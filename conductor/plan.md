@@ -4,5 +4,5 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 ---
 
-## [ ] Track: Build the MVP of the local-first AI assistant, including the Go-based smart router with a gRPC interface for communication, and an initial IDE integration focused on a VS Code-compatible abstraction layer for Antigravity.
+## [~] Track: Build the MVP of the local-first AI assistant, including the Go-based smart router with a gRPC interface for communication, and an initial IDE integration focused on a VS Code-compatible abstraction layer for Antigravity. [checkpoint: f17dada]
 *Link: [./.conductor/jobs/local_ai_mvp_20251211/](./.conductor/jobs/local_ai_mvp_20251211/)*

@@ -1,4 +1,4 @@
-# Job Specification: Build the MVP of the Local-First AI Assistant
+# Track Specification: Build the MVP of the Local-First AI Assistant
 
 ## 1. Job Title
 Build the MVP of the local-first AI assistant, including the Go-based smart router with a gRPC interface for communication, and an initial IDE integration focused on a VS Code-compatible abstraction layer for Antigravity.

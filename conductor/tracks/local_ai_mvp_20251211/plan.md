@@ -1,4 +1,4 @@
-# Job Plan: Build the MVP of the Local-First AI Assistant
+# Track Plan: Build the MVP of the Local-First AI Assistant
 
 This plan outlines the phases and tasks required to build the MVP of the local-first AI assistant, following the project's workflow guidelines.
 
@@ -8,19 +8,19 @@ This plan outlines the phases and tasks required to build the MVP of the local-f
 Establish the foundational Go project structure, define the gRPC service for inter-process communication, and implement a basic server.
 
 ### Tasks
-- [ ] Task: Initialize Go project structure.
-    - [ ] Subtask: Create `go.mod` and initial directory layout.
-    - [ ] Subtask: Define basic `main.go` entry point.
-- [ ] Task: Define gRPC service contract (protobuf).
-    - [ ] Subtask: Define service methods for AI requests (e.g., `ProcessRequest`).
-    - [ ] Subtask: Define request and response message structures.
-- [ ] Task: Generate gRPC server/client stubs.
-    - [ ] Subtask: Configure protobuf compiler for Go.
-    - [ ] Subtask: Generate `*.pb.go` files from `.proto`.
-- [ ] Task: Implement basic gRPC server.
-    - [ ] Subtask: Write tests for gRPC server instantiation and basic request handling.
-    - [ ] Subtask: Implement server with a placeholder `ProcessRequest` method.
-- [ ] Task: Conductor - User Manual Verification 'Setup and Core gRPC Service' (Protocol in workflow.md)
+- [x] Task: Initialize Go project structure.
+    - [x] Subtask: Create `go.mod` and initial directory layout.
+    - [x] Subtask: Define basic `main.go` entry point.
+- [x] Task: Define gRPC service contract (protobuf).
+    - [x] Subtask: Define service methods for AI requests (e.g., `ProcessRequest`).
+    - [x] Subtask: Define request and response message structures.
+- [x] Task: Generate gRPC server/client stubs.
+    - [x] Subtask: Configure protobuf compiler for Go.
+    - [x] Subtask: Generate `*.pb.go` files from `.proto`.
+- [x] Task: Implement basic gRPC server.
+    - [x] Subtask: Write tests for gRPC server instantiation and basic request handling.
+    - [x] Subtask: Implement server with a placeholder `ProcessRequest` method.
+- [x] Task: Conductor - User Manual Verification 'Setup and Core gRPC Service' (Protocol in workflow.md)
 
 ## Phase 2: Smart Router Logic
 

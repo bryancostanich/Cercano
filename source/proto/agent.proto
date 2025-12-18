@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package agent;
+
+option go_package = "cercano/source/proto";
+
+// The Agent service definition.
+service Agent {
+  // ProcessRequest handles AI requests.
+  rpc ProcessRequest (ProcessRequestRequest) returns (ProcessRequestResponse) {}
+}
+
+// The request message for ProcessRequest.
+message ProcessRequestRequest {
+  string input = 1; // User input or query
+}
+
+// The response message for ProcessRequest.
+message ProcessRequestResponse {
+  string output = 1; // AI generated output
+}

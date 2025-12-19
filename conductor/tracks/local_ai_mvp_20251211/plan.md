@@ -28,15 +28,21 @@ Establish the foundational Go project structure, define the gRPC service for int
 Implement the intelligent routing logic to direct requests to appropriate local or cloud models based on predefined criteria.
 
 ### Tasks
-- [ ] Task: Design router interface.
-    - [ ] Subtask: Define interfaces for router and model providers (local/cloud).
-- [ ] Task: Implement "best guess" routing algorithm.
-    - [ ] Subtask: Write tests for router's decision-making logic (e.g., based on keywords, request complexity).
-    - [ ] Subtask: Implement initial routing logic.
-- [ ] Task: Implement mechanism for user-initiated "retry with more powerful model."
-    - [ ] Subtask: Write tests for retry mechanism.
-    - [ ] Subtask: Implement fallback to cloud model if local fails or is explicitly requested.
-- [ ] Task: Conductor - User Manual Verification 'Smart Router Logic' (Protocol in workflow.md)
+- [x] Task: Design router interface.
+    - [x] Subtask: Define interfaces for router and model providers (local/cloud).
+- [x] Task: Select a local model for routing classification.
+    - [x] Subtask: Research and choose a small, fast local model suitable for this classification task.
+- [x] Task: Create routing guidelines file.
+    - [x] Subtask: Define a format for the guidelines file (Markdown).
+    - [x] Subtask: Populate the guidelines file with conceptual rules for `LocalModel` and `CloudModel` execution.
+- [x] Task: Implement model-driven router with guidelines.
+    - [x] Subtask: Write tests for the model-driven router's decision-making based on the guidelines.
+    - [x] Subtask: Implement the `SmartRouter` to load the `router_guidelines.md` file.
+    - [x] Subtask: Update the `SelectProvider` method to construct a prompt (using the guidelines) and query the local routing model.
+    - [x] Subtask: Update logic to parse the model's response and select the correct `ModelProvider`.
+- [x] Task: Create README for the Go application.
+    - [x] Subtask: Add installation instructions for Ollama and Phi-2 to the README.
+- [x] Task: Conductor - User Manual Verification 'Smart Router Logic' (Protocol in workflow.md)
 
 ## Phase 3: Local Model Integration (Unit Test Generation)
 
@@ -70,3 +76,15 @@ Develop a decoupled, VS Code-compatible abstraction layer that communicates with
     - [ ] Subtask: Implement command that captures selected code/file context and sends to the Go backend via gRPC.
     - [ ] Subtask: Display the generated unit tests in the IDE.
 - [ ] Task: Conductor - User Manual Verification 'IDE Abstraction Layer (VS Code/Antigravity Compatibility)' (Protocol in workflow.md)
+
+## vNext
+
+### Tasks
+- [ ] Task: Embed `llama.cpp` for a self-contained application.
+    - [ ] Subtask: Research and select a Go binding for `llama.cpp`.
+    - [ ] Subtask: Integrate the `llama.cpp` library into the Go project using Cgo.
+    - [ ] Subtask: Implement a mechanism to package and distribute the Phi-2 model file with the application.
+    - [ ] Subtask: Update the `SmartRouter` to use the embedded `llama.cpp` runtime instead of the Ollama API.
+- [ ] Task: Add contextual information to the router prompt.
+    - [ ] Subtask: Design a mechanism to gather context from the IDE.
+    - [ ] Subtask: Update the `SmartRouter` to include this context in the prompt.

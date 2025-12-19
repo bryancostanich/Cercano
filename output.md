@@ -1,15 +1,17 @@
-Excellent! The `grpcurl` command was successful:
+Okay, the plan to integrate a local LLM for routing decisions is clear. We'll use Ollama for this, as it provides a straightforward way to manage models and offers a convenient REST API for integration.
 
-```
-{
-  "output": "Processed: Hello from grpcurl"
-}
-```
+Before I can implement the router logic, you need to set up Ollama on your system:
 
-This means:
-1.  The gRPC server is running correctly on port `50052`.
-2.  The gRPC service is functioning as expected.
+1.  **Install Ollama:**
+    ```bash
+    brew install ollama
+    ```
+    (This command will install Ollama. Please follow any on-screen instructions during the installation.)
 
-Did you also confirm that the server terminal (where you ran `go run source/cmd/agent/main.go`) showed the log message: `Received request: Hello from grpcurl`?
+2.  **Download the Phi-2 model:**
+    ```bash
+    ollama run phi
+    ```
+    (This will download the Phi-2 model. The first time you run this, it will download the model, which might take some time depending on your internet connection.)
 
-If both confirmations are true, then the "User Manual Verification 'Setup and Core gRPC Service'" task is complete. Please confirm if everything worked as expected!
+After you have installed Ollama and downloaded the Phi-2 model, please confirm so I can proceed with implementing the model-driven router logic.

@@ -22,27 +22,38 @@ Establish the foundational Go project structure, define the gRPC service for int
     - [x] Subtask: Implement server with a placeholder `ProcessRequest` method.
 - [x] Task: Conductor - User Manual Verification 'Setup and Core gRPC Service' (Protocol in workflow.md)
 
-## Phase 2: Smart Router Logic
+## Phase 2: Semantic Router Logic (Embeddings)
 
 ### Objective
-Implement the intelligent routing logic to direct requests to appropriate local or cloud models based on predefined criteria.
+Implement a robust routing logic using semantic similarity (embeddings) to direct requests to appropriate local or cloud models. This approach is preferred over prompt-based classification due to the challenges of controlling local models to reliably classify and provide formatted output without unintended generation or hallucination.
 
 ### Tasks
 - [x] Task: Design router interface.
     - [x] Subtask: Define interfaces for router and model providers (local/cloud).
-- [x] Task: Select a local model for routing classification.
-    - [x] Subtask: Research and choose a small, fast local model suitable for this classification task.
-- [x] Task: Create routing guidelines file.
-    - [x] Subtask: Define a format for the guidelines file (Markdown).
-    - [x] Subtask: Populate the guidelines file with conceptual rules for `LocalModel` and `CloudModel` execution.
-- [x] Task: Implement model-driven router with guidelines.
-    - [x] Subtask: Write tests for the model-driven router's decision-making based on the guidelines.
-    - [x] Subtask: Implement the `SmartRouter` to load the `router_guidelines.md` file.
-    - [x] Subtask: Update the `SelectProvider` method to construct a prompt (using the guidelines) and query the local routing model.
-    - [x] Subtask: Update logic to parse the model's response and select the correct `ModelProvider`.
-- [x] Task: Create README for the Go application.
-    - [x] Subtask: Add installation instructions for Ollama and Phi-2 to the README.
-- [x] Task: Conductor - User Manual Verification 'Smart Router Logic' (Protocol in workflow.md)
+- [x] Task: Select a local embedding model.
+    - [x] Subtask: Research and choose a small, fast local embedding model (e.g., `nomic-embed-text`) available via Ollama.
+- [x] Task: Create routing prototypes file.
+    - [x] Subtask: Define a format for categorized example phrases (YAML).
+    - [x] Subtask: Populate the file with representative phrases for `LocalModel` and `CloudModel`.
+- [x] Task: Implement semantic router logic.
+    - [x] Subtask: Implement `GetEmbedding` to call Ollama's embeddings API.
+    - [x] Subtask: Implement Cosine Similarity math helper.
+    - [x] Subtask: Implement `SelectProvider` to compare the request embedding against the prototypes.
+- [x] Task: Create and run an integration test for semantic routing.
+    - [x] Subtask: Validate that diverse prompts are routed correctly based on mathematical similarity.
+- [x] Task: Update README with embedding model requirements.
+- [x] Task: Conductor - User Manual Verification 'Semantic Router Logic' (Protocol in workflow.md)
+
+### Phase 2 Refinement: Robustness & Fallback
+- [x] Task: Expand routing prototypes.
+    - [x] Subtask: Use local LLM to generate diverse phrasing variations for Local/Cloud categories.
+    - [x] Subtask: Update `prototypes.yaml` with 50+ examples.
+- [x] Task: Implement Router Fallback Logic.
+    - [x] Subtask: Define a similarity threshold (e.g., 0.35).
+    - [x] Subtask: Update `SelectProvider` to default to `CloudModel` if confidence is low.
+- [x] Task: Refactor and harden tests.
+    - [x] Subtask: Ensure integration tests do NOT use exact string matches from prototypes.
+    - [x] Subtask: Add test cases for ambiguous queries to verify fallback behavior.
 
 ## Phase 3: Local Model Integration (Unit Test Generation)
 
@@ -50,10 +61,10 @@ Implement the intelligent routing logic to direct requests to appropriate local 
 Integrate a local AI model specifically for the task of generating unit tests.
 
 ### Tasks
-- [ ] Task: Select and integrate a local model for code analysis/generation.
-    - [ ] Subtask: Research suitable open-source or local-first models for test generation.
-    - [ ] Subtask: Write integration tests for the chosen local model.
-    - [ ] Subtask: Integrate the model into the Go application.
+- [x] Task: Select and integrate a local model for code analysis/generation. [d94a2bd]
+    - [x] Subtask: Research suitable open-source or local-first models for test generation.
+    - [x] Subtask: Write integration tests for the chosen local model.
+    - [x] Subtask: Integrate the model into the Go application.
 - [ ] Task: Implement unit test generation handler.
     - [ ] Subtask: Write tests for the unit test generation handler.
     - [ ] Subtask: Implement logic to process code, call local model, and format output.

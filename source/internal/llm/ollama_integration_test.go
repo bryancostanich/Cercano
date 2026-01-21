@@ -10,7 +10,7 @@ import (
 	"cercano/source/internal/router"
 )
 
-const integrationTestModelName = "deepseek-coder"
+const integrationTestModelName = "qwen3-coder"
 
 func TestOllamaProvider_Integration_Process(t *testing.T) {
 	if os.Getenv("INTEGRATION_TEST") != "1" {

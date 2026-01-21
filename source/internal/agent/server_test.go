@@ -6,6 +6,7 @@ import (
 	"net"
 	"testing"
 
+	"cercano/source/internal/router"
 	"cercano/source/proto" // Import the generated protobuf package
 
 	"google.golang.org/grpc"
@@ -17,10 +18,29 @@ const bufSize = 1024 * 1024
 
 var lis *bufconn.Listener
 
+// Mocks for testing
+type mockProvider struct {
+	name string
+}
+
+func (m *mockProvider) Process(ctx context.Context, req *router.Request) (*router.Response, error) {
+	return &router.Response{Output: "Processed by " + m.name}, nil
+}
+
+func (m *mockProvider) Name() string {
+	return m.name
+}
+
+type mockRouter struct{}
+
+func (m *mockRouter) SelectProvider(req *router.Request) (router.ModelProvider, error) {
+	return &mockProvider{name: "MockLocal"}, nil
+}
+
 func init() {
 	lis = bufconn.Listen(bufSize)
 	s := grpc.NewServer()
-	proto.RegisterAgentServer(s, NewServer())
+	proto.RegisterAgentServer(s, NewServer(&mockRouter{}))
 	go func() {
 		if err := s.Serve(lis); err != nil {
 			log.Fatalf("Server exited with error: %v", err)

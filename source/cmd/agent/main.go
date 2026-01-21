@@ -19,7 +19,7 @@ func main() {
 
 	// Initialize Providers
 	// TODO: Make configuration loadable
-	localProvider := llm.NewOllamaProvider("deepseek-coder", "http://localhost:11434")
+	localProvider := llm.NewOllamaProvider("qwen3-coder", "http://localhost:11434")
 	cloudProvider := llm.NewMockProvider("CloudModel")
 
 	// Initialize Router

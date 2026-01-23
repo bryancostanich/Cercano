@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"testing"
 )
 
@@ -28,36 +29,59 @@ func (m *MockModelProvider) Name() string {
 
 // MockRoundTripper is a mock http.RoundTripper for testing.
 type MockRoundTripper struct {
-	Response *http.Response
-	Err      error
+	responses map[string]string // Maps prompt to JSON response
 }
 
 func (m *MockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if m.Err != nil {
-		return nil, m.Err
-	}
-	return m.Response, nil
-}
+	body, _ := io.ReadAll(req.Body)
+	req.Body = io.NopCloser(bytes.NewBuffer(body))
 
-// newMockClient creates a new mock http.Client that returns the given response or error.
-func newMockClient(statusCode int, body string, err error) *http.Client {
-	return &http.Client{
-		Transport: &MockRoundTripper{
-			Response: &http.Response{
-				StatusCode: statusCode,
-				Body:       io.NopCloser(bytes.NewBufferString(body)),
+	// Simplified: just match the body string to find the response
+	for prompt, resp := range m.responses {
+		if bytes.Contains(body, []byte(prompt)) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewBufferString(resp)),
 				Header:     make(http.Header),
-			},
-			Err: err,
-		},
+			}, nil
+		}
 	}
+
+	return nil, fmt.Errorf("no mock response for body: %s", string(body))
 }
 
 func TestSmartRouter_SelectProvider(t *testing.T) {
+	// Create a temporary prototypes file
+	protoContent := `
+local_model:
+  - "local task"
+cloud_model:
+  - "cloud task"
+`
+	tmpFile, err := os.CreateTemp("", "prototypes*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	if _, err := tmpFile.Write([]byte(protoContent)); err != nil {
+		t.Fatalf("Failed to write to temp file: %v", err)
+	}
+	tmpFile.Close()
+
 	mockLocal := &MockModelProvider{name: "LocalModel"}
 	mockCloud := &MockModelProvider{name: "CloudModel"}
 
-	router, err := NewSmartRouter(mockLocal, mockCloud, "phi") // Updated NewSmartRouter call
+	// Mock responses for initialization
+	mockResponses := map[string]string{
+		"local task": `{"embedding": [1.0, 0.0]}`,
+		"cloud task": `{"embedding": [0.0, 1.0]}`,
+	}
+
+	mockClient := &http.Client{
+		Transport: &MockRoundTripper{responses: mockResponses},
+	}
+
+	router, err := NewSmartRouter(mockLocal, mockCloud, "nomic-embed-text", mockClient, tmpFile.Name())
 	if err != nil {
 		t.Fatalf("Failed to create SmartRouter: %v", err)
 	}
@@ -66,57 +90,34 @@ func TestSmartRouter_SelectProvider(t *testing.T) {
 		name               string
 		input              string
 		expectedModel      string
-		mockOllamaResponse string // New field for mock Ollama response
-		expectError        bool
+		mockOllamaResponse string
 	}{
 		{
-			name:               "File system operation, should go to local",
-			input:              "Move the file 'main.go' to 'cmd/app/'",
+			name:               "Close to local",
+			input:              "do something local",
 			expectedModel:      "LocalModel",
-			mockOllamaResponse: `{"model":"phi","response":"LocalModel","done":true}`, // Simulate Ollama response
-			expectError:        false,
+			mockOllamaResponse: `{"embedding": [0.9, 0.1]}`,
 		},
 		{
-			name:               "Code explanation, should go to local",
-			input:              "What does this function do? func (s *Server) foo() { ... }",
-			expectedModel:      "LocalModel",
-			mockOllamaResponse: `{"model":"phi","response":"LocalModel","done":true}`,
-			expectError:        false,
-		},
-		{
-			name:               "Architectural analysis, should go to cloud",
-			input:              "Summarize the project's architecture.",
+			name:               "Close to cloud",
+			input:              "do something cloud",
 			expectedModel:      "CloudModel",
-			mockOllamaResponse: `{"model":"phi","response":"CloudModel","done":true}`,
-			expectError:        false,
-		},
-		{
-			name:               "General knowledge, should go to cloud",
-			input:              "What is the capital of France?",
-			expectedModel:      "CloudModel",
-			mockOllamaResponse: `{"model":"phi","response":"CloudModel","done":true}`,
-			expectError:        false,
+			mockOllamaResponse: `{"embedding": [0.1, 0.9]}`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			router.httpClient = newMockClient(http.StatusOK, tt.mockOllamaResponse, nil) // Assign mock client
+			// Update mock for the specific test case
+			mockResponses[tt.input] = tt.mockOllamaResponse
 			selectedProvider, err := router.SelectProvider(&Request{Input: tt.input})
-
-			if tt.expectError {
-				if err == nil {
-					t.Errorf("Expected an error, but got none")
-				}
-				return
-			}
 
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}
 
 			if selectedProvider.Name() != tt.expectedModel {
-				t.Errorf("Expected model %s, but got %s", tt.expectedModel, selectedProvider.Name())
+				t.Errorf("Expected %s, got %s", tt.expectedModel, selectedProvider.Name())
 			}
 		})
 	}

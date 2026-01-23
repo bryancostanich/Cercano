@@ -65,9 +65,10 @@ Integrate a local AI model specifically for the task of generating unit tests.
     - [x] Subtask: Research suitable open-source or local-first models for test generation.
     - [x] Subtask: Write integration tests for the chosen local model.
     - [x] Subtask: Integrate the model into the Go application.
-- [ ] Task: Implement unit test generation handler.
-    - [ ] Subtask: Write tests for the unit test generation handler.
-    - [ ] Subtask: Implement logic to process code, call local model, and format output.
+- [x] Task: Implement unit test generation handler. [7fc415d]
+    - [x] Subtask: Write unit tests with mocks to verify handler logic (plumbing: prompt construction, error handling).
+    - [x] Subtask: Create an integration test to validate generated code structure (quality: parses as Go, contains expected imports).
+    - [x] Subtask: Implement logic to process code, call local model, and format output.
 - [ ] Task: Conductor - User Manual Verification 'Local Model Integration (Unit Test Generation)' (Protocol in workflow.md)
 
 ## Phase 4: IDE Abstraction Layer (VS Code/Antigravity Compatibility)

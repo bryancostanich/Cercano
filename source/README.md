@@ -46,11 +46,12 @@ Follow these steps to set up, build, and run the AI agent.
     ```
     For other operating systems (Linux, Windows), please refer to the [Ollama website](https://ollama.com/download).
 
-5.  **Download the Phi-2 model:**
+5.  **Download the embedding and LLM models:**
     ```bash
-    ollama run phi
+    ollama pull nomic-embed-text
+    ollama pull phi
     ```
-    This will download the Phi-2 model, which the smart router uses for classification.
+    The smart router uses `nomic-embed-text` for semantic classification via embeddings. `phi` is used as a default local LLM for request processing.
 
 ### Build and Run the AI Agent
 
@@ -87,12 +88,12 @@ While the agent is running in one terminal, you can test its gRPC endpoint using
     cd source/proto
     grpcurl -plaintext -proto agent.proto -d '{"input": "What is the capital of France?"}' localhost:50052 agent.Agent/ProcessRequest
     ```
-    You should receive a response from the Ollama model. The classification of the request will be handled by the smart router.
+    The classification of the request will be handled by the smart router using semantic similarity against prototypes.
 
 ## Project Structure
 
 *   `source/cmd/agent/`: Contains the main application entry point.
 *   `source/internal/agent/`: Contains the gRPC server implementation.
-*   `source/internal/router/`: Contains the smart routing logic, including the interfaces for model providers and the Ollama integration.
+*   `source/internal/router/`: Contains the smart routing logic, including the interfaces for model providers, embedding-based classification, and Ollama integration.
 *   `source/proto/`: Contains the Protocol Buffer definitions (`.proto` files) and generated Go code.
-*   `source/router_guidelines.md`: Markdown file defining the conceptual rules for routing decisions.
+*   `source/internal/router/prototypes.yaml`: YAML file defining example phrases for semantic routing categories.

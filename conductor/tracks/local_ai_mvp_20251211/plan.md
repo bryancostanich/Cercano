@@ -55,21 +55,42 @@ Implement a robust routing logic using semantic similarity (embeddings) to direc
     - [x] Subtask: Ensure integration tests do NOT use exact string matches from prototypes.
     - [x] Subtask: Add test cases for ambiguous queries to verify fallback behavior.
 
-## Phase 3: Local Model Integration (Unit Test Generation)
+## Phase 3: Basic Local Model Integration (Unit Test Generation)
 
 ### Objective
-Integrate a local AI model specifically for the task of generating unit tests.
+Integrate the local AI model (Qwen3-coder) and establish the basic pipeline for generating unit tests.
 
 ### Tasks
 - [x] Task: Select and integrate a local model for code analysis/generation. [d94a2bd]
     - [x] Subtask: Research suitable open-source or local-first models for test generation.
     - [x] Subtask: Write integration tests for the chosen local model.
     - [x] Subtask: Integrate the model into the Go application.
-- [x] Task: Implement unit test generation handler. [7fc415d]
-    - [x] Subtask: Write unit tests with mocks to verify handler logic (plumbing: prompt construction, error handling).
-    - [x] Subtask: Create an integration test to validate generated code structure (quality: parses as Go, contains expected imports).
-    - [x] Subtask: Implement logic to process code, call local model, and format output.
-- [ ] Task: Conductor - User Manual Verification 'Local Model Integration (Unit Test Generation)' (Protocol in workflow.md)
+- [x] Task: Verify Smart Router Classification.
+    - [x] Subtask: Validated that "Generate unit tests..." prompts are correctly routed to the Local Model.
+- [x] Task: Create Sandbox Test Environment.
+    - [x] Subtask: Created `test/sandbox` with a simple Calculator app.
+    - [x] Subtask: Established a "Live Fire" test harness (`sandbox_test_generation_test.go`) to run generation against the sandbox.
+- [x] Task: Initial End-to-End Verification.
+    - [x] Subtask: Verified the model generates Go code.
+    - [x] Subtask: Identified that one-shot generation is insufficient (issues with unused imports, markdown formatting).
+
+## Phase 3.5: Agentic Self-Correction Loop
+
+### Objective
+Implement an iterative "Generate -> Test -> Fix" loop to ensure generated code actually compiles and passes. The agent should be able to read compiler errors and self-correct.
+
+### Tasks
+- [ ] Task: Implement Self-Correction Logic in `UnitTestHandler`.
+    - [ ] Subtask: Update `Generate` to accept a retry limit.
+    - [ ] Subtask: Implement a feedback loop: 
+        1. Generate Code.
+        2. Write to temp file.
+        3. Run `go test -c`.
+        4. If error, append error to prompt and ask model to fix.
+        5. Repeat until success or max retries.
+- [ ] Task: Verify Self-Correction with Sandbox.
+    - [ ] Subtask: Run `TestSandbox_GenerateAndRunTests` and verify it passes *without* manual prompt tweaking.
+- [ ] Task: Conductor - User Manual Verification 'Self-Correction Loop' (Protocol in workflow.md)
 
 ## Phase 4: IDE Abstraction Layer (VS Code/Antigravity Compatibility)
 

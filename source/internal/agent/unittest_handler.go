@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"cercano/source/internal/router"
 )
@@ -28,6 +29,7 @@ func (h *UnitTestHandler) Generate(ctx context.Context, code string) (string, er
 Write table-driven unit tests for the following Go code using the standard 'testing' package.
 Ensure the tests cover happy paths and edge cases.
 Do not include any explanations, just the Go code.
+IMPORTANT: Do NOT blindly copy imports from the source code. Only import packages that are strictly necessary for the TEST code (like 'testing').
 
 Code:
 `+"```go\n%s\n```"+`
@@ -43,5 +45,19 @@ Code:
 		return "", fmt.Errorf("failed to generate tests: %w", err)
 	}
 
-	return resp.Output, nil
+	return cleanMarkdown(resp.Output), nil
+}
+
+// cleanMarkdown removes ```go and ``` lines if present
+func cleanMarkdown(code string) string {
+	lines := strings.Split(code, "\n")
+	var result []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			continue
+		}
+		result = append(result, line)
+	}
+	return strings.Join(result, "\n")
 }

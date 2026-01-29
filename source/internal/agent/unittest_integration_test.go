@@ -15,7 +15,7 @@ import (
 )
 
 // Use the same model as the other integration tests
-const integrationTestModelName = "qwen2.5-coder:1.5b" 
+const integrationTestModelName = "qwen3-coder" 
 
 func TestUnitTestHandler_Integration_GenerateValidCode(t *testing.T) {
 	if os.Getenv("INTEGRATION_TEST") != "1" {

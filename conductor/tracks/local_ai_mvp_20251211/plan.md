@@ -83,8 +83,8 @@ Implement an iterative "Generate -> Test -> Fix" loop using a Coordinator patter
 - [x] Task: Define Component Interfaces. [925b38b]
     - [x] Subtask: Define `Validator` interface for running tests/builds.
     - [x] Subtask: Define `CodeGenerator` interface (satisfied by `UnitTestHandler`).
-- [ ] Task: Implement Validator.
-    - [ ] Subtask: Create `internal/agent/validator.go` to execute `go test -c` and capture stderr.
+- [x] Task: Implement Validator. [51feac1]
+    - [x] Subtask: Create `internal/agent/validator.go` to execute `go test -c` and capture stderr.
 - [ ] Task: Enhance `UnitTestHandler` with Fix Capability.
     - [ ] Subtask: Add `Fix(ctx, code, errorMsg)` method to `UnitTestHandler` that prompts the model to correct specific errors.
 - [ ] Task: Implement `GenerationCoordinator`.

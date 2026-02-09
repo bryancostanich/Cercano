@@ -3,7 +3,6 @@ package agent_test
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -24,7 +23,6 @@ func TestSandbox_GenerateAndRunTests(t *testing.T) {
 	// We need to go up 3 levels to get to root, then into test/sandbox
 	sandboxDir := filepath.Join(wd, "../../..", "test", "sandbox")
 	targetFile := filepath.Join(sandboxDir, "calculator.go")
-	outputFile := filepath.Join(sandboxDir, "calculator_test.go")
 
 	if _, err := os.Stat(targetFile); os.IsNotExist(err) {
 		t.Fatalf("Sandbox file not found at: %s", targetFile)
@@ -36,39 +34,21 @@ func TestSandbox_GenerateAndRunTests(t *testing.T) {
 		t.Fatalf("Failed to read calculator.go: %v", err)
 	}
 
-	// 3. Initialize Agent
-	// Using qwen3-coder
+	// 3. Initialize Agent Components
 	provider := llm.NewOllamaProvider("qwen3-coder", "http://localhost:11434")
 	handler := agent.NewUnitTestHandler(provider)
+	validator := agent.NewGoTestValidator()
+	coordinator := agent.NewGenerationCoordinator(handler, validator)
 
-	// 4. Generate Tests
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	// 4. Generate and Verify Tests with Self-Correction
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second) // Increased timeout for retries
 	defer cancel()
 
-	t.Log("Generating tests for calculator.go...")
-	generatedCode, err := handler.Generate(ctx, string(content))
+	t.Log("Generating and verifying tests for calculator.go (with self-correction)...")
+	finalCode, err := coordinator.Coordinate(ctx, string(content), sandboxDir, "calculator_test.go")
 	if err != nil {
-		t.Fatalf("Generation failed: %v", err)
+		t.Fatalf("Generation/Self-Correction failed: %v", err)
 	}
 
-	// 5. Write Generated Tests
-	err = os.WriteFile(outputFile, []byte(generatedCode), 0644)
-	if err != nil {
-		t.Fatalf("Failed to write calculator_test.go: %v", err)
-	}
-	t.Logf("Wrote generated tests to %s", outputFile)
-
-	// 6. Run the Generated Tests
-	// We execute 'go test' inside the sandbox directory
-	cmd := exec.Command("go", "test", "-v", ".")
-	cmd.Dir = sandboxDir
-	output, err := cmd.CombinedOutput()
-
-	t.Logf("--- SANDBOX TEST OUTPUT ---\n%s\n--------------------------- ", string(output))
-
-	if err != nil {
-		t.Fatalf("Generated tests failed to pass: %v", err)
-	}
-
-	t.Log("SUCCESS: Generated tests compiled and passed!")
+	t.Logf("Successfully generated and verified tests:\n%s", finalCode)
 }

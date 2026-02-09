@@ -103,9 +103,9 @@ Develop a decoupled IDE abstraction layer that communicates with the core Go app
     - [x] Subtask: Initialize a new VS Code extension project (`vscode-extension`).
     - [x] Subtask: Research and initialize a new Zed extension project (`zed-extension`).
     - [x] Subtask: Configure gRPC client stubs for both environments (TypeScript for VS Code, Rust/Wasm for Zed).
-- [ ] Task: Implement basic gRPC client in the IDE abstraction layer.
-    - [ ] Subtask: Write tests for gRPC client connection and basic request/response.
-    - [ ] Subtask: Implement clients to call the Go backend's `ProcessRequest` method.
+- [x] Task: Implement basic gRPC client in the IDE abstraction layer.
+    - [x] Subtask: Write tests for gRPC client connection and basic request/response.
+    - [x] Subtask: Implement clients to call the Go backend's `ProcessRequest` method.
 - [ ] Task: Implement IDE command for "Generate Unit Tests".
     - [ ] Subtask: Implement VS Code command that captures context and sends to backend.
     - [ ] Subtask: Implement Zed command/action that captures context and sends to backend.

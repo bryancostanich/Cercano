@@ -99,7 +99,7 @@ Implement an iterative "Generate -> Test -> Fix" loop using a Coordinator patter
 Develop a decoupled IDE abstraction layer that communicates with the core Go application via gRPC, enabling integration with multiple editors. The initial focus will be on VS Code (and compatible editors like Antigravity) and Zed.
 
 ### Tasks
-- [~] Task: Set up Editor Extension Projects.
+- [x] Task: Set up Editor Extension Projects. [f09bcf9]
     - [x] Subtask: Initialize a new VS Code extension project (`vscode-extension`).
     - [x] Subtask: Research and initialize a new Zed extension project (`zed-extension`).
     - [x] Subtask: Configure gRPC client stubs for both environments (TypeScript for VS Code, Rust/Wasm for Zed).

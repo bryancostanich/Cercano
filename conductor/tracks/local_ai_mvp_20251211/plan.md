@@ -100,7 +100,7 @@ Develop a decoupled IDE abstraction layer that communicates with the core Go app
 
 ### Tasks
 - [~] Task: Set up Editor Extension Projects.
-    - [ ] Subtask: Initialize a new VS Code extension project (`vscode-extension`).
+    - [x] Subtask: Initialize a new VS Code extension project (`vscode-extension`).
     - [ ] Subtask: Research and initialize a new Zed extension project (`zed-extension`).
     - [ ] Subtask: Configure gRPC client stubs for both environments (TypeScript for VS Code, Rust/Wasm for Zed).
 - [ ] Task: Implement basic gRPC client in the IDE abstraction layer.

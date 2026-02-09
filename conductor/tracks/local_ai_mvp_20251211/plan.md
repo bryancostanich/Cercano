@@ -87,8 +87,8 @@ Implement an iterative "Generate -> Test -> Fix" loop using a Coordinator patter
     - [x] Subtask: Create `internal/agent/validator.go` to execute `go test -c` and capture stderr.
 - [x] Task: Enhance `UnitTestHandler` with Fix Capability. [d8b7012]
     - [x] Subtask: Add `Fix(ctx, code, errorMsg)` method to `UnitTestHandler` that prompts the model to correct specific errors.
-- [ ] Task: Implement `GenerationCoordinator`.
-    - [ ] Subtask: Create `internal/agent/coordinator.go` to orchestrate the Retry Loop (Generate -> Write -> Validate -> Fix).
+- [x] Task: Implement `GenerationCoordinator`. [bd10c17]
+    - [x] Subtask: Create `internal/agent/coordinator.go` to orchestrate the Retry Loop (Generate -> Write -> Validate -> Fix).
 - [ ] Task: Verify Self-Correction with Sandbox.
     - [ ] Subtask: Run `TestSandbox_GenerateAndRunTests` using the new Coordinator and verify it auto-corrects errors (e.g., unused imports).
 - [ ] Task: Conductor - User Manual Verification 'Self-Correction Loop' (Protocol in workflow.md)

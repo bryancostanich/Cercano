@@ -106,10 +106,10 @@ Develop a decoupled IDE abstraction layer that communicates with the core Go app
 - [x] Task: Implement basic gRPC client in the IDE abstraction layer. [6f37c55]
     - [x] Subtask: Write tests for gRPC client connection and basic request/response.
     - [x] Subtask: Implement clients to call the Go backend's `ProcessRequest` method.
-- [ ] Task: Implement IDE command for "Generate Unit Tests".
-    - [ ] Subtask: Implement VS Code command that captures context and sends to backend.
-    - [ ] Subtask: Implement Zed command/action that captures context and sends to backend.
-    - [ ] Subtask: Display the generated unit tests in the respective IDEs.
+- [x] Task: Implement IDE command for "Generate Unit Tests".
+    - [x] Subtask: Implement VS Code command that captures context and sends to backend.
+    - [x] Subtask: Implement Zed command/action that captures context and sends to backend. (Scaffolded only)
+    - [x] Subtask: Display the generated unit tests in the respective IDEs.
 - [ ] Task: Conductor - User Manual Verification 'IDE Abstraction Layer (Multi-Editor Support)' (Protocol in workflow.md)
 
 ## vNext

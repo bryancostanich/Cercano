@@ -77,19 +77,20 @@ Integrate the local AI model (Qwen3-coder) and establish the basic pipeline for 
 ## Phase 3.5: Agentic Self-Correction Loop
 
 ### Objective
-Implement an iterative "Generate -> Test -> Fix" loop to ensure generated code actually compiles and passes. The agent should be able to read compiler errors and self-correct.
+Implement an iterative "Generate -> Test -> Fix" loop using a Coordinator pattern. This decouples the "thinking" (Handler) from the "doing" (File I/O, Test Execution) and ensures generated code compiles and passes.
 
 ### Tasks
-- [ ] Task: Implement Self-Correction Logic in `UnitTestHandler`.
-    - [ ] Subtask: Update `Generate` to accept a retry limit.
-    - [ ] Subtask: Implement a feedback loop: 
-        1. Generate Code.
-        2. Write to temp file.
-        3. Run `go test -c`.
-        4. If error, append error to prompt and ask model to fix.
-        5. Repeat until success or max retries.
+- [x] Task: Define Component Interfaces. [925b38b]
+    - [x] Subtask: Define `Validator` interface for running tests/builds.
+    - [x] Subtask: Define `CodeGenerator` interface (satisfied by `UnitTestHandler`).
+- [ ] Task: Implement Validator.
+    - [ ] Subtask: Create `internal/agent/validator.go` to execute `go test -c` and capture stderr.
+- [ ] Task: Enhance `UnitTestHandler` with Fix Capability.
+    - [ ] Subtask: Add `Fix(ctx, code, errorMsg)` method to `UnitTestHandler` that prompts the model to correct specific errors.
+- [ ] Task: Implement `GenerationCoordinator`.
+    - [ ] Subtask: Create `internal/agent/coordinator.go` to orchestrate the Retry Loop (Generate -> Write -> Validate -> Fix).
 - [ ] Task: Verify Self-Correction with Sandbox.
-    - [ ] Subtask: Run `TestSandbox_GenerateAndRunTests` and verify it passes *without* manual prompt tweaking.
+    - [ ] Subtask: Run `TestSandbox_GenerateAndRunTests` using the new Coordinator and verify it auto-corrects errors (e.g., unused imports).
 - [ ] Task: Conductor - User Manual Verification 'Self-Correction Loop' (Protocol in workflow.md)
 
 ## Phase 4: IDE Abstraction Layer (VS Code/Antigravity Compatibility)

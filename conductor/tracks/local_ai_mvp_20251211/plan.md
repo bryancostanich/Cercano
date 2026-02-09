@@ -74,7 +74,7 @@ Integrate the local AI model (Qwen3-coder) and establish the basic pipeline for 
     - [x] Subtask: Verified the model generates Go code.
     - [x] Subtask: Identified that one-shot generation is insufficient (issues with unused imports, markdown formatting).
 
-## Phase 3.5: Agentic Self-Correction Loop
+## Phase 3.5: Agentic Self-Correction Loop [checkpoint: 8e76f6d]
 
 ### Objective
 Implement an iterative "Generate -> Test -> Fix" loop using a Coordinator pattern. This decouples the "thinking" (Handler) from the "doing" (File I/O, Test Execution) and ensures generated code compiles and passes.
@@ -91,7 +91,7 @@ Implement an iterative "Generate -> Test -> Fix" loop using a Coordinator patter
     - [x] Subtask: Create `internal/agent/coordinator.go` to orchestrate the Retry Loop (Generate -> Write -> Validate -> Fix).
 - [x] Task: Verify Self-Correction with Sandbox. [ac527a9]
     - [x] Subtask: Run `TestSandbox_GenerateAndRunTests` using the new Coordinator and verify it auto-corrects errors (e.g., unused imports).
-- [~] Task: Conductor - User Manual Verification 'Self-Correction Loop' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Self-Correction Loop' (Protocol in workflow.md)
 
 ## Phase 4: IDE Abstraction Layer (VS Code/Antigravity Compatibility)
 

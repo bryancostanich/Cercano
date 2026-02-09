@@ -74,3 +74,32 @@ func TestUnitTestHandler_Generate_HandlesError(t *testing.T) {
 		t.Errorf("Expected error containing '%v', got '%v'", expectedErr, err)
 	}
 }
+
+func TestUnitTestHandler_Fix_ConstructsPrompt(t *testing.T) {
+	spy := &SpyProvider{}
+	handler := agent.NewUnitTestHandler(spy)
+
+	inputCode := "func Add(a, b int) { return a + b }"
+	errorMsg := "too many return values"
+	ctx := context.Background()
+
+	_, err := handler.Fix(ctx, inputCode, errorMsg)
+	if err != nil {
+		t.Fatalf("Fix failed: %v", err)
+	}
+
+	if spy.CapturedRequest == nil {
+		t.Fatal("Provider.Process was not called")
+	}
+
+	prompt := spy.CapturedRequest.Input
+	if !strings.Contains(prompt, inputCode) {
+		t.Errorf("Prompt should contain the input code")
+	}
+	if !strings.Contains(prompt, errorMsg) {
+		t.Errorf("Prompt should contain the error message")
+	}
+	if !strings.Contains(prompt, "Please fix it") {
+		t.Errorf("Prompt should contain 'Please fix it'")
+	}
+}

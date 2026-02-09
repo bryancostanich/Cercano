@@ -48,6 +48,28 @@ Code:
 	return cleanMarkdown(resp.Output), nil
 }
 
+// Fix attempts to fix the provided code based on the error message.
+func (h *UnitTestHandler) Fix(ctx context.Context, code string, errorMsg string) (string, error) {
+	prompt := fmt.Sprintf(`You are an expert Go developer.
+The following Go code has errors. Please fix it.
+Return ONLY the corrected Go code. Do not explain.
+
+Code:
+`+"```go\n%s\n```"+`
+
+Error:
+%s
+`, code, errorMsg)
+
+	req := &router.Request{Input: prompt}
+	resp, err := h.provider.Process(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fix code: %w", err)
+	}
+
+	return cleanMarkdown(resp.Output), nil
+}
+
 // cleanMarkdown removes ```go and ``` lines if present
 func cleanMarkdown(code string) string {
 	lines := strings.Split(code, "\n")

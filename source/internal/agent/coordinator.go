@@ -26,10 +26,12 @@ func NewGenerationCoordinator(gen CodeGenerator, val Validator) *GenerationCoord
 // Coordinate runs the generation loop: Generate -> Write -> Validate -> Fix.
 func (c *GenerationCoordinator) Coordinate(ctx context.Context, inputCode, workDir, fileName string) (string, error) {
 	// 1. Initial Generation
+	fmt.Println(">> Coordinator: Requesting initial code generation...")
 	generatedCode, err := c.generator.Generate(ctx, inputCode)
 	if err != nil {
 		return "", fmt.Errorf("initial generation failed: %w", err)
 	}
+	fmt.Println(">> Coordinator: Initial code generated.")
 
 	for i := 0; i <= c.maxRetries; i++ {
 		// 2. Write to disk
@@ -40,9 +42,11 @@ func (c *GenerationCoordinator) Coordinate(ctx context.Context, inputCode, workD
 		}
 
 		// 3. Validate
+		fmt.Printf(">> Coordinator: Validating (Attempt %d/%d)...\n", i+1, c.maxRetries+1)
 		err = c.validator.Validate(ctx, workDir)
 		if err == nil {
 			// Success!
+			fmt.Println(">> Coordinator: Validation PASSED.")
 			return generatedCode, nil
 		}
 
@@ -51,13 +55,15 @@ func (c *GenerationCoordinator) Coordinate(ctx context.Context, inputCode, workD
 			return "", fmt.Errorf("failed to generate valid code after %d retries. Last error: %w", c.maxRetries, err)
 		}
 
-		fmt.Printf("Validation failed (attempt %d): %v. Attempting fix...\n", i+1, err)
+		fmt.Printf(">> Coordinator: Validation FAILED: %v\n", err)
+		fmt.Println(">> Coordinator: Requesting FIX from agent...")
 		
 		fixedCode, fixErr := c.generator.Fix(ctx, generatedCode, err.Error())
 		if fixErr != nil {
 			return "", fmt.Errorf("fix attempt failed: %w (original error: %v)", fixErr, err)
 		}
 		generatedCode = fixedCode
+		fmt.Println(">> Coordinator: Agent returned fixed code.")
 	}
 
 	return generatedCode, nil

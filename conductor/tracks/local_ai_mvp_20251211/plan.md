@@ -93,23 +93,24 @@ Implement an iterative "Generate -> Test -> Fix" loop using a Coordinator patter
     - [x] Subtask: Run `TestSandbox_GenerateAndRunTests` using the new Coordinator and verify it auto-corrects errors (e.g., unused imports).
 - [x] Task: Conductor - User Manual Verification 'Self-Correction Loop' (Protocol in workflow.md)
 
-## Phase 4: IDE Abstraction Layer (VS Code/Antigravity Compatibility)
+## Phase 4: IDE Abstraction Layer (Multi-Editor Support)
 
 ### Objective
-Develop a decoupled, VS Code-compatible abstraction layer that communicates with the core Go application via gRPC to enable integration with Antigravity.
+Develop a decoupled IDE abstraction layer that communicates with the core Go application via gRPC, enabling integration with multiple editors. The initial focus will be on VS Code (and compatible editors like Antigravity) and Zed.
 
 ### Tasks
-- [ ] Task: Set up VS Code extension development environment.
-    - [ ] Subtask: Initialize a new VS Code extension project.
-    - [ ] Subtask: Configure gRPC client for communication with Go backend.
+- [~] Task: Set up Editor Extension Projects.
+    - [ ] Subtask: Initialize a new VS Code extension project (`vscode-extension`).
+    - [ ] Subtask: Research and initialize a new Zed extension project (`zed-extension`).
+    - [ ] Subtask: Configure gRPC client stubs for both environments (TypeScript for VS Code, Rust/Wasm for Zed).
 - [ ] Task: Implement basic gRPC client in the IDE abstraction layer.
     - [ ] Subtask: Write tests for gRPC client connection and basic request/response.
-    - [ ] Subtask: Implement client to call the Go backend's `ProcessRequest` method.
+    - [ ] Subtask: Implement clients to call the Go backend's `ProcessRequest` method.
 - [ ] Task: Implement IDE command for "Generate Unit Tests".
-    - [ ] Subtask: Write tests for the IDE command, ensuring it captures context and sends to backend.
-    - [ ] Subtask: Implement command that captures selected code/file context and sends to the Go backend via gRPC.
-    - [ ] Subtask: Display the generated unit tests in the IDE.
-- [ ] Task: Conductor - User Manual Verification 'IDE Abstraction Layer (VS Code/Antigravity Compatibility)' (Protocol in workflow.md)
+    - [ ] Subtask: Implement VS Code command that captures context and sends to backend.
+    - [ ] Subtask: Implement Zed command/action that captures context and sends to backend.
+    - [ ] Subtask: Display the generated unit tests in the respective IDEs.
+- [ ] Task: Conductor - User Manual Verification 'IDE Abstraction Layer (Multi-Editor Support)' (Protocol in workflow.md)
 
 ## vNext
 

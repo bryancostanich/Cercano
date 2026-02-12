@@ -31,7 +31,7 @@ suite('CercanoClient Test Suite', () => {
         const response = new ProcessRequestResponse();
         response.setOutput(expectedOutput);
 
-        agentClientStub.processRequest.callsFake((req, cb: any) => {
+        agentClientStub.processRequest.callsFake((req, meta, options, cb: any) => {
             cb(null, response);
             return {} as any;
         });
@@ -46,7 +46,7 @@ suite('CercanoClient Test Suite', () => {
 
         const expectedError = new Error("gRPC Error");
 
-        agentClientStub.processRequest.callsFake((req, cb: any) => {
+        agentClientStub.processRequest.callsFake((req, meta, options, cb: any) => {
             cb(expectedError, null);
             return {} as any;
         });

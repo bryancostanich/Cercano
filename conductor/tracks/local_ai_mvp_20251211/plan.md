@@ -106,7 +106,7 @@ Develop a decoupled IDE abstraction layer that communicates with the core Go app
 - [x] Task: Implement basic gRPC client in the IDE abstraction layer. [6f37c55]
     - [x] Subtask: Write tests for gRPC client connection and basic request/response.
     - [x] Subtask: Implement clients to call the Go backend's `ProcessRequest` method.
-- [~] Task: Implement Native Chat Participant.
+- [x] Task: Implement Native Chat Participant. [a40f27c]
     - [x] Subtask: Register `chatParticipants` in `package.json`.
     - [x] Subtask: Implement `vscode.chat.createChatParticipant` handler.
     - [x] Subtask: Connect Chat Participant to gRPC client.

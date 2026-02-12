@@ -1,19 +1,23 @@
 import * as vscode from 'vscode';
 import { CercanoClient } from './client';
-import { ChatProvider } from './chatProvider';
 
 let client: CercanoClient;
 
 export function activate(context: vscode.ExtensionContext) {
-    // Initialize gRPC client
     client = new CercanoClient();
 
-    // Register Chat Provider
-    const provider = new ChatProvider(context.extensionUri, client);
+    const participant = vscode.chat.createChatParticipant("cercano.chat", async (request, context, response, token) => {
+        response.progress("Thinking...");
+        try {
+            const result = await client.process(request.prompt);
+            response.markdown(result);
+        } catch (err: any) {
+            response.markdown(`Error: ${err.message || err}`);
+        }
+    });
 
-    context.subscriptions.push(
-        vscode.window.registerWebviewViewProvider(ChatProvider.viewType, provider)
-    );
+    participant.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'icon.svg');
+    context.subscriptions.push(participant);
 }
 
 export function deactivate() {

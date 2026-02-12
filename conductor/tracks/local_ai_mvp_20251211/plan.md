@@ -108,8 +108,8 @@ Develop a decoupled IDE abstraction layer that communicates with the core Go app
     - [x] Subtask: Implement clients to call the Go backend's `ProcessRequest` method.
 - [~] Task: Implement Native Chat Participant.
     - [x] Subtask: Register `chatParticipants` in `package.json`.
-    - [ ] Subtask: Implement `vscode.chat.createChatParticipant` handler.
-    - [ ] Subtask: Connect Chat Participant to gRPC client.
+    - [x] Subtask: Implement `vscode.chat.createChatParticipant` handler.
+    - [x] Subtask: Connect Chat Participant to gRPC client.
     - [x] Subtask: Implement Zed chat interface (Scaffolded only).
 - [~] Task: Conductor - User Manual Verification 'IDE Abstraction Layer (Multi-Editor Support)' (Protocol in workflow.md)
 

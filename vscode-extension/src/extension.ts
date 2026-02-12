@@ -1,10 +1,11 @@
 import * as vscode from 'vscode';
 import { CercanoClient } from './client';
+import { ChatProvider } from './chatProvider';
 
 let client: CercanoClient;
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('Cercano: Activating extension...');
+    console.log('Cercano: Activating extension (Sidebar Mode)...');
     
     try {
         client = new CercanoClient();
@@ -13,22 +14,12 @@ export function activate(context: vscode.ExtensionContext) {
         console.error('Cercano: Failed to init gRPC client:', err);
     }
 
-    const participant = vscode.chat.createChatParticipant("cercano.chat", async (request, context, response, token) => {
-        console.log('Cercano: Chat request received:', request.prompt);
-        response.progress("Thinking...");
-        try {
-            const result = await client.process(request.prompt);
-            console.log('Cercano: Received response from backend');
-            response.markdown(result);
-        } catch (err: any) {
-            console.error('Cercano: Error processing request:', err);
-            response.markdown(`Error: ${err.message || err}`);
-        }
-    });
+    const provider = new ChatProvider(context.extensionUri, client);
 
-    participant.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'icon.svg');
-    context.subscriptions.push(participant);
-    console.log('Cercano: Chat participant registered.');
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(ChatProvider.viewType, provider)
+    );
+    console.log('Cercano: Sidebar Chat Provider registered.');
 }
 
 export function deactivate() {

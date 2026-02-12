@@ -106,10 +106,10 @@ Develop a decoupled IDE abstraction layer that communicates with the core Go app
 - [x] Task: Implement basic gRPC client in the IDE abstraction layer. [6f37c55]
     - [x] Subtask: Write tests for gRPC client connection and basic request/response.
     - [x] Subtask: Implement clients to call the Go backend's `ProcessRequest` method.
-- [x] Task: Implement Sidebar Chat Interface. [240d00c]
-    - [x] Subtask: Register `WebviewViewProvider` in `package.json`.
-    - [x] Subtask: Create `ChatProvider` class and basic HTML/CSS UI.
-    - [x] Subtask: Connect Chat UI to gRPC client (handle messages).
+- [~] Task: Implement Native Chat Participant.
+    - [x] Subtask: Register `chatParticipants` in `package.json`.
+    - [ ] Subtask: Implement `vscode.chat.createChatParticipant` handler.
+    - [ ] Subtask: Connect Chat Participant to gRPC client.
     - [x] Subtask: Implement Zed chat interface (Scaffolded only).
 - [~] Task: Conductor - User Manual Verification 'IDE Abstraction Layer (Multi-Editor Support)' (Protocol in workflow.md)
 

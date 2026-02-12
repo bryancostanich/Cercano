@@ -23,11 +23,12 @@ The MVP will focus on delivering the following critical capabilities:
 
 *   **Smart Router Model:** An intelligent classifier responsible for analyzing developer requests, determining their complexity and nature, and routing them to the most appropriate "expert" model (local or cloud). This router will also be capable of clarifying user prompts and reformulating them for optimal model performance.
 *   **Local Model Integration:** The system will integrate with readily available, out-of-the-box local models capable of handling common development tasks (e.g., code completion, simple refactoring, code explanation). For the MVP, no custom model training or extensive optimization will be undertaken.
-*   **IDE Integration via Local MCP Provider:** The system will integrate into IDEs (e.g., VS Code, Zed) as a local Model Context Protocol (MCP) provider. This will allow developers to add it as they would any other AI agent provider (like Gemini or Claude), enabling seamless interaction within their existing development environment.
+*   **IDE Integration via gRPC:** The system integrates into IDEs (VS Code, Zed) via a decoupled gRPC interface. This allows developers to interact with the assistant via a Sidebar Chat interface.
+*   **Agentic Self-Correction:** The system includes an iterative loop that automatically validates generated code (e.g., via compilation) and requests fixes from the model if errors are detected.
 
 ## 5. Interaction Model
 
-The primary interaction model will be a local MCP integration within the developer's IDE. Developers will interact with the system by adding it as an AI agent provider, similar to how they would integrate cloud-based services. This approach aims for a native and intuitive experience within the developer's familiar environment.
+The primary interaction model is a **Sidebar Chat** within the IDE. Developers invoke the assistant to generate code or tests, and the system intelligently routes the request and validates the output before presenting it.
 
 ## Refined MVP Requirements
 
@@ -42,8 +43,8 @@ Here are the refined requirements based on our discussion:
 *   **User Control** - Provide a user-facing option to "retry with a more powerful model" if the local model's response is insufficient.
 
 ### IDE Integration:
-*   **Target** - Prioritize "Antigravity" (Google's IDE).
-*   **Implementation Strategy** - Integrate via a VS Code-compatible abstraction layer.
+*   **Target** - VS Code and Zed.
+*   **Implementation Strategy** - Decoupled gRPC architecture with editor-specific extensions (TypeScript for VS Code, Rust for Zed).
 
 ### Architecture:
 *   **Decoupling** - The core Go application will be completely decoupled from the IDE integration layer.

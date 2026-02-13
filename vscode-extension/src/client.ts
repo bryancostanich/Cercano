@@ -18,9 +18,9 @@ export class CercanoClient {
             const request = new ProcessRequestRequest();
             request.setInput(input);
 
-            // Set a 5-second deadline to prevent hanging
+            // Set a generous deadline (5 minutes) for complex AI tasks and self-correction loops
             const deadline = new Date();
-            deadline.setSeconds(deadline.getSeconds() + 5);
+            deadline.setSeconds(deadline.getSeconds() + 300);
 
             const metadata = new grpc.Metadata();
 

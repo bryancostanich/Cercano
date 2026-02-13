@@ -93,7 +93,7 @@ Implement an iterative "Generate -> Test -> Fix" loop using a Coordinator patter
     - [x] Subtask: Run `TestSandbox_GenerateAndRunTests` using the new Coordinator and verify it auto-corrects errors (e.g., unused imports).
 - [x] Task: Conductor - User Manual Verification 'Self-Correction Loop' (Protocol in workflow.md)
 
-## Phase 4: IDE Abstraction Layer (Multi-Editor Support) [checkpoint: d4a2a76]
+## Phase 4: IDE Abstraction Layer (Multi-Editor Support) [checkpoint: d2f388d]
 
 ### Objective
 Develop a decoupled IDE abstraction layer that communicates with the core Go application via gRPC, enabling integration with multiple editors. The initial focus will be on VS Code (and compatible editors like Antigravity) and Zed.

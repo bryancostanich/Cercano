@@ -3,36 +3,24 @@
   "publisher": "cercano",
   "displayName": "Cercano",
   "description": "Local-first AI assistant integration for VS Code",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "engines": {
     "vscode": "^1.90.0"
   },
-  "categories": [
-    "Other"
-  ],
   "activationEvents": [
-    "onView:cercano.chatView"
+    "onChatParticipant:cercano-chat"
   ],
   "main": "./out/extension.js",
   "contributes": {
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "cercano-sidebar",
-          "title": "Cercano",
-          "icon": "media/icon.svg"
-        }
-      ]
-    },
-    "views": {
-      "cercano-sidebar": [
-        {
-          "type": "webview",
-          "id": "cercano.chatView",
-          "name": "Chat"
-        }
-      ]
-    },
+    "chatParticipants": [
+      {
+        "id": "cercano-chat",
+        "name": "cercano",
+        "fullName": "Cercano",
+        "description": "Local-first AI assistant",
+        "isSticky": true
+      }
+    ],
     "commands": [
       {
         "command": "cercano.generateTests",

@@ -19,14 +19,19 @@ func NewUnitTestHandler(provider agent.ModelProvider) *UnitTestHandler {
 }
 
 // Generate generates unit tests for the provided Go code.
-func (h *UnitTestHandler) Generate(ctx context.Context, code string) (string, error) {
-	if code == "" {
-		return "", fmt.Errorf("input code cannot be empty")
+func (h *UnitTestHandler) Generate(ctx context.Context, instruction string, code string) (string, error) {
+	if code == "" && instruction == "" {
+		return "", fmt.Errorf("input code and instruction cannot both be empty")
+	}
+
+	// For backward compatibility while refactoring, if instruction is empty, assume it's the old unit test generation request.
+	if instruction == "" {
+		instruction = "Write table-driven unit tests for the following Go code using the standard 'testing' package."
 	}
 
 	// Construct the prompt with specific instructions for the model
 	prompt := fmt.Sprintf(`You are an expert Go developer.
-Write table-driven unit tests for the following Go code using the standard 'testing' package.
+%s
 Ensure the tests cover happy paths and edge cases.
 Do not include any explanations, just the Go code.
 IMPORTANT: Do NOT blindly copy imports from the source code. Only import packages that are strictly necessary for the TEST code (like 'testing').
@@ -34,7 +39,7 @@ IMPORTANT: Do NOT blindly copy imports from the source code. Only import package
 Code:
 `+"```go\n%s\n```"+`
 `,
-		code) // Note: The original prompt had an extra backtick here, which has been removed.
+		instruction, code) // Note: The original prompt had an extra backtick here, which has been removed.
 
 	req := &agent.Request{
 		Input: prompt,

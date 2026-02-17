@@ -9,12 +9,12 @@ import (
 )
 
 type MockGenerator struct {
-	GenerateFunc func(ctx context.Context, code string) (string, error)
+	GenerateFunc func(ctx context.Context, instruction, code string) (string, error)
 	FixFunc      func(ctx context.Context, code string, errorMsg string) (string, error)
 }
 
-func (m *MockGenerator) Generate(ctx context.Context, code string) (string, error) {
-	return m.GenerateFunc(ctx, code)
+func (m *MockGenerator) Generate(ctx context.Context, instruction, code string) (string, error) {
+	return m.GenerateFunc(ctx, instruction, code)
 }
 
 func (m *MockGenerator) Fix(ctx context.Context, code string, errorMsg string) (string, error) {
@@ -31,7 +31,7 @@ func (m *MockValidator) Validate(ctx context.Context, workDir string) error {
 
 func TestGenerationCoordinator_Coordinate_SuccessFirstTime(t *testing.T) {
 	gen := &MockGenerator{
-		GenerateFunc: func(ctx context.Context, code string) (string, error) {
+		GenerateFunc: func(ctx context.Context, instruction, code string) (string, error) {
 			return "generated code", nil
 		},
 	}
@@ -45,7 +45,7 @@ func TestGenerationCoordinator_Coordinate_SuccessFirstTime(t *testing.T) {
 	
 	ctx := context.Background()
 	workDir := t.TempDir()
-	result, err := coordinator.Coordinate(ctx, "input code", workDir, "test_file.go")
+	result, err := coordinator.Coordinate(ctx, "instruction", "input code", workDir, "test_file.go")
 	
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
@@ -58,7 +58,7 @@ func TestGenerationCoordinator_Coordinate_SuccessFirstTime(t *testing.T) {
 func TestGenerationCoordinator_Coordinate_FixSuccess(t *testing.T) {
 	fixCalled := false
 	gen := &MockGenerator{
-		GenerateFunc: func(ctx context.Context, code string) (string, error) {
+		GenerateFunc: func(ctx context.Context, instruction, code string) (string, error) {
 			return "bad code", nil
 		},
 		FixFunc: func(ctx context.Context, code string, errorMsg string) (string, error) {
@@ -78,7 +78,7 @@ func TestGenerationCoordinator_Coordinate_FixSuccess(t *testing.T) {
 	coordinator := loop.NewGenerationCoordinator(gen, val)
 	ctx := context.Background()
 	workDir := t.TempDir()
-	result, err := coordinator.Coordinate(ctx, "input code", workDir, "test_file.go")
+	result, err := coordinator.Coordinate(ctx, "instruction", "input code", workDir, "test_file.go")
 
 	if err != nil {
 		t.Fatalf("expected success after fix, got %v", err)

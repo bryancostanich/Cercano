@@ -39,7 +39,7 @@ func TestUnitTestHandler_Generate_ConstructsPrompt(t *testing.T) {
 	inputCode := "func Add(a, b int) int { return a + b }"
 	ctx := context.Background()
 
-	_, err := handler.Generate(ctx, inputCode)
+	_, err := handler.Generate(ctx, "", inputCode)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestUnitTestHandler_Generate_HandlesError(t *testing.T) {
 	spy := &SpyProvider{Err: expectedErr}
 	handler := tools.NewUnitTestHandler(spy)
 
-	_, err := handler.Generate(context.Background(), "func foo()")
+	_, err := handler.Generate(context.Background(), "", "func foo()")
 	
 	if err == nil {
 		t.Fatal("Expected error from handler, got nil")

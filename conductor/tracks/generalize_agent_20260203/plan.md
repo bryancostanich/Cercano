@@ -8,8 +8,8 @@ This plan outlines the refactor to move from a task-specific "Unit Test" handler
 Remove hardcoded task logic and rename components to be domain-agnostic.
 
 ### Tasks
-- [ ] Task: Generalize `CodeGenerator` interface.
-    - [ ] Update interface to accept `instruction string` and `code string`.
+- [x] Task: Generalize `CodeGenerator` interface. [6ca4f88]
+    - [x] Update interface to accept `instruction string` and `code string`.
 - [ ] Task: Implement `GenericCodeGenerator`.
     - [ ] Rename `internal/tools/unittest_handler.go` to `internal/tools/generic_generator.go`.
     - [ ] Update `Generate` method to use the passed instruction.

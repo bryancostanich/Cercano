@@ -25,8 +25,36 @@
       {
         "command": "cercano.generateTests",
         "title": "Cercano: Generate Unit Tests"
+      },
+      {
+        "command": "cercano.setGeminiKey",
+        "title": "Cercano: Set Google Gemini API Key"
+      },
+      {
+        "command": "cercano.setAnthropicKey",
+        "title": "Cercano: Set Anthropic API Key"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Cercano",
+      "properties": {
+        "cercano.provider": {
+          "type": "string",
+          "enum": [
+            "local",
+            "google",
+            "anthropic"
+          ],
+          "default": "local",
+          "description": "The AI provider to use."
+        },
+        "cercano.model": {
+          "type": "string",
+          "default": "gemini-1.5-pro",
+          "description": "The model to use when a cloud provider is selected."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

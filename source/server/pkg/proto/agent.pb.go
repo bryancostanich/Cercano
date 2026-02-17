@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v6.33.2
-// source: source/proto/agent.proto
+// source: agent.proto
 
 package proto
 
@@ -31,7 +31,7 @@ type ProcessRequestRequest struct {
 
 func (x *ProcessRequestRequest) Reset() {
 	*x = ProcessRequestRequest{}
-	mi := &file_source_proto_agent_proto_msgTypes[0]
+	mi := &file_agent_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -43,7 +43,7 @@ func (x *ProcessRequestRequest) String() string {
 func (*ProcessRequestRequest) ProtoMessage() {}
 
 func (x *ProcessRequestRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_source_proto_agent_proto_msgTypes[0]
+	mi := &file_agent_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -56,7 +56,7 @@ func (x *ProcessRequestRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessRequestRequest.ProtoReflect.Descriptor instead.
 func (*ProcessRequestRequest) Descriptor() ([]byte, []int) {
-	return file_source_proto_agent_proto_rawDescGZIP(), []int{0}
+	return file_agent_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *ProcessRequestRequest) GetInput() string {
@@ -76,7 +76,7 @@ type ProcessRequestResponse struct {
 
 func (x *ProcessRequestResponse) Reset() {
 	*x = ProcessRequestResponse{}
-	mi := &file_source_proto_agent_proto_msgTypes[1]
+	mi := &file_agent_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -88,7 +88,7 @@ func (x *ProcessRequestResponse) String() string {
 func (*ProcessRequestResponse) ProtoMessage() {}
 
 func (x *ProcessRequestResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_source_proto_agent_proto_msgTypes[1]
+	mi := &file_agent_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -101,7 +101,7 @@ func (x *ProcessRequestResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessRequestResponse.ProtoReflect.Descriptor instead.
 func (*ProcessRequestResponse) Descriptor() ([]byte, []int) {
-	return file_source_proto_agent_proto_rawDescGZIP(), []int{1}
+	return file_agent_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *ProcessRequestResponse) GetOutput() string {
@@ -111,36 +111,36 @@ func (x *ProcessRequestResponse) GetOutput() string {
 	return ""
 }
 
-var File_source_proto_agent_proto protoreflect.FileDescriptor
+var File_agent_proto protoreflect.FileDescriptor
 
-const file_source_proto_agent_proto_rawDesc = "" +
+const file_agent_proto_rawDesc = "" +
 	"\n" +
-	"\x18source/proto/agent.proto\x12\x05agent\"-\n" +
+	"\vagent.proto\x12\x05agent\"-\n" +
 	"\x15ProcessRequestRequest\x12\x14\n" +
 	"\x05input\x18\x01 \x01(\tR\x05input\"0\n" +
 	"\x16ProcessRequestResponse\x12\x16\n" +
 	"\x06output\x18\x01 \x01(\tR\x06output2X\n" +
 	"\x05Agent\x12O\n" +
-	"\x0eProcessRequest\x12\x1c.agent.ProcessRequestRequest\x1a\x1d.agent.ProcessRequestResponse\"\x00B\x16Z\x14cercano/source/server/pkg/protob\x06proto3"
+	"\x0eProcessRequest\x12\x1c.agent.ProcessRequestRequest\x1a\x1d.agent.ProcessRequestResponse\"\x00B!Z\x1fcercano/source/server/pkg/protob\x06proto3"
 
 var (
-	file_source_proto_agent_proto_rawDescOnce sync.Once
-	file_source_proto_agent_proto_rawDescData []byte
+	file_agent_proto_rawDescOnce sync.Once
+	file_agent_proto_rawDescData []byte
 )
 
-func file_source_proto_agent_proto_rawDescGZIP() []byte {
-	file_source_proto_agent_proto_rawDescOnce.Do(func() {
-		file_source_proto_agent_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_source_proto_agent_proto_rawDesc), len(file_source_proto_agent_proto_rawDesc)))
+func file_agent_proto_rawDescGZIP() []byte {
+	file_agent_proto_rawDescOnce.Do(func() {
+		file_agent_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_agent_proto_rawDesc), len(file_agent_proto_rawDesc)))
 	})
-	return file_source_proto_agent_proto_rawDescData
+	return file_agent_proto_rawDescData
 }
 
-var file_source_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_source_proto_agent_proto_goTypes = []any{
+var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_agent_proto_goTypes = []any{
 	(*ProcessRequestRequest)(nil),  // 0: agent.ProcessRequestRequest
 	(*ProcessRequestResponse)(nil), // 1: agent.ProcessRequestResponse
 }
-var file_source_proto_agent_proto_depIdxs = []int32{
+var file_agent_proto_depIdxs = []int32{
 	0, // 0: agent.Agent.ProcessRequest:input_type -> agent.ProcessRequestRequest
 	1, // 1: agent.Agent.ProcessRequest:output_type -> agent.ProcessRequestResponse
 	1, // [1:2] is the sub-list for method output_type
@@ -150,26 +150,26 @@ var file_source_proto_agent_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_source_proto_agent_proto_init() }
-func file_source_proto_agent_proto_init() {
-	if File_source_proto_agent_proto != nil {
+func init() { file_agent_proto_init() }
+func file_agent_proto_init() {
+	if File_agent_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_source_proto_agent_proto_rawDesc), len(file_source_proto_agent_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_proto_rawDesc), len(file_agent_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_source_proto_agent_proto_goTypes,
-		DependencyIndexes: file_source_proto_agent_proto_depIdxs,
-		MessageInfos:      file_source_proto_agent_proto_msgTypes,
+		GoTypes:           file_agent_proto_goTypes,
+		DependencyIndexes: file_agent_proto_depIdxs,
+		MessageInfos:      file_agent_proto_msgTypes,
 	}.Build()
-	File_source_proto_agent_proto = out.File
-	file_source_proto_agent_proto_goTypes = nil
-	file_source_proto_agent_proto_depIdxs = nil
+	File_agent_proto = out.File
+	file_agent_proto_goTypes = nil
+	file_agent_proto_depIdxs = nil
 }

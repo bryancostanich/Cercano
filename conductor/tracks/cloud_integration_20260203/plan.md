@@ -17,7 +17,7 @@ Update the gRPC contract to support passing provider configuration and credentia
     - [x] Update the Chat Participant to retrieve these keys and include them in the gRPC request.
 - [x] Task: Conductor - User Manual Verification 'Protocol & Authentication Setup' (Protocol in workflow.md) [cc8b2c8]
 
-## Phase 2: Backend Provider Abstraction (LangChainGo)
+## Phase 2: Backend Provider Abstraction (LangChainGo) [checkpoint: 29c7966]
 
 ### Objective
 Implement the server-side logic to dynamically instantiate cloud providers.
@@ -32,7 +32,7 @@ Implement the server-side logic to dynamically instantiate cloud providers.
     - [x] Update the Router to use the new `CloudModelProvider` when routing to cloud.
 - [x] Task: Verify with Integration Tests. [054f7c7]
     - [x] Create a test harness that uses environment variables for real API keys (to be run manually).
-- [ ] Task: Conductor - User Manual Verification 'Backend Provider Abstraction' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Backend Provider Abstraction' (Protocol in workflow.md) [967a8c8]
 
 ## Phase 3: End-to-End Verification
 

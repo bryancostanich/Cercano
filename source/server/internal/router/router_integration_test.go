@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"cercano/source/internal/router" // Import the router package
+	"cercano/source/server/internal/router" // Import the router package
 )
 
 const integrationTestModelName = "nomic-embed-text"

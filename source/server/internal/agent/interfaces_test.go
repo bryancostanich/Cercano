@@ -3,7 +3,7 @@ package agent_test
 import (
 	"testing"
 
-	"cercano/source/internal/agent"
+	"cercano/source/server/internal/agent"
 )
 
 func TestInterfaces(t *testing.T) {

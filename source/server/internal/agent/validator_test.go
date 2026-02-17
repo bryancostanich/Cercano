@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"cercano/source/internal/agent"
+	"cercano/source/server/internal/agent"
 )
 
 func TestGoTestValidator_Validate(t *testing.T) {

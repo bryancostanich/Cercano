@@ -8,7 +8,7 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	"cercano/source/internal/router"
+	"cercano/source/server/internal/router"
 )
 
 type OllamaProvider struct {

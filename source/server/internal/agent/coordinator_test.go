@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"cercano/source/internal/agent"
+	"cercano/source/server/internal/agent"
 )
 
 type MockGenerator struct {

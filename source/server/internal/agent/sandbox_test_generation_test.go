@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"cercano/source/internal/agent"
-	"cercano/source/internal/llm"
+	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/llm"
 )
 
 // TestSandbox_GenerateAndRunTests verifies the agent can generate passing tests for a simple sandbox project.

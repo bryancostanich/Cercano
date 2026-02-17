@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"cercano/source/internal/agent"
-	"cercano/source/internal/router"
+	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/router"
 )
 
 // SpyProvider captures the request for verification.

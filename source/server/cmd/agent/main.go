@@ -6,10 +6,10 @@ import (
 	"net"
 	"net/http"
 
-	"cercano/source/internal/agent"
-	"cercano/source/internal/llm"
-	"cercano/source/internal/router"
-	"cercano/source/proto"
+	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/router"
+	"cercano/source/server/pkg/proto"
 
 	"google.golang.org/grpc"
 )

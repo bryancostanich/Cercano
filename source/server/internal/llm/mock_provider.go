@@ -3,7 +3,7 @@ package llm
 import (
 	"context"
 
-	"cercano/source/internal/router"
+	"cercano/source/server/internal/router"
 )
 
 type MockProvider struct {

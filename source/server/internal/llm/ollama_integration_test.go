@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"cercano/source/internal/llm"
-	"cercano/source/internal/router"
+	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/router"
 )
 
 const integrationTestModelName = "qwen3-coder"

@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"testing"
 
-	"cercano/source/internal/llm"
-	"cercano/source/internal/router"
+	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/router"
 )
 
 func TestRouter_ClassifiesUnitTestGenerationAsLocal(t *testing.T) {

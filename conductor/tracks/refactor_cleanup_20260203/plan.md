@@ -49,7 +49,7 @@ Rename and reorganize internal packages to accurately reflect the "Agent" (logic
 Ensure end-to-end functionality is preserved and paths are correctly configured.
 
 ### Tasks
-- [ ] Task: Update Sandbox and Integration Tests.
+- [x] Task: Update Sandbox and Integration Tests.
     - [ ] Update `test/sandbox` paths in the Go integration tests.
     - [ ] Verify `SANDBOX_TEST=1 go test ./...` passes.
 - [ ] Task: Final Manual Verification in VS Code.

@@ -24,7 +24,7 @@ Unify all project code under the `source/` directory and establish the `server/`
     - [x] Subtask: Verify `npm run compile` still works.
 - [x] Task: Conductor - User Manual Verification 'Directory Restructuring' (Protocol in workflow.md)
 
-## Phase 2: Component Role Clarification (Server Refactor)
+## Phase 2: Component Role Clarification (Server Refactor) [checkpoint: a1d8f23]
 
 ### Objective
 Rename and reorganize internal packages to accurately reflect the "Agent" (logic) and "Coordinator" (executor) roles.

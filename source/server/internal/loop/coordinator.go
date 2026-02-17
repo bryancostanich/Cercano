@@ -26,10 +26,10 @@ func NewGenerationCoordinator(gen tools.CodeGenerator, val tools.Validator) *Gen
 }
 
 // Coordinate runs the generation loop: Generate -> Write -> Validate -> Fix.
-func (c *GenerationCoordinator) Coordinate(ctx context.Context, inputCode, workDir, fileName string) (string, error) {
+func (c *GenerationCoordinator) Coordinate(ctx context.Context, instruction string, inputCode string, workDir string, fileName string) (string, error) {
 	// 1. Initial Generation
 	fmt.Println(">> Coordinator: Requesting initial code generation...")
-	generatedCode, err := c.generator.Generate(ctx, inputCode)
+	generatedCode, err := c.generator.Generate(ctx, instruction, inputCode)
 	if err != nil {
 		return "", fmt.Errorf("initial generation failed: %w", err)
 	}

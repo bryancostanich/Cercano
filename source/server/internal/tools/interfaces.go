@@ -4,8 +4,8 @@ import "context"
 
 // CodeGenerator defines the interface for generating and fixing code.
 type CodeGenerator interface {
-	// Generate generates code based on the input.
-	Generate(ctx context.Context, code string) (string, error)
+	// Generate generates code based on the instruction and existing code.
+	Generate(ctx context.Context, instruction string, code string) (string, error)
 	// Fix attempts to fix the code based on the provided error message.
 	Fix(ctx context.Context, code string, errorMsg string) (string, error)
 }

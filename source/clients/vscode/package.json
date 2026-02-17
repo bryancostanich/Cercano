@@ -18,7 +18,13 @@
         "name": "cercano",
         "fullName": "Cercano",
         "description": "Local-first AI assistant",
-        "isSticky": true
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "config",
+            "description": "Configure API keys and model providers"
+          }
+        ]
       }
     ],
     "commands": [
@@ -33,6 +39,10 @@
       {
         "command": "cercano.setAnthropicKey",
         "title": "Cercano: Set Anthropic API Key"
+      },
+      {
+        "command": "cercano.showConfig",
+        "title": "Cercano: Show Configuration Menu"
       }
     ],
     "configuration": {

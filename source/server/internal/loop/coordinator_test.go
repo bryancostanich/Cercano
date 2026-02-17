@@ -1,11 +1,11 @@
-package workflows_test
+package loop_test
 
 import (
 	"context"
 	"errors"
 	"testing"
 
-	"cercano/source/server/internal/workflows"
+	"cercano/source/server/internal/loop"
 )
 
 type MockGenerator struct {
@@ -41,7 +41,7 @@ func TestGenerationCoordinator_Coordinate_SuccessFirstTime(t *testing.T) {
 		},
 	}
 
-	coordinator := workflows.NewGenerationCoordinator(gen, val)
+	coordinator := loop.NewGenerationCoordinator(gen, val)
 	
 	ctx := context.Background()
 	workDir := t.TempDir()
@@ -75,7 +75,7 @@ func TestGenerationCoordinator_Coordinate_FixSuccess(t *testing.T) {
 		},
 	}
 
-	coordinator := workflows.NewGenerationCoordinator(gen, val)
+	coordinator := loop.NewGenerationCoordinator(gen, val)
 	ctx := context.Background()
 	workDir := t.TempDir()
 	result, err := coordinator.Coordinate(ctx, "input code", workDir, "test_file.go")

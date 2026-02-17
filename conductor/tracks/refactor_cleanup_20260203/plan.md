@@ -19,7 +19,7 @@ Unify all project code under the `source/` directory and establish the `server/`
 - [x] Task: Update Go module and imports. [18091a0]
     - [ ] Update `go.mod` if necessary.
     - [ ] Run `go fmt ./...` and fix import paths across the backend.
-- [x] Task: Update VS Code extension configuration.
+- [x] Task: Update VS Code extension configuration. [7dfb39e]
     - [x] Subtask: Update `package.json` paths, `tsconfig.json`, and `launch.json` to reflect the new location.
     - [x] Subtask: Verify `npm run compile` still works.
 - [ ] Task: Conductor - User Manual Verification 'Directory Restructuring' (Protocol in workflow.md)

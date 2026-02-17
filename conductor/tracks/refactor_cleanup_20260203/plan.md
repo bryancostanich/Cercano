@@ -2,7 +2,7 @@
 
 This plan outlines the phases and tasks required to refactor the project structure and clarify component roles, following the project's workflow guidelines.
 
-## Phase 1: Directory Restructuring (Root & source/)
+## Phase 1: Directory Restructuring (Root & source/) [checkpoint: bf07bcd]
 
 ### Objective
 Unify all project code under the `source/` directory and establish the `server/` vs. `clients/` hierarchy.

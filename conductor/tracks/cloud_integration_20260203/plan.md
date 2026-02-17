@@ -2,7 +2,7 @@
 
 This plan outlines the steps to integrate real cloud LLM providers into the Cercano backend using `langchaingo` and secure client-side key management.
 
-## Phase 1: Protocol & Authentication Setup
+## Phase 1: Protocol & Authentication Setup [checkpoint: efc7e58]
 
 ### Objective
 Update the gRPC contract to support passing provider configuration and credentials.

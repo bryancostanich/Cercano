@@ -60,7 +60,7 @@
         },
         "cercano.model": {
           "type": "string",
-          "default": "gemini-1.5-pro",
+          "default": "gemini-3-flash-preview",
           "description": "The model to use when a cloud provider is selected."
         }
       }

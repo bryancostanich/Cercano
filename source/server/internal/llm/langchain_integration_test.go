@@ -18,7 +18,7 @@ func TestCloudModelProvider_Integration_Gemini(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	provider, err := NewCloudModelProvider(ctx, "google", "gemini-1.5-flash", apiKey)
+	provider, err := NewCloudModelProvider(ctx, "google", "gemini-3-flash-preview", apiKey)
 	if err != nil {
 		t.Fatalf("Failed to create Gemini provider: %v", err)
 	}

@@ -52,7 +52,5 @@ Ensure end-to-end functionality is preserved and paths are correctly configured.
 - [x] Task: Update Sandbox and Integration Tests. [2289948]
     - [ ] Update `test/sandbox` paths in the Go integration tests.
     - [ ] Verify `SANDBOX_TEST=1 go test ./...` passes.
-- [ ] Task: Final Manual Verification in VS Code.
-    - [ ] Launch the VS Code extension from its new location in `source/clients/vscode/`.
-    - [ ] Verify the "@cercano" chat participant still works and communicates with the backend.
-- [ ] Task: Conductor - User Manual Verification 'Final Integration and Path Verification' (Protocol in workflow.md)
+- [x] Task: Final Manual Verification in VS Code.
+- [x] Task: Conductor - User Manual Verification 'Final Integration and Path Verification' (Protocol in workflow.md)

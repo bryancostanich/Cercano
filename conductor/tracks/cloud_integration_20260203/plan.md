@@ -12,9 +12,9 @@ Update the gRPC contract to support passing provider configuration and credentia
     - [x] Add `CloudProviderConfig` message (provider type, model, api_key).
     - [x] Update `ProcessRequestRequest` to include an optional `CloudProviderConfig`.
 - [x] Task: Re-generate gRPC stubs (Go & TypeScript). [5f31211]
-- [ ] Task: Implement VS Code Secret Management.
-    - [ ] Add commands to set/get Gemini and Anthropic keys using `vscode.SecretStorage`.
-    - [ ] Update the Chat Participant to retrieve these keys and include them in the gRPC request.
+- [x] Task: Implement VS Code Secret Management. [5d544d5]
+    - [x] Add commands to set/get Gemini and Anthropic keys using `vscode.SecretStorage`.
+    - [x] Update the Chat Participant to retrieve these keys and include them in the gRPC request.
 - [ ] Task: Conductor - User Manual Verification 'Protocol & Authentication Setup' (Protocol in workflow.md)
 
 ## Phase 2: Backend Provider Abstraction (LangChainGo)

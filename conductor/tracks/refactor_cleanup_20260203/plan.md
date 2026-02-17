@@ -43,7 +43,7 @@ Rename and reorganize internal packages to accurately reflect the "Agent" (logic
     - [x] Confirm all tests pass (`go test ./...`).
 - [x] Task: Conductor - User Manual Verification 'Component Role Clarification' (Protocol in workflow.md)
 
-## Phase 3: Final Integration and Path Verification
+## Phase 3: Final Integration and Path Verification [checkpoint: 4bd450c]
 
 ### Objective
 Ensure end-to-end functionality is preserved and paths are correctly configured.

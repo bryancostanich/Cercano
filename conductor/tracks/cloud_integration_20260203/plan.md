@@ -23,8 +23,8 @@ Update the gRPC contract to support passing provider configuration and credentia
 Implement the server-side logic to dynamically instantiate cloud providers.
 
 ### Tasks
-- [ ] Task: Integrate `langchaingo`.
-    - [ ] Add `github.com/tmc/langchaingo` to `go.mod`.
+- [x] Task: Integrate `langchaingo`. [813728f]
+    - [x] Add `github.com/tmc/langchaingo` to `go.mod`.
 - [ ] Task: Implement `langchaingo` Wrapper.
     - [ ] Create a `CloudModelProvider` struct that wraps `langchaingo`'s `llms.Model` interface.
     - [ ] Implement a factory function to create providers (Gemini, Anthropic) based on the gRPC config.

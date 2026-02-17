@@ -1,4 +1,4 @@
-package agent
+package server
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"net"
 	"testing"
 
-	"cercano/source/server/internal/router"
+	"cercano/source/server/internal/agent"
 	"cercano/source/server/pkg/proto" // Import the generated protobuf package
 
 	"google.golang.org/grpc"
@@ -23,8 +23,8 @@ type mockProvider struct {
 	name string
 }
 
-func (m *mockProvider) Process(ctx context.Context, req *router.Request) (*router.Response, error) {
-	return &router.Response{Output: "Processed by " + m.name}, nil
+func (m *mockProvider) Process(ctx context.Context, req *agent.Request) (*agent.Response, error) {
+	return &agent.Response{Output: "Processed by " + m.name}, nil
 }
 
 func (m *mockProvider) Name() string {
@@ -33,7 +33,7 @@ func (m *mockProvider) Name() string {
 
 type mockRouter struct{}
 
-func (m *mockRouter) SelectProvider(req *router.Request) (router.ModelProvider, error) {
+func (m *mockRouter) SelectProvider(req *agent.Request) (agent.ModelProvider, error) {
 	return &mockProvider{name: "MockLocal"}, nil
 }
 

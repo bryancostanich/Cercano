@@ -39,7 +39,7 @@ func Add(a, b int) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	generatedCode, err := handler.Generate(ctx, inputCode)
+	generatedCode, err := handler.Generate(ctx, "Write table-driven unit tests for the following Go code using the standard 'testing' package.", inputCode)
 	if err != nil {
 		t.Fatalf("Integration test failed to generate code: %v", err)
 	}

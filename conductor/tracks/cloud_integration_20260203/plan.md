@@ -15,7 +15,7 @@ Update the gRPC contract to support passing provider configuration and credentia
 - [x] Task: Implement VS Code Secret Management. [5d544d5]
     - [x] Add commands to set/get Gemini and Anthropic keys using `vscode.SecretStorage`.
     - [x] Update the Chat Participant to retrieve these keys and include them in the gRPC request.
-- [ ] Task: Conductor - User Manual Verification 'Protocol & Authentication Setup' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Protocol & Authentication Setup' (Protocol in workflow.md) [cc8b2c8]
 
 ## Phase 2: Backend Provider Abstraction (LangChainGo)
 

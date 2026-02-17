@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"cercano/source/internal/router"
-	"cercano/source/proto" // Import the generated protobuf package
+	"cercano/source/server/internal/router"
+	"cercano/source/server/pkg/proto" // Import the generated protobuf package
 )
 
 // Server is the gRPC server for the Agent service.

@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"cercano/source/internal/router"
+	"cercano/source/server/internal/router"
 )
 
 func TestOllamaProvider_Process(t *testing.T) {

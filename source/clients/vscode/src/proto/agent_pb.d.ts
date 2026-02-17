@@ -10,6 +10,11 @@ export class ProcessRequestRequest extends jspb.Message {
     getInput(): string;
     setInput(value: string): ProcessRequestRequest;
 
+    hasProviderConfig(): boolean;
+    clearProviderConfig(): void;
+    getProviderConfig(): CloudProviderConfig | undefined;
+    setProviderConfig(value?: CloudProviderConfig): ProcessRequestRequest;
+
     serializeBinary(): Uint8Array;
     toObject(includeInstance?: boolean): ProcessRequestRequest.AsObject;
     static toObject(includeInstance: boolean, msg: ProcessRequestRequest): ProcessRequestRequest.AsObject;
@@ -23,6 +28,33 @@ export class ProcessRequestRequest extends jspb.Message {
 export namespace ProcessRequestRequest {
     export type AsObject = {
         input: string,
+        providerConfig?: CloudProviderConfig.AsObject,
+    }
+}
+
+export class CloudProviderConfig extends jspb.Message { 
+    getProvider(): string;
+    setProvider(value: string): CloudProviderConfig;
+    getModel(): string;
+    setModel(value: string): CloudProviderConfig;
+    getApiKey(): string;
+    setApiKey(value: string): CloudProviderConfig;
+
+    serializeBinary(): Uint8Array;
+    toObject(includeInstance?: boolean): CloudProviderConfig.AsObject;
+    static toObject(includeInstance: boolean, msg: CloudProviderConfig): CloudProviderConfig.AsObject;
+    static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+    static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+    static serializeBinaryToWriter(message: CloudProviderConfig, writer: jspb.BinaryWriter): void;
+    static deserializeBinary(bytes: Uint8Array): CloudProviderConfig;
+    static deserializeBinaryFromReader(message: CloudProviderConfig, reader: jspb.BinaryReader): CloudProviderConfig;
+}
+
+export namespace CloudProviderConfig {
+    export type AsObject = {
+        provider: string,
+        model: string,
+        apiKey: string,
     }
 }
 

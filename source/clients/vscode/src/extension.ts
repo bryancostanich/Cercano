@@ -36,7 +36,43 @@ export function activate(context: vscode.ExtensionContext) {
         }
     }));
 
+    const showConfigMenu = async () => {
+        const items: vscode.QuickPickItem[] = [
+            { label: 'Set Google Gemini API Key', description: 'Store your Gemini API key securely' },
+            { label: 'Set Anthropic API Key', description: 'Store your Anthropic API key securely' },
+            { label: 'Select Provider', description: 'Choose between local, google, or anthropic' }
+        ];
+
+        const selection = await vscode.window.showQuickPick(items, { placeHolder: 'Cercano Configuration' });
+        if (!selection) return;
+
+        switch (selection.label) {
+            case 'Set Google Gemini API Key':
+                await vscode.commands.executeCommand('cercano.setGeminiKey');
+                break;
+            case 'Set Anthropic API Key':
+                await vscode.commands.executeCommand('cercano.setAnthropicKey');
+                break;
+            case 'Select Provider':
+                const providers = ['local', 'google', 'anthropic'];
+                const provider = await vscode.window.showQuickPick(providers, { placeHolder: 'Select AI Provider' });
+                if (provider) {
+                    await vscode.workspace.getConfiguration('cercano').update('provider', provider, vscode.ConfigurationTarget.Global);
+                    vscode.window.showInformationMessage(`Cercano: Provider set to ${provider}`);
+                }
+                break;
+        }
+    };
+
+    context.subscriptions.push(vscode.commands.registerCommand('cercano.showConfig', showConfigMenu));
+
     const participant = vscode.chat.createChatParticipant("cercano-chat", async (request, contextChat, response, token) => {
+        if (request.command === 'config') {
+            await showConfigMenu();
+            response.markdown('Configuration menu opened.');
+            return;
+        }
+
         console.log('Cercano: Chat request received:', request.prompt);
         response.progress("Thinking...");
         

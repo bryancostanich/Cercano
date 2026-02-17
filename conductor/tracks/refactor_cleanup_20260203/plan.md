@@ -8,7 +8,7 @@ This plan outlines the phases and tasks required to refactor the project structu
 Unify all project code under the `source/` directory and establish the `server/` vs. `clients/` hierarchy.
 
 ### Tasks
-- [~] Task: Create new directory structure.
+- [x] Task: Create new directory structure. [baf1fd6]
     - [x] Create `source/server/`.
     - [x] Create `source/clients/`.
 - [ ] Task: Move IDE extensions to `source/clients/`.

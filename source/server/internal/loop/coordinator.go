@@ -1,4 +1,4 @@
-package workflows
+package loop
 
 import (
 	"context"
@@ -6,18 +6,18 @@ import (
 	"os"
 	"path/filepath"
 
-	"cercano/source/server/internal/capabilities"
+	"cercano/source/server/internal/tools"
 )
 
 // GenerationCoordinator orchestrates the iterative generation and validation of code.
 type GenerationCoordinator struct {
-	generator capabilities.CodeGenerator
-	validator capabilities.Validator
+	generator tools.CodeGenerator
+	validator tools.Validator
 	maxRetries int
 }
 
 // NewGenerationCoordinator creates a new coordinator.
-func NewGenerationCoordinator(gen capabilities.CodeGenerator, val capabilities.Validator) *GenerationCoordinator {
+func NewGenerationCoordinator(gen tools.CodeGenerator, val tools.Validator) *GenerationCoordinator {
 	return &GenerationCoordinator{
 		generator: gen,
 		validator: val,

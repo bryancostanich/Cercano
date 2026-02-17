@@ -1,4 +1,4 @@
-package capabilities_test
+package tools_test
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/agent"
-	"cercano/source/server/internal/capabilities"
+	"cercano/source/server/internal/tools"
 )
 
 // SpyProvider captures the request for verification.
@@ -34,7 +34,7 @@ func (s *SpyProvider) Name() string {
 
 func TestUnitTestHandler_Generate_ConstructsPrompt(t *testing.T) {
 	spy := &SpyProvider{}
-	handler := capabilities.NewUnitTestHandler(spy)
+	handler := tools.NewUnitTestHandler(spy)
 
 	inputCode := "func Add(a, b int) int { return a + b }"
 	ctx := context.Background()
@@ -62,7 +62,7 @@ func TestUnitTestHandler_Generate_ConstructsPrompt(t *testing.T) {
 func TestUnitTestHandler_Generate_HandlesError(t *testing.T) {
 	expectedErr := context.DeadlineExceeded
 	spy := &SpyProvider{Err: expectedErr}
-	handler := capabilities.NewUnitTestHandler(spy)
+	handler := tools.NewUnitTestHandler(spy)
 
 	_, err := handler.Generate(context.Background(), "func foo()")
 	
@@ -77,7 +77,7 @@ func TestUnitTestHandler_Generate_HandlesError(t *testing.T) {
 
 func TestUnitTestHandler_Fix_ConstructsPrompt(t *testing.T) {
 	spy := &SpyProvider{}
-	handler := capabilities.NewUnitTestHandler(spy)
+	handler := tools.NewUnitTestHandler(spy)
 
 	inputCode := "func Add(a, b int) { return a + b }"
 	errorMsg := "too many return values"

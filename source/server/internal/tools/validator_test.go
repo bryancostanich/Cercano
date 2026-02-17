@@ -1,4 +1,4 @@
-package capabilities_test
+package tools_test
 
 import (
 	"context"
@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"cercano/source/server/internal/capabilities"
+	"cercano/source/server/internal/tools"
 )
 
 func TestGoTestValidator_Validate(t *testing.T) {
-	v := capabilities.NewGoTestValidator()
+	v := tools.NewGoTestValidator()
 	ctx := context.Background()
 
 	t.Run("ValidCode", func(t *testing.T) {

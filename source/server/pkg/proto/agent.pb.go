@@ -23,10 +23,11 @@ const (
 
 // The request message for ProcessRequest.
 type ProcessRequestRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Input         string                 `protobuf:"bytes,1,opt,name=input,proto3" json:"input,omitempty"` // User input or query
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Input          string                 `protobuf:"bytes,1,opt,name=input,proto3" json:"input,omitempty"`                                         // User input or query
+	ProviderConfig *CloudProviderConfig   `protobuf:"bytes,2,opt,name=provider_config,json=providerConfig,proto3" json:"provider_config,omitempty"` // Optional provider configuration
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ProcessRequestRequest) Reset() {
@@ -66,6 +67,74 @@ func (x *ProcessRequestRequest) GetInput() string {
 	return ""
 }
 
+func (x *ProcessRequestRequest) GetProviderConfig() *CloudProviderConfig {
+	if x != nil {
+		return x.ProviderConfig
+	}
+	return nil
+}
+
+// Configuration for cloud providers.
+type CloudProviderConfig struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Provider      string                 `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`           // e.g., "google", "anthropic"
+	Model         string                 `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`                 // e.g., "gemini-1.5-pro", "claude-3-opus"
+	ApiKey        string                 `protobuf:"bytes,3,opt,name=api_key,json=apiKey,proto3" json:"api_key,omitempty"` // API key for the provider
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloudProviderConfig) Reset() {
+	*x = CloudProviderConfig{}
+	mi := &file_agent_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloudProviderConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloudProviderConfig) ProtoMessage() {}
+
+func (x *CloudProviderConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloudProviderConfig.ProtoReflect.Descriptor instead.
+func (*CloudProviderConfig) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *CloudProviderConfig) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *CloudProviderConfig) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *CloudProviderConfig) GetApiKey() string {
+	if x != nil {
+		return x.ApiKey
+	}
+	return ""
+}
+
 // The response message for ProcessRequest.
 type ProcessRequestResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -76,7 +145,7 @@ type ProcessRequestResponse struct {
 
 func (x *ProcessRequestResponse) Reset() {
 	*x = ProcessRequestResponse{}
-	mi := &file_agent_proto_msgTypes[1]
+	mi := &file_agent_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -88,7 +157,7 @@ func (x *ProcessRequestResponse) String() string {
 func (*ProcessRequestResponse) ProtoMessage() {}
 
 func (x *ProcessRequestResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[1]
+	mi := &file_agent_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -101,7 +170,7 @@ func (x *ProcessRequestResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessRequestResponse.ProtoReflect.Descriptor instead.
 func (*ProcessRequestResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{1}
+	return file_agent_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ProcessRequestResponse) GetOutput() string {
@@ -115,9 +184,14 @@ var File_agent_proto protoreflect.FileDescriptor
 
 const file_agent_proto_rawDesc = "" +
 	"\n" +
-	"\vagent.proto\x12\x05agent\"-\n" +
+	"\vagent.proto\x12\x05agent\"r\n" +
 	"\x15ProcessRequestRequest\x12\x14\n" +
-	"\x05input\x18\x01 \x01(\tR\x05input\"0\n" +
+	"\x05input\x18\x01 \x01(\tR\x05input\x12C\n" +
+	"\x0fprovider_config\x18\x02 \x01(\v2\x1a.agent.CloudProviderConfigR\x0eproviderConfig\"`\n" +
+	"\x13CloudProviderConfig\x12\x1a\n" +
+	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x14\n" +
+	"\x05model\x18\x02 \x01(\tR\x05model\x12\x17\n" +
+	"\aapi_key\x18\x03 \x01(\tR\x06apiKey\"0\n" +
 	"\x16ProcessRequestResponse\x12\x16\n" +
 	"\x06output\x18\x01 \x01(\tR\x06output2X\n" +
 	"\x05Agent\x12O\n" +
@@ -135,19 +209,21 @@ func file_agent_proto_rawDescGZIP() []byte {
 	return file_agent_proto_rawDescData
 }
 
-var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_agent_proto_goTypes = []any{
 	(*ProcessRequestRequest)(nil),  // 0: agent.ProcessRequestRequest
-	(*ProcessRequestResponse)(nil), // 1: agent.ProcessRequestResponse
+	(*CloudProviderConfig)(nil),    // 1: agent.CloudProviderConfig
+	(*ProcessRequestResponse)(nil), // 2: agent.ProcessRequestResponse
 }
 var file_agent_proto_depIdxs = []int32{
-	0, // 0: agent.Agent.ProcessRequest:input_type -> agent.ProcessRequestRequest
-	1, // 1: agent.Agent.ProcessRequest:output_type -> agent.ProcessRequestResponse
-	1, // [1:2] is the sub-list for method output_type
-	0, // [0:1] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	1, // 0: agent.ProcessRequestRequest.provider_config:type_name -> agent.CloudProviderConfig
+	0, // 1: agent.Agent.ProcessRequest:input_type -> agent.ProcessRequestRequest
+	2, // 2: agent.Agent.ProcessRequest:output_type -> agent.ProcessRequestResponse
+	2, // [2:3] is the sub-list for method output_type
+	1, // [1:2] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for extension type_name
+	1, // [1:1] is the sub-list for extension extendee
+	0, // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_agent_proto_init() }
@@ -161,7 +237,7 @@ func file_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_proto_rawDesc), len(file_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

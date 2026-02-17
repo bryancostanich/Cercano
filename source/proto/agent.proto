@@ -13,6 +13,14 @@ service Agent {
 // The request message for ProcessRequest.
 message ProcessRequestRequest {
   string input = 1; // User input or query
+  CloudProviderConfig provider_config = 2; // Optional provider configuration
+}
+
+// Configuration for cloud providers.
+message CloudProviderConfig {
+  string provider = 1; // e.g., "google", "anthropic"
+  string model = 2;    // e.g., "gemini-1.5-pro", "claude-3-opus"
+  string api_key = 3;  // API key for the provider
 }
 
 // The response message for ProcessRequest.

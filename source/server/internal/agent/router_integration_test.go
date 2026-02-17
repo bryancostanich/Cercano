@@ -25,7 +25,9 @@ func TestSmartRouter_Integration_SelectProvider(t *testing.T) {
 	mockLocal := &mockModelProvider{name: "LocalModel"}
 	mockCloud := &mockModelProvider{name: "CloudModel"}
 
-	smartRouter, err := agent.NewSmartRouter(mockLocal, mockCloud, integrationTestModelName, nil, "prototypes.yaml")
+	smartRouter, err := agent.NewSmartRouter(mockLocal, mockCloud, integrationTestModelName, nil, "prototypes.yaml", func(ctx context.Context, provider, model, apiKey string) (agent.ModelProvider, error) {
+		return &mockModelProvider{name: provider}, nil
+	})
 	if err != nil {
 		t.Fatalf("Failed to create SmartRouter: %v", err)
 	}

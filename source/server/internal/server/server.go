@@ -24,6 +24,14 @@ func (s *Server) ProcessRequest(ctx context.Context, req *proto.ProcessRequestRe
 	fmt.Printf("Received request: %s\n", req.Input)
 
 	agentReq := &agent.Request{Input: req.Input}
+	if req.ProviderConfig != nil {
+		agentReq.ProviderConfig = &agent.ProviderConfig{
+			Provider: req.ProviderConfig.Provider,
+			Model:    req.ProviderConfig.Model,
+			ApiKey:   req.ProviderConfig.ApiKey,
+		}
+	}
+
 	provider, err := s.router.SelectProvider(agentReq)
 	if err != nil {
 		return nil, fmt.Errorf("router error: %w", err)

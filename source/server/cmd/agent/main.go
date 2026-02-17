@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -25,7 +26,9 @@ func main() {
 	// Initialize Agent (formerly Router)
 	// Note: Expects to be run from 'source/server' directory where internal/agent/prototypes.yaml is accessible
 	// I need to make sure the path is correct relative to execution.
-	smartAgent, err := agent.NewSmartRouter(localProvider, cloudProvider, "nomic-embed-text", http.DefaultClient, "internal/agent/prototypes.yaml")
+	smartAgent, err := agent.NewSmartRouter(localProvider, cloudProvider, "nomic-embed-text", http.DefaultClient, "internal/agent/prototypes.yaml", func(ctx context.Context, provider, model, apiKey string) (agent.ModelProvider, error) {
+		return llm.NewCloudModelProvider(ctx, provider, model, apiKey)
+	})
 	if err != nil {
 		log.Fatalf("failed to create agent: %v", err)
 	}

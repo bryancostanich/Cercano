@@ -34,6 +34,9 @@ func (m *mockProvider) Name() string {
 type mockRouter struct{}
 
 func (m *mockRouter) SelectProvider(req *agent.Request) (agent.ModelProvider, error) {
+	if req.ProviderConfig != nil {
+		return &mockProvider{name: req.ProviderConfig.Provider}, nil
+	}
 	return &mockProvider{name: "MockLocal"}, nil
 }
 

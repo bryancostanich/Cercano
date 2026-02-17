@@ -1,4 +1,4 @@
-package router_test
+package agent_test
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"cercano/source/server/internal/router" // Import the router package
+	"cercano/source/server/internal/agent"
 )
 
 const integrationTestModelName = "nomic-embed-text"
@@ -25,7 +25,7 @@ func TestSmartRouter_Integration_SelectProvider(t *testing.T) {
 	mockLocal := &mockModelProvider{name: "LocalModel"}
 	mockCloud := &mockModelProvider{name: "CloudModel"}
 
-	smartRouter, err := router.NewSmartRouter(mockLocal, mockCloud, integrationTestModelName, nil, "prototypes.yaml")
+	smartRouter, err := agent.NewSmartRouter(mockLocal, mockCloud, integrationTestModelName, nil, "prototypes.yaml")
 	if err != nil {
 		t.Fatalf("Failed to create SmartRouter: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestSmartRouter_Integration_SelectProvider(t *testing.T) {
 			t.Logf("--- Testing: %s ---", tc.name)
 			t.Logf("Input: %s", tc.input)
 
-			req := &router.Request{Input: tc.input}
+			req := &agent.Request{Input: tc.input}
 			selectedProvider, err := smartRouter.SelectProvider(req)
 			if err != nil {
 				t.Errorf("SelectProvider returned an error: %v", err)
@@ -111,17 +111,17 @@ func TestSmartRouter_Integration_SelectProvider(t *testing.T) {
 		})
 	}}
 
-// mockModelProvider is a mock implementation of the router.ModelProvider interface for testing.
+// mockModelProvider is a mock implementation of the agent.ModelProvider interface for testing.
 type mockModelProvider struct {
 	name string
 	err  error
 }
 
-func (m *mockModelProvider) Process(ctx context.Context, req *router.Request) (*router.Response, error) {
+func (m *mockModelProvider) Process(ctx context.Context, req *agent.Request) (*agent.Response, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
-	return &router.Response{Output: fmt.Sprintf("Processed by %s: %s", m.name, req.Input)}, nil
+	return &agent.Response{Output: fmt.Sprintf("Processed by %s: %s", m.name, req.Input)}, nil
 }
 
 func (m *mockModelProvider) Name() string {

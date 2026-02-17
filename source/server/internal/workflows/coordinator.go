@@ -1,21 +1,23 @@
-package agent
+package workflows
 
 import (
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"cercano/source/server/internal/capabilities"
 )
 
 // GenerationCoordinator orchestrates the iterative generation and validation of code.
 type GenerationCoordinator struct {
-	generator CodeGenerator
-	validator Validator
+	generator capabilities.CodeGenerator
+	validator capabilities.Validator
 	maxRetries int
 }
 
 // NewGenerationCoordinator creates a new coordinator.
-func NewGenerationCoordinator(gen CodeGenerator, val Validator) *GenerationCoordinator {
+func NewGenerationCoordinator(gen capabilities.CodeGenerator, val capabilities.Validator) *GenerationCoordinator {
 	return &GenerationCoordinator{
 		generator: gen,
 		validator: val,

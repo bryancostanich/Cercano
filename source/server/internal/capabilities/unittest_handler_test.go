@@ -1,4 +1,4 @@
-package agent_test
+package capabilities_test
 
 import (
 	"context"
@@ -6,24 +6,24 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/agent"
-	"cercano/source/server/internal/router"
+	"cercano/source/server/internal/capabilities"
 )
 
 // SpyProvider captures the request for verification.
 type SpyProvider struct {
-	CapturedRequest *router.Request
-	Response        *router.Response
+	CapturedRequest *agent.Request
+	Response        *agent.Response
 	Err             error
 }
 
-func (s *SpyProvider) Process(ctx context.Context, req *router.Request) (*router.Response, error) {
+func (s *SpyProvider) Process(ctx context.Context, req *agent.Request) (*agent.Response, error) {
 	s.CapturedRequest = req
 	if s.Err != nil {
 		return nil, s.Err
 	}
 	// Return a default response if none set, to avoid nil panics
 	if s.Response == nil {
-		return &router.Response{Output: "default spy response"}, nil
+		return &agent.Response{Output: "default spy response"}, nil
 	}
 	return s.Response, nil
 }
@@ -34,7 +34,7 @@ func (s *SpyProvider) Name() string {
 
 func TestUnitTestHandler_Generate_ConstructsPrompt(t *testing.T) {
 	spy := &SpyProvider{}
-	handler := agent.NewUnitTestHandler(spy)
+	handler := capabilities.NewUnitTestHandler(spy)
 
 	inputCode := "func Add(a, b int) int { return a + b }"
 	ctx := context.Background()
@@ -62,7 +62,7 @@ func TestUnitTestHandler_Generate_ConstructsPrompt(t *testing.T) {
 func TestUnitTestHandler_Generate_HandlesError(t *testing.T) {
 	expectedErr := context.DeadlineExceeded
 	spy := &SpyProvider{Err: expectedErr}
-	handler := agent.NewUnitTestHandler(spy)
+	handler := capabilities.NewUnitTestHandler(spy)
 
 	_, err := handler.Generate(context.Background(), "func foo()")
 	
@@ -77,7 +77,7 @@ func TestUnitTestHandler_Generate_HandlesError(t *testing.T) {
 
 func TestUnitTestHandler_Fix_ConstructsPrompt(t *testing.T) {
 	spy := &SpyProvider{}
-	handler := agent.NewUnitTestHandler(spy)
+	handler := capabilities.NewUnitTestHandler(spy)
 
 	inputCode := "func Add(a, b int) { return a + b }"
 	errorMsg := "too many return values"

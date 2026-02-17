@@ -8,7 +8,7 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/llm"
-	"cercano/source/server/internal/router"
+	"cercano/source/server/internal/server"
 	"cercano/source/server/pkg/proto"
 
 	"google.golang.org/grpc"
@@ -22,11 +22,12 @@ func main() {
 	localProvider := llm.NewOllamaProvider("qwen3-coder", "http://localhost:11434")
 	cloudProvider := llm.NewMockProvider("CloudModel")
 
-	// Initialize Router
-	// Note: Expects to be run from 'source' directory where internal/router/prototypes.yaml is accessible
-	smartRouter, err := router.NewSmartRouter(localProvider, cloudProvider, "nomic-embed-text", http.DefaultClient, "internal/router/prototypes.yaml")
+	// Initialize Agent (formerly Router)
+	// Note: Expects to be run from 'source/server' directory where internal/agent/prototypes.yaml is accessible
+	// I need to make sure the path is correct relative to execution.
+	smartAgent, err := agent.NewSmartRouter(localProvider, cloudProvider, "nomic-embed-text", http.DefaultClient, "internal/agent/prototypes.yaml")
 	if err != nil {
-		log.Fatalf("failed to create router: %v", err)
+		log.Fatalf("failed to create agent: %v", err)
 	}
 
 	lis, err := net.Listen("tcp", ":50052")
@@ -35,7 +36,7 @@ func main() {
 	}
 
 	s := grpc.NewServer()
-	proto.RegisterAgentServer(s, agent.NewServer(smartRouter))
+	proto.RegisterAgentServer(s, server.NewServer(smartAgent))
 
 	fmt.Printf("Server listening at %v\n", lis.Addr())
 	if err := s.Serve(lis); err != nil {

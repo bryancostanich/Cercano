@@ -30,18 +30,18 @@ Unify all project code under the `source/` directory and establish the `server/`
 Rename and reorganize internal packages to accurately reflect the "Agent" (logic) and "Coordinator" (executor) roles.
 
 ### Tasks
-- [ ] Task: Formalize 'Agent' domain.
-    - [ ] Create `source/server/internal/agent/` (if not exists or needs move).
-    - [ ] Move/Refactor Router logic into the Agent package as the "brain".
-- [ ] Task: Define 'Workflows' domain (Coordinator).
-    - [ ] Create `source/server/internal/workflows/` (or similar).
-    - [ ] Move the `GenerationCoordinator` into the workflows package.
-- [ ] Task: Update gRPC Service Implementation.
-    - [ ] Ensure the gRPC server in `main.go` (now in `server/`) correctly instantiates the new Agent and Workflow components.
-- [ ] Task: Verify with Unit Tests.
-    - [ ] Update existing tests to match new package names.
-    - [ ] Confirm all tests pass (`go test ./...`).
-- [ ] Task: Conductor - User Manual Verification 'Component Role Clarification' (Protocol in workflow.md)
+- [x] Task: Formalize 'Agent' domain.
+    - [x] Create `source/server/internal/agent/` (if not exists or needs move).
+    - [x] Move/Refactor Router logic into the Agent package as the "brain".
+- [x] Task: Define 'Workflows' domain (Coordinator).
+    - [x] Create `source/server/internal/workflows/` (or similar).
+    - [x] Move the `GenerationCoordinator` into the workflows package.
+- [x] Task: Update gRPC Service Implementation.
+    - [x] Ensure the gRPC server in `main.go` (now in `server/`) correctly instantiates the new Agent and Workflow components.
+- [x] Task: Verify with Unit Tests.
+    - [x] Update existing tests to match new package names.
+    - [x] Confirm all tests pass (`go test ./...`).
+- [x] Task: Conductor - User Manual Verification 'Component Role Clarification' (Protocol in workflow.md)
 
 ## Phase 3: Final Integration and Path Verification
 

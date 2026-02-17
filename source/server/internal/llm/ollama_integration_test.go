@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"cercano/source/server/internal/llm"
-	"cercano/source/server/internal/router"
+	"cercano/source/server/internal/agent"
 )
 
 const integrationTestModelName = "qwen3-coder"
@@ -20,7 +20,7 @@ func TestOllamaProvider_Integration_Process(t *testing.T) {
 	// Assume Ollama is running at localhost:11434
 	provider := llm.NewOllamaProvider(integrationTestModelName, "http://localhost:11434")
 
-	req := &router.Request{
+	req := &agent.Request{
 		Input: "Write a simple Go function that adds two integers.",
 	}
 

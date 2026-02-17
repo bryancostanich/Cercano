@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"cercano/source/server/internal/router"
+	"cercano/source/server/internal/agent"
 )
 
 func TestOllamaProvider_Process(t *testing.T) {
@@ -38,7 +38,7 @@ func TestOllamaProvider_Process(t *testing.T) {
 	// Test Subject
 	provider := NewOllamaProvider("test-model", server.URL)
 
-	req := &router.Request{Input: "Hello"}
+	req := &agent.Request{Input: "Hello"}
 	resp, err := provider.Process(context.Background(), req)
 
 	if err != nil {

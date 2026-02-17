@@ -1,11 +1,11 @@
-package router_test
+package agent_test
 
 import (
 	"net/http"
 	"testing"
 
+	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/llm"
-	"cercano/source/server/internal/router"
 )
 
 func TestRouter_ClassifiesUnitTestGenerationAsLocal(t *testing.T) {
@@ -14,7 +14,7 @@ func TestRouter_ClassifiesUnitTestGenerationAsLocal(t *testing.T) {
 	cloudProvider := llm.NewMockProvider("CloudModel")
 
 	// Initialize Router with real prototypes and embedding model (requires Ollama)
-	r, err := router.NewSmartRouter(localProvider, cloudProvider, "nomic-embed-text", http.DefaultClient, "prototypes.yaml")
+	r, err := agent.NewSmartRouter(localProvider, cloudProvider, "nomic-embed-text", http.DefaultClient, "prototypes.yaml")
 	if err != nil {
 		t.Fatalf("Failed to create router: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestRouter_ClassifiesUnitTestGenerationAsLocal(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		req := &router.Request{Input: tc.input}
+		req := &agent.Request{Input: tc.input}
 		provider, err := r.SelectProvider(req)
 		if err != nil {
 			t.Errorf("Router failed for input '%s': %v", tc.input, err)

@@ -3,7 +3,7 @@ package llm
 import (
 	"context"
 
-	"cercano/source/server/internal/router"
+	"cercano/source/server/internal/agent"
 )
 
 type MockProvider struct {
@@ -14,8 +14,8 @@ func NewMockProvider(name string) *MockProvider {
 	return &MockProvider{ProviderName: name}
 }
 
-func (m *MockProvider) Process(ctx context.Context, req *router.Request) (*router.Response, error) {
-	return &router.Response{Output: "Processed by " + m.ProviderName + " (Mock)"}, nil
+func (m *MockProvider) Process(ctx context.Context, req *agent.Request) (*agent.Response, error) {
+	return &agent.Response{Output: "Processed by " + m.ProviderName + " (Mock)"}, nil
 }
 
 func (m *MockProvider) Name() string {

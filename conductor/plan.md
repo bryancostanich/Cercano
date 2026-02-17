@@ -6,10 +6,7 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 ---
 
-- [x] **Track: Refactor and clean up existing architecture/code structure**
-*Link: [./tracks/refactor_cleanup_20260203/](./tracks/refactor_cleanup_20260203/)*
 
----
 
 - [ ] **Track: Improve the experience of cercano in the IDE with a more full-featured integration**
 *Link: [./tracks/ide_enhancements_20260203/](./tracks/ide_enhancements_20260203/)*

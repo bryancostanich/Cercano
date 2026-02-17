@@ -1,20 +1,20 @@
-package agent
+package capabilities
 
 import (
 	"context"
 	"fmt"
 	"strings"
 
-	"cercano/source/server/internal/router"
+	"cercano/source/server/internal/agent"
 )
 
 // UnitTestHandler handles requests to generate unit tests.
 type UnitTestHandler struct {
-	provider router.ModelProvider
+	provider agent.ModelProvider
 }
 
 // NewUnitTestHandler creates a new UnitTestHandler with the given provider.
-func NewUnitTestHandler(provider router.ModelProvider) *UnitTestHandler {
+func NewUnitTestHandler(provider agent.ModelProvider) *UnitTestHandler {
 	return &UnitTestHandler{provider: provider}
 }
 
@@ -36,7 +36,7 @@ Code:
 `,
 		code) // Note: The original prompt had an extra backtick here, which has been removed.
 
-	req := &router.Request{
+	req := &agent.Request{
 		Input: prompt,
 	}
 
@@ -61,7 +61,7 @@ Error:
 %s
 `, code, errorMsg)
 
-	req := &router.Request{Input: prompt}
+	req := &agent.Request{Input: prompt}
 	resp, err := h.provider.Process(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("failed to fix code: %w", err)

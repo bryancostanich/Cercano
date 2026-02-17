@@ -1,21 +1,21 @@
-package agent
+package server
 
 import (
 	"context"
 	"fmt"
 
-	"cercano/source/server/internal/router"
+	"cercano/source/server/internal/agent"
 	"cercano/source/server/pkg/proto" // Import the generated protobuf package
 )
 
 // Server is the gRPC server for the Agent service.
 type Server struct {
 	proto.UnimplementedAgentServer
-	router router.Router
+	router agent.Router
 }
 
 // NewServer creates a new Agent gRPC server.
-func NewServer(r router.Router) *Server {
+func NewServer(r agent.Router) *Server {
 	return &Server{router: r}
 }
 
@@ -23,19 +23,19 @@ func NewServer(r router.Router) *Server {
 func (s *Server) ProcessRequest(ctx context.Context, req *proto.ProcessRequestRequest) (*proto.ProcessRequestResponse, error) {
 	fmt.Printf("Received request: %s\n", req.Input)
 
-	routerReq := &router.Request{Input: req.Input}
-	provider, err := s.router.SelectProvider(routerReq)
+	agentReq := &agent.Request{Input: req.Input}
+	provider, err := s.router.SelectProvider(agentReq)
 	if err != nil {
 		return nil, fmt.Errorf("router error: %w", err)
 	}
 
-	response, err := provider.Process(ctx, routerReq)
+	response, err := provider.Process(ctx, agentReq)
 	if err != nil {
 		return nil, fmt.Errorf("provider processing error: %w", err)
 	}
 
 	return &proto.ProcessRequestResponse{
 		Output: response.Output,
-	}, nil
+	},
+	nil
 }
-

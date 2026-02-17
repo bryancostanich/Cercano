@@ -1,4 +1,4 @@
-package agent_test
+package capabilities_test
 
 import (
 	"context"
@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/capabilities"
 )
 
 func TestGoTestValidator_Validate(t *testing.T) {
-	v := agent.NewGoTestValidator()
+	v := capabilities.NewGoTestValidator()
 	ctx := context.Background()
 
 	t.Run("ValidCode", func(t *testing.T) {

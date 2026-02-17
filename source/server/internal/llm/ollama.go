@@ -8,7 +8,7 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	"cercano/source/server/internal/router"
+	"cercano/source/server/internal/agent"
 )
 
 type OllamaProvider struct {
@@ -39,7 +39,7 @@ type generateResponse struct {
 	Response string `json:"response"`
 }
 
-func (p *OllamaProvider) Process(ctx context.Context, req *router.Request) (*router.Response, error) {
+func (p *OllamaProvider) Process(ctx context.Context, req *agent.Request) (*agent.Response, error) {
 	url := fmt.Sprintf("%s/api/generate", p.BaseURL)
 
 	payload := generateRequest{
@@ -75,5 +75,5 @@ func (p *OllamaProvider) Process(ctx context.Context, req *router.Request) (*rou
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	return &router.Response{Output: genResp.Response}, nil
+	return &agent.Response{Output: genResp.Response}, nil
 }

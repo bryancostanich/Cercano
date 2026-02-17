@@ -1,4 +1,4 @@
-package agent_test
+package capabilities_test
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/llm"
 )
 
@@ -25,7 +25,7 @@ func TestUnitTestHandler_Integration_GenerateValidCode(t *testing.T) {
 	// Assume Ollama is running at localhost:11434
 	// We use a known small coding model. Ensure this model is pulled in Ollama.
 	provider := llm.NewOllamaProvider(integrationTestModelName, "http://localhost:11434")
-	handler := agent.NewUnitTestHandler(provider)
+	handler := capabilities.NewUnitTestHandler(provider)
 
 	// Input: A simple Go function
 	inputCode := `

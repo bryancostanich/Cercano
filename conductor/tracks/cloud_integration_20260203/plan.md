@@ -8,10 +8,10 @@ This plan outlines the steps to integrate real cloud LLM providers into the Cerc
 Update the gRPC contract to support passing provider configuration and credentials.
 
 ### Tasks
-- [ ] Task: Update `agent.proto`.
-    - [ ] Add `CloudProviderConfig` message (provider type, model, api_key).
-    - [ ] Update `ProcessRequestRequest` to include an optional `CloudProviderConfig`.
-- [ ] Task: Re-generate gRPC stubs (Go & TypeScript).
+- [x] Task: Update `agent.proto`. [5f31211]
+    - [x] Add `CloudProviderConfig` message (provider type, model, api_key).
+    - [x] Update `ProcessRequestRequest` to include an optional `CloudProviderConfig`.
+- [x] Task: Re-generate gRPC stubs (Go & TypeScript). [5f31211]
 - [ ] Task: Implement VS Code Secret Management.
     - [ ] Add commands to set/get Gemini and Anthropic keys using `vscode.SecretStorage`.
     - [ ] Update the Chat Participant to retrieve these keys and include them in the gRPC request.

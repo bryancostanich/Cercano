@@ -11,7 +11,7 @@ Unify all project code under the `source/` directory and establish the `server/`
 - [x] Task: Create new directory structure. [baf1fd6]
     - [x] Create `source/server/`.
     - [x] Create `source/clients/`.
-- [~] Task: Move IDE extensions to `source/clients/`.
+- [x] Task: Move IDE extensions to `source/clients/`. [c48cf73]
     - [x] Move `vscode-extension/` to `source/clients/vscode/`.
     - [x] Move `zed-extension/` to `source/clients/zed/`.
 - [ ] Task: Move core Go code to `source/server/`.

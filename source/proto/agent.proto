@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package agent;
 
-option go_package = "cercano/source/proto";
+option go_package = "cercano/source/server/pkg/proto";
 
 // The Agent service definition.
 service Agent {

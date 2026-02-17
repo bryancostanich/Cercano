@@ -22,7 +22,7 @@ Unify all project code under the `source/` directory and establish the `server/`
 - [x] Task: Update VS Code extension configuration. [7dfb39e]
     - [x] Subtask: Update `package.json` paths, `tsconfig.json`, and `launch.json` to reflect the new location.
     - [x] Subtask: Verify `npm run compile` still works.
-- [ ] Task: Conductor - User Manual Verification 'Directory Restructuring' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Directory Restructuring' (Protocol in workflow.md)
 
 ## Phase 2: Component Role Clarification (Server Refactor)
 

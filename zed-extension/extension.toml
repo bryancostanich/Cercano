@@ -1,7 +1,0 @@
-id = "cercano"
-name = "Cercano"
-version = "0.0.1"
-schema_version = 1
-authors = ["Your Name"]
-description = "Local-first AI assistant integration for Zed"
-repository = "https://github.com/yourusername/cercano"

@@ -25,9 +25,9 @@ Implement the server-side logic to dynamically instantiate cloud providers.
 ### Tasks
 - [x] Task: Integrate `langchaingo`. [813728f]
     - [x] Add `github.com/tmc/langchaingo` to `go.mod`.
-- [ ] Task: Implement `langchaingo` Wrapper.
-    - [ ] Create a `CloudModelProvider` struct that wraps `langchaingo`'s `llms.Model` interface.
-    - [ ] Implement a factory function to create providers (Gemini, Anthropic) based on the gRPC config.
+- [x] Task: Implement `langchaingo` Wrapper. [aabb6a1]
+    - [x] Create a `CloudModelProvider` struct that wraps `langchaingo`'s `llms.Model` interface.
+    - [x] Implement a factory function to create providers (Gemini, Anthropic) based on the gRPC config.
 - [ ] Task: Update Agent Logic.
     - [ ] Update the Router to use the new `CloudModelProvider` when routing to cloud.
 - [ ] Task: Verify with Integration Tests.

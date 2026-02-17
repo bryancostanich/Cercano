@@ -1,6 +1,7 @@
 package agent_test
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -14,7 +15,9 @@ func TestRouter_ClassifiesUnitTestGenerationAsLocal(t *testing.T) {
 	cloudProvider := llm.NewMockProvider("CloudModel")
 
 	// Initialize Router with real prototypes and embedding model (requires Ollama)
-	r, err := agent.NewSmartRouter(localProvider, cloudProvider, "nomic-embed-text", http.DefaultClient, "prototypes.yaml")
+	r, err := agent.NewSmartRouter(localProvider, cloudProvider, "nomic-embed-text", http.DefaultClient, "prototypes.yaml", func(ctx context.Context, provider, model, apiKey string) (agent.ModelProvider, error) {
+		return llm.NewMockProvider(provider), nil
+	})
 	if err != nil {
 		t.Fatalf("Failed to create router: %v", err)
 	}

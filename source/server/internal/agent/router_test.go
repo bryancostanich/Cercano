@@ -81,7 +81,9 @@ cloud_model:
 		Transport: &MockRoundTripper{responses: mockResponses},
 	}
 
-	router, err := NewSmartRouter(mockLocal, mockCloud, "nomic-embed-text", mockClient, tmpFile.Name())
+	router, err := NewSmartRouter(mockLocal, mockCloud, "nomic-embed-text", mockClient, tmpFile.Name(), func(ctx context.Context, provider, model, apiKey string) (ModelProvider, error) {
+		return &MockModelProvider{name: provider}, nil
+	})
 	if err != nil {
 		t.Fatalf("Failed to create SmartRouter: %v", err)
 	}

@@ -1,4 +1,4 @@
-package workflows_test
+package integration_test
 
 import (
 	"context"
@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"cercano/source/server/internal/capabilities"
+	"cercano/source/server/internal/tools"
 	"cercano/source/server/internal/llm"
-	"cercano/source/server/internal/workflows"
+	"cercano/source/server/internal/loop"
 )
 
 // TestSandbox_GenerateAndRunTests verifies the agent can generate passing tests for a simple sandbox project.
@@ -20,13 +20,7 @@ func TestSandbox_GenerateAndRunTests(t *testing.T) {
 
 	// 1. Setup paths
 	wd, _ := os.Getwd()
-	// wd is .../source/server/internal/workflows
-	// We need to go up 4 levels to get to root (source/server/internal/workflows -> server -> source -> root -> test/sandbox)
-	// No, Wait. 
-	// root/source/server/internal/workflows
-	// root/test/sandbox
-	// So ../../../.. is correct.
-	
+	// wd is .../source/server/test/integration
 sandboxDir := filepath.Join(wd, "../../../..", "test", "sandbox")
 targetFile := filepath.Join(sandboxDir, "calculator.go")
 
@@ -42,9 +36,9 @@ targetFile := filepath.Join(sandboxDir, "calculator.go")
 
 	// 3. Initialize Agent Components
 	provider := llm.NewOllamaProvider("qwen3-coder", "http://localhost:11434")
-handler := capabilities.NewUnitTestHandler(provider)
-validator := capabilities.NewGoTestValidator()
-coordinator := workflows.NewGenerationCoordinator(handler, validator)
+	handler := tools.NewUnitTestHandler(provider)
+	validator := tools.NewGoTestValidator()
+	coordinator := loop.NewGenerationCoordinator(handler, validator)
 
 	// 4. Generate and Verify Tests with Self-Correction
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second) // Increased timeout for retries

@@ -30,8 +30,8 @@ Implement the server-side logic to dynamically instantiate cloud providers.
     - [x] Implement a factory function to create providers (Gemini, Anthropic) based on the gRPC config.
 - [x] Task: Update Agent Logic. [7cdf1a6]
     - [x] Update the Router to use the new `CloudModelProvider` when routing to cloud.
-- [ ] Task: Verify with Integration Tests.
-    - [ ] Create a test harness that uses environment variables for real API keys (to be run manually).
+- [x] Task: Verify with Integration Tests. [054f7c7]
+    - [x] Create a test harness that uses environment variables for real API keys (to be run manually).
 - [ ] Task: Conductor - User Manual Verification 'Backend Provider Abstraction' (Protocol in workflow.md)
 
 ## Phase 3: End-to-End Verification

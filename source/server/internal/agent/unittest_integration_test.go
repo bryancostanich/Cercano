@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"cercano/source/internal/agent"
-	"cercano/source/internal/llm"
+	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/llm"
 )
 
 // Use the same model as the other integration tests

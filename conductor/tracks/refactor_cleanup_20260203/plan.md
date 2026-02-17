@@ -16,7 +16,7 @@ Unify all project code under the `source/` directory and establish the `server/`
     - [x] Move `zed-extension/` to `source/clients/zed/`.
 - [x] Task: Move core Go code to `source/server/`. [8a9f6b5]
     - [x] Move existing files from `source/` (except `proto/` and `clients/`) to `source/server/`.
-- [ ] Task: Update Go module and imports.
+- [x] Task: Update Go module and imports.
     - [ ] Update `go.mod` if necessary.
     - [ ] Run `go fmt ./...` and fix import paths across the backend.
 - [ ] Task: Update VS Code extension configuration.

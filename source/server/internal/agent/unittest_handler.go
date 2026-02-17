@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"cercano/source/internal/router"
+	"cercano/source/server/internal/router"
 )
 
 // UnitTestHandler handles requests to generate unit tests.

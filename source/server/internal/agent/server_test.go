@@ -6,8 +6,8 @@ import (
 	"net"
 	"testing"
 
-	"cercano/source/internal/router"
-	"cercano/source/proto" // Import the generated protobuf package
+	"cercano/source/server/internal/router"
+	"cercano/source/server/pkg/proto" // Import the generated protobuf package
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"

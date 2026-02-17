@@ -1,0 +1,62 @@
+# Track Plan: Generalize Agent Capabilities
+
+This plan outlines the refactor to move from a task-specific "Unit Test" handler to a generic, intent-aware agentic architecture.
+
+## Phase 1: Tool & Interface Generalization
+
+### Objective
+Remove hardcoded task logic and rename components to be domain-agnostic.
+
+### Tasks
+- [ ] Task: Generalize `CodeGenerator` interface.
+    - [ ] Update interface to accept `instruction string` and `code string`.
+- [ ] Task: Implement `GenericCodeGenerator`.
+    - [ ] Rename `internal/tools/unittest_handler.go` to `internal/tools/generic_generator.go`.
+    - [ ] Update `Generate` method to use the passed instruction.
+    - [ ] Implement a system prompt wrapper.
+- [ ] Task: Enhance `GoValidator`.
+    - [ ] Rename `internal/tools/validator.go` to `internal/tools/go_validator.go`.
+    - [ ] (Optional) Logic to choose `go test` vs `go build` based on input context.
+- [ ] Task: Verify with unit tests.
+- [ ] Task: Conductor - User Manual Verification 'Tool Generalization' (Protocol in workflow.md)
+
+## Phase 2: Intent Classification
+
+### Objective
+Enable the system to distinguish between "requests that need a loop" and "simple chat".
+
+### Tasks
+- [ ] Task: Define Intent Constants.
+    - [ ] Add `IntentCoding` and `IntentChat` to the `agent` package.
+- [ ] Task: Expand `prototypes.yaml`.
+    - [ ] Add examples for "Coding" (generate, fix, refactor) and "Chat" (explain, summarize, what is).
+- [ ] Task: Implement Intent Detection.
+    - [ ] Add `ClassifyIntent(request)` to the `SmartRouter` or `Agent`.
+- [ ] Task: Verify classification with tests.
+- [ ] Task: Conductor - User Manual Verification 'Intent Classification' (Protocol in workflow.md)
+
+## Phase 3: The `Agent` Orchestrator
+
+### Objective
+Implement the new top-level orchestrator and update the gRPC server.
+
+### Tasks
+- [ ] Task: Create `internal/agent/agent.go`.
+    - [ ] Implement `Agent.ProcessRequest(input, code)`.
+    - [ ] Logic: Route -> Classify Intent -> Choose Strategy (Loop vs Direct).
+- [ ] Task: Update gRPC Server.
+    - [ ] Update `internal/server/server.go` to call the new `Agent` instead of the `Router` directly.
+- [ ] Task: Verify End-to-End.
+    - [ ] Run sandbox tests with generic instructions.
+- [ ] Task: Conductor - User Manual Verification 'Agent Orchestrator' (Protocol in workflow.md)
+
+## Phase 4: Regression & Cleanup
+
+### Objective
+Ensure existing functionality is preserved and old code is removed.
+
+### Tasks
+- [ ] Task: Remove old `UnitTestHandler` references.
+- [ ] Task: Update README and documentation.
+- [ ] Task: Final System Verification.
+- [ ] Task: Conductor - User Manual Verification 'Final Verification' (Protocol in workflow.md)

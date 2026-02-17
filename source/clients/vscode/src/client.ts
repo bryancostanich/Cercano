@@ -1,6 +1,6 @@
 import * as grpc from '@grpc/grpc-js';
 import { AgentClient } from './proto/agent_grpc_pb';
-import { ProcessRequestRequest, ProcessRequestResponse } from './proto/agent_pb';
+import { ProcessRequestRequest, ProcessRequestResponse, CloudProviderConfig } from './proto/agent_pb';
 
 export class CercanoClient {
     private client: AgentClient;
@@ -13,10 +13,18 @@ export class CercanoClient {
         );
     }
 
-    public process(input: string): Promise<string> {
+    public process(input: string, providerConfig?: { provider: string, model: string, apiKey: string }): Promise<string> {
         return new Promise((resolve, reject) => {
             const request = new ProcessRequestRequest();
             request.setInput(input);
+
+            if (providerConfig) {
+                const config = new CloudProviderConfig();
+                config.setProvider(providerConfig.provider);
+                config.setModel(providerConfig.model);
+                config.setApiKey(providerConfig.apiKey);
+                request.setProviderConfig(config);
+            }
 
             // Set a generous deadline (5 minutes) for complex AI tasks and self-correction loops
             const deadline = new Date();

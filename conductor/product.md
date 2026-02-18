@@ -35,7 +35,7 @@ The primary interaction model is a **Sidebar Chat** within the IDE. Developers i
 Here are the refined requirements based on our discussion:
 
 ### Local Model Capabilities:
-*   **Primary Focus** - Generating unit tests for existing functions.
+*   **Primary Focus** - Generic code generation, refactoring, and analysis via an agentic orchestrator.
 *   **Additional capabilities** - Code formatting & linting, commit message generation, dependency analysis, and docstring/comment generation.
 
 ### Smart Router Logic:

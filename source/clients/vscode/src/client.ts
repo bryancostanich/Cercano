@@ -13,17 +13,18 @@ export class CercanoClient {
         );
     }
 
-    public process(input: string, providerConfig?: { provider: string, model: string, apiKey: string }): Promise<string> {
+    public process(input: string, providerConfig?: { provider: string, model: string, apiKey: string }): Promise<ProcessRequestResponse> {
         return new Promise((resolve, reject) => {
             const request = new ProcessRequestRequest();
             request.setInput(input);
 
             if (providerConfig) {
                 const config = new CloudProviderConfig();
-                config.setProvider(providerConfig.provider);
-                config.setModel(providerConfig.model);
-                config.setApiKey(providerConfig.apiKey);
-                request.setProviderConfig(config);
+                const provider = new CloudProviderConfig();
+                provider.setProvider(providerConfig.provider);
+                provider.setModel(providerConfig.model);
+                provider.setApiKey(providerConfig.apiKey);
+                request.setProviderConfig(provider);
             }
 
             // Set a generous deadline (5 minutes) for complex AI tasks and self-correction loops
@@ -36,7 +37,7 @@ export class CercanoClient {
                 if (error) {
                     return reject(error);
                 }
-                resolve(response.getOutput());
+                resolve(response);
             });
         });
     }

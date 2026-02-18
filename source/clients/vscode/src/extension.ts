@@ -74,7 +74,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         console.log('Cercano: Chat request received:', request.prompt);
-        response.progress("Thinking...");
+        response.progress("Routing request...");
         
         // 1. Gather IDE Context
         const editor = vscode.window.activeTextEditor;
@@ -118,12 +118,70 @@ export function activate(context: vscode.ExtensionContext) {
         try {
             // 4. Call gRPC backend
             const result = await client.process(fullPrompt, providerConfig);
-            response.markdown(result);
+            
+            // Show markdown output
+            response.markdown(result.getOutput());
+
+            // 5. Handle File Changes via WorkspaceEdit
+            const fileChanges = result.getFileChangesList();
+            if (fileChanges && fileChanges.length > 0) {
+                const edit = new vscode.WorkspaceEdit();
+                const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
+                for (const change of fileChanges) {
+                    const relativePath = change.getPath();
+                    const content = change.getContent();
+                    const action = change.getAction(); // This is an enum (0=CREATE, 1=UPDATE, 2=DELETE)
+
+                    let fileUri: vscode.Uri;
+                    if (workspaceFolder) {
+                        fileUri = vscode.Uri.file(require('path').join(workspaceFolder, relativePath));
+                    } else {
+                        fileUri = vscode.Uri.file(relativePath);
+                    }
+
+                    if (action === 0) { // CREATE
+                        edit.createFile(fileUri, { ignoreIfExists: true });
+                        edit.insert(fileUri, new vscode.Position(0, 0), content);
+                    } else if (action === 1) { // UPDATE
+                        // For UPDATE, we currently replace the whole file content
+                        // In a more advanced version, we might use diffing or line-based edits.
+                        const document = await vscode.workspace.openTextDocument(fileUri);
+                        const fullRange = new vscode.Range(
+                            document.positionAt(0),
+                            document.positionAt(document.getText().length)
+                        );
+                        edit.replace(fileUri, fullRange, content);
+                    } else if (action === 2) { // DELETE
+                        edit.deleteFile(fileUri);
+                    }
+                }
+
+                response.markdown("\n\n---\n### 📂 Proposed File Changes\nCercano has generated file modifications. Click below to review and apply them.");
+                
+                // Show a button/command to apply the edits with a preview
+                response.button({
+                    command: "cercano.applyChanges",
+                    title: "Apply Changes",
+                    arguments: [edit]
+                });
+            }
+
         } catch (err: any) {
             console.error('Cercano: Error processing request:', err);
             response.markdown(`Error: ${err.message || err}`);
         }
     });
+
+    // Register the command to apply changes with preview
+    context.subscriptions.push(vscode.commands.registerCommand('cercano.applyChanges', async (edit: vscode.WorkspaceEdit) => {
+        const success = await vscode.workspace.applyEdit(edit);
+        if (success) {
+            vscode.window.showInformationMessage("Cercano: Changes applied successfully.");
+        } else {
+            vscode.window.showErrorMessage("Cercano: Failed to apply changes.");
+        }
+    }));
 
     participant.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'icon.svg');
     context.subscriptions.push(participant);

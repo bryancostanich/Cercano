@@ -17,7 +17,7 @@ Remove hardcoded task logic and rename components to be domain-agnostic.
 - [x] Task: Enhance `GoValidator`. [22cf287]
     - [x] Rename `internal/tools/validator.go` to `internal/tools/go_validator.go`.
     - [x] (Optional) Logic to choose `go test` vs `go build` based on input context.
-- [ ] Task: Verify with unit tests.
+- [~] Task: Verify with unit tests.
 - [ ] Task: Conductor - User Manual Verification 'Tool Generalization' (Protocol in workflow.md)
 
 ## Phase 2: Intent Classification

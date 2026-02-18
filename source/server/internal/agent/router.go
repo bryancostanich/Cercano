@@ -37,15 +37,30 @@ type ollamaEmbeddingResponse struct {
 
 // Prototypes represents the categorized example phrases from YAML.
 type Prototypes struct {
-	LocalModel []string `yaml:"local_model"`
-	CloudModel []string `yaml:"cloud_model"`
+	Intents struct {
+		Coding []string `yaml:"coding"`
+		Chat   []string `yaml:"chat"`
+	} `yaml:"intents"`
+	Providers struct {
+		Local []string `yaml:"local"`
+		Cloud []string `yaml:"cloud"`
+	} `yaml:"providers"`
 }
+
+// PrototypeType defines the type of prototype (intent vs provider).
+type PrototypeType string
+
+const (
+	TypeIntent   PrototypeType = "intent"
+	TypeProvider PrototypeType = "provider"
+)
 
 // PrototypeEmbedding stores a phrase and its pre-calculated embedding.
 type PrototypeEmbedding struct {
 	Phrase    string
 	Embedding []float64
 	Category  string
+	Type      PrototypeType
 }
 
 // Intent represents the user's intended task (e.g., coding or chat).
@@ -132,29 +147,37 @@ func NewSmartRouter(local, cloud ModelProvider, embeddingModel string, client *h
 		CloudFactory:       cloudFactory,
 	}
 
-	// Pre-calculate embeddings for all prototypes
-	for _, phrase := range rawPrototypes.LocalModel {
-		embedding, err := sr.GetEmbedding(phrase)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get embedding for local prototype '%s': %w", phrase, err)
+	// Helper to add prototypes
+	addProtos := func(phrases []string, category string, pType PrototypeType) error {
+		for _, phrase := range phrases {
+			embedding, err := sr.GetEmbedding(phrase)
+			if err != nil {
+				return fmt.Errorf("failed to get embedding for prototype '%s': %w", phrase, err)
+			}
+			sr.Prototypes = append(sr.Prototypes, PrototypeEmbedding{
+				Phrase:    phrase,
+				Embedding: embedding,
+				Category:  category,
+				Type:      pType,
+			})
 		}
-		sr.Prototypes = append(sr.Prototypes, PrototypeEmbedding{
-			Phrase:    phrase,
-			Embedding: embedding,
-			Category:  "LocalModel",
-		})
+		return nil
 	}
 
-	for _, phrase := range rawPrototypes.CloudModel {
-		embedding, err := sr.GetEmbedding(phrase)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get embedding for cloud prototype '%s': %w", phrase, err)
-		}
-		sr.Prototypes = append(sr.Prototypes, PrototypeEmbedding{
-			Phrase:    phrase,
-			Embedding: embedding,
-			Category:  "CloudModel",
-		})
+	// Load Intent prototypes
+	if err := addProtos(rawPrototypes.Intents.Coding, "Coding", TypeIntent); err != nil {
+		return nil, err
+	}
+	if err := addProtos(rawPrototypes.Intents.Chat, "Chat", TypeIntent); err != nil {
+		return nil, err
+	}
+
+	// Load Provider prototypes
+	if err := addProtos(rawPrototypes.Providers.Local, "LocalModel", TypeProvider); err != nil {
+		return nil, err
+	}
+	if err := addProtos(rawPrototypes.Providers.Cloud, "CloudModel", TypeProvider); err != nil {
+		return nil, err
 	}
 
 	return sr, nil
@@ -223,6 +246,9 @@ func (sr *SmartRouter) ClassifyIntent(req *Request) (Intent, error) {
 	var maxSimilarity float64 = -1.0
 
 	for _, proto := range sr.Prototypes {
+		if proto.Type != TypeIntent {
+			continue
+		}
 		sim := CosineSimilarity(embedding, proto.Embedding)
 		if sim > maxSimilarity {
 			maxSimilarity = sim
@@ -230,29 +256,18 @@ func (sr *SmartRouter) ClassifyIntent(req *Request) (Intent, error) {
 		}
 	}
 
-	// Map prototype categories to intents
-	var intent Intent
-	if bestCategory == "LocalModel" {
+	// Default to Chat if similarity is low
+	intent := IntentChat
+	if maxSimilarity >= similarityThreshold && bestCategory == "Coding" {
 		intent = IntentCoding
-	} else {
-		intent = IntentChat
 	}
 
-	fmt.Printf("Intent Classification: %s | Category: %s\n", intent, bestCategory)
+	fmt.Printf("Intent Classification: %s | Similarity: %.4f | Category: %s\n", intent, maxSimilarity, bestCategory)
 	return intent, nil
 }
 
 // SelectProvider implements the smart routing algorithm using semantic similarity.
 func (sr *SmartRouter) SelectProvider(req *Request) (ModelProvider, error) {
-	// If the request specifies a cloud provider config, use it directly.
-	if req.ProviderConfig != nil && sr.CloudFactory != nil {
-		fmt.Printf("Router: Using cloud provider from config: %s\n", req.ProviderConfig.Provider)
-		// We use context.Background() here for provider initialization if needed,
-		// or we could pass the request context if we change the interface.
-		// For now, let's use Background.
-		return sr.CloudFactory(context.Background(), req.ProviderConfig.Provider, req.ProviderConfig.Model, req.ProviderConfig.ApiKey)
-	}
-
 	embedding, err := sr.GetEmbedding(req.Input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get embedding for request: %w", err)
@@ -263,6 +278,9 @@ func (sr *SmartRouter) SelectProvider(req *Request) (ModelProvider, error) {
 	var bestPhrase string
 
 	for _, proto := range sr.Prototypes {
+		if proto.Type != TypeProvider {
+			continue
+		}
 		sim := CosineSimilarity(embedding, proto.Embedding)
 		if sim > maxSimilarity {
 			maxSimilarity = sim
@@ -273,15 +291,28 @@ func (sr *SmartRouter) SelectProvider(req *Request) (ModelProvider, error) {
 
 	fmt.Printf("Router Decision: %s | Similarity: %.4f | Closest Prototype: '%s'\n", bestCategory, maxSimilarity, bestPhrase)
 
-	// Fallback logic
+	// Determine final category (handling fallback)
+	finalCategory := bestCategory
 	if maxSimilarity < similarityThreshold {
 		fmt.Printf("Similarity below threshold (%.2f). Defaulting to CloudModel.\n", similarityThreshold)
-		if provider, ok := sr.ModelProviders["CloudModel"]; ok {
+		finalCategory = "CloudModel"
+	}
+
+	// If LocalModel is selected, return the local provider
+	if finalCategory == "LocalModel" {
+		if provider, ok := sr.ModelProviders["LocalModel"]; ok {
 			return provider, nil
 		}
 	}
 
-	if provider, ok := sr.ModelProviders[bestCategory]; ok {
+	// If CloudModel is selected, check if we have a specific config from the client
+	if req.ProviderConfig != nil && sr.CloudFactory != nil {
+		fmt.Printf("Router: Using cloud provider from client config: %s\n", req.ProviderConfig.Provider)
+		return sr.CloudFactory(context.Background(), req.ProviderConfig.Provider, req.ProviderConfig.Model, req.ProviderConfig.ApiKey)
+	}
+
+	// Otherwise use the default cloud provider
+	if provider, ok := sr.ModelProviders["CloudModel"]; ok {
 		return provider, nil
 	}
 

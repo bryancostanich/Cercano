@@ -49,16 +49,16 @@ Implement the user-facing workflow for reviewing and applying code changes using
     - [x] Manually verify that generating a unit test opens the "Refactor Preview" panel rather than just printing text.
 - [x] Task: Conductor - User Manual Verification 'VS Code Safe Apply Integration' (Protocol in workflow.md)
 
-## Phase 4: UI Polish & Feedback
+## Phase 4: UI Polish & Feedback [checkpoint: 88131af]
 
 ### Objective
 Improve the visual feedback and rendering of the assistant's progress and results.
 
 ### Tasks
-- [~] Task: Enhance Markdown Rendering.
-    - [ ] Verify that code blocks returned by the backend are correctly highlighted in the native Chat window.
-- [ ] Task: Implement Detailed Progress Reporting.
-    - [ ] Use `response.progress()` to show specific states: "Routing...", "Generating (Local)...", "Validating...", "Escalating to Cloud...".
-- [ ] Task: Final End-to-End System Test.
-    - [ ] Verify the full flow: User Request -> Local Attempt -> Self-Correction -> Fallback to Cloud -> Refactor Preview -> Apply.
-- [ ] Task: Conductor - User Manual Verification 'UI Polish & Feedback' (Protocol in workflow.md)
+- [x] Task: Enhance Markdown Rendering.
+    - [x] Verify that code blocks returned by the backend are correctly highlighted in the native Chat window.
+- [x] Task: Implement Detailed Progress Reporting.
+    - [x] Use `response.progress()` to show specific states: "Routing...", "Generating (Local)...", "Validating...", "Escalating to Cloud...".
+- [x] Task: Final End-to-End System Test.
+    - [x] Verify the full flow: User Request -> Local Attempt -> Self-Correction -> Fallback to Cloud -> Refactor Preview -> Apply.
+- [x] Task: Conductor - User Manual Verification 'UI Polish & Feedback' (Protocol in workflow.md)

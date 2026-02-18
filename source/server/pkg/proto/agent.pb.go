@@ -21,6 +21,56 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Possible actions for a FileChange.
+type FileAction int32
+
+const (
+	FileAction_CREATE FileAction = 0
+	FileAction_UPDATE FileAction = 1
+	FileAction_DELETE FileAction = 2
+)
+
+// Enum value maps for FileAction.
+var (
+	FileAction_name = map[int32]string{
+		0: "CREATE",
+		1: "UPDATE",
+		2: "DELETE",
+	}
+	FileAction_value = map[string]int32{
+		"CREATE": 0,
+		"UPDATE": 1,
+		"DELETE": 2,
+	}
+)
+
+func (x FileAction) Enum() *FileAction {
+	p := new(FileAction)
+	*p = x
+	return p
+}
+
+func (x FileAction) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (FileAction) Descriptor() protoreflect.EnumDescriptor {
+	return file_agent_proto_enumTypes[0].Descriptor()
+}
+
+func (FileAction) Type() protoreflect.EnumType {
+	return &file_agent_proto_enumTypes[0]
+}
+
+func (x FileAction) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use FileAction.Descriptor instead.
+func (FileAction) EnumDescriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{0}
+}
+
 // The request message for ProcessRequest.
 type ProcessRequestRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
@@ -153,10 +203,12 @@ func (x *CloudProviderConfig) GetApiKey() string {
 
 // The response message for ProcessRequest.
 type ProcessRequestResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Output        string                 `protobuf:"bytes,1,opt,name=output,proto3" json:"output,omitempty"` // AI generated output
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Output          string                 `protobuf:"bytes,1,opt,name=output,proto3" json:"output,omitempty"`                                          // AI generated output
+	FileChanges     []*FileChange          `protobuf:"bytes,2,rep,name=file_changes,json=fileChanges,proto3" json:"file_changes,omitempty"`             // Optional structured file modifications
+	RoutingMetadata *RoutingMetadata       `protobuf:"bytes,3,opt,name=routing_metadata,json=routingMetadata,proto3" json:"routing_metadata,omitempty"` // Optional metadata about the model/routing
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ProcessRequestResponse) Reset() {
@@ -196,6 +248,142 @@ func (x *ProcessRequestResponse) GetOutput() string {
 	return ""
 }
 
+func (x *ProcessRequestResponse) GetFileChanges() []*FileChange {
+	if x != nil {
+		return x.FileChanges
+	}
+	return nil
+}
+
+func (x *ProcessRequestResponse) GetRoutingMetadata() *RoutingMetadata {
+	if x != nil {
+		return x.RoutingMetadata
+	}
+	return nil
+}
+
+// Represents a change to a specific file.
+type FileChange struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`                            // File path (relative to work_dir)
+	Content       string                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`                      // New file content
+	Action        FileAction             `protobuf:"varint,3,opt,name=action,proto3,enum=agent.FileAction" json:"action,omitempty"` // Type of action to perform
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FileChange) Reset() {
+	*x = FileChange{}
+	mi := &file_agent_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FileChange) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FileChange) ProtoMessage() {}
+
+func (x *FileChange) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FileChange.ProtoReflect.Descriptor instead.
+func (*FileChange) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *FileChange) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *FileChange) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *FileChange) GetAction() FileAction {
+	if x != nil {
+		return x.Action
+	}
+	return FileAction_CREATE
+}
+
+// Metadata about the routing and model execution.
+type RoutingMetadata struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ModelName     string                 `protobuf:"bytes,1,opt,name=model_name,json=modelName,proto3" json:"model_name,omitempty"` // Name of the model that processed the request
+	Confidence    float32                `protobuf:"fixed32,2,opt,name=confidence,proto3" json:"confidence,omitempty"`              // Confidence score for the routing decision
+	Escalated     bool                   `protobuf:"varint,3,opt,name=escalated,proto3" json:"escalated,omitempty"`                 // Whether the request was escalated to cloud
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RoutingMetadata) Reset() {
+	*x = RoutingMetadata{}
+	mi := &file_agent_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RoutingMetadata) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RoutingMetadata) ProtoMessage() {}
+
+func (x *RoutingMetadata) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RoutingMetadata.ProtoReflect.Descriptor instead.
+func (*RoutingMetadata) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *RoutingMetadata) GetModelName() string {
+	if x != nil {
+		return x.ModelName
+	}
+	return ""
+}
+
+func (x *RoutingMetadata) GetConfidence() float32 {
+	if x != nil {
+		return x.Confidence
+	}
+	return 0
+}
+
+func (x *RoutingMetadata) GetEscalated() bool {
+	if x != nil {
+		return x.Escalated
+	}
+	return false
+}
+
 var File_agent_proto protoreflect.FileDescriptor
 
 const file_agent_proto_rawDesc = "" +
@@ -209,9 +397,31 @@ const file_agent_proto_rawDesc = "" +
 	"\x13CloudProviderConfig\x12\x1a\n" +
 	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12\x17\n" +
-	"\aapi_key\x18\x03 \x01(\tR\x06apiKey\"0\n" +
+	"\aapi_key\x18\x03 \x01(\tR\x06apiKey\"\xa9\x01\n" +
 	"\x16ProcessRequestResponse\x12\x16\n" +
-	"\x06output\x18\x01 \x01(\tR\x06output2X\n" +
+	"\x06output\x18\x01 \x01(\tR\x06output\x124\n" +
+	"\ffile_changes\x18\x02 \x03(\v2\x11.agent.FileChangeR\vfileChanges\x12A\n" +
+	"\x10routing_metadata\x18\x03 \x01(\v2\x16.agent.RoutingMetadataR\x0froutingMetadata\"e\n" +
+	"\n" +
+	"FileChange\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
+	"\acontent\x18\x02 \x01(\tR\acontent\x12)\n" +
+	"\x06action\x18\x03 \x01(\x0e2\x11.agent.FileActionR\x06action\"n\n" +
+	"\x0fRoutingMetadata\x12\x1d\n" +
+	"\n" +
+	"model_name\x18\x01 \x01(\tR\tmodelName\x12\x1e\n" +
+	"\n" +
+	"confidence\x18\x02 \x01(\x02R\n" +
+	"confidence\x12\x1c\n" +
+	"\tescalated\x18\x03 \x01(\bR\tescalated*0\n" +
+	"\n" +
+	"FileAction\x12\n" +
+	"\n" +
+	"\x06CREATE\x10\x00\x12\n" +
+	"\n" +
+	"\x06UPDATE\x10\x01\x12\n" +
+	"\n" +
+	"\x06DELETE\x10\x022X\n" +
 	"\x05Agent\x12O\n" +
 	"\x0eProcessRequest\x12\x1c.agent.ProcessRequestRequest\x1a\x1d.agent.ProcessRequestResponse\"\x00B!Z\x1fcercano/source/server/pkg/protob\x06proto3"
 
@@ -227,21 +437,28 @@ func file_agent_proto_rawDescGZIP() []byte {
 	return file_agent_proto_rawDescData
 }
 
-var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_agent_proto_goTypes = []any{
-	(*ProcessRequestRequest)(nil),  // 0: agent.ProcessRequestRequest
-	(*CloudProviderConfig)(nil),    // 1: agent.CloudProviderConfig
-	(*ProcessRequestResponse)(nil), // 2: agent.ProcessRequestResponse
+	(FileAction)(0),                // 0: agent.FileAction
+	(*ProcessRequestRequest)(nil),  // 1: agent.ProcessRequestRequest
+	(*CloudProviderConfig)(nil),    // 2: agent.CloudProviderConfig
+	(*ProcessRequestResponse)(nil), // 3: agent.ProcessRequestResponse
+	(*FileChange)(nil),             // 4: agent.FileChange
+	(*RoutingMetadata)(nil),        // 5: agent.RoutingMetadata
 }
 var file_agent_proto_depIdxs = []int32{
-	1, // 0: agent.ProcessRequestRequest.provider_config:type_name -> agent.CloudProviderConfig
-	0, // 1: agent.Agent.ProcessRequest:input_type -> agent.ProcessRequestRequest
-	2, // 2: agent.Agent.ProcessRequest:output_type -> agent.ProcessRequestResponse
-	2, // [2:3] is the sub-list for method output_type
-	1, // [1:2] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	2, // 0: agent.ProcessRequestRequest.provider_config:type_name -> agent.CloudProviderConfig
+	4, // 1: agent.ProcessRequestResponse.file_changes:type_name -> agent.FileChange
+	5, // 2: agent.ProcessRequestResponse.routing_metadata:type_name -> agent.RoutingMetadata
+	0, // 3: agent.FileChange.action:type_name -> agent.FileAction
+	1, // 4: agent.Agent.ProcessRequest:input_type -> agent.ProcessRequestRequest
+	3, // 5: agent.Agent.ProcessRequest:output_type -> agent.ProcessRequestResponse
+	5, // [5:6] is the sub-list for method output_type
+	4, // [4:5] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_agent_proto_init() }
@@ -254,13 +471,14 @@ func file_agent_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_proto_rawDesc), len(file_agent_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   3,
+			NumEnums:      1,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_agent_proto_goTypes,
 		DependencyIndexes: file_agent_proto_depIdxs,
+		EnumInfos:         file_agent_proto_enumTypes,
 		MessageInfos:      file_agent_proto_msgTypes,
 	}.Build()
 	File_agent_proto = out.File

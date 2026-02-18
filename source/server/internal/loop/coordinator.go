@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/tools"
 )
 
@@ -26,12 +27,12 @@ func NewGenerationCoordinator(gen tools.CodeGenerator, val tools.Validator) *Gen
 }
 
 // Coordinate runs the generation loop: Generate -> Write -> Validate -> Fix.
-func (c *GenerationCoordinator) Coordinate(ctx context.Context, instruction string, inputCode string, workDir string, fileName string) (string, error) {
+func (c *GenerationCoordinator) Coordinate(ctx context.Context, instruction string, inputCode string, workDir string, fileName string) (*agent.Response, error) {
 	// 1. Initial Generation
 	fmt.Println(">> Coordinator: Requesting initial code generation...")
 	generatedCode, err := c.generator.Generate(ctx, instruction, inputCode)
 	if err != nil {
-		return "", fmt.Errorf("initial generation failed: %w", err)
+		return nil, fmt.Errorf("initial generation failed: %w", err)
 	}
 	fmt.Println(">> Coordinator: Initial code generated.")
 
@@ -40,7 +41,7 @@ func (c *GenerationCoordinator) Coordinate(ctx context.Context, instruction stri
 		filePath := filepath.Join(workDir, fileName)
 		err = os.WriteFile(filePath, []byte(generatedCode), 0644)
 		if err != nil {
-			return "", fmt.Errorf("failed to write generated code to disk: %w", err)
+			return nil, fmt.Errorf("failed to write generated code to disk: %w", err)
 		}
 
 		// 3. Validate
@@ -49,12 +50,21 @@ func (c *GenerationCoordinator) Coordinate(ctx context.Context, instruction stri
 		if err == nil {
 			// Success!
 			fmt.Println(">> Coordinator: Validation PASSED.")
-			return generatedCode, nil
+			return &agent.Response{
+				Output: generatedCode,
+				FileChanges: []agent.FileChange{
+					{
+						Path:    fileName,
+						Content: generatedCode,
+						Action:  "UPDATE",
+					},
+				},
+			}, nil
 		}
 
 		// 4. If failure, attempt Fix (unless we've hit retry limit)
 		if i == c.maxRetries {
-			return "", fmt.Errorf("failed to generate valid code after %d retries. Last error: %w", c.maxRetries, err)
+			return nil, fmt.Errorf("failed to generate valid code after %d retries. Last error: %w", c.maxRetries, err)
 		}
 
 		fmt.Printf(">> Coordinator: Validation FAILED: %v\n", err)
@@ -62,11 +72,11 @@ func (c *GenerationCoordinator) Coordinate(ctx context.Context, instruction stri
 		
 		fixedCode, fixErr := c.generator.Fix(ctx, generatedCode, err.Error())
 		if fixErr != nil {
-			return "", fmt.Errorf("fix attempt failed: %w (original error: %v)", fixErr, err)
+			return nil, fmt.Errorf("fix attempt failed: %w (original error: %v)", fixErr, err)
 		}
 		generatedCode = fixedCode
 		fmt.Println(">> Coordinator: Agent returned fixed code.")
 	}
 
-	return generatedCode, nil
+	return &agent.Response{Output: generatedCode}, nil
 }

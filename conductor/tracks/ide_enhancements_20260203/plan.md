@@ -8,16 +8,16 @@ This plan outlines the phases and tasks required to transition Cercano into a pr
 Update the communication contract between Client and Server to support structured file changes and explicit routing signals.
 
 ### Tasks
-- [ ] Task: Update `agent.proto`.
-    - [ ] Add `FileChange` message (path, content, action).
-    - [ ] Update `ProcessRequestResponse` to include an optional list of `FileChange`.
-    - [ ] Add `RoutingMetadata` to the response (which model was used, confidence).
-- [ ] Task: Re-generate gRPC stubs.
-    - [ ] Generate Go stubs for the server.
-    - [ ] Generate TypeScript stubs for the VS Code extension.
-- [ ] Task: Update Backend Domain Models.
-    - [ ] Refactor internal response structures to support the new `FileChange` type.
-- [ ] Task: Conductor - User Manual Verification 'Protocol & Data Model Foundation' (Protocol in workflow.md)
+- [x] Task: Update `agent.proto`.
+    - [x] Add `FileChange` message (path, content, action).
+    - [x] Update `ProcessRequestResponse` to include an optional list of `FileChange`.
+    - [x] Add `RoutingMetadata` to the response (which model was used, confidence).
+- [x] Task: Re-generate gRPC stubs.
+    - [x] Generate Go stubs for the server.
+    - [x] Generate TypeScript stubs for the VS Code extension.
+- [x] Task: Update Backend Domain Models.
+    - [x] Refactor internal response structures to support the new `FileChange` type.
+- [~] Task: Conductor - User Manual Verification 'Protocol & Data Model Foundation' (Protocol in workflow.md)
 
 ## Phase 2: Smart Escalation & Routing Logic
 

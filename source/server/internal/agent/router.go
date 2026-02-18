@@ -48,6 +48,14 @@ type PrototypeEmbedding struct {
 	Category  string
 }
 
+// Intent represents the user's intended task (e.g., coding or chat).
+type Intent string
+
+const (
+	IntentCoding Intent = "coding"
+	IntentChat   Intent = "chat"
+)
+
 // Request represents a request to be processed by an AI model.
 type Request struct {
 	Input          string

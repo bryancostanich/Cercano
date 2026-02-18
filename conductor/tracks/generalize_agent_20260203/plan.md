@@ -28,7 +28,7 @@ Enable the system to distinguish between "requests that need a loop" and "simple
 ### Tasks
 - [x] Task: Define Intent Constants. [a126892]
     - [x] Add `IntentCoding` and `IntentChat` to the `agent` package.
-- [ ] Task: Expand `prototypes.yaml`.
+- [~] Task: Expand `prototypes.yaml`.
     - [ ] Add examples for "Coding" (generate, fix, refactor) and "Chat" (explain, summarize, what is).
 - [ ] Task: Implement Intent Detection.
     - [ ] Add `ClassifyIntent(request)` to the `SmartRouter` or `Agent`.

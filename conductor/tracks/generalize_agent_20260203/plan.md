@@ -56,7 +56,7 @@ Implement the new top-level orchestrator and update the gRPC server.
 Ensure existing functionality is preserved and old code is removed.
 
 ### Tasks
-- [~] Task: Remove old `UnitTestHandler` references.
-- [ ] Task: Update README and documentation.
+- [x] Task: Remove old `UnitTestHandler` references. [bedec76]
+- [~] Task: Update README and documentation.
 - [ ] Task: Final System Verification.
 - [ ] Task: Conductor - User Manual Verification 'Final Verification' (Protocol in workflow.md)

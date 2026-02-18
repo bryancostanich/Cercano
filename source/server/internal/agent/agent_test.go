@@ -25,8 +25,8 @@ func (m *mockModelProvider) Process(ctx context.Context, req *Request) (*Respons
 func (m *mockModelProvider) Name() string { return m.name }
 
 type mockCoordinator struct{}
-func (m *mockCoordinator) Coordinate(ctx context.Context, instruction, inputCode, workDir, fileName string) (string, error) {
-	return "coordinated output", nil
+func (m *mockCoordinator) Coordinate(ctx context.Context, instruction, inputCode, workDir, fileName string) (*Response, error) {
+	return &Response{Output: "coordinated output"}, nil
 }
 
 func TestAgent_ProcessRequest_ChatIntent(t *testing.T) {

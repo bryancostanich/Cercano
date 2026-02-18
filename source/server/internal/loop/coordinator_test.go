@@ -50,8 +50,8 @@ func TestGenerationCoordinator_Coordinate_SuccessFirstTime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
-	if result != "generated code" {
-		t.Errorf("expected 'generated code', got '%s'", result)
+	if result.Output != "generated code" {
+		t.Errorf("expected 'generated code', got '%s'", result.Output)
 	}
 }
 
@@ -86,7 +86,7 @@ func TestGenerationCoordinator_Coordinate_FixSuccess(t *testing.T) {
 	if !fixCalled {
 		t.Error("expected Fix to be called")
 	}
-	if result != "fixed code" {
-		t.Errorf("expected 'fixed code', got '%s'", result)
+	if result.Output != "fixed code" {
+		t.Errorf("expected 'fixed code', got '%s'", result.Output)
 	}
 }

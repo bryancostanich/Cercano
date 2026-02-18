@@ -88,7 +88,23 @@ type ProviderConfig struct {
 
 // Response represents a response from an AI model.
 type Response struct {
-	Output string
+	Output          string
+	FileChanges     []FileChange
+	RoutingMetadata RoutingMetadata
+}
+
+// FileChange represents a change to a specific file.
+type FileChange struct {
+	Path    string
+	Content string
+	Action  string // "CREATE", "UPDATE", "DELETE"
+}
+
+// RoutingMetadata contains details about how the request was routed.
+type RoutingMetadata struct {
+	ModelName  string
+	Confidence float64
+	Escalated  bool
 }
 
 // ModelProvider defines the interface for an AI model provider (local or cloud).
@@ -201,9 +217,13 @@ func (sr *SmartRouter) GetEmbedding(text string) ([]float64, error) {
 
 	resp, err := sr.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send request to Ollama API: %w", err)
+		return nil, fmt.Errorf("failed to connect to Ollama API. Is Ollama running? Error: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("embedding model '%s' not found. Please run 'ollama pull %s'", sr.EmbeddingModelName, sr.EmbeddingModelName)
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := ioutil.ReadAll(resp.Body)

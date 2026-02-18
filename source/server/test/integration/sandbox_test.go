@@ -50,5 +50,5 @@ targetFile := filepath.Join(sandboxDir, "calculator.go")
 		t.Fatalf("Generation/Self-Correction failed: %v", err)
 	}
 
-	t.Logf("Successfully generated and verified tests:\n%s", finalCode)
+	t.Logf("Successfully generated and verified tests:\n%s", finalCode.Output)
 }

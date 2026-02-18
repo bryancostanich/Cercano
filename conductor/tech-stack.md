@@ -11,7 +11,7 @@ This document outlines the core technologies used in the project.
 *   **gRPC** - Used for high-performance, contract-first communication between the core Go application and the IDE abstraction layer.
 
 ## 3. IDE Integration
-*   **VS Code API** - Sidebar Chat Interface (Webview).
+*   **VS Code API** - Sidebar Chat Interface (Webview) and WorkspaceEdit API for safe code application.
 *   **Zed Extension API** - Native Rust-based extension (Scaffolded).
 
 ## 4. Other Tools/Libraries

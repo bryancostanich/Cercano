@@ -24,11 +24,12 @@ The MVP will focus on delivering the following critical capabilities:
 *   **Smart Router Model:** An intelligent classifier responsible for analyzing developer requests, determining their complexity and nature, and routing them to the most appropriate "expert" model (local or cloud). This router will also be capable of clarifying user prompts and reformulating them for optimal model performance.
 *   **Local Model Integration:** The system will integrate with readily available, out-of-the-box local models capable of handling common development tasks (e.g., code completion, simple refactoring, code explanation). For the MVP, no custom model training or extensive optimization will be undertaken.
 *   **IDE Integration via gRPC:** The system integrates into IDEs (VS Code, Zed) via a decoupled gRPC interface. This allows developers to interact with the assistant via a Sidebar Chat interface.
-*   **Agentic Self-Correction:** The system includes an iterative loop that automatically validates generated code (e.g., via compilation) and requests fixes from the model if errors are detected.
+*   **Agentic Self-Correction & Escalation:** The system includes an iterative loop that automatically validates generated code (e.g., via compilation) and requests fixes. If local models fail repeatedly, the system automatically escalates the task to a more powerful cloud model.
+*   **Structured Code Application:** The system returns structured file changes, allowing the IDE to present a diff view (Refactor Preview) and apply changes safely with a single click.
 
 ## 5. Interaction Model
 
-The primary interaction model is a **Sidebar Chat** within the IDE. Developers invoke the assistant to generate code or tests, and the system intelligently routes the request and validates the output before presenting it.
+The primary interaction model is a **Sidebar Chat** within the IDE. Developers invoke the assistant to generate code or tests. The system intelligently routes the request, validates the output, and presents any code modifications as a "Safe Apply" action, allowing the user to review changes in a diff view before confirming.
 
 ## Refined MVP Requirements
 

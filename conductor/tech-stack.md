@@ -17,3 +17,6 @@ This document outlines the core technologies used in the project.
 ## 4. Other Tools/Libraries
 *   **Ollama** - Local LLM runtime.
 *   **Qwen3-coder** - Primary local model for code generation.
+*   **langchaingo** - Model-agnostic abstraction for LLM providers.
+*   **Google Gemini** - Supported cloud LLM provider.
+*   **Anthropic Claude** - Supported cloud LLM provider.

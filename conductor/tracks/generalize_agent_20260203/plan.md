@@ -14,9 +14,9 @@ Remove hardcoded task logic and rename components to be domain-agnostic.
     - [x] Rename `internal/tools/unittest_handler.go` to `internal/tools/generic_generator.go`.
     - [x] Update `Generate` method to use the passed instruction.
     - [x] Implement a system prompt wrapper.
-- [ ] Task: Enhance `GoValidator`.
-    - [ ] Rename `internal/tools/validator.go` to `internal/tools/go_validator.go`.
-    - [ ] (Optional) Logic to choose `go test` vs `go build` based on input context.
+- [x] Task: Enhance `GoValidator`. [22cf287]
+    - [x] Rename `internal/tools/validator.go` to `internal/tools/go_validator.go`.
+    - [x] (Optional) Logic to choose `go test` vs `go build` based on input context.
 - [ ] Task: Verify with unit tests.
 - [ ] Task: Conductor - User Manual Verification 'Tool Generalization' (Protocol in workflow.md)
 

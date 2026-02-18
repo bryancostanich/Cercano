@@ -40,7 +40,7 @@ Implement the server-side logic to dynamically instantiate cloud providers.
 Verify that the full loop from VS Code to Cloud LLM works with real keys.
 
 ### Tasks
-- [ ] Task: Full Loop Test - Google Gemini.
+- [x] Task: Full Loop Test - Google Gemini. [29c7966]
     - [ ] Configure Gemini key in VS Code.
     - [ ] Send request and verify response from Gemini.
 - [ ] Task: Full Loop Test - Anthropic Claude.

@@ -36,7 +36,7 @@ targetFile := filepath.Join(sandboxDir, "calculator.go")
 
 	// 3. Initialize Agent Components
 	provider := llm.NewOllamaProvider("qwen3-coder", "http://localhost:11434")
-	handler := tools.NewUnitTestHandler(provider)
+	handler := tools.NewGenericGenerator(provider)
 	validator := tools.NewGoTestValidator()
 	coordinator := loop.NewGenerationCoordinator(handler, validator)
 

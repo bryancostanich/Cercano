@@ -50,6 +50,63 @@ func (m *MockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 	return nil, fmt.Errorf("no mock response for body: %s", string(body))
 }
 
+func TestSmartRouter_ClassifyIntent(t *testing.T) {
+	// Setup same router as above
+	protoContent := `
+local_model:
+  - "generate code"
+cloud_model:
+  - "explain this"
+`
+	tmpFile, err := os.CreateTemp("", "prototypes*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Write([]byte(protoContent))
+	tmpFile.Close()
+
+	mockResponses := map[string]string{
+		"generate code": `{"embedding": [1.0, 0.0]}`,
+		"explain this":  `{"embedding": [0.0, 1.0]}`,
+	}
+	mockClient := &http.Client{
+		Transport: &MockRoundTripper{responses: mockResponses},
+	}
+
+	router, _ := NewSmartRouter(nil, nil, "nomic-embed-text", mockClient, tmpFile.Name(), nil)
+
+	tests := []struct {
+		input          string
+		expectedIntent Intent
+		mockResponse   string
+	}{
+		{
+			input:          "write me some code",
+			expectedIntent: IntentCoding,
+			mockResponse:   `{"embedding": [0.9, 0.1]}`,
+		},
+		{
+			input:          "what is life?",
+			expectedIntent: IntentChat,
+			mockResponse:   `{"embedding": [0.1, 0.9]}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			mockResponses[tt.input] = tt.mockResponse
+			intent, err := router.ClassifyIntent(&Request{Input: tt.input})
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+			if intent != tt.expectedIntent {
+				t.Errorf("Expected %s, got %s", tt.expectedIntent, intent)
+			}
+		})
+	}
+}
+
 func TestSmartRouter_SelectProvider(t *testing.T) {
 	// Create a temporary prototypes file
 	protoContent := `

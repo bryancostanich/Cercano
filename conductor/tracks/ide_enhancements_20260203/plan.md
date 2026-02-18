@@ -2,7 +2,7 @@
 
 This plan outlines the phases and tasks required to transition Cercano into a proactive assistant with structured file edits and smart model escalation.
 
-## Phase 1: Protocol & Data Model Foundation
+## Phase 1: Protocol & Data Model Foundation [checkpoint: a564092]
 
 ### Objective
 Update the communication contract between Client and Server to support structured file changes and explicit routing signals.
@@ -17,7 +17,7 @@ Update the communication contract between Client and Server to support structure
     - [x] Generate TypeScript stubs for the VS Code extension.
 - [x] Task: Update Backend Domain Models.
     - [x] Refactor internal response structures to support the new `FileChange` type.
-- [~] Task: Conductor - User Manual Verification 'Protocol & Data Model Foundation' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Protocol & Data Model Foundation' (Protocol in workflow.md)
 
 ## Phase 2: Smart Escalation & Routing Logic
 

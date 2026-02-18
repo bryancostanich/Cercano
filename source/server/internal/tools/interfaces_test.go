@@ -8,11 +8,11 @@ import (
 
 func TestCodeGenerator_Generate_Signature(t *testing.T) {
 	// Just verify compilation of the signature
-	var gen tools.CodeGenerator = (*tools.UnitTestHandler)(nil)
+	var gen tools.CodeGenerator = (*tools.GenericGenerator)(nil)
 	_ = gen
 }
 
 func TestInterfaces(t *testing.T) {
-	// Verify UnitTestHandler implements CodeGenerator
-	var _ tools.CodeGenerator = (*tools.UnitTestHandler)(nil)
+	// Verify GenericGenerator implements CodeGenerator
+	var _ tools.CodeGenerator = (*tools.GenericGenerator)(nil)
 }

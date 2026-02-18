@@ -117,6 +117,7 @@ type ModelProvider interface {
 type Router interface {
 	SelectProvider(req *Request) (ModelProvider, error)
 	ClassifyIntent(req *Request) (Intent, error)
+	GetModelProviders() map[string]ModelProvider
 }
 
 // CloudFactory defines a function that creates a Cloud Model Provider.
@@ -132,9 +133,14 @@ const (
 type SmartRouter struct {
 	ModelProviders     map[string]ModelProvider
 	EmbeddingModelName string
-	Prototypes         []PrototypeEmbedding
+	IntentPrototypes   []PrototypeEmbedding
+	ProviderPrototypes []PrototypeEmbedding
 	httpClient         *http.Client
 	CloudFactory       CloudFactory
+}
+
+func (sr *SmartRouter) GetModelProviders() map[string]ModelProvider {
+	return sr.ModelProviders
 }
 
 // NewSmartRouter creates a new SmartRouter, loads prototypes, and pre-calculates their embeddings.
@@ -163,38 +169,49 @@ func NewSmartRouter(local, cloud ModelProvider, embeddingModel string, client *h
 		CloudFactory:       cloudFactory,
 	}
 
-	// Helper to add prototypes
-	addProtos := func(phrases []string, category string, pType PrototypeType) error {
+	// Helper to pre-calculate embeddings
+	getEmbeds := func(phrases []string, category string, pType PrototypeType) ([]PrototypeEmbedding, error) {
+		var embeds []PrototypeEmbedding
 		for _, phrase := range phrases {
 			embedding, err := sr.GetEmbedding(phrase)
 			if err != nil {
-				return fmt.Errorf("failed to get embedding for prototype '%s': %w", phrase, err)
+				return nil, fmt.Errorf("failed to get embedding for prototype '%s': %w", phrase, err)
 			}
-			sr.Prototypes = append(sr.Prototypes, PrototypeEmbedding{
+			embeds = append(embeds, PrototypeEmbedding{
 				Phrase:    phrase,
 				Embedding: embedding,
 				Category:  category,
 				Type:      pType,
 			})
 		}
-		return nil
+		return embeds, nil
 	}
 
 	// Load Intent prototypes
-	if err := addProtos(rawPrototypes.Intents.Coding, "Coding", TypeIntent); err != nil {
+	intentCoding, err := getEmbeds(rawPrototypes.Intents.Coding, "Intent:Coding", TypeIntent)
+	if err != nil {
 		return nil, err
 	}
-	if err := addProtos(rawPrototypes.Intents.Chat, "Chat", TypeIntent); err != nil {
+	sr.IntentPrototypes = append(sr.IntentPrototypes, intentCoding...)
+
+	intentChat, err := getEmbeds(rawPrototypes.Intents.Chat, "Intent:Chat", TypeIntent)
+	if err != nil {
 		return nil, err
 	}
+	sr.IntentPrototypes = append(sr.IntentPrototypes, intentChat...)
 
 	// Load Provider prototypes
-	if err := addProtos(rawPrototypes.Providers.Local, "LocalModel", TypeProvider); err != nil {
+	providerLocal, err := getEmbeds(rawPrototypes.Providers.Local, "Provider:Local", TypeProvider)
+	if err != nil {
 		return nil, err
 	}
-	if err := addProtos(rawPrototypes.Providers.Cloud, "CloudModel", TypeProvider); err != nil {
+	sr.ProviderPrototypes = append(sr.ProviderPrototypes, providerLocal...)
+
+	providerCloud, err := getEmbeds(rawPrototypes.Providers.Cloud, "Provider:Cloud", TypeProvider)
+	if err != nil {
 		return nil, err
 	}
+	sr.ProviderPrototypes = append(sr.ProviderPrototypes, providerCloud...)
 
 	return sr, nil
 }
@@ -265,10 +282,7 @@ func (sr *SmartRouter) ClassifyIntent(req *Request) (Intent, error) {
 	var bestCategory string
 	var maxSimilarity float64 = -1.0
 
-	for _, proto := range sr.Prototypes {
-		if proto.Type != TypeIntent {
-			continue
-		}
+	for _, proto := range sr.IntentPrototypes {
 		sim := CosineSimilarity(embedding, proto.Embedding)
 		if sim > maxSimilarity {
 			maxSimilarity = sim
@@ -278,7 +292,7 @@ func (sr *SmartRouter) ClassifyIntent(req *Request) (Intent, error) {
 
 	// Default to Chat if similarity is low
 	intent := IntentChat
-	if maxSimilarity >= similarityThreshold && bestCategory == "Coding" {
+	if maxSimilarity >= similarityThreshold && bestCategory == "Intent:Coding" {
 		intent = IntentCoding
 	}
 
@@ -297,10 +311,7 @@ func (sr *SmartRouter) SelectProvider(req *Request) (ModelProvider, error) {
 	var maxSimilarity float64 = -1.0
 	var bestPhrase string
 
-	for _, proto := range sr.Prototypes {
-		if proto.Type != TypeProvider {
-			continue
-		}
+	for _, proto := range sr.ProviderPrototypes {
 		sim := CosineSimilarity(embedding, proto.Embedding)
 		if sim > maxSimilarity {
 			maxSimilarity = sim
@@ -315,11 +326,11 @@ func (sr *SmartRouter) SelectProvider(req *Request) (ModelProvider, error) {
 	finalCategory := bestCategory
 	if maxSimilarity < similarityThreshold {
 		fmt.Printf("Similarity below threshold (%.2f). Defaulting to CloudModel.\n", similarityThreshold)
-		finalCategory = "CloudModel"
+		finalCategory = "Provider:Cloud"
 	}
 
 	// If LocalModel is selected, return the local provider
-	if finalCategory == "LocalModel" {
+	if finalCategory == "Provider:Local" {
 		if provider, ok := sr.ModelProviders["LocalModel"]; ok {
 			return provider, nil
 		}

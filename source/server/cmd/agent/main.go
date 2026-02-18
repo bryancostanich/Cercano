@@ -56,9 +56,13 @@ func main() {
 	localProvider := llm.NewOllamaProvider(localModel, ollamaURL)
 	cloudProvider := llm.NewMockProvider("CloudModel")
 
-	handler := tools.NewGenericGenerator(localProvider)
+	localHandler := tools.NewGenericGenerator(localProvider)
+	// TODO: Create a real CloudHandler when cloud integration is done.
+	// For now, we reuse the localHandler or pass the mock.
+	cloudHandler := tools.NewGenericGenerator(cloudProvider) 
+
 	validator := tools.NewGoValidator()
-	coordinator := loop.NewGenerationCoordinator(handler, validator)
+	coordinator := loop.NewGenerationCoordinator(localHandler, cloudHandler, validator)
 
 	smartRouter, err := agent.NewSmartRouter(localProvider, cloudProvider, embeddingModel, http.DefaultClient, "internal/agent/prototypes.yaml", func(ctx context.Context, provider, model, apiKey string) (agent.ModelProvider, error) {
 		return llm.NewCloudModelProvider(ctx, provider, model, apiKey)

@@ -46,9 +46,9 @@ Implement the new top-level orchestrator and update the gRPC server.
     - [x] Logic: Route -> Classify Intent -> Choose Strategy (Loop vs Direct).
 - [x] Task: Update gRPC Server. [45167cd]
     - [x] Update `internal/server/server.go` to call the new `Agent` instead of the `Router` directly.
-- [~] Task: Verify End-to-End.
-    - [ ] Run sandbox tests with generic instructions.
-- [ ] Task: Conductor - User Manual Verification 'Agent Orchestrator' (Protocol in workflow.md)
+- [x] Task: Verify End-to-End. [2bf69b8]
+    - [x] Run sandbox tests with generic instructions.
+- [~] Task: Conductor - User Manual Verification 'Agent Orchestrator' (Protocol in workflow.md)
 
 ## Phase 4: Regression & Cleanup
 

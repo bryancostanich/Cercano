@@ -1,0 +1,64 @@
+# Cercano
+
+Cercano is a local-first, AI development experience that provides a hybrid local/cloud AI development experience. Enabling development tasks to use a local LLM first approach and then fall back to cloud models when the task is either unsuited for local models, or the local model begins to spin its wheels. Potentailly providing a faster, more efficient, and cost-effective workflow for developers.
+
+By combining the speed of local models with the power of cloud-based AI, Cercano creates a "Mixture of Experts" (MoE) architecture that intelligently routes tasks to the most appropriate model.
+
+## Key Features
+
+- **Smart Router** - An intelligent classifier that determines whether a request can be handled locally (faster, no cost) or requires a cloud model (higher capability).
+- **Local-First Architecture** - Utilizes [Ollama](https://ollama.com/) to run powerful open-source models (like qwen3-coder, GLM4.7-Flash, etc.) locally on your machine.
+- **Cloud Fallback** - Seamlessly integrates with Google Gemini and Anthropic Claude for complex tasks that exceed local model capabilities.
+- **Agentic Self-Correction** - An iterative loop that automatically validates generated code (e.g., via compilation) and requests fixes if errors are detected.
+- **IDE Integration** - Decoupled gRPC-based architecture allows for integration into modern IDEs like VS Code and Zed.
+
+## Architecture
+
+Cercano is built as a decoupled system:
+
+1. **Core Agent (Go)** - The heart of the system, written in Go. It handles model routing, agentic loops, and provides a gRPC interface.
+2. **Smart Router** - Uses semantic classification (via embeddings) to disambiguate user requests and optimize prompt delivery.
+3. **IDE Clients:**
+    - **VS Code** - A TypeScript-based extension providing a Sidebar Chat interface.
+    - **Zed** - A native Rust-based extension.
+4. **Communication** - High-performance gRPC protocol for inter-process communication between the IDE and the Core Agent.
+
+## Project Structure
+
+- `source/server/`: The core Go-based AI agent and gRPC server.
+- `source/clients/`: IDE-specific extensions.
+    - `vscode/`: VS Code extension (TypeScript).
+    - `zed/`: Zed extension (Rust).
+- `source/proto/`: Protocol Buffer definitions for gRPC.
+- `test/`: Integration and sandbox tests.
+- `conductor/`: Product definitions, tech stack, and project planning documents.
+
+## Tech Stack
+
+- **Backend** - Go (Golang)
+- **Local LLM Runtime** - Ollama (qwen3-coder, nomic-embed-text)
+- **Cloud LLMs** - Google Gemini, Anthropic Claude
+- **Communication** - gRPC
+- **Frontend/Clients** - TypeScript (VS Code), Rust (Zed)
+
+## Getting Started
+
+Detailed setup instructions for the core agent, including prerequisites like Go and Ollama, can be found in the [Server README](source/server/README.md).
+
+### Quick Start (Server)
+
+1. Ensure you have **Go** and **Ollama** installed.
+2. Clone the repository and navigate to the `source/server` directory.
+3. Build the agent:
+   ```bash
+   cd source/server
+   go build -o bin/agent ./cmd/agent
+   ```
+4. Run the agent:
+   ```bash
+   go run cmd/agent/main.go
+   ```
+
+## Development
+
+Cercano is in active development. For detailed information on the project's goals and technical decisions, refer to the documents in the `conductor/` directory.

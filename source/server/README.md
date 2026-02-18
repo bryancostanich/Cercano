@@ -93,7 +93,8 @@ While the agent is running in one terminal, you can test its gRPC endpoint using
 ## Project Structure
 
 *   `source/cmd/agent/`: Contains the main application entry point.
-*   `source/internal/agent/`: Contains the gRPC server implementation.
-*   `source/internal/router/`: Contains the smart routing logic, including the interfaces for model providers, embedding-based classification, and Ollama integration.
-*   `source/proto/`: Contains the Protocol Buffer definitions (`.proto` files) and generated Go code.
-*   `source/internal/router/prototypes.yaml`: YAML file defining example phrases for semantic routing categories.
+*   `source/internal/agent/`: Contains the gRPC server implementation, Agent orchestrator, and smart router.
+*   `source/internal/llm/`: Contains model provider implementations (Ollama, Cloud/LangChainGo).
+*   `source/internal/loop/`: Contains the iterative coordinator loop for agentic tasks.
+*   `source/internal/tools/`: Contains code generation and validation tools.
+*   `source/internal/agent/prototypes.yaml`: YAML file defining example phrases for semantic routing and intent classification.

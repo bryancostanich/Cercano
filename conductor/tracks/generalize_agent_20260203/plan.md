@@ -26,8 +26,8 @@ Remove hardcoded task logic and rename components to be domain-agnostic.
 Enable the system to distinguish between "requests that need a loop" and "simple chat".
 
 ### Tasks
-- [ ] Task: Define Intent Constants.
-    - [ ] Add `IntentCoding` and `IntentChat` to the `agent` package.
+- [x] Task: Define Intent Constants. [a126892]
+    - [x] Add `IntentCoding` and `IntentChat` to the `agent` package.
 - [ ] Task: Expand `prototypes.yaml`.
     - [ ] Add examples for "Coding" (generate, fix, refactor) and "Chat" (explain, summarize, what is).
 - [ ] Task: Implement Intent Detection.

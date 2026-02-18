@@ -38,7 +38,7 @@ targetFile := filepath.Join(sandboxDir, "calculator.go")
 	provider := llm.NewOllamaProvider("qwen3-coder", "http://localhost:11434")
 	handler := tools.NewGenericGenerator(provider)
 	validator := tools.NewGoValidator()
-	coordinator := loop.NewGenerationCoordinator(handler, validator)
+	coordinator := loop.NewGenerationCoordinator(handler, handler, validator)
 
 	// 4. Generate and Verify Tests with Self-Correction
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second) // Increased timeout for retries

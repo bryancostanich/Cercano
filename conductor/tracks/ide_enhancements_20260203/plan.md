@@ -25,13 +25,13 @@ Update the communication contract between Client and Server to support structure
 Implement the "intelligence" that decides when to use the Local Model vs. the Cloud Model (Mock).
 
 ### Tasks
-- [ ] Task: Enhance Router Classification.
-    - [ ] Red phase: Write tests for "High Complexity" prompt detection.
-    - [ ] Green phase: Update Router prototypes and threshold logic to escalate complex tasks.
-- [ ] Task: Implement Automatic Fallback in Coordinator.
-    - [ ] Red phase: Write tests for the `GenerationCoordinator` where it fails twice locally and succeeds on the 3rd attempt via Cloud.
-    - [ ] Green phase: Update `Coordinate` method to track attempts and switch providers upon threshold breach.
-- [ ] Task: Handle Explicit 'Cloud' Requests.
+- [x] Task: Enhance Router Classification. [checkpoint: ff89e1a]
+    - [x] Red phase: Write tests for "High Complexity" prompt detection.
+    - [x] Green phase: Update Router prototypes and threshold logic to escalate complex tasks.
+- [x] Task: Implement Automatic Fallback in Coordinator. [checkpoint: ff89e1a]
+    - [x] Red phase: Write tests for the `GenerationCoordinator` where it fails twice locally and succeeds on the 3rd attempt via Cloud.
+    - [x] Green phase: Update `Coordinate` method to track attempts and switch providers upon threshold breach.
+- [~] Task: Handle Explicit 'Cloud' Requests.
     - [ ] Update Agent logic to detect keywords like "use cloud" and override routing.
 - [ ] Task: Conductor - User Manual Verification 'Smart Escalation & Routing Logic' (Protocol in workflow.md)
 

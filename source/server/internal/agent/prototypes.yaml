@@ -14,6 +14,8 @@ intents:
     - "Fix the bug in this function"
     - "Add a new field to the struct"
     - "Implement the interface"
+    - "Implement a complex raft consensus algorithm from scratch"
+    - "Refactor this massive monolithic service into a distributed system with high availability"
 
   chat:
     - "Explain what this function does"
@@ -48,6 +50,8 @@ providers:
     - "Organize imports in 'main.go'."
 
   cloud:
+    - "Implement a complex raft consensus algorithm from scratch"
+    - "Refactor this massive monolithic service into a distributed system with high availability"
     - "How do I implement a distributed rate limiter using Redis?"
     - "What are the pros and cons of using Microservices vs Monolith?"
     - "Explain the Raft consensus algorithm."

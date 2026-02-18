@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // Coordinator defines the interface for the iterative generation loop.
@@ -36,6 +37,14 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 	provider, err := a.router.SelectProvider(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to select provider: %w", err)
+	}
+
+	// Explicit override: If user says "use cloud", force CloudModel
+	if strings.Contains(strings.ToLower(req.Input), "use cloud") {
+		fmt.Println("Agent: Explicit 'use cloud' detected. Overriding routing to CloudModel.")
+		if cloud, ok := a.router.GetModelProviders()["CloudModel"]; ok {
+			provider = cloud
+		}
 	}
 
 	// 3. Execute Strategy

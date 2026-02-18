@@ -25,11 +25,12 @@ func TestRouter_ClassifiesUnitTestGenerationAsLocal(t *testing.T) {
 	testCases := []struct {
 		input          string
 		expectedSource string
+		expectedIntent agent.Intent
 	}{
-		{"Generate unit tests for this function", "LocalModel"},
-		{"Write a table driven test for router.go", "LocalModel"},
-		{"Create a test file for the server package", "LocalModel"},
-		{"Explain how black holes work", "CloudModel"}, // Control case
+		{"Generate unit tests for this function", "LocalModel", agent.IntentCoding},
+		{"Write a table driven test for router.go", "LocalModel", agent.IntentCoding},
+		{"Create a test file for the server package", "LocalModel", agent.IntentCoding},
+		{"Explain how black holes work", "CloudModel", agent.IntentChat}, // Control case
 	}
 
 	for _, tc := range testCases {
@@ -42,6 +43,15 @@ func TestRouter_ClassifiesUnitTestGenerationAsLocal(t *testing.T) {
 
 		if provider.Name() != tc.expectedSource {
 			t.Errorf("Input: '%s'\nExpected: %s\nGot: %s", tc.input, tc.expectedSource, provider.Name())
+		}
+
+		intent, err := r.ClassifyIntent(req)
+		if err != nil {
+			t.Errorf("ClassifyIntent failed for input '%s': %v", tc.input, err)
+			continue
+		}
+		if intent != tc.expectedIntent {
+			t.Errorf("Input: '%s'\nExpected Intent: %s\nGot Intent: %s", tc.input, tc.expectedIntent, intent)
 		}
 	}
 }

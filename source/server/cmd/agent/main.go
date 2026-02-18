@@ -9,7 +9,9 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/loop"
 	"cercano/source/server/internal/server"
+	"cercano/source/server/internal/tools"
 	"cercano/source/server/pkg/proto"
 
 	"google.golang.org/grpc"
@@ -22,6 +24,11 @@ func main() {
 	// TODO: Make configuration loadable
 	localProvider := llm.NewOllamaProvider("qwen3-coder", "http://localhost:11434")
 	cloudProvider := llm.NewMockProvider("CloudModel")
+
+	handler := tools.NewGenericGenerator(localProvider)
+	validator := tools.NewGoTestValidator()
+	coordinator := loop.NewGenerationCoordinator(handler, validator)
+	_ = coordinator // Will be used by the Agent orchestrator soon
 
 	// Initialize Agent (formerly Router)
 	// Note: Expects to be run from 'source/server' directory where internal/agent/prototypes.yaml is accessible

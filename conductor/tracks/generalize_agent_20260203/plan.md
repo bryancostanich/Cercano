@@ -57,6 +57,6 @@ Ensure existing functionality is preserved and old code is removed.
 
 ### Tasks
 - [x] Task: Remove old `UnitTestHandler` references. [bedec76]
-- [~] Task: Update README and documentation.
-- [ ] Task: Final System Verification.
+- [x] Task: Update README and documentation. [9def773]
+- [~] Task: Final System Verification.
 - [ ] Task: Conductor - User Manual Verification 'Final Verification' (Protocol in workflow.md)

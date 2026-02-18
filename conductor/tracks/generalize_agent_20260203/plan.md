@@ -2,7 +2,7 @@
 
 This plan outlines the refactor to move from a task-specific "Unit Test" handler to a generic, intent-aware agentic architecture.
 
-## Phase 1: Tool & Interface Generalization
+## Phase 1: Tool & Interface Generalization [checkpoint: bc1f444]
 
 ### Objective
 Remove hardcoded task logic and rename components to be domain-agnostic.
@@ -18,7 +18,7 @@ Remove hardcoded task logic and rename components to be domain-agnostic.
     - [x] Rename `internal/tools/validator.go` to `internal/tools/go_validator.go`.
     - [x] (Optional) Logic to choose `go test` vs `go build` based on input context.
 - [x] Task: Verify with unit tests. [761afbe]
-- [~] Task: Conductor - User Manual Verification 'Tool Generalization' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Tool Generalization' (Protocol in workflow.md) [4f0a65c]
 
 ## Phase 2: Intent Classification
 

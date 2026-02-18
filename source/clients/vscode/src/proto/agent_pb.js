@@ -120,7 +120,9 @@ proto.agent.ProcessRequestRequest.prototype.toObject = function(opt_includeInsta
 proto.agent.ProcessRequestRequest.toObject = function(includeInstance, msg) {
   var f, obj = {
     input: jspb.Message.getFieldWithDefault(msg, 1, ""),
-    providerConfig: (f = msg.getProviderConfig()) && proto.agent.CloudProviderConfig.toObject(includeInstance, f)
+    providerConfig: (f = msg.getProviderConfig()) && proto.agent.CloudProviderConfig.toObject(includeInstance, f),
+    workDir: jspb.Message.getFieldWithDefault(msg, 3, ""),
+    fileName: jspb.Message.getFieldWithDefault(msg, 4, "")
   };
 
   if (includeInstance) {
@@ -166,6 +168,14 @@ proto.agent.ProcessRequestRequest.deserializeBinaryFromReader = function(msg, re
       reader.readMessage(value,proto.agent.CloudProviderConfig.deserializeBinaryFromReader);
       msg.setProviderConfig(value);
       break;
+    case 3:
+      var value = /** @type {string} */ (reader.readString());
+      msg.setWorkDir(value);
+      break;
+    case 4:
+      var value = /** @type {string} */ (reader.readString());
+      msg.setFileName(value);
+      break;
     default:
       reader.skipField();
       break;
@@ -208,6 +218,20 @@ proto.agent.ProcessRequestRequest.serializeBinaryToWriter = function(message, wr
       2,
       f,
       proto.agent.CloudProviderConfig.serializeBinaryToWriter
+    );
+  }
+  f = message.getWorkDir();
+  if (f.length > 0) {
+    writer.writeString(
+      3,
+      f
+    );
+  }
+  f = message.getFileName();
+  if (f.length > 0) {
+    writer.writeString(
+      4,
+      f
     );
   }
 };
@@ -265,6 +289,42 @@ proto.agent.ProcessRequestRequest.prototype.clearProviderConfig = function() {
  */
 proto.agent.ProcessRequestRequest.prototype.hasProviderConfig = function() {
   return jspb.Message.getField(this, 2) != null;
+};
+
+
+/**
+ * optional string work_dir = 3;
+ * @return {string}
+ */
+proto.agent.ProcessRequestRequest.prototype.getWorkDir = function() {
+  return /** @type {string} */ (jspb.Message.getFieldWithDefault(this, 3, ""));
+};
+
+
+/**
+ * @param {string} value
+ * @return {!proto.agent.ProcessRequestRequest} returns this
+ */
+proto.agent.ProcessRequestRequest.prototype.setWorkDir = function(value) {
+  return jspb.Message.setProto3StringField(this, 3, value);
+};
+
+
+/**
+ * optional string file_name = 4;
+ * @return {string}
+ */
+proto.agent.ProcessRequestRequest.prototype.getFileName = function() {
+  return /** @type {string} */ (jspb.Message.getFieldWithDefault(this, 4, ""));
+};
+
+
+/**
+ * @param {string} value
+ * @return {!proto.agent.ProcessRequestRequest} returns this
+ */
+proto.agent.ProcessRequestRequest.prototype.setFileName = function(value) {
+  return jspb.Message.setProto3StringField(this, 4, value);
 };
 
 

@@ -20,7 +20,7 @@ Remove hardcoded task logic and rename components to be domain-agnostic.
 - [x] Task: Verify with unit tests. [761afbe]
 - [x] Task: Conductor - User Manual Verification 'Tool Generalization' (Protocol in workflow.md) [4f0a65c]
 
-## Phase 2: Intent Classification
+## Phase 2: Intent Classification [checkpoint: 2e62b1f]
 
 ### Objective
 Enable the system to distinguish between "requests that need a loop" and "simple chat".

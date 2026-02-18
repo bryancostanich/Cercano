@@ -6,11 +6,6 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 ---
 
-## [x] Track: Generalize Agent Capabilities
-*Link: [./tracks/generalize_agent_20260203/](./tracks/generalize_agent_20260203/)*
-
----
-
 - [~] **Track: Implement model-agnostic cloud integration for the Go backend using langchaingo**
 *Link: [./tracks/cloud_integration_20260203/](./tracks/cloud_integration_20260203/)*
 

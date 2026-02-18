@@ -26,7 +26,7 @@ func main() {
 	cloudProvider := llm.NewMockProvider("CloudModel")
 
 	handler := tools.NewGenericGenerator(localProvider)
-	validator := tools.NewGoTestValidator()
+	validator := tools.NewGoValidator()
 	coordinator := loop.NewGenerationCoordinator(handler, validator)
 	_ = coordinator // Will be used by the Agent orchestrator soon
 

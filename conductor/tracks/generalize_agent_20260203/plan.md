@@ -32,8 +32,8 @@ Enable the system to distinguish between "requests that need a loop" and "simple
     - [ ] Add examples for "Coding" (generate, fix, refactor) and "Chat" (explain, summarize, what is).
 - [x] Task: Implement Intent Detection. [d17a814]
     - [x] Add `ClassifyIntent(request)` to the `SmartRouter` or `Agent`.
-- [~] Task: Verify classification with tests.
-- [ ] Task: Conductor - User Manual Verification 'Intent Classification' (Protocol in workflow.md)
+- [x] Task: Verify classification with tests. [4f8f485]
+- [~] Task: Conductor - User Manual Verification 'Intent Classification' (Protocol in workflow.md)
 
 ## Phase 3: The `Agent` Orchestrator
 

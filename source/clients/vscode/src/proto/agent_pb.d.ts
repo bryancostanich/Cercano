@@ -14,6 +14,10 @@ export class ProcessRequestRequest extends jspb.Message {
     clearProviderConfig(): void;
     getProviderConfig(): CloudProviderConfig | undefined;
     setProviderConfig(value?: CloudProviderConfig): ProcessRequestRequest;
+    getWorkDir(): string;
+    setWorkDir(value: string): ProcessRequestRequest;
+    getFileName(): string;
+    setFileName(value: string): ProcessRequestRequest;
 
     serializeBinary(): Uint8Array;
     toObject(includeInstance?: boolean): ProcessRequestRequest.AsObject;
@@ -29,6 +33,8 @@ export namespace ProcessRequestRequest {
     export type AsObject = {
         input: string,
         providerConfig?: CloudProviderConfig.AsObject,
+        workDir: string,
+        fileName: string,
     }
 }
 

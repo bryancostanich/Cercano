@@ -44,10 +44,17 @@ func (m *mockRouter) ClassifyIntent(req *agent.Request) (agent.Intent, error) {
 	return agent.IntentChat, nil
 }
 
+type mockCoordinator struct{}
+
+func (m *mockCoordinator) Coordinate(ctx context.Context, instruction, inputCode, workDir, fileName string) (string, error) {
+	return "coordinated output", nil
+}
+
 func init() {
 	lis = bufconn.Listen(bufSize)
 	s := grpc.NewServer()
-	proto.RegisterAgentServer(s, NewServer(&mockRouter{}))
+	orchestrator := agent.NewAgent(&mockRouter{}, &mockCoordinator{})
+	proto.RegisterAgentServer(s, NewServer(orchestrator))
 	go func() {
 		if err := s.Serve(lis); err != nil {
 			log.Fatalf("Server exited with error: %v", err)

@@ -60,6 +60,8 @@ const (
 type Request struct {
 	Input          string
 	ProviderConfig *ProviderConfig
+	WorkDir        string
+	FileName       string
 }
 
 // ProviderConfig represents a cloud provider configuration.

@@ -26,6 +26,8 @@ type ProcessRequestRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Input          string                 `protobuf:"bytes,1,opt,name=input,proto3" json:"input,omitempty"`                                         // User input or query
 	ProviderConfig *CloudProviderConfig   `protobuf:"bytes,2,opt,name=provider_config,json=providerConfig,proto3" json:"provider_config,omitempty"` // Optional provider configuration
+	WorkDir        string                 `protobuf:"bytes,3,opt,name=work_dir,json=workDir,proto3" json:"work_dir,omitempty"`                      // Optional working directory for agentic tasks
+	FileName       string                 `protobuf:"bytes,4,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`                   // Optional filename for agentic tasks
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -72,6 +74,20 @@ func (x *ProcessRequestRequest) GetProviderConfig() *CloudProviderConfig {
 		return x.ProviderConfig
 	}
 	return nil
+}
+
+func (x *ProcessRequestRequest) GetWorkDir() string {
+	if x != nil {
+		return x.WorkDir
+	}
+	return ""
+}
+
+func (x *ProcessRequestRequest) GetFileName() string {
+	if x != nil {
+		return x.FileName
+	}
+	return ""
 }
 
 // Configuration for cloud providers.
@@ -184,10 +200,12 @@ var File_agent_proto protoreflect.FileDescriptor
 
 const file_agent_proto_rawDesc = "" +
 	"\n" +
-	"\vagent.proto\x12\x05agent\"r\n" +
+	"\vagent.proto\x12\x05agent\"\xaa\x01\n" +
 	"\x15ProcessRequestRequest\x12\x14\n" +
 	"\x05input\x18\x01 \x01(\tR\x05input\x12C\n" +
-	"\x0fprovider_config\x18\x02 \x01(\v2\x1a.agent.CloudProviderConfigR\x0eproviderConfig\"`\n" +
+	"\x0fprovider_config\x18\x02 \x01(\v2\x1a.agent.CloudProviderConfigR\x0eproviderConfig\x12\x19\n" +
+	"\bwork_dir\x18\x03 \x01(\tR\aworkDir\x12\x1b\n" +
+	"\tfile_name\x18\x04 \x01(\tR\bfileName\"`\n" +
 	"\x13CloudProviderConfig\x12\x1a\n" +
 	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12\x17\n" +

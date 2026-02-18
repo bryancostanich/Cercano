@@ -44,6 +44,13 @@ func (m *mockRouter) ClassifyIntent(req *agent.Request) (agent.Intent, error) {
 	return agent.IntentChat, nil
 }
 
+func (m *mockRouter) GetModelProviders() map[string]agent.ModelProvider {
+	return map[string]agent.ModelProvider{
+		"LocalModel": &mockProvider{name: "MockLocal"},
+		"CloudModel": &mockProvider{name: "MockCloud"},
+	}
+}
+
 type mockCoordinator struct{}
 
 func (m *mockCoordinator) Coordinate(ctx context.Context, instruction, inputCode, workDir, fileName string) (*agent.Response, error) {
@@ -53,7 +60,9 @@ func (m *mockCoordinator) Coordinate(ctx context.Context, instruction, inputCode
 func init() {
 	lis = bufconn.Listen(bufSize)
 	s := grpc.NewServer()
-	orchestrator := agent.NewAgent(&mockRouter{}, &mockCoordinator{})
+	// NewGenerationCoordinator signature changed
+	coordinator := &mockCoordinator{}
+	orchestrator := agent.NewAgent(&mockRouter{}, coordinator)
 	proto.RegisterAgentServer(s, NewServer(orchestrator))
 	go func() {
 		if err := s.Serve(lis); err != nil {

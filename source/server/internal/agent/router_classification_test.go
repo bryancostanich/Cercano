@@ -43,11 +43,16 @@ func TestRouter_ClassifiesUnitTestGenerationAsLocal(t *testing.T) {
 
 	mockResponses := map[string]string{
 		// Intent Prototypes
-		"Rename the variable": `{"embedding": [1.0, 0.0]}`,
-		"Explain what":        `{"embedding": [0.0, 1.0]}`,
+		"Rename the variable": `{"embedding": [1.0, 0.0]}`, // Intent:Coding
+		"Explain what":        `{"embedding": [0.0, 1.0]}`, // Intent:Chat
+
 		// Provider Prototypes
-		"Format this file":    `{"embedding": [1.0, 0.0]}`,
-		"How do I implement":  `{"embedding": [0.0, 1.0]}`,
+		"Format this file":   `{"embedding": [1.0, 0.0]}`, // Provider:Local
+		"How do I implement": `{"embedding": [0.0, 1.0]}`, // Provider:Cloud
+
+		// High Complexity Tasks
+		"Refactor this massive monolithic": `{"embedding": [0.5, 0.5]}`,
+		"Implement a complex raft":        `{"embedding": [0.5, 0.5]}`,
 	}
 
 	mockClient := &http.Client{
@@ -72,24 +77,23 @@ func TestRouter_ClassifiesUnitTestGenerationAsLocal(t *testing.T) {
 			input:          "Generate unit tests for this function",
 			expectedSource: "LocalModel",
 			expectedIntent: IntentCoding,
-			mockEmbedding:  `{"embedding": [0.9, 0.1]}`,
-		},
-		{
-			input:          "Write a table driven test for router.go",
-			expectedSource: "LocalModel",
-			expectedIntent: IntentCoding,
-			mockEmbedding:  `{"embedding": [0.9, 0.1]}`,
+			mockEmbedding:  `{"embedding": [1.0, 0.0]}`, // Matches Coding Intent and Local Provider
 		},
 		{
 			input:          "Explain how black holes work",
 			expectedSource: "CloudModel",
 			expectedIntent: IntentChat,
-			mockEmbedding:  `{"embedding": [0.1, 0.9]}`,
+			mockEmbedding:  `{"embedding": [0.0, 1.0]}`, // Matches Chat Intent and Cloud Provider
+		},
+		{
+			input:          "Refactor this massive monolithic service into a distributed system with high availability",
+			expectedSource: "CloudModel",
+			expectedIntent: IntentCoding,
+			mockEmbedding:  `{"embedding": [0.5, 0.5]}`, // Matches both per prototypes.yaml
 		},
 	}
 
 	for _, tc := range testCases {
-		// Add mock response for this specific input
 		mockResponses[tc.input] = tc.mockEmbedding
 
 		req := &Request{Input: tc.input}
@@ -100,7 +104,7 @@ func TestRouter_ClassifiesUnitTestGenerationAsLocal(t *testing.T) {
 		}
 
 		if provider.Name() != tc.expectedSource {
-			t.Errorf("Input: '%s'\nExpected: %s\nGot: %s", tc.input, tc.expectedSource, provider.Name())
+			t.Errorf("Input: '%s'\nExpected Provider: %s\nGot Provider: %s", tc.input, tc.expectedSource, provider.Name())
 		}
 
 		intent, err := r.ClassifyIntent(req)

@@ -40,6 +40,10 @@ func (m *mockRouter) SelectProvider(req *agent.Request) (agent.ModelProvider, er
 	return &mockProvider{name: "MockLocal"}, nil
 }
 
+func (m *mockRouter) ClassifyIntent(req *agent.Request) (agent.Intent, error) {
+	return agent.IntentChat, nil
+}
+
 func init() {
 	lis = bufconn.Listen(bufSize)
 	s := grpc.NewServer()

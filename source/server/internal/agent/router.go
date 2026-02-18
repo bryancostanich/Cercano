@@ -83,6 +83,7 @@ type ModelProvider interface {
 // Router defines the interface for a smart router that selects a model provider.
 type Router interface {
 	SelectProvider(req *Request) (ModelProvider, error)
+	ClassifyIntent(req *Request) (Intent, error)
 }
 
 // CloudFactory defines a function that creates a Cloud Model Provider.
@@ -207,6 +208,32 @@ func CosineSimilarity(a, b []float64) float64 {
 		return 0
 	}
 	return dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
+}
+
+// ClassifyIntent determines if the user's request is a coding task or a chat task.
+func (sr *SmartRouter) ClassifyIntent(req *Request) (Intent, error) {
+	embedding, err := sr.GetEmbedding(req.Input)
+	if err != nil {
+		return "", fmt.Errorf("failed to get embedding for request: %w", err)
+	}
+
+	var bestCategory string
+	var maxSimilarity float64 = -1.0
+
+	for _, proto := range sr.Prototypes {
+		sim := CosineSimilarity(embedding, proto.Embedding)
+		if sim > maxSimilarity {
+			maxSimilarity = sim
+			bestCategory = proto.Category
+		}
+	}
+
+	// Map prototype categories to intents
+	if bestCategory == "LocalModel" {
+		return IntentCoding, nil
+	}
+
+	return IntentChat, nil
 }
 
 // SelectProvider implements the smart routing algorithm using semantic similarity.

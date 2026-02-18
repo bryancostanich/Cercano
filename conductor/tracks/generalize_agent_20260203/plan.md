@@ -44,9 +44,9 @@ Implement the new top-level orchestrator and update the gRPC server.
 - [x] Task: Create `internal/agent/agent.go`. [3986143]
     - [x] Implement `Agent.ProcessRequest(input, code)`.
     - [x] Logic: Route -> Classify Intent -> Choose Strategy (Loop vs Direct).
-- [~] Task: Update gRPC Server.
-    - [ ] Update `internal/server/server.go` to call the new `Agent` instead of the `Router` directly.
-- [ ] Task: Verify End-to-End.
+- [x] Task: Update gRPC Server. [45167cd]
+    - [x] Update `internal/server/server.go` to call the new `Agent` instead of the `Router` directly.
+- [~] Task: Verify End-to-End.
     - [ ] Run sandbox tests with generic instructions.
 - [ ] Task: Conductor - User Manual Verification 'Agent Orchestrator' (Protocol in workflow.md)
 

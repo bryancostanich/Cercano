@@ -10,10 +10,10 @@ Remove hardcoded task logic and rename components to be domain-agnostic.
 ### Tasks
 - [x] Task: Generalize `CodeGenerator` interface. [6ca4f88]
     - [x] Update interface to accept `instruction string` and `code string`.
-- [ ] Task: Implement `GenericCodeGenerator`.
-    - [ ] Rename `internal/tools/unittest_handler.go` to `internal/tools/generic_generator.go`.
-    - [ ] Update `Generate` method to use the passed instruction.
-    - [ ] Implement a system prompt wrapper.
+- [x] Task: Implement `GenericCodeGenerator`. [ae2ba49]
+    - [x] Rename `internal/tools/unittest_handler.go` to `internal/tools/generic_generator.go`.
+    - [x] Update `Generate` method to use the passed instruction.
+    - [x] Implement a system prompt wrapper.
 - [ ] Task: Enhance `GoValidator`.
     - [ ] Rename `internal/tools/validator.go` to `internal/tools/go_validator.go`.
     - [ ] (Optional) Logic to choose `go test` vs `go build` based on input context.

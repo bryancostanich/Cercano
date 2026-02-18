@@ -6,10 +6,10 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 ---
 
-- [~] **Track: Implement model-agnostic cloud integration for the Go backend using langchaingo**
-*Link: [./tracks/cloud_integration_20260203/](./tracks/cloud_integration_20260203/)*
+- [ ] **Track: Improve the experience of cercano in the IDE with a more full-featured integration**
+*Link: [./tracks/ide_enhancements_20260203/](./tracks/ide_enhancements_20260203/)*
 
 ---
 
-- [ ] **Track: Improve the experience of cercano in the IDE with a more full-featured integration**
-*Link: [./tracks/ide_enhancements_20260203/](./tracks/ide_enhancements_20260203/)*
+- [~] **Track: Implement model-agnostic cloud integration for the Go backend using langchaingo**
+*Link: [./tracks/cloud_integration_20260203/](./tracks/cloud_integration_20260203/)*

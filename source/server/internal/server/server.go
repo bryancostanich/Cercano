@@ -11,19 +11,23 @@ import (
 // Server is the gRPC server for the Agent service.
 type Server struct {
 	proto.UnimplementedAgentServer
-	router agent.Router
+	agent *agent.Agent
 }
 
 // NewServer creates a new Agent gRPC server.
-func NewServer(r agent.Router) *Server {
-	return &Server{router: r}
+func NewServer(a *agent.Agent) *Server {
+	return &Server{agent: a}
 }
 
 // ProcessRequest implements proto.AgentServer.
 func (s *Server) ProcessRequest(ctx context.Context, req *proto.ProcessRequestRequest) (*proto.ProcessRequestResponse, error) {
 	fmt.Printf("Received request: %s\n", req.Input)
 
-	agentReq := &agent.Request{Input: req.Input}
+	agentReq := &agent.Request{
+		Input:    req.Input,
+		WorkDir:  req.WorkDir,
+		FileName: req.FileName,
+	}
 	if req.ProviderConfig != nil {
 		agentReq.ProviderConfig = &agent.ProviderConfig{
 			Provider: req.ProviderConfig.Provider,
@@ -32,14 +36,9 @@ func (s *Server) ProcessRequest(ctx context.Context, req *proto.ProcessRequestRe
 		}
 	}
 
-	provider, err := s.router.SelectProvider(agentReq)
+	response, err := s.agent.ProcessRequest(ctx, agentReq)
 	if err != nil {
-		return nil, fmt.Errorf("router error: %w", err)
-	}
-
-	response, err := provider.Process(ctx, agentReq)
-	if err != nil {
-		return nil, fmt.Errorf("provider processing error: %w", err)
+		return nil, fmt.Errorf("agent error: %w", err)
 	}
 
 	return &proto.ProcessRequestResponse{

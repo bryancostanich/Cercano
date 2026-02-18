@@ -30,15 +30,14 @@ func main() {
 	coordinator := loop.NewGenerationCoordinator(handler, validator)
 	_ = coordinator // Will be used by the Agent orchestrator soon
 
-	// Initialize Agent (formerly Router)
-	// Note: Expects to be run from 'source/server' directory where internal/agent/prototypes.yaml is accessible
-	// I need to make sure the path is correct relative to execution.
-	smartAgent, err := agent.NewSmartRouter(localProvider, cloudProvider, "nomic-embed-text", http.DefaultClient, "internal/agent/prototypes.yaml", func(ctx context.Context, provider, model, apiKey string) (agent.ModelProvider, error) {
+	smartRouter, err := agent.NewSmartRouter(localProvider, cloudProvider, "nomic-embed-text", http.DefaultClient, "internal/agent/prototypes.yaml", func(ctx context.Context, provider, model, apiKey string) (agent.ModelProvider, error) {
 		return llm.NewCloudModelProvider(ctx, provider, model, apiKey)
 	})
 	if err != nil {
-		log.Fatalf("failed to create agent: %v", err)
+		log.Fatalf("failed to create router: %v", err)
 	}
+
+	orchestrator := agent.NewAgent(smartRouter, coordinator)
 
 	lis, err := net.Listen("tcp", ":50052")
 	if err != nil {
@@ -46,7 +45,7 @@ func main() {
 	}
 
 	s := grpc.NewServer()
-	proto.RegisterAgentServer(s, server.NewServer(smartAgent))
+	proto.RegisterAgentServer(s, server.NewServer(orchestrator))
 
 	fmt.Printf("Server listening at %v\n", lis.Addr())
 	if err := s.Serve(lis); err != nil {

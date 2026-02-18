@@ -229,11 +229,15 @@ func (sr *SmartRouter) ClassifyIntent(req *Request) (Intent, error) {
 	}
 
 	// Map prototype categories to intents
+	var intent Intent
 	if bestCategory == "LocalModel" {
-		return IntentCoding, nil
+		intent = IntentCoding
+	} else {
+		intent = IntentChat
 	}
 
-	return IntentChat, nil
+	fmt.Printf("Intent Classification: %s | Category: %s\n", intent, bestCategory)
+	return intent, nil
 }
 
 // SelectProvider implements the smart routing algorithm using semantic similarity.

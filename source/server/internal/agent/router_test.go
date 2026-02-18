@@ -53,10 +53,16 @@ func (m *MockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 func TestSmartRouter_ClassifyIntent(t *testing.T) {
 	// Setup same router as above
 	protoContent := `
-local_model:
-  - "generate code"
-cloud_model:
-  - "explain this"
+intents:
+  coding:
+    - "generate code"
+  chat:
+    - "explain this"
+providers:
+  local:
+    - "local task"
+  cloud:
+    - "cloud task"
 `
 	tmpFile, err := os.CreateTemp("", "prototypes*.yaml")
 	if err != nil {
@@ -69,6 +75,8 @@ cloud_model:
 	mockResponses := map[string]string{
 		"generate code": `{"embedding": [1.0, 0.0]}`,
 		"explain this":  `{"embedding": [0.0, 1.0]}`,
+		"local task":    `{"embedding": [1.0, 0.0]}`,
+		"cloud task":    `{"embedding": [0.0, 1.0]}`,
 	}
 	mockClient := &http.Client{
 		Transport: &MockRoundTripper{responses: mockResponses},
@@ -110,10 +118,16 @@ cloud_model:
 func TestSmartRouter_SelectProvider(t *testing.T) {
 	// Create a temporary prototypes file
 	protoContent := `
-local_model:
-  - "local task"
-cloud_model:
-  - "cloud task"
+intents:
+  coding:
+    - "generate code"
+  chat:
+    - "explain this"
+providers:
+  local:
+    - "local task"
+  cloud:
+    - "cloud task"
 `
 	tmpFile, err := os.CreateTemp("", "prototypes*.yaml")
 	if err != nil {
@@ -130,8 +144,10 @@ cloud_model:
 
 	// Mock responses for initialization
 	mockResponses := map[string]string{
-		"local task": `{"embedding": [1.0, 0.0]}`,
-		"cloud task": `{"embedding": [0.0, 1.0]}`,
+		"generate code": `{"embedding": [1.0, 0.0]}`,
+		"explain this":  `{"embedding": [0.0, 1.0]}`,
+		"local task":    `{"embedding": [1.0, 0.0]}`,
+		"cloud task":    `{"embedding": [0.0, 1.0]}`,
 	}
 
 	mockClient := &http.Client{

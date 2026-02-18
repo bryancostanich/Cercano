@@ -41,8 +41,33 @@ func (s *Server) ProcessRequest(ctx context.Context, req *proto.ProcessRequestRe
 		return nil, fmt.Errorf("agent error: %w", err)
 	}
 
-	return &proto.ProcessRequestResponse{
+	protoRes := &proto.ProcessRequestResponse{
 		Output: response.Output,
-	},
-	nil
+	}
+
+	if len(response.FileChanges) > 0 {
+		protoRes.FileChanges = make([]*proto.FileChange, len(response.FileChanges))
+		for i, fc := range response.FileChanges {
+			action := proto.FileAction_UPDATE
+			switch fc.Action {
+			case "CREATE":
+				action = proto.FileAction_CREATE
+			case "DELETE":
+				action = proto.FileAction_DELETE
+			}
+			protoRes.FileChanges[i] = &proto.FileChange{
+				Path:    fc.Path,
+				Content: fc.Content,
+				Action:  action,
+			}
+		}
+	}
+
+	protoRes.RoutingMetadata = &proto.RoutingMetadata{
+		ModelName:  response.RoutingMetadata.ModelName,
+		Confidence: float32(response.RoutingMetadata.Confidence),
+		Escalated:  response.RoutingMetadata.Escalated,
+	}
+
+	return protoRes, nil
 }

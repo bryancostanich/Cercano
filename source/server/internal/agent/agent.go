@@ -7,7 +7,7 @@ import (
 
 // Coordinator defines the interface for the iterative generation loop.
 type Coordinator interface {
-	Coordinate(ctx context.Context, instruction, inputCode, workDir, fileName string) (string, error)
+	Coordinate(ctx context.Context, instruction, inputCode, workDir, fileName string) (*Response, error)
 }
 
 // Agent is the top-level orchestrator for AI requests.
@@ -43,13 +43,26 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 		fmt.Printf("Agent: Detected Coding intent. Executing Coordinator Loop in %s for %s...\n", req.WorkDir, req.FileName)
 		// Coordinate takes (ctx, instruction, inputCode, workDir, fileName)
 		// We pass empty inputCode for now as instruction contains the full prompt.
-		output, err := a.coordinator.Coordinate(ctx, req.Input, "", req.WorkDir, req.FileName)
+		res, err := a.coordinator.Coordinate(ctx, req.Input, "", req.WorkDir, req.FileName)
 		if err != nil {
 			return nil, fmt.Errorf("agentic loop failed: %w", err)
 		}
-		return &Response{Output: output}, nil
+		// Merge metadata from routing if needed
+		res.RoutingMetadata = RoutingMetadata{
+			ModelName:  provider.Name(),
+			Confidence: 1.0, // Initial simple value
+		}
+		return res, nil
 	}
 
 	fmt.Printf("Agent: Executing direct call with provider: %s\n", provider.Name())
-	return provider.Process(ctx, req)
+	res, err := provider.Process(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	res.RoutingMetadata = RoutingMetadata{
+		ModelName:  provider.Name(),
+		Confidence: 1.0, // Initial simple value
+	}
+	return res, nil
 }

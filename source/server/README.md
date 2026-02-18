@@ -49,25 +49,26 @@ Follow these steps to set up, build, and run the AI agent.
 5.  **Download the embedding and LLM models:**
     ```bash
     ollama pull nomic-embed-text
-    ollama pull phi
+    ollama pull qwen3-coder
     ```
-    The smart router uses `nomic-embed-text` for semantic classification via embeddings. `phi` is used as a default local LLM for request processing.
+    The smart router uses `nomic-embed-text` for semantic classification via embeddings. `qwen3-coder` is used as a default local LLM for request processing.
 
 ### Build and Run the AI Agent
 
-1.  **Navigate to the source directory:**
+1.  **Navigate to the server directory:**
     ```bash
-    cd source
+    cd source/server
     ```
 
 2.  **Build the agent:**
     ```bash
-    go build -o ../bin/agent ./cmd/agent
+    mkdir -p ../../bin
+    go build -o ../../bin/agent ./cmd/agent
     ```
 
 3.  **Run the agent:**
     ```bash
-    ../bin/agent
+    ../../bin/agent
     ```
     The gRPC server will start and listen on port `50052`.
 

@@ -28,4 +28,27 @@ message CloudProviderConfig {
 // The response message for ProcessRequest.
 message ProcessRequestResponse {
   string output = 1; // AI generated output
+  repeated FileChange file_changes = 2; // Optional structured file modifications
+  RoutingMetadata routing_metadata = 3; // Optional metadata about the model/routing
+}
+
+// Represents a change to a specific file.
+message FileChange {
+  string path = 1;      // File path (relative to work_dir)
+  string content = 2;   // New file content
+  FileAction action = 3; // Type of action to perform
+}
+
+// Possible actions for a FileChange.
+enum FileAction {
+  CREATE = 0;
+  UPDATE = 1;
+  DELETE = 2;
+}
+
+// Metadata about the routing and model execution.
+message RoutingMetadata {
+  string model_name = 1; // Name of the model that processed the request
+  float confidence = 2;  // Confidence score for the routing decision
+  bool escalated = 3;   // Whether the request was escalated to cloud
 }

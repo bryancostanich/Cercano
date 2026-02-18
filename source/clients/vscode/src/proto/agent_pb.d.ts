@@ -67,6 +67,15 @@ export namespace CloudProviderConfig {
 export class ProcessRequestResponse extends jspb.Message { 
     getOutput(): string;
     setOutput(value: string): ProcessRequestResponse;
+    clearFileChangesList(): void;
+    getFileChangesList(): Array<FileChange>;
+    setFileChangesList(value: Array<FileChange>): ProcessRequestResponse;
+    addFileChanges(value?: FileChange, index?: number): FileChange;
+
+    hasRoutingMetadata(): boolean;
+    clearRoutingMetadata(): void;
+    getRoutingMetadata(): RoutingMetadata | undefined;
+    setRoutingMetadata(value?: RoutingMetadata): ProcessRequestResponse;
 
     serializeBinary(): Uint8Array;
     toObject(includeInstance?: boolean): ProcessRequestResponse.AsObject;
@@ -81,5 +90,65 @@ export class ProcessRequestResponse extends jspb.Message {
 export namespace ProcessRequestResponse {
     export type AsObject = {
         output: string,
+        fileChangesList: Array<FileChange.AsObject>,
+        routingMetadata?: RoutingMetadata.AsObject,
     }
+}
+
+export class FileChange extends jspb.Message { 
+    getPath(): string;
+    setPath(value: string): FileChange;
+    getContent(): string;
+    setContent(value: string): FileChange;
+    getAction(): FileAction;
+    setAction(value: FileAction): FileChange;
+
+    serializeBinary(): Uint8Array;
+    toObject(includeInstance?: boolean): FileChange.AsObject;
+    static toObject(includeInstance: boolean, msg: FileChange): FileChange.AsObject;
+    static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+    static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+    static serializeBinaryToWriter(message: FileChange, writer: jspb.BinaryWriter): void;
+    static deserializeBinary(bytes: Uint8Array): FileChange;
+    static deserializeBinaryFromReader(message: FileChange, reader: jspb.BinaryReader): FileChange;
+}
+
+export namespace FileChange {
+    export type AsObject = {
+        path: string,
+        content: string,
+        action: FileAction,
+    }
+}
+
+export class RoutingMetadata extends jspb.Message { 
+    getModelName(): string;
+    setModelName(value: string): RoutingMetadata;
+    getConfidence(): number;
+    setConfidence(value: number): RoutingMetadata;
+    getEscalated(): boolean;
+    setEscalated(value: boolean): RoutingMetadata;
+
+    serializeBinary(): Uint8Array;
+    toObject(includeInstance?: boolean): RoutingMetadata.AsObject;
+    static toObject(includeInstance: boolean, msg: RoutingMetadata): RoutingMetadata.AsObject;
+    static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+    static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+    static serializeBinaryToWriter(message: RoutingMetadata, writer: jspb.BinaryWriter): void;
+    static deserializeBinary(bytes: Uint8Array): RoutingMetadata;
+    static deserializeBinaryFromReader(message: RoutingMetadata, reader: jspb.BinaryReader): RoutingMetadata;
+}
+
+export namespace RoutingMetadata {
+    export type AsObject = {
+        modelName: string,
+        confidence: number,
+        escalated: boolean,
+    }
+}
+
+export enum FileAction {
+    CREATE = 0,
+    UPDATE = 1,
+    DELETE = 2,
 }

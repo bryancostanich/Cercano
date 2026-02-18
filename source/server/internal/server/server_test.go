@@ -46,8 +46,8 @@ func (m *mockRouter) ClassifyIntent(req *agent.Request) (agent.Intent, error) {
 
 type mockCoordinator struct{}
 
-func (m *mockCoordinator) Coordinate(ctx context.Context, instruction, inputCode, workDir, fileName string) (string, error) {
-	return "coordinated output", nil
+func (m *mockCoordinator) Coordinate(ctx context.Context, instruction, inputCode, workDir, fileName string) (*agent.Response, error) {
+	return &agent.Response{Output: "coordinated output"}, nil
 }
 
 func init() {

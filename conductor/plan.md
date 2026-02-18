@@ -6,7 +6,7 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 ---
 
-- [ ] **Track: Improve the experience of cercano in the IDE with a more full-featured integration**
+- [~] **Track: Improve the experience of cercano in the IDE with a more full-featured integration**
 *Link: [./tracks/ide_enhancements_20260203/](./tracks/ide_enhancements_20260203/)*
 
 ---

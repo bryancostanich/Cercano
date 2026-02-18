@@ -35,7 +35,7 @@ Enable the system to distinguish between "requests that need a loop" and "simple
 - [x] Task: Verify classification with tests. [4f8f485]
 - [~] Task: Conductor - User Manual Verification 'Intent Classification' (Protocol in workflow.md)
 
-## Phase 3: The `Agent` Orchestrator
+## Phase 3: The `Agent` Orchestrator [checkpoint: f3709a8]
 
 ### Objective
 Implement the new top-level orchestrator and update the gRPC server.
@@ -48,7 +48,7 @@ Implement the new top-level orchestrator and update the gRPC server.
     - [x] Update `internal/server/server.go` to call the new `Agent` instead of the `Router` directly.
 - [x] Task: Verify End-to-End. [2bf69b8]
     - [x] Run sandbox tests with generic instructions.
-- [~] Task: Conductor - User Manual Verification 'Agent Orchestrator' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Agent Orchestrator' (Protocol in workflow.md) [1e4930c]
 
 ## Phase 4: Regression & Cleanup
 

@@ -34,3 +34,4 @@ go.work.sum
 
 # Mac stuff
 **/.DS_STORE
+source/server/bin/

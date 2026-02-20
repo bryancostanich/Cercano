@@ -43,7 +43,7 @@ Code Context:
 		return "", fmt.Errorf("failed to generate code: %w", err)
 	}
 
-	return cleanMarkdown(resp.Output), nil
+	return resp.Output, nil
 }
 
 // Fix attempts to fix the provided code based on the error message.
@@ -65,11 +65,11 @@ Error:
 		return "", fmt.Errorf("failed to fix code: %w", err)
 	}
 
-	return cleanMarkdown(resp.Output), nil
+	return resp.Output, nil
 }
 
-// cleanMarkdown removes ```go and ``` lines if present
-func cleanMarkdown(code string) string {
+// CleanMarkdown removes ```go and ``` lines if present
+func CleanMarkdown(code string) string {
 	lines := strings.Split(code, "\n")
 	var result []string
 	for _, line := range lines {

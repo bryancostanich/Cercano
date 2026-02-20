@@ -18,6 +18,12 @@ intents:
     - "Refactor this massive monolithic service into a distributed system with high availability"
 
   chat:
+    - "Tell me about this class"
+    - "please tell me about this class"
+    - "What does this file do?"
+    - "Explain this code to me"
+    - "Summarize this class"
+    - "What is the purpose of this method?"
     - "Explain what this function does"
     - "Summarize the content of README.md."
     - "What is the capital of France?"

@@ -185,7 +185,8 @@ providers:
 		t.Run(tt.name, func(t *testing.T) {
 			// Update mock for the specific test case
 			mockResponses[tt.input] = tt.mockOllamaResponse
-			selectedProvider, err := router.SelectProvider(&Request{Input: tt.input})
+			// Assume intent chat for these tests
+			selectedProvider, err := router.SelectProvider(&Request{Input: tt.input}, IntentChat)
 
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)

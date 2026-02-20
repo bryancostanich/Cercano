@@ -17,15 +17,15 @@ Add adk-go to the project and establish the new package structure without breaki
 Wrap existing ModelProvider and Validator implementations as ADK agent.Agent types.
 
 ### Tasks
-- [ ] Task: Implement `NewGeneratorAgent(provider agent.ModelProvider) agent.Agent`.
-    - [ ] Red phase: Write unit tests asserting correct event emission for success and error cases.
-    - [ ] Green phase: Implement the adapter wrapping `provider.Process()`.
-- [ ] Task: Implement `NewValidatorAgent(validator tools.Validator, workDir string) agent.Agent`.
-    - [ ] Red phase: Write unit tests asserting `Escalate=true` on build success, error content on failure.
-    - [ ] Green phase: Implement the adapter wrapping `validator.Validate()`.
-- [ ] Task: Implement escalation state logic via `session.State` failure counter.
-    - [ ] Red phase: Write tests asserting provider switch after threshold failures.
-    - [ ] Green phase: Implement counter read/write in ValidatorAgent; wire provider selection.
+- [x] Task: Implement `NewGeneratorAgent(local, cloud agent.ModelProvider) (agent.Agent, error)`.
+    - [x] Red phase: Write unit tests asserting correct event emission for success and error cases.
+    - [x] Green phase: Implement the adapter wrapping `provider.Process()`.
+- [x] Task: Implement `NewValidatorAgent(validator tools.Validator, workDir string, threshold int) (agent.Agent, error)`.
+    - [x] Red phase: Write unit tests asserting `Escalate=true` on build success, error content on failure.
+    - [x] Green phase: Implement the adapter wrapping `validator.Validate()`.
+- [x] Task: Implement escalation state logic via `session.State` failure counter.
+    - [x] Red phase: Write tests asserting provider switch after threshold failures.
+    - [x] Green phase: Implement counter read/write in ValidatorAgent; wire provider selection.
 - [ ] Task: Conductor - User Manual Verification 'Agent Adapter Layer' (Protocol in workflow.md)
 
 ## Phase 3: LoopAgent Coordinator

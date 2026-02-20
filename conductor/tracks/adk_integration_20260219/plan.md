@@ -26,7 +26,7 @@ Wrap existing ModelProvider and Validator implementations as ADK agent.Agent typ
 - [x] Task: Implement escalation state logic via `session.State` failure counter.
     - [x] Red phase: Write tests asserting provider switch after threshold failures.
     - [x] Green phase: Implement counter read/write in ValidatorAgent; wire provider selection.
-- [ ] Task: Conductor - User Manual Verification 'Agent Adapter Layer' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Agent Adapter Layer' (Protocol in workflow.md)
 
 ## Phase 3: LoopAgent Coordinator
 

@@ -13,3 +13,13 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 - [~] **Track: Implement model-agnostic cloud integration for the Go backend using langchaingo**
 *Link: [./tracks/cloud_integration_20260203/](./tracks/cloud_integration_20260203/)*
+
+---
+
+- [x] **Track: Fix broken VS Code code review and apply workflow** [checkpoint: 97e7b55]
+*Link: [./tracks/ide_fixes_20260219/](./tracks/ide_fixes_20260219/)*
+
+---
+
+- [ ] **Track: Replace GenerationCoordinator with Google ADK LoopAgent**
+*Link: [./tracks/adk_integration_20260219/](./tracks/adk_integration_20260219/)*

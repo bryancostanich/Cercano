@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { buildFollowupArgs, buildReplaceRange } from '../extensionHelpers';
+import { buildFollowupArgs, buildReplaceRange, isPreviewTabForResponse } from '../extensionHelpers';
 
 suite('Extension Helpers Test Suite', () => {
 
@@ -46,6 +46,24 @@ suite('Extension Helpers Test Suite', () => {
         test('does not use hardcoded 100000 line limit', () => {
             const range = buildReplaceRange(5);
             assert.notStrictEqual(range.endLine, 100000);
+        });
+    });
+
+    suite('isPreviewTabForResponse', () => {
+        test('returns true for a cercano-preview URI matching the responseId', () => {
+            assert.strictEqual(isPreviewTabForResponse('cercano-preview', 'abc123', 'abc123'), true);
+        });
+
+        test('returns false when scheme does not match', () => {
+            assert.strictEqual(isPreviewTabForResponse('file', 'abc123', 'abc123'), false);
+        });
+
+        test('returns false when responseId does not match', () => {
+            assert.strictEqual(isPreviewTabForResponse('cercano-preview', 'abc123', 'differentId'), false);
+        });
+
+        test('returns false when both scheme and responseId do not match', () => {
+            assert.strictEqual(isPreviewTabForResponse('file', 'abc123', 'differentId'), false);
         });
     });
 });

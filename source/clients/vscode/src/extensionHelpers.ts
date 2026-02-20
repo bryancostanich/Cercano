@@ -43,3 +43,11 @@ export function buildReplaceRange(lineCount: number): ReplaceRange {
         endCharacter: 0
     };
 }
+
+/**
+ * Returns true if a tab's URI scheme and query string match a cercano preview
+ * tab for the given responseId. Used to identify preview diff tabs to close on Reject.
+ */
+export function isPreviewTabForResponse(scheme: string, query: string, responseId: string): boolean {
+    return scheme === 'cercano-preview' && query === responseId;
+}

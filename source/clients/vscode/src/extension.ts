@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { CercanoClient } from './client';
-import { buildFollowupArgs, buildReplaceRange } from './extensionHelpers';
+import { buildFollowupArgs, buildReplaceRange, isPreviewTabForResponse } from './extensionHelpers';
 
 let client: CercanoClient;
 
@@ -286,6 +286,19 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(vscode.commands.registerCommand('cercano.rejectChanges', async (args: { responseId: string }) => {
         processedResponses.add(args.responseId);
+
+        // Close any open preview diff tabs for this response
+        for (const tabGroup of vscode.window.tabGroups.all) {
+            for (const tab of tabGroup.tabs) {
+                if (tab.input instanceof vscode.TabInputTextDiff) {
+                    const modified = tab.input.modified;
+                    if (isPreviewTabForResponse(modified.scheme, modified.query, args.responseId)) {
+                        await vscode.window.tabGroups.close(tab);
+                    }
+                }
+            }
+        }
+
         vscode.window.showInformationMessage("Cercano: Changes rejected.");
     }));
 

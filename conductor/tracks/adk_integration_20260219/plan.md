@@ -34,12 +34,12 @@ Wrap existing ModelProvider and Validator implementations as ADK agent.Agent typ
 Replace GenerationCoordinator with an ADK-backed implementation satisfying the existing Coordinator interface.
 
 ### Tasks
-- [ ] Task: Implement `NewADKCoordinator` in `internal/loop/`.
-    - [ ] Red phase: Port existing coordinator tests to the new implementation.
-    - [ ] Green phase: Implement using `loopagent.New(...)` with the adapters from Phase 2.
-    - [ ] Preserve backup/restore file behaviour and filename inference step.
-- [ ] Task: Wire `NewADKCoordinator` into `cmd/agent/main.go` replacing `NewGenerationCoordinator`.
-- [ ] Task: Run full test suite; fix any regressions.
+- [x] Task: Implement `NewADKCoordinator` in `internal/loop/`.
+    - [x] Red phase: Port existing coordinator tests to the new implementation.
+    - [x] Green phase: Implement using `loopagent.New(...)` with the adapters from Phase 2.
+    - [x] Preserve backup/restore file behaviour and filename inference step.
+- [x] Task: Wire `NewADKCoordinator` into `cmd/agent/main.go` replacing `NewGenerationCoordinator`.
+- [x] Task: Run full test suite; fix any regressions.
 - [ ] Task: Conductor - User Manual Verification 'LoopAgent Coordinator' (Protocol in workflow.md)
 
 ## Phase 4: Streaming & SessionService

@@ -70,11 +70,8 @@ func main() {
 		}
 	}
 
-	localHandler := tools.NewGenericGenerator(localProvider)
-	cloudHandler := tools.NewGenericGenerator(cloudProvider) 
-
 	validator := tools.NewGoValidator()
-	coordinator := loop.NewGenerationCoordinator(localHandler, cloudHandler, validator)
+	coordinator := loop.NewADKCoordinator(localProvider, cloudProvider, validator)
 
 	smartRouter, err := agent.NewSmartRouter(localProvider, cloudProvider, embeddingModel, http.DefaultClient, "internal/agent/prototypes.yaml", func(ctx context.Context, provider, model, apiKey string) (agent.ModelProvider, error) {
 		return llm.NewCloudModelProvider(ctx, provider, model, apiKey)

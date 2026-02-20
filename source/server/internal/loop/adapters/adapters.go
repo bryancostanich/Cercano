@@ -3,6 +3,7 @@ package adapters
 import (
 	"fmt"
 	"iter"
+	"os"
 
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/session"
@@ -12,19 +13,34 @@ import (
 	"cercano/source/server/internal/tools"
 )
 
-// Session state keys used to coordinate escalation between adapters.
+// Session state keys used to coordinate state between adapters and the coordinator.
 const (
 	// StateKeyUseCloud signals the GeneratorAgent to use the cloud provider.
 	StateKeyUseCloud = "cercano:use_cloud"
 	// StateKeyValidationFailures tracks consecutive validation failures.
 	StateKeyValidationFailures = "cercano:validation_failures"
+	// StateKeyTargetPath is the absolute path the ValidatorAgent writes generated code to.
+	StateKeyTargetPath = "cercano:target_path"
+	// StateKeyInputCode is the initial code context passed to the first generation.
+	StateKeyInputCode = "cercano:input_code"
+	// StateKeyLastGeneratedCode is the raw output from the most recent GeneratorAgent run.
+	StateKeyLastGeneratedCode = "cercano:last_generated_code"
+	// StateKeyLastValidationError is the error text from the most recent ValidatorAgent failure.
+	StateKeyLastValidationError = "cercano:last_validation_error"
 )
 
 // NewGeneratorAgent returns an ADK agent that calls a ModelProvider.
 //
-// It reads StateKeyUseCloud from session state to choose between local and cloud
-// providers. The instruction is extracted from InvocationContext.UserContent().
-// If cloud is nil, local is always used regardless of state.
+// Provider selection:
+//   - Reads StateKeyUseCloud from session state; if true and cloud != nil, uses cloud.
+//   - Otherwise uses local.
+//
+// Prompt building:
+//   - First iteration (no prior state): builds a generate prompt from UserContent + StateKeyInputCode.
+//   - Subsequent iterations: builds a fix prompt from StateKeyLastGeneratedCode + StateKeyLastValidationError.
+//
+// State written (via event.Actions.StateDelta):
+//   - StateKeyLastGeneratedCode = generated output
 func NewGeneratorAgent(local, cloud agentmod.ModelProvider) (agent.Agent, error) {
 	return agent.New(agent.Config{
 		Name:        "generator",
@@ -40,23 +56,17 @@ func generatorRun(local, cloud agentmod.ModelProvider) func(agent.InvocationCont
 
 			// Switch to cloud if the session state requests it.
 			if cloud != nil {
-				useCloud, err := ctx.Session().State().Get(StateKeyUseCloud)
-				if err == nil {
-					if v, ok := useCloud.(bool); ok && v {
+				if v, err := ctx.Session().State().Get(StateKeyUseCloud); err == nil {
+					if b, ok := v.(bool); ok && b {
 						provider = cloud
 					}
 				}
 			}
 
-			// Extract instruction from user content.
-			var instruction string
-			if uc := ctx.UserContent(); uc != nil {
-				for _, part := range uc.Parts {
-					instruction += part.Text
-				}
-			}
+			// Build prompt: fix if prior state exists, generate otherwise.
+			prompt := buildPrompt(ctx)
 
-			resp, err := provider.Process(ctx, &agentmod.Request{Input: instruction})
+			resp, err := provider.Process(ctx, &agentmod.Request{Input: prompt})
 			if err != nil {
 				yield(nil, fmt.Errorf("generator: provider %q failed: %w", provider.Name(), err))
 				return
@@ -64,17 +74,68 @@ func generatorRun(local, cloud agentmod.ModelProvider) func(agent.InvocationCont
 
 			ev := session.NewEvent(ctx.InvocationID())
 			ev.LLMResponse.Content = genai.NewContentFromText(resp.Output, genai.RoleModel)
+			ev.Actions.StateDelta = map[string]any{
+				StateKeyLastGeneratedCode: resp.Output,
+			}
 			yield(ev, nil)
 		}
 	}
 }
 
+// buildPrompt constructs the correct prompt for the current iteration.
+func buildPrompt(ctx agent.InvocationContext) string {
+	state := ctx.Session().State()
+
+	prevCode, codeErr := state.Get(StateKeyLastGeneratedCode)
+	prevError, errErr := state.Get(StateKeyLastValidationError)
+
+	if codeErr == nil && errErr == nil {
+		code, _ := prevCode.(string)
+		errMsg, _ := prevError.(string)
+		if code != "" && errMsg != "" {
+			return fmt.Sprintf(
+				"You are an expert Go developer.\n"+
+					"The following Go code has errors. Please fix it according to the error message.\n"+
+					"Return ONLY the corrected Go code. Do not explain.\n\n"+
+					"Code:\n```go\n%s\n```\n\nError:\n%s",
+				code, errMsg,
+			)
+		}
+	}
+
+	// Initial generation.
+	var instruction string
+	if uc := ctx.UserContent(); uc != nil {
+		for _, part := range uc.Parts {
+			instruction += part.Text
+		}
+	}
+
+	inputCode := ""
+	if raw, err := state.Get(StateKeyInputCode); err == nil {
+		if s, ok := raw.(string); ok {
+			inputCode = s
+		}
+	}
+
+	return fmt.Sprintf(
+		"You are an expert Go developer.\n"+
+			"Instruction: %s\n"+
+			"Return ONLY the requested Go code. Do not include any explanations.\n\n"+
+			"Code Context:\n```go\n%s\n```",
+		instruction, inputCode,
+	)
+}
+
 // NewValidatorAgent returns an ADK agent that calls a Validator.
 //
-// On validation success it emits an event with Actions.Escalate = true, which
-// causes the enclosing LoopAgent to terminate.
-// On failure it increments StateKeyValidationFailures in session state. When
-// the count reaches escalationThreshold it also sets StateKeyUseCloud = true.
+// Disk write: if StateKeyTargetPath and StateKeyLastGeneratedCode are both present in
+// session state, the agent writes the cleaned code to disk before validating.
+//
+// On validation success it emits an event with Actions.Escalate = true.
+// On failure it increments StateKeyValidationFailures and stores the error text in
+// StateKeyLastValidationError. When failures >= escalationThreshold it also sets
+// StateKeyUseCloud = true.
 func NewValidatorAgent(validator tools.Validator, workDir string, escalationThreshold int) (agent.Agent, error) {
 	return agent.New(agent.Config{
 		Name:        "validator",
@@ -86,21 +147,35 @@ func NewValidatorAgent(validator tools.Validator, workDir string, escalationThre
 func validatorRun(validator tools.Validator, workDir string, escalationThreshold int) func(agent.InvocationContext) iter.Seq2[*session.Event, error] {
 	return func(ctx agent.InvocationContext) iter.Seq2[*session.Event, error] {
 		return func(yield func(*session.Event, error) bool) {
+			state := ctx.Session().State()
+
+			// Write generated code to disk when the coordinator has provided a target path.
+			targetRaw, pathErr := state.Get(StateKeyTargetPath)
+			codeRaw, codeErr := state.Get(StateKeyLastGeneratedCode)
+			if pathErr == nil && codeErr == nil {
+				if targetPath, ok := targetRaw.(string); ok {
+					if code, ok := codeRaw.(string); ok {
+						clean := tools.CleanMarkdown(code)
+						// Best-effort write; a failure will surface as a build error.
+						_ = os.WriteFile(targetPath, []byte(clean), 0644)
+					}
+				}
+			}
+
 			err := validator.Validate(ctx, workDir)
 
 			ev := session.NewEvent(ctx.InvocationID())
 
 			if err == nil {
-				// Validation passed: signal LoopAgent to terminate.
 				ev.Actions.Escalate = true
 				ev.LLMResponse.Content = genai.NewContentFromText("validation passed", genai.RoleModel)
 				yield(ev, nil)
 				return
 			}
 
-			// Validation failed: read and increment failure counter.
+			// Validation failed: update failure counter and optionally set use_cloud.
 			failures := 0
-			if raw, stateErr := ctx.Session().State().Get(StateKeyValidationFailures); stateErr == nil {
+			if raw, stateErr := state.Get(StateKeyValidationFailures); stateErr == nil {
 				if v, ok := raw.(int); ok {
 					failures = v
 				}
@@ -108,7 +183,8 @@ func validatorRun(validator tools.Validator, workDir string, escalationThreshold
 			failures++
 
 			ev.Actions.StateDelta = map[string]any{
-				StateKeyValidationFailures: failures,
+				StateKeyValidationFailures:  failures,
+				StateKeyLastValidationError: err.Error(),
 			}
 
 			if failures >= escalationThreshold {

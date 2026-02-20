@@ -88,9 +88,10 @@ type ProviderConfig struct {
 
 // Response represents a response from an AI model.
 type Response struct {
-	Output          string
-	FileChanges     []FileChange
-	RoutingMetadata RoutingMetadata
+	Output           string
+	FileChanges      []FileChange
+	RoutingMetadata  RoutingMetadata
+	ValidationErrors string // New field for rich feedback
 }
 
 // FileChange represents a change to a specific file.
@@ -115,7 +116,7 @@ type ModelProvider interface {
 
 // Router defines the interface for a smart router that selects a model provider.
 type Router interface {
-	SelectProvider(req *Request) (ModelProvider, error)
+	SelectProvider(req *Request, intent Intent) (ModelProvider, error)
 	ClassifyIntent(req *Request) (Intent, error)
 	GetModelProviders() map[string]ModelProvider
 }
@@ -126,7 +127,7 @@ type CloudFactory func(ctx context.Context, provider, model, apiKey string) (Mod
 const (
 	ollamaAPIURL          = "http://localhost:11434/api/generate"
 	ollamaEmbeddingAPIURL = "http://localhost:11434/api/embeddings"
-	similarityThreshold   = 0.45
+	similarityThreshold   = 0.50
 )
 
 // SmartRouter implements the Router interface with routing logic based on semantic similarity.
@@ -290,18 +291,21 @@ func (sr *SmartRouter) ClassifyIntent(req *Request) (Intent, error) {
 		}
 	}
 
-	// Default to Chat if similarity is low
+	// Default to Chat if similarity is low or ambiguous
 	intent := IntentChat
+	// Only promote to Coding if we are reasonably confident AND it's the clear winner
 	if maxSimilarity >= similarityThreshold && bestCategory == "Intent:Coding" {
 		intent = IntentCoding
 	}
 
-	fmt.Printf("Intent Classification: %s | Similarity: %.4f | Category: %s\n", intent, maxSimilarity, bestCategory)
+	if intent == IntentCoding {
+		fmt.Printf("Intent Classification: %s | Similarity: %.4f | Category: %s\n", intent, maxSimilarity, bestCategory)
+	}
 	return intent, nil
 }
 
 // SelectProvider implements the smart routing algorithm using semantic similarity.
-func (sr *SmartRouter) SelectProvider(req *Request) (ModelProvider, error) {
+func (sr *SmartRouter) SelectProvider(req *Request, intent Intent) (ModelProvider, error) {
 	embedding, err := sr.GetEmbedding(req.Input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get embedding for request: %w", err)
@@ -325,8 +329,13 @@ func (sr *SmartRouter) SelectProvider(req *Request) (ModelProvider, error) {
 	// Determine final category (handling fallback)
 	finalCategory := bestCategory
 	if maxSimilarity < similarityThreshold {
-		fmt.Printf("Similarity below threshold (%.2f). Defaulting to CloudModel.\n", similarityThreshold)
-		finalCategory = "Provider:Cloud"
+		fmt.Printf("Similarity below threshold (%.2f). Defaulting based on intent: %s\n", similarityThreshold, intent)
+		
+		if intent == IntentCoding {
+			finalCategory = "Provider:Cloud"
+		} else {
+			finalCategory = "Provider:Local"
+		}
 	}
 
 	// If LocalModel is selected, return the local provider

@@ -97,16 +97,7 @@ func TestRouter_ClassifiesUnitTestGenerationAsLocal(t *testing.T) {
 		mockResponses[tc.input] = tc.mockEmbedding
 
 		req := &Request{Input: tc.input}
-		provider, err := r.SelectProvider(req)
-		if err != nil {
-			t.Errorf("Router failed for input '%s': %v", tc.input, err)
-			continue
-		}
-
-		if provider.Name() != tc.expectedSource {
-			t.Errorf("Input: '%s'\nExpected Provider: %s\nGot Provider: %s", tc.input, tc.expectedSource, provider.Name())
-		}
-
+		
 		intent, err := r.ClassifyIntent(req)
 		if err != nil {
 			t.Errorf("ClassifyIntent failed for input '%s': %v", tc.input, err)
@@ -114,6 +105,16 @@ func TestRouter_ClassifiesUnitTestGenerationAsLocal(t *testing.T) {
 		}
 		if intent != tc.expectedIntent {
 			t.Errorf("Input: '%s'\nExpected Intent: %s\nGot Intent: %s", tc.input, tc.expectedIntent, intent)
+		}
+
+		provider, err := r.SelectProvider(req, intent)
+		if err != nil {
+			t.Errorf("Router failed for input '%s': %v", tc.input, err)
+			continue
+		}
+
+		if provider.Name() != tc.expectedSource {
+			t.Errorf("Input: '%s'\nExpected Provider: %s\nGot Provider: %s", tc.input, tc.expectedSource, provider.Name())
 		}
 	}
 }

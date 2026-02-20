@@ -6,6 +6,64 @@
 
 import * as jspb from "google-protobuf";
 
+export class StreamProcessResponse extends jspb.Message { 
+
+    hasProgress(): boolean;
+    clearProgress(): void;
+    getProgress(): ProgressUpdate | undefined;
+    setProgress(value?: ProgressUpdate): StreamProcessResponse;
+
+    hasFinalResponse(): boolean;
+    clearFinalResponse(): void;
+    getFinalResponse(): ProcessRequestResponse | undefined;
+    setFinalResponse(value?: ProcessRequestResponse): StreamProcessResponse;
+
+    getPayloadCase(): StreamProcessResponse.PayloadCase;
+
+    serializeBinary(): Uint8Array;
+    toObject(includeInstance?: boolean): StreamProcessResponse.AsObject;
+    static toObject(includeInstance: boolean, msg: StreamProcessResponse): StreamProcessResponse.AsObject;
+    static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+    static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+    static serializeBinaryToWriter(message: StreamProcessResponse, writer: jspb.BinaryWriter): void;
+    static deserializeBinary(bytes: Uint8Array): StreamProcessResponse;
+    static deserializeBinaryFromReader(message: StreamProcessResponse, reader: jspb.BinaryReader): StreamProcessResponse;
+}
+
+export namespace StreamProcessResponse {
+    export type AsObject = {
+        progress?: ProgressUpdate.AsObject,
+        finalResponse?: ProcessRequestResponse.AsObject,
+    }
+
+    export enum PayloadCase {
+        PAYLOAD_NOT_SET = 0,
+        PROGRESS = 1,
+        FINAL_RESPONSE = 2,
+    }
+
+}
+
+export class ProgressUpdate extends jspb.Message { 
+    getMessage(): string;
+    setMessage(value: string): ProgressUpdate;
+
+    serializeBinary(): Uint8Array;
+    toObject(includeInstance?: boolean): ProgressUpdate.AsObject;
+    static toObject(includeInstance: boolean, msg: ProgressUpdate): ProgressUpdate.AsObject;
+    static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+    static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+    static serializeBinaryToWriter(message: ProgressUpdate, writer: jspb.BinaryWriter): void;
+    static deserializeBinary(bytes: Uint8Array): ProgressUpdate;
+    static deserializeBinaryFromReader(message: ProgressUpdate, reader: jspb.BinaryReader): ProgressUpdate;
+}
+
+export namespace ProgressUpdate {
+    export type AsObject = {
+        message: string,
+    }
+}
+
 export class ProcessRequestRequest extends jspb.Message { 
     getInput(): string;
     setInput(value: string): ProcessRequestRequest;
@@ -76,6 +134,8 @@ export class ProcessRequestResponse extends jspb.Message {
     clearRoutingMetadata(): void;
     getRoutingMetadata(): RoutingMetadata | undefined;
     setRoutingMetadata(value?: RoutingMetadata): ProcessRequestResponse;
+    getValidationErrors(): string;
+    setValidationErrors(value: string): ProcessRequestResponse;
 
     serializeBinary(): Uint8Array;
     toObject(includeInstance?: boolean): ProcessRequestResponse.AsObject;
@@ -92,6 +152,7 @@ export namespace ProcessRequestResponse {
         output: string,
         fileChangesList: Array<FileChange.AsObject>,
         routingMetadata?: RoutingMetadata.AsObject,
+        validationErrors: string,
     }
 }
 

@@ -71,6 +71,134 @@ func (FileAction) EnumDescriptor() ([]byte, []int) {
 	return file_agent_proto_rawDescGZIP(), []int{0}
 }
 
+// The response message for StreamProcessRequest.
+type StreamProcessResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Payload:
+	//
+	//	*StreamProcessResponse_Progress
+	//	*StreamProcessResponse_FinalResponse
+	Payload       isStreamProcessResponse_Payload `protobuf_oneof:"payload"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StreamProcessResponse) Reset() {
+	*x = StreamProcessResponse{}
+	mi := &file_agent_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StreamProcessResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StreamProcessResponse) ProtoMessage() {}
+
+func (x *StreamProcessResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StreamProcessResponse.ProtoReflect.Descriptor instead.
+func (*StreamProcessResponse) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *StreamProcessResponse) GetPayload() isStreamProcessResponse_Payload {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *StreamProcessResponse) GetProgress() *ProgressUpdate {
+	if x != nil {
+		if x, ok := x.Payload.(*StreamProcessResponse_Progress); ok {
+			return x.Progress
+		}
+	}
+	return nil
+}
+
+func (x *StreamProcessResponse) GetFinalResponse() *ProcessRequestResponse {
+	if x != nil {
+		if x, ok := x.Payload.(*StreamProcessResponse_FinalResponse); ok {
+			return x.FinalResponse
+		}
+	}
+	return nil
+}
+
+type isStreamProcessResponse_Payload interface {
+	isStreamProcessResponse_Payload()
+}
+
+type StreamProcessResponse_Progress struct {
+	Progress *ProgressUpdate `protobuf:"bytes,1,opt,name=progress,proto3,oneof"`
+}
+
+type StreamProcessResponse_FinalResponse struct {
+	FinalResponse *ProcessRequestResponse `protobuf:"bytes,2,opt,name=final_response,json=finalResponse,proto3,oneof"`
+}
+
+func (*StreamProcessResponse_Progress) isStreamProcessResponse_Payload() {}
+
+func (*StreamProcessResponse_FinalResponse) isStreamProcessResponse_Payload() {}
+
+// Progress update during a long-running task.
+type ProgressUpdate struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Message       string                 `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProgressUpdate) Reset() {
+	*x = ProgressUpdate{}
+	mi := &file_agent_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProgressUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProgressUpdate) ProtoMessage() {}
+
+func (x *ProgressUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProgressUpdate.ProtoReflect.Descriptor instead.
+func (*ProgressUpdate) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ProgressUpdate) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 // The request message for ProcessRequest.
 type ProcessRequestRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
@@ -84,7 +212,7 @@ type ProcessRequestRequest struct {
 
 func (x *ProcessRequestRequest) Reset() {
 	*x = ProcessRequestRequest{}
-	mi := &file_agent_proto_msgTypes[0]
+	mi := &file_agent_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -96,7 +224,7 @@ func (x *ProcessRequestRequest) String() string {
 func (*ProcessRequestRequest) ProtoMessage() {}
 
 func (x *ProcessRequestRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[0]
+	mi := &file_agent_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -109,7 +237,7 @@ func (x *ProcessRequestRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessRequestRequest.ProtoReflect.Descriptor instead.
 func (*ProcessRequestRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{0}
+	return file_agent_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ProcessRequestRequest) GetInput() string {
@@ -152,7 +280,7 @@ type CloudProviderConfig struct {
 
 func (x *CloudProviderConfig) Reset() {
 	*x = CloudProviderConfig{}
-	mi := &file_agent_proto_msgTypes[1]
+	mi := &file_agent_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -164,7 +292,7 @@ func (x *CloudProviderConfig) String() string {
 func (*CloudProviderConfig) ProtoMessage() {}
 
 func (x *CloudProviderConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[1]
+	mi := &file_agent_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -177,7 +305,7 @@ func (x *CloudProviderConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloudProviderConfig.ProtoReflect.Descriptor instead.
 func (*CloudProviderConfig) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{1}
+	return file_agent_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *CloudProviderConfig) GetProvider() string {
@@ -203,17 +331,18 @@ func (x *CloudProviderConfig) GetApiKey() string {
 
 // The response message for ProcessRequest.
 type ProcessRequestResponse struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Output          string                 `protobuf:"bytes,1,opt,name=output,proto3" json:"output,omitempty"`                                          // AI generated output
-	FileChanges     []*FileChange          `protobuf:"bytes,2,rep,name=file_changes,json=fileChanges,proto3" json:"file_changes,omitempty"`             // Optional structured file modifications
-	RoutingMetadata *RoutingMetadata       `protobuf:"bytes,3,opt,name=routing_metadata,json=routingMetadata,proto3" json:"routing_metadata,omitempty"` // Optional metadata about the model/routing
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Output           string                 `protobuf:"bytes,1,opt,name=output,proto3" json:"output,omitempty"`                                             // AI generated output
+	FileChanges      []*FileChange          `protobuf:"bytes,2,rep,name=file_changes,json=fileChanges,proto3" json:"file_changes,omitempty"`                // Optional structured file modifications
+	RoutingMetadata  *RoutingMetadata       `protobuf:"bytes,3,opt,name=routing_metadata,json=routingMetadata,proto3" json:"routing_metadata,omitempty"`    // Optional metadata about the model/routing
+	ValidationErrors string                 `protobuf:"bytes,4,opt,name=validation_errors,json=validationErrors,proto3" json:"validation_errors,omitempty"` // Optional captured validation errors (e.g. test failures)
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ProcessRequestResponse) Reset() {
 	*x = ProcessRequestResponse{}
-	mi := &file_agent_proto_msgTypes[2]
+	mi := &file_agent_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -225,7 +354,7 @@ func (x *ProcessRequestResponse) String() string {
 func (*ProcessRequestResponse) ProtoMessage() {}
 
 func (x *ProcessRequestResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[2]
+	mi := &file_agent_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -238,7 +367,7 @@ func (x *ProcessRequestResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessRequestResponse.ProtoReflect.Descriptor instead.
 func (*ProcessRequestResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{2}
+	return file_agent_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ProcessRequestResponse) GetOutput() string {
@@ -262,6 +391,13 @@ func (x *ProcessRequestResponse) GetRoutingMetadata() *RoutingMetadata {
 	return nil
 }
 
+func (x *ProcessRequestResponse) GetValidationErrors() string {
+	if x != nil {
+		return x.ValidationErrors
+	}
+	return ""
+}
+
 // Represents a change to a specific file.
 type FileChange struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -274,7 +410,7 @@ type FileChange struct {
 
 func (x *FileChange) Reset() {
 	*x = FileChange{}
-	mi := &file_agent_proto_msgTypes[3]
+	mi := &file_agent_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -286,7 +422,7 @@ func (x *FileChange) String() string {
 func (*FileChange) ProtoMessage() {}
 
 func (x *FileChange) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[3]
+	mi := &file_agent_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -299,7 +435,7 @@ func (x *FileChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileChange.ProtoReflect.Descriptor instead.
 func (*FileChange) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{3}
+	return file_agent_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *FileChange) GetPath() string {
@@ -335,7 +471,7 @@ type RoutingMetadata struct {
 
 func (x *RoutingMetadata) Reset() {
 	*x = RoutingMetadata{}
-	mi := &file_agent_proto_msgTypes[4]
+	mi := &file_agent_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -347,7 +483,7 @@ func (x *RoutingMetadata) String() string {
 func (*RoutingMetadata) ProtoMessage() {}
 
 func (x *RoutingMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[4]
+	mi := &file_agent_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -360,7 +496,7 @@ func (x *RoutingMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RoutingMetadata.ProtoReflect.Descriptor instead.
 func (*RoutingMetadata) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{4}
+	return file_agent_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *RoutingMetadata) GetModelName() string {
@@ -388,7 +524,13 @@ var File_agent_proto protoreflect.FileDescriptor
 
 const file_agent_proto_rawDesc = "" +
 	"\n" +
-	"\vagent.proto\x12\x05agent\"\xaa\x01\n" +
+	"\vagent.proto\x12\x05agent\"\x9f\x01\n" +
+	"\x15StreamProcessResponse\x123\n" +
+	"\bprogress\x18\x01 \x01(\v2\x15.agent.ProgressUpdateH\x00R\bprogress\x12F\n" +
+	"\x0efinal_response\x18\x02 \x01(\v2\x1d.agent.ProcessRequestResponseH\x00R\rfinalResponseB\t\n" +
+	"\apayload\"*\n" +
+	"\x0eProgressUpdate\x12\x18\n" +
+	"\amessage\x18\x01 \x01(\tR\amessage\"\xaa\x01\n" +
 	"\x15ProcessRequestRequest\x12\x14\n" +
 	"\x05input\x18\x01 \x01(\tR\x05input\x12C\n" +
 	"\x0fprovider_config\x18\x02 \x01(\v2\x1a.agent.CloudProviderConfigR\x0eproviderConfig\x12\x19\n" +
@@ -397,11 +539,12 @@ const file_agent_proto_rawDesc = "" +
 	"\x13CloudProviderConfig\x12\x1a\n" +
 	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12\x17\n" +
-	"\aapi_key\x18\x03 \x01(\tR\x06apiKey\"\xa9\x01\n" +
+	"\aapi_key\x18\x03 \x01(\tR\x06apiKey\"\xd6\x01\n" +
 	"\x16ProcessRequestResponse\x12\x16\n" +
 	"\x06output\x18\x01 \x01(\tR\x06output\x124\n" +
 	"\ffile_changes\x18\x02 \x03(\v2\x11.agent.FileChangeR\vfileChanges\x12A\n" +
-	"\x10routing_metadata\x18\x03 \x01(\v2\x16.agent.RoutingMetadataR\x0froutingMetadata\"e\n" +
+	"\x10routing_metadata\x18\x03 \x01(\v2\x16.agent.RoutingMetadataR\x0froutingMetadata\x12+\n" +
+	"\x11validation_errors\x18\x04 \x01(\tR\x10validationErrors\"e\n" +
 	"\n" +
 	"FileChange\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
@@ -421,9 +564,10 @@ const file_agent_proto_rawDesc = "" +
 	"\n" +
 	"\x06UPDATE\x10\x01\x12\n" +
 	"\n" +
-	"\x06DELETE\x10\x022X\n" +
+	"\x06DELETE\x10\x022\xb0\x01\n" +
 	"\x05Agent\x12O\n" +
-	"\x0eProcessRequest\x12\x1c.agent.ProcessRequestRequest\x1a\x1d.agent.ProcessRequestResponse\"\x00B!Z\x1fcercano/source/server/pkg/protob\x06proto3"
+	"\x0eProcessRequest\x12\x1c.agent.ProcessRequestRequest\x1a\x1d.agent.ProcessRequestResponse\"\x00\x12V\n" +
+	"\x14StreamProcessRequest\x12\x1c.agent.ProcessRequestRequest\x1a\x1c.agent.StreamProcessResponse\"\x000\x01B!Z\x1fcercano/source/server/pkg/protob\x06proto3"
 
 var (
 	file_agent_proto_rawDescOnce sync.Once
@@ -438,27 +582,33 @@ func file_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_agent_proto_goTypes = []any{
 	(FileAction)(0),                // 0: agent.FileAction
-	(*ProcessRequestRequest)(nil),  // 1: agent.ProcessRequestRequest
-	(*CloudProviderConfig)(nil),    // 2: agent.CloudProviderConfig
-	(*ProcessRequestResponse)(nil), // 3: agent.ProcessRequestResponse
-	(*FileChange)(nil),             // 4: agent.FileChange
-	(*RoutingMetadata)(nil),        // 5: agent.RoutingMetadata
+	(*StreamProcessResponse)(nil),  // 1: agent.StreamProcessResponse
+	(*ProgressUpdate)(nil),         // 2: agent.ProgressUpdate
+	(*ProcessRequestRequest)(nil),  // 3: agent.ProcessRequestRequest
+	(*CloudProviderConfig)(nil),    // 4: agent.CloudProviderConfig
+	(*ProcessRequestResponse)(nil), // 5: agent.ProcessRequestResponse
+	(*FileChange)(nil),             // 6: agent.FileChange
+	(*RoutingMetadata)(nil),        // 7: agent.RoutingMetadata
 }
 var file_agent_proto_depIdxs = []int32{
-	2, // 0: agent.ProcessRequestRequest.provider_config:type_name -> agent.CloudProviderConfig
-	4, // 1: agent.ProcessRequestResponse.file_changes:type_name -> agent.FileChange
-	5, // 2: agent.ProcessRequestResponse.routing_metadata:type_name -> agent.RoutingMetadata
-	0, // 3: agent.FileChange.action:type_name -> agent.FileAction
-	1, // 4: agent.Agent.ProcessRequest:input_type -> agent.ProcessRequestRequest
-	3, // 5: agent.Agent.ProcessRequest:output_type -> agent.ProcessRequestResponse
-	5, // [5:6] is the sub-list for method output_type
-	4, // [4:5] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	2, // 0: agent.StreamProcessResponse.progress:type_name -> agent.ProgressUpdate
+	5, // 1: agent.StreamProcessResponse.final_response:type_name -> agent.ProcessRequestResponse
+	4, // 2: agent.ProcessRequestRequest.provider_config:type_name -> agent.CloudProviderConfig
+	6, // 3: agent.ProcessRequestResponse.file_changes:type_name -> agent.FileChange
+	7, // 4: agent.ProcessRequestResponse.routing_metadata:type_name -> agent.RoutingMetadata
+	0, // 5: agent.FileChange.action:type_name -> agent.FileAction
+	3, // 6: agent.Agent.ProcessRequest:input_type -> agent.ProcessRequestRequest
+	3, // 7: agent.Agent.StreamProcessRequest:input_type -> agent.ProcessRequestRequest
+	5, // 8: agent.Agent.ProcessRequest:output_type -> agent.ProcessRequestResponse
+	1, // 9: agent.Agent.StreamProcessRequest:output_type -> agent.StreamProcessResponse
+	8, // [8:10] is the sub-list for method output_type
+	6, // [6:8] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_agent_proto_init() }
@@ -466,13 +616,17 @@ func file_agent_proto_init() {
 	if File_agent_proto != nil {
 		return
 	}
+	file_agent_proto_msgTypes[0].OneofWrappers = []any{
+		(*StreamProcessResponse_Progress)(nil),
+		(*StreamProcessResponse_FinalResponse)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_proto_rawDesc), len(file_agent_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   5,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

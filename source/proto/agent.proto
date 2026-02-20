@@ -6,8 +6,24 @@ option go_package = "cercano/source/server/pkg/proto";
 
 // The Agent service definition.
 service Agent {
-  // ProcessRequest handles AI requests.
+  // ProcessRequest handles AI requests (Unary).
   rpc ProcessRequest (ProcessRequestRequest) returns (ProcessRequestResponse) {}
+
+  // StreamProcessRequest handles AI requests with progress updates (Streaming).
+  rpc StreamProcessRequest (ProcessRequestRequest) returns (stream StreamProcessResponse) {}
+}
+
+// The response message for StreamProcessRequest.
+message StreamProcessResponse {
+  oneof payload {
+    ProgressUpdate progress = 1;
+    ProcessRequestResponse final_response = 2;
+  }
+}
+
+// Progress update during a long-running task.
+message ProgressUpdate {
+  string message = 1;
 }
 
 // The request message for ProcessRequest.
@@ -30,6 +46,7 @@ message ProcessRequestResponse {
   string output = 1; // AI generated output
   repeated FileChange file_changes = 2; // Optional structured file modifications
   RoutingMetadata routing_metadata = 3; // Optional metadata about the model/routing
+  string validation_errors = 4; // Optional captured validation errors (e.g. test failures)
 }
 
 // Represents a change to a specific file.

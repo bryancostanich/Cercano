@@ -54,11 +54,23 @@ func main() {
 
 	// Initialize Providers
 	localProvider := llm.NewOllamaProvider(localModel, ollamaURL)
-	cloudProvider := llm.NewMockProvider("CloudModel")
+	
+	// Default to Mock for cloud, but upgrade if keys are present
+	var cloudProvider agent.ModelProvider = llm.NewMockProvider("CloudModel")
+	
+	// Check for Cloud Keys
+	geminiKey := os.Getenv("GEMINI_API_KEY")
+	if geminiKey != "" {
+		fmt.Println("Main: Detected GEMINI_API_KEY. Initializing real Cloud Provider (Google)...")
+		cp, err := llm.NewCloudModelProvider(context.Background(), "google", "gemini-1.5-flash", geminiKey)
+		if err == nil {
+			cloudProvider = cp
+		} else {
+			fmt.Printf("Main: Failed to init real Cloud Provider: %v\n", err)
+		}
+	}
 
 	localHandler := tools.NewGenericGenerator(localProvider)
-	// TODO: Create a real CloudHandler when cloud integration is done.
-	// For now, we reuse the localHandler or pass the mock.
 	cloudHandler := tools.NewGenericGenerator(cloudProvider) 
 
 	validator := tools.NewGoValidator()

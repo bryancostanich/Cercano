@@ -19,7 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Agent_ProcessRequest_FullMethodName = "/agent.Agent/ProcessRequest"
+	Agent_ProcessRequest_FullMethodName       = "/agent.Agent/ProcessRequest"
+	Agent_StreamProcessRequest_FullMethodName = "/agent.Agent/StreamProcessRequest"
 )
 
 // AgentClient is the client API for Agent service.
@@ -28,8 +29,10 @@ const (
 //
 // The Agent service definition.
 type AgentClient interface {
-	// ProcessRequest handles AI requests.
+	// ProcessRequest handles AI requests (Unary).
 	ProcessRequest(ctx context.Context, in *ProcessRequestRequest, opts ...grpc.CallOption) (*ProcessRequestResponse, error)
+	// StreamProcessRequest handles AI requests with progress updates (Streaming).
+	StreamProcessRequest(ctx context.Context, in *ProcessRequestRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamProcessResponse], error)
 }
 
 type agentClient struct {
@@ -50,14 +53,35 @@ func (c *agentClient) ProcessRequest(ctx context.Context, in *ProcessRequestRequ
 	return out, nil
 }
 
+func (c *agentClient) StreamProcessRequest(ctx context.Context, in *ProcessRequestRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamProcessResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[0], Agent_StreamProcessRequest_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ProcessRequestRequest, StreamProcessResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_StreamProcessRequestClient = grpc.ServerStreamingClient[StreamProcessResponse]
+
 // AgentServer is the server API for Agent service.
 // All implementations must embed UnimplementedAgentServer
 // for forward compatibility.
 //
 // The Agent service definition.
 type AgentServer interface {
-	// ProcessRequest handles AI requests.
+	// ProcessRequest handles AI requests (Unary).
 	ProcessRequest(context.Context, *ProcessRequestRequest) (*ProcessRequestResponse, error)
+	// StreamProcessRequest handles AI requests with progress updates (Streaming).
+	StreamProcessRequest(*ProcessRequestRequest, grpc.ServerStreamingServer[StreamProcessResponse]) error
 	mustEmbedUnimplementedAgentServer()
 }
 
@@ -70,6 +94,9 @@ type UnimplementedAgentServer struct{}
 
 func (UnimplementedAgentServer) ProcessRequest(context.Context, *ProcessRequestRequest) (*ProcessRequestResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ProcessRequest not implemented")
+}
+func (UnimplementedAgentServer) StreamProcessRequest(*ProcessRequestRequest, grpc.ServerStreamingServer[StreamProcessResponse]) error {
+	return status.Error(codes.Unimplemented, "method StreamProcessRequest not implemented")
 }
 func (UnimplementedAgentServer) mustEmbedUnimplementedAgentServer() {}
 func (UnimplementedAgentServer) testEmbeddedByValue()               {}
@@ -110,6 +137,17 @@ func _Agent_ProcessRequest_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Agent_StreamProcessRequest_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(ProcessRequestRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AgentServer).StreamProcessRequest(m, &grpc.GenericServerStream[ProcessRequestRequest, StreamProcessResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_StreamProcessRequestServer = grpc.ServerStreamingServer[StreamProcessResponse]
+
 // Agent_ServiceDesc is the grpc.ServiceDesc for Agent service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -122,6 +160,12 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Agent_ProcessRequest_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "StreamProcessRequest",
+			Handler:       _Agent_StreamProcessRequest_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "agent.proto",
 }

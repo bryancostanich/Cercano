@@ -13,7 +13,7 @@ suite('CercanoClient Test Suite', () => {
         agentClientStub = sinon.createStubInstance(AgentClient);
     });
 
-    test('process returns output on success', async () => {
+    test('process returns response object on success', async () => {
         client = new CercanoClient();
         (client as any).client = agentClientStub;
 
@@ -27,7 +27,7 @@ suite('CercanoClient Test Suite', () => {
         });
 
         const result = await client.process("input");
-        assert.strictEqual(result, expectedOutput);
+        assert.strictEqual(result.getOutput(), expectedOutput);
     });
 
     test('process throws error on failure', async () => {
@@ -49,7 +49,7 @@ suite('CercanoClient Test Suite', () => {
         }
     });
 
-    test('process includes provider config if provided', async () => {
+    test('process includes context and provider config if provided', async () => {
         client = new CercanoClient();
         (client as any).client = agentClientStub;
 
@@ -69,10 +69,13 @@ suite('CercanoClient Test Suite', () => {
             apiKey: "test-key"
         };
 
-        // Now process takes 2 arguments
-        await client.process("input", providerConfig);
+        // Signature: input, workDir, fileName, providerConfig
+        await client.process("input", "/tmp", "test.txt", providerConfig);
 
         assert.ok(capturedRequest);
+        assert.strictEqual(capturedRequest!.getWorkDir(), "/tmp");
+        assert.strictEqual(capturedRequest!.getFileName(), "test.txt");
+
         const config = capturedRequest!.getProviderConfig();
         assert.ok(config);
         assert.strictEqual(config!.getProvider(), "gemini");

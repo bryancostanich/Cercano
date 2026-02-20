@@ -6,10 +6,10 @@
 Add adk-go to the project and establish the new package structure without breaking anything.
 
 ### Tasks
-- [ ] Task: Add `google.golang.org/adk` to `go.mod` and run `go mod tidy`.
-- [ ] Task: Create `internal/loop/adapters/` package skeleton for agent adapter code.
-- [ ] Task: Verify existing tests still pass after dependency addition.
-- [ ] Task: Conductor - User Manual Verification 'Dependency & Package Setup' (Protocol in workflow.md)
+- [x] Task: Add `google.golang.org/adk` to `go.mod` and run `go mod tidy`. [72705c7]
+- [x] Task: Create `internal/loop/adapters/` package skeleton for agent adapter code. [72705c7]
+- [x] Task: Verify existing tests still pass after dependency addition. [72705c7]
+- [x] Task: Conductor - User Manual Verification 'Dependency & Package Setup' (Protocol in workflow.md)
 
 ## Phase 2: Agent Adapter Layer
 

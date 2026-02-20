@@ -45,7 +45,7 @@ targetFile := filepath.Join(sandboxDir, "calculator.go")
 	defer cancel()
 
 	t.Log("Generating and verifying tests for calculator.go (with self-correction)...")
-	finalCode, err := coordinator.Coordinate(ctx, "Write table-driven unit tests for the following Go code using the standard 'testing' package.", string(content), sandboxDir, "calculator_test.go")
+	finalCode, err := coordinator.Coordinate(ctx, "Write table-driven unit tests for the following Go code using the standard 'testing' package.", string(content), sandboxDir, "calculator_test.go", nil)
 	if err != nil {
 		t.Fatalf("Generation/Self-Correction failed: %v", err)
 	}

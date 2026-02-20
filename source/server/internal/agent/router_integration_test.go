@@ -100,7 +100,8 @@ func TestSmartRouter_Integration_SelectProvider(t *testing.T) {
 			t.Logf("Input: %s", tc.input)
 
 			req := &agent.Request{Input: tc.input}
-			selectedProvider, err := smartRouter.SelectProvider(req)
+			intent, _ := smartRouter.ClassifyIntent(req)
+			selectedProvider, err := smartRouter.SelectProvider(req, intent)
 			if err != nil {
 				t.Errorf("SelectProvider returned an error: %v", err)
 				return

@@ -11,7 +11,7 @@ type mockRouter struct {
 	ModelProviders map[string]ModelProvider
 }
 
-func (m *mockRouter) SelectProvider(req *Request) (ModelProvider, error) {
+func (m *mockRouter) SelectProvider(req *Request, intent Intent) (ModelProvider, error) {
 	return m.provider, nil
 }
 
@@ -32,7 +32,7 @@ func (m *mockModelProvider) Name() string { return m.name }
 
 type mockCoordinator struct{}
 
-func (m *mockCoordinator) Coordinate(ctx context.Context, instruction, inputCode, workDir, fileName string) (*Response, error) {
+func (m *mockCoordinator) Coordinate(ctx context.Context, instruction, inputCode, workDir, fileName string, progress ProgressFunc) (*Response, error) {
 	return &Response{Output: "coordinated output"}, nil
 }
 
@@ -73,6 +73,49 @@ func TestAgent_ProcessRequest_CodingIntent(t *testing.T) {
 	if res.Output != "coordinated output" {
 		t.Errorf("Expected coordinated output, got %s", res.Output)
 	}
+}
+
+func TestAgent_ProcessRequest_UnitTestFilenameAdjustment(t *testing.T) {
+	router := &mockRouter{intent: IntentCoding, provider: &mockModelProvider{name: "mock"}}
+	
+	capturedFile := ""
+	coordinator := &MockCoordinator{
+		CoordinateFunc: func(ctx context.Context, instruction, inputCode, workDir, fileName string, progress ProgressFunc) (*Response, error) {
+			capturedFile = fileName
+			return &Response{Output: "ok"}, nil
+		},
+	}
+	a := NewAgent(router, coordinator)
+
+	ctx := context.Background()
+	req := &Request{
+		Input:    "Generate unit tests for this",
+		WorkDir:  "/tmp",
+		FileName: "logic.go",
+	}
+	_, err := a.ProcessRequest(ctx, req)
+
+	if err != nil {
+		t.Fatalf("ProcessRequest failed: %v", err)
+	}
+	if capturedFile != "logic_test.go" {
+		t.Errorf("Expected logic_test.go for singular, got %s", capturedFile)
+	}
+
+	// Test plural
+	req.Input = "Generate unit tests"
+	_, err = a.ProcessRequest(ctx, req)
+	if capturedFile != "logic_test.go" {
+		t.Errorf("Expected logic_test.go for plural, got %s", capturedFile)
+	}
+}
+
+type MockCoordinator struct {
+	CoordinateFunc func(ctx context.Context, instruction, inputCode, workDir, fileName string, progress ProgressFunc) (*Response, error)
+}
+
+func (m *MockCoordinator) Coordinate(ctx context.Context, instruction, inputCode, workDir, fileName string, progress ProgressFunc) (*Response, error) {
+	return m.CoordinateFunc(ctx, instruction, inputCode, workDir, fileName, progress)
 }
 
 func TestAgent_ProcessRequest_ExplicitCloudOverride(t *testing.T) {

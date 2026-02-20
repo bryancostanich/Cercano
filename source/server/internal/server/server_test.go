@@ -33,7 +33,7 @@ func (m *mockProvider) Name() string {
 
 type mockRouter struct{}
 
-func (m *mockRouter) SelectProvider(req *agent.Request) (agent.ModelProvider, error) {
+func (m *mockRouter) SelectProvider(req *agent.Request, intent agent.Intent) (agent.ModelProvider, error) {
 	if req.ProviderConfig != nil {
 		return &mockProvider{name: req.ProviderConfig.Provider}, nil
 	}
@@ -53,7 +53,7 @@ func (m *mockRouter) GetModelProviders() map[string]agent.ModelProvider {
 
 type mockCoordinator struct{}
 
-func (m *mockCoordinator) Coordinate(ctx context.Context, instruction, inputCode, workDir, fileName string) (*agent.Response, error) {
+func (m *mockCoordinator) Coordinate(ctx context.Context, instruction, inputCode, workDir, fileName string, progress agent.ProgressFunc) (*agent.Response, error) {
 	return &agent.Response{Output: "coordinated output"}, nil
 }
 

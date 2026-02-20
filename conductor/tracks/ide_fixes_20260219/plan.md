@@ -27,5 +27,7 @@ Ensure the fixed workflow is covered by tests and verified manually end-to-end.
     - [x] Open the VS Code extension in Extension Development Host.
     - [x] Send a coding request; confirm file tree appears.
     - [x] Confirm Apply Changes writes file content correctly.
+    - [x] Confirm Preview Changes opens a diff view.
+    - [x] Confirm Reject closes the diff view and dismisses without writing.
     - [x] Known limitation: buttons persist after use (VS Code Chat API limitation; accepted).
 - [x] Task: Conductor - User Manual Verification 'End-to-End Verification' (Protocol in workflow.md)

@@ -1,7 +1,12 @@
 import * as vscode from 'vscode';
 import { CercanoClient } from './client';
+import { buildFollowupArgs, buildReplaceRange } from './extensionHelpers';
 
 let client: CercanoClient;
+
+// Track validated contents and processed responses across turns
+const validatedContents = new Map<string, string>();
+const processedResponses = new Set<string>();
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Cercano: Activating extension (Native Chat Mode)...');
@@ -66,27 +71,32 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(vscode.commands.registerCommand('cercano.showConfig', showConfigMenu));
 
-    const participant = vscode.chat.createChatParticipant("cercano-chat", async (request, contextChat, response, token) => {
+    const participant = vscode.chat.createChatParticipant("cercano-chat", async (request: vscode.ChatRequest, contextChat: vscode.ChatContext, response: vscode.ChatResponseStream, token: vscode.CancellationToken): Promise<vscode.ChatResult> => {
         if (request.command === 'config') {
             await showConfigMenu();
             response.markdown('Configuration menu opened.');
-            return;
+            return {};
         }
 
         console.log('Cercano: Chat request received:', request.prompt);
-        response.progress("Routing request...");
+        const responseId = Date.now().toString(); // Simple unique ID for this response
         
         // 1. Gather IDE Context
         const editor = vscode.window.activeTextEditor;
         let contextText = "";
+        let workDir = "";
+        let fileName = "";
+
         if (editor) {
             const document = editor.document;
             const selection = editor.selection;
             const text = selection.isEmpty ? document.getText() : document.getText(selection);
-            const filename = document.fileName;
             
-            contextText = `\n\n--- Context from ${filename} ---\n${text}\n--- End Context ---\n`;
-            console.log(`Cercano: Included context from ${filename}`);
+            fileName = require('path').basename(document.fileName);
+            workDir = require('path').dirname(document.fileName);
+            
+            contextText = `\n\n--- Context from ${fileName} ---\n${text}\n--- End Context ---\n`;
+            console.log(`Cercano: Included context from ${fileName} in ${workDir}`);
         }
 
         // 2. Resolve Provider Configuration
@@ -106,7 +116,7 @@ export function activate(context: vscode.ExtensionContext) {
                     model: model,
                     apiKey: apiKey
                 };
-                console.log(`Cercano: Using cloud provider: ${provider}, model: ${model}`);
+                console.log(`Cercano: Sending cloud preference to agent: ${provider} (${model})`);
             } else {
                 response.markdown(`Warning: No API key found for **${provider}**. Please run the "Cercano: Set ${provider === 'google' ? 'Gemini' : 'Anthropic'} API Key" command. Falling back to default routing.`);
             }
@@ -116,23 +126,44 @@ export function activate(context: vscode.ExtensionContext) {
         const fullPrompt = request.prompt + contextText;
 
         try {
-            // 4. Call gRPC backend
-            const result = await client.process(fullPrompt, providerConfig);
+            // 4. Call gRPC backend with streaming
+            const result = await client.processStream(
+                fullPrompt, 
+                workDir, 
+                fileName, 
+                providerConfig,
+                (msg) => response.progress(msg)
+            );
             
             // Show markdown output
             response.markdown(result.getOutput());
 
-            // 5. Handle File Changes via WorkspaceEdit
+            // 5. Show Routing Info
+            const metadata = result.getRoutingMetadata();
+            if (metadata) {
+                const modelName = metadata.getModelName();
+                const escalated = metadata.getEscalated();
+                response.markdown(`\n\n*(Processed by: **${modelName}**${escalated ? ' [Escalated]' : ''})*`);
+            }
+
+            // 6. Show Validation Errors if any
+            const validationErrors = result.getValidationErrors();
+            if (validationErrors) {
+                response.markdown(`\n\n---\n### ⚠️ Validation Issues\nSome issues were detected during generation:\n\n\`\`\`\n${validationErrors}\n\`\`\``);
+            }
+
+            // 7. Handle File Changes via FileTree and followups
             const fileChanges = result.getFileChangesList();
             if (fileChanges && fileChanges.length > 0) {
                 const edit = new vscode.WorkspaceEdit();
                 const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                const fileTreeItems: vscode.ChatResponseFileTree[] = [];
+                const paths: string[] = [];
 
                 for (const change of fileChanges) {
                     const relativePath = change.getPath();
                     const content = change.getContent();
-                    const action = change.getAction(); // This is an enum (0=CREATE, 1=UPDATE, 2=DELETE)
-
+                    
                     let fileUri: vscode.Uri;
                     if (workspaceFolder) {
                         fileUri = vscode.Uri.file(require('path').join(workspaceFolder, relativePath));
@@ -140,47 +171,122 @@ export function activate(context: vscode.ExtensionContext) {
                         fileUri = vscode.Uri.file(relativePath);
                     }
 
-                    if (action === 0) { // CREATE
-                        edit.createFile(fileUri, { ignoreIfExists: true });
-                        edit.insert(fileUri, new vscode.Position(0, 0), content);
-                    } else if (action === 1) { // UPDATE
-                        // For UPDATE, we currently replace the whole file content
-                        // In a more advanced version, we might use diffing or line-based edits.
-                        const document = await vscode.workspace.openTextDocument(fileUri);
-                        const fullRange = new vscode.Range(
-                            document.positionAt(0),
-                            document.positionAt(document.getText().length)
-                        );
-                        edit.replace(fileUri, fullRange, content);
-                    } else if (action === 2) { // DELETE
-                        edit.deleteFile(fileUri);
-                    }
+                    fileTreeItems.push({ name: relativePath });
+                    paths.push(relativePath);
+
+                    // Store the validated content for this specific file/response
+                    const changeId = `${responseId}:${relativePath}`;
+                    validatedContents.set(changeId, content);
                 }
 
-                response.markdown("\n\n---\n### 📂 Proposed File Changes\nCercano has generated file modifications. Click below to review and apply them.");
-                
-                // Show a button/command to apply the edits with a preview
-                response.button({
-                    command: "cercano.applyChanges",
-                    title: "Apply Changes",
-                    arguments: [edit]
-                });
+                // Show rich file tree
+                if (workspaceFolder) {
+                    response.filetree(fileTreeItems, vscode.Uri.file(workspaceFolder));
+                }
+
+                response.markdown("\n\nCercano has proposed modifications to the files listed above.");
+
+                // Inline action buttons — pass full args (responseId + filePaths) directly
+                const buttonArgs = buildFollowupArgs({ responseId, filePaths: paths });
+                response.button({ title: 'Apply Changes', command: 'cercano.applyChanges', arguments: [buttonArgs] });
+                response.button({ title: 'Preview Changes', command: 'cercano.previewChanges', arguments: [buttonArgs] });
+                response.button({ title: 'Reject', command: 'cercano.rejectChanges', arguments: [{ responseId }] });
             }
 
         } catch (err: any) {
             console.error('Cercano: Error processing request:', err);
             response.markdown(`Error: ${err.message || err}`);
         }
+
+        return {};
     });
 
-    // Register the command to apply changes with preview
-    context.subscriptions.push(vscode.commands.registerCommand('cercano.applyChanges', async (edit: vscode.WorkspaceEdit) => {
+    // Register the command to preview changes
+    context.subscriptions.push(vscode.commands.registerCommand('cercano.previewChanges', async (args: { responseId: string, filePaths: string[] }) => {
+        for (const relativePath of args.filePaths) {
+            const changeId = `${args.responseId}:${relativePath}`;
+            const newContent = validatedContents.get(changeId);
+            if (newContent === undefined) continue;
+
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+            const fileUri = workspaceFolder ? vscode.Uri.file(require('path').join(workspaceFolder, relativePath)) : vscode.Uri.file(relativePath);
+            
+            // Check if file exists for original content
+            let originalUri = fileUri;
+            let fileExists = true;
+            try {
+                await vscode.workspace.fs.stat(fileUri);
+            } catch {
+                fileExists = false;
+                // If it doesn't exist, we'll diff against an empty temporary file
+                originalUri = vscode.Uri.parse(`cercano-empty:empty`);
+                const emptyProvider = new class implements vscode.TextDocumentContentProvider {
+                    provideTextDocumentContent() { return ""; }
+                };
+                context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('cercano-empty', emptyProvider));
+            }
+
+            const previewUri = vscode.Uri.parse(`cercano-preview:${fileUri.path}?${args.responseId}`);
+            
+            const provider = new class implements vscode.TextDocumentContentProvider {
+                provideTextDocumentContent() { return newContent; }
+            };
+            context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('cercano-preview', provider));
+
+            const title = fileExists ? `Cercano Preview: ${relativePath}` : `Cercano Preview: ${relativePath} (New File)`;
+            await vscode.commands.executeCommand('vscode.diff', originalUri, previewUri, title);
+        }
+    }));
+
+    // Register the command to apply changes
+    context.subscriptions.push(vscode.commands.registerCommand('cercano.applyChanges', async (args: { responseId: string, filePaths: string[] }) => {
+        if (processedResponses.has(args.responseId)) {
+            vscode.window.showInformationMessage("Cercano: These changes have already been handled.");
+            return;
+        }
+
+        const edit = new vscode.WorkspaceEdit();
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const fs = require('fs');
+
+        for (const relativePath of args.filePaths) {
+            const changeId = `${args.responseId}:${relativePath}`;
+            const content = validatedContents.get(changeId);
+            if (content === undefined) continue;
+
+            const fileUri = workspaceFolder ? vscode.Uri.file(require('path').join(workspaceFolder, relativePath)) : vscode.Uri.file(relativePath);
+            
+            if (!fs.existsSync(fileUri.fsPath)) {
+                edit.createFile(fileUri, { ignoreIfExists: true });
+                edit.insert(fileUri, new vscode.Position(0, 0), content);
+            } else {
+                const doc = await vscode.workspace.openTextDocument(fileUri);
+                const r = buildReplaceRange(doc.lineCount);
+                const range = new vscode.Range(
+                    new vscode.Position(r.startLine, r.startCharacter),
+                    new vscode.Position(r.endLine, r.endCharacter)
+                );
+                edit.replace(fileUri, range, content);
+            }
+        }
+
         const success = await vscode.workspace.applyEdit(edit);
+        
         if (success) {
-            vscode.window.showInformationMessage("Cercano: Changes applied successfully.");
+            processedResponses.add(args.responseId);
+            if (args.filePaths.length > 0) {
+                const firstUri = workspaceFolder ? vscode.Uri.file(require('path').join(workspaceFolder, args.filePaths[0])) : vscode.Uri.file(args.filePaths[0]);
+                await vscode.window.showTextDocument(firstUri);
+                vscode.window.showInformationMessage("Cercano: Changes applied.");
+            }
         } else {
             vscode.window.showErrorMessage("Cercano: Failed to apply changes.");
         }
+    }));
+
+    context.subscriptions.push(vscode.commands.registerCommand('cercano.rejectChanges', async (args: { responseId: string }) => {
+        processedResponses.add(args.responseId);
+        vscode.window.showInformationMessage("Cercano: Changes rejected.");
     }));
 
     participant.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'icon.svg');

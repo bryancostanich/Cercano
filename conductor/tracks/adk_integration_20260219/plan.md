@@ -28,7 +28,7 @@ Wrap existing ModelProvider and Validator implementations as ADK agent.Agent typ
     - [x] Green phase: Implement counter read/write in ValidatorAgent; wire provider selection.
 - [x] Task: Conductor - User Manual Verification 'Agent Adapter Layer' (Protocol in workflow.md)
 
-## Phase 3: LoopAgent Coordinator
+## Phase 3: LoopAgent Coordinator [checkpoint: 50b73cf]
 
 ### Objective
 Replace GenerationCoordinator with an ADK-backed implementation satisfying the existing Coordinator interface.

@@ -26,5 +26,5 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 ---
 
-- [ ] **Track: SmartRouter classification improvements**
-*Notes: "Tell me about this class" misclassified as Coding intent (similarity 0.5592). Explanation/analysis requests need better prototype coverage or a confidence threshold fallback.*
+- [x] **Track: SmartRouter classification improvements** [checkpoint: 2365d75]
+*Notes: Fixed by replacing single nearest-neighbor with top-K (K=3) average scoring per category, and stripping VS Code file context before embedding to prevent source code from skewing classification.*

@@ -40,7 +40,7 @@ Replace GenerationCoordinator with an ADK-backed implementation satisfying the e
     - [x] Preserve backup/restore file behaviour and filename inference step.
 - [x] Task: Wire `NewADKCoordinator` into `cmd/agent/main.go` replacing `NewGenerationCoordinator`.
 - [x] Task: Run full test suite; fix any regressions.
-- [ ] Task: Conductor - User Manual Verification 'LoopAgent Coordinator' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'LoopAgent Coordinator' (Protocol in workflow.md)
 
 ## Phase 4: Streaming & SessionService
 

@@ -8,6 +8,8 @@ import (
 	"io/ioutil"
 	"math"
 	"net/http"
+	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -128,6 +130,7 @@ const (
 	ollamaAPIURL          = "http://localhost:11434/api/generate"
 	ollamaEmbeddingAPIURL = "http://localhost:11434/api/embeddings"
 	similarityThreshold   = 0.50
+	classificationTopK    = 3
 )
 
 // SmartRouter implements the Router interface with routing logic based on semantic similarity.
@@ -273,58 +276,84 @@ func CosineSimilarity(a, b []float64) float64 {
 	return dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
 }
 
+// contextDelimiter is the marker the VS Code extension uses to append file context.
+const contextDelimiter = "--- Context from "
+
+// extractQueryText strips appended file context from the input, returning only
+// the user's query. This prevents source code context from skewing embeddings.
+func extractQueryText(input string) string {
+	if idx := strings.Index(input, contextDelimiter); idx > 0 {
+		return strings.TrimSpace(input[:idx])
+	}
+	return input
+}
+
+// topKAveragePerCategory computes the mean of the top-K cosine similarities
+// per category and returns the category with the highest average.
+// Categories with fewer than K prototypes use all available.
+func topKAveragePerCategory(queryEmbedding []float64, prototypes []PrototypeEmbedding, k int) (bestCategory string, bestAvg float64) {
+	// Group similarities by category
+	catSims := make(map[string][]float64)
+	for _, proto := range prototypes {
+		sim := CosineSimilarity(queryEmbedding, proto.Embedding)
+		catSims[proto.Category] = append(catSims[proto.Category], sim)
+	}
+
+	bestAvg = -1.0
+	for cat, sims := range catSims {
+		// Sort ascending so top-K are at the end
+		sort.Float64s(sims)
+		n := k
+		if n > len(sims) {
+			n = len(sims)
+		}
+		var sum float64
+		for i := len(sims) - n; i < len(sims); i++ {
+			sum += sims[i]
+		}
+		avg := sum / float64(n)
+		if avg > bestAvg {
+			bestAvg = avg
+			bestCategory = cat
+		}
+	}
+	return
+}
+
 // ClassifyIntent determines if the user's request is a coding task or a chat task.
 func (sr *SmartRouter) ClassifyIntent(req *Request) (Intent, error) {
-	embedding, err := sr.GetEmbedding(req.Input)
+	queryText := extractQueryText(req.Input)
+	embedding, err := sr.GetEmbedding(queryText)
 	if err != nil {
 		return "", fmt.Errorf("failed to get embedding for request: %w", err)
 	}
 
-	var bestCategory string
-	var maxSimilarity float64 = -1.0
-
-	for _, proto := range sr.IntentPrototypes {
-		sim := CosineSimilarity(embedding, proto.Embedding)
-		if sim > maxSimilarity {
-			maxSimilarity = sim
-			bestCategory = proto.Category
-		}
-	}
+	bestCategory, bestAvg := topKAveragePerCategory(embedding, sr.IntentPrototypes, classificationTopK)
 
 	// Default to Chat if similarity is low or ambiguous
 	intent := IntentChat
 	// Only promote to Coding if we are reasonably confident AND it's the clear winner
-	if maxSimilarity >= similarityThreshold && bestCategory == "Intent:Coding" {
+	if bestAvg >= similarityThreshold && bestCategory == "Intent:Coding" {
 		intent = IntentCoding
 	}
 
 	if intent == IntentCoding {
-		fmt.Printf("Intent Classification: %s | Similarity: %.4f | Category: %s\n", intent, maxSimilarity, bestCategory)
+		fmt.Printf("Intent Classification: %s | Top-%d Avg Similarity: %.4f | Category: %s\n", intent, classificationTopK, bestAvg, bestCategory)
 	}
 	return intent, nil
 }
 
 // SelectProvider implements the smart routing algorithm using semantic similarity.
 func (sr *SmartRouter) SelectProvider(req *Request, intent Intent) (ModelProvider, error) {
-	embedding, err := sr.GetEmbedding(req.Input)
+	queryText := extractQueryText(req.Input)
+	embedding, err := sr.GetEmbedding(queryText)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get embedding for request: %w", err)
 	}
 
-	var bestCategory string
-	var maxSimilarity float64 = -1.0
-	var bestPhrase string
+	bestCategory, maxSimilarity := topKAveragePerCategory(embedding, sr.ProviderPrototypes, classificationTopK)
 
-	for _, proto := range sr.ProviderPrototypes {
-		sim := CosineSimilarity(embedding, proto.Embedding)
-		if sim > maxSimilarity {
-			maxSimilarity = sim
-			bestCategory = proto.Category
-			bestPhrase = proto.Phrase
-		}
-	}
-
-	fmt.Printf("Router Decision: %s | Similarity: %.4f | Closest Prototype: '%s'\n", bestCategory, maxSimilarity, bestPhrase)
+	fmt.Printf("Router Decision: %s | Top-%d Avg Similarity: %.4f\n", bestCategory, classificationTopK, maxSimilarity)
 
 	// Determine final category (handling fallback)
 	finalCategory := bestCategory

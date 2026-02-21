@@ -23,3 +23,8 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 - [ ] **Track: Replace GenerationCoordinator with Google ADK LoopAgent**
 *Link: [./tracks/adk_integration_20260219/](./tracks/adk_integration_20260219/)*
+
+---
+
+- [ ] **Track: SmartRouter classification improvements**
+*Notes: "Tell me about this class" misclassified as Coding intent (similarity 0.5592). Explanation/analysis requests need better prototype coverage or a confidence threshold fallback.*

@@ -64,9 +64,10 @@ func (s *Server) StreamProcessRequest(req *proto.ProcessRequestRequest, stream p
 
 func (s *Server) mapRequest(req *proto.ProcessRequestRequest) *agent.Request {
 	agentReq := &agent.Request{
-		Input:    req.Input,
-		WorkDir:  req.WorkDir,
-		FileName: req.FileName,
+		Input:          req.Input,
+		WorkDir:        req.WorkDir,
+		FileName:       req.FileName,
+		ConversationID: req.ConversationId,
 	}
 	if req.ProviderConfig != nil {
 		agentReq.ProviderConfig = &agent.ProviderConfig{

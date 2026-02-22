@@ -18,7 +18,8 @@ export class CercanoClient {
         workDir?: string,
         fileName?: string,
         providerConfig?: { provider: string, model: string, apiKey: string },
-        onProgress?: (message: string) => void
+        onProgress?: (message: string) => void,
+        conversationId?: string
     ): Promise<ProcessRequestResponse> {
         return new Promise((resolve, reject) => {
             const request = new ProcessRequestRequest();
@@ -26,6 +27,7 @@ export class CercanoClient {
 
             if (workDir) { request.setWorkDir(workDir); }
             if (fileName) { request.setFileName(fileName); }
+            if (conversationId) { request.setConversationId(conversationId); }
 
             if (providerConfig) {
                 const config = new CloudProviderConfig();
@@ -67,13 +69,14 @@ export class CercanoClient {
         });
     }
 
-    public process(input: string, workDir?: string, fileName?: string, providerConfig?: { provider: string, model: string, apiKey: string }): Promise<ProcessRequestResponse> {
+    public process(input: string, workDir?: string, fileName?: string, providerConfig?: { provider: string, model: string, apiKey: string }, conversationId?: string): Promise<ProcessRequestResponse> {
         return new Promise((resolve, reject) => {
             const request = new ProcessRequestRequest();
             request.setInput(input);
 
             if (workDir) { request.setWorkDir(workDir); }
             if (fileName) { request.setFileName(fileName); }
+            if (conversationId) { request.setConversationId(conversationId); }
 
             if (providerConfig) {
                 const config = new CloudProviderConfig();

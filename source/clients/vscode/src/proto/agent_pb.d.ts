@@ -76,6 +76,8 @@ export class ProcessRequestRequest extends jspb.Message {
     setWorkDir(value: string): ProcessRequestRequest;
     getFileName(): string;
     setFileName(value: string): ProcessRequestRequest;
+    getConversationId(): string;
+    setConversationId(value: string): ProcessRequestRequest;
 
     serializeBinary(): Uint8Array;
     toObject(includeInstance?: boolean): ProcessRequestRequest.AsObject;
@@ -93,6 +95,7 @@ export namespace ProcessRequestRequest {
         providerConfig?: CloudProviderConfig.AsObject,
         workDir: string,
         fileName: string,
+        conversationId: string,
     }
 }
 

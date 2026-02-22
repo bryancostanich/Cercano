@@ -570,7 +570,8 @@ proto.agent.ProcessRequestRequest.toObject = function(includeInstance, msg) {
     input: jspb.Message.getFieldWithDefault(msg, 1, ""),
     providerConfig: (f = msg.getProviderConfig()) && proto.agent.CloudProviderConfig.toObject(includeInstance, f),
     workDir: jspb.Message.getFieldWithDefault(msg, 3, ""),
-    fileName: jspb.Message.getFieldWithDefault(msg, 4, "")
+    fileName: jspb.Message.getFieldWithDefault(msg, 4, ""),
+    conversationId: jspb.Message.getFieldWithDefault(msg, 5, "")
   };
 
   if (includeInstance) {
@@ -623,6 +624,10 @@ proto.agent.ProcessRequestRequest.deserializeBinaryFromReader = function(msg, re
     case 4:
       var value = /** @type {string} */ (reader.readString());
       msg.setFileName(value);
+      break;
+    case 5:
+      var value = /** @type {string} */ (reader.readString());
+      msg.setConversationId(value);
       break;
     default:
       reader.skipField();
@@ -679,6 +684,13 @@ proto.agent.ProcessRequestRequest.serializeBinaryToWriter = function(message, wr
   if (f.length > 0) {
     writer.writeString(
       4,
+      f
+    );
+  }
+  f = message.getConversationId();
+  if (f.length > 0) {
+    writer.writeString(
+      5,
       f
     );
   }
@@ -773,6 +785,24 @@ proto.agent.ProcessRequestRequest.prototype.getFileName = function() {
  */
 proto.agent.ProcessRequestRequest.prototype.setFileName = function(value) {
   return jspb.Message.setProto3StringField(this, 4, value);
+};
+
+
+/**
+ * optional string conversation_id = 5;
+ * @return {string}
+ */
+proto.agent.ProcessRequestRequest.prototype.getConversationId = function() {
+  return /** @type {string} */ (jspb.Message.getFieldWithDefault(this, 5, ""));
+};
+
+
+/**
+ * @param {string} value
+ * @return {!proto.agent.ProcessRequestRequest} returns this
+ */
+proto.agent.ProcessRequestRequest.prototype.setConversationId = function(value) {
+  return jspb.Message.setProto3StringField(this, 5, value);
 };
 
 

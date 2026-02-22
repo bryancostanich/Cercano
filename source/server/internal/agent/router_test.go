@@ -506,6 +506,134 @@ providers:
 	}
 }
 
+// TestClassifyIntent_ReferentialFollowUps verifies that short, referential
+// follow-up phrases used in multi-turn conversations (e.g., "add those to the
+// file", "make those changes") correctly classify as coding intent rather than
+// falling through to chat.
+func TestClassifyIntent_ReferentialFollowUps(t *testing.T) {
+	// Prototypes mirror the real prototypes.yaml structure: coding includes
+	// both explicit instructions AND referential follow-ups; chat includes
+	// explanatory/conversational phrases AND suggestion-seeking questions
+	// (which use action words like "add" but are interrogative, not imperative).
+	protoContent := `
+intents:
+  coding:
+    - "write a function"
+    - "implement the interface"
+    - "add a new field to the struct"
+    - "add those to the file"
+    - "update the class with those additions"
+    - "make those changes"
+    - "go ahead and add them"
+  chat:
+    - "explain this code"
+    - "what does this do"
+    - "tell me about this class"
+    - "how does this work"
+    - "what would you add to improve this"
+    - "what changes would you suggest"
+    - "how could this be improved"
+    - "what features are missing"
+providers:
+  local:
+    - "local task"
+  cloud:
+    - "cloud task"
+`
+	tmpFile, err := os.CreateTemp("", "prototypes*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Write([]byte(protoContent))
+	tmpFile.Close()
+
+	// Explicit coding: cluster near [1, 0, 0]
+	// Referential coding: cluster near [0.85, 0.15, 0] (still coding-ish)
+	// Chat (explanatory): cluster near [0, 1, 0]
+	// Chat (suggestion-seeking): cluster near [0.3, 0.7, 0] — uses action words
+	//   like "add" but in interrogative form, so closer to chat than coding
+	mockResponses := map[string]string{
+		// Coding prototypes (explicit)
+		"write a function":           `{"embedding": [0.95, 0.05, 0.0]}`,
+		"implement the interface":    `{"embedding": [0.90, 0.10, 0.0]}`,
+		"add a new field to the struct": `{"embedding": [0.88, 0.12, 0.0]}`,
+		// Coding prototypes (referential follow-ups)
+		"add those to the file":              `{"embedding": [0.85, 0.15, 0.0]}`,
+		"update the class with those additions": `{"embedding": [0.83, 0.17, 0.0]}`,
+		"make those changes":                 `{"embedding": [0.82, 0.18, 0.0]}`,
+		"go ahead and add them":              `{"embedding": [0.80, 0.20, 0.0]}`,
+		// Chat prototypes (explanatory)
+		"explain this code":      `{"embedding": [0.05, 0.95, 0.0]}`,
+		"what does this do":      `{"embedding": [0.10, 0.90, 0.0]}`,
+		"tell me about this class": `{"embedding": [0.08, 0.92, 0.0]}`,
+		"how does this work":     `{"embedding": [0.07, 0.93, 0.0]}`,
+		// Chat prototypes (suggestion-seeking — use action words but interrogative)
+		"what would you add to improve this": `{"embedding": [0.30, 0.70, 0.0]}`,
+		"what changes would you suggest":     `{"embedding": [0.25, 0.75, 0.0]}`,
+		"how could this be improved":         `{"embedding": [0.20, 0.80, 0.0]}`,
+		"what features are missing":          `{"embedding": [0.22, 0.78, 0.0]}`,
+		// Provider prototypes
+		"local task": `{"embedding": [1.0, 0.0, 0.0]}`,
+		"cloud task": `{"embedding": [0.0, 1.0, 0.0]}`,
+	}
+	mockClient := &http.Client{
+		Transport: &MockRoundTripper{responses: mockResponses},
+	}
+
+	router, err := NewSmartRouter(nil, nil, "nomic-embed-text", mockClient, tmpFile.Name(), nil)
+	if err != nil {
+		t.Fatalf("Failed to create SmartRouter: %v", err)
+	}
+
+	tests := []struct {
+		input          string
+		expectedIntent Intent
+		mockEmbedding  string
+	}{
+		{
+			input:          "add them to the class",
+			expectedIntent: IntentCoding,
+			mockEmbedding:  `{"embedding": [0.84, 0.16, 0.0]}`,
+		},
+		{
+			input:          "yes, please add all of those",
+			expectedIntent: IntentCoding,
+			mockEmbedding:  `{"embedding": [0.81, 0.19, 0.0]}`,
+		},
+		{
+			input:          "update the file with those changes",
+			expectedIntent: IntentCoding,
+			mockEmbedding:  `{"embedding": [0.83, 0.17, 0.0]}`,
+		},
+		{
+			// Suggestion-seeking question — uses "add" but interrogative, not imperative
+			input:          "what would you add to make it more complete?",
+			expectedIntent: IntentChat,
+			mockEmbedding:  `{"embedding": [0.28, 0.72, 0.0]}`,
+		},
+		{
+			// Another suggestion-seeking variant
+			input:          "what would you add to make it more full featured?",
+			expectedIntent: IntentChat,
+			mockEmbedding:  `{"embedding": [0.27, 0.73, 0.0]}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			mockResponses[tt.input] = tt.mockEmbedding
+			intent, err := router.ClassifyIntent(&Request{Input: tt.input})
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+			if intent != tt.expectedIntent {
+				t.Errorf("Expected %s, got %s", tt.expectedIntent, intent)
+			}
+		})
+	}
+}
+
 // TestTopKAveragePerCategory_KLargerThanCategory verifies graceful handling
 // when K exceeds the number of prototypes in a category.
 func TestTopKAveragePerCategory_KLargerThanCategory(t *testing.T) {

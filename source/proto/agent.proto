@@ -32,6 +32,7 @@ message ProcessRequestRequest {
   CloudProviderConfig provider_config = 2; // Optional provider configuration
   string work_dir = 3;  // Optional working directory for agentic tasks
   string file_name = 4; // Optional filename for agentic tasks
+  string conversation_id = 5; // Optional conversation ID for multi-turn history
 }
 
 // Configuration for cloud providers.

@@ -3,9 +3,11 @@ package loop
 import (
 	"context"
 	"fmt"
+	"iter"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	adkagent "google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/workflowagents/loopagent"
@@ -23,16 +25,18 @@ type ADKCoordinator struct {
 	localProvider       agentmod.ModelProvider
 	cloudProvider       agentmod.ModelProvider
 	validator           tools.Validator
+	sessionService      session.Service
 	maxRetries          int
 	escalationThreshold int
 }
 
 // NewADKCoordinator creates an ADKCoordinator with local and cloud providers.
-func NewADKCoordinator(local, cloud agentmod.ModelProvider, val tools.Validator) *ADKCoordinator {
+func NewADKCoordinator(local, cloud agentmod.ModelProvider, val tools.Validator, sessionSvc session.Service) *ADKCoordinator {
 	return &ADKCoordinator{
 		localProvider:       local,
 		cloudProvider:       cloud,
 		validator:           val,
+		sessionService:      sessionSvc,
 		maxRetries:          3,
 		escalationThreshold: 2,
 	}
@@ -44,15 +48,14 @@ func (c *ADKCoordinator) SetEscalationThreshold(threshold int) {
 	c.escalationThreshold = threshold
 }
 
-// Coordinate runs the generate→validate loop using an ADK LoopAgent.
-// It satisfies the agent.Coordinator interface.
-func (c *ADKCoordinator) Coordinate(ctx context.Context, instruction, inputCode, workDir, fileName string, progress agentmod.ProgressFunc) (*agentmod.Response, error) {
-	if progress == nil {
-		progress = func(string) {}
-	}
-
+// CoordinateStream sets up the generate→validate loop and returns an event
+// iterator plus a finalize closure. The caller drains the iterator to drive the
+// loop, then calls finalize to restore the workspace backup and obtain the
+// final response.
+func (c *ADKCoordinator) CoordinateStream(ctx context.Context, instruction, inputCode, workDir, fileName string) (
+	iter.Seq2[*session.Event, error], func() (*agentmod.Response, error), error,
+) {
 	// 1. Filename inference — ask the local model which file to target.
-	progress("Planning: Identifying target file...")
 	inferPrompt := fmt.Sprintf(
 		"Based on the instruction '%s' and the current file '%s', what is the single filename that should be modified or created? Return ONLY the filename.",
 		instruction, fileName,
@@ -90,13 +93,13 @@ func (c *ADKCoordinator) Coordinate(ctx context.Context, instruction, inputCode,
 	genAgent, err := adapters.NewGeneratorAgent(c.localProvider, c.cloudProvider)
 	if err != nil {
 		restore()
-		return nil, fmt.Errorf("failed to create generator agent: %w", err)
+		return nil, nil, fmt.Errorf("failed to create generator agent: %w", err)
 	}
 
 	valAgent, err := adapters.NewValidatorAgent(c.validator, workDir, c.escalationThreshold)
 	if err != nil {
 		restore()
-		return nil, fmt.Errorf("failed to create validator agent: %w", err)
+		return nil, nil, fmt.Errorf("failed to create validator agent: %w", err)
 	}
 
 	// 4. Wrap in a LoopAgent. MaxIterations = maxRetries + 1.
@@ -109,13 +112,12 @@ func (c *ADKCoordinator) Coordinate(ctx context.Context, instruction, inputCode,
 	})
 	if err != nil {
 		restore()
-		return nil, fmt.Errorf("failed to create loop agent: %w", err)
+		return nil, nil, fmt.Errorf("failed to create loop agent: %w", err)
 	}
 
-	// 5. Create an in-memory session with initial state.
-	svc := session.InMemoryService()
-	const sessionID = "coord-session"
-	_, err = svc.Create(ctx, &session.CreateRequest{
+	// 5. Create a session with initial state using the shared service.
+	sessionID := fmt.Sprintf("coord-%d", time.Now().UnixNano())
+	_, err = c.sessionService.Create(ctx, &session.CreateRequest{
 		AppName:   "cercano",
 		UserID:    "coordinator",
 		SessionID: sessionID,
@@ -126,98 +128,137 @@ func (c *ADKCoordinator) Coordinate(ctx context.Context, instruction, inputCode,
 	})
 	if err != nil {
 		restore()
-		return nil, fmt.Errorf("failed to create ADK session: %w", err)
+		return nil, nil, fmt.Errorf("failed to create ADK session: %w", err)
 	}
 
 	agentRunner, err := runner.New(runner.Config{
 		AppName:        "cercano",
 		Agent:          loop,
-		SessionService: svc,
+		SessionService: c.sessionService,
 	})
 	if err != nil {
 		restore()
-		return nil, fmt.Errorf("failed to create runner: %w", err)
+		return nil, nil, fmt.Errorf("failed to create runner: %w", err)
 	}
 
-	// 6. Run the loop, collecting results and reporting progress.
+	// Accumulated state from the event stream.
 	var succeeded bool
 	var lastGeneratedCode string
 	var lastValidationError string
 	escalated := false
+	var streamErr error
 
 	userContent := genai.NewContentFromText(instruction, genai.RoleUser)
 
-	for event, runErr := range agentRunner.Run(ctx, "coordinator", sessionID, userContent, adkagent.RunConfig{}) {
-		if runErr != nil {
-			restore()
-			return nil, fmt.Errorf("agent loop error: %w", runErr)
-		}
-		if event == nil {
-			continue
-		}
+	// 6. Build the event iterator that wraps agentRunner.Run and accumulates state.
+	events := func(yield func(*session.Event, error) bool) {
+		for event, runErr := range agentRunner.Run(ctx, "coordinator", sessionID, userContent, adkagent.RunConfig{}) {
+			if runErr != nil {
+				streamErr = fmt.Errorf("agent loop error: %w", runErr)
+				yield(nil, streamErr)
+				return
+			}
+			if event == nil {
+				continue
+			}
 
-		switch event.Author {
-		case "generator":
-			if event.LLMResponse.Content != nil {
-				var code string
-				for _, part := range event.LLMResponse.Content.Parts {
-					code += part.Text
+			// Accumulate state from each event.
+			switch event.Author {
+			case "generator":
+				if event.LLMResponse.Content != nil {
+					var code string
+					for _, part := range event.LLMResponse.Content.Parts {
+						code += part.Text
+					}
+					if code != "" {
+						lastGeneratedCode = code
+					}
 				}
-				if code != "" {
-					lastGeneratedCode = code
+			case "validator":
+				if event.Actions.Escalate {
+					succeeded = true
+				} else {
+					if event.LLMResponse.Content != nil {
+						for _, part := range event.LLMResponse.Content.Parts {
+							lastValidationError = part.Text
+						}
+					}
+					if v, ok := event.Actions.StateDelta[adapters.StateKeyUseCloud]; ok {
+						if b, ok := v.(bool); ok && b {
+							escalated = true
+						}
+					}
 				}
 			}
-			progress("Generating code...")
 
-		case "validator":
-			if event.Actions.Escalate {
-				succeeded = true
-				progress("Validation passed.")
-			} else {
-				if event.LLMResponse.Content != nil {
-					for _, part := range event.LLMResponse.Content.Parts {
-						lastValidationError = part.Text
-					}
-				}
-				if v, ok := event.Actions.StateDelta[adapters.StateKeyUseCloud]; ok {
-					if b, ok := v.(bool); ok && b {
-						escalated = true
-					}
-				}
-				progress("Validation failed. Retrying...")
+			if !yield(event, nil) {
+				return
 			}
 		}
 	}
 
-	// 7. Always restore the backup — workspace stays clean for IDE Apply.
-	restore()
+	// 7. Finalize closure: restores the backup and builds the response.
+	finalize := func() (*agentmod.Response, error) {
+		restore()
 
-	// 8. Build and return the response.
-	if succeeded {
-		cleanCode := tools.CleanMarkdown(lastGeneratedCode)
+		if streamErr != nil {
+			return nil, streamErr
+		}
 
-		chatOutput := lastGeneratedCode
-		if !strings.Contains(chatOutput, "```") {
-			chatOutput = fmt.Sprintf(
-				"I've generated the code for **%s**:\n\n```go\n%s\n```",
-				fileName, lastGeneratedCode,
-			)
+		if succeeded {
+			cleanCode := tools.CleanMarkdown(lastGeneratedCode)
+
+			chatOutput := lastGeneratedCode
+			if !strings.Contains(chatOutput, "```") {
+				chatOutput = fmt.Sprintf(
+					"I've generated the code for **%s**:\n\n```go\n%s\n```",
+					fileName, lastGeneratedCode,
+				)
+			}
+
+			return &agentmod.Response{
+				Output: chatOutput,
+				FileChanges: []agentmod.FileChange{
+					{Path: fileName, Content: cleanCode, Action: "UPDATE"},
+				},
+				RoutingMetadata: agentmod.RoutingMetadata{
+					Escalated: escalated,
+				},
+				ValidationErrors: lastValidationError,
+			}, nil
 		}
 
 		return &agentmod.Response{
-			Output: chatOutput,
-			FileChanges: []agentmod.FileChange{
-				{Path: fileName, Content: cleanCode, Action: "UPDATE"},
-			},
-			RoutingMetadata: agentmod.RoutingMetadata{
-				Escalated: escalated,
-			},
+			Output:           fmt.Sprintf("Failed to generate valid code after %d attempts.", c.maxRetries+1),
 			ValidationErrors: lastValidationError,
 		}, nil
 	}
 
-	return &agentmod.Response{
-		Output:           fmt.Sprintf("Failed to generate valid code after %d attempts.", c.maxRetries+1),
-		ValidationErrors: lastValidationError,
-	}, nil
+	return events, finalize, nil
+}
+
+// Coordinate runs the generate→validate loop using an ADK LoopAgent.
+// It satisfies the agent.Coordinator interface by delegating to CoordinateStream.
+func (c *ADKCoordinator) Coordinate(ctx context.Context, instruction, inputCode, workDir, fileName string, progress agentmod.ProgressFunc) (*agentmod.Response, error) {
+	if progress == nil {
+		progress = func(string) {}
+	}
+
+	progress("Planning: Identifying target file...")
+
+	events, finalize, err := c.CoordinateStream(ctx, instruction, inputCode, workDir, fileName)
+	if err != nil {
+		return nil, err
+	}
+
+	for event, runErr := range events {
+		if runErr != nil {
+			return nil, runErr
+		}
+		if msg := agentmod.MapEventToProgress(event); msg != "" {
+			progress(msg)
+		}
+	}
+
+	return finalize()
 }

@@ -79,6 +79,7 @@ type Request struct {
 	ProviderConfig *ProviderConfig
 	WorkDir        string
 	FileName       string
+	ConversationID string
 }
 
 // ProviderConfig represents a cloud provider configuration.
@@ -358,13 +359,8 @@ func (sr *SmartRouter) SelectProvider(req *Request, intent Intent) (ModelProvide
 	// Determine final category (handling fallback)
 	finalCategory := bestCategory
 	if maxSimilarity < similarityThreshold {
-		fmt.Printf("Similarity below threshold (%.2f). Defaulting based on intent: %s\n", similarityThreshold, intent)
-		
-		if intent == IntentCoding {
-			finalCategory = "Provider:Cloud"
-		} else {
-			finalCategory = "Provider:Local"
-		}
+		fmt.Printf("Similarity below threshold (%.2f). Defaulting to Local (coordinator handles escalation for coding tasks).\n", similarityThreshold)
+		finalCategory = "Provider:Local"
 	}
 
 	// If LocalModel is selected, return the local provider

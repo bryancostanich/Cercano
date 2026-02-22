@@ -14,23 +14,69 @@ type Coordinator interface {
 	Coordinate(ctx context.Context, instruction, inputCode, workDir, fileName string, progress ProgressFunc) (*Response, error)
 }
 
+// AgentOption configures optional Agent dependencies.
+type AgentOption func(*Agent)
+
+// WithConversationStore attaches a ConversationStore for multi-turn history.
+func WithConversationStore(cs *ConversationStore) AgentOption {
+	return func(a *Agent) {
+		a.conversation = cs
+	}
+}
+
 // Agent is the top-level orchestrator for AI requests.
 type Agent struct {
-	router      Router
-	coordinator Coordinator
+	router       Router
+	coordinator  Coordinator
+	conversation *ConversationStore
 }
 
 // NewAgent creates a new Agent orchestrator.
-func NewAgent(r Router, c Coordinator) *Agent {
-	return &Agent{
+func NewAgent(r Router, c Coordinator, opts ...AgentOption) *Agent {
+	a := &Agent{
 		router:      r,
 		coordinator: c,
 	}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
+}
+
+// loadHistory loads conversation history and returns (augmentedInput, originalInput).
+// If no store is configured or no history exists, augmentedInput == originalInput.
+func (a *Agent) loadHistory(ctx context.Context, req *Request) (augmented, original string) {
+	original = req.Input
+	augmented = original
+
+	if a.conversation == nil || req.ConversationID == "" {
+		return
+	}
+
+	history, err := a.conversation.LoadHistory(ctx, req.ConversationID)
+	if err != nil || history == "" {
+		return
+	}
+
+	augmented = history + "\n" + original
+	return
+}
+
+// storeConversationTurn compacts the response and stores the turn.
+func (a *Agent) storeConversationTurn(ctx context.Context, conversationID, originalInput string, resp *Response) {
+	if a.conversation == nil || conversationID == "" {
+		return
+	}
+	compacted := CompactResponse(resp)
+	_ = a.conversation.AppendTurn(ctx, conversationID, originalInput, compacted)
 }
 
 // ProcessRequest orchestrates the flow: Route -> Classify -> Execute Strategy.
 func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, error) {
-	// 1. Classify Intent
+	// Load conversation history
+	augmentedInput, originalInput := a.loadHistory(ctx, req)
+
+	// 1. Classify Intent (uses original input — no history pollution)
 	intent, err := a.router.ClassifyIntent(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to classify intent: %w", err)
@@ -50,7 +96,7 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 		}
 	}
 
-	// 3. Execute Strategy
+	// 3. Execute Strategy (uses augmented input so LLM can resolve references)
 	if intent == IntentCoding && req.WorkDir != "" && req.FileName != "" {
 		targetFile := req.FileName
 		// If user asks for unit tests specifically, ensure we are targeting a _test.go file
@@ -61,35 +107,42 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 		}
 
 		fmt.Printf("Agent: Detected Coding intent. Executing Coordinator Loop in %s for %s...\n", req.WorkDir, targetFile)
-		// Coordinate takes (ctx, instruction, inputCode, workDir, fileName, progress)
-		// We pass nil for progress in unary calls for now.
-		res, err := a.coordinator.Coordinate(ctx, req.Input, "", req.WorkDir, targetFile, nil)
+		res, err := a.coordinator.Coordinate(ctx, augmentedInput, "", req.WorkDir, targetFile, nil)
 		if err != nil {
 			return nil, fmt.Errorf("agentic loop failed: %w", err)
 		}
-		// Merge metadata from routing if needed
 		res.RoutingMetadata = RoutingMetadata{
 			ModelName:  provider.Name(),
-			Confidence: 1.0, // Initial simple value
+			Confidence: 1.0,
 		}
+		a.storeConversationTurn(ctx, req.ConversationID, originalInput, res)
 		return res, nil
 	}
 
 	fmt.Printf("Agent: Executing direct call with provider: %s\n", provider.Name())
-	res, err := provider.Process(ctx, req)
+	// Use augmented input for the provider call
+	augReq := &Request{
+		Input:          augmentedInput,
+		ProviderConfig: req.ProviderConfig,
+		WorkDir:        req.WorkDir,
+		FileName:       req.FileName,
+		ConversationID: req.ConversationID,
+	}
+	res, err := provider.Process(ctx, augReq)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if len(res.FileChanges) > 0 {
 		fmt.Printf("Agent: WARNING - Provider %s returned %d file changes for non-coordinator request. Clearing them.\n", provider.Name(), len(res.FileChanges))
 		res.FileChanges = nil
 	}
-	
+
 	res.RoutingMetadata = RoutingMetadata{
 		ModelName:  provider.Name(),
-		Confidence: 1.0, // Initial simple value
+		Confidence: 1.0,
 	}
+	a.storeConversationTurn(ctx, req.ConversationID, originalInput, res)
 	return res, nil
 }
 
@@ -99,7 +152,10 @@ func (a *Agent) ProcessRequestStream(ctx context.Context, req *Request, progress
 		progress = func(string) {}
 	}
 
-	// 1. Classify Intent
+	// Load conversation history
+	augmentedInput, originalInput := a.loadHistory(ctx, req)
+
+	// 1. Classify Intent (uses original input — no history pollution)
 	intent, err := a.router.ClassifyIntent(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to classify intent: %w", err)
@@ -122,39 +178,83 @@ func (a *Agent) ProcessRequestStream(ctx context.Context, req *Request, progress
 		}
 	}
 
-	// 3. Execute Strategy
+	// 3. Execute Strategy (uses augmented input so LLM can resolve references)
 	if intent == IntentCoding && req.WorkDir != "" && req.FileName != "" {
+		targetFile := req.FileName
+
+		// Streaming path: use CoordinateStream when available.
+		if sc, ok := a.coordinator.(StreamableCoordinator); ok {
+			fmt.Printf("Agent: Detected Coding intent (streaming). Executing CoordinateStream in %s for %s...\n", req.WorkDir, targetFile)
+			progress(fmt.Sprintf("Generating and Validating Code (%s)...", provider.Name()))
+
+			events, finalize, err := sc.CoordinateStream(ctx, augmentedInput, "", req.WorkDir, targetFile)
+			if err != nil {
+				return nil, fmt.Errorf("agentic loop setup failed: %w", err)
+			}
+
+			for event, runErr := range events {
+				if runErr != nil {
+					return nil, fmt.Errorf("agentic loop error: %w", runErr)
+				}
+				if msg := MapEventToProgress(event); msg != "" {
+					progress(msg)
+				}
+			}
+
+			res, err := finalize()
+			if err != nil {
+				return nil, fmt.Errorf("agentic loop finalize failed: %w", err)
+			}
+			res.RoutingMetadata = RoutingMetadata{
+				ModelName:  provider.Name(),
+				Confidence: 1.0,
+				Escalated:  res.RoutingMetadata.Escalated,
+			}
+			a.storeConversationTurn(ctx, req.ConversationID, originalInput, res)
+			return res, nil
+		}
+
+		// Fallback: non-streamable coordinator.
 		fmt.Printf("Agent: Detected Coding intent. Executing Coordinator Loop in %s for %s...\n", req.WorkDir, req.FileName)
 		progress(fmt.Sprintf("Generating and Validating Code (%s)...", provider.Name()))
-		res, err := a.coordinator.Coordinate(ctx, req.Input, "", req.WorkDir, req.FileName, progress)
+		res, err := a.coordinator.Coordinate(ctx, augmentedInput, "", req.WorkDir, req.FileName, progress)
 		if err != nil {
 			return nil, fmt.Errorf("agentic loop failed: %w", err)
 		}
-		// Merge metadata from routing if needed
 		res.RoutingMetadata = RoutingMetadata{
 			ModelName:  provider.Name(),
-			Confidence: 1.0, // Initial simple value
-			Escalated:  res.RoutingMetadata.Escalated, // Preserve from coordinator
+			Confidence: 1.0,
+			Escalated:  res.RoutingMetadata.Escalated,
 		}
+		a.storeConversationTurn(ctx, req.ConversationID, originalInput, res)
 		return res, nil
 	}
 
 	progress(fmt.Sprintf("Generating Response (%s)...", provider.Name()))
 	fmt.Printf("Agent: Executing direct call with provider: %s\n", provider.Name())
-	res, err := provider.Process(ctx, req)
+	// Use augmented input for the provider call
+	augReq := &Request{
+		Input:          augmentedInput,
+		ProviderConfig: req.ProviderConfig,
+		WorkDir:        req.WorkDir,
+		FileName:       req.FileName,
+		ConversationID: req.ConversationID,
+	}
+	res, err := provider.Process(ctx, augReq)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if len(res.FileChanges) > 0 {
 		fmt.Printf("Agent: WARNING - Provider %s returned %d file changes for non-coordinator request. Clearing them.\n", provider.Name(), len(res.FileChanges))
 		res.FileChanges = nil
 	}
-	
+
 	res.RoutingMetadata = RoutingMetadata{
 		ModelName:  provider.Name(),
-		Confidence: 1.0, // Initial simple value
+		Confidence: 1.0,
 	}
 	progress(fmt.Sprintf("Generating Response (%s)... Done.", provider.Name()))
+	a.storeConversationTurn(ctx, req.ConversationID, originalInput, res)
 	return res, nil
 }

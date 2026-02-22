@@ -17,6 +17,7 @@ import (
 	"cercano/source/server/internal/tools"
 	"cercano/source/server/pkg/proto"
 
+	"google.golang.org/adk/session"
 	"google.golang.org/grpc"
 )
 
@@ -71,7 +72,8 @@ func main() {
 	}
 
 	validator := tools.NewGoValidator()
-	coordinator := loop.NewADKCoordinator(localProvider, cloudProvider, validator)
+	sessionSvc := session.InMemoryService()
+	coordinator := loop.NewADKCoordinator(localProvider, cloudProvider, validator, sessionSvc)
 
 	smartRouter, err := agent.NewSmartRouter(localProvider, cloudProvider, embeddingModel, http.DefaultClient, "internal/agent/prototypes.yaml", func(ctx context.Context, provider, model, apiKey string) (agent.ModelProvider, error) {
 		return llm.NewCloudModelProvider(ctx, provider, model, apiKey)
@@ -89,7 +91,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	orchestrator := agent.NewAgent(smartRouter, coordinator)
+	convStore := agent.NewConversationStore(sessionSvc, 3)
+	orchestrator := agent.NewAgent(smartRouter, coordinator, agent.WithConversationStore(convStore))
 
 	lis, err := net.Listen("tcp", ":50052")
 	if err != nil {

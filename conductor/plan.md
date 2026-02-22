@@ -21,7 +21,7 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 ---
 
-- [ ] **Track: Replace GenerationCoordinator with Google ADK LoopAgent**
+- [x] **Track: Replace GenerationCoordinator with Google ADK LoopAgent** [checkpoint: 58969fc]
 *Link: [./tracks/adk_integration_20260219/](./tracks/adk_integration_20260219/)*
 
 ---

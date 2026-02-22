@@ -10,6 +10,7 @@ import (
 
 	agentmod "cercano/source/server/internal/agent"
 	"cercano/source/server/internal/loop"
+	"google.golang.org/adk/session"
 )
 
 // ---- stubs for ADK coordinator tests ----
@@ -53,7 +54,7 @@ func TestADKCoordinator_SuccessFirstTime(t *testing.T) {
 	local := &seqProvider{name: "local", outputs: []string{"not a filename", "generated code"}}
 	val := &funcValidator{fn: func(_ context.Context, _ string) error { return nil }}
 
-	coord := loop.NewADKCoordinator(local, nil, val)
+	coord := loop.NewADKCoordinator(local, nil, val, session.InMemoryService())
 	workDir := t.TempDir()
 
 	result, err := coord.Coordinate(context.Background(), "write a function", "", workDir, "main.go", nil)
@@ -89,7 +90,7 @@ func TestADKCoordinator_FixSuccess(t *testing.T) {
 		return nil
 	}}
 
-	coord := loop.NewADKCoordinator(local, nil, val)
+	coord := loop.NewADKCoordinator(local, nil, val, session.InMemoryService())
 	workDir := t.TempDir()
 
 	result, err := coord.Coordinate(context.Background(), "instruction", "", workDir, "main.go", nil)
@@ -123,7 +124,7 @@ func TestADKCoordinator_Escalation(t *testing.T) {
 		return nil
 	}}
 
-	coord := loop.NewADKCoordinator(local, cloud, val)
+	coord := loop.NewADKCoordinator(local, cloud, val, session.InMemoryService())
 	coord.SetEscalationThreshold(1) // switch after 1 failure
 
 	// Intercept cloud calls to set flag.
@@ -131,7 +132,7 @@ func TestADKCoordinator_Escalation(t *testing.T) {
 	// Since seqProvider doesn't support callbacks, we use a wrapper.
 	wrappedCloud := &callTrackingProvider{inner: cloud, onCall: func() { cloudCalled = true }}
 
-	coord2 := loop.NewADKCoordinator(local, wrappedCloud, val)
+	coord2 := loop.NewADKCoordinator(local, wrappedCloud, val, session.InMemoryService())
 	coord2.SetEscalationThreshold(1)
 
 	workDir := t.TempDir()
@@ -175,7 +176,7 @@ func TestADKCoordinator_MaxRetriesExceeded(t *testing.T) {
 		return errors.New("build always fails")
 	}}
 
-	coord := loop.NewADKCoordinator(local, nil, val)
+	coord := loop.NewADKCoordinator(local, nil, val, session.InMemoryService())
 	workDir := t.TempDir()
 
 	result, err := coord.Coordinate(context.Background(), "instruction", "", workDir, "main.go", nil)
@@ -205,7 +206,7 @@ func TestADKCoordinator_BackupRestored(t *testing.T) {
 		return errors.New("always fails")
 	}}
 
-	coord := loop.NewADKCoordinator(local, nil, val)
+	coord := loop.NewADKCoordinator(local, nil, val, session.InMemoryService())
 	_, err := coord.Coordinate(context.Background(), "instruction", "", workDir, "main.go", nil)
 	if err != nil {
 		t.Fatalf("expected graceful failure, got: %v", err)
@@ -229,7 +230,7 @@ func TestADKCoordinator_InfersFilename(t *testing.T) {
 	}}
 	val := &funcValidator{fn: func(_ context.Context, _ string) error { return nil }}
 
-	coord := loop.NewADKCoordinator(local, nil, val)
+	coord := loop.NewADKCoordinator(local, nil, val, session.InMemoryService())
 	workDir := t.TempDir()
 
 	result, err := coord.Coordinate(context.Background(), "Generate tests", "", workDir, "source.go", nil)
@@ -250,7 +251,7 @@ func TestADKCoordinator_ProgressReported(t *testing.T) {
 	local := &seqProvider{name: "local", outputs: []string{"not a filename", "generated code"}}
 	val := &funcValidator{fn: func(_ context.Context, _ string) error { return nil }}
 
-	coord := loop.NewADKCoordinator(local, nil, val)
+	coord := loop.NewADKCoordinator(local, nil, val, session.InMemoryService())
 	workDir := t.TempDir()
 
 	var messages []string
@@ -262,5 +263,87 @@ func TestADKCoordinator_ProgressReported(t *testing.T) {
 	}
 	if len(messages) == 0 {
 		t.Error("expected at least one progress message, got none")
+	}
+}
+
+// ---- CoordinateStream tests ----
+
+// TestADKCoordinator_CoordinateStream_YieldsEvents: events are yielded and finalize returns a valid response.
+func TestADKCoordinator_CoordinateStream_YieldsEvents(t *testing.T) {
+	local := &seqProvider{name: "local", outputs: []string{"not a filename", "generated code"}}
+	val := &funcValidator{fn: func(_ context.Context, _ string) error { return nil }}
+
+	coord := loop.NewADKCoordinator(local, nil, val, session.InMemoryService())
+	workDir := t.TempDir()
+
+	events, finalize, err := coord.CoordinateStream(context.Background(), "write a function", "", workDir, "main.go")
+	if err != nil {
+		t.Fatalf("CoordinateStream setup failed: %v", err)
+	}
+
+	eventCount := 0
+	for ev, runErr := range events {
+		if runErr != nil {
+			t.Fatalf("unexpected error during iteration: %v", runErr)
+		}
+		if ev != nil {
+			eventCount++
+		}
+	}
+
+	if eventCount == 0 {
+		t.Error("expected at least one event, got none")
+	}
+
+	result, err := finalize()
+	if err != nil {
+		t.Fatalf("finalize failed: %v", err)
+	}
+	if !strings.Contains(result.Output, "generated code") {
+		t.Errorf("expected output to contain 'generated code', got: %q", result.Output)
+	}
+	if len(result.FileChanges) != 1 {
+		t.Fatalf("expected 1 file change, got %d", len(result.FileChanges))
+	}
+}
+
+// TestADKCoordinator_CoordinateStream_FinalizeRestoresBackup: backup is restored after finalize.
+func TestADKCoordinator_CoordinateStream_FinalizeRestoresBackup(t *testing.T) {
+	workDir := t.TempDir()
+	targetFile := filepath.Join(workDir, "main.go")
+	originalContent := "package main\n\nfunc original() {}"
+	if err := os.WriteFile(targetFile, []byte(originalContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	local := &seqProvider{name: "local", outputs: []string{"not a filename", "generated code"}}
+	val := &funcValidator{fn: func(_ context.Context, _ string) error { return nil }}
+
+	coord := loop.NewADKCoordinator(local, nil, val, session.InMemoryService())
+
+	events, finalize, err := coord.CoordinateStream(context.Background(), "instruction", "", workDir, "main.go")
+	if err != nil {
+		t.Fatalf("CoordinateStream setup failed: %v", err)
+	}
+
+	// Drain all events
+	for _, runErr := range events {
+		if runErr != nil {
+			t.Fatalf("unexpected error during iteration: %v", runErr)
+		}
+	}
+
+	_, err = finalize()
+	if err != nil {
+		t.Fatalf("finalize failed: %v", err)
+	}
+
+	// Verify backup was restored
+	restored, readErr := os.ReadFile(targetFile)
+	if readErr != nil {
+		t.Fatalf("expected file to exist after finalize, got: %v", readErr)
+	}
+	if string(restored) != originalContent {
+		t.Errorf("expected original content %q, got %q", originalContent, string(restored))
 	}
 }

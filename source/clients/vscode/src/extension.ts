@@ -8,6 +8,9 @@ let client: CercanoClient;
 const validatedContents = new Map<string, string>();
 const processedResponses = new Set<string>();
 
+// Conversation ID for multi-turn history (persists for the extension session)
+const conversationId: string = require('crypto').randomUUID();
+
 export function activate(context: vscode.ExtensionContext) {
     console.log('Cercano: Activating extension (Native Chat Mode)...');
     
@@ -128,11 +131,12 @@ export function activate(context: vscode.ExtensionContext) {
         try {
             // 4. Call gRPC backend with streaming
             const result = await client.processStream(
-                fullPrompt, 
-                workDir, 
-                fileName, 
+                fullPrompt,
+                workDir,
+                fileName,
                 providerConfig,
-                (msg) => response.progress(msg)
+                (msg) => response.progress(msg),
+                conversationId
             );
             
             // Show markdown output

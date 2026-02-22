@@ -206,6 +206,7 @@ type ProcessRequestRequest struct {
 	ProviderConfig *CloudProviderConfig   `protobuf:"bytes,2,opt,name=provider_config,json=providerConfig,proto3" json:"provider_config,omitempty"` // Optional provider configuration
 	WorkDir        string                 `protobuf:"bytes,3,opt,name=work_dir,json=workDir,proto3" json:"work_dir,omitempty"`                      // Optional working directory for agentic tasks
 	FileName       string                 `protobuf:"bytes,4,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`                   // Optional filename for agentic tasks
+	ConversationId string                 `protobuf:"bytes,5,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"` // Optional conversation ID for multi-turn history
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -264,6 +265,13 @@ func (x *ProcessRequestRequest) GetWorkDir() string {
 func (x *ProcessRequestRequest) GetFileName() string {
 	if x != nil {
 		return x.FileName
+	}
+	return ""
+}
+
+func (x *ProcessRequestRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
 	}
 	return ""
 }
@@ -530,12 +538,13 @@ const file_agent_proto_rawDesc = "" +
 	"\x0efinal_response\x18\x02 \x01(\v2\x1d.agent.ProcessRequestResponseH\x00R\rfinalResponseB\t\n" +
 	"\apayload\"*\n" +
 	"\x0eProgressUpdate\x12\x18\n" +
-	"\amessage\x18\x01 \x01(\tR\amessage\"\xaa\x01\n" +
+	"\amessage\x18\x01 \x01(\tR\amessage\"\xd3\x01\n" +
 	"\x15ProcessRequestRequest\x12\x14\n" +
 	"\x05input\x18\x01 \x01(\tR\x05input\x12C\n" +
 	"\x0fprovider_config\x18\x02 \x01(\v2\x1a.agent.CloudProviderConfigR\x0eproviderConfig\x12\x19\n" +
 	"\bwork_dir\x18\x03 \x01(\tR\aworkDir\x12\x1b\n" +
-	"\tfile_name\x18\x04 \x01(\tR\bfileName\"`\n" +
+	"\tfile_name\x18\x04 \x01(\tR\bfileName\x12'\n" +
+	"\x0fconversation_id\x18\x05 \x01(\tR\x0econversationId\"`\n" +
 	"\x13CloudProviderConfig\x12\x1a\n" +
 	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12\x17\n" +

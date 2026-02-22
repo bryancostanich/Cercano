@@ -16,6 +16,14 @@ intents:
     - "Implement the interface"
     - "Implement a complex raft consensus algorithm from scratch"
     - "Refactor this massive monolithic service into a distributed system with high availability"
+    - "Add those to the file"
+    - "Add them to the class"
+    - "Update the file with those changes"
+    - "Update the class with those additions"
+    - "Make those changes"
+    - "Go ahead and add them"
+    - "Please make those modifications"
+    - "Yes, add all of those"
 
   chat:
     - "Tell me about this class"
@@ -42,6 +50,12 @@ intents:
     - "What is your name?"
     - "Explain the Raft consensus algorithm."
     - "What is the difference between JWT and Session-based authentication?"
+    - "What would you add to make it more complete?"
+    - "What would you add to improve this?"
+    - "What changes would you suggest?"
+    - "How could this be improved?"
+    - "What features are missing?"
+    - "What else could be added?"
 
 providers:
   local:

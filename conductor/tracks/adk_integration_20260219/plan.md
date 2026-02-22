@@ -42,15 +42,37 @@ Replace GenerationCoordinator with an ADK-backed implementation satisfying the e
 - [x] Task: Run full test suite; fix any regressions.
 - [x] Task: Conductor - User Manual Verification 'LoopAgent Coordinator' (Protocol in workflow.md)
 
-## Phase 4: Streaming & SessionService
+## Phase 4: Streaming & SessionService [checkpoint: 58969fc]
 
 ### Objective
 Replace ProgressFunc threading with ADK event iteration and introduce in-memory SessionService.
 
 ### Tasks
-- [ ] Task: Refactor progress reporting to consume `iter.Seq2[*session.Event, error]`.
-    - [ ] Map ADK events to existing `StreamProcessResponse` progress messages at gRPC boundary.
-- [ ] Task: Introduce `session.InMemoryService()` in `cmd/agent/main.go`.
-    - [ ] Wire session create/retrieve into gRPC server per-stream-call.
-- [ ] Task: Red/Green tests for streaming event delivery.
-- [ ] Task: Conductor - User Manual Verification 'Streaming & SessionService' (Protocol in workflow.md)
+- [x] Task: Refactor progress reporting to consume `iter.Seq2[*session.Event, error]`.
+    - [x] Map ADK events to existing `StreamProcessResponse` progress messages at gRPC boundary.
+- [x] Task: Introduce `session.InMemoryService()` in `cmd/agent/main.go`.
+    - [x] Wire shared session service into ADKCoordinator and ConversationStore.
+- [x] Task: Add `StreamableCoordinator` interface and `MapEventToProgress` helper.
+- [x] Task: Red/Green tests for streaming event delivery.
+- [x] Task: Conductor - User Manual Verification 'Streaming & SessionService' (Protocol in workflow.md)
+
+## Phase 5: Conversation History [checkpoint: 821074f]
+
+### Objective
+Add server-side conversation tracking so multi-turn requests can resolve references from prior turns.
+
+### Tasks
+- [x] Task: Add `conversation_id` field to proto; regenerate Go and JS/TS stubs.
+- [x] Task: Implement `ConversationStore` with `AppendTurn`, `LoadHistory`, and `CompactResponse`.
+    - [x] Red/Green TDD: 7 tests covering round-trip, depth limit, empty ID, multi-conversation isolation.
+- [x] Task: Integrate into Agent via functional options (`WithConversationStore`).
+    - [x] Classification uses original input (no history pollution).
+    - [x] Execution uses augmented input (LLM resolves references).
+    - [x] Storage uses original input (prevents recursive accumulation).
+    - [x] Red/Green TDD: 4 tests covering injection, storage, no-ID, nil-store.
+- [x] Task: Map `ConversationID` in server.go `mapRequest`.
+- [x] Task: Wire `ConversationStore` in `main.go`.
+- [x] Task: Extension generates UUID `conversationId` and passes with each request.
+- [x] Task: Add referential coding prototypes and suggestion-seeking chat prototypes.
+- [x] Task: Fix provider routing fallback to default to local.
+- [x] Task: Conductor - User Manual Verification 'Conversation History' (Protocol in workflow.md)

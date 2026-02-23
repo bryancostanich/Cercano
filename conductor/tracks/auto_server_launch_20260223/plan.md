@@ -42,19 +42,27 @@ Extension spawns and manages the Go server as a child process.
 
 *Files: `serverHelpers.ts` (pure helpers), `serverManager.ts` (ServerManager class), `serverManager.test.ts` (8 tests), `extension.ts` (integration).*
 
-## Phase 2: Configuration
+## Phase 2: Configuration [complete]
 
 ### Objective
 Make the server launch configurable for development vs production workflows.
 
 ### Tasks
-- [ ] Task: Add extension settings.
-    - [ ] `cercano.server.autoLaunch` (boolean, default true) — toggle auto-launch.
-    - [ ] `cercano.server.binaryPath` (string, optional) — override path to server binary.
-    - [ ] `cercano.server.port` (number, default 50052) — configurable gRPC port.
-- [ ] Task: Pass port configuration to both server (CLI flag or env var) and client.
-- [ ] Task: Show server status in VS Code status bar (running/stopped/error).
-- [ ] Task: Conductor - User Manual Verification
+- [x] Task: Add extension settings to `package.json`.
+    - [x] `cercano.server.autoLaunch` (boolean, default true) — toggle auto-launch.
+    - [x] `cercano.server.binaryPath` (string, optional) — override path to server binary.
+    - [x] `cercano.server.port` (number, default 50052) — configurable gRPC port.
+- [x] Task: Pass port configuration to both server and client.
+    - [x] Extension passes `CERCANO_PORT` env var to spawned server process.
+    - [x] Extension passes port to `CercanoClient` constructor.
+    - [x] Go server reads `CERCANO_PORT` env var, falls back to `50052`.
+- [x] Task: Show server status in VS Code status bar (running/stopped/error).
+    - [x] Right-aligned status bar item with codicon states: check (running), circle-slash (stopped), sync~spin (starting), error (error).
+    - [x] Clicking opens the config menu.
+- [x] Task: Changed activation event from `onChatParticipant` to `onStartupFinished` so server and status bar are available immediately.
+- [x] Task: Conductor - User Manual Verification
+
+*Files: `package.json` (settings + activation), `serverManager.ts` (config, status bar, env var), `extension.ts` (reads config, passes port to client), `cmd/agent/main.go` (reads CERCANO_PORT).*
 
 ## Phase 3: Ollama Dependency Check
 

@@ -3,38 +3,92 @@ import * as cp from 'child_process';
 import * as path from 'path';
 import { resolveServerBinaryPath, isServerReady, checkPortInUse } from './serverHelpers';
 
-const SERVER_PORT = 50052;
+const DEFAULT_PORT = 50052;
 const STARTUP_TIMEOUT_MS = 30000;
+
+export interface ServerConfig {
+    autoLaunch: boolean;
+    binaryPath: string;
+    port: number;
+}
+
+export function getServerConfig(): ServerConfig {
+    const config = vscode.workspace.getConfiguration('cercano.server');
+    return {
+        autoLaunch: config.get<boolean>('autoLaunch', true),
+        binaryPath: config.get<string>('binaryPath', ''),
+        port: config.get<number>('port', DEFAULT_PORT),
+    };
+}
 
 export class ServerManager {
     private process: cp.ChildProcess | null = null;
     private outputChannel: vscode.OutputChannel;
+    private statusBarItem: vscode.StatusBarItem;
     private _running = false;
+    private _port = DEFAULT_PORT;
 
     constructor() {
         this.outputChannel = vscode.window.createOutputChannel('Cercano Server');
+        this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+        this.statusBarItem.command = 'cercano.showConfig';
+        this.updateStatusBar('stopped');
+        this.statusBarItem.show();
     }
 
     get running(): boolean {
         return this._running;
     }
 
+    get port(): number {
+        return this._port;
+    }
+
+    private updateStatusBar(state: 'running' | 'stopped' | 'starting' | 'error'): void {
+        switch (state) {
+            case 'running':
+                this.statusBarItem.text = '$(check) Cercano';
+                this.statusBarItem.tooltip = `Cercano server running on port ${this._port}`;
+                this.statusBarItem.backgroundColor = undefined;
+                break;
+            case 'stopped':
+                this.statusBarItem.text = '$(circle-slash) Cercano';
+                this.statusBarItem.tooltip = 'Cercano server stopped';
+                this.statusBarItem.backgroundColor = undefined;
+                break;
+            case 'starting':
+                this.statusBarItem.text = '$(sync~spin) Cercano';
+                this.statusBarItem.tooltip = 'Cercano server starting...';
+                this.statusBarItem.backgroundColor = undefined;
+                break;
+            case 'error':
+                this.statusBarItem.text = '$(error) Cercano';
+                this.statusBarItem.tooltip = 'Cercano server error — click to configure';
+                this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+                break;
+        }
+    }
+
     /**
      * Starts the server binary. If a server is already running on the port, reuses it.
      * Returns true if the server is ready (started or already running).
      */
-    async start(extensionPath: string): Promise<boolean> {
+    async start(extensionPath: string, config: ServerConfig): Promise<boolean> {
+        this._port = config.port;
+
         // Check if server is already running on the port
-        const portInUse = await checkPortInUse(SERVER_PORT);
+        const portInUse = await checkPortInUse(this._port);
         if (portInUse) {
-            this.outputChannel.appendLine(`Cercano: Server already running on port ${SERVER_PORT}, reusing.`);
+            this.outputChannel.appendLine(`Cercano: Server already running on port ${this._port}, reusing.`);
             this._running = true;
+            this.updateStatusBar('running');
             return true;
         }
 
-        const binaryPath = resolveServerBinaryPath(extensionPath);
-        this.outputChannel.appendLine(`Cercano: Starting server from ${binaryPath}`);
-        this.outputChannel.show(true); // Show but don't steal focus
+        const binaryPath = config.binaryPath || resolveServerBinaryPath(extensionPath);
+        this.outputChannel.appendLine(`Cercano: Starting server from ${binaryPath} on port ${this._port}`);
+        this.outputChannel.show(true);
+        this.updateStatusBar('starting');
 
         return new Promise<boolean>((resolve) => {
             let resolved = false;
@@ -43,9 +97,12 @@ export class ServerManager {
                 this.process = cp.spawn(binaryPath, [], {
                     cwd: path.dirname(path.dirname(binaryPath)), // source/server/
                     stdio: ['ignore', 'pipe', 'pipe'],
+                    // eslint-disable-next-line @typescript-eslint/naming-convention
+                    env: { ...process.env, CERCANO_PORT: String(this._port) },
                 });
             } catch (err: any) {
                 this.outputChannel.appendLine(`Cercano: Failed to spawn server: ${err.message}`);
+                this.updateStatusBar('error');
                 resolve(false);
                 return;
             }
@@ -55,6 +112,7 @@ export class ServerManager {
                 if (!resolved) {
                     resolved = true;
                     this.outputChannel.appendLine('Cercano: Server startup timed out.');
+                    this.updateStatusBar('error');
                     vscode.window.showErrorMessage('Cercano: Server failed to start within 30 seconds.');
                     resolve(false);
                 }
@@ -69,6 +127,7 @@ export class ServerManager {
                     resolved = true;
                     clearTimeout(timeout);
                     this._running = true;
+                    this.updateStatusBar('running');
                     this.outputChannel.appendLine('Cercano: Server is ready.');
                     resolve(true);
                 }
@@ -83,6 +142,7 @@ export class ServerManager {
                 if (!resolved) {
                     resolved = true;
                     clearTimeout(timeout);
+                    this.updateStatusBar('error');
                     vscode.window.showErrorMessage(`Cercano: Server failed to start: ${err.message}`);
                     resolve(false);
                 }
@@ -95,11 +155,15 @@ export class ServerManager {
                 if (!resolved) {
                     resolved = true;
                     clearTimeout(timeout);
+                    this.updateStatusBar('error');
                     resolve(false);
+                } else {
+                    this.updateStatusBar('stopped');
                 }
 
                 // Unexpected crash after successful start
-                if (code !== null && code !== 0 && resolved) {
+                if (code !== null && code !== 0) {
+                    this.updateStatusBar('error');
                     vscode.window.showWarningMessage(`Cercano: Server crashed (exit code ${code}). Restart VS Code or run "Cercano: Show Configuration Menu".`);
                 }
 
@@ -114,6 +178,7 @@ export class ServerManager {
     stop(): void {
         if (!this.process) {
             this._running = false;
+            this.updateStatusBar('stopped');
             return;
         }
 
@@ -136,6 +201,7 @@ export class ServerManager {
 
         proc.on('exit', () => {
             clearTimeout(killTimeout);
+            this.updateStatusBar('stopped');
             this.outputChannel.appendLine('Cercano: Server stopped.');
         });
     }
@@ -143,5 +209,6 @@ export class ServerManager {
     dispose(): void {
         this.stop();
         this.outputChannel.dispose();
+        this.statusBarItem.dispose();
     }
 }

@@ -96,8 +96,7 @@ Cercano is in active development. For detailed information on the project's goal
 ## Feature TODOs
 
 * **Better VS Code Agent Window Integration** - The Cercano model should be available as a drop down in the agent window, as a sibling to things like "Gemini 3.1", "claude", etc.
-* **Automatic Server Launch** - The Cercano server should be automatically launched when the VS Code extension is activated, and should be automatically shut down when the VS Code extension is deactivated.
 * **LLM-Based Conversation Compaction** - Conversation history currently uses simple compaction: chat responses are truncated at 2000 characters and coding responses are reduced to `[Code generated: ACTION path]`. This works well for short exchanges but may lose important nuance in longer conversations. Revisit with LLM-based summarization for more sophisticated compaction.
 * **Per-Model Configuration** - Add configurable per-model settings such as context window size, classification similarity thresholds, conversation history depth, compaction limits, and other model-specific parameters. Currently these are hardcoded constants shared across all models.
 * **Server Debug Output in Extension** - Surface server-side logs (intent classification, provider routing decisions, coordinator events) in the VS Code extension output channel for easier debugging during development.
-* **Configurable Ports** - The gRPC server port (50052) and Ollama URL (localhost:11434) are hardcoded in both the server and client. These should be configurable via environment variables or settings.
+* **Zed Extension** - The Zed client (`source/clients/zed/`) is a stub. Build out the Rust-based Zed extension to connect to the Cercano gRPC server with feature parity to the VS Code extension.

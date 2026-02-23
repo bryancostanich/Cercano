@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Run Extension",
+            "name": "Extension Only",
             "type": "extensionHost",
             "request": "launch",
             "args": [
@@ -25,6 +25,14 @@
                 "${workspaceFolder}/out/**/*.js"
             ],
             "preLaunchTask": "${defaultBuildTask}"
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Run Extension",
+            "configurations": ["Extension Only"],
+            "preLaunchTask": "Build & Run Server",
+            "stopAll": true
         }
     ]
 }

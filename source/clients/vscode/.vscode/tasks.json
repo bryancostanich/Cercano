@@ -2,6 +2,32 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "Build & Run Server",
+			"type": "shell",
+			"command": "kill $(lsof -ti :50052) 2>/dev/null; go build -o bin/agent ./cmd/agent && ./bin/agent",
+			"options": {
+				"cwd": "${workspaceFolder}/../../server"
+			},
+			"isBackground": true,
+			"problemMatcher": {
+				"owner": "cercano-server",
+				"pattern": {
+					"regexp": "^\\[ERROR\\]\\s+(.*)$",
+					"message": 1
+				},
+				"background": {
+					"activeOnStart": true,
+					"beginsPattern": "^Starting Cercano AI Agent gRPC server",
+					"endsPattern": "^Server listening at"
+				}
+			},
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"showReuseMessage": false
+			}
+		},
+		{
 			"type": "npm",
 			"script": "watch",
 			"problemMatcher": "$tsc-watch",

@@ -77,6 +77,11 @@
           "type": "number",
           "default": 50052,
           "description": "The gRPC port for the Cercano server."
+        },
+        "cercano.ollama.url": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "The URL for the Ollama server."
         }
       }
     }

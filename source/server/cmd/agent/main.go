@@ -43,7 +43,10 @@ func checkOllama(ctx context.Context, baseURL string, models ...string) error {
 func main() {
 	fmt.Println("Starting Cercano AI Agent gRPC server...")
 
-	ollamaURL := "http://localhost:11434"
+	ollamaURL := os.Getenv("OLLAMA_URL")
+	if ollamaURL == "" {
+		ollamaURL = "http://localhost:11434"
+	}
 	embeddingModel := "nomic-embed-text"
 	localModel := "qwen3-coder"
 

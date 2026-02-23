@@ -5,6 +5,7 @@
 
 import * as path from 'path';
 import * as net from 'net';
+import * as http from 'http';
 
 const READY_PATTERN = /^Server listening at/;
 
@@ -23,6 +24,23 @@ export function resolveServerBinaryPath(extensionPath: string): string {
  */
 export function isServerReady(line: string): boolean {
     return READY_PATTERN.test(line);
+}
+
+/**
+ * Checks if Ollama is reachable at the given URL.
+ * Returns true if Ollama responds, false otherwise.
+ */
+export function checkOllamaReachable(ollamaUrl: string): Promise<boolean> {
+    return new Promise((resolve) => {
+        const req = http.get(`${ollamaUrl}/api/tags`, { timeout: 3000 }, (res) => {
+            resolve(res.statusCode === 200);
+        });
+        req.on('error', () => resolve(false));
+        req.on('timeout', () => {
+            req.destroy();
+            resolve(false);
+        });
+    });
 }
 
 /**

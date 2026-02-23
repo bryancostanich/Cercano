@@ -18,7 +18,7 @@ Streamline the development inner loop so F5 builds and runs the server automatic
     - [x] Kept `Extension Only` config for cases where server is run manually.
 - [x] Task: Conductor - User Manual Verification
 
-*Notes: The server process is orphaned when debugging stops (VS Code limitation with background tasks). The `kill` command at the start of the task is the self-cleaning mechanism — each F5 press guarantees a fresh server. Phase 1 will solve this properly with extension-managed child process lifecycle.*
+*Notes: Superseded by Phase 1 — the `Build & Run Server` task was replaced with a build-only `Build Server` task. ServerManager now owns the server lifecycle, so no more orphaned processes.*
 
 ## Phase 1: Server Process Management [complete]
 
@@ -64,14 +64,21 @@ Make the server launch configurable for development vs production workflows.
 
 *Files: `package.json` (settings + activation), `serverManager.ts` (config, status bar, env var), `extension.ts` (reads config, passes port to client), `cmd/agent/main.go` (reads CERCANO_PORT).*
 
-## Phase 3: Ollama Dependency Check
+## Phase 3: Ollama Dependency Check [complete]
 
 ### Objective
 Verify Ollama is running before starting the server, with helpful error messages.
 
 ### Tasks
-- [ ] Task: Check if Ollama is reachable on activation (before spawning server).
-    - [ ] If not running, show actionable error message with link to install instructions.
-- [ ] Task: Add `cercano.ollama.url` setting (default `http://localhost:11434`).
-- [ ] Task: Pass Ollama URL to server via env var or CLI flag.
-- [ ] Task: Conductor - User Manual Verification
+- [x] Task: Check if Ollama is reachable on activation (before spawning server).
+    - [x] `checkOllamaReachable()` in `serverHelpers.ts` — HTTP GET to `/api/tags` with 3s timeout.
+    - [x] If not running, shows error dialog with "Download Ollama" and "Open Settings" buttons.
+    - [x] Status bar shows error state.
+- [x] Task: Add `cercano.ollama.url` setting (default `http://localhost:11434`) to `package.json`.
+- [x] Task: Pass Ollama URL to server via `OLLAMA_URL` env var.
+    - [x] Go server reads `OLLAMA_URL` env var, falls back to `http://localhost:11434`.
+- [x] Task: Simplified dev launch config — removed `Build & Run Server` background task, replaced with build-only `Build Server` task. ServerManager owns the full lifecycle now, fixing the orphaned process issue from Phase 0.
+- [x] Task: Removed `$go` problem matcher from build task (was misinterpreting shell profile warnings as errors).
+- [x] Task: Conductor - User Manual Verification
+
+*Files: `serverHelpers.ts` (checkOllamaReachable), `serverManager.ts` (pre-flight check, OLLAMA_URL env), `package.json` (cercano.ollama.url setting), `cmd/agent/main.go` (reads OLLAMA_URL), `.vscode/tasks.json` + `launch.json` (simplified).*

@@ -23,13 +23,16 @@ By combining the speed of local models with the power of cloud-based AI, Cercano
 └─────────┼───────────────┼────────────────┼──────────────┘
           └───────────────┼────────────────┘
                           │ gRPC
-                    ┌─────┴──────┐
-                    │   Server   │
-                    └─────┬──────┘
-                          │
 ┌─────────────────────────┴───────────────────────────────┐
-│                        Agent                            │
-│                                                         │
+|                  CERCANO SERVER                         |
+|                         |                               |
+|                   ┌─────┴──────┐                        |
+|                   │    gRPC    │                        |
+|                   │   Server   │                        |
+|                   └─────┬──────┘                        |
+|                         |                               |
+│                       AGENT                             │
+│                         |                               │
 │  ┌─────────────┐  ┌──────────────┐  ┌────────────────┐  │
 │  │   Smart     │  │  Coordinator │  │  Conversation  │  │
 │  │   Router    │  │  (LoopAgent) │  │     Store      │  │
@@ -39,7 +42,7 @@ By combining the speed of local models with the power of cloud-based AI, Cercano
              │                            │
 ┌────────────┴────────────┐  ┌────────────┴────────────────┐
 │    Local Model          │  │       Cloud Models          │
-│    (Ollama)             │  │   (Gemini, Claude)          │
+│    (Ollama)             │  │      (Gemini, Claude)       │
 └─────────────────────────┘  └─────────────────────────────┘
 ```
 

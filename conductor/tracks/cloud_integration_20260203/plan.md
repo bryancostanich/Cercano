@@ -41,9 +41,9 @@ Verify that the full loop from VS Code to Cloud LLM works with real keys.
 
 ### Tasks
 - [x] Task: Full Loop Test - Google Gemini. [29c7966]
-    - [ ] Configure Gemini key in VS Code.
-    - [ ] Send request and verify response from Gemini.
-- [ ] Task: Full Loop Test - Anthropic Claude.
-    - [ ] Configure Anthropic key in VS Code.
-    - [ ] Send request and verify response from Claude.
-- [ ] Task: Conductor - User Manual Verification 'End-to-End Verification' (Protocol in workflow.md)
+    - [x] Configure Gemini key in VS Code.
+    - [x] Send request and verify response from Gemini.
+- [x] Task: Full Loop Test - Anthropic Claude. [a504f22]
+    - [x] Configure Anthropic key in VS Code.
+    - [x] Send request and verify response from Claude.
+- [x] Task: Conductor - User Manual Verification 'End-to-End Verification' (Protocol in workflow.md)

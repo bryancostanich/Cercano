@@ -16,7 +16,7 @@ By combining the speed of local models with the power of cloud-based AI, Cercano
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                   Client Integrations                   │
+│                 CLIENT INTEGRATIONS                     │
 │   ┌───────────┐   ┌───────────┐   ┌───────────────┐     │
 │   │  VS Code  │   │    Zed    │   │    Others     │     │
 │   └─────┬─────┘   └─────┬─────┘   └──────┬────────┘     │

@@ -11,7 +11,7 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 ---
 
-- [~] **Track: Implement model-agnostic cloud integration for the Go backend using langchaingo**
+- [x] **Track: Implement model-agnostic cloud integration for the Go backend using langchaingo** [checkpoint: a504f22]
 *Link: [./tracks/cloud_integration_20260203/](./tracks/cloud_integration_20260203/)*
 
 ---

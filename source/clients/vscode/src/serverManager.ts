@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import * as path from 'path';
-import { resolveServerBinaryPath, isServerReady, checkPortInUse } from './serverHelpers';
+import { resolveServerBinaryPath, isServerReady, checkPortInUse, checkOllamaReachable } from './serverHelpers';
 
 const DEFAULT_PORT = 50052;
 const STARTUP_TIMEOUT_MS = 30000;
@@ -10,14 +10,17 @@ export interface ServerConfig {
     autoLaunch: boolean;
     binaryPath: string;
     port: number;
+    ollamaUrl: string;
 }
 
 export function getServerConfig(): ServerConfig {
-    const config = vscode.workspace.getConfiguration('cercano.server');
+    const serverConfig = vscode.workspace.getConfiguration('cercano.server');
+    const ollamaConfig = vscode.workspace.getConfiguration('cercano.ollama');
     return {
-        autoLaunch: config.get<boolean>('autoLaunch', true),
-        binaryPath: config.get<string>('binaryPath', ''),
-        port: config.get<number>('port', DEFAULT_PORT),
+        autoLaunch: serverConfig.get<boolean>('autoLaunch', true),
+        binaryPath: serverConfig.get<string>('binaryPath', ''),
+        port: serverConfig.get<number>('port', DEFAULT_PORT),
+        ollamaUrl: ollamaConfig.get<string>('url', 'http://localhost:11434'),
     };
 }
 
@@ -85,6 +88,24 @@ export class ServerManager {
             return true;
         }
 
+        // Check if Ollama is reachable before starting the server
+        const ollamaReachable = await checkOllamaReachable(config.ollamaUrl);
+        if (!ollamaReachable) {
+            this.outputChannel.appendLine(`Cercano: Ollama is not reachable at ${config.ollamaUrl}`);
+            this.updateStatusBar('error');
+            const action = await vscode.window.showErrorMessage(
+                `Cercano: Ollama is not running at ${config.ollamaUrl}. The server requires Ollama to function.`,
+                'Download Ollama',
+                'Open Settings'
+            );
+            if (action === 'Download Ollama') {
+                vscode.env.openExternal(vscode.Uri.parse('https://ollama.com/'));
+            } else if (action === 'Open Settings') {
+                vscode.commands.executeCommand('workbench.action.openSettings', 'cercano.ollama');
+            }
+            return false;
+        }
+
         const binaryPath = config.binaryPath || resolveServerBinaryPath(extensionPath);
         this.outputChannel.appendLine(`Cercano: Starting server from ${binaryPath} on port ${this._port}`);
         this.outputChannel.show(true);
@@ -97,8 +118,13 @@ export class ServerManager {
                 this.process = cp.spawn(binaryPath, [], {
                     cwd: path.dirname(path.dirname(binaryPath)), // source/server/
                     stdio: ['ignore', 'pipe', 'pipe'],
-                    // eslint-disable-next-line @typescript-eslint/naming-convention
-                    env: { ...process.env, CERCANO_PORT: String(this._port) },
+                    env: {
+                        ...process.env,
+                        // eslint-disable-next-line @typescript-eslint/naming-convention
+                        CERCANO_PORT: String(this._port),
+                        // eslint-disable-next-line @typescript-eslint/naming-convention
+                        OLLAMA_URL: config.ollamaUrl,
+                    },
                 });
             } catch (err: any) {
                 this.outputChannel.appendLine(`Cercano: Failed to spawn server: ${err.message}`);

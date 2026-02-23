@@ -17,8 +17,36 @@ type CloudModelProvider struct {
 	llm          llms.Model
 }
 
+// defaultModels maps provider names to sensible default models.
+var defaultModels = map[string]string{
+	"google":    "gemini-3-flash",
+	"anthropic": "claude-sonnet-4-6",
+}
+
+// resolveModel returns the given model if it's non-empty and belongs to the
+// provider, otherwise returns the provider's default model.
+func resolveModel(provider, model string) string {
+	if model == "" {
+		return defaultModels[provider]
+	}
+	// Catch cross-provider model names (e.g. gemini model sent to anthropic)
+	switch provider {
+	case "google":
+		if len(model) >= 6 && model[:6] == "claude" {
+			return defaultModels[provider]
+		}
+	case "anthropic":
+		if len(model) >= 6 && model[:6] == "gemini" {
+			return defaultModels[provider]
+		}
+	}
+	return model
+}
+
 // NewCloudModelProvider creates a new cloud model provider based on the type.
 func NewCloudModelProvider(ctx context.Context, provider, model, apiKey string) (*CloudModelProvider, error) {
+	model = resolveModel(provider, model)
+
 	var llm llms.Model
 	var err error
 

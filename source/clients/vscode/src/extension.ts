@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { CercanoClient } from './client';
 import { buildFollowupArgs, buildReplaceRange, isPreviewTabForResponse } from './extensionHelpers';
-import { ServerManager } from './serverManager';
+import { ServerManager, getServerConfig } from './serverManager';
 
 let client: CercanoClient;
 let serverManager: ServerManager;
@@ -16,17 +16,22 @@ const conversationId: string = require('crypto').randomUUID();
 export async function activate(context: vscode.ExtensionContext) {
     console.log('Cercano: Activating extension (Native Chat Mode)...');
 
-    // Start the server
+    // Read server configuration
+    const serverConfig = getServerConfig();
+
+    // Start the server (if auto-launch is enabled)
     serverManager = new ServerManager();
     context.subscriptions.push({ dispose: () => serverManager.dispose() });
 
-    const serverReady = await serverManager.start(context.extensionPath);
-    if (!serverReady) {
-        vscode.window.showErrorMessage('Cercano: Server is not running. Check the "Cercano Server" output channel for details.');
+    if (serverConfig.autoLaunch) {
+        const serverReady = await serverManager.start(context.extensionPath, serverConfig);
+        if (!serverReady) {
+            vscode.window.showErrorMessage('Cercano: Server is not running. Check the "Cercano Server" output channel for details.');
+        }
     }
 
     try {
-        client = new CercanoClient();
+        client = new CercanoClient(`127.0.0.1:${serverConfig.port}`);
         console.log('Cercano: gRPC Client initialized.');
     } catch (err) {
         console.error('Cercano: Failed to init gRPC client:', err);

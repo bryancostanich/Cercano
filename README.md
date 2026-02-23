@@ -72,21 +72,64 @@ By combining the speed of local models with the power of cloud-based AI, Cercano
 
 ## Getting Started
 
-Detailed setup instructions for the core agent, including prerequisites like Go and Ollama, can be found in the [Server README](source/server/README.md).
+### Prerequisites
 
-### Quick Start (Server)
+- [Go](https://go.dev/dl/) (1.21+)
+- [Ollama](https://ollama.com/) with the following models pulled:
+  ```bash
+  ollama pull qwen3-coder
+  ollama pull nomic-embed-text
+  ```
+- [VS Code](https://code.visualstudio.com/) (1.90+)
+- [Node.js](https://nodejs.org/) (20+) and npm
 
-1. Ensure you have **Go** and **Ollama** installed.
-2. Clone the repository and navigate to the `source/server` directory.
-3. Build the agent:
+### Quick Start
+
+1. Clone the repository:
    ```bash
-   cd source/server
-   go build -o bin/agent ./cmd/agent
+   git clone https://github.com/bryan-costanich/Cercano.git
+   cd Cercano
    ```
-4. Run the agent:
+
+2. Install the VS Code extension dependencies:
    ```bash
-   go run cmd/agent/main.go
+   cd source/clients/vscode
+   npm install
    ```
+
+3. Open the VS Code extension workspace:
+   ```bash
+   code source/clients/vscode
+   ```
+
+4. Press **F5** to launch. This will:
+   - Build the Go server binary
+   - Compile the TypeScript extension
+   - Open a new VS Code window (Extension Development Host)
+   - Automatically start the Cercano server (with Ollama pre-flight check)
+
+5. In the Extension Development Host, open the Chat panel and type `@cercano` followed by your question.
+
+### Cloud Provider Setup (Optional)
+
+Cercano is local-first — cloud providers are only used for escalation when local models can't handle a task.
+
+1. In the Chat panel, type `@cercano /config` to open the configuration menu.
+2. Set your API key (Google Gemini or Anthropic Claude).
+3. Select your preferred cloud provider for escalation.
+
+### Configuration
+
+The following settings are available under `cercano.*` in VS Code Settings:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `cercano.server.autoLaunch` | `true` | Automatically start the server on activation |
+| `cercano.server.binaryPath` | *(empty)* | Override path to the server binary |
+| `cercano.server.port` | `50052` | gRPC server port |
+| `cercano.ollama.url` | `http://localhost:11434` | Ollama server URL |
+| `cercano.provider` | `local` | Cloud provider for escalation (`google` or `anthropic`) |
+| `cercano.model` | *(empty)* | Override cloud model name |
 
 ## Development
 

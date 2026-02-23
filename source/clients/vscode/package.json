@@ -8,7 +8,7 @@
     "vscode": "^1.90.0"
   },
   "activationEvents": [
-    "onChatParticipant:cercano-chat"
+    "onStartupFinished"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -62,6 +62,21 @@
           "type": "string",
           "default": "gemini-3-flash-preview",
           "description": "The model to use when a cloud provider is selected."
+        },
+        "cercano.server.autoLaunch": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start the Cercano server when the extension activates."
+        },
+        "cercano.server.binaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Override the path to the Cercano server binary. Leave empty to use the default location (source/server/bin/agent)."
+        },
+        "cercano.server.port": {
+          "type": "number",
+          "default": 50052,
+          "description": "The gRPC port for the Cercano server."
         }
       }
     }

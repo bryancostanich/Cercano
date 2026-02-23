@@ -94,7 +94,11 @@ func main() {
 	convStore := agent.NewConversationStore(sessionSvc, 3)
 	orchestrator := agent.NewAgent(smartRouter, coordinator, agent.WithConversationStore(convStore))
 
-	lis, err := net.Listen("tcp", ":50052")
+	port := os.Getenv("CERCANO_PORT")
+	if port == "" {
+		port = "50052"
+	}
+	lis, err := net.Listen("tcp", ":"+port)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}

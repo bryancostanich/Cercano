@@ -48,7 +48,7 @@ export function activate(context: vscode.ExtensionContext) {
         const items: vscode.QuickPickItem[] = [
             { label: 'Set Google Gemini API Key', description: 'Store your Gemini API key securely' },
             { label: 'Set Anthropic API Key', description: 'Store your Anthropic API key securely' },
-            { label: 'Select Provider', description: 'Choose between local, google, or anthropic' }
+            { label: 'Select Cloud Provider', description: 'Choose a cloud provider for escalation (local is always default)' }
         ];
 
         const selection = await vscode.window.showQuickPick(items, { placeHolder: 'Cercano Configuration' });
@@ -61,9 +61,9 @@ export function activate(context: vscode.ExtensionContext) {
             case 'Set Anthropic API Key':
                 await vscode.commands.executeCommand('cercano.setAnthropicKey');
                 break;
-            case 'Select Provider':
-                const providers = ['local', 'google', 'anthropic'];
-                const provider = await vscode.window.showQuickPick(providers, { placeHolder: 'Select AI Provider' });
+            case 'Select Cloud Provider':
+                const providers = ['google', 'anthropic'];
+                const provider = await vscode.window.showQuickPick(providers, { placeHolder: 'Select Cloud Provider' });
                 if (provider) {
                     await vscode.workspace.getConfiguration('cercano').update('provider', provider, vscode.ConfigurationTarget.Global);
                     vscode.window.showInformationMessage(`Cercano: Provider set to ${provider}`);

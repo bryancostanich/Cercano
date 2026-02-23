@@ -20,23 +20,27 @@ Streamline the development inner loop so F5 builds and runs the server automatic
 
 *Notes: The server process is orphaned when debugging stops (VS Code limitation with background tasks). The `kill` command at the start of the task is the self-cleaning mechanism — each F5 press guarantees a fresh server. Phase 1 will solve this properly with extension-managed child process lifecycle.*
 
-## Phase 1: Server Process Management
+## Phase 1: Server Process Management [complete]
 
 ### Objective
 Extension spawns and manages the Go server as a child process.
 
 ### Tasks
-- [ ] Task: Build the server binary as part of extension activation (or locate a pre-built binary).
-    - [ ] Define a convention for where the binary lives (e.g., `bin/agent` relative to workspace root, or bundled with extension).
-- [ ] Task: Spawn the server process from `extension.ts` on activation.
-    - [ ] Use `child_process.spawn` with stdout/stderr piped to an output channel.
-    - [ ] Wait for the server to be ready (poll the gRPC port or parse stdout for "listening" message).
-- [ ] Task: Kill the server process on extension deactivation.
-    - [ ] Handle graceful shutdown (SIGTERM) with a fallback to SIGKILL.
-- [ ] Task: Handle edge cases.
-    - [ ] Server already running (port in use) — detect and reuse.
-    - [ ] Server crashes mid-session — notify user, optionally restart.
-- [ ] Task: Conductor - User Manual Verification
+- [x] Task: Locate pre-built server binary on extension activation.
+    - [x] Convention: `source/server/bin/agent` resolved relative to extension path via `resolveServerBinaryPath()`.
+- [x] Task: Spawn the server process from `extension.ts` on activation.
+    - [x] `ServerManager` class using `child_process.spawn` with stdout/stderr piped to "Cercano Server" output channel.
+    - [x] Waits for server readiness by parsing stdout for "Server listening at" pattern (30s timeout).
+- [x] Task: Kill the server process on extension deactivation.
+    - [x] `deactivate()` calls `serverManager.stop()` — SIGTERM with 3s fallback to SIGKILL.
+    - [x] `dispose()` registered on `context.subscriptions` as safety net.
+- [x] Task: Handle edge cases.
+    - [x] Server already running (port in use) — `checkPortInUse()` detects and reuses.
+    - [x] Server crashes mid-session — notifies user via warning message.
+    - [x] Spawn failure or timeout — shows error message, extension continues (degraded).
+- [x] Task: Conductor - User Manual Verification
+
+*Files: `serverHelpers.ts` (pure helpers), `serverManager.ts` (ServerManager class), `serverManager.test.ts` (8 tests), `extension.ts` (integration).*
 
 ## Phase 2: Configuration
 

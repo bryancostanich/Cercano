@@ -14,14 +14,40 @@ By combining the speed of local models with the power of cloud-based AI, Cercano
 
 ## Architecture
 
-Cercano is built as a decoupled system:
+```
+┌─────────────────────────────────────────────────────────┐
+│                   Client Integrations                   │
+│   ┌───────────┐   ┌───────────┐   ┌───────────────┐     │
+│   │  VS Code  │   │    Zed    │   │    Others     │     │
+│   └─────┬─────┘   └─────┬─────┘   └──────┬────────┘     │
+└─────────┼───────────────┼────────────────┼──────────────┘
+          └───────────────┼────────────────┘
+                          │ gRPC
+                    ┌─────┴──────┐
+                    │   Server   │
+                    └─────┬──────┘
+                          │
+┌─────────────────────────┴───────────────────────────────┐
+│                        Agent                            │
+│                                                         │
+│  ┌─────────────┐  ┌──────────────┐  ┌────────────────┐  │
+│  │   Smart     │  │  Coordinator │  │  Conversation  │  │
+│  │   Router    │  │  (LoopAgent) │  │     Store      │  │
+│  └─────────────┘  └──────────────┘  └────────────────┘  │
+│                                                         │
+└────────────┬────────────────────────────┬───────────────┘
+             │                            │
+┌────────────┴────────────┐  ┌────────────┴────────────────┐
+│    Local Model          │  │       Cloud Models          │
+│    (Ollama)             │  │   (Gemini, Claude)          │
+└─────────────────────────┘  └─────────────────────────────┘
+```
 
-1. **Core Agent (Go)** - The heart of the system, written in Go. It handles model routing, agentic loops, and provides a gRPC interface.
-2. **Smart Router** - Uses semantic classification (via embeddings) to disambiguate user requests and optimize prompt delivery.
-3. **IDE Clients:**
-    - **VS Code** - A TypeScript-based extension providing a Sidebar Chat interface.
-    - **Zed** - A native Rust-based extension.
-4. **Communication** - High-performance gRPC protocol for inter-process communication between the IDE and the Core Agent.
+- **Core Agent (Go)** - The heart of the system, written in Go. It handles model routing, agentic loops, conversation history, and provides a gRPC interface.
+- **Smart Router** - Uses semantic classification (via embeddings) to disambiguate user requests and optimize prompt delivery.
+- **Coordinator (LoopAgent)** - Google ADK-backed iterative loop that generates code, validates it, and self-corrects with escalation to cloud models.
+- **Conversation Store** - Server-side multi-turn history so the LLM can resolve references across requests.
+- **Clients** - VS Code (TypeScript), Zed (Rust - still under construction), with gRPC for inter-process communication. The gRPC server enables any kind of client integration. Today, VS Code and Zed are provided as examples.
 
 ## Project Structure
 

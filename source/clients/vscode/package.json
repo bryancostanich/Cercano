@@ -63,6 +63,11 @@
           "default": "gemini-3-flash-preview",
           "description": "The model to use when a cloud provider is selected."
         },
+        "cercano.localModel": {
+          "type": "string",
+          "default": "qwen3-coder",
+          "description": "The Ollama model to use for local inference."
+        },
         "cercano.server.autoLaunch": {
           "type": "boolean",
           "default": true,

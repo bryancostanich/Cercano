@@ -48,7 +48,11 @@ func main() {
 		ollamaURL = "http://localhost:11434"
 	}
 	embeddingModel := "nomic-embed-text"
-	localModel := "qwen3-coder"
+	localModel := os.Getenv("CERCANO_LOCAL_MODEL")
+	if localModel == "" {
+		localModel = "qwen3-coder"
+	}
+	fmt.Printf("Local model: %s\n", localModel)
 
 	// Pre-flight check for Ollama
 	if err := checkOllama(context.Background(), ollamaURL); err != nil {
@@ -97,6 +101,10 @@ func main() {
 	convStore := agent.NewConversationStore(sessionSvc, 3)
 	orchestrator := agent.NewAgent(smartRouter, coordinator, agent.WithConversationStore(convStore))
 
+	cloudFactory := func(ctx context.Context, provider, model, apiKey string) (agent.ModelProvider, error) {
+		return llm.NewCloudModelProvider(ctx, provider, model, apiKey)
+	}
+
 	port := os.Getenv("CERCANO_PORT")
 	if port == "" {
 		port = "50052"
@@ -107,7 +115,7 @@ func main() {
 	}
 
 	s := grpc.NewServer()
-	proto.RegisterAgentServer(s, server.NewServer(orchestrator))
+	proto.RegisterAgentServer(s, server.NewServer(orchestrator, localProvider, smartRouter, coordinator, cloudFactory))
 
 	fmt.Printf("Server listening at %v\n", lis.Addr())
 	if err := s.Serve(lis); err != nil {

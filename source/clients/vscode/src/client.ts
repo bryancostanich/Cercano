@@ -1,6 +1,6 @@
 import * as grpc from '@grpc/grpc-js';
 import { AgentClient } from './proto/agent_grpc_pb';
-import { ProcessRequestRequest, ProcessRequestResponse, CloudProviderConfig, StreamProcessResponse } from './proto/agent_pb';
+import { ProcessRequestRequest, ProcessRequestResponse, StreamProcessResponse, UpdateConfigRequest } from './proto/agent_pb';
 
 export class CercanoClient {
     private client: AgentClient;
@@ -13,11 +13,35 @@ export class CercanoClient {
         );
     }
 
+    public updateConfig(config: {
+        localModel?: string,
+        cloudProvider?: string,
+        cloudModel?: string,
+        cloudApiKey?: string
+    }): Promise<{ success: boolean, message: string }> {
+        return new Promise((resolve, reject) => {
+            const request = new UpdateConfigRequest();
+            if (config.localModel) { request.setLocalModel(config.localModel); }
+            if (config.cloudProvider) { request.setCloudProvider(config.cloudProvider); }
+            if (config.cloudModel) { request.setCloudModel(config.cloudModel); }
+            if (config.cloudApiKey) { request.setCloudApiKey(config.cloudApiKey); }
+
+            this.client.updateConfig(request, (error, response) => {
+                if (error) {
+                    return reject(error);
+                }
+                resolve({
+                    success: response.getSuccess(),
+                    message: response.getMessage()
+                });
+            });
+        });
+    }
+
     public processStream(
         input: string,
         workDir?: string,
         fileName?: string,
-        providerConfig?: { provider: string, model: string, apiKey: string },
         onProgress?: (message: string) => void,
         conversationId?: string
     ): Promise<ProcessRequestResponse> {
@@ -28,14 +52,6 @@ export class CercanoClient {
             if (workDir) { request.setWorkDir(workDir); }
             if (fileName) { request.setFileName(fileName); }
             if (conversationId) { request.setConversationId(conversationId); }
-
-            if (providerConfig) {
-                const config = new CloudProviderConfig();
-                config.setProvider(providerConfig.provider);
-                config.setModel(providerConfig.model);
-                config.setApiKey(providerConfig.apiKey);
-                request.setProviderConfig(config);
-            }
 
             const deadline = new Date();
             deadline.setSeconds(deadline.getSeconds() + 300);
@@ -69,7 +85,7 @@ export class CercanoClient {
         });
     }
 
-    public process(input: string, workDir?: string, fileName?: string, providerConfig?: { provider: string, model: string, apiKey: string }, conversationId?: string): Promise<ProcessRequestResponse> {
+    public process(input: string, workDir?: string, fileName?: string, conversationId?: string): Promise<ProcessRequestResponse> {
         return new Promise((resolve, reject) => {
             const request = new ProcessRequestRequest();
             request.setInput(input);
@@ -77,14 +93,6 @@ export class CercanoClient {
             if (workDir) { request.setWorkDir(workDir); }
             if (fileName) { request.setFileName(fileName); }
             if (conversationId) { request.setConversationId(conversationId); }
-
-            if (providerConfig) {
-                const config = new CloudProviderConfig();
-                config.setProvider(providerConfig.provider);
-                config.setModel(providerConfig.model);
-                config.setApiKey(providerConfig.apiKey);
-                request.setProviderConfig(config);
-            }
 
             // Set a generous deadline (5 minutes) for complex AI tasks and self-correction loops
             const deadline = new Date();

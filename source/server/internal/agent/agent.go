@@ -123,7 +123,6 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 	// Use augmented input for the provider call
 	augReq := &Request{
 		Input:          augmentedInput,
-		ProviderConfig: req.ProviderConfig,
 		WorkDir:        req.WorkDir,
 		FileName:       req.FileName,
 		ConversationID: req.ConversationID,
@@ -235,7 +234,6 @@ func (a *Agent) ProcessRequestStream(ctx context.Context, req *Request, progress
 	// Use augmented input for the provider call
 	augReq := &Request{
 		Input:          augmentedInput,
-		ProviderConfig: req.ProviderConfig,
 		WorkDir:        req.WorkDir,
 		FileName:       req.FileName,
 		ConversationID: req.ConversationID,

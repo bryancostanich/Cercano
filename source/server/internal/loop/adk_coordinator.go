@@ -48,6 +48,11 @@ func (c *ADKCoordinator) SetEscalationThreshold(threshold int) {
 	c.escalationThreshold = threshold
 }
 
+// SetCloudProvider replaces the cloud provider at runtime.
+func (c *ADKCoordinator) SetCloudProvider(p agentmod.ModelProvider) {
+	c.cloudProvider = p
+}
+
 // CoordinateStream sets up the generate→validate loop and returns an event
 // iterator plus a finalize closure. The caller drains the iterator to drive the
 // loop, then calls finalize to restore the workspace backup and obtain the

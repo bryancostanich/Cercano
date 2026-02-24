@@ -124,6 +124,7 @@ The following settings are available under `cercano.*` in VS Code Settings:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
+| `cercano.localModel` | `qwen3-coder` | Ollama model for local inference |
 | `cercano.server.autoLaunch` | `true` | Automatically start the server on activation |
 | `cercano.server.binaryPath` | *(empty)* | Override path to the server binary |
 | `cercano.server.port` | `50052` | gRPC server port |
@@ -141,4 +142,5 @@ Cercano is in active development. For detailed information on the project's goal
 * **Better VS Code Agent Window Integration** - The Cercano model should be available as a drop down in the agent window, as a sibling to things like "Gemini 3.1", "claude", etc.
 * **LLM-Based Conversation Compaction** - Conversation history currently uses simple compaction: chat responses are truncated at 2000 characters and coding responses are reduced to `[Code generated: ACTION path]`. This works well for short exchanges but may lose important nuance in longer conversations. Revisit with LLM-based summarization for more sophisticated compaction.
 * **Per-Model Configuration** - Add configurable per-model settings such as context window size, classification similarity thresholds, conversation history depth, compaction limits, and other model-specific parameters. Currently these are hardcoded constants shared across all models.
+* **Simplify Provider Routing** - The SmartRouter's provider routing step (local vs cloud) uses embedding-based classification, but embeddings capture semantic meaning, not task complexity. This leads to mediocre similarity scores for straightforward queries. Since cloud vs local is now a configuration choice (via `UpdateConfig` RPC) and the coordinator already handles escalation during coding tasks, the provider routing step may be redundant. Explore removing it in favor of always routing to local and relying on configuration + coordinator escalation for cloud usage.
 * **Zed Extension** - The Zed client (`source/clients/zed/`) is a stub. Build out the Rust-based Zed extension to connect to the Cercano gRPC server with feature parity to the VS Code extension.

@@ -13,6 +13,44 @@ const processedResponses = new Set<string>();
 // Conversation ID for multi-turn history (persists for the extension session)
 const conversationId: string = require('crypto').randomUUID();
 
+/**
+ * Sends current configuration to the server via UpdateConfig RPC.
+ * Called on activation and whenever settings change.
+ */
+async function sendConfig(context: vscode.ExtensionContext): Promise<void> {
+    if (!client) { return; }
+
+    const config = vscode.workspace.getConfiguration('cercano');
+    const localModel = config.get<string>('localModel', 'qwen3-coder');
+    const provider = config.get<string>('provider') || 'local';
+    const model = config.get<string>('model') || '';
+
+    const updatePayload: {
+        localModel?: string,
+        cloudProvider?: string,
+        cloudModel?: string,
+        cloudApiKey?: string
+    } = { localModel };
+
+    // Include cloud config if a cloud provider is selected
+    if (provider === 'google' || provider === 'anthropic') {
+        const secretKey = provider === 'google' ? 'gemini-api-key' : 'anthropic-api-key';
+        const apiKey = await context.secrets.get(secretKey);
+        if (apiKey) {
+            updatePayload.cloudProvider = provider;
+            updatePayload.cloudModel = model;
+            updatePayload.cloudApiKey = apiKey;
+        }
+    }
+
+    try {
+        const result = await client.updateConfig(updatePayload);
+        console.log(`Cercano: Config sent to server: ${result.message}`);
+    } catch (err) {
+        console.error('Cercano: Failed to send config to server:', err);
+    }
+}
+
 export async function activate(context: vscode.ExtensionContext) {
     console.log('Cercano: Activating extension (Native Chat Mode)...');
 
@@ -37,6 +75,31 @@ export async function activate(context: vscode.ExtensionContext) {
         console.error('Cercano: Failed to init gRPC client:', err);
     }
 
+    // Send initial configuration to the server
+    await sendConfig(context);
+
+    // Watch for config changes
+    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(async (e) => {
+        if (e.affectsConfiguration('cercano.server.port') ||
+            e.affectsConfiguration('cercano.ollama.url')) {
+            // Port or Ollama URL changes require a server restart
+            const newConfig = getServerConfig();
+            vscode.window.showInformationMessage('Cercano: Server configuration changed, restarting server...');
+            serverManager.stop();
+            await serverManager.start(context.extensionPath, newConfig);
+            if (e.affectsConfiguration('cercano.server.port')) {
+                client = new CercanoClient(`127.0.0.1:${newConfig.port}`);
+            }
+            await sendConfig(context);
+        } else if (e.affectsConfiguration('cercano.localModel') ||
+                   e.affectsConfiguration('cercano.provider') ||
+                   e.affectsConfiguration('cercano.model')) {
+            // Model and provider changes are sent via UpdateConfig RPC — no restart needed
+            await sendConfig(context);
+            vscode.window.showInformationMessage('Cercano: Configuration updated.');
+        }
+    }));
+
     // Register secret management commands
     context.subscriptions.push(vscode.commands.registerCommand('cercano.setGeminiKey', async () => {
         const key = await vscode.window.showInputBox({
@@ -46,6 +109,7 @@ export async function activate(context: vscode.ExtensionContext) {
         if (key) {
             await context.secrets.store('gemini-api-key', key);
             vscode.window.showInformationMessage('Cercano: Gemini API Key stored securely.');
+            await sendConfig(context);
         }
     }));
 
@@ -57,11 +121,14 @@ export async function activate(context: vscode.ExtensionContext) {
         if (key) {
             await context.secrets.store('anthropic-api-key', key);
             vscode.window.showInformationMessage('Cercano: Anthropic API Key stored securely.');
+            await sendConfig(context);
         }
     }));
 
     const showConfigMenu = async () => {
+        const currentModel = vscode.workspace.getConfiguration('cercano').get<string>('localModel', 'qwen3-coder');
         const items: vscode.QuickPickItem[] = [
+            { label: 'Set Local Model', description: `Currently: ${currentModel}` },
             { label: 'Set Google Gemini API Key', description: 'Store your Gemini API key securely' },
             { label: 'Set Anthropic API Key', description: 'Store your Anthropic API key securely' },
             { label: 'Select Cloud Provider', description: 'Choose a cloud provider for escalation (local is always default)' }
@@ -71,6 +138,17 @@ export async function activate(context: vscode.ExtensionContext) {
         if (!selection) return;
 
         switch (selection.label) {
+            case 'Set Local Model':
+                const model = await vscode.window.showInputBox({
+                    prompt: 'Enter the Ollama model name for local inference',
+                    value: currentModel,
+                    placeHolder: 'e.g., qwen3-coder, GLM-4.7-Flash'
+                });
+                if (model) {
+                    await vscode.workspace.getConfiguration('cercano').update('localModel', model, vscode.ConfigurationTarget.Global);
+                    vscode.window.showInformationMessage(`Cercano: Local model set to ${model}.`);
+                }
+                break;
             case 'Set Google Gemini API Key':
                 await vscode.commands.executeCommand('cercano.setGeminiKey');
                 break;
@@ -98,8 +176,8 @@ export async function activate(context: vscode.ExtensionContext) {
         }
 
         console.log('Cercano: Chat request received:', request.prompt);
-        const responseId = Date.now().toString(); // Simple unique ID for this response
-        
+        const responseId = Date.now().toString();
+
         // 1. Gather IDE Context
         const editor = vscode.window.activeTextEditor;
         let contextText = "";
@@ -110,55 +188,31 @@ export async function activate(context: vscode.ExtensionContext) {
             const document = editor.document;
             const selection = editor.selection;
             const text = selection.isEmpty ? document.getText() : document.getText(selection);
-            
+
             fileName = require('path').basename(document.fileName);
             workDir = require('path').dirname(document.fileName);
-            
+
             contextText = `\n\n--- Context from ${fileName} ---\n${text}\n--- End Context ---\n`;
             console.log(`Cercano: Included context from ${fileName} in ${workDir}`);
         }
 
-        // 2. Resolve Provider Configuration
-        const config = vscode.workspace.getConfiguration('cercano');
-        const provider = config.get<string>('provider') || 'local';
-        const model = config.get<string>('model') || '';
-        
-        let providerConfig: { provider: string, model: string, apiKey: string } | undefined;
-
-        if (provider === 'google' || provider === 'anthropic') {
-            const secretKey = provider === 'google' ? 'gemini-api-key' : 'anthropic-api-key';
-            const apiKey = await context.secrets.get(secretKey);
-            
-            if (apiKey) {
-                providerConfig = {
-                    provider: provider,
-                    model: model,
-                    apiKey: apiKey
-                };
-                console.log(`Cercano: Sending cloud preference to agent: ${provider} (${model})`);
-            } else {
-                response.markdown(`Warning: No API key found for **${provider}**. Please run the "Cercano: Set ${provider === 'google' ? 'Gemini' : 'Anthropic'} API Key" command. Falling back to default routing.`);
-            }
-        }
-
-        // 3. Combine Prompt + Context
+        // 2. Combine Prompt + Context
         const fullPrompt = request.prompt + contextText;
 
         try {
-            // 4. Call gRPC backend with streaming
+            // 3. Call gRPC backend with streaming (provider config is already on the server via UpdateConfig)
             const result = await client.processStream(
                 fullPrompt,
                 workDir,
                 fileName,
-                providerConfig,
                 (msg) => response.progress(msg),
                 conversationId
             );
-            
+
             // Show markdown output
             response.markdown(result.getOutput());
 
-            // 5. Show Routing Info
+            // 4. Show Routing Info
             const metadata = result.getRoutingMetadata();
             if (metadata) {
                 const modelName = metadata.getModelName();
@@ -166,13 +220,13 @@ export async function activate(context: vscode.ExtensionContext) {
                 response.markdown(`\n\n*(Processed by: **${modelName}**${escalated ? ' [Escalated]' : ''})*`);
             }
 
-            // 6. Show Validation Errors if any
+            // 5. Show Validation Errors if any
             const validationErrors = result.getValidationErrors();
             if (validationErrors) {
                 response.markdown(`\n\n---\n### ⚠️ Validation Issues\nSome issues were detected during generation:\n\n\`\`\`\n${validationErrors}\n\`\`\``);
             }
 
-            // 7. Handle File Changes via FileTree and followups
+            // 6. Handle File Changes via FileTree and followups
             const fileChanges = result.getFileChangesList();
             if (fileChanges && fileChanges.length > 0) {
                 const edit = new vscode.WorkspaceEdit();
@@ -183,7 +237,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 for (const change of fileChanges) {
                     const relativePath = change.getPath();
                     const content = change.getContent();
-                    
+
                     let fileUri: vscode.Uri;
                     if (workspaceFolder) {
                         fileUri = vscode.Uri.file(require('path').join(workspaceFolder, relativePath));
@@ -230,7 +284,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
             const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
             const fileUri = workspaceFolder ? vscode.Uri.file(require('path').join(workspaceFolder, relativePath)) : vscode.Uri.file(relativePath);
-            
+
             // Check if file exists for original content
             let originalUri = fileUri;
             let fileExists = true;
@@ -247,7 +301,7 @@ export async function activate(context: vscode.ExtensionContext) {
             }
 
             const previewUri = vscode.Uri.parse(`cercano-preview:${fileUri.path}?${args.responseId}`);
-            
+
             const provider = new class implements vscode.TextDocumentContentProvider {
                 provideTextDocumentContent() { return newContent; }
             };
@@ -275,7 +329,7 @@ export async function activate(context: vscode.ExtensionContext) {
             if (content === undefined) continue;
 
             const fileUri = workspaceFolder ? vscode.Uri.file(require('path').join(workspaceFolder, relativePath)) : vscode.Uri.file(relativePath);
-            
+
             if (!fs.existsSync(fileUri.fsPath)) {
                 edit.createFile(fileUri, { ignoreIfExists: true });
                 edit.insert(fileUri, new vscode.Position(0, 0), content);
@@ -291,7 +345,7 @@ export async function activate(context: vscode.ExtensionContext) {
         }
 
         const success = await vscode.workspace.applyEdit(edit);
-        
+
         if (success) {
             processedResponses.add(args.responseId);
             if (args.filePaths.length > 0) {

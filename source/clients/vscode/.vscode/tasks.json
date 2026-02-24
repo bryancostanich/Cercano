@@ -23,10 +23,7 @@
 			"presentation": {
 				"reveal": "never"
 			},
-			"group": {
-				"kind": "build",
-				"isDefault": true
-			},
+			"group": "build",
 			"dependsOn": ["Build Server"]
 		},
 		{
@@ -36,7 +33,10 @@
 			"presentation": {
 				"reveal": "never"
 			},
-			"group": "build",
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
 			"dependsOn": ["Build Server"]
 		}
 	]

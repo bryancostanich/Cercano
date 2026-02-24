@@ -634,6 +634,71 @@ providers:
 	}
 }
 
+// TestSmartRouter_SetCloudProvider verifies runtime cloud provider replacement.
+func TestSmartRouter_SetCloudProvider(t *testing.T) {
+	protoContent := `
+intents:
+  coding:
+    - "code"
+  chat:
+    - "chat"
+providers:
+  local:
+    - "local task"
+  cloud:
+    - "cloud task"
+`
+	tmpFile, err := os.CreateTemp("", "prototypes*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Write([]byte(protoContent))
+	tmpFile.Close()
+
+	mockLocal := &MockModelProvider{name: "LocalModel"}
+	mockCloud := &MockModelProvider{name: "MockCloud"}
+
+	mockResponses := map[string]string{
+		"code":       `{"embedding": [1.0, 0.0]}`,
+		"chat":       `{"embedding": [0.0, 1.0]}`,
+		"local task": `{"embedding": [1.0, 0.0]}`,
+		"cloud task": `{"embedding": [0.0, 1.0]}`,
+		// Query in cloud territory
+		"do complex analysis": `{"embedding": [0.1, 0.9]}`,
+	}
+	mockClient := &http.Client{
+		Transport: &MockRoundTripper{responses: mockResponses},
+	}
+
+	router, err := NewSmartRouter(mockLocal, mockCloud, "nomic-embed-text", mockClient, tmpFile.Name(), nil)
+	if err != nil {
+		t.Fatalf("Failed to create SmartRouter: %v", err)
+	}
+
+	// Verify initial cloud provider
+	provider, err := router.SelectProvider(&Request{Input: "do complex analysis"}, IntentChat)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if provider.Name() != "MockCloud" {
+		t.Errorf("Expected MockCloud, got %s", provider.Name())
+	}
+
+	// Replace cloud provider at runtime
+	newCloud := &MockModelProvider{name: "GoogleGemini"}
+	router.SetCloudProvider(newCloud)
+
+	// Verify the new provider is used
+	provider, err = router.SelectProvider(&Request{Input: "do complex analysis"}, IntentChat)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if provider.Name() != "GoogleGemini" {
+		t.Errorf("Expected GoogleGemini after SetCloudProvider, got %s", provider.Name())
+	}
+}
+
 // TestTopKAveragePerCategory_KLargerThanCategory verifies graceful handling
 // when K exceeds the number of prototypes in a category.
 func TestTopKAveragePerCategory_KLargerThanCategory(t *testing.T) {

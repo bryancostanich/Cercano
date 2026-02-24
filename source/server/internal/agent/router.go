@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -76,17 +77,9 @@ const (
 // Request represents a request to be processed by an AI model.
 type Request struct {
 	Input          string
-	ProviderConfig *ProviderConfig
 	WorkDir        string
 	FileName       string
 	ConversationID string
-}
-
-// ProviderConfig represents a cloud provider configuration.
-type ProviderConfig struct {
-	Provider string
-	Model    string
-	ApiKey   string
 }
 
 // Response represents a response from an AI model.
@@ -136,6 +129,7 @@ const (
 
 // SmartRouter implements the Router interface with routing logic based on semantic similarity.
 type SmartRouter struct {
+	mu                 sync.RWMutex
 	ModelProviders     map[string]ModelProvider
 	EmbeddingModelName string
 	IntentPrototypes   []PrototypeEmbedding
@@ -145,7 +139,16 @@ type SmartRouter struct {
 }
 
 func (sr *SmartRouter) GetModelProviders() map[string]ModelProvider {
+	sr.mu.RLock()
+	defer sr.mu.RUnlock()
 	return sr.ModelProviders
+}
+
+// SetCloudProvider replaces the cloud model provider at runtime (thread-safe).
+func (sr *SmartRouter) SetCloudProvider(p ModelProvider) {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	sr.ModelProviders["CloudModel"] = p
 }
 
 // NewSmartRouter creates a new SmartRouter, loads prototypes, and pre-calculates their embeddings.
@@ -363,6 +366,9 @@ func (sr *SmartRouter) SelectProvider(req *Request, intent Intent) (ModelProvide
 		finalCategory = "Provider:Local"
 	}
 
+	sr.mu.RLock()
+	defer sr.mu.RUnlock()
+
 	// If LocalModel is selected, return the local provider
 	if finalCategory == "Provider:Local" {
 		if provider, ok := sr.ModelProviders["LocalModel"]; ok {
@@ -370,13 +376,7 @@ func (sr *SmartRouter) SelectProvider(req *Request, intent Intent) (ModelProvide
 		}
 	}
 
-	// If CloudModel is selected, check if we have a specific config from the client
-	if req.ProviderConfig != nil && sr.CloudFactory != nil {
-		fmt.Printf("Router: Using cloud provider from client config: %s\n", req.ProviderConfig.Provider)
-		return sr.CloudFactory(context.Background(), req.ProviderConfig.Provider, req.ProviderConfig.Model, req.ProviderConfig.ApiKey)
-	}
-
-	// Otherwise use the default cloud provider
+	// Use the stored cloud provider (configured via UpdateConfig RPC)
 	if provider, ok := sr.ModelProviders["CloudModel"]; ok {
 		return provider, nil
 	}

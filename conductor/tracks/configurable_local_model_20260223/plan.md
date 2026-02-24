@@ -2,7 +2,7 @@
 
 The local model (`qwen3-coder`) is hardcoded at server startup via env var. Cloud provider config is sent per-request on every gRPC call. Both patterns are inconsistent and the local model requires a server restart to change. This track unifies both under a single `UpdateConfig` RPC for runtime configuration.
 
-## Phase 1: `UpdateConfig` RPC — Runtime Model & Provider Configuration
+## [x] Phase 1: `UpdateConfig` RPC — Runtime Model & Provider Configuration
 
 ### Objective
 Replace the per-request `CloudProviderConfig` pattern and startup-only local model env var with a single `UpdateConfig` RPC. Both local model and cloud provider become runtime-configurable without server restart.
@@ -116,13 +116,3 @@ Verify:
    - Chat again — should use `GLM-4.7-Flash` (no server restart, check server output for model name)
    - Set cloud API key, change provider to Google
    - Ask a "use cloud"-style question — should use the configured cloud provider
-
-## Phase 2: CLI Flags (Optional)
-
-### Objective
-Add CLI flags to the server binary for standalone usage without env vars.
-
-### Tasks
-- [ ] Task: Add `--port`, `--ollama-url`, `--local-model` flags to `main.go` (env vars remain as fallback).
-- [ ] Task: Update Server README with CLI usage examples.
-- [ ] Task: Conductor - User Manual Verification

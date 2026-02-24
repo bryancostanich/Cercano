@@ -201,12 +201,12 @@ func (x *ProgressUpdate) GetMessage() string {
 
 // The request message for ProcessRequest.
 type ProcessRequestRequest struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Input          string                 `protobuf:"bytes,1,opt,name=input,proto3" json:"input,omitempty"`                                         // User input or query
-	ProviderConfig *CloudProviderConfig   `protobuf:"bytes,2,opt,name=provider_config,json=providerConfig,proto3" json:"provider_config,omitempty"` // Optional provider configuration
-	WorkDir        string                 `protobuf:"bytes,3,opt,name=work_dir,json=workDir,proto3" json:"work_dir,omitempty"`                      // Optional working directory for agentic tasks
-	FileName       string                 `protobuf:"bytes,4,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`                   // Optional filename for agentic tasks
-	ConversationId string                 `protobuf:"bytes,5,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"` // Optional conversation ID for multi-turn history
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Input string                 `protobuf:"bytes,1,opt,name=input,proto3" json:"input,omitempty"` // User input or query
+	// Field 2 removed (was CloudProviderConfig provider_config)
+	WorkDir        string `protobuf:"bytes,3,opt,name=work_dir,json=workDir,proto3" json:"work_dir,omitempty"`                      // Optional working directory for agentic tasks
+	FileName       string `protobuf:"bytes,4,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`                   // Optional filename for agentic tasks
+	ConversationId string `protobuf:"bytes,5,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"` // Optional conversation ID for multi-turn history
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -248,13 +248,6 @@ func (x *ProcessRequestRequest) GetInput() string {
 	return ""
 }
 
-func (x *ProcessRequestRequest) GetProviderConfig() *CloudProviderConfig {
-	if x != nil {
-		return x.ProviderConfig
-	}
-	return nil
-}
-
 func (x *ProcessRequestRequest) GetWorkDir() string {
 	if x != nil {
 		return x.WorkDir
@@ -276,30 +269,31 @@ func (x *ProcessRequestRequest) GetConversationId() string {
 	return ""
 }
 
-// Configuration for cloud providers.
-type CloudProviderConfig struct {
+// Runtime configuration update request.
+type UpdateConfigRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Provider      string                 `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`           // e.g., "google", "anthropic"
-	Model         string                 `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`                 // e.g., "gemini-1.5-pro", "claude-3-opus"
-	ApiKey        string                 `protobuf:"bytes,3,opt,name=api_key,json=apiKey,proto3" json:"api_key,omitempty"` // API key for the provider
+	LocalModel    string                 `protobuf:"bytes,1,opt,name=local_model,json=localModel,proto3" json:"local_model,omitempty"`          // Ollama model name (e.g., "qwen3-coder", "GLM-4.7-Flash")
+	CloudProvider string                 `protobuf:"bytes,2,opt,name=cloud_provider,json=cloudProvider,proto3" json:"cloud_provider,omitempty"` // Cloud provider name (e.g., "google", "anthropic")
+	CloudModel    string                 `protobuf:"bytes,3,opt,name=cloud_model,json=cloudModel,proto3" json:"cloud_model,omitempty"`          // Cloud model name (e.g., "gemini-1.5-flash", "claude-3-opus")
+	CloudApiKey   string                 `protobuf:"bytes,4,opt,name=cloud_api_key,json=cloudApiKey,proto3" json:"cloud_api_key,omitempty"`     // API key for the cloud provider
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *CloudProviderConfig) Reset() {
-	*x = CloudProviderConfig{}
+func (x *UpdateConfigRequest) Reset() {
+	*x = UpdateConfigRequest{}
 	mi := &file_agent_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *CloudProviderConfig) String() string {
+func (x *UpdateConfigRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*CloudProviderConfig) ProtoMessage() {}
+func (*UpdateConfigRequest) ProtoMessage() {}
 
-func (x *CloudProviderConfig) ProtoReflect() protoreflect.Message {
+func (x *UpdateConfigRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_agent_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -311,28 +305,88 @@ func (x *CloudProviderConfig) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CloudProviderConfig.ProtoReflect.Descriptor instead.
-func (*CloudProviderConfig) Descriptor() ([]byte, []int) {
+// Deprecated: Use UpdateConfigRequest.ProtoReflect.Descriptor instead.
+func (*UpdateConfigRequest) Descriptor() ([]byte, []int) {
 	return file_agent_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *CloudProviderConfig) GetProvider() string {
+func (x *UpdateConfigRequest) GetLocalModel() string {
 	if x != nil {
-		return x.Provider
+		return x.LocalModel
 	}
 	return ""
 }
 
-func (x *CloudProviderConfig) GetModel() string {
+func (x *UpdateConfigRequest) GetCloudProvider() string {
 	if x != nil {
-		return x.Model
+		return x.CloudProvider
 	}
 	return ""
 }
 
-func (x *CloudProviderConfig) GetApiKey() string {
+func (x *UpdateConfigRequest) GetCloudModel() string {
 	if x != nil {
-		return x.ApiKey
+		return x.CloudModel
+	}
+	return ""
+}
+
+func (x *UpdateConfigRequest) GetCloudApiKey() string {
+	if x != nil {
+		return x.CloudApiKey
+	}
+	return ""
+}
+
+// Runtime configuration update response.
+type UpdateConfigResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateConfigResponse) Reset() {
+	*x = UpdateConfigResponse{}
+	mi := &file_agent_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateConfigResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateConfigResponse) ProtoMessage() {}
+
+func (x *UpdateConfigResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateConfigResponse.ProtoReflect.Descriptor instead.
+func (*UpdateConfigResponse) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *UpdateConfigResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *UpdateConfigResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
 	}
 	return ""
 }
@@ -350,7 +404,7 @@ type ProcessRequestResponse struct {
 
 func (x *ProcessRequestResponse) Reset() {
 	*x = ProcessRequestResponse{}
-	mi := &file_agent_proto_msgTypes[4]
+	mi := &file_agent_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -362,7 +416,7 @@ func (x *ProcessRequestResponse) String() string {
 func (*ProcessRequestResponse) ProtoMessage() {}
 
 func (x *ProcessRequestResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[4]
+	mi := &file_agent_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -375,7 +429,7 @@ func (x *ProcessRequestResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessRequestResponse.ProtoReflect.Descriptor instead.
 func (*ProcessRequestResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{4}
+	return file_agent_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ProcessRequestResponse) GetOutput() string {
@@ -418,7 +472,7 @@ type FileChange struct {
 
 func (x *FileChange) Reset() {
 	*x = FileChange{}
-	mi := &file_agent_proto_msgTypes[5]
+	mi := &file_agent_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -430,7 +484,7 @@ func (x *FileChange) String() string {
 func (*FileChange) ProtoMessage() {}
 
 func (x *FileChange) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[5]
+	mi := &file_agent_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -443,7 +497,7 @@ func (x *FileChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileChange.ProtoReflect.Descriptor instead.
 func (*FileChange) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{5}
+	return file_agent_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *FileChange) GetPath() string {
@@ -479,7 +533,7 @@ type RoutingMetadata struct {
 
 func (x *RoutingMetadata) Reset() {
 	*x = RoutingMetadata{}
-	mi := &file_agent_proto_msgTypes[6]
+	mi := &file_agent_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -491,7 +545,7 @@ func (x *RoutingMetadata) String() string {
 func (*RoutingMetadata) ProtoMessage() {}
 
 func (x *RoutingMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[6]
+	mi := &file_agent_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -504,7 +558,7 @@ func (x *RoutingMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RoutingMetadata.ProtoReflect.Descriptor instead.
 func (*RoutingMetadata) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{6}
+	return file_agent_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *RoutingMetadata) GetModelName() string {
@@ -538,17 +592,22 @@ const file_agent_proto_rawDesc = "" +
 	"\x0efinal_response\x18\x02 \x01(\v2\x1d.agent.ProcessRequestResponseH\x00R\rfinalResponseB\t\n" +
 	"\apayload\"*\n" +
 	"\x0eProgressUpdate\x12\x18\n" +
-	"\amessage\x18\x01 \x01(\tR\amessage\"\xd3\x01\n" +
+	"\amessage\x18\x01 \x01(\tR\amessage\"\x8e\x01\n" +
 	"\x15ProcessRequestRequest\x12\x14\n" +
-	"\x05input\x18\x01 \x01(\tR\x05input\x12C\n" +
-	"\x0fprovider_config\x18\x02 \x01(\v2\x1a.agent.CloudProviderConfigR\x0eproviderConfig\x12\x19\n" +
+	"\x05input\x18\x01 \x01(\tR\x05input\x12\x19\n" +
 	"\bwork_dir\x18\x03 \x01(\tR\aworkDir\x12\x1b\n" +
 	"\tfile_name\x18\x04 \x01(\tR\bfileName\x12'\n" +
-	"\x0fconversation_id\x18\x05 \x01(\tR\x0econversationId\"`\n" +
-	"\x13CloudProviderConfig\x12\x1a\n" +
-	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x14\n" +
-	"\x05model\x18\x02 \x01(\tR\x05model\x12\x17\n" +
-	"\aapi_key\x18\x03 \x01(\tR\x06apiKey\"\xd6\x01\n" +
+	"\x0fconversation_id\x18\x05 \x01(\tR\x0econversationId\"\xa2\x01\n" +
+	"\x13UpdateConfigRequest\x12\x1f\n" +
+	"\vlocal_model\x18\x01 \x01(\tR\n" +
+	"localModel\x12%\n" +
+	"\x0ecloud_provider\x18\x02 \x01(\tR\rcloudProvider\x12\x1f\n" +
+	"\vcloud_model\x18\x03 \x01(\tR\n" +
+	"cloudModel\x12\"\n" +
+	"\rcloud_api_key\x18\x04 \x01(\tR\vcloudApiKey\"J\n" +
+	"\x14UpdateConfigResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\xd6\x01\n" +
 	"\x16ProcessRequestResponse\x12\x16\n" +
 	"\x06output\x18\x01 \x01(\tR\x06output\x124\n" +
 	"\ffile_changes\x18\x02 \x03(\v2\x11.agent.FileChangeR\vfileChanges\x12A\n" +
@@ -573,10 +632,11 @@ const file_agent_proto_rawDesc = "" +
 	"\n" +
 	"\x06UPDATE\x10\x01\x12\n" +
 	"\n" +
-	"\x06DELETE\x10\x022\xb0\x01\n" +
+	"\x06DELETE\x10\x022\xfb\x01\n" +
 	"\x05Agent\x12O\n" +
 	"\x0eProcessRequest\x12\x1c.agent.ProcessRequestRequest\x1a\x1d.agent.ProcessRequestResponse\"\x00\x12V\n" +
-	"\x14StreamProcessRequest\x12\x1c.agent.ProcessRequestRequest\x1a\x1c.agent.StreamProcessResponse\"\x000\x01B!Z\x1fcercano/source/server/pkg/protob\x06proto3"
+	"\x14StreamProcessRequest\x12\x1c.agent.ProcessRequestRequest\x1a\x1c.agent.StreamProcessResponse\"\x000\x01\x12I\n" +
+	"\fUpdateConfig\x12\x1a.agent.UpdateConfigRequest\x1a\x1b.agent.UpdateConfigResponse\"\x00B!Z\x1fcercano/source/server/pkg/protob\x06proto3"
 
 var (
 	file_agent_proto_rawDescOnce sync.Once
@@ -591,33 +651,35 @@ func file_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_agent_proto_goTypes = []any{
 	(FileAction)(0),                // 0: agent.FileAction
 	(*StreamProcessResponse)(nil),  // 1: agent.StreamProcessResponse
 	(*ProgressUpdate)(nil),         // 2: agent.ProgressUpdate
 	(*ProcessRequestRequest)(nil),  // 3: agent.ProcessRequestRequest
-	(*CloudProviderConfig)(nil),    // 4: agent.CloudProviderConfig
-	(*ProcessRequestResponse)(nil), // 5: agent.ProcessRequestResponse
-	(*FileChange)(nil),             // 6: agent.FileChange
-	(*RoutingMetadata)(nil),        // 7: agent.RoutingMetadata
+	(*UpdateConfigRequest)(nil),    // 4: agent.UpdateConfigRequest
+	(*UpdateConfigResponse)(nil),   // 5: agent.UpdateConfigResponse
+	(*ProcessRequestResponse)(nil), // 6: agent.ProcessRequestResponse
+	(*FileChange)(nil),             // 7: agent.FileChange
+	(*RoutingMetadata)(nil),        // 8: agent.RoutingMetadata
 }
 var file_agent_proto_depIdxs = []int32{
 	2, // 0: agent.StreamProcessResponse.progress:type_name -> agent.ProgressUpdate
-	5, // 1: agent.StreamProcessResponse.final_response:type_name -> agent.ProcessRequestResponse
-	4, // 2: agent.ProcessRequestRequest.provider_config:type_name -> agent.CloudProviderConfig
-	6, // 3: agent.ProcessRequestResponse.file_changes:type_name -> agent.FileChange
-	7, // 4: agent.ProcessRequestResponse.routing_metadata:type_name -> agent.RoutingMetadata
-	0, // 5: agent.FileChange.action:type_name -> agent.FileAction
-	3, // 6: agent.Agent.ProcessRequest:input_type -> agent.ProcessRequestRequest
-	3, // 7: agent.Agent.StreamProcessRequest:input_type -> agent.ProcessRequestRequest
-	5, // 8: agent.Agent.ProcessRequest:output_type -> agent.ProcessRequestResponse
+	6, // 1: agent.StreamProcessResponse.final_response:type_name -> agent.ProcessRequestResponse
+	7, // 2: agent.ProcessRequestResponse.file_changes:type_name -> agent.FileChange
+	8, // 3: agent.ProcessRequestResponse.routing_metadata:type_name -> agent.RoutingMetadata
+	0, // 4: agent.FileChange.action:type_name -> agent.FileAction
+	3, // 5: agent.Agent.ProcessRequest:input_type -> agent.ProcessRequestRequest
+	3, // 6: agent.Agent.StreamProcessRequest:input_type -> agent.ProcessRequestRequest
+	4, // 7: agent.Agent.UpdateConfig:input_type -> agent.UpdateConfigRequest
+	6, // 8: agent.Agent.ProcessRequest:output_type -> agent.ProcessRequestResponse
 	1, // 9: agent.Agent.StreamProcessRequest:output_type -> agent.StreamProcessResponse
-	8, // [8:10] is the sub-list for method output_type
-	6, // [6:8] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	5, // 10: agent.Agent.UpdateConfig:output_type -> agent.UpdateConfigResponse
+	8, // [8:11] is the sub-list for method output_type
+	5, // [5:8] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_agent_proto_init() }
@@ -635,7 +697,7 @@ func file_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_proto_rawDesc), len(file_agent_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   7,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

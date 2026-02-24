@@ -67,11 +67,6 @@ export namespace ProgressUpdate {
 export class ProcessRequestRequest extends jspb.Message { 
     getInput(): string;
     setInput(value: string): ProcessRequestRequest;
-
-    hasProviderConfig(): boolean;
-    clearProviderConfig(): void;
-    getProviderConfig(): CloudProviderConfig | undefined;
-    setProviderConfig(value?: CloudProviderConfig): ProcessRequestRequest;
     getWorkDir(): string;
     setWorkDir(value: string): ProcessRequestRequest;
     getFileName(): string;
@@ -92,36 +87,61 @@ export class ProcessRequestRequest extends jspb.Message {
 export namespace ProcessRequestRequest {
     export type AsObject = {
         input: string,
-        providerConfig?: CloudProviderConfig.AsObject,
         workDir: string,
         fileName: string,
         conversationId: string,
     }
 }
 
-export class CloudProviderConfig extends jspb.Message { 
-    getProvider(): string;
-    setProvider(value: string): CloudProviderConfig;
-    getModel(): string;
-    setModel(value: string): CloudProviderConfig;
-    getApiKey(): string;
-    setApiKey(value: string): CloudProviderConfig;
+export class UpdateConfigRequest extends jspb.Message { 
+    getLocalModel(): string;
+    setLocalModel(value: string): UpdateConfigRequest;
+    getCloudProvider(): string;
+    setCloudProvider(value: string): UpdateConfigRequest;
+    getCloudModel(): string;
+    setCloudModel(value: string): UpdateConfigRequest;
+    getCloudApiKey(): string;
+    setCloudApiKey(value: string): UpdateConfigRequest;
 
     serializeBinary(): Uint8Array;
-    toObject(includeInstance?: boolean): CloudProviderConfig.AsObject;
-    static toObject(includeInstance: boolean, msg: CloudProviderConfig): CloudProviderConfig.AsObject;
+    toObject(includeInstance?: boolean): UpdateConfigRequest.AsObject;
+    static toObject(includeInstance: boolean, msg: UpdateConfigRequest): UpdateConfigRequest.AsObject;
     static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
     static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
-    static serializeBinaryToWriter(message: CloudProviderConfig, writer: jspb.BinaryWriter): void;
-    static deserializeBinary(bytes: Uint8Array): CloudProviderConfig;
-    static deserializeBinaryFromReader(message: CloudProviderConfig, reader: jspb.BinaryReader): CloudProviderConfig;
+    static serializeBinaryToWriter(message: UpdateConfigRequest, writer: jspb.BinaryWriter): void;
+    static deserializeBinary(bytes: Uint8Array): UpdateConfigRequest;
+    static deserializeBinaryFromReader(message: UpdateConfigRequest, reader: jspb.BinaryReader): UpdateConfigRequest;
 }
 
-export namespace CloudProviderConfig {
+export namespace UpdateConfigRequest {
     export type AsObject = {
-        provider: string,
-        model: string,
-        apiKey: string,
+        localModel: string,
+        cloudProvider: string,
+        cloudModel: string,
+        cloudApiKey: string,
+    }
+}
+
+export class UpdateConfigResponse extends jspb.Message { 
+    getSuccess(): boolean;
+    setSuccess(value: boolean): UpdateConfigResponse;
+    getMessage(): string;
+    setMessage(value: string): UpdateConfigResponse;
+
+    serializeBinary(): Uint8Array;
+    toObject(includeInstance?: boolean): UpdateConfigResponse.AsObject;
+    static toObject(includeInstance: boolean, msg: UpdateConfigResponse): UpdateConfigResponse.AsObject;
+    static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+    static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+    static serializeBinaryToWriter(message: UpdateConfigResponse, writer: jspb.BinaryWriter): void;
+    static deserializeBinary(bytes: Uint8Array): UpdateConfigResponse;
+    static deserializeBinaryFromReader(message: UpdateConfigResponse, reader: jspb.BinaryReader): UpdateConfigResponse;
+}
+
+export namespace UpdateConfigResponse {
+    export type AsObject = {
+        success: boolean,
+        message: string,
     }
 }
 

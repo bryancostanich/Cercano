@@ -34,9 +34,6 @@ func (m *mockProvider) Name() string {
 type mockRouter struct{}
 
 func (m *mockRouter) SelectProvider(req *agent.Request, intent agent.Intent) (agent.ModelProvider, error) {
-	if req.ProviderConfig != nil {
-		return &mockProvider{name: req.ProviderConfig.Provider}, nil
-	}
 	return &mockProvider{name: "MockLocal"}, nil
 }
 
@@ -60,10 +57,9 @@ func (m *mockCoordinator) Coordinate(ctx context.Context, instruction, inputCode
 func init() {
 	lis = bufconn.Listen(bufSize)
 	s := grpc.NewServer()
-	// NewGenerationCoordinator signature changed
 	coordinator := &mockCoordinator{}
 	orchestrator := agent.NewAgent(&mockRouter{}, coordinator)
-	proto.RegisterAgentServer(s, NewServer(orchestrator))
+	proto.RegisterAgentServer(s, NewServer(orchestrator, nil, nil, nil, nil))
 	go func() {
 		if err := s.Serve(lis); err != nil {
 			log.Fatalf("Server exited with error: %v", err)

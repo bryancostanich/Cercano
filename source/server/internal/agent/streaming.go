@@ -15,6 +15,15 @@ type StreamableCoordinator interface {
 	)
 }
 
+// TokenFunc defines a callback for incremental token delivery.
+type TokenFunc func(token string)
+
+// StreamingModelProvider extends ModelProvider with token-level streaming.
+type StreamingModelProvider interface {
+	ModelProvider
+	ProcessStream(ctx context.Context, req *Request, onToken TokenFunc) (*Response, error)
+}
+
 // MapEventToProgress converts an ADK session event to a human-readable progress string.
 func MapEventToProgress(event *session.Event) string {
 	if event == nil {

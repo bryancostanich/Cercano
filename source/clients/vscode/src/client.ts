@@ -43,7 +43,8 @@ export class CercanoClient {
         workDir?: string,
         fileName?: string,
         onProgress?: (message: string) => void,
-        conversationId?: string
+        conversationId?: string,
+        onToken?: (token: string) => void
     ): Promise<ProcessRequestResponse> {
         return new Promise((resolve, reject) => {
             const request = new ProcessRequestRequest();
@@ -65,6 +66,10 @@ export class CercanoClient {
                 if (response.hasProgress()) {
                     if (onProgress) {
                         onProgress(response.getProgress()!.getMessage());
+                    }
+                } else if (response.hasTokenDelta()) {
+                    if (onToken) {
+                        onToken(response.getTokenDelta()!.getContent());
                     }
                 } else if (response.hasFinalResponse()) {
                     finalResponse = response.getFinalResponse();

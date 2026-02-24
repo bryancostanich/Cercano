@@ -16,11 +16,17 @@ service Agent {
   rpc UpdateConfig (UpdateConfigRequest) returns (UpdateConfigResponse) {}
 }
 
+// Incremental token from LLM streaming.
+message TokenDelta {
+  string content = 1;
+}
+
 // The response message for StreamProcessRequest.
 message StreamProcessResponse {
   oneof payload {
     ProgressUpdate progress = 1;
     ProcessRequestResponse final_response = 2;
+    TokenDelta token_delta = 3;
   }
 }
 

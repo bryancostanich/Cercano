@@ -38,3 +38,8 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 - [x] **Track: Configurable Local Model**
 *Link: [./tracks/configurable_local_model_20260223/](./tracks/configurable_local_model_20260223/)*
+
+---
+
+- [x] **Track: Token-Level LLM Streaming**
+*Link: [./archive/token_streaming_20260223/](./archive/token_streaming_20260223/)*

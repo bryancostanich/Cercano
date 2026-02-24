@@ -5,18 +5,73 @@ import (
 	"fmt"
 
 	"cercano/source/server/internal/agent"
-	"cercano/source/server/pkg/proto" // Import the generated protobuf package
+	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/loop"
+	"cercano/source/server/pkg/proto"
 )
 
 // Server is the gRPC server for the Agent service.
 type Server struct {
 	proto.UnimplementedAgentServer
-	agent *agent.Agent
+	agent         *agent.Agent
+	localProvider *llm.OllamaProvider
+	router        *agent.SmartRouter
+	coordinator   *loop.ADKCoordinator
+	cloudFactory  agent.CloudFactory
 }
 
 // NewServer creates a new Agent gRPC server.
-func NewServer(a *agent.Agent) *Server {
-	return &Server{agent: a}
+func NewServer(a *agent.Agent, localProvider *llm.OllamaProvider, router *agent.SmartRouter, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory) *Server {
+	return &Server{
+		agent:         a,
+		localProvider: localProvider,
+		router:        router,
+		coordinator:   coordinator,
+		cloudFactory:  cloudFactory,
+	}
+}
+
+// UpdateConfig implements proto.AgentServer — updates runtime config without restart.
+func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigRequest) (*proto.UpdateConfigResponse, error) {
+	var changes []string
+
+	if req.LocalModel != "" {
+		s.localProvider.SetModelName(req.LocalModel)
+		changes = append(changes, fmt.Sprintf("local_model=%s", req.LocalModel))
+		fmt.Printf("UpdateConfig: Local model set to %s\n", req.LocalModel)
+	}
+
+	if req.CloudApiKey != "" && req.CloudProvider != "" {
+		model := req.CloudModel
+		if model == "" {
+			model = "gemini-1.5-flash" // sensible default
+		}
+
+		provider, err := s.cloudFactory(ctx, req.CloudProvider, model, req.CloudApiKey)
+		if err != nil {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("failed to create cloud provider: %v", err),
+			}, nil
+		}
+
+		s.router.SetCloudProvider(provider)
+		s.coordinator.SetCloudProvider(provider)
+		changes = append(changes, fmt.Sprintf("cloud_provider=%s/%s", req.CloudProvider, model))
+		fmt.Printf("UpdateConfig: Cloud provider set to %s/%s\n", req.CloudProvider, model)
+	}
+
+	if len(changes) == 0 {
+		return &proto.UpdateConfigResponse{
+			Success: true,
+			Message: "no changes requested",
+		}, nil
+	}
+
+	return &proto.UpdateConfigResponse{
+		Success: true,
+		Message: fmt.Sprintf("updated: %v", changes),
+	}, nil
 }
 
 // ProcessRequest implements proto.AgentServer (Unary).
@@ -38,10 +93,6 @@ func (s *Server) StreamProcessRequest(req *proto.ProcessRequestRequest, stream p
 
 	agentReq := s.mapRequest(req)
 
-	// We create a modified Agent.ProcessRequest that accepts a progress callback.
-	// For simplicity in this track, we'll directly orchestrate here or update Agent.
-	// Let's update Agent.ProcessRequest to take an optional progress callback.
-	
 	response, err := s.agent.ProcessRequestStream(stream.Context(), agentReq, func(msg string) {
 		stream.Send(&proto.StreamProcessResponse{
 			Payload: &proto.StreamProcessResponse_Progress{
@@ -63,20 +114,12 @@ func (s *Server) StreamProcessRequest(req *proto.ProcessRequestRequest, stream p
 }
 
 func (s *Server) mapRequest(req *proto.ProcessRequestRequest) *agent.Request {
-	agentReq := &agent.Request{
+	return &agent.Request{
 		Input:          req.Input,
 		WorkDir:        req.WorkDir,
 		FileName:       req.FileName,
 		ConversationID: req.ConversationId,
 	}
-	if req.ProviderConfig != nil {
-		agentReq.ProviderConfig = &agent.ProviderConfig{
-			Provider: req.ProviderConfig.Provider,
-			Model:    req.ProviderConfig.Model,
-			ApiKey:   req.ProviderConfig.ApiKey,
-		}
-	}
-	return agentReq
 }
 
 func (s *Server) mapResponse(response *agent.Response) *proto.ProcessRequestResponse {

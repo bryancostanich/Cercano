@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { CercanoClient } from '../client';
 import { AgentClient } from '../proto/agent_grpc_pb';
-import { ProcessRequestResponse, ProcessRequestRequest } from '../proto/agent_pb';
+import { ProcessRequestResponse, ProcessRequestRequest, UpdateConfigRequest, UpdateConfigResponse } from '../proto/agent_pb';
 
 suite('CercanoClient Test Suite', () => {
     let client: CercanoClient;
@@ -49,7 +49,7 @@ suite('CercanoClient Test Suite', () => {
         }
     });
 
-    test('process includes context and provider config if provided', async () => {
+    test('process includes workDir and fileName', async () => {
         client = new CercanoClient();
         (client as any).client = agentClientStub;
 
@@ -63,23 +63,32 @@ suite('CercanoClient Test Suite', () => {
             return {} as any;
         });
 
-        const providerConfig = {
-            provider: "gemini",
-            model: "gemini-1.5-pro",
-            apiKey: "test-key"
-        };
-
-        // Signature: input, workDir, fileName, providerConfig
-        await client.process("input", "/tmp", "test.txt", providerConfig);
+        await client.process("input", "/tmp", "test.txt");
 
         assert.ok(capturedRequest);
         assert.strictEqual(capturedRequest!.getWorkDir(), "/tmp");
         assert.strictEqual(capturedRequest!.getFileName(), "test.txt");
+    });
 
-        const config = capturedRequest!.getProviderConfig();
-        assert.ok(config);
-        assert.strictEqual(config!.getProvider(), "gemini");
-        assert.strictEqual(config!.getModel(), "gemini-1.5-pro");
-        assert.strictEqual(config!.getApiKey(), "test-key");
+    test('updateConfig sends config to server', async () => {
+        client = new CercanoClient();
+        (client as any).client = agentClientStub;
+
+        const response = new UpdateConfigResponse();
+        response.setSuccess(true);
+        response.setMessage("updated: [local_model=GLM-4.7-Flash]");
+
+        let capturedRequest: UpdateConfigRequest | undefined;
+        agentClientStub.updateConfig.callsFake((req, cb: any) => {
+            capturedRequest = req;
+            cb(null, response);
+            return {} as any;
+        });
+
+        const result = await client.updateConfig({ localModel: 'GLM-4.7-Flash' });
+
+        assert.ok(capturedRequest);
+        assert.strictEqual(capturedRequest!.getLocalModel(), 'GLM-4.7-Flash');
+        assert.strictEqual(result.success, true);
     });
 });

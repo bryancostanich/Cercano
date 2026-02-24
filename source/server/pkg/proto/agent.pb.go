@@ -71,6 +71,51 @@ func (FileAction) EnumDescriptor() ([]byte, []int) {
 	return file_agent_proto_rawDescGZIP(), []int{0}
 }
 
+// Incremental token from LLM streaming.
+type TokenDelta struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Content       string                 `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TokenDelta) Reset() {
+	*x = TokenDelta{}
+	mi := &file_agent_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TokenDelta) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TokenDelta) ProtoMessage() {}
+
+func (x *TokenDelta) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TokenDelta.ProtoReflect.Descriptor instead.
+func (*TokenDelta) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *TokenDelta) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
 // The response message for StreamProcessRequest.
 type StreamProcessResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -78,6 +123,7 @@ type StreamProcessResponse struct {
 	//
 	//	*StreamProcessResponse_Progress
 	//	*StreamProcessResponse_FinalResponse
+	//	*StreamProcessResponse_TokenDelta
 	Payload       isStreamProcessResponse_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -85,7 +131,7 @@ type StreamProcessResponse struct {
 
 func (x *StreamProcessResponse) Reset() {
 	*x = StreamProcessResponse{}
-	mi := &file_agent_proto_msgTypes[0]
+	mi := &file_agent_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -97,7 +143,7 @@ func (x *StreamProcessResponse) String() string {
 func (*StreamProcessResponse) ProtoMessage() {}
 
 func (x *StreamProcessResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[0]
+	mi := &file_agent_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -110,7 +156,7 @@ func (x *StreamProcessResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamProcessResponse.ProtoReflect.Descriptor instead.
 func (*StreamProcessResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{0}
+	return file_agent_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *StreamProcessResponse) GetPayload() isStreamProcessResponse_Payload {
@@ -138,6 +184,15 @@ func (x *StreamProcessResponse) GetFinalResponse() *ProcessRequestResponse {
 	return nil
 }
 
+func (x *StreamProcessResponse) GetTokenDelta() *TokenDelta {
+	if x != nil {
+		if x, ok := x.Payload.(*StreamProcessResponse_TokenDelta); ok {
+			return x.TokenDelta
+		}
+	}
+	return nil
+}
+
 type isStreamProcessResponse_Payload interface {
 	isStreamProcessResponse_Payload()
 }
@@ -150,9 +205,15 @@ type StreamProcessResponse_FinalResponse struct {
 	FinalResponse *ProcessRequestResponse `protobuf:"bytes,2,opt,name=final_response,json=finalResponse,proto3,oneof"`
 }
 
+type StreamProcessResponse_TokenDelta struct {
+	TokenDelta *TokenDelta `protobuf:"bytes,3,opt,name=token_delta,json=tokenDelta,proto3,oneof"`
+}
+
 func (*StreamProcessResponse_Progress) isStreamProcessResponse_Payload() {}
 
 func (*StreamProcessResponse_FinalResponse) isStreamProcessResponse_Payload() {}
+
+func (*StreamProcessResponse_TokenDelta) isStreamProcessResponse_Payload() {}
 
 // Progress update during a long-running task.
 type ProgressUpdate struct {
@@ -164,7 +225,7 @@ type ProgressUpdate struct {
 
 func (x *ProgressUpdate) Reset() {
 	*x = ProgressUpdate{}
-	mi := &file_agent_proto_msgTypes[1]
+	mi := &file_agent_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -176,7 +237,7 @@ func (x *ProgressUpdate) String() string {
 func (*ProgressUpdate) ProtoMessage() {}
 
 func (x *ProgressUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[1]
+	mi := &file_agent_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -189,7 +250,7 @@ func (x *ProgressUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProgressUpdate.ProtoReflect.Descriptor instead.
 func (*ProgressUpdate) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{1}
+	return file_agent_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ProgressUpdate) GetMessage() string {
@@ -213,7 +274,7 @@ type ProcessRequestRequest struct {
 
 func (x *ProcessRequestRequest) Reset() {
 	*x = ProcessRequestRequest{}
-	mi := &file_agent_proto_msgTypes[2]
+	mi := &file_agent_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -225,7 +286,7 @@ func (x *ProcessRequestRequest) String() string {
 func (*ProcessRequestRequest) ProtoMessage() {}
 
 func (x *ProcessRequestRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[2]
+	mi := &file_agent_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -238,7 +299,7 @@ func (x *ProcessRequestRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessRequestRequest.ProtoReflect.Descriptor instead.
 func (*ProcessRequestRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{2}
+	return file_agent_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ProcessRequestRequest) GetInput() string {
@@ -282,7 +343,7 @@ type UpdateConfigRequest struct {
 
 func (x *UpdateConfigRequest) Reset() {
 	*x = UpdateConfigRequest{}
-	mi := &file_agent_proto_msgTypes[3]
+	mi := &file_agent_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -294,7 +355,7 @@ func (x *UpdateConfigRequest) String() string {
 func (*UpdateConfigRequest) ProtoMessage() {}
 
 func (x *UpdateConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[3]
+	mi := &file_agent_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -307,7 +368,7 @@ func (x *UpdateConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateConfigRequest.ProtoReflect.Descriptor instead.
 func (*UpdateConfigRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{3}
+	return file_agent_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *UpdateConfigRequest) GetLocalModel() string {
@@ -349,7 +410,7 @@ type UpdateConfigResponse struct {
 
 func (x *UpdateConfigResponse) Reset() {
 	*x = UpdateConfigResponse{}
-	mi := &file_agent_proto_msgTypes[4]
+	mi := &file_agent_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -361,7 +422,7 @@ func (x *UpdateConfigResponse) String() string {
 func (*UpdateConfigResponse) ProtoMessage() {}
 
 func (x *UpdateConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[4]
+	mi := &file_agent_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -374,7 +435,7 @@ func (x *UpdateConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateConfigResponse.ProtoReflect.Descriptor instead.
 func (*UpdateConfigResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{4}
+	return file_agent_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *UpdateConfigResponse) GetSuccess() bool {
@@ -404,7 +465,7 @@ type ProcessRequestResponse struct {
 
 func (x *ProcessRequestResponse) Reset() {
 	*x = ProcessRequestResponse{}
-	mi := &file_agent_proto_msgTypes[5]
+	mi := &file_agent_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -416,7 +477,7 @@ func (x *ProcessRequestResponse) String() string {
 func (*ProcessRequestResponse) ProtoMessage() {}
 
 func (x *ProcessRequestResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[5]
+	mi := &file_agent_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -429,7 +490,7 @@ func (x *ProcessRequestResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessRequestResponse.ProtoReflect.Descriptor instead.
 func (*ProcessRequestResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{5}
+	return file_agent_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ProcessRequestResponse) GetOutput() string {
@@ -472,7 +533,7 @@ type FileChange struct {
 
 func (x *FileChange) Reset() {
 	*x = FileChange{}
-	mi := &file_agent_proto_msgTypes[6]
+	mi := &file_agent_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -484,7 +545,7 @@ func (x *FileChange) String() string {
 func (*FileChange) ProtoMessage() {}
 
 func (x *FileChange) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[6]
+	mi := &file_agent_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -497,7 +558,7 @@ func (x *FileChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileChange.ProtoReflect.Descriptor instead.
 func (*FileChange) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{6}
+	return file_agent_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *FileChange) GetPath() string {
@@ -533,7 +594,7 @@ type RoutingMetadata struct {
 
 func (x *RoutingMetadata) Reset() {
 	*x = RoutingMetadata{}
-	mi := &file_agent_proto_msgTypes[7]
+	mi := &file_agent_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -545,7 +606,7 @@ func (x *RoutingMetadata) String() string {
 func (*RoutingMetadata) ProtoMessage() {}
 
 func (x *RoutingMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[7]
+	mi := &file_agent_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -558,7 +619,7 @@ func (x *RoutingMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RoutingMetadata.ProtoReflect.Descriptor instead.
 func (*RoutingMetadata) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{7}
+	return file_agent_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *RoutingMetadata) GetModelName() string {
@@ -586,10 +647,15 @@ var File_agent_proto protoreflect.FileDescriptor
 
 const file_agent_proto_rawDesc = "" +
 	"\n" +
-	"\vagent.proto\x12\x05agent\"\x9f\x01\n" +
+	"\vagent.proto\x12\x05agent\"&\n" +
+	"\n" +
+	"TokenDelta\x12\x18\n" +
+	"\acontent\x18\x01 \x01(\tR\acontent\"\xd5\x01\n" +
 	"\x15StreamProcessResponse\x123\n" +
 	"\bprogress\x18\x01 \x01(\v2\x15.agent.ProgressUpdateH\x00R\bprogress\x12F\n" +
-	"\x0efinal_response\x18\x02 \x01(\v2\x1d.agent.ProcessRequestResponseH\x00R\rfinalResponseB\t\n" +
+	"\x0efinal_response\x18\x02 \x01(\v2\x1d.agent.ProcessRequestResponseH\x00R\rfinalResponse\x124\n" +
+	"\vtoken_delta\x18\x03 \x01(\v2\x11.agent.TokenDeltaH\x00R\n" +
+	"tokenDeltaB\t\n" +
 	"\apayload\"*\n" +
 	"\x0eProgressUpdate\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\"\x8e\x01\n" +
@@ -651,35 +717,37 @@ func file_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_agent_proto_goTypes = []any{
 	(FileAction)(0),                // 0: agent.FileAction
-	(*StreamProcessResponse)(nil),  // 1: agent.StreamProcessResponse
-	(*ProgressUpdate)(nil),         // 2: agent.ProgressUpdate
-	(*ProcessRequestRequest)(nil),  // 3: agent.ProcessRequestRequest
-	(*UpdateConfigRequest)(nil),    // 4: agent.UpdateConfigRequest
-	(*UpdateConfigResponse)(nil),   // 5: agent.UpdateConfigResponse
-	(*ProcessRequestResponse)(nil), // 6: agent.ProcessRequestResponse
-	(*FileChange)(nil),             // 7: agent.FileChange
-	(*RoutingMetadata)(nil),        // 8: agent.RoutingMetadata
+	(*TokenDelta)(nil),             // 1: agent.TokenDelta
+	(*StreamProcessResponse)(nil),  // 2: agent.StreamProcessResponse
+	(*ProgressUpdate)(nil),         // 3: agent.ProgressUpdate
+	(*ProcessRequestRequest)(nil),  // 4: agent.ProcessRequestRequest
+	(*UpdateConfigRequest)(nil),    // 5: agent.UpdateConfigRequest
+	(*UpdateConfigResponse)(nil),   // 6: agent.UpdateConfigResponse
+	(*ProcessRequestResponse)(nil), // 7: agent.ProcessRequestResponse
+	(*FileChange)(nil),             // 8: agent.FileChange
+	(*RoutingMetadata)(nil),        // 9: agent.RoutingMetadata
 }
 var file_agent_proto_depIdxs = []int32{
-	2, // 0: agent.StreamProcessResponse.progress:type_name -> agent.ProgressUpdate
-	6, // 1: agent.StreamProcessResponse.final_response:type_name -> agent.ProcessRequestResponse
-	7, // 2: agent.ProcessRequestResponse.file_changes:type_name -> agent.FileChange
-	8, // 3: agent.ProcessRequestResponse.routing_metadata:type_name -> agent.RoutingMetadata
-	0, // 4: agent.FileChange.action:type_name -> agent.FileAction
-	3, // 5: agent.Agent.ProcessRequest:input_type -> agent.ProcessRequestRequest
-	3, // 6: agent.Agent.StreamProcessRequest:input_type -> agent.ProcessRequestRequest
-	4, // 7: agent.Agent.UpdateConfig:input_type -> agent.UpdateConfigRequest
-	6, // 8: agent.Agent.ProcessRequest:output_type -> agent.ProcessRequestResponse
-	1, // 9: agent.Agent.StreamProcessRequest:output_type -> agent.StreamProcessResponse
-	5, // 10: agent.Agent.UpdateConfig:output_type -> agent.UpdateConfigResponse
-	8, // [8:11] is the sub-list for method output_type
-	5, // [5:8] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	3, // 0: agent.StreamProcessResponse.progress:type_name -> agent.ProgressUpdate
+	7, // 1: agent.StreamProcessResponse.final_response:type_name -> agent.ProcessRequestResponse
+	1, // 2: agent.StreamProcessResponse.token_delta:type_name -> agent.TokenDelta
+	8, // 3: agent.ProcessRequestResponse.file_changes:type_name -> agent.FileChange
+	9, // 4: agent.ProcessRequestResponse.routing_metadata:type_name -> agent.RoutingMetadata
+	0, // 5: agent.FileChange.action:type_name -> agent.FileAction
+	4, // 6: agent.Agent.ProcessRequest:input_type -> agent.ProcessRequestRequest
+	4, // 7: agent.Agent.StreamProcessRequest:input_type -> agent.ProcessRequestRequest
+	5, // 8: agent.Agent.UpdateConfig:input_type -> agent.UpdateConfigRequest
+	7, // 9: agent.Agent.ProcessRequest:output_type -> agent.ProcessRequestResponse
+	2, // 10: agent.Agent.StreamProcessRequest:output_type -> agent.StreamProcessResponse
+	6, // 11: agent.Agent.UpdateConfig:output_type -> agent.UpdateConfigResponse
+	9, // [9:12] is the sub-list for method output_type
+	6, // [6:9] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_agent_proto_init() }
@@ -687,9 +755,10 @@ func file_agent_proto_init() {
 	if File_agent_proto != nil {
 		return
 	}
-	file_agent_proto_msgTypes[0].OneofWrappers = []any{
+	file_agent_proto_msgTypes[1].OneofWrappers = []any{
 		(*StreamProcessResponse_Progress)(nil),
 		(*StreamProcessResponse_FinalResponse)(nil),
+		(*StreamProcessResponse_TokenDelta)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -697,7 +766,7 @@ func file_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_proto_rawDesc), len(file_agent_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -146,7 +146,8 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 }
 
 // ProcessRequestStream orchestrates the flow with progress updates.
-func (a *Agent) ProcessRequestStream(ctx context.Context, req *Request, progress ProgressFunc) (*Response, error) {
+// tokenProgress delivers incremental LLM tokens for chat-path streaming.
+func (a *Agent) ProcessRequestStream(ctx context.Context, req *Request, progress ProgressFunc, tokenProgress TokenFunc) (*Response, error) {
 	if progress == nil {
 		progress = func(string) {}
 	}
@@ -238,7 +239,13 @@ func (a *Agent) ProcessRequestStream(ctx context.Context, req *Request, progress
 		FileName:       req.FileName,
 		ConversationID: req.ConversationID,
 	}
-	res, err := provider.Process(ctx, augReq)
+
+	var res *Response
+	if sp, ok := provider.(StreamingModelProvider); ok && tokenProgress != nil {
+		res, err = sp.ProcessStream(ctx, augReq, tokenProgress)
+	} else {
+		res, err = provider.Process(ctx, augReq)
+	}
 	if err != nil {
 		return nil, err
 	}

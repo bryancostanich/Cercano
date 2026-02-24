@@ -6,6 +6,26 @@
 
 import * as jspb from "google-protobuf";
 
+export class TokenDelta extends jspb.Message { 
+    getContent(): string;
+    setContent(value: string): TokenDelta;
+
+    serializeBinary(): Uint8Array;
+    toObject(includeInstance?: boolean): TokenDelta.AsObject;
+    static toObject(includeInstance: boolean, msg: TokenDelta): TokenDelta.AsObject;
+    static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+    static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+    static serializeBinaryToWriter(message: TokenDelta, writer: jspb.BinaryWriter): void;
+    static deserializeBinary(bytes: Uint8Array): TokenDelta;
+    static deserializeBinaryFromReader(message: TokenDelta, reader: jspb.BinaryReader): TokenDelta;
+}
+
+export namespace TokenDelta {
+    export type AsObject = {
+        content: string,
+    }
+}
+
 export class StreamProcessResponse extends jspb.Message { 
 
     hasProgress(): boolean;
@@ -17,6 +37,11 @@ export class StreamProcessResponse extends jspb.Message {
     clearFinalResponse(): void;
     getFinalResponse(): ProcessRequestResponse | undefined;
     setFinalResponse(value?: ProcessRequestResponse): StreamProcessResponse;
+
+    hasTokenDelta(): boolean;
+    clearTokenDelta(): void;
+    getTokenDelta(): TokenDelta | undefined;
+    setTokenDelta(value?: TokenDelta): StreamProcessResponse;
 
     getPayloadCase(): StreamProcessResponse.PayloadCase;
 
@@ -34,12 +59,14 @@ export namespace StreamProcessResponse {
     export type AsObject = {
         progress?: ProgressUpdate.AsObject,
         finalResponse?: ProcessRequestResponse.AsObject,
+        tokenDelta?: TokenDelta.AsObject,
     }
 
     export enum PayloadCase {
         PAYLOAD_NOT_SET = 0,
         PROGRESS = 1,
         FINAL_RESPONSE = 2,
+        TOKEN_DELTA = 3,
     }
 
 }

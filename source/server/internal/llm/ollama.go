@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strings"
 	"sync"
 
 	"cercano/source/server/internal/agent"
@@ -48,6 +49,7 @@ type generateRequest struct {
 
 type generateResponse struct {
 	Response string `json:"response"`
+	Done     bool   `json:"done"`
 }
 
 func (p *OllamaProvider) Process(ctx context.Context, req *agent.Request) (*agent.Response, error) {
@@ -91,4 +93,63 @@ func (p *OllamaProvider) Process(ctx context.Context, req *agent.Request) (*agen
 	}
 
 	return &agent.Response{Output: genResp.Response}, nil
+}
+
+// ProcessStream sends a streaming request to Ollama and calls onToken for each chunk.
+// Returns the complete accumulated response when done.
+func (p *OllamaProvider) ProcessStream(ctx context.Context, req *agent.Request, onToken agent.TokenFunc) (*agent.Response, error) {
+	p.mu.RLock()
+	modelName := p.ModelName
+	p.mu.RUnlock()
+
+	url := fmt.Sprintf("%s/api/generate", p.BaseURL)
+
+	payload := generateRequest{
+		Model:  modelName,
+		Prompt: req.Input,
+		Stream: true,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.Client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call Ollama: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := ioutil.ReadAll(resp.Body)
+		return nil, fmt.Errorf("ollama error: %s", string(respBody))
+	}
+
+	var accumulated strings.Builder
+	decoder := json.NewDecoder(resp.Body)
+
+	for decoder.More() {
+		var chunk generateResponse
+		if err := decoder.Decode(&chunk); err != nil {
+			return nil, fmt.Errorf("failed to decode stream chunk: %w", err)
+		}
+		if chunk.Response != "" {
+			accumulated.WriteString(chunk.Response)
+			if onToken != nil {
+				onToken(chunk.Response)
+			}
+		}
+		if chunk.Done {
+			break
+		}
+	}
+
+	return &agent.Response{Output: accumulated.String()}, nil
 }

@@ -93,13 +93,22 @@ func (s *Server) StreamProcessRequest(req *proto.ProcessRequestRequest, stream p
 
 	agentReq := s.mapRequest(req)
 
-	response, err := s.agent.ProcessRequestStream(stream.Context(), agentReq, func(msg string) {
-		stream.Send(&proto.StreamProcessResponse{
-			Payload: &proto.StreamProcessResponse_Progress{
-				Progress: &proto.ProgressUpdate{Message: msg},
-			},
-		})
-	})
+	response, err := s.agent.ProcessRequestStream(stream.Context(), agentReq,
+		func(msg string) {
+			stream.Send(&proto.StreamProcessResponse{
+				Payload: &proto.StreamProcessResponse_Progress{
+					Progress: &proto.ProgressUpdate{Message: msg},
+				},
+			})
+		},
+		func(token string) {
+			stream.Send(&proto.StreamProcessResponse{
+				Payload: &proto.StreamProcessResponse_TokenDelta{
+					TokenDelta: &proto.TokenDelta{Content: token},
+				},
+			})
+		},
+	)
 
 	if err != nil {
 		return fmt.Errorf("agent error: %w", err)

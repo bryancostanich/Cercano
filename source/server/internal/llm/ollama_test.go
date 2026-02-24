@@ -93,3 +93,87 @@ func TestOllamaProvider_Process(t *testing.T) {
 		t.Errorf("Expected 'Test Response', got '%s'", resp.Output)
 	}
 }
+
+func TestOllamaProvider_ImplementsStreamingModelProvider(t *testing.T) {
+	var _ agent.StreamingModelProvider = &OllamaProvider{}
+}
+
+func TestOllamaProvider_ProcessStream(t *testing.T) {
+	// Mock Ollama server returning newline-delimited JSON chunks
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&req)
+
+		// Verify stream:true was requested
+		if req["stream"] != true {
+			t.Errorf("Expected stream:true, got %v", req["stream"])
+		}
+
+		// Write chunked responses (Ollama format: newline-delimited JSON)
+		chunks := []map[string]interface{}{
+			{"response": "Hello", "done": false},
+			{"response": " ", "done": false},
+			{"response": "world", "done": false},
+			{"response": "!", "done": true},
+		}
+
+		for _, chunk := range chunks {
+			json.NewEncoder(w).Encode(chunk)
+		}
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	provider := NewOllamaProvider("test-model", server.URL)
+
+	var tokens []string
+	resp, err := provider.ProcessStream(context.Background(), &agent.Request{Input: "test"}, func(token string) {
+		tokens = append(tokens, token)
+	})
+
+	if err != nil {
+		t.Fatalf("ProcessStream failed: %v", err)
+	}
+
+	// Verify tokens arrived in order
+	expected := []string{"Hello", " ", "world", "!"}
+	if len(tokens) != len(expected) {
+		t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+	}
+	for i, tok := range expected {
+		if tokens[i] != tok {
+			t.Errorf("token %d: expected %q, got %q", i, tok, tokens[i])
+		}
+	}
+
+	// Verify accumulated output
+	if resp.Output != "Hello world!" {
+		t.Errorf("expected accumulated output %q, got %q", "Hello world!", resp.Output)
+	}
+}
+
+func TestOllamaProvider_ProcessStream_NilCallback(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		chunks := []map[string]interface{}{
+			{"response": "Hello", "done": false},
+			{"response": " world", "done": true},
+		}
+		for _, chunk := range chunks {
+			json.NewEncoder(w).Encode(chunk)
+		}
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	provider := NewOllamaProvider("test-model", server.URL)
+
+	// nil onToken should not panic
+	resp, err := provider.ProcessStream(context.Background(), &agent.Request{Input: "test"}, nil)
+
+	if err != nil {
+		t.Fatalf("ProcessStream with nil callback failed: %v", err)
+	}
+	if resp.Output != "Hello world" {
+		t.Errorf("expected %q, got %q", "Hello world", resp.Output)
+	}
+}

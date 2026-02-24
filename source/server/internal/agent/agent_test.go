@@ -185,7 +185,7 @@ func TestAgent_ProcessRequestStream_UsesStreamableCoordinator(t *testing.T) {
 		Input:    "write code",
 		WorkDir:  "/tmp",
 		FileName: "test.go",
-	}, progress)
+	}, progress, nil)
 
 	if err != nil {
 		t.Fatalf("ProcessRequestStream failed: %v", err)
@@ -220,13 +220,105 @@ func TestAgent_ProcessRequestStream_FallsBackToCoordinate(t *testing.T) {
 		Input:    "write code",
 		WorkDir:  "/tmp",
 		FileName: "test.go",
-	}, nil)
+	}, nil, nil)
 
 	if err != nil {
 		t.Fatalf("ProcessRequestStream failed: %v", err)
 	}
 	if res.Output != "coordinated output" {
 		t.Errorf("expected 'coordinated output', got %q", res.Output)
+	}
+}
+
+// mockStreamingModelProvider implements StreamingModelProvider for agent tests.
+type mockStreamingModelProvider struct {
+	name   string
+	tokens []string
+}
+
+func (m *mockStreamingModelProvider) Process(ctx context.Context, req *Request) (*Response, error) {
+	return &Response{Output: strings.Join(m.tokens, "")}, nil
+}
+func (m *mockStreamingModelProvider) Name() string { return m.name }
+func (m *mockStreamingModelProvider) ProcessStream(ctx context.Context, req *Request, onToken TokenFunc) (*Response, error) {
+	var out strings.Builder
+	for _, tok := range m.tokens {
+		out.WriteString(tok)
+		if onToken != nil {
+			onToken(tok)
+		}
+	}
+	return &Response{Output: out.String()}, nil
+}
+
+func TestAgent_ProcessRequestStream_ChatWithTokenStreaming(t *testing.T) {
+	provider := &mockStreamingModelProvider{
+		name:   "streaming-mock",
+		tokens: []string{"Hello", " ", "world"},
+	}
+	router := &mockRouter{intent: IntentChat, provider: provider}
+	coordinator := &mockCoordinator{}
+	a := NewAgent(router, coordinator)
+
+	var receivedTokens []string
+	tokenCb := func(token string) { receivedTokens = append(receivedTokens, token) }
+
+	res, err := a.ProcessRequestStream(context.Background(), &Request{Input: "hi"}, nil, tokenCb)
+	if err != nil {
+		t.Fatalf("ProcessRequestStream failed: %v", err)
+	}
+	if res.Output != "Hello world" {
+		t.Errorf("expected %q, got %q", "Hello world", res.Output)
+	}
+	if len(receivedTokens) != 3 {
+		t.Fatalf("expected 3 tokens, got %d", len(receivedTokens))
+	}
+	for i, expected := range []string{"Hello", " ", "world"} {
+		if receivedTokens[i] != expected {
+			t.Errorf("token %d: expected %q, got %q", i, expected, receivedTokens[i])
+		}
+	}
+}
+
+func TestAgent_ProcessRequestStream_ChatFallbackToNonStreaming(t *testing.T) {
+	// Non-streaming provider — should still work via Process()
+	provider := &mockModelProvider{name: "non-streaming"}
+	router := &mockRouter{intent: IntentChat, provider: provider}
+	coordinator := &mockCoordinator{}
+	a := NewAgent(router, coordinator)
+
+	tokenCalled := false
+	res, err := a.ProcessRequestStream(context.Background(), &Request{Input: "hi"}, nil, func(token string) {
+		tokenCalled = true
+	})
+	if err != nil {
+		t.Fatalf("ProcessRequestStream failed: %v", err)
+	}
+	if res.Output != "provider output" {
+		t.Errorf("expected %q, got %q", "provider output", res.Output)
+	}
+	if tokenCalled {
+		t.Error("tokenProgress should not be called for non-streaming provider")
+	}
+}
+
+func TestAgent_ProcessRequestStream_NilTokenCallback(t *testing.T) {
+	// StreamingModelProvider with nil tokenProgress should use blocking path
+	provider := &mockStreamingModelProvider{
+		name:   "streaming-mock",
+		tokens: []string{"Hello"},
+	}
+	router := &mockRouter{intent: IntentChat, provider: provider}
+	coordinator := &mockCoordinator{}
+	a := NewAgent(router, coordinator)
+
+	// nil tokenProgress — should fall back to Process()
+	res, err := a.ProcessRequestStream(context.Background(), &Request{Input: "hi"}, nil, nil)
+	if err != nil {
+		t.Fatalf("ProcessRequestStream failed: %v", err)
+	}
+	if res.Output != "Hello" {
+		t.Errorf("expected %q, got %q", "Hello", res.Output)
 	}
 }
 

@@ -201,16 +201,20 @@ export async function activate(context: vscode.ExtensionContext) {
 
         try {
             // 3. Call gRPC backend with streaming (provider config is already on the server via UpdateConfig)
+            let tokensReceived = false;
             const result = await client.processStream(
                 fullPrompt,
                 workDir,
                 fileName,
                 (msg) => response.progress(msg),
-                conversationId
+                conversationId,
+                (token) => { tokensReceived = true; response.markdown(token); }
             );
 
-            // Show markdown output
-            response.markdown(result.getOutput());
+            // Show markdown output only if no tokens were streamed (fallback for non-streaming providers)
+            if (!tokensReceived) {
+                response.markdown(result.getOutput());
+            }
 
             // 4. Show Routing Info
             const metadata = result.getRoutingMetadata();

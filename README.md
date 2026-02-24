@@ -124,7 +124,7 @@ The following settings are available under `cercano.*` in VS Code Settings:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `cercano.localModel` | `qwen3-coder` | Ollama model for local inference |
+| `cercano.localModel` | `qwen3-coder` | Ollama model for local inference (changeable at runtime via `@cercano /config`) |
 | `cercano.server.autoLaunch` | `true` | Automatically start the server on activation |
 | `cercano.server.binaryPath` | *(empty)* | Override path to the server binary |
 | `cercano.server.port` | `50052` | gRPC server port |

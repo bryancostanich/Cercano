@@ -59,6 +59,7 @@ intents:
 
 providers:
   local:
+    # Coding tasks
     - "Rename the variable 'userCount' to 'totalUsers' in this file."
     - "Refactor this method to use a switch statement."
     - "Write a function to validate email addresses."
@@ -68,6 +69,14 @@ providers:
     - "Add a docstring to the 'ProcessRequest' method."
     - "Format this file using gofmt."
     - "Organize imports in 'main.go'."
+    # Chat/explanatory tasks (simple questions a local model handles fine)
+    - "Tell me about this class"
+    - "What does this file do?"
+    - "Explain this code to me"
+    - "Summarize this function"
+    - "What is the purpose of this method?"
+    - "Hello"
+    - "How are you?"
 
   cloud:
     - "Implement a complex raft consensus algorithm from scratch"

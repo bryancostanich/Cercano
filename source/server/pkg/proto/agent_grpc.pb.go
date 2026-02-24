@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	Agent_ProcessRequest_FullMethodName       = "/agent.Agent/ProcessRequest"
 	Agent_StreamProcessRequest_FullMethodName = "/agent.Agent/StreamProcessRequest"
+	Agent_UpdateConfig_FullMethodName         = "/agent.Agent/UpdateConfig"
 )
 
 // AgentClient is the client API for Agent service.
@@ -33,6 +34,8 @@ type AgentClient interface {
 	ProcessRequest(ctx context.Context, in *ProcessRequestRequest, opts ...grpc.CallOption) (*ProcessRequestResponse, error)
 	// StreamProcessRequest handles AI requests with progress updates (Streaming).
 	StreamProcessRequest(ctx context.Context, in *ProcessRequestRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamProcessResponse], error)
+	// UpdateConfig updates runtime configuration (model, provider) without server restart.
+	UpdateConfig(ctx context.Context, in *UpdateConfigRequest, opts ...grpc.CallOption) (*UpdateConfigResponse, error)
 }
 
 type agentClient struct {
@@ -72,6 +75,16 @@ func (c *agentClient) StreamProcessRequest(ctx context.Context, in *ProcessReque
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Agent_StreamProcessRequestClient = grpc.ServerStreamingClient[StreamProcessResponse]
 
+func (c *agentClient) UpdateConfig(ctx context.Context, in *UpdateConfigRequest, opts ...grpc.CallOption) (*UpdateConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateConfigResponse)
+	err := c.cc.Invoke(ctx, Agent_UpdateConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServer is the server API for Agent service.
 // All implementations must embed UnimplementedAgentServer
 // for forward compatibility.
@@ -82,6 +95,8 @@ type AgentServer interface {
 	ProcessRequest(context.Context, *ProcessRequestRequest) (*ProcessRequestResponse, error)
 	// StreamProcessRequest handles AI requests with progress updates (Streaming).
 	StreamProcessRequest(*ProcessRequestRequest, grpc.ServerStreamingServer[StreamProcessResponse]) error
+	// UpdateConfig updates runtime configuration (model, provider) without server restart.
+	UpdateConfig(context.Context, *UpdateConfigRequest) (*UpdateConfigResponse, error)
 	mustEmbedUnimplementedAgentServer()
 }
 
@@ -97,6 +112,9 @@ func (UnimplementedAgentServer) ProcessRequest(context.Context, *ProcessRequestR
 }
 func (UnimplementedAgentServer) StreamProcessRequest(*ProcessRequestRequest, grpc.ServerStreamingServer[StreamProcessResponse]) error {
 	return status.Error(codes.Unimplemented, "method StreamProcessRequest not implemented")
+}
+func (UnimplementedAgentServer) UpdateConfig(context.Context, *UpdateConfigRequest) (*UpdateConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateConfig not implemented")
 }
 func (UnimplementedAgentServer) mustEmbedUnimplementedAgentServer() {}
 func (UnimplementedAgentServer) testEmbeddedByValue()               {}
@@ -148,6 +166,24 @@ func _Agent_StreamProcessRequest_Handler(srv interface{}, stream grpc.ServerStre
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Agent_StreamProcessRequestServer = grpc.ServerStreamingServer[StreamProcessResponse]
 
+func _Agent_UpdateConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).UpdateConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_UpdateConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).UpdateConfig(ctx, req.(*UpdateConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Agent_ServiceDesc is the grpc.ServiceDesc for Agent service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -158,6 +194,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ProcessRequest",
 			Handler:    _Agent_ProcessRequest_Handler,
+		},
+		{
+			MethodName: "UpdateConfig",
+			Handler:    _Agent_UpdateConfig_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

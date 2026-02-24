@@ -11,9 +11,11 @@ export interface ServerConfig {
     binaryPath: string;
     port: number;
     ollamaUrl: string;
+    localModel: string;
 }
 
 export function getServerConfig(): ServerConfig {
+    const config = vscode.workspace.getConfiguration('cercano');
     const serverConfig = vscode.workspace.getConfiguration('cercano.server');
     const ollamaConfig = vscode.workspace.getConfiguration('cercano.ollama');
     return {
@@ -21,6 +23,7 @@ export function getServerConfig(): ServerConfig {
         binaryPath: serverConfig.get<string>('binaryPath', ''),
         port: serverConfig.get<number>('port', DEFAULT_PORT),
         ollamaUrl: ollamaConfig.get<string>('url', 'http://localhost:11434'),
+        localModel: config.get<string>('localModel', 'qwen3-coder'),
     };
 }
 
@@ -124,6 +127,8 @@ export class ServerManager {
                         CERCANO_PORT: String(this._port),
                         // eslint-disable-next-line @typescript-eslint/naming-convention
                         OLLAMA_URL: config.ollamaUrl,
+                        // eslint-disable-next-line @typescript-eslint/naming-convention
+                        CERCANO_LOCAL_MODEL: config.localModel,
                     },
                 });
             } catch (err: any) {

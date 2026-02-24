@@ -33,3 +33,8 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 - [x] **Track: Automatic Server Launch**
 *Link: [./tracks/auto_server_launch_20260223/](./tracks/auto_server_launch_20260223/)*
+
+---
+
+- [x] **Track: Configurable Local Model**
+*Link: [./tracks/configurable_local_model_20260223/](./tracks/configurable_local_model_20260223/)*

@@ -11,6 +11,9 @@ service Agent {
 
   // StreamProcessRequest handles AI requests with progress updates (Streaming).
   rpc StreamProcessRequest (ProcessRequestRequest) returns (stream StreamProcessResponse) {}
+
+  // UpdateConfig updates runtime configuration (model, provider) without server restart.
+  rpc UpdateConfig (UpdateConfigRequest) returns (UpdateConfigResponse) {}
 }
 
 // The response message for StreamProcessRequest.
@@ -29,17 +32,24 @@ message ProgressUpdate {
 // The request message for ProcessRequest.
 message ProcessRequestRequest {
   string input = 1; // User input or query
-  CloudProviderConfig provider_config = 2; // Optional provider configuration
+  // Field 2 removed (was CloudProviderConfig provider_config)
   string work_dir = 3;  // Optional working directory for agentic tasks
   string file_name = 4; // Optional filename for agentic tasks
   string conversation_id = 5; // Optional conversation ID for multi-turn history
 }
 
-// Configuration for cloud providers.
-message CloudProviderConfig {
-  string provider = 1; // e.g., "google", "anthropic"
-  string model = 2;    // e.g., "gemini-1.5-pro", "claude-3-opus"
-  string api_key = 3;  // API key for the provider
+// Runtime configuration update request.
+message UpdateConfigRequest {
+  string local_model = 1;    // Ollama model name (e.g., "qwen3-coder", "GLM-4.7-Flash")
+  string cloud_provider = 2; // Cloud provider name (e.g., "google", "anthropic")
+  string cloud_model = 3;    // Cloud model name (e.g., "gemini-1.5-flash", "claude-3-opus")
+  string cloud_api_key = 4;  // API key for the cloud provider
+}
+
+// Runtime configuration update response.
+message UpdateConfigResponse {
+  bool success = 1;
+  string message = 2;
 }
 
 // The response message for ProcessRequest.

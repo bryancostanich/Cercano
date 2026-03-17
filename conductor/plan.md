@@ -43,3 +43,13 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 - [x] **Track: Token-Level LLM Streaming**
 *Link: [./archive/token_streaming_20260223/](./archive/token_streaming_20260223/)*
+
+---
+
+- [ ] **Track: AI Engine Agnosticism — Abstract local inference layer to support pluggable backends**
+*Link: [./tracks/engine_agnosticism_20260317/](./tracks/engine_agnosticism_20260317/)*
+
+---
+
+- [ ] **Track: Cercano as MCP Server — Expose local inference as tools for cloud agents**
+*Link: [./tracks/mcp_server_20260317/](./tracks/mcp_server_20260317/)*

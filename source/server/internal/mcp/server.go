@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"cercano/source/server/pkg/proto"
 
@@ -38,44 +37,13 @@ func (s *Server) MCPServer() *gomcp.Server {
 	return s.mcpServer
 }
 
-// registerTools registers all Cercano MCP tools with the server.
-func (s *Server) registerTools() {
-	// Tools will be registered in Phase 2.
-	fmt.Fprintln(os.Stderr, "Cercano MCP server initialized (no tools registered yet)")
-}
-
-// ChatRequest is the input schema for the cercano_chat tool.
-type ChatRequest struct {
-	Message        string `json:"message" jsonschema:"The question or discussion prompt"`
-	Context        string `json:"context,omitempty" jsonschema:"Code or file contents for reference"`
-	ConversationID string `json:"conversation_id,omitempty" jsonschema:"Conversation ID for multi-turn support"`
-}
-
-// GenerateRequest is the input schema for the cercano_generate tool.
-type GenerateRequest struct {
-	Instruction    string `json:"instruction" jsonschema:"What to generate or modify"`
-	FilePath       string `json:"file_path,omitempty" jsonschema:"Target file path for code changes"`
-	WorkDir        string `json:"work_dir,omitempty" jsonschema:"Working directory for validation"`
-	Context        string `json:"context,omitempty" jsonschema:"Existing code or file contents for context"`
-	ConversationID string `json:"conversation_id,omitempty" jsonschema:"Conversation ID for multi-turn support"`
-}
-
-// ReviewRequest is the input schema for the cercano_review tool.
-type ReviewRequest struct {
-	Code         string `json:"code" jsonschema:"The code to review"`
-	Instructions string `json:"instructions,omitempty" jsonschema:"Specific review criteria or focus areas"`
-	FilePath     string `json:"file_path,omitempty" jsonschema:"File path for context"`
-}
-
-// SummarizeRequest is the input schema for the cercano_summarize tool.
-type SummarizeRequest struct {
-	Content string `json:"content" jsonschema:"The content to summarize"`
-	Format  string `json:"format,omitempty" jsonschema:"Desired output format (e.g. bullet points or one paragraph)"`
-}
-
-// ClassifyRequest is the input schema for the cercano_classify tool.
-type ClassifyRequest struct {
-	Query string `json:"query" jsonschema:"The task description to classify"`
+// LocalRequest is the input schema for the cercano_local tool.
+type LocalRequest struct {
+	Prompt         string `json:"prompt" jsonschema:"The prompt to run against local models"`
+	FilePath       string `json:"file_path,omitempty" jsonschema:"Target file path for code changes. When provided with work_dir, enables the agentic code generation loop with validation."`
+	WorkDir        string `json:"work_dir,omitempty" jsonschema:"Working directory for code validation (go build/test). When provided with file_path, enables the agentic code generation loop."`
+	Context        string `json:"context,omitempty" jsonschema:"Additional context such as existing code or file contents"`
+	ConversationID string `json:"conversation_id,omitempty" jsonschema:"Conversation ID for multi-turn support across calls"`
 }
 
 // ConfigRequest is the input schema for the cercano_config tool.
@@ -86,33 +54,19 @@ type ConfigRequest struct {
 	CloudModel    string `json:"cloud_model,omitempty" jsonschema:"Cloud model to set"`
 }
 
-// handleChat processes a cercano_chat tool call.
-func (s *Server) handleChat(ctx context.Context, request *gomcp.CallToolRequest, args ChatRequest) (*gomcp.CallToolResult, any, error) {
-	input := args.Message
-	if args.Context != "" {
-		input = fmt.Sprintf("%s\n\nContext:\n%s", args.Message, args.Context)
-	}
-
-	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
-		Input:          input,
-		ConversationId: args.ConversationID,
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("gRPC call failed: %w", err)
-	}
-
-	return &gomcp.CallToolResult{
-		Content: []gomcp.Content{
-			&gomcp.TextContent{Text: resp.Output},
-		},
-	}, nil, nil
+// registerTools registers all Cercano MCP tools with the server.
+func (s *Server) registerTools() {
+	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
+		Name:        "cercano_local",
+		Description: "Run a prompt against Cercano's local AI models (Ollama). Handles both chat-style queries and code generation. When file_path and work_dir are provided, uses an agentic generate-validate loop with automatic self-correction. Otherwise, processes the prompt as a direct LLM call. Use this to offload work to local inference — faster, private, and at zero cost.",
+	}, s.handleLocal)
 }
 
-// handleGenerate processes a cercano_generate tool call.
-func (s *Server) handleGenerate(ctx context.Context, request *gomcp.CallToolRequest, args GenerateRequest) (*gomcp.CallToolResult, any, error) {
-	input := args.Instruction
+// handleLocal processes a cercano_local tool call.
+func (s *Server) handleLocal(ctx context.Context, request *gomcp.CallToolRequest, args LocalRequest) (*gomcp.CallToolResult, any, error) {
+	input := args.Prompt
 	if args.Context != "" {
-		input = fmt.Sprintf("%s\n\nExisting code:\n%s", args.Instruction, args.Context)
+		input = fmt.Sprintf("%s\n\nContext:\n%s", args.Prompt, args.Context)
 	}
 
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{

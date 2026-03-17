@@ -15,52 +15,22 @@ Add the MCP SDK dependency, establish the package structure, and implement a min
 - [x] Task: Verify the MCP server starts, responds to `initialize`, and advertises an empty tool list.
 - [ ] Task: Conductor - User Manual Verification 'MCP SDK & Package Setup' (Protocol in workflow.md)
 
-## Phase 2: Core Tools — Generate & Chat
+## Phase 2: Core Tool — `cercano_local`
 
 ### Objective
-Implement the two primary tools that map directly to existing gRPC RPCs.
+Implement a single flexible tool that runs any prompt against local models via the existing gRPC API. The SmartRouter handles intent classification internally. Specialized tools (review, summarize, etc.) are deferred to the Agent Skills & Tool Use track, which will evaluate whether they improve agent ergonomics.
 
 ### Tasks
-- [ ] Task: Implement `cercano_chat` tool.
-    - [ ] Define input schema (message, context, conversation_id).
-    - [ ] Map to `ProcessRequest` gRPC call (no workDir/fileName).
-    - [ ] Return natural language response with routing metadata.
-    - [ ] Red phase: Write tests against a mock gRPC client.
-    - [ ] Green phase: Implement and pass.
-- [ ] Task: Implement `cercano_generate` tool.
-    - [ ] Define input schema (instruction, file_path, work_dir, context, conversation_id).
-    - [ ] Map to `ProcessRequest` gRPC call with workDir and fileName.
-    - [ ] Return generated code, file changes, validation errors, routing metadata.
-    - [ ] Red phase: Write tests against a mock gRPC client.
-    - [ ] Green phase: Implement and pass.
-- [ ] Task: Test both tools end-to-end with a running Cercano gRPC server.
-- [ ] Task: Conductor - User Manual Verification 'Core Tools — Generate & Chat' (Protocol in workflow.md)
+- [x] Task: Implement `cercano_local` tool.
+    - [x] Define input schema (prompt, file_path, work_dir, context, conversation_id).
+    - [x] Map to `ProcessRequest` gRPC call. If work_dir and file_path are provided, the SmartRouter routes to the coding path (agentic generate-validate loop). Otherwise, it handles as a direct LLM call.
+    - [x] Return output text, file changes (if any), validation errors (if any), routing metadata.
+    - [x] Red phase: Write tests against a mock gRPC client.
+    - [x] Green phase: Implement and pass.
+- [ ] Task: Test end-to-end with a running Cercano gRPC server (both chat-style and code generation queries).
+- [ ] Task: Conductor - User Manual Verification 'Core Tool — cercano_local' (Protocol in workflow.md)
 
-## Phase 3: Utility Tools — Review, Summarize, Classify
-
-### Objective
-Add higher-level tools that wrap the core gRPC API with prompt templates and SmartRouter access.
-
-### Tasks
-- [ ] Task: Implement `cercano_review` tool.
-    - [ ] Define input schema (code, instructions, file_path).
-    - [ ] Create review prompt template in `internal/mcp/prompts.go`.
-    - [ ] Map to `ProcessRequest` gRPC call with templated prompt.
-    - [ ] Red/Green TDD.
-- [ ] Task: Implement `cercano_summarize` tool.
-    - [ ] Define input schema (content, format).
-    - [ ] Create summarization prompt template.
-    - [ ] Map to `ProcessRequest` gRPC call with templated prompt.
-    - [ ] Red/Green TDD.
-- [ ] Task: Implement `cercano_classify` tool.
-    - [ ] Define input schema (query).
-    - [ ] Determine approach: either add a lightweight `Classify` RPC to the gRPC server, or have the MCP server call `ProcessRequest` with a classification prompt and parse the result.
-    - [ ] Return intent (coding/chat), recommended provider (local/cloud), confidence.
-    - [ ] Red/Green TDD.
-- [ ] Task: Test all utility tools end-to-end.
-- [ ] Task: Conductor - User Manual Verification 'Utility Tools — Review, Summarize, Classify' (Protocol in workflow.md)
-
-## Phase 4: Configuration Tool & Multi-Turn Support
+## Phase 3: Configuration Tool & Multi-Turn Support
 
 ### Objective
 Add runtime configuration management and verify multi-turn conversation support across MCP tool calls.
@@ -72,11 +42,11 @@ Add runtime configuration management and verify multi-turn conversation support 
     - [ ] "get" action returns current config (may require a new RPC or cached state).
     - [ ] Red/Green TDD.
 - [ ] Task: Verify multi-turn conversations work across sequential MCP tool calls.
-    - [ ] Test: call `cercano_chat` with conversation_id, follow up with second call using same ID.
+    - [ ] Test: call `cercano_local` with conversation_id, follow up with second call using same ID.
     - [ ] Verify the second response reflects context from the first turn.
 - [ ] Task: Conductor - User Manual Verification 'Configuration Tool & Multi-Turn Support' (Protocol in workflow.md)
 
-## Phase 5: Integration & Agent Testing
+## Phase 4: Integration & Agent Testing
 
 ### Objective
 Validate the MCP server works with real agents (Claude Code), add build/install scripts, and clean up.
@@ -86,7 +56,7 @@ Validate the MCP server works with real agents (Claude Code), add build/install 
     - [ ] `go build -o bin/cercano-mcp cmd/mcp/main.go`
 - [ ] Task: Write a Claude Code MCP configuration example for connecting to Cercano.
     - [ ] Document the `.claude.json` or `mcp_servers` config entry.
-- [ ] Task: Test with Claude Code — verify tool discovery, `cercano_chat`, and `cercano_generate` work.
+- [ ] Task: Test with Claude Code — verify tool discovery and `cercano_local` work.
 - [ ] Task: Test with at least one other MCP-compatible agent (e.g., Cursor) if available.
 - [ ] Task: Add error handling for common failure modes:
     - [ ] gRPC server not running.

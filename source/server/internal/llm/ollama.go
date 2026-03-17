@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"cercano/source/server/internal/agent"
 )
@@ -92,6 +94,68 @@ func (p *OllamaProvider) SwitchToPrimary() {
 	defer p.mu.Unlock()
 	p.activeURL = p.BaseURL
 	p.usingFallback = false
+}
+
+// StartHealthMonitor starts a background goroutine that periodically pings the primary
+// URL. After failureThreshold consecutive failures it switches to the fallback URL.
+// When the primary recovers, it switches back. The monitor stops when ctx is cancelled.
+// If no remote URL is configured (primary == fallback), the monitor is a no-op.
+func (p *OllamaProvider) StartHealthMonitor(ctx context.Context, interval time.Duration, failureThreshold int) {
+	p.mu.RLock()
+	primary := p.BaseURL
+	fallback := p.fallbackURL
+	p.mu.RUnlock()
+
+	// No-op if primary and fallback are the same (no remote configured)
+	if primary == fallback {
+		return
+	}
+
+	go func() {
+		consecutiveFailures := 0
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if p.pingOllama(ctx, primary) {
+					consecutiveFailures = 0
+					if p.IsUsingFallback() {
+						log.Printf("HealthMonitor: primary endpoint %s recovered, switching back", primary)
+						p.SwitchToPrimary()
+					}
+				} else {
+					consecutiveFailures++
+					if consecutiveFailures >= failureThreshold && !p.IsUsingFallback() {
+						log.Printf("HealthMonitor: primary endpoint %s unreachable (%d failures), switching to fallback %s",
+							primary, consecutiveFailures, fallback)
+						p.SwitchToFallback()
+					}
+				}
+			}
+		}
+	}()
+}
+
+// pingOllama sends a lightweight GET /api/tags to check if the endpoint is responsive.
+func (p *OllamaProvider) pingOllama(ctx context.Context, baseURL string) bool {
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(pingCtx, "GET", baseURL+"/api/tags", nil)
+	if err != nil {
+		return false
+	}
+
+	resp, err := p.Client.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 // ModelInfo represents a model available on the Ollama instance.

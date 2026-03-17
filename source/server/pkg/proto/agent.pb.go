@@ -651,6 +651,149 @@ func (x *RoutingMetadata) GetEscalated() bool {
 	return false
 }
 
+// Request to list available models on the active Ollama instance.
+type ListModelsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListModelsRequest) Reset() {
+	*x = ListModelsRequest{}
+	mi := &file_agent_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListModelsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListModelsRequest) ProtoMessage() {}
+
+func (x *ListModelsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListModelsRequest.ProtoReflect.Descriptor instead.
+func (*ListModelsRequest) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{9}
+}
+
+// A single model available on an Ollama instance.
+type ModelInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                               // Model name (e.g., "qwen3-coder:latest")
+	Size          int64                  `protobuf:"varint,2,opt,name=size,proto3" json:"size,omitempty"`                              // Model size in bytes
+	ModifiedAt    string                 `protobuf:"bytes,3,opt,name=modified_at,json=modifiedAt,proto3" json:"modified_at,omitempty"` // Last modified timestamp
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelInfo) Reset() {
+	*x = ModelInfo{}
+	mi := &file_agent_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelInfo) ProtoMessage() {}
+
+func (x *ModelInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelInfo.ProtoReflect.Descriptor instead.
+func (*ModelInfo) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ModelInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ModelInfo) GetSize() int64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+func (x *ModelInfo) GetModifiedAt() string {
+	if x != nil {
+		return x.ModifiedAt
+	}
+	return ""
+}
+
+// Response containing available models.
+type ListModelsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Models        []*ModelInfo           `protobuf:"bytes,1,rep,name=models,proto3" json:"models,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListModelsResponse) Reset() {
+	*x = ListModelsResponse{}
+	mi := &file_agent_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListModelsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListModelsResponse) ProtoMessage() {}
+
+func (x *ListModelsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListModelsResponse.ProtoReflect.Descriptor instead.
+func (*ListModelsResponse) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ListModelsResponse) GetModels() []*ModelInfo {
+	if x != nil {
+		return x.Models
+	}
+	return nil
+}
+
 var File_agent_proto protoreflect.FileDescriptor
 
 const file_agent_proto_rawDesc = "" +
@@ -700,7 +843,15 @@ const file_agent_proto_rawDesc = "" +
 	"\n" +
 	"confidence\x18\x02 \x01(\x02R\n" +
 	"confidence\x12\x1c\n" +
-	"\tescalated\x18\x03 \x01(\bR\tescalated*0\n" +
+	"\tescalated\x18\x03 \x01(\bR\tescalated\"\x13\n" +
+	"\x11ListModelsRequest\"T\n" +
+	"\tModelInfo\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
+	"\x04size\x18\x02 \x01(\x03R\x04size\x12\x1f\n" +
+	"\vmodified_at\x18\x03 \x01(\tR\n" +
+	"modifiedAt\">\n" +
+	"\x12ListModelsResponse\x12(\n" +
+	"\x06models\x18\x01 \x03(\v2\x10.agent.ModelInfoR\x06models*0\n" +
 	"\n" +
 	"FileAction\x12\n" +
 	"\n" +
@@ -708,11 +859,13 @@ const file_agent_proto_rawDesc = "" +
 	"\n" +
 	"\x06UPDATE\x10\x01\x12\n" +
 	"\n" +
-	"\x06DELETE\x10\x022\xfb\x01\n" +
+	"\x06DELETE\x10\x022\xc0\x02\n" +
 	"\x05Agent\x12O\n" +
 	"\x0eProcessRequest\x12\x1c.agent.ProcessRequestRequest\x1a\x1d.agent.ProcessRequestResponse\"\x00\x12V\n" +
 	"\x14StreamProcessRequest\x12\x1c.agent.ProcessRequestRequest\x1a\x1c.agent.StreamProcessResponse\"\x000\x01\x12I\n" +
-	"\fUpdateConfig\x12\x1a.agent.UpdateConfigRequest\x1a\x1b.agent.UpdateConfigResponse\"\x00B!Z\x1fcercano/source/server/pkg/protob\x06proto3"
+	"\fUpdateConfig\x12\x1a.agent.UpdateConfigRequest\x1a\x1b.agent.UpdateConfigResponse\"\x00\x12C\n" +
+	"\n" +
+	"ListModels\x12\x18.agent.ListModelsRequest\x1a\x19.agent.ListModelsResponse\"\x00B!Z\x1fcercano/source/server/pkg/protob\x06proto3"
 
 var (
 	file_agent_proto_rawDescOnce sync.Once
@@ -727,7 +880,7 @@ func file_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_agent_proto_goTypes = []any{
 	(FileAction)(0),                // 0: agent.FileAction
 	(*TokenDelta)(nil),             // 1: agent.TokenDelta
@@ -739,25 +892,31 @@ var file_agent_proto_goTypes = []any{
 	(*ProcessRequestResponse)(nil), // 7: agent.ProcessRequestResponse
 	(*FileChange)(nil),             // 8: agent.FileChange
 	(*RoutingMetadata)(nil),        // 9: agent.RoutingMetadata
+	(*ListModelsRequest)(nil),      // 10: agent.ListModelsRequest
+	(*ModelInfo)(nil),              // 11: agent.ModelInfo
+	(*ListModelsResponse)(nil),     // 12: agent.ListModelsResponse
 }
 var file_agent_proto_depIdxs = []int32{
-	3, // 0: agent.StreamProcessResponse.progress:type_name -> agent.ProgressUpdate
-	7, // 1: agent.StreamProcessResponse.final_response:type_name -> agent.ProcessRequestResponse
-	1, // 2: agent.StreamProcessResponse.token_delta:type_name -> agent.TokenDelta
-	8, // 3: agent.ProcessRequestResponse.file_changes:type_name -> agent.FileChange
-	9, // 4: agent.ProcessRequestResponse.routing_metadata:type_name -> agent.RoutingMetadata
-	0, // 5: agent.FileChange.action:type_name -> agent.FileAction
-	4, // 6: agent.Agent.ProcessRequest:input_type -> agent.ProcessRequestRequest
-	4, // 7: agent.Agent.StreamProcessRequest:input_type -> agent.ProcessRequestRequest
-	5, // 8: agent.Agent.UpdateConfig:input_type -> agent.UpdateConfigRequest
-	7, // 9: agent.Agent.ProcessRequest:output_type -> agent.ProcessRequestResponse
-	2, // 10: agent.Agent.StreamProcessRequest:output_type -> agent.StreamProcessResponse
-	6, // 11: agent.Agent.UpdateConfig:output_type -> agent.UpdateConfigResponse
-	9, // [9:12] is the sub-list for method output_type
-	6, // [6:9] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	3,  // 0: agent.StreamProcessResponse.progress:type_name -> agent.ProgressUpdate
+	7,  // 1: agent.StreamProcessResponse.final_response:type_name -> agent.ProcessRequestResponse
+	1,  // 2: agent.StreamProcessResponse.token_delta:type_name -> agent.TokenDelta
+	8,  // 3: agent.ProcessRequestResponse.file_changes:type_name -> agent.FileChange
+	9,  // 4: agent.ProcessRequestResponse.routing_metadata:type_name -> agent.RoutingMetadata
+	0,  // 5: agent.FileChange.action:type_name -> agent.FileAction
+	11, // 6: agent.ListModelsResponse.models:type_name -> agent.ModelInfo
+	4,  // 7: agent.Agent.ProcessRequest:input_type -> agent.ProcessRequestRequest
+	4,  // 8: agent.Agent.StreamProcessRequest:input_type -> agent.ProcessRequestRequest
+	5,  // 9: agent.Agent.UpdateConfig:input_type -> agent.UpdateConfigRequest
+	10, // 10: agent.Agent.ListModels:input_type -> agent.ListModelsRequest
+	7,  // 11: agent.Agent.ProcessRequest:output_type -> agent.ProcessRequestResponse
+	2,  // 12: agent.Agent.StreamProcessRequest:output_type -> agent.StreamProcessResponse
+	6,  // 13: agent.Agent.UpdateConfig:output_type -> agent.UpdateConfigResponse
+	12, // 14: agent.Agent.ListModels:output_type -> agent.ListModelsResponse
+	11, // [11:15] is the sub-list for method output_type
+	7,  // [7:11] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_agent_proto_init() }
@@ -776,7 +935,7 @@ func file_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_proto_rawDesc), len(file_agent_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   9,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

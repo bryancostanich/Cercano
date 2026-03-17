@@ -22,6 +22,7 @@ const (
 	Agent_ProcessRequest_FullMethodName       = "/agent.Agent/ProcessRequest"
 	Agent_StreamProcessRequest_FullMethodName = "/agent.Agent/StreamProcessRequest"
 	Agent_UpdateConfig_FullMethodName         = "/agent.Agent/UpdateConfig"
+	Agent_ListModels_FullMethodName           = "/agent.Agent/ListModels"
 )
 
 // AgentClient is the client API for Agent service.
@@ -36,6 +37,8 @@ type AgentClient interface {
 	StreamProcessRequest(ctx context.Context, in *ProcessRequestRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamProcessResponse], error)
 	// UpdateConfig updates runtime configuration (model, provider) without server restart.
 	UpdateConfig(ctx context.Context, in *UpdateConfigRequest, opts ...grpc.CallOption) (*UpdateConfigResponse, error)
+	// ListModels returns the models available on the active Ollama instance.
+	ListModels(ctx context.Context, in *ListModelsRequest, opts ...grpc.CallOption) (*ListModelsResponse, error)
 }
 
 type agentClient struct {
@@ -85,6 +88,16 @@ func (c *agentClient) UpdateConfig(ctx context.Context, in *UpdateConfigRequest,
 	return out, nil
 }
 
+func (c *agentClient) ListModels(ctx context.Context, in *ListModelsRequest, opts ...grpc.CallOption) (*ListModelsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListModelsResponse)
+	err := c.cc.Invoke(ctx, Agent_ListModels_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServer is the server API for Agent service.
 // All implementations must embed UnimplementedAgentServer
 // for forward compatibility.
@@ -97,6 +110,8 @@ type AgentServer interface {
 	StreamProcessRequest(*ProcessRequestRequest, grpc.ServerStreamingServer[StreamProcessResponse]) error
 	// UpdateConfig updates runtime configuration (model, provider) without server restart.
 	UpdateConfig(context.Context, *UpdateConfigRequest) (*UpdateConfigResponse, error)
+	// ListModels returns the models available on the active Ollama instance.
+	ListModels(context.Context, *ListModelsRequest) (*ListModelsResponse, error)
 	mustEmbedUnimplementedAgentServer()
 }
 
@@ -115,6 +130,9 @@ func (UnimplementedAgentServer) StreamProcessRequest(*ProcessRequestRequest, grp
 }
 func (UnimplementedAgentServer) UpdateConfig(context.Context, *UpdateConfigRequest) (*UpdateConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateConfig not implemented")
+}
+func (UnimplementedAgentServer) ListModels(context.Context, *ListModelsRequest) (*ListModelsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListModels not implemented")
 }
 func (UnimplementedAgentServer) mustEmbedUnimplementedAgentServer() {}
 func (UnimplementedAgentServer) testEmbeddedByValue()               {}
@@ -184,6 +202,24 @@ func _Agent_UpdateConfig_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Agent_ListModels_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListModelsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).ListModels(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_ListModels_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).ListModels(ctx, req.(*ListModelsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Agent_ServiceDesc is the grpc.ServiceDesc for Agent service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -198,6 +234,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateConfig",
 			Handler:    _Agent_UpdateConfig_Handler,
+		},
+		{
+			MethodName: "ListModels",
+			Handler:    _Agent_ListModels_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

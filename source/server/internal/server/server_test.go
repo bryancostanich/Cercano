@@ -2,8 +2,11 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"cercano/source/server/internal/agent"
@@ -93,6 +96,37 @@ func TestAgentServer_ProcessRequest(t *testing.T) {
 	}
 
 	// Add more test cases here as functionality expands
+}
+
+func TestListModels(t *testing.T) {
+	// Create a mock Ollama server that returns models
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"models": []map[string]interface{}{
+				{"name": "qwen3-coder:latest", "size": 4700000000, "modified_at": "2026-03-15T10:30:00Z"},
+				{"name": "llama3:latest", "size": 8100000000, "modified_at": "2026-03-14T09:00:00Z"},
+			},
+		})
+	})
+	mockOllama := httptest.NewServer(handler)
+	defer mockOllama.Close()
+
+	provider := llm.NewOllamaProvider("test-model", mockOllama.URL)
+	srv := NewServer(nil, provider, nil, nil, nil)
+
+	resp, err := srv.ListModels(context.Background(), &proto.ListModelsRequest{})
+	if err != nil {
+		t.Fatalf("ListModels failed: %v", err)
+	}
+	if len(resp.Models) != 2 {
+		t.Fatalf("Expected 2 models, got %d", len(resp.Models))
+	}
+	if resp.Models[0].Name != "qwen3-coder:latest" {
+		t.Errorf("Expected 'qwen3-coder:latest', got %q", resp.Models[0].Name)
+	}
+	if resp.Models[1].Name != "llama3:latest" {
+		t.Errorf("Expected 'llama3:latest', got %q", resp.Models[1].Name)
+	}
 }
 
 func TestUpdateConfig_OllamaURL(t *testing.T) {

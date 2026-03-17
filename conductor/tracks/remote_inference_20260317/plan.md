@@ -52,23 +52,23 @@ Let users query which models are available on the active Ollama instance, so the
 Automatically fall back to local Ollama when the remote endpoint becomes unavailable, and switch back when it recovers.
 
 ### Tasks
-- [ ] Task: Refactor `OllamaProvider` to support primary/fallback URLs.
-    - [ ] Add `primaryURL`, `fallbackURL`, and `activeURL` fields.
-    - [ ] When `SetBaseURL()` is called with a remote URL, set `primaryURL = remote`, `fallbackURL = localhost:11434`, `activeURL = primaryURL`.
-    - [ ] When no remote is configured, `primaryURL` and `activeURL` are both `localhost:11434` with no fallback.
-    - [ ] `Process()`/`ProcessStream()` use `activeURL`.
-    - [ ] Red/Green TDD.
-- [ ] Task: Implement health monitor goroutine.
-    - [ ] Background goroutine pings `primaryURL` via `GET /api/tags` every 30 seconds.
-    - [ ] On 3 consecutive failures: set `activeURL = fallbackURL`, log warning.
-    - [ ] On recovery (primary responds): set `activeURL = primaryURL`, log info.
-    - [ ] Health monitor starts when a remote URL is configured, stops when cleared.
-    - [ ] Graceful shutdown via context cancellation.
-    - [ ] Red/Green TDD with mock HTTP server simulating failures/recovery.
-- [ ] Task: Add endpoint info to response metadata.
-    - [ ] Include `[Endpoint: <url>]` or `[Endpoint: local(fallback)]` in response metadata alongside existing model/confidence info.
-    - [ ] Update proto if needed to carry this field.
-    - [ ] Red/Green TDD.
+- [x] Task: Refactor `OllamaProvider` to support primary/fallback URLs. [e9ce2d0]
+    - [x] Add `primaryURL`, `fallbackURL`, and `activeURL` fields.
+    - [x] When `SetBaseURL()` is called with a remote URL, set `primaryURL = remote`, `fallbackURL = localhost:11434`, `activeURL = primaryURL`.
+    - [x] When no remote is configured, `primaryURL` and `activeURL` are both `localhost:11434` with no fallback.
+    - [x] `Process()`/`ProcessStream()` use `activeURL`.
+    - [x] Red/Green TDD.
+- [x] Task: Implement health monitor goroutine. [d73b79f]
+    - [x] Background goroutine pings `primaryURL` via `GET /api/tags` every 30 seconds.
+    - [x] On 3 consecutive failures: set `activeURL = fallbackURL`, log warning.
+    - [x] On recovery (primary responds): set `activeURL = primaryURL`, log info.
+    - [x] Health monitor starts when a remote URL is configured, stops when cleared. [d7b0da8]
+    - [x] Graceful shutdown via context cancellation.
+    - [x] Red/Green TDD with mock HTTP server simulating failures/recovery.
+- [x] Task: Add endpoint info to response metadata. [a2a9c2d]
+    - [x] Include `[Endpoint: <url>]` or `[Endpoint: local(fallback)]` in response metadata alongside existing model/confidence info.
+    - [x] Update proto if needed to carry this field.
+    - [x] Red/Green TDD.
 - [ ] Task: End-to-end test: configure remote URL, stop remote Ollama, verify fallback to local, restart remote, verify switch-back.
 - [ ] Task: Conductor - User Manual Verification 'Fallback Mechanism' (Protocol in workflow.md)
 

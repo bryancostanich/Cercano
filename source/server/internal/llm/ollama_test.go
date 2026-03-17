@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"cercano/source/server/internal/agent"
 )
@@ -252,6 +253,103 @@ func TestOllamaProvider_Fallback_ProcessUsesActiveURL(t *testing.T) {
 	resp, _ = provider.Process(context.Background(), &agent.Request{Input: "test"})
 	if resp.Output != "from-remote" {
 		t.Errorf("Expected 'from-remote' after recovery, got %q", resp.Output)
+	}
+}
+
+func TestOllamaProvider_HealthMonitor_SwitchesToFallback(t *testing.T) {
+	// Remote server that we can shut down mid-test
+	remoteServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{"models": []interface{}{}})
+	}))
+
+	provider := NewOllamaProvider("test-model", "http://localhost:11434")
+	provider.SetBaseURL(remoteServer.URL)
+
+	// Start health monitor with very short interval for testing
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	provider.StartHealthMonitor(ctx, 50*time.Millisecond, 2) // 50ms interval, 2 failures to trigger
+
+	// Verify it's using primary
+	time.Sleep(30 * time.Millisecond)
+	if provider.IsUsingFallback() {
+		t.Error("Should not be using fallback while remote is healthy")
+	}
+
+	// Kill the remote server
+	remoteServer.Close()
+
+	// Wait for health monitor to detect failure (2 failures * 50ms + buffer)
+	time.Sleep(200 * time.Millisecond)
+
+	if !provider.IsUsingFallback() {
+		t.Error("Expected IsUsingFallback=true after remote goes down")
+	}
+}
+
+func TestOllamaProvider_HealthMonitor_RecoversToPrimary(t *testing.T) {
+	requestCount := 0
+	failUntil := 3 // fail the first 3 requests, then succeed
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		if requestCount <= failUntil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"models": []interface{}{}})
+	})
+	remoteServer := httptest.NewServer(handler)
+	defer remoteServer.Close()
+
+	provider := NewOllamaProvider("test-model", "http://localhost:11434")
+	provider.SetBaseURL(remoteServer.URL)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	provider.StartHealthMonitor(ctx, 50*time.Millisecond, 2)
+
+	// Wait for it to fail over (2 failures * 50ms + buffer)
+	time.Sleep(200 * time.Millisecond)
+	if !provider.IsUsingFallback() {
+		t.Error("Expected fallback after initial failures")
+	}
+
+	// Wait for recovery (server starts succeeding after request 3)
+	time.Sleep(200 * time.Millisecond)
+	if provider.IsUsingFallback() {
+		t.Error("Expected recovery to primary after remote comes back")
+	}
+}
+
+func TestOllamaProvider_HealthMonitor_StopsOnCancel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{"models": []interface{}{}})
+	}))
+	defer server.Close()
+
+	provider := NewOllamaProvider("test-model", "http://localhost:11434")
+	provider.SetBaseURL(server.URL)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	provider.StartHealthMonitor(ctx, 50*time.Millisecond, 3)
+
+	// Cancel and verify it doesn't panic or leak
+	cancel()
+	time.Sleep(100 * time.Millisecond)
+	// If we get here without panicking, the test passes
+}
+
+func TestOllamaProvider_HealthMonitor_NoopWithoutRemote(t *testing.T) {
+	// When no remote is configured (primary == fallback), monitor should be a no-op
+	provider := NewOllamaProvider("test-model", "http://localhost:11434")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	provider.StartHealthMonitor(ctx, 50*time.Millisecond, 3)
+
+	time.Sleep(100 * time.Millisecond)
+	if provider.IsUsingFallback() {
+		t.Error("Should never switch to fallback when no remote is configured")
 	}
 }
 

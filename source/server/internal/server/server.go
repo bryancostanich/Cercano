@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"time"
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/llm"
@@ -14,11 +15,12 @@ import (
 // Server is the gRPC server for the Agent service.
 type Server struct {
 	proto.UnimplementedAgentServer
-	agent         *agent.Agent
-	localProvider *llm.OllamaProvider
-	router        *agent.SmartRouter
-	coordinator   *loop.ADKCoordinator
-	cloudFactory  agent.CloudFactory
+	agent              *agent.Agent
+	localProvider      *llm.OllamaProvider
+	router             *agent.SmartRouter
+	coordinator        *loop.ADKCoordinator
+	cloudFactory       agent.CloudFactory
+	healthMonitorCancel context.CancelFunc // cancel function for the active health monitor
 }
 
 // NewServer creates a new Agent gRPC server.
@@ -44,9 +46,17 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 				Message: fmt.Sprintf("invalid ollama_url %q: must be a valid http:// or https:// URL", req.OllamaUrl),
 			}, nil
 		}
+		// Stop any existing health monitor before switching URLs
+		if s.healthMonitorCancel != nil {
+			s.healthMonitorCancel()
+		}
 		s.localProvider.SetBaseURL(req.OllamaUrl)
+		// Start health monitor for the new remote endpoint
+		monitorCtx, cancel := context.WithCancel(context.Background())
+		s.healthMonitorCancel = cancel
+		s.localProvider.StartHealthMonitor(monitorCtx, 30*time.Second, 3)
 		changes = append(changes, fmt.Sprintf("ollama_url=%s", req.OllamaUrl))
-		fmt.Printf("UpdateConfig: Ollama URL set to %s\n", req.OllamaUrl)
+		fmt.Printf("UpdateConfig: Ollama URL set to %s (health monitor started)\n", req.OllamaUrl)
 	}
 
 	if req.LocalModel != "" {

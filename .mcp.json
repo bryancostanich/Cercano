@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "cercano": {
+      "type": "stdio",
+      "command": "/Users/bryancostanich/Git_Repos/bryan_costanich/Cercano/source/server/bin/cercano-mcp",
+      "args": ["--grpc-addr", "localhost:50052"]
+    }
+  }
+}

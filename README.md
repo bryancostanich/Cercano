@@ -10,6 +10,7 @@ By combining the speed of local models with the power of cloud-based AI, Cercano
 - **Local-First Architecture** - Utilizes [Ollama](https://ollama.com/) to run powerful open-source models (like qwen3-coder, GLM4.7-Flash, etc.) locally on your machine.
 - **Cloud Fallback** - Seamlessly integrates with Google Gemini and Anthropic Claude for complex tasks that exceed local model capabilities.
 - **Agentic Self-Correction** - An iterative loop that automatically validates generated code (e.g., via compilation) and requests fixes if errors are detected.
+- **MCP Server** - Expose Cercano as an [MCP](https://modelcontextprotocol.io/) server, allowing cloud-based agents like Claude Code and Cursor to delegate work to local models — faster, private, and at zero cost. Supports chat queries, agentic code generation, runtime model switching, and multi-turn conversations.
 - **IDE Integration** - Decoupled gRPC-based architecture allows for integration into modern IDEs like VS Code and Zed.
 
 ## Architecture
@@ -177,6 +178,47 @@ Cercano can be used as an MCP (Model Context Protocol) server, allowing cloud-ba
 | `cercano_local` | Run any prompt against local models. When `file_path` and `work_dir` are provided, uses the agentic generate-validate loop. Otherwise, processes as a direct LLM call. |
 | `cercano_config` | Update runtime configuration (local model, cloud provider/model) without restarting the server. |
 
+### Usage Examples
+
+Once the MCP server is connected, your agent can call Cercano tools directly:
+
+**Chat query (offload to local model):**
+```
+cercano_local(prompt: "What is a goroutine in Go? Answer in one sentence.")
+→ "A goroutine is a lightweight thread of execution managed by the Go runtime."
+  [Model: qwen3-coder, Confidence: 1.00, Escalated: false]
+```
+
+**Switch local model at runtime:**
+```
+cercano_config(action: "set", local_model: "GLM-4.7-Flash")
+→ Configuration update success: updated: [local_model=GLM-4.7-Flash]
+```
+
+**Agentic code generation (with validation loop):**
+```
+cercano_local(
+  prompt: "Add a health check endpoint that returns JSON",
+  file_path: "internal/server/health.go",
+  work_dir: "/path/to/project/source/server"
+)
+→ Generated code with automatic build validation and self-correction.
+```
+
+**Multi-turn conversation:**
+```
+cercano_local(prompt: "Explain the SmartRouter", conversation_id: "abc123")
+cercano_local(prompt: "How does it handle escalation?", conversation_id: "abc123")
+→ Second call has full context from the first.
+```
+
+### Verified Agents
+
+| Agent | Status |
+|-------|--------|
+| Claude Code | Verified — tool discovery, chat queries, config updates, model switching |
+| Cursor | Not yet tested |
+
 ### Flags
 
 | Flag | Default | Description |
@@ -210,6 +252,5 @@ make test   # Run all tests
 * **Containerize Go Server** - Package the Cercano Go server in a container (Docker) for easier end-user distribution and deployment. Ollama remains on the host due to GPU/Metal passthrough constraints, so the container connects to Ollama externally.
 * **Add Gemma Support** - Add Google's Gemma models to the supported local model list for Ollama.
 * **Agent Skills & Tool Use** - Adopt the [Agent Skills](https://agentskills.io) open standard to codify Cercano's tool use capabilities. Agent Skills is a portable, file-based format (SKILL.md) for giving agents discoverable capabilities, supported by 25+ agent products including Claude Code, Cursor, Copilot, and Codex. Cercano should support skills as both a consumer (discover and activate community/enterprise skills) and a provider (package Cercano's local inference capabilities as skills other agents can use). Includes a comprehensive audit of agent features across the landscape — both open source (Codex, Aider, Continue, Cody, OpenHands, SWE-Agent) and closed source (Claude Code, Cursor, Windsurf, GitHub Copilot, JetBrains AI) — to produce a feature matrix reference document informing capability decisions. This track should also revisit the MCP tool surface design — evaluate whether a single flexible tool (`cercano_local`) is sufficient or whether specialized tools (review, summarize, refactor, etc.) provide better agent ergonomics informed by the Agent Skills model and real-world usage patterns.
-* **Cercano as MCP Server** - Expose Cercano's local inference capabilities as an MCP (Model Context Protocol) server, allowing cloud-based agents like Claude Code and Cursor to delegate tasks to local models. A thin MCP adapter would sit in front of the existing gRPC server, exposing tools such as local code generation, summarization, code review, and complexity classification. This lets cloud agents offload suitable work to local inference — faster and at zero cost.
 * **Remote/External Inference** - Support running inference on remote machines (e.g., Ollama on a LAN Mac Studio) and external AI accelerators (e.g., tiiny.ai). The Ollama URL is already configurable, but this feature would make remote inference robust and first-class, with service discovery and hardware-aware routing.
 * **AI Engine Agnosticism** - Abstract the local inference layer so Cercano is not coupled to Ollama. Support pluggable inference backends including ONNX Runtime, Enso, and other popular AI engines, allowing users to choose the runtime best suited to their hardware and models.

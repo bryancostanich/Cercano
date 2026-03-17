@@ -50,6 +50,109 @@ func TestOllamaProvider_SetModelName(t *testing.T) {
 	}
 }
 
+func TestOllamaProvider_SetBaseURL(t *testing.T) {
+	// Track which server receives the request
+	server1Called := false
+	server2Called := false
+
+	handler1 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server1Called = true
+		json.NewEncoder(w).Encode(map[string]string{"response": "from-server1"})
+	})
+	handler2 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server2Called = true
+		json.NewEncoder(w).Encode(map[string]string{"response": "from-server2"})
+	})
+	server1 := httptest.NewServer(handler1)
+	defer server1.Close()
+	server2 := httptest.NewServer(handler2)
+	defer server2.Close()
+
+	provider := NewOllamaProvider("test-model", server1.URL)
+
+	// Verify initial BaseURL via GetBaseURL
+	if provider.GetBaseURL() != server1.URL {
+		t.Errorf("Expected initial BaseURL %q, got %q", server1.URL, provider.GetBaseURL())
+	}
+
+	// Process a request — should hit server1
+	provider.Process(context.Background(), &agent.Request{Input: "test"})
+	if !server1Called {
+		t.Error("Expected server1 to be called with initial BaseURL")
+	}
+
+	// Switch BaseURL at runtime
+	provider.SetBaseURL(server2.URL)
+
+	// Verify GetBaseURL reflects the change
+	if provider.GetBaseURL() != server2.URL {
+		t.Errorf("Expected BaseURL %q after SetBaseURL, got %q", server2.URL, provider.GetBaseURL())
+	}
+
+	// Process another request — should hit server2
+	provider.Process(context.Background(), &agent.Request{Input: "test2"})
+	if !server2Called {
+		t.Error("Expected server2 to be called after SetBaseURL")
+	}
+}
+
+func TestOllamaProvider_SetBaseURL_AffectsStreaming(t *testing.T) {
+	server1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{"response": "stream-from-1", "done": true})
+	}))
+	defer server1.Close()
+	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{"response": "stream-from-2", "done": true})
+	}))
+	defer server2.Close()
+
+	provider := NewOllamaProvider("test-model", server1.URL)
+
+	// Stream from server1
+	resp1, err := provider.ProcessStream(context.Background(), &agent.Request{Input: "test"}, nil)
+	if err != nil {
+		t.Fatalf("ProcessStream failed: %v", err)
+	}
+	if resp1.Output != "stream-from-1" {
+		t.Errorf("Expected 'stream-from-1', got %q", resp1.Output)
+	}
+
+	// Switch and stream from server2
+	provider.SetBaseURL(server2.URL)
+	resp2, err := provider.ProcessStream(context.Background(), &agent.Request{Input: "test"}, nil)
+	if err != nil {
+		t.Fatalf("ProcessStream failed: %v", err)
+	}
+	if resp2.Output != "stream-from-2" {
+		t.Errorf("Expected 'stream-from-2', got %q", resp2.Output)
+	}
+}
+
+func TestOllamaProvider_SetBaseURL_ConcurrentAccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"response": "ok"})
+	}))
+	defer server.Close()
+
+	provider := NewOllamaProvider("test-model", server.URL)
+
+	// Hammer SetBaseURL and Process concurrently to detect races
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 100; i++ {
+			provider.SetBaseURL(server.URL)
+		}
+		close(done)
+	}()
+
+	for i := 0; i < 100; i++ {
+		provider.Process(context.Background(), &agent.Request{Input: "test"})
+	}
+	<-done
+
+	// If we get here without a race detector panic, the test passes
+}
+
 func TestOllamaProvider_Process(t *testing.T) {
 	// Mock Ollama Server
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

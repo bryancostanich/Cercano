@@ -6,19 +6,19 @@
 Make the Ollama endpoint URL changeable at runtime via gRPC and MCP, with thread-safe access in `OllamaProvider`.
 
 ### Tasks
-- [~] Task: Make `BaseURL` thread-safe in `OllamaProvider`.
-    - [ ] Add `SetBaseURL(url string)` method protected by the existing `sync.RWMutex`.
-    - [ ] Update `Process()` and `ProcessStream()` to read `BaseURL` under read lock (currently only `ModelName` is locked).
-    - [ ] Red/Green TDD: test concurrent `SetBaseURL` + `Process` calls.
-- [ ] Task: Add `ollama_url` field to `UpdateConfigRequest` in `agent.proto`.
-    - [ ] Regenerate Go bindings (`protoc`).
-    - [ ] Update `Server.UpdateConfig()` to call `OllamaProvider.SetBaseURL()`.
-    - [ ] Validate URL format (must be valid HTTP/HTTPS URL).
-    - [ ] Red/Green TDD.
-- [ ] Task: Update `cercano_config` MCP tool to support `ollama_url` parameter.
-    - [ ] Add `ollama_url` to the tool's input schema.
-    - [ ] Pass through to `UpdateConfig` gRPC call.
-    - [ ] Red/Green TDD.
+- [x] Task: Make `BaseURL` thread-safe in `OllamaProvider`. [35defa8]
+    - [x] Add `SetBaseURL(url string)` method protected by the existing `sync.RWMutex`.
+    - [x] Update `Process()` and `ProcessStream()` to read `BaseURL` under read lock (currently only `ModelName` is locked).
+    - [x] Red/Green TDD: test concurrent `SetBaseURL` + `Process` calls.
+- [x] Task: Add `ollama_url` field to `UpdateConfigRequest` in `agent.proto`. [4cbf2f7]
+    - [x] Regenerate Go bindings (`protoc`).
+    - [x] Update `Server.UpdateConfig()` to call `OllamaProvider.SetBaseURL()`.
+    - [x] Validate URL format (must be valid HTTP/HTTPS URL).
+    - [x] Red/Green TDD.
+- [x] Task: Update `cercano_config` MCP tool to support `ollama_url` parameter. [96e72b2]
+    - [x] Add `ollama_url` to the tool's input schema.
+    - [x] Pass through to `UpdateConfig` gRPC call.
+    - [x] Red/Green TDD.
 - [ ] Task: End-to-end test: switch Ollama URL at runtime via MCP, verify next query hits the new endpoint.
 - [ ] Task: Conductor - User Manual Verification 'Runtime-Configurable Ollama URL' (Protocol in workflow.md)
 

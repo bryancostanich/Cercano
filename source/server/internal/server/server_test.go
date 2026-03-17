@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/llm"
 	"cercano/source/server/pkg/proto" // Import the generated protobuf package
 
 	"google.golang.org/grpc"
@@ -92,4 +93,70 @@ func TestAgentServer_ProcessRequest(t *testing.T) {
 	}
 
 	// Add more test cases here as functionality expands
+}
+
+func TestUpdateConfig_OllamaURL(t *testing.T) {
+	provider := llm.NewOllamaProvider("test-model", "http://localhost:11434")
+	srv := NewServer(nil, provider, nil, nil, nil)
+
+	// Set a valid remote URL
+	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{
+		OllamaUrl: "http://mac-studio.local:11434",
+	})
+	if err != nil {
+		t.Fatalf("UpdateConfig failed: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("Expected success, got: %s", resp.Message)
+	}
+
+	// Verify the provider's BaseURL was updated
+	if provider.GetBaseURL() != "http://mac-studio.local:11434" {
+		t.Errorf("Expected BaseURL 'http://mac-studio.local:11434', got '%s'", provider.GetBaseURL())
+	}
+}
+
+func TestUpdateConfig_OllamaURL_InvalidURL(t *testing.T) {
+	provider := llm.NewOllamaProvider("test-model", "http://localhost:11434")
+	srv := NewServer(nil, provider, nil, nil, nil)
+
+	// Set an invalid URL — should fail validation
+	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{
+		OllamaUrl: "not-a-valid-url",
+	})
+	if err != nil {
+		t.Fatalf("UpdateConfig returned error: %v", err)
+	}
+	if resp.Success {
+		t.Error("Expected failure for invalid URL, got success")
+	}
+
+	// BaseURL should remain unchanged
+	if provider.GetBaseURL() != "http://localhost:11434" {
+		t.Errorf("Expected BaseURL unchanged, got '%s'", provider.GetBaseURL())
+	}
+}
+
+func TestUpdateConfig_OllamaURL_WithModel(t *testing.T) {
+	provider := llm.NewOllamaProvider("test-model", "http://localhost:11434")
+	srv := NewServer(nil, provider, nil, nil, nil)
+
+	// Set both URL and model in one call
+	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{
+		OllamaUrl:  "http://192.168.1.100:11434",
+		LocalModel: "llama3",
+	})
+	if err != nil {
+		t.Fatalf("UpdateConfig failed: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("Expected success, got: %s", resp.Message)
+	}
+
+	if provider.GetBaseURL() != "http://192.168.1.100:11434" {
+		t.Errorf("Expected BaseURL 'http://192.168.1.100:11434', got '%s'", provider.GetBaseURL())
+	}
+	if provider.Name() != "llama3" {
+		t.Errorf("Expected model 'llama3', got '%s'", provider.Name())
+	}
 }

@@ -337,6 +337,7 @@ type UpdateConfigRequest struct {
 	CloudProvider string                 `protobuf:"bytes,2,opt,name=cloud_provider,json=cloudProvider,proto3" json:"cloud_provider,omitempty"` // Cloud provider name (e.g., "google", "anthropic")
 	CloudModel    string                 `protobuf:"bytes,3,opt,name=cloud_model,json=cloudModel,proto3" json:"cloud_model,omitempty"`          // Cloud model name (e.g., "gemini-1.5-flash", "claude-3-opus")
 	CloudApiKey   string                 `protobuf:"bytes,4,opt,name=cloud_api_key,json=cloudApiKey,proto3" json:"cloud_api_key,omitempty"`     // API key for the cloud provider
+	OllamaUrl     string                 `protobuf:"bytes,5,opt,name=ollama_url,json=ollamaUrl,proto3" json:"ollama_url,omitempty"`             // Ollama endpoint URL (e.g., "http://mac-studio.local:11434")
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -395,6 +396,13 @@ func (x *UpdateConfigRequest) GetCloudModel() string {
 func (x *UpdateConfigRequest) GetCloudApiKey() string {
 	if x != nil {
 		return x.CloudApiKey
+	}
+	return ""
+}
+
+func (x *UpdateConfigRequest) GetOllamaUrl() string {
+	if x != nil {
+		return x.OllamaUrl
 	}
 	return ""
 }
@@ -663,14 +671,16 @@ const file_agent_proto_rawDesc = "" +
 	"\x05input\x18\x01 \x01(\tR\x05input\x12\x19\n" +
 	"\bwork_dir\x18\x03 \x01(\tR\aworkDir\x12\x1b\n" +
 	"\tfile_name\x18\x04 \x01(\tR\bfileName\x12'\n" +
-	"\x0fconversation_id\x18\x05 \x01(\tR\x0econversationId\"\xa2\x01\n" +
+	"\x0fconversation_id\x18\x05 \x01(\tR\x0econversationId\"\xc1\x01\n" +
 	"\x13UpdateConfigRequest\x12\x1f\n" +
 	"\vlocal_model\x18\x01 \x01(\tR\n" +
 	"localModel\x12%\n" +
 	"\x0ecloud_provider\x18\x02 \x01(\tR\rcloudProvider\x12\x1f\n" +
 	"\vcloud_model\x18\x03 \x01(\tR\n" +
 	"cloudModel\x12\"\n" +
-	"\rcloud_api_key\x18\x04 \x01(\tR\vcloudApiKey\"J\n" +
+	"\rcloud_api_key\x18\x04 \x01(\tR\vcloudApiKey\x12\x1d\n" +
+	"\n" +
+	"ollama_url\x18\x05 \x01(\tR\tollamaUrl\"J\n" +
 	"\x14UpdateConfigResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\xd6\x01\n" +

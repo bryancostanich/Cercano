@@ -28,21 +28,21 @@ Make the Ollama endpoint URL changeable at runtime via gRPC and MCP, with thread
 Let users query which models are available on the active Ollama instance, so they can make informed model selections — especially useful when pointing at a remote machine with different models than local.
 
 ### Tasks
-- [ ] Task: Add `ListModels()` method to `OllamaProvider`.
-    - [ ] Call Ollama's `GET /api/tags` endpoint.
-    - [ ] Parse response and return list of model names, sizes, and modification dates.
-    - [ ] Handle errors (Ollama not running, network timeout).
-    - [ ] Red/Green TDD with mock HTTP server.
-- [ ] Task: Add `ListModels` RPC to `agent.proto`.
-    - [ ] Define `ListModelsRequest` (empty) and `ListModelsResponse` (repeated model info).
-    - [ ] Regenerate Go bindings.
-    - [ ] Implement in `Server`.
-    - [ ] Red/Green TDD.
-- [ ] Task: Add `cercano_models` MCP tool.
-    - [ ] Register new tool in the MCP server.
-    - [ ] Call `ListModels` gRPC RPC.
-    - [ ] Return formatted model list to the agent.
-    - [ ] Red/Green TDD.
+- [x] Task: Add `ListModels()` method to `OllamaProvider`. [184ff9e]
+    - [x] Call Ollama's `GET /api/tags` endpoint.
+    - [x] Parse response and return list of model names, sizes, and modification dates.
+    - [x] Handle errors (Ollama not running, network timeout).
+    - [x] Red/Green TDD with mock HTTP server.
+- [x] Task: Add `ListModels` RPC to `agent.proto`. [1d3ea23]
+    - [x] Define `ListModelsRequest` (empty) and `ListModelsResponse` (repeated model info).
+    - [x] Regenerate Go bindings.
+    - [x] Implement in `Server`.
+    - [x] Red/Green TDD.
+- [x] Task: Add `cercano_models` MCP tool. [1cf5f97]
+    - [x] Register new tool in the MCP server.
+    - [x] Call `ListModels` gRPC RPC.
+    - [x] Return formatted model list to the agent.
+    - [x] Red/Green TDD.
 - [ ] Task: End-to-end test: call `cercano_models` via MCP, verify it returns real model list from running Ollama.
 - [ ] Task: Conductor - User Manual Verification 'Model Discovery' (Protocol in workflow.md)
 

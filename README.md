@@ -139,8 +139,19 @@ Cercano is in active development. For detailed information on the project's goal
 
 ## Feature TODOs
 
+### Existing Improvements
+
 * **Better VS Code Agent Window Integration** - The Cercano model should be available as a drop down in the agent window, as a sibling to things like "Gemini 3.1", "claude", etc.
 * **LLM-Based Conversation Compaction** - Conversation history currently uses simple compaction: chat responses are truncated at 2000 characters and coding responses are reduced to `[Code generated: ACTION path]`. This works well for short exchanges but may lose important nuance in longer conversations. Revisit with LLM-based summarization for more sophisticated compaction.
 * **Per-Model Configuration** - Add configurable per-model settings such as context window size, classification similarity thresholds, conversation history depth, compaction limits, and other model-specific parameters. Currently these are hardcoded constants shared across all models.
 * **Simplify Provider Routing** - The SmartRouter's provider routing step (local vs cloud) uses embedding-based classification, but embeddings capture semantic meaning, not task complexity. This leads to mediocre similarity scores for straightforward queries. Since the system is local-first by design and the coordinator already handles escalation to cloud during coding tasks (after repeated validation failures), the provider routing step may be redundant. Explore removing it in favor of always routing to local and relying on the coordinator's built-in escalation logic for cloud usage.
 * **Zed Extension** - The Zed client (`source/clients/zed/`) is a stub. Build out the Rust-based Zed extension to connect to the Cercano gRPC server with feature parity to the VS Code extension.
+
+### New Features
+
+* **Containerize Go Server** - Package the Cercano Go server in a container (Docker) for easier end-user distribution and deployment. Ollama remains on the host due to GPU/Metal passthrough constraints, so the container connects to Ollama externally.
+* **Add Gemma Support** - Add Google's Gemma models to the supported local model list for Ollama.
+* **Agent Capabilities Research** - Comprehensive audit of agent features across the landscape — both open source (Codex, Aider, Continue, Cody, OpenHands, SWE-Agent) and closed source (Claude Code, Cursor, Windsurf, GitHub Copilot, JetBrains AI). Produce a feature matrix reference document to inform tool use design and capability decisions for Cercano.
+* **Cercano as MCP Server** - Expose Cercano's local inference capabilities as an MCP (Model Context Protocol) server, allowing cloud-based agents like Claude Code and Cursor to delegate tasks to local models. A thin MCP adapter would sit in front of the existing gRPC server, exposing tools such as local code generation, summarization, code review, and complexity classification. This lets cloud agents offload suitable work to local inference — faster and at zero cost.
+* **Remote/External Inference** - Support running inference on remote machines (e.g., Ollama on a LAN Mac Studio) and external AI accelerators (e.g., tiiny.ai). The Ollama URL is already configurable, but this feature would make remote inference robust and first-class, with service discovery and hardware-aware routing.
+* **AI Engine Agnosticism** - Abstract the local inference layer so Cercano is not coupled to Ollama. Support pluggable inference backends including ONNX Runtime, Enso, and other popular AI engines, allowing users to choose the runtime best suited to their hardware and models.

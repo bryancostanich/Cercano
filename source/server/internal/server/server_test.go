@@ -129,6 +129,40 @@ func TestListModels(t *testing.T) {
 	}
 }
 
+func TestMapResponse_IncludesEndpoint(t *testing.T) {
+	provider := llm.NewOllamaProvider("test-model", "http://localhost:11434")
+	provider.SetBaseURL("http://remote:11434")
+	srv := NewServer(nil, provider, nil, nil, nil)
+
+	agentResp := &agent.Response{
+		Output: "test output",
+		RoutingMetadata: agent.RoutingMetadata{
+			ModelName:  "test-model",
+			Confidence: 1.0,
+		},
+	}
+
+	protoResp := srv.MapResponseForTest(agentResp)
+
+	if protoResp.RoutingMetadata.Endpoint != "http://remote:11434" {
+		t.Errorf("Expected endpoint 'http://remote:11434', got %q", protoResp.RoutingMetadata.Endpoint)
+	}
+	if protoResp.RoutingMetadata.IsFallback {
+		t.Error("Expected IsFallback=false when using primary")
+	}
+
+	// Switch to fallback and verify
+	provider.SwitchToFallback()
+	protoResp = srv.MapResponseForTest(agentResp)
+
+	if protoResp.RoutingMetadata.Endpoint != "http://localhost:11434" {
+		t.Errorf("Expected fallback endpoint 'http://localhost:11434', got %q", protoResp.RoutingMetadata.Endpoint)
+	}
+	if !protoResp.RoutingMetadata.IsFallback {
+		t.Error("Expected IsFallback=true when using fallback")
+	}
+}
+
 func TestUpdateConfig_OllamaURL(t *testing.T) {
 	provider := llm.NewOllamaProvider("test-model", "http://localhost:11434")
 	srv := NewServer(nil, provider, nil, nil, nil)

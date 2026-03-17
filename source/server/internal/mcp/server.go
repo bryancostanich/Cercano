@@ -123,8 +123,12 @@ func (s *Server) handleLocal(ctx context.Context, request *gomcp.CallToolRequest
 		output += fmt.Sprintf("\nValidation Errors:\n%s", resp.ValidationErrors)
 	}
 	if resp.RoutingMetadata != nil {
-		output += fmt.Sprintf("\n\n[Model: %s, Confidence: %.2f, Escalated: %v]",
-			resp.RoutingMetadata.ModelName, resp.RoutingMetadata.Confidence, resp.RoutingMetadata.Escalated)
+		endpointInfo := resp.RoutingMetadata.Endpoint
+		if resp.RoutingMetadata.IsFallback {
+			endpointInfo += " (fallback)"
+		}
+		output += fmt.Sprintf("\n\n[Model: %s, Confidence: %.2f, Escalated: %v, Endpoint: %s]",
+			resp.RoutingMetadata.ModelName, resp.RoutingMetadata.Confidence, resp.RoutingMetadata.Escalated, endpointInfo)
 	}
 
 	return &gomcp.CallToolResult{

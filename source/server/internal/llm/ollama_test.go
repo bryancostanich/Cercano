@@ -153,6 +153,108 @@ func TestOllamaProvider_SetBaseURL_ConcurrentAccess(t *testing.T) {
 	// If we get here without a race detector panic, the test passes
 }
 
+func TestOllamaProvider_Fallback_LocalOnly(t *testing.T) {
+	// When no remote is configured, there's no fallback — just the local endpoint.
+	provider := NewOllamaProvider("test-model", "http://localhost:11434")
+
+	if provider.GetActiveURL() != "http://localhost:11434" {
+		t.Errorf("Expected activeURL 'http://localhost:11434', got %q", provider.GetActiveURL())
+	}
+	if provider.IsUsingFallback() {
+		t.Error("Expected IsUsingFallback=false when no remote configured")
+	}
+}
+
+func TestOllamaProvider_Fallback_SetRemote(t *testing.T) {
+	server1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"response": "from-remote"})
+	}))
+	defer server1.Close()
+
+	provider := NewOllamaProvider("test-model", "http://localhost:11434")
+
+	// Set a remote URL — primary becomes remote, fallback becomes localhost
+	provider.SetBaseURL(server1.URL)
+
+	if provider.GetActiveURL() != server1.URL {
+		t.Errorf("Expected activeURL %q, got %q", server1.URL, provider.GetActiveURL())
+	}
+	if provider.IsUsingFallback() {
+		t.Error("Expected IsUsingFallback=false right after setting remote")
+	}
+
+	// GetBaseURL should still return the primary (remote) URL
+	if provider.GetBaseURL() != server1.URL {
+		t.Errorf("Expected BaseURL %q, got %q", server1.URL, provider.GetBaseURL())
+	}
+}
+
+func TestOllamaProvider_Fallback_SwitchToFallback(t *testing.T) {
+	provider := NewOllamaProvider("test-model", "http://localhost:11434")
+	provider.SetBaseURL("http://remote:11434")
+
+	// Simulate switching to fallback
+	provider.SwitchToFallback()
+
+	if provider.GetActiveURL() != "http://localhost:11434" {
+		t.Errorf("Expected activeURL to be fallback 'http://localhost:11434', got %q", provider.GetActiveURL())
+	}
+	if !provider.IsUsingFallback() {
+		t.Error("Expected IsUsingFallback=true after SwitchToFallback")
+	}
+}
+
+func TestOllamaProvider_Fallback_SwitchToPrimary(t *testing.T) {
+	provider := NewOllamaProvider("test-model", "http://localhost:11434")
+	provider.SetBaseURL("http://remote:11434")
+	provider.SwitchToFallback()
+
+	// Recover — switch back to primary
+	provider.SwitchToPrimary()
+
+	if provider.GetActiveURL() != "http://remote:11434" {
+		t.Errorf("Expected activeURL 'http://remote:11434', got %q", provider.GetActiveURL())
+	}
+	if provider.IsUsingFallback() {
+		t.Error("Expected IsUsingFallback=false after SwitchToPrimary")
+	}
+}
+
+func TestOllamaProvider_Fallback_ProcessUsesActiveURL(t *testing.T) {
+	remoteServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"response": "from-remote"})
+	}))
+	defer remoteServer.Close()
+	localServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"response": "from-local"})
+	}))
+	defer localServer.Close()
+
+	// Start with local, then set remote as primary
+	provider := NewOllamaProvider("test-model", localServer.URL)
+	provider.SetBaseURL(remoteServer.URL)
+
+	// Should hit remote
+	resp, _ := provider.Process(context.Background(), &agent.Request{Input: "test"})
+	if resp.Output != "from-remote" {
+		t.Errorf("Expected 'from-remote', got %q", resp.Output)
+	}
+
+	// Switch to fallback (local)
+	provider.SwitchToFallback()
+	resp, _ = provider.Process(context.Background(), &agent.Request{Input: "test"})
+	if resp.Output != "from-local" {
+		t.Errorf("Expected 'from-local', got %q", resp.Output)
+	}
+
+	// Recover to primary (remote)
+	provider.SwitchToPrimary()
+	resp, _ = provider.Process(context.Background(), &agent.Request{Input: "test"})
+	if resp.Output != "from-remote" {
+		t.Errorf("Expected 'from-remote' after recovery, got %q", resp.Output)
+	}
+}
+
 func TestOllamaProvider_ListModels(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" {

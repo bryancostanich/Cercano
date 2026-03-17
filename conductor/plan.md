@@ -51,7 +51,7 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 ---
 
-- [ ] **Track: Cercano as MCP Server — Expose local inference as tools for cloud agents**
+- [x] **Track: Cercano as MCP Server — Expose local inference as tools for cloud agents**
 *Link: [./tracks/mcp_server_20260317/](./tracks/mcp_server_20260317/)*
 
 ---

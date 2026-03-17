@@ -56,7 +56,11 @@ Validate the MCP server works with real agents (Claude Code), add build/install 
     - [x] `go build -o bin/cercano-mcp cmd/mcp/main.go` — added Makefile with `make mcp`, `make agent`, `make all`, `make test`, `make clean`.
 - [x] Task: Write a Claude Code MCP configuration example for connecting to Cercano.
     - [x] Document the `.mcp.json` config entry and `claude mcp add` CLI command.
-- [ ] Task: Test with Claude Code — verify tool discovery and `cercano_local` work.
+- [x] Task: Test with Claude Code — verify tool discovery and `cercano_local` work.
+    - [x] Tool discovery: both `cercano_local` and `cercano_config` discovered with correct schemas.
+    - [x] Chat query: `cercano_local` returned coherent response (model: qwen3-coder).
+    - [x] Config update: `cercano_config` set local_model to GLM-4.7-Flash successfully.
+    - [x] Model switch verification: re-ran same prompt, confirmed new model in response metadata.
 - [ ] Task: Test with at least one other MCP-compatible agent (e.g., Cursor) if available.
 - [x] Task: Add error handling for common failure modes:
     - [x] gRPC server not running — actionable "connection refused" message.

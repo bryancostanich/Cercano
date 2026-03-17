@@ -56,5 +56,10 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 ---
 
+- [ ] **Track: Remote Inference — Runtime-configurable remote Ollama with model discovery and fallback**
+*Link: [./tracks/remote_inference_20260317/](./tracks/remote_inference_20260317/)*
+
+---
+
 - [ ] **Track: User-Friendly Distribution — Setup scripts, Docker packaging, and CI/CD releases**
 *Link: [./tracks/distribution_20260317/](./tracks/distribution_20260317/)*

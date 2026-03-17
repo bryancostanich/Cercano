@@ -593,9 +593,11 @@ func (x *FileChange) GetAction() FileAction {
 // Metadata about the routing and model execution.
 type RoutingMetadata struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ModelName     string                 `protobuf:"bytes,1,opt,name=model_name,json=modelName,proto3" json:"model_name,omitempty"` // Name of the model that processed the request
-	Confidence    float32                `protobuf:"fixed32,2,opt,name=confidence,proto3" json:"confidence,omitempty"`              // Confidence score for the routing decision
-	Escalated     bool                   `protobuf:"varint,3,opt,name=escalated,proto3" json:"escalated,omitempty"`                 // Whether the request was escalated to cloud
+	ModelName     string                 `protobuf:"bytes,1,opt,name=model_name,json=modelName,proto3" json:"model_name,omitempty"`     // Name of the model that processed the request
+	Confidence    float32                `protobuf:"fixed32,2,opt,name=confidence,proto3" json:"confidence,omitempty"`                  // Confidence score for the routing decision
+	Escalated     bool                   `protobuf:"varint,3,opt,name=escalated,proto3" json:"escalated,omitempty"`                     // Whether the request was escalated to cloud
+	Endpoint      string                 `protobuf:"bytes,4,opt,name=endpoint,proto3" json:"endpoint,omitempty"`                        // Active Ollama endpoint URL that served the request
+	IsFallback    bool                   `protobuf:"varint,5,opt,name=is_fallback,json=isFallback,proto3" json:"is_fallback,omitempty"` // Whether the fallback (local) endpoint was used
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -647,6 +649,20 @@ func (x *RoutingMetadata) GetConfidence() float32 {
 func (x *RoutingMetadata) GetEscalated() bool {
 	if x != nil {
 		return x.Escalated
+	}
+	return false
+}
+
+func (x *RoutingMetadata) GetEndpoint() string {
+	if x != nil {
+		return x.Endpoint
+	}
+	return ""
+}
+
+func (x *RoutingMetadata) GetIsFallback() bool {
+	if x != nil {
+		return x.IsFallback
 	}
 	return false
 }
@@ -836,14 +852,17 @@ const file_agent_proto_rawDesc = "" +
 	"FileChange\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\tR\acontent\x12)\n" +
-	"\x06action\x18\x03 \x01(\x0e2\x11.agent.FileActionR\x06action\"n\n" +
+	"\x06action\x18\x03 \x01(\x0e2\x11.agent.FileActionR\x06action\"\xab\x01\n" +
 	"\x0fRoutingMetadata\x12\x1d\n" +
 	"\n" +
 	"model_name\x18\x01 \x01(\tR\tmodelName\x12\x1e\n" +
 	"\n" +
 	"confidence\x18\x02 \x01(\x02R\n" +
 	"confidence\x12\x1c\n" +
-	"\tescalated\x18\x03 \x01(\bR\tescalated\"\x13\n" +
+	"\tescalated\x18\x03 \x01(\bR\tescalated\x12\x1a\n" +
+	"\bendpoint\x18\x04 \x01(\tR\bendpoint\x12\x1f\n" +
+	"\vis_fallback\x18\x05 \x01(\bR\n" +
+	"isFallback\"\x13\n" +
 	"\x11ListModelsRequest\"T\n" +
 	"\tModelInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +

@@ -164,6 +164,11 @@ func (s *Server) mapRequest(req *proto.ProcessRequestRequest) *agent.Request {
 	}
 }
 
+// MapResponseForTest exposes mapResponse for testing.
+func (s *Server) MapResponseForTest(response *agent.Response) *proto.ProcessRequestResponse {
+	return s.mapResponse(response)
+}
+
 func (s *Server) mapResponse(response *agent.Response) *proto.ProcessRequestResponse {
 	protoRes := &proto.ProcessRequestResponse{
 		Output: response.Output,
@@ -187,11 +192,16 @@ func (s *Server) mapResponse(response *agent.Response) *proto.ProcessRequestResp
 		}
 	}
 
-	protoRes.RoutingMetadata = &proto.RoutingMetadata{
+	rm := &proto.RoutingMetadata{
 		ModelName:  response.RoutingMetadata.ModelName,
 		Confidence: float32(response.RoutingMetadata.Confidence),
 		Escalated:  response.RoutingMetadata.Escalated,
 	}
+	if s.localProvider != nil {
+		rm.Endpoint = s.localProvider.GetActiveURL()
+		rm.IsFallback = s.localProvider.IsUsingFallback()
+	}
+	protoRes.RoutingMetadata = rm
 
 	protoRes.ValidationErrors = response.ValidationErrors
 

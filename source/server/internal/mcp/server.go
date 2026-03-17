@@ -71,12 +71,20 @@ type ConfigRequest struct {
 	OllamaURL     string `json:"ollama_url,omitempty" jsonschema:"Ollama endpoint URL (e.g. http://mac-studio.local:11434)"`
 }
 
+// ModelsRequest is the input schema for the cercano_models tool.
+type ModelsRequest struct{}
+
 // registerTools registers all Cercano MCP tools with the server.
 func (s *Server) registerTools() {
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_local",
 		Description: "Run a prompt against Cercano's local AI models (Ollama). Handles both chat-style queries and code generation. When file_path and work_dir are provided, uses an agentic generate-validate loop with automatic self-correction. Otherwise, processes the prompt as a direct LLM call. Use this to offload work to local inference — faster, private, and at zero cost.",
 	}, s.handleLocal)
+
+	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
+		Name:        "cercano_models",
+		Description: "List models available on the active Ollama instance. Returns model names, sizes, and modification dates. Useful for discovering what models are available on a remote machine before switching.",
+	}, s.handleModels)
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_config",
@@ -122,6 +130,39 @@ func (s *Server) handleLocal(ctx context.Context, request *gomcp.CallToolRequest
 	return &gomcp.CallToolResult{
 		Content: []gomcp.Content{
 			&gomcp.TextContent{Text: output},
+		},
+	}, nil, nil
+}
+
+// handleModels processes a cercano_models tool call.
+func (s *Server) handleModels(ctx context.Context, request *gomcp.CallToolRequest, args ModelsRequest) (*gomcp.CallToolResult, any, error) {
+	resp, err := s.grpcClient.ListModels(ctx, &proto.ListModelsRequest{})
+	if err != nil {
+		return nil, nil, formatGRPCError(err, "cercano_models")
+	}
+
+	if len(resp.Models) == 0 {
+		return &gomcp.CallToolResult{
+			Content: []gomcp.Content{
+				&gomcp.TextContent{Text: "No models found on the active Ollama instance."},
+			},
+		}, nil, nil
+	}
+
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("Available models (%d):\n\n", len(resp.Models)))
+	for _, m := range resp.Models {
+		sizeMB := float64(m.Size) / 1_000_000
+		sizeStr := fmt.Sprintf("%.0f MB", sizeMB)
+		if sizeMB >= 1000 {
+			sizeStr = fmt.Sprintf("%.1f GB", sizeMB/1000)
+		}
+		output.WriteString(fmt.Sprintf("- %s (%s, modified: %s)\n", m.Name, sizeStr, m.ModifiedAt))
+	}
+
+	return &gomcp.CallToolResult{
+		Content: []gomcp.Content{
+			&gomcp.TextContent{Text: output.String()},
 		},
 	}, nil, nil
 }

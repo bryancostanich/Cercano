@@ -18,6 +18,8 @@ type mockAgentClient struct {
 	configResp     *proto.UpdateConfigResponse
 	configErr      error
 	lastConfigReq  *proto.UpdateConfigRequest
+	modelsResp     *proto.ListModelsResponse
+	modelsErr      error
 }
 
 func (m *mockAgentClient) ProcessRequest(ctx context.Context, in *proto.ProcessRequestRequest, opts ...grpc.CallOption) (*proto.ProcessRequestResponse, error) {
@@ -27,6 +29,13 @@ func (m *mockAgentClient) ProcessRequest(ctx context.Context, in *proto.ProcessR
 
 func (m *mockAgentClient) StreamProcessRequest(ctx context.Context, in *proto.ProcessRequestRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[proto.StreamProcessResponse], error) {
 	return nil, nil
+}
+
+func (m *mockAgentClient) ListModels(ctx context.Context, in *proto.ListModelsRequest, opts ...grpc.CallOption) (*proto.ListModelsResponse, error) {
+	if m.modelsResp != nil {
+		return m.modelsResp, m.modelsErr
+	}
+	return &proto.ListModelsResponse{}, m.modelsErr
 }
 
 func (m *mockAgentClient) UpdateConfig(ctx context.Context, in *proto.UpdateConfigRequest, opts ...grpc.CallOption) (*proto.UpdateConfigResponse, error) {
@@ -374,6 +383,83 @@ func TestCercanoConfig_SetCloudProvider(t *testing.T) {
 	if mock.lastConfigReq.CloudModel != "gemini-1.5-flash" {
 		t.Errorf("expected cloud_model 'gemini-1.5-flash', got %q", mock.lastConfigReq.CloudModel)
 	}
+}
+
+func TestCercanoModels_ListModels(t *testing.T) {
+	mock := &mockAgentClient{
+		modelsResp: &proto.ListModelsResponse{
+			Models: []*proto.ModelInfo{
+				{Name: "qwen3-coder:latest", Size: 4700000000, ModifiedAt: "2026-03-15T10:30:00Z"},
+				{Name: "llama3:latest", Size: 8100000000, ModifiedAt: "2026-03-14T09:00:00Z"},
+			},
+		},
+	}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name:      "cercano_models",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if text == "" {
+		t.Error("expected non-empty response")
+	}
+	// Should contain model names
+	if !contains(text, "qwen3-coder") {
+		t.Errorf("expected response to contain 'qwen3-coder', got %q", text)
+	}
+	if !contains(text, "llama3") {
+		t.Errorf("expected response to contain 'llama3', got %q", text)
+	}
+}
+
+func TestNewServer_RegistersModelsTool(t *testing.T) {
+	mock := &mockAgentClient{}
+	s := NewServer(mock)
+
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	ctx := context.Background()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	found := false
+	for tool, err := range cs.Tools(ctx, nil) {
+		if err != nil {
+			t.Fatalf("listing tools failed: %v", err)
+		}
+		if tool.Name == "cercano_models" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected cercano_models tool to be registered")
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
+}
+
+func containsHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCercanoConfig_SetOllamaURL(t *testing.T) {

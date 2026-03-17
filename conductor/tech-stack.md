@@ -9,6 +9,7 @@ This document outlines the core technologies used in the project.
 
 ## 2. Communication Frameworks
 *   **gRPC** - Used for high-performance, contract-first communication between the core Go application and the IDE abstraction layer.
+*   **MCP (Model Context Protocol)** - Used to expose Cercano's local inference capabilities as tools for cloud-based agents. Official Go SDK: `modelcontextprotocol/go-sdk` v1.x. (2026-03-17)
 
 ## 3. IDE Integration
 *   **VS Code API** - Sidebar Chat Interface (Webview) and WorkspaceEdit API for safe code application.

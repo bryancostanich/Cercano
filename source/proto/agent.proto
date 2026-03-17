@@ -89,6 +89,8 @@ message RoutingMetadata {
   string model_name = 1; // Name of the model that processed the request
   float confidence = 2;  // Confidence score for the routing decision
   bool escalated = 3;   // Whether the request was escalated to cloud
+  string endpoint = 4;  // Active Ollama endpoint URL that served the request
+  bool is_fallback = 5; // Whether the fallback (local) endpoint was used
 }
 
 // Request to list available models on the active Ollama instance.

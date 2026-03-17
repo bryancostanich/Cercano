@@ -14,17 +14,22 @@ import (
 )
 
 type OllamaProvider struct {
-	mu        sync.RWMutex
-	ModelName string
-	BaseURL   string
-	Client    *http.Client
+	mu          sync.RWMutex
+	ModelName   string
+	BaseURL     string // primary URL (what the user configured)
+	fallbackURL string // always the initial local URL
+	activeURL   string // the URL currently being used for requests
+	usingFallback bool
+	Client      *http.Client
 }
 
 func NewOllamaProvider(modelName, baseURL string) *OllamaProvider {
 	return &OllamaProvider{
-		ModelName: modelName,
-		BaseURL:   baseURL,
-		Client:    http.DefaultClient,
+		ModelName:   modelName,
+		BaseURL:     baseURL,
+		fallbackURL: baseURL,
+		activeURL:   baseURL,
+		Client:      http.DefaultClient,
 	}
 }
 
@@ -42,17 +47,51 @@ func (p *OllamaProvider) Name() string {
 }
 
 // SetBaseURL updates the Ollama endpoint URL at runtime (thread-safe).
+// When a remote URL is set, it becomes the primary and the original local URL
+// becomes the fallback. The active URL is set to the new primary.
 func (p *OllamaProvider) SetBaseURL(url string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.BaseURL = url
+	p.activeURL = url
+	p.usingFallback = false
 }
 
-// GetBaseURL returns the current Ollama endpoint URL (thread-safe).
+// GetBaseURL returns the primary (configured) Ollama endpoint URL (thread-safe).
 func (p *OllamaProvider) GetBaseURL() string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.BaseURL
+}
+
+// GetActiveURL returns the URL currently being used for requests (thread-safe).
+func (p *OllamaProvider) GetActiveURL() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.activeURL
+}
+
+// IsUsingFallback returns true if requests are currently routed to the fallback URL.
+func (p *OllamaProvider) IsUsingFallback() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.usingFallback
+}
+
+// SwitchToFallback routes all requests to the fallback (local) URL.
+func (p *OllamaProvider) SwitchToFallback() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.activeURL = p.fallbackURL
+	p.usingFallback = true
+}
+
+// SwitchToPrimary routes all requests back to the primary URL.
+func (p *OllamaProvider) SwitchToPrimary() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.activeURL = p.BaseURL
+	p.usingFallback = false
 }
 
 // ModelInfo represents a model available on the Ollama instance.
@@ -69,10 +108,10 @@ type tagsResponse struct {
 // ListModels queries the Ollama instance for available models via GET /api/tags.
 func (p *OllamaProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	p.mu.RLock()
-	baseURL := p.BaseURL
+	activeURL := p.activeURL
 	p.mu.RUnlock()
 
-	url := fmt.Sprintf("%s/api/tags", baseURL)
+	url := fmt.Sprintf("%s/api/tags", activeURL)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -112,10 +151,10 @@ type generateResponse struct {
 func (p *OllamaProvider) Process(ctx context.Context, req *agent.Request) (*agent.Response, error) {
 	p.mu.RLock()
 	modelName := p.ModelName
-	baseURL := p.BaseURL
+	activeURL := p.activeURL
 	p.mu.RUnlock()
 
-	url := fmt.Sprintf("%s/api/generate", baseURL)
+	url := fmt.Sprintf("%s/api/generate", activeURL)
 
 	payload := generateRequest{
 		Model:  modelName,
@@ -158,10 +197,10 @@ func (p *OllamaProvider) Process(ctx context.Context, req *agent.Request) (*agen
 func (p *OllamaProvider) ProcessStream(ctx context.Context, req *agent.Request, onToken agent.TokenFunc) (*agent.Response, error) {
 	p.mu.RLock()
 	modelName := p.ModelName
-	baseURL := p.BaseURL
+	activeURL := p.activeURL
 	p.mu.RUnlock()
 
-	url := fmt.Sprintf("%s/api/generate", baseURL)
+	url := fmt.Sprintf("%s/api/generate", activeURL)
 
 	payload := generateRequest{
 		Model:  modelName,

@@ -55,6 +55,49 @@ func (p *OllamaProvider) GetBaseURL() string {
 	return p.BaseURL
 }
 
+// ModelInfo represents a model available on the Ollama instance.
+type ModelInfo struct {
+	Name       string `json:"name"`
+	Size       int64  `json:"size"`
+	ModifiedAt string `json:"modified_at"`
+}
+
+type tagsResponse struct {
+	Models []ModelInfo `json:"models"`
+}
+
+// ListModels queries the Ollama instance for available models via GET /api/tags.
+func (p *OllamaProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
+	p.mu.RLock()
+	baseURL := p.BaseURL
+	p.mu.RUnlock()
+
+	url := fmt.Sprintf("%s/api/tags", baseURL)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := p.Client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call Ollama: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := ioutil.ReadAll(resp.Body)
+		return nil, fmt.Errorf("ollama error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var tags tagsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tags); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return tags.Models, nil
+}
+
 type generateRequest struct {
 	Model  string `json:"model"`
 	Prompt string `json:"prompt"`

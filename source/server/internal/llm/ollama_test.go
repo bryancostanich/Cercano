@@ -153,6 +153,80 @@ func TestOllamaProvider_SetBaseURL_ConcurrentAccess(t *testing.T) {
 	// If we get here without a race detector panic, the test passes
 }
 
+func TestOllamaProvider_ListModels(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			t.Errorf("Expected GET request, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/tags" {
+			t.Errorf("Expected path /api/tags, got %s", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"models": []map[string]interface{}{
+				{
+					"name":        "qwen3-coder:latest",
+					"size":        4700000000,
+					"modified_at": "2026-03-15T10:30:00Z",
+				},
+				{
+					"name":        "nomic-embed-text:latest",
+					"size":        274000000,
+					"modified_at": "2026-03-10T08:00:00Z",
+				},
+			},
+		})
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	provider := NewOllamaProvider("test-model", server.URL)
+
+	models, err := provider.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels failed: %v", err)
+	}
+
+	if len(models) != 2 {
+		t.Fatalf("Expected 2 models, got %d", len(models))
+	}
+
+	if models[0].Name != "qwen3-coder:latest" {
+		t.Errorf("Expected first model 'qwen3-coder:latest', got %q", models[0].Name)
+	}
+	if models[0].Size != 4700000000 {
+		t.Errorf("Expected size 4700000000, got %d", models[0].Size)
+	}
+	if models[1].Name != "nomic-embed-text:latest" {
+		t.Errorf("Expected second model 'nomic-embed-text:latest', got %q", models[1].Name)
+	}
+}
+
+func TestOllamaProvider_ListModels_Error(t *testing.T) {
+	// Server that returns an error
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("internal error"))
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	provider := NewOllamaProvider("test-model", server.URL)
+
+	_, err := provider.ListModels(context.Background())
+	if err == nil {
+		t.Error("Expected error for 500 response, got nil")
+	}
+}
+
+func TestOllamaProvider_ListModels_Unreachable(t *testing.T) {
+	provider := NewOllamaProvider("test-model", "http://localhost:1")
+
+	_, err := provider.ListModels(context.Background())
+	if err == nil {
+		t.Error("Expected error for unreachable server, got nil")
+	}
+}
+
 func TestOllamaProvider_Process(t *testing.T) {
 	// Mock Ollama Server
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

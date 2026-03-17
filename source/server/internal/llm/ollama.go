@@ -41,6 +41,20 @@ func (p *OllamaProvider) Name() string {
 	return p.ModelName
 }
 
+// SetBaseURL updates the Ollama endpoint URL at runtime (thread-safe).
+func (p *OllamaProvider) SetBaseURL(url string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.BaseURL = url
+}
+
+// GetBaseURL returns the current Ollama endpoint URL (thread-safe).
+func (p *OllamaProvider) GetBaseURL() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.BaseURL
+}
+
 type generateRequest struct {
 	Model  string `json:"model"`
 	Prompt string `json:"prompt"`
@@ -55,9 +69,10 @@ type generateResponse struct {
 func (p *OllamaProvider) Process(ctx context.Context, req *agent.Request) (*agent.Response, error) {
 	p.mu.RLock()
 	modelName := p.ModelName
+	baseURL := p.BaseURL
 	p.mu.RUnlock()
 
-	url := fmt.Sprintf("%s/api/generate", p.BaseURL)
+	url := fmt.Sprintf("%s/api/generate", baseURL)
 
 	payload := generateRequest{
 		Model:  modelName,
@@ -100,9 +115,10 @@ func (p *OllamaProvider) Process(ctx context.Context, req *agent.Request) (*agen
 func (p *OllamaProvider) ProcessStream(ctx context.Context, req *agent.Request, onToken agent.TokenFunc) (*agent.Response, error) {
 	p.mu.RLock()
 	modelName := p.ModelName
+	baseURL := p.BaseURL
 	p.mu.RUnlock()
 
-	url := fmt.Sprintf("%s/api/generate", p.BaseURL)
+	url := fmt.Sprintf("%s/api/generate", baseURL)
 
 	payload := generateRequest{
 		Model:  modelName,

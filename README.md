@@ -132,10 +132,68 @@ The following settings are available under `cercano.*` in VS Code Settings:
 | `cercano.provider` | `local` | Cloud provider for escalation (`google` or `anthropic`) |
 | `cercano.model` | *(empty)* | Override cloud model name |
 
+## MCP Server
+
+Cercano can be used as an MCP (Model Context Protocol) server, allowing cloud-based agents like Claude Code and Cursor to delegate work to local models — faster, private, and at zero cost.
+
+### Setup
+
+1. Build the MCP server:
+   ```bash
+   cd source/server
+   make mcp
+   ```
+
+2. Add to Claude Code (choose one):
+
+   **Via CLI:**
+   ```bash
+   claude mcp add --transport stdio cercano -- /path/to/Cercano/source/server/bin/cercano-mcp --grpc-addr localhost:50052
+   ```
+
+   **Via `.mcp.json` (project scope):**
+   ```json
+   {
+     "mcpServers": {
+       "cercano": {
+         "type": "stdio",
+         "command": "/path/to/Cercano/source/server/bin/cercano-mcp",
+         "args": ["--grpc-addr", "localhost:50052"]
+       }
+     }
+   }
+   ```
+
+3. Ensure the Cercano gRPC server is running:
+   ```bash
+   cd source/server
+   make agent && bin/agent
+   ```
+
+### MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `cercano_local` | Run any prompt against local models. When `file_path` and `work_dir` are provided, uses the agentic generate-validate loop. Otherwise, processes as a direct LLM call. |
+| `cercano_config` | Update runtime configuration (local model, cloud provider/model) without restarting the server. |
+
+### Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--grpc-addr` | `localhost:50052` | Address of the Cercano gRPC server |
+
 ## Development
 
 Cercano is in active development. For detailed information on the project's goals and technical decisions, refer to the documents in the `conductor/` directory.
 
+### Building
+
+```bash
+cd source/server
+make all    # Build both agent and MCP server
+make test   # Run all tests
+```
 
 ## Feature TODOs
 

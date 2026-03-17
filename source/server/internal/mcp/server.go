@@ -3,11 +3,27 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"cercano/source/server/pkg/proto"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// formatGRPCError wraps gRPC errors with actionable diagnostic messages.
+func formatGRPCError(err error, operation string) error {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "connection refused"):
+		return fmt.Errorf("%s: connection refused. Is the Cercano gRPC server running? Start it with: cd source/server && make agent && bin/agent", operation)
+	case strings.Contains(msg, "unavailable"):
+		return fmt.Errorf("%s: server unavailable. The Cercano gRPC server may not be running or may be starting up", operation)
+	case strings.Contains(msg, "Ollama") || strings.Contains(msg, "ollama"):
+		return fmt.Errorf("%s: Ollama error. Is Ollama running? Start it with: ollama serve", operation)
+	default:
+		return fmt.Errorf("%s: %w", operation, err)
+	}
+}
 
 // Server wraps the MCP server and its gRPC client connection to the Cercano agent.
 type Server struct {
@@ -81,7 +97,7 @@ func (s *Server) handleLocal(ctx context.Context, request *gomcp.CallToolRequest
 		ConversationId: args.ConversationID,
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("gRPC call failed: %w", err)
+		return nil, nil, formatGRPCError(err, "cercano_local")
 	}
 
 	output := resp.Output
@@ -119,7 +135,7 @@ func (s *Server) handleConfig(ctx context.Context, request *gomcp.CallToolReques
 			CloudModel:    args.CloudModel,
 		})
 		if err != nil {
-			return nil, nil, fmt.Errorf("gRPC UpdateConfig failed: %w", err)
+			return nil, nil, formatGRPCError(err, "cercano_config")
 		}
 
 		status := "success"

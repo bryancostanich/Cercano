@@ -88,6 +88,25 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	}, nil
 }
 
+// ListModels implements proto.AgentServer — returns available models from the active Ollama instance.
+func (s *Server) ListModels(ctx context.Context, req *proto.ListModelsRequest) (*proto.ListModelsResponse, error) {
+	models, err := s.localProvider.ListModels(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list models: %w", err)
+	}
+
+	protoModels := make([]*proto.ModelInfo, len(models))
+	for i, m := range models {
+		protoModels[i] = &proto.ModelInfo{
+			Name:       m.Name,
+			Size:       m.Size,
+			ModifiedAt: m.ModifiedAt,
+		}
+	}
+
+	return &proto.ListModelsResponse{Models: protoModels}, nil
+}
+
 // ProcessRequest implements proto.AgentServer (Unary).
 func (s *Server) ProcessRequest(ctx context.Context, req *proto.ProcessRequestRequest) (*proto.ProcessRequestResponse, error) {
 	fmt.Printf("Received request (Unary): %s\n", req.Input)

@@ -14,6 +14,9 @@ service Agent {
 
   // UpdateConfig updates runtime configuration (model, provider) without server restart.
   rpc UpdateConfig (UpdateConfigRequest) returns (UpdateConfigResponse) {}
+
+  // ListModels returns the models available on the active Ollama instance.
+  rpc ListModels (ListModelsRequest) returns (ListModelsResponse) {}
 }
 
 // Incremental token from LLM streaming.
@@ -86,4 +89,19 @@ message RoutingMetadata {
   string model_name = 1; // Name of the model that processed the request
   float confidence = 2;  // Confidence score for the routing decision
   bool escalated = 3;   // Whether the request was escalated to cloud
+}
+
+// Request to list available models on the active Ollama instance.
+message ListModelsRequest {}
+
+// A single model available on an Ollama instance.
+message ModelInfo {
+  string name = 1;        // Model name (e.g., "qwen3-coder:latest")
+  int64 size = 2;         // Model size in bytes
+  string modified_at = 3; // Last modified timestamp
+}
+
+// Response containing available models.
+message ListModelsResponse {
+  repeated ModelInfo models = 1;
 }

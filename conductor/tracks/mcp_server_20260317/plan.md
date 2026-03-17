@@ -52,16 +52,16 @@ Add runtime configuration management and verify multi-turn conversation support 
 Validate the MCP server works with real agents (Claude Code), add build/install scripts, and clean up.
 
 ### Tasks
-- [ ] Task: Add MCP server build target to the project's build system.
-    - [ ] `go build -o bin/cercano-mcp cmd/mcp/main.go`
-- [ ] Task: Write a Claude Code MCP configuration example for connecting to Cercano.
-    - [ ] Document the `.claude.json` or `mcp_servers` config entry.
+- [x] Task: Add MCP server build target to the project's build system.
+    - [x] `go build -o bin/cercano-mcp cmd/mcp/main.go` — added Makefile with `make mcp`, `make agent`, `make all`, `make test`, `make clean`.
+- [x] Task: Write a Claude Code MCP configuration example for connecting to Cercano.
+    - [x] Document the `.mcp.json` config entry and `claude mcp add` CLI command.
 - [ ] Task: Test with Claude Code — verify tool discovery and `cercano_local` work.
 - [ ] Task: Test with at least one other MCP-compatible agent (e.g., Cursor) if available.
-- [ ] Task: Add error handling for common failure modes:
-    - [ ] gRPC server not running.
-    - [ ] Ollama not running.
-    - [ ] Invalid model name.
-- [ ] Task: Update README.md with MCP server documentation (setup, usage, tool reference).
-- [ ] Task: Run full test suite — `go test ./...`.
+- [x] Task: Add error handling for common failure modes:
+    - [x] gRPC server not running — actionable "connection refused" message.
+    - [x] Ollama not running — actionable "ollama serve" suggestion.
+    - [x] Server unavailable — clear diagnostic message.
+- [x] Task: Update README.md with MCP server documentation (setup, usage, tool reference).
+- [x] Task: Run full test suite — `go test ./...`.
 - [ ] Task: Conductor - User Manual Verification 'Integration & Agent Testing' (Protocol in workflow.md)

@@ -10,6 +10,7 @@ By combining the speed of local models with the power of cloud-based AI, Cercano
 - **Local-First Architecture** - Utilizes [Ollama](https://ollama.com/) to run powerful open-source models (like qwen3-coder, GLM4.7-Flash, etc.) locally on your machine.
 - **Cloud Fallback** - Seamlessly integrates with Google Gemini and Anthropic Claude for complex tasks that exceed local model capabilities.
 - **Agentic Self-Correction** - An iterative loop that automatically validates generated code (e.g., via compilation) and requests fixes if errors are detected.
+- **Remote Inference** - Point Cercano at a remote Ollama instance (e.g., a Mac Studio on your LAN) for access to larger models. Runtime-configurable with automatic fallback to local if the remote goes down, plus model discovery to see what's available on the remote machine.
 - **MCP Server** - Expose Cercano as an [MCP](https://modelcontextprotocol.io/) server, allowing cloud-based agents like Claude Code and Cursor to delegate work to local models — faster, private, and at zero cost. Supports chat queries, agentic code generation, runtime model switching, and multi-turn conversations.
 - **IDE Integration** - Decoupled gRPC-based architecture allows for integration into modern IDEs like VS Code and Zed.
 
@@ -176,7 +177,8 @@ Cercano can be used as an MCP (Model Context Protocol) server, allowing cloud-ba
 | Tool | Description |
 |------|-------------|
 | `cercano_local` | Run any prompt against local models. When `file_path` and `work_dir` are provided, uses the agentic generate-validate loop. Otherwise, processes as a direct LLM call. |
-| `cercano_config` | Update runtime configuration (local model, cloud provider/model) without restarting the server. |
+| `cercano_models` | List models available on the active Ollama instance. Returns model names, sizes, and modification dates. Useful for discovering models on a remote machine. |
+| `cercano_config` | Update runtime configuration (local model, Ollama endpoint URL, cloud provider/model) without restarting the server. |
 
 ### Usage Examples
 
@@ -205,6 +207,20 @@ cercano_local(
 → Generated code with automatic build validation and self-correction.
 ```
 
+**Point at a remote Ollama instance:**
+```
+cercano_config(action: "set", ollama_url: "http://mac-studio.local:11434")
+→ Configuration update success: updated: [ollama_url=http://mac-studio.local:11434]
+```
+
+**Discover available models:**
+```
+cercano_models()
+→ Available models (2):
+  - qwen3-coder:latest (4.7 GB)
+  - llama3:70b (39.1 GB)
+```
+
 **Multi-turn conversation:**
 ```
 cercano_local(prompt: "Explain the SmartRouter", conversation_id: "abc123")
@@ -224,6 +240,55 @@ cercano_local(prompt: "How does it handle escalation?", conversation_id: "abc123
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--grpc-addr` | `localhost:50052` | Address of the Cercano gRPC server |
+
+## Remote Inference
+
+Cercano can delegate inference to a remote Ollama instance — for example, a Mac Studio on your LAN with more GPU memory and larger models. The remote endpoint is runtime-configurable with automatic fallback to local Ollama if the remote goes down.
+
+### Setup
+
+1. Ensure Ollama is running on the remote machine and accessible over the network:
+   ```bash
+   # On the remote machine (e.g., mac-studio.local)
+   OLLAMA_HOST=0.0.0.0 ollama serve
+   ```
+
+2. Point Cercano at the remote instance:
+
+   **Via environment variable (at startup):**
+   ```bash
+   OLLAMA_URL=http://mac-studio.local:11434 bin/agent
+   ```
+
+   **Via MCP at runtime (no restart needed):**
+   ```
+   cercano_config(action: "set", ollama_url: "http://mac-studio.local:11434")
+   ```
+
+3. Discover available models on the remote machine:
+   ```
+   cercano_models()
+   → Available models (3):
+   - qwen3-coder:latest (4.7 GB, modified: 2026-03-15T10:30:00Z)
+   - llama3:70b (39.1 GB, modified: 2026-03-14T09:00:00Z)
+   - deepseek-coder-v2:latest (8.9 GB, modified: 2026-03-13T14:00:00Z)
+   ```
+
+4. Switch to a model that's only available on the remote:
+   ```
+   cercano_config(action: "set", local_model: "llama3:70b")
+   ```
+
+### Fallback Behavior
+
+When a remote endpoint is configured, Cercano monitors it with periodic health checks:
+
+- Pings the remote every 30 seconds via `GET /api/tags`
+- After 3 consecutive failures, automatically switches to local Ollama
+- When the remote recovers, automatically switches back
+- Response metadata includes `[Endpoint: url]` or `[Endpoint: url (fallback)]` so you always know which instance served the request
+
+No configuration is needed — fallback is automatic whenever a remote URL is set.
 
 ## Development
 
@@ -252,5 +317,4 @@ make test   # Run all tests
 * **User-Friendly Distribution** - Setup/launch scripts for quick onboarding, Docker containerization for one-command deployment, and a CI/CD pipeline with GitHub Actions for automated releases (cross-platform binaries and Docker images on tagged commits).
 * **Add Gemma Support** - Add Google's Gemma models to the supported local model list for Ollama.
 * **Agent Skills & Tool Use** - Adopt the [Agent Skills](https://agentskills.io) open standard to codify Cercano's tool use capabilities. Agent Skills is a portable, file-based format (SKILL.md) for giving agents discoverable capabilities, supported by 25+ agent products including Claude Code, Cursor, Copilot, and Codex. Cercano should support skills as both a consumer (discover and activate community/enterprise skills) and a provider (package Cercano's local inference capabilities as skills other agents can use). Includes a comprehensive audit of agent features across the landscape — both open source (Codex, Aider, Continue, Cody, OpenHands, SWE-Agent) and closed source (Claude Code, Cursor, Windsurf, GitHub Copilot, JetBrains AI) — to produce a feature matrix reference document informing capability decisions. This track should also revisit the MCP tool surface design — evaluate whether a single flexible tool (`cercano_local`) is sufficient or whether specialized tools (review, summarize, refactor, etc.) provide better agent ergonomics informed by the Agent Skills model and real-world usage patterns.
-* **Remote/External Inference** - Support running inference on remote machines (e.g., Ollama on a LAN Mac Studio) and external AI accelerators (e.g., tiiny.ai). The Ollama URL is already configurable, but this feature would make remote inference robust and first-class, with service discovery and hardware-aware routing.
 * **AI Engine Agnosticism** - Abstract the local inference layer so Cercano is not coupled to Ollama. Support pluggable inference backends including ONNX Runtime, Enso, and other popular AI engines, allowing users to choose the runtime best suited to their hardware and models.

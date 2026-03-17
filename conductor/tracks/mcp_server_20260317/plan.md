@@ -27,7 +27,7 @@ Implement a single flexible tool that runs any prompt against local models via t
     - [x] Return output text, file changes (if any), validation errors (if any), routing metadata.
     - [x] Red phase: Write tests against a mock gRPC client.
     - [x] Green phase: Implement and pass.
-- [ ] Task: Test end-to-end with a running Cercano gRPC server (both chat-style and code generation queries).
+- [x] Task: Test end-to-end with a running Cercano gRPC server (both chat-style and code generation queries).
 - [ ] Task: Conductor - User Manual Verification 'Core Tool — cercano_local' (Protocol in workflow.md)
 
 ## Phase 3: Configuration Tool & Multi-Turn Support

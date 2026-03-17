@@ -6,13 +6,13 @@
 Add the MCP SDK dependency, establish the package structure, and implement a minimal MCP server that starts and responds to the initialize handshake.
 
 ### Tasks
-- [ ] Task: Evaluate and select Go MCP SDK (e.g., `mcp-go` from mark3labs or the reference implementation). Add to `go.mod`.
-- [ ] Task: Create `internal/mcp/` package with `server.go` skeleton.
-- [ ] Task: Create `cmd/mcp/main.go` entry point that starts the MCP server on stdio.
-    - [ ] Accept `--grpc-addr` flag (default: `localhost:50052`).
-    - [ ] Initialize gRPC client connection to Cercano server.
-    - [ ] Start MCP server with stdio transport.
-- [ ] Task: Verify the MCP server starts, responds to `initialize`, and advertises an empty tool list.
+- [x] Task: Evaluate and select Go MCP SDK. Selected `modelcontextprotocol/go-sdk` v1.4.1 (official SDK, stable v1.x, maintained by MCP org + Google). Added to `go.mod`.
+- [x] Task: Create `internal/mcp/` package with `server.go` skeleton.
+- [x] Task: Create `cmd/mcp/main.go` entry point that starts the MCP server on stdio.
+    - [x] Accept `--grpc-addr` flag (default: `localhost:50052`).
+    - [x] Initialize gRPC client connection to Cercano server.
+    - [x] Start MCP server with stdio transport.
+- [x] Task: Verify the MCP server starts, responds to `initialize`, and advertises an empty tool list.
 - [ ] Task: Conductor - User Manual Verification 'MCP SDK & Package Setup' (Protocol in workflow.md)
 
 ## Phase 2: Core Tools — Generate & Chat

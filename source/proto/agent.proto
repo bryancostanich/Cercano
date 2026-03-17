@@ -50,6 +50,7 @@ message UpdateConfigRequest {
   string cloud_provider = 2; // Cloud provider name (e.g., "google", "anthropic")
   string cloud_model = 3;    // Cloud model name (e.g., "gemini-1.5-flash", "claude-3-opus")
   string cloud_api_key = 4;  // API key for the cloud provider
+  string ollama_url = 5;     // Ollama endpoint URL (e.g., "http://mac-studio.local:11434")
 }
 
 // Runtime configuration update response.

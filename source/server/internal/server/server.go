@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"net/url"
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/llm"
@@ -34,6 +35,19 @@ func NewServer(a *agent.Agent, localProvider *llm.OllamaProvider, router *agent.
 // UpdateConfig implements proto.AgentServer — updates runtime config without restart.
 func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigRequest) (*proto.UpdateConfigResponse, error) {
 	var changes []string
+
+	if req.OllamaUrl != "" {
+		u, err := url.ParseRequestURI(req.OllamaUrl)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid ollama_url %q: must be a valid http:// or https:// URL", req.OllamaUrl),
+			}, nil
+		}
+		s.localProvider.SetBaseURL(req.OllamaUrl)
+		changes = append(changes, fmt.Sprintf("ollama_url=%s", req.OllamaUrl))
+		fmt.Printf("UpdateConfig: Ollama URL set to %s\n", req.OllamaUrl)
+	}
 
 	if req.LocalModel != "" {
 		s.localProvider.SetModelName(req.LocalModel)

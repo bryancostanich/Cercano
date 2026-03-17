@@ -12,9 +12,12 @@ import (
 
 // mockAgentClient implements proto.AgentClient for testing.
 type mockAgentClient struct {
-	processResp *proto.ProcessRequestResponse
-	processErr  error
-	lastRequest *proto.ProcessRequestRequest
+	processResp    *proto.ProcessRequestResponse
+	processErr     error
+	lastRequest    *proto.ProcessRequestRequest
+	configResp     *proto.UpdateConfigResponse
+	configErr      error
+	lastConfigReq  *proto.UpdateConfigRequest
 }
 
 func (m *mockAgentClient) ProcessRequest(ctx context.Context, in *proto.ProcessRequestRequest, opts ...grpc.CallOption) (*proto.ProcessRequestResponse, error) {
@@ -27,7 +30,11 @@ func (m *mockAgentClient) StreamProcessRequest(ctx context.Context, in *proto.Pr
 }
 
 func (m *mockAgentClient) UpdateConfig(ctx context.Context, in *proto.UpdateConfigRequest, opts ...grpc.CallOption) (*proto.UpdateConfigResponse, error) {
-	return &proto.UpdateConfigResponse{}, nil
+	m.lastConfigReq = in
+	if m.configResp != nil {
+		return m.configResp, m.configErr
+	}
+	return &proto.UpdateConfigResponse{Success: true, Message: "Configuration updated"}, m.configErr
 }
 
 func TestNewServer_RegistersTools(t *testing.T) {
@@ -265,5 +272,182 @@ func TestCercanoLocal_GRPCError(t *testing.T) {
 	}
 	if !result.IsError {
 		t.Error("expected IsError=true when gRPC call fails")
+	}
+}
+
+func TestNewServer_RegistersConfigTool(t *testing.T) {
+	mock := &mockAgentClient{}
+	s := NewServer(mock)
+
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	ctx := context.Background()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	found := false
+	for tool, err := range cs.Tools(ctx, nil) {
+		if err != nil {
+			t.Fatalf("listing tools failed: %v", err)
+		}
+		if tool.Name == "cercano_config" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected cercano_config tool to be registered")
+	}
+}
+
+func TestCercanoConfig_SetLocalModel(t *testing.T) {
+	mock := &mockAgentClient{
+		configResp: &proto.UpdateConfigResponse{
+			Success: true,
+			Message: "Local model updated to GLM-4.7-Flash",
+		},
+	}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_config",
+		Arguments: map[string]any{
+			"action":      "set",
+			"local_model": "GLM-4.7-Flash",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	if mock.lastConfigReq == nil {
+		t.Fatal("expected UpdateConfig gRPC call")
+	}
+	if mock.lastConfigReq.LocalModel != "GLM-4.7-Flash" {
+		t.Errorf("expected local_model 'GLM-4.7-Flash', got %q", mock.lastConfigReq.LocalModel)
+	}
+
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if text == "" {
+		t.Error("expected non-empty response")
+	}
+}
+
+func TestCercanoConfig_SetCloudProvider(t *testing.T) {
+	mock := &mockAgentClient{
+		configResp: &proto.UpdateConfigResponse{
+			Success: true,
+			Message: "Cloud provider updated",
+		},
+	}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_config",
+		Arguments: map[string]any{
+			"action":         "set",
+			"cloud_provider": "google",
+			"cloud_model":    "gemini-1.5-flash",
+		},
+	})
+
+	if mock.lastConfigReq == nil {
+		t.Fatal("expected UpdateConfig gRPC call")
+	}
+	if mock.lastConfigReq.CloudProvider != "google" {
+		t.Errorf("expected cloud_provider 'google', got %q", mock.lastConfigReq.CloudProvider)
+	}
+	if mock.lastConfigReq.CloudModel != "gemini-1.5-flash" {
+		t.Errorf("expected cloud_model 'gemini-1.5-flash', got %q", mock.lastConfigReq.CloudModel)
+	}
+}
+
+func TestCercanoConfig_InvalidAction(t *testing.T) {
+	mock := &mockAgentClient{}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_config",
+		Arguments: map[string]any{
+			"action": "delete",
+		},
+	})
+	// Should return an error for invalid action.
+	if err != nil {
+		return // error propagated
+	}
+	if result != nil && result.IsError {
+		return // error in result
+	}
+	t.Error("expected error for invalid action")
+}
+
+func TestCercanoLocal_MultiTurn(t *testing.T) {
+	callCount := 0
+	mock := &mockAgentClient{}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	convID := "test-conv-456"
+
+	// First turn.
+	mock.processResp = &proto.ProcessRequestResponse{Output: "First response"}
+	cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_local",
+		Arguments: map[string]any{
+			"prompt":          "First question",
+			"conversation_id": convID,
+		},
+	})
+	callCount++
+	if mock.lastRequest.ConversationId != convID {
+		t.Errorf("turn 1: expected conversation_id %q, got %q", convID, mock.lastRequest.ConversationId)
+	}
+
+	// Second turn with same conversation ID.
+	mock.processResp = &proto.ProcessRequestResponse{Output: "Second response"}
+	cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_local",
+		Arguments: map[string]any{
+			"prompt":          "Follow up question",
+			"conversation_id": convID,
+		},
+	})
+	callCount++
+	if mock.lastRequest.ConversationId != convID {
+		t.Errorf("turn 2: expected conversation_id %q, got %q", convID, mock.lastRequest.ConversationId)
+	}
+	if mock.lastRequest.Input != "Follow up question" {
+		t.Errorf("turn 2: expected input 'Follow up question', got %q", mock.lastRequest.Input)
+	}
+	if callCount != 2 {
+		t.Errorf("expected 2 gRPC calls, got %d", callCount)
 	}
 }

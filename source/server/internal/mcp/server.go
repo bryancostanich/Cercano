@@ -60,6 +60,11 @@ func (s *Server) registerTools() {
 		Name:        "cercano_local",
 		Description: "Run a prompt against Cercano's local AI models (Ollama). Handles both chat-style queries and code generation. When file_path and work_dir are provided, uses an agentic generate-validate loop with automatic self-correction. Otherwise, processes the prompt as a direct LLM call. Use this to offload work to local inference — faster, private, and at zero cost.",
 	}, s.handleLocal)
+
+	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
+		Name:        "cercano_config",
+		Description: "Query or update Cercano's runtime configuration. Use action 'set' to change the local model, cloud provider, or cloud model without restarting the server.",
+	}, s.handleConfig)
 }
 
 // handleLocal processes a cercano_local tool call.
@@ -102,4 +107,34 @@ func (s *Server) handleLocal(ctx context.Context, request *gomcp.CallToolRequest
 			&gomcp.TextContent{Text: output},
 		},
 	}, nil, nil
+}
+
+// handleConfig processes a cercano_config tool call.
+func (s *Server) handleConfig(ctx context.Context, request *gomcp.CallToolRequest, args ConfigRequest) (*gomcp.CallToolResult, any, error) {
+	switch args.Action {
+	case "set":
+		resp, err := s.grpcClient.UpdateConfig(ctx, &proto.UpdateConfigRequest{
+			LocalModel:    args.LocalModel,
+			CloudProvider: args.CloudProvider,
+			CloudModel:    args.CloudModel,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("gRPC UpdateConfig failed: %w", err)
+		}
+
+		status := "success"
+		if !resp.Success {
+			status = "failed"
+		}
+		output := fmt.Sprintf("Configuration update %s: %s", status, resp.Message)
+
+		return &gomcp.CallToolResult{
+			Content: []gomcp.Content{
+				&gomcp.TextContent{Text: output},
+			},
+		}, nil, nil
+
+	default:
+		return nil, nil, fmt.Errorf("invalid action %q: must be \"set\"", args.Action)
+	}
 }

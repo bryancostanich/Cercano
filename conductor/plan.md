@@ -56,5 +56,5 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 ---
 
-- [ ] **Track: Containerize Go Server — Docker packaging for end-user distribution**
-*Link: [./tracks/containerize_server_20260317/](./tracks/containerize_server_20260317/)*
+- [ ] **Track: User-Friendly Distribution — Setup scripts, Docker packaging, and CI/CD releases**
+*Link: [./tracks/distribution_20260317/](./tracks/distribution_20260317/)*

@@ -68,6 +68,7 @@ type ConfigRequest struct {
 	LocalModel    string `json:"local_model,omitempty" jsonschema:"Local model name to set"`
 	CloudProvider string `json:"cloud_provider,omitempty" jsonschema:"Cloud provider to set (google or anthropic)"`
 	CloudModel    string `json:"cloud_model,omitempty" jsonschema:"Cloud model to set"`
+	OllamaURL     string `json:"ollama_url,omitempty" jsonschema:"Ollama endpoint URL (e.g. http://mac-studio.local:11434)"`
 }
 
 // registerTools registers all Cercano MCP tools with the server.
@@ -79,7 +80,7 @@ func (s *Server) registerTools() {
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_config",
-		Description: "Query or update Cercano's runtime configuration. Use action 'set' to change the local model, cloud provider, or cloud model without restarting the server.",
+		Description: "Query or update Cercano's runtime configuration. Use action 'set' to change the local model, Ollama endpoint URL, cloud provider, or cloud model without restarting the server.",
 	}, s.handleConfig)
 }
 
@@ -133,6 +134,7 @@ func (s *Server) handleConfig(ctx context.Context, request *gomcp.CallToolReques
 			LocalModel:    args.LocalModel,
 			CloudProvider: args.CloudProvider,
 			CloudModel:    args.CloudModel,
+			OllamaUrl:     args.OllamaURL,
 		})
 		if err != nil {
 			return nil, nil, formatGRPCError(err, "cercano_config")

@@ -376,6 +376,46 @@ func TestCercanoConfig_SetCloudProvider(t *testing.T) {
 	}
 }
 
+func TestCercanoConfig_SetOllamaURL(t *testing.T) {
+	mock := &mockAgentClient{
+		configResp: &proto.UpdateConfigResponse{
+			Success: true,
+			Message: "updated: [ollama_url=http://mac-studio.local:11434]",
+		},
+	}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_config",
+		Arguments: map[string]any{
+			"action":    "set",
+			"ollama_url": "http://mac-studio.local:11434",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	if mock.lastConfigReq == nil {
+		t.Fatal("expected UpdateConfig gRPC call")
+	}
+	if mock.lastConfigReq.OllamaUrl != "http://mac-studio.local:11434" {
+		t.Errorf("expected ollama_url 'http://mac-studio.local:11434', got %q", mock.lastConfigReq.OllamaUrl)
+	}
+
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if text == "" {
+		t.Error("expected non-empty response")
+	}
+}
+
 func TestCercanoConfig_InvalidAction(t *testing.T) {
 	mock := &mockAgentClient{}
 	s := NewServer(mock)

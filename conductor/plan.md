@@ -61,8 +61,8 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 ---
 
-- [~] **Track: Local Co-Processor Tools — Specialized MCP tools for local offload (summarize, extract, classify, explain)**
-*Link: [./tracks/local_coprocessor_tools_20260318/](./tracks/local_coprocessor_tools_20260318/)*
+- [x] **Track: Local Co-Processor Tools — Specialized MCP tools for local offload (summarize, extract, classify, explain)**
+*Link: [./archive/local_coprocessor_tools_20260318/](./archive/local_coprocessor_tools_20260318/)*
 
 ---
 

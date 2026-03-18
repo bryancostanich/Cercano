@@ -304,19 +304,19 @@ make test   # Run all tests
 
 ## Feature TODOs
 
-### Existing Improvements
-
-* **Better VS Code Agent Window Integration** - The Cercano model should be available as a drop down in the agent window, as a sibling to things like "Gemini 3.1", "claude", etc.
-* **LLM-Based Conversation Compaction** - Conversation history currently uses simple compaction: chat responses are truncated at 2000 characters and coding responses are reduced to `[Code generated: ACTION path]`. This works well for short exchanges but may lose important nuance in longer conversations. Revisit with LLM-based summarization for more sophisticated compaction.
-* **Per-Model Configuration** - Add configurable per-model settings such as context window size, classification similarity thresholds, conversation history depth, compaction limits, and other model-specific parameters. Currently these are hardcoded constants shared across all models.
-* **Simplify Provider Routing** - The SmartRouter's provider routing step (local vs cloud) uses embedding-based classification, but embeddings capture semantic meaning, not task complexity. This leads to mediocre similarity scores for straightforward queries. Since the system is local-first by design and the coordinator already handles escalation to cloud during coding tasks (after repeated validation failures), the provider routing step may be redundant. Explore removing it in favor of always routing to local and relying on the coordinator's built-in escalation logic for cloud usage.
-* **Zed Extension** - The Zed client (`source/clients/zed/`) is a stub. Build out the Rust-based Zed extension to connect to the Cercano gRPC server with feature parity to the VS Code extension.
-
 ### New Features
 
-* **User-Friendly Distribution** - Setup/launch scripts for quick onboarding, Docker containerization for one-command deployment, and a CI/CD pipeline with GitHub Actions for automated releases (cross-platform binaries and Docker images on tagged commits).
+* **[Competitive Audit — Agent Features Landscape](conductor/tracks/competitive_audit_20260318/plan.md)** - Feature matrix across 12+ open-source and commercial agents (Codex, Aider, Continue, Cody, OpenHands, SWE-Agent, Claude Code, Cursor, Windsurf, GitHub Copilot, JetBrains AI, Amazon Q) to inform Cercano's tool design and roadmap.
+* **[Local Co-Processor Tools](conductor/tracks/local_coprocessor_tools_20260318/plan.md)** - Specialized MCP tools that make Cercano a local co-processor for cloud agents. Offload summarization, extraction, semantic search, classification, code explanation, and boilerplate generation to local inference — faster, cheaper, and more private.
+* **[Agent Skills Integration](conductor/tracks/agent_skills_20260318/plan.md)** - Adopt the [Agent Skills](https://agentskills.io) open standard (SKILL.md) to package Cercano's tools as discoverable skills for 25+ compatible agents, and enable Cercano to consume community/enterprise skills.
+* **[User-Friendly Distribution](conductor/tracks/distribution_20260317/plan.md)** - Setup/launch scripts, Docker containerization, and CI/CD pipeline with GitHub Actions for automated cross-platform releases.
+* **[AI Engine Agnosticism](conductor/tracks/engine_agnosticism_20260317/plan.md)** - Abstract the local inference layer to support pluggable backends (ONNX Runtime, Enso, etc.) beyond Ollama.
 * **Add Gemma Support** - Add Google's Gemma models to the supported local model list for Ollama.
-* **Competitive Audit — Agent Features Landscape** - Comprehensive audit of agent features across the open-source and commercial landscape (Codex, Aider, Continue, Cody, OpenHands, SWE-Agent, Claude Code, Cursor, Windsurf, GitHub Copilot, JetBrains AI, Amazon Q). Produces a feature matrix reference document mapping capabilities across agents to inform Cercano's tool design and roadmap.
-* **Local Co-Processor Tools** - Design and build specialized MCP tools that make Cercano a high-value local co-processor for cloud agents. Instead of sending everything to the cloud, offload tasks like summarization, extraction, semantic search, classification, and code explanation to local inference — faster, cheaper, and more private. Evaluates whether specialized tools (summarize, extract, search, classify, explain, boilerplate) provide better agent ergonomics than the current single flexible tool (`cercano_local`).
-* **Agent Skills Integration** - Adopt the [Agent Skills](https://agentskills.io) open standard to codify Cercano's tool use capabilities. Agent Skills is a portable, file-based format (SKILL.md) for giving agents discoverable capabilities, supported by 25+ agent products including Claude Code, Cursor, Copilot, and Codex. Cercano as a provider (package local co-processor tools as discoverable skills) and as a consumer (discover and activate community/enterprise skills).
-* **AI Engine Agnosticism** - Abstract the local inference layer so Cercano is not coupled to Ollama. Support pluggable inference backends including ONNX Runtime, Enso, and other popular AI engines, allowing users to choose the runtime best suited to their hardware and models.
+
+### Existing Improvements
+
+* **Better VS Code Agent Window Integration** - Make Cercano available as a model dropdown in the VS Code agent window alongside Gemini, Claude, etc.
+* **LLM-Based Conversation Compaction** - Replace simple truncation-based compaction with LLM-powered summarization for better context retention in long conversations.
+* **Per-Model Configuration** - Configurable per-model settings (context window, classification thresholds, history depth, compaction limits) instead of hardcoded constants.
+* **Simplify Provider Routing** - Evaluate removing the SmartRouter's embedding-based local/cloud routing in favor of always-local with coordinator-driven cloud escalation.
+* **Zed Extension** - Build out the Rust-based Zed extension (`source/clients/zed/`) with feature parity to the VS Code extension.

@@ -87,6 +87,6 @@ Build the classify and explain tools — quick local triage and code comprehensi
 Update README with new tool documentation and close out the track.
 
 ### Tasks
-- [ ] Task: Update README.md MCP Tools table with cercano_summarize, cercano_extract, cercano_classify, cercano_explain.
-- [ ] Task: Add usage examples for the new tools.
-- [ ] Task: Conductor - User Manual Verification 'Documentation & Closeout' (Protocol in workflow.md)
+- [x] Task: Update README.md MCP Tools table with cercano_summarize, cercano_extract, cercano_classify, cercano_explain. [a867c37]
+- [x] Task: Add usage examples for the new tools. [a867c37]
+- [x] Task: Conductor - User Manual Verification 'Documentation & Closeout' (Protocol in workflow.md)

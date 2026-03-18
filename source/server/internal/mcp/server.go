@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"cercano/source/server/pkg/proto"
@@ -71,6 +72,19 @@ type ConfigRequest struct {
 	OllamaURL     string `json:"ollama_url,omitempty" jsonschema:"Ollama endpoint URL (e.g. http://mac-studio.local:11434)"`
 }
 
+// SummarizeRequest is the input schema for the cercano_summarize tool.
+type SummarizeRequest struct {
+	Text      string `json:"text,omitempty" jsonschema:"Raw text to summarize. Provide either text or file_path."`
+	FilePath  string `json:"file_path,omitempty" jsonschema:"Path to a file to read and summarize. Provide either text or file_path."`
+	MaxLength string `json:"max_length,omitempty" jsonschema:"Target summary length: brief (1-2 sentences), medium (1 paragraph, default), or detailed (multiple paragraphs)."`
+}
+
+// ExtractRequest is the input schema for the cercano_extract tool.
+type ExtractRequest struct {
+	Text  string `json:"text" jsonschema:"The text to search through and extract information from"`
+	Query string `json:"query" jsonschema:"What to find or extract (e.g. 'error messages', 'function signatures', 'config values')"`
+}
+
 // ModelsRequest is the input schema for the cercano_models tool.
 type ModelsRequest struct{}
 
@@ -90,6 +104,16 @@ func (s *Server) registerTools() {
 		Name:        "cercano_config",
 		Description: "Query or update Cercano's runtime configuration. Use action 'set' to change the local model, Ollama endpoint URL, cloud provider, or cloud model without restarting the server.",
 	}, s.handleConfig)
+
+	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
+		Name:        "cercano_summarize",
+		Description: "Summarize text or a file using local AI. Returns a concise summary without sending the full content to the cloud. Use this to distill large files, logs, diffs, or documents before processing.",
+	}, s.handleSummarize)
+
+	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
+		Name:        "cercano_extract",
+		Description: "Extract specific information from text using local AI. Returns only the relevant sections matching your query. Use this to pull function signatures, error messages, config values, or other targeted info from large text without sending everything to the cloud.",
+	}, s.handleExtract)
 }
 
 // handleLocal processes a cercano_local tool call.
@@ -200,4 +224,68 @@ func (s *Server) handleConfig(ctx context.Context, request *gomcp.CallToolReques
 	default:
 		return nil, nil, fmt.Errorf("invalid action %q: must be \"set\"", args.Action)
 	}
+}
+
+// handleSummarize processes a cercano_summarize tool call.
+func (s *Server) handleSummarize(ctx context.Context, request *gomcp.CallToolRequest, args SummarizeRequest) (*gomcp.CallToolResult, any, error) {
+	if args.Text == "" && args.FilePath == "" {
+		return nil, nil, fmt.Errorf("cercano_summarize: provide either 'text' or 'file_path'")
+	}
+
+	content := args.Text
+	if args.FilePath != "" {
+		data, err := os.ReadFile(args.FilePath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("cercano_summarize: failed to read file %q: %w", args.FilePath, err)
+		}
+		content = string(data)
+	}
+
+	lengthInstruction := "one paragraph"
+	switch args.MaxLength {
+	case "brief":
+		lengthInstruction = "1-2 sentences"
+	case "detailed":
+		lengthInstruction = "multiple paragraphs covering all key points"
+	}
+
+	prompt := fmt.Sprintf("Summarize the following text in %s. Focus on the most important information. Output only the summary, no preamble.\n\nText to summarize:\n%s", lengthInstruction, content)
+
+	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
+		Input: prompt,
+	})
+	if err != nil {
+		return nil, nil, formatGRPCError(err, "cercano_summarize")
+	}
+
+	return &gomcp.CallToolResult{
+		Content: []gomcp.Content{
+			&gomcp.TextContent{Text: resp.Output},
+		},
+	}, nil, nil
+}
+
+// handleExtract processes a cercano_extract tool call.
+func (s *Server) handleExtract(ctx context.Context, request *gomcp.CallToolRequest, args ExtractRequest) (*gomcp.CallToolResult, any, error) {
+	if args.Text == "" {
+		return nil, nil, fmt.Errorf("cercano_extract: 'text' is required")
+	}
+	if args.Query == "" {
+		return nil, nil, fmt.Errorf("cercano_extract: 'query' is required")
+	}
+
+	prompt := fmt.Sprintf("Extract the following from the text below: %s\n\nRules:\n- Output ONLY the extracted content, no commentary\n- Preserve the original formatting of extracted sections\n- If nothing matches, respond with \"No matching content found.\"\n\nText:\n%s", args.Query, args.Text)
+
+	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
+		Input: prompt,
+	})
+	if err != nil {
+		return nil, nil, formatGRPCError(err, "cercano_extract")
+	}
+
+	return &gomcp.CallToolResult{
+		Content: []gomcp.Content{
+			&gomcp.TextContent{Text: resp.Output},
+		},
+	}, nil, nil
 }

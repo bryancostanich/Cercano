@@ -124,9 +124,11 @@ func (s *Server) ProcessRequest(ctx context.Context, req *proto.ProcessRequestRe
 	agentReq := s.mapRequest(req)
 	response, err := s.agent.ProcessRequest(ctx, agentReq)
 	if err != nil {
+		fmt.Printf("ProcessRequest error: %v\n", err)
 		return nil, fmt.Errorf("agent error: %w", err)
 	}
 
+	fmt.Printf("ProcessRequest completed successfully\n")
 	return s.mapResponse(response), nil
 }
 

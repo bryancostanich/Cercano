@@ -52,12 +52,22 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 ---
 
 - [x] **Track: Cercano as MCP Server — Expose local inference as tools for cloud agents**
-*Link: [./tracks/mcp_server_20260317/](./tracks/mcp_server_20260317/)*
+*Link: [./archive/mcp_server_20260317/](./archive/mcp_server_20260317/)*
 
 ---
 
 - [x] **Track: Remote Inference — Runtime-configurable remote Ollama with model discovery and fallback**
-*Link: [./tracks/remote_inference_20260317/](./tracks/remote_inference_20260317/)*
+*Link: [./archive/remote_inference_20260317/](./archive/remote_inference_20260317/)*
+
+---
+
+- [~] **Track: Local Co-Processor Tools — Specialized MCP tools for local offload (summarize, extract, classify, explain)**
+*Link: [./tracks/local_coprocessor_tools_20260318/](./tracks/local_coprocessor_tools_20260318/)*
+
+---
+
+- [ ] **Track: Semantic Codebase Search — Embedding-based code search by intent**
+*Link: [./tracks/semantic_search_20260318/](./tracks/semantic_search_20260318/)*
 
 ---
 
@@ -66,13 +76,13 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 ---
 
-- [ ] **Track: Local Co-Processor Tools — Specialized MCP tools for local offload (summarize, extract, search, classify, explain, boilerplate)**
-*Link: [./tracks/local_coprocessor_tools_20260318/](./tracks/local_coprocessor_tools_20260318/)*
+- [ ] **Track: Agent Skills Integration — SKILL.md provider and consumer support**
+*Link: [./tracks/agent_skills_20260318/](./tracks/agent_skills_20260318/)*
 
 ---
 
-- [ ] **Track: Agent Skills Integration — SKILL.md provider and consumer support**
-*Link: [./tracks/agent_skills_20260318/](./tracks/agent_skills_20260318/)*
+- [ ] **Track: AI Engine Agnosticism — Abstract local inference layer to support pluggable backends**
+*Link: [./tracks/engine_agnosticism_20260317/](./tracks/engine_agnosticism_20260317/)*
 
 ---
 

@@ -177,6 +177,10 @@ Cercano can be used as an MCP (Model Context Protocol) server, allowing cloud-ba
 | Tool | Description |
 |------|-------------|
 | `cercano_local` | Run any prompt against local models. When `file_path` and `work_dir` are provided, uses the agentic generate-validate loop. Otherwise, processes as a direct LLM call. |
+| `cercano_summarize` | Summarize text or a file locally. Returns a concise summary (brief/medium/detailed) without sending full content to the cloud. |
+| `cercano_extract` | Extract specific information from text locally. Pull function signatures, error messages, config values, or other targeted info from large text. |
+| `cercano_classify` | Classify or triage text locally. Returns a category, confidence level, and reasoning. Supports custom or auto-determined categories. |
+| `cercano_explain` | Explain code or a file locally. Returns a developer-focused explanation of what the code does, its key components, and how they interact. |
 | `cercano_models` | List models available on the active Ollama instance. Returns model names, sizes, and modification dates. Useful for discovering models on a remote machine. |
 | `cercano_config` | Update runtime configuration (local model, Ollama endpoint URL, cloud provider/model) without restarting the server. |
 
@@ -219,6 +223,38 @@ cercano_models()
 → Available models (2):
   - qwen3-coder:latest (4.7 GB)
   - llama3:70b (39.1 GB)
+```
+
+**Summarize a file locally (keep large content out of cloud context):**
+```
+cercano_summarize(file_path: "internal/agent/router.go", max_length: "brief")
+→ "This Go package implements a smart routing system that selects between local
+   and cloud AI models based on semantic similarity of user requests."
+```
+
+**Extract specific info from large text:**
+```
+cercano_extract(text: "<500 lines of logs>", query: "error and warning messages")
+→ WARN  Remote endpoint health check failed (attempt 1/3)
+  ERROR Remote endpoint unreachable after 3 attempts, falling back to local
+```
+
+**Classify/triage an error locally:**
+```
+cercano_classify(
+  text: "panic: runtime error: invalid memory address or nil pointer dereference",
+  categories: "bug, config issue, infra problem"
+)
+→ Category: bug
+  Confidence: high
+  Reasoning: Nil pointer dereference is a programming bug in the code logic.
+```
+
+**Explain unfamiliar code before deciding what to send to cloud:**
+```
+cercano_explain(file_path: "internal/agent/router.go")
+→ This code implements a smart routing system for an AI agent that selects
+  between local and cloud models based on semantic similarity...
 ```
 
 **Multi-turn conversation:**
@@ -307,7 +343,8 @@ make test   # Run all tests
 ### New Features
 
 * **[Competitive Audit — Agent Features Landscape](conductor/tracks/competitive_audit_20260318/plan.md)** - Feature matrix across 12+ open-source and commercial agents (Codex, Aider, Continue, Cody, OpenHands, SWE-Agent, Claude Code, Cursor, Windsurf, GitHub Copilot, JetBrains AI, Amazon Q) to inform Cercano's tool design and roadmap.
-* **[Local Co-Processor Tools](conductor/tracks/local_coprocessor_tools_20260318/plan.md)** - Specialized MCP tools that make Cercano a local co-processor for cloud agents. Offload summarization, extraction, semantic search, classification, code explanation, and boilerplate generation to local inference — faster, cheaper, and more private.
+* **[Local Co-Processor Tools](conductor/tracks/local_coprocessor_tools_20260318/plan.md)** *(in progress)* - Specialized MCP tools that make Cercano a local co-processor for cloud agents. Summarize, extract, classify, and explain content locally — faster, cheaper, and more private. Four tools shipped, README update pending.
+* **[Semantic Codebase Search](conductor/tracks/semantic_search_20260318/plan.md)** - Embedding-based code search by intent ("find auth-related code"), not just string matching. Requires indexing pipeline, storage, and nearest-neighbor retrieval.
 * **[Agent Skills Integration](conductor/tracks/agent_skills_20260318/plan.md)** - Adopt the [Agent Skills](https://agentskills.io) open standard (SKILL.md) to package Cercano's tools as discoverable skills for 25+ compatible agents, and enable Cercano to consume community/enterprise skills.
 * **[User-Friendly Distribution](conductor/tracks/distribution_20260317/plan.md)** - Setup/launch scripts, Docker containerization, and CI/CD pipeline with GitHub Actions for automated cross-platform releases.
 * **[AI Engine Agnosticism](conductor/tracks/engine_agnosticism_20260317/plan.md)** - Abstract the local inference layer to support pluggable backends (ONNX Runtime, Enso, etc.) beyond Ollama.

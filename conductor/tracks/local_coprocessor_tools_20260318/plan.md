@@ -10,6 +10,7 @@ Finalize the tool surface based on real usage patterns and the local co-processo
     - [x] Rank by: frequency of use × cloud token savings × implementation complexity.
     - [x] Identify MVP set: summarize, extract.
     - [x] Full priority order: summarize > extract > explain > classify > search > boilerplate.
+    - [x] Decision: boilerplate cut (cercano_local already handles it), search moved to its own track.
 - [x] Task: Design input/output schemas for each MVP tool.
     - [x] Define MCP tool descriptions optimized for agent discoverability.
     - [x] Decision: reuse existing `ProcessRequest` gRPC RPC — no new proto RPCs needed. Tools are prompt-wrapping at the MCP layer.
@@ -17,7 +18,7 @@ Finalize the tool surface based on real usage patterns and the local co-processo
     - [x] Summarize template: length-parameterized (brief/medium/detailed), "output only the summary, no preamble".
     - [x] Extract template: query-driven, "output ONLY the extracted content, no commentary".
     - [x] Tested against qwen3-coder on Mac Studio (remote Ollama) — output quality good.
-- [ ] Task: Conductor - User Manual Verification 'Tool Surface Design' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Tool Surface Design' (Protocol in workflow.md)
 
 ## Phase 2: cercano_summarize
 
@@ -36,10 +37,11 @@ Build the summarize tool — condense files, diffs, logs, or arbitrary text into
 - [x] Task: Fix Ollama context overflow for long prompts. [1347c89]
     - [x] Added `num_ctx: 32768` to `generateRequest` options in OllamaProvider.
 - [x] Task: Fix SmartRouter embedding overflow for long prompts. [0a739c5]
-    - [x] Truncate input to 2048 chars in `extractQueryText` before embedding — only the beginning is needed for intent classification.
+    - [x] Truncate input to 512 chars in `extractQueryText` before embedding.
+    - [x] Fix: always truncate after context delimiter stripping. [648b570]
 - [x] Task: End-to-end test with Claude Code — summarize a real file and verify useful output.
     - [x] Summarized `server.go` (11KB) with brief and detailed modes via Mac Studio remote.
-- [ ] Task: Conductor - User Manual Verification 'cercano_summarize' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'cercano_summarize' (Protocol in workflow.md)
 
 ## Phase 3: cercano_extract
 
@@ -56,31 +58,9 @@ Build the extract tool — pull specific information from large text based on a 
     - [x] Red/Green TDD: 5 tests (registration, basic, missing text, missing query, gRPC error).
 - [x] Task: End-to-end test with Claude Code — extract info from a real log.
     - [x] Extracted error/warning messages from a sample log — returned exactly the relevant lines.
-- [ ] Task: Conductor - User Manual Verification 'cercano_extract' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'cercano_extract' (Protocol in workflow.md)
 
-## Phase 4: cercano_search (Semantic)
-
-### Objective
-Build semantic codebase search — find relevant code by intent, not just string matching.
-
-### Tasks
-- [ ] Task: Design the indexing strategy (when to index, incremental vs. full, storage format).
-- [ ] Task: Implement codebase indexing using embeddings (nomic-embed-text or similar).
-    - [ ] Walk directory, chunk files, generate embeddings.
-    - [ ] Store embeddings for fast retrieval.
-    - [ ] Red/Green TDD.
-- [ ] Task: Implement semantic search query.
-    - [ ] Embed the query, find nearest neighbors.
-    - [ ] Return ranked results with file paths and snippets.
-    - [ ] Red/Green TDD.
-- [ ] Task: Add `cercano_search` MCP tool.
-    - [ ] Register tool with descriptive schema.
-    - [ ] Wire to gRPC.
-    - [ ] Red/Green TDD.
-- [ ] Task: End-to-end test with Claude Code — semantic search on a real codebase.
-- [ ] Task: Conductor - User Manual Verification 'cercano_search' (Protocol in workflow.md)
-
-## Phase 5: cercano_classify & cercano_explain
+## Phase 4: cercano_classify & cercano_explain
 
 ### Objective
 Build the classify and explain tools — quick local triage and code comprehension.
@@ -98,18 +78,15 @@ Build the classify and explain tools — quick local triage and code comprehensi
 - [x] Task: End-to-end tests for both tools.
     - [x] cercano_classify: classified a panic stack trace as "bug" with high confidence.
     - [x] cercano_explain: explained router.go (~14KB) — full detailed explanation returned.
-- [ ] Task: Conductor - User Manual Verification 'cercano_classify & cercano_explain' (Protocol in workflow.md)
+- [x] Task: Fix error propagation — formatGRPCError now preserves original error message. [8921dca]
+- [x] Task: Conductor - User Manual Verification 'cercano_classify & cercano_explain' (Protocol in workflow.md)
 
-## Phase 6: cercano_boilerplate & Integration
+## Phase 5: Documentation & Closeout
 
 ### Objective
-Build the boilerplate generator and run final integration testing across all tools.
+Update README with new tool documentation and close out the track.
 
 ### Tasks
-- [ ] Task: Implement `cercano_boilerplate` MCP tool.
-    - [ ] Design prompt template for boilerplate generation.
-    - [ ] Support type parameter (test, interface_impl, struct, etc.).
-    - [ ] Wire to gRPC, Red/Green TDD.
-- [ ] Task: Integration test — use all tools in a realistic Claude Code workflow.
-- [ ] Task: Update README.md with new tool documentation.
-- [ ] Task: Conductor - User Manual Verification 'cercano_boilerplate & Integration' (Protocol in workflow.md)
+- [ ] Task: Update README.md MCP Tools table with cercano_summarize, cercano_extract, cercano_classify, cercano_explain.
+- [ ] Task: Add usage examples for the new tools.
+- [ ] Task: Conductor - User Manual Verification 'Documentation & Closeout' (Protocol in workflow.md)

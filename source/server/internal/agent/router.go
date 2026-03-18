@@ -289,6 +289,12 @@ func extractQueryText(input string) string {
 	if idx := strings.Index(input, contextDelimiter); idx > 0 {
 		return strings.TrimSpace(input[:idx])
 	}
+	// Truncate long inputs to avoid exceeding embedding model context limits.
+	// Only the first portion is needed for intent classification.
+	const maxEmbeddingChars = 2048
+	if len(input) > maxEmbeddingChars {
+		return input[:maxEmbeddingChars]
+	}
 	return input
 }
 

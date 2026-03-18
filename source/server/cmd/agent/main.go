@@ -41,7 +41,8 @@ func checkOllama(ctx context.Context, baseURL string, models ...string) error {
 }
 
 func main() {
-	fmt.Println("Starting Cercano AI Agent gRPC server...")
+	const version = "0.3.0"
+	fmt.Printf("Starting Cercano AI Agent gRPC server (v%s)...\n", version)
 
 	ollamaURL := os.Getenv("OLLAMA_URL")
 	if ollamaURL == "" {

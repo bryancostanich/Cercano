@@ -286,16 +286,17 @@ const contextDelimiter = "--- Context from "
 // extractQueryText strips appended file context from the input, returning only
 // the user's query. This prevents source code context from skewing embeddings.
 func extractQueryText(input string) string {
+	text := input
 	if idx := strings.Index(input, contextDelimiter); idx > 0 {
-		return strings.TrimSpace(input[:idx])
+		text = strings.TrimSpace(input[:idx])
 	}
-	// Truncate long inputs to avoid exceeding embedding model context limits.
+	// Truncate to avoid exceeding embedding model context limits.
 	// Only the first portion is needed for intent classification.
-	const maxEmbeddingChars = 2048
-	if len(input) > maxEmbeddingChars {
-		return input[:maxEmbeddingChars]
+	const maxEmbeddingChars = 512
+	if len(text) > maxEmbeddingChars {
+		text = text[:maxEmbeddingChars]
 	}
-	return input
+	return text
 }
 
 // topKAveragePerCategory computes the mean of the top-K cosine similarities

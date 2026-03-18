@@ -532,6 +532,319 @@ func TestCercanoConfig_InvalidAction(t *testing.T) {
 	t.Error("expected error for invalid action")
 }
 
+// --- cercano_classify tests ---
+
+func TestNewServer_RegistersClassifyTool(t *testing.T) {
+	mock := &mockAgentClient{}
+	s := NewServer(mock)
+
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	ctx := context.Background()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	found := false
+	for tool, err := range cs.Tools(ctx, nil) {
+		if err != nil {
+			t.Fatalf("listing tools failed: %v", err)
+		}
+		if tool.Name == "cercano_classify" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected cercano_classify tool to be registered")
+	}
+}
+
+func TestCercanoClassify_Basic(t *testing.T) {
+	mock := &mockAgentClient{
+		processResp: &proto.ProcessRequestResponse{
+			Output: "Category: bug\nConfidence: high\nReasoning: The stack trace indicates a null pointer dereference.",
+		},
+	}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_classify",
+		Arguments: map[string]any{
+			"text":       "panic: runtime error: invalid memory address or nil pointer dereference",
+			"categories": "bug, config issue, infra problem",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	if mock.lastRequest == nil {
+		t.Fatal("expected gRPC request to be made")
+	}
+	if !strings.Contains(mock.lastRequest.Input, "Classify the following") {
+		t.Errorf("expected classify instruction in prompt, got %q", mock.lastRequest.Input)
+	}
+	if !strings.Contains(mock.lastRequest.Input, "bug, config issue, infra problem") {
+		t.Errorf("expected categories in prompt, got %q", mock.lastRequest.Input)
+	}
+	if mock.lastRequest.WorkDir != "" {
+		t.Errorf("expected empty work_dir, got %q", mock.lastRequest.WorkDir)
+	}
+
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if !strings.Contains(text, "Category: bug") {
+		t.Errorf("expected classification output, got %q", text)
+	}
+}
+
+func TestCercanoClassify_NoCategories(t *testing.T) {
+	mock := &mockAgentClient{
+		processResp: &proto.ProcessRequestResponse{
+			Output: "Category: error log\nConfidence: high\nReasoning: Contains error output.",
+		},
+	}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_classify",
+		Arguments: map[string]any{
+			"text": "ERROR: connection refused",
+		},
+	})
+
+	if mock.lastRequest == nil {
+		t.Fatal("expected gRPC request to be made")
+	}
+	if !strings.Contains(mock.lastRequest.Input, "Determine the most appropriate category") {
+		t.Errorf("expected default category instruction when none provided, got %q", mock.lastRequest.Input)
+	}
+}
+
+func TestCercanoClassify_MissingText(t *testing.T) {
+	mock := &mockAgentClient{}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name:      "cercano_classify",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		return
+	}
+	if result != nil && result.IsError {
+		return
+	}
+	t.Error("expected error when text is missing")
+}
+
+func TestCercanoClassify_GRPCError(t *testing.T) {
+	mock := &mockAgentClient{
+		processErr: context.DeadlineExceeded,
+	}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_classify",
+		Arguments: map[string]any{
+			"text": "some text",
+		},
+	})
+	if err != nil {
+		return
+	}
+	if result == nil {
+		t.Fatal("expected either an error or a result")
+	}
+	if !result.IsError {
+		t.Error("expected IsError=true when gRPC call fails")
+	}
+}
+
+// --- cercano_explain tests ---
+
+func TestNewServer_RegistersExplainTool(t *testing.T) {
+	mock := &mockAgentClient{}
+	s := NewServer(mock)
+
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	ctx := context.Background()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	found := false
+	for tool, err := range cs.Tools(ctx, nil) {
+		if err != nil {
+			t.Fatalf("listing tools failed: %v", err)
+		}
+		if tool.Name == "cercano_explain" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected cercano_explain tool to be registered")
+	}
+}
+
+func TestCercanoExplain_WithText(t *testing.T) {
+	mock := &mockAgentClient{
+		processResp: &proto.ProcessRequestResponse{
+			Output: "This function sorts a slice of integers using bubble sort.",
+		},
+	}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_explain",
+		Arguments: map[string]any{
+			"text": "func sort(a []int) { for i := range a { for j := i+1; j < len(a); j++ { if a[j] < a[i] { a[i], a[j] = a[j], a[i] } } } }",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	if mock.lastRequest == nil {
+		t.Fatal("expected gRPC request to be made")
+	}
+	if !strings.Contains(mock.lastRequest.Input, "Explain the following") {
+		t.Errorf("expected explain instruction in prompt, got %q", mock.lastRequest.Input)
+	}
+	if !strings.Contains(mock.lastRequest.Input, "func sort") {
+		t.Errorf("expected code in prompt, got %q", mock.lastRequest.Input)
+	}
+
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if text != "This function sorts a slice of integers using bubble sort." {
+		t.Errorf("expected clean output, got %q", text)
+	}
+}
+
+func TestCercanoExplain_WithFilePath(t *testing.T) {
+	dir := t.TempDir()
+	testFile := filepath.Join(dir, "test.go")
+	os.WriteFile(testFile, []byte("package main\n\nfunc hello() string { return \"world\" }\n"), 0644)
+
+	mock := &mockAgentClient{
+		processResp: &proto.ProcessRequestResponse{Output: "A simple function that returns the string 'world'."},
+	}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	_, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_explain",
+		Arguments: map[string]any{
+			"file_path": testFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	if mock.lastRequest == nil {
+		t.Fatal("expected gRPC request to be made")
+	}
+	if !strings.Contains(mock.lastRequest.Input, "func hello()") {
+		t.Errorf("expected file content in prompt, got %q", mock.lastRequest.Input)
+	}
+}
+
+func TestCercanoExplain_NoInput(t *testing.T) {
+	mock := &mockAgentClient{}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name:      "cercano_explain",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		return
+	}
+	if result != nil && result.IsError {
+		return
+	}
+	t.Error("expected error when neither text nor file_path provided")
+}
+
+func TestCercanoExplain_GRPCError(t *testing.T) {
+	mock := &mockAgentClient{
+		processErr: context.DeadlineExceeded,
+	}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_explain",
+		Arguments: map[string]any{
+			"text": "some code",
+		},
+	})
+	if err != nil {
+		return
+	}
+	if result == nil {
+		t.Fatal("expected either an error or a result")
+	}
+	if !result.IsError {
+		t.Error("expected IsError=true when gRPC call fails")
+	}
+}
+
 // --- cercano_summarize tests ---
 
 func TestNewServer_RegistersSummarizeTool(t *testing.T) {

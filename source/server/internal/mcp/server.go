@@ -85,6 +85,18 @@ type ExtractRequest struct {
 	Query string `json:"query" jsonschema:"What to find or extract (e.g. 'error messages', 'function signatures', 'config values')"`
 }
 
+// ClassifyRequest is the input schema for the cercano_classify tool.
+type ClassifyRequest struct {
+	Text       string `json:"text" jsonschema:"The text to classify or triage"`
+	Categories string `json:"categories,omitempty" jsonschema:"Comma-separated list of categories to choose from. If omitted, the model will determine appropriate categories."`
+}
+
+// ExplainRequest is the input schema for the cercano_explain tool.
+type ExplainRequest struct {
+	Text     string `json:"text,omitempty" jsonschema:"Code or text to explain. Provide either text or file_path."`
+	FilePath string `json:"file_path,omitempty" jsonschema:"Path to a file to read and explain. Provide either text or file_path."`
+}
+
 // ModelsRequest is the input schema for the cercano_models tool.
 type ModelsRequest struct{}
 
@@ -114,6 +126,16 @@ func (s *Server) registerTools() {
 		Name:        "cercano_extract",
 		Description: "Extract specific information from text using local AI. Returns only the relevant sections matching your query. Use this to pull function signatures, error messages, config values, or other targeted info from large text without sending everything to the cloud.",
 	}, s.handleExtract)
+
+	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
+		Name:        "cercano_classify",
+		Description: "Classify or triage text using local AI. Returns a category, confidence level, and brief reasoning. Use this for quick local triage of errors, logs, code quality, or any content that needs categorization without sending it to the cloud.",
+	}, s.handleClassify)
+
+	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
+		Name:        "cercano_explain",
+		Description: "Explain code or text using local AI. Returns a clear explanation of what the code does, its key interfaces, and data flow. Use this to understand unfamiliar code locally before deciding what context to send to the cloud.",
+	}, s.handleExplain)
 }
 
 // handleLocal processes a cercano_local tool call.
@@ -281,6 +303,64 @@ func (s *Server) handleExtract(ctx context.Context, request *gomcp.CallToolReque
 	})
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_extract")
+	}
+
+	return &gomcp.CallToolResult{
+		Content: []gomcp.Content{
+			&gomcp.TextContent{Text: resp.Output},
+		},
+	}, nil, nil
+}
+
+// handleClassify processes a cercano_classify tool call.
+func (s *Server) handleClassify(ctx context.Context, request *gomcp.CallToolRequest, args ClassifyRequest) (*gomcp.CallToolResult, any, error) {
+	if args.Text == "" {
+		return nil, nil, fmt.Errorf("cercano_classify: 'text' is required")
+	}
+
+	categoryInstruction := "Determine the most appropriate category."
+	if args.Categories != "" {
+		categoryInstruction = fmt.Sprintf("Choose from these categories: %s", args.Categories)
+	}
+
+	prompt := fmt.Sprintf("Classify the following text. %s\n\nRespond with exactly this format:\nCategory: <category>\nConfidence: <high/medium/low>\nReasoning: <one sentence explanation>\n\nText:\n%s", categoryInstruction, args.Text)
+
+	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
+		Input: prompt,
+	})
+	if err != nil {
+		return nil, nil, formatGRPCError(err, "cercano_classify")
+	}
+
+	return &gomcp.CallToolResult{
+		Content: []gomcp.Content{
+			&gomcp.TextContent{Text: resp.Output},
+		},
+	}, nil, nil
+}
+
+// handleExplain processes a cercano_explain tool call.
+func (s *Server) handleExplain(ctx context.Context, request *gomcp.CallToolRequest, args ExplainRequest) (*gomcp.CallToolResult, any, error) {
+	if args.Text == "" && args.FilePath == "" {
+		return nil, nil, fmt.Errorf("cercano_explain: provide either 'text' or 'file_path'")
+	}
+
+	content := args.Text
+	if args.FilePath != "" {
+		data, err := os.ReadFile(args.FilePath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("cercano_explain: failed to read file %q: %w", args.FilePath, err)
+		}
+		content = string(data)
+	}
+
+	prompt := fmt.Sprintf("Explain the following code or text. Describe what it does, its key components, and how they interact. Be concise and focus on what a developer needs to understand to work with this code.\n\nCode:\n%s", content)
+
+	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
+		Input: prompt,
+	})
+	if err != nil {
+		return nil, nil, formatGRPCError(err, "cercano_explain")
 	}
 
 	return &gomcp.CallToolResult{

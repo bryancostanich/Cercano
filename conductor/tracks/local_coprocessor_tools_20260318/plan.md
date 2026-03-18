@@ -3,10 +3,9 @@
 ## Phase 1: Tool Surface Design
 
 ### Objective
-Finalize the tool surface based on real usage patterns and competitive audit findings. Decide which tools to build first, define their contracts, and design prompt templates.
+Finalize the tool surface based on real usage patterns and the local co-processor value proposition (bandwidth, privacy, cost, latency, availability, parallelism). Decide which tools to build first, define their contracts, and design prompt templates.
 
 ### Tasks
-- [ ] Task: Review competitive audit findings (if available) for tool surface inspiration.
 - [ ] Task: Finalize tool list and priority order based on value proposition analysis.
     - [ ] Rank by: frequency of use × cloud token savings × implementation complexity.
     - [ ] Identify MVP set (likely: summarize, extract).

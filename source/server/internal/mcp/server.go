@@ -11,19 +11,20 @@ import (
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// formatGRPCError wraps gRPC errors with actionable diagnostic messages.
+// formatGRPCError wraps gRPC errors with actionable diagnostic hints
+// while preserving the original error message for debugging.
 func formatGRPCError(err error, operation string) error {
 	msg := err.Error()
+	var hint string
 	switch {
 	case strings.Contains(msg, "connection refused"):
-		return fmt.Errorf("%s: connection refused. Is the Cercano gRPC server running? Start it with: cd source/server && make agent && bin/agent", operation)
+		hint = " (hint: Is the Cercano gRPC server running? Start it with: cd source/server && make agent && bin/agent)"
 	case strings.Contains(msg, "unavailable"):
-		return fmt.Errorf("%s: server unavailable. The Cercano gRPC server may not be running or may be starting up", operation)
+		hint = " (hint: The Cercano gRPC server may not be running or may be starting up)"
 	case strings.Contains(msg, "Ollama") || strings.Contains(msg, "ollama"):
-		return fmt.Errorf("%s: Ollama error. Is Ollama running? Start it with: ollama serve", operation)
-	default:
-		return fmt.Errorf("%s: %w", operation, err)
+		hint = " (hint: Is Ollama running? Start it with: ollama serve)"
 	}
+	return fmt.Errorf("%s: %s%s", operation, msg, hint)
 }
 
 // Server wraps the MCP server and its gRPC client connection to the Cercano agent.

@@ -86,15 +86,18 @@ Build semantic codebase search — find relevant code by intent, not just string
 Build the classify and explain tools — quick local triage and code comprehension.
 
 ### Tasks
-- [ ] Task: Implement `cercano_classify` MCP tool.
-    - [ ] Design prompt template for classification.
-    - [ ] Support custom categories or default set.
-    - [ ] Wire to gRPC, Red/Green TDD.
-- [ ] Task: Implement `cercano_explain` MCP tool.
-    - [ ] Design prompt template for code explanation.
-    - [ ] Support file_path and text inputs, optional audience level.
-    - [ ] Wire to gRPC, Red/Green TDD.
-- [ ] Task: End-to-end tests for both tools.
+- [x] Task: Implement `cercano_classify` MCP tool. [648b570]
+    - [x] Prompt template: structured output (Category/Confidence/Reasoning).
+    - [x] Support custom categories or auto-determined.
+    - [x] Wire to gRPC, Red/Green TDD (5 tests).
+- [x] Task: Implement `cercano_explain` MCP tool. [648b570]
+    - [x] Prompt template for developer-focused code explanation.
+    - [x] Support file_path and text inputs.
+    - [x] Wire to gRPC, Red/Green TDD (5 tests).
+- [x] Task: Fix extractQueryText truncation bug — delimiter match inside file content bypassed truncation. [648b570]
+- [x] Task: End-to-end tests for both tools.
+    - [x] cercano_classify: classified a panic stack trace as "bug" with high confidence.
+    - [x] cercano_explain: explained router.go (~14KB) — full detailed explanation returned.
 - [ ] Task: Conductor - User Manual Verification 'cercano_classify & cercano_explain' (Protocol in workflow.md)
 
 ## Phase 6: cercano_boilerplate & Integration

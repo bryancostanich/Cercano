@@ -202,9 +202,14 @@ func (p *OllamaProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 }
 
 type generateRequest struct {
-	Model  string `json:"model"`
-	Prompt string `json:"prompt"`
-	Stream bool   `json:"stream"`
+	Model   string          `json:"model"`
+	Prompt  string          `json:"prompt"`
+	Stream  bool            `json:"stream"`
+	Options generateOptions `json:"options"`
+}
+
+type generateOptions struct {
+	NumCtx int `json:"num_ctx"`
 }
 
 type generateResponse struct {
@@ -221,9 +226,10 @@ func (p *OllamaProvider) Process(ctx context.Context, req *agent.Request) (*agen
 	url := fmt.Sprintf("%s/api/generate", activeURL)
 
 	payload := generateRequest{
-		Model:  modelName,
-		Prompt: req.Input,
-		Stream: false,
+		Model:   modelName,
+		Prompt:  req.Input,
+		Stream:  false,
+		Options: generateOptions{NumCtx: 32768},
 	}
 
 	body, err := json.Marshal(payload)
@@ -267,9 +273,10 @@ func (p *OllamaProvider) ProcessStream(ctx context.Context, req *agent.Request, 
 	url := fmt.Sprintf("%s/api/generate", activeURL)
 
 	payload := generateRequest{
-		Model:  modelName,
-		Prompt: req.Input,
-		Stream: true,
+		Model:   modelName,
+		Prompt:  req.Input,
+		Stream:  true,
+		Options: generateOptions{NumCtx: 32768},
 	}
 
 	body, err := json.Marshal(payload)

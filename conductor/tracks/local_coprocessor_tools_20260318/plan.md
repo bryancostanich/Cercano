@@ -6,15 +6,17 @@
 Finalize the tool surface based on real usage patterns and the local co-processor value proposition (bandwidth, privacy, cost, latency, availability, parallelism). Decide which tools to build first, define their contracts, and design prompt templates.
 
 ### Tasks
-- [ ] Task: Finalize tool list and priority order based on value proposition analysis.
-    - [ ] Rank by: frequency of use × cloud token savings × implementation complexity.
-    - [ ] Identify MVP set (likely: summarize, extract).
-- [ ] Task: Design input/output schemas for each MVP tool.
-    - [ ] Define MCP tool descriptions optimized for agent discoverability.
-    - [ ] Define gRPC message types if new RPCs are needed vs. reusing ProcessRequest.
-- [ ] Task: Design prompt templates for each MVP tool, tuned for local models.
-    - [ ] Test templates manually against qwen3-coder and GLM-4.7-Flash.
-    - [ ] Iterate until output quality is consistently useful.
+- [x] Task: Finalize tool list and priority order based on value proposition analysis.
+    - [x] Rank by: frequency of use × cloud token savings × implementation complexity.
+    - [x] Identify MVP set: summarize, extract.
+    - [x] Full priority order: summarize > extract > explain > classify > search > boilerplate.
+- [x] Task: Design input/output schemas for each MVP tool.
+    - [x] Define MCP tool descriptions optimized for agent discoverability.
+    - [x] Decision: reuse existing `ProcessRequest` gRPC RPC — no new proto RPCs needed. Tools are prompt-wrapping at the MCP layer.
+- [x] Task: Design prompt templates for each MVP tool, tuned for local models.
+    - [x] Summarize template: length-parameterized (brief/medium/detailed), "output only the summary, no preamble".
+    - [x] Extract template: query-driven, "output ONLY the extracted content, no commentary".
+    - [x] Tested against qwen3-coder on Mac Studio (remote Ollama) — output quality good.
 - [ ] Task: Conductor - User Manual Verification 'Tool Surface Design' (Protocol in workflow.md)
 
 ## Phase 2: cercano_summarize
@@ -23,19 +25,20 @@ Finalize the tool surface based on real usage patterns and the local co-processo
 Build the summarize tool — condense files, diffs, logs, or arbitrary text into concise summaries suitable for cloud agent context windows.
 
 ### Tasks
-- [ ] Task: Add `Summarize` RPC to `agent.proto` (or decide to reuse `Process` with a mode flag).
-    - [ ] Define request/response message types.
-    - [ ] Regenerate Go bindings.
-- [ ] Task: Implement summarize logic in the server.
-    - [ ] Apply the summarize prompt template.
-    - [ ] Support text input and file_path input.
-    - [ ] Handle max_length parameter.
-    - [ ] Red/Green TDD.
-- [ ] Task: Add `cercano_summarize` MCP tool.
-    - [ ] Register tool with descriptive schema.
-    - [ ] Wire to gRPC.
-    - [ ] Red/Green TDD.
-- [ ] Task: End-to-end test with Claude Code — summarize a real file and verify useful output.
+- [x] Task: Decide on RPC approach — reuse `ProcessRequest` with prompt wrapping in MCP layer. [0511240]
+    - [x] No new proto messages needed.
+    - [x] No server-side changes needed for the tool itself.
+- [x] Task: Implement `cercano_summarize` MCP tool. [0511240]
+    - [x] `SummarizeRequest` struct with text, file_path, max_length fields.
+    - [x] `handleSummarize` handler: validates input, reads file if needed, constructs prompt, calls ProcessRequest.
+    - [x] Registered in `registerTools()` with descriptive schema.
+    - [x] Red/Green TDD: 7 tests (registration, text input, file input, max_length, no input, file not found, gRPC error).
+- [x] Task: Fix Ollama context overflow for long prompts. [1347c89]
+    - [x] Added `num_ctx: 32768` to `generateRequest` options in OllamaProvider.
+- [x] Task: Fix SmartRouter embedding overflow for long prompts. [0a739c5]
+    - [x] Truncate input to 2048 chars in `extractQueryText` before embedding — only the beginning is needed for intent classification.
+- [x] Task: End-to-end test with Claude Code — summarize a real file and verify useful output.
+    - [x] Summarized `server.go` (11KB) with brief and detailed modes via Mac Studio remote.
 - [ ] Task: Conductor - User Manual Verification 'cercano_summarize' (Protocol in workflow.md)
 
 ## Phase 3: cercano_extract
@@ -44,18 +47,15 @@ Build the summarize tool — condense files, diffs, logs, or arbitrary text into
 Build the extract tool — pull specific information from large text based on a query.
 
 ### Tasks
-- [ ] Task: Add `Extract` RPC or reuse `Process` with mode routing.
-    - [ ] Define request/response message types.
-    - [ ] Regenerate Go bindings if needed.
-- [ ] Task: Implement extract logic in the server.
-    - [ ] Apply the extract prompt template.
-    - [ ] Support text input and query parameter.
-    - [ ] Red/Green TDD.
-- [ ] Task: Add `cercano_extract` MCP tool.
-    - [ ] Register tool with descriptive schema.
-    - [ ] Wire to gRPC.
-    - [ ] Red/Green TDD.
-- [ ] Task: End-to-end test with Claude Code — extract info from a real log/file.
+- [x] Task: Decide on RPC approach — reuse `ProcessRequest` with prompt wrapping in MCP layer. [0511240]
+    - [x] No new proto messages needed.
+- [x] Task: Implement `cercano_extract` MCP tool. [0511240]
+    - [x] `ExtractRequest` struct with text, query fields.
+    - [x] `handleExtract` handler: validates input, constructs prompt, calls ProcessRequest.
+    - [x] Registered in `registerTools()` with descriptive schema.
+    - [x] Red/Green TDD: 5 tests (registration, basic, missing text, missing query, gRPC error).
+- [x] Task: End-to-end test with Claude Code — extract info from a real log.
+    - [x] Extracted error/warning messages from a sample log — returned exactly the relevant lines.
 - [ ] Task: Conductor - User Manual Verification 'cercano_extract' (Protocol in workflow.md)
 
 ## Phase 4: cercano_search (Semantic)

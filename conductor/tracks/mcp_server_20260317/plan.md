@@ -13,7 +13,7 @@ Add the MCP SDK dependency, establish the package structure, and implement a min
     - [x] Initialize gRPC client connection to Cercano server.
     - [x] Start MCP server with stdio transport.
 - [x] Task: Verify the MCP server starts, responds to `initialize`, and advertises an empty tool list.
-- [ ] Task: Conductor - User Manual Verification 'MCP SDK & Package Setup' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'MCP SDK & Package Setup' (Protocol in workflow.md)
 
 ## Phase 2: Core Tool — `cercano_local`
 
@@ -28,7 +28,7 @@ Implement a single flexible tool that runs any prompt against local models via t
     - [x] Red phase: Write tests against a mock gRPC client.
     - [x] Green phase: Implement and pass.
 - [x] Task: Test end-to-end with a running Cercano gRPC server (both chat-style and code generation queries).
-- [ ] Task: Conductor - User Manual Verification 'Core Tool — cercano_local' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Core Tool — cercano_local' (Protocol in workflow.md)
 
 ## Phase 3: Configuration Tool & Multi-Turn Support
 
@@ -44,7 +44,7 @@ Add runtime configuration management and verify multi-turn conversation support 
 - [x] Task: Verify multi-turn conversations work across sequential MCP tool calls.
     - [x] Test: call `cercano_local` with conversation_id, follow up with second call using same ID.
     - [x] Verify the second call passes the same conversation_id to the gRPC server.
-- [ ] Task: Conductor - User Manual Verification 'Configuration Tool & Multi-Turn Support' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Configuration Tool & Multi-Turn Support' (Protocol in workflow.md)
 
 ## Phase 4: Integration & Agent Testing
 
@@ -61,11 +61,10 @@ Validate the MCP server works with real agents (Claude Code), add build/install 
     - [x] Chat query: `cercano_local` returned coherent response (model: qwen3-coder).
     - [x] Config update: `cercano_config` set local_model to GLM-4.7-Flash successfully.
     - [x] Model switch verification: re-ran same prompt, confirmed new model in response metadata.
-- [ ] Task: Test with at least one other MCP-compatible agent (e.g., Cursor) if available.
 - [x] Task: Add error handling for common failure modes:
     - [x] gRPC server not running — actionable "connection refused" message.
     - [x] Ollama not running — actionable "ollama serve" suggestion.
     - [x] Server unavailable — clear diagnostic message.
 - [x] Task: Update README.md with MCP server documentation (setup, usage, tool reference).
 - [x] Task: Run full test suite — `go test ./...`.
-- [ ] Task: Conductor - User Manual Verification 'Integration & Agent Testing' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Integration & Agent Testing' (Protocol in workflow.md)

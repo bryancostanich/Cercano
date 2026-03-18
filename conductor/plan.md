@@ -56,8 +56,23 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 ---
 
-- [ ] **Track: Remote Inference — Runtime-configurable remote Ollama with model discovery and fallback**
+- [x] **Track: Remote Inference — Runtime-configurable remote Ollama with model discovery and fallback**
 *Link: [./tracks/remote_inference_20260317/](./tracks/remote_inference_20260317/)*
+
+---
+
+- [ ] **Track: Competitive Audit — Agent features landscape across open-source and commercial agents**
+*Link: [./tracks/competitive_audit_20260318/](./tracks/competitive_audit_20260318/)*
+
+---
+
+- [ ] **Track: Local Co-Processor Tools — Specialized MCP tools for local offload (summarize, extract, search, classify, explain, boilerplate)**
+*Link: [./tracks/local_coprocessor_tools_20260318/](./tracks/local_coprocessor_tools_20260318/)*
+
+---
+
+- [ ] **Track: Agent Skills Integration — SKILL.md provider and consumer support**
+*Link: [./tracks/agent_skills_20260318/](./tracks/agent_skills_20260318/)*
 
 ---
 

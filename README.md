@@ -1,6 +1,6 @@
 # Cercano
 
-Cercano is a local-first AI development tool powered by [Ollama](https://ollama.com/). It runs open-source models on your own hardware — fast, private, and at zero cost.
+Cercano is a local-first AI development tool that runs open-source models on your own hardware — fast, private, and at zero cost. Currently powered by [Ollama](https://ollama.com/), with pluggable backend support planned.
 
 Cercano works in two ways:
 

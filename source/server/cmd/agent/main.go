@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/config"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/loop"
 	"cercano/source/server/internal/server"
@@ -23,7 +24,7 @@ import (
 
 func checkOllama(ctx context.Context, baseURL string, models ...string) error {
 	client := &http.Client{Timeout: 5 * time.Second}
-	
+
 	// Check if Ollama is running
 	resp, err := client.Get(baseURL + "/api/tags")
 	if err != nil {
@@ -35,8 +36,6 @@ func checkOllama(ctx context.Context, baseURL string, models ...string) error {
 		return fmt.Errorf("Ollama returned an unexpected status: %d", resp.StatusCode)
 	}
 
-	// Basic check for required models could be added here if needed, 
-	// but SmartRouter will also report missing models during initialization.
 	return nil
 }
 
@@ -44,38 +43,38 @@ func main() {
 	const version = "0.3.0"
 	fmt.Printf("Starting Cercano AI Agent gRPC server (v%s)...\n", version)
 
-	ollamaURL := os.Getenv("OLLAMA_URL")
-	if ollamaURL == "" {
-		ollamaURL = "http://localhost:11434"
+	// Load config: file → env vars → defaults
+	cfg, err := config.Load(config.DefaultPath())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] Failed to load config: %v (using defaults)\n", err)
+		cfg = config.Defaults()
 	}
-	embeddingModel := "nomic-embed-text"
-	localModel := os.Getenv("CERCANO_LOCAL_MODEL")
-	if localModel == "" {
-		localModel = "qwen3-coder"
+
+	fmt.Printf("Local model: %s\n", cfg.LocalModel)
+	fmt.Printf("Ollama URL: %s\n", cfg.OllamaURL)
+	if cfg.CloudProvider != "" {
+		fmt.Printf("Cloud provider: %s (%s)\n", cfg.CloudProvider, cfg.CloudModel)
 	}
-	fmt.Printf("Local model: %s\n", localModel)
 
 	// Pre-flight check for Ollama
-	if err := checkOllama(context.Background(), ollamaURL); err != nil {
+	if err := checkOllama(context.Background(), cfg.OllamaURL); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
 	// Initialize Providers
-	localProvider := llm.NewOllamaProvider(localModel, ollamaURL)
-	
+	localProvider := llm.NewOllamaProvider(cfg.LocalModel, cfg.OllamaURL)
+
 	// Default to Mock for cloud, but upgrade if keys are present
 	var cloudProvider agent.ModelProvider = llm.NewMockProvider("CloudModel")
-	
-	// Check for Cloud Keys
-	geminiKey := os.Getenv("GEMINI_API_KEY")
-	if geminiKey != "" {
-		fmt.Println("Main: Detected GEMINI_API_KEY. Initializing real Cloud Provider (Google)...")
-		cp, err := llm.NewCloudModelProvider(context.Background(), "google", "gemini-1.5-flash", geminiKey)
+
+	if cfg.CloudAPIKey != "" && cfg.CloudProvider != "" {
+		fmt.Printf("Main: Initializing Cloud Provider (%s)...\n", cfg.CloudProvider)
+		cp, err := llm.NewCloudModelProvider(context.Background(), cfg.CloudProvider, cfg.CloudModel, cfg.CloudAPIKey)
 		if err == nil {
 			cloudProvider = cp
 		} else {
-			fmt.Printf("Main: Failed to init real Cloud Provider: %v\n", err)
+			fmt.Printf("Main: Failed to init Cloud Provider: %v\n", err)
 		}
 	}
 
@@ -83,14 +82,13 @@ func main() {
 	sessionSvc := session.InMemoryService()
 	coordinator := loop.NewADKCoordinator(localProvider, cloudProvider, validator, sessionSvc)
 
-	smartRouter, err := agent.NewSmartRouter(localProvider, cloudProvider, embeddingModel, http.DefaultClient, "internal/agent/prototypes.yaml", func(ctx context.Context, provider, model, apiKey string) (agent.ModelProvider, error) {
+	smartRouter, err := agent.NewSmartRouter(localProvider, cloudProvider, cfg.EmbeddingModel, http.DefaultClient, "internal/agent/prototypes.yaml", func(ctx context.Context, provider, model, apiKey string) (agent.ModelProvider, error) {
 		return llm.NewCloudModelProvider(ctx, provider, model, apiKey)
 	})
 	if err != nil {
-		// If it's a connection error or missing model, format it nicely
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "connection refused") || strings.Contains(errMsg, "no such host") {
-			fmt.Fprintf(os.Stderr, "\n[ERROR] SmartRouter initialization failed: Could not connect to Ollama. Please ensure it is running at %s\n", ollamaURL)
+			fmt.Fprintf(os.Stderr, "\n[ERROR] SmartRouter initialization failed: Could not connect to Ollama. Please ensure it is running at %s\n", cfg.OllamaURL)
 		} else if strings.Contains(errMsg, "not found") {
 			fmt.Fprintf(os.Stderr, "\n[ERROR] SmartRouter initialization failed: %v\n", err)
 		} else {
@@ -106,11 +104,7 @@ func main() {
 		return llm.NewCloudModelProvider(ctx, provider, model, apiKey)
 	}
 
-	port := os.Getenv("CERCANO_PORT")
-	if port == "" {
-		port = "50052"
-	}
-	lis, err := net.Listen("tcp", ":"+port)
+	lis, err := net.Listen("tcp", ":"+cfg.Port)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}

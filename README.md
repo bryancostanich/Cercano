@@ -48,12 +48,12 @@ Cercano can run as a standalone gRPC server (for IDE clients) or embedded inside
   └─────┬─────┘                      └──────┬───────┘
         │ gRPC                              │ MCP (stdio)
         │                                   │
-┌───────┴───────────────────┐  ┌────────────┴───────────────┐
+┌───────┴───────────────────┐  ┌────────────┴────────────────┐
 │    CERCANO SERVER         │  │    CERCANO (embedded)       │
 │                           │  │                             │
 │  ┌──────────────────────┐ │  │  ┌───────────────────────┐  │
 │  │       Agent          │ │  │  │  MCP Tool Handlers    │  │
-│  │  ┌───────┐ ┌───────┐ │ │  │  │  summarize, extract, │  │
+│  │  ┌───────┐ ┌───────┐ │ │  │  │  summarize, extract,  │  │
 │  │  │Router │ │ Loop  │ │ │  │  │  classify, explain    │  │
 │  │  └───────┘ └───────┘ │ │  │  └───────────┬───────────┘  │
 │  └──────────┬───────────┘ │  │              │              │

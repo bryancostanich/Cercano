@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -103,6 +105,18 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 }
 
 func main() {
+	// Handle subcommands before flag parsing
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "setup":
+			runSetup()
+			return
+		case "version":
+			fmt.Printf("cercano v%s\n", version)
+			return
+		}
+	}
+
 	mcpMode := flag.Bool("mcp", false, "Run in MCP mode (embedded gRPC server + MCP on stdio)")
 	grpcAddr := flag.String("grpc-addr", "", "Address of an external gRPC server (MCP-only, no embedded server)")
 	showVersion := flag.Bool("version", false, "Print version and exit")
@@ -125,6 +139,117 @@ func main() {
 	} else {
 		runServerMode(cfg)
 	}
+}
+
+// runSetup checks prerequisites and pulls required Ollama models.
+func runSetup() {
+	fmt.Printf("Cercano Setup (v%s)\n", version)
+	fmt.Println("Checking prerequisites...")
+
+	cfg, err := config.Load(config.DefaultPath())
+	if err != nil {
+		cfg = config.Defaults()
+	}
+
+	// Check Ollama is running
+	fmt.Printf("\n[1/3] Checking Ollama at %s...\n", cfg.OllamaURL)
+	if err := checkOllama(cfg.OllamaURL); err != nil {
+		fmt.Fprintf(os.Stderr, "  FAIL: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("  OK: Ollama is running.")
+
+	// Check required models
+	fmt.Println("\n[2/3] Checking required models...")
+	requiredModels := []string{cfg.LocalModel, cfg.EmbeddingModel}
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	resp, err := client.Get(cfg.OllamaURL + "/api/tags")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  FAIL: Could not list models: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	type modelList struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+
+	var models modelList
+	if err := decodeJSON(resp.Body, &models); err != nil {
+		fmt.Fprintf(os.Stderr, "  FAIL: Could not parse model list: %v\n", err)
+		os.Exit(1)
+	}
+
+	installed := make(map[string]bool)
+	for _, m := range models.Models {
+		// Strip :latest suffix for comparison
+		name := strings.TrimSuffix(m.Name, ":latest")
+		installed[name] = true
+		installed[m.Name] = true
+	}
+
+	allPresent := true
+	for _, model := range requiredModels {
+		if installed[model] {
+			fmt.Printf("  OK: %s\n", model)
+		} else {
+			fmt.Printf("  MISSING: %s — pulling...\n", model)
+			if err := pullModel(cfg.OllamaURL, model); err != nil {
+				fmt.Fprintf(os.Stderr, "  FAIL: Could not pull %s: %v\n", model, err)
+				allPresent = false
+			} else {
+				fmt.Printf("  OK: %s (pulled)\n", model)
+			}
+		}
+	}
+
+	if !allPresent {
+		os.Exit(1)
+	}
+
+	// Check/create config file
+	fmt.Println("\n[3/3] Checking config file...")
+	configPath := config.DefaultPath()
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		fmt.Printf("  Creating default config at %s\n", configPath)
+		if err := config.Save(cfg, configPath); err != nil {
+			fmt.Fprintf(os.Stderr, "  WARN: Could not create config file: %v\n", err)
+		} else {
+			fmt.Println("  OK: Config file created.")
+		}
+	} else {
+		fmt.Printf("  OK: Config file exists at %s\n", configPath)
+	}
+
+	fmt.Println("\nSetup complete! Run 'cercano' to start the server.")
+}
+
+func decodeJSON(r io.Reader, v interface{}) error {
+	return json.NewDecoder(r).Decode(v)
+}
+
+func pullModel(ollamaURL, model string) error {
+	payload := fmt.Sprintf(`{"name":"%s"}`, model)
+	resp, err := http.Post(ollamaURL+"/api/pull", "application/json", strings.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("Ollama returned status %d", resp.StatusCode)
+	}
+	// Read through the streaming response to completion
+	buf := make([]byte, 4096)
+	for {
+		_, err := resp.Body.Read(buf)
+		if err != nil {
+			break
+		}
+	}
+	return nil
 }
 
 // runServerMode starts the gRPC server in standalone mode (for IDE clients).

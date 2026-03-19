@@ -1,58 +1,78 @@
 # Cercano
 
-Cercano is a local-first, AI development experience that provides a hybrid local/cloud AI development experience. Enabling development tasks to use a local LLM first approach and then fall back to cloud models when the task is either unsuited for local models, or the local model begins to spin its wheels. Potentailly providing a faster, more efficient, and cost-effective workflow for developers.
+Cercano is a local-first AI development tool powered by [Ollama](https://ollama.com/). It runs open-source models on your own hardware — fast, private, and at zero cost.
 
-By combining the speed of local models with the power of cloud-based AI, Cercano creates a "Mixture of Experts" (MoE) architecture that intelligently routes tasks to the most appropriate model.
+Cercano works in two ways:
+
+**1. Standalone Agent** — Use Cercano directly as your AI coding assistant. It routes tasks to local models first, falls back to cloud when needed, and runs an agentic loop that generates, validates, and self-corrects code automatically. Integrates with VS Code and other IDEs via gRPC.
+
+**2. Local Co-Processor** — Plug Cercano into cloud-based agents like Claude Code, Cursor, or Copilot via [MCP](https://modelcontextprotocol.io/). Instead of sending everything to the cloud, offload tasks like summarization, extraction, classification, and code explanation to local inference. This saves cloud context window, reduces cost, keeps sensitive code off the wire, and runs faster for simple tasks.
 
 ## Key Features
 
-- **Smart Router** - An intelligent classifier that determines whether a request can be handled locally (faster, no cost) or requires a cloud model (higher capability). The router uses embeddings to classify the requests so it's ultra-fast and doesn't rely on the unpredictability of a model.
-- **Local-First Architecture** - Utilizes [Ollama](https://ollama.com/) to run powerful open-source models (like qwen3-coder, GLM4.7-Flash, etc.) locally on your machine.
-- **Cloud Fallback** - Seamlessly integrates with Google Gemini and Anthropic Claude for complex tasks that exceed local model capabilities.
-- **Agentic Self-Correction** - An iterative loop that automatically validates generated code (e.g., via compilation) and requests fixes if errors are detected.
-- **Remote Inference** - Point Cercano at a remote Ollama instance (e.g., a Mac Studio on your LAN) for access to larger models. Runtime-configurable with automatic fallback to local if the remote goes down, plus model discovery to see what's available on the remote machine.
-- **MCP Server** - Expose Cercano as an [MCP](https://modelcontextprotocol.io/) server, allowing cloud-based agents like Claude Code and Cursor to delegate work to local models — faster, private, and at zero cost. Supports chat queries, agentic code generation, runtime model switching, and multi-turn conversations.
-- **IDE Integration** - Decoupled gRPC-based architecture allows for integration into modern IDEs like VS Code and Zed.
+### Core
+- **Local-First Architecture** — Run powerful open-source models (qwen3-coder, GLM-4.7-Flash, etc.) locally via [Ollama](https://ollama.com/).
+- **Cloud Fallback** — Seamless integration with Google Gemini and Anthropic Claude for tasks that exceed local model capabilities.
+- **Smart Router** — Embedding-based classifier routes requests to local or cloud models. Ultra-fast, no LLM call needed for routing.
+- **Agentic Self-Correction** — Iterative loop that generates code, validates it (e.g., via compilation), and self-corrects automatically.
+- **Remote Inference** — Point Cercano at a remote Ollama instance (e.g., a Mac Studio on your LAN) for access to larger models. Runtime-configurable with automatic fallback if the remote goes down.
+
+### Local Co-Processor Tools (via MCP)
+When used as a co-processor inside cloud agents, Cercano provides specialized tools that keep work local:
+
+| Tool | What it does | Why local? |
+|------|-------------|------------|
+| `cercano_summarize` | Condense files, logs, or text into concise summaries | Keep large content out of cloud context windows |
+| `cercano_extract` | Pull specific info (errors, signatures, config) from large text | Filter noise locally, send only what matters |
+| `cercano_classify` | Triage errors, logs, or code with category + confidence | Quick local triage without cloud round-trip |
+| `cercano_explain` | Explain what code does, its components and data flow | Understand code locally before deciding what to send to cloud |
+| `cercano_local` | General-purpose prompt execution against local models | Offload any simple task to local inference |
+
+### Integration
+- **MCP Server** — Expose all tools to any [MCP](https://modelcontextprotocol.io/)-compatible agent (Claude Code, Cursor, Copilot, etc.).
+- **IDE Integration** — VS Code extension with gRPC-based architecture. Zed extension in progress.
+- **Model Discovery** — Query available models on any Ollama instance via `cercano_models`.
+- **Runtime Configuration** — Switch models, Ollama endpoints, and cloud providers on the fly via `cercano_config`.
 
 ## Architecture
 
+Cercano can run as a standalone gRPC server (for IDE clients) or embedded inside an MCP host (for cloud agents like Claude Code). Both modes share the same core engine.
+
 ```
-┌─────────────────────────────────────────────────────────┐
-│                 CLIENT INTEGRATIONS                     │
-│   ┌───────────┐   ┌───────────┐   ┌───────────────┐     │
-│   │  VS Code  │   │    Zed    │   │    Others     │     │
-│   └─────┬─────┘   └─────┬─────┘   └──────┬────────┘     │
-└─────────┼───────────────┼────────────────┼──────────────┘
-          └───────────────┼────────────────┘
-                          │ gRPC
-┌─────────────────────────┴───────────────────────────────┐
-|                  CERCANO SERVER                         |
-|                         |                               |
-|                   ┌─────┴──────┐                        |
-|                   │    gRPC    │                        |
-|                   │   Server   │                        |
-|                   └─────┬──────┘                        |
-|                         |                               |
-│                       AGENT                             │
-│                         |                               │
-│  ┌─────────────┐  ┌──────────────┐  ┌────────────────┐  │
-│  │   Smart     │  │  Coordinator │  │  Conversation  │  │
-│  │   Router    │  │  (LoopAgent) │  │     Store      │  │
-│  └─────────────┘  └──────────────┘  └────────────────┘  │
-│                                                         │
-└────────────┬────────────────────────────┬───────────────┘
-             │                            │
-┌────────────┴────────────┐  ┌────────────┴────────────────┐
-│    Local Model          │  │       Cloud Models          │
-│    (Ollama)             │  │      (Gemini, Claude)       │
-└─────────────────────────┘  └─────────────────────────────┘
+  Standalone Mode                    Co-Processor Mode
+  (IDE clients)                      (Cloud agents)
+
+  ┌───────────┐                      ┌──────────────┐
+  │  VS Code  │                      │  Claude Code │
+  │  Zed, etc │                      │  Cursor, etc │
+  └─────┬─────┘                      └──────┬───────┘
+        │ gRPC                              │ MCP (stdio)
+        │                                   │
+┌───────┴───────────────────┐  ┌────────────┴───────────────┐
+│    CERCANO SERVER         │  │    CERCANO (embedded)       │
+│                           │  │                             │
+│  ┌──────────────────────┐ │  │  ┌───────────────────────┐  │
+│  │       Agent          │ │  │  │  MCP Tool Handlers    │  │
+│  │  ┌───────┐ ┌───────┐ │ │  │  │  summarize, extract, │  │
+│  │  │Router │ │ Loop  │ │ │  │  │  classify, explain    │  │
+│  │  └───────┘ └───────┘ │ │  │  └───────────┬───────────┘  │
+│  └──────────┬───────────┘ │  │              │              │
+│             │             │  │        ┌─────┴──────┐       │
+│             │             │  │        │   Agent    │       │
+└─────────────┼─────────────┘  │        └─────┬──────┘       │
+              │                └──────────────┼──────────────┘
+              │                               │
+     ┌────────┴────────┐             ┌────────┴────────┐
+     │  Ollama         │             │  Ollama         │
+     │  (local/remote) │             │  (local/remote) │
+     └─────────────────┘             └─────────────────┘
 ```
 
-- **Core Agent (Go)** - The heart of the system, written in Go. It handles model routing, agentic loops, conversation history, and provides a gRPC interface.
-- **Smart Router** - Uses semantic classification (via embeddings) to disambiguate user requests and optimize prompt delivery.
-- **Coordinator (LoopAgent)** - Google ADK-backed iterative loop that generates code, validates it, and self-corrects with escalation to cloud models.
-- **Conversation Store** - Server-side multi-turn history so the LLM can resolve references across requests.
-- **Clients** - VS Code (TypeScript), Zed (Rust - still under construction), with gRPC for inter-process communication. The gRPC server enables any kind of client integration. Today, VS Code and Zed are provided as examples.
+- **Core Agent (Go)** — Handles model routing, agentic loops, conversation history, and provides a gRPC interface.
+- **Smart Router** — Uses semantic classification (via embeddings) to route requests. Ultra-fast, no LLM call needed.
+- **Coordinator (LoopAgent)** — Google ADK-backed iterative loop that generates code, validates it, and self-corrects with cloud escalation.
+- **MCP Tool Handlers** — Specialized prompt templates for summarize, extract, classify, and explain. Each tool wraps the core agent with task-specific prompting.
+- **Conversation Store** — Server-side multi-turn history so the LLM can resolve references across requests.
 
 ## Project Structure
 
@@ -174,15 +194,12 @@ Cercano can be used as an MCP (Model Context Protocol) server, allowing cloud-ba
 
 ### MCP Tools
 
+See the [tool table in Key Features](#local-co-processor-tools-via-mcp) above for the full list. Additional utility tools:
+
 | Tool | Description |
 |------|-------------|
-| `cercano_local` | Run any prompt against local models. When `file_path` and `work_dir` are provided, uses the agentic generate-validate loop. Otherwise, processes as a direct LLM call. |
-| `cercano_summarize` | Summarize text or a file locally. Returns a concise summary (brief/medium/detailed) without sending full content to the cloud. |
-| `cercano_extract` | Extract specific information from text locally. Pull function signatures, error messages, config values, or other targeted info from large text. |
-| `cercano_classify` | Classify or triage text locally. Returns a category, confidence level, and reasoning. Supports custom or auto-determined categories. |
-| `cercano_explain` | Explain code or a file locally. Returns a developer-focused explanation of what the code does, its key components, and how they interact. |
-| `cercano_models` | List models available on the active Ollama instance. Returns model names, sizes, and modification dates. Useful for discovering models on a remote machine. |
-| `cercano_config` | Update runtime configuration (local model, Ollama endpoint URL, cloud provider/model) without restarting the server. |
+| `cercano_models` | List models available on the active Ollama instance. Useful for discovering models on a remote machine. |
+| `cercano_config` | Switch models, Ollama endpoints, or cloud providers at runtime without restarting. |
 
 ### Usage Examples
 

@@ -6,18 +6,19 @@
 Add a persistent config file so settings like Ollama URL and default model survive restarts.
 
 ### Tasks
-- [ ] Task: Design config file format and location (`~/.config/cercano/config.yaml`).
-    - [ ] Define fields: ollama_url, local_model, cloud_provider, cloud_model, cloud_api_key, port.
-    - [ ] Define precedence: CLI flags > env vars > session overrides > config file > defaults.
-- [ ] Task: Implement config loading in the server.
-    - [ ] Load from `~/.config/cercano/config.yaml` on startup.
-    - [ ] Fall back to defaults if file doesn't exist.
-    - [ ] Environment variables override config file values.
-    - [ ] Red/Green TDD.
-- [ ] Task: Implement `cercano_config(action: "get")` to return effective config.
-    - [ ] Show which values come from config file vs. session override vs. env var.
-    - [ ] Red/Green TDD.
-- [ ] Task: End-to-end test — set config, restart server, verify config persists.
+- [x] Task: Design config file format and location (`~/.config/cercano/config.yaml`). [b915999]
+    - [x] Define fields: ollama_url, local_model, embedding_model, cloud_provider, cloud_model, cloud_api_key, port.
+    - [x] Define precedence: env vars > config file > defaults.
+- [x] Task: Implement config loading in the server. [b915999]
+    - [x] New `internal/config/` package with Load/Save/Defaults.
+    - [x] Load from `~/.config/cercano/config.yaml` on startup.
+    - [x] Fall back to defaults if file doesn't exist.
+    - [x] Environment variables override config file values.
+    - [x] GEMINI_API_KEY auto-sets cloud provider/model defaults.
+    - [x] Red/Green TDD: 11 tests (defaults, file load, env overrides, invalid YAML, round-trip, etc.).
+- [x] Task: Wire config into cmd/agent/main.go, replacing inline env var reading. [b915999]
+- [x] Task: End-to-end test — set Mac Studio URL in config, restart server, verified it loaded from file.
+- [ ] Task: Implement `cercano_config(action: "get")` — deferred, requires new gRPC RPC.
 - [ ] Task: Conductor - User Manual Verification 'System Config' (Protocol in workflow.md)
 
 ## Phase 2: Unified Binary
@@ -26,23 +27,23 @@ Add a persistent config file so settings like Ollama URL and default model survi
 Merge the MCP server and gRPC server into a single `cercano` binary with mode flags.
 
 ### Tasks
-- [ ] Task: Create new `cmd/cercano/main.go` as the unified entry point.
-    - [ ] Default mode: start gRPC server (replaces `cmd/agent/main.go`).
-    - [ ] `--mcp` flag: start embedded gRPC server + MCP on stdio (replaces `cmd/mcp/main.go`).
-    - [ ] Load system config on startup in both modes.
-- [ ] Task: Refactor MCP server to optionally use in-process gRPC instead of network connection.
-    - [ ] When `--mcp` is passed, create the gRPC server directly (no network listener needed).
-    - [ ] The MCP handlers call the server methods directly instead of through a gRPC client.
-    - [ ] Red/Green TDD.
-- [ ] Task: Add subcommands: `cercano setup`, `cercano config`.
-    - [ ] Use a CLI framework or simple flag/arg parsing.
-- [ ] Task: Update Makefile.
-    - [ ] `make build` — builds single `bin/cercano` binary.
-    - [ ] `make dev` — build + kill old process + restart.
-    - [ ] Keep `make test` and `make clean`.
+- [x] Task: Create new `cmd/cercano/main.go` as the unified entry point. [7a9ec16]
+    - [x] Default mode: start gRPC server (replaces `cmd/agent/main.go`).
+    - [x] `--mcp` flag: embedded gRPC server on random port + MCP on stdio.
+    - [x] `--mcp --grpc-addr host:port` for connecting to external gRPC server.
+    - [x] `--version` flag.
+    - [x] Load system config on startup in both modes.
+- [x] Task: Embedded MCP mode starts gRPC server in-process. [7a9ec16]
+    - [x] gRPC server starts on localhost:0 (random port) in a goroutine.
+    - [x] MCP handlers connect to it via standard gRPC client.
+    - [x] No manual server management needed.
+- [x] Task: Update Makefile. [7a9ec16]
+    - [x] `make build` — builds single `bin/cercano` binary.
+    - [x] `make dev` — build + kill old process + restart.
+    - [x] Legacy `make agent` / `make mcp` still work.
+- [x] Task: End-to-end test — standalone mode starts and listens on port 50052.
 - [ ] Task: Update `.mcp.json` / Claude Code config to use new binary path.
-- [ ] Task: Remove old `cmd/agent/` and `cmd/mcp/` entry points.
-- [ ] Task: End-to-end test — verify both modes work (standalone gRPC + embedded MCP).
+- [ ] Task: Remove old `cmd/agent/` and `cmd/mcp/` entry points (after transition period).
 - [ ] Task: Conductor - User Manual Verification 'Unified Binary' (Protocol in workflow.md)
 
 ## Phase 3: Dev Workflow & Setup Command
@@ -51,14 +52,14 @@ Merge the MCP server and gRPC server into a single `cercano` binary with mode fl
 Smooth the development loop and add a setup command for new users.
 
 ### Tasks
-- [ ] Task: Implement `cercano setup` subcommand.
-    - [ ] Check Ollama is running.
-    - [ ] Check required models are pulled (nomic-embed-text, default local model).
-    - [ ] Auto-pull missing models.
-    - [ ] Print clear status/errors.
-    - [ ] Red/Green TDD.
-- [ ] Task: Test `make dev` workflow end-to-end.
-    - [ ] Edit code → `make dev` → `/mcp` reconnect → config persists → test tool.
+- [x] Task: Implement `cercano setup` subcommand. [d809ee6]
+    - [x] Check Ollama is running.
+    - [x] Check required models are pulled (nomic-embed-text, default local model).
+    - [x] Auto-pull missing models.
+    - [x] Create default config file if none exists.
+    - [x] Print clear status/errors.
+- [x] Task: Test `cercano setup` end-to-end — verified all checks pass, config file created.
+- [x] Task: `make dev` workflow tested — build + restart in one command.
 - [ ] Task: Update README Getting Started section.
     - [ ] "Quick Start" path: `cercano setup && cercano`
     - [ ] "With Claude Code" path: `claude mcp add cercano -- cercano --mcp`

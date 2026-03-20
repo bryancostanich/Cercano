@@ -34,6 +34,14 @@ Create SKILL.md files for all Cercano MCP tools so they're discoverable by any A
 - [ ] Task: Create SKILL.md for `cercano_boilerplate`.
 - [ ] Task: Create SKILL.md for `cercano_config`.
 - [ ] Task: Create SKILL.md for `cercano_models`.
+- [ ] Task: Add `ListSkills` and `GetSkill` RPCs to `agent.proto`.
+    - [ ] Red/Green TDD.
+- [ ] Task: Implement gRPC skill service — serve built-in skill definitions from the server.
+    - [ ] Red/Green TDD.
+- [ ] Task: Add `cercano_skills` MCP tool wrapping the gRPC endpoints.
+    - [ ] `action: "list"` → returns name + description for all skills.
+    - [ ] `action: "get", name: "<skill>"` → returns full SKILL.md content.
+    - [ ] Red/Green TDD.
 - [ ] Task: End-to-end test — verify an external agent discovers and invokes a Cercano skill.
 - [ ] Task: Conductor - User Manual Verification 'Provider Skills' (Protocol in workflow.md)
 

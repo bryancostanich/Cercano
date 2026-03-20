@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"cercano/source/server/internal/tools"
+	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/llm"
 )
 
@@ -24,7 +25,7 @@ func TestGenericGenerator_Integration_GenerateValidCode(t *testing.T) {
 
 	// Assume Ollama is running at localhost:11434
 	// We use a known small coding model. Ensure this model is pulled in Ollama.
-	provider := llm.NewOllamaProvider(integrationTestModelName, "http://localhost:11434")
+	provider := llm.NewLocalModelProvider(ollama.NewOllamaEngine("http://localhost:11434"), integrationTestModelName)
 	handler := tools.NewGenericGenerator(provider)
 
 	// Input: A simple Go function

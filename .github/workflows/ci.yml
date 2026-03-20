@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: source/server
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: source/server/go.mod
+          cache-dependency-path: source/server/go.sum
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build binary
+        run: go build -ldflags "-X main.version=ci-${{ github.sha }}" -o bin/cercano ./cmd/cercano

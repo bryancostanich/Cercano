@@ -28,7 +28,9 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-const version = "0.4.0"
+// version is set at build time via -ldflags "-X main.version=...".
+// Falls back to "dev" for local builds.
+var version = "dev"
 
 func checkOllama(baseURL string) error {
 	client := &http.Client{Timeout: 5 * time.Second}

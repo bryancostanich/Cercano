@@ -72,17 +72,17 @@ Smooth the development loop and add a setup command for new users.
 Automated testing on PRs and release binaries on tagged commits.
 
 ### Tasks
-- [ ] Task: Create `.github/workflows/ci.yml`.
-    - [ ] Trigger on push to `main` and on pull requests.
-    - [ ] Run `go test ./...` in `source/server/`.
-    - [ ] Build binary to verify compilation.
-    - [ ] Cache Go modules.
-- [ ] Task: Create `.github/workflows/release.yml`.
-    - [ ] Trigger on pushed tags matching `v*`.
-    - [ ] Build cross-platform binaries: macOS arm64, macOS amd64, Linux amd64.
-    - [ ] Create GitHub Release with binaries attached.
-- [ ] Task: Add version injection via `-ldflags` at build time.
-    - [ ] `cercano --version` prints the version.
+- [x] Task: Create `.github/workflows/ci.yml`.
+    - [x] Trigger on push to `main` and on pull requests.
+    - [x] Run `go test ./...` in `source/server/`.
+    - [x] Build binary to verify compilation.
+    - [x] Cache Go modules.
+- [x] Task: Create `.github/workflows/release.yml`.
+    - [x] Trigger on pushed tags matching `v*`.
+    - [x] Build cross-platform binaries: macOS arm64, macOS amd64, Linux amd64.
+    - [x] Create GitHub Release with binaries attached.
+- [x] Task: Add version injection via `-ldflags` at build time.
+    - [x] `cercano --version` prints the version.
 - [ ] Task: Test the full release workflow with a test tag.
 - [ ] Task: Conductor - User Manual Verification 'CI/CD Pipeline' (Protocol in workflow.md)
 

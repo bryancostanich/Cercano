@@ -19,7 +19,7 @@ Understand the Agent Skills specification in depth, review how other agents impl
 - [x] Task: Design the consumer architecture — how Cercano discovers and activates external skills. `d305c15`
 - [x] Task: Conductor - User Manual Verification 'Research & Design' (Protocol in workflow.md)
 
-## Phase 2: Provider — Package Cercano Tools as Skills
+## Phase 2: Provider — Package Cercano Tools as Skills [checkpoint: 7d23254]
 
 ### Objective
 Create SKILL.md files for all Cercano MCP tools so they're discoverable by any Agent Skills-compatible agent.

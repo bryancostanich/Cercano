@@ -49,6 +49,14 @@ func (m *mockAgentClient) UpdateConfig(ctx context.Context, in *proto.UpdateConf
 	return &proto.UpdateConfigResponse{Success: true, Message: "Configuration updated"}, m.configErr
 }
 
+func (m *mockAgentClient) ListSkills(ctx context.Context, in *proto.ListSkillsRequest, opts ...grpc.CallOption) (*proto.ListSkillsResponse, error) {
+	return &proto.ListSkillsResponse{}, nil
+}
+
+func (m *mockAgentClient) GetSkill(ctx context.Context, in *proto.GetSkillRequest, opts ...grpc.CallOption) (*proto.GetSkillResponse, error) {
+	return &proto.GetSkillResponse{}, nil
+}
+
 func TestNewServer_RegistersTools(t *testing.T) {
 	mock := &mockAgentClient{}
 	s := NewServer(mock)

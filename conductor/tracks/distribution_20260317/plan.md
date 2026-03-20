@@ -66,7 +66,7 @@ Smooth the development loop and add a setup command for new users.
     - [ ] "Developer" path: `make dev`
 - [x] Task: Conductor - User Manual Verification 'Dev Workflow & Setup' (Protocol in workflow.md)
 
-## Phase 4: CI/CD Pipeline
+## Phase 4: CI/CD Pipeline [checkpoint: 2dc1aa9]
 
 ### Objective
 Automated testing on PRs and release binaries on tagged commits.

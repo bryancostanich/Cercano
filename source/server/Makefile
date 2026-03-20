@@ -1,8 +1,11 @@
 .PHONY: all build agent mcp dev clean test
 
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X main.version=$(VERSION)
+
 # Unified binary (preferred)
 build:
-	go build -o bin/cercano ./cmd/cercano
+	go build -ldflags "$(LDFLAGS)" -o bin/cercano ./cmd/cercano
 
 # Legacy binaries (kept for backwards compatibility)
 all: build agent mcp

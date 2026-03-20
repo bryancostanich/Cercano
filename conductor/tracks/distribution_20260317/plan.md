@@ -100,7 +100,7 @@ Let macOS users install Cercano with `brew install`.
     - [x] Install to `bin/cercano`.
     - [x] Add caveats about Ollama dependency.
     - [ ] Switch to GitHub Release binary download when repo is public.
-- [ ] Task: Test `brew install` → `cercano setup` → `cercano` end-to-end. Blocked on Xcode update.
+- [x] Task: Test `brew install` → `cercano setup` → `cercano` end-to-end.
 - [ ] Task: Update README with `brew install` instructions. Deferred until repo is public.
 - [ ] Task: Conductor - User Manual Verification 'Homebrew Distribution' (Protocol in workflow.md)
 

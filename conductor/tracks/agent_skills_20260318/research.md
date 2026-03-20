@@ -158,9 +158,29 @@ Cercano Server
         └── Route invocations per SKILL.md instructions
 ```
 
+### Dynamic Skill Discovery via gRPC + MCP
+
+In addition to static SKILL.md files, Cercano will serve its skill catalog dynamically — following the same architecture pattern as all other Cercano tools (MCP wraps gRPC).
+
+**gRPC layer** — Add `ListSkills` and `GetSkill` RPCs to `agent.proto`:
+- `ListSkills()` → returns name + description for all available skills (catalog tier)
+- `GetSkill(name)` → returns full SKILL.md content for a specific skill (instructions tier)
+
+**MCP layer** — Add a `cercano_skills` tool wrapping the gRPC calls:
+- `cercano_skills(action: "list")` → catalog of all skills
+- `cercano_skills(action: "get", name: "cercano-summarize")` → full skill definition
+
+**Why this matters for distribution:**
+Agents already connected to Cercano via MCP can discover skills dynamically through the connection — no file installation step needed. The static SKILL.md files remain as a fallback for filesystem-based discovery by agents that aren't connected to Cercano.
+
+**Two discovery paths:**
+1. **Dynamic** — Agent connects to Cercano MCP → calls `cercano_skills` → gets skill catalog
+2. **Static** — Agent scans `.agents/skills/` or `.claude/skills/` directories for SKILL.md files
+
 ### Distribution (Deferred to Phase 4)
 
 Open questions tracked in plan.md:
 - How do skills get from brew install to agent-discoverable directories?
 - Auto-detect installed agents vs. manual `cercano skills install`?
 - Symlinks vs. copies?
+- Dynamic discovery via `cercano_skills` MCP tool may reduce the need for file-based distribution

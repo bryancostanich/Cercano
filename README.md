@@ -97,40 +97,43 @@ Cercano can run as a standalone gRPC server (for IDE clients) or embedded inside
 ### Prerequisites
 
 - [Go](https://go.dev/dl/) (1.21+)
-- [Ollama](https://ollama.com/) with the following models pulled:
-  ```bash
-  ollama pull qwen3-coder
-  ollama pull nomic-embed-text
-  ```
-- [VS Code](https://code.visualstudio.com/) (1.90+)
-- [Node.js](https://nodejs.org/) (20+) and npm
+- [Ollama](https://ollama.com/) running locally
 
 ### Quick Start
 
-1. Clone the repository:
+```bash
+git clone https://github.com/bryan-costanich/Cercano.git
+cd Cercano/source/server
+make build
+bin/cercano setup    # checks Ollama, pulls required models, creates config
+bin/cercano          # starts the gRPC server
+```
+
+### Use with Claude Code
+
+```bash
+claude mcp add --transport stdio cercano -- /path/to/bin/cercano --mcp
+```
+
+Or add to your project's `.mcp.json`. In `--mcp` mode, Cercano starts an embedded gRPC server — no separate server needed.
+
+### Use with VS Code
+
+1. Install the VS Code extension dependencies:
    ```bash
-   git clone https://github.com/bryan-costanich/Cercano.git
-   cd Cercano
+   cd source/clients/vscode && npm install
    ```
+2. Open `source/clients/vscode` in VS Code and press **F5** to launch.
+3. In the Extension Development Host, open the Chat panel and type `@cercano` followed by your question.
 
-2. Install the VS Code extension dependencies:
-   ```bash
-   cd source/clients/vscode
-   npm install
-   ```
+### Developer Workflow
 
-3. Open the VS Code extension workspace:
-   ```bash
-   code source/clients/vscode
-   ```
+```bash
+cd source/server
+make dev    # build + restart in one command
+```
 
-4. Press **F5** to launch. This will:
-   - Build the Go server binary
-   - Compile the TypeScript extension
-   - Open a new VS Code window (Extension Development Host)
-   - Automatically start the Cercano server (with Ollama pre-flight check)
-
-5. In the Extension Development Host, open the Chat panel and type `@cercano` followed by your question.
+System config at `~/.config/cercano/config.yaml` persists across restarts (Ollama URL, model, port, etc.).
 
 ### Cloud Provider Setup (Optional)
 
@@ -160,17 +163,17 @@ Cercano can be used as an MCP (Model Context Protocol) server, allowing cloud-ba
 
 ### Setup
 
-1. Build the MCP server:
+1. Build Cercano:
    ```bash
    cd source/server
-   make mcp
+   make build
    ```
 
 2. Add to Claude Code (choose one):
 
    **Via CLI:**
    ```bash
-   claude mcp add --transport stdio cercano -- /path/to/Cercano/source/server/bin/cercano-mcp --grpc-addr localhost:50052
+   claude mcp add --transport stdio cercano -- /path/to/Cercano/source/server/bin/cercano --mcp
    ```
 
    **Via `.mcp.json` (project scope):**
@@ -179,18 +182,14 @@ Cercano can be used as an MCP (Model Context Protocol) server, allowing cloud-ba
      "mcpServers": {
        "cercano": {
          "type": "stdio",
-         "command": "/path/to/Cercano/source/server/bin/cercano-mcp",
-         "args": ["--grpc-addr", "localhost:50052"]
+         "command": "/path/to/Cercano/source/server/bin/cercano",
+         "args": ["--mcp"]
        }
      }
    }
    ```
 
-3. Ensure the Cercano gRPC server is running:
-   ```bash
-   cd source/server
-   make agent && bin/agent
-   ```
+   In `--mcp` mode, Cercano starts an embedded gRPC server automatically — no separate server process needed.
 
 ### MCP Tools
 

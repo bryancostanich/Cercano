@@ -1,6 +1,6 @@
 # Track Plan: User-Friendly Distribution
 
-## Phase 1: System Config
+## Phase 1: System Config [checkpoint: 3f7021d]
 
 ### Objective
 Add a persistent config file so settings like Ollama URL and default model survive restarts.
@@ -19,9 +19,9 @@ Add a persistent config file so settings like Ollama URL and default model survi
 - [x] Task: Wire config into cmd/agent/main.go, replacing inline env var reading. [b915999]
 - [x] Task: End-to-end test — set Mac Studio URL in config, restart server, verified it loaded from file.
 - [ ] Task: Implement `cercano_config(action: "get")` — deferred, requires new gRPC RPC.
-- [ ] Task: Conductor - User Manual Verification 'System Config' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'System Config' (Protocol in workflow.md)
 
-## Phase 2: Unified Binary
+## Phase 2: Unified Binary [checkpoint: 3f7021d]
 
 ### Objective
 Merge the MCP server and gRPC server into a single `cercano` binary with mode flags.
@@ -44,9 +44,9 @@ Merge the MCP server and gRPC server into a single `cercano` binary with mode fl
 - [x] Task: End-to-end test — standalone mode starts and listens on port 50052.
 - [ ] Task: Update `.mcp.json` / Claude Code config to use new binary path.
 - [ ] Task: Remove old `cmd/agent/` and `cmd/mcp/` entry points (after transition period).
-- [ ] Task: Conductor - User Manual Verification 'Unified Binary' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Unified Binary' (Protocol in workflow.md)
 
-## Phase 3: Dev Workflow & Setup Command
+## Phase 3: Dev Workflow & Setup Command [checkpoint: 3f7021d]
 
 ### Objective
 Smooth the development loop and add a setup command for new users.
@@ -64,27 +64,27 @@ Smooth the development loop and add a setup command for new users.
     - [ ] "Quick Start" path: `cercano setup && cercano`
     - [ ] "With Claude Code" path: `claude mcp add cercano -- cercano --mcp`
     - [ ] "Developer" path: `make dev`
-- [ ] Task: Conductor - User Manual Verification 'Dev Workflow & Setup' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Dev Workflow & Setup' (Protocol in workflow.md)
 
-## Phase 4: CI/CD Pipeline
+## Phase 4: CI/CD Pipeline [checkpoint: 2dc1aa9]
 
 ### Objective
 Automated testing on PRs and release binaries on tagged commits.
 
 ### Tasks
-- [ ] Task: Create `.github/workflows/ci.yml`.
-    - [ ] Trigger on push to `main` and on pull requests.
-    - [ ] Run `go test ./...` in `source/server/`.
-    - [ ] Build binary to verify compilation.
-    - [ ] Cache Go modules.
-- [ ] Task: Create `.github/workflows/release.yml`.
-    - [ ] Trigger on pushed tags matching `v*`.
-    - [ ] Build cross-platform binaries: macOS arm64, macOS amd64, Linux amd64.
-    - [ ] Create GitHub Release with binaries attached.
-- [ ] Task: Add version injection via `-ldflags` at build time.
-    - [ ] `cercano --version` prints the version.
-- [ ] Task: Test the full release workflow with a test tag.
-- [ ] Task: Conductor - User Manual Verification 'CI/CD Pipeline' (Protocol in workflow.md)
+- [x] Task: Create `.github/workflows/ci.yml`.
+    - [x] Trigger on push to `main` and on pull requests.
+    - [x] Run `go test ./...` in `source/server/`.
+    - [x] Build binary to verify compilation.
+    - [x] Cache Go modules.
+- [x] Task: Create `.github/workflows/release.yml`.
+    - [x] Trigger on pushed tags matching `v*`.
+    - [x] Build cross-platform binaries: macOS arm64, macOS amd64, Linux amd64.
+    - [x] Create GitHub Release with binaries attached.
+- [x] Task: Add version injection via `-ldflags` at build time.
+    - [x] `cercano --version` prints the version.
+- [x] Task: Test the full release workflow with a test tag. [v0.5.0-rc1]
+- [x] Task: Conductor - User Manual Verification 'CI/CD Pipeline' (Protocol in workflow.md)
 
 ## Phase 5: Homebrew Distribution
 
@@ -92,22 +92,16 @@ Automated testing on PRs and release binaries on tagged commits.
 Let macOS users install Cercano with `brew install`.
 
 ### Tasks
-- [ ] Task: Create a Homebrew tap repo (`homebrew-cercano`).
-- [ ] Task: Write the Homebrew formula.
-    - [ ] Download release binary from GitHub Releases.
-    - [ ] Install to `bin/cercano`.
-    - [ ] Add caveats about Ollama dependency.
-- [ ] Task: Test `brew install` → `cercano setup` → `cercano` end-to-end.
-- [ ] Task: Update README with `brew install` instructions.
+- [ ] Task: Create a Homebrew tap repo (`homebrew-cercano`). Deferred until repo is public.
+    - [x] Private repo created on GitHub (can be deleted/recreated when ready).
+    - [x] Local tap (`cercano/local`) used for testing.
+- [x] Task: Write the Homebrew formula. [source/server/Formula/cercano.rb]
+    - [x] Builds from source via `go build` with ldflags version injection.
+    - [x] Install to `bin/cercano`.
+    - [x] Add caveats about Ollama dependency.
+    - [ ] Switch to GitHub Release binary download when repo is public.
+- [x] Task: Test `brew install` → `cercano setup` → `cercano` end-to-end.
+- [ ] Task: Update README with `brew install` instructions. Deferred until repo is public.
 - [ ] Task: Conductor - User Manual Verification 'Homebrew Distribution' (Protocol in workflow.md)
 
-## Phase 6 (Stretch): Docker
-
-### Objective
-Docker image for headless/LAN server deployments. Not blocking track completion.
-
-### Tasks
-- [ ] Task: Create multi-stage `Dockerfile` (golang build + alpine runtime).
-- [ ] Task: Create `docker-compose.yml` with Ollama networking.
-- [ ] Task: Verify `docker compose up` connects to host Ollama.
-- [ ] Task: Conductor - User Manual Verification 'Docker' (Protocol in workflow.md)
+> **Note:** Docker phase moved to its own track: `conductor/tracks/docker_20260320/`

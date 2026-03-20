@@ -17,6 +17,12 @@ service Agent {
 
   // ListModels returns the models available on the active Ollama instance.
   rpc ListModels (ListModelsRequest) returns (ListModelsResponse) {}
+
+  // ListSkills returns the catalog of available Agent Skills (name + description).
+  rpc ListSkills (ListSkillsRequest) returns (ListSkillsResponse) {}
+
+  // GetSkill returns the full SKILL.md content for a specific skill by name.
+  rpc GetSkill (GetSkillRequest) returns (GetSkillResponse) {}
 }
 
 // Incremental token from LLM streaming.
@@ -45,6 +51,7 @@ message ProcessRequestRequest {
   string work_dir = 3;  // Optional working directory for agentic tasks
   string file_name = 4; // Optional filename for agentic tasks
   string conversation_id = 5; // Optional conversation ID for multi-turn history
+  bool direct_local = 6; // Skip SmartRouter, go directly to local provider
 }
 
 // Runtime configuration update request.
@@ -106,4 +113,29 @@ message ModelInfo {
 // Response containing available models.
 message ListModelsResponse {
   repeated ModelInfo models = 1;
+}
+
+// Request to list available Agent Skills.
+message ListSkillsRequest {}
+
+// A single skill in the catalog.
+message SkillInfo {
+  string name = 1;          // Skill name (matches directory name)
+  string description = 2;   // What the skill does and when to use it
+}
+
+// Response containing available skills.
+message ListSkillsResponse {
+  repeated SkillInfo skills = 1;
+}
+
+// Request to get a specific skill's full definition.
+message GetSkillRequest {
+  string name = 1; // Skill name to retrieve
+}
+
+// Response containing the full skill definition.
+message GetSkillResponse {
+  string name = 1;        // Skill name
+  string content = 2;     // Full SKILL.md file content
 }

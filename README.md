@@ -293,6 +293,56 @@ cercano_local(prompt: "How does it handle escalation?", conversation_id: "abc123
 |------|---------|-------------|
 | `--grpc-addr` | `localhost:50052` | Address of the Cercano gRPC server |
 
+## Agent Skills
+
+Cercano publishes its tools as [Agent Skills](https://agentskills.io) — an open standard for packaging AI capabilities so they're discoverable by any compatible agent. Over 30 agents support this standard, including Claude Code, Cursor, Copilot, Gemini CLI, Codex, and more.
+
+### Published Skills
+
+| Skill | Description |
+|-------|-------------|
+| `cercano-local` | General-purpose local inference — chat queries and agentic code generation |
+| `cercano-summarize` | Summarize text or files locally (brief, medium, or detailed) |
+| `cercano-extract` | Pull specific information from text (errors, signatures, config values) |
+| `cercano-classify` | Categorize/triage text with confidence scores and reasoning |
+| `cercano-explain` | Explain code — what it does, key interfaces, and data flow |
+| `cercano-config` | View/change Cercano's runtime configuration |
+| `cercano-models` | List available models on the connected Ollama instance |
+
+Each skill is a `SKILL.md` file that tells the agent what the tool does, its parameters, and how to invoke it via MCP.
+
+### How Agents Discover Skills
+
+Agents scan well-known directories for `SKILL.md` files at startup:
+
+| Directory | Discovered by |
+|-----------|---------------|
+| `.agents/skills/<skill-name>/SKILL.md` | Any Agent Skills-compatible agent |
+| `.claude/skills/<skill-name>/SKILL.md` | Claude Code (also appears as slash commands) |
+
+Cercano ships its skill definitions in both locations.
+
+### Installing Skills in Your Project
+
+To make Cercano's skills available to your agent, copy the skill files into your project:
+
+```bash
+# For any Agent Skills-compatible agent
+cp -r /path/to/Cercano/.agents/skills/* .agents/skills/
+
+# For Claude Code specifically (enables /cercano-* slash commands)
+cp -r /path/to/Cercano/.claude/skills/* .claude/skills/
+```
+
+The `cercano_skills` MCP tool also provides programmatic access to skill definitions:
+
+```
+cercano_skills(action: "list")           → catalog of all skills
+cercano_skills(action: "get", name: "cercano-local")  → full SKILL.md content
+```
+
+For a detailed guide on writing custom SKILL.md files, see [docs/agent-skills-guide.md](docs/agent-skills-guide.md).
+
 ## Remote Inference
 
 Cercano can delegate inference to a remote Ollama instance — for example, a Mac Studio on your LAN with more GPU memory and larger models. The remote endpoint is runtime-configurable with automatic fallback to local Ollama if the remote goes down.
@@ -361,7 +411,7 @@ make test   # Run all tests
 * **[Competitive Audit — Agent Features Landscape](conductor/tracks/competitive_audit_20260318/plan.md)** - Feature matrix across 12+ open-source and commercial agents (Codex, Aider, Continue, Cody, OpenHands, SWE-Agent, Claude Code, Cursor, Windsurf, GitHub Copilot, JetBrains AI, Amazon Q) to inform Cercano's tool design and roadmap.
 * **[Local Co-Processor Tools](conductor/tracks/local_coprocessor_tools_20260318/plan.md)** *(in progress)* - Specialized MCP tools that make Cercano a local co-processor for cloud agents. Summarize, extract, classify, and explain content locally — faster, cheaper, and more private. Four tools shipped, README update pending.
 * **[Semantic Codebase Search](conductor/tracks/semantic_search_20260318/plan.md)** - Embedding-based code search by intent ("find auth-related code"), not just string matching. Requires indexing pipeline, storage, and nearest-neighbor retrieval.
-* **[Agent Skills Integration](conductor/tracks/agent_skills_20260318/plan.md)** - Adopt the [Agent Skills](https://agentskills.io) open standard (SKILL.md) to package Cercano's tools as discoverable skills for 25+ compatible agents, and enable Cercano to consume community/enterprise skills.
+* **[Agent Skills Integration](conductor/tracks/agent_skills_20260318/plan.md)** *(provider complete)* - Cercano's 7 MCP tools are published as [Agent Skills](https://agentskills.io) (SKILL.md), discoverable by 30+ compatible agents. Consumer-side skill discovery deferred pending real-world testing with third-party skills.
 * **[User-Friendly Distribution](conductor/tracks/distribution_20260317/plan.md)** - Setup/launch scripts, Docker containerization, and CI/CD pipeline with GitHub Actions for automated cross-platform releases.
 * **[AI Engine Agnosticism](conductor/tracks/engine_agnosticism_20260317/plan.md)** - Abstract the local inference layer to support pluggable backends (ONNX Runtime, Enso, etc.) beyond Ollama.
 * **Add Gemma Support** - Add Google's Gemma models to the supported local model list for Ollama.

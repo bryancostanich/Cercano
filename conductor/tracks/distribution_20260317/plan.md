@@ -84,7 +84,7 @@ Automated testing on PRs and release binaries on tagged commits.
 - [x] Task: Add version injection via `-ldflags` at build time.
     - [x] `cercano --version` prints the version.
 - [x] Task: Test the full release workflow with a test tag. [v0.5.0-rc1]
-- [ ] Task: Conductor - User Manual Verification 'CI/CD Pipeline' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'CI/CD Pipeline' (Protocol in workflow.md)
 
 ## Phase 5: Homebrew Distribution
 

@@ -818,6 +818,239 @@ func (x *ListModelsResponse) GetModels() []*ModelInfo {
 	return nil
 }
 
+// Request to list available Agent Skills.
+type ListSkillsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListSkillsRequest) Reset() {
+	*x = ListSkillsRequest{}
+	mi := &file_source_proto_agent_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListSkillsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListSkillsRequest) ProtoMessage() {}
+
+func (x *ListSkillsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_source_proto_agent_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListSkillsRequest.ProtoReflect.Descriptor instead.
+func (*ListSkillsRequest) Descriptor() ([]byte, []int) {
+	return file_source_proto_agent_proto_rawDescGZIP(), []int{12}
+}
+
+// A single skill in the catalog.
+type SkillInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`               // Skill name (matches directory name)
+	Description   string                 `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"` // What the skill does and when to use it
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SkillInfo) Reset() {
+	*x = SkillInfo{}
+	mi := &file_source_proto_agent_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SkillInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SkillInfo) ProtoMessage() {}
+
+func (x *SkillInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_source_proto_agent_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SkillInfo.ProtoReflect.Descriptor instead.
+func (*SkillInfo) Descriptor() ([]byte, []int) {
+	return file_source_proto_agent_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *SkillInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SkillInfo) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+// Response containing available skills.
+type ListSkillsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Skills        []*SkillInfo           `protobuf:"bytes,1,rep,name=skills,proto3" json:"skills,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListSkillsResponse) Reset() {
+	*x = ListSkillsResponse{}
+	mi := &file_source_proto_agent_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListSkillsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListSkillsResponse) ProtoMessage() {}
+
+func (x *ListSkillsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_source_proto_agent_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListSkillsResponse.ProtoReflect.Descriptor instead.
+func (*ListSkillsResponse) Descriptor() ([]byte, []int) {
+	return file_source_proto_agent_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ListSkillsResponse) GetSkills() []*SkillInfo {
+	if x != nil {
+		return x.Skills
+	}
+	return nil
+}
+
+// Request to get a specific skill's full definition.
+type GetSkillRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"` // Skill name to retrieve
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetSkillRequest) Reset() {
+	*x = GetSkillRequest{}
+	mi := &file_source_proto_agent_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetSkillRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetSkillRequest) ProtoMessage() {}
+
+func (x *GetSkillRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_source_proto_agent_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetSkillRequest.ProtoReflect.Descriptor instead.
+func (*GetSkillRequest) Descriptor() ([]byte, []int) {
+	return file_source_proto_agent_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *GetSkillRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+// Response containing the full skill definition.
+type GetSkillResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`       // Skill name
+	Content       string                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"` // Full SKILL.md file content
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetSkillResponse) Reset() {
+	*x = GetSkillResponse{}
+	mi := &file_source_proto_agent_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetSkillResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetSkillResponse) ProtoMessage() {}
+
+func (x *GetSkillResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_source_proto_agent_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetSkillResponse.ProtoReflect.Descriptor instead.
+func (*GetSkillResponse) Descriptor() ([]byte, []int) {
+	return file_source_proto_agent_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *GetSkillResponse) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *GetSkillResponse) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
 var File_source_proto_agent_proto protoreflect.FileDescriptor
 
 const file_source_proto_agent_proto_rawDesc = "" +
@@ -879,7 +1112,18 @@ const file_source_proto_agent_proto_rawDesc = "" +
 	"\vmodified_at\x18\x03 \x01(\tR\n" +
 	"modifiedAt\">\n" +
 	"\x12ListModelsResponse\x12(\n" +
-	"\x06models\x18\x01 \x03(\v2\x10.agent.ModelInfoR\x06models*0\n" +
+	"\x06models\x18\x01 \x03(\v2\x10.agent.ModelInfoR\x06models\"\x13\n" +
+	"\x11ListSkillsRequest\"A\n" +
+	"\tSkillInfo\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription\">\n" +
+	"\x12ListSkillsResponse\x12(\n" +
+	"\x06skills\x18\x01 \x03(\v2\x10.agent.SkillInfoR\x06skills\"%\n" +
+	"\x0fGetSkillRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"@\n" +
+	"\x10GetSkillResponse\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
+	"\acontent\x18\x02 \x01(\tR\acontent*0\n" +
 	"\n" +
 	"FileAction\x12\n" +
 	"\n" +
@@ -887,13 +1131,16 @@ const file_source_proto_agent_proto_rawDesc = "" +
 	"\n" +
 	"\x06UPDATE\x10\x01\x12\n" +
 	"\n" +
-	"\x06DELETE\x10\x022\xc0\x02\n" +
+	"\x06DELETE\x10\x022\xc4\x03\n" +
 	"\x05Agent\x12O\n" +
 	"\x0eProcessRequest\x12\x1c.agent.ProcessRequestRequest\x1a\x1d.agent.ProcessRequestResponse\"\x00\x12V\n" +
 	"\x14StreamProcessRequest\x12\x1c.agent.ProcessRequestRequest\x1a\x1c.agent.StreamProcessResponse\"\x000\x01\x12I\n" +
 	"\fUpdateConfig\x12\x1a.agent.UpdateConfigRequest\x1a\x1b.agent.UpdateConfigResponse\"\x00\x12C\n" +
 	"\n" +
-	"ListModels\x12\x18.agent.ListModelsRequest\x1a\x19.agent.ListModelsResponse\"\x00B!Z\x1fcercano/source/server/pkg/protob\x06proto3"
+	"ListModels\x12\x18.agent.ListModelsRequest\x1a\x19.agent.ListModelsResponse\"\x00\x12C\n" +
+	"\n" +
+	"ListSkills\x12\x18.agent.ListSkillsRequest\x1a\x19.agent.ListSkillsResponse\"\x00\x12=\n" +
+	"\bGetSkill\x12\x16.agent.GetSkillRequest\x1a\x17.agent.GetSkillResponse\"\x00B!Z\x1fcercano/source/server/pkg/protob\x06proto3"
 
 var (
 	file_source_proto_agent_proto_rawDescOnce sync.Once
@@ -908,7 +1155,7 @@ func file_source_proto_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_source_proto_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_source_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_source_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_source_proto_agent_proto_goTypes = []any{
 	(FileAction)(0),                // 0: agent.FileAction
 	(*TokenDelta)(nil),             // 1: agent.TokenDelta
@@ -923,6 +1170,11 @@ var file_source_proto_agent_proto_goTypes = []any{
 	(*ListModelsRequest)(nil),      // 10: agent.ListModelsRequest
 	(*ModelInfo)(nil),              // 11: agent.ModelInfo
 	(*ListModelsResponse)(nil),     // 12: agent.ListModelsResponse
+	(*ListSkillsRequest)(nil),      // 13: agent.ListSkillsRequest
+	(*SkillInfo)(nil),              // 14: agent.SkillInfo
+	(*ListSkillsResponse)(nil),     // 15: agent.ListSkillsResponse
+	(*GetSkillRequest)(nil),        // 16: agent.GetSkillRequest
+	(*GetSkillResponse)(nil),       // 17: agent.GetSkillResponse
 }
 var file_source_proto_agent_proto_depIdxs = []int32{
 	3,  // 0: agent.StreamProcessResponse.progress:type_name -> agent.ProgressUpdate
@@ -932,19 +1184,24 @@ var file_source_proto_agent_proto_depIdxs = []int32{
 	9,  // 4: agent.ProcessRequestResponse.routing_metadata:type_name -> agent.RoutingMetadata
 	0,  // 5: agent.FileChange.action:type_name -> agent.FileAction
 	11, // 6: agent.ListModelsResponse.models:type_name -> agent.ModelInfo
-	4,  // 7: agent.Agent.ProcessRequest:input_type -> agent.ProcessRequestRequest
-	4,  // 8: agent.Agent.StreamProcessRequest:input_type -> agent.ProcessRequestRequest
-	5,  // 9: agent.Agent.UpdateConfig:input_type -> agent.UpdateConfigRequest
-	10, // 10: agent.Agent.ListModels:input_type -> agent.ListModelsRequest
-	7,  // 11: agent.Agent.ProcessRequest:output_type -> agent.ProcessRequestResponse
-	2,  // 12: agent.Agent.StreamProcessRequest:output_type -> agent.StreamProcessResponse
-	6,  // 13: agent.Agent.UpdateConfig:output_type -> agent.UpdateConfigResponse
-	12, // 14: agent.Agent.ListModels:output_type -> agent.ListModelsResponse
-	11, // [11:15] is the sub-list for method output_type
-	7,  // [7:11] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	14, // 7: agent.ListSkillsResponse.skills:type_name -> agent.SkillInfo
+	4,  // 8: agent.Agent.ProcessRequest:input_type -> agent.ProcessRequestRequest
+	4,  // 9: agent.Agent.StreamProcessRequest:input_type -> agent.ProcessRequestRequest
+	5,  // 10: agent.Agent.UpdateConfig:input_type -> agent.UpdateConfigRequest
+	10, // 11: agent.Agent.ListModels:input_type -> agent.ListModelsRequest
+	13, // 12: agent.Agent.ListSkills:input_type -> agent.ListSkillsRequest
+	16, // 13: agent.Agent.GetSkill:input_type -> agent.GetSkillRequest
+	7,  // 14: agent.Agent.ProcessRequest:output_type -> agent.ProcessRequestResponse
+	2,  // 15: agent.Agent.StreamProcessRequest:output_type -> agent.StreamProcessResponse
+	6,  // 16: agent.Agent.UpdateConfig:output_type -> agent.UpdateConfigResponse
+	12, // 17: agent.Agent.ListModels:output_type -> agent.ListModelsResponse
+	15, // 18: agent.Agent.ListSkills:output_type -> agent.ListSkillsResponse
+	17, // 19: agent.Agent.GetSkill:output_type -> agent.GetSkillResponse
+	14, // [14:20] is the sub-list for method output_type
+	8,  // [8:14] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_source_proto_agent_proto_init() }
@@ -963,7 +1220,7 @@ func file_source_proto_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_source_proto_agent_proto_rawDesc), len(file_source_proto_agent_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   12,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

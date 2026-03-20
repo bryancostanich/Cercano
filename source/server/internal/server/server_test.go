@@ -205,6 +205,85 @@ func TestUpdateConfig_OllamaURL_InvalidURL(t *testing.T) {
 	}
 }
 
+func TestListSkills(t *testing.T) {
+	srv := NewServer(nil, nil, nil, nil, nil)
+
+	resp, err := srv.ListSkills(context.Background(), &proto.ListSkillsRequest{})
+	if err != nil {
+		t.Fatalf("ListSkills failed: %v", err)
+	}
+	if len(resp.Skills) == 0 {
+		t.Fatal("Expected at least one skill, got none")
+	}
+
+	// Verify all expected skills are present
+	expectedSkills := map[string]bool{
+		"cercano-local":     false,
+		"cercano-models":    false,
+		"cercano-config":    false,
+		"cercano-summarize": false,
+		"cercano-extract":   false,
+		"cercano-classify":  false,
+		"cercano-explain":   false,
+	}
+
+	for _, skill := range resp.Skills {
+		if _, ok := expectedSkills[skill.Name]; ok {
+			expectedSkills[skill.Name] = true
+		}
+		if skill.Description == "" {
+			t.Errorf("Skill %q has empty description", skill.Name)
+		}
+	}
+
+	for name, found := range expectedSkills {
+		if !found {
+			t.Errorf("Expected skill %q not found in catalog", name)
+		}
+	}
+}
+
+func TestGetSkill(t *testing.T) {
+	srv := NewServer(nil, nil, nil, nil, nil)
+
+	resp, err := srv.GetSkill(context.Background(), &proto.GetSkillRequest{Name: "cercano-local"})
+	if err != nil {
+		t.Fatalf("GetSkill failed: %v", err)
+	}
+	if resp.Name != "cercano-local" {
+		t.Errorf("Expected name 'cercano-local', got %q", resp.Name)
+	}
+	if resp.Content == "" {
+		t.Error("Expected non-empty content")
+	}
+	// Content should contain the SKILL.md frontmatter
+	if !containsString(resp.Content, "name: cercano-local") {
+		t.Error("Content should contain frontmatter with name field")
+	}
+}
+
+func TestGetSkill_NotFound(t *testing.T) {
+	srv := NewServer(nil, nil, nil, nil, nil)
+
+	_, err := srv.GetSkill(context.Background(), &proto.GetSkillRequest{Name: "nonexistent-skill"})
+	if err == nil {
+		t.Fatal("Expected error for nonexistent skill, got nil")
+	}
+}
+
+func containsString(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstring(s, substr))
+}
+
+func containsSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
 func TestUpdateConfig_OllamaURL_WithModel(t *testing.T) {
 	provider := llm.NewOllamaProvider("test-model", "http://localhost:11434")
 	srv := NewServer(nil, provider, nil, nil, nil)

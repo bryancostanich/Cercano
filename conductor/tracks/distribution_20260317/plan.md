@@ -104,13 +104,4 @@ Let macOS users install Cercano with `brew install`.
 - [ ] Task: Update README with `brew install` instructions. Deferred until repo is public.
 - [ ] Task: Conductor - User Manual Verification 'Homebrew Distribution' (Protocol in workflow.md)
 
-## Phase 6 (Stretch): Docker
-
-### Objective
-Docker image for headless/LAN server deployments. Not blocking track completion.
-
-### Tasks
-- [ ] Task: Create multi-stage `Dockerfile` (golang build + alpine runtime).
-- [ ] Task: Create `docker-compose.yml` with Ollama networking.
-- [ ] Task: Verify `docker compose up` connects to host Ollama.
-- [ ] Task: Conductor - User Manual Verification 'Docker' (Protocol in workflow.md)
+> **Note:** Docker phase moved to its own track: `conductor/tracks/docker_20260320/`

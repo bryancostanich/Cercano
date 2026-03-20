@@ -1,6 +1,6 @@
 # Track Plan: Agent Skills Integration
 
-## Phase 1: Research & Design
+## Phase 1: Research & Design [checkpoint: bca54a5]
 
 ### Objective
 Understand the Agent Skills specification in depth, review how other agents implement it, and design Cercano's approach for both provider and consumer sides.

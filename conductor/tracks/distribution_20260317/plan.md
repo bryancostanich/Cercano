@@ -1,6 +1,6 @@
 # Track Plan: User-Friendly Distribution
 
-## Phase 1: System Config
+## Phase 1: System Config [checkpoint: 3f7021d]
 
 ### Objective
 Add a persistent config file so settings like Ollama URL and default model survive restarts.
@@ -21,7 +21,7 @@ Add a persistent config file so settings like Ollama URL and default model survi
 - [ ] Task: Implement `cercano_config(action: "get")` — deferred, requires new gRPC RPC.
 - [x] Task: Conductor - User Manual Verification 'System Config' (Protocol in workflow.md)
 
-## Phase 2: Unified Binary
+## Phase 2: Unified Binary [checkpoint: 3f7021d]
 
 ### Objective
 Merge the MCP server and gRPC server into a single `cercano` binary with mode flags.
@@ -46,7 +46,7 @@ Merge the MCP server and gRPC server into a single `cercano` binary with mode fl
 - [ ] Task: Remove old `cmd/agent/` and `cmd/mcp/` entry points (after transition period).
 - [x] Task: Conductor - User Manual Verification 'Unified Binary' (Protocol in workflow.md)
 
-## Phase 3: Dev Workflow & Setup Command
+## Phase 3: Dev Workflow & Setup Command [checkpoint: 3f7021d]
 
 ### Objective
 Smooth the development loop and add a setup command for new users.

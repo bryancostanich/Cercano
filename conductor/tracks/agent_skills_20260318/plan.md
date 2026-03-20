@@ -49,7 +49,7 @@ Create SKILL.md files for all Cercano MCP tools so they're discoverable by any A
 
 > Moved to a future track. Needs real-world testing with a third-party tool that publishes Agent Skills before designing the consumer architecture. Key finding: SKILL.md files are prompt instructions, not tool registrations — the consumer side requires the agentic loop to read and follow skill instructions using existing tools.
 
-## Phase 3: Documentation & Polish
+## Phase 3: Documentation & Polish [checkpoint: 90c74d1]
 
 ### Objective
 Document the provider-side Agent Skills support (SKILL.md files, `cercano_skills` MCP tool, skill installation).
@@ -65,4 +65,4 @@ Document the provider-side Agent Skills support (SKILL.md files, `cercano_skills
 - [x] Task: Document the current manual skill installation approach in the README.
     - [x] How to copy SKILL.md files into `.agents/skills/` and `.claude/skills/`.
     - [x] Which directories each agent scans.
-- [ ] Task: Conductor - User Manual Verification 'Documentation & Polish' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Documentation & Polish' (Protocol in workflow.md)

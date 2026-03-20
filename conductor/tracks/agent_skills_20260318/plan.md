@@ -43,7 +43,7 @@ Create SKILL.md files for all Cercano MCP tools so they're discoverable by any A
     - [x] `action: "get", name: "<skill>"` → returns full SKILL.md content.
     - [x] Red/Green TDD.
 - [x] Task: End-to-end test — verify an external agent discovers and invokes a Cercano skill. `c10d960`
-- [ ] Task: Conductor - User Manual Verification 'Provider Skills' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Provider Skills' (Protocol in workflow.md)
 
 ## Phase 3: Consumer — Skill Discovery & Activation
 

@@ -6,18 +6,18 @@
 Understand the Agent Skills specification in depth, review how other agents implement it, and design Cercano's approach for both provider and consumer sides.
 
 ### Tasks
-- [~] Task: Deep-read the Agent Skills specification at agentskills.io.
+- [x] Task: Deep-read the Agent Skills specification at agentskills.io. `4f46af6`
     - [x] Document the SKILL.md format, required fields, optional fields.
     - [x] Identify how discovery works (file-based, registry, etc.).
     - [x] Note any agent-specific extensions or variations.
-- [~] Task: Review how existing agents (Claude Code, Cursor, Copilot) discover and use skills.
+- [x] Task: Review how existing agents (Claude Code, Cursor, Copilot) discover and use skills. `4f46af6`
     - [x] What directory conventions do they scan?
     - [x] How do they present discovered skills to the user/model?
-- [~] Task: Design Cercano's SKILL.md structure for provider skills.
+- [x] Task: Design Cercano's SKILL.md structure for provider skills. `4f46af6`
     - [x] Map each MCP tool to a SKILL.md file.
     - [x] Define the directory layout — target both `.agents/skills/` and `.claude/skills/`.
-- [~] Task: Design the consumer architecture — how Cercano discovers and activates external skills.
-- [ ] Task: Conductor - User Manual Verification 'Research & Design' (Protocol in workflow.md)
+- [x] Task: Design the consumer architecture — how Cercano discovers and activates external skills. `d305c15`
+- [x] Task: Conductor - User Manual Verification 'Research & Design' (Protocol in workflow.md)
 
 ## Phase 2: Provider — Package Cercano Tools as Skills
 

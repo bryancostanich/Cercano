@@ -19,7 +19,7 @@ Add a persistent config file so settings like Ollama URL and default model survi
 - [x] Task: Wire config into cmd/agent/main.go, replacing inline env var reading. [b915999]
 - [x] Task: End-to-end test — set Mac Studio URL in config, restart server, verified it loaded from file.
 - [ ] Task: Implement `cercano_config(action: "get")` — deferred, requires new gRPC RPC.
-- [ ] Task: Conductor - User Manual Verification 'System Config' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'System Config' (Protocol in workflow.md)
 
 ## Phase 2: Unified Binary
 
@@ -44,7 +44,7 @@ Merge the MCP server and gRPC server into a single `cercano` binary with mode fl
 - [x] Task: End-to-end test — standalone mode starts and listens on port 50052.
 - [ ] Task: Update `.mcp.json` / Claude Code config to use new binary path.
 - [ ] Task: Remove old `cmd/agent/` and `cmd/mcp/` entry points (after transition period).
-- [ ] Task: Conductor - User Manual Verification 'Unified Binary' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Unified Binary' (Protocol in workflow.md)
 
 ## Phase 3: Dev Workflow & Setup Command
 
@@ -64,7 +64,7 @@ Smooth the development loop and add a setup command for new users.
     - [ ] "Quick Start" path: `cercano setup && cercano`
     - [ ] "With Claude Code" path: `claude mcp add cercano -- cercano --mcp`
     - [ ] "Developer" path: `make dev`
-- [ ] Task: Conductor - User Manual Verification 'Dev Workflow & Setup' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Dev Workflow & Setup' (Protocol in workflow.md)
 
 ## Phase 4: CI/CD Pipeline
 

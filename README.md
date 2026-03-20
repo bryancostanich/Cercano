@@ -345,7 +345,7 @@ For a detailed guide on writing custom SKILL.md files, see [docs/agent-skills-gu
 
 ## Remote Inference
 
-Cercano can delegate inference to a remote Ollama instance — for example, a Mac Studio on your LAN with more GPU memory and larger models. The remote endpoint is runtime-configurable with automatic fallback to local Ollama if the remote goes down.
+Cercano can delegate inference to a remote Ollama instance — for example, another machine on your LAN with more GPU memory and larger models. The remote endpoint is runtime-configurable with automatic fallback to local Ollama if the remote goes down.
 
 ### Setup
 

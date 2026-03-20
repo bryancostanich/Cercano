@@ -157,6 +157,39 @@ Before marking any task complete, verify:
 
 ## Development Commands
 
+### Cercano-Specific Commands
+
+#### Build
+```bash
+# Rebuild the cercano binary (required after any Go code changes for MCP testing)
+cd source/server && go build -o bin/cercano ./cmd/cercano/
+```
+
+#### Test
+```bash
+# Run all tests
+cd source/server && go test ./... -count=1
+
+# Run specific package tests
+cd source/server && go test ./internal/mcp/ -v
+```
+
+#### Protobuf Regeneration
+```bash
+# After modifying source/proto/agent.proto, regenerate Go code:
+PATH=$PATH:~/go/bin protoc --go_out=. --go-grpc_out=. -I. source/proto/agent.proto
+# Generated files go to source/server/pkg/proto/ — verify they landed in the right place
+```
+
+#### MCP Testing
+```bash
+# The MCP server is configured in .mcp.json and launched via: cercano --mcp
+# After rebuilding the binary, restart the MCP connection in your agent (e.g., Claude Code)
+# to pick up changes.
+```
+
+### General Commands
+
 **AI AGENT INSTRUCTION: This section should be adapted to the project's specific language, framework, and build tools.**
 
 ### Setup

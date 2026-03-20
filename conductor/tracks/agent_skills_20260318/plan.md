@@ -52,17 +52,17 @@ Create SKILL.md files for all Cercano MCP tools so they're discoverable by any A
 ## Phase 3: Documentation & Polish
 
 ### Objective
-Document the provider-side Agent Skills support (SKILL.md files, `cercano_skills` MCP tool, skill distribution).
+Document the provider-side Agent Skills support (SKILL.md files, `cercano_skills` MCP tool, skill installation).
 
 ### Tasks
-- [ ] Task: Update README.md with Agent Skills section.
-    - [ ] Document provider capabilities (how to use Cercano's skills from other agents).
-- [ ] Task: Add a guide for creating custom SKILL.md files for Cercano.
-- [ ] Task: Design and implement skill distribution/installation for end users.
-    - [ ] How do skills get from a Homebrew (or binary) install into agent-discoverable directories?
-    - [ ] Should `cercano` auto-detect installed agents (Claude Code, Cursor, Copilot, etc.) and install skills to their paths?
-    - [ ] Should there be a `cercano skills install` command with `--agent` flag?
-    - [ ] Symlinks vs copies — symlinks auto-update but may not work on all platforms.
-    - [ ] Should first-run setup (`cercano init`) prompt the user?
-    - [ ] Where do bundled skills live in the Homebrew prefix (e.g., `$(brew --prefix)/share/cercano/skills/`)?
+- [x] Task: Update README.md with Agent Skills section.
+    - [x] Add Agent Skills section documenting provider capabilities.
+    - [x] List the 7 published skills and how agents discover them.
+    - [x] Update the Feature TODOs entry for Agent Skills to reflect current status.
+- [x] Task: Create `docs/agent-skills-guide.md` — a guide for creating custom SKILL.md files for Cercano.
+    - [x] Cover SKILL.md frontmatter format, directory layout, and conventions.
+    - [x] Include a worked example wrapping a Cercano MCP tool.
+- [x] Task: Document the current manual skill installation approach in the README.
+    - [x] How to copy SKILL.md files into `.agents/skills/` and `.claude/skills/`.
+    - [x] Which directories each agent scans.
 - [ ] Task: Conductor - User Manual Verification 'Documentation & Polish' (Protocol in workflow.md)

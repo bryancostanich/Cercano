@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -73,7 +74,12 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		return llm.NewCloudModelProvider(ctx, provider, model, apiKey)
 	}
 
-	smartRouter, err := agent.NewSmartRouter(localProvider, cloudProvider, cfg.EmbeddingModel, http.DefaultClient, "internal/agent/prototypes.yaml", cloudFactory)
+	// Resolve prototypes.yaml relative to the binary location so the server
+	// works regardless of the working directory (important for MCP stdio mode).
+	exePath, _ := os.Executable()
+	serverRoot := filepath.Dir(filepath.Dir(exePath)) // bin/cercano -> bin -> server root
+	prototypesPath := filepath.Join(serverRoot, "internal", "agent", "prototypes.yaml")
+	smartRouter, err := agent.NewSmartRouter(localProvider, cloudProvider, cfg.EmbeddingModel, http.DefaultClient, prototypesPath, cloudFactory)
 	if err != nil {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "connection refused") || strings.Contains(errMsg, "no such host") {

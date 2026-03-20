@@ -45,34 +45,19 @@ Create SKILL.md files for all Cercano MCP tools so they're discoverable by any A
 - [x] Task: End-to-end test — verify an external agent discovers and invokes a Cercano skill. `c10d960`
 - [x] Task: Conductor - User Manual Verification 'Provider Skills' (Protocol in workflow.md)
 
-## Phase 3: Consumer — Skill Discovery & Activation
+## ~~Phase 3: Consumer — Skill Discovery & Activation~~ DEFERRED
+
+> Moved to a future track. Needs real-world testing with a third-party tool that publishes Agent Skills before designing the consumer architecture. Key finding: SKILL.md files are prompt instructions, not tool registrations — the consumer side requires the agentic loop to read and follow skill instructions using existing tools.
+
+## Phase 3: Documentation & Polish
 
 ### Objective
-Enable Cercano to discover external skills in a project and make them available for use.
-
-### Tasks
-- [ ] Task: Implement skill discovery — scan project for `.skills/` directories and parse SKILL.md files.
-    - [ ] Red/Green TDD.
-- [ ] Task: Implement skill registry — store discovered skills and their metadata.
-    - [ ] Red/Green TDD.
-- [ ] Task: Implement skill activation — register discovered skills as invocable tools.
-    - [ ] Red/Green TDD.
-- [ ] Task: Implement skill invocation — route calls to the skill's defined backend.
-    - [ ] Red/Green TDD.
-- [ ] Task: End-to-end test — add a third-party skill to a project, verify Cercano discovers and can invoke it.
-- [ ] Task: Conductor - User Manual Verification 'Skill Discovery & Activation' (Protocol in workflow.md)
-
-## Phase 4: Documentation & Polish
-
-### Objective
-Document Agent Skills support and ensure everything works together.
+Document the provider-side Agent Skills support (SKILL.md files, `cercano_skills` MCP tool, skill distribution).
 
 ### Tasks
 - [ ] Task: Update README.md with Agent Skills section.
     - [ ] Document provider capabilities (how to use Cercano's skills from other agents).
-    - [ ] Document consumer capabilities (how to add skills to a project for Cercano to use).
 - [ ] Task: Add a guide for creating custom SKILL.md files for Cercano.
-- [ ] Task: Final integration test across provider + consumer.
 - [ ] Task: Design and implement skill distribution/installation for end users.
     - [ ] How do skills get from a Homebrew (or binary) install into agent-discoverable directories?
     - [ ] Should `cercano` auto-detect installed agents (Claude Code, Cursor, Copilot, etc.) and install skills to their paths?

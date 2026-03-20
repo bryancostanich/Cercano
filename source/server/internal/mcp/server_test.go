@@ -23,6 +23,11 @@ type mockAgentClient struct {
 	lastConfigReq  *proto.UpdateConfigRequest
 	modelsResp     *proto.ListModelsResponse
 	modelsErr      error
+	skillsResp     *proto.ListSkillsResponse
+	skillsErr      error
+	getSkillResp   *proto.GetSkillResponse
+	getSkillErr    error
+	lastGetSkillReq *proto.GetSkillRequest
 }
 
 func (m *mockAgentClient) ProcessRequest(ctx context.Context, in *proto.ProcessRequestRequest, opts ...grpc.CallOption) (*proto.ProcessRequestResponse, error) {
@@ -50,11 +55,18 @@ func (m *mockAgentClient) UpdateConfig(ctx context.Context, in *proto.UpdateConf
 }
 
 func (m *mockAgentClient) ListSkills(ctx context.Context, in *proto.ListSkillsRequest, opts ...grpc.CallOption) (*proto.ListSkillsResponse, error) {
-	return &proto.ListSkillsResponse{}, nil
+	if m.skillsResp != nil {
+		return m.skillsResp, m.skillsErr
+	}
+	return &proto.ListSkillsResponse{}, m.skillsErr
 }
 
 func (m *mockAgentClient) GetSkill(ctx context.Context, in *proto.GetSkillRequest, opts ...grpc.CallOption) (*proto.GetSkillResponse, error) {
-	return &proto.GetSkillResponse{}, nil
+	m.lastGetSkillReq = in
+	if m.getSkillResp != nil {
+		return m.getSkillResp, m.getSkillErr
+	}
+	return &proto.GetSkillResponse{}, m.getSkillErr
 }
 
 func TestNewServer_RegistersTools(t *testing.T) {
@@ -1272,5 +1284,114 @@ func TestCercanoLocal_MultiTurn(t *testing.T) {
 	}
 	if callCount != 2 {
 		t.Errorf("expected 2 gRPC calls, got %d", callCount)
+	}
+}
+
+func TestCercanoSkills_List(t *testing.T) {
+	mock := &mockAgentClient{
+		skillsResp: &proto.ListSkillsResponse{
+			Skills: []*proto.SkillInfo{
+				{Name: "cercano-local", Description: "Run prompts against local AI"},
+				{Name: "cercano-summarize", Description: "Summarize text locally"},
+			},
+		},
+	}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_skills",
+		Arguments: map[string]any{
+			"action": "list",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	if len(result.Content) == 0 {
+		t.Fatal("expected content in result")
+	}
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if !strings.Contains(text, "cercano-local") {
+		t.Error("expected output to contain 'cercano-local'")
+	}
+	if !strings.Contains(text, "cercano-summarize") {
+		t.Error("expected output to contain 'cercano-summarize'")
+	}
+}
+
+func TestCercanoSkills_Get(t *testing.T) {
+	mock := &mockAgentClient{
+		getSkillResp: &proto.GetSkillResponse{
+			Name:    "cercano-local",
+			Content: "---\nname: cercano-local\ndescription: Run prompts\n---\n# Cercano Local",
+		},
+	}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_skills",
+		Arguments: map[string]any{
+			"action": "get",
+			"name":   "cercano-local",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	if len(result.Content) == 0 {
+		t.Fatal("expected content in result")
+	}
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if !strings.Contains(text, "cercano-local") {
+		t.Error("expected output to contain 'cercano-local'")
+	}
+	if !strings.Contains(text, "# Cercano Local") {
+		t.Error("expected output to contain skill body content")
+	}
+
+	// Verify the correct skill name was passed to gRPC
+	if mock.lastGetSkillReq.Name != "cercano-local" {
+		t.Errorf("expected gRPC request for 'cercano-local', got %q", mock.lastGetSkillReq.Name)
+	}
+}
+
+func TestCercanoSkills_InvalidAction(t *testing.T) {
+	mock := &mockAgentClient{}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_skills",
+		Arguments: map[string]any{
+			"action": "delete",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected IsError=true for invalid action")
 	}
 }

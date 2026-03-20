@@ -34,15 +34,15 @@ Create SKILL.md files for all Cercano MCP tools so they're discoverable by any A
 - [x] Task: Create SKILL.md for `cercano_models`. `ac5614f`
 - ~~Task: Create SKILL.md for `cercano_search`.~~ (tool does not exist yet)
 - ~~Task: Create SKILL.md for `cercano_boilerplate`.~~ (tool does not exist yet)
-- [ ] Task: Add `ListSkills` and `GetSkill` RPCs to `agent.proto`.
-    - [ ] Red/Green TDD.
-- [ ] Task: Implement gRPC skill service — serve built-in skill definitions from the server.
-    - [ ] Red/Green TDD.
-- [ ] Task: Add `cercano_skills` MCP tool wrapping the gRPC endpoints.
-    - [ ] `action: "list"` → returns name + description for all skills.
-    - [ ] `action: "get", name: "<skill>"` → returns full SKILL.md content.
-    - [ ] Red/Green TDD.
-- [ ] Task: End-to-end test — verify an external agent discovers and invokes a Cercano skill.
+- [x] Task: Add `ListSkills` and `GetSkill` RPCs to `agent.proto`. `7f1a086`
+    - [x] Red/Green TDD.
+- [x] Task: Implement gRPC skill service — serve built-in skill definitions from the server. `7f1a086`
+    - [x] Red/Green TDD.
+- [x] Task: Add `cercano_skills` MCP tool wrapping the gRPC endpoints. `bc53c2a`
+    - [x] `action: "list"` → returns name + description for all skills.
+    - [x] `action: "get", name: "<skill>"` → returns full SKILL.md content.
+    - [x] Red/Green TDD.
+- [~] Task: End-to-end test — verify an external agent discovers and invokes a Cercano skill. (manual verification at phase gate)
 - [ ] Task: Conductor - User Manual Verification 'Provider Skills' (Protocol in workflow.md)
 
 ## Phase 3: Consumer — Skill Discovery & Activation

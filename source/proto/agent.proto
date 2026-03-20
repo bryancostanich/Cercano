@@ -45,6 +45,7 @@ message ProcessRequestRequest {
   string work_dir = 3;  // Optional working directory for agentic tasks
   string file_name = 4; // Optional filename for agentic tasks
   string conversation_id = 5; // Optional conversation ID for multi-turn history
+  bool direct_local = 6; // Skip SmartRouter, go directly to local provider
 }
 
 // Runtime configuration update request.

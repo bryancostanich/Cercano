@@ -173,6 +173,7 @@ func (s *Server) mapRequest(req *proto.ProcessRequestRequest) *agent.Request {
 		WorkDir:        req.WorkDir,
 		FileName:       req.FileName,
 		ConversationID: req.ConversationId,
+		DirectLocal:    req.DirectLocal,
 	}
 }
 

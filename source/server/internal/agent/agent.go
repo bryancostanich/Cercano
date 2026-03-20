@@ -76,6 +76,20 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 	// Load conversation history
 	augmentedInput, originalInput := a.loadHistory(ctx, req)
 
+	// Direct local bypass — skip SmartRouter for co-processor tools
+	if req.DirectLocal {
+		fmt.Println("Agent: DirectLocal — bypassing SmartRouter, using local provider.")
+		local := a.router.GetModelProviders()["LocalModel"]
+		augReq := &Request{Input: augmentedInput, DirectLocal: true}
+		res, err := local.Process(ctx, augReq)
+		if err != nil {
+			return nil, err
+		}
+		res.RoutingMetadata = RoutingMetadata{ModelName: local.Name(), Confidence: 1.0}
+		a.storeConversationTurn(ctx, req.ConversationID, originalInput, res)
+		return res, nil
+	}
+
 	// 1. Classify Intent (uses original input — no history pollution)
 	intent, err := a.router.ClassifyIntent(req)
 	if err != nil {

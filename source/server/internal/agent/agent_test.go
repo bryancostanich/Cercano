@@ -448,6 +448,50 @@ func TestAgent_ProcessRequest_NoConversationID_NoHistory(t *testing.T) {
 	}
 }
 
+func TestAgent_ProcessRequest_DirectLocal(t *testing.T) {
+	localProvider := &mockModelProviderFunc{
+		name:     "LocalModel",
+		response: &Response{Output: "local summary"},
+	}
+	cloudProvider := &mockModelProvider{name: "CloudModel"}
+
+	router := &mockRouter{
+		intent:   IntentChat,
+		provider: cloudProvider, // Router would normally pick cloud
+		ModelProviders: map[string]ModelProvider{
+			"LocalModel": localProvider,
+			"CloudModel": cloudProvider,
+		},
+	}
+	coordinator := &mockCoordinator{}
+	a := NewAgent(router, coordinator)
+
+	ctx := context.Background()
+	res, err := a.ProcessRequest(ctx, &Request{
+		Input:       "Summarize this text...",
+		DirectLocal: true,
+	})
+	if err != nil {
+		t.Fatalf("ProcessRequest failed: %v", err)
+	}
+	if res.Output != "local summary" {
+		t.Errorf("Expected 'local summary', got %q", res.Output)
+	}
+	if res.RoutingMetadata.ModelName != "LocalModel" {
+		t.Errorf("Expected routing to LocalModel, got %s", res.RoutingMetadata.ModelName)
+	}
+	if res.RoutingMetadata.Confidence != 1.0 {
+		t.Errorf("Expected confidence 1.0, got %f", res.RoutingMetadata.Confidence)
+	}
+	// Verify the provider actually received the request
+	if localProvider.capturedReq == nil {
+		t.Fatal("expected local provider to capture request")
+	}
+	if !localProvider.capturedReq.DirectLocal {
+		t.Error("expected DirectLocal to be passed through to provider request")
+	}
+}
+
 func TestAgent_ProcessRequest_NilConversationStore(t *testing.T) {
 	// Backward compat: Agent without conversation store works fine
 	provider := &mockModelProviderFunc{

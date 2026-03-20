@@ -275,7 +275,8 @@ func (s *Server) handleSummarize(ctx context.Context, request *gomcp.CallToolReq
 	prompt := fmt.Sprintf("Summarize the following text in %s. Focus on the most important information. Output only the summary, no preamble.\n\nText to summarize:\n%s", lengthInstruction, content)
 
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
-		Input: prompt,
+		Input:       prompt,
+		DirectLocal: true,
 	})
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_summarize")
@@ -300,7 +301,8 @@ func (s *Server) handleExtract(ctx context.Context, request *gomcp.CallToolReque
 	prompt := fmt.Sprintf("Extract the following from the text below: %s\n\nRules:\n- Output ONLY the extracted content, no commentary\n- Preserve the original formatting of extracted sections\n- If nothing matches, respond with \"No matching content found.\"\n\nText:\n%s", args.Query, args.Text)
 
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
-		Input: prompt,
+		Input:       prompt,
+		DirectLocal: true,
 	})
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_extract")
@@ -327,7 +329,8 @@ func (s *Server) handleClassify(ctx context.Context, request *gomcp.CallToolRequ
 	prompt := fmt.Sprintf("Classify the following text. %s\n\nRespond with exactly this format:\nCategory: <category>\nConfidence: <high/medium/low>\nReasoning: <one sentence explanation>\n\nText:\n%s", categoryInstruction, args.Text)
 
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
-		Input: prompt,
+		Input:       prompt,
+		DirectLocal: true,
 	})
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_classify")
@@ -358,7 +361,8 @@ func (s *Server) handleExplain(ctx context.Context, request *gomcp.CallToolReque
 	prompt := fmt.Sprintf("Explain the following code or text. Describe what it does, its key components, and how they interact. Be concise and focus on what a developer needs to understand to work with this code.\n\nCode:\n%s", content)
 
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
-		Input: prompt,
+		Input:       prompt,
+		DirectLocal: true,
 	})
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_explain")

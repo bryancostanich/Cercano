@@ -25,15 +25,15 @@ Understand the Agent Skills specification in depth, review how other agents impl
 Create SKILL.md files for all Cercano MCP tools so they're discoverable by any Agent Skills-compatible agent.
 
 ### Tasks
-- [ ] Task: Create SKILL.md for `cercano_local`.
-- [ ] Task: Create SKILL.md for `cercano_summarize`.
-- [ ] Task: Create SKILL.md for `cercano_extract`.
-- [ ] Task: Create SKILL.md for `cercano_search`.
-- [ ] Task: Create SKILL.md for `cercano_classify`.
-- [ ] Task: Create SKILL.md for `cercano_explain`.
-- [ ] Task: Create SKILL.md for `cercano_boilerplate`.
-- [ ] Task: Create SKILL.md for `cercano_config`.
-- [ ] Task: Create SKILL.md for `cercano_models`.
+- [~] Task: Create SKILL.md for `cercano_local`.
+- [~] Task: Create SKILL.md for `cercano_summarize`.
+- [~] Task: Create SKILL.md for `cercano_extract`.
+- [~] Task: Create SKILL.md for `cercano_classify`.
+- [~] Task: Create SKILL.md for `cercano_explain`.
+- [~] Task: Create SKILL.md for `cercano_config`.
+- [~] Task: Create SKILL.md for `cercano_models`.
+- ~~Task: Create SKILL.md for `cercano_search`.~~ (tool does not exist yet)
+- ~~Task: Create SKILL.md for `cercano_boilerplate`.~~ (tool does not exist yet)
 - [ ] Task: Add `ListSkills` and `GetSkill` RPCs to `agent.proto`.
     - [ ] Red/Green TDD.
 - [ ] Task: Implement gRPC skill service — serve built-in skill definitions from the server.

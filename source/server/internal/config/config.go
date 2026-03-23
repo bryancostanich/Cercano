@@ -99,7 +99,7 @@ func applyEnvOverrides(cfg *Config) {
 			cfg.CloudProvider = "google"
 		}
 		if cfg.CloudModel == "" {
-			cfg.CloudModel = "gemini-1.5-flash"
+			cfg.CloudModel = "gemini-3-flash"
 		}
 	}
 }

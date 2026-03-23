@@ -526,6 +526,47 @@ func TestCercanoConfig_SetOllamaURL(t *testing.T) {
 	}
 }
 
+func TestCercanoConfig_GetListsModels(t *testing.T) {
+	mock := &mockAgentClient{
+		modelsResp: &proto.ListModelsResponse{
+			Models: []*proto.ModelInfo{
+				{Name: "qwen3-coder:latest", Size: 18556700761},
+				{Name: "gemma3:4b", Size: 3300000000},
+				{Name: "nomic-embed-text:latest", Size: 274302450},
+			},
+		},
+	}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_config",
+		Arguments: map[string]any{
+			"action": "get",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if !strings.Contains(text, "qwen3-coder:latest") {
+		t.Errorf("expected qwen3-coder in output, got %q", text)
+	}
+	if !strings.Contains(text, "gemma3:4b") {
+		t.Errorf("expected gemma3:4b in output, got %q", text)
+	}
+	if !strings.Contains(text, "3.3 GB") {
+		t.Errorf("expected size formatting, got %q", text)
+	}
+}
+
 func TestCercanoConfig_InvalidAction(t *testing.T) {
 	mock := &mockAgentClient{}
 	s := NewServer(mock)

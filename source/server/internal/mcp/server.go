@@ -100,8 +100,8 @@ type LocalRequest struct {
 
 // ConfigRequest is the input schema for the cercano_config tool.
 type ConfigRequest struct {
-	Action        string `json:"action" jsonschema:"get or set"`
-	LocalModel    string `json:"local_model,omitempty" jsonschema:"Local model name to set"`
+	Action        string `json:"action" jsonschema:"get (list available Ollama models) or set (change configuration)"`
+	LocalModel    string `json:"local_model,omitempty" jsonschema:"Local model name to set (use action 'get' to see available models)"`
 	CloudProvider string `json:"cloud_provider,omitempty" jsonschema:"Cloud provider to set (google or anthropic)"`
 	CloudModel    string `json:"cloud_model,omitempty" jsonschema:"Cloud model to set"`
 	OllamaURL     string `json:"ollama_url,omitempty" jsonschema:"Ollama endpoint URL (e.g. http://mac-studio.local:11434)"`
@@ -157,7 +157,7 @@ func (s *Server) registerTools() {
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_config",
-		Description: "Query or update Cercano's runtime configuration. Use action 'set' to change the local model, Ollama endpoint URL, cloud provider, or cloud model without restarting the server.",
+		Description: "Query or update Cercano's runtime configuration. Use action 'get' to list available local models from Ollama. Use action 'set' to change the local model, Ollama endpoint URL, cloud provider, or cloud model without restarting the server.",
 	}, s.handleConfig)
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
@@ -277,6 +277,33 @@ func (s *Server) handleConfig(ctx context.Context, request *gomcp.CallToolReques
 		return result, nil, nil
 	}
 	switch args.Action {
+	case "get":
+		modelsResp, err := s.grpcClient.ListModels(ctx, &proto.ListModelsRequest{})
+		if err != nil {
+			return nil, nil, formatGRPCError(err, "cercano_config")
+		}
+
+		var output strings.Builder
+		output.WriteString("Available local models (from Ollama):\n\n")
+		if len(modelsResp.Models) == 0 {
+			output.WriteString("  (no models installed)\n")
+		}
+		for _, m := range modelsResp.Models {
+			sizeMB := float64(m.Size) / 1_000_000
+			sizeStr := fmt.Sprintf("%.0f MB", sizeMB)
+			if sizeMB >= 1000 {
+				sizeStr = fmt.Sprintf("%.1f GB", sizeMB/1000)
+			}
+			output.WriteString(fmt.Sprintf("- %s (%s)\n", m.Name, sizeStr))
+		}
+		output.WriteString("\nUse action 'set' with local_model to switch models.")
+
+		return &gomcp.CallToolResult{
+			Content: []gomcp.Content{
+				&gomcp.TextContent{Text: output.String()},
+			},
+		}, nil, nil
+
 	case "set":
 		resp, err := s.grpcClient.UpdateConfig(ctx, &proto.UpdateConfigRequest{
 			LocalModel:    args.LocalModel,
@@ -301,7 +328,7 @@ func (s *Server) handleConfig(ctx context.Context, request *gomcp.CallToolReques
 		}, nil, nil
 
 	default:
-		return nil, nil, fmt.Errorf("invalid action %q: must be \"set\"", args.Action)
+		return nil, nil, fmt.Errorf("invalid action %q: must be \"get\" or \"set\"", args.Action)
 	}
 }
 

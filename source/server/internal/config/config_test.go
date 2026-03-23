@@ -127,7 +127,7 @@ func TestLoad_GeminiKeySetsCloudDefaults(t *testing.T) {
 	if cfg.CloudProvider != "google" {
 		t.Errorf("expected default CloudProvider 'google', got %q", cfg.CloudProvider)
 	}
-	if cfg.CloudModel != "gemini-1.5-flash" {
+	if cfg.CloudModel != "gemini-3-flash" {
 		t.Errorf("expected default CloudModel, got %q", cfg.CloudModel)
 	}
 }

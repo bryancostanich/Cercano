@@ -4,9 +4,9 @@ Cercano is a local-first AI development tool that runs open-source models on you
 
 Cercano works in two ways:
 
-**1. Standalone Agent** — Use Cercano directly as your AI coding assistant. It routes tasks to local models first, falls back to cloud when needed, and runs an agentic loop that generates, validates, and self-corrects code automatically. Integrates with VS Code and other IDEs via gRPC.
+**1. Local, in-agent Tool ** — Plug Cercano into cloud-based agents like Claude Code, Cursor, or Copilot via [MCP](https://modelcontextprotocol.io/). Instead of sending everything to the cloud, Cercano supercharges your frontier coding experience by providing a set of skills running locally, such as _summarization_, _extraction_, _classification_, and _code explanation_ that can not only massively reduce your cloud context window and usage (and costs), but actually provide better context to the cloud model.
 
-**2. Local Co-Processor** — Plug Cercano into cloud-based agents like Claude Code, Cursor, or Copilot via [MCP](https://modelcontextprotocol.io/). Instead of sending everything to the cloud, offload tasks like summarization, extraction, classification, and code explanation to local inference. This saves cloud context window, reduces cost, keeps sensitive code off the wire, and runs faster for simple tasks.
+**2. Standalone Agent** — Use Cercano directly as your AI coding assistant. It routes tasks to local models first, falls back to cloud when needed, and runs an agentic loop that generates, validates, and self-corrects code automatically. Integrates with VS Code and other IDEs via gRPC. Please note that Cercano's stand-alone agent is still relatively primitive and is undergoing rapid development.
 
 ## Key Features
 
@@ -415,6 +415,7 @@ make test   # Run all tests
 * **[User-Friendly Distribution](conductor/tracks/distribution_20260317/plan.md)** - Setup/launch scripts, Docker containerization, and CI/CD pipeline with GitHub Actions for automated cross-platform releases.
 * **[AI Engine Agnosticism](conductor/tracks/engine_agnosticism_20260317/plan.md)** - Abstract the local inference layer to support pluggable backends (ONNX Runtime, Enso, etc.) beyond Ollama.
 * **Add Gemma Support** - Add Google's Gemma models to the supported local model list for Ollama.
+* **Stand-alone CLI** - Create a stand alone Command Line Interface (CLI) for cercano that doesn't really on other CLI integrations.
 
 ### Existing Improvements
 

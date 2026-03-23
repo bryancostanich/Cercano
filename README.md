@@ -409,12 +409,11 @@ make test   # Run all tests
 ### New Features
 
 * **[Competitive Audit — Agent Features Landscape](conductor/tracks/competitive_audit_20260318/plan.md)** - Feature matrix across 12+ open-source and commercial agents (Codex, Aider, Continue, Cody, OpenHands, SWE-Agent, Claude Code, Cursor, Windsurf, GitHub Copilot, JetBrains AI, Amazon Q) to inform Cercano's tool design and roadmap.
-* **[Local Co-Processor Tools](conductor/tracks/local_coprocessor_tools_20260318/plan.md)** *(in progress)* - Specialized MCP tools that make Cercano a local co-processor for cloud agents. Summarize, extract, classify, and explain content locally — faster, cheaper, and more private. Four tools shipped, README update pending.
+* **[Local Co-Processor Tools](conductor/tracks/local_coprocessor_tools_20260318/plan.md)** *(complete)* - Specialized MCP tools that make Cercano a local co-processor for cloud agents. Summarize, extract, classify, and explain content locally — faster, cheaper, and more private.
 * **[Semantic Codebase Search](conductor/tracks/semantic_search_20260318/plan.md)** - Embedding-based code search by intent ("find auth-related code"), not just string matching. Requires indexing pipeline, storage, and nearest-neighbor retrieval.
 * **[Agent Skills Integration](conductor/tracks/agent_skills_20260318/plan.md)** *(provider complete)* - Cercano's 7 MCP tools are published as [Agent Skills](https://agentskills.io) (SKILL.md), discoverable by 30+ compatible agents. Consumer-side skill discovery deferred pending real-world testing with third-party skills.
 * **[User-Friendly Distribution](conductor/tracks/distribution_20260317/plan.md)** - Setup/launch scripts, Docker containerization, and CI/CD pipeline with GitHub Actions for automated cross-platform releases.
 * **[AI Engine Agnosticism](conductor/tracks/engine_agnosticism_20260317/plan.md)** - Abstract the local inference layer to support pluggable backends (ONNX Runtime, Enso, etc.) beyond Ollama.
-* **Add Gemma Support** - Add Google's Gemma models to the supported local model list for Ollama.
 * **Stand-alone CLI** - Create a stand alone Command Line Interface (CLI) for cercano that doesn't really on other CLI integrations.
 
 ### Existing Improvements

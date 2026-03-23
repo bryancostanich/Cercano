@@ -116,13 +116,15 @@ type SummarizeRequest struct {
 
 // ExtractRequest is the input schema for the cercano_extract tool.
 type ExtractRequest struct {
-	Text  string `json:"text" jsonschema:"The text to search through and extract information from"`
-	Query string `json:"query" jsonschema:"What to find or extract (e.g. 'error messages', 'function signatures', 'config values')"`
+	Text     string `json:"text,omitempty" jsonschema:"The text to search through and extract information from. Provide either text or file_path."`
+	FilePath string `json:"file_path,omitempty" jsonschema:"Path to a file to read and extract information from. Provide either text or file_path."`
+	Query    string `json:"query" jsonschema:"What to find or extract (e.g. 'error messages', 'function signatures', 'config values')"`
 }
 
 // ClassifyRequest is the input schema for the cercano_classify tool.
 type ClassifyRequest struct {
-	Text       string `json:"text" jsonschema:"The text to classify or triage"`
+	Text       string `json:"text,omitempty" jsonschema:"The text to classify or triage. Provide either text or file_path."`
+	FilePath   string `json:"file_path,omitempty" jsonschema:"Path to a file to read and classify. Provide either text or file_path."`
 	Categories string `json:"categories,omitempty" jsonschema:"Comma-separated list of categories to choose from. If omitted, the model will determine appropriate categories."`
 }
 
@@ -165,12 +167,12 @@ func (s *Server) registerTools() {
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_extract",
-		Description: "Extract specific information from text using local AI. Returns only the relevant sections matching your query. Use this to pull function signatures, error messages, config values, or other targeted info from large text without sending everything to the cloud.",
+		Description: "Extract specific information from text or a file using local AI. Returns only the relevant sections matching your query. Use this to pull function signatures, error messages, config values, or other targeted info from large text without sending everything to the cloud.",
 	}, s.handleExtract)
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_classify",
-		Description: "Classify or triage text using local AI. Returns a category, confidence level, and brief reasoning. Use this for quick local triage of errors, logs, code quality, or any content that needs categorization without sending it to the cloud.",
+		Description: "Classify or triage text or a file using local AI. Returns a category, confidence level, and brief reasoning. Use this for quick local triage of errors, logs, code quality, or any content that needs categorization without sending it to the cloud.",
 	}, s.handleClassify)
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
@@ -351,14 +353,23 @@ func (s *Server) handleExtract(ctx context.Context, request *gomcp.CallToolReque
 	if result, ok := s.checkDegraded(); ok {
 		return result, nil, nil
 	}
-	if args.Text == "" {
-		return nil, nil, fmt.Errorf("cercano_extract: 'text' is required")
+	if args.Text == "" && args.FilePath == "" {
+		return nil, nil, fmt.Errorf("cercano_extract: provide either 'text' or 'file_path'")
 	}
 	if args.Query == "" {
 		return nil, nil, fmt.Errorf("cercano_extract: 'query' is required")
 	}
 
-	prompt := fmt.Sprintf("Extract the following from the text below: %s\n\nRules:\n- Output ONLY the extracted content, no commentary\n- Preserve the original formatting of extracted sections\n- If nothing matches, respond with \"No matching content found.\"\n\nText:\n%s", args.Query, args.Text)
+	content := args.Text
+	if args.FilePath != "" {
+		data, err := os.ReadFile(args.FilePath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("cercano_extract: failed to read file %q: %w", args.FilePath, err)
+		}
+		content = string(data)
+	}
+
+	prompt := fmt.Sprintf("Extract the following from the text below: %s\n\nRules:\n- Output ONLY the extracted content, no commentary\n- Preserve the original formatting of extracted sections\n- If nothing matches, respond with \"No matching content found.\"\n\nText:\n%s", args.Query, content)
 
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
 		Input:       prompt,
@@ -380,8 +391,17 @@ func (s *Server) handleClassify(ctx context.Context, request *gomcp.CallToolRequ
 	if result, ok := s.checkDegraded(); ok {
 		return result, nil, nil
 	}
-	if args.Text == "" {
-		return nil, nil, fmt.Errorf("cercano_classify: 'text' is required")
+	if args.Text == "" && args.FilePath == "" {
+		return nil, nil, fmt.Errorf("cercano_classify: provide either 'text' or 'file_path'")
+	}
+
+	content := args.Text
+	if args.FilePath != "" {
+		data, err := os.ReadFile(args.FilePath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("cercano_classify: failed to read file %q: %w", args.FilePath, err)
+		}
+		content = string(data)
 	}
 
 	categoryInstruction := "Determine the most appropriate category."
@@ -389,7 +409,7 @@ func (s *Server) handleClassify(ctx context.Context, request *gomcp.CallToolRequ
 		categoryInstruction = fmt.Sprintf("Choose from these categories: %s", args.Categories)
 	}
 
-	prompt := fmt.Sprintf("Classify the following text. %s\n\nRespond with exactly this format:\nCategory: <category>\nConfidence: <high/medium/low>\nReasoning: <one sentence explanation>\n\nText:\n%s", categoryInstruction, args.Text)
+	prompt := fmt.Sprintf("Classify the following text. %s\n\nRespond with exactly this format:\nCategory: <category>\nConfidence: <high/medium/low>\nReasoning: <one sentence explanation>\n\nText:\n%s", categoryInstruction, content)
 
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
 		Input:       prompt,

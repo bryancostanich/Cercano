@@ -31,6 +31,7 @@ func formatGRPCError(err error, operation string) error {
 type Server struct {
 	mcpServer  *gomcp.Server
 	grpcClient proto.AgentClient
+	startupErr string // non-empty when the server started in degraded mode
 }
 
 // NewServer creates a new MCP server backed by the given gRPC client.
@@ -48,6 +49,39 @@ func NewServer(grpcClient proto.AgentClient) *Server {
 	s.registerTools()
 
 	return s
+}
+
+// NewDegradedServer creates an MCP server that registers all tools but returns
+// a startup error for every call. This keeps the MCP stdio pipe alive so the
+// client receives a clear diagnostic instead of "Failed to reconnect".
+func NewDegradedServer(startupErr error) *Server {
+	mcpServer := gomcp.NewServer(
+		&gomcp.Implementation{Name: "cercano", Version: "0.1.0"},
+		nil,
+	)
+
+	s := &Server{
+		mcpServer:  mcpServer,
+		startupErr: startupErr.Error(),
+	}
+
+	s.registerTools()
+
+	return s
+}
+
+// checkDegraded returns a tool error result if the server started in degraded
+// mode. Callers should return immediately when ok is true.
+func (s *Server) checkDegraded() (result *gomcp.CallToolResult, ok bool) {
+	if s.startupErr == "" {
+		return nil, false
+	}
+	return &gomcp.CallToolResult{
+		IsError: true,
+		Content: []gomcp.Content{
+			&gomcp.TextContent{Text: fmt.Sprintf("Cercano is not available: %s", s.startupErr)},
+		},
+	}, true
 }
 
 // MCPServer returns the underlying MCP server for transport binding.
@@ -152,6 +186,9 @@ func (s *Server) registerTools() {
 
 // handleLocal processes a cercano_local tool call.
 func (s *Server) handleLocal(ctx context.Context, request *gomcp.CallToolRequest, args LocalRequest) (*gomcp.CallToolResult, any, error) {
+	if result, ok := s.checkDegraded(); ok {
+		return result, nil, nil
+	}
 	input := args.Prompt
 	if args.Context != "" {
 		input = fmt.Sprintf("%s\n\nContext:\n%s", args.Prompt, args.Context)
@@ -198,6 +235,9 @@ func (s *Server) handleLocal(ctx context.Context, request *gomcp.CallToolRequest
 
 // handleModels processes a cercano_models tool call.
 func (s *Server) handleModels(ctx context.Context, request *gomcp.CallToolRequest, args ModelsRequest) (*gomcp.CallToolResult, any, error) {
+	if result, ok := s.checkDegraded(); ok {
+		return result, nil, nil
+	}
 	resp, err := s.grpcClient.ListModels(ctx, &proto.ListModelsRequest{})
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_models")
@@ -231,6 +271,9 @@ func (s *Server) handleModels(ctx context.Context, request *gomcp.CallToolReques
 
 // handleConfig processes a cercano_config tool call.
 func (s *Server) handleConfig(ctx context.Context, request *gomcp.CallToolRequest, args ConfigRequest) (*gomcp.CallToolResult, any, error) {
+	if result, ok := s.checkDegraded(); ok {
+		return result, nil, nil
+	}
 	switch args.Action {
 	case "set":
 		resp, err := s.grpcClient.UpdateConfig(ctx, &proto.UpdateConfigRequest{
@@ -262,6 +305,9 @@ func (s *Server) handleConfig(ctx context.Context, request *gomcp.CallToolReques
 
 // handleSummarize processes a cercano_summarize tool call.
 func (s *Server) handleSummarize(ctx context.Context, request *gomcp.CallToolRequest, args SummarizeRequest) (*gomcp.CallToolResult, any, error) {
+	if result, ok := s.checkDegraded(); ok {
+		return result, nil, nil
+	}
 	if args.Text == "" && args.FilePath == "" {
 		return nil, nil, fmt.Errorf("cercano_summarize: provide either 'text' or 'file_path'")
 	}
@@ -302,6 +348,9 @@ func (s *Server) handleSummarize(ctx context.Context, request *gomcp.CallToolReq
 
 // handleExtract processes a cercano_extract tool call.
 func (s *Server) handleExtract(ctx context.Context, request *gomcp.CallToolRequest, args ExtractRequest) (*gomcp.CallToolResult, any, error) {
+	if result, ok := s.checkDegraded(); ok {
+		return result, nil, nil
+	}
 	if args.Text == "" {
 		return nil, nil, fmt.Errorf("cercano_extract: 'text' is required")
 	}
@@ -328,6 +377,9 @@ func (s *Server) handleExtract(ctx context.Context, request *gomcp.CallToolReque
 
 // handleClassify processes a cercano_classify tool call.
 func (s *Server) handleClassify(ctx context.Context, request *gomcp.CallToolRequest, args ClassifyRequest) (*gomcp.CallToolResult, any, error) {
+	if result, ok := s.checkDegraded(); ok {
+		return result, nil, nil
+	}
 	if args.Text == "" {
 		return nil, nil, fmt.Errorf("cercano_classify: 'text' is required")
 	}
@@ -356,6 +408,9 @@ func (s *Server) handleClassify(ctx context.Context, request *gomcp.CallToolRequ
 
 // handleExplain processes a cercano_explain tool call.
 func (s *Server) handleExplain(ctx context.Context, request *gomcp.CallToolRequest, args ExplainRequest) (*gomcp.CallToolResult, any, error) {
+	if result, ok := s.checkDegraded(); ok {
+		return result, nil, nil
+	}
 	if args.Text == "" && args.FilePath == "" {
 		return nil, nil, fmt.Errorf("cercano_explain: provide either 'text' or 'file_path'")
 	}
@@ -388,6 +443,9 @@ func (s *Server) handleExplain(ctx context.Context, request *gomcp.CallToolReque
 
 // handleSkills processes a cercano_skills tool call.
 func (s *Server) handleSkills(ctx context.Context, request *gomcp.CallToolRequest, args SkillsRequest) (*gomcp.CallToolResult, any, error) {
+	if result, ok := s.checkDegraded(); ok {
+		return result, nil, nil
+	}
 	switch args.Action {
 	case "list":
 		resp, err := s.grpcClient.ListSkills(ctx, &proto.ListSkillsRequest{})

@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1393,5 +1394,44 @@ func TestCercanoSkills_InvalidAction(t *testing.T) {
 	}
 	if !result.IsError {
 		t.Error("expected IsError=true for invalid action")
+	}
+}
+
+func TestDegradedServer_RegistersToolsAndReturnsError(t *testing.T) {
+	s := NewDegradedServer(fmt.Errorf("could not connect to Ollama at http://localhost:11434. Is Ollama running?"))
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	// Verify tools are still registered.
+	toolCount := 0
+	for _, err := range cs.Tools(ctx, nil) {
+		if err != nil {
+			t.Fatalf("listing tools failed: %v", err)
+		}
+		toolCount++
+	}
+	if toolCount == 0 {
+		t.Fatal("expected tools to be registered in degraded mode")
+	}
+
+	// Verify calling a tool returns the startup error via IsError.
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name:      "cercano_local",
+		Arguments: map[string]any{"prompt": "hello"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected IsError=true in degraded mode")
+	}
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if !strings.Contains(text, "Ollama") {
+		t.Errorf("expected error to mention Ollama, got: %s", text)
 	}
 }

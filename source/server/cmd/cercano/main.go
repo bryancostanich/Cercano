@@ -294,8 +294,15 @@ func runMCPMode(cfg config.Config, externalGRPC string) {
 
 		addr, _, err := startGRPCServer(cfg, "localhost:0")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
-			os.Exit(1)
+			// Start in degraded mode so the MCP pipe stays alive and
+			// the client gets a clear error instead of "Failed to reconnect".
+			fmt.Fprintf(os.Stderr, "[ERROR] %v — starting in degraded mode\n", err)
+			s := mcpserver.NewDegradedServer(err)
+			if runErr := s.MCPServer().Run(context.Background(), &gomcp.StdioTransport{}); runErr != nil {
+				fmt.Fprintf(os.Stderr, "MCP server error: %v\n", runErr)
+				os.Exit(1)
+			}
+			return
 		}
 		grpcTarget = addr
 		fmt.Fprintf(os.Stderr, "Embedded gRPC server listening at %s\n", grpcTarget)

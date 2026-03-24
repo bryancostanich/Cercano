@@ -94,3 +94,8 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 - [x] **Track: Usage Telemetry & Token Savings Metrics** [checkpoint: 47b34ea]
 *Link: [./archive/usage_telemetry_20260323/](./archive/usage_telemetry_20260323/)*
+
+---
+
+- [x] **Track: Project Context Initialization** [checkpoint: 866f53d]
+*Link: [./archive/project_context_20260324/](./archive/project_context_20260324/)*

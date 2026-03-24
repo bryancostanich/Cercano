@@ -6,12 +6,13 @@
 Define what to measure, how to store it, and how to surface metrics — with a focus on quantifying cloud token savings from local inference.
 
 ### Tasks
-- [ ] Task: Define the metrics to capture (tool invocations, input/output token counts, model used, latency, estimated cloud token equivalent).
-- [ ] Task: Decide storage strategy (local SQLite, flat file, in-memory with periodic flush).
-- [ ] Task: Decide aggregation approach (per-session, per-day, cumulative totals).
-- [ ] Task: Design the token savings estimation model (map local requests to estimated cloud token cost).
-- [ ] Task: Decide privacy boundaries — what is never recorded (prompt content, file paths, etc.).
-- [ ] Task: Write architecture decision document.
+- [x] Task: Define the metrics to capture (tool invocations, input/output token counts, model used, latency, estimated cloud token equivalent).
+- [x] Task: Decide storage strategy — SQLite at `~/.config/cercano/telemetry.db`, WAL mode.
+- [x] Task: Decide aggregation approach — per-session, per-day, and cumulative, computed via SQL at query time.
+- [x] Task: Design the token savings estimation model — 1:1 mapping at launch, calibrate with real data soon after.
+- [x] Task: Design host-reported cloud usage ingestion — opt-in `cercano_report_usage` MCP tool for hosts to report cloud token usage.
+- [x] Task: Decide privacy boundaries — never record prompt/response content, file paths, conversation IDs, or API keys.
+- [x] Task: Write architecture decision document.
 - [ ] Task: Conductor - User Manual Verification 'Design & Architecture' (Protocol in workflow.md)
 
 ## Phase 2: Collection Layer
@@ -25,6 +26,7 @@ Instrument the server to capture usage events at the right points without impact
 - [ ] Task: Instrument MCP tool handlers to emit events (tool name, model, token counts, duration).
 - [ ] Task: Instrument the SmartRouter/agent layer to capture routing decisions and escalation events.
 - [ ] Task: Implement token counting for Ollama requests/responses.
+- [ ] Task: Add `cercano_report_usage` MCP tool for host-side cloud token reporting (opt-in).
 - [ ] Task: Red/Green TDD for all collection components.
 - [ ] Task: Conductor - User Manual Verification 'Collection Layer' (Protocol in workflow.md)
 

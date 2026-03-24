@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/pkg/proto"
 
@@ -35,6 +36,7 @@ type Server struct {
 	grpcClient proto.AgentClient
 	startupErr string // non-empty when the server started in degraded mode
 	collector  *telemetry.Collector // optional; nil disables telemetry
+	ctxLoader  *projectctx.Loader  // project context loader
 }
 
 // NewServer creates a new MCP server backed by the given gRPC client.
@@ -47,6 +49,7 @@ func NewServer(grpcClient proto.AgentClient) *Server {
 	s := &Server{
 		mcpServer:  mcpServer,
 		grpcClient: grpcClient,
+		ctxLoader:  projectctx.NewLoader(),
 	}
 
 	s.registerTools()
@@ -66,6 +69,7 @@ func NewDegradedServer(startupErr error) *Server {
 	s := &Server{
 		mcpServer:  mcpServer,
 		startupErr: startupErr.Error(),
+		ctxLoader:  projectctx.NewLoader(),
 	}
 
 	s.registerTools()
@@ -123,6 +127,27 @@ func (s *Server) emitEvent(toolName string, resp *proto.ProcessRequestResponse, 
 	s.collector.Emit(e)
 }
 
+// withContext prepends project context to a prompt if available.
+func (s *Server) withContext(projectDir, prompt string) string {
+	return s.ctxLoader.PrependContext(projectDir, prompt)
+}
+
+// nudgeMessage is appended to tool responses when the project hasn't been initialized.
+const nudgeMessage = "\n\n---\n*Note: Cercano hasn't been initialized for this project. Running `cercano_init` with the project directory will enable project-aware responses. Recommended if you'll use Cercano more than once in this session.*"
+
+// maybeNudge appends an init recommendation to the result if the project isn't initialized.
+func (s *Server) maybeNudge(projectDir string, result *gomcp.CallToolResult) *gomcp.CallToolResult {
+	if projectDir == "" || !s.ctxLoader.NudgeNeeded(projectDir) {
+		return result
+	}
+	if len(result.Content) > 0 {
+		if tc, ok := result.Content[0].(*gomcp.TextContent); ok {
+			tc.Text += nudgeMessage
+		}
+	}
+	return result
+}
+
 // MCPServer returns the underlying MCP server for transport binding.
 func (s *Server) MCPServer() *gomcp.Server {
 	return s.mcpServer
@@ -148,16 +173,18 @@ type ConfigRequest struct {
 
 // SummarizeRequest is the input schema for the cercano_summarize tool.
 type SummarizeRequest struct {
-	Text      string `json:"text,omitempty" jsonschema:"Raw text to summarize. Provide either text or file_path."`
-	FilePath  string `json:"file_path,omitempty" jsonschema:"Path to a file to read and summarize. Provide either text or file_path."`
-	MaxLength string `json:"max_length,omitempty" jsonschema:"Target summary length: brief (1-2 sentences), medium (1 paragraph, default), or detailed (multiple paragraphs)."`
+	Text       string `json:"text,omitempty" jsonschema:"Raw text to summarize. Provide either text or file_path."`
+	FilePath   string `json:"file_path,omitempty" jsonschema:"Path to a file to read and summarize. Provide either text or file_path."`
+	MaxLength  string `json:"max_length,omitempty" jsonschema:"Target summary length: brief (1-2 sentences), medium (1 paragraph, default), or detailed (multiple paragraphs)."`
+	ProjectDir string `json:"project_dir,omitempty" jsonschema:"Project root directory. Enables project-aware responses when .cercano/context.md exists."`
 }
 
 // ExtractRequest is the input schema for the cercano_extract tool.
 type ExtractRequest struct {
-	Text     string `json:"text,omitempty" jsonschema:"The text to search through and extract information from. Provide either text or file_path."`
-	FilePath string `json:"file_path,omitempty" jsonschema:"Path to a file to read and extract information from. Provide either text or file_path."`
-	Query    string `json:"query" jsonschema:"What to find or extract (e.g. 'error messages', 'function signatures', 'config values')"`
+	Text       string `json:"text,omitempty" jsonschema:"The text to search through and extract information from. Provide either text or file_path."`
+	FilePath   string `json:"file_path,omitempty" jsonschema:"Path to a file to read and extract information from. Provide either text or file_path."`
+	Query      string `json:"query" jsonschema:"What to find or extract (e.g. 'error messages', 'function signatures', 'config values')"`
+	ProjectDir string `json:"project_dir,omitempty" jsonschema:"Project root directory. Enables project-aware responses when .cercano/context.md exists."`
 }
 
 // ClassifyRequest is the input schema for the cercano_classify tool.
@@ -165,12 +192,14 @@ type ClassifyRequest struct {
 	Text       string `json:"text,omitempty" jsonschema:"The text to classify or triage. Provide either text or file_path."`
 	FilePath   string `json:"file_path,omitempty" jsonschema:"Path to a file to read and classify. Provide either text or file_path."`
 	Categories string `json:"categories,omitempty" jsonschema:"Comma-separated list of categories to choose from. If omitted, the model will determine appropriate categories."`
+	ProjectDir string `json:"project_dir,omitempty" jsonschema:"Project root directory. Enables project-aware responses when .cercano/context.md exists."`
 }
 
 // ExplainRequest is the input schema for the cercano_explain tool.
 type ExplainRequest struct {
-	Text     string `json:"text,omitempty" jsonschema:"Code or text to explain. Provide either text or file_path."`
-	FilePath string `json:"file_path,omitempty" jsonschema:"Path to a file to read and explain. Provide either text or file_path."`
+	Text       string `json:"text,omitempty" jsonschema:"Code or text to explain. Provide either text or file_path."`
+	FilePath   string `json:"file_path,omitempty" jsonschema:"Path to a file to read and explain. Provide either text or file_path."`
+	ProjectDir string `json:"project_dir,omitempty" jsonschema:"Project root directory. Enables project-aware responses when .cercano/context.md exists."`
 }
 
 // ModelsRequest is the input schema for the cercano_models tool.
@@ -256,6 +285,7 @@ func (s *Server) handleLocal(ctx context.Context, request *gomcp.CallToolRequest
 	if args.Context != "" {
 		input = fmt.Sprintf("%s\n\nContext:\n%s", args.Prompt, args.Context)
 	}
+	input = s.withContext(args.WorkDir, input)
 
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
 		Input:          input,
@@ -290,11 +320,12 @@ func (s *Server) handleLocal(ctx context.Context, request *gomcp.CallToolRequest
 			resp.RoutingMetadata.ModelName, resp.RoutingMetadata.Confidence, resp.RoutingMetadata.Escalated, endpointInfo)
 	}
 
-	return &gomcp.CallToolResult{
+	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{
 			&gomcp.TextContent{Text: output},
 		},
-	}, nil, nil
+	}
+	return s.maybeNudge(args.WorkDir, result), nil, nil
 }
 
 // handleModels processes a cercano_models tool call.
@@ -422,6 +453,7 @@ func (s *Server) handleSummarize(ctx context.Context, request *gomcp.CallToolReq
 	}
 
 	prompt := fmt.Sprintf("Summarize the following text in %s. Focus on the most important information. Output only the summary, no preamble.\n\nText to summarize:\n%s", lengthInstruction, content)
+	prompt = s.withContext(args.ProjectDir, prompt)
 
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
 		Input:       prompt,
@@ -432,11 +464,12 @@ func (s *Server) handleSummarize(ctx context.Context, request *gomcp.CallToolReq
 	}
 	s.emitEvent("cercano_summarize", resp, startTime)
 
-	return &gomcp.CallToolResult{
+	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{
 			&gomcp.TextContent{Text: resp.Output},
 		},
-	}, nil, nil
+	}
+	return s.maybeNudge(args.ProjectDir, result), nil, nil
 }
 
 // handleExtract processes a cercano_extract tool call.
@@ -462,6 +495,7 @@ func (s *Server) handleExtract(ctx context.Context, request *gomcp.CallToolReque
 	}
 
 	prompt := fmt.Sprintf("Extract the following from the text below: %s\n\nRules:\n- Output ONLY the extracted content, no commentary\n- Preserve the original formatting of extracted sections\n- If nothing matches, respond with \"No matching content found.\"\n\nText:\n%s", args.Query, content)
+	prompt = s.withContext(args.ProjectDir, prompt)
 
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
 		Input:       prompt,
@@ -472,11 +506,12 @@ func (s *Server) handleExtract(ctx context.Context, request *gomcp.CallToolReque
 	}
 	s.emitEvent("cercano_extract", resp, startTime)
 
-	return &gomcp.CallToolResult{
+	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{
 			&gomcp.TextContent{Text: resp.Output},
 		},
-	}, nil, nil
+	}
+	return s.maybeNudge(args.ProjectDir, result), nil, nil
 }
 
 // handleClassify processes a cercano_classify tool call.
@@ -504,6 +539,7 @@ func (s *Server) handleClassify(ctx context.Context, request *gomcp.CallToolRequ
 	}
 
 	prompt := fmt.Sprintf("Classify the following text. %s\n\nRespond with exactly this format:\nCategory: <category>\nConfidence: <high/medium/low>\nReasoning: <one sentence explanation>\n\nText:\n%s", categoryInstruction, content)
+	prompt = s.withContext(args.ProjectDir, prompt)
 
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
 		Input:       prompt,
@@ -514,11 +550,12 @@ func (s *Server) handleClassify(ctx context.Context, request *gomcp.CallToolRequ
 	}
 	s.emitEvent("cercano_classify", resp, startTime)
 
-	return &gomcp.CallToolResult{
+	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{
 			&gomcp.TextContent{Text: resp.Output},
 		},
-	}, nil, nil
+	}
+	return s.maybeNudge(args.ProjectDir, result), nil, nil
 }
 
 // handleExplain processes a cercano_explain tool call.
@@ -541,6 +578,7 @@ func (s *Server) handleExplain(ctx context.Context, request *gomcp.CallToolReque
 	}
 
 	prompt := fmt.Sprintf("Explain the following code or text. Describe what it does, its key components, and how they interact. Be concise and focus on what a developer needs to understand to work with this code.\n\nCode:\n%s", content)
+	prompt = s.withContext(args.ProjectDir, prompt)
 
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
 		Input:       prompt,
@@ -551,11 +589,12 @@ func (s *Server) handleExplain(ctx context.Context, request *gomcp.CallToolReque
 	}
 	s.emitEvent("cercano_explain", resp, startTime)
 
-	return &gomcp.CallToolResult{
+	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{
 			&gomcp.TextContent{Text: resp.Output},
 		},
-	}, nil, nil
+	}
+	return s.maybeNudge(args.ProjectDir, result), nil, nil
 }
 
 // handleSkills processes a cercano_skills tool call.

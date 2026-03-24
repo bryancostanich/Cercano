@@ -25,6 +25,7 @@ Build the plumbing: load context from `.cercano/context.md` and inject it into a
 - [ ] Task: Add `project_dir` optional parameter to all co-processor tools (summarize, extract, classify, explain).
 - [ ] Task: Implement context injection in MCP handlers — prepend loaded context to prompts when available.
 - [ ] Task: Implement session-level context cache on the MCP Server — load once per init, reuse across calls.
+- [ ] Task: Implement "not initialized" nudge — when a tool call includes a project dir but no `.cercano/context.md` exists, append a recommendation to the tool response suggesting `cercano_init`.
 - [ ] Task: Red/Green TDD for all components.
 - [ ] Task: Conductor - User Manual Verification 'Context Storage & Injection' (Protocol in workflow.md)
 

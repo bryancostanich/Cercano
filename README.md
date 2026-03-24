@@ -39,6 +39,7 @@ Cercano tracks how much work stays local and how many cloud tokens you save:
 - **`cercano_stats`** — MCP tool that returns usage summary, token savings, and breakdowns by tool, model, and day.
 - **`cercano_report_usage`** — Opt-in tool for host agents to report their cloud token usage, enabling accurate local-vs-cloud comparison.
 - **`cercano stats`** — CLI command for a quick terminal summary of cumulative usage.
+- **Cloud token capture** — A PostToolUse hook parses Claude Code's transcript to automatically record cloud token usage alongside local metrics. Run `cercano setup` to configure the hook.
 
 Data is stored locally in `~/.config/cercano/telemetry.db` (SQLite). No prompt content, file paths, or credentials are ever recorded.
 

@@ -28,6 +28,11 @@ When used as a co-processor inside cloud agents, Cercano provides specialized to
 | `cercano_explain` | Explain what code does, its components and data flow | Understand code locally before deciding what to send to cloud |
 | `cercano_local` | General-purpose prompt execution against local models | Offload any simple task to local inference |
 
+### Project Context
+Run `cercano_init` once per project to make all Cercano tools project-aware. It scans the repo, feeds key files through a local model, and writes `.cercano/context.md` — a concise reference document that gets automatically prepended to all tool calls. The host AI can optionally provide domain knowledge it already has.
+
+If you use a Cercano tool without initializing first, it will suggest running init.
+
 ### Usage Telemetry & Token Savings
 Cercano tracks how much work stays local and how many cloud tokens you save:
 

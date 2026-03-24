@@ -1,6 +1,6 @@
 # Track Plan: Usage Telemetry & Token Savings Metrics
 
-## Phase 1: Design & Architecture
+## Phase 1: Design & Architecture [checkpoint: f5244b9]
 
 ### Objective
 Define what to measure, how to store it, and how to surface metrics — with a focus on quantifying cloud token savings from local inference.
@@ -13,7 +13,7 @@ Define what to measure, how to store it, and how to surface metrics — with a f
 - [x] Task: Design host-reported cloud usage ingestion — opt-in `cercano_report_usage` MCP tool for hosts to report cloud token usage.
 - [x] Task: Decide privacy boundaries — never record prompt/response content, file paths, conversation IDs, or API keys.
 - [x] Task: Write architecture decision document.
-- [ ] Task: Conductor - User Manual Verification 'Design & Architecture' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Design & Architecture' (Protocol in workflow.md)
 
 ## Phase 2: Collection Layer
 

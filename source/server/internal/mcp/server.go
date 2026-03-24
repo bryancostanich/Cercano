@@ -104,10 +104,18 @@ func (s *Server) emitEvent(toolName string, resp *proto.ProcessRequestResponse, 
 		model = resp.RoutingMetadata.ModelName
 		wasEscalated = resp.RoutingMetadata.Escalated
 	}
+	inputTokens := 0
+	outputTokens := 0
+	if resp != nil {
+		inputTokens = int(resp.InputTokens)
+		outputTokens = int(resp.OutputTokens)
+	}
 	e := &telemetry.Event{
 		Timestamp:     time.Unix(0, startTime),
 		ToolName:      toolName,
 		Model:         model,
+		InputTokens:   inputTokens,
+		OutputTokens:  outputTokens,
 		DurationMs:    time.Since(time.Unix(0, startTime)).Milliseconds(),
 		WasEscalated:  wasEscalated,
 		CloudProvider: cloudProvider,

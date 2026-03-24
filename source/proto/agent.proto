@@ -75,6 +75,8 @@ message ProcessRequestResponse {
   repeated FileChange file_changes = 2; // Optional structured file modifications
   RoutingMetadata routing_metadata = 3; // Optional metadata about the model/routing
   string validation_errors = 4; // Optional captured validation errors (e.g. test failures)
+  int32 input_tokens = 5; // Prompt tokens consumed
+  int32 output_tokens = 6; // Completion tokens generated
 }
 
 // Represents a change to a specific file.

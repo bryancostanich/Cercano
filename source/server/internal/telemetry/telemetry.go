@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -210,4 +211,78 @@ func (s *SQLiteStore) GetStats(ctx context.Context) (*Stats, error) {
 // Close closes the underlying database connection.
 func (s *SQLiteStore) Close() error {
 	return s.db.Close()
+}
+
+// Collector provides async, non-blocking telemetry collection.
+// MCP handlers call Emit/EmitCloudUsage without waiting for the write to complete.
+type Collector struct {
+	store    Store
+	events   chan *Event
+	cloud    chan CloudUsageReport
+	done     chan struct{}
+}
+
+// NewCollector creates a Collector that drains events to the given store.
+// bufferSize controls the channel capacity; events are dropped if the buffer is full.
+func NewCollector(store Store, bufferSize int) *Collector {
+	c := &Collector{
+		store:  store,
+		events: make(chan *Event, bufferSize),
+		cloud:  make(chan CloudUsageReport, bufferSize),
+		done:   make(chan struct{}),
+	}
+	go c.drain()
+	return c
+}
+
+// Emit queues a telemetry event for async persistence. Non-blocking; drops if buffer full.
+func (c *Collector) Emit(e *Event) {
+	select {
+	case c.events <- e:
+	default:
+		// Buffer full — drop silently to avoid blocking the request path.
+	}
+}
+
+// EmitCloudUsage queues a cloud usage report for async persistence.
+func (c *Collector) EmitCloudUsage(r CloudUsageReport) {
+	select {
+	case c.cloud <- r:
+	default:
+	}
+}
+
+// Close drains remaining events and shuts down the collector.
+func (c *Collector) Close() {
+	close(c.events)
+	close(c.cloud)
+	<-c.done
+}
+
+func (c *Collector) drain() {
+	defer close(c.done)
+	for {
+		select {
+		case e, ok := <-c.events:
+			if !ok {
+				// Channel closed — drain remaining cloud reports and exit.
+				for r := range c.cloud {
+					if err := c.store.RecordCloudUsage(context.Background(), r); err != nil {
+						log.Printf("telemetry: failed to record cloud usage: %v", err)
+					}
+				}
+				return
+			}
+			if err := c.store.RecordEvent(context.Background(), e); err != nil {
+				log.Printf("telemetry: failed to record event: %v", err)
+			}
+		case r, ok := <-c.cloud:
+			if !ok {
+				continue
+			}
+			if err := c.store.RecordCloudUsage(context.Background(), r); err != nil {
+				log.Printf("telemetry: failed to record cloud usage: %v", err)
+			}
+		}
+	}
 }

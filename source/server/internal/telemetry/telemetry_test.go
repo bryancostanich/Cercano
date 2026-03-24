@@ -279,3 +279,97 @@ func TestSQLiteStore_StatsByTool(t *testing.T) {
 		t.Error("expected cercano_summarize with count 3")
 	}
 }
+
+func TestStats_ComputeSavings(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test_telemetry.db")
+	store, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	// 800 local tokens
+	e := NewEvent("cercano_summarize", "qwen3-coder")
+	e.Complete(500, 300, false, "", "")
+	store.RecordEvent(context.Background(), e)
+
+	// 200 cloud tokens
+	store.RecordCloudUsage(context.Background(), CloudUsageReport{
+		Timestamp:         time.Now(),
+		CloudInputTokens:  150,
+		CloudOutputTokens: 50,
+		CloudProvider:     "anthropic",
+		CloudModel:        "claude-opus-4-6",
+	})
+
+	stats, err := store.GetStats(context.Background())
+	if err != nil {
+		t.Fatalf("GetStats failed: %v", err)
+	}
+	// 800 local / (800 local + 200 cloud) = 80%
+	if stats.LocalPercentage < 79.9 || stats.LocalPercentage > 80.1 {
+		t.Errorf("expected ~80%% local, got %.1f%%", stats.LocalPercentage)
+	}
+}
+
+func TestSQLiteStore_StatsByModel(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test_telemetry.db")
+	store, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	for i := 0; i < 3; i++ {
+		e := NewEvent("cercano_summarize", "qwen3-coder")
+		e.Complete(100, 50, false, "", "")
+		store.RecordEvent(context.Background(), e)
+	}
+	for i := 0; i < 2; i++ {
+		e := NewEvent("cercano_summarize", "gemma3:4b")
+		e.Complete(80, 40, false, "", "")
+		store.RecordEvent(context.Background(), e)
+	}
+
+	stats, err := store.GetStats(context.Background())
+	if err != nil {
+		t.Fatalf("GetStats failed: %v", err)
+	}
+	if len(stats.ByModel) < 2 {
+		t.Fatalf("expected at least 2 models, got %d", len(stats.ByModel))
+	}
+
+	found := false
+	for _, ms := range stats.ByModel {
+		if ms.Name == "qwen3-coder" && ms.Count == 3 {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected qwen3-coder with count 3")
+	}
+}
+
+func TestSQLiteStore_StatsByDay(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test_telemetry.db")
+	store, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	e := NewEvent("cercano_summarize", "qwen3-coder")
+	e.Complete(100, 50, false, "", "")
+	store.RecordEvent(context.Background(), e)
+
+	stats, err := store.GetStats(context.Background())
+	if err != nil {
+		t.Fatalf("GetStats failed: %v", err)
+	}
+	if len(stats.ByDay) == 0 {
+		t.Fatal("expected at least 1 day in ByDay")
+	}
+	if stats.ByDay[0].Count != 1 {
+		t.Errorf("expected 1 event today, got %d", stats.ByDay[0].Count)
+	}
+}

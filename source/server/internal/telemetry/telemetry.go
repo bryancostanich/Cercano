@@ -56,8 +56,8 @@ type CloudUsageReport struct {
 	CloudModel        string
 }
 
-// ToolStats holds aggregated stats for a single tool.
-type ToolStats struct {
+// GroupStats holds aggregated stats for a named group (tool, model, or date).
+type GroupStats struct {
 	Name         string
 	Count        int
 	InputTokens  int
@@ -66,13 +66,26 @@ type ToolStats struct {
 
 // Stats holds aggregated telemetry statistics.
 type Stats struct {
-	TotalRequests        int
-	TotalInputTokens     int
-	TotalOutputTokens    int
-	LocalTokensSaved     int // input + output for non-escalated requests
+	TotalRequests          int
+	TotalInputTokens       int
+	TotalOutputTokens      int
+	LocalTokensSaved       int     // input + output for non-escalated requests
 	TotalCloudInputTokens  int
 	TotalCloudOutputTokens int
-	ByTool               []ToolStats
+	LocalPercentage        float64 // percentage of total tokens handled locally (0-100)
+	ByTool                 []GroupStats
+	ByModel                []GroupStats
+	ByDay                  []GroupStats
+}
+
+// ComputeSavings calculates the LocalPercentage from local and cloud totals.
+func (s *Stats) ComputeSavings() {
+	totalLocal := s.LocalTokensSaved
+	totalCloud := s.TotalCloudInputTokens + s.TotalCloudOutputTokens
+	total := totalLocal + totalCloud
+	if total > 0 {
+		s.LocalPercentage = float64(totalLocal) / float64(total) * 100
+	}
 }
 
 // Store defines the interface for telemetry persistence.
@@ -198,13 +211,56 @@ func (s *SQLiteStore) GetStats(ctx context.Context) (*Stats, error) {
 	defer rows.Close()
 
 	for rows.Next() {
-		var ts ToolStats
-		if err := rows.Scan(&ts.Name, &ts.Count, &ts.InputTokens, &ts.OutputTokens); err != nil {
+		var gs GroupStats
+		if err := rows.Scan(&gs.Name, &gs.Count, &gs.InputTokens, &gs.OutputTokens); err != nil {
 			return nil, fmt.Errorf("failed to scan tool stats: %w", err)
 		}
-		stats.ByTool = append(stats.ByTool, ts)
+		stats.ByTool = append(stats.ByTool, gs)
+	}
+	rows.Close()
+
+	// By model
+	rows, err = s.db.QueryContext(ctx, `
+		SELECT model, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)
+		FROM events
+		GROUP BY model
+		ORDER BY COUNT(*) DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query model stats: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var gs GroupStats
+		if err := rows.Scan(&gs.Name, &gs.Count, &gs.InputTokens, &gs.OutputTokens); err != nil {
+			return nil, fmt.Errorf("failed to scan model stats: %w", err)
+		}
+		stats.ByModel = append(stats.ByModel, gs)
 	}
 
+	// By day
+	dayRows, err := s.db.QueryContext(ctx, `
+		SELECT DATE(timestamp), COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)
+		FROM events
+		GROUP BY DATE(timestamp)
+		ORDER BY DATE(timestamp) DESC
+		LIMIT 30
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query daily stats: %w", err)
+	}
+	defer dayRows.Close()
+
+	for dayRows.Next() {
+		var gs GroupStats
+		if err := dayRows.Scan(&gs.Name, &gs.Count, &gs.InputTokens, &gs.OutputTokens); err != nil {
+			return nil, fmt.Errorf("failed to scan daily stats: %w", err)
+		}
+		stats.ByDay = append(stats.ByDay, gs)
+	}
+
+	stats.ComputeSavings()
 	return stats, nil
 }
 

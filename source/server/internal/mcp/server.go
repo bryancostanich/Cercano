@@ -98,7 +98,8 @@ func (s *Server) SetCollector(c *telemetry.Collector) {
 
 // emitEvent is a helper that emits a telemetry event if a collector is configured.
 // tokenSaving indicates whether this call substitutes for a cloud call (counts toward savings).
-func (s *Server) emitEvent(toolName string, resp *proto.ProcessRequestResponse, startTime int64, tokenSaving bool) {
+// cloudTokens optionally records host-reported cloud token usage alongside this event.
+func (s *Server) emitEvent(toolName string, resp *proto.ProcessRequestResponse, startTime int64, tokenSaving bool, cloudTokens *cloudTokenFields) {
 	if s.collector == nil {
 		return
 	}
@@ -127,6 +128,15 @@ func (s *Server) emitEvent(toolName string, resp *proto.ProcessRequestResponse, 
 		TokenSaving:   tokenSaving,
 	}
 	s.collector.Emit(e)
+
+	// Record host-reported cloud usage if provided
+	if cloudTokens != nil && (cloudTokens.HostCloudTokensIn > 0 || cloudTokens.HostCloudTokensOut > 0) {
+		s.collector.EmitCloudUsage(telemetry.CloudUsageReport{
+			Timestamp:         time.Now(),
+			CloudInputTokens:  cloudTokens.HostCloudTokensIn,
+			CloudOutputTokens: cloudTokens.HostCloudTokensOut,
+		})
+	}
 }
 
 // withContext prepends project context to a prompt if available.
@@ -155,6 +165,13 @@ func (s *Server) MCPServer() *gomcp.Server {
 	return s.mcpServer
 }
 
+// cloudTokenFields are optional fields for host-reported cloud token usage.
+// Included in all co-processor tool requests to enable automatic tracking.
+type cloudTokenFields struct {
+	HostCloudTokensIn  int `json:"host_cloud_tokens_in,omitempty" jsonschema:"Your cloud input tokens since the last cercano call. Include this to help track cloud vs local usage."`
+	HostCloudTokensOut int `json:"host_cloud_tokens_out,omitempty" jsonschema:"Your cloud output tokens since the last cercano call. Include this to help track cloud vs local usage."`
+}
+
 // LocalRequest is the input schema for the cercano_local tool.
 type LocalRequest struct {
 	Prompt         string `json:"prompt" jsonschema:"The prompt to run against local models"`
@@ -162,6 +179,7 @@ type LocalRequest struct {
 	WorkDir        string `json:"work_dir,omitempty" jsonschema:"Working directory for code validation (go build/test). When provided with file_path, enables the agentic code generation loop."`
 	Context        string `json:"context,omitempty" jsonschema:"Additional context such as existing code or file contents"`
 	ConversationID string `json:"conversation_id,omitempty" jsonschema:"Conversation ID for multi-turn support across calls"`
+	cloudTokenFields
 }
 
 // ConfigRequest is the input schema for the cercano_config tool.
@@ -179,6 +197,7 @@ type SummarizeRequest struct {
 	FilePath   string `json:"file_path,omitempty" jsonschema:"Path to a file to read and summarize. Provide either text or file_path."`
 	MaxLength  string `json:"max_length,omitempty" jsonschema:"Target summary length: brief (1-2 sentences), medium (1 paragraph, default), or detailed (multiple paragraphs)."`
 	ProjectDir string `json:"project_dir,omitempty" jsonschema:"Project root directory. Enables project-aware responses when .cercano/context.md exists."`
+	cloudTokenFields
 }
 
 // ExtractRequest is the input schema for the cercano_extract tool.
@@ -187,6 +206,7 @@ type ExtractRequest struct {
 	FilePath   string `json:"file_path,omitempty" jsonschema:"Path to a file to read and extract information from. Provide either text or file_path."`
 	Query      string `json:"query" jsonschema:"What to find or extract (e.g. 'error messages', 'function signatures', 'config values')"`
 	ProjectDir string `json:"project_dir,omitempty" jsonschema:"Project root directory. Enables project-aware responses when .cercano/context.md exists."`
+	cloudTokenFields
 }
 
 // ClassifyRequest is the input schema for the cercano_classify tool.
@@ -195,6 +215,7 @@ type ClassifyRequest struct {
 	FilePath   string `json:"file_path,omitempty" jsonschema:"Path to a file to read and classify. Provide either text or file_path."`
 	Categories string `json:"categories,omitempty" jsonschema:"Comma-separated list of categories to choose from. If omitted, the model will determine appropriate categories."`
 	ProjectDir string `json:"project_dir,omitempty" jsonschema:"Project root directory. Enables project-aware responses when .cercano/context.md exists."`
+	cloudTokenFields
 }
 
 // ExplainRequest is the input schema for the cercano_explain tool.
@@ -202,6 +223,7 @@ type ExplainRequest struct {
 	Text       string `json:"text,omitempty" jsonschema:"Code or text to explain. Provide either text or file_path."`
 	FilePath   string `json:"file_path,omitempty" jsonschema:"Path to a file to read and explain. Provide either text or file_path."`
 	ProjectDir string `json:"project_dir,omitempty" jsonschema:"Project root directory. Enables project-aware responses when .cercano/context.md exists."`
+	cloudTokenFields
 }
 
 // ModelsRequest is the input schema for the cercano_models tool.
@@ -309,7 +331,7 @@ func (s *Server) handleLocal(ctx context.Context, request *gomcp.CallToolRequest
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_local")
 	}
-	s.emitEvent("cercano_local", resp, startTime, true)
+	s.emitEvent("cercano_local", resp, startTime, true, &args.cloudTokenFields)
 
 	output := resp.Output
 	if len(resp.FileChanges) > 0 {
@@ -475,7 +497,7 @@ func (s *Server) handleSummarize(ctx context.Context, request *gomcp.CallToolReq
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_summarize")
 	}
-	s.emitEvent("cercano_summarize", resp, startTime, true)
+	s.emitEvent("cercano_summarize", resp, startTime, true, &args.cloudTokenFields)
 
 	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{
@@ -517,7 +539,7 @@ func (s *Server) handleExtract(ctx context.Context, request *gomcp.CallToolReque
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_extract")
 	}
-	s.emitEvent("cercano_extract", resp, startTime, true)
+	s.emitEvent("cercano_extract", resp, startTime, true, &args.cloudTokenFields)
 
 	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{
@@ -561,7 +583,7 @@ func (s *Server) handleClassify(ctx context.Context, request *gomcp.CallToolRequ
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_classify")
 	}
-	s.emitEvent("cercano_classify", resp, startTime, true)
+	s.emitEvent("cercano_classify", resp, startTime, true, &args.cloudTokenFields)
 
 	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{
@@ -600,7 +622,7 @@ func (s *Server) handleExplain(ctx context.Context, request *gomcp.CallToolReque
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_explain")
 	}
-	s.emitEvent("cercano_explain", resp, startTime, true)
+	s.emitEvent("cercano_explain", resp, startTime, true, &args.cloudTokenFields)
 
 	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{
@@ -781,7 +803,7 @@ func (s *Server) handleInit(ctx context.Context, request *gomcp.CallToolRequest,
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_init")
 	}
-	s.emitEvent("cercano_init", resp, startTime, false)
+	s.emitEvent("cercano_init", resp, startTime, false, nil)
 
 	// Write the context file
 	if err := builder.WriteContext(args.ProjectDir, resp.Output); err != nil {

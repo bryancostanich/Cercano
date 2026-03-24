@@ -15,7 +15,7 @@ Define what to measure, how to store it, and how to surface metrics — with a f
 - [x] Task: Write architecture decision document.
 - [x] Task: Conductor - User Manual Verification 'Design & Architecture' (Protocol in workflow.md)
 
-## Phase 2: Collection Layer
+## Phase 2: Collection Layer [checkpoint: b4e51ff]
 
 ### Objective
 Instrument the server to capture usage events at the right points without impacting latency.
@@ -28,7 +28,7 @@ Instrument the server to capture usage events at the right points without impact
 - [x] Task: Implement token counting for Ollama requests/responses.
 - [x] Task: Add `cercano_report_usage` MCP tool for host-side cloud token reporting (opt-in).
 - [x] Task: Red/Green TDD for all collection components.
-- [ ] Task: Conductor - User Manual Verification 'Collection Layer' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Collection Layer' (Protocol in workflow.md)
 
 ## Phase 3: Storage & Aggregation
 

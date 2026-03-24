@@ -291,6 +291,11 @@ func NewCollector(store Store, bufferSize int) *Collector {
 	return c
 }
 
+// Store returns the underlying store for direct queries (e.g., GetStats).
+func (c *Collector) Store() Store {
+	return c.store
+}
+
 // Emit queues a telemetry event for async persistence. Non-blocking; drops if buffer full.
 func (c *Collector) Emit(e *Event) {
 	select {

@@ -170,7 +170,7 @@ func runSetup() {
 	}
 
 	// Check Ollama is running
-	fmt.Printf("\n[1/3] Checking Ollama at %s...\n", cfg.OllamaURL)
+	fmt.Printf("\n[1/4] Checking Ollama at %s...\n", cfg.OllamaURL)
 	if err := checkOllama(cfg.OllamaURL); err != nil {
 		fmt.Fprintf(os.Stderr, "  FAIL: %v\n", err)
 		os.Exit(1)
@@ -178,7 +178,7 @@ func runSetup() {
 	fmt.Println("  OK: Ollama is running.")
 
 	// Check required models
-	fmt.Println("\n[2/3] Checking required models...")
+	fmt.Println("\n[2/4] Checking required models...")
 	requiredModels := []string{cfg.LocalModel, cfg.EmbeddingModel}
 	client := &http.Client{Timeout: 5 * time.Second}
 
@@ -229,7 +229,7 @@ func runSetup() {
 	}
 
 	// Check/create config file
-	fmt.Println("\n[3/3] Checking config file...")
+	fmt.Println("\n[3/4] Checking config file...")
 	configPath := config.DefaultPath()
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		fmt.Printf("  Creating default config at %s\n", configPath)
@@ -242,7 +242,93 @@ func runSetup() {
 		fmt.Printf("  OK: Config file exists at %s\n", configPath)
 	}
 
+	// Configure Claude Code hook for cloud token telemetry
+	fmt.Println("\n[4/4] Checking Claude Code telemetry hook...")
+	if err := ensureClaudeHook(); err != nil {
+		fmt.Fprintf(os.Stderr, "  WARN: Could not configure hook: %v\n", err)
+	}
+
 	fmt.Println("\nSetup complete! Run 'cercano' to start the server.")
+}
+
+// ensureClaudeHook adds the PostToolUse telemetry hook to Claude Code's
+// user-level settings.json if it's not already present.
+func ensureClaudeHook() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	settingsPath := filepath.Join(home, ".claude", "settings.json")
+
+	// Find the hook script
+	exePath, _ := os.Executable()
+	hookScript := filepath.Join(filepath.Dir(exePath), "..", "hooks", "report_cloud_tokens.py")
+	// Resolve to absolute path
+	hookScript, _ = filepath.Abs(hookScript)
+	if _, err := os.Stat(hookScript); os.IsNotExist(err) {
+		// Try relative to server root
+		serverRoot := filepath.Dir(filepath.Dir(exePath))
+		hookScript = filepath.Join(serverRoot, "hooks", "report_cloud_tokens.py")
+		if _, err := os.Stat(hookScript); os.IsNotExist(err) {
+			return fmt.Errorf("hook script not found")
+		}
+	}
+
+	// Read existing settings
+	var settings map[string]interface{}
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			settings = make(map[string]interface{})
+		} else {
+			return err
+		}
+	} else {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return fmt.Errorf("failed to parse settings.json: %w", err)
+		}
+	}
+
+	// Check if hook already exists
+	hooks, _ := settings["hooks"].(map[string]interface{})
+	if hooks == nil {
+		hooks = make(map[string]interface{})
+	}
+
+	postToolUse, _ := hooks["PostToolUse"].([]interface{})
+	for _, h := range postToolUse {
+		if hm, ok := h.(map[string]interface{}); ok {
+			if m, ok := hm["matcher"].(string); ok && m == "mcp__cercano__.*" {
+				fmt.Println("  OK: Telemetry hook already configured.")
+				return nil
+			}
+		}
+	}
+
+	// Add the hook
+	hookEntry := map[string]interface{}{
+		"matcher": "mcp__cercano__.*",
+		"hooks": []interface{}{
+			map[string]interface{}{
+				"type":    "command",
+				"command": fmt.Sprintf("python3 %s", hookScript),
+			},
+		},
+	}
+	postToolUse = append(postToolUse, hookEntry)
+	hooks["PostToolUse"] = postToolUse
+	settings["hooks"] = hooks
+
+	// Write back
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(settingsPath, out, 0644); err != nil {
+		return err
+	}
+	fmt.Printf("  OK: Telemetry hook added (script: %s)\n", hookScript)
+	return nil
 }
 
 func decodeJSON(r io.Reader, v interface{}) error {

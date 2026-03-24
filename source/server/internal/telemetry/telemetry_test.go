@@ -171,6 +171,79 @@ func TestSQLiteStore_CreatesDirectory(t *testing.T) {
 	}
 }
 
+func TestCollector_EmitAndDrain(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test_telemetry.db")
+	store, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	collector := NewCollector(store, 100)
+
+	for i := 0; i < 5; i++ {
+		e := NewEvent("cercano_summarize", "qwen3-coder")
+		e.Complete(100, 50, false, "", "")
+		collector.Emit(e)
+	}
+
+	collector.EmitCloudUsage(CloudUsageReport{
+		Timestamp:         time.Now(),
+		CloudInputTokens:  10000,
+		CloudOutputTokens: 2000,
+		CloudProvider:     "anthropic",
+		CloudModel:        "claude-opus-4-6",
+	})
+
+	collector.Close()
+
+	stats, err := store.GetStats(context.Background())
+	if err != nil {
+		t.Fatalf("GetStats failed: %v", err)
+	}
+	if stats.TotalRequests != 5 {
+		t.Errorf("expected 5 requests, got %d", stats.TotalRequests)
+	}
+	if stats.TotalCloudInputTokens != 10000 {
+		t.Errorf("expected 10000 cloud input tokens, got %d", stats.TotalCloudInputTokens)
+	}
+}
+
+func TestCollector_NonBlocking(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test_telemetry.db")
+	store, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	// Buffer of 1 — second emit should be dropped, not block
+	collector := NewCollector(store, 1)
+
+	// Fill the buffer
+	e1 := NewEvent("cercano_summarize", "qwen3-coder")
+	e1.Complete(100, 50, false, "", "")
+	collector.Emit(e1)
+
+	// This should not block even if buffer is full
+	done := make(chan struct{})
+	go func() {
+		e2 := NewEvent("cercano_extract", "qwen3-coder")
+		e2.Complete(200, 80, false, "", "")
+		collector.Emit(e2)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good — didn't block
+	case <-time.After(1 * time.Second):
+		t.Fatal("Emit blocked when buffer was full")
+	}
+
+	collector.Close()
+}
+
 func TestSQLiteStore_StatsByTool(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test_telemetry.db")
 	store, err := NewSQLiteStore(dbPath)

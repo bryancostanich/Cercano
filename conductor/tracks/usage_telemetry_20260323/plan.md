@@ -26,8 +26,8 @@ Instrument the server to capture usage events at the right points without impact
 - [x] Task: Instrument MCP tool handlers to emit events (tool name, model, token counts, duration).
 - [-] Task: Instrument the SmartRouter/agent layer to capture routing decisions and escalation events. *(deferred — MCP handlers cover primary use case)*
 - [x] Task: Implement token counting for Ollama requests/responses.
-- [ ] Task: Add `cercano_report_usage` MCP tool for host-side cloud token reporting (opt-in).
-- [ ] Task: Red/Green TDD for all collection components.
+- [x] Task: Add `cercano_report_usage` MCP tool for host-side cloud token reporting (opt-in).
+- [x] Task: Red/Green TDD for all collection components.
 - [ ] Task: Conductor - User Manual Verification 'Collection Layer' (Protocol in workflow.md)
 
 ## Phase 3: Storage & Aggregation

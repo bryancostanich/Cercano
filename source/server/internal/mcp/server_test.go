@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/pkg/proto"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -1519,6 +1520,88 @@ func TestCercanoSkills_InvalidAction(t *testing.T) {
 	}
 	if !result.IsError {
 		t.Error("expected IsError=true for invalid action")
+	}
+}
+
+func TestCercanoReportUsage_RecordsTokens(t *testing.T) {
+	mock := &mockAgentClient{}
+	s := NewServer(mock)
+
+	// Create a real telemetry store and collector for this test
+	dbPath := filepath.Join(t.TempDir(), "test_telemetry.db")
+	store, err := telemetry.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+	collector := telemetry.NewCollector(store, 100)
+	s.SetCollector(collector)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_report_usage",
+		Arguments: map[string]any{
+			"cloud_input_tokens":  15000,
+			"cloud_output_tokens": 3000,
+			"cloud_provider":      "anthropic",
+			"cloud_model":         "claude-opus-4-6",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if !strings.Contains(text, "18000") {
+		t.Errorf("expected total token count in output, got %q", text)
+	}
+
+	// Drain collector and verify storage
+	collector.Close()
+	stats, err := store.GetStats(context.Background())
+	if err != nil {
+		t.Fatalf("GetStats failed: %v", err)
+	}
+	if stats.TotalCloudInputTokens != 15000 {
+		t.Errorf("expected 15000 cloud input tokens, got %d", stats.TotalCloudInputTokens)
+	}
+	if stats.TotalCloudOutputTokens != 3000 {
+		t.Errorf("expected 3000 cloud output tokens, got %d", stats.TotalCloudOutputTokens)
+	}
+}
+
+func TestCercanoReportUsage_NoCollector(t *testing.T) {
+	mock := &mockAgentClient{}
+	s := NewServer(mock)
+	// No collector set
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_report_usage",
+		Arguments: map[string]any{
+			"cloud_input_tokens":  1000,
+			"cloud_output_tokens": 500,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if !strings.Contains(text, "not enabled") {
+		t.Errorf("expected 'not enabled' message, got %q", text)
 	}
 }
 

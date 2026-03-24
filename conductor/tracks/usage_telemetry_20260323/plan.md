@@ -36,10 +36,10 @@ Instrument the server to capture usage events at the right points without impact
 Persist events and compute aggregated metrics for reporting.
 
 ### Tasks
-- [ ] Task: Implement storage backend (per design decision in Phase 1).
-- [ ] Task: Implement aggregation queries (totals by tool, by model, by time period).
-- [ ] Task: Implement cloud token savings calculator (local tokens processed vs. estimated cloud equivalent).
-- [ ] Task: Red/Green TDD.
+- [x] Task: Implement storage backend (per design decision in Phase 1). *(completed in Phase 2)*
+- [x] Task: Implement aggregation queries (totals by tool, by model, by time period).
+- [x] Task: Implement cloud token savings calculator (local tokens processed vs. estimated cloud equivalent).
+- [x] Task: Red/Green TDD.
 - [ ] Task: Conductor - User Manual Verification 'Storage & Aggregation' (Protocol in workflow.md)
 
 ## Phase 4: Reporting MCP Tool & Dashboard

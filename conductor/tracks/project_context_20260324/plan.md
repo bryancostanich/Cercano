@@ -35,11 +35,11 @@ Build the plumbing: load context from `.cercano/context.md` and inject it into a
 Build the local intelligence that scans a repo and produces a useful context document.
 
 ### Tasks
-- [ ] Task: Implement file discovery — walk project dir, identify key files by name/extension (README, CLAUDE.md, .claude/memory/*, *.proto, *.h, config files, Makefile, go.mod, package.json, etc.).
-- [ ] Task: Implement size-aware file reading — read files up to a size limit, skip binaries and node_modules.
-- [ ] Task: Implement local model summarization — feed discovered files through cercano's local model to extract key domain knowledge (data structures, APIs, architecture, conventions).
-- [ ] Task: Implement context assembly — combine local model output with any host-provided context into a structured context.md.
-- [ ] Task: Red/Green TDD for scanner and builder.
+- [x] Task: Implement file discovery — walk project dir, identify key files by name/extension (README, CLAUDE.md, .claude/memory/*, *.proto, *.h, config files, Makefile, go.mod, package.json, etc.).
+- [x] Task: Implement size-aware file reading — read files up to a size limit, skip binaries and node_modules.
+- [x] Task: Implement local model summarization — prompt template built, actual LLM call happens in cercano_init handler.
+- [x] Task: Implement context assembly — Builder.BuildPrompt combines files + host context, Builder.WriteContext writes .cercano/context.md.
+- [x] Task: Red/Green TDD for scanner and builder.
 - [ ] Task: Conductor - User Manual Verification 'Repo Scanner & Context Builder' (Protocol in workflow.md)
 
 ## Phase 4: cercano_init MCP Tool & Skill

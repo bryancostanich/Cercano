@@ -54,3 +54,25 @@ Expose metrics to users via an MCP tool and optional summary output.
 - [x] Task: Red/Green TDD.
 - [x] Task: Update README.md with telemetry documentation.
 - [x] Task: Conductor - User Manual Verification 'Reporting MCP Tool & Dashboard' (Protocol in workflow.md)
+
+## Phase 5: Host Cloud Token Capture via Hook
+
+### Objective
+Automatically capture real cloud token usage from Claude Code's transcript file using a PostToolUse hook, replacing the 1:1 estimate with actual data.
+
+### Design Notes
+- Claude Code's transcript JSONL (`transcript_path`) already contains `usage` on every assistant message: `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`
+- Total cloud tokens per message = `input_tokens + cache_creation_input_tokens + cache_read_input_tokens + output_tokens` (volume) or `input_tokens + output_tokens` (billed, since cache reads are cheaper)
+- A `PostToolUse` hook matching `mcp__cercano__.*` fires after every cercano call
+- The hook receives `transcript_path` in its JSON input
+- A script parses the JSONL, computes cumulative cloud tokens, calculates the delta since last report, and writes to Cercano's telemetry DB
+- No new binaries, no OTel collector — just a shell/python script
+
+### Tasks
+- [ ] Task: Write the hook script — parse transcript JSONL, extract cumulative cloud token usage, compute delta since last report, write to telemetry.db.
+- [ ] Task: Track last-reported position so the hook only processes new entries (avoid re-counting on every call).
+- [ ] Task: Configure the PostToolUse hook in Claude Code settings — match `mcp__cercano__.*`, run the script.
+- [ ] Task: Update `cercano_stats` to show actual vs estimated cloud tokens when hook data is available.
+- [ ] Task: Red/Green TDD for the hook script.
+- [ ] Task: Update README.md with hook setup instructions.
+- [ ] Task: Conductor - User Manual Verification 'Host Cloud Token Capture via Hook' (Protocol in workflow.md)

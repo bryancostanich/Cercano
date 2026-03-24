@@ -92,8 +92,8 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 ---
 
-- [x] **Track: Usage Telemetry & Token Savings Metrics** [checkpoint: 47b34ea]
-*Link: [./archive/usage_telemetry_20260323/](./archive/usage_telemetry_20260323/)*
+- [ ] **Track: Usage Telemetry & Token Savings Metrics** *(Phase 5: host cloud token capture via hook)*
+*Link: [./tracks/usage_telemetry_20260323/](./tracks/usage_telemetry_20260323/)*
 
 ---
 

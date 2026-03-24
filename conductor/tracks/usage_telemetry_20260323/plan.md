@@ -22,7 +22,7 @@ Instrument the server to capture usage events at the right points without impact
 
 ### Tasks
 - [x] Task: Define telemetry event struct and storage interface.
-- [ ] Task: Implement async event collection (fire-and-forget from request path).
+- [x] Task: Implement async event collection (fire-and-forget from request path).
 - [ ] Task: Instrument MCP tool handlers to emit events (tool name, model, token counts, duration).
 - [ ] Task: Instrument the SmartRouter/agent layer to capture routing decisions and escalation events.
 - [ ] Task: Implement token counting for Ollama requests/responses.

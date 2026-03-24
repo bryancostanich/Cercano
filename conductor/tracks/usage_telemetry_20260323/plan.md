@@ -52,5 +52,5 @@ Expose metrics to users via an MCP tool and optional summary output.
 - [x] Task: Add stats to server startup log (cumulative usage since install).
 - [x] Task: Add `--stats` CLI flag for quick terminal summary.
 - [x] Task: Red/Green TDD.
-- [ ] Task: Update README.md with telemetry documentation.
+- [x] Task: Update README.md with telemetry documentation.
 - [ ] Task: Conductor - User Manual Verification 'Reporting MCP Tool & Dashboard' (Protocol in workflow.md)

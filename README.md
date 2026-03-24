@@ -28,6 +28,15 @@ When used as a co-processor inside cloud agents, Cercano provides specialized to
 | `cercano_explain` | Explain what code does, its components and data flow | Understand code locally before deciding what to send to cloud |
 | `cercano_local` | General-purpose prompt execution against local models | Offload any simple task to local inference |
 
+### Usage Telemetry & Token Savings
+Cercano tracks how much work stays local and how many cloud tokens you save:
+
+- **`cercano_stats`** — MCP tool that returns usage summary, token savings, and breakdowns by tool, model, and day.
+- **`cercano_report_usage`** — Opt-in tool for host agents to report their cloud token usage, enabling accurate local-vs-cloud comparison.
+- **`cercano stats`** — CLI command for a quick terminal summary of cumulative usage.
+
+Data is stored locally in `~/.config/cercano/telemetry.db` (SQLite). No prompt content, file paths, or credentials are ever recorded.
+
 ### Integration
 - **MCP Server** — Expose all tools to any [MCP](https://modelcontextprotocol.io/)-compatible agent (Claude Code, Cursor, Copilot, etc.).
 - **IDE Integration** — VS Code extension with gRPC-based architecture. Zed extension in progress.

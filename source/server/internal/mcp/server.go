@@ -182,6 +182,14 @@ type SkillsRequest struct {
 	Name   string `json:"name,omitempty" jsonschema:"Skill name to retrieve (required when action is get)"`
 }
 
+// ReportUsageRequest is the input schema for the cercano_report_usage tool.
+type ReportUsageRequest struct {
+	CloudInputTokens  int    `json:"cloud_input_tokens" jsonschema:"Number of tokens sent to the cloud model"`
+	CloudOutputTokens int    `json:"cloud_output_tokens" jsonschema:"Number of tokens received from the cloud model"`
+	CloudProvider     string `json:"cloud_provider,omitempty" jsonschema:"Cloud provider name (e.g. anthropic, google)"`
+	CloudModel        string `json:"cloud_model,omitempty" jsonschema:"Cloud model name (e.g. claude-opus-4-6, gemini-3-flash)"`
+}
+
 // registerTools registers all Cercano MCP tools with the server.
 func (s *Server) registerTools() {
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
@@ -223,6 +231,11 @@ func (s *Server) registerTools() {
 		Name:        "cercano_skills",
 		Description: "List or retrieve Cercano's Agent Skills. Use action 'list' to get a catalog of all available skills with descriptions. Use action 'get' with a skill name to retrieve the full SKILL.md definition.",
 	}, s.handleSkills)
+
+	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
+		Name:        "cercano_report_usage",
+		Description: "Report cloud token usage from the host agent (opt-in). Call this to help Cercano track how many cloud tokens are used alongside local inference, enabling accurate local-vs-cloud usage comparison.",
+	}, s.handleReportUsage)
 }
 
 // handleLocal processes a cercano_local tool call.
@@ -578,4 +591,30 @@ func (s *Server) handleSkills(ctx context.Context, request *gomcp.CallToolReques
 	default:
 		return nil, nil, fmt.Errorf("invalid action %q: must be 'list' or 'get'", args.Action)
 	}
+}
+
+// handleReportUsage processes a cercano_report_usage tool call.
+func (s *Server) handleReportUsage(ctx context.Context, request *gomcp.CallToolRequest, args ReportUsageRequest) (*gomcp.CallToolResult, any, error) {
+	if s.collector == nil {
+		return &gomcp.CallToolResult{
+			Content: []gomcp.Content{
+				&gomcp.TextContent{Text: "Telemetry is not enabled."},
+			},
+		}, nil, nil
+	}
+
+	s.collector.EmitCloudUsage(telemetry.CloudUsageReport{
+		Timestamp:         time.Now(),
+		CloudInputTokens:  args.CloudInputTokens,
+		CloudOutputTokens: args.CloudOutputTokens,
+		CloudProvider:     args.CloudProvider,
+		CloudModel:        args.CloudModel,
+	})
+
+	total := args.CloudInputTokens + args.CloudOutputTokens
+	return &gomcp.CallToolResult{
+		Content: []gomcp.Content{
+			&gomcp.TextContent{Text: fmt.Sprintf("Recorded %d cloud tokens (%d in, %d out).", total, args.CloudInputTokens, args.CloudOutputTokens)},
+		},
+	}, nil, nil
 }

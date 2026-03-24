@@ -69,8 +69,8 @@ Automatically capture real cloud token usage from Claude Code's transcript file 
 - No new binaries, no OTel collector — just a shell/python script
 
 ### Tasks
-- [ ] Task: Write the hook script — parse transcript JSONL, extract cumulative cloud token usage, compute delta since last report, write to telemetry.db.
-- [ ] Task: Track last-reported position so the hook only processes new entries (avoid re-counting on every call).
+- [x] Task: Write the hook script — parse transcript JSONL, extract cumulative cloud token usage, compute delta since last report, write to telemetry.db.
+- [x] Task: Track last-reported position so the hook only processes new entries — uses session-keyed state file at `~/.config/cercano/hook_state.json`.
 - [ ] Task: Configure the PostToolUse hook in Claude Code settings — match `mcp__cercano__.*`, run the script.
 - [ ] Task: Update `cercano_stats` to show actual vs estimated cloud tokens when hook data is available.
 - [ ] Task: Red/Green TDD for the hook script.

@@ -747,6 +747,7 @@ func (s *Server) handleInit(ctx context.Context, request *gomcp.CallToolRequest,
 	if result, ok := s.checkDegraded(); ok {
 		return result, nil, nil
 	}
+	startTime := time.Now().UnixNano()
 	if args.ProjectDir == "" {
 		return nil, nil, fmt.Errorf("cercano_init: project_dir is required")
 	}
@@ -778,6 +779,7 @@ func (s *Server) handleInit(ctx context.Context, request *gomcp.CallToolRequest,
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_init")
 	}
+	s.emitEvent("cercano_init", resp, startTime)
 
 	// Write the context file
 	if err := builder.WriteContext(args.ProjectDir, resp.Output); err != nil {

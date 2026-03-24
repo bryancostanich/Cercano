@@ -21,7 +21,7 @@ Define what to measure, how to store it, and how to surface metrics — with a f
 Instrument the server to capture usage events at the right points without impacting latency.
 
 ### Tasks
-- [ ] Task: Define telemetry event struct and storage interface.
+- [x] Task: Define telemetry event struct and storage interface.
 - [ ] Task: Implement async event collection (fire-and-forget from request path).
 - [ ] Task: Instrument MCP tool handlers to emit events (tool name, model, token counts, duration).
 - [ ] Task: Instrument the SmartRouter/agent layer to capture routing decisions and escalation events.

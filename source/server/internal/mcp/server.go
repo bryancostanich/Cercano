@@ -97,7 +97,8 @@ func (s *Server) SetCollector(c *telemetry.Collector) {
 }
 
 // emitEvent is a helper that emits a telemetry event if a collector is configured.
-func (s *Server) emitEvent(toolName string, resp *proto.ProcessRequestResponse, startTime int64) {
+// tokenSaving indicates whether this call substitutes for a cloud call (counts toward savings).
+func (s *Server) emitEvent(toolName string, resp *proto.ProcessRequestResponse, startTime int64, tokenSaving bool) {
 	if s.collector == nil {
 		return
 	}
@@ -123,6 +124,7 @@ func (s *Server) emitEvent(toolName string, resp *proto.ProcessRequestResponse, 
 		DurationMs:    time.Since(time.Unix(0, startTime)).Milliseconds(),
 		WasEscalated:  wasEscalated,
 		CloudProvider: cloudProvider,
+		TokenSaving:   tokenSaving,
 	}
 	s.collector.Emit(e)
 }
@@ -307,7 +309,7 @@ func (s *Server) handleLocal(ctx context.Context, request *gomcp.CallToolRequest
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_local")
 	}
-	s.emitEvent("cercano_local", resp, startTime)
+	s.emitEvent("cercano_local", resp, startTime, true)
 
 	output := resp.Output
 	if len(resp.FileChanges) > 0 {
@@ -473,7 +475,7 @@ func (s *Server) handleSummarize(ctx context.Context, request *gomcp.CallToolReq
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_summarize")
 	}
-	s.emitEvent("cercano_summarize", resp, startTime)
+	s.emitEvent("cercano_summarize", resp, startTime, true)
 
 	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{
@@ -515,7 +517,7 @@ func (s *Server) handleExtract(ctx context.Context, request *gomcp.CallToolReque
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_extract")
 	}
-	s.emitEvent("cercano_extract", resp, startTime)
+	s.emitEvent("cercano_extract", resp, startTime, true)
 
 	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{
@@ -559,7 +561,7 @@ func (s *Server) handleClassify(ctx context.Context, request *gomcp.CallToolRequ
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_classify")
 	}
-	s.emitEvent("cercano_classify", resp, startTime)
+	s.emitEvent("cercano_classify", resp, startTime, true)
 
 	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{
@@ -598,7 +600,7 @@ func (s *Server) handleExplain(ctx context.Context, request *gomcp.CallToolReque
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_explain")
 	}
-	s.emitEvent("cercano_explain", resp, startTime)
+	s.emitEvent("cercano_explain", resp, startTime, true)
 
 	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{
@@ -779,7 +781,7 @@ func (s *Server) handleInit(ctx context.Context, request *gomcp.CallToolRequest,
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_init")
 	}
-	s.emitEvent("cercano_init", resp, startTime)
+	s.emitEvent("cercano_init", resp, startTime, false)
 
 	// Write the context file
 	if err := builder.WriteContext(args.ProjectDir, resp.Output); err != nil {

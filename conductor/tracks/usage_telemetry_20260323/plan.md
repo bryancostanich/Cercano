@@ -30,7 +30,7 @@ Instrument the server to capture usage events at the right points without impact
 - [x] Task: Red/Green TDD for all collection components.
 - [x] Task: Conductor - User Manual Verification 'Collection Layer' (Protocol in workflow.md)
 
-## Phase 3: Storage & Aggregation
+## Phase 3: Storage & Aggregation [checkpoint: e1ddfc3]
 
 ### Objective
 Persist events and compute aggregated metrics for reporting.
@@ -42,7 +42,7 @@ Persist events and compute aggregated metrics for reporting.
 - [x] Task: Red/Green TDD.
 - [-] Task: Conductor - User Manual Verification 'Storage & Aggregation' *(deferred — will verify with Phase 4)*
 
-## Phase 4: Reporting MCP Tool & Dashboard
+## Phase 4: Reporting MCP Tool & Dashboard [checkpoint: 47b34ea]
 
 ### Objective
 Expose metrics to users via an MCP tool and optional summary output.

@@ -89,3 +89,8 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 - [ ] **Track: Docker Deployment — Containerized Cercano with Docker and docker-compose**
 *Link: [./tracks/docker_20260320/](./tracks/docker_20260320/)*
+
+---
+
+- [x] **Track: Usage Telemetry & Token Savings Metrics** [checkpoint: 47b34ea]
+*Link: [./tracks/usage_telemetry_20260323/](./tracks/usage_telemetry_20260323/)*

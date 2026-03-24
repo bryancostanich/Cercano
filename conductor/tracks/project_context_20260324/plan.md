@@ -27,7 +27,7 @@ Build the plumbing: load context from `.cercano/context.md` and inject it into a
 - [x] Task: Implement session-level context cache on the MCP Server — load once per init, reuse across calls.
 - [x] Task: Implement "not initialized" nudge — when a tool call includes a project dir but no `.cercano/context.md` exists, append a recommendation to the tool response suggesting `cercano_init`.
 - [ ] Task: Red/Green TDD for all components.
-- [ ] Task: Conductor - User Manual Verification 'Context Storage & Injection' (Protocol in workflow.md)
+- [-] Task: Conductor - User Manual Verification 'Context Storage & Injection' *(verified with Phase 4)*
 
 ## Phase 3: Repo Scanner & Context Builder
 
@@ -40,7 +40,7 @@ Build the local intelligence that scans a repo and produces a useful context doc
 - [x] Task: Implement local model summarization — prompt template built, actual LLM call happens in cercano_init handler.
 - [x] Task: Implement context assembly — Builder.BuildPrompt combines files + host context, Builder.WriteContext writes .cercano/context.md.
 - [x] Task: Red/Green TDD for scanner and builder.
-- [ ] Task: Conductor - User Manual Verification 'Repo Scanner & Context Builder' (Protocol in workflow.md)
+- [-] Task: Conductor - User Manual Verification 'Repo Scanner & Context Builder' *(verified with Phase 4)*
 
 ## Phase 4: cercano_init MCP Tool & Skill
 
@@ -54,4 +54,4 @@ Ship the `cercano_init` tool and its Agent Skill definition.
 - [-] Task: Add telemetry for init events *(deferred — low priority, existing tool telemetry covers basic tracking)*.
 - [x] Task: Red/Green TDD.
 - [x] Task: Update README.md with project context documentation.
-- [ ] Task: Conductor - User Manual Verification 'cercano_init MCP Tool & Skill' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'cercano_init MCP Tool & Skill' (Protocol in workflow.md)

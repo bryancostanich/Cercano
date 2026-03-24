@@ -475,6 +475,8 @@ type ProcessRequestResponse struct {
 	FileChanges      []*FileChange          `protobuf:"bytes,2,rep,name=file_changes,json=fileChanges,proto3" json:"file_changes,omitempty"`                // Optional structured file modifications
 	RoutingMetadata  *RoutingMetadata       `protobuf:"bytes,3,opt,name=routing_metadata,json=routingMetadata,proto3" json:"routing_metadata,omitempty"`    // Optional metadata about the model/routing
 	ValidationErrors string                 `protobuf:"bytes,4,opt,name=validation_errors,json=validationErrors,proto3" json:"validation_errors,omitempty"` // Optional captured validation errors (e.g. test failures)
+	InputTokens      int32                  `protobuf:"varint,5,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`               // Prompt tokens consumed
+	OutputTokens     int32                  `protobuf:"varint,6,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`            // Completion tokens generated
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -535,6 +537,20 @@ func (x *ProcessRequestResponse) GetValidationErrors() string {
 		return x.ValidationErrors
 	}
 	return ""
+}
+
+func (x *ProcessRequestResponse) GetInputTokens() int32 {
+	if x != nil {
+		return x.InputTokens
+	}
+	return 0
+}
+
+func (x *ProcessRequestResponse) GetOutputTokens() int32 {
+	if x != nil {
+		return x.OutputTokens
+	}
+	return 0
 }
 
 // Represents a change to a specific file.
@@ -1084,12 +1100,14 @@ const file_source_proto_agent_proto_rawDesc = "" +
 	"ollama_url\x18\x05 \x01(\tR\tollamaUrl\"J\n" +
 	"\x14UpdateConfigResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xd6\x01\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\x9e\x02\n" +
 	"\x16ProcessRequestResponse\x12\x16\n" +
 	"\x06output\x18\x01 \x01(\tR\x06output\x124\n" +
 	"\ffile_changes\x18\x02 \x03(\v2\x11.agent.FileChangeR\vfileChanges\x12A\n" +
 	"\x10routing_metadata\x18\x03 \x01(\v2\x16.agent.RoutingMetadataR\x0froutingMetadata\x12+\n" +
-	"\x11validation_errors\x18\x04 \x01(\tR\x10validationErrors\"e\n" +
+	"\x11validation_errors\x18\x04 \x01(\tR\x10validationErrors\x12!\n" +
+	"\finput_tokens\x18\x05 \x01(\x05R\vinputTokens\x12#\n" +
+	"\routput_tokens\x18\x06 \x01(\x05R\foutputTokens\"e\n" +
 	"\n" +
 	"FileChange\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +

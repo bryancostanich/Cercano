@@ -123,16 +123,25 @@ func main() {
 		case "version":
 			fmt.Printf("cercano v%s\n", version)
 			return
+		case "stats":
+			runStats()
+			return
 		}
 	}
 
 	mcpMode := flag.Bool("mcp", false, "Run in MCP mode (embedded gRPC server + MCP on stdio)")
 	grpcAddr := flag.String("grpc-addr", "", "Address of an external gRPC server (MCP-only, no embedded server)")
 	showVersion := flag.Bool("version", false, "Print version and exit")
+	showStats := flag.Bool("stats", false, "Print usage statistics and exit")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Printf("cercano v%s\n", version)
+		return
+	}
+
+	if *showStats {
+		runStats()
 		return
 	}
 
@@ -261,6 +270,61 @@ func pullModel(ollamaURL, model string) error {
 	return nil
 }
 
+// runStats prints cumulative usage statistics and exits.
+func runStats() {
+	telemetryPath := filepath.Join(filepath.Dir(config.DefaultPath()), "telemetry.db")
+	store, err := telemetry.NewSQLiteStore(telemetryPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to open telemetry database: %v\n", err)
+		os.Exit(1)
+	}
+	defer store.Close()
+
+	stats, err := store.GetStats(context.Background())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to query stats: %v\n", err)
+		os.Exit(1)
+	}
+
+	totalLocal := stats.TotalInputTokens + stats.TotalOutputTokens
+	totalCloud := stats.TotalCloudInputTokens + stats.TotalCloudOutputTokens
+
+	fmt.Printf("Cercano Usage Statistics (v%s)\n\n", version)
+	fmt.Printf("  Total requests:          %d\n", stats.TotalRequests)
+	fmt.Printf("  Local tokens processed:  %d (%d in, %d out)\n", totalLocal, stats.TotalInputTokens, stats.TotalOutputTokens)
+	if totalCloud > 0 {
+		fmt.Printf("  Cloud tokens (reported): %d (%d in, %d out)\n", totalCloud, stats.TotalCloudInputTokens, stats.TotalCloudOutputTokens)
+		fmt.Printf("  Kept local:              %.1f%%\n", stats.LocalPercentage)
+	} else {
+		fmt.Printf("  Est. cloud tokens saved: %d\n", stats.LocalTokensSaved)
+	}
+
+	if len(stats.ByTool) > 0 {
+		fmt.Printf("\n  By Tool:\n")
+		for _, t := range stats.ByTool {
+			fmt.Printf("    %-25s %d calls, %d tokens\n", t.Name, t.Count, t.InputTokens+t.OutputTokens)
+		}
+	}
+
+	if len(stats.ByModel) > 0 {
+		fmt.Printf("\n  By Model:\n")
+		for _, m := range stats.ByModel {
+			fmt.Printf("    %-25s %d calls, %d tokens\n", m.Name, m.Count, m.InputTokens+m.OutputTokens)
+		}
+	}
+
+	if len(stats.ByDay) > 0 {
+		fmt.Printf("\n  Recent Activity:\n")
+		limit := len(stats.ByDay)
+		if limit > 7 {
+			limit = 7
+		}
+		for _, d := range stats.ByDay[:limit] {
+			fmt.Printf("    %-25s %d calls, %d tokens\n", d.Name, d.Count, d.InputTokens+d.OutputTokens)
+		}
+	}
+}
+
 // runServerMode starts the gRPC server in standalone mode (for IDE clients).
 func runServerMode(cfg config.Config) {
 	fmt.Printf("Starting Cercano gRPC server (v%s)...\n", version)
@@ -330,6 +394,12 @@ func runMCPMode(cfg config.Config, externalGRPC string) {
 		s.SetCollector(collector)
 		defer collector.Close()
 		defer telemetryStore.Close()
+
+		// Log cumulative stats on startup
+		if stats, err := telemetryStore.GetStats(context.Background()); err == nil && stats.TotalRequests > 0 {
+			totalLocal := stats.TotalInputTokens + stats.TotalOutputTokens
+			fmt.Fprintf(os.Stderr, "Telemetry: %d requests, %d local tokens processed\n", stats.TotalRequests, totalLocal)
+		}
 	}
 
 	if err := s.MCPServer().Run(context.Background(), &gomcp.StdioTransport{}); err != nil {

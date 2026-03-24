@@ -40,7 +40,7 @@ Persist events and compute aggregated metrics for reporting.
 - [x] Task: Implement aggregation queries (totals by tool, by model, by time period).
 - [x] Task: Implement cloud token savings calculator (local tokens processed vs. estimated cloud equivalent).
 - [x] Task: Red/Green TDD.
-- [ ] Task: Conductor - User Manual Verification 'Storage & Aggregation' (Protocol in workflow.md)
+- [-] Task: Conductor - User Manual Verification 'Storage & Aggregation' *(deferred — will verify with Phase 4)*
 
 ## Phase 4: Reporting MCP Tool & Dashboard
 
@@ -48,9 +48,9 @@ Persist events and compute aggregated metrics for reporting.
 Expose metrics to users via an MCP tool and optional summary output.
 
 ### Tasks
-- [ ] Task: Add `cercano_stats` MCP tool (returns usage summary, token savings, top models/tools).
+- [x] Task: Add `cercano_stats` MCP tool (returns usage summary, token savings, top models/tools).
 - [ ] Task: Add stats to server startup log (cumulative usage since install).
 - [ ] Task: Add `--stats` CLI flag for quick terminal summary.
-- [ ] Task: Red/Green TDD.
+- [x] Task: Red/Green TDD.
 - [ ] Task: Update README.md with telemetry documentation.
 - [ ] Task: Conductor - User Manual Verification 'Reporting MCP Tool & Dashboard' (Protocol in workflow.md)

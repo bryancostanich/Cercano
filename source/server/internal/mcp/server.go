@@ -182,6 +182,9 @@ type SkillsRequest struct {
 	Name   string `json:"name,omitempty" jsonschema:"Skill name to retrieve (required when action is get)"`
 }
 
+// StatsRequest is the input schema for the cercano_stats tool.
+type StatsRequest struct{}
+
 // ReportUsageRequest is the input schema for the cercano_report_usage tool.
 type ReportUsageRequest struct {
 	CloudInputTokens  int    `json:"cloud_input_tokens" jsonschema:"Number of tokens sent to the cloud model"`
@@ -236,6 +239,11 @@ func (s *Server) registerTools() {
 		Name:        "cercano_report_usage",
 		Description: "Report cloud token usage from the host agent (opt-in). Call this to help Cercano track how many cloud tokens are used alongside local inference, enabling accurate local-vs-cloud usage comparison.",
 	}, s.handleReportUsage)
+
+	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
+		Name:        "cercano_stats",
+		Description: "View Cercano usage statistics and cloud token savings. Shows total requests, tokens processed locally, cloud tokens reported by the host, percentage kept local, and breakdowns by tool, model, and day.",
+	}, s.handleStats)
 }
 
 // handleLocal processes a cercano_local tool call.
@@ -615,6 +623,71 @@ func (s *Server) handleReportUsage(ctx context.Context, request *gomcp.CallToolR
 	return &gomcp.CallToolResult{
 		Content: []gomcp.Content{
 			&gomcp.TextContent{Text: fmt.Sprintf("Recorded %d cloud tokens (%d in, %d out).", total, args.CloudInputTokens, args.CloudOutputTokens)},
+		},
+	}, nil, nil
+}
+
+// handleStats processes a cercano_stats tool call.
+func (s *Server) handleStats(ctx context.Context, request *gomcp.CallToolRequest, args StatsRequest) (*gomcp.CallToolResult, any, error) {
+	if s.collector == nil {
+		return &gomcp.CallToolResult{
+			Content: []gomcp.Content{
+				&gomcp.TextContent{Text: "Telemetry is not enabled."},
+			},
+		}, nil, nil
+	}
+
+	stats, err := s.collector.Store().GetStats(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("cercano_stats: %w", err)
+	}
+
+	var out strings.Builder
+	out.WriteString("## Cercano Usage Statistics\n\n")
+
+	// Totals
+	totalLocal := stats.TotalInputTokens + stats.TotalOutputTokens
+	totalCloud := stats.TotalCloudInputTokens + stats.TotalCloudOutputTokens
+	out.WriteString(fmt.Sprintf("**Total requests:** %d\n", stats.TotalRequests))
+	out.WriteString(fmt.Sprintf("**Local tokens:** %d (%d in, %d out)\n", totalLocal, stats.TotalInputTokens, stats.TotalOutputTokens))
+	if totalCloud > 0 {
+		out.WriteString(fmt.Sprintf("**Cloud tokens (host-reported):** %d (%d in, %d out)\n", totalCloud, stats.TotalCloudInputTokens, stats.TotalCloudOutputTokens))
+		out.WriteString(fmt.Sprintf("**Kept local:** %.1f%%\n", stats.LocalPercentage))
+	} else {
+		out.WriteString(fmt.Sprintf("**Estimated cloud tokens saved:** %d\n", stats.LocalTokensSaved))
+	}
+
+	// By tool
+	if len(stats.ByTool) > 0 {
+		out.WriteString("\n### By Tool\n")
+		for _, t := range stats.ByTool {
+			out.WriteString(fmt.Sprintf("- %s: %d calls, %d tokens\n", t.Name, t.Count, t.InputTokens+t.OutputTokens))
+		}
+	}
+
+	// By model
+	if len(stats.ByModel) > 0 {
+		out.WriteString("\n### By Model\n")
+		for _, m := range stats.ByModel {
+			out.WriteString(fmt.Sprintf("- %s: %d calls, %d tokens\n", m.Name, m.Count, m.InputTokens+m.OutputTokens))
+		}
+	}
+
+	// By day (last 7)
+	if len(stats.ByDay) > 0 {
+		out.WriteString("\n### Recent Activity\n")
+		limit := len(stats.ByDay)
+		if limit > 7 {
+			limit = 7
+		}
+		for _, d := range stats.ByDay[:limit] {
+			out.WriteString(fmt.Sprintf("- %s: %d calls, %d tokens\n", d.Name, d.Count, d.InputTokens+d.OutputTokens))
+		}
+	}
+
+	return &gomcp.CallToolResult{
+		Content: []gomcp.Content{
+			&gomcp.TextContent{Text: out.String()},
 		},
 	}, nil, nil
 }

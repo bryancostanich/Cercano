@@ -213,8 +213,10 @@ type generateOptions struct {
 }
 
 type generateResponse struct {
-	Response string `json:"response"`
-	Done     bool   `json:"done"`
+	Response        string `json:"response"`
+	Done            bool   `json:"done"`
+	PromptEvalCount int    `json:"prompt_eval_count,omitempty"`
+	EvalCount       int    `json:"eval_count,omitempty"`
 }
 
 func (p *OllamaProvider) Process(ctx context.Context, req *agent.Request) (*agent.Response, error) {
@@ -259,7 +261,11 @@ func (p *OllamaProvider) Process(ctx context.Context, req *agent.Request) (*agen
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	return &agent.Response{Output: genResp.Response}, nil
+	return &agent.Response{
+		Output:       genResp.Response,
+		InputTokens:  genResp.PromptEvalCount,
+		OutputTokens: genResp.EvalCount,
+	}, nil
 }
 
 // ProcessStream sends a streaming request to Ollama and calls onToken for each chunk.
@@ -302,6 +308,7 @@ func (p *OllamaProvider) ProcessStream(ctx context.Context, req *agent.Request, 
 	}
 
 	var accumulated strings.Builder
+	var lastChunk generateResponse
 	decoder := json.NewDecoder(resp.Body)
 
 	for decoder.More() {
@@ -316,9 +323,14 @@ func (p *OllamaProvider) ProcessStream(ctx context.Context, req *agent.Request, 
 			}
 		}
 		if chunk.Done {
+			lastChunk = chunk
 			break
 		}
 	}
 
-	return &agent.Response{Output: accumulated.String()}, nil
+	return &agent.Response{
+		Output:       accumulated.String(),
+		InputTokens:  lastChunk.PromptEvalCount,
+		OutputTokens: lastChunk.EvalCount,
+	}, nil
 }

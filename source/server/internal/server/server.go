@@ -217,6 +217,8 @@ func (s *Server) mapResponse(response *agent.Response) *proto.ProcessRequestResp
 	protoRes.RoutingMetadata = rm
 
 	protoRes.ValidationErrors = response.ValidationErrors
+	protoRes.InputTokens = int32(response.InputTokens)
+	protoRes.OutputTokens = int32(response.OutputTokens)
 
 	return protoRes
 }

@@ -20,6 +20,7 @@ import (
 	"cercano/source/server/internal/loop"
 	mcpserver "cercano/source/server/internal/mcp"
 	"cercano/source/server/internal/server"
+	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/internal/tools"
 	"cercano/source/server/pkg/proto"
 
@@ -318,6 +319,18 @@ func runMCPMode(cfg config.Config, externalGRPC string) {
 
 	grpcClient := proto.NewAgentClient(conn)
 	s := mcpserver.NewServer(grpcClient)
+
+	// Initialize telemetry
+	telemetryPath := filepath.Join(filepath.Dir(config.DefaultPath()), "telemetry.db")
+	telemetryStore, err := telemetry.NewSQLiteStore(telemetryPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] Failed to initialize telemetry: %v\n", err)
+	} else {
+		collector := telemetry.NewCollector(telemetryStore, 256)
+		s.SetCollector(collector)
+		defer collector.Close()
+		defer telemetryStore.Close()
+	}
 
 	if err := s.MCPServer().Run(context.Background(), &gomcp.StdioTransport{}); err != nil {
 		fmt.Fprintf(os.Stderr, "MCP server error: %v\n", err)

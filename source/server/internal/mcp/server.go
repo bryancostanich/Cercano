@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
+	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/pkg/proto"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -32,6 +34,7 @@ type Server struct {
 	mcpServer  *gomcp.Server
 	grpcClient proto.AgentClient
 	startupErr string // non-empty when the server started in degraded mode
+	collector  *telemetry.Collector // optional; nil disables telemetry
 }
 
 // NewServer creates a new MCP server backed by the given gRPC client.
@@ -82,6 +85,34 @@ func (s *Server) checkDegraded() (result *gomcp.CallToolResult, ok bool) {
 			&gomcp.TextContent{Text: fmt.Sprintf("Cercano is not available: %s", s.startupErr)},
 		},
 	}, true
+}
+
+// SetCollector attaches a telemetry collector for usage tracking.
+func (s *Server) SetCollector(c *telemetry.Collector) {
+	s.collector = c
+}
+
+// emitEvent is a helper that emits a telemetry event if a collector is configured.
+func (s *Server) emitEvent(toolName string, resp *proto.ProcessRequestResponse, startTime int64) {
+	if s.collector == nil {
+		return
+	}
+	model := ""
+	wasEscalated := false
+	cloudProvider := ""
+	if resp != nil && resp.RoutingMetadata != nil {
+		model = resp.RoutingMetadata.ModelName
+		wasEscalated = resp.RoutingMetadata.Escalated
+	}
+	e := &telemetry.Event{
+		Timestamp:     time.Unix(0, startTime),
+		ToolName:      toolName,
+		Model:         model,
+		DurationMs:    time.Since(time.Unix(0, startTime)).Milliseconds(),
+		WasEscalated:  wasEscalated,
+		CloudProvider: cloudProvider,
+	}
+	s.collector.Emit(e)
 }
 
 // MCPServer returns the underlying MCP server for transport binding.
@@ -191,6 +222,7 @@ func (s *Server) handleLocal(ctx context.Context, request *gomcp.CallToolRequest
 	if result, ok := s.checkDegraded(); ok {
 		return result, nil, nil
 	}
+	startTime := time.Now().UnixNano()
 	input := args.Prompt
 	if args.Context != "" {
 		input = fmt.Sprintf("%s\n\nContext:\n%s", args.Prompt, args.Context)
@@ -205,6 +237,7 @@ func (s *Server) handleLocal(ctx context.Context, request *gomcp.CallToolRequest
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_local")
 	}
+	s.emitEvent("cercano_local", resp, startTime)
 
 	output := resp.Output
 	if len(resp.FileChanges) > 0 {
@@ -337,6 +370,7 @@ func (s *Server) handleSummarize(ctx context.Context, request *gomcp.CallToolReq
 	if result, ok := s.checkDegraded(); ok {
 		return result, nil, nil
 	}
+	startTime := time.Now().UnixNano()
 	if args.Text == "" && args.FilePath == "" {
 		return nil, nil, fmt.Errorf("cercano_summarize: provide either 'text' or 'file_path'")
 	}
@@ -367,6 +401,7 @@ func (s *Server) handleSummarize(ctx context.Context, request *gomcp.CallToolReq
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_summarize")
 	}
+	s.emitEvent("cercano_summarize", resp, startTime)
 
 	return &gomcp.CallToolResult{
 		Content: []gomcp.Content{
@@ -380,6 +415,7 @@ func (s *Server) handleExtract(ctx context.Context, request *gomcp.CallToolReque
 	if result, ok := s.checkDegraded(); ok {
 		return result, nil, nil
 	}
+	startTime := time.Now().UnixNano()
 	if args.Text == "" && args.FilePath == "" {
 		return nil, nil, fmt.Errorf("cercano_extract: provide either 'text' or 'file_path'")
 	}
@@ -405,6 +441,7 @@ func (s *Server) handleExtract(ctx context.Context, request *gomcp.CallToolReque
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_extract")
 	}
+	s.emitEvent("cercano_extract", resp, startTime)
 
 	return &gomcp.CallToolResult{
 		Content: []gomcp.Content{
@@ -418,6 +455,7 @@ func (s *Server) handleClassify(ctx context.Context, request *gomcp.CallToolRequ
 	if result, ok := s.checkDegraded(); ok {
 		return result, nil, nil
 	}
+	startTime := time.Now().UnixNano()
 	if args.Text == "" && args.FilePath == "" {
 		return nil, nil, fmt.Errorf("cercano_classify: provide either 'text' or 'file_path'")
 	}
@@ -445,6 +483,7 @@ func (s *Server) handleClassify(ctx context.Context, request *gomcp.CallToolRequ
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_classify")
 	}
+	s.emitEvent("cercano_classify", resp, startTime)
 
 	return &gomcp.CallToolResult{
 		Content: []gomcp.Content{
@@ -458,6 +497,7 @@ func (s *Server) handleExplain(ctx context.Context, request *gomcp.CallToolReque
 	if result, ok := s.checkDegraded(); ok {
 		return result, nil, nil
 	}
+	startTime := time.Now().UnixNano()
 	if args.Text == "" && args.FilePath == "" {
 		return nil, nil, fmt.Errorf("cercano_explain: provide either 'text' or 'file_path'")
 	}
@@ -480,6 +520,7 @@ func (s *Server) handleExplain(ctx context.Context, request *gomcp.CallToolReque
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_explain")
 	}
+	s.emitEvent("cercano_explain", resp, startTime)
 
 	return &gomcp.CallToolResult{
 		Content: []gomcp.Content{

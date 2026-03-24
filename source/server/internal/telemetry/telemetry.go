@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -23,6 +24,7 @@ type Event struct {
 	WasEscalated  bool
 	CloudProvider string
 	CloudModel    string
+	TokenSaving   bool // true if this call substitutes for a cloud call (counts toward savings)
 	startTime     time.Time
 }
 
@@ -30,10 +32,11 @@ type Event struct {
 func NewEvent(toolName, model string) *Event {
 	now := time.Now()
 	return &Event{
-		Timestamp: now,
-		ToolName:  toolName,
-		Model:     model,
-		startTime: now,
+		Timestamp:   now,
+		ToolName:    toolName,
+		Model:       model,
+		TokenSaving: true, // default: most calls substitute for cloud calls
+		startTime:   now,
 	}
 }
 
@@ -116,6 +119,10 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := migrateSchema(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 
 	return &SQLiteStore{db: db}, nil
 }
@@ -132,7 +139,8 @@ func createTables(db *sql.DB) error {
 			duration_ms INTEGER NOT NULL DEFAULT 0,
 			was_escalated BOOLEAN NOT NULL DEFAULT 0,
 			cloud_provider TEXT NOT NULL DEFAULT '',
-			cloud_model TEXT NOT NULL DEFAULT ''
+			cloud_model TEXT NOT NULL DEFAULT '',
+			token_saving BOOLEAN NOT NULL DEFAULT 1
 		);
 
 		CREATE TABLE IF NOT EXISTS cloud_usage (
@@ -150,12 +158,26 @@ func createTables(db *sql.DB) error {
 	return nil
 }
 
+// migrateSchema adds columns that may be missing from older databases.
+func migrateSchema(db *sql.DB) error {
+	// Add token_saving column if it doesn't exist (added in v0.x)
+	_, err := db.Exec(`ALTER TABLE events ADD COLUMN token_saving BOOLEAN NOT NULL DEFAULT 1`)
+	if err != nil {
+		// Column already exists — ignore the error
+		if !strings.Contains(err.Error(), "duplicate column") {
+			// Unexpected error
+			return nil // non-fatal, proceed anyway
+		}
+	}
+	return nil
+}
+
 // RecordEvent persists a telemetry event.
 func (s *SQLiteStore) RecordEvent(ctx context.Context, e *Event) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO events (timestamp, tool_name, model, input_tokens, output_tokens, duration_ms, was_escalated, cloud_provider, cloud_model)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.Timestamp, e.ToolName, e.Model, e.InputTokens, e.OutputTokens, e.DurationMs, e.WasEscalated, e.CloudProvider, e.CloudModel,
+		`INSERT INTO events (timestamp, tool_name, model, input_tokens, output_tokens, duration_ms, was_escalated, cloud_provider, cloud_model, token_saving)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.Timestamp, e.ToolName, e.Model, e.InputTokens, e.OutputTokens, e.DurationMs, e.WasEscalated, e.CloudProvider, e.CloudModel, e.TokenSaving,
 	)
 	return err
 }
@@ -180,7 +202,7 @@ func (s *SQLiteStore) GetStats(ctx context.Context) (*Stats, error) {
 			COALESCE(COUNT(*), 0),
 			COALESCE(SUM(input_tokens), 0),
 			COALESCE(SUM(output_tokens), 0),
-			COALESCE(SUM(CASE WHEN was_escalated = 0 THEN input_tokens + output_tokens ELSE 0 END), 0)
+			COALESCE(SUM(CASE WHEN was_escalated = 0 AND token_saving = 1 THEN input_tokens + output_tokens ELSE 0 END), 0)
 		FROM events
 	`)
 	if err := row.Scan(&stats.TotalRequests, &stats.TotalInputTokens, &stats.TotalOutputTokens, &stats.LocalTokensSaved); err != nil {

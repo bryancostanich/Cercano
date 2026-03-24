@@ -6,14 +6,14 @@
 Design the project context system — how context is built, stored, loaded, and injected into tool calls.
 
 ### Tasks
-- [ ] Task: Define the context file format and location (`.cercano/context.md` at project root).
-- [ ] Task: Design the `cercano_init` tool interface — required params (`project_dir`), optional params (`context` from host AI), return value.
-- [ ] Task: Design the repo scanning strategy — which files to read (README, CLAUDE.md, memory files, headers, proto files, configs), size limits, prioritization.
-- [ ] Task: Design the local model summarization pipeline — how scanned files get distilled into a concise context document.
-- [ ] Task: Design how the skill prompt instructs the host AI — explicit guidance that the host should only provide context it already has, not go research the project.
-- [ ] Task: Design context injection — how existing tools (summarize, extract, classify, explain, local) prepend context to prompts. Session-level caching vs. per-call file read.
-- [ ] Task: Write architecture decision document.
-- [ ] Task: Conductor - User Manual Verification 'Design & Architecture' (Protocol in workflow.md)
+- [x] Task: Define the context file format and location (`.cercano/context.md` at project root).
+- [x] Task: Design the `cercano_init` tool interface — required params (`project_dir`), optional params (`context` from host AI), return value.
+- [x] Task: Design the repo scanning strategy — which files to read (README, CLAUDE.md, memory files, headers, proto files, configs), size limits, prioritization.
+- [x] Task: Design the local model summarization pipeline — how scanned files get distilled into a concise context document.
+- [x] Task: Design how the skill prompt instructs the host AI — explicit guidance that the host should only provide context it already has, not go research the project.
+- [x] Task: Design context injection — how existing tools (summarize, extract, classify, explain, local) prepend context to prompts. Session-level caching vs. per-call file read.
+- [x] Task: Write architecture decision document — covered by spec.md.
+- [-] Task: Conductor - User Manual Verification 'Design & Architecture' *(deferred — spec.md reviewed inline)*
 
 ## Phase 2: Context Storage & Injection
 
@@ -21,11 +21,11 @@ Design the project context system — how context is built, stored, loaded, and 
 Build the plumbing: load context from `.cercano/context.md` and inject it into all tool calls.
 
 ### Tasks
-- [ ] Task: Implement context loader — read `.cercano/context.md` from project root, cache in memory.
-- [ ] Task: Add `project_dir` optional parameter to all co-processor tools (summarize, extract, classify, explain).
-- [ ] Task: Implement context injection in MCP handlers — prepend loaded context to prompts when available.
-- [ ] Task: Implement session-level context cache on the MCP Server — load once per init, reuse across calls.
-- [ ] Task: Implement "not initialized" nudge — when a tool call includes a project dir but no `.cercano/context.md` exists, append a recommendation to the tool response suggesting `cercano_init`.
+- [x] Task: Implement context loader — read `.cercano/context.md` from project root, cache in memory.
+- [~] Task: Add `project_dir` optional parameter to all co-processor tools (summarize, extract, classify, explain).
+- [~] Task: Implement context injection in MCP handlers — prepend loaded context to prompts when available.
+- [~] Task: Implement session-level context cache on the MCP Server — load once per init, reuse across calls.
+- [~] Task: Implement "not initialized" nudge — when a tool call includes a project dir but no `.cercano/context.md` exists, append a recommendation to the tool response suggesting `cercano_init`.
 - [ ] Task: Red/Green TDD for all components.
 - [ ] Task: Conductor - User Manual Verification 'Context Storage & Injection' (Protocol in workflow.md)
 

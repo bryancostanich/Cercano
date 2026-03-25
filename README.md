@@ -334,8 +334,12 @@ Cercano publishes its tools as [Agent Skills](https://agentskills.io) — an ope
 | `cercano-extract` | Pull specific information from text (errors, signatures, config values) |
 | `cercano-classify` | Categorize/triage text with confidence scores and reasoning |
 | `cercano-explain` | Explain code — what it does, key interfaces, and data flow |
+| `cercano-fetch` | Fetch a URL and extract readable text (HTML stripped to plain text) |
+| `cercano-research` | Research a question via DuckDuckGo search + local model analysis |
 | `cercano-config` | View/change Cercano's runtime configuration |
 | `cercano-models` | List available models on the connected Ollama instance |
+| `cercano-init` | Initialize project context for project-aware responses |
+| `cercano-stats` | View usage statistics and cloud token savings |
 
 Each skill is a `SKILL.md` file that tells the agent what the tool does, its parameters, and how to invoke it via MCP.
 

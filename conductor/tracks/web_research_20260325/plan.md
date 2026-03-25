@@ -1,7 +1,5 @@
 # Track Plan: Web Research Tool
 
-> **Future consideration:** Documentation site indexing (crawl a doc site once, make it persistently searchable — similar to Cursor's @Docs) is a natural extension of this track. It may need to be split into its own track or combined with the Semantic Search track depending on scope. Parking it here as a note for now.
-
 ## Phase 1: Design & Architecture
 
 ### Objective

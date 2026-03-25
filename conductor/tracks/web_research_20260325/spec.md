@@ -56,7 +56,7 @@ Key decisions:
 ### 4.1 cercano_fetch
 - Input: `url` (required), `project_dir` (optional for context)
 - Behavior: HTTP GET, extract readable text from HTML (strip tags, scripts, styles, nav), respect robots.txt
-- Output: Extracted text content, truncated to a reasonable size (~32KB)
+- Output: Full extracted text content (no artificial truncation — host decides what to use)
 - Error handling: Timeouts, redirects, non-HTML content types
 
 ### 4.2 cercano_research

@@ -104,6 +104,20 @@ func applyEnvOverrides(cfg *Config) {
 	}
 }
 
+// VenvDir returns the path to Cercano's Python venv (~/.config/cercano/venv/).
+func VenvDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "cercano", "venv")
+}
+
+// VenvPython returns the path to the Python binary inside Cercano's venv.
+func VenvPython() string {
+	return filepath.Join(VenvDir(), "bin", "python3")
+}
+
 // Save writes the config to the given path, creating directories as needed.
 func Save(cfg Config, path string) error {
 	dir := filepath.Dir(path)

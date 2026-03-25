@@ -99,9 +99,23 @@ func applyEnvOverrides(cfg *Config) {
 			cfg.CloudProvider = "google"
 		}
 		if cfg.CloudModel == "" {
-			cfg.CloudModel = "gemini-1.5-flash"
+			cfg.CloudModel = "gemini-3-flash"
 		}
 	}
+}
+
+// VenvDir returns the path to Cercano's Python venv (~/.config/cercano/venv/).
+func VenvDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "cercano", "venv")
+}
+
+// VenvPython returns the path to the Python binary inside Cercano's venv.
+func VenvPython() string {
+	return filepath.Join(VenvDir(), "bin", "python3")
 }
 
 // Save writes the config to the given path, creating directories as needed.

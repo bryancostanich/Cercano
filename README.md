@@ -4,9 +4,9 @@ Cercano is a local-first AI development tool that runs open-source models on you
 
 Cercano works in two ways:
 
-**1. Standalone Agent** — Use Cercano directly as your AI coding assistant. It routes tasks to local models first, falls back to cloud when needed, and runs an agentic loop that generates, validates, and self-corrects code automatically. Integrates with VS Code and other IDEs via gRPC.
+**1. Local, in-agent Tool** — Plug Cercano into cloud-based agents like Claude Code, Cursor, or Copilot via [MCP](https://modelcontextprotocol.io/). Instead of sending everything to the cloud, Cercano supercharges your frontier coding experience by providing a set of skills running locally, such as _research_, _summarization_, _extraction_, _classification_, and _code explanation_ that can not only massively reduce your cloud context window and usage (and costs), but actually provide better context to the cloud model.
 
-**2. Local Co-Processor** — Plug Cercano into cloud-based agents like Claude Code, Cursor, or Copilot via [MCP](https://modelcontextprotocol.io/). Instead of sending everything to the cloud, offload tasks like summarization, extraction, classification, and code explanation to local inference. This saves cloud context window, reduces cost, keeps sensitive code off the wire, and runs faster for simple tasks.
+**2. Standalone Agent** — Use Cercano directly as your AI coding assistant. It routes tasks to local models first, falls back to cloud when needed, and runs an agentic loop that generates, validates, and self-corrects code automatically. Integrates with VS Code and other IDEs via gRPC. Please note that Cercano's stand-alone agent is still relatively primitive and is undergoing rapid development.
 
 ## Key Features
 
@@ -27,6 +27,23 @@ When used as a co-processor inside cloud agents, Cercano provides specialized to
 | `cercano_classify` | Triage errors, logs, or code with category + confidence | Quick local triage without cloud round-trip |
 | `cercano_explain` | Explain what code does, its components and data flow | Understand code locally before deciding what to send to cloud |
 | `cercano_local` | General-purpose prompt execution against local models | Offload any simple task to local inference |
+| `cercano_fetch` | Fetch a URL and extract readable text (HTML stripped to plain text) | Read web pages without stuffing raw HTML into cloud context |
+| `cercano_research` | Research a question via DuckDuckGo search + local model analysis | Get distilled, sourced answers without browsing the web yourself |
+
+### Project Context
+Run `cercano_init` once per project to make all Cercano tools project-aware. It scans the repo, feeds key files through a local model, and writes `.cercano/context.md` — a concise reference document that gets automatically prepended to all tool calls. The host AI can optionally provide domain knowledge it already has.
+
+If you use a Cercano tool without initializing first, it will suggest running init.
+
+### Usage Telemetry & Token Savings
+Cercano tracks how much work stays local and how many cloud tokens you save:
+
+- **`cercano_stats`** — MCP tool that returns usage summary, token savings, and breakdowns by tool, model, and day.
+- **`cercano_report_usage`** — Opt-in tool for host agents to report their cloud token usage, enabling accurate local-vs-cloud comparison.
+- **`cercano stats`** — CLI command for a quick terminal summary of cumulative usage.
+- **Cloud token capture** — A PostToolUse hook parses Claude Code's transcript to automatically record cloud token usage alongside local metrics. Run `cercano setup` to configure the hook.
+
+Data is stored locally in `~/.config/cercano/telemetry.db` (SQLite). No prompt content, file paths, or credentials are ever recorded.
 
 ### Integration
 - **MCP Server** — Expose all tools to any [MCP](https://modelcontextprotocol.io/)-compatible agent (Claude Code, Cursor, Copilot, etc.).
@@ -273,6 +290,17 @@ cercano_explain(file_path: "internal/agent/router.go")
   between local and cloud models based on semantic similarity...
 ```
 
+**Research a question (search + fetch + local model analysis):**
+```
+cercano_research(query: "How does the Ollama REST API list models?")
+→ Ollama lists models via GET /api/tags, which returns a JSON array of
+  installed models with name, size, and modification date...
+
+  Sources:
+  - https://docs.ollama.com/api/introduction
+  - https://github.com/ollama/ollama/blob/main/docs/api.md
+```
+
 **Multi-turn conversation:**
 ```
 cercano_local(prompt: "Explain the SmartRouter", conversation_id: "abc123")
@@ -293,9 +321,63 @@ cercano_local(prompt: "How does it handle escalation?", conversation_id: "abc123
 |------|---------|-------------|
 | `--grpc-addr` | `localhost:50052` | Address of the Cercano gRPC server |
 
+## Agent Skills
+
+Cercano publishes its tools as [Agent Skills](https://agentskills.io) — an open standard for packaging AI capabilities so they're discoverable by any compatible agent. Over 30 agents support this standard, including Claude Code, Cursor, Copilot, Gemini CLI, Codex, and more.
+
+### Published Skills
+
+| Skill | Description |
+|-------|-------------|
+| `cercano-local` | General-purpose local inference — chat queries and agentic code generation |
+| `cercano-summarize` | Summarize text or files locally (brief, medium, or detailed) |
+| `cercano-extract` | Pull specific information from text (errors, signatures, config values) |
+| `cercano-classify` | Categorize/triage text with confidence scores and reasoning |
+| `cercano-explain` | Explain code — what it does, key interfaces, and data flow |
+| `cercano-fetch` | Fetch a URL and extract readable text (HTML stripped to plain text) |
+| `cercano-research` | Research a question via DuckDuckGo search + local model analysis |
+| `cercano-config` | View/change Cercano's runtime configuration |
+| `cercano-models` | List available models on the connected Ollama instance |
+| `cercano-init` | Initialize project context for project-aware responses |
+| `cercano-stats` | View usage statistics and cloud token savings |
+
+Each skill is a `SKILL.md` file that tells the agent what the tool does, its parameters, and how to invoke it via MCP.
+
+### How Agents Discover Skills
+
+Agents scan well-known directories for `SKILL.md` files at startup:
+
+| Directory | Discovered by |
+|-----------|---------------|
+| `.agents/skills/<skill-name>/SKILL.md` | Any Agent Skills-compatible agent |
+| `.claude/skills/<skill-name>/SKILL.md` | Claude Code (also appears as slash commands) |
+
+Cercano ships its skill definitions in both locations.
+
+### Installing Skills in Your Project
+
+To make Cercano's skills available to your agent, copy the skill files into your project:
+
+```bash
+# For any Agent Skills-compatible agent
+cp -r /path/to/Cercano/.agents/skills/* .agents/skills/
+
+# For Claude Code specifically (enables /cercano-* slash commands)
+cp -r /path/to/Cercano/.claude/skills/* .claude/skills/
+```
+
+The `cercano_skills` MCP tool also provides programmatic access to skill definitions:
+
+```
+cercano_skills(action: "list")           → catalog of all skills
+cercano_skills(action: "get", name: "cercano-local")  → full SKILL.md content
+```
+
+For a detailed guide on writing custom SKILL.md files, see [docs/agent-skills-guide.md](docs/agent-skills-guide.md).
+
 ## Remote Inference
 
-Cercano can delegate inference to a remote Ollama instance — for example, a Mac Studio on your LAN with more GPU memory and larger models. The remote endpoint is runtime-configurable with automatic fallback to local Ollama if the remote goes down.
+Cercano can delegate inference to a remote Ollama instance — for example, another machine on your LAN with more GPU memory and larger models. The remote endpoint is runtime-configurable with automatic fallback to local Ollama if the remote goes down.
 
 ### Setup
 
@@ -359,12 +441,13 @@ make test   # Run all tests
 ### New Features
 
 * **[Competitive Audit — Agent Features Landscape](conductor/tracks/competitive_audit_20260318/plan.md)** - Feature matrix across 12+ open-source and commercial agents (Codex, Aider, Continue, Cody, OpenHands, SWE-Agent, Claude Code, Cursor, Windsurf, GitHub Copilot, JetBrains AI, Amazon Q) to inform Cercano's tool design and roadmap.
-* **[Local Co-Processor Tools](conductor/tracks/local_coprocessor_tools_20260318/plan.md)** *(in progress)* - Specialized MCP tools that make Cercano a local co-processor for cloud agents. Summarize, extract, classify, and explain content locally — faster, cheaper, and more private. Four tools shipped, README update pending.
 * **[Semantic Codebase Search](conductor/tracks/semantic_search_20260318/plan.md)** - Embedding-based code search by intent ("find auth-related code"), not just string matching. Requires indexing pipeline, storage, and nearest-neighbor retrieval.
-* **[Agent Skills Integration](conductor/tracks/agent_skills_20260318/plan.md)** - Adopt the [Agent Skills](https://agentskills.io) open standard (SKILL.md) to package Cercano's tools as discoverable skills for 25+ compatible agents, and enable Cercano to consume community/enterprise skills.
 * **[User-Friendly Distribution](conductor/tracks/distribution_20260317/plan.md)** - Setup/launch scripts, Docker containerization, and CI/CD pipeline with GitHub Actions for automated cross-platform releases.
 * **[AI Engine Agnosticism](conductor/tracks/engine_agnosticism_20260317/plan.md)** - Abstract the local inference layer to support pluggable backends (ONNX Runtime, Enso, etc.) beyond Ollama.
-* **Add Gemma Support** - Add Google's Gemma models to the supported local model list for Ollama.
+* **[Web Research Tool](conductor/tracks/web_research_20260325/plan.md)** - Fetch URLs, search the web via DuckDuckGo, and use local models to analyze and distill results. Keeps raw web content out of the cloud context window.
+* **Stand-alone CLI** - Create a stand alone Command Line Interface (CLI) for cercano that doesn't really on other CLI integrations.
+* **PDF Parsing** - Extract text from local and remote PDFs for use with summarize, extract, explain, and research tools.
+* **Documentation Site Indexing** - Crawl a documentation site once, index it persistently, and make it searchable across sessions (similar to Cursor's @Docs).
 
 ### Existing Improvements
 

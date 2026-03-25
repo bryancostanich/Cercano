@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -132,7 +133,13 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "setup":
-			runSetup()
+			installEngine := false
+			for _, arg := range os.Args[2:] {
+				if arg == "--install-engine" {
+					installEngine = true
+				}
+			}
+			runSetup(installEngine)
 			return
 		case "version":
 			fmt.Printf("cercano v%s\n", version)
@@ -174,7 +181,7 @@ func main() {
 }
 
 // runSetup checks prerequisites and pulls required Ollama models.
-func runSetup() {
+func runSetup(installEngine bool) {
 	fmt.Printf("Cercano Setup (v%s)\n", version)
 	fmt.Println("Checking prerequisites...")
 
@@ -183,67 +190,101 @@ func runSetup() {
 		cfg = config.Defaults()
 	}
 
-	// Check Ollama is running
-	fmt.Printf("\n[1/5] Checking Ollama at %s...\n", cfg.OllamaURL)
-	if err := checkOllama(cfg.OllamaURL); err != nil {
-		fmt.Fprintf(os.Stderr, "  FAIL: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Println("  OK: Ollama is running.")
+	// Step 1: Detect AI engine backend
+	fmt.Printf("\n[1/6] Checking for AI engine backends...\n")
+	detection := detectEngineWith(checkOllama, cfg.OllamaURL)
 
-	// Check required models
-	fmt.Println("\n[2/5] Checking required models...")
-	requiredModels := []string{cfg.LocalModel, cfg.EmbeddingModel}
-	client := &http.Client{Timeout: 5 * time.Second}
-
-	resp, err := client.Get(cfg.OllamaURL + "/api/tags")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "  FAIL: Could not list models: %v\n", err)
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
-
-	type modelList struct {
-		Models []struct {
-			Name string `json:"name"`
-		} `json:"models"`
-	}
-
-	var models modelList
-	if err := decodeJSON(resp.Body, &models); err != nil {
-		fmt.Fprintf(os.Stderr, "  FAIL: Could not parse model list: %v\n", err)
-		os.Exit(1)
-	}
-
-	installed := make(map[string]bool)
-	for _, m := range models.Models {
-		// Strip :latest suffix for comparison
-		name := strings.TrimSuffix(m.Name, ":latest")
-		installed[name] = true
-		installed[m.Name] = true
-	}
-
-	allPresent := true
-	for _, model := range requiredModels {
-		if installed[model] {
-			fmt.Printf("  OK: %s\n", model)
-		} else {
-			fmt.Printf("  MISSING: %s — pulling...\n", model)
-			if err := pullModel(cfg.OllamaURL, model); err != nil {
-				fmt.Fprintf(os.Stderr, "  FAIL: Could not pull %s: %v\n", model, err)
-				allPresent = false
-			} else {
-				fmt.Printf("  OK: %s (pulled)\n", model)
+	engineAvailable := detection.Available
+	if detection.Available {
+		fmt.Printf("  OK: %s is running at %s\n", detection.Name, detection.URL)
+	} else {
+		// Prompt for installation
+		shouldInstall := promptInstallEngine(os.Stderr, os.Stdin, installEngine)
+		if shouldInstall {
+			goos := runtime.GOOS
+			hasBrew := hasBrewInstalled()
+			if err := installOllama(goos, hasBrew); err != nil {
+				fmt.Fprintf(os.Stderr, "  FAIL: %v\n", err)
+				fmt.Fprintf(os.Stderr, "  Install Ollama manually from https://ollama.com/download and re-run 'cercano setup'.\n")
+				os.Exit(1)
 			}
+			// Start Ollama after install
+			if err := startOllama(goos, hasBrew); err != nil {
+				fmt.Fprintf(os.Stderr, "  WARN: %v\n", err)
+				fmt.Fprintf(os.Stderr, "  Please start Ollama manually and re-run 'cercano setup'.\n")
+				os.Exit(1)
+			}
+			// Wait for engine to become responsive
+			if err := waitForEngine(checkOllama, cfg.OllamaURL, 10); err != nil {
+				fmt.Fprintf(os.Stderr, "  FAIL: %v\n", err)
+				fmt.Fprintf(os.Stderr, "  Ollama was installed but is not responding. Please start it manually and re-run 'cercano setup'.\n")
+				os.Exit(1)
+			}
+			fmt.Fprintln(os.Stderr, "  OK: Ollama is running.")
+			engineAvailable = true
+		} else {
+			fmt.Fprintln(os.Stderr, "  Skipping engine installation.")
+			fmt.Fprintln(os.Stderr, "  Install Ollama from https://ollama.com/download when ready, then re-run 'cercano setup'.")
 		}
 	}
 
-	if !allPresent {
-		os.Exit(1)
+	// Step 2: Check required models (only if engine is available)
+	if engineAvailable {
+		fmt.Println("\n[2/6] Checking required models...")
+		requiredModels := []string{cfg.LocalModel, cfg.EmbeddingModel}
+		client := &http.Client{Timeout: 5 * time.Second}
+
+		resp, err := client.Get(cfg.OllamaURL + "/api/tags")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  FAIL: Could not list models: %v\n", err)
+			os.Exit(1)
+		}
+		defer resp.Body.Close()
+
+		type modelList struct {
+			Models []struct {
+				Name string `json:"name"`
+			} `json:"models"`
+		}
+
+		var models modelList
+		if err := decodeJSON(resp.Body, &models); err != nil {
+			fmt.Fprintf(os.Stderr, "  FAIL: Could not parse model list: %v\n", err)
+			os.Exit(1)
+		}
+
+		installed := make(map[string]bool)
+		for _, m := range models.Models {
+			// Strip :latest suffix for comparison
+			name := strings.TrimSuffix(m.Name, ":latest")
+			installed[name] = true
+			installed[m.Name] = true
+		}
+
+		allPresent := true
+		for _, model := range requiredModels {
+			if installed[model] {
+				fmt.Printf("  OK: %s\n", model)
+			} else {
+				fmt.Printf("  MISSING: %s — pulling...\n", model)
+				if err := pullModel(cfg.OllamaURL, model); err != nil {
+					fmt.Fprintf(os.Stderr, "  FAIL: Could not pull %s: %v\n", model, err)
+					allPresent = false
+				} else {
+					fmt.Printf("  OK: %s (pulled)\n", model)
+				}
+			}
+		}
+
+		if !allPresent {
+			os.Exit(1)
+		}
+	} else {
+		fmt.Fprintln(os.Stderr, "\n[2/6] Skipping model check (no engine available).")
 	}
 
 	// Check/create config file
-	fmt.Println("\n[3/5] Checking config file...")
+	fmt.Println("\n[3/6] Checking config file...")
 	configPath := config.DefaultPath()
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		fmt.Printf("  Creating default config at %s\n", configPath)
@@ -257,19 +298,26 @@ func runSetup() {
 	}
 
 	// Configure Claude Code hook for cloud token telemetry
-	fmt.Println("\n[4/5] Checking Claude Code telemetry hook...")
+	fmt.Println("\n[4/6] Checking Claude Code telemetry hook...")
 	if err := ensureClaudeHook(); err != nil {
 		fmt.Fprintf(os.Stderr, "  WARN: Could not configure hook: %v\n", err)
 	}
 
 	// Set up Python venv for web research (DuckDuckGo search)
-	fmt.Println("\n[5/5] Setting up Python venv for web research...")
+	fmt.Println("\n[5/6] Setting up Python venv for web research...")
 	if err := ensureVenv(); err != nil {
 		fmt.Fprintf(os.Stderr, "  WARN: Could not set up Python venv: %v\n", err)
 		fmt.Fprintf(os.Stderr, "  (Web research features will not be available. You can re-run 'cercano setup' to retry.)\n")
 	}
 
-	fmt.Println("\nSetup complete! Run 'cercano' to start the server.")
+	// Summary
+	fmt.Println("\n[6/6] Setup complete!")
+	if engineAvailable {
+		fmt.Println("  Run 'cercano' to start the server.")
+	} else {
+		fmt.Println("  Note: No AI engine is installed. Install Ollama from https://ollama.com/download")
+		fmt.Println("  then re-run 'cercano setup' to pull models.")
+	}
 }
 
 // ensureVenv creates the Python venv at ~/.config/cercano/venv/ and installs

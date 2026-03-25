@@ -113,16 +113,12 @@ Cercano can run as a standalone gRPC server (for IDE clients) or embedded inside
 
 ## Getting Started
 
-### Prerequisites
-
-- [Ollama](https://ollama.com/) running locally
-
 ### Install via Homebrew (macOS)
 
 ```bash
 brew tap bryancostanich/cercano
 brew install cercano
-cercano setup    # checks Ollama, pulls required models, creates config
+cercano setup    # detects/installs Ollama, pulls models, creates config
 ```
 
 ### Install from Source
@@ -133,9 +129,11 @@ Requires [Go](https://go.dev/dl/) 1.21+.
 git clone https://github.com/bryancostanich/Cercano.git
 cd Cercano/source/server
 make build
-bin/cercano setup    # checks Ollama, pulls required models, creates config
+bin/cercano setup    # detects/installs Ollama, pulls models, creates config
 bin/cercano          # starts the gRPC server
 ```
+
+`cercano setup` handles everything: if no AI engine backend is detected, it offers to install [Ollama](https://ollama.com/) automatically (via Homebrew on macOS or the official installer on Linux), starts it, and pulls the required models. Use `--install-engine` to skip the interactive prompt for scripted/CI use.
 
 ### Use with Claude Code
 

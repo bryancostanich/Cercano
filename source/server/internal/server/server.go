@@ -79,7 +79,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	if req.CloudApiKey != "" && req.CloudProvider != "" {
 		model := req.CloudModel
 		if model == "" {
-			model = "gemini-1.5-flash" // sensible default
+			model = "gemini-3-flash" // sensible default
 		}
 
 		provider, err := s.cloudFactory(ctx, req.CloudProvider, model, req.CloudApiKey)
@@ -242,6 +242,8 @@ func (s *Server) mapResponse(response *agent.Response) *proto.ProcessRequestResp
 	protoRes.RoutingMetadata = rm
 
 	protoRes.ValidationErrors = response.ValidationErrors
+	protoRes.InputTokens = int32(response.InputTokens)
+	protoRes.OutputTokens = int32(response.OutputTokens)
 
 	return protoRes
 }

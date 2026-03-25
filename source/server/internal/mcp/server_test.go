@@ -2,11 +2,14 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/pkg/proto"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -525,6 +528,47 @@ func TestCercanoConfig_SetOllamaURL(t *testing.T) {
 	}
 }
 
+func TestCercanoConfig_GetListsModels(t *testing.T) {
+	mock := &mockAgentClient{
+		modelsResp: &proto.ListModelsResponse{
+			Models: []*proto.ModelInfo{
+				{Name: "qwen3-coder:latest", Size: 18556700761},
+				{Name: "gemma3:4b", Size: 3300000000},
+				{Name: "nomic-embed-text:latest", Size: 274302450},
+			},
+		},
+	}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_config",
+		Arguments: map[string]any{
+			"action": "get",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if !strings.Contains(text, "qwen3-coder:latest") {
+		t.Errorf("expected qwen3-coder in output, got %q", text)
+	}
+	if !strings.Contains(text, "gemma3:4b") {
+		t.Errorf("expected gemma3:4b in output, got %q", text)
+	}
+	if !strings.Contains(text, "3.3 GB") {
+		t.Errorf("expected size formatting, got %q", text)
+	}
+}
+
 func TestCercanoConfig_InvalidAction(t *testing.T) {
 	mock := &mockAgentClient{}
 	s := NewServer(mock)
@@ -705,6 +749,46 @@ func TestCercanoClassify_GRPCError(t *testing.T) {
 	}
 	if !result.IsError {
 		t.Error("expected IsError=true when gRPC call fails")
+	}
+}
+
+func TestCercanoClassify_WithFilePath(t *testing.T) {
+	mock := &mockAgentClient{
+		processResp: &proto.ProcessRequestResponse{
+			Output: "Category: script\nConfidence: high\nReasoning: It is a shell script.",
+		},
+	}
+	s := NewServer(mock)
+
+	tmpFile := filepath.Join(t.TempDir(), "sample.sh")
+	os.WriteFile(tmpFile, []byte("#!/bin/bash\necho hello"), 0644)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_classify",
+		Arguments: map[string]any{
+			"file_path": tmpFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	if mock.lastRequest == nil {
+		t.Fatal("expected gRPC request to be made")
+	}
+	if !strings.Contains(mock.lastRequest.Input, "echo hello") {
+		t.Errorf("expected file content in prompt, got %q", mock.lastRequest.Input)
+	}
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if !strings.Contains(text, "Category: script") {
+		t.Errorf("expected classify output, got %q", text)
 	}
 }
 
@@ -1238,6 +1322,50 @@ func TestCercanoExtract_GRPCError(t *testing.T) {
 	}
 }
 
+func TestCercanoExtract_WithFilePath(t *testing.T) {
+	mock := &mockAgentClient{
+		processResp: &proto.ProcessRequestResponse{
+			Output: "func main() {",
+		},
+	}
+	s := NewServer(mock)
+
+	tmpFile := filepath.Join(t.TempDir(), "sample.go")
+	os.WriteFile(tmpFile, []byte("package main\n\nfunc main() {\n\tfmt.Println(\"hi\")\n}"), 0644)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_extract",
+		Arguments: map[string]any{
+			"file_path": tmpFile,
+			"query":     "function signatures",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	if mock.lastRequest == nil {
+		t.Fatal("expected gRPC request to be made")
+	}
+	if !strings.Contains(mock.lastRequest.Input, "func main()") {
+		t.Errorf("expected file content in prompt, got %q", mock.lastRequest.Input)
+	}
+	if !strings.Contains(mock.lastRequest.Input, "function signatures") {
+		t.Errorf("expected query in prompt, got %q", mock.lastRequest.Input)
+	}
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if text != "func main() {" {
+		t.Errorf("unexpected output: %q", text)
+	}
+}
+
 func TestCercanoLocal_MultiTurn(t *testing.T) {
 	callCount := 0
 	mock := &mockAgentClient{}
@@ -1393,5 +1521,207 @@ func TestCercanoSkills_InvalidAction(t *testing.T) {
 	}
 	if !result.IsError {
 		t.Error("expected IsError=true for invalid action")
+	}
+}
+
+func TestCercanoStats_ReturnsUsageSummary(t *testing.T) {
+	mock := &mockAgentClient{}
+	s := NewServer(mock)
+
+	dbPath := filepath.Join(t.TempDir(), "test_telemetry.db")
+	store, err := telemetry.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+	collector := telemetry.NewCollector(store, 100)
+	s.SetCollector(collector)
+
+	// Seed some data
+	e := telemetry.NewEvent("cercano_summarize", "qwen3-coder")
+	e.Complete(500, 100, false, "", "")
+	collector.Emit(e)
+	collector.EmitCloudUsage(telemetry.CloudUsageReport{
+		Timestamp:         time.Now(),
+		CloudInputTokens:  10000,
+		CloudOutputTokens: 2000,
+		CloudProvider:     "anthropic",
+		CloudModel:        "claude-opus-4-6",
+	})
+	collector.Close()
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name:      "cercano_stats",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if !strings.Contains(text, "Total requests") {
+		t.Errorf("expected 'Total requests' in output, got %q", text)
+	}
+	if !strings.Contains(text, "cercano_summarize") {
+		t.Errorf("expected tool breakdown, got %q", text)
+	}
+	if !strings.Contains(text, "qwen3-coder") {
+		t.Errorf("expected model breakdown, got %q", text)
+	}
+	if !strings.Contains(text, "Kept local") {
+		t.Errorf("expected local percentage, got %q", text)
+	}
+}
+
+func TestCercanoStats_NoCollector(t *testing.T) {
+	mock := &mockAgentClient{}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name:      "cercano_stats",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if !strings.Contains(text, "not enabled") {
+		t.Errorf("expected 'not enabled' message, got %q", text)
+	}
+}
+
+func TestCercanoReportUsage_RecordsTokens(t *testing.T) {
+	mock := &mockAgentClient{}
+	s := NewServer(mock)
+
+	// Create a real telemetry store and collector for this test
+	dbPath := filepath.Join(t.TempDir(), "test_telemetry.db")
+	store, err := telemetry.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+	collector := telemetry.NewCollector(store, 100)
+	s.SetCollector(collector)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_report_usage",
+		Arguments: map[string]any{
+			"cloud_input_tokens":  15000,
+			"cloud_output_tokens": 3000,
+			"cloud_provider":      "anthropic",
+			"cloud_model":         "claude-opus-4-6",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if !strings.Contains(text, "18000") {
+		t.Errorf("expected total token count in output, got %q", text)
+	}
+
+	// Drain collector and verify storage
+	collector.Close()
+	stats, err := store.GetStats(context.Background())
+	if err != nil {
+		t.Fatalf("GetStats failed: %v", err)
+	}
+	if stats.TotalCloudInputTokens != 15000 {
+		t.Errorf("expected 15000 cloud input tokens, got %d", stats.TotalCloudInputTokens)
+	}
+	if stats.TotalCloudOutputTokens != 3000 {
+		t.Errorf("expected 3000 cloud output tokens, got %d", stats.TotalCloudOutputTokens)
+	}
+}
+
+func TestCercanoReportUsage_NoCollector(t *testing.T) {
+	mock := &mockAgentClient{}
+	s := NewServer(mock)
+	// No collector set
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_report_usage",
+		Arguments: map[string]any{
+			"cloud_input_tokens":  1000,
+			"cloud_output_tokens": 500,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if !strings.Contains(text, "not enabled") {
+		t.Errorf("expected 'not enabled' message, got %q", text)
+	}
+}
+
+func TestDegradedServer_RegistersToolsAndReturnsError(t *testing.T) {
+	s := NewDegradedServer(fmt.Errorf("could not connect to Ollama at http://localhost:11434. Is Ollama running?"))
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	// Verify tools are still registered.
+	toolCount := 0
+	for _, err := range cs.Tools(ctx, nil) {
+		if err != nil {
+			t.Fatalf("listing tools failed: %v", err)
+		}
+		toolCount++
+	}
+	if toolCount == 0 {
+		t.Fatal("expected tools to be registered in degraded mode")
+	}
+
+	// Verify calling a tool returns the startup error via IsError.
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name:      "cercano_local",
+		Arguments: map[string]any{"prompt": "hello"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected IsError=true in degraded mode")
+	}
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if !strings.Contains(text, "Ollama") {
+		t.Errorf("expected error to mention Ollama, got: %s", text)
 	}
 }

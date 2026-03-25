@@ -1,5 +1,7 @@
 # Track Plan: Semantic Codebase Search
 
+> **Future consideration:** Documentation site indexing — crawl a doc site once, index it persistently, make it searchable across sessions (similar to Cursor's @Docs). This is a natural extension of the embedding/indexing infrastructure built in this track. May warrant its own phase or separate track.
+
 ## Phase 1: Design & Architecture
 
 ### Objective

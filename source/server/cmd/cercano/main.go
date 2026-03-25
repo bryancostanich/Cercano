@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -22,6 +24,7 @@ import (
 	"cercano/source/server/internal/loop"
 	mcpserver "cercano/source/server/internal/mcp"
 	"cercano/source/server/internal/server"
+	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/internal/tools"
 	"cercano/source/server/pkg/proto"
 
@@ -129,16 +132,25 @@ func main() {
 		case "version":
 			fmt.Printf("cercano v%s\n", version)
 			return
+		case "stats":
+			runStats()
+			return
 		}
 	}
 
 	mcpMode := flag.Bool("mcp", false, "Run in MCP mode (embedded gRPC server + MCP on stdio)")
 	grpcAddr := flag.String("grpc-addr", "", "Address of an external gRPC server (MCP-only, no embedded server)")
 	showVersion := flag.Bool("version", false, "Print version and exit")
+	showStats := flag.Bool("stats", false, "Print usage statistics and exit")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Printf("cercano v%s\n", version)
+		return
+	}
+
+	if *showStats {
+		runStats()
 		return
 	}
 
@@ -167,7 +179,7 @@ func runSetup() {
 	}
 
 	// Check Ollama is running
-	fmt.Printf("\n[1/3] Checking Ollama at %s...\n", cfg.OllamaURL)
+	fmt.Printf("\n[1/5] Checking Ollama at %s...\n", cfg.OllamaURL)
 	if err := checkOllama(cfg.OllamaURL); err != nil {
 		fmt.Fprintf(os.Stderr, "  FAIL: %v\n", err)
 		os.Exit(1)
@@ -175,7 +187,7 @@ func runSetup() {
 	fmt.Println("  OK: Ollama is running.")
 
 	// Check required models
-	fmt.Println("\n[2/3] Checking required models...")
+	fmt.Println("\n[2/5] Checking required models...")
 	requiredModels := []string{cfg.LocalModel, cfg.EmbeddingModel}
 	client := &http.Client{Timeout: 5 * time.Second}
 
@@ -226,7 +238,7 @@ func runSetup() {
 	}
 
 	// Check/create config file
-	fmt.Println("\n[3/3] Checking config file...")
+	fmt.Println("\n[3/5] Checking config file...")
 	configPath := config.DefaultPath()
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		fmt.Printf("  Creating default config at %s\n", configPath)
@@ -239,7 +251,148 @@ func runSetup() {
 		fmt.Printf("  OK: Config file exists at %s\n", configPath)
 	}
 
+	// Configure Claude Code hook for cloud token telemetry
+	fmt.Println("\n[4/5] Checking Claude Code telemetry hook...")
+	if err := ensureClaudeHook(); err != nil {
+		fmt.Fprintf(os.Stderr, "  WARN: Could not configure hook: %v\n", err)
+	}
+
+	// Set up Python venv for web research (DuckDuckGo search)
+	fmt.Println("\n[5/5] Setting up Python venv for web research...")
+	if err := ensureVenv(); err != nil {
+		fmt.Fprintf(os.Stderr, "  WARN: Could not set up Python venv: %v\n", err)
+		fmt.Fprintf(os.Stderr, "  (Web research features will not be available. You can re-run 'cercano setup' to retry.)\n")
+	}
+
 	fmt.Println("\nSetup complete! Run 'cercano' to start the server.")
+}
+
+// ensureVenv creates the Python venv at ~/.config/cercano/venv/ and installs
+// ddgs if not already set up. Validates the install with a test import.
+func ensureVenv() error {
+	venvDir := config.VenvDir()
+	pythonPath := config.VenvPython()
+
+	// Check if venv already exists and is working
+	if _, err := os.Stat(pythonPath); err == nil {
+		// Validate the existing venv has ddgs
+		cmd := exec.Command(pythonPath, "-c", "import ddgs")
+		if cmd.Run() == nil {
+			fmt.Println("  OK: Python venv exists and ddgs is installed.")
+			return nil
+		}
+		fmt.Println("  Venv exists but ddgs is missing — reinstalling...")
+	}
+
+	// Find system python3
+	systemPython, err := exec.LookPath("python3")
+	if err != nil {
+		return fmt.Errorf("python3 not found in PATH. Install Python 3 to enable web research features")
+	}
+
+	// Create venv
+	fmt.Printf("  Creating venv at %s...\n", venvDir)
+	cmd := exec.Command(systemPython, "-m", "venv", venvDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to create venv: %w\n%s", err, string(out))
+	}
+
+	// Install ddgs
+	pipPath := filepath.Join(venvDir, "bin", "pip")
+	fmt.Println("  Installing ddgs...")
+	cmd = exec.Command(pipPath, "install", "--quiet", "ddgs")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to install ddgs: %w\n%s", err, string(out))
+	}
+
+	// Validate
+	cmd = exec.Command(pythonPath, "-c", "import ddgs; print('ok')")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("validation failed: %w\n%s", err, string(out))
+	}
+
+	fmt.Println("  OK: Python venv created and ddgs installed.")
+	return nil
+}
+
+// ensureClaudeHook adds the PostToolUse telemetry hook to Claude Code's
+// user-level settings.json if it's not already present.
+func ensureClaudeHook() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	settingsPath := filepath.Join(home, ".claude", "settings.json")
+
+	// Find the hook script
+	exePath, _ := os.Executable()
+	hookScript := filepath.Join(filepath.Dir(exePath), "..", "hooks", "report_cloud_tokens.py")
+	// Resolve to absolute path
+	hookScript, _ = filepath.Abs(hookScript)
+	if _, err := os.Stat(hookScript); os.IsNotExist(err) {
+		// Try relative to server root
+		serverRoot := filepath.Dir(filepath.Dir(exePath))
+		hookScript = filepath.Join(serverRoot, "hooks", "report_cloud_tokens.py")
+		if _, err := os.Stat(hookScript); os.IsNotExist(err) {
+			return fmt.Errorf("hook script not found")
+		}
+	}
+
+	// Read existing settings
+	var settings map[string]interface{}
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			settings = make(map[string]interface{})
+		} else {
+			return err
+		}
+	} else {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return fmt.Errorf("failed to parse settings.json: %w", err)
+		}
+	}
+
+	// Check if hook already exists
+	hooks, _ := settings["hooks"].(map[string]interface{})
+	if hooks == nil {
+		hooks = make(map[string]interface{})
+	}
+
+	postToolUse, _ := hooks["PostToolUse"].([]interface{})
+	for _, h := range postToolUse {
+		if hm, ok := h.(map[string]interface{}); ok {
+			if m, ok := hm["matcher"].(string); ok && m == "mcp__cercano__.*" {
+				fmt.Println("  OK: Telemetry hook already configured.")
+				return nil
+			}
+		}
+	}
+
+	// Add the hook
+	hookEntry := map[string]interface{}{
+		"matcher": "mcp__cercano__.*",
+		"hooks": []interface{}{
+			map[string]interface{}{
+				"type":    "command",
+				"command": fmt.Sprintf("python3 %s", hookScript),
+			},
+		},
+	}
+	postToolUse = append(postToolUse, hookEntry)
+	hooks["PostToolUse"] = postToolUse
+	settings["hooks"] = hooks
+
+	// Write back
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(settingsPath, out, 0644); err != nil {
+		return err
+	}
+	fmt.Printf("  OK: Telemetry hook added (script: %s)\n", hookScript)
+	return nil
 }
 
 func decodeJSON(r io.Reader, v interface{}) error {
@@ -265,6 +418,81 @@ func pullModel(ollamaURL, model string) error {
 		}
 	}
 	return nil
+}
+
+// runStats prints cumulative usage statistics and exits.
+func runStats() {
+	telemetryPath := filepath.Join(filepath.Dir(config.DefaultPath()), "telemetry.db")
+	store, err := telemetry.NewSQLiteStore(telemetryPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to open telemetry database: %v\n", err)
+		os.Exit(1)
+	}
+	defer store.Close()
+
+	stats, err := store.GetStats(context.Background())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to query stats: %v\n", err)
+		os.Exit(1)
+	}
+
+	totalLocal := stats.TotalInputTokens + stats.TotalOutputTokens
+	totalCloud := stats.TotalCloudInputTokens + stats.TotalCloudOutputTokens
+
+	fmt.Printf("Cercano Usage Statistics (v%s)\n\n", version)
+	fmt.Printf("  Total requests:          %d\n", stats.TotalRequests)
+	fmt.Printf("  Local tokens processed:  %d (%d in, %d out)\n", totalLocal, stats.TotalInputTokens, stats.TotalOutputTokens)
+	if totalCloud > 0 {
+		fmt.Printf("  Cloud tokens (reported): %d (%d in, %d out)\n", totalCloud, stats.TotalCloudInputTokens, stats.TotalCloudOutputTokens)
+		fmt.Printf("  Kept local:              %.1f%%\n", stats.LocalPercentage)
+	} else {
+		fmt.Printf("  Est. cloud tokens saved: %d\n", stats.LocalTokensSaved)
+	}
+
+	if len(stats.ByTool) > 0 {
+		fmt.Printf("\n  By Tool:\n")
+		for _, t := range stats.ByTool {
+			fmt.Printf("    %-25s %d calls, %d tokens\n", t.Name, t.Count, t.InputTokens+t.OutputTokens)
+		}
+	}
+
+	if len(stats.ByModel) > 0 {
+		fmt.Printf("\n  By Model:\n")
+		for _, m := range stats.ByModel {
+			fmt.Printf("    %-25s %d calls, %d tokens\n", m.Name, m.Count, m.InputTokens+m.OutputTokens)
+		}
+	}
+
+	if len(stats.ByDay) > 0 {
+		fmt.Printf("\n  Recent Activity:\n")
+		limit := len(stats.ByDay)
+		if limit > 7 {
+			limit = 7
+		}
+		for _, d := range stats.ByDay[:limit] {
+			fmt.Printf("    %-25s %d calls, %d tokens\n", d.Name, d.Count, d.InputTokens+d.OutputTokens)
+		}
+	}
+
+	if len(stats.BySession) > 0 {
+		fmt.Printf("\n  By Session:\n")
+		limit := len(stats.BySession)
+		if limit > 10 {
+			limit = 10
+		}
+		for _, sess := range stats.BySession[:limit] {
+			fmt.Printf("    %-25s %d calls, %d tokens\n", sess.StartedAt.Format("2006-01-02 15:04"), sess.Count, sess.InputTokens+sess.OutputTokens)
+		}
+	}
+}
+
+// generateSessionID returns a UUID v4 string for identifying an MCP session.
+func generateSessionID() string {
+	var uuid [16]byte
+	rand.Read(uuid[:])
+	uuid[6] = (uuid[6] & 0x0f) | 0x40 // version 4
+	uuid[8] = (uuid[8] & 0x3f) | 0x80 // variant 10
+	return fmt.Sprintf("%x-%x-%x-%x-%x", uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:])
 }
 
 // runServerMode starts the gRPC server in standalone mode (for IDE clients).
@@ -301,8 +529,15 @@ func runMCPMode(cfg config.Config, externalGRPC string) {
 
 		addr, _, err := startGRPCServer(cfg, "localhost:0")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
-			os.Exit(1)
+			// Start in degraded mode so the MCP pipe stays alive and
+			// the client gets a clear error instead of "Failed to reconnect".
+			fmt.Fprintf(os.Stderr, "[ERROR] %v — starting in degraded mode\n", err)
+			s := mcpserver.NewDegradedServer(err)
+			if runErr := s.MCPServer().Run(context.Background(), &gomcp.StdioTransport{}); runErr != nil {
+				fmt.Fprintf(os.Stderr, "MCP server error: %v\n", runErr)
+				os.Exit(1)
+			}
+			return
 		}
 		grpcTarget = addr
 		fmt.Fprintf(os.Stderr, "Embedded gRPC server listening at %s\n", grpcTarget)
@@ -318,6 +553,25 @@ func runMCPMode(cfg config.Config, externalGRPC string) {
 
 	grpcClient := proto.NewAgentClient(conn)
 	s := mcpserver.NewServer(grpcClient)
+
+	// Initialize telemetry
+	telemetryPath := filepath.Join(filepath.Dir(config.DefaultPath()), "telemetry.db")
+	telemetryStore, err := telemetry.NewSQLiteStore(telemetryPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] Failed to initialize telemetry: %v\n", err)
+	} else {
+		collector := telemetry.NewCollector(telemetryStore, 256)
+		collector.SetSessionID(generateSessionID())
+		s.SetCollector(collector)
+		defer collector.Close()
+		defer telemetryStore.Close()
+
+		// Log cumulative stats on startup
+		if stats, err := telemetryStore.GetStats(context.Background()); err == nil && stats.TotalRequests > 0 {
+			totalLocal := stats.TotalInputTokens + stats.TotalOutputTokens
+			fmt.Fprintf(os.Stderr, "Telemetry: %d requests, %d local tokens processed\n", stats.TotalRequests, totalLocal)
+		}
+	}
 
 	if err := s.MCPServer().Run(context.Background(), &gomcp.StdioTransport{}); err != nil {
 		fmt.Fprintf(os.Stderr, "MCP server error: %v\n", err)

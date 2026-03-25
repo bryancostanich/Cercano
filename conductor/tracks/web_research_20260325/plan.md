@@ -6,12 +6,12 @@
 Define tool interfaces, search provider abstraction, and concurrency model.
 
 ### Tasks
-- [ ] Task: Define `cercano_fetch` tool interface — params, output format, size limits, error handling.
-- [ ] Task: Define `cercano_research` tool interface — params, multi-step flow, output format with citations.
-- [ ] Task: Design search provider interface — abstract DDG behind a provider so Brave/SearXNG can be added later.
-- [ ] Task: Design the Python subprocess protocol — CLI args, JSON output format, error signaling.
-- [ ] Task: Write architecture decision document (spec.md covers this).
-- [ ] Task: Conductor - User Manual Verification 'Design & Architecture' (Protocol in workflow.md)
+- [x] Task: Define `cercano_fetch` tool interface — params, output format, size limits, error handling.
+- [x] Task: Define `cercano_research` tool interface — params, multi-step flow, output format with citations.
+- [x] Task: Design search provider interface — abstract DDG behind a provider so Brave/SearXNG can be added later.
+- [x] Task: Design the Python subprocess protocol — CLI args, JSON output format, error signaling.
+- [x] Task: Write architecture decision document (spec.md covers this).
+- [-] Task: Conductor - User Manual Verification 'Design & Architecture' *(spec reviewed and approved by user)*
 
 ## Phase 2: URL Fetching (cercano_fetch)
 
@@ -19,12 +19,12 @@ Define tool interfaces, search provider abstraction, and concurrency model.
 Build the URL fetching tool — HTTP GET + HTML-to-text extraction. No search provider needed.
 
 ### Tasks
-- [ ] Task: Implement HTML-to-text extractor — strip scripts, styles, nav, ads; preserve paragraph structure.
-- [ ] Task: Implement HTTP fetcher with timeout, redirect following, User-Agent, content-type checking.
-- [ ] Task: Add `cercano_fetch` MCP tool handler — accepts URL, returns raw extracted text (not summarized — host decides what to do with it).
-- [ ] Task: Add telemetry for fetch events (token_saving=true).
-- [ ] Task: Write Agent Skill (SKILL.md) for `cercano_fetch`.
-- [ ] Task: Red/Green TDD for fetcher and extractor.
+- [x] Task: Implement HTML-to-text extractor — strip scripts, styles, nav, ads; preserve paragraph structure.
+- [x] Task: Implement HTTP fetcher with timeout, redirect following, User-Agent, content-type checking.
+- [x] Task: Add `cercano_fetch` MCP tool handler — accepts URL, returns raw extracted text (not summarized — host decides what to do with it).
+- [-] Task: Add telemetry for fetch events *(fetch doesn't call the local model — no tokens to track)*.
+- [x] Task: Write Agent Skill (SKILL.md) for `cercano_fetch`.
+- [x] Task: Red/Green TDD for fetcher and extractor.
 - [ ] Task: Conductor - User Manual Verification 'URL Fetching' (Protocol in workflow.md)
 
 ## Phase 3: Setup & Python Search Integration

@@ -9,6 +9,7 @@ import (
 
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/telemetry"
+	"cercano/source/server/internal/web"
 	"cercano/source/server/pkg/proto"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -235,6 +236,13 @@ type SkillsRequest struct {
 	Name   string `json:"name,omitempty" jsonschema:"Skill name to retrieve (required when action is get)"`
 }
 
+// FetchRequest is the input schema for the cercano_fetch tool.
+type FetchRequest struct {
+	URL        string `json:"url" jsonschema:"URL to fetch and extract text from."`
+	ProjectDir string `json:"project_dir,omitempty" jsonschema:"Project root directory. Enables project-aware responses when .cercano/context.md exists."`
+	cloudTokenFields
+}
+
 // InitRequest is the input schema for the cercano_init tool.
 type InitRequest struct {
 	ProjectDir string `json:"project_dir" jsonschema:"Project root directory to scan and build context for (required)."`
@@ -303,6 +311,11 @@ func (s *Server) registerTools() {
 		Name:        "cercano_stats",
 		Description: "View Cercano usage statistics and cloud token savings. Shows total requests, tokens processed locally, cloud tokens reported by the host, percentage kept local, and breakdowns by tool, model, and day.",
 	}, s.handleStats)
+
+	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
+		Name:        "cercano_fetch",
+		Description: "Fetch a URL and extract readable text content. Returns the full extracted text (HTML stripped to plain text) — not a summary. Use this to read web pages, documentation, articles, or any URL locally without sending the content to the cloud.",
+	}, s.handleFetch)
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_init",
@@ -764,6 +777,31 @@ func (s *Server) handleStats(ctx context.Context, request *gomcp.CallToolRequest
 			&gomcp.TextContent{Text: out.String()},
 		},
 	}, nil, nil
+}
+
+// handleFetch processes a cercano_fetch tool call.
+func (s *Server) handleFetch(ctx context.Context, request *gomcp.CallToolRequest, args FetchRequest) (*gomcp.CallToolResult, any, error) {
+	if args.URL == "" {
+		return nil, nil, fmt.Errorf("cercano_fetch: 'url' is required")
+	}
+
+	fetcher := web.NewFetcher()
+	fetchResult, err := fetcher.Fetch(args.URL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("cercano_fetch: %w", err)
+	}
+
+	output := fetchResult.Content
+	if output == "" {
+		output = "(No readable text content found at this URL)"
+	}
+
+	result := &gomcp.CallToolResult{
+		Content: []gomcp.Content{
+			&gomcp.TextContent{Text: output},
+		},
+	}
+	return s.maybeNudge(args.ProjectDir, result), nil, nil
 }
 
 // handleInit processes a cercano_init tool call.

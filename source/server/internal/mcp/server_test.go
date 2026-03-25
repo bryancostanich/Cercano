@@ -1566,17 +1566,17 @@ func TestCercanoStats_ReturnsUsageSummary(t *testing.T) {
 	}
 
 	text := result.Content[0].(*gomcp.TextContent).Text
-	if !strings.Contains(text, "Total requests") {
-		t.Errorf("expected 'Total requests' in output, got %q", text)
+	if !strings.Contains(text, "Total Requests") {
+		t.Errorf("expected 'Total Requests' in output, got %q", text)
 	}
-	if !strings.Contains(text, "cercano_summarize") {
+	if !strings.Contains(text, "summarize") {
 		t.Errorf("expected tool breakdown, got %q", text)
 	}
 	if !strings.Contains(text, "qwen3-coder") {
 		t.Errorf("expected model breakdown, got %q", text)
 	}
-	if !strings.Contains(text, "Kept local") {
-		t.Errorf("expected local percentage, got %q", text)
+	if !strings.Contains(text, "Local vs Cloud") {
+		t.Errorf("expected local vs cloud bar, got %q", text)
 	}
 }
 

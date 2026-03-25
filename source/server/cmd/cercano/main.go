@@ -489,54 +489,7 @@ func runStats() {
 		os.Exit(1)
 	}
 
-	totalLocal := stats.TotalInputTokens + stats.TotalOutputTokens
-	totalCloud := stats.TotalCloudInputTokens + stats.TotalCloudOutputTokens
-
-	fmt.Printf("Cercano Usage Statistics (v%s)\n\n", version)
-	fmt.Printf("  Total requests:          %d\n", stats.TotalRequests)
-	fmt.Printf("  Local tokens processed:  %d (%d in, %d out)\n", totalLocal, stats.TotalInputTokens, stats.TotalOutputTokens)
-	if totalCloud > 0 {
-		fmt.Printf("  Cloud tokens (reported): %d (%d in, %d out)\n", totalCloud, stats.TotalCloudInputTokens, stats.TotalCloudOutputTokens)
-		fmt.Printf("  Kept local:              %.1f%%\n", stats.LocalPercentage)
-	} else {
-		fmt.Printf("  Est. cloud tokens saved: %d\n", stats.LocalTokensSaved)
-	}
-
-	if len(stats.ByTool) > 0 {
-		fmt.Printf("\n  By Tool:\n")
-		for _, t := range stats.ByTool {
-			fmt.Printf("    %-25s %d calls, %d tokens\n", t.Name, t.Count, t.InputTokens+t.OutputTokens)
-		}
-	}
-
-	if len(stats.ByModel) > 0 {
-		fmt.Printf("\n  By Model:\n")
-		for _, m := range stats.ByModel {
-			fmt.Printf("    %-25s %d calls, %d tokens\n", m.Name, m.Count, m.InputTokens+m.OutputTokens)
-		}
-	}
-
-	if len(stats.ByDay) > 0 {
-		fmt.Printf("\n  Recent Activity:\n")
-		limit := len(stats.ByDay)
-		if limit > 7 {
-			limit = 7
-		}
-		for _, d := range stats.ByDay[:limit] {
-			fmt.Printf("    %-25s %d calls, %d tokens\n", d.Name, d.Count, d.InputTokens+d.OutputTokens)
-		}
-	}
-
-	if len(stats.BySession) > 0 {
-		fmt.Printf("\n  By Session:\n")
-		limit := len(stats.BySession)
-		if limit > 10 {
-			limit = 10
-		}
-		for _, sess := range stats.BySession[:limit] {
-			fmt.Printf("    %-25s %d calls, %d tokens\n", sess.StartedAt.Format("2006-01-02 15:04"), sess.Count, sess.InputTokens+sess.OutputTokens)
-		}
-	}
+	fmt.Print(telemetry.FormatStatsASCII(stats))
 }
 
 // generateSessionID returns a UUID v4 string for identifying an MCP session.

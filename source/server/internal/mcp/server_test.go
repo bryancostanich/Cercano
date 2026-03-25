@@ -1605,7 +1605,7 @@ func TestCercanoStats_NoCollector(t *testing.T) {
 	}
 }
 
-func TestCercanoReportUsage_RecordsTokens(t *testing.T) {
+func TestCercanoSubmitUsage_RecordsTokens(t *testing.T) {
 	mock := &mockAgentClient{}
 	s := NewServer(mock)
 
@@ -1627,7 +1627,7 @@ func TestCercanoReportUsage_RecordsTokens(t *testing.T) {
 	defer cs.Close()
 
 	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
-		Name: "cercano_report_usage",
+		Name: "cercano_submit_usage",
 		Arguments: map[string]any{
 			"cloud_input_tokens":  15000,
 			"cloud_output_tokens": 3000,
@@ -1658,7 +1658,7 @@ func TestCercanoReportUsage_RecordsTokens(t *testing.T) {
 	}
 }
 
-func TestCercanoReportUsage_NoCollector(t *testing.T) {
+func TestCercanoSubmitUsage_NoCollector(t *testing.T) {
 	mock := &mockAgentClient{}
 	s := NewServer(mock)
 	// No collector set
@@ -1671,7 +1671,7 @@ func TestCercanoReportUsage_NoCollector(t *testing.T) {
 	defer cs.Close()
 
 	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
-		Name: "cercano_report_usage",
+		Name: "cercano_submit_usage",
 		Arguments: map[string]any{
 			"cloud_input_tokens":  1000,
 			"cloud_output_tokens": 500,

@@ -23,6 +23,7 @@ Build the URL fetching tool — HTTP GET + HTML-to-text extraction. No search pr
 - [ ] Task: Implement HTTP fetcher with timeout, redirect following, User-Agent, content-type checking.
 - [ ] Task: Add `cercano_fetch` MCP tool handler — accepts URL, returns raw extracted text (not summarized — host decides what to do with it).
 - [ ] Task: Add telemetry for fetch events (token_saving=true).
+- [ ] Task: Write Agent Skill (SKILL.md) for `cercano_fetch`.
 - [ ] Task: Red/Green TDD for fetcher and extractor.
 - [ ] Task: Conductor - User Manual Verification 'URL Fetching' (Protocol in workflow.md)
 

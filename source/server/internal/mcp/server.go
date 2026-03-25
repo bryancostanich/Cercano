@@ -168,7 +168,7 @@ const venvMissingMessage = "Web research requires a Python virtual environment t
 // venvNudgeMessage is appended to cercano_init output when the venv is missing.
 const venvNudgeMessage = "\n\n---\n*Note: The Python venv for web research is not set up. Run `cercano setup` to enable `cercano_research` (DuckDuckGo search + local model analysis).*"
 
-// isVenvReady returns true if the Python venv exists and has duckduckgo-search installed.
+// isVenvReady returns true if the Python venv exists and has ddgs installed.
 func isVenvReady() bool {
 	pythonPath := config.VenvPython()
 	if _, err := os.Stat(pythonPath); err != nil {

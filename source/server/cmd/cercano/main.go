@@ -260,20 +260,20 @@ func runSetup() {
 }
 
 // ensureVenv creates the Python venv at ~/.config/cercano/venv/ and installs
-// duckduckgo-search if not already set up. Validates the install with a test import.
+// ddgs if not already set up. Validates the install with a test import.
 func ensureVenv() error {
 	venvDir := config.VenvDir()
 	pythonPath := config.VenvPython()
 
 	// Check if venv already exists and is working
 	if _, err := os.Stat(pythonPath); err == nil {
-		// Validate the existing venv has duckduckgo-search
-		cmd := exec.Command(pythonPath, "-c", "import duckduckgo_search")
+		// Validate the existing venv has ddgs
+		cmd := exec.Command(pythonPath, "-c", "import ddgs")
 		if cmd.Run() == nil {
-			fmt.Println("  OK: Python venv exists and duckduckgo-search is installed.")
+			fmt.Println("  OK: Python venv exists and ddgs is installed.")
 			return nil
 		}
-		fmt.Println("  Venv exists but duckduckgo-search is missing — reinstalling...")
+		fmt.Println("  Venv exists but ddgs is missing — reinstalling...")
 	}
 
 	// Find system python3
@@ -289,21 +289,21 @@ func ensureVenv() error {
 		return fmt.Errorf("failed to create venv: %w\n%s", err, string(out))
 	}
 
-	// Install duckduckgo-search
+	// Install ddgs
 	pipPath := filepath.Join(venvDir, "bin", "pip")
-	fmt.Println("  Installing duckduckgo-search...")
-	cmd = exec.Command(pipPath, "install", "--quiet", "duckduckgo-search")
+	fmt.Println("  Installing ddgs...")
+	cmd = exec.Command(pipPath, "install", "--quiet", "ddgs")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to install duckduckgo-search: %w\n%s", err, string(out))
+		return fmt.Errorf("failed to install ddgs: %w\n%s", err, string(out))
 	}
 
 	// Validate
-	cmd = exec.Command(pythonPath, "-c", "import duckduckgo_search; print('ok')")
+	cmd = exec.Command(pythonPath, "-c", "import ddgs; print('ok')")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("validation failed: %w\n%s", err, string(out))
 	}
 
-	fmt.Println("  OK: Python venv created and duckduckgo-search installed.")
+	fmt.Println("  OK: Python venv created and ddgs installed.")
 	return nil
 }
 

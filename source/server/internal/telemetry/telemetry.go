@@ -24,7 +24,8 @@ type Event struct {
 	WasEscalated  bool
 	CloudProvider string
 	CloudModel    string
-	TokenSaving   bool // true if this call substitutes for a cloud call (counts toward savings)
+	TokenSaving   bool   // true if this call substitutes for a cloud call (counts toward savings)
+	SessionID     string // MCP session that generated this event (empty for legacy events)
 	startTime     time.Time
 }
 
@@ -67,6 +68,15 @@ type GroupStats struct {
 	OutputTokens int
 }
 
+// SessionStats holds aggregated stats for a single MCP session.
+type SessionStats struct {
+	SessionID    string
+	StartedAt    time.Time
+	Count        int
+	InputTokens  int
+	OutputTokens int
+}
+
 // Stats holds aggregated telemetry statistics.
 type Stats struct {
 	TotalRequests          int
@@ -79,6 +89,7 @@ type Stats struct {
 	ByTool                 []GroupStats
 	ByModel                []GroupStats
 	ByDay                  []GroupStats
+	BySession              []SessionStats
 }
 
 // ComputeSavings calculates the LocalPercentage from local and cloud totals.
@@ -95,6 +106,7 @@ func (s *Stats) ComputeSavings() {
 type Store interface {
 	RecordEvent(ctx context.Context, e *Event) error
 	RecordCloudUsage(ctx context.Context, r CloudUsageReport) error
+	RecordSession(ctx context.Context, sessionID string) error
 	GetStats(ctx context.Context) (*Stats, error)
 	Close() error
 }
@@ -151,6 +163,11 @@ func createTables(db *sql.DB) error {
 			cloud_provider TEXT NOT NULL DEFAULT '',
 			cloud_model TEXT NOT NULL DEFAULT ''
 		);
+
+		CREATE TABLE IF NOT EXISTS sessions (
+			session_id TEXT PRIMARY KEY,
+			started_at DATETIME NOT NULL
+		);
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to create telemetry tables: %w", err)
@@ -160,24 +177,36 @@ func createTables(db *sql.DB) error {
 
 // migrateSchema adds columns that may be missing from older databases.
 func migrateSchema(db *sql.DB) error {
-	// Add token_saving column if it doesn't exist (added in v0.x)
+	// Add token_saving column if it doesn't exist
 	_, err := db.Exec(`ALTER TABLE events ADD COLUMN token_saving BOOLEAN NOT NULL DEFAULT 1`)
-	if err != nil {
-		// Column already exists — ignore the error
-		if !strings.Contains(err.Error(), "duplicate column") {
-			// Unexpected error
-			return nil // non-fatal, proceed anyway
-		}
+	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		// non-fatal, proceed anyway
 	}
+
+	// Add session_id column if it doesn't exist
+	_, err = db.Exec(`ALTER TABLE events ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		// non-fatal, proceed anyway
+	}
+
 	return nil
 }
 
 // RecordEvent persists a telemetry event.
 func (s *SQLiteStore) RecordEvent(ctx context.Context, e *Event) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO events (timestamp, tool_name, model, input_tokens, output_tokens, duration_ms, was_escalated, cloud_provider, cloud_model, token_saving)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.Timestamp, e.ToolName, e.Model, e.InputTokens, e.OutputTokens, e.DurationMs, e.WasEscalated, e.CloudProvider, e.CloudModel, e.TokenSaving,
+		`INSERT INTO events (timestamp, tool_name, model, input_tokens, output_tokens, duration_ms, was_escalated, cloud_provider, cloud_model, token_saving, session_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.Timestamp, e.ToolName, e.Model, e.InputTokens, e.OutputTokens, e.DurationMs, e.WasEscalated, e.CloudProvider, e.CloudModel, e.TokenSaving, e.SessionID,
+	)
+	return err
+}
+
+// RecordSession persists a new session record.
+func (s *SQLiteStore) RecordSession(ctx context.Context, sessionID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO sessions (session_id, started_at) VALUES (?, ?)`,
+		sessionID, time.Now(),
 	)
 	return err
 }
@@ -282,6 +311,28 @@ func (s *SQLiteStore) GetStats(ctx context.Context) (*Stats, error) {
 		stats.ByDay = append(stats.ByDay, gs)
 	}
 
+	// By session (only sessions with events)
+	sessionRows, err := s.db.QueryContext(ctx, `
+		SELECT s.session_id, s.started_at, COUNT(*), COALESCE(SUM(e.input_tokens), 0), COALESCE(SUM(e.output_tokens), 0)
+		FROM sessions s
+		JOIN events e ON e.session_id = s.session_id
+		GROUP BY s.session_id
+		ORDER BY s.started_at DESC
+		LIMIT 20
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query session stats: %w", err)
+	}
+	defer sessionRows.Close()
+
+	for sessionRows.Next() {
+		var ss SessionStats
+		if err := sessionRows.Scan(&ss.SessionID, &ss.StartedAt, &ss.Count, &ss.InputTokens, &ss.OutputTokens); err != nil {
+			return nil, fmt.Errorf("failed to scan session stats: %w", err)
+		}
+		stats.BySession = append(stats.BySession, ss)
+	}
+
 	stats.ComputeSavings()
 	return stats, nil
 }
@@ -294,10 +345,11 @@ func (s *SQLiteStore) Close() error {
 // Collector provides async, non-blocking telemetry collection.
 // MCP handlers call Emit/EmitCloudUsage without waiting for the write to complete.
 type Collector struct {
-	store    Store
-	events   chan *Event
-	cloud    chan CloudUsageReport
-	done     chan struct{}
+	store     Store
+	events    chan *Event
+	cloud     chan CloudUsageReport
+	done      chan struct{}
+	sessionID string // auto-applied to all emitted events
 }
 
 // NewCollector creates a Collector that drains events to the given store.
@@ -318,8 +370,20 @@ func (c *Collector) Store() Store {
 	return c.store
 }
 
+// SetSessionID sets the session ID that will be auto-applied to all emitted events.
+// Also records the session in the store.
+func (c *Collector) SetSessionID(id string) {
+	c.sessionID = id
+	if err := c.store.RecordSession(context.Background(), id); err != nil {
+		log.Printf("telemetry: failed to record session: %v", err)
+	}
+}
+
 // Emit queues a telemetry event for async persistence. Non-blocking; drops if buffer full.
 func (c *Collector) Emit(e *Event) {
+	if e.SessionID == "" && c.sessionID != "" {
+		e.SessionID = c.sessionID
+	}
 	select {
 	case c.events <- e:
 	default:

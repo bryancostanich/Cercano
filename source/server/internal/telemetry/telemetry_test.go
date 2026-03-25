@@ -350,6 +350,145 @@ func TestSQLiteStore_StatsByModel(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_RecordSession(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test_telemetry.db")
+	store, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	sessionID := "test-session-abc"
+	if err := store.RecordSession(context.Background(), sessionID); err != nil {
+		t.Fatalf("RecordSession failed: %v", err)
+	}
+
+	// Record events tagged with session
+	e := NewEvent("cercano_summarize", "qwen3-coder")
+	e.SessionID = sessionID
+	e.Complete(500, 100, false, "", "")
+	if err := store.RecordEvent(context.Background(), e); err != nil {
+		t.Fatalf("RecordEvent failed: %v", err)
+	}
+
+	e2 := NewEvent("cercano_extract", "qwen3-coder")
+	e2.SessionID = sessionID
+	e2.Complete(200, 50, false, "", "")
+	if err := store.RecordEvent(context.Background(), e2); err != nil {
+		t.Fatalf("RecordEvent failed: %v", err)
+	}
+
+	stats, err := store.GetStats(context.Background())
+	if err != nil {
+		t.Fatalf("GetStats failed: %v", err)
+	}
+	if len(stats.BySession) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(stats.BySession))
+	}
+	if stats.BySession[0].Count != 2 {
+		t.Errorf("expected 2 events in session, got %d", stats.BySession[0].Count)
+	}
+	if stats.BySession[0].InputTokens+stats.BySession[0].OutputTokens != 850 {
+		t.Errorf("expected 850 total tokens, got %d", stats.BySession[0].InputTokens+stats.BySession[0].OutputTokens)
+	}
+}
+
+func TestSQLiteStore_MultipleSessions(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test_telemetry.db")
+	store, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	store.RecordSession(context.Background(), "session-1")
+	store.RecordSession(context.Background(), "session-2")
+
+	// 3 events in session-1
+	for i := 0; i < 3; i++ {
+		e := NewEvent("cercano_summarize", "qwen3-coder")
+		e.SessionID = "session-1"
+		e.Complete(100, 50, false, "", "")
+		store.RecordEvent(context.Background(), e)
+	}
+
+	// 1 event in session-2
+	e := NewEvent("cercano_research", "qwen3-coder")
+	e.SessionID = "session-2"
+	e.Complete(500, 200, false, "", "")
+	store.RecordEvent(context.Background(), e)
+
+	stats, err := store.GetStats(context.Background())
+	if err != nil {
+		t.Fatalf("GetStats failed: %v", err)
+	}
+	if len(stats.BySession) != 2 {
+		t.Fatalf("expected 2 sessions, got %d", len(stats.BySession))
+	}
+	// Should be ordered by most recent first (session-2 was created after session-1)
+}
+
+func TestSQLiteStore_EventsWithoutSession(t *testing.T) {
+	// Pre-existing events without session_id should still work
+	dbPath := filepath.Join(t.TempDir(), "test_telemetry.db")
+	store, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	// Event with no session (legacy)
+	e := NewEvent("cercano_summarize", "qwen3-coder")
+	e.Complete(100, 50, false, "", "")
+	store.RecordEvent(context.Background(), e)
+
+	// Event with session
+	store.RecordSession(context.Background(), "session-1")
+	e2 := NewEvent("cercano_extract", "qwen3-coder")
+	e2.SessionID = "session-1"
+	e2.Complete(200, 80, false, "", "")
+	store.RecordEvent(context.Background(), e2)
+
+	stats, err := store.GetStats(context.Background())
+	if err != nil {
+		t.Fatalf("GetStats failed: %v", err)
+	}
+	// Total should include both
+	if stats.TotalRequests != 2 {
+		t.Errorf("expected 2 total requests, got %d", stats.TotalRequests)
+	}
+	// BySession should only show session-1 (legacy events excluded)
+	if len(stats.BySession) != 1 {
+		t.Fatalf("expected 1 session in BySession, got %d", len(stats.BySession))
+	}
+}
+
+func TestCollector_SessionID(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test_telemetry.db")
+	store, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	collector := NewCollector(store, 100)
+	collector.SetSessionID("collector-session-1")
+
+	e := NewEvent("cercano_summarize", "qwen3-coder")
+	e.Complete(100, 50, false, "", "")
+	collector.Emit(e)
+
+	collector.Close()
+
+	stats, err := store.GetStats(context.Background())
+	if err != nil {
+		t.Fatalf("GetStats failed: %v", err)
+	}
+	if len(stats.BySession) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(stats.BySession))
+	}
+}
+
 func TestSQLiteStore_StatsByDay(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test_telemetry.db")
 	store, err := NewSQLiteStore(dbPath)

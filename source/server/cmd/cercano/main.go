@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -465,6 +466,26 @@ func runStats() {
 			fmt.Printf("    %-25s %d calls, %d tokens\n", d.Name, d.Count, d.InputTokens+d.OutputTokens)
 		}
 	}
+
+	if len(stats.BySession) > 0 {
+		fmt.Printf("\n  By Session:\n")
+		limit := len(stats.BySession)
+		if limit > 10 {
+			limit = 10
+		}
+		for _, sess := range stats.BySession[:limit] {
+			fmt.Printf("    %-25s %d calls, %d tokens\n", sess.StartedAt.Format("2006-01-02 15:04"), sess.Count, sess.InputTokens+sess.OutputTokens)
+		}
+	}
+}
+
+// generateSessionID returns a UUID v4 string for identifying an MCP session.
+func generateSessionID() string {
+	var uuid [16]byte
+	rand.Read(uuid[:])
+	uuid[6] = (uuid[6] & 0x0f) | 0x40 // version 4
+	uuid[8] = (uuid[8] & 0x3f) | 0x80 // variant 10
+	return fmt.Sprintf("%x-%x-%x-%x-%x", uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:])
 }
 
 // runServerMode starts the gRPC server in standalone mode (for IDE clients).
@@ -533,6 +554,7 @@ func runMCPMode(cfg config.Config, externalGRPC string) {
 		fmt.Fprintf(os.Stderr, "[WARN] Failed to initialize telemetry: %v\n", err)
 	} else {
 		collector := telemetry.NewCollector(telemetryStore, 256)
+		collector.SetSessionID(generateSessionID())
 		s.SetCollector(collector)
 		defer collector.Close()
 		defer telemetryStore.Close()

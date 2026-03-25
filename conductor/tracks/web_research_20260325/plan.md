@@ -41,7 +41,7 @@ Set up the Python venv and DDG search script, integrate with `cercano setup`.
 - [x] Task: Red/Green TDD for subprocess integration. `6649191`
 - [x] Task: Conductor - User Manual Verification 'Setup & Python Search' (Protocol in workflow.md) `585c826`
 
-## Phase 4: Research Tool (cercano_research)
+## Phase 4: Research Tool (cercano_research) [checkpoint: 972eff7]
 
 ### Objective
 Build the full research pipeline — query crafting, search, fetch, analyze, synthesize.
@@ -57,7 +57,7 @@ Build the full research pipeline — query crafting, search, fetch, analyze, syn
 - [x] Task: Red/Green TDD. `e7f0b0c`
 - [x] Task: Write Agent Skill (SKILL.md) for both `cercano_fetch` and `cercano_research`. `ca8a8f2`
 - [x] Task: Update README.md with research tool documentation. `ca8a8f2`
-- [ ] Task: Conductor - User Manual Verification 'Research Tool' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Research Tool' (Protocol in workflow.md) `972eff7`
 
 ## Phase 5: Pluggable Search Providers (future)
 

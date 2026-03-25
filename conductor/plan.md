@@ -46,11 +46,6 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 ---
 
-- [ ] **Track: AI Engine Agnosticism — Abstract local inference layer to support pluggable backends**
-*Link: [./tracks/engine_agnosticism_20260317/](./tracks/engine_agnosticism_20260317/)*
-
----
-
 - [x] **Track: Cercano as MCP Server — Expose local inference as tools for cloud agents**
 *Link: [./archive/mcp_server_20260317/](./archive/mcp_server_20260317/)*
 
@@ -76,8 +71,9 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 ---
 
-- [ ] **Track: Agent Skills Integration — SKILL.md provider and consumer support**
-*Link: [./tracks/agent_skills_20260318/](./tracks/agent_skills_20260318/)*
+- [x] **Track: Agent Skills Integration — SKILL.md provider support** [checkpoint: 90c74d1]
+*Link: [./archive/agent_skills_20260318/](./archive/agent_skills_20260318/)*
+*Notes: Provider-side complete — 7 skills published, cercano_skills MCP tool, docs. Consumer-side skill discovery deferred to a future track pending real-world testing with third-party skills.*
 
 ---
 
@@ -88,3 +84,18 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 - [ ] **Track: User-Friendly Distribution — Setup scripts, Docker packaging, and CI/CD releases**
 *Link: [./tracks/distribution_20260317/](./tracks/distribution_20260317/)*
+
+---
+
+- [ ] **Track: Docker Deployment — Containerized Cercano with Docker and docker-compose**
+*Link: [./tracks/docker_20260320/](./tracks/docker_20260320/)*
+
+---
+
+- [ ] **Track: Usage Telemetry & Token Savings Metrics** *(Phase 5: host cloud token capture via hook)*
+*Link: [./tracks/usage_telemetry_20260323/](./tracks/usage_telemetry_20260323/)*
+
+---
+
+- [x] **Track: Project Context Initialization** [checkpoint: 866f53d]
+*Link: [./archive/project_context_20260324/](./archive/project_context_20260324/)*

@@ -64,6 +64,8 @@ type Response struct {
 	FileChanges      []FileChange
 	RoutingMetadata  RoutingMetadata
 	ValidationErrors string // New field for rich feedback
+	InputTokens      int    // Prompt tokens consumed (from Ollama prompt_eval_count)
+	OutputTokens     int    // Completion tokens generated (from Ollama eval_count)
 }
 
 // FileChange represents a change to a specific file.

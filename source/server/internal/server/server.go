@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"cercano/source/server/internal/agent"
@@ -202,8 +203,10 @@ func (s *Server) MapResponseForTest(response *agent.Response) *proto.ProcessRequ
 }
 
 func (s *Server) mapResponse(response *agent.Response) *proto.ProcessRequestResponse {
+	// Sanitize output to valid UTF-8 — gRPC requires all string fields
+	// to be valid UTF-8 and will fail marshaling otherwise.
 	protoRes := &proto.ProcessRequestResponse{
-		Output: response.Output,
+		Output: strings.ToValidUTF8(response.Output, "\uFFFD"),
 	}
 
 	if len(response.FileChanges) > 0 {

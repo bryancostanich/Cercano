@@ -67,7 +67,9 @@ func (f *Fetcher) Fetch(url string) (*FetchResult, error) {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	content := string(body)
+	// Sanitize to valid UTF-8 — raw HTTP responses may contain invalid
+	// byte sequences that would cause gRPC marshaling failures.
+	content := strings.ToValidUTF8(string(body), "\uFFFD")
 
 	// Extract text if HTML
 	if strings.Contains(contentType, "text/html") || strings.Contains(contentType, "application/xhtml") {

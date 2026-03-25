@@ -115,13 +115,22 @@ Cercano can run as a standalone gRPC server (for IDE clients) or embedded inside
 
 ### Prerequisites
 
-- [Go](https://go.dev/dl/) (1.21+)
 - [Ollama](https://ollama.com/) running locally
 
-### Quick Start
+### Install via Homebrew (macOS)
 
 ```bash
-git clone https://github.com/bryan-costanich/Cercano.git
+brew tap bryancostanich/cercano
+brew install cercano
+cercano setup    # checks Ollama, pulls required models, creates config
+```
+
+### Install from Source
+
+Requires [Go](https://go.dev/dl/) 1.21+.
+
+```bash
+git clone https://github.com/bryancostanich/Cercano.git
 cd Cercano/source/server
 make build
 bin/cercano setup    # checks Ollama, pulls required models, creates config
@@ -131,7 +140,7 @@ bin/cercano          # starts the gRPC server
 ### Use with Claude Code
 
 ```bash
-claude mcp add --transport stdio cercano -- /path/to/bin/cercano --mcp
+claude mcp add --transport stdio cercano -- cercano --mcp
 ```
 
 Or add to your project's `.mcp.json`. In `--mcp` mode, Cercano starts an embedded gRPC server — no separate server needed.

@@ -27,6 +27,8 @@ When used as a co-processor inside cloud agents, Cercano provides specialized to
 | `cercano_classify` | Triage errors, logs, or code with category + confidence | Quick local triage without cloud round-trip |
 | `cercano_explain` | Explain what code does, its components and data flow | Understand code locally before deciding what to send to cloud |
 | `cercano_local` | General-purpose prompt execution against local models | Offload any simple task to local inference |
+| `cercano_fetch` | Fetch a URL and extract readable text (HTML stripped to plain text) | Read web pages without stuffing raw HTML into cloud context |
+| `cercano_research` | Research a question via DuckDuckGo search + local model analysis | Get distilled, sourced answers without browsing the web yourself |
 
 ### Project Context
 Run `cercano_init` once per project to make all Cercano tools project-aware. It scans the repo, feeds key files through a local model, and writes `.cercano/context.md` — a concise reference document that gets automatically prepended to all tool calls. The host AI can optionally provide domain knowledge it already has.
@@ -286,6 +288,17 @@ cercano_classify(
 cercano_explain(file_path: "internal/agent/router.go")
 → This code implements a smart routing system for an AI agent that selects
   between local and cloud models based on semantic similarity...
+```
+
+**Research a question (search + fetch + local model analysis):**
+```
+cercano_research(query: "How does the Ollama REST API list models?")
+→ Ollama lists models via GET /api/tags, which returns a JSON array of
+  installed models with name, size, and modification date...
+
+  Sources:
+  - https://docs.ollama.com/api/introduction
+  - https://github.com/ollama/ollama/blob/main/docs/api.md
 ```
 
 **Multi-turn conversation:**

@@ -200,6 +200,73 @@ Explain code or text using local AI inference.
 *One of text or file_path is required.
 `,
 		},
+		{
+			Name:        "cercano-fetch",
+			Description: "Fetch a URL and extract readable text content locally. Returns full extracted text (not a summary) — HTML is stripped to clean plain text.",
+			Content: `---
+name: cercano-fetch
+description: Fetch a URL and extract readable text content locally. Returns full extracted text (not a summary) — HTML is stripped to clean plain text. Use this to read web pages, documentation, articles, or any URL without sending content to the cloud.
+compatibility: Requires Cercano server running.
+---
+
+# Cercano Fetch
+
+Fetch a URL and extract readable text content locally.
+
+## MCP Tool
+
+**Tool name:** ` + "`cercano_fetch`" + `
+
+## Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| url | string | Yes | The URL to fetch. |
+| project_dir | string | No | Project root directory for context-aware responses. |
+
+## Output
+
+Returns the full extracted text from the page. HTML is converted to plain text with structure preserved (headings, paragraphs, lists, code blocks). Scripts, styles, navigation, headers, footers, and sidebars are stripped.
+`,
+		},
+		{
+			Name:        "cercano-research",
+			Description: "Research a question using DuckDuckGo search and local AI analysis. Crafts search queries, fetches top results, and synthesizes a sourced answer — all locally.",
+			Content: `---
+name: cercano-research
+description: Research a question using DuckDuckGo search and local AI analysis. Crafts search queries, fetches top results, and synthesizes a sourced answer — all locally. Use this instead of browsing the web yourself to save cloud context tokens.
+compatibility: Requires Cercano server running and Python venv set up (run 'cercano setup').
+---
+
+# Cercano Research
+
+Research a question using web search and local AI analysis.
+
+## MCP Tool
+
+**Tool name:** ` + "`cercano_research`" + `
+
+## Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| query | string | Yes | The research question to investigate. |
+| max_results | int | No | Maximum pages to fetch and analyze (default 5). |
+| project_dir | string | No | Project root directory for context-aware responses. |
+
+## Pipeline
+
+1. Local model generates 2-3 search queries from your question
+2. DuckDuckGo searches run concurrently
+3. Duplicate URLs removed
+4. Top N pages fetched and converted to plain text
+5. Local model analyzes fetched content and produces a sourced answer
+
+## Prerequisites
+
+Requires the Python venv with the ddgs package. Run ` + "`cercano setup`" + ` to create it automatically.
+`,
+		},
 	}
 }
 

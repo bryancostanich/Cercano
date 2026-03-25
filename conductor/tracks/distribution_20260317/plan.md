@@ -92,16 +92,17 @@ Automated testing on PRs and release binaries on tagged commits.
 Let macOS users install Cercano with `brew install`.
 
 ### Tasks
-- [ ] Task: Create a Homebrew tap repo (`homebrew-cercano`). Deferred until repo is public.
+- [x] Task: Create a Homebrew tap repo (`homebrew-cercano`). [92b57b1]
     - [x] Private repo created on GitHub (can be deleted/recreated when ready).
     - [x] Local tap (`cercano/local`) used for testing.
+    - [x] Public tap repo pushed with formula pointing at release binaries.
 - [x] Task: Write the Homebrew formula. [source/server/Formula/cercano.rb]
     - [x] Builds from source via `go build` with ldflags version injection.
     - [x] Install to `bin/cercano`.
     - [x] Add caveats about Ollama dependency.
-    - [ ] Switch to GitHub Release binary download when repo is public.
+    - [x] Switch to GitHub Release binary download when repo is public. [dabc180]
 - [x] Task: Test `brew install` → `cercano setup` → `cercano` end-to-end.
-- [ ] Task: Update README with `brew install` instructions. Deferred until repo is public.
+- [~] Task: Update README with `brew install` instructions.
 - [ ] Task: Conductor - User Manual Verification 'Homebrew Distribution' (Protocol in workflow.md)
 
 > **Note:** Docker phase moved to its own track: `conductor/tracks/docker_20260320/`

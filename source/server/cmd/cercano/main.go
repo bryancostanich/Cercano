@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -170,7 +171,7 @@ func runSetup() {
 	}
 
 	// Check Ollama is running
-	fmt.Printf("\n[1/4] Checking Ollama at %s...\n", cfg.OllamaURL)
+	fmt.Printf("\n[1/5] Checking Ollama at %s...\n", cfg.OllamaURL)
 	if err := checkOllama(cfg.OllamaURL); err != nil {
 		fmt.Fprintf(os.Stderr, "  FAIL: %v\n", err)
 		os.Exit(1)
@@ -178,7 +179,7 @@ func runSetup() {
 	fmt.Println("  OK: Ollama is running.")
 
 	// Check required models
-	fmt.Println("\n[2/4] Checking required models...")
+	fmt.Println("\n[2/5] Checking required models...")
 	requiredModels := []string{cfg.LocalModel, cfg.EmbeddingModel}
 	client := &http.Client{Timeout: 5 * time.Second}
 
@@ -229,7 +230,7 @@ func runSetup() {
 	}
 
 	// Check/create config file
-	fmt.Println("\n[3/4] Checking config file...")
+	fmt.Println("\n[3/5] Checking config file...")
 	configPath := config.DefaultPath()
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		fmt.Printf("  Creating default config at %s\n", configPath)
@@ -243,12 +244,67 @@ func runSetup() {
 	}
 
 	// Configure Claude Code hook for cloud token telemetry
-	fmt.Println("\n[4/4] Checking Claude Code telemetry hook...")
+	fmt.Println("\n[4/5] Checking Claude Code telemetry hook...")
 	if err := ensureClaudeHook(); err != nil {
 		fmt.Fprintf(os.Stderr, "  WARN: Could not configure hook: %v\n", err)
 	}
 
+	// Set up Python venv for web research (DuckDuckGo search)
+	fmt.Println("\n[5/5] Setting up Python venv for web research...")
+	if err := ensureVenv(); err != nil {
+		fmt.Fprintf(os.Stderr, "  WARN: Could not set up Python venv: %v\n", err)
+		fmt.Fprintf(os.Stderr, "  (Web research features will not be available. You can re-run 'cercano setup' to retry.)\n")
+	}
+
 	fmt.Println("\nSetup complete! Run 'cercano' to start the server.")
+}
+
+// ensureVenv creates the Python venv at ~/.config/cercano/venv/ and installs
+// duckduckgo-search if not already set up. Validates the install with a test import.
+func ensureVenv() error {
+	venvDir := config.VenvDir()
+	pythonPath := config.VenvPython()
+
+	// Check if venv already exists and is working
+	if _, err := os.Stat(pythonPath); err == nil {
+		// Validate the existing venv has duckduckgo-search
+		cmd := exec.Command(pythonPath, "-c", "import duckduckgo_search")
+		if cmd.Run() == nil {
+			fmt.Println("  OK: Python venv exists and duckduckgo-search is installed.")
+			return nil
+		}
+		fmt.Println("  Venv exists but duckduckgo-search is missing — reinstalling...")
+	}
+
+	// Find system python3
+	systemPython, err := exec.LookPath("python3")
+	if err != nil {
+		return fmt.Errorf("python3 not found in PATH. Install Python 3 to enable web research features")
+	}
+
+	// Create venv
+	fmt.Printf("  Creating venv at %s...\n", venvDir)
+	cmd := exec.Command(systemPython, "-m", "venv", venvDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to create venv: %w\n%s", err, string(out))
+	}
+
+	// Install duckduckgo-search
+	pipPath := filepath.Join(venvDir, "bin", "pip")
+	fmt.Println("  Installing duckduckgo-search...")
+	cmd = exec.Command(pipPath, "install", "--quiet", "duckduckgo-search")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to install duckduckgo-search: %w\n%s", err, string(out))
+	}
+
+	// Validate
+	cmd = exec.Command(pythonPath, "-c", "import duckduckgo_search; print('ok')")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("validation failed: %w\n%s", err, string(out))
+	}
+
+	fmt.Println("  OK: Python venv created and duckduckgo-search installed.")
+	return nil
 }
 
 // ensureClaudeHook adds the PostToolUse telemetry hook to Claude Code's

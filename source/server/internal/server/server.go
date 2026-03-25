@@ -8,7 +8,6 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/engine"
-	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/loop"
 	"cercano/source/server/pkg/proto"
@@ -17,12 +16,12 @@ import (
 // Server is the gRPC server for the Agent service.
 type Server struct {
 	proto.UnimplementedAgentServer
-	agent              *agent.Agent
-	localProvider      *llm.LocalModelProvider
-	router             *agent.SmartRouter
-	coordinator        *loop.ADKCoordinator
-	cloudFactory       agent.CloudFactory
-	registry           *engine.EngineRegistry
+	agent               *agent.Agent
+	localProvider       *llm.LocalModelProvider
+	router              *agent.SmartRouter
+	coordinator         *loop.ADKCoordinator
+	cloudFactory        agent.CloudFactory
+	registry            *engine.EngineRegistry
 	healthMonitorCancel context.CancelFunc // cancel function for the active health monitor
 }
 
@@ -54,15 +53,15 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		if s.healthMonitorCancel != nil {
 			s.healthMonitorCancel()
 		}
-		
+
 		if s.registry != nil {
 			if eng, err := s.registry.GetEngine("ollama"); err == nil {
-				if ollamaEng, ok := eng.(*ollama.OllamaEngine); ok {
-					ollamaEng.SetBaseURL(req.OllamaUrl)
+				if confEng, ok := eng.(engine.ConfigurableEngine); ok {
+					confEng.SetBaseURL(req.OllamaUrl)
 					// Start health monitor for the new remote endpoint
 					monitorCtx, cancel := context.WithCancel(context.Background())
 					s.healthMonitorCancel = cancel
-					ollamaEng.StartHealthMonitor(monitorCtx, 30*time.Second, 3)
+					confEng.StartHealthMonitor(monitorCtx, 30*time.Second, 3)
 				}
 			}
 		}
@@ -119,7 +118,7 @@ func (s *Server) ListModels(ctx context.Context, req *proto.ListModelsRequest) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ollama engine: %v", err)
 	}
-	
+
 	models, err := eng.ListModels(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list models: %w", err)
@@ -230,16 +229,16 @@ func (s *Server) mapResponse(response *agent.Response) *proto.ProcessRequestResp
 		Confidence: float32(response.RoutingMetadata.Confidence),
 		Escalated:  response.RoutingMetadata.Escalated,
 	}
-	
+
 	if s.registry != nil {
 		if eng, err := s.registry.GetEngine("ollama"); err == nil {
-			if ollamaEng, ok := eng.(*ollama.OllamaEngine); ok {
-				rm.Endpoint = ollamaEng.GetActiveURL()
-				rm.IsFallback = ollamaEng.IsUsingFallback()
+			if confEng, ok := eng.(engine.ConfigurableEngine); ok {
+				rm.Endpoint = confEng.GetActiveURL()
+				rm.IsFallback = confEng.IsUsingFallback()
 			}
 		}
 	}
-	
+
 	protoRes.RoutingMetadata = rm
 
 	protoRes.ValidationErrors = response.ValidationErrors

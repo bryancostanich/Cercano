@@ -167,7 +167,7 @@ func TestUpdateConfig_OllamaURL(t *testing.T) {
 	eng := ollama.NewOllamaEngine("http://localhost:11434")
 	registry.RegisterEngine(eng)
 	provider := llm.NewLocalModelProvider(eng, "test-model")
-	
+
 	srv := NewServer(nil, provider, nil, nil, nil, registry)
 
 	// Set a valid remote URL
@@ -191,7 +191,7 @@ func TestUpdateConfig_OllamaURL_InvalidURL(t *testing.T) {
 	registry := engine.NewEngineRegistry()
 	eng := ollama.NewOllamaEngine("http://localhost:11434")
 	registry.RegisterEngine(eng)
-	
+
 	srv := NewServer(nil, nil, nil, nil, nil, registry)
 
 	// Set an invalid URL — should fail validation
@@ -211,7 +211,7 @@ func TestUpdateConfig_OllamaURL_InvalidURL(t *testing.T) {
 }
 
 func TestListSkills(t *testing.T) {
-	srv := NewServer(nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil, nil)
 
 	resp, err := srv.ListSkills(context.Background(), &proto.ListSkillsRequest{})
 	if err != nil {
@@ -249,7 +249,7 @@ func TestListSkills(t *testing.T) {
 }
 
 func TestGetSkill(t *testing.T) {
-	srv := NewServer(nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil, nil)
 
 	resp, err := srv.GetSkill(context.Background(), &proto.GetSkillRequest{Name: "cercano-local"})
 	if err != nil {
@@ -268,7 +268,7 @@ func TestGetSkill(t *testing.T) {
 }
 
 func TestGetSkill_NotFound(t *testing.T) {
-	srv := NewServer(nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil, nil)
 
 	_, err := srv.GetSkill(context.Background(), &proto.GetSkillRequest{Name: "nonexistent-skill"})
 	if err == nil {

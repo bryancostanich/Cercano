@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -259,6 +260,14 @@ type FetchRequest struct {
 	cloudTokenFields
 }
 
+// ResearchRequest is the input schema for the cercano_research tool.
+type ResearchRequest struct {
+	Query      string `json:"query" jsonschema:"The research question to investigate via web search and local model analysis."`
+	MaxResults int    `json:"max_results,omitempty" jsonschema:"Maximum number of pages to fetch and analyze (default 5)."`
+	ProjectDir string `json:"project_dir,omitempty" jsonschema:"Project root directory. Enables project-aware responses when .cercano/context.md exists."`
+	cloudTokenFields
+}
+
 // InitRequest is the input schema for the cercano_init tool.
 type InitRequest struct {
 	ProjectDir string `json:"project_dir" jsonschema:"Project root directory to scan and build context for (required)."`
@@ -332,6 +341,11 @@ func (s *Server) registerTools() {
 		Name:        "cercano_fetch",
 		Description: "Fetch a URL and extract readable text content. Returns the full extracted text (HTML stripped to plain text) — not a summary. Use this to read web pages, documentation, articles, or any URL locally without sending the content to the cloud.",
 	}, s.handleFetch)
+
+	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
+		Name:        "cercano_research",
+		Description: "Research a question using web search and local AI analysis. Crafts search queries, searches DuckDuckGo, fetches top results, and synthesizes a sourced answer — all locally. Use this instead of browsing the web yourself to save cloud context tokens. Requires Python venv (run 'cercano setup' first).",
+	}, s.handleResearch)
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_init",
@@ -818,6 +832,110 @@ func (s *Server) handleFetch(ctx context.Context, request *gomcp.CallToolRequest
 		},
 	}
 	return s.maybeNudge(args.ProjectDir, result), nil, nil
+}
+
+// grpcModelCaller adapts the gRPC client to the web.ModelCaller interface.
+type grpcModelCaller struct {
+	client proto.AgentClient
+}
+
+func (g *grpcModelCaller) Call(ctx context.Context, prompt string) (string, error) {
+	resp, err := g.client.ProcessRequest(ctx, &proto.ProcessRequestRequest{
+		Input:       prompt,
+		DirectLocal: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	return resp.Output, nil
+}
+
+// grpcModelCallerWithTokens is like grpcModelCaller but accumulates token counts
+// from multiple calls for telemetry reporting.
+type grpcModelCallerWithTokens struct {
+	client      proto.AgentClient
+	lastResp    *proto.ProcessRequestResponse
+	totalIn    int32
+	totalOut   int32
+	totalCalls int
+}
+
+func (g *grpcModelCallerWithTokens) Call(ctx context.Context, prompt string) (string, error) {
+	resp, err := g.client.ProcessRequest(ctx, &proto.ProcessRequestRequest{
+		Input:       prompt,
+		DirectLocal: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	g.lastResp = resp
+	g.totalIn += int32(resp.InputTokens)
+	g.totalOut += int32(resp.OutputTokens)
+	g.totalCalls++
+	return resp.Output, nil
+}
+
+// handleResearch processes a cercano_research tool call.
+func (s *Server) handleResearch(ctx context.Context, request *gomcp.CallToolRequest, args ResearchRequest) (*gomcp.CallToolResult, any, error) {
+	if result, ok := s.checkDegraded(); ok {
+		return result, nil, nil
+	}
+	startTime := time.Now().UnixNano()
+
+	if args.Query == "" {
+		return nil, nil, fmt.Errorf("cercano_research: 'query' is required")
+	}
+
+	// Check venv
+	if !isVenvReady() {
+		return &gomcp.CallToolResult{
+			IsError: true,
+			Content: []gomcp.Content{
+				&gomcp.TextContent{Text: venvMissingMessage},
+			},
+		}, nil, nil
+	}
+
+	// Resolve script path relative to the binary
+	exePath, _ := os.Executable()
+	scriptPath := filepath.Join(filepath.Dir(exePath), "..", "scripts", "ddg_search.py")
+	scriptPath, _ = filepath.Abs(scriptPath)
+
+	// Build pipeline dependencies
+	modelCaller := &grpcModelCallerWithTokens{client: s.grpcClient}
+	searcher := web.NewSearcher(config.VenvPython(), scriptPath)
+	fetcher := web.NewFetcher()
+
+	pipeline := web.NewResearchPipeline(modelCaller, searcher, fetcher)
+	result, err := pipeline.Run(ctx, s.withContext(args.ProjectDir, args.Query), args.MaxResults)
+	if err != nil {
+		return nil, nil, fmt.Errorf("cercano_research: %w", err)
+	}
+
+	// Build output with sources
+	output := result.Answer
+	if len(result.Sources) > 0 {
+		output += "\n\nSources:\n"
+		for _, src := range result.Sources {
+			output += fmt.Sprintf("- %s\n", src)
+		}
+	}
+
+	// Emit telemetry — use the last gRPC response for routing metadata,
+	// but report cumulative tokens
+	resp := modelCaller.lastResp
+	if resp != nil {
+		resp.InputTokens = modelCaller.totalIn
+		resp.OutputTokens = modelCaller.totalOut
+	}
+	s.emitEvent("cercano_research", resp, startTime, true, &args.cloudTokenFields)
+
+	toolResult := &gomcp.CallToolResult{
+		Content: []gomcp.Content{
+			&gomcp.TextContent{Text: output},
+		},
+	}
+	return s.maybeNudge(args.ProjectDir, toolResult), nil, nil
 }
 
 // handleInit processes a cercano_init tool call.

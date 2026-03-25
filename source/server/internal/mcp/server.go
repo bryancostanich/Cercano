@@ -8,6 +8,7 @@ import (
 	"time"
 
 	projectctx "cercano/source/server/internal/context"
+	"cercano/source/server/internal/config"
 	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/internal/web"
 	"cercano/source/server/pkg/proto"
@@ -159,6 +160,21 @@ func (s *Server) maybeNudge(projectDir string, result *gomcp.CallToolResult) *go
 		}
 	}
 	return result
+}
+
+// venvMissingMessage is returned when cercano_research is called without the Python venv.
+const venvMissingMessage = "Web research requires a Python virtual environment that is not set up. Run `cercano setup` to create it automatically."
+
+// venvNudgeMessage is appended to cercano_init output when the venv is missing.
+const venvNudgeMessage = "\n\n---\n*Note: The Python venv for web research is not set up. Run `cercano setup` to enable `cercano_research` (DuckDuckGo search + local model analysis).*"
+
+// isVenvReady returns true if the Python venv exists and has duckduckgo-search installed.
+func isVenvReady() bool {
+	pythonPath := config.VenvPython()
+	if _, err := os.Stat(pythonPath); err != nil {
+		return false
+	}
+	return true
 }
 
 // MCPServer returns the underlying MCP server for transport binding.
@@ -853,6 +869,11 @@ func (s *Server) handleInit(ctx context.Context, request *gomcp.CallToolRequest,
 
 	output := fmt.Sprintf("Project initialized. %s\n\nContext written to %s (%d bytes).",
 		filesSummary, projectctx.ContextPath(args.ProjectDir), len(resp.Output))
+
+	// Nudge about venv if web research isn't available
+	if !isVenvReady() {
+		output += venvNudgeMessage
+	}
 
 	return &gomcp.CallToolResult{
 		Content: []gomcp.Content{

@@ -4,7 +4,7 @@ Cercano is a local-first AI development tool that runs open-source models on you
 
 Cercano works in two ways:
 
-**1. Local, in-agent Tool** — Plug Cercano into cloud-based agents like Claude Code, Cursor, or Copilot via [MCP](https://modelcontextprotocol.io/). Instead of sending everything to the cloud, Cercano supercharges your frontier coding experience by providing a set of skills running locally, such as _summarization_, _extraction_, _classification_, and _code explanation_ that can not only massively reduce your cloud context window and usage (and costs), but actually provide better context to the cloud model.
+**1. Local, in-agent Tool** — Plug Cercano into cloud-based agents like Claude Code, Cursor, or Copilot via [MCP](https://modelcontextprotocol.io/). Instead of sending everything to the cloud, Cercano supercharges your frontier coding experience by providing a set of skills running locally, such as _research_, _summarization_, _extraction_, _classification_, and _code explanation_ that can not only massively reduce your cloud context window and usage (and costs), but actually provide better context to the cloud model.
 
 **2. Standalone Agent** — Use Cercano directly as your AI coding assistant. It routes tasks to local models first, falls back to cloud when needed, and runs an agentic loop that generates, validates, and self-corrects code automatically. Integrates with VS Code and other IDEs via gRPC. Please note that Cercano's stand-alone agent is still relatively primitive and is undergoing rapid development.
 

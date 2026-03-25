@@ -12,6 +12,8 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/config"
+	"cercano/source/server/internal/engine"
+	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/loop"
 	"cercano/source/server/internal/server"
@@ -62,8 +64,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	registry := engine.NewEngineRegistry()
+	ollamaEng := ollama.NewOllamaEngine(cfg.OllamaURL)
+	registry.RegisterEngine(ollamaEng)
+	registry.RegisterEmbedder(ollamaEng)
+
 	// Initialize Providers
-	localProvider := llm.NewOllamaProvider(cfg.LocalModel, cfg.OllamaURL)
+	localProvider := llm.NewLocalModelProvider(ollamaEng, cfg.LocalModel)
 
 	// Default to Mock for cloud, but upgrade if keys are present
 	var cloudProvider agent.ModelProvider = llm.NewMockProvider("CloudModel")
@@ -82,7 +89,7 @@ func main() {
 	sessionSvc := session.InMemoryService()
 	coordinator := loop.NewADKCoordinator(localProvider, cloudProvider, validator, sessionSvc)
 
-	smartRouter, err := agent.NewSmartRouter(localProvider, cloudProvider, cfg.EmbeddingModel, http.DefaultClient, "internal/agent/prototypes.yaml", func(ctx context.Context, provider, model, apiKey string) (agent.ModelProvider, error) {
+	smartRouter, err := agent.NewSmartRouter(localProvider, cloudProvider, cfg.EmbeddingModel, ollamaEng, "internal/agent/prototypes.yaml", func(ctx context.Context, provider, model, apiKey string) (agent.ModelProvider, error) {
 		return llm.NewCloudModelProvider(ctx, provider, model, apiKey)
 	})
 	if err != nil {
@@ -110,7 +117,7 @@ func main() {
 	}
 
 	s := grpc.NewServer()
-	proto.RegisterAgentServer(s, server.NewServer(orchestrator, localProvider, smartRouter, coordinator, cloudFactory))
+	proto.RegisterAgentServer(s, server.NewServer(orchestrator, localProvider, smartRouter, coordinator, cloudFactory, registry))
 
 	fmt.Printf("Server listening at %v\n", lis.Addr())
 	if err := s.Serve(lis); err != nil {

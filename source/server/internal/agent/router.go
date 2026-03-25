@@ -1,42 +1,17 @@
 package agent
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"math"
-	"net/http"
 	"sort"
 	"strings"
 	"sync"
 
+	"cercano/source/server/internal/engine"
 	"gopkg.in/yaml.v3"
 )
-
-// Ollama API structs
-type ollamaGenerateRequest struct {
-	Model   string                 `json:"model"`
-	Prompt  string                 `json:"prompt"`
-	Stream  bool                   `json:"stream"`
-	Options map[string]interface{} `json:"options"`
-}
-
-type ollamaGenerateResponse struct {
-	Model    string `json:"model"`
-	Response string `json:"response"`
-	Done     bool   `json:"done"`
-}
-
-type ollamaEmbeddingRequest struct {
-	Model  string `json:"model"`
-	Prompt string `json:"prompt"`
-}
-
-type ollamaEmbeddingResponse struct {
-	Embedding []float64 `json:"embedding"`
-}
 
 // Prototypes represents the categorized example phrases from YAML.
 type Prototypes struct {
@@ -124,8 +99,6 @@ type Router interface {
 type CloudFactory func(ctx context.Context, provider, model, apiKey string) (ModelProvider, error)
 
 const (
-	ollamaAPIURL          = "http://localhost:11434/api/generate"
-	ollamaEmbeddingAPIURL = "http://localhost:11434/api/embeddings"
 	similarityThreshold   = 0.50
 	classificationTopK    = 3
 )
@@ -137,7 +110,7 @@ type SmartRouter struct {
 	EmbeddingModelName string
 	IntentPrototypes   []PrototypeEmbedding
 	ProviderPrototypes []PrototypeEmbedding
-	httpClient         *http.Client
+	embedder           engine.EmbeddingService
 	CloudFactory       CloudFactory
 }
 
@@ -155,11 +128,7 @@ func (sr *SmartRouter) SetCloudProvider(p ModelProvider) {
 }
 
 // NewSmartRouter creates a new SmartRouter, loads prototypes, and pre-calculates their embeddings.
-func NewSmartRouter(local, cloud ModelProvider, embeddingModel string, client *http.Client, prototypesPath string, cloudFactory CloudFactory) (*SmartRouter, error) {
-	if client == nil {
-		client = http.DefaultClient
-	}
-
+func NewSmartRouter(local, cloud ModelProvider, embeddingModel string, embedder engine.EmbeddingService, prototypesPath string, cloudFactory CloudFactory) (*SmartRouter, error) {
 	yamlBytes, err := ioutil.ReadFile(prototypesPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load prototypes from %s: %w", prototypesPath, err)
@@ -176,7 +145,7 @@ func NewSmartRouter(local, cloud ModelProvider, embeddingModel string, client *h
 			"CloudModel": cloud,
 		},
 		EmbeddingModelName: embeddingModel,
-		httpClient:         client,
+		embedder:           embedder,
 		CloudFactory:       cloudFactory,
 	}
 
@@ -227,43 +196,9 @@ func NewSmartRouter(local, cloud ModelProvider, embeddingModel string, client *h
 	return sr, nil
 }
 
-// GetEmbedding calls Ollama's embedding API to get a vector representation of the text.
+// GetEmbedding calls the EmbeddingService to get a vector representation of the text.
 func (sr *SmartRouter) GetEmbedding(text string) ([]float64, error) {
-	requestBody, err := json.Marshal(ollamaEmbeddingRequest{
-		Model:  sr.EmbeddingModelName,
-		Prompt: text,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal embedding request: %w", err)
-	}
-
-	req, err := http.NewRequest("POST", ollamaEmbeddingAPIURL, bytes.NewBuffer(requestBody))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create new HTTP request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := sr.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to Ollama API. Is Ollama running? Error: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("embedding model '%s' not found. Please run 'ollama pull %s'", sr.EmbeddingModelName, sr.EmbeddingModelName)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := ioutil.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Ollama API returned non-OK status: %d, body: %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	var embeddingResp ollamaEmbeddingResponse
-	if err := json.NewDecoder(resp.Body).Decode(&embeddingResp); err != nil {
-		return nil, fmt.Errorf("failed to decode Ollama API response: %w", err)
-	}
-
-	return embeddingResp.Embedding, nil
+	return sr.embedder.Embed(context.Background(), sr.EmbeddingModelName, text)
 }
 
 // CosineSimilarity calculates the cosine similarity between two vectors.

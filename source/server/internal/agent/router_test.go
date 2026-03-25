@@ -1,6 +1,9 @@
 package agent
 
 import (
+	"encoding/json"
+	"strings"
+
 	"bytes"
 	"context"
 	"fmt"
@@ -51,6 +54,28 @@ func (m *MockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 	return nil, fmt.Errorf("no mock response for body: %s", string(body))
 }
 
+
+type mockEmbedder struct {
+	responses map[string]string
+}
+
+func (m *mockEmbedder) Embed(ctx context.Context, model, text string) ([]float64, error) {
+	for prompt, resp := range m.responses {
+		if strings.Contains(text, prompt) {
+			var er struct {
+				Embedding []float64 `json:"embedding"`
+			}
+			if err := json.Unmarshal([]byte(resp), &er); err != nil {
+				return nil, err
+			}
+			return er.Embedding, nil
+		}
+	}
+	return []float64{0.0, 0.0}, nil
+}
+
+func (m *mockEmbedder) Name() string { return "mock" }
+
 func TestSmartRouter_ClassifyIntent(t *testing.T) {
 	// Setup same router as above
 	protoContent := `
@@ -79,11 +104,9 @@ providers:
 		"local task":    `{"embedding": [1.0, 0.0]}`,
 		"cloud task":    `{"embedding": [0.0, 1.0]}`,
 	}
-	mockClient := &http.Client{
-		Transport: &MockRoundTripper{responses: mockResponses},
-	}
+	embedder := &mockEmbedder{responses: mockResponses}
 
-	router, _ := NewSmartRouter(nil, nil, "nomic-embed-text", mockClient, tmpFile.Name(), nil)
+	router, _ := NewSmartRouter(nil, nil, "nomic-embed-text", embedder, tmpFile.Name(), nil)
 
 	tests := []struct {
 		input          string
@@ -151,11 +174,9 @@ providers:
 		"cloud task":    `{"embedding": [0.0, 1.0]}`,
 	}
 
-	mockClient := &http.Client{
-		Transport: &MockRoundTripper{responses: mockResponses},
-	}
+	embedder := &mockEmbedder{responses: mockResponses}
 
-	router, err := NewSmartRouter(mockLocal, mockCloud, "nomic-embed-text", mockClient, tmpFile.Name(), func(ctx context.Context, provider, model, apiKey string) (ModelProvider, error) {
+	router, err := NewSmartRouter(mockLocal, mockCloud, "nomic-embed-text", embedder, tmpFile.Name(), func(ctx context.Context, provider, model, apiKey string) (ModelProvider, error) {
 		return &MockModelProvider{name: provider}, nil
 	})
 	if err != nil {
@@ -246,11 +267,9 @@ providers:
 		// Query: exact same direction as "write a class" → single-NN picks coding
 		"tell me about this class": `{"embedding": [1.0, 1.0, 0.0]}`,
 	}
-	mockClient := &http.Client{
-		Transport: &MockRoundTripper{responses: mockResponses},
-	}
+	embedder := &mockEmbedder{responses: mockResponses}
 
-	router, err := NewSmartRouter(nil, nil, "nomic-embed-text", mockClient, tmpFile.Name(), nil)
+	router, err := NewSmartRouter(nil, nil, "nomic-embed-text", embedder, tmpFile.Name(), nil)
 	if err != nil {
 		t.Fatalf("Failed to create SmartRouter: %v", err)
 	}
@@ -305,11 +324,9 @@ providers:
 		// Query is clearly in coding territory
 		"implement a sorting algorithm": `{"embedding": [0.92, 0.08, 0.0]}`,
 	}
-	mockClient := &http.Client{
-		Transport: &MockRoundTripper{responses: mockResponses},
-	}
+	embedder := &mockEmbedder{responses: mockResponses}
 
-	router, err := NewSmartRouter(nil, nil, "nomic-embed-text", mockClient, tmpFile.Name(), nil)
+	router, err := NewSmartRouter(nil, nil, "nomic-embed-text", embedder, tmpFile.Name(), nil)
 	if err != nil {
 		t.Fatalf("Failed to create SmartRouter: %v", err)
 	}
@@ -367,11 +384,9 @@ providers:
 		// Query clearly in local territory
 		"what time is it": `{"embedding": [0.88, 0.12]}`,
 	}
-	mockClient := &http.Client{
-		Transport: &MockRoundTripper{responses: mockResponses},
-	}
+	embedder := &mockEmbedder{responses: mockResponses}
 
-	router, err := NewSmartRouter(mockLocal, mockCloud, "nomic-embed-text", mockClient, tmpFile.Name(), nil)
+	router, err := NewSmartRouter(mockLocal, mockCloud, "nomic-embed-text", embedder, tmpFile.Name(), nil)
 	if err != nil {
 		t.Fatalf("Failed to create SmartRouter: %v", err)
 	}
@@ -484,11 +499,9 @@ providers:
 		// Query WITHOUT context — should be what gets embedded after stripping
 		"tell me about this class": `{"embedding": [0.1, 0.9]}`,
 	}
-	mockClient := &http.Client{
-		Transport: &MockRoundTripper{responses: mockResponses},
-	}
+	embedder := &mockEmbedder{responses: mockResponses}
 
-	router, err := NewSmartRouter(nil, nil, "nomic-embed-text", mockClient, tmpFile.Name(), nil)
+	router, err := NewSmartRouter(nil, nil, "nomic-embed-text", embedder, tmpFile.Name(), nil)
 	if err != nil {
 		t.Fatalf("Failed to create SmartRouter: %v", err)
 	}
@@ -577,11 +590,9 @@ providers:
 		"local task": `{"embedding": [1.0, 0.0, 0.0]}`,
 		"cloud task": `{"embedding": [0.0, 1.0, 0.0]}`,
 	}
-	mockClient := &http.Client{
-		Transport: &MockRoundTripper{responses: mockResponses},
-	}
+	embedder := &mockEmbedder{responses: mockResponses}
 
-	router, err := NewSmartRouter(nil, nil, "nomic-embed-text", mockClient, tmpFile.Name(), nil)
+	router, err := NewSmartRouter(nil, nil, "nomic-embed-text", embedder, tmpFile.Name(), nil)
 	if err != nil {
 		t.Fatalf("Failed to create SmartRouter: %v", err)
 	}
@@ -667,11 +678,9 @@ providers:
 		// Query in cloud territory
 		"do complex analysis": `{"embedding": [0.1, 0.9]}`,
 	}
-	mockClient := &http.Client{
-		Transport: &MockRoundTripper{responses: mockResponses},
-	}
+	embedder := &mockEmbedder{responses: mockResponses}
 
-	router, err := NewSmartRouter(mockLocal, mockCloud, "nomic-embed-text", mockClient, tmpFile.Name(), nil)
+	router, err := NewSmartRouter(mockLocal, mockCloud, "nomic-embed-text", embedder, tmpFile.Name(), nil)
 	if err != nil {
 		t.Fatalf("Failed to create SmartRouter: %v", err)
 	}

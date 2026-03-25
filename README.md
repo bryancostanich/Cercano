@@ -456,3 +456,7 @@ make test   # Run all tests
 * **Per-Model Configuration** - Configurable per-model settings (context window, classification thresholds, history depth, compaction limits) instead of hardcoded constants.
 * **Simplify Provider Routing** - Evaluate removing the SmartRouter's embedding-based local/cloud routing in favor of always-local with coordinator-driven cloud escalation.
 * **Zed Extension** - Build out the Rust-based Zed extension (`source/clients/zed/`) with feature parity to the VS Code extension.
+
+***
+
+This is not an officially supported Google product

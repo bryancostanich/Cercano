@@ -94,3 +94,6 @@ Key decisions:
 - Image/media search
 - Caching of fetched pages (future enhancement)
 - Search providers other than DuckDuckGo (Phase 5 — future)
+
+## 7. Future Consideration: .NET AOT Search Binary
+The Python venv for DDG search is ~49MB. A .NET AOT console app doing the same HTTP + HTML parsing (using AngleSharp) would be 2-5MB, start in milliseconds, and require no runtime. No good .NET DDG library exists today, but the scraping is straightforward. Worth considering if the Python dependency becomes a pain point.

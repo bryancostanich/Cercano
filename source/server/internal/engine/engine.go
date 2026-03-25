@@ -1,6 +1,9 @@
 package engine
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // ModelInfo represents a model available on the InferenceEngine.
 type ModelInfo struct {
@@ -21,4 +24,12 @@ type InferenceEngine interface {
 type EmbeddingService interface {
 	Embed(ctx context.Context, model, text string) ([]float64, error)
 	Name() string
+}
+
+// ConfigurableEngine defines the interface for engines that support dynamic endpoint configuration and health monitoring.
+type ConfigurableEngine interface {
+	SetBaseURL(url string)
+	GetActiveURL() string
+	IsUsingFallback() bool
+	StartHealthMonitor(ctx context.Context, interval time.Duration, failureThreshold int)
 }

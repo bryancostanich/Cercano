@@ -802,6 +802,19 @@ func (s *Server) handleStats(ctx context.Context, request *gomcp.CallToolRequest
 		}
 	}
 
+	// By session (last 10)
+	if len(stats.BySession) > 0 {
+		out.WriteString("\n### By Session\n")
+		limit := len(stats.BySession)
+		if limit > 10 {
+			limit = 10
+		}
+		for _, sess := range stats.BySession[:limit] {
+			out.WriteString(fmt.Sprintf("- %s: %d calls, %d tokens\n",
+				sess.StartedAt.Format("2006-01-02 15:04"), sess.Count, sess.InputTokens+sess.OutputTokens))
+		}
+	}
+
 	return &gomcp.CallToolResult{
 		Content: []gomcp.Content{
 			&gomcp.TextContent{Text: out.String()},

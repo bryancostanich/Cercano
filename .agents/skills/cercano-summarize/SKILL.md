@@ -1,6 +1,8 @@
 ---
 name: cercano-summarize
-description: Summarize text or files using local AI via Cercano without sending content to the cloud. Use this to distill large files, logs, diffs, documents, or any lengthy text into a concise summary. Supports brief, medium, and detailed summary lengths. Runs entirely on local models for privacy.
+description: Summarize text or files using local AI via Cercano without sending content to the cloud. Supports brief, medium, and detailed summary lengths.
+TRIGGER when: user asks to summarize a file, log, diff, document, or large block of text. Use this INSTEAD of reading the full content into cloud context.
+DO NOT TRIGGER when: summarizing short text that's already in the conversation context.
 compatibility: Requires Cercano server running and connected to an Ollama instance.
 ---
 

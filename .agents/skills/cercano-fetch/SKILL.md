@@ -1,6 +1,8 @@
 ---
 name: cercano-fetch
-description: Fetch a URL and extract readable text content locally. Returns full extracted text (not a summary) — HTML is stripped to clean plain text. Use this to read web pages, documentation, articles, or any URL without sending content to the cloud.
+description: Fetch a URL and extract readable text content locally. Returns full extracted text (not a summary) — HTML is stripped to clean plain text.
+TRIGGER when: user asks to fetch, read, or open a URL. Use this INSTEAD of WebFetch.
+DO NOT TRIGGER when: user asks a research question without a specific URL (use cercano-research instead).
 compatibility: Requires Cercano server running.
 ---
 

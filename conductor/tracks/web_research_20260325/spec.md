@@ -45,9 +45,9 @@ Host AI: "cercano_research: what's the Ollama API for listing models?"
 ```
 
 Key decisions:
-- **DuckDuckGo as default search** — Zero config, no API key, free. Scraped via the well-maintained `duckduckgo-search` Python library.
+- **DuckDuckGo as default search** — Zero config, no API key, free. Scraped via the well-maintained `ddgs` Python library.
 - **Python subprocess for search** — Go spawns `python3 ddg_search.py`, reads JSON from stdout. ~70ms startup overhead, negligible vs network latency.
-- **Bundled Python venv** — `cercano setup` creates `~/.config/cercano/venv/` with `duckduckgo-search` installed. Isolated from system Python.
+- **Bundled Python venv** — `cercano setup` creates `~/.config/cercano/venv/` with `ddgs` installed. Isolated from system Python.
 - **Go for everything else** — HTTP fetching, HTML-to-text, concurrency orchestration, local model calls all in Go.
 - **Pluggable search providers** — Architecture supports adding Brave, SearXNG, etc. later via a provider interface.
 
@@ -73,12 +73,12 @@ Key decisions:
 - Location: `source/server/scripts/ddg_search.py`
 - Interface: `python3 ddg_search.py --query "..." --max-results N`
 - Output: JSON array of `{url, title, snippet}` to stdout
-- Dependencies: `duckduckgo-search` library installed in venv
+- Dependencies: `ddgs` library installed in venv
 - Error handling: Print error to stderr, exit non-zero
 
 ### 4.4 Setup Integration
 - `cercano setup` creates `~/.config/cercano/venv/` if not present
-- Installs `duckduckgo-search` into the venv
+- Installs `ddgs` into the venv
 - Validates the venv works by running a test import
 
 ## 5. Acceptance Criteria

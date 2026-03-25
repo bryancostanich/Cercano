@@ -33,8 +33,8 @@ Build the URL fetching tool — HTTP GET + HTML-to-text extraction. No search pr
 Set up the Python venv and DDG search script, integrate with `cercano setup`.
 
 ### Tasks
-- [x] Task: Write `ddg_search.py` script — accepts query + max_results args, outputs JSON to stdout using `duckduckgo-search` lib. `6649191`
-- [x] Task: Add venv creation to `cercano setup` — create `~/.config/cercano/venv/`, install `duckduckgo-search`, validate with test import. `f9cd26a`
+- [x] Task: Write `ddg_search.py` script — accepts query + max_results args, outputs JSON to stdout using `ddgs` lib. `6649191`
+- [x] Task: Add venv creation to `cercano setup` — create `~/.config/cercano/venv/`, install `ddgs`, validate with test import. `f9cd26a`
 - [x] Task: Add venv check to `cercano_research` handler — if venv missing, return error suggesting `cercano setup`. `f9cd26a`
 - [x] Task: Add venv check to `cercano_init` — if research features need the venv, nudge during init. `f9cd26a`
 - [x] Task: Implement Go subprocess caller — spawn `~/.config/cercano/venv/bin/python3 ddg_search.py`, parse JSON stdout, handle errors. `6649191`

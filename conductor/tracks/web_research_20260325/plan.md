@@ -47,16 +47,16 @@ Set up the Python venv and DDG search script, integrate with `cercano setup`.
 Build the full research pipeline — query crafting, search, fetch, analyze, synthesize.
 
 ### Tasks
-- [ ] Task: Implement query crafting — local model generates 2-3 search queries from the user's question.
-- [ ] Task: Implement parallel search execution — spawn DDG searches concurrently via goroutines.
-- [ ] Task: Implement result deduplication and ranking — merge results from multiple queries, remove duplicates by URL.
-- [ ] Task: Implement parallel URL fetching — fetch top N pages concurrently.
-- [ ] Task: Implement analysis and synthesis — local model reads fetched content and produces a sourced answer.
-- [ ] Task: Add `cercano_research` MCP tool handler — orchestrates the full pipeline. Support batch mode (multiple questions in one call).
-- [ ] Task: Add telemetry for research events (token_saving=true).
-- [ ] Task: Red/Green TDD.
-- [ ] Task: Write Agent Skill (SKILL.md) for both `cercano_fetch` and `cercano_research`.
-- [ ] Task: Update README.md with research tool documentation.
+- [x] Task: Implement query crafting — local model generates 2-3 search queries from the user's question. `e7f0b0c`
+- [x] Task: Implement parallel search execution — spawn DDG searches concurrently via goroutines. `e7f0b0c`
+- [x] Task: Implement result deduplication and ranking — merge results from multiple queries, remove duplicates by URL. `e7f0b0c`
+- [x] Task: Implement parallel URL fetching — fetch top N pages concurrently. `e7f0b0c`
+- [x] Task: Implement analysis and synthesis — local model reads fetched content and produces a sourced answer. `e7f0b0c`
+- [x] Task: Add `cercano_research` MCP tool handler — orchestrates the full pipeline. Support batch mode (multiple questions in one call). `e7f0b0c`
+- [x] Task: Add telemetry for research events (token_saving=true). `e7f0b0c`
+- [x] Task: Red/Green TDD. `e7f0b0c`
+- [x] Task: Write Agent Skill (SKILL.md) for both `cercano_fetch` and `cercano_research`. `ca8a8f2`
+- [x] Task: Update README.md with research tool documentation. `ca8a8f2`
 - [ ] Task: Conductor - User Manual Verification 'Research Tool' (Protocol in workflow.md)
 
 ## Phase 5: Pluggable Search Providers (future)

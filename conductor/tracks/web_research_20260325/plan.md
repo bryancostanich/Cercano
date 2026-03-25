@@ -27,7 +27,7 @@ Build the URL fetching tool — HTTP GET + HTML-to-text extraction. No search pr
 - [x] Task: Red/Green TDD for fetcher and extractor.
 - [ ] Task: Conductor - User Manual Verification 'URL Fetching' (Protocol in workflow.md)
 
-## Phase 3: Setup & Python Search Integration
+## Phase 3: Setup & Python Search Integration [checkpoint: 585c826]
 
 ### Objective
 Set up the Python venv and DDG search script, integrate with `cercano setup`.
@@ -39,7 +39,7 @@ Set up the Python venv and DDG search script, integrate with `cercano setup`.
 - [x] Task: Add venv check to `cercano_init` — if research features need the venv, nudge during init. `f9cd26a`
 - [x] Task: Implement Go subprocess caller — spawn `~/.config/cercano/venv/bin/python3 ddg_search.py`, parse JSON stdout, handle errors. `6649191`
 - [x] Task: Red/Green TDD for subprocess integration. `6649191`
-- [ ] Task: Conductor - User Manual Verification 'Setup & Python Search' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Setup & Python Search' (Protocol in workflow.md) `585c826`
 
 ## Phase 4: Research Tool (cercano_research)
 

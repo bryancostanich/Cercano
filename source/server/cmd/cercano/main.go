@@ -38,6 +38,11 @@ import (
 // Falls back to "dev" for local builds.
 var version = "dev"
 
+func init() {
+	// Normalize: strip leading "v" so the print format "v%s" doesn't double up.
+	version = strings.TrimPrefix(version, "v")
+}
+
 func checkOllama(baseURL string) error {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(baseURL + "/api/tags")

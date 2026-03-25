@@ -213,6 +213,7 @@ type ConfigRequest struct {
 type SummarizeRequest struct {
 	Text       string `json:"text,omitempty" jsonschema:"Raw text to summarize. Provide either text or file_path."`
 	FilePath   string `json:"file_path,omitempty" jsonschema:"Path to a file to read and summarize. Provide either text or file_path."`
+	Path       string `json:"path,omitempty" jsonschema:"Alias for file_path (deprecated, use file_path instead)."`
 	MaxLength  string `json:"max_length,omitempty" jsonschema:"Target summary length: brief (1-2 sentences), medium (1 paragraph, default), or detailed (multiple paragraphs)."`
 	ProjectDir string `json:"project_dir,omitempty" jsonschema:"Project root directory. Enables project-aware responses when .cercano/context.md exists."`
 	cloudTokenFields
@@ -222,6 +223,7 @@ type SummarizeRequest struct {
 type ExtractRequest struct {
 	Text       string `json:"text,omitempty" jsonschema:"The text to search through and extract information from. Provide either text or file_path."`
 	FilePath   string `json:"file_path,omitempty" jsonschema:"Path to a file to read and extract information from. Provide either text or file_path."`
+	Path       string `json:"path,omitempty" jsonschema:"Alias for file_path (deprecated, use file_path instead)."`
 	Query      string `json:"query" jsonschema:"What to find or extract (e.g. 'error messages', 'function signatures', 'config values')"`
 	ProjectDir string `json:"project_dir,omitempty" jsonschema:"Project root directory. Enables project-aware responses when .cercano/context.md exists."`
 	cloudTokenFields
@@ -231,6 +233,7 @@ type ExtractRequest struct {
 type ClassifyRequest struct {
 	Text       string `json:"text,omitempty" jsonschema:"The text to classify or triage. Provide either text or file_path."`
 	FilePath   string `json:"file_path,omitempty" jsonschema:"Path to a file to read and classify. Provide either text or file_path."`
+	Path       string `json:"path,omitempty" jsonschema:"Alias for file_path (deprecated, use file_path instead)."`
 	Categories string `json:"categories,omitempty" jsonschema:"Comma-separated list of categories to choose from. If omitted, the model will determine appropriate categories."`
 	ProjectDir string `json:"project_dir,omitempty" jsonschema:"Project root directory. Enables project-aware responses when .cercano/context.md exists."`
 	cloudTokenFields
@@ -240,6 +243,7 @@ type ClassifyRequest struct {
 type ExplainRequest struct {
 	Text       string `json:"text,omitempty" jsonschema:"Code or text to explain. Provide either text or file_path."`
 	FilePath   string `json:"file_path,omitempty" jsonschema:"Path to a file to read and explain. Provide either text or file_path."`
+	Path       string `json:"path,omitempty" jsonschema:"Alias for file_path (deprecated, use file_path instead)."`
 	ProjectDir string `json:"project_dir,omitempty" jsonschema:"Project root directory. Enables project-aware responses when .cercano/context.md exists."`
 	cloudTokenFields
 }
@@ -509,6 +513,9 @@ func (s *Server) handleSummarize(ctx context.Context, request *gomcp.CallToolReq
 		return result, nil, nil
 	}
 	startTime := time.Now().UnixNano()
+	if args.FilePath == "" && args.Path != "" {
+		args.FilePath = args.Path
+	}
 	if args.Text == "" && args.FilePath == "" {
 		return nil, nil, fmt.Errorf("cercano_summarize: provide either 'text' or 'file_path'")
 	}
@@ -556,6 +563,9 @@ func (s *Server) handleExtract(ctx context.Context, request *gomcp.CallToolReque
 		return result, nil, nil
 	}
 	startTime := time.Now().UnixNano()
+	if args.FilePath == "" && args.Path != "" {
+		args.FilePath = args.Path
+	}
 	if args.Text == "" && args.FilePath == "" {
 		return nil, nil, fmt.Errorf("cercano_extract: provide either 'text' or 'file_path'")
 	}
@@ -598,6 +608,9 @@ func (s *Server) handleClassify(ctx context.Context, request *gomcp.CallToolRequ
 		return result, nil, nil
 	}
 	startTime := time.Now().UnixNano()
+	if args.FilePath == "" && args.Path != "" {
+		args.FilePath = args.Path
+	}
 	if args.Text == "" && args.FilePath == "" {
 		return nil, nil, fmt.Errorf("cercano_classify: provide either 'text' or 'file_path'")
 	}
@@ -642,6 +655,9 @@ func (s *Server) handleExplain(ctx context.Context, request *gomcp.CallToolReque
 		return result, nil, nil
 	}
 	startTime := time.Now().UnixNano()
+	if args.FilePath == "" && args.Path != "" {
+		args.FilePath = args.Path
+	}
 	if args.Text == "" && args.FilePath == "" {
 		return nil, nil, fmt.Errorf("cercano_explain: provide either 'text' or 'file_path'")
 	}

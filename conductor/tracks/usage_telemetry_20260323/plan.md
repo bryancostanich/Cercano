@@ -76,3 +76,26 @@ Automatically capture real cloud token usage from Claude Code's transcript file 
 - [-] Task: Red/Green TDD for the hook script. *(Python script — tested manually with real transcript)*
 - [x] Task: Update README.md with hook setup instructions.
 - [ ] Task: Conductor - User Manual Verification 'Host Cloud Token Capture via Hook' (Protocol in workflow.md)
+
+## Phase 6: Per-Session Usage Tracking
+
+### Objective
+Track telemetry per MCP session (each Claude Code window spawns its own `cercano --mcp` process) so users can see usage breakdowns by session, not just cumulative totals.
+
+### Design Notes
+- Each `cercano --mcp` process generates a UUID session ID at startup
+- Session ID stored in a `sessions` table with start timestamp
+- Every event row gets a `session_id` column (FK to sessions)
+- `cercano_stats` gains a `by_session` breakdown showing per-window usage
+- Sessions labeled by start time (e.g., "2026-03-25 14:32") since Claude Code doesn't expose a window name
+- Schema migration adds `session_id` column with empty default for pre-existing rows
+
+### Tasks
+- [ ] Task: Add `sessions` table and `session_id` column to events — schema migration in `migrateSchema()`.
+- [ ] Task: Generate UUID session ID on MCP server startup — pass to Server and Collector.
+- [ ] Task: Record session start — insert row into `sessions` table when MCP server initializes telemetry.
+- [ ] Task: Tag all emitted events with the session ID — update `Event` struct and `RecordEvent`.
+- [ ] Task: Add `BySession` stats query — aggregate events grouped by session_id, join with sessions for timestamps.
+- [ ] Task: Update `cercano_stats` output to include per-session breakdown.
+- [ ] Task: Red/Green TDD.
+- [ ] Task: Conductor - User Manual Verification 'Per-Session Usage Tracking' (Protocol in workflow.md)

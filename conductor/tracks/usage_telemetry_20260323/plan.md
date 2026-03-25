@@ -91,11 +91,11 @@ Track telemetry per MCP session (each Claude Code window spawns its own `cercano
 - Schema migration adds `session_id` column with empty default for pre-existing rows
 
 ### Tasks
-- [~] Task: Add `sessions` table and `session_id` column to events — schema migration in `migrateSchema()`.
-- [~] Task: Generate UUID session ID on MCP server startup — pass to Server and Collector.
-- [~] Task: Record session start — insert row into `sessions` table when MCP server initializes telemetry.
-- [~] Task: Tag all emitted events with the session ID — update `Event` struct and `RecordEvent`.
-- [~] Task: Add `BySession` stats query — aggregate events grouped by session_id, join with sessions for timestamps.
-- [~] Task: Update `cercano_stats` output to include per-session breakdown.
-- [~] Task: Red/Green TDD.
+- [x] Task: Add `sessions` table and `session_id` column to events — schema migration in `migrateSchema()`. `6ff39dc`
+- [x] Task: Generate UUID session ID on MCP server startup — pass to Server and Collector. `6ff39dc`
+- [x] Task: Record session start — insert row into `sessions` table when MCP server initializes telemetry. `6ff39dc`
+- [x] Task: Tag all emitted events with the session ID — update `Event` struct and `RecordEvent`. `6ff39dc`
+- [x] Task: Add `BySession` stats query — aggregate events grouped by session_id, join with sessions for timestamps. `6ff39dc`
+- [x] Task: Update `cercano_stats` output to include per-session breakdown. `6ff39dc`
+- [x] Task: Red/Green TDD. `6ff39dc`
 - [ ] Task: Conductor - User Manual Verification 'Per-Session Usage Tracking' (Protocol in workflow.md)

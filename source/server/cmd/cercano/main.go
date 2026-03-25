@@ -18,6 +18,8 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/config"
+	"cercano/source/server/internal/engine"
+	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/loop"
 	mcpserver "cercano/source/server/internal/mcp"
@@ -56,7 +58,12 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		return "", nil, err
 	}
 
-	localProvider := llm.NewOllamaProvider(cfg.LocalModel, cfg.OllamaURL)
+	registry := engine.NewEngineRegistry()
+	ollamaEng := ollama.NewOllamaEngine(cfg.OllamaURL)
+	registry.RegisterEngine(ollamaEng)
+	registry.RegisterEmbedder(ollamaEng)
+
+	localProvider := llm.NewLocalModelProvider(ollamaEng, cfg.LocalModel)
 
 	var cloudProvider agent.ModelProvider = llm.NewMockProvider("CloudModel")
 	if cfg.CloudAPIKey != "" && cfg.CloudProvider != "" {
@@ -82,7 +89,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	exePath, _ := os.Executable()
 	serverRoot := filepath.Dir(filepath.Dir(exePath)) // bin/cercano -> bin -> server root
 	prototypesPath := filepath.Join(serverRoot, "internal", "agent", "prototypes.yaml")
-	smartRouter, err := agent.NewSmartRouter(localProvider, cloudProvider, cfg.EmbeddingModel, http.DefaultClient, prototypesPath, cloudFactory)
+	smartRouter, err := agent.NewSmartRouter(localProvider, cloudProvider, cfg.EmbeddingModel, ollamaEng, prototypesPath, cloudFactory)
 	if err != nil {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "connection refused") || strings.Contains(errMsg, "no such host") {
@@ -100,7 +107,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	}
 
 	s := grpc.NewServer()
-	proto.RegisterAgentServer(s, server.NewServer(orchestrator, localProvider, smartRouter, coordinator, cloudFactory))
+	proto.RegisterAgentServer(s, server.NewServer(orchestrator, localProvider, smartRouter, coordinator, cloudFactory, registry))
 
 	go func() {
 		if err := s.Serve(lis); err != nil {

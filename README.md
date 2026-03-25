@@ -16,6 +16,7 @@ Cercano works in two ways:
 - **Smart Router** — Embedding-based classifier routes requests to local or cloud models. Ultra-fast, no LLM call needed for routing.
 - **Agentic Self-Correction** — Iterative loop that generates code, validates it (e.g., via compilation), and self-corrects automatically.
 - **Remote Inference** — Point Cercano at a remote Ollama instance (e.g., a Mac Studio on your LAN) for access to larger models. Runtime-configurable with automatic fallback if the remote goes down.
+- **Pluggable Engine Architecture** — Inference backends are abstracted behind `InferenceEngine` and `EmbeddingService` interfaces. Ollama is the built-in engine; adding new backends (ONNX, vLLM, etc.) requires only implementing the interface and registering it — no changes to the core agent, router, or MCP tools.
 
 ### Local Co-Processor Tools (via MCP)
 When used as a co-processor inside cloud agents, Cercano provides specialized tools that keep work local:
@@ -80,15 +81,16 @@ Cercano can run as a standalone gRPC server (for IDE clients) or embedded inside
               │                └──────────────┼──────────────┘
               │                               │
      ┌────────┴────────┐             ┌────────┴────────┐
-     │  Ollama         │             │  Ollama         │
-     │  (local/remote) │             │  (local/remote) │
+     │  Engine Layer   │             │  Engine Layer   │
+     │  (Ollama, etc.) │             │  (Ollama, etc.) │
      └─────────────────┘             └─────────────────┘
 ```
 
 - **Core Agent (Go)** — Handles model routing, agentic loops, conversation history, and provides a gRPC interface.
 - **Smart Router** — Uses semantic classification (via embeddings) to route requests. Ultra-fast, no LLM call needed.
 - **Coordinator (LoopAgent)** — Google ADK-backed iterative loop that generates code, validates it, and self-corrects with cloud escalation.
-- **MCP Tool Handlers** — Specialized prompt templates for summarize, extract, classify, and explain. Each tool wraps the core agent with task-specific prompting.
+- **Engine Layer** — Pluggable inference backends behind `InferenceEngine` and `EmbeddingService` interfaces. Ollama is the default; new engines register via `EngineRegistry`.
+- **MCP Tool Handlers** — Specialized prompt templates for summarize, extract, classify, explain, fetch, and research. Each tool wraps the core agent with task-specific prompting.
 - **Conversation Store** — Server-side multi-turn history so the LLM can resolve references across requests.
 
 ## Project Structure

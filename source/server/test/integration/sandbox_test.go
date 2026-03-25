@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"cercano/source/server/internal/tools"
+	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/loop"
 )
@@ -35,7 +36,7 @@ targetFile := filepath.Join(sandboxDir, "calculator.go")
 	}
 
 	// 3. Initialize Agent Components
-	provider := llm.NewOllamaProvider("qwen3-coder", "http://localhost:11434")
+	provider := llm.NewLocalModelProvider(ollama.NewOllamaEngine("http://localhost:11434"), "qwen3-coder")
 	handler := tools.NewGenericGenerator(provider)
 	validator := tools.NewGoValidator()
 	coordinator := loop.NewGenerationCoordinator(handler, handler, validator)

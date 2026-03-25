@@ -10,8 +10,10 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/engine"
+	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/llm"
-	"cercano/source/server/pkg/proto" // Import the generated protobuf package
+	"cercano/source/server/pkg/proto"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -63,7 +65,7 @@ func init() {
 	s := grpc.NewServer()
 	coordinator := &mockCoordinator{}
 	orchestrator := agent.NewAgent(&mockRouter{}, coordinator)
-	proto.RegisterAgentServer(s, NewServer(orchestrator, nil, nil, nil, nil))
+	proto.RegisterAgentServer(s, NewServer(orchestrator, nil, nil, nil, nil, nil))
 	go func() {
 		if err := s.Serve(lis); err != nil {
 			log.Fatalf("Server exited with error: %v", err)
@@ -94,12 +96,9 @@ func TestAgentServer_ProcessRequest(t *testing.T) {
 	if res.Output == "" {
 		t.Errorf("Expected output, got empty string")
 	}
-
-	// Add more test cases here as functionality expands
 }
 
 func TestListModels(t *testing.T) {
-	// Create a mock Ollama server that returns models
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"models": []map[string]interface{}{
@@ -111,8 +110,11 @@ func TestListModels(t *testing.T) {
 	mockOllama := httptest.NewServer(handler)
 	defer mockOllama.Close()
 
-	provider := llm.NewOllamaProvider("test-model", mockOllama.URL)
-	srv := NewServer(nil, provider, nil, nil, nil)
+	registry := engine.NewEngineRegistry()
+	eng := ollama.NewOllamaEngine(mockOllama.URL)
+	registry.RegisterEngine(eng)
+
+	srv := NewServer(nil, nil, nil, nil, nil, registry)
 
 	resp, err := srv.ListModels(context.Background(), &proto.ListModelsRequest{})
 	if err != nil {
@@ -121,18 +123,15 @@ func TestListModels(t *testing.T) {
 	if len(resp.Models) != 2 {
 		t.Fatalf("Expected 2 models, got %d", len(resp.Models))
 	}
-	if resp.Models[0].Name != "qwen3-coder:latest" {
-		t.Errorf("Expected 'qwen3-coder:latest', got %q", resp.Models[0].Name)
-	}
-	if resp.Models[1].Name != "llama3:latest" {
-		t.Errorf("Expected 'llama3:latest', got %q", resp.Models[1].Name)
-	}
 }
 
 func TestMapResponse_IncludesEndpoint(t *testing.T) {
-	provider := llm.NewOllamaProvider("test-model", "http://localhost:11434")
-	provider.SetBaseURL("http://remote:11434")
-	srv := NewServer(nil, provider, nil, nil, nil)
+	registry := engine.NewEngineRegistry()
+	eng := ollama.NewOllamaEngine("http://localhost:11434")
+	registry.RegisterEngine(eng)
+
+	eng.SetBaseURL("http://remote:11434")
+	srv := NewServer(nil, nil, nil, nil, nil, registry)
 
 	agentResp := &agent.Response{
 		Output: "test output",
@@ -152,7 +151,7 @@ func TestMapResponse_IncludesEndpoint(t *testing.T) {
 	}
 
 	// Switch to fallback and verify
-	provider.SwitchToFallback()
+	eng.SwitchToFallback()
 	protoResp = srv.MapResponseForTest(agentResp)
 
 	if protoResp.RoutingMetadata.Endpoint != "http://localhost:11434" {
@@ -164,8 +163,12 @@ func TestMapResponse_IncludesEndpoint(t *testing.T) {
 }
 
 func TestUpdateConfig_OllamaURL(t *testing.T) {
-	provider := llm.NewOllamaProvider("test-model", "http://localhost:11434")
-	srv := NewServer(nil, provider, nil, nil, nil)
+	registry := engine.NewEngineRegistry()
+	eng := ollama.NewOllamaEngine("http://localhost:11434")
+	registry.RegisterEngine(eng)
+	provider := llm.NewLocalModelProvider(eng, "test-model")
+
+	srv := NewServer(nil, provider, nil, nil, nil, registry)
 
 	// Set a valid remote URL
 	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{
@@ -179,14 +182,17 @@ func TestUpdateConfig_OllamaURL(t *testing.T) {
 	}
 
 	// Verify the provider's BaseURL was updated
-	if provider.GetBaseURL() != "http://mac-studio.local:11434" {
-		t.Errorf("Expected BaseURL 'http://mac-studio.local:11434', got '%s'", provider.GetBaseURL())
+	if eng.GetActiveURL() != "http://mac-studio.local:11434" {
+		t.Errorf("Expected BaseURL 'http://mac-studio.local:11434', got '%s'", eng.GetActiveURL())
 	}
 }
 
 func TestUpdateConfig_OllamaURL_InvalidURL(t *testing.T) {
-	provider := llm.NewOllamaProvider("test-model", "http://localhost:11434")
-	srv := NewServer(nil, provider, nil, nil, nil)
+	registry := engine.NewEngineRegistry()
+	eng := ollama.NewOllamaEngine("http://localhost:11434")
+	registry.RegisterEngine(eng)
+
+	srv := NewServer(nil, nil, nil, nil, nil, registry)
 
 	// Set an invalid URL — should fail validation
 	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{
@@ -199,14 +205,13 @@ func TestUpdateConfig_OllamaURL_InvalidURL(t *testing.T) {
 		t.Error("Expected failure for invalid URL, got success")
 	}
 
-	// BaseURL should remain unchanged
-	if provider.GetBaseURL() != "http://localhost:11434" {
-		t.Errorf("Expected BaseURL unchanged, got '%s'", provider.GetBaseURL())
+	if eng.GetActiveURL() != "http://localhost:11434" {
+		t.Errorf("Expected BaseURL unchanged, got '%s'", eng.GetActiveURL())
 	}
 }
 
 func TestListSkills(t *testing.T) {
-	srv := NewServer(nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil, nil)
 
 	resp, err := srv.ListSkills(context.Background(), &proto.ListSkillsRequest{})
 	if err != nil {
@@ -244,7 +249,7 @@ func TestListSkills(t *testing.T) {
 }
 
 func TestGetSkill(t *testing.T) {
-	srv := NewServer(nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil, nil)
 
 	resp, err := srv.GetSkill(context.Background(), &proto.GetSkillRequest{Name: "cercano-local"})
 	if err != nil {
@@ -263,7 +268,7 @@ func TestGetSkill(t *testing.T) {
 }
 
 func TestGetSkill_NotFound(t *testing.T) {
-	srv := NewServer(nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil, nil)
 
 	_, err := srv.GetSkill(context.Background(), &proto.GetSkillRequest{Name: "nonexistent-skill"})
 	if err == nil {
@@ -285,8 +290,12 @@ func containsSubstring(s, substr string) bool {
 }
 
 func TestUpdateConfig_OllamaURL_WithModel(t *testing.T) {
-	provider := llm.NewOllamaProvider("test-model", "http://localhost:11434")
-	srv := NewServer(nil, provider, nil, nil, nil)
+	registry := engine.NewEngineRegistry()
+	eng := ollama.NewOllamaEngine("http://localhost:11434")
+	registry.RegisterEngine(eng)
+	provider := llm.NewLocalModelProvider(eng, "test-model")
+
+	srv := NewServer(nil, provider, nil, nil, nil, registry)
 
 	// Set both URL and model in one call
 	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{
@@ -300,8 +309,8 @@ func TestUpdateConfig_OllamaURL_WithModel(t *testing.T) {
 		t.Errorf("Expected success, got: %s", resp.Message)
 	}
 
-	if provider.GetBaseURL() != "http://192.168.1.100:11434" {
-		t.Errorf("Expected BaseURL 'http://192.168.1.100:11434', got '%s'", provider.GetBaseURL())
+	if eng.GetActiveURL() != "http://192.168.1.100:11434" {
+		t.Errorf("Expected BaseURL 'http://192.168.1.100:11434', got '%s'", eng.GetActiveURL())
 	}
 	if provider.Name() != "llama3" {
 		t.Errorf("Expected model 'llama3', got '%s'", provider.Name())

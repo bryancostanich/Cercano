@@ -775,65 +775,11 @@ func (s *Server) handleStats(ctx context.Context, request *gomcp.CallToolRequest
 		return nil, nil, fmt.Errorf("cercano_stats: %w", err)
 	}
 
-	var out strings.Builder
-	out.WriteString("## Cercano Usage Statistics\n\n")
-
-	// Totals
-	totalLocal := stats.TotalInputTokens + stats.TotalOutputTokens
-	totalCloud := stats.TotalCloudInputTokens + stats.TotalCloudOutputTokens
-	out.WriteString(fmt.Sprintf("**Total requests:** %d\n", stats.TotalRequests))
-	out.WriteString(fmt.Sprintf("**Local tokens:** %d (%d in, %d out)\n", totalLocal, stats.TotalInputTokens, stats.TotalOutputTokens))
-	if totalCloud > 0 {
-		out.WriteString(fmt.Sprintf("**Cloud tokens (host-reported):** %d (%d in, %d out)\n", totalCloud, stats.TotalCloudInputTokens, stats.TotalCloudOutputTokens))
-		out.WriteString(fmt.Sprintf("**Kept local:** %.1f%%\n", stats.LocalPercentage))
-	} else {
-		out.WriteString(fmt.Sprintf("**Estimated cloud tokens saved:** %d\n", stats.LocalTokensSaved))
-	}
-
-	// By tool
-	if len(stats.ByTool) > 0 {
-		out.WriteString("\n### By Tool\n")
-		for _, t := range stats.ByTool {
-			out.WriteString(fmt.Sprintf("- %s: %d calls, %d tokens\n", t.Name, t.Count, t.InputTokens+t.OutputTokens))
-		}
-	}
-
-	// By model
-	if len(stats.ByModel) > 0 {
-		out.WriteString("\n### By Model\n")
-		for _, m := range stats.ByModel {
-			out.WriteString(fmt.Sprintf("- %s: %d calls, %d tokens\n", m.Name, m.Count, m.InputTokens+m.OutputTokens))
-		}
-	}
-
-	// By day (last 7)
-	if len(stats.ByDay) > 0 {
-		out.WriteString("\n### Recent Activity\n")
-		limit := len(stats.ByDay)
-		if limit > 7 {
-			limit = 7
-		}
-		for _, d := range stats.ByDay[:limit] {
-			out.WriteString(fmt.Sprintf("- %s: %d calls, %d tokens\n", d.Name, d.Count, d.InputTokens+d.OutputTokens))
-		}
-	}
-
-	// By session (last 10)
-	if len(stats.BySession) > 0 {
-		out.WriteString("\n### By Session\n")
-		limit := len(stats.BySession)
-		if limit > 10 {
-			limit = 10
-		}
-		for _, sess := range stats.BySession[:limit] {
-			out.WriteString(fmt.Sprintf("- %s: %d calls, %d tokens\n",
-				sess.StartedAt.Format("2006-01-02 15:04"), sess.Count, sess.InputTokens+sess.OutputTokens))
-		}
-	}
+	formatted := telemetry.FormatStatsASCII(stats)
 
 	return &gomcp.CallToolResult{
 		Content: []gomcp.Content{
-			&gomcp.TextContent{Text: out.String()},
+			&gomcp.TextContent{Text: formatted},
 		},
 	}, nil, nil
 }

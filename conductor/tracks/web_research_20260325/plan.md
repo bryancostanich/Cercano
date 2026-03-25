@@ -1,5 +1,7 @@
 # Track Plan: Web Research Tool
 
+> **Future consideration:** Documentation site indexing (crawl a doc site once, make it persistently searchable — similar to Cursor's @Docs) is a natural extension of this track. It may need to be split into its own track or combined with the Semantic Search track depending on scope. Parking it here as a note for now.
+
 ## Phase 1: Design & Architecture
 
 ### Objective
@@ -21,8 +23,8 @@ Build the URL fetching tool — HTTP GET + HTML-to-text extraction. No search pr
 ### Tasks
 - [ ] Task: Implement HTML-to-text extractor — strip scripts, styles, nav, ads; preserve paragraph structure.
 - [ ] Task: Implement HTTP fetcher with timeout, redirect following, User-Agent, content-type checking.
-- [ ] Task: Add `cercano_fetch` MCP tool handler — accepts URL, returns extracted text.
-- [ ] Task: Add telemetry for fetch events.
+- [ ] Task: Add `cercano_fetch` MCP tool handler — accepts URL, returns raw extracted text (not summarized — host decides what to do with it).
+- [ ] Task: Add telemetry for fetch events (token_saving=true).
 - [ ] Task: Red/Green TDD for fetcher and extractor.
 - [ ] Task: Conductor - User Manual Verification 'URL Fetching' (Protocol in workflow.md)
 
@@ -49,7 +51,7 @@ Build the full research pipeline — query crafting, search, fetch, analyze, syn
 - [ ] Task: Implement result deduplication and ranking — merge results from multiple queries, remove duplicates by URL.
 - [ ] Task: Implement parallel URL fetching — fetch top N pages concurrently.
 - [ ] Task: Implement analysis and synthesis — local model reads fetched content and produces a sourced answer.
-- [ ] Task: Add `cercano_research` MCP tool handler — orchestrates the full pipeline.
+- [ ] Task: Add `cercano_research` MCP tool handler — orchestrates the full pipeline. Support batch mode (multiple questions in one call).
 - [ ] Task: Add telemetry for research events (token_saving=true).
 - [ ] Task: Red/Green TDD.
 - [ ] Task: Write Agent Skill (SKILL.md) for both `cercano_fetch` and `cercano_research`.

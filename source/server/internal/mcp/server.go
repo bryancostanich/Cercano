@@ -277,8 +277,8 @@ type InitRequest struct {
 // StatsRequest is the input schema for the cercano_stats tool.
 type StatsRequest struct{}
 
-// ReportUsageRequest is the input schema for the cercano_report_usage tool.
-type ReportUsageRequest struct {
+// SubmitUsageRequest is the input schema for the cercano_submit_usage tool.
+type SubmitUsageRequest struct {
 	CloudInputTokens  int    `json:"cloud_input_tokens" jsonschema:"Number of tokens sent to the cloud model"`
 	CloudOutputTokens int    `json:"cloud_output_tokens" jsonschema:"Number of tokens received from the cloud model"`
 	CloudProvider     string `json:"cloud_provider,omitempty" jsonschema:"Cloud provider name (e.g. anthropic, google)"`
@@ -328,9 +328,9 @@ func (s *Server) registerTools() {
 	}, s.handleSkills)
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
-		Name:        "cercano_report_usage",
-		Description: "Report cloud token usage from the host agent (opt-in). Call this to help Cercano track how many cloud tokens are used alongside local inference, enabling accurate local-vs-cloud usage comparison.",
-	}, s.handleReportUsage)
+		Name:        "cercano_submit_usage",
+		Description: "Submit cloud token usage data to Cercano (opt-in). This is for sending data, not viewing it — use cercano_stats to see usage reports. Helps Cercano track cloud tokens alongside local inference for accurate local-vs-cloud comparison.",
+	}, s.handleSubmitUsage)
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_stats",
@@ -718,8 +718,8 @@ func (s *Server) handleSkills(ctx context.Context, request *gomcp.CallToolReques
 	}
 }
 
-// handleReportUsage processes a cercano_report_usage tool call.
-func (s *Server) handleReportUsage(ctx context.Context, request *gomcp.CallToolRequest, args ReportUsageRequest) (*gomcp.CallToolResult, any, error) {
+// handleSubmitUsage processes a cercano_submit_usage tool call.
+func (s *Server) handleSubmitUsage(ctx context.Context, request *gomcp.CallToolRequest, args SubmitUsageRequest) (*gomcp.CallToolResult, any, error) {
 	if s.collector == nil {
 		return &gomcp.CallToolResult{
 			Content: []gomcp.Content{

@@ -22,7 +22,7 @@ Returns a markdown-formatted report including:
 
 - **Total requests** processed locally
 - **Local tokens** (input + output)
-- **Cloud tokens** (if host-reported via `cercano_report_usage`)
+- **Cloud tokens** (if host-reported via `cercano_submit_usage`)
 - **Kept local percentage** (when cloud data is available)
 - **Estimated cloud tokens saved** (when no cloud data reported)
 - **Breakdown by tool** (e.g. summarize, extract, classify)

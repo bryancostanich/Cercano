@@ -1,6 +1,8 @@
 ---
 name: cercano-research
-description: Research a question using DuckDuckGo search and local AI analysis. Crafts search queries, fetches top results, and synthesizes a sourced answer — all locally. Use this instead of browsing the web yourself to save cloud context tokens.
+description: Research a question using DuckDuckGo search and local AI analysis. Crafts search queries, fetches top results, and synthesizes a sourced answer — all locally.
+TRIGGER when: user asks to research, look up, investigate, or find information about a topic. Use this INSTEAD of WebSearch/WebFetch.
+DO NOT TRIGGER when: user provides a specific URL to read (use cercano-fetch instead).
 compatibility: Requires Cercano server running and Python venv set up (run 'cercano setup').
 ---
 

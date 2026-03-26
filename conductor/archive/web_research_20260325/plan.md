@@ -25,7 +25,7 @@ Build the URL fetching tool — HTTP GET + HTML-to-text extraction. No search pr
 - [-] Task: Add telemetry for fetch events *(fetch doesn't call the local model — no tokens to track)*.
 - [x] Task: Write Agent Skill (SKILL.md) for `cercano_fetch`.
 - [x] Task: Red/Green TDD for fetcher and extractor.
-- [ ] Task: Conductor - User Manual Verification 'URL Fetching' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'URL Fetching' (Protocol in workflow.md)
 
 ## Phase 3: Setup & Python Search Integration [checkpoint: 585c826]
 

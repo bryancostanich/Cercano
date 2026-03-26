@@ -107,5 +107,5 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 ---
 
-- [ ] **Track: Update Check & Upgrade Prompt**
+- [x] **Track: Update Check & Upgrade Prompt**
 *Link: [./tracks/update_check_20260325/](./tracks/update_check_20260325/)*

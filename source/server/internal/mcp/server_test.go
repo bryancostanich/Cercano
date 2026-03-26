@@ -1725,3 +1725,225 @@ func TestDegradedServer_RegistersToolsAndReturnsError(t *testing.T) {
 		t.Errorf("expected error to mention Ollama, got: %s", text)
 	}
 }
+
+func TestHandleDocument_MissingFilePath(t *testing.T) {
+	mock := &mockAgentClient{}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name:      "cercano_document",
+		Arguments: map[string]any{},
+	})
+	// Missing file_path should result in an error
+	if err == nil && result != nil && !result.IsError {
+		text := ""
+		if len(result.Content) > 0 {
+			text = result.Content[0].(*gomcp.TextContent).Text
+		}
+		t.Errorf("expected error for missing file_path, got result: %s", text)
+	}
+}
+
+func TestHandleDocument_FileNotFound(t *testing.T) {
+	mock := &mockAgentClient{}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_document",
+		Arguments: map[string]any{
+			"file_path": "/nonexistent/file.go",
+		},
+	})
+	if err == nil && result != nil && !result.IsError {
+		t.Error("expected error for nonexistent file")
+	}
+}
+
+func TestHandleDocument_DryRun(t *testing.T) {
+	mock := &mockAgentClient{}
+	s := NewServer(mock)
+
+	// Create a temp Go file with undocumented symbols
+	dir := t.TempDir()
+	goFile := filepath.Join(dir, "test.go")
+	src := `package example
+
+func Hello() string {
+	return "hello"
+}
+
+// World is documented.
+func World() string {
+	return "world"
+}
+`
+	os.WriteFile(goFile, []byte(src), 0644)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_document",
+		Arguments: map[string]any{
+			"file_path": goFile,
+			"dry_run":   true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if !strings.Contains(text, "Dry run") {
+		t.Errorf("expected dry run output, got: %s", text)
+	}
+	if !strings.Contains(text, "Hello") {
+		t.Errorf("expected Hello in dry run output, got: %s", text)
+	}
+	if !strings.Contains(text, "already documented") {
+		t.Errorf("expected 'already documented' for World, got: %s", text)
+	}
+
+	// Verify file was NOT modified
+	data, _ := os.ReadFile(goFile)
+	if string(data) != src {
+		t.Error("dry run should not modify the file")
+	}
+}
+
+func TestHandleDocument_EndToEnd(t *testing.T) {
+	mock := &mockAgentClient{
+		processResp: &proto.ProcessRequestResponse{
+			Output:      "Hello returns a greeting string.",
+			InputTokens: 100,
+			OutputTokens: 20,
+			RoutingMetadata: &proto.RoutingMetadata{
+				ModelName: "qwen3-coder",
+			},
+		},
+	}
+	s := NewServer(mock)
+	dbPath := filepath.Join(t.TempDir(), "test_telemetry.db")
+	store, err := telemetry.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+	s.SetCollector(telemetry.NewCollector(store, 100))
+
+	// Create a temp Go file
+	dir := t.TempDir()
+	goFile := filepath.Join(dir, "test.go")
+	src := `package example
+
+func Hello() string {
+	return "hello"
+}
+
+// World is documented.
+func World() string {
+	return "world"
+}
+`
+	os.WriteFile(goFile, []byte(src), 0644)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_document",
+		Arguments: map[string]any{
+			"file_path": goFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if !strings.Contains(text, "Documented") {
+		t.Errorf("expected 'Documented' in output, got: %s", text)
+	}
+	if !strings.Contains(text, "Hello") {
+		t.Errorf("expected Hello in output, got: %s", text)
+	}
+	if !strings.Contains(text, "already documented") {
+		t.Errorf("expected 'already documented' for World, got: %s", text)
+	}
+
+	// Verify the file was modified
+	data, _ := os.ReadFile(goFile)
+	if !strings.Contains(string(data), "// Hello returns a greeting string.") {
+		t.Errorf("expected doc comment in file, got:\n%s", string(data))
+	}
+
+	// Verify backup was created
+	backupDir := filepath.Join(dir, ".cercano", "backups")
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		t.Fatalf("backup dir should exist: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Error("expected backup file to be created")
+	}
+}
+
+func TestHandleDocument_AllDocumented(t *testing.T) {
+	mock := &mockAgentClient{}
+	s := NewServer(mock)
+
+	dir := t.TempDir()
+	goFile := filepath.Join(dir, "test.go")
+	src := `package example
+
+// Hello is documented.
+func Hello() string {
+	return "hello"
+}
+`
+	os.WriteFile(goFile, []byte(src), 0644)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_document",
+		Arguments: map[string]any{
+			"file_path": goFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if !strings.Contains(text, "already documented") {
+		t.Errorf("expected 'already documented' message, got: %s", text)
+	}
+}

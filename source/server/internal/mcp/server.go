@@ -10,6 +10,7 @@ import (
 
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/config"
+	"cercano/source/server/internal/document"
 	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/internal/web"
 	"cercano/source/server/pkg/proto"
@@ -289,6 +290,15 @@ type SubmitUsageRequest struct {
 	CloudModel        string `json:"cloud_model,omitempty" jsonschema:"Cloud model name (e.g. claude-opus-4-6, gemini-3-flash)"`
 }
 
+// DocumentRequest is the input schema for the cercano_document tool.
+type DocumentRequest struct {
+	FilePath   string `json:"file_path" jsonschema:"Path to the Go source file to document."`
+	Style      string `json:"style,omitempty" jsonschema:"Doc comment style: minimal (1-2 sentences, default) or detailed (multi-line with params)."`
+	DryRun     bool   `json:"dry_run,omitempty" jsonschema:"If true, report what would be documented but do not write changes."`
+	ProjectDir string `json:"project_dir,omitempty" jsonschema:"Project root directory. Enables project-aware responses when .cercano/context.md exists."`
+	cloudTokenFields
+}
+
 // registerTools registers all Cercano MCP tools with the server.
 func (s *Server) registerTools() {
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
@@ -355,6 +365,11 @@ func (s *Server) registerTools() {
 		Name:        "cercano_init",
 		Description: "Initialize Cercano for a project. Scans the repo to build a project context file (.cercano/context.md) that makes all Cercano tools project-aware. Optionally accepts domain knowledge the host AI already has. Do NOT research the project to populate the context parameter — only provide knowledge you already have. Cercano will scan the repo itself.",
 	}, s.handleInit)
+
+	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
+		Name:        "cercano_document",
+		Description: "Generate doc comments for exported Go symbols using local AI and write them directly to the file. The host never sees the file contents — Cercano handles the entire read-think-write cycle locally. Returns only a summary of what was documented. Supports dry_run mode to preview without writing.",
+	}, s.handleDocument)
 }
 
 // handleLocal processes a cercano_local tool call.
@@ -973,4 +988,145 @@ func (s *Server) handleInit(ctx context.Context, request *gomcp.CallToolRequest,
 			&gomcp.TextContent{Text: output},
 		},
 	}, nil, nil
+}
+
+// handleDocument processes a cercano_document tool call.
+func (s *Server) handleDocument(ctx context.Context, request *gomcp.CallToolRequest, args DocumentRequest) (*gomcp.CallToolResult, any, error) {
+	if result, ok := s.checkDegraded(); ok {
+		return result, nil, nil
+	}
+	startTime := time.Now().UnixNano()
+
+	if args.FilePath == "" {
+		return nil, nil, fmt.Errorf("cercano_document: file_path is required")
+	}
+
+	// Determine style
+	style := document.StyleMinimal
+	if args.Style == "detailed" {
+		style = document.StyleDetailed
+	}
+
+	// Parse the Go file
+	symbols, err := document.ParseGoFile(args.FilePath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("cercano_document: %w", err)
+	}
+
+	undocumented := document.UndocumentedSymbols(symbols)
+	if len(undocumented) == 0 {
+		// Count documented symbols for the summary
+		documented := 0
+		for _, sym := range symbols {
+			if sym.HasDoc {
+				documented++
+			}
+		}
+		result := &gomcp.CallToolResult{
+			Content: []gomcp.Content{
+				&gomcp.TextContent{Text: fmt.Sprintf("All %d exported symbols in %s are already documented.", documented, filepath.Base(args.FilePath))},
+			},
+		}
+		return result, nil, nil
+	}
+
+	// Dry run: report what would be documented
+	if args.DryRun {
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "Dry run — would document %d of %d exported symbols in %s:\n", len(undocumented), len(symbols), filepath.Base(args.FilePath))
+		for _, sym := range undocumented {
+			label := string(sym.Kind)
+			if sym.Receiver != "" {
+				label = fmt.Sprintf("method on %s", sym.Receiver)
+			}
+			fmt.Fprintf(&sb, "  + %s (%s)\n", sym.Name, label)
+		}
+		// List already-documented symbols
+		for _, sym := range symbols {
+			if sym.HasDoc {
+				fmt.Fprintf(&sb, "  . %s (already documented)\n", sym.Name)
+			}
+		}
+		result := &gomcp.CallToolResult{
+			Content: []gomcp.Content{
+				&gomcp.TextContent{Text: sb.String()},
+			},
+		}
+		return result, nil, nil
+	}
+
+	// Backup the file before making changes
+	backupPath, err := document.BackupFile(args.FilePath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("cercano_document: backup failed: %w", err)
+	}
+
+	// Generate doc comments for each undocumented symbol
+	var edits []document.DocEdit
+	var documented []string
+	var skipped []string
+
+	for _, sym := range undocumented {
+		prompt := document.BuildPrompt(sym, style)
+		prompt = s.withContext(args.ProjectDir, prompt)
+
+		resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
+			Input:       prompt,
+			DirectLocal: true,
+		})
+		if err != nil {
+			skipped = append(skipped, fmt.Sprintf("%s (inference error)", sym.Name))
+			continue
+		}
+		s.emitEvent("cercano_document", resp, startTime, true, &args.cloudTokenFields)
+
+		comment := document.FormatAsGoDoc(resp.Output)
+		if comment == "" {
+			skipped = append(skipped, fmt.Sprintf("%s (empty response)", sym.Name))
+			continue
+		}
+
+		edits = append(edits, document.DocEdit{
+			Line:    sym.StartLine,
+			Comment: comment,
+		})
+
+		label := string(sym.Kind)
+		if sym.Receiver != "" {
+			label = fmt.Sprintf("method on %s", sym.Receiver)
+		}
+		documented = append(documented, fmt.Sprintf("%s (%s)", sym.Name, label))
+	}
+
+	// Apply edits
+	if len(edits) > 0 {
+		if err := document.InsertDocComments(args.FilePath, edits); err != nil {
+			// Restore from backup on failure
+			document.RestoreFile(args.FilePath, backupPath)
+			return nil, nil, fmt.Errorf("cercano_document: insert failed, file restored: %w", err)
+		}
+	}
+
+	// Build summary
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Documented %d of %d exported symbols in %s:\n", len(documented), len(symbols), filepath.Base(args.FilePath))
+	for _, d := range documented {
+		fmt.Fprintf(&sb, "  + %s\n", d)
+	}
+	for _, sym := range symbols {
+		if sym.HasDoc {
+			fmt.Fprintf(&sb, "  . %s (already documented)\n", sym.Name)
+		}
+	}
+	for _, s := range skipped {
+		fmt.Fprintf(&sb, "  ! %s\n", s)
+	}
+	fmt.Fprintf(&sb, "\nBackup saved to %s", backupPath)
+
+	result := &gomcp.CallToolResult{
+		Content: []gomcp.Content{
+			&gomcp.TextContent{Text: sb.String()},
+		},
+	}
+	return s.maybeNudge(args.ProjectDir, result), nil, nil
 }

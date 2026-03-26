@@ -125,15 +125,15 @@ func TestOllamaEngine_CompleteStream(t *testing.T) {
 		if r.URL.Path != "/api/generate" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
-		
+
 		responses := []generateResponse{
 			{Response: "Hello", Done: false},
 			{Response: " ", Done: false},
-			{Response: "World", Done: true},
+			{Response: "World", Done: true, PromptEvalCount: 50, EvalCount: 20},
 		}
-		
+
 		encoder := json.NewEncoder(w)
 		for _, resp := range responses {
 			encoder.Encode(resp)
@@ -142,21 +142,28 @@ func TestOllamaEngine_CompleteStream(t *testing.T) {
 	defer srv.Close()
 
 	eng := NewOllamaEngine(srv.URL)
-	
+
 	var streamed []string
 	result, err := eng.CompleteStream(context.Background(), "test-model", "prompt", "", func(token string) {
 		streamed = append(streamed, token)
 	})
-	
+
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
-	if result != "Hello World" {
-		t.Fatalf("expected result 'Hello World', got %q", result)
+
+	if result.Output != "Hello World" {
+		t.Fatalf("expected result 'Hello World', got %q", result.Output)
 	}
-	
+
 	if len(streamed) != 3 {
 		t.Fatalf("expected 3 streamed tokens, got %d", len(streamed))
+	}
+
+	if result.InputTokens != 50 {
+		t.Errorf("expected 50 input tokens, got %d", result.InputTokens)
+	}
+	if result.OutputTokens != 20 {
+		t.Errorf("expected 20 output tokens, got %d", result.OutputTokens)
 	}
 }

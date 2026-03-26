@@ -1,22 +1,22 @@
 class Cercano < Formula
   desc "AI-powered development tool with local/cloud model routing"
   homepage "https://github.com/bryancostanich/Cercano"
-  version "0.7.0"
+  version "0.7.1"
   license "MIT"
 
   on_macos do
     if Hardware::CPU.arm?
       url "https://github.com/bryancostanich/Cercano/releases/download/v#{version}/cercano-darwin-arm64"
-      sha256 "b3a6a34960e14b153bfc38cab5eb307f357ea69292096358a6980ee57ed5a92b"
+      sha256 "475982aee8c65cbcbabe7a579836156f3b5acb59f18e38d668019488a7ee35f1"
     else
       url "https://github.com/bryancostanich/Cercano/releases/download/v#{version}/cercano-darwin-amd64"
-      sha256 "81440424b0c4a6c7982b20ba070b6d16a8213ae475f8b4698c1f67d4b8115ecd"
+      sha256 "19140c4e8c8e763ff190b31a7f8a2f827355cc4aff63b5d6ca93209adcdcd9e2"
     end
   end
 
   on_linux do
     url "https://github.com/bryancostanich/Cercano/releases/download/v#{version}/cercano-linux-amd64"
-    sha256 "823f84a8482109b8f60c5541c382cf4983e78e3104a1f5e21357103897a2409d"
+    sha256 "e38335e1465b856d0010d270204b9259de7af22ab89825c16893f40dc9fc3477"
   end
 
   def install

@@ -27,6 +27,7 @@ import (
 	"cercano/source/server/internal/server"
 	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/internal/tools"
+	"cercano/source/server/internal/update"
 	"cercano/source/server/pkg/proto"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -143,6 +144,15 @@ func main() {
 			return
 		case "version":
 			fmt.Printf("cercano v%s\n", version)
+			if info := update.CheckForUpdate(version); info != nil {
+				if info.UpdateAvailable {
+					fmt.Printf("\nA newer version is available: v%s\n", info.LatestVersion)
+					fmt.Printf("  Upgrade: %s\n", info.UpgradeCommand())
+					fmt.Printf("  Release: %s\n", info.ReleaseURL)
+				} else {
+					fmt.Println("(up to date)")
+				}
+			}
 			return
 		case "stats":
 			runStats()
@@ -158,6 +168,15 @@ func main() {
 
 	if *showVersion {
 		fmt.Printf("cercano v%s\n", version)
+		if info := update.CheckForUpdate(version); info != nil {
+			if info.UpdateAvailable {
+				fmt.Printf("\nA newer version is available: v%s\n", info.LatestVersion)
+				fmt.Printf("  Upgrade: %s\n", info.UpgradeCommand())
+				fmt.Printf("  Release: %s\n", info.ReleaseURL)
+			} else {
+				fmt.Println("(up to date)")
+			}
+		}
 		return
 	}
 
@@ -183,7 +202,15 @@ func main() {
 // runSetup checks prerequisites and pulls required Ollama models.
 func runSetup(installEngine bool) {
 	fmt.Printf("Cercano Setup (v%s)\n", version)
-	fmt.Println("Checking prerequisites...")
+
+	// Check for updates (cached, non-blocking)
+	configDir := filepath.Dir(config.DefaultPath())
+	if info := update.CheckCached(version, configDir); info != nil && info.UpdateAvailable {
+		fmt.Printf("\n  Note: A newer version is available (v%s).\n", info.LatestVersion)
+		fmt.Printf("  Run `%s` after setup to get the latest features.\n", info.UpgradeCommand())
+	}
+
+	fmt.Println("\nChecking prerequisites...")
 
 	cfg, err := config.Load(config.DefaultPath())
 	if err != nil {
@@ -577,6 +604,13 @@ func runMCPMode(cfg config.Config, externalGRPC string) {
 			totalLocal := stats.TotalInputTokens + stats.TotalOutputTokens
 			fmt.Fprintf(os.Stderr, "Telemetry: %d requests, %d local tokens processed\n", stats.TotalRequests, totalLocal)
 		}
+	}
+
+	// Check for updates (cached, non-blocking)
+	configDir := filepath.Dir(config.DefaultPath())
+	if info := update.CheckCached(version, configDir); info != nil && info.UpdateAvailable {
+		fmt.Fprintf(os.Stderr, "[UPDATE] A newer version is available: v%s. Run: %s\n", info.LatestVersion, info.UpgradeCommand())
+		s.SetUpdateInfo(info.LatestVersion, info.UpgradeCommand())
 	}
 
 	if err := s.MCPServer().Run(context.Background(), &gomcp.StdioTransport{}); err != nil {

@@ -104,3 +104,8 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 - [ ] **Track: cercano_document — Local Code Documentation Tool**
 *Link: [./tracks/document_tool_20260325/](./tracks/document_tool_20260325/)*
+
+---
+
+- [ ] **Track: Update Check & Upgrade Prompt**
+*Link: [./tracks/update_check_20260325/](./tracks/update_check_20260325/)*

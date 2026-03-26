@@ -36,11 +36,14 @@ func formatGRPCError(err error, operation string) error {
 
 // Server wraps the MCP server and its gRPC client connection to the Cercano agent.
 type Server struct {
-	mcpServer  *gomcp.Server
-	grpcClient proto.AgentClient
-	startupErr string // non-empty when the server started in degraded mode
-	collector  *telemetry.Collector // optional; nil disables telemetry
-	ctxLoader  *projectctx.Loader  // project context loader
+	mcpServer       *gomcp.Server
+	grpcClient      proto.AgentClient
+	startupErr      string // non-empty when the server started in degraded mode
+	collector       *telemetry.Collector // optional; nil disables telemetry
+	ctxLoader       *projectctx.Loader  // project context loader
+	updateVersion   string // latest available version, empty if up to date
+	updateCommand   string // upgrade command to show the user
+	updateNudgeSent bool   // true after the first tool response nudge
 }
 
 // NewServer creates a new MCP server backed by the given gRPC client.
@@ -100,6 +103,27 @@ func (s *Server) SetCollector(c *telemetry.Collector) {
 	s.collector = c
 }
 
+// SetUpdateInfo stores update information for the session nudge.
+func (s *Server) SetUpdateInfo(latestVersion, upgradeCommand string) {
+	s.updateVersion = latestVersion
+	s.updateCommand = upgradeCommand
+}
+
+// maybeUpdateNudge appends an update notification to the first tool response in a session.
+func (s *Server) maybeUpdateNudge(result *gomcp.CallToolResult) *gomcp.CallToolResult {
+	if s.updateNudgeSent || s.updateVersion == "" {
+		return result
+	}
+	s.updateNudgeSent = true
+	nudge := fmt.Sprintf("\n\n---\n*Note: Cercano v%s is available. Run `%s` to update.*", s.updateVersion, s.updateCommand)
+	if len(result.Content) > 0 {
+		if tc, ok := result.Content[0].(*gomcp.TextContent); ok {
+			tc.Text += nudge
+		}
+	}
+	return result
+}
+
 // emitEvent is a helper that emits a telemetry event if a collector is configured.
 // tokenSaving indicates whether this call substitutes for a cloud call (counts toward savings).
 // cloudTokens optionally records host-reported cloud token usage alongside this event.
@@ -151,17 +175,17 @@ func (s *Server) withContext(projectDir, prompt string) string {
 // nudgeMessage is appended to tool responses when the project hasn't been initialized.
 const nudgeMessage = "\n\n---\n*Note: Cercano hasn't been initialized for this project. Running `cercano_init` with the project directory will enable project-aware responses. Recommended if you'll use Cercano more than once in this session.*"
 
-// maybeNudge appends an init recommendation to the result if the project isn't initialized.
+// maybeNudge appends an init recommendation to the result if the project isn't initialized,
+// and an update nudge on the first tool response if an update is available.
 func (s *Server) maybeNudge(projectDir string, result *gomcp.CallToolResult) *gomcp.CallToolResult {
-	if projectDir == "" || !s.ctxLoader.NudgeNeeded(projectDir) {
-		return result
-	}
-	if len(result.Content) > 0 {
-		if tc, ok := result.Content[0].(*gomcp.TextContent); ok {
-			tc.Text += nudgeMessage
+	if projectDir != "" && s.ctxLoader.NudgeNeeded(projectDir) {
+		if len(result.Content) > 0 {
+			if tc, ok := result.Content[0].(*gomcp.TextContent); ok {
+				tc.Text += nudgeMessage
+			}
 		}
 	}
-	return result
+	return s.maybeUpdateNudge(result)
 }
 
 // venvMissingMessage is returned when cercano_research is called without the Python venv.

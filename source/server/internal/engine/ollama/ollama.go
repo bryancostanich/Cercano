@@ -56,6 +56,7 @@ func (e *OllamaEngine) GetActiveURL() string {
 	return e.activeURL
 }
 
+// SwitchToFallback updates the active Ollama URL to the fallback endpoint and marks the engine as using the fallback.
 func (e *OllamaEngine) SwitchToFallback() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -63,6 +64,7 @@ func (e *OllamaEngine) SwitchToFallback() {
 	e.usingFallback = true
 }
 
+// SwitchToPrimary switches the Ollama engine to use the primary endpoint and disables fallback mode.
 func (e *OllamaEngine) SwitchToPrimary() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -70,12 +72,14 @@ func (e *OllamaEngine) SwitchToPrimary() {
 	e.usingFallback = false
 }
 
+// IsUsingFallback returns whether the Ollama engine is currently using a fallback local endpoint.
 func (e *OllamaEngine) IsUsingFallback() bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.usingFallback
 }
 
+// StartHealthMonitor starts a background goroutine to monitor the health of the primary Ollama endpoint and switches to the fallback endpoint if failures exceed the threshold.
 func (e *OllamaEngine) StartHealthMonitor(ctx context.Context, interval time.Duration, failureThreshold int) {
 	e.mu.RLock()
 	primary := e.BaseURL
@@ -136,6 +140,7 @@ type tagsResponse struct {
 	Models []engine.ModelInfo `json:"models"`
 }
 
+// ListModels retrieves the list of available models from the Ollama instance.
 func (e *OllamaEngine) ListModels(ctx context.Context) ([]engine.ModelInfo, error) {
 	url := fmt.Sprintf("%s/api/tags", e.GetActiveURL())
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -169,11 +174,14 @@ type generateRequest struct {
 }
 
 type generateResponse struct {
-	Response string `json:"response"`
-	Done     bool   `json:"done"`
+	Response       string `json:"response"`
+	Done           bool   `json:"done"`
+	PromptEvalCount int   `json:"prompt_eval_count"`
+	EvalCount       int   `json:"eval_count"`
 }
 
-func (e *OllamaEngine) Complete(ctx context.Context, model, prompt, systemPrompt string) (string, error) {
+// Complete generates a response using the Ollama inference engine with the given model, prompt, and system prompt.
+func (e *OllamaEngine) Complete(ctx context.Context, model, prompt, systemPrompt string) (engine.CompletionResult, error) {
 	url := fmt.Sprintf("%s/api/generate", e.GetActiveURL())
 	payload := generateRequest{
 		Model:   model,
@@ -185,26 +193,31 @@ func (e *OllamaEngine) Complete(ctx context.Context, model, prompt, systemPrompt
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
 	if err != nil {
-		return "", err
+		return engine.CompletionResult{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := e.Client.Do(req)
 	if err != nil {
-		return "", err
+		return engine.CompletionResult{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := ioutil.ReadAll(resp.Body)
-		return "", fmt.Errorf("ollama error: %s", string(b))
+		return engine.CompletionResult{}, fmt.Errorf("ollama error: %s", string(b))
 	}
 	var genResp generateResponse
 	if err := json.NewDecoder(resp.Body).Decode(&genResp); err != nil {
-		return "", err
+		return engine.CompletionResult{}, err
 	}
-	return genResp.Response, nil
+	return engine.CompletionResult{
+		Output:       genResp.Response,
+		InputTokens:  genResp.PromptEvalCount,
+		OutputTokens: genResp.EvalCount,
+	}, nil
 }
 
-func (e *OllamaEngine) CompleteStream(ctx context.Context, model, prompt, systemPrompt string, onToken func(string)) (string, error) {
+// CompleteStream sends a streaming generate request to the Ollama API and returns the accumulated response, invoking onToken for each received chunk.
+func (e *OllamaEngine) CompleteStream(ctx context.Context, model, prompt, systemPrompt string, onToken func(string)) (engine.CompletionResult, error) {
 	url := fmt.Sprintf("%s/api/generate", e.GetActiveURL())
 	payload := generateRequest{
 		Model:   model,
@@ -216,24 +229,25 @@ func (e *OllamaEngine) CompleteStream(ctx context.Context, model, prompt, system
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
 	if err != nil {
-		return "", err
+		return engine.CompletionResult{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := e.Client.Do(req)
 	if err != nil {
-		return "", err
+		return engine.CompletionResult{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := ioutil.ReadAll(resp.Body)
-		return "", fmt.Errorf("ollama error: %s", string(b))
+		return engine.CompletionResult{}, fmt.Errorf("ollama error: %s", string(b))
 	}
 	var accumulated strings.Builder
+	var lastChunk generateResponse
 	decoder := json.NewDecoder(resp.Body)
 	for decoder.More() {
 		var chunk generateResponse
 		if err := decoder.Decode(&chunk); err != nil {
-			return "", err
+			return engine.CompletionResult{}, err
 		}
 		if chunk.Response != "" {
 			accumulated.WriteString(chunk.Response)
@@ -242,10 +256,15 @@ func (e *OllamaEngine) CompleteStream(ctx context.Context, model, prompt, system
 			}
 		}
 		if chunk.Done {
+			lastChunk = chunk
 			break
 		}
 	}
-	return accumulated.String(), nil
+	return engine.CompletionResult{
+		Output:       accumulated.String(),
+		InputTokens:  lastChunk.PromptEvalCount,
+		OutputTokens: lastChunk.EvalCount,
+	}, nil
 }
 
 type ollamaEmbeddingRequest struct {
@@ -257,6 +276,7 @@ type ollamaEmbeddingResponse struct {
 	Embedding []float64 `json:"embedding"`
 }
 
+// Embed returns the embedding vector for the given text using the specified Ollama model.
 func (e *OllamaEngine) Embed(ctx context.Context, model, text string) ([]float64, error) {
 	url := fmt.Sprintf("%s/api/embeddings", e.GetActiveURL())
 	payload := ollamaEmbeddingRequest{

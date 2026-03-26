@@ -17,11 +17,11 @@ type mockEngine struct {
 	streamChunks   []string
 }
 
-func (m *mockEngine) Complete(ctx context.Context, model, prompt, systemPrompt string) (string, error) {
-	return m.completeResult, m.completeError
+func (m *mockEngine) Complete(ctx context.Context, model, prompt, systemPrompt string) (engine.CompletionResult, error) {
+	return engine.CompletionResult{Output: m.completeResult, InputTokens: 10, OutputTokens: 5}, m.completeError
 }
 
-func (m *mockEngine) CompleteStream(ctx context.Context, model, prompt, systemPrompt string, onToken func(string)) (string, error) {
+func (m *mockEngine) CompleteStream(ctx context.Context, model, prompt, systemPrompt string, onToken func(string)) (engine.CompletionResult, error) {
 	var accumulated strings.Builder
 	for _, chunk := range m.streamChunks {
 		if onToken != nil {
@@ -29,7 +29,7 @@ func (m *mockEngine) CompleteStream(ctx context.Context, model, prompt, systemPr
 		}
 		accumulated.WriteString(chunk)
 	}
-	return accumulated.String(), m.completeError
+	return engine.CompletionResult{Output: accumulated.String(), InputTokens: 10, OutputTokens: 5}, m.completeError
 }
 
 func (m *mockEngine) ListModels(ctx context.Context) ([]engine.ModelInfo, error) {

@@ -99,3 +99,8 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 - [x] **Track: Project Context Initialization** [checkpoint: 866f53d]
 *Link: [./archive/project_context_20260324/](./archive/project_context_20260324/)*
+
+---
+
+- [ ] **Track: cercano_document — Local Code Documentation Tool**
+*Link: [./tracks/document_tool_20260325/](./tracks/document_tool_20260325/)*

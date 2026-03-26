@@ -36,7 +36,9 @@ Surface update prompts in `cercano version` and `cercano setup`.
 - [x] Task: Add update check to `cercano setup`.
     - [x] Check at start of setup (using cache, non-blocking).
     - [x] If newer available: print note before "Checking prerequisites..."
-- [ ] Task: Conductor - User Manual Verification 'CLI Integration' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'CLI Integration' (Protocol in workflow.md)
+    - Built with v0.5.0, ran `cercano version` — showed v0.7.0 available with brew upgrade command and release URL
+    - Rebuilt with v0.7.0, ran `cercano version` — showed "(up to date)"
 
 ## Phase 3: MCP Integration
 
@@ -52,4 +54,7 @@ Surface update information in MCP mode — stderr on startup and optional nudge 
     - [x] `SetUpdateInfo` method for main.go to set update data.
     - [x] `maybeUpdateNudge` appended to first tool response only.
     - [x] Chained into existing `maybeNudge` so all tool handlers benefit.
-- [ ] Task: Conductor - User Manual Verification 'MCP Integration' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'MCP Integration' (Protocol in workflow.md)
+    - Built with v0.5.0, reconnected MCP — [UPDATE] message appeared on stderr
+    - First tool response included one-time nudge: "Cercano v0.7.0 is available..."
+    - Second tool response had no nudge — once-per-session confirmed

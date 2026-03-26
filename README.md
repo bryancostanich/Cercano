@@ -470,3 +470,6 @@ make test   # Run all tests
 ***
 
 This is not an officially supported Google product
+
+Canonical Repo :: [https://github.com/bryancostanich/Cercano](https://github.com/bryancostanich/Cercano)
+Google Mirror :: [https://github.com/GoogleDevRelExplorations/cercano](https://github.com/GoogleDevRelExplorations/cercano)

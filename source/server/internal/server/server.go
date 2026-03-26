@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/config"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/loop"
@@ -24,6 +25,8 @@ type Server struct {
 	cloudFactory        agent.CloudFactory
 	registry            *engine.EngineRegistry
 	healthMonitorCancel context.CancelFunc // cancel function for the active health monitor
+	configPath          string             // path to config.yaml for persistence
+	currentConfig       config.Config      // current config state for persistence
 }
 
 // NewServer creates a new Agent gRPC server.
@@ -36,6 +39,12 @@ func NewServer(a *agent.Agent, localProvider *llm.LocalModelProvider, router *ag
 		cloudFactory:  cloudFactory,
 		registry:      registry,
 	}
+}
+
+// SetConfigPersistence enables config persistence by storing the config path and current state.
+func (s *Server) SetConfigPersistence(path string, cfg config.Config) {
+	s.configPath = path
+	s.currentConfig = cfg
 }
 
 // UpdateConfig implements proto.AgentServer — updates runtime config without restart.
@@ -104,9 +113,31 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		}, nil
 	}
 
+	// Persist changes to disk
+	if s.configPath != "" {
+		if req.OllamaUrl != "" {
+			s.currentConfig.OllamaURL = req.OllamaUrl
+		}
+		if req.LocalModel != "" {
+			s.currentConfig.LocalModel = req.LocalModel
+		}
+		if req.CloudProvider != "" {
+			s.currentConfig.CloudProvider = req.CloudProvider
+		}
+		if req.CloudModel != "" {
+			s.currentConfig.CloudModel = req.CloudModel
+		}
+		if req.CloudApiKey != "" {
+			s.currentConfig.CloudAPIKey = req.CloudApiKey
+		}
+		if err := config.Save(s.currentConfig, s.configPath); err != nil {
+			fmt.Printf("UpdateConfig: warning — failed to persist config: %v\n", err)
+		}
+	}
+
 	return &proto.UpdateConfigResponse{
 		Success: true,
-		Message: fmt.Sprintf("updated: %v", changes),
+		Message: fmt.Sprintf("updated: [%s]", strings.Join(changes, ", ")),
 	}, nil
 }
 

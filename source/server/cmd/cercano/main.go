@@ -114,7 +114,9 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	}
 
 	s := grpc.NewServer()
-	proto.RegisterAgentServer(s, server.NewServer(orchestrator, localProvider, smartRouter, coordinator, cloudFactory, registry))
+	srv := server.NewServer(orchestrator, localProvider, smartRouter, coordinator, cloudFactory, registry)
+	srv.SetConfigPersistence(config.DefaultPath(), cfg)
+	proto.RegisterAgentServer(s, srv)
 
 	go func() {
 		if err := s.Serve(lis); err != nil {

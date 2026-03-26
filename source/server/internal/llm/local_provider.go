@@ -40,12 +40,16 @@ func (p *LocalModelProvider) Process(ctx context.Context, req *agent.Request) (*
 	eng := p.Engine
 	p.mu.RUnlock()
 
-	response, err := eng.Complete(ctx, modelName, req.Input, "")
+	result, err := eng.Complete(ctx, modelName, req.Input, "")
 	if err != nil {
 		return nil, err
 	}
 
-	return &agent.Response{Output: response}, nil
+	return &agent.Response{
+		Output:       result.Output,
+		InputTokens:  result.InputTokens,
+		OutputTokens: result.OutputTokens,
+	}, nil
 }
 
 func (p *LocalModelProvider) ProcessStream(ctx context.Context, req *agent.Request, onToken agent.TokenFunc) (*agent.Response, error) {
@@ -54,7 +58,7 @@ func (p *LocalModelProvider) ProcessStream(ctx context.Context, req *agent.Reque
 	eng := p.Engine
 	p.mu.RUnlock()
 
-	response, err := eng.CompleteStream(ctx, modelName, req.Input, "", func(t string) {
+	result, err := eng.CompleteStream(ctx, modelName, req.Input, "", func(t string) {
 		if onToken != nil {
 			onToken(t)
 		}
@@ -63,5 +67,9 @@ func (p *LocalModelProvider) ProcessStream(ctx context.Context, req *agent.Reque
 		return nil, err
 	}
 
-	return &agent.Response{Output: response}, nil
+	return &agent.Response{
+		Output:       result.Output,
+		InputTokens:  result.InputTokens,
+		OutputTokens: result.OutputTokens,
+	}, nil
 }

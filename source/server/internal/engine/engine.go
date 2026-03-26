@@ -12,10 +12,17 @@ type ModelInfo struct {
 	ModifiedAt string `json:"modified_at"`
 }
 
+// CompletionResult holds the output of a text generation call along with token usage.
+type CompletionResult struct {
+	Output       string
+	InputTokens  int
+	OutputTokens int
+}
+
 // InferenceEngine defines the interface for local text generation backends.
 type InferenceEngine interface {
-	Complete(ctx context.Context, model, prompt, systemPrompt string) (string, error)
-	CompleteStream(ctx context.Context, model, prompt, systemPrompt string, onToken func(string)) (string, error)
+	Complete(ctx context.Context, model, prompt, systemPrompt string) (CompletionResult, error)
+	CompleteStream(ctx context.Context, model, prompt, systemPrompt string, onToken func(string)) (CompletionResult, error)
 	ListModels(ctx context.Context) ([]ModelInfo, error)
 	Name() string
 }

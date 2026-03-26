@@ -83,4 +83,4 @@ Register the skill and update project documentation.
 
 ### Tasks
 - [x] Task: Update README with `cercano_document` tool description.
-- [ ] Task: Conductor - User Manual Verification 'Skill Definition & Documentation' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Skill Definition & Documentation' (Protocol in workflow.md)

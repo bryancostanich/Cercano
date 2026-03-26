@@ -75,7 +75,7 @@ Automatically capture real cloud token usage from Claude Code's transcript file 
 - [x] Task: Update `cercano_stats` to show actual vs estimated cloud tokens when hook data is available. *(already implemented — shows "host-reported" vs "estimated" based on data presence)*
 - [-] Task: Red/Green TDD for the hook script. *(Python script — tested manually with real transcript)*
 - [x] Task: Update README.md with hook setup instructions.
-- [ ] Task: Conductor - User Manual Verification 'Host Cloud Token Capture via Hook' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Host Cloud Token Capture via Hook' (Protocol in workflow.md)
 
 ## Phase 6: Per-Session Usage Tracking
 
@@ -98,4 +98,4 @@ Track telemetry per MCP session (each Claude Code window spawns its own `cercano
 - [x] Task: Add `BySession` stats query — aggregate events grouped by session_id, join with sessions for timestamps. `6ff39dc`
 - [x] Task: Update `cercano_stats` output to include per-session breakdown. `6ff39dc`
 - [x] Task: Red/Green TDD. `6ff39dc`
-- [ ] Task: Conductor - User Manual Verification 'Per-Session Usage Tracking' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Per-Session Usage Tracking' (Protocol in workflow.md)

@@ -92,8 +92,8 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 ---
 
-- [ ] **Track: Usage Telemetry & Token Savings Metrics** *(Phase 5: host cloud token capture via hook)*
-*Link: [./tracks/usage_telemetry_20260323/](./tracks/usage_telemetry_20260323/)*
+- [x] **Track: Usage Telemetry & Token Savings Metrics**
+*Link: [./archive/usage_telemetry_20260323/](./archive/usage_telemetry_20260323/)*
 
 ---
 
@@ -102,10 +102,10 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 ---
 
-- [ ] **Track: cercano_document — Local Code Documentation Tool**
-*Link: [./tracks/document_tool_20260325/](./tracks/document_tool_20260325/)*
+- [x] **Track: cercano_document — Local Code Documentation Tool**
+*Link: [./archive/document_tool_20260325/](./archive/document_tool_20260325/)*
 
 ---
 
 - [x] **Track: Update Check & Upgrade Prompt**
-*Link: [./tracks/update_check_20260325/](./tracks/update_check_20260325/)*
+*Link: [./archive/update_check_20260325/](./archive/update_check_20260325/)*

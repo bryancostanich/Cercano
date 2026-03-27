@@ -432,13 +432,13 @@ func TestCheckpoint_HasPhase(t *testing.T) {
 	dir := t.TempDir()
 	cp := NewCheckpoint(dir, "topic", "intent", "thorough")
 
-	if cp.HasPhase("plan.md") {
+	if cp.HasPhase("plan.json") {
 		t.Error("expected HasPhase false before save")
 	}
 
 	cp.SavePlan(&ResearchPlan{Topic: "test"})
 
-	if !cp.HasPhase("plan.md") {
+	if !cp.HasPhase("plan.json") {
 		t.Error("expected HasPhase true after save")
 	}
 }
@@ -552,8 +552,9 @@ func TestRunResult_Summary(t *testing.T) {
 		FindingsCount:   15,
 		ChasedCount:     5,
 		SourcesSearched: 4,
+		OutputDir:       "/tmp/research-output",
 	}
-	summary := result.Summary("test topic", "/tmp/research-output")
+	summary := result.Summary("test topic")
 	if !strings.Contains(summary, "test topic") {
 		t.Error("summary should contain topic")
 	}
@@ -663,15 +664,14 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	pipeline := NewPipeline(model, dispatcher, fetcher)
 
 	dir := t.TempDir()
-	outputDir := filepath.Join(dir, "research-output")
 
 	result, err := pipeline.Run(context.Background(), RunConfig{
 		Topic:      "test topic",
 		Intent:     "testing the pipeline",
 		Depth:      "survey",
-		OutputDir:  outputDir,
 		ProjectDir: dir,
 	})
+	outputDir := result.OutputDir
 
 	if err != nil {
 		t.Fatalf("Pipeline.Run: %v", err)

@@ -328,6 +328,41 @@ The host agent never sees the file contents — only the summary.
 ` + "```" + `
 `,
 		},
+		{
+			Name:        "cercano-deep-research",
+			Description: "Deep multi-source research tool. Takes a topic and intent, identifies authoritative sources, systematically searches, analyzes and ranks findings, chases cited references, and compiles a structured report.",
+			Content: `---
+name: cercano-deep-research
+description: Deep multi-source research with ranked, annotated findings, reference chasing, contradiction detection, and gap analysis.
+compatibility: Requires Cercano server running, connected to an Ollama instance, and Python venv with ddgs package.
+---
+
+# Cercano Deep Research
+
+Multi-source research tool that compiles a ranked, annotated encyclopedia of findings.
+
+## MCP Tool
+
+**Tool name:** ` + "`cercano_deep_research`" + `
+
+## Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| topic | string | Yes | The research topic |
+| intent | string | Yes | What you need this research for |
+| depth | string | No | survey (quick) or thorough (deep, default) |
+| date_range | string | No | Filter by date (e.g. "2024-2026") |
+| sources | string[] | No | Override auto-detected sources |
+| output_path | string | No | Write report to file |
+
+## Examples
+
+` + "```json" + `
+{"topic": "CRISPR sickle cell", "intent": "grant proposal", "depth": "thorough", "output_path": "/tmp/research.md"}
+` + "```" + `
+`,
+		},
 	}
 }
 

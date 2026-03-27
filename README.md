@@ -31,6 +31,7 @@ When used as a co-processor inside cloud agents, Cercano provides specialized to
 | `cercano_fetch` | Fetch a URL and extract readable text (HTML stripped to plain text) | Read web pages without stuffing raw HTML into cloud context |
 | `cercano_research` | Research a question via DuckDuckGo search + local model analysis | Get distilled, sourced answers without browsing the web yourself |
 | `cercano_document` | Generate doc comments for exported Go symbols and write them to the file | Entire read-think-write cycle stays local — host never sees file contents |
+| `cercano_deep_research` | Multi-source research with ranked findings, reference chasing, and gap analysis | Dozens of page fetches and analyses stay local — host gets only the compiled report |
 
 ### Project Context
 Run `cercano_init` once per project to make all Cercano tools project-aware. It scans the repo, feeds key files through a local model, and writes `.cercano/context.md` — a concise reference document that gets automatically prepended to all tool calls. The host AI can optionally provide domain knowledge it already has.

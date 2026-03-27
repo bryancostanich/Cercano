@@ -105,18 +105,17 @@ func (s *Stats) ComputeSavings() {
 		s.LocalPercentage = float64(totalLocal) / float64(total) * 100
 	}
 
-	// Net savings = content avoided - overhead
-	// Only count overhead from events that have savings data (content_tokens_avoided > 0)
+	// Net savings = content avoided - per-call overhead
+	// Overhead is ~100 tokens per call (tool call formatting + reading the short response).
+	// Local model output tokens are NOT overhead — they're local work the cloud never sees.
 	if s.TotalContentAvoided > 0 {
 		savingsCallCount := 0
-		savingsOutputTokens := 0
 		for _, t := range s.ByTool {
 			if t.ContentTokensAvoided > 0 {
 				savingsCallCount += t.Count
-				savingsOutputTokens += t.OutputTokens
 			}
 		}
-		overhead := savingsOutputTokens + (savingsCallCount * 50)
+		overhead := savingsCallCount * 100
 		s.EstimatedNetSavings = s.TotalContentAvoided - overhead
 		if s.EstimatedNetSavings < 0 {
 			s.EstimatedNetSavings = 0

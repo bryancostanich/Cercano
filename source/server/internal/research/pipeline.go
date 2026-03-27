@@ -30,7 +30,7 @@ type RunConfig struct {
 	Depth       string   // "survey" or "thorough"
 	DateRange   string
 	Sources     []string // user override, empty for auto
-	OutputPath  string   // write report to file if set
+	OutputDir   string   // write report to this directory if set
 	ProjectDir  string
 }
 
@@ -156,15 +156,15 @@ func (p *Pipeline) Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 	primaryCount, chasedCount := countFindings(findings)
 	report := CompileReport(plan, findings, sections)
 
-	// Write to file if requested
-	if cfg.OutputPath != "" {
-		if err := os.WriteFile(cfg.OutputPath, []byte(report), 0644); err != nil {
+	// Write to directory if requested
+	if cfg.OutputDir != "" {
+		if err := WriteReport(cfg.OutputDir, plan, findings, sections); err != nil {
 			return nil, fmt.Errorf("failed to write report: %w", err)
 		}
 	}
 
-	// Cleanup checkpoint (keep if output_path set for reference)
-	if cfg.OutputPath == "" {
+	// Cleanup checkpoint (keep if output_dir set for reference)
+	if cfg.OutputDir == "" {
 		cp.Cleanup()
 	}
 
@@ -178,7 +178,7 @@ func (p *Pipeline) Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 }
 
 // Summary returns a short summary of the result for the MCP response.
-func (r *RunResult) Summary(topic, outputPath string) string {
+func (r *RunResult) Summary(topic, outputDir string) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Deep research complete: %s\n", topic))
 	sb.WriteString(fmt.Sprintf("  Sources searched: %d\n", r.SourcesSearched))
@@ -187,8 +187,8 @@ func (r *RunResult) Summary(topic, outputPath string) string {
 		sb.WriteString(fmt.Sprintf(" (%d primary, %d discovered via references)", r.FindingsCount-r.ChasedCount, r.ChasedCount))
 	}
 	sb.WriteString("\n")
-	if outputPath != "" {
-		sb.WriteString(fmt.Sprintf("  Report written to: %s\n", outputPath))
+	if outputDir != "" {
+		sb.WriteString(fmt.Sprintf("  Report written to: %s\n", outputDir))
 	}
 	return sb.String()
 }

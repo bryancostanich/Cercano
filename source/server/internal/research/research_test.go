@@ -553,15 +553,15 @@ func TestRunResult_Summary(t *testing.T) {
 		ChasedCount:     5,
 		SourcesSearched: 4,
 	}
-	summary := result.Summary("test topic", "/tmp/report.md")
+	summary := result.Summary("test topic", "/tmp/research-output")
 	if !strings.Contains(summary, "test topic") {
 		t.Error("summary should contain topic")
 	}
 	if !strings.Contains(summary, "15") {
 		t.Error("summary should contain findings count")
 	}
-	if !strings.Contains(summary, "/tmp/report.md") {
-		t.Error("summary should contain output path")
+	if !strings.Contains(summary, "/tmp/research-output") {
+		t.Error("summary should contain output dir")
 	}
 }
 
@@ -663,13 +663,13 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	pipeline := NewPipeline(model, dispatcher, fetcher)
 
 	dir := t.TempDir()
-	outputPath := filepath.Join(dir, "report.md")
+	outputDir := filepath.Join(dir, "research-output")
 
 	result, err := pipeline.Run(context.Background(), RunConfig{
 		Topic:      "test topic",
 		Intent:     "testing the pipeline",
 		Depth:      "survey",
-		OutputPath: outputPath,
+		OutputDir:  outputDir,
 		ProjectDir: dir,
 	})
 
@@ -685,12 +685,27 @@ func TestPipeline_EndToEnd(t *testing.T) {
 		t.Error("expected non-empty report")
 	}
 
-	// Check report was written to file
-	data, err := os.ReadFile(outputPath)
+	// Check report directory was created with files
+	readmeData, err := os.ReadFile(filepath.Join(outputDir, "README.md"))
 	if err != nil {
-		t.Fatalf("expected report file: %v", err)
+		t.Fatalf("expected README.md in output dir: %v", err)
 	}
-	if !strings.Contains(string(data), "Deep Research: test topic") {
-		t.Error("report file should contain the topic")
+	if !strings.Contains(string(readmeData), "Deep Research: test topic") {
+		t.Error("README should contain the topic")
+	}
+
+	// Check findings directory has files
+	findingsDir := filepath.Join(outputDir, "findings")
+	entries, err := os.ReadDir(findingsDir)
+	if err != nil {
+		t.Fatalf("expected findings directory: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Error("expected finding files in findings/")
+	}
+
+	// Check synthesis file exists
+	if _, err := os.Stat(filepath.Join(outputDir, "synthesis.md")); os.IsNotExist(err) {
+		t.Error("expected synthesis.md in output dir")
 	}
 }

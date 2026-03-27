@@ -432,13 +432,13 @@ func TestCheckpoint_HasPhase(t *testing.T) {
 	dir := t.TempDir()
 	cp := NewCheckpoint(dir, "topic", "intent", "thorough")
 
-	if cp.HasPhase("plan.json") {
+	if cp.HasPhase("plan.md") {
 		t.Error("expected HasPhase false before save")
 	}
 
 	cp.SavePlan(&ResearchPlan{Topic: "test"})
 
-	if !cp.HasPhase("plan.json") {
+	if !cp.HasPhase("plan.md") {
 		t.Error("expected HasPhase true after save")
 	}
 }

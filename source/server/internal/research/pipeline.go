@@ -63,7 +63,7 @@ func (p *Pipeline) Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 
 	// Phase 1: Plan sources
 	var plan *ResearchPlan
-	if cp.HasPhase("plan.json") {
+	if cp.HasPhase("plan.md") {
 		plan, _ = cp.LoadPlan()
 	}
 	if plan == nil {
@@ -81,7 +81,7 @@ func (p *Pipeline) Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 
 	// Phase 2-3: Search all sources
 	var pubs []Publication
-	if cp.HasPhase("search_results.json") {
+	if cp.HasPhase("search_results.md") {
 		pubs, _ = cp.LoadSearchResults()
 	}
 	if len(pubs) == 0 {
@@ -100,7 +100,7 @@ func (p *Pipeline) Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 
 	// Phase 4: Analyze findings
 	var findings []AnnotatedFinding
-	if cp.HasPhase("findings.json") {
+	if cp.HasPhase("findings.md") {
 		findings, _ = cp.LoadFindings()
 	}
 	if len(findings) == 0 {
@@ -124,7 +124,7 @@ func (p *Pipeline) Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 
 	// Phase 5: Synthesis
 	var sections ReportSections
-	if cp.HasPhase("sections.json") {
+	if cp.HasPhase("sections.md") {
 		loaded, _ := cp.LoadSections()
 		if loaded != nil {
 			sections = *loaded

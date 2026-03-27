@@ -341,7 +341,7 @@ type DeepResearchRequest struct {
 	Depth      string   `json:"depth,omitempty" jsonschema:"Research depth: survey (5-10 results, quick) or thorough (20+ results, deep). Default: thorough."`
 	DateRange  string   `json:"date_range,omitempty" jsonschema:"Filter results by date range (e.g. '2024-2026', 'last 2 years', 'after 2023-06')."`
 	Sources    []string `json:"sources,omitempty" jsonschema:"Override auto-detected sources. If omitted, sources are chosen based on topic domain."`
-	OutputPath string   `json:"output_path,omitempty" jsonschema:"Write the report to this file path instead of returning inline. Recommended for thorough research."`
+	OutputDir  string   `json:"output_dir,omitempty" jsonschema:"Write the report to this directory as multiple files (README.md, findings/, references/, synthesis.md). Recommended for thorough research."`
 	ProjectDir string   `json:"project_dir,omitempty" jsonschema:"Project root directory."`
 	cloudTokenFields
 }
@@ -420,7 +420,7 @@ func (s *Server) registerTools() {
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_deep_research",
-		Description: "Deep multi-source research tool. Takes a topic and intent, identifies authoritative sources (academic, industry, news, reference), systematically searches each one, analyzes and ranks findings by relevance and impact, chases cited references, and compiles a structured report with executive summary, contradiction detection, gap analysis, and follow-up suggestions. The entire pipeline runs locally. Use output_path for thorough research to avoid large inline responses.",
+		Description: "Deep multi-source research tool. Takes a topic and intent, identifies authoritative sources (academic, industry, news, reference), systematically searches each one, analyzes and ranks findings by relevance and impact, chases cited references, and compiles a structured report with executive summary, contradiction detection, gap analysis, and follow-up suggestions. The entire pipeline runs locally. Use output_dir for thorough research — writes findings as individual files.",
 	}, s.handleDeepResearch)
 }
 
@@ -1228,7 +1228,7 @@ func (s *Server) handleDeepResearch(ctx context.Context, request *gomcp.CallTool
 		Depth:      args.Depth,
 		DateRange:  args.DateRange,
 		Sources:    args.Sources,
-		OutputPath: args.OutputPath,
+		OutputDir:  args.OutputDir,
 		ProjectDir: args.ProjectDir,
 	})
 	if err != nil {
@@ -1243,10 +1243,10 @@ func (s *Server) handleDeepResearch(ctx context.Context, request *gomcp.CallTool
 	}
 	s.emitEvent("cercano_deep_research", resp, startTime, true, &args.cloudTokenFields, runResult.ContentTokensAvoided)
 
-	// Return summary if output_path was set, full report otherwise
+	// Return summary if output_dir was set, full report otherwise
 	output := runResult.Report
-	if args.OutputPath != "" {
-		output = runResult.Summary(args.Topic, args.OutputPath)
+	if args.OutputDir != "" {
+		output = runResult.Summary(args.Topic, args.OutputDir)
 	}
 
 	result := &gomcp.CallToolResult{

@@ -36,3 +36,4 @@ go.work.sum
 **/.DS_STORE
 source/server/bin/
 source/server/agent
+scratch/

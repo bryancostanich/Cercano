@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -36,10 +38,11 @@ type RunConfig struct {
 
 // RunResult holds the output of a research run.
 type RunResult struct {
-	Report              string // the full markdown report
-	FindingsCount       int
-	ChasedCount         int
-	SourcesSearched     int
+	Report               string // the full markdown report (single-file version)
+	OutputDir            string // directory where report files were written
+	FindingsCount        int
+	ChasedCount          int
+	SourcesSearched      int
 	ContentTokensAvoided int // for telemetry
 }
 
@@ -63,7 +66,7 @@ func (p *Pipeline) Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 
 	// Phase 1: Plan sources
 	var plan *ResearchPlan
-	if cp.HasPhase("plan.md") {
+	if cp.HasPhase("plan.json") {
 		plan, _ = cp.LoadPlan()
 	}
 	if plan == nil {
@@ -81,7 +84,7 @@ func (p *Pipeline) Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 
 	// Phase 2-3: Search all sources
 	var pubs []Publication
-	if cp.HasPhase("search_results.md") {
+	if cp.HasPhase("search_results.json") {
 		pubs, _ = cp.LoadSearchResults()
 	}
 	if len(pubs) == 0 {
@@ -100,7 +103,7 @@ func (p *Pipeline) Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 
 	// Phase 4: Analyze findings
 	var findings []AnnotatedFinding
-	if cp.HasPhase("findings.md") {
+	if cp.HasPhase("findings.json") {
 		findings, _ = cp.LoadFindings()
 	}
 	if len(findings) == 0 {
@@ -124,7 +127,7 @@ func (p *Pipeline) Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 
 	// Phase 5: Synthesis
 	var sections ReportSections
-	if cp.HasPhase("sections.md") {
+	if cp.HasPhase("sections.json") {
 		loaded, _ := cp.LoadSections()
 		if loaded != nil {
 			sections = *loaded
@@ -156,20 +159,26 @@ func (p *Pipeline) Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 	primaryCount, chasedCount := countFindings(findings)
 	report := CompileReport(plan, findings, sections)
 
-	// Write to directory if requested
-	if cfg.OutputDir != "" {
-		if err := WriteReport(cfg.OutputDir, plan, findings, sections); err != nil {
-			return nil, fmt.Errorf("failed to write report: %w", err)
+	// Determine output directory — default to <project>/scratch/research/<slug>/
+	outputDir := cfg.OutputDir
+	if outputDir == "" {
+		base := cfg.ProjectDir
+		if base == "" {
+			base, _ = os.Getwd()
 		}
+		outputDir = filepath.Join(base, "scratch", "research", slugifyTopic(cfg.Topic))
 	}
 
-	// Cleanup checkpoint (keep if output_dir set for reference)
-	if cfg.OutputDir == "" {
-		cp.Cleanup()
+	if err := WriteReport(outputDir, plan, findings, sections); err != nil {
+		return nil, fmt.Errorf("failed to write report: %w", err)
 	}
+
+	// Always clean up process checkpoints
+	cp.Cleanup()
 
 	return &RunResult{
 		Report:               report,
+		OutputDir:            outputDir,
 		FindingsCount:        primaryCount + chasedCount,
 		ChasedCount:          chasedCount,
 		SourcesSearched:      len(plan.Sources),
@@ -178,7 +187,7 @@ func (p *Pipeline) Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 }
 
 // Summary returns a short summary of the result for the MCP response.
-func (r *RunResult) Summary(topic, outputDir string) string {
+func (r *RunResult) Summary(topic string) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Deep research complete: %s\n", topic))
 	sb.WriteString(fmt.Sprintf("  Sources searched: %d\n", r.SourcesSearched))
@@ -187,9 +196,7 @@ func (r *RunResult) Summary(topic, outputDir string) string {
 		sb.WriteString(fmt.Sprintf(" (%d primary, %d discovered via references)", r.FindingsCount-r.ChasedCount, r.ChasedCount))
 	}
 	sb.WriteString("\n")
-	if outputDir != "" {
-		sb.WriteString(fmt.Sprintf("  Report written to: %s\n", outputDir))
-	}
+	sb.WriteString(fmt.Sprintf("  Report written to: %s\n", r.OutputDir))
 	return sb.String()
 }
 
@@ -202,4 +209,19 @@ func countFindings(findings []AnnotatedFinding) (primary, chased int) {
 		}
 	}
 	return
+}
+
+var nonAlphaNumPipeline = regexp.MustCompile(`[^a-z0-9]+`)
+
+func slugifyTopic(topic string) string {
+	s := strings.ToLower(topic)
+	s = nonAlphaNumPipeline.ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-")
+	if len(s) > 50 {
+		s = s[:50]
+		if i := strings.LastIndex(s, "-"); i > 20 {
+			s = s[:i]
+		}
+	}
+	return s
 }

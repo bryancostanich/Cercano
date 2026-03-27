@@ -114,3 +114,8 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 - [ ] **Track: Cloud Token Savings Estimation — Measure actual tokens kept out of cloud context**
 *Link: [./tracks/savings_estimation_20260326/](./tracks/savings_estimation_20260326/)*
+
+---
+
+- [ ] **Track: Deep Research Skill — Multi-source academic research with ranked, annotated findings**
+*Link: [./tracks/deep_research_20260326/](./tracks/deep_research_20260326/)*

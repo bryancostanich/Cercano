@@ -109,3 +109,8 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 - [x] **Track: Update Check & Upgrade Prompt**
 *Link: [./archive/update_check_20260325/](./archive/update_check_20260325/)*
+
+---
+
+- [ ] **Track: Cloud Token Savings Estimation — Measure actual tokens kept out of cloud context**
+*Link: [./tracks/savings_estimation_20260326/](./tracks/savings_estimation_20260326/)*

@@ -31,12 +31,28 @@ func FormatStatsASCII(stats *Stats) string {
 	if totalCloud > 0 {
 		out.WriteString(fmt.Sprintf("  Cloud Tokens:    %s (%s in, %s out)\n",
 			formatNumber(totalCloud), formatNumber(stats.TotalCloudInputTokens), formatNumber(stats.TotalCloudOutputTokens)))
+		if stats.EstimatedNetSavings > 0 {
+			savingsPct := float64(stats.EstimatedNetSavings) / float64(totalCloud+stats.EstimatedNetSavings) * 100
+			out.WriteString(fmt.Sprintf("  Tokens Saved:    %s (%.1f%% of what cloud would have used)\n",
+				formatNumber(stats.EstimatedNetSavings), savingsPct))
+		}
 		out.WriteString("\n")
 		out.WriteString(localVsCloudBar(totalLocal, totalCloud))
 	} else {
 		out.WriteString(fmt.Sprintf("  Tokens Saved:    ~%s (estimated)\n", formatNumber(stats.LocalTokensSaved)))
 	}
 	out.WriteString("\n")
+
+	// Estimated Cloud Savings
+	if stats.TotalContentAvoided > 0 {
+		overhead := stats.TotalContentAvoided - stats.EstimatedNetSavings
+		out.WriteString(sectionHeader("Estimated Cloud Savings"))
+		out.WriteString(fmt.Sprintf("  Content kept out of cloud:  %s tokens\n", formatNumber(stats.TotalContentAvoided)))
+		out.WriteString(fmt.Sprintf("  Cercano overhead:          -%s tokens\n", formatNumber(overhead)))
+		out.WriteString("  ─────────────────────────────────────\n")
+		out.WriteString(fmt.Sprintf("  Estimated net savings:     %s tokens\n", formatNumber(stats.EstimatedNetSavings)))
+		out.WriteString("\n")
+	}
 
 	// By Tool - horizontal bar chart
 	if len(stats.ByTool) > 0 {

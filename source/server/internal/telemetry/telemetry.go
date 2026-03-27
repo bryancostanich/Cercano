@@ -15,18 +15,19 @@ import (
 
 // Event represents a single telemetry event from a local inference request.
 type Event struct {
-	Timestamp     time.Time
-	ToolName      string
-	Model         string
-	InputTokens   int
-	OutputTokens  int
-	DurationMs    int64
-	WasEscalated  bool
-	CloudProvider string
-	CloudModel    string
-	TokenSaving   bool   // true if this call substitutes for a cloud call (counts toward savings)
-	SessionID     string // MCP session that generated this event (empty for legacy events)
-	startTime     time.Time
+	Timestamp            time.Time
+	ToolName             string
+	Model                string
+	InputTokens          int
+	OutputTokens         int
+	DurationMs           int64
+	WasEscalated         bool
+	CloudProvider        string
+	CloudModel           string
+	TokenSaving          bool   // true if this call substitutes for a cloud call (counts toward savings)
+	SessionID            string // MCP session that generated this event (empty for legacy events)
+	ContentTokensAvoided int    // estimated cloud tokens avoided by handling locally
+	startTime            time.Time
 }
 
 // NewEvent creates a new telemetry event with the current timestamp.
@@ -62,10 +63,11 @@ type CloudUsageReport struct {
 
 // GroupStats holds aggregated stats for a named group (tool, model, or date).
 type GroupStats struct {
-	Name         string
-	Count        int
-	InputTokens  int
-	OutputTokens int
+	Name                 string
+	Count                int
+	InputTokens          int
+	OutputTokens         int
+	ContentTokensAvoided int
 }
 
 // SessionStats holds aggregated stats for a single MCP session.
@@ -86,19 +88,39 @@ type Stats struct {
 	TotalCloudInputTokens  int
 	TotalCloudOutputTokens int
 	LocalPercentage        float64 // percentage of total tokens handled locally (0-100)
+	TotalContentAvoided    int     // sum of content_tokens_avoided across all events
+	EstimatedNetSavings    int     // TotalContentAvoided - overhead
 	ByTool                 []GroupStats
 	ByModel                []GroupStats
 	ByDay                  []GroupStats
 	BySession              []SessionStats
 }
 
-// ComputeSavings calculates the LocalPercentage from local and cloud totals.
+// ComputeSavings calculates the LocalPercentage and EstimatedNetSavings.
 func (s *Stats) ComputeSavings() {
 	totalLocal := s.LocalTokensSaved
 	totalCloud := s.TotalCloudInputTokens + s.TotalCloudOutputTokens
 	total := totalLocal + totalCloud
 	if total > 0 {
 		s.LocalPercentage = float64(totalLocal) / float64(total) * 100
+	}
+
+	// Net savings = content avoided - overhead
+	// Only count overhead from events that have savings data (content_tokens_avoided > 0)
+	if s.TotalContentAvoided > 0 {
+		savingsCallCount := 0
+		savingsOutputTokens := 0
+		for _, t := range s.ByTool {
+			if t.ContentTokensAvoided > 0 {
+				savingsCallCount += t.Count
+				savingsOutputTokens += t.OutputTokens
+			}
+		}
+		overhead := savingsOutputTokens + (savingsCallCount * 50)
+		s.EstimatedNetSavings = s.TotalContentAvoided - overhead
+		if s.EstimatedNetSavings < 0 {
+			s.EstimatedNetSavings = 0
+		}
 	}
 }
 
@@ -189,15 +211,21 @@ func migrateSchema(db *sql.DB) error {
 		// non-fatal, proceed anyway
 	}
 
+	// Add content_tokens_avoided column if it doesn't exist
+	_, err = db.Exec(`ALTER TABLE events ADD COLUMN content_tokens_avoided INTEGER NOT NULL DEFAULT 0`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		// non-fatal, proceed anyway
+	}
+
 	return nil
 }
 
 // RecordEvent persists a telemetry event.
 func (s *SQLiteStore) RecordEvent(ctx context.Context, e *Event) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO events (timestamp, tool_name, model, input_tokens, output_tokens, duration_ms, was_escalated, cloud_provider, cloud_model, token_saving, session_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.Timestamp, e.ToolName, e.Model, e.InputTokens, e.OutputTokens, e.DurationMs, e.WasEscalated, e.CloudProvider, e.CloudModel, e.TokenSaving, e.SessionID,
+		`INSERT INTO events (timestamp, tool_name, model, input_tokens, output_tokens, duration_ms, was_escalated, cloud_provider, cloud_model, token_saving, session_id, content_tokens_avoided)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.Timestamp, e.ToolName, e.Model, e.InputTokens, e.OutputTokens, e.DurationMs, e.WasEscalated, e.CloudProvider, e.CloudModel, e.TokenSaving, e.SessionID, e.ContentTokensAvoided,
 	)
 	return err
 }
@@ -231,10 +259,11 @@ func (s *SQLiteStore) GetStats(ctx context.Context) (*Stats, error) {
 			COALESCE(COUNT(*), 0),
 			COALESCE(SUM(input_tokens), 0),
 			COALESCE(SUM(output_tokens), 0),
-			COALESCE(SUM(CASE WHEN was_escalated = 0 AND token_saving = 1 THEN input_tokens + output_tokens ELSE 0 END), 0)
+			COALESCE(SUM(CASE WHEN was_escalated = 0 AND token_saving = 1 THEN input_tokens + output_tokens ELSE 0 END), 0),
+			COALESCE(SUM(content_tokens_avoided), 0)
 		FROM events
 	`)
-	if err := row.Scan(&stats.TotalRequests, &stats.TotalInputTokens, &stats.TotalOutputTokens, &stats.LocalTokensSaved); err != nil {
+	if err := row.Scan(&stats.TotalRequests, &stats.TotalInputTokens, &stats.TotalOutputTokens, &stats.LocalTokensSaved, &stats.TotalContentAvoided); err != nil {
 		return nil, fmt.Errorf("failed to query event stats: %w", err)
 	}
 
@@ -251,7 +280,7 @@ func (s *SQLiteStore) GetStats(ctx context.Context) (*Stats, error) {
 
 	// By tool
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT tool_name, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)
+		SELECT tool_name, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(content_tokens_avoided), 0)
 		FROM events
 		GROUP BY tool_name
 		ORDER BY COUNT(*) DESC
@@ -263,7 +292,7 @@ func (s *SQLiteStore) GetStats(ctx context.Context) (*Stats, error) {
 
 	for rows.Next() {
 		var gs GroupStats
-		if err := rows.Scan(&gs.Name, &gs.Count, &gs.InputTokens, &gs.OutputTokens); err != nil {
+		if err := rows.Scan(&gs.Name, &gs.Count, &gs.InputTokens, &gs.OutputTokens, &gs.ContentTokensAvoided); err != nil {
 			return nil, fmt.Errorf("failed to scan tool stats: %w", err)
 		}
 		stats.ByTool = append(stats.ByTool, gs)

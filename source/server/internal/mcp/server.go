@@ -11,6 +11,7 @@ import (
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/config"
 	"cercano/source/server/internal/document"
+	"cercano/source/server/internal/research"
 	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/internal/web"
 	"cercano/source/server/pkg/proto"
@@ -333,6 +334,18 @@ type DocumentRequest struct {
 	cloudTokenFields
 }
 
+// DeepResearchRequest is the input schema for the cercano_deep_research tool.
+type DeepResearchRequest struct {
+	Topic      string   `json:"topic" jsonschema:"The research topic to investigate."`
+	Intent     string   `json:"intent" jsonschema:"What you need this research for — drives relevance scoring and source selection."`
+	Depth      string   `json:"depth,omitempty" jsonschema:"Research depth: survey (5-10 results, quick) or thorough (20+ results, deep). Default: thorough."`
+	DateRange  string   `json:"date_range,omitempty" jsonschema:"Filter results by date range (e.g. '2024-2026', 'last 2 years', 'after 2023-06')."`
+	Sources    []string `json:"sources,omitempty" jsonschema:"Override auto-detected sources. If omitted, sources are chosen based on topic domain."`
+	OutputPath string   `json:"output_path,omitempty" jsonschema:"Write the report to this file path instead of returning inline. Recommended for thorough research."`
+	ProjectDir string   `json:"project_dir,omitempty" jsonschema:"Project root directory."`
+	cloudTokenFields
+}
+
 // registerTools registers all Cercano MCP tools with the server.
 func (s *Server) registerTools() {
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
@@ -404,6 +417,11 @@ func (s *Server) registerTools() {
 		Name:        "cercano_document",
 		Description: "Generate doc comments for exported Go symbols using local AI and write them directly to the file. The host never sees the file contents — Cercano handles the entire read-think-write cycle locally. Returns only a summary of what was documented. Supports dry_run mode to preview without writing.",
 	}, s.handleDocument)
+
+	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
+		Name:        "cercano_deep_research",
+		Description: "Deep multi-source research tool. Takes a topic and intent, identifies authoritative sources (academic, industry, news, reference), systematically searches each one, analyzes and ranks findings by relevance and impact, chases cited references, and compiles a structured report with executive summary, contradiction detection, gap analysis, and follow-up suggestions. The entire pipeline runs locally. Use output_path for thorough research to avoid large inline responses.",
+	}, s.handleDeepResearch)
 }
 
 // handleLocal processes a cercano_local tool call.
@@ -1163,4 +1181,116 @@ func (s *Server) handleDocument(ctx context.Context, request *gomcp.CallToolRequ
 		},
 	}
 	return s.maybeNudge(args.ProjectDir, result), nil, nil
+}
+
+// handleDeepResearch processes a cercano_deep_research tool call.
+func (s *Server) handleDeepResearch(ctx context.Context, request *gomcp.CallToolRequest, args DeepResearchRequest) (*gomcp.CallToolResult, any, error) {
+	if result, ok := s.checkDegraded(); ok {
+		return result, nil, nil
+	}
+	startTime := time.Now().UnixNano()
+
+	if args.Topic == "" {
+		return nil, nil, fmt.Errorf("cercano_deep_research: 'topic' is required")
+	}
+	if args.Intent == "" {
+		return nil, nil, fmt.Errorf("cercano_deep_research: 'intent' is required")
+	}
+
+	if !isVenvReady() {
+		return &gomcp.CallToolResult{
+			Content: []gomcp.Content{
+				&gomcp.TextContent{Text: venvMissingMessage},
+			},
+		}, nil, nil
+	}
+
+	// Set up dependencies
+	modelCaller := &grpcModelCallerWithTokens{client: s.grpcClient}
+
+	exePath, _ := os.Executable()
+	serverRoot := filepath.Dir(filepath.Dir(exePath))
+	scriptPath := filepath.Join(serverRoot, "scripts", "ddg_search.py")
+	pythonPath := config.VenvPython()
+	ddgSearcher := web.NewSearcher(pythonPath, scriptPath)
+
+	// Adapt web.Searcher to research.SearchProvider
+	searchAdapter := &webSearchAdapter{searcher: ddgSearcher}
+	// Adapt web.Fetcher to research.URLFetcher
+	fetchAdapter := &webFetchAdapter{fetcher: web.NewFetcher()}
+
+	dispatcher := research.NewSearchDispatcher(searchAdapter)
+	pipeline := research.NewPipeline(modelCaller, dispatcher, fetchAdapter)
+
+	runResult, err := pipeline.Run(ctx, research.RunConfig{
+		Topic:      args.Topic,
+		Intent:     args.Intent,
+		Depth:      args.Depth,
+		DateRange:  args.DateRange,
+		Sources:    args.Sources,
+		OutputPath: args.OutputPath,
+		ProjectDir: args.ProjectDir,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("cercano_deep_research: %w", err)
+	}
+
+	// Emit telemetry
+	resp := modelCaller.lastResp
+	if resp != nil {
+		resp.InputTokens = modelCaller.totalIn
+		resp.OutputTokens = modelCaller.totalOut
+	}
+	s.emitEvent("cercano_deep_research", resp, startTime, true, &args.cloudTokenFields, runResult.ContentTokensAvoided)
+
+	// Return summary if output_path was set, full report otherwise
+	output := runResult.Report
+	if args.OutputPath != "" {
+		output = runResult.Summary(args.Topic, args.OutputPath)
+	}
+
+	result := &gomcp.CallToolResult{
+		Content: []gomcp.Content{
+			&gomcp.TextContent{Text: output},
+		},
+	}
+	return s.maybeNudge(args.ProjectDir, result), nil, nil
+}
+
+// webSearchAdapter adapts web.Searcher to research.SearchProvider.
+type webSearchAdapter struct {
+	searcher *web.Searcher
+}
+
+func (a *webSearchAdapter) Search(ctx context.Context, query string, maxResults int) ([]research.SearchResult, error) {
+	results, err := a.searcher.Search(ctx, query, maxResults)
+	if err != nil {
+		return nil, err
+	}
+	var out []research.SearchResult
+	for _, r := range results {
+		out = append(out, research.SearchResult{
+			URL:     r.URL,
+			Title:   r.Title,
+			Snippet: r.Snippet,
+		})
+	}
+	return out, nil
+}
+
+// webFetchAdapter adapts web.Fetcher to research.URLFetcher.
+type webFetchAdapter struct {
+	fetcher *web.Fetcher
+}
+
+func (a *webFetchAdapter) FetchURL(url string) (*research.FetchResult, error) {
+	result, err := a.fetcher.Fetch(url)
+	if err != nil {
+		return nil, err
+	}
+	return &research.FetchResult{
+		URL:     result.URL,
+		Title:   result.Title,
+		Content: result.Content,
+	}, nil
 }

@@ -1243,11 +1243,8 @@ func (s *Server) handleDeepResearch(ctx context.Context, request *gomcp.CallTool
 	}
 	s.emitEvent("cercano_deep_research", resp, startTime, true, &args.cloudTokenFields, runResult.ContentTokensAvoided)
 
-	// Return summary if output_dir was set, full report otherwise
-	output := runResult.Report
-	if args.OutputDir != "" {
-		output = runResult.Summary(args.Topic, args.OutputDir)
-	}
+	// Always return summary — report is written to directory
+	output := runResult.Summary(args.Topic)
 
 	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{

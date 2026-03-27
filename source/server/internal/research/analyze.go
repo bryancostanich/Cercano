@@ -9,7 +9,7 @@ import (
 
 // AnalyzeFinding asks the local model to analyze a publication relative to the user's intent.
 func AnalyzeFinding(ctx context.Context, model ModelCaller, pub Publication, content, intent string) (*AnnotatedFinding, error) {
-	prompt := fmt.Sprintf(`Analyze this research finding relative to the user's research intent.
+	prompt := fmt.Sprintf(`Analyze this research finding relative to the user's research intent. Extract concrete, substantive information — not vague descriptions.
 
 User's intent: %s
 
@@ -22,15 +22,21 @@ Content:
 %s
 
 Respond in EXACTLY this format:
-SUMMARY: <2-3 sentence summary>
-WHY_IT_MATTERS: <why this is relevant to the user's intent>
-HOW_TO_USE: <how the user could apply this in their work>
+
+SUMMARY: Write a detailed 4-6 sentence summary that includes KEY FACTS: specific numbers, methods, results, conclusions, names of technologies/tools, performance metrics, sample sizes, dates, or other concrete data points. Do NOT write vague descriptions like "this paper presents a novel approach" — instead write what the approach IS, what it FOUND, and what the NUMBERS were.
+
+KEY_FINDINGS: List 3-5 bullet points of the most important specific facts, data points, or conclusions. Each bullet should contain concrete information someone could cite or act on.
+
+WHY_IT_MATTERS: Explain specifically how this connects to the user's intent. Reference specific aspects of both the finding and the intent.
+
+HOW_TO_USE: Give specific, actionable suggestions for how the user could apply this. Not generic advice — concrete next steps.
+
 RELEVANCE: <1-5, where 5 is directly relevant>
 IMPACT: <low, medium, or high>
 CITED_REF: <title of a cited work that's relevant> | <why it's relevant> | <suggested source to find it>
 CITED_REF: <another cited work> | <why> | <source>
 
-Only include CITED_REF lines for works that are directly relevant to the user's intent. Include 0-5 references.`, intent, pub.Title, pub.Source, pub.Authors, pub.Date, truncateContent(content, 6000))
+Only include CITED_REF lines for works that are directly relevant to the user's intent. Include 0-5 references.`, intent, pub.Title, pub.Source, pub.Authors, pub.Date, truncateContent(content, 8000))
 
 	resp, err := model.Call(ctx, prompt)
 	if err != nil {
@@ -43,31 +49,100 @@ Only include CITED_REF lines for works that are directly relevant to the user's 
 		ImpactRating:   "medium",
 	}
 
+	// Parse with section-aware logic to handle multi-line values
+	currentSection := ""
+	var sectionLines []string
+
+	flushSection := func() {
+		text := strings.TrimSpace(strings.Join(sectionLines, "\n"))
+		switch currentSection {
+		case "SUMMARY":
+			finding.Summary = text
+		case "KEY_FINDINGS":
+			for _, line := range sectionLines {
+				line = strings.TrimSpace(line)
+				line = strings.TrimPrefix(line, "- ")
+				line = strings.TrimPrefix(line, "* ")
+				line = strings.TrimPrefix(line, "• ")
+				// Strip leading number + punctuation (1. or 1) )
+				for i, c := range line {
+					if c >= '0' && c <= '9' || c == '.' || c == ')' || c == ' ' {
+						continue
+					}
+					line = line[i:]
+					break
+				}
+				line = strings.TrimSpace(line)
+				if line != "" {
+					finding.KeyFindings = append(finding.KeyFindings, line)
+				}
+			}
+		case "WHY_IT_MATTERS":
+			finding.WhyItMatters = text
+		case "HOW_TO_USE":
+			finding.HowToUse = text
+		}
+		sectionLines = nil
+	}
+
 	for _, line := range strings.Split(resp, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "SUMMARY:") {
-			finding.Summary = strings.TrimSpace(strings.TrimPrefix(line, "SUMMARY:"))
-		} else if strings.HasPrefix(line, "WHY_IT_MATTERS:") {
-			finding.WhyItMatters = strings.TrimSpace(strings.TrimPrefix(line, "WHY_IT_MATTERS:"))
-		} else if strings.HasPrefix(line, "HOW_TO_USE:") {
-			finding.HowToUse = strings.TrimSpace(strings.TrimPrefix(line, "HOW_TO_USE:"))
-		} else if strings.HasPrefix(line, "RELEVANCE:") {
-			val := strings.TrimSpace(strings.TrimPrefix(line, "RELEVANCE:"))
+		trimmed := strings.TrimSpace(line)
+
+		// Check for section headers
+		if strings.HasPrefix(trimmed, "SUMMARY:") {
+			flushSection()
+			currentSection = "SUMMARY"
+			rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "SUMMARY:"))
+			if rest != "" {
+				sectionLines = append(sectionLines, rest)
+			}
+		} else if strings.HasPrefix(trimmed, "KEY_FINDINGS:") {
+			flushSection()
+			currentSection = "KEY_FINDINGS"
+			rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "KEY_FINDINGS:"))
+			if rest != "" {
+				sectionLines = append(sectionLines, rest)
+			}
+		} else if strings.HasPrefix(trimmed, "WHY_IT_MATTERS:") {
+			flushSection()
+			currentSection = "WHY_IT_MATTERS"
+			rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "WHY_IT_MATTERS:"))
+			if rest != "" {
+				sectionLines = append(sectionLines, rest)
+			}
+		} else if strings.HasPrefix(trimmed, "HOW_TO_USE:") {
+			flushSection()
+			currentSection = "HOW_TO_USE"
+			rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "HOW_TO_USE:"))
+			if rest != "" {
+				sectionLines = append(sectionLines, rest)
+			}
+		} else if strings.HasPrefix(trimmed, "RELEVANCE:") {
+			flushSection()
+			currentSection = ""
+			val := strings.TrimSpace(strings.TrimPrefix(trimmed, "RELEVANCE:"))
 			if n, err := strconv.Atoi(val); err == nil && n >= 1 && n <= 5 {
 				finding.RelevanceScore = n
 			}
-		} else if strings.HasPrefix(line, "IMPACT:") {
-			val := strings.TrimSpace(strings.ToLower(strings.TrimPrefix(line, "IMPACT:")))
+		} else if strings.HasPrefix(trimmed, "IMPACT:") {
+			flushSection()
+			currentSection = ""
+			val := strings.TrimSpace(strings.ToLower(strings.TrimPrefix(trimmed, "IMPACT:")))
 			if val == "low" || val == "medium" || val == "high" {
 				finding.ImpactRating = val
 			}
-		} else if strings.HasPrefix(line, "CITED_REF:") {
-			ref := parseCitedRef(strings.TrimPrefix(line, "CITED_REF:"))
+		} else if strings.HasPrefix(trimmed, "CITED_REF:") {
+			flushSection()
+			currentSection = ""
+			ref := parseCitedRef(strings.TrimPrefix(trimmed, "CITED_REF:"))
 			if ref != nil {
 				finding.CitedRefs = append(finding.CitedRefs, *ref)
 			}
+		} else if currentSection != "" && trimmed != "" {
+			sectionLines = append(sectionLines, trimmed)
 		}
 	}
+	flushSection()
 
 	// Fallback if model didn't produce a summary
 	if finding.Summary == "" {

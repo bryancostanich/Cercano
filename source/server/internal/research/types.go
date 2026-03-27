@@ -51,6 +51,7 @@ type Publication struct {
 type AnnotatedFinding struct {
 	Publication    Publication
 	Summary        string
+	KeyFindings    []string // concrete bullet points of key facts
 	WhyItMatters   string
 	HowToUse       string
 	RelevanceScore int    // 1-5
@@ -109,6 +110,7 @@ type DeepResearchConfig struct {
 	MaxChasedTotal      int // max total chased references
 	MaxChasedPerFinding int // max chased references per finding
 	PageTruncateChars   int // max chars per fetched page
+	AnalysisTruncate    int // max chars sent to model for analysis
 }
 
 // DefaultConfig returns config for the given depth.
@@ -119,6 +121,7 @@ func DefaultConfig(depth string) DeepResearchConfig {
 			MaxChasedTotal:      10,
 			MaxChasedPerFinding: 3,
 			PageTruncateChars:   6000,
+			AnalysisTruncate:    8000,
 		}
 	}
 	return DeepResearchConfig{
@@ -126,5 +129,6 @@ func DefaultConfig(depth string) DeepResearchConfig {
 		MaxChasedTotal:      50,
 		MaxChasedPerFinding: 5,
 		PageTruncateChars:   8000,
+		AnalysisTruncate:    10000,
 	}
 }

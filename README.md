@@ -350,6 +350,8 @@ Cercano publishes its tools as [Agent Skills](https://agentskills.io) — an ope
 | `cercano-config` | View/change Cercano's runtime configuration |
 | `cercano-models` | List available models on the connected Ollama instance |
 | `cercano-init` | Initialize project context for project-aware responses |
+| `cercano-document` | Generate doc comments for exported Go symbols and write directly to the file |
+| `cercano-deep-research` | Multi-source research with ranked findings, reference chasing, and gap analysis |
 | `cercano-stats` | View usage statistics and cloud token savings |
 
 Each skill is a `SKILL.md` file that tells the agent what the tool does, its parameters, and how to invoke it via MCP.

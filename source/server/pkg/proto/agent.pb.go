@@ -269,6 +269,7 @@ type ProcessRequestRequest struct {
 	FileName       string `protobuf:"bytes,4,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`                   // Optional filename for agentic tasks
 	ConversationId string `protobuf:"bytes,5,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"` // Optional conversation ID for multi-turn history
 	DirectLocal    bool   `protobuf:"varint,6,opt,name=direct_local,json=directLocal,proto3" json:"direct_local,omitempty"`         // Skip SmartRouter, go directly to local provider
+	ModelOverride  string `protobuf:"bytes,7,opt,name=model_override,json=modelOverride,proto3" json:"model_override,omitempty"`    // Use this model instead of the configured default (temporary, per-request)
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -336,6 +337,13 @@ func (x *ProcessRequestRequest) GetDirectLocal() bool {
 		return x.DirectLocal
 	}
 	return false
+}
+
+func (x *ProcessRequestRequest) GetModelOverride() string {
+	if x != nil {
+		return x.ModelOverride
+	}
+	return ""
 }
 
 // Runtime configuration update request.
@@ -1082,13 +1090,14 @@ const file_source_proto_agent_proto_rawDesc = "" +
 	"tokenDeltaB\t\n" +
 	"\apayload\"*\n" +
 	"\x0eProgressUpdate\x12\x18\n" +
-	"\amessage\x18\x01 \x01(\tR\amessage\"\xb1\x01\n" +
+	"\amessage\x18\x01 \x01(\tR\amessage\"\xd8\x01\n" +
 	"\x15ProcessRequestRequest\x12\x14\n" +
 	"\x05input\x18\x01 \x01(\tR\x05input\x12\x19\n" +
 	"\bwork_dir\x18\x03 \x01(\tR\aworkDir\x12\x1b\n" +
 	"\tfile_name\x18\x04 \x01(\tR\bfileName\x12'\n" +
 	"\x0fconversation_id\x18\x05 \x01(\tR\x0econversationId\x12!\n" +
-	"\fdirect_local\x18\x06 \x01(\bR\vdirectLocal\"\xc1\x01\n" +
+	"\fdirect_local\x18\x06 \x01(\bR\vdirectLocal\x12%\n" +
+	"\x0emodel_override\x18\a \x01(\tR\rmodelOverride\"\xc1\x01\n" +
 	"\x13UpdateConfigRequest\x12\x1f\n" +
 	"\vlocal_model\x18\x01 \x01(\tR\n" +
 	"localModel\x12%\n" +

@@ -52,6 +52,7 @@ message ProcessRequestRequest {
   string file_name = 4; // Optional filename for agentic tasks
   string conversation_id = 5; // Optional conversation ID for multi-turn history
   bool direct_local = 6; // Skip SmartRouter, go directly to local provider
+  string model_override = 7; // Use this model instead of the configured default (temporary, per-request)
 }
 
 // Runtime configuration update request.

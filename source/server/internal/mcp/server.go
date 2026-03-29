@@ -126,8 +126,7 @@ func (s *Server) maybeUpdateNudge(result *gomcp.CallToolResult) *gomcp.CallToolR
 }
 
 // preCheckModelForResearch checks the current model BEFORE running research.
-// Returns a warning message if the model is code-only and better options exist.
-// Returns empty string if the model is fine.
+// Returns a warning message to show the user, or empty string if model is fine.
 func (s *Server) preCheckModelForResearch(ctx context.Context) string {
 	// Probe the current model name with a minimal request
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
@@ -143,6 +142,7 @@ func (s *Server) preCheckModelForResearch(ctx context.Context) string {
 		return ""
 	}
 
+	// Current model is code-only — check what's available
 	modelsResp, err := s.grpcClient.ListModels(ctx, &proto.ListModelsRequest{})
 	if err != nil || len(modelsResp.Models) == 0 {
 		return ""
@@ -154,16 +154,22 @@ func (s *Server) preCheckModelForResearch(ctx context.Context) string {
 	}
 
 	suggested, found := research.SuggestResearchModel(modelNames)
-	if !found {
-		return ""
+	if found {
+		// A better model is available — ask the user
+		return fmt.Sprintf("Your current model (%s) is optimized for code, not research analysis.\n\n"+
+			"A better model is available on your Ollama instance: **%s**\n\n"+
+			"To use it for this research run (without changing your default), re-run with:\n"+
+			"  use_model: \"%s\"\n\n"+
+			"To switch your default model permanently:\n"+
+			"  cercano_config(action: \"set\", local_model: \"%s\")", currentModel, suggested, suggested, suggested)
 	}
 
-	return fmt.Sprintf("Your current model (%s) is optimized for code, not research analysis. "+
-		"A better model for research is available: %s\n\n"+
-		"To switch and get better results, run:\n"+
-		"  cercano_config(action: \"set\", local_model: \"%s\")\n\n"+
-		"Then re-run your research query. To proceed with the current model anyway, "+
-		"add the parameter: force: true", currentModel, suggested, suggested)
+	// No better model available — suggest pulling one
+	return fmt.Sprintf("Your current model (%s) is optimized for code, not research analysis.\n\n"+
+		"No research-optimized models were found on your Ollama instance.\n"+
+		"For significantly better research results, pull a general-purpose model:\n\n"+
+		"  ollama pull qwen2.5\n\n"+
+		"Then re-run with: use_model: \"qwen2.5\"", currentModel)
 }
 
 // EstimateTokens approximates token count from a string using the ~4 chars/token heuristic.
@@ -384,7 +390,7 @@ type DeepResearchRequest struct {
 	Sources    []string `json:"sources,omitempty" jsonschema:"Override auto-detected sources. If omitted, sources are chosen based on topic domain."`
 	OutputDir  string   `json:"output_dir,omitempty" jsonschema:"Write the report to this directory as multiple files (README.md, findings/, references/, synthesis.md). Recommended for thorough research."`
 	ProjectDir string   `json:"project_dir,omitempty" jsonschema:"Project root directory."`
-	Force      bool     `json:"force,omitempty" jsonschema:"Set to true to skip the model suitability check and proceed with the current model."`
+	UseModel   string   `json:"use_model,omitempty" jsonschema:"Use this model for the research run instead of the default. Suggested by the model check if your current model is code-optimized."`
 	cloudTokenFields
 }
 
@@ -937,17 +943,19 @@ func (g *grpcModelCaller) Call(ctx context.Context, prompt string) (string, erro
 // grpcModelCallerWithTokens is like grpcModelCaller but accumulates token counts
 // from multiple calls for telemetry reporting.
 type grpcModelCallerWithTokens struct {
-	client      proto.AgentClient
-	lastResp    *proto.ProcessRequestResponse
-	totalIn    int32
-	totalOut   int32
-	totalCalls int
+	client        proto.AgentClient
+	modelOverride string // per-request model override
+	lastResp      *proto.ProcessRequestResponse
+	totalIn       int32
+	totalOut      int32
+	totalCalls    int
 }
 
 func (g *grpcModelCallerWithTokens) Call(ctx context.Context, prompt string) (string, error) {
 	resp, err := g.client.ProcessRequest(ctx, &proto.ProcessRequestRequest{
-		Input:       prompt,
-		DirectLocal: true,
+		Input:         prompt,
+		DirectLocal:   true,
+		ModelOverride: g.modelOverride,
 	})
 	if err != nil {
 		return "", err
@@ -1261,8 +1269,8 @@ func (s *Server) handleDeepResearch(ctx context.Context, request *gomcp.CallTool
 		}, nil, nil
 	}
 
-	// Pre-check model suitability
-	if !args.Force {
+	// Pre-check model suitability (skip if user specified a model)
+	if args.UseModel == "" {
 		if warning := s.preCheckModelForResearch(ctx); warning != "" {
 			return &gomcp.CallToolResult{
 				Content: []gomcp.Content{
@@ -1273,7 +1281,7 @@ func (s *Server) handleDeepResearch(ctx context.Context, request *gomcp.CallTool
 	}
 
 	// Set up dependencies
-	modelCaller := &grpcModelCallerWithTokens{client: s.grpcClient}
+	modelCaller := &grpcModelCallerWithTokens{client: s.grpcClient, modelOverride: args.UseModel}
 
 	exePath, _ := os.Executable()
 	serverRoot := filepath.Dir(filepath.Dir(exePath))

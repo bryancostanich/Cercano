@@ -225,6 +225,7 @@ func (s *Server) mapRequest(req *proto.ProcessRequestRequest) *agent.Request {
 		FileName:       req.FileName,
 		ConversationID: req.ConversationId,
 		DirectLocal:    req.DirectLocal,
+		ModelOverride:  req.ModelOverride,
 	}
 }
 

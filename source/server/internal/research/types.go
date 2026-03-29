@@ -117,18 +117,18 @@ type DeepResearchConfig struct {
 func DefaultConfig(depth string) DeepResearchConfig {
 	if depth == "survey" {
 		return DeepResearchConfig{
-			MaxPrimaryResults:   5,
+			MaxPrimaryResults:   3,
 			MaxChasedTotal:      10,
 			MaxChasedPerFinding: 3,
-			PageTruncateChars:   6000,
-			AnalysisTruncate:    8000,
+			PageTruncateChars:   10000,
+			AnalysisTruncate:    12000,
 		}
 	}
 	return DeepResearchConfig{
-		MaxPrimaryResults:   10,
+		MaxPrimaryResults:   6,
 		MaxChasedTotal:      50,
 		MaxChasedPerFinding: 5,
-		PageTruncateChars:   8000,
-		AnalysisTruncate:    10000,
+		PageTruncateChars:   12000,
+		AnalysisTruncate:    15000,
 	}
 }

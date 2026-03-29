@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -213,18 +214,18 @@ func TestSearchArXiv_ParsesAtomXML(t *testing.T) {
 
 // --- Analysis Tests ---
 
-func TestAnalyzeFinding_ParsesAnnotation(t *testing.T) {
+func TestAnalyzeFinding_MultiPass(t *testing.T) {
 	model := &mockModel{responses: []string{
-		`SUMMARY: This paper presents a novel delivery mechanism.
-WHY_IT_MATTERS: Directly relevant to the grant proposal.
-HOW_TO_USE: Use as supporting evidence for the gap analysis.
-RELEVANCE: 5
-IMPACT: high
-CITED_REF: Earlier CRISPR Study | foundational work | PubMed`,
+		// Pass 1: Fact extraction
+		"- ExecuTorch has 50KB base footprint\n- Supports 12 hardware backends\n- Uses AOT compilation",
+		// Pass 2: Relevance analysis
+		"WHY_IT_MATTERS: The 50KB footprint sets a benchmark.\nHOW_TO_USE: Benchmark against it.\nRELEVANCE: 5\nIMPACT: high\nCITED_REF: Earlier Study | foundational | PubMed",
+		// Pass 3: Quality gate
+		"PASS",
 	}}
 
 	pub := Publication{Title: "Test Paper", Source: "PubMed"}
-	finding, err := AnalyzeFinding(context.Background(), model, pub, "Paper content here", "writing a grant proposal")
+	finding, err := AnalyzeFinding(context.Background(), model, pub, "Paper content here", "writing a grant proposal", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -235,8 +236,8 @@ CITED_REF: Earlier CRISPR Study | foundational work | PubMed`,
 	if finding.ImpactRating != "high" {
 		t.Errorf("expected high impact, got %s", finding.ImpactRating)
 	}
-	if finding.Summary == "" {
-		t.Error("expected non-empty summary")
+	if len(finding.KeyFindings) < 3 {
+		t.Errorf("expected at least 3 key findings, got %d", len(finding.KeyFindings))
 	}
 	if finding.WhyItMatters == "" {
 		t.Error("expected non-empty WhyItMatters")
@@ -244,20 +245,88 @@ CITED_REF: Earlier CRISPR Study | foundational work | PubMed`,
 	if len(finding.CitedRefs) != 1 {
 		t.Fatalf("expected 1 cited ref, got %d", len(finding.CitedRefs))
 	}
-	if finding.CitedRefs[0].Title != "Earlier CRISPR Study" {
-		t.Errorf("expected cited ref title, got %s", finding.CitedRefs[0].Title)
-	}
 }
 
-func TestAnalyzeFinding_FallbackSummary(t *testing.T) {
-	model := &mockModel{responses: []string{"RELEVANCE: 3\nIMPACT: medium"}}
-	pub := Publication{Title: "Test", Abstract: "The abstract text."}
-	finding, err := AnalyzeFinding(context.Background(), model, pub, "content", "intent")
+func TestExtractFacts_ReturnsBullets(t *testing.T) {
+	model := &mockModel{responses: []string{
+		"- Fact one about the tool\n- Fact two with numbers: 50KB\n- Fact three about performance",
+	}}
+	facts, err := ExtractFacts(context.Background(), model, Publication{Title: "Test"}, "content")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if finding.Summary != "The abstract text." {
-		t.Errorf("expected abstract as fallback summary, got %s", finding.Summary)
+	if len(facts) != 3 {
+		t.Errorf("expected 3 facts, got %d", len(facts))
+	}
+}
+
+func TestAnalyzeRelevance_ParsesScores(t *testing.T) {
+	model := &mockModel{responses: []string{
+		"WHY_IT_MATTERS: Directly relevant because of X.\nHOW_TO_USE: Do A, B, C.\nRELEVANCE: 4\nIMPACT: high",
+	}}
+	result, err := AnalyzeRelevance(context.Background(), model, []string{"fact1"}, "Title", "intent", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.RelevanceScore != 4 {
+		t.Errorf("expected 4, got %d", result.RelevanceScore)
+	}
+	if result.ImpactRating != "high" {
+		t.Errorf("expected high, got %s", result.ImpactRating)
+	}
+}
+
+func TestScoreQuality_PassesGoodSummary(t *testing.T) {
+	model := &mockModel{responses: []string{"PASS"}}
+	passed, _, err := ScoreQuality(context.Background(), model, "ExecuTorch achieves 50KB footprint with 12 backends", []string{"50KB footprint"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !passed {
+		t.Error("expected PASS for specific summary")
+	}
+}
+
+func TestScoreQuality_FailsVagueSummary(t *testing.T) {
+	model := &mockModel{responses: []string{"FAIL: No specific numbers or metrics mentioned."}}
+	passed, critique, err := ScoreQuality(context.Background(), model, "This tool presents a novel approach", []string{"uses a novel approach"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if passed {
+		t.Error("expected FAIL for vague summary")
+	}
+	if critique == "" {
+		t.Error("expected non-empty critique")
+	}
+}
+
+func TestBuildCrossContext_FormatsCorrectly(t *testing.T) {
+	findings := []AnnotatedFinding{
+		{Publication: Publication{Title: "Finding A", Source: "PubMed"}, KeyFindings: []string{"Key fact about A"}, Summary: "Summary A"},
+		{Publication: Publication{Title: "Finding B", Source: "arXiv"}, KeyFindings: []string{"Key fact about B"}, Summary: "Summary B"},
+	}
+	ctx := BuildCrossContext(findings)
+	if !strings.Contains(ctx, "Finding A") || !strings.Contains(ctx, "Finding B") {
+		t.Error("cross context should contain finding titles")
+	}
+	if !strings.Contains(ctx, "Key fact about A") {
+		t.Error("cross context should use key findings when available")
+	}
+}
+
+func TestBuildCrossContext_CapsAt15(t *testing.T) {
+	var findings []AnnotatedFinding
+	for i := 0; i < 20; i++ {
+		findings = append(findings, AnnotatedFinding{
+			Publication: Publication{Title: fmt.Sprintf("Finding %d", i)},
+			Summary:     fmt.Sprintf("Summary %d", i),
+		})
+	}
+	ctx := BuildCrossContext(findings)
+	lines := strings.Split(strings.TrimSpace(ctx), "\n")
+	if len(lines) > 15 {
+		t.Errorf("expected max 15 lines, got %d", len(lines))
 	}
 }
 
@@ -636,8 +705,12 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	model := &mockModel{responses: []string{
 		// Plan sources
 		"SOURCE: Wikipedia\nREASON: Background\nQUERY: test topic",
-		// Analyze finding 1
-		"SUMMARY: A summary.\nWHY_IT_MATTERS: Very relevant.\nHOW_TO_USE: Use it.\nRELEVANCE: 4\nIMPACT: high",
+		// Analyze finding 1 — Pass 1: facts
+		"- The tool supports 5 platforms\n- Achieves 10 tokens/sec\n- Open source under MIT license",
+		// Analyze finding 1 — Pass 2: relevance
+		"WHY_IT_MATTERS: Directly competitive.\nHOW_TO_USE: Benchmark against it.\nRELEVANCE: 4\nIMPACT: high",
+		// Analyze finding 1 — Pass 3: quality gate
+		"PASS",
 		// Executive summary
 		"This research covers test topic with key findings.",
 		// Synthesis

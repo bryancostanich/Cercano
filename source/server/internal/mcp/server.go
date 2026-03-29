@@ -125,10 +125,21 @@ func (s *Server) maybeUpdateNudge(result *gomcp.CallToolResult) *gomcp.CallToolR
 	return result
 }
 
-// checkModelForResearch checks if the model used for research is appropriate.
-// Call after the pipeline has run, using the model name from the gRPC response.
-func (s *Server) checkModelForResearch(ctx context.Context, usedModel string) string {
-	if !research.IsCodeOnlyModel(usedModel) {
+// preCheckModelForResearch checks the current model BEFORE running research.
+// Returns a warning message if the model is code-only and better options exist.
+// Returns empty string if the model is fine.
+func (s *Server) preCheckModelForResearch(ctx context.Context) string {
+	// Probe the current model name with a minimal request
+	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
+		Input:       "hi",
+		DirectLocal: true,
+	})
+	if err != nil || resp == nil || resp.RoutingMetadata == nil {
+		return ""
+	}
+
+	currentModel := resp.RoutingMetadata.ModelName
+	if !research.IsCodeOnlyModel(currentModel) {
 		return ""
 	}
 
@@ -142,7 +153,17 @@ func (s *Server) checkModelForResearch(ctx context.Context, usedModel string) st
 		modelNames = append(modelNames, m.Name)
 	}
 
-	return research.CheckResearchModel(usedModel, modelNames)
+	suggested, found := research.SuggestResearchModel(modelNames)
+	if !found {
+		return ""
+	}
+
+	return fmt.Sprintf("Your current model (%s) is optimized for code, not research analysis. "+
+		"A better model for research is available: %s\n\n"+
+		"To switch and get better results, run:\n"+
+		"  cercano_config(action: \"set\", local_model: \"%s\")\n\n"+
+		"Then re-run your research query. To proceed with the current model anyway, "+
+		"add the parameter: force: true", currentModel, suggested, suggested)
 }
 
 // EstimateTokens approximates token count from a string using the ~4 chars/token heuristic.
@@ -363,6 +384,7 @@ type DeepResearchRequest struct {
 	Sources    []string `json:"sources,omitempty" jsonschema:"Override auto-detected sources. If omitted, sources are chosen based on topic domain."`
 	OutputDir  string   `json:"output_dir,omitempty" jsonschema:"Write the report to this directory as multiple files (README.md, findings/, references/, synthesis.md). Recommended for thorough research."`
 	ProjectDir string   `json:"project_dir,omitempty" jsonschema:"Project root directory."`
+	Force      bool     `json:"force,omitempty" jsonschema:"Set to true to skip the model suitability check and proceed with the current model."`
 	cloudTokenFields
 }
 
@@ -992,10 +1014,17 @@ func (s *Server) handleResearch(ctx context.Context, request *gomcp.CallToolRequ
 	}
 	s.emitEvent("cercano_research", resp, startTime, true, &args.cloudTokenFields, int(modelCaller.totalIn))
 
-	// Check if model is appropriate for research
-	if resp != nil && resp.RoutingMetadata != nil {
-		if modelNote := s.checkModelForResearch(ctx, resp.RoutingMetadata.ModelName); modelNote != "" {
-			output += "\n\n" + modelNote
+	// Check if model is appropriate for research (post-run note for lightweight research)
+	if resp != nil && resp.RoutingMetadata != nil && research.IsCodeOnlyModel(resp.RoutingMetadata.ModelName) {
+		modelsResp, _ := s.grpcClient.ListModels(ctx, &proto.ListModelsRequest{})
+		if modelsResp != nil {
+			var names []string
+			for _, m := range modelsResp.Models {
+				names = append(names, m.Name)
+			}
+			if note := research.CheckResearchModel(resp.RoutingMetadata.ModelName, names); note != "" {
+				output += "\n\n" + note
+			}
 		}
 	}
 
@@ -1232,6 +1261,17 @@ func (s *Server) handleDeepResearch(ctx context.Context, request *gomcp.CallTool
 		}, nil, nil
 	}
 
+	// Pre-check model suitability
+	if !args.Force {
+		if warning := s.preCheckModelForResearch(ctx); warning != "" {
+			return &gomcp.CallToolResult{
+				Content: []gomcp.Content{
+					&gomcp.TextContent{Text: warning},
+				},
+			}, nil, nil
+		}
+	}
+
 	// Set up dependencies
 	modelCaller := &grpcModelCallerWithTokens{client: s.grpcClient}
 
@@ -1272,13 +1312,6 @@ func (s *Server) handleDeepResearch(ctx context.Context, request *gomcp.CallTool
 
 	// Always return summary — report is written to directory
 	output := runResult.Summary(args.Topic)
-
-	// Check if model is appropriate for research
-	if resp != nil && resp.RoutingMetadata != nil {
-		if modelNote := s.checkModelForResearch(ctx, resp.RoutingMetadata.ModelName); modelNote != "" {
-			output += "\n\n" + modelNote
-		}
-	}
 
 	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{

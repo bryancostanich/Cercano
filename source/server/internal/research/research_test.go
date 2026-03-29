@@ -683,6 +683,59 @@ func TestEqualFold(t *testing.T) {
 	}
 }
 
+// --- Model Check Tests ---
+
+func TestIsCodeOnlyModel(t *testing.T) {
+	if !IsCodeOnlyModel("qwen3-coder") {
+		t.Error("qwen3-coder should be code-only")
+	}
+	if !IsCodeOnlyModel("qwen3-coder:latest") {
+		t.Error("qwen3-coder:latest should be code-only")
+	}
+	if IsCodeOnlyModel("qwen2.5:72b") {
+		t.Error("qwen2.5 should NOT be code-only")
+	}
+	if IsCodeOnlyModel("llama3.1") {
+		t.Error("llama3.1 should NOT be code-only")
+	}
+}
+
+func TestSuggestResearchModel(t *testing.T) {
+	models := []string{"qwen3-coder:latest", "qwen2.5:latest", "nomic-embed-text:latest"}
+	suggested, found := SuggestResearchModel(models)
+	if !found {
+		t.Fatal("expected to find a suggestion")
+	}
+	if suggested != "qwen2.5:latest" {
+		t.Errorf("expected qwen2.5:latest, got %s", suggested)
+	}
+}
+
+func TestSuggestResearchModel_NoBetterAvailable(t *testing.T) {
+	models := []string{"qwen3-coder:latest", "nomic-embed-text:latest"}
+	_, found := SuggestResearchModel(models)
+	if found {
+		t.Error("expected no suggestion when no research model available")
+	}
+}
+
+func TestCheckResearchModel_SuggestsSwitch(t *testing.T) {
+	note := CheckResearchModel("qwen3-coder", []string{"qwen3-coder:latest", "llama3.1:latest"})
+	if note == "" {
+		t.Fatal("expected a suggestion note")
+	}
+	if !strings.Contains(note, "llama3.1") {
+		t.Errorf("expected suggestion to mention llama3.1, got: %s", note)
+	}
+}
+
+func TestCheckResearchModel_NoNoteWhenModelIsFine(t *testing.T) {
+	note := CheckResearchModel("qwen2.5:72b", []string{"qwen2.5:72b", "qwen3-coder:latest"})
+	if note != "" {
+		t.Errorf("expected no note for research-capable model, got: %s", note)
+	}
+}
+
 // --- Config Tests ---
 
 func TestDefaultConfig_Survey(t *testing.T) {

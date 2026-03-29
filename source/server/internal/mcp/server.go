@@ -125,6 +125,26 @@ func (s *Server) maybeUpdateNudge(result *gomcp.CallToolResult) *gomcp.CallToolR
 	return result
 }
 
+// checkModelForResearch checks if the model used for research is appropriate.
+// Call after the pipeline has run, using the model name from the gRPC response.
+func (s *Server) checkModelForResearch(ctx context.Context, usedModel string) string {
+	if !research.IsCodeOnlyModel(usedModel) {
+		return ""
+	}
+
+	modelsResp, err := s.grpcClient.ListModels(ctx, &proto.ListModelsRequest{})
+	if err != nil || len(modelsResp.Models) == 0 {
+		return ""
+	}
+
+	var modelNames []string
+	for _, m := range modelsResp.Models {
+		modelNames = append(modelNames, m.Name)
+	}
+
+	return research.CheckResearchModel(usedModel, modelNames)
+}
+
 // EstimateTokens approximates token count from a string using the ~4 chars/token heuristic.
 func EstimateTokens(content string) int {
 	if len(content) == 0 {
@@ -972,6 +992,13 @@ func (s *Server) handleResearch(ctx context.Context, request *gomcp.CallToolRequ
 	}
 	s.emitEvent("cercano_research", resp, startTime, true, &args.cloudTokenFields, int(modelCaller.totalIn))
 
+	// Check if model is appropriate for research
+	if resp != nil && resp.RoutingMetadata != nil {
+		if modelNote := s.checkModelForResearch(ctx, resp.RoutingMetadata.ModelName); modelNote != "" {
+			output += "\n\n" + modelNote
+		}
+	}
+
 	toolResult := &gomcp.CallToolResult{
 		Content: []gomcp.Content{
 			&gomcp.TextContent{Text: output},
@@ -1245,6 +1272,13 @@ func (s *Server) handleDeepResearch(ctx context.Context, request *gomcp.CallTool
 
 	// Always return summary — report is written to directory
 	output := runResult.Summary(args.Topic)
+
+	// Check if model is appropriate for research
+	if resp != nil && resp.RoutingMetadata != nil {
+		if modelNote := s.checkModelForResearch(ctx, resp.RoutingMetadata.ModelName); modelNote != "" {
+			output += "\n\n" + modelNote
+		}
+	}
 
 	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{

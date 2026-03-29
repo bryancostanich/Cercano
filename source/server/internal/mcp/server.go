@@ -390,6 +390,7 @@ type DeepResearchRequest struct {
 	Sources    []string `json:"sources,omitempty" jsonschema:"Override auto-detected sources. If omitted, sources are chosen based on topic domain."`
 	OutputDir  string   `json:"output_dir,omitempty" jsonschema:"Write the report to this directory as multiple files (README.md, findings/, references/, synthesis.md). Recommended for thorough research."`
 	ProjectDir string   `json:"project_dir,omitempty" jsonschema:"Project root directory."`
+	Phase      string   `json:"phase,omitempty" jsonschema:"Run a specific phase: plan (select sources), search (find results), analyze (assess findings), synthesize (write report). Omit to run all phases. Each phase shows results and suggests the next step."`
 	UseModel   string   `json:"use_model,omitempty" jsonschema:"Use this model for the research run instead of the default. Suggested by the model check if your current model is code-optimized."`
 	cloudTokenFields
 }
@@ -1297,7 +1298,7 @@ func (s *Server) handleDeepResearch(ctx context.Context, request *gomcp.CallTool
 	dispatcher := research.NewSearchDispatcher(searchAdapter)
 	pipeline := research.NewPipeline(modelCaller, dispatcher, fetchAdapter)
 
-	runResult, err := pipeline.Run(ctx, research.RunConfig{
+	phaseResult, err := pipeline.Run(ctx, research.RunConfig{
 		Topic:      args.Topic,
 		Intent:     args.Intent,
 		Depth:      args.Depth,
@@ -1305,6 +1306,7 @@ func (s *Server) handleDeepResearch(ctx context.Context, request *gomcp.CallTool
 		Sources:    args.Sources,
 		OutputDir:  args.OutputDir,
 		ProjectDir: args.ProjectDir,
+		Phase:      args.Phase,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("cercano_deep_research: %w", err)
@@ -1316,10 +1318,9 @@ func (s *Server) handleDeepResearch(ctx context.Context, request *gomcp.CallTool
 		resp.InputTokens = modelCaller.totalIn
 		resp.OutputTokens = modelCaller.totalOut
 	}
-	s.emitEvent("cercano_deep_research", resp, startTime, true, &args.cloudTokenFields, runResult.ContentTokensAvoided)
+	s.emitEvent("cercano_deep_research", resp, startTime, true, &args.cloudTokenFields, phaseResult.ContentTokensAvoided)
 
-	// Always return summary — report is written to directory
-	output := runResult.Summary(args.Topic)
+	output := phaseResult.Summary
 
 	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{

@@ -119,3 +119,8 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 - [ ] **Track: Deep Research Skill — Multi-source academic research with ranked, annotated findings**
 *Link: [./tracks/deep_research_20260326/](./tracks/deep_research_20260326/)*
+
+---
+
+- [ ] **Track: Deep Research Enhancement — Multi-pass analysis, cross-finding context, quality gating**
+*Link: [./tracks/deep_research_enhancement_20260329/](./tracks/deep_research_enhancement_20260329/)*

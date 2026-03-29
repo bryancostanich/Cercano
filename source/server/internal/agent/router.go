@@ -55,7 +55,8 @@ type Request struct {
 	WorkDir        string
 	FileName       string
 	ConversationID string
-	DirectLocal    bool // Skip SmartRouter, go directly to local provider
+	DirectLocal    bool   // Skip SmartRouter, go directly to local provider
+	ModelOverride  string // Use this model instead of the configured default (per-request)
 }
 
 // Response represents a response from an AI model.

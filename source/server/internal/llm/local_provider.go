@@ -40,6 +40,11 @@ func (p *LocalModelProvider) Process(ctx context.Context, req *agent.Request) (*
 	eng := p.Engine
 	p.mu.RUnlock()
 
+	// Per-request model override (e.g., research uses a different model)
+	if req.ModelOverride != "" {
+		modelName = req.ModelOverride
+	}
+
 	result, err := eng.Complete(ctx, modelName, req.Input, "")
 	if err != nil {
 		return nil, err

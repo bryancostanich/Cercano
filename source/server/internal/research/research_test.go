@@ -616,22 +616,19 @@ func TestAnalyzeAll_SkipsEmptyContent(t *testing.T) {
 	}
 }
 
-func TestRunResult_Summary(t *testing.T) {
-	result := &RunResult{
+func TestPhaseResult_HasSummary(t *testing.T) {
+	result := &PhaseResult{
+		Phase:           "synthesize",
+		Summary:         "Research complete: test topic",
 		FindingsCount:   15,
-		ChasedCount:     5,
 		SourcesSearched: 4,
 		OutputDir:       "/tmp/research-output",
 	}
-	summary := result.Summary("test topic")
-	if !strings.Contains(summary, "test topic") {
-		t.Error("summary should contain topic")
+	if result.Summary == "" {
+		t.Error("expected non-empty summary")
 	}
-	if !strings.Contains(summary, "15") {
-		t.Error("summary should contain findings count")
-	}
-	if !strings.Contains(summary, "/tmp/research-output") {
-		t.Error("summary should contain output dir")
+	if result.Phase != "synthesize" {
+		t.Errorf("expected synthesize phase, got %s", result.Phase)
 	}
 }
 
@@ -797,6 +794,10 @@ func TestPipeline_EndToEnd(t *testing.T) {
 		Depth:      "survey",
 		ProjectDir: dir,
 	})
+
+	if err != nil {
+		t.Fatalf("Pipeline.Run: %v", err)
+	}
 	outputDir := result.OutputDir
 
 	if err != nil {

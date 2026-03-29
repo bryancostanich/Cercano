@@ -258,7 +258,37 @@ func AnalyzeFinding(ctx context.Context, model ModelCaller, pub Publication, con
 	return finding, nil
 }
 
-// AnalyzeAll processes all publications sequentially with accumulating cross-context.
+// AnalyzeAllWithProgress processes all publications with progress updates.
+func AnalyzeAllWithProgress(ctx context.Context, model ModelCaller, fetcher URLFetcher, pubs []Publication, intent string, cfg DeepResearchConfig, progress *ProgressWriter) []AnnotatedFinding {
+	var findings []AnnotatedFinding
+
+	for i, pub := range pubs {
+		progress.Update("Analyzing", fmt.Sprintf("Finding %d of %d: %s", i+1, len(pubs), truncateTitle(pub.Title, 50)))
+
+		content := pub.Abstract
+		if content == "" && pub.URL != "" {
+			if result, err := fetcher.FetchURL(pub.URL); err == nil {
+				content = result.Content
+			}
+		}
+
+		if content == "" {
+			continue
+		}
+
+		crossCtx := BuildCrossContext(findings)
+
+		finding, err := AnalyzeFinding(ctx, model, pub, content, intent, crossCtx)
+		if err != nil {
+			continue
+		}
+		findings = append(findings, *finding)
+	}
+
+	return findings
+}
+
+// AnalyzeAll processes all publications sequentially with accumulating cross-context (no progress).
 func AnalyzeAll(ctx context.Context, model ModelCaller, fetcher URLFetcher, pubs []Publication, intent string, cfg DeepResearchConfig) []AnnotatedFinding {
 	var findings []AnnotatedFinding
 
@@ -453,6 +483,13 @@ func parseCitedRef(s string) *CitedReference {
 		ref.Source = strings.TrimSpace(parts[2])
 	}
 	return ref
+}
+
+func truncateTitle(title string, maxLen int) string {
+	if len(title) <= maxLen {
+		return title
+	}
+	return title[:maxLen] + "..."
 }
 
 func truncateContent(content string, maxChars int) string {

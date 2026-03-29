@@ -19,19 +19,31 @@ Depth: %s
 %s
 
 Instructions:
-- Choose 3-8 sources most relevant to this topic and intent
-- For each source, provide 2-3 search queries tailored to that source's strengths
+- Choose 3-5 sources most relevant to this SPECIFIC topic and intent
+- For each source, provide 2-3 HIGHLY SPECIFIC search queries
+- Queries must be precise enough to return directly relevant results — not broad topic searches
+
+BAD queries (too broad, will return irrelevant results):
+QUERY: local AI inference
+QUERY: developer tools AI
+QUERY: machine learning edge computing
+
+GOOD queries (specific, will find relevant results):
+QUERY: "local LLM inference" tools comparison ollama llama.cpp
+QUERY: on-device AI code completion IDE plugin
+QUERY: privacy-preserving local model serving framework developer
+
 - Format your response EXACTLY as:
 
 SOURCE: <source name>
 REASON: <why this source is relevant>
-QUERY: <search query 1>
-QUERY: <search query 2>
+QUERY: <specific search query 1>
+QUERY: <specific search query 2>
 
 SOURCE: <source name>
 REASON: <why this source is relevant>
-QUERY: <search query 1>
-QUERY: <search query 2>
+QUERY: <specific search query 1>
+QUERY: <specific search query 2>
 
 Only include sources that are genuinely relevant. Do not include all sources.`, SourceNames(), topic, intent, depth, formatDateRangeInstruction(dateRange))
 

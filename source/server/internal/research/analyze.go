@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // --- Pass 1: Fact Extraction ---
@@ -258,20 +259,65 @@ func AnalyzeFinding(ctx context.Context, model ModelCaller, pub Publication, con
 	return finding, nil
 }
 
-// AnalyzeAllWithProgress processes all publications with progress updates.
-func AnalyzeAllWithProgress(ctx context.Context, model ModelCaller, fetcher URLFetcher, pubs []Publication, intent string, cfg DeepResearchConfig, progress *ProgressWriter) []AnnotatedFinding {
+// PrefetchContent fetches all publication URLs concurrently and returns a map of URL → content.
+func PrefetchContent(ctx context.Context, fetcher URLFetcher, pubs []Publication, progress *ProgressWriter) map[string]string {
+	content := make(map[string]string)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	progress.Update("Fetching", fmt.Sprintf("Prefetching %d pages concurrently...", len(pubs)))
+
+	for _, pub := range pubs {
+		if pub.Abstract != "" {
+			// Already have content from API
+			mu.Lock()
+			content[pub.URL] = pub.Abstract
+			mu.Unlock()
+			continue
+		}
+		if pub.URL == "" {
+			continue
+		}
+
+		wg.Add(1)
+		go func(url string) {
+			defer wg.Done()
+			if result, err := fetcher.FetchURL(url); err == nil && result.Content != "" {
+				mu.Lock()
+				content[url] = result.Content
+				mu.Unlock()
+			}
+		}(pub.URL)
+	}
+
+	wg.Wait()
+	progress.Update("Fetching", fmt.Sprintf("Prefetched %d pages", len(content)))
+	return content
+}
+
+// AnalyzeAllWithPrefetch uses a pre-populated content map (from search+fetch overlap).
+// Falls back to fetching individual URLs if content is missing.
+func AnalyzeAllWithPrefetch(ctx context.Context, model ModelCaller, fetcher URLFetcher, pubs []Publication, prefetched map[string]string, intent string, cfg DeepResearchConfig, progress *ProgressWriter) []AnnotatedFinding {
+	// If no prefetched content, do a bulk prefetch now
+	if len(prefetched) == 0 {
+		prefetched = PrefetchContent(ctx, fetcher, pubs, progress)
+	}
+
 	var findings []AnnotatedFinding
 
 	for i, pub := range pubs {
 		progress.Update("Analyzing", fmt.Sprintf("Finding %d of %d: %s", i+1, len(pubs), truncateTitle(pub.Title, 50)))
 
-		content := pub.Abstract
+		content := prefetched[pub.URL]
+		if content == "" && pub.Abstract != "" {
+			content = pub.Abstract
+		}
+		// Last resort: fetch individually
 		if content == "" && pub.URL != "" {
 			if result, err := fetcher.FetchURL(pub.URL); err == nil {
 				content = result.Content
 			}
 		}
-
 		if content == "" {
 			continue
 		}
@@ -286,6 +332,13 @@ func AnalyzeAllWithProgress(ctx context.Context, model ModelCaller, fetcher URLF
 	}
 
 	return findings
+}
+
+// AnalyzeAllWithProgress processes all publications with progress updates.
+// Content is prefetched concurrently before analysis begins.
+func AnalyzeAllWithProgress(ctx context.Context, model ModelCaller, fetcher URLFetcher, pubs []Publication, intent string, cfg DeepResearchConfig, progress *ProgressWriter) []AnnotatedFinding {
+	prefetched := PrefetchContent(ctx, fetcher, pubs, progress)
+	return AnalyzeAllWithPrefetch(ctx, model, fetcher, pubs, prefetched, intent, cfg, progress)
 }
 
 // AnalyzeAll processes all publications sequentially with accumulating cross-context (no progress).

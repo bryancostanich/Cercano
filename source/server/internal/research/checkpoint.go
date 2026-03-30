@@ -75,6 +75,18 @@ func (c *Checkpoint) LoadSections() (*ReportSections, error) {
 	return &sections, nil
 }
 
+func (c *Checkpoint) SaveContentMap(content map[string]string) error {
+	return c.saveJSON("content.json", content)
+}
+
+func (c *Checkpoint) LoadContentMap() (map[string]string, error) {
+	var content map[string]string
+	if err := c.loadJSON("content.json", &content); err != nil {
+		return nil, err
+	}
+	return content, nil
+}
+
 // HasPhase returns true if a checkpoint file for the given phase exists.
 func (c *Checkpoint) HasPhase(filename string) bool {
 	_, err := os.Stat(filepath.Join(c.workDir, filename))

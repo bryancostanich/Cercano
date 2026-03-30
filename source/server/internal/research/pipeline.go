@@ -146,10 +146,13 @@ func (p *Pipeline) runSearch(ctx context.Context, cfg RunConfig, cp *Checkpoint,
 		return nil, fmt.Errorf("no research plan found — run with phase: \"plan\" first")
 	}
 
-	progress.Update("Searching", fmt.Sprintf("Querying %d sources...", len(plan.Sources)))
+	progress.Update("Searching", fmt.Sprintf("Searching %d sources and prefetching content concurrently...", len(plan.Sources)))
 
-	pubs := p.dispatcher.SearchAllSources(ctx, plan, rcfg.MaxPrimaryResults)
+	// Search + prefetch content in parallel
+	pubs, contentMap := p.dispatcher.SearchAndPrefetch(ctx, plan, rcfg.MaxPrimaryResults, p.fetcher)
 	cp.SaveSearchResults(pubs)
+	// Save prefetched content for the analyze phase
+	cp.SaveContentMap(contentMap)
 
 	// Build summary
 	var sb strings.Builder
@@ -195,8 +198,11 @@ func (p *Pipeline) runAnalyze(ctx context.Context, cfg RunConfig, cp *Checkpoint
 		return nil, fmt.Errorf("no search results found — run with phase: \"search\" first")
 	}
 
+	// Load prefetched content if available (from search phase)
+	prefetched, _ := cp.LoadContentMap()
+
 	progress.Update("Analyzing", fmt.Sprintf("Processing %d results (3 passes each)...", len(pubs)))
-	findings := AnalyzeAllWithProgress(ctx, p.model, p.fetcher, pubs, cfg.Intent, rcfg, progress)
+	findings := AnalyzeAllWithPrefetch(ctx, p.model, p.fetcher, pubs, prefetched, cfg.Intent, rcfg, progress)
 
 	// Chase references
 	if len(findings) > 0 {

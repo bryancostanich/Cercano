@@ -77,6 +77,59 @@ func (d *SearchDispatcher) SearchAllSources(ctx context.Context, plan *ResearchP
 	return deduplicatePubs(allPubs)
 }
 
+// SearchAndPrefetch searches all sources concurrently AND starts fetching content
+// as results come in. Returns publications and a prefetched content map.
+func (d *SearchDispatcher) SearchAndPrefetch(ctx context.Context, plan *ResearchPlan, maxPerSource int, fetcher URLFetcher) ([]Publication, map[string]string) {
+	var allPubs []Publication
+	var pubsMu sync.Mutex
+
+	content := make(map[string]string)
+	var contentMu sync.Mutex
+	var fetchWg sync.WaitGroup
+
+	var searchWg sync.WaitGroup
+
+	for _, source := range plan.Sources {
+		searchWg.Add(1)
+		go func(src Source) {
+			defer searchWg.Done()
+			pubs := d.SearchSource(ctx, src, maxPerSource)
+
+			pubsMu.Lock()
+			allPubs = append(allPubs, pubs...)
+			pubsMu.Unlock()
+
+			// Start fetching these results immediately
+			for _, pub := range pubs {
+				if pub.Abstract != "" {
+					contentMu.Lock()
+					content[pub.URL] = pub.Abstract
+					contentMu.Unlock()
+					continue
+				}
+				if pub.URL == "" {
+					continue
+				}
+
+				fetchWg.Add(1)
+				go func(url string) {
+					defer fetchWg.Done()
+					if result, err := fetcher.FetchURL(url); err == nil && result.Content != "" {
+						contentMu.Lock()
+						content[url] = result.Content
+						contentMu.Unlock()
+					}
+				}(pub.URL)
+			}
+		}(source)
+	}
+
+	searchWg.Wait()
+	fetchWg.Wait()
+
+	return deduplicatePubs(allPubs), content
+}
+
 // searchWeb uses DDG with site-scoping for web sources.
 func (d *SearchDispatcher) searchWeb(ctx context.Context, source Source, query string, maxResults int) ([]Publication, error) {
 	searchQuery := query

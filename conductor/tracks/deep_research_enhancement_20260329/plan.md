@@ -2,88 +2,82 @@
 
 ## Phase 0: Model Check & Auto-Switch
 
-### Objective
-Detect when the active model is a poor fit for research tasks and prompt the user before wasting time.
-
 ### Tasks
 - [x] Task: Define research-capable model list and code-only model detection.
-    - [x] `IsCodeOnlyModel`, `SuggestResearchModel`, `CheckResearchModel`.
-    - [x] Red/Green TDD: TestIsCodeOnlyModel, TestSuggestResearchModel, TestCheckResearchModel_SuggestsSwitch, TestCheckResearchModel_NoNoteWhenModelIsFine.
-- [x] Task: Pre-check model before deep research runs.
-    - [x] If code-only model detected, return immediately with switch suggestion.
-    - [x] User can override with `force: true` parameter.
-    - [x] Regular `cercano_research` keeps post-run note (it's fast).
+- [x] Task: Pre-check model before deep research runs. Returns immediately with suggestion if wrong model.
+- [x] Task: Per-request model override via `use_model` parameter (proto + full pipeline).
 - [ ] ~~Task: Add `research_model` config field.~~ Removed — we check what's being used, not bake specific models.
 
 ## Phase 1: Multi-Pass Analysis Pipeline
 
-### Objective
-Replace the single overloaded analysis call with three focused passes.
-
 ### Tasks
-- [x] Task: Implement Pass 1 — Fact Extraction (`ExtractFacts`).
-    - [x] Example-driven prompt with BAD vs GOOD examples.
-    - [x] Red/Green TDD: TestExtractFacts_ReturnsBullets.
-- [x] Task: Implement Pass 2 — Relevance Analysis (`AnalyzeRelevance`).
-    - [x] Takes extracted facts + intent + cross-context.
-    - [x] Example-driven prompt for WHY_IT_MATTERS and HOW_TO_USE.
-    - [x] Scoring guide with full range descriptions (1-5).
-    - [x] Red/Green TDD: TestAnalyzeRelevance_ParsesScores.
-- [x] Task: Implement Pass 3 — Quality Gate (`ScoreQuality`).
-    - [x] Checks for specific facts vs vague filler.
-    - [x] Re-prompts fact extraction with critique on failure (max 1 retry).
-    - [x] Red/Green TDD: TestScoreQuality_PassesGoodSummary, TestScoreQuality_FailsVagueSummary.
+- [x] Task: Pass 1 — Fact Extraction with example-driven prompt.
+- [x] Task: Pass 2 — Relevance Analysis with cross-finding context and scoring guide.
+- [x] Task: Pass 3 — Quality Gate with re-prompt on failure.
 - [x] Task: Wire three passes into `AnalyzeFinding`.
 
 ## Phase 2: Cross-Finding Context
 
-### Objective
-Give the model awareness of previously analyzed findings.
-
 ### Tasks
-- [x] Task: `BuildCrossContext` — 1-line summary per prior finding, capped at 15.
-    - [x] Red/Green TDD: TestBuildCrossContext_FormatsCorrectly, TestBuildCrossContext_CapsAt15.
-- [x] Task: Pass cross-context to AnalyzeRelevance.
+- [x] Task: `BuildCrossContext` — 1-line summaries, capped at 15.
+- [x] Task: Cross-context passed to AnalyzeRelevance.
 - [x] Task: `AnalyzeAll` accumulates context as it processes.
 
 ## Phase 3: Quality Gate with Re-Prompting
 
-### Tasks
 - [x] Implemented as part of Phase 1 (Pass 3).
 
 ## Phase 4: Depth Over Breadth
 
-### Tasks
-- [x] Task: Updated `DefaultConfig` — survey: 3/source, thorough: 6/source, increased truncation limits.
-- [x] Task: Updated planner prompt — 3-5 sources with SPECIFIC query examples (BAD vs GOOD).
+- [x] Task: Updated `DefaultConfig` — survey: 3/source, thorough: 6/source.
+- [x] Task: Updated planner prompt with specific query examples.
 
 ## Phase 5: Example-Driven Prompts
 
-### Tasks
-- [x] Task: Examples in fact extraction prompt.
-- [x] Task: Examples in relevance analysis prompt.
-- [x] Task: Examples in planner prompt (search query quality).
+- [x] Task: Examples in fact extraction, relevance analysis, and planner prompts.
 
 ## Phase 6: Progress Updates
 
-### Objective
-Show the user what's happening during long-running research.
-
-### Tasks
-- [x] Task: `ProgressWriter` — writes to stderr and `status.md` in output dir.
-    - [x] Shows phase, detail, and elapsed time.
-    - [x] status.md updated live (viewable in VS Code).
-    - [x] Cleaned up on completion.
+- [x] Task: `ProgressWriter` — stderr + `status.md` in output dir.
 - [x] Task: `AnalyzeAllWithProgress` — per-finding progress messages.
 - [x] Task: Pipeline wired with progress at every phase.
 
-## Phase 7: Integration & Validation
+## Phase 7: Phased Execution
 
-### Objective
-Verify the enhanced pipeline produces measurably better output.
+- [x] Task: Pipeline supports `phase` parameter: plan, search, analyze, synthesize.
+- [x] Task: Each phase returns results and suggests next step.
+- [x] Task: State preserved via checkpoints between calls.
+- [x] Task: MCP handler wires `phase` parameter through.
+
+## Phase 8: Parallel Content Prefetching
+
+- [x] Task: `PrefetchContent` — fetches all URLs concurrently.
+- [x] Task: `SearchAndPrefetch` — overlaps search + fetch across sources.
+- [x] Task: Content map checkpointed for analyze phase.
+- [x] Task: `AnalyzeAllWithPrefetch` reads from prefetched map.
+
+## Phase 9: Validation & Polish
+
+### Status: NOT STARTED — pick up here
 
 ### Tasks
-- [ ] Task: Run before/after comparison.
-    - [ ] Same topic + intent, compare: summary specificity, score distribution, cross-references.
-- [ ] Task: Update SKILL.md with new behavior notes.
+- [ ] Task: Push pending commits and test phased flow end-to-end with parallelized fetching.
+- [ ] Task: Run timed before/after comparison (pre-parallelization vs post).
+- [ ] Task: Address remaining issues:
+    - [ ] Relevance scores still cluster at 4/5 — needs calibration.
+    - [ ] DDG searcher returning more results than max_results limit.
+    - [ ] Irrelevant results from broad DDG queries (hiring threads, incident pages).
+    - [ ] Consider filtering thin content (< N chars) before analysis.
+- [ ] Task: Update SKILL.md with: phased execution, model check, use_model parameter.
+- [ ] Task: Update track plan for deep_research_20260326 (parent track) with completion status.
 - [ ] Task: Conductor - User Manual Verification 'Integration & Validation' (Protocol in workflow.md)
+
+## Unpushed Commits
+
+There are commits not yet pushed to origin:
+- `feat(research): Pre-check model before running deep research, not after`
+- `conductor(plan): Add formal before/after validation for research enhancement`
+- `feat(research): Per-request model override and pre-run model check flow`
+- `feat(research): Phased execution — plan, search, analyze, synthesize as separate steps`
+- `perf(research): Parallel content prefetching overlapped with search`
+- `conductor(plan): Update deep research enhancement track with completion status`

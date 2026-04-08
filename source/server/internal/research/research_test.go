@@ -486,96 +486,325 @@ func TestCompileReport_SeparatesChasedFindings(t *testing.T) {
 	}
 }
 
-// --- Checkpoint Tests ---
+// --- Incremental Deepening Tests ---
 
-func TestCheckpoint_SaveAndLoad(t *testing.T) {
+func TestPipeline_SameDepthReturnsAlreadyMessage(t *testing.T) {
 	dir := t.TempDir()
-	cp := NewCheckpoint(dir, "topic", "intent", "thorough")
+	outputDir := filepath.Join(dir, "scratch", "research", "test-topic")
 
-	plan := &ResearchPlan{Topic: "topic", Intent: "intent", Depth: "thorough"}
-	if err := cp.SavePlan(plan); err != nil {
-		t.Fatalf("SavePlan: %v", err)
+	// Create a completed sidecar at "standard" depth
+	sc := NewSidecar(outputDir)
+	state := NewState("test topic", "intent", "standard", "")
+	state.Progress = ProgressState{Phase: "complete", CompletedAt: time.Now()}
+	if err := sc.Save(state); err != nil {
+		t.Fatalf("Save sidecar: %v", err)
 	}
 
-	loaded, err := cp.LoadPlan()
+	pipeline := NewPipeline(&mockModel{responses: []string{""}}, NewSearchDispatcher(&mockSearcher{}), &mockFetcher{})
+
+	result, err := pipeline.Run(context.Background(), RunConfig{
+		Topic:     "test topic",
+		Intent:    "intent",
+		Depth:     "standard",
+		OutputDir: outputDir,
+	})
 	if err != nil {
-		t.Fatalf("LoadPlan: %v", err)
+		t.Fatalf("Run: %v", err)
 	}
-	if loaded.Topic != "topic" {
-		t.Errorf("expected topic, got %s", loaded.Topic)
-	}
-}
-
-func TestCheckpoint_HasPhase(t *testing.T) {
-	dir := t.TempDir()
-	cp := NewCheckpoint(dir, "topic", "intent", "thorough")
-
-	if cp.HasPhase("plan.json") {
-		t.Error("expected HasPhase false before save")
-	}
-
-	cp.SavePlan(&ResearchPlan{Topic: "test"})
-
-	if !cp.HasPhase("plan.json") {
-		t.Error("expected HasPhase true after save")
+	if !strings.Contains(result.Summary, "already at depth") {
+		t.Errorf("expected 'already at depth' message, got: %s", result.Summary)
 	}
 }
 
-func TestCheckpoint_DeterministicHash(t *testing.T) {
+func TestPipeline_ShallowerDepthReturnsAlreadyMessage(t *testing.T) {
 	dir := t.TempDir()
-	cp1 := NewCheckpoint(dir, "topic", "intent", "thorough")
-	cp2 := NewCheckpoint(dir, "topic", "intent", "thorough")
+	outputDir := filepath.Join(dir, "scratch", "research", "test-topic")
 
-	if cp1.WorkDir() != cp2.WorkDir() {
-		t.Error("expected same work dir for same inputs")
+	// Create a completed sidecar at "deep" depth
+	sc := NewSidecar(outputDir)
+	state := NewState("test topic", "intent", "deep", "")
+	state.Progress = ProgressState{Phase: "complete", CompletedAt: time.Now()}
+	if err := sc.Save(state); err != nil {
+		t.Fatalf("Save sidecar: %v", err)
 	}
 
-	cp3 := NewCheckpoint(dir, "different", "intent", "thorough")
-	if cp1.WorkDir() == cp3.WorkDir() {
-		t.Error("expected different work dir for different inputs")
+	pipeline := NewPipeline(&mockModel{responses: []string{""}}, NewSearchDispatcher(&mockSearcher{}), &mockFetcher{})
+
+	result, err := pipeline.Run(context.Background(), RunConfig{
+		Topic:     "test topic",
+		Intent:    "intent",
+		Depth:     "survey", // shallower than deep
+		OutputDir: outputDir,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(result.Summary, "already at depth") {
+		t.Errorf("expected 'already at depth' message, got: %s", result.Summary)
 	}
 }
 
-func TestCheckpoint_Cleanup(t *testing.T) {
+func TestPipeline_DeeperDepthProceeds(t *testing.T) {
 	dir := t.TempDir()
-	cp := NewCheckpoint(dir, "topic", "intent", "thorough")
-	cp.SavePlan(&ResearchPlan{Topic: "test"})
+	outputDir := filepath.Join(dir, "scratch", "research", "test-topic")
 
-	cp.Cleanup()
+	// Create a completed sidecar at "survey" depth with plan + findings
+	sc := NewSidecar(outputDir)
+	state := NewState("test topic", "intent", "survey", "")
+	state.Plan = &ResearchPlan{
+		Topic: "test topic", Intent: "intent", Depth: "survey",
+		Sources: []Source{{Name: "Wikipedia", Type: "web", Site: "wikipedia.org", Queries: []string{"test"}, Reason: "background"}},
+	}
+	state.SearchResults = []Publication{{Title: "Existing Pub", URL: "https://example.com/existing", Source: "Wikipedia"}}
+	state.Findings = []AnnotatedFinding{{
+		Publication:    Publication{Title: "Existing Pub", URL: "https://example.com/existing", Source: "Wikipedia"},
+		RelevanceScore: 3, ImpactRating: "medium", Summary: "existing finding",
+		KeyFindings: []string{"existing fact"},
+	}}
+	state.Progress = ProgressState{Phase: "complete", CompletedAt: time.Now()}
+	if err := sc.Save(state); err != nil {
+		t.Fatalf("Save sidecar: %v", err)
+	}
 
-	if _, err := os.Stat(cp.WorkDir()); !os.IsNotExist(err) {
-		t.Error("expected work dir to be removed after cleanup")
+	model := &mockModel{responses: []string{
+		// PlanExpansion response
+		"SOURCE: Google Scholar\nREASON: Broader academic coverage\nQUERY: test topic academic",
+		// Analyze new finding — Pass 1: facts
+		"- New fact from deeper search",
+		// Analyze new finding — Pass 2: relevance
+		"WHY_IT_MATTERS: New perspective.\nHOW_TO_USE: Compare.\nRELEVANCE: 4\nIMPACT: high",
+		// Analyze new finding — Pass 3: quality gate
+		"PASS",
+		// ReAnalyzeMiddleFindings — re-score existing finding (score was 3)
+		"WHY_IT_MATTERS: Updated perspective.\nHOW_TO_USE: Updated action.\nRELEVANCE: 4\nIMPACT: high",
+		// Executive summary
+		"Deep research summary.",
+		// Synthesis
+		"Deep synthesis.",
+		// Contradictions
+		"NONE",
+		// Gap analysis
+		"- Remaining gaps",
+		// Reading order
+		"1. Start here",
+		// Follow-up
+		"1. Follow up query",
+	}}
+
+	searcher := &mockSearcher{results: map[string][]SearchResult{
+		"test topic": {{URL: "https://example.com/new", Title: "New Article", Snippet: strings.Repeat("Content. ", 15)}},
+	}}
+	fetcher := &mockFetcher{pages: map[string]*FetchResult{
+		"https://example.com/new": {URL: "https://example.com/new", Content: strings.Repeat("New deep content. ", 40)},
+	}}
+
+	dispatcher := NewSearchDispatcher(searcher)
+	pipeline := NewPipeline(model, dispatcher, fetcher)
+
+	result, err := pipeline.Run(context.Background(), RunConfig{
+		Topic:     "test topic",
+		Intent:    "intent",
+		Depth:     "standard", // deeper than survey
+		OutputDir: outputDir,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Contains(result.Summary, "already at depth") {
+		t.Error("deeper depth should not return 'already at depth' message")
+	}
+	if result.FindingsCount == 0 {
+		t.Error("expected findings from deepened run")
 	}
 }
 
-// --- Additional Coverage Tests ---
-
-func TestCheckpoint_SaveAndLoadAllTypes(t *testing.T) {
+func TestPipeline_InProgressStateResumes(t *testing.T) {
 	dir := t.TempDir()
-	cp := NewCheckpoint(dir, "topic", "intent", "thorough")
+	outputDir := filepath.Join(dir, "scratch", "research", "test-topic")
 
-	// Search results
-	pubs := []Publication{{Title: "Pub1", URL: "https://example.com"}}
-	cp.SaveSearchResults(pubs)
-	loaded, err := cp.LoadSearchResults()
-	if err != nil || len(loaded) != 1 {
-		t.Fatalf("LoadSearchResults: err=%v, len=%d", err, len(loaded))
+	// Create an in-progress sidecar (crashed after plan phase)
+	sc := NewSidecar(outputDir)
+	state := NewState("test topic", "intent", "survey", "")
+	state.Plan = &ResearchPlan{
+		Topic: "test topic", Intent: "intent", Depth: "survey",
+		Sources: []Source{{Name: "Wikipedia", Type: "web", Site: "wikipedia.org", Queries: []string{"test"}, Reason: "background"}},
+	}
+	state.Progress = ProgressState{Phase: "plan"} // in progress
+	if err := sc.Save(state); err != nil {
+		t.Fatalf("Save sidecar: %v", err)
 	}
 
-	// Findings
-	findings := []AnnotatedFinding{{Publication: Publication{Title: "F1"}, RelevanceScore: 4, ImpactRating: "high"}}
-	cp.SaveFindings(findings)
-	loadedFindings, err := cp.LoadFindings()
-	if err != nil || len(loadedFindings) != 1 {
-		t.Fatalf("LoadFindings: err=%v, len=%d", err, len(loadedFindings))
+	model := &mockModel{responses: []string{
+		// Plan (existing plan will be kept since it's a resume, not deepening)
+		"SOURCE: Wikipedia\nREASON: Background\nQUERY: test topic",
+		// Analyze — facts
+		"- A test fact about topic",
+		// Analyze — relevance
+		"WHY_IT_MATTERS: Important.\nHOW_TO_USE: Use it.\nRELEVANCE: 4\nIMPACT: high",
+		// Quality gate
+		"PASS",
+		// Executive summary
+		"Summary.",
+		// Synthesis
+		"Synthesis.",
+		// Contradictions
+		"NONE",
+		// Gap analysis
+		"- Gap",
+		// Reading order
+		"1. Read this",
+		// Follow-up
+		"1. Follow up",
+	}}
+
+	searcher := &mockSearcher{results: map[string][]SearchResult{
+		"test topic": {{URL: "https://example.com/1", Title: "Test Article", Snippet: strings.Repeat("Snippet content. ", 15)}},
+	}}
+	fetcher := &mockFetcher{pages: map[string]*FetchResult{
+		"https://example.com/1": {URL: "https://example.com/1", Content: strings.Repeat("Full content. ", 40)},
+	}}
+
+	dispatcher := NewSearchDispatcher(searcher)
+	pipeline := NewPipeline(model, dispatcher, fetcher)
+
+	result, err := pipeline.Run(context.Background(), RunConfig{
+		Topic:     "test topic",
+		Intent:    "intent",
+		Depth:     "survey",
+		OutputDir: outputDir,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// Should have completed — not returned "already at depth"
+	if strings.Contains(result.Summary, "already at depth") {
+		t.Error("in-progress state should resume, not return already-complete")
+	}
+}
+
+func TestReAnalyzeMiddleFindings_OnlyReScores2to4(t *testing.T) {
+	model := &mockModelCaller{fn: func(prompt string) (string, error) {
+		// Always return score 5 — but it should only be called for score 2-4 findings
+		return "WHY_IT_MATTERS: Updated.\nHOW_TO_USE: Updated.\nRELEVANCE: 5\nIMPACT: high", nil
+	}}
+
+	findings := []AnnotatedFinding{
+		{Publication: Publication{Title: "Score1"}, RelevanceScore: 1, ImpactRating: "low", KeyFindings: []string{"fact"}},
+		{Publication: Publication{Title: "Score2"}, RelevanceScore: 2, ImpactRating: "low", KeyFindings: []string{"fact"}},
+		{Publication: Publication{Title: "Score3"}, RelevanceScore: 3, ImpactRating: "medium", KeyFindings: []string{"fact"}},
+		{Publication: Publication{Title: "Score4"}, RelevanceScore: 4, ImpactRating: "high", KeyFindings: []string{"fact"}},
+		{Publication: Publication{Title: "Score5"}, RelevanceScore: 5, ImpactRating: "high", KeyFindings: []string{"fact"}},
 	}
 
-	// Sections
-	sections := &ReportSections{ExecutiveSummary: "Summary", Synthesis: "Synth"}
-	cp.SaveSections(sections)
-	loadedSections, err := cp.LoadSections()
-	if err != nil || loadedSections.ExecutiveSummary != "Summary" {
-		t.Fatalf("LoadSections: err=%v", err)
+	result := ReAnalyzeMiddleFindings(context.Background(), model, findings, "test intent")
+
+	// Score 1 should be unchanged
+	if result[0].RelevanceScore != 1 {
+		t.Errorf("score-1 finding should be unchanged, got %d", result[0].RelevanceScore)
+	}
+	// Score 5 should be unchanged
+	if result[4].RelevanceScore != 5 {
+		t.Errorf("score-5 finding should be unchanged, got %d", result[4].RelevanceScore)
+	}
+	// Scores 2, 3, 4 should be re-scored to 5 (mock always returns 5)
+	for i := 1; i <= 3; i++ {
+		if result[i].RelevanceScore != 5 {
+			t.Errorf("score-%d finding should be re-scored to 5, got %d", i+1, result[i].RelevanceScore)
+		}
+		if result[i].WhyItMatters != "Updated." {
+			t.Errorf("score-%d finding WhyItMatters should be updated", i+1)
+		}
+	}
+}
+
+func TestPlanExpansion_FiltersExistingSources(t *testing.T) {
+	model := &mockModel{responses: []string{
+		"SOURCE: PubMed\nREASON: Already searched\nQUERY: test\n\nSOURCE: arXiv\nREASON: New source\nQUERY: test deep",
+	}}
+
+	existing := []Source{
+		{Name: "PubMed", Queries: []string{"test"}, Reason: "existing"},
+	}
+
+	newSources, err := PlanExpansion(context.Background(), model, "topic", "intent", "deep", "", existing, 5)
+	if err != nil {
+		t.Fatalf("PlanExpansion: %v", err)
+	}
+
+	// PubMed should be filtered out since it's already in existing
+	for _, s := range newSources {
+		if strings.EqualFold(s.Name, "PubMed") {
+			t.Error("PlanExpansion should filter out existing sources")
+		}
+	}
+	// arXiv should be kept
+	found := false
+	for _, s := range newSources {
+		if s.Name == "arXiv" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected arXiv in new sources")
+	}
+}
+
+func TestPipeline_SidecarPersistsAfterComplete(t *testing.T) {
+	model := &mockModel{responses: []string{
+		// Plan
+		"SOURCE: Wikipedia\nREASON: Background\nQUERY: test topic",
+		// Analyze — facts
+		"- Test fact",
+		// Analyze — relevance
+		"WHY_IT_MATTERS: Important.\nHOW_TO_USE: Use it.\nRELEVANCE: 4\nIMPACT: high",
+		// Quality gate
+		"PASS",
+		// Executive summary
+		"Summary.",
+		// Synthesis
+		"Synthesis.",
+		// Contradictions
+		"NONE",
+		// Gap analysis
+		"- Gap",
+		// Reading order
+		"1. Read this",
+		// Follow-up
+		"1. Follow up",
+	}}
+
+	searcher := &mockSearcher{results: map[string][]SearchResult{
+		"test topic": {{URL: "https://example.com/1", Title: "Test Article", Snippet: strings.Repeat("A test snippet about the topic with substantial details and findings. ", 15)}},
+	}}
+	fetcher := &mockFetcher{pages: map[string]*FetchResult{}}
+
+	dir := t.TempDir()
+	dispatcher := NewSearchDispatcher(searcher)
+	pipeline := NewPipeline(model, dispatcher, fetcher)
+
+	result, err := pipeline.Run(context.Background(), RunConfig{
+		Topic:      "test topic",
+		Intent:     "intent",
+		Depth:      "survey",
+		ProjectDir: dir,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Verify sidecar persists (not cleaned up)
+	sc := NewSidecar(result.OutputDir)
+	if !sc.Exists() {
+		t.Error("expected research_state.json to persist after completion")
+	}
+
+	// Verify state is marked complete
+	loaded, err := sc.Load()
+	if err != nil {
+		t.Fatalf("Load sidecar: %v", err)
+	}
+	if loaded.Progress.Phase != "complete" {
+		t.Errorf("expected phase 'complete', got %q", loaded.Progress.Phase)
 	}
 }
 

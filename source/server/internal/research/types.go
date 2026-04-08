@@ -115,6 +115,38 @@ type DeepResearchConfig struct {
 	MaxSources          int // max sources to search
 }
 
+// CurrentStateVersion is the version written into ResearchState.Version.
+const CurrentStateVersion = 1
+
+// ResearchState is the persistent sidecar written to research_state.json.
+type ResearchState struct {
+	Version       int                `json:"version"`
+	Depth         string             `json:"depth"`
+	Topic         string             `json:"topic"`
+	Intent        string             `json:"intent"`
+	DateRange     string             `json:"date_range,omitempty"`
+	Plan          *ResearchPlan      `json:"plan,omitempty"`
+	SearchResults []Publication      `json:"search_results,omitempty"`
+	ContentCache  map[string]string  `json:"content_cache,omitempty"`
+	Findings      []AnnotatedFinding `json:"findings,omitempty"`
+	Sections      *ReportSections    `json:"sections,omitempty"`
+	Progress      ProgressState      `json:"progress"`
+	CreatedAt     time.Time          `json:"created_at"`
+	UpdatedAt     time.Time          `json:"updated_at"`
+}
+
+// ProgressState is the serializable progress snapshot in the sidecar.
+type ProgressState struct {
+	Phase            string    `json:"phase"`
+	Step             string    `json:"step,omitempty"`
+	Current          int       `json:"current,omitempty"`
+	Total            int       `json:"total,omitempty"`
+	FindingsAccepted int       `json:"findings_accepted"`
+	RunStartedAt     time.Time `json:"run_started_at"`
+	PhaseStartedAt   time.Time `json:"phase_started_at,omitempty"`
+	CompletedAt      time.Time `json:"completed_at,omitempty"`
+}
+
 // DepthOrder returns a numeric ordering for a depth string (survey=1, standard=2, deep=3, unknown=0).
 func DepthOrder(depth string) int {
 	switch depth {

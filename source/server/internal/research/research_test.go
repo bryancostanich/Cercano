@@ -836,6 +836,168 @@ func TestDepthOrder(t *testing.T) {
 	}
 }
 
+// --- Sidecar Tests ---
+
+func TestSidecar_SaveAndLoad(t *testing.T) {
+	dir := t.TempDir()
+	sc := NewSidecar(dir)
+
+	state := NewState("test topic", "test intent", "standard", "2024-2025")
+	state.Plan = &ResearchPlan{Topic: "test topic", Intent: "test intent", Depth: "standard"}
+	state.SearchResults = []Publication{{Title: "Pub1", URL: "https://example.com/1"}}
+	state.Findings = []AnnotatedFinding{{Publication: Publication{Title: "F1"}, RelevanceScore: 4}}
+
+	if err := sc.Save(state); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := sc.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if loaded.Topic != "test topic" {
+		t.Errorf("expected topic %q, got %q", "test topic", loaded.Topic)
+	}
+	if loaded.Intent != "test intent" {
+		t.Errorf("expected intent %q, got %q", "test intent", loaded.Intent)
+	}
+	if loaded.Depth != "standard" {
+		t.Errorf("expected depth %q, got %q", "standard", loaded.Depth)
+	}
+	if loaded.DateRange != "2024-2025" {
+		t.Errorf("expected date_range %q, got %q", "2024-2025", loaded.DateRange)
+	}
+	if loaded.Version != CurrentStateVersion {
+		t.Errorf("expected version %d, got %d", CurrentStateVersion, loaded.Version)
+	}
+	if loaded.Plan == nil {
+		t.Fatal("expected non-nil plan")
+	}
+	if loaded.Plan.Topic != "test topic" {
+		t.Errorf("expected plan topic %q, got %q", "test topic", loaded.Plan.Topic)
+	}
+	if len(loaded.SearchResults) != 1 {
+		t.Errorf("expected 1 search result, got %d", len(loaded.SearchResults))
+	}
+	if len(loaded.Findings) != 1 {
+		t.Errorf("expected 1 finding, got %d", len(loaded.Findings))
+	}
+	if loaded.UpdatedAt.IsZero() {
+		t.Error("expected UpdatedAt to be set after Save")
+	}
+}
+
+func TestSidecar_Exists(t *testing.T) {
+	dir := t.TempDir()
+	sc := NewSidecar(dir)
+
+	if sc.Exists() {
+		t.Error("expected Exists() false before Save")
+	}
+
+	state := NewState("topic", "intent", "survey", "")
+	if err := sc.Save(state); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	if !sc.Exists() {
+		t.Error("expected Exists() true after Save")
+	}
+}
+
+func TestSidecar_Path(t *testing.T) {
+	sc := NewSidecar("/some/output/dir")
+	expected := "/some/output/dir/research_state.json"
+	if sc.Path() != expected {
+		t.Errorf("expected path %q, got %q", expected, sc.Path())
+	}
+}
+
+func TestSidecar_LoadMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	sc := NewSidecar(dir)
+
+	_, err := sc.Load()
+	if err == nil {
+		t.Error("expected error loading non-existent sidecar")
+	}
+}
+
+func TestSidecar_IsInProgress(t *testing.T) {
+	tests := []struct {
+		phase      string
+		inProgress bool
+	}{
+		{"plan", true},
+		{"search", true},
+		{"analyze", true},
+		{"synthesize", true},
+		{"complete", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		state := &ResearchState{
+			Progress: ProgressState{Phase: tt.phase},
+		}
+		got := state.IsInProgress()
+		if got != tt.inProgress {
+			t.Errorf("phase %q: expected IsInProgress()=%v, got %v", tt.phase, tt.inProgress, got)
+		}
+	}
+}
+
+func TestNewState_InitializesCorrectly(t *testing.T) {
+	state := NewState("quantum computing", "write a survey", "deep", "2023-2025")
+
+	if state.Version != CurrentStateVersion {
+		t.Errorf("expected version %d, got %d", CurrentStateVersion, state.Version)
+	}
+	if state.Topic != "quantum computing" {
+		t.Errorf("expected topic %q, got %q", "quantum computing", state.Topic)
+	}
+	if state.Intent != "write a survey" {
+		t.Errorf("expected intent %q, got %q", "write a survey", state.Intent)
+	}
+	if state.Depth != "deep" {
+		t.Errorf("expected depth %q, got %q", "deep", state.Depth)
+	}
+	if state.DateRange != "2023-2025" {
+		t.Errorf("expected date_range %q, got %q", "2023-2025", state.DateRange)
+	}
+	if state.Progress.Phase != "plan" {
+		t.Errorf("expected initial phase %q, got %q", "plan", state.Progress.Phase)
+	}
+	if state.Progress.RunStartedAt.IsZero() {
+		t.Error("expected RunStartedAt to be set")
+	}
+	if state.CreatedAt.IsZero() {
+		t.Error("expected CreatedAt to be set")
+	}
+	if state.UpdatedAt.IsZero() {
+		t.Error("expected UpdatedAt to be set")
+	}
+	if state.IsInProgress() != true {
+		t.Error("new state should be in progress")
+	}
+}
+
+func TestSidecar_SaveCreatesDir(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "nested", "output")
+	sc := NewSidecar(dir)
+
+	state := NewState("topic", "intent", "survey", "")
+	if err := sc.Save(state); err != nil {
+		t.Fatalf("Save should create intermediate dirs: %v", err)
+	}
+
+	if !sc.Exists() {
+		t.Error("expected sidecar file to exist after Save with new dir")
+	}
+}
+
 // --- Integration-ish test with pipeline ---
 
 func TestPipeline_EndToEnd(t *testing.T) {

@@ -13,8 +13,9 @@ const (
 	DefaultTimeout = 30 * time.Second
 	// MaxResponseSize is the maximum response body to read (5MB).
 	MaxResponseSize = 5 * 1024 * 1024
-	// UserAgent identifies Cercano's fetcher.
-	UserAgent = "Cercano/1.0 (Local AI Tool; +https://github.com/bryancostanich/Cercano)"
+	// UserAgent identifies Cercano's fetcher. Uses a browser-like User-Agent
+	// to avoid bot detection that serves minimal or empty HTML.
+	UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 )
 
 // FetchResult contains the fetched and extracted content from a URL.

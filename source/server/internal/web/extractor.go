@@ -23,10 +23,20 @@ func ExtractText(html string) string {
 	doc.Find("script, style, noscript, svg, img, video, audio, iframe, object, embed").Remove()
 	doc.Find("nav, footer, header, aside").Remove()
 
-	// Prefer <article> or <main> if present
+	// Prefer semantic content containers, then common class-based containers
 	content := doc.Find("article")
 	if content.Length() == 0 {
 		content = doc.Find("main")
+	}
+	if content.Length() == 0 {
+		content = doc.Find("[role='main']")
+	}
+	if content.Length() == 0 {
+		// Common article container classes used by news/blog sites
+		content = doc.Find(".article-body, .article-content, .post-content, .entry-content, .story-body, .c-entry-content")
+	}
+	if content.Length() == 0 {
+		content = doc.Find("#content, #main-content, #article-body, .content")
 	}
 	if content.Length() == 0 {
 		content = doc.Find("body")
@@ -55,11 +65,22 @@ func extractNode(s *goquery.Selection, sb *strings.Builder) {
 			sb.WriteString("\n\n")
 			sb.WriteString(strings.TrimSpace(child.Text()))
 			sb.WriteString("\n\n")
-		case "p", "div", "section", "article", "main":
+		case "p":
 			text := strings.TrimSpace(child.Text())
 			if text != "" {
 				sb.WriteString("\n\n")
 				sb.WriteString(text)
+			}
+		case "div", "section", "article", "main":
+			// Recurse into block containers instead of flattening with .Text()
+			if child.Children().Length() > 0 {
+				extractNode(child, sb)
+			} else {
+				text := strings.TrimSpace(child.Text())
+				if text != "" {
+					sb.WriteString("\n\n")
+					sb.WriteString(text)
+				}
 			}
 		case "li":
 			sb.WriteString("\n- ")

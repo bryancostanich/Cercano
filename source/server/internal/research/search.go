@@ -53,7 +53,11 @@ func (d *SearchDispatcher) SearchSource(ctx context.Context, source Source, maxR
 		mu.Unlock()
 	}
 
-	return deduplicatePubs(allPubs)
+	result := deduplicatePubs(allPubs)
+	if len(result) > maxResults {
+		result = result[:maxResults]
+	}
+	return result
 }
 
 // SearchAllSources searches all sources in a plan concurrently.

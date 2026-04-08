@@ -1244,3 +1244,45 @@ func TestAnalyzeAllWithPrefetch_SkipsThinContent(t *testing.T) {
 		t.Errorf("expected 'Good Article', got %q", findings[0].Publication.Title)
 	}
 }
+
+// --- FilterByKeywordOverlap Tests ---
+
+func TestFilterByKeywordOverlap(t *testing.T) {
+	pubs := []Publication{
+		{Title: "Local LLM inference performance on Apple Silicon"},
+		{Title: "Best restaurants in downtown Portland"},
+		{Title: "Ollama: running large language models locally"},
+		{Title: "Weather forecast for next week"},
+	}
+	filtered := FilterByKeywordOverlap(pubs, "local LLM inference Ollama performance")
+	if len(filtered) != 2 {
+		t.Errorf("expected 2 relevant results, got %d", len(filtered))
+	}
+	for _, p := range filtered {
+		if p.Title == "Best restaurants in downtown Portland" || p.Title == "Weather forecast for next week" {
+			t.Errorf("irrelevant result not filtered: %q", p.Title)
+		}
+	}
+}
+
+func TestFilterByKeywordOverlap_KeepsAllWhenRelevant(t *testing.T) {
+	pubs := []Publication{
+		{Title: "AI inference optimization techniques"},
+		{Title: "Machine learning model serving at edge"},
+	}
+	filtered := FilterByKeywordOverlap(pubs, "AI inference edge serving optimization")
+	if len(filtered) != 2 {
+		t.Errorf("all relevant results should be kept, got %d", len(filtered))
+	}
+}
+
+func TestFilterByKeywordOverlap_ReturnsAllWhenNoneMatch(t *testing.T) {
+	pubs := []Publication{
+		{Title: "Quantum computing advances"},
+		{Title: "Protein folding discoveries"},
+	}
+	filtered := FilterByKeywordOverlap(pubs, "local LLM inference")
+	if len(filtered) != 2 {
+		t.Errorf("should return all when none match, got %d", len(filtered))
+	}
+}

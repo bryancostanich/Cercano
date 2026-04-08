@@ -3,10 +3,13 @@ package research
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
 )
+
+const minContentChars = 500
 
 // --- Pass 1: Fact Extraction ---
 
@@ -315,12 +318,17 @@ func AnalyzeAllWithPrefetch(ctx context.Context, model ModelCaller, fetcher URLF
 			content = pub.Abstract
 		}
 		// Last resort: fetch individually
-		if content == "" && pub.URL != "" {
+		if content == "" && pub.URL != "" && fetcher != nil {
 			if result, err := fetcher.FetchURL(pub.URL); err == nil {
 				content = result.Content
 			}
 		}
 		if content == "" {
+			continue
+		}
+		// Skip thin content — paywalled pages, error pages, failed extractions
+		if len(content) < minContentChars {
+			fmt.Fprintf(os.Stderr, "  Skipping %q: only %d chars (min %d)\n", truncateTitle(pub.Title, 40), len(content), minContentChars)
 			continue
 		}
 

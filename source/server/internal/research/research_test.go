@@ -55,6 +55,14 @@ func (m *mockFetcher) FetchURL(url string) (*FetchResult, error) {
 	return &FetchResult{URL: url, Content: "Default fetched content for " + url}, nil
 }
 
+type mockModelCaller struct {
+	fn func(prompt string) (string, error)
+}
+
+func (m *mockModelCaller) Call(ctx context.Context, prompt string) (string, error) {
+	return m.fn(prompt)
+}
+
 // --- Source Registry Tests ---
 
 func TestSourceRegistry_HasSources(t *testing.T) {
@@ -1142,11 +1150,11 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	}}
 
 	searcher := &mockSearcher{results: map[string][]SearchResult{
-		"test topic": {{URL: "https://example.com/1", Title: "Test Article", Snippet: "A test snippet"}},
+		"test topic": {{URL: "https://example.com/1", Title: "Test Article", Snippet: strings.Repeat("A test snippet about the topic with details. ", 15)}},
 	}}
 
 	fetcher := &mockFetcher{pages: map[string]*FetchResult{
-		"https://example.com/1": {URL: "https://example.com/1", Content: "Full article content about the test topic."},
+		"https://example.com/1": {URL: "https://example.com/1", Content: strings.Repeat("Full article content about the test topic. ", 20)},
 	}}
 
 	dispatcher := NewSearchDispatcher(searcher)
@@ -1200,5 +1208,39 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	// Check synthesis file exists
 	if _, err := os.Stat(filepath.Join(outputDir, "synthesis.md")); os.IsNotExist(err) {
 		t.Error("expected synthesis.md in output dir")
+	}
+}
+
+func TestAnalyzeAllWithPrefetch_SkipsThinContent(t *testing.T) {
+	pubs := []Publication{
+		{Title: "Good Article", URL: "https://example.com/good", Source: "Web"},
+		{Title: "Thin Page", URL: "https://example.com/thin", Source: "Web"},
+		{Title: "Empty Page", URL: "https://example.com/empty", Source: "Web"},
+	}
+	prefetched := map[string]string{
+		"https://example.com/good":  strings.Repeat("This is substantial content. ", 50),
+		"https://example.com/thin":  "Short.",
+		"https://example.com/empty": "",
+	}
+	model := &mockModelCaller{fn: func(prompt string) (string, error) {
+		if strings.Contains(prompt, "Extract every concrete fact") {
+			return "- Fact one about the topic", nil
+		}
+		if strings.Contains(prompt, "analyze the relevance") || strings.Contains(prompt, "connection between these facts") {
+			return "WHY_IT_MATTERS: relevant\nHOW_TO_USE: use it\nRELEVANCE: 3\nIMPACT: medium", nil
+		}
+		if strings.Contains(prompt, "QUALITY") {
+			return "PASS", nil
+		}
+		return "", nil
+	}}
+	cfg := DefaultConfig("survey")
+	tracker := NewProgressTracker(t.TempDir())
+	findings := AnalyzeAllWithPrefetch(context.Background(), model, nil, pubs, prefetched, "test intent", cfg, tracker)
+	if len(findings) != 1 {
+		t.Errorf("expected 1 finding (only good article), got %d", len(findings))
+	}
+	if len(findings) > 0 && findings[0].Publication.Title != "Good Article" {
+		t.Errorf("expected 'Good Article', got %q", findings[0].Publication.Title)
 	}
 }

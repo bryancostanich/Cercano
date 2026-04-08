@@ -737,15 +737,102 @@ func TestCheckResearchModel_NoNoteWhenModelIsFine(t *testing.T) {
 
 func TestDefaultConfig_Survey(t *testing.T) {
 	cfg := DefaultConfig("survey")
-	if cfg.MaxChasedTotal != 10 {
-		t.Errorf("expected 10 max chased for survey, got %d", cfg.MaxChasedTotal)
+	if cfg.MaxPrimaryResults != 3 {
+		t.Errorf("survey: expected MaxPrimaryResults=3, got %d", cfg.MaxPrimaryResults)
+	}
+	if cfg.MaxChasedTotal != 0 {
+		t.Errorf("survey: expected MaxChasedTotal=0, got %d", cfg.MaxChasedTotal)
+	}
+	if cfg.MaxChasedPerFinding != 0 {
+		t.Errorf("survey: expected MaxChasedPerFinding=0, got %d", cfg.MaxChasedPerFinding)
+	}
+	if cfg.PageTruncateChars != 8000 {
+		t.Errorf("survey: expected PageTruncateChars=8000, got %d", cfg.PageTruncateChars)
+	}
+	if cfg.AnalysisTruncate != 10000 {
+		t.Errorf("survey: expected AnalysisTruncate=10000, got %d", cfg.AnalysisTruncate)
+	}
+	if cfg.MaxQueriesPerSource != 2 {
+		t.Errorf("survey: expected MaxQueriesPerSource=2, got %d", cfg.MaxQueriesPerSource)
+	}
+	if cfg.MaxSources != 3 {
+		t.Errorf("survey: expected MaxSources=3, got %d", cfg.MaxSources)
 	}
 }
 
-func TestDefaultConfig_Thorough(t *testing.T) {
-	cfg := DefaultConfig("thorough")
+func TestDefaultConfig_Standard(t *testing.T) {
+	cfg := DefaultConfig("standard")
+	if cfg.MaxPrimaryResults != 4 {
+		t.Errorf("standard: expected MaxPrimaryResults=4, got %d", cfg.MaxPrimaryResults)
+	}
+	if cfg.MaxChasedTotal != 15 {
+		t.Errorf("standard: expected MaxChasedTotal=15, got %d", cfg.MaxChasedTotal)
+	}
+	if cfg.MaxChasedPerFinding != 3 {
+		t.Errorf("standard: expected MaxChasedPerFinding=3, got %d", cfg.MaxChasedPerFinding)
+	}
+	if cfg.PageTruncateChars != 10000 {
+		t.Errorf("standard: expected PageTruncateChars=10000, got %d", cfg.PageTruncateChars)
+	}
+	if cfg.AnalysisTruncate != 12000 {
+		t.Errorf("standard: expected AnalysisTruncate=12000, got %d", cfg.AnalysisTruncate)
+	}
+	if cfg.MaxQueriesPerSource != 3 {
+		t.Errorf("standard: expected MaxQueriesPerSource=3, got %d", cfg.MaxQueriesPerSource)
+	}
+	if cfg.MaxSources != 4 {
+		t.Errorf("standard: expected MaxSources=4, got %d", cfg.MaxSources)
+	}
+}
+
+func TestDefaultConfig_Deep(t *testing.T) {
+	cfg := DefaultConfig("deep")
+	if cfg.MaxPrimaryResults != 6 {
+		t.Errorf("deep: expected MaxPrimaryResults=6, got %d", cfg.MaxPrimaryResults)
+	}
 	if cfg.MaxChasedTotal != 50 {
-		t.Errorf("expected 50 max chased for thorough, got %d", cfg.MaxChasedTotal)
+		t.Errorf("deep: expected MaxChasedTotal=50, got %d", cfg.MaxChasedTotal)
+	}
+	if cfg.MaxChasedPerFinding != 5 {
+		t.Errorf("deep: expected MaxChasedPerFinding=5, got %d", cfg.MaxChasedPerFinding)
+	}
+	if cfg.PageTruncateChars != 12000 {
+		t.Errorf("deep: expected PageTruncateChars=12000, got %d", cfg.PageTruncateChars)
+	}
+	if cfg.AnalysisTruncate != 15000 {
+		t.Errorf("deep: expected AnalysisTruncate=15000, got %d", cfg.AnalysisTruncate)
+	}
+	if cfg.MaxQueriesPerSource != 3 {
+		t.Errorf("deep: expected MaxQueriesPerSource=3, got %d", cfg.MaxQueriesPerSource)
+	}
+	if cfg.MaxSources != 5 {
+		t.Errorf("deep: expected MaxSources=5, got %d", cfg.MaxSources)
+	}
+}
+
+func TestDefaultConfig_EmptyDefaultsToStandard(t *testing.T) {
+	cfgEmpty := DefaultConfig("")
+	cfgStandard := DefaultConfig("standard")
+	if cfgEmpty != cfgStandard {
+		t.Errorf("empty depth should return standard config, got %+v, want %+v", cfgEmpty, cfgStandard)
+	}
+}
+
+func TestDepthOrder(t *testing.T) {
+	if DepthOrder("survey") != 1 {
+		t.Errorf("expected survey=1, got %d", DepthOrder("survey"))
+	}
+	if DepthOrder("standard") != 2 {
+		t.Errorf("expected standard=2, got %d", DepthOrder("standard"))
+	}
+	if DepthOrder("deep") != 3 {
+		t.Errorf("expected deep=3, got %d", DepthOrder("deep"))
+	}
+	if DepthOrder("unknown") != 0 {
+		t.Errorf("expected unknown=0, got %d", DepthOrder("unknown"))
+	}
+	if DepthOrder("") != 0 {
+		t.Errorf("expected empty=0, got %d", DepthOrder(""))
 	}
 }
 

@@ -208,6 +208,30 @@ func BuildCrossContext(findings []AnnotatedFinding) string {
 	return sb.String()
 }
 
+// ReAnalyzeMiddleFindings re-runs Pass 2 (relevance analysis) on findings scored 2-4,
+// using the full cross-context from all findings. Findings scored 1 or 5 are left unchanged.
+func ReAnalyzeMiddleFindings(ctx context.Context, model ModelCaller, findings []AnnotatedFinding, intent string) []AnnotatedFinding {
+	crossCtx := BuildCrossContext(findings)
+	for i := range findings {
+		score := findings[i].RelevanceScore
+		if score < 2 || score > 4 {
+			continue // skip 1s and 5s
+		}
+		relevance, err := AnalyzeRelevance(ctx, model, findings[i].KeyFindings, findings[i].Publication.Title, intent, crossCtx)
+		if err != nil {
+			continue
+		}
+		findings[i].WhyItMatters = relevance.WhyItMatters
+		findings[i].HowToUse = relevance.HowToUse
+		findings[i].RelevanceScore = relevance.RelevanceScore
+		findings[i].ImpactRating = relevance.ImpactRating
+		if relevance.CrossRefs != "" {
+			findings[i].WhyItMatters += "\n\n**Connections to other findings:** " + relevance.CrossRefs
+		}
+	}
+	return findings
+}
+
 // --- Orchestrated Analysis ---
 
 // AnalyzeFinding runs the multi-pass analysis pipeline on a single publication.

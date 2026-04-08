@@ -9,7 +9,7 @@ import (
 	"sync"
 )
 
-const minContentChars = 500
+const minContentChars = 200
 
 // --- Pass 1: Fact Extraction ---
 

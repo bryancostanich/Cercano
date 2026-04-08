@@ -78,7 +78,9 @@ func (d *SearchDispatcher) SearchAllSources(ctx context.Context, plan *ResearchP
 	}
 
 	wg.Wait()
-	return deduplicatePubs(allPubs)
+	topicIntent := plan.Topic + " " + plan.Intent
+	deduped := deduplicatePubs(allPubs)
+	return FilterByKeywordOverlap(deduped, topicIntent)
 }
 
 // SearchAndPrefetch searches all sources concurrently AND starts fetching content
@@ -131,7 +133,10 @@ func (d *SearchDispatcher) SearchAndPrefetch(ctx context.Context, plan *Research
 	searchWg.Wait()
 	fetchWg.Wait()
 
-	return deduplicatePubs(allPubs), content
+	topicIntent := plan.Topic + " " + plan.Intent
+	deduped := deduplicatePubs(allPubs)
+	filtered := FilterByKeywordOverlap(deduped, topicIntent)
+	return filtered, content
 }
 
 // searchWeb uses DDG with site-scoping for web sources.
@@ -311,6 +316,43 @@ func (d *SearchDispatcher) searchArXiv(ctx context.Context, query string, maxRes
 	}
 
 	return pubs, nil
+}
+
+// FilterByKeywordOverlap removes publications whose title has zero keyword overlap
+// with the given topic/intent text. Keywords shorter than 4 chars are ignored (stop words).
+func FilterByKeywordOverlap(pubs []Publication, topicIntent string) []Publication {
+	keywords := make(map[string]bool)
+	for _, word := range strings.Fields(strings.ToLower(topicIntent)) {
+		if len(word) >= 4 {
+			keywords[word] = true
+		}
+	}
+	if len(keywords) == 0 {
+		return pubs
+	}
+
+	var result []Publication
+	for _, p := range pubs {
+		titleWords := strings.Fields(strings.ToLower(p.Title))
+		overlap := false
+		for _, w := range titleWords {
+			// Strip leading/trailing punctuation before matching
+			w = strings.Trim(w, ".,;:!?\"'()")
+			if keywords[w] {
+				overlap = true
+				break
+			}
+		}
+		if overlap {
+			result = append(result, p)
+		}
+	}
+
+	// If filtering removed everything, return originals
+	if len(result) == 0 {
+		return pubs
+	}
+	return result
 }
 
 // deduplicatePubs removes duplicates by URL.

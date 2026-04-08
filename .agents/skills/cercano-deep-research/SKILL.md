@@ -18,20 +18,42 @@ Multi-source research tool that takes a topic and intent, identifies authoritati
 |-----------|------|----------|-------------|
 | topic | string | Yes | The research topic to investigate. |
 | intent | string | Yes | What you need this research for — drives relevance scoring and source selection. |
-| depth | string | No | `"survey"` (5-10 results, quick) or `"thorough"` (20+ results, deep). Default: `"thorough"`. |
+| depth | string | No | `"survey"` (quick scan, ~2 min), `"standard"` (balanced, ~5-8 min), or `"deep"` (exhaustive, ~15+ min). Default: `"standard"`. |
 | date_range | string | No | Filter results by date (e.g. `"2024-2026"`, `"last 2 years"`). |
 | sources | string[] | No | Override auto-detected sources. If omitted, sources are chosen based on topic domain. |
-| output_path | string | No | Write report to file instead of returning inline. Recommended for thorough research. |
+| output_dir | string | No | Write report to this directory as multiple files. Recommended for standard/deep research and required for incremental deepening. |
 | project_dir | string | No | Project root directory. |
+| phase | string | No | Run a specific phase: `"plan"`, `"search"`, `"analyze"`, `"synthesize"`. Omit to run all phases. |
+| use_model | string | No | Override the default model for this research run. |
+
+## Depth Tiers
+
+| | Survey | Standard (default) | Deep |
+|---|---|---|---|
+| Sources | 2-3 | 3-4 | 4-5 |
+| Results/query | 3 | 4 | 6 |
+| Reference chasing | None | 1-hop, max 15 | 1-hop, max 50 |
+| Analysis | 3-pass (facts, relevance, quality gate) | 3-pass | 3-pass |
+| Target time | ~2 min | ~5-8 min | ~15+ min |
 
 ## How It Works
 
 1. **Source Planning** — Local model analyzes topic + intent and identifies relevant sources from 25+ options across academic, industry, news, reference, and regulatory categories
 2. **Systematic Search** — Searches each source using tailored queries (free APIs for PubMed, arXiv; site-scoped DuckDuckGo for others)
 3. **Content Extraction** — Fetches and extracts readable content from top results
-4. **Analysis & Annotation** — Local model analyzes each finding: summary, relevance to intent, how to use it, star rating (1-5), impact rating
-5. **Reference Chasing** — Identifies cited works in findings that are relevant to intent, searches for and analyzes them (1 hop, max 50)
-6. **Synthesis** — Executive summary, narrative synthesis, contradiction detection, gap analysis, recommended reading order, follow-up suggestions
+4. **Analysis & Annotation** — 3-pass pipeline: fact extraction, relevance scoring (1-5), quality gate with retry
+5. **Reference Chasing** (standard/deep only) — Identifies cited works relevant to intent, searches and analyzes them
+6. **Synthesis** — Executive summary, narrative synthesis, contradiction detection, gap analysis, reading order, follow-up suggestions
+
+## Incremental Deepening
+
+Run a survey first to get a quick landscape, then deepen to standard or deep without re-doing prior work:
+
+1. Run survey with an `output_dir`
+2. Review the results
+3. Run again with the same `output_dir` and a deeper depth — existing findings are preserved, new sources are added, and middle-scored findings (2-4) are re-evaluated with richer context
+
+The tool stores state in `research_state.json` inside the output directory. Each deepening pass expands the plan with complementary sources and enriches the analysis.
 
 ## Output
 
@@ -45,20 +67,26 @@ Structured markdown report with:
 - Gap Analysis (what the research didn't find)
 - Recommended Reading Order
 - Suggested Follow-Up Research
+- Next Steps (suggested deeper research command)
 
 ## Examples
 
 **Quick survey:**
 ```json
-{"topic": "quantum computing error correction", "intent": "preparing a conference talk", "depth": "survey"}
+{"topic": "quantum computing error correction", "intent": "preparing a conference talk", "depth": "survey", "output_dir": "/tmp/qec-research"}
 ```
 
-**Thorough research to file:**
+**Standard research (default):**
 ```json
-{"topic": "CRISPR gene therapy for sickle cell disease", "intent": "writing a grant proposal for a novel delivery mechanism", "depth": "thorough", "output_path": "/tmp/crispr-research.md"}
+{"topic": "CRISPR gene therapy for sickle cell disease", "intent": "writing a grant proposal for a novel delivery mechanism", "output_dir": "/tmp/crispr-research"}
 ```
 
-**With date filter and source override:**
+**Deep research:**
 ```json
-{"topic": "transformer architecture improvements", "intent": "literature review for PhD thesis", "date_range": "2024-2026", "sources": ["arXiv", "Google Scholar", "Semantic Scholar"]}
+{"topic": "transformer architecture improvements", "intent": "literature review for PhD thesis", "depth": "deep", "date_range": "2024-2026", "output_dir": "/tmp/transformer-research"}
+```
+
+**Incremental deepening (survey → standard):**
+```json
+{"topic": "quantum computing error correction", "intent": "preparing a conference talk", "depth": "standard", "output_dir": "/tmp/qec-research"}
 ```

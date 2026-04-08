@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // --- Mocks ---
@@ -995,6 +996,122 @@ func TestSidecar_SaveCreatesDir(t *testing.T) {
 
 	if !sc.Exists() {
 		t.Error("expected sidecar file to exist after Save with new dir")
+	}
+}
+
+// --- ProgressTracker Tests ---
+
+func TestProgressTracker_ETA(t *testing.T) {
+	dir := t.TempDir()
+	pt := NewProgressTracker(dir)
+	pt.StartPhase("Analyzing findings", 10)
+
+	// Complete 3 items with ~100ms each
+	for i := 0; i < 3; i++ {
+		time.Sleep(100 * time.Millisecond)
+		pt.CompleteItem()
+	}
+
+	eta := pt.EstRemainingSeconds()
+	// 7 items remaining at ~0.1s each = ~0.7s. Allow generous range for CI.
+	if eta < 0 || eta > 5 {
+		t.Errorf("expected ETA between 0 and 5 seconds, got %d", eta)
+	}
+}
+
+func TestProgressTracker_StatusFile(t *testing.T) {
+	dir := t.TempDir()
+	pt := NewProgressTracker(dir)
+	pt.StartPhase("Analyzing findings", 25)
+	pt.SetStep("Relevance scoring")
+	pt.CompleteItem()
+
+	statusPath := filepath.Join(dir, "status.md")
+	data, err := os.ReadFile(statusPath)
+	if err != nil {
+		t.Fatalf("expected status.md to exist: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "# Research Progress") {
+		t.Error("expected '# Research Progress' header")
+	}
+	if !strings.Contains(content, "Analyzing findings") {
+		t.Error("expected phase name in status.md")
+	}
+	if !strings.Contains(content, "Relevance scoring") {
+		t.Error("expected step name in status.md")
+	}
+	if !strings.Contains(content, "**Findings accepted:**") {
+		t.Error("expected findings accepted line in status.md")
+	}
+}
+
+func TestProgressTracker_Done(t *testing.T) {
+	dir := t.TempDir()
+	pt := NewProgressTracker(dir)
+	pt.StartPhase("Synthesizing", 5)
+
+	statusPath := filepath.Join(dir, "status.md")
+	if _, err := os.Stat(statusPath); os.IsNotExist(err) {
+		t.Fatal("expected status.md to exist after StartPhase")
+	}
+
+	pt.Done(12, 4)
+
+	if _, err := os.Stat(statusPath); !os.IsNotExist(err) {
+		t.Error("expected status.md to be deleted after Done()")
+	}
+}
+
+func TestProgressTracker_ProgressState(t *testing.T) {
+	dir := t.TempDir()
+	pt := NewProgressTracker(dir)
+	pt.StartPhase("Searching", 20)
+	pt.SetStep("Fetching results")
+	pt.IncrementFindings()
+	pt.IncrementFindings()
+
+	state := pt.State()
+
+	if state.Phase != "Searching" {
+		t.Errorf("expected phase 'Searching', got %q", state.Phase)
+	}
+	if state.Step != "Fetching results" {
+		t.Errorf("expected step 'Fetching results', got %q", state.Step)
+	}
+	if state.Total != 20 {
+		t.Errorf("expected total 20, got %d", state.Total)
+	}
+	if state.FindingsAccepted != 2 {
+		t.Errorf("expected FindingsAccepted=2, got %d", state.FindingsAccepted)
+	}
+	if state.RunStartedAt.IsZero() {
+		t.Error("expected RunStartedAt to be set")
+	}
+	if state.PhaseStartedAt.IsZero() {
+		t.Error("expected PhaseStartedAt to be set")
+	}
+}
+
+// --- SearchSource Cap Tests ---
+
+func TestSearchSource_CapsResults(t *testing.T) {
+	var results []SearchResult
+	for i := 0; i < 10; i++ {
+		results = append(results, SearchResult{
+			URL:   fmt.Sprintf("https://example.com/%d", i),
+			Title: fmt.Sprintf("Result %d", i),
+		})
+	}
+	searcher := &mockSearcher{results: map[string][]SearchResult{
+		"test query": results,
+	}}
+	dispatcher := NewSearchDispatcher(searcher)
+	source := Source{Name: "TestWeb", Type: "web", Queries: []string{"test query"}}
+	pubs := dispatcher.SearchSource(context.Background(), source, 3)
+	if len(pubs) > 3 {
+		t.Errorf("SearchSource returned %d results, want <= 3", len(pubs))
 	}
 }
 

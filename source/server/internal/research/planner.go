@@ -7,8 +7,21 @@ import (
 )
 
 // PlanSources asks the local model to identify relevant sources and generate search queries.
+// It first decomposes the topic into sub-questions, then generates targeted queries for each.
 func PlanSources(ctx context.Context, model ModelCaller, topic, intent, depth, dateRange string) (*ResearchPlan, error) {
-	prompt := fmt.Sprintf(`You are a research librarian. Given a topic and research intent, identify the most relevant sources to search and generate tailored search queries for each.
+	prompt := fmt.Sprintf(`You are a research librarian. Given a topic and research intent, plan a systematic search strategy.
+
+STEP 1: DECOMPOSE THE TOPIC
+First, break the research topic into 3-5 specific sub-questions that need answering. Think about how a human researcher would approach this — what are the distinct facets or entities to investigate individually?
+
+For example, if the topic is "AI coding tool plugin systems", the sub-questions might be:
+- What plugin/extension system does Claude Code use?
+- What plugin/extension system does GitHub Copilot use?
+- What plugin/extension system does Cursor use?
+- What is MCP and how does it relate to these plugin systems?
+
+STEP 2: GENERATE TARGETED QUERIES
+For each sub-question, choose the best source and generate 1-2 highly specific search queries.
 
 Available sources:
 %s
@@ -20,25 +33,30 @@ Depth: %s
 
 Instructions:
 - Choose 3-5 sources most relevant to this SPECIFIC topic and intent
-- For each source, provide 2-3 HIGHLY SPECIFIC search queries
-- Queries must be precise enough to return directly relevant results — not broad topic searches
+- Generate queries that target INDIVIDUAL sub-questions, not the whole topic at once
+- Each query should be specific enough to return directly relevant results
 
 BAD queries (too broad, will return irrelevant results):
-QUERY: local AI inference
-QUERY: developer tools AI
-QUERY: machine learning edge computing
+QUERY: AI coding tool plugins
+QUERY: developer tools extension systems
+QUERY: MCP protocol overview
 
-GOOD queries (specific, will find relevant results):
-QUERY: "local LLM inference" tools comparison ollama llama.cpp
-QUERY: on-device AI code completion IDE plugin
-QUERY: privacy-preserving local model serving framework developer
+GOOD queries (targeted at specific sub-questions):
+QUERY: "Claude Code" plugin marketplace how to build extension
+QUERY: "GitHub Copilot" extension API third party tools
+QUERY: "Gemini CLI" extension developer guide 2025
+QUERY: Model Context Protocol vs native IDE extensions comparison
 
-- Format your response EXACTLY as:
+Format your response EXACTLY as:
+
+SUB_QUESTION: <the specific sub-question being addressed>
 
 SOURCE: <source name>
-REASON: <why this source is relevant>
+REASON: <why this source is relevant to this sub-question>
 QUERY: <specific search query 1>
 QUERY: <specific search query 2>
+
+SUB_QUESTION: <next sub-question>
 
 SOURCE: <source name>
 REASON: <why this source is relevant>
@@ -71,18 +89,19 @@ Only include sources that are genuinely relevant. Do not include all sources.`, 
 
 // PlanWithOverride creates a plan using user-specified sources, generating queries via the model.
 func PlanWithOverride(ctx context.Context, model ModelCaller, topic, intent, depth, dateRange string, sourceNames []string) (*ResearchPlan, error) {
-	prompt := fmt.Sprintf(`Generate 2-3 search queries for each of the following sources, tailored to this research topic.
+	prompt := fmt.Sprintf(`Generate targeted search queries for each of the following sources.
+
+First, decompose the research topic into 3-5 specific sub-questions that need answering. Then for each source, generate queries that target these sub-questions — not the whole topic at once.
 
 Topic: %s
 Intent: %s
 %s
+Sources to search: %s
 
 For each source, format as:
 SOURCE: <source name>
-QUERY: <search query 1>
-QUERY: <search query 2>
-
-Sources to search: %s`, topic, intent, formatDateRangeInstruction(dateRange), strings.Join(sourceNames, ", "))
+QUERY: <search query targeting a specific sub-question>
+QUERY: <search query targeting another sub-question>`, topic, intent, formatDateRangeInstruction(dateRange), strings.Join(sourceNames, ", "))
 
 	resp, err := model.Call(ctx, prompt)
 	if err != nil {

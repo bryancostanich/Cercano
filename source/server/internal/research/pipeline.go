@@ -38,6 +38,14 @@ type RunConfig struct {
 	Phase      string // "plan", "search", "analyze", "synthesize", or "" for all
 }
 
+// SuggestedNext holds structured metadata for the host agent to auto-invoke deeper research.
+type SuggestedNext struct {
+	Action string            `json:"action"`
+	Tool   string            `json:"tool"`
+	Params map[string]string `json:"params"`
+	Reason string            `json:"reason"`
+}
+
 // PhaseResult holds the output of a single phase.
 type PhaseResult struct {
 	Phase                string // which phase just completed
@@ -48,7 +56,8 @@ type PhaseResult struct {
 	ChasedCount          int
 	SourcesSearched      int
 	ContentTokensAvoided int
-	Report               string // full report, only set on final phase
+	Report               string         // full report, only set on final phase
+	SuggestedNext        *SuggestedNext // structured hint for host to deepen research
 }
 
 // Run executes the pipeline — either a single phase or all phases.
@@ -419,6 +428,27 @@ func (p *Pipeline) runSynthesize(ctx context.Context, cfg RunConfig, state *Rese
 		totalContent += len(f.Publication.Abstract)
 	}
 
+	var suggested *SuggestedNext
+	currentDepth := state.Depth
+	if currentDepth == "survey" || currentDepth == "standard" {
+		nextDepth := "standard"
+		if currentDepth == "standard" {
+			nextDepth = "deep"
+		}
+		suggested = &SuggestedNext{
+			Action: "deepen",
+			Tool:   "cercano_deep_research",
+			Params: map[string]string{
+				"topic":      cfg.Topic,
+				"intent":     cfg.Intent,
+				"depth":      nextDepth,
+				"output_dir": outputDir,
+			},
+			Reason: fmt.Sprintf("%s found %d findings across %d sources. %s depth adds broader coverage and reference chasing.",
+				currentDepth, primaryCount+chasedCount, len(plan.Sources), nextDepth),
+		}
+	}
+
 	return &PhaseResult{
 		Phase:                "synthesize",
 		NextPhase:            "",
@@ -429,6 +459,7 @@ func (p *Pipeline) runSynthesize(ctx context.Context, cfg RunConfig, state *Rese
 		SourcesSearched:      len(plan.Sources),
 		ContentTokensAvoided: totalContent / 4,
 		Report:               report,
+		SuggestedNext:        suggested,
 	}, nil
 }
 

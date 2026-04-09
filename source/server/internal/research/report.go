@@ -9,6 +9,21 @@ import (
 	"strings"
 )
 
+// FormatNextSteps returns a markdown "Next Steps" section suggesting deeper research.
+// Returns empty string for "deep" depth (terminal level).
+func FormatNextSteps(depth, topic, intent, outputDir string) string {
+	var nextDepth string
+	switch depth {
+	case "survey":
+		nextDepth = "standard"
+	case "standard":
+		nextDepth = "deep"
+	default:
+		return ""
+	}
+	return fmt.Sprintf("## Next Steps\n\nThis %s identified findings that may warrant deeper analysis. To expand with %s coverage and reference chasing, run:\n\n    cercano_deep_research topic=\"%s\" intent=\"%s\" depth=\"%s\" output_dir=\"%s\"\n\nThe existing findings will be preserved and enriched with additional sources.\n", depth, nextDepth, topic, intent, nextDepth, outputDir)
+}
+
 // WriteReport writes the research to a directory structure with multiple files.
 func WriteReport(outputDir string, plan *ResearchPlan, findings []AnnotatedFinding, sections ReportSections) error {
 	if err := os.MkdirAll(filepath.Join(outputDir, "findings"), 0755); err != nil {
@@ -40,6 +55,16 @@ func WriteReport(outputDir string, plan *ResearchPlan, findings []AnnotatedFindi
 
 	// Write synthesis.md
 	os.WriteFile(filepath.Join(outputDir, "synthesis.md"), []byte(formatSynthesis(sections)), 0644)
+
+	nextSteps := FormatNextSteps(plan.Depth, plan.Topic, plan.Intent, outputDir)
+	if nextSteps != "" {
+		synthPath := filepath.Join(outputDir, "synthesis.md")
+		f, err := os.OpenFile(synthPath, os.O_APPEND|os.O_WRONLY, 0644)
+		if err == nil {
+			f.WriteString("\n" + nextSteps)
+			f.Close()
+		}
+	}
 
 	// Write README.md (index)
 	os.WriteFile(filepath.Join(outputDir, "README.md"), []byte(formatReadme(plan, primaryFindings, chasedFindings, sections)), 0644)
@@ -92,6 +117,11 @@ func CompileReport(plan *ResearchPlan, findings []AnnotatedFinding, sections Rep
 	}
 
 	out.WriteString(formatSynthesis(sections))
+
+	nextSteps := FormatNextSteps(plan.Depth, plan.Topic, plan.Intent, "")
+	if nextSteps != "" {
+		out.WriteString(nextSteps)
+	}
 
 	return out.String()
 }

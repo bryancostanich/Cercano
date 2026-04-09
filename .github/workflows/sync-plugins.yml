@@ -1,0 +1,42 @@
+name: Sync Plugin Skills
+
+on:
+  push:
+    branches: [main]
+    paths: ['plugins/skills/**']
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        repo: [cercano-claude, cercano-gemini, cercano-codex]
+    steps:
+      - name: Checkout main repo
+        uses: actions/checkout@v4
+
+      - name: Checkout plugin repo
+        uses: actions/checkout@v4
+        with:
+          repository: bryancostanich/${{ matrix.repo }}
+          path: target
+          token: ${{ secrets.PLUGIN_SYNC_TOKEN }}
+
+      - name: Sync skills
+        run: |
+          rm -rf target/skills/
+          cp -r plugins/skills/ target/skills/
+
+      - name: Create PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          path: target
+          token: ${{ secrets.PLUGIN_SYNC_TOKEN }}
+          branch: sync/skills-update
+          title: "sync: update skills from main repo"
+          body: |
+            Automated skill sync from [cercano/plugins/skills/](https://github.com/bryancostanich/Cercano/tree/main/plugins/skills/).
+
+            Triggered by commit ${{ github.sha }}.
+          commit-message: "sync: update skills from main repo"
+          delete-branch: true

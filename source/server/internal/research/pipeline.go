@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Pipeline orchestrates the full deep research flow.
@@ -29,12 +30,20 @@ func NewPipeline(model ModelCaller, dispatcher *SearchDispatcher, fetcher URLFet
 type RunConfig struct {
 	Topic      string
 	Intent     string
-	Depth      string   // "survey" or "thorough"
+	Depth      string   // "survey", "standard", or "deep"
 	DateRange  string
 	Sources    []string // user override, empty for auto
 	OutputDir  string   // write report to this directory if set
 	ProjectDir string
-	Phase      string   // "plan", "search", "analyze", "synthesize", or "" for all
+	Phase      string // "plan", "search", "analyze", "synthesize", or "" for all
+}
+
+// SuggestedNext holds structured metadata for the host agent to auto-invoke deeper research.
+type SuggestedNext struct {
+	Action string            `json:"action"`
+	Tool   string            `json:"tool"`
+	Params map[string]string `json:"params"`
+	Reason string            `json:"reason"`
 }
 
 // PhaseResult holds the output of a single phase.
@@ -47,14 +56,15 @@ type PhaseResult struct {
 	ChasedCount          int
 	SourcesSearched      int
 	ContentTokensAvoided int
-	Report               string // full report, only set on final phase
+	Report               string         // full report, only set on final phase
+	SuggestedNext        *SuggestedNext // structured hint for host to deepen research
 }
 
 // Run executes the pipeline — either a single phase or all phases.
 func (p *Pipeline) Run(ctx context.Context, cfg RunConfig) (*PhaseResult, error) {
 	depth := cfg.Depth
 	if depth == "" {
-		depth = "thorough"
+		depth = "standard"
 	}
 	rcfg := DefaultConfig(depth)
 
@@ -68,14 +78,32 @@ func (p *Pipeline) Run(ctx context.Context, cfg RunConfig) (*PhaseResult, error)
 		outputDir = filepath.Join(base, "scratch", "research", slugifyTopic(cfg.Topic))
 	}
 
-	progress := NewProgressWriter(outputDir)
+	progress := NewProgressTracker(outputDir)
+	sidecar := NewSidecar(outputDir)
 
-	// Checkpoints
-	baseDir := cfg.ProjectDir
-	if baseDir == "" {
-		baseDir, _ = os.Getwd()
+	// Check for existing state
+	var state *ResearchState
+	if sidecar.Exists() {
+		loaded, err := sidecar.Load()
+		if err == nil && loaded.Version == CurrentStateVersion {
+			if loaded.IsInProgress() {
+				state = loaded // resume from crash
+			} else if DepthOrder(depth) > DepthOrder(loaded.Depth) {
+				state = loaded // incremental deepening
+			} else {
+				return &PhaseResult{
+					Phase:   "all",
+					Summary: fmt.Sprintf("Research already at depth '%s' (requested '%s'). To re-run, delete research_state.json in %s.", loaded.Depth, depth, outputDir),
+				}, nil
+			}
+		}
 	}
-	cp := NewCheckpoint(baseDir, cfg.Topic, cfg.Intent, depth)
+
+	if state == nil {
+		state = NewState(cfg.Topic, cfg.Intent, depth, cfg.DateRange)
+	} else {
+		state.Depth = depth // upgrade depth level
+	}
 
 	phase := cfg.Phase
 	if phase == "" {
@@ -84,15 +112,15 @@ func (p *Pipeline) Run(ctx context.Context, cfg RunConfig) (*PhaseResult, error)
 
 	switch phase {
 	case "plan":
-		return p.runPlan(ctx, cfg, cp, progress, outputDir)
+		return p.runPlan(ctx, cfg, state, sidecar, rcfg, progress, outputDir)
 	case "search":
-		return p.runSearch(ctx, cfg, cp, rcfg, progress, outputDir)
+		return p.runSearch(ctx, cfg, state, sidecar, rcfg, progress, outputDir)
 	case "analyze":
-		return p.runAnalyze(ctx, cfg, cp, rcfg, progress, outputDir)
+		return p.runAnalyze(ctx, cfg, state, sidecar, rcfg, progress, outputDir)
 	case "synthesize":
-		return p.runSynthesize(ctx, cfg, cp, rcfg, progress, outputDir)
+		return p.runSynthesize(ctx, cfg, state, sidecar, rcfg, progress, outputDir)
 	case "all":
-		return p.runAll(ctx, cfg, cp, rcfg, progress, outputDir)
+		return p.runAll(ctx, cfg, state, sidecar, rcfg, progress, outputDir)
 	default:
 		return nil, fmt.Errorf("unknown phase: %s (use plan, search, analyze, synthesize, or omit for all)", phase)
 	}
@@ -100,20 +128,34 @@ func (p *Pipeline) Run(ctx context.Context, cfg RunConfig) (*PhaseResult, error)
 
 // --- Phase: Plan ---
 
-func (p *Pipeline) runPlan(ctx context.Context, cfg RunConfig, cp *Checkpoint, progress *ProgressWriter, outputDir string) (*PhaseResult, error) {
+func (p *Pipeline) runPlan(ctx context.Context, cfg RunConfig, state *ResearchState, sidecar *Sidecar, rcfg DeepResearchConfig, progress *ProgressTracker, outputDir string) (*PhaseResult, error) {
 	progress.Update("Planning", "Identifying relevant sources...")
 
 	var plan *ResearchPlan
 	var err error
-	if len(cfg.Sources) > 0 {
-		plan, err = PlanWithOverride(ctx, p.model, cfg.Topic, cfg.Intent, cfg.Depth, cfg.DateRange, cfg.Sources)
+
+	if state.Plan != nil && len(state.Plan.Sources) > 0 {
+		// Incremental deepening: expand existing plan with complementary sources
+		newSources, expErr := PlanExpansion(ctx, p.model, cfg.Topic, cfg.Intent, state.Depth, cfg.DateRange, state.Plan.Sources, rcfg.MaxSources)
+		if expErr != nil {
+			return nil, fmt.Errorf("plan expansion: %w", expErr)
+		}
+		plan = state.Plan
+		plan.Depth = state.Depth
+		plan.Sources = append(plan.Sources, newSources...)
+	} else if len(cfg.Sources) > 0 {
+		plan, err = PlanWithOverride(ctx, p.model, cfg.Topic, cfg.Intent, state.Depth, cfg.DateRange, cfg.Sources)
 	} else {
-		plan, err = PlanSources(ctx, p.model, cfg.Topic, cfg.Intent, cfg.Depth, cfg.DateRange)
+		plan, err = PlanSources(ctx, p.model, cfg.Topic, cfg.Intent, state.Depth, cfg.DateRange)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("source planning: %w", err)
 	}
-	cp.SavePlan(plan)
+
+	state.Plan = plan
+	state.Progress.Phase = "plan"
+	state.Progress.PhaseStartedAt = time.Now()
+	sidecar.Save(state)
 
 	// Build summary
 	var sb strings.Builder
@@ -139,10 +181,9 @@ func (p *Pipeline) runPlan(ctx context.Context, cfg RunConfig, cp *Checkpoint, p
 
 // --- Phase: Search ---
 
-func (p *Pipeline) runSearch(ctx context.Context, cfg RunConfig, cp *Checkpoint, rcfg DeepResearchConfig, progress *ProgressWriter, outputDir string) (*PhaseResult, error) {
-	// Load plan from checkpoint
-	plan, err := cp.LoadPlan()
-	if err != nil {
+func (p *Pipeline) runSearch(ctx context.Context, cfg RunConfig, state *ResearchState, sidecar *Sidecar, rcfg DeepResearchConfig, progress *ProgressTracker, outputDir string) (*PhaseResult, error) {
+	plan := state.Plan
+	if plan == nil || len(plan.Sources) == 0 {
 		return nil, fmt.Errorf("no research plan found — run with phase: \"plan\" first")
 	}
 
@@ -150,9 +191,36 @@ func (p *Pipeline) runSearch(ctx context.Context, cfg RunConfig, cp *Checkpoint,
 
 	// Search + prefetch content in parallel
 	pubs, contentMap := p.dispatcher.SearchAndPrefetch(ctx, plan, rcfg.MaxPrimaryResults, p.fetcher)
-	cp.SaveSearchResults(pubs)
-	// Save prefetched content for the analyze phase
-	cp.SaveContentMap(contentMap)
+
+	// If deepening, skip publications already in state
+	if len(state.SearchResults) > 0 {
+		existingURLs := make(map[string]bool, len(state.SearchResults))
+		for _, existing := range state.SearchResults {
+			existingURLs[existing.URL] = true
+		}
+		var newPubs []Publication
+		for _, pub := range pubs {
+			if !existingURLs[pub.URL] {
+				newPubs = append(newPubs, pub)
+			}
+		}
+		state.SearchResults = append(state.SearchResults, newPubs...)
+		// Merge content caches
+		if state.ContentCache == nil {
+			state.ContentCache = make(map[string]string)
+		}
+		for k, v := range contentMap {
+			state.ContentCache[k] = v
+		}
+		pubs = state.SearchResults // for summary counts
+	} else {
+		state.SearchResults = pubs
+		state.ContentCache = contentMap
+	}
+
+	state.Progress.Phase = "search"
+	state.Progress.PhaseStartedAt = time.Now()
+	sidecar.Save(state)
 
 	// Build summary
 	var sb strings.Builder
@@ -192,30 +260,58 @@ func (p *Pipeline) runSearch(ctx context.Context, cfg RunConfig, cp *Checkpoint,
 
 // --- Phase: Analyze ---
 
-func (p *Pipeline) runAnalyze(ctx context.Context, cfg RunConfig, cp *Checkpoint, rcfg DeepResearchConfig, progress *ProgressWriter, outputDir string) (*PhaseResult, error) {
-	pubs, err := cp.LoadSearchResults()
-	if err != nil || len(pubs) == 0 {
+func (p *Pipeline) runAnalyze(ctx context.Context, cfg RunConfig, state *ResearchState, sidecar *Sidecar, rcfg DeepResearchConfig, progress *ProgressTracker, outputDir string) (*PhaseResult, error) {
+	pubs := state.SearchResults
+	if len(pubs) == 0 {
 		return nil, fmt.Errorf("no search results found — run with phase: \"search\" first")
 	}
 
-	// Load prefetched content if available (from search phase)
-	prefetched, _ := cp.LoadContentMap()
+	prefetched := state.ContentCache
 
-	progress.Update("Analyzing", fmt.Sprintf("Processing %d results (3 passes each)...", len(pubs)))
-	findings := AnalyzeAllWithPrefetch(ctx, p.model, p.fetcher, pubs, prefetched, cfg.Intent, rcfg, progress)
+	// If deepening, only analyze pubs not already in findings
+	var pubsToAnalyze []Publication
+	if len(state.Findings) > 0 {
+		analyzedURLs := make(map[string]bool, len(state.Findings))
+		for _, f := range state.Findings {
+			analyzedURLs[f.Publication.URL] = true
+		}
+		for _, pub := range pubs {
+			if !analyzedURLs[pub.URL] {
+				pubsToAnalyze = append(pubsToAnalyze, pub)
+			}
+		}
+	} else {
+		pubsToAnalyze = pubs
+	}
 
-	// Chase references
-	if len(findings) > 0 {
-		refCount := countCitedRefs(findings, rcfg)
+	progress.Update("Analyzing", fmt.Sprintf("Processing %d results (3 passes each)...", len(pubsToAnalyze)))
+	newFindings := AnalyzeAllWithPrefetch(ctx, p.model, p.fetcher, pubsToAnalyze, prefetched, cfg.Intent, rcfg, progress)
+
+	// Chase references on new findings
+	if len(newFindings) > 0 {
+		refCount := countCitedRefs(newFindings, rcfg)
 		if refCount > 0 {
 			progress.Update("Chasing", fmt.Sprintf("Following %d cited references...", refCount))
-			chased := ChaseReferences(ctx, p.model, p.dispatcher, p.fetcher, findings, cfg.Intent, rcfg)
-			findings = append(findings, chased...)
+			chased := ChaseReferences(ctx, p.model, p.dispatcher, p.fetcher, newFindings, cfg.Intent, rcfg)
+			newFindings = append(newFindings, chased...)
 		}
 	}
-	cp.SaveFindings(findings)
 
-	primaryCount, chasedCount := countFindings(findings)
+	// Merge new findings with existing
+	allFindings := append(state.Findings, newFindings...)
+
+	// If deepening and we have existing findings, re-analyze middle-scored ones
+	if len(state.Findings) > 0 && len(newFindings) > 0 {
+		progress.Update("Re-analyzing", "Re-scoring middle-range findings with new context...")
+		allFindings = ReAnalyzeMiddleFindings(ctx, p.model, allFindings, cfg.Intent)
+	}
+
+	state.Findings = allFindings
+	state.Progress.Phase = "analyze"
+	state.Progress.PhaseStartedAt = time.Now()
+	sidecar.Save(state)
+
+	primaryCount, chasedCount := countFindings(allFindings)
 
 	// Build summary
 	var sb strings.Builder
@@ -223,8 +319,8 @@ func (p *Pipeline) runAnalyze(ctx context.Context, cfg RunConfig, cp *Checkpoint
 	sb.WriteString(fmt.Sprintf("Analyzed **%d findings** (%d primary, %d discovered via references)\n\n", primaryCount+chasedCount, primaryCount, chasedCount))
 
 	sb.WriteString("Top findings by relevance:\n")
-	sorted := make([]AnnotatedFinding, len(findings))
-	copy(sorted, findings)
+	sorted := make([]AnnotatedFinding, len(allFindings))
+	copy(sorted, allFindings)
 	sortFindings(sorted)
 	limit := 10
 	if limit > len(sorted) {
@@ -245,7 +341,7 @@ func (p *Pipeline) runAnalyze(ctx context.Context, cfg RunConfig, cp *Checkpoint
 
 	// Track content for telemetry
 	totalContent := 0
-	for _, f := range findings {
+	for _, f := range allFindings {
 		totalContent += len(f.Publication.Abstract)
 	}
 
@@ -262,13 +358,13 @@ func (p *Pipeline) runAnalyze(ctx context.Context, cfg RunConfig, cp *Checkpoint
 
 // --- Phase: Synthesize ---
 
-func (p *Pipeline) runSynthesize(ctx context.Context, cfg RunConfig, cp *Checkpoint, rcfg DeepResearchConfig, progress *ProgressWriter, outputDir string) (*PhaseResult, error) {
-	findings, err := cp.LoadFindings()
-	if err != nil || len(findings) == 0 {
+func (p *Pipeline) runSynthesize(ctx context.Context, cfg RunConfig, state *ResearchState, sidecar *Sidecar, rcfg DeepResearchConfig, progress *ProgressTracker, outputDir string) (*PhaseResult, error) {
+	findings := state.Findings
+	if len(findings) == 0 {
 		return nil, fmt.Errorf("no findings found — run with phase: \"analyze\" first")
 	}
 
-	plan, _ := cp.LoadPlan()
+	plan := state.Plan
 	if plan == nil {
 		plan = &ResearchPlan{Topic: cfg.Topic, Intent: cfg.Intent}
 	}
@@ -291,7 +387,13 @@ func (p *Pipeline) runSynthesize(ctx context.Context, cfg RunConfig, cp *Checkpo
 	if sections.GapAnalysis != "" {
 		sections.FollowUpQueries, _ = SuggestFollowUp(ctx, p.model, sections.GapAnalysis, cfg.Intent)
 	}
-	cp.SaveSections(&sections)
+
+	state.Sections = &sections
+	state.Progress = ProgressState{
+		Phase:       "complete",
+		CompletedAt: time.Now(),
+	}
+	sidecar.Save(state)
 
 	// Compile and write report
 	progress.Update("Compiling", "Writing report files...")
@@ -302,8 +404,6 @@ func (p *Pipeline) runSynthesize(ctx context.Context, cfg RunConfig, cp *Checkpo
 		return nil, fmt.Errorf("failed to write report: %w", err)
 	}
 
-	// Clean up checkpoints
-	cp.Cleanup()
 	progress.Done(primaryCount+chasedCount, len(plan.Sources))
 
 	// Build summary
@@ -328,6 +428,27 @@ func (p *Pipeline) runSynthesize(ctx context.Context, cfg RunConfig, cp *Checkpo
 		totalContent += len(f.Publication.Abstract)
 	}
 
+	var suggested *SuggestedNext
+	currentDepth := state.Depth
+	if currentDepth == "survey" || currentDepth == "standard" {
+		nextDepth := "standard"
+		if currentDepth == "standard" {
+			nextDepth = "deep"
+		}
+		suggested = &SuggestedNext{
+			Action: "deepen",
+			Tool:   "cercano_deep_research",
+			Params: map[string]string{
+				"topic":      cfg.Topic,
+				"intent":     cfg.Intent,
+				"depth":      nextDepth,
+				"output_dir": outputDir,
+			},
+			Reason: fmt.Sprintf("%s found %d findings across %d sources. %s depth adds broader coverage and reference chasing.",
+				currentDepth, primaryCount+chasedCount, len(plan.Sources), nextDepth),
+		}
+	}
+
 	return &PhaseResult{
 		Phase:                "synthesize",
 		NextPhase:            "",
@@ -338,20 +459,21 @@ func (p *Pipeline) runSynthesize(ctx context.Context, cfg RunConfig, cp *Checkpo
 		SourcesSearched:      len(plan.Sources),
 		ContentTokensAvoided: totalContent / 4,
 		Report:               report,
+		SuggestedNext:        suggested,
 	}, nil
 }
 
 // --- Run All (backward compat) ---
 
-func (p *Pipeline) runAll(ctx context.Context, cfg RunConfig, cp *Checkpoint, rcfg DeepResearchConfig, progress *ProgressWriter, outputDir string) (*PhaseResult, error) {
+func (p *Pipeline) runAll(ctx context.Context, cfg RunConfig, state *ResearchState, sidecar *Sidecar, rcfg DeepResearchConfig, progress *ProgressTracker, outputDir string) (*PhaseResult, error) {
 	// Plan
-	planResult, err := p.runPlan(ctx, cfg, cp, progress, outputDir)
+	planResult, err := p.runPlan(ctx, cfg, state, sidecar, rcfg, progress, outputDir)
 	if err != nil {
 		return nil, err
 	}
 
 	// Search
-	searchResult, err := p.runSearch(ctx, cfg, cp, rcfg, progress, outputDir)
+	searchResult, err := p.runSearch(ctx, cfg, state, sidecar, rcfg, progress, outputDir)
 	if err != nil {
 		return nil, err
 	}
@@ -363,13 +485,13 @@ func (p *Pipeline) runAll(ctx context.Context, cfg RunConfig, cp *Checkpoint, rc
 	}
 
 	// Analyze
-	_, err = p.runAnalyze(ctx, cfg, cp, rcfg, progress, outputDir)
+	_, err = p.runAnalyze(ctx, cfg, state, sidecar, rcfg, progress, outputDir)
 	if err != nil {
 		return nil, err
 	}
 
 	// Synthesize
-	return p.runSynthesize(ctx, cfg, cp, rcfg, progress, outputDir)
+	return p.runSynthesize(ctx, cfg, state, sidecar, rcfg, progress, outputDir)
 }
 
 // --- Helpers ---

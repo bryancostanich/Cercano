@@ -385,7 +385,7 @@ type DocumentRequest struct {
 type DeepResearchRequest struct {
 	Topic      string   `json:"topic" jsonschema:"The research topic to investigate."`
 	Intent     string   `json:"intent" jsonschema:"What you need this research for — drives relevance scoring and source selection."`
-	Depth      string   `json:"depth,omitempty" jsonschema:"Research depth: survey (5-10 results, quick) or thorough (20+ results, deep). Default: thorough."`
+	Depth      string   `json:"depth,omitempty" jsonschema:"Research depth: survey (quick landscape scan, ~2 min), standard (balanced, ~5-8 min), or deep (exhaustive with reference chasing, ~15+ min). Default: standard."`
 	DateRange  string   `json:"date_range,omitempty" jsonschema:"Filter results by date range (e.g. '2024-2026', 'last 2 years', 'after 2023-06')."`
 	Sources    []string `json:"sources,omitempty" jsonschema:"Override auto-detected sources. If omitted, sources are chosen based on topic domain."`
 	OutputDir  string   `json:"output_dir,omitempty" jsonschema:"Write the report to this directory as multiple files (README.md, findings/, references/, synthesis.md). Recommended for thorough research."`
@@ -1327,7 +1327,13 @@ func (s *Server) handleDeepResearch(ctx context.Context, request *gomcp.CallTool
 			&gomcp.TextContent{Text: output},
 		},
 	}
-	return s.maybeNudge(args.ProjectDir, result), nil, nil
+	var metadata any
+	if phaseResult.SuggestedNext != nil {
+		metadata = map[string]any{
+			"suggested_next": phaseResult.SuggestedNext,
+		}
+	}
+	return s.maybeNudge(args.ProjectDir, result), metadata, nil
 }
 
 // webSearchAdapter adapts web.Searcher to research.SearchProvider.

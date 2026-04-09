@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // --- Mocks ---
@@ -52,6 +53,14 @@ func (m *mockFetcher) FetchURL(url string) (*FetchResult, error) {
 		return page, nil
 	}
 	return &FetchResult{URL: url, Content: "Default fetched content for " + url}, nil
+}
+
+type mockModelCaller struct {
+	fn func(prompt string) (string, error)
+}
+
+func (m *mockModelCaller) Call(ctx context.Context, prompt string) (string, error) {
+	return m.fn(prompt)
 }
 
 // --- Source Registry Tests ---
@@ -477,96 +486,325 @@ func TestCompileReport_SeparatesChasedFindings(t *testing.T) {
 	}
 }
 
-// --- Checkpoint Tests ---
+// --- Incremental Deepening Tests ---
 
-func TestCheckpoint_SaveAndLoad(t *testing.T) {
+func TestPipeline_SameDepthReturnsAlreadyMessage(t *testing.T) {
 	dir := t.TempDir()
-	cp := NewCheckpoint(dir, "topic", "intent", "thorough")
+	outputDir := filepath.Join(dir, "scratch", "research", "test-topic")
 
-	plan := &ResearchPlan{Topic: "topic", Intent: "intent", Depth: "thorough"}
-	if err := cp.SavePlan(plan); err != nil {
-		t.Fatalf("SavePlan: %v", err)
+	// Create a completed sidecar at "standard" depth
+	sc := NewSidecar(outputDir)
+	state := NewState("test topic", "intent", "standard", "")
+	state.Progress = ProgressState{Phase: "complete", CompletedAt: time.Now()}
+	if err := sc.Save(state); err != nil {
+		t.Fatalf("Save sidecar: %v", err)
 	}
 
-	loaded, err := cp.LoadPlan()
+	pipeline := NewPipeline(&mockModel{responses: []string{""}}, NewSearchDispatcher(&mockSearcher{}), &mockFetcher{})
+
+	result, err := pipeline.Run(context.Background(), RunConfig{
+		Topic:     "test topic",
+		Intent:    "intent",
+		Depth:     "standard",
+		OutputDir: outputDir,
+	})
 	if err != nil {
-		t.Fatalf("LoadPlan: %v", err)
+		t.Fatalf("Run: %v", err)
 	}
-	if loaded.Topic != "topic" {
-		t.Errorf("expected topic, got %s", loaded.Topic)
-	}
-}
-
-func TestCheckpoint_HasPhase(t *testing.T) {
-	dir := t.TempDir()
-	cp := NewCheckpoint(dir, "topic", "intent", "thorough")
-
-	if cp.HasPhase("plan.json") {
-		t.Error("expected HasPhase false before save")
-	}
-
-	cp.SavePlan(&ResearchPlan{Topic: "test"})
-
-	if !cp.HasPhase("plan.json") {
-		t.Error("expected HasPhase true after save")
+	if !strings.Contains(result.Summary, "already at depth") {
+		t.Errorf("expected 'already at depth' message, got: %s", result.Summary)
 	}
 }
 
-func TestCheckpoint_DeterministicHash(t *testing.T) {
+func TestPipeline_ShallowerDepthReturnsAlreadyMessage(t *testing.T) {
 	dir := t.TempDir()
-	cp1 := NewCheckpoint(dir, "topic", "intent", "thorough")
-	cp2 := NewCheckpoint(dir, "topic", "intent", "thorough")
+	outputDir := filepath.Join(dir, "scratch", "research", "test-topic")
 
-	if cp1.WorkDir() != cp2.WorkDir() {
-		t.Error("expected same work dir for same inputs")
+	// Create a completed sidecar at "deep" depth
+	sc := NewSidecar(outputDir)
+	state := NewState("test topic", "intent", "deep", "")
+	state.Progress = ProgressState{Phase: "complete", CompletedAt: time.Now()}
+	if err := sc.Save(state); err != nil {
+		t.Fatalf("Save sidecar: %v", err)
 	}
 
-	cp3 := NewCheckpoint(dir, "different", "intent", "thorough")
-	if cp1.WorkDir() == cp3.WorkDir() {
-		t.Error("expected different work dir for different inputs")
+	pipeline := NewPipeline(&mockModel{responses: []string{""}}, NewSearchDispatcher(&mockSearcher{}), &mockFetcher{})
+
+	result, err := pipeline.Run(context.Background(), RunConfig{
+		Topic:     "test topic",
+		Intent:    "intent",
+		Depth:     "survey", // shallower than deep
+		OutputDir: outputDir,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(result.Summary, "already at depth") {
+		t.Errorf("expected 'already at depth' message, got: %s", result.Summary)
 	}
 }
 
-func TestCheckpoint_Cleanup(t *testing.T) {
+func TestPipeline_DeeperDepthProceeds(t *testing.T) {
 	dir := t.TempDir()
-	cp := NewCheckpoint(dir, "topic", "intent", "thorough")
-	cp.SavePlan(&ResearchPlan{Topic: "test"})
+	outputDir := filepath.Join(dir, "scratch", "research", "test-topic")
 
-	cp.Cleanup()
+	// Create a completed sidecar at "survey" depth with plan + findings
+	sc := NewSidecar(outputDir)
+	state := NewState("test topic", "intent", "survey", "")
+	state.Plan = &ResearchPlan{
+		Topic: "test topic", Intent: "intent", Depth: "survey",
+		Sources: []Source{{Name: "Wikipedia", Type: "web", Site: "wikipedia.org", Queries: []string{"test"}, Reason: "background"}},
+	}
+	state.SearchResults = []Publication{{Title: "Existing Pub", URL: "https://example.com/existing", Source: "Wikipedia"}}
+	state.Findings = []AnnotatedFinding{{
+		Publication:    Publication{Title: "Existing Pub", URL: "https://example.com/existing", Source: "Wikipedia"},
+		RelevanceScore: 3, ImpactRating: "medium", Summary: "existing finding",
+		KeyFindings: []string{"existing fact"},
+	}}
+	state.Progress = ProgressState{Phase: "complete", CompletedAt: time.Now()}
+	if err := sc.Save(state); err != nil {
+		t.Fatalf("Save sidecar: %v", err)
+	}
 
-	if _, err := os.Stat(cp.WorkDir()); !os.IsNotExist(err) {
-		t.Error("expected work dir to be removed after cleanup")
+	model := &mockModel{responses: []string{
+		// PlanExpansion response
+		"SOURCE: Google Scholar\nREASON: Broader academic coverage\nQUERY: test topic academic",
+		// Analyze new finding — Pass 1: facts
+		"- New fact from deeper search",
+		// Analyze new finding — Pass 2: relevance
+		"WHY_IT_MATTERS: New perspective.\nHOW_TO_USE: Compare.\nRELEVANCE: 4\nIMPACT: high",
+		// Analyze new finding — Pass 3: quality gate
+		"PASS",
+		// ReAnalyzeMiddleFindings — re-score existing finding (score was 3)
+		"WHY_IT_MATTERS: Updated perspective.\nHOW_TO_USE: Updated action.\nRELEVANCE: 4\nIMPACT: high",
+		// Executive summary
+		"Deep research summary.",
+		// Synthesis
+		"Deep synthesis.",
+		// Contradictions
+		"NONE",
+		// Gap analysis
+		"- Remaining gaps",
+		// Reading order
+		"1. Start here",
+		// Follow-up
+		"1. Follow up query",
+	}}
+
+	searcher := &mockSearcher{results: map[string][]SearchResult{
+		"test topic": {{URL: "https://example.com/new", Title: "New Article", Snippet: strings.Repeat("Content. ", 15)}},
+	}}
+	fetcher := &mockFetcher{pages: map[string]*FetchResult{
+		"https://example.com/new": {URL: "https://example.com/new", Content: strings.Repeat("New deep content. ", 40)},
+	}}
+
+	dispatcher := NewSearchDispatcher(searcher)
+	pipeline := NewPipeline(model, dispatcher, fetcher)
+
+	result, err := pipeline.Run(context.Background(), RunConfig{
+		Topic:     "test topic",
+		Intent:    "intent",
+		Depth:     "standard", // deeper than survey
+		OutputDir: outputDir,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Contains(result.Summary, "already at depth") {
+		t.Error("deeper depth should not return 'already at depth' message")
+	}
+	if result.FindingsCount == 0 {
+		t.Error("expected findings from deepened run")
 	}
 }
 
-// --- Additional Coverage Tests ---
-
-func TestCheckpoint_SaveAndLoadAllTypes(t *testing.T) {
+func TestPipeline_InProgressStateResumes(t *testing.T) {
 	dir := t.TempDir()
-	cp := NewCheckpoint(dir, "topic", "intent", "thorough")
+	outputDir := filepath.Join(dir, "scratch", "research", "test-topic")
 
-	// Search results
-	pubs := []Publication{{Title: "Pub1", URL: "https://example.com"}}
-	cp.SaveSearchResults(pubs)
-	loaded, err := cp.LoadSearchResults()
-	if err != nil || len(loaded) != 1 {
-		t.Fatalf("LoadSearchResults: err=%v, len=%d", err, len(loaded))
+	// Create an in-progress sidecar (crashed after plan phase)
+	sc := NewSidecar(outputDir)
+	state := NewState("test topic", "intent", "survey", "")
+	state.Plan = &ResearchPlan{
+		Topic: "test topic", Intent: "intent", Depth: "survey",
+		Sources: []Source{{Name: "Wikipedia", Type: "web", Site: "wikipedia.org", Queries: []string{"test"}, Reason: "background"}},
+	}
+	state.Progress = ProgressState{Phase: "plan"} // in progress
+	if err := sc.Save(state); err != nil {
+		t.Fatalf("Save sidecar: %v", err)
 	}
 
-	// Findings
-	findings := []AnnotatedFinding{{Publication: Publication{Title: "F1"}, RelevanceScore: 4, ImpactRating: "high"}}
-	cp.SaveFindings(findings)
-	loadedFindings, err := cp.LoadFindings()
-	if err != nil || len(loadedFindings) != 1 {
-		t.Fatalf("LoadFindings: err=%v, len=%d", err, len(loadedFindings))
+	model := &mockModel{responses: []string{
+		// Plan (existing plan will be kept since it's a resume, not deepening)
+		"SOURCE: Wikipedia\nREASON: Background\nQUERY: test topic",
+		// Analyze — facts
+		"- A test fact about topic",
+		// Analyze — relevance
+		"WHY_IT_MATTERS: Important.\nHOW_TO_USE: Use it.\nRELEVANCE: 4\nIMPACT: high",
+		// Quality gate
+		"PASS",
+		// Executive summary
+		"Summary.",
+		// Synthesis
+		"Synthesis.",
+		// Contradictions
+		"NONE",
+		// Gap analysis
+		"- Gap",
+		// Reading order
+		"1. Read this",
+		// Follow-up
+		"1. Follow up",
+	}}
+
+	searcher := &mockSearcher{results: map[string][]SearchResult{
+		"test topic": {{URL: "https://example.com/1", Title: "Test Article", Snippet: strings.Repeat("Snippet content. ", 15)}},
+	}}
+	fetcher := &mockFetcher{pages: map[string]*FetchResult{
+		"https://example.com/1": {URL: "https://example.com/1", Content: strings.Repeat("Full content. ", 40)},
+	}}
+
+	dispatcher := NewSearchDispatcher(searcher)
+	pipeline := NewPipeline(model, dispatcher, fetcher)
+
+	result, err := pipeline.Run(context.Background(), RunConfig{
+		Topic:     "test topic",
+		Intent:    "intent",
+		Depth:     "survey",
+		OutputDir: outputDir,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// Should have completed — not returned "already at depth"
+	if strings.Contains(result.Summary, "already at depth") {
+		t.Error("in-progress state should resume, not return already-complete")
+	}
+}
+
+func TestReAnalyzeMiddleFindings_OnlyReScores2to4(t *testing.T) {
+	model := &mockModelCaller{fn: func(prompt string) (string, error) {
+		// Always return score 5 — but it should only be called for score 2-4 findings
+		return "WHY_IT_MATTERS: Updated.\nHOW_TO_USE: Updated.\nRELEVANCE: 5\nIMPACT: high", nil
+	}}
+
+	findings := []AnnotatedFinding{
+		{Publication: Publication{Title: "Score1"}, RelevanceScore: 1, ImpactRating: "low", KeyFindings: []string{"fact"}},
+		{Publication: Publication{Title: "Score2"}, RelevanceScore: 2, ImpactRating: "low", KeyFindings: []string{"fact"}},
+		{Publication: Publication{Title: "Score3"}, RelevanceScore: 3, ImpactRating: "medium", KeyFindings: []string{"fact"}},
+		{Publication: Publication{Title: "Score4"}, RelevanceScore: 4, ImpactRating: "high", KeyFindings: []string{"fact"}},
+		{Publication: Publication{Title: "Score5"}, RelevanceScore: 5, ImpactRating: "high", KeyFindings: []string{"fact"}},
 	}
 
-	// Sections
-	sections := &ReportSections{ExecutiveSummary: "Summary", Synthesis: "Synth"}
-	cp.SaveSections(sections)
-	loadedSections, err := cp.LoadSections()
-	if err != nil || loadedSections.ExecutiveSummary != "Summary" {
-		t.Fatalf("LoadSections: err=%v", err)
+	result := ReAnalyzeMiddleFindings(context.Background(), model, findings, "test intent")
+
+	// Score 1 should be unchanged
+	if result[0].RelevanceScore != 1 {
+		t.Errorf("score-1 finding should be unchanged, got %d", result[0].RelevanceScore)
+	}
+	// Score 5 should be unchanged
+	if result[4].RelevanceScore != 5 {
+		t.Errorf("score-5 finding should be unchanged, got %d", result[4].RelevanceScore)
+	}
+	// Scores 2, 3, 4 should be re-scored to 5 (mock always returns 5)
+	for i := 1; i <= 3; i++ {
+		if result[i].RelevanceScore != 5 {
+			t.Errorf("score-%d finding should be re-scored to 5, got %d", i+1, result[i].RelevanceScore)
+		}
+		if result[i].WhyItMatters != "Updated." {
+			t.Errorf("score-%d finding WhyItMatters should be updated", i+1)
+		}
+	}
+}
+
+func TestPlanExpansion_FiltersExistingSources(t *testing.T) {
+	model := &mockModel{responses: []string{
+		"SOURCE: PubMed\nREASON: Already searched\nQUERY: test\n\nSOURCE: arXiv\nREASON: New source\nQUERY: test deep",
+	}}
+
+	existing := []Source{
+		{Name: "PubMed", Queries: []string{"test"}, Reason: "existing"},
+	}
+
+	newSources, err := PlanExpansion(context.Background(), model, "topic", "intent", "deep", "", existing, 5)
+	if err != nil {
+		t.Fatalf("PlanExpansion: %v", err)
+	}
+
+	// PubMed should be filtered out since it's already in existing
+	for _, s := range newSources {
+		if strings.EqualFold(s.Name, "PubMed") {
+			t.Error("PlanExpansion should filter out existing sources")
+		}
+	}
+	// arXiv should be kept
+	found := false
+	for _, s := range newSources {
+		if s.Name == "arXiv" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected arXiv in new sources")
+	}
+}
+
+func TestPipeline_SidecarPersistsAfterComplete(t *testing.T) {
+	model := &mockModel{responses: []string{
+		// Plan
+		"SOURCE: Wikipedia\nREASON: Background\nQUERY: test topic",
+		// Analyze — facts
+		"- Test fact",
+		// Analyze — relevance
+		"WHY_IT_MATTERS: Important.\nHOW_TO_USE: Use it.\nRELEVANCE: 4\nIMPACT: high",
+		// Quality gate
+		"PASS",
+		// Executive summary
+		"Summary.",
+		// Synthesis
+		"Synthesis.",
+		// Contradictions
+		"NONE",
+		// Gap analysis
+		"- Gap",
+		// Reading order
+		"1. Read this",
+		// Follow-up
+		"1. Follow up",
+	}}
+
+	searcher := &mockSearcher{results: map[string][]SearchResult{
+		"test topic": {{URL: "https://example.com/1", Title: "Test Article", Snippet: strings.Repeat("A test snippet about the topic with substantial details and findings. ", 15)}},
+	}}
+	fetcher := &mockFetcher{pages: map[string]*FetchResult{}}
+
+	dir := t.TempDir()
+	dispatcher := NewSearchDispatcher(searcher)
+	pipeline := NewPipeline(model, dispatcher, fetcher)
+
+	result, err := pipeline.Run(context.Background(), RunConfig{
+		Topic:      "test topic",
+		Intent:     "intent",
+		Depth:      "survey",
+		ProjectDir: dir,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Verify sidecar persists (not cleaned up)
+	sc := NewSidecar(result.OutputDir)
+	if !sc.Exists() {
+		t.Error("expected research_state.json to persist after completion")
+	}
+
+	// Verify state is marked complete
+	loaded, err := sc.Load()
+	if err != nil {
+		t.Fatalf("Load sidecar: %v", err)
+	}
+	if loaded.Progress.Phase != "complete" {
+		t.Errorf("expected phase 'complete', got %q", loaded.Progress.Phase)
 	}
 }
 
@@ -737,15 +975,380 @@ func TestCheckResearchModel_NoNoteWhenModelIsFine(t *testing.T) {
 
 func TestDefaultConfig_Survey(t *testing.T) {
 	cfg := DefaultConfig("survey")
-	if cfg.MaxChasedTotal != 10 {
-		t.Errorf("expected 10 max chased for survey, got %d", cfg.MaxChasedTotal)
+	if cfg.MaxPrimaryResults != 3 {
+		t.Errorf("survey: expected MaxPrimaryResults=3, got %d", cfg.MaxPrimaryResults)
+	}
+	if cfg.MaxChasedTotal != 0 {
+		t.Errorf("survey: expected MaxChasedTotal=0, got %d", cfg.MaxChasedTotal)
+	}
+	if cfg.MaxChasedPerFinding != 0 {
+		t.Errorf("survey: expected MaxChasedPerFinding=0, got %d", cfg.MaxChasedPerFinding)
+	}
+	if cfg.PageTruncateChars != 8000 {
+		t.Errorf("survey: expected PageTruncateChars=8000, got %d", cfg.PageTruncateChars)
+	}
+	if cfg.AnalysisTruncate != 10000 {
+		t.Errorf("survey: expected AnalysisTruncate=10000, got %d", cfg.AnalysisTruncate)
+	}
+	if cfg.MaxQueriesPerSource != 2 {
+		t.Errorf("survey: expected MaxQueriesPerSource=2, got %d", cfg.MaxQueriesPerSource)
+	}
+	if cfg.MaxSources != 3 {
+		t.Errorf("survey: expected MaxSources=3, got %d", cfg.MaxSources)
 	}
 }
 
-func TestDefaultConfig_Thorough(t *testing.T) {
-	cfg := DefaultConfig("thorough")
+func TestDefaultConfig_Standard(t *testing.T) {
+	cfg := DefaultConfig("standard")
+	if cfg.MaxPrimaryResults != 4 {
+		t.Errorf("standard: expected MaxPrimaryResults=4, got %d", cfg.MaxPrimaryResults)
+	}
+	if cfg.MaxChasedTotal != 15 {
+		t.Errorf("standard: expected MaxChasedTotal=15, got %d", cfg.MaxChasedTotal)
+	}
+	if cfg.MaxChasedPerFinding != 3 {
+		t.Errorf("standard: expected MaxChasedPerFinding=3, got %d", cfg.MaxChasedPerFinding)
+	}
+	if cfg.PageTruncateChars != 10000 {
+		t.Errorf("standard: expected PageTruncateChars=10000, got %d", cfg.PageTruncateChars)
+	}
+	if cfg.AnalysisTruncate != 12000 {
+		t.Errorf("standard: expected AnalysisTruncate=12000, got %d", cfg.AnalysisTruncate)
+	}
+	if cfg.MaxQueriesPerSource != 3 {
+		t.Errorf("standard: expected MaxQueriesPerSource=3, got %d", cfg.MaxQueriesPerSource)
+	}
+	if cfg.MaxSources != 4 {
+		t.Errorf("standard: expected MaxSources=4, got %d", cfg.MaxSources)
+	}
+}
+
+func TestDefaultConfig_Deep(t *testing.T) {
+	cfg := DefaultConfig("deep")
+	if cfg.MaxPrimaryResults != 6 {
+		t.Errorf("deep: expected MaxPrimaryResults=6, got %d", cfg.MaxPrimaryResults)
+	}
 	if cfg.MaxChasedTotal != 50 {
-		t.Errorf("expected 50 max chased for thorough, got %d", cfg.MaxChasedTotal)
+		t.Errorf("deep: expected MaxChasedTotal=50, got %d", cfg.MaxChasedTotal)
+	}
+	if cfg.MaxChasedPerFinding != 5 {
+		t.Errorf("deep: expected MaxChasedPerFinding=5, got %d", cfg.MaxChasedPerFinding)
+	}
+	if cfg.PageTruncateChars != 12000 {
+		t.Errorf("deep: expected PageTruncateChars=12000, got %d", cfg.PageTruncateChars)
+	}
+	if cfg.AnalysisTruncate != 15000 {
+		t.Errorf("deep: expected AnalysisTruncate=15000, got %d", cfg.AnalysisTruncate)
+	}
+	if cfg.MaxQueriesPerSource != 3 {
+		t.Errorf("deep: expected MaxQueriesPerSource=3, got %d", cfg.MaxQueriesPerSource)
+	}
+	if cfg.MaxSources != 5 {
+		t.Errorf("deep: expected MaxSources=5, got %d", cfg.MaxSources)
+	}
+}
+
+func TestDefaultConfig_EmptyDefaultsToStandard(t *testing.T) {
+	cfgEmpty := DefaultConfig("")
+	cfgStandard := DefaultConfig("standard")
+	if cfgEmpty != cfgStandard {
+		t.Errorf("empty depth should return standard config, got %+v, want %+v", cfgEmpty, cfgStandard)
+	}
+}
+
+func TestDepthOrder(t *testing.T) {
+	if DepthOrder("survey") != 1 {
+		t.Errorf("expected survey=1, got %d", DepthOrder("survey"))
+	}
+	if DepthOrder("standard") != 2 {
+		t.Errorf("expected standard=2, got %d", DepthOrder("standard"))
+	}
+	if DepthOrder("deep") != 3 {
+		t.Errorf("expected deep=3, got %d", DepthOrder("deep"))
+	}
+	if DepthOrder("unknown") != 0 {
+		t.Errorf("expected unknown=0, got %d", DepthOrder("unknown"))
+	}
+	if DepthOrder("") != 0 {
+		t.Errorf("expected empty=0, got %d", DepthOrder(""))
+	}
+}
+
+// --- Sidecar Tests ---
+
+func TestSidecar_SaveAndLoad(t *testing.T) {
+	dir := t.TempDir()
+	sc := NewSidecar(dir)
+
+	state := NewState("test topic", "test intent", "standard", "2024-2025")
+	state.Plan = &ResearchPlan{Topic: "test topic", Intent: "test intent", Depth: "standard"}
+	state.SearchResults = []Publication{{Title: "Pub1", URL: "https://example.com/1"}}
+	state.Findings = []AnnotatedFinding{{Publication: Publication{Title: "F1"}, RelevanceScore: 4}}
+
+	if err := sc.Save(state); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := sc.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if loaded.Topic != "test topic" {
+		t.Errorf("expected topic %q, got %q", "test topic", loaded.Topic)
+	}
+	if loaded.Intent != "test intent" {
+		t.Errorf("expected intent %q, got %q", "test intent", loaded.Intent)
+	}
+	if loaded.Depth != "standard" {
+		t.Errorf("expected depth %q, got %q", "standard", loaded.Depth)
+	}
+	if loaded.DateRange != "2024-2025" {
+		t.Errorf("expected date_range %q, got %q", "2024-2025", loaded.DateRange)
+	}
+	if loaded.Version != CurrentStateVersion {
+		t.Errorf("expected version %d, got %d", CurrentStateVersion, loaded.Version)
+	}
+	if loaded.Plan == nil {
+		t.Fatal("expected non-nil plan")
+	}
+	if loaded.Plan.Topic != "test topic" {
+		t.Errorf("expected plan topic %q, got %q", "test topic", loaded.Plan.Topic)
+	}
+	if len(loaded.SearchResults) != 1 {
+		t.Errorf("expected 1 search result, got %d", len(loaded.SearchResults))
+	}
+	if len(loaded.Findings) != 1 {
+		t.Errorf("expected 1 finding, got %d", len(loaded.Findings))
+	}
+	if loaded.UpdatedAt.IsZero() {
+		t.Error("expected UpdatedAt to be set after Save")
+	}
+}
+
+func TestSidecar_Exists(t *testing.T) {
+	dir := t.TempDir()
+	sc := NewSidecar(dir)
+
+	if sc.Exists() {
+		t.Error("expected Exists() false before Save")
+	}
+
+	state := NewState("topic", "intent", "survey", "")
+	if err := sc.Save(state); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	if !sc.Exists() {
+		t.Error("expected Exists() true after Save")
+	}
+}
+
+func TestSidecar_Path(t *testing.T) {
+	sc := NewSidecar("/some/output/dir")
+	expected := "/some/output/dir/research_state.json"
+	if sc.Path() != expected {
+		t.Errorf("expected path %q, got %q", expected, sc.Path())
+	}
+}
+
+func TestSidecar_LoadMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	sc := NewSidecar(dir)
+
+	_, err := sc.Load()
+	if err == nil {
+		t.Error("expected error loading non-existent sidecar")
+	}
+}
+
+func TestSidecar_IsInProgress(t *testing.T) {
+	tests := []struct {
+		phase      string
+		inProgress bool
+	}{
+		{"plan", true},
+		{"search", true},
+		{"analyze", true},
+		{"synthesize", true},
+		{"complete", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		state := &ResearchState{
+			Progress: ProgressState{Phase: tt.phase},
+		}
+		got := state.IsInProgress()
+		if got != tt.inProgress {
+			t.Errorf("phase %q: expected IsInProgress()=%v, got %v", tt.phase, tt.inProgress, got)
+		}
+	}
+}
+
+func TestNewState_InitializesCorrectly(t *testing.T) {
+	state := NewState("quantum computing", "write a survey", "deep", "2023-2025")
+
+	if state.Version != CurrentStateVersion {
+		t.Errorf("expected version %d, got %d", CurrentStateVersion, state.Version)
+	}
+	if state.Topic != "quantum computing" {
+		t.Errorf("expected topic %q, got %q", "quantum computing", state.Topic)
+	}
+	if state.Intent != "write a survey" {
+		t.Errorf("expected intent %q, got %q", "write a survey", state.Intent)
+	}
+	if state.Depth != "deep" {
+		t.Errorf("expected depth %q, got %q", "deep", state.Depth)
+	}
+	if state.DateRange != "2023-2025" {
+		t.Errorf("expected date_range %q, got %q", "2023-2025", state.DateRange)
+	}
+	if state.Progress.Phase != "plan" {
+		t.Errorf("expected initial phase %q, got %q", "plan", state.Progress.Phase)
+	}
+	if state.Progress.RunStartedAt.IsZero() {
+		t.Error("expected RunStartedAt to be set")
+	}
+	if state.CreatedAt.IsZero() {
+		t.Error("expected CreatedAt to be set")
+	}
+	if state.UpdatedAt.IsZero() {
+		t.Error("expected UpdatedAt to be set")
+	}
+	if state.IsInProgress() != true {
+		t.Error("new state should be in progress")
+	}
+}
+
+func TestSidecar_SaveCreatesDir(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "nested", "output")
+	sc := NewSidecar(dir)
+
+	state := NewState("topic", "intent", "survey", "")
+	if err := sc.Save(state); err != nil {
+		t.Fatalf("Save should create intermediate dirs: %v", err)
+	}
+
+	if !sc.Exists() {
+		t.Error("expected sidecar file to exist after Save with new dir")
+	}
+}
+
+// --- ProgressTracker Tests ---
+
+func TestProgressTracker_ETA(t *testing.T) {
+	dir := t.TempDir()
+	pt := NewProgressTracker(dir)
+	pt.StartPhase("Analyzing findings", 10)
+
+	// Complete 3 items with ~100ms each
+	for i := 0; i < 3; i++ {
+		time.Sleep(100 * time.Millisecond)
+		pt.CompleteItem()
+	}
+
+	eta := pt.EstRemainingSeconds()
+	// 7 items remaining at ~0.1s each = ~0.7s. Allow generous range for CI.
+	if eta < 0 || eta > 5 {
+		t.Errorf("expected ETA between 0 and 5 seconds, got %d", eta)
+	}
+}
+
+func TestProgressTracker_StatusFile(t *testing.T) {
+	dir := t.TempDir()
+	pt := NewProgressTracker(dir)
+	pt.StartPhase("Analyzing findings", 25)
+	pt.SetStep("Relevance scoring")
+	pt.CompleteItem()
+
+	statusPath := filepath.Join(dir, "status.md")
+	data, err := os.ReadFile(statusPath)
+	if err != nil {
+		t.Fatalf("expected status.md to exist: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "# Research Progress") {
+		t.Error("expected '# Research Progress' header")
+	}
+	if !strings.Contains(content, "Analyzing findings") {
+		t.Error("expected phase name in status.md")
+	}
+	if !strings.Contains(content, "Relevance scoring") {
+		t.Error("expected step name in status.md")
+	}
+	if !strings.Contains(content, "**Findings accepted:**") {
+		t.Error("expected findings accepted line in status.md")
+	}
+}
+
+func TestProgressTracker_Done(t *testing.T) {
+	dir := t.TempDir()
+	pt := NewProgressTracker(dir)
+	pt.StartPhase("Synthesizing", 5)
+
+	statusPath := filepath.Join(dir, "status.md")
+	if _, err := os.Stat(statusPath); os.IsNotExist(err) {
+		t.Fatal("expected status.md to exist after StartPhase")
+	}
+
+	pt.Done(12, 4)
+
+	if _, err := os.Stat(statusPath); !os.IsNotExist(err) {
+		t.Error("expected status.md to be deleted after Done()")
+	}
+}
+
+func TestProgressTracker_ProgressState(t *testing.T) {
+	dir := t.TempDir()
+	pt := NewProgressTracker(dir)
+	pt.StartPhase("Searching", 20)
+	pt.SetStep("Fetching results")
+	pt.IncrementFindings()
+	pt.IncrementFindings()
+
+	state := pt.State()
+
+	if state.Phase != "Searching" {
+		t.Errorf("expected phase 'Searching', got %q", state.Phase)
+	}
+	if state.Step != "Fetching results" {
+		t.Errorf("expected step 'Fetching results', got %q", state.Step)
+	}
+	if state.Total != 20 {
+		t.Errorf("expected total 20, got %d", state.Total)
+	}
+	if state.FindingsAccepted != 2 {
+		t.Errorf("expected FindingsAccepted=2, got %d", state.FindingsAccepted)
+	}
+	if state.RunStartedAt.IsZero() {
+		t.Error("expected RunStartedAt to be set")
+	}
+	if state.PhaseStartedAt.IsZero() {
+		t.Error("expected PhaseStartedAt to be set")
+	}
+}
+
+// --- SearchSource Cap Tests ---
+
+func TestSearchSource_CapsResults(t *testing.T) {
+	var results []SearchResult
+	for i := 0; i < 10; i++ {
+		results = append(results, SearchResult{
+			URL:   fmt.Sprintf("https://example.com/%d", i),
+			Title: fmt.Sprintf("Result %d", i),
+		})
+	}
+	searcher := &mockSearcher{results: map[string][]SearchResult{
+		"test query": results,
+	}}
+	dispatcher := NewSearchDispatcher(searcher)
+	source := Source{Name: "TestWeb", Type: "web", Queries: []string{"test query"}}
+	pubs := dispatcher.SearchSource(context.Background(), source, 3)
+	if len(pubs) > 3 {
+		t.Errorf("SearchSource returned %d results, want <= 3", len(pubs))
 	}
 }
 
@@ -776,11 +1379,11 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	}}
 
 	searcher := &mockSearcher{results: map[string][]SearchResult{
-		"test topic": {{URL: "https://example.com/1", Title: "Test Article", Snippet: "A test snippet"}},
+		"test topic": {{URL: "https://example.com/1", Title: "Test Article", Snippet: strings.Repeat("A test snippet about the topic with details. ", 15)}},
 	}}
 
 	fetcher := &mockFetcher{pages: map[string]*FetchResult{
-		"https://example.com/1": {URL: "https://example.com/1", Content: "Full article content about the test topic."},
+		"https://example.com/1": {URL: "https://example.com/1", Content: strings.Repeat("Full article content about the test topic. ", 20)},
 	}}
 
 	dispatcher := NewSearchDispatcher(searcher)
@@ -834,5 +1437,108 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	// Check synthesis file exists
 	if _, err := os.Stat(filepath.Join(outputDir, "synthesis.md")); os.IsNotExist(err) {
 		t.Error("expected synthesis.md in output dir")
+	}
+}
+
+func TestAnalyzeAllWithPrefetch_SkipsThinContent(t *testing.T) {
+	pubs := []Publication{
+		{Title: "Good Article", URL: "https://example.com/good", Source: "Web"},
+		{Title: "Thin Page", URL: "https://example.com/thin", Source: "Web"},
+		{Title: "Empty Page", URL: "https://example.com/empty", Source: "Web"},
+	}
+	prefetched := map[string]string{
+		"https://example.com/good":  strings.Repeat("This is substantial content. ", 50),
+		"https://example.com/thin":  "Short.",
+		"https://example.com/empty": "",
+	}
+	model := &mockModelCaller{fn: func(prompt string) (string, error) {
+		if strings.Contains(prompt, "Extract every concrete fact") {
+			return "- Fact one about the topic", nil
+		}
+		if strings.Contains(prompt, "analyze the relevance") || strings.Contains(prompt, "connection between these facts") {
+			return "WHY_IT_MATTERS: relevant\nHOW_TO_USE: use it\nRELEVANCE: 3\nIMPACT: medium", nil
+		}
+		if strings.Contains(prompt, "QUALITY") {
+			return "PASS", nil
+		}
+		return "", nil
+	}}
+	cfg := DefaultConfig("survey")
+	tracker := NewProgressTracker(t.TempDir())
+	findings := AnalyzeAllWithPrefetch(context.Background(), model, nil, pubs, prefetched, "test intent", cfg, tracker)
+	if len(findings) != 1 {
+		t.Errorf("expected 1 finding (only good article), got %d", len(findings))
+	}
+	if len(findings) > 0 && findings[0].Publication.Title != "Good Article" {
+		t.Errorf("expected 'Good Article', got %q", findings[0].Publication.Title)
+	}
+}
+
+// --- FilterByKeywordOverlap Tests ---
+
+func TestFilterByKeywordOverlap(t *testing.T) {
+	pubs := []Publication{
+		{Title: "Local LLM inference performance on Apple Silicon"},
+		{Title: "Best restaurants in downtown Portland"},
+		{Title: "Ollama: running large language models locally"},
+		{Title: "Weather forecast for next week"},
+	}
+	filtered := FilterByKeywordOverlap(pubs, "local LLM inference Ollama performance")
+	if len(filtered) != 2 {
+		t.Errorf("expected 2 relevant results, got %d", len(filtered))
+	}
+	for _, p := range filtered {
+		if p.Title == "Best restaurants in downtown Portland" || p.Title == "Weather forecast for next week" {
+			t.Errorf("irrelevant result not filtered: %q", p.Title)
+		}
+	}
+}
+
+func TestFilterByKeywordOverlap_KeepsAllWhenRelevant(t *testing.T) {
+	pubs := []Publication{
+		{Title: "AI inference optimization techniques"},
+		{Title: "Machine learning model serving at edge"},
+	}
+	filtered := FilterByKeywordOverlap(pubs, "AI inference edge serving optimization")
+	if len(filtered) != 2 {
+		t.Errorf("all relevant results should be kept, got %d", len(filtered))
+	}
+}
+
+func TestFilterByKeywordOverlap_ReturnsAllWhenNoneMatch(t *testing.T) {
+	pubs := []Publication{
+		{Title: "Quantum computing advances"},
+		{Title: "Protein folding discoveries"},
+	}
+	filtered := FilterByKeywordOverlap(pubs, "local LLM inference")
+	if len(filtered) != 2 {
+		t.Errorf("should return all when none match, got %d", len(filtered))
+	}
+}
+
+func TestFormatNextSteps_Survey(t *testing.T) {
+	result := FormatNextSteps("survey", "quantum error correction", "understand QEC methods", "/tmp/research")
+	if !strings.Contains(result, "standard") {
+		t.Error("survey should suggest standard depth")
+	}
+	if !strings.Contains(result, "cercano_deep_research") {
+		t.Error("should include tool name")
+	}
+	if !strings.Contains(result, "/tmp/research") {
+		t.Error("should include output_dir")
+	}
+}
+
+func TestFormatNextSteps_Standard(t *testing.T) {
+	result := FormatNextSteps("standard", "topic", "intent", "/tmp")
+	if !strings.Contains(result, "deep") {
+		t.Error("standard should suggest deep")
+	}
+}
+
+func TestFormatNextSteps_Deep(t *testing.T) {
+	result := FormatNextSteps("deep", "topic", "intent", "/tmp")
+	if result != "" {
+		t.Error("deep should not suggest further deepening")
 	}
 }

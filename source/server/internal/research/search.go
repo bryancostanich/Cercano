@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -318,14 +319,28 @@ func (d *SearchDispatcher) searchArXiv(ctx context.Context, query string, maxRes
 	return pubs, nil
 }
 
-// FilterByKeywordOverlap removes publications whose title has zero keyword overlap
-// with the given topic/intent text. Keywords shorter than 4 chars are ignored (stop words).
+// splitWords splits text into lowercase words, breaking on whitespace, hyphens,
+// underscores, slashes, and common punctuation.
+var wordSplitter = regexp.MustCompile(`[\s\-_/.,;:!?"'()\[\]{}]+`)
+
+func splitWords(text string) []string {
+	parts := wordSplitter.Split(strings.ToLower(text), -1)
+	var words []string
+	for _, w := range parts {
+		if len(w) >= 3 {
+			words = append(words, w)
+		}
+	}
+	return words
+}
+
+// FilterByKeywordOverlap removes publications whose title, URL, and abstract
+// have zero keyword overlap with the given topic/intent text.
+// Keywords shorter than 3 chars are ignored (stop words).
 func FilterByKeywordOverlap(pubs []Publication, topicIntent string) []Publication {
 	keywords := make(map[string]bool)
-	for _, word := range strings.Fields(strings.ToLower(topicIntent)) {
-		if len(word) >= 4 {
-			keywords[word] = true
-		}
+	for _, word := range splitWords(topicIntent) {
+		keywords[word] = true
 	}
 	if len(keywords) == 0 {
 		return pubs
@@ -333,18 +348,13 @@ func FilterByKeywordOverlap(pubs []Publication, topicIntent string) []Publicatio
 
 	var result []Publication
 	for _, p := range pubs {
-		titleWords := strings.Fields(strings.ToLower(p.Title))
-		overlap := false
-		for _, w := range titleWords {
-			// Strip leading/trailing punctuation before matching
-			w = strings.Trim(w, ".,;:!?\"'()")
+		// Check title + URL path + abstract for any keyword match
+		searchText := p.Title + " " + p.URL + " " + p.Abstract
+		for _, w := range splitWords(searchText) {
 			if keywords[w] {
-				overlap = true
+				result = append(result, p)
 				break
 			}
-		}
-		if overlap {
-			result = append(result, p)
 		}
 	}
 

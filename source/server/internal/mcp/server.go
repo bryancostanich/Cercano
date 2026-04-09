@@ -125,6 +125,21 @@ func (s *Server) maybeUpdateNudge(result *gomcp.CallToolResult) *gomcp.CallToolR
 	return result
 }
 
+// notifyProgress sends an MCP progress notification if the request has a progress token.
+// Errors are silently ignored — progress is best-effort.
+func notifyProgress(ctx context.Context, req *gomcp.CallToolRequest, message string, progress, total float64) {
+	token := req.Params.GetProgressToken()
+	if token == nil {
+		return
+	}
+	req.Session.NotifyProgress(ctx, &gomcp.ProgressNotificationParams{
+		ProgressToken: token,
+		Message:       message,
+		Progress:      progress,
+		Total:         total,
+	})
+}
+
 // preCheckModelForResearch checks the current model BEFORE running research.
 // Returns a warning message to show the user, or empty string if model is fine.
 func (s *Server) preCheckModelForResearch(ctx context.Context) string {
@@ -656,6 +671,7 @@ func (s *Server) handleSummarize(ctx context.Context, request *gomcp.CallToolReq
 	prompt := fmt.Sprintf("Summarize the following text in %s. Focus on the most important information. Output only the summary, no preamble.\n\nText to summarize:\n%s", lengthInstruction, content)
 	prompt = s.withContext(args.ProjectDir, prompt)
 
+	notifyProgress(ctx, request, "Summarizing locally...", 0, 1)
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
 		Input:       prompt,
 		DirectLocal: true,
@@ -664,6 +680,7 @@ func (s *Server) handleSummarize(ctx context.Context, request *gomcp.CallToolReq
 		return nil, nil, formatGRPCError(err, "cercano_summarize")
 	}
 	s.emitEvent("cercano_summarize", resp, startTime, true, &args.cloudTokenFields, EstimateTokens(content))
+	notifyProgress(ctx, request, "Summarization complete", 1, 1)
 
 	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{
@@ -1000,6 +1017,7 @@ func (s *Server) handleResearch(ctx context.Context, request *gomcp.CallToolRequ
 	fetcher := web.NewFetcher()
 
 	pipeline := web.NewResearchPipeline(modelCaller, searcher, fetcher)
+	notifyProgress(ctx, request, "Researching locally...", 0, 2)
 	result, err := pipeline.Run(ctx, s.withContext(args.ProjectDir, args.Query), args.MaxResults)
 	if err != nil {
 		return nil, nil, fmt.Errorf("cercano_research: %w", err)
@@ -1022,6 +1040,7 @@ func (s *Server) handleResearch(ctx context.Context, request *gomcp.CallToolRequ
 		resp.OutputTokens = modelCaller.totalOut
 	}
 	s.emitEvent("cercano_research", resp, startTime, true, &args.cloudTokenFields, int(modelCaller.totalIn))
+	notifyProgress(ctx, request, "Research complete", 2, 2)
 
 	// Check if model is appropriate for research (post-run note for lightweight research)
 	if resp != nil && resp.RoutingMetadata != nil && research.IsCodeOnlyModel(resp.RoutingMetadata.ModelName) {
@@ -1298,6 +1317,7 @@ func (s *Server) handleDeepResearch(ctx context.Context, request *gomcp.CallTool
 	dispatcher := research.NewSearchDispatcher(searchAdapter)
 	pipeline := research.NewPipeline(modelCaller, dispatcher, fetchAdapter)
 
+	notifyProgress(ctx, request, "Starting deep research...", 0, 4)
 	phaseResult, err := pipeline.Run(ctx, research.RunConfig{
 		Topic:      args.Topic,
 		Intent:     args.Intent,
@@ -1319,6 +1339,7 @@ func (s *Server) handleDeepResearch(ctx context.Context, request *gomcp.CallTool
 		resp.OutputTokens = modelCaller.totalOut
 	}
 	s.emitEvent("cercano_deep_research", resp, startTime, true, &args.cloudTokenFields, phaseResult.ContentTokensAvoided)
+	notifyProgress(ctx, request, "Deep research complete", 4, 4)
 
 	output := phaseResult.Summary
 

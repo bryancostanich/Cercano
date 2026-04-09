@@ -248,6 +248,29 @@ func (s *Server) withContext(projectDir, prompt string) string {
 // nudgeMessage is appended to tool responses when the project hasn't been initialized.
 const nudgeMessage = "\n\n---\n*Note: Cercano hasn't been initialized for this project. Running `cercano_init` with the project directory will enable project-aware responses. Recommended if you'll use Cercano more than once in this session.*"
 
+// withStructuredContent copies the first TextContent into StructuredContent so that
+// Claude Code v2.0.21+ (which prioritizes structuredContent for display) renders the
+// tool output to the user. Without this, TextContent-only results are invisible.
+func withStructuredContent(result *gomcp.CallToolResult) *gomcp.CallToolResult {
+	if result == nil || result.StructuredContent != nil {
+		return result
+	}
+	if len(result.Content) > 0 {
+		if tc, ok := result.Content[0].(*gomcp.TextContent); ok {
+			result.StructuredContent = map[string]any{"type": "text", "text": tc.Text}
+		}
+	}
+	return result
+}
+
+// wrapStructured wraps a ToolHandlerFor so that every result includes structuredContent.
+func wrapStructured[In, Out any](h gomcp.ToolHandlerFor[In, Out]) gomcp.ToolHandlerFor[In, Out] {
+	return func(ctx context.Context, req *gomcp.CallToolRequest, input In) (*gomcp.CallToolResult, Out, error) {
+		result, out, err := h(ctx, req, input)
+		return withStructuredContent(result), out, err
+	}
+}
+
 // maybeNudge appends an init recommendation to the result if the project isn't initialized,
 // and an update nudge on the first tool response if an update is available.
 func (s *Server) maybeNudge(projectDir string, result *gomcp.CallToolResult) *gomcp.CallToolResult {
@@ -415,77 +438,77 @@ func (s *Server) registerTools() {
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_local",
 		Description: "Run a prompt against Cercano's local AI models (Ollama). Handles both chat-style queries and code generation. When file_path and work_dir are provided, uses an agentic generate-validate loop with automatic self-correction. Otherwise, processes the prompt as a direct LLM call. Use this to offload work to local inference — faster, private, and at zero cost.",
-	}, s.handleLocal)
+	}, wrapStructured(s.handleLocal))
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_models",
 		Description: "List models available on the active Ollama instance. Returns model names, sizes, and modification dates. Useful for discovering what models are available on a remote machine before switching.",
-	}, s.handleModels)
+	}, wrapStructured(s.handleModels))
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_config",
 		Description: "Query or update Cercano's runtime configuration. Use action 'get' to list available local models from Ollama. Use action 'set' to change the local model, Ollama endpoint URL, cloud provider, or cloud model without restarting the server.",
-	}, s.handleConfig)
+	}, wrapStructured(s.handleConfig))
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_summarize",
 		Description: "Summarize text or a file using local AI. Returns a concise summary without sending the full content to the cloud. Use this to distill large files, logs, diffs, or documents before processing.",
-	}, s.handleSummarize)
+	}, wrapStructured(s.handleSummarize))
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_extract",
 		Description: "Extract specific information from text or a file using local AI. Returns only the relevant sections matching your query. Use this to pull function signatures, error messages, config values, or other targeted info from large text without sending everything to the cloud.",
-	}, s.handleExtract)
+	}, wrapStructured(s.handleExtract))
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_classify",
 		Description: "Classify or triage text or a file using local AI. Returns a category, confidence level, and brief reasoning. Use this for quick local triage of errors, logs, code quality, or any content that needs categorization without sending it to the cloud.",
-	}, s.handleClassify)
+	}, wrapStructured(s.handleClassify))
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_explain",
 		Description: "Explain code or text using local AI. Returns a clear explanation of what the code does, its key interfaces, and data flow. Use this to understand unfamiliar code locally before deciding what context to send to the cloud.",
-	}, s.handleExplain)
+	}, wrapStructured(s.handleExplain))
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_skills",
 		Description: "List or retrieve Cercano's Agent Skills. Use action 'list' to get a catalog of all available skills with descriptions. Use action 'get' with a skill name to retrieve the full SKILL.md definition.",
-	}, s.handleSkills)
+	}, wrapStructured(s.handleSkills))
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_submit_usage",
 		Description: "Submit cloud token usage data to Cercano (opt-in). This is for sending data, not viewing it — use cercano_stats to see usage reports. Helps Cercano track cloud tokens alongside local inference for accurate local-vs-cloud comparison.",
-	}, s.handleSubmitUsage)
+	}, wrapStructured(s.handleSubmitUsage))
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_stats",
 		Description: "View Cercano usage statistics and cloud token savings. Shows total requests, tokens processed locally, cloud tokens reported by the host, percentage kept local, and breakdowns by tool, model, and day.",
-	}, s.handleStats)
+	}, wrapStructured(s.handleStats))
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_fetch",
 		Description: "Fetch a URL and extract readable text content. Returns the full extracted text (HTML stripped to plain text) — not a summary. Use this to read web pages, documentation, articles, or any URL locally without sending the content to the cloud.",
-	}, s.handleFetch)
+	}, wrapStructured(s.handleFetch))
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_research",
 		Description: "Research a question using web search and local AI analysis. Crafts search queries, searches DuckDuckGo, fetches top results, and synthesizes a sourced answer — all locally. Use this instead of browsing the web yourself to save cloud context tokens. Requires Python venv (run 'cercano setup' first).",
-	}, s.handleResearch)
+	}, wrapStructured(s.handleResearch))
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_init",
 		Description: "Initialize Cercano for a project. Scans the repo to build a project context file (.cercano/context.md) that makes all Cercano tools project-aware. Optionally accepts domain knowledge the host AI already has. Do NOT research the project to populate the context parameter — only provide knowledge you already have. Cercano will scan the repo itself.",
-	}, s.handleInit)
+	}, wrapStructured(s.handleInit))
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_document",
 		Description: "Generate doc comments for exported Go symbols using local AI and write them directly to the file. The host never sees the file contents — Cercano handles the entire read-think-write cycle locally. Returns only a summary of what was documented. Supports dry_run mode to preview without writing.",
-	}, s.handleDocument)
+	}, wrapStructured(s.handleDocument))
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_deep_research",
 		Description: "Deep multi-source research tool. Takes a topic and intent, identifies authoritative sources (academic, industry, news, reference), systematically searches each one, analyzes and ranks findings by relevance and impact, chases cited references, and compiles a structured report with executive summary, contradiction detection, gap analysis, and follow-up suggestions. The entire pipeline runs locally. Use output_dir for thorough research — writes findings as individual files.",
-	}, s.handleDeepResearch)
+	}, wrapStructured(s.handleDeepResearch))
 }
 
 // handleLocal processes a cercano_local tool call.

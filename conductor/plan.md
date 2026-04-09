@@ -124,3 +124,8 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 
 - [ ] **Track: Deep Research Enhancement — Multi-pass analysis, cross-finding context, quality gating**
 *Link: [./tracks/deep_research_enhancement_20260329/](./tracks/deep_research_enhancement_20260329/)*
+
+---
+
+- [ ] **Track: Plugin Packaging — Claude Code, Gemini CLI, Codex CLI plugin/extension packages**
+*Link: [./tracks/plugin_packaging_20260408/](./tracks/plugin_packaging_20260408/)*

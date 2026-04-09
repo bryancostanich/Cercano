@@ -178,6 +178,66 @@ func fallbackSources(topic string) []Source {
 	}
 }
 
+// PlanExpansion asks the model to select NEW sources that complement existing ones.
+// It returns only the new sources to add (not the existing ones).
+func PlanExpansion(ctx context.Context, model ModelCaller, topic, intent, depth, dateRange string, existingSources []Source, maxSources int) ([]Source, error) {
+	var existingList strings.Builder
+	for i, s := range existingSources {
+		existingList.WriteString(fmt.Sprintf("%d. %s — %s\n", i+1, s.Name, s.Reason))
+		for _, q := range s.Queries {
+			existingList.WriteString(fmt.Sprintf("   QUERY: %s\n", q))
+		}
+	}
+
+	prompt := fmt.Sprintf(`You are a research librarian expanding a research plan. The user is deepening their research and needs COMPLEMENTARY sources that were NOT already searched.
+
+Available sources:
+%s
+
+Topic: %s
+Intent: %s
+Depth: %s
+%s
+
+Sources ALREADY searched (do NOT repeat these):
+%s
+
+Instructions:
+- Choose 2-%d NEW sources that complement the existing research
+- Pick sources that cover DIFFERENT angles, methodologies, or perspectives
+- For each source, provide 2-3 HIGHLY SPECIFIC search queries
+- Do NOT repeat any source already listed above
+
+Format your response EXACTLY as:
+
+SOURCE: <source name>
+REASON: <why this source adds new perspective>
+QUERY: <specific search query 1>
+QUERY: <specific search query 2>`, SourceNames(), topic, intent, depth, formatDateRangeInstruction(dateRange), existingList.String(), maxSources)
+
+	resp, err := model.Call(ctx, prompt)
+	if err != nil {
+		return nil, fmt.Errorf("plan expansion failed: %w", err)
+	}
+
+	candidates := parsePlanResponse(resp)
+
+	// Filter out any sources that match existing ones
+	existingNames := make(map[string]bool, len(existingSources))
+	for _, s := range existingSources {
+		existingNames[strings.ToLower(s.Name)] = true
+	}
+
+	var newSources []Source
+	for _, c := range candidates {
+		if !existingNames[strings.ToLower(c.Name)] {
+			newSources = append(newSources, c)
+		}
+	}
+
+	return newSources, nil
+}
+
 func formatDateRangeInstruction(dateRange string) string {
 	if dateRange == "" {
 		return ""

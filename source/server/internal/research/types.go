@@ -80,7 +80,7 @@ type Source struct {
 type ResearchPlan struct {
 	Topic     string
 	Intent    string
-	Depth     string // "survey" or "thorough"
+	Depth     string // "survey", "standard", or "deep"
 	DateRange string
 	Sources   []Source
 }
@@ -111,24 +111,92 @@ type DeepResearchConfig struct {
 	MaxChasedPerFinding int // max chased references per finding
 	PageTruncateChars   int // max chars per fetched page
 	AnalysisTruncate    int // max chars sent to model for analysis
+	MaxQueriesPerSource int // max queries to run per source
+	MaxSources          int // max sources to search
 }
 
-// DefaultConfig returns config for the given depth.
+// CurrentStateVersion is the version written into ResearchState.Version.
+const CurrentStateVersion = 1
+
+// ResearchState is the persistent sidecar written to research_state.json.
+type ResearchState struct {
+	Version       int                `json:"version"`
+	Depth         string             `json:"depth"`
+	Topic         string             `json:"topic"`
+	Intent        string             `json:"intent"`
+	DateRange     string             `json:"date_range,omitempty"`
+	Plan          *ResearchPlan      `json:"plan,omitempty"`
+	SearchResults []Publication      `json:"search_results,omitempty"`
+	ContentCache  map[string]string  `json:"content_cache,omitempty"`
+	Findings      []AnnotatedFinding `json:"findings,omitempty"`
+	Sections      *ReportSections    `json:"sections,omitempty"`
+	Progress      ProgressState      `json:"progress"`
+	CreatedAt     time.Time          `json:"created_at"`
+	UpdatedAt     time.Time          `json:"updated_at"`
+}
+
+// ProgressState is the serializable progress snapshot in the sidecar.
+type ProgressState struct {
+	Phase            string    `json:"phase"`
+	Step             string    `json:"step,omitempty"`
+	Current          int       `json:"current,omitempty"`
+	Total            int       `json:"total,omitempty"`
+	FindingsAccepted int       `json:"findings_accepted"`
+	RunStartedAt     time.Time `json:"run_started_at"`
+	PhaseStartedAt   time.Time `json:"phase_started_at,omitempty"`
+	CompletedAt      time.Time `json:"completed_at,omitempty"`
+}
+
+// DepthOrder returns a numeric ordering for a depth string (survey=1, standard=2, deep=3, unknown=0).
+func DepthOrder(depth string) int {
+	switch depth {
+	case "survey":
+		return 1
+	case "standard":
+		return 2
+	case "deep":
+		return 3
+	default:
+		return 0
+	}
+}
+
+// DefaultConfig returns config for the given depth: "survey", "standard", or "deep".
+// An empty string defaults to "standard".
 func DefaultConfig(depth string) DeepResearchConfig {
-	if depth == "survey" {
+	if depth == "" {
+		depth = "standard"
+	}
+	switch depth {
+	case "survey":
 		return DeepResearchConfig{
 			MaxPrimaryResults:   3,
-			MaxChasedTotal:      10,
+			MaxChasedTotal:      0,
+			MaxChasedPerFinding: 0,
+			PageTruncateChars:   8000,
+			AnalysisTruncate:    10000,
+			MaxQueriesPerSource: 2,
+			MaxSources:          3,
+		}
+	case "deep":
+		return DeepResearchConfig{
+			MaxPrimaryResults:   6,
+			MaxChasedTotal:      50,
+			MaxChasedPerFinding: 5,
+			PageTruncateChars:   12000,
+			AnalysisTruncate:    15000,
+			MaxQueriesPerSource: 3,
+			MaxSources:          5,
+		}
+	default: // "standard" and anything unrecognised
+		return DeepResearchConfig{
+			MaxPrimaryResults:   4,
+			MaxChasedTotal:      15,
 			MaxChasedPerFinding: 3,
 			PageTruncateChars:   10000,
 			AnalysisTruncate:    12000,
+			MaxQueriesPerSource: 3,
+			MaxSources:          4,
 		}
-	}
-	return DeepResearchConfig{
-		MaxPrimaryResults:   6,
-		MaxChasedTotal:      50,
-		MaxChasedPerFinding: 5,
-		PageTruncateChars:   12000,
-		AnalysisTruncate:    15000,
 	}
 }

@@ -3,10 +3,13 @@ package research
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
 )
+
+const minContentChars = 200
 
 // --- Pass 1: Fact Extraction ---
 
@@ -84,12 +87,14 @@ GOOD: "1) Benchmark Cercano's binary size against ExecuTorch's 50KB. 2) Test if 
 
 CROSS_REFS: How does this relate to previously analyzed findings? (skip if no prior findings)
 
-RELEVANCE: 1-5 (be discriminating — not everything is a 5. Use the full range.)
-1 = tangentially related at best
-2 = related topic but doesn't help with the specific intent
-3 = useful context but not directly actionable
-4 = directly relevant with actionable information
-5 = essential — core finding that changes how you think about the intent
+RELEVANCE: 1-5
+1 = Tangentially related, no actionable connection to the research intent
+2 = Related topic area, but doesn't address the specific question
+3 = Addresses the question but with limited specificity or indirect evidence
+4 = Directly relevant with specific data, methods, or conclusions that can be acted on
+5 = Essential finding — primary source, strong evidence, directly answers the intent
+
+CALIBRATION: Use the FULL range. Most findings in a typical set should score 2-4. A score of 5 means this is one of the most important results in the entire set — reserve it. A score of 1 is fine for tangential results. Do not default to 4.
 
 IMPACT: low, medium, or high
 
@@ -203,6 +208,30 @@ func BuildCrossContext(findings []AnnotatedFinding) string {
 	return sb.String()
 }
 
+// ReAnalyzeMiddleFindings re-runs Pass 2 (relevance analysis) on findings scored 2-4,
+// using the full cross-context from all findings. Findings scored 1 or 5 are left unchanged.
+func ReAnalyzeMiddleFindings(ctx context.Context, model ModelCaller, findings []AnnotatedFinding, intent string) []AnnotatedFinding {
+	crossCtx := BuildCrossContext(findings)
+	for i := range findings {
+		score := findings[i].RelevanceScore
+		if score < 2 || score > 4 {
+			continue // skip 1s and 5s
+		}
+		relevance, err := AnalyzeRelevance(ctx, model, findings[i].KeyFindings, findings[i].Publication.Title, intent, crossCtx)
+		if err != nil {
+			continue
+		}
+		findings[i].WhyItMatters = relevance.WhyItMatters
+		findings[i].HowToUse = relevance.HowToUse
+		findings[i].RelevanceScore = relevance.RelevanceScore
+		findings[i].ImpactRating = relevance.ImpactRating
+		if relevance.CrossRefs != "" {
+			findings[i].WhyItMatters += "\n\n**Connections to other findings:** " + relevance.CrossRefs
+		}
+	}
+	return findings
+}
+
 // --- Orchestrated Analysis ---
 
 // AnalyzeFinding runs the multi-pass analysis pipeline on a single publication.
@@ -260,7 +289,7 @@ func AnalyzeFinding(ctx context.Context, model ModelCaller, pub Publication, con
 }
 
 // PrefetchContent fetches all publication URLs concurrently and returns a map of URL → content.
-func PrefetchContent(ctx context.Context, fetcher URLFetcher, pubs []Publication, progress *ProgressWriter) map[string]string {
+func PrefetchContent(ctx context.Context, fetcher URLFetcher, pubs []Publication, progress *ProgressTracker) map[string]string {
 	content := make(map[string]string)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -297,7 +326,7 @@ func PrefetchContent(ctx context.Context, fetcher URLFetcher, pubs []Publication
 
 // AnalyzeAllWithPrefetch uses a pre-populated content map (from search+fetch overlap).
 // Falls back to fetching individual URLs if content is missing.
-func AnalyzeAllWithPrefetch(ctx context.Context, model ModelCaller, fetcher URLFetcher, pubs []Publication, prefetched map[string]string, intent string, cfg DeepResearchConfig, progress *ProgressWriter) []AnnotatedFinding {
+func AnalyzeAllWithPrefetch(ctx context.Context, model ModelCaller, fetcher URLFetcher, pubs []Publication, prefetched map[string]string, intent string, cfg DeepResearchConfig, progress *ProgressTracker) []AnnotatedFinding {
 	// If no prefetched content, do a bulk prefetch now
 	if len(prefetched) == 0 {
 		prefetched = PrefetchContent(ctx, fetcher, pubs, progress)
@@ -313,12 +342,17 @@ func AnalyzeAllWithPrefetch(ctx context.Context, model ModelCaller, fetcher URLF
 			content = pub.Abstract
 		}
 		// Last resort: fetch individually
-		if content == "" && pub.URL != "" {
+		if content == "" && pub.URL != "" && fetcher != nil {
 			if result, err := fetcher.FetchURL(pub.URL); err == nil {
 				content = result.Content
 			}
 		}
 		if content == "" {
+			continue
+		}
+		// Skip thin content — paywalled pages, error pages, failed extractions
+		if len(content) < minContentChars {
+			fmt.Fprintf(os.Stderr, "  Skipping %q: only %d chars (min %d)\n", truncateTitle(pub.Title, 40), len(content), minContentChars)
 			continue
 		}
 
@@ -336,7 +370,7 @@ func AnalyzeAllWithPrefetch(ctx context.Context, model ModelCaller, fetcher URLF
 
 // AnalyzeAllWithProgress processes all publications with progress updates.
 // Content is prefetched concurrently before analysis begins.
-func AnalyzeAllWithProgress(ctx context.Context, model ModelCaller, fetcher URLFetcher, pubs []Publication, intent string, cfg DeepResearchConfig, progress *ProgressWriter) []AnnotatedFinding {
+func AnalyzeAllWithProgress(ctx context.Context, model ModelCaller, fetcher URLFetcher, pubs []Publication, intent string, cfg DeepResearchConfig, progress *ProgressTracker) []AnnotatedFinding {
 	prefetched := PrefetchContent(ctx, fetcher, pubs, progress)
 	return AnalyzeAllWithPrefetch(ctx, model, fetcher, pubs, prefetched, intent, cfg, progress)
 }

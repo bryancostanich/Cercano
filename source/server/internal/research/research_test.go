@@ -1515,3 +1515,30 @@ func TestFilterByKeywordOverlap_ReturnsAllWhenNoneMatch(t *testing.T) {
 		t.Errorf("should return all when none match, got %d", len(filtered))
 	}
 }
+
+func TestFormatNextSteps_Survey(t *testing.T) {
+	result := FormatNextSteps("survey", "quantum error correction", "understand QEC methods", "/tmp/research")
+	if !strings.Contains(result, "standard") {
+		t.Error("survey should suggest standard depth")
+	}
+	if !strings.Contains(result, "cercano_deep_research") {
+		t.Error("should include tool name")
+	}
+	if !strings.Contains(result, "/tmp/research") {
+		t.Error("should include output_dir")
+	}
+}
+
+func TestFormatNextSteps_Standard(t *testing.T) {
+	result := FormatNextSteps("standard", "topic", "intent", "/tmp")
+	if !strings.Contains(result, "deep") {
+		t.Error("standard should suggest deep")
+	}
+}
+
+func TestFormatNextSteps_Deep(t *testing.T) {
+	result := FormatNextSteps("deep", "topic", "intent", "/tmp")
+	if result != "" {
+		t.Error("deep should not suggest further deepening")
+	}
+}

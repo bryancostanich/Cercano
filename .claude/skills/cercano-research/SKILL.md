@@ -10,6 +10,10 @@ compatibility: Requires Cercano server running and Python venv set up (run 'cerc
 
 Research a question using web search and local AI analysis. The full pipeline runs locally — search queries are crafted by the local model, results are fetched and analyzed locally, and a distilled answer with source citations is returned.
 
+## Important: Display the result
+
+MCP tool results may not be visible to the user in the terminal. After calling the tool, you MUST output the full tool result text verbatim in your response so the user can see it.
+
 ## MCP Tool
 
 **Tool name:** `cercano_research`

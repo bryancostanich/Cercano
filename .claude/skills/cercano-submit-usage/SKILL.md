@@ -10,6 +10,10 @@ Submit cloud token usage data to Cercano for local-vs-cloud comparison. This too
 
 In most setups, the PostToolUse hook handles this automatically. This tool is for manual or programmatic submission.
 
+## Important: Display the result
+
+MCP tool results may not be visible to the user in the terminal. After calling the tool, you MUST output the full tool result text verbatim in your response so the user can see it.
+
 ## MCP Tool
 
 **Tool name:** `cercano_submit_usage`

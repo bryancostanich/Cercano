@@ -8,6 +8,10 @@ compatibility: Requires Cercano server running and connected to an Ollama instan
 
 Extract targeted information from text using local AI inference.
 
+## Important: Display the result
+
+MCP tool results may not be visible to the user in the terminal. After calling the tool, you MUST output the full tool result text verbatim in your response so the user can see it.
+
 ## MCP Tool
 
 **Tool name:** `cercano_extract`

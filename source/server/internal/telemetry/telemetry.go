@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // Event represents a single telemetry event from a local inference request.
@@ -143,9 +143,13 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("failed to create telemetry directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL")
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open telemetry database: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to enable WAL mode: %w", err)
 	}
 
 	if err := createTables(db); err != nil {
@@ -320,10 +324,10 @@ func (s *SQLiteStore) GetStats(ctx context.Context) (*Stats, error) {
 
 	// By day
 	dayRows, err := s.db.QueryContext(ctx, `
-		SELECT DATE(timestamp), COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)
+		SELECT substr(timestamp, 1, 10) AS day, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)
 		FROM events
-		GROUP BY DATE(timestamp)
-		ORDER BY DATE(timestamp) DESC
+		GROUP BY day
+		ORDER BY day DESC
 		LIMIT 30
 	`)
 	if err != nil {

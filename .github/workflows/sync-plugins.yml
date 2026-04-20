@@ -10,7 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        repo: [cercano-claude, cercano-gemini, cercano-codex]
+        include:
+          - repo: cercano-claude
+            target: skills/
+          - repo: cercano-gemini
+            target: skills/
+          - repo: cercano-codex
+            target: plugins/cercano/skills/
     steps:
       - name: Checkout main repo
         uses: actions/checkout@v4
@@ -24,8 +30,9 @@ jobs:
 
       - name: Sync skills
         run: |
-          rm -rf target/skills/
-          cp -r plugins/skills/ target/skills/
+          rm -rf target/${{ matrix.target }}
+          mkdir -p target/$(dirname ${{ matrix.target }})
+          cp -r plugins/skills/ target/${{ matrix.target }}
 
       - name: Create PR
         uses: peter-evans/create-pull-request@v6

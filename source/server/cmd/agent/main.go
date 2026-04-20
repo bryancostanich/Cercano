@@ -89,7 +89,7 @@ func main() {
 	sessionSvc := session.InMemoryService()
 	coordinator := loop.NewADKCoordinator(localProvider, cloudProvider, validator, sessionSvc)
 
-	smartRouter, err := agent.NewSmartRouter(localProvider, cloudProvider, cfg.EmbeddingModel, ollamaEng, "internal/agent/prototypes.yaml", func(ctx context.Context, provider, model, apiKey string) (agent.ModelProvider, error) {
+	smartRouter, err := agent.NewSmartRouterFromBytes(localProvider, cloudProvider, cfg.EmbeddingModel, ollamaEng, agent.DefaultPrototypes(), func(ctx context.Context, provider, model, apiKey string) (agent.ModelProvider, error) {
 		return llm.NewCloudModelProvider(ctx, provider, model, apiKey)
 	})
 	if err != nil {

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"io/ioutil"
 	"math"
@@ -12,6 +13,16 @@ import (
 	"cercano/source/server/internal/engine"
 	"gopkg.in/yaml.v3"
 )
+
+//go:embed prototypes.yaml
+var embeddedPrototypes []byte
+
+// DefaultPrototypes returns the embedded prototypes.yaml bytes.
+// Callers should prefer this over loading from disk — the file is an
+// immutable code asset and is bundled into the binary at build time.
+func DefaultPrototypes() []byte {
+	return embeddedPrototypes
+}
 
 // Prototypes represents the categorized example phrases from YAML.
 type Prototypes struct {
@@ -128,13 +139,19 @@ func (sr *SmartRouter) SetCloudProvider(p ModelProvider) {
 	sr.ModelProviders["CloudModel"] = p
 }
 
-// NewSmartRouter creates a new SmartRouter, loads prototypes, and pre-calculates their embeddings.
+// NewSmartRouter creates a new SmartRouter by loading prototypes from a file path.
+// Prefer NewSmartRouterFromBytes for production paths — use DefaultPrototypes() for
+// the embedded default. Path-based loading is retained for test overrides.
 func NewSmartRouter(local, cloud ModelProvider, embeddingModel string, embedder engine.EmbeddingService, prototypesPath string, cloudFactory CloudFactory) (*SmartRouter, error) {
 	yamlBytes, err := ioutil.ReadFile(prototypesPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load prototypes from %s: %w", prototypesPath, err)
 	}
+	return NewSmartRouterFromBytes(local, cloud, embeddingModel, embedder, yamlBytes, cloudFactory)
+}
 
+// NewSmartRouterFromBytes creates a SmartRouter from in-memory prototypes YAML.
+func NewSmartRouterFromBytes(local, cloud ModelProvider, embeddingModel string, embedder engine.EmbeddingService, yamlBytes []byte, cloudFactory CloudFactory) (*SmartRouter, error) {
 	var rawPrototypes Prototypes
 	if err := yaml.Unmarshal(yamlBytes, &rawPrototypes); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal prototypes: %w", err)

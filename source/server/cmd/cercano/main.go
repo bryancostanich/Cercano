@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -14,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -252,63 +255,73 @@ func runSetup(installEngine bool) {
 		}
 	}
 
-	// Step 2: Check required models (only if engine is available)
+	// Step 2: Check/choose a chat model.
+	//
+	// Cercano does not prescribe a particular chat model — the user picks
+	// whatever fits their hardware and workload. Setup only asks the user
+	// to choose when Ollama has no installed chat models at all.
 	if engineAvailable {
-		fmt.Println("\n[2/6] Checking required models...")
-		requiredModels := []string{cfg.LocalModel, cfg.EmbeddingModel}
-		client := &http.Client{Timeout: 5 * time.Second}
+		fmt.Println("\n[2/6] Checking chat models...")
 
-		resp, err := client.Get(cfg.OllamaURL + "/api/tags")
+		installed, err := listInstalledModels(cfg.OllamaURL)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  FAIL: Could not list models: %v\n", err)
 			os.Exit(1)
 		}
-		defer resp.Body.Close()
 
-		type modelList struct {
-			Models []struct {
-				Name string `json:"name"`
-			} `json:"models"`
-		}
+		// The embedding model (nomic-embed-text) is not a chat model — it's
+		// only needed for gRPC agent-mode routing (VS Code/Zed) and is
+		// offered as a separate opt-in step below.
+		chatModels := filterChatModels(installed)
 
-		var models modelList
-		if err := decodeJSON(resp.Body, &models); err != nil {
-			fmt.Fprintf(os.Stderr, "  FAIL: Could not parse model list: %v\n", err)
-			os.Exit(1)
-		}
-
-		installed := make(map[string]bool)
-		for _, m := range models.Models {
-			// Strip :latest suffix for comparison
-			name := strings.TrimSuffix(m.Name, ":latest")
-			installed[name] = true
-			installed[m.Name] = true
-		}
-
-		allPresent := true
-		for _, model := range requiredModels {
-			if installed[model] {
-				fmt.Printf("  OK: %s\n", model)
+		if len(chatModels) == 0 {
+			// No chat models available — show curated picker.
+			picked, err := pickCuratedModel(os.Stdin, os.Stderr)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  FAIL: %v\n", err)
+				os.Exit(1)
+			}
+			if picked != "" {
+				fmt.Printf("  Pulling %s (this can take several minutes)...\n", picked)
+				if err := pullModel(cfg.OllamaURL, picked); err != nil {
+					fmt.Fprintf(os.Stderr, "  FAIL: Could not pull %s: %v\n", picked, err)
+					os.Exit(1)
+				}
+				fmt.Printf("  OK: %s pulled.\n", picked)
+				cfg.LocalModel = picked
 			} else {
-				fmt.Printf("  MISSING: %s — pulling...\n", model)
-				if err := pullModel(cfg.OllamaURL, model); err != nil {
-					fmt.Fprintf(os.Stderr, "  FAIL: Could not pull %s: %v\n", model, err)
-					allPresent = false
-				} else {
-					fmt.Printf("  OK: %s (pulled)\n", model)
+				fmt.Fprintln(os.Stderr, "  Skipping model pull. Pull a chat model with `ollama pull <model>` and re-run `cercano setup`.")
+			}
+		} else {
+			// Use the configured model if it's installed; otherwise fall
+			// back to the first installed chat model and update the config.
+			configured := strings.TrimSuffix(cfg.LocalModel, ":latest")
+			configuredPresent := false
+			for _, m := range chatModels {
+				if strings.TrimSuffix(m, ":latest") == configured {
+					configuredPresent = true
+					break
 				}
 			}
-		}
+			if configuredPresent {
+				fmt.Printf("  OK: Using %s (from config).\n", cfg.LocalModel)
+			} else {
+				chosen := chatModels[0]
+				fmt.Printf("  Configured model %q not installed. Using %s instead.\n", cfg.LocalModel, chosen)
+				cfg.LocalModel = chosen
+			}
 
-		if !allPresent {
-			os.Exit(1)
+			if len(chatModels) > 1 {
+				fmt.Printf("  Other installed chat models: %s\n", strings.Join(chatModels[1:], ", "))
+				fmt.Println("  (Change the active model anytime with `cercano_config set local_model <name>`.)")
+			}
 		}
 	} else {
 		fmt.Fprintln(os.Stderr, "\n[2/6] Skipping model check (no engine available).")
 	}
 
 	// Check/create config file
-	fmt.Println("\n[3/6] Checking config file...")
+	fmt.Println("\n[3/7] Checking config file...")
 	configPath := config.DefaultPath()
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		fmt.Printf("  Creating default config at %s\n", configPath)
@@ -322,20 +335,64 @@ func runSetup(installEngine bool) {
 	}
 
 	// Configure Claude Code hook for cloud token telemetry
-	fmt.Println("\n[4/6] Checking Claude Code telemetry hook...")
+	fmt.Println("\n[4/7] Checking Claude Code telemetry hook...")
 	if err := ensureClaudeHook(); err != nil {
 		fmt.Fprintf(os.Stderr, "  WARN: Could not configure hook: %v\n", err)
 	}
 
 	// Set up Python venv for web research (DuckDuckGo search)
-	fmt.Println("\n[5/6] Setting up Python venv for web research...")
+	fmt.Println("\n[5/7] Setting up Python venv for web research...")
 	if err := ensureVenv(); err != nil {
 		fmt.Fprintf(os.Stderr, "  WARN: Could not set up Python venv: %v\n", err)
 		fmt.Fprintf(os.Stderr, "  (Web research features will not be available. You can re-run 'cercano setup' to retry.)\n")
 	}
 
+	// Optional: agent-mode routing requires an embedding model. Most users
+	// (MCP plugins for Claude Code, Codex, Cursor, Windsurf, Gemini CLI) do
+	// not need this — only the VS Code and Zed IDE extensions that talk to
+	// the gRPC agent API use classification.
+	fmt.Println("\n[6/7] Agent-mode routing (optional)...")
+	if engineAvailable {
+		installed, err := listInstalledModels(cfg.OllamaURL)
+		if err == nil {
+			embedModel := strings.TrimSuffix(cfg.EmbeddingModel, ":latest")
+			hasEmbedding := false
+			for _, m := range installed {
+				if strings.TrimSuffix(m, ":latest") == embedModel {
+					hasEmbedding = true
+					break
+				}
+			}
+			if hasEmbedding {
+				fmt.Printf("  OK: Embedding model %s is installed — agent-mode routing available.\n", cfg.EmbeddingModel)
+			} else {
+				fmt.Println("  MCP plugins (Claude Code, Codex, Cursor, Windsurf, Gemini CLI) do not need this.")
+				fmt.Println("  Only the VS Code and Zed IDE extensions that use gRPC agent-mode need an embedding model.")
+				if promptYesNo(os.Stderr, os.Stdin, fmt.Sprintf("  Pull %s now? [y/N]: ", cfg.EmbeddingModel), false) {
+					fmt.Printf("  Pulling %s...\n", cfg.EmbeddingModel)
+					if err := pullModel(cfg.OllamaURL, cfg.EmbeddingModel); err != nil {
+						fmt.Fprintf(os.Stderr, "  WARN: Could not pull %s: %v\n", cfg.EmbeddingModel, err)
+					} else {
+						fmt.Printf("  OK: %s pulled.\n", cfg.EmbeddingModel)
+					}
+				} else {
+					fmt.Println("  Skipping. Run `ollama pull " + cfg.EmbeddingModel + "` later to enable agent mode.")
+				}
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "  WARN: Could not check for embedding model: %v\n", err)
+		}
+	} else {
+		fmt.Println("  Skipped (no engine available).")
+	}
+
+	// Persist any chat-model choice made in step 2.
+	if err := config.Save(cfg, configPath); err != nil {
+		fmt.Fprintf(os.Stderr, "  WARN: Could not save config: %v\n", err)
+	}
+
 	// Summary
-	fmt.Println("\n[6/6] Setup complete!")
+	fmt.Println("\n[7/7] Setup complete!")
 	if engineAvailable {
 		fmt.Println("  Run 'cercano' to start the server.")
 	} else {
@@ -495,6 +552,138 @@ func pullModel(ollamaURL, model string) error {
 		}
 	}
 	return nil
+}
+
+// listInstalledModels queries the Ollama /api/tags endpoint and returns
+// the list of installed model names (with any :tag suffix preserved).
+func listInstalledModels(ollamaURL string) ([]string, error) {
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(ollamaURL + "/api/tags")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var body struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+	if err := decodeJSON(resp.Body, &body); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(body.Models))
+	for _, m := range body.Models {
+		names = append(names, m.Name)
+	}
+	return names, nil
+}
+
+// embeddingModelNames are recognized embedding models that should NOT be
+// treated as chat models. Cercano only ships with nomic-embed-text support
+// today, but excluding other common embedders future-proofs the check.
+var embeddingModelNames = map[string]bool{
+	"nomic-embed-text":    true,
+	"mxbai-embed-large":   true,
+	"all-minilm":          true,
+	"snowflake-arctic-embed": true,
+}
+
+// filterChatModels returns only models that can serve chat/completion
+// requests — i.e., anything that isn't an embedding model.
+func filterChatModels(installed []string) []string {
+	var chat []string
+	for _, m := range installed {
+		base := strings.TrimSuffix(m, ":latest")
+		// Strip any :tag to get the family name for embedding check.
+		family := base
+		if idx := strings.Index(base, ":"); idx > 0 {
+			family = base[:idx]
+		}
+		if embeddingModelNames[family] {
+			continue
+		}
+		chat = append(chat, m)
+	}
+	return chat
+}
+
+// curatedModel is a Cercano-recommended chat model surfaced when a fresh
+// Ollama install has nothing else to suggest.
+type curatedModel struct {
+	Name        string
+	Size        string
+	Description string
+}
+
+// curatedChatModels are Cercano-recommended chat models shown to users with
+// empty Ollama installs. Keep the list short and explicit — users with
+// specific preferences can always pick their own with `ollama pull`.
+var curatedChatModels = []curatedModel{
+	{
+		Name:        "qwen3-coder-next:latest",
+		Size:        "~18GB",
+		Description: "Best for code-heavy Cercano workflows — code explanation, extraction from source trees, structured pulls from technical docs.",
+	},
+	{
+		Name:        "qwen3.6:27b",
+		Size:        "~17GB",
+		Description: "Best general-purpose — strong reasoning and writing. Great for research, synthesis, and summarization.",
+	},
+	{
+		Name:        "gemma4:26b",
+		Size:        "~16GB",
+		Description: "Deep research and long-context analysis. Follows structured output formats reliably.",
+	},
+	{
+		Name:        "gemma4:e4b",
+		Size:        "~3GB",
+		Description: "Tiny efficient variant — runs on older hardware or low-memory machines. Good quality for its size.",
+	},
+	{
+		Name:        "phi4:14b",
+		Size:        "~9GB",
+		Description: "Mid-size sweet spot — decent reasoning with a smaller footprint than qwen3.6.",
+	},
+}
+
+// pickCuratedModel shows the curated list and returns the user's selection.
+// Returns an empty string if the user declines to pick anything.
+func pickCuratedModel(in io.Reader, out io.Writer) (string, error) {
+	fmt.Fprintln(out, "  No chat models installed. Choose one (or skip and install your own later):")
+	fmt.Fprintln(out)
+	for i, m := range curatedChatModels {
+		fmt.Fprintf(out, "    [%d] %s (%s)\n", i+1, m.Name, m.Size)
+		fmt.Fprintf(out, "        %s\n\n", m.Description)
+	}
+	fmt.Fprintf(out, "    [0] Skip — I'll install my own with `ollama pull <model>`\n\n")
+	fmt.Fprintf(out, "  Choice [0-%d]: ", len(curatedChatModels))
+
+	reader := bufio.NewReader(in)
+	line, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", fmt.Errorf("failed to read choice: %w", err)
+	}
+	choice, err := strconv.Atoi(strings.TrimSpace(line))
+	if err != nil || choice < 0 || choice > len(curatedChatModels) {
+		return "", fmt.Errorf("invalid choice %q", strings.TrimSpace(line))
+	}
+	if choice == 0 {
+		return "", nil
+	}
+	return curatedChatModels[choice-1].Name, nil
+}
+
+// promptYesNo reads a y/n response from stdin. Returns defaultYes on empty input.
+func promptYesNo(out io.Writer, in io.Reader, prompt string, defaultYes bool) bool {
+	fmt.Fprint(out, prompt)
+	reader := bufio.NewReader(in)
+	line, _ := reader.ReadString('\n')
+	line = strings.ToLower(strings.TrimSpace(line))
+	if line == "" {
+		return defaultYes
+	}
+	return line == "y" || line == "yes"
 }
 
 // runStats prints cumulative usage statistics and exits.

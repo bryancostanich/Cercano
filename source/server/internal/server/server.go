@@ -15,12 +15,19 @@ import (
 	"cercano/source/server/pkg/proto"
 )
 
+// RouterCloudUpdater is the subset of the router interface the gRPC server
+// needs to propagate a runtime cloud-provider swap. Both *agent.SmartRouter
+// and *agent.LazyRouter satisfy this.
+type RouterCloudUpdater interface {
+	SetCloudProvider(p agent.ModelProvider)
+}
+
 // Server is the gRPC server for the Agent service.
 type Server struct {
 	proto.UnimplementedAgentServer
 	agent               *agent.Agent
 	localProvider       *llm.LocalModelProvider
-	router              *agent.SmartRouter
+	router              RouterCloudUpdater
 	coordinator         *loop.ADKCoordinator
 	cloudFactory        agent.CloudFactory
 	registry            *engine.EngineRegistry
@@ -30,7 +37,7 @@ type Server struct {
 }
 
 // NewServer creates a new Agent gRPC server.
-func NewServer(a *agent.Agent, localProvider *llm.LocalModelProvider, router *agent.SmartRouter, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
+func NewServer(a *agent.Agent, localProvider *llm.LocalModelProvider, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
 	return &Server{
 		agent:         a,
 		localProvider: localProvider,

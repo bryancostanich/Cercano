@@ -218,7 +218,7 @@ func runSetup(installEngine bool) {
 	}
 
 	// Step 1: Detect AI engine backend
-	fmt.Printf("\n[1/6] Checking for AI engine backends...\n")
+	fmt.Printf("\n[1/7] Checking for AI engine backends...\n")
 	detection := detectEngineWith(checkOllama, cfg.OllamaURL)
 
 	engineAvailable := detection.Available
@@ -261,7 +261,7 @@ func runSetup(installEngine bool) {
 	// whatever fits their hardware and workload. Setup only asks the user
 	// to choose when Ollama has no installed chat models at all.
 	if engineAvailable {
-		fmt.Println("\n[2/6] Checking chat models...")
+		fmt.Println("\n[2/7] Checking chat models...")
 
 		installed, err := listInstalledModels(cfg.OllamaURL)
 		if err != nil {
@@ -317,7 +317,7 @@ func runSetup(installEngine bool) {
 			}
 		}
 	} else {
-		fmt.Fprintln(os.Stderr, "\n[2/6] Skipping model check (no engine available).")
+		fmt.Fprintln(os.Stderr, "\n[2/7] Skipping model check (no engine available).")
 	}
 
 	// Check/create config file

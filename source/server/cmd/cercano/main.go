@@ -91,19 +91,17 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		return llm.NewCloudModelProvider(ctx, provider, model, apiKey)
 	}
 
-	// Prototypes are embedded in the binary (see //go:embed in internal/agent/router.go)
-	// so the server works from any install location without a sibling data file.
-	smartRouter, err := agent.NewSmartRouterFromBytes(localProvider, cloudProvider, cfg.EmbeddingModel, ollamaEng, agent.DefaultPrototypes(), cloudFactory)
-	if err != nil {
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "connection refused") || strings.Contains(errMsg, "no such host") {
-			return "", nil, fmt.Errorf("SmartRouter init failed: could not connect to Ollama at %s", cfg.OllamaURL)
-		}
-		return "", nil, fmt.Errorf("SmartRouter init failed: %v", err)
+	// SmartRouter is built lazily on first use. This keeps MCP-only deployments
+	// working even when the embedding model (nomic-embed-text) is not installed,
+	// since MCP tools never classify intent. Prototypes are embedded in the
+	// binary (see //go:embed in internal/agent/router.go). See GitHub issue #5.
+	routerFactory := func() (*agent.SmartRouter, error) {
+		return agent.NewSmartRouterFromBytes(localProvider, cloudProvider, cfg.EmbeddingModel, ollamaEng, agent.DefaultPrototypes(), cloudFactory)
 	}
+	lazyRouter := agent.NewLazyRouter(routerFactory, localProvider, cloudProvider)
 
 	convStore := agent.NewConversationStore(sessionSvc, 3)
-	orchestrator := agent.NewAgent(smartRouter, coordinator, agent.WithConversationStore(convStore))
+	orchestrator := agent.NewAgent(lazyRouter, coordinator, agent.WithConversationStore(convStore))
 
 	lis, err := net.Listen("tcp", bindAddr)
 	if err != nil {
@@ -111,7 +109,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	}
 
 	s := grpc.NewServer()
-	srv := server.NewServer(orchestrator, localProvider, smartRouter, coordinator, cloudFactory, registry)
+	srv := server.NewServer(orchestrator, localProvider, lazyRouter, coordinator, cloudFactory, registry)
 	srv.SetConfigPersistence(config.DefaultPath(), cfg)
 	proto.RegisterAgentServer(s, srv)
 

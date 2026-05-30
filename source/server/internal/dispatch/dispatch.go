@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"time"
 
 	"cercano/source/server/internal/engine"
 )
@@ -44,17 +46,23 @@ func (l *Loop) Run(ctx context.Context, seed []engine.ChatMessage, userMsg strin
 
 		for turn := 0; turn < l.maxTurns; turn++ {
 			if ctx.Err() != nil {
+				log.Printf("dispatch: turn %d aborting, ctx done before engine call", turn)
 				out <- Event{Kind: EventDone, Cancelled: true}
 				return
 			}
+
+			log.Printf("dispatch: turn %d starting, history=%d msgs", turn, len(*historyRef))
 
 			req := engine.ChatRequest{
 				Model:    l.model,
 				Messages: *historyRef,
 				Tools:    schemasAsJSON(l.registry.Schemas()),
 			}
+			engineStart := time.Now()
 			resp, err := l.engine.ChatWithTools(ctx, req)
+			engineDur := time.Since(engineStart)
 			if err != nil {
+				log.Printf("dispatch: turn %d engine error after %s: %v", turn, engineDur, err)
 				if ctx.Err() != nil {
 					out <- Event{Kind: EventDone, Cancelled: true}
 					return
@@ -62,8 +70,11 @@ func (l *Loop) Run(ctx context.Context, seed []engine.ChatMessage, userMsg strin
 				out <- Event{Kind: EventDone, DoneError: err.Error()}
 				return
 			}
+			log.Printf("dispatch: turn %d engine returned in %s, content_len=%d, tool_calls=%d",
+				turn, engineDur, len(resp.Content), len(resp.ToolCalls))
 
 			if len(resp.ToolCalls) == 0 {
+				log.Printf("dispatch: turn %d final text response, exiting loop", turn)
 				out <- Event{Kind: EventTextChunk, Text: resp.Content}
 				*historyRef = append(*historyRef, engine.ChatMessage{Role: "assistant", Content: resp.Content})
 				out <- Event{Kind: EventDone}
@@ -78,9 +89,13 @@ func (l *Loop) Run(ctx context.Context, seed []engine.ChatMessage, userMsg strin
 
 			for _, tc := range resp.ToolCalls {
 				if ctx.Err() != nil {
+					log.Printf("dispatch: turn %d aborting mid-tool-loop, ctx done", turn)
 					out <- Event{Kind: EventDone, Cancelled: true}
 					return
 				}
+				log.Printf("dispatch: turn %d running tool %q (args %d bytes)",
+					turn, tc.Function.Name, len(tc.Function.Arguments))
+
 				out <- Event{
 					Kind:       EventToolCall,
 					ToolCallID: tc.ID,
@@ -88,11 +103,16 @@ func (l *Loop) Run(ctx context.Context, seed []engine.ChatMessage, userMsg strin
 					ToolArgs:   tc.Function.Arguments,
 				}
 
+				toolStart := time.Now()
 				result, ok, runErr := l.runTool(ctx, tc)
+				toolDur := time.Since(toolStart)
 				resultText := result
 				if runErr != nil {
 					resultText = runErr.Error()
 				}
+				log.Printf("dispatch: turn %d tool %q returned in %s ok=%v result_bytes=%d",
+					turn, tc.Function.Name, toolDur, ok, len(resultText))
+
 				out <- Event{
 					Kind:       EventToolResult,
 					ToolCallID: tc.ID,
@@ -108,6 +128,7 @@ func (l *Loop) Run(ctx context.Context, seed []engine.ChatMessage, userMsg strin
 			}
 		}
 
+		log.Printf("dispatch: exceeded max turns (%d), exiting", l.maxTurns)
 		out <- Event{Kind: EventDone, DoneError: fmt.Sprintf("exceeded max turns (%d)", l.maxTurns)}
 	}()
 

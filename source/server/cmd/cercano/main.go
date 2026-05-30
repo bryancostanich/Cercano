@@ -22,6 +22,8 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/config"
+	"cercano/source/server/internal/dispatch"
+	"cercano/source/server/internal/dispatch/builtin"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/llm"
@@ -772,6 +774,18 @@ func runMCPMode(cfg config.Config, externalGRPC string) {
 
 	grpcClient := proto.NewAgentClient(conn)
 	s := mcpserver.NewServer(grpcClient)
+
+	// Wire cercano_dispatch: agentic local-LLM tool-use loop. Uses its own
+	// Ollama engine + in-memory session store (separate from the gRPC server's).
+	dispatchEng := ollama.NewOllamaEngine(cfg.OllamaURL)
+	dispatchReg := dispatch.NewRegistry()
+	_ = dispatchReg.Register(builtin.NewReadFile())
+	_ = dispatchReg.Register(builtin.NewWriteFile())
+	_ = dispatchReg.Register(builtin.NewShellExec())
+	_ = dispatchReg.Register(builtin.NewWebFetch())
+	dispatchLoop := dispatch.NewLoop(dispatchEng, dispatchReg, cfg.LocalModel, 50)
+	dispatchStore := dispatch.NewStore(session.InMemoryService(), 200)
+	s.SetDispatch(dispatchLoop, dispatchStore)
 
 	// Initialize telemetry
 	telemetryPath := filepath.Join(filepath.Dir(config.DefaultPath()), "telemetry.db")

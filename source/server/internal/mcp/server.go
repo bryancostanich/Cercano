@@ -2,15 +2,18 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/config"
+	projectctx "cercano/source/server/internal/context"
+	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/document"
+	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/research"
 	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/internal/web"
@@ -45,6 +48,15 @@ type Server struct {
 	updateVersion   string // latest available version, empty if up to date
 	updateCommand   string // upgrade command to show the user
 	updateNudgeSent bool   // true after the first tool response nudge
+	dispatchLoop    *dispatch.Loop  // optional; nil disables cercano_dispatch
+	dispatchStore   *dispatch.Store // history persistence for dispatch
+}
+
+// SetDispatch wires the cercano_dispatch tool's loop + history store.
+// If never called, cercano_dispatch returns a configuration error per call.
+func (s *Server) SetDispatch(loop *dispatch.Loop, store *dispatch.Store) {
+	s.dispatchLoop = loop
+	s.dispatchStore = store
 }
 
 // NewServer creates a new MCP server backed by the given gRPC client.
@@ -128,8 +140,14 @@ func (s *Server) maybeUpdateNudge(result *gomcp.CallToolResult) *gomcp.CallToolR
 // notifyProgress sends an MCP progress notification if the request has a progress token.
 // Errors are silently ignored — progress is best-effort.
 func notifyProgress(ctx context.Context, req *gomcp.CallToolRequest, message string, progress, total float64) {
+	if req == nil || req.Params == nil {
+		return
+	}
 	token := req.Params.GetProgressToken()
 	if token == nil {
+		return
+	}
+	if req.Session == nil {
 		return
 	}
 	req.Session.NotifyProgress(ctx, &gomcp.ProgressNotificationParams{
@@ -397,6 +415,14 @@ type DocumentRequest struct {
 	cloudTokenFields
 }
 
+// DispatchRequest is the input schema for the cercano_dispatch tool.
+type DispatchRequest struct {
+	Prompt         string `json:"prompt" jsonschema:"The task / instruction for the local LLM."`
+	System         string `json:"system,omitempty" jsonschema:"Optional system message override. Defaults to the built-in dispatch system prompt."`
+	ConversationID string `json:"conversation_id,omitempty" jsonschema:"Conversation ID for multi-turn dispatch across calls."`
+	cloudTokenFields
+}
+
 // DeepResearchRequest is the input schema for the cercano_deep_research tool.
 type DeepResearchRequest struct {
 	Topic      string   `json:"topic" jsonschema:"The research topic to investigate."`
@@ -487,6 +513,11 @@ func (s *Server) registerTools() {
 		Name:        "cercano_deep_research",
 		Description: "Deep multi-source research tool. Takes a topic and intent, identifies authoritative sources (academic, industry, news, reference), systematically searches each one, analyzes and ranks findings by relevance and impact, chases cited references, and compiles a structured report with executive summary, contradiction detection, gap analysis, and follow-up suggestions. The entire pipeline runs locally. Use output_dir for thorough research — writes findings as individual files.",
 	}, s.handleDeepResearch)
+
+	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
+		Name:        "cercano_dispatch",
+		Description: "Dispatch a task to Cercano's local LLM as an autonomous agent with full tool-use capability (read_file, write_file, shell_exec, web_fetch). Runs an agentic loop locally — the model can read code, run commands, fetch URLs, and edit files until it decides the task is done. Streams events as progress notifications so you can see what's happening; cancel any time. No cloud calls, no validator loop, no SmartRouter — raw local dispatch under your control. Multi-turn via conversation_id.",
+	}, s.handleDispatch)
 }
 
 // handleLocal processes a cercano_local tool call.
@@ -1394,4 +1425,96 @@ func (a *webFetchAdapter) FetchURL(url string) (*research.FetchResult, error) {
 		Title:   result.Title,
 		Content: result.Content,
 	}, nil
+}
+
+// handleDispatch processes a cercano_dispatch tool call.
+func (s *Server) handleDispatch(ctx context.Context, request *gomcp.CallToolRequest, args DispatchRequest) (*gomcp.CallToolResult, any, error) {
+	if result, ok := s.checkDegraded(); ok {
+		return result, nil, nil
+	}
+	if s.dispatchLoop == nil || s.dispatchStore == nil {
+		return &gomcp.CallToolResult{
+			IsError: true,
+			Content: []gomcp.Content{&gomcp.TextContent{Text: "cercano_dispatch is not configured on this server"}},
+		}, nil, nil
+	}
+
+	hist, err := s.dispatchStore.Load(ctx, args.ConversationID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load history: %w", err)
+	}
+
+	if args.System != "" {
+		hasSystem := len(hist) > 0 && hist[0].Role == "system"
+		if !hasSystem {
+			hist = append([]engine.ChatMessage{{Role: "system", Content: args.System}}, hist...)
+		}
+	}
+
+	startTime := time.Now().UnixNano()
+
+	eventCh, finalHistory := s.dispatchLoop.Run(ctx, hist, args.Prompt)
+
+	var (
+		finalText     string
+		turns         int
+		toolCallsMade int
+		cancelled     bool
+		doneErr       string
+	)
+	for ev := range eventCh {
+		if body, mErr := json.Marshal(ev); mErr == nil {
+			notifyProgress(ctx, request, string(body), 0, 0)
+		}
+		switch ev.Kind {
+		case dispatch.EventTextChunk:
+			finalText += ev.Text
+			turns++
+		case dispatch.EventToolCall:
+			toolCallsMade++
+		case dispatch.EventDone:
+			cancelled = ev.Cancelled
+			doneErr = ev.DoneError
+		}
+	}
+
+	if persistErr := s.dispatchStore.Save(ctx, args.ConversationID, finalHistory()); persistErr != nil {
+		fmt.Fprintf(os.Stderr, "dispatch: failed to persist history for %q: %v\n", args.ConversationID, persistErr)
+	}
+
+	// Telemetry: count this call even though there's no gRPC response.
+	if s.collector != nil {
+		s.collector.Emit(&telemetry.Event{
+			Timestamp:  time.Unix(0, startTime),
+			ToolName:   "cercano_dispatch",
+			DurationMs: time.Since(time.Unix(0, startTime)).Milliseconds(),
+		})
+		if args.HostCloudTokensIn > 0 || args.HostCloudTokensOut > 0 {
+			s.collector.EmitCloudUsage(telemetry.CloudUsageReport{
+				Timestamp:         time.Now(),
+				CloudInputTokens:  args.HostCloudTokensIn,
+				CloudOutputTokens: args.HostCloudTokensOut,
+			})
+		}
+	}
+
+	if doneErr != "" {
+		return &gomcp.CallToolResult{
+			IsError: true,
+			Content: []gomcp.Content{&gomcp.TextContent{Text: fmt.Sprintf("dispatch failed: %s", doneErr)}},
+		}, nil, nil
+	}
+
+	resultBody := map[string]interface{}{
+		"text": finalText,
+		"summary": map[string]interface{}{
+			"turns":           turns,
+			"tool_calls_made": toolCallsMade,
+			"cancelled":       cancelled,
+		},
+	}
+	b, _ := json.MarshalIndent(resultBody, "", "  ")
+	return &gomcp.CallToolResult{
+		Content: []gomcp.Content{&gomcp.TextContent{Text: string(b)}},
+	}, nil, nil
 }

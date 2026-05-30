@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -19,10 +20,63 @@ type CompletionResult struct {
 	OutputTokens int
 }
 
+// ChatMessage is one message in a chat conversation.
+// Tool-use turns set ToolCalls (assistant) or ToolCallID + Content (tool result).
+type ChatMessage struct {
+	Role       string     `json:"role"` // "system" | "user" | "assistant" | "tool"
+	Content    string     `json:"content,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"` // role=tool only
+	Name       string     `json:"name,omitempty"`         // role=tool: tool name
+}
+
+// ToolCall is a single tool invocation requested by the assistant.
+type ToolCall struct {
+	ID       string       `json:"id,omitempty"`
+	Function ToolCallFunc `json:"function"`
+}
+
+// ToolCallFunc is the function payload of a ToolCall.
+type ToolCallFunc struct {
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
+}
+
+// ToolSchemaJSON is the on-the-wire format Ollama expects in the chat /tools field.
+type ToolSchemaJSON struct {
+	Type     string           `json:"type"` // always "function"
+	Function ToolFunctionJSON `json:"function"`
+}
+
+// ToolFunctionJSON is the function descriptor inside a ToolSchemaJSON.
+type ToolFunctionJSON struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Parameters  map[string]interface{} `json:"parameters"`
+}
+
+// ChatRequest is the input to ChatWithTools.
+type ChatRequest struct {
+	Model    string           `json:"model"`
+	Messages []ChatMessage    `json:"messages"`
+	Tools    []ToolSchemaJSON `json:"tools,omitempty"`
+}
+
+// ChatResponse is the output of ChatWithTools.
+// If ToolCalls is non-empty, the assistant wants the loop to run them and re-call.
+// Otherwise Content is the final response.
+type ChatResponse struct {
+	Content      string
+	ToolCalls    []ToolCall
+	InputTokens  int
+	OutputTokens int
+}
+
 // InferenceEngine defines the interface for local text generation backends.
 type InferenceEngine interface {
 	Complete(ctx context.Context, model, prompt, systemPrompt string) (CompletionResult, error)
 	CompleteStream(ctx context.Context, model, prompt, systemPrompt string, onToken func(string)) (CompletionResult, error)
+	ChatWithTools(ctx context.Context, req ChatRequest) (ChatResponse, error)
 	ListModels(ctx context.Context) ([]ModelInfo, error)
 	Name() string
 }

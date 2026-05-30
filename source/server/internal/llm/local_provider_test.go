@@ -40,6 +40,10 @@ func (m *mockEngine) Name() string {
 	return m.name
 }
 
+func (m *mockEngine) ChatWithTools(ctx context.Context, req engine.ChatRequest) (engine.ChatResponse, error) {
+	return engine.ChatResponse{}, nil
+}
+
 func TestLocalModelProvider_Process(t *testing.T) {
 	eng := &mockEngine{
 		name:           "mock",

@@ -306,19 +306,34 @@ func (e *OllamaEngine) Embed(ctx context.Context, model, text string) ([]float64
 }
 
 // ChatWithTools sends a tool-use-capable chat request to Ollama's /api/chat
-// endpoint. Returns the assistant message (text and/or tool_calls).
+// endpoint with streaming enabled, accumulates the response, and returns the
+// final assistant message (text and/or tool_calls).
+//
+// Diagnostic logging is written to stderr ("ollama-chat: " prefix) so the
+// dispatch hang can be characterized by re-running and inspecting logs.
 func (e *OllamaEngine) ChatWithTools(ctx context.Context, req engine.ChatRequest) (engine.ChatResponse, error) {
 	url := fmt.Sprintf("%s/api/chat", e.GetActiveURL())
 	payload := map[string]interface{}{
 		"model":    req.Model,
 		"messages": req.Messages,
-		"stream":   false,
+		"stream":   true,
 		"options":  map[string]interface{}{"num_ctx": 32768},
 	}
 	if len(req.Tools) > 0 {
 		payload["tools"] = req.Tools
 	}
 	body, _ := json.Marshal(payload)
+
+	log.Printf("ollama-chat: POST %s model=%q messages=%d tools=%d payload_bytes=%d",
+		url, req.Model, len(req.Messages), len(req.Tools), len(body))
+	// Dump payload (truncated) so we can see exactly what Ollama receives.
+	preview := string(body)
+	if len(preview) > 4000 {
+		preview = preview[:4000] + "...[truncated]"
+	}
+	log.Printf("ollama-chat: payload=%s", preview)
+
+	startReq := time.Now()
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
 	if err != nil {
 		return engine.ChatResponse{}, err
@@ -326,14 +341,18 @@ func (e *OllamaEngine) ChatWithTools(ctx context.Context, req engine.ChatRequest
 	httpReq.Header.Set("Content-Type", "application/json")
 	resp, err := e.Client.Do(httpReq)
 	if err != nil {
+		log.Printf("ollama-chat: HTTP error after %s: %v", time.Since(startReq), err)
 		return engine.ChatResponse{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := ioutil.ReadAll(resp.Body)
+		log.Printf("ollama-chat: HTTP %d after %s: %s", resp.StatusCode, time.Since(startReq), string(b))
 		return engine.ChatResponse{}, fmt.Errorf("ollama chat error: %s", string(b))
 	}
-	var chatResp struct {
+	log.Printf("ollama-chat: response headers received in %s, decoding stream", time.Since(startReq))
+
+	type chunkType struct {
 		Message struct {
 			Role      string `json:"role"`
 			Content   string `json:"content"`
@@ -345,34 +364,74 @@ func (e *OllamaEngine) ChatWithTools(ctx context.Context, req engine.ChatRequest
 				} `json:"function"`
 			} `json:"tool_calls"`
 		} `json:"message"`
-		PromptEvalCount int `json:"prompt_eval_count"`
-		EvalCount       int `json:"eval_count"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-		return engine.ChatResponse{}, err
+		Done            bool `json:"done"`
+		PromptEvalCount int  `json:"prompt_eval_count"`
+		EvalCount       int  `json:"eval_count"`
 	}
 
-	out := engine.ChatResponse{
-		Content:      chatResp.Message.Content,
-		InputTokens:  chatResp.PromptEvalCount,
-		OutputTokens: chatResp.EvalCount,
-	}
-	for i, tc := range chatResp.Message.ToolCalls {
-		id := tc.ID
-		if id == "" {
-			id = fmt.Sprintf("tc_%d", i)
+	var (
+		accumulatedContent strings.Builder
+		finalToolCalls     []engine.ToolCall
+		promptEvalCount    int
+		evalCount          int
+		chunkN             int
+		lastChunkAt        = time.Now()
+	)
+	decoder := json.NewDecoder(resp.Body)
+	for decoder.More() {
+		var chunk chunkType
+		if err := decoder.Decode(&chunk); err != nil {
+			log.Printf("ollama-chat: decode error after %d chunks (%s): %v",
+				chunkN, time.Since(startReq), err)
+			return engine.ChatResponse{}, err
 		}
-		args := tc.Function.Arguments
-		if len(args) == 0 {
-			args = json.RawMessage("{}")
+		chunkN++
+		gap := time.Since(lastChunkAt)
+		lastChunkAt = time.Now()
+		contentPreview := chunk.Message.Content
+		if len(contentPreview) > 200 {
+			contentPreview = contentPreview[:200] + "..."
 		}
-		out.ToolCalls = append(out.ToolCalls, engine.ToolCall{
-			ID: id,
-			Function: engine.ToolCallFunc{
-				Name:      tc.Function.Name,
-				Arguments: args,
-			},
-		})
+		log.Printf("ollama-chat: chunk %d (+%s since prev) content_len=%d tool_calls=%d done=%v content_preview=%q",
+			chunkN, gap, len(chunk.Message.Content), len(chunk.Message.ToolCalls), chunk.Done, contentPreview)
+		if chunk.Message.Content != "" {
+			accumulatedContent.WriteString(chunk.Message.Content)
+		}
+		// Tool calls typically arrive complete in a single chunk (Ollama buffers them).
+		// If multiple chunks carry tool_calls, take the last non-empty set.
+		if len(chunk.Message.ToolCalls) > 0 {
+			finalToolCalls = finalToolCalls[:0]
+			for i, tc := range chunk.Message.ToolCalls {
+				id := tc.ID
+				if id == "" {
+					id = fmt.Sprintf("tc_%d", i)
+				}
+				args := tc.Function.Arguments
+				if len(args) == 0 {
+					args = json.RawMessage("{}")
+				}
+				finalToolCalls = append(finalToolCalls, engine.ToolCall{
+					ID: id,
+					Function: engine.ToolCallFunc{
+						Name:      tc.Function.Name,
+						Arguments: args,
+					},
+				})
+			}
+		}
+		if chunk.Done {
+			promptEvalCount = chunk.PromptEvalCount
+			evalCount = chunk.EvalCount
+		}
 	}
-	return out, nil
+
+	log.Printf("ollama-chat: stream complete after %s, chunks=%d, content_len=%d, tool_calls=%d, prompt_eval=%d, eval=%d",
+		time.Since(startReq), chunkN, accumulatedContent.Len(), len(finalToolCalls), promptEvalCount, evalCount)
+
+	return engine.ChatResponse{
+		Content:      accumulatedContent.String(),
+		ToolCalls:    finalToolCalls,
+		InputTokens:  promptEvalCount,
+		OutputTokens: evalCount,
+	}, nil
 }

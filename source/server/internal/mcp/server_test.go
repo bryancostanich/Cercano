@@ -94,18 +94,23 @@ func TestNewServer_RegistersTools(t *testing.T) {
 	}
 	defer cs.Close()
 
-	// List tools and verify cercano_local is registered.
-	found := false
+	// List tools and verify expected tools are registered.
+	want := map[string]bool{
+		"cercano_local":    false,
+		"cercano_dispatch": false,
+	}
 	for tool, err := range cs.Tools(ctx, nil) {
 		if err != nil {
 			t.Fatalf("listing tools failed: %v", err)
 		}
-		if tool.Name == "cercano_local" {
-			found = true
+		if _, ok := want[tool.Name]; ok {
+			want[tool.Name] = true
 		}
 	}
-	if !found {
-		t.Error("expected cercano_local tool to be registered")
+	for name, found := range want {
+		if !found {
+			t.Errorf("expected %s tool to be registered", name)
+		}
 	}
 }
 

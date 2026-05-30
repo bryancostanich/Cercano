@@ -50,6 +50,26 @@ func init() {
 	version = strings.TrimPrefix(version, "v")
 }
 
+// setupDispatchLogFile configures the standard library logger to tee output
+// to both stderr and ~/.cercano-dispatch.log with microsecond timestamps,
+// so dispatch diagnostics survive Claude Code's startup-only stderr capture.
+func setupDispatchLogFile() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[diag] could not resolve home dir for log: %v\n", err)
+		return
+	}
+	path := home + "/.cercano-dispatch.log"
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[diag] could not open dispatch log %s: %v\n", path, err)
+		return
+	}
+	log.SetOutput(io.MultiWriter(os.Stderr, f))
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	log.Printf("diag: dispatch log opened, version=%s pid=%d", version, os.Getpid())
+}
+
 func checkOllama(baseURL string) error {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(baseURL + "/api/tags")
@@ -737,6 +757,10 @@ func runServerMode(cfg config.Config) {
 // runMCPMode starts the MCP server. If no external gRPC address is provided,
 // it starts an embedded gRPC server on a random port.
 func runMCPMode(cfg config.Config, externalGRPC string) {
+	// Tee diagnostic logging to a file so it survives Claude Code's stdio
+	// stderr capture window (which closes after the initial connect handshake).
+	setupDispatchLogFile()
+
 	var grpcTarget string
 
 	if externalGRPC != "" {

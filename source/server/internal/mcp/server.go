@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1429,17 +1430,33 @@ func (a *webFetchAdapter) FetchURL(url string) (*research.FetchResult, error) {
 
 // handleDispatch processes a cercano_dispatch tool call.
 func (s *Server) handleDispatch(ctx context.Context, request *gomcp.CallToolRequest, args DispatchRequest) (*gomcp.CallToolResult, any, error) {
+	handlerStart := time.Now()
+	log.Printf("handler: enter convID=%q prompt_len=%d system_len=%d",
+		args.ConversationID, len(args.Prompt), len(args.System))
+
 	if result, ok := s.checkDegraded(); ok {
+		log.Printf("handler: server degraded, returning early")
 		return result, nil, nil
 	}
 	if s.dispatchLoop == nil || s.dispatchStore == nil {
+		log.Printf("handler: dispatch not configured, returning error")
 		return &gomcp.CallToolResult{
 			IsError: true,
 			Content: []gomcp.Content{&gomcp.TextContent{Text: "cercano_dispatch is not configured on this server"}},
 		}, nil, nil
 	}
 
+	// Probe whether the host included a progress token.
+	hasToken := false
+	if request != nil && request.Params != nil {
+		hasToken = request.Params.GetProgressToken() != nil
+	}
+	log.Printf("handler: progress_token_present=%v", hasToken)
+
+	loadStart := time.Now()
 	hist, err := s.dispatchStore.Load(ctx, args.ConversationID)
+	log.Printf("handler: store.Load returned in %s, history_len=%d, err=%v",
+		time.Since(loadStart), len(hist), err)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load history: %w", err)
 	}
@@ -1453,6 +1470,7 @@ func (s *Server) handleDispatch(ctx context.Context, request *gomcp.CallToolRequ
 
 	startTime := time.Now().UnixNano()
 
+	log.Printf("handler: invoking dispatch.Loop.Run")
 	eventCh, finalHistory := s.dispatchLoop.Run(ctx, hist, args.Prompt)
 
 	var (
@@ -1461,10 +1479,18 @@ func (s *Server) handleDispatch(ctx context.Context, request *gomcp.CallToolRequ
 		toolCallsMade int
 		cancelled     bool
 		doneErr       string
+		eventCount    int
 	)
 	for ev := range eventCh {
+		eventCount++
+		evStart := time.Now()
 		if body, mErr := json.Marshal(ev); mErr == nil {
 			notifyProgress(ctx, request, string(body), 0, 0)
+		}
+		notifyDur := time.Since(evStart)
+		if notifyDur > 50*time.Millisecond {
+			log.Printf("handler: event %d (%s) notifyProgress took %s",
+				eventCount, ev.Kind, notifyDur)
 		}
 		switch ev.Kind {
 		case dispatch.EventTextChunk:
@@ -1477,12 +1503,22 @@ func (s *Server) handleDispatch(ctx context.Context, request *gomcp.CallToolRequ
 			doneErr = ev.DoneError
 		}
 	}
+	log.Printf("handler: event loop drained after %s, events=%d, cancelled=%v, doneErr=%q, ctx.Err=%v",
+		time.Since(handlerStart), eventCount, cancelled, doneErr, ctx.Err())
 
-	if persistErr := s.dispatchStore.Save(ctx, args.ConversationID, finalHistory()); persistErr != nil {
+	saveStart := time.Now()
+	hist2 := finalHistory()
+	if persistErr := s.dispatchStore.Save(ctx, args.ConversationID, hist2); persistErr != nil {
+		log.Printf("handler: store.Save FAILED after %s for %q: %v",
+			time.Since(saveStart), args.ConversationID, persistErr)
 		fmt.Fprintf(os.Stderr, "dispatch: failed to persist history for %q: %v\n", args.ConversationID, persistErr)
+	} else {
+		log.Printf("handler: store.Save returned in %s, history_msgs=%d",
+			time.Since(saveStart), len(hist2))
 	}
 
 	// Telemetry: count this call even though there's no gRPC response.
+	telemStart := time.Now()
 	if s.collector != nil {
 		s.collector.Emit(&telemetry.Event{
 			Timestamp:  time.Unix(0, startTime),
@@ -1497,8 +1533,10 @@ func (s *Server) handleDispatch(ctx context.Context, request *gomcp.CallToolRequ
 			})
 		}
 	}
+	log.Printf("handler: telemetry emit took %s", time.Since(telemStart))
 
 	if doneErr != "" {
+		log.Printf("handler: returning error result after %s: %s", time.Since(handlerStart), doneErr)
 		return &gomcp.CallToolResult{
 			IsError: true,
 			Content: []gomcp.Content{&gomcp.TextContent{Text: fmt.Sprintf("dispatch failed: %s", doneErr)}},
@@ -1514,6 +1552,8 @@ func (s *Server) handleDispatch(ctx context.Context, request *gomcp.CallToolRequ
 		},
 	}
 	b, _ := json.MarshalIndent(resultBody, "", "  ")
+	log.Printf("handler: returning success result after %s, result_bytes=%d (text=%d, tool_calls=%d, turns=%d)",
+		time.Since(handlerStart), len(b), len(finalText), toolCallsMade, turns)
 	return &gomcp.CallToolResult{
 		Content: []gomcp.Content{&gomcp.TextContent{Text: string(b)}},
 	}, nil, nil

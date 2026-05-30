@@ -304,3 +304,75 @@ func (e *OllamaEngine) Embed(ctx context.Context, model, text string) ([]float64
 	}
 	return embResp.Embedding, nil
 }
+
+// ChatWithTools sends a tool-use-capable chat request to Ollama's /api/chat
+// endpoint. Returns the assistant message (text and/or tool_calls).
+func (e *OllamaEngine) ChatWithTools(ctx context.Context, req engine.ChatRequest) (engine.ChatResponse, error) {
+	url := fmt.Sprintf("%s/api/chat", e.GetActiveURL())
+	payload := map[string]interface{}{
+		"model":    req.Model,
+		"messages": req.Messages,
+		"stream":   false,
+		"options":  map[string]interface{}{"num_ctx": 32768},
+	}
+	if len(req.Tools) > 0 {
+		payload["tools"] = req.Tools
+	}
+	body, _ := json.Marshal(payload)
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return engine.ChatResponse{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := e.Client.Do(httpReq)
+	if err != nil {
+		return engine.ChatResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := ioutil.ReadAll(resp.Body)
+		return engine.ChatResponse{}, fmt.Errorf("ollama chat error: %s", string(b))
+	}
+	var chatResp struct {
+		Message struct {
+			Role      string `json:"role"`
+			Content   string `json:"content"`
+			ToolCalls []struct {
+				ID       string `json:"id"`
+				Function struct {
+					Name      string          `json:"name"`
+					Arguments json.RawMessage `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
+		} `json:"message"`
+		PromptEvalCount int `json:"prompt_eval_count"`
+		EvalCount       int `json:"eval_count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
+		return engine.ChatResponse{}, err
+	}
+
+	out := engine.ChatResponse{
+		Content:      chatResp.Message.Content,
+		InputTokens:  chatResp.PromptEvalCount,
+		OutputTokens: chatResp.EvalCount,
+	}
+	for i, tc := range chatResp.Message.ToolCalls {
+		id := tc.ID
+		if id == "" {
+			id = fmt.Sprintf("tc_%d", i)
+		}
+		args := tc.Function.Arguments
+		if len(args) == 0 {
+			args = json.RawMessage("{}")
+		}
+		out.ToolCalls = append(out.ToolCalls, engine.ToolCall{
+			ID: id,
+			Function: engine.ToolCallFunc{
+				Name:      tc.Function.Name,
+				Arguments: args,
+			},
+		})
+	}
+	return out, nil
+}

@@ -116,3 +116,11 @@ func TestAutoValidator_InvalidConfigReturnsFailed(t *testing.T) {
 		t.Errorf("err = %v, want it to contain 'invalid .cercano/config.yaml'", err)
 	}
 }
+
+func TestDefaultKindToValidator_IncludesPython(t *testing.T) {
+	m := DefaultKindToValidator()
+	v, ok := m[KindPython]
+	if !ok || v == nil {
+		t.Fatalf("expected KindPython entry in DefaultKindToValidator, got %+v", m)
+	}
+}

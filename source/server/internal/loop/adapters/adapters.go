@@ -162,7 +162,7 @@ func validatorRun(validator tools.Validator, workDir string, escalationThreshold
 				}
 			}
 
-			err := validator.Validate(ctx, workDir)
+			_, err := validator.Validate(ctx, workDir)
 
 			ev := session.NewEvent(ctx.InvocationID())
 

@@ -110,7 +110,7 @@ func (c *GenerationCoordinator) Coordinate(ctx context.Context, instruction stri
 		msg := fmt.Sprintf("Validating (Attempt %d/%d)...", i+1, c.maxRetries+1)
 		progress(msg)
 		fmt.Printf(">> Coordinator: %s\n", msg)
-		err = c.validator.Validate(ctx, workDir)
+		_, err = c.validator.Validate(ctx, workDir)
 		if err == nil {
 			// Success!
 			fmt.Println(">> Coordinator: Validation PASSED.")

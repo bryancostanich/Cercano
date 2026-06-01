@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/loop"
+	"cercano/source/server/internal/tools"
 )
 
 type MockGenerator struct {
@@ -26,8 +27,11 @@ type MockValidator struct {
 	ValidateFunc func(ctx context.Context, workDir string) error
 }
 
-func (m *MockValidator) Validate(ctx context.Context, workDir string) error {
-	return m.ValidateFunc(ctx, workDir)
+func (m *MockValidator) Validate(ctx context.Context, workDir string) (tools.Decision, error) {
+	if err := m.ValidateFunc(ctx, workDir); err != nil {
+		return tools.Failed, err
+	}
+	return tools.Passed, nil
 }
 
 func TestGenerationCoordinator_Coordinate_SuccessFirstTime(t *testing.T) {

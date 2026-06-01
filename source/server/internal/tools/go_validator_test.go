@@ -28,9 +28,12 @@ func TestPass(t *testing.T) {}
 			t.Fatal(err)
 		}
 
-		err = v.Validate(ctx, tmpDir)
+		decision, err := v.Validate(ctx, tmpDir)
 		if err != nil {
-			t.Errorf("expected no error, got %v", err)
+			t.Fatalf("expected no error, got %v", err)
+		}
+		if decision != tools.Passed {
+			t.Errorf("got decision %s, want passed", decision)
 		}
 	})
 
@@ -51,9 +54,12 @@ func TestFail(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		err = v.Validate(ctx, tmpDir)
+		decision, err := v.Validate(ctx, tmpDir)
 		if err == nil {
-			t.Error("expected error for compilation failure, got nil")
+			t.Fatal("expected error for compilation failure, got nil")
+		}
+		if decision != tools.Failed {
+			t.Errorf("got decision %s, want failed", decision)
 		}
 	})
 
@@ -74,9 +80,12 @@ func TestFail(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		err = v.Validate(ctx, tmpDir)
+		decision, err := v.Validate(ctx, tmpDir)
 		if err == nil {
-			t.Error("expected error for test failure, got nil")
+			t.Fatal("expected error for test failure, got nil")
+		}
+		if decision != tools.Failed {
+			t.Errorf("got decision %s, want failed", decision)
 		}
 	})
 }

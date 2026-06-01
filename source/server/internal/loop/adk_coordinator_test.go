@@ -10,6 +10,7 @@ import (
 
 	agentmod "cercano/source/server/internal/agent"
 	"cercano/source/server/internal/loop"
+	"cercano/source/server/internal/tools"
 	"google.golang.org/adk/session"
 )
 
@@ -40,9 +41,12 @@ type funcValidator struct {
 	calls int
 }
 
-func (v *funcValidator) Validate(ctx context.Context, workDir string) error {
+func (v *funcValidator) Validate(ctx context.Context, workDir string) (tools.Decision, error) {
 	v.calls++
-	return v.fn(ctx, workDir)
+	if err := v.fn(ctx, workDir); err != nil {
+		return tools.Failed, err
+	}
+	return tools.Passed, nil
 }
 
 // ---- ADK coordinator tests ----

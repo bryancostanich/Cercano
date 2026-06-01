@@ -14,6 +14,7 @@ import (
 
 	agentmod "cercano/source/server/internal/agent"
 	"cercano/source/server/internal/loop/adapters"
+	"cercano/source/server/internal/tools"
 )
 
 // ---- stub ModelProvider ----
@@ -44,13 +45,16 @@ type stubValidator struct {
 	calls   int
 }
 
-func (v *stubValidator) Validate(_ context.Context, _ string) error {
+func (v *stubValidator) Validate(_ context.Context, _ string) (tools.Decision, error) {
 	i := v.calls
 	v.calls++
 	if i < len(v.results) {
-		return v.results[i]
+		if v.results[i] != nil {
+			return tools.Failed, v.results[i]
+		}
+		return tools.Passed, nil
 	}
-	return nil
+	return tools.Passed, nil
 }
 
 // ---- test helpers ----

@@ -2,11 +2,11 @@ package tools
 
 import (
 	"context"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	"cercano/source/server/internal/testfixtures"
 )
 
 func skipIfNoNpm(t *testing.T) {
@@ -17,11 +17,8 @@ func skipIfNoNpm(t *testing.T) {
 
 func TestNodeValidator_PassesOnTrivialBuild(t *testing.T) {
 	skipIfNoNpm(t)
-	dir := t.TempDir()
-	pkg := `{"name":"x","version":"0.0.1","scripts":{"build":"exit 0"}}`
-	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(pkg), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Use Copy: npm may write a package-lock.json or similar artifacts.
+	dir := testfixtures.Copy(t, "node/valid")
 	v := NewNodeValidator()
 	decision, err := v.Validate(context.Background(), dir)
 	if err != nil {
@@ -34,11 +31,7 @@ func TestNodeValidator_PassesOnTrivialBuild(t *testing.T) {
 
 func TestNodeValidator_FailsOnFailingBuild(t *testing.T) {
 	skipIfNoNpm(t)
-	dir := t.TempDir()
-	pkg := `{"name":"x","version":"0.0.1","scripts":{"build":"exit 1"}}`
-	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(pkg), 0644); err != nil {
-		t.Fatal(err)
-	}
+	dir := testfixtures.Copy(t, "node/broken")
 	v := NewNodeValidator()
 	decision, err := v.Validate(context.Background(), dir)
 	if err == nil {

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/projectconfig"
+	"cercano/source/server/internal/testfixtures"
 )
 
 type fakeLoader struct {
@@ -123,4 +124,40 @@ func TestDefaultKindToValidator_IncludesPython(t *testing.T) {
 	if !ok || v == nil {
 		t.Fatalf("expected KindPython entry in DefaultKindToValidator, got %+v", m)
 	}
+}
+
+// End-to-end: AutoValidator with the real Default* wiring should detect a
+// Python fixture and dispatch to PythonValidator (Pass on valid, Fail on broken).
+// PATH-gated like the other Python tests.
+func TestAutoValidator_DispatchesToPython_EndToEnd(t *testing.T) {
+	skipIfNoPython(t)
+
+	av := NewAutoValidator(fakeLoader{}, DefaultKindToValidator())
+
+	t.Run("valid", func(t *testing.T) {
+		dir := copyFixtureForAutoValidator(t, "python/valid")
+		decision, err := av.Validate(context.Background(), dir)
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if decision != Passed {
+			t.Errorf("got decision %s, want passed", decision)
+		}
+	})
+
+	t.Run("broken", func(t *testing.T) {
+		dir := copyFixtureForAutoValidator(t, "python/broken")
+		decision, err := av.Validate(context.Background(), dir)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if decision != Failed {
+			t.Errorf("got decision %s, want failed", decision)
+		}
+	})
+}
+
+// copyFixtureForAutoValidator is a thin alias for testfixtures.Copy.
+func copyFixtureForAutoValidator(t *testing.T, name string) string {
+	return testfixtures.Copy(t, name)
 }

@@ -85,7 +85,7 @@ func main() {
 		}
 	}
 
-	validator := tools.NewGoValidator()
+	validator := tools.NewAutoValidator(tools.DefaultLoader(), tools.DefaultKindToValidator())
 	sessionSvc := session.InMemoryService()
 	coordinator := loop.NewADKCoordinator(localProvider, cloudProvider, validator, sessionSvc)
 

@@ -32,6 +32,8 @@ func TestDetect(t *testing.T) {
 		{"cargo", map[string]string{"Cargo.toml": "[package]\nname='x'\n"}, KindRust},
 		{"node with build", map[string]string{"package.json": `{"scripts":{"build":"webpack"}}`}, KindNode},
 		{"node without build", map[string]string{"package.json": `{"scripts":{"test":"jest"}}`}, KindUnknown},
+		{"python", map[string]string{"pyproject.toml": "[project]\nname=\"x\"\n"}, KindPython},
+		{"go beats python", map[string]string{"go.mod": "module x", "pyproject.toml": ""}, KindGo},
 		{"empty", map[string]string{}, KindUnknown},
 		{"rust beats go", map[string]string{"Cargo.toml": "", "go.mod": "module x"}, KindRust},
 		{"go beats fsproj", map[string]string{"go.mod": "module x", "App.fsproj": "<Project/>"}, KindGo},

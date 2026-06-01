@@ -16,6 +16,7 @@ const (
 	KindDotnetSolution
 	KindDotnetProject
 	KindNode
+	KindPython
 )
 
 func (k ProjectKind) String() string {
@@ -30,6 +31,8 @@ func (k ProjectKind) String() string {
 		return "dotnet-project"
 	case KindNode:
 		return "node"
+	case KindPython:
+		return "python"
 	default:
 		return "unknown"
 	}
@@ -44,7 +47,7 @@ func Detect(workDir string) (ProjectKind, error) {
 		return KindUnknown, err
 	}
 
-	hasCargo, hasGoMod, hasSln, hasDotnetProj, hasPackageJSON := false, false, false, false, false
+	hasCargo, hasGoMod, hasSln, hasDotnetProj, hasPackageJSON, hasPyProject := false, false, false, false, false, false
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -61,6 +64,8 @@ func Detect(workDir string) (ProjectKind, error) {
 			hasDotnetProj = true
 		case name == "package.json":
 			hasPackageJSON = true
+		case name == "pyproject.toml":
+			hasPyProject = true
 		}
 	}
 
@@ -75,6 +80,8 @@ func Detect(workDir string) (ProjectKind, error) {
 		return KindDotnetProject, nil
 	case hasPackageJSON && nodeHasBuildScript(filepath.Join(workDir, "package.json")):
 		return KindNode, nil
+	case hasPyProject:
+		return KindPython, nil
 	default:
 		return KindUnknown, nil
 	}

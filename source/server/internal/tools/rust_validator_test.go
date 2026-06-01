@@ -2,23 +2,12 @@ package tools
 
 import (
 	"context"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	"cercano/source/server/internal/testfixtures"
 )
-
-const minimalCargo = `[package]
-name = "x"
-version = "0.1.0"
-edition = "2021"
-[lib]
-path = "src/lib.rs"
-`
-
-const validRs = "pub fn add(a: i32, b: i32) -> i32 { a + b }\n"
-const brokenRs = "pub fn add(a: i32, b: i32) -> i32 { a + b\n"
 
 func skipIfNoCargo(t *testing.T) {
 	if _, err := exec.LookPath("cargo"); err != nil {
@@ -28,16 +17,8 @@ func skipIfNoCargo(t *testing.T) {
 
 func TestRustValidator_PassesOnValidProject(t *testing.T) {
 	skipIfNoCargo(t)
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "Cargo.toml"), []byte(minimalCargo), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(dir, "src"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "src/lib.rs"), []byte(validRs), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Use Copy: cargo build writes Cargo.lock + target/ into the project.
+	dir := testfixtures.Copy(t, "rust/valid")
 	v := NewRustValidator()
 	decision, err := v.Validate(context.Background(), dir)
 	if err != nil {
@@ -50,16 +31,7 @@ func TestRustValidator_PassesOnValidProject(t *testing.T) {
 
 func TestRustValidator_FailsOnBrokenProject(t *testing.T) {
 	skipIfNoCargo(t)
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "Cargo.toml"), []byte(minimalCargo), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(dir, "src"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "src/lib.rs"), []byte(brokenRs), 0644); err != nil {
-		t.Fatal(err)
-	}
+	dir := testfixtures.Copy(t, "rust/broken")
 	v := NewRustValidator()
 	decision, err := v.Validate(context.Background(), dir)
 	if err == nil {

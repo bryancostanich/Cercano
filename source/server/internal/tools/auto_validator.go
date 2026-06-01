@@ -35,6 +35,7 @@ func DefaultKindToValidator() KindToValidator {
 		KindDotnetSolution: NewDotnetValidator(),
 		KindDotnetProject:  NewDotnetValidator(),
 		KindNode:           NewNodeValidator(),
+		KindPython:         NewPythonValidator(),
 	}
 }
 

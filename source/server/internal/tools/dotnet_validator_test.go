@@ -2,24 +2,12 @@ package tools
 
 import (
 	"context"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	"cercano/source/server/internal/testfixtures"
 )
-
-const minimalFsproj = `<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <OutputType>Library</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
-  </PropertyGroup>
-  <ItemGroup><Compile Include="Lib.fs" /></ItemGroup>
-</Project>
-`
-
-const validFs = "module Lib\nlet add a b = a + b\n"
-const brokenFs = "module Lib\nlet add a b = a + b +\n"
 
 func skipIfNoDotnet(t *testing.T) {
 	if _, err := exec.LookPath("dotnet"); err != nil {
@@ -29,13 +17,8 @@ func skipIfNoDotnet(t *testing.T) {
 
 func TestDotnetValidator_PassesOnValidProject(t *testing.T) {
 	skipIfNoDotnet(t)
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "Lib.fsproj"), []byte(minimalFsproj), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "Lib.fs"), []byte(validFs), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Use Copy: dotnet build writes bin/ and obj/ into the project dir.
+	dir := testfixtures.Copy(t, "dotnet/valid")
 	v := NewDotnetValidator()
 	decision, err := v.Validate(context.Background(), dir)
 	if err != nil {
@@ -48,13 +31,7 @@ func TestDotnetValidator_PassesOnValidProject(t *testing.T) {
 
 func TestDotnetValidator_FailsOnBrokenProject(t *testing.T) {
 	skipIfNoDotnet(t)
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "Lib.fsproj"), []byte(minimalFsproj), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "Lib.fs"), []byte(brokenFs), 0644); err != nil {
-		t.Fatal(err)
-	}
+	dir := testfixtures.Copy(t, "dotnet/broken")
 	v := NewDotnetValidator()
 	decision, err := v.Validate(context.Background(), dir)
 	if err == nil {

@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"errors"
 	"fmt"
 	"iter"
 	"os"
@@ -162,40 +163,55 @@ func validatorRun(validator tools.Validator, workDir string, escalationThreshold
 				}
 			}
 
-			_, err := validator.Validate(ctx, workDir)
+			decision, vErr := validator.Validate(ctx, workDir)
 
 			ev := session.NewEvent(ctx.InvocationID())
 
-			if err == nil {
+			switch decision {
+			case tools.Passed:
 				ev.Actions.Escalate = true
 				ev.LLMResponse.Content = genai.NewContentFromText("validation passed", genai.RoleModel)
 				yield(ev, nil)
 				return
-			}
 
-			// Validation failed: update failure counter and optionally set use_cloud.
-			failures := 0
-			if raw, stateErr := state.Get(StateKeyValidationFailures); stateErr == nil {
-				if v, ok := raw.(int); ok {
-					failures = v
+			case tools.Skipped:
+				// Exit the loop after this generation; no retry, no escalation.
+				ev.Actions.Escalate = true
+				reason := "validation skipped"
+				var sr *tools.SkipReason
+				if errors.As(vErr, &sr) {
+					reason = sr.Reason
 				}
-			}
-			failures++
+				ev.LLMResponse.Content = genai.NewContentFromText(
+					fmt.Sprintf("validation skipped: %s", reason),
+					genai.RoleModel,
+				)
+				yield(ev, nil)
+				return
 
-			ev.Actions.StateDelta = map[string]any{
-				StateKeyValidationFailures:  failures,
-				StateKeyLastValidationError: err.Error(),
-			}
+			case tools.Failed:
+				// Failure path: bump counter, optionally set use_cloud.
+				failures := 0
+				if raw, stateErr := state.Get(StateKeyValidationFailures); stateErr == nil {
+					if v, ok := raw.(int); ok {
+						failures = v
+					}
+				}
+				failures++
 
-			if failures >= escalationThreshold {
-				ev.Actions.StateDelta[StateKeyUseCloud] = true
+				ev.Actions.StateDelta = map[string]any{
+					StateKeyValidationFailures:  failures,
+					StateKeyLastValidationError: vErr.Error(),
+				}
+				if failures >= escalationThreshold {
+					ev.Actions.StateDelta[StateKeyUseCloud] = true
+				}
+				ev.LLMResponse.Content = genai.NewContentFromText(
+					fmt.Sprintf("validation failed: %s", vErr.Error()),
+					genai.RoleModel,
+				)
+				yield(ev, nil)
 			}
-
-			ev.LLMResponse.Content = genai.NewContentFromText(
-				fmt.Sprintf("validation failed: %s", err.Error()),
-				genai.RoleModel,
-			)
-			yield(ev, nil)
 		}
 	}
 }

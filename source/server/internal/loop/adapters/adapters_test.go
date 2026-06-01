@@ -242,6 +242,62 @@ func TestGeneratorAgent_SelectsCloudWhenStateSet(t *testing.T) {
 
 // ---- ValidatorAgent tests ----
 
+// skippingValidator returns Skipped with a known reason.
+type skippingValidator struct {
+	calls  int
+	reason string
+}
+
+func (v *skippingValidator) Validate(_ context.Context, _ string) (tools.Decision, error) {
+	v.calls++
+	return tools.Skipped, &tools.SkipReason{Reason: v.reason}
+}
+
+// TestValidatorAgent_Skipped_EscalatesAndCarriesReason: validation skipped →
+// event has Escalate=true (exits loop without retry), content includes reason.
+func TestValidatorAgent_Skipped_EscalatesAndCarriesReason(t *testing.T) {
+	val := &skippingValidator{reason: "no recognized project manifest in /tmp/x"}
+	ag, err := adapters.NewValidatorAgent(val, t.TempDir(), 3)
+	if err != nil {
+		t.Fatalf("NewValidatorAgent: %v", err)
+	}
+
+	events := runAgent(t, ag, nil, "trigger")
+	if len(events) == 0 {
+		t.Fatal("expected at least one event")
+	}
+
+	var found bool
+	for _, ev := range events {
+		if ev.Author != "validator" {
+			continue
+		}
+		if !ev.Actions.Escalate {
+			t.Errorf("expected Escalate=true for skipped validation")
+		}
+		if ev.LLMResponse.Content == nil {
+			continue
+		}
+		var text strings.Builder
+		for _, p := range ev.LLMResponse.Content.Parts {
+			text.WriteString(p.Text)
+		}
+		if !strings.Contains(text.String(), val.reason) {
+			t.Errorf("event content = %q, want it to contain skip reason %q", text.String(), val.reason)
+		}
+		if !strings.Contains(text.String(), "skipped") {
+			t.Errorf("event content = %q, want it to mention 'skipped'", text.String())
+		}
+		found = true
+	}
+	if !found {
+		t.Error("no validator event observed")
+	}
+	if val.calls != 1 {
+		t.Errorf("validator called %d times, want 1 (Skipped must not retry)", val.calls)
+	}
+}
+
 // TestValidatorAgent_Success_Escalates: validation passes → event has Escalate=true.
 func TestValidatorAgent_Success_Escalates(t *testing.T) {
 	val := &stubValidator{results: []error{nil}}

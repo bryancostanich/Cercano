@@ -37,3 +37,4 @@ go.work.sum
 source/server/bin/
 source/server/agent
 scratch/
+test/sandbox/

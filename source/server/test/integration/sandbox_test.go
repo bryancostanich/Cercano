@@ -7,10 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"cercano/source/server/internal/tools"
 	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/loop"
+	"cercano/source/server/internal/testfixtures"
+	"cercano/source/server/internal/tools"
 )
 
 // TestSandbox_GenerateAndRunTests verifies the agent can generate passing tests for a simple sandbox project.
@@ -19,30 +20,21 @@ func TestSandbox_GenerateAndRunTests(t *testing.T) {
 		t.Skip("Skipping sandbox test; set SANDBOX_TEST=1 to run")
 	}
 
-	// 1. Setup paths
-	wd, _ := os.Getwd()
-	// wd is .../source/server/test/integration
-sandboxDir := filepath.Join(wd, "../../../..", "test", "sandbox")
-targetFile := filepath.Join(sandboxDir, "calculator.go")
+	// Copy the needs-tests fixture into a per-test sandbox the test can mutate.
+	sandboxDir := testfixtures.Copy(t, "go/needs-tests")
+	targetFile := filepath.Join(sandboxDir, "calculator.go")
 
-	if _, err := os.Stat(targetFile); os.IsNotExist(err) {
-		t.Fatalf("Sandbox file not found at: %s (wd: %s)", targetFile, wd)
-	}
-
-	// 2. Read Target Code
 	content, err := os.ReadFile(targetFile)
 	if err != nil {
 		t.Fatalf("Failed to read calculator.go: %v", err)
 	}
 
-	// 3. Initialize Agent Components
 	provider := llm.NewLocalModelProvider(ollama.NewOllamaEngine("http://localhost:11434"), "qwen3-coder")
 	handler := tools.NewGenericGenerator(provider)
 	validator := tools.NewGoValidator()
 	coordinator := loop.NewGenerationCoordinator(handler, handler, validator)
 
-	// 4. Generate and Verify Tests with Self-Correction
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second) // Increased timeout for retries
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
 	t.Log("Generating and verifying tests for calculator.go (with self-correction)...")

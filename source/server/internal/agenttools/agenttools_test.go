@@ -43,10 +43,21 @@ func TestRegistry_All_SortedByName(t *testing.T) {
 
 func TestRegistry_Filter(t *testing.T) {
 	r := DefaultRegistry()
+	all := r.All()
 	rTier := r.Filter(PermR)
-	if len(rTier) != len(r.All()) {
-		t.Errorf("default registry should be R-tier only; got mixed: R=%d All=%d",
-			len(rTier), len(r.All()))
+	wTier := r.Filter(PermW)
+	xTier := r.Filter(PermX)
+	if len(rTier)+len(wTier)+len(xTier) != len(all) {
+		t.Errorf("R+W+X (%d+%d+%d) should sum to All (%d)",
+			len(rTier), len(wTier), len(xTier), len(all))
+	}
+	for _, tier := range []struct {
+		name  string
+		tools []Tool
+	}{{"R", rTier}, {"W", wTier}, {"X", xTier}} {
+		if len(tier.tools) == 0 {
+			t.Errorf("expected at least one %s-tier tool in default registry", tier.name)
+		}
 	}
 }
 

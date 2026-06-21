@@ -2,12 +2,14 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
 	"time"
 
 	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/config"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/llm"
@@ -35,7 +37,12 @@ type Server struct {
 	healthMonitorCancel context.CancelFunc // cancel function for the active health monitor
 	configPath          string             // path to config.yaml for persistence
 	currentConfig       config.Config      // current config state for persistence
+	toolRegistry        *agenttools.Registry
 }
+
+// SetToolRegistry attaches the agent's tool registry. The CLI's /tools and
+// /tool commands route through ListTools / InvokeTool RPCs to it.
+func (s *Server) SetToolRegistry(r *agenttools.Registry) { s.toolRegistry = r }
 
 // NewServer creates a new Agent gRPC server.
 func NewServer(a *agent.Agent, localProvider *llm.LocalModelProvider, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
@@ -237,6 +244,86 @@ func (s *Server) RenameConversation(ctx context.Context, req *proto.RenameConver
 		return nil, err
 	}
 	return &proto.RenameConversationResponse{Ok: true}, nil
+}
+
+// ListTools implements proto.AgentServer — enumerates the agent's tool
+// registry for the CLI's /tools listing. Returns an empty list when no
+// registry was wired (e.g. tests that don't need tools).
+func (s *Server) ListTools(ctx context.Context, req *proto.ListToolsRequest) (*proto.ListToolsResponse, error) {
+	if s.toolRegistry == nil {
+		return &proto.ListToolsResponse{}, nil
+	}
+	tools := s.toolRegistry.All()
+	out := &proto.ListToolsResponse{Tools: make([]*proto.BuiltinTool, 0, len(tools))}
+	for _, t := range tools {
+		out.Tools = append(out.Tools, &proto.BuiltinTool{
+			Name:        t.Name(),
+			Description: t.Description(),
+			Permission:  string(t.Permission()),
+			Schema:      string(t.Schema()),
+		})
+	}
+	return out, nil
+}
+
+// InvokeTool implements proto.AgentServer — runs the named tool with JSON
+// args. Tool errors are surfaced as InvokeToolResponse.error rather than gRPC
+// errors so the CLI can render them inline.
+func (s *Server) InvokeTool(ctx context.Context, req *proto.InvokeToolRequest) (*proto.InvokeToolResponse, error) {
+	resp := &proto.InvokeToolResponse{}
+	if s.toolRegistry == nil {
+		resp.Error = "no tool registry configured"
+		return resp, nil
+	}
+	tool, ok := s.toolRegistry.Get(req.GetName())
+	if !ok {
+		resp.Error = fmt.Sprintf("unknown tool %q", req.GetName())
+		return resp, nil
+	}
+	argsJSON := req.GetArgsJson()
+	if argsJSON == "" {
+		argsJSON = "{}"
+	}
+	result, err := tool.Execute(ctx, []byte(argsJSON))
+	if err != nil {
+		resp.Error = err.Error()
+		return resp, nil
+	}
+	resp.ResultType = string(result.Type)
+	resp.Truncated = result.Truncated
+	resp.Note = result.Note
+	switch result.Type {
+	case agenttools.ResultText:
+		resp.Text = result.Text
+	case agenttools.ResultRows:
+		b, err := json.Marshal(result.Rows)
+		if err != nil {
+			resp.Error = "marshal rows: " + err.Error()
+			return resp, nil
+		}
+		resp.RowsJson = string(b)
+	case agenttools.ResultJSON:
+		resp.Json = string(result.JSON)
+	}
+	return resp, nil
+}
+
+// GetContextUsage implements proto.AgentServer — reports cumulative token
+// usage vs. the active model's context-window size for a conversation.
+func (s *Server) GetContextUsage(ctx context.Context, req *proto.GetContextUsageRequest) (*proto.GetContextUsageResponse, error) {
+	used, max := s.agent.GetContextUsage(ctx, req.GetConversationId())
+	var pct float64
+	if max > 0 {
+		pct = float64(used) / float64(max)
+		if pct > 1 {
+			pct = 1
+		}
+	}
+	return &proto.GetContextUsageResponse{
+		TokensUsed: int32(used),
+		ModelMax:   int32(max),
+		Percent:    pct,
+	}, nil
 }
 
 // GetConfig implements proto.AgentServer — reports the current runtime config

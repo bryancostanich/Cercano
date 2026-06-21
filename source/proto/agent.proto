@@ -28,6 +28,22 @@ service Agent {
   rpc DeleteConversation (DeleteConversationRequest) returns (DeleteConversationResponse) {}
   rpc RenameConversation (RenameConversationRequest) returns (RenameConversationResponse) {}
 
+  // GetContextUsage reports cumulative token usage vs. the active model's
+  // context window for a conversation. The CLI status bar polls this after
+  // each streamed turn.
+  rpc GetContextUsage (GetContextUsageRequest) returns (GetContextUsageResponse) {}
+
+  // ListTools enumerates the agent's registered tools (name, description,
+  // permission tier). /tools in the CLI renders this through the Table
+  // primitive.
+  rpc ListTools (ListToolsRequest) returns (ListToolsResponse) {}
+
+  // InvokeTool executes a registered tool with JSON args and returns its
+  // Result. Used by /tool <name> {...args} for direct invocation; the
+  // agent's chat path will dispatch tools via this same RPC once the
+  // algorithmic-dispatcher lands.
+  rpc InvokeTool (InvokeToolRequest) returns (InvokeToolResponse) {}
+
   // ListModels returns the models available on the active Ollama instance.
   rpc ListModels (ListModelsRequest) returns (ListModelsResponse) {}
 
@@ -182,6 +198,45 @@ message DeleteConversationResponse { bool ok = 1; }
 
 message RenameConversationRequest  { string conversation_id = 1; string title = 2; }
 message RenameConversationResponse { bool ok = 1; }
+
+// Context-window usage for a conversation. Used is the cumulative tokens
+// counted for this conversation; max is the conventional context-window
+// size for the active model. Computed via tokenizer estimates (and upstream
+// counts when available); not exact for non-OpenAI families.
+message GetContextUsageRequest  { string conversation_id = 1; }
+message GetContextUsageResponse {
+  int32  tokens_used = 1;
+  int32  model_max   = 2;
+  double percent     = 3;
+}
+
+// BuiltinTool summarises one registered agent tool — surfaced by ListTools
+// for the CLI's /tools listing.
+message BuiltinTool {
+  string name        = 1;
+  string description = 2;
+  string permission  = 3; // "R" | "W" | "X"
+  string schema      = 4; // JSON Schema as a string
+}
+
+message ListToolsRequest  {}
+message ListToolsResponse { repeated BuiltinTool tools = 1; }
+
+// InvokeTool runs a registered tool with JSON args. Result is shaped by the
+// tool — rows/text/json with optional truncation flag and note.
+message InvokeToolRequest {
+  string name      = 1;
+  string args_json = 2; // pass as a JSON string for simplicity
+}
+message InvokeToolResponse {
+  string result_type = 1; // "rows" | "text" | "json"
+  string text        = 2;
+  string rows_json   = 3; // when result_type == "rows", JSON-encoded []map[string]any
+  string json        = 4; // when result_type == "json", verbatim
+  bool   truncated   = 5;
+  string note        = 6;
+  string error       = 7; // populated when tool execution fails
+}
 
 message GetConfigRequest {}
 message GetConfigResponse {

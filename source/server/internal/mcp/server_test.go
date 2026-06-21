@@ -77,6 +77,18 @@ func (m *mockAgentClient) RenameConversation(ctx context.Context, in *proto.Rena
 	return &proto.RenameConversationResponse{Ok: true}, nil
 }
 
+func (m *mockAgentClient) GetContextUsage(ctx context.Context, in *proto.GetContextUsageRequest, opts ...grpc.CallOption) (*proto.GetContextUsageResponse, error) {
+	return &proto.GetContextUsageResponse{}, nil
+}
+
+func (m *mockAgentClient) ListTools(ctx context.Context, in *proto.ListToolsRequest, opts ...grpc.CallOption) (*proto.ListToolsResponse, error) {
+	return &proto.ListToolsResponse{}, nil
+}
+
+func (m *mockAgentClient) InvokeTool(ctx context.Context, in *proto.InvokeToolRequest, opts ...grpc.CallOption) (*proto.InvokeToolResponse, error) {
+	return &proto.InvokeToolResponse{}, nil
+}
+
 func (m *mockAgentClient) ListSkills(ctx context.Context, in *proto.ListSkillsRequest, opts ...grpc.CallOption) (*proto.ListSkillsResponse, error) {
 	if m.skillsResp != nil {
 		return m.skillsResp, m.skillsErr

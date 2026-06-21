@@ -261,6 +261,81 @@ func (c *Client) RenameConversation(ctx context.Context, conversationID, title s
 	return err
 }
 
+// ToolInfo is the registry summary returned by ListTools.
+type ToolInfo struct {
+	Name        string
+	Description string
+	Permission  string // "R" | "W" | "X"
+	Schema      string // JSON Schema
+}
+
+// ListTools enumerates the agent's registered tools.
+func (c *Client) ListTools(ctx context.Context) ([]ToolInfo, error) {
+	resp, err := c.agent.ListTools(ctx, &proto.ListToolsRequest{})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ToolInfo, 0, len(resp.GetTools()))
+	for _, t := range resp.GetTools() {
+		out = append(out, ToolInfo{
+			Name:        t.GetName(),
+			Description: t.GetDescription(),
+			Permission:  t.GetPermission(),
+			Schema:      t.GetSchema(),
+		})
+	}
+	return out, nil
+}
+
+// ToolResult mirrors the agent-side Result, shaped for the CLI's renderer.
+type ToolResult struct {
+	Type      string // "rows" | "text" | "json"
+	Text      string
+	RowsJSON  string // marshalled []map[string]any
+	JSON      string
+	Truncated bool
+	Note      string
+	Error     string
+}
+
+// InvokeTool runs the named tool with JSON args.
+func (c *Client) InvokeTool(ctx context.Context, name, argsJSON string) (*ToolResult, error) {
+	resp, err := c.agent.InvokeTool(ctx, &proto.InvokeToolRequest{Name: name, ArgsJson: argsJSON})
+	if err != nil {
+		return nil, err
+	}
+	return &ToolResult{
+		Type:      resp.GetResultType(),
+		Text:      resp.GetText(),
+		RowsJSON:  resp.GetRowsJson(),
+		JSON:      resp.GetJson(),
+		Truncated: resp.GetTruncated(),
+		Note:      resp.GetNote(),
+		Error:     resp.GetError(),
+	}, nil
+}
+
+// ContextUsage is the cumulative token usage for a conversation against the
+// active model's context-window size.
+type ContextUsage struct {
+	TokensUsed int
+	ModelMax   int
+	Percent    float64
+}
+
+// GetContextUsage fetches the live context-window meter for a conversation.
+func (c *Client) GetContextUsage(ctx context.Context, conversationID string) (*ContextUsage, error) {
+	resp, err := c.agent.GetContextUsage(ctx, &proto.GetContextUsageRequest{ConversationId: conversationID})
+	if err != nil {
+		return nil, err
+	}
+	return &ContextUsage{
+		TokensUsed: int(resp.GetTokensUsed()),
+		ModelMax:   int(resp.GetModelMax()),
+		Percent:    resp.GetPercent(),
+	}, nil
+}
+
 // UpdateConfig sends a runtime config patch. Returns the agent's confirmation
 // summary line (e.g. "updated: [local_model=qwen3-coder, cloud=anthropic/...]").
 func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, error) {
@@ -304,11 +379,14 @@ const (
 )
 
 // StreamChat opens a streaming chat call and emits typed messages on the
-// returned channel. The channel closes when the stream ends.
-func (c *Client) StreamChat(ctx context.Context, conversationID, input string) (<-chan StreamMsg, error) {
+// returned channel. workDir is the active project root; the agent uses it
+// to prepend the project's .cercano/context.md to the prompt for project
+// awareness. The channel closes when the stream ends.
+func (c *Client) StreamChat(ctx context.Context, conversationID, input, workDir string) (<-chan StreamMsg, error) {
 	stream, err := c.agent.StreamProcessRequest(ctx, &proto.ProcessRequestRequest{
 		Input:          input,
 		ConversationId: conversationID,
+		WorkDir:        workDir,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("stream open: %w", err)

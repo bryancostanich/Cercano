@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
 )
 
@@ -37,12 +38,42 @@ func WithPersistentStore(ps conversation.Store) AgentOption {
 	}
 }
 
+// WithContextMeter attaches a per-conversation token-usage registry. When set,
+// the agent updates each conversation's counter on every turn (using upstream
+// token counts when available, falling back to tokenizer-based estimates).
+// The GetContextUsage RPC reads from this registry. If nil, the CLI status
+// bar shows zeros.
+func WithContextMeter(reg *contextmeter.Registry, modelForMax string) AgentOption {
+	return func(a *Agent) {
+		a.meter = reg
+		a.meterModel = modelForMax
+	}
+}
+
+// ContextLoader is the interface for loading project context. Implementations
+// look up .cercano/context.md (or equivalent) under a project directory.
+// Kept narrow so the agent doesn't pull the full internal/context package
+// surface (and so we can stub it in tests).
+type ContextLoader interface {
+	PrependContext(projectDir, prompt string) string
+}
+
+// WithContextLoader attaches a project-context loader. When the request
+// carries a work_dir, the agent prepends the project's .cercano/context.md
+// to the prompt so the model has project awareness on every turn.
+func WithContextLoader(l ContextLoader) AgentOption {
+	return func(a *Agent) { a.contextLoader = l }
+}
+
 // Agent is the top-level orchestrator for AI requests.
 type Agent struct {
 	router       Router
 	coordinator  Coordinator
 	conversation *ConversationStore
 	persistent   conversation.Store
+	meter         *contextmeter.Registry
+	meterModel    string // active local model name, used as Max() baseline
+	contextLoader ContextLoader
 }
 
 // NewAgent creates a new Agent orchestrator.
@@ -63,6 +94,13 @@ func (a *Agent) loadHistory(ctx context.Context, req *Request) (augmented, origi
 	original = req.Input
 	augmented = original
 
+	// Prepend project context (.cercano/context.md under req.WorkDir) so the
+	// model has project awareness on every turn. Done before history so the
+	// history reflects what the model was actually asked.
+	if a.contextLoader != nil && req.WorkDir != "" {
+		augmented = a.contextLoader.PrependContext(req.WorkDir, augmented)
+	}
+
 	if a.conversation == nil || req.ConversationID == "" {
 		return
 	}
@@ -72,14 +110,21 @@ func (a *Agent) loadHistory(ctx context.Context, req *Request) (augmented, origi
 		return
 	}
 
-	augmented = history + "\n" + original
+	augmented = history + "\n" + augmented
 	return
 }
 
 // storeConversationTurn compacts the response and stores the turn in BOTH
 // the in-memory session store (fast intra-session history) AND the persistent
 // SQLite store (cross-restart /history & /resume), if configured.
-func (a *Agent) storeConversationTurn(ctx context.Context, conversationID, originalInput string, resp *Response) {
+//
+// augmentedInput is the FULL prompt sent to the model — including project
+// context (.cercano/context.md prepended) and conversation history. It's
+// used as the input side of the context-window meter so the meter reflects
+// "size of what was sent" rather than just the user's last typed line.
+// originalInput is the user's bare text and is what gets persisted to the
+// conversation store.
+func (a *Agent) storeConversationTurn(ctx context.Context, conversationID, originalInput, augmentedInput string, resp *Response) {
 	if conversationID == "" {
 		return
 	}
@@ -87,6 +132,32 @@ func (a *Agent) storeConversationTurn(ctx context.Context, conversationID, origi
 	if a.conversation != nil {
 		_ = a.conversation.AppendTurn(ctx, conversationID, originalInput, compacted)
 	}
+	// Context meter — SNAPSHOT semantics, not cumulative. After each turn,
+	// the meter reflects the size of the most recently sent prompt + the
+	// response that came back. That's the "context window fill" indicator
+	// the CLI status bar is meant to show. Reset first so multi-turn growth
+	// reflects actual conversation size, not lifetime spend.
+	if a.meter != nil {
+		c := a.meter.Get(conversationID, a.meterModel)
+		c.Reset()
+		if augmentedInput != "" {
+			c.Add(augmentedInput)
+		} else {
+			// Coordinator path may not pass augmentedInput; fall back to the
+			// user's text + Ollama-reported input tokens if available.
+			if resp.InputTokens > 0 {
+				c.AddCount(resp.InputTokens)
+			} else {
+				c.Add(originalInput)
+			}
+		}
+		if resp.OutputTokens > 0 {
+			c.AddCount(resp.OutputTokens)
+		} else {
+			c.Add(compacted)
+		}
+	}
+
 	if a.persistent != nil {
 		// projectDir comes from the request the agent processed; we don't
 		// carry it onto this helper, so EnsureConversation here uses empty
@@ -116,8 +187,11 @@ func (a *Agent) storeConversationTurn(ctx context.Context, conversationID, origi
 // ResumeConversation loads persisted turns for the given conversation id and
 // hydrates them into the in-memory session store, so that the next call to
 // loadHistory sees full context. Returns the persisted turns so the caller
-// (CLI) can render them in the scrollback. If no persistent store is
-// configured the returned slice is empty.
+// (CLI) can render them in the scrollback. Also rebuilds the conversation's
+// context-meter counter from the persisted token totals (or tokenizer
+// estimates) so the CLI's status bar shows accurate accumulated usage right
+// after resume. If no persistent store is configured the returned slice is
+// empty.
 func (a *Agent) ResumeConversation(ctx context.Context, conversationID string) ([]conversation.Turn, error) {
 	if a.persistent == nil {
 		return nil, nil
@@ -125,6 +199,22 @@ func (a *Agent) ResumeConversation(ctx context.Context, conversationID string) (
 	turns, err := a.persistent.GetTurns(ctx, conversationID)
 	if err != nil {
 		return nil, err
+	}
+	// Rebuild the meter so the CLI sees accurate context-window usage
+	// immediately after /resume.
+	if a.meter != nil {
+		a.meter.Drop(conversationID)
+		c := a.meter.Get(conversationID, a.meterModel)
+		for _, t := range turns {
+			switch {
+			case t.Role == "user" && t.TokensIn > 0:
+				c.AddCount(t.TokensIn)
+			case t.Role == "assistant" && t.TokensOut > 0:
+				c.AddCount(t.TokensOut)
+			default:
+				c.Add(t.Content)
+			}
+		}
 	}
 	if a.conversation == nil {
 		return turns, nil
@@ -143,6 +233,18 @@ func (a *Agent) ResumeConversation(ctx context.Context, conversationID string) (
 		}
 	}
 	return turns, nil
+}
+
+// GetContextUsage reports the current token usage for a conversation. Used
+// is the cumulative tokens spent, max is the model's conventional context
+// window. Both zero if no meter is configured or the conversation has no
+// turns yet.
+func (a *Agent) GetContextUsage(ctx context.Context, conversationID string) (used, max int) {
+	if a == nil || a.meter == nil || conversationID == "" {
+		return 0, 0
+	}
+	c := a.meter.Get(conversationID, a.meterModel)
+	return c.Used(), c.Max()
 }
 
 // ListConversations returns persisted conversation summaries (project filter
@@ -193,7 +295,7 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 			modelName = req.ModelOverride
 		}
 		res.RoutingMetadata = RoutingMetadata{ModelName: modelName, Confidence: 1.0}
-		a.storeConversationTurn(ctx, req.ConversationID, originalInput, res)
+		a.storeConversationTurn(ctx, req.ConversationID, originalInput, augmentedInput, res)
 		return res, nil
 	}
 
@@ -236,7 +338,7 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 			ModelName:  provider.Name(),
 			Confidence: 1.0,
 		}
-		a.storeConversationTurn(ctx, req.ConversationID, originalInput, res)
+		a.storeConversationTurn(ctx, req.ConversationID, originalInput, augmentedInput, res)
 		return res, nil
 	}
 
@@ -271,7 +373,7 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 		ModelName:  provider.Name(),
 		Confidence: 1.0,
 	}
-	a.storeConversationTurn(ctx, req.ConversationID, originalInput, res)
+	a.storeConversationTurn(ctx, req.ConversationID, originalInput, augmentedInput, res)
 	return res, nil
 }
 
@@ -340,7 +442,7 @@ func (a *Agent) ProcessRequestStream(ctx context.Context, req *Request, progress
 				Confidence: 1.0,
 				Escalated:  res.RoutingMetadata.Escalated,
 			}
-			a.storeConversationTurn(ctx, req.ConversationID, originalInput, res)
+			a.storeConversationTurn(ctx, req.ConversationID, originalInput, augmentedInput, res)
 			return res, nil
 		}
 
@@ -356,7 +458,7 @@ func (a *Agent) ProcessRequestStream(ctx context.Context, req *Request, progress
 			Confidence: 1.0,
 			Escalated:  res.RoutingMetadata.Escalated,
 		}
-		a.storeConversationTurn(ctx, req.ConversationID, originalInput, res)
+		a.storeConversationTurn(ctx, req.ConversationID, originalInput, augmentedInput, res)
 		return res, nil
 	}
 
@@ -397,6 +499,6 @@ func (a *Agent) ProcessRequestStream(ctx context.Context, req *Request, progress
 		Confidence: 1.0,
 	}
 	progress(fmt.Sprintf("Generating Response (%s)... Done.", provider.Name()))
-	a.storeConversationTurn(ctx, req.ConversationID, originalInput, res)
+	a.storeConversationTurn(ctx, req.ConversationID, originalInput, augmentedInput, res)
 	return res, nil
 }

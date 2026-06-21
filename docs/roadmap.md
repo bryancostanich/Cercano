@@ -1,28 +1,31 @@
 # Master Project Plan
 
-This plan tracks all major jobs for the project. Each job has its own detailed plan in its respective folder.
+This plan tracks all major jobs for the project. Each job links to its detailed
+spec or plan under `features/`, `plans/`, `research/`, or `internal/`.
 
 ## [x] Track: Build the MVP of the local-first AI assistant, including the Go-based smart router with a gRPC interface for communication, and an initial IDE integration focused on a VS Code-compatible abstraction layer for Antigravity. [checkpoint: d4a2a76]
+
+*Link: [./features/local_ai_mvp_spec.md](./features/local_ai_mvp_spec.md)*
 
 ---
 
 - [x] **Track: Improve the experience of cercano in the IDE with a more full-featured integration** [checkpoint: 88131af]
-*Link: [./tracks/ide_enhancements_20260203/](./tracks/ide_enhancements_20260203/)*
+*Link: [./features/ide_enhancements_spec.md](./features/ide_enhancements_spec.md)*
 
 ---
 
 - [x] **Track: Implement model-agnostic cloud integration for the Go backend using langchaingo** [checkpoint: a504f22]
-*Link: [./tracks/cloud_integration_20260203/](./tracks/cloud_integration_20260203/)*
+*Link: [./features/cloud_integration_spec.md](./features/cloud_integration_spec.md)*
 
 ---
 
 - [x] **Track: Fix broken VS Code code review and apply workflow** [checkpoint: 97e7b55]
-*Link: [./tracks/ide_fixes_20260219/](./tracks/ide_fixes_20260219/)*
+*Link: [./internal/ide_fixes.md](./internal/ide_fixes.md)*
 
 ---
 
 - [x] **Track: Replace GenerationCoordinator with Google ADK LoopAgent** [checkpoint: 58969fc]
-*Link: [./tracks/adk_integration_20260219/](./tracks/adk_integration_20260219/)*
+*Link: [./features/adk_integration_spec.md](./features/adk_integration_spec.md)*
 
 ---
 
@@ -32,100 +35,102 @@ This plan tracks all major jobs for the project. Each job has its own detailed p
 ---
 
 - [x] **Track: Automatic Server Launch**
-*Link: [./tracks/auto_server_launch_20260223/](./tracks/auto_server_launch_20260223/)*
+*Link: [./features/auto_server_launch_spec.md](./features/auto_server_launch_spec.md)*
 
 ---
 
 - [x] **Track: Configurable Local Model**
-*Link: [./tracks/configurable_local_model_20260223/](./tracks/configurable_local_model_20260223/)*
+*Link: [./features/configurable_local_model_spec.md](./features/configurable_local_model_spec.md)*
 
 ---
 
 - [x] **Track: Token-Level LLM Streaming**
-*Link: [./archive/token_streaming_20260223/](./archive/token_streaming_20260223/)*
+*Link: [./features/token_streaming_spec.md](./features/token_streaming_spec.md)*
 
 ---
 
 - [x] **Track: Cercano as MCP Server — Expose local inference as tools for cloud agents**
-*Link: [./archive/mcp_server_20260317/](./archive/mcp_server_20260317/)*
+*Link: [./features/mcp_server_spec.md](./features/mcp_server_spec.md)*
 
 ---
 
 - [x] **Track: Remote Inference — Runtime-configurable remote Ollama with model discovery and fallback**
-*Link: [./archive/remote_inference_20260317/](./archive/remote_inference_20260317/)*
+*Link: [./features/remote_inference_spec.md](./features/remote_inference_spec.md)*
 
 ---
 
 - [x] **Track: Local Co-Processor Tools — Specialized MCP tools for local offload (summarize, extract, classify, explain)**
-*Link: [./archive/local_coprocessor_tools_20260318/](./archive/local_coprocessor_tools_20260318/)*
+*Link: [./features/local_coprocessor_tools_spec.md](./features/local_coprocessor_tools_spec.md)*
 
 ---
 
 - [ ] **Track: Semantic Codebase Search — Embedding-based code search by intent**
-*Link: [./tracks/semantic_search_20260318/](./tracks/semantic_search_20260318/)*
+*Link: [./plans/semantic_search.md](./plans/semantic_search.md)*
 
 ---
 
 - [ ] **Track: Competitive Audit — Agent features landscape across open-source and commercial agents**
-*Link: [./tracks/competitive_audit_20260318/](./tracks/competitive_audit_20260318/)*
+*Link: [./research/competitive_audit.md](./research/competitive_audit.md)*
 
 ---
 
 - [x] **Track: Agent Skills Integration — SKILL.md provider support** [checkpoint: 90c74d1]
-*Link: [./archive/agent_skills_20260318/](./archive/agent_skills_20260318/)*
+*Link: [./features/agent_skills_spec.md](./features/agent_skills_spec.md)*
 *Notes: Provider-side complete — 7 skills published, cercano_skills MCP tool, docs. Consumer-side skill discovery deferred to a future track pending real-world testing with third-party skills.*
 
 ---
 
-- [ ] **Track: AI Engine Agnosticism — Abstract local inference layer to support pluggable backends**
-*Link: [./tracks/engine_agnosticism_20260317/](./tracks/engine_agnosticism_20260317/)*
+- [x] **Track: AI Engine Agnosticism — Abstract local inference layer to support pluggable backends**
+*Link: [./features/engine_agnosticism_spec.md](./features/engine_agnosticism_spec.md)*
+*Notes: Shipped via PR #1 (merged 2026-03-25).*
 
 ---
 
-- [ ] **Track: User-Friendly Distribution — Setup scripts, Docker packaging, and CI/CD releases**
-*Link: [./tracks/distribution_20260317/](./tracks/distribution_20260317/)*
+- [x] **Track: User-Friendly Distribution — Setup scripts, Docker packaging, and CI/CD releases**
+*Link: [./features/distribution_spec.md](./features/distribution_spec.md)*
+*Notes: Largely shipped; a few sub-items remain (see "Remaining" in the spec).*
 
 ---
 
 - [ ] **Track: Docker Deployment — Containerized Cercano with Docker and docker-compose**
-*Link: [./tracks/docker_20260320/](./tracks/docker_20260320/)*
+*Link: [./plans/docker.md](./plans/docker.md)*
 
 ---
 
 - [x] **Track: Usage Telemetry & Token Savings Metrics**
-*Link: [./archive/usage_telemetry_20260323/](./archive/usage_telemetry_20260323/)*
+*Link: [./features/usage_telemetry_spec.md](./features/usage_telemetry_spec.md)*
 
 ---
 
 - [x] **Track: Project Context Initialization** [checkpoint: 866f53d]
-*Link: [./archive/project_context_20260324/](./archive/project_context_20260324/)*
+*Link: [./features/project_context_spec.md](./features/project_context_spec.md)*
 
 ---
 
 - [x] **Track: cercano_document — Local Code Documentation Tool**
-*Link: [./archive/document_tool_20260325/](./archive/document_tool_20260325/)*
+*Link: [./features/document_tool_spec.md](./features/document_tool_spec.md)*
 
 ---
 
 - [x] **Track: Update Check & Upgrade Prompt**
-*Link: [./archive/update_check_20260325/](./archive/update_check_20260325/)*
+*Link: [./features/update_check_spec.md](./features/update_check_spec.md)*
 
 ---
 
 - [ ] **Track: Cloud Token Savings Estimation — Measure actual tokens kept out of cloud context**
-*Link: [./tracks/savings_estimation_20260326/](./tracks/savings_estimation_20260326/)*
+*Link: [./plans/savings_estimation.md](./plans/savings_estimation.md)*
 
 ---
 
-- [ ] **Track: Deep Research Skill — Multi-source academic research with ranked, annotated findings**
-*Link: [./tracks/deep_research_20260326/](./tracks/deep_research_20260326/)*
+- [x] **Track: Deep Research Skill — Multi-source academic research with ranked, annotated findings**
+*Link: [./features/deep_research_spec.md](./features/deep_research_spec.md)*
 
 ---
 
 - [ ] **Track: Deep Research Enhancement — Multi-pass analysis, cross-finding context, quality gating**
-*Link: [./tracks/deep_research_enhancement_20260329/](./tracks/deep_research_enhancement_20260329/)*
+*Link: [./plans/deep_research_enhancement.md](./plans/deep_research_enhancement.md)*
 
 ---
 
 - [ ] **Track: Plugin Packaging — Claude Code, Gemini CLI, Codex CLI plugin/extension packages**
-*Link: [./tracks/plugin_packaging_20260408/](./tracks/plugin_packaging_20260408/)*
+*Link: [./plans/plugin_packaging.md](./plans/plugin_packaging.md)*

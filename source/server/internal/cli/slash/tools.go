@@ -44,7 +44,7 @@ func RegisterTools(r *Registry, c *agentclient.Client) {
 
 	r.Register(Command{
 		Name: "tool",
-		Help: "Invoke a tool directly: /tool <name> <json-args>. Example: /tool grep {\"pattern\":\"foo\",\"path\":\".\"}",
+		Help: "Invoke a tool directly: /tool <name> <json-args>. R-tier runs silently; W/X-tier prompts to confirm. Example: /tool grep {\"pattern\":\"foo\",\"path\":\".\"}",
 		Handler: func(args []string) Result {
 			if len(args) == 0 {
 				return Result{Kind: ResultText, Text: "usage: /tool <name> <json-args>   (e.g. /tool list_dir {\"path\":\".\"})"}
@@ -54,19 +54,17 @@ func RegisterTools(r *Registry, c *agentclient.Client) {
 			if len(args) > 1 {
 				argsJSON = strings.Join(args[1:], " ")
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			res, err := c.InvokeTool(ctx, name, argsJSON)
-			if err != nil {
-				return Result{Kind: ResultText, Text: "tool: " + err.Error()}
-			}
-			if res.Error != "" {
-				return Result{Kind: ResultText, Text: "tool error: " + res.Error}
-			}
-			return Result{Kind: ResultText, Text: renderToolResult(res)}
+			// Hand off to the model; it knows the tool's permission tier
+			// (from the cached ListTools result) and routes through the
+			// confirm-prompt UI when appropriate.
+			return Result{Kind: ResultInvokeTool, ToolName: name, ToolArgs: argsJSON}
 		},
 	})
 }
+
+// RenderToolResult is the same renderer used inline by the model when a
+// tool's result comes back. Exported so the model can call it.
+func RenderToolResult(r *agentclient.ToolResult) string { return renderToolResult(r) }
 
 // renderToolResult shapes a ToolResult into a string the CLI can render.
 // Rows → markdown table (caught by the Table interceptor for proper layout).

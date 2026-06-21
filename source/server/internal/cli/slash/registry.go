@@ -29,12 +29,15 @@ const (
 	ResultResumeConversation // Text field carries the conversation id
 	ResultSetPromptColor     // Text field carries the parsed hex (#RRGGBB) or a palette key
 	ResultSetSessionTitle    // Text field carries the new title
+	ResultInvokeTool         // ToolName + ToolArgs carry the tool to invoke (CLI may prompt-confirm first)
 )
 
 // Result is what a slash command produces.
 type Result struct {
-	Kind ResultKind
-	Text string // for ResultText
+	Kind     ResultKind
+	Text     string // for ResultText / Set* result kinds
+	ToolName string // for ResultInvokeTool
+	ToolArgs string // for ResultInvokeTool (JSON-encoded args)
 }
 
 // Registry holds the set of registered commands and supports prefix dispatch.

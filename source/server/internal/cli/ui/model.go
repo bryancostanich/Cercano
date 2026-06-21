@@ -74,7 +74,8 @@ type Model struct {
 	cumIn, cumOut  int
 	lastLatencyMs  int
 	modelMaxTokens int
-	lastModel      string
+	lastModel      string // local model name (from config)
+	cloudModel     string // cloud model name (from config); empty when no cloud configured
 	cloudState     string // "" = unknown, "NONE" = absent, "ok" = real cloud configured
 	ctrlCArmed     bool   // first ctrl-c on empty input arms quit; any other key disarms
 	errMsg         string
@@ -166,7 +167,39 @@ func newConvID() string {
 }
 
 // Init is called by Bubble Tea once at startup.
-func (m Model) Init() tea.Cmd { return tea.Batch(textinput.Blink, m.splash.Init()) }
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(textinput.Blink, m.splash.Init(), fetchConfigCmd(m.agent))
+}
+
+// configLoadedMsg carries the result of the startup / post-edit GetConfig RPC.
+type configLoadedMsg struct {
+	LocalModel    string
+	CloudModel    string
+	CloudConfigured bool
+}
+
+// fetchConfigCmd asks the agent for the current local + cloud model names so
+// the header bar can render both. Called on Init and whenever the config
+// editor closes so user edits flow into the header immediately.
+func fetchConfigCmd(ag *agentclient.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		cfg, err := ag.GetConfig(ctx)
+		if err != nil || cfg == nil {
+			return configLoadedMsg{}
+		}
+		// Treat "cloud configured" as: provider AND (api-key OR base-url) are
+		// set. Otherwise we'd show a cloud model name that the agent will
+		// never actually route to.
+		configured := cfg.CloudProvider != "" && (cfg.CloudAPIKeySet || cfg.CloudBaseURL != "")
+		return configLoadedMsg{
+			LocalModel:      cfg.LocalModel,
+			CloudModel:      cfg.CloudModel,
+			CloudConfigured: configured,
+		}
+	}
+}
 
 // streamTickMsg signals "drain one message from the active stream channel."
 type streamTickMsg struct{ msg agentclient.StreamMsg }
@@ -249,6 +282,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.editor = next
 			if closed {
 				m.editorActive = false
+				// Refresh the header bar's model names — the editor may
+				// have just changed local-model / cloud-model / cloud-base-url.
+				return m, fetchConfigCmd(m.agent)
 			}
 			return m, cmd
 		}
@@ -354,6 +390,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Max > 0 {
 			m.modelMaxTokens = msg.Max
+		}
+		return m, nil
+
+	case configLoadedMsg:
+		if msg.LocalModel != "" {
+			m.lastModel = msg.LocalModel
+		}
+		if msg.CloudConfigured {
+			m.cloudModel = msg.CloudModel
+		} else {
+			m.cloudModel = ""
 		}
 		return m, nil
 
@@ -869,6 +916,42 @@ func (m Model) applyResume(conversationID string) Model {
 	return m
 }
 
+// abbreviateModel produces a short display name for the header strip:
+//
+//   - claude-opus-4-7    → opus 4.7
+//   - claude-sonnet-4-6  → sonnet 4.6
+//   - claude-haiku-4-5   → haiku 4.5
+//   - qwen3-coder:latest → qwen3-coder  (strip the latest tag)
+//   - gemini-1.5-pro     → gemini 1.5 pro (collapse the dashes that aren't
+//                          part of the version)
+//   - anything-else      → returned verbatim
+//
+// Aim is signal at a glance; if the abbreviation hides a distinction the
+// user can always /config to see full names.
+func abbreviateModel(name string) string {
+	if name == "" {
+		return "—"
+	}
+	// Strip Ollama ":latest" suffix.
+	name = strings.TrimSuffix(name, ":latest")
+	// Anthropic family — collapse "claude-<family>-<major>-<minor>".
+	if strings.HasPrefix(name, "claude-") {
+		rest := strings.TrimPrefix(name, "claude-")
+		// Split into "<family>-<major>-<minor>[-suffix]".
+		parts := strings.Split(rest, "-")
+		if len(parts) >= 3 {
+			// e.g. ["opus","4","7"] → "opus 4.7"
+			return parts[0] + " " + parts[1] + "." + parts[2]
+		}
+		return rest
+	}
+	// Google Gemini — turn "gemini-1.5-pro" → "gemini 1.5 pro".
+	if strings.HasPrefix(name, "gemini-") {
+		return strings.ReplaceAll(name, "-", " ")
+	}
+	return name
+}
+
 // normalizeProgress canonicalises the agent's progress messages for display:
 // lowercases the first word, strips trailing "...", and trims whitespace.
 // Avoids touching the agent's emission semantics (shared with other clients)
@@ -1036,42 +1119,65 @@ func (m Model) renderSlashSuggestions() string {
 }
 
 func (m Model) renderHeader() string {
-	// Brand + model stay anchored on the left edge. When a session title is
-	// present, we center the title-with-fade across the full terminal width
-	// — independent of the left section's width — so it sits at the visual
-	// center of the bar regardless of how long the brand/model strip is.
+	// Three regions:
+	//   left   — brand + version, anchored at column 0
+	//   center — session title (centered across full width when present)
+	//   right  — cloud + local model strip, anchored at the right edge
+	//
+	// With the title centered, the left and right slots stay symmetric so
+	// the bar reads cleanly even on wide terminals.
 	left := lipgloss.JoinHorizontal(lipgloss.Left,
 		m.styles.Primary.Render("▓▓ CERCANO"),
 		m.styles.Muted.Render(" v0.1.0"),
-		m.styles.BorderDim.Render("  ·  "),
-		m.styles.Accent.Render(m.lastModel),
 	)
+
+	rightPieces := []string{}
+	if m.cloudModel != "" {
+		rightPieces = append(rightPieces,
+			m.styles.Info.Render("c:"),
+			m.styles.Accent.Render(abbreviateModel(m.cloudModel)),
+			m.styles.BorderDim.Render(" │ "),
+		)
+	}
+	rightPieces = append(rightPieces,
+		m.styles.Info.Render("l:"),
+		m.styles.Accent.Render(abbreviateModel(m.lastModel)),
+	)
+	right := lipgloss.JoinHorizontal(lipgloss.Left, rightPieces...)
+
+	leftW := lipgloss.Width(left)
+	rightW := lipgloss.Width(right)
+
+	// No title — flush left and right to the edges with a single gap.
 	if m.sessionTitle == "" {
-		return lipgloss.NewStyle().Width(m.width).Render(left)
+		gap := m.width - leftW - rightW
+		if gap < 1 {
+			gap = 1
+		}
+		return left + strings.Repeat(" ", gap) + right
 	}
 
 	title := m.styles.Info.Render("░▒▓ ") +
 		m.styles.Info.Render(m.sessionTitle) +
 		m.styles.Info.Render(" ▓▒░")
-
-	leftW := lipgloss.Width(left)
 	titleW := lipgloss.Width(title)
 
-	// Centered start position for the title across the full bar.
+	// Center the title across the full bar.
 	titleStart := (m.width - titleW) / 2
 	gapBefore := titleStart - leftW
 	if gapBefore < 2 {
-		// Left section is too wide for the title to be fully centered.
-		// Push the title past the left content with a minimal gap so it
-		// stays readable rather than overlapping.
-		gapBefore = 2
+		gapBefore = 2 // collision guard with the brand
 	}
-	usedAfter := leftW + gapBefore + titleW
-	gapAfter := m.width - usedAfter
-	if gapAfter < 0 {
-		gapAfter = 0
+	titleEnd := leftW + gapBefore + titleW
+	gapAfter := m.width - rightW - titleEnd
+	if gapAfter < 2 {
+		gapAfter = 2 // collision guard with the model strip
 	}
-	return left + strings.Repeat(" ", gapBefore) + title + strings.Repeat(" ", gapAfter)
+	return left +
+		strings.Repeat(" ", gapBefore) +
+		title +
+		strings.Repeat(" ", gapAfter) +
+		right
 }
 
 func (m Model) renderStatus() string {
@@ -1089,8 +1195,6 @@ func (m Model) renderStatus() string {
 		m.renderContextMeter(),
 		m.styles.BorderDim.Render("  ·  "),
 		m.styles.Muted.Render(fmt.Sprintf("turn %d↑/%d↓", m.tokIn, m.tokOut)),
-		m.styles.BorderDim.Render("  ·  "),
-		m.styles.Accent.Render(m.lastModel),
 		cloudPart,
 		m.styles.BorderDim.Render("  ·  "),
 		m.styles.Muted.Render("/help for cmds"),

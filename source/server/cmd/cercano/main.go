@@ -21,9 +21,12 @@ import (
 	"time"
 
 	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/cli/agentclient"
 	cliui "cercano/source/server/internal/cli/ui"
 	"cercano/source/server/internal/config"
+	projectctx "cercano/source/server/internal/context"
+	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/dispatch/builtin"
@@ -163,9 +166,20 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		fmt.Fprintf(os.Stderr, "[WARN] Could not resolve conversation store path: %v — /history & /resume disabled.\n", err)
 	}
 
+	// Context-window meter: per-conversation running token counters keyed
+	// by conversation id. The CLI polls GetContextUsage after each turn.
+	meterRegistry := contextmeter.NewRegistry()
+
+	// Project context loader: reads .cercano/context.md from the request's
+	// WorkDir and prepends it to the prompt so the model has project
+	// awareness on every turn.
+	ctxLoader := projectctx.NewLoader()
+
 	orchestrator := agent.NewAgent(lazyRouter, coordinator,
 		agent.WithConversationStore(convStore),
 		agent.WithPersistentStore(persistentStore),
+		agent.WithContextMeter(meterRegistry, cfg.LocalModel),
+		agent.WithContextLoader(ctxLoader),
 	)
 
 	lis, err := net.Listen("tcp", bindAddr)
@@ -176,6 +190,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	s := grpc.NewServer()
 	srv := server.NewServer(orchestrator, localProvider, lazyRouter, coordinator, cloudFactory, registry)
 	srv.SetConfigPersistence(config.DefaultPath(), cfg)
+	srv.SetToolRegistry(agenttools.DefaultRegistry())
 	proto.RegisterAgentServer(s, srv)
 
 	go func() {

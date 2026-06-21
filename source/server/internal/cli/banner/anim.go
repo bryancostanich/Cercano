@@ -11,22 +11,30 @@ import (
 // SweepDuration is how long the shimmer takes to cross the wordmark.
 const SweepDuration = 1400 * time.Millisecond
 
+// WaitDuration is the pause between consecutive sweeps. Total cycle is
+// SweepDuration + WaitDuration.
+const WaitDuration = 1000 * time.Millisecond
+
 // TickInterval is the animation frame budget. 33ms ≈ 30fps — enough for a
-// smooth perceived sweep without burning CPU.
+// smooth perceived sweep without burning CPU during the sweep phase, and
+// fast enough that the transition into/out of the wait phase reads as
+// instantaneous.
 const TickInterval = 33 * time.Millisecond
 
-// TickMsg is emitted by AnimModel's ticker to advance the sweep.
+// cycleDuration is the full sweep + wait period.
+const cycleDuration = SweepDuration + WaitDuration
+
+// TickMsg is emitted by AnimModel's ticker to advance the animation.
 type TickMsg time.Time
 
-// AnimModel renders the banner with a moving shimmer sweep over the wordmark.
-// One-shot: starts at construction, finishes after SweepDuration, after which
-// View returns the static banner. Caller decides when to retire the model.
+// AnimModel renders the banner with a recurring shimmer: a left-to-right
+// sweep across the wordmark, followed by a brief wait, repeating until the
+// caller stops forwarding ticks (typically when the splash is dismissed).
 type AnimModel struct {
 	Palette theme.Palette
 	Meta    Meta
 
-	started  time.Time
-	finished bool
+	started time.Time
 }
 
 // NewAnimModel constructs the animation, starting the timer at the call site.
@@ -42,32 +50,27 @@ func NewAnimModel(p theme.Palette, m Meta) AnimModel {
 // Init kicks off the first tick.
 func (m AnimModel) Init() tea.Cmd { return tickCmd() }
 
-// Update advances the animation. The caller must forward TickMsg messages to
-// this Update for the sweep to progress.
+// Update re-issues a tick on every TickMsg so the animation runs as long as
+// the root model forwards ticks. To stop the animation, the caller gates the
+// TickMsg forwarding (e.g. on a "splash dismissed" flag); the tick chain
+// then dies naturally on the next message.
 func (m AnimModel) Update(msg tea.Msg) (AnimModel, tea.Cmd) {
 	if _, ok := msg.(TickMsg); !ok {
-		return m, nil
-	}
-	if time.Since(m.started) >= SweepDuration {
-		m.finished = true
 		return m, nil
 	}
 	return m, tickCmd()
 }
 
-// Done reports whether the sweep has finished. Caller can stop forwarding
-// ticks and / or dismiss the splash once Done returns true.
-func (m AnimModel) Done() bool { return m.finished }
-
-// View renders the current frame. After Done() the static banner is returned.
+// View renders the current frame. During the sweep portion of each cycle
+// the bright band crosses the wordmark; during the wait portion the banner
+// is rendered plain.
 func (m AnimModel) View() string {
-	if m.finished {
+	phase := time.Since(m.started) % cycleDuration
+	if phase >= SweepDuration {
+		// Wait phase — plain banner.
 		return Render(m.Palette, m.Meta)
 	}
-	progress := float64(time.Since(m.started)) / float64(SweepDuration)
-	if progress > 1 {
-		progress = 1
-	}
+	progress := float64(phase) / float64(SweepDuration)
 	const pad = 6.0
 	sweepPos := -pad + progress*(float64(WordmarkCols)+2*pad)
 	return RenderWithSweep(m.Palette, m.Meta, sweepPos)

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -124,6 +125,8 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	slash.RegisterBasics(reg)
 	slash.RegisterConfig(reg, ag)
 	slash.RegisterColor(reg)
+	slash.RegisterContext(reg)
+	slash.RegisterTools(reg, ag)
 	// currentConv is captured by reference so it always returns the active
 	// conversation id even after /resume swaps it.
 	convRef := &struct{ id string }{}
@@ -168,6 +171,26 @@ func (m Model) Init() tea.Cmd { return tea.Batch(textinput.Blink, m.splash.Init(
 // streamTickMsg signals "drain one message from the active stream channel."
 type streamTickMsg struct{ msg agentclient.StreamMsg }
 type streamEndMsg struct{}
+
+// ctxUsageMsg carries the result of an asynchronous GetContextUsage call.
+type ctxUsageMsg struct {
+	Used, Max int
+	Percent   float64
+}
+
+// fetchContextUsage produces a tea.Cmd that asks the agent for the live
+// context-window meter and translates the response into a ctxUsageMsg.
+func fetchContextUsage(ag *agentclient.Client, convID string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		u, err := ag.GetContextUsage(ctx, convID)
+		if err != nil || u == nil {
+			return ctxUsageMsg{}
+		}
+		return ctxUsageMsg{Used: u.TokensUsed, Max: u.ModelMax, Percent: u.Percent}
+	}
+}
 
 // progressAnimTickMsg fires every ~50ms while a streaming assistant entry is
 // awaiting its first token. Triggers a View re-render so the per-char sweep
@@ -323,6 +346,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case streamTickMsg:
 		return m.applyStreamMsg(msg.msg)
 
+	case ctxUsageMsg:
+		// Authoritative context-window meter from the agent; overrides
+		// our locally-summed cumIn approximation.
+		if msg.Used > 0 {
+			m.cumIn = msg.Used
+		}
+		if msg.Max > 0 {
+			m.modelMaxTokens = msg.Max
+		}
+		return m, nil
+
 	case streamEndMsg:
 		m.streaming = false
 		// Finalize the streaming entry so it stops showing the spinner.
@@ -330,9 +364,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			e.Streaming = false
 		}
 		m.refreshViewport()
-		return m, nil
+		// Poll the agent for the authoritative context-window usage on the
+		// same conversation. Result arrives as a ctxUsageMsg and overrides
+		// the local cumIn approximation we incremented during streaming.
+		return m, fetchContextUsage(m.agent, m.convID)
 
 	case banner.TickMsg:
+		// Gate forwarding on splashShown — when the splash is dismissed,
+		// returning nil Cmd lets the animation's tick chain die out
+		// naturally without needing the AnimModel itself to track state.
+		if !m.splashShown {
+			return m, nil
+		}
 		var cmd tea.Cmd
 		m.splash, cmd = m.splash.Update(msg)
 		return m, cmd
@@ -371,7 +414,9 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 	m.entries = append(m.entries, &Entry{Role: RoleAssistant, Content: "", Streaming: true})
 	m.refreshViewport()
 
-	ch, err := m.agent.StreamChat(context.Background(), m.convID, text)
+	// Pass cwd so the agent prepends .cercano/context.md if present.
+	wd, _ := os.Getwd()
+	ch, err := m.agent.StreamChat(context.Background(), m.convID, text, wd)
 	if err != nil {
 		m.errMsg = err.Error()
 		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "error: " + err.Error()})
@@ -472,6 +517,9 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 		}
 		m.tokIn = sm.TokIn
 		m.tokOut = sm.TokOut
+		// cumIn/cumOut here are local approximations until the agent
+		// answers GetContextUsage below; the RPC's authoritative cumulative
+		// total overrides cumIn (Used) on arrival.
 		m.cumIn += sm.TokIn
 		m.cumOut += sm.TokOut
 		if sm.Model != "" {
@@ -1051,7 +1099,13 @@ func (m Model) renderStatus() string {
 }
 
 func (m Model) renderContextMeter() string {
-	used := m.cumIn + m.cumOut
+	// cumIn now carries the agent-reported cumulative used (set by
+	// ctxUsageMsg) rather than per-turn input. Fall back to cumIn+cumOut
+	// before the first usage RPC has returned.
+	used := m.cumIn
+	if used == 0 {
+		used = m.cumIn + m.cumOut
+	}
 	max := m.modelMaxTokens
 	if max <= 0 {
 		max = 1

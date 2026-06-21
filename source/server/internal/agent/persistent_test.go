@@ -26,7 +26,7 @@ func TestAgent_storeConversationTurn_WritesUserAndAssistant(t *testing.T) {
 	a, store := newTestAgentWithPersistent(t)
 	ctx := context.Background()
 
-	a.storeConversationTurn(ctx, "conv-1", "what's the capital of France?", &Response{
+	a.storeConversationTurn(ctx, "conv-1", "what's the capital of France?", "what's the capital of France?", &Response{
 		Output:       "Paris.",
 		InputTokens:  12,
 		OutputTokens: 4,
@@ -56,7 +56,7 @@ func TestAgent_storeConversationTurn_WritesUserAndAssistant(t *testing.T) {
 func TestAgent_storeConversationTurn_NoConvID_NoOp(t *testing.T) {
 	a, store := newTestAgentWithPersistent(t)
 	ctx := context.Background()
-	a.storeConversationTurn(ctx, "", "hello", &Response{Output: "world"})
+	a.storeConversationTurn(ctx, "", "hello", "hello", &Response{Output: "world"})
 
 	infos, _ := store.List(ctx, "", 0)
 	if len(infos) != 0 {
@@ -67,7 +67,7 @@ func TestAgent_storeConversationTurn_NoConvID_NoOp(t *testing.T) {
 func TestAgent_storeConversationTurn_NoPersistentStore_NoPanic(t *testing.T) {
 	// No persistent store + no in-memory store. Should not panic; just no-op.
 	a := &Agent{}
-	a.storeConversationTurn(context.Background(), "conv-1", "hello", &Response{Output: "world"})
+	a.storeConversationTurn(context.Background(), "conv-1", "hello", "hello", &Response{Output: "world"})
 }
 
 func TestAgent_RenameConversation_DelegatesToStore(t *testing.T) {

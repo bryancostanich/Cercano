@@ -27,6 +27,9 @@ const (
 	Agent_ResumeConversation_FullMethodName   = "/agent.Agent/ResumeConversation"
 	Agent_DeleteConversation_FullMethodName   = "/agent.Agent/DeleteConversation"
 	Agent_RenameConversation_FullMethodName   = "/agent.Agent/RenameConversation"
+	Agent_GetContextUsage_FullMethodName      = "/agent.Agent/GetContextUsage"
+	Agent_ListTools_FullMethodName            = "/agent.Agent/ListTools"
+	Agent_InvokeTool_FullMethodName           = "/agent.Agent/InvokeTool"
 	Agent_ListModels_FullMethodName           = "/agent.Agent/ListModels"
 	Agent_ListSkills_FullMethodName           = "/agent.Agent/ListSkills"
 	Agent_GetSkill_FullMethodName             = "/agent.Agent/GetSkill"
@@ -55,6 +58,19 @@ type AgentClient interface {
 	ResumeConversation(ctx context.Context, in *ResumeConversationRequest, opts ...grpc.CallOption) (*ResumeConversationResponse, error)
 	DeleteConversation(ctx context.Context, in *DeleteConversationRequest, opts ...grpc.CallOption) (*DeleteConversationResponse, error)
 	RenameConversation(ctx context.Context, in *RenameConversationRequest, opts ...grpc.CallOption) (*RenameConversationResponse, error)
+	// GetContextUsage reports cumulative token usage vs. the active model's
+	// context window for a conversation. The CLI status bar polls this after
+	// each streamed turn.
+	GetContextUsage(ctx context.Context, in *GetContextUsageRequest, opts ...grpc.CallOption) (*GetContextUsageResponse, error)
+	// ListTools enumerates the agent's registered tools (name, description,
+	// permission tier). /tools in the CLI renders this through the Table
+	// primitive.
+	ListTools(ctx context.Context, in *ListToolsRequest, opts ...grpc.CallOption) (*ListToolsResponse, error)
+	// InvokeTool executes a registered tool with JSON args and returns its
+	// Result. Used by /tool <name> {...args} for direct invocation; the
+	// agent's chat path will dispatch tools via this same RPC once the
+	// algorithmic-dispatcher lands.
+	InvokeTool(ctx context.Context, in *InvokeToolRequest, opts ...grpc.CallOption) (*InvokeToolResponse, error)
 	// ListModels returns the models available on the active Ollama instance.
 	ListModels(ctx context.Context, in *ListModelsRequest, opts ...grpc.CallOption) (*ListModelsResponse, error)
 	// ListSkills returns the catalog of available Agent Skills (name + description).
@@ -160,6 +176,36 @@ func (c *agentClient) RenameConversation(ctx context.Context, in *RenameConversa
 	return out, nil
 }
 
+func (c *agentClient) GetContextUsage(ctx context.Context, in *GetContextUsageRequest, opts ...grpc.CallOption) (*GetContextUsageResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetContextUsageResponse)
+	err := c.cc.Invoke(ctx, Agent_GetContextUsage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) ListTools(ctx context.Context, in *ListToolsRequest, opts ...grpc.CallOption) (*ListToolsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListToolsResponse)
+	err := c.cc.Invoke(ctx, Agent_ListTools_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) InvokeTool(ctx context.Context, in *InvokeToolRequest, opts ...grpc.CallOption) (*InvokeToolResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InvokeToolResponse)
+	err := c.cc.Invoke(ctx, Agent_InvokeTool_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *agentClient) ListModels(ctx context.Context, in *ListModelsRequest, opts ...grpc.CallOption) (*ListModelsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListModelsResponse)
@@ -213,6 +259,19 @@ type AgentServer interface {
 	ResumeConversation(context.Context, *ResumeConversationRequest) (*ResumeConversationResponse, error)
 	DeleteConversation(context.Context, *DeleteConversationRequest) (*DeleteConversationResponse, error)
 	RenameConversation(context.Context, *RenameConversationRequest) (*RenameConversationResponse, error)
+	// GetContextUsage reports cumulative token usage vs. the active model's
+	// context window for a conversation. The CLI status bar polls this after
+	// each streamed turn.
+	GetContextUsage(context.Context, *GetContextUsageRequest) (*GetContextUsageResponse, error)
+	// ListTools enumerates the agent's registered tools (name, description,
+	// permission tier). /tools in the CLI renders this through the Table
+	// primitive.
+	ListTools(context.Context, *ListToolsRequest) (*ListToolsResponse, error)
+	// InvokeTool executes a registered tool with JSON args and returns its
+	// Result. Used by /tool <name> {...args} for direct invocation; the
+	// agent's chat path will dispatch tools via this same RPC once the
+	// algorithmic-dispatcher lands.
+	InvokeTool(context.Context, *InvokeToolRequest) (*InvokeToolResponse, error)
 	// ListModels returns the models available on the active Ollama instance.
 	ListModels(context.Context, *ListModelsRequest) (*ListModelsResponse, error)
 	// ListSkills returns the catalog of available Agent Skills (name + description).
@@ -252,6 +311,15 @@ func (UnimplementedAgentServer) DeleteConversation(context.Context, *DeleteConve
 }
 func (UnimplementedAgentServer) RenameConversation(context.Context, *RenameConversationRequest) (*RenameConversationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RenameConversation not implemented")
+}
+func (UnimplementedAgentServer) GetContextUsage(context.Context, *GetContextUsageRequest) (*GetContextUsageResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetContextUsage not implemented")
+}
+func (UnimplementedAgentServer) ListTools(context.Context, *ListToolsRequest) (*ListToolsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListTools not implemented")
+}
+func (UnimplementedAgentServer) InvokeTool(context.Context, *InvokeToolRequest) (*InvokeToolResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method InvokeTool not implemented")
 }
 func (UnimplementedAgentServer) ListModels(context.Context, *ListModelsRequest) (*ListModelsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListModels not implemented")
@@ -420,6 +488,60 @@ func _Agent_RenameConversation_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Agent_GetContextUsage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetContextUsageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).GetContextUsage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_GetContextUsage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).GetContextUsage(ctx, req.(*GetContextUsageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_ListTools_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListToolsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).ListTools(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_ListTools_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).ListTools(ctx, req.(*ListToolsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_InvokeTool_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InvokeToolRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).InvokeTool(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_InvokeTool_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).InvokeTool(ctx, req.(*InvokeToolRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Agent_ListModels_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListModelsRequest)
 	if err := dec(in); err != nil {
@@ -508,6 +630,18 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RenameConversation",
 			Handler:    _Agent_RenameConversation_Handler,
+		},
+		{
+			MethodName: "GetContextUsage",
+			Handler:    _Agent_GetContextUsage_Handler,
+		},
+		{
+			MethodName: "ListTools",
+			Handler:    _Agent_ListTools_Handler,
+		},
+		{
+			MethodName: "InvokeTool",
+			Handler:    _Agent_InvokeTool_Handler,
 		},
 		{
 			MethodName: "ListModels",

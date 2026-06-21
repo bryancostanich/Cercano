@@ -12,6 +12,8 @@ Audit all open-source agents for their tool surface, local inference support, ex
 - [ ] Task: Audit Cody (Sourcegraph) — tools, capabilities, extensibility, local inference support.
 - [ ] Task: Audit OpenHands — tools, capabilities, extensibility, local inference support.
 - [ ] Task: Audit SWE-Agent — tools, capabilities, extensibility, local inference support.
+- [ ] Task: Audit OpenCode — tools, capabilities, extensibility, local inference support.
+- [ ] Task: Audit Gemini CLI (Google) — tools, capabilities, extensibility, local inference support.
 - [ ] Task: Conductor - User Manual Verification 'Open Source Agents' (Protocol in workflow.md)
 
 ## Phase 2: Closed Source / Commercial Agents

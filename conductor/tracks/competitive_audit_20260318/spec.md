@@ -23,6 +23,8 @@ The audit covers two dimensions:
 - Cody (Sourcegraph)
 - OpenHands
 - SWE-Agent
+- OpenCode
+- Gemini CLI (Google)
 
 ### Closed Source / Commercial
 - Claude Code (Anthropic)

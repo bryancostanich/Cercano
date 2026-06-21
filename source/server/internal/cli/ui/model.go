@@ -102,6 +102,23 @@ type Model struct {
 	// header. Empty for fresh sessions (header omits the title slot until
 	// /rename or /resume sets one).
 	sessionTitle string
+
+	// toolCache is the registry of available tools, fetched at startup so
+	// the CLI can decide locally (no extra RPC) whether to prompt before
+	// invoking a tool. Keyed by tool name.
+	toolCache map[string]agentclient.ToolInfo
+
+	// pendingConfirm carries a tool invocation waiting on a y/n/d keypress.
+	// While non-nil, all key events route to the confirm resolver instead
+	// of the input or scrollback.
+	pendingConfirm *pendingToolCall
+}
+
+// pendingToolCall is a queued tool invocation awaiting user confirmation.
+type pendingToolCall struct {
+	Name       string
+	Args       string
+	Permission string // "R" | "W" | "X" — R never reaches here, but kept for symmetry
 }
 
 const defaultInputPlaceholder = "type a message, /help for commands"
@@ -168,7 +185,41 @@ func newConvID() string {
 
 // Init is called by Bubble Tea once at startup.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, m.splash.Init(), fetchConfigCmd(m.agent))
+	return tea.Batch(textinput.Blink, m.splash.Init(), fetchConfigCmd(m.agent), fetchToolsCmd(m.agent))
+}
+
+// toolsLoadedMsg carries the result of the startup ListTools RPC; populates
+// m.toolCache so the confirm-prompt decision is local.
+type toolsLoadedMsg struct {
+	Tools []agentclient.ToolInfo
+}
+
+func fetchToolsCmd(ag *agentclient.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		tools, err := ag.ListTools(ctx)
+		if err != nil {
+			return toolsLoadedMsg{}
+		}
+		return toolsLoadedMsg{Tools: tools}
+	}
+}
+
+// toolResultMsg is the async return value of an InvokeTool call.
+type toolResultMsg struct {
+	Name string
+	Res  *agentclient.ToolResult
+	Err  error
+}
+
+func invokeToolCmd(ag *agentclient.Client, name, argsJSON string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		res, err := ag.InvokeTool(ctx, name, argsJSON)
+		return toolResultMsg{Name: name, Res: res, Err: err}
+	}
 }
 
 // configLoadedMsg carries the result of the startup / post-edit GetConfig RPC.
@@ -276,6 +327,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.ClearScreen
 
 	case tea.KeyMsg:
+		// Pending confirm gates ALL keys — until the user resolves it, the
+		// input, scrollback, and any in-flight slash commands stay dormant.
+		if m.pendingConfirm != nil {
+			next, cmd := m.resolveConfirmKey(msg.String())
+			return next, cmd
+		}
 		// Overlays swallow keys when active.
 		if m.editorActive {
 			next, cmd, closed := m.editor.Update(msg)
@@ -404,6 +461,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case toolsLoadedMsg:
+		cache := make(map[string]agentclient.ToolInfo, len(msg.Tools))
+		for _, t := range msg.Tools {
+			cache[t.Name] = t
+		}
+		m.toolCache = cache
+		return m, nil
+
+	case toolResultMsg:
+		var body string
+		if msg.Err != nil {
+			body = "tool error: " + msg.Err.Error()
+		} else if msg.Res.Error != "" {
+			body = "tool error: " + msg.Res.Error
+		} else {
+			body = slash.RenderToolResult(msg.Res)
+		}
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: body})
+		m.refreshViewport()
+		return m, nil
+
 	case streamEndMsg:
 		m.streaming = false
 		// Finalize the streaming entry so it stops showing the spinner.
@@ -510,6 +588,26 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 	case slash.ResultSetSessionTitle:
 		m.sessionTitle = res.Text
 		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "renamed to: " + res.Text})
+		m.refreshViewport()
+	case slash.ResultInvokeTool:
+		// Decide locally whether to prompt: R-tier runs silently, W/X
+		// queues a pending confirm.
+		info := m.toolCache[res.ToolName]
+		perm := info.Permission
+		if perm == "" {
+			// Unknown tool — let the server respond with an error so the
+			// user gets a clear message rather than a silent no-op.
+			return m, invokeToolCmd(m.agent, res.ToolName, res.ToolArgs)
+		}
+		if perm == "R" {
+			m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: m.styles.Muted.Render("running tool:"+res.ToolName)})
+			m.refreshViewport()
+			return m, invokeToolCmd(m.agent, res.ToolName, res.ToolArgs)
+		}
+		// W or X — queue confirm.
+		m.pendingConfirm = &pendingToolCall{Name: res.ToolName, Args: res.ToolArgs, Permission: perm}
+		prompt := m.renderConfirmPrompt(m.pendingConfirm)
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: prompt})
 		m.refreshViewport()
 	case slash.ResultText:
 		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: res.Text})
@@ -914,6 +1012,62 @@ func (m Model) applyResume(conversationID string) Model {
 	m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: fmt.Sprintf("⟲ resumed %d turn(s)", len(turns))})
 	m.relayout()
 	return m
+}
+
+// renderConfirmPrompt builds the single-line confirm message shown in
+// scrollback while pendingConfirm is set. W-tier renders normally; X-tier
+// gets a red ⚠ destructive emphasis.
+func (m Model) renderConfirmPrompt(p *pendingToolCall) string {
+	head := m.styles.Accent.Render("▸ ")
+	if p.Permission == "X" {
+		head = m.styles.Error.Render("▸ ⚠ DESTRUCTIVE ")
+	}
+	summary := p.Name + " " + truncateArgs(p.Args, 80)
+	return head +
+		m.styles.AgentProse.Render(summary) +
+		m.styles.BorderDim.Render("   ·   ") +
+		m.styles.Muted.Render("[") +
+		m.styles.Accent.Render("y") +
+		m.styles.Muted.Render("]es / [") +
+		m.styles.Accent.Render("n") +
+		m.styles.Muted.Render("]o / [") +
+		m.styles.Accent.Render("d") +
+		m.styles.Muted.Render("]iff")
+}
+
+// resolveConfirmKey processes a keystroke while a confirm is pending. y → run,
+// n / esc → cancel, d → reveal the full args, anything else → ignored.
+func (m Model) resolveConfirmKey(key string) (Model, tea.Cmd) {
+	switch key {
+	case "y", "Y":
+		pending := m.pendingConfirm
+		m.pendingConfirm = nil
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: m.styles.Accent.Render("✓ approved — running…")})
+		m.refreshViewport()
+		return m, invokeToolCmd(m.agent, pending.Name, pending.Args)
+	case "n", "N", "esc", "ctrl+c":
+		m.pendingConfirm = nil
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: m.styles.Muted.Render("canceled.")})
+		m.refreshViewport()
+		return m, nil
+	case "d", "D":
+		// Show the full args JSON so the user can inspect before approving.
+		m.entries = append(m.entries, &Entry{Role: RoleSystem,
+			Content: "args:\n```json\n" + m.pendingConfirm.Args + "\n```"})
+		m.refreshViewport()
+		return m, nil
+	}
+	// Any other key is ignored while the confirm is pending.
+	return m, nil
+}
+
+// truncateArgs renders the JSON args compactly for the confirm prompt one-liner.
+func truncateArgs(s string, max int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
 }
 
 // abbreviateModel produces a short display name for the header strip:

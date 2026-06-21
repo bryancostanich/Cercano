@@ -16,7 +16,12 @@ type Config struct {
 	CloudProvider  string `yaml:"cloud_provider"`
 	CloudModel     string `yaml:"cloud_model"`
 	CloudAPIKey    string `yaml:"cloud_api_key"`
-	Port           string `yaml:"port"`
+	// CloudBaseURL overrides the cloud provider's default endpoint when set.
+	// Use this to point cercano at a local Anthropic-compatible proxy such as
+	// Meridian (default http://127.0.0.1:3456). When set with the anthropic
+	// provider, an empty API key is accepted — the proxy handles auth.
+	CloudBaseURL string `yaml:"cloud_base_url"`
+	Port         string `yaml:"port"`
 }
 
 // Defaults returns a Config with default values.

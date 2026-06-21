@@ -3,7 +3,10 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
+
+	"cercano/source/server/internal/conversation"
 )
 
 // ProgressFunc defines a callback for progress updates.
@@ -24,11 +27,22 @@ func WithConversationStore(cs *ConversationStore) AgentOption {
 	}
 }
 
+// WithPersistentStore attaches a SQLite-backed persistent conversation store.
+// When set, the agent dual-writes every turn (in-memory for fast history
+// during the active session, persistent for cross-restart /history & /resume).
+// If nil, persistence is silently skipped.
+func WithPersistentStore(ps conversation.Store) AgentOption {
+	return func(a *Agent) {
+		a.persistent = ps
+	}
+}
+
 // Agent is the top-level orchestrator for AI requests.
 type Agent struct {
 	router       Router
 	coordinator  Coordinator
 	conversation *ConversationStore
+	persistent   conversation.Store
 }
 
 // NewAgent creates a new Agent orchestrator.
@@ -62,13 +76,102 @@ func (a *Agent) loadHistory(ctx context.Context, req *Request) (augmented, origi
 	return
 }
 
-// storeConversationTurn compacts the response and stores the turn.
+// storeConversationTurn compacts the response and stores the turn in BOTH
+// the in-memory session store (fast intra-session history) AND the persistent
+// SQLite store (cross-restart /history & /resume), if configured.
 func (a *Agent) storeConversationTurn(ctx context.Context, conversationID, originalInput string, resp *Response) {
-	if a.conversation == nil || conversationID == "" {
+	if conversationID == "" {
 		return
 	}
 	compacted := CompactResponse(resp)
-	_ = a.conversation.AppendTurn(ctx, conversationID, originalInput, compacted)
+	if a.conversation != nil {
+		_ = a.conversation.AppendTurn(ctx, conversationID, originalInput, compacted)
+	}
+	if a.persistent != nil {
+		// projectDir comes from the request the agent processed; we don't
+		// carry it onto this helper, so EnsureConversation here uses empty
+		// project. The next refactor can thread workDir through.
+		if err := a.persistent.EnsureConversation(ctx, conversationID, "", ""); err != nil {
+			fmt.Fprintf(os.Stderr, "[persistent-store] EnsureConversation(%s) failed: %v\n", conversationID, err)
+		}
+		if err := a.persistent.Append(ctx, conversation.Turn{
+			ConversationID: conversationID,
+			Role:           "user",
+			Content:        originalInput,
+			TokensIn:       resp.InputTokens,
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "[persistent-store] Append(user, %s) failed: %v\n", conversationID, err)
+		}
+		if err := a.persistent.Append(ctx, conversation.Turn{
+			ConversationID: conversationID,
+			Role:           "assistant",
+			Content:        compacted,
+			TokensOut:      resp.OutputTokens,
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "[persistent-store] Append(assistant, %s) failed: %v\n", conversationID, err)
+		}
+	}
+}
+
+// ResumeConversation loads persisted turns for the given conversation id and
+// hydrates them into the in-memory session store, so that the next call to
+// loadHistory sees full context. Returns the persisted turns so the caller
+// (CLI) can render them in the scrollback. If no persistent store is
+// configured the returned slice is empty.
+func (a *Agent) ResumeConversation(ctx context.Context, conversationID string) ([]conversation.Turn, error) {
+	if a.persistent == nil {
+		return nil, nil
+	}
+	turns, err := a.persistent.GetTurns(ctx, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	if a.conversation == nil {
+		return turns, nil
+	}
+	// Rehydrate the in-memory store by replaying user/assistant pairs.
+	var pendingUser string
+	for _, t := range turns {
+		switch t.Role {
+		case "user":
+			pendingUser = t.Content
+		case "assistant":
+			if pendingUser != "" {
+				_ = a.conversation.AppendTurn(ctx, conversationID, pendingUser, t.Content)
+				pendingUser = ""
+			}
+		}
+	}
+	return turns, nil
+}
+
+// ListConversations returns persisted conversation summaries (project filter
+// + limit). Empty slice if no persistent store is configured.
+func (a *Agent) ListConversations(ctx context.Context, projectDir string, limit int) ([]conversation.Info, error) {
+	if a.persistent == nil {
+		return nil, nil
+	}
+	return a.persistent.List(ctx, projectDir, limit)
+}
+
+// DeleteConversation removes a conversation and its turns from the persistent
+// store. The in-memory session store is not touched (it'll garbage-collect
+// when the agent restarts).
+func (a *Agent) DeleteConversation(ctx context.Context, conversationID string) error {
+	if a.persistent == nil {
+		return nil
+	}
+	return a.persistent.Delete(ctx, conversationID)
+}
+
+// RenameConversation sets a custom title for a persisted conversation. A
+// user-chosen title overrides the auto-derived one and is never overwritten
+// by subsequent turn appends.
+func (a *Agent) RenameConversation(ctx context.Context, conversationID, title string) error {
+	if a.persistent == nil {
+		return nil
+	}
+	return a.persistent.Rename(ctx, conversationID, title)
 }
 
 // ProcessRequest orchestrates the flow: Route -> Classify -> Execute Strategy.
@@ -146,6 +249,15 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 		ConversationID: req.ConversationID,
 	}
 	res, err := provider.Process(ctx, augReq)
+	if err != nil {
+		// If the failing provider isn't the local one, degrade to local and
+		// surface a notice. NEVER silently mock; the user always knows.
+		if newRes, ok := a.degradeIfCloudFailure(ctx, provider, augReq, err, nil); ok {
+			res = newRes
+			err = nil
+			provider = a.router.GetModelProviders()["LocalModel"]
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -263,6 +375,13 @@ func (a *Agent) ProcessRequestStream(ctx context.Context, req *Request, progress
 		res, err = sp.ProcessStream(ctx, augReq, tokenProgress)
 	} else {
 		res, err = provider.Process(ctx, augReq)
+	}
+	if err != nil {
+		if newRes, ok := a.degradeIfCloudFailure(ctx, provider, augReq, err, progress); ok {
+			res = newRes
+			err = nil
+			provider = a.router.GetModelProviders()["LocalModel"]
+		}
 	}
 	if err != nil {
 		return nil, err

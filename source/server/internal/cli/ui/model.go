@@ -1,0 +1,1097 @@
+// Package ui hosts the Bubble Tea root model for cercano-cli.
+package ui
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"math"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"cercano/source/server/internal/cli/agentclient"
+	"cercano/source/server/internal/cli/banner"
+	"cercano/source/server/internal/cli/render"
+	"cercano/source/server/internal/cli/slash"
+	"cercano/source/server/internal/cli/theme"
+)
+
+// Role tags a scrollback entry's origin so the renderer can style it.
+type Role int
+
+const (
+	RoleUser Role = iota
+	RoleAssistant
+	RoleSystem // /help output, errors, progress notes
+)
+
+// Entry is one item in the scrollback. Stored raw; re-wrapped on every render.
+type Entry struct {
+	Role      Role
+	Content   string // grows live for streaming assistant turns
+	Streaming bool   // true while tokens are flowing in
+	// Status is the current pre-stream progress note (e.g. "classifying
+	// intent", "selecting provider", "generating response"). Set by
+	// progress messages while Content is empty; shown in place of the
+	// "thinking…" placeholder. Cleared as soon as tokens start arriving.
+	Status string
+	// Tables are markdown tables extracted from Content at stream-done.
+	// Content carries `{{TABLE_N}}` sentinels; renderEntry substitutes them
+	// with freshly-rendered Table strings at the CURRENT viewport width
+	// every frame, so a terminal resize automatically re-fits each table.
+	Tables []render.Table
+}
+
+// Model is the Bubble Tea root model.
+type Model struct {
+	width, height int
+
+	palette theme.Palette
+	styles  theme.Styles
+
+	agent  *agentclient.Client
+	convID string
+
+	registry *slash.Registry
+
+	splashShown bool // hide after first user input
+	splash      banner.AnimModel
+	entries     []*Entry
+	viewport    viewport.Model
+	input       textinput.Model
+	streamCh    <-chan agentclient.StreamMsg
+	streaming   bool
+
+	tokIn, tokOut  int
+	cumIn, cumOut  int
+	lastLatencyMs  int
+	modelMaxTokens int
+	lastModel      string
+	cloudState     string // "" = unknown, "NONE" = absent, "ok" = real cloud configured
+	ctrlCArmed     bool   // first ctrl-c on empty input arms quit; any other key disarms
+	errMsg         string
+
+	editorActive bool
+	editor       configEditor
+
+	historyActive bool
+	history       historyPicker
+
+	// convRef shares the current convID with the slash registry by reference,
+	// so /rename always targets whatever conversation the model currently has
+	// active (including after /resume).
+	convRef *struct{ id string }
+
+	openHistoryOnStart bool // -r flag → open the history picker after first WindowSizeMsg
+
+	// promptBorderColor is the color of the lines immediately above and
+	// below the input row. Defaults to the palette's accent (lime). /color
+	// sets it at runtime.
+	promptBorderColor lipgloss.Color
+
+	// sessionTitle is the current conversation's display title. Shown in the
+	// header. Empty for fresh sessions (header omits the title slot until
+	// /rename or /resume sets one).
+	sessionTitle string
+}
+
+const defaultInputPlaceholder = "type a message, /help for commands"
+const armedInputPlaceholder = "(press ^C again to quit, or type a message)"
+
+// New builds the root model. The provided agent client must already be Dial'd.
+// openHistoryOnStart=true makes the CLI open the /history picker as soon as
+// the terminal size is known (used by the `cercano -r` flag).
+func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
+	p := theme.Cracker()
+	s := theme.NewStyles(p)
+
+	ti := textinput.New()
+	ti.Placeholder = defaultInputPlaceholder
+	ti.Prompt = s.UserPrompt.Render("▶ ")
+	ti.CharLimit = 0
+	ti.Focus()
+
+	vp := viewport.New(80, 10)
+
+	reg := slash.New()
+	slash.RegisterBasics(reg)
+	slash.RegisterConfig(reg, ag)
+	slash.RegisterColor(reg)
+	// currentConv is captured by reference so it always returns the active
+	// conversation id even after /resume swaps it.
+	convRef := &struct{ id string }{}
+	slash.RegisterHistory(reg, ag, func() string { return convRef.id })
+
+	splash := banner.NewAnimModel(p, banner.Meta{
+		Tagline: "local-first ai coprocessor",
+		Version: "v0.1.0",
+		Model:   "qwen3-coder",
+	})
+
+	initialConvID := newConvID()
+	convRef.id = initialConvID
+
+	return Model{
+		palette:        p,
+		styles:         s,
+		agent:          ag,
+		convID:         initialConvID,
+		convRef:        convRef,
+		registry:       reg,
+		splashShown:    !openHistoryOnStart,
+		splash:         splash,
+		viewport:       vp,
+		input:          ti,
+		lastModel:      "qwen3-coder",
+		modelMaxTokens: 128_000, // placeholder until the agent serves real ctx limits
+		openHistoryOnStart: openHistoryOnStart,
+		promptBorderColor:  p.Accent,
+	}
+}
+
+func newConvID() string {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
+// Init is called by Bubble Tea once at startup.
+func (m Model) Init() tea.Cmd { return tea.Batch(textinput.Blink, m.splash.Init()) }
+
+// streamTickMsg signals "drain one message from the active stream channel."
+type streamTickMsg struct{ msg agentclient.StreamMsg }
+type streamEndMsg struct{}
+
+// progressAnimTickMsg fires every ~50ms while a streaming assistant entry is
+// awaiting its first token. Triggers a View re-render so the per-char sweep
+// over the status text advances.
+type progressAnimTickMsg time.Time
+
+func progressAnimTick() tea.Cmd {
+	return tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg { return progressAnimTickMsg(t) })
+}
+
+func waitForStream(ch <-chan agentclient.StreamMsg) tea.Cmd {
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return streamEndMsg{}
+		}
+		return streamTickMsg{msg: msg}
+	}
+}
+
+// Update is the Bubble Tea reducer.
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.relayout()
+		// Propagate the new size to any open overlay so it re-renders at
+		// the correct dimensions on resize. Without this, the overlay keeps
+		// drawing at its construction-time width/height and the buffer
+		// fragments.
+		if m.editorActive {
+			m.editor = m.editor.setSize(m.width, m.height)
+		}
+		if m.historyActive {
+			m.history.width = m.width
+			m.history.height = m.height
+		}
+		// -r boot: open the history picker on the first sized frame.
+		if m.openHistoryOnStart && m.width > 0 {
+			m.openHistoryOnStart = false
+			hp, _ := newHistoryPicker(m.agent, m.palette, m.styles, m.width, m.height, m.convID)
+			m.history = hp
+			m.historyActive = true
+		}
+		// Force a full alt-screen redraw on resize. Without ClearScreen,
+		// rows in the terminal that were occupied at the OLD size but not
+		// rewritten at the NEW size show stale content.
+		return m, tea.ClearScreen
+
+	case tea.KeyMsg:
+		// Overlays swallow keys when active.
+		if m.editorActive {
+			next, cmd, closed := m.editor.Update(msg)
+			m.editor = next
+			if closed {
+				m.editorActive = false
+			}
+			return m, cmd
+		}
+		if m.historyActive {
+			next, cmd, closed := m.history.Update(msg)
+			m.history = next
+			if closed {
+				m.historyActive = false
+			}
+			return m, cmd
+		}
+		// Ctrl-C semantics: clear the input first; if input was already
+		// empty, arm a quit-on-next-Ctrl-C state. Any other key disarms.
+		// Matches bash / python REPL / node convention.
+		key := msg.String()
+		if key == "ctrl+c" {
+			if m.input.Value() != "" {
+				m.input.SetValue("")
+				m.ctrlCArmed = false
+				m.input.Placeholder = defaultInputPlaceholder
+				return m, nil
+			}
+			if m.ctrlCArmed {
+				return m, tea.Quit
+			}
+			m.ctrlCArmed = true
+			m.input.Placeholder = armedInputPlaceholder
+			return m, nil
+		}
+		if m.ctrlCArmed {
+			m.ctrlCArmed = false
+			m.input.Placeholder = defaultInputPlaceholder
+		}
+		// Tab completion for slash commands.
+		if key == "tab" {
+			val := m.input.Value()
+			if strings.HasPrefix(val, "/") {
+				matches := m.registry.PrefixMatches(val)
+				if len(matches) == 1 {
+					// Complete fully + space, so the user can type args.
+					m.input.SetValue("/" + matches[0] + " ")
+					m.input.CursorEnd()
+					return m, nil
+				}
+				if len(matches) > 1 {
+					completed := slash.CommonPrefix(matches)
+					if "/"+completed != val {
+						m.input.SetValue("/" + completed)
+						m.input.CursorEnd()
+					}
+					return m, nil
+				}
+			}
+			// Not a slash command — fall through to default key routing.
+		}
+		switch key {
+		case "enter":
+			text := strings.TrimSpace(m.input.Value())
+			if text == "" {
+				return m, nil
+			}
+			m.input.SetValue("")
+			wasSplashShown := m.splashShown
+			m.splashShown = false
+			if wasSplashShown {
+				// Splash just dismissed — the viewport grows into the
+				// freed rows. Without this, the status bar would float
+				// 9 rows above the terminal bottom.
+				m.relayout()
+			}
+			return m.submit(text)
+		case "pgup", "pgdown", "home", "end", "ctrl+u", "ctrl+d", "ctrl+b", "ctrl+f", "shift+up", "shift+down":
+			// Route navigation keys to the scrollback viewport. Keeps the
+			// textinput's normal arrow / line-edit semantics intact.
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
+		}
+		var cmd tea.Cmd
+		prevVal := m.input.Value()
+		m.input, cmd = m.input.Update(msg)
+		// Recompute layout if the input changed shape (suggestion line
+		// height depends on the input value). Cheap when nothing changed.
+		if m.input.Value() != prevVal {
+			m.relayout()
+		}
+		return m, cmd
+
+	case tea.MouseMsg:
+		// Mouse wheel ↑/↓ scrolls scrollback line-by-line.
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
+
+	case streamTickMsg:
+		return m.applyStreamMsg(msg.msg)
+
+	case streamEndMsg:
+		m.streaming = false
+		// Finalize the streaming entry so it stops showing the spinner.
+		if e := m.lastAssistantEntry(); e != nil {
+			e.Streaming = false
+		}
+		m.refreshViewport()
+		return m, nil
+
+	case banner.TickMsg:
+		var cmd tea.Cmd
+		m.splash, cmd = m.splash.Update(msg)
+		return m, cmd
+
+	case resumeRequestedMsg:
+		// Fired by the history picker's OnSelect after the overlay closes.
+		m = m.applyResume(msg.ConversationID)
+		if msg.Title != "" {
+			m.sessionTitle = msg.Title
+		}
+		return m, nil
+
+	case progressAnimTickMsg:
+		// Keep ticking while there's an assistant entry awaiting its first
+		// token — that's when the animated status line is visible. Each tick
+		// must call refreshViewport so the per-frame color sweep is pushed
+		// into the viewport's content cache; without this, View renders the
+		// last-set content and the animation appears frozen.
+		if e := m.lastAssistantEntry(); e != nil && e.Streaming && e.Content == "" {
+			m.refreshViewport()
+			return m, progressAnimTick()
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) submit(text string) (tea.Model, tea.Cmd) {
+	if strings.HasPrefix(text, "/") {
+		next, cmd := m.runSlash(text)
+		return next, cmd
+	}
+	// User turn
+	m.entries = append(m.entries, &Entry{Role: RoleUser, Content: text})
+	// Assistant placeholder
+	m.entries = append(m.entries, &Entry{Role: RoleAssistant, Content: "", Streaming: true})
+	m.refreshViewport()
+
+	ch, err := m.agent.StreamChat(context.Background(), m.convID, text)
+	if err != nil {
+		m.errMsg = err.Error()
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "error: " + err.Error()})
+		m.refreshViewport()
+		return m, nil
+	}
+	m.streamCh = ch
+	m.streaming = true
+	// Fire both the stream drainer and the progress-text animator; both
+	// re-issue themselves until streaming ends.
+	return m, tea.Batch(waitForStream(ch), progressAnimTick())
+}
+
+func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
+	res, _ := m.registry.Dispatch(line)
+	switch res.Kind {
+	case slash.ResultQuit:
+		return m, tea.Quit
+	case slash.ResultClearConversation:
+		m.entries = nil
+		m.convID = newConvID()
+		if m.convRef != nil {
+			m.convRef.id = m.convID
+		}
+		m.sessionTitle = ""
+		m.cumIn = 0
+		m.cumOut = 0
+		m.refreshViewport()
+	case slash.ResultOpenConfigEditor:
+		ed, _ := newConfigEditor(m.agent, m.palette, m.styles, m.width, m.height)
+		m.editor = ed
+		m.editorActive = true
+	case slash.ResultOpenHistoryPicker:
+		hp, _ := newHistoryPicker(m.agent, m.palette, m.styles, m.width, m.height, m.convID)
+		m.history = hp
+		m.historyActive = true
+	case slash.ResultResumeConversation:
+		// /resume <id> path — slash already validated against the agent.
+		m = m.applyResume(res.Text)
+	case slash.ResultSetPromptColor:
+		m.promptBorderColor = m.resolvePromptColor(res.Text)
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "prompt color set"})
+		m.refreshViewport()
+	case slash.ResultSetSessionTitle:
+		m.sessionTitle = res.Text
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "renamed to: " + res.Text})
+		m.refreshViewport()
+	case slash.ResultText:
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: res.Text})
+		m.refreshViewport()
+	}
+	return m, nil
+}
+
+func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
+	switch sm.Type {
+	case agentclient.TypeToken:
+		if e := m.lastAssistantEntry(); e != nil {
+			e.Content += sm.Token
+			// Once real tokens arrive, the pre-stream progress note is
+			// no longer relevant; clear so the renderer drops it.
+			e.Status = ""
+		}
+	case agentclient.TypeProgress:
+		// Collapse progress messages onto the live assistant entry's Status
+		// field — one line that mutates as the agent advances through phases
+		// (classifying intent → selecting provider → generating response).
+		// Falls back to a normal system entry if there's no streaming assistant
+		// to attach to.
+		note := normalizeProgress(sm.Note)
+		if e := m.lastAssistantEntry(); e != nil && e.Streaming && e.Content == "" {
+			e.Status = note
+		} else {
+			m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: note})
+		}
+	case agentclient.TypeDone:
+		if e := m.lastAssistantEntry(); e != nil {
+			// If we never received any tokens, fall back to the full final response.
+			if e.Content == "" {
+				e.Content = sm.Final
+			}
+			e.Streaming = false
+			// Extract markdown tables into Entry.Tables; Content keeps the
+			// `{{TABLE_N}}` sentinels. renderEntry re-renders each table at
+			// the current viewport width every frame, so resize auto-refits.
+			cleaned, tables := render.InterceptMarkdownTables(e.Content)
+			e.Content = cleaned
+			e.Tables = tables
+		}
+		// Surface non-fatal notices (e.g. "cloud not configured — answered
+		// locally") as a system entry above the assistant content. Sticks
+		// the cloud state to NONE so the status bar shows it.
+		if sm.Notice != "" {
+			m.entries = append(m.entries[:len(m.entries)-1], &Entry{Role: RoleSystem, Content: "⚠ " + sm.Notice}, m.entries[len(m.entries)-1])
+			m.cloudState = "NONE"
+		} else {
+			m.cloudState = "ok"
+		}
+		m.tokIn = sm.TokIn
+		m.tokOut = sm.TokOut
+		m.cumIn += sm.TokIn
+		m.cumOut += sm.TokOut
+		if sm.Model != "" {
+			m.lastModel = sm.Model
+		}
+	case agentclient.TypeError:
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "stream error: " + sm.Err.Error()})
+		if e := m.lastAssistantEntry(); e != nil {
+			e.Streaming = false
+		}
+	}
+	m.refreshViewport()
+	return m, waitForStream(m.streamCh)
+}
+
+func (m Model) lastAssistantEntry() *Entry {
+	for i := len(m.entries) - 1; i >= 0; i-- {
+		if m.entries[i].Role == RoleAssistant {
+			return m.entries[i]
+		}
+	}
+	return nil
+}
+
+// relayout sets viewport / input widths and the viewport height so the
+// rendered View exactly fills the terminal — status bar pinned to the bottom.
+//
+// Splash is rendered only when the terminal is wide enough to hold the
+// fixed-width banner. Suggestion height (which depends on the current input
+// value + registry help text + wrap width) is computed here so the
+// viewport's allocated height matches what View will actually emit, no
+// per-frame state mutation needed.
+//
+// View structure (lines):
+//
+//	header  (1)
+//	─────   (1)
+//	splash  (8) + blank (1)   ← only when splash visible
+//	viewport (bodyH)
+//	─────   (1)
+//	suggestion (variable, 0..N)
+//	input   (1)
+//	─────   (1)
+//	status  (1)
+func (m *Model) relayout() {
+	contentW := m.width
+	if contentW < 20 {
+		contentW = 20
+	}
+	const chromeNoSplash = 6 // header + 3 dividers + input + status
+	splashH := 0
+	if m.splashEffective() {
+		splashH = 9 // 8 banner rows + 1 blank
+	}
+	suggestH := 0
+	if m.viewport.Width > 0 && !m.editorActive {
+		// Width may not yet match contentW on the first paint; the
+		// suggestion uses m.width which we've just updated above.
+		if hint := m.renderSlashSuggestions(); hint != "" {
+			suggestH = strings.Count(hint, "\n") + 1
+		}
+	}
+	bodyH := m.height - chromeNoSplash - splashH - suggestH
+	if bodyH < 3 {
+		bodyH = 3
+	}
+	m.viewport.Width = contentW
+	m.viewport.Height = bodyH
+	m.input.Width = contentW - 4
+	m.refreshViewport()
+}
+
+// splashEffective reports whether the splash banner is currently showable.
+// We hide it on terminals narrower than the banner's fixed width because
+// the 62-col chrome wraps catastrophically on a 40-col terminal — every
+// banner row becomes 2-3 terminal rows, the whole layout fragments.
+func (m Model) splashEffective() bool {
+	return m.splashShown && m.width >= banner.Width
+}
+
+// refreshViewport rebuilds the viewport content from raw entries at the
+// current width. Auto-scrolls to bottom ONLY if the user was already at the
+// bottom — preserves scroll position when they've paged up to read history.
+func (m *Model) refreshViewport() {
+	wasAtBottom := m.viewport.AtBottom()
+	var b strings.Builder
+	for i, e := range m.entries {
+		b.WriteString(m.renderEntry(e))
+		if i < len(m.entries)-1 {
+			b.WriteString("\n")
+		}
+	}
+	m.viewport.SetContent(b.String())
+	if wasAtBottom {
+		m.viewport.GotoBottom()
+	}
+}
+
+const entryIndent = 2
+
+func (m *Model) renderEntry(e *Entry) string {
+	wrapW := m.viewport.Width
+	if wrapW < 10 {
+		wrapW = 10
+	}
+	textW := wrapW - entryIndent
+	if textW < 8 {
+		textW = 8
+	}
+	pad := strings.Repeat(" ", entryIndent)
+
+	switch e.Role {
+	case RoleUser:
+		// User entries: bullet on the first line, hanging indent on wrapped lines.
+		wrapped := lipgloss.NewStyle().Width(textW).Render(e.Content)
+		lines := strings.Split(wrapped, "\n")
+		for i := range lines {
+			if i == 0 {
+				lines[i] = m.styles.UserPrompt.Render("▶ ") + lines[i]
+			} else {
+				lines[i] = pad + lines[i]
+			}
+		}
+		return strings.Join(lines, "\n")
+
+	case RoleAssistant:
+		content := e.Content
+		if e.Streaming && content == "" {
+			status := e.Status
+			if status == "" {
+				status = "thinking…"
+			}
+			content = animateSpinnerGlyph() + " " + animateLimeSweep(status)
+		} else if e.Streaming {
+			content = e.Content + m.styles.Accent.Render(" ⟳")
+		}
+		// Substitute table sentinels with freshly-rendered tables at the
+		// current text width. Done every frame so resize re-fits without
+		// losing the parsed table data.
+		if len(e.Tables) > 0 {
+			for i, t := range e.Tables {
+				marker := fmt.Sprintf("{{TABLE_%d}}", i)
+				rendered := t.Render(textW, m.styles)
+				content = strings.Replace(content, marker, rendered, 1)
+			}
+			// Skip the outer lipgloss Width wrap; tables already fit textW
+			// and re-wrapping a styled multi-line block would break its
+			// columns. Prose lines stay full-width by virtue of the agent
+			// emitting reasonable line lengths.
+			styled := m.styles.AgentProse.Render(content)
+			return indentBlock(pad, styled)
+		}
+		styled := m.styles.AgentProse.Render(content)
+		wrapped := lipgloss.NewStyle().Width(textW).Render(styled)
+		return indentBlock(pad, wrapped)
+
+	case RoleSystem:
+		styled := m.styles.Muted.Render(e.Content)
+		wrapped := lipgloss.NewStyle().Width(textW).Render(styled)
+		return indentBlock(pad, wrapped)
+	}
+	return e.Content
+}
+
+// animateSpinnerGlyph renders the spinner symbol with two layered motions:
+//
+//  1. A clockwise block-rotation through 8 half/quarter-block glyphs
+//     (`▌▘▀▝▐▗▄▖`) at 80ms/frame — gives the visual of a square rolling
+//     in place. Ties to the wordmark block-letter aesthetic.
+//
+//  2. A sine-modulated brightness pulse (lime → white → lime) at 1.5s cycle,
+//     phase-locked to the same wall clock the status-text sweep uses. So the
+//     spinner peaks white in roughly the same rhythm as the sweep peak
+//     crosses the text, then dims back to lime base.
+//
+// Both motions are wall-clock-driven so phases stay smooth across status
+// changes; nothing per-entry to track.
+func animateSpinnerGlyph() string {
+	const frames = "▌▘▀▝▐▗▄▖"
+	const frameMs = 80
+	const pulseCycleMs = 1500
+
+	nowMs := time.Now().UnixMilli()
+
+	// Rotation.
+	runes := []rune(frames)
+	glyph := string(runes[int(nowMs/frameMs)%len(runes)])
+
+	// Brightness pulse — stays in the orange/amber family throughout:
+	// primary amber base lerps to bright amber peak (palette colors), so
+	// the rolling block reads orange at every phase of the cycle.
+	phase := float64(nowMs%int64(pulseCycleMs)) / float64(pulseCycleMs)
+	pulse := 0.5 + 0.5*math.Sin(phase*2*math.Pi)
+	base := [3]uint8{0xEA, 0x82, 0x12} // primary amber
+	peak := [3]uint8{0xFF, 0xB8, 0x4D} // bright amber
+	c := [3]uint8{
+		uint8(float64(base[0]) + (float64(peak[0])-float64(base[0]))*pulse),
+		uint8(float64(base[1]) + (float64(peak[1])-float64(base[1]))*pulse),
+		uint8(float64(base[2]) + (float64(peak[2])-float64(base[2]))*pulse),
+	}
+	hex := []byte("#000000")
+	const digits = "0123456789ABCDEF"
+	hex[1] = digits[c[0]>>4]
+	hex[2] = digits[c[0]&0xF]
+	hex[3] = digits[c[1]>>4]
+	hex[4] = digits[c[1]&0xF]
+	hex[5] = digits[c[2]>>4]
+	hex[6] = digits[c[2]&0xF]
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(string(hex))).Render(glyph)
+}
+
+// animateLimeSweep renders `text` with a per-char color sweep — lime base, a
+// bright peak (lime→white) traveling left-to-right on a 1.5s loop. Phase is
+// derived from wall-clock time so the animation stays smooth regardless of
+// when the status text last changed.
+func animateLimeSweep(text string) string {
+	const (
+		cycleMs = 1500 // one full sweep duration
+		tail    = 4.0  // half-width of the bright band, in columns
+		padCols = 4.0  // off-screen lead-in / trail-out
+	)
+	// Walk-clock phase, 0..1.
+	phaseMs := time.Now().UnixMilli() % int64(cycleMs)
+	progress := float64(phaseMs) / float64(cycleMs)
+
+	cols := utf8.RuneCountInString(text)
+	sweepPos := -padCols + progress*(float64(cols)+2*padCols)
+
+	var b strings.Builder
+	col := 0
+	for _, r := range text {
+		b.WriteString(lipgloss.NewStyle().
+			Foreground(progressColorAt(col, sweepPos, tail)).
+			Render(string(r)))
+		col++
+	}
+	return b.String()
+}
+
+// progressColorAt returns the rendered color for one column at a given sweep
+// position. Lime base; the inside `tail` columns lerp toward white.
+func progressColorAt(col int, sweepPos float64, tail float64) lipgloss.Color {
+	dist := float64(col) - sweepPos
+	if dist < 0 {
+		dist = -dist
+	}
+	if dist >= tail {
+		return lipgloss.Color("#BDF000") // lime base
+	}
+	k := 1.0 - dist/tail // 0 at edge, 1 at peak
+	base := [3]uint8{0xBD, 0xF0, 0x00}  // lime
+	peak := [3]uint8{0xFF, 0xFF, 0xFF}  // white peak
+	c := [3]uint8{
+		uint8(float64(base[0]) + (float64(peak[0])-float64(base[0]))*k),
+		uint8(float64(base[1]) + (float64(peak[1])-float64(base[1]))*k),
+		uint8(float64(base[2]) + (float64(peak[2])-float64(base[2]))*k),
+	}
+	hex := []byte("#000000")
+	const digits = "0123456789ABCDEF"
+	hex[1] = digits[c[0]>>4]
+	hex[2] = digits[c[0]&0xF]
+	hex[3] = digits[c[1]>>4]
+	hex[4] = digits[c[1]&0xF]
+	hex[5] = digits[c[2]>>4]
+	hex[6] = digits[c[2]&0xF]
+	return lipgloss.Color(string(hex))
+}
+
+// applyResume calls the agent's ResumeConversation RPC, switches the active
+// conversation id, clears the splash, and re-renders the persisted turns
+// into the scrollback so the user picks up exactly where they left off.
+// resolvePromptColor maps a slash-command color token into a lipgloss.Color
+// the View can apply directly. Tokens take one of two shapes:
+//
+//   - `#RRGGBB` — literal hex, used as-is
+//   - `palette:<key>` — looked up against the model's palette
+//
+// Falls back to the current value (silently — the slash command already
+// validated; this is just the model-side dispatch).
+func (m Model) resolvePromptColor(token string) lipgloss.Color {
+	if strings.HasPrefix(token, "#") {
+		return lipgloss.Color(token)
+	}
+	if strings.HasPrefix(token, "palette:") {
+		switch strings.TrimPrefix(token, "palette:") {
+		case "primary":
+			return m.palette.Primary
+		case "accent":
+			return m.palette.Accent
+		case "info":
+			return m.palette.Info
+		case "success":
+			return m.palette.Success
+		case "warn":
+			return m.palette.Warn
+		case "error":
+			return m.palette.Error
+		case "muted":
+			return m.palette.Muted
+		case "bright":
+			return m.palette.Bright
+		case "border":
+			return m.palette.Border
+		case "border_dim":
+			return m.palette.BorderDim
+		}
+	}
+	return m.promptBorderColor
+}
+
+// applyResume updates the model + the convRef shared with the slash registry,
+// then rehydrates scrollback from the persisted turns.
+func (m Model) applyResume(conversationID string) Model {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	turns, err := m.agent.ResumeConversation(ctx, conversationID)
+	if err != nil {
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "resume failed: " + err.Error()})
+		m.refreshViewport()
+		return m
+	}
+	m.convID = conversationID
+	if m.convRef != nil {
+		m.convRef.id = conversationID
+	}
+	m.entries = nil
+	m.cumIn = 0
+	m.cumOut = 0
+	m.splashShown = false
+	for _, t := range turns {
+		role := RoleSystem
+		switch t.Role {
+		case "user":
+			role = RoleUser
+		case "assistant":
+			role = RoleAssistant
+		}
+		m.entries = append(m.entries, &Entry{
+			Role:    role,
+			Content: t.Content,
+		})
+		m.cumIn += t.TokensIn
+		m.cumOut += t.TokensOut
+	}
+	m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: fmt.Sprintf("⟲ resumed %d turn(s)", len(turns))})
+	m.relayout()
+	return m
+}
+
+// normalizeProgress canonicalises the agent's progress messages for display:
+// lowercases the first word, strips trailing "...", and trims whitespace.
+// Avoids touching the agent's emission semantics (shared with other clients)
+// while still giving the CLI a consistent visual cadence.
+func normalizeProgress(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimRight(s, ".")
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return s
+	}
+	// Lowercase the leading word only (e.g. "Classifying Intent" → "classifying intent").
+	// Spare any all-caps tokens past the first space.
+	first := []rune(s)
+	if first[0] >= 'A' && first[0] <= 'Z' {
+		first[0] = first[0] + ('a' - 'A')
+	}
+	// Lowercase second word if it's a single capital-leading word.
+	out := string(first)
+	if i := strings.Index(out, " "); i > 0 && i+1 < len(out) {
+		r := []rune(out)
+		if r[i+1] >= 'A' && r[i+1] <= 'Z' {
+			r[i+1] = r[i+1] + ('a' - 'A')
+		}
+		out = string(r)
+	}
+	return out
+}
+
+// indentBlock prefixes every line of s with pad.
+func indentBlock(pad, s string) string {
+	if s == "" {
+		return pad
+	}
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		lines[i] = pad + lines[i]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// View renders the full screen at the current width/height. The viewport
+// height is computed dynamically here so it absorbs whatever rows the
+// suggestion/help line ends up taking — wrapped help text grows downward,
+// the viewport shrinks to keep the status bar pinned to terminal bottom.
+func (m Model) View() string {
+	if m.width == 0 || m.height == 0 {
+		return "" // first paint before WindowSizeMsg
+	}
+
+	var parts []string
+	parts = append(parts, m.renderHeader())
+	parts = append(parts, m.styles.BorderDim.Render(strings.Repeat("─", m.width)))
+	if m.splashEffective() {
+		parts = append(parts, m.splash.View())
+		parts = append(parts, "")
+	}
+
+	switch {
+	case m.editorActive:
+		parts = append(parts, m.editor.View())
+	case m.historyActive:
+		parts = append(parts, m.history.View())
+	default:
+		parts = append(parts, m.viewport.View())
+	}
+
+	promptLine := lipgloss.NewStyle().Foreground(m.promptBorderColor).Render(strings.Repeat("─", m.width))
+	parts = append(parts, promptLine)
+	if hint := m.renderSlashSuggestions(); hint != "" && !m.editorActive {
+		parts = append(parts, hint)
+	}
+	parts = append(parts, m.input.View())
+	parts = append(parts, promptLine)
+	parts = append(parts, m.renderStatus())
+
+	out := strings.Join(parts, "\n")
+
+	// Alt-screen safety: pad to exactly m.height lines so resize-to-smaller
+	// frames clear the trailing rows the previous larger frame occupied.
+	rendered := strings.Count(out, "\n") + 1
+	if rendered < m.height {
+		out += strings.Repeat("\n", m.height-rendered)
+	}
+	return out
+}
+
+// countLines totals the visible row count of a slice of pre-joined strings,
+// accounting for embedded newlines (e.g. multi-line splash, wrapped help).
+func countLines(rows []string) int {
+	n := 0
+	for _, r := range rows {
+		n += strings.Count(r, "\n") + 1
+	}
+	return n
+}
+
+// renderSlashSuggestions renders the line above the input. Two states:
+//
+//   - Help mode: once the user has typed a recognised command (with or
+//     without trailing args), show that command's Help text — gives them
+//     the usage signature mid-typing, before they hit Enter.
+//
+//   - Completion mode: prefix matches against the registry, displayed as a
+//     two-tone strip (typed prefix in bright amber, completion tail in cyan)
+//     with a `tab to complete` hint.
+//
+// Returns the empty string when the input isn't a slash command.
+func (m Model) renderSlashSuggestions() string {
+	val := m.input.Value()
+	if !strings.HasPrefix(val, "/") || len(val) < 2 {
+		return ""
+	}
+
+	// Help mode: the first whitespace-delimited token, if it's a registered
+	// command (or alias), overrides completion with the usage signature.
+	firstWord := strings.TrimPrefix(val, "/")
+	if i := strings.IndexAny(firstWord, " \t"); i >= 0 {
+		firstWord = firstWord[:i]
+	}
+	if cmd, ok := m.registry.Lookup(firstWord); ok && cmd.Help != "" {
+		// Wrap help text to terminal width with hanging indent so the
+		// continuation lines align under the help text rather than the
+		// command name prefix.
+		head := "  " + m.styles.Accent.Render("/"+cmd.Name) +
+			m.styles.BorderDim.Render("   ·   ")
+		prefixW := lipgloss.Width(head)
+		wrapW := m.width - prefixW
+		if wrapW < 20 {
+			wrapW = 20
+		}
+		wrappedHelp := lipgloss.NewStyle().Width(wrapW).Render(cmd.Help)
+		lines := strings.Split(wrappedHelp, "\n")
+		for i := range lines {
+			styled := m.styles.Muted.Render(lines[i])
+			if i == 0 {
+				lines[i] = head + styled
+			} else {
+				lines[i] = strings.Repeat(" ", prefixW) + styled
+			}
+		}
+		return strings.Join(lines, "\n")
+	}
+
+	matches := m.registry.PrefixMatches(val)
+	if len(matches) == 0 {
+		return ""
+	}
+	typed := strings.TrimPrefix(val, "/")
+	var pieces []string
+	for _, n := range matches {
+		// Color the typed prefix in bright amber so the user sees "this is
+		// what you typed"; the completion tail in info-cyan so it reads as
+		// "here's what would be added."
+		var b strings.Builder
+		b.WriteString(m.styles.Bright.Render("/" + n[:len(typed)]))
+		if len(n) > len(typed) {
+			b.WriteString(m.styles.Info.Render(n[len(typed):]))
+		}
+		pieces = append(pieces, b.String())
+	}
+	hint := "  " + strings.Join(pieces, "  ") +
+		m.styles.BorderDim.Render("   ·   ") + m.styles.Muted.Render("tab to complete")
+	return hint
+}
+
+func (m Model) renderHeader() string {
+	// Brand + model stay anchored on the left edge. When a session title is
+	// present, we center the title-with-fade across the full terminal width
+	// — independent of the left section's width — so it sits at the visual
+	// center of the bar regardless of how long the brand/model strip is.
+	left := lipgloss.JoinHorizontal(lipgloss.Left,
+		m.styles.Primary.Render("▓▓ CERCANO"),
+		m.styles.Muted.Render(" v0.1.0"),
+		m.styles.BorderDim.Render("  ·  "),
+		m.styles.Accent.Render(m.lastModel),
+	)
+	if m.sessionTitle == "" {
+		return lipgloss.NewStyle().Width(m.width).Render(left)
+	}
+
+	title := m.styles.Info.Render("░▒▓ ") +
+		m.styles.Info.Render(m.sessionTitle) +
+		m.styles.Info.Render(" ▓▒░")
+
+	leftW := lipgloss.Width(left)
+	titleW := lipgloss.Width(title)
+
+	// Centered start position for the title across the full bar.
+	titleStart := (m.width - titleW) / 2
+	gapBefore := titleStart - leftW
+	if gapBefore < 2 {
+		// Left section is too wide for the title to be fully centered.
+		// Push the title past the left content with a minimal gap so it
+		// stays readable rather than overlapping.
+		gapBefore = 2
+	}
+	usedAfter := leftW + gapBefore + titleW
+	gapAfter := m.width - usedAfter
+	if gapAfter < 0 {
+		gapAfter = 0
+	}
+	return left + strings.Repeat(" ", gapBefore) + title + strings.Repeat(" ", gapAfter)
+}
+
+func (m Model) renderStatus() string {
+	if m.streaming {
+		return lipgloss.NewStyle().Width(m.width).Render(m.styles.Accent.Render("⟳ streaming"))
+	}
+	cloudPart := ""
+	switch m.cloudState {
+	case "NONE":
+		cloudPart = m.styles.BorderDim.Render("  ·  ") + m.styles.Muted.Render("cloud:") + m.styles.Error.Render(" NONE")
+	case "ok":
+		cloudPart = m.styles.BorderDim.Render("  ·  ") + m.styles.Muted.Render("cloud:") + m.styles.Success.Render(" ok")
+	}
+	parts := []string{
+		m.renderContextMeter(),
+		m.styles.BorderDim.Render("  ·  "),
+		m.styles.Muted.Render(fmt.Sprintf("turn %d↑/%d↓", m.tokIn, m.tokOut)),
+		m.styles.BorderDim.Render("  ·  "),
+		m.styles.Accent.Render(m.lastModel),
+		cloudPart,
+		m.styles.BorderDim.Render("  ·  "),
+		m.styles.Muted.Render("/help for cmds"),
+	}
+	return lipgloss.NewStyle().Width(m.width).Render(strings.Join(parts, ""))
+}
+
+func (m Model) renderContextMeter() string {
+	used := m.cumIn + m.cumOut
+	max := m.modelMaxTokens
+	if max <= 0 {
+		max = 1
+	}
+	pct := float64(used) / float64(max)
+	if pct > 1 {
+		pct = 1
+	}
+	const cells = 20
+	fillN := int(pct * float64(cells))
+	bar := m.styles.MeterFill.Render(strings.Repeat("█", fillN)) +
+		m.styles.MeterEmpty.Render(strings.Repeat("░", cells-fillN))
+	pctStyle := m.styles.Muted
+	switch {
+	case pct >= 0.9:
+		pctStyle = m.styles.Error
+	case pct >= 0.7:
+		pctStyle = m.styles.Warn
+	}
+	return strings.Join([]string{
+		m.styles.Muted.Render("ctx "),
+		bar,
+		m.styles.Muted.Render(" "),
+		m.styles.Accent.Render(formatTokens(used)),
+		m.styles.BorderDim.Render("/"),
+		m.styles.Muted.Render(formatTokens(max)),
+		m.styles.Muted.Render(" "),
+		pctStyle.Render(fmt.Sprintf("%d%%", int(pct*100))),
+	}, "")
+}
+
+// formatTokens renders 21400 → "21.4k", 1247 → "1.2k", 412 → "412".
+func formatTokens(n int) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	return fmt.Sprintf("%.1fk", float64(n)/1000)
+}
+
+
+// QuitAfter exposes a tea.Cmd for the main package to fire if it wants to wrap
+// startup with a confirmation. Currently unused; reserved for future.
+func QuitAfter() tea.Cmd { return tea.Quit }

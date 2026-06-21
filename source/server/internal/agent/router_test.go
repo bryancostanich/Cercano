@@ -176,7 +176,7 @@ providers:
 
 	embedder := &mockEmbedder{responses: mockResponses}
 
-	router, err := NewSmartRouter(mockLocal, mockCloud, "nomic-embed-text", embedder, tmpFile.Name(), func(ctx context.Context, provider, model, apiKey string) (ModelProvider, error) {
+	router, err := NewSmartRouter(mockLocal, mockCloud, "nomic-embed-text", embedder, tmpFile.Name(), func(ctx context.Context, provider, model, apiKey, baseURL string) (ModelProvider, error) {
 		return &MockModelProvider{name: provider}, nil
 	})
 	if err != nil {

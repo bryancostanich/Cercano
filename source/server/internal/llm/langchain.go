@@ -44,7 +44,11 @@ func resolveModel(provider, model string) string {
 }
 
 // NewCloudModelProvider creates a new cloud model provider based on the type.
-func NewCloudModelProvider(ctx context.Context, provider, model, apiKey string) (*CloudModelProvider, error) {
+// baseURL is optional; when set with the anthropic provider, requests go to
+// that endpoint instead of api.anthropic.com (used by Meridian and other
+// Anthropic-compatible proxies). An empty apiKey is accepted only when
+// baseURL is set — the proxy is expected to handle auth.
+func NewCloudModelProvider(ctx context.Context, provider, model, apiKey, baseURL string) (*CloudModelProvider, error) {
 	model = resolveModel(provider, model)
 
 	var llm llms.Model
@@ -54,7 +58,19 @@ func NewCloudModelProvider(ctx context.Context, provider, model, apiKey string) 
 	case "google":
 		llm, err = googleai.New(ctx, googleai.WithAPIKey(apiKey), googleai.WithDefaultModel(model))
 	case "anthropic":
-		llm, err = anthropic.New(anthropic.WithToken(apiKey), anthropic.WithModel(model))
+		opts := []anthropic.Option{anthropic.WithModel(model)}
+		if apiKey != "" {
+			opts = append(opts, anthropic.WithToken(apiKey))
+		} else {
+			// langchaingo's anthropic adapter wants a non-empty token; the
+			// proxy will ignore it. Use a literal placeholder so the SDK
+			// doesn't refuse to construct.
+			opts = append(opts, anthropic.WithToken("dummy"))
+		}
+		if baseURL != "" {
+			opts = append(opts, anthropic.WithBaseURL(baseURL))
+		}
+		llm, err = anthropic.New(opts...)
 	default:
 		return nil, fmt.Errorf("unsupported cloud provider: %s", provider)
 	}

@@ -57,6 +57,26 @@ func (m *mockAgentClient) UpdateConfig(ctx context.Context, in *proto.UpdateConf
 	return &proto.UpdateConfigResponse{Success: true, Message: "Configuration updated"}, m.configErr
 }
 
+func (m *mockAgentClient) GetConfig(ctx context.Context, in *proto.GetConfigRequest, opts ...grpc.CallOption) (*proto.GetConfigResponse, error) {
+	return &proto.GetConfigResponse{}, nil
+}
+
+func (m *mockAgentClient) ListConversations(ctx context.Context, in *proto.ListConversationsRequest, opts ...grpc.CallOption) (*proto.ListConversationsResponse, error) {
+	return &proto.ListConversationsResponse{}, nil
+}
+
+func (m *mockAgentClient) ResumeConversation(ctx context.Context, in *proto.ResumeConversationRequest, opts ...grpc.CallOption) (*proto.ResumeConversationResponse, error) {
+	return &proto.ResumeConversationResponse{}, nil
+}
+
+func (m *mockAgentClient) DeleteConversation(ctx context.Context, in *proto.DeleteConversationRequest, opts ...grpc.CallOption) (*proto.DeleteConversationResponse, error) {
+	return &proto.DeleteConversationResponse{Ok: true}, nil
+}
+
+func (m *mockAgentClient) RenameConversation(ctx context.Context, in *proto.RenameConversationRequest, opts ...grpc.CallOption) (*proto.RenameConversationResponse, error) {
+	return &proto.RenameConversationResponse{Ok: true}, nil
+}
+
 func (m *mockAgentClient) ListSkills(ctx context.Context, in *proto.ListSkillsRequest, opts ...grpc.CallOption) (*proto.ListSkillsResponse, error) {
 	if m.skillsResp != nil {
 		return m.skillsResp, m.skillsErr

@@ -15,6 +15,19 @@ service Agent {
   // UpdateConfig updates runtime configuration (model, provider) without server restart.
   rpc UpdateConfig (UpdateConfigRequest) returns (UpdateConfigResponse) {}
 
+  // GetConfig returns the current runtime config. API key is reported as a
+  // presence bool only — the literal value never leaves the agent.
+  rpc GetConfig (GetConfigRequest) returns (GetConfigResponse) {}
+
+  // Persisted-conversation surface: /history picker calls ListConversations;
+  // selecting a row calls ResumeConversation; deleting a row (future) calls
+  // DeleteConversation. Resume rehydrates the in-memory session store on the
+  // agent so the next chat turn sees full prior context.
+  rpc ListConversations (ListConversationsRequest) returns (ListConversationsResponse) {}
+  rpc ResumeConversation (ResumeConversationRequest) returns (ResumeConversationResponse) {}
+  rpc DeleteConversation (DeleteConversationRequest) returns (DeleteConversationResponse) {}
+  rpc RenameConversation (RenameConversationRequest) returns (RenameConversationResponse) {}
+
   // ListModels returns the models available on the active Ollama instance.
   rpc ListModels (ListModelsRequest) returns (ListModelsResponse) {}
 
@@ -62,6 +75,10 @@ message UpdateConfigRequest {
   string cloud_model = 3;    // Cloud model name (e.g., "gemini-1.5-flash", "claude-3-opus")
   string cloud_api_key = 4;  // API key for the cloud provider
   string ollama_url = 5;     // Ollama endpoint URL (e.g., "http://mac-studio.local:11434")
+  // Anthropic-compatible proxy URL (e.g., "http://127.0.0.1:3456" for Meridian).
+  // When set, used as the baseURL for the anthropic client; api_key may be empty
+  // because the proxy handles auth (Claude Max OAuth in Meridian's case).
+  string cloud_base_url = 6;
 }
 
 // Runtime configuration update response.
@@ -78,6 +95,10 @@ message ProcessRequestResponse {
   string validation_errors = 4; // Optional captured validation errors (e.g. test failures)
   int32 input_tokens = 5; // Prompt tokens consumed
   int32 output_tokens = 6; // Completion tokens generated
+  // Non-fatal informational message from the agent (e.g. "cloud was unavailable —
+  // answered locally"). Clients render this as a system entry so the user always
+  // knows when routing did something different than the SmartRouter requested.
+  string notice = 7;
 }
 
 // Represents a change to a specific file.
@@ -119,6 +140,64 @@ message ListModelsResponse {
 }
 
 // Request to list available Agent Skills.
+// GetConfig returns the current runtime config to the caller. The API key
+// is reported as a presence bool only — the literal value never leaves the
+// agent so a curious client can't dump someone else's secrets.
+// Conversation is the persisted summary returned by ListConversations.
+message Conversation {
+  string id = 1;
+  string title = 2;
+  string project_dir = 3;
+  string model = 4;
+  int64  started_at = 5;        // unix seconds
+  int64  last_turn_at = 6;
+  int32  turn_count = 7;
+}
+
+// PersistedTurn is one stored role-emission returned by Resume.
+message PersistedTurn {
+  string id = 1;
+  string conversation_id = 2;
+  string role = 3;              // "user" | "assistant" | "system"
+  string content = 4;
+  int32  tokens_in = 5;
+  int32  tokens_out = 6;
+  int32  latency_ms = 7;
+  int64  created_at = 8;
+}
+
+message ListConversationsRequest {
+  string project_dir = 1;       // empty matches all
+  int32  limit = 2;             // 0 = no cap
+}
+message ListConversationsResponse {
+  repeated Conversation conversations = 1;
+}
+
+message ResumeConversationRequest  { string conversation_id = 1; }
+message ResumeConversationResponse { repeated PersistedTurn turns = 1; }
+
+message DeleteConversationRequest  { string conversation_id = 1; }
+message DeleteConversationResponse { bool ok = 1; }
+
+message RenameConversationRequest  { string conversation_id = 1; string title = 2; }
+message RenameConversationResponse { bool ok = 1; }
+
+message GetConfigRequest {}
+message GetConfigResponse {
+  string ollama_url = 1;
+  string local_model = 2;
+  string embedding_model = 3;
+  string cloud_provider = 4;
+  string cloud_model = 5;
+  string cloud_base_url = 6;
+  bool   cloud_api_key_set = 7;
+  // Last observed cloud state: "ok", "absent", "error". Reflects whether the
+  // most recent turn succeeded; useful for surfacing in the CLI status bar.
+  string cloud_state = 8;
+  string port = 9;
+}
+
 message ListSkillsRequest {}
 
 // A single skill in the catalog.

@@ -18,7 +18,7 @@ func TestCloudModelProvider_Integration_Gemini(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	provider, err := NewCloudModelProvider(ctx, "google", "gemini-3-flash-preview", apiKey)
+	provider, err := NewCloudModelProvider(ctx, "google", "gemini-3-flash-preview", apiKey, "")
 	if err != nil {
 		t.Fatalf("Failed to create Gemini provider: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestCloudModelProvider_Integration_Anthropic(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	provider, err := NewCloudModelProvider(ctx, "anthropic", "claude-3-haiku-20240307", apiKey)
+	provider, err := NewCloudModelProvider(ctx, "anthropic", "claude-3-haiku-20240307", apiKey, "")
 	if err != nil {
 		t.Fatalf("Failed to create Anthropic provider: %v", err)
 	}

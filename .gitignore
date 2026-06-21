@@ -38,3 +38,6 @@ source/server/bin/
 source/server/agent
 scratch/
 test/sandbox/
+
+# Brainstorm/visual-companion session artifacts (per-session, regenerated)
+.superpowers/

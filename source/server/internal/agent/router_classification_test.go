@@ -58,7 +58,7 @@ func TestRouter_ClassifiesUnitTestGenerationAsLocal(t *testing.T) {
 	embedder := &mockEmbedder{responses: mockResponses}
 
 	// Initialize Router with mocked client
-	r, err := NewSmartRouter(localProvider, cloudProvider, "nomic-embed-text", embedder, "prototypes.yaml", func(ctx context.Context, provider, model, apiKey string) (ModelProvider, error) {
+	r, err := NewSmartRouter(localProvider, cloudProvider, "nomic-embed-text", embedder, "prototypes.yaml", func(ctx context.Context, provider, model, apiKey, baseURL string) (ModelProvider, error) {
 		return &MockModelProvider{name: provider}, nil
 	})
 	if err != nil {

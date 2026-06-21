@@ -21,7 +21,10 @@ import (
 	"time"
 
 	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/cli/agentclient"
+	cliui "cercano/source/server/internal/cli/ui"
 	"cercano/source/server/internal/config"
+	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/dispatch/builtin"
 	"cercano/source/server/internal/engine"
@@ -34,6 +37,8 @@ import (
 	"cercano/source/server/internal/tools"
 	"cercano/source/server/internal/update"
 	"cercano/source/server/pkg/proto"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/adk/session"
@@ -97,23 +102,39 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 
 	localProvider := llm.NewLocalModelProvider(ollamaEng, cfg.LocalModel)
 
-	var cloudProvider agent.ModelProvider = llm.NewMockProvider("CloudModel")
-	if cfg.CloudAPIKey != "" && cfg.CloudProvider != "" {
+	// Cloud provider: only construct a real one when there's enough config to
+	// actually reach a cloud. Otherwise return a sentinel that auto-degrades
+	// to local at turn time with a visible scrollback notice. No silent mock.
+	var cloudProvider agent.ModelProvider
+	canConfigureCloud := cfg.CloudProvider != "" && (cfg.CloudAPIKey != "" || cfg.CloudBaseURL != "")
+	if canConfigureCloud {
 		fmt.Fprintf(os.Stderr, "Initializing Cloud Provider (%s)...\n", cfg.CloudProvider)
-		cp, err := llm.NewCloudModelProvider(context.Background(), cfg.CloudProvider, cfg.CloudModel, cfg.CloudAPIKey)
+		if cfg.CloudBaseURL != "" {
+			fmt.Fprintf(os.Stderr, "  baseURL: %s\n", cfg.CloudBaseURL)
+		}
+		cp, err := llm.NewCloudModelProvider(context.Background(), cfg.CloudProvider, cfg.CloudModel, cfg.CloudAPIKey, cfg.CloudBaseURL)
 		if err == nil {
 			cloudProvider = cp
 		} else {
-			fmt.Fprintf(os.Stderr, "Failed to init Cloud Provider: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Failed to init Cloud Provider: %v — cloud routing will degrade to local.\n", err)
+			cloudProvider = llm.NewAbsentCloudProvider("provider init failed: " + err.Error())
 		}
+	}
+	if cloudProvider == nil {
+		reason := "no API key or base URL configured"
+		if cfg.CloudProvider == "" {
+			reason = "no provider selected"
+		}
+		cloudProvider = llm.NewAbsentCloudProvider(reason)
+		fmt.Fprintf(os.Stderr, "Cloud provider absent (%s); routing will degrade to local with notice.\n", reason)
 	}
 
 	validator := tools.NewAutoValidator(tools.DefaultLoader(), tools.DefaultKindToValidator())
 	sessionSvc := session.InMemoryService()
 	coordinator := loop.NewADKCoordinator(localProvider, cloudProvider, validator, sessionSvc)
 
-	cloudFactory := func(ctx context.Context, provider, model, apiKey string) (agent.ModelProvider, error) {
-		return llm.NewCloudModelProvider(ctx, provider, model, apiKey)
+	cloudFactory := func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.ModelProvider, error) {
+		return llm.NewCloudModelProvider(ctx, provider, model, apiKey, baseURL)
 	}
 
 	// SmartRouter is built lazily on first use. This keeps MCP-only deployments
@@ -126,7 +147,26 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	lazyRouter := agent.NewLazyRouter(routerFactory, localProvider, cloudProvider)
 
 	convStore := agent.NewConversationStore(sessionSvc, 3)
-	orchestrator := agent.NewAgent(lazyRouter, coordinator, agent.WithConversationStore(convStore))
+
+	// Persistent SQLite-backed conversation store for /history and /resume.
+	// If the open fails (disk full, perms), log and continue without
+	// persistence — the agent still works for transient turns.
+	var persistentStore conversation.Store
+	if path, err := conversation.DefaultPath(); err == nil {
+		if ps, err := conversation.Open(path); err == nil {
+			persistentStore = ps
+			fmt.Fprintf(os.Stderr, "Conversation store: %s\n", path)
+		} else {
+			fmt.Fprintf(os.Stderr, "[WARN] Failed to open conversation store at %s: %v — /history & /resume disabled.\n", path, err)
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "[WARN] Could not resolve conversation store path: %v — /history & /resume disabled.\n", err)
+	}
+
+	orchestrator := agent.NewAgent(lazyRouter, coordinator,
+		agent.WithConversationStore(convStore),
+		agent.WithPersistentStore(persistentStore),
+	)
 
 	lis, err := net.Listen("tcp", bindAddr)
 	if err != nil {
@@ -152,7 +192,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 }
 
 func main() {
-	// Handle subcommands before flag parsing
+	// Handle subcommands before flag parsing.
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "setup":
@@ -179,6 +219,17 @@ func main() {
 		case "stats":
 			runStats()
 			return
+		case "agent":
+			// Explicit server mode: starts the gRPC agent in the foreground.
+			// Used by `cercano-cli` auto-launch and by IDE extensions that want
+			// to manage the server lifecycle themselves.
+			cfg, err := config.Load(config.DefaultPath())
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[WARN] Failed to load config: %v (using defaults)\n", err)
+				cfg = config.Defaults()
+			}
+			runServerMode(cfg)
+			return
 		}
 	}
 
@@ -186,6 +237,10 @@ func main() {
 	grpcAddr := flag.String("grpc-addr", "", "Address of an external gRPC server (MCP-only, no embedded server)")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	showStats := flag.Bool("stats", false, "Print usage statistics and exit")
+	forceServer := flag.Bool("server", false, "Force server mode (equivalent to `cercano agent`)")
+	forceCLI := flag.Bool("cli", false, "Force CLI mode even when stdin is not a terminal")
+	resumeOnStart := flag.Bool("r", false, "Open the conversation history picker on launch (alias for --resume)")
+	resumeLong := flag.Bool("resume", false, "Open the conversation history picker on launch")
 	flag.Parse()
 
 	if *showVersion {
@@ -207,17 +262,67 @@ func main() {
 		return
 	}
 
-	// Load config
+	// Load config (server + CLI both need it).
 	cfg, err := config.Load(config.DefaultPath())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[WARN] Failed to load config: %v (using defaults)\n", err)
 		cfg = config.Defaults()
 	}
 
-	if *mcpMode {
+	openHistory := *resumeOnStart || *resumeLong
+	switch {
+	case *mcpMode:
 		runMCPMode(cfg, *grpcAddr)
-	} else {
+	case *forceServer:
 		runServerMode(cfg)
+	case *forceCLI:
+		runCLI(cfg, openHistory)
+	case isInteractiveStdin():
+		// Real terminal invocation → the user wants the CLI.
+		runCLI(cfg, openHistory)
+	default:
+		// Spawned by another process (VS Code extension, MCP host wrapper,
+		// systemd, etc.) → run the gRPC server in the foreground so the
+		// parent process gets what it expects.
+		runServerMode(cfg)
+	}
+}
+
+// isInteractiveStdin reports whether stdin is connected to a character device,
+// i.e. a real terminal. Returns false for pipes, files, sockets, and the
+// no-TTY contexts that VS Code's extension host, MCP stdio hosts, and CI
+// runners use to spawn child processes. Forces CLI mode → server mode when
+// nothing's there to drive a TUI.
+func isInteractiveStdin() bool {
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
+// runCLI launches the cercano TUI. Connects to a running agent on
+// localhost:<cfg.Port>, or auto-launches one (as `cercano agent`) on miss.
+// openHistoryOnStart opens the /history picker immediately after first paint
+// (used by the -r / --resume flag).
+func runCLI(cfg config.Config, openHistoryOnStart bool) {
+	addr := "localhost:" + cfg.Port
+	fmt.Fprintln(os.Stderr, "cercano: connecting to", addr+"…")
+	ag, err := agentclient.Dial(context.Background(), addr)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "cercano:", err)
+		os.Exit(1)
+	}
+	defer ag.Close()
+	if ag.AutoLaunched {
+		fmt.Fprintln(os.Stderr, "cercano: auto-launched agent server (log:", ag.ServerLog+")")
+	}
+
+	m := cliui.New(ag, openHistoryOnStart)
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, "cercano:", err)
+		os.Exit(1)
 	}
 }
 

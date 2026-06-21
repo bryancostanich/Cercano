@@ -20,6 +20,7 @@ import (
 // and *agent.LazyRouter satisfy this.
 type RouterCloudUpdater interface {
 	SetCloudProvider(p agent.ModelProvider)
+	GetModelProviders() map[string]agent.ModelProvider
 }
 
 // Server is the gRPC server for the Agent service.
@@ -93,24 +94,49 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		fmt.Printf("UpdateConfig: Local model set to %s\n", req.LocalModel)
 	}
 
-	if req.CloudApiKey != "" && req.CloudProvider != "" {
+	// Cloud provider rebuild: any of provider / model / api_key / base_url
+	// changes is enough to want a rebuild. We require provider to be set
+	// (existing or new) and at least one of api_key / base_url so we don't
+	// silently land back on the absent sentinel.
+	wantCloudRebuild := req.CloudProvider != "" || req.CloudModel != "" || req.CloudApiKey != "" || req.CloudBaseUrl != ""
+	if wantCloudRebuild {
+		provider := req.CloudProvider
+		if provider == "" {
+			provider = s.currentConfig.CloudProvider
+		}
 		model := req.CloudModel
 		if model == "" {
-			model = "gemini-3-flash" // sensible default
+			model = s.currentConfig.CloudModel
 		}
-
-		provider, err := s.cloudFactory(ctx, req.CloudProvider, model, req.CloudApiKey)
+		apiKey := req.CloudApiKey
+		if apiKey == "" {
+			apiKey = s.currentConfig.CloudAPIKey
+		}
+		baseURL := req.CloudBaseUrl
+		if baseURL == "" {
+			baseURL = s.currentConfig.CloudBaseURL
+		}
+		if provider == "" || (apiKey == "" && baseURL == "") {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: "cloud config incomplete: need cloud_provider and at least one of cloud_api_key / cloud_base_url",
+			}, nil
+		}
+		cp, err := s.cloudFactory(ctx, provider, model, apiKey, baseURL)
 		if err != nil {
 			return &proto.UpdateConfigResponse{
 				Success: false,
 				Message: fmt.Sprintf("failed to create cloud provider: %v", err),
 			}, nil
 		}
-
-		s.router.SetCloudProvider(provider)
-		s.coordinator.SetCloudProvider(provider)
-		changes = append(changes, fmt.Sprintf("cloud_provider=%s/%s", req.CloudProvider, model))
-		fmt.Printf("UpdateConfig: Cloud provider set to %s/%s\n", req.CloudProvider, model)
+		s.router.SetCloudProvider(cp)
+		s.coordinator.SetCloudProvider(cp)
+		summary := fmt.Sprintf("%s/%s", provider, model)
+		if baseURL != "" {
+			summary += " @ " + baseURL
+		}
+		changes = append(changes, "cloud="+summary)
+		fmt.Printf("UpdateConfig: Cloud provider set to %s\n", summary)
 	}
 
 	if len(changes) == 0 {
@@ -137,6 +163,9 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		if req.CloudApiKey != "" {
 			s.currentConfig.CloudAPIKey = req.CloudApiKey
 		}
+		if req.CloudBaseUrl != "" {
+			s.currentConfig.CloudBaseURL = req.CloudBaseUrl
+		}
 		if err := config.Save(s.currentConfig, s.configPath); err != nil {
 			fmt.Printf("UpdateConfig: warning — failed to persist config: %v\n", err)
 		}
@@ -145,6 +174,93 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	return &proto.UpdateConfigResponse{
 		Success: true,
 		Message: fmt.Sprintf("updated: [%s]", strings.Join(changes, ", ")),
+	}, nil
+}
+
+// ListConversations implements proto.AgentServer — returns persisted
+// conversation summaries for the /history picker.
+func (s *Server) ListConversations(ctx context.Context, req *proto.ListConversationsRequest) (*proto.ListConversationsResponse, error) {
+	infos, err := s.agent.ListConversations(ctx, req.GetProjectDir(), int(req.GetLimit()))
+	if err != nil {
+		return nil, err
+	}
+	out := &proto.ListConversationsResponse{Conversations: make([]*proto.Conversation, 0, len(infos))}
+	for _, i := range infos {
+		out.Conversations = append(out.Conversations, &proto.Conversation{
+			Id:         i.ID,
+			Title:      i.Title,
+			ProjectDir: i.ProjectDir,
+			Model:      i.Model,
+			StartedAt:  i.StartedAt.Unix(),
+			LastTurnAt: i.LastTurnAt.Unix(),
+			TurnCount:  int32(i.TurnCount),
+		})
+	}
+	return out, nil
+}
+
+// ResumeConversation implements proto.AgentServer — loads persisted turns
+// for a conversation, rehydrates the in-memory session store, returns the
+// turns so the CLI can render them in scrollback.
+func (s *Server) ResumeConversation(ctx context.Context, req *proto.ResumeConversationRequest) (*proto.ResumeConversationResponse, error) {
+	turns, err := s.agent.ResumeConversation(ctx, req.GetConversationId())
+	if err != nil {
+		return nil, err
+	}
+	out := &proto.ResumeConversationResponse{Turns: make([]*proto.PersistedTurn, 0, len(turns))}
+	for _, t := range turns {
+		out.Turns = append(out.Turns, &proto.PersistedTurn{
+			Id:             t.ID,
+			ConversationId: t.ConversationID,
+			Role:           t.Role,
+			Content:        t.Content,
+			TokensIn:       int32(t.TokensIn),
+			TokensOut:      int32(t.TokensOut),
+			LatencyMs:      int32(t.LatencyMs),
+			CreatedAt:      t.CreatedAt.Unix(),
+		})
+	}
+	return out, nil
+}
+
+// DeleteConversation implements proto.AgentServer.
+func (s *Server) DeleteConversation(ctx context.Context, req *proto.DeleteConversationRequest) (*proto.DeleteConversationResponse, error) {
+	if err := s.agent.DeleteConversation(ctx, req.GetConversationId()); err != nil {
+		return nil, err
+	}
+	return &proto.DeleteConversationResponse{Ok: true}, nil
+}
+
+// RenameConversation implements proto.AgentServer.
+func (s *Server) RenameConversation(ctx context.Context, req *proto.RenameConversationRequest) (*proto.RenameConversationResponse, error) {
+	if err := s.agent.RenameConversation(ctx, req.GetConversationId(), req.GetTitle()); err != nil {
+		return nil, err
+	}
+	return &proto.RenameConversationResponse{Ok: true}, nil
+}
+
+// GetConfig implements proto.AgentServer — reports the current runtime config
+// without exposing the literal API key. cloud_state is derived from the active
+// cloud provider's Name() ("NONE" → "absent", everything else → "ok").
+func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*proto.GetConfigResponse, error) {
+	state := "absent"
+	if s.router != nil {
+		if cp, ok := s.router.GetModelProviders()["CloudModel"]; ok && cp != nil {
+			if cp.Name() != "NONE" {
+				state = "ok"
+			}
+		}
+	}
+	return &proto.GetConfigResponse{
+		OllamaUrl:      s.currentConfig.OllamaURL,
+		LocalModel:     s.currentConfig.LocalModel,
+		EmbeddingModel: s.currentConfig.EmbeddingModel,
+		CloudProvider:  s.currentConfig.CloudProvider,
+		CloudModel:     s.currentConfig.CloudModel,
+		CloudBaseUrl:   s.currentConfig.CloudBaseURL,
+		CloudApiKeySet: s.currentConfig.CloudAPIKey != "",
+		CloudState:     state,
+		Port:           s.currentConfig.Port,
 	}, nil
 }
 
@@ -246,6 +362,7 @@ func (s *Server) mapResponse(response *agent.Response) *proto.ProcessRequestResp
 	// to be valid UTF-8 and will fail marshaling otherwise.
 	protoRes := &proto.ProcessRequestResponse{
 		Output: strings.ToValidUTF8(response.Output, "\uFFFD"),
+		Notice: response.Notice,
 	}
 
 	if len(response.FileChanges) > 0 {

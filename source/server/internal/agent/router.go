@@ -78,6 +78,11 @@ type Response struct {
 	ValidationErrors string // New field for rich feedback
 	InputTokens      int    // Prompt tokens consumed (from Ollama prompt_eval_count)
 	OutputTokens     int    // Completion tokens generated (from Ollama eval_count)
+	// Notice carries a non-fatal informational message produced by the agent
+	// (e.g. "cloud was unavailable — answered locally"). Clients render it as
+	// a system message in the scrollback so the user always knows when routing
+	// did something different than the SmartRouter requested.
+	Notice string
 }
 
 // FileChange represents a change to a specific file.
@@ -108,7 +113,9 @@ type Router interface {
 }
 
 // CloudFactory defines a function that creates a Cloud Model Provider.
-type CloudFactory func(ctx context.Context, provider, model, apiKey string) (ModelProvider, error)
+// baseURL is optional; when non-empty it overrides the provider's default
+// endpoint (used by Meridian and other Anthropic-compatible local proxies).
+type CloudFactory func(ctx context.Context, provider, model, apiKey, baseURL string) (ModelProvider, error)
 
 const (
 	similarityThreshold   = 0.50

@@ -14,7 +14,7 @@ func TestCloudModelProvider_Interface(t *testing.T) {
 func TestNewCloudModelProvider_Gemini(t *testing.T) {
 	ctx := context.Background()
 	// Test creating a Gemini provider (without real initialization for now)
-	provider, err := NewCloudModelProvider(ctx, "google", "gemini-1.5-pro", "fake-key")
+	provider, err := NewCloudModelProvider(ctx, "google", "gemini-1.5-pro", "fake-key", "")
 	if err != nil {
 		t.Fatalf("Failed to create provider: %v", err)
 	}
@@ -26,7 +26,7 @@ func TestNewCloudModelProvider_Gemini(t *testing.T) {
 
 func TestNewCloudModelProvider_Anthropic(t *testing.T) {
 	ctx := context.Background()
-	provider, err := NewCloudModelProvider(ctx, "anthropic", "claude-3-opus", "fake-key")
+	provider, err := NewCloudModelProvider(ctx, "anthropic", "claude-3-opus", "fake-key", "")
 	if err != nil {
 		t.Fatalf("Failed to create provider: %v", err)
 	}

@@ -1,0 +1,131 @@
+package slash
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"cercano/source/server/internal/cli/agentclient"
+)
+
+// RegisterConfig wires /config and /cloud against the supplied client.
+// Both commands are algorithmic — parsing is prefix-match, dispatch routes
+// directly to UpdateConfig / GetConfig RPCs with no LLM involvement.
+func RegisterConfig(r *Registry, c *agentclient.Client) {
+	r.Register(Command{
+		Name: "config",
+		Help: "View or update runtime config. Usage: /config [key value]. Keys: local-model, cloud-provider, cloud-model, cloud-api-key, cloud-base-url, ollama-url.",
+		Handler: func(args []string) Result {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			if len(args) == 0 {
+				// Open the interactive editor.
+				return Result{Kind: ResultOpenConfigEditor}
+			}
+			// One-arg form: `/config show` prints current state without
+			// opening the editor (handy for piping or scripted use).
+			if len(args) == 1 && args[0] == "show" {
+				cfg, err := c.GetConfig(ctx)
+				if err != nil {
+					return Result{Kind: ResultText, Text: "config: " + err.Error()}
+				}
+				return Result{Kind: ResultText, Text: formatConfig(cfg)}
+			}
+			if len(args) < 2 {
+				return Result{Kind: ResultText, Text: "usage: /config <key> <value>, /config show, or /config alone for the editor"}
+			}
+			key := args[0]
+			value := strings.Join(args[1:], " ")
+
+			var update agentclient.ConfigUpdate
+			switch key {
+			case "local-model", "local_model":
+				update.LocalModel = value
+			case "ollama-url", "ollama_url":
+				update.OllamaURL = value
+			case "cloud-provider", "cloud_provider":
+				update.CloudProvider = value
+			case "cloud-model", "cloud_model":
+				update.CloudModel = value
+			case "cloud-api-key", "cloud_api_key":
+				update.CloudAPIKey = value
+			case "cloud-base-url", "cloud_base_url":
+				update.CloudBaseURL = value
+			default:
+				return Result{Kind: ResultText, Text: "unknown config key /" + key + " (valid: local-model, ollama-url, cloud-provider, cloud-model, cloud-api-key, cloud-base-url)"}
+			}
+			msg, err := c.UpdateConfig(ctx, update)
+			if err != nil {
+				return Result{Kind: ResultText, Text: "config update failed: " + err.Error()}
+			}
+			return Result{Kind: ResultText, Text: msg}
+		},
+	})
+
+	r.Register(Command{
+		Name: "cloud",
+		Help: "Show current cloud config (provider, model, baseURL, key state, last-turn cloud status).",
+		Handler: func(args []string) Result {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			cfg, err := c.GetConfig(ctx)
+			if err != nil {
+				return Result{Kind: ResultText, Text: "cloud: " + err.Error()}
+			}
+			return Result{Kind: ResultText, Text: formatCloud(cfg)}
+		},
+	})
+}
+
+func formatConfig(cfg *agentclient.Config) string {
+	var b strings.Builder
+	b.WriteString("current config:\n")
+	b.WriteString("  ollama-url:      ")
+	b.WriteString(orDash(cfg.OllamaURL))
+	b.WriteString("\n  local-model:     ")
+	b.WriteString(orDash(cfg.LocalModel))
+	b.WriteString("\n  embedding-model: ")
+	b.WriteString(orDash(cfg.EmbeddingModel))
+	b.WriteString("\n  cloud-provider:  ")
+	b.WriteString(orDash(cfg.CloudProvider))
+	b.WriteString("\n  cloud-model:     ")
+	b.WriteString(orDash(cfg.CloudModel))
+	b.WriteString("\n  cloud-base-url:  ")
+	b.WriteString(orDash(cfg.CloudBaseURL))
+	b.WriteString("\n  cloud-api-key:   ")
+	if cfg.CloudAPIKeySet {
+		b.WriteString("(set)")
+	} else {
+		b.WriteString("(unset)")
+	}
+	b.WriteString("\n  cloud-state:     ")
+	b.WriteString(cfg.CloudState)
+	b.WriteString("\n  port:            ")
+	b.WriteString(orDash(cfg.Port))
+	return b.String()
+}
+
+func formatCloud(cfg *agentclient.Config) string {
+	if cfg.CloudProvider == "" {
+		return "cloud: not configured. Set cloud-provider, then cloud-base-url and/or cloud-api-key."
+	}
+	endpoint := "default endpoint"
+	if cfg.CloudBaseURL != "" {
+		endpoint = cfg.CloudBaseURL
+	}
+	auth := "no api key"
+	if cfg.CloudAPIKeySet {
+		auth = "api key set"
+	}
+	return fmt.Sprintf("cloud: %s / %s @ %s (%s)  ·  last-turn state: %s",
+		cfg.CloudProvider, orDash(cfg.CloudModel), endpoint, auth, cfg.CloudState)
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
+}

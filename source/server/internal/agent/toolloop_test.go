@@ -25,7 +25,51 @@ func (m *mockProvider) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatR
 	return out, nil
 }
 func (m *mockProvider) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.StreamReader, error) {
-	return nil, nil
+	if m.calls >= len(m.scripts) {
+		return nil, fmt.Errorf("mockProvider: no script for call %d", m.calls)
+	}
+	blocks := m.scripts[m.calls]
+	m.calls++
+	return &scriptedStream{events: blocksToEvents(blocks)}, nil
+}
+
+type scriptedStream struct {
+	events []llm.StreamEvent
+	idx    int
+}
+
+func (s *scriptedStream) Next() (llm.StreamEvent, bool, error) {
+	if s.idx >= len(s.events) {
+		return llm.StreamEvent{}, false, nil
+	}
+	ev := s.events[s.idx]
+	s.idx++
+	return ev, true, nil
+}
+
+func (s *scriptedStream) Close() error { return nil }
+
+func blocksToEvents(blocks []llm.Block) []llm.StreamEvent {
+	events := []llm.StreamEvent{{Type: llm.EventMessageStart}}
+	for _, b := range blocks {
+		switch b.Type {
+		case llm.BlockText:
+			events = append(events, llm.StreamEvent{
+				Type: llm.EventTextDelta, TextDelta: b.Text,
+			})
+		case llm.BlockToolUse:
+			events = append(events, llm.StreamEvent{
+				Type:      llm.EventToolUseStart,
+				ToolUseID: b.ToolUseID, ToolName: b.ToolName,
+			})
+			events = append(events, llm.StreamEvent{
+				Type: llm.EventToolUseInputDelta, TextDelta: string(b.ToolInput),
+			})
+			events = append(events, llm.StreamEvent{Type: llm.EventToolUseStop})
+		}
+	}
+	events = append(events, llm.StreamEvent{Type: llm.EventMessageStop, StopReason: "end_turn"})
+	return events
 }
 
 func TestToolLoop_PlainText_TerminatesImmediately(t *testing.T) {

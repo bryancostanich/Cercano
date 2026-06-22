@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"path/filepath"
 	"testing"
 
 	"cercano/source/server/internal/llm"
@@ -62,5 +63,25 @@ func TestParseMode(t *testing.T) {
 	}
 	if _, err := ParseMode("garbage"); err == nil {
 		t.Errorf("expected error for garbage mode")
+	}
+}
+
+func TestPermissionStore_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "permissions.yaml")
+	s, err := LoadPermissionStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Mode() != ModePermissive {
+		t.Errorf("default mode should be permissive, got %s", s.Mode())
+	}
+	if err := s.SetMode(ModeStrict); err != nil {
+		t.Fatal(err)
+	}
+	// reload
+	s2, _ := LoadPermissionStore(path)
+	if s2.Mode() != ModeStrict {
+		t.Errorf("mode did not persist: %s", s2.Mode())
 	}
 }

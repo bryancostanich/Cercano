@@ -1104,7 +1104,7 @@ func (m *Model) relayout() {
 	if bodyH < 3 {
 		bodyH = 3
 	}
-	m.viewport.SetWidth(contentW - 1) // reserve the right column for the scrollbar
+	m.viewport.SetWidth(contentW - 2) // reserve two right columns: a gap + the scrollbar
 	m.viewport.SetHeight(bodyH)
 	m.input.SetWidth(contentW - 4)
 	m.refreshViewport()
@@ -1217,12 +1217,23 @@ func (m *Model) renderAssistantMarkdown(e *Entry, textW int) string {
 	blocks, tail := render.SplitBlocks(e.Content)
 	var parts []string
 	for _, b := range blocks {
-		parts = append(parts, m.renderMdBlock(b, textW))
+		s := m.renderMdBlock(b, textW)
+		// A blank line before a heading gives it breathing room — but not when
+		// the heading is the very first thing in the reply.
+		if len(parts) > 0 && isHeadingBlock(b) {
+			s = "\n" + s
+		}
+		parts = append(parts, s)
 	}
 	if strings.TrimSpace(tail) != "" {
 		parts = append(parts, m.md.RenderLive(closeOpenFence(tail), textW))
 	}
 	return strings.Join(parts, "\n")
+}
+
+// isHeadingBlock reports whether a prose block leads with an ATX heading marker.
+func isHeadingBlock(b render.MdBlock) bool {
+	return b.Kind == render.MdProse && strings.HasPrefix(strings.TrimSpace(b.Raw), "#")
 }
 
 func (m *Model) renderMdBlock(b render.MdBlock, textW int) string {
@@ -1830,6 +1841,7 @@ func (m Model) renderViewportWithScrollbar() string {
 		contentLine := m.viewport.YOffset() + i
 		line = m.renderSelectionOnLine(line, contentLine)
 		b.WriteString(line)
+		b.WriteString(" ") // one-column gap so content doesn't touch the scrollbar
 		// Guard against any row-count mismatch between the rendered body and
 		// the computed column.
 		if i < len(col) {

@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"os/exec"
+	"runtime"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -144,7 +146,7 @@ func (m Model) handleSelectionKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		}
 		m.clearSelection()
 		m.selectionNotice = "copied selection"
-		return m, tea.SetClipboard(text), true
+		return m, selectionClipboardCmd(text), true
 	}
 	if isSelectionCopyKey(msg) {
 		text := m.selectedText()
@@ -154,7 +156,7 @@ func (m Model) handleSelectionKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		}
 		m.clearSelection()
 		m.selectionNotice = "copied selection"
-		return m, tea.SetClipboard(text), true
+		return m, selectionClipboardCmd(text), true
 	}
 
 	// Let navigation keys keep the selection while the viewport scrolls. If the
@@ -172,6 +174,22 @@ func isSelectionCopyKey(msg tea.KeyPressMsg) bool {
 		return false
 	}
 	return key.Mod.Contains(tea.ModSuper) || key.Mod.Contains(tea.ModMeta)
+}
+
+func selectionClipboardCmd(text string) tea.Cmd {
+	return tea.Batch(tea.SetClipboard(text), pbcopyCmd(text))
+}
+
+func pbcopyCmd(text string) tea.Cmd {
+	return func() tea.Msg {
+		if runtime.GOOS != "darwin" {
+			return nil
+		}
+		cmd := exec.Command("pbcopy")
+		cmd.Stdin = strings.NewReader(text)
+		_ = cmd.Run()
+		return nil
+	}
 }
 
 func (m Model) selectedText() string {

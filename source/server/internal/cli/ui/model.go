@@ -477,7 +477,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if text := m.selectedText(); text != "" {
 				m.selectionNotice = "copied selection"
 				m.scrollbarDragging = false
-				return m, tea.SetClipboard(text)
+				return m, selectionClipboardCmd(text)
 			}
 		}
 		m.scrollbarDragging = false

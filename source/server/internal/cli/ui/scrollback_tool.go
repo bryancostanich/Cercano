@@ -91,13 +91,13 @@ func renderToolEntry(e ToolEntry, width int, focused bool) string {
 	case ToolStatusInProgress:
 		statusBit = toolEntryFaint.Render("…")
 	case ToolStatusComplete:
-		statusBit = toolEntrySuccess.Render("✓ " + e.ResultSummary)
+		statusBit = toolEntrySuccess.Render("✓ " + flattenSummary(e.ResultSummary))
 	case ToolStatusError:
-		statusBit = toolEntryError.Render("⚠ " + e.ResultSummary)
+		statusBit = toolEntryError.Render("⚠ " + flattenSummary(e.ResultSummary))
 	}
 
 	line := fmt.Sprintf("%s%s %s %s   %s",
-		gutter, marker, e.ToolName, toolEntryFaint.Render(e.ArgsSummary), statusBit)
+		gutter, marker, e.ToolName, toolEntryFaint.Render(flattenSummary(e.ArgsSummary)), statusBit)
 
 	if e.Folded {
 		return line
@@ -111,6 +111,14 @@ func renderToolEntry(e ToolEntry, width int, focused bool) string {
 		body = append(body, "    "+indentToolBody(e.FullResult, "    "))
 	}
 	return strings.Join(body, "\n")
+}
+
+// flattenSummary collapses a tool summary to a single line: newlines, tabs and
+// runs of whitespace become single spaces. The folded tool entry is one line,
+// so an embedded newline (e.g. a Bash result's "$ cmd\n[exit=...]") would
+// otherwise leak a second, un-indented fragment into scrollback.
+func flattenSummary(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // indentToolBody prefixes every line after the first in s with prefix.

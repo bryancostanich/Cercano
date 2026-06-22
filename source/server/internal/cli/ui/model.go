@@ -95,7 +95,17 @@ type Model struct {
 	selection          textSelection
 	selectionNotice    string
 	input              textarea.Model
-	streamCh           <-chan agentclient.StreamMsg
+
+	// inputHistory holds every submitted prompt (messages and slash commands),
+	// oldest first, for shell-style ↑/↓ recall. historyIdx is the browse
+	// position: len(inputHistory) means "at the live input". historyStash holds
+	// the unsubmitted input saved when browsing begins, restored on ↓ past the
+	// newest entry.
+	inputHistory []string
+	historyIdx   int
+	historyStash string
+
+	streamCh <-chan agentclient.StreamMsg
 	streaming          bool
 
 	tokIn, tokOut  int
@@ -733,6 +743,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.InsertString("\n")
 			m.relayout()
 			return m, nil
+		case "up":
+			// On the first line, ↑ recalls the previous submitted input (shell
+			// style); otherwise it falls through to move the cursor up.
+			if m.input.Line() == 0 && m.recallHistoryPrev() {
+				return m, nil
+			}
+		case "down":
+			// On the last line, ↓ steps forward through history; otherwise it
+			// falls through to move the cursor down.
+			if m.input.Line() == m.input.LineCount()-1 && m.recallHistoryNext() {
+				return m, nil
+			}
 		}
 		var cmd tea.Cmd
 		prevVal := m.input.Value()
@@ -855,6 +877,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) submit(text string) (tea.Model, tea.Cmd) {
+	// Record for ↑/↓ history recall (skip consecutive duplicates), and reset
+	// the browse position back to the live input.
+	if n := len(m.inputHistory); n == 0 || m.inputHistory[n-1] != text {
+		m.inputHistory = append(m.inputHistory, text)
+	}
+	m.historyIdx = len(m.inputHistory)
+	m.historyStash = ""
+
 	if strings.HasPrefix(text, "/") {
 		next, cmd := m.runSlash(text)
 		return next, cmd
@@ -879,6 +909,50 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 	// Fire both the stream drainer and the progress-text animator; both
 	// re-issue themselves until streaming ends.
 	return m, tea.Batch(waitForStream(ch), progressAnimTick())
+}
+
+// recallHistoryPrev steps the prompt back to an older submitted input. Returns
+// true if it consumed the key (recalled, or already at the oldest entry).
+func (m *Model) recallHistoryPrev() bool {
+	n := len(m.inputHistory)
+	if n == 0 {
+		return false
+	}
+	switch {
+	case m.historyIdx >= n: // at the live input — stash it, jump to newest
+		m.historyStash = m.input.Value()
+		m.historyIdx = n - 1
+	case m.historyIdx == 0: // already oldest
+		return true
+	default:
+		m.historyIdx--
+	}
+	m.setInputValue(m.inputHistory[m.historyIdx])
+	return true
+}
+
+// recallHistoryNext steps the prompt forward toward newer submitted inputs, then
+// back to the stashed live input. Returns true if it consumed the key.
+func (m *Model) recallHistoryNext() bool {
+	n := len(m.inputHistory)
+	if n == 0 || m.historyIdx >= n { // not browsing
+		return false
+	}
+	m.historyIdx++
+	if m.historyIdx >= n { // stepped past the newest — restore the live input
+		m.setInputValue(m.historyStash)
+		return true
+	}
+	m.setInputValue(m.inputHistory[m.historyIdx])
+	return true
+}
+
+// setInputValue replaces the prompt contents, parks the cursor at the end, and
+// re-fits the layout (recalled history may be multi-line).
+func (m *Model) setInputValue(s string) {
+	m.input.SetValue(s)
+	m.input.CursorEnd()
+	m.relayout()
 }
 
 func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {

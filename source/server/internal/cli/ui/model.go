@@ -124,6 +124,12 @@ type Model struct {
 	// startup fetch (permissionModeMsg) and by the /strict /permissive
 	// /bypass /mode slash handlers.
 	permissionMode string
+
+	// focusedToolIdx points into m.entries at the tool entry the user is
+	// currently navigating; -1 means the input box owns focus (default). Esc
+	// on empty input enters nav mode at the most recent tool entry; up/down
+	// cycle, enter/tab toggle Folded, esc returns to input.
+	focusedToolIdx int
 }
 
 // pendingToolCall is a queued tool invocation awaiting user confirmation.
@@ -193,6 +199,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 		modelMaxTokens: 128_000, // placeholder until the agent serves real ctx limits
 		openHistoryOnStart: openHistoryOnStart,
 		promptBorderColor:  p.Accent,
+		focusedToolIdx:     -1,
 	}
 }
 
@@ -389,6 +396,64 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.historyActive = false
 			}
 			return m, cmd
+		}
+		// Tool-entry navigation mode: focus is on a scrollback tool entry
+		// rather than the input box. Up/down cycle (clamped at edges),
+		// enter/tab toggle Folded, esc returns to input. Any other key
+		// returns to input and is then handled by the normal input path.
+		if m.focusedToolIdx >= 0 {
+			switch msg.Type {
+			case tea.KeyUp:
+				indices := m.toolEntryIndices()
+				for i, idx := range indices {
+					if idx == m.focusedToolIdx {
+						if i > 0 {
+							m.focusedToolIdx = indices[i-1]
+							m.refreshViewport()
+						}
+						break
+					}
+				}
+				return m, nil
+			case tea.KeyDown:
+				indices := m.toolEntryIndices()
+				for i, idx := range indices {
+					if idx == m.focusedToolIdx {
+						if i < len(indices)-1 {
+							m.focusedToolIdx = indices[i+1]
+							m.refreshViewport()
+						}
+						break
+					}
+				}
+				return m, nil
+			case tea.KeyEnter, tea.KeyTab:
+				if m.focusedToolIdx < len(m.entries) && m.entries[m.focusedToolIdx].Tool != nil {
+					m.entries[m.focusedToolIdx].Tool.Folded = !m.entries[m.focusedToolIdx].Tool.Folded
+					m.refreshViewport()
+				}
+				return m, nil
+			case tea.KeyEsc:
+				m.focusedToolIdx = -1
+				m.refreshViewport()
+				return m, nil
+			}
+			// Any other key (typing) drops nav mode and falls through to
+			// normal input handling so the character actually lands in the
+			// input box.
+			m.focusedToolIdx = -1
+			m.refreshViewport()
+			// fall through
+		}
+		// Esc on empty input enters tool-entry navigation mode, focusing the
+		// most-recent tool entry. No-op when scrollback has no tool entries.
+		if msg.Type == tea.KeyEsc && m.input.Value() == "" {
+			indices := m.toolEntryIndices()
+			if len(indices) > 0 {
+				m.focusedToolIdx = indices[len(indices)-1]
+				m.refreshViewport()
+				return m, nil
+			}
 		}
 		// Ctrl-C semantics: clear the input first; if input was already
 		// empty, arm a quit-on-next-Ctrl-C state. Any other key disarms.
@@ -610,6 +675,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.sessionTitle = ""
 		m.cumIn = 0
 		m.cumOut = 0
+		m.focusedToolIdx = -1
 		m.refreshViewport()
 	case slash.ResultOpenConfigEditor:
 		ed, _ := newConfigEditor(m.agent, m.palette, m.styles, m.width, m.height)
@@ -781,6 +847,19 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 	return m, waitForStream(m.streamCh)
 }
 
+// toolEntryIndices returns the m.entries positions of every tool-call entry,
+// in order. Used by the up/down nav handlers to cycle focus among tool entries
+// while skipping prose / system entries.
+func (m Model) toolEntryIndices() []int {
+	var out []int
+	for i, e := range m.entries {
+		if e.Tool != nil {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
 // findToolEntry returns the ToolEntry whose ToolUseID matches id, or nil if
 // no such entry exists. Used by the stream-event handlers to update an
 // in-flight tool-call line as it transitions through use-stop → exec-start →
@@ -869,7 +948,7 @@ func (m *Model) refreshViewport() {
 	wasAtBottom := m.viewport.AtBottom()
 	var b strings.Builder
 	for i, e := range m.entries {
-		b.WriteString(m.renderEntry(e))
+		b.WriteString(m.renderEntry(e, i))
 		if i < len(m.entries)-1 {
 			b.WriteString("\n")
 		}
@@ -882,7 +961,7 @@ func (m *Model) refreshViewport() {
 
 const entryIndent = 2
 
-func (m *Model) renderEntry(e *Entry) string {
+func (m *Model) renderEntry(e *Entry, idx int) string {
 	wrapW := m.viewport.Width
 	if wrapW < 10 {
 		wrapW = 10
@@ -897,7 +976,7 @@ func (m *Model) renderEntry(e *Entry) string {
 	// marker + status glyph. Indented to match the prose left-margin so the
 	// scrollback's vertical rhythm stays consistent.
 	if e.Tool != nil {
-		return indentBlock(pad, renderToolEntry(*e.Tool, textW))
+		return indentBlock(pad, renderToolEntry(*e.Tool, textW, idx == m.focusedToolIdx))
 	}
 
 	switch e.Role {
@@ -1117,6 +1196,7 @@ func (m Model) applyResume(conversationID string) Model {
 	m.entries = nil
 	m.cumIn = 0
 	m.cumOut = 0
+	m.focusedToolIdx = -1
 	m.splashShown = false
 	for _, t := range turns {
 		role := RoleSystem

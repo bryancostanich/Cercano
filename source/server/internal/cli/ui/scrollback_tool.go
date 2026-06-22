@@ -69,12 +69,21 @@ var (
 //
 // width is reserved for future wrapping; V1 does not wrap because the args
 // summary + result summary are pre-trimmed by the caller.
-func renderToolEntry(e ToolEntry, width int) string {
+//
+// focused renders a left-margin caret in the accent color so the user can see
+// which entry the up/down nav cursor is currently on. When false, a two-space
+// gutter holds the slot so toggling fold doesn't shift the body horizontally.
+func renderToolEntry(e ToolEntry, width int, focused bool) string {
 	_ = width // reserved for follow-up: wrap long lines to terminal width
 
 	marker := "▸"
 	if !e.Folded {
 		marker = "▾"
+	}
+
+	gutter := "  "
+	if focused {
+		gutter = lipgloss.NewStyle().Foreground(theme.Cracker().Accent).Render("▶ ")
 	}
 
 	var statusBit string
@@ -87,8 +96,8 @@ func renderToolEntry(e ToolEntry, width int) string {
 		statusBit = toolEntryError.Render("⚠ " + e.ResultSummary)
 	}
 
-	line := fmt.Sprintf("%s %s %s   %s",
-		marker, e.ToolName, toolEntryFaint.Render(e.ArgsSummary), statusBit)
+	line := fmt.Sprintf("%s%s %s %s   %s",
+		gutter, marker, e.ToolName, toolEntryFaint.Render(e.ArgsSummary), statusBit)
 
 	if e.Folded {
 		return line
@@ -96,10 +105,10 @@ func renderToolEntry(e ToolEntry, width int) string {
 
 	body := []string{line}
 	if e.FullArgs != "" {
-		body = append(body, toolEntryFaint.Render("  args: "+e.FullArgs))
+		body = append(body, toolEntryFaint.Render("    args: "+e.FullArgs))
 	}
 	if e.FullResult != "" {
-		body = append(body, "  "+indentToolBody(e.FullResult, "  "))
+		body = append(body, "    "+indentToolBody(e.FullResult, "    "))
 	}
 	return strings.Join(body, "\n")
 }

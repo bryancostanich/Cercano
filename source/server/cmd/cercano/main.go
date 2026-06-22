@@ -191,6 +191,18 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	srv := server.NewServer(orchestrator, localProvider, lazyRouter, coordinator, cloudFactory, registry)
 	srv.SetConfigPersistence(config.DefaultPath(), cfg)
 	srv.SetToolRegistry(agenttools.DefaultRegistry())
+
+	// Permission store + pending-decisions barrier for the native tool-calling
+	// loop. Path mirrors config.yaml: ~/.config/cercano/permissions.yaml.
+	permsPath := filepath.Join(filepath.Dir(config.DefaultPath()), "permissions.yaml")
+	permStore, err := agent.LoadPermissionStore(permsPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] Failed to load permission store at %s: %v — defaulting to permissive in-memory store.\n", permsPath, err)
+		permStore, _ = agent.LoadPermissionStore(permsPath)
+	}
+	pending := agent.NewPendingDecisions()
+	srv.SetPermissions(permStore, pending)
+
 	proto.RegisterAgentServer(s, srv)
 
 	go func() {

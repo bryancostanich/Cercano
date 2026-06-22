@@ -13,6 +13,7 @@ import (
 	"cercano/source/server/internal/config"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/legacymodels"
+	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/loop"
 	"cercano/source/server/pkg/proto"
 )
@@ -38,11 +39,26 @@ type Server struct {
 	configPath          string             // path to config.yaml for persistence
 	currentConfig       config.Config      // current config state for persistence
 	toolRegistry        *agenttools.Registry
+	permStore           *agent.PermissionStore
+	pendingDecisions    *agent.PendingDecisions
+	cloudLLMProvider    llm.Provider
 }
 
 // SetToolRegistry attaches the agent's tool registry. The CLI's /tools and
 // /tool commands route through ListTools / InvokeTool RPCs to it.
 func (s *Server) SetToolRegistry(r *agenttools.Registry) { s.toolRegistry = r }
+
+// SetPermissions wires the permission store and pending-decisions barrier used
+// by the SetPermissionMode / GetPermissionMode / Allow|DenyToolCall RPCs.
+func (s *Server) SetPermissions(store *agent.PermissionStore, pending *agent.PendingDecisions) {
+	s.permStore = store
+	s.pendingDecisions = pending
+}
+
+// SetCloudLLMProvider attaches the native-tool-calling cloud provider used by
+// GetProviderCapabilities. Optional — when nil, GetProviderCapabilities falls
+// back to a hardcoded Anthropic-shaped capability snapshot.
+func (s *Server) SetCloudLLMProvider(p llm.Provider) { s.cloudLLMProvider = p }
 
 // NewServer creates a new Agent gRPC server.
 func NewServer(a *agent.Agent, localProvider *legacymodels.LocalModelProvider, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
@@ -437,6 +453,68 @@ func (s *Server) mapRequest(req *proto.ProcessRequestRequest) *agent.Request {
 		DirectLocal:    req.DirectLocal,
 		ModelOverride:  req.ModelOverride,
 	}
+}
+
+// SetPermissionMode implements proto.AgentServer.
+func (s *Server) SetPermissionMode(ctx context.Context, req *proto.SetPermissionModeRequest) (*proto.SetPermissionModeResponse, error) {
+	if s.permStore == nil {
+		return &proto.SetPermissionModeResponse{Ok: false, Error: "permission store not configured"}, nil
+	}
+	m, err := agent.ParseMode(req.GetMode())
+	if err != nil {
+		return &proto.SetPermissionModeResponse{Ok: false, Error: err.Error()}, nil
+	}
+	if err := s.permStore.SetMode(m); err != nil {
+		return &proto.SetPermissionModeResponse{Ok: false, Error: err.Error()}, nil
+	}
+	return &proto.SetPermissionModeResponse{Ok: true}, nil
+}
+
+// GetPermissionMode implements proto.AgentServer.
+func (s *Server) GetPermissionMode(ctx context.Context, req *proto.GetPermissionModeRequest) (*proto.GetPermissionModeResponse, error) {
+	if s.permStore == nil {
+		return &proto.GetPermissionModeResponse{Mode: string(agent.ModePermissive)}, nil
+	}
+	return &proto.GetPermissionModeResponse{Mode: string(s.permStore.Mode())}, nil
+}
+
+// AllowToolCall implements proto.AgentServer.
+func (s *Server) AllowToolCall(ctx context.Context, req *proto.AllowToolCallRequest) (*proto.AllowToolCallResponse, error) {
+	if s.pendingDecisions == nil {
+		return &proto.AllowToolCallResponse{Ok: false}, nil
+	}
+	ok := s.pendingDecisions.Resolve(req.GetToolUseId(), true)
+	return &proto.AllowToolCallResponse{Ok: ok}, nil
+}
+
+// DenyToolCall implements proto.AgentServer.
+func (s *Server) DenyToolCall(ctx context.Context, req *proto.DenyToolCallRequest) (*proto.DenyToolCallResponse, error) {
+	if s.pendingDecisions == nil {
+		return &proto.DenyToolCallResponse{Ok: false}, nil
+	}
+	ok := s.pendingDecisions.Resolve(req.GetToolUseId(), false)
+	return &proto.DenyToolCallResponse{Ok: ok}, nil
+}
+
+// GetProviderCapabilities implements proto.AgentServer.
+func (s *Server) GetProviderCapabilities(ctx context.Context, req *proto.GetProviderCapabilitiesRequest) (*proto.GetProviderCapabilitiesResponse, error) {
+	if s.cloudLLMProvider == nil {
+		return &proto.GetProviderCapabilitiesResponse{
+			SupportsTools:         true,
+			SupportsParallelTools: true,
+			SupportsCaching:       true,
+			SupportsVision:        true,
+			MaxToolsPerCall:       0,
+		}, nil
+	}
+	c := s.cloudLLMProvider.Capabilities()
+	return &proto.GetProviderCapabilitiesResponse{
+		SupportsTools:         c.SupportsTools,
+		SupportsParallelTools: c.SupportsParallelTools,
+		SupportsCaching:       c.SupportsCaching,
+		SupportsVision:        c.SupportsVision,
+		MaxToolsPerCall:       int32(c.MaxToolsPerCall),
+	}, nil
 }
 
 // MapResponseForTest exposes mapResponse for testing.

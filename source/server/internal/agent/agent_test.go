@@ -514,3 +514,15 @@ func TestAgent_ProcessRequest_NilConversationStore(t *testing.T) {
 		t.Errorf("expected original input, got %q", provider.capturedReq.Input)
 	}
 }
+
+type fakeRecap struct{ scheduled []string }
+
+func (f *fakeRecap) Schedule(id string) { f.scheduled = append(f.scheduled, id) }
+
+func TestWithRecapSchedulerStoresHook(t *testing.T) {
+	fr := &fakeRecap{}
+	a := NewAgent(nil, nil, WithRecapScheduler(fr))
+	if a.recap == nil {
+		t.Fatal("recap scheduler not attached")
+	}
+}

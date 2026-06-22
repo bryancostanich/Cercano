@@ -83,13 +83,17 @@ func buildHistoryRows(ag *agentclient.Client, currentID string) []overlay.Row {
 		if title == "" {
 			title = "(untitled)"
 		}
-		summary := fmt.Sprintf("%d turn", c.TurnCount)
+		meta := fmt.Sprintf("%d turn", c.TurnCount)
 		if c.TurnCount != 1 {
-			summary += "s"
+			meta += "s"
 		}
-		summary += " · " + relativeTime(c.LastTurnAt)
+		meta += " · " + relativeTime(c.LastTurnAt)
 		if c.Model != "" {
-			summary += " · " + c.Model
+			meta += " · " + c.Model
+		}
+		summary := meta
+		if c.Recap != "" {
+			summary = c.Recap + "  ·  " + meta
 		}
 		hint := ""
 		if c.ID == currentID {

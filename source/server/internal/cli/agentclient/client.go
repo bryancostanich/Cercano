@@ -25,7 +25,7 @@ import (
 type Client struct {
 	conn         *grpc.ClientConn
 	agent        proto.AgentClient
-	AutoLaunched bool // true if Dial spawned a new cercano process
+	AutoLaunched bool   // true if Dial spawned a new cercano process
 	ServerLog    string // path to the auto-launched server's log file, if any
 }
 
@@ -178,13 +178,15 @@ type ConfigUpdate struct {
 
 // ConversationInfo is a persisted conversation summary returned by ListConversations.
 type ConversationInfo struct {
-	ID         string
-	Title      string
-	ProjectDir string
-	Model      string
-	StartedAt  time.Time
-	LastTurnAt time.Time
-	TurnCount  int
+	ID             string
+	Title          string
+	ProjectDir     string
+	Model          string
+	StartedAt      time.Time
+	LastTurnAt     time.Time
+	TurnCount      int
+	Recap          string
+	RecapUpdatedAt time.Time
 }
 
 // PersistedTurn is one stored role-emission returned by ResumeConversation.
@@ -211,13 +213,15 @@ func (c *Client) ListConversations(ctx context.Context, projectDir string, limit
 	out := make([]ConversationInfo, 0, len(resp.GetConversations()))
 	for _, c := range resp.GetConversations() {
 		out = append(out, ConversationInfo{
-			ID:         c.GetId(),
-			Title:      c.GetTitle(),
-			ProjectDir: c.GetProjectDir(),
-			Model:      c.GetModel(),
-			StartedAt:  time.Unix(c.GetStartedAt(), 0),
-			LastTurnAt: time.Unix(c.GetLastTurnAt(), 0),
-			TurnCount:  int(c.GetTurnCount()),
+			ID:             c.GetId(),
+			Title:          c.GetTitle(),
+			ProjectDir:     c.GetProjectDir(),
+			Model:          c.GetModel(),
+			StartedAt:      time.Unix(c.GetStartedAt(), 0),
+			LastTurnAt:     time.Unix(c.GetLastTurnAt(), 0),
+			TurnCount:      int(c.GetTurnCount()),
+			Recap:          c.GetRecap(),
+			RecapUpdatedAt: time.Unix(c.GetRecapUpdatedAt(), 0),
 		})
 	}
 	return out, nil
@@ -259,6 +263,25 @@ func (c *Client) RenameConversation(ctx context.Context, conversationID, title s
 		Title:          title,
 	})
 	return err
+}
+
+// GetConversation fetches a single conversation's metadata including its recap.
+func (c *Client) GetConversation(ctx context.Context, conversationID string) (ConversationInfo, error) {
+	resp, err := c.agent.GetConversation(ctx, &proto.GetConversationRequest{ConversationId: conversationID})
+	if err != nil {
+		return ConversationInfo{}, err
+	}
+	return ConversationInfo{
+		ID:             resp.GetId(),
+		Title:          resp.GetTitle(),
+		ProjectDir:     resp.GetProjectDir(),
+		Model:          resp.GetModel(),
+		StartedAt:      time.Unix(resp.GetStartedAt(), 0),
+		LastTurnAt:     time.Unix(resp.GetLastTurnAt(), 0),
+		TurnCount:      int(resp.GetTurnCount()),
+		Recap:          resp.GetRecap(),
+		RecapUpdatedAt: time.Unix(resp.GetRecapUpdatedAt(), 0),
+	}, nil
 }
 
 // ToolInfo is the registry summary returned by ListTools.

@@ -91,6 +91,8 @@ type Model struct {
 	historyActive bool
 	history       historyPicker
 
+	recap string // living one-line work summary; shown in the chat footer
+
 	// convRef shares the current convID with the slash registry by reference,
 	// so /rename always targets whatever conversation the model currently has
 	// active (including after /resume).
@@ -317,6 +319,24 @@ func fetchContextUsage(ag *agentclient.Client, convID string) tea.Cmd {
 			return ctxUsageMsg{}
 		}
 		return ctxUsageMsg{Used: u.TokensUsed, Max: u.ModelMax, Percent: u.Percent}
+	}
+}
+
+type recapLoadedMsg struct{ recap string }
+
+// fetchRecap asks the agent for the conversation's latest living recap.
+func fetchRecap(ag *agentclient.Client, convID string) tea.Cmd {
+	return func() tea.Msg {
+		if convID == "" {
+			return recapLoadedMsg{}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		info, err := ag.GetConversation(ctx, convID)
+		if err != nil {
+			return recapLoadedMsg{}
+		}
+		return recapLoadedMsg{recap: info.Recap}
 	}
 }
 
@@ -552,6 +572,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case recapLoadedMsg:
+		m.recap = msg.recap
+		return m, nil
+
 	case configLoadedMsg:
 		if msg.LocalModel != "" {
 			m.lastModel = msg.LocalModel
@@ -598,7 +622,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Poll the agent for the authoritative context-window usage on the
 		// same conversation. Result arrives as a ctxUsageMsg and overrides
 		// the local cumIn approximation we incremented during streaming.
-		return m, fetchContextUsage(m.agent, m.convID)
+		return m, tea.Batch(fetchContextUsage(m.agent, m.convID), fetchRecap(m.agent, m.convID))
 
 	case banner.TickMsg:
 		// Gate forwarding on splashShown — when the splash is dismissed,
@@ -1214,6 +1238,11 @@ func (m Model) applyResume(conversationID string) Model {
 		m.cumOut += t.TokensOut
 	}
 	m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: fmt.Sprintf("⟲ resumed %d turn(s)", len(turns))})
+	// Surface the prior session's living recap as a one-line banner + footer.
+	if info, err := m.agent.GetConversation(ctx, conversationID); err == nil && info.Recap != "" {
+		m.recap = info.Recap
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "Recap: " + info.Recap})
+	}
 	m.relayout()
 	return m
 }
@@ -1405,6 +1434,9 @@ func (m Model) View() string {
 		parts = append(parts, m.history.View())
 	default:
 		parts = append(parts, m.viewport.View())
+		if m.recap != "" {
+			parts = append(parts, m.renderRecap())
+		}
 	}
 
 	promptLine := lipgloss.NewStyle().Foreground(m.promptBorderColor).Render(strings.Repeat("─", m.width))
@@ -1504,6 +1536,25 @@ func (m Model) renderSlashSuggestions() string {
 	hint := "  " + strings.Join(pieces, "  ") +
 		m.styles.BorderDim.Render("   ·   ") + m.styles.Muted.Render("tab to complete")
 	return hint
+}
+
+// renderRecap draws the living one-line work summary at the bottom of the
+// chat area, dimmed and truncated to terminal width. Only rendered in the
+// default (no-overlay) view.
+func (m Model) renderRecap() string {
+	label := m.styles.Muted.Render("recap ")
+	avail := m.width - lipgloss.Width(label)
+	if avail < 8 {
+		return ""
+	}
+	text := m.recap
+	if lipgloss.Width(text) > avail {
+		r := []rune(text)
+		if len(r) > avail-1 {
+			text = string(r[:avail-1]) + "…"
+		}
+	}
+	return label + m.styles.BorderDim.Render(text)
 }
 
 func (m Model) renderHeader() string {

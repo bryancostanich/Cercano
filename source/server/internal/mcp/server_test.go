@@ -77,6 +77,10 @@ func (m *mockAgentClient) RenameConversation(ctx context.Context, in *proto.Rena
 	return &proto.RenameConversationResponse{Ok: true}, nil
 }
 
+func (m *mockAgentClient) GetConversation(ctx context.Context, in *proto.GetConversationRequest, opts ...grpc.CallOption) (*proto.Conversation, error) {
+	return &proto.Conversation{}, nil
+}
+
 func (m *mockAgentClient) GetContextUsage(ctx context.Context, in *proto.GetContextUsageRequest, opts ...grpc.CallOption) (*proto.GetContextUsageResponse, error) {
 	return &proto.GetContextUsageResponse{}, nil
 }

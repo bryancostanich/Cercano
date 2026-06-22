@@ -35,6 +35,16 @@ func CrackerMarkdownStyle() ansi.StyleConfig {
 	sc.H2.Color = strp(mdBright)
 	sc.H3.Color = strp(mdBright)
 
+	// Drop the leading "#" markers — the bundled style encodes them as heading
+	// prefixes. Clear prefix/suffix on every level so headings show as styled
+	// text only.
+	for _, h := range []*ansi.StyleBlock{&sc.Heading, &sc.H1, &sc.H2, &sc.H3, &sc.H4, &sc.H5, &sc.H6} {
+		h.Prefix = ""
+		h.Suffix = ""
+		h.BlockPrefix = ""
+		h.BlockSuffix = ""
+	}
+
 	sc.Strong.Color = strp(mdBright)
 	sc.Strong.Bold = boolp(true)
 	sc.Emph.Italic = boolp(true)

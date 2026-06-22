@@ -295,6 +295,11 @@ func main() {
 			}
 			runServerMode(cfg)
 			return
+		case "run":
+			// Headless one-shot: sends a single prompt and streams the response.
+			// Intended for scripts and CI — no TTY, no UI.
+			runHeadless(os.Args[2:])
+			return
 		}
 	}
 

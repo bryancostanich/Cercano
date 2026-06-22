@@ -454,7 +454,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		var cmd tea.Cmd
-		m.viewport, cmd = m.viewport.Update(msg)
+		// When the prompt has grown multi-line and the pointer is over the
+		// bottom prompt region (below the viewport), scroll the textarea;
+		// otherwise scroll the chat scrollback.
+		if m.input.Height() > 1 && msg.Mouse().Y >= m.scrollbarTop+m.viewport.Height() {
+			m.input, cmd = m.input.Update(msg)
+		} else {
+			m.viewport, cmd = m.viewport.Update(msg)
+		}
 		return m, cmd
 
 	case tea.MouseClickMsg:

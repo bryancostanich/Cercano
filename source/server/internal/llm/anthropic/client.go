@@ -99,3 +99,22 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 	}
 	return out, nil
 }
+
+func (c *Client) StreamChat(ctx context.Context, req ChatRequest) (llm.StreamReader, error) {
+	params := sdk.MessageNewParams{
+		Model:     sdk.Model(req.Model),
+		MaxTokens: int64(req.MaxTokens),
+		Messages:  messagesToSDK(req.Messages),
+	}
+	if req.System != "" {
+		params.System = []sdk.TextBlockParam{{Text: req.System}}
+	}
+	if len(req.Tools) > 0 {
+		params.Tools = toolsToSDK(req.Tools)
+	}
+	if req.Temperature > 0 {
+		params.Temperature = sdk.Float(req.Temperature)
+	}
+	st := c.sdk.Messages.NewStreaming(ctx, params)
+	return &streamReader{stream: st, blockKind: map[int64]string{}}, nil
+}

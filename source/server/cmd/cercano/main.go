@@ -109,6 +109,16 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	// Cloud provider: only construct a real one when there's enough config to
 	// actually reach a cloud. Otherwise return a sentinel that auto-degrades
 	// to local at turn time with a visible scrollback notice. No silent mock.
+	//
+	// Dual-path note (native tool calling migration; see docs/plans/native_tool_calling.md):
+	//   - Anthropic cloud: StreamProcessRequest uses the new layered provider
+	//     wired below via srv.SetCloudLLMProvider (internal/llm/anthropic).
+	//     The legacymodels.NewCloudModelProvider built here remains as the
+	//     fallback path for the older ProcessRequestStream entrypoint.
+	//   - Other providers (Google, etc.) + local: legacy ModelProvider path
+	//     via langchaingo. internal/legacymodels/langchain.go stays in place
+	//     un-imported elsewhere; scheduled for cleanup once all providers
+	//     migrate to the layered interface.
 	var cloudProvider agent.ModelProvider
 	canConfigureCloud := cfg.CloudProvider != "" && (cfg.CloudAPIKey != "" || cfg.CloudBaseURL != "")
 	if canConfigureCloud {

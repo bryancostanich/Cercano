@@ -6,7 +6,6 @@
 package render
 
 import (
-	"sort"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -14,13 +13,11 @@ import (
 	"cercano/source/server/internal/cli/theme"
 )
 
-// Column declares one table column. Priority orders drop behavior: when the
-// table is too wide for the terminal, columns are dropped from lowest Priority
-// upward until the rest fits.
+// Column declares one table column. Wrappable marks the column whose cells may
+// wrap across multiple lines to help a wide table fit without losing data.
 type Column struct {
 	Name      string
-	Priority  int  // lower drops first
-	Wrappable bool // if true, this column is the one we truncate with `…` before transposing
+	Wrappable bool
 }
 
 // Table is the typed alternative to raw markdown tables. Rows are keyed by
@@ -30,53 +27,36 @@ type Table struct {
 	Rows []map[string]string
 }
 
-// Render returns a styled string fitting within maxWidth columns. Width-fit
-// rules (in order): drop lowest-priority columns → truncate the wrappable
-// column with `…` → transpose to key:value pairs. Always readable; never
-// scrambled.
-// minWrapWidth is the narrowest the wrappable column shrinks to before we'd
-// rather drop a column than wrap into an unreadable sliver.
+// minWrapWidth is the narrowest the wrappable column shrinks to before the table
+// gives up on a grid and transposes instead.
 const minWrapWidth = 12
 
+// Render returns a styled string that fits within maxWidth WITHOUT dropping any
+// data. It draws a grid when the columns fit — wrapping the wrappable column
+// across lines if that helps — and otherwise transposes to a lossless key:value
+// layout, one block per row. It never drops a column and never truncates a cell.
 func (t Table) Render(maxWidth int, styles theme.Styles) string {
 	if len(t.Cols) == 0 || len(t.Rows) == 0 {
 		return styles.Muted.Render("(empty table)")
 	}
 
-	// Start with all columns; drop in priority order until it fits.
-	cols := append([]Column(nil), t.Cols...)
-	dropped := []string{}
-
-	for {
-		widths := computeColWidths(cols, t.Rows)
-		total := totalGridWidth(widths)
-		if total <= maxWidth {
-			return renderGrid(cols, widths, t.Rows, styles, dropped)
-		}
-		// Shrink the wrappable column to the leftover width and let renderGrid
-		// WRAP its cells across multiple lines (never truncate). Only if even a
-		// readable minimum won't fit do we fall through to dropping a column.
-		if i := wrappableIdx(cols); i >= 0 && widths[i] > minWrapWidth {
-			over := total - maxWidth
-			newW := widths[i] - over
-			if newW < minWrapWidth {
-				newW = minWrapWidth
-			}
-			widths[i] = newW
-			total = totalGridWidth(widths)
-			if total <= maxWidth {
-				return renderGrid(cols, widths, t.Rows, styles, dropped)
-			}
-		}
-		// Drop the lowest-priority column.
-		idx := lowestPriorityIdx(cols)
-		if idx < 0 || len(cols) <= 1 {
-			break // can't drop further; fall through to transpose
-		}
-		dropped = append(dropped, cols[idx].Name)
-		cols = append(cols[:idx], cols[idx+1:]...)
+	widths := computeColWidths(t.Cols, t.Rows)
+	if totalGridWidth(widths) <= maxWidth {
+		return renderGrid(t.Cols, widths, t.Rows, styles)
 	}
-
+	// Try wrapping the wrappable column across lines to make the grid fit.
+	if i := wrappableIdx(t.Cols); i >= 0 && widths[i] > minWrapWidth {
+		over := totalGridWidth(widths) - maxWidth
+		newW := widths[i] - over
+		if newW < minWrapWidth {
+			newW = minWrapWidth
+		}
+		widths[i] = newW
+		if totalGridWidth(widths) <= maxWidth {
+			return renderGrid(t.Cols, widths, t.Rows, styles)
+		}
+	}
+	// Still too wide for a grid → responsive transpose; every column survives.
 	return renderTransposed(t.Cols, t.Rows, maxWidth, styles)
 }
 
@@ -117,20 +97,7 @@ func wrappableIdx(cols []Column) int {
 	return -1
 }
 
-func lowestPriorityIdx(cols []Column) int {
-	if len(cols) == 0 {
-		return -1
-	}
-	idx := 0
-	for i := 1; i < len(cols); i++ {
-		if cols[i].Priority < cols[idx].Priority {
-			idx = i
-		}
-	}
-	return idx
-}
-
-func renderGrid(cols []Column, widths []int, rows []map[string]string, styles theme.Styles, dropped []string) string {
+func renderGrid(cols []Column, widths []int, rows []map[string]string, styles theme.Styles) string {
 	var b strings.Builder
 
 	// Top border: ┌──┬──┐
@@ -183,12 +150,6 @@ func renderGrid(cols []Column, widths []int, rows []map[string]string, styles th
 
 	// Bottom border: └──┴──┘
 	b.WriteString(styles.Border.Render(borderRow("└", "┴", "┘", "─", widths)))
-
-	if len(dropped) > 0 {
-		sort.Strings(dropped)
-		b.WriteString("\n")
-		b.WriteString(styles.Muted.Render("(dropped: " + strings.Join(dropped, ", ") + ")"))
-	}
 	return b.String()
 }
 

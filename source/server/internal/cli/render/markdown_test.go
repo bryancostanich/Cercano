@@ -10,7 +10,7 @@ import (
 // These exercise matchTable's detection rules through SplitBlocks, which is the
 // only consumer now that InterceptMarkdownTables is retired.
 
-func TestTable_KeepsFirstColumnWhenNarrow(t *testing.T) {
+func TestTable_NarrowKeepsAllColumns(t *testing.T) {
 	in := "| Key | Mid | Desc |\n| --- | --- | --- |\n" +
 		"| K1 | M1 | a long explanatory field that forces the table to shrink |\n\nafter"
 	blocks, _ := SplitBlocks(in)
@@ -24,13 +24,16 @@ func TestTable_KeepsFirstColumnWhenNarrow(t *testing.T) {
 		t.Fatal("expected a table block")
 	}
 	out := stripAnsi(tbl.Render(22, theme.NewStyles(theme.Cracker())))
-	// The key column and its data must survive a narrow render.
-	if !strings.Contains(out, "Key") || !strings.Contains(out, "K1") {
-		t.Fatalf("first/key column was dropped: %q", out)
+	// A narrow render must drop nothing — every header (so every column) and the
+	// short cell values survive. (The long Desc value wraps across lines, which
+	// is fine — wrapping never loses data.)
+	for _, want := range []string{"Key", "Mid", "Desc", "K1", "M1"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q preserved at narrow width, got %q", want, out)
+		}
 	}
-	// It must never be the dropped one.
-	if strings.Contains(out, "dropped: Key") {
-		t.Fatalf("key column should be dropped last, never first: %q", out)
+	if strings.Contains(out, "dropped") {
+		t.Fatalf("no column should be dropped, got %q", out)
 	}
 }
 

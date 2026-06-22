@@ -10,8 +10,8 @@ import (
 func TestTable_FitsWidth_RendersGrid(t *testing.T) {
 	tbl := Table{
 		Cols: []Column{
-			{Name: "name", Priority: 10},
-			{Name: "size", Priority: 5},
+			{Name: "name"},
+			{Name: "size"},
 		},
 		Rows: []map[string]string{
 			{"name": "qwen", "size": "4.7GB"},
@@ -27,36 +27,34 @@ func TestTable_FitsWidth_RendersGrid(t *testing.T) {
 	}
 }
 
-func TestTable_TooWide_DropsLowestPriority(t *testing.T) {
+func TestTable_TooWide_DropsNothing(t *testing.T) {
 	tbl := Table{
 		Cols: []Column{
-			{Name: "essential", Priority: 100},
-			{Name: "secondary", Priority: 5},
+			{Name: "essential"},
+			{Name: "secondary"},
 		},
 		Rows: []map[string]string{
-			{"essential": "value-here", "secondary": "should-drop-first"},
+			{"essential": "VA", "secondary": "VB"},
 		},
 	}
-	out := tbl.Render(20, theme.NewStyles(theme.Cracker()))
-	plain := stripAnsi(out)
-	if !strings.Contains(plain, "essential") {
-		t.Errorf("essential column missing from output: %q", plain)
+	plain := stripAnsi(tbl.Render(20, theme.NewStyles(theme.Cracker())))
+	// No data is ever dropped — both columns and both values survive (the table
+	// transposes if it can't fit as a grid), and there is no "dropped" footnote.
+	for _, want := range []string{"essential", "VA", "secondary", "VB"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("expected %q preserved, got %q", want, plain)
+		}
 	}
-	// The dropped column's *data* should not appear in the data rows; the
-	// drop-footnote will still mention its name.
-	if strings.Contains(plain, "should-drop-first") {
-		t.Errorf("secondary column data should have been dropped: %q", plain)
-	}
-	if !strings.Contains(plain, "dropped: secondary") {
-		t.Errorf("drop footnote missing: %q", plain)
+	if strings.Contains(plain, "dropped") {
+		t.Errorf("nothing should be dropped, got %q", plain)
 	}
 }
 
-func TestTable_WrappableWrapsBeforeDropping(t *testing.T) {
+func TestTable_WrappableWrapsToFit(t *testing.T) {
 	tbl := Table{
 		Cols: []Column{
-			{Name: "id", Priority: 100},
-			{Name: "desc", Priority: 50, Wrappable: true},
+			{Name: "id"},
+			{Name: "desc", Wrappable: true},
 		},
 		Rows: []map[string]string{
 			{"id": "01", "desc": "a very long description that should wrap"},
@@ -87,8 +85,8 @@ func TestTable_TransposesWhenStillTooNarrow(t *testing.T) {
 	// forcing the transpose path.
 	tbl := Table{
 		Cols: []Column{
-			{Name: "primary-key-column", Priority: 100},
-			{Name: "secondary-data", Priority: 50},
+			{Name: "primary-key-column"},
+			{Name: "secondary-data"},
 		},
 		Rows: []map[string]string{
 			{"primary-key-column": "v1", "secondary-data": "v2"},

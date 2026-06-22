@@ -113,8 +113,9 @@ func TestPasteMsgInsertsIntoPrompt(t *testing.T) {
 	next, _ := m.Update(tea.PasteMsg{Content: "hello\nworld"})
 	got := next.(Model)
 
-	if got.input.Value() != "hello world" {
-		t.Fatalf("input.Value() = %q, want pasted text sanitized into prompt", got.input.Value())
+	// The prompt is a multi-line textarea now, so a pasted newline is preserved.
+	if got.input.Value() != "hello\nworld" {
+		t.Fatalf("input.Value() = %q, want pasted text inserted verbatim", got.input.Value())
 	}
 }
 

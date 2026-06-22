@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"cercano/source/server/internal/cli/theme"
 )
@@ -74,8 +75,6 @@ var (
 // which entry the up/down nav cursor is currently on. When false, a two-space
 // gutter holds the slot so toggling fold doesn't shift the body horizontally.
 func renderToolEntry(e ToolEntry, width int, focused bool) string {
-	_ = width // reserved for follow-up: wrap long lines to terminal width
-
 	marker := "▸"
 	if !e.Folded {
 		marker = "▾"
@@ -100,6 +99,13 @@ func renderToolEntry(e ToolEntry, width int, focused bool) string {
 		gutter, marker, e.ToolName, toolEntryFaint.Render(flattenSummary(e.ArgsSummary)), statusBit)
 
 	if e.Folded {
+		// Wrap (ANSI-aware) to the available width so a long args/result line
+		// flows onto continuation lines instead of being clipped at the edge.
+		// ansi.Wrap breaks on spaces and hard-breaks tokens longer than width
+		// (paths, JSON), so no line ever overflows.
+		if width > 0 && lipgloss.Width(line) > width {
+			return ansi.Wrap(line, width, "")
+		}
 		return line
 	}
 

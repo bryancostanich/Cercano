@@ -15,3 +15,14 @@ func TestInputCursorRow(t *testing.T) {
 		t.Fatalf("inputCursorRow = %d, want 7", got)
 	}
 }
+
+func TestInputCursorRowFirstEntry(t *testing.T) {
+	// inputIdx==0: input appended first in parts → cursor row is 0.
+	parts := []string{
+		"input here", // input → row 0
+	}
+	got := inputCursorRow(parts, 0)
+	if got != 0 {
+		t.Fatalf("inputCursorRow = %d, want 0", got)
+	}
+}

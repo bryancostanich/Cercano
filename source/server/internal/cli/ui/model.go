@@ -394,7 +394,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.ClearScreen
 
 	case tea.MouseWheelMsg:
-		if m.editorActive || m.historyActive {
+		if m.editorActive || m.historyActive || m.pendingConfirm != nil {
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -1467,6 +1467,7 @@ func (m Model) View() tea.View {
 	}
 	v := tea.NewView(out)
 	v.AltScreen = true
+	// Request baseline keyboard enhancements (Kitty-protocol key disambiguation). Zero value = no key release/repeat reporting; set ReportEventTypes if those are ever needed.
 	v.KeyboardEnhancements = tea.KeyboardEnhancements{}
 	v.MouseMode = tea.MouseModeCellMotion
 	// Drive the real terminal cursor to the input caret position. Only

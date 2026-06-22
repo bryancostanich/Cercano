@@ -213,6 +213,33 @@ func TestStore_Rename_MissingConvSilentNoOp(t *testing.T) {
 	}
 }
 
+func TestStore_AppendWithBlocksJSON_RoundTrip(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	if err := s.EnsureConversation(ctx, "c1", "/tmp", "claude"); err != nil {
+		t.Fatal(err)
+	}
+	blocks := `[{"type":"tool_use","id":"u1","name":"read_file","input":{"path":"main.go"}}]`
+	if err := s.Append(ctx, Turn{
+		ID: "t1", ConversationID: "c1", Role: "assistant",
+		Content: "", BlocksJSON: blocks, CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	turns, err := s.GetTurns(ctx, "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turns) != 1 || turns[0].BlocksJSON != blocks {
+		t.Errorf("blocks not round-tripped: %+v", turns)
+	}
+}
+
 func TestDeriveTitle(t *testing.T) {
 	cases := []struct {
 		in, want string

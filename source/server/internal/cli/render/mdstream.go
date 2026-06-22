@@ -6,15 +6,17 @@ import "strings"
 type MdKind int
 
 const (
-	MdProse MdKind = iota // prose, headings, lists, code fences — rendered via Glamour
+	MdProse MdKind = iota // prose, headings, lists — rendered via Glamour
 	MdTable               // a pipe-table — rendered via the responsive Table renderer
+	MdCode                // a fenced code block — Glamour-rendered, wrapped in rules
 )
 
 // MdBlock is one block of a streamed assistant reply.
 type MdBlock struct {
 	Kind  MdKind
-	Raw   string // markdown source (MdProse)
+	Raw   string // markdown source (MdProse / MdCode, fences included)
 	Table *Table // set when Kind == MdTable
+	Lang  string // fence info string (e.g. "go"); set when Kind == MdCode
 }
 
 // SplitBlocks splits markdown into completed blocks plus a trailing in-progress
@@ -35,7 +37,6 @@ func SplitBlocks(text string) (blocks []MdBlock, tail string) {
 	}
 
 	var cur []string
-	inFence := false
 
 	flushProse := func() {
 		if len(cur) > 0 {
@@ -47,29 +48,39 @@ func SplitBlocks(text string) (blocks []MdBlock, tail string) {
 	i := 0
 	for i < len(lines) {
 		line := lines[i]
+		trimmed := strings.TrimSpace(line)
 
-		if !inFence {
-			if mt, consumed := matchTable(lines, i); consumed > 0 && tableTerminated(lines, i, consumed, hadTrailingNL) {
+		// Fenced code block → its own block once the closing fence arrives.
+		if strings.HasPrefix(trimmed, "```") {
+			if lang, consumed := matchFence(lines, i); consumed > 0 {
 				flushProse()
-				tbl := mt.toTable()
 				blocks = append(blocks, MdBlock{
-					Kind:  MdTable,
-					Raw:   strings.Join(lines[i:i+consumed], "\n"),
-					Table: &tbl,
+					Kind: MdCode,
+					Raw:  strings.Join(lines[i:i+consumed], "\n"),
+					Lang: lang,
 				})
 				i += consumed
 				continue
 			}
+			// Unterminated fence — the rest is the still-streaming tail.
+			cur = append(cur, lines[i:]...)
+			break
 		}
 
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") {
-			inFence = !inFence
-			cur = append(cur, line)
-			i++
+		// Terminated pipe-table → its own block.
+		if mt, consumed := matchTable(lines, i); consumed > 0 && tableTerminated(lines, i, consumed, hadTrailingNL) {
+			flushProse()
+			tbl := mt.toTable()
+			blocks = append(blocks, MdBlock{
+				Kind:  MdTable,
+				Raw:   strings.Join(lines[i:i+consumed], "\n"),
+				Table: &tbl,
+			})
+			i += consumed
 			continue
 		}
-		if trimmed == "" && !inFence {
+
+		if trimmed == "" {
 			flushProse()
 			i++
 			continue
@@ -80,6 +91,24 @@ func SplitBlocks(text string) (blocks []MdBlock, tail string) {
 
 	tail = strings.Join(cur, "\n")
 	return blocks, tail
+}
+
+// matchFence consumes a fenced code block starting at lines[i] (an opening
+// ``` line). Returns the fence info string (language) and the number of lines
+// consumed including the closing fence, or 0 if no closing fence is present yet
+// (the block is still streaming).
+func matchFence(lines []string, i int) (lang string, consumed int) {
+	open := strings.TrimSpace(lines[i])
+	if !strings.HasPrefix(open, "```") {
+		return "", 0
+	}
+	lang = strings.TrimSpace(strings.TrimPrefix(open, "```"))
+	for j := i + 1; j < len(lines); j++ {
+		if strings.HasPrefix(strings.TrimSpace(lines[j]), "```") {
+			return lang, j - i + 1
+		}
+	}
+	return lang, 0
 }
 
 // tableTerminated reports whether a table starting at lines[i] spanning

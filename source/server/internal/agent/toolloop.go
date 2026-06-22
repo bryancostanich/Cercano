@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/llm"
@@ -106,7 +107,12 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			Tools:     catalog,
 			MaxTokens: 4096,
 		}
-		resp, err := in.Provider.Chat(ctx, req)
+		rdr, err := in.Provider.StreamChat(ctx, req)
+		if err != nil {
+			return ToolLoopResult{}, err
+		}
+		resp, err := collectStream(ctx, rdr)
+		rdr.Close()
 		if err != nil {
 			return ToolLoopResult{}, err
 		}
@@ -248,4 +254,79 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	}
 	return ToolLoopResult{Iterations: MaxToolLoopIterations, History: hist},
 		fmt.Errorf("hit max tool loop iterations (%d)", MaxToolLoopIterations)
+}
+
+// collectStream consumes a StreamReader and rebuilds the equivalent
+// non-streaming ChatResponse shape the loop logic expects. Text deltas
+// concatenate into BlockText; tool_use_input_delta events concatenate
+// partial JSON into BlockToolUse.ToolInput.
+func collectStream(ctx context.Context, rdr llm.StreamReader) (llm.ChatResponse, error) {
+	var (
+		out         llm.ChatResponse
+		currentText strings.Builder
+		currentTool *llm.Block
+		toolArgsBuf strings.Builder
+	)
+	flushText := func() {
+		if currentText.Len() > 0 {
+			out.Blocks = append(out.Blocks, llm.Block{
+				Type: llm.BlockText, Text: currentText.String(),
+			})
+			currentText.Reset()
+		}
+	}
+	flushTool := func() {
+		if currentTool != nil {
+			if toolArgsBuf.Len() > 0 {
+				currentTool.ToolInput = json.RawMessage(toolArgsBuf.String())
+			} else if currentTool.ToolInput == nil {
+				currentTool.ToolInput = json.RawMessage("{}")
+			}
+			out.Blocks = append(out.Blocks, *currentTool)
+			currentTool = nil
+			toolArgsBuf.Reset()
+		}
+	}
+	for {
+		ev, ok, err := rdr.Next()
+		if err != nil {
+			return out, err
+		}
+		if !ok {
+			break
+		}
+		switch ev.Type {
+		case llm.EventTextDelta:
+			if currentTool != nil {
+				flushTool()
+			}
+			currentText.WriteString(ev.TextDelta)
+		case llm.EventToolUseStart:
+			flushText()
+			flushTool()
+			currentTool = &llm.Block{
+				Type:      llm.BlockToolUse,
+				ToolUseID: ev.ToolUseID,
+				ToolName:  ev.ToolName,
+			}
+		case llm.EventToolUseInputDelta:
+			toolArgsBuf.WriteString(ev.TextDelta)
+		case llm.EventToolUseStop:
+			flushTool()
+		case llm.EventMessageStop:
+			flushText()
+			flushTool()
+			if ev.StopReason != "" {
+				out.StopReason = ev.StopReason
+			}
+		case llm.EventError:
+			return out, fmt.Errorf("stream error: %s", ev.ErrText)
+		}
+		if err := ctx.Err(); err != nil {
+			return out, err
+		}
+	}
+	flushText()
+	flushTool()
+	return out, nil
 }

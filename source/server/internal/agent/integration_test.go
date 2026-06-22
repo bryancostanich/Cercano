@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,35 +9,67 @@ import (
 	"cercano/source/server/internal/llm/anthropic"
 )
 
+// SSE fixture: first round emits "Listing." text + tool_use(LS, path=".")
+const sseRound1 = `event: message_start
+data: {"type":"message_start","message":{"id":"m_1","type":"message","role":"assistant","model":"claude","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Listing."}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"u1","name":"LS","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\".\"}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":5}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+`
+
+// SSE fixture: second round emits "Done." and ends turn.
+const sseRound2 = `event: message_start
+data: {"type":"message_start","message":{"id":"m_2","type":"message","role":"assistant","model":"claude","content":[],"stop_reason":null,"usage":{"input_tokens":20,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Done."}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+`
+
 func TestIntegration_FullTurnWithToolCall(t *testing.T) {
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
 		if calls == 1 {
-			// First call: model says "I'll list the dir" and emits a tool_use.
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id": "m_1", "type": "message", "role": "assistant",
-				"model": "claude",
-				"content": []map[string]any{
-					{"type": "text", "text": "Listing."},
-					{"type": "tool_use", "id": "u1", "name": "LS",
-						"input": map[string]any{"path": "."}},
-				},
-				"stop_reason": "tool_use",
-				"usage":       map[string]int{"input_tokens": 10, "output_tokens": 5},
-			})
+			_, _ = w.Write([]byte(sseRound1))
 		} else {
-			// Second call: model summarizes and stops.
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id": "m_2", "type": "message", "role": "assistant",
-				"model": "claude",
-				"content": []map[string]any{
-					{"type": "text", "text": "Done."},
-				},
-				"stop_reason": "end_turn",
-				"usage":       map[string]int{"input_tokens": 20, "output_tokens": 3},
-			})
+			_, _ = w.Write([]byte(sseRound2))
 		}
 	}))
 	defer srv.Close()

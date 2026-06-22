@@ -50,6 +50,9 @@ func CrackerMarkdownStyle() ansi.StyleConfig {
 	sc.Emph.Italic = boolp(true)
 
 	sc.Code.Color = strp(mdCyan)
+	// Zero the code-block margin so the body aligns flush-left under the
+	// horizontal rules we draw around it (see codeRule in the ui package).
+	sc.CodeBlock.Margin = uintp(0)
 
 	sc.Item.Color = strp(mdLime)
 	sc.Enumeration.Color = strp(mdLime)

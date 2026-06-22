@@ -61,6 +61,27 @@ func TestAssistantMarkdown_HeadingsDropHashMarker(t *testing.T) {
 	}
 }
 
+func TestAssistantMarkdown_CodeBlockHasLabeledRules(t *testing.T) {
+	m := &Model{
+		styles: theme.NewStyles(theme.Cracker()),
+		md:     render.NewMarkdown(theme.CrackerMarkdownStyle()),
+	}
+	e := &Entry{Role: RoleAssistant, Content: "intro\n\n```go\nx := 1\n```\n\nouttro\n"}
+	vis := plain(m.renderAssistantMarkdown(e, 40))
+
+	// Language label present on the opening rule.
+	if !strings.Contains(vis, "─── go ") {
+		t.Fatalf("expected labeled opening rule, got: %q", vis)
+	}
+	// Two rule lines (open + close), each spanning the width.
+	if strings.Count(vis, "────────") < 2 {
+		t.Fatalf("expected opening and closing rules, got: %q", vis)
+	}
+	if !strings.Contains(vis, "x := 1") {
+		t.Fatalf("code body missing: %q", vis)
+	}
+}
+
 func TestAssistantMarkdown_OpenFenceTailRenders(t *testing.T) {
 	m := &Model{
 		styles: theme.NewStyles(theme.Cracker()),

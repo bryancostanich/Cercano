@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/config"
+	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
@@ -453,6 +455,24 @@ func (s *Server) StreamProcessRequest(req *proto.ProcessRequestRequest, stream p
 // wired via SetCloudLLMProvider.
 func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestRequest, stream proto.Agent_StreamProcessRequestServer) error {
 	ctx := stream.Context()
+
+	// F2: propagate WorkDir into tool execution. Tools that touch the
+	// filesystem (run_command, read_file, git_status) read os.Getwd when
+	// no explicit cwd is passed in their args. Chdir + restore makes them
+	// honor the client-supplied project directory. The legacy path passes
+	// WorkDir as a string param to the coordinator/provider but does NOT
+	// thread it into agenttools — so neither path covers VS Code / Zed
+	// clients properly today. This is the simplest V1 fix.
+	if req.GetWorkDir() != "" {
+		if prev, err := os.Getwd(); err == nil {
+			if err := os.Chdir(req.GetWorkDir()); err == nil {
+				defer os.Chdir(prev)
+			} else {
+				fmt.Fprintf(os.Stderr, "[tool-loop] chdir(%s) failed: %v\n", req.GetWorkDir(), err)
+			}
+		}
+	}
+
 	sink := func(ev agent.LoopEvent) {
 		switch ev.Kind {
 		case agent.LoopToolUseStart:
@@ -526,6 +546,8 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		return fmt.Errorf("tool loop error: %w", err)
 	}
 
+	s.persistToolLoopTurns(ctx, req, result)
+
 	return stream.Send(&proto.StreamProcessResponse{
 		Payload: &proto.StreamProcessResponse_FinalResponse{
 			FinalResponse: &proto.ProcessRequestResponse{
@@ -536,6 +558,62 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 			},
 		},
 	})
+}
+
+// persistToolLoopTurns dual-writes the user turn + assistant turn(s) emitted
+// by RunToolLoop into the persistent conversation store, mirroring the
+// legacy storeConversationTurn path so /history and /resume cover
+// tool-calling conversations. Best-effort: store errors are logged but never
+// surfaced to the caller (matches legacy behavior).
+func (s *Server) persistToolLoopTurns(ctx context.Context, req *proto.ProcessRequestRequest, result agent.ToolLoopResult) {
+	if s.agent == nil {
+		return
+	}
+	store := s.agent.PersistentStore()
+	convID := req.GetConversationId()
+	if store == nil || convID == "" {
+		return
+	}
+	if err := store.EnsureConversation(ctx, convID, req.GetWorkDir(), s.currentConfig.CloudModel); err != nil {
+		fmt.Fprintf(os.Stderr, "[tool-loop] EnsureConversation(%s) failed: %v\n", convID, err)
+		return
+	}
+	// User turn — plain text in Content, matches legacy persistence.
+	if err := store.Append(ctx, conversation.Turn{
+		ConversationID: convID,
+		Role:           "user",
+		Content:        req.GetInput(),
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "[tool-loop] Append(user, %s) failed: %v\n", convID, err)
+	}
+	// Assistant turn(s) — every assistant message from the loop's history.
+	// Blocks marshaled into BlocksJSON; Content carries the concatenated
+	// text so /history readers without block-aware rendering still see
+	// something meaningful.
+	for _, m := range result.History {
+		if m.Role != llm.RoleAssistant {
+			continue
+		}
+		blocksJSON, err := json.Marshal(m.Blocks)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[tool-loop] marshal assistant blocks failed: %v\n", err)
+			continue
+		}
+		var text string
+		for _, b := range m.Blocks {
+			if b.Type == llm.BlockText {
+				text += b.Text
+			}
+		}
+		if err := store.Append(ctx, conversation.Turn{
+			ConversationID: convID,
+			Role:           "assistant",
+			Content:        text,
+			BlocksJSON:     string(blocksJSON),
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "[tool-loop] Append(assistant, %s) failed: %v\n", convID, err)
+		}
+	}
 }
 
 func (s *Server) mapRequest(req *proto.ProcessRequestRequest) *agent.Request {

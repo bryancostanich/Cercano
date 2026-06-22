@@ -427,7 +427,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		height := m.viewport.Height()
-		onBar := mouse.X == m.width-1 &&
+		// The bar occupies the last column (width-1). Accept the rightmost column
+		// and anything past it: terminals report a click in the final column as
+		// X=width-1 or, in some cases, X=width (one past) — an exact == match made
+		// the 1-column bar unreliable to grab. Viewport text is X < width-1, so
+		// this never steals a text click.
+		onBar := mouse.X >= m.width-1 &&
 			mouse.Y >= m.scrollbarTop && mouse.Y < m.scrollbarTop+height
 		if onBar {
 			// Grabbing the scrollbar is a scroll gesture, not a selection;

@@ -3,7 +3,7 @@ package banner
 import (
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"cercano/source/server/internal/cli/theme"
 )

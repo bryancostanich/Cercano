@@ -6,16 +6,17 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"image/color"
 	"math"
 	"os"
 	"strings"
 	"time"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"cercano/source/server/internal/cli/agentclient"
 	"cercano/source/server/internal/cli/banner"
@@ -103,7 +104,7 @@ type Model struct {
 	// promptBorderColor is the color of the lines immediately above and
 	// below the input row. Defaults to the palette's accent (lime). /color
 	// sets it at runtime.
-	promptBorderColor lipgloss.Color
+	promptBorderColor color.Color
 
 	// sessionTitle is the current conversation's display title. Shown in the
 	// header. Empty for fresh sessions (header omits the title slot until
@@ -163,7 +164,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	ti.CharLimit = 0
 	ti.Focus()
 
-	vp := viewport.New(80, 10)
+	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(10))
 
 	reg := slash.New()
 	slash.RegisterBasics(reg)
@@ -213,7 +214,7 @@ func newConvID() string {
 
 // Init is called by Bubble Tea once at startup.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, m.splash.Init(), fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent))
+	return tea.Batch(m.input.Focus(), m.splash.Init(), fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent))
 }
 
 // permissionModeMsg carries the result of the startup GetPermissionMode RPC.
@@ -390,7 +391,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// rewritten at the NEW size show stale content.
 		return m, tea.ClearScreen
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Pending confirm gates ALL keys — until the user resolves it, the
 		// input, scrollback, and any in-flight slash commands stay dormant.
 		if m.pendingConfirm != nil {
@@ -422,7 +423,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// enter/tab toggle Folded, esc returns to input. Any other key
 		// returns to input and is then handled by the normal input path.
 		if m.focusedToolIdx >= 0 {
-			switch msg.Type {
+			switch msg.Code {
 			case tea.KeyUp:
 				indices := m.toolEntryIndices()
 				for i, idx := range indices {
@@ -467,7 +468,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Esc on empty input enters tool-entry navigation mode, focusing the
 		// most-recent tool entry. No-op when scrollback has no tool entries.
-		if msg.Type == tea.KeyEsc && m.input.Value() == "" {
+		if msg.Code == tea.KeyEsc && m.input.Value() == "" {
 			indices := m.toolEntryIndices()
 			if len(indices) > 0 {
 				m.focusedToolIdx = indices[len(indices)-1]
@@ -934,7 +935,7 @@ func (m *Model) relayout() {
 		splashH = 9 // 8 banner rows + 1 blank
 	}
 	suggestH := 0
-	if m.viewport.Width > 0 && !m.editorActive {
+	if m.viewport.Width() > 0 && !m.editorActive {
 		// Width may not yet match contentW on the first paint; the
 		// suggestion uses m.width which we've just updated above.
 		if hint := m.renderSlashSuggestions(); hint != "" {
@@ -945,9 +946,9 @@ func (m *Model) relayout() {
 	if bodyH < 3 {
 		bodyH = 3
 	}
-	m.viewport.Width = contentW
-	m.viewport.Height = bodyH
-	m.input.Width = contentW - 4
+	m.viewport.SetWidth(contentW)
+	m.viewport.SetHeight(bodyH)
+	m.input.SetWidth(contentW - 4)
 	m.refreshViewport()
 }
 
@@ -980,7 +981,7 @@ func (m *Model) refreshViewport() {
 const entryIndent = 2
 
 func (m *Model) renderEntry(e *Entry, idx int) string {
-	wrapW := m.viewport.Width
+	wrapW := m.viewport.Width()
 	if wrapW < 10 {
 		wrapW = 10
 	}
@@ -1127,7 +1128,7 @@ func animateLimeSweep(text string) string {
 
 // progressColorAt returns the rendered color for one column at a given sweep
 // position. Lime base; the inside `tail` columns lerp toward white.
-func progressColorAt(col int, sweepPos float64, tail float64) lipgloss.Color {
+func progressColorAt(col int, sweepPos float64, tail float64) color.Color {
 	dist := float64(col) - sweepPos
 	if dist < 0 {
 		dist = -dist
@@ -1165,7 +1166,7 @@ func progressColorAt(col int, sweepPos float64, tail float64) lipgloss.Color {
 //
 // Falls back to the current value (silently — the slash command already
 // validated; this is just the model-side dispatch).
-func (m Model) resolvePromptColor(token string) lipgloss.Color {
+func (m Model) resolvePromptColor(token string) color.Color {
 	if strings.HasPrefix(token, "#") {
 		return lipgloss.Color(token)
 	}
@@ -1408,9 +1409,11 @@ func indentBlock(pad, s string) string {
 // height is computed dynamically here so it absorbs whatever rows the
 // suggestion/help line ends up taking — wrapped help text grows downward,
 // the viewport shrinks to keep the status bar pinned to terminal bottom.
-func (m Model) View() string {
+func (m Model) View() tea.View {
 	if m.width == 0 || m.height == 0 {
-		return "" // first paint before WindowSizeMsg
+		v := tea.NewView("")
+		v.AltScreen = true
+		return v // first paint before WindowSizeMsg
 	}
 
 	var parts []string
@@ -1450,7 +1453,9 @@ func (m Model) View() string {
 	if rendered < m.height {
 		out += strings.Repeat("\n", m.height-rendered)
 	}
-	return out
+	v := tea.NewView(out)
+	v.AltScreen = true
+	return v
 }
 
 // countLines totals the visible row count of a slice of pre-joined strings,

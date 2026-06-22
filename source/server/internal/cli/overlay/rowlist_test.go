@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"cercano/source/server/internal/cli/theme"
 )
@@ -26,17 +26,17 @@ func TestRowList_NavigateAndSelect(t *testing.T) {
 	styles := theme.NewStyles(theme.Cracker())
 
 	// Down twice → cursor at row 2.
-	r, _, closed := r.Update(tea.KeyMsg{Type: tea.KeyDown}, styles)
+	r, _, closed := r.Update(tea.KeyPressMsg{Code: tea.KeyDown}, styles)
 	if closed {
 		t.Fatal("unexpected close on first down")
 	}
-	r, _, closed = r.Update(tea.KeyMsg{Type: tea.KeyDown}, styles)
+	r, _, closed = r.Update(tea.KeyPressMsg{Code: tea.KeyDown}, styles)
 	if r.Cursor() != 2 {
 		t.Fatalf("cursor: got %d want 2", r.Cursor())
 	}
 
 	// Enter → OnSelect fires with row "c", overlay closes.
-	r, _, closed = r.Update(tea.KeyMsg{Type: tea.KeyEnter}, styles)
+	r, _, closed = r.Update(tea.KeyPressMsg{Code: tea.KeyEnter}, styles)
 	if !closed {
 		t.Fatal("expected overlay to close after select")
 	}
@@ -64,20 +64,20 @@ func TestRowList_EditOnEditableRow(t *testing.T) {
 	styles := theme.NewStyles(theme.Cracker())
 
 	// Enter → enter edit mode.
-	r, _, _ = r.Update(tea.KeyMsg{Type: tea.KeyEnter}, styles)
+	r, _, _ = r.Update(tea.KeyPressMsg{Code: tea.KeyEnter}, styles)
 	if !r.editing {
 		t.Fatal("expected editing mode after enter on editable row")
 	}
 
 	// Type "new" into the input (simulate keys).
 	for _, ch := range "new" {
-		r, _, _ = r.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}}, styles)
+		r, _, _ = r.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)}, styles)
 	}
 	// Note: bubbles/textinput pre-populates with "old" + cursor end; our typed
 	// runes append. We mostly care that OnEdit fires; let's clear via ctrl+u
 	// not available here, so just commit and check OnEdit was invoked.
 
-	r, _, closed := r.Update(tea.KeyMsg{Type: tea.KeyEnter}, styles)
+	r, _, closed := r.Update(tea.KeyPressMsg{Code: tea.KeyEnter}, styles)
 	if closed {
 		t.Fatal("commit should not close overlay")
 	}
@@ -95,7 +95,7 @@ func TestRowList_ReadOnlyRowIgnoresEnter(t *testing.T) {
 	}, Hooks{})
 	styles := theme.NewStyles(theme.Cracker())
 
-	r, _, closed := r.Update(tea.KeyMsg{Type: tea.KeyEnter}, styles)
+	r, _, closed := r.Update(tea.KeyPressMsg{Code: tea.KeyEnter}, styles)
 	if closed {
 		t.Fatal("read-only row should not close")
 	}
@@ -107,7 +107,7 @@ func TestRowList_ReadOnlyRowIgnoresEnter(t *testing.T) {
 func TestRowList_EscClosesOverlay(t *testing.T) {
 	r := New("test", []Row{{Label: "a"}}, Hooks{})
 	styles := theme.NewStyles(theme.Cracker())
-	_, _, closed := r.Update(tea.KeyMsg{Type: tea.KeyEsc}, styles)
+	_, _, closed := r.Update(tea.KeyPressMsg{Code: tea.KeyEsc}, styles)
 	if !closed {
 		t.Fatal("esc should close overlay")
 	}
@@ -123,8 +123,8 @@ func TestRowList_SaveErrorShowsStatus(t *testing.T) {
 	})
 	styles := theme.NewStyles(theme.Cracker())
 
-	r, _, _ = r.Update(tea.KeyMsg{Type: tea.KeyEnter}, styles)
-	r, _, _ = r.Update(tea.KeyMsg{Type: tea.KeyEnter}, styles)
+	r, _, _ = r.Update(tea.KeyPressMsg{Code: tea.KeyEnter}, styles)
+	r, _, _ = r.Update(tea.KeyPressMsg{Code: tea.KeyEnter}, styles)
 
 	view := r.View(80, theme.Cracker(), styles)
 	if !strings.Contains(stripAnsi(view), "save failed: nope") {

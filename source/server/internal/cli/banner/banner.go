@@ -3,9 +3,10 @@
 package banner
 
 import (
+	"image/color"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"cercano/source/server/internal/cli/theme"
 )
@@ -34,7 +35,7 @@ const WordmarkCols = 28
 // Returned string contains terminal escape sequences; render width per line is `Width`.
 // Equivalent to RenderWithSweep(p, m, +infinity) — no shimmer applied.
 func Render(p theme.Palette, m Meta) string {
-	return renderWith(p, m, func(rune, int) lipgloss.Color { return p.Primary })
+	return renderWith(p, m, func(rune, int) color.Color { return p.Primary })
 }
 
 // RenderWithSweep renders the banner with a moving shimmer band over the wordmark.
@@ -50,11 +51,11 @@ func RenderWithSweep(p theme.Palette, m Meta, sweepPos float64) string {
 
 // renderWith is the common renderer; topColor and botColor (here, both the
 // same function) decide each wordmark cell's color.
-func renderWith(p theme.Palette, m Meta, colorFn func(r rune, col int) lipgloss.Color) string {
+func renderWith(p theme.Palette, m Meta, colorFn func(r rune, col int) color.Color) string {
 	return renderWithRowColors(p, m, colorFn, colorFn)
 }
 
-func renderWithRowColors(p theme.Palette, m Meta, colorTop, colorBot func(rune, int) lipgloss.Color) string {
+func renderWithRowColors(p theme.Palette, m Meta, colorTop, colorBot func(rune, int) color.Color) string {
 	s := theme.NewStyles(p)
 	borderTop := s.BorderDim.Render("╔" + strings.Repeat("═", Width-2) + "╗")
 	borderBot := s.BorderDim.Render("╚" + strings.Repeat("═", Width-2) + "╝")
@@ -63,7 +64,7 @@ func renderWithRowColors(p theme.Palette, m Meta, colorTop, colorBot func(rune, 
 
 	// Wordmark rows: 2-col left pad, 28-col wordmark, 30-col right pad. Each
 	// wordmark cell rendered independently so per-column colors can change.
-	wordmarkLine := func(text string, cf func(rune, int) lipgloss.Color) string {
+	wordmarkLine := func(text string, cf func(rune, int) color.Color) string {
 		var b strings.Builder
 		col := 0
 		for _, r := range text {
@@ -114,13 +115,13 @@ func visibleWidth(s string) int { return lipgloss.Width(s) }
 
 // makeShimmerColorFn returns a per-column color function for one wordmark row.
 // Distance from the sweep head selects amber → bright → white via piecewise lerp.
-func makeShimmerColorFn(p theme.Palette, sweepPos float64) func(rune, int) lipgloss.Color {
+func makeShimmerColorFn(p theme.Palette, sweepPos float64) func(rune, int) color.Color {
 	const tail = 5.0
-	base := hexToRGB(string(p.Primary))
-	bright := hexToRGB(string(p.Bright))
+	base := colorToRGB(p.Primary)
+	bright := colorToRGB(p.Bright)
 	white := [3]uint8{0xFF, 0xFF, 0xFF}
 
-	return func(r rune, col int) lipgloss.Color {
+	return func(r rune, col int) color.Color {
 		// Spaces inside the wordmark (e.g. the N letter's gap) stay base; the
 		// space isn't painted anyway, but the lookup must not crash.
 		dist := float64(col) - sweepPos
@@ -142,30 +143,11 @@ func makeShimmerColorFn(p theme.Palette, sweepPos float64) func(rune, int) lipgl
 	}
 }
 
-func hexToRGB(hex string) [3]uint8 {
-	hex = strings.TrimPrefix(hex, "#")
-	if len(hex) != 6 {
-		return [3]uint8{0xEA, 0x82, 0x12}
-	}
-	var rgb [3]uint8
-	for i := 0; i < 3; i++ {
-		hi := hexDigit(hex[2*i])
-		lo := hexDigit(hex[2*i+1])
-		rgb[i] = (hi << 4) | lo
-	}
-	return rgb
-}
-
-func hexDigit(c byte) uint8 {
-	switch {
-	case c >= '0' && c <= '9':
-		return c - '0'
-	case c >= 'a' && c <= 'f':
-		return c - 'a' + 10
-	case c >= 'A' && c <= 'F':
-		return c - 'A' + 10
-	}
-	return 0
+// colorToRGB extracts the R/G/B components from a color.Color.
+// The alpha-premultiplied 16-bit values from RGBA() are scaled back to 8-bit.
+func colorToRGB(c color.Color) [3]uint8 {
+	r, g, b, _ := c.RGBA()
+	return [3]uint8{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8)}
 }
 
 func lerpRGB(a, b [3]uint8, t float64) [3]uint8 {

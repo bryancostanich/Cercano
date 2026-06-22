@@ -1,6 +1,6 @@
 package theme
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 // Styles are pre-built lipgloss styles derived from a Palette. Build once at
 // startup; reuse on every render. All styles inherit from the palette so a

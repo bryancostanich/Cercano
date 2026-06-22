@@ -430,6 +430,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		onBar := mouse.X == m.width-1 &&
 			mouse.Y >= m.scrollbarTop && mouse.Y < m.scrollbarTop+height
 		if onBar {
+			// Grabbing the scrollbar is a scroll gesture, not a selection;
+			// cancel any in-progress selection drag so it can't hijack motion.
+			m.selection.Dragging = false
 			m.scrollbarDragging = true
 			off := scrollOffsetFromClick(mouse.Y, m.scrollbarTop, height, m.viewport.TotalLineCount())
 			m.viewport.SetYOffset(off)
@@ -449,16 +452,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		mouse := msg.Mouse()
+		// An active scrollbar drag is unambiguous and takes priority over text
+		// selection — otherwise a left-over selection.Dragging would swallow the
+		// motion and the bar wouldn't scroll.
+		if m.scrollbarDragging {
+			height := m.viewport.Height()
+			off := scrollOffsetFromClick(mouse.Y, m.scrollbarTop, height, m.viewport.TotalLineCount())
+			m.viewport.SetYOffset(off)
+			return m, nil
+		}
 		if m.selection.Dragging {
 			m.updateSelection(mouse, true)
 			return m, nil
 		}
-		if !m.scrollbarDragging {
-			return m, nil
-		}
-		height := m.viewport.Height()
-		off := scrollOffsetFromClick(mouse.Y, m.scrollbarTop, height, m.viewport.TotalLineCount())
-		m.viewport.SetYOffset(off)
 		return m, nil
 
 	case tea.MouseReleaseMsg:

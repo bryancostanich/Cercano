@@ -81,9 +81,15 @@ type Model struct {
 	splash      banner.AnimModel
 	entries     []*Entry
 	viewport    viewport.Model
-	input       textinput.Model
-	streamCh    <-chan agentclient.StreamMsg
-	streaming   bool
+	// viewportPlainLines mirrors the rendered viewport content with ANSI
+	// styling stripped. It lets mouse selection copy clean text while the
+	// viewport itself keeps the styled display string.
+	viewportPlainLines []string
+	selection          textSelection
+	selectionNotice    string
+	input              textinput.Model
+	streamCh           <-chan agentclient.StreamMsg
+	streaming          bool
 
 	tokIn, tokOut  int
 	cumIn, cumOut  int
@@ -405,6 +411,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.editorActive || m.historyActive || m.pendingConfirm != nil {
 			return m, nil
 		}
+		if m.selection.Dragging {
+			return m, nil
+		}
 		var cmd tea.Cmd
 		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
@@ -414,6 +423,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		mouse := msg.Mouse()
+		if mouse.Button != tea.MouseLeft {
+			return m, nil
+		}
 		height := m.viewport.Height()
 		onBar := mouse.X == m.width-1 &&
 			mouse.Y >= m.scrollbarTop && mouse.Y < m.scrollbarTop+height
@@ -421,24 +433,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.scrollbarDragging = true
 			off := scrollOffsetFromClick(mouse.Y, m.scrollbarTop, height, m.viewport.TotalLineCount())
 			m.viewport.SetYOffset(off)
+			return m, nil
 		}
+		if m.mouseInViewportText(mouse) {
+			m.beginSelection(mouse)
+			return m, nil
+		}
+		m.clearSelection()
 		return m, nil
 
 	case tea.MouseMotionMsg:
-		if !m.scrollbarDragging {
-			return m, nil
-		}
 		if m.editorActive || m.historyActive || m.pendingConfirm != nil {
 			m.scrollbarDragging = false
+			m.selection.Dragging = false
 			return m, nil
 		}
 		mouse := msg.Mouse()
+		if m.selection.Dragging {
+			m.updateSelection(mouse, true)
+			return m, nil
+		}
+		if !m.scrollbarDragging {
+			return m, nil
+		}
 		height := m.viewport.Height()
 		off := scrollOffsetFromClick(mouse.Y, m.scrollbarTop, height, m.viewport.TotalLineCount())
 		m.viewport.SetYOffset(off)
 		return m, nil
 
 	case tea.MouseReleaseMsg:
+		mouse := msg.Mouse()
+		if m.selection.Dragging {
+			m.updateSelection(mouse, true)
+			m.selection.Dragging = false
+			if m.selection.empty() {
+				m.clearSelection()
+			} else if text := m.selectedText(); text != "" {
+				m.selectionNotice = "copied selection"
+				m.scrollbarDragging = false
+				return m, tea.SetClipboard(text)
+			}
+		}
 		m.scrollbarDragging = false
 		return m, nil
 
@@ -468,6 +503,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.historyActive = false
 			}
 			return m, cmd
+		}
+		if m.selection.Active {
+			next, cmd, handled := m.handleSelectionKey(msg)
+			if handled {
+				return next, cmd
+			}
+			m = next
 		}
 		// Tool-entry navigation mode: focus is on a scrollback tool entry
 		// rather than the input box. Up/down cycle (clamped at edges),
@@ -1026,7 +1068,9 @@ func (m *Model) refreshViewport() {
 			b.WriteString("\n")
 		}
 	}
-	m.viewport.SetContent(b.String())
+	content := b.String()
+	m.viewportPlainLines = plainLines(content)
+	m.viewport.SetContent(content)
 	if wasAtBottom {
 		m.viewport.GotoBottom()
 	}
@@ -1510,8 +1554,14 @@ func (m Model) View() tea.View {
 	}
 	v := tea.NewView(out)
 	v.AltScreen = true
-	// Request baseline keyboard enhancements (Kitty-protocol key disambiguation). Zero value = no key release/repeat reporting; set ReportEventTypes if those are ever needed.
-	v.KeyboardEnhancements = tea.KeyboardEnhancements{}
+	// Request richer Kitty-protocol key reporting so terminals that support it
+	// can deliver Command/Super-modified keys such as Cmd+C to the app-native
+	// selection layer. Terminals that reserve Cmd+C for their own copy action
+	// simply won't emit a keypress, so ctrl+c/c/enter remain copy fallbacks.
+	v.KeyboardEnhancements = tea.KeyboardEnhancements{
+		ReportAllKeysAsEscapeCodes: true,
+		ReportAssociatedText:       true,
+	}
 	v.MouseMode = tea.MouseModeCellMotion
 	// Drive the real terminal cursor to the input caret position. Only
 	// when the chat input owns focus (no overlay, no pending confirm).
@@ -1635,6 +1685,8 @@ func (m Model) renderViewportWithScrollbar() string {
 	col := scrollbarColumn(m.viewport.TotalLineCount(), height, m.viewport.YOffset())
 	var b strings.Builder
 	for i, line := range lines {
+		contentLine := m.viewport.YOffset() + i
+		line = m.renderSelectionOnLine(line, contentLine)
 		b.WriteString(line)
 		// Guard against any row-count mismatch between the rendered body and
 		// the computed column.
@@ -1723,6 +1775,16 @@ func (m Model) renderStatus() string {
 	if m.streaming {
 		return lipgloss.NewStyle().Width(m.width).Render(m.styles.Accent.Render("⟳ streaming"))
 	}
+	help := m.styles.Muted.Render("/help for cmds")
+	if m.selection.hasRange() {
+		help = m.styles.Info.Render("selection: ") +
+			m.styles.Accent.Render("c") +
+			m.styles.Muted.Render(" copy ") +
+			m.styles.Accent.Render("esc") +
+			m.styles.Muted.Render(" clear")
+	} else if m.selectionNotice != "" {
+		help = m.styles.Success.Render(m.selectionNotice)
+	}
 	cloudPart := ""
 	switch m.cloudState {
 	case "NONE":
@@ -1737,7 +1799,7 @@ func (m Model) renderStatus() string {
 		cloudPart,
 		m.renderPermissionModeChip(),
 		m.styles.BorderDim.Render("  ·  "),
-		m.styles.Muted.Render("/help for cmds"),
+		help,
 	}
 	return lipgloss.NewStyle().Width(m.width).Render(strings.Join(parts, ""))
 }

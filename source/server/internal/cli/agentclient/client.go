@@ -358,15 +358,22 @@ func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, erro
 
 // StreamMsg is a typed event produced by a streaming chat turn.
 type StreamMsg struct {
-	Type   StreamMsgType
-	Token  string // for TypeToken
-	Note   string // for TypeProgress
-	Final  string // for TypeDone (full response)
-	Notice string // for TypeDone (agent informational note, e.g. cloud absent)
-	Model  string // for TypeDone
-	TokIn  int    // for TypeDone
-	TokOut int    // for TypeDone
-	Err    error  // for TypeError
+	Type        StreamMsgType
+	Token       string // for TypeToken
+	Note        string // for TypeProgress
+	Final       string // for TypeDone (full response)
+	Notice      string // for TypeDone (agent informational note, e.g. cloud absent)
+	Model       string // for TypeDone
+	TokIn       int    // for TypeDone
+	TokOut      int    // for TypeDone
+	Err         error  // for TypeError
+	ToolUseID   string // for TypeToolUseStart/Stop, TypeToolExecStart/Complete, TypePermissionRequired
+	ToolName    string // for TypeToolUseStart, TypePermissionRequired
+	ArgsSummary string // for TypeToolUseStop
+	ArgsJSON    string // for TypePermissionRequired
+	Summary     string // for TypeToolExecComplete
+	IsError     bool   // for TypeToolExecComplete
+	Tier        string // for TypePermissionRequired ("W" | "X")
 }
 
 type StreamMsgType int
@@ -376,6 +383,11 @@ const (
 	TypeProgress
 	TypeDone
 	TypeError
+	TypeToolUseStart
+	TypeToolUseStop
+	TypeToolExecStart
+	TypeToolExecComplete
+	TypePermissionRequired
 )
 
 // StreamChat opens a streaming chat call and emits typed messages on the
@@ -424,7 +436,106 @@ func (c *Client) StreamChat(ctx context.Context, conversationID, input, workDir 
 				}
 				continue
 			}
+			if tus := msg.GetToolUseStart(); tus != nil {
+				out <- StreamMsg{
+					Type:      TypeToolUseStart,
+					ToolUseID: tus.GetToolUseId(),
+					ToolName:  tus.GetToolName(),
+				}
+				continue
+			}
+			if tup := msg.GetToolUseStop(); tup != nil {
+				out <- StreamMsg{
+					Type:        TypeToolUseStop,
+					ToolUseID:   tup.GetToolUseId(),
+					ArgsSummary: tup.GetArgsSummary(),
+				}
+				continue
+			}
+			if tes := msg.GetToolExecStart(); tes != nil {
+				out <- StreamMsg{
+					Type:      TypeToolExecStart,
+					ToolUseID: tes.GetToolUseId(),
+				}
+				continue
+			}
+			if tec := msg.GetToolExecComplete(); tec != nil {
+				out <- StreamMsg{
+					Type:      TypeToolExecComplete,
+					ToolUseID: tec.GetToolUseId(),
+					Summary:   tec.GetSummary(),
+					IsError:   tec.GetIsError(),
+				}
+				continue
+			}
+			if pr := msg.GetPermissionRequired(); pr != nil {
+				out <- StreamMsg{
+					Type:      TypePermissionRequired,
+					ToolUseID: pr.GetToolUseId(),
+					ToolName:  pr.GetToolName(),
+					ArgsJSON:  pr.GetArgsJson(),
+					Tier:      pr.GetTier(),
+				}
+				continue
+			}
 		}
 	}()
 	return out, nil
+}
+
+// SetPermissionMode changes the agent's session permission mode.
+func (c *Client) SetPermissionMode(ctx context.Context, mode string) error {
+	res, err := c.agent.SetPermissionMode(ctx, &proto.SetPermissionModeRequest{Mode: mode})
+	if err != nil {
+		return err
+	}
+	if !res.GetOk() {
+		return fmt.Errorf("%s", res.GetError())
+	}
+	return nil
+}
+
+// GetPermissionMode reads the agent's current session permission mode.
+func (c *Client) GetPermissionMode(ctx context.Context) (string, error) {
+	res, err := c.agent.GetPermissionMode(ctx, &proto.GetPermissionModeRequest{})
+	if err != nil {
+		return "", err
+	}
+	return res.GetMode(), nil
+}
+
+// AllowToolCall approves a paused tool call awaiting permission.
+func (c *Client) AllowToolCall(ctx context.Context, toolUseID string) error {
+	_, err := c.agent.AllowToolCall(ctx, &proto.AllowToolCallRequest{ToolUseId: toolUseID})
+	return err
+}
+
+// DenyToolCall rejects a paused tool call awaiting permission.
+func (c *Client) DenyToolCall(ctx context.Context, toolUseID string) error {
+	_, err := c.agent.DenyToolCall(ctx, &proto.DenyToolCallRequest{ToolUseId: toolUseID})
+	return err
+}
+
+// ProviderCaps is the capability set reported by the active provider.
+type ProviderCaps struct {
+	SupportsTools         bool
+	SupportsParallelTools bool
+	SupportsCaching       bool
+	SupportsVision        bool
+	MaxToolsPerCall       int32
+}
+
+// GetProviderCapabilities reports what the active provider supports.
+func (c *Client) GetProviderCapabilities(ctx context.Context) (ProviderCaps, error) {
+	res, err := c.agent.GetProviderCapabilities(ctx, &proto.GetProviderCapabilitiesRequest{})
+	if err != nil {
+		return ProviderCaps{}, err
+	}
+	return ProviderCaps{
+		SupportsTools:         res.GetSupportsTools(),
+		SupportsParallelTools: res.GetSupportsParallelTools(),
+		SupportsCaching:       res.GetSupportsCaching(),
+		SupportsVision:        res.GetSupportsVision(),
+		MaxToolsPerCall:       res.GetMaxToolsPerCall(),
+	}, nil
 }

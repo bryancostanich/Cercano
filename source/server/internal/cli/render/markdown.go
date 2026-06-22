@@ -84,14 +84,26 @@ func splitPipeRow(s string) []string {
 
 func (mt markdownTable) toTable() Table {
 	cols := make([]Column, len(mt.Headers))
-	// Last column is the wrap-OK column by convention; LLMs usually put the
-	// longest explanatory field at the end. Priority increments left-to-right
-	// so right-most columns drop first.
+	// Drop order when the table is too narrow (lowest Priority drops first):
+	//   - The FIRST column is the key/identifier — usually the most important —
+	//     so it gets the highest Priority and is dropped last (only when it's
+	//     the sole survivor, after which the table transposes to key:value).
+	//   - The LAST column is the wrap-OK explanatory field (LLMs put the long
+	//     text there); keep it above the middle columns.
+	//   - MIDDLE columns drop first.
+	last := len(mt.Headers) - 1
 	for i, h := range mt.Headers {
+		prio := i // middle columns: low priority, drop first
+		switch {
+		case i == 0:
+			prio = len(mt.Headers) + 1 // key column: drop last
+		case i == last:
+			prio = len(mt.Headers) // description column: keep over middles
+		}
 		cols[i] = Column{
 			Name:      h,
-			Priority:  i,
-			Wrappable: i == len(mt.Headers)-1,
+			Priority:  prio,
+			Wrappable: i == last,
 		}
 	}
 	rows := make([]map[string]string, len(mt.Rows))

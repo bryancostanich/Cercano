@@ -3,23 +3,27 @@
 // 80s phosphor terminals and demoscene cracker intros.
 package theme
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"image/color"
+
+	"charm.land/lipgloss/v2"
+)
 
 // Palette is the set of named colors a theme exposes.
 type Palette struct {
-	BgDeep      lipgloss.Color // terminal background fallback
-	Surface     lipgloss.Color // overlay panel background
-	BorderDim   lipgloss.Color // outer chrome lines
-	Border      lipgloss.Color // inner gridlines
-	Primary     lipgloss.Color // wordmark, default text
-	Bright      lipgloss.Color // active state, focus
-	DimAmber    lipgloss.Color // meter empty, ghost text
-	Accent      lipgloss.Color // lime — user sigil, accent rail, success peak
-	Info        lipgloss.Color // cyan — metadata, paths
-	Muted       lipgloss.Color // secondary text
-	Success     lipgloss.Color // confirmations, build pass
-	Warn        lipgloss.Color // meter mid-range, advisory
-	Error       lipgloss.Color // failures, bypass indicator
+	BgDeep      color.Color // terminal background fallback
+	Surface     color.Color // overlay panel background
+	BorderDim   color.Color // outer chrome lines
+	Border      color.Color // inner gridlines
+	Primary     color.Color // wordmark, default text
+	Bright      color.Color // active state, focus
+	DimAmber    color.Color // meter empty, ghost text
+	Accent      color.Color // lime — user sigil, accent rail, success peak
+	Info        color.Color // cyan — metadata, paths
+	Muted       color.Color // secondary text
+	Success     color.Color // confirmations, build pass
+	Warn        color.Color // meter mid-range, advisory
+	Error       color.Color // failures, bypass indicator
 }
 
 // Cracker returns the default cercano-cli palette. Hex codes match

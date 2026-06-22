@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"cercano/source/server/internal/cli/theme"
 )

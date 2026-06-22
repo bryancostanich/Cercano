@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"cercano/source/server/internal/cli/agentclient"
 	"cercano/source/server/internal/cli/overlay"
@@ -43,7 +43,7 @@ func newConfigEditor(ag *agentclient.Client, p theme.Palette, s theme.Styles, w,
 	}, nil
 }
 
-func (ed configEditor) Update(msg tea.KeyMsg) (configEditor, tea.Cmd, bool) {
+func (ed configEditor) Update(msg tea.KeyPressMsg) (configEditor, tea.Cmd, bool) {
 	next, cmd, closed := ed.list.Update(msg, ed.styles)
 	ed.list = next
 	return ed, cmd, closed

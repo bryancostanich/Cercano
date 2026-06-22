@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"cercano/source/server/internal/cli/agentclient"
 	"cercano/source/server/internal/cli/overlay"
@@ -55,7 +55,7 @@ func newHistoryPicker(ag *agentclient.Client, p theme.Palette, s theme.Styles, w
 	}, nil
 }
 
-func (h historyPicker) Update(msg tea.KeyMsg) (historyPicker, tea.Cmd, bool) {
+func (h historyPicker) Update(msg tea.KeyPressMsg) (historyPicker, tea.Cmd, bool) {
 	next, cmd, closed := h.list.Update(msg, h.styles)
 	h.list = next
 	return h, cmd, closed

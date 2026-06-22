@@ -43,7 +43,7 @@ import (
 	"cercano/source/server/internal/update"
 	"cercano/source/server/pkg/proto"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/adk/session"
@@ -389,7 +389,7 @@ func runCLI(cfg config.Config, openHistoryOnStart bool) {
 	}
 
 	m := cliui.New(ag, openHistoryOnStart)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "cercano:", err)
 		os.Exit(1)

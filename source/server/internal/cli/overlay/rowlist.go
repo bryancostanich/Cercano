@@ -8,9 +8,9 @@ package overlay
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"cercano/source/server/internal/cli/theme"
 )
@@ -76,7 +76,7 @@ func (r *RowList) SetStatus(s string) { r.status = s }
 
 // Update routes a key event. Returns (next, cmd, closed) — `closed` tells the
 // host whether the overlay should be dismissed.
-func (r RowList) Update(msg tea.KeyMsg, styles theme.Styles) (RowList, tea.Cmd, bool) {
+func (r RowList) Update(msg tea.KeyPressMsg, styles theme.Styles) (RowList, tea.Cmd, bool) {
 	key := msg.String()
 	if r.editing {
 		switch key {
@@ -135,7 +135,7 @@ func (r RowList) Update(msg tea.KeyMsg, styles theme.Styles) (RowList, tea.Cmd, 
 			ti := textinput.New()
 			ti.Prompt = styles.Accent.Render("▸ ")
 			ti.CharLimit = 0
-			ti.Focus()
+			blinkCmd := ti.Focus()
 			if !row.Masked {
 				ti.SetValue(row.Value)
 				ti.CursorEnd()
@@ -143,7 +143,7 @@ func (r RowList) Update(msg tea.KeyMsg, styles theme.Styles) (RowList, tea.Cmd, 
 			r.input = ti
 			r.editing = true
 			r.status = ""
-			return r, textinput.Blink, false
+			return r, blinkCmd, false
 		default:
 			if r.Hooks.OnSelect == nil {
 				r.status = "no select handler"

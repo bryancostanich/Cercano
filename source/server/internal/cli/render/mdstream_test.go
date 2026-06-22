@@ -22,17 +22,34 @@ func TestSplit_TrailingNewlineIsNotASeparator(t *testing.T) {
 	}
 }
 
-func TestSplit_CodeFenceWithBlankLineStaysOneBlock(t *testing.T) {
+func TestSplit_CodeFenceIsCodeBlockWithLang(t *testing.T) {
 	in := "```go\nfunc main() {\n\n}\n```\n\nafter"
 	blocks, tail := SplitBlocks(in)
-	if len(blocks) != 1 || blocks[0].Kind != MdProse {
+	if len(blocks) != 1 || blocks[0].Kind != MdCode {
 		t.Fatalf("blocks = %#v", blocks)
+	}
+	if blocks[0].Lang != "go" {
+		t.Fatalf("lang = %q, want go", blocks[0].Lang)
 	}
 	if blocks[0].Raw != "```go\nfunc main() {\n\n}\n```" {
 		t.Fatalf("fence block raw = %q", blocks[0].Raw)
 	}
 	if tail != "after" {
 		t.Fatalf("tail = %q", tail)
+	}
+}
+
+func TestSplit_CodeFenceSeparatesFromSurroundingProse(t *testing.T) {
+	in := "intro para\n\n```json\n{}\n```\n\noutro para\n"
+	blocks, _ := SplitBlocks(in)
+	if len(blocks) != 2 {
+		t.Fatalf("expected prose + code blocks, got %#v", blocks)
+	}
+	if blocks[0].Kind != MdProse || blocks[0].Raw != "intro para" {
+		t.Fatalf("block 0 = %#v", blocks[0])
+	}
+	if blocks[1].Kind != MdCode || blocks[1].Lang != "json" {
+		t.Fatalf("block 1 = %#v", blocks[1])
 	}
 }
 

@@ -44,7 +44,7 @@ func RegisterTools(r *Registry, c *agentclient.Client) {
 
 	r.Register(Command{
 		Name: "tool",
-		Help: "Invoke a tool directly: /tool <name> <json-args>. R-tier runs silently; W/X-tier prompts to confirm. Example: /tool grep {\"pattern\":\"foo\",\"path\":\".\"}",
+		Help: "Invoke a tool directly: /tool <name> <json-args>. R-tier runs silently. W/X-tier requires /bypass mode for direct invoke (the unary RPC can't surface the confirm prompt); model-driven tool calls in the normal chat flow always go through the streaming confirm gate. Example: /tool grep {\"pattern\":\"foo\",\"path\":\".\"}",
 		Handler: func(args []string) Result {
 			if len(args) == 0 {
 				return Result{Kind: ResultText, Text: "usage: /tool <name> <json-args>   (e.g. /tool list_dir {\"path\":\".\"})"}

@@ -52,22 +52,32 @@ func TestTable_TooWide_DropsLowestPriority(t *testing.T) {
 	}
 }
 
-func TestTable_WrappableTruncatesBeforeDropping(t *testing.T) {
+func TestTable_WrappableWrapsBeforeDropping(t *testing.T) {
 	tbl := Table{
 		Cols: []Column{
 			{Name: "id", Priority: 100},
 			{Name: "desc", Priority: 50, Wrappable: true},
 		},
 		Rows: []map[string]string{
-			{"id": "01", "desc": "a very long description that should be truncated"},
+			{"id": "01", "desc": "a very long description that should wrap"},
 		},
 	}
 	out := stripAnsi(tbl.Render(30, theme.NewStyles(theme.Cracker())))
 	if !strings.Contains(out, "id") || !strings.Contains(out, "desc") {
-		t.Errorf("expected both cols to remain via truncation; got %q", out)
+		t.Errorf("expected both cols to remain via wrapping; got %q", out)
 	}
-	if !strings.Contains(out, "…") {
-		t.Errorf("expected ellipsis from truncation; got %q", out)
+	// Wrap, never truncate: no ellipsis, and every word survives.
+	if strings.Contains(out, "…") {
+		t.Errorf("expected wrapping, not truncation; got %q", out)
+	}
+	for _, word := range []string{"description", "should", "wrap"} {
+		if !strings.Contains(out, word) {
+			t.Errorf("expected word %q preserved by wrapping; got %q", word, out)
+		}
+	}
+	// Wrapping produces a multi-line row → more than the single-row grid height.
+	if strings.Count(out, "\n") < 5 {
+		t.Errorf("expected a multi-line wrapped row; got %q", out)
 	}
 }
 
@@ -102,10 +112,18 @@ func TestTable_Empty(t *testing.T) {
 	}
 }
 
-func TestFormatNumbers(t *testing.T) {
-	// truncate is internal but worth sanity-checking the rune boundary.
-	if got := truncate("hello world", 5); got != "hell…" {
-		t.Errorf("truncate hello world @5: %q", got)
+func TestWrapCell(t *testing.T) {
+	// Word wrap on spaces.
+	if got := wrapCell("hello world", 5); len(got) != 2 || got[0] != "hello" || got[1] != "world" {
+		t.Errorf("wrapCell word-wrap: %q", got)
+	}
+	// Hard-break a word wider than the column.
+	if got := wrapCell("abcdefgh", 5); len(got) != 2 || got[0] != "abcde" || got[1] != "fgh" {
+		t.Errorf("wrapCell hard-break: %q", got)
+	}
+	// Fits on one line.
+	if got := wrapCell("hi", 10); len(got) != 1 || got[0] != "hi" {
+		t.Errorf("wrapCell single line: %q", got)
 	}
 }
 

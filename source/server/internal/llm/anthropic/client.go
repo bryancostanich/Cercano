@@ -73,15 +73,29 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 	params := sdk.MessageNewParams{
 		Model:     sdk.Model(req.Model),
 		MaxTokens: int64(req.MaxTokens),
-		Messages:  []sdk.MessageParam{},
+		Messages:  messagesToSDK(req.Messages),
 	}
+	if req.System != "" {
+		params.System = []sdk.TextBlockParam{{Text: req.System}}
+	}
+	if len(req.Tools) > 0 {
+		params.Tools = toolsToSDK(req.Tools)
+	}
+	if req.Temperature > 0 {
+		params.Temperature = sdk.Float(req.Temperature)
+	}
+
 	resp, err := c.sdk.Messages.New(ctx, params)
 	if err != nil {
 		return ChatResponse{}, err
 	}
-	return ChatResponse{
+	out := ChatResponse{
 		StopReason:   string(resp.StopReason),
 		InputTokens:  int(resp.Usage.InputTokens),
 		OutputTokens: int(resp.Usage.OutputTokens),
-	}, nil
+	}
+	for _, b := range resp.Content {
+		out.Blocks = append(out.Blocks, blockFromSDK(b))
+	}
+	return out, nil
 }

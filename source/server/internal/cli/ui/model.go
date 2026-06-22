@@ -48,6 +48,11 @@ type Entry struct {
 	// with freshly-rendered Table strings at the CURRENT viewport width
 	// every frame, so a terminal resize automatically re-fits each table.
 	Tables []render.Table
+
+	// Tool, when non-nil, makes this entry a tool-call line — Role/Content
+	// are ignored and renderToolEntry produces the visible row. expand /
+	// collapse via tab-focus is a follow-up; V1 renders folded.
+	Tool *ToolEntry
 }
 
 // Model is the Bubble Tea root model.
@@ -724,6 +729,41 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 		if e := m.lastAssistantEntry(); e != nil {
 			e.Streaming = false
 		}
+	case agentclient.TypeToolUseStart:
+		// Model just emitted a tool_use block. Drop a folded in-progress line
+		// into scrollback so the user sees what's being invoked. Args summary
+		// fills in on TypeToolUseStop; result fills in on TypeToolExecComplete.
+		m.entries = append(m.entries, &Entry{
+			Role: RoleSystem,
+			Tool: &ToolEntry{
+				ToolUseID: sm.ToolUseID,
+				ToolName:  sm.ToolName,
+				Status:    ToolStatusInProgress,
+				Folded:    true,
+			},
+		})
+	case agentclient.TypeToolUseStop:
+		// Args block finished streaming — attach the summary to the existing
+		// entry. Silent skip if the start event was missed.
+		if t := m.findToolEntry(sm.ToolUseID); t != nil {
+			t.ArgsSummary = sm.ArgsSummary
+		}
+	case agentclient.TypeToolExecStart:
+		// Server is now running the tool. We already show InProgress from
+		// TypeToolUseStart; nothing to do unless the start was missed.
+		if t := m.findToolEntry(sm.ToolUseID); t != nil {
+			t.Status = ToolStatusInProgress
+		}
+	case agentclient.TypeToolExecComplete:
+		// Tool finished — flip status to ✓ or ⚠ and attach the result summary.
+		if t := m.findToolEntry(sm.ToolUseID); t != nil {
+			if sm.IsError {
+				t.Status = ToolStatusError
+			} else {
+				t.Status = ToolStatusComplete
+			}
+			t.ResultSummary = sm.Summary
+		}
 	case agentclient.TypePermissionRequired:
 		// Server-side tool loop hit a W/X tool and is blocked on a decision.
 		// Raise the confirm prompt; the y/n/esc resolver will RPC back via
@@ -739,6 +779,22 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 	}
 	m.refreshViewport()
 	return m, waitForStream(m.streamCh)
+}
+
+// findToolEntry returns the ToolEntry whose ToolUseID matches id, or nil if
+// no such entry exists. Used by the stream-event handlers to update an
+// in-flight tool-call line as it transitions through use-stop → exec-start →
+// exec-complete.
+func (m Model) findToolEntry(id string) *ToolEntry {
+	if id == "" {
+		return nil
+	}
+	for i := len(m.entries) - 1; i >= 0; i-- {
+		if t := m.entries[i].Tool; t != nil && t.ToolUseID == id {
+			return t
+		}
+	}
+	return nil
 }
 
 func (m Model) lastAssistantEntry() *Entry {
@@ -836,6 +892,13 @@ func (m *Model) renderEntry(e *Entry) string {
 		textW = 8
 	}
 	pad := strings.Repeat(" ", entryIndent)
+
+	// Tool-call entries get their own renderer — folded one-liner with arrow
+	// marker + status glyph. Indented to match the prose left-margin so the
+	// scrollback's vertical rhythm stays consistent.
+	if e.Tool != nil {
+		return indentBlock(pad, renderToolEntry(*e.Tool, textW))
+	}
 
 	switch e.Role {
 	case RoleUser:

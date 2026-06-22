@@ -35,12 +35,12 @@ func TestSlash_Tool_NoArgs_ShowsUsage(t *testing.T) {
 func TestSlash_Tool_DispatchesInvokeTool(t *testing.T) {
 	r := New()
 	RegisterTools(r, nil)
-	res, _ := r.Dispatch(`/tool grep {"pattern":"foo"}`)
+	res, _ := r.Dispatch(`/tool Grep {"pattern":"foo"}`)
 	if res.Kind != ResultInvokeTool {
 		t.Fatalf("kind: got %v want ResultInvokeTool", res.Kind)
 	}
-	if res.ToolName != "grep" {
-		t.Errorf("ToolName: got %q want grep", res.ToolName)
+	if res.ToolName != "Grep" {
+		t.Errorf("ToolName: got %q want Grep", res.ToolName)
 	}
 	if res.ToolArgs != `{"pattern":"foo"}` {
 		t.Errorf("ToolArgs: got %q want {\"pattern\":\"foo\"}", res.ToolArgs)

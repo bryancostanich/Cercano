@@ -58,7 +58,7 @@ func TestToolLoop_SingleToolCall_FeedsResultAndContinues(t *testing.T) {
 		scripts: [][]llm.Block{
 			{
 				{Type: llm.BlockText, Text: "Reading..."},
-				{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "list_dir",
+				{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "LS",
 					ToolInput: json.RawMessage(`{"path":"."}`)},
 			},
 			{{Type: llm.BlockText, Text: "Got it."}},
@@ -87,9 +87,9 @@ func TestToolLoop_RTierRunsConcurrently(t *testing.T) {
 	prov := &mockProvider{
 		scripts: [][]llm.Block{
 			{
-				{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "list_dir",
+				{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "LS",
 					ToolInput: json.RawMessage(`{"path":"."}`)},
-				{Type: llm.BlockToolUse, ToolUseID: "u2", ToolName: "list_dir",
+				{Type: llm.BlockToolUse, ToolUseID: "u2", ToolName: "LS",
 					ToolInput: json.RawMessage(`{"path":"."}`)},
 			},
 			{{Type: llm.BlockText, Text: "done"}},
@@ -128,7 +128,7 @@ func TestToolLoop_RTierRunsConcurrently(t *testing.T) {
 func TestToolLoop_UserDeniesWTier_TerminatesTurn(t *testing.T) {
 	prov := &mockProvider{
 		scripts: [][]llm.Block{{
-			{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "write_file",
+			{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "Write",
 				ToolInput: json.RawMessage(`{"path":"/tmp/x","content":"x"}`)},
 		}},
 		caps: llm.Capabilities{SupportsTools: true},
@@ -199,7 +199,7 @@ func TestToolLoop_3StrikeErrorGuard(t *testing.T) {
 func TestToolLoop_EmitsExpectedEvents(t *testing.T) {
 	prov := &mockProvider{
 		scripts: [][]llm.Block{
-			{{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "list_dir",
+			{{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "LS",
 				ToolInput: json.RawMessage(`{"path":"."}`)}},
 			{{Type: llm.BlockText, Text: "done"}},
 		},
@@ -238,7 +238,7 @@ func TestToolLoop_IterationCap(t *testing.T) {
 	for i := range scripts {
 		scripts[i] = []llm.Block{{
 			Type: llm.BlockToolUse, ToolUseID: fmt.Sprintf("u%d", i),
-			ToolName: "list_dir", ToolInput: json.RawMessage(`{"path":"."}`),
+			ToolName: "LS", ToolInput: json.RawMessage(`{"path":"."}`),
 		}}
 	}
 	prov := &mockProvider{scripts: scripts, caps: llm.Capabilities{SupportsTools: true}}

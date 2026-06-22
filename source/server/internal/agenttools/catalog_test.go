@@ -34,7 +34,7 @@ func TestBuildToolCatalog_PreservesPermissionTier(t *testing.T) {
 	if byName["rm_file"].Permission != llm.PermX {
 		t.Errorf("rm_file should be X, got %v", byName["rm_file"].Permission)
 	}
-	if byName["read_file"].Permission != llm.PermR {
-		t.Errorf("read_file should be R, got %v", byName["read_file"].Permission)
+	if byName["Read"].Permission != llm.PermR {
+		t.Errorf("Read should be R, got %v", byName["Read"].Permission)
 	}
 }

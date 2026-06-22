@@ -128,7 +128,7 @@ func TestStreamToolLoop_PersistsMultiTurnHistory(t *testing.T) {
 	srv, store := newServerWithStore(t)
 	prov := &scriptedProvider{
 		scripts: [][]llm.Block{
-			{{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "list_dir",
+			{{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "LS",
 				ToolInput: json.RawMessage(`{"path":"."}`)}},
 			{{Type: llm.BlockText, Text: "All done."}},
 		},

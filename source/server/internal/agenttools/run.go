@@ -19,10 +19,10 @@ var osEnviron = os.Environ
 // they hit the model context.
 type runCommandTool struct{}
 
-// RunCommand constructs the run_command tool.
+// RunCommand constructs the Bash tool.
 func RunCommand() Tool { return runCommandTool{} }
 
-func (runCommandTool) Name() string             { return "run_command" }
+func (runCommandTool) Name() string             { return "Bash" }
 func (runCommandTool) Permission() Permission   { return PermW }
 func (runCommandTool) Description() string {
 	return "Run a shell command and capture its output. Args: {cmd: [argv strings], cwd?: string, timeout_seconds?: int (default 60), env?: {key: value}}."
@@ -50,10 +50,10 @@ type runCommandArgs struct {
 func (runCommandTool) Execute(ctx context.Context, raw json.RawMessage) (*Result, error) {
 	var a runCommandArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
-		return nil, fmt.Errorf("run_command: parse args: %w", err)
+		return nil, fmt.Errorf("Bash: parse args: %w", err)
 	}
 	if len(a.Cmd) == 0 {
-		return nil, errors.New("run_command: cmd is required and must have at least one element")
+		return nil, errors.New("Bash: cmd is required and must have at least one element")
 	}
 	timeout := time.Duration(a.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
@@ -82,13 +82,13 @@ func (runCommandTool) Execute(ctx context.Context, raw json.RawMessage) (*Result
 		// child on timeout, which surfaces as a non-nil ExitError. Without
 		// this guard the ExitError branch would swallow the timeout.
 		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-			return nil, fmt.Errorf("run_command: timed out after %s", timeout)
+			return nil, fmt.Errorf("Bash: timed out after %s", timeout)
 		}
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
 			exitCode = ee.ExitCode()
 		} else {
-			return nil, fmt.Errorf("run_command: %w", err)
+			return nil, fmt.Errorf("Bash: %w", err)
 		}
 	}
 	// Truncate each stream independently — caps at 16 KiB each so a single

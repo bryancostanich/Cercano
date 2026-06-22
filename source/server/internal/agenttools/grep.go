@@ -18,10 +18,10 @@ import (
 // raw stdout of either backend.
 type grepTool struct{}
 
-// Grep constructs the grep tool.
+// Grep constructs the Grep tool.
 func Grep() Tool { return grepTool{} }
 
-func (grepTool) Name() string             { return "grep" }
+func (grepTool) Name() string             { return "Grep" }
 func (grepTool) Permission() Permission   { return PermR }
 func (grepTool) Description() string {
 	return "Search files under a directory for a pattern. Returns rows of {path, line, content}. Prefers ripgrep when present; falls back to grep. Args: {pattern: string, path?: string, case_insensitive?: bool, glob?: string}."
@@ -49,10 +49,10 @@ type grepArgs struct {
 func (grepTool) Execute(ctx context.Context, raw json.RawMessage) (*Result, error) {
 	var a grepArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
-		return nil, fmt.Errorf("grep: parse args: %w", err)
+		return nil, fmt.Errorf("Grep: parse args: %w", err)
 	}
 	if a.Pattern == "" {
-		return nil, errors.New("grep: pattern is required")
+		return nil, errors.New("Grep: pattern is required")
 	}
 	if a.Path == "" {
 		a.Path = "."

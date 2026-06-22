@@ -18,10 +18,10 @@ import (
 // policy on large files.
 type readFileTool struct{}
 
-// ReadFile constructs the read_file tool.
+// ReadFile constructs the Read tool.
 func ReadFile() Tool { return readFileTool{} }
 
-func (readFileTool) Name() string       { return "read_file" }
+func (readFileTool) Name() string       { return "Read" }
 func (readFileTool) Permission() Permission { return PermR }
 func (readFileTool) Description() string {
 	return "Read a UTF-8 text file from disk. Returns the file contents, capped at 32 KiB. Refuses binary files. Args: {path: string, start?: int, end?: int}."
@@ -47,17 +47,17 @@ type readFileArgs struct {
 func (readFileTool) Execute(ctx context.Context, raw json.RawMessage) (*Result, error) {
 	var a readFileArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
-		return nil, fmt.Errorf("read_file: parse args: %w", err)
+		return nil, fmt.Errorf("Read: parse args: %w", err)
 	}
 	if a.Path == "" {
-		return nil, errors.New("read_file: path is required")
+		return nil, errors.New("Read: path is required")
 	}
 	data, err := os.ReadFile(a.Path)
 	if err != nil {
-		return nil, fmt.Errorf("read_file: %w", err)
+		return nil, fmt.Errorf("Read: %w", err)
 	}
 	if looksBinary(data) {
-		return nil, fmt.Errorf("read_file: %s appears to be binary; refusing to read", a.Path)
+		return nil, fmt.Errorf("Read: %s appears to be binary; refusing to read", a.Path)
 	}
 	text := string(data)
 	if a.Start > 0 || a.End > 0 {
@@ -98,10 +98,10 @@ func selectLines(text string, start, end int) string {
 // listDirTool returns the entries of a directory as rows with name/type/size.
 type listDirTool struct{}
 
-// ListDir constructs the list_dir tool.
+// ListDir constructs the LS tool.
 func ListDir() Tool { return listDirTool{} }
 
-func (listDirTool) Name() string             { return "list_dir" }
+func (listDirTool) Name() string             { return "LS" }
 func (listDirTool) Permission() Permission   { return PermR }
 func (listDirTool) Description() string {
 	return "List entries of a directory with name, type, and size. Args: {path: string, hidden?: bool}. Default skips dotfiles."
@@ -125,14 +125,14 @@ type listDirArgs struct {
 func (listDirTool) Execute(ctx context.Context, raw json.RawMessage) (*Result, error) {
 	var a listDirArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
-		return nil, fmt.Errorf("list_dir: parse args: %w", err)
+		return nil, fmt.Errorf("LS: parse args: %w", err)
 	}
 	if a.Path == "" {
-		return nil, errors.New("list_dir: path is required")
+		return nil, errors.New("LS: path is required")
 	}
 	entries, err := os.ReadDir(a.Path)
 	if err != nil {
-		return nil, fmt.Errorf("list_dir: %w", err)
+		return nil, fmt.Errorf("LS: %w", err)
 	}
 	rows := make([]map[string]any, 0, len(entries))
 	for _, e := range entries {
@@ -221,4 +221,57 @@ func (statFileTool) Execute(ctx context.Context, raw json.RawMessage) (*Result, 
 		"size":   info.Size(),
 		"mtime":  info.ModTime().UTC().Format(time.RFC3339),
 	}}}, nil
+}
+
+// globTool matches paths against a glob pattern via filepath.Glob.
+type globTool struct{}
+
+// Glob constructs the Glob tool.
+func Glob() Tool { return globTool{} }
+
+func (globTool) Name() string             { return "Glob" }
+func (globTool) Permission() Permission   { return PermR }
+func (globTool) Description() string {
+	// V1 limitation: uses Go stdlib filepath.Glob, which does NOT support
+	// `**` recursive descent. Patterns are evaluated relative to `path`
+	// (defaults to cwd).
+	return "Match paths against a glob pattern. Returns matching paths one per line, sorted. Does NOT support ** recursive globbing in V1. Args: {pattern: string, path?: string}."
+}
+func (globTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"required": ["pattern"],
+		"properties": {
+			"pattern": {"type": "string", "description": "Glob pattern, e.g. 'README*' or '*.go'. Does NOT support ** recursive globbing in V1."},
+			"path":    {"type": "string", "description": "Optional directory to glob within. Defaults to current working directory."}
+		}
+	}`)
+}
+
+type globArgs struct {
+	Pattern string `json:"pattern"`
+	Path    string `json:"path"`
+}
+
+func (globTool) Execute(ctx context.Context, raw json.RawMessage) (*Result, error) {
+	var a globArgs
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return nil, fmt.Errorf("Glob: parse args: %w", err)
+	}
+	if a.Pattern == "" {
+		return nil, errors.New("Glob: pattern is required")
+	}
+	pat := a.Pattern
+	if a.Path != "" {
+		pat = filepath.Join(a.Path, a.Pattern)
+	}
+	matches, err := filepath.Glob(pat)
+	if err != nil {
+		return nil, fmt.Errorf("Glob: %w", err)
+	}
+	if len(matches) == 0 {
+		return &Result{Type: ResultText, Text: "(no matches)", Note: "0 matches"}, nil
+	}
+	sort.Strings(matches)
+	return NewTextResult(strings.Join(matches, "\n") + "\n"), nil
 }

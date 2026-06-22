@@ -122,3 +122,36 @@ func TestToolLoop_RTierRunsConcurrently(t *testing.T) {
 		t.Errorf("missing tool results: u1=%v u2=%v", found1, found2)
 	}
 }
+
+func TestToolLoop_UserDeniesWTier_TerminatesTurn(t *testing.T) {
+	prov := &mockProvider{
+		scripts: [][]llm.Block{{
+			{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "write_file",
+				ToolInput: json.RawMessage(`{"path":"/tmp/x","content":"x"}`)},
+		}},
+		caps: llm.Capabilities{SupportsTools: true},
+	}
+	reg := agenttools.DefaultRegistry()
+	dir := t.TempDir()
+	perms, _ := LoadPermissionStore(dir + "/perms.yaml")
+	_ = perms.SetMode(ModeStrict)
+
+	requester := func(ctx context.Context, name string, args json.RawMessage, tier llm.Permission) (bool, error) {
+		return false, nil
+	}
+
+	result, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider: prov, Registry: reg, Permissions: perms,
+		PermissionRequester: requester, UserInput: "write x",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prov.calls != 1 {
+		t.Errorf("denial should NOT cause another loop iteration; calls=%d", prov.calls)
+	}
+	last := result.History[len(result.History)-1]
+	if last.Role != llm.RoleUser || len(last.Blocks) == 0 || !last.Blocks[0].IsError {
+		t.Errorf("expected error tool_result, got %+v", last)
+	}
+}

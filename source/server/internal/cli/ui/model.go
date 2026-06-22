@@ -61,11 +61,6 @@ type Model struct {
 	// used to hit-test scrollbar mouse events. Set in relayout().
 	scrollbarTop int
 
-	// inputTop is the absolute screen row of the prompt input's first line,
-	// used to hit-test mouse-wheel events over the (multi-line) prompt. Set in
-	// relayout().
-	inputTop int
-
 	// scrollbarDragging is true while the user holds the mouse on the
 	// scrollbar; motion events then scrub the viewport scroll position.
 	scrollbarDragging bool
@@ -458,23 +453,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.selection.Dragging {
 			return m, nil
 		}
-		// Scroll the textarea only when it's multi-line AND the pointer is
-		// actually over the input's rows; otherwise scroll the chat scrollback.
-		y := msg.Mouse().Y
-		overInput := m.input.Height() > 1 && y >= m.inputTop && y < m.inputTop+m.input.Height()
-		if overInput {
-			// Drive the cursor rather than feed the raw wheel: the textarea's
-			// own wheel scroll overscrolls past the content into empty lines and
-			// is asymmetric. Moving the cursor lets the view follow, clamped to
-			// the content, symmetric both directions.
-			switch msg.Button {
-			case ansi.MouseWheelUp:
-				m.input.CursorUp()
-			case ansi.MouseWheelDown:
-				m.input.CursorDown()
-			}
-			return m, nil
-		}
+		// The wheel always scrolls the chat scrollback. The multi-line prompt is
+		// navigated with the up/down arrow keys (the textarea has no clean way to
+		// scroll its view without moving the cursor or overscrolling into blank
+		// padding rows).
 		var cmd tea.Cmd
 		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
@@ -1162,15 +1144,6 @@ func (m *Model) relayout() {
 	}
 	m.viewport.SetWidth(contentW - 2) // reserve two right columns: a gap + the scrollbar
 	m.viewport.SetHeight(bodyH)
-
-	// The prompt input's first screen row: below the viewport, the recap line
-	// (if any), the divider above the input, and the suggestion line (if any).
-	recapH := 0
-	if m.recap != "" {
-		recapH = strings.Count(m.renderRecap(), "\n") + 1
-	}
-	m.inputTop = m.scrollbarTop + bodyH + recapH + 1 + suggestH
-
 	m.refreshViewport()
 }
 

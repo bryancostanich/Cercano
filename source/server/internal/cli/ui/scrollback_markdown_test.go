@@ -46,6 +46,21 @@ func TestAssistantMarkdown_FormatsProseAndTable(t *testing.T) {
 	}
 }
 
+func TestAssistantMarkdown_HeadingsDropHashMarker(t *testing.T) {
+	m := &Model{
+		styles: theme.NewStyles(theme.Cracker()),
+		md:     render.NewMarkdown(theme.CrackerMarkdownStyle()),
+	}
+	e := &Entry{Role: RoleAssistant, Content: "# Title\n\n## Subtitle\n\nbody\n"}
+	vis := plain(m.renderAssistantMarkdown(e, 60))
+	if strings.Contains(vis, "#") {
+		t.Fatalf("expected no '#' markers in rendered headings: %q", vis)
+	}
+	if !strings.Contains(vis, "Title") || !strings.Contains(vis, "Subtitle") {
+		t.Fatalf("heading text missing: %q", vis)
+	}
+}
+
 func TestAssistantMarkdown_OpenFenceTailRenders(t *testing.T) {
 	m := &Model{
 		styles: theme.NewStyles(theme.Cracker()),

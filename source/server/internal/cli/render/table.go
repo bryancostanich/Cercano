@@ -34,6 +34,10 @@ type Table struct {
 // rules (in order): drop lowest-priority columns → truncate the wrappable
 // column with `…` → transpose to key:value pairs. Always readable; never
 // scrambled.
+// minWrapWidth is the narrowest the wrappable column shrinks to before we'd
+// rather drop a column than wrap into an unreadable sliver.
+const minWrapWidth = 12
+
 func (t Table) Render(maxWidth int, styles theme.Styles) string {
 	if len(t.Cols) == 0 || len(t.Rows) == 0 {
 		return styles.Muted.Render("(empty table)")
@@ -49,12 +53,14 @@ func (t Table) Render(maxWidth int, styles theme.Styles) string {
 		if total <= maxWidth {
 			return renderGrid(cols, widths, t.Rows, styles, dropped)
 		}
-		// Try truncating the wrappable column to fit, before dropping more.
-		if i := wrappableIdx(cols); i >= 0 && widths[i] > 8 {
+		// Shrink the wrappable column to the leftover width and let renderGrid
+		// WRAP its cells across multiple lines (never truncate). Only if even a
+		// readable minimum won't fit do we fall through to dropping a column.
+		if i := wrappableIdx(cols); i >= 0 && widths[i] > minWrapWidth {
 			over := total - maxWidth
 			newW := widths[i] - over
-			if newW < 6 {
-				newW = 6
+			if newW < minWrapWidth {
+				newW = minWrapWidth
 			}
 			widths[i] = newW
 			total = totalGridWidth(widths)
@@ -146,21 +152,33 @@ func renderGrid(cols []Column, widths []int, rows []map[string]string, styles th
 	b.WriteString(styles.Border.Render(borderRow("├", "┼", "┤", "─", widths)))
 	b.WriteString("\n")
 
-	// Data rows.
+	// Data rows. Cells wrap (never truncate) to their column width, so a row
+	// can span multiple terminal lines; non-wrapping cells sit on the first
+	// line with blanks beneath.
 	for _, r := range rows {
-		b.WriteString(styles.Border.Render("│"))
+		cellLines := make([][]string, len(cols))
+		rowH := 1
 		for i, c := range cols {
-			val := r[c.Name]
-			if lipgloss.Width(val) > widths[i] {
-				val = truncate(val, widths[i])
+			cellLines[i] = wrapCell(r[c.Name], widths[i])
+			if len(cellLines[i]) > rowH {
+				rowH = len(cellLines[i])
 			}
-			cell := padCell(val, widths[i])
-			b.WriteString(" ")
-			b.WriteString(styles.Primary.Render(cell))
-			b.WriteString(" ")
-			b.WriteString(styles.Border.Render("│"))
 		}
-		b.WriteString("\n")
+		for k := 0; k < rowH; k++ {
+			b.WriteString(styles.Border.Render("│"))
+			for i := range cols {
+				cell := ""
+				if k < len(cellLines[i]) {
+					cell = cellLines[i][k]
+				}
+				cell = padCell(cell, widths[i])
+				b.WriteString(" ")
+				b.WriteString(styles.Primary.Render(cell))
+				b.WriteString(" ")
+				b.WriteString(styles.Border.Render("│"))
+			}
+			b.WriteString("\n")
+		}
 	}
 
 	// Bottom border: └──┴──┘
@@ -222,20 +240,56 @@ func padCell(val string, targetWidth int) string {
 	return val + strings.Repeat(" ", targetWidth-w)
 }
 
-// truncate cuts val to maxWidth visible columns, ending with `…` if cut.
-func truncate(val string, maxWidth int) string {
-	if maxWidth <= 1 {
-		return "…"
+// wrapCell word-wraps s to fit within width columns, returning one string per
+// line (always at least one). Words longer than the column are hard-broken so
+// nothing is lost — wrap, never truncate.
+func wrapCell(s string, width int) []string {
+	if width < 1 {
+		width = 1
 	}
-	cum := 0
-	for i, r := range val {
-		w := lipgloss.Width(string(r))
-		if cum+w > maxWidth-1 {
-			return val[:i] + "…"
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return []string{""}
+	}
+	var lines []string
+	cur := ""
+	for _, w := range words {
+		// Hard-break a word that's wider than the whole column.
+		for lipgloss.Width(w) > width {
+			if cur != "" {
+				lines = append(lines, cur)
+				cur = ""
+			}
+			head, tail := cutRunes(w, width)
+			lines = append(lines, head)
+			w = tail
 		}
-		cum += w
+		switch {
+		case cur == "":
+			cur = w
+		case lipgloss.Width(cur)+1+lipgloss.Width(w) <= width:
+			cur += " " + w
+		default:
+			lines = append(lines, cur)
+			cur = w
+		}
 	}
-	return val
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
+}
+
+// cutRunes splits s into a head of at most width runes and the remainder.
+func cutRunes(s string, width int) (head, tail string) {
+	r := []rune(s)
+	if len(r) <= width {
+		return s, ""
+	}
+	return string(r[:width]), string(r[width:])
 }
 
 // softWrap wraps text to fit lineWidth columns. Continuation lines are

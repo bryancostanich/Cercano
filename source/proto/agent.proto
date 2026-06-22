@@ -27,6 +27,7 @@ service Agent {
   rpc ResumeConversation (ResumeConversationRequest) returns (ResumeConversationResponse) {}
   rpc DeleteConversation (DeleteConversationRequest) returns (DeleteConversationResponse) {}
   rpc RenameConversation (RenameConversationRequest) returns (RenameConversationResponse) {}
+  rpc GetConversation (GetConversationRequest) returns (Conversation) {}
 
   // GetContextUsage reports cumulative token usage vs. the active model's
   // context window for a conversation. The CLI status bar polls this after
@@ -168,6 +169,8 @@ message Conversation {
   int64  started_at = 5;        // unix seconds
   int64  last_turn_at = 6;
   int32  turn_count = 7;
+  string recap = 8;
+  int64  recap_updated_at = 9;
 }
 
 // PersistedTurn is one stored role-emission returned by Resume.
@@ -198,6 +201,8 @@ message DeleteConversationResponse { bool ok = 1; }
 
 message RenameConversationRequest  { string conversation_id = 1; string title = 2; }
 message RenameConversationResponse { bool ok = 1; }
+
+message GetConversationRequest { string conversation_id = 1; }
 
 // Context-window usage for a conversation. Used is the cumulative tokens
 // counted for this conversation; max is the conventional context-window

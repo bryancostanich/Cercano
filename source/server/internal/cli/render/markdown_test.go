@@ -1,9 +1,38 @@
 package render
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"cercano/source/server/internal/cli/theme"
+)
 
 // These exercise matchTable's detection rules through SplitBlocks, which is the
 // only consumer now that InterceptMarkdownTables is retired.
+
+func TestTable_KeepsFirstColumnWhenNarrow(t *testing.T) {
+	in := "| Key | Mid | Desc |\n| --- | --- | --- |\n" +
+		"| K1 | M1 | a long explanatory field that forces the table to shrink |\n\nafter"
+	blocks, _ := SplitBlocks(in)
+	var tbl *Table
+	for _, b := range blocks {
+		if b.Kind == MdTable {
+			tbl = b.Table
+		}
+	}
+	if tbl == nil {
+		t.Fatal("expected a table block")
+	}
+	out := stripAnsi(tbl.Render(22, theme.NewStyles(theme.Cracker())))
+	// The key column and its data must survive a narrow render.
+	if !strings.Contains(out, "Key") || !strings.Contains(out, "K1") {
+		t.Fatalf("first/key column was dropped: %q", out)
+	}
+	// It must never be the dropped one.
+	if strings.Contains(out, "dropped: Key") {
+		t.Fatalf("key column should be dropped last, never first: %q", out)
+	}
+}
 
 func TestMatch_RejectsBareTextWithPipes(t *testing.T) {
 	// Bare pipes without a separator row are not a markdown table.

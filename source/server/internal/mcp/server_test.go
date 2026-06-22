@@ -104,6 +104,26 @@ func (m *mockAgentClient) GetSkill(ctx context.Context, in *proto.GetSkillReques
 	return &proto.GetSkillResponse{}, m.getSkillErr
 }
 
+func (m *mockAgentClient) AllowToolCall(ctx context.Context, in *proto.AllowToolCallRequest, opts ...grpc.CallOption) (*proto.AllowToolCallResponse, error) {
+	return &proto.AllowToolCallResponse{}, nil
+}
+
+func (m *mockAgentClient) DenyToolCall(ctx context.Context, in *proto.DenyToolCallRequest, opts ...grpc.CallOption) (*proto.DenyToolCallResponse, error) {
+	return &proto.DenyToolCallResponse{}, nil
+}
+
+func (m *mockAgentClient) GetPermissionMode(ctx context.Context, in *proto.GetPermissionModeRequest, opts ...grpc.CallOption) (*proto.GetPermissionModeResponse, error) {
+	return &proto.GetPermissionModeResponse{}, nil
+}
+
+func (m *mockAgentClient) GetProviderCapabilities(ctx context.Context, in *proto.GetProviderCapabilitiesRequest, opts ...grpc.CallOption) (*proto.GetProviderCapabilitiesResponse, error) {
+	return &proto.GetProviderCapabilitiesResponse{}, nil
+}
+
+func (m *mockAgentClient) SetPermissionMode(ctx context.Context, in *proto.SetPermissionModeRequest, opts ...grpc.CallOption) (*proto.SetPermissionModeResponse, error) {
+	return &proto.SetPermissionModeResponse{}, nil
+}
+
 func TestNewServer_RegistersTools(t *testing.T) {
 	mock := &mockAgentClient{}
 	s := NewServer(mock)

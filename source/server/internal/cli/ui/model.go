@@ -758,7 +758,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// must call refreshViewport so the per-frame color sweep is pushed
 		// into the viewport's content cache; without this, View renders the
 		// last-set content and the animation appears frozen.
-		if e := m.lastAssistantEntry(); e != nil && e.Streaming && e.Content == "" {
+		if e := m.streamingTextEntry(); e != nil && e.Content == "" {
 			m.refreshViewport()
 			return m, progressAnimTick()
 		}
@@ -872,26 +872,38 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 	switch sm.Type {
 	case agentclient.TypeToken:
-		if e := m.lastAssistantEntry(); e != nil {
-			e.Content += sm.Token
-			// Once real tokens arrive, the pre-stream progress note is
-			// no longer relevant; clear so the renderer drops it.
-			e.Status = ""
+		// Append to the open text entry, or start a fresh one if the previous
+		// segment was closed by a tool call — so post-tool prose lands BELOW the
+		// tools in scrollback rather than in the pre-tool placeholder.
+		e := m.streamingTextEntry()
+		if e == nil {
+			e = &Entry{Role: RoleAssistant, Streaming: true}
+			m.entries = append(m.entries, e)
 		}
+		e.Content += sm.Token
+		// Once real tokens arrive, the pre-stream progress note is
+		// no longer relevant; clear so the renderer drops it.
+		e.Status = ""
 	case agentclient.TypeProgress:
-		// Collapse progress messages onto the live assistant entry's Status
-		// field — one line that mutates as the agent advances through phases
-		// (classifying intent → selecting provider → generating response).
-		// Falls back to a normal system entry if there's no streaming assistant
-		// to attach to.
+		// Collapse progress messages onto the open (empty) assistant entry's
+		// Status field — one line that mutates as the agent advances through
+		// phases. Falls back to a normal system entry if there's no open
+		// streaming assistant to attach to.
 		note := normalizeProgress(sm.Note)
-		if e := m.lastAssistantEntry(); e != nil && e.Streaming && e.Content == "" {
+		if e := m.streamingTextEntry(); e != nil && e.Content == "" {
 			e.Status = note
 		} else {
 			m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: note})
 		}
 	case agentclient.TypeDone:
-		if e := m.lastAssistantEntry(); e != nil {
+		e := m.streamingTextEntry()
+		if e == nil && sm.Final != "" {
+			// Tools ran but no post-tool tokens streamed; surface the final
+			// answer as a fresh entry below them.
+			e = &Entry{Role: RoleAssistant}
+			m.entries = append(m.entries, e)
+		}
+		if e != nil {
 			// If we never received any tokens, fall back to the full final response.
 			if e.Content == "" {
 				e.Content = sm.Final
@@ -918,14 +930,23 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 			m.lastModel = sm.Model
 		}
 	case agentclient.TypeError:
-		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "stream error: " + sm.Err.Error()})
-		if e := m.lastAssistantEntry(); e != nil {
+		if e := m.streamingTextEntry(); e != nil {
 			e.Streaming = false
 		}
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "stream error: " + sm.Err.Error()})
 	case agentclient.TypeToolUseStart:
-		// Model just emitted a tool_use block. Drop a folded in-progress line
-		// into scrollback so the user sees what's being invoked. Args summary
-		// fills in on TypeToolUseStop; result fills in on TypeToolExecComplete.
+		// Model just emitted a tool_use block. Close the open assistant text
+		// entry first: drop it if it's only the empty "thinking" placeholder,
+		// otherwise stop its streaming indicator. Then drop a folded in-progress
+		// line so the user sees what's being invoked. Args summary fills in on
+		// TypeToolUseStop; result fills in on TypeToolExecComplete.
+		if e := m.streamingTextEntry(); e != nil {
+			if e.Content == "" {
+				m.entries = m.entries[:len(m.entries)-1]
+			} else {
+				e.Streaming = false
+			}
+		}
 		m.entries = append(m.entries, &Entry{
 			Role: RoleSystem,
 			Tool: &ToolEntry{
@@ -1007,6 +1028,20 @@ func (m Model) lastAssistantEntry() *Entry {
 	for i := len(m.entries) - 1; i >= 0; i-- {
 		if m.entries[i].Role == RoleAssistant {
 			return m.entries[i]
+		}
+	}
+	return nil
+}
+
+// streamingTextEntry returns the currently-open assistant text entry: the last
+// entry, and only if it is a streaming assistant. Streamed tokens append here.
+// Appending any other entry (e.g. a tool call) "closes" it, so the next text
+// starts a fresh entry positioned BELOW the tools — keeping scrollback in the
+// order things actually happened (pre-tool prose, tool calls, then the answer).
+func (m Model) streamingTextEntry() *Entry {
+	if n := len(m.entries); n > 0 {
+		if e := m.entries[n-1]; e.Role == RoleAssistant && e.Streaming {
+			return e
 		}
 	}
 	return nil

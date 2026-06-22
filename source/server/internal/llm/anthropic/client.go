@@ -1,0 +1,87 @@
+package anthropic
+
+import (
+	"context"
+	"net/http"
+
+	sdk "github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
+
+	"cercano/source/server/internal/llm"
+)
+
+type Config struct {
+	BaseURL   string
+	APIKey    string
+	Model     string
+	UserAgent string
+}
+
+type ChatRequest = llm.ChatRequest
+type ChatResponse = llm.ChatResponse
+
+type Client struct {
+	cfg Config
+	sdk *sdk.Client
+}
+
+type uaRoundTripper struct {
+	base http.RoundTripper
+	ua   string
+}
+
+func (u *uaRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
+	if u.ua != "" {
+		r.Header.Set("User-Agent", u.ua)
+	}
+	return u.base.RoundTrip(r)
+}
+
+func NewClient(cfg Config) *Client {
+	apiKey := cfg.APIKey
+	if apiKey == "" {
+		apiKey = "dummy"
+	}
+	opts := []option.RequestOption{
+		option.WithAPIKey(apiKey),
+	}
+	if cfg.BaseURL != "" {
+		opts = append(opts, option.WithBaseURL(cfg.BaseURL))
+	}
+	if cfg.UserAgent != "" {
+		opts = append(opts, option.WithHTTPClient(&http.Client{
+			Transport: &uaRoundTripper{base: http.DefaultTransport, ua: cfg.UserAgent},
+		}))
+	}
+	c := sdk.NewClient(opts...)
+	return &Client{cfg: cfg, sdk: &c}
+}
+
+func (c *Client) Name() string { return "anthropic" }
+
+func (c *Client) Capabilities() llm.Capabilities {
+	return llm.Capabilities{
+		SupportsTools:         true,
+		SupportsParallelTools: true,
+		SupportsCaching:       true,
+		SupportsVision:        true,
+		MaxToolsPerCall:       0,
+	}
+}
+
+func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+	params := sdk.MessageNewParams{
+		Model:     sdk.Model(req.Model),
+		MaxTokens: int64(req.MaxTokens),
+		Messages:  []sdk.MessageParam{},
+	}
+	resp, err := c.sdk.Messages.New(ctx, params)
+	if err != nil {
+		return ChatResponse{}, err
+	}
+	return ChatResponse{
+		StopReason:   string(resp.StopReason),
+		InputTokens:  int(resp.Usage.InputTokens),
+		OutputTokens: int(resp.Usage.OutputTokens),
+	}, nil
+}

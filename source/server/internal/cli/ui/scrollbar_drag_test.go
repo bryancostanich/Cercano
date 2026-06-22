@@ -38,6 +38,18 @@ func barDrag(t *testing.T, m Model) int {
 	return m.viewport.YOffset()
 }
 
+// Regression (root cause from live trace): a click in the rightmost column is
+// reported by some terminals as X=width — one past the bar at width-1. The grab
+// must still register and the drag must scroll.
+func TestScrollbarGrabAtRightEdge(t *testing.T) {
+	m := buildDragModel() // width 80 → bar at column 79
+	m = send(t, m, tea.MouseClickMsg{X: 80, Y: 2, Button: tea.MouseLeft})  // X == width (off by one)
+	m = send(t, m, tea.MouseMotionMsg{X: 80, Y: 9, Button: tea.MouseLeft}) // drag down
+	if got := m.viewport.YOffset(); got == 0 {
+		t.Fatalf("bar grab at right edge (X=width=%d) did not scroll (yoff=0)", 80)
+	}
+}
+
 // Control: a fresh scrollbar drag with no prior interaction must scroll.
 func TestScrollbarDragFresh(t *testing.T) {
 	if got := barDrag(t, buildDragModel()); got == 0 {
@@ -59,6 +71,21 @@ func TestScrollbarDragWinsOverStuckSelection(t *testing.T) {
 	}
 	if got := barDrag(t, m); got == 0 {
 		t.Fatalf("scrollbar drag hijacked by stuck selection.Dragging (yoff stayed 0)")
+	}
+}
+
+// Regression: make a real text selection in the viewport (press, motion,
+// release → non-empty → auto-copy-on-release), then drag the scrollbar. It must
+// scroll.
+func TestScrollbarDragAfterViewportSelectAndCopy(t *testing.T) {
+	m := buildDragModel()
+	m = send(t, m, tea.MouseClickMsg{X: 2, Y: 4, Button: tea.MouseLeft})   // press → beginSelection
+	m = send(t, m, tea.MouseMotionMsg{X: 6, Y: 4, Button: tea.MouseLeft})  // drag-select
+	m = send(t, m, tea.MouseReleaseMsg{X: 6, Y: 4, Button: tea.MouseLeft}) // release → auto-copy
+	t.Logf("after select+copy: selDrag=%v selActive=%v sbDrag=%v",
+		m.selection.Dragging, m.selection.Active, m.scrollbarDragging)
+	if got := barDrag(t, m); got == 0 {
+		t.Fatalf("scrollbar drag after viewport select+copy did not scroll (yoff=0)")
 	}
 }
 

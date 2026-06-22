@@ -145,6 +145,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	slash.RegisterColor(reg)
 	slash.RegisterContext(reg)
 	slash.RegisterTools(reg, ag)
+	slash.RegisterPermissions(reg, ag)
 	// currentConv is captured by reference so it always returns the active
 	// conversation id even after /resume swaps it.
 	convRef := &struct{ id string }{}

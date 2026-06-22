@@ -45,11 +45,6 @@ type Entry struct {
 	// progress messages while Content is empty; shown in place of the
 	// "thinking…" placeholder. Cleared as soon as tokens start arriving.
 	Status string
-	// Tables are markdown tables extracted from Content at stream-done.
-	// Content carries `{{TABLE_N}}` sentinels; renderEntry substitutes them
-	// with freshly-rendered Table strings at the CURRENT viewport width
-	// every frame, so a terminal resize automatically re-fits each table.
-	Tables []render.Table
 
 	// Tool, when non-nil, makes this entry a tool-call line — Role/Content
 	// are ignored and renderToolEntry produces the visible row. expand /
@@ -63,6 +58,10 @@ type Model struct {
 
 	palette theme.Palette
 	styles  theme.Styles
+
+	// md renders assistant markdown prose. Holds per-width Glamour renderers
+	// and a render cache for committed blocks.
+	md *render.Markdown
 
 	agent  *agentclient.Client
 	convID string
@@ -192,6 +191,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	return Model{
 		palette:            p,
 		styles:             s,
+		md:                 render.NewMarkdown(theme.CrackerMarkdownStyle()),
 		agent:              ag,
 		convID:             initialConvID,
 		convRef:            convRef,
@@ -794,12 +794,6 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 				e.Content = sm.Final
 			}
 			e.Streaming = false
-			// Extract markdown tables into Entry.Tables; Content keeps the
-			// `{{TABLE_N}}` sentinels. renderEntry re-renders each table at
-			// the current viewport width every frame, so resize auto-refits.
-			cleaned, tables := render.InterceptMarkdownTables(e.Content)
-			e.Content = cleaned
-			e.Tables = tables
 		}
 		// Surface non-fatal notices (e.g. "cloud not configured — answered
 		// locally") as a system entry above the assistant content. Sticks
@@ -1024,35 +1018,20 @@ func (m *Model) renderEntry(e *Entry, idx int) string {
 		return strings.Join(lines, "\n")
 
 	case RoleAssistant:
-		content := e.Content
-		if e.Streaming && content == "" {
+		// Pre-stream placeholder: no content yet, show the animated status.
+		if e.Streaming && e.Content == "" {
 			status := e.Status
 			if status == "" {
 				status = "thinking…"
 			}
-			content = animateSpinnerGlyph() + " " + animateLimeSweep(status)
-		} else if e.Streaming {
-			content = e.Content + m.styles.Accent.Render(" ⟳")
+			content := animateSpinnerGlyph() + " " + animateLimeSweep(status)
+			return indentBlock(pad, content)
 		}
-		// Substitute table sentinels with freshly-rendered tables at the
-		// current text width. Done every frame so resize re-fits without
-		// losing the parsed table data.
-		if len(e.Tables) > 0 {
-			for i, t := range e.Tables {
-				marker := fmt.Sprintf("{{TABLE_%d}}", i)
-				rendered := t.Render(textW, m.styles)
-				content = strings.Replace(content, marker, rendered, 1)
-			}
-			// Skip the outer lipgloss Width wrap; tables already fit textW
-			// and re-wrapping a styled multi-line block would break its
-			// columns. Prose lines stay full-width by virtue of the agent
-			// emitting reasonable line lengths.
-			styled := m.styles.AgentProse.Render(content)
-			return indentBlock(pad, styled)
+		rendered := m.renderAssistantMarkdown(e, textW)
+		if e.Streaming {
+			rendered += m.styles.Accent.Render(" ⟳")
 		}
-		styled := m.styles.AgentProse.Render(content)
-		wrapped := lipgloss.NewStyle().Width(textW).Render(styled)
-		return indentBlock(pad, wrapped)
+		return indentBlock(pad, rendered)
 
 	case RoleSystem:
 		styled := m.styles.Muted.Render(e.Content)
@@ -1060,6 +1039,45 @@ func (m *Model) renderEntry(e *Entry, idx int) string {
 		return indentBlock(pad, wrapped)
 	}
 	return e.Content
+}
+
+// renderAssistantMarkdown splits the assistant buffer into completed blocks plus
+// a live tail, rendering prose via Glamour and tables via the responsive Table
+// renderer. Committed blocks are cached; the tail renders live (with any open
+// code fence synthetically closed) so streaming code highlights as it grows.
+func (m *Model) renderAssistantMarkdown(e *Entry, textW int) string {
+	blocks, tail := render.SplitBlocks(e.Content)
+	var parts []string
+	for _, b := range blocks {
+		parts = append(parts, m.renderMdBlock(b, textW))
+	}
+	if strings.TrimSpace(tail) != "" {
+		parts = append(parts, m.md.RenderLive(closeOpenFence(tail), textW))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func (m *Model) renderMdBlock(b render.MdBlock, textW int) string {
+	if b.Kind == render.MdTable && b.Table != nil {
+		return b.Table.Render(textW, m.styles)
+	}
+	return m.md.Render(b.Raw, textW)
+}
+
+// closeOpenFence appends a closing code fence when the tail has an odd number of
+// fence lines, so Glamour renders an in-progress code block instead of leaking
+// the rest as raw text.
+func closeOpenFence(s string) string {
+	n := 0
+	for _, ln := range strings.Split(s, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(ln), "```") {
+			n++
+		}
+	}
+	if n%2 == 1 {
+		return s + "\n```"
+	}
+	return s
 }
 
 // animateSpinnerGlyph renders the spinner symbol with two layered motions:

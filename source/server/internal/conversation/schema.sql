@@ -24,3 +24,9 @@ CREATE TABLE IF NOT EXISTS turns (
     created_at      INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_turns_conv ON turns(conversation_id, created_at);
+
+-- Migration: content_json holds the ordered Anthropic-format block array for
+-- assistant turns with tool_use/tool_result. Text-only turns leave this empty
+-- and use `content`. Idempotency is handled in Go (PRAGMA table_info check)
+-- because SQLite ALTER TABLE ADD COLUMN has no IF NOT EXISTS in the embedded
+-- modernc.org/sqlite version.

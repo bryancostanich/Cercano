@@ -43,6 +43,7 @@ type Turn struct {
 	ConversationID string
 	Role           string // "user" | "assistant" | "system"
 	Content        string
+	BlocksJSON     string // Anthropic-format block array for tool_use/tool_result turns; empty for text-only.
 	TokensIn       int
 	TokensOut      int
 	LatencyMs      int
@@ -121,7 +122,38 @@ func Open(path string) (Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	if err := migrateContentJSON(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate content_json: %w", err)
+	}
 	return &sqliteStore{db: db}, nil
+}
+
+// migrateContentJSON adds the content_json column if missing. SQLite's
+// ALTER TABLE ADD COLUMN has no IF NOT EXISTS, so we probe PRAGMA first.
+func migrateContentJSON(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(turns)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "content_json" {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE turns ADD COLUMN content_json TEXT NOT NULL DEFAULT ''`)
+	return err
 }
 
 func newID() string {
@@ -188,9 +220,9 @@ func (s *sqliteStore) Append(ctx context.Context, t Turn) error {
 	defer tx.Rollback()
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO turns (id, conversation_id, role, content, tokens_in, tokens_out, latency_ms, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		turnID, t.ConversationID, t.Role, t.Content, t.TokensIn, t.TokensOut, t.LatencyMs, createdAt,
+		INSERT INTO turns (id, conversation_id, role, content, content_json, tokens_in, tokens_out, latency_ms, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		turnID, t.ConversationID, t.Role, t.Content, t.BlocksJSON, t.TokensIn, t.TokensOut, t.LatencyMs, createdAt,
 	); err != nil {
 		return fmt.Errorf("insert turn: %w", err)
 	}
@@ -264,7 +296,7 @@ func (s *sqliteStore) GetTurns(ctx context.Context, conversationID string) ([]Tu
 	defer s.mu.Unlock()
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, conversation_id, role, content, tokens_in, tokens_out, latency_ms, created_at
+		SELECT id, conversation_id, role, content, content_json, tokens_in, tokens_out, latency_ms, created_at
 		FROM turns
 		WHERE conversation_id = ?
 		ORDER BY created_at ASC`, conversationID)
@@ -277,7 +309,7 @@ func (s *sqliteStore) GetTurns(ctx context.Context, conversationID string) ([]Tu
 	for rows.Next() {
 		var t Turn
 		var createdAt int64
-		if err := rows.Scan(&t.ID, &t.ConversationID, &t.Role, &t.Content,
+		if err := rows.Scan(&t.ID, &t.ConversationID, &t.Role, &t.Content, &t.BlocksJSON,
 			&t.TokensIn, &t.TokensOut, &t.LatencyMs, &createdAt); err != nil {
 			return nil, err
 		}

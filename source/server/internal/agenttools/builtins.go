@@ -9,6 +9,7 @@ func DefaultRegistry() *Registry {
 	r.MustRegister(ReadFile())
 	r.MustRegister(ListDir())
 	r.MustRegister(StatFile())
+	r.MustRegister(Glob())
 	r.MustRegister(Grep())
 	r.MustRegister(GitStatus())
 	r.MustRegister(GitLog())

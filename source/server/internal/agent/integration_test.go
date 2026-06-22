@@ -22,7 +22,7 @@ func TestIntegration_FullTurnWithToolCall(t *testing.T) {
 				"model": "claude",
 				"content": []map[string]any{
 					{"type": "text", "text": "Listing."},
-					{"type": "tool_use", "id": "u1", "name": "list_dir",
+					{"type": "tool_use", "id": "u1", "name": "LS",
 						"input": map[string]any{"path": "."}},
 				},
 				"stop_reason": "tool_use",

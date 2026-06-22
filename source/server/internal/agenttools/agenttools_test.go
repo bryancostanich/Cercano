@@ -15,9 +15,9 @@ func TestRegistry_RegisterAndGet(t *testing.T) {
 	if err := r.Register(ReadFile()); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := r.Get("read_file")
-	if !ok || got.Name() != "read_file" {
-		t.Errorf("Get(read_file): ok=%v name=%q", ok, got.Name())
+	got, ok := r.Get("Read")
+	if !ok || got.Name() != "Read" {
+		t.Errorf("Get(Read): ok=%v name=%q", ok, got.Name())
 	}
 	if err := r.Register(ReadFile()); err == nil {
 		t.Errorf("expected duplicate registration error")
@@ -33,7 +33,7 @@ func TestRegistry_All_SortedByName(t *testing.T) {
 	if len(all) != 3 {
 		t.Fatalf("want 3 tools, got %d", len(all))
 	}
-	want := []string{"grep", "list_dir", "read_file"}
+	want := []string{"Grep", "LS", "Read"}
 	for i, n := range want {
 		if all[i].Name() != n {
 			t.Errorf("position %d: want %q got %q", i, n, all[i].Name())
@@ -204,6 +204,43 @@ func TestGrep_FindsMatchesWithStructuredRows(t *testing.T) {
 		if row["path"] == nil || row["line"] == nil || row["content"] == nil {
 			t.Errorf("row missing required fields: %+v", row)
 		}
+	}
+}
+
+func TestGlob_BasicPattern(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "a.txt"), []byte{}, 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "b.txt"), []byte{}, 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "c.go"), []byte{}, 0o644)
+
+	res, err := Glob().Execute(context.Background(),
+		json.RawMessage(`{"pattern":"*.txt","path":"`+dir+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "a.txt") || !strings.Contains(res.Text, "b.txt") {
+		t.Errorf("expected a.txt and b.txt in output, got: %q", res.Text)
+	}
+	if strings.Contains(res.Text, "c.go") {
+		t.Errorf("c.go should not match *.txt: %q", res.Text)
+	}
+}
+
+func TestGlob_NoMatches(t *testing.T) {
+	dir := t.TempDir()
+	res, err := Glob().Execute(context.Background(),
+		json.RawMessage(`{"pattern":"*.nonexistent","path":"`+dir+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Text == "" {
+		t.Errorf("expected non-empty output for no matches, got empty")
+	}
+}
+
+func TestGlob_PermissionIsR(t *testing.T) {
+	if Glob().Permission() != PermR {
+		t.Errorf("Glob must be R-tier, got %v", Glob().Permission())
 	}
 }
 

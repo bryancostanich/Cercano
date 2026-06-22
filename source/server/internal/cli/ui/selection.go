@@ -185,7 +185,7 @@ func pbcopyCmd(text string) tea.Cmd {
 		if runtime.GOOS != "darwin" {
 			return nil
 		}
-		cmd := exec.Command("pbcopy")
+		cmd := exec.Command("/usr/bin/pbcopy")
 		cmd.Stdin = strings.NewReader(text)
 		_ = cmd.Run()
 		return nil

@@ -1806,11 +1806,18 @@ func (m Model) renderStatus() string {
 	}
 	help := m.styles.Muted.Render("/help for cmds")
 	if m.selection.hasRange() {
-		help = m.styles.Info.Render("selection: ") +
-			m.styles.Accent.Render("c") +
-			m.styles.Muted.Render(" copy ") +
-			m.styles.Accent.Render("esc") +
-			m.styles.Muted.Render(" clear")
+		if m.selectionNotice != "" {
+			help = m.styles.Success.Render(m.selectionNotice) +
+				m.styles.Muted.Render("  ") +
+				m.styles.Accent.Render("esc") +
+				m.styles.Muted.Render(" clear")
+		} else {
+			help = m.styles.Info.Render("selection: ") +
+				m.styles.Accent.Render("c") +
+				m.styles.Muted.Render(" copy ") +
+				m.styles.Accent.Render("esc") +
+				m.styles.Muted.Render(" clear")
+		}
 	} else if m.selectionNotice != "" {
 		help = m.styles.Success.Render(m.selectionNotice)
 	}

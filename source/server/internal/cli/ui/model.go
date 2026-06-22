@@ -65,6 +65,10 @@ type Model struct {
 	// used to hit-test scrollbar mouse events. Set in relayout().
 	scrollbarTop int
 
+	// scrollbarDragging is true while the user holds the mouse on the
+	// scrollbar; motion events then scrub the viewport scroll position.
+	scrollbarDragging bool
+
 	palette theme.Palette
 	styles  theme.Styles
 
@@ -404,6 +408,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
+
+	case tea.MouseClickMsg:
+		if m.editorActive || m.historyActive || m.pendingConfirm != nil {
+			return m, nil
+		}
+		mouse := msg.Mouse()
+		height := m.viewport.Height()
+		onBar := mouse.X == m.width-1 &&
+			mouse.Y >= m.scrollbarTop && mouse.Y < m.scrollbarTop+height
+		if onBar {
+			m.scrollbarDragging = true
+			off := scrollOffsetFromClick(mouse.Y, m.scrollbarTop, height, m.viewport.TotalLineCount())
+			m.viewport.SetYOffset(off)
+		}
+		return m, nil
+
+	case tea.MouseMotionMsg:
+		if !m.scrollbarDragging {
+			return m, nil
+		}
+		if m.editorActive || m.historyActive || m.pendingConfirm != nil {
+			m.scrollbarDragging = false
+			return m, nil
+		}
+		mouse := msg.Mouse()
+		height := m.viewport.Height()
+		off := scrollOffsetFromClick(mouse.Y, m.scrollbarTop, height, m.viewport.TotalLineCount())
+		m.viewport.SetYOffset(off)
+		return m, nil
+
+	case tea.MouseReleaseMsg:
+		m.scrollbarDragging = false
+		return m, nil
 
 	case tea.KeyPressMsg:
 		// Pending confirm gates ALL keys — until the user resolves it, the
@@ -1610,6 +1647,8 @@ func (m Model) renderViewportWithScrollbar() string {
 			default:
 				b.WriteString(" ")
 			}
+		} else {
+			b.WriteString(" ")
 		}
 		if i < len(lines)-1 {
 			b.WriteString("\n")

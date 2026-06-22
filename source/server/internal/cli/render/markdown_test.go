@@ -1,83 +1,45 @@
 package render
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
-func TestIntercept_NoTableLeavesTextAlone(t *testing.T) {
-	in := "hello\nworld\n"
-	out, tables := InterceptMarkdownTables(in)
-	if out != strings.TrimRight(in, "\n") && out != in {
-		// Allow trailing newline difference; what matters is preservation.
-		t.Logf("note: trailing whitespace normalized")
-	}
-	if len(tables) != 0 {
-		t.Errorf("expected 0 tables, got %d", len(tables))
+// These exercise matchTable's detection rules through SplitBlocks, which is the
+// only consumer now that InterceptMarkdownTables is retired.
+
+func TestMatch_RejectsBareTextWithPipes(t *testing.T) {
+	// Bare pipes without a separator row are not a markdown table.
+	blocks, _ := SplitBlocks("a | b | c\nfoo\n")
+	for _, b := range blocks {
+		if b.Kind == MdTable {
+			t.Fatalf("bare pipes should not parse as a table: %#v", b)
+		}
 	}
 }
 
-func TestIntercept_DetectsSimpleTable(t *testing.T) {
-	in := "before\n" +
-		"| model | size |\n" +
-		"| --- | --- |\n" +
-		"| qwen | 4.7GB |\n" +
-		"| nomic | 274MB |\n" +
-		"after"
-	out, tables := InterceptMarkdownTables(in)
-	if len(tables) != 1 {
-		t.Fatalf("expected 1 table, got %d", len(tables))
+func TestMatch_RequiresSeparatorRow(t *testing.T) {
+	blocks, tail := SplitBlocks("| col1 | col2 |\n| data1 | data2 |\n")
+	for _, b := range blocks {
+		if b.Kind == MdTable {
+			t.Fatalf("no separator row → not a table: %#v", b)
+		}
 	}
-	if !strings.Contains(out, "{{TABLE_0}}") {
-		t.Errorf("expected sentinel, got %q", out)
+	_ = tail
+}
+
+func TestMatch_ParsesColumnsAndRows(t *testing.T) {
+	in := "| model | size |\n| --- | --- |\n| qwen | 4.7GB |\n| nomic | 274MB |\n\nafter"
+	blocks, _ := SplitBlocks(in)
+	if len(blocks) < 1 || blocks[0].Kind != MdTable || blocks[0].Table == nil {
+		t.Fatalf("expected leading table block: %#v", blocks)
 	}
-	if !strings.HasPrefix(out, "before\n") || !strings.HasSuffix(out, "\nafter") {
-		t.Errorf("expected surrounding prose preserved, got %q", out)
+	tbl := blocks[0].Table
+	if len(tbl.Cols) != 2 || tbl.Cols[0].Name != "model" || tbl.Cols[1].Name != "size" {
+		t.Fatalf("columns wrong: %+v", tbl.Cols)
 	}
-	tbl := tables[0]
-	if len(tbl.Cols) != 2 {
-		t.Errorf("expected 2 cols, got %d", len(tbl.Cols))
+	if len(tbl.Rows) != 2 || tbl.Rows[1]["model"] != "nomic" {
+		t.Fatalf("rows wrong: %+v", tbl.Rows)
 	}
-	if tbl.Cols[0].Name != "model" || tbl.Cols[1].Name != "size" {
-		t.Errorf("column names: %+v", tbl.Cols)
-	}
-	if len(tbl.Rows) != 2 {
-		t.Errorf("expected 2 rows, got %d", len(tbl.Rows))
-	}
-	if tbl.Rows[1]["model"] != "nomic" {
-		t.Errorf("row data wrong: %+v", tbl.Rows[1])
-	}
-	// Last column wrappable.
+	// Last column is the wrappable one by convention.
 	if !tbl.Cols[1].Wrappable {
-		t.Errorf("expected last column wrappable")
-	}
-}
-
-func TestIntercept_RejectsBareTextWithPipes(t *testing.T) {
-	in := "a | b | c\nfoo"
-	_, tables := InterceptMarkdownTables(in)
-	if len(tables) != 0 {
-		t.Errorf("expected 0 tables, bare pipes != markdown table")
-	}
-}
-
-func TestIntercept_RequiresSeparatorRow(t *testing.T) {
-	in := "| col1 | col2 |\n| data1 | data2 |"
-	_, tables := InterceptMarkdownTables(in)
-	if len(tables) != 0 {
-		t.Errorf("expected 0 tables without separator row")
-	}
-}
-
-func TestIntercept_TwoTables(t *testing.T) {
-	in := "| a | b |\n| --- | --- |\n| 1 | 2 |\n\n" +
-		"prose between\n\n" +
-		"| x | y |\n| --- | --- |\n| 3 | 4 |"
-	out, tables := InterceptMarkdownTables(in)
-	if len(tables) != 2 {
-		t.Fatalf("expected 2 tables, got %d", len(tables))
-	}
-	if !strings.Contains(out, "{{TABLE_0}}") || !strings.Contains(out, "{{TABLE_1}}") {
-		t.Errorf("missing one of the sentinels: %q", out)
+		t.Fatalf("expected last column wrappable")
 	}
 }

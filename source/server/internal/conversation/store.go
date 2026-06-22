@@ -35,6 +35,9 @@ type Info struct {
 	StartedAt  time.Time
 	LastTurnAt time.Time
 	TurnCount  int
+
+	Recap          string
+	RecapUpdatedAt time.Time
 }
 
 // Turn is one persisted role-emission inside a conversation.
@@ -75,6 +78,12 @@ type Store interface {
 	// auto-derived title set on first user turn — a user-chosen title is
 	// never overwritten by subsequent appends.
 	Rename(ctx context.Context, conversationID, title string) error
+
+	// UpdateRecap sets the LLM-generated living recap and its timestamp.
+	UpdateRecap(ctx context.Context, conversationID, recap string) error
+
+	// Get returns a single conversation's Info, or an error if not found.
+	Get(ctx context.Context, conversationID string) (Info, error)
 
 	// Close releases the underlying DB handle.
 	Close() error
@@ -120,6 +129,17 @@ func Open(path string) (Store, error) {
 	if _, err := db.Exec(schemaSQL); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
+	}
+	// Migrate pre-existing DBs that predate the recap columns. ALTER fails
+	// with "duplicate column name" once applied — ignore that case.
+	for _, alter := range []string{
+		`ALTER TABLE conversations ADD COLUMN recap TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE conversations ADD COLUMN recap_updated_at INTEGER NOT NULL DEFAULT 0`,
+	} {
+		if _, err := db.Exec(alter); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			db.Close()
+			return nil, fmt.Errorf("migrate recap columns: %w", err)
+		}
 	}
 	return &sqliteStore{db: db}, nil
 }
@@ -228,6 +248,7 @@ func (s *sqliteStore) List(ctx context.Context, projectDir string, limit int) ([
 
 	query := `
 		SELECT c.id, c.title, c.project_dir, c.model, c.started_at, c.last_turn_at,
+		       c.recap, c.recap_updated_at,
 		       (SELECT COUNT(*) FROM turns t WHERE t.conversation_id = c.id) AS turn_count
 		FROM conversations c
 		WHERE (? = '' OR c.project_dir = ?)
@@ -247,13 +268,16 @@ func (s *sqliteStore) List(ctx context.Context, projectDir string, limit int) ([
 	var out []Info
 	for rows.Next() {
 		var info Info
-		var startedAt, lastTurnAt int64
+		var startedAt, lastTurnAt, recapAt int64
 		if err := rows.Scan(&info.ID, &info.Title, &info.ProjectDir, &info.Model,
-			&startedAt, &lastTurnAt, &info.TurnCount); err != nil {
+			&startedAt, &lastTurnAt, &info.Recap, &recapAt, &info.TurnCount); err != nil {
 			return nil, err
 		}
 		info.StartedAt = time.Unix(startedAt, 0)
 		info.LastTurnAt = time.Unix(lastTurnAt, 0)
+		if recapAt > 0 {
+			info.RecapUpdatedAt = time.Unix(recapAt, 0)
+		}
 		out = append(out, info)
 	}
 	return out, rows.Err()
@@ -302,6 +326,41 @@ func (s *sqliteStore) Rename(ctx context.Context, conversationID, title string) 
 	defer s.mu.Unlock()
 	_, err := s.db.ExecContext(ctx, `UPDATE conversations SET title = ? WHERE id = ?`, title, conversationID)
 	return err
+}
+
+func (s *sqliteStore) UpdateRecap(ctx context.Context, conversationID, recap string) error {
+	if conversationID == "" {
+		return errors.New("conversation id required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE conversations SET recap = ?, recap_updated_at = ? WHERE id = ?`,
+		recap, time.Now().Unix(), conversationID)
+	return err
+}
+
+func (s *sqliteStore) Get(ctx context.Context, conversationID string) (Info, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var info Info
+	var startedAt, lastTurnAt, recapAt int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT c.id, c.title, c.project_dir, c.model, c.started_at, c.last_turn_at,
+		       c.recap, c.recap_updated_at,
+		       (SELECT COUNT(*) FROM turns t WHERE t.conversation_id = c.id) AS turn_count
+		FROM conversations c WHERE c.id = ?`, conversationID).
+		Scan(&info.ID, &info.Title, &info.ProjectDir, &info.Model,
+			&startedAt, &lastTurnAt, &info.Recap, &recapAt, &info.TurnCount)
+	if err != nil {
+		return Info{}, err
+	}
+	info.StartedAt = time.Unix(startedAt, 0)
+	info.LastTurnAt = time.Unix(lastTurnAt, 0)
+	if recapAt > 0 {
+		info.RecapUpdatedAt = time.Unix(recapAt, 0)
+	}
+	return info, nil
 }
 
 func (s *sqliteStore) Close() error {

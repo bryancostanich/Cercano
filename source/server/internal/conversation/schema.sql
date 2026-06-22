@@ -6,7 +6,9 @@ CREATE TABLE IF NOT EXISTS conversations (
     project_dir  TEXT NOT NULL DEFAULT '',
     model        TEXT NOT NULL DEFAULT '',
     started_at   INTEGER NOT NULL,
-    last_turn_at INTEGER NOT NULL
+    last_turn_at INTEGER NOT NULL,
+    recap            TEXT NOT NULL DEFAULT '',
+    recap_updated_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_conv_project ON conversations(project_dir, last_turn_at DESC);
 CREATE INDEX IF NOT EXISTS idx_conv_last_turn ON conversations(last_turn_at DESC);

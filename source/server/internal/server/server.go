@@ -16,6 +16,7 @@ import (
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/llm/anthropic"
 	"cercano/source/server/internal/loop"
 	"cercano/source/server/pkg/proto"
 )
@@ -555,6 +556,8 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		}
 		return s.pendingDecisions.Wait(ctx, toolUseID)
 	}
+
+	ctx = anthropic.WithSessionID(ctx, req.GetConversationId())
 
 	result, err := agent.RunToolLoop(ctx, agent.ToolLoopInput{
 		Provider:            s.cloudLLMProvider,

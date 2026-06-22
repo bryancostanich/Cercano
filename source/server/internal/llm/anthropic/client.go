@@ -2,6 +2,8 @@ package anthropic
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"net/http"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
@@ -25,16 +27,42 @@ type Client struct {
 	sdk *sdk.Client
 }
 
-type uaRoundTripper struct {
+type sessionContextKey struct{}
+
+// WithSessionID attaches a conversation/session ID to ctx so the adapter's
+// RoundTripper can emit opencode-style identification headers per request.
+func WithSessionID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, sessionContextKey{}, id)
+}
+
+func sessionIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(sessionContextKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+type headerRoundTripper struct {
 	base http.RoundTripper
 	ua   string
 }
 
-func (u *uaRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
-	if u.ua != "" {
-		r.Header.Set("User-Agent", u.ua)
+func (h *headerRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
+	if h.ua != "" {
+		r.Header.Set("User-Agent", h.ua)
 	}
-	return u.base.RoundTrip(r)
+	if sid := sessionIDFromContext(r.Context()); sid != "" {
+		r.Header.Set("x-opencode-session", sid)
+		r.Header.Set("x-opencode-request", newMessageID())
+		r.Header.Set("x-opencode-agent-mode", "primary")
+	}
+	return h.base.RoundTrip(r)
+}
+
+func newMessageID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	return "msg-" + hex.EncodeToString(b[:])
 }
 
 func NewClient(cfg Config) *Client {
@@ -48,11 +76,9 @@ func NewClient(cfg Config) *Client {
 	if cfg.BaseURL != "" {
 		opts = append(opts, option.WithBaseURL(cfg.BaseURL))
 	}
-	if cfg.UserAgent != "" {
-		opts = append(opts, option.WithHTTPClient(&http.Client{
-			Transport: &uaRoundTripper{base: http.DefaultTransport, ua: cfg.UserAgent},
-		}))
-	}
+	opts = append(opts, option.WithHTTPClient(&http.Client{
+		Transport: &headerRoundTripper{base: http.DefaultTransport, ua: cfg.UserAgent},
+	}))
 	c := sdk.NewClient(opts...)
 	return &Client{cfg: cfg, sdk: &c}
 }

@@ -361,4 +361,27 @@ This split keeps tool-calling capability available to every client unchanged. VS
 
 ## Status
 
-Design approved 2026-06-21. Implementation plan not yet written.
+Design approved 2026-06-21. Implementation plan written (see `native_tool_calling_tasks.md`) and executed.
+
+- [x] Internal types (Block / Message / Tool / ToolChoice / Permission / StreamEvent / StreamReader / Provider / Capabilities / ChatRequest / ChatResponse)
+- [x] Anthropic adapter (anthropic-sdk-go v1.51, WithBaseURL → Meridian, custom UA RoundTripper, Chat + StreamChat with SSE → StreamEvent translation, schema validation + Required pass-through)
+- [x] Ollama adapter (ollama/api v0.30.10, Chat + StreamChat with NDJSON, ordered-map ToolCallFunctionArguments + ToolPropertiesMap)
+- [x] Tool catalog assembly (`agenttools.BuildToolCatalog` + exported `PermissionToLLM`)
+- [x] Bounded autonomous tool loop with R-tier concurrency, W/X serialization, 3-strike guard, iteration cap, user-deny hard turn-end
+- [x] Permission modes (strict / permissive / bypass) stored agent-side via `PermissionStore` (~/.config/cercano/permissions.yaml)
+- [x] PermissionRequired streaming events + AllowToolCall/DenyToolCall unary RPCs paired via `PendingDecisions`
+- [x] Persistence with `content_json` column on `turns` (PRAGMA-guarded migration)
+- [x] CLI confirm UI repointed to streaming events (RPC-based Allow/Deny)
+- [x] CLI slash commands /strict /permissive /bypass /mode and palette-aware mode chip in status bar
+- [x] CLI folded tool-call scrollback entries (expand/collapse stubbed; V1 renders folded)
+- [x] gRPC handlers: SetPermissionMode, GetPermissionMode, AllowToolCall, DenyToolCall, GetProviderCapabilities
+- [x] Legacy provider files relocated to `internal/legacymodels` (unblocks `agent → llm` import direction)
+- [x] Main wiring: Anthropic provider constructed when `cfg.CloudProvider == "anthropic"`, wired via `srv.SetCloudLLMProvider`
+- [x] Integration test: full tool-call turn through Anthropic adapter against httptest server
+- [x] Supersedes `docs/plans/dispatch.md` for V1; references updated in `docs/plans/cli.md`
+
+V1 follow-ups recorded for future work:
+- `streamProcessRequestWithToolLoop` doesn't yet persist turns, propagate `WorkDir`/system prompt, or run the project-context loader. Needed before legacy `ProcessRequestStream` path can be deleted entirely.
+- `/tool` invoking W/X-tier tools requires `/bypass` mode because the unary InvokeTool RPC can't surface the confirm prompt. Documented in `/tool` help.
+- Expand/collapse keybind for folded tool entries is V2 polish.
+- Legacy provider files in `internal/legacymodels/` await deletion once Google/etc. cloud paths are migrated or removed.

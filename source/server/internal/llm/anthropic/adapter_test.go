@@ -61,6 +61,31 @@ func TestFromSDKBlock_ToolUse(t *testing.T) {
 	}
 }
 
+func TestToolsToSDK_PreservesRequired(t *testing.T) {
+	tools := []llm.Tool{{
+		Name:        "read_file",
+		Description: "Read a file",
+		Schema:      json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`),
+	}}
+	out := toolsToSDK(tools)
+	if len(out) != 1 || out[0].OfTool == nil {
+		t.Fatalf("malformed output: %+v", out)
+	}
+	req := out[0].OfTool.InputSchema.Required
+	if len(req) != 1 || req[0] != "path" {
+		t.Errorf("expected Required=[path], got %+v", req)
+	}
+}
+
+func TestToolsToSDK_PanicsOnBadSchema(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("expected panic on bad schema")
+		}
+	}()
+	_ = toolsToSDK([]llm.Tool{{Name: "x", Schema: json.RawMessage(`{not json`)}})
+}
+
 func TestRoundTrip(t *testing.T) {
 	original := llm.Block{
 		Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "read_file",

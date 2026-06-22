@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"encoding/json"
+	"fmt"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 
@@ -56,14 +57,24 @@ func toolsToSDK(tools []llm.Tool) []sdk.ToolUnionParam {
 	out := make([]sdk.ToolUnionParam, 0, len(tools))
 	for _, t := range tools {
 		var schema map[string]any
-		_ = json.Unmarshal(t.Schema, &schema)
+		if err := json.Unmarshal(t.Schema, &schema); err != nil {
+			panic(fmt.Sprintf("anthropic: tool %q has invalid JSON schema: %v", t.Name, err))
+		}
+		schemaParam := sdk.ToolInputSchemaParam{
+			Properties: schema["properties"],
+		}
+		if req, ok := schema["required"].([]any); ok {
+			for _, r := range req {
+				if s, ok := r.(string); ok {
+					schemaParam.Required = append(schemaParam.Required, s)
+				}
+			}
+		}
 		out = append(out, sdk.ToolUnionParam{
 			OfTool: &sdk.ToolParam{
 				Name:        t.Name,
 				Description: sdk.String(t.Description),
-				InputSchema: sdk.ToolInputSchemaParam{
-					Properties: schema["properties"],
-				},
+				InputSchema: schemaParam,
 			},
 		})
 	}

@@ -162,9 +162,14 @@ relayout(width change) ─► invalidate caches ─► re-render committed block
   Glamour v2.0.1 overflows a 4-column table at width 40 — the justification for
   keeping `render.Table`.
 
-## Open Decisions (resolve in plan)
+## Resolved Decisions
 
-- Whether to build one Glamour renderer and pass width per call, or cache renderers
-  per width.
-- Whether to retire `InterceptMarkdownTables` or keep it for the legacy/non-streaming
-  path.
+- **Glamour width handling:** Glamour bakes the wrap width in at renderer
+  construction. Build one renderer for the current width, cache it on the `Model`,
+  and rebuild only on resize (rare event) — not per frame. Confirm the exact width
+  option in Glamour v2.0.1 during implementation; the build-per-width-rebuild-on-
+  resize approach holds regardless.
+- **`InterceptMarkdownTables`:** Retire the wrapper — it has exactly one caller
+  (`model.go:800`, the path being rewritten) and no legacy/headless consumer. Keep
+  and reuse its helpers (`matchTable`, `looksLikePipeRow`, `looksLikeSeparator`,
+  `splitPipeRow`, `markdownTable.toTable`) from the splitter.

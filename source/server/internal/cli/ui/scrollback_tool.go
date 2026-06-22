@@ -95,16 +95,28 @@ func renderToolEntry(e ToolEntry, width int, focused bool) string {
 		statusBit = toolEntryError.Render("⚠ " + flattenSummary(e.ResultSummary))
 	}
 
-	line := fmt.Sprintf("%s%s %s %s   %s",
-		gutter, marker, e.ToolName, toolEntryFaint.Render(flattenSummary(e.ArgsSummary)), statusBit)
+	prefix := fmt.Sprintf("%s%s %s ", gutter, marker, e.ToolName)
+	content := fmt.Sprintf("%s   %s", toolEntryFaint.Render(flattenSummary(e.ArgsSummary)), statusBit)
+	line := prefix + content
 
 	if e.Folded {
 		// Wrap (ANSI-aware) to the available width so a long args/result line
 		// flows onto continuation lines instead of being clipped at the edge.
-		// ansi.Wrap breaks on spaces and hard-breaks tokens longer than width
-		// (paths, JSON), so no line ever overflows.
-		if width > 0 && lipgloss.Width(line) > width {
-			return ansi.Wrap(line, width, "")
+		// Continuation lines hang-indent under the content (past "▸ <tool> ") so
+		// the wrapped entry reads as one unit. ansi.Wrap breaks on spaces and
+		// hard-breaks tokens longer than the limit (paths, JSON) — no overflow.
+		hang := lipgloss.Width(prefix)
+		avail := width - hang
+		if width > 0 && avail >= 8 && lipgloss.Width(line) > width {
+			wrapped := strings.Split(ansi.Wrap(content, avail, ""), "\n")
+			for i := range wrapped {
+				if i == 0 {
+					wrapped[i] = prefix + wrapped[i]
+				} else {
+					wrapped[i] = strings.Repeat(" ", hang) + wrapped[i]
+				}
+			}
+			return strings.Join(wrapped, "\n")
 		}
 		return line
 	}

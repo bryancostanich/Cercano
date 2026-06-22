@@ -235,6 +235,16 @@ func (a *Agent) ResumeConversation(ctx context.Context, conversationID string) (
 	return turns, nil
 }
 
+// PersistentStore returns the configured persistent conversation store, or
+// nil if none was attached. The new tool-loop path in the server reaches
+// through here to dual-write turns the same way storeConversationTurn does.
+func (a *Agent) PersistentStore() conversation.Store {
+	if a == nil {
+		return nil
+	}
+	return a.persistent
+}
+
 // GetContextUsage reports the current token usage for a conversation. Used
 // is the cumulative tokens spent, max is the model's conventional context
 // window. Both zero if no meter is configured or the conversation has no

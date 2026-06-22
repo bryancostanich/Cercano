@@ -12,32 +12,6 @@ type markdownTable struct {
 	Rows      [][]string
 }
 
-// InterceptMarkdownTables scans the text line by line. Markdown table blocks
-// (lines like `| a | b |` with a `| --- | --- |` separator row) are extracted
-// into Table values and returned alongside the cleaned text with sentinel
-// markers (`{{TABLE_N}}`) in their place. The caller substitutes rendered
-// tables back in after rendering each Table at its width.
-//
-// Algorithmic — no markdown library, no LLM call. Handles the canonical
-// pipe-delimited form most LLMs emit.
-func InterceptMarkdownTables(text string) (cleaned string, tables []Table) {
-	lines := strings.Split(text, "\n")
-	var out []string
-
-	i := 0
-	for i < len(lines) {
-		if mt, consumed := matchTable(lines, i); consumed > 0 {
-			tables = append(tables, mt.toTable())
-			out = append(out, "{{TABLE_"+itoa(len(tables)-1)+"}}")
-			i += consumed
-			continue
-		}
-		out = append(out, lines[i])
-		i++
-	}
-	return strings.Join(out, "\n"), tables
-}
-
 // matchTable tries to consume a markdown table starting at lines[i]. Returns
 // the parsed block and the number of lines consumed (0 if no match).
 func matchTable(lines []string, i int) (markdownTable, int) {

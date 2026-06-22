@@ -61,6 +61,41 @@ func TestAssistantMarkdown_HeadingsDropHashMarker(t *testing.T) {
 	}
 }
 
+func TestAssistantMarkdown_BlankLineBeforeHeadings(t *testing.T) {
+	m := &Model{
+		styles: theme.NewStyles(theme.Cracker()),
+		md:     render.NewMarkdown(theme.CrackerMarkdownStyle()),
+	}
+	e := &Entry{Role: RoleAssistant, Content: "intro paragraph\n\n## Section\n\nbody\n"}
+	vis := plain(m.renderAssistantMarkdown(e, 60))
+
+	// A blank line should separate the intro paragraph from the heading.
+	if !strings.Contains(vis, "intro paragraph") {
+		t.Fatalf("intro missing: %q", vis)
+	}
+	idx := strings.Index(vis, "Section")
+	if idx < 0 {
+		t.Fatalf("heading missing: %q", vis)
+	}
+	// The two lines immediately before the heading line should include a blank one.
+	before := vis[:idx]
+	if !strings.Contains(before, "\n\n") {
+		t.Fatalf("expected a blank line before the heading: %q", vis)
+	}
+}
+
+func TestAssistantMarkdown_FirstHeadingHasNoLeadingBlank(t *testing.T) {
+	m := &Model{
+		styles: theme.NewStyles(theme.Cracker()),
+		md:     render.NewMarkdown(theme.CrackerMarkdownStyle()),
+	}
+	e := &Entry{Role: RoleAssistant, Content: "# Title\n\nbody\n"}
+	vis := plain(m.renderAssistantMarkdown(e, 60))
+	if strings.HasPrefix(vis, "\n") {
+		t.Fatalf("first heading should not start with a blank line: %q", vis)
+	}
+}
+
 func TestAssistantMarkdown_CodeBlockHasLabeledRules(t *testing.T) {
 	m := &Model{
 		styles: theme.NewStyles(theme.Cracker()),

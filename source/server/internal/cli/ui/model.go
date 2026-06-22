@@ -164,6 +164,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	ti.Prompt = s.UserPrompt.Render("▶ ")
 	ti.CharLimit = 0
 	ti.Focus()
+	ti.SetVirtualCursor(false)
 
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(10))
 
@@ -1451,6 +1452,7 @@ func (m Model) View() tea.View {
 	if hint := m.renderSlashSuggestions(); hint != "" && !m.editorActive {
 		parts = append(parts, hint)
 	}
+	inputIdx := len(parts)
 	parts = append(parts, m.input.View())
 	parts = append(parts, promptLine)
 	parts = append(parts, m.renderStatus())
@@ -1467,6 +1469,16 @@ func (m Model) View() tea.View {
 	v.AltScreen = true
 	v.KeyboardEnhancements = tea.KeyboardEnhancements{}
 	v.MouseMode = tea.MouseModeCellMotion
+	// Drive the real terminal cursor to the input caret position. Only
+	// when the chat input owns focus (no overlay, no pending confirm).
+	if !m.editorActive && !m.historyActive && m.pendingConfirm == nil {
+		if c := m.input.Cursor(); c != nil {
+			c.Y += inputCursorRow(parts, inputIdx)
+			v.Cursor = c
+		}
+	} else {
+		v.Cursor = nil // overlays manage their own (virtual) cursor
+	}
 	return v
 }
 

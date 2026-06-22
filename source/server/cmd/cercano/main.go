@@ -33,6 +33,7 @@ import (
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/legacymodels"
+	"cercano/source/server/internal/llm/anthropic"
 	"cercano/source/server/internal/loop"
 	mcpserver "cercano/source/server/internal/mcp"
 	"cercano/source/server/internal/server"
@@ -202,6 +203,18 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	}
 	pending := agent.NewPendingDecisions()
 	srv.SetPermissions(permStore, pending)
+
+	// Layered LLM provider for native tool calling. Constructed only when
+	// the cloud is actually configured (anthropic-only for V1). When absent,
+	// StreamProcessRequest falls back to the legacy ProcessRequestStream path.
+	if canConfigureCloud && strings.EqualFold(cfg.CloudProvider, "anthropic") {
+		client := anthropic.NewClient(anthropic.Config{
+			BaseURL: cfg.CloudBaseURL,
+			APIKey:  cfg.CloudAPIKey,
+			Model:   cfg.CloudModel,
+		})
+		srv.SetCloudLLMProvider(client)
+	}
 
 	proto.RegisterAgentServer(s, srv)
 

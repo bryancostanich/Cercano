@@ -9,6 +9,26 @@ import (
 	"cercano/source/server/internal/llm"
 )
 
+type LoopEventKind string
+
+const (
+	LoopToolUseStart       LoopEventKind = "tool_use_start"
+	LoopToolUseStop        LoopEventKind = "tool_use_stop"
+	LoopToolExecStart      LoopEventKind = "tool_exec_start"
+	LoopToolExecComplete   LoopEventKind = "tool_exec_complete"
+	LoopPermissionRequired LoopEventKind = "permission_required"
+)
+
+type LoopEvent struct {
+	Kind      LoopEventKind
+	ToolUseID string
+	ToolName  string
+	ArgsJSON  string
+	Tier      string
+	Summary   string
+	IsError   bool
+}
+
 type ToolLoopInput struct {
 	Provider    llm.Provider
 	Registry    *agenttools.Registry
@@ -20,7 +40,10 @@ type ToolLoopInput struct {
 
 	// PermissionRequester is the callback the loop uses to surface a
 	// confirm prompt to the active client (nil = auto-allow, useful in tests).
-	PermissionRequester func(ctx context.Context, name string, args json.RawMessage, tier llm.Permission) (allow bool, err error)
+	PermissionRequester func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission) (allow bool, err error)
+
+	// EventSink receives lifecycle events as the loop runs. Nil-safe.
+	EventSink func(ev LoopEvent)
 }
 
 type ToolLoopResult struct {
@@ -32,9 +55,34 @@ type ToolLoopResult struct {
 
 const MaxToolLoopIterations = 10
 
+func summarizeResult(res *agenttools.Result) string {
+	if res == nil {
+		return ""
+	}
+	switch res.Type {
+	case agenttools.ResultText:
+		t := res.Text
+		if len(t) > 80 {
+			t = t[:80]
+		}
+		return t
+	case agenttools.ResultRows:
+		return fmt.Sprintf("rows: %d", len(res.Rows))
+	case agenttools.ResultJSON:
+		return fmt.Sprintf("json: %d bytes", len(res.JSON))
+	}
+	return ""
+}
+
 func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) {
 	if !in.Provider.Capabilities().SupportsTools {
 		return ToolLoopResult{}, fmt.Errorf("provider %s does not support tools", in.Provider.Name())
+	}
+
+	emit := func(ev LoopEvent) {
+		if in.EventSink != nil {
+			in.EventSink(ev)
+		}
 	}
 
 	hist := append([]llm.Message{}, in.ConvHistory...)
@@ -81,6 +129,11 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			}, nil
 		}
 
+		for _, tc := range toolCalls {
+			emit(LoopEvent{Kind: LoopToolUseStart, ToolUseID: tc.ToolUseID, ToolName: tc.ToolName})
+			emit(LoopEvent{Kind: LoopToolUseStop, ToolUseID: tc.ToolUseID, ToolName: tc.ToolName, ArgsJSON: string(tc.ToolInput)})
+		}
+
 		results := make([]llm.Block, 0, len(toolCalls))
 
 		type pendingCall struct {
@@ -114,13 +167,16 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		rChan := make(chan rr, len(rCalls))
 		for i, pc := range rCalls {
 			go func(i int, pc pendingCall) {
+				emit(LoopEvent{Kind: LoopToolExecStart, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName})
 				res, err := pc.tool.Execute(ctx, pc.block.ToolInput)
 				out := llm.Block{Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID}
 				if err != nil {
 					out.Content = err.Error()
 					out.IsError = true
+					emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: err.Error(), IsError: true})
 				} else {
 					out.Content = res.Text
+					emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: summarizeResult(res), IsError: false})
 				}
 				rChan <- rr{idx: i, res: out}
 			}(i, pc)
@@ -142,7 +198,8 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 					hist = append(hist, llm.Message{Role: llm.RoleUser, Blocks: results})
 					return ToolLoopResult{FinalText: finalText, Iterations: iter + 1, History: hist}, nil
 				}
-				allow, err := in.PermissionRequester(ctx, pc.block.ToolName, pc.block.ToolInput, pc.tier)
+				emit(LoopEvent{Kind: LoopPermissionRequired, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, ArgsJSON: string(pc.block.ToolInput), Tier: string(pc.tier)})
+				allow, err := in.PermissionRequester(ctx, pc.block.ToolUseID, pc.block.ToolName, pc.block.ToolInput, pc.tier)
 				if err != nil {
 					return ToolLoopResult{}, err
 				}
@@ -155,13 +212,16 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 					return ToolLoopResult{FinalText: finalText, Iterations: iter + 1, History: hist}, nil
 				}
 			}
+			emit(LoopEvent{Kind: LoopToolExecStart, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName})
 			res, err := pc.tool.Execute(ctx, pc.block.ToolInput)
 			out := llm.Block{Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID}
 			if err != nil {
 				out.Content = err.Error()
 				out.IsError = true
+				emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: err.Error(), IsError: true})
 			} else {
 				out.Content = res.Text
+				emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: summarizeResult(res), IsError: false})
 			}
 			results = append(results, out)
 		}

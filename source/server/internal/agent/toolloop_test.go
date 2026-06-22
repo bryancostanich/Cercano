@@ -138,7 +138,7 @@ func TestToolLoop_UserDeniesWTier_TerminatesTurn(t *testing.T) {
 	perms, _ := LoadPermissionStore(dir + "/perms.yaml")
 	_ = perms.SetMode(ModeStrict)
 
-	requester := func(ctx context.Context, name string, args json.RawMessage, tier llm.Permission) (bool, error) {
+	requester := func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission) (bool, error) {
 		return false, nil
 	}
 
@@ -193,6 +193,42 @@ func TestToolLoop_3StrikeErrorGuard(t *testing.T) {
 	}
 	if prov.calls != 3 {
 		t.Errorf("expected exactly 3 calls before abort, got %d", prov.calls)
+	}
+}
+
+func TestToolLoop_EmitsExpectedEvents(t *testing.T) {
+	prov := &mockProvider{
+		scripts: [][]llm.Block{
+			{{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "list_dir",
+				ToolInput: json.RawMessage(`{"path":"."}`)}},
+			{{Type: llm.BlockText, Text: "done"}},
+		},
+		caps: llm.Capabilities{SupportsTools: true},
+	}
+	reg := agenttools.DefaultRegistry()
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+	var events []LoopEventKind
+	_, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider: prov, Registry: reg, Permissions: perms, UserInput: "x",
+		EventSink: func(ev LoopEvent) { events = append(events, ev.Kind) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantKinds := []LoopEventKind{
+		LoopToolUseStart, LoopToolExecStart, LoopToolExecComplete,
+	}
+	for _, k := range wantKinds {
+		found := false
+		for _, e := range events {
+			if e == k {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing event %s", k)
+		}
 	}
 }
 

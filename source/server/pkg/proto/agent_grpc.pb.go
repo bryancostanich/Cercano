@@ -19,20 +19,25 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Agent_ProcessRequest_FullMethodName       = "/agent.Agent/ProcessRequest"
-	Agent_StreamProcessRequest_FullMethodName = "/agent.Agent/StreamProcessRequest"
-	Agent_UpdateConfig_FullMethodName         = "/agent.Agent/UpdateConfig"
-	Agent_GetConfig_FullMethodName            = "/agent.Agent/GetConfig"
-	Agent_ListConversations_FullMethodName    = "/agent.Agent/ListConversations"
-	Agent_ResumeConversation_FullMethodName   = "/agent.Agent/ResumeConversation"
-	Agent_DeleteConversation_FullMethodName   = "/agent.Agent/DeleteConversation"
-	Agent_RenameConversation_FullMethodName   = "/agent.Agent/RenameConversation"
-	Agent_GetContextUsage_FullMethodName      = "/agent.Agent/GetContextUsage"
-	Agent_ListTools_FullMethodName            = "/agent.Agent/ListTools"
-	Agent_InvokeTool_FullMethodName           = "/agent.Agent/InvokeTool"
-	Agent_ListModels_FullMethodName           = "/agent.Agent/ListModels"
-	Agent_ListSkills_FullMethodName           = "/agent.Agent/ListSkills"
-	Agent_GetSkill_FullMethodName             = "/agent.Agent/GetSkill"
+	Agent_ProcessRequest_FullMethodName          = "/agent.Agent/ProcessRequest"
+	Agent_StreamProcessRequest_FullMethodName    = "/agent.Agent/StreamProcessRequest"
+	Agent_UpdateConfig_FullMethodName            = "/agent.Agent/UpdateConfig"
+	Agent_GetConfig_FullMethodName               = "/agent.Agent/GetConfig"
+	Agent_ListConversations_FullMethodName       = "/agent.Agent/ListConversations"
+	Agent_ResumeConversation_FullMethodName      = "/agent.Agent/ResumeConversation"
+	Agent_DeleteConversation_FullMethodName      = "/agent.Agent/DeleteConversation"
+	Agent_RenameConversation_FullMethodName      = "/agent.Agent/RenameConversation"
+	Agent_GetContextUsage_FullMethodName         = "/agent.Agent/GetContextUsage"
+	Agent_ListTools_FullMethodName               = "/agent.Agent/ListTools"
+	Agent_InvokeTool_FullMethodName              = "/agent.Agent/InvokeTool"
+	Agent_ListModels_FullMethodName              = "/agent.Agent/ListModels"
+	Agent_ListSkills_FullMethodName              = "/agent.Agent/ListSkills"
+	Agent_GetSkill_FullMethodName                = "/agent.Agent/GetSkill"
+	Agent_SetPermissionMode_FullMethodName       = "/agent.Agent/SetPermissionMode"
+	Agent_GetPermissionMode_FullMethodName       = "/agent.Agent/GetPermissionMode"
+	Agent_AllowToolCall_FullMethodName           = "/agent.Agent/AllowToolCall"
+	Agent_DenyToolCall_FullMethodName            = "/agent.Agent/DenyToolCall"
+	Agent_GetProviderCapabilities_FullMethodName = "/agent.Agent/GetProviderCapabilities"
 )
 
 // AgentClient is the client API for Agent service.
@@ -77,6 +82,16 @@ type AgentClient interface {
 	ListSkills(ctx context.Context, in *ListSkillsRequest, opts ...grpc.CallOption) (*ListSkillsResponse, error)
 	// GetSkill returns the full SKILL.md content for a specific skill by name.
 	GetSkill(ctx context.Context, in *GetSkillRequest, opts ...grpc.CallOption) (*GetSkillResponse, error)
+	// SetPermissionMode changes the agent's session permission mode.
+	SetPermissionMode(ctx context.Context, in *SetPermissionModeRequest, opts ...grpc.CallOption) (*SetPermissionModeResponse, error)
+	// GetPermissionMode reads the current mode.
+	GetPermissionMode(ctx context.Context, in *GetPermissionModeRequest, opts ...grpc.CallOption) (*GetPermissionModeResponse, error)
+	// AllowToolCall + DenyToolCall are how a client replies to a
+	// PermissionRequired stream event.
+	AllowToolCall(ctx context.Context, in *AllowToolCallRequest, opts ...grpc.CallOption) (*AllowToolCallResponse, error)
+	DenyToolCall(ctx context.Context, in *DenyToolCallRequest, opts ...grpc.CallOption) (*DenyToolCallResponse, error)
+	// GetProviderCapabilities reports what the active provider supports.
+	GetProviderCapabilities(ctx context.Context, in *GetProviderCapabilitiesRequest, opts ...grpc.CallOption) (*GetProviderCapabilitiesResponse, error)
 }
 
 type agentClient struct {
@@ -236,6 +251,56 @@ func (c *agentClient) GetSkill(ctx context.Context, in *GetSkillRequest, opts ..
 	return out, nil
 }
 
+func (c *agentClient) SetPermissionMode(ctx context.Context, in *SetPermissionModeRequest, opts ...grpc.CallOption) (*SetPermissionModeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetPermissionModeResponse)
+	err := c.cc.Invoke(ctx, Agent_SetPermissionMode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) GetPermissionMode(ctx context.Context, in *GetPermissionModeRequest, opts ...grpc.CallOption) (*GetPermissionModeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetPermissionModeResponse)
+	err := c.cc.Invoke(ctx, Agent_GetPermissionMode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) AllowToolCall(ctx context.Context, in *AllowToolCallRequest, opts ...grpc.CallOption) (*AllowToolCallResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AllowToolCallResponse)
+	err := c.cc.Invoke(ctx, Agent_AllowToolCall_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) DenyToolCall(ctx context.Context, in *DenyToolCallRequest, opts ...grpc.CallOption) (*DenyToolCallResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DenyToolCallResponse)
+	err := c.cc.Invoke(ctx, Agent_DenyToolCall_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) GetProviderCapabilities(ctx context.Context, in *GetProviderCapabilitiesRequest, opts ...grpc.CallOption) (*GetProviderCapabilitiesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetProviderCapabilitiesResponse)
+	err := c.cc.Invoke(ctx, Agent_GetProviderCapabilities_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServer is the server API for Agent service.
 // All implementations must embed UnimplementedAgentServer
 // for forward compatibility.
@@ -278,6 +343,16 @@ type AgentServer interface {
 	ListSkills(context.Context, *ListSkillsRequest) (*ListSkillsResponse, error)
 	// GetSkill returns the full SKILL.md content for a specific skill by name.
 	GetSkill(context.Context, *GetSkillRequest) (*GetSkillResponse, error)
+	// SetPermissionMode changes the agent's session permission mode.
+	SetPermissionMode(context.Context, *SetPermissionModeRequest) (*SetPermissionModeResponse, error)
+	// GetPermissionMode reads the current mode.
+	GetPermissionMode(context.Context, *GetPermissionModeRequest) (*GetPermissionModeResponse, error)
+	// AllowToolCall + DenyToolCall are how a client replies to a
+	// PermissionRequired stream event.
+	AllowToolCall(context.Context, *AllowToolCallRequest) (*AllowToolCallResponse, error)
+	DenyToolCall(context.Context, *DenyToolCallRequest) (*DenyToolCallResponse, error)
+	// GetProviderCapabilities reports what the active provider supports.
+	GetProviderCapabilities(context.Context, *GetProviderCapabilitiesRequest) (*GetProviderCapabilitiesResponse, error)
 	mustEmbedUnimplementedAgentServer()
 }
 
@@ -329,6 +404,21 @@ func (UnimplementedAgentServer) ListSkills(context.Context, *ListSkillsRequest) 
 }
 func (UnimplementedAgentServer) GetSkill(context.Context, *GetSkillRequest) (*GetSkillResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetSkill not implemented")
+}
+func (UnimplementedAgentServer) SetPermissionMode(context.Context, *SetPermissionModeRequest) (*SetPermissionModeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetPermissionMode not implemented")
+}
+func (UnimplementedAgentServer) GetPermissionMode(context.Context, *GetPermissionModeRequest) (*GetPermissionModeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetPermissionMode not implemented")
+}
+func (UnimplementedAgentServer) AllowToolCall(context.Context, *AllowToolCallRequest) (*AllowToolCallResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AllowToolCall not implemented")
+}
+func (UnimplementedAgentServer) DenyToolCall(context.Context, *DenyToolCallRequest) (*DenyToolCallResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DenyToolCall not implemented")
+}
+func (UnimplementedAgentServer) GetProviderCapabilities(context.Context, *GetProviderCapabilitiesRequest) (*GetProviderCapabilitiesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetProviderCapabilities not implemented")
 }
 func (UnimplementedAgentServer) mustEmbedUnimplementedAgentServer() {}
 func (UnimplementedAgentServer) testEmbeddedByValue()               {}
@@ -596,6 +686,96 @@ func _Agent_GetSkill_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Agent_SetPermissionMode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetPermissionModeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).SetPermissionMode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_SetPermissionMode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).SetPermissionMode(ctx, req.(*SetPermissionModeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_GetPermissionMode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetPermissionModeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).GetPermissionMode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_GetPermissionMode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).GetPermissionMode(ctx, req.(*GetPermissionModeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_AllowToolCall_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AllowToolCallRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).AllowToolCall(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_AllowToolCall_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).AllowToolCall(ctx, req.(*AllowToolCallRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_DenyToolCall_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DenyToolCallRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).DenyToolCall(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_DenyToolCall_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).DenyToolCall(ctx, req.(*DenyToolCallRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_GetProviderCapabilities_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetProviderCapabilitiesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).GetProviderCapabilities(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_GetProviderCapabilities_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).GetProviderCapabilities(ctx, req.(*GetProviderCapabilitiesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Agent_ServiceDesc is the grpc.ServiceDesc for Agent service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -654,6 +834,26 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetSkill",
 			Handler:    _Agent_GetSkill_Handler,
+		},
+		{
+			MethodName: "SetPermissionMode",
+			Handler:    _Agent_SetPermissionMode_Handler,
+		},
+		{
+			MethodName: "GetPermissionMode",
+			Handler:    _Agent_GetPermissionMode_Handler,
+		},
+		{
+			MethodName: "AllowToolCall",
+			Handler:    _Agent_AllowToolCall_Handler,
+		},
+		{
+			MethodName: "DenyToolCall",
+			Handler:    _Agent_DenyToolCall_Handler,
+		},
+		{
+			MethodName: "GetProviderCapabilities",
+			Handler:    _Agent_GetProviderCapabilities_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

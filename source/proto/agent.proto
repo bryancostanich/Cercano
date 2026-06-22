@@ -52,6 +52,20 @@ service Agent {
 
   // GetSkill returns the full SKILL.md content for a specific skill by name.
   rpc GetSkill (GetSkillRequest) returns (GetSkillResponse) {}
+
+  // SetPermissionMode changes the agent's session permission mode.
+  rpc SetPermissionMode (SetPermissionModeRequest) returns (SetPermissionModeResponse) {}
+
+  // GetPermissionMode reads the current mode.
+  rpc GetPermissionMode (GetPermissionModeRequest) returns (GetPermissionModeResponse) {}
+
+  // AllowToolCall + DenyToolCall are how a client replies to a
+  // PermissionRequired stream event.
+  rpc AllowToolCall (AllowToolCallRequest) returns (AllowToolCallResponse) {}
+  rpc DenyToolCall  (DenyToolCallRequest)  returns (DenyToolCallResponse)  {}
+
+  // GetProviderCapabilities reports what the active provider supports.
+  rpc GetProviderCapabilities (GetProviderCapabilitiesRequest) returns (GetProviderCapabilitiesResponse) {}
 }
 
 // Incremental token from LLM streaming.
@@ -62,9 +76,14 @@ message TokenDelta {
 // The response message for StreamProcessRequest.
 message StreamProcessResponse {
   oneof payload {
-    ProgressUpdate progress = 1;
+    ProgressUpdate    progress = 1;
     ProcessRequestResponse final_response = 2;
-    TokenDelta token_delta = 3;
+    TokenDelta        token_delta = 3;
+    ToolUseStart      tool_use_start = 4;
+    ToolUseStop       tool_use_stop = 5;
+    ToolExecStart     tool_exec_start = 6;
+    ToolExecComplete  tool_exec_complete = 7;
+    PermissionRequired permission_required = 8;
   }
 }
 
@@ -180,6 +199,10 @@ message PersistedTurn {
   int32  tokens_out = 6;
   int32  latency_ms = 7;
   int64  created_at = 8;
+  // Ordered block array (JSON) for tool-calling turns. When present, this
+  // is the lossless representation; `content` remains a flat human-readable
+  // fallback for older clients and quick previews.
+  string content_json = 9;
 }
 
 message ListConversationsRequest {
@@ -275,4 +298,51 @@ message GetSkillRequest {
 message GetSkillResponse {
   string name = 1;        // Skill name
   string content = 2;     // Full SKILL.md file content
+}
+
+// Permission-mode RPCs let the CLI's slash commands (/strict, /permissive,
+// /bypass) flip how the agent gates W/X tools, and let the status bar read
+// the current mode at startup.
+message SetPermissionModeRequest  { string mode = 1; }     // "strict" | "permissive" | "bypass"
+message SetPermissionModeResponse { bool ok = 1; string error = 2; }
+
+message GetPermissionModeRequest  {}
+message GetPermissionModeResponse { string mode = 1; }
+
+// Allow/Deny pair the asynchronous PermissionRequired stream event with a
+// client reply. tool_use_id is the same id the event carried.
+message AllowToolCallRequest  { string tool_use_id = 1; }
+message AllowToolCallResponse { bool ok = 1; }
+
+message DenyToolCallRequest  { string tool_use_id = 1; }
+message DenyToolCallResponse { bool ok = 1; }
+
+// Provider capability snapshot — clients hide tool-call UI when the active
+// provider can't drive native tool use.
+message GetProviderCapabilitiesRequest {}
+message GetProviderCapabilitiesResponse {
+  bool supports_tools = 1;
+  bool supports_parallel_tools = 2;
+  bool supports_caching = 3;
+  bool supports_vision = 4;
+  int32 max_tools_per_call = 5;
+}
+
+// Tool-call event blocks for streaming responses. ToolUseStart/Stop bracket
+// the model emitting a tool call; ToolExecStart/Complete bracket the agent
+// executing it; PermissionRequired pauses the stream until the client
+// answers via AllowToolCall or DenyToolCall.
+message ToolUseStart   { string tool_use_id = 1; string tool_name = 2; }
+message ToolUseStop    { string tool_use_id = 1; string args_summary = 2; }
+message ToolExecStart  { string tool_use_id = 1; }
+message ToolExecComplete {
+  string tool_use_id = 1;
+  string summary = 2;
+  bool is_error = 3;
+}
+message PermissionRequired {
+  string tool_use_id = 1;
+  string tool_name = 2;
+  string args_json = 3;
+  string tier = 4;       // "W" | "X"
 }

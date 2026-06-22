@@ -1840,6 +1840,11 @@ func (m Model) renderViewportWithScrollbar() string {
 	for i, line := range lines {
 		contentLine := m.viewport.YOffset() + i
 		line = m.renderSelectionOnLine(line, contentLine)
+		// Clamp to the viewport width so an over-wide content line (Glamour
+		// pads prose a few columns past the wrap width) can't push the
+		// composited row past m.width and wrap in the terminal — which would
+		// shove the scrollbar onto a wrapped row and make it vanish.
+		line = ansi.Truncate(line, m.viewport.Width(), "")
 		b.WriteString(line)
 		b.WriteString(" ") // one-column gap so content doesn't touch the scrollbar
 		// Guard against any row-count mismatch between the rendered body and
@@ -1847,14 +1852,9 @@ func (m Model) renderViewportWithScrollbar() string {
 		if i < len(col) {
 			switch col[i] {
 			case '█':
-				// Thumb — the brightest element so the handle reads clearly.
-				b.WriteString(m.styles.Muted.Render("█"))
+				b.WriteString(m.styles.Border.Render("█"))
 			case '░':
-				// Track — use the visible Border grey, not BorderDim (#434343),
-				// which is nearly invisible on the charcoal background and made
-				// the gutter look empty (especially scrolled to the top, where
-				// the thumb is a small nub).
-				b.WriteString(m.styles.Border.Render("│"))
+				b.WriteString(m.styles.BorderDim.Render("░"))
 			default:
 				b.WriteString(" ")
 			}

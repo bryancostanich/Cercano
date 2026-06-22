@@ -67,10 +67,10 @@ func WithContextLoader(l ContextLoader) AgentOption {
 
 // Agent is the top-level orchestrator for AI requests.
 type Agent struct {
-	router       Router
-	coordinator  Coordinator
-	conversation *ConversationStore
-	persistent   conversation.Store
+	router        Router
+	coordinator   Coordinator
+	conversation  *ConversationStore
+	persistent    conversation.Store
 	meter         *contextmeter.Registry
 	meterModel    string // active local model name, used as Max() baseline
 	contextLoader ContextLoader

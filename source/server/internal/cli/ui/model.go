@@ -61,6 +61,10 @@ type Entry struct {
 type Model struct {
 	width, height int
 
+	// scrollbarTop is the absolute screen row of the viewport's first line,
+	// used to hit-test scrollbar mouse events. Set in relayout().
+	scrollbarTop int
+
 	palette theme.Palette
 	styles  theme.Styles
 
@@ -945,6 +949,8 @@ func (m *Model) relayout() {
 	if m.splashEffective() {
 		splashH = 9 // 8 banner rows + 1 blank
 	}
+	// Viewport's first screen row = header (1) + divider (1) + splash height.
+	m.scrollbarTop = 2 + splashH
 	suggestH := 0
 	if m.viewport.Width() > 0 && !m.editorActive {
 		// Width may not yet match contentW on the first paint; the
@@ -957,7 +963,7 @@ func (m *Model) relayout() {
 	if bodyH < 3 {
 		bodyH = 3
 	}
-	m.viewport.SetWidth(contentW)
+	m.viewport.SetWidth(contentW - 1) // reserve the right column for the scrollbar
 	m.viewport.SetHeight(bodyH)
 	m.input.SetWidth(contentW - 4)
 	m.refreshViewport()
@@ -1441,7 +1447,7 @@ func (m Model) View() tea.View {
 	case m.historyActive:
 		parts = append(parts, m.history.View())
 	default:
-		parts = append(parts, m.viewport.View())
+		parts = append(parts, m.renderViewportWithScrollbar())
 		if m.recap != "" {
 			parts = append(parts, m.renderRecap())
 		}
@@ -1579,6 +1585,37 @@ func (m Model) renderRecap() string {
 		}
 	}
 	return label + m.styles.BorderDim.Render(text)
+}
+
+// renderViewportWithScrollbar renders the chat viewport with a one-column
+// vertical scrollbar on its right edge. The bar paints a thumb (█) + track (░)
+// in subtle greys only when the content overflows; otherwise the reserved
+// column is blank, so the bar appears and disappears without reflowing text.
+func (m Model) renderViewportWithScrollbar() string {
+	body := m.viewport.View()
+	lines := strings.Split(body, "\n")
+	height := m.viewport.Height()
+	col := scrollbarColumn(m.viewport.TotalLineCount(), height, m.viewport.YOffset())
+	var b strings.Builder
+	for i, line := range lines {
+		b.WriteString(line)
+		// Guard against any row-count mismatch between the rendered body and
+		// the computed column.
+		if i < len(col) {
+			switch col[i] {
+			case '█':
+				b.WriteString(m.styles.Border.Render("█"))
+			case '░':
+				b.WriteString(m.styles.BorderDim.Render("░"))
+			default:
+				b.WriteString(" ")
+			}
+		}
+		if i < len(lines)-1 {
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
 }
 
 func (m Model) renderHeader() string {

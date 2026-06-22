@@ -12,13 +12,13 @@ func BuildToolCatalog(reg *Registry) []llm.Tool {
 			Name:        t.Name(),
 			Description: t.Description(),
 			Schema:      t.Schema(),
-			Permission:  permissionToLLM(t.Permission()),
+			Permission:  PermissionToLLM(t.Permission()),
 		})
 	}
 	return out
 }
 
-func permissionToLLM(p Permission) llm.Permission {
+func PermissionToLLM(p Permission) llm.Permission {
 	switch p {
 	case PermR:
 		return llm.PermR

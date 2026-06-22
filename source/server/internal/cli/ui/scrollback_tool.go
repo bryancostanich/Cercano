@@ -70,9 +70,9 @@ var (
 // width is reserved for future wrapping; V1 does not wrap because the args
 // summary + result summary are pre-trimmed by the caller.
 //
-// focused renders a left-margin caret in the accent color so the user can see
-// which entry the up/down nav cursor is currently on. When false, a two-space
-// gutter holds the slot so toggling fold doesn't shift the body horizontally.
+// focused renders a left-margin caret in the accent color. Retained for
+// callers that still pass true; the inline-mode UI has dropped the F3
+// tool-entry navigation that used to drive it.
 func renderToolEntry(e ToolEntry, width int, focused bool) string {
 	_ = width // reserved for follow-up: wrap long lines to terminal width
 

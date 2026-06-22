@@ -1,4 +1,4 @@
-package llm_test
+package legacymodels_test
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/agent"
 )
@@ -19,7 +19,7 @@ func TestOllamaProvider_Integration_Process(t *testing.T) {
 	}
 
 	// Assume Ollama is running at localhost:11434
-	provider := llm.NewLocalModelProvider(ollama.NewOllamaEngine("http://localhost:11434"), integrationTestModelName)
+	provider := legacymodels.NewLocalModelProvider(ollama.NewOllamaEngine("http://localhost:11434"), integrationTestModelName)
 
 	req := &agent.Request{
 		Input: "Write a simple Go function that adds two integers.",

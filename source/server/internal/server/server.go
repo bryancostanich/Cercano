@@ -12,7 +12,7 @@ import (
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/config"
 	"cercano/source/server/internal/engine"
-	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/loop"
 	"cercano/source/server/pkg/proto"
 )
@@ -29,7 +29,7 @@ type RouterCloudUpdater interface {
 type Server struct {
 	proto.UnimplementedAgentServer
 	agent               *agent.Agent
-	localProvider       *llm.LocalModelProvider
+	localProvider       *legacymodels.LocalModelProvider
 	router              RouterCloudUpdater
 	coordinator         *loop.ADKCoordinator
 	cloudFactory        agent.CloudFactory
@@ -45,7 +45,7 @@ type Server struct {
 func (s *Server) SetToolRegistry(r *agenttools.Registry) { s.toolRegistry = r }
 
 // NewServer creates a new Agent gRPC server.
-func NewServer(a *agent.Agent, localProvider *llm.LocalModelProvider, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
+func NewServer(a *agent.Agent, localProvider *legacymodels.LocalModelProvider, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
 	return &Server{
 		agent:         a,
 		localProvider: localProvider,

@@ -1,4 +1,4 @@
-package llm_test
+package legacymodels_test
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/engine"
-	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/legacymodels"
 )
 
 type mockEngine struct {
@@ -49,7 +49,7 @@ func TestLocalModelProvider_Process(t *testing.T) {
 		name:           "mock",
 		completeResult: "success",
 	}
-	provider := llm.NewLocalModelProvider(eng, "test-model")
+	provider := legacymodels.NewLocalModelProvider(eng, "test-model")
 
 	resp, err := provider.Process(context.Background(), &agent.Request{Input: "hello"})
 	if err != nil {
@@ -65,7 +65,7 @@ func TestLocalModelProvider_ProcessStream(t *testing.T) {
 		name:         "mock",
 		streamChunks: []string{"a", "b", "c"},
 	}
-	provider := llm.NewLocalModelProvider(eng, "test-model")
+	provider := legacymodels.NewLocalModelProvider(eng, "test-model")
 
 	var tokens []string
 	resp, err := provider.ProcessStream(context.Background(), &agent.Request{Input: "hello"}, func(token string) {
@@ -84,7 +84,7 @@ func TestLocalModelProvider_ProcessStream(t *testing.T) {
 
 func TestLocalModelProvider_SetModelName(t *testing.T) {
 	eng := &mockEngine{name: "mock"}
-	provider := llm.NewLocalModelProvider(eng, "test-model")
+	provider := legacymodels.NewLocalModelProvider(eng, "test-model")
 
 	if provider.Name() != "test-model" {
 		t.Errorf("expected 'test-model', got %q", provider.Name())

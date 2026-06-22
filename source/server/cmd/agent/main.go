@@ -14,7 +14,7 @@ import (
 	"cercano/source/server/internal/config"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/engine/ollama"
-	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/loop"
 	"cercano/source/server/internal/server"
 	"cercano/source/server/internal/tools"
@@ -70,7 +70,7 @@ func main() {
 	registry.RegisterEmbedder(ollamaEng)
 
 	// Initialize Providers
-	localProvider := llm.NewLocalModelProvider(ollamaEng, cfg.LocalModel)
+	localProvider := legacymodels.NewLocalModelProvider(ollamaEng, cfg.LocalModel)
 
 	// Cloud provider construction: only build a real one when there's enough
 	// config to actually reach a cloud (API key OR a proxy baseURL). Otherwise
@@ -78,19 +78,19 @@ func main() {
 	var cloudProvider agent.ModelProvider
 	if cfg.CloudProvider != "" && (cfg.CloudAPIKey != "" || cfg.CloudBaseURL != "") {
 		fmt.Printf("Main: Initializing Cloud Provider (%s)...\n", cfg.CloudProvider)
-		cp, err := llm.NewCloudModelProvider(context.Background(), cfg.CloudProvider, cfg.CloudModel, cfg.CloudAPIKey, cfg.CloudBaseURL)
+		cp, err := legacymodels.NewCloudModelProvider(context.Background(), cfg.CloudProvider, cfg.CloudModel, cfg.CloudAPIKey, cfg.CloudBaseURL)
 		if err == nil {
 			cloudProvider = cp
 		} else {
 			fmt.Printf("Main: Failed to init Cloud Provider: %v — degrading to local-only.\n", err)
-			cloudProvider = llm.NewAbsentCloudProvider("provider init failed: " + err.Error())
+			cloudProvider = legacymodels.NewAbsentCloudProvider("provider init failed: " + err.Error())
 		}
 	} else {
 		reason := "no API key or base URL configured"
 		if cfg.CloudProvider == "" {
 			reason = "no provider selected"
 		}
-		cloudProvider = llm.NewAbsentCloudProvider(reason)
+		cloudProvider = legacymodels.NewAbsentCloudProvider(reason)
 	}
 
 	validator := tools.NewAutoValidator(tools.DefaultLoader(), tools.DefaultKindToValidator())
@@ -98,7 +98,7 @@ func main() {
 	coordinator := loop.NewADKCoordinator(localProvider, cloudProvider, validator, sessionSvc)
 
 	smartRouter, err := agent.NewSmartRouterFromBytes(localProvider, cloudProvider, cfg.EmbeddingModel, ollamaEng, agent.DefaultPrototypes(), func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.ModelProvider, error) {
-		return llm.NewCloudModelProvider(ctx, provider, model, apiKey, baseURL)
+		return legacymodels.NewCloudModelProvider(ctx, provider, model, apiKey, baseURL)
 	})
 	if err != nil {
 		errMsg := err.Error()
@@ -116,7 +116,7 @@ func main() {
 	orchestrator := agent.NewAgent(smartRouter, coordinator, agent.WithConversationStore(convStore))
 
 	cloudFactory := func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.ModelProvider, error) {
-		return llm.NewCloudModelProvider(ctx, provider, model, apiKey, baseURL)
+		return legacymodels.NewCloudModelProvider(ctx, provider, model, apiKey, baseURL)
 	}
 
 	lis, err := net.Listen("tcp", ":"+cfg.Port)

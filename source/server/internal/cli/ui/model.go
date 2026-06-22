@@ -392,6 +392,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// rewritten at the NEW size show stale content.
 		return m, tea.ClearScreen
 
+	case tea.MouseWheelMsg:
+		if m.editorActive || m.historyActive {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
+
 	case tea.KeyPressMsg:
 		// Pending confirm gates ALL keys — until the user resolves it, the
 		// input, scrollback, and any in-flight slash commands stay dormant.
@@ -1457,6 +1465,8 @@ func (m Model) View() tea.View {
 	}
 	v := tea.NewView(out)
 	v.AltScreen = true
+	v.KeyboardEnhancements = tea.KeyboardEnhancements{}
+	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }
 

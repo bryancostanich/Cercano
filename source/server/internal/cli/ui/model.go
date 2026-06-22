@@ -1847,9 +1847,14 @@ func (m Model) renderViewportWithScrollbar() string {
 		if i < len(col) {
 			switch col[i] {
 			case '█':
-				b.WriteString(m.styles.Border.Render("█"))
+				// Thumb — the brightest element so the handle reads clearly.
+				b.WriteString(m.styles.Muted.Render("█"))
 			case '░':
-				b.WriteString(m.styles.BorderDim.Render("░"))
+				// Track — use the visible Border grey, not BorderDim (#434343),
+				// which is nearly invisible on the charcoal background and made
+				// the gutter look empty (especially scrolled to the top, where
+				// the thumb is a small nub).
+				b.WriteString(m.styles.Border.Render("│"))
 			default:
 				b.WriteString(" ")
 			}

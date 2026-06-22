@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	"cercano/source/server/internal/agenttools"
@@ -153,5 +155,67 @@ func TestToolLoop_UserDeniesWTier_TerminatesTurn(t *testing.T) {
 	last := result.History[len(result.History)-1]
 	if last.Role != llm.RoleUser || len(last.Blocks) == 0 || !last.Blocks[0].IsError {
 		t.Errorf("expected error tool_result, got %+v", last)
+	}
+}
+
+// register a single failing tool for cleaner scripted scenarios
+type alwaysFailTool struct{}
+
+func (alwaysFailTool) Name() string                      { return "always_fail" }
+func (alwaysFailTool) Description() string               { return "always fails" }
+func (alwaysFailTool) Permission() agenttools.Permission { return agenttools.PermR }
+func (alwaysFailTool) Schema() json.RawMessage           { return json.RawMessage(`{"type":"object"}`) }
+func (alwaysFailTool) Execute(ctx context.Context, args json.RawMessage) (*agenttools.Result, error) {
+	return nil, fmt.Errorf("always-fail")
+}
+
+func TestToolLoop_3StrikeErrorGuard(t *testing.T) {
+	prov := &mockProvider{
+		scripts: [][]llm.Block{
+			{{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "always_fail",
+				ToolInput: json.RawMessage(`{}`)}},
+			{{Type: llm.BlockToolUse, ToolUseID: "u2", ToolName: "always_fail",
+				ToolInput: json.RawMessage(`{}`)}},
+			{{Type: llm.BlockToolUse, ToolUseID: "u3", ToolName: "always_fail",
+				ToolInput: json.RawMessage(`{}`)}},
+		},
+		caps: llm.Capabilities{SupportsTools: true},
+	}
+	reg := agenttools.NewRegistry()
+	reg.MustRegister(alwaysFailTool{})
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+
+	_, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider: prov, Registry: reg, Permissions: perms, UserInput: "x",
+	})
+	if err == nil || !strings.Contains(err.Error(), "3 consecutive") {
+		t.Errorf("expected 3-strike abort, got %v", err)
+	}
+	if prov.calls != 3 {
+		t.Errorf("expected exactly 3 calls before abort, got %d", prov.calls)
+	}
+}
+
+func TestToolLoop_IterationCap(t *testing.T) {
+	// 11 iterations of "call tool again" — should abort at 10.
+	scripts := make([][]llm.Block, 11)
+	for i := range scripts {
+		scripts[i] = []llm.Block{{
+			Type: llm.BlockToolUse, ToolUseID: fmt.Sprintf("u%d", i),
+			ToolName: "list_dir", ToolInput: json.RawMessage(`{"path":"."}`),
+		}}
+	}
+	prov := &mockProvider{scripts: scripts, caps: llm.Capabilities{SupportsTools: true}}
+	reg := agenttools.DefaultRegistry()
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+
+	_, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider: prov, Registry: reg, Permissions: perms, UserInput: "x",
+	})
+	if err == nil || !strings.Contains(err.Error(), "max tool loop iterations") {
+		t.Errorf("expected iteration cap abort, got %v", err)
+	}
+	if prov.calls != 10 {
+		t.Errorf("expected exactly 10 calls before cap, got %d", prov.calls)
 	}
 }

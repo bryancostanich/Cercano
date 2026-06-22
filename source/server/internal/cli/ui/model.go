@@ -107,6 +107,9 @@ type Model struct {
 
 	streamCh <-chan agentclient.StreamMsg
 	streaming          bool
+	// cancelStream cancels the context of the in-flight StreamChat so Esc can
+	// abort a running prompt. Nil when nothing is streaming.
+	cancelStream context.CancelFunc
 
 	tokIn, tokOut  int
 	cumIn, cumOut  int
@@ -611,6 +614,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, cmd
 		}
+		// Esc cancels an in-flight prompt execution.
+		if m.streaming && key.Matches(msg, keys.Back) {
+			m.cancelCurrentStream()
+			return m, nil
+		}
 		if m.selection.Active {
 			next, cmd, handled := m.handleSelectionKey(msg)
 			if handled {
@@ -767,6 +775,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case streamTickMsg:
+		// Ignore late messages from a stream we already canceled.
+		if !m.streaming {
+			return m, nil
+		}
 		return m.applyStreamMsg(msg.msg)
 
 	case ctxUsageMsg:
@@ -822,6 +834,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case streamEndMsg:
 		m.streaming = false
+		if m.cancelStream != nil {
+			m.cancelStream() // release the stream context on normal completion
+			m.cancelStream = nil
+		}
 		// Finalize the streaming entry so it stops showing the spinner.
 		if e := m.lastAssistantEntry(); e != nil {
 			e.Streaming = false
@@ -897,13 +913,16 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 
 	// Pass cwd so the agent prepends .cercano/context.md if present.
 	wd, _ := os.Getwd()
-	ch, err := m.agent.StreamChat(context.Background(), m.convID, text, wd)
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := m.agent.StreamChat(ctx, m.convID, text, wd)
 	if err != nil {
+		cancel()
 		m.errMsg = err.Error()
 		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "error: " + err.Error()})
 		m.refreshViewport()
 		return m, nil
 	}
+	m.cancelStream = cancel
 	m.streamCh = ch
 	m.streaming = true
 	// Fire both the stream drainer and the progress-text animator; both
@@ -953,6 +972,24 @@ func (m *Model) setInputValue(s string) {
 	m.input.SetValue(s)
 	m.input.CursorEnd()
 	m.relayout()
+}
+
+// cancelCurrentStream aborts an in-flight prompt: cancel the StreamChat context
+// (the gRPC stream closes), drop streaming state, finalize the placeholder, and
+// append a muted "canceled" note. Any late messages are ignored by the
+// streamTickMsg guard once m.streaming is false.
+func (m *Model) cancelCurrentStream() {
+	if m.cancelStream != nil {
+		m.cancelStream()
+		m.cancelStream = nil
+	}
+	m.streaming = false
+	m.streamCh = nil
+	if e := m.lastAssistantEntry(); e != nil {
+		e.Streaming = false
+	}
+	m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "⊘ canceled"})
+	m.refreshViewport()
 }
 
 func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {

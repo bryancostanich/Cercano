@@ -311,6 +311,7 @@ func main() {
 	forceCLI := flag.Bool("cli", false, "Force CLI mode even when stdin is not a terminal")
 	resumeOnStart := flag.Bool("r", false, "Open the conversation history picker on launch (alias for --resume)")
 	resumeLong := flag.Bool("resume", false, "Open the conversation history picker on launch")
+	mdtest := flag.Bool("mdtest", false, "Launch the TUI with a markdown doc pre-loaded for render testing (optional file path as a positional arg; built-in sample if omitted)")
 	flag.Parse()
 
 	if *showVersion {
@@ -341,15 +342,19 @@ func main() {
 
 	openHistory := *resumeOnStart || *resumeLong
 	switch {
+	case *mdtest:
+		// Render-testing mode: launch the TUI with a markdown doc pre-loaded.
+		// No model round-trip — the doc renders through the normal viewport path.
+		runCLI(cfg, false, loadMdTestDoc(flag.Arg(0)))
 	case *mcpMode:
 		runMCPMode(cfg, *grpcAddr)
 	case *forceServer:
 		runServerMode(cfg)
 	case *forceCLI:
-		runCLI(cfg, openHistory)
+		runCLI(cfg, openHistory, "")
 	case isInteractiveStdin():
 		// Real terminal invocation → the user wants the CLI.
-		runCLI(cfg, openHistory)
+		runCLI(cfg, openHistory, "")
 	default:
 		// Spawned by another process (VS Code extension, MCP host wrapper,
 		// systemd, etc.) → run the gRPC server in the foreground so the
@@ -375,7 +380,7 @@ func isInteractiveStdin() bool {
 // localhost:<cfg.Port>, or auto-launches one (as `cercano agent`) on miss.
 // openHistoryOnStart opens the /history picker immediately after first paint
 // (used by the -r / --resume flag).
-func runCLI(cfg config.Config, openHistoryOnStart bool) {
+func runCLI(cfg config.Config, openHistoryOnStart bool, seedDoc string) {
 	addr := "localhost:" + cfg.Port
 	fmt.Fprintln(os.Stderr, "cercano: connecting to", addr+"…")
 	ag, err := agentclient.Dial(context.Background(), addr)
@@ -389,6 +394,9 @@ func runCLI(cfg config.Config, openHistoryOnStart bool) {
 	}
 
 	m := cliui.New(ag, openHistoryOnStart)
+	if seedDoc != "" {
+		m = m.SeedAssistantMarkdown(seedDoc)
+	}
 	p := tea.NewProgram(m)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "cercano:", err)

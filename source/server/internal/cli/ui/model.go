@@ -228,6 +228,15 @@ func newConvID() string {
 	return hex.EncodeToString(b[:])
 }
 
+// SeedAssistantMarkdown pre-loads a finished assistant entry containing the
+// given markdown, for the `--mdtest` render-testing mode. Hides the splash so
+// the rendered doc is visible immediately. No agent round-trip occurs.
+func (m Model) SeedAssistantMarkdown(doc string) Model {
+	m.entries = append(m.entries, &Entry{Role: RoleAssistant, Content: doc})
+	m.splashShown = false
+	return m
+}
+
 // Init is called by Bubble Tea once at startup.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(m.input.Focus(), m.splash.Init(), fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent))

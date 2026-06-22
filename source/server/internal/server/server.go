@@ -413,6 +413,10 @@ func (s *Server) ProcessRequest(ctx context.Context, req *proto.ProcessRequestRe
 func (s *Server) StreamProcessRequest(req *proto.ProcessRequestRequest, stream proto.Agent_StreamProcessRequestServer) error {
 	fmt.Printf("Received request (Stream): %s\n", req.Input)
 
+	if s.cloudLLMProvider != nil && s.toolRegistry != nil {
+		return s.streamProcessRequestWithToolLoop(req, stream)
+	}
+
 	agentReq := s.mapRequest(req)
 
 	response, err := s.agent.ProcessRequestStream(stream.Context(), agentReq,
@@ -440,6 +444,96 @@ func (s *Server) StreamProcessRequest(req *proto.ProcessRequestRequest, stream p
 	return stream.Send(&proto.StreamProcessResponse{
 		Payload: &proto.StreamProcessResponse_FinalResponse{
 			FinalResponse: s.mapResponse(response),
+		},
+	})
+}
+
+// streamProcessRequestWithToolLoop drives the native tool-calling loop and
+// emits per-event stream payloads. Used when a layered LLM provider has been
+// wired via SetCloudLLMProvider.
+func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestRequest, stream proto.Agent_StreamProcessRequestServer) error {
+	ctx := stream.Context()
+	sink := func(ev agent.LoopEvent) {
+		switch ev.Kind {
+		case agent.LoopToolUseStart:
+			stream.Send(&proto.StreamProcessResponse{
+				Payload: &proto.StreamProcessResponse_ToolUseStart{
+					ToolUseStart: &proto.ToolUseStart{
+						ToolUseId: ev.ToolUseID,
+						ToolName:  ev.ToolName,
+					},
+				},
+			})
+		case agent.LoopToolUseStop:
+			stream.Send(&proto.StreamProcessResponse{
+				Payload: &proto.StreamProcessResponse_ToolUseStop{
+					ToolUseStop: &proto.ToolUseStop{
+						ToolUseId:   ev.ToolUseID,
+						ArgsSummary: ev.ArgsJSON,
+					},
+				},
+			})
+		case agent.LoopToolExecStart:
+			stream.Send(&proto.StreamProcessResponse{
+				Payload: &proto.StreamProcessResponse_ToolExecStart{
+					ToolExecStart: &proto.ToolExecStart{
+						ToolUseId: ev.ToolUseID,
+					},
+				},
+			})
+		case agent.LoopToolExecComplete:
+			stream.Send(&proto.StreamProcessResponse{
+				Payload: &proto.StreamProcessResponse_ToolExecComplete{
+					ToolExecComplete: &proto.ToolExecComplete{
+						ToolUseId: ev.ToolUseID,
+						Summary:   ev.Summary,
+						IsError:   ev.IsError,
+					},
+				},
+			})
+		}
+	}
+
+	requester := func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission) (bool, error) {
+		if s.pendingDecisions == nil {
+			return false, nil
+		}
+		if err := stream.Send(&proto.StreamProcessResponse{
+			Payload: &proto.StreamProcessResponse_PermissionRequired{
+				PermissionRequired: &proto.PermissionRequired{
+					ToolUseId: toolUseID,
+					ToolName:  name,
+					ArgsJson:  string(args),
+					Tier:      string(tier),
+				},
+			},
+		}); err != nil {
+			return false, err
+		}
+		return s.pendingDecisions.Wait(ctx, toolUseID)
+	}
+
+	result, err := agent.RunToolLoop(ctx, agent.ToolLoopInput{
+		Provider:            s.cloudLLMProvider,
+		Registry:            s.toolRegistry,
+		Permissions:         s.permStore,
+		UserInput:           req.GetInput(),
+		Model:               s.currentConfig.CloudModel,
+		EventSink:           sink,
+		PermissionRequester: requester,
+	})
+	if err != nil {
+		return fmt.Errorf("tool loop error: %w", err)
+	}
+
+	return stream.Send(&proto.StreamProcessResponse{
+		Payload: &proto.StreamProcessResponse_FinalResponse{
+			FinalResponse: &proto.ProcessRequestResponse{
+				Output: strings.ToValidUTF8(result.FinalText, "�"),
+				RoutingMetadata: &proto.RoutingMetadata{
+					ModelName: s.cloudLLMProvider.Name(),
+				},
+			},
 		},
 	})
 }

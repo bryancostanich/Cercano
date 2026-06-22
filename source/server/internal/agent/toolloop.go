@@ -82,7 +82,14 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		}
 
 		results := make([]llm.Block, 0, len(toolCalls))
-		allErrored := true
+		_ = mode
+
+		type pendingCall struct {
+			block llm.Block
+			tool  agenttools.Tool
+			tier  llm.Permission
+		}
+		var rCalls, wxCalls []pendingCall
 		for _, tc := range toolCalls {
 			tool, ok := in.Registry.Get(tc.ToolName)
 			if !ok {
@@ -93,21 +100,57 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				continue
 			}
 			tier := agenttools.PermissionToLLM(tool.Permission())
-			_ = mode
-			_ = tier
-			res, ierr := tool.Execute(ctx, tc.ToolInput)
-			if ierr != nil {
-				results = append(results, llm.Block{
-					Type: llm.BlockToolResult, ToolUseRef: tc.ToolUseID,
-					Content: ierr.Error(), IsError: true,
-				})
-				continue
+			pc := pendingCall{block: tc, tool: tool, tier: tier}
+			if tier == llm.PermR {
+				rCalls = append(rCalls, pc)
+			} else {
+				wxCalls = append(wxCalls, pc)
 			}
-			allErrored = false
-			results = append(results, llm.Block{
-				Type: llm.BlockToolResult, ToolUseRef: tc.ToolUseID,
-				Content: res.Text, IsError: false,
-			})
+		}
+
+		type rr struct {
+			idx int
+			res llm.Block
+		}
+		rChan := make(chan rr, len(rCalls))
+		for i, pc := range rCalls {
+			go func(i int, pc pendingCall) {
+				res, err := pc.tool.Execute(ctx, pc.block.ToolInput)
+				out := llm.Block{Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID}
+				if err != nil {
+					out.Content = err.Error()
+					out.IsError = true
+				} else {
+					out.Content = res.Text
+				}
+				rChan <- rr{idx: i, res: out}
+			}(i, pc)
+		}
+		rResults := make([]llm.Block, len(rCalls))
+		for range rCalls {
+			r := <-rChan
+			rResults[r.idx] = r.res
+		}
+		results = append(results, rResults...)
+
+		for _, pc := range wxCalls {
+			res, err := pc.tool.Execute(ctx, pc.block.ToolInput)
+			out := llm.Block{Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID}
+			if err != nil {
+				out.Content = err.Error()
+				out.IsError = true
+			} else {
+				out.Content = res.Text
+			}
+			results = append(results, out)
+		}
+
+		allErrored := true
+		for _, r := range results {
+			if !r.IsError {
+				allErrored = false
+				break
+			}
 		}
 		hist = append(hist, llm.Message{Role: llm.RoleUser, Blocks: results})
 

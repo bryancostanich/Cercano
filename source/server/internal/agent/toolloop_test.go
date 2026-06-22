@@ -80,3 +80,45 @@ func TestToolLoop_SingleToolCall_FeedsResultAndContinues(t *testing.T) {
 		t.Errorf("final: %q", result.FinalText)
 	}
 }
+
+func TestToolLoop_RTierRunsConcurrently(t *testing.T) {
+	prov := &mockProvider{
+		scripts: [][]llm.Block{
+			{
+				{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "list_dir",
+					ToolInput: json.RawMessage(`{"path":"."}`)},
+				{Type: llm.BlockToolUse, ToolUseID: "u2", ToolName: "list_dir",
+					ToolInput: json.RawMessage(`{"path":"."}`)},
+			},
+			{{Type: llm.BlockText, Text: "done"}},
+		},
+		caps: llm.Capabilities{SupportsTools: true, SupportsParallelTools: true},
+	}
+	reg := agenttools.DefaultRegistry()
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+
+	result, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider: prov, Registry: reg, Permissions: perms, UserInput: "x",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FinalText != "done" {
+		t.Errorf("final: %q", result.FinalText)
+	}
+
+	var found1, found2 bool
+	for _, m := range result.History {
+		for _, b := range m.Blocks {
+			if b.Type == llm.BlockToolResult && b.ToolUseRef == "u1" {
+				found1 = true
+			}
+			if b.Type == llm.BlockToolResult && b.ToolUseRef == "u2" {
+				found2 = true
+			}
+		}
+	}
+	if !found1 || !found2 {
+		t.Errorf("missing tool results: u1=%v u2=%v", found1, found2)
+	}
+}

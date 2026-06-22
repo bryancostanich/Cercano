@@ -18,6 +18,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"cercano/source/server/internal/cli/agentclient"
 	"cercano/source/server/internal/cli/banner"
@@ -1165,10 +1166,53 @@ func (m *Model) renderAssistantMarkdown(e *Entry, textW int) string {
 }
 
 func (m *Model) renderMdBlock(b render.MdBlock, textW int) string {
-	if b.Kind == render.MdTable && b.Table != nil {
+	switch {
+	case b.Kind == render.MdTable && b.Table != nil:
 		return b.Table.Render(textW, m.styles)
+	case b.Kind == render.MdCode:
+		body := trimBlankEdgeLines(m.md.Render(b.Raw, textW))
+		top := codeRule(b.Lang, textW, m.styles)
+		bottom := codeRule("", textW, m.styles)
+		return top + "\n" + body + "\n" + bottom
+	default:
+		return m.md.Render(b.Raw, textW)
 	}
-	return m.md.Render(b.Raw, textW)
+}
+
+// trimBlankEdgeLines drops leading and trailing lines that are visually empty —
+// Glamour pads code blocks with a blank line top and bottom, which we don't want
+// inside our rules. Lines carry ANSI escapes (a "blank" line is escape codes +
+// spaces), so emptiness is judged on the ANSI-stripped text. Interior blank
+// lines are preserved.
+func trimBlankEdgeLines(s string) string {
+	lines := strings.Split(s, "\n")
+	blank := func(l string) bool { return strings.TrimSpace(ansi.Strip(l)) == "" }
+	for len(lines) > 0 && blank(lines[0]) {
+		lines = lines[1:]
+	}
+	for len(lines) > 0 && blank(lines[len(lines)-1]) {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// codeRule renders a full-width horizontal rule delimiting a code block. With a
+// language it reads `─── go ─────────…`; without one it's a plain rule. The rule
+// is muted; the language label is cyan to echo the inline-code color.
+func codeRule(lang string, width int, styles theme.Styles) string {
+	if width < 4 {
+		width = 4
+	}
+	if lang == "" {
+		return styles.Muted.Render(strings.Repeat("─", width))
+	}
+	fill := width - (lipgloss.Width(lang) + 5) // "─── " (4) + lang + " " (1)
+	if fill < 0 {
+		fill = 0
+	}
+	return styles.Muted.Render("─── ") +
+		styles.Info.Render(lang) +
+		styles.Muted.Render(" "+strings.Repeat("─", fill))
 }
 
 // closeOpenFence appends a closing code fence when the tail has an odd number of

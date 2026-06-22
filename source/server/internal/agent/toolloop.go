@@ -82,7 +82,6 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		}
 
 		results := make([]llm.Block, 0, len(toolCalls))
-		_ = mode
 
 		type pendingCall struct {
 			block llm.Block
@@ -134,6 +133,28 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		results = append(results, rResults...)
 
 		for _, pc := range wxCalls {
+			if GateDecision(mode, pc.tier) {
+				if in.PermissionRequester == nil {
+					results = append(results, llm.Block{
+						Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID,
+						Content: "no permission requester wired", IsError: true,
+					})
+					hist = append(hist, llm.Message{Role: llm.RoleUser, Blocks: results})
+					return ToolLoopResult{FinalText: finalText, Iterations: iter + 1, History: hist}, nil
+				}
+				allow, err := in.PermissionRequester(ctx, pc.block.ToolName, pc.block.ToolInput, pc.tier)
+				if err != nil {
+					return ToolLoopResult{}, err
+				}
+				if !allow {
+					results = append(results, llm.Block{
+						Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID,
+						Content: "user denied execution", IsError: true,
+					})
+					hist = append(hist, llm.Message{Role: llm.RoleUser, Blocks: results})
+					return ToolLoopResult{FinalText: finalText, Iterations: iter + 1, History: hist}, nil
+				}
+			}
 			res, err := pc.tool.Execute(ctx, pc.block.ToolInput)
 			out := llm.Block{Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID}
 			if err != nil {

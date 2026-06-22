@@ -458,16 +458,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.selection.Dragging {
 			return m, nil
 		}
-		var cmd tea.Cmd
 		// Scroll the textarea only when it's multi-line AND the pointer is
 		// actually over the input's rows; otherwise scroll the chat scrollback.
 		y := msg.Mouse().Y
 		overInput := m.input.Height() > 1 && y >= m.inputTop && y < m.inputTop+m.input.Height()
 		if overInput {
-			m.input, cmd = m.input.Update(msg)
-		} else {
-			m.viewport, cmd = m.viewport.Update(msg)
+			// Drive the cursor rather than feed the raw wheel: the textarea's
+			// own wheel scroll overscrolls past the content into empty lines and
+			// is asymmetric. Moving the cursor lets the view follow, clamped to
+			// the content, symmetric both directions.
+			switch msg.Button {
+			case ansi.MouseWheelUp:
+				m.input.CursorUp()
+			case ansi.MouseWheelDown:
+				m.input.CursorDown()
+			}
+			return m, nil
 		}
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
 
 	case tea.MouseClickMsg:

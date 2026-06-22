@@ -229,3 +229,53 @@ func TestDeriveTitle(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateRecapAndGet(t *testing.T) {
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+
+	if err := s.EnsureConversation(ctx, "c1", "/proj", "qwen3-coder"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateRecap(ctx, "c1", "Refactored the router and added tests"); err != nil {
+		t.Fatalf("UpdateRecap: %v", err)
+	}
+
+	got, err := s.Get(ctx, "c1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Recap != "Refactored the router and added tests" {
+		t.Errorf("recap = %q", got.Recap)
+	}
+	if got.RecapUpdatedAt.IsZero() {
+		t.Error("RecapUpdatedAt not set")
+	}
+}
+
+func TestGetMissingReturnsError(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	if _, err := s.Get(context.Background(), "nope"); err == nil {
+		t.Error("expected error for missing conversation")
+	}
+}
+
+func TestListIncludesRecap(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	ctx := context.Background()
+	_ = s.EnsureConversation(ctx, "c1", "", "")
+	_ = s.UpdateRecap(ctx, "c1", "did a thing")
+	list, err := s.List(ctx, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Recap != "did a thing" {
+		t.Errorf("list recap = %+v", list)
+	}
+}

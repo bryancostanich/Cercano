@@ -32,7 +32,7 @@ import (
 	"cercano/source/server/internal/dispatch/builtin"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/engine/ollama"
-	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/loop"
 	mcpserver "cercano/source/server/internal/mcp"
 	"cercano/source/server/internal/server"
@@ -103,7 +103,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	registry.RegisterEngine(ollamaEng)
 	registry.RegisterEmbedder(ollamaEng)
 
-	localProvider := llm.NewLocalModelProvider(ollamaEng, cfg.LocalModel)
+	localProvider := legacymodels.NewLocalModelProvider(ollamaEng, cfg.LocalModel)
 
 	// Cloud provider: only construct a real one when there's enough config to
 	// actually reach a cloud. Otherwise return a sentinel that auto-degrades
@@ -115,12 +115,12 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		if cfg.CloudBaseURL != "" {
 			fmt.Fprintf(os.Stderr, "  baseURL: %s\n", cfg.CloudBaseURL)
 		}
-		cp, err := llm.NewCloudModelProvider(context.Background(), cfg.CloudProvider, cfg.CloudModel, cfg.CloudAPIKey, cfg.CloudBaseURL)
+		cp, err := legacymodels.NewCloudModelProvider(context.Background(), cfg.CloudProvider, cfg.CloudModel, cfg.CloudAPIKey, cfg.CloudBaseURL)
 		if err == nil {
 			cloudProvider = cp
 		} else {
 			fmt.Fprintf(os.Stderr, "Failed to init Cloud Provider: %v — cloud routing will degrade to local.\n", err)
-			cloudProvider = llm.NewAbsentCloudProvider("provider init failed: " + err.Error())
+			cloudProvider = legacymodels.NewAbsentCloudProvider("provider init failed: " + err.Error())
 		}
 	}
 	if cloudProvider == nil {
@@ -128,7 +128,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		if cfg.CloudProvider == "" {
 			reason = "no provider selected"
 		}
-		cloudProvider = llm.NewAbsentCloudProvider(reason)
+		cloudProvider = legacymodels.NewAbsentCloudProvider(reason)
 		fmt.Fprintf(os.Stderr, "Cloud provider absent (%s); routing will degrade to local with notice.\n", reason)
 	}
 
@@ -137,7 +137,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	coordinator := loop.NewADKCoordinator(localProvider, cloudProvider, validator, sessionSvc)
 
 	cloudFactory := func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.ModelProvider, error) {
-		return llm.NewCloudModelProvider(ctx, provider, model, apiKey, baseURL)
+		return legacymodels.NewCloudModelProvider(ctx, provider, model, apiKey, baseURL)
 	}
 
 	// SmartRouter is built lazily on first use. This keeps MCP-only deployments

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"cercano/source/server/internal/engine/ollama"
-	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/loop"
 	"cercano/source/server/internal/testfixtures"
 	"cercano/source/server/internal/tools"
@@ -29,7 +29,7 @@ func TestSandbox_GenerateAndRunTests(t *testing.T) {
 		t.Fatalf("Failed to read calculator.go: %v", err)
 	}
 
-	provider := llm.NewLocalModelProvider(ollama.NewOllamaEngine("http://localhost:11434"), "qwen3-coder")
+	provider := legacymodels.NewLocalModelProvider(ollama.NewOllamaEngine("http://localhost:11434"), "qwen3-coder")
 	handler := tools.NewGenericGenerator(provider)
 	validator := tools.NewGoValidator()
 	coordinator := loop.NewGenerationCoordinator(handler, handler, validator)

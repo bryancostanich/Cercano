@@ -12,7 +12,7 @@ import (
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/engine/ollama"
-	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/pkg/proto"
 
 	"google.golang.org/grpc"
@@ -166,7 +166,7 @@ func TestUpdateConfig_OllamaURL(t *testing.T) {
 	registry := engine.NewEngineRegistry()
 	eng := ollama.NewOllamaEngine("http://localhost:11434")
 	registry.RegisterEngine(eng)
-	provider := llm.NewLocalModelProvider(eng, "test-model")
+	provider := legacymodels.NewLocalModelProvider(eng, "test-model")
 
 	srv := NewServer(nil, provider, nil, nil, nil, registry)
 
@@ -293,7 +293,7 @@ func TestUpdateConfig_OllamaURL_WithModel(t *testing.T) {
 	registry := engine.NewEngineRegistry()
 	eng := ollama.NewOllamaEngine("http://localhost:11434")
 	registry.RegisterEngine(eng)
-	provider := llm.NewLocalModelProvider(eng, "test-model")
+	provider := legacymodels.NewLocalModelProvider(eng, "test-model")
 
 	srv := NewServer(nil, provider, nil, nil, nil, registry)
 

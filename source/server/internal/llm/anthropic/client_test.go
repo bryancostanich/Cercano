@@ -92,3 +92,52 @@ func TestClient_Chat_SendsMessagesAndTools(t *testing.T) {
 		t.Errorf("blocks not converted: %+v", resp.Blocks)
 	}
 }
+
+func TestClient_Chat_SessionHeaders(t *testing.T) {
+	var seenSession, seenRequest, seenMode string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenSession = r.Header.Get("x-opencode-session")
+		seenRequest = r.Header.Get("x-opencode-request")
+		seenMode = r.Header.Get("x-opencode-agent-mode")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"id":"m_1","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"model":"claude","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{BaseURL: srv.URL, APIKey: "dummy", Model: "claude"})
+	ctx := WithSessionID(t.Context(), "conv-abc-123")
+	_, err := c.Chat(ctx, ChatRequest{Model: "claude", MaxTokens: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if seenSession != "conv-abc-123" {
+		t.Errorf("session header: got %q want conv-abc-123", seenSession)
+	}
+	if seenRequest == "" || !strings.HasPrefix(seenRequest, "msg-") {
+		t.Errorf("request header missing or wrong shape: %q", seenRequest)
+	}
+	if seenMode != "primary" {
+		t.Errorf("agent-mode: got %q want primary", seenMode)
+	}
+}
+
+func TestClient_Chat_NoSessionHeader_WhenUnset(t *testing.T) {
+	var seenSession string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenSession = r.Header.Get("x-opencode-session")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"id":"m_1","type":"message","role":"assistant","content":[],"model":"claude","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer srv.Close()
+	c := NewClient(Config{BaseURL: srv.URL, APIKey: "dummy"})
+	_, err := c.Chat(t.Context(), ChatRequest{Model: "claude", MaxTokens: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seenSession != "" {
+		t.Errorf("expected no session header without context value, got %q", seenSession)
+	}
+}

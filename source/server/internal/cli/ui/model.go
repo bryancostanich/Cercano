@@ -61,6 +61,11 @@ type Model struct {
 	// used to hit-test scrollbar mouse events. Set in relayout().
 	scrollbarTop int
 
+	// inputTop is the absolute screen row of the prompt input's first line,
+	// used to hit-test mouse-wheel events over the (multi-line) prompt. Set in
+	// relayout().
+	inputTop int
+
 	// scrollbarDragging is true while the user holds the mouse on the
 	// scrollbar; motion events then scrub the viewport scroll position.
 	scrollbarDragging bool
@@ -454,10 +459,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		var cmd tea.Cmd
-		// When the prompt has grown multi-line and the pointer is over the
-		// bottom prompt region (below the viewport), scroll the textarea;
-		// otherwise scroll the chat scrollback.
-		if m.input.Height() > 1 && msg.Mouse().Y >= m.scrollbarTop+m.viewport.Height() {
+		// Scroll the textarea only when it's multi-line AND the pointer is
+		// actually over the input's rows; otherwise scroll the chat scrollback.
+		y := msg.Mouse().Y
+		overInput := m.input.Height() > 1 && y >= m.inputTop && y < m.inputTop+m.input.Height()
+		if overInput {
 			m.input, cmd = m.input.Update(msg)
 		} else {
 			m.viewport, cmd = m.viewport.Update(msg)
@@ -1147,6 +1153,15 @@ func (m *Model) relayout() {
 	}
 	m.viewport.SetWidth(contentW - 2) // reserve two right columns: a gap + the scrollbar
 	m.viewport.SetHeight(bodyH)
+
+	// The prompt input's first screen row: below the viewport, the recap line
+	// (if any), the divider above the input, and the suggestion line (if any).
+	recapH := 0
+	if m.recap != "" {
+		recapH = strings.Count(m.renderRecap(), "\n") + 1
+	}
+	m.inputTop = m.scrollbarTop + bodyH + recapH + 1 + suggestH
+
 	m.refreshViewport()
 }
 

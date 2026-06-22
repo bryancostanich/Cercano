@@ -187,18 +187,18 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	convRef.id = initialConvID
 
 	return Model{
-		palette:        p,
-		styles:         s,
-		agent:          ag,
-		convID:         initialConvID,
-		convRef:        convRef,
-		registry:       reg,
-		splashShown:    !openHistoryOnStart,
-		splash:         splash,
-		viewport:       vp,
-		input:          ti,
-		lastModel:      "qwen3-coder",
-		modelMaxTokens: 128_000, // placeholder until the agent serves real ctx limits
+		palette:            p,
+		styles:             s,
+		agent:              ag,
+		convID:             initialConvID,
+		convRef:            convRef,
+		registry:           reg,
+		splashShown:        !openHistoryOnStart,
+		splash:             splash,
+		viewport:           vp,
+		input:              ti,
+		lastModel:          "qwen3-coder",
+		modelMaxTokens:     128_000, // placeholder until the agent serves real ctx limits
 		openHistoryOnStart: openHistoryOnStart,
 		promptBorderColor:  p.Accent,
 		focusedToolIdx:     -1,
@@ -270,8 +270,8 @@ func invokeToolCmd(ag *agentclient.Client, name, argsJSON string) tea.Cmd {
 
 // configLoadedMsg carries the result of the startup / post-edit GetConfig RPC.
 type configLoadedMsg struct {
-	LocalModel    string
-	CloudModel    string
+	LocalModel      string
+	CloudModel      string
 	CloudConfigured bool
 }
 
@@ -552,12 +552,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 
-	case tea.MouseMsg:
-		// Mouse wheel ↑/↓ scrolls scrollback line-by-line.
-		var cmd tea.Cmd
-		m.viewport, cmd = m.viewport.Update(msg)
-		return m, cmd
-
 	case streamTickMsg:
 		return m.applyStreamMsg(msg.msg)
 
@@ -744,7 +738,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 			return m, invokeToolCmd(m.agent, res.ToolName, res.ToolArgs)
 		}
 		if perm == "R" {
-			m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: m.styles.Muted.Render("running tool:"+res.ToolName)})
+			m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: m.styles.Muted.Render("running tool:" + res.ToolName)})
 			m.refreshViewport()
 			return m, invokeToolCmd(m.agent, res.ToolName, res.ToolArgs)
 		}
@@ -1141,9 +1135,9 @@ func progressColorAt(col int, sweepPos float64, tail float64) lipgloss.Color {
 	if dist >= tail {
 		return lipgloss.Color("#BDF000") // lime base
 	}
-	k := 1.0 - dist/tail // 0 at edge, 1 at peak
-	base := [3]uint8{0xBD, 0xF0, 0x00}  // lime
-	peak := [3]uint8{0xFF, 0xFF, 0xFF}  // white peak
+	k := 1.0 - dist/tail               // 0 at edge, 1 at peak
+	base := [3]uint8{0xBD, 0xF0, 0x00} // lime
+	peak := [3]uint8{0xFF, 0xFF, 0xFF} // white peak
 	c := [3]uint8{
 		uint8(float64(base[0]) + (float64(peak[0])-float64(base[0]))*k),
 		uint8(float64(base[1]) + (float64(peak[1])-float64(base[1]))*k),
@@ -1340,7 +1334,7 @@ func truncateArgs(s string, max int) string {
 //   - claude-haiku-4-5   → haiku 4.5
 //   - qwen3-coder:latest → qwen3-coder  (strip the latest tag)
 //   - gemini-1.5-pro     → gemini 1.5 pro (collapse the dashes that aren't
-//                          part of the version)
+//     part of the version)
 //   - anything-else      → returned verbatim
 //
 // Aim is signal at a glance; if the abbreviation hides a distinction the
@@ -1710,7 +1704,6 @@ func formatTokens(n int) string {
 	}
 	return fmt.Sprintf("%.1fk", float64(n)/1000)
 }
-
 
 // QuitAfter exposes a tea.Cmd for the main package to fire if it wants to wrap
 // startup with a confirmation. Currently unused; reserved for future.

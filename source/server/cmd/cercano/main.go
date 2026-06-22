@@ -384,7 +384,7 @@ func runCLI(cfg config.Config, openHistoryOnStart bool) {
 	}
 
 	m := cliui.New(ag, openHistoryOnStart)
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "cercano:", err)
 		os.Exit(1)

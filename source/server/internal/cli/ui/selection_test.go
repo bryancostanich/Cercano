@@ -75,6 +75,35 @@ func TestSelectionPointFromMouseUsesViewportOffset(t *testing.T) {
 	}
 }
 
+func TestMouseReleaseCopiesDragSelection(t *testing.T) {
+	vp := viewport.New(viewport.WithWidth(20), viewport.WithHeight(4))
+	vp.SetContent("hello world")
+
+	m := Model{
+		scrollbarTop:       0,
+		viewport:           vp,
+		viewportPlainLines: []string{"hello world"},
+		selection:          textSelection{Active: true, Dragging: true, Anchor: selectionPoint{Line: 0, Col: 0}, Cursor: selectionPoint{Line: 0, Col: 1}},
+		selectionNotice:    "",
+		scrollbarDragging:  true,
+	}
+
+	next, cmd := m.Update(tea.MouseReleaseMsg{X: 5, Y: 0, Button: tea.MouseLeft})
+	if cmd == nil {
+		t.Fatal("MouseRelease should return clipboard command for non-empty selection")
+	}
+	got := next.(Model)
+	if got.selectionNotice != "copied selection" {
+		t.Fatalf("selectionNotice = %q, want copied selection", got.selectionNotice)
+	}
+	if got.scrollbarDragging {
+		t.Fatal("scrollbarDragging should be cleared")
+	}
+	if !got.selection.hasRange() {
+		t.Fatal("selection should remain visible after auto-copy")
+	}
+}
+
 func TestRenderSelectionOnLinePreservesPlainText(t *testing.T) {
 	p := theme.Cracker()
 	m := Model{

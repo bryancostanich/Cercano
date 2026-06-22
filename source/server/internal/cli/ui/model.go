@@ -1,16 +1,4 @@
 // Package ui hosts the Bubble Tea root model for cercano-cli.
-//
-// Cercano renders inline (not in an alt-screen buffer), so the terminal owns
-// scrollback: completed turns, tool entries, and system messages are written
-// to the terminal via tea.Println as they finalize and stay in the user's
-// terminal history afterward. The View() returns only the live frame —
-// in-flight streaming content + the input row + the status footer.
-//
-// This mirrors how Claude Code (Ink), npm/yarn/pnpm (Ink), and the official
-// `bubbletea/examples/package-manager` reference render. Bubble Tea flushes
-// tea.Println / tea.Printf above the rendered View only when alt-screen mode
-// is OFF (standard_renderer.go's altScreenActive gate), which is why this
-// pattern works only without WithAltScreen.
 package ui
 
 import (
@@ -25,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -44,10 +33,7 @@ const (
 	RoleSystem // /help output, errors, progress notes
 )
 
-// Entry is one item in scrollback. In inline mode entries are short-lived:
-// they exist only while in-flight (streaming assistant token by token, or a
-// tool call mid-execution). Once finalized they're committed to terminal
-// scrollback via tea.Println and the in-memory Entry is discarded.
+// Entry is one item in the scrollback. Stored raw; re-wrapped on every render.
 type Entry struct {
 	Role      Role
 	Content   string // grows live for streaming assistant turns
@@ -58,12 +44,14 @@ type Entry struct {
 	// "thinking…" placeholder. Cleared as soon as tokens start arriving.
 	Status string
 	// Tables are markdown tables extracted from Content at stream-done.
-	// Content carries `{{TABLE_N}}` sentinels; the renderer substitutes them
-	// with freshly-rendered Table strings at m.width when committing.
+	// Content carries `{{TABLE_N}}` sentinels; renderEntry substitutes them
+	// with freshly-rendered Table strings at the CURRENT viewport width
+	// every frame, so a terminal resize automatically re-fits each table.
 	Tables []render.Table
 
 	// Tool, when non-nil, makes this entry a tool-call line — Role/Content
-	// are ignored and renderToolEntry produces the visible row.
+	// are ignored and renderToolEntry produces the visible row. expand /
+	// collapse via tab-focus is a follow-up; V1 renders folded.
 	Tool *ToolEntry
 }
 
@@ -81,19 +69,11 @@ type Model struct {
 
 	splashShown bool // hide after first user input
 	splash      banner.AnimModel
+	entries     []*Entry
+	viewport    viewport.Model
 	input       textinput.Model
 	streamCh    <-chan agentclient.StreamMsg
 	streaming   bool
-
-	// inflightAssistant holds the assistant turn currently being streamed —
-	// shown in the live View() above the input. On TypeDone it is rendered
-	// and committed to terminal scrollback via tea.Println, then cleared.
-	inflightAssistant *Entry
-
-	// inflightTools tracks tool calls whose execution hasn't completed yet.
-	// Rendered as folded one-liners above the input. On TypeToolExecComplete
-	// the matching entry is Println'd and removed from this slice.
-	inflightTools []*Entry
 
 	tokIn, tokOut  int
 	cumIn, cumOut  int
@@ -125,8 +105,9 @@ type Model struct {
 	// sets it at runtime.
 	promptBorderColor lipgloss.Color
 
-	// sessionTitle is the current conversation's display title. Shown as the
-	// leftmost element of the status footer. Empty for fresh sessions.
+	// sessionTitle is the current conversation's display title. Shown in the
+	// header. Empty for fresh sessions (header omits the title slot until
+	// /rename or /resume sets one).
 	sessionTitle string
 
 	// toolCache is the registry of available tools, fetched at startup so
@@ -136,17 +117,21 @@ type Model struct {
 
 	// pendingConfirm carries a tool invocation waiting on a y/n/d keypress.
 	// While non-nil, all key events route to the confirm resolver instead
-	// of the input.
+	// of the input or scrollback.
 	pendingConfirm *pendingToolCall
 
 	// permissionMode caches the agent's current session permission mode
 	// ("strict" | "permissive" | "bypass") so the status bar can render a
-	// colored chip without an RPC round-trip every frame.
+	// colored chip without an RPC round-trip every frame. Updated by the
+	// startup fetch (permissionModeMsg) and by the /strict /permissive
+	// /bypass /mode slash handlers.
 	permissionMode string
 
-	// bannerCommitted ensures the static banner is Println'd to scrollback
-	// exactly once when the splash gets dismissed.
-	bannerCommitted bool
+	// focusedToolIdx points into m.entries at the tool entry the user is
+	// currently navigating; -1 means the input box owns focus (default). Esc
+	// on empty input enters nav mode at the most recent tool entry; up/down
+	// cycle, enter/tab toggle Folded, esc returns to input.
+	focusedToolIdx int
 }
 
 // pendingToolCall is a queued tool invocation awaiting user confirmation.
@@ -178,6 +163,8 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	ti.CharLimit = 0
 	ti.Focus()
 
+	vp := viewport.New(80, 10)
+
 	reg := slash.New()
 	slash.RegisterBasics(reg)
 	slash.RegisterConfig(reg, ag)
@@ -208,11 +195,13 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 		registry:           reg,
 		splashShown:        !openHistoryOnStart,
 		splash:             splash,
+		viewport:           vp,
 		input:              ti,
 		lastModel:          "qwen3-coder",
 		modelMaxTokens:     128_000, // placeholder until the agent serves real ctx limits
 		openHistoryOnStart: openHistoryOnStart,
 		promptBorderColor:  p.Accent,
+		focusedToolIdx:     -1,
 	}
 }
 
@@ -287,8 +276,8 @@ type configLoadedMsg struct {
 }
 
 // fetchConfigCmd asks the agent for the current local + cloud model names so
-// the status footer can render both. Called on Init and whenever the config
-// editor closes so user edits flow into the footer immediately.
+// the header bar can render both. Called on Init and whenever the config
+// editor closes so user edits flow into the header immediately.
 func fetchConfigCmd(ag *agentclient.Client) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -379,7 +368,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.relayout()
 		// Propagate the new size to any open overlay so it re-renders at
-		// the correct dimensions on resize.
+		// the correct dimensions on resize. Without this, the overlay keeps
+		// drawing at its construction-time width/height and the buffer
+		// fragments.
 		if m.editorActive {
 			m.editor = m.editor.setSize(m.width, m.height)
 		}
@@ -394,14 +385,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.history = hp
 			m.historyActive = true
 		}
-		// Inline mode: terminal owns scrollback. Already-committed lines
-		// reflow as the terminal sees fit; we only need to re-lay out the
-		// live frame. No ClearScreen — there's no alt-screen to clear.
-		return m, nil
+		// Force a full alt-screen redraw on resize. Without ClearScreen,
+		// rows in the terminal that were occupied at the OLD size but not
+		// rewritten at the NEW size show stale content.
+		return m, tea.ClearScreen
 
 	case tea.KeyMsg:
 		// Pending confirm gates ALL keys — until the user resolves it, the
-		// input and any in-flight slash commands stay dormant.
+		// input, scrollback, and any in-flight slash commands stay dormant.
 		if m.pendingConfirm != nil {
 			next, cmd := m.resolveConfirmKey(msg.String())
 			return next, cmd
@@ -412,7 +403,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.editor = next
 			if closed {
 				m.editorActive = false
-				// Refresh the status footer's model names — the editor may
+				// Refresh the header bar's model names — the editor may
 				// have just changed local-model / cloud-model / cloud-base-url.
 				return m, fetchConfigCmd(m.agent)
 			}
@@ -425,6 +416,64 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.historyActive = false
 			}
 			return m, cmd
+		}
+		// Tool-entry navigation mode: focus is on a scrollback tool entry
+		// rather than the input box. Up/down cycle (clamped at edges),
+		// enter/tab toggle Folded, esc returns to input. Any other key
+		// returns to input and is then handled by the normal input path.
+		if m.focusedToolIdx >= 0 {
+			switch msg.Type {
+			case tea.KeyUp:
+				indices := m.toolEntryIndices()
+				for i, idx := range indices {
+					if idx == m.focusedToolIdx {
+						if i > 0 {
+							m.focusedToolIdx = indices[i-1]
+							m.refreshViewport()
+						}
+						break
+					}
+				}
+				return m, nil
+			case tea.KeyDown:
+				indices := m.toolEntryIndices()
+				for i, idx := range indices {
+					if idx == m.focusedToolIdx {
+						if i < len(indices)-1 {
+							m.focusedToolIdx = indices[i+1]
+							m.refreshViewport()
+						}
+						break
+					}
+				}
+				return m, nil
+			case tea.KeyEnter, tea.KeyTab:
+				if m.focusedToolIdx < len(m.entries) && m.entries[m.focusedToolIdx].Tool != nil {
+					m.entries[m.focusedToolIdx].Tool.Folded = !m.entries[m.focusedToolIdx].Tool.Folded
+					m.refreshViewport()
+				}
+				return m, nil
+			case tea.KeyEsc:
+				m.focusedToolIdx = -1
+				m.refreshViewport()
+				return m, nil
+			}
+			// Any other key (typing) drops nav mode and falls through to
+			// normal input handling so the character actually lands in the
+			// input box.
+			m.focusedToolIdx = -1
+			m.refreshViewport()
+			// fall through
+		}
+		// Esc on empty input enters tool-entry navigation mode, focusing the
+		// most-recent tool entry. No-op when scrollback has no tool entries.
+		if msg.Type == tea.KeyEsc && m.input.Value() == "" {
+			indices := m.toolEntryIndices()
+			if len(indices) > 0 {
+				m.focusedToolIdx = indices[len(indices)-1]
+				m.refreshViewport()
+				return m, nil
+			}
 		}
 		// Ctrl-C semantics: clear the input first; if input was already
 		// empty, arm a quit-on-next-Ctrl-C state. Any other key disarms.
@@ -479,18 +528,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.SetValue("")
 			wasSplashShown := m.splashShown
 			m.splashShown = false
-			next, cmd := m.submit(text)
-			// Commit the static banner to scrollback now that the splash
-			// has been dismissed. tea.Println prints above the live frame.
 			if wasSplashShown {
-				nm := next.(Model)
-				bannerCmd := nm.commitBannerIfNeeded()
-				return nm, tea.Batch(bannerCmd, cmd)
+				// Splash just dismissed — the viewport grows into the
+				// freed rows. Without this, the status bar would float
+				// 9 rows above the terminal bottom.
+				m.relayout()
 			}
-			return next, cmd
+			return m.submit(text)
+		case "pgup", "pgdown", "home", "end", "ctrl+u", "ctrl+d", "ctrl+b", "ctrl+f", "shift+up", "shift+down":
+			// Route navigation keys to the scrollback viewport. Keeps the
+			// textinput's normal arrow / line-edit semantics intact.
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
 		}
 		var cmd tea.Cmd
+		prevVal := m.input.Value()
 		m.input, cmd = m.input.Update(msg)
+		// Recompute layout if the input changed shape (suggestion line
+		// height depends on the input value). Cheap when nothing changed.
+		if m.input.Value() != prevVal {
+			m.relayout()
+		}
 		return m, cmd
 
 	case streamTickMsg:
@@ -543,22 +602,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			body = slash.RenderToolResult(msg.Res)
 		}
-		return m, m.printlnSystem(body)
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: body})
+		m.refreshViewport()
+		return m, nil
 
 	case streamEndMsg:
 		m.streaming = false
-		// Finalize any still-streaming assistant entry: commit it to
-		// scrollback and clear the in-flight slot.
-		var cmds []tea.Cmd
-		if m.inflightAssistant != nil {
-			m.inflightAssistant.Streaming = false
-			cmds = append(cmds, tea.Println(m.renderAssistantForScrollback(m.inflightAssistant)))
-			m.inflightAssistant = nil
+		// Finalize the streaming entry so it stops showing the spinner.
+		if e := m.lastAssistantEntry(); e != nil {
+			e.Streaming = false
 		}
-		// Poll the agent for authoritative context-window usage. Result
-		// arrives as a ctxUsageMsg and overrides the local cumIn approx.
-		cmds = append(cmds, fetchContextUsage(m.agent, m.convID), fetchRecap(m.agent, m.convID))
-		return m, tea.Batch(cmds...)
+		m.refreshViewport()
+		// Poll the agent for the authoritative context-window usage on the
+		// same conversation. Result arrives as a ctxUsageMsg and overrides
+		// the local cumIn approximation we incremented during streaming.
+		return m, tea.Batch(fetchContextUsage(m.agent, m.convID), fetchRecap(m.agent, m.convID))
 
 	case banner.TickMsg:
 		// Gate forwarding on splashShown — when the splash is dismissed,
@@ -573,18 +631,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case resumeRequestedMsg:
 		// Fired by the history picker's OnSelect after the overlay closes.
-		next, cmd := m.applyResume(msg.ConversationID)
+		m = m.applyResume(msg.ConversationID)
 		if msg.Title != "" {
-			next.sessionTitle = msg.Title
+			m.sessionTitle = msg.Title
 		}
-		return next, cmd
+		return m, nil
 
 	case progressAnimTickMsg:
-		// Keep ticking while the in-flight assistant entry is awaiting its
-		// first token — that's when the animated status line is visible.
-		// The View renders fresh each frame; the tick re-issues so Bubble
-		// Tea redraws.
-		if e := m.inflightAssistant; e != nil && e.Streaming && e.Content == "" {
+		// Keep ticking while there's an assistant entry awaiting its first
+		// token — that's when the animated status line is visible. Each tick
+		// must call refreshViewport so the per-frame color sweep is pushed
+		// into the viewport's content cache; without this, View renders the
+		// last-set content and the animation appears frozen.
+		if e := m.lastAssistantEntry(); e != nil && e.Streaming && e.Content == "" {
+			m.refreshViewport()
 			return m, progressAnimTick()
 		}
 		return m, nil
@@ -597,24 +657,26 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 		next, cmd := m.runSlash(text)
 		return next, cmd
 	}
-	// Commit the user turn to scrollback immediately, then drop an in-flight
-	// assistant placeholder so the streaming spinner shows in the live frame.
-	userCmd := tea.Println(m.renderUserLine(text))
-	m.inflightAssistant = &Entry{Role: RoleAssistant, Content: "", Streaming: true}
+	// User turn
+	m.entries = append(m.entries, &Entry{Role: RoleUser, Content: text})
+	// Assistant placeholder
+	m.entries = append(m.entries, &Entry{Role: RoleAssistant, Content: "", Streaming: true})
+	m.refreshViewport()
 
 	// Pass cwd so the agent prepends .cercano/context.md if present.
 	wd, _ := os.Getwd()
 	ch, err := m.agent.StreamChat(context.Background(), m.convID, text, wd)
 	if err != nil {
 		m.errMsg = err.Error()
-		m.inflightAssistant = nil
-		return m, tea.Batch(userCmd, m.printlnSystem("error: "+err.Error()))
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "error: " + err.Error()})
+		m.refreshViewport()
+		return m, nil
 	}
 	m.streamCh = ch
 	m.streaming = true
-	// Fire the stream drainer + the progress-text animator; both re-issue
-	// themselves until streaming ends.
-	return m, tea.Batch(userCmd, waitForStream(ch), progressAnimTick())
+	// Fire both the stream drainer and the progress-text animator; both
+	// re-issue themselves until streaming ends.
+	return m, tea.Batch(waitForStream(ch), progressAnimTick())
 }
 
 func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
@@ -623,6 +685,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 	case slash.ResultQuit:
 		return m, tea.Quit
 	case slash.ResultClearConversation:
+		m.entries = nil
 		m.convID = newConvID()
 		if m.convRef != nil {
 			m.convRef.id = m.convID
@@ -630,8 +693,8 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.sessionTitle = ""
 		m.cumIn = 0
 		m.cumOut = 0
-		m.inflightAssistant = nil
-		m.inflightTools = nil
+		m.focusedToolIdx = -1
+		m.refreshViewport()
 	case slash.ResultOpenConfigEditor:
 		ed, _ := newConfigEditor(m.agent, m.palette, m.styles, m.width, m.height)
 		m.editor = ed
@@ -642,24 +705,28 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.historyActive = true
 	case slash.ResultResumeConversation:
 		// /resume <id> path — slash already validated against the agent.
-		return m.applyResume(res.Text)
+		m = m.applyResume(res.Text)
 	case slash.ResultSetPromptColor:
 		m.promptBorderColor = m.resolvePromptColor(res.Text)
-		return m, m.printlnSystem("prompt color set")
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "prompt color set"})
+		m.refreshViewport()
 	case slash.ResultSetSessionTitle:
 		m.sessionTitle = res.Text
-		return m, m.printlnSystem("renamed to: " + res.Text)
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "renamed to: " + res.Text})
+		m.refreshViewport()
 	case slash.ResultSetPermissionMode:
 		// Fire-and-forget: server persistence is the source of truth, but the
 		// local cache flips immediately so the status-bar chip reflects the
-		// new mode on the very next frame.
+		// new mode on the very next frame. If the RPC fails the local UI
+		// lies briefly; the next restart re-reads from the server.
 		mode := res.PermissionMode
 		ag := m.agent
 		go func() {
 			_ = ag.SetPermissionMode(context.Background(), mode)
 		}()
 		m.permissionMode = mode
-		return m, m.printlnSystem("Permission mode → " + mode)
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "Permission mode → " + mode})
+		m.refreshViewport()
 	case slash.ResultInvokeTool:
 		// Decide locally whether to prompt: R-tier runs silently, W/X
 		// queues a pending confirm.
@@ -671,17 +738,18 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 			return m, invokeToolCmd(m.agent, res.ToolName, res.ToolArgs)
 		}
 		if perm == "R" {
-			return m, tea.Batch(
-				m.printlnSystem(m.styles.Muted.Render("running tool:"+res.ToolName)),
-				invokeToolCmd(m.agent, res.ToolName, res.ToolArgs),
-			)
+			m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: m.styles.Muted.Render("running tool:" + res.ToolName)})
+			m.refreshViewport()
+			return m, invokeToolCmd(m.agent, res.ToolName, res.ToolArgs)
 		}
-		// W or X — queue confirm. The confirm prompt lives in the live
-		// frame (rendered above the input) so the user can see and act
-		// on it directly.
+		// W or X — queue confirm.
 		m.pendingConfirm = &pendingToolCall{Name: res.ToolName, Args: res.ToolArgs, Permission: perm}
+		prompt := m.renderConfirmPrompt(m.pendingConfirm)
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: prompt})
+		m.refreshViewport()
 	case slash.ResultText:
-		return m, m.printlnSystem(res.Text)
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: res.Text})
+		m.refreshViewport()
 	}
 	return m, nil
 }
@@ -689,7 +757,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 	switch sm.Type {
 	case agentclient.TypeToken:
-		if e := m.inflightAssistant; e != nil {
+		if e := m.lastAssistantEntry(); e != nil {
 			e.Content += sm.Token
 			// Once real tokens arrive, the pre-stream progress note is
 			// no longer relevant; clear so the renderer drops it.
@@ -699,62 +767,57 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 		// Collapse progress messages onto the live assistant entry's Status
 		// field — one line that mutates as the agent advances through phases
 		// (classifying intent → selecting provider → generating response).
-		// Falls back to a Println'd system entry if there's no streaming
-		// assistant to attach to.
+		// Falls back to a normal system entry if there's no streaming assistant
+		// to attach to.
 		note := normalizeProgress(sm.Note)
-		if e := m.inflightAssistant; e != nil && e.Streaming && e.Content == "" {
+		if e := m.lastAssistantEntry(); e != nil && e.Streaming && e.Content == "" {
 			e.Status = note
 		} else {
-			return m, tea.Batch(m.printlnSystem(note), waitForStream(m.streamCh))
+			m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: note})
 		}
 	case agentclient.TypeDone:
-		var cmds []tea.Cmd
-		// Surface non-fatal notices (e.g. "cloud not configured — answered
-		// locally") above the assistant body. Sticks the cloud state to
-		// NONE so the status bar shows it.
-		if sm.Notice != "" {
-			cmds = append(cmds, m.printlnSystem("⚠ "+sm.Notice))
-			m.cloudState = "NONE"
-		} else {
-			m.cloudState = "ok"
-		}
-		if e := m.inflightAssistant; e != nil {
+		if e := m.lastAssistantEntry(); e != nil {
 			// If we never received any tokens, fall back to the full final response.
 			if e.Content == "" {
 				e.Content = sm.Final
 			}
 			e.Streaming = false
 			// Extract markdown tables into Entry.Tables; Content keeps the
-			// `{{TABLE_N}}` sentinels. renderAssistantForScrollback resolves
-			// them at commit time.
+			// `{{TABLE_N}}` sentinels. renderEntry re-renders each table at
+			// the current viewport width every frame, so resize auto-refits.
 			cleaned, tables := render.InterceptMarkdownTables(e.Content)
 			e.Content = cleaned
 			e.Tables = tables
-			cmds = append(cmds, tea.Println(m.renderAssistantForScrollback(e)))
-			m.inflightAssistant = nil
+		}
+		// Surface non-fatal notices (e.g. "cloud not configured — answered
+		// locally") as a system entry above the assistant content. Sticks
+		// the cloud state to NONE so the status bar shows it.
+		if sm.Notice != "" {
+			m.entries = append(m.entries[:len(m.entries)-1], &Entry{Role: RoleSystem, Content: "⚠ " + sm.Notice}, m.entries[len(m.entries)-1])
+			m.cloudState = "NONE"
+		} else {
+			m.cloudState = "ok"
 		}
 		m.tokIn = sm.TokIn
 		m.tokOut = sm.TokOut
 		// cumIn/cumOut here are local approximations until the agent
-		// answers GetContextUsage in streamEndMsg.
+		// answers GetContextUsage below; the RPC's authoritative cumulative
+		// total overrides cumIn (Used) on arrival.
 		m.cumIn += sm.TokIn
 		m.cumOut += sm.TokOut
 		if sm.Model != "" {
 			m.lastModel = sm.Model
 		}
-		cmds = append(cmds, waitForStream(m.streamCh))
-		return m, tea.Batch(cmds...)
 	case agentclient.TypeError:
-		errCmd := m.printlnSystem("stream error: " + sm.Err.Error())
-		if e := m.inflightAssistant; e != nil {
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "stream error: " + sm.Err.Error()})
+		if e := m.lastAssistantEntry(); e != nil {
 			e.Streaming = false
 		}
-		return m, tea.Batch(errCmd, waitForStream(m.streamCh))
 	case agentclient.TypeToolUseStart:
-		// Model just emitted a tool_use block. Track the entry in the
-		// in-flight list so the View renders a folded in-progress line
-		// above the input until exec completes.
-		m.inflightTools = append(m.inflightTools, &Entry{
+		// Model just emitted a tool_use block. Drop a folded in-progress line
+		// into scrollback so the user sees what's being invoked. Args summary
+		// fills in on TypeToolUseStop; result fills in on TypeToolExecComplete.
+		m.entries = append(m.entries, &Entry{
 			Role: RoleSystem,
 			Tool: &ToolEntry{
 				ToolUseID: sm.ToolUseID,
@@ -766,74 +829,126 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 	case agentclient.TypeToolUseStop:
 		// Args block finished streaming — attach the summary to the existing
 		// entry. Silent skip if the start event was missed.
-		if t := m.findInflightTool(sm.ToolUseID); t != nil {
+		if t := m.findToolEntry(sm.ToolUseID); t != nil {
 			t.ArgsSummary = sm.ArgsSummary
 		}
 	case agentclient.TypeToolExecStart:
 		// Server is now running the tool. We already show InProgress from
 		// TypeToolUseStart; nothing to do unless the start was missed.
-		if t := m.findInflightTool(sm.ToolUseID); t != nil {
+		if t := m.findToolEntry(sm.ToolUseID); t != nil {
 			t.Status = ToolStatusInProgress
 		}
 	case agentclient.TypeToolExecComplete:
-		// Tool finished — flip status, attach the result summary, commit
-		// the folded line to scrollback, and remove from in-flight.
-		var cmd tea.Cmd
-		for i, e := range m.inflightTools {
-			if e.Tool != nil && e.Tool.ToolUseID == sm.ToolUseID {
-				if sm.IsError {
-					e.Tool.Status = ToolStatusError
-				} else {
-					e.Tool.Status = ToolStatusComplete
-				}
-				e.Tool.ResultSummary = sm.Summary
-				cmd = tea.Println(m.renderToolForScrollback(e.Tool))
-				m.inflightTools = append(m.inflightTools[:i], m.inflightTools[i+1:]...)
-				break
+		// Tool finished — flip status to ✓ or ⚠ and attach the result summary.
+		if t := m.findToolEntry(sm.ToolUseID); t != nil {
+			if sm.IsError {
+				t.Status = ToolStatusError
+			} else {
+				t.Status = ToolStatusComplete
 			}
-		}
-		if cmd != nil {
-			return m, tea.Batch(cmd, waitForStream(m.streamCh))
+			t.ResultSummary = sm.Summary
 		}
 	case agentclient.TypePermissionRequired:
 		// Server-side tool loop hit a W/X tool and is blocked on a decision.
 		// Raise the confirm prompt; the y/n/esc resolver will RPC back via
-		// AllowToolCall/DenyToolCall to unblock the loop. The prompt lives
-		// in the live View() above the input.
+		// AllowToolCall/DenyToolCall to unblock the loop.
 		m.pendingConfirm = &pendingToolCall{
 			ToolUseID:  sm.ToolUseID,
 			Name:       sm.ToolName,
 			Args:       sm.ArgsJSON,
 			Permission: sm.Tier,
 		}
+		prompt := m.renderConfirmPrompt(m.pendingConfirm)
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: prompt})
 	}
+	m.refreshViewport()
 	return m, waitForStream(m.streamCh)
 }
 
-// findInflightTool returns the ToolEntry whose ToolUseID matches id, or nil if
-// no such entry exists.
-func (m Model) findInflightTool(id string) *ToolEntry {
+// toolEntryIndices returns the m.entries positions of every tool-call entry,
+// in order. Used by the up/down nav handlers to cycle focus among tool entries
+// while skipping prose / system entries.
+func (m Model) toolEntryIndices() []int {
+	var out []int
+	for i, e := range m.entries {
+		if e.Tool != nil {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// findToolEntry returns the ToolEntry whose ToolUseID matches id, or nil if
+// no such entry exists. Used by the stream-event handlers to update an
+// in-flight tool-call line as it transitions through use-stop → exec-start →
+// exec-complete.
+func (m Model) findToolEntry(id string) *ToolEntry {
 	if id == "" {
 		return nil
 	}
-	for i := len(m.inflightTools) - 1; i >= 0; i-- {
-		if t := m.inflightTools[i].Tool; t != nil && t.ToolUseID == id {
+	for i := len(m.entries) - 1; i >= 0; i-- {
+		if t := m.entries[i].Tool; t != nil && t.ToolUseID == id {
 			return t
 		}
 	}
 	return nil
 }
 
-// relayout sets the input width to match the current terminal width minus
-// the indent gutter. In inline mode there's no viewport to size — the live
-// frame is just the input row plus the status footer, and scrollback is
-// owned by the terminal.
+func (m Model) lastAssistantEntry() *Entry {
+	for i := len(m.entries) - 1; i >= 0; i-- {
+		if m.entries[i].Role == RoleAssistant {
+			return m.entries[i]
+		}
+	}
+	return nil
+}
+
+// relayout sets viewport / input widths and the viewport height so the
+// rendered View exactly fills the terminal — status bar pinned to the bottom.
+//
+// Splash is rendered only when the terminal is wide enough to hold the
+// fixed-width banner. Suggestion height (which depends on the current input
+// value + registry help text + wrap width) is computed here so the
+// viewport's allocated height matches what View will actually emit, no
+// per-frame state mutation needed.
+//
+// View structure (lines):
+//
+//	header  (1)
+//	─────   (1)
+//	splash  (8) + blank (1)   ← only when splash visible
+//	viewport (bodyH)
+//	─────   (1)
+//	suggestion (variable, 0..N)
+//	input   (1)
+//	─────   (1)
+//	status  (1)
 func (m *Model) relayout() {
 	contentW := m.width
 	if contentW < 20 {
 		contentW = 20
 	}
+	const chromeNoSplash = 6 // header + 3 dividers + input + status
+	splashH := 0
+	if m.splashEffective() {
+		splashH = 9 // 8 banner rows + 1 blank
+	}
+	suggestH := 0
+	if m.viewport.Width > 0 && !m.editorActive {
+		// Width may not yet match contentW on the first paint; the
+		// suggestion uses m.width which we've just updated above.
+		if hint := m.renderSlashSuggestions(); hint != "" {
+			suggestH = strings.Count(hint, "\n") + 1
+		}
+	}
+	bodyH := m.height - chromeNoSplash - splashH - suggestH
+	if bodyH < 3 {
+		bodyH = 3
+	}
+	m.viewport.Width = contentW
+	m.viewport.Height = bodyH
 	m.input.Width = contentW - 4
+	m.refreshViewport()
 }
 
 // splashEffective reports whether the splash banner is currently showable.
@@ -844,98 +959,95 @@ func (m Model) splashEffective() bool {
 	return m.splashShown && m.width >= banner.Width
 }
 
+// refreshViewport rebuilds the viewport content from raw entries at the
+// current width. Auto-scrolls to bottom ONLY if the user was already at the
+// bottom — preserves scroll position when they've paged up to read history.
+func (m *Model) refreshViewport() {
+	wasAtBottom := m.viewport.AtBottom()
+	var b strings.Builder
+	for i, e := range m.entries {
+		b.WriteString(m.renderEntry(e, i))
+		if i < len(m.entries)-1 {
+			b.WriteString("\n")
+		}
+	}
+	m.viewport.SetContent(b.String())
+	if wasAtBottom {
+		m.viewport.GotoBottom()
+	}
+}
+
 const entryIndent = 2
 
-// renderUserLine renders a user turn for commit to terminal scrollback.
-// Same visual treatment as the previous in-viewport rendering: bullet on
-// the first line, hanging indent on wrapped lines.
-func (m Model) renderUserLine(text string) string {
-	wrapW, textW, pad := m.bodyMetrics()
-	_ = wrapW
-	wrapped := lipgloss.NewStyle().Width(textW).Render(text)
-	lines := strings.Split(wrapped, "\n")
-	for i := range lines {
-		if i == 0 {
-			lines[i] = m.styles.UserPrompt.Render("▶ ") + lines[i]
-		} else {
-			lines[i] = pad + lines[i]
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-// renderAssistantForScrollback formats an assistant Entry for tea.Println.
-// Resolves any {{TABLE_N}} sentinels at the current terminal width.
-func (m Model) renderAssistantForScrollback(e *Entry) string {
-	_, textW, pad := m.bodyMetrics()
-	content := e.Content
-	if len(e.Tables) > 0 {
-		for i, t := range e.Tables {
-			marker := fmt.Sprintf("{{TABLE_%d}}", i)
-			rendered := t.Render(textW, m.styles)
-			content = strings.Replace(content, marker, rendered, 1)
-		}
-		// Skip outer wrap; tables already fit textW.
-		return indentBlock(pad, m.styles.AgentProse.Render(content))
-	}
-	styled := m.styles.AgentProse.Render(content)
-	wrapped := lipgloss.NewStyle().Width(textW).Render(styled)
-	return indentBlock(pad, wrapped)
-}
-
-// renderSystemLine formats a system message for tea.Println at current width.
-func (m Model) renderSystemLine(content string) string {
-	_, textW, pad := m.bodyMetrics()
-	styled := m.styles.Muted.Render(content)
-	wrapped := lipgloss.NewStyle().Width(textW).Render(styled)
-	return indentBlock(pad, wrapped)
-}
-
-// printlnSystem is a small convenience that wraps tea.Println with the
-// same system-message styling the old viewport rendering used.
-func (m Model) printlnSystem(content string) tea.Cmd {
-	return tea.Println(m.renderSystemLine(content))
-}
-
-// renderToolForScrollback formats a (folded) tool entry for tea.Println.
-func (m Model) renderToolForScrollback(t *ToolEntry) string {
-	_, textW, pad := m.bodyMetrics()
-	t.Folded = true
-	return indentBlock(pad, renderToolEntry(*t, textW, false))
-}
-
-// commitBannerIfNeeded Println's the static banner to terminal scrollback
-// the first time the splash is dismissed. Idempotent: subsequent calls do
-// nothing.
-func (m *Model) commitBannerIfNeeded() tea.Cmd {
-	if m.bannerCommitted {
-		return nil
-	}
-	m.bannerCommitted = true
-	if !(m.width >= banner.Width) {
-		return nil
-	}
-	static := banner.Render(m.palette, banner.Meta{
-		Tagline: "local-first ai coprocessor",
-		Version: "v0.1.0",
-		Model:   "qwen3-coder",
-	})
-	return tea.Println(static + "\n")
-}
-
-// bodyMetrics returns the wrap width, the inner text width (after the
-// gutter), and the gutter pad string used by every entry renderer.
-func (m Model) bodyMetrics() (wrapW, textW int, pad string) {
-	wrapW = m.width
+func (m *Model) renderEntry(e *Entry, idx int) string {
+	wrapW := m.viewport.Width
 	if wrapW < 10 {
 		wrapW = 10
 	}
-	textW = wrapW - entryIndent
+	textW := wrapW - entryIndent
 	if textW < 8 {
 		textW = 8
 	}
-	pad = strings.Repeat(" ", entryIndent)
-	return
+	pad := strings.Repeat(" ", entryIndent)
+
+	// Tool-call entries get their own renderer — folded one-liner with arrow
+	// marker + status glyph. Indented to match the prose left-margin so the
+	// scrollback's vertical rhythm stays consistent.
+	if e.Tool != nil {
+		return indentBlock(pad, renderToolEntry(*e.Tool, textW, idx == m.focusedToolIdx))
+	}
+
+	switch e.Role {
+	case RoleUser:
+		// User entries: bullet on the first line, hanging indent on wrapped lines.
+		wrapped := lipgloss.NewStyle().Width(textW).Render(e.Content)
+		lines := strings.Split(wrapped, "\n")
+		for i := range lines {
+			if i == 0 {
+				lines[i] = m.styles.UserPrompt.Render("▶ ") + lines[i]
+			} else {
+				lines[i] = pad + lines[i]
+			}
+		}
+		return strings.Join(lines, "\n")
+
+	case RoleAssistant:
+		content := e.Content
+		if e.Streaming && content == "" {
+			status := e.Status
+			if status == "" {
+				status = "thinking…"
+			}
+			content = animateSpinnerGlyph() + " " + animateLimeSweep(status)
+		} else if e.Streaming {
+			content = e.Content + m.styles.Accent.Render(" ⟳")
+		}
+		// Substitute table sentinels with freshly-rendered tables at the
+		// current text width. Done every frame so resize re-fits without
+		// losing the parsed table data.
+		if len(e.Tables) > 0 {
+			for i, t := range e.Tables {
+				marker := fmt.Sprintf("{{TABLE_%d}}", i)
+				rendered := t.Render(textW, m.styles)
+				content = strings.Replace(content, marker, rendered, 1)
+			}
+			// Skip the outer lipgloss Width wrap; tables already fit textW
+			// and re-wrapping a styled multi-line block would break its
+			// columns. Prose lines stay full-width by virtue of the agent
+			// emitting reasonable line lengths.
+			styled := m.styles.AgentProse.Render(content)
+			return indentBlock(pad, styled)
+		}
+		styled := m.styles.AgentProse.Render(content)
+		wrapped := lipgloss.NewStyle().Width(textW).Render(styled)
+		return indentBlock(pad, wrapped)
+
+	case RoleSystem:
+		styled := m.styles.Muted.Render(e.Content)
+		wrapped := lipgloss.NewStyle().Width(textW).Render(styled)
+		return indentBlock(pad, wrapped)
+	}
+	return e.Content
 }
 
 // animateSpinnerGlyph renders the spinner symbol with two layered motions:
@@ -1042,6 +1154,9 @@ func progressColorAt(col int, sweepPos float64, tail float64) lipgloss.Color {
 	return lipgloss.Color(string(hex))
 }
 
+// applyResume calls the agent's ResumeConversation RPC, switches the active
+// conversation id, clears the splash, and re-renders the persisted turns
+// into the scrollback so the user picks up exactly where they left off.
 // resolvePromptColor maps a slash-command color token into a lipgloss.Color
 // the View can apply directly. Tokens take one of two shapes:
 //
@@ -1081,58 +1196,54 @@ func (m Model) resolvePromptColor(token string) lipgloss.Color {
 	return m.promptBorderColor
 }
 
-// applyResume calls the agent's ResumeConversation RPC, switches the active
-// conversation id, dismisses the splash, and commits the persisted turns to
-// terminal scrollback so the user picks up where they left off.
-func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
+// applyResume updates the model + the convRef shared with the slash registry,
+// then rehydrates scrollback from the persisted turns.
+func (m Model) applyResume(conversationID string) Model {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	turns, err := m.agent.ResumeConversation(ctx, conversationID)
 	if err != nil {
-		return m, m.printlnSystem("resume failed: " + err.Error())
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "resume failed: " + err.Error()})
+		m.refreshViewport()
+		return m
 	}
 	m.convID = conversationID
 	if m.convRef != nil {
 		m.convRef.id = conversationID
 	}
+	m.entries = nil
 	m.cumIn = 0
 	m.cumOut = 0
-	m.inflightAssistant = nil
-	m.inflightTools = nil
-	wasSplashShown := m.splashShown
+	m.focusedToolIdx = -1
 	m.splashShown = false
-
-	var cmds []tea.Cmd
-	if wasSplashShown {
-		if c := m.commitBannerIfNeeded(); c != nil {
-			cmds = append(cmds, c)
-		}
-	}
 	for _, t := range turns {
+		role := RoleSystem
 		switch t.Role {
 		case "user":
-			cmds = append(cmds, tea.Println(m.renderUserLine(t.Content)))
+			role = RoleUser
 		case "assistant":
-			cleaned, tables := render.InterceptMarkdownTables(t.Content)
-			e := &Entry{Role: RoleAssistant, Content: cleaned, Tables: tables}
-			cmds = append(cmds, tea.Println(m.renderAssistantForScrollback(e)))
-		default:
-			cmds = append(cmds, m.printlnSystem(t.Content))
+			role = RoleAssistant
 		}
+		m.entries = append(m.entries, &Entry{
+			Role:    role,
+			Content: t.Content,
+		})
 		m.cumIn += t.TokensIn
 		m.cumOut += t.TokensOut
 	}
-	cmds = append(cmds, m.printlnSystem(fmt.Sprintf("⟲ resumed %d turn(s)", len(turns))))
+	m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: fmt.Sprintf("⟲ resumed %d turn(s)", len(turns))})
+	// Surface the prior session's living recap as a one-line banner + footer.
 	if info, err := m.agent.GetConversation(ctx, conversationID); err == nil && info.Recap != "" {
 		m.recap = info.Recap
-		cmds = append(cmds, m.printlnSystem("Recap: "+info.Recap))
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "Recap: " + info.Recap})
 	}
-	return m, tea.Batch(cmds...)
+	m.relayout()
+	return m
 }
 
-// renderConfirmPrompt builds the single-line confirm message shown above the
-// input while pendingConfirm is set. W-tier renders normally; X-tier gets a
-// red ⚠ destructive emphasis.
+// renderConfirmPrompt builds the single-line confirm message shown in
+// scrollback while pendingConfirm is set. W-tier renders normally; X-tier
+// gets a red ⚠ destructive emphasis.
 func (m Model) renderConfirmPrompt(p *pendingToolCall) string {
 	head := m.styles.Accent.Render("▸ ")
 	if p.Permission == "X" {
@@ -1168,24 +1279,26 @@ func (m Model) resolveConfirmKey(key string) (Model, tea.Cmd) {
 	case "y", "Y":
 		pending := m.pendingConfirm
 		m.pendingConfirm = nil
-		approveMsg := m.printlnSystem(m.styles.Accent.Render("✓ approved — running…"))
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: m.styles.Accent.Render("✓ approved — running…")})
+		m.refreshViewport()
 		if pending.ToolUseID != "" {
 			// Stream-event origin: unblock the server-side tool loop. The
 			// server resumes execution and surfaces results through the same
-			// stream, so we return no invoke cmd here.
+			// stream, so we return no tea.Cmd here.
 			ag := m.agent
 			id := pending.ToolUseID
 			if ag != nil {
 				go func() { _ = ag.AllowToolCall(context.Background(), id) }()
 			}
-			return m, approveMsg
+			return m, nil
 		}
 		// Local /tool origin: fire the invoke directly.
-		return m, tea.Batch(approveMsg, invokeToolCmd(m.agent, pending.Name, pending.Args))
+		return m, invokeToolCmd(m.agent, pending.Name, pending.Args)
 	case "n", "N", "esc", "ctrl+c":
 		pending := m.pendingConfirm
 		m.pendingConfirm = nil
-		cancelMsg := m.printlnSystem(m.styles.Muted.Render("canceled."))
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: m.styles.Muted.Render("canceled.")})
+		m.refreshViewport()
 		if pending != nil && pending.ToolUseID != "" {
 			ag := m.agent
 			id := pending.ToolUseID
@@ -1193,10 +1306,13 @@ func (m Model) resolveConfirmKey(key string) (Model, tea.Cmd) {
 				go func() { _ = ag.DenyToolCall(context.Background(), id) }()
 			}
 		}
-		return m, cancelMsg
+		return m, nil
 	case "d", "D":
 		// Show the full args JSON so the user can inspect before approving.
-		return m, m.printlnSystem("args:\n```json\n" + m.pendingConfirm.Args + "\n```")
+		m.entries = append(m.entries, &Entry{Role: RoleSystem,
+			Content: "args:\n```json\n" + m.pendingConfirm.Args + "\n```"})
+		m.refreshViewport()
+		return m, nil
 	}
 	// Any other key is ignored while the confirm is pending.
 	return m, nil
@@ -1211,7 +1327,7 @@ func truncateArgs(s string, max int) string {
 	return s[:max] + "…"
 }
 
-// abbreviateModel produces a short display name for the status footer:
+// abbreviateModel produces a short display name for the header strip:
 //
 //   - claude-opus-4-7    → opus 4.7
 //   - claude-sonnet-4-6  → sonnet 4.6
@@ -1259,6 +1375,7 @@ func normalizeProgress(s string) string {
 		return s
 	}
 	// Lowercase the leading word only (e.g. "Classifying Intent" → "classifying intent").
+	// Spare any all-caps tokens past the first space.
 	first := []rune(s)
 	if first[0] >= 'A' && first[0] <= 'Z' {
 		first[0] = first[0] + ('a' - 'A')
@@ -1287,88 +1404,63 @@ func indentBlock(pad, s string) string {
 	return strings.Join(lines, "\n")
 }
 
-// View renders the live frame at the bottom of the terminal. Inline mode:
-// the terminal owns scrollback (committed via tea.Println), the View()
-// only shows in-flight content + input row + status footer. Nothing renders
-// below the status, which is why the status visually pins to the bottom.
+// View renders the full screen at the current width/height. The viewport
+// height is computed dynamically here so it absorbs whatever rows the
+// suggestion/help line ends up taking — wrapped help text grows downward,
+// the viewport shrinks to keep the status bar pinned to terminal bottom.
 func (m Model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return "" // first paint before WindowSizeMsg
 	}
 
-	// Overlays take the whole live frame — same behavior as before, just
-	// without the header band on top.
-	if m.editorActive {
-		return m.editor.View()
-	}
-	if m.historyActive {
-		return m.history.View()
-	}
-
 	var parts []string
-
-	// Splash plays in the live frame on startup. Once dismissed (first user
-	// input or /resume) the static banner is Println'd to scrollback by
-	// commitBannerIfNeeded.
+	parts = append(parts, m.renderHeader())
+	parts = append(parts, m.styles.BorderDim.Render(strings.Repeat("─", m.width)))
 	if m.splashEffective() {
 		parts = append(parts, m.splash.View())
 		parts = append(parts, "")
 	}
 
-	// In-flight streaming assistant content. Lives in the live frame until
-	// TypeDone commits it to scrollback.
-	if e := m.inflightAssistant; e != nil {
-		parts = append(parts, m.renderLiveAssistant(e))
-	}
-	// In-flight tool entries: rendered as folded one-liners above the input
-	// until exec completes and they get Println'd.
-	for _, e := range m.inflightTools {
-		if e.Tool != nil {
-			_, textW, pad := m.bodyMetrics()
-			parts = append(parts, indentBlock(pad, renderToolEntry(*e.Tool, textW, false)))
+	switch {
+	case m.editorActive:
+		parts = append(parts, m.editor.View())
+	case m.historyActive:
+		parts = append(parts, m.history.View())
+	default:
+		parts = append(parts, m.viewport.View())
+		if m.recap != "" {
+			parts = append(parts, m.renderRecap())
 		}
-	}
-	// Confirm prompt: rendered above the input while pendingConfirm is set
-	// so the user can read it together with the y/n hint.
-	if m.pendingConfirm != nil {
-		_, _, pad := m.bodyMetrics()
-		parts = append(parts, indentBlock(pad, m.renderConfirmPrompt(m.pendingConfirm)))
-	}
-	if m.recap != "" {
-		parts = append(parts, m.renderRecap())
 	}
 
 	promptLine := lipgloss.NewStyle().Foreground(m.promptBorderColor).Render(strings.Repeat("─", m.width))
 	parts = append(parts, promptLine)
-	if hint := m.renderSlashSuggestions(); hint != "" {
+	if hint := m.renderSlashSuggestions(); hint != "" && !m.editorActive {
 		parts = append(parts, hint)
 	}
 	parts = append(parts, m.input.View())
 	parts = append(parts, promptLine)
 	parts = append(parts, m.renderStatus())
 
-	return strings.Join(parts, "\n")
+	out := strings.Join(parts, "\n")
+
+	// Alt-screen safety: pad to exactly m.height lines so resize-to-smaller
+	// frames clear the trailing rows the previous larger frame occupied.
+	rendered := strings.Count(out, "\n") + 1
+	if rendered < m.height {
+		out += strings.Repeat("\n", m.height-rendered)
+	}
+	return out
 }
 
-// renderLiveAssistant draws the in-flight streaming assistant entry for the
-// live View frame. While awaiting the first token, shows the spinner + the
-// animated progress status. While streaming tokens, shows the accumulated
-// content plus a trailing accent glyph.
-func (m Model) renderLiveAssistant(e *Entry) string {
-	_, textW, pad := m.bodyMetrics()
-	content := e.Content
-	if e.Streaming && content == "" {
-		status := e.Status
-		if status == "" {
-			status = "thinking…"
-		}
-		content = animateSpinnerGlyph() + " " + animateLimeSweep(status)
-	} else if e.Streaming {
-		content = e.Content + m.styles.Accent.Render(" ⟳")
+// countLines totals the visible row count of a slice of pre-joined strings,
+// accounting for embedded newlines (e.g. multi-line splash, wrapped help).
+func countLines(rows []string) int {
+	n := 0
+	for _, r := range rows {
+		n += strings.Count(r, "\n") + 1
 	}
-	styled := m.styles.AgentProse.Render(content)
-	wrapped := lipgloss.NewStyle().Width(textW).Render(styled)
-	return indentBlock(pad, wrapped)
+	return n
 }
 
 // renderSlashSuggestions renders the line above the input. Two states:
@@ -1440,8 +1532,9 @@ func (m Model) renderSlashSuggestions() string {
 	return hint
 }
 
-// renderRecap draws the living one-line work summary just above the input
-// border, dimmed and truncated to terminal width. Only rendered when set.
+// renderRecap draws the living one-line work summary at the bottom of the
+// chat area, dimmed and truncated to terminal width. Only rendered in the
+// default (no-overlay) view.
 func (m Model) renderRecap() string {
 	label := m.styles.Muted.Render("recap ")
 	avail := m.width - lipgloss.Width(label)
@@ -1458,9 +1551,68 @@ func (m Model) renderRecap() string {
 	return label + m.styles.BorderDim.Render(text)
 }
 
-// renderStatus renders the status footer at the bottom of the live frame.
-// It absorbs the session title (when set) plus the cloud + local model strip
-// that used to live in the header, since inline mode has no header band.
+func (m Model) renderHeader() string {
+	// Three regions:
+	//   left   — brand + version, anchored at column 0
+	//   center — session title (centered across full width when present)
+	//   right  — cloud + local model strip, anchored at the right edge
+	//
+	// With the title centered, the left and right slots stay symmetric so
+	// the bar reads cleanly even on wide terminals.
+	left := lipgloss.JoinHorizontal(lipgloss.Left,
+		m.styles.Primary.Render("▓▓ CERCANO"),
+		m.styles.Muted.Render(" v0.1.0"),
+	)
+
+	rightPieces := []string{}
+	if m.cloudModel != "" {
+		rightPieces = append(rightPieces,
+			m.styles.Info.Render("c:"),
+			m.styles.Accent.Render(abbreviateModel(m.cloudModel)),
+			m.styles.BorderDim.Render(" │ "),
+		)
+	}
+	rightPieces = append(rightPieces,
+		m.styles.Info.Render("l:"),
+		m.styles.Accent.Render(abbreviateModel(m.lastModel)),
+	)
+	right := lipgloss.JoinHorizontal(lipgloss.Left, rightPieces...)
+
+	leftW := lipgloss.Width(left)
+	rightW := lipgloss.Width(right)
+
+	// No title — flush left and right to the edges with a single gap.
+	if m.sessionTitle == "" {
+		gap := m.width - leftW - rightW
+		if gap < 1 {
+			gap = 1
+		}
+		return left + strings.Repeat(" ", gap) + right
+	}
+
+	title := m.styles.Info.Render("░▒▓ ") +
+		m.styles.Info.Render(m.sessionTitle) +
+		m.styles.Info.Render(" ▓▒░")
+	titleW := lipgloss.Width(title)
+
+	// Center the title across the full bar.
+	titleStart := (m.width - titleW) / 2
+	gapBefore := titleStart - leftW
+	if gapBefore < 2 {
+		gapBefore = 2 // collision guard with the brand
+	}
+	titleEnd := leftW + gapBefore + titleW
+	gapAfter := m.width - rightW - titleEnd
+	if gapAfter < 2 {
+		gapAfter = 2 // collision guard with the model strip
+	}
+	return left +
+		strings.Repeat(" ", gapBefore) +
+		title +
+		strings.Repeat(" ", gapAfter) +
+		right
+}
+
 func (m Model) renderStatus() string {
 	if m.streaming {
 		return lipgloss.NewStyle().Width(m.width).Render(m.styles.Accent.Render("⟳ streaming"))
@@ -1472,25 +1624,12 @@ func (m Model) renderStatus() string {
 	case "ok":
 		cloudPart = m.styles.BorderDim.Render("  ·  ") + m.styles.Muted.Render("cloud:") + m.styles.Success.Render(" ok")
 	}
-	titlePart := ""
-	if m.sessionTitle != "" {
-		titlePart = m.styles.Info.Render(m.sessionTitle) + m.styles.BorderDim.Render("  ·  ")
-	}
-	modelPart := m.styles.BorderDim.Render("  ·  ") + m.styles.Muted.Render("l:") + m.styles.Accent.Render(abbreviateModel(m.lastModel))
-	if m.cloudModel != "" {
-		modelPart = m.styles.BorderDim.Render("  ·  ") +
-			m.styles.Muted.Render("c:") + m.styles.Accent.Render(abbreviateModel(m.cloudModel)) +
-			m.styles.BorderDim.Render(" │ ") +
-			m.styles.Muted.Render("l:") + m.styles.Accent.Render(abbreviateModel(m.lastModel))
-	}
 	parts := []string{
-		titlePart,
 		m.renderContextMeter(),
 		m.styles.BorderDim.Render("  ·  "),
 		m.styles.Muted.Render(fmt.Sprintf("turn %d↑/%d↓", m.tokIn, m.tokOut)),
 		cloudPart,
 		m.renderPermissionModeChip(),
-		modelPart,
 		m.styles.BorderDim.Render("  ·  "),
 		m.styles.Muted.Render("/help for cmds"),
 	}

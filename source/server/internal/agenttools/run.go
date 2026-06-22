@@ -105,7 +105,16 @@ func (runCommandTool) Execute(ctx context.Context, raw json.RawMessage) (*Result
 	if seStr != "" {
 		body += "\nstderr:\n" + seStr
 	}
-	return NewTextResult(body), nil
+	res := NewTextResult(body)
+	// One-line glance summary for the folded scrollback entry. Prepend rather
+	// than overwrite so a truncation note from NewTextResult survives.
+	summary := fmt.Sprintf("exit %d · %s", exitCode, elapsed.Round(time.Millisecond))
+	if res.Note == "" {
+		res.Note = summary
+	} else {
+		res.Note = summary + " · " + res.Note
+	}
+	return res, nil
 }
 
 // envOf turns the args env map into the os.Environ-style "K=V" slice,

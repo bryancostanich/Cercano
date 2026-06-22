@@ -60,19 +60,41 @@ func summarizeResult(res *agenttools.Result) string {
 	if res == nil {
 		return ""
 	}
+	// Prefer the curated one-line Note (e.g. Bash's "exit 1 · 2ms", or a
+	// truncation/fallback caveat). It's purpose-built for a glance; the raw
+	// result text is not.
+	if res.Note != "" {
+		return truncateRunes(res.Note, 80)
+	}
 	switch res.Type {
 	case agenttools.ResultText:
-		t := res.Text
-		if len(t) > 80 {
-			t = t[:80]
-		}
-		return t
+		// First line only, truncated rune-safely (the old text[:80] sliced
+		// bytes and could split a multibyte rune into invalid UTF-8).
+		return truncateRunes(firstLine(res.Text), 80)
 	case agenttools.ResultRows:
 		return fmt.Sprintf("rows: %d", len(res.Rows))
 	case agenttools.ResultJSON:
 		return fmt.Sprintf("json: %d bytes", len(res.JSON))
 	}
 	return ""
+}
+
+// firstLine returns s up to the first newline.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
+// truncateRunes caps s to max runes, appending an ellipsis when it cuts. It
+// counts runes (not bytes), so it never splits a multibyte character.
+func truncateRunes(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
 }
 
 func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) {

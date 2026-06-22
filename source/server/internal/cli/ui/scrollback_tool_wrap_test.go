@@ -29,6 +29,22 @@ func TestRenderToolEntryFoldedWrapsToWidth(t *testing.T) {
 	}
 }
 
+// Wrapped continuation lines hang-indent under the content, aligned past the
+// "  ▸ Bash " prefix (visible width 9), so the wrap reads as one entry.
+func TestRenderToolEntryFoldedHangingIndent(t *testing.T) {
+	e := ToolEntry{ToolName: "Bash", ArgsSummary: strings.Repeat("x", 200), ResultSummary: "ok", Status: ToolStatusComplete, Folded: true}
+	lines := strings.Split(renderToolEntry(e, 40, false), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected the long entry to wrap")
+	}
+	const hang = 9 // width of "  ▸ Bash "
+	for i, ln := range lines[1:] {
+		if !strings.HasPrefix(ln, strings.Repeat(" ", hang)) {
+			t.Fatalf("continuation line %d is not hang-indented by %d: %q", i+1, hang, ln)
+		}
+	}
+}
+
 // A folded entry that fits must stay a single line (no spurious wrapping/pad).
 func TestRenderToolEntryFoldedShortStaysOneLine(t *testing.T) {
 	e := ToolEntry{ToolName: "Read", ArgsSummary: "main.go", ResultSummary: "ok", Status: ToolStatusComplete, Folded: true}

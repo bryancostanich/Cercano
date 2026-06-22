@@ -14,7 +14,7 @@ import (
 	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -87,7 +87,7 @@ type Model struct {
 	viewportPlainLines []string
 	selection          textSelection
 	selectionNotice    string
-	input              textinput.Model
+	input              textarea.Model
 	streamCh           <-chan agentclient.StreamMsg
 	streaming          bool
 
@@ -173,10 +173,39 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	p := theme.Cracker()
 	s := theme.NewStyles(p)
 
-	ti := textinput.New()
+	ti := textarea.New()
 	ti.Placeholder = defaultInputPlaceholder
-	ti.Prompt = s.UserPrompt.Render("▶ ")
 	ti.CharLimit = 0
+	ti.ShowLineNumbers = false
+	// Grow/shrink to fit wrapped content, from one line up to the cap; beyond
+	// the cap the textarea scrolls internally.
+	ti.DynamicHeight = true
+	ti.MinHeight = 1
+	ti.MaxHeight = maxInputLines
+	// Lime "▶ " on the first line; a 2-space hang indent on wrapped/extra lines
+	// so continuation text aligns under the first line's content.
+	ti.SetPromptFunc(2, func(info textarea.PromptInfo) string {
+		if info.LineNumber == 0 {
+			return s.UserPrompt.Render("▶ ")
+		}
+		return "  "
+	})
+	// Strip textarea's default chrome so it reads like a single-line prompt that
+	// just happens to wrap: no cursor-line highlight, no end-of-buffer glyph.
+	plain := lipgloss.NewStyle()
+	st := ti.Styles()
+	st.Focused.Base = plain
+	st.Blurred.Base = plain
+	st.Focused.CursorLine = plain
+	st.Blurred.CursorLine = plain
+	st.Focused.EndOfBuffer = plain
+	st.Blurred.EndOfBuffer = plain
+	st.Focused.Text = lipgloss.NewStyle().Foreground(p.Primary)
+	st.Blurred.Text = lipgloss.NewStyle().Foreground(p.Primary)
+	st.Focused.Placeholder = lipgloss.NewStyle().Foreground(p.Muted)
+	st.Blurred.Placeholder = lipgloss.NewStyle().Foreground(p.Muted)
+	ti.SetStyles(st)
+	ti.EndOfBufferCharacter = ' '
 	ti.Focus()
 	ti.SetVirtualCursor(false)
 
@@ -660,15 +689,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.input.SetValue("")
-			wasSplashShown := m.splashShown
 			m.splashShown = false
-			if wasSplashShown {
-				// Splash just dismissed — the viewport grows into the
-				// freed rows. Without this, the status bar would float
-				// 9 rows above the terminal bottom.
-				m.relayout()
-			}
+			// Reset the input back to one line (and reclaim any splash rows).
+			m.relayout()
 			return m.submit(text)
+		case "shift+enter":
+			// Insert a hard newline for multi-line composing; relayout so the
+			// input grows by a row (up to the cap).
+			m.input.InsertString("\n")
+			m.relayout()
+			return m, nil
 		}
 		var cmd tea.Cmd
 		prevVal := m.input.Value()
@@ -1085,7 +1115,7 @@ func (m *Model) relayout() {
 	if contentW < 20 {
 		contentW = 20
 	}
-	const chromeNoSplash = 6 // header + 3 dividers + input + status
+	const chromeNoInput = 5 // header + 3 dividers + status (input height added below)
 	splashH := 0
 	if m.splashEffective() {
 		splashH = 9 // 8 banner rows + 1 blank
@@ -1100,15 +1130,21 @@ func (m *Model) relayout() {
 			suggestH = strings.Count(hint, "\n") + 1
 		}
 	}
-	bodyH := m.height - chromeNoSplash - splashH - suggestH
+	// Size the input first — DynamicHeight re-fits it to the wrapped content at
+	// this width; the body claims whatever rows are left.
+	m.input.SetWidth(contentW - 4)
+	inputH := m.input.Height()
+	bodyH := m.height - chromeNoInput - inputH - splashH - suggestH
 	if bodyH < 3 {
 		bodyH = 3
 	}
 	m.viewport.SetWidth(contentW - 2) // reserve two right columns: a gap + the scrollbar
 	m.viewport.SetHeight(bodyH)
-	m.input.SetWidth(contentW - 4)
 	m.refreshViewport()
 }
+
+// maxInputLines caps how tall the prompt grows before it scrolls internally.
+const maxInputLines = 6
 
 // splashEffective reports whether the splash banner is currently showable.
 // We hide it on terminals narrower than the banner's fixed width because

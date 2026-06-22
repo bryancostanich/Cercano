@@ -74,6 +74,20 @@ type Agent struct {
 	meter         *contextmeter.Registry
 	meterModel    string // active local model name, used as Max() baseline
 	contextLoader ContextLoader
+	recap         RecapScheduler
+}
+
+// RecapScheduler requests a (debounced) recap regeneration for a conversation.
+// Implemented by *recap.Generator; kept as an interface so agent doesn't import
+// the recap package.
+type RecapScheduler interface {
+	Schedule(conversationID string)
+}
+
+// WithRecapScheduler attaches the living-recap generator. After each persisted
+// assistant turn the agent calls Schedule to refresh the conversation recap.
+func WithRecapScheduler(rs RecapScheduler) AgentOption {
+	return func(a *Agent) { a.recap = rs }
 }
 
 // NewAgent creates a new Agent orchestrator.
@@ -181,6 +195,9 @@ func (a *Agent) storeConversationTurn(ctx context.Context, conversationID, origi
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "[persistent-store] Append(assistant, %s) failed: %v\n", conversationID, err)
 		}
+		if a.recap != nil {
+			a.recap.Schedule(conversationID)
+		}
 	}
 }
 
@@ -254,6 +271,14 @@ func (a *Agent) ListConversations(ctx context.Context, projectDir string, limit 
 		return nil, nil
 	}
 	return a.persistent.List(ctx, projectDir, limit)
+}
+
+// GetConversation returns a single conversation's Info, including its recap.
+func (a *Agent) GetConversation(ctx context.Context, conversationID string) (conversation.Info, error) {
+	if a.persistent == nil {
+		return conversation.Info{}, fmt.Errorf("no persistent store configured")
+	}
+	return a.persistent.Get(ctx, conversationID)
 }
 
 // DeleteConversation removes a conversation and its turns from the persistent

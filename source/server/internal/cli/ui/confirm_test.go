@@ -65,10 +65,11 @@ func TestResolveConfirmKey_N_Cancels(t *testing.T) {
 	if next.pendingConfirm != nil {
 		t.Errorf("n should clear pendingConfirm")
 	}
-	// Inline mode: the cancellation message is Println'd to scrollback as
-	// a tea.Cmd rather than appended to an in-memory entries slice.
-	if cmd == nil {
-		t.Errorf("n should return a Println cmd for the cancellation message")
+	if cmd != nil {
+		t.Errorf("n should not return a cmd; got %v", cmd)
+	}
+	if len(next.entries) == 0 {
+		t.Errorf("expected a cancellation system entry")
 	}
 }
 
@@ -89,9 +90,18 @@ func TestResolveConfirmKey_D_RevealsArgsAndKeepsPending(t *testing.T) {
 	if next.pendingConfirm == nil {
 		t.Errorf("d must NOT clear pendingConfirm (user still needs to y/n)")
 	}
-	// Inline mode: d Println's the args body to scrollback as a tea.Cmd.
-	if cmd == nil {
-		t.Errorf("d should return a Println cmd carrying the full args")
+	if cmd != nil {
+		t.Errorf("d should not return a cmd")
+	}
+	found := false
+	for _, e := range next.entries {
+		if strings.Contains(e.Content, `"path":"a.go"`) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("d should append a system entry with the args; entries: %+v", next.entries)
 	}
 }
 
@@ -129,17 +139,13 @@ func TestResolveConfirmKey_Y_WithToolUseID_NoCmd(t *testing.T) {
 	if next.pendingConfirm != nil {
 		t.Errorf("y should clear pendingConfirm")
 	}
-	// Stream-event path: server has the call; the UI must NOT call
-	// invokeToolCmd. Inline mode still Println's the approval message via
-	// a tea.Cmd, so we expect a non-nil cmd — but it carries the system
-	// line, not a tool invocation. The "no double-fire" guarantee is in
-	// resolveConfirmKey: only the AllowToolCall goroutine runs.
-	if cmd == nil {
-		t.Errorf("y should return a Println cmd for the approval message")
+	// Stream-event path: server has the call; UI must not double-fire it.
+	if cmd != nil {
+		t.Errorf("y with ToolUseID should NOT return a tea.Cmd; got %v", cmd)
 	}
 }
 
-func TestResolveConfirmKey_N_WithToolUseID_PrintlnOnly(t *testing.T) {
+func TestResolveConfirmKey_N_WithToolUseID_NoCmd(t *testing.T) {
 	m := minimalModel()
 	m.pendingConfirm = &pendingToolCall{
 		ToolUseID:  "tu_456",
@@ -152,10 +158,8 @@ func TestResolveConfirmKey_N_WithToolUseID_PrintlnOnly(t *testing.T) {
 	if next.pendingConfirm != nil {
 		t.Errorf("n should clear pendingConfirm")
 	}
-	// Inline mode: n Println's the cancellation message. The DenyToolCall
-	// RPC fires in a goroutine, not as the returned tea.Cmd.
-	if cmd == nil {
-		t.Errorf("n should return a Println cmd for the cancellation message")
+	if cmd != nil {
+		t.Errorf("n should not return a tea.Cmd; got %v", cmd)
 	}
 }
 

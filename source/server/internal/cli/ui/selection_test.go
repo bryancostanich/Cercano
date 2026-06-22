@@ -104,6 +104,50 @@ func TestMouseReleaseCopiesDragSelection(t *testing.T) {
 	}
 }
 
+func TestPasteMsgInsertsIntoPrompt(t *testing.T) {
+	m := New(nil, false)
+	m.width = 80
+	m.height = 24
+	m.relayout()
+
+	next, _ := m.Update(tea.PasteMsg{Content: "hello\nworld"})
+	got := next.(Model)
+
+	if got.input.Value() != "hello world" {
+		t.Fatalf("input.Value() = %q, want pasted text sanitized into prompt", got.input.Value())
+	}
+}
+
+func TestPasteMsgClearsSelectionAndToolFocus(t *testing.T) {
+	m := New(nil, false)
+	m.width = 80
+	m.height = 24
+	m.focusedToolIdx = 1
+	m.selection = textSelection{
+		Active: true,
+		Anchor: selectionPoint{Line: 0, Col: 0},
+		Cursor: selectionPoint{Line: 0, Col: 2},
+	}
+	m.selectionNotice = "copied selection"
+	m.relayout()
+
+	next, _ := m.Update(tea.PasteMsg{Content: "pasted"})
+	got := next.(Model)
+
+	if got.input.Value() != "pasted" {
+		t.Fatalf("input.Value() = %q, want pasted text", got.input.Value())
+	}
+	if got.selection.Active {
+		t.Fatal("paste should clear active viewport selection")
+	}
+	if got.selectionNotice != "" {
+		t.Fatalf("selectionNotice = %q, want cleared notice", got.selectionNotice)
+	}
+	if got.focusedToolIdx != -1 {
+		t.Fatalf("focusedToolIdx = %d, want -1", got.focusedToolIdx)
+	}
+}
+
 func TestRenderSelectionOnLinePreservesPlainText(t *testing.T) {
 	p := theme.Cracker()
 	m := Model{

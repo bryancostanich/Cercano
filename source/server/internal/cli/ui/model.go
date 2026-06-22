@@ -497,6 +497,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.scrollbarDragging = false
 		return m, nil
 
+	case tea.PasteMsg:
+		if m.editorActive || m.historyActive || m.pendingConfirm != nil {
+			return m, nil
+		}
+		m = m.preparePromptInput()
+		var cmd tea.Cmd
+		prevVal := m.input.Value()
+		m.input, cmd = m.input.Update(msg)
+		if m.input.Value() != prevVal {
+			m.relayout()
+		}
+		return m, cmd
+
 	case tea.KeyPressMsg:
 		// Pending confirm gates ALL keys — until the user resolves it, the
 		// input, scrollback, and any in-flight slash commands stay dormant.
@@ -575,8 +588,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Any other key (typing) drops nav mode and falls through to
 			// normal input handling so the character actually lands in the
 			// input box.
-			m.focusedToolIdx = -1
-			m.refreshViewport()
+			m = m.preparePromptInput()
 			// fall through
 		}
 		// Esc on empty input enters tool-entry navigation mode, focusing the
@@ -1123,6 +1135,19 @@ func (m *Model) refreshViewport() {
 	if wasAtBottom {
 		m.viewport.GotoBottom()
 	}
+}
+
+func (m Model) preparePromptInput() Model {
+	needsRefresh := m.focusedToolIdx >= 0
+	if m.selection.Active {
+		m.clearSelection()
+	}
+	m.selectionNotice = ""
+	if needsRefresh {
+		m.focusedToolIdx = -1
+		m.refreshViewport()
+	}
+	return m
 }
 
 const entryIndent = 2

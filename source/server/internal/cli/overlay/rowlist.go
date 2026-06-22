@@ -8,12 +8,22 @@ package overlay
 import (
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"cercano/source/server/internal/cli/theme"
 )
+
+var rowKeys = struct{ Up, Down, Home, End, Enter, Close key.Binding }{
+	Up:    key.NewBinding(key.WithKeys("up", "k")),
+	Down:  key.NewBinding(key.WithKeys("down", "j")),
+	Home:  key.NewBinding(key.WithKeys("home", "g")),
+	End:   key.NewBinding(key.WithKeys("end", "G")),
+	Enter: key.NewBinding(key.WithKeys("enter")),
+	Close: key.NewBinding(key.WithKeys("esc", "q")),
+}
 
 // Row is one displayed line.
 //
@@ -77,9 +87,9 @@ func (r *RowList) SetStatus(s string) { r.status = s }
 // Update routes a key event. Returns (next, cmd, closed) — `closed` tells the
 // host whether the overlay should be dismissed.
 func (r RowList) Update(msg tea.KeyPressMsg, styles theme.Styles) (RowList, tea.Cmd, bool) {
-	key := msg.String()
+	keyStr := msg.String()
 	if r.editing {
-		switch key {
+		switch keyStr {
 		case "esc":
 			r.editing = false
 			r.status = "canceled"
@@ -110,22 +120,22 @@ func (r RowList) Update(msg tea.KeyPressMsg, styles theme.Styles) (RowList, tea.
 		r.input, cmd = r.input.Update(msg)
 		return r, cmd, false
 	}
-	switch key {
-	case "esc", "q":
+	switch {
+	case key.Matches(msg, rowKeys.Close):
 		return r, nil, true
-	case "up", "k":
+	case key.Matches(msg, rowKeys.Up):
 		if r.cursor > 0 {
 			r.cursor--
 		}
-	case "down", "j":
+	case key.Matches(msg, rowKeys.Down):
 		if r.cursor < len(r.Rows)-1 {
 			r.cursor++
 		}
-	case "home", "g":
+	case key.Matches(msg, rowKeys.Home):
 		r.cursor = 0
-	case "end", "G":
+	case key.Matches(msg, rowKeys.End):
 		r.cursor = len(r.Rows) - 1
-	case "enter":
+	case key.Matches(msg, rowKeys.Enter):
 		row := r.Rows[r.cursor]
 		switch {
 		case row.ReadOnly:

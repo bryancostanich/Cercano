@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -423,8 +424,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// enter/tab toggle Folded, esc returns to input. Any other key
 		// returns to input and is then handled by the normal input path.
 		if m.focusedToolIdx >= 0 {
-			switch msg.Code {
-			case tea.KeyUp:
+			switch {
+			case key.Matches(msg, keys.NavUp):
 				indices := m.toolEntryIndices()
 				for i, idx := range indices {
 					if idx == m.focusedToolIdx {
@@ -436,7 +437,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				return m, nil
-			case tea.KeyDown:
+			case key.Matches(msg, keys.NavDown):
 				indices := m.toolEntryIndices()
 				for i, idx := range indices {
 					if idx == m.focusedToolIdx {
@@ -448,13 +449,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				return m, nil
-			case tea.KeyEnter, tea.KeyTab:
+			case key.Matches(msg, keys.ToggleTool):
 				if m.focusedToolIdx < len(m.entries) && m.entries[m.focusedToolIdx].Tool != nil {
 					m.entries[m.focusedToolIdx].Tool.Folded = !m.entries[m.focusedToolIdx].Tool.Folded
 					m.refreshViewport()
 				}
 				return m, nil
-			case tea.KeyEsc:
+			case key.Matches(msg, keys.Back):
 				m.focusedToolIdx = -1
 				m.refreshViewport()
 				return m, nil
@@ -468,7 +469,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Esc on empty input enters tool-entry navigation mode, focusing the
 		// most-recent tool entry. No-op when scrollback has no tool entries.
-		if msg.Code == tea.KeyEsc && m.input.Value() == "" {
+		if key.Matches(msg, keys.Back) && m.input.Value() == "" {
 			indices := m.toolEntryIndices()
 			if len(indices) > 0 {
 				m.focusedToolIdx = indices[len(indices)-1]
@@ -479,8 +480,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Ctrl-C semantics: clear the input first; if input was already
 		// empty, arm a quit-on-next-Ctrl-C state. Any other key disarms.
 		// Matches bash / python REPL / node convention.
-		key := msg.String()
-		if key == "ctrl+c" {
+		keyStr := msg.String()
+		if keyStr == "ctrl+c" {
 			if m.input.Value() != "" {
 				m.input.SetValue("")
 				m.ctrlCArmed = false
@@ -499,7 +500,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.Placeholder = defaultInputPlaceholder
 		}
 		// Tab completion for slash commands.
-		if key == "tab" {
+		if keyStr == "tab" {
 			val := m.input.Value()
 			if strings.HasPrefix(val, "/") {
 				matches := m.registry.PrefixMatches(val)
@@ -520,7 +521,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Not a slash command — fall through to default key routing.
 		}
-		switch key {
+		if key.Matches(msg, keys.ScrollKeys) {
+			// Route navigation keys to the scrollback viewport. Keeps the
+			// textinput's normal arrow / line-edit semantics intact.
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
+		}
+		switch keyStr {
 		case "enter":
 			text := strings.TrimSpace(m.input.Value())
 			if text == "" {
@@ -536,12 +544,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.relayout()
 			}
 			return m.submit(text)
-		case "pgup", "pgdown", "home", "end", "ctrl+u", "ctrl+d", "ctrl+b", "ctrl+f", "shift+up", "shift+down":
-			// Route navigation keys to the scrollback viewport. Keeps the
-			// textinput's normal arrow / line-edit semantics intact.
-			var cmd tea.Cmd
-			m.viewport, cmd = m.viewport.Update(msg)
-			return m, cmd
 		}
 		var cmd tea.Cmd
 		prevVal := m.input.Value()

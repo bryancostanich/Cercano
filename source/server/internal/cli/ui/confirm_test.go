@@ -121,6 +121,48 @@ func TestResolveConfirmKey_Y_ClearsAndReturnsCmd(t *testing.T) {
 	}
 }
 
+// PermissionRequired stream-event path: pendingConfirm carries a ToolUseID,
+// so y / n must NOT fire invokeToolCmd (the server already has the call
+// queued); they should clear pendingConfirm and return a nil tea.Cmd. The
+// actual RPC fires in a goroutine and is exercised in integration tests; here
+// we only assert the synchronous UI contract.
+func TestResolveConfirmKey_Y_WithToolUseID_NoCmd(t *testing.T) {
+	m := minimalModel()
+	m.pendingConfirm = &pendingToolCall{
+		ToolUseID:  "tu_123",
+		Name:       "write_file",
+		Args:       "{}",
+		Permission: "W",
+	}
+
+	next, cmd := m.resolveConfirmKey("y")
+	if next.pendingConfirm != nil {
+		t.Errorf("y should clear pendingConfirm")
+	}
+	// Stream-event path: server has the call; UI must not double-fire it.
+	if cmd != nil {
+		t.Errorf("y with ToolUseID should NOT return a tea.Cmd; got %v", cmd)
+	}
+}
+
+func TestResolveConfirmKey_N_WithToolUseID_NoCmd(t *testing.T) {
+	m := minimalModel()
+	m.pendingConfirm = &pendingToolCall{
+		ToolUseID:  "tu_456",
+		Name:       "rm_file",
+		Args:       "{}",
+		Permission: "X",
+	}
+
+	next, cmd := m.resolveConfirmKey("n")
+	if next.pendingConfirm != nil {
+		t.Errorf("n should clear pendingConfirm")
+	}
+	if cmd != nil {
+		t.Errorf("n should not return a tea.Cmd; got %v", cmd)
+	}
+}
+
 func TestResolveConfirmKey_OtherKey_Ignored(t *testing.T) {
 	m := minimalModel()
 	m.pendingConfirm = &pendingToolCall{Name: "rm_file", Args: "{}", Permission: "X"}

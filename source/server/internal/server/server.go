@@ -212,16 +212,39 @@ func (s *Server) ListConversations(ctx context.Context, req *proto.ListConversat
 	out := &proto.ListConversationsResponse{Conversations: make([]*proto.Conversation, 0, len(infos))}
 	for _, i := range infos {
 		out.Conversations = append(out.Conversations, &proto.Conversation{
-			Id:         i.ID,
-			Title:      i.Title,
-			ProjectDir: i.ProjectDir,
-			Model:      i.Model,
-			StartedAt:  i.StartedAt.Unix(),
-			LastTurnAt: i.LastTurnAt.Unix(),
-			TurnCount:  int32(i.TurnCount),
+			Id:             i.ID,
+			Title:          i.Title,
+			ProjectDir:     i.ProjectDir,
+			Model:          i.Model,
+			StartedAt:      i.StartedAt.Unix(),
+			LastTurnAt:     i.LastTurnAt.Unix(),
+			TurnCount:      int32(i.TurnCount),
+			Recap:          i.Recap,
+			RecapUpdatedAt: i.RecapUpdatedAt.Unix(),
 		})
 	}
 	return out, nil
+}
+
+// GetConversation implements proto.AgentServer — returns a single
+// conversation's metadata including its living recap. Lightweight: no turn
+// rehydration.
+func (s *Server) GetConversation(ctx context.Context, req *proto.GetConversationRequest) (*proto.Conversation, error) {
+	i, err := s.agent.GetConversation(ctx, req.GetConversationId())
+	if err != nil {
+		return nil, err
+	}
+	return &proto.Conversation{
+		Id:             i.ID,
+		Title:          i.Title,
+		ProjectDir:     i.ProjectDir,
+		Model:          i.Model,
+		StartedAt:      i.StartedAt.Unix(),
+		LastTurnAt:     i.LastTurnAt.Unix(),
+		TurnCount:      int32(i.TurnCount),
+		Recap:          i.Recap,
+		RecapUpdatedAt: i.RecapUpdatedAt.Unix(),
+	}, nil
 }
 
 // ResumeConversation implements proto.AgentServer — loads persisted turns

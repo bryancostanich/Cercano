@@ -36,6 +36,7 @@ import (
 	"cercano/source/server/internal/llm/anthropic"
 	"cercano/source/server/internal/loop"
 	mcpserver "cercano/source/server/internal/mcp"
+	"cercano/source/server/internal/recap"
 	"cercano/source/server/internal/server"
 	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/internal/tools"
@@ -186,12 +187,26 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	// awareness on every turn.
 	ctxLoader := projectctx.NewLoader()
 
-	orchestrator := agent.NewAgent(lazyRouter, coordinator,
+	agentOpts := []agent.AgentOption{
 		agent.WithConversationStore(convStore),
 		agent.WithPersistentStore(persistentStore),
 		agent.WithContextMeter(meterRegistry, cfg.LocalModel),
 		agent.WithContextLoader(ctxLoader),
-	)
+	}
+	// Living recap: after each turn, a debounced local-model pass updates a
+	// one-line conversation summary. Only when a persistent store exists.
+	if persistentStore != nil {
+		recapComplete := func(ctx context.Context, prompt string) (string, error) {
+			resp, err := localProvider.Process(ctx, &agent.Request{Input: prompt})
+			if err != nil {
+				return "", err
+			}
+			return resp.Output, nil
+		}
+		recapGen := recap.New(persistentStore, recapComplete, 8*time.Second, 12)
+		agentOpts = append(agentOpts, agent.WithRecapScheduler(recapGen))
+	}
+	orchestrator := agent.NewAgent(lazyRouter, coordinator, agentOpts...)
 
 	lis, err := net.Listen("tcp", bindAddr)
 	if err != nil {
@@ -760,9 +775,9 @@ func listInstalledModels(ollamaURL string) ([]string, error) {
 // treated as chat models. Cercano only ships with nomic-embed-text support
 // today, but excluding other common embedders future-proofs the check.
 var embeddingModelNames = map[string]bool{
-	"nomic-embed-text":    true,
-	"mxbai-embed-large":   true,
-	"all-minilm":          true,
+	"nomic-embed-text":       true,
+	"mxbai-embed-large":      true,
+	"all-minilm":             true,
 	"snowflake-arctic-embed": true,
 }
 

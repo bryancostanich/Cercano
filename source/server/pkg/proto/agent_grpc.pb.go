@@ -27,6 +27,7 @@ const (
 	Agent_ResumeConversation_FullMethodName      = "/agent.Agent/ResumeConversation"
 	Agent_DeleteConversation_FullMethodName      = "/agent.Agent/DeleteConversation"
 	Agent_RenameConversation_FullMethodName      = "/agent.Agent/RenameConversation"
+	Agent_GetConversation_FullMethodName         = "/agent.Agent/GetConversation"
 	Agent_GetContextUsage_FullMethodName         = "/agent.Agent/GetContextUsage"
 	Agent_ListTools_FullMethodName               = "/agent.Agent/ListTools"
 	Agent_InvokeTool_FullMethodName              = "/agent.Agent/InvokeTool"
@@ -63,6 +64,7 @@ type AgentClient interface {
 	ResumeConversation(ctx context.Context, in *ResumeConversationRequest, opts ...grpc.CallOption) (*ResumeConversationResponse, error)
 	DeleteConversation(ctx context.Context, in *DeleteConversationRequest, opts ...grpc.CallOption) (*DeleteConversationResponse, error)
 	RenameConversation(ctx context.Context, in *RenameConversationRequest, opts ...grpc.CallOption) (*RenameConversationResponse, error)
+	GetConversation(ctx context.Context, in *GetConversationRequest, opts ...grpc.CallOption) (*Conversation, error)
 	// GetContextUsage reports cumulative token usage vs. the active model's
 	// context window for a conversation. The CLI status bar polls this after
 	// each streamed turn.
@@ -185,6 +187,16 @@ func (c *agentClient) RenameConversation(ctx context.Context, in *RenameConversa
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RenameConversationResponse)
 	err := c.cc.Invoke(ctx, Agent_RenameConversation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) GetConversation(ctx context.Context, in *GetConversationRequest, opts ...grpc.CallOption) (*Conversation, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Conversation)
+	err := c.cc.Invoke(ctx, Agent_GetConversation_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -324,6 +336,7 @@ type AgentServer interface {
 	ResumeConversation(context.Context, *ResumeConversationRequest) (*ResumeConversationResponse, error)
 	DeleteConversation(context.Context, *DeleteConversationRequest) (*DeleteConversationResponse, error)
 	RenameConversation(context.Context, *RenameConversationRequest) (*RenameConversationResponse, error)
+	GetConversation(context.Context, *GetConversationRequest) (*Conversation, error)
 	// GetContextUsage reports cumulative token usage vs. the active model's
 	// context window for a conversation. The CLI status bar polls this after
 	// each streamed turn.
@@ -386,6 +399,9 @@ func (UnimplementedAgentServer) DeleteConversation(context.Context, *DeleteConve
 }
 func (UnimplementedAgentServer) RenameConversation(context.Context, *RenameConversationRequest) (*RenameConversationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RenameConversation not implemented")
+}
+func (UnimplementedAgentServer) GetConversation(context.Context, *GetConversationRequest) (*Conversation, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetConversation not implemented")
 }
 func (UnimplementedAgentServer) GetContextUsage(context.Context, *GetContextUsageRequest) (*GetContextUsageResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetContextUsage not implemented")
@@ -574,6 +590,24 @@ func _Agent_RenameConversation_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AgentServer).RenameConversation(ctx, req.(*RenameConversationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_GetConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetConversationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).GetConversation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_GetConversation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).GetConversation(ctx, req.(*GetConversationRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -810,6 +844,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RenameConversation",
 			Handler:    _Agent_RenameConversation_Handler,
+		},
+		{
+			MethodName: "GetConversation",
+			Handler:    _Agent_GetConversation_Handler,
 		},
 		{
 			MethodName: "GetContextUsage",

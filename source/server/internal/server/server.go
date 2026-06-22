@@ -194,13 +194,13 @@ func (s *Server) ListConversations(ctx context.Context, req *proto.ListConversat
 	out := &proto.ListConversationsResponse{Conversations: make([]*proto.Conversation, 0, len(infos))}
 	for _, i := range infos {
 		out.Conversations = append(out.Conversations, &proto.Conversation{
-			Id:         i.ID,
-			Title:      i.Title,
-			ProjectDir: i.ProjectDir,
-			Model:      i.Model,
-			StartedAt:  i.StartedAt.Unix(),
-			LastTurnAt: i.LastTurnAt.Unix(),
-			TurnCount:  int32(i.TurnCount),
+			Id:             i.ID,
+			Title:          i.Title,
+			ProjectDir:     i.ProjectDir,
+			Model:          i.Model,
+			StartedAt:      i.StartedAt.Unix(),
+			LastTurnAt:     i.LastTurnAt.Unix(),
+			TurnCount:      int32(i.TurnCount),
 			Recap:          i.Recap,
 			RecapUpdatedAt: i.RecapUpdatedAt.Unix(),
 		})

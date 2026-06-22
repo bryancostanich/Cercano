@@ -25,7 +25,7 @@ import (
 type Client struct {
 	conn         *grpc.ClientConn
 	agent        proto.AgentClient
-	AutoLaunched bool // true if Dial spawned a new cercano process
+	AutoLaunched bool   // true if Dial spawned a new cercano process
 	ServerLog    string // path to the auto-launched server's log file, if any
 }
 
@@ -178,13 +178,13 @@ type ConfigUpdate struct {
 
 // ConversationInfo is a persisted conversation summary returned by ListConversations.
 type ConversationInfo struct {
-	ID         string
-	Title      string
-	ProjectDir string
-	Model      string
-	StartedAt  time.Time
-	LastTurnAt time.Time
-	TurnCount  int
+	ID             string
+	Title          string
+	ProjectDir     string
+	Model          string
+	StartedAt      time.Time
+	LastTurnAt     time.Time
+	TurnCount      int
 	Recap          string
 	RecapUpdatedAt time.Time
 }
@@ -213,13 +213,13 @@ func (c *Client) ListConversations(ctx context.Context, projectDir string, limit
 	out := make([]ConversationInfo, 0, len(resp.GetConversations()))
 	for _, c := range resp.GetConversations() {
 		out = append(out, ConversationInfo{
-			ID:         c.GetId(),
-			Title:      c.GetTitle(),
-			ProjectDir: c.GetProjectDir(),
-			Model:      c.GetModel(),
-			StartedAt:  time.Unix(c.GetStartedAt(), 0),
-			LastTurnAt: time.Unix(c.GetLastTurnAt(), 0),
-			TurnCount:  int(c.GetTurnCount()),
+			ID:             c.GetId(),
+			Title:          c.GetTitle(),
+			ProjectDir:     c.GetProjectDir(),
+			Model:          c.GetModel(),
+			StartedAt:      time.Unix(c.GetStartedAt(), 0),
+			LastTurnAt:     time.Unix(c.GetLastTurnAt(), 0),
+			TurnCount:      int(c.GetTurnCount()),
 			Recap:          c.GetRecap(),
 			RecapUpdatedAt: time.Unix(c.GetRecapUpdatedAt(), 0),
 		})

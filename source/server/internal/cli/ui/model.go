@@ -112,6 +112,13 @@ type Model struct {
 	// While non-nil, all key events route to the confirm resolver instead
 	// of the input or scrollback.
 	pendingConfirm *pendingToolCall
+
+	// permissionMode caches the agent's current session permission mode
+	// ("strict" | "permissive" | "bypass") so the status bar can render a
+	// colored chip without an RPC round-trip every frame. Updated by the
+	// startup fetch (permissionModeMsg) and by the /strict /permissive
+	// /bypass /mode slash handlers.
+	permissionMode string
 }
 
 // pendingToolCall is a queued tool invocation awaiting user confirmation.
@@ -186,7 +193,25 @@ func newConvID() string {
 
 // Init is called by Bubble Tea once at startup.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, m.splash.Init(), fetchConfigCmd(m.agent), fetchToolsCmd(m.agent))
+	return tea.Batch(textinput.Blink, m.splash.Init(), fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent))
+}
+
+// permissionModeMsg carries the result of the startup GetPermissionMode RPC.
+// Empty / errored fetches default to "permissive" so the chip always renders.
+type permissionModeMsg struct {
+	Mode string
+}
+
+func fetchPermissionModeCmd(ag *agentclient.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		mode, err := ag.GetPermissionMode(ctx)
+		if err != nil || mode == "" {
+			return permissionModeMsg{Mode: "permissive"}
+		}
+		return permissionModeMsg{Mode: mode}
+	}
 }
 
 // toolsLoadedMsg carries the result of the startup ListTools RPC; populates
@@ -462,6 +487,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case permissionModeMsg:
+		m.permissionMode = msg.Mode
+		return m, nil
+
 	case toolsLoadedMsg:
 		cache := make(map[string]agentclient.ToolInfo, len(msg.Tools))
 		for _, t := range msg.Tools {
@@ -589,6 +618,19 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 	case slash.ResultSetSessionTitle:
 		m.sessionTitle = res.Text
 		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "renamed to: " + res.Text})
+		m.refreshViewport()
+	case slash.ResultSetPermissionMode:
+		// Fire-and-forget: server persistence is the source of truth, but the
+		// local cache flips immediately so the status-bar chip reflects the
+		// new mode on the very next frame. If the RPC fails the local UI
+		// lies briefly; the next restart re-reads from the server.
+		mode := res.PermissionMode
+		ag := m.agent
+		go func() {
+			_ = ag.SetPermissionMode(context.Background(), mode)
+		}()
+		m.permissionMode = mode
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "Permission mode → " + mode})
 		m.refreshViewport()
 	case slash.ResultInvokeTool:
 		// Decide locally whether to prompt: R-tier runs silently, W/X
@@ -1351,10 +1393,33 @@ func (m Model) renderStatus() string {
 		m.styles.BorderDim.Render("  ·  "),
 		m.styles.Muted.Render(fmt.Sprintf("turn %d↑/%d↓", m.tokIn, m.tokOut)),
 		cloudPart,
+		m.renderPermissionModeChip(),
 		m.styles.BorderDim.Render("  ·  "),
 		m.styles.Muted.Render("/help for cmds"),
 	}
 	return lipgloss.NewStyle().Width(m.width).Render(strings.Join(parts, ""))
+}
+
+// renderPermissionModeChip renders the session-mode chip for the status bar:
+// strict → red (Error), permissive → amber (Primary), bypass → lime (Accent).
+// Returns the empty string when the mode isn't known yet (the startup fetch
+// hasn't landed) so the bar doesn't show a misleading default.
+func (m Model) renderPermissionModeChip() string {
+	if m.permissionMode == "" {
+		return ""
+	}
+	var valStyle lipgloss.Style
+	switch m.permissionMode {
+	case "strict":
+		valStyle = m.styles.Error
+	case "bypass":
+		valStyle = m.styles.Accent
+	default: // permissive (or anything unexpected) → amber
+		valStyle = m.styles.Primary
+	}
+	return m.styles.BorderDim.Render("  ·  ") +
+		m.styles.Muted.Render("mode:") +
+		valStyle.Render(" "+m.permissionMode)
 }
 
 func (m Model) renderContextMeter() string {

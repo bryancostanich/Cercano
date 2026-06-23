@@ -18,18 +18,18 @@ import (
 
 // mockAgentClient implements proto.AgentClient for testing.
 type mockAgentClient struct {
-	processResp    *proto.ProcessRequestResponse
-	processErr     error
-	lastRequest    *proto.ProcessRequestRequest
-	configResp     *proto.UpdateConfigResponse
-	configErr      error
-	lastConfigReq  *proto.UpdateConfigRequest
-	modelsResp     *proto.ListModelsResponse
-	modelsErr      error
-	skillsResp     *proto.ListSkillsResponse
-	skillsErr      error
-	getSkillResp   *proto.GetSkillResponse
-	getSkillErr    error
+	processResp     *proto.ProcessRequestResponse
+	processErr      error
+	lastRequest     *proto.ProcessRequestRequest
+	configResp      *proto.UpdateConfigResponse
+	configErr       error
+	lastConfigReq   *proto.UpdateConfigRequest
+	modelsResp      *proto.ListModelsResponse
+	modelsErr       error
+	skillsResp      *proto.ListSkillsResponse
+	skillsErr       error
+	getSkillResp    *proto.GetSkillResponse
+	getSkillErr     error
 	lastGetSkillReq *proto.GetSkillRequest
 }
 
@@ -47,6 +47,34 @@ func (m *mockAgentClient) ListModels(ctx context.Context, in *proto.ListModelsRe
 		return m.modelsResp, m.modelsErr
 	}
 	return &proto.ListModelsResponse{}, m.modelsErr
+}
+
+func (m *mockAgentClient) GetRuntimeStatus(ctx context.Context, in *proto.GetRuntimeStatusRequest, opts ...grpc.CallOption) (*proto.GetRuntimeStatusResponse, error) {
+	return &proto.GetRuntimeStatusResponse{}, nil
+}
+
+func (m *mockAgentClient) ListRuntimeModels(ctx context.Context, in *proto.ListRuntimeModelsRequest, opts ...grpc.CallOption) (*proto.ListRuntimeModelsResponse, error) {
+	return &proto.ListRuntimeModelsResponse{}, nil
+}
+
+func (m *mockAgentClient) ListRuntimeEndpoints(ctx context.Context, in *proto.ListRuntimeEndpointsRequest, opts ...grpc.CallOption) (*proto.ListRuntimeEndpointsResponse, error) {
+	return &proto.ListRuntimeEndpointsResponse{}, nil
+}
+
+func (m *mockAgentClient) StartRuntimeModel(ctx context.Context, in *proto.StartRuntimeModelRequest, opts ...grpc.CallOption) (*proto.StartRuntimeModelResponse, error) {
+	return &proto.StartRuntimeModelResponse{}, nil
+}
+
+func (m *mockAgentClient) StopRuntimeModel(ctx context.Context, in *proto.StopRuntimeModelRequest, opts ...grpc.CallOption) (*proto.StopRuntimeModelResponse, error) {
+	return &proto.StopRuntimeModelResponse{}, nil
+}
+
+func (m *mockAgentClient) RestartRuntime(ctx context.Context, in *proto.RestartRuntimeRequest, opts ...grpc.CallOption) (*proto.RestartRuntimeResponse, error) {
+	return &proto.RestartRuntimeResponse{}, nil
+}
+
+func (m *mockAgentClient) StreamRuntimeLogs(ctx context.Context, in *proto.StreamRuntimeLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[proto.RuntimeLogEntry], error) {
+	return nil, nil
 }
 
 func (m *mockAgentClient) UpdateConfig(ctx context.Context, in *proto.UpdateConfigRequest, opts ...grpc.CallOption) (*proto.UpdateConfigResponse, error) {
@@ -436,6 +464,46 @@ func TestCercanoConfig_SetLocalModel(t *testing.T) {
 	}
 }
 
+func TestCercanoConfig_SetLocalRuntime(t *testing.T) {
+	mock := &mockAgentClient{
+		configResp: &proto.UpdateConfigResponse{
+			Success: true,
+			Message: "updated: [local_runtime=llama_server]",
+		},
+	}
+	s := NewServer(mock)
+
+	ctx := context.Background()
+	client := gomcp.NewClient(&gomcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	t1, t2 := gomcp.NewInMemoryTransports()
+	s.MCPServer().Connect(ctx, t1, nil)
+	cs, _ := client.Connect(ctx, t2, nil)
+	defer cs.Close()
+
+	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "cercano_config",
+		Arguments: map[string]any{
+			"action":        "set",
+			"local_runtime": "llama_server",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+
+	if mock.lastConfigReq == nil {
+		t.Fatal("expected UpdateConfig gRPC call")
+	}
+	if mock.lastConfigReq.LocalRuntime != "llama_server" {
+		t.Errorf("expected local_runtime 'llama_server', got %q", mock.lastConfigReq.LocalRuntime)
+	}
+
+	text := result.Content[0].(*gomcp.TextContent).Text
+	if text == "" {
+		t.Error("expected non-empty response")
+	}
+}
+
 func TestCercanoConfig_SetCloudProvider(t *testing.T) {
 	mock := &mockAgentClient{
 		configResp: &proto.UpdateConfigResponse{
@@ -568,7 +636,7 @@ func TestCercanoConfig_SetOllamaURL(t *testing.T) {
 	result, err := cs.CallTool(ctx, &gomcp.CallToolParams{
 		Name: "cercano_config",
 		Arguments: map[string]any{
-			"action":    "set",
+			"action":     "set",
 			"ollama_url": "http://mac-studio.local:11434",
 		},
 	})
@@ -1893,8 +1961,8 @@ func World() string {
 func TestHandleDocument_EndToEnd(t *testing.T) {
 	mock := &mockAgentClient{
 		processResp: &proto.ProcessRequestResponse{
-			Output:      "Hello returns a greeting string.",
-			InputTokens: 100,
+			Output:       "Hello returns a greeting string.",
+			InputTokens:  100,
 			OutputTokens: 20,
 			RoutingMetadata: &proto.RoutingMetadata{
 				ModelName: "qwen3-coder",

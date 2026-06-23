@@ -11,6 +11,7 @@ import (
 // Config holds all Cercano configuration values.
 type Config struct {
 	OllamaURL      string `yaml:"ollama_url"`
+	LocalRuntime   string `yaml:"local_runtime"`
 	LocalModel     string `yaml:"local_model"`
 	EmbeddingModel string `yaml:"embedding_model"`
 	CloudProvider  string `yaml:"cloud_provider"`
@@ -20,17 +21,73 @@ type Config struct {
 	// Use this to point cercano at a local Anthropic-compatible proxy such as
 	// Meridian (default http://127.0.0.1:3456). When set with the anthropic
 	// provider, an empty API key is accepted — the proxy handles auth.
-	CloudBaseURL string `yaml:"cloud_base_url"`
-	Port         string `yaml:"port"`
+	CloudBaseURL string            `yaml:"cloud_base_url"`
+	Port         string            `yaml:"port"`
+	LlamaServer  LlamaServerConfig `yaml:"llama_server"`
+}
+
+// LlamaServerConfig controls the optional managed llama-server sidecar.
+type LlamaServerConfig struct {
+	Enabled          bool          `yaml:"enabled"`
+	Binary           string        `yaml:"binary"`
+	ModelDirs        []string      `yaml:"model_dirs"`
+	DefaultModel     string        `yaml:"default_model"`
+	Host             string        `yaml:"host"`
+	Port             int           `yaml:"port"`
+	ContextSize      int           `yaml:"context_size"`
+	GPULayers        string        `yaml:"gpu_layers"`
+	Threads          int           `yaml:"threads"`
+	ExtraArgs        []string      `yaml:"extra_args"`
+	ReadinessTimeout string        `yaml:"readiness_timeout"`
+	Restart          RestartConfig `yaml:"restart"`
+}
+
+// RestartConfig controls sidecar restart behavior.
+type RestartConfig struct {
+	Enabled     bool   `yaml:"enabled"`
+	MaxAttempts int    `yaml:"max_attempts"`
+	Backoff     string `yaml:"backoff"`
+	enabledSet  bool   `yaml:"-"`
+}
+
+// UnmarshalYAML tracks whether enabled was explicitly present, letting config
+// defaults fill omitted values without overriding an intentional false.
+func (r *RestartConfig) UnmarshalYAML(value *yaml.Node) error {
+	type restartConfig RestartConfig
+	var raw restartConfig
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		if value.Content[i].Value == "enabled" {
+			raw.enabledSet = true
+			break
+		}
+	}
+	*r = RestartConfig(raw)
+	return nil
 }
 
 // Defaults returns a Config with default values.
 func Defaults() Config {
 	return Config{
 		OllamaURL:      "http://localhost:11434",
+		LocalRuntime:   "ollama",
 		LocalModel:     "qwen3-coder",
 		EmbeddingModel: "nomic-embed-text",
 		Port:           "50052",
+		LlamaServer: LlamaServerConfig{
+			ModelDirs:        []string{"~/.cercano/models"},
+			Host:             "127.0.0.1",
+			ContextSize:      8192,
+			GPULayers:        "auto",
+			ReadinessTimeout: "60s",
+			Restart: RestartConfig{
+				Enabled:     true,
+				MaxAttempts: 3,
+				Backoff:     "2s",
+			},
+		},
 	}
 }
 
@@ -68,6 +125,9 @@ func Load(path string) (Config, error) {
 		if cfg.OllamaURL == "" {
 			cfg.OllamaURL = defaults.OllamaURL
 		}
+		if cfg.LocalRuntime == "" {
+			cfg.LocalRuntime = defaults.LocalRuntime
+		}
 		if cfg.LocalModel == "" {
 			cfg.LocalModel = defaults.LocalModel
 		}
@@ -77,10 +137,38 @@ func Load(path string) (Config, error) {
 		if cfg.Port == "" {
 			cfg.Port = defaults.Port
 		}
+		applyLlamaServerDefaults(&cfg.LlamaServer, defaults.LlamaServer)
 	}
 
 	applyEnvOverrides(&cfg)
 	return cfg, nil
+}
+
+func applyLlamaServerDefaults(cfg *LlamaServerConfig, defaults LlamaServerConfig) {
+	if len(cfg.ModelDirs) == 0 {
+		cfg.ModelDirs = defaults.ModelDirs
+	}
+	if cfg.Host == "" {
+		cfg.Host = defaults.Host
+	}
+	if cfg.ContextSize == 0 {
+		cfg.ContextSize = defaults.ContextSize
+	}
+	if cfg.GPULayers == "" {
+		cfg.GPULayers = defaults.GPULayers
+	}
+	if cfg.ReadinessTimeout == "" {
+		cfg.ReadinessTimeout = defaults.ReadinessTimeout
+	}
+	if cfg.Restart.MaxAttempts == 0 {
+		cfg.Restart.MaxAttempts = defaults.Restart.MaxAttempts
+	}
+	if cfg.Restart.Backoff == "" {
+		cfg.Restart.Backoff = defaults.Restart.Backoff
+	}
+	if !cfg.Restart.enabledSet && defaults.Restart.Enabled {
+		cfg.Restart.Enabled = true
+	}
 }
 
 // applyEnvOverrides applies environment variable overrides to the config.
@@ -91,6 +179,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("CERCANO_LOCAL_MODEL"); v != "" {
 		cfg.LocalModel = v
+	}
+	if v := os.Getenv("CERCANO_LOCAL_RUNTIME"); v != "" {
+		cfg.LocalRuntime = v
 	}
 	if v := os.Getenv("CERCANO_EMBEDDING_MODEL"); v != "" {
 		cfg.EmbeddingModel = v

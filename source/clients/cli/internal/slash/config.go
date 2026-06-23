@@ -15,7 +15,7 @@ import (
 func RegisterConfig(r *Registry, c *agentclient.Client) {
 	r.Register(Command{
 		Name: "config",
-		Help: "View or update runtime config. Usage: /config [key value]. Keys: local-model, cloud-provider, cloud-model, cloud-api-key, cloud-base-url, ollama-url.",
+		Help: "View or update runtime config. Usage: /config [key value]. Keys: local-runtime, local-model, cloud-provider, cloud-model, cloud-api-key, cloud-base-url, ollama-url.",
 		Handler: func(args []string) Result {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -41,6 +41,8 @@ func RegisterConfig(r *Registry, c *agentclient.Client) {
 
 			var update agentclient.ConfigUpdate
 			switch key {
+			case "local-runtime", "local_runtime":
+				update.LocalRuntime = value
 			case "local-model", "local_model":
 				update.LocalModel = value
 			case "ollama-url", "ollama_url":
@@ -54,7 +56,7 @@ func RegisterConfig(r *Registry, c *agentclient.Client) {
 			case "cloud-base-url", "cloud_base_url":
 				update.CloudBaseURL = value
 			default:
-				return Result{Kind: ResultText, Text: "unknown config key /" + key + " (valid: local-model, ollama-url, cloud-provider, cloud-model, cloud-api-key, cloud-base-url)"}
+				return Result{Kind: ResultText, Text: "unknown config key /" + key + " (valid: local-runtime, local-model, ollama-url, cloud-provider, cloud-model, cloud-api-key, cloud-base-url)"}
 			}
 			msg, err := c.UpdateConfig(ctx, update)
 			if err != nil {
@@ -82,7 +84,9 @@ func RegisterConfig(r *Registry, c *agentclient.Client) {
 func formatConfig(cfg *agentclient.Config) string {
 	var b strings.Builder
 	b.WriteString("current config:\n")
-	b.WriteString("  ollama-url:      ")
+	b.WriteString("  local-runtime:  ")
+	b.WriteString(orDash(cfg.LocalRuntime))
+	b.WriteString("\n  ollama-url:      ")
 	b.WriteString(orDash(cfg.OllamaURL))
 	b.WriteString("\n  local-model:     ")
 	b.WriteString(orDash(cfg.LocalModel))

@@ -28,9 +28,12 @@ import (
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/dispatch/builtin"
 	"cercano/source/server/internal/engine"
+	llamaengine "cercano/source/server/internal/engine/llamaserver"
 	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm/anthropic"
+	"cercano/source/server/internal/localruntime"
+	runtimellama "cercano/source/server/internal/localruntime/llamaserver"
 	"cercano/source/server/internal/loop"
 	mcpserver "cercano/source/server/internal/mcp"
 	"cercano/source/server/internal/recap"
@@ -101,7 +104,12 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	registry.RegisterEngine(ollamaEng)
 	registry.RegisterEmbedder(ollamaEng)
 
-	localProvider := legacymodels.NewLocalModelProvider(ollamaEng, cfg.LocalModel)
+	runtimeManager := buildRuntimeManager(cfg)
+	llamaEng := llamaengine.NewEngine(runtimeManager)
+	registry.RegisterEngine(llamaEng)
+
+	localEngine, localModel := selectLocalEngine(cfg, ollamaEng, llamaEng)
+	localProvider := legacymodels.NewLocalModelProvider(localEngine, localModel)
 
 	// Cloud provider: only construct a real one when there's enough config to
 	// actually reach a cloud. Otherwise return a sentinel that auto-degrades
@@ -211,6 +219,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 
 	s := grpc.NewServer()
 	srv := server.NewServer(orchestrator, localProvider, lazyRouter, coordinator, cloudFactory, registry)
+	srv.SetRuntimeManager(runtimeManager)
 	srv.SetConfigPersistence(config.DefaultPath(), cfg)
 	srv.SetToolRegistry(agenttools.DefaultRegistry())
 
@@ -250,6 +259,51 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	}
 
 	return lis.Addr().String(), cleanup, nil
+}
+
+func buildRuntimeManager(cfg config.Config) localruntime.Manager {
+	manager := localruntime.NewManager(localruntime.WithEndpoints(localruntime.EndpointsFromConfig(cfg)))
+	if !llamaServerEnabled(cfg) {
+		return manager
+	}
+	provider := runtimellama.NewProvider(cfg.LlamaServer)
+	manager.RegisterProvider(provider)
+	if strings.TrimSpace(cfg.LlamaServer.DefaultModel) == "" {
+		manager.WriteLog(localruntime.LogEntry{
+			Source:  "cercano.runtime.llama_server",
+			Level:   "info",
+			Message: "llama-server provider registered; no default_model configured",
+		})
+		return manager
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
+	defer cancel()
+	if _, err := manager.Start(ctx, localruntime.StartRequest{
+		Runtime: "llama_server",
+		ModelID: cfg.LlamaServer.DefaultModel,
+	}); err != nil {
+		manager.WriteLog(localruntime.LogEntry{
+			Source:  "cercano.runtime.llama_server",
+			Level:   "error",
+			Message: "failed to start llama-server: " + err.Error(),
+		})
+	}
+	return manager
+}
+
+func llamaServerEnabled(cfg config.Config) bool {
+	return cfg.LlamaServer.Enabled || strings.EqualFold(cfg.LocalRuntime, "llama_server")
+}
+
+func selectLocalEngine(cfg config.Config, ollamaEng engine.InferenceEngine, llamaEng engine.InferenceEngine) (engine.InferenceEngine, string) {
+	if strings.EqualFold(cfg.LocalRuntime, "llama_server") {
+		model := strings.TrimSpace(cfg.LlamaServer.DefaultModel)
+		if model == "" {
+			model = cfg.LocalModel
+		}
+		return llamaEng, model
+	}
+	return ollamaEng, cfg.LocalModel
 }
 
 func main() {
@@ -366,7 +420,7 @@ func runSetup(installEngine bool) {
 	}
 
 	// Step 1: Detect AI engine backend
-	fmt.Printf("\n[1/7] Checking for AI engine backends...\n")
+	fmt.Printf("\n[1/8] Checking for AI engine backends...\n")
 	detection := detectEngineWith(checkOllama, cfg.OllamaURL)
 
 	engineAvailable := detection.Available
@@ -409,7 +463,7 @@ func runSetup(installEngine bool) {
 	// whatever fits their hardware and workload. Setup only asks the user
 	// to choose when Ollama has no installed chat models at all.
 	if engineAvailable {
-		fmt.Println("\n[2/7] Checking chat models...")
+		fmt.Println("\n[2/8] Checking chat models...")
 
 		installed, err := listInstalledModels(cfg.OllamaURL)
 		if err != nil {
@@ -465,11 +519,17 @@ func runSetup(installEngine bool) {
 			}
 		}
 	} else {
-		fmt.Fprintln(os.Stderr, "\n[2/7] Skipping model check (no engine available).")
+		fmt.Fprintln(os.Stderr, "\n[2/8] Skipping model check (no engine available).")
 	}
 
+	// Step 3: Prepare the optional managed llama-server runtime. This does not
+	// change the active inference engine yet; it only makes the supervised
+	// sidecar available for dashboard/start-stop flows.
+	fmt.Println("\n[3/8] Setting up managed llama-server runtime...")
+	ensureLlamaServerSetup(&cfg, installEngine)
+
 	// Check/create config file
-	fmt.Println("\n[3/7] Checking config file...")
+	fmt.Println("\n[4/8] Checking config file...")
 	configPath := config.DefaultPath()
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		fmt.Printf("  Creating default config at %s\n", configPath)
@@ -483,48 +543,32 @@ func runSetup(installEngine bool) {
 	}
 
 	// Configure Claude Code hook for cloud token telemetry
-	fmt.Println("\n[4/7] Checking Claude Code telemetry hook...")
+	fmt.Println("\n[5/8] Checking Claude Code telemetry hook...")
 	if err := ensureClaudeHook(); err != nil {
 		fmt.Fprintf(os.Stderr, "  WARN: Could not configure hook: %v\n", err)
 	}
 
 	// Set up Python venv for web research (DuckDuckGo search)
-	fmt.Println("\n[5/7] Setting up Python venv for web research...")
+	fmt.Println("\n[6/8] Setting up Python venv for web research...")
 	if err := ensureVenv(); err != nil {
 		fmt.Fprintf(os.Stderr, "  WARN: Could not set up Python venv: %v\n", err)
 		fmt.Fprintf(os.Stderr, "  (Web research features will not be available. You can re-run 'cercano setup' to retry.)\n")
 	}
 
-	// Optional: agent-mode routing requires an embedding model. Most users
-	// (MCP plugins for Claude Code, Codex, Cursor, Windsurf, Gemini CLI) do
-	// not need this — only the VS Code and Zed IDE extensions that talk to
-	// the gRPC agent API use classification.
-	fmt.Println("\n[6/7] Agent-mode routing (optional)...")
+	// Ensure the embedding model is present. It powers smart routing today and
+	// gives semantic features a known local embedder on first run.
+	fmt.Println("\n[7/8] Checking embedding model...")
 	if engineAvailable {
 		installed, err := listInstalledModels(cfg.OllamaURL)
 		if err == nil {
-			embedModel := strings.TrimSuffix(cfg.EmbeddingModel, ":latest")
-			hasEmbedding := false
-			for _, m := range installed {
-				if strings.TrimSuffix(m, ":latest") == embedModel {
-					hasEmbedding = true
-					break
-				}
-			}
-			if hasEmbedding {
-				fmt.Printf("  OK: Embedding model %s is installed — agent-mode routing available.\n", cfg.EmbeddingModel)
+			if hasInstalledModel(installed, cfg.EmbeddingModel) {
+				fmt.Printf("  OK: Embedding model %s is installed.\n", cfg.EmbeddingModel)
 			} else {
-				fmt.Println("  MCP plugins (Claude Code, Codex, Cursor, Windsurf, Gemini CLI) do not need this.")
-				fmt.Println("  Only the VS Code and Zed IDE extensions that use gRPC agent-mode need an embedding model.")
-				if promptYesNo(os.Stderr, os.Stdin, fmt.Sprintf("  Pull %s now? [y/N]: ", cfg.EmbeddingModel), false) {
-					fmt.Printf("  Pulling %s...\n", cfg.EmbeddingModel)
-					if err := pullModel(cfg.OllamaURL, cfg.EmbeddingModel); err != nil {
-						fmt.Fprintf(os.Stderr, "  WARN: Could not pull %s: %v\n", cfg.EmbeddingModel, err)
-					} else {
-						fmt.Printf("  OK: %s pulled.\n", cfg.EmbeddingModel)
-					}
+				fmt.Printf("  Pulling embedding model %s...\n", cfg.EmbeddingModel)
+				if err := pullModel(cfg.OllamaURL, cfg.EmbeddingModel); err != nil {
+					fmt.Fprintf(os.Stderr, "  WARN: Could not pull %s: %v\n", cfg.EmbeddingModel, err)
 				} else {
-					fmt.Println("  Skipping. Run `ollama pull " + cfg.EmbeddingModel + "` later to enable agent mode.")
+					fmt.Printf("  OK: %s pulled.\n", cfg.EmbeddingModel)
 				}
 			}
 		} else {
@@ -540,13 +584,149 @@ func runSetup(installEngine bool) {
 	}
 
 	// Summary
-	fmt.Println("\n[7/7] Setup complete!")
+	fmt.Println("\n[8/8] Setup complete!")
 	if engineAvailable {
 		fmt.Println("  Run 'cercano' to start the server.")
 	} else {
 		fmt.Println("  Note: No AI engine is installed. Install Ollama from https://ollama.com/download")
 		fmt.Println("  then re-run 'cercano setup' to pull models.")
 	}
+}
+
+func ensureLlamaServerSetup(cfg *config.Config, installEngine bool) {
+	applyLlamaServerSetupDefaults(cfg)
+	if err := ensureLlamaModelDirs(cfg.LlamaServer.ModelDirs); err != nil {
+		fmt.Fprintf(os.Stderr, "  WARN: Could not prepare model directory: %v\n", err)
+	} else {
+		fmt.Printf("  OK: GGUF model directory ready at %s\n", cfg.LlamaServer.ModelDirs[0])
+	}
+
+	binary, err := findLlamaServerBinary(cfg.LlamaServer)
+	if err != nil {
+		shouldInstall := promptInstallLlamaServer(os.Stderr, os.Stdin, installEngine)
+		if shouldInstall {
+			goos := runtime.GOOS
+			hasBrew := hasBrewInstalled()
+			if installErr := installLlamaServerRuntime(goos, hasBrew); installErr != nil {
+				fmt.Fprintf(os.Stderr, "  WARN: %v\n", installErr)
+				fmt.Fprintln(os.Stderr, "  Managed llama-server will stay disabled until `llama-server` is on PATH.")
+				cfg.LlamaServer.Enabled = false
+				return
+			}
+			binary, err = findLlamaServerBinary(cfg.LlamaServer)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  WARN: llama-server install completed but binary detection failed: %v\n", err)
+				cfg.LlamaServer.Enabled = false
+				return
+			}
+		} else {
+			fmt.Fprintln(os.Stderr, "  Skipping managed runtime installation.")
+			fmt.Fprintln(os.Stderr, "  Install llama.cpp later and re-run `cercano setup` to enable supervised GGUF models.")
+			cfg.LlamaServer.Enabled = false
+			return
+		}
+	}
+
+	cfg.LlamaServer.Enabled = true
+	cfg.LlamaServer.Binary = binary
+	fmt.Printf("  OK: llama-server runtime available at %s\n", binary)
+
+	models, err := runtimellama.NewProvider(cfg.LlamaServer).Discover(context.Background())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  WARN: Could not scan GGUF models: %v\n", err)
+		return
+	}
+	if len(models) == 0 {
+		fmt.Printf("  No GGUF models found yet. Add .gguf files to %s to use the managed runtime.\n", cfg.LlamaServer.ModelDirs[0])
+		return
+	}
+	if strings.TrimSpace(cfg.LlamaServer.DefaultModel) == "" {
+		if len(models) == 1 {
+			cfg.LlamaServer.DefaultModel = models[0].Path
+			fmt.Printf("  OK: Selected managed model %s\n", models[0].DisplayName)
+		} else {
+			fmt.Printf("  Found %d GGUF models. Set llama_server.default_model in config to choose one.\n", len(models))
+		}
+		return
+	}
+	fmt.Printf("  OK: Managed default model configured as %s\n", cfg.LlamaServer.DefaultModel)
+}
+
+func applyLlamaServerSetupDefaults(cfg *config.Config) {
+	defaults := config.Defaults().LlamaServer
+	if len(cfg.LlamaServer.ModelDirs) == 0 {
+		cfg.LlamaServer.ModelDirs = defaults.ModelDirs
+	}
+	if cfg.LlamaServer.Host == "" {
+		cfg.LlamaServer.Host = defaults.Host
+	}
+	if cfg.LlamaServer.ContextSize == 0 {
+		cfg.LlamaServer.ContextSize = defaults.ContextSize
+	}
+	if cfg.LlamaServer.GPULayers == "" {
+		cfg.LlamaServer.GPULayers = defaults.GPULayers
+	}
+	if cfg.LlamaServer.ReadinessTimeout == "" {
+		cfg.LlamaServer.ReadinessTimeout = defaults.ReadinessTimeout
+	}
+	if cfg.LlamaServer.Restart.MaxAttempts == 0 {
+		cfg.LlamaServer.Restart.MaxAttempts = defaults.Restart.MaxAttempts
+	}
+	if cfg.LlamaServer.Restart.Backoff == "" {
+		cfg.LlamaServer.Restart.Backoff = defaults.Restart.Backoff
+	}
+}
+
+func ensureLlamaModelDirs(dirs []string) error {
+	for _, dir := range dirs {
+		expanded, err := expandSetupPath(dir)
+		if err != nil {
+			return err
+		}
+		if expanded == "" {
+			continue
+		}
+		if err := os.MkdirAll(expanded, 0755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func findLlamaServerBinary(cfg config.LlamaServerConfig) (string, error) {
+	if strings.TrimSpace(cfg.Binary) != "" {
+		path, err := expandSetupPath(cfg.Binary)
+		if err != nil {
+			return "", err
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return "", err
+		}
+		if info.IsDir() {
+			return "", fmt.Errorf("llama-server binary %s is a directory", path)
+		}
+		return path, nil
+	}
+	path, err := exec.LookPath("llama-server")
+	if err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func expandSetupPath(path string) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
+	}
+	return filepath.Abs(path)
 }
 
 // ensureVenv creates the Python venv at ~/.config/cercano/venv/ and installs
@@ -725,6 +905,16 @@ func listInstalledModels(ollamaURL string) ([]string, error) {
 		names = append(names, m.Name)
 	}
 	return names, nil
+}
+
+func hasInstalledModel(installed []string, model string) bool {
+	normalized := strings.TrimSuffix(model, ":latest")
+	for _, candidate := range installed {
+		if strings.TrimSuffix(candidate, ":latest") == normalized {
+			return true
+		}
+	}
+	return false
 }
 
 // embeddingModelNames are recognized embedding models that should NOT be

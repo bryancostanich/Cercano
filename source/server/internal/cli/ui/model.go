@@ -14,7 +14,6 @@ import (
 	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -94,7 +93,7 @@ type Model struct {
 	viewportPlainLines []string
 	selection          textSelection
 	selectionNotice    string
-	input              textarea.Model
+	input              promptInput
 
 	// inputHistory holds every submitted prompt (messages and slash commands),
 	// oldest first, for shell-style ↑/↓ recall. historyIdx is the browse
@@ -105,8 +104,8 @@ type Model struct {
 	historyIdx   int
 	historyStash string
 
-	streamCh <-chan agentclient.StreamMsg
-	streaming          bool
+	streamCh  <-chan agentclient.StreamMsg
+	streaming bool
 	// cancelStream cancels the context of the in-flight StreamChat so Esc can
 	// abort a running prompt. Nil when nothing is streaming.
 	cancelStream context.CancelFunc
@@ -193,41 +192,28 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	p := theme.Cracker()
 	s := theme.NewStyles(p)
 
-	ti := textarea.New()
+	ti := newPromptInput()
 	ti.Placeholder = defaultInputPlaceholder
-	ti.CharLimit = 0
-	ti.ShowLineNumbers = false
 	// Grow/shrink to fit wrapped content, from one line up to the cap; beyond
-	// the cap the textarea scrolls internally.
-	ti.DynamicHeight = true
+	// the cap the prompt scrolls internally.
 	ti.MinHeight = 1
 	ti.MaxHeight = maxInputLines
 	// Lime "▶ " on the first line; a 2-space hang indent on wrapped/extra lines
 	// so continuation text aligns under the first line's content.
-	ti.SetPromptFunc(2, func(info textarea.PromptInfo) string {
+	ti.SetPromptFunc(2, func(info promptInfo) string {
 		if info.LineNumber == 0 {
 			return s.UserPrompt.Render("▶ ")
 		}
 		return "  "
 	})
-	// Strip textarea's default chrome so it reads like a single-line prompt that
-	// just happens to wrap: no cursor-line highlight, no end-of-buffer glyph.
-	plain := lipgloss.NewStyle()
-	st := ti.Styles()
-	st.Focused.Base = plain
-	st.Blurred.Base = plain
-	st.Focused.CursorLine = plain
-	st.Blurred.CursorLine = plain
-	st.Focused.EndOfBuffer = plain
-	st.Blurred.EndOfBuffer = plain
-	st.Focused.Text = lipgloss.NewStyle().Foreground(p.Primary)
-	st.Blurred.Text = lipgloss.NewStyle().Foreground(p.Primary)
-	st.Focused.Placeholder = lipgloss.NewStyle().Foreground(p.Muted)
-	st.Blurred.Placeholder = lipgloss.NewStyle().Foreground(p.Muted)
-	ti.SetStyles(st)
-	ti.EndOfBufferCharacter = ' '
+	ti.SetStyles(promptInputStyles{
+		Text:        lipgloss.NewStyle().Foreground(p.Primary),
+		Placeholder: lipgloss.NewStyle().Foreground(p.Muted),
+		Selection: lipgloss.NewStyle().
+			Foreground(p.BgDeep).
+			Background(p.Info),
+	})
 	ti.Focus()
-	ti.SetVirtualCursor(false)
 
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(10))
 
@@ -488,10 +474,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.selection.Dragging {
 			return m, nil
 		}
-		// The wheel always scrolls the chat scrollback. The multi-line prompt is
-		// navigated with the up/down arrow keys (the textarea has no clean way to
-		// scroll its view without moving the cursor or overscrolling into blank
-		// padding rows).
+		mouse := msg.Mouse()
+		if m.mouseInPrompt(mouse) {
+			switch mouse.Button {
+			case tea.MouseWheelUp:
+				m.input.ScrollView(-promptWheelDelta)
+			case tea.MouseWheelDown:
+				m.input.ScrollView(promptWheelDelta)
+			}
+			return m, nil
+		}
 		var cmd tea.Cmd
 		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
@@ -502,6 +494,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		mouse := msg.Mouse()
 		if mouse.Button != tea.MouseLeft {
+			return m, nil
+		}
+		if m.mouseInPrompt(mouse) {
+			m.clearSelection()
+			m.input.MouseDown(mouse.X, mouse.Y-m.promptTop())
 			return m, nil
 		}
 		height := m.viewport.Height()
@@ -532,9 +529,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.editorActive || m.historyActive || m.pendingConfirm != nil {
 			m.scrollbarDragging = false
 			m.selection.Dragging = false
+			m.input.CancelDrag()
 			return m, nil
 		}
 		mouse := msg.Mouse()
+		if m.input.Dragging() {
+			m.input.MouseDrag(mouse.X, mouse.Y-m.promptTop())
+			return m, nil
+		}
 		// An active scrollbar drag is unambiguous and takes priority over text
 		// selection — otherwise a left-over selection.Dragging would swallow the
 		// motion and the bar wouldn't scroll.
@@ -560,6 +562,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseReleaseMsg:
 		mouse := msg.Mouse()
 		m.dragScrolling = false
+		if m.input.Dragging() {
+			m.input.MouseUp(mouse.X, mouse.Y-m.promptTop())
+			return m, nil
+		}
 		if m.selection.Dragging {
 			m.updateSelection(mouse, true)
 			m.selection.Dragging = false
@@ -688,6 +694,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Matches bash / python REPL / node convention.
 		keyStr := msg.String()
 		if keyStr == "ctrl+c" {
+			if m.input.HasSelection() {
+				var cmd tea.Cmd
+				m.input, cmd = m.input.Update(msg)
+				return m, cmd
+			}
 			if m.input.Value() != "" {
 				m.input.SetValue("")
 				m.ctrlCArmed = false
@@ -1296,6 +1307,30 @@ func (m *Model) relayout() {
 	m.viewport.SetWidth(contentW - 2) // reserve two right columns: a gap + the scrollbar
 	m.viewport.SetHeight(bodyH)
 	m.refreshViewport()
+}
+
+func (m Model) promptTop() int {
+	top := 2 + 0
+	if m.splashEffective() {
+		top += 9
+	}
+	top += m.viewport.Height()
+	if m.recap != "" {
+		top++
+	}
+	top++ // prompt border above the input
+	if hint := m.renderSlashSuggestions(); hint != "" && !m.editorActive {
+		top += strings.Count(hint, "\n") + 1
+	}
+	return top
+}
+
+func (m Model) mouseInPrompt(mouse tea.Mouse) bool {
+	top := m.promptTop()
+	return mouse.X >= 0 &&
+		mouse.X < m.width &&
+		mouse.Y >= top &&
+		mouse.Y < top+m.input.Height()
 }
 
 // maxInputLines caps how tall the prompt grows before it scrolls internally.

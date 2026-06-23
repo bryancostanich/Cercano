@@ -19,7 +19,7 @@ func newKeyMap() keyMap {
 		Back:       key.NewBinding(key.WithKeys("esc")),
 		ScrollKeys: key.NewBinding(key.WithKeys(
 			"pgup", "pgdown", "home", "end",
-			"ctrl+u", "ctrl+d", "ctrl+b", "ctrl+f", "shift+up", "shift+down")),
+			"ctrl+u", "ctrl+d", "ctrl+b", "ctrl+f")),
 	}
 }
 

@@ -125,14 +125,7 @@ type Model struct {
 	ctrlCArmed     bool   // first ctrl-c on empty input arms quit; any other key disarms
 	errMsg         string
 
-	editorActive bool
-	editor       configEditor
-
-	historyActive bool
-	history       historyPicker
-
-	runtimeActive bool
-	runtime       runtimeDashboard
+	content contentPage
 
 	recap string // living one-line work summary; shown in the chat footer
 
@@ -463,22 +456,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the correct dimensions on resize. Without this, the overlay keeps
 		// drawing at its construction-time width/height and the buffer
 		// fragments.
-		if m.editorActive {
-			m.editor = m.editor.setSize(m.width, m.height)
-		}
-		if m.historyActive {
-			m.history.width = m.width
-			m.history.height = m.height
-		}
-		if m.runtimeActive {
-			m.runtime = m.runtime.setSize(m.width, m.height)
+		if m.content != nil {
+			m.content.SetSize(m.width, m.height)
 		}
 		// -r boot: open the history picker on the first sized frame.
 		if m.openHistoryOnStart && m.width > 0 {
 			m.openHistoryOnStart = false
 			hp, _ := newHistoryPicker(m.agent, m.palette, m.styles, m.width, m.height, m.convID)
-			m.history = hp
-			m.historyActive = true
+			m.content = hp
 		}
 		// Force a full alt-screen redraw on resize. Without ClearScreen,
 		// rows in the terminal that were occupied at the OLD size but not
@@ -486,7 +471,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.ClearScreen
 
 	case tea.MouseWheelMsg:
-		if m.overlayActive() || m.pendingConfirm != nil {
+		if m.contentPageActive() || m.pendingConfirm != nil {
 			return m, nil
 		}
 		if m.selection.Dragging {
@@ -507,7 +492,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tea.MouseClickMsg:
-		if m.overlayActive() || m.pendingConfirm != nil {
+		if m.contentPageActive() || m.pendingConfirm != nil {
 			return m, nil
 		}
 		mouse := msg.Mouse()
@@ -544,7 +529,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMotionMsg:
-		if m.overlayActive() || m.pendingConfirm != nil {
+		if m.contentPageActive() || m.pendingConfirm != nil {
 			m.scrollbarDragging = false
 			m.selection.Dragging = false
 			m.input.CancelDrag()
@@ -602,7 +587,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.PasteMsg:
-		if m.overlayActive() || m.pendingConfirm != nil {
+		if m.contentPageActive() || m.pendingConfirm != nil {
 			return m, nil
 		}
 		m = m.preparePromptInput()
@@ -621,38 +606,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			next, cmd := m.resolveConfirmKey(msg.String())
 			return next, cmd
 		}
-		// Overlays swallow keys when active.
-		if m.editorActive {
-			next, cmd, closed := m.editor.Update(msg)
-			m.editor = next
-			if closed {
-				m.editorActive = false
-				// Refresh the header bar's model names — the editor may
-				// have just changed local-model / cloud-model / cloud-base-url.
-				return m, fetchConfigCmd(m.agent)
-			}
-			return m, cmd
+		keyStr := msg.String()
+		if keyStr == "ctrl+c" {
+			next, cmd := m.handleCtrlCKey(msg)
+			return next, cmd
 		}
-		if m.historyActive {
-			next, cmd, closed := m.history.Update(msg)
-			m.history = next
-			if closed {
-				m.historyActive = false
-			}
-			return m, cmd
+		if m.ctrlCArmed {
+			m.ctrlCArmed = false
+			m.input.Placeholder = defaultInputPlaceholder
 		}
-		if m.runtimeActive {
-			next, cmd, closed := m.runtime.Update(msg)
-			m.runtime = next
+		// Active content pages own the middle region, but global keys stay
+		// above this branch.
+		if m.content != nil {
+			pageID := m.content.ID()
+			cmd, closed := m.content.Update(msg)
 			if closed {
-				m.runtimeActive = false
+				m.content = nil
+				if pageID == contentPageConfig {
+					// Refresh the header bar's model names — the editor may
+					// have just changed local-model / cloud-model / cloud-base-url.
+					return m, fetchConfigCmd(m.agent)
+				}
 			}
 			return m, cmd
 		}
 		if isRuntimeDashboardKey(msg) {
 			dashboard, _ := newRuntimeDashboard(m.agent, m.palette, m.styles, m.width, m.height)
-			m.runtime = dashboard
-			m.runtimeActive = true
+			m.content = dashboard
 			return m, nil
 		}
 		// Esc cancels an in-flight prompt execution.
@@ -723,33 +703,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refreshViewport()
 				return m, nil
 			}
-		}
-		// Ctrl-C semantics: clear the input first; if input was already
-		// empty, arm a quit-on-next-Ctrl-C state. Any other key disarms.
-		// Matches bash / python REPL / node convention.
-		keyStr := msg.String()
-		if keyStr == "ctrl+c" {
-			if m.input.HasSelection() {
-				var cmd tea.Cmd
-				m.input, cmd = m.input.Update(msg)
-				return m, cmd
-			}
-			if m.input.Value() != "" {
-				m.input.SetValue("")
-				m.ctrlCArmed = false
-				m.input.Placeholder = defaultInputPlaceholder
-				return m, nil
-			}
-			if m.ctrlCArmed {
-				return m, tea.Quit
-			}
-			m.ctrlCArmed = true
-			m.input.Placeholder = armedInputPlaceholder
-			return m, nil
-		}
-		if m.ctrlCArmed {
-			m.ctrlCArmed = false
-			m.input.Placeholder = defaultInputPlaceholder
 		}
 		// Tab completion for slash commands.
 		if keyStr == "tab" {
@@ -822,8 +775,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case runtimeDashboardActionMsg:
-		if m.runtimeActive {
-			m.runtime = m.runtime.applyActionMsg(msg)
+		if dashboard, ok := m.content.(*runtimeDashboard); ok {
+			dashboard.applyActionMsg(msg)
 		}
 		return m, nil
 
@@ -1063,16 +1016,13 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 	case slash.ResultOpenConfigEditor:
 		ed, _ := newConfigEditor(m.agent, m.palette, m.styles, m.width, m.height)
-		m.editor = ed
-		m.editorActive = true
+		m.content = ed
 	case slash.ResultOpenHistoryPicker:
 		hp, _ := newHistoryPicker(m.agent, m.palette, m.styles, m.width, m.height, m.convID)
-		m.history = hp
-		m.historyActive = true
+		m.content = hp
 	case slash.ResultOpenRuntimeDashboard:
 		dashboard, _ := newRuntimeDashboard(m.agent, m.palette, m.styles, m.width, m.height)
-		m.runtime = dashboard
-		m.runtimeActive = true
+		m.content = dashboard
 	case slash.ResultResumeConversation:
 		// /resume <id> path — slash already validated against the agent.
 		m = m.applyResume(res.Text)
@@ -1339,7 +1289,7 @@ func (m *Model) relayout() {
 	// Viewport's first screen row = header (1) + divider (1) + splash height.
 	m.scrollbarTop = 2 + splashH
 	suggestH := 0
-	if m.viewport.Width() > 0 && !m.overlayActive() {
+	if m.viewport.Width() > 0 && !m.contentPageActive() {
 		// Width may not yet match contentW on the first paint; the
 		// suggestion uses m.width which we've just updated above.
 		if hint := m.renderSlashSuggestions(); hint != "" {
@@ -1359,8 +1309,31 @@ func (m *Model) relayout() {
 	m.refreshViewport()
 }
 
-func (m Model) overlayActive() bool {
-	return m.editorActive || m.historyActive || m.runtimeActive
+func (m Model) contentPageActive() bool {
+	return m.content != nil
+}
+
+// handleCtrlCKey owns the app-wide Ctrl+C contract for every content page:
+// clear selected/composed prompt text first, arm quit on the first empty
+// Ctrl+C, and quit only on the second consecutive empty Ctrl+C.
+func (m Model) handleCtrlCKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	if m.input.HasSelection() {
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+	}
+	if m.input.Value() != "" {
+		m.input.SetValue("")
+		m.ctrlCArmed = false
+		m.input.Placeholder = defaultInputPlaceholder
+		return m, nil
+	}
+	if m.ctrlCArmed {
+		return m, tea.Quit
+	}
+	m.ctrlCArmed = true
+	m.input.Placeholder = armedInputPlaceholder
+	return m, nil
 }
 
 func (m Model) promptTop() int {
@@ -1373,7 +1346,7 @@ func (m Model) promptTop() int {
 		top++
 	}
 	top++ // prompt border above the input
-	if hint := m.renderSlashSuggestions(); hint != "" && !m.overlayActive() {
+	if hint := m.renderSlashSuggestions(); hint != "" && !m.contentPageActive() {
 		top += strings.Count(hint, "\n") + 1
 	}
 	return top
@@ -1963,12 +1936,8 @@ func (m Model) View() tea.View {
 	}
 
 	switch {
-	case m.editorActive:
-		parts = append(parts, m.editor.View())
-	case m.historyActive:
-		parts = append(parts, m.history.View())
-	case m.runtimeActive:
-		parts = append(parts, m.runtime.View())
+	case m.content != nil:
+		parts = append(parts, m.content.View())
 	default:
 		parts = append(parts, m.renderViewportWithScrollbar())
 		if m.recap != "" {
@@ -1977,20 +1946,26 @@ func (m Model) View() tea.View {
 	}
 
 	promptLine := lipgloss.NewStyle().Foreground(m.promptBorderColor).Render(strings.Repeat("─", m.width))
-	parts = append(parts, promptLine)
-	if hint := m.renderSlashSuggestions(); hint != "" && !m.overlayActive() {
-		parts = append(parts, hint)
+	promptParts := []string{promptLine}
+	if hint := m.renderSlashSuggestions(); hint != "" && !m.contentPageActive() {
+		promptParts = append(promptParts, hint)
 	}
-	inputIdx := len(parts)
-	parts = append(parts, m.input.View())
-	parts = append(parts, promptLine)
-	parts = append(parts, m.renderStatus())
+	inputIdx := len(parts) + len(promptParts)
+	promptParts = append(promptParts, m.input.View())
+	promptParts = append(promptParts, promptLine)
+	promptParts = append(promptParts, m.renderStatus())
 
-	out := strings.Join(parts, "\n")
+	spareRows := m.height - countLines(parts) - countLines(promptParts)
+	for range spareRows {
+		parts = append(parts, "")
+		inputIdx++
+	}
+	parts = append(parts, promptParts...)
 
 	// Alt-screen safety: pad to exactly m.height lines so resize-to-smaller
 	// frames clear the trailing rows the previous larger frame occupied.
-	rendered := strings.Count(out, "\n") + 1
+	out := strings.Join(parts, "\n")
+	rendered := countLines(parts)
 	if rendered < m.height {
 		out += strings.Repeat("\n", m.height-rendered)
 	}
@@ -2009,7 +1984,7 @@ func (m Model) View() tea.View {
 	v.MouseMode = tea.MouseModeCellMotion
 	// Drive the real terminal cursor to the input caret position. Only
 	// when the chat input owns focus (no overlay, no pending confirm).
-	if !m.overlayActive() && m.pendingConfirm == nil {
+	if !m.contentPageActive() && m.pendingConfirm == nil {
 		if c := m.input.Cursor(); c != nil {
 			c.Y += inputCursorRow(parts, inputIdx)
 			v.Cursor = c

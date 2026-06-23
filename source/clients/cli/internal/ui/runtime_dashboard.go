@@ -2,12 +2,16 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"cercano/source/clients/cli/internal/overlay"
 	"cercano/source/clients/cli/internal/theme"
@@ -24,16 +28,29 @@ const (
 	maxDashboardModels    = 12
 	maxDashboardInstances = 8
 	maxDashboardLogs      = 10
+	maxCatalogRows        = 6
+)
+
+type runtimeDashboardFocus int
+
+const (
+	runtimeFocusCatalog runtimeDashboardFocus = iota
+	runtimeFocusActions
 )
 
 // runtimeDashboard wraps overlay.RowList with runtime status rows and
 // start/stop/restart actions backed by the Cercano server.
 type runtimeDashboard struct {
-	width, height int
-	palette       theme.Palette
-	styles        theme.Styles
-	agent         *agentclient.Client
-	list          overlay.RowList
+	width, height  int
+	palette        theme.Palette
+	styles         theme.Styles
+	agent          *agentclient.Client
+	snapshot       runtimeDashboardSnapshot
+	list           overlay.RowList
+	focus          runtimeDashboardFocus
+	catalogSearch  textinput.Model
+	catalogCursor  int
+	catalogMessage string
 }
 
 type runtimeDashboardSnapshot struct {
@@ -54,7 +71,22 @@ type runtimeDashboardActionMsg struct {
 	Status string
 }
 
-func newRuntimeDashboard(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h int) (runtimeDashboard, tea.Cmd) {
+func newRuntimeDashboard(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h int) (*runtimeDashboard, tea.Cmd) {
+	search := textinput.New()
+	search.Prompt = ""
+	search.Placeholder = "Search catalog models"
+	search.CharLimit = 0
+	search.SetWidth(32)
+	blinkCmd := search.Focus()
+	dashboard := &runtimeDashboard{
+		palette:       p,
+		styles:        s,
+		agent:         ag,
+		width:         w,
+		height:        h,
+		focus:         runtimeFocusCatalog,
+		catalogSearch: search,
+	}
 	hooks := overlay.Hooks{
 		OnSelect: func(row overlay.Row) (string, bool, tea.Cmd) {
 			action, err := parseRuntimeDashboardAction(row.Key)
@@ -64,41 +96,122 @@ func newRuntimeDashboard(ag *agentclient.Client, p theme.Palette, s theme.Styles
 			return runtimeDashboardPendingStatus(action), false, runtimeDashboardActionCmd(ag, action)
 		},
 		OnReload: func() []overlay.Row {
-			return buildRuntimeRows(ag)
+			dashboard.snapshot = loadRuntimeDashboardSnapshot(ag)
+			return runtimeActionRowsFromSnapshot(dashboard.snapshot)
 		},
 	}
-	list := overlay.New("model runtime dashboard", buildRuntimeRows(ag), hooks)
-	list.SetStatus("enter action rows; esc closes")
-	return runtimeDashboard{
-		palette: p,
-		styles:  s,
-		agent:   ag,
-		width:   w,
-		height:  h,
-		list:    list,
-	}, nil
+	dashboard.snapshot = loadRuntimeDashboardSnapshot(ag)
+	list := overlay.New("models and processes", runtimeActionRowsFromSnapshot(dashboard.snapshot), hooks)
+	list.SetStatus("tab focus; enter action rows; esc closes")
+	dashboard.list = list
+	return dashboard, blinkCmd
 }
 
-func (d runtimeDashboard) Update(msg tea.KeyPressMsg) (runtimeDashboard, tea.Cmd, bool) {
-	next, cmd, closed := d.list.Update(msg, d.styles)
-	d.list = next
-	return d, cmd, closed
+func (d *runtimeDashboard) ID() contentPageID {
+	return contentPageModels
 }
 
-func (d runtimeDashboard) View() string {
-	return d.list.View(d.width, d.palette, d.styles)
-}
-
-func (d runtimeDashboard) setSize(w, h int) runtimeDashboard {
+func (d *runtimeDashboard) SetSize(w, h int) {
 	d.width = w
 	d.height = h
-	return d
 }
 
-func (d runtimeDashboard) applyActionMsg(msg runtimeDashboardActionMsg) runtimeDashboard {
+func (d *runtimeDashboard) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	switch msg.String() {
+	case "tab":
+		d.toggleFocus()
+		return nil, false
+	}
+	if d.focus == runtimeFocusCatalog {
+		return d.updateCatalog(msg)
+	}
+	next, cmd, closed := d.list.Update(msg, d.styles)
+	d.list = next
+	return cmd, closed
+}
+
+func (d *runtimeDashboard) View() string {
+	configBlock := d.renderConfigBlocks()
+	listBlock := d.list.ViewPanel(dashboardPanelWidth(d.width), d.palette, d.styles)
+	contentH := dashboardContentHeight(d.height)
+	catalogRows := d.catalogRowsForHeight(contentH, countLines([]string{configBlock, listBlock}))
+	catalogBlock := d.renderCatalogBlock(catalogRows)
+	parts := []string{
+		configBlock,
+		catalogBlock,
+		listBlock,
+	}
+	logRows := contentH - countLines(parts)
+	parts = append(parts, d.renderLocalServerLogBlock(logRows))
+	return fitBlockHeight(strings.Join(parts, "\n"), contentH)
+}
+
+func (d *runtimeDashboard) applyActionMsg(msg runtimeDashboardActionMsg) {
 	d.list.Reload()
 	d.list.SetStatus(msg.Status)
-	return d
+}
+
+func (d *runtimeDashboard) toggleFocus() {
+	if d.focus == runtimeFocusCatalog {
+		d.focus = runtimeFocusActions
+		d.catalogSearch.Blur()
+		d.catalogMessage = ""
+		d.list.SetStatus("tab search; enter action rows; esc closes")
+		return
+	}
+	d.focus = runtimeFocusCatalog
+	_ = d.catalogSearch.Focus()
+	d.list.SetStatus("tab actions")
+}
+
+func (d *runtimeDashboard) updateCatalog(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	switch msg.String() {
+	case "esc", "q":
+		if d.catalogSearch.Value() != "" {
+			d.catalogSearch.SetValue("")
+			d.catalogCursor = 0
+			d.catalogMessage = "filter cleared"
+			return nil, false
+		}
+		return nil, true
+	case "up":
+		if d.catalogCursor > 0 {
+			d.catalogCursor--
+		}
+		return nil, false
+	case "down":
+		models := filteredCatalogModels(runtimeStatusModels(d.snapshot.Status), d.catalogSearch.Value())
+		if d.catalogCursor < len(models)-1 {
+			d.catalogCursor++
+		}
+		return nil, false
+	case "home":
+		d.catalogCursor = 0
+		return nil, false
+	case "end":
+		models := filteredCatalogModels(runtimeStatusModels(d.snapshot.Status), d.catalogSearch.Value())
+		if len(models) > 0 {
+			d.catalogCursor = len(models) - 1
+		}
+		return nil, false
+	case "enter":
+		models := filteredCatalogModels(runtimeStatusModels(d.snapshot.Status), d.catalogSearch.Value())
+		if len(models) == 0 {
+			d.catalogMessage = "no model selected"
+			return nil, false
+		}
+		selected := models[clampIndex(d.catalogCursor, len(models))]
+		d.catalogMessage = "download action coming next for " + shortModelName(firstNonEmpty(selected.DisplayName, selected.ID))
+		return nil, false
+	}
+	prev := d.catalogSearch.Value()
+	var cmd tea.Cmd
+	d.catalogSearch, cmd = d.catalogSearch.Update(msg)
+	if d.catalogSearch.Value() != prev {
+		d.catalogCursor = 0
+		d.catalogMessage = ""
+	}
+	return cmd, false
 }
 
 func buildRuntimeRows(ag *agentclient.Client) []overlay.Row {
@@ -110,6 +223,12 @@ func buildRuntimeRows(ag *agentclient.Client) []overlay.Row {
 
 func loadRuntimeDashboardSnapshot(ag *agentclient.Client) runtimeDashboardSnapshot {
 	var snap runtimeDashboardSnapshot
+	if ag == nil {
+		err := errors.New("agent client unavailable")
+		snap.ConfigErr = err
+		snap.StatusErr = err
+		return snap
+	}
 
 	cfgCtx, cfgCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	snap.Config, snap.ConfigErr = ag.GetConfig(cfgCtx)
@@ -151,6 +270,29 @@ func runtimeRowsFromSnapshot(s runtimeDashboardSnapshot) []overlay.Row {
 	return rows
 }
 
+func runtimeActionRowsFromSnapshot(s runtimeDashboardSnapshot) []overlay.Row {
+	rows := make([]overlay.Row, 0, 32)
+	if s.StatusErr != nil {
+		rows = append(rows, overlay.Row{
+			Label:    "runtime status",
+			Value:    s.StatusErr.Error(),
+			Hint:     "error",
+			ReadOnly: true,
+		})
+		return rows
+	}
+	status := s.Status
+	if status == nil {
+		status = &agentclient.RuntimeStatus{}
+	}
+	appendRuntimeModelRows(&rows, status.Models, status.Instances)
+	appendRuntimeInstanceRows(&rows, status.Instances)
+	if len(rows) == 0 {
+		rows = append(rows, overlay.Row{Label: "runtime", Value: "no runtime data", ReadOnly: true})
+	}
+	return rows
+}
+
 func appendRuntimeConfigRows(rows *[]overlay.Row, s runtimeDashboardSnapshot) {
 	if s.ConfigErr != nil {
 		*rows = append(*rows, overlay.Row{
@@ -179,6 +321,494 @@ func appendRuntimeConfigRows(rows *[]overlay.Row, s runtimeDashboardSnapshot) {
 			ReadOnly: true,
 		})
 	}
+}
+
+type runtimeDashboardField struct {
+	Label string
+	Value string
+	Hint  string
+}
+
+func (d *runtimeDashboard) renderConfigBlocks() string {
+	totalW := dashboardPanelWidth(d.width)
+	leftW, rightW := dashboardConfigBlockWidths(totalW)
+	return lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		renderRuntimeDashboardBlock("local config", localConfigFields(d.snapshot), leftW, d.palette, d.styles),
+		renderRuntimeDashboardBlock("cloud / external", cloudConfigFields(d.snapshot), rightW, d.palette, d.styles),
+	)
+}
+
+func (d *runtimeDashboard) renderLocalServerLogBlock(height int) string {
+	totalW := dashboardPanelWidth(d.width)
+	contentW := dashboardBlockContentWidth(totalW)
+	logs := localModelServerLogs(runtimeStatusLogs(d.snapshot.Status))
+	lines := make([]string, 0, maxDashboardLogs)
+	if len(logs) == 0 {
+		lines = append(lines, d.styles.Dim.Render("no local model server logs yet"))
+	} else {
+		start := 0
+		if len(logs) > maxDashboardLogs {
+			start = len(logs) - maxDashboardLogs
+		}
+		for _, entry := range logs[start:] {
+			lines = append(lines, renderRuntimeLogLine(entry, contentW, d.styles))
+		}
+	}
+	return renderRuntimeDashboardTextBlock("local model server log", lines, totalW, height, d.palette, d.styles)
+}
+
+func (d *runtimeDashboard) renderCatalogBlock(rowLimit int) string {
+	if rowLimit < 1 {
+		rowLimit = 1
+	}
+	if rowLimit > maxCatalogRows {
+		rowLimit = maxCatalogRows
+	}
+	totalW := dashboardPanelWidth(d.width)
+	contentW := dashboardBlockContentWidth(totalW)
+	models := filteredCatalogModels(runtimeStatusModels(d.snapshot.Status), d.catalogSearch.Value())
+	if len(models) > 0 {
+		d.catalogCursor = clampIndex(d.catalogCursor, len(models))
+	} else {
+		d.catalogCursor = 0
+	}
+
+	listW := contentW / 2
+	if listW < 34 {
+		listW = 34
+	}
+	if listW > contentW-28 {
+		listW = contentW - 28
+	}
+	detailW := contentW - listW - 3
+	if detailW < 20 {
+		detailW = 20
+	}
+
+	queryLabel := d.styles.Muted.Render("filter ")
+	if d.focus == runtimeFocusCatalog {
+		queryLabel = d.styles.Bright.Render("filter ")
+	}
+	d.catalogSearch.SetWidth(maxInt(8, contentW-lipgloss.Width(queryLabel)-2))
+	searchLine := queryLabel + d.styles.Primary.Render(d.catalogSearch.View())
+	if d.catalogMessage != "" {
+		remaining := contentW - lipgloss.Width(searchLine) - 2
+		if remaining > 8 {
+			searchLine += d.styles.BorderDim.Render("  " + truncatePlain(d.catalogMessage, remaining))
+		}
+	}
+
+	selected := agentclient.RuntimeModel{}
+	if len(models) > 0 {
+		selected = models[d.catalogCursor]
+	}
+	details := catalogDetailLines(selected, detailW, d.styles)
+
+	lines := []string{searchLine}
+	for i := 0; i < rowLimit; i++ {
+		left := ""
+		if i < len(models) {
+			absolute := i
+			left = d.renderCatalogModelRow(models[i], absolute == d.catalogCursor, listW)
+		} else if i == 0 && len(models) == 0 {
+			left = d.styles.Dim.Render(catalogEmptyMessage(runtimeStatusModels(d.snapshot.Status), d.catalogSearch.Value()))
+		}
+		right := ""
+		if i < len(details) {
+			right = details[i]
+		}
+		lines = append(lines,
+			padRightStyled(left, listW)+
+				d.styles.BorderDim.Render(" │ ")+
+				padRightStyled(right, detailW),
+		)
+	}
+	if len(models) > rowLimit && d.catalogMessage == "" {
+		remaining := contentW - lipgloss.Width(searchLine) - 2
+		if remaining > 10 {
+			lines[0] = searchLine + d.styles.BorderDim.Render(fmt.Sprintf("  %d more", len(models)-rowLimit))
+		}
+	}
+	return renderRuntimeDashboardTextBlock("download catalog", lines, totalW, 0, d.palette, d.styles)
+}
+
+func (d *runtimeDashboard) renderCatalogModelRow(model agentclient.RuntimeModel, selected bool, width int) string {
+	marker := "  "
+	nameStyle := d.styles.Primary
+	if selected {
+		marker = d.styles.Accent.Render("▶ ")
+		nameStyle = d.styles.Bright
+	}
+	name := firstNonEmpty(model.DisplayName, shortModelName(model.ID), model.ID, "unknown")
+	metadata := strings.Join(nonEmptyParts(model.Family, model.Quantization, formatBytes(model.SizeBytes), model.DownloadState), " · ")
+	row := marker + nameStyle.Render(name)
+	if metadata != "" {
+		row += d.styles.BorderDim.Render("  " + metadata)
+	}
+	if lipgloss.Width(row) > width {
+		row = ansi.Truncate(row, width, "")
+	}
+	return row
+}
+
+func renderRuntimeDashboardBlock(title string, fields []runtimeDashboardField, totalW int, palette theme.Palette, styles theme.Styles) string {
+	contentW := dashboardBlockContentWidth(totalW)
+	if len(fields) == 0 {
+		fields = []runtimeDashboardField{{Label: "status", Value: "unavailable"}}
+	}
+	labelW := 0
+	for _, field := range fields {
+		if w := lipgloss.Width(field.Label); w > labelW {
+			labelW = w
+		}
+	}
+	if labelW > 14 {
+		labelW = 14
+	}
+	valueW := contentW - labelW - 2
+	if valueW < 8 {
+		valueW = 8
+	}
+	lines := make([]string, 0, len(fields)+1)
+	lines = append(lines, styles.Accent.Render(title))
+	for _, field := range fields {
+		label := padRightPlain(truncatePlain(field.Label, labelW), labelW)
+		value := field.Value
+		if strings.TrimSpace(value) == "" {
+			value = "(unset)"
+		}
+		value = truncatePlain(value, valueW)
+		line := styles.Muted.Render(label) + styles.BorderDim.Render("  ")
+		if value == "(unset)" {
+			line += styles.Dim.Render(value)
+		} else {
+			line += styles.Primary.Render(value)
+		}
+		if field.Hint != "" && lipgloss.Width(line) < contentW {
+			remaining := contentW - lipgloss.Width(line) - 2
+			if remaining > 4 {
+				line += styles.BorderDim.Render("  " + truncatePlain(field.Hint, remaining))
+			}
+		}
+		lines = append(lines, line)
+	}
+	return renderRuntimeDashboardTextBlock("", lines, totalW, 0, palette, styles)
+}
+
+func renderRuntimeDashboardTextBlock(title string, lines []string, totalW, height int, palette theme.Palette, styles theme.Styles) string {
+	contentW := dashboardBlockContentWidth(totalW)
+	if title != "" {
+		lines = append([]string{styles.Accent.Render(title)}, lines...)
+	}
+	minHeight := len(lines) + 2 // content lines plus border.
+	if height < minHeight {
+		height = minHeight
+	}
+	for len(lines) < height-2 {
+		lines = append(lines, "")
+	}
+	for i, line := range lines {
+		if lipgloss.Width(line) > contentW {
+			lines[i] = ansi.Truncate(line, contentW, "")
+		}
+	}
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(palette.BorderDim).
+		Padding(0, 1).
+		Width(totalW).
+		Render(strings.Join(lines, "\n"))
+}
+
+func localConfigFields(s runtimeDashboardSnapshot) []runtimeDashboardField {
+	if s.ConfigErr != nil {
+		return []runtimeDashboardField{{Label: "config", Value: s.ConfigErr.Error(), Hint: "error"}}
+	}
+	cfg := s.Config
+	if cfg == nil {
+		return []runtimeDashboardField{{Label: "config", Value: "unavailable"}}
+	}
+	return []runtimeDashboardField{
+		{Label: "runtime", Value: firstNonEmpty(cfg.LocalRuntime, "ollama")},
+		{Label: "chat model", Value: cfg.LocalModel},
+		{Label: "embedding", Value: cfg.EmbeddingModel},
+		{Label: "ollama URL", Value: cfg.OllamaURL},
+		{Label: "llama-server", Value: localServerSummary(s.Status, cfg.LocalRuntime)},
+	}
+}
+
+func cloudConfigFields(s runtimeDashboardSnapshot) []runtimeDashboardField {
+	if s.ConfigErr != nil {
+		return []runtimeDashboardField{{Label: "config", Value: s.ConfigErr.Error(), Hint: "error"}}
+	}
+	cfg := s.Config
+	if cfg == nil {
+		return []runtimeDashboardField{{Label: "config", Value: "unavailable"}}
+	}
+	keyState := "missing"
+	if cfg.CloudAPIKeySet {
+		keyState = "configured"
+	}
+	endpointValue, endpointHint := externalEndpointSummary(runtimeStatusEndpoints(s.Status))
+	return []runtimeDashboardField{
+		{Label: "provider", Value: cfg.CloudProvider},
+		{Label: "model", Value: cfg.CloudModel},
+		{Label: "base URL", Value: cfg.CloudBaseURL},
+		{Label: "API key", Value: keyState, Hint: cfg.CloudState},
+		{Label: "endpoints", Value: endpointValue, Hint: endpointHint},
+	}
+}
+
+func localServerSummary(status *agentclient.RuntimeStatus, configuredRuntime string) string {
+	if status == nil {
+		return "status unavailable"
+	}
+	runtimeName := firstNonEmpty(configuredRuntime, "llama_server")
+	var running []string
+	for _, instance := range status.Instances {
+		if instance.Runtime != "llama_server" && instance.Runtime != runtimeName {
+			continue
+		}
+		parts := nonEmptyParts(instance.State, shortModelName(instance.ModelID))
+		if instance.PID > 0 {
+			parts = append(parts, fmt.Sprintf("pid:%d", instance.PID))
+		}
+		if instance.Endpoint != "" {
+			parts = append(parts, instance.Endpoint)
+		}
+		running = append(running, strings.Join(parts, " | "))
+	}
+	if len(running) == 0 {
+		return "not running"
+	}
+	return strings.Join(running, "; ")
+}
+
+func externalEndpointSummary(endpoints []agentclient.RuntimeEndpoint) (string, string) {
+	var external []agentclient.RuntimeEndpoint
+	for _, endpoint := range endpoints {
+		if isExternalEndpoint(endpoint) {
+			external = append(external, endpoint)
+		}
+	}
+	if len(external) == 0 {
+		return "none configured", ""
+	}
+	first := external[0]
+	value := countLabel(len(external), "endpoint")
+	hint := strings.Join(nonEmptyParts(firstNonEmpty(first.DisplayName, first.ID), first.State, first.Scope), " | ")
+	if len(external) > 1 {
+		hint += fmt.Sprintf(" | +%d", len(external)-1)
+	}
+	return value, hint
+}
+
+func isExternalEndpoint(endpoint agentclient.RuntimeEndpoint) bool {
+	id := strings.ToLower(endpoint.ID)
+	scope := strings.ToLower(endpoint.Scope)
+	kind := strings.ToLower(endpoint.Kind)
+	if scope == "local" {
+		return false
+	}
+	return strings.HasPrefix(id, "cloud:") ||
+		scope == "cloud" ||
+		scope == "remote" ||
+		scope == "lan" ||
+		kind == "cloud" ||
+		strings.Contains(kind, "openai") ||
+		strings.Contains(kind, "anthropic") ||
+		strings.Contains(kind, "google")
+}
+
+func runtimeStatusEndpoints(status *agentclient.RuntimeStatus) []agentclient.RuntimeEndpoint {
+	if status == nil {
+		return nil
+	}
+	return status.Endpoints
+}
+
+func runtimeStatusLogs(status *agentclient.RuntimeStatus) []agentclient.RuntimeLogEntry {
+	if status == nil {
+		return nil
+	}
+	return status.Logs
+}
+
+func runtimeStatusModels(status *agentclient.RuntimeStatus) []agentclient.RuntimeModel {
+	if status == nil {
+		return nil
+	}
+	return status.Models
+}
+
+func filteredCatalogModels(models []agentclient.RuntimeModel, query string) []agentclient.RuntimeModel {
+	query = strings.ToLower(strings.TrimSpace(query))
+	out := make([]agentclient.RuntimeModel, 0, len(models))
+	for _, model := range models {
+		if !isCatalogDownloadModel(model) {
+			continue
+		}
+		if query == "" || catalogModelMatches(model, query) {
+			out = append(out, model)
+		}
+	}
+	return out
+}
+
+func isCatalogDownloadModel(model agentclient.RuntimeModel) bool {
+	source := strings.ToLower(model.Source)
+	state := strings.ToLower(model.DownloadState)
+	if source == "catalog" || source == "recommended" {
+		return true
+	}
+	switch state {
+	case "not_downloaded", "downloading", "failed":
+		return true
+	default:
+		return false
+	}
+}
+
+func catalogModelMatches(model agentclient.RuntimeModel, query string) bool {
+	haystack := strings.ToLower(strings.Join(nonEmptyParts(
+		model.ID,
+		model.DisplayName,
+		model.Runtime,
+		model.Source,
+		model.Format,
+		model.Family,
+		model.Quantization,
+		model.DownloadState,
+		model.RuntimeState,
+	), " "))
+	return strings.Contains(haystack, query)
+}
+
+func catalogEmptyMessage(allModels []agentclient.RuntimeModel, query string) string {
+	hasCatalog := false
+	for _, model := range allModels {
+		if isCatalogDownloadModel(model) {
+			hasCatalog = true
+			break
+		}
+	}
+	if !hasCatalog {
+		return "catalog models will appear here"
+	}
+	if strings.TrimSpace(query) != "" {
+		return "no catalog models match"
+	}
+	return "no catalog models available"
+}
+
+func catalogDetailLines(model agentclient.RuntimeModel, width int, styles theme.Styles) []string {
+	if model.ID == "" {
+		return []string{
+			styles.Dim.Render("Select a catalog model to see details."),
+		}
+	}
+	caps := runtimeCapabilitiesHint(model.SupportsChat, model.SupportsEmbed, model.SupportsTools)
+	lines := []string{
+		detailLine("name", firstNonEmpty(model.DisplayName, shortModelName(model.ID)), width, styles),
+		detailLine("family", strings.Join(nonEmptyParts(model.Family, model.Quantization), " · "), width, styles),
+		detailLine("size", formatBytes(model.SizeBytes), width, styles),
+		detailLine("runtime", strings.Join(nonEmptyParts(model.Runtime, model.Source), " · "), width, styles),
+		detailLine("state", strings.Join(nonEmptyParts(model.DownloadState, model.RuntimeState), " · "), width, styles),
+		detailLine("supports", caps, width, styles),
+	}
+	idLine := detailLine("id", model.ID, width, styles)
+	if idLine != "" {
+		lines = append(lines, idLine)
+	}
+	return lines
+}
+
+func detailLine(label, value string, width int, styles theme.Styles) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		value = "(unknown)"
+	}
+	line := styles.Muted.Render(label+": ") + styles.Primary.Render(value)
+	if lipgloss.Width(line) > width {
+		line = ansi.Truncate(line, width, "")
+	}
+	return line
+}
+
+func localModelServerLogs(logs []agentclient.RuntimeLogEntry) []agentclient.RuntimeLogEntry {
+	out := make([]agentclient.RuntimeLogEntry, 0, len(logs))
+	for _, entry := range logs {
+		source := strings.ToLower(entry.Source)
+		runtimeID := strings.ToLower(entry.RuntimeID)
+		if strings.Contains(source, "llama") || strings.Contains(runtimeID, "llama") {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+func renderRuntimeLogLine(entry agentclient.RuntimeLogEntry, width int, styles theme.Styles) string {
+	stamp := "--:--:--"
+	if !entry.Timestamp.IsZero() {
+		stamp = entry.Timestamp.Format("15:04:05")
+	}
+	level := strings.ToUpper(firstNonEmpty(entry.Level, "info"))
+	model := shortModelName(entry.ModelID)
+	prefix := strings.Join(nonEmptyParts(stamp, "["+level+"]", model), " ")
+	message := strings.TrimSpace(entry.Message)
+	if message == "" {
+		message = "(empty log line)"
+	}
+	line := styles.Muted.Render(prefix) + styles.BorderDim.Render("  ") + styles.Primary.Render(message)
+	if lipgloss.Width(line) > width {
+		return ansi.Truncate(line, width, "")
+	}
+	return line
+}
+
+func dashboardPanelWidth(width int) int {
+	totalW := width - 2
+	if totalW < 40 {
+		totalW = 40
+	}
+	return totalW
+}
+
+func dashboardContentHeight(height int) int {
+	// Root chrome around content pages is: top bar, divider, prompt top rule,
+	// one-line prompt, prompt bottom rule, and status bar.
+	contentH := height - 6
+	if contentH < 1 {
+		return 1
+	}
+	return contentH
+}
+
+func (d *runtimeDashboard) catalogRowsForHeight(contentHeight, fixedWithoutCatalog int) int {
+	const minLogBlockHeight = 4
+	// Catalog block height = title + search line + N rows + border.
+	rows := contentHeight - fixedWithoutCatalog - minLogBlockHeight - 4
+	if rows < 1 {
+		return 1
+	}
+	if rows > maxCatalogRows {
+		return maxCatalogRows
+	}
+	return rows
+}
+
+func dashboardConfigBlockWidths(totalW int) (int, int) {
+	leftW := totalW / 2
+	return leftW, totalW - leftW
+}
+
+func dashboardBlockContentWidth(totalW int) int {
+	contentW := totalW - 4
+	if contentW < 12 {
+		contentW = 12
+	}
+	return contentW
 }
 
 func appendRuntimeEndpointRows(rows *[]overlay.Row, endpoints []agentclient.RuntimeEndpoint) {
@@ -587,6 +1217,65 @@ func shortID(id string) string {
 		return id
 	}
 	return id[:12]
+}
+
+func clampIndex(idx, length int) int {
+	if length <= 0 {
+		return 0
+	}
+	if idx < 0 {
+		return 0
+	}
+	if idx >= length {
+		return length - 1
+	}
+	return idx
+}
+
+func fitBlockHeight(value string, maxLines int) string {
+	if maxLines <= 0 {
+		return ""
+	}
+	lines := strings.Split(value, "\n")
+	if len(lines) <= maxLines {
+		return value
+	}
+	return strings.Join(lines[:maxLines], "\n")
+}
+
+func padRightPlain(value string, width int) string {
+	pad := width - lipgloss.Width(value)
+	if pad <= 0 {
+		return value
+	}
+	return value + strings.Repeat(" ", pad)
+}
+
+func padRightStyled(value string, width int) string {
+	pad := width - lipgloss.Width(value)
+	if pad <= 0 {
+		return value
+	}
+	return value + strings.Repeat(" ", pad)
+}
+
+func truncatePlain(value string, max int) string {
+	value = strings.TrimSpace(value)
+	if max <= 0 || lipgloss.Width(value) <= max {
+		return value
+	}
+	if max <= 3 {
+		runes := []rune(value)
+		if len(runes) <= max {
+			return value
+		}
+		return string(runes[:max])
+	}
+	runes := []rune(value)
+	if len(runes) <= max {
+		return value
+	}
+	return string(runes[:max-3]) + "..."
 }
 
 func shorten(value string, max int) string {

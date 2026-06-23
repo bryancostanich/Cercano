@@ -7,9 +7,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"cercano/source/server/pkg/agentclient"
 	"cercano/source/clients/cli/internal/overlay"
 	"cercano/source/clients/cli/internal/theme"
+	"cercano/source/server/pkg/agentclient"
 )
 
 // resumeRequestedMsg is fired by the history picker when the user selects a
@@ -32,7 +32,7 @@ type historyPicker struct {
 	list          overlay.RowList
 }
 
-func newHistoryPicker(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h int, currentID string) (historyPicker, tea.Cmd) {
+func newHistoryPicker(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h int, currentID string) (*historyPicker, tea.Cmd) {
 	rows := buildHistoryRows(ag, currentID)
 	hooks := overlay.Hooks{
 		OnSelect: func(row overlay.Row) (string, bool, tea.Cmd) {
@@ -44,7 +44,7 @@ func newHistoryPicker(ag *agentclient.Client, p theme.Palette, s theme.Styles, w
 			}
 		},
 	}
-	return historyPicker{
+	return &historyPicker{
 		palette:   p,
 		styles:    s,
 		agent:     ag,
@@ -55,13 +55,22 @@ func newHistoryPicker(ag *agentclient.Client, p theme.Palette, s theme.Styles, w
 	}, nil
 }
 
-func (h historyPicker) Update(msg tea.KeyPressMsg) (historyPicker, tea.Cmd, bool) {
-	next, cmd, closed := h.list.Update(msg, h.styles)
-	h.list = next
-	return h, cmd, closed
+func (h *historyPicker) ID() contentPageID {
+	return contentPageHistory
 }
 
-func (h historyPicker) View() string {
+func (h *historyPicker) SetSize(w, hgt int) {
+	h.width = w
+	h.height = hgt
+}
+
+func (h *historyPicker) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	next, cmd, closed := h.list.Update(msg, h.styles)
+	h.list = next
+	return cmd, closed
+}
+
+func (h *historyPicker) View() string {
 	return h.list.View(h.width, h.palette, h.styles)
 }
 

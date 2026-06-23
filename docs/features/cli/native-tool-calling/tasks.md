@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go 1.24+, `github.com/anthropics/anthropic-sdk-go` v1.51+, `github.com/ollama/ollama/api` (official), existing protobuf/gRPC, existing `modernc.org/sqlite`. Drops `github.com/tmc/langchaingo` from the cloud path (kept available, not used).
 
-**Reference spec:** `docs/plans/native_tool_calling.md`
+**Reference spec:** `docs/features/cli/native-tool-calling/design.md`
 
 ---
 
@@ -3504,10 +3504,10 @@ git commit -m "feat(cli/slash): /tool W/X-tier requires bypass mode (direct invo
 
 ---
 
-### Task 32: Edit docs/plans/cli.md to remove embedding-based tool selection
+### Task 32: Edit docs/features/cli/README.md to remove embedding-based tool selection
 
 **Files:**
-- Modify: `docs/plans/cli.md`
+- Modify: `docs/features/cli/README.md`
 
 - [ ] **Step 1: Remove the line**
 
@@ -3518,35 +3518,35 @@ Find the sentence "tool selection for ambiguous intent (embedding similarity ove
 Append to the relevant section:
 
 ```markdown
-> Tool selection is now handled by native tool calling — the model emits structured tool_use blocks via the provider's tool-calling channel. See `docs/plans/native_tool_calling.md`.
+> Tool selection is now handled by native tool calling — the model emits structured tool_use blocks via the provider's tool-calling channel. See `docs/features/cli/native-tool-calling/design.md`.
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add docs/plans/cli.md
+git add docs/features/cli/README.md
 git commit -m "docs(plans/cli): remove embedding-based tool selection; native tool calling supersedes it"
 ```
 
 ---
 
-### Task 33: Mark docs/plans/dispatch.md as superseded
+### Task 33: Mark docs/archive/dispatch.md as superseded
 
 **Files:**
-- Modify: `docs/plans/dispatch.md`
+- Modify: `docs/archive/dispatch.md`
 
 - [ ] **Step 1: Update status line**
 
 Replace the existing status note with:
 
 ```markdown
-> Status: **Superseded** by `docs/plans/native_tool_calling.md` for V1. The native-tool-calling design covers both Anthropic and Ollama uniformly and includes the confirm-gating UI dispatch.md deferred. The host-LLM cancellation, conversation_id continuity, and MCP progress-event goals can move to a follow-up if still wanted.
+> Status: **Superseded** by `docs/features/cli/native-tool-calling/design.md` for V1. The native-tool-calling design covers both Anthropic and Ollama uniformly and includes the confirm-gating UI dispatch.md deferred. The host-LLM cancellation, conversation_id continuity, and MCP progress-event goals can move to a follow-up if still wanted.
 ```
 
 - [ ] **Step 2: Commit**
 
 ```bash
-git add docs/plans/dispatch.md
+git add docs/archive/dispatch.md
 git commit -m "docs(plans/dispatch): mark superseded by native_tool_calling.md"
 ```
 
@@ -3643,7 +3643,7 @@ git commit -m "test(agent): integration — full tool-call turn through anthropi
 ### Task 35: Update the implementation plan's status
 
 **Files:**
-- Modify: `docs/plans/native_tool_calling.md`
+- Modify: `docs/features/cli/native-tool-calling/design.md`
 
 - [ ] **Step 1: Update the Status section**
 
@@ -3668,7 +3668,7 @@ Design approved. Implementation complete:
 - [ ] **Step 2: Commit**
 
 ```bash
-git add docs/plans/native_tool_calling.md
+git add docs/features/cli/native-tool-calling/design.md
 git commit -m "docs(plans/native_tool_calling): mark implementation complete"
 ```
 

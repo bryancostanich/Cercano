@@ -111,7 +111,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	// actually reach a cloud. Otherwise return a sentinel that auto-degrades
 	// to local at turn time with a visible scrollback notice. No silent mock.
 	//
-	// Dual-path note (native tool calling migration; see docs/plans/native_tool_calling.md):
+	// Dual-path note (native tool calling migration; see docs/features/cli/native-tool-calling/design.md):
 	//   - Anthropic cloud: StreamProcessRequest uses the new layered provider
 	//     wired below via srv.SetCloudLLMProvider (internal/llm/anthropic).
 	//     The legacymodels.NewCloudModelProvider built here remains as the

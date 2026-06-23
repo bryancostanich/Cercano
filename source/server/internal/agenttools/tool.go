@@ -4,7 +4,7 @@
 // CODE VALIDATORS — those are a different concept (validate AI-generated
 // code; this package is "let the agent do things").
 //
-// Design choices (per conductor/tracks/cli/spec.md §8.5):
+// Design choices (per docs/features/cli/README.md, "Design principles"):
 //
 //   - Permission tiers R / W / X drive the CLI's confirm-prompt UI. R-tier
 //     read-only tools run silently; W-tier ask before applying; X-tier

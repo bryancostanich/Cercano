@@ -103,7 +103,7 @@ Cercano can run as a standalone gRPC server (for IDE clients) or embedded inside
     - `zed/`: Zed extension (Rust).
 - `source/proto/`: Protocol Buffer definitions for gRPC.
 - `test/`: Integration and sandbox tests.
-- `conductor/`: Product definitions, tech stack, and project planning documents.
+- `docs/`: Product definitions, feature specs, plans, and project documentation.
 
 ## Tech Stack
 
@@ -439,7 +439,7 @@ No configuration is needed — fallback is automatic whenever a remote URL is se
 
 ## Development
 
-Cercano is in active development. For detailed information on the project's goals and technical decisions, refer to the documents in the `conductor/` directory.
+Cercano is in active development. For detailed information on the project's goals and technical decisions, refer to the documents in the `docs/` directory.
 
 ### Building
 
@@ -453,11 +453,11 @@ make test   # Run all tests
 
 ### New Features
 
-* **[Competitive Audit — Agent Features Landscape](conductor/tracks/competitive_audit_20260318/plan.md)** - Feature matrix across 12+ open-source and commercial agents (Codex, Aider, Continue, Cody, OpenHands, SWE-Agent, Claude Code, Cursor, Windsurf, GitHub Copilot, JetBrains AI, Amazon Q) to inform Cercano's tool design and roadmap.
-* **[Semantic Codebase Search](conductor/tracks/semantic_search_20260318/plan.md)** - Embedding-based code search by intent ("find auth-related code"), not just string matching. Requires indexing pipeline, storage, and nearest-neighbor retrieval.
-* **[User-Friendly Distribution](conductor/tracks/distribution_20260317/plan.md)** - Setup/launch scripts, Docker containerization, and CI/CD pipeline with GitHub Actions for automated cross-platform releases.
-* **[AI Engine Agnosticism](conductor/tracks/engine_agnosticism_20260317/plan.md)** - Abstract the local inference layer to support pluggable backends (ONNX Runtime, Enso, etc.) beyond Ollama.
-* **[Web Research Tool](conductor/tracks/web_research_20260325/plan.md)** - Fetch URLs, search the web via DuckDuckGo, and use local models to analyze and distill results. Keeps raw web content out of the cloud context window.
+* **[Competitive Audit — Agent Features Landscape](docs/research/competitive-audit.md)** - Feature matrix across 12+ open-source and commercial agents (Codex, Aider, Continue, Cody, OpenHands, SWE-Agent, Claude Code, Cursor, Windsurf, GitHub Copilot, JetBrains AI, Amazon Q) to inform Cercano's tool design and roadmap.
+* **[Semantic Codebase Search](docs/features/semantic-search/plan.md)** - Embedding-based code search by intent ("find auth-related code"), not just string matching. Requires indexing pipeline, storage, and nearest-neighbor retrieval.
+* **[User-Friendly Distribution](docs/features/distribution/spec.md)** - Setup/launch scripts, Docker containerization, and CI/CD pipeline with GitHub Actions for automated cross-platform releases.
+* **[AI Engine Agnosticism](docs/features/engine/agnosticism.md)** - Abstract the local inference layer to support pluggable backends (ONNX Runtime, Enso, etc.) beyond Ollama.
+* **[Web Research Tool](docs/features/web-research/spec.md)** - Fetch URLs, search the web via DuckDuckGo, and use local models to analyze and distill results. Keeps raw web content out of the cloud context window.
 * **Stand-alone CLI** - Create a stand alone Command Line Interface (CLI) for cercano that doesn't really on other CLI integrations.
 * **PDF Parsing** - Extract text from local and remote PDFs for use with summarize, extract, explain, and research tools.
 * **Documentation Site Indexing** - Crawl a documentation site once, index it persistently, and make it searchable across sessions (similar to Cursor's @Docs).

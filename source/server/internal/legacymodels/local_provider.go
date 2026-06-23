@@ -28,6 +28,16 @@ func (p *LocalModelProvider) SetModelName(name string) {
 	p.ModelName = name
 }
 
+// SetEngine updates the local inference backend at runtime.
+func (p *LocalModelProvider) SetEngine(eng engine.InferenceEngine, modelName string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.Engine = eng
+	if modelName != "" {
+		p.ModelName = modelName
+	}
+}
+
 func (p *LocalModelProvider) Name() string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

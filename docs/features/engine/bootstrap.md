@@ -2,7 +2,7 @@
 
 ## Overview
 
-`cercano setup` detects whether an AI engine backend is available and, if none is found, offers to install one — with Ollama recommended as the simplest path. Previously setup assumed Ollama was already installed and running, printing an error and exiting otherwise, which left new users to figure out Ollama installation themselves. This feature adds a guided first-run experience: a new initial setup step performs engine detection, prompts the user (interactively or via flag), installs Ollama using a platform-appropriate method, starts it, and verifies it is responsive before continuing with the existing model-pull, config, hook, and venv steps. The messaging is engine-agnostic ("No AI engine backend was detected") since Cercano's architecture supports pluggable backends; Ollama is just the recommended default today.
+`cercano setup` detects whether an AI engine backend is available and, if none is found, offers to install one — with Ollama recommended as the simplest active inference path. Previously setup assumed Ollama was already installed and running, printing an error and exiting otherwise, which left new users to figure out Ollama installation themselves. This feature adds a guided first-run experience: a new initial setup step performs engine detection, prompts the user (interactively or via flag), installs Ollama using a platform-appropriate method, starts it, and verifies it is responsive before continuing with the model-pull, config, hook, and venv steps. Setup pulls the selected chat model and configured embedding model, and also prepares the optional managed `llama-server` runtime used by embedded inference. The messaging is engine-agnostic ("No AI engine backend was detected") since Cercano's architecture supports pluggable backends; Ollama is just the recommended default today.
 
 ## Design / Architecture
 
@@ -18,6 +18,8 @@ The logic lives in `cmd/cercano/main.go` and integrates into the existing `runSe
 
 **Integration.** Engine detection becomes the new first step; step numbering shifted from [1/5] to [1/6] with subsequent steps renumbered. When the engine is already present, setup prints which engine and URL ("OK: Ollama is running at http://localhost:11434") and proceeds exactly as before with no behavior change. After a successful install + start, setup continues into the existing model-pull and config steps.
 
+**Managed runtime setup.** Setup now also prepares `llama-server` from `llama.cpp`: it creates the configured GGUF model directories, detects or installs `llama-server` through Homebrew when available, enables `llama_server.enabled` when the binary exists, and records a default GGUF model when exactly one configured model is found. This does not change `local_runtime` away from `ollama`; the managed sidecar is available for runtime inventory, dashboard, and explicit start/stop flows.
+
 ## Key behaviors / capabilities
 
 - Detects a missing engine backend and offers guided installation.
@@ -25,6 +27,8 @@ The logic lives in `cmd/cercano/main.go` and integrates into the existing `runSe
 - `--install-engine` flag installs without prompting (scripted/CI use).
 - Platform-aware install: macOS via Homebrew (download-URL fallback), Linux via Ollama installer script.
 - Auto-starts Ollama post-install and polls up to 10s for responsiveness.
+- Automatically pulls the configured embedding model (`nomic-embed-text` by default) when Ollama is available.
+- Prepares optional managed `llama-server` runtime and `~/.cercano/models`.
 - Non-TTY stdin prints guidance instead of hanging on a prompt.
 - Engine-agnostic messaging; existing already-running flow unchanged.
 
@@ -32,7 +36,7 @@ The logic lives in `cmd/cercano/main.go` and integrates into the existing `runSe
 
 - Detection is engine-agnostic by design (`engineCheckFunc`), though only Ollama is wired today.
 - Ollama remains a Homebrew caveat, not a hard dependency.
-- Out of scope: installing engines other than Ollama, Windows support, and automatic selection when multiple engines are present.
+- Out of scope: replacing Ollama as the default active inference engine, Windows runtime automation, and automatic selection when multiple GGUF models are present.
 
 ## Remaining / not-yet-done
 

@@ -73,6 +73,26 @@ func promptInstallEngine(out io.Writer, in io.Reader, autoInstall bool) bool {
 	return true // default yes on EOF
 }
 
+// promptInstallLlamaServer displays the managed runtime install prompt.
+func promptInstallLlamaServer(out io.Writer, in io.Reader, autoInstall bool) bool {
+	if autoInstall {
+		return true
+	}
+	fmt.Fprintln(out, "  Managed llama-server runtime is not installed.")
+	fmt.Fprintln(out, "  Cercano can install llama.cpp and supervise llama-server as an isolated local runtime.")
+	fmt.Fprintln(out)
+	if in == nil {
+		fmt.Fprintln(out, "  Install llama.cpp so `llama-server` is available, then re-run 'cercano setup'.")
+		return false
+	}
+	fmt.Fprint(out, "  Install llama-server runtime now? [Y/n]: ")
+	scanner := bufio.NewScanner(in)
+	if scanner.Scan() {
+		return parseYesNo(scanner.Text())
+	}
+	return true
+}
+
 // ollamaInstallCommand returns the command and args to install Ollama on the given platform.
 // Returns empty command if installation cannot be automated.
 func ollamaInstallCommand(goos string, hasHomebrew bool) (string, []string) {
@@ -84,6 +104,20 @@ func ollamaInstallCommand(goos string, hasHomebrew bool) (string, []string) {
 		return "", nil
 	case "linux":
 		return "sh", []string{"-c", "curl -fsSL https://ollama.com/install.sh | sh"}
+	default:
+		return "", nil
+	}
+}
+
+// llamaServerInstallCommand returns the command and args to install llama.cpp,
+// which provides the llama-server binary. Homebrew supports macOS and Linux.
+func llamaServerInstallCommand(goos string, hasHomebrew bool) (string, []string) {
+	switch goos {
+	case "darwin", "linux":
+		if hasHomebrew {
+			return "brew", []string{"install", "llama.cpp"}
+		}
+		return "", nil
 	default:
 		return "", nil
 	}
@@ -131,6 +165,26 @@ func installOllama(goos string, hasBrew bool) error {
 	}
 
 	fmt.Fprintln(os.Stderr, "  OK: Ollama installed.")
+	return nil
+}
+
+// installLlamaServerRuntime installs llama.cpp, which provides llama-server.
+func installLlamaServerRuntime(goos string, hasBrew bool) error {
+	cmd, args := llamaServerInstallCommand(goos, hasBrew)
+	if cmd == "" {
+		return fmt.Errorf("automatic llama-server installation is not available on this platform. Install llama.cpp manually so `llama-server` is on PATH")
+	}
+	fmt.Fprintln(os.Stderr, "  Installing llama.cpp runtime...")
+	proc := exec.Command(cmd, args...)
+	proc.Stdout = os.Stdout
+	proc.Stderr = os.Stderr
+	if err := proc.Run(); err != nil {
+		return fmt.Errorf("llama.cpp installation failed: %w", err)
+	}
+	if _, err := exec.LookPath("llama-server"); err != nil {
+		return fmt.Errorf("llama.cpp installed, but llama-server was not found on PATH")
+	}
+	fmt.Fprintln(os.Stderr, "  OK: llama-server runtime installed.")
 	return nil
 }
 

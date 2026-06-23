@@ -89,6 +89,35 @@ func TestPromptInstall_Declined(t *testing.T) {
 	}
 }
 
+func TestPromptInstallLlamaServer_AutoYes(t *testing.T) {
+	var buf bytes.Buffer
+	result := promptInstallLlamaServer(&buf, nil, true)
+	if !result {
+		t.Error("expected true when --install-engine is set")
+	}
+}
+
+func TestPromptInstallLlamaServer_Interactive(t *testing.T) {
+	var outBuf bytes.Buffer
+	inBuf := strings.NewReader("y\n")
+	result := promptInstallLlamaServer(&outBuf, inBuf, false)
+	if !result {
+		t.Error("expected true when user answers 'y'")
+	}
+	if !strings.Contains(outBuf.String(), "Managed llama-server runtime is not installed") {
+		t.Error("expected llama-server messaging in output")
+	}
+}
+
+func TestPromptInstallLlamaServer_Declined(t *testing.T) {
+	var outBuf bytes.Buffer
+	inBuf := strings.NewReader("n\n")
+	result := promptInstallLlamaServer(&outBuf, inBuf, false)
+	if result {
+		t.Error("expected false when user answers 'n'")
+	}
+}
+
 func TestInstallCommand_Darwin(t *testing.T) {
 	cmd, args := ollamaInstallCommand("darwin", true)
 	if cmd != "brew" {
@@ -120,6 +149,33 @@ func TestInstallCommand_Unsupported(t *testing.T) {
 	cmd, _ := ollamaInstallCommand("windows", false)
 	if cmd != "" {
 		t.Errorf("expected empty command for unsupported platform, got %q", cmd)
+	}
+}
+
+func TestLlamaServerInstallCommand_Darwin(t *testing.T) {
+	cmd, args := llamaServerInstallCommand("darwin", true)
+	if cmd != "brew" {
+		t.Errorf("expected 'brew' on darwin with homebrew, got %q", cmd)
+	}
+	if len(args) < 2 || args[0] != "install" || args[1] != "llama.cpp" {
+		t.Errorf("expected ['install', 'llama.cpp'], got %v", args)
+	}
+}
+
+func TestLlamaServerInstallCommand_LinuxWithBrew(t *testing.T) {
+	cmd, args := llamaServerInstallCommand("linux", true)
+	if cmd != "brew" {
+		t.Errorf("expected 'brew' on linux with homebrew, got %q", cmd)
+	}
+	if len(args) < 2 || args[0] != "install" || args[1] != "llama.cpp" {
+		t.Errorf("expected ['install', 'llama.cpp'], got %v", args)
+	}
+}
+
+func TestLlamaServerInstallCommand_NoBrew(t *testing.T) {
+	cmd, _ := llamaServerInstallCommand("darwin", false)
+	if cmd != "" {
+		t.Errorf("expected empty command when no homebrew is available, got %q", cmd)
 	}
 }
 

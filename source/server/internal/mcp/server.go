@@ -43,14 +43,14 @@ func formatGRPCError(err error, operation string) error {
 type Server struct {
 	mcpServer       *gomcp.Server
 	grpcClient      proto.AgentClient
-	startupErr      string // non-empty when the server started in degraded mode
+	startupErr      string               // non-empty when the server started in degraded mode
 	collector       *telemetry.Collector // optional; nil disables telemetry
-	ctxLoader       *projectctx.Loader  // project context loader
-	updateVersion   string // latest available version, empty if up to date
-	updateCommand   string // upgrade command to show the user
-	updateNudgeSent bool   // true after the first tool response nudge
-	dispatchLoop    *dispatch.Loop  // optional; nil disables cercano_dispatch
-	dispatchStore   *dispatch.Store // history persistence for dispatch
+	ctxLoader       *projectctx.Loader   // project context loader
+	updateVersion   string               // latest available version, empty if up to date
+	updateCommand   string               // upgrade command to show the user
+	updateNudgeSent bool                 // true after the first tool response nudge
+	dispatchLoop    *dispatch.Loop       // optional; nil disables cercano_dispatch
+	dispatchStore   *dispatch.Store      // history persistence for dispatch
 }
 
 // SetDispatch wires the cercano_dispatch tool's loop + history store.
@@ -267,7 +267,6 @@ func (s *Server) withContext(projectDir, prompt string) string {
 // nudgeMessage is appended to tool responses when the project hasn't been initialized.
 const nudgeMessage = "\n\n---\n*Note: Cercano hasn't been initialized for this project. Running `cercano_init` with the project directory will enable project-aware responses. Recommended if you'll use Cercano more than once in this session.*"
 
-
 // maybeNudge appends an init recommendation to the result if the project isn't initialized,
 // and an update nudge on the first tool response if an update is available.
 func (s *Server) maybeNudge(projectDir string, result *gomcp.CallToolResult) *gomcp.CallToolResult {
@@ -321,6 +320,7 @@ type LocalRequest struct {
 // ConfigRequest is the input schema for the cercano_config tool.
 type ConfigRequest struct {
 	Action        string `json:"action" jsonschema:"get (list available Ollama models) or set (change configuration)"`
+	LocalRuntime  string `json:"local_runtime,omitempty" jsonschema:"Local runtime to use for generation (ollama or llama_server)"`
 	LocalModel    string `json:"local_model,omitempty" jsonschema:"Local model name to set (use action 'get' to see available models)"`
 	CloudProvider string `json:"cloud_provider,omitempty" jsonschema:"Cloud provider to set (google or anthropic)"`
 	CloudModel    string `json:"cloud_model,omitempty" jsonschema:"Cloud model to set"`
@@ -623,7 +623,7 @@ func (s *Server) handleConfig(ctx context.Context, request *gomcp.CallToolReques
 		}
 
 		var output strings.Builder
-		output.WriteString("Available local models (from Ollama):\n\n")
+		output.WriteString("Available local models (from active local runtime):\n\n")
 		if len(modelsResp.Models) == 0 {
 			output.WriteString("  (no models installed)\n")
 		}
@@ -645,6 +645,7 @@ func (s *Server) handleConfig(ctx context.Context, request *gomcp.CallToolReques
 
 	case "set":
 		resp, err := s.grpcClient.UpdateConfig(ctx, &proto.UpdateConfigRequest{
+			LocalRuntime:  args.LocalRuntime,
 			LocalModel:    args.LocalModel,
 			CloudProvider: args.CloudProvider,
 			CloudModel:    args.CloudModel,

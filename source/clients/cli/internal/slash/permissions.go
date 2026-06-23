@@ -1,7 +1,7 @@
 package slash
 
 import (
-	"cercano/source/server/internal/cli/agentclient"
+	"cercano/source/server/pkg/agentclient"
 )
 
 // RegisterPermissions wires /strict, /permissive, /bypass, and /mode. The

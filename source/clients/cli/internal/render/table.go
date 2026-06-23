@@ -10,7 +10,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"cercano/source/server/internal/cli/theme"
+	"cercano/source/clients/cli/internal/theme"
 )
 
 // Column declares one table column. Wrappable marks the column whose cells may

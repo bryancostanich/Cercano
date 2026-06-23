@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"cercano/source/server/internal/config"
+	"cercano/source/server/pkg/config"
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/document"

@@ -30,8 +30,8 @@ source/server/internal/llm/ollama/stream.go      # NDJSON → StreamEvent
 source/server/internal/agent/toolloop.go          # Bounded autonomous loop
 source/server/internal/agent/permissions.go      # PermissionMode + gate decision
 source/server/internal/agenttools/catalog.go     # BuildToolCatalog(registry)
-source/server/internal/cli/ui/scrollback_tool.go # Folded tool-call entry
-source/server/internal/cli/slash/permissions.go  # /strict /permissive /bypass
+source/clients/cli/internal/ui/scrollback_tool.go # Folded tool-call entry
+source/clients/cli/internal/slash/permissions.go  # /strict /permissive /bypass
 ```
 
 **Modified files:**
@@ -41,9 +41,9 @@ source/proto/agent.proto                          # new RPCs, new stream events,
 source/server/internal/conversation/schema.sql   # ALTER turns ADD content_json
 source/server/internal/conversation/store.go     # Append + GetTurns + BlocksJSON
 source/server/internal/agent/agent.go             # Wire toolloop into ProcessRequest path
-source/server/internal/cli/agentclient/client.go # new RPCs
-source/server/internal/cli/ui/model.go           # PermissionRequired event handling
-source/server/internal/cli/slash/registry.go     # register permission commands
+source/clients/cli/internal/agentclient/client.go # new RPCs
+source/clients/cli/internal/ui/model.go           # PermissionRequired event handling
+source/clients/cli/internal/slash/registry.go     # register permission commands
 ```
 
 **Test files (paired with each implementation file):**
@@ -59,8 +59,8 @@ source/server/internal/llm/ollama/stream_test.go
 source/server/internal/agent/toolloop_test.go
 source/server/internal/agent/permissions_test.go
 source/server/internal/agenttools/catalog_test.go
-source/server/internal/cli/ui/scrollback_tool_test.go
-source/server/internal/cli/slash/permissions_test.go
+source/clients/cli/internal/ui/scrollback_tool_test.go
+source/clients/cli/internal/slash/permissions_test.go
 ```
 
 ---
@@ -2936,7 +2936,7 @@ git commit -m "feat(agent): tool loop emits events; wire into StreamProcessReque
 ### Task 25: agentclient — wrappers for new RPCs
 
 **Files:**
-- Modify: `source/server/internal/cli/agentclient/client.go`
+- Modify: `source/clients/cli/internal/agentclient/client.go`
 
 - [ ] **Step 1: Add wrappers**
 
@@ -2994,7 +2994,7 @@ Expected: success.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add source/server/internal/cli/agentclient/client.go
+git add source/clients/cli/internal/agentclient/client.go
 git commit -m "feat(cli/agentclient): wrappers for permission + tool-call RPCs"
 ```
 
@@ -3003,9 +3003,9 @@ git commit -m "feat(cli/agentclient): wrappers for permission + tool-call RPCs"
 ### Task 26: Slash commands /strict /permissive /bypass /mode
 
 **Files:**
-- Create: `source/server/internal/cli/slash/permissions.go`
-- Create: `source/server/internal/cli/slash/permissions_test.go`
-- Modify: `source/server/internal/cli/slash/registry.go` (register commands)
+- Create: `source/clients/cli/internal/slash/permissions.go`
+- Create: `source/clients/cli/internal/slash/permissions_test.go`
+- Modify: `source/clients/cli/internal/slash/registry.go` (register commands)
 
 - [ ] **Step 1: Write failing test**
 
@@ -3061,13 +3061,13 @@ type Result struct {
 
 - [ ] **Step 3: Implement commands**
 
-`source/server/internal/cli/slash/permissions.go`:
+`source/clients/cli/internal/slash/permissions.go`:
 
 ```go
 package slash
 
 import (
-	"cercano/source/server/internal/cli/agentclient"
+	"cercano/source/clients/cli/internal/agentclient"
 )
 
 func RegisterPermissions(r *Registry, _ *agentclient.Client) {
@@ -3109,7 +3109,7 @@ Run: `cd source/server && go test ./internal/cli/slash/ -v`
 Expected: PASS.
 
 ```bash
-git add source/server/internal/cli/slash/permissions.go source/server/internal/cli/slash/permissions_test.go source/server/internal/cli/slash/registry.go
+git add source/clients/cli/internal/slash/permissions.go source/clients/cli/internal/slash/permissions_test.go source/clients/cli/internal/slash/registry.go
 git commit -m "feat(cli/slash): /strict /permissive /bypass /mode commands"
 ```
 
@@ -3118,7 +3118,7 @@ git commit -m "feat(cli/slash): /strict /permissive /bypass /mode commands"
 ### Task 27: UI model — handle ResultSetPermissionMode → RPC + status indicator
 
 **Files:**
-- Modify: `source/server/internal/cli/ui/model.go`
+- Modify: `source/clients/cli/internal/ui/model.go`
 
 - [ ] **Step 1: Handle the new ResultKind**
 
@@ -3169,7 +3169,7 @@ Manually launch `cercano`, run `/strict`, `/permissive`, `/bypass`. Verify the c
 - [ ] **Step 5: Commit**
 
 ```bash
-git add source/server/internal/cli/ui/model.go
+git add source/clients/cli/internal/ui/model.go
 git commit -m "feat(cli/ui): permission mode chip in status bar + RPC dispatch"
 ```
 
@@ -3178,8 +3178,8 @@ git commit -m "feat(cli/ui): permission mode chip in status bar + RPC dispatch"
 ### Task 28: Handle PermissionRequired streaming event → confirm UI → AllowToolCall/DenyToolCall RPC
 
 **Files:**
-- Modify: `source/server/internal/cli/ui/model.go`
-- Modify: `source/server/internal/cli/ui/confirm_test.go`
+- Modify: `source/clients/cli/internal/ui/model.go`
+- Modify: `source/clients/cli/internal/ui/confirm_test.go`
 
 - [ ] **Step 1: Add a streaming event case**
 
@@ -3257,7 +3257,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add source/server/internal/cli/ui/
+git add source/clients/cli/internal/ui/
 git commit -m "feat(cli/ui): handle PermissionRequired events; reply via AllowToolCall/DenyToolCall RPC"
 ```
 
@@ -3266,9 +3266,9 @@ git commit -m "feat(cli/ui): handle PermissionRequired events; reply via AllowTo
 ### Task 29: Folded scrollback tool-call entries with expand/collapse
 
 **Files:**
-- Create: `source/server/internal/cli/ui/scrollback_tool.go`
-- Create: `source/server/internal/cli/ui/scrollback_tool_test.go`
-- Modify: `source/server/internal/cli/ui/model.go`
+- Create: `source/clients/cli/internal/ui/scrollback_tool.go`
+- Create: `source/clients/cli/internal/ui/scrollback_tool_test.go`
+- Modify: `source/clients/cli/internal/ui/model.go`
 
 - [ ] **Step 1: Write failing test**
 
@@ -3329,7 +3329,7 @@ func TestToolEntry_InProgress(t *testing.T) {
 
 - [ ] **Step 2: Implement**
 
-`source/server/internal/cli/ui/scrollback_tool.go`:
+`source/clients/cli/internal/ui/scrollback_tool.go`:
 
 ```go
 package ui
@@ -3416,7 +3416,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add source/server/internal/cli/ui/scrollback_tool.go source/server/internal/cli/ui/scrollback_tool_test.go source/server/internal/cli/ui/model.go
+git add source/clients/cli/internal/ui/scrollback_tool.go source/clients/cli/internal/ui/scrollback_tool_test.go source/clients/cli/internal/ui/model.go
 git commit -m "feat(cli/ui): folded tool-call scrollback entries; expand/collapse stub"
 ```
 
@@ -3469,8 +3469,8 @@ git commit -m "refactor(agent): cloud path uses new anthropic adapter instead of
 ### Task 31: Update /tool slash command to flow through agent gate
 
 **Files:**
-- Modify: `source/server/internal/cli/slash/tools.go`
-- Modify: `source/server/internal/cli/ui/model.go`
+- Modify: `source/clients/cli/internal/slash/tools.go`
+- Modify: `source/clients/cli/internal/ui/model.go`
 
 - [ ] **Step 1: Route /tool through gRPC InvokeTool but gate via PermissionRequired**
 
@@ -3498,7 +3498,7 @@ help: "Invoke a tool directly: /tool <name> <json-args>. R-tier runs silently; W
 - [ ] **Step 2: Update existing tests + commit**
 
 ```bash
-git add source/server/internal/cli/slash/tools.go
+git add source/clients/cli/internal/slash/tools.go
 git commit -m "feat(cli/slash): /tool W/X-tier requires bypass mode (direct invoke can't stream confirm)"
 ```
 

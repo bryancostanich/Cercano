@@ -22,9 +22,6 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
-	"cercano/source/server/internal/cli/agentclient"
-	cliui "cercano/source/server/internal/cli/ui"
-	"cercano/source/server/internal/config"
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
@@ -40,10 +37,9 @@ import (
 	"cercano/source/server/internal/server"
 	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/internal/tools"
-	"cercano/source/server/internal/update"
+	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
-
-	tea "charm.land/bubbletea/v2"
+	"cercano/source/server/pkg/update"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/adk/session"
@@ -308,10 +304,6 @@ func main() {
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	showStats := flag.Bool("stats", false, "Print usage statistics and exit")
 	forceServer := flag.Bool("server", false, "Force server mode (equivalent to `cercano agent`)")
-	forceCLI := flag.Bool("cli", false, "Force CLI mode even when stdin is not a terminal")
-	resumeOnStart := flag.Bool("r", false, "Open the conversation history picker on launch (alias for --resume)")
-	resumeLong := flag.Bool("resume", false, "Open the conversation history picker on launch")
-	mdtest := flag.Bool("mdtest", false, "Launch the TUI with a markdown doc pre-loaded for render testing (optional file path as a positional arg; built-in sample if omitted)")
 	flag.Parse()
 
 	if *showVersion {
@@ -333,74 +325,25 @@ func main() {
 		return
 	}
 
-	// Load config (server + CLI both need it).
+	// Load config for server/MCP mode.
 	cfg, err := config.Load(config.DefaultPath())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[WARN] Failed to load config: %v (using defaults)\n", err)
 		cfg = config.Defaults()
 	}
 
-	openHistory := *resumeOnStart || *resumeLong
+	// This binary IS the cercano agent server. The terminal UI lives in the
+	// separate `cercano-cli` binary (source/clients/cli), which dials this
+	// server over gRPC and auto-launches `cercano agent` if none is running.
+	// The agent server is a singleton; bare `cercano`, `cercano agent`, and
+	// `cercano --server` all run it in the foreground.
 	switch {
-	case *mdtest:
-		// Render-testing mode: launch the TUI with a markdown doc pre-loaded.
-		// No model round-trip — the doc renders through the normal viewport path.
-		runCLI(cfg, false, loadMdTestDoc(flag.Arg(0)))
 	case *mcpMode:
 		runMCPMode(cfg, *grpcAddr)
 	case *forceServer:
 		runServerMode(cfg)
-	case *forceCLI:
-		runCLI(cfg, openHistory, "")
-	case isInteractiveStdin():
-		// Real terminal invocation → the user wants the CLI.
-		runCLI(cfg, openHistory, "")
 	default:
-		// Spawned by another process (VS Code extension, MCP host wrapper,
-		// systemd, etc.) → run the gRPC server in the foreground so the
-		// parent process gets what it expects.
 		runServerMode(cfg)
-	}
-}
-
-// isInteractiveStdin reports whether stdin is connected to a character device,
-// i.e. a real terminal. Returns false for pipes, files, sockets, and the
-// no-TTY contexts that VS Code's extension host, MCP stdio hosts, and CI
-// runners use to spawn child processes. Forces CLI mode → server mode when
-// nothing's there to drive a TUI.
-func isInteractiveStdin() bool {
-	info, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return (info.Mode() & os.ModeCharDevice) != 0
-}
-
-// runCLI launches the cercano TUI. Connects to a running agent on
-// localhost:<cfg.Port>, or auto-launches one (as `cercano agent`) on miss.
-// openHistoryOnStart opens the /history picker immediately after first paint
-// (used by the -r / --resume flag).
-func runCLI(cfg config.Config, openHistoryOnStart bool, seedDoc string) {
-	addr := "localhost:" + cfg.Port
-	fmt.Fprintln(os.Stderr, "cercano: connecting to", addr+"…")
-	ag, err := agentclient.Dial(context.Background(), addr)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "cercano:", err)
-		os.Exit(1)
-	}
-	defer ag.Close()
-	if ag.AutoLaunched {
-		fmt.Fprintln(os.Stderr, "cercano: auto-launched agent server (log:", ag.ServerLog+")")
-	}
-
-	m := cliui.New(ag, openHistoryOnStart)
-	if seedDoc != "" {
-		m = m.SeedAssistantMarkdown(seedDoc)
-	}
-	p := tea.NewProgram(m)
-	if _, err := p.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "cercano:", err)
-		os.Exit(1)
 	}
 }
 

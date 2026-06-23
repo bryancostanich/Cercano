@@ -25,8 +25,8 @@
 Pure int-in/int-out helpers, fully unit-tested. No model state, no rendering.
 
 **Files:**
-- Create: `source/server/internal/cli/ui/scrollbar.go`
-- Test: `source/server/internal/cli/ui/scrollbar_test.go`
+- Create: `source/clients/cli/internal/ui/scrollbar.go`
+- Test: `source/clients/cli/internal/ui/scrollbar_test.go`
 
 **Interfaces:**
 - Produces:
@@ -36,7 +36,7 @@ Pure int-in/int-out helpers, fully unit-tested. No model state, no rendering.
 
 - [ ] **Step 1: Write the failing tests**
 
-`source/server/internal/cli/ui/scrollbar_test.go`:
+`source/clients/cli/internal/ui/scrollbar_test.go`:
 ```go
 package ui
 
@@ -107,7 +107,7 @@ Expected: FAIL — `undefined: scrollbarColumn`, `undefined: scrollbarThumb`, `u
 
 - [ ] **Step 3: Implement `scrollbar.go`**
 
-`source/server/internal/cli/ui/scrollbar.go`:
+`source/clients/cli/internal/ui/scrollbar.go`:
 ```go
 package ui
 
@@ -198,7 +198,7 @@ Expected: PASS (all five tests). Note `TestScrollbarColumnBottom`: total=40,heig
 - [ ] **Step 5: Commit**
 
 ```bash
-git add source/server/internal/cli/ui/scrollbar.go source/server/internal/cli/ui/scrollbar_test.go
+git add source/clients/cli/internal/ui/scrollbar.go source/clients/cli/internal/ui/scrollbar_test.go
 git commit -m "feat(tui): pure scrollbar geometry helpers"
 ```
 
@@ -209,7 +209,7 @@ git commit -m "feat(tui): pure scrollbar geometry helpers"
 Reserve the bar column and composite the styled bar onto the viewport block.
 
 **Files:**
-- Modify: `source/server/internal/cli/ui/model.go` (`relayout`, `View`, add a `renderViewportWithScrollbar` helper and a `scrollbarTop` field)
+- Modify: `source/clients/cli/internal/ui/model.go` (`relayout`, `View`, add a `renderViewportWithScrollbar` helper and a `scrollbarTop` field)
 
 **Interfaces:**
 - Consumes: `scrollbarColumn(total, height, yOffset int) []rune` (Task 1).
@@ -298,7 +298,7 @@ Expected: clean build; all packages PASS (no behavior tests change here — corr
 - [ ] **Step 6: Commit**
 
 ```bash
-git add source/server/internal/cli/ui/model.go
+git add source/clients/cli/internal/ui/model.go
 git commit -m "feat(tui): render vertical scrollbar on the chat viewport"
 ```
 
@@ -309,7 +309,7 @@ git commit -m "feat(tui): render vertical scrollbar on the chat viewport"
 Add drag state and three mouse cases. The drag math reuses `scrollOffsetFromClick` (already tested in Task 1); the interaction itself is verified by a human smoke test.
 
 **Files:**
-- Modify: `source/server/internal/cli/ui/model.go` (add `scrollbarDragging` field; add mouse cases to `Update`)
+- Modify: `source/clients/cli/internal/ui/model.go` (add `scrollbarDragging` field; add mouse cases to `Update`)
 
 **Interfaces:**
 - Consumes: `scrollOffsetFromClick(clickRow, top, height, total int) int` (Task 1); model field `scrollbarTop` (Task 2).
@@ -374,7 +374,7 @@ Expected: clean build, all PASS, vet clean. If `mouse.X`/`mouse.Y` don't compile
 - [ ] **Step 5: Commit**
 
 ```bash
-git add source/server/internal/cli/ui/model.go
+git add source/clients/cli/internal/ui/model.go
 git commit -m "feat(tui): click and drag the scrollbar to scroll"
 ```
 

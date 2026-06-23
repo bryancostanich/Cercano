@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"cercano/source/server/internal/cli/theme"
+	"cercano/source/clients/cli/internal/theme"
 )
 
 func TestRender_LineCountAndWidth(t *testing.T) {

@@ -7,9 +7,9 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 
-	"cercano/source/server/internal/cli/agentclient"
-	"cercano/source/server/internal/cli/render"
-	"cercano/source/server/internal/cli/theme"
+	"cercano/source/server/pkg/agentclient"
+	"cercano/source/clients/cli/internal/render"
+	"cercano/source/clients/cli/internal/theme"
 )
 
 // newStreamTestModel builds a Model wired enough to drive applyStreamMsg

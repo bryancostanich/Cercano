@@ -19,11 +19,11 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"cercano/source/server/internal/cli/agentclient"
-	"cercano/source/server/internal/cli/banner"
-	"cercano/source/server/internal/cli/render"
-	"cercano/source/server/internal/cli/slash"
-	"cercano/source/server/internal/cli/theme"
+	"cercano/source/server/pkg/agentclient"
+	"cercano/source/clients/cli/internal/banner"
+	"cercano/source/clients/cli/internal/render"
+	"cercano/source/clients/cli/internal/slash"
+	"cercano/source/clients/cli/internal/theme"
 )
 
 // Role tags a scrollback entry's origin so the renderer can style it.

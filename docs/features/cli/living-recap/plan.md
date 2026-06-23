@@ -752,7 +752,7 @@ git commit -m "feat(server): GetConversation handler + recap in list"
 ### Task 6: CLI agent client — recap fields + GetConversation
 
 **Files:**
-- Modify: `source/server/internal/cli/agentclient/client.go`
+- Modify: `source/clients/cli/internal/agentclient/client.go`
 
 **Interfaces:**
 - Produces:
@@ -810,7 +810,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add source/server/internal/cli/agentclient/client.go
+git add source/clients/cli/internal/agentclient/client.go
 git commit -m "feat(cli): agentclient GetConversation + recap fields"
 ```
 
@@ -888,7 +888,7 @@ git commit -m "feat(cli): wire living-recap generator into agent"
 ### Task 8: TUI — recap footer + turn-boundary refresh
 
 **Files:**
-- Modify: `source/server/internal/cli/ui/model.go`
+- Modify: `source/clients/cli/internal/ui/model.go`
 
 **Interfaces:**
 - Consumes: `agentclient.Client.GetConversation`.
@@ -989,7 +989,7 @@ Expected: PASS. Then run the CLI, send a message, and after the turn ends confir
 - [ ] **Step 6: Commit**
 
 ```bash
-git add source/server/internal/cli/ui/model.go
+git add source/clients/cli/internal/ui/model.go
 git commit -m "feat(cli): living recap footer with turn-boundary refresh"
 ```
 
@@ -998,8 +998,8 @@ git commit -m "feat(cli): living recap footer with turn-boundary refresh"
 ### Task 9: TUI — history picker recap + resume banner
 
 **Files:**
-- Modify: `source/server/internal/cli/ui/history_picker.go`
-- Modify: `source/server/internal/cli/ui/model.go` (`applyResume`)
+- Modify: `source/clients/cli/internal/ui/history_picker.go`
+- Modify: `source/clients/cli/internal/ui/model.go` (`applyResume`)
 
 **Interfaces:**
 - Consumes: `ConversationInfo.Recap`, `agentclient.Client.GetConversation`.
@@ -1049,7 +1049,7 @@ Expected: PASS. Run CLI, `/history`, confirm rows show the recap; select one, co
 - [ ] **Step 4: Commit**
 
 ```bash
-git add source/server/internal/cli/ui/
+git add source/clients/cli/internal/ui/
 git commit -m "feat(cli): recap in history picker + resume banner"
 ```
 

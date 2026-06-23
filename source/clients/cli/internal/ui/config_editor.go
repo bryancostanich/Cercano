@@ -6,9 +6,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"cercano/source/server/internal/cli/agentclient"
-	"cercano/source/server/internal/cli/overlay"
-	"cercano/source/server/internal/cli/theme"
+	"cercano/source/server/pkg/agentclient"
+	"cercano/source/clients/cli/internal/overlay"
+	"cercano/source/clients/cli/internal/theme"
 )
 
 // configEditor wraps overlay.RowList with the config-specific row builder

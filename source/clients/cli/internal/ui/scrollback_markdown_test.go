@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"cercano/source/server/internal/cli/render"
-	"cercano/source/server/internal/cli/theme"
+	"cercano/source/clients/cli/internal/render"
+	"cercano/source/clients/cli/internal/theme"
 )
 
 // ansiRE strips SGR escape sequences so assertions can match the visible text.

@@ -53,7 +53,7 @@ Streaming chat RPC (verify token streaming), conversation store + resume (SQLite
 
 These are intentional changes discovered/decided during implementation; the task lists below are annotated to match.
 
-- **CLI location.** The client lives in `source/server/internal/cli/` (in-tree with the agent), **not** the planned standalone `source/clients/cli/` module. Single binary; subpackages: `ui/`, `render/`, `slash/`, `theme/`, `banner/`, `overlay/`, `agentclient/`.
+- **CLI location.** Relocated to **`source/clients/cli/` as its own Go module** (`cercano/source/clients/cli`), per the original plan. This split the prior single binary into two: `cercano` (agent server / MCP, in `source/server`) and `cercano-cli` (the TUI). The CLI depends on the server module only for exported `pkg/` packages (`proto`, `agentclient`, `config`, `update`) via a `replace` directive — `agentclient`, `config`, and `update` were promoted from `internal/` to `pkg/` to cross the module boundary. Subpackages under `source/clients/cli/internal/`: `ui/`, `render/`, `slash/`, `theme/`, `banner/`, `overlay/`. The agent server is a singleton; the CLI auto-launches `cercano agent` when none is listening.
 - **LLM provider layer rewritten.** A new `internal/llm` Provider abstraction (`Provider`, `Capabilities`, `StreamEvent`, internal `Block`/`Message`/`Tool` types) with first-party **anthropic-sdk-go** and **native Ollama** adapters replaced the old langchaingo cloud path. Legacy providers moved to `internal/legacymodels`. Charm libraries ported to **v2** (`charm.land/*`).
 - **Native tool calling supersedes embedding-based dispatch.** The SmartRouter no longer picks tools via embeddings; the model emits structured `tool_use` blocks through the provider's tool-calling channel (`internal/agent/toolloop.go`, `internal/agenttools`). The old `dispatch` plan is marked superseded.
 - **Permission model is mode-based, not a bypass toggle.** Phase 16's "bypass UI" shipped as three first-class modes — **Strict / Permissive (default) / Bypass** — set once via `/strict` `/permissive` `/bypass` `/mode`, surfaced as a status-bar mode chip, enforced agent-side via `PermissionStore` + `permissions.yaml`. Per-tool R/W/X tiers still exist underneath (`agenttools` fs_read/fs_write/fs_destructive, git_read/git_write).
@@ -116,7 +116,7 @@ These are intentional changes discovered/decided during implementation; the task
 
 ### CLI client (phases 8–18)
 
-> **Location note:** the CLI client shipped in `source/server/internal/cli/` rather than the planned standalone `source/clients/cli/` module. **A move to `source/clients/cli/` is planned** (see Open Questions). Subpackages below live under `internal/cli/`.
+> **Location note:** the CLI client now lives in its own Go module at `source/clients/cli/`, with subpackages under `source/clients/cli/internal/` (`ui`, `render`, `slash`, `theme`, `banner`, `overlay`). The entrypoint is `source/clients/cli/main.go` (builds the `cercano-cli` binary).
 
 **Phase 8 — CLI scaffold + theme primitives** ✅
 - [x] Task 8.1: Module scaffold (entry in `cmd/cercano/`, `agent`/`run`/`setup` subcommands, dev launcher script)
@@ -186,7 +186,7 @@ These are intentional changes discovered/decided during implementation; the task
 - [~] Task 18.3: README + skill docs — standalone-agent README + `--mdtest` harness added; CLI skill docs pending
 - [ ] Task 18.4: Homebrew formula — install `cercano-cli` alongside `cercano`
 
-**Plan-track features still outstanding (rollup):** MCP host runtime + `/mcp` UI (6, 15); diff renderer + `/diff` / `/undo` (12.3, 14.3); font picker (17); `SwitchProject`/`GetProjectContext`/`GetUsage` RPCs (7.1); formal acceptance pass + Homebrew CLI formula (18); **relocate CLI to `source/clients/cli/`**.
+**Plan-track features still outstanding (rollup):** MCP host runtime + `/mcp` UI (6, 15); diff renderer + `/diff` / `/undo` (12.3, 14.3); font picker (17); `SwitchProject`/`GetProjectContext`/`GetUsage` RPCs (7.1); formal acceptance pass + Homebrew CLI formula (18). ✅ *CLI relocated to its own module at `source/clients/cli/`.*
 
 ### Self-review checklist (completed by plan author before handoff)
 - [x] Algorithmic > LLM enforced across dispatch / slash / font / title / classify / autodetect
@@ -203,9 +203,9 @@ Resolved during implementation:
 - Conversation title derivation — living-recap generator supplies the summary; `/rename` for manual override.
 - CLI auto-launch path — dedicated `cercano agent` subcommand (chosen).
 - Provider layer — native `internal/llm` adapters (anthropic-sdk-go + Ollama) replaced langchaingo; Charm ported to v2.
+- CLI location — relocated to its own module at `source/clients/cli/` (two binaries: `cercano` server + `cercano-cli`).
 
 Still open:
-- **Relocate the CLI from `source/server/internal/cli/` to `source/clients/cli/`** (matches the original clean-separation intent; not yet done).
 - Semantic search backing index format (may be decided by parallel `semantic_search` track).
 - Future themes (V1 ships `cracker` only).
 - Whether to add `SwitchProject`/`GetProjectContext`/`GetUsage` as first-class RPCs or fold into existing handlers.

@@ -6,7 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"cercano/source/server/internal/cli/agentclient"
+	"cercano/source/server/pkg/agentclient"
 )
 
 // Esc during an in-flight prompt cancels it: streaming stops, the context is

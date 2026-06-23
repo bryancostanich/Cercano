@@ -93,7 +93,7 @@ Implement a local prompt widget inside the CLI first, shaped like the subset of
 `textarea.Model` that `model.go` already consumes. Suggested location:
 
 ```text
-source/server/internal/cli/ui/prompt_input.go
+source/clients/cli/internal/ui/prompt_input.go
 ```
 
 The widget should not embed `textarea.Model`. It should own:
@@ -309,7 +309,7 @@ V1, restoring the exact pre-edit cursor and selection snapshot is acceptable.
 
 ## Root Model Integration
 
-In `source/server/internal/cli/ui/model.go`:
+In `source/clients/cli/internal/ui/model.go`:
 
 - replace `textarea.Model` with `promptInput`
 - preserve existing constructor styling and prompt text

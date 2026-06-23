@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"cercano/source/server/internal/cli/agentclient"
+	"cercano/source/server/pkg/agentclient"
 )
 
 // RegisterConfig wires /config and /cloud against the supplied client.

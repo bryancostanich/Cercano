@@ -97,8 +97,9 @@ Cercano can run as a standalone gRPC server (for IDE clients) or embedded inside
 
 ## Project Structure
 
-- `source/server/`: The core Go-based AI agent and gRPC server.
-- `source/clients/`: IDE-specific extensions.
+- `source/server/`: The core Go-based AI agent and gRPC server (the `cercano` binary). Exports `pkg/` (proto, agentclient, config, update) for clients.
+- `source/clients/`: Client front-ends.
+    - `cli/`: Standalone terminal client — its own Go module, builds the `cercano-cli` binary (thin gRPC client; auto-launches the singleton `cercano agent`).
     - `vscode/`: VS Code extension (TypeScript).
     - `zed/`: Zed extension (Rust).
 - `source/proto/`: Protocol Buffer definitions for gRPC.

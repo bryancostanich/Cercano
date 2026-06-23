@@ -7,8 +7,14 @@ func TestCrackerMarkdownStyle_KeyColorsSet(t *testing.T) {
 	if sc.Heading.Color == nil || *sc.Heading.Color != "#FFB84D" {
 		t.Fatalf("heading color = %v, want #FFB84D", sc.Heading.Color)
 	}
-	if sc.Code.Color == nil || *sc.Code.Color != "#00C8E8" {
-		t.Fatalf("inline code color = %v, want #00C8E8", sc.Code.Color)
+	// Inline code uses the darker desaturated teal — distinct from links and
+	// calmer than the vivid chrome cyan (see palette.go).
+	if sc.Code.Color == nil || *sc.Code.Color != bufCodeHex {
+		t.Fatalf("inline code color = %v, want %s", sc.Code.Color, bufCodeHex)
+	}
+	// Links keep the brighter muted cyan — a different named color from code.
+	if sc.Link.Color == nil || *sc.Link.Color != bufLinkHex {
+		t.Fatalf("link color = %v, want %s", sc.Link.Color, bufLinkHex)
 	}
 	if sc.Link.Underline == nil || !*sc.Link.Underline {
 		t.Fatalf("link should be underlined")

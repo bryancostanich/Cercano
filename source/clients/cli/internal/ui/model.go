@@ -1465,7 +1465,7 @@ func (m *Model) renderEntry(e *Entry, idx int) string {
 		lines := strings.Split(wrapped, "\n")
 		for i := range lines {
 			if i == 0 {
-				lines[i] = m.styles.UserPrompt.Render("▶ ") + lines[i]
+				lines[i] = m.styles.BufferUserPrompt.Render("▶ ") + lines[i]
 			} else {
 				lines[i] = pad + lines[i]
 			}
@@ -1569,7 +1569,7 @@ func codeRule(lang string, width int, styles theme.Styles) string {
 		fill = 0
 	}
 	return styles.Muted.Render("─── ") +
-		styles.Info.Render(lang) +
+		styles.BufferCode.Render(lang) +
 		styles.Muted.Render(" "+strings.Repeat("─", fill))
 }
 

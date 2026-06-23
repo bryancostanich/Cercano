@@ -19,11 +19,11 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"cercano/source/server/pkg/agentclient"
 	"cercano/source/clients/cli/internal/banner"
 	"cercano/source/clients/cli/internal/render"
 	"cercano/source/clients/cli/internal/slash"
 	"cercano/source/clients/cli/internal/theme"
+	"cercano/source/server/pkg/agentclient"
 )
 
 // Role tags a scrollback entry's origin so the renderer can style it.
@@ -129,6 +129,9 @@ type Model struct {
 	historyActive bool
 	history       historyPicker
 
+	runtimeActive bool
+	runtime       runtimeDashboard
+
 	recap string // living one-line work summary; shown in the chat footer
 
 	// convRef shares the current convID with the slash registry by reference,
@@ -231,6 +234,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	// conversation id even after /resume swaps it.
 	convRef := &struct{ id string }{}
 	slash.RegisterHistory(reg, ag, func() string { return convRef.id })
+	slash.RegisterRuntime(reg)
 
 	splash := banner.NewAnimModel(p, banner.Meta{
 		Tagline: "local-first ai coprocessor",
@@ -520,6 +524,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.history.width = m.width
 			m.history.height = m.height
 		}
+		if m.runtimeActive {
+			m.runtime = m.runtime.setSize(m.width, m.height)
+		}
 		// -r boot: open the history picker on the first sized frame.
 		if m.openHistoryOnStart && m.width > 0 {
 			m.openHistoryOnStart = false
@@ -533,7 +540,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.ClearScreen
 
 	case tea.MouseWheelMsg:
-		if m.editorActive || m.historyActive || m.pendingConfirm != nil {
+		if m.overlayActive() || m.pendingConfirm != nil {
 			return m, nil
 		}
 		if m.selection.Dragging {
@@ -554,7 +561,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tea.MouseClickMsg:
-		if m.editorActive || m.historyActive || m.pendingConfirm != nil {
+		if m.overlayActive() || m.pendingConfirm != nil {
 			return m, nil
 		}
 		mouse := msg.Mouse()
@@ -591,7 +598,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMotionMsg:
-		if m.editorActive || m.historyActive || m.pendingConfirm != nil {
+		if m.overlayActive() || m.pendingConfirm != nil {
 			m.scrollbarDragging = false
 			m.selection.Dragging = false
 			m.input.CancelDrag()
@@ -652,7 +659,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.PasteMsg:
-		if m.editorActive || m.historyActive || m.pendingConfirm != nil {
+		if m.overlayActive() || m.pendingConfirm != nil {
 			return m, nil
 		}
 		m = m.preparePromptInput()
@@ -696,6 +703,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.historyActive = false
 			}
 			return m, cmd
+		}
+		if m.runtimeActive {
+			next, cmd, closed := m.runtime.Update(msg)
+			m.runtime = next
+			if closed {
+				m.runtimeActive = false
+			}
+			return m, cmd
+		}
+		if isRuntimeDashboardKey(msg) {
+			dashboard, _ := newRuntimeDashboard(m.agent, m.palette, m.styles, m.width, m.height)
+			m.runtime = dashboard
+			m.runtimeActive = true
+			return m, nil
 		}
 		// Esc cancels an in-flight prompt execution.
 		if m.streaming && key.Matches(msg, keys.Back) {
@@ -865,6 +886,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.relayout()
 		}
 		return m, cmd
+
+	case runtimeDashboardActionMsg:
+		if m.runtimeActive {
+			m.runtime = m.runtime.applyActionMsg(msg)
+		}
+		return m, nil
 
 	case streamTickMsg:
 		// Ignore late messages from a stream we already canceled.
@@ -1108,6 +1135,10 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		hp, _ := newHistoryPicker(m.agent, m.palette, m.styles, m.width, m.height, m.convID)
 		m.history = hp
 		m.historyActive = true
+	case slash.ResultOpenRuntimeDashboard:
+		dashboard, _ := newRuntimeDashboard(m.agent, m.palette, m.styles, m.width, m.height)
+		m.runtime = dashboard
+		m.runtimeActive = true
 	case slash.ResultResumeConversation:
 		// /resume <id> path — slash already validated against the agent.
 		m = m.applyResume(res.Text)
@@ -1370,7 +1401,7 @@ func (m *Model) relayout() {
 	// Viewport's first screen row = header (1) + divider (1) + splash height.
 	m.scrollbarTop = 2 + splashH
 	suggestH := 0
-	if m.viewport.Width() > 0 && !m.editorActive {
+	if m.viewport.Width() > 0 && !m.overlayActive() {
 		// Width may not yet match contentW on the first paint; the
 		// suggestion uses m.width which we've just updated above.
 		if hint := m.renderSlashSuggestions(); hint != "" {
@@ -1390,6 +1421,10 @@ func (m *Model) relayout() {
 	m.refreshViewport()
 }
 
+func (m Model) overlayActive() bool {
+	return m.editorActive || m.historyActive || m.runtimeActive
+}
+
 func (m Model) promptTop() int {
 	top := 2 + 0
 	if m.splashEffective() {
@@ -1400,7 +1435,7 @@ func (m Model) promptTop() int {
 		top++
 	}
 	top++ // prompt border above the input
-	if hint := m.renderSlashSuggestions(); hint != "" && !m.editorActive {
+	if hint := m.renderSlashSuggestions(); hint != "" && !m.overlayActive() {
 		top += strings.Count(hint, "\n") + 1
 	}
 	return top
@@ -1994,6 +2029,8 @@ func (m Model) View() tea.View {
 		parts = append(parts, m.editor.View())
 	case m.historyActive:
 		parts = append(parts, m.history.View())
+	case m.runtimeActive:
+		parts = append(parts, m.runtime.View())
 	default:
 		parts = append(parts, m.renderViewportWithScrollbar())
 		if m.recap != "" {
@@ -2003,7 +2040,7 @@ func (m Model) View() tea.View {
 
 	promptLine := lipgloss.NewStyle().Foreground(m.promptBorderColor).Render(strings.Repeat("─", m.width))
 	parts = append(parts, promptLine)
-	if hint := m.renderSlashSuggestions(); hint != "" && !m.editorActive {
+	if hint := m.renderSlashSuggestions(); hint != "" && !m.overlayActive() {
 		parts = append(parts, hint)
 	}
 	inputIdx := len(parts)
@@ -2034,7 +2071,7 @@ func (m Model) View() tea.View {
 	v.MouseMode = tea.MouseModeCellMotion
 	// Drive the real terminal cursor to the input caret position. Only
 	// when the chat input owns focus (no overlay, no pending confirm).
-	if !m.editorActive && !m.historyActive && m.pendingConfirm == nil {
+	if !m.overlayActive() && m.pendingConfirm == nil {
 		if c := m.input.Cursor(); c != nil {
 			c.Y += inputCursorRow(parts, inputIdx)
 			v.Cursor = c

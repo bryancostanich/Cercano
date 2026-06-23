@@ -1,6 +1,9 @@
 package ui
 
-import "charm.land/bubbles/v2/key"
+import (
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+)
 
 // keyMap holds the cercano-cli key bindings matched via key.Matches in Update.
 type keyMap struct {
@@ -24,3 +27,8 @@ func newKeyMap() keyMap {
 }
 
 var keys = newKeyMap()
+
+func isRuntimeDashboardKey(msg tea.KeyPressMsg) bool {
+	k := msg.Key()
+	return keyIs(k, 'm') && promptCommandMod(k)
+}

@@ -84,6 +84,14 @@ func (r RowList) Cursor() int { return r.cursor }
 // an initial hint).
 func (r *RowList) SetStatus(s string) { r.status = s }
 
+// Reload refreshes rows through Hooks.OnReload and keeps the cursor in bounds.
+func (r *RowList) Reload() {
+	if r.Hooks.OnReload == nil {
+		return
+	}
+	r.reloadRows()
+}
+
 // Update routes a key event. Returns (next, cmd, closed) — `closed` tells the
 // host whether the overlay should be dismissed.
 func (r RowList) Update(msg tea.KeyPressMsg, styles theme.Styles) (RowList, tea.Cmd, bool) {
@@ -109,10 +117,7 @@ func (r RowList) Update(msg tea.KeyPressMsg, styles theme.Styles) (RowList, tea.
 			}
 			r.status = status
 			if r.Hooks.OnReload != nil {
-				r.Rows = r.Hooks.OnReload()
-				if r.cursor >= len(r.Rows) {
-					r.cursor = len(r.Rows) - 1
-				}
+				r.reloadRows()
 			}
 			return r, nil, false
 		}
@@ -161,10 +166,27 @@ func (r RowList) Update(msg tea.KeyPressMsg, styles theme.Styles) (RowList, tea.
 			}
 			status, close, cmd := r.Hooks.OnSelect(row)
 			r.status = status
+			if !close && r.Hooks.OnReload != nil {
+				r.reloadRows()
+			}
 			return r, cmd, close
 		}
 	}
 	return r, nil, false
+}
+
+func (r *RowList) reloadRows() {
+	r.Rows = r.Hooks.OnReload()
+	if len(r.Rows) == 0 {
+		r.cursor = 0
+		return
+	}
+	if r.cursor >= len(r.Rows) {
+		r.cursor = len(r.Rows) - 1
+	}
+	if r.cursor < 0 {
+		r.cursor = 0
+	}
 }
 
 // View renders the panel. `width` is the terminal width; the panel sizes

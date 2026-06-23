@@ -54,8 +54,10 @@ func CrackerMarkdownStyle() ansi.StyleConfig {
 	// horizontal rules we draw around it (see codeRule in the ui package).
 	sc.CodeBlock.Margin = uintp(0)
 
-	sc.Item.Color = strp(mdLime)
-	sc.Enumeration.Color = strp(mdLime)
+	// List items (bullets and numbers) match normal paragraph text. Dracula
+	// colors the whole list via List.Color (white) and ignores Item/Enumeration
+	// .Color for the rendered text, so the block color is the only lever.
+	sc.List.Color = strp(mdAmber)
 
 	sc.Link.Color = strp(mdCyan)
 	sc.Link.Underline = boolp(true)

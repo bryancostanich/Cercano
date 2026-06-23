@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"cercano/source/server/internal/cli/agentclient"
+	"cercano/source/server/pkg/agentclient"
 )
 
 // CurrentConversationFn is supplied by the host (Model) so /rename knows

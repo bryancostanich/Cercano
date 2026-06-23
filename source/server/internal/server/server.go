@@ -11,7 +11,7 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
-	"cercano/source/server/internal/config"
+	"cercano/source/server/pkg/config"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/legacymodels"

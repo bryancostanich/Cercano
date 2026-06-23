@@ -24,8 +24,8 @@
 
 **Files:**
 - Modify: `source/server/go.mod`, `source/server/go.sum` (via `go get`)
-- Create: `source/server/internal/cli/render/glamour.go`
-- Test: `source/server/internal/cli/render/glamour_test.go`
+- Create: `source/clients/cli/internal/render/glamour.go`
+- Test: `source/clients/cli/internal/render/glamour_test.go`
 
 **Interfaces:**
 - Produces:
@@ -44,7 +44,7 @@ Expected: `go.mod` gains `charm.land/glamour/v2 v2.0.1` (and `go.sum` updated). 
 
 - [ ] **Step 2: Write the failing test**
 
-Create `source/server/internal/cli/render/glamour_test.go`:
+Create `source/clients/cli/internal/render/glamour_test.go`:
 
 ```go
 package render
@@ -101,7 +101,7 @@ Expected: FAIL — `undefined: NewMarkdown`.
 
 - [ ] **Step 4: Write the implementation**
 
-Create `source/server/internal/cli/render/glamour.go`:
+Create `source/clients/cli/internal/render/glamour.go`:
 
 ```go
 package render
@@ -209,7 +209,7 @@ Expected: PASS (all three).
 
 ```bash
 cd /Users/bryancostanich/git_repos/bryan_costanich/Cercano-md-render
-git add source/server/go.mod source/server/go.sum source/server/internal/cli/render/glamour.go source/server/internal/cli/render/glamour_test.go
+git add source/server/go.mod source/server/go.sum source/clients/cli/internal/render/glamour.go source/clients/cli/internal/render/glamour_test.go
 git commit -m "feat(render): glamour markdown wrapper with per-width renderer cache"
 ```
 
@@ -218,8 +218,8 @@ git commit -m "feat(render): glamour markdown wrapper with per-width renderer ca
 ### Task 2: Cracker-themed Glamour style
 
 **Files:**
-- Create: `source/server/internal/cli/theme/markdown.go`
-- Test: `source/server/internal/cli/theme/markdown_test.go`
+- Create: `source/clients/cli/internal/theme/markdown.go`
+- Test: `source/clients/cli/internal/theme/markdown_test.go`
 
 **Interfaces:**
 - Consumes: nothing from other tasks.
@@ -229,7 +229,7 @@ git commit -m "feat(render): glamour markdown wrapper with per-width renderer ca
 
 - [ ] **Step 1: Write the failing test**
 
-Create `source/server/internal/cli/theme/markdown_test.go`:
+Create `source/clients/cli/internal/theme/markdown_test.go`:
 
 ```go
 package theme
@@ -260,7 +260,7 @@ Expected: FAIL — `undefined: CrackerMarkdownStyle`.
 
 - [ ] **Step 3: Write the implementation**
 
-Create `source/server/internal/cli/theme/markdown.go`:
+Create `source/clients/cli/internal/theme/markdown.go`:
 
 ```go
 package theme
@@ -328,7 +328,7 @@ Expected: PASS.
 
 ```bash
 cd /Users/bryancostanich/git_repos/bryan_costanich/Cercano-md-render
-git add source/server/internal/cli/theme/markdown.go source/server/internal/cli/theme/markdown_test.go
+git add source/clients/cli/internal/theme/markdown.go source/clients/cli/internal/theme/markdown_test.go
 git commit -m "feat(theme): cracker-themed glamour markdown style"
 ```
 
@@ -337,8 +337,8 @@ git commit -m "feat(theme): cracker-themed glamour markdown style"
 ### Task 3: Streaming block splitter
 
 **Files:**
-- Create: `source/server/internal/cli/render/mdstream.go`
-- Test: `source/server/internal/cli/render/mdstream_test.go`
+- Create: `source/clients/cli/internal/render/mdstream.go`
+- Test: `source/clients/cli/internal/render/mdstream_test.go`
 
 **Interfaces:**
 - Consumes: `matchTable`, `markdownTable.toTable`, `Table` (existing in `markdown.go`/`table.go`).
@@ -356,7 +356,7 @@ git commit -m "feat(theme): cracker-themed glamour markdown style"
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `source/server/internal/cli/render/mdstream_test.go`:
+Create `source/clients/cli/internal/render/mdstream_test.go`:
 
 ```go
 package render
@@ -441,7 +441,7 @@ Expected: FAIL — `undefined: SplitBlocks` / `undefined: MdProse`.
 
 - [ ] **Step 3: Write the implementation**
 
-Create `source/server/internal/cli/render/mdstream.go`:
+Create `source/clients/cli/internal/render/mdstream.go`:
 
 ```go
 package render
@@ -543,7 +543,7 @@ Expected: PASS (all six).
 
 ```bash
 cd /Users/bryancostanich/git_repos/bryan_costanich/Cercano-md-render
-git add source/server/internal/cli/render/mdstream.go source/server/internal/cli/render/mdstream_test.go
+git add source/clients/cli/internal/render/mdstream.go source/clients/cli/internal/render/mdstream_test.go
 git commit -m "feat(render): streaming markdown block splitter"
 ```
 
@@ -552,15 +552,15 @@ git commit -m "feat(render): streaming markdown block splitter"
 ### Task 4: Wire assistant rendering to streaming markdown
 
 **Files:**
-- Modify: `source/server/internal/cli/ui/model.go`
+- Modify: `source/clients/cli/internal/ui/model.go`
   - `Entry` struct (remove `Tables` field, ~lines 48-52)
   - `Model` struct (add `md` field, near `styles` ~line 65)
   - `New()` return literal (~line 192)
   - `applyStreamMsg` `TypeDone` (~lines 790-803)
   - `renderEntry` `RoleAssistant` case (~lines 1026-1055) + new helpers
-- Modify: `source/server/internal/cli/render/markdown.go` (delete `InterceptMarkdownTables`)
-- Modify: `source/server/internal/cli/render/markdown_test.go` (delete its `InterceptMarkdownTables` tests)
-- Test: `source/server/internal/cli/ui/scrollback_markdown_test.go` (new)
+- Modify: `source/clients/cli/internal/render/markdown.go` (delete `InterceptMarkdownTables`)
+- Modify: `source/clients/cli/internal/render/markdown_test.go` (delete its `InterceptMarkdownTables` tests)
+- Test: `source/clients/cli/internal/ui/scrollback_markdown_test.go` (new)
 
 **Interfaces:**
 - Consumes: `render.NewMarkdown`, `(*render.Markdown).Render`, `(*render.Markdown).RenderLive`, `render.SplitBlocks`, `render.MdBlock`, `render.MdTable`, `theme.CrackerMarkdownStyle`.
@@ -568,7 +568,7 @@ git commit -m "feat(render): streaming markdown block splitter"
 
 - [ ] **Step 1: Write the failing test**
 
-Create `source/server/internal/cli/ui/scrollback_markdown_test.go`:
+Create `source/clients/cli/internal/ui/scrollback_markdown_test.go`:
 
 ```go
 package ui
@@ -577,8 +577,8 @@ import (
 	"strings"
 	"testing"
 
-	"cercano/source/server/internal/cli/render"
-	"cercano/source/server/internal/cli/theme"
+	"cercano/source/clients/cli/internal/render"
+	"cercano/source/clients/cli/internal/theme"
 )
 
 // Renders an assistant entry the way renderEntry does for committed blocks,
@@ -742,11 +742,11 @@ func closeOpenFence(s string) string {
 
 - [ ] **Step 9: Delete the now-dead `InterceptMarkdownTables`**
 
-In `source/server/internal/cli/render/markdown.go`, delete the entire `InterceptMarkdownTables` function (from its doc comment `// InterceptMarkdownTables scans the text...` through its closing `}`). Keep `markdownTable`, `matchTable`, `looksLikePipeRow`, `looksLikeSeparator`, `splitPipeRow`, `toTable`, and `itoa` — they are still used.
+In `source/clients/cli/internal/render/markdown.go`, delete the entire `InterceptMarkdownTables` function (from its doc comment `// InterceptMarkdownTables scans the text...` through its closing `}`). Keep `markdownTable`, `matchTable`, `looksLikePipeRow`, `looksLikeSeparator`, `splitPipeRow`, `toTable`, and `itoa` — they are still used.
 
 - [ ] **Step 10: Delete the `InterceptMarkdownTables` tests**
 
-In `source/server/internal/cli/render/markdown_test.go`, delete the five tests that call `InterceptMarkdownTables`: `TestIntercept_NoTableLeavesTextAlone`, `TestIntercept_DetectsSimpleTable`, `TestIntercept_RejectsBareTextWithPipes`, `TestIntercept_RequiresSeparatorRow`, `TestIntercept_TwoTables`. If the file is left with no tests and unused imports, remove the dead imports too (table detection is now covered by `mdstream_test.go`). If the file becomes empty, delete it.
+In `source/clients/cli/internal/render/markdown_test.go`, delete the five tests that call `InterceptMarkdownTables`: `TestIntercept_NoTableLeavesTextAlone`, `TestIntercept_DetectsSimpleTable`, `TestIntercept_RejectsBareTextWithPipes`, `TestIntercept_RequiresSeparatorRow`, `TestIntercept_TwoTables`. If the file is left with no tests and unused imports, remove the dead imports too (table detection is now covered by `mdstream_test.go`). If the file becomes empty, delete it.
 
 - [ ] **Step 11: Build and run the full test suite**
 

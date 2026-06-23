@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"cercano/source/server/internal/agent"
-	"cercano/source/server/internal/config"
+	"cercano/source/server/pkg/config"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/legacymodels"

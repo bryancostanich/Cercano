@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"cercano/source/server/internal/cli/theme"
+	"cercano/source/clients/cli/internal/theme"
 )
 
 // minimalModel returns a Model populated just enough for the confirm-prompt

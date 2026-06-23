@@ -1,16 +1,25 @@
 #!/usr/bin/env bash
 # Cercano dev launcher.
 #
+# Cercano is now two binaries:
+#   * cercano      — the agent gRPC server (a singleton; built from source/server)
+#   * cercano-cli  — the terminal UI (built from source/clients/cli)
+# The CLI auto-launches `cercano agent` when no server is listening, finding the
+# server binary as a sibling next to its own executable. This launcher builds
+# both, co-locates them in a libexec dir so that sibling lookup works, then
+# exec's the CLI.
+#
 # Behaviors:
-#   1. Rebuild-if-stale: if any .go file under source/server/ is newer than the
-#      installed binary, rebuild from source before invoking.
-#   2. Kill stale agents: any running `cercano agent` process whose start time
-#      predates the current binary's mtime is killed (it's running outdated
-#      code; the next CLI launch will spawn a fresh one).
+#   1. Rebuild-if-stale: rebuild either binary whose sources changed since it was
+#      last built. The CLI depends on the server module (pkg/proto, pkg/config,
+#      pkg/update) via a replace directive, so any .go change under source/
+#      restages the CLI.
+#   2. Kill stale agents: any running `cercano agent` whose start time predates
+#      the freshly built server binary is killed (it's running outdated code; the
+#      next CLI launch spawns a fresh one).
 #   3. Enable TUI key-debug tracing by default for prompt-selection debugging.
 #      Set CERCANO_DEBUG_KEYS=0 to disable it.
-#   4. Exec the binary with the original args. TTY detection in the binary
-#      itself picks CLI vs agent mode.
+#   4. Exec the CLI with the original args.
 #
 # Install:
 #   cp source/server/scripts/cercano-launcher.sh ~/bin/cercano
@@ -21,34 +30,52 @@
 set -euo pipefail
 
 REPO="${CERCANO_REPO:-$HOME/git_repos/bryan_costanich/cercano}"
-SRC_DIR="$REPO/source/server"
-BIN="$HOME/bin/.cercano-bin"
+SERVER_DIR="$REPO/source/server"
+CLI_DIR="$REPO/source/clients/cli"
 
-mkdir -p "$(dirname "$BIN")"
+# Both binaries live co-located in a hidden libexec dir so the CLI's sibling
+# lookup (next to its own executable) finds the `cercano` server binary. Keeping
+# them out of ~/bin avoids clashing with this launcher script (also ~/bin/cercano).
+LIBEXEC="$HOME/bin/.cercano-libexec"
+SERVER_BIN="$LIBEXEC/cercano"
+CLI_BIN="$LIBEXEC/cercano-cli"
+
+mkdir -p "$LIBEXEC"
 
 # Temporary prompt-selection diagnostic: the TUI writes key events to
 # /tmp/cercano-key-debug.log when enabled. Keep this in the dev launcher so the
 # normal launch path captures macOS Terminal's actual Shift/Option/Cmd events.
 export CERCANO_DEBUG_KEYS="${CERCANO_DEBUG_KEYS:-1}"
 
-# 1. Rebuild if stale.
-rebuild=0
-if [[ ! -x "$BIN" ]]; then
-    rebuild=1
-elif find "$SRC_DIR" -name '*.go' -newer "$BIN" -print -quit 2>/dev/null | grep -q .; then
-    rebuild=1
-fi
+# stale BIN SRC_GLOB_ROOT — true if BIN is missing or any .go under SRC_GLOB_ROOT
+# is newer than BIN.
+stale() {
+    local bin="$1" root="$2"
+    [[ ! -x "$bin" ]] && return 0
+    find "$root" -name '*.go' -newer "$bin" -print -quit 2>/dev/null | grep -q .
+}
 
-if (( rebuild )); then
-    echo "[cercano] rebuilding..." >&2
-    if ! (cd "$SRC_DIR" && go build -o "$BIN" ./cmd/cercano/); then
-        echo "[cercano] build failed" >&2
+# 1a. Rebuild the server binary if its sources changed.
+if stale "$SERVER_BIN" "$SERVER_DIR"; then
+    echo "[cercano] rebuilding agent server..." >&2
+    if ! (cd "$SERVER_DIR" && go build -o "$SERVER_BIN" ./cmd/cercano/); then
+        echo "[cercano] server build failed" >&2
         exit 1
     fi
 fi
 
-# 2. Kill any stale `cercano agent` processes (started before current binary).
-bin_mtime=$(stat -f %m "$BIN")
+# 1b. Rebuild the CLI if anything under source/ changed (it depends on the
+#     server module via a replace directive).
+if stale "$CLI_BIN" "$REPO/source"; then
+    echo "[cercano] rebuilding CLI..." >&2
+    if ! (cd "$CLI_DIR" && go build -o "$CLI_BIN" .); then
+        echo "[cercano] CLI build failed" >&2
+        exit 1
+    fi
+fi
+
+# 2. Kill any stale `cercano agent` processes (started before current server binary).
+bin_mtime=$(stat -f %m "$SERVER_BIN")
 
 for pid in $(pgrep -f "cercano agent" 2>/dev/null); do
     [[ -z "$pid" ]] && continue
@@ -70,5 +97,6 @@ for pid in $(pgrep -f "cercano agent" 2>/dev/null); do
     fi
 done
 
-# 3. Exec the binary with original args.
-exec "$BIN" "$@"
+# 3. Exec the CLI with original args. It dials the server, auto-launching
+#    `$SERVER_BIN agent` (found as its sibling) if none is listening.
+exec "$CLI_BIN" "$@"

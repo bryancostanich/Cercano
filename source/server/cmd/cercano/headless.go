@@ -8,8 +8,8 @@ import (
 	"os/signal"
 	"strings"
 
-	"cercano/source/server/internal/cli/agentclient"
-	"cercano/source/server/internal/config"
+	"cercano/source/server/pkg/agentclient"
+	"cercano/source/server/pkg/config"
 )
 
 // runHeadless executes a single prompt against the cercano agent and streams

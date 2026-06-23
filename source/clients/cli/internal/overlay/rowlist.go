@@ -13,7 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"cercano/source/server/internal/cli/theme"
+	"cercano/source/clients/cli/internal/theme"
 )
 
 var rowKeys = struct{ Up, Down, Home, End, Enter, Close key.Binding }{

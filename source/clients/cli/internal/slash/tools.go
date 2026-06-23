@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"cercano/source/server/internal/cli/agentclient"
+	"cercano/source/server/pkg/agentclient"
 )
 
 // RegisterTools wires /tools (list) and /tool (invoke) against the client.

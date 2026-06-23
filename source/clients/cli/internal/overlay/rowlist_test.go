@@ -7,7 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"cercano/source/server/internal/cli/theme"
+	"cercano/source/clients/cli/internal/theme"
 )
 
 func TestRowList_NavigateAndSelect(t *testing.T) {

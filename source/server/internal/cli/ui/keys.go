@@ -18,7 +18,7 @@ func newKeyMap() keyMap {
 		ToggleTool: key.NewBinding(key.WithKeys("enter", "tab")),
 		Back:       key.NewBinding(key.WithKeys("esc")),
 		ScrollKeys: key.NewBinding(key.WithKeys(
-			"pgup", "pgdown", "home", "end",
+			"pgup", "pgdown",
 			"ctrl+u", "ctrl+d", "ctrl+b", "ctrl+f")),
 	}
 }

@@ -7,7 +7,9 @@
 #   2. Kill stale agents: any running `cercano agent` process whose start time
 #      predates the current binary's mtime is killed (it's running outdated
 #      code; the next CLI launch will spawn a fresh one).
-#   3. Exec the binary with the original args. TTY detection in the binary
+#   3. Enable TUI key-debug tracing by default for prompt-selection debugging.
+#      Set CERCANO_DEBUG_KEYS=0 to disable it.
+#   4. Exec the binary with the original args. TTY detection in the binary
 #      itself picks CLI vs agent mode.
 #
 # Install:
@@ -23,6 +25,11 @@ SRC_DIR="$REPO/source/server"
 BIN="$HOME/bin/.cercano-bin"
 
 mkdir -p "$(dirname "$BIN")"
+
+# Temporary prompt-selection diagnostic: the TUI writes key events to
+# /tmp/cercano-key-debug.log when enabled. Keep this in the dev launcher so the
+# normal launch path captures macOS Terminal's actual Shift/Option/Cmd events.
+export CERCANO_DEBUG_KEYS="${CERCANO_DEBUG_KEYS:-1}"
 
 # 1. Rebuild if stale.
 rebuild=0

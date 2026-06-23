@@ -1,10 +1,13 @@
 package ui
 
 import (
+	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -134,6 +137,356 @@ func TestPrompt_MacNavigationAndSelection(t *testing.T) {
 	}
 }
 
+func TestPrompt_ModifiedArrowNavigationVariants(t *testing.T) {
+	for _, mod := range []tea.KeyMod{tea.ModSuper, tea.ModMeta} {
+		p := newTestPromptInput(80)
+		p.SetValue("hello brave world\nnext line")
+		p, _ = updatePromptKey(p, tea.KeyLeft, "", mod)
+		if got, want := p.cursor, len([]rune("hello brave world\n")); got != want {
+			t.Fatalf("%v-left cursor = %d, want %d", mod, got, want)
+		}
+		p, _ = updatePromptKey(p, tea.KeyRight, "", mod)
+		if got, want := p.cursor, len([]rune(p.Value())); got != want {
+			t.Fatalf("%v-right cursor = %d, want %d", mod, got, want)
+		}
+		p, _ = updatePromptKey(p, tea.KeyUp, "", mod)
+		if got := p.cursor; got != 0 {
+			t.Fatalf("%v-up cursor = %d, want document start", mod, got)
+		}
+		p, _ = updatePromptKey(p, tea.KeyDown, "", mod)
+		if got, want := p.cursor, len([]rune(p.Value())); got != want {
+			t.Fatalf("%v-down cursor = %d, want document end %d", mod, got, want)
+		}
+	}
+}
+
+func TestPrompt_OptionMetaWordNavigationFallbacks(t *testing.T) {
+	p := newTestPromptInput(80)
+	p.SetValue("hello brave world")
+
+	p, _ = updatePromptRune(p, 'b', tea.ModAlt)
+	if got, want := p.cursor, len([]rune("hello brave ")); got != want {
+		t.Fatalf("alt+b cursor = %d, want %d", got, want)
+	}
+	p, _ = updatePromptRune(p, 'f', tea.ModAlt)
+	if got, want := p.cursor, len([]rune("hello brave world")); got != want {
+		t.Fatalf("alt+f cursor = %d, want %d", got, want)
+	}
+
+	p, _ = updatePromptRune(p, 'b', tea.ModAlt|tea.ModShift)
+	if got := p.selectedText(); got != "world" {
+		t.Fatalf("shift+alt+b selected %q, want world", got)
+	}
+}
+
+func TestPrompt_CtrlLineNavigationFallbacks(t *testing.T) {
+	p := newTestPromptInput(80)
+	p.SetValue("hello\nworld")
+
+	p, _ = updatePromptRune(p, 'a', tea.ModCtrl)
+	if got, want := p.cursor, len([]rune("hello\n")); got != want {
+		t.Fatalf("ctrl+a cursor = %d, want line start %d", got, want)
+	}
+	p, _ = updatePromptRune(p, 'e', tea.ModCtrl)
+	if got, want := p.cursor, len([]rune("hello\nworld")); got != want {
+		t.Fatalf("ctrl+e cursor = %d, want line end %d", got, want)
+	}
+}
+
+func TestPrompt_ShiftSelectionHorizontalDirections(t *testing.T) {
+	p := newTestPromptInput(80)
+	p.SetValue("abcde")
+	p.CursorStart()
+
+	p, _ = updatePromptKey(p, tea.KeyRight, "", tea.ModShift)
+	if got := p.selectedText(); got != "a" {
+		t.Fatalf("shift-right selected %q, want a", got)
+	}
+	p, _ = updatePromptKey(p, tea.KeyRight, "", tea.ModShift)
+	if got := p.selectedText(); got != "ab" {
+		t.Fatalf("second shift-right selected %q, want ab", got)
+	}
+	p, _ = updatePromptKey(p, tea.KeyLeft, "", tea.ModShift)
+	if got := p.selectedText(); got != "a" {
+		t.Fatalf("shift-left should shrink selection to %q, got %q", "a", got)
+	}
+	p, _ = updatePromptKey(p, tea.KeyLeft, "", tea.ModShift)
+	if p.HasSelection() {
+		t.Fatalf("shift-left back to anchor should clear selection, got %q", p.selectedText())
+	}
+
+	p.CursorEnd()
+	p, _ = updatePromptKey(p, tea.KeyLeft, "", tea.ModShift)
+	if got := p.selectedText(); got != "e" {
+		t.Fatalf("shift-left from end selected %q, want e", got)
+	}
+	p, _ = updatePromptKey(p, tea.KeyLeft, "", tea.ModShift)
+	if got := p.selectedText(); got != "de" {
+		t.Fatalf("second shift-left selected %q, want de", got)
+	}
+	p, _ = updatePromptKey(p, tea.KeyRight, "", tea.ModShift)
+	if got := p.selectedText(); got != "e" {
+		t.Fatalf("shift-right should shrink selection to %q, got %q", "e", got)
+	}
+}
+
+func TestPrompt_ShiftSelectionVisualRowDirections(t *testing.T) {
+	p := newTestPromptInput(8) // 2 prompt cols + 6 text cols
+	p.SetValue("abcdefghijkl")
+	p.CursorStart()
+
+	p, _ = updatePromptKey(p, tea.KeyDown, "", tea.ModShift)
+	if got := p.selectedText(); got != "abcdef" {
+		t.Fatalf("shift-down selected %q, want first visual row", got)
+	}
+	p, _ = updatePromptKey(p, tea.KeyUp, "", tea.ModShift)
+	if p.HasSelection() {
+		t.Fatalf("shift-up back to anchor should clear selection, got %q", p.selectedText())
+	}
+
+	p.CursorEnd()
+	p, _ = updatePromptKey(p, tea.KeyUp, "", tea.ModShift)
+	if got := p.selectedText(); got != "ghijkl" {
+		t.Fatalf("shift-up from end selected %q, want second visual row", got)
+	}
+	p, _ = updatePromptKey(p, tea.KeyDown, "", tea.ModShift)
+	if p.HasSelection() {
+		t.Fatalf("shift-down back to anchor should clear selection, got %q", p.selectedText())
+	}
+}
+
+func TestPrompt_ShiftDownExtendsAcrossMultipleWrappedRows(t *testing.T) {
+	p := newTestPromptInput(8) // 2 prompt cols + 6 text cols
+	p.SetValue("abcdefghijklmnopqr")
+	p.CursorStart()
+
+	p, _ = updatePromptKey(p, tea.KeyDown, "", tea.ModShift)
+	if got := p.selectedText(); got != "abcdef" {
+		t.Fatalf("first shift-down selected %q, want abcdef", got)
+	}
+	p, _ = updatePromptKey(p, tea.KeyDown, "", tea.ModShift)
+	if got := p.selectedText(); got != "abcdefghijkl" {
+		t.Fatalf("second shift-down selected %q, want abcdefghijkl", got)
+	}
+	p, _ = updatePromptKey(p, tea.KeyDown, "", tea.ModShift)
+	if got := p.selectedText(); got != "abcdefghijklmnopqr" {
+		t.Fatalf("third shift-down selected %q, want whole wrapped value", got)
+	}
+}
+
+func TestPrompt_ShiftUpExtendsAcrossMultipleWrappedRows(t *testing.T) {
+	p := newTestPromptInput(8) // 2 prompt cols + 6 text cols
+	p.SetValue("abcdefghijklmnopqr")
+	p.CursorEnd()
+
+	p, _ = updatePromptKey(p, tea.KeyUp, "", tea.ModShift)
+	if got := p.selectedText(); got != "mnopqr" {
+		t.Fatalf("first shift-up selected %q, want mnopqr", got)
+	}
+	p, _ = updatePromptKey(p, tea.KeyUp, "", tea.ModShift)
+	if got := p.selectedText(); got != "ghijklmnopqr" {
+		t.Fatalf("second shift-up selected %q, want ghijklmnopqr", got)
+	}
+	p, _ = updatePromptKey(p, tea.KeyUp, "", tea.ModShift)
+	if got := p.selectedText(); got != "abcdefghijklmnopqr" {
+		t.Fatalf("third shift-up selected %q, want whole wrapped value", got)
+	}
+}
+
+func TestPrompt_CursorAtSoftWrapBoundaryUsesNextVisualRow(t *testing.T) {
+	p := newTestPromptInput(8) // 2 prompt cols + 6 text cols
+	p.SetValue("abcdefghijkl")
+	p.cursor = len([]rune("abcdef"))
+
+	c := p.Cursor()
+	if c == nil {
+		t.Fatal("cursor unexpectedly nil")
+	}
+	if got, want := c.X, 2; got != want {
+		t.Fatalf("cursor x at soft-wrap boundary = %d, want prompt column %d", got, want)
+	}
+	if got, want := c.Y, 1; got != want {
+		t.Fatalf("cursor y at soft-wrap boundary = %d, want next visual row %d", got, want)
+	}
+}
+
+func TestPrompt_RootShiftUpDownSelectsHardNewlineRows(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.input.SetValue("alpha\nbravo\ncharlie")
+	m.relayout()
+
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+	got := next.(Model)
+	if text := got.input.selectedText(); text != "\ncharlie" {
+		t.Fatalf("root shift-up selected %q, want newline+charlie", text)
+	}
+	assertPromptViewHighlightsText(t, got.input.View(), "charlie")
+
+	next, _ = got.Update(tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModShift})
+	got = next.(Model)
+	if got.input.HasSelection() {
+		t.Fatalf("root shift-down back to anchor should clear selection, got %q", got.input.selectedText())
+	}
+
+	m.input.CursorStart()
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModShift})
+	got = next.(Model)
+	if text := got.input.selectedText(); text != "alpha\n" {
+		t.Fatalf("root shift-down selected %q, want alpha+newline", text)
+	}
+	assertPromptViewHighlightsText(t, got.input.View(), "alpha")
+}
+
+func TestPrompt_ShiftUpFromHardLineStartSelectsPreviousLine(t *testing.T) {
+	p := newStyledTestPromptInput(80)
+	p.SetValue("alpha\nbravo\ncharlie")
+	p.moveCursor(len([]rune("alpha\nbravo\n")), false)
+
+	p, _ = updatePromptKey(p, tea.KeyUp, "", tea.ModShift)
+	if got := p.selectedText(); got != "bravo\n" {
+		t.Fatalf("shift-up from hard line start selected %q, want bravo+newline", got)
+	}
+	lines := strings.Split(p.View(), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("prompt view has %d lines, want at least 2: %q", len(lines), p.View())
+	}
+	cells := ansiCells(lines[1])
+	for _, r := range "bravo" {
+		cell := mustCell(t, cells, r)
+		if !cell.hasBackground {
+			t.Fatalf("selected cell %q should have background style, cells=%+v", r, cells)
+		}
+	}
+}
+
+func TestPrompt_SelectedBlankLineBreakRendersHighlight(t *testing.T) {
+	p := newStyledTestPromptInput(20)
+	p.SetValue("alpha\n\ncharlie")
+	p.moveCursor(len([]rune("alpha\n\n")), false)
+
+	p, _ = updatePromptKey(p, tea.KeyUp, "", tea.ModShift)
+	if got := p.selectedText(); got != "\n" {
+		t.Fatalf("shift-up over blank line selected %q, want newline", got)
+	}
+
+	lines := strings.Split(p.View(), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("prompt view has %d lines, want at least 2: %q", len(lines), p.View())
+	}
+	for _, cell := range ansiCells(lines[1]) {
+		if cell.r == ' ' && cell.hasBackground {
+			return
+		}
+	}
+	t.Fatalf("blank selected line did not render highlighted padding: %q", lines[1])
+}
+
+func TestPrompt_SelectionRenderRestoresTextStyleAfterSelection(t *testing.T) {
+	p := newStyledTestPromptInput(80)
+	p.SetValue("abcd")
+	p.selectionAnchor = 2
+	p.cursor = 3
+
+	cells := ansiCells(p.View())
+	cCell := mustCell(t, cells, 'c')
+	dCell := mustCell(t, cells, 'd')
+	if cCell == nil || !cCell.hasForeground || !cCell.hasBackground {
+		t.Fatalf("selected cell should have foreground and background style, cells=%+v", cells)
+	}
+	if dCell == nil || !dCell.hasForeground || dCell.hasBackground {
+		t.Fatalf("text after selection should restore text foreground without selection background, cells=%+v", cells)
+	}
+}
+
+func TestPrompt_ReverseSelectionRenderRestoresTextStyleAfterSelection(t *testing.T) {
+	p := newStyledTestPromptInput(80)
+	p.SetValue("abcdef")
+	p.cursor = 4
+
+	p, _ = updatePromptKey(p, tea.KeyLeft, "", tea.ModShift)
+	p, _ = updatePromptKey(p, tea.KeyLeft, "", tea.ModShift)
+	if got := p.selectedText(); got != "cd" {
+		t.Fatalf("reverse selection selected %q, want cd", got)
+	}
+
+	cells := ansiCells(p.View())
+	for _, r := range []rune{'c', 'd'} {
+		cell := mustCell(t, cells, r)
+		if !cell.hasForeground || !cell.hasBackground {
+			t.Fatalf("selected cell %q should have foreground and background style, cells=%+v", r, cells)
+		}
+	}
+	for _, r := range []rune{'b', 'e'} {
+		cell := mustCell(t, cells, r)
+		if !cell.hasForeground || cell.hasBackground {
+			t.Fatalf("unselected cell %q should have text foreground and no selection background, cells=%+v", r, cells)
+		}
+	}
+}
+
+func TestPrompt_SelectionRenderAcrossWrappedRows(t *testing.T) {
+	p := newStyledTestPromptInput(8) // 2 prompt cols + 6 text cols
+	p.SetValue("abcdefghi")
+	p.selectionAnchor = 2
+	p.cursor = 8
+	if got := p.selectedText(); got != "cdefgh" {
+		t.Fatalf("wrapped selection selected %q, want cdefgh", got)
+	}
+
+	cells := ansiCells(p.View())
+	for _, r := range []rune{'c', 'd', 'e', 'f', 'g', 'h'} {
+		cell := mustCell(t, cells, r)
+		if !cell.hasForeground || !cell.hasBackground {
+			t.Fatalf("wrapped selected cell %q should have foreground and background style, cells=%+v", r, cells)
+		}
+	}
+	for _, r := range []rune{'b', 'i'} {
+		cell := mustCell(t, cells, r)
+		if !cell.hasForeground || cell.hasBackground {
+			t.Fatalf("wrapped unselected cell %q should have text foreground and no selection background, cells=%+v", r, cells)
+		}
+	}
+}
+
+func TestPrompt_ModifiedArrowsDoNotTriggerHistoryRecall(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.inputHistory = []string{"old prompt"}
+	m.historyIdx = len(m.inputHistory)
+	m.input.SetValue("draft")
+	m.input.CursorStart()
+
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModShift})
+	got := next.(Model)
+	if got.input.Value() != "draft" {
+		t.Fatalf("shift-down recalled history instead of selecting in prompt: %q", got.input.Value())
+	}
+}
+
+func TestPrompt_HomeEndRouteToPrompt(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.viewport.SetContent(strings.Repeat("chat\n", 80))
+	m.viewport.SetYOffset(10)
+	m.input.SetValue("hello\nworld")
+
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyHome})
+	got := next.(Model)
+	if got.viewport.YOffset() != 10 {
+		t.Fatalf("home should not scroll viewport, yoffset=%d", got.viewport.YOffset())
+	}
+	if want := len([]rune("hello\n")); got.input.cursor != want {
+		t.Fatalf("home cursor = %d, want line start %d", got.input.cursor, want)
+	}
+
+	next, _ = got.Update(tea.KeyPressMsg{Code: tea.KeyEnd})
+	got = next.(Model)
+	if want := len([]rune("hello\nworld")); got.input.cursor != want {
+		t.Fatalf("end cursor = %d, want line end %d", got.input.cursor, want)
+	}
+}
+
 func TestPrompt_SelectionTypingReplacesSelection(t *testing.T) {
 	p := newTestPromptInput(80)
 	p.SetValue("hello")
@@ -174,6 +527,40 @@ func TestPrompt_UndoRedoPasteSingleStep(t *testing.T) {
 	p, _ = updatePromptRune(p, 'z', tea.ModSuper|tea.ModShift)
 	if got := p.Value(); got != "one\ntwo\nthree" {
 		t.Fatalf("cmd+shift+z = %q, want pasted text", got)
+	}
+}
+
+func TestPrompt_UndoRedoKeyVariants(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		undoMod tea.KeyMod
+		redoMod tea.KeyMod
+	}{
+		{name: "super", undoMod: tea.ModSuper, redoMod: tea.ModSuper | tea.ModShift},
+		{name: "meta", undoMod: tea.ModMeta, redoMod: tea.ModMeta | tea.ModShift},
+		{name: "ctrl", undoMod: tea.ModCtrl, redoMod: tea.ModCtrl | tea.ModShift},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newTestPromptInput(80)
+			p, _ = p.Update(tea.PasteMsg{Content: "paste"})
+			p, _ = updatePromptRune(p, 'z', tc.undoMod)
+			if got := p.Value(); got != "" {
+				t.Fatalf("%s undo = %q, want empty", tc.name, got)
+			}
+			p, _ = updatePromptRune(p, 'z', tc.redoMod)
+			if got := p.Value(); got != "paste" {
+				t.Fatalf("%s redo = %q, want paste", tc.name, got)
+			}
+		})
+	}
+}
+
+func TestPrompt_CtrlUnderscoreUndoes(t *testing.T) {
+	p := newTestPromptInput(80)
+	p, _ = p.Update(tea.PasteMsg{Content: "paste"})
+	p, _ = updatePromptRune(p, '_', tea.ModCtrl)
+	if got := p.Value(); got != "" {
+		t.Fatalf("ctrl+_ undo = %q, want empty", got)
 	}
 }
 
@@ -230,6 +617,15 @@ func newTestPromptInput(width int) promptInput {
 	return p
 }
 
+func newStyledTestPromptInput(width int) promptInput {
+	p := newTestPromptInput(width)
+	p.SetStyles(promptInputStyles{
+		Text:      lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
+		Selection: lipgloss.NewStyle().Foreground(lipgloss.Color("7")).Background(lipgloss.Color("4")),
+	})
+	return p
+}
+
 func updatePromptText(p promptInput, text string) (promptInput, tea.Cmd) {
 	r := []rune(text)
 	code := rune(0)
@@ -252,4 +648,93 @@ func unicodeLower(r rune) rune {
 		return r + ('a' - 'A')
 	}
 	return r
+}
+
+type styledCell struct {
+	r             rune
+	hasForeground bool
+	hasBackground bool
+}
+
+func ansiCells(s string) []styledCell {
+	var cells []styledCell
+	hasForeground := false
+	hasBackground := false
+	for i := 0; i < len(s); {
+		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
+			if end := strings.IndexByte(s[i+2:], 'm'); end >= 0 {
+				applySGR(s[i+2:i+2+end], &hasForeground, &hasBackground)
+				i += end + 3
+				continue
+			}
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r != '\n' {
+			cells = append(cells, styledCell{
+				r:             r,
+				hasForeground: hasForeground,
+				hasBackground: hasBackground,
+			})
+		}
+		i += size
+	}
+	return cells
+}
+
+func applySGR(seq string, hasForeground, hasBackground *bool) {
+	if seq == "" {
+		*hasForeground = false
+		*hasBackground = false
+		return
+	}
+	for _, part := range strings.Split(seq, ";") {
+		n, err := strconv.Atoi(part)
+		if err != nil {
+			continue
+		}
+		switch {
+		case n == 0:
+			*hasForeground = false
+			*hasBackground = false
+		case n == 39:
+			*hasForeground = false
+		case n == 49:
+			*hasBackground = false
+		case n == 38 || n >= 30 && n <= 37 || n >= 90 && n <= 97:
+			*hasForeground = true
+		case n == 48 || n >= 40 && n <= 47 || n >= 100 && n <= 107:
+			*hasBackground = true
+		}
+	}
+}
+
+func findCell(cells []styledCell, r rune) *styledCell {
+	for i := range cells {
+		if cells[i].r == r {
+			return &cells[i]
+		}
+	}
+	return nil
+}
+
+func mustCell(t *testing.T, cells []styledCell, r rune) *styledCell {
+	t.Helper()
+	cell := findCell(cells, r)
+	if cell == nil {
+		t.Fatalf("cell %q not found in %+v", r, cells)
+	}
+	return cell
+}
+
+func assertPromptViewHighlightsText(t *testing.T, view, selected string) {
+	t.Helper()
+	idx := strings.Index(view, selected)
+	if idx < 0 {
+		t.Fatalf("selected text %q not found in view %q", selected, view)
+	}
+	prefix := view[:idx]
+	esc := strings.LastIndex(prefix, "\x1b[")
+	if esc < 0 || !strings.Contains(prefix[esc:], "48;") {
+		t.Fatalf("selected text %q not preceded by background style in view %q", selected, view)
+	}
 }

@@ -117,6 +117,58 @@ func TestPrompt_WheelOutsidePromptScrollsChatViewport(t *testing.T) {
 	}
 }
 
+func TestView_PinsPromptChromeToBottomWithShortOverlay(t *testing.T) {
+	m := New(nil, false)
+	m.width = 80
+	m.height = 24
+	m.splashShown = false
+	m.relayout()
+	dashboard, _ := newRuntimeDashboard(nil, m.palette, m.styles, m.width, m.height)
+	m.content = dashboard
+
+	view := m.View()
+	lines := strings.Split(view.Content, "\n")
+	if len(lines) != m.height {
+		t.Fatalf("view lines = %d, want %d:\n%s", len(lines), m.height, ansi.Strip(view.Content))
+	}
+	last := ansi.Strip(lines[len(lines)-1])
+	if !strings.Contains(last, "/help for cmds") {
+		t.Fatalf("status bar not pinned to last line: %q\n%s", last, ansi.Strip(view.Content))
+	}
+}
+
+func TestContentPage_CtrlCUsesGlobalDoublePressQuit(t *testing.T) {
+	m := New(nil, false)
+	m.width = 80
+	m.height = 24
+	dashboard, _ := newRuntimeDashboard(nil, m.palette, m.styles, m.width, m.height)
+	m.content = dashboard
+
+	next, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	m = next.(Model)
+	if cmd != nil {
+		t.Fatal("first ctrl+c should arm quit, not quit")
+	}
+	if !m.ctrlCArmed {
+		t.Fatal("first ctrl+c should arm quit")
+	}
+	if m.input.Placeholder != armedInputPlaceholder {
+		t.Fatalf("placeholder = %q, want %q", m.input.Placeholder, armedInputPlaceholder)
+	}
+	if m.content == nil {
+		t.Fatal("first ctrl+c should keep the content page open")
+	}
+
+	_, cmd = m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("second ctrl+c should return quit command")
+	}
+	msg := cmd()
+	if _, ok := msg.(tea.QuitMsg); !ok {
+		t.Fatalf("expected QuitMsg from second ctrl+c, got %T", msg)
+	}
+}
+
 func TestPrompt_MacNavigationAndSelection(t *testing.T) {
 	p := newTestPromptInput(80)
 	p.SetValue("hello brave world\nnext line")

@@ -192,11 +192,20 @@ func (r *RowList) reloadRows() {
 // View renders the panel. `width` is the terminal width; the panel sizes
 // itself with 2-col outer margin.
 func (r RowList) View(width int, palette theme.Palette, styles theme.Styles) string {
-	innerW := width - 6
-	if innerW < 40 {
-		innerW = 40
+	panelW := width - 6
+	if panelW < 40 {
+		panelW = 40
 	}
+	return r.ViewPanel(panelW, palette, styles)
+}
 
+// ViewPanel renders the panel at an explicit outer width. Content pages use
+// this when the parent already owns page margins and the list should align
+// with sibling blocks.
+func (r RowList) ViewPanel(panelW int, palette theme.Palette, styles theme.Styles) string {
+	if panelW < 40 {
+		panelW = 40
+	}
 	labelW := 0
 	for _, row := range r.Rows {
 		if lw := lipgloss.Width(row.Label); lw > labelW {
@@ -248,13 +257,13 @@ func (r RowList) View(width int, palette theme.Palette, styles theme.Styles) str
 	body.WriteString("\n" + footer + "\n")
 
 	title := styles.Accent.Render("─ " + r.Title + " ")
-	titleLine := title + styles.BorderDim.Render(strings.Repeat("─", innerW-lipgloss.Width(title)))
+	titleLine := title + styles.BorderDim.Render(strings.Repeat("─", panelW-lipgloss.Width(title)))
 
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(palette.Border).
 		Padding(0, 1).
-		Width(innerW).
+		Width(panelW).
 		Render(titleLine + "\n" + body.String())
 }
 

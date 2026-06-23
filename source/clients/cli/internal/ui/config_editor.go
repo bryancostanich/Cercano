@@ -6,9 +6,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"cercano/source/server/pkg/agentclient"
 	"cercano/source/clients/cli/internal/overlay"
 	"cercano/source/clients/cli/internal/theme"
+	"cercano/source/server/pkg/agentclient"
 )
 
 // configEditor wraps overlay.RowList with the config-specific row builder
@@ -23,7 +23,7 @@ type configEditor struct {
 	list          overlay.RowList
 }
 
-func newConfigEditor(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h int) (configEditor, tea.Cmd) {
+func newConfigEditor(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h int) (*configEditor, tea.Cmd) {
 	rows := buildConfigRows(ag)
 	hooks := overlay.Hooks{
 		OnEdit: func(row overlay.Row, newValue string) (string, error) {
@@ -33,7 +33,7 @@ func newConfigEditor(ag *agentclient.Client, p theme.Palette, s theme.Styles, w,
 			return buildConfigRows(ag)
 		},
 	}
-	return configEditor{
+	return &configEditor{
 		palette: p,
 		styles:  s,
 		agent:   ag,
@@ -43,20 +43,23 @@ func newConfigEditor(ag *agentclient.Client, p theme.Palette, s theme.Styles, w,
 	}, nil
 }
 
-func (ed configEditor) Update(msg tea.KeyPressMsg) (configEditor, tea.Cmd, bool) {
-	next, cmd, closed := ed.list.Update(msg, ed.styles)
-	ed.list = next
-	return ed, cmd, closed
+func (ed *configEditor) ID() contentPageID {
+	return contentPageConfig
 }
 
-func (ed configEditor) View() string {
-	return ed.list.View(ed.width, ed.palette, ed.styles)
-}
-
-func (ed configEditor) setSize(w, h int) configEditor {
+func (ed *configEditor) SetSize(w, h int) {
 	ed.width = w
 	ed.height = h
-	return ed
+}
+
+func (ed *configEditor) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	next, cmd, closed := ed.list.Update(msg, ed.styles)
+	ed.list = next
+	return cmd, closed
+}
+
+func (ed *configEditor) View() string {
+	return ed.list.View(ed.width, ed.palette, ed.styles)
 }
 
 // buildConfigRows snapshots the current config into overlay rows.

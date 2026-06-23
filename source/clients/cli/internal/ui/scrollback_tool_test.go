@@ -3,6 +3,8 @@ package ui
 import (
 	"strings"
 	"testing"
+
+	"charm.land/lipgloss/v2"
 )
 
 // stripAnsiCSI is defined in confirm_test.go (same package). Reused here.
@@ -24,6 +26,29 @@ func TestToolEntry_FoldedRender(t *testing.T) {
 	}
 	if strings.Count(s, "\n") > 0 {
 		t.Errorf("folded should be one line, got newlines in: %q", s)
+	}
+}
+
+func TestToolEntry_ArgsColumnAligned(t *testing.T) {
+	// Short tool names pad to a fixed column so args start at the same offset
+	// regardless of name length.
+	short := stripAnsiCSI(renderToolEntry(ToolEntry{ToolName: "LS", ArgsSummary: "X", Status: ToolStatusComplete, Folded: true}, 80, false))
+	long := stripAnsiCSI(renderToolEntry(ToolEntry{ToolName: "Bash", ArgsSummary: "X", Status: ToolStatusComplete, Folded: true}, 80, false))
+	if strings.Index(short, "X") != strings.Index(long, "X") {
+		t.Errorf("args column not aligned: LS arg at %d, Bash arg at %d\n%q\n%q",
+			strings.Index(short, "X"), strings.Index(long, "X"), short, long)
+	}
+}
+
+func TestToolEntry_StatusRightAligned(t *testing.T) {
+	e := ToolEntry{ToolName: "Bash", ArgsSummary: "x", Status: ToolStatusComplete, ResultSummary: "exit 1 · 686ms", Folded: true}
+	const w = 60
+	s := stripAnsiCSI(renderToolEntry(e, w, false))
+	if !strings.HasSuffix(s, "✓ exit 1 · 686ms") {
+		t.Errorf("status should be at the right edge, got: %q", s)
+	}
+	if lipgloss.Width(s) != w {
+		t.Errorf("right-aligned line should fill width %d, got width %d: %q", w, lipgloss.Width(s), s)
 	}
 }
 

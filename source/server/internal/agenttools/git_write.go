@@ -53,7 +53,11 @@ func (gitAddTool) Execute(ctx context.Context, raw json.RawMessage) (*Result, er
 	if err != nil {
 		return nil, fmt.Errorf("git_add: %w: %s", err, string(bytes.TrimSpace(out)))
 	}
-	return &Result{Type: ResultText, Text: fmt.Sprintf("staged %d path(s)", len(a.Paths))}, nil
+	return &Result{
+		Type:   ResultText,
+		Text:   fmt.Sprintf("staged %d path(s)", len(a.Paths)),
+		Detail: countLabel(len(a.Paths), "path", "paths"),
+	}, nil
 }
 
 // gitCommitTool creates a commit with the given message. Optional --no-verify

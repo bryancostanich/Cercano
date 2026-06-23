@@ -48,7 +48,9 @@ func (gitStatusTool) Execute(ctx context.Context, raw json.RawMessage) (*Result,
 		return nil, fmt.Errorf("git_status: %w", err)
 	}
 	rows := parseGitStatusV2(string(out))
-	return NewRowsResult(rows), nil
+	res := NewRowsResult(rows)
+	res.Detail = countLabel(len(rows), "change", "changes")
+	return res, nil
 }
 
 // parseGitStatusV2 handles the most common record types:
@@ -189,5 +191,7 @@ func (gitLogTool) Execute(ctx context.Context, raw json.RawMessage) (*Result, er
 	if len(rows) == 0 {
 		return nil, errors.New("git_log: no commits matched")
 	}
-	return NewRowsResult(rows), nil
+	res := NewRowsResult(rows)
+	res.Detail = countLabel(len(rows), "commit", "commits")
+	return res, nil
 }

@@ -81,12 +81,15 @@ func runRipgrep(ctx context.Context, a grepArgs) (*Result, error) {
 		// error condition for our purposes — treat as empty result.
 		var ee *exec.ExitError
 		if errors.As(err, &ee) && ee.ExitCode() == 1 {
-			return NewRowsResult(nil), nil
+			res := NewRowsResult(nil)
+			res.Detail = "0 matches"
+			return res, nil
 		}
 		return nil, fmt.Errorf("grep (rg): %w: %s", err, string(bytes.TrimSpace(out)))
 	}
 	rows := parseVimgrep(string(out))
 	r := NewRowsResult(rows)
+	r.Detail = countLabel(len(rows), "match", "matches")
 	if r.Note == "" {
 		r.Note = "via rg"
 	} else {
@@ -110,12 +113,15 @@ func runGrep(ctx context.Context, a grepArgs) (*Result, error) {
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) && ee.ExitCode() == 1 {
-			return NewRowsResult(nil), nil
+			res := NewRowsResult(nil)
+			res.Detail = "0 matches"
+			return res, nil
 		}
 		return nil, fmt.Errorf("grep: %w: %s", err, string(bytes.TrimSpace(out)))
 	}
 	rows := parseGrepNH(string(out))
 	r := NewRowsResult(rows)
+	r.Detail = countLabel(len(rows), "match", "matches")
 	if r.Note == "" {
 		r.Note = "via grep (rg not found)"
 	} else {

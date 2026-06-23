@@ -793,6 +793,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 					ToolExecComplete: &proto.ToolExecComplete{
 						ToolUseId: ev.ToolUseID,
 						Summary:   ev.Summary,
+						Detail:    ev.Detail,
 						IsError:   ev.IsError,
 					},
 				},

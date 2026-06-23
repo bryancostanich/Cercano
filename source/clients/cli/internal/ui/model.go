@@ -71,6 +71,11 @@ type Model struct {
 	dragMouse     tea.Mouse
 	dragScrolling bool
 
+	// root and home are resolved once at construction; used to humanize tool-call
+	// path arguments (relative to the project root, ~-abbreviated under home).
+	root string
+	home string
+
 	palette theme.Palette
 	styles  theme.Styles
 
@@ -238,10 +243,17 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 		Version: "v0.1.0",
 		Model:   "qwen3-coder",
 	})
+
 	initialConvID := newConvID()
 	convRef.id = initialConvID
 
+	// Resolved once for humanizing tool-call path args (relative-to-root, ~-home).
+	root, _ := os.Getwd()
+	home, _ := os.UserHomeDir()
+
 	return Model{
+		root:               root,
+		home:               home,
 		palette:            p,
 		styles:             s,
 		md:                 render.NewMarkdown(theme.CrackerMarkdownStyle()),
@@ -1196,30 +1208,34 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 				ToolUseID: sm.ToolUseID,
 				ToolName:  sm.ToolName,
 				Status:    ToolStatusInProgress,
+				StartedAt: time.Now(), // fallback timing anchor until exec-start tightens it
 				Folded:    true,
 			},
 		})
 	case agentclient.TypeToolUseStop:
-		// Args block finished streaming — attach the summary to the existing
-		// entry. Silent skip if the start event was missed.
+		// Args block finished streaming — humanize the raw call JSON into a
+		// readable one-liner. Silent skip if the start event was missed.
 		if t := m.findToolEntry(sm.ToolUseID); t != nil {
-			t.ArgsSummary = sm.ArgsSummary
+			t.ArgsSummary = humanizeArgs(t.ToolName, sm.ArgsSummary, m.root, m.home)
 		}
 	case agentclient.TypeToolExecStart:
-		// Server is now running the tool. We already show InProgress from
-		// TypeToolUseStart; nothing to do unless the start was missed.
+		// Server is now running the tool. Re-anchor the timing clock here so the
+		// measured duration covers execution, not arg streaming. We already show
+		// InProgress from TypeToolUseStart.
 		if t := m.findToolEntry(sm.ToolUseID); t != nil {
 			t.Status = ToolStatusInProgress
+			t.StartedAt = time.Now()
 		}
 	case agentclient.TypeToolExecComplete:
-		// Tool finished — flip status to ✓ or ⚠ and attach the result summary.
+		// Tool finished — flip status to ✓ or ⚠ and build the result blurb
+		// (detail · CLI-measured timing).
 		if t := m.findToolEntry(sm.ToolUseID); t != nil {
 			if sm.IsError {
 				t.Status = ToolStatusError
 			} else {
 				t.Status = ToolStatusComplete
 			}
-			t.ResultSummary = sm.Summary
+			t.ResultSummary = humanizeResult(sm.Detail, sm.Summary, sm.IsError, time.Since(t.StartedAt))
 		}
 	case agentclient.TypePermissionRequired:
 		// Server-side tool loop hit a W/X tool and is blocked on a decision.

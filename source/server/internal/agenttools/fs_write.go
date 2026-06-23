@@ -79,8 +79,9 @@ func (writeFileTool) Execute(ctx context.Context, raw json.RawMessage) (*Result,
 		return nil, fmt.Errorf("Write: rename: %w", err)
 	}
 	return &Result{
-		Type: ResultText,
-		Text: fmt.Sprintf("wrote %d bytes to %s", len(a.Content), a.Path),
+		Type:   ResultText,
+		Text:   fmt.Sprintf("wrote %d bytes to %s", len(a.Content), a.Path),
+		Detail: countLabel(lineCount(a.Content), "line", "lines"),
 	}, nil
 }
 
@@ -143,11 +144,17 @@ func (editFileTool) Execute(ctx context.Context, raw json.RawMessage) (*Result, 
 	}
 	updated := strings.Replace(content, a.OldString, a.NewString, 1)
 	// Re-use the atomic-write helper so partial writes can't happen.
-	return writeFileTool{}.Execute(ctx, mustMarshal(map[string]any{
+	res, err := writeFileTool{}.Execute(ctx, mustMarshal(map[string]any{
 		"path":    a.Path,
 		"content": updated,
 		"mkdir":   false,
 	}))
+	if err != nil {
+		return nil, err
+	}
+	// Override Write's whole-file line count with the edit delta.
+	res.Detail = editDetail(a.OldString, a.NewString)
+	return res, nil
 }
 
 func mustMarshal(v any) json.RawMessage {

@@ -11,6 +11,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -45,7 +46,8 @@ type ToolEntry struct {
 	FullResult    string // full result body; shown when expanded
 	ResultSummary string // short result blurb shown next to ✓ in folded view
 	Status        ToolStatus
-	Folded        bool // V1: always true; reserved for future expand/collapse
+	StartedAt     time.Time // exec-start wall clock; result blurb times against it
+	Folded        bool      // V1: always true; reserved for future expand/collapse
 }
 
 // Package-level styles so renderToolEntry doesn't need a palette parameter.
@@ -95,20 +97,47 @@ func renderToolEntry(e ToolEntry, width int, focused bool) string {
 		statusBit = toolEntryError.Render("⚠ " + flattenSummary(e.ResultSummary))
 	}
 
-	prefix := fmt.Sprintf("%s%s %s ", gutter, marker, e.ToolName)
-	content := fmt.Sprintf("%s   %s", toolEntryFaint.Render(flattenSummary(e.ArgsSummary)), statusBit)
+	// Pad short tool names to a fixed column so the args lines up down the list.
+	// Longer names (git_commit, git_reset_hard) overflow the column rather than
+	// widening it for everyone — they're comparatively rare.
+	const nameCol = 6
+	name := e.ToolName
+	if pad := nameCol - lipgloss.Width(name); pad > 0 {
+		name += strings.Repeat(" ", pad)
+	}
+	prefix := fmt.Sprintf("%s%s %s ", gutter, marker, name)
+	argsRender := toolEntryFaint.Render(flattenSummary(e.ArgsSummary))
+	left := prefix + argsRender
+
+	// Right-align the status/timing to the right edge when the whole entry fits
+	// on one line — name+args read left-to-right, the ✓/timing column lines up
+	// down the right margin. Needs at least one space between args and status.
+	rightAligned := ""
+	if width > 0 {
+		leftW := lipgloss.Width(left)
+		statusW := lipgloss.Width(statusBit)
+		if leftW+1+statusW <= width {
+			rightAligned = left + strings.Repeat(" ", width-leftW-statusW) + statusBit
+		}
+	}
+
+	content := fmt.Sprintf("%s   %s", argsRender, statusBit)
 	line := prefix + content
 
 	if e.Folded {
-		// Wrap (ANSI-aware) to the available width so a long args/result line
-		// flows onto continuation lines instead of being clipped at the edge.
-		// Continuation lines hang-indent under the content (past "▸ <tool> ") so
-		// the wrapped entry reads as one unit. ansi.Wrap breaks on spaces and
-		// hard-breaks tokens longer than the limit (paths, JSON) — no overflow.
+		if rightAligned != "" {
+			return rightAligned
+		}
+		// Too long for one line: wrap the ARGS (ANSI-aware) to the available
+		// width, hang-indenting continuation lines under the content (past
+		// "▸ <tool> "), then right-align the status on the last line — or a fresh
+		// line if it won't fit — so the ✓/timing column stays flush right like the
+		// un-wrapped entries. ansi.Wrap breaks on spaces and hard-breaks tokens
+		// longer than the limit (paths, JSON).
 		hang := lipgloss.Width(prefix)
 		avail := width - hang
-		if width > 0 && avail >= 8 && lipgloss.Width(line) > width {
-			wrapped := strings.Split(ansi.Wrap(content, avail, ""), "\n")
+		if width > 0 && avail >= 8 {
+			wrapped := strings.Split(ansi.Wrap(argsRender, avail, ""), "\n")
 			for i := range wrapped {
 				if i == 0 {
 					wrapped[i] = prefix + wrapped[i]
@@ -116,12 +145,27 @@ func renderToolEntry(e ToolEntry, width int, focused bool) string {
 					wrapped[i] = strings.Repeat(" ", hang) + wrapped[i]
 				}
 			}
+			statusW := lipgloss.Width(statusBit)
+			last := len(wrapped) - 1
+			if lastW := lipgloss.Width(wrapped[last]); lastW+1+statusW <= width {
+				wrapped[last] += strings.Repeat(" ", width-lastW-statusW) + statusBit
+			} else {
+				pad := width - statusW
+				if pad < hang {
+					pad = hang
+				}
+				wrapped = append(wrapped, strings.Repeat(" ", pad)+statusBit)
+			}
 			return strings.Join(wrapped, "\n")
 		}
 		return line
 	}
 
-	body := []string{line}
+	first := line
+	if rightAligned != "" {
+		first = rightAligned
+	}
+	body := []string{first}
 	if e.FullArgs != "" {
 		body = append(body, toolEntryFaint.Render("    args: "+e.FullArgs))
 	}

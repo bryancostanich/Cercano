@@ -88,6 +88,36 @@ type Result struct {
 	// note that a tool fell back to a slower implementation (e.g. grep
 	// instead of rg).
 	Note string `json:"note,omitempty"`
+	// Detail is a clean, timing-free, content-free outcome token ("480 lines",
+	// "12 matches", "+3 −1") shown by clients next to the status glyph. Unlike
+	// the derived summary, it never carries result content.
+	Detail string `json:"detail,omitempty"`
+}
+
+// LLMContent renders the result as the text the model receives as the tool
+// result. Text results pass through; rows/JSON results serialize so the model
+// actually sees the output — an empty result makes the model re-call the tool
+// and loop to the iteration cap. A truncation/fallback Note is appended so the
+// model knows the view was capped.
+func (r *Result) LLMContent() string {
+	var body string
+	switch r.Type {
+	case ResultRows:
+		if b, err := json.Marshal(r.Rows); err == nil {
+			body = string(b)
+		}
+	case ResultJSON:
+		body = string(r.JSON)
+	default:
+		body = r.Text
+	}
+	if r.Note != "" {
+		if body != "" {
+			body += "\n"
+		}
+		body += "(" + r.Note + ")"
+	}
+	return body
 }
 
 // NewRowsResult constructs a rows-shaped Result, applying the standard

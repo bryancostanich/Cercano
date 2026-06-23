@@ -27,6 +27,7 @@ type LoopEvent struct {
 	ArgsJSON  string
 	Tier      string
 	Summary   string
+	Detail    string
 	IsError   bool
 }
 
@@ -203,8 +204,8 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 					out.IsError = true
 					emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: err.Error(), IsError: true})
 				} else {
-					out.Content = res.Text
-					emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: summarizeResult(res), IsError: false})
+					out.Content = res.LLMContent()
+					emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: summarizeResult(res), Detail: res.Detail, IsError: false})
 				}
 				rChan <- rr{idx: i, res: out}
 			}(i, pc)
@@ -248,8 +249,8 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				out.IsError = true
 				emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: err.Error(), IsError: true})
 			} else {
-				out.Content = res.Text
-				emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: summarizeResult(res), IsError: false})
+				out.Content = res.LLMContent()
+				emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: summarizeResult(res), Detail: res.Detail, IsError: false})
 			}
 			results = append(results, out)
 		}

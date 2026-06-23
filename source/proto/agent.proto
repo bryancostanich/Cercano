@@ -462,6 +462,9 @@ message ToolExecComplete {
   string tool_use_id = 1;
   string summary = 2;
   bool is_error = 3;
+  // detail is a clean, timing-free, content-free outcome token ("480 lines",
+  // "12 matches", "+3 −1") rendered by clients next to the status glyph.
+  string detail = 4;
 }
 message PermissionRequired {
   string tool_use_id = 1;

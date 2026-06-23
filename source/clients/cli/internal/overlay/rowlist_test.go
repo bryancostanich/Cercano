@@ -104,6 +104,32 @@ func TestRowList_ReadOnlyRowIgnoresEnter(t *testing.T) {
 	}
 }
 
+func TestRowList_SelectReloadsWhenOverlayStaysOpen(t *testing.T) {
+	rows := []Row{{Key: "start", Label: "start", Value: "pending"}}
+	reloadCalled := false
+	r := New("test", rows, Hooks{
+		OnSelect: func(row Row) (string, bool, tea.Cmd) {
+			return "started", false, nil
+		},
+		OnReload: func() []Row {
+			reloadCalled = true
+			return []Row{{Key: "done", Label: "state", Value: "running", ReadOnly: true}}
+		},
+	})
+	styles := theme.NewStyles(theme.Cracker())
+
+	r, _, closed := r.Update(tea.KeyPressMsg{Code: tea.KeyEnter}, styles)
+	if closed {
+		t.Fatal("select should keep overlay open")
+	}
+	if !reloadCalled {
+		t.Fatal("OnReload was not invoked after non-closing select")
+	}
+	if got := r.Rows[0].Value; got != "running" {
+		t.Fatalf("reloaded row value: got %q want running", got)
+	}
+}
+
 func TestRowList_EscClosesOverlay(t *testing.T) {
 	r := New("test", []Row{{Label: "a"}}, Hooks{})
 	styles := theme.NewStyles(theme.Cracker())

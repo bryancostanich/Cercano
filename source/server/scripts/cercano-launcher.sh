@@ -17,9 +17,7 @@
 #   2. Kill stale agents: any running `cercano agent` whose start time predates
 #      the freshly built server binary is killed (it's running outdated code; the
 #      next CLI launch spawns a fresh one).
-#   3. Enable TUI key-debug tracing by default for prompt-selection debugging.
-#      Set CERCANO_DEBUG_KEYS=0 to disable it.
-#   4. Exec the CLI with the original args.
+#   3. Exec the CLI with the original args.
 #
 # Install:
 #   cp source/server/scripts/cercano-launcher.sh ~/bin/cercano
@@ -41,11 +39,6 @@ SERVER_BIN="$LIBEXEC/cercano"
 CLI_BIN="$LIBEXEC/cercano-cli"
 
 mkdir -p "$LIBEXEC"
-
-# Temporary prompt-selection diagnostic: the TUI writes key events to
-# /tmp/cercano-key-debug.log when enabled. Keep this in the dev launcher so the
-# normal launch path captures macOS Terminal's actual Shift/Option/Cmd events.
-export CERCANO_DEBUG_KEYS="${CERCANO_DEBUG_KEYS:-1}"
 
 # stale BIN SRC_GLOB_ROOT — true if BIN is missing or any .go under SRC_GLOB_ROOT
 # is newer than BIN.

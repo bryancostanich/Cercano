@@ -4175,10 +4175,13 @@ func (x *ToolExecStart) GetToolUseId() string {
 }
 
 type ToolExecComplete struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ToolUseId     string                 `protobuf:"bytes,1,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`
-	Summary       string                 `protobuf:"bytes,2,opt,name=summary,proto3" json:"summary,omitempty"`
-	IsError       bool                   `protobuf:"varint,3,opt,name=is_error,json=isError,proto3" json:"is_error,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	ToolUseId string                 `protobuf:"bytes,1,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`
+	Summary   string                 `protobuf:"bytes,2,opt,name=summary,proto3" json:"summary,omitempty"`
+	IsError   bool                   `protobuf:"varint,3,opt,name=is_error,json=isError,proto3" json:"is_error,omitempty"`
+	// detail is a clean, timing-free, content-free outcome token ("480 lines",
+	// "12 matches", "+3 −1") rendered by clients next to the status glyph.
+	Detail        string `protobuf:"bytes,4,opt,name=detail,proto3" json:"detail,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4232,6 +4235,13 @@ func (x *ToolExecComplete) GetIsError() bool {
 		return x.IsError
 	}
 	return false
+}
+
+func (x *ToolExecComplete) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
 }
 
 type PermissionRequired struct {
@@ -4610,11 +4620,12 @@ const file_agent_proto_rawDesc = "" +
 	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\x12!\n" +
 	"\fargs_summary\x18\x02 \x01(\tR\vargsSummary\"/\n" +
 	"\rToolExecStart\x12\x1e\n" +
-	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\"g\n" +
+	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\"\x7f\n" +
 	"\x10ToolExecComplete\x12\x1e\n" +
 	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\x12\x18\n" +
 	"\asummary\x18\x02 \x01(\tR\asummary\x12\x19\n" +
-	"\bis_error\x18\x03 \x01(\bR\aisError\"\x82\x01\n" +
+	"\bis_error\x18\x03 \x01(\bR\aisError\x12\x16\n" +
+	"\x06detail\x18\x04 \x01(\tR\x06detail\"\x82\x01\n" +
 	"\x12PermissionRequired\x12\x1e\n" +
 	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\x12\x1b\n" +
 	"\ttool_name\x18\x02 \x01(\tR\btoolName\x12\x1b\n" +

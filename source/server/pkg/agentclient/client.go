@@ -678,6 +678,7 @@ type StreamMsg struct {
 	ArgsSummary string // for TypeToolUseStop
 	ArgsJSON    string // for TypePermissionRequired
 	Summary     string // for TypeToolExecComplete
+	Detail      string // for TypeToolExecComplete (clean outcome token)
 	IsError     bool   // for TypeToolExecComplete
 	Tier        string // for TypePermissionRequired ("W" | "X")
 }
@@ -770,6 +771,7 @@ func (c *Client) StreamChat(ctx context.Context, conversationID, input, workDir 
 					Type:      TypeToolExecComplete,
 					ToolUseID: tec.GetToolUseId(),
 					Summary:   tec.GetSummary(),
+					Detail:    tec.GetDetail(),
 					IsError:   tec.GetIsError(),
 				}
 				continue

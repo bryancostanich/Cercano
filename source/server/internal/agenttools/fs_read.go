@@ -63,7 +63,9 @@ func (readFileTool) Execute(ctx context.Context, raw json.RawMessage) (*Result, 
 	if a.Start > 0 || a.End > 0 {
 		text = selectLines(text, a.Start, a.End)
 	}
-	return NewTextResult(text), nil
+	res := NewTextResult(text)
+	res.Detail = countLabel(lineCount(text), "line", "lines")
+	return res, nil
 }
 
 // looksBinary heuristic: NUL byte in the first 8 KiB. Catches most binaries
@@ -164,7 +166,9 @@ func (listDirTool) Execute(ctx context.Context, raw json.RawMessage) (*Result, e
 		}
 		return rows[i]["name"].(string) < rows[j]["name"].(string)
 	})
-	return NewRowsResult(rows), nil
+	res := NewRowsResult(rows)
+	res.Detail = countLabel(len(rows), "entry", "entries")
+	return res, nil
 }
 
 func isSymlink(m fs.FileMode) bool { return m&fs.ModeSymlink != 0 }
@@ -270,8 +274,10 @@ func (globTool) Execute(ctx context.Context, raw json.RawMessage) (*Result, erro
 		return nil, fmt.Errorf("Glob: %w", err)
 	}
 	if len(matches) == 0 {
-		return &Result{Type: ResultText, Text: "(no matches)", Note: "0 matches"}, nil
+		return &Result{Type: ResultText, Text: "(no matches)", Note: "0 matches", Detail: "0 matches"}, nil
 	}
 	sort.Strings(matches)
-	return NewTextResult(strings.Join(matches, "\n") + "\n"), nil
+	res := NewTextResult(strings.Join(matches, "\n") + "\n")
+	res.Detail = countLabel(len(matches), "match", "matches")
+	return res, nil
 }

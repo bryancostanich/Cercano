@@ -106,6 +106,7 @@ func (runCommandTool) Execute(ctx context.Context, raw json.RawMessage) (*Result
 		body += "\nstderr:\n" + seStr
 	}
 	res := NewTextResult(body)
+	res.Detail = fmt.Sprintf("exit %d", exitCode)
 	// One-line glance summary for the folded scrollback entry. Prepend rather
 	// than overwrite so a truncation note from NewTextResult survives.
 	summary := fmt.Sprintf("exit %d · %s", exitCode, elapsed.Round(time.Millisecond))

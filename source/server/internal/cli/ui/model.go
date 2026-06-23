@@ -94,6 +94,9 @@ type Model struct {
 	selection          textSelection
 	selectionNotice    string
 	input              promptInput
+	debugKeys          bool
+	keyDebug           string
+	keyDebugLogPath    string
 
 	// inputHistory holds every submitted prompt (messages and slash commands),
 	// oldest first, for shell-style ↑/↓ recall. historyIdx is the browse
@@ -234,6 +237,12 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 		Version: "v0.1.0",
 		Model:   "qwen3-coder",
 	})
+	debugKeys := os.Getenv("CERCANO_DEBUG_KEYS") == "1"
+	keyDebugLogPath := ""
+	if debugKeys {
+		keyDebugLogPath = "/tmp/cercano-key-debug.log"
+		_ = os.WriteFile(keyDebugLogPath, nil, 0644)
+	}
 
 	initialConvID := newConvID()
 	convRef.id = initialConvID
@@ -255,6 +264,8 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 		openHistoryOnStart: openHistoryOnStart,
 		promptBorderColor:  p.Accent,
 		focusedToolIdx:     -1,
+		debugKeys:          debugKeys,
+		keyDebugLogPath:    keyDebugLogPath,
 	}
 }
 
@@ -262,6 +273,60 @@ func newConvID() string {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
+}
+
+func (m Model) appendKeyDebug(phase string, msg tea.KeyPressMsg) {
+	if m.keyDebugLogPath == "" {
+		return
+	}
+	f, err := os.OpenFile(m.keyDebugLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	key := msg.Key()
+	selection := m.input.selectedText()
+	if len(selection) > 80 {
+		selection = selection[:80]
+	}
+	_, _ = fmt.Fprintf(f,
+		"%s phase=%s key=%q stroke=%q code=%d base=%d mod=%d text=%q cursor=%d anchor=%d selection=%q value_len=%d\n",
+		time.Now().Format(time.RFC3339Nano),
+		phase,
+		msg.String(),
+		msg.Keystroke(),
+		key.Code,
+		key.BaseCode,
+		key.Mod,
+		key.Text,
+		m.input.cursor,
+		m.input.selectionAnchor,
+		selection,
+		len([]rune(m.input.Value())),
+	)
+}
+
+func (m Model) appendKeyboardEnhancementsDebug(msg tea.KeyboardEnhancementsMsg) {
+	if m.keyDebugLogPath == "" {
+		return
+	}
+	f, err := os.OpenFile(m.keyDebugLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	_, _ = fmt.Fprintf(f,
+		"%s phase=keyboard-enhancements flags=%d disambiguation=%t event_types=%t alternate=%t all_escape=%t associated_text=%t\n",
+		time.Now().Format(time.RFC3339Nano),
+		msg.Flags,
+		msg.SupportsKeyDisambiguation(),
+		msg.SupportsEventTypes(),
+		msg.SupportsAlternateKeys(),
+		msg.SupportsAllKeysAsEscapeCodes(),
+		msg.SupportsAssociatedText(),
+	)
 }
 
 // SeedAssistantMarkdown pre-loads a finished assistant entry containing the
@@ -580,6 +645,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.scrollbarDragging = false
 		return m, nil
 
+	case tea.KeyboardEnhancementsMsg:
+		if m.debugKeys {
+			m.appendKeyboardEnhancementsDebug(msg)
+		}
+		return m, nil
+
 	case tea.PasteMsg:
 		if m.editorActive || m.historyActive || m.pendingConfirm != nil {
 			return m, nil
@@ -594,6 +665,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tea.KeyPressMsg:
+		if m.debugKeys {
+			key := msg.Key()
+			m.keyDebug = fmt.Sprintf("key=%q stroke=%q code=%d base=%d mod=%d text=%q",
+				msg.String(), msg.Keystroke(), key.Code, key.BaseCode, key.Mod, key.Text)
+			m.appendKeyDebug("recv", msg)
+		}
 		// Pending confirm gates ALL keys — until the user resolves it, the
 		// input, scrollback, and any in-flight slash commands stay dormant.
 		if m.pendingConfirm != nil {
@@ -745,6 +822,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport, cmd = m.viewport.Update(msg)
 			return m, cmd
 		}
+		unmodifiedArrow := msg.Key().Mod == 0
 		switch keyStr {
 		case "enter":
 			text := strings.TrimSpace(m.input.Value())
@@ -765,19 +843,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up":
 			// On the first line, ↑ recalls the previous submitted input (shell
 			// style); otherwise it falls through to move the cursor up.
-			if m.input.Line() == 0 && m.recallHistoryPrev() {
+			if unmodifiedArrow && m.input.Line() == 0 && m.recallHistoryPrev() {
 				return m, nil
 			}
 		case "down":
 			// On the last line, ↓ steps forward through history; otherwise it
 			// falls through to move the cursor down.
-			if m.input.Line() == m.input.LineCount()-1 && m.recallHistoryNext() {
+			if unmodifiedArrow && m.input.Line() == m.input.LineCount()-1 && m.recallHistoryNext() {
 				return m, nil
 			}
 		}
 		var cmd tea.Cmd
 		prevVal := m.input.Value()
 		m.input, cmd = m.input.Update(msg)
+		if m.debugKeys {
+			m.appendKeyDebug("post-prompt", msg)
+		}
 		// Recompute layout if the input changed shape (suggestion line
 		// height depends on the input value). Cheap when nothing changed.
 		if m.input.Value() != prevVal {
@@ -1945,7 +2026,9 @@ func (m Model) View() tea.View {
 	// selection layer. Terminals that reserve Cmd+C for their own copy action
 	// simply won't emit a keypress, so ctrl+c/c/enter remain copy fallbacks.
 	v.KeyboardEnhancements = tea.KeyboardEnhancements{
+		ReportEventTypes:           true,
 		ReportAllKeysAsEscapeCodes: true,
+		ReportAlternateKeys:        true,
 		ReportAssociatedText:       true,
 	}
 	v.MouseMode = tea.MouseModeCellMotion
@@ -2168,6 +2251,9 @@ func (m Model) renderStatus() string {
 		return lipgloss.NewStyle().Width(m.width).Render(m.styles.Accent.Render("⟳ streaming"))
 	}
 	help := m.styles.Muted.Render("/help for cmds")
+	if m.keyDebug != "" {
+		help = m.styles.Info.Render(m.keyDebug)
+	}
 	if m.selection.hasRange() {
 		if m.selectionNotice != "" {
 			help = m.styles.Success.Render(m.selectionNotice) +

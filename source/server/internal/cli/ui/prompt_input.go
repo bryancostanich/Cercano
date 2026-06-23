@@ -257,16 +257,16 @@ func (p promptInput) Update(msg tea.Msg) (promptInput, tea.Cmd) {
 
 func (p promptInput) handleKey(msg tea.KeyPressMsg) (promptInput, tea.Cmd) {
 	k := msg.Key()
-	shift := k.Mod.Contains(tea.ModShift)
-	alt := k.Mod.Contains(tea.ModAlt)
-	cmd := k.Mod.Contains(tea.ModSuper) || k.Mod.Contains(tea.ModMeta)
+	shift := promptShiftMod(msg)
+	alt := promptAltMod(msg)
+	cmd := promptCommandMod(msg.Key())
 
-	if cmd && keyIs(k, 'z') {
-		if shift {
-			p.redoEdit()
-		} else {
-			p.undoEdit()
-		}
+	if isPromptRedoKey(msg) {
+		p.redoEdit()
+		return p, nil
+	}
+	if isPromptUndoKey(msg) {
+		p.undoEdit()
 		return p, nil
 	}
 	if cmd && keyIs(k, 'a') {
@@ -284,10 +284,22 @@ func (p promptInput) handleKey(msg tea.KeyPressMsg) (promptInput, tea.Cmd) {
 	}
 
 	switch {
-	case isKeyLeft(k, msg):
+	case isPromptDocStartKey(msg):
+		p.moveCursor(0, shift)
+		return p, nil
+	case isPromptDocEndKey(msg):
+		p.moveCursor(len(p.value), shift)
+		return p, nil
+	case isPromptLineStartKey(msg):
+		p.navigate(promptNavLeft, shift, false, true)
+		return p, nil
+	case isPromptLineEndKey(msg):
+		p.navigate(promptNavRight, shift, false, true)
+		return p, nil
+	case isKeyLeft(k, msg) || isPromptWordLeftKey(msg):
 		p.navigate(promptNavLeft, shift, alt, cmd)
 		return p, nil
-	case isKeyRight(k, msg):
+	case isKeyRight(k, msg) || isPromptWordRightKey(msg):
 		p.navigate(promptNavRight, shift, alt, cmd)
 		return p, nil
 	case isKeyUp(k, msg):
@@ -591,20 +603,40 @@ func (p promptInput) View() string {
 			continue
 		}
 
-		if hasSelection {
-			start := maxInt(selectionStart, row.start)
-			end := minInt(selectionEnd, row.end)
-			if start < end {
-				startCol := p.widthBetween(row.start, start)
-				endCol := p.widthBetween(row.start, end)
-				lineText = lipgloss.StyleRanges(lineText, lipgloss.NewRange(startCol, endCol, p.styles.Selection))
-			}
-		}
 		plainWidth := lipgloss.Width(row.text)
-		lineText = p.styles.Text.Render(lineText)
-		lines = append(lines, prompt+lineText+strings.Repeat(" ", maxInt(0, textWidth-plainWidth)))
+		lineText = p.renderRowText(row, selectionStart, selectionEnd, hasSelection)
+		padding := strings.Repeat(" ", maxInt(0, textWidth-plainWidth))
+		if p.rowLineBreakSelected(row, selectionStart, selectionEnd, hasSelection) {
+			padding = p.styles.Selection.Render(padding)
+		}
+		lines = append(lines, prompt+lineText+padding)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (p promptInput) renderRowText(row promptRow, selectionStart, selectionEnd int, hasSelection bool) string {
+	if !hasSelection {
+		return p.styles.Text.Render(row.text)
+	}
+	start := maxInt(selectionStart, row.start)
+	end := minInt(selectionEnd, row.end)
+	if start >= end {
+		return p.styles.Text.Render(row.text)
+	}
+
+	var b strings.Builder
+	b.WriteString(p.styles.Text.Render(string(p.value[row.start:start])))
+	b.WriteString(p.styles.Selection.Render(string(p.value[start:end])))
+	b.WriteString(p.styles.Text.Render(string(p.value[end:row.end])))
+	return b.String()
+}
+
+func (p promptInput) rowLineBreakSelected(row promptRow, selectionStart, selectionEnd int, hasSelection bool) bool {
+	return hasSelection &&
+		row.end < len(p.value) &&
+		p.value[row.end] == '\n' &&
+		selectionStart <= row.end &&
+		selectionEnd > row.end
 }
 
 func (p promptInput) Cursor() *tea.Cursor {
@@ -673,11 +705,15 @@ func (p promptInput) rowFromRange(start, end int) promptRow {
 func (p promptInput) cursorRowIndex(rows []promptRow, offset int) int {
 	offset = clampInt(offset, 0, len(p.value))
 	for i, row := range rows {
-		last := i == len(rows)-1
-		if offset >= row.start && (offset < row.end || offset == row.end && (last || offset > row.start)) {
+		if offset == row.start {
 			return i
 		}
+	}
+	for i, row := range rows {
 		if row.start == row.end && offset == row.start {
+			return i
+		}
+		if offset > row.start && offset <= row.end {
 			return i
 		}
 	}
@@ -696,13 +732,30 @@ func (p promptInput) cursorColumnAt(offset int) int {
 
 func (p promptInput) offsetByVisualLine(delta int) int {
 	rows := p.layoutRows()
-	idx := p.cursorRowIndex(rows, p.cursor)
+	idx := p.cursorRowIndexForVertical(rows, p.cursor, delta)
+	if delta < 0 && idx == 0 {
+		return 0
+	}
+	if delta > 0 && idx == len(rows)-1 {
+		return len(p.value)
+	}
 	target := clampInt(idx+delta, 0, len(rows)-1)
 	goal := p.goalColumn
 	if !p.hasGoal || goal < 0 {
 		goal = p.cursorColumn()
 	}
 	return p.offsetAtColumn(rows[target], goal)
+}
+
+func (p promptInput) cursorRowIndexForVertical(rows []promptRow, offset, delta int) int {
+	if delta < 0 && offset > 0 {
+		for i := 1; i < len(rows); i++ {
+			if offset == rows[i].start && p.value[offset-1] != '\n' {
+				return i - 1
+			}
+		}
+	}
+	return p.cursorRowIndex(rows, offset)
 }
 
 func (p promptInput) offsetFromPoint(x, y int) int {
@@ -789,20 +842,128 @@ func keyIs(k tea.Key, r rune) bool {
 	return k.Code == r || k.Code == upper || k.BaseCode == r || k.BaseCode == upper
 }
 
+func isPromptUndoKey(msg tea.KeyPressMsg) bool {
+	k := msg.Key()
+	if keyIs(k, '_') && k.Mod.Contains(tea.ModCtrl) {
+		return true
+	}
+	if !keyIs(k, 'z') {
+		return false
+	}
+	if k.Mod.Contains(tea.ModCtrl) && !k.Mod.Contains(tea.ModShift) {
+		return true
+	}
+	return promptCommandMod(k) && !k.Mod.Contains(tea.ModShift)
+}
+
+func isPromptRedoKey(msg tea.KeyPressMsg) bool {
+	k := msg.Key()
+	if !keyIs(k, 'z') {
+		return false
+	}
+	if k.Mod.Contains(tea.ModCtrl) && k.Mod.Contains(tea.ModShift) {
+		return true
+	}
+	return promptCommandMod(k) && k.Mod.Contains(tea.ModShift)
+}
+
+func promptCommandMod(k tea.Key) bool {
+	return k.Mod.Contains(tea.ModSuper) || k.Mod.Contains(tea.ModMeta)
+}
+
+func promptShiftMod(msg tea.KeyPressMsg) bool {
+	k := msg.Key()
+	return k.Mod.Contains(tea.ModShift) || keyHasMod(msg, "shift")
+}
+
+func promptAltMod(msg tea.KeyPressMsg) bool {
+	k := msg.Key()
+	return k.Mod.Contains(tea.ModAlt) || keyHasMod(msg, "alt")
+}
+
+func promptCtrlMod(msg tea.KeyPressMsg) bool {
+	k := msg.Key()
+	return k.Mod.Contains(tea.ModCtrl) || keyHasMod(msg, "ctrl")
+}
+
+func keyHasMod(msg tea.KeyPressMsg, mod string) bool {
+	for _, repr := range promptKeyReprs(msg) {
+		parts := strings.Split(repr, "+")
+		for i := 0; i < len(parts)-1; i++ {
+			if parts[i] == mod {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func keyNamed(msg tea.KeyPressMsg, names ...string) bool {
+	for _, repr := range promptKeyReprs(msg) {
+		for _, name := range names {
+			if repr == name || strings.HasSuffix(repr, "+"+name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func promptKeyReprs(msg tea.KeyPressMsg) []string {
+	reprs := []string{
+		strings.ToLower(msg.Keystroke()),
+		strings.ToLower(msg.String()),
+	}
+	if text := strings.ToLower(msg.Key().Text); text != "" {
+		reprs = append(reprs, text)
+	}
+	return reprs
+}
+
+func isPromptWordLeftKey(msg tea.KeyPressMsg) bool {
+	k := msg.Key()
+	return promptAltMod(msg) && keyIs(k, 'b')
+}
+
+func isPromptWordRightKey(msg tea.KeyPressMsg) bool {
+	k := msg.Key()
+	return promptAltMod(msg) && keyIs(k, 'f')
+}
+
+func isPromptLineStartKey(msg tea.KeyPressMsg) bool {
+	k := msg.Key()
+	return keyNamed(msg, "home") ||
+		(promptCtrlMod(msg) && keyIs(k, 'a') && !promptAltMod(msg) && !promptCommandMod(k))
+}
+
+func isPromptLineEndKey(msg tea.KeyPressMsg) bool {
+	k := msg.Key()
+	return keyNamed(msg, "end") ||
+		(promptCtrlMod(msg) && keyIs(k, 'e') && !promptAltMod(msg) && !promptCommandMod(k))
+}
+
+func isPromptDocStartKey(msg tea.KeyPressMsg) bool {
+	return (promptCommandMod(msg.Key()) || promptCtrlMod(msg)) && keyNamed(msg, "home")
+}
+
+func isPromptDocEndKey(msg tea.KeyPressMsg) bool {
+	return (promptCommandMod(msg.Key()) || promptCtrlMod(msg)) && keyNamed(msg, "end")
+}
+
 func isKeyLeft(k tea.Key, msg tea.KeyPressMsg) bool {
-	return k.Code == tea.KeyLeft || msg.String() == "left"
+	return k.Code == tea.KeyLeft || k.BaseCode == tea.KeyLeft || keyNamed(msg, "left")
 }
 
 func isKeyRight(k tea.Key, msg tea.KeyPressMsg) bool {
-	return k.Code == tea.KeyRight || msg.String() == "right"
+	return k.Code == tea.KeyRight || k.BaseCode == tea.KeyRight || keyNamed(msg, "right")
 }
 
 func isKeyUp(k tea.Key, msg tea.KeyPressMsg) bool {
-	return k.Code == tea.KeyUp || msg.String() == "up"
+	return k.Code == tea.KeyUp || k.BaseCode == tea.KeyUp || keyNamed(msg, "up")
 }
 
 func isKeyDown(k tea.Key, msg tea.KeyPressMsg) bool {
-	return k.Code == tea.KeyDown || msg.String() == "down"
+	return k.Code == tea.KeyDown || k.BaseCode == tea.KeyDown || keyNamed(msg, "down")
 }
 
 func minInt(a, b int) int {

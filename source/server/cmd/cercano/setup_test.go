@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"cercano/source/server/internal/config"
+	"cercano/source/server/pkg/config"
 )
 
 func TestFilterChatModels_ExcludesEmbeddings(t *testing.T) {

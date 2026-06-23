@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"cercano/source/server/internal/config"
 	"cercano/source/server/internal/localruntime"
+	"cercano/source/server/pkg/config"
 )
 
 const runtimeName = "llama_server"

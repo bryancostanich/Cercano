@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"cercano/source/server/internal/config"
+	"cercano/source/server/pkg/config"
 )
 
 type fakeProvider struct {

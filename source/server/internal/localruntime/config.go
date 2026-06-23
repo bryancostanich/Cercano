@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"cercano/source/server/internal/config"
+	"cercano/source/server/pkg/config"
 )
 
 func EndpointsFromConfig(cfg config.Config) []EndpointRecord {

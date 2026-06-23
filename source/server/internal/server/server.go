@@ -17,6 +17,7 @@ import (
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/llm/anthropic"
+	"cercano/source/server/internal/localruntime"
 	"cercano/source/server/internal/loop"
 	"cercano/source/server/pkg/proto"
 )
@@ -45,6 +46,7 @@ type Server struct {
 	permStore           *agent.PermissionStore
 	pendingDecisions    *agent.PendingDecisions
 	cloudLLMProvider    llm.Provider
+	runtimeManager      localruntime.Manager
 }
 
 // SetToolRegistry attaches the agent's tool registry. The CLI's /tools and
@@ -63,6 +65,12 @@ func (s *Server) SetPermissions(store *agent.PermissionStore, pending *agent.Pen
 // back to a hardcoded Anthropic-shaped capability snapshot.
 func (s *Server) SetCloudLLMProvider(p llm.Provider) { s.cloudLLMProvider = p }
 
+// SetRuntimeManager attaches the local runtime/dashboard state manager.
+func (s *Server) SetRuntimeManager(m localruntime.Manager) {
+	s.runtimeManager = m
+	s.refreshRuntimeEndpoints()
+}
+
 // NewServer creates a new Agent gRPC server.
 func NewServer(a *agent.Agent, localProvider *legacymodels.LocalModelProvider, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
 	return &Server{
@@ -79,6 +87,7 @@ func NewServer(a *agent.Agent, localProvider *legacymodels.LocalModelProvider, r
 func (s *Server) SetConfigPersistence(path string, cfg config.Config) {
 	s.configPath = path
 	s.currentConfig = cfg
+	s.refreshRuntimeEndpoints()
 }
 
 // UpdateConfig implements proto.AgentServer — updates runtime config without restart.
@@ -118,6 +127,38 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		s.localProvider.SetModelName(req.LocalModel)
 		changes = append(changes, fmt.Sprintf("local_model=%s", req.LocalModel))
 		fmt.Printf("UpdateConfig: Local model set to %s\n", req.LocalModel)
+	}
+
+	if req.LocalRuntime != "" {
+		if req.LocalRuntime != "ollama" && req.LocalRuntime != "llama_server" {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid local_runtime %q: expected ollama or llama_server", req.LocalRuntime),
+			}, nil
+		}
+		if s.registry == nil {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: "engine registry is not configured",
+			}, nil
+		}
+		eng, err := s.registry.GetEngine(req.LocalRuntime)
+		if err != nil {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("local runtime %q is not available: %v", req.LocalRuntime, err),
+			}, nil
+		}
+		model := req.LocalModel
+		if model == "" && req.LocalRuntime == "llama_server" {
+			model = s.currentConfig.LlamaServer.DefaultModel
+		}
+		if model == "" {
+			model = s.currentConfig.LocalModel
+		}
+		s.localProvider.SetEngine(eng, model)
+		changes = append(changes, fmt.Sprintf("local_runtime=%s", req.LocalRuntime))
+		fmt.Printf("UpdateConfig: Local runtime set to %s\n", req.LocalRuntime)
 	}
 
 	// Cloud provider rebuild: any of provider / model / api_key / base_url
@@ -172,26 +213,31 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		}, nil
 	}
 
+	if req.OllamaUrl != "" {
+		s.currentConfig.OllamaURL = req.OllamaUrl
+	}
+	if req.LocalModel != "" {
+		s.currentConfig.LocalModel = req.LocalModel
+	}
+	if req.LocalRuntime != "" {
+		s.currentConfig.LocalRuntime = req.LocalRuntime
+	}
+	if req.CloudProvider != "" {
+		s.currentConfig.CloudProvider = req.CloudProvider
+	}
+	if req.CloudModel != "" {
+		s.currentConfig.CloudModel = req.CloudModel
+	}
+	if req.CloudApiKey != "" {
+		s.currentConfig.CloudAPIKey = req.CloudApiKey
+	}
+	if req.CloudBaseUrl != "" {
+		s.currentConfig.CloudBaseURL = req.CloudBaseUrl
+	}
+	s.refreshRuntimeEndpoints()
+
 	// Persist changes to disk
 	if s.configPath != "" {
-		if req.OllamaUrl != "" {
-			s.currentConfig.OllamaURL = req.OllamaUrl
-		}
-		if req.LocalModel != "" {
-			s.currentConfig.LocalModel = req.LocalModel
-		}
-		if req.CloudProvider != "" {
-			s.currentConfig.CloudProvider = req.CloudProvider
-		}
-		if req.CloudModel != "" {
-			s.currentConfig.CloudModel = req.CloudModel
-		}
-		if req.CloudApiKey != "" {
-			s.currentConfig.CloudAPIKey = req.CloudApiKey
-		}
-		if req.CloudBaseUrl != "" {
-			s.currentConfig.CloudBaseURL = req.CloudBaseUrl
-		}
 		if err := config.Save(s.currentConfig, s.configPath); err != nil {
 			fmt.Printf("UpdateConfig: warning — failed to persist config: %v\n", err)
 		}
@@ -390,17 +436,22 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 		CloudApiKeySet: s.currentConfig.CloudAPIKey != "",
 		CloudState:     state,
 		Port:           s.currentConfig.Port,
+		LocalRuntime:   s.currentConfig.LocalRuntime,
 	}, nil
 }
 
-// ListModels implements proto.AgentServer — returns available models from the active Ollama instance.
+// ListModels implements proto.AgentServer — returns available models from the active local runtime.
 func (s *Server) ListModels(ctx context.Context, req *proto.ListModelsRequest) (*proto.ListModelsResponse, error) {
 	if s.registry == nil {
 		return nil, fmt.Errorf("registry not configured")
 	}
-	eng, err := s.registry.GetEngine("ollama")
+	runtimeName := s.currentConfig.LocalRuntime
+	if runtimeName == "" {
+		runtimeName = "ollama"
+	}
+	eng, err := s.registry.GetEngine(runtimeName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get ollama engine: %v", err)
+		return nil, fmt.Errorf("failed to get %s engine: %v", runtimeName, err)
 	}
 
 	models, err := eng.ListModels(ctx)
@@ -418,6 +469,217 @@ func (s *Server) ListModels(ctx context.Context, req *proto.ListModelsRequest) (
 	}
 
 	return &proto.ListModelsResponse{Models: protoModels}, nil
+}
+
+// GetRuntimeStatus implements proto.AgentServer — returns the dashboard's
+// provider-neutral runtime snapshot.
+func (s *Server) GetRuntimeStatus(ctx context.Context, req *proto.GetRuntimeStatusRequest) (*proto.GetRuntimeStatusResponse, error) {
+	if s.runtimeManager == nil {
+		return &proto.GetRuntimeStatusResponse{}, nil
+	}
+	status, err := s.runtimeManager.Status(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &proto.GetRuntimeStatusResponse{
+		Models:    mapRuntimeModels(status.Models),
+		Instances: mapRuntimeInstances(status.Instances),
+		Endpoints: mapRuntimeEndpoints(status.Endpoints),
+		Logs:      mapRuntimeLogs(status.Logs),
+	}, nil
+}
+
+// ListRuntimeModels implements proto.AgentServer.
+func (s *Server) ListRuntimeModels(ctx context.Context, req *proto.ListRuntimeModelsRequest) (*proto.ListRuntimeModelsResponse, error) {
+	if s.runtimeManager == nil {
+		return &proto.ListRuntimeModelsResponse{}, nil
+	}
+	models, err := s.runtimeManager.Inventory(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &proto.ListRuntimeModelsResponse{Models: mapRuntimeModels(models)}, nil
+}
+
+// ListRuntimeEndpoints implements proto.AgentServer.
+func (s *Server) ListRuntimeEndpoints(ctx context.Context, req *proto.ListRuntimeEndpointsRequest) (*proto.ListRuntimeEndpointsResponse, error) {
+	if s.runtimeManager == nil {
+		return &proto.ListRuntimeEndpointsResponse{}, nil
+	}
+	endpoints, err := s.runtimeManager.Endpoints(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &proto.ListRuntimeEndpointsResponse{Endpoints: mapRuntimeEndpoints(endpoints)}, nil
+}
+
+// StartRuntimeModel implements proto.AgentServer.
+func (s *Server) StartRuntimeModel(ctx context.Context, req *proto.StartRuntimeModelRequest) (*proto.StartRuntimeModelResponse, error) {
+	if s.runtimeManager == nil {
+		return &proto.StartRuntimeModelResponse{Ok: false, Error: "runtime manager not configured"}, nil
+	}
+	instance, err := s.runtimeManager.Start(ctx, localruntime.StartRequest{
+		Runtime: req.GetRuntime(),
+		ModelID: req.GetModelId(),
+	})
+	if err != nil {
+		return &proto.StartRuntimeModelResponse{Ok: false, Error: err.Error()}, nil
+	}
+	return &proto.StartRuntimeModelResponse{Ok: true, Instance: mapRuntimeInstance(*instance)}, nil
+}
+
+// StopRuntimeModel implements proto.AgentServer.
+func (s *Server) StopRuntimeModel(ctx context.Context, req *proto.StopRuntimeModelRequest) (*proto.StopRuntimeModelResponse, error) {
+	if s.runtimeManager == nil {
+		return &proto.StopRuntimeModelResponse{Ok: false, Error: "runtime manager not configured"}, nil
+	}
+	if err := s.runtimeManager.Stop(ctx, localruntime.StopRequest{InstanceID: req.GetInstanceId()}); err != nil {
+		return &proto.StopRuntimeModelResponse{Ok: false, Error: err.Error()}, nil
+	}
+	return &proto.StopRuntimeModelResponse{Ok: true}, nil
+}
+
+// RestartRuntime implements proto.AgentServer.
+func (s *Server) RestartRuntime(ctx context.Context, req *proto.RestartRuntimeRequest) (*proto.RestartRuntimeResponse, error) {
+	if s.runtimeManager == nil {
+		return &proto.RestartRuntimeResponse{Ok: false, Error: "runtime manager not configured"}, nil
+	}
+	instance, err := s.runtimeManager.Restart(ctx, localruntime.RestartRequest{
+		InstanceID: req.GetInstanceId(),
+		Runtime:    req.GetRuntime(),
+		ModelID:    req.GetModelId(),
+	})
+	if err != nil {
+		return &proto.RestartRuntimeResponse{Ok: false, Error: err.Error()}, nil
+	}
+	return &proto.RestartRuntimeResponse{Ok: true, Instance: mapRuntimeInstance(*instance)}, nil
+}
+
+// StreamRuntimeLogs implements proto.AgentServer. The first version streams the
+// current server-side buffer; live follow can build on the same RPC later.
+func (s *Server) StreamRuntimeLogs(req *proto.StreamRuntimeLogsRequest, stream proto.Agent_StreamRuntimeLogsServer) error {
+	if s.runtimeManager == nil {
+		return nil
+	}
+	logs, err := s.runtimeManager.Logs(stream.Context(), localruntime.LogRequest{
+		Tail:   int(req.GetTail()),
+		Source: req.GetSource(),
+	})
+	if err != nil {
+		return err
+	}
+	for _, entry := range logs {
+		if err := stream.Send(mapRuntimeLog(entry)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Server) refreshRuntimeEndpoints() {
+	if s.runtimeManager == nil {
+		return
+	}
+	s.runtimeManager.SetEndpoints(localruntime.EndpointsFromConfig(s.currentConfig))
+}
+
+func mapRuntimeModels(models []localruntime.ModelRecord) []*proto.RuntimeModel {
+	out := make([]*proto.RuntimeModel, 0, len(models))
+	for _, model := range models {
+		out = append(out, &proto.RuntimeModel{
+			Id:            model.ID,
+			DisplayName:   model.DisplayName,
+			Runtime:       model.Runtime,
+			Source:        model.Source,
+			Path:          model.Path,
+			Format:        model.Format,
+			Family:        model.Family,
+			Quantization:  model.Quantization,
+			SizeBytes:     model.SizeBytes,
+			ModifiedAt:    formatRuntimeTime(model.ModifiedAt),
+			DownloadState: model.DownloadState,
+			RuntimeState:  model.RuntimeState,
+			SupportsChat:  model.SupportsChat,
+			SupportsEmbed: model.SupportsEmbed,
+			SupportsTools: model.SupportsTools,
+			Active:        model.Active,
+		})
+	}
+	return out
+}
+
+func mapRuntimeInstances(instances []localruntime.InstanceRecord) []*proto.RuntimeInstance {
+	out := make([]*proto.RuntimeInstance, 0, len(instances))
+	for _, instance := range instances {
+		out = append(out, mapRuntimeInstance(instance))
+	}
+	return out
+}
+
+func mapRuntimeInstance(instance localruntime.InstanceRecord) *proto.RuntimeInstance {
+	return &proto.RuntimeInstance{
+		Id:           instance.ID,
+		Runtime:      instance.Runtime,
+		ModelId:      instance.ModelID,
+		State:        instance.State,
+		Pid:          int32(instance.PID),
+		Address:      instance.Address,
+		Port:         int32(instance.Port),
+		Endpoint:     instance.Endpoint,
+		StartedAt:    formatRuntimeTime(instance.StartedAt),
+		ReadyAt:      formatRuntimeTime(instance.ReadyAt),
+		RestartCount: int32(instance.RestartCount),
+		LastExitCode: int32(instance.LastExitCode),
+		LastError:    instance.LastError,
+		LogPath:      instance.LogPath,
+	}
+}
+
+func mapRuntimeEndpoints(endpoints []localruntime.EndpointRecord) []*proto.RuntimeEndpoint {
+	out := make([]*proto.RuntimeEndpoint, 0, len(endpoints))
+	for _, endpoint := range endpoints {
+		out = append(out, &proto.RuntimeEndpoint{
+			Id:            endpoint.ID,
+			Kind:          endpoint.Kind,
+			DisplayName:   endpoint.DisplayName,
+			BaseUrl:       endpoint.BaseURL,
+			Scope:         endpoint.Scope,
+			State:         endpoint.State,
+			ActiveRoles:   append([]string(nil), endpoint.ActiveRoles...),
+			Models:        append([]string(nil), endpoint.Models...),
+			LastCheckedAt: formatRuntimeTime(endpoint.LastCheckedAt),
+			LatencyMs:     endpoint.LatencyMS,
+			LastError:     endpoint.LastError,
+			AuthState:     endpoint.AuthState,
+		})
+	}
+	return out
+}
+
+func mapRuntimeLogs(logs []localruntime.LogEntry) []*proto.RuntimeLogEntry {
+	out := make([]*proto.RuntimeLogEntry, 0, len(logs))
+	for _, entry := range logs {
+		out = append(out, mapRuntimeLog(entry))
+	}
+	return out
+}
+
+func mapRuntimeLog(entry localruntime.LogEntry) *proto.RuntimeLogEntry {
+	return &proto.RuntimeLogEntry{
+		Timestamp: formatRuntimeTime(entry.Timestamp),
+		Source:    entry.Source,
+		Level:     entry.Level,
+		RuntimeId: entry.RuntimeID,
+		ModelId:   entry.ModelID,
+		Message:   entry.Message,
+	}
+}
+
+func formatRuntimeTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 // ProcessRequest implements proto.AgentServer (Unary).

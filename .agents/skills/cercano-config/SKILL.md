@@ -1,6 +1,6 @@
 ---
 name: cercano-config
-description: Query or update Cercano's runtime configuration without restarting the server. Use action 'get' to list available local models from Ollama. Use action 'set' to switch the active local model, change the Ollama endpoint URL, or change the cloud provider and model.
+description: Query or update Cercano's runtime configuration without restarting the server. Use action 'get' to list available local models. Use action 'set' to switch the active local runtime or model, change the Ollama endpoint URL, or change the cloud provider and model.
 compatibility: Requires Cercano server running.
 ---
 
@@ -16,7 +16,8 @@ Query or update Cercano's runtime configuration.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `action` | string | Yes | `"get"` to list available Ollama models, `"set"` to update config. |
+| `action` | string | Yes | `"get"` to list available local models, `"set"` to update config. |
+| `local_runtime` | string | No | Local runtime to use for generation: `"ollama"` or `"llama_server"`. |
 | `local_model` | string | No | Local model name to set (e.g. `"qwen2.5-coder:32b"`). |
 | `cloud_provider` | string | No | Cloud provider to set: `"google"` or `"anthropic"`. |
 | `cloud_model` | string | No | Cloud model to set (e.g. `"claude-sonnet-4-20250514"`). |
@@ -29,6 +30,14 @@ Query or update Cercano's runtime configuration.
 {
   "action": "set",
   "local_model": "qwen2.5-coder:32b"
+}
+```
+
+**Switch local runtime:**
+```json
+{
+  "action": "set",
+  "local_runtime": "llama_server"
 }
 ```
 

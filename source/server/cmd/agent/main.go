@@ -13,8 +13,11 @@ import (
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/internal/engine"
+	llamaengine "cercano/source/server/internal/engine/llamaserver"
 	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/legacymodels"
+	"cercano/source/server/internal/localruntime"
+	runtimellama "cercano/source/server/internal/localruntime/llamaserver"
 	"cercano/source/server/internal/loop"
 	"cercano/source/server/internal/server"
 	"cercano/source/server/internal/tools"
@@ -69,8 +72,13 @@ func main() {
 	registry.RegisterEngine(ollamaEng)
 	registry.RegisterEmbedder(ollamaEng)
 
+	runtimeManager := buildRuntimeManager(cfg)
+	llamaEng := llamaengine.NewEngine(runtimeManager)
+	registry.RegisterEngine(llamaEng)
+
 	// Initialize Providers
-	localProvider := legacymodels.NewLocalModelProvider(ollamaEng, cfg.LocalModel)
+	localEngine, localModel := selectLocalEngine(cfg, ollamaEng, llamaEng)
+	localProvider := legacymodels.NewLocalModelProvider(localEngine, localModel)
 
 	// Cloud provider construction: only build a real one when there's enough
 	// config to actually reach a cloud (API key OR a proxy baseURL). Otherwise
@@ -125,10 +133,58 @@ func main() {
 	}
 
 	s := grpc.NewServer()
-	proto.RegisterAgentServer(s, server.NewServer(orchestrator, localProvider, smartRouter, coordinator, cloudFactory, registry))
+	srv := server.NewServer(orchestrator, localProvider, smartRouter, coordinator, cloudFactory, registry)
+	srv.SetRuntimeManager(runtimeManager)
+	srv.SetConfigPersistence(config.DefaultPath(), cfg)
+	proto.RegisterAgentServer(s, srv)
 
 	fmt.Printf("Server listening at %v\n", lis.Addr())
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}
+}
+
+func buildRuntimeManager(cfg config.Config) localruntime.Manager {
+	manager := localruntime.NewManager(localruntime.WithEndpoints(localruntime.EndpointsFromConfig(cfg)))
+	if !llamaServerEnabled(cfg) {
+		return manager
+	}
+	provider := runtimellama.NewProvider(cfg.LlamaServer)
+	manager.RegisterProvider(provider)
+	if strings.TrimSpace(cfg.LlamaServer.DefaultModel) == "" {
+		manager.WriteLog(localruntime.LogEntry{
+			Source:  "cercano.runtime.llama_server",
+			Level:   "info",
+			Message: "llama-server provider registered; no default_model configured",
+		})
+		return manager
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
+	defer cancel()
+	if _, err := manager.Start(ctx, localruntime.StartRequest{
+		Runtime: "llama_server",
+		ModelID: cfg.LlamaServer.DefaultModel,
+	}); err != nil {
+		manager.WriteLog(localruntime.LogEntry{
+			Source:  "cercano.runtime.llama_server",
+			Level:   "error",
+			Message: "failed to start llama-server: " + err.Error(),
+		})
+	}
+	return manager
+}
+
+func llamaServerEnabled(cfg config.Config) bool {
+	return cfg.LlamaServer.Enabled || strings.EqualFold(cfg.LocalRuntime, "llama_server")
+}
+
+func selectLocalEngine(cfg config.Config, ollamaEng engine.InferenceEngine, llamaEng engine.InferenceEngine) (engine.InferenceEngine, string) {
+	if strings.EqualFold(cfg.LocalRuntime, "llama_server") {
+		model := strings.TrimSpace(cfg.LlamaServer.DefaultModel)
+		if model == "" {
+			model = cfg.LocalModel
+		}
+		return llamaEng, model
+	}
+	return ollamaEng, cfg.LocalModel
 }

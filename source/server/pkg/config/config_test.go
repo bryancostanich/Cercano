@@ -11,6 +11,9 @@ func TestDefaults(t *testing.T) {
 	if cfg.OllamaURL != "http://localhost:11434" {
 		t.Errorf("expected default OllamaURL, got %q", cfg.OllamaURL)
 	}
+	if cfg.LocalRuntime != "ollama" {
+		t.Errorf("expected default LocalRuntime, got %q", cfg.LocalRuntime)
+	}
 	if cfg.LocalModel != "qwen3-coder" {
 		t.Errorf("expected default LocalModel, got %q", cfg.LocalModel)
 	}
@@ -19,6 +22,12 @@ func TestDefaults(t *testing.T) {
 	}
 	if cfg.Port != "50052" {
 		t.Errorf("expected default Port, got %q", cfg.Port)
+	}
+	if cfg.LlamaServer.Host != "127.0.0.1" {
+		t.Errorf("expected default llama-server host, got %q", cfg.LlamaServer.Host)
+	}
+	if cfg.LlamaServer.Restart.MaxAttempts != 3 {
+		t.Errorf("expected default llama-server restart attempts, got %d", cfg.LlamaServer.Restart.MaxAttempts)
 	}
 }
 
@@ -53,6 +62,31 @@ func TestLoad_FromFile(t *testing.T) {
 	}
 	if cfg.Port != "50052" {
 		t.Errorf("expected default Port, got %q", cfg.Port)
+	}
+	if cfg.LlamaServer.ContextSize != 8192 {
+		t.Errorf("expected default llama-server context size, got %d", cfg.LlamaServer.ContextSize)
+	}
+}
+
+func TestLoad_LlamaServerRestartCanBeDisabled(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	os.WriteFile(path, []byte(`
+llama_server:
+  enabled: true
+  restart:
+    enabled: false
+`), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.LlamaServer.Restart.Enabled {
+		t.Fatal("expected explicit restart.enabled=false to be preserved")
+	}
+	if cfg.LlamaServer.Restart.MaxAttempts != 3 {
+		t.Errorf("expected restart max attempts default, got %d", cfg.LlamaServer.Restart.MaxAttempts)
 	}
 }
 

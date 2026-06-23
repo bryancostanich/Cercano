@@ -89,6 +89,7 @@ Query or update Cercano's runtime configuration.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | action | string | Yes | "get" or "set". |
+| local_runtime | string | No | Local runtime: "ollama" or "llama_server". |
 | local_model | string | No | Local model name to set. |
 | cloud_provider | string | No | Cloud provider: "google" or "anthropic". |
 | cloud_model | string | No | Cloud model name. |

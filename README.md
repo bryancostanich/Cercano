@@ -121,7 +121,7 @@ Cercano can run as a standalone gRPC server (for IDE clients) or embedded inside
 ```bash
 brew tap bryancostanich/cercano
 brew install cercano
-cercano setup    # detects/installs Ollama, pulls models, creates config
+cercano setup    # prepares Ollama plus the managed llama-server runtime
 ```
 
 ### Install from Source
@@ -132,11 +132,13 @@ Requires [Go](https://go.dev/dl/) 1.21+.
 git clone https://github.com/bryancostanich/Cercano.git
 cd Cercano/source/server
 make build
-bin/cercano setup    # detects/installs Ollama, pulls models, creates config
+bin/cercano setup    # prepares Ollama plus the managed llama-server runtime
 bin/cercano          # starts the gRPC server
 ```
 
-`cercano setup` handles everything: if no AI engine backend is detected, it offers to install [Ollama](https://ollama.com/) automatically (via Homebrew on macOS or the official installer on Linux), starts it, and pulls the required models. Use `--install-engine` to skip the interactive prompt for scripted/CI use.
+`cercano setup` handles the local runtime prerequisites: if no AI engine backend is detected, it offers to install [Ollama](https://ollama.com/) automatically (via Homebrew on macOS or the official installer on Linux), starts it, pulls the selected chat model, and ensures the configured embedding model (`nomic-embed-text` by default) is downloaded. It also prepares the optional managed `llama-server` runtime from [llama.cpp](https://github.com/ggml-org/llama.cpp), creates `~/.cercano/models` for GGUF files, and enables the runtime in config when `llama-server` is available. Ollama remains the default local inference path for now. Use `--install-engine` to skip interactive prompts for scripted/CI use.
+
+To explicitly route local generation through the managed GGUF runtime, set `local_runtime: llama_server` in config or run `/config local-runtime llama_server` after setup.
 
 ### Use with Claude Code
 

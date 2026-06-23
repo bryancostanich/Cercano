@@ -4,6 +4,8 @@ class Cercano < Formula
   version "0.8.1"
   license "MIT"
 
+  depends_on "llama.cpp"
+
   on_macos do
     if Hardware::CPU.arm?
       url "https://github.com/bryancostanich/Cercano/releases/download/v#{version}/cercano-darwin-arm64"
@@ -26,8 +28,10 @@ class Cercano < Formula
 
   def caveats
     <<~EOS
-      Cercano requires Ollama for local AI inference.
-      Install it from https://ollama.com/ then run:
+      Cercano uses Ollama as the default local inference engine and can also
+      supervise llama-server from llama.cpp as an isolated managed runtime.
+
+      Run setup after install:
 
         cercano setup
 

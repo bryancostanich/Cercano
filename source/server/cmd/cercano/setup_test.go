@@ -2,8 +2,12 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"cercano/source/server/internal/config"
 )
 
 func TestFilterChatModels_ExcludesEmbeddings(t *testing.T) {
@@ -31,6 +35,19 @@ func TestFilterChatModels_Empty(t *testing.T) {
 	got := filterChatModels([]string{"nomic-embed-text"})
 	if len(got) != 0 {
 		t.Errorf("expected empty slice when only embeddings installed, got %v", got)
+	}
+}
+
+func TestHasInstalledModel_MatchesLatestSuffix(t *testing.T) {
+	installed := []string{"qwen3-coder:latest", "nomic-embed-text:latest"}
+	if !hasInstalledModel(installed, "nomic-embed-text") {
+		t.Error("expected bare model name to match installed :latest model")
+	}
+	if !hasInstalledModel(installed, "nomic-embed-text:latest") {
+		t.Error("expected :latest model name to match installed :latest model")
+	}
+	if hasInstalledModel(installed, "mxbai-embed-large") {
+		t.Error("expected missing model to return false")
 	}
 }
 
@@ -107,5 +124,34 @@ func TestPromptYesNo(t *testing.T) {
 				t.Errorf("input=%q default=%v: got %v, want %v", tc.input, tc.defaultYes, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestEnsureLlamaModelDirs_CreatesDirs(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "models", "gguf")
+	if err := ensureLlamaModelDirs([]string{dir}); err != nil {
+		t.Fatalf("ensureLlamaModelDirs returned error: %v", err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("expected model dir to exist: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected %s to be a directory", dir)
+	}
+}
+
+func TestFindLlamaServerBinary_ConfiguredPath(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "llama-server")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatalf("write fake binary: %v", err)
+	}
+	got, err := findLlamaServerBinary(config.LlamaServerConfig{Binary: bin})
+	if err != nil {
+		t.Fatalf("findLlamaServerBinary returned error: %v", err)
+	}
+	if got != bin {
+		t.Fatalf("got %q, want %q", got, bin)
 	}
 }

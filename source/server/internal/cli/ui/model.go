@@ -1316,10 +1316,17 @@ func (m *Model) refreshViewport() {
 	wasAtBottom := m.viewport.AtBottom()
 	var b strings.Builder
 	for i, e := range m.entries {
-		b.WriteString(m.renderEntry(e, i))
-		if i < len(m.entries)-1 {
-			b.WriteString("\n")
+		if i > 0 {
+			// A blank line separates the user prompt, tool calls, and assistant
+			// output so they don't squish together — but consecutive tool-call
+			// entries stay tight as a group.
+			if m.entries[i-1].Tool != nil && e.Tool != nil {
+				b.WriteString("\n")
+			} else {
+				b.WriteString("\n\n")
+			}
 		}
+		b.WriteString(m.renderEntry(e, i))
 	}
 	content := b.String()
 	m.viewportPlainLines = plainLines(content)

@@ -26,22 +26,63 @@ type Palette struct {
 	Error       color.Color // failures, bypass indicator
 }
 
-// Cracker returns the default cercano-cli palette. Hex codes match
+// Cracker palette hex codes — the single source of truth for both the lipgloss
+// Palette (chrome) and the Glamour markdown style (assistant prose). Anything
+// that needs a cracker color references these, never a bare literal. Match
 // `docs/features/cli/README.md` ("Visual design").
+const (
+	hexBgDeep    = "#1A1A1A"
+	hexSurface   = "#252525"
+	hexBorderDim = "#434343"
+	hexBorder    = "#6F6F6F"
+	hexPrimary   = "#EA8212"
+	hexBright    = "#FFB84D"
+	hexDimAmber  = "#5A3308"
+	hexAccent    = "#BDF000"
+	hexInfo      = "#00C8E8"
+	hexMuted     = "#888888"
+	hexSuccess   = "#6FCF6F"
+	hexWarn      = "#FFD24D"
+	hexError     = "#E84D4D"
+)
+
+// Cracker returns the default cercano-cli palette, built from the hex constants
+// above.
 func Cracker() Palette {
 	return Palette{
-		BgDeep:    lipgloss.Color("#1A1A1A"),
-		Surface:   lipgloss.Color("#252525"),
-		BorderDim: lipgloss.Color("#434343"),
-		Border:    lipgloss.Color("#6F6F6F"),
-		Primary:   lipgloss.Color("#EA8212"),
-		Bright:    lipgloss.Color("#FFB84D"),
-		DimAmber:  lipgloss.Color("#5A3308"),
-		Accent:    lipgloss.Color("#BDF000"),
-		Info:      lipgloss.Color("#00C8E8"),
-		Muted:     lipgloss.Color("#888888"),
-		Success:   lipgloss.Color("#6FCF6F"),
-		Warn:      lipgloss.Color("#FFD24D"),
-		Error:     lipgloss.Color("#E84D4D"),
+		BgDeep:    lipgloss.Color(hexBgDeep),
+		Surface:   lipgloss.Color(hexSurface),
+		BorderDim: lipgloss.Color(hexBorderDim),
+		Border:    lipgloss.Color(hexBorder),
+		Primary:   lipgloss.Color(hexPrimary),
+		Bright:    lipgloss.Color(hexBright),
+		DimAmber:  lipgloss.Color(hexDimAmber),
+		Accent:    lipgloss.Color(hexAccent),
+		Info:      lipgloss.Color(hexInfo),
+		Muted:     lipgloss.Color(hexMuted),
+		Success:   lipgloss.Color(hexSuccess),
+		Warn:      lipgloss.Color(hexWarn),
+		Error:     lipgloss.Color(hexError),
 	}
 }
+
+// Buffer-muted accents. The main scrollback buffer reuses the chrome accent
+// hues (cyan, lime, red) but at lower saturation, so rendered turns read calmer
+// than the top bar / footer, which keep the full-saturation Palette colors.
+// Same hue as the palette accents with the edge taken off; amber (Primary)
+// stays the buffer's base color and is intentionally not muted.
+const (
+	bufLinkHex = "#2EA8BC" // muted cyan  — markdown links
+	bufCodeHex = "#3A6A73" // darker, more desaturated teal — inline code, code-fence lang
+	bufLimeHex = "#A9CE21" // muted Accent — tool ✓, focus caret, echoed user ▶
+	bufRedHex  = "#D95C5C" // muted Error  — tool ⚠
+)
+
+// Buffer-muted lipgloss colors derived from the hexes above. Exported so the
+// ui package can color scrollback content without reaching into chrome styles.
+var (
+	BufferLink  = lipgloss.Color(bufLinkHex)
+	BufferCode  = lipgloss.Color(bufCodeHex)
+	BufferLime  = lipgloss.Color(bufLimeHex)
+	BufferError = lipgloss.Color(bufRedHex)
+)

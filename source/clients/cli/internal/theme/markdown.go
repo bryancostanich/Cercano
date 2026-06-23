@@ -5,15 +5,6 @@ import (
 	"charm.land/glamour/v2/styles"
 )
 
-// Cracker palette hex — keep in sync with Cracker() in palette.go.
-const (
-	mdAmber  = "#EA8212"
-	mdBright = "#FFB84D"
-	mdLime   = "#BDF000"
-	mdCyan   = "#00C8E8"
-	mdMuted  = "#888888"
-)
-
 func strp(s string) *string { return &s }
 func boolp(b bool) *bool    { return &b }
 func uintp(u uint) *uint    { return &u }
@@ -26,14 +17,14 @@ func CrackerMarkdownStyle() ansi.StyleConfig {
 	sc := styles.DraculaStyleConfig // struct copy; we replace leaf pointers, never mutate pointees
 
 	sc.Document.Margin = uintp(0)
-	sc.Document.Color = strp(mdAmber)
+	sc.Document.Color = strp(hexPrimary)
 
-	sc.Heading.Color = strp(mdBright)
+	sc.Heading.Color = strp(hexBright)
 	sc.Heading.Bold = boolp(true)
-	sc.H1.Color = strp(mdBright)
+	sc.H1.Color = strp(hexBright)
 	sc.H1.Bold = boolp(true)
-	sc.H2.Color = strp(mdBright)
-	sc.H3.Color = strp(mdBright)
+	sc.H2.Color = strp(hexBright)
+	sc.H3.Color = strp(hexBright)
 
 	// Drop the leading "#" markers — the bundled style encodes them as heading
 	// prefixes. Clear prefix/suffix on every level so headings show as styled
@@ -45,11 +36,13 @@ func CrackerMarkdownStyle() ansi.StyleConfig {
 		h.BlockSuffix = ""
 	}
 
-	sc.Strong.Color = strp(mdBright)
+	sc.Strong.Color = strp(hexBright)
 	sc.Strong.Bold = boolp(true)
 	sc.Emph.Italic = boolp(true)
 
-	sc.Code.Color = strp(mdCyan)
+	// Inline code uses a darker, desaturated teal (bufCodeHex) — distinct from
+	// links and calmer than the vivid chrome cyan (hexInfo).
+	sc.Code.Color = strp(bufCodeHex)
 	// Zero the code-block margin so the body aligns flush-left under the
 	// horizontal rules we draw around it (see codeRule in the ui package).
 	sc.CodeBlock.Margin = uintp(0)
@@ -57,13 +50,13 @@ func CrackerMarkdownStyle() ansi.StyleConfig {
 	// List items (bullets and numbers) match normal paragraph text. Dracula
 	// colors the whole list via List.Color (white) and ignores Item/Enumeration
 	// .Color for the rendered text, so the block color is the only lever.
-	sc.List.Color = strp(mdAmber)
+	sc.List.Color = strp(hexPrimary)
 
-	sc.Link.Color = strp(mdCyan)
+	sc.Link.Color = strp(bufLinkHex)
 	sc.Link.Underline = boolp(true)
-	sc.LinkText.Color = strp(mdCyan)
+	sc.LinkText.Color = strp(bufLinkHex)
 
-	sc.HorizontalRule.Color = strp(mdMuted)
+	sc.HorizontalRule.Color = strp(hexMuted)
 
 	return sc
 }

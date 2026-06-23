@@ -53,9 +53,9 @@ type ToolEntry struct {
 // Package-level styles so renderToolEntry doesn't need a palette parameter.
 // Initialized from the active palette (Cracker) which matches what New() uses.
 var (
-	toolEntryFaint    = lipgloss.NewStyle().Faint(true)
-	toolEntrySuccess  = lipgloss.NewStyle().Foreground(theme.Cracker().Accent) // lime ✓
-	toolEntryError    = lipgloss.NewStyle().Foreground(theme.Cracker().Error)  // red ⚠
+	toolEntryFaint   = lipgloss.NewStyle().Faint(true)
+	toolEntrySuccess = lipgloss.NewStyle().Foreground(theme.BufferLime)  // muted lime ✓
+	toolEntryError   = lipgloss.NewStyle().Foreground(theme.BufferError) // muted red ⚠
 )
 
 // renderToolEntry produces the scrollback text for one tool call.
@@ -84,7 +84,7 @@ func renderToolEntry(e ToolEntry, width int, focused bool) string {
 
 	gutter := "  "
 	if focused {
-		gutter = lipgloss.NewStyle().Foreground(theme.Cracker().Accent).Render("▶ ")
+		gutter = lipgloss.NewStyle().Foreground(theme.BufferLime).Render("▶ ")
 	}
 
 	var statusBit string

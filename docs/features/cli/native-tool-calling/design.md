@@ -33,8 +33,8 @@ The CLI already has the user-facing pieces of tool calling: a typed `agenttools.
 
 ### Supersession
 
-- `docs/plans/dispatch.md` (raw local-LLM tool-use dispatch via MCP) is **superseded for V1**. Native tool calling provides the same loop for both Anthropic and Ollama and includes the confirm-gating UI dispatch.md deferred. The host-LLM cancellation, conversation_id continuity, and MCP progress-event goals from dispatch.md can move to a follow-up if still wanted.
-- `docs/plans/cli.md` mentions "tool selection for ambiguous intent (embedding similarity over tool descriptions, LLM fallback only)" as an algorithmic-over-LLM example. With native tool calling, the model picks tools natively *with parameters*; embedding-based pre-classification has no role. That line is removed from `cli.md`.
+- `docs/archive/dispatch.md` (raw local-LLM tool-use dispatch via MCP) is **superseded for V1**. Native tool calling provides the same loop for both Anthropic and Ollama and includes the confirm-gating UI dispatch.md deferred. The host-LLM cancellation, conversation_id continuity, and MCP progress-event goals from dispatch.md can move to a follow-up if still wanted.
+- `docs/features/cli/README.md` mentions "tool selection for ambiguous intent (embedding similarity over tool descriptions, LLM fallback only)" as an algorithmic-over-LLM example. With native tool calling, the model picks tools natively *with parameters*; embedding-based pre-classification has no role. That line is removed from the CLI overview.
 
 ## Design / Approach
 
@@ -361,7 +361,7 @@ This split keeps tool-calling capability available to every client unchanged. VS
 
 ## Status
 
-Design approved 2026-06-21. Implementation plan written (see `native_tool_calling_tasks.md`) and executed.
+Design approved 2026-06-21. Implementation plan written (see `tasks.md`) and executed.
 
 - [x] Internal types (Block / Message / Tool / ToolChoice / Permission / StreamEvent / StreamReader / Provider / Capabilities / ChatRequest / ChatResponse)
 - [x] Anthropic adapter (anthropic-sdk-go v1.51, WithBaseURL → Meridian, custom UA RoundTripper, Chat + StreamChat with SSE → StreamEvent translation, schema validation + Required pass-through)
@@ -378,7 +378,7 @@ Design approved 2026-06-21. Implementation plan written (see `native_tool_callin
 - [x] Legacy provider files relocated to `internal/legacymodels` (unblocks `agent → llm` import direction)
 - [x] Main wiring: Anthropic provider constructed when `cfg.CloudProvider == "anthropic"`, wired via `srv.SetCloudLLMProvider`
 - [x] Integration test: full tool-call turn through Anthropic adapter against httptest server
-- [x] Supersedes `docs/plans/dispatch.md` for V1; references updated in `docs/plans/cli.md`
+- [x] Supersedes `docs/archive/dispatch.md` for V1; references updated in `docs/features/cli/README.md`
 
 V1 follow-ups recorded for future work:
 - `streamProcessRequestWithToolLoop` doesn't yet persist turns, propagate `WorkDir`/system prompt, or run the project-context loader. Needed before legacy `ProcessRequestStream` path can be deleted entirely.

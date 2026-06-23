@@ -1,6 +1,6 @@
 # `cercano_dispatch` — Raw Local-LLM Tool-Use Dispatch
 
-> Status: **Superseded** by `docs/plans/native_tool_calling.md` for V1. The native tool calling design covers both Anthropic and Ollama uniformly through a layered provider abstraction and includes the confirm-gating UI dispatch.md deferred. The host-LLM cancellation, conversation_id continuity, and MCP progress-event goals can move to a follow-up if still wanted.
+> Status: **Superseded** by `docs/features/cli/native-tool-calling/design.md` for V1. The native tool calling design covers both Anthropic and Ollama uniformly through a layered provider abstraction and includes the confirm-gating UI dispatch.md deferred. The host-LLM cancellation, conversation_id continuity, and MCP progress-event goals can move to a follow-up if still wanted.
 
 ## Overview / Goal
 

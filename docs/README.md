@@ -1,54 +1,62 @@
 # Cercano Docs
 
-Project documentation, organized by status. Migrated from the former
-`conductor/` track workflow and superpowers planning docs (2026-06-21).
+Project documentation, organized **by feature** — each major feature or initiative
+gets its own folder under `features/`, holding all of its docs (design, plan, tasks,
+spec) across its whole lifecycle. **Status lives in each doc's header**, not in the
+folder path, so a feature's folder never moves when it ships. Reorg history is in
+`archive/` (`_migration_audit.md`, `_reorg_audit.md`).
 
-## `features/` — shipped features (as-built specs)
+## `features/` — one folder per feature/initiative
 
-Specs describing features that have shipped. One `<name>_spec.md` per feature.
+Each folder holds the docs that feature needs, using conventional filenames:
+`spec.md` (as-built), `design.md` (approved design), `plan.md` / `tasks.md`
+(implementation), `followups.md`. Check the `Status:` header inside each doc.
 
-- adk_integration, agent_skills, auto_server_launch, cloud_integration,
-  configurable_local_model, deep_research, distribution, document_tool,
-  engine_agnosticism, engine_bootstrap, generalize_agent, ide_enhancements,
-  local_ai_mvp, local_coprocessor_tools, mcp_server, project_context,
-  remote_inference, token_streaming, update_check, usage_telemetry, web_research
+### `features/cli/` — the standalone CLI / agent initiative
+The active build. One sub-folder per piece:
 
-> `distribution` and a few others carry a short "Remaining / not-yet-done"
-> section for the small sub-items still open.
+- `README.md` — initiative overview (the CLI track plan)
+- `native-tool-calling/` — design, tasks, followups
+- `living-recap/` — design, plan
+- `textarea/` — native prompt textarea spec
+- `tui-charm-v2/` — Charm v2 migration design + plan
+- `buffer-scrollbar/` — viewport scrollbar design + plan
+- `streaming-markdown/` — streaming markdown render design + plan
 
-## `plans/` — in-progress / not-yet-built
-
-Planning docs with intent, design, and remaining task lists.
-
-- **cli** — stand-alone terminal agent harness (plan drafted, not implemented)
-- **plugin_packaging** — Claude/Gemini/Codex plugin repos (in progress; testing pending)
-- **deep_research_enhancement** — deep-research v2 three-tier redesign + structured-output fix
-- **dispatch**, **validator_dispatch** — agent/validator dispatch (TDD plans, not started)
-- **docker** — containerization (not started)
-- **savings_estimation** — token-savings estimation (not started)
-- **semantic_search** — embedding-based codebase search (not started)
+### Other features (shipped & planned)
+`adk-integration`, `agent-skills`, `auto-server-launch`, `cloud-integration`,
+`configurable-local-model`, `deep-research` (spec + enhancement-plan),
+`distribution`, `docker`, `document-tool`, `engine` (agnosticism + bootstrap),
+`generalize-agent`, `ide-enhancements`, `local-ai-mvp`, `local-coprocessor-tools`,
+`mcp-server`, `plugin-packaging`, `project-context`, `remote-inference`,
+`savings-estimation`, `semantic-search`, `test-fixtures`, `token-streaming`,
+`update-check`, `usage-telemetry`, `validator-dispatch`, `web-research`
 
 ## `research/` — research deliverables
 
-- **competitive_audit** — agent-features landscape audit. NOTE: scoped only, the
+- `competitive-audit.md` — agent-features landscape audit. NOTE: scoped only; the
   per-agent investigation was never run; matrices are scaffolded with TBD cells.
 
-## `internal/` — infra / maintenance
+## `internal/` — infra / maintenance records
 
-- **test_fixtures** — test-fixture infrastructure (planning)
-- **refactor_cleanup** — server/client restructure (shipped)
-- **ide_fixes** — VS Code extension bug fixes (shipped)
+- `refactor-cleanup.md` — server/client restructure (shipped)
+- `ide-fixes.md` — VS Code extension bug fixes (shipped)
 
-## Project-level reference
+## `reference/` — evergreen project-level
 
 - `product.md` — product vision / concept
 - `tech-stack.md` — technology stack
 - `workflow.md` — development workflow / process
-- `roadmap.md` — master project plan (track links are historical; tracks now live
-  under `features/` and `plans/`)
-- `code_styleguides/` — `general.md`, `go.md`
-
-## Other
-
+- `roadmap.md` — master project plan (links into `features/`)
 - `agent-skills-guide.md` — guide to writing SKILL.md files
-- `_migration_audit.md` — record of this docs reorg
+- `code-styleguides/` — `general.md`, `go.md`
+
+## `agent/` — user-facing agent documentation
+
+- `README.md` — how to set up and use the standalone Cercano agent
+
+## `archive/` — superseded / historical
+
+- `dispatch.md` — raw local-LLM dispatch design, superseded by `features/cli/native-tool-calling/`
+- `_migration_audit.md` — record of the first docs reorg (conductor → docs)
+- `_reorg_audit.md` — record of this feature-centric reorg

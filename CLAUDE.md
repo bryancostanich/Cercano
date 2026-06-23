@@ -28,4 +28,4 @@ cd source/server && go test ./... -count=1
 - `source/server/internal/web/` — URL fetching, HTML extraction, DDG search, research pipeline
 - `source/server/scripts/` — Python scripts (ddg_search.py)
 - `.agents/skills/` — Agent Skill definitions (SKILL.md files)
-- `conductor/` — Track-based development workflow
+- `docs/` — Specs, plans, research, and project documentation

@@ -178,11 +178,11 @@ The decision is **agent-side**. The CLI just renders the `PermissionRequired` st
 
 ## Detailed design docs
 
-- `docs/plans/native_tool_calling.md` — the brainstorm + spec for native tool calling
-- `docs/plans/native_tool_calling_tasks.md` — the implementation plan
-- `docs/plans/native_tool_calling_followups.md` — V1 follow-ups (resolved and deferred)
-- `docs/plans/cli.md` — the CLI track spec
-- `docs/plans/dispatch.md` — superseded raw-dispatch design (kept for context)
+- `docs/features/cli/native-tool-calling/design.md` — the brainstorm + spec for native tool calling
+- `docs/features/cli/native-tool-calling/tasks.md` — the implementation plan
+- `docs/features/cli/native-tool-calling/followups.md` — V1 follow-ups (resolved and deferred)
+- `docs/features/cli/README.md` — the CLI track spec
+- `docs/archive/dispatch.md` — superseded raw-dispatch design (kept for context)
 
 ## Known limitations
 

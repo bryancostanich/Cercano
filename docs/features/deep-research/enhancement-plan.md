@@ -194,8 +194,3 @@ MCP notification/streaming (broken in Claude Code), `cercano_research_status` po
 
 ### Prior work that must land first (v2 foundation)
 Six unpushed commits from the enhancement track: model pre-check, per-request model override, phased execution, parallel prefetching, validation results, track status update. Sidecar/incremental design builds on these. (Per project rules: never push without explicit approval.)
-
-### Superpowers sources folded into this doc
-- `docs/superpowers/plans/2026-04-08-deep-research-v2.md` (v2 11-task plan)
-- `docs/superpowers/specs/2026-04-08-deep-research-v2-design.md` (v2 three-tier design)
-- `docs/superpowers/continuations/2026-04-09-structured-content-fix.md` and `…-fix-v2.md` (structuredContent rendering fix for research/tool output)

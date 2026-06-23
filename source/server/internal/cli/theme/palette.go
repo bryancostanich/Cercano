@@ -27,7 +27,7 @@ type Palette struct {
 }
 
 // Cracker returns the default cercano-cli palette. Hex codes match
-// `conductor/tracks/cli/spec.md §6.1`.
+// `docs/features/cli/README.md` ("Visual design").
 func Cracker() Palette {
 	return Palette{
 		BgDeep:    lipgloss.Color("#1A1A1A"),

@@ -2,11 +2,11 @@ package ui
 
 import (
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -122,15 +122,43 @@ func (m *Model) selectionPointFromMouse(mouse tea.Mouse, allowScroll bool) selec
 	}
 }
 
+// selectionBg is the SGR for the selection background — a muted slate blue laid
+// UNDER the existing text so the syntax colors show through, like a native
+// selection rather than a flat one-color block.
+const selectionBg = "\x1b[48;2;45;79;97m" // #2D4F61
+
+var ansiResetRe = regexp.MustCompile("\x1b\\[0?m")
+
 func (m Model) renderSelectionOnLine(line string, contentLine int) string {
 	start, end, ok := m.selection.lineRange(contentLine, m.viewport.Width())
 	if !ok {
 		return line
 	}
-	style := lipgloss.NewStyle().
-		Foreground(m.palette.BgDeep).
-		Background(m.palette.Info)
-	return lipgloss.StyleRanges(line, lipgloss.NewRange(start, end, style))
+	return highlightRange(line, start, end)
+}
+
+// highlightRange overlays the selection background on the visible columns
+// [start,end) of an already-styled line, preserving the per-character foreground
+// colors. The background is re-applied after every SGR reset so inner resets
+// don't drop it.
+func highlightRange(line string, start, end int) string {
+	w := ansi.StringWidth(line)
+	if start < 0 {
+		start = 0
+	}
+	if end > w {
+		end = w
+	}
+	if start >= end {
+		return line
+	}
+	before := ansi.Cut(line, 0, start)
+	mid := ansi.Cut(line, start, end)
+	after := ansi.Cut(line, end, w)
+	mid = selectionBg + ansiResetRe.ReplaceAllStringFunc(mid, func(r string) string {
+		return r + selectionBg
+	}) + "\x1b[0m"
+	return before + mid + after
 }
 
 func (m Model) handleSelectionKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {

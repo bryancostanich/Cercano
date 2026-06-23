@@ -72,6 +72,7 @@ func buildConfigRows(ag *agentclient.Client) []overlay.Row {
 		apiKey = "(set)"
 	}
 	return []overlay.Row{
+		{Key: "local-runtime", Label: "local-runtime", Value: cfg.LocalRuntime, Editable: true, Hint: "ollama | llama_server"},
 		{Key: "local-model", Label: "local-model", Value: cfg.LocalModel, Editable: true},
 		{Key: "ollama-url", Label: "ollama-url", Value: cfg.OllamaURL, Editable: true},
 		{Key: "cloud-provider", Label: "cloud-provider", Value: cfg.CloudProvider, Editable: true},
@@ -90,6 +91,8 @@ func saveSingle(ag *agentclient.Client, wireKey, value string) (string, error) {
 	defer cancel()
 	var u agentclient.ConfigUpdate
 	switch wireKey {
+	case "local-runtime":
+		u.LocalRuntime = value
 	case "local-model":
 		u.LocalModel = value
 	case "ollama-url":

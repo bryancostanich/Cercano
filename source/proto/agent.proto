@@ -48,6 +48,16 @@ service Agent {
   // ListModels returns the models available on the active Ollama instance.
   rpc ListModels (ListModelsRequest) returns (ListModelsResponse) {}
 
+  // Runtime dashboard APIs expose managed runtimes, external endpoints, and
+  // logs through Cercano rather than having the CLI call providers directly.
+  rpc GetRuntimeStatus (GetRuntimeStatusRequest) returns (GetRuntimeStatusResponse) {}
+  rpc ListRuntimeModels (ListRuntimeModelsRequest) returns (ListRuntimeModelsResponse) {}
+  rpc ListRuntimeEndpoints (ListRuntimeEndpointsRequest) returns (ListRuntimeEndpointsResponse) {}
+  rpc StartRuntimeModel (StartRuntimeModelRequest) returns (StartRuntimeModelResponse) {}
+  rpc StopRuntimeModel (StopRuntimeModelRequest) returns (StopRuntimeModelResponse) {}
+  rpc RestartRuntime (RestartRuntimeRequest) returns (RestartRuntimeResponse) {}
+  rpc StreamRuntimeLogs (StreamRuntimeLogsRequest) returns (stream RuntimeLogEntry) {}
+
   // ListSkills returns the catalog of available Agent Skills (name + description).
   rpc ListSkills (ListSkillsRequest) returns (ListSkillsResponse) {}
 
@@ -106,7 +116,7 @@ message ProcessRequestRequest {
 
 // Runtime configuration update request.
 message UpdateConfigRequest {
-  string local_model = 1;    // Ollama model name (e.g., "qwen3-coder", "GLM-4.7-Flash")
+  string local_model = 1;    // Local model name (Ollama tag or managed runtime model id/path)
   string cloud_provider = 2; // Cloud provider name (e.g., "google", "anthropic")
   string cloud_model = 3;    // Cloud model name (e.g., "gemini-1.5-flash", "claude-3-opus")
   string cloud_api_key = 4;  // API key for the cloud provider
@@ -115,6 +125,7 @@ message UpdateConfigRequest {
   // When set, used as the baseURL for the anthropic client; api_key may be empty
   // because the proxy handles auth (Claude Max OAuth in Meridian's case).
   string cloud_base_url = 6;
+  string local_runtime = 7;  // Local runtime name: "ollama" or "llama_server"
 }
 
 // Runtime configuration update response.
@@ -173,6 +184,112 @@ message ModelInfo {
 // Response containing available models.
 message ListModelsResponse {
   repeated ModelInfo models = 1;
+}
+
+message RuntimeModel {
+  string id = 1;
+  string display_name = 2;
+  string runtime = 3;
+  string source = 4;
+  string path = 5;
+  string format = 6;
+  string family = 7;
+  string quantization = 8;
+  int64 size_bytes = 9;
+  string modified_at = 10;
+  string download_state = 11;
+  string runtime_state = 12;
+  bool supports_chat = 13;
+  bool supports_embed = 14;
+  bool supports_tools = 15;
+  bool active = 16;
+}
+
+message RuntimeInstance {
+  string id = 1;
+  string runtime = 2;
+  string model_id = 3;
+  string state = 4;
+  int32 pid = 5;
+  string address = 6;
+  int32 port = 7;
+  string endpoint = 8;
+  string started_at = 9;
+  string ready_at = 10;
+  int32 restart_count = 11;
+  int32 last_exit_code = 12;
+  string last_error = 13;
+  string log_path = 14;
+}
+
+message RuntimeEndpoint {
+  string id = 1;
+  string kind = 2;
+  string display_name = 3;
+  string base_url = 4;
+  string scope = 5;
+  string state = 6;
+  repeated string active_roles = 7;
+  repeated string models = 8;
+  string last_checked_at = 9;
+  int64 latency_ms = 10;
+  string last_error = 11;
+  string auth_state = 12;
+}
+
+message RuntimeLogEntry {
+  string timestamp = 1;
+  string source = 2;
+  string level = 3;
+  string runtime_id = 4;
+  string model_id = 5;
+  string message = 6;
+}
+
+message GetRuntimeStatusRequest {}
+message GetRuntimeStatusResponse {
+  repeated RuntimeModel models = 1;
+  repeated RuntimeInstance instances = 2;
+  repeated RuntimeEndpoint endpoints = 3;
+  repeated RuntimeLogEntry logs = 4;
+}
+
+message ListRuntimeModelsRequest {}
+message ListRuntimeModelsResponse { repeated RuntimeModel models = 1; }
+
+message ListRuntimeEndpointsRequest {}
+message ListRuntimeEndpointsResponse { repeated RuntimeEndpoint endpoints = 1; }
+
+message StartRuntimeModelRequest {
+  string runtime = 1;
+  string model_id = 2;
+}
+message StartRuntimeModelResponse {
+  bool ok = 1;
+  string error = 2;
+  RuntimeInstance instance = 3;
+}
+
+message StopRuntimeModelRequest { string instance_id = 1; }
+message StopRuntimeModelResponse {
+  bool ok = 1;
+  string error = 2;
+}
+
+message RestartRuntimeRequest {
+  string instance_id = 1;
+  string runtime = 2;
+  string model_id = 3;
+}
+message RestartRuntimeResponse {
+  bool ok = 1;
+  string error = 2;
+  RuntimeInstance instance = 3;
+}
+
+message StreamRuntimeLogsRequest {
+  int32 tail = 1;
+  string source = 2;
 }
 
 // Request to list available Agent Skills.
@@ -279,6 +396,7 @@ message GetConfigResponse {
   // most recent turn succeeded; useful for surfacing in the CLI status bar.
   string cloud_state = 8;
   string port = 9;
+  string local_runtime = 10;
 }
 
 message ListSkillsRequest {}

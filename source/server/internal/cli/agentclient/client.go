@@ -135,6 +135,7 @@ func (c *Client) Close() error {
 // Config is the current runtime config reported by the agent.
 type Config struct {
 	OllamaURL      string
+	LocalRuntime   string
 	LocalModel     string
 	EmbeddingModel string
 	CloudProvider  string
@@ -153,6 +154,7 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 	}
 	return &Config{
 		OllamaURL:      resp.GetOllamaUrl(),
+		LocalRuntime:   resp.GetLocalRuntime(),
 		LocalModel:     resp.GetLocalModel(),
 		EmbeddingModel: resp.GetEmbeddingModel(),
 		CloudProvider:  resp.GetCloudProvider(),
@@ -169,11 +171,85 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 // proxy handles auth.
 type ConfigUpdate struct {
 	OllamaURL     string
+	LocalRuntime  string
 	LocalModel    string
 	CloudProvider string
 	CloudModel    string
 	CloudAPIKey   string
 	CloudBaseURL  string
+}
+
+// RuntimeStatus is the provider-neutral model/runtime dashboard snapshot.
+type RuntimeStatus struct {
+	Models    []RuntimeModel
+	Instances []RuntimeInstance
+	Endpoints []RuntimeEndpoint
+	Logs      []RuntimeLogEntry
+}
+
+type RuntimeModel struct {
+	ID            string
+	DisplayName   string
+	Runtime       string
+	Source        string
+	Path          string
+	Format        string
+	Family        string
+	Quantization  string
+	SizeBytes     int64
+	ModifiedAt    time.Time
+	DownloadState string
+	RuntimeState  string
+	SupportsChat  bool
+	SupportsEmbed bool
+	SupportsTools bool
+	Active        bool
+}
+
+type RuntimeInstance struct {
+	ID           string
+	Runtime      string
+	ModelID      string
+	State        string
+	PID          int
+	Address      string
+	Port         int
+	Endpoint     string
+	StartedAt    time.Time
+	ReadyAt      time.Time
+	RestartCount int
+	LastExitCode int
+	LastError    string
+	LogPath      string
+}
+
+type RuntimeEndpoint struct {
+	ID            string
+	Kind          string
+	DisplayName   string
+	BaseURL       string
+	Scope         string
+	State         string
+	ActiveRoles   []string
+	Models        []string
+	LastCheckedAt time.Time
+	LatencyMS     int64
+	LastError     string
+	AuthState     string
+}
+
+type RuntimeLogEntry struct {
+	Timestamp time.Time
+	Source    string
+	Level     string
+	RuntimeID string
+	ModelID   string
+	Message   string
+}
+
+type RuntimeLogMsg struct {
+	Entry RuntimeLogEntry
+	Err   error
 }
 
 // ConversationInfo is a persisted conversation summary returned by ListConversations.
@@ -359,11 +435,109 @@ func (c *Client) GetContextUsage(ctx context.Context, conversationID string) (*C
 	}, nil
 }
 
+func (c *Client) GetRuntimeStatus(ctx context.Context) (*RuntimeStatus, error) {
+	resp, err := c.agent.GetRuntimeStatus(ctx, &proto.GetRuntimeStatusRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return &RuntimeStatus{
+		Models:    mapRuntimeModels(resp.GetModels()),
+		Instances: mapRuntimeInstances(resp.GetInstances()),
+		Endpoints: mapRuntimeEndpoints(resp.GetEndpoints()),
+		Logs:      mapRuntimeLogs(resp.GetLogs()),
+	}, nil
+}
+
+func (c *Client) ListRuntimeModels(ctx context.Context) ([]RuntimeModel, error) {
+	resp, err := c.agent.ListRuntimeModels(ctx, &proto.ListRuntimeModelsRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return mapRuntimeModels(resp.GetModels()), nil
+}
+
+func (c *Client) ListRuntimeEndpoints(ctx context.Context) ([]RuntimeEndpoint, error) {
+	resp, err := c.agent.ListRuntimeEndpoints(ctx, &proto.ListRuntimeEndpointsRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return mapRuntimeEndpoints(resp.GetEndpoints()), nil
+}
+
+func (c *Client) StartRuntimeModel(ctx context.Context, runtimeName, modelID string) (*RuntimeInstance, error) {
+	resp, err := c.agent.StartRuntimeModel(ctx, &proto.StartRuntimeModelRequest{
+		Runtime: runtimeName,
+		ModelId: modelID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !resp.GetOk() {
+		return nil, fmt.Errorf("%s", resp.GetError())
+	}
+	instance := mapRuntimeInstance(resp.GetInstance())
+	return &instance, nil
+}
+
+func (c *Client) StopRuntimeModel(ctx context.Context, instanceID string) error {
+	resp, err := c.agent.StopRuntimeModel(ctx, &proto.StopRuntimeModelRequest{InstanceId: instanceID})
+	if err != nil {
+		return err
+	}
+	if !resp.GetOk() {
+		return fmt.Errorf("%s", resp.GetError())
+	}
+	return nil
+}
+
+func (c *Client) RestartRuntime(ctx context.Context, instanceID, runtimeName, modelID string) (*RuntimeInstance, error) {
+	resp, err := c.agent.RestartRuntime(ctx, &proto.RestartRuntimeRequest{
+		InstanceId: instanceID,
+		Runtime:    runtimeName,
+		ModelId:    modelID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !resp.GetOk() {
+		return nil, fmt.Errorf("%s", resp.GetError())
+	}
+	instance := mapRuntimeInstance(resp.GetInstance())
+	return &instance, nil
+}
+
+func (c *Client) StreamRuntimeLogs(ctx context.Context, tail int, source string) (<-chan RuntimeLogMsg, error) {
+	stream, err := c.agent.StreamRuntimeLogs(ctx, &proto.StreamRuntimeLogsRequest{
+		Tail:   int32(tail),
+		Source: source,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan RuntimeLogMsg, 16)
+	go func() {
+		defer close(out)
+		for {
+			entry, err := stream.Recv()
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			if err != nil {
+				out <- RuntimeLogMsg{Err: err}
+				return
+			}
+			out <- RuntimeLogMsg{Entry: mapRuntimeLog(entry)}
+		}
+	}()
+	return out, nil
+}
+
 // UpdateConfig sends a runtime config patch. Returns the agent's confirmation
 // summary line (e.g. "updated: [local_model=qwen3-coder, cloud=anthropic/...]").
 func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, error) {
 	resp, err := c.agent.UpdateConfig(ctx, &proto.UpdateConfigRequest{
 		OllamaUrl:     u.OllamaURL,
+		LocalRuntime:  u.LocalRuntime,
 		LocalModel:    u.LocalModel,
 		CloudProvider: u.CloudProvider,
 		CloudModel:    u.CloudModel,
@@ -377,6 +551,115 @@ func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, erro
 		return "", fmt.Errorf("%s", resp.GetMessage())
 	}
 	return resp.GetMessage(), nil
+}
+
+func mapRuntimeModels(models []*proto.RuntimeModel) []RuntimeModel {
+	out := make([]RuntimeModel, 0, len(models))
+	for _, model := range models {
+		out = append(out, RuntimeModel{
+			ID:            model.GetId(),
+			DisplayName:   model.GetDisplayName(),
+			Runtime:       model.GetRuntime(),
+			Source:        model.GetSource(),
+			Path:          model.GetPath(),
+			Format:        model.GetFormat(),
+			Family:        model.GetFamily(),
+			Quantization:  model.GetQuantization(),
+			SizeBytes:     model.GetSizeBytes(),
+			ModifiedAt:    parseRuntimeTime(model.GetModifiedAt()),
+			DownloadState: model.GetDownloadState(),
+			RuntimeState:  model.GetRuntimeState(),
+			SupportsChat:  model.GetSupportsChat(),
+			SupportsEmbed: model.GetSupportsEmbed(),
+			SupportsTools: model.GetSupportsTools(),
+			Active:        model.GetActive(),
+		})
+	}
+	return out
+}
+
+func mapRuntimeInstances(instances []*proto.RuntimeInstance) []RuntimeInstance {
+	out := make([]RuntimeInstance, 0, len(instances))
+	for _, instance := range instances {
+		out = append(out, mapRuntimeInstance(instance))
+	}
+	return out
+}
+
+func mapRuntimeInstance(instance *proto.RuntimeInstance) RuntimeInstance {
+	if instance == nil {
+		return RuntimeInstance{}
+	}
+	return RuntimeInstance{
+		ID:           instance.GetId(),
+		Runtime:      instance.GetRuntime(),
+		ModelID:      instance.GetModelId(),
+		State:        instance.GetState(),
+		PID:          int(instance.GetPid()),
+		Address:      instance.GetAddress(),
+		Port:         int(instance.GetPort()),
+		Endpoint:     instance.GetEndpoint(),
+		StartedAt:    parseRuntimeTime(instance.GetStartedAt()),
+		ReadyAt:      parseRuntimeTime(instance.GetReadyAt()),
+		RestartCount: int(instance.GetRestartCount()),
+		LastExitCode: int(instance.GetLastExitCode()),
+		LastError:    instance.GetLastError(),
+		LogPath:      instance.GetLogPath(),
+	}
+}
+
+func mapRuntimeEndpoints(endpoints []*proto.RuntimeEndpoint) []RuntimeEndpoint {
+	out := make([]RuntimeEndpoint, 0, len(endpoints))
+	for _, endpoint := range endpoints {
+		out = append(out, RuntimeEndpoint{
+			ID:            endpoint.GetId(),
+			Kind:          endpoint.GetKind(),
+			DisplayName:   endpoint.GetDisplayName(),
+			BaseURL:       endpoint.GetBaseUrl(),
+			Scope:         endpoint.GetScope(),
+			State:         endpoint.GetState(),
+			ActiveRoles:   append([]string(nil), endpoint.GetActiveRoles()...),
+			Models:        append([]string(nil), endpoint.GetModels()...),
+			LastCheckedAt: parseRuntimeTime(endpoint.GetLastCheckedAt()),
+			LatencyMS:     endpoint.GetLatencyMs(),
+			LastError:     endpoint.GetLastError(),
+			AuthState:     endpoint.GetAuthState(),
+		})
+	}
+	return out
+}
+
+func mapRuntimeLogs(logs []*proto.RuntimeLogEntry) []RuntimeLogEntry {
+	out := make([]RuntimeLogEntry, 0, len(logs))
+	for _, entry := range logs {
+		out = append(out, mapRuntimeLog(entry))
+	}
+	return out
+}
+
+func mapRuntimeLog(entry *proto.RuntimeLogEntry) RuntimeLogEntry {
+	if entry == nil {
+		return RuntimeLogEntry{}
+	}
+	return RuntimeLogEntry{
+		Timestamp: parseRuntimeTime(entry.GetTimestamp()),
+		Source:    entry.GetSource(),
+		Level:     entry.GetLevel(),
+		RuntimeID: entry.GetRuntimeId(),
+		ModelID:   entry.GetModelId(),
+		Message:   entry.GetMessage(),
+	}
+}
+
+func parseRuntimeTime(value string) time.Time {
+	if value == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
 }
 
 // StreamMsg is a typed event produced by a streaming chat turn.

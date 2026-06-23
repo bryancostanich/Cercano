@@ -9,7 +9,8 @@ Follow these steps to set up, build, and run the AI agent.
 ### Prerequisites
 
 *   **Go:** Go 1.21 or later. [Download & Install Go](https://go.dev/doc/install)
-*   **Ollama:** A local LLM runtime. [Ollama Website](https://ollama.com/)
+*   **Ollama:** The default local LLM runtime. [Ollama Website](https://ollama.com/)
+*   **llama.cpp / llama-server:** Optional managed GGUF runtime for embedded inference.
 *   **Protocol Buffers Compiler (`protoc`):** Used to generate gRPC code.
 
 ### Installation
@@ -38,13 +39,14 @@ Follow these steps to set up, build, and run the AI agent.
     ```
     (You might want to add this line to your shell's profile file, e.g., `~/.zshrc` or `~/.bash_profile`, for persistence.)
 
-4.  **Install Ollama:**
+4.  **Install local runtimes:**
     On macOS:
     ```bash
     brew install ollama
+    brew install llama.cpp
     brew services start ollama
     ```
-    For other operating systems (Linux, Windows), please refer to the [Ollama website](https://ollama.com/download).
+    For other operating systems, run `bin/cercano setup` after building; it can install Ollama on Linux and prepares `~/.cercano/models` for GGUF files. Install `llama.cpp` manually if `llama-server` is not on `PATH`.
 
 5.  **Download the embedding and LLM models:**
     ```bash

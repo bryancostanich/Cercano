@@ -10,9 +10,11 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/config"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/legacymodels"
+	"cercano/source/server/internal/localruntime"
 	"cercano/source/server/pkg/proto"
 
 	"google.golang.org/grpc"
@@ -122,6 +124,33 @@ func TestListModels(t *testing.T) {
 	}
 	if len(resp.Models) != 2 {
 		t.Fatalf("Expected 2 models, got %d", len(resp.Models))
+	}
+}
+
+func TestGetRuntimeStatus_IncludesConfiguredEndpoints(t *testing.T) {
+	srv := NewServer(nil, nil, nil, nil, nil, nil)
+	srv.SetRuntimeManager(localruntime.NewManager())
+	srv.SetConfigPersistence("", config.Config{
+		OllamaURL:      "http://mac-studio.local:11434",
+		LocalModel:     "qwen3-coder",
+		EmbeddingModel: "nomic-embed-text",
+		CloudProvider:  "anthropic",
+		CloudModel:     "claude-test",
+		CloudBaseURL:   "http://127.0.0.1:3456",
+	})
+
+	resp, err := srv.GetRuntimeStatus(context.Background(), &proto.GetRuntimeStatusRequest{})
+	if err != nil {
+		t.Fatalf("GetRuntimeStatus failed: %v", err)
+	}
+	if len(resp.Endpoints) != 2 {
+		t.Fatalf("expected 2 endpoints, got %#v", resp.Endpoints)
+	}
+	if resp.Endpoints[0].GetId() != "ollama" || resp.Endpoints[0].GetScope() != "lan" {
+		t.Fatalf("unexpected ollama endpoint: %#v", resp.Endpoints[0])
+	}
+	if resp.Endpoints[1].GetKind() != "anthropic_proxy" {
+		t.Fatalf("unexpected cloud endpoint: %#v", resp.Endpoints[1])
 	}
 }
 
@@ -315,4 +344,81 @@ func TestUpdateConfig_OllamaURL_WithModel(t *testing.T) {
 	if provider.Name() != "llama3" {
 		t.Errorf("Expected model 'llama3', got '%s'", provider.Name())
 	}
+}
+
+func TestUpdateConfig_LocalRuntime(t *testing.T) {
+	registry := engine.NewEngineRegistry()
+	ollamaEng := &namedTestEngine{name: "ollama"}
+	llamaEng := &namedTestEngine{name: "llama_server"}
+	registry.RegisterEngine(ollamaEng)
+	registry.RegisterEngine(llamaEng)
+	provider := legacymodels.NewLocalModelProvider(ollamaEng, "ollama-model")
+
+	srv := NewServer(nil, provider, nil, nil, nil, registry)
+	srv.SetConfigPersistence("", config.Config{
+		LocalRuntime: "ollama",
+		LocalModel:   "ollama-model",
+		LlamaServer: config.LlamaServerConfig{
+			DefaultModel: "/models/model-a.gguf",
+		},
+	})
+
+	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{
+		LocalRuntime: "llama_server",
+	})
+	if err != nil {
+		t.Fatalf("UpdateConfig failed: %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("expected success, got: %s", resp.Message)
+	}
+	got, err := provider.Process(context.Background(), &agent.Request{Input: "hello"})
+	if err != nil {
+		t.Fatalf("provider process failed: %v", err)
+	}
+	if got.Output != "llama_server:/models/model-a.gguf:hello" {
+		t.Fatalf("unexpected provider output: %q", got.Output)
+	}
+	cfg, err := srv.GetConfig(context.Background(), &proto.GetConfigRequest{})
+	if err != nil {
+		t.Fatalf("GetConfig failed: %v", err)
+	}
+	if cfg.GetLocalRuntime() != "llama_server" {
+		t.Fatalf("local runtime not persisted in server state: %q", cfg.GetLocalRuntime())
+	}
+}
+
+func TestUpdateConfig_LocalRuntime_Invalid(t *testing.T) {
+	srv := NewServer(nil, nil, nil, nil, nil, engine.NewEngineRegistry())
+	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{
+		LocalRuntime: "tensor_vibes",
+	})
+	if err != nil {
+		t.Fatalf("UpdateConfig returned error: %v", err)
+	}
+	if resp.Success {
+		t.Fatal("expected invalid local runtime to fail")
+	}
+}
+
+type namedTestEngine struct {
+	name string
+}
+
+func (e *namedTestEngine) Name() string { return e.name }
+
+func (e *namedTestEngine) Complete(ctx context.Context, model, prompt, systemPrompt string) (engine.CompletionResult, error) {
+	return engine.CompletionResult{Output: e.name + ":" + model + ":" + prompt}, nil
+}
+
+func (e *namedTestEngine) CompleteStream(ctx context.Context, model, prompt, systemPrompt string, onToken func(string)) (engine.CompletionResult, error) {
+	return e.Complete(ctx, model, prompt, systemPrompt)
+}
+
+func (e *namedTestEngine) ChatWithTools(ctx context.Context, req engine.ChatRequest) (engine.ChatResponse, error) {
+	return engine.ChatResponse{Content: e.name}, nil
+}
+
+func (e *namedTestEngine) ListModels(ctx context.Context) ([]engine.ModelInfo, error) {
+	return []engine.ModelInfo{{Name: e.name + "-model"}}, nil
 }

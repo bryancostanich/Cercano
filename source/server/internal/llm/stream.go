@@ -25,6 +25,11 @@ type StreamEvent struct {
 
 	StopReason string
 
+	// Provider-reported token usage. InputTokens is set on EventMessageStart
+	// (full prompt: system + tools + history); OutputTokens on EventMessageStop.
+	InputTokens  int
+	OutputTokens int
+
 	ErrText string
 }
 

@@ -191,6 +191,99 @@ func TestInMemoryManagerDownloadModelTracksProgressAndWritesFile(t *testing.T) {
 	}
 }
 
+func TestInMemoryManagerCancelDownloadStopsActiveJob(t *testing.T) {
+	started := make(chan struct{})
+	released := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+		close(released)
+	}))
+	defer server.Close()
+
+	target := filepath.Join(t.TempDir(), "model.gguf")
+	manager := NewManager()
+	manager.RegisterProvider(&fakeProvider{
+		name: "llama_server",
+		models: []ModelRecord{{
+			ID:                 "catalog:model",
+			DisplayName:        "Catalog Model",
+			Runtime:            "llama_server",
+			Source:             "catalog",
+			Path:               target,
+			Format:             "gguf",
+			DownloadState:      "not_downloaded",
+			DownloadURL:        server.URL,
+			DownloadTotalBytes: 1024,
+			SizeBytes:          1024,
+			SupportsChat:       true,
+		}},
+	})
+
+	if _, err := manager.DownloadModel(context.Background(), DownloadRequest{Runtime: "llama_server", ModelID: "catalog:model"}); err != nil {
+		t.Fatalf("DownloadModel returned error: %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("download server was not reached")
+	}
+	model, err := manager.CancelDownload(context.Background(), DownloadRequest{Runtime: "llama_server", ModelID: "catalog:model"})
+	if err != nil {
+		t.Fatalf("CancelDownload returned error: %v", err)
+	}
+	if model.DownloadState != "cancelled" {
+		t.Fatalf("expected cancelled model, got %#v", model)
+	}
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("download request was not cancelled")
+	}
+}
+
+func TestInMemoryManagerDeleteModelRemovesDownloadedFile(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "model.gguf")
+	if err := os.WriteFile(target, []byte("downloaded"), 0644); err != nil {
+		t.Fatalf("write model: %v", err)
+	}
+	manager := NewManager()
+	manager.RegisterProvider(&fakeProvider{
+		name: "llama_server",
+		models: []ModelRecord{{
+			ID:                 "catalog:model",
+			DisplayName:        "Catalog Model",
+			Runtime:            "llama_server",
+			Source:             "catalog",
+			Path:               target,
+			Format:             "gguf",
+			DownloadState:      "downloaded",
+			DownloadURL:        "https://example.test/model.gguf",
+			DownloadTotalBytes: 10,
+			SizeBytes:          10,
+			SupportsChat:       true,
+		}},
+	})
+
+	if err := manager.DeleteModel(context.Background(), DeleteModelRequest{Runtime: "llama_server", ModelID: "catalog:model"}); err != nil {
+		t.Fatalf("DeleteModel returned error: %v", err)
+	}
+	if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected model file removed, stat err=%v", err)
+	}
+	status, err := manager.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status returned error: %v", err)
+	}
+	model, ok := findModelRecord(status.Models, "catalog:model")
+	if !ok {
+		t.Fatal("expected model in status")
+	}
+	if model.DownloadState != "not_downloaded" || model.DownloadedBytes != 0 {
+		t.Fatalf("expected not_downloaded model after delete, got %#v", model)
+	}
+}
+
 func TestEndpointsFromConfigIncludesExternalEndpointInfo(t *testing.T) {
 	cfg := config.Config{
 		OllamaURL:      "http://mac-studio.local:11434",

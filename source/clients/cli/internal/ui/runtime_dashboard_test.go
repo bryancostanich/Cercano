@@ -385,6 +385,49 @@ func TestRuntimeDashboardLogBlockFillsRemainingContentHeight(t *testing.T) {
 	}
 }
 
+func TestRuntimeDashboardShowsDownloadProgressAndActions(t *testing.T) {
+	snapshot := runtimeDashboardSnapshot{
+		Status: &agentclient.RuntimeStatus{
+			Models: []agentclient.RuntimeModel{{
+				ID:                 "catalog:qwen",
+				DisplayName:        "Qwen Coder",
+				Runtime:            "llama_server",
+				Source:             "catalog",
+				Family:             "qwen",
+				Quantization:       "Q4_K_M",
+				SizeBytes:          100,
+				DownloadState:      "downloading",
+				DownloadURL:        "https://example.test/qwen.gguf",
+				DownloadedBytes:    50,
+				DownloadTotalBytes: 100,
+				SupportsChat:       true,
+			}},
+		},
+	}
+
+	rows := runtimeActionRowsFromSnapshot(snapshot)
+	assertRowContains(t, rows, "downloaded models", "0 models")
+	assertRowContains(t, rows, "downloads", "1 job")
+	assertAnyRowContains(t, rows, "downloading 50%")
+	assertAnyRowContains(t, rows, "cancel catalog:qwen")
+
+	m := New(nil, false)
+	dashboard := &runtimeDashboard{
+		width:    110,
+		height:   24,
+		palette:  m.palette,
+		styles:   m.styles,
+		snapshot: snapshot,
+		focus:    runtimeFocusCatalog,
+	}
+	dashboard.catalogSearch = textinput.New()
+	dashboard.list = overlay.New("models and processes", rows, overlay.Hooks{})
+	view := ansi.Strip(dashboard.View())
+	if !strings.Contains(view, "[") || !strings.Contains(view, "50%") {
+		t.Fatalf("dashboard should render download progress:\n%s", view)
+	}
+}
+
 func TestRuntimeDashboardShowsScrollbarWhenContentOverflows(t *testing.T) {
 	dashboard := overflowingRuntimeDashboard(t, 14)
 
@@ -455,18 +498,32 @@ func TestRuntimeDashboardScrollbarDragScrollsContentPage(t *testing.T) {
 }
 
 func TestRuntimeDashboardActionRoundTrip(t *testing.T) {
-	want := runtimeDashboardAction{
+	cases := []runtimeDashboardAction{{
 		Kind:       runtimeActionRestart,
 		Runtime:    "llama_server",
 		ModelID:    "/models/qwen.gguf",
 		InstanceID: "llama-abc",
-	}
-	got, err := parseRuntimeDashboardAction(encodeRuntimeDashboardAction(want))
-	if err != nil {
-		t.Fatalf("parse action: %v", err)
-	}
-	if got != want {
-		t.Fatalf("action = %+v, want %+v", got, want)
+	}, {
+		Kind:    runtimeActionDownload,
+		Runtime: "llama_server",
+		ModelID: "catalog:qwen",
+	}, {
+		Kind:    runtimeActionCancel,
+		Runtime: "llama_server",
+		ModelID: "catalog:qwen",
+	}, {
+		Kind:    runtimeActionDelete,
+		Runtime: "llama_server",
+		ModelID: "catalog:qwen",
+	}}
+	for _, want := range cases {
+		got, err := parseRuntimeDashboardAction(encodeRuntimeDashboardAction(want))
+		if err != nil {
+			t.Fatalf("parse action: %v", err)
+		}
+		if got != want {
+			t.Fatalf("action = %+v, want %+v", got, want)
+		}
 	}
 }
 
@@ -483,7 +540,7 @@ func assertRowContains(t *testing.T, rows []overlay.Row, label, value string) {
 func assertAnyRowContains(t *testing.T, rows []overlay.Row, value string) {
 	t.Helper()
 	for _, row := range rows {
-		if strings.Contains(row.Value, value) {
+		if strings.Contains(row.Label, value) || strings.Contains(row.Value, value) || strings.Contains(row.Hint, value) {
 			return
 		}
 	}

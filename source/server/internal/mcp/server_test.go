@@ -77,6 +77,14 @@ func (m *mockAgentClient) DownloadRuntimeModel(ctx context.Context, in *proto.Do
 	return &proto.DownloadRuntimeModelResponse{}, nil
 }
 
+func (m *mockAgentClient) CancelRuntimeModelDownload(ctx context.Context, in *proto.CancelRuntimeModelDownloadRequest, opts ...grpc.CallOption) (*proto.CancelRuntimeModelDownloadResponse, error) {
+	return &proto.CancelRuntimeModelDownloadResponse{}, nil
+}
+
+func (m *mockAgentClient) DeleteRuntimeModel(ctx context.Context, in *proto.DeleteRuntimeModelRequest, opts ...grpc.CallOption) (*proto.DeleteRuntimeModelResponse, error) {
+	return &proto.DeleteRuntimeModelResponse{}, nil
+}
+
 func (m *mockAgentClient) StreamRuntimeLogs(ctx context.Context, in *proto.StreamRuntimeLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[proto.RuntimeLogEntry], error) {
 	return nil, nil
 }

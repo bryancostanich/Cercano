@@ -19,10 +19,13 @@ import (
 )
 
 const (
-	runtimeActionStart   = "start"
-	runtimeActionStop    = "stop"
-	runtimeActionRestart = "restart"
-	runtimeActionSep     = "\x1f"
+	runtimeActionStart    = "start"
+	runtimeActionStop     = "stop"
+	runtimeActionRestart  = "restart"
+	runtimeActionDownload = "download"
+	runtimeActionCancel   = "cancel_download"
+	runtimeActionDelete   = "delete_model"
+	runtimeActionSep      = "\x1f"
 
 	maxDashboardEndpoints = 8
 	maxDashboardModels    = 12
@@ -323,7 +326,14 @@ func (d *runtimeDashboard) updateCatalog(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			d.catalogMessage = "already downloaded"
 			return nil, false
 		}
+		if strings.EqualFold(selected.DownloadState, "downloading") {
+			d.catalogMessage = "already downloading"
+			return nil, false
+		}
 		d.catalogMessage = "starting download..."
+		if strings.EqualFold(selected.DownloadState, "failed") || strings.EqualFold(selected.DownloadState, "cancelled") {
+			d.catalogMessage = "retrying download..."
+		}
 		return runtimeDashboardDownloadCmd(d.agent, selected), false
 	}
 	prev := d.catalogSearch.Value()
@@ -383,6 +393,7 @@ func runtimeRowsFromSnapshot(s runtimeDashboardSnapshot) []overlay.Row {
 
 	appendRuntimeEndpointRows(&rows, status.Endpoints)
 	appendRuntimeModelRows(&rows, status.Models, status.Instances)
+	appendRuntimeDownloadRows(&rows, status.Models)
 	appendRuntimeInstanceRows(&rows, status.Instances)
 	appendRuntimeLogRows(&rows, status.Logs)
 
@@ -408,6 +419,7 @@ func runtimeActionRowsFromSnapshot(s runtimeDashboardSnapshot) []overlay.Row {
 		status = &agentclient.RuntimeStatus{}
 	}
 	appendRuntimeModelRows(&rows, status.Models, status.Instances)
+	appendRuntimeDownloadRows(&rows, status.Models)
 	appendRuntimeInstanceRows(&rows, status.Instances)
 	if len(rows) == 0 {
 		rows = append(rows, overlay.Row{Label: "runtime", Value: "no runtime data", ReadOnly: true})
@@ -563,7 +575,7 @@ func (d *runtimeDashboard) renderCatalogModelRow(model agentclient.RuntimeModel,
 		nameStyle = d.styles.Bright
 	}
 	name := firstNonEmpty(model.DisplayName, shortModelName(model.ID), model.ID, "unknown")
-	metadata := strings.Join(nonEmptyParts(model.Family, model.Quantization, formatBytes(model.SizeBytes), downloadStatusText(model)), " · ")
+	metadata := strings.Join(nonEmptyParts(model.Family, model.Quantization, formatBytes(model.SizeBytes), compactDownloadStatusText(model)), " · ")
 	row := marker + nameStyle.Render(name)
 	if metadata != "" {
 		row += d.styles.BorderDim.Render("  " + metadata)
@@ -839,6 +851,9 @@ func catalogDetailLines(model agentclient.RuntimeModel, width int, styles theme.
 		detailLine("state", strings.Join(nonEmptyParts(downloadStatusText(model), model.RuntimeState), " · "), width, styles),
 		detailLine("supports", caps, width, styles),
 	}
+	if progress := downloadProgressBar(model, 18); progress != "" {
+		lines = append(lines, detailLine("progress", progress+" "+downloadByteStatus(model), width, styles))
+	}
 	if model.DownloadError != "" {
 		lines = append(lines, detailLine("error", model.DownloadError, width, styles))
 	}
@@ -964,6 +979,7 @@ func appendRuntimeEndpointRows(rows *[]overlay.Row, endpoints []agentclient.Runt
 }
 
 func appendRuntimeModelRows(rows *[]overlay.Row, models []agentclient.RuntimeModel, instances []agentclient.RuntimeInstance) {
+	models = downloadedRuntimeModels(models)
 	*rows = append(*rows, overlay.Row{
 		Label:    "downloaded models",
 		Value:    countLabel(len(models), "model"),
@@ -994,6 +1010,63 @@ func appendRuntimeModelRows(rows *[]overlay.Row, models []agentclient.RuntimeMod
 				Value: model.Runtime,
 				Hint:  "enter",
 			})
+		}
+		if canDeleteRuntimeModel(model) {
+			*rows = append(*rows, overlay.Row{
+				Key:   encodeRuntimeDashboardAction(runtimeDashboardAction{Kind: runtimeActionDelete, Runtime: model.Runtime, ModelID: model.ID}),
+				Label: "delete " + shortModelName(model.ID),
+				Value: "remove local file",
+				Hint:  "enter",
+			})
+		}
+	}
+}
+
+func appendRuntimeDownloadRows(rows *[]overlay.Row, models []agentclient.RuntimeModel) {
+	downloads := downloadJobModels(models)
+	*rows = append(*rows, overlay.Row{
+		Label:    "downloads",
+		Value:    countLabel(len(downloads), "job"),
+		ReadOnly: true,
+	})
+	if len(downloads) == 0 {
+		*rows = append(*rows, overlay.Row{Label: "download", Value: "none active", ReadOnly: true})
+		return
+	}
+	for i, model := range downloads {
+		if i >= maxDashboardModels {
+			appendMoreRow(rows, "downloads", len(downloads)-i)
+			break
+		}
+		*rows = append(*rows, overlay.Row{
+			Label:    "download " + firstNonEmpty(model.DisplayName, shortModelName(model.ID), model.ID),
+			Value:    downloadActionValue(model),
+			Hint:     downloadActionHint(model),
+			ReadOnly: true,
+		})
+		switch strings.ToLower(model.DownloadState) {
+		case "downloading":
+			*rows = append(*rows, overlay.Row{
+				Key:   encodeRuntimeDashboardAction(runtimeDashboardAction{Kind: runtimeActionCancel, Runtime: model.Runtime, ModelID: model.ID}),
+				Label: "cancel " + shortModelName(model.ID),
+				Value: downloadStatusText(model),
+				Hint:  "enter",
+			})
+		case "failed", "cancelled":
+			*rows = append(*rows, overlay.Row{
+				Key:   encodeRuntimeDashboardAction(runtimeDashboardAction{Kind: runtimeActionDownload, Runtime: model.Runtime, ModelID: model.ID}),
+				Label: "retry " + shortModelName(model.ID),
+				Value: model.Runtime,
+				Hint:  "enter",
+			})
+			if canDeleteRuntimeModel(model) {
+				*rows = append(*rows, overlay.Row{
+					Key:   encodeRuntimeDashboardAction(runtimeDashboardAction{Kind: runtimeActionDelete, Runtime: model.Runtime, ModelID: model.ID}),
+					Label: "delete " + shortModelName(model.ID),
+					Value: "remove partial file",
+					Hint:  "enter",
+				})
+			}
 		}
 	}
 }
@@ -1076,6 +1149,17 @@ func runtimeDashboardActionCmd(ag *agentclient.Client, action runtimeDashboardAc
 			return runtimeDashboardActionMsg{Status: "action failed: agent client unavailable"}
 		}
 		switch action.Kind {
+		case runtimeActionDownload:
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			model, err := ag.DownloadRuntimeModel(ctx, action.Runtime, action.ModelID)
+			if err != nil {
+				return runtimeDashboardActionMsg{Status: "download failed: " + err.Error(), CatalogMessage: "download failed"}
+			}
+			return runtimeDashboardActionMsg{
+				Status:         "downloading " + shortModelName(firstNonEmpty(model.DisplayName, model.ID, action.ModelID)),
+				CatalogMessage: downloadStatusText(*model),
+			}
 		case runtimeActionStart:
 			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 			defer cancel()
@@ -1099,6 +1183,27 @@ func runtimeDashboardActionCmd(ag *agentclient.Client, action runtimeDashboardAc
 				return runtimeDashboardActionMsg{Status: "restart failed: " + err.Error()}
 			}
 			return runtimeDashboardActionMsg{Status: "restarted " + shortModelName(instance.ModelID)}
+		case runtimeActionCancel:
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			model, err := ag.CancelRuntimeModelDownload(ctx, action.Runtime, action.ModelID)
+			if err != nil {
+				return runtimeDashboardActionMsg{Status: "cancel failed: " + err.Error(), CatalogMessage: "cancel failed"}
+			}
+			return runtimeDashboardActionMsg{
+				Status:         "cancelled " + shortModelName(firstNonEmpty(model.DisplayName, model.ID, action.ModelID)),
+				CatalogMessage: downloadStatusText(*model),
+			}
+		case runtimeActionDelete:
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			if err := ag.DeleteRuntimeModel(ctx, action.Runtime, action.ModelID); err != nil {
+				return runtimeDashboardActionMsg{Status: "delete failed: " + err.Error(), CatalogMessage: "delete failed"}
+			}
+			return runtimeDashboardActionMsg{
+				Status:         "deleted " + shortModelName(action.ModelID),
+				CatalogMessage: "deleted " + shortModelName(action.ModelID),
+			}
 		default:
 			return runtimeDashboardActionMsg{Status: "action failed: unsupported action " + action.Kind}
 		}
@@ -1145,12 +1250,18 @@ func runtimeDashboardDownloadCmd(ag *agentclient.Client, model agentclient.Runti
 
 func runtimeDashboardPendingStatus(action runtimeDashboardAction) string {
 	switch action.Kind {
+	case runtimeActionDownload:
+		return "starting download for " + shortModelName(action.ModelID) + "..."
 	case runtimeActionStart:
 		return "starting " + shortModelName(action.ModelID) + "..."
 	case runtimeActionStop:
 		return "stopping " + shortID(action.InstanceID) + "..."
 	case runtimeActionRestart:
 		return "restarting " + shortModelName(action.ModelID) + "..."
+	case runtimeActionCancel:
+		return "cancelling download for " + shortModelName(action.ModelID) + "..."
+	case runtimeActionDelete:
+		return "deleting " + shortModelName(action.ModelID) + "..."
 	default:
 		return "running action..."
 	}
@@ -1161,24 +1272,106 @@ func downloadStatusText(model agentclient.RuntimeModel) string {
 	if state == "" {
 		return ""
 	}
-	if strings.EqualFold(state, "downloading") {
-		total := model.DownloadTotalBytes
-		if total == 0 {
-			total = model.SizeBytes
+	switch strings.ToLower(state) {
+	case "downloaded":
+		return "complete"
+	case "not_downloaded":
+		return "available"
+	case "downloading":
+		if percent, ok := downloadPercent(model); ok {
+			return fmt.Sprintf("downloading %.0f%% (%s)", percent, downloadByteStatus(model))
 		}
-		if total > 0 {
-			percent := float64(model.DownloadedBytes) / float64(total) * 100
-			return fmt.Sprintf("downloading %.0f%% (%s/%s)", percent, formatBytes(model.DownloadedBytes), formatBytes(total))
-		}
-		if model.DownloadedBytes > 0 {
-			return "downloading " + formatBytes(model.DownloadedBytes)
+		if bytes := downloadByteStatus(model); bytes != "" {
+			return "downloading " + bytes
 		}
 		return "downloading"
-	}
-	if strings.EqualFold(state, "failed") && model.DownloadError != "" {
+	case "failed":
 		return "failed"
+	case "cancelled":
+		return "cancelled"
+	default:
+		return state
 	}
-	return state
+}
+
+func compactDownloadStatusText(model agentclient.RuntimeModel) string {
+	switch strings.ToLower(strings.TrimSpace(model.DownloadState)) {
+	case "downloaded":
+		return "complete"
+	case "downloading":
+		if percent, ok := downloadPercent(model); ok {
+			return fmt.Sprintf("%.0f%%", percent)
+		}
+		return "downloading"
+	case "failed":
+		return "failed"
+	case "cancelled":
+		return "cancelled"
+	case "not_downloaded":
+		return "available"
+	default:
+		return strings.TrimSpace(model.DownloadState)
+	}
+}
+
+func downloadPercent(model agentclient.RuntimeModel) (float64, bool) {
+	total := model.DownloadTotalBytes
+	if total == 0 {
+		total = model.SizeBytes
+	}
+	if total <= 0 {
+		return 0, false
+	}
+	downloaded := model.DownloadedBytes
+	if strings.EqualFold(model.DownloadState, "downloaded") && downloaded == 0 {
+		downloaded = total
+	}
+	if downloaded < 0 {
+		downloaded = 0
+	}
+	if downloaded > total {
+		downloaded = total
+	}
+	return float64(downloaded) / float64(total) * 100, true
+}
+
+func downloadByteStatus(model agentclient.RuntimeModel) string {
+	total := model.DownloadTotalBytes
+	if total == 0 {
+		total = model.SizeBytes
+	}
+	downloaded := model.DownloadedBytes
+	if strings.EqualFold(model.DownloadState, "downloaded") && downloaded == 0 {
+		downloaded = total
+	}
+	if total > 0 {
+		return formatDownloadBytes(downloaded) + "/" + formatDownloadBytes(total)
+	}
+	if downloaded > 0 {
+		return formatDownloadBytes(downloaded)
+	}
+	return ""
+}
+
+func downloadProgressBar(model agentclient.RuntimeModel, width int) string {
+	if width < 4 {
+		return ""
+	}
+	percent, ok := downloadPercent(model)
+	if !ok {
+		return ""
+	}
+	inner := width - 2
+	filled := int(percent/100*float64(inner) + 0.5)
+	filled = clampInt(filled, 0, inner)
+	return "[" + strings.Repeat("#", filled) + strings.Repeat("-", inner-filled) + "]"
+}
+
+func formatDownloadBytes(size int64) string {
+	if size <= 0 {
+		return "0 B"
+	}
+	return formatBytes(size)
 }
 
 func encodeRuntimeDashboardAction(action runtimeDashboardAction) string {
@@ -1197,6 +1390,10 @@ func parseRuntimeDashboardAction(key string) (runtimeDashboardAction, error) {
 		InstanceID: parts[3],
 	}
 	switch action.Kind {
+	case runtimeActionDownload:
+		if action.Runtime == "" || action.ModelID == "" {
+			return runtimeDashboardAction{}, fmt.Errorf("download needs runtime and model")
+		}
 	case runtimeActionStart:
 		if action.Runtime == "" || action.ModelID == "" {
 			return runtimeDashboardAction{}, fmt.Errorf("start needs runtime and model")
@@ -1209,6 +1406,14 @@ func parseRuntimeDashboardAction(key string) (runtimeDashboardAction, error) {
 		if action.Runtime == "" || action.ModelID == "" || action.InstanceID == "" {
 			return runtimeDashboardAction{}, fmt.Errorf("restart needs instance, runtime, and model")
 		}
+	case runtimeActionCancel:
+		if action.Runtime == "" || action.ModelID == "" {
+			return runtimeDashboardAction{}, fmt.Errorf("cancel needs runtime and model")
+		}
+	case runtimeActionDelete:
+		if action.Runtime == "" || action.ModelID == "" {
+			return runtimeDashboardAction{}, fmt.Errorf("delete needs runtime and model")
+		}
 	default:
 		return runtimeDashboardAction{}, fmt.Errorf("unsupported action %q", action.Kind)
 	}
@@ -1216,7 +1421,51 @@ func parseRuntimeDashboardAction(key string) (runtimeDashboardAction, error) {
 }
 
 func canStartRuntimeModel(model agentclient.RuntimeModel, running agentclient.RuntimeInstance) bool {
-	return model.Runtime == "llama_server" && model.ID != "" && running.ID == ""
+	return model.Runtime == "llama_server" &&
+		model.ID != "" &&
+		strings.EqualFold(model.DownloadState, "downloaded") &&
+		running.ID == ""
+}
+
+func canDeleteRuntimeModel(model agentclient.RuntimeModel) bool {
+	return model.Runtime != "" &&
+		model.ID != "" &&
+		model.DownloadURL != "" &&
+		!strings.EqualFold(model.DownloadState, "downloading")
+}
+
+func downloadedRuntimeModels(models []agentclient.RuntimeModel) []agentclient.RuntimeModel {
+	out := make([]agentclient.RuntimeModel, 0, len(models))
+	for _, model := range models {
+		if strings.EqualFold(model.DownloadState, "downloaded") {
+			out = append(out, model)
+		}
+	}
+	return out
+}
+
+func downloadJobModels(models []agentclient.RuntimeModel) []agentclient.RuntimeModel {
+	out := make([]agentclient.RuntimeModel, 0, len(models))
+	for _, model := range models {
+		switch strings.ToLower(model.DownloadState) {
+		case "downloading", "failed", "cancelled":
+			out = append(out, model)
+		}
+	}
+	return out
+}
+
+func downloadActionValue(model agentclient.RuntimeModel) string {
+	status := downloadStatusText(model)
+	bar := downloadProgressBar(model, 16)
+	return strings.Join(nonEmptyParts(bar, status), " ")
+}
+
+func downloadActionHint(model agentclient.RuntimeModel) string {
+	if model.DownloadError != "" {
+		return "error: " + shorten(model.DownloadError, 56)
+	}
+	return strings.Join(nonEmptyParts(model.Runtime, model.Family, model.Quantization, formatBytes(model.SizeBytes)), " | ")
 }
 
 func activeInstancesByModel(instances []agentclient.RuntimeInstance) map[string]agentclient.RuntimeInstance {

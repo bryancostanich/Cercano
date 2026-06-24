@@ -570,6 +570,35 @@ func (s *Server) DownloadRuntimeModel(ctx context.Context, req *proto.DownloadRu
 	return &proto.DownloadRuntimeModelResponse{Ok: true, Model: mapRuntimeModel(*model)}, nil
 }
 
+// CancelRuntimeModelDownload implements proto.AgentServer.
+func (s *Server) CancelRuntimeModelDownload(ctx context.Context, req *proto.CancelRuntimeModelDownloadRequest) (*proto.CancelRuntimeModelDownloadResponse, error) {
+	if s.runtimeManager == nil {
+		return &proto.CancelRuntimeModelDownloadResponse{Ok: false, Error: "runtime manager not configured"}, nil
+	}
+	model, err := s.runtimeManager.CancelDownload(ctx, localruntime.DownloadRequest{
+		Runtime: req.GetRuntime(),
+		ModelID: req.GetModelId(),
+	})
+	if err != nil {
+		return &proto.CancelRuntimeModelDownloadResponse{Ok: false, Error: err.Error()}, nil
+	}
+	return &proto.CancelRuntimeModelDownloadResponse{Ok: true, Model: mapRuntimeModel(*model)}, nil
+}
+
+// DeleteRuntimeModel implements proto.AgentServer.
+func (s *Server) DeleteRuntimeModel(ctx context.Context, req *proto.DeleteRuntimeModelRequest) (*proto.DeleteRuntimeModelResponse, error) {
+	if s.runtimeManager == nil {
+		return &proto.DeleteRuntimeModelResponse{Ok: false, Error: "runtime manager not configured"}, nil
+	}
+	if err := s.runtimeManager.DeleteModel(ctx, localruntime.DeleteModelRequest{
+		Runtime: req.GetRuntime(),
+		ModelID: req.GetModelId(),
+	}); err != nil {
+		return &proto.DeleteRuntimeModelResponse{Ok: false, Error: err.Error()}, nil
+	}
+	return &proto.DeleteRuntimeModelResponse{Ok: true}, nil
+}
+
 // StreamRuntimeLogs implements proto.AgentServer. The first version streams the
 // current server-side buffer; live follow can build on the same RPC later.
 func (s *Server) StreamRuntimeLogs(req *proto.StreamRuntimeLogsRequest, stream proto.Agent_StreamRuntimeLogsServer) error {

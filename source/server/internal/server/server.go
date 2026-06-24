@@ -948,6 +948,11 @@ func (s *Server) persistToolLoopTurns(ctx context.Context, req *proto.ProcessReq
 			fmt.Fprintf(os.Stderr, "[tool-loop] Append(%s, %s) failed: %v\n", role, convID, err)
 		}
 	}
+	// Refresh the living recap for this conversation. The legacy path schedules
+	// this inside the agent, but the tool-loop path persists turns here, so it
+	// must trigger the recap too — otherwise recaps never update in the native
+	// tool-calling (cloud) flow the CLI uses.
+	s.agent.ScheduleRecap(convID)
 }
 
 func (s *Server) mapRequest(req *proto.ProcessRequestRequest) *agent.Request {

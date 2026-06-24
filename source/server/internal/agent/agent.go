@@ -90,6 +90,16 @@ func WithRecapScheduler(rs RecapScheduler) AgentOption {
 	return func(a *Agent) { a.recap = rs }
 }
 
+// ScheduleRecap requests a debounced recap regeneration for a conversation.
+// Nil-safe — a no-op when no scheduler is attached. Exported so callers that
+// persist turns outside the agent (e.g. the tool-loop streaming path on the
+// server) can refresh the recap too.
+func (a *Agent) ScheduleRecap(conversationID string) {
+	if a.recap != nil {
+		a.recap.Schedule(conversationID)
+	}
+}
+
 // NewAgent creates a new Agent orchestrator.
 func NewAgent(r Router, c Coordinator, opts ...AgentOption) *Agent {
 	a := &Agent{
@@ -195,9 +205,7 @@ func (a *Agent) storeConversationTurn(ctx context.Context, conversationID, origi
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "[persistent-store] Append(assistant, %s) failed: %v\n", conversationID, err)
 		}
-		if a.recap != nil {
-			a.recap.Schedule(conversationID)
-		}
+		a.ScheduleRecap(conversationID)
 	}
 }
 

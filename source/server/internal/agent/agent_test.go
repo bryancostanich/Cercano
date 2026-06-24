@@ -526,3 +526,17 @@ func TestWithRecapSchedulerStoresHook(t *testing.T) {
 		t.Fatal("recap scheduler not attached")
 	}
 }
+
+func TestScheduleRecap_ForwardsToScheduler(t *testing.T) {
+	fr := &fakeRecap{}
+	a := NewAgent(nil, nil, WithRecapScheduler(fr))
+	a.ScheduleRecap("conv-1")
+	if len(fr.scheduled) != 1 || fr.scheduled[0] != "conv-1" {
+		t.Errorf("ScheduleRecap forwarded %v, want [conv-1]", fr.scheduled)
+	}
+}
+
+func TestScheduleRecap_NilSchedulerNoPanic(t *testing.T) {
+	a := NewAgent(nil, nil) // no recap scheduler attached
+	a.ScheduleRecap("conv-1")
+}

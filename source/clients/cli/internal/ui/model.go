@@ -125,6 +125,15 @@ type Model struct {
 	ctrlCArmed     bool   // first ctrl-c on empty input arms quit; any other key disarms
 	errMsg         string
 
+	// Live turn telemetry, surfaced by renderStatus while a turn streams. Reset
+	// when a turn begins; the engine fields fill in on the RouteSelected event.
+	turnStart    time.Time // wall clock when streaming began (for elapsed)
+	turnActivity string    // current verb: thinking → routing → running <tool> → writing
+	turnTokOut   int       // output tokens seen so far this turn (approximate, live)
+	turnModel    string    // engine handling the turn (from RouteSelected)
+	turnCloud    bool      // true when the turn routed to a cloud engine
+	hadTurn      bool      // a turn has completed; gate the idle token counter
+
 	content contentPage
 
 	recap string // living one-line work summary; shown in the chat footer
@@ -931,6 +940,12 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 	m.cancelStream = cancel
 	m.streamCh = ch
 	m.streaming = true
+	// Reset live turn telemetry; the engine fields fill in on RouteSelected.
+	m.turnStart = time.Now()
+	m.turnActivity = "thinking"
+	m.turnTokOut = 0
+	m.turnModel = ""
+	m.turnCloud = false
 	// Fire both the stream drainer and the progress-text animator; both
 	// re-issue themselves until streaming ends.
 	return m, tea.Batch(waitForStream(ch), progressAnimTick())
@@ -1089,7 +1104,14 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 		// Once real tokens arrive, the pre-stream progress note is
 		// no longer relevant; clear so the renderer drops it.
 		e.Status = ""
+		m.turnActivity = "writing"
+		m.turnTokOut++ // one delta ≈ one token (approximate live count)
+	case agentclient.TypeRouteSelected:
+		// Engine chosen for this turn — fills the footer's local/cloud badge.
+		m.turnModel = sm.RouteModel
+		m.turnCloud = sm.RouteCloud
 	case agentclient.TypeProgress:
+		m.turnActivity = "routing"
 		// Collapse progress messages onto the open (empty) assistant entry's
 		// Status field — one line that mutates as the agent advances through
 		// phases. Falls back to a normal system entry if there's no open
@@ -1126,6 +1148,7 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 		}
 		m.tokIn = sm.TokIn
 		m.tokOut = sm.TokOut
+		m.hadTurn = true
 		// cumIn/cumOut here are local approximations until the agent
 		// answers GetContextUsage below; the RPC's authoritative cumulative
 		// total overrides cumIn (Used) on arrival.
@@ -1145,6 +1168,7 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 		// otherwise stop its streaming indicator. Then drop a folded in-progress
 		// line so the user sees what's being invoked. Args summary fills in on
 		// TypeToolUseStop; result fills in on TypeToolExecComplete.
+		m.turnActivity = "running " + sm.ToolName
 		if e := m.streamingTextEntry(); e != nil {
 			if e.Content == "" {
 				m.entries = m.entries[:len(m.entries)-1]
@@ -2198,7 +2222,13 @@ func (m Model) renderHeader() string {
 
 func (m Model) renderStatus() string {
 	if m.streaming {
-		return lipgloss.NewStyle().Width(m.width).Render(m.styles.Accent.Render("⟳ streaming"))
+		// Live turn status: activity · elapsed · tokens · engine, plus an
+		// interrupt hint. Elapsed recomputes each frame (the progress-anim tick
+		// repaints while streaming).
+		line := turnStatusLine(m.turnActivity, time.Since(m.turnStart), m.turnTokOut, m.turnModel, m.turnCloud)
+		status := m.styles.Accent.Render("⟳ " + line)
+		hint := m.styles.BorderDim.Render("  ·  ") + m.styles.Muted.Render("esc interrupt")
+		return lipgloss.NewStyle().Width(m.width).Render(status + hint)
 	}
 	help := m.styles.Muted.Render("/help for cmds")
 	if m.selection.hasRange() {
@@ -2224,10 +2254,16 @@ func (m Model) renderStatus() string {
 	case "ok":
 		cloudPart = m.styles.BorderDim.Render("  ·  ") + m.styles.Muted.Render("cloud:") + m.styles.Success.Render(" ok")
 	}
+	// Show the token counter only once a turn has completed — no "0↑/0↓" on a
+	// fresh session — and label it "last turn" since it's the prior turn's total.
+	turnPart := ""
+	if m.hadTurn {
+		turnPart = m.styles.BorderDim.Render("  ·  ") +
+			m.styles.Muted.Render(fmt.Sprintf("last turn %d↑/%d↓", m.tokIn, m.tokOut))
+	}
 	parts := []string{
 		m.renderContextMeter(),
-		m.styles.BorderDim.Render("  ·  "),
-		m.styles.Muted.Render(fmt.Sprintf("turn %d↑/%d↓", m.tokIn, m.tokOut)),
+		turnPart,
 		cloudPart,
 		m.renderPermissionModeChip(),
 		m.styles.BorderDim.Render("  ·  "),

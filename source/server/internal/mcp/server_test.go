@@ -172,6 +172,14 @@ func (m *mockAgentClient) SetPermissionMode(ctx context.Context, in *proto.SetPe
 	return &proto.SetPermissionModeResponse{}, nil
 }
 
+func (m *mockAgentClient) ProposeContextEdit(ctx context.Context, in *proto.ProposeContextEditRequest, opts ...grpc.CallOption) (*proto.ProposeContextEditResponse, error) {
+	return &proto.ProposeContextEditResponse{}, nil
+}
+
+func (m *mockAgentClient) DeleteConversationTurns(ctx context.Context, in *proto.DeleteConversationTurnsRequest, opts ...grpc.CallOption) (*proto.DeleteConversationTurnsResponse, error) {
+	return &proto.DeleteConversationTurnsResponse{}, nil
+}
+
 func TestNewServer_RegistersTools(t *testing.T) {
 	mock := &mockAgentClient{}
 	s := NewServer(mock)

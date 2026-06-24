@@ -441,6 +441,7 @@ func (c *Client) GetContextUsage(ctx context.Context, conversationID string) (*C
 
 // ContextTurn is one display-ready turn summary from GetConversationTurns.
 type ContextTurn struct {
+	ID        string
 	Role      string
 	Kind      string
 	Preview   string
@@ -456,6 +457,7 @@ func (c *Client) GetConversationTurns(ctx context.Context, conversationID string
 	out := make([]ContextTurn, 0, len(resp.GetTurns()))
 	for _, t := range resp.GetTurns() {
 		out = append(out, ContextTurn{
+			ID:        t.GetId(),
 			Role:      t.GetRole(),
 			Kind:      t.GetKind(),
 			Preview:   t.GetPreview(),
@@ -463,6 +465,36 @@ func (c *Client) GetConversationTurns(ctx context.Context, conversationID string
 		})
 	}
 	return out, nil
+}
+
+// Proposal is the set of turn IDs proposed for deletion and the model's rationale.
+type Proposal struct {
+	DeleteIDs []string
+	Rationale string
+}
+
+// ProposeContextEdit asks the agent to analyse a conversation and propose turns
+// to delete based on the given instruction. Read-only — no turns are deleted.
+func (c *Client) ProposeContextEdit(ctx context.Context, conversationID, instruction string) (Proposal, error) {
+	resp, err := c.agent.ProposeContextEdit(ctx, &proto.ProposeContextEditRequest{
+		ConversationId: conversationID, Instruction: instruction,
+	})
+	if err != nil {
+		return Proposal{}, err
+	}
+	return Proposal{DeleteIDs: resp.GetDeleteIds(), Rationale: resp.GetRationale()}, nil
+}
+
+// DeleteConversationTurns hard-deletes the named turns from a conversation and
+// returns the number of turns deleted.
+func (c *Client) DeleteConversationTurns(ctx context.Context, conversationID string, ids []string) (int, error) {
+	resp, err := c.agent.DeleteConversationTurns(ctx, &proto.DeleteConversationTurnsRequest{
+		ConversationId: conversationID, TurnId: ids,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int(resp.GetDeleted()), nil
 }
 
 func (c *Client) GetRuntimeStatus(ctx context.Context) (*RuntimeStatus, error) {

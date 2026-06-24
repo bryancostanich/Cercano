@@ -68,6 +68,7 @@ func contextTurnView(t conversation.Turn, tok contextmeter.Tokenizer) *proto.Con
 	}
 
 	return &proto.ContextTurn{
+		Id:        t.ID,
 		Role:      t.Role,
 		Kind:      kind,
 		Preview:   ctTruncate(ctPreview(preview), contextTurnPreviewMax),

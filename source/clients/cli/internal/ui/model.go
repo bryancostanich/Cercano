@@ -1576,17 +1576,14 @@ func (m *Model) renderEntry(e *Entry, idx int) string {
 	case RoleAssistant:
 		// Pre-text placeholder: no prose yet — show the live turn status inline
 		// (activity · elapsed · tokens · engine) where the agent is working.
-		// Indented to the content margin, italic + bright for readability, with a
-		// blank line above for breathing room.
 		if e.Streaming && e.Content == "" {
 			activity := m.turnActivity
 			if activity == "" {
 				activity = "thinking"
 			}
 			line := turnStatusLine(activity, time.Since(m.turnStart), m.turnTokOut, m.turnModel, m.turnCloud)
-			styled := lipgloss.NewStyle().Foreground(m.palette.Bright).Italic(true).Render(line)
-			content := animateSpinnerGlyph() + " " + styled
-			return "\n" + indentBlock(pad, content)
+			content := animateSpinnerGlyph() + " " + animateLimeSweep(line)
+			return indentBlock(pad, content)
 		}
 		rendered := m.renderAssistantMarkdown(e, textW)
 		if e.Streaming {

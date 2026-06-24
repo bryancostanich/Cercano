@@ -25,6 +25,7 @@ import (
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/llm/anthropic"
 	"cercano/source/server/internal/localruntime"
+	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
@@ -179,6 +180,14 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		fmt.Printf("UpdateConfig: Local runtime set to %s\n", req.LocalRuntime)
 	}
 
+	if req.LocusMode != "" {
+		if _, err := locus.ParseMode(req.LocusMode); err != nil {
+			return &proto.UpdateConfigResponse{Success: false, Message: err.Error()}, nil
+		}
+		changes = append(changes, fmt.Sprintf("locus_mode=%s", req.LocusMode))
+		fmt.Printf("UpdateConfig: Locus mode set to %s\n", req.LocusMode)
+	}
+
 	// Cloud provider rebuild: any of provider / model / api_key / base_url
 	// changes is enough to want a rebuild. We require provider to be set
 	// (existing or new) and at least one of api_key / base_url so we don't
@@ -251,6 +260,9 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	}
 	if req.CloudBaseUrl != "" {
 		s.currentConfig.CloudBaseURL = req.CloudBaseUrl
+	}
+	if req.LocusMode != "" {
+		s.currentConfig.LocusMode = req.LocusMode
 	}
 	s.refreshRuntimeEndpoints()
 
@@ -537,6 +549,7 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 		CloudState:     state,
 		Port:           s.currentConfig.Port,
 		LocalRuntime:   s.currentConfig.LocalRuntime,
+		LocusMode:      s.currentConfig.LocusMode,
 	}, nil
 }
 

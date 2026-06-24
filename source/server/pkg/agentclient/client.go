@@ -144,6 +144,7 @@ type Config struct {
 	CloudAPIKeySet bool
 	CloudState     string // "ok" | "absent" | "error"
 	Port           string
+	LocusMode      string
 }
 
 // GetConfig fetches the agent's current runtime config.
@@ -163,6 +164,7 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 		CloudAPIKeySet: resp.GetCloudApiKeySet(),
 		CloudState:     resp.GetCloudState(),
 		Port:           resp.GetPort(),
+		LocusMode:      resp.GetLocusMode(),
 	}, nil
 }
 
@@ -177,6 +179,7 @@ type ConfigUpdate struct {
 	CloudModel    string
 	CloudAPIKey   string
 	CloudBaseURL  string
+	LocusMode     string
 }
 
 // RuntimeStatus is the provider-neutral model/runtime dashboard snapshot.
@@ -732,6 +735,7 @@ func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, erro
 		CloudModel:    u.CloudModel,
 		CloudApiKey:   u.CloudAPIKey,
 		CloudBaseUrl:  u.CloudBaseURL,
+		LocusMode:     u.LocusMode,
 	})
 	if err != nil {
 		return "", err

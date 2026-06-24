@@ -55,6 +55,7 @@ type Server struct {
 	permStore           *agent.PermissionStore
 	pendingDecisions    *agent.PendingDecisions
 	cloudLLMProvider    llm.Provider
+	localLLMProvider    llm.Provider // native-tool-loop local provider (Ollama)
 	runtimeManager      localruntime.Manager
 	contextLoader       *projectctx.Loader
 
@@ -82,6 +83,37 @@ func (s *Server) SetPermissions(store *agent.PermissionStore, pending *agent.Pen
 // GetProviderCapabilities. Optional — when nil, GetProviderCapabilities falls
 // back to a hardcoded Anthropic-shaped capability snapshot.
 func (s *Server) SetCloudLLMProvider(p llm.Provider) { s.cloudLLMProvider = p }
+
+// SetLocalLLMProvider attaches the native-tool-calling local provider (Ollama).
+func (s *Server) SetLocalLLMProvider(p llm.Provider) { s.localLLMProvider = p }
+
+// resolveMainProvider picks the llm.Provider for the main tool-loop per the
+// active Locus Mode. Returns the provider, whether it's the cloud tier, whether
+// this is a fallback (preferred tier unavailable), or an error when the mode
+// forbids crossing and the required tier has no provider wired.
+func (s *Server) resolveMainProvider() (llm.Provider, bool, bool, error) {
+	mode, _ := locus.ParseMode(s.currentConfig.LocusMode)
+	res := mode.Main()
+
+	provForTier := func(t locus.Tier) llm.Provider {
+		if t == locus.TierCloud {
+			return s.cloudLLMProvider
+		}
+		return s.localLLMProvider
+	}
+
+	if p := provForTier(res.Preferred); p != nil {
+		return p, res.Preferred == locus.TierCloud, false, nil
+	}
+	if res.CrossAllowed {
+		if p := provForTier(res.Fallback); p != nil {
+			return p, res.Fallback == locus.TierCloud, true, nil
+		}
+	}
+	return nil, false, false, fmt.Errorf(
+		"locus mode %q: no %s provider available (and fallback not permitted)",
+		mode, res.Preferred)
+}
 
 // SetRuntimeManager attaches the local runtime/dashboard state manager.
 func (s *Server) SetRuntimeManager(m localruntime.Manager) {

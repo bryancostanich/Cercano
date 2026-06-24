@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
@@ -79,6 +80,9 @@ func ctPreview(s string) string { return strings.Join(strings.Fields(s), " ") }
 func ctTruncate(s string, max int) string {
 	if len(s) <= max {
 		return s
+	}
+	for max > 0 && !utf8.RuneStart(s[max]) {
+		max--
 	}
 	return s[:max] + "…"
 }

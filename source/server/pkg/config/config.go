@@ -22,6 +22,7 @@ type Config struct {
 	// Meridian (default http://127.0.0.1:3456). When set with the anthropic
 	// provider, an empty API key is accepted — the proxy handles auth.
 	CloudBaseURL string            `yaml:"cloud_base_url"`
+	LocusMode    string            `yaml:"locus_mode"` // cloud_only|cloud_primary|local_primary|local_only
 	Port         string            `yaml:"port"`
 	LlamaServer  LlamaServerConfig `yaml:"llama_server"`
 	Compaction   CompactionConfig  `yaml:"compaction"`
@@ -96,6 +97,7 @@ func Defaults() Config {
 		LocalRuntime:   "ollama",
 		LocalModel:     "qwen3-coder",
 		EmbeddingModel: "nomic-embed-text",
+		LocusMode:      "local_primary",
 		Port:           "50052",
 		LlamaServer: LlamaServerConfig{
 			ModelDirs:        []string{"~/.cercano/models"},

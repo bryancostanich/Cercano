@@ -828,6 +828,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 
+	case contextEditProposalMsg:
+		if cv, ok := m.content.(*contextView); ok {
+			cv.onProposal(msg)
+		}
+		return m, nil
+
+	case contextEditDeletedMsg:
+		if cv, ok := m.content.(*contextView); ok {
+			return m, cv.onDeleted(msg)
+		}
+		return m, nil
+
 	case runtimeDashboardActionMsg:
 		if dashboard, ok := m.content.(*runtimeDashboard); ok {
 			return m, dashboard.applyActionMsg(msg)

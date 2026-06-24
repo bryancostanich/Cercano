@@ -109,6 +109,31 @@ func TestChatPane_ErrorClearsBusyAndShows(t *testing.T) {
 
 type errString string
 func (e errString) Error() string { return string(e) }
+
+func TestChatPane_QueuesWhileBusyAndDrains(t *testing.T) {
+	p := newTestPane()
+	p.Submit("first")              // starts; busy
+	if p.Submit("second") != nil { // busy → enqueue, returns nil
+		t.Error("submit while busy should enqueue (nil cmd), not start")
+	}
+	if len(p.queued) != 1 || p.queued[0] != "second" {
+		t.Fatalf("queue = %v, want [second]", p.queued)
+	}
+	if !strings.Contains(p.View(), "second") {
+		t.Error("queued message should render")
+	}
+	// ending the first exchange auto-drains "second" (returns its start cmd)
+	cmd := p.Apply(chatDoneMsg{})
+	if cmd == nil { t.Error("done with a queued msg should return the drain cmd") }
+	if len(p.queued) != 0 { t.Errorf("queue should be empty after drain, got %v", p.queued) }
+	if !p.Busy() { t.Error("draining the next message should make the pane busy again") }
+	// last queued can be unstaged
+	p2 := newTestPane()
+	p2.Submit("a"); p2.Submit("b") // a starts, b queued
+	if got, ok := p2.unstageLastQueued(); !ok || got != "b" || len(p2.queued) != 0 {
+		t.Errorf("unstage = (%q,%v), queue=%v", got, ok, p2.queued)
+	}
+}
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -170,6 +195,7 @@ type chatPane struct {
 	busy    bool
 	activity string
 	started  time.Time
+	queued   []string // FIFO; messages submitted while busy (mirrors main chat d808952)
 	scrollOffset int
 }
 
@@ -182,9 +208,10 @@ func (c *chatPane) Busy() bool { return c.busy }
 func (c *chatPane) SetSize(w, h int) { c.width = w; c.height = h }
 
 // Submit appends the user message, marks the pane busy, and returns the driver's
-// cmd batched with the animation tick. Ignored while already busy.
+// cmd batched with the animation tick. While busy it enqueues (FIFO) instead.
 func (c *chatPane) Submit(input string) tea.Cmd {
 	if c.busy {
+		c.queued = append(c.queued, input)
 		return nil
 	}
 	c.entries = append(c.entries, &Entry{Role: RoleUser, Content: input})
@@ -195,9 +222,10 @@ func (c *chatPane) Submit(input string) tea.Cmd {
 	return tea.Batch(c.driver.Submit(ctx, input), progressAnimTick())
 }
 
-// Apply mutates pane state for a driver event. chatConfirmMsg is handled by the
-// model (it raises the confirm gate); this method handles the rest.
-func (c *chatPane) Apply(msg tea.Msg) {
+// Apply mutates pane state for a driver event and returns any follow-up cmd
+// (notably auto-draining the next queued message when an exchange ends).
+// chatConfirmMsg is handled by the model (it raises the confirm gate).
+func (c *chatPane) Apply(msg tea.Msg) tea.Cmd {
 	switch m := msg.(type) {
 	case chatStatusMsg:
 		c.activity = m.activity
@@ -208,11 +236,40 @@ func (c *chatPane) Apply(msg tea.Msg) {
 			c.entries = append(c.entries, &Entry{Role: RoleSystem, Content: m.text})
 		}
 		c.busy = false
+		return c.drainNext()
 	case chatErrorMsg:
 		c.entries = append(c.entries, &Entry{Role: RoleSystem, Content: c.styles.Error.Render("error: " + m.err.Error())})
 		c.busy = false
+		return c.drainNext()
 	}
+	return nil
 }
+
+// drainNext pops and submits the oldest queued message after an exchange ends.
+func (c *chatPane) drainNext() tea.Cmd {
+	if len(c.queued) == 0 {
+		return nil
+	}
+	next := c.queued[0]
+	c.queued = c.queued[1:]
+	return c.Submit(next) // busy is false here, so this starts the exchange
+}
+
+// unstageLastQueued pops the most-recently-queued message off the queue and
+// returns it (for the host to put back into the prompt for editing). Returns
+// "", false when the queue is empty. Mirrors the main chat.
+func (c *chatPane) unstageLastQueued() (string, bool) {
+	n := len(c.queued)
+	if n == 0 {
+		return "", false
+	}
+	last := c.queued[n-1]
+	c.queued = c.queued[:n-1]
+	return last, true
+}
+
+// clearQueue drops all pending messages (cancel/esc).
+func (c *chatPane) clearQueue() { c.queued = nil }
 
 // appendAssistant is used by the model when it handles chatConfirmMsg, so the
 // agent's pre-confirm message shows in the log.
@@ -234,6 +291,9 @@ func (c *chatPane) View() string {
 	if c.busy {
 		line := c.activity + "  ·  " + time.Since(c.started).Truncate(time.Second).String()
 		b.WriteString(animateSpinnerGlyph() + " " + animateLimeSweep(line) + "\n")
+	}
+	for _, q := range c.queued {
+		b.WriteString(c.styles.Muted.Render("⏳ " + q) + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -499,9 +559,11 @@ func (m Model) routeChatMsg(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, progressAnimTick()
 	}
-	cv.pane.Apply(msg)
-	if cv.pane.Busy() { return m, progressAnimTick() }
-	return m, nil
+	drain := cv.pane.Apply(msg) // may auto-submit the next queued message
+	if cv.pane.Busy() {
+		return m, tea.Batch(drain, progressAnimTick())
+	}
+	return m, drain
 }
 ```
 
@@ -513,6 +575,8 @@ Top-level msg cases:
 ```
 
 Ensure `progressAnimTickMsg` already triggers a re-render while the pane is busy (the main chat's tick handler does this; the pane's animated line repaints on each tick — confirm the existing `progressAnimTickMsg` case re-renders and, if it only continues while `m.streaming`, extend it to also continue while a `*contextView` pane is busy).
+
+**Queuing-key parity** (mirror the main chat in `handleContextViewKey`): the `enter` branch already enqueues via `cv.pane.Submit` when the pane is busy (no special-casing needed — `Submit` enqueues). Add two parity keys: on `up` with an empty input, call `cv.pane.unstageLastQueued()` and, if it returns a message, `m.input.SetValue(msg)` (pop the last queued back for editing); and have the `esc`-closes-the-page path also `cv.pane.clearQueue()` so closing `/c` drops pending messages. Keep these minimal — they match `d808952`'s `unstageLastQueued` / esc-drops-queue behavior.
 
 - [ ] **Step 5: Run tests + build the CLI**
 

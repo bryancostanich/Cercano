@@ -55,15 +55,35 @@ A self-contained type (e.g. `internal/ui/chatpane.go`, package `ui`):
 
 - **State:** `entries []*Entry` (its own message log, reusing the existing `Entry`
   type), `driver ChatDriver`, live-status fields (`busy bool`, `activity string`,
-  `startedAt time.Time`, `tokOut int`, `engine string`), `scrollOffset int`, and a
-  reference to the host's confirm mechanism.
+  `startedAt time.Time`, `tokOut int`, `engine string`), `queued []string` (FIFO),
+  `scrollOffset int`.
 - **Rendering:** an entries view (reusing `renderEntry`-style rendering) + a status
   line while `busy` (reuse `animateSpinnerGlyph`/`animateLimeSweep`/the
-  `turnStatusLine` formatter). Scrolls via the existing windowing helper.
-- **Input:** `Submit(input string) tea.Cmd` appends a user `Entry`, sets `busy`,
-  and returns `driver.Submit(ctx, input)`.
+  `turnStatusLine` formatter) + the queued messages rendered dimmed. Scrolls via
+  the existing windowing helper.
+- **Input:** `Submit(input string) tea.Cmd` — when idle, appends a user `Entry`,
+  sets `busy`, returns `driver.Submit(ctx, input)`; **when busy, enqueues** the
+  message (FIFO) and returns nil. See Message queuing.
 - **Event handling:** `Apply(msg chatPaneMsg) tea.Cmd` mutates entries/status per
-  event (below) and continues the animation tick.
+  event (below); on the terminal events (`done`/`error`) it clears `busy` and
+  **drains the next queued message** (auto-submits it), continuing the tick.
+
+## 1a. Message queuing (mirrors the main chat, `d808952`)
+
+The pane owns the same queuing behavior the main chat just gained, so the Phase-2
+migration inherits it:
+
+- **Enqueue while busy:** `Submit` during an in-flight exchange appends to
+  `queued` instead of starting a new one.
+- **Auto-drain:** when an exchange ends (`done`/`error` clears `busy`), if `queued`
+  is non-empty the pane pops the front and submits it — one queued item per
+  completed exchange, FIFO.
+- **Render:** queued messages render as dimmed rows (the pane's `renderQueued`,
+  mirroring the main view's), so the user sees what's pending.
+- **Unstage / clear (parity with main):** `↑` on an empty input pops the most
+  recently queued message back for editing (`unstageLastQueued`); a cancel/`esc`
+  drops the queue. These are part of the reusable behavior; the `/c` host wires
+  them through its key handler.
 
 ## 2. `ChatDriver` + the event protocol
 
@@ -135,7 +155,7 @@ view's bespoke entry/status code with a `chatPane` — no `chatPane` change expe
 | Propose error | `errorEvent` → error message in the pane; clear busy; no confirm |
 | Delete error | `errorEvent` → error message; turns NOT reloaded; busy cleared |
 | Empty proposal (nothing to remove) | `done` with a "nothing to remove" message; no confirm |
-| Submit while busy | ignored (one in-flight exchange at a time, v1) |
+| Submit while busy | enqueued (FIFO); auto-drained when the current exchange ends |
 | Confirm pending | the shared confirm gate intercepts keys (existing ordering) |
 
 ## Testing
@@ -145,6 +165,10 @@ view's bespoke entry/status code with a `chatPane` — no `chatPane` change expe
   (`status` sets activity, `assistantDelta` appends/extends an assistant entry,
   `confirm` raises the gate, `done` clears busy, `errorEvent` appends an error
   entry); rendering contains the messages + an animated status line while busy.
+- **`chatPane` queuing:** `Submit` while busy enqueues (no new exchange);
+  `Apply(done)`/`Apply(error)` with a non-empty queue auto-submits the next (and
+  returns its cmd); queued messages render; `unstageLastQueued` pops the last back;
+  cancel clears the queue.
 - **`contextManagerDriver` (fake agentclient):** `Submit` emits
   status→assistantDelta(rationale)→confirm with the right ids; the confirm's
   `onYes` emits status→done and triggers the delete; error path emits

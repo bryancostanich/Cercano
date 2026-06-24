@@ -43,7 +43,7 @@ func TestChatPane_ApplyAssistantAndDone(t *testing.T) {
 	if p.Busy() {
 		t.Error("done should clear busy")
 	}
-	out := p.View()
+	out := stripAnsiCSI(p.View())
 	if !strings.Contains(out, "echo: hi") {
 		t.Errorf("assistant text missing:\n%s", out)
 	}
@@ -73,6 +73,25 @@ func TestChatPane_ErrorClearsBusyAndShows(t *testing.T) {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+func TestChatPane_RendersMarkdownAndScrolls(t *testing.T) {
+	p := newTestPane()
+	p.Submit("ask")
+	p.Apply(chatAssistantMsg{text: "# Heading\n\nsome **bold** text"})
+	p.Apply(chatDoneMsg{})
+	out := stripAnsiCSI(p.View())
+	if !strings.Contains(out, "Heading") || !strings.Contains(out, "bold") {
+		t.Errorf("assistant markdown not rendered:\n%s", out)
+	}
+	for i := 0; i < 60; i++ {
+		p.Apply(chatAssistantMsg{text: "line"})
+	}
+	st0 := p.ScrollState()
+	p.ScrollBy(20)
+	if p.ScrollState().Offset <= st0.Offset {
+		t.Errorf("ScrollBy did not advance: %d -> %d", st0.Offset, p.ScrollState().Offset)
+	}
+}
 
 func TestChatPane_QueuesWhileBusyAndDrains(t *testing.T) {
 	p := newTestPane()

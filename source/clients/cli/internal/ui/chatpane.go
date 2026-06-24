@@ -6,7 +6,9 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
+	"cercano/source/clients/cli/internal/render"
 	"cercano/source/clients/cli/internal/theme"
 )
 
@@ -43,6 +45,7 @@ type chatPane struct {
 	width   int
 	height  int
 
+	md           *render.Markdown
 	entries      []*Entry
 	busy         bool
 	activity     string
@@ -52,7 +55,14 @@ type chatPane struct {
 }
 
 func newChatPane(d ChatDriver, s theme.Styles, p theme.Palette, w, h int) *chatPane {
-	return &chatPane{driver: d, styles: s, palette: p, width: w, height: h}
+	return &chatPane{
+		driver:  d,
+		styles:  s,
+		palette: p,
+		width:   w,
+		height:  h,
+		md:      render.NewMarkdown(theme.CrackerMarkdownStyle()),
+	}
 }
 
 func (c *chatPane) Busy() bool { return c.busy }
@@ -133,27 +143,108 @@ func (c *chatPane) appendAssistant(text string) {
 
 func (c *chatPane) clearBusy() { c.busy = false }
 
-// rolePrefix returns a readable label for a Role value.
-func rolePrefix(r Role) string {
-	switch r {
-	case RoleUser:
-		return "user"
+// renderChatEntry renders one chat Entry with the same primitives as the main
+// buffer: assistant content through the markdown engine, user/system styled.
+// Free function so both the pane and (later) the main chat can use it.
+func renderChatEntry(e *Entry, md *render.Markdown, s theme.Styles, width int) string {
+	switch e.Role {
 	case RoleAssistant:
-		return "assistant"
-	default:
-		return "system"
+		return md.Render(e.Content, width)
+	case RoleUser:
+		return s.UserPrompt.Render("▶ ") + e.Content
+	default: // RoleSystem
+		return s.Muted.Render(e.Content)
 	}
 }
 
-// View renders the message log plus, while busy, the animated status line.
-// The spinner uses animateSpinnerGlyph; the status text animates with lime
-// sweep (animateLimeSweep), matching the UX of the main page.
-func (c *chatPane) View() string {
-	var b strings.Builder
-	for _, e := range c.entries {
-		role := c.styles.Muted.Render(rolePrefix(e.Role) + ": ")
-		b.WriteString(role + e.Content + "\n")
+// ScrollBy advances the scroll offset by delta lines (positive = down).
+func (c *chatPane) ScrollBy(delta int) { c.scrollOffset += delta; c.clampScroll() }
+
+// ScrollTo sets the scroll offset to a specific line.
+func (c *chatPane) ScrollTo(offset int) { c.scrollOffset = offset; c.clampScroll() }
+
+// ScrollState returns a snapshot of the current scroll geometry.
+func (c *chatPane) ScrollState() contentPageScrollState {
+	allLines := c.contentLines()
+	total := len(allLines)
+	contentH := c.contentHeight()
+	return contentPageScrollState{
+		Total:  total,
+		Height: contentH,
+		Offset: clampInt(c.scrollOffset, 0, maxInt(0, total-contentH)),
 	}
+}
+
+func (c *chatPane) clampScroll() { c.scrollOffset = c.ScrollState().Offset }
+
+// contentHeight is the scrollable area: total height minus the pinned rows
+// (1 busy line + 1 per queued item, minimum 1).
+func (c *chatPane) contentHeight() int {
+	pinned := 0
+	if c.busy {
+		pinned++
+	}
+	pinned += len(c.queued)
+	h := c.height - pinned
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
+
+// contentLines renders all entries into a flat line slice for windowing.
+func (c *chatPane) contentLines() []string {
+	contentW := c.width - 2 // reserve 1 col for scrollbar gutter + 1 space
+	if contentW < 1 {
+		contentW = 1
+	}
+	var lines []string
+	for _, e := range c.entries {
+		rendered := renderChatEntry(e, c.md, c.styles, contentW)
+		for _, l := range strings.Split(rendered, "\n") {
+			lines = append(lines, l)
+		}
+	}
+	return lines
+}
+
+// View renders the message log with a scrollbar, plus the pinned status/queued
+// rows at the bottom.
+func (c *chatPane) View() string {
+	contentH := c.contentHeight()
+	allLines := c.contentLines()
+	total := len(allLines)
+	c.scrollOffset = clampInt(c.scrollOffset, 0, maxInt(0, total-contentH))
+	col := scrollbarColumn(total, contentH, c.scrollOffset)
+	contentW := c.width - 2
+	if contentW < 1 {
+		contentW = 1
+	}
+
+	var b strings.Builder
+	for i := 0; i < contentH; i++ {
+		line := ""
+		if src := c.scrollOffset + i; src >= 0 && src < total {
+			line = allLines[src]
+		}
+		b.WriteString(ansi.Truncate(line, contentW, ""))
+		b.WriteString(" ")
+		if i < len(col) {
+			switch col[i] {
+			case '█':
+				b.WriteString(c.styles.Border.Render("█"))
+			case '░':
+				b.WriteString(c.styles.BorderDim.Render("░"))
+			default:
+				b.WriteString(" ")
+			}
+		} else {
+			b.WriteString(" ")
+		}
+		b.WriteString("\n")
+	}
+
+	// Pinned rows: busy status then queued messages.
 	if c.busy {
 		line := c.activity + "  ·  " + time.Since(c.started).Truncate(time.Second).String()
 		b.WriteString(animateSpinnerGlyph() + " " + animateLimeSweep(line) + "\n")

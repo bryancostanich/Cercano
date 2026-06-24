@@ -263,11 +263,11 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 
 func buildRuntimeManager(cfg config.Config) localruntime.Manager {
 	manager := localruntime.NewManager(localruntime.WithEndpoints(localruntime.EndpointsFromConfig(cfg)))
+	provider := runtimellama.NewProvider(cfg.LlamaServer)
+	manager.RegisterProvider(provider)
 	if !llamaServerEnabled(cfg) {
 		return manager
 	}
-	provider := runtimellama.NewProvider(cfg.LlamaServer)
-	manager.RegisterProvider(provider)
 	if strings.TrimSpace(cfg.LlamaServer.DefaultModel) == "" {
 		manager.WriteLog(localruntime.LogEntry{
 			Source:  "cercano.runtime.llama_server",

@@ -199,18 +199,49 @@ func TestStreamToolLoop_PersistsMultiTurnHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTurns: %v", err)
 	}
-	// 1 user + 2 assistant (tool_use turn + final text turn).
-	if len(turns) != 3 {
-		t.Fatalf("expected 3 turns, got %d", len(turns))
+	// 1 user + assistant tool_use + user tool_result + assistant text.
+	if len(turns) != 4 {
+		t.Fatalf("expected 4 turns, got %d", len(turns))
 	}
 	if turns[0].Role != "user" {
 		t.Errorf("turn 0 role: %q", turns[0].Role)
 	}
 	if turns[1].Role != "assistant" || turns[1].BlocksJSON == "" {
-		t.Errorf("turn 1 should be assistant with blocks, got role=%q blocks=%q", turns[1].Role, turns[1].BlocksJSON)
+		t.Errorf("turn 1 should be assistant with blocks, got role=%q", turns[1].Role)
 	}
-	if turns[2].Role != "assistant" || turns[2].Content != "All done." {
-		t.Errorf("turn 2: role=%q content=%q", turns[2].Role, turns[2].Content)
+	if turns[2].Role != "user" || turns[2].BlocksJSON == "" {
+		t.Errorf("turn 2 should be the user tool_result turn, got role=%q blocks=%q", turns[2].Role, turns[2].BlocksJSON)
+	}
+	if turns[3].Role != "assistant" || turns[3].Content != "All done." {
+		t.Errorf("turn 3: role=%q content=%q", turns[3].Role, turns[3].Content)
+	}
+}
+
+func TestPersistToolLoopTurns_DeltaOnly(t *testing.T) {
+	srv, store := newServerWithStore(t)
+	ctx := context.Background()
+	req := &proto.ProcessRequestRequest{Input: "second", ConversationId: "conv-delta"}
+
+	// Simulate a result whose History carries a 2-message injected prefix plus
+	// 2 new messages. Only the 2 new ones should be persisted.
+	result := agent.ToolLoopResult{History: []llm.Message{
+		{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "old-user"}}},      // injected
+		{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: "old-asst"}}}, // injected
+		{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "second"}}},        // new
+		{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: "reply"}}},    // new
+	}}
+
+	srv.persistToolLoopTurns(ctx, req, result, 2)
+
+	turns, err := store.GetTurns(ctx, "conv-delta")
+	if err != nil {
+		t.Fatalf("GetTurns: %v", err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("expected 2 persisted (delta only), got %d", len(turns))
+	}
+	if turns[0].Content != "second" || turns[1].Content != "reply" {
+		t.Errorf("unexpected delta turns: %q, %q", turns[0].Content, turns[1].Content)
 	}
 }
 

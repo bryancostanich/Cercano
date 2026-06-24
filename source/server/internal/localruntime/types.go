@@ -31,6 +31,8 @@ type Manager interface {
 	Stop(context.Context, StopRequest) error
 	Restart(context.Context, RestartRequest) (*InstanceRecord, error)
 	DownloadModel(context.Context, DownloadRequest) (*ModelRecord, error)
+	CancelDownload(context.Context, DownloadRequest) (*ModelRecord, error)
+	DeleteModel(context.Context, DeleteModelRequest) error
 	Status(context.Context) (*StatusSnapshot, error)
 	Logs(context.Context, LogRequest) ([]LogEntry, error)
 	WriteLog(LogEntry)
@@ -156,6 +158,11 @@ type RestartRequest struct {
 }
 
 type DownloadRequest struct {
+	Runtime string
+	ModelID string
+}
+
+type DeleteModelRequest struct {
 	Runtime string
 	ModelID string
 }

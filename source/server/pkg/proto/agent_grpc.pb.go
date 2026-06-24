@@ -19,34 +19,36 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Agent_ProcessRequest_FullMethodName          = "/agent.Agent/ProcessRequest"
-	Agent_StreamProcessRequest_FullMethodName    = "/agent.Agent/StreamProcessRequest"
-	Agent_UpdateConfig_FullMethodName            = "/agent.Agent/UpdateConfig"
-	Agent_GetConfig_FullMethodName               = "/agent.Agent/GetConfig"
-	Agent_ListConversations_FullMethodName       = "/agent.Agent/ListConversations"
-	Agent_ResumeConversation_FullMethodName      = "/agent.Agent/ResumeConversation"
-	Agent_DeleteConversation_FullMethodName      = "/agent.Agent/DeleteConversation"
-	Agent_RenameConversation_FullMethodName      = "/agent.Agent/RenameConversation"
-	Agent_GetConversation_FullMethodName         = "/agent.Agent/GetConversation"
-	Agent_GetContextUsage_FullMethodName         = "/agent.Agent/GetContextUsage"
-	Agent_ListTools_FullMethodName               = "/agent.Agent/ListTools"
-	Agent_InvokeTool_FullMethodName              = "/agent.Agent/InvokeTool"
-	Agent_ListModels_FullMethodName              = "/agent.Agent/ListModels"
-	Agent_GetRuntimeStatus_FullMethodName        = "/agent.Agent/GetRuntimeStatus"
-	Agent_ListRuntimeModels_FullMethodName       = "/agent.Agent/ListRuntimeModels"
-	Agent_ListRuntimeEndpoints_FullMethodName    = "/agent.Agent/ListRuntimeEndpoints"
-	Agent_StartRuntimeModel_FullMethodName       = "/agent.Agent/StartRuntimeModel"
-	Agent_StopRuntimeModel_FullMethodName        = "/agent.Agent/StopRuntimeModel"
-	Agent_RestartRuntime_FullMethodName          = "/agent.Agent/RestartRuntime"
-	Agent_DownloadRuntimeModel_FullMethodName    = "/agent.Agent/DownloadRuntimeModel"
-	Agent_StreamRuntimeLogs_FullMethodName       = "/agent.Agent/StreamRuntimeLogs"
-	Agent_ListSkills_FullMethodName              = "/agent.Agent/ListSkills"
-	Agent_GetSkill_FullMethodName                = "/agent.Agent/GetSkill"
-	Agent_SetPermissionMode_FullMethodName       = "/agent.Agent/SetPermissionMode"
-	Agent_GetPermissionMode_FullMethodName       = "/agent.Agent/GetPermissionMode"
-	Agent_AllowToolCall_FullMethodName           = "/agent.Agent/AllowToolCall"
-	Agent_DenyToolCall_FullMethodName            = "/agent.Agent/DenyToolCall"
-	Agent_GetProviderCapabilities_FullMethodName = "/agent.Agent/GetProviderCapabilities"
+	Agent_ProcessRequest_FullMethodName             = "/agent.Agent/ProcessRequest"
+	Agent_StreamProcessRequest_FullMethodName       = "/agent.Agent/StreamProcessRequest"
+	Agent_UpdateConfig_FullMethodName               = "/agent.Agent/UpdateConfig"
+	Agent_GetConfig_FullMethodName                  = "/agent.Agent/GetConfig"
+	Agent_ListConversations_FullMethodName          = "/agent.Agent/ListConversations"
+	Agent_ResumeConversation_FullMethodName         = "/agent.Agent/ResumeConversation"
+	Agent_DeleteConversation_FullMethodName         = "/agent.Agent/DeleteConversation"
+	Agent_RenameConversation_FullMethodName         = "/agent.Agent/RenameConversation"
+	Agent_GetConversation_FullMethodName            = "/agent.Agent/GetConversation"
+	Agent_GetContextUsage_FullMethodName            = "/agent.Agent/GetContextUsage"
+	Agent_ListTools_FullMethodName                  = "/agent.Agent/ListTools"
+	Agent_InvokeTool_FullMethodName                 = "/agent.Agent/InvokeTool"
+	Agent_ListModels_FullMethodName                 = "/agent.Agent/ListModels"
+	Agent_GetRuntimeStatus_FullMethodName           = "/agent.Agent/GetRuntimeStatus"
+	Agent_ListRuntimeModels_FullMethodName          = "/agent.Agent/ListRuntimeModels"
+	Agent_ListRuntimeEndpoints_FullMethodName       = "/agent.Agent/ListRuntimeEndpoints"
+	Agent_StartRuntimeModel_FullMethodName          = "/agent.Agent/StartRuntimeModel"
+	Agent_StopRuntimeModel_FullMethodName           = "/agent.Agent/StopRuntimeModel"
+	Agent_RestartRuntime_FullMethodName             = "/agent.Agent/RestartRuntime"
+	Agent_DownloadRuntimeModel_FullMethodName       = "/agent.Agent/DownloadRuntimeModel"
+	Agent_CancelRuntimeModelDownload_FullMethodName = "/agent.Agent/CancelRuntimeModelDownload"
+	Agent_DeleteRuntimeModel_FullMethodName         = "/agent.Agent/DeleteRuntimeModel"
+	Agent_StreamRuntimeLogs_FullMethodName          = "/agent.Agent/StreamRuntimeLogs"
+	Agent_ListSkills_FullMethodName                 = "/agent.Agent/ListSkills"
+	Agent_GetSkill_FullMethodName                   = "/agent.Agent/GetSkill"
+	Agent_SetPermissionMode_FullMethodName          = "/agent.Agent/SetPermissionMode"
+	Agent_GetPermissionMode_FullMethodName          = "/agent.Agent/GetPermissionMode"
+	Agent_AllowToolCall_FullMethodName              = "/agent.Agent/AllowToolCall"
+	Agent_DenyToolCall_FullMethodName               = "/agent.Agent/DenyToolCall"
+	Agent_GetProviderCapabilities_FullMethodName    = "/agent.Agent/GetProviderCapabilities"
 )
 
 // AgentClient is the client API for Agent service.
@@ -97,6 +99,8 @@ type AgentClient interface {
 	StopRuntimeModel(ctx context.Context, in *StopRuntimeModelRequest, opts ...grpc.CallOption) (*StopRuntimeModelResponse, error)
 	RestartRuntime(ctx context.Context, in *RestartRuntimeRequest, opts ...grpc.CallOption) (*RestartRuntimeResponse, error)
 	DownloadRuntimeModel(ctx context.Context, in *DownloadRuntimeModelRequest, opts ...grpc.CallOption) (*DownloadRuntimeModelResponse, error)
+	CancelRuntimeModelDownload(ctx context.Context, in *CancelRuntimeModelDownloadRequest, opts ...grpc.CallOption) (*CancelRuntimeModelDownloadResponse, error)
+	DeleteRuntimeModel(ctx context.Context, in *DeleteRuntimeModelRequest, opts ...grpc.CallOption) (*DeleteRuntimeModelResponse, error)
 	StreamRuntimeLogs(ctx context.Context, in *StreamRuntimeLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RuntimeLogEntry], error)
 	// ListSkills returns the catalog of available Agent Skills (name + description).
 	ListSkills(ctx context.Context, in *ListSkillsRequest, opts ...grpc.CallOption) (*ListSkillsResponse, error)
@@ -331,6 +335,26 @@ func (c *agentClient) DownloadRuntimeModel(ctx context.Context, in *DownloadRunt
 	return out, nil
 }
 
+func (c *agentClient) CancelRuntimeModelDownload(ctx context.Context, in *CancelRuntimeModelDownloadRequest, opts ...grpc.CallOption) (*CancelRuntimeModelDownloadResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CancelRuntimeModelDownloadResponse)
+	err := c.cc.Invoke(ctx, Agent_CancelRuntimeModelDownload_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) DeleteRuntimeModel(ctx context.Context, in *DeleteRuntimeModelRequest, opts ...grpc.CallOption) (*DeleteRuntimeModelResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteRuntimeModelResponse)
+	err := c.cc.Invoke(ctx, Agent_DeleteRuntimeModel_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *agentClient) StreamRuntimeLogs(ctx context.Context, in *StreamRuntimeLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RuntimeLogEntry], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[1], Agent_StreamRuntimeLogs_FullMethodName, cOpts...)
@@ -468,6 +492,8 @@ type AgentServer interface {
 	StopRuntimeModel(context.Context, *StopRuntimeModelRequest) (*StopRuntimeModelResponse, error)
 	RestartRuntime(context.Context, *RestartRuntimeRequest) (*RestartRuntimeResponse, error)
 	DownloadRuntimeModel(context.Context, *DownloadRuntimeModelRequest) (*DownloadRuntimeModelResponse, error)
+	CancelRuntimeModelDownload(context.Context, *CancelRuntimeModelDownloadRequest) (*CancelRuntimeModelDownloadResponse, error)
+	DeleteRuntimeModel(context.Context, *DeleteRuntimeModelRequest) (*DeleteRuntimeModelResponse, error)
 	StreamRuntimeLogs(*StreamRuntimeLogsRequest, grpc.ServerStreamingServer[RuntimeLogEntry]) error
 	// ListSkills returns the catalog of available Agent Skills (name + description).
 	ListSkills(context.Context, *ListSkillsRequest) (*ListSkillsResponse, error)
@@ -552,6 +578,12 @@ func (UnimplementedAgentServer) RestartRuntime(context.Context, *RestartRuntimeR
 }
 func (UnimplementedAgentServer) DownloadRuntimeModel(context.Context, *DownloadRuntimeModelRequest) (*DownloadRuntimeModelResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DownloadRuntimeModel not implemented")
+}
+func (UnimplementedAgentServer) CancelRuntimeModelDownload(context.Context, *CancelRuntimeModelDownloadRequest) (*CancelRuntimeModelDownloadResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CancelRuntimeModelDownload not implemented")
+}
+func (UnimplementedAgentServer) DeleteRuntimeModel(context.Context, *DeleteRuntimeModelRequest) (*DeleteRuntimeModelResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteRuntimeModel not implemented")
 }
 func (UnimplementedAgentServer) StreamRuntimeLogs(*StreamRuntimeLogsRequest, grpc.ServerStreamingServer[RuntimeLogEntry]) error {
 	return status.Error(codes.Unimplemented, "method StreamRuntimeLogs not implemented")
@@ -951,6 +983,42 @@ func _Agent_DownloadRuntimeModel_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Agent_CancelRuntimeModelDownload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CancelRuntimeModelDownloadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).CancelRuntimeModelDownload(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_CancelRuntimeModelDownload_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).CancelRuntimeModelDownload(ctx, req.(*CancelRuntimeModelDownloadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_DeleteRuntimeModel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteRuntimeModelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).DeleteRuntimeModel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_DeleteRuntimeModel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).DeleteRuntimeModel(ctx, req.(*DeleteRuntimeModelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Agent_StreamRuntimeLogs_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(StreamRuntimeLogsRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -1170,6 +1238,14 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DownloadRuntimeModel",
 			Handler:    _Agent_DownloadRuntimeModel_Handler,
+		},
+		{
+			MethodName: "CancelRuntimeModelDownload",
+			Handler:    _Agent_CancelRuntimeModelDownload_Handler,
+		},
+		{
+			MethodName: "DeleteRuntimeModel",
+			Handler:    _Agent_DeleteRuntimeModel_Handler,
 		},
 		{
 			MethodName: "ListSkills",

@@ -35,23 +35,29 @@ func WithHTTPClient(client *http.Client) Option {
 // InMemoryManager is the first runtime manager implementation. It keeps
 // dashboard state in memory and delegates real runtime behavior to providers.
 type InMemoryManager struct {
-	mu         sync.RWMutex
-	providers  map[string]Provider
-	instances  map[string]InstanceRecord
-	endpoints  []EndpointRecord
-	downloads  map[string]ModelRecord
-	httpClient *http.Client
-	logs       []LogEntry
-	logLimit   int
+	mu           sync.RWMutex
+	providers    map[string]Provider
+	instances    map[string]InstanceRecord
+	endpoints    []EndpointRecord
+	downloads    map[string]ModelRecord
+	downloadJobs map[string]*downloadJob
+	httpClient   *http.Client
+	logs         []LogEntry
+	logLimit     int
+}
+
+type downloadJob struct {
+	cancel context.CancelFunc
 }
 
 func NewManager(opts ...Option) *InMemoryManager {
 	m := &InMemoryManager{
-		providers:  make(map[string]Provider),
-		instances:  make(map[string]InstanceRecord),
-		downloads:  make(map[string]ModelRecord),
-		httpClient: http.DefaultClient,
-		logLimit:   defaultLogLimit,
+		providers:    make(map[string]Provider),
+		instances:    make(map[string]InstanceRecord),
+		downloads:    make(map[string]ModelRecord),
+		downloadJobs: make(map[string]*downloadJob),
+		httpClient:   http.DefaultClient,
+		logLimit:     defaultLogLimit,
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -216,8 +222,11 @@ func (m *InMemoryManager) DownloadModel(ctx context.Context, req DownloadRequest
 	model.DownloadedBytes = 0
 	model.DownloadTotalBytes = total
 	model.DownloadError = ""
+	downloadCtx, cancel := context.WithCancel(context.Background())
+	job := &downloadJob{cancel: cancel}
 	m.mu.Lock()
 	m.downloads[model.ID] = model
+	m.downloadJobs[model.ID] = job
 	m.mu.Unlock()
 	m.WriteLog(LogEntry{
 		Source:  "cercano.runtime.download",
@@ -225,8 +234,80 @@ func (m *InMemoryManager) DownloadModel(ctx context.Context, req DownloadRequest
 		ModelID: model.ID,
 		Message: "starting download for " + model.DisplayName,
 	})
-	go m.runDownload(context.Background(), model)
+	go m.runDownload(downloadCtx, model, job)
 	return &model, nil
+}
+
+func (m *InMemoryManager) CancelDownload(ctx context.Context, req DownloadRequest) (*ModelRecord, error) {
+	if strings.TrimSpace(req.Runtime) == "" {
+		return nil, errors.New("runtime is required")
+	}
+	if strings.TrimSpace(req.ModelID) == "" {
+		return nil, errors.New("model id is required")
+	}
+	model, ok := m.download(req.ModelID)
+	if !ok {
+		found, err := m.findDownloadModel(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		model = found
+	}
+	if model.DownloadState != "downloading" {
+		return &model, nil
+	}
+
+	m.mu.RLock()
+	job := m.downloadJobs[model.ID]
+	m.mu.RUnlock()
+	if job != nil && job.cancel != nil {
+		job.cancel()
+	}
+	m.markDownloadCancelled(model)
+	cancelled, _ := m.download(model.ID)
+	return &cancelled, nil
+}
+
+func (m *InMemoryManager) DeleteModel(ctx context.Context, req DeleteModelRequest) error {
+	if strings.TrimSpace(req.Runtime) == "" {
+		return errors.New("runtime is required")
+	}
+	if strings.TrimSpace(req.ModelID) == "" {
+		return errors.New("model id is required")
+	}
+	model, err := m.findDownloadModel(ctx, DownloadRequest{Runtime: req.Runtime, ModelID: req.ModelID})
+	if err != nil {
+		return err
+	}
+	if model.DownloadState == "downloading" {
+		return fmt.Errorf("model %q is downloading; cancel it before deleting", req.ModelID)
+	}
+	if model.DownloadURL == "" {
+		return fmt.Errorf("model %q is not a managed download", req.ModelID)
+	}
+	if model.Path == "" {
+		return fmt.Errorf("model %q does not have a target path", req.ModelID)
+	}
+	if err := os.Remove(model.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	_ = os.Remove(model.Path + ".part")
+	model.DownloadState = "not_downloaded"
+	model.DownloadedBytes = 0
+	if model.DownloadTotalBytes == 0 {
+		model.DownloadTotalBytes = model.SizeBytes
+	}
+	model.DownloadError = ""
+	model.RuntimeState = StateStopped
+	model.ModifiedAt = time.Time{}
+	m.updateDownload(model)
+	m.WriteLog(LogEntry{
+		Source:  "cercano.runtime.download",
+		Level:   "info",
+		ModelID: model.ID,
+		Message: "deleted " + model.DisplayName,
+	})
+	return nil
 }
 
 func (m *InMemoryManager) Status(ctx context.Context) (*StatusSnapshot, error) {
@@ -275,7 +356,8 @@ func (m *InMemoryManager) findDownloadModel(ctx context.Context, req DownloadReq
 	return ModelRecord{}, fmt.Errorf("runtime model %q not found", req.ModelID)
 }
 
-func (m *InMemoryManager) runDownload(ctx context.Context, model ModelRecord) {
+func (m *InMemoryManager) runDownload(ctx context.Context, model ModelRecord, job *downloadJob) {
+	defer m.clearDownloadJob(model.ID, job)
 	if err := os.MkdirAll(filepath.Dir(model.Path), 0755); err != nil {
 		m.failDownload(model, err)
 		return
@@ -288,6 +370,10 @@ func (m *InMemoryManager) runDownload(ctx context.Context, model ModelRecord) {
 	}
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+			m.markDownloadCancelled(model)
+			return
+		}
 		m.failDownload(model, err)
 		return
 	}
@@ -312,6 +398,12 @@ func (m *InMemoryManager) runDownload(ctx context.Context, model ModelRecord) {
 	buf := make([]byte, 256*1024)
 	lastUpdate := time.Now()
 	for {
+		if ctx.Err() != nil {
+			_ = file.Close()
+			_ = os.Remove(tempPath)
+			m.markDownloadCancelled(model)
+			return
+		}
 		n, readErr := resp.Body.Read(buf)
 		if n > 0 {
 			if _, err := file.Write(buf[:n]); err != nil {
@@ -333,6 +425,10 @@ func (m *InMemoryManager) runDownload(ctx context.Context, model ModelRecord) {
 		if readErr != nil {
 			_ = file.Close()
 			_ = os.Remove(tempPath)
+			if errors.Is(readErr, context.Canceled) || ctx.Err() != nil {
+				m.markDownloadCancelled(model)
+				return
+			}
 			m.failDownload(model, readErr)
 			return
 		}
@@ -370,6 +466,14 @@ func (m *InMemoryManager) updateDownload(model ModelRecord) {
 	m.downloads[model.ID] = model
 }
 
+func (m *InMemoryManager) clearDownloadJob(modelID string, job *downloadJob) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.downloadJobs[modelID] == job {
+		delete(m.downloadJobs, modelID)
+	}
+}
+
 func (m *InMemoryManager) failDownload(model ModelRecord, err error) {
 	model.DownloadState = "failed"
 	model.DownloadError = err.Error()
@@ -379,6 +483,24 @@ func (m *InMemoryManager) failDownload(model ModelRecord, err error) {
 		Level:   "error",
 		ModelID: model.ID,
 		Message: "download failed for " + model.DisplayName + ": " + err.Error(),
+	})
+}
+
+func (m *InMemoryManager) markDownloadCancelled(model ModelRecord) {
+	if existing, ok := m.download(model.ID); ok {
+		if existing.DownloadState == "cancelled" {
+			return
+		}
+		model = mergeDownloadRecord(model, existing)
+	}
+	model.DownloadState = "cancelled"
+	model.DownloadError = ""
+	m.updateDownload(model)
+	m.WriteLog(LogEntry{
+		Source:  "cercano.runtime.download",
+		Level:   "info",
+		ModelID: model.ID,
+		Message: "cancelled download for " + model.DisplayName,
 	})
 }
 

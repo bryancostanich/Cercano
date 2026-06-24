@@ -525,6 +525,35 @@ func (c *Client) DownloadRuntimeModel(ctx context.Context, runtimeName, modelID 
 	return &model, nil
 }
 
+func (c *Client) CancelRuntimeModelDownload(ctx context.Context, runtimeName, modelID string) (*RuntimeModel, error) {
+	resp, err := c.agent.CancelRuntimeModelDownload(ctx, &proto.CancelRuntimeModelDownloadRequest{
+		Runtime: runtimeName,
+		ModelId: modelID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !resp.GetOk() {
+		return nil, fmt.Errorf("%s", resp.GetError())
+	}
+	model := mapRuntimeModel(resp.GetModel())
+	return &model, nil
+}
+
+func (c *Client) DeleteRuntimeModel(ctx context.Context, runtimeName, modelID string) error {
+	resp, err := c.agent.DeleteRuntimeModel(ctx, &proto.DeleteRuntimeModelRequest{
+		Runtime: runtimeName,
+		ModelId: modelID,
+	})
+	if err != nil {
+		return err
+	}
+	if !resp.GetOk() {
+		return fmt.Errorf("%s", resp.GetError())
+	}
+	return nil
+}
+
 func (c *Client) StreamRuntimeLogs(ctx context.Context, tail int, source string) (<-chan RuntimeLogMsg, error) {
 	stream, err := c.agent.StreamRuntimeLogs(ctx, &proto.StreamRuntimeLogsRequest{
 		Tail:   int32(tail),

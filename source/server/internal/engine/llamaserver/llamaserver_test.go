@@ -209,6 +209,12 @@ func (m *fakeRuntimeManager) Restart(context.Context, localruntime.RestartReques
 func (m *fakeRuntimeManager) DownloadModel(context.Context, localruntime.DownloadRequest) (*localruntime.ModelRecord, error) {
 	return nil, nil
 }
+func (m *fakeRuntimeManager) CancelDownload(context.Context, localruntime.DownloadRequest) (*localruntime.ModelRecord, error) {
+	return nil, nil
+}
+func (m *fakeRuntimeManager) DeleteModel(context.Context, localruntime.DeleteModelRequest) error {
+	return nil
+}
 func (m *fakeRuntimeManager) Status(context.Context) (*localruntime.StatusSnapshot, error) {
 	return nil, nil
 }

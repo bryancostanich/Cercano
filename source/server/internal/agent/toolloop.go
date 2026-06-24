@@ -49,10 +49,12 @@ type ToolLoopInput struct {
 }
 
 type ToolLoopResult struct {
-	FinalText   string
-	FinalBlocks []llm.Block
-	Iterations  int
-	History     []llm.Message
+	FinalText    string
+	FinalBlocks  []llm.Block
+	Iterations   int
+	History      []llm.Message
+	InputTokens  int // last LLM call's provider-reported input tokens (context occupancy)
+	OutputTokens int // last LLM call's provider-reported output tokens
 }
 
 const MaxToolLoopIterations = 10
@@ -121,6 +123,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		mode = in.Permissions.Mode()
 	}
 	consecutiveErrors := 0
+	var lastIn, lastOut int
 
 	for iter := 0; iter < MaxToolLoopIterations; iter++ {
 		req := llm.ChatRequest{
@@ -139,6 +142,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		if err != nil {
 			return ToolLoopResult{}, err
 		}
+		lastIn, lastOut = resp.InputTokens, resp.OutputTokens
 		hist = append(hist, llm.Message{Role: llm.RoleAssistant, Blocks: resp.Blocks})
 
 		var toolCalls []llm.Block
@@ -155,6 +159,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			return ToolLoopResult{
 				FinalText: finalText, FinalBlocks: resp.Blocks,
 				Iterations: iter + 1, History: hist,
+				InputTokens: lastIn, OutputTokens: lastOut,
 			}, nil
 		}
 
@@ -225,7 +230,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 						Content: "no permission requester wired", IsError: true,
 					})
 					hist = append(hist, llm.Message{Role: llm.RoleUser, Blocks: results})
-					return ToolLoopResult{FinalText: finalText, Iterations: iter + 1, History: hist}, nil
+					return ToolLoopResult{FinalText: finalText, Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, nil
 				}
 				emit(LoopEvent{Kind: LoopPermissionRequired, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, ArgsJSON: string(pc.block.ToolInput), Tier: string(pc.tier)})
 				allow, err := in.PermissionRequester(ctx, pc.block.ToolUseID, pc.block.ToolName, pc.block.ToolInput, pc.tier)
@@ -238,7 +243,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 						Content: "user denied execution", IsError: true,
 					})
 					hist = append(hist, llm.Message{Role: llm.RoleUser, Blocks: results})
-					return ToolLoopResult{FinalText: finalText, Iterations: iter + 1, History: hist}, nil
+					return ToolLoopResult{FinalText: finalText, Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, nil
 				}
 			}
 			emit(LoopEvent{Kind: LoopToolExecStart, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName})
@@ -269,13 +274,14 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			if consecutiveErrors >= 3 {
 				return ToolLoopResult{
 					FinalText: finalText, Iterations: iter + 1, History: hist,
+					InputTokens: lastIn, OutputTokens: lastOut,
 				}, fmt.Errorf("aborted: 3 consecutive iterations of tool errors")
 			}
 		} else {
 			consecutiveErrors = 0
 		}
 	}
-	return ToolLoopResult{Iterations: MaxToolLoopIterations, History: hist},
+	return ToolLoopResult{Iterations: MaxToolLoopIterations, History: hist, InputTokens: lastIn, OutputTokens: lastOut},
 		fmt.Errorf("hit max tool loop iterations (%d)", MaxToolLoopIterations)
 }
 

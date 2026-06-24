@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -88,5 +90,39 @@ func TestContextViewRoute_EnterWithEmptyInputIsNoop(t *testing.T) {
 	}
 	if next.content == nil {
 		t.Error("enter with empty input should not close the page")
+	}
+}
+
+func TestContextViewRoute_DeleteErrorSurfacesScrollback(t *testing.T) {
+	m := modelWithContextView()
+	before := len(m.entries)
+	m2, _ := m.onContextDeleted(contextEditDeletedMsg{err: errors.New("rpc: unavailable")})
+	if len(m2.entries) <= before {
+		t.Fatal("delete error should append a scrollback entry")
+	}
+	last := m2.entries[len(m2.entries)-1]
+	if !strings.Contains(last.Content, "couldn't delete") {
+		t.Errorf("last entry should contain 'couldn't delete', got: %q", last.Content)
+	}
+	// snapshot should NOT be reloaded on error — cv.snapshot stays zero
+	cv := m2.content.(*contextView)
+	if cv.snapshot.Turns != nil {
+		t.Error("snapshot should not be reloaded on delete error")
+	}
+}
+
+func TestContextViewRoute_EmptyProposalNoConfirm(t *testing.T) {
+	m := modelWithContextView()
+	before := len(m.entries)
+	m2, _ := m.onContextProposal(contextEditProposalMsg{p: agentclient.Proposal{DeleteIDs: []string{}, Rationale: "r"}})
+	if m2.pendingConfirm != nil {
+		t.Error("empty proposal should not raise a pendingConfirm")
+	}
+	if len(m2.entries) <= before {
+		t.Fatal("empty proposal should append a scrollback entry")
+	}
+	last := m2.entries[len(m2.entries)-1]
+	if !strings.Contains(last.Content, "nothing to remove") {
+		t.Errorf("last entry should contain 'nothing to remove', got: %q", last.Content)
 	}
 }

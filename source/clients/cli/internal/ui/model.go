@@ -677,6 +677,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Active content pages own the middle region, but global keys stay
 		// above this branch.
 		if m.content != nil {
+			if cv, ok := m.content.(*contextView); ok {
+				return m.handleContextViewKey(cv, msg)
+			}
 			pageID := m.content.ID()
 			cmd, closed := m.content.Update(msg)
 			if closed {
@@ -838,16 +841,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case contextEditProposalMsg:
-		if cv, ok := m.content.(*contextView); ok {
-			cv.onProposal(msg)
-		}
-		return m, nil
+		return m.onContextProposal(msg)
 
 	case contextEditDeletedMsg:
-		if cv, ok := m.content.(*contextView); ok {
-			return m, cv.onDeleted(msg)
-		}
-		return m, nil
+		return m.onContextDeleted(msg)
 
 	case runtimeDashboardActionMsg:
 		if dashboard, ok := m.content.(*runtimeDashboard); ok {
@@ -1995,6 +1992,91 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 			},
 		},
 	}
+}
+
+// handleContextViewKey owns the keyboard while the /c context viewer is the
+// active page: typing edits the main prompt bar, enter submits an edit
+// instruction (ProposeContextEdit), scroll keys move the turn list, and esc on
+// an empty bar closes the page.
+func (m Model) handleContextViewKey(cv *contextView, msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		if m.input.Value() != "" {
+			m.input.SetValue("")
+			return m, nil
+		}
+		m.content = nil
+		m.contentScrollbarDragging = false
+		return m, nil
+	case "enter":
+		text := strings.TrimSpace(m.input.Value())
+		if text == "" {
+			return m, nil
+		}
+		m.input.SetValue("")
+		return m, cv.proposeCmd(text)
+	case "pgup", "ctrl+b":
+		cv.ScrollBy(-dashboardContentHeight(cv.height))
+		return m, nil
+	case "pgdown", "ctrl+f":
+		cv.ScrollBy(dashboardContentHeight(cv.height))
+		return m, nil
+	case "ctrl+u":
+		cv.ScrollBy(-maxInt(1, dashboardContentHeight(cv.height)/2))
+		return m, nil
+	case "ctrl+d":
+		cv.ScrollBy(maxInt(1, dashboardContentHeight(cv.height)/2))
+		return m, nil
+	case "r":
+		cv.snapshot = loadContextSnapshot(cv.agent, cv.convID)
+		return m, nil
+	}
+	// Everything else edits the prompt bar.
+	m = m.preparePromptInput()
+	var cmd tea.Cmd
+	prev := m.input.Value()
+	m.input, cmd = m.input.Update(msg)
+	if m.input.Value() != prev {
+		m.relayout()
+	}
+	return m, cmd
+}
+
+// onContextProposal applies a proposal to the /c view and raises a confirm gate
+// whose y deletes the proposed turns and n cancels.
+func (m Model) onContextProposal(msg contextEditProposalMsg) (Model, tea.Cmd) {
+	cv, ok := m.content.(*contextView)
+	if !ok {
+		return m, nil
+	}
+	if msg.err != nil {
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: m.styles.Muted.Render("couldn't interpret that — try rephrasing")})
+		m.refreshViewport()
+		return m, nil
+	}
+	cv.applyProposal(msg.p)
+	ids := msg.p.DeleteIDs
+	m.pendingConfirm = &confirmRequest{
+		onYes: func(m Model) (Model, tea.Cmd) {
+			m.pendingConfirm = nil
+			return m, cv.deleteCmd(ids)
+		},
+		onNo: func(m Model) (Model, tea.Cmd) {
+			m.pendingConfirm = nil
+			cv.cancelProposal()
+			return m, nil
+		},
+	}
+	return m, nil
+}
+
+// onContextDeleted clears the proposal and reloads the /c snapshot.
+func (m Model) onContextDeleted(msg contextEditDeletedMsg) (Model, tea.Cmd) {
+	if cv, ok := m.content.(*contextView); ok {
+		cv.cancelProposal()
+		cv.snapshot = loadContextSnapshot(cv.agent, cv.convID)
+	}
+	return m, nil
 }
 
 // truncateArgs renders the JSON args compactly for the confirm prompt one-liner.

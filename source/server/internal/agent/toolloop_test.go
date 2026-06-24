@@ -72,6 +72,47 @@ func blocksToEvents(blocks []llm.Block) []llm.StreamEvent {
 	return events
 }
 
+// loopingProvider requests a (succeeding) tool whenever tools are offered, and
+// answers in text once tools are withheld — driving the loop to its cap and
+// exercising the final no-tools degradation pass.
+type loopingProvider struct{ calls int }
+
+func (p *loopingProvider) Name() string                   { return "looping" }
+func (p *loopingProvider) Capabilities() llm.Capabilities { return llm.Capabilities{SupportsTools: true} }
+func (p *loopingProvider) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, nil
+}
+func (p *loopingProvider) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.StreamReader, error) {
+	p.calls++
+	var blocks []llm.Block
+	if len(req.Tools) > 0 {
+		blocks = []llm.Block{{Type: llm.BlockToolUse, ToolUseID: fmt.Sprintf("u%d", p.calls),
+			ToolName: "LS", ToolInput: json.RawMessage(`{"path":"."}`)}}
+	} else {
+		blocks = []llm.Block{{Type: llm.BlockText, Text: "Here's my best answer."}}
+	}
+	return &scriptedStream{events: blocksToEvents(blocks)}, nil
+}
+
+func TestToolLoop_HitsCap_DegradesToFinalAnswer(t *testing.T) {
+	prov := &loopingProvider{}
+	reg := agenttools.DefaultRegistry()
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+
+	result, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider: prov, Registry: reg, Permissions: perms, UserInput: "do a lot of work",
+	})
+	if err != nil {
+		t.Fatalf("hitting the iteration cap should degrade to a final answer, not error: %v", err)
+	}
+	if result.FinalText != "Here's my best answer." {
+		t.Errorf("expected the final no-tools answer, got %q", result.FinalText)
+	}
+	if prov.calls != MaxToolLoopIterations+1 {
+		t.Errorf("expected %d calls (cap tool turns + 1 final), got %d", MaxToolLoopIterations+1, prov.calls)
+	}
+}
+
 func TestToolLoop_PlainText_TerminatesImmediately(t *testing.T) {
 	prov := &mockProvider{
 		scripts: [][]llm.Block{{
@@ -276,26 +317,5 @@ func TestToolLoop_EmitsExpectedEvents(t *testing.T) {
 	}
 }
 
-func TestToolLoop_IterationCap(t *testing.T) {
-	// 11 iterations of "call tool again" — should abort at 10.
-	scripts := make([][]llm.Block, 11)
-	for i := range scripts {
-		scripts[i] = []llm.Block{{
-			Type: llm.BlockToolUse, ToolUseID: fmt.Sprintf("u%d", i),
-			ToolName: "LS", ToolInput: json.RawMessage(`{"path":"."}`),
-		}}
-	}
-	prov := &mockProvider{scripts: scripts, caps: llm.Capabilities{SupportsTools: true}}
-	reg := agenttools.DefaultRegistry()
-	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
-
-	_, err := RunToolLoop(t.Context(), ToolLoopInput{
-		Provider: prov, Registry: reg, Permissions: perms, UserInput: "x",
-	})
-	if err == nil || !strings.Contains(err.Error(), "max tool loop iterations") {
-		t.Errorf("expected iteration cap abort, got %v", err)
-	}
-	if prov.calls != 10 {
-		t.Errorf("expected exactly 10 calls before cap, got %d", prov.calls)
-	}
-}
+// Cap enforcement + graceful degradation is covered by
+// TestToolLoop_HitsCap_DegradesToFinalAnswer.

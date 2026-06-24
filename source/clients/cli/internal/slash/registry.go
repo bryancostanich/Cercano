@@ -27,6 +27,7 @@ const (
 	ResultOpenConfigEditor
 	ResultOpenHistoryPicker
 	ResultOpenRuntimeDashboard
+	ResultOpenContextView
 	ResultResumeConversation // Text field carries the conversation id
 	ResultSetPromptColor     // Text field carries the parsed hex (#RRGGBB) or a palette key
 	ResultSetSessionTitle    // Text field carries the new title

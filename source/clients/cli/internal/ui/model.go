@@ -243,6 +243,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	convRef := &struct{ id string }{}
 	slash.RegisterHistory(reg, ag, func() string { return convRef.id })
 	slash.RegisterRuntime(reg)
+	slash.RegisterContextView(reg)
 
 	splash := banner.NewAnimModel(p, banner.Meta{
 		Tagline: "local-first ai coprocessor",
@@ -1088,6 +1089,10 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 	case slash.ResultOpenRuntimeDashboard:
 		dashboard, _ := newRuntimeDashboard(m.agent, m.palette, m.styles, m.width, m.height)
 		m.content = dashboard
+	case slash.ResultOpenContextView:
+		cv, cmd := newContextView(m.agent, m.palette, m.styles, m.convID, m.width, m.height)
+		m.content = cv
+		return m, cmd
 	case slash.ResultResumeConversation:
 		// /resume <id> path — slash already validated against the agent.
 		m = m.applyResume(res.Text)

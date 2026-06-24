@@ -56,6 +56,7 @@ service Agent {
   rpc StartRuntimeModel (StartRuntimeModelRequest) returns (StartRuntimeModelResponse) {}
   rpc StopRuntimeModel (StopRuntimeModelRequest) returns (StopRuntimeModelResponse) {}
   rpc RestartRuntime (RestartRuntimeRequest) returns (RestartRuntimeResponse) {}
+  rpc DownloadRuntimeModel (DownloadRuntimeModelRequest) returns (DownloadRuntimeModelResponse) {}
   rpc StreamRuntimeLogs (StreamRuntimeLogsRequest) returns (stream RuntimeLogEntry) {}
 
   // ListSkills returns the catalog of available Agent Skills (name + description).
@@ -212,6 +213,10 @@ message RuntimeModel {
   bool supports_embed = 14;
   bool supports_tools = 15;
   bool active = 16;
+  string download_url = 17;
+  int64 downloaded_bytes = 18;
+  int64 download_total_bytes = 19;
+  string download_error = 20;
 }
 
 message RuntimeInstance {
@@ -294,6 +299,16 @@ message RestartRuntimeResponse {
   bool ok = 1;
   string error = 2;
   RuntimeInstance instance = 3;
+}
+
+message DownloadRuntimeModelRequest {
+  string runtime = 1;
+  string model_id = 2;
+}
+message DownloadRuntimeModelResponse {
+  bool ok = 1;
+  string error = 2;
+  RuntimeModel model = 3;
 }
 
 message StreamRuntimeLogsRequest {

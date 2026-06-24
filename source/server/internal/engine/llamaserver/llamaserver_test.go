@@ -206,6 +206,9 @@ func (m *fakeRuntimeManager) Stop(context.Context, localruntime.StopRequest) err
 func (m *fakeRuntimeManager) Restart(context.Context, localruntime.RestartRequest) (*localruntime.InstanceRecord, error) {
 	return nil, nil
 }
+func (m *fakeRuntimeManager) DownloadModel(context.Context, localruntime.DownloadRequest) (*localruntime.ModelRecord, error) {
+	return nil, nil
+}
 func (m *fakeRuntimeManager) Status(context.Context) (*localruntime.StatusSnapshot, error) {
 	return nil, nil
 }

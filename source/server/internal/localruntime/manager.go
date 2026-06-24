@@ -4,7 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -19,22 +24,34 @@ func WithEndpoints(endpoints []EndpointRecord) Option {
 	}
 }
 
+func WithHTTPClient(client *http.Client) Option {
+	return func(m *InMemoryManager) {
+		if client != nil {
+			m.httpClient = client
+		}
+	}
+}
+
 // InMemoryManager is the first runtime manager implementation. It keeps
 // dashboard state in memory and delegates real runtime behavior to providers.
 type InMemoryManager struct {
-	mu        sync.RWMutex
-	providers map[string]Provider
-	instances map[string]InstanceRecord
-	endpoints []EndpointRecord
-	logs      []LogEntry
-	logLimit  int
+	mu         sync.RWMutex
+	providers  map[string]Provider
+	instances  map[string]InstanceRecord
+	endpoints  []EndpointRecord
+	downloads  map[string]ModelRecord
+	httpClient *http.Client
+	logs       []LogEntry
+	logLimit   int
 }
 
 func NewManager(opts ...Option) *InMemoryManager {
 	m := &InMemoryManager{
-		providers: make(map[string]Provider),
-		instances: make(map[string]InstanceRecord),
-		logLimit:  defaultLogLimit,
+		providers:  make(map[string]Provider),
+		instances:  make(map[string]InstanceRecord),
+		downloads:  make(map[string]ModelRecord),
+		httpClient: http.DefaultClient,
+		logLimit:   defaultLogLimit,
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -78,6 +95,7 @@ func (m *InMemoryManager) Inventory(ctx context.Context) ([]ModelRecord, error) 
 		}
 		out = append(out, models...)
 	}
+	out = m.overlayDownloads(out)
 	sortModels(out)
 	return out, errors.Join(errs...)
 }
@@ -167,6 +185,50 @@ func (m *InMemoryManager) Restart(ctx context.Context, req RestartRequest) (*Ins
 	return m.Start(ctx, StartRequest{Runtime: runtimeName, ModelID: modelID})
 }
 
+func (m *InMemoryManager) DownloadModel(ctx context.Context, req DownloadRequest) (*ModelRecord, error) {
+	if strings.TrimSpace(req.Runtime) == "" {
+		return nil, errors.New("runtime is required")
+	}
+	if strings.TrimSpace(req.ModelID) == "" {
+		return nil, errors.New("model id is required")
+	}
+	if existing, ok := m.download(req.ModelID); ok && existing.DownloadState == "downloading" {
+		return &existing, nil
+	}
+	model, err := m.findDownloadModel(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if model.DownloadState == "downloaded" {
+		return &model, nil
+	}
+	if model.DownloadURL == "" {
+		return nil, fmt.Errorf("model %q does not have a download URL", req.ModelID)
+	}
+	if model.Path == "" {
+		return nil, fmt.Errorf("model %q does not have a target path", req.ModelID)
+	}
+	total := model.DownloadTotalBytes
+	if total == 0 {
+		total = model.SizeBytes
+	}
+	model.DownloadState = "downloading"
+	model.DownloadedBytes = 0
+	model.DownloadTotalBytes = total
+	model.DownloadError = ""
+	m.mu.Lock()
+	m.downloads[model.ID] = model
+	m.mu.Unlock()
+	m.WriteLog(LogEntry{
+		Source:  "cercano.runtime.download",
+		Level:   "info",
+		ModelID: model.ID,
+		Message: "starting download for " + model.DisplayName,
+	})
+	go m.runDownload(context.Background(), model)
+	return &model, nil
+}
+
 func (m *InMemoryManager) Status(ctx context.Context) (*StatusSnapshot, error) {
 	models, modelErr := m.Inventory(ctx)
 	instances, instanceErr := m.Instances(ctx)
@@ -198,6 +260,155 @@ func (m *InMemoryManager) Logs(_ context.Context, req LogRequest) ([]LogEntry, e
 		filtered = filtered[len(filtered)-req.Tail:]
 	}
 	return cloneLogs(filtered), nil
+}
+
+func (m *InMemoryManager) findDownloadModel(ctx context.Context, req DownloadRequest) (ModelRecord, error) {
+	models, err := m.Inventory(ctx)
+	if err != nil && len(models) == 0 {
+		return ModelRecord{}, err
+	}
+	for _, model := range models {
+		if model.Runtime == req.Runtime && model.ID == req.ModelID {
+			return model, nil
+		}
+	}
+	return ModelRecord{}, fmt.Errorf("runtime model %q not found", req.ModelID)
+}
+
+func (m *InMemoryManager) runDownload(ctx context.Context, model ModelRecord) {
+	if err := os.MkdirAll(filepath.Dir(model.Path), 0755); err != nil {
+		m.failDownload(model, err)
+		return
+	}
+	tempPath := model.Path + ".part"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, model.DownloadURL, nil)
+	if err != nil {
+		m.failDownload(model, err)
+		return
+	}
+	resp, err := m.httpClient.Do(req)
+	if err != nil {
+		m.failDownload(model, err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		m.failDownload(model, fmt.Errorf("download returned HTTP %d", resp.StatusCode))
+		return
+	}
+	if resp.ContentLength > 0 {
+		model.DownloadTotalBytes = resp.ContentLength
+		if model.SizeBytes == 0 {
+			model.SizeBytes = resp.ContentLength
+		}
+		m.updateDownload(model)
+	}
+	file, err := os.Create(tempPath)
+	if err != nil {
+		m.failDownload(model, err)
+		return
+	}
+	var written int64
+	buf := make([]byte, 256*1024)
+	lastUpdate := time.Now()
+	for {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, err := file.Write(buf[:n]); err != nil {
+				_ = file.Close()
+				_ = os.Remove(tempPath)
+				m.failDownload(model, err)
+				return
+			}
+			written += int64(n)
+			model.DownloadedBytes = written
+			if time.Since(lastUpdate) >= 250*time.Millisecond {
+				m.updateDownload(model)
+				lastUpdate = time.Now()
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			_ = file.Close()
+			_ = os.Remove(tempPath)
+			m.failDownload(model, readErr)
+			return
+		}
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		m.failDownload(model, err)
+		return
+	}
+	if err := os.Rename(tempPath, model.Path); err != nil {
+		_ = os.Remove(tempPath)
+		m.failDownload(model, err)
+		return
+	}
+	model.DownloadState = "downloaded"
+	model.DownloadedBytes = written
+	if model.DownloadTotalBytes == 0 {
+		model.DownloadTotalBytes = written
+	}
+	model.SizeBytes = model.DownloadTotalBytes
+	model.ModifiedAt = time.Now()
+	model.DownloadError = ""
+	m.updateDownload(model)
+	m.WriteLog(LogEntry{
+		Source:  "cercano.runtime.download",
+		Level:   "info",
+		ModelID: model.ID,
+		Message: "downloaded " + model.DisplayName,
+	})
+}
+
+func (m *InMemoryManager) updateDownload(model ModelRecord) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.downloads[model.ID] = model
+}
+
+func (m *InMemoryManager) failDownload(model ModelRecord, err error) {
+	model.DownloadState = "failed"
+	model.DownloadError = err.Error()
+	m.updateDownload(model)
+	m.WriteLog(LogEntry{
+		Source:  "cercano.runtime.download",
+		Level:   "error",
+		ModelID: model.ID,
+		Message: "download failed for " + model.DisplayName + ": " + err.Error(),
+	})
+}
+
+func (m *InMemoryManager) download(modelID string) (ModelRecord, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	model, ok := m.downloads[modelID]
+	return model, ok
+}
+
+func (m *InMemoryManager) overlayDownloads(models []ModelRecord) []ModelRecord {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if len(m.downloads) == 0 {
+		return models
+	}
+	out := append([]ModelRecord(nil), models...)
+	seen := make(map[string]bool, len(out))
+	for i := range out {
+		if download, ok := m.downloads[out[i].ID]; ok {
+			out[i] = mergeDownloadRecord(out[i], download)
+		}
+		seen[out[i].ID] = true
+	}
+	for id, download := range m.downloads {
+		if !seen[id] {
+			out = append(out, download)
+		}
+	}
+	return out
 }
 
 func (m *InMemoryManager) WriteLog(entry LogEntry) {
@@ -272,4 +483,22 @@ func cloneLogs(in []LogEntry) []LogEntry {
 	out := make([]LogEntry, len(in))
 	copy(out, in)
 	return out
+}
+
+func mergeDownloadRecord(base, download ModelRecord) ModelRecord {
+	base.DownloadState = download.DownloadState
+	base.DownloadURL = download.DownloadURL
+	base.DownloadedBytes = download.DownloadedBytes
+	base.DownloadTotalBytes = download.DownloadTotalBytes
+	base.DownloadError = download.DownloadError
+	if download.SizeBytes > 0 {
+		base.SizeBytes = download.SizeBytes
+	}
+	if !download.ModifiedAt.IsZero() {
+		base.ModifiedAt = download.ModifiedAt
+	}
+	if download.Path != "" {
+		base.Path = download.Path
+	}
+	return base
 }

@@ -73,6 +73,10 @@ func (m *mockAgentClient) RestartRuntime(ctx context.Context, in *proto.RestartR
 	return &proto.RestartRuntimeResponse{}, nil
 }
 
+func (m *mockAgentClient) DownloadRuntimeModel(ctx context.Context, in *proto.DownloadRuntimeModelRequest, opts ...grpc.CallOption) (*proto.DownloadRuntimeModelResponse, error) {
+	return &proto.DownloadRuntimeModelResponse{}, nil
+}
+
 func (m *mockAgentClient) StreamRuntimeLogs(ctx context.Context, in *proto.StreamRuntimeLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[proto.RuntimeLogEntry], error) {
 	return nil, nil
 }

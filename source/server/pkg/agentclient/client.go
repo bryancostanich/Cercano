@@ -188,22 +188,26 @@ type RuntimeStatus struct {
 }
 
 type RuntimeModel struct {
-	ID            string
-	DisplayName   string
-	Runtime       string
-	Source        string
-	Path          string
-	Format        string
-	Family        string
-	Quantization  string
-	SizeBytes     int64
-	ModifiedAt    time.Time
-	DownloadState string
-	RuntimeState  string
-	SupportsChat  bool
-	SupportsEmbed bool
-	SupportsTools bool
-	Active        bool
+	ID                 string
+	DisplayName        string
+	Runtime            string
+	Source             string
+	Path               string
+	Format             string
+	Family             string
+	Quantization       string
+	SizeBytes          int64
+	ModifiedAt         time.Time
+	DownloadState      string
+	DownloadURL        string
+	DownloadedBytes    int64
+	DownloadTotalBytes int64
+	DownloadError      string
+	RuntimeState       string
+	SupportsChat       bool
+	SupportsEmbed      bool
+	SupportsTools      bool
+	Active             bool
 }
 
 type RuntimeInstance struct {
@@ -506,6 +510,21 @@ func (c *Client) RestartRuntime(ctx context.Context, instanceID, runtimeName, mo
 	return &instance, nil
 }
 
+func (c *Client) DownloadRuntimeModel(ctx context.Context, runtimeName, modelID string) (*RuntimeModel, error) {
+	resp, err := c.agent.DownloadRuntimeModel(ctx, &proto.DownloadRuntimeModelRequest{
+		Runtime: runtimeName,
+		ModelId: modelID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !resp.GetOk() {
+		return nil, fmt.Errorf("%s", resp.GetError())
+	}
+	model := mapRuntimeModel(resp.GetModel())
+	return &model, nil
+}
+
 func (c *Client) StreamRuntimeLogs(ctx context.Context, tail int, source string) (<-chan RuntimeLogMsg, error) {
 	stream, err := c.agent.StreamRuntimeLogs(ctx, &proto.StreamRuntimeLogsRequest{
 		Tail:   int32(tail),
@@ -556,26 +575,37 @@ func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, erro
 func mapRuntimeModels(models []*proto.RuntimeModel) []RuntimeModel {
 	out := make([]RuntimeModel, 0, len(models))
 	for _, model := range models {
-		out = append(out, RuntimeModel{
-			ID:            model.GetId(),
-			DisplayName:   model.GetDisplayName(),
-			Runtime:       model.GetRuntime(),
-			Source:        model.GetSource(),
-			Path:          model.GetPath(),
-			Format:        model.GetFormat(),
-			Family:        model.GetFamily(),
-			Quantization:  model.GetQuantization(),
-			SizeBytes:     model.GetSizeBytes(),
-			ModifiedAt:    parseRuntimeTime(model.GetModifiedAt()),
-			DownloadState: model.GetDownloadState(),
-			RuntimeState:  model.GetRuntimeState(),
-			SupportsChat:  model.GetSupportsChat(),
-			SupportsEmbed: model.GetSupportsEmbed(),
-			SupportsTools: model.GetSupportsTools(),
-			Active:        model.GetActive(),
-		})
+		out = append(out, mapRuntimeModel(model))
 	}
 	return out
+}
+
+func mapRuntimeModel(model *proto.RuntimeModel) RuntimeModel {
+	if model == nil {
+		return RuntimeModel{}
+	}
+	return RuntimeModel{
+		ID:                 model.GetId(),
+		DisplayName:        model.GetDisplayName(),
+		Runtime:            model.GetRuntime(),
+		Source:             model.GetSource(),
+		Path:               model.GetPath(),
+		Format:             model.GetFormat(),
+		Family:             model.GetFamily(),
+		Quantization:       model.GetQuantization(),
+		SizeBytes:          model.GetSizeBytes(),
+		ModifiedAt:         parseRuntimeTime(model.GetModifiedAt()),
+		DownloadState:      model.GetDownloadState(),
+		DownloadURL:        model.GetDownloadUrl(),
+		DownloadedBytes:    model.GetDownloadedBytes(),
+		DownloadTotalBytes: model.GetDownloadTotalBytes(),
+		DownloadError:      model.GetDownloadError(),
+		RuntimeState:       model.GetRuntimeState(),
+		SupportsChat:       model.GetSupportsChat(),
+		SupportsEmbed:      model.GetSupportsEmbed(),
+		SupportsTools:      model.GetSupportsTools(),
+		Active:             model.GetActive(),
+	}
 }
 
 func mapRuntimeInstances(instances []*proto.RuntimeInstance) []RuntimeInstance {

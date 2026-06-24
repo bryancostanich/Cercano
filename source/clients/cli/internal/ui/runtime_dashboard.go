@@ -68,7 +68,14 @@ type runtimeDashboardAction struct {
 }
 
 type runtimeDashboardActionMsg struct {
-	Status string
+	Status         string
+	CatalogMessage string
+}
+
+type runtimeDashboardRefreshMsg struct{}
+
+func runtimeDashboardRefreshTick() tea.Cmd {
+	return tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg { return runtimeDashboardRefreshMsg{} })
 }
 
 func newRuntimeDashboard(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h int) (*runtimeDashboard, tea.Cmd) {
@@ -146,9 +153,34 @@ func (d *runtimeDashboard) View() string {
 	return fitBlockHeight(strings.Join(parts, "\n"), contentH)
 }
 
-func (d *runtimeDashboard) applyActionMsg(msg runtimeDashboardActionMsg) {
+func (d *runtimeDashboard) applyActionMsg(msg runtimeDashboardActionMsg) tea.Cmd {
 	d.list.Reload()
 	d.list.SetStatus(msg.Status)
+	if msg.CatalogMessage != "" {
+		d.catalogMessage = msg.CatalogMessage
+	}
+	if d.hasActiveDownloads() {
+		return runtimeDashboardRefreshTick()
+	}
+	return nil
+}
+
+func (d *runtimeDashboard) refreshSnapshot() tea.Cmd {
+	d.snapshot = loadRuntimeDashboardSnapshot(d.agent)
+	d.list.Reload()
+	if d.hasActiveDownloads() {
+		return runtimeDashboardRefreshTick()
+	}
+	return nil
+}
+
+func (d *runtimeDashboard) hasActiveDownloads() bool {
+	for _, model := range runtimeStatusModels(d.snapshot.Status) {
+		if strings.EqualFold(model.DownloadState, "downloading") {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *runtimeDashboard) toggleFocus() {
@@ -201,8 +233,12 @@ func (d *runtimeDashboard) updateCatalog(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			return nil, false
 		}
 		selected := models[clampIndex(d.catalogCursor, len(models))]
-		d.catalogMessage = "download action coming next for " + shortModelName(firstNonEmpty(selected.DisplayName, selected.ID))
-		return nil, false
+		if strings.EqualFold(selected.DownloadState, "downloaded") {
+			d.catalogMessage = "already downloaded"
+			return nil, false
+		}
+		d.catalogMessage = "starting download..."
+		return runtimeDashboardDownloadCmd(d.agent, selected), false
 	}
 	prev := d.catalogSearch.Value()
 	var cmd tea.Cmd
@@ -441,7 +477,7 @@ func (d *runtimeDashboard) renderCatalogModelRow(model agentclient.RuntimeModel,
 		nameStyle = d.styles.Bright
 	}
 	name := firstNonEmpty(model.DisplayName, shortModelName(model.ID), model.ID, "unknown")
-	metadata := strings.Join(nonEmptyParts(model.Family, model.Quantization, formatBytes(model.SizeBytes), model.DownloadState), " · ")
+	metadata := strings.Join(nonEmptyParts(model.Family, model.Quantization, formatBytes(model.SizeBytes), downloadStatusText(model)), " · ")
 	row := marker + nameStyle.Render(name)
 	if metadata != "" {
 		row += d.styles.BorderDim.Render("  " + metadata)
@@ -714,8 +750,14 @@ func catalogDetailLines(model agentclient.RuntimeModel, width int, styles theme.
 		detailLine("family", strings.Join(nonEmptyParts(model.Family, model.Quantization), " · "), width, styles),
 		detailLine("size", formatBytes(model.SizeBytes), width, styles),
 		detailLine("runtime", strings.Join(nonEmptyParts(model.Runtime, model.Source), " · "), width, styles),
-		detailLine("state", strings.Join(nonEmptyParts(model.DownloadState, model.RuntimeState), " · "), width, styles),
+		detailLine("state", strings.Join(nonEmptyParts(downloadStatusText(model), model.RuntimeState), " · "), width, styles),
 		detailLine("supports", caps, width, styles),
+	}
+	if model.DownloadError != "" {
+		lines = append(lines, detailLine("error", model.DownloadError, width, styles))
+	}
+	if model.Path != "" {
+		lines = append(lines, detailLine("path", model.Path, width, styles))
 	}
 	idLine := detailLine("id", model.ID, width, styles)
 	if idLine != "" {
@@ -741,7 +783,7 @@ func localModelServerLogs(logs []agentclient.RuntimeLogEntry) []agentclient.Runt
 	for _, entry := range logs {
 		source := strings.ToLower(entry.Source)
 		runtimeID := strings.ToLower(entry.RuntimeID)
-		if strings.Contains(source, "llama") || strings.Contains(runtimeID, "llama") {
+		if strings.Contains(source, "llama") || strings.Contains(source, "download") || strings.Contains(runtimeID, "llama") {
 			out = append(out, entry)
 		}
 	}
@@ -977,6 +1019,44 @@ func runtimeDashboardActionCmd(ag *agentclient.Client, action runtimeDashboardAc
 	}
 }
 
+func runtimeDashboardDownloadCmd(ag *agentclient.Client, model agentclient.RuntimeModel) tea.Cmd {
+	return func() tea.Msg {
+		if ag == nil {
+			return runtimeDashboardActionMsg{
+				Status:         "download failed: agent client unavailable",
+				CatalogMessage: "agent client unavailable",
+			}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		download, err := ag.DownloadRuntimeModel(ctx, model.Runtime, model.ID)
+		if err != nil {
+			return runtimeDashboardActionMsg{
+				Status:         "download failed: " + err.Error(),
+				CatalogMessage: "download failed",
+			}
+		}
+		name := shortModelName(firstNonEmpty(download.DisplayName, download.ID, model.DisplayName, model.ID))
+		switch strings.ToLower(download.DownloadState) {
+		case "downloaded":
+			return runtimeDashboardActionMsg{
+				Status:         "downloaded " + name,
+				CatalogMessage: "downloaded " + name,
+			}
+		case "downloading":
+			return runtimeDashboardActionMsg{
+				Status:         "downloading " + name,
+				CatalogMessage: downloadStatusText(*download),
+			}
+		default:
+			return runtimeDashboardActionMsg{
+				Status:         "download queued " + name,
+				CatalogMessage: downloadStatusText(*download),
+			}
+		}
+	}
+}
+
 func runtimeDashboardPendingStatus(action runtimeDashboardAction) string {
 	switch action.Kind {
 	case runtimeActionStart:
@@ -988,6 +1068,31 @@ func runtimeDashboardPendingStatus(action runtimeDashboardAction) string {
 	default:
 		return "running action..."
 	}
+}
+
+func downloadStatusText(model agentclient.RuntimeModel) string {
+	state := strings.TrimSpace(model.DownloadState)
+	if state == "" {
+		return ""
+	}
+	if strings.EqualFold(state, "downloading") {
+		total := model.DownloadTotalBytes
+		if total == 0 {
+			total = model.SizeBytes
+		}
+		if total > 0 {
+			percent := float64(model.DownloadedBytes) / float64(total) * 100
+			return fmt.Sprintf("downloading %.0f%% (%s/%s)", percent, formatBytes(model.DownloadedBytes), formatBytes(total))
+		}
+		if model.DownloadedBytes > 0 {
+			return "downloading " + formatBytes(model.DownloadedBytes)
+		}
+		return "downloading"
+	}
+	if strings.EqualFold(state, "failed") && model.DownloadError != "" {
+		return "failed"
+	}
+	return state
 }
 
 func encodeRuntimeDashboardAction(action runtimeDashboardAction) string {

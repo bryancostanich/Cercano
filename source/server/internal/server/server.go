@@ -11,7 +11,6 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
-	"cercano/source/server/pkg/config"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/legacymodels"
@@ -19,6 +18,7 @@ import (
 	"cercano/source/server/internal/llm/anthropic"
 	"cercano/source/server/internal/localruntime"
 	"cercano/source/server/internal/loop"
+	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 )
 
@@ -555,6 +555,21 @@ func (s *Server) RestartRuntime(ctx context.Context, req *proto.RestartRuntimeRe
 	return &proto.RestartRuntimeResponse{Ok: true, Instance: mapRuntimeInstance(*instance)}, nil
 }
 
+// DownloadRuntimeModel implements proto.AgentServer.
+func (s *Server) DownloadRuntimeModel(ctx context.Context, req *proto.DownloadRuntimeModelRequest) (*proto.DownloadRuntimeModelResponse, error) {
+	if s.runtimeManager == nil {
+		return &proto.DownloadRuntimeModelResponse{Ok: false, Error: "runtime manager not configured"}, nil
+	}
+	model, err := s.runtimeManager.DownloadModel(ctx, localruntime.DownloadRequest{
+		Runtime: req.GetRuntime(),
+		ModelID: req.GetModelId(),
+	})
+	if err != nil {
+		return &proto.DownloadRuntimeModelResponse{Ok: false, Error: err.Error()}, nil
+	}
+	return &proto.DownloadRuntimeModelResponse{Ok: true, Model: mapRuntimeModel(*model)}, nil
+}
+
 // StreamRuntimeLogs implements proto.AgentServer. The first version streams the
 // current server-side buffer; live follow can build on the same RPC later.
 func (s *Server) StreamRuntimeLogs(req *proto.StreamRuntimeLogsRequest, stream proto.Agent_StreamRuntimeLogsServer) error {
@@ -586,26 +601,34 @@ func (s *Server) refreshRuntimeEndpoints() {
 func mapRuntimeModels(models []localruntime.ModelRecord) []*proto.RuntimeModel {
 	out := make([]*proto.RuntimeModel, 0, len(models))
 	for _, model := range models {
-		out = append(out, &proto.RuntimeModel{
-			Id:            model.ID,
-			DisplayName:   model.DisplayName,
-			Runtime:       model.Runtime,
-			Source:        model.Source,
-			Path:          model.Path,
-			Format:        model.Format,
-			Family:        model.Family,
-			Quantization:  model.Quantization,
-			SizeBytes:     model.SizeBytes,
-			ModifiedAt:    formatRuntimeTime(model.ModifiedAt),
-			DownloadState: model.DownloadState,
-			RuntimeState:  model.RuntimeState,
-			SupportsChat:  model.SupportsChat,
-			SupportsEmbed: model.SupportsEmbed,
-			SupportsTools: model.SupportsTools,
-			Active:        model.Active,
-		})
+		out = append(out, mapRuntimeModel(model))
 	}
 	return out
+}
+
+func mapRuntimeModel(model localruntime.ModelRecord) *proto.RuntimeModel {
+	return &proto.RuntimeModel{
+		Id:                 model.ID,
+		DisplayName:        model.DisplayName,
+		Runtime:            model.Runtime,
+		Source:             model.Source,
+		Path:               model.Path,
+		Format:             model.Format,
+		Family:             model.Family,
+		Quantization:       model.Quantization,
+		SizeBytes:          model.SizeBytes,
+		ModifiedAt:         formatRuntimeTime(model.ModifiedAt),
+		DownloadState:      model.DownloadState,
+		DownloadUrl:        model.DownloadURL,
+		DownloadedBytes:    model.DownloadedBytes,
+		DownloadTotalBytes: model.DownloadTotalBytes,
+		DownloadError:      model.DownloadError,
+		RuntimeState:       model.RuntimeState,
+		SupportsChat:       model.SupportsChat,
+		SupportsEmbed:      model.SupportsEmbed,
+		SupportsTools:      model.SupportsTools,
+		Active:             model.Active,
+	}
 }
 
 func mapRuntimeInstances(instances []localruntime.InstanceRecord) []*proto.RuntimeInstance {

@@ -28,6 +28,40 @@ const runtimeName = "llama_server"
 
 var quantRE = regexp.MustCompile(`(?i)(?:^|[-_. ])(Q[0-9][A-Z0-9]*(?:[_-][A-Z0-9]+){0,3})(?:$|[-_. ])`)
 
+type catalogModel struct {
+	ID            string
+	DisplayName   string
+	Filename      string
+	DownloadURL   string
+	Family        string
+	Quantization  string
+	SizeBytes     int64
+	SupportsTools bool
+}
+
+var defaultCatalog = []catalogModel{
+	{
+		ID:            runtimeName + ":catalog:qwen2.5-coder-1.5b-q4_k_m",
+		DisplayName:   "Qwen2.5 Coder 1.5B Instruct Q4_K_M",
+		Filename:      "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
+		DownloadURL:   "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
+		Family:        "qwen",
+		Quantization:  "Q4_K_M",
+		SizeBytes:     1117320768,
+		SupportsTools: true,
+	},
+	{
+		ID:            runtimeName + ":catalog:qwen2.5-coder-7b-q4_k_m",
+		DisplayName:   "Qwen2.5 Coder 7B Instruct Q4_K_M",
+		Filename:      "qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+		DownloadURL:   "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+		Family:        "qwen",
+		Quantization:  "Q4_K_M",
+		SizeBytes:     4683073536,
+		SupportsTools: true,
+	},
+}
+
 type instanceUpdater interface {
 	UpdateInstance(localruntime.InstanceRecord)
 }
@@ -123,6 +157,7 @@ func (p *Provider) Discover(ctx context.Context) ([]localruntime.ModelRecord, er
 	sort.Slice(models, func(i, j int) bool {
 		return models[i].DisplayName < models[j].DisplayName
 	})
+	models = append(models, p.catalogModels()...)
 	return models, errors.Join(errs...)
 }
 
@@ -261,6 +296,9 @@ func (p *Provider) resolveModel(ctx context.Context, requested string) (localrun
 	}
 	for _, model := range models {
 		if matchesModel(requested, model) {
+			if model.DownloadState != "" && model.DownloadState != "downloaded" {
+				return localruntime.ModelRecord{}, fmt.Errorf("llama-server model %q is not downloaded", requested)
+			}
 			return model, nil
 		}
 	}
@@ -564,6 +602,52 @@ func modelRecord(path string, info os.FileInfo) localruntime.ModelRecord {
 		RuntimeState:  localruntime.StateStopped,
 		SupportsChat:  true,
 	}
+}
+
+func (p *Provider) catalogModels() []localruntime.ModelRecord {
+	targetDir := p.catalogTargetDir()
+	out := make([]localruntime.ModelRecord, 0, len(defaultCatalog))
+	for _, item := range defaultCatalog {
+		path := filepath.Join(targetDir, item.Filename)
+		state := "not_downloaded"
+		var modified time.Time
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			state = "downloaded"
+			modified = info.ModTime()
+		}
+		out = append(out, localruntime.ModelRecord{
+			ID:                 item.ID,
+			DisplayName:        item.DisplayName,
+			Runtime:            runtimeName,
+			Source:             "catalog",
+			Path:               path,
+			Format:             "gguf",
+			Family:             item.Family,
+			Quantization:       item.Quantization,
+			SizeBytes:          item.SizeBytes,
+			ModifiedAt:         modified,
+			DownloadState:      state,
+			DownloadURL:        item.DownloadURL,
+			DownloadTotalBytes: item.SizeBytes,
+			RuntimeState:       localruntime.StateStopped,
+			SupportsChat:       true,
+			SupportsTools:      item.SupportsTools,
+		})
+	}
+	return out
+}
+
+func (p *Provider) catalogTargetDir() string {
+	if len(p.cfg.ModelDirs) > 0 {
+		if expanded, err := expandPath(p.cfg.ModelDirs[0]); err == nil && expanded != "" {
+			return expanded
+		}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "."
+	}
+	return filepath.Join(home, ".cercano", "models")
 }
 
 func matchesModel(requested string, model localruntime.ModelRecord) bool {

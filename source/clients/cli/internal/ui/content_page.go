@@ -20,6 +20,14 @@ type contentPage interface {
 	View() string
 }
 
+type contentPageScrollState struct {
+	Total  int
+	Height int
+	Offset int
+}
+
 type contentPageScroller interface {
 	ScrollBy(delta int)
+	ScrollTo(offset int)
+	ScrollState() contentPageScrollState
 }

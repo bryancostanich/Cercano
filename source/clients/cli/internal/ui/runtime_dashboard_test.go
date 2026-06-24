@@ -429,6 +429,31 @@ func TestRuntimeDashboardWheelScrollsContentPage(t *testing.T) {
 	}
 }
 
+func TestRuntimeDashboardScrollbarDragScrollsContentPage(t *testing.T) {
+	m := New(nil, false)
+	m.width = 110
+	m.height = 14
+	m.splashShown = false
+	m.content = overflowingRuntimeDashboard(t, 14)
+
+	top := m.contentTop()
+	bottom := top + dashboardContentHeight(m.height) - 1
+	m = send(t, m, tea.MouseClickMsg{X: m.width, Y: top, Button: tea.MouseLeft})
+	if !m.contentScrollbarDragging {
+		t.Fatalf("content page scrollbar should be dragging after right-edge click")
+	}
+	m = send(t, m, tea.MouseMotionMsg{X: m.width, Y: bottom, Button: tea.MouseLeft})
+
+	scrolled := m.content.(*runtimeDashboard)
+	if scrolled.scrollOffset == 0 {
+		t.Fatalf("dragging content page scrollbar should move runtime dashboard offset")
+	}
+	m = send(t, m, tea.MouseReleaseMsg{X: m.width, Y: bottom, Button: tea.MouseLeft})
+	if m.contentScrollbarDragging {
+		t.Fatalf("content page scrollbar drag should end on release")
+	}
+}
+
 func TestRuntimeDashboardActionRoundTrip(t *testing.T) {
 	want := runtimeDashboardAction{
 		Kind:       runtimeActionRestart,

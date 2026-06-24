@@ -385,6 +385,50 @@ func TestRuntimeDashboardLogBlockFillsRemainingContentHeight(t *testing.T) {
 	}
 }
 
+func TestRuntimeDashboardShowsScrollbarWhenContentOverflows(t *testing.T) {
+	dashboard := overflowingRuntimeDashboard(t, 14)
+
+	view := dashboard.View()
+	if got, want := strings.Count(view, "\n")+1, dashboardContentHeight(dashboard.height); got != want {
+		t.Fatalf("dashboard content height = %d, want %d:\n%s", got, want, ansi.Strip(view))
+	}
+	if !strings.Contains(view, "█") || !strings.Contains(view, "░") {
+		t.Fatalf("overflowing dashboard should render scrollbar thumb and track:\n%s", ansi.Strip(view))
+	}
+}
+
+func TestRuntimeDashboardScrollByMovesVisibleWindow(t *testing.T) {
+	dashboard := overflowingRuntimeDashboard(t, 14)
+
+	top := ansi.Strip(dashboard.View())
+	if !strings.Contains(top, "local config") {
+		t.Fatalf("expected top of dashboard before scrolling:\n%s", top)
+	}
+	dashboard.ScrollBy(999)
+	bottom := ansi.Strip(dashboard.View())
+	if !strings.Contains(bottom, "download log line") {
+		t.Fatalf("expected log rows after scrolling down:\n%s", bottom)
+	}
+	if top == bottom {
+		t.Fatalf("scrolling should change visible dashboard window:\n%s", top)
+	}
+}
+
+func TestRuntimeDashboardWheelScrollsContentPage(t *testing.T) {
+	m := New(nil, false)
+	m.width = 110
+	m.height = 14
+	dashboard := overflowingRuntimeDashboard(t, 14)
+	m.content = dashboard
+
+	next, _ := m.Update(tea.MouseWheelMsg{X: 2, Y: 2, Button: tea.MouseWheelDown})
+	got := next.(Model)
+	scrolled := got.content.(*runtimeDashboard)
+	if scrolled.scrollOffset == 0 {
+		t.Fatalf("mouse wheel should scroll runtime dashboard content page")
+	}
+}
+
 func TestRuntimeDashboardActionRoundTrip(t *testing.T) {
 	want := runtimeDashboardAction{
 		Kind:       runtimeActionRestart,
@@ -429,4 +473,55 @@ func maxRenderedLineWidth(value string) int {
 		}
 	}
 	return maxW
+}
+
+func overflowingRuntimeDashboard(t *testing.T, height int) *runtimeDashboard {
+	t.Helper()
+	m := New(nil, false)
+	logs := make([]agentclient.RuntimeLogEntry, 0, 10)
+	for i := 0; i < 10; i++ {
+		logs = append(logs, agentclient.RuntimeLogEntry{
+			Timestamp: time.Date(2026, 6, 23, 12, 34, i, 0, time.Local),
+			Source:    "cercano.runtime.llama_server",
+			RuntimeID: "llama_server",
+			ModelID:   "catalog:qwen2.5-coder-7b-q4",
+			Message:   "download log line",
+		})
+	}
+	snapshot := runtimeDashboardSnapshot{
+		Config: &agentclient.Config{
+			LocalRuntime:   "llama_server",
+			LocalModel:     "qwen.gguf",
+			EmbeddingModel: "nomic-embed-text",
+			CloudProvider:  "anthropic",
+			CloudModel:     "claude-test",
+			CloudBaseURL:   "http://127.0.0.1:3456",
+		},
+		Status: &agentclient.RuntimeStatus{
+			Models: []agentclient.RuntimeModel{{
+				ID:            "catalog:qwen2.5-coder-7b-q4",
+				DisplayName:   "Qwen2.5 Coder 7B Q4_K_M",
+				Runtime:       "llama_server",
+				Source:        "catalog",
+				Family:        "qwen",
+				Quantization:  "Q4_K_M",
+				DownloadState: "not_downloaded",
+				SupportsChat:  true,
+				SupportsTools: true,
+			}},
+			Logs: logs,
+		},
+	}
+	dashboard := &runtimeDashboard{
+		width:    110,
+		height:   height,
+		palette:  m.palette,
+		styles:   m.styles,
+		snapshot: snapshot,
+		focus:    runtimeFocusCatalog,
+	}
+	dashboard.catalogSearch = textinput.New()
+	_ = dashboard.catalogSearch.Focus()
+	dashboard.list = overlay.New("models and processes", runtimeActionRowsFromSnapshot(snapshot), overlay.Hooks{})
+	return dashboard
 }

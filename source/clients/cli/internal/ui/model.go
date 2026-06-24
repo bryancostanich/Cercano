@@ -480,7 +480,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.ClearScreen
 
 	case tea.MouseWheelMsg:
-		if m.contentPageActive() || m.pendingConfirm != nil {
+		if m.contentPageActive() {
+			if scroller, ok := m.content.(contentPageScroller); ok {
+				switch msg.Mouse().Button {
+				case tea.MouseWheelUp:
+					scroller.ScrollBy(-promptWheelDelta)
+				case tea.MouseWheelDown:
+					scroller.ScrollBy(promptWheelDelta)
+				}
+			}
+			return m, nil
+		}
+		if m.pendingConfirm != nil {
 			return m, nil
 		}
 		if m.selection.Dragging {

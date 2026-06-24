@@ -51,6 +51,7 @@ type runtimeDashboard struct {
 	catalogSearch  textinput.Model
 	catalogCursor  int
 	catalogMessage string
+	scrollOffset   int
 }
 
 type runtimeDashboardSnapshot struct {
@@ -121,12 +122,25 @@ func (d *runtimeDashboard) ID() contentPageID {
 func (d *runtimeDashboard) SetSize(w, h int) {
 	d.width = w
 	d.height = h
+	d.clampScroll()
 }
 
 func (d *runtimeDashboard) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	switch msg.String() {
 	case "tab":
 		d.toggleFocus()
+		return nil, false
+	case "pgup", "ctrl+b":
+		d.ScrollBy(-dashboardContentHeight(d.height))
+		return nil, false
+	case "pgdown", "ctrl+f":
+		d.ScrollBy(dashboardContentHeight(d.height))
+		return nil, false
+	case "ctrl+u":
+		d.ScrollBy(-maxInt(1, dashboardContentHeight(d.height)/2))
+		return nil, false
+	case "ctrl+d":
+		d.ScrollBy(maxInt(1, dashboardContentHeight(d.height)/2))
 		return nil, false
 	}
 	if d.focus == runtimeFocusCatalog {
@@ -138,6 +152,11 @@ func (d *runtimeDashboard) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 }
 
 func (d *runtimeDashboard) View() string {
+	full, contentH := d.fullContent()
+	return d.renderScrollableContent(full, contentH)
+}
+
+func (d *runtimeDashboard) fullContent() (string, int) {
 	configBlock := d.renderConfigBlocks()
 	listBlock := d.list.ViewPanel(dashboardPanelWidth(d.width), d.palette, d.styles)
 	contentH := dashboardContentHeight(d.height)
@@ -150,7 +169,55 @@ func (d *runtimeDashboard) View() string {
 	}
 	logRows := contentH - countLines(parts)
 	parts = append(parts, d.renderLocalServerLogBlock(logRows))
-	return fitBlockHeight(strings.Join(parts, "\n"), contentH)
+	return strings.Join(parts, "\n"), contentH
+}
+
+func (d *runtimeDashboard) ScrollBy(delta int) {
+	d.scrollOffset += delta
+	d.clampScroll()
+}
+
+func (d *runtimeDashboard) clampScroll() {
+	full, contentH := d.fullContent()
+	d.scrollOffset = clampInt(d.scrollOffset, 0, maxInt(0, countLines([]string{full})-contentH))
+}
+
+func (d *runtimeDashboard) renderScrollableContent(full string, height int) string {
+	if height < 1 {
+		height = 1
+	}
+	lines := strings.Split(full, "\n")
+	d.scrollOffset = clampInt(d.scrollOffset, 0, maxInt(0, len(lines)-height))
+	panelW := dashboardPanelWidth(d.width)
+	col := scrollbarColumn(len(lines), height, d.scrollOffset)
+
+	var b strings.Builder
+	for i := 0; i < height; i++ {
+		line := ""
+		src := d.scrollOffset + i
+		if src >= 0 && src < len(lines) {
+			line = lines[src]
+		}
+		line = ansi.Truncate(line, panelW, "")
+		b.WriteString(line)
+		b.WriteString(" ")
+		if i < len(col) {
+			switch col[i] {
+			case '█':
+				b.WriteString(d.styles.Border.Render("█"))
+			case '░':
+				b.WriteString(d.styles.BorderDim.Render("░"))
+			default:
+				b.WriteString(" ")
+			}
+		} else {
+			b.WriteString(" ")
+		}
+		if i < height-1 {
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
 }
 
 func (d *runtimeDashboard) applyActionMsg(msg runtimeDashboardActionMsg) tea.Cmd {
@@ -1335,17 +1402,6 @@ func clampIndex(idx, length int) int {
 		return length - 1
 	}
 	return idx
-}
-
-func fitBlockHeight(value string, maxLines int) string {
-	if maxLines <= 0 {
-		return ""
-	}
-	lines := strings.Split(value, "\n")
-	if len(lines) <= maxLines {
-		return value
-	}
-	return strings.Join(lines[:maxLines], "\n")
 }
 
 func padRightPlain(value string, width int) string {

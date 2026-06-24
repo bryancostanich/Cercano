@@ -146,11 +146,8 @@ func rolePrefix(r Role) string {
 }
 
 // View renders the message log plus, while busy, the animated status line.
-// The spinner uses animateSpinnerGlyph; the status text is rendered in lime
-// (Accent style) as a contiguous string so callers and tests can match it.
-// animateLimeSweep fragments each rune with per-char ANSI codes and would
-// break strings.Contains checks, so it is reserved for the richer renderEntry
-// path in Task 3 where the host strips ANSI before testing.
+// The spinner uses animateSpinnerGlyph; the status text animates with lime
+// sweep (animateLimeSweep), matching the UX of the main page.
 func (c *chatPane) View() string {
 	var b strings.Builder
 	for _, e := range c.entries {
@@ -159,7 +156,7 @@ func (c *chatPane) View() string {
 	}
 	if c.busy {
 		line := c.activity + "  ·  " + time.Since(c.started).Truncate(time.Second).String()
-		b.WriteString(animateSpinnerGlyph() + " " + c.styles.Accent.Render(line) + "\n")
+		b.WriteString(animateSpinnerGlyph() + " " + animateLimeSweep(line) + "\n")
 	}
 	for _, q := range c.queued {
 		b.WriteString(c.styles.Muted.Render("⏳ "+q) + "\n")

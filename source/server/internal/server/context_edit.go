@@ -14,6 +14,9 @@ import (
 // ProposeContextEdit runs the picker model over the conversation's turn
 // summaries and returns a validated deletion proposal. Read-only.
 func (s *Server) ProposeContextEdit(ctx context.Context, req *proto.ProposeContextEditRequest) (*proto.ProposeContextEditResponse, error) {
+	if s.agent == nil {
+		return &proto.ProposeContextEditResponse{}, nil
+	}
 	store := s.agent.PersistentStore()
 	convID := req.GetConversationId()
 	if store == nil || convID == "" {
@@ -75,6 +78,9 @@ func (s *Server) ProposeContextEdit(ctx context.Context, req *proto.ProposeConte
 // DeleteConversationTurns hard-deletes the named turns. The next tool-loop turn
 // rebuilds history from the store, so the context shrinks automatically.
 func (s *Server) DeleteConversationTurns(ctx context.Context, req *proto.DeleteConversationTurnsRequest) (*proto.DeleteConversationTurnsResponse, error) {
+	if s.agent == nil {
+		return &proto.DeleteConversationTurnsResponse{}, nil
+	}
 	store := s.agent.PersistentStore()
 	convID := req.GetConversationId()
 	if store == nil || convID == "" {

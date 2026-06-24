@@ -913,6 +913,15 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		EventSink:           sink,
 		PermissionRequester: requester,
 		ConvHistory:         convHistory,
+		// Forward assistant text deltas so the CLI renders the reply live,
+		// token-by-token, instead of one block at the end.
+		OnTextDelta: func(t string) {
+			stream.Send(&proto.StreamProcessResponse{
+				Payload: &proto.StreamProcessResponse_TokenDelta{
+					TokenDelta: &proto.TokenDelta{Content: t},
+				},
+			})
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("tool loop error: %w", err)

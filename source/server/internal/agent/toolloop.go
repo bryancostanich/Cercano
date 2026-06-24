@@ -46,6 +46,11 @@ type ToolLoopInput struct {
 
 	// EventSink receives lifecycle events as the loop runs. Nil-safe.
 	EventSink func(ev LoopEvent)
+
+	// OnTextDelta, when set, receives assistant text deltas as they stream from
+	// the provider, so the server can forward them to the client for live
+	// token-by-token rendering. Nil-safe.
+	OnTextDelta func(string)
 }
 
 type ToolLoopResult struct {
@@ -137,7 +142,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		if err != nil {
 			return ToolLoopResult{}, err
 		}
-		resp, err := collectStream(ctx, rdr)
+		resp, err := collectStream(ctx, rdr, in.OnTextDelta)
 		rdr.Close()
 		if err != nil {
 			return ToolLoopResult{}, err
@@ -289,7 +294,11 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 // non-streaming ChatResponse shape the loop logic expects. Text deltas
 // concatenate into BlockText; tool_use_input_delta events concatenate
 // partial JSON into BlockToolUse.ToolInput.
-func collectStream(ctx context.Context, rdr llm.StreamReader) (llm.ChatResponse, error) {
+// collectStream consumes a StreamReader into a ChatResponse. onText, when
+// non-nil, is called with each text delta as it arrives so callers can stream
+// assistant prose to the client live (the loop otherwise only surfaces the
+// fully-buffered text at the end).
+func collectStream(ctx context.Context, rdr llm.StreamReader, onText func(string)) (llm.ChatResponse, error) {
 	var (
 		out         llm.ChatResponse
 		currentText strings.Builder
@@ -330,6 +339,9 @@ func collectStream(ctx context.Context, rdr llm.StreamReader) (llm.ChatResponse,
 				flushTool()
 			}
 			currentText.WriteString(ev.TextDelta)
+			if onText != nil {
+				onText(ev.TextDelta)
+			}
 		case llm.EventToolUseStart:
 			flushText()
 			flushTool()

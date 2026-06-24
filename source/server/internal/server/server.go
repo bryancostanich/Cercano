@@ -878,7 +878,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		return fmt.Errorf("tool loop error: %w", err)
 	}
 
-	s.persistToolLoopTurns(ctx, req, result)
+	s.persistToolLoopTurns(ctx, req, result, 0)
 
 	return stream.Send(&proto.StreamProcessResponse{
 		Payload: &proto.StreamProcessResponse_FinalResponse{
@@ -892,12 +892,12 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	})
 }
 
-// persistToolLoopTurns dual-writes the user turn + assistant turn(s) emitted
-// by RunToolLoop into the persistent conversation store, mirroring the
-// legacy storeConversationTurn path so /history and /resume cover
-// tool-calling conversations. Best-effort: store errors are logged but never
-// surfaced to the caller (matches legacy behavior).
-func (s *Server) persistToolLoopTurns(ctx context.Context, req *proto.ProcessRequestRequest, result agent.ToolLoopResult) {
+// persistToolLoopTurns persists the messages added this turn into the
+// persistent conversation store. It writes result.History[injectedLen:] —
+// every role, with BlocksJSON and concatenated text Content — so that user
+// tool_result messages are saved alongside assistant turns. Best-effort:
+// store errors are logged but never surfaced to the caller.
+func (s *Server) persistToolLoopTurns(ctx context.Context, req *proto.ProcessRequestRequest, result agent.ToolLoopResult, injectedLen int) {
 	if s.agent == nil {
 		return
 	}
@@ -910,25 +910,15 @@ func (s *Server) persistToolLoopTurns(ctx context.Context, req *proto.ProcessReq
 		fmt.Fprintf(os.Stderr, "[tool-loop] EnsureConversation(%s) failed: %v\n", convID, err)
 		return
 	}
-	// User turn — plain text in Content, matches legacy persistence.
-	if err := store.Append(ctx, conversation.Turn{
-		ConversationID: convID,
-		Role:           "user",
-		Content:        req.GetInput(),
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "[tool-loop] Append(user, %s) failed: %v\n", convID, err)
+	// Persist only the messages added this turn — result.History begins with the
+	// injected ConvHistory prefix, which is already stored. Clamp defensively.
+	if injectedLen < 0 || injectedLen > len(result.History) {
+		injectedLen = 0
 	}
-	// Assistant turn(s) — every assistant message from the loop's history.
-	// Blocks marshaled into BlocksJSON; Content carries the concatenated
-	// text so /history readers without block-aware rendering still see
-	// something meaningful.
-	for _, m := range result.History {
-		if m.Role != llm.RoleAssistant {
-			continue
-		}
+	for _, m := range result.History[injectedLen:] {
 		blocksJSON, err := json.Marshal(m.Blocks)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[tool-loop] marshal assistant blocks failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "[tool-loop] marshal blocks failed: %v\n", err)
 			continue
 		}
 		var text string
@@ -937,13 +927,14 @@ func (s *Server) persistToolLoopTurns(ctx context.Context, req *proto.ProcessReq
 				text += b.Text
 			}
 		}
+		role := string(m.Role)
 		if err := store.Append(ctx, conversation.Turn{
 			ConversationID: convID,
-			Role:           "assistant",
+			Role:           role,
 			Content:        text,
 			BlocksJSON:     string(blocksJSON),
 		}); err != nil {
-			fmt.Fprintf(os.Stderr, "[tool-loop] Append(assistant, %s) failed: %v\n", convID, err)
+			fmt.Fprintf(os.Stderr, "[tool-loop] Append(%s, %s) failed: %v\n", role, convID, err)
 		}
 	}
 }

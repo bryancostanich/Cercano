@@ -64,6 +64,10 @@ type Model struct {
 	// scrollbar; motion events then scrub the viewport scroll position.
 	scrollbarDragging bool
 
+	// contentScrollbarDragging is the same gesture, but for a reusable content
+	// page scrollbar rather than the main chat scrollback.
+	contentScrollbarDragging bool
+
 	// dragMouse is the last pointer position during a text-selection drag.
 	// dragScrolling is true while the edge auto-scroll tick loop is running, so
 	// holding the pointer past the top/bottom edge keeps scrolling without
@@ -512,10 +516,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tea.MouseClickMsg:
-		if m.contentPageActive() || m.pendingConfirm != nil {
+		if m.pendingConfirm != nil {
 			return m, nil
 		}
 		mouse := msg.Mouse()
+		if m.contentPageActive() {
+			if mouse.Button != tea.MouseLeft {
+				return m, nil
+			}
+			if scroller, state, ok := m.contentScrollbarAt(mouse); ok {
+				m.contentScrollbarDragging = true
+				scroller.ScrollTo(scrollOffsetFromClick(mouse.Y, m.contentTop(), state.Height, state.Total))
+				return m, nil
+			}
+			m.contentScrollbarDragging = false
+			return m, nil
+		}
 		if mouse.Button != tea.MouseLeft {
 			return m, nil
 		}
@@ -549,7 +565,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMotionMsg:
-		if m.contentPageActive() || m.pendingConfirm != nil {
+		if m.contentPageActive() {
+			mouse := msg.Mouse()
+			if m.contentScrollbarDragging {
+				if scroller, state, ok := m.activeContentScroller(); ok {
+					scroller.ScrollTo(scrollOffsetFromClick(mouse.Y, m.contentTop(), state.Height, state.Total))
+				}
+			}
+			return m, nil
+		}
+		if m.pendingConfirm != nil {
 			m.scrollbarDragging = false
 			m.selection.Dragging = false
 			m.input.CancelDrag()
@@ -583,6 +608,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseReleaseMsg:
+		if m.contentPageActive() {
+			m.contentScrollbarDragging = false
+			return m, nil
+		}
 		mouse := msg.Mouse()
 		m.dragScrolling = false
 		if m.input.Dragging() {
@@ -642,6 +671,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd, closed := m.content.Update(msg)
 			if closed {
 				m.content = nil
+				m.contentScrollbarDragging = false
 				if pageID == contentPageConfig {
 					// Refresh the header bar's model names — the editor may
 					// have just changed local-model / cloud-model / cloud-base-url.
@@ -1357,6 +1387,43 @@ func (m Model) contentPageActive() bool {
 	return m.content != nil
 }
 
+func (m Model) contentTop() int {
+	top := 2
+	if m.splashEffective() {
+		top += 9
+	}
+	return top
+}
+
+func (m Model) activeContentScroller() (contentPageScroller, contentPageScrollState, bool) {
+	if m.content == nil {
+		return nil, contentPageScrollState{}, false
+	}
+	scroller, ok := m.content.(contentPageScroller)
+	if !ok {
+		return nil, contentPageScrollState{}, false
+	}
+	state := scroller.ScrollState()
+	if state.Height < 1 || state.Total <= state.Height {
+		return nil, contentPageScrollState{}, false
+	}
+	return scroller, state, true
+}
+
+func (m Model) contentScrollbarAt(mouse tea.Mouse) (contentPageScroller, contentPageScrollState, bool) {
+	scroller, state, ok := m.activeContentScroller()
+	if !ok {
+		return nil, contentPageScrollState{}, false
+	}
+	top := m.contentTop()
+	onBar := mouse.X >= m.width-1 &&
+		mouse.Y >= top && mouse.Y < top+state.Height
+	if !onBar {
+		return nil, contentPageScrollState{}, false
+	}
+	return scroller, state, true
+}
+
 // handleCtrlCKey owns the app-wide Ctrl+C contract for every content page:
 // clear selected/composed prompt text first, arm quit on the first empty
 // Ctrl+C, and quit only on the second consecutive empty Ctrl+C.
@@ -1381,10 +1448,7 @@ func (m Model) handleCtrlCKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) promptTop() int {
-	top := 2 + 0
-	if m.splashEffective() {
-		top += 9
-	}
+	top := m.contentTop()
 	top += m.viewport.Height()
 	if m.recap != "" {
 		top++

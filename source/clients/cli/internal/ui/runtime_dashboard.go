@@ -177,9 +177,28 @@ func (d *runtimeDashboard) ScrollBy(delta int) {
 	d.clampScroll()
 }
 
-func (d *runtimeDashboard) clampScroll() {
+func (d *runtimeDashboard) ScrollTo(offset int) {
+	d.scrollOffset = offset
+	d.clampScroll()
+}
+
+func (d *runtimeDashboard) ScrollState() contentPageScrollState {
+	return d.scrollState()
+}
+
+func (d *runtimeDashboard) scrollState() contentPageScrollState {
 	full, contentH := d.fullContent()
-	d.scrollOffset = clampInt(d.scrollOffset, 0, maxInt(0, countLines([]string{full})-contentH))
+	total := countLines([]string{full})
+	return contentPageScrollState{
+		Total:  total,
+		Height: contentH,
+		Offset: clampInt(d.scrollOffset, 0, maxInt(0, total-contentH)),
+	}
+}
+
+func (d *runtimeDashboard) clampScroll() {
+	state := d.scrollState()
+	d.scrollOffset = state.Offset
 }
 
 func (d *runtimeDashboard) renderScrollableContent(full string, height int) string {

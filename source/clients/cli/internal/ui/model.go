@@ -1388,7 +1388,7 @@ func (m *Model) relayout() {
 	// the viewport is one row too tall and shoves the status bar off-screen.
 	recapH := 0
 	if m.recap != "" {
-		recapH = 1
+		recapH = 2 // blank spacer line + the recap line itself
 	}
 	// Size the input first — DynamicHeight re-fits it to the wrapped content at
 	// this width; the body claims whatever rows are left.
@@ -1471,7 +1471,7 @@ func (m Model) promptTop() int {
 	top := m.contentTop()
 	top += m.viewport.Height()
 	if m.recap != "" {
-		top++
+		top += 2 // blank spacer line + the recap line
 	}
 	top++ // prompt border above the input
 	if hint := m.renderSlashSuggestions(); hint != "" && !m.contentPageActive() {
@@ -2211,8 +2211,10 @@ func (m Model) renderSlashSuggestions() string {
 // chat area, dimmed and truncated to terminal width. Only rendered in the
 // default (no-overlay) view.
 func (m Model) renderRecap() string {
-	label := m.styles.Muted.Render("recap ")
-	avail := m.width - lipgloss.Width(label)
+	const labelText = "recap "
+	pad := strings.Repeat(" ", entryIndent)
+	style := lipgloss.NewStyle().Foreground(m.palette.Bright).Italic(true)
+	avail := m.width - entryIndent - lipgloss.Width(labelText)
 	if avail < 8 {
 		return ""
 	}
@@ -2223,7 +2225,9 @@ func (m Model) renderRecap() string {
 			text = string(r[:avail-1]) + "…"
 		}
 	}
-	return label + m.styles.BorderDim.Render(text)
+	// Blank line above for breathing room; indented to the content margin;
+	// italic + bright amber so it's actually readable, not a dim afterthought.
+	return "\n" + pad + style.Render(labelText+text)
 }
 
 // renderViewportWithScrollbar renders the chat viewport with a one-column

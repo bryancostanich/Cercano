@@ -166,7 +166,7 @@ func (d *runtimeDashboard) toggleFocus() {
 
 func (d *runtimeDashboard) updateCatalog(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	switch msg.String() {
-	case "esc", "q":
+	case "esc":
 		if d.catalogSearch.Value() != "" {
 			d.catalogSearch.SetValue("")
 			d.catalogCursor = 0

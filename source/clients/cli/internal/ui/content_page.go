@@ -19,3 +19,7 @@ type contentPage interface {
 	Update(tea.KeyPressMsg) (cmd tea.Cmd, closed bool)
 	View() string
 }
+
+type contentPageScroller interface {
+	ScrollBy(delta int)
+}

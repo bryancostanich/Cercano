@@ -2210,7 +2210,10 @@ func (m Model) renderSlashSuggestions() string {
 func (m Model) renderRecap() string {
 	const labelText = "recap "
 	pad := strings.Repeat(" ", entryIndent)
-	style := lipgloss.NewStyle().Foreground(m.palette.Bright).Italic(true)
+	// Label in lime (upright) to read as a label; the recap text in bright amber
+	// italic so the two are visually distinct.
+	labelStyle := lipgloss.NewStyle().Foreground(m.palette.Accent)
+	textStyle := lipgloss.NewStyle().Foreground(m.palette.Bright).Italic(true)
 	avail := m.width - entryIndent - lipgloss.Width(labelText)
 	if avail < 8 {
 		return ""
@@ -2222,9 +2225,8 @@ func (m Model) renderRecap() string {
 			text = string(r[:avail-1]) + "…"
 		}
 	}
-	// Blank line above for breathing room; indented to the content margin;
-	// italic + bright amber so it's actually readable, not a dim afterthought.
-	return "\n" + pad + style.Render(labelText+text)
+	// Blank line above for breathing room; indented to the content margin.
+	return "\n" + pad + labelStyle.Render(labelText) + textStyle.Render(text)
 }
 
 // renderViewportWithScrollbar renders the chat viewport with a one-column

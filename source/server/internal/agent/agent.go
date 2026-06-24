@@ -445,6 +445,12 @@ func (a *Agent) ProcessRequestStream(ctx context.Context, req *Request, progress
 		}
 	}
 
+	// Announce the chosen route so the client can show a live engine badge.
+	if req.OnRoute != nil {
+		cloudP := a.router.GetModelProviders()["CloudModel"]
+		req.OnRoute(provider.Name(), cloudP != nil && provider == cloudP)
+	}
+
 	// 3. Execute Strategy (uses augmented input so LLM can resolve references)
 	if intent == IntentCoding && req.WorkDir != "" && req.FileName != "" {
 		targetFile := req.FileName

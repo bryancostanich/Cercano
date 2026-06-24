@@ -680,6 +680,8 @@ type StreamMsg struct {
 	Summary     string // for TypeToolExecComplete
 	Detail      string // for TypeToolExecComplete (clean outcome token)
 	IsError     bool   // for TypeToolExecComplete
+	RouteModel  string // for TypeRouteSelected (engine handling the turn)
+	RouteCloud  bool   // for TypeRouteSelected (true = cloud, false = local)
 	Tier        string // for TypePermissionRequired ("W" | "X")
 }
 
@@ -695,6 +697,7 @@ const (
 	TypeToolExecStart
 	TypeToolExecComplete
 	TypePermissionRequired
+	TypeRouteSelected
 )
 
 // StreamChat opens a streaming chat call and emits typed messages on the
@@ -783,6 +786,14 @@ func (c *Client) StreamChat(ctx context.Context, conversationID, input, workDir 
 					ToolName:  pr.GetToolName(),
 					ArgsJSON:  pr.GetArgsJson(),
 					Tier:      pr.GetTier(),
+				}
+				continue
+			}
+			if rs := msg.GetRouteSelected(); rs != nil {
+				out <- StreamMsg{
+					Type:       TypeRouteSelected,
+					RouteModel: rs.GetModel(),
+					RouteCloud: rs.GetIsCloud(),
 				}
 				continue
 			}

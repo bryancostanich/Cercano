@@ -857,11 +857,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 
-	case contextEditProposalMsg:
-		return m.onContextProposal(msg)
-
-	case contextEditDeletedMsg:
-		return m.onContextDeleted(msg)
+	case chatStatusMsg, chatAssistantMsg, chatDoneMsg, chatErrorMsg, chatConfirmMsg:
+		return m.routeChatMsg(msg)
 
 	case runtimeDashboardActionMsg:
 		if dashboard, ok := m.content.(*runtimeDashboard); ok {
@@ -1003,6 +1000,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// last-set content and the animation appears frozen.
 		if e := m.streamingTextEntry(); e != nil && e.Content == "" {
 			m.refreshViewport()
+			return m, progressAnimTick()
+		}
+		// Also keep ticking while the /c chatPane is busy so its animated
+		// status line repaints on every frame.
+		if cv, ok := m.content.(*contextView); ok && cv.pane != nil && cv.pane.Busy() {
 			return m, progressAnimTick()
 		}
 		return m, nil
@@ -2026,14 +2028,18 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 
 // handleContextViewKey owns the keyboard while the /c context viewer is the
 // active page: typing edits the main prompt bar, enter submits an edit
-// instruction (ProposeContextEdit), scroll keys move the turn list, and esc on
-// an empty bar closes the page.
+// instruction to the pane, scroll keys move the turn list, and esc on an empty
+// bar closes the page.
 func (m Model) handleContextViewKey(cv *contextView, msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		if m.input.Value() != "" {
 			m.input.SetValue("")
 			return m, nil
+		}
+		// Closing /c — drop any queued pane messages.
+		if cv.pane != nil {
+			cv.pane.clearQueue()
 		}
 		m.content = nil
 		m.contentScrollbarDragging = false
@@ -2044,7 +2050,16 @@ func (m Model) handleContextViewKey(cv *contextView, msg tea.KeyPressMsg) (Model
 			return m, nil
 		}
 		m.input.SetValue("")
-		return m, cv.proposeCmd(text)
+		return m, cv.pane.Submit(text)
+	case "up":
+		// Pop the last queued message back into the prompt bar for editing
+		// (mirrors d808952 unstageLastQueued behaviour in the main chat).
+		if m.input.Value() == "" && cv.pane != nil {
+			if msg, ok := cv.pane.unstageLastQueued(); ok {
+				m.input.SetValue(msg)
+				return m, nil
+			}
+		}
 	case "pgup", "ctrl+b":
 		cv.ScrollBy(-dashboardContentHeight(cv.height))
 		return m, nil
@@ -2072,52 +2087,28 @@ func (m Model) handleContextViewKey(cv *contextView, msg tea.KeyPressMsg) (Model
 	return m, cmd
 }
 
-// onContextProposal applies a proposal to the /c view and raises a confirm gate
-// whose y deletes the proposed turns and n cancels.
-func (m Model) onContextProposal(msg contextEditProposalMsg) (Model, tea.Cmd) {
+// routeChatMsg routes a chat-pane event to the active *contextView. On
+// chatConfirmMsg it appends the assistant message to the pane and raises the
+// shared confirm gate. All other events are forwarded to pane.Apply.
+func (m Model) routeChatMsg(msg tea.Msg) (Model, tea.Cmd) {
 	cv, ok := m.content.(*contextView)
 	if !ok {
 		return m, nil
 	}
-	if msg.err != nil {
-		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: m.styles.Muted.Render("couldn't interpret that — try rephrasing")})
-		m.refreshViewport()
-		return m, nil
-	}
-	if len(msg.p.DeleteIDs) == 0 {
-		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "nothing to remove"})
-		m.refreshViewport()
-		return m, nil
-	}
-	cv.applyProposal(msg.p)
-	ids := msg.p.DeleteIDs
-	m.pendingConfirm = &confirmRequest{
-		onYes: func(m Model) (Model, tea.Cmd) {
-			m.pendingConfirm = nil
-			return m, cv.deleteCmd(ids)
-		},
-		onNo: func(m Model) (Model, tea.Cmd) {
-			m.pendingConfirm = nil
-			cv.cancelProposal()
-			return m, nil
-		},
-	}
-	return m, nil
-}
-
-// onContextDeleted clears the proposal and reloads the /c snapshot.
-// On error it surfaces a scrollback entry and skips the reload.
-func (m Model) onContextDeleted(msg contextEditDeletedMsg) (Model, tea.Cmd) {
-	if cv, ok := m.content.(*contextView); ok {
-		cv.cancelProposal()
-		if msg.err != nil {
-			m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "couldn't delete: " + msg.err.Error()})
-			m.refreshViewport()
-			return m, nil
+	if cm, isConfirm := msg.(chatConfirmMsg); isConfirm {
+		cv.pane.appendAssistant(cm.assistant)
+		onYes, onNo := cm.onYes, cm.onNo
+		m.pendingConfirm = &confirmRequest{
+			onYes: func(m Model) (Model, tea.Cmd) { m.pendingConfirm = nil; return m, onYes },
+			onNo:  func(m Model) (Model, tea.Cmd) { m.pendingConfirm = nil; cv.pane.clearBusy(); return m, onNo },
 		}
-		cv.snapshot = loadContextSnapshot(cv.agent, cv.convID)
+		return m, progressAnimTick()
 	}
-	return m, nil
+	drain := cv.pane.Apply(msg)
+	if cv.pane.Busy() {
+		return m, tea.Batch(drain, progressAnimTick())
+	}
+	return m, drain
 }
 
 // truncateArgs renders the JSON args compactly for the confirm prompt one-liner.

@@ -40,6 +40,9 @@ type contextView struct {
 	scrollOffset    int
 	showingProposal bool
 	proposal        agentclient.Proposal
+
+	driver *contextManagerDriver
+	pane   *chatPane
 }
 
 func loadContextSnapshot(ag *agentclient.Client, convID string) contextSnapshot {
@@ -57,6 +60,17 @@ func loadContextSnapshot(ag *agentclient.Client, convID string) contextSnapshot 
 func newContextView(ag *agentclient.Client, p theme.Palette, s theme.Styles, convID string, w, h int) (*contextView, tea.Cmd) {
 	cv := &contextView{palette: p, styles: s, agent: ag, convID: convID, width: w, height: h}
 	cv.snapshot = loadContextSnapshot(ag, convID)
+	cv.driver = &contextManagerDriver{
+		agent:  ag,
+		convID: convID,
+		onDeleted: func(ids []string) {
+			cv.snapshot = loadContextSnapshot(ag, convID)
+			cv.cancelProposal()
+		},
+		mark:   cv.applyProposalIDs,
+		unmark: cv.cancelProposal,
+	}
+	cv.pane = newChatPane(cv.driver, s, p, w, h)
 	return cv, nil
 }
 
@@ -106,6 +120,13 @@ func (c *contextView) cancelProposal() {
 	c.showingProposal = false
 }
 
+// applyProposalIDs marks the given turn IDs for deletion (used by the driver's
+// mark hook so turns render with ✗ while a confirm is pending).
+func (c *contextView) applyProposalIDs(ids []string) {
+	c.proposal.DeleteIDs = ids
+	c.showingProposal = true
+}
+
 func (c *contextView) markedForDelete(id string) bool {
 	if !c.showingProposal {
 		return false
@@ -118,27 +139,7 @@ func (c *contextView) markedForDelete(id string) bool {
 	return false
 }
 
-// --- async commands ---
-
-func (c *contextView) proposeCmd(instruction string) tea.Cmd {
-	ag, convID := c.agent, c.convID
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		p, err := ag.ProposeContextEdit(ctx, convID, instruction)
-		return contextEditProposalMsg{p: p, err: err}
-	}
-}
-
-func (c *contextView) deleteCmd(ids []string) tea.Cmd {
-	ag, convID := c.agent, c.convID
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		n, err := ag.DeleteConversationTurns(ctx, convID, ids)
-		return contextEditDeletedMsg{n: n, err: err}
-	}
-}
+// (proposeCmd and deleteCmd removed — the contextManagerDriver owns those RPCs now.)
 
 func (c *contextView) View() string {
 	full, contentH := c.fullContent()
@@ -161,17 +162,13 @@ func (c *contextView) fullContent() (string, int) {
 		}
 	}
 	lines = append(lines, "")
-	lines = append(lines, c.renderFooter())
-	return strings.Join(lines, "\n"), dashboardContentHeight(c.height)
-}
-
-func (c *contextView) renderFooter() string {
-	if c.showingProposal {
-		rationale := c.styles.Warn.Render(c.proposal.Rationale)
-		confirm := c.styles.Bright.Render("[y]") + " delete  " + c.styles.Bright.Render("[n]") + " cancel"
-		return rationale + "\n" + confirm
+	// Chat pane: shows the instruction log + animated status line.
+	if c.pane != nil {
+		lines = append(lines, c.pane.View())
+	} else {
+		lines = append(lines, c.styles.Muted.Render("type to edit · enter to propose · esc: back"))
 	}
-	return c.styles.Muted.Render("type to edit · enter to propose · esc: back")
+	return strings.Join(lines, "\n"), dashboardContentHeight(c.height)
 }
 
 func (c *contextView) renderHeader() string {

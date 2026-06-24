@@ -12,3 +12,9 @@ Hard stops: design ties, irreversible actions, 5 failed fixes on one issue.
 **Do NOT push. Do NOT merge to main** (await per-act authorization on return).
 
 ## Decision log
+
+### D1 — Merge plan Tasks 2 & 3 into one atomic dispatch
+- **Fork:** Plan separates "slim contextView" (T2) from "model.go prompt-bar routing" (T3). T2 removes contextView fields/methods that the first-cut model.go references, so T2 cannot compile-green alone without throwaway stubbing.
+- **Options:** (a) keep split with stubs in T2, replaced in T3; (b) merge into one dispatch.
+- **Chosen: (b)** merge. Ranking correctness>cleanliness: one atomic UI rewire compiles+tests as a unit and avoids a broken intermediate state; the throwaway stubbing in (a) is wasted churn and a likely error source.
+- **Reversible:** yes (worktree). Not a hard-stop.

@@ -2054,6 +2054,11 @@ func (m Model) onContextProposal(msg contextEditProposalMsg) (Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, nil
 	}
+	if len(msg.p.DeleteIDs) == 0 {
+		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "nothing to remove"})
+		m.refreshViewport()
+		return m, nil
+	}
 	cv.applyProposal(msg.p)
 	ids := msg.p.DeleteIDs
 	m.pendingConfirm = &confirmRequest{
@@ -2071,9 +2076,15 @@ func (m Model) onContextProposal(msg contextEditProposalMsg) (Model, tea.Cmd) {
 }
 
 // onContextDeleted clears the proposal and reloads the /c snapshot.
+// On error it surfaces a scrollback entry and skips the reload.
 func (m Model) onContextDeleted(msg contextEditDeletedMsg) (Model, tea.Cmd) {
 	if cv, ok := m.content.(*contextView); ok {
 		cv.cancelProposal()
+		if msg.err != nil {
+			m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "couldn't delete: " + msg.err.Error()})
+			m.refreshViewport()
+			return m, nil
+		}
 		cv.snapshot = loadContextSnapshot(cv.agent, cv.convID)
 	}
 	return m, nil

@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"cercano/source/clients/cli/internal/overlay"
 	"cercano/source/server/pkg/agentclient"
 )
 
@@ -54,8 +53,9 @@ func TestIsRuntimeDashboardKey(t *testing.T) {
 	}
 }
 
-func TestRuntimeRowsFromSnapshotShowsRuntimeDashboardData(t *testing.T) {
-	rows := runtimeRowsFromSnapshot(runtimeDashboardSnapshot{
+func TestRuntimeDashboardViewShowsRuntimeDashboardData(t *testing.T) {
+	m := New(nil, false)
+	snapshot := runtimeDashboardSnapshot{
 		Config: &agentclient.Config{
 			LocalRuntime:   "llama_server",
 			LocalModel:     "qwen.gguf",
@@ -102,19 +102,39 @@ func TestRuntimeRowsFromSnapshotShowsRuntimeDashboardData(t *testing.T) {
 				Message:   "server ready",
 			}},
 		},
-	})
+	}
+	dashboard := &runtimeDashboard{
+		width:    118,
+		height:   45,
+		palette:  m.palette,
+		styles:   m.styles,
+		snapshot: snapshot,
+		focus:    runtimeFocusCatalog,
+	}
+	dashboard.catalogSearch = textinput.New()
 
-	assertRowContains(t, rows, "external endpoints", "1 endpoint")
-	assertRowContains(t, rows, "endpoint openai proxy", "openai_compatible")
-	assertRowContains(t, rows, "downloaded models", "1 model")
-	assertRowContains(t, rows, "model qwen", "llama_server")
-	assertRowContains(t, rows, "start qwen.gguf", "llama_server")
-	assertRowContains(t, rows, "runtime processes", "1 process")
-	assertRowContains(t, rows, "process running.gguf", "running")
-	assertRowContains(t, rows, "stop running.gguf", "llama_server")
-	assertRowContains(t, rows, "restart running.gguf", "llama_server")
-	assertRowContains(t, rows, "recent logs", "1 entry")
-	assertAnyRowContains(t, rows, "server ready")
+	full, _ := dashboard.fullContent()
+	view := ansi.Strip(full)
+	for _, want := range []string{
+		"local config",
+		"cloud / external",
+		"runtime status",
+		"download catalog",
+		"installed models",
+		"running processes",
+		"local model server log",
+		"qwen",
+		"openai proxy",
+		"server ready",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("dashboard view missing %q:\n%s", want, view)
+		}
+	}
+	rows := dashboard.operationRows()
+	assertActionRowContains(t, rows, "start", "qwen.gguf")
+	assertActionRowContains(t, rows, "stop", "running.gguf")
+	assertActionRowContains(t, rows, "restart", "running.gguf")
 }
 
 func TestRuntimeDashboardViewSeparatesConfigAndLocalLogs(t *testing.T) {
@@ -189,10 +209,11 @@ func TestRuntimeDashboardViewSeparatesConfigAndLocalLogs(t *testing.T) {
 		palette:  m.palette,
 		styles:   m.styles,
 		snapshot: snapshot,
-		list:     overlay.New("models and processes", runtimeActionRowsFromSnapshot(snapshot), overlay.Hooks{}),
 	}
+	dashboard.catalogSearch = textinput.New()
 
-	view := ansi.Strip(dashboard.View())
+	full, _ := dashboard.fullContent()
+	view := ansi.Strip(full)
 	for _, want := range []string{
 		"local config",
 		"cloud / external",
@@ -202,7 +223,7 @@ func TestRuntimeDashboardViewSeparatesConfigAndLocalLogs(t *testing.T) {
 		"openai",
 		"Qwen2.5 Coder",
 		"server ready",
-		"models and processes",
+		"installed models",
 	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("dashboard view missing %q:\n%s", want, view)
@@ -211,10 +232,13 @@ func TestRuntimeDashboardViewSeparatesConfigAndLocalLogs(t *testing.T) {
 	if strings.Contains(view, "not a local runtime log") {
 		t.Fatalf("dashboard log block should filter non-local logs:\n%s", view)
 	}
-	modelsIdx := strings.Index(view, "models and processes")
+	modelsIdx := strings.Index(view, "installed models")
 	logIdx := strings.Index(view, "local model server log")
 	if modelsIdx == -1 || logIdx == -1 || logIdx < modelsIdx {
-		t.Fatalf("log block should render below models/processes:\n%s", view)
+		t.Fatalf("log block should render below installed/process sections:\n%s", view)
+	}
+	if strings.Contains(view, "- models and processes") {
+		t.Fatalf("dashboard should not render the old overlay title:\n%s", view)
 	}
 }
 
@@ -257,7 +281,6 @@ func TestRuntimeDashboardCatalogSearchFiltersAndShowsDetails(t *testing.T) {
 		},
 	}
 	dashboard.catalogSearch.SetValue("Qwen")
-	dashboard.list = overlay.New("models and processes", runtimeActionRowsFromSnapshot(dashboard.snapshot), overlay.Hooks{})
 
 	view := ansi.Strip(dashboard.renderCatalogBlock(maxCatalogRows))
 	for _, want := range []string{"filter", "Qwen2.5 Coder", "family: qwen", "supports: chat,tools"} {
@@ -294,7 +317,6 @@ func TestRuntimeDashboardCatalogTypingFiltersByDefault(t *testing.T) {
 	}
 	dashboard.catalogSearch = textinput.New()
 	_ = dashboard.catalogSearch.Focus()
-	dashboard.list = overlay.New("models and processes", runtimeActionRowsFromSnapshot(dashboard.snapshot), overlay.Hooks{})
 
 	for _, ch := range "qwen" {
 		if _, closed := dashboard.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)}); closed {
@@ -332,7 +354,6 @@ func TestRuntimeDashboardBlocksUseFullPageWidth(t *testing.T) {
 			},
 		},
 	}
-	dashboard.list = overlay.New("models and processes", runtimeActionRowsFromSnapshot(dashboard.snapshot), overlay.Hooks{})
 
 	pageW := dashboardPanelWidth(dashboard.width)
 	leftW, rightW := dashboardConfigBlockWidths(pageW)
@@ -354,8 +375,17 @@ func TestRuntimeDashboardBlocksUseFullPageWidth(t *testing.T) {
 	if got := maxRenderedLineWidth(logBlock); got != pageW {
 		t.Fatalf("log block width = %d, want %d:\n%s", got, pageW, ansi.Strip(logBlock))
 	}
-	if got := maxRenderedLineWidth(dashboard.list.ViewPanel(pageW, dashboard.palette, dashboard.styles)); got != pageW {
-		t.Fatalf("action block width = %d, want %d:\n%s", got, pageW, ansi.Strip(dashboard.list.ViewPanel(pageW, dashboard.palette, dashboard.styles)))
+	installedBlock := dashboard.renderInstalledModelsBlock()
+	if got := maxRenderedLineWidth(installedBlock); got != pageW {
+		t.Fatalf("installed block width = %d, want %d:\n%s", got, pageW, ansi.Strip(installedBlock))
+	}
+	downloadsBlock := dashboard.renderDownloadsBlock()
+	if got := maxRenderedLineWidth(downloadsBlock); got != pageW {
+		t.Fatalf("downloads block width = %d, want %d:\n%s", got, pageW, ansi.Strip(downloadsBlock))
+	}
+	processesBlock := dashboard.renderProcessesBlock()
+	if got := maxRenderedLineWidth(processesBlock); got != pageW {
+		t.Fatalf("processes block width = %d, want %d:\n%s", got, pageW, ansi.Strip(processesBlock))
 	}
 }
 
@@ -377,7 +407,6 @@ func TestRuntimeDashboardLogBlockFillsRemainingContentHeight(t *testing.T) {
 			},
 		},
 	}
-	dashboard.list = overlay.New("models and processes", runtimeActionRowsFromSnapshot(dashboard.snapshot), overlay.Hooks{})
 
 	view := dashboard.View()
 	if got, want := strings.Count(view, "\n")+1, dashboardContentHeight(dashboard.height); got != want {
@@ -405,12 +434,6 @@ func TestRuntimeDashboardShowsDownloadProgressAndActions(t *testing.T) {
 		},
 	}
 
-	rows := runtimeActionRowsFromSnapshot(snapshot)
-	assertRowContains(t, rows, "downloaded models", "0 models")
-	assertRowContains(t, rows, "downloads", "1 job")
-	assertAnyRowContains(t, rows, "downloading 50%")
-	assertAnyRowContains(t, rows, "cancel catalog:qwen")
-
 	m := New(nil, false)
 	dashboard := &runtimeDashboard{
 		width:    110,
@@ -421,8 +444,10 @@ func TestRuntimeDashboardShowsDownloadProgressAndActions(t *testing.T) {
 		focus:    runtimeFocusCatalog,
 	}
 	dashboard.catalogSearch = textinput.New()
-	dashboard.list = overlay.New("models and processes", rows, overlay.Hooks{})
-	view := ansi.Strip(dashboard.View())
+	rows := dashboard.downloadRows()
+	assertActionRowContains(t, rows, "Qwen Coder", "downloading 50%")
+	assertActionRowContains(t, rows, "cancel", "catalog:qwen")
+	view := ansi.Strip(dashboard.renderCatalogBlock(maxCatalogRows) + "\n" + dashboard.renderDownloadsBlock())
 	if !strings.Contains(view, "[") || !strings.Contains(view, "50%") {
 		t.Fatalf("dashboard should render download progress:\n%s", view)
 	}
@@ -527,7 +552,7 @@ func TestRuntimeDashboardActionRoundTrip(t *testing.T) {
 	}
 }
 
-func assertRowContains(t *testing.T, rows []overlay.Row, label, value string) {
+func assertActionRowContains(t *testing.T, rows []runtimeDashboardActionRow, label, value string) {
 	t.Helper()
 	for _, row := range rows {
 		if row.Label == label && strings.Contains(row.Value, value) {
@@ -535,16 +560,6 @@ func assertRowContains(t *testing.T, rows []overlay.Row, label, value string) {
 		}
 	}
 	t.Fatalf("missing row label %q containing value %q in %#v", label, value, rows)
-}
-
-func assertAnyRowContains(t *testing.T, rows []overlay.Row, value string) {
-	t.Helper()
-	for _, row := range rows {
-		if strings.Contains(row.Label, value) || strings.Contains(row.Value, value) || strings.Contains(row.Hint, value) {
-			return
-		}
-	}
-	t.Fatalf("missing any row containing value %q in %#v", value, rows)
 }
 
 func maxRenderedLineWidth(value string) int {
@@ -604,6 +619,5 @@ func overflowingRuntimeDashboard(t *testing.T, height int) *runtimeDashboard {
 	}
 	dashboard.catalogSearch = textinput.New()
 	_ = dashboard.catalogSearch.Focus()
-	dashboard.list = overlay.New("models and processes", runtimeActionRowsFromSnapshot(snapshot), overlay.Hooks{})
 	return dashboard
 }

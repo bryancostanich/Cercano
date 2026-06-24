@@ -336,12 +336,15 @@ func collectStream(ctx context.Context, rdr llm.StreamReader) (llm.ChatResponse,
 			toolArgsBuf.WriteString(ev.TextDelta)
 		case llm.EventToolUseStop:
 			flushTool()
+		case llm.EventMessageStart:
+			out.InputTokens = ev.InputTokens
 		case llm.EventMessageStop:
 			flushText()
 			flushTool()
 			if ev.StopReason != "" {
 				out.StopReason = ev.StopReason
 			}
+			out.OutputTokens = ev.OutputTokens
 		case llm.EventError:
 			return out, fmt.Errorf("stream error: %s", ev.ErrText)
 		}

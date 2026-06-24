@@ -31,7 +31,7 @@ func (s *streamReader) Close() error { return s.stream.Close() }
 func (s *streamReader) convert(raw sdk.MessageStreamEventUnion) (llm.StreamEvent, bool) {
 	switch raw.Type {
 	case "message_start":
-		return llm.StreamEvent{Type: llm.EventMessageStart}, true
+		return llm.StreamEvent{Type: llm.EventMessageStart, InputTokens: int(raw.Message.Usage.InputTokens)}, true
 	case "content_block_start":
 		cb := raw.ContentBlock
 		s.blockKind[raw.Index] = cb.Type
@@ -59,7 +59,7 @@ func (s *streamReader) convert(raw sdk.MessageStreamEventUnion) (llm.StreamEvent
 		}
 		return llm.StreamEvent{}, false
 	case "message_delta":
-		return llm.StreamEvent{Type: llm.EventMessageStop, StopReason: string(raw.Delta.StopReason)}, true
+		return llm.StreamEvent{Type: llm.EventMessageStop, StopReason: string(raw.Delta.StopReason), OutputTokens: int(raw.Usage.OutputTokens)}, true
 	case "message_stop":
 		return llm.StreamEvent{Type: llm.EventMessageStop}, true
 	}

@@ -640,9 +640,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		if isRuntimeDashboardKey(msg) {
-			dashboard, _ := newRuntimeDashboard(m.agent, m.palette, m.styles, m.width, m.height)
+			dashboard, cmd := newRuntimeDashboard(m.agent, m.palette, m.styles, m.width, m.height)
 			m.content = dashboard
-			return m, nil
+			if dashboard.hasActiveDownloads() {
+				cmd = tea.Batch(cmd, runtimeDashboardRefreshTick())
+			}
+			return m, cmd
 		}
 		// Esc cancels an in-flight prompt execution.
 		if m.streaming && key.Matches(msg, keys.Back) {
@@ -785,7 +788,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case runtimeDashboardActionMsg:
 		if dashboard, ok := m.content.(*runtimeDashboard); ok {
-			dashboard.applyActionMsg(msg)
+			return m, dashboard.applyActionMsg(msg)
+		}
+		return m, nil
+
+	case runtimeDashboardRefreshMsg:
+		if dashboard, ok := m.content.(*runtimeDashboard); ok {
+			return m, dashboard.refreshSnapshot()
 		}
 		return m, nil
 
@@ -1470,13 +1479,15 @@ func (m *Model) renderEntry(e *Entry, idx int) string {
 		return strings.Join(lines, "\n")
 
 	case RoleAssistant:
-		// Pre-stream placeholder: no content yet, show the animated status.
+		// Pre-text placeholder: no prose yet — show the live turn status inline
+		// (activity · elapsed · tokens · engine) where the agent is working.
 		if e.Streaming && e.Content == "" {
-			status := e.Status
-			if status == "" {
-				status = "thinking…"
+			activity := m.turnActivity
+			if activity == "" {
+				activity = "thinking"
 			}
-			content := animateSpinnerGlyph() + " " + animateLimeSweep(status)
+			line := turnStatusLine(activity, time.Since(m.turnStart), m.turnTokOut, m.turnModel, m.turnCloud)
+			content := animateSpinnerGlyph() + " " + animateLimeSweep(line)
 			return indentBlock(pad, content)
 		}
 		rendered := m.renderAssistantMarkdown(e, textW)
@@ -2221,15 +2232,8 @@ func (m Model) renderHeader() string {
 }
 
 func (m Model) renderStatus() string {
-	if m.streaming {
-		// Live turn status: activity · elapsed · tokens · engine, plus an
-		// interrupt hint. Elapsed recomputes each frame (the progress-anim tick
-		// repaints while streaming).
-		line := turnStatusLine(m.turnActivity, time.Since(m.turnStart), m.turnTokOut, m.turnModel, m.turnCloud)
-		status := m.styles.Accent.Render("⟳ " + line)
-		hint := m.styles.BorderDim.Render("  ·  ") + m.styles.Muted.Render("esc interrupt")
-		return lipgloss.NewStyle().Width(m.width).Render(status + hint)
-	}
+	// The footer stays put during a turn — the live turn status renders inline on
+	// the assistant placeholder, not here.
 	help := m.styles.Muted.Render("/help for cmds")
 	if m.selection.hasRange() {
 		if m.selectionNotice != "" {

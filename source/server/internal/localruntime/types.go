@@ -30,6 +30,7 @@ type Manager interface {
 	Start(context.Context, StartRequest) (*InstanceRecord, error)
 	Stop(context.Context, StopRequest) error
 	Restart(context.Context, RestartRequest) (*InstanceRecord, error)
+	DownloadModel(context.Context, DownloadRequest) (*ModelRecord, error)
 	Status(context.Context) (*StatusSnapshot, error)
 	Logs(context.Context, LogRequest) ([]LogEntry, error)
 	WriteLog(LogEntry)
@@ -68,22 +69,26 @@ type ProviderInfo struct {
 }
 
 type ModelRecord struct {
-	ID            string
-	DisplayName   string
-	Runtime       string
-	Source        string
-	Path          string
-	Format        string
-	Family        string
-	Quantization  string
-	SizeBytes     int64
-	ModifiedAt    time.Time
-	DownloadState string
-	RuntimeState  string
-	SupportsChat  bool
-	SupportsEmbed bool
-	SupportsTools bool
-	Active        bool
+	ID                 string
+	DisplayName        string
+	Runtime            string
+	Source             string
+	Path               string
+	Format             string
+	Family             string
+	Quantization       string
+	SizeBytes          int64
+	ModifiedAt         time.Time
+	DownloadState      string
+	DownloadURL        string
+	DownloadedBytes    int64
+	DownloadTotalBytes int64
+	DownloadError      string
+	RuntimeState       string
+	SupportsChat       bool
+	SupportsEmbed      bool
+	SupportsTools      bool
+	Active             bool
 }
 
 type InstanceRecord struct {
@@ -148,6 +153,11 @@ type RestartRequest struct {
 	InstanceID string
 	Runtime    string
 	ModelID    string
+}
+
+type DownloadRequest struct {
+	Runtime string
+	ModelID string
 }
 
 type LogRequest struct {

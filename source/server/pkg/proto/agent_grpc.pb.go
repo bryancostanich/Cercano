@@ -38,6 +38,7 @@ const (
 	Agent_StartRuntimeModel_FullMethodName       = "/agent.Agent/StartRuntimeModel"
 	Agent_StopRuntimeModel_FullMethodName        = "/agent.Agent/StopRuntimeModel"
 	Agent_RestartRuntime_FullMethodName          = "/agent.Agent/RestartRuntime"
+	Agent_DownloadRuntimeModel_FullMethodName    = "/agent.Agent/DownloadRuntimeModel"
 	Agent_StreamRuntimeLogs_FullMethodName       = "/agent.Agent/StreamRuntimeLogs"
 	Agent_ListSkills_FullMethodName              = "/agent.Agent/ListSkills"
 	Agent_GetSkill_FullMethodName                = "/agent.Agent/GetSkill"
@@ -95,6 +96,7 @@ type AgentClient interface {
 	StartRuntimeModel(ctx context.Context, in *StartRuntimeModelRequest, opts ...grpc.CallOption) (*StartRuntimeModelResponse, error)
 	StopRuntimeModel(ctx context.Context, in *StopRuntimeModelRequest, opts ...grpc.CallOption) (*StopRuntimeModelResponse, error)
 	RestartRuntime(ctx context.Context, in *RestartRuntimeRequest, opts ...grpc.CallOption) (*RestartRuntimeResponse, error)
+	DownloadRuntimeModel(ctx context.Context, in *DownloadRuntimeModelRequest, opts ...grpc.CallOption) (*DownloadRuntimeModelResponse, error)
 	StreamRuntimeLogs(ctx context.Context, in *StreamRuntimeLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RuntimeLogEntry], error)
 	// ListSkills returns the catalog of available Agent Skills (name + description).
 	ListSkills(ctx context.Context, in *ListSkillsRequest, opts ...grpc.CallOption) (*ListSkillsResponse, error)
@@ -319,6 +321,16 @@ func (c *agentClient) RestartRuntime(ctx context.Context, in *RestartRuntimeRequ
 	return out, nil
 }
 
+func (c *agentClient) DownloadRuntimeModel(ctx context.Context, in *DownloadRuntimeModelRequest, opts ...grpc.CallOption) (*DownloadRuntimeModelResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DownloadRuntimeModelResponse)
+	err := c.cc.Invoke(ctx, Agent_DownloadRuntimeModel_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *agentClient) StreamRuntimeLogs(ctx context.Context, in *StreamRuntimeLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RuntimeLogEntry], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[1], Agent_StreamRuntimeLogs_FullMethodName, cOpts...)
@@ -455,6 +467,7 @@ type AgentServer interface {
 	StartRuntimeModel(context.Context, *StartRuntimeModelRequest) (*StartRuntimeModelResponse, error)
 	StopRuntimeModel(context.Context, *StopRuntimeModelRequest) (*StopRuntimeModelResponse, error)
 	RestartRuntime(context.Context, *RestartRuntimeRequest) (*RestartRuntimeResponse, error)
+	DownloadRuntimeModel(context.Context, *DownloadRuntimeModelRequest) (*DownloadRuntimeModelResponse, error)
 	StreamRuntimeLogs(*StreamRuntimeLogsRequest, grpc.ServerStreamingServer[RuntimeLogEntry]) error
 	// ListSkills returns the catalog of available Agent Skills (name + description).
 	ListSkills(context.Context, *ListSkillsRequest) (*ListSkillsResponse, error)
@@ -536,6 +549,9 @@ func (UnimplementedAgentServer) StopRuntimeModel(context.Context, *StopRuntimeMo
 }
 func (UnimplementedAgentServer) RestartRuntime(context.Context, *RestartRuntimeRequest) (*RestartRuntimeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RestartRuntime not implemented")
+}
+func (UnimplementedAgentServer) DownloadRuntimeModel(context.Context, *DownloadRuntimeModelRequest) (*DownloadRuntimeModelResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DownloadRuntimeModel not implemented")
 }
 func (UnimplementedAgentServer) StreamRuntimeLogs(*StreamRuntimeLogsRequest, grpc.ServerStreamingServer[RuntimeLogEntry]) error {
 	return status.Error(codes.Unimplemented, "method StreamRuntimeLogs not implemented")
@@ -917,6 +933,24 @@ func _Agent_RestartRuntime_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Agent_DownloadRuntimeModel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DownloadRuntimeModelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).DownloadRuntimeModel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_DownloadRuntimeModel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).DownloadRuntimeModel(ctx, req.(*DownloadRuntimeModelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Agent_StreamRuntimeLogs_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(StreamRuntimeLogsRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -1132,6 +1166,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RestartRuntime",
 			Handler:    _Agent_RestartRuntime_Handler,
+		},
+		{
+			MethodName: "DownloadRuntimeModel",
+			Handler:    _Agent_DownloadRuntimeModel_Handler,
 		},
 		{
 			MethodName: "ListSkills",

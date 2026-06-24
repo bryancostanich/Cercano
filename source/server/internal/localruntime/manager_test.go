@@ -3,6 +3,10 @@ package localruntime
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -117,6 +121,76 @@ func TestInMemoryManagerStartStop(t *testing.T) {
 	}
 }
 
+func TestInMemoryManagerDownloadModelTracksProgressAndWritesFile(t *testing.T) {
+	body := []byte("gguf test body")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "14")
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	target := filepath.Join(t.TempDir(), "model.gguf")
+	manager := NewManager()
+	manager.RegisterProvider(&fakeProvider{
+		name: "llama_server",
+		models: []ModelRecord{{
+			ID:                 "catalog:model",
+			DisplayName:        "Catalog Model",
+			Runtime:            "llama_server",
+			Source:             "catalog",
+			Path:               target,
+			Format:             "gguf",
+			DownloadState:      "not_downloaded",
+			DownloadURL:        server.URL,
+			DownloadTotalBytes: int64(len(body)),
+			SizeBytes:          int64(len(body)),
+			SupportsChat:       true,
+		}},
+	})
+
+	model, err := manager.DownloadModel(context.Background(), DownloadRequest{
+		Runtime: "llama_server",
+		ModelID: "catalog:model",
+	})
+	if err != nil {
+		t.Fatalf("DownloadModel returned error: %v", err)
+	}
+	if model.DownloadState != "downloading" {
+		t.Fatalf("expected downloading model, got %#v", model)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	var downloaded ModelRecord
+	for time.Now().Before(deadline) {
+		status, err := manager.Status(context.Background())
+		if err != nil {
+			t.Fatalf("Status returned error: %v", err)
+		}
+		if got, ok := findModelRecord(status.Models, "catalog:model"); ok && got.DownloadState == "downloaded" {
+			downloaded = got
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if downloaded.DownloadState != "downloaded" {
+		t.Fatalf("model did not finish downloading: %#v", downloaded)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("expected downloaded file: %v", err)
+	}
+	if string(data) != string(body) {
+		t.Fatalf("downloaded data = %q, want %q", string(data), string(body))
+	}
+	logs, err := manager.Logs(context.Background(), LogRequest{Source: "cercano.runtime.download"})
+	if err != nil {
+		t.Fatalf("Logs returned error: %v", err)
+	}
+	if len(logs) == 0 {
+		t.Fatal("expected download logs")
+	}
+}
+
 func TestEndpointsFromConfigIncludesExternalEndpointInfo(t *testing.T) {
 	cfg := config.Config{
 		OllamaURL:      "http://mac-studio.local:11434",
@@ -137,4 +211,13 @@ func TestEndpointsFromConfigIncludesExternalEndpointInfo(t *testing.T) {
 	if endpoints[1].Kind != "anthropic_proxy" || endpoints[1].AuthState != "configured" {
 		t.Fatalf("unexpected cloud endpoint: %#v", endpoints[1])
 	}
+}
+
+func findModelRecord(models []ModelRecord, id string) (ModelRecord, bool) {
+	for _, model := range models {
+		if model.ID == id {
+			return model, true
+		}
+	}
+	return ModelRecord{}, false
 }

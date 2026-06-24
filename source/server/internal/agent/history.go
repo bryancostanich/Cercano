@@ -41,32 +41,45 @@ func BuildLLMHistory(turns []conversation.Turn) []llm.Message {
 }
 
 // repairPairing removes orphaned tool_use / tool_result blocks so the array is
-// always valid to send. tool_use is kept only if some tool_result references
-// its id; tool_result is kept only if some tool_use declares its ref.
+// always valid to send. A tool_use is kept only if a tool_result referencing
+// its id appears in a LATER message; a tool_result is kept only if a tool_use
+// declaring its id appears in an EARLIER message. This positional rule (not a
+// global presence check) guarantees the use-before-result ordering the provider
+// requires, even if stored data is out of order.
 func repairPairing(msgs []llm.Message) []llm.Message {
-	resulted := map[string]bool{} // tool_use ids that have a matching tool_result
-	used := map[string]bool{}     // tool_use ids that were declared
-	for _, m := range msgs {
+	// First occurrence (message index) of each declared tool_use id.
+	useIdx := map[string]int{}
+	for i, m := range msgs {
 		for _, b := range m.Blocks {
-			switch b.Type {
-			case llm.BlockToolUse:
-				used[b.ToolUseID] = true
-			case llm.BlockToolResult:
-				resulted[b.ToolUseRef] = true
+			if b.Type == llm.BlockToolUse {
+				if _, ok := useIdx[b.ToolUseID]; !ok {
+					useIdx[b.ToolUseID] = i
+				}
+			}
+		}
+	}
+	// tool_use ids that have a matching tool_result in a strictly later message.
+	resolvedAfter := map[string]bool{}
+	for i, m := range msgs {
+		for _, b := range m.Blocks {
+			if b.Type == llm.BlockToolResult {
+				if j, ok := useIdx[b.ToolUseRef]; ok && i > j {
+					resolvedAfter[b.ToolUseRef] = true
+				}
 			}
 		}
 	}
 	out := make([]llm.Message, 0, len(msgs))
-	for _, m := range msgs {
+	for i, m := range msgs {
 		kept := make([]llm.Block, 0, len(m.Blocks))
 		for _, b := range m.Blocks {
 			switch b.Type {
 			case llm.BlockToolUse:
-				if !resulted[b.ToolUseID] {
+				if !resolvedAfter[b.ToolUseID] {
 					continue
 				}
 			case llm.BlockToolResult:
-				if !used[b.ToolUseRef] {
+				if j, ok := useIdx[b.ToolUseRef]; !ok || i <= j {
 					continue
 				}
 			}

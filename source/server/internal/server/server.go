@@ -919,6 +919,8 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	}
 
 	s.persistToolLoopTurns(ctx, req, result, injectedLen)
+	s.agent.RecordContextUsage(req.GetConversationId(), s.currentConfig.CloudModel,
+		result.InputTokens, result.OutputTokens)
 
 	return stream.Send(&proto.StreamProcessResponse{
 		Payload: &proto.StreamProcessResponse_FinalResponse{

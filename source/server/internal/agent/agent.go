@@ -270,6 +270,22 @@ func (a *Agent) PersistentStore() conversation.Store {
 	return a.persistent
 }
 
+// RecordContextUsage snapshots a conversation's context-window meter from
+// provider-reported token usage, measured against the given model's window
+// (typically the cloud model that served the turn). Snapshot semantics:
+// reset then set used = inputTokens + outputTokens. No-op when no meter is
+// configured or inputTokens <= 0 (a provider that reports no usage must not
+// clobber a prior good reading).
+func (a *Agent) RecordContextUsage(convID, model string, inputTokens, outputTokens int) {
+	if a == nil || a.meter == nil || convID == "" || inputTokens <= 0 {
+		return
+	}
+	c := a.meter.Get(convID, model)
+	c.SetMax(contextmeter.ModelMax(model))
+	c.Reset()
+	c.AddCount(inputTokens + outputTokens)
+}
+
 // GetContextUsage reports the current token usage for a conversation. Used
 // is the cumulative tokens spent, max is the model's conventional context
 // window. Both zero if no meter is configured or the conversation has no

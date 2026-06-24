@@ -11,6 +11,7 @@ import (
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/pkg/config"
+	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/pkg/proto"
@@ -43,6 +44,7 @@ type scriptedProvider struct {
 	calls   int
 	caps    llm.Capabilities
 	seen    [][]llm.Message // req.Messages captured per StreamChat call
+	usage   [2]int          // [inputTokens, outputTokens] to emit; zero means skip
 }
 
 func (p *scriptedProvider) Name() string                   { return "scripted" }
@@ -58,8 +60,13 @@ func (p *scriptedProvider) StreamChat(ctx context.Context, req llm.ChatRequest) 
 	}
 	blocks := p.scripts[p.calls]
 	p.seen = append(p.seen, req.Messages)
+	evs := blocksToEvents(blocks)
+	if p.usage[0] != 0 {
+		evs[0].InputTokens = p.usage[0]              // EventMessageStart is always events[0]
+		evs[len(evs)-1].OutputTokens = p.usage[1]    // EventMessageStop is always the last
+	}
 	p.calls++
-	return &scriptedStream{events: blocksToEvents(blocks)}, nil
+	return &scriptedStream{events: evs}, nil
 }
 
 type scriptExhaustedErr struct{ call int }
@@ -115,7 +122,11 @@ func newServerWithStore(t *testing.T) (*Server, conversation.Store) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	a := agent.NewAgent(&mockRouter{}, &mockCoordinator{}, agent.WithPersistentStore(store))
+	reg := contextmeter.NewRegistry()
+	a := agent.NewAgent(&mockRouter{}, &mockCoordinator{},
+		agent.WithPersistentStore(store),
+		agent.WithContextMeter(reg, "test-model"),
+	)
 	srv := NewServer(a, nil, nil, nil, nil, nil)
 	srv.SetConfigPersistence("", config.Config{CloudModel: "test-model"})
 	srv.SetToolRegistry(agenttools.DefaultRegistry())
@@ -400,5 +411,35 @@ func TestStreamToolLoop_ReplaysHistoryNoDuplication(t *testing.T) {
 		if turns[i].Content != w {
 			t.Errorf("turn %d = %q, want %q", i, turns[i].Content, w)
 		}
+	}
+}
+
+// TestStreamToolLoop_UpdatesContextMeter verifies that after a tool-loop turn
+// the context meter reflects the provider-reported token counts against the
+// cloud model's window size.
+func TestStreamToolLoop_UpdatesContextMeter(t *testing.T) {
+	srv, _ := newServerWithStore(t)
+	prov := &scriptedProvider{
+		scripts: [][]llm.Block{{{Type: llm.BlockText, Text: "hello"}}},
+		caps:    llm.Capabilities{SupportsTools: true},
+		usage:   [2]int{4321, 99},
+	}
+	srv.SetCloudLLMProvider(prov)
+
+	if err := srv.streamProcessRequestWithToolLoop(
+		&proto.ProcessRequestRequest{Input: "hi", ConversationId: "conv-meter"},
+		&fakeStream{ctx: context.Background()}); err != nil {
+		t.Fatalf("streamProcessRequestWithToolLoop: %v", err)
+	}
+
+	resp, err := srv.GetContextUsage(context.Background(), &proto.GetContextUsageRequest{ConversationId: "conv-meter"})
+	if err != nil {
+		t.Fatalf("GetContextUsage: %v", err)
+	}
+	if resp.TokensUsed != 4321+99 {
+		t.Errorf("TokensUsed = %d, want %d", resp.TokensUsed, 4321+99)
+	}
+	if want := int32(contextmeter.ModelMax("test-model")); resp.ModelMax != want {
+		t.Errorf("ModelMax = %d, want %d (cloud window)", resp.ModelMax, want)
 	}
 }

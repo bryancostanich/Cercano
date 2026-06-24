@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/llm"
@@ -50,5 +52,18 @@ func TestGetConversationTurns_SummariesAndSideEffectFree(t *testing.T) {
 	used, _ := srv.agent.GetContextUsage(ctx, convID)
 	if used != 0 {
 		t.Errorf("GetConversationTurns mutated the meter: used = %d, want 0", used)
+	}
+}
+
+func TestCtTruncate_RuneBoundary(t *testing.T) {
+	// 60 CJK runes = 180 bytes; truncating at 121 bytes splits a rune.
+	// A correct implementation must back up to a rune boundary.
+	s := strings.Repeat("世", 60)
+	got := ctTruncate(s, 121)
+	if !utf8.ValidString(got) {
+		t.Fatalf("ctTruncate produced invalid UTF-8: %q", got)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("expected ellipsis suffix, got %q", got)
 	}
 }

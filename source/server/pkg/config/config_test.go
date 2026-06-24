@@ -258,3 +258,9 @@ func TestDefaults_Retention(t *testing.T) {
 		t.Errorf("retention defaults = %+v, want {90,180,false}", r)
 	}
 }
+
+func TestDefaultsLocusMode(t *testing.T) {
+	if got := Defaults().LocusMode; got != "local_primary" {
+		t.Errorf("Defaults().LocusMode = %q; want local_primary", got)
+	}
+}

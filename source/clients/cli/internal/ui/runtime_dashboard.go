@@ -13,7 +13,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"cercano/source/clients/cli/internal/overlay"
 	"cercano/source/clients/cli/internal/theme"
 	"cercano/source/server/pkg/agentclient"
 )
@@ -27,11 +26,11 @@ const (
 	runtimeActionDelete   = "delete_model"
 	runtimeActionSep      = "\x1f"
 
-	maxDashboardEndpoints = 8
 	maxDashboardModels    = 12
 	maxDashboardInstances = 8
 	maxDashboardLogs      = 10
-	maxCatalogRows        = 6
+	maxCatalogRows        = 12
+	minCatalogRows        = 10
 )
 
 type runtimeDashboardFocus int
@@ -41,20 +40,23 @@ const (
 	runtimeFocusActions
 )
 
-// runtimeDashboard wraps overlay.RowList with runtime status rows and
-// start/stop/restart actions backed by the Cercano server.
+// runtimeDashboard owns the model-management content page. It keeps the global
+// chrome in the root model and renders native dashboard sections in the page
+// body so each section can get its own width and height budget.
 type runtimeDashboard struct {
-	width, height  int
-	palette        theme.Palette
-	styles         theme.Styles
-	agent          *agentclient.Client
-	snapshot       runtimeDashboardSnapshot
-	list           overlay.RowList
-	focus          runtimeDashboardFocus
-	catalogSearch  textinput.Model
-	catalogCursor  int
-	catalogMessage string
-	scrollOffset   int
+	width, height   int
+	palette         theme.Palette
+	styles          theme.Styles
+	agent           *agentclient.Client
+	snapshot        runtimeDashboardSnapshot
+	focus           runtimeDashboardFocus
+	catalogSearch   textinput.Model
+	catalogCursor   int
+	catalogTop      int
+	catalogMessage  string
+	operationCursor int
+	actionMessage   string
+	scrollOffset    int
 }
 
 type runtimeDashboardSnapshot struct {
@@ -74,6 +76,13 @@ type runtimeDashboardAction struct {
 type runtimeDashboardActionMsg struct {
 	Status         string
 	CatalogMessage string
+}
+
+type runtimeDashboardActionRow struct {
+	Label  string
+	Value  string
+	Hint   string
+	Action runtimeDashboardAction
 }
 
 type runtimeDashboardRefreshMsg struct{}
@@ -98,23 +107,7 @@ func newRuntimeDashboard(ag *agentclient.Client, p theme.Palette, s theme.Styles
 		focus:         runtimeFocusCatalog,
 		catalogSearch: search,
 	}
-	hooks := overlay.Hooks{
-		OnSelect: func(row overlay.Row) (string, bool, tea.Cmd) {
-			action, err := parseRuntimeDashboardAction(row.Key)
-			if err != nil {
-				return "action failed: " + err.Error(), false, nil
-			}
-			return runtimeDashboardPendingStatus(action), false, runtimeDashboardActionCmd(ag, action)
-		},
-		OnReload: func() []overlay.Row {
-			dashboard.snapshot = loadRuntimeDashboardSnapshot(ag)
-			return runtimeActionRowsFromSnapshot(dashboard.snapshot)
-		},
-	}
 	dashboard.snapshot = loadRuntimeDashboardSnapshot(ag)
-	list := overlay.New("models and processes", runtimeActionRowsFromSnapshot(dashboard.snapshot), hooks)
-	list.SetStatus("tab focus; enter action rows; esc closes")
-	dashboard.list = list
 	return dashboard, blinkCmd
 }
 
@@ -149,9 +142,7 @@ func (d *runtimeDashboard) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if d.focus == runtimeFocusCatalog {
 		return d.updateCatalog(msg)
 	}
-	next, cmd, closed := d.list.Update(msg, d.styles)
-	d.list = next
-	return cmd, closed
+	return d.updateOperations(msg)
 }
 
 func (d *runtimeDashboard) View() string {
@@ -161,14 +152,14 @@ func (d *runtimeDashboard) View() string {
 
 func (d *runtimeDashboard) fullContent() (string, int) {
 	configBlock := d.renderConfigBlocks()
-	listBlock := d.list.ViewPanel(dashboardPanelWidth(d.width), d.palette, d.styles)
 	contentH := dashboardContentHeight(d.height)
-	catalogRows := d.catalogRowsForHeight(contentH, countLines([]string{configBlock, listBlock}))
-	catalogBlock := d.renderCatalogBlock(catalogRows)
 	parts := []string{
 		configBlock,
-		catalogBlock,
-		listBlock,
+		d.renderRuntimeStatusBlock(),
+		d.renderCatalogBlock(d.catalogRowBudget()),
+		d.renderDownloadsBlock(),
+		d.renderInstalledModelsBlock(),
+		d.renderProcessesBlock(),
 	}
 	logRows := contentH - countLines(parts)
 	parts = append(parts, d.renderLocalServerLogBlock(logRows))
@@ -243,11 +234,12 @@ func (d *runtimeDashboard) renderScrollableContent(full string, height int) stri
 }
 
 func (d *runtimeDashboard) applyActionMsg(msg runtimeDashboardActionMsg) tea.Cmd {
-	d.list.Reload()
-	d.list.SetStatus(msg.Status)
+	d.snapshot = loadRuntimeDashboardSnapshot(d.agent)
+	d.clampOperationCursor()
 	if msg.CatalogMessage != "" {
 		d.catalogMessage = msg.CatalogMessage
 	}
+	d.actionMessage = msg.Status
 	if d.hasActiveDownloads() {
 		return runtimeDashboardRefreshTick()
 	}
@@ -256,7 +248,7 @@ func (d *runtimeDashboard) applyActionMsg(msg runtimeDashboardActionMsg) tea.Cmd
 
 func (d *runtimeDashboard) refreshSnapshot() tea.Cmd {
 	d.snapshot = loadRuntimeDashboardSnapshot(d.agent)
-	d.list.Reload()
+	d.clampOperationCursor()
 	if d.hasActiveDownloads() {
 		return runtimeDashboardRefreshTick()
 	}
@@ -277,12 +269,66 @@ func (d *runtimeDashboard) toggleFocus() {
 		d.focus = runtimeFocusActions
 		d.catalogSearch.Blur()
 		d.catalogMessage = ""
-		d.list.SetStatus("tab search; enter action rows; esc closes")
+		d.clampOperationCursor()
 		return
 	}
 	d.focus = runtimeFocusCatalog
 	_ = d.catalogSearch.Focus()
-	d.list.SetStatus("tab actions")
+}
+
+func (d *runtimeDashboard) updateOperations(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	actions := d.operationActions()
+	switch msg.String() {
+	case "esc":
+		return nil, true
+	case "up":
+		if d.operationCursor > 0 {
+			d.operationCursor--
+		}
+		return nil, false
+	case "down":
+		if d.operationCursor < len(actions)-1 {
+			d.operationCursor++
+		}
+		return nil, false
+	case "home":
+		d.operationCursor = 0
+		return nil, false
+	case "end":
+		if len(actions) > 0 {
+			d.operationCursor = len(actions) - 1
+		}
+		return nil, false
+	case "enter":
+		if len(actions) == 0 {
+			d.actionMessage = "no action selected"
+			return nil, false
+		}
+		d.operationCursor = clampIndex(d.operationCursor, len(actions))
+		action := actions[d.operationCursor]
+		d.actionMessage = runtimeDashboardPendingStatus(action)
+		return runtimeDashboardActionCmd(d.agent, action), false
+	}
+	return nil, false
+}
+
+func (d *runtimeDashboard) operationActions() []runtimeDashboardAction {
+	var actions []runtimeDashboardAction
+	for _, row := range d.operationRows() {
+		if row.Action.Kind != "" {
+			actions = append(actions, row.Action)
+		}
+	}
+	return actions
+}
+
+func (d *runtimeDashboard) clampOperationCursor() {
+	actions := d.operationActions()
+	if len(actions) == 0 {
+		d.operationCursor = 0
+		return
+	}
+	d.operationCursor = clampIndex(d.operationCursor, len(actions))
 }
 
 func (d *runtimeDashboard) updateCatalog(msg tea.KeyPressMsg) (tea.Cmd, bool) {
@@ -299,21 +345,25 @@ func (d *runtimeDashboard) updateCatalog(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		if d.catalogCursor > 0 {
 			d.catalogCursor--
 		}
+		d.keepCatalogCursorVisible(d.catalogRowBudget(), len(filteredCatalogModels(runtimeStatusModels(d.snapshot.Status), d.catalogSearch.Value())))
 		return nil, false
 	case "down":
 		models := filteredCatalogModels(runtimeStatusModels(d.snapshot.Status), d.catalogSearch.Value())
 		if d.catalogCursor < len(models)-1 {
 			d.catalogCursor++
 		}
+		d.keepCatalogCursorVisible(d.catalogRowBudget(), len(models))
 		return nil, false
 	case "home":
 		d.catalogCursor = 0
+		d.catalogTop = 0
 		return nil, false
 	case "end":
 		models := filteredCatalogModels(runtimeStatusModels(d.snapshot.Status), d.catalogSearch.Value())
 		if len(models) > 0 {
 			d.catalogCursor = len(models) - 1
 		}
+		d.keepCatalogCursorVisible(d.catalogRowBudget(), len(models))
 		return nil, false
 	case "enter":
 		models := filteredCatalogModels(runtimeStatusModels(d.snapshot.Status), d.catalogSearch.Value())
@@ -341,16 +391,10 @@ func (d *runtimeDashboard) updateCatalog(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	d.catalogSearch, cmd = d.catalogSearch.Update(msg)
 	if d.catalogSearch.Value() != prev {
 		d.catalogCursor = 0
+		d.catalogTop = 0
 		d.catalogMessage = ""
 	}
 	return cmd, false
-}
-
-func buildRuntimeRows(ag *agentclient.Client) []overlay.Row {
-	if ag == nil {
-		return []overlay.Row{{Label: "runtime", Value: "agent client unavailable", ReadOnly: true}}
-	}
-	return runtimeRowsFromSnapshot(loadRuntimeDashboardSnapshot(ag))
 }
 
 func loadRuntimeDashboardSnapshot(ag *agentclient.Client) runtimeDashboardSnapshot {
@@ -373,90 +417,6 @@ func loadRuntimeDashboardSnapshot(ag *agentclient.Client) runtimeDashboardSnapsh
 	return snap
 }
 
-func runtimeRowsFromSnapshot(s runtimeDashboardSnapshot) []overlay.Row {
-	rows := make([]overlay.Row, 0, 48)
-	appendRuntimeConfigRows(&rows, s)
-
-	if s.StatusErr != nil {
-		rows = append(rows, overlay.Row{
-			Label:    "runtime status",
-			Value:    s.StatusErr.Error(),
-			Hint:     "error",
-			ReadOnly: true,
-		})
-		return rows
-	}
-	status := s.Status
-	if status == nil {
-		status = &agentclient.RuntimeStatus{}
-	}
-
-	appendRuntimeEndpointRows(&rows, status.Endpoints)
-	appendRuntimeModelRows(&rows, status.Models, status.Instances)
-	appendRuntimeDownloadRows(&rows, status.Models)
-	appendRuntimeInstanceRows(&rows, status.Instances)
-	appendRuntimeLogRows(&rows, status.Logs)
-
-	if len(rows) == 0 {
-		rows = append(rows, overlay.Row{Label: "runtime", Value: "no runtime data", ReadOnly: true})
-	}
-	return rows
-}
-
-func runtimeActionRowsFromSnapshot(s runtimeDashboardSnapshot) []overlay.Row {
-	rows := make([]overlay.Row, 0, 32)
-	if s.StatusErr != nil {
-		rows = append(rows, overlay.Row{
-			Label:    "runtime status",
-			Value:    s.StatusErr.Error(),
-			Hint:     "error",
-			ReadOnly: true,
-		})
-		return rows
-	}
-	status := s.Status
-	if status == nil {
-		status = &agentclient.RuntimeStatus{}
-	}
-	appendRuntimeModelRows(&rows, status.Models, status.Instances)
-	appendRuntimeDownloadRows(&rows, status.Models)
-	appendRuntimeInstanceRows(&rows, status.Instances)
-	if len(rows) == 0 {
-		rows = append(rows, overlay.Row{Label: "runtime", Value: "no runtime data", ReadOnly: true})
-	}
-	return rows
-}
-
-func appendRuntimeConfigRows(rows *[]overlay.Row, s runtimeDashboardSnapshot) {
-	if s.ConfigErr != nil {
-		*rows = append(*rows, overlay.Row{
-			Label:    "config",
-			Value:    s.ConfigErr.Error(),
-			Hint:     "error",
-			ReadOnly: true,
-		})
-		return
-	}
-	if s.Config == nil {
-		return
-	}
-	cfg := s.Config
-	*rows = append(*rows,
-		overlay.Row{Label: "local runtime", Value: cfg.LocalRuntime, Hint: "active", ReadOnly: true},
-		overlay.Row{Label: "local model", Value: cfg.LocalModel, ReadOnly: true},
-		overlay.Row{Label: "embedding model", Value: cfg.EmbeddingModel, ReadOnly: true},
-	)
-	if cfg.CloudProvider != "" || cfg.CloudModel != "" || cfg.CloudBaseURL != "" {
-		parts := nonEmptyParts(cfg.CloudProvider, cfg.CloudModel, cfg.CloudBaseURL)
-		*rows = append(*rows, overlay.Row{
-			Label:    "cloud endpoint",
-			Value:    strings.Join(parts, " | "),
-			Hint:     "configured",
-			ReadOnly: true,
-		})
-	}
-}
-
 type runtimeDashboardField struct {
 	Label string
 	Value string
@@ -471,6 +431,67 @@ func (d *runtimeDashboard) renderConfigBlocks() string {
 		renderRuntimeDashboardBlock("local config", localConfigFields(d.snapshot), leftW, d.palette, d.styles),
 		renderRuntimeDashboardBlock("cloud / external", cloudConfigFields(d.snapshot), rightW, d.palette, d.styles),
 	)
+}
+
+func (d *runtimeDashboard) renderRuntimeStatusBlock() string {
+	totalW := dashboardPanelWidth(d.width)
+	contentW := dashboardBlockContentWidth(totalW)
+	status := d.snapshot.Status
+	cfg := d.snapshot.Config
+	runtimeName := "llama_server"
+	if cfg != nil {
+		runtimeName = firstNonEmpty(cfg.LocalRuntime, runtimeName)
+	}
+	var running []agentclient.RuntimeInstance
+	for _, instance := range runtimeStatusInstances(status) {
+		if instance.Runtime == runtimeName || instance.Runtime == "llama_server" {
+			running = append(running, instance)
+		}
+	}
+	serverState := "not running"
+	endpoint := ""
+	lastError := ""
+	if len(running) > 0 {
+		first := running[0]
+		parts := nonEmptyParts(first.State, shortModelName(first.ModelID))
+		if first.PID > 0 {
+			parts = append(parts, fmt.Sprintf("pid:%d", first.PID))
+		}
+		serverState = strings.Join(parts, " | ")
+		endpoint = first.Endpoint
+		lastError = first.LastError
+	}
+	models := runtimeStatusModels(status)
+	fields := []runtimeDashboardField{
+		{Label: "server", Value: serverState},
+		{Label: "endpoint", Value: firstNonEmpty(endpoint, "none")},
+		{Label: "installed", Value: countLabel(len(downloadedRuntimeModels(models)), "model")},
+		{Label: "downloads", Value: countLabel(len(downloadJobModels(models)), "job")},
+	}
+	if lastError != "" {
+		fields = append(fields, runtimeDashboardField{Label: "last error", Value: lastError})
+	}
+	if d.snapshot.StatusErr != nil {
+		fields = []runtimeDashboardField{{Label: "status", Value: d.snapshot.StatusErr.Error(), Hint: "error"}}
+	}
+	return renderRuntimeDashboardTextBlock("runtime status", []string{renderRuntimeStatusLine(fields, contentW, d.styles)}, totalW, 0, d.palette, d.styles)
+}
+
+func renderRuntimeStatusLine(fields []runtimeDashboardField, width int, styles theme.Styles) string {
+	parts := make([]string, 0, len(fields))
+	for _, field := range fields {
+		value := firstNonEmpty(field.Value, "(unset)")
+		part := styles.Muted.Render(field.Label+": ") + styles.Primary.Render(value)
+		if field.Hint != "" {
+			part += styles.BorderDim.Render(" " + field.Hint)
+		}
+		parts = append(parts, part)
+	}
+	line := strings.Join(parts, styles.BorderDim.Render(" │ "))
+	if lipgloss.Width(line) > width {
+		line = ansi.Truncate(line, width, "")
+	}
+	return line
 }
 
 func (d *runtimeDashboard) renderLocalServerLogBlock(height int) string {
@@ -507,6 +528,7 @@ func (d *runtimeDashboard) renderCatalogBlock(rowLimit int) string {
 	} else {
 		d.catalogCursor = 0
 	}
+	d.keepCatalogCursorVisible(rowLimit, len(models))
 
 	listW := contentW / 2
 	if listW < 34 {
@@ -540,11 +562,12 @@ func (d *runtimeDashboard) renderCatalogBlock(rowLimit int) string {
 	details := catalogDetailLines(selected, detailW, d.styles)
 
 	lines := []string{searchLine}
+	start := d.catalogTop
 	for i := 0; i < rowLimit; i++ {
 		left := ""
-		if i < len(models) {
-			absolute := i
-			left = d.renderCatalogModelRow(models[i], absolute == d.catalogCursor, listW)
+		idx := start + i
+		if idx < len(models) {
+			left = d.renderCatalogModelRow(models[idx], idx == d.catalogCursor, listW)
 		} else if i == 0 && len(models) == 0 {
 			left = d.styles.Dim.Render(catalogEmptyMessage(runtimeStatusModels(d.snapshot.Status), d.catalogSearch.Value()))
 		}
@@ -561,10 +584,47 @@ func (d *runtimeDashboard) renderCatalogBlock(rowLimit int) string {
 	if len(models) > rowLimit && d.catalogMessage == "" {
 		remaining := contentW - lipgloss.Width(searchLine) - 2
 		if remaining > 10 {
-			lines[0] = searchLine + d.styles.BorderDim.Render(fmt.Sprintf("  %d more", len(models)-rowLimit))
+			end := len(models)
+			if start+rowLimit < end {
+				end = start + rowLimit
+			}
+			lines[0] = searchLine + d.styles.BorderDim.Render(fmt.Sprintf("  %d-%d/%d", start+1, end, len(models)))
 		}
 	}
 	return renderRuntimeDashboardTextBlock("download catalog", lines, totalW, 0, d.palette, d.styles)
+}
+
+func (d *runtimeDashboard) catalogRowBudget() int {
+	contentH := dashboardContentHeight(d.height)
+	rows := contentH / 2
+	if rows < minCatalogRows {
+		rows = minCatalogRows
+	}
+	if rows > maxCatalogRows {
+		rows = maxCatalogRows
+	}
+	return rows
+}
+
+func (d *runtimeDashboard) keepCatalogCursorVisible(rowLimit, total int) {
+	if total <= 0 {
+		d.catalogTop = 0
+		return
+	}
+	if rowLimit < 1 {
+		rowLimit = 1
+	}
+	if rowLimit > total {
+		rowLimit = total
+	}
+	d.catalogCursor = clampIndex(d.catalogCursor, total)
+	if d.catalogCursor < d.catalogTop {
+		d.catalogTop = d.catalogCursor
+	}
+	if d.catalogCursor >= d.catalogTop+rowLimit {
+		d.catalogTop = d.catalogCursor - rowLimit + 1
+	}
+	d.catalogTop = clampInt(d.catalogTop, 0, maxInt(0, total-rowLimit))
 }
 
 func (d *runtimeDashboard) renderCatalogModelRow(model agentclient.RuntimeModel, selected bool, width int) string {
@@ -776,6 +836,13 @@ func runtimeStatusModels(status *agentclient.RuntimeStatus) []agentclient.Runtim
 	return status.Models
 }
 
+func runtimeStatusInstances(status *agentclient.RuntimeStatus) []agentclient.RuntimeInstance {
+	if status == nil {
+		return nil
+	}
+	return status.Instances
+}
+
 func filteredCatalogModels(models []agentclient.RuntimeModel, query string) []agentclient.RuntimeModel {
 	query = strings.ToLower(strings.TrimSpace(query))
 	out := make([]agentclient.RuntimeModel, 0, len(models))
@@ -797,7 +864,7 @@ func isCatalogDownloadModel(model agentclient.RuntimeModel) bool {
 		return true
 	}
 	switch state {
-	case "not_downloaded", "downloading", "failed":
+	case "not_downloaded", "downloading", "failed", "cancelled":
 		return true
 	default:
 		return false
@@ -910,6 +977,225 @@ func renderRuntimeLogLine(entry agentclient.RuntimeLogEntry, width int, styles t
 	return line
 }
 
+func (d *runtimeDashboard) renderDownloadsBlock() string {
+	rows := d.downloadRows()
+	if len(rows) == 0 {
+		rows = []runtimeDashboardActionRow{{Label: "download", Value: "none active"}}
+	}
+	return d.renderActionBlock("downloads", rows)
+}
+
+func (d *runtimeDashboard) renderInstalledModelsBlock() string {
+	rows := d.installedModelRows()
+	if len(rows) == 0 {
+		rows = []runtimeDashboardActionRow{{Label: "model", Value: "no downloaded GGUF models found"}}
+	}
+	return d.renderActionBlock("installed models", rows)
+}
+
+func (d *runtimeDashboard) renderProcessesBlock() string {
+	rows := d.processRows()
+	if len(rows) == 0 {
+		rows = []runtimeDashboardActionRow{{Label: "process", Value: "none running"}}
+	}
+	return d.renderActionBlock("running processes", rows)
+}
+
+func (d *runtimeDashboard) renderActionBlock(title string, rows []runtimeDashboardActionRow) string {
+	totalW := dashboardPanelWidth(d.width)
+	contentW := dashboardBlockContentWidth(totalW)
+	lines := make([]string, 0, len(rows)+1)
+	if d.focus == runtimeFocusActions && d.actionMessage != "" {
+		lines = append(lines, d.styles.BorderDim.Render(truncatePlain(d.actionMessage, contentW)))
+	}
+	actionOrdinal := 0
+	for _, row := range rows {
+		selected := false
+		if row.Action.Kind != "" {
+			selected = d.focus == runtimeFocusActions && actionOrdinal == d.operationCursor
+			actionOrdinal++
+		}
+		lines = append(lines, d.renderActionRow(row, selected, contentW))
+	}
+	return renderRuntimeDashboardTextBlock(title, lines, totalW, 0, d.palette, d.styles)
+}
+
+func (d *runtimeDashboard) renderActionRow(row runtimeDashboardActionRow, selected bool, width int) string {
+	marker := "  "
+	if row.Action.Kind != "" {
+		marker = "  "
+		if selected {
+			marker = d.styles.Accent.Render("▶ ")
+		}
+	}
+	bodyW := width - lipgloss.Width(marker)
+	labelW, valueW, hintW := actionColumnWidths(bodyW)
+	label := truncatePlain(row.Label, labelW)
+	value := truncatePlain(row.Value, valueW)
+	hint := truncatePlain(row.Hint, hintW)
+	labelStyle := d.styles.Muted
+	valueStyle := d.styles.Primary
+	if row.Action.Kind != "" {
+		labelStyle = d.styles.Primary
+		if selected {
+			labelStyle = d.styles.Bright
+			valueStyle = d.styles.Bright
+		}
+	}
+	line := marker +
+		labelStyle.Render(padRightPlain(label, labelW)) +
+		d.styles.BorderDim.Render(" │ ") +
+		valueStyle.Render(padRightPlain(value, valueW))
+	if hintW > 0 {
+		line += d.styles.BorderDim.Render(" │ " + padRightPlain(hint, hintW))
+	}
+	return ansi.Truncate(line, width, "")
+}
+
+func actionColumnWidths(width int) (labelW, valueW, hintW int) {
+	if width < 24 {
+		return maxInt(8, width/2), maxInt(8, width-width/2-3), 0
+	}
+	if width < 52 {
+		labelW = clampInt(width/3, 10, 18)
+		valueW = maxInt(8, width-labelW-3)
+		return labelW, valueW, 0
+	}
+	labelW = clampInt(width*28/100, 18, 34)
+	hintW = clampInt(width*22/100, 14, 30)
+	valueW = width - labelW - hintW - 6
+	if valueW < 14 {
+		hintW = 0
+		valueW = width - labelW - 3
+	}
+	return labelW, valueW, hintW
+}
+
+func (d *runtimeDashboard) operationRows() []runtimeDashboardActionRow {
+	var rows []runtimeDashboardActionRow
+	rows = append(rows, d.downloadRows()...)
+	rows = append(rows, d.installedModelRows()...)
+	rows = append(rows, d.processRows()...)
+	return rows
+}
+
+func (d *runtimeDashboard) downloadRows() []runtimeDashboardActionRow {
+	models := downloadJobModels(runtimeStatusModels(d.snapshot.Status))
+	rows := make([]runtimeDashboardActionRow, 0, len(models)*3)
+	for i, model := range models {
+		if i >= maxDashboardModels {
+			rows = append(rows, runtimeDashboardActionRow{Label: "downloads", Value: fmt.Sprintf("%d more hidden", len(models)-i)})
+			break
+		}
+		rows = append(rows, runtimeDashboardActionRow{
+			Label: firstNonEmpty(model.DisplayName, shortModelName(model.ID), model.ID),
+			Value: downloadActionValue(model),
+			Hint:  downloadActionHint(model),
+		})
+		switch strings.ToLower(model.DownloadState) {
+		case "downloading":
+			rows = append(rows, runtimeDashboardActionRow{
+				Label:  "cancel",
+				Value:  shortModelName(model.ID),
+				Hint:   "enter",
+				Action: runtimeDashboardAction{Kind: runtimeActionCancel, Runtime: model.Runtime, ModelID: model.ID},
+			})
+		case "failed", "cancelled":
+			rows = append(rows, runtimeDashboardActionRow{
+				Label:  "retry",
+				Value:  shortModelName(model.ID),
+				Hint:   "enter",
+				Action: runtimeDashboardAction{Kind: runtimeActionDownload, Runtime: model.Runtime, ModelID: model.ID},
+			})
+			if canDeleteRuntimeModel(model) {
+				rows = append(rows, runtimeDashboardActionRow{
+					Label:  "delete",
+					Value:  shortModelName(model.ID),
+					Hint:   "remove partial file",
+					Action: runtimeDashboardAction{Kind: runtimeActionDelete, Runtime: model.Runtime, ModelID: model.ID},
+				})
+			}
+		}
+	}
+	return rows
+}
+
+func (d *runtimeDashboard) installedModelRows() []runtimeDashboardActionRow {
+	models := downloadedRuntimeModels(runtimeStatusModels(d.snapshot.Status))
+	active := activeInstancesByModel(runtimeStatusInstances(d.snapshot.Status))
+	rows := make([]runtimeDashboardActionRow, 0, len(models)*3)
+	for i, model := range models {
+		if i >= maxDashboardModels {
+			rows = append(rows, runtimeDashboardActionRow{Label: "models", Value: fmt.Sprintf("%d more hidden", len(models)-i)})
+			break
+		}
+		running := active[runtimeModelKey(model.Runtime, model.ID)]
+		rows = append(rows, runtimeDashboardActionRow{
+			Label: firstNonEmpty(model.DisplayName, shortModelName(model.ID), model.ID),
+			Value: modelValue(model, running),
+			Hint:  modelHint(model, running),
+		})
+		if canStartRuntimeModel(model, running) {
+			rows = append(rows, runtimeDashboardActionRow{
+				Label:  "start",
+				Value:  shortModelName(model.ID),
+				Hint:   model.Runtime,
+				Action: runtimeDashboardAction{Kind: runtimeActionStart, Runtime: model.Runtime, ModelID: model.ID},
+			})
+		}
+		if canDeleteRuntimeModel(model) {
+			rows = append(rows, runtimeDashboardActionRow{
+				Label:  "delete",
+				Value:  shortModelName(model.ID),
+				Hint:   "remove local file",
+				Action: runtimeDashboardAction{Kind: runtimeActionDelete, Runtime: model.Runtime, ModelID: model.ID},
+			})
+		}
+	}
+	return rows
+}
+
+func (d *runtimeDashboard) processRows() []runtimeDashboardActionRow {
+	instances := runtimeStatusInstances(d.snapshot.Status)
+	rows := make([]runtimeDashboardActionRow, 0, len(instances)*3)
+	for i, instance := range instances {
+		if i >= maxDashboardInstances {
+			rows = append(rows, runtimeDashboardActionRow{Label: "processes", Value: fmt.Sprintf("%d more hidden", len(instances)-i)})
+			break
+		}
+		rows = append(rows, runtimeDashboardActionRow{
+			Label: shortModelName(instance.ModelID),
+			Value: instanceValue(instance),
+			Hint:  instanceHint(instance),
+		})
+		if instance.ID == "" {
+			continue
+		}
+		if instance.State != "stopped" {
+			rows = append(rows, runtimeDashboardActionRow{
+				Label:  "stop",
+				Value:  shortModelName(instance.ModelID),
+				Hint:   instance.Runtime,
+				Action: runtimeDashboardAction{Kind: runtimeActionStop, InstanceID: instance.ID},
+			})
+		}
+		if instance.Runtime != "" && instance.ModelID != "" {
+			rows = append(rows, runtimeDashboardActionRow{
+				Label: "restart",
+				Value: shortModelName(instance.ModelID),
+				Hint:  instance.Runtime,
+				Action: runtimeDashboardAction{
+					Kind:       runtimeActionRestart,
+					Runtime:    instance.Runtime,
+					ModelID:    instance.ModelID,
+					InstanceID: instance.ID,
+				},
+			})
+		}
+	}
+	return rows
+}
+
 func dashboardPanelWidth(width int) int {
 	totalW := width - 2
 	if totalW < 40 {
@@ -928,19 +1214,6 @@ func dashboardContentHeight(height int) int {
 	return contentH
 }
 
-func (d *runtimeDashboard) catalogRowsForHeight(contentHeight, fixedWithoutCatalog int) int {
-	const minLogBlockHeight = 4
-	// Catalog block height = title + search line + N rows + border.
-	rows := contentHeight - fixedWithoutCatalog - minLogBlockHeight - 4
-	if rows < 1 {
-		return 1
-	}
-	if rows > maxCatalogRows {
-		return maxCatalogRows
-	}
-	return rows
-}
-
 func dashboardConfigBlockWidths(totalW int) (int, int) {
 	leftW := totalW / 2
 	return leftW, totalW - leftW
@@ -952,195 +1225,6 @@ func dashboardBlockContentWidth(totalW int) int {
 		contentW = 12
 	}
 	return contentW
-}
-
-func appendRuntimeEndpointRows(rows *[]overlay.Row, endpoints []agentclient.RuntimeEndpoint) {
-	*rows = append(*rows, overlay.Row{
-		Label:    "external endpoints",
-		Value:    countLabel(len(endpoints), "endpoint"),
-		ReadOnly: true,
-	})
-	if len(endpoints) == 0 {
-		*rows = append(*rows, overlay.Row{Label: "endpoint", Value: "none configured", ReadOnly: true})
-		return
-	}
-	for i, endpoint := range endpoints {
-		if i >= maxDashboardEndpoints {
-			appendMoreRow(rows, "endpoints", len(endpoints)-i)
-			break
-		}
-		*rows = append(*rows, overlay.Row{
-			Label:    endpointLabel(endpoint),
-			Value:    endpointValue(endpoint),
-			Hint:     endpointHint(endpoint),
-			ReadOnly: true,
-		})
-	}
-}
-
-func appendRuntimeModelRows(rows *[]overlay.Row, models []agentclient.RuntimeModel, instances []agentclient.RuntimeInstance) {
-	models = downloadedRuntimeModels(models)
-	*rows = append(*rows, overlay.Row{
-		Label:    "downloaded models",
-		Value:    countLabel(len(models), "model"),
-		ReadOnly: true,
-	})
-	if len(models) == 0 {
-		*rows = append(*rows, overlay.Row{Label: "model", Value: "no downloaded GGUF models found", ReadOnly: true})
-		return
-	}
-	active := activeInstancesByModel(instances)
-	for i, model := range models {
-		if i >= maxDashboardModels {
-			appendMoreRow(rows, "models", len(models)-i)
-			break
-		}
-		running := active[runtimeModelKey(model.Runtime, model.ID)]
-		hint := modelHint(model, running)
-		*rows = append(*rows, overlay.Row{
-			Label:    modelLabel(model),
-			Value:    modelValue(model, running),
-			Hint:     hint,
-			ReadOnly: true,
-		})
-		if canStartRuntimeModel(model, running) {
-			*rows = append(*rows, overlay.Row{
-				Key:   encodeRuntimeDashboardAction(runtimeDashboardAction{Kind: runtimeActionStart, Runtime: model.Runtime, ModelID: model.ID}),
-				Label: "start " + shortModelName(model.ID),
-				Value: model.Runtime,
-				Hint:  "enter",
-			})
-		}
-		if canDeleteRuntimeModel(model) {
-			*rows = append(*rows, overlay.Row{
-				Key:   encodeRuntimeDashboardAction(runtimeDashboardAction{Kind: runtimeActionDelete, Runtime: model.Runtime, ModelID: model.ID}),
-				Label: "delete " + shortModelName(model.ID),
-				Value: "remove local file",
-				Hint:  "enter",
-			})
-		}
-	}
-}
-
-func appendRuntimeDownloadRows(rows *[]overlay.Row, models []agentclient.RuntimeModel) {
-	downloads := downloadJobModels(models)
-	*rows = append(*rows, overlay.Row{
-		Label:    "downloads",
-		Value:    countLabel(len(downloads), "job"),
-		ReadOnly: true,
-	})
-	if len(downloads) == 0 {
-		*rows = append(*rows, overlay.Row{Label: "download", Value: "none active", ReadOnly: true})
-		return
-	}
-	for i, model := range downloads {
-		if i >= maxDashboardModels {
-			appendMoreRow(rows, "downloads", len(downloads)-i)
-			break
-		}
-		*rows = append(*rows, overlay.Row{
-			Label:    "download " + firstNonEmpty(model.DisplayName, shortModelName(model.ID), model.ID),
-			Value:    downloadActionValue(model),
-			Hint:     downloadActionHint(model),
-			ReadOnly: true,
-		})
-		switch strings.ToLower(model.DownloadState) {
-		case "downloading":
-			*rows = append(*rows, overlay.Row{
-				Key:   encodeRuntimeDashboardAction(runtimeDashboardAction{Kind: runtimeActionCancel, Runtime: model.Runtime, ModelID: model.ID}),
-				Label: "cancel " + shortModelName(model.ID),
-				Value: downloadStatusText(model),
-				Hint:  "enter",
-			})
-		case "failed", "cancelled":
-			*rows = append(*rows, overlay.Row{
-				Key:   encodeRuntimeDashboardAction(runtimeDashboardAction{Kind: runtimeActionDownload, Runtime: model.Runtime, ModelID: model.ID}),
-				Label: "retry " + shortModelName(model.ID),
-				Value: model.Runtime,
-				Hint:  "enter",
-			})
-			if canDeleteRuntimeModel(model) {
-				*rows = append(*rows, overlay.Row{
-					Key:   encodeRuntimeDashboardAction(runtimeDashboardAction{Kind: runtimeActionDelete, Runtime: model.Runtime, ModelID: model.ID}),
-					Label: "delete " + shortModelName(model.ID),
-					Value: "remove partial file",
-					Hint:  "enter",
-				})
-			}
-		}
-	}
-}
-
-func appendRuntimeInstanceRows(rows *[]overlay.Row, instances []agentclient.RuntimeInstance) {
-	*rows = append(*rows, overlay.Row{
-		Label:    "runtime processes",
-		Value:    countLabel(len(instances), "process"),
-		ReadOnly: true,
-	})
-	if len(instances) == 0 {
-		*rows = append(*rows, overlay.Row{Label: "process", Value: "none running", ReadOnly: true})
-		return
-	}
-	for i, instance := range instances {
-		if i >= maxDashboardInstances {
-			appendMoreRow(rows, "processes", len(instances)-i)
-			break
-		}
-		*rows = append(*rows, overlay.Row{
-			Label:    instanceLabel(instance),
-			Value:    instanceValue(instance),
-			Hint:     instanceHint(instance),
-			ReadOnly: true,
-		})
-		if instance.ID == "" {
-			continue
-		}
-		if instance.State != "stopped" {
-			*rows = append(*rows, overlay.Row{
-				Key:   encodeRuntimeDashboardAction(runtimeDashboardAction{Kind: runtimeActionStop, InstanceID: instance.ID}),
-				Label: "stop " + shortModelName(instance.ModelID),
-				Value: instance.Runtime,
-				Hint:  "enter",
-			})
-		}
-		if instance.Runtime != "" && instance.ModelID != "" {
-			*rows = append(*rows, overlay.Row{
-				Key: encodeRuntimeDashboardAction(runtimeDashboardAction{
-					Kind:       runtimeActionRestart,
-					Runtime:    instance.Runtime,
-					ModelID:    instance.ModelID,
-					InstanceID: instance.ID,
-				}),
-				Label: "restart " + shortModelName(instance.ModelID),
-				Value: instance.Runtime,
-				Hint:  "enter",
-			})
-		}
-	}
-}
-
-func appendRuntimeLogRows(rows *[]overlay.Row, logs []agentclient.RuntimeLogEntry) {
-	*rows = append(*rows, overlay.Row{
-		Label:    "recent logs",
-		Value:    countLabel(len(logs), "entry"),
-		ReadOnly: true,
-	})
-	if len(logs) == 0 {
-		*rows = append(*rows, overlay.Row{Label: "log", Value: "no runtime logs yet", ReadOnly: true})
-		return
-	}
-	start := 0
-	if len(logs) > maxDashboardLogs {
-		start = len(logs) - maxDashboardLogs
-	}
-	for _, entry := range logs[start:] {
-		*rows = append(*rows, overlay.Row{
-			Label:    logLabel(entry),
-			Value:    shorten(entry.Message, 96),
-			Hint:     logHint(entry),
-			ReadOnly: true,
-		})
-	}
 }
 
 func runtimeDashboardActionCmd(ag *agentclient.Client, action runtimeDashboardAction) tea.Cmd {
@@ -1483,40 +1567,6 @@ func runtimeModelKey(runtimeName, modelID string) string {
 	return runtimeName + "\x00" + modelID
 }
 
-func endpointLabel(endpoint agentclient.RuntimeEndpoint) string {
-	name := firstNonEmpty(endpoint.DisplayName, endpoint.ID, endpoint.Kind, "endpoint")
-	return "endpoint " + name
-}
-
-func endpointValue(endpoint agentclient.RuntimeEndpoint) string {
-	parts := nonEmptyParts(endpoint.State, endpoint.Kind, endpoint.Scope, endpoint.BaseURL)
-	if endpoint.LatencyMS > 0 {
-		parts = append(parts, fmt.Sprintf("%dms", endpoint.LatencyMS))
-	}
-	if endpoint.LastError != "" {
-		parts = append(parts, "error: "+shorten(endpoint.LastError, 48))
-	}
-	return strings.Join(parts, " | ")
-}
-
-func endpointHint(endpoint agentclient.RuntimeEndpoint) string {
-	parts := make([]string, 0, 3)
-	if endpoint.AuthState != "" {
-		parts = append(parts, "auth:"+endpoint.AuthState)
-	}
-	if len(endpoint.ActiveRoles) > 0 {
-		parts = append(parts, strings.Join(endpoint.ActiveRoles, ","))
-	}
-	if len(endpoint.Models) > 0 {
-		parts = append(parts, "models:"+shorten(strings.Join(endpoint.Models, ","), 36))
-	}
-	return strings.Join(parts, " | ")
-}
-
-func modelLabel(model agentclient.RuntimeModel) string {
-	return "model " + firstNonEmpty(model.DisplayName, shortModelName(model.ID), model.ID, "unknown")
-}
-
 func modelValue(model agentclient.RuntimeModel, running agentclient.RuntimeInstance) string {
 	parts := nonEmptyParts(model.Runtime, model.DownloadState, model.RuntimeState, model.Family, model.Quantization, formatBytes(model.SizeBytes))
 	if running.ID != "" {
@@ -1538,10 +1588,6 @@ func modelHint(model agentclient.RuntimeModel, running agentclient.RuntimeInstan
 		parts = append(parts, "pid:"+fmt.Sprint(running.PID))
 	}
 	return strings.Join(parts, " | ")
-}
-
-func instanceLabel(instance agentclient.RuntimeInstance) string {
-	return "process " + shortModelName(instance.ModelID)
 }
 
 func instanceValue(instance agentclient.RuntimeInstance) string {
@@ -1572,18 +1618,6 @@ func instanceHint(instance agentclient.RuntimeInstance) string {
 	return strings.Join(parts, " | ")
 }
 
-func logLabel(entry agentclient.RuntimeLogEntry) string {
-	source := firstNonEmpty(entry.Source, "log")
-	if entry.Timestamp.IsZero() {
-		return source
-	}
-	return entry.Timestamp.Format("15:04:05") + " " + source
-}
-
-func logHint(entry agentclient.RuntimeLogEntry) string {
-	return strings.Join(nonEmptyParts(entry.Level, entry.RuntimeID, shortModelName(entry.ModelID)), " | ")
-}
-
 func runtimeCapabilitiesHint(chat, embed, tools bool) string {
 	var caps []string
 	if chat {
@@ -1596,14 +1630,6 @@ func runtimeCapabilitiesHint(chat, embed, tools bool) string {
 		caps = append(caps, "tools")
 	}
 	return strings.Join(caps, ",")
-}
-
-func appendMoreRow(rows *[]overlay.Row, label string, count int) {
-	*rows = append(*rows, overlay.Row{
-		Label:    label,
-		Value:    fmt.Sprintf("%d more hidden", count),
-		ReadOnly: true,
-	})
 }
 
 func countLabel(count int, singular string) string {

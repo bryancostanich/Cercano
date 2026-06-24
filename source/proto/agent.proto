@@ -95,7 +95,16 @@ message StreamProcessResponse {
     ToolExecStart     tool_exec_start = 6;
     ToolExecComplete  tool_exec_complete = 7;
     PermissionRequired permission_required = 8;
+    RouteSelected     route_selected = 9;
   }
+}
+
+// RouteSelected announces which engine is handling the turn, emitted once the
+// route is chosen (and again on any mid-turn switch). Lets clients show a live
+// "<model> (local|cloud)" badge.
+message RouteSelected {
+  string model = 1;
+  bool is_cloud = 2;
 }
 
 // Progress update during a long-running task.

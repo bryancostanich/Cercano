@@ -68,6 +68,10 @@ type Request struct {
 	ConversationID string
 	DirectLocal    bool   // Skip SmartRouter, go directly to local provider
 	ModelOverride  string // Use this model instead of the configured default (per-request)
+	// OnRoute, if set, is called once the provider for this turn is chosen, with
+	// the model name and whether it's a cloud engine. Lets the streaming server
+	// announce the route to clients for a live engine badge. Nil-safe.
+	OnRoute func(model string, isCloud bool)
 }
 
 // Response represents a response from an AI model.

@@ -706,6 +706,14 @@ func (s *Server) StreamProcessRequest(req *proto.ProcessRequestRequest, stream p
 	}
 
 	agentReq := s.mapRequest(req)
+	// Announce the routed engine so the client can show a live engine badge.
+	agentReq.OnRoute = func(model string, isCloud bool) {
+		stream.Send(&proto.StreamProcessResponse{
+			Payload: &proto.StreamProcessResponse_RouteSelected{
+				RouteSelected: &proto.RouteSelected{Model: model, IsCloud: isCloud},
+			},
+		})
+	}
 
 	response, err := s.agent.ProcessRequestStream(stream.Context(), agentReq,
 		func(msg string) {
@@ -821,6 +829,18 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	}
 
 	ctx = anthropic.WithSessionID(ctx, req.GetConversationId())
+
+	// The native tool-loop provider is the configured cloud (Anthropic) engine.
+	// Announce the route up front so the client can show the engine badge from
+	// the first frame.
+	stream.Send(&proto.StreamProcessResponse{
+		Payload: &proto.StreamProcessResponse_RouteSelected{
+			RouteSelected: &proto.RouteSelected{
+				Model:   s.currentConfig.CloudModel,
+				IsCloud: true,
+			},
+		},
+	})
 
 	result, err := agent.RunToolLoop(ctx, agent.ToolLoopInput{
 		Provider:            s.cloudLLMProvider,

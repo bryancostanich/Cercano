@@ -34,6 +34,11 @@ service Agent {
   // each streamed turn.
   rpc GetContextUsage (GetContextUsageRequest) returns (GetContextUsageResponse) {}
 
+  // GetConversationTurns returns display-ready, side-effect-free summaries of a
+  // conversation's turns for the /c context viewer. Unlike ResumeConversation
+  // it does NOT re-hydrate server session state.
+  rpc GetConversationTurns (GetConversationTurnsRequest) returns (GetConversationTurnsResponse) {}
+
   // ListTools enumerates the agent's registered tools (name, description,
   // permission tier). /tools in the CLI renders this through the Table
   // primitive.
@@ -398,6 +403,15 @@ message GetContextUsageResponse {
   int32  tokens_used = 1;
   int32  model_max   = 2;
   double percent     = 3;
+}
+
+message GetConversationTurnsRequest  { string conversation_id = 1; }
+message GetConversationTurnsResponse { repeated ContextTurn turns = 1; }
+message ContextTurn {
+  string role       = 1; // "user" | "assistant" | "system"
+  string kind       = 2; // "text" | "tool_use" | "tool_result"
+  string preview    = 3; // flattened, truncated, display-ready
+  int32  est_tokens = 4; // contextmeter tokenizer estimate
 }
 
 // BuiltinTool summarises one registered agent tool — surfaced by ListTools

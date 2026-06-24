@@ -53,7 +53,7 @@ func TestChatPane_StatusShownWhileBusy(t *testing.T) {
 	p := newTestPane()
 	p.Submit("x")
 	p.Apply(chatStatusMsg{activity: "thinking…"})
-	if !strings.Contains(p.View(), "thinking…") {
+	if !strings.Contains(stripAnsiCSI(p.View()), "thinking…") {
 		t.Error("busy status not rendered")
 	}
 }

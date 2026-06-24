@@ -83,6 +83,10 @@ type Store interface {
 	// UpdateRecap sets the LLM-generated living recap and its timestamp.
 	UpdateRecap(ctx context.Context, conversationID, recap string) error
 
+	// DeleteTurns removes the named turns from a conversation. Unknown ids are
+	// ignored (idempotent); other conversations are never affected.
+	DeleteTurns(ctx context.Context, conversationID string, ids []string) error
+
 	// Get returns a single conversation's Info, or an error if not found.
 	Get(ctx context.Context, conversationID string) (Info, error)
 
@@ -347,6 +351,27 @@ func (s *sqliteStore) Delete(ctx context.Context, conversationID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.ExecContext(ctx, `DELETE FROM conversations WHERE id = ?`, conversationID)
+	return err
+}
+
+func (s *sqliteStore) DeleteTurns(ctx context.Context, conversationID string, ids []string) error {
+	if conversationID == "" {
+		return errors.New("conversation id required")
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	placeholders := make([]string, len(ids))
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, conversationID)
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	query := "DELETE FROM turns WHERE conversation_id = ? AND id IN (" + strings.Join(placeholders, ",") + ")"
+	_, err := s.db.ExecContext(ctx, query, args...)
 	return err
 }
 

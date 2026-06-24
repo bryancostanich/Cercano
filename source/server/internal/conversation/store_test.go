@@ -329,3 +329,41 @@ func TestGetTurns_SameSecondPreservesInsertionOrder(t *testing.T) {
 		t.Fatalf("order not preserved: got %v, want [a b c]", got)
 	}
 }
+
+func TestDeleteTurns_RemovesOnlyNamed(t *testing.T) {
+	s, err := Open(":memory:")
+	if err != nil { t.Fatalf("open: %v", err) }
+	defer s.Close()
+	ctx := context.Background()
+	if err := s.EnsureConversation(ctx, "c1", "", "m"); err != nil { t.Fatalf("ensure: %v", err) }
+	if err := s.EnsureConversation(ctx, "c2", "", "m"); err != nil { t.Fatalf("ensure: %v", err) }
+	// c1: three turns with known ids; c2: one turn that must survive.
+	for _, tn := range []Turn{
+		{ID: "a", ConversationID: "c1", Role: "user", Content: "one"},
+		{ID: "b", ConversationID: "c1", Role: "assistant", Content: "two"},
+		{ID: "c", ConversationID: "c1", Role: "user", Content: "three"},
+		{ID: "z", ConversationID: "c2", Role: "user", Content: "other"},
+	} {
+		if err := s.Append(ctx, tn); err != nil { t.Fatalf("append: %v", err) }
+	}
+
+	if err := s.DeleteTurns(ctx, "c1", []string{"a", "c", "ghost"}); err != nil {
+		t.Fatalf("DeleteTurns: %v", err)
+	}
+	got, _ := s.GetTurns(ctx, "c1")
+	if len(got) != 1 || got[0].ID != "b" {
+		t.Fatalf("c1 turns = %+v, want only [b]", got)
+	}
+	other, _ := s.GetTurns(ctx, "c2")
+	if len(other) != 1 {
+		t.Errorf("c2 should be untouched, got %d turns", len(other))
+	}
+	// Idempotent: deleting already-gone ids is a no-op, no error.
+	if err := s.DeleteTurns(ctx, "c1", []string{"a"}); err != nil {
+		t.Errorf("idempotent delete errored: %v", err)
+	}
+	// Empty id list is a no-op.
+	if err := s.DeleteTurns(ctx, "c1", nil); err != nil {
+		t.Errorf("empty delete errored: %v", err)
+	}
+}

@@ -86,10 +86,33 @@ func TestChatPane_RendersMarkdownAndScrolls(t *testing.T) {
 	for i := 0; i < 60; i++ {
 		p.Apply(chatAssistantMsg{text: "line"})
 	}
+	// After appending, pane sticks to bottom; scroll to top so ScrollBy can advance.
+	p.ScrollTo(0)
 	st0 := p.ScrollState()
 	p.ScrollBy(20)
 	if p.ScrollState().Offset <= st0.Offset {
 		t.Errorf("ScrollBy did not advance: %d -> %d", st0.Offset, p.ScrollState().Offset)
+	}
+}
+
+func TestChatPane_SetSizeResizes(t *testing.T) {
+	p := newTestPane()
+	p.SetSize(40, 8)
+	if p.width != 40 || p.height != 8 {
+		t.Errorf("SetSize not applied: %d x %d", p.width, p.height)
+	}
+}
+
+func TestChatPane_SticksToBottomOnAppend(t *testing.T) {
+	p := newTestPane()
+	p.SetSize(80, 8)
+	for i := 0; i < 60; i++ {
+		p.Apply(chatAssistantMsg{text: "line"})
+	}
+	st := p.ScrollState()
+	// offset should be pinned at the maximum (bottom), so the latest line is visible
+	if st.Offset != maxInt(0, st.Total-st.Height) {
+		t.Errorf("not stuck to bottom: offset=%d, want %d", st.Offset, maxInt(0, st.Total-st.Height))
 	}
 }
 

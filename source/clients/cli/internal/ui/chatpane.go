@@ -77,6 +77,7 @@ func (c *chatPane) Submit(input string) tea.Cmd {
 		return nil
 	}
 	c.entries = append(c.entries, &Entry{Role: RoleUser, Content: input})
+	c.scrollToBottom()
 	c.busy = true
 	c.activity = "working…"
 	c.started = time.Now()
@@ -93,14 +94,17 @@ func (c *chatPane) Apply(msg tea.Msg) tea.Cmd {
 		c.activity = m.activity
 	case chatAssistantMsg:
 		c.entries = append(c.entries, &Entry{Role: RoleAssistant, Content: m.text})
+		c.scrollToBottom()
 	case chatDoneMsg:
 		if m.text != "" {
 			c.entries = append(c.entries, &Entry{Role: RoleSystem, Content: m.text})
 		}
+		c.scrollToBottom()
 		c.busy = false
 		return c.drainNext()
 	case chatErrorMsg:
 		c.entries = append(c.entries, &Entry{Role: RoleSystem, Content: c.styles.Error.Render("error: " + m.err.Error())})
+		c.scrollToBottom()
 		c.busy = false
 		return c.drainNext()
 	}
@@ -176,6 +180,13 @@ func (c *chatPane) ScrollState() contentPageScrollState {
 }
 
 func (c *chatPane) clampScroll() { c.scrollOffset = c.ScrollState().Offset }
+
+// scrollToBottom pins the view to the most-recent line. The sentinel value is
+// clamped to the real maximum by clampScroll / ScrollState.
+func (c *chatPane) scrollToBottom() {
+	c.scrollOffset = 1 << 30 // clamped to real max by clampScroll
+	c.clampScroll()
+}
 
 // contentHeight is the scrollable area: total height minus the pinned rows
 // (1 busy line + 1 per queued item, minimum 1).

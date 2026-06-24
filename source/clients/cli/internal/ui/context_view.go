@@ -20,16 +20,6 @@ type contextSnapshot struct {
 	UsageErr error
 }
 
-type contextEditProposalMsg struct {
-	p   agentclient.Proposal
-	err error
-}
-
-type contextEditDeletedMsg struct {
-	n   int
-	err error
-}
-
 type contextView struct {
 	width, height   int
 	palette         theme.Palette
@@ -79,6 +69,9 @@ func (c *contextView) ID() contentPageID { return contentPageContext }
 func (c *contextView) SetSize(w, h int) {
 	c.width = w
 	c.height = h
+	if c.pane != nil {
+		c.pane.SetSize(w, h)
+	}
 	c.clampScroll()
 }
 

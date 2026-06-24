@@ -1375,11 +1375,18 @@ func (m *Model) relayout() {
 			suggestH = strings.Count(hint, "\n") + 1
 		}
 	}
+	// Reserve a row for the living-recap line when it's shown — View() renders it
+	// below the viewport, and promptTop() already accounts for it. Without this
+	// the viewport is one row too tall and shoves the status bar off-screen.
+	recapH := 0
+	if m.recap != "" {
+		recapH = 1
+	}
 	// Size the input first — DynamicHeight re-fits it to the wrapped content at
 	// this width; the body claims whatever rows are left.
 	m.input.SetWidth(contentW - 4)
 	inputH := m.input.Height()
-	bodyH := m.height - chromeNoInput - inputH - splashH - suggestH
+	bodyH := m.height - chromeNoInput - inputH - splashH - suggestH - recapH
 	if bodyH < 3 {
 		bodyH = 3
 	}
@@ -1561,14 +1568,17 @@ func (m *Model) renderEntry(e *Entry, idx int) string {
 	case RoleAssistant:
 		// Pre-text placeholder: no prose yet — show the live turn status inline
 		// (activity · elapsed · tokens · engine) where the agent is working.
+		// Indented to the content margin, italic + bright for readability, with a
+		// blank line above for breathing room.
 		if e.Streaming && e.Content == "" {
 			activity := m.turnActivity
 			if activity == "" {
 				activity = "thinking"
 			}
 			line := turnStatusLine(activity, time.Since(m.turnStart), m.turnTokOut, m.turnModel, m.turnCloud)
-			content := animateSpinnerGlyph() + " " + animateLimeSweep(line)
-			return indentBlock(pad, content)
+			styled := lipgloss.NewStyle().Foreground(m.palette.Bright).Italic(true).Render(line)
+			content := animateSpinnerGlyph() + " " + styled
+			return "\n" + indentBlock(pad, content)
 		}
 		rendered := m.renderAssistantMarkdown(e, textW)
 		if e.Streaming {

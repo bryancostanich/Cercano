@@ -164,10 +164,10 @@ type Model struct {
 	// invoking a tool. Keyed by tool name.
 	toolCache map[string]agentclient.ToolInfo
 
-	// pendingConfirm carries a tool invocation waiting on a y/n/d keypress.
-	// While non-nil, all key events route to the confirm resolver instead
-	// of the input or scrollback.
-	pendingConfirm *pendingToolCall
+	// pendingConfirm carries a pending confirmation gate waiting on a y/n/esc
+	// (and optional extra) keypress. While non-nil, all key events route to
+	// the confirm resolver instead of the input or scrollback.
+	pendingConfirm *confirmRequest
 
 	// permissionMode caches the agent's current session permission mode
 	// ("strict" | "permissive" | "bypass") so the status bar can render a
@@ -194,6 +194,15 @@ type pendingToolCall struct {
 	Name       string
 	Args       string
 	Permission string // "R" | "W" | "X" — R never reaches here, but kept for symmetry
+}
+
+// confirmRequest is a generic confirmation gate. Any feature raises one; the
+// model routes y / n / esc (and optional extra keys) to it. onYes/onNo
+// resolve and should clear m.pendingConfirm; extras run without resolving.
+type confirmRequest struct {
+	onYes  func(Model) (Model, tea.Cmd)
+	onNo   func(Model) (Model, tea.Cmd)
+	extras map[string]func(Model) (Model, tea.Cmd)
 }
 
 const defaultInputPlaceholder = "type a message, /help for commands"
@@ -1153,8 +1162,9 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 			return m, invokeToolCmd(m.agent, res.ToolName, res.ToolArgs)
 		}
 		// W or X — queue confirm.
-		m.pendingConfirm = &pendingToolCall{Name: res.ToolName, Args: res.ToolArgs, Permission: perm}
-		prompt := m.renderConfirmPrompt(m.pendingConfirm)
+		tc := &pendingToolCall{Name: res.ToolName, Args: res.ToolArgs, Permission: perm}
+		m.pendingConfirm = toolConfirm(tc)
+		prompt := m.renderConfirmPrompt(tc)
 		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: prompt})
 		m.refreshViewport()
 	case slash.ResultText:
@@ -1290,13 +1300,14 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 		// Server-side tool loop hit a W/X tool and is blocked on a decision.
 		// Raise the confirm prompt; the y/n/esc resolver will RPC back via
 		// AllowToolCall/DenyToolCall to unblock the loop.
-		m.pendingConfirm = &pendingToolCall{
+		tc := &pendingToolCall{
 			ToolUseID:  sm.ToolUseID,
 			Name:       sm.ToolName,
 			Args:       sm.ArgsJSON,
 			Permission: sm.Tier,
 		}
-		prompt := m.renderConfirmPrompt(m.pendingConfirm)
+		m.pendingConfirm = toolConfirm(tc)
+		prompt := m.renderConfirmPrompt(tc)
 		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: prompt})
 	}
 	m.refreshViewport()
@@ -1916,60 +1927,74 @@ func (m Model) renderConfirmPrompt(p *pendingToolCall) string {
 		m.styles.Muted.Render("]iff")
 }
 
-// resolveConfirmKey processes a keystroke while a confirm is pending. y → run,
-// n / esc → cancel, d → reveal the full args, anything else → ignored.
-//
-// Two pending-confirm origins are supported:
-//
-//  1. PermissionRequired stream event (ToolUseID set) — the server-side tool
-//     loop is blocked waiting on a decision. y/n RPCs back via
-//     AllowToolCall/DenyToolCall so the loop unblocks; we don't call
-//     InvokeTool here because the server already has the call queued.
-//
-//  2. Local `/tool <name>` invocation (ToolUseID empty) — the legacy local
-//     flow; y fires invokeToolCmd directly, n drops the request.
+// resolveConfirmKey processes a keystroke while a confirm is pending.
+// y/Y → onYes, n/N/esc/ctrl+c → onNo, extras keys → their handler,
+// anything else → ignored (confirm stays pending).
 func (m Model) resolveConfirmKey(key string) (Model, tea.Cmd) {
-	switch key {
-	case "y", "Y":
-		pending := m.pendingConfirm
-		m.pendingConfirm = nil
-		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: m.styles.Accent.Render("✓ approved — running…")})
-		m.refreshViewport()
-		if pending.ToolUseID != "" {
-			// Stream-event origin: unblock the server-side tool loop. The
-			// server resumes execution and surfaces results through the same
-			// stream, so we return no tea.Cmd here.
-			ag := m.agent
-			id := pending.ToolUseID
-			if ag != nil {
-				go func() { _ = ag.AllowToolCall(context.Background(), id) }()
-			}
-			return m, nil
-		}
-		// Local /tool origin: fire the invoke directly.
-		return m, invokeToolCmd(m.agent, pending.Name, pending.Args)
-	case "n", "N", "esc", "ctrl+c":
-		pending := m.pendingConfirm
-		m.pendingConfirm = nil
-		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: m.styles.Muted.Render("canceled.")})
-		m.refreshViewport()
-		if pending != nil && pending.ToolUseID != "" {
-			ag := m.agent
-			id := pending.ToolUseID
-			if ag != nil {
-				go func() { _ = ag.DenyToolCall(context.Background(), id) }()
-			}
-		}
-		return m, nil
-	case "d", "D":
-		// Show the full args JSON so the user can inspect before approving.
-		m.entries = append(m.entries, &Entry{Role: RoleSystem,
-			Content: "args:\n```json\n" + m.pendingConfirm.Args + "\n```"})
-		m.refreshViewport()
+	c := m.pendingConfirm
+	if c == nil {
 		return m, nil
 	}
-	// Any other key is ignored while the confirm is pending.
-	return m, nil
+	switch key {
+	case "y", "Y":
+		return c.onYes(m)
+	case "n", "N", "esc", "ctrl+c":
+		return c.onNo(m)
+	default:
+		if fn, ok := c.extras[key]; ok {
+			return fn(m)
+		}
+		return m, nil
+	}
+}
+
+// toolConfirm builds the confirmRequest for a tool-permission decision,
+// preserving the prior behavior: y approves (Allow RPC for stream-origin call,
+// else local invoke), n denies (Deny RPC for stream-origin), d/D reveals args.
+func toolConfirm(tc *pendingToolCall) *confirmRequest {
+	return &confirmRequest{
+		onYes: func(m Model) (Model, tea.Cmd) {
+			m.pendingConfirm = nil
+			m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: m.styles.Accent.Render("✓ approved — running…")})
+			m.refreshViewport()
+			if tc.ToolUseID != "" {
+				// Stream-event origin: unblock the server-side tool loop.
+				ag, id := m.agent, tc.ToolUseID
+				if ag != nil {
+					go func() { _ = ag.AllowToolCall(context.Background(), id) }()
+				}
+				return m, nil
+			}
+			// Local /tool origin: fire the invoke directly.
+			return m, invokeToolCmd(m.agent, tc.Name, tc.Args)
+		},
+		onNo: func(m Model) (Model, tea.Cmd) {
+			m.pendingConfirm = nil
+			m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: m.styles.Muted.Render("canceled.")})
+			m.refreshViewport()
+			if tc.ToolUseID != "" {
+				ag, id := m.agent, tc.ToolUseID
+				if ag != nil {
+					go func() { _ = ag.DenyToolCall(context.Background(), id) }()
+				}
+			}
+			return m, nil
+		},
+		extras: map[string]func(Model) (Model, tea.Cmd){
+			"d": func(m Model) (Model, tea.Cmd) {
+				m.entries = append(m.entries, &Entry{Role: RoleSystem,
+					Content: "args:\n```json\n" + tc.Args + "\n```"})
+				m.refreshViewport()
+				return m, nil
+			},
+			"D": func(m Model) (Model, tea.Cmd) {
+				m.entries = append(m.entries, &Entry{Role: RoleSystem,
+					Content: "args:\n```json\n" + tc.Args + "\n```"})
+				m.refreshViewport()
+				return m, nil
+			},
+		},
+	}
 }
 
 // truncateArgs renders the JSON args compactly for the confirm prompt one-liner.

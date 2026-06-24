@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"cercano/source/clients/cli/internal/theme"
+	tea "charm.land/bubbletea/v2"
 )
 
 // minimalModel returns a Model populated just enough for the confirm-prompt
@@ -59,7 +60,7 @@ func TestRenderConfirmPrompt_TruncatesLongArgs(t *testing.T) {
 
 func TestResolveConfirmKey_N_Cancels(t *testing.T) {
 	m := minimalModel()
-	m.pendingConfirm = &pendingToolCall{Name: "rm_file", Args: "{}", Permission: "X"}
+	m.pendingConfirm = toolConfirm(&pendingToolCall{Name: "rm_file", Args: "{}", Permission: "X"})
 
 	next, cmd := m.resolveConfirmKey("n")
 	if next.pendingConfirm != nil {
@@ -75,7 +76,7 @@ func TestResolveConfirmKey_N_Cancels(t *testing.T) {
 
 func TestResolveConfirmKey_Esc_Cancels(t *testing.T) {
 	m := minimalModel()
-	m.pendingConfirm = &pendingToolCall{Name: "write_file", Args: "{}", Permission: "W"}
+	m.pendingConfirm = toolConfirm(&pendingToolCall{Name: "write_file", Args: "{}", Permission: "W"})
 	next, _ := m.resolveConfirmKey("esc")
 	if next.pendingConfirm != nil {
 		t.Errorf("esc should clear pendingConfirm")
@@ -84,7 +85,7 @@ func TestResolveConfirmKey_Esc_Cancels(t *testing.T) {
 
 func TestResolveConfirmKey_D_RevealsArgsAndKeepsPending(t *testing.T) {
 	m := minimalModel()
-	m.pendingConfirm = &pendingToolCall{Name: "edit_file", Args: `{"path":"a.go"}`, Permission: "W"}
+	m.pendingConfirm = toolConfirm(&pendingToolCall{Name: "edit_file", Args: `{"path":"a.go"}`, Permission: "W"})
 
 	next, cmd := m.resolveConfirmKey("d")
 	if next.pendingConfirm == nil {
@@ -107,7 +108,7 @@ func TestResolveConfirmKey_D_RevealsArgsAndKeepsPending(t *testing.T) {
 
 func TestResolveConfirmKey_Y_ClearsAndReturnsCmd(t *testing.T) {
 	m := minimalModel()
-	m.pendingConfirm = &pendingToolCall{Name: "write_file", Args: "{}", Permission: "W"}
+	m.pendingConfirm = toolConfirm(&pendingToolCall{Name: "write_file", Args: "{}", Permission: "W"})
 
 	next, cmd := m.resolveConfirmKey("y")
 	if next.pendingConfirm != nil {
@@ -128,12 +129,12 @@ func TestResolveConfirmKey_Y_ClearsAndReturnsCmd(t *testing.T) {
 // we only assert the synchronous UI contract.
 func TestResolveConfirmKey_Y_WithToolUseID_NoCmd(t *testing.T) {
 	m := minimalModel()
-	m.pendingConfirm = &pendingToolCall{
+	m.pendingConfirm = toolConfirm(&pendingToolCall{
 		ToolUseID:  "tu_123",
 		Name:       "write_file",
 		Args:       "{}",
 		Permission: "W",
-	}
+	})
 
 	next, cmd := m.resolveConfirmKey("y")
 	if next.pendingConfirm != nil {
@@ -147,12 +148,12 @@ func TestResolveConfirmKey_Y_WithToolUseID_NoCmd(t *testing.T) {
 
 func TestResolveConfirmKey_N_WithToolUseID_NoCmd(t *testing.T) {
 	m := minimalModel()
-	m.pendingConfirm = &pendingToolCall{
+	m.pendingConfirm = toolConfirm(&pendingToolCall{
 		ToolUseID:  "tu_456",
 		Name:       "rm_file",
 		Args:       "{}",
 		Permission: "X",
-	}
+	})
 
 	next, cmd := m.resolveConfirmKey("n")
 	if next.pendingConfirm != nil {
@@ -165,7 +166,7 @@ func TestResolveConfirmKey_N_WithToolUseID_NoCmd(t *testing.T) {
 
 func TestResolveConfirmKey_OtherKey_Ignored(t *testing.T) {
 	m := minimalModel()
-	m.pendingConfirm = &pendingToolCall{Name: "rm_file", Args: "{}", Permission: "X"}
+	m.pendingConfirm = toolConfirm(&pendingToolCall{Name: "rm_file", Args: "{}", Permission: "X"})
 
 	next, cmd := m.resolveConfirmKey("a")
 	if next.pendingConfirm == nil {
@@ -173,6 +174,44 @@ func TestResolveConfirmKey_OtherKey_Ignored(t *testing.T) {
 	}
 	if cmd != nil {
 		t.Errorf("unrelated key should not return a cmd")
+	}
+}
+
+func TestResolveConfirmKey_Generic(t *testing.T) {
+	yes, no, diff := false, false, false
+	mk := func() Model {
+		m := minimalModel()
+		m.pendingConfirm = &confirmRequest{
+			onYes:  func(m Model) (Model, tea.Cmd) { yes = true; m.pendingConfirm = nil; return m, nil },
+			onNo:   func(m Model) (Model, tea.Cmd) { no = true; m.pendingConfirm = nil; return m, nil },
+			extras: map[string]func(Model) (Model, tea.Cmd){"d": func(m Model) (Model, tea.Cmd) { diff = true; return m, nil }},
+		}
+		return m
+	}
+	// y → onYes, clears
+	m := mk()
+	m, _ = m.resolveConfirmKey("y")
+	if !yes || m.pendingConfirm != nil {
+		t.Errorf("y: yes=%v pending=%v", yes, m.pendingConfirm != nil)
+	}
+	// n → onNo, clears
+	yes = false
+	m = mk()
+	m, _ = m.resolveConfirmKey("n")
+	if !no || m.pendingConfirm != nil {
+		t.Errorf("n: no=%v pending=%v", no, m.pendingConfirm != nil)
+	}
+	// d (extra) → handler, does NOT clear
+	m = mk()
+	m, _ = m.resolveConfirmKey("d")
+	if !diff || m.pendingConfirm == nil {
+		t.Errorf("d: diff=%v pending=%v", diff, m.pendingConfirm == nil)
+	}
+	// unknown key → ignored, still pending
+	m = mk()
+	m, _ = m.resolveConfirmKey("x")
+	if m.pendingConfirm == nil {
+		t.Error("unknown key cleared the confirm")
 	}
 }
 

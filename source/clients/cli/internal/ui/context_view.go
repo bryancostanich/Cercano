@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
@@ -21,14 +20,6 @@ type contextSnapshot struct {
 	UsageErr error
 }
 
-type contextViewMode int
-
-const (
-	cvBrowse   contextViewMode = iota
-	cvEditing                  // text input active
-	cvProposal                 // proposal shown, awaiting y/n
-)
-
 type contextEditProposalMsg struct {
 	p   agentclient.Proposal
 	err error
@@ -40,17 +31,15 @@ type contextEditDeletedMsg struct {
 }
 
 type contextView struct {
-	width, height int
-	palette       theme.Palette
-	styles        theme.Styles
-	agent         *agentclient.Client
-	convID        string
-	snapshot      contextSnapshot
-	scrollOffset  int
-	mode          contextViewMode
-	input         textinput.Model
-	proposal      agentclient.Proposal
-	editErr       string
+	width, height   int
+	palette         theme.Palette
+	styles          theme.Styles
+	agent           *agentclient.Client
+	convID          string
+	snapshot        contextSnapshot
+	scrollOffset    int
+	showingProposal bool
+	proposal        agentclient.Proposal
 }
 
 func loadContextSnapshot(ag *agentclient.Client, convID string) contextSnapshot {
@@ -68,11 +57,6 @@ func loadContextSnapshot(ag *agentclient.Client, convID string) contextSnapshot 
 func newContextView(ag *agentclient.Client, p theme.Palette, s theme.Styles, convID string, w, h int) (*contextView, tea.Cmd) {
 	cv := &contextView{palette: p, styles: s, agent: ag, convID: convID, width: w, height: h}
 	cv.snapshot = loadContextSnapshot(ag, convID)
-	inp := textinput.New()
-	inp.Placeholder = "instruction, e.g. 'drop the debugging tangent'"
-	inp.CharLimit = 0
-	inp.SetWidth(w - 4)
-	cv.input = inp
 	return cv, nil
 }
 
@@ -84,79 +68,46 @@ func (c *contextView) SetSize(w, h int) {
 	c.clampScroll()
 }
 
+// Update handles keys that the model hasn't intercepted. For *contextView,
+// the model's handleContextViewKey owns most keys; this method handles the
+// residual scroll + close keys so the contentPage contract stays valid.
 func (c *contextView) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
-	switch c.mode {
-	case cvEditing:
-		switch msg.String() {
-		case "enter":
-			instr := strings.TrimSpace(c.input.Value())
-			if instr == "" {
-				return nil, false
-			}
-			c.input.Reset()
-			return c.proposeCmd(instr), false
-		case "esc":
-			c.mode = cvBrowse
-			c.editErr = ""
-			c.input.Blur()
-			return nil, false
-		}
-		var cmd tea.Cmd
-		c.input, cmd = c.input.Update(msg)
-		return cmd, false
-
-	case cvProposal:
-		switch msg.String() {
-		case "y":
-			return c.deleteCmd(c.proposal.DeleteIDs), false
-		case "n", "esc":
-			c.cancelProposal()
-			return nil, false
-		}
+	switch msg.String() {
+	case "esc", "q":
+		return nil, true
+	case "r":
+		c.snapshot = loadContextSnapshot(c.agent, c.convID)
 		return nil, false
-
-	default: // cvBrowse — existing 3a handling plus e
-		switch msg.String() {
-		case "esc", "q":
-			return nil, true
-		case "e":
-			c.mode = cvEditing
-			return c.input.Focus(), false
-		case "r":
-			c.snapshot = loadContextSnapshot(c.agent, c.convID)
-			return nil, false
-		case "up", "k":
-			c.ScrollBy(-1)
-		case "down", "j":
-			c.ScrollBy(1)
-		case "pgup", "ctrl+b":
-			c.ScrollBy(-dashboardContentHeight(c.height))
-		case "pgdown", "ctrl+f":
-			c.ScrollBy(dashboardContentHeight(c.height))
-		case "ctrl+u":
-			c.ScrollBy(-maxInt(1, dashboardContentHeight(c.height)/2))
-		case "ctrl+d":
-			c.ScrollBy(maxInt(1, dashboardContentHeight(c.height)/2))
-		}
-		return nil, false
+	case "up", "k":
+		c.ScrollBy(-1)
+	case "down", "j":
+		c.ScrollBy(1)
+	case "pgup", "ctrl+b":
+		c.ScrollBy(-dashboardContentHeight(c.height))
+	case "pgdown", "ctrl+f":
+		c.ScrollBy(dashboardContentHeight(c.height))
+	case "ctrl+u":
+		c.ScrollBy(-maxInt(1, dashboardContentHeight(c.height)/2))
+	case "ctrl+d":
+		c.ScrollBy(maxInt(1, dashboardContentHeight(c.height)/2))
 	}
+	return nil, false
 }
 
-// --- edit mode small methods ---
+// --- proposal state methods ---
 
 func (c *contextView) applyProposal(p agentclient.Proposal) {
 	c.proposal = p
-	c.mode = cvProposal
-	c.editErr = ""
+	c.showingProposal = true
 }
 
 func (c *contextView) cancelProposal() {
 	c.proposal = agentclient.Proposal{}
-	c.mode = cvBrowse
+	c.showingProposal = false
 }
 
 func (c *contextView) markedForDelete(id string) bool {
-	if c.mode != cvProposal {
+	if !c.showingProposal {
 		return false
 	}
 	for _, d := range c.proposal.DeleteIDs {
@@ -189,23 +140,6 @@ func (c *contextView) deleteCmd(ids []string) tea.Cmd {
 	}
 }
 
-// called by model.go when async msgs arrive
-
-func (c *contextView) onProposal(m contextEditProposalMsg) {
-	if m.err != nil {
-		c.editErr = "could not interpret that — try rephrasing"
-		c.mode = cvEditing
-		return
-	}
-	c.applyProposal(m.p)
-}
-
-func (c *contextView) onDeleted(m contextEditDeletedMsg) tea.Cmd {
-	c.cancelProposal()
-	c.snapshot = loadContextSnapshot(c.agent, c.convID)
-	return nil
-}
-
 func (c *contextView) View() string {
 	full, contentH := c.fullContent()
 	return c.renderScrollableContent(full, contentH)
@@ -232,21 +166,12 @@ func (c *contextView) fullContent() (string, int) {
 }
 
 func (c *contextView) renderFooter() string {
-	switch c.mode {
-	case cvProposal:
+	if c.showingProposal {
 		rationale := c.styles.Warn.Render(c.proposal.Rationale)
 		confirm := c.styles.Bright.Render("[y]") + " delete  " + c.styles.Bright.Render("[n]") + " cancel"
 		return rationale + "\n" + confirm
-	case cvEditing:
-		hint := c.styles.Muted.Render("enter to propose · esc to cancel")
-		errLine := ""
-		if c.editErr != "" {
-			errLine = "\n" + c.styles.Error.Render(c.editErr)
-		}
-		return c.input.View() + "\n" + hint + errLine
-	default: // cvBrowse
-		return c.styles.Muted.Render("r: refresh · e: edit · esc/q: back")
 	}
+	return c.styles.Muted.Render("type to edit · enter to propose · esc: back")
 }
 
 func (c *contextView) renderHeader() string {

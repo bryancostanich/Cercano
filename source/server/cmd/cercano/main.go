@@ -220,6 +220,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	s := grpc.NewServer()
 	srv := server.NewServer(orchestrator, localProvider, lazyRouter, coordinator, cloudFactory, registry)
 	srv.SetRuntimeManager(runtimeManager)
+	srv.SetContextLoader(ctxLoader)
 	srv.SetConfigPersistence(config.DefaultPath(), cfg)
 	srv.SetToolRegistry(agenttools.DefaultRegistry())
 

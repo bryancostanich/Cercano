@@ -11,6 +11,7 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
+	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/legacymodels"
@@ -47,7 +48,12 @@ type Server struct {
 	pendingDecisions    *agent.PendingDecisions
 	cloudLLMProvider    llm.Provider
 	runtimeManager      localruntime.Manager
+	contextLoader       *projectctx.Loader
 }
+
+// SetContextLoader wires the project-context loader so the native tool-loop can
+// include .cercano/context.md (and the working directory) in its system prompt.
+func (s *Server) SetContextLoader(l *projectctx.Loader) { s.contextLoader = l }
 
 // SetToolRegistry attaches the agent's tool registry. The CLI's /tools and
 // /tool commands route through ListTools / InvokeTool RPCs to it.
@@ -796,6 +802,33 @@ func (s *Server) StreamProcessRequest(req *proto.ProcessRequestRequest, stream p
 	})
 }
 
+// buildToolLoopSystem builds the system prompt for the native tool-loop. It
+// names the working directory — without it the cloud model has no idea where it
+// is and wastes its whole iteration budget searching the filesystem to locate
+// the project — and includes the project's .cercano/context.md when present.
+func buildToolLoopSystem(workDir, projectContext string) string {
+	var b strings.Builder
+	b.WriteString("You are Cercano, an agentic coding assistant operating in a terminal.")
+	if workDir != "" {
+		fmt.Fprintf(&b, " The current working directory is %s — treat it as the project root and resolve relative file paths against it. Do not search the filesystem to locate the project.", workDir)
+	}
+	if strings.TrimSpace(projectContext) != "" {
+		b.WriteString("\n\nProject context:\n")
+		b.WriteString(projectContext)
+	}
+	return b.String()
+}
+
+// loadProjectContext returns the project's .cercano/context.md content, or "" if
+// no loader is wired or none exists. Nil-safe.
+func (s *Server) loadProjectContext(workDir string) string {
+	if s.contextLoader == nil || workDir == "" {
+		return ""
+	}
+	c, _ := s.contextLoader.Load(workDir)
+	return c
+}
+
 // streamProcessRequestWithToolLoop drives the native tool-calling loop and
 // emits per-event stream payloads. Used when a layered LLM provider has been
 // wired via SetCloudLLMProvider.
@@ -831,6 +864,9 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 				},
 			})
 		case agent.LoopToolUseStop:
+			// Per-tool trace to the server log so a runaway/looping turn is
+			// diagnosable after the fact (which tools, what args, in what order).
+			fmt.Fprintf(os.Stderr, "[tool-loop] call %s args=%s\n", ev.ToolName, ev.ArgsJSON)
 			stream.Send(&proto.StreamProcessResponse{
 				Payload: &proto.StreamProcessResponse_ToolUseStop{
 					ToolUseStop: &proto.ToolUseStop{
@@ -848,6 +884,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 				},
 			})
 		case agent.LoopToolExecComplete:
+			fmt.Fprintf(os.Stderr, "[tool-loop]   -> %s (err=%v) %s\n", ev.Summary, ev.IsError, ev.Detail)
 			stream.Send(&proto.StreamProcessResponse{
 				Payload: &proto.StreamProcessResponse_ToolExecComplete{
 					ToolExecComplete: &proto.ToolExecComplete{
@@ -910,6 +947,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		Permissions:         s.permStore,
 		UserInput:           req.GetInput(),
 		Model:               s.currentConfig.CloudModel,
+		System:              buildToolLoopSystem(req.GetWorkDir(), s.loadProjectContext(req.GetWorkDir())),
 		EventSink:           sink,
 		PermissionRequester: requester,
 		ConvHistory:         convHistory,

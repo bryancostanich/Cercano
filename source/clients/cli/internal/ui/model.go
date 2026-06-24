@@ -859,7 +859,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case recapLoadedMsg:
+		// When the recap's presence toggles, the recap line claims (or frees) a
+		// row below the viewport. relayout() must re-run so the viewport resizes
+		// and the status bar stays pinned — otherwise the new line pushes the
+		// footer off-screen until the next resize.
+		had := m.recap != ""
 		m.recap = msg.recap
+		if had != (m.recap != "") {
+			m.relayout()
+		}
 		return m, nil
 
 	case configLoadedMsg:

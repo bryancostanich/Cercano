@@ -29,6 +29,7 @@ const (
 	Agent_RenameConversation_FullMethodName         = "/agent.Agent/RenameConversation"
 	Agent_GetConversation_FullMethodName            = "/agent.Agent/GetConversation"
 	Agent_GetContextUsage_FullMethodName            = "/agent.Agent/GetContextUsage"
+	Agent_GetConversationTurns_FullMethodName       = "/agent.Agent/GetConversationTurns"
 	Agent_ListTools_FullMethodName                  = "/agent.Agent/ListTools"
 	Agent_InvokeTool_FullMethodName                 = "/agent.Agent/InvokeTool"
 	Agent_ListModels_FullMethodName                 = "/agent.Agent/ListModels"
@@ -79,6 +80,10 @@ type AgentClient interface {
 	// context window for a conversation. The CLI status bar polls this after
 	// each streamed turn.
 	GetContextUsage(ctx context.Context, in *GetContextUsageRequest, opts ...grpc.CallOption) (*GetContextUsageResponse, error)
+	// GetConversationTurns returns display-ready, side-effect-free summaries of a
+	// conversation's turns for the /c context viewer. Unlike ResumeConversation
+	// it does NOT re-hydrate server session state.
+	GetConversationTurns(ctx context.Context, in *GetConversationTurnsRequest, opts ...grpc.CallOption) (*GetConversationTurnsResponse, error)
 	// ListTools enumerates the agent's registered tools (name, description,
 	// permission tier). /tools in the CLI renders this through the Table
 	// primitive.
@@ -229,6 +234,16 @@ func (c *agentClient) GetContextUsage(ctx context.Context, in *GetContextUsageRe
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetContextUsageResponse)
 	err := c.cc.Invoke(ctx, Agent_GetContextUsage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) GetConversationTurns(ctx context.Context, in *GetConversationTurnsRequest, opts ...grpc.CallOption) (*GetConversationTurnsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetConversationTurnsResponse)
+	err := c.cc.Invoke(ctx, Agent_GetConversationTurns_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -472,6 +487,10 @@ type AgentServer interface {
 	// context window for a conversation. The CLI status bar polls this after
 	// each streamed turn.
 	GetContextUsage(context.Context, *GetContextUsageRequest) (*GetContextUsageResponse, error)
+	// GetConversationTurns returns display-ready, side-effect-free summaries of a
+	// conversation's turns for the /c context viewer. Unlike ResumeConversation
+	// it does NOT re-hydrate server session state.
+	GetConversationTurns(context.Context, *GetConversationTurnsRequest) (*GetConversationTurnsResponse, error)
 	// ListTools enumerates the agent's registered tools (name, description,
 	// permission tier). /tools in the CLI renders this through the Table
 	// primitive.
@@ -548,6 +567,9 @@ func (UnimplementedAgentServer) GetConversation(context.Context, *GetConversatio
 }
 func (UnimplementedAgentServer) GetContextUsage(context.Context, *GetContextUsageRequest) (*GetContextUsageResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetContextUsage not implemented")
+}
+func (UnimplementedAgentServer) GetConversationTurns(context.Context, *GetConversationTurnsRequest) (*GetConversationTurnsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetConversationTurns not implemented")
 }
 func (UnimplementedAgentServer) ListTools(context.Context, *ListToolsRequest) (*ListToolsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListTools not implemented")
@@ -799,6 +821,24 @@ func _Agent_GetContextUsage_Handler(srv interface{}, ctx context.Context, dec fu
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AgentServer).GetContextUsage(ctx, req.(*GetContextUsageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_GetConversationTurns_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetConversationTurnsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).GetConversationTurns(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_GetConversationTurns_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).GetConversationTurns(ctx, req.(*GetConversationTurnsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1198,6 +1238,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetContextUsage",
 			Handler:    _Agent_GetContextUsage_Handler,
+		},
+		{
+			MethodName: "GetConversationTurns",
+			Handler:    _Agent_GetConversationTurns_Handler,
 		},
 		{
 			MethodName: "ListTools",

@@ -439,6 +439,32 @@ func (c *Client) GetContextUsage(ctx context.Context, conversationID string) (*C
 	}, nil
 }
 
+// ContextTurn is one display-ready turn summary from GetConversationTurns.
+type ContextTurn struct {
+	Role      string
+	Kind      string
+	Preview   string
+	EstTokens int
+}
+
+// GetConversationTurns returns side-effect-free turn summaries for the /c viewer.
+func (c *Client) GetConversationTurns(ctx context.Context, conversationID string) ([]ContextTurn, error) {
+	resp, err := c.agent.GetConversationTurns(ctx, &proto.GetConversationTurnsRequest{ConversationId: conversationID})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ContextTurn, 0, len(resp.GetTurns()))
+	for _, t := range resp.GetTurns() {
+		out = append(out, ContextTurn{
+			Role:      t.GetRole(),
+			Kind:      t.GetKind(),
+			Preview:   t.GetPreview(),
+			EstTokens: int(t.GetEstTokens()),
+		})
+	}
+	return out, nil
+}
+
 func (c *Client) GetRuntimeStatus(ctx context.Context) (*RuntimeStatus, error) {
 	resp, err := c.agent.GetRuntimeStatus(ctx, &proto.GetRuntimeStatusRequest{})
 	if err != nil {

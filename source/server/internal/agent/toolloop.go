@@ -344,7 +344,9 @@ func collectStream(ctx context.Context, rdr llm.StreamReader) (llm.ChatResponse,
 			if ev.StopReason != "" {
 				out.StopReason = ev.StopReason
 			}
-			out.OutputTokens = ev.OutputTokens
+			if ev.OutputTokens > 0 {
+				out.OutputTokens = ev.OutputTokens
+			}
 		case llm.EventError:
 			return out, fmt.Errorf("stream error: %s", ev.ErrText)
 		}

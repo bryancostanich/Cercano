@@ -142,6 +142,11 @@ type Model struct {
 
 	recap string // living one-line work summary; shown in the chat footer
 
+	// queued holds messages submitted while a response was streaming, FIFO.
+	// They render just above the prompt, drain (front) as each stream completes,
+	// and the most-recent (back) can be popped back into the prompt with ↑.
+	queued []string
+
 	// convRef shares the current convID with the slash registry by reference,
 	// so /rename always targets whatever conversation the model currently has
 	// active (including after /resume).
@@ -808,6 +813,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.input.SetValue("")
 			m.splashShown = false
+			// Submitting mid-stream queues the message instead of starting a
+			// second turn; it sends when the current stream completes.
+			if m.streaming {
+				m.queued = append(m.queued, text)
+				m.relayout()
+				return m, nil
+			}
 			// Reset the input back to one line (and reclaim any splash rows).
 			m.relayout()
 			return m.submit(text)
@@ -818,6 +830,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.relayout()
 			return m, nil
 		case "up":
+			// On an empty prompt, ↑ first unstages the most-recently-queued
+			// message for editing (takes priority over history).
+			if unmodifiedArrow && m.input.Value() == "" && m.input.Line() == 0 && m.unstageLastQueued() {
+				return m, nil
+			}
 			// On the first line, ↑ recalls the previous submitted input (shell
 			// style); otherwise it falls through to move the cursor up.
 			if unmodifiedArrow && m.input.Line() == 0 && m.recallHistoryPrev() {
@@ -938,7 +955,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Poll the agent for the authoritative context-window usage on the
 		// same conversation. Result arrives as a ctxUsageMsg and overrides
 		// the local cumIn approximation we incremented during streaming.
-		return m, tea.Batch(fetchContextUsage(m.agent, m.convID), fetchRecap(m.agent, m.convID))
+		done := tea.Batch(fetchContextUsage(m.agent, m.convID), fetchRecap(m.agent, m.convID))
+		// Drain the next queued message: each completed turn fires the next.
+		if len(m.queued) > 0 {
+			nextMsg := m.queued[0]
+			m.queued = m.queued[1:]
+			m.relayout()
+			nm, cmd := m.submit(nextMsg)
+			return nm, tea.Batch(cmd, done)
+		}
+		return m, done
 
 	case banner.TickMsg:
 		// Gate forwarding on splashShown — when the splash is dismissed,
@@ -1087,7 +1113,9 @@ func (m *Model) cancelCurrentStream() {
 		e.Streaming = false
 	}
 	m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "⊘ canceled"})
-	m.refreshViewport()
+	// Esc aborts the train of thought — drop any queued follow-ups too.
+	m.queued = nil
+	m.relayout()
 }
 
 func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
@@ -1410,11 +1438,12 @@ func (m *Model) relayout() {
 	if m.recap != "" {
 		recapH = 2 // blank spacer line + the recap line itself
 	}
+	queuedH := len(m.queued) // one row per queued message, rendered above the prompt
 	// Size the input first — DynamicHeight re-fits it to the wrapped content at
 	// this width; the body claims whatever rows are left.
 	m.input.SetWidth(contentW - 4)
 	inputH := m.input.Height()
-	bodyH := m.height - chromeNoInput - inputH - splashH - suggestH - recapH
+	bodyH := m.height - chromeNoInput - inputH - splashH - suggestH - recapH - queuedH
 	if bodyH < 3 {
 		bodyH = 3
 	}
@@ -1493,7 +1522,8 @@ func (m Model) promptTop() int {
 	if m.recap != "" {
 		top += 2 // blank spacer line + the recap line
 	}
-	top++ // prompt border above the input
+	top += len(m.queued) // queued messages render above the prompt border
+	top++                // prompt border above the input
 	if hint := m.renderSlashSuggestions(); hint != "" && !m.contentPageActive() {
 		top += strings.Count(hint, "\n") + 1
 	}
@@ -2206,7 +2236,12 @@ func (m Model) View() tea.View {
 	}
 
 	promptLine := lipgloss.NewStyle().Foreground(m.promptBorderColor).Render(strings.Repeat("─", m.width))
-	promptParts := []string{promptLine}
+	promptParts := []string{}
+	// Queued messages float just above the prompt border.
+	if q := m.renderQueued(); q != "" {
+		promptParts = append(promptParts, q)
+	}
+	promptParts = append(promptParts, promptLine)
 	if hint := m.renderSlashSuggestions(); hint != "" && !m.contentPageActive() {
 		promptParts = append(promptParts, hint)
 	}
@@ -2332,6 +2367,43 @@ func (m Model) renderSlashSuggestions() string {
 	hint := "  " + strings.Join(pieces, "  ") +
 		m.styles.BorderDim.Render("   ·   ") + m.styles.Muted.Render("tab to complete")
 	return hint
+}
+
+// unstageLastQueued pops the most-recently-queued message back into the prompt
+// for editing and drops it from the queue. Returns false when the queue is
+// empty so callers can fall through to history recall.
+func (m *Model) unstageLastQueued() bool {
+	n := len(m.queued)
+	if n == 0 {
+		return false
+	}
+	m.input.SetValue(m.queued[n-1])
+	m.queued = m.queued[:n-1]
+	m.relayout()
+	return true
+}
+
+// renderQueued draws the messages queued while a response streams, as dimmed
+// lines just above the prompt — indented to the content margin, one per line,
+// truncated to width. Empty when nothing is queued.
+func (m Model) renderQueued() string {
+	if len(m.queued) == 0 {
+		return ""
+	}
+	pad := strings.Repeat(" ", entryIndent)
+	avail := m.width - entryIndent - 2 // leave room for the "⊕ " marker
+	lines := make([]string, len(m.queued))
+	for i, q := range m.queued {
+		text := q
+		if avail > 1 && lipgloss.Width(text) > avail {
+			r := []rune(text)
+			if len(r) > avail-1 {
+				text = string(r[:avail-1]) + "…"
+			}
+		}
+		lines[i] = pad + m.styles.Muted.Render("⊕ "+text)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // renderRecap draws the living one-line work summary at the bottom of the

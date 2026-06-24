@@ -19,8 +19,8 @@ func TestRecapAppearanceReservesViewportRow(t *testing.T) {
 
 	next, _ := m.Update(recapLoadedMsg{recap: "wired the engine badge"})
 	m = next.(Model)
-	if got := m.viewport.Height(); got != h0-1 {
-		t.Errorf("recap appearing should shrink viewport by 1 (reserve its row): %d -> %d, want %d", h0, got, h0-1)
+	if got := m.viewport.Height(); got != h0-2 {
+		t.Errorf("recap appearing should shrink viewport by 2 (blank spacer + recap line): %d -> %d, want %d", h0, got, h0-2)
 	}
 
 	// Clearing it frees the row again.

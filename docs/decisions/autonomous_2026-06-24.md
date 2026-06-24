@@ -18,3 +18,11 @@ Hard stops: design ties, irreversible actions, 5 failed fixes on one issue.
 - **Options:** (a) keep split with stubs in T2, replaced in T3; (b) merge into one dispatch.
 - **Chosen: (b)** merge. Ranking correctness>cleanliness: one atomic UI rewire compiles+tests as a unit and avoids a broken intermediate state; the throwaway stubbing in (a) is wasted churn and a likely error source.
 - **Reversible:** yes (worktree). Not a hard-stop.
+
+### D2 — Fix delete-error surfacing found at final review
+- Final whole-branch review (opus) returned "merge with fixes": `onContextDeleted` swallowed the delete-RPC error, violating the design's "Delete error | surface it" requirement.
+- **Action:** dispatched a fix (commit 88c4621) — surface the error in scrollback, skip reload on failure; also guard empty proposals from raising a confirm. Re-review clean.
+- Ranking correctness>...: a stated requirement + a silent success-looking failure = must-fix before declaring done.
+
+## OUTCOME
+All review gates passed. Branch `cedit-rework` complete (4 commits: confirm refactor, decision doc, /c rewire, error-fix). NOT merged to main, NOT pushed — awaiting user's per-act merge authorization on return.

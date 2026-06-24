@@ -62,3 +62,31 @@ func TestBuildLLMHistory_OrphanToolResultStripped(t *testing.T) {
 	if len(got) != 1 { t.Fatalf("len = %d, want 1 (orphan tool_result dropped)", len(got)) }
 	if got[0].Blocks[0].Text != "hi" { t.Errorf("kept wrong message: %+v", got[0]) }
 }
+
+func TestBuildLLMHistory_OutOfOrderToolResultDropped(t *testing.T) {
+	resBlocks := []llm.Block{{Type: llm.BlockToolResult, ToolUseRef: "u1", Content: "x"}}
+	useBlocks := []llm.Block{{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "LS"}}
+	turns := []conversation.Turn{
+		{Role: "user", BlocksJSON: blocksJSON(t, resBlocks)},      // result BEFORE use (invalid order)
+		{Role: "assistant", BlocksJSON: blocksJSON(t, useBlocks)}, // use AFTER result
+	}
+	got := BuildLLMHistory(turns)
+	if len(got) != 0 {
+		t.Fatalf("len = %d, want 0 (out-of-order pair fully dropped): %+v", len(got), got)
+	}
+}
+
+func TestBuildLLMHistory_MixedTextAndOrphanToolUse(t *testing.T) {
+	mixed := []llm.Block{
+		{Type: llm.BlockText, Text: "thinking"},
+		{Type: llm.BlockToolUse, ToolUseID: "u9", ToolName: "LS"}, // orphan: no following tool_result
+	}
+	turns := []conversation.Turn{{Role: "assistant", BlocksJSON: blocksJSON(t, mixed)}}
+	got := BuildLLMHistory(turns)
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1 (message kept for its text block)", len(got))
+	}
+	if len(got[0].Blocks) != 1 || got[0].Blocks[0].Type != llm.BlockText || got[0].Blocks[0].Text != "thinking" {
+		t.Errorf("expected only the text block to survive, got %+v", got[0].Blocks)
+	}
+}

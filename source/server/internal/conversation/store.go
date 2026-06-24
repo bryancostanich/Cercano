@@ -323,7 +323,7 @@ func (s *sqliteStore) GetTurns(ctx context.Context, conversationID string) ([]Tu
 		SELECT id, conversation_id, role, content, content_json, tokens_in, tokens_out, latency_ms, created_at
 		FROM turns
 		WHERE conversation_id = ?
-		ORDER BY created_at ASC`, conversationID)
+		ORDER BY created_at ASC, rowid ASC`, conversationID)
 	if err != nil {
 		return nil, err
 	}

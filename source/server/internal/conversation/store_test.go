@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -304,5 +305,27 @@ func TestListIncludesRecap(t *testing.T) {
 	}
 	if len(list) != 1 || list[0].Recap != "did a thing" {
 		t.Errorf("list recap = %+v", list)
+	}
+}
+
+func TestGetTurns_SameSecondPreservesInsertionOrder(t *testing.T) {
+	s, err := Open(":memory:")
+	if err != nil { t.Fatalf("Open: %v", err) }
+	defer s.Close()
+	ctx := context.Background()
+	if err := s.EnsureConversation(ctx, "c1", "", "m"); err != nil { t.Fatalf("Ensure: %v", err) }
+
+	ts := time.Unix(1_700_000_000, 0) // identical timestamp for all three
+	for _, c := range []string{"a", "b", "c"} {
+		if err := s.Append(ctx, Turn{ConversationID: "c1", Role: "assistant", Content: c, CreatedAt: ts}); err != nil {
+			t.Fatalf("Append %s: %v", c, err)
+		}
+	}
+	turns, err := s.GetTurns(ctx, "c1")
+	if err != nil { t.Fatalf("GetTurns: %v", err) }
+	got := []string{}
+	for _, tn := range turns { got = append(got, tn.Content) }
+	if strings.Join(got, "") != "abc" {
+		t.Fatalf("order not preserved: got %v, want [a b c]", got)
 	}
 }

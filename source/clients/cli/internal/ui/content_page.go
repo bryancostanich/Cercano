@@ -6,6 +6,7 @@ type contentPageID string
 
 const (
 	contentPageConfig  contentPageID = "config"
+	contentPageContext contentPageID = "context"
 	contentPageHistory contentPageID = "history"
 	contentPageModels  contentPageID = "models"
 )

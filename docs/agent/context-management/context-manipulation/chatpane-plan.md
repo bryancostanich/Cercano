@@ -478,7 +478,91 @@ git commit -m "feat(cli): context-manager ChatDriver over the edit RPCs"
 
 ---
 
-### Task 3: Wire the pane into `/c`
+### Task 3: `chatPane` rendering — real markdown + scrollbar
+
+Replace the pane's minimal `View` with the main buffer's actual rendering
+primitives: the same `render.Markdown` engine and the same `scrollbarColumn`,
+factored into a reusable per-entry renderer the main chat can later delegate to.
+Assistant messages render with full markdown formatting — no approximation.
+
+**Files:**
+- Modify: `source/clients/cli/internal/ui/chatpane.go`
+- Test: `source/clients/cli/internal/ui/chatpane_test.go`
+
+**Interfaces:**
+- Consumes: `render.NewMarkdown`/`(*render.Markdown).Render` (`internal/render`), `theme.CrackerMarkdownStyle()`, `scrollbarColumn`, `clampInt`/`maxInt`.
+- Produces: `renderChatEntry(e *Entry, md *render.Markdown, s theme.Styles, width int) string` (free, reusable); `chatPane` gains `md *render.Markdown`, `scrollOffset int`, `ScrollBy`/`ScrollState`.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `chatpane_test.go`:
+
+```go
+func TestChatPane_RendersMarkdownAndScrolls(t *testing.T) {
+	p := newTestPane()
+	p.Submit("ask")
+	p.Apply(chatAssistantMsg{text: "# Heading\n\nsome **bold** text"})
+	p.Apply(chatDoneMsg{})
+	out := stripAnsiCSI(p.View())
+	if !strings.Contains(out, "Heading") || !strings.Contains(out, "bold") {
+		t.Errorf("assistant markdown not rendered:\n%s", out)
+	}
+	for i := 0; i < 60; i++ { p.Apply(chatAssistantMsg{text: "line"}) }
+	st0 := p.ScrollState()
+	p.ScrollBy(20)
+	if p.ScrollState().Offset <= st0.Offset {
+		t.Errorf("ScrollBy did not advance: %d -> %d", st0.Offset, p.ScrollState().Offset)
+	}
+}
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `cd source/clients/cli && go test ./internal/ui/ -run TestChatPane_RendersMarkdown -count=1`
+Expected: FAIL — `renderChatEntry`/`p.md`/`ScrollState` undefined or markdown not applied.
+
+- [ ] **Step 3: Add the markdown renderer + per-entry render + scrollbar**
+
+In `chatpane.go`:
+- Import `"cercano/source/clients/cli/internal/render"` (and ensure `theme` imported).
+- Add fields `md *render.Markdown`, `scrollOffset int` to `chatPane`; in `newChatPane` set `md: render.NewMarkdown(theme.CrackerMarkdownStyle())`.
+- Add the reusable per-entry renderer (mirrors the main buffer's roles; extract-friendly so `Model.renderEntry` can later delegate):
+
+```go
+// renderChatEntry renders one chat Entry with the same primitives as the main
+// buffer: assistant content through the markdown engine, user/system styled.
+// Free function so both the pane and (later) the main chat can use it.
+func renderChatEntry(e *Entry, md *render.Markdown, s theme.Styles, width int) string {
+	switch e.Role {
+	case RoleAssistant:
+		return md.Render(e.Content, width)
+	case RoleUser:
+		return s.UserPrompt.Render("▶ ") + e.Content
+	default: // RoleSystem
+		return s.Muted.Render(e.Content)
+	}
+}
+```
+
+- Rewrite `View`: render each entry via `renderChatEntry` into a `[]string` of lines, window them with a scrollbar (copy `contextView.renderScrollableContent` / the `scrollbarColumn` pattern — reserve the bottom 1–2 rows for the status + queued lines, which stay PINNED and are not scrolled). Keep the busy line `animateSpinnerGlyph() + " " + animateLimeSweep(line)`. Add `ScrollBy(delta)`, `ScrollState() contentPageScrollState`, and a `clampScroll` mirroring `contextView`'s. Markdown width = pane width minus the scrollbar gutter (match the main buffer).
+
+(If `s.UserPrompt` is the wrong field, use the real user-sigil style from `theme.Styles` — check `styles.go`.)
+
+- [ ] **Step 4: Run tests + build**
+
+Run: `cd source/clients/cli && go test ./internal/ui/ -run TestChatPane -count=1 -v && go build ./...`
+Expected: PASS; clean build.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add source/clients/cli/internal/ui/chatpane.go source/clients/cli/internal/ui/chatpane_test.go
+git commit -m "feat(cli): chatPane renders via the buffer's markdown engine + scrollbar"
+```
+
+---
+
+### Task 4: Wire the pane into `/c`
 
 Embed a `chatPane` in `contextView`, feed it from the prompt bar, route events, and render the chat log + status alongside the turns.
 

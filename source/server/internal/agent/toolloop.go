@@ -62,7 +62,12 @@ type ToolLoopResult struct {
 	OutputTokens int // last LLM call's provider-reported output tokens
 }
 
-const MaxToolLoopIterations = 10
+// MaxToolLoopIterations caps the LLM round-trips per turn. Agentic work
+// (locate a project, read several docs, multi-file edits) routinely needs many
+// steps — 10 was far too low and turns died mid-task. This is a safety bound,
+// not an expected ceiling; on hitting it the loop degrades to a final no-tools
+// answer rather than erroring out.
+const MaxToolLoopIterations = 50
 
 func summarizeResult(res *agenttools.Result) string {
 	if res == nil {
@@ -286,8 +291,37 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			consecutiveErrors = 0
 		}
 	}
-	return ToolLoopResult{Iterations: MaxToolLoopIterations, History: hist, InputTokens: lastIn, OutputTokens: lastOut},
-		fmt.Errorf("hit max tool loop iterations (%d)", MaxToolLoopIterations)
+	// Reached the iteration cap with tools still pending. Rather than erroring
+	// out and discarding everything the model gathered, make one final pass with
+	// no tools so it answers from what it has. Text deltas stream as usual.
+	hist = append(hist, llm.Message{
+		Role: llm.RoleUser,
+		Blocks: []llm.Block{{Type: llm.BlockText, Text: fmt.Sprintf(
+			"You've reached the %d-step tool limit for this turn. Stop calling tools and give your best answer now using what you've gathered.",
+			MaxToolLoopIterations)}},
+	})
+	finalReq := llm.ChatRequest{Model: in.Model, System: in.System, Messages: hist, MaxTokens: 4096}
+	rdr, err := in.Provider.StreamChat(ctx, finalReq)
+	if err != nil {
+		return ToolLoopResult{Iterations: MaxToolLoopIterations, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, err
+	}
+	resp, err := collectStream(ctx, rdr, in.OnTextDelta)
+	rdr.Close()
+	if err != nil {
+		return ToolLoopResult{Iterations: MaxToolLoopIterations, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, err
+	}
+	var finalText string
+	for _, b := range resp.Blocks {
+		if b.Type == llm.BlockText {
+			finalText += b.Text
+		}
+	}
+	hist = append(hist, llm.Message{Role: llm.RoleAssistant, Blocks: resp.Blocks})
+	return ToolLoopResult{
+		FinalText: finalText, FinalBlocks: resp.Blocks,
+		Iterations: MaxToolLoopIterations, History: hist,
+		InputTokens: resp.InputTokens, OutputTokens: resp.OutputTokens,
+	}, nil
 }
 
 // collectStream consumes a StreamReader and rebuilds the equivalent

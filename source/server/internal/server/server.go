@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
+	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -802,21 +805,117 @@ func (s *Server) StreamProcessRequest(req *proto.ProcessRequestRequest, stream p
 	})
 }
 
-// buildToolLoopSystem builds the system prompt for the native tool-loop. It
-// names the working directory — without it the cloud model has no idea where it
-// is and wastes its whole iteration budget searching the filesystem to locate
-// the project — and includes the project's .cercano/context.md when present.
-func buildToolLoopSystem(workDir, projectContext string) string {
+// loopEnv is the environment grounding rendered into the tool-loop system
+// prompt's <env> block.
+type loopEnv struct {
+	WorkDir   string
+	Platform  string
+	Date      string
+	GitRepo   bool
+	GitBranch string
+}
+
+// buildToolLoopSystem assembles the tool-loop system prompt: an <env> block
+// (cwd, platform, date, git), a <directory> snapshot of the cwd's immediate
+// children, and the project's .cercano/context.md when present. The cwd + the
+// snapshot are what stop the cloud model from hunting the filesystem to locate
+// the project before it can do any real work.
+func buildToolLoopSystem(env loopEnv, dirSnapshot, projectContext string) string {
 	var b strings.Builder
-	b.WriteString("You are Cercano, an agentic coding assistant operating in a terminal.")
-	if workDir != "" {
-		fmt.Fprintf(&b, " The current working directory is %s — treat it as the project root and resolve relative file paths against it. Do not search the filesystem to locate the project.", workDir)
+	b.WriteString("You are Cercano, an agentic coding assistant operating in a terminal.\n\n")
+	b.WriteString("<env>\n")
+	if env.WorkDir != "" {
+		fmt.Fprintf(&b, "Working directory: %s\n", env.WorkDir)
+	}
+	if env.Platform != "" {
+		fmt.Fprintf(&b, "Platform: %s\n", env.Platform)
+	}
+	if env.Date != "" {
+		fmt.Fprintf(&b, "Today's date: %s\n", env.Date)
+	}
+	if env.GitRepo {
+		if env.GitBranch != "" {
+			fmt.Fprintf(&b, "Is a git repository: yes (branch %s)\n", env.GitBranch)
+		} else {
+			b.WriteString("Is a git repository: yes\n")
+		}
+	} else {
+		b.WriteString("Is a git repository: no\n")
+	}
+	b.WriteString("</env>\n\n")
+	b.WriteString("Resolve relative file paths against the working directory; don't search the filesystem to locate the project.\n")
+	if strings.TrimSpace(dirSnapshot) != "" {
+		b.WriteString("\n<directory>\n")
+		b.WriteString(strings.TrimRight(dirSnapshot, "\n"))
+		b.WriteString("\n</directory>\n")
 	}
 	if strings.TrimSpace(projectContext) != "" {
-		b.WriteString("\n\nProject context:\n")
-		b.WriteString(projectContext)
+		b.WriteString("\n<project-context>\n")
+		b.WriteString(strings.TrimRight(projectContext, "\n"))
+		b.WriteString("\n</project-context>\n")
 	}
 	return b.String()
+}
+
+// buildSystemPrompt gathers live environment grounding for workDir and renders
+// the tool-loop system prompt.
+func (s *Server) buildSystemPrompt(workDir string) string {
+	env := loopEnv{
+		WorkDir:  workDir,
+		Platform: runtime.GOOS,
+		Date:     time.Now().Format("2006-01-02"),
+	}
+	if workDir != "" {
+		env.GitRepo, env.GitBranch = gitInfo(workDir)
+	}
+	return buildToolLoopSystem(env, directorySnapshot(workDir, 80), s.loadProjectContext(workDir))
+}
+
+// directorySnapshot lists the immediate children of dir — directories first
+// (trailing slash), then files — skipping dot-entries, capped at max with a
+// "(N more)" note so the prompt stays bounded.
+func directorySnapshot(dir string, max int) string {
+	if dir == "" {
+		return ""
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	var dirs, files []string
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		if e.IsDir() {
+			dirs = append(dirs, name+"/")
+		} else {
+			files = append(files, name)
+		}
+	}
+	sort.Strings(dirs)
+	sort.Strings(files)
+	all := append(dirs, files...)
+	more := 0
+	if len(all) > max {
+		more = len(all) - max
+		all = all[:max]
+	}
+	out := strings.Join(all, "\n")
+	if more > 0 {
+		out += fmt.Sprintf("\n… (%d more)", more)
+	}
+	return out
+}
+
+// gitInfo reports whether dir is inside a git work tree and its current branch.
+func gitInfo(dir string) (bool, string) {
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		return false, ""
+	}
+	return true, strings.TrimSpace(string(out))
 }
 
 // loadProjectContext returns the project's .cercano/context.md content, or "" if
@@ -947,7 +1046,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		Permissions:         s.permStore,
 		UserInput:           req.GetInput(),
 		Model:               s.currentConfig.CloudModel,
-		System:              buildToolLoopSystem(req.GetWorkDir(), s.loadProjectContext(req.GetWorkDir())),
+		System:              s.buildSystemPrompt(req.GetWorkDir()),
 		EventSink:           sink,
 		PermissionRequester: requester,
 		ConvHistory:         convHistory,

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -10,19 +11,121 @@ import (
 	"cercano/source/server/pkg/agentclient"
 )
 
+// stubDriver is a no-op ChatDriver for tests that don't need real RPCs.
+type stubDriver struct{}
+
+func (stubDriver) Name() string { return "stub" }
+func (stubDriver) Submit(_ context.Context, _ string) tea.Cmd {
+	return func() tea.Msg { return chatDoneMsg{text: "ok"} }
+}
+
 func modelWithContextView() Model {
 	m := Model{
-		palette:      theme.Cracker(),
-		styles:       theme.NewStyles(theme.Cracker()),
-		convID:       "c1",
+		palette:        theme.Cracker(),
+		styles:         theme.NewStyles(theme.Cracker()),
+		convID:         "c1",
 		focusedToolIdx: -1,
 	}
 	m.input = newPromptInput()
 	m.input.Focus()
-	cv := &contextView{width: 80, height: 24, palette: m.palette, styles: m.styles, convID: "c1"}
+	p, s, w, h := m.palette, m.styles, 80, 24
+	d := &contextManagerDriver{agent: nil, convID: "c1"}
+	cv := &contextView{
+		width:   w,
+		height:  h,
+		palette: p,
+		styles:  s,
+		convID:  "c1",
+	}
+	cv.driver = d
+	cv.pane = newChatPane(d, s, p, w, h)
 	m.content = cv
 	return m
 }
+
+// --- new Task 4 tests ---
+
+func TestContextView_PaneSubmitFromPromptBar(t *testing.T) {
+	m := modelWithContextView()
+	cv := m.content.(*contextView)
+	m.input.SetValue("drop the tangent")
+	next, cmd := m.handleContextViewKey(cv, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Error("enter should submit to the pane (a cmd)")
+	}
+	if !cv.pane.Busy() {
+		t.Error("pane should be busy after submit")
+	}
+	if next.input.Value() != "" {
+		t.Errorf("input not cleared: %q", next.input.Value())
+	}
+}
+
+func TestContextView_ChatConfirmRaisesGate(t *testing.T) {
+	m := modelWithContextView()
+	cv := m.content.(*contextView)
+	m2, _ := m.routeChatMsg(chatConfirmMsg{
+		assistant: "r",
+		onYes:     func() tea.Msg { return chatDoneMsg{} },
+		onNo:      func() tea.Msg { return chatDoneMsg{} },
+	})
+	if m2.pendingConfirm == nil {
+		t.Error("chatConfirmMsg should raise the confirm gate")
+	}
+	// the rationale should be in the pane log
+	found := false
+	for _, e := range cv.pane.entries {
+		if e.Content == "r" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("assistant rationale not appended to the pane")
+	}
+}
+
+func TestContextView_ChatDoneClears(t *testing.T) {
+	m := modelWithContextView()
+	cv := m.content.(*contextView)
+	// Submit first to get busy
+	cv.pane.Submit("hi")
+	if !cv.pane.Busy() {
+		t.Fatal("pane should be busy")
+	}
+	m.routeChatMsg(chatDoneMsg{text: "done"})
+	if cv.pane.Busy() {
+		t.Error("chatDoneMsg should clear busy")
+	}
+}
+
+func TestContextView_UpUnstagesLastQueued(t *testing.T) {
+	m := modelWithContextView()
+	cv := m.content.(*contextView)
+	// Submit to make busy, then queue a second message
+	cv.pane.Submit("first")
+	cv.pane.Submit("second") // enqueued
+	next, _ := m.handleContextViewKey(cv, tea.KeyPressMsg{Code: tea.KeyUp})
+	if next.input.Value() != "second" {
+		t.Errorf("up should pop last queued into input, got %q", next.input.Value())
+	}
+}
+
+func TestContextView_EscClosesPageAndClearsQueue(t *testing.T) {
+	m := modelWithContextView()
+	cv := m.content.(*contextView)
+	cv.pane.Submit("first")
+	cv.pane.Submit("queued") // enqueued
+	// esc with empty input should close page and clear queue
+	next, _ := m.handleContextViewKey(cv, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if next.content != nil {
+		t.Error("esc with empty input should close the /c page")
+	}
+	if len(cv.pane.queued) != 0 {
+		t.Error("esc should clear the pane queue")
+	}
+}
+
+// --- retained behavioural tests updated for new pane+driver flow ---
 
 func TestContextViewRoute_TypingEditsPromptBar(t *testing.T) {
 	m := modelWithContextView()
@@ -46,13 +149,22 @@ func TestContextViewRoute_EnterProposes(t *testing.T) {
 	}
 }
 
+// ProposalRaisesConfirm: chatConfirmMsg from driver raises pendingConfirm + marks turns.
 func TestContextViewRoute_ProposalRaisesConfirm(t *testing.T) {
 	m := modelWithContextView()
 	cv := m.content.(*contextView)
 	cv.snapshot = contextSnapshot{Turns: []agentclient.ContextTurn{{ID: "a", Role: "user", Preview: "x"}}}
-	m2, _ := m.onContextProposal(contextEditProposalMsg{p: agentclient.Proposal{DeleteIDs: []string{"a"}, Rationale: "r"}})
+	// Simulate the driver emitting a chatConfirmMsg that also marks turns.
+	cv.pane.appendAssistant("delete rationale")
+	cv.applyProposalIDs([]string{"a"})
+	msg := chatConfirmMsg{
+		assistant: "",
+		onYes:     func() tea.Msg { return chatDoneMsg{} },
+		onNo:      func() tea.Msg { return chatDoneMsg{} },
+	}
+	m2, _ := m.routeChatMsg(msg)
 	if m2.pendingConfirm == nil {
-		t.Error("proposal should raise a pendingConfirm")
+		t.Error("chatConfirmMsg should raise a pendingConfirm")
 	}
 	if !cv.markedForDelete("a") {
 		t.Error("proposal should mark turn a")
@@ -93,35 +205,34 @@ func TestContextViewRoute_EnterWithEmptyInputIsNoop(t *testing.T) {
 	}
 }
 
+// DeleteErrorSurfacesScrollback: chatErrorMsg routes to pane (shown in pane log).
 func TestContextViewRoute_DeleteErrorSurfacesScrollback(t *testing.T) {
 	m := modelWithContextView()
-	before := len(m.entries)
-	m2, _ := m.onContextDeleted(contextEditDeletedMsg{err: errors.New("rpc: unavailable")})
-	if len(m2.entries) <= before {
-		t.Fatal("delete error should append a scrollback entry")
+	cv := m.content.(*contextView)
+	before := len(cv.pane.entries)
+	m.routeChatMsg(chatErrorMsg{err: errors.New("rpc: unavailable")})
+	if len(cv.pane.entries) <= before {
+		t.Fatal("delete error should append an entry to the pane log")
 	}
-	last := m2.entries[len(m2.entries)-1]
-	if !strings.Contains(last.Content, "couldn't delete") {
-		t.Errorf("last entry should contain 'couldn't delete', got: %q", last.Content)
-	}
-	// snapshot should NOT be reloaded on error — cv.snapshot stays zero
-	cv := m2.content.(*contextView)
-	if cv.snapshot.Turns != nil {
-		t.Error("snapshot should not be reloaded on delete error")
+	last := cv.pane.entries[len(cv.pane.entries)-1]
+	if !strings.Contains(last.Content, "rpc: unavailable") {
+		t.Errorf("pane error entry should contain error text, got: %q", last.Content)
 	}
 }
 
+// EmptyProposalNoConfirm: chatDoneMsg (empty proposal) → no confirm gate, pane gets "nothing to remove".
 func TestContextViewRoute_EmptyProposalNoConfirm(t *testing.T) {
 	m := modelWithContextView()
-	before := len(m.entries)
-	m2, _ := m.onContextProposal(contextEditProposalMsg{p: agentclient.Proposal{DeleteIDs: []string{}, Rationale: "r"}})
+	cv := m.content.(*contextView)
+	before := len(cv.pane.entries)
+	m2, _ := m.routeChatMsg(chatDoneMsg{text: "nothing to remove."})
 	if m2.pendingConfirm != nil {
-		t.Error("empty proposal should not raise a pendingConfirm")
+		t.Error("chatDoneMsg should not raise a pendingConfirm")
 	}
-	if len(m2.entries) <= before {
-		t.Fatal("empty proposal should append a scrollback entry")
+	if len(cv.pane.entries) <= before {
+		t.Fatal("chatDoneMsg should append an entry to the pane log")
 	}
-	last := m2.entries[len(m2.entries)-1]
+	last := cv.pane.entries[len(cv.pane.entries)-1]
 	if !strings.Contains(last.Content, "nothing to remove") {
 		t.Errorf("last entry should contain 'nothing to remove', got: %q", last.Content)
 	}

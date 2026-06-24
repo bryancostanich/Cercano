@@ -36,6 +36,7 @@ import (
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/llm/anthropic"
+	ollamallm "cercano/source/server/internal/llm/ollama"
 	"cercano/source/server/internal/localruntime"
 	runtimellama "cercano/source/server/internal/localruntime/llamaserver"
 	"cercano/source/server/internal/loop"
@@ -281,6 +282,13 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		})
 		srv.SetCloudLLMProvider(client)
 	}
+
+	// Native tool-loop local provider (Ollama). Wired unconditionally so Local
+	// modes can drive the tool-calling loop; availability is enforced per turn.
+	srv.SetLocalLLMProvider(ollamallm.NewClient(ollamallm.Config{
+		BaseURL: cfg.OllamaURL,
+		Model:   cfg.LocalModel,
+	}))
 
 	proto.RegisterAgentServer(s, srv)
 

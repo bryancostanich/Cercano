@@ -296,13 +296,13 @@ func TestRuntimeDashboardCatalogTypingFiltersByDefault(t *testing.T) {
 	_ = dashboard.catalogSearch.Focus()
 	dashboard.list = overlay.New("models and processes", runtimeActionRowsFromSnapshot(dashboard.snapshot), overlay.Hooks{})
 
-	for _, ch := range "Qwen" {
+	for _, ch := range "qwen" {
 		if _, closed := dashboard.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)}); closed {
 			t.Fatal("typing in catalog search should not close dashboard")
 		}
 	}
-	if got := dashboard.catalogSearch.Value(); got != "Qwen" {
-		t.Fatalf("catalog search value = %q, want Qwen", got)
+	if got := dashboard.catalogSearch.Value(); got != "qwen" {
+		t.Fatalf("catalog search value = %q, want qwen", got)
 	}
 	if view := ansi.Strip(dashboard.renderCatalogBlock(maxCatalogRows)); !strings.Contains(view, "Qwen2.5 Coder") {
 		t.Fatalf("catalog should show Qwen after typing:\n%s", view)

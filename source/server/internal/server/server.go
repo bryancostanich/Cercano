@@ -865,6 +865,16 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		},
 	})
 
+	var convHistory []llm.Message
+	if store := s.agent.PersistentStore(); store != nil && req.GetConversationId() != "" {
+		if turns, err := store.GetTurns(ctx, req.GetConversationId()); err != nil {
+			fmt.Fprintf(os.Stderr, "[tool-loop] GetTurns(%s) failed: %v\n", req.GetConversationId(), err)
+		} else {
+			convHistory = agent.BuildLLMHistory(turns)
+		}
+	}
+	injectedLen := len(convHistory)
+
 	result, err := agent.RunToolLoop(ctx, agent.ToolLoopInput{
 		Provider:            s.cloudLLMProvider,
 		Registry:            s.toolRegistry,
@@ -873,12 +883,13 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		Model:               s.currentConfig.CloudModel,
 		EventSink:           sink,
 		PermissionRequester: requester,
+		ConvHistory:         convHistory,
 	})
 	if err != nil {
 		return fmt.Errorf("tool loop error: %w", err)
 	}
 
-	s.persistToolLoopTurns(ctx, req, result, 0)
+	s.persistToolLoopTurns(ctx, req, result, injectedLen)
 
 	return stream.Send(&proto.StreamProcessResponse{
 		Payload: &proto.StreamProcessResponse_FinalResponse{

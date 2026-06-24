@@ -42,6 +42,7 @@ type scriptedProvider struct {
 	scripts [][]llm.Block
 	calls   int
 	caps    llm.Capabilities
+	seen    [][]llm.Message // req.Messages captured per StreamChat call
 }
 
 func (p *scriptedProvider) Name() string                   { return "scripted" }
@@ -56,6 +57,7 @@ func (p *scriptedProvider) StreamChat(ctx context.Context, req llm.ChatRequest) 
 		return nil, &scriptExhaustedErr{call: p.calls}
 	}
 	blocks := p.scripts[p.calls]
+	p.seen = append(p.seen, req.Messages)
 	p.calls++
 	return &scriptedStream{events: blocksToEvents(blocks)}, nil
 }
@@ -345,4 +347,58 @@ func (o cwdObserver) Execute(ctx context.Context, args json.RawMessage) (*agentt
 	wd, _ := os.Getwd()
 	*o.out = wd
 	return agenttools.NewTextResult("ok"), nil
+}
+
+func TestStreamToolLoop_ReplaysHistoryNoDuplication(t *testing.T) {
+	srv, store := newServerWithStore(t)
+	prov := &scriptedProvider{
+		scripts: [][]llm.Block{
+			{{Type: llm.BlockText, Text: "one"}},
+			{{Type: llm.BlockText, Text: "two"}},
+		},
+		caps: llm.Capabilities{SupportsTools: true},
+	}
+	srv.SetCloudLLMProvider(prov)
+
+	// Turn 1.
+	if err := srv.streamProcessRequestWithToolLoop(
+		&proto.ProcessRequestRequest{Input: "first", ConversationId: "conv-r"},
+		&fakeStream{ctx: context.Background()}); err != nil {
+		t.Fatalf("turn 1: %v", err)
+	}
+	// Turn 2.
+	if err := srv.streamProcessRequestWithToolLoop(
+		&proto.ProcessRequestRequest{Input: "second", ConversationId: "conv-r"},
+		&fakeStream{ctx: context.Background()}); err != nil {
+		t.Fatalf("turn 2: %v", err)
+	}
+
+	// (a) Replay: the provider's turn-2 input must include the prior turn
+	// (user "first", assistant "one") ahead of the new user "second".
+	if len(prov.seen) != 2 {
+		t.Fatalf("expected 2 provider calls, got %d", len(prov.seen))
+	}
+	turn2 := prov.seen[1]
+	if len(turn2) != 3 {
+		t.Fatalf("turn-2 provider input = %d messages, want 3 (first, one, second)", len(turn2))
+	}
+	if turn2[0].Blocks[0].Text != "first" || turn2[1].Blocks[0].Text != "one" || turn2[2].Blocks[0].Text != "second" {
+		t.Errorf("turn-2 history wrong: %q / %q / %q",
+			turn2[0].Blocks[0].Text, turn2[1].Blocks[0].Text, turn2[2].Blocks[0].Text)
+	}
+
+	// (b) No duplication: 2 messages per turn × 2 turns = 4, linear.
+	turns, err := store.GetTurns(context.Background(), "conv-r")
+	if err != nil {
+		t.Fatalf("GetTurns: %v", err)
+	}
+	if len(turns) != 4 {
+		t.Fatalf("expected 4 turns (linear growth, no re-save), got %d", len(turns))
+	}
+	want := []string{"first", "one", "second", "two"}
+	for i, w := range want {
+		if turns[i].Content != w {
+			t.Errorf("turn %d = %q, want %q", i, turns[i].Content, w)
+		}
+	}
 }

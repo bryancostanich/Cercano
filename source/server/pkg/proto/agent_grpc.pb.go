@@ -50,6 +50,8 @@ const (
 	Agent_AllowToolCall_FullMethodName              = "/agent.Agent/AllowToolCall"
 	Agent_DenyToolCall_FullMethodName               = "/agent.Agent/DenyToolCall"
 	Agent_GetProviderCapabilities_FullMethodName    = "/agent.Agent/GetProviderCapabilities"
+	Agent_ProposeContextEdit_FullMethodName         = "/agent.Agent/ProposeContextEdit"
+	Agent_DeleteConversationTurns_FullMethodName    = "/agent.Agent/DeleteConversationTurns"
 )
 
 // AgentClient is the client API for Agent service.
@@ -121,6 +123,11 @@ type AgentClient interface {
 	DenyToolCall(ctx context.Context, in *DenyToolCallRequest, opts ...grpc.CallOption) (*DenyToolCallResponse, error)
 	// GetProviderCapabilities reports what the active provider supports.
 	GetProviderCapabilities(ctx context.Context, in *GetProviderCapabilitiesRequest, opts ...grpc.CallOption) (*GetProviderCapabilitiesResponse, error)
+	// ProposeContextEdit runs the picker model over a conversation's turn summaries
+	// and returns a validated deletion proposal. Read-only — no turns are deleted.
+	ProposeContextEdit(ctx context.Context, in *ProposeContextEditRequest, opts ...grpc.CallOption) (*ProposeContextEditResponse, error)
+	// DeleteConversationTurns hard-deletes the named turns from a conversation.
+	DeleteConversationTurns(ctx context.Context, in *DeleteConversationTurnsRequest, opts ...grpc.CallOption) (*DeleteConversationTurnsResponse, error)
 }
 
 type agentClient struct {
@@ -459,6 +466,26 @@ func (c *agentClient) GetProviderCapabilities(ctx context.Context, in *GetProvid
 	return out, nil
 }
 
+func (c *agentClient) ProposeContextEdit(ctx context.Context, in *ProposeContextEditRequest, opts ...grpc.CallOption) (*ProposeContextEditResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProposeContextEditResponse)
+	err := c.cc.Invoke(ctx, Agent_ProposeContextEdit_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) DeleteConversationTurns(ctx context.Context, in *DeleteConversationTurnsRequest, opts ...grpc.CallOption) (*DeleteConversationTurnsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteConversationTurnsResponse)
+	err := c.cc.Invoke(ctx, Agent_DeleteConversationTurns_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServer is the server API for Agent service.
 // All implementations must embed UnimplementedAgentServer
 // for forward compatibility.
@@ -528,6 +555,11 @@ type AgentServer interface {
 	DenyToolCall(context.Context, *DenyToolCallRequest) (*DenyToolCallResponse, error)
 	// GetProviderCapabilities reports what the active provider supports.
 	GetProviderCapabilities(context.Context, *GetProviderCapabilitiesRequest) (*GetProviderCapabilitiesResponse, error)
+	// ProposeContextEdit runs the picker model over a conversation's turn summaries
+	// and returns a validated deletion proposal. Read-only — no turns are deleted.
+	ProposeContextEdit(context.Context, *ProposeContextEditRequest) (*ProposeContextEditResponse, error)
+	// DeleteConversationTurns hard-deletes the named turns from a conversation.
+	DeleteConversationTurns(context.Context, *DeleteConversationTurnsRequest) (*DeleteConversationTurnsResponse, error)
 	mustEmbedUnimplementedAgentServer()
 }
 
@@ -630,6 +662,12 @@ func (UnimplementedAgentServer) DenyToolCall(context.Context, *DenyToolCallReque
 }
 func (UnimplementedAgentServer) GetProviderCapabilities(context.Context, *GetProviderCapabilitiesRequest) (*GetProviderCapabilitiesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetProviderCapabilities not implemented")
+}
+func (UnimplementedAgentServer) ProposeContextEdit(context.Context, *ProposeContextEditRequest) (*ProposeContextEditResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProposeContextEdit not implemented")
+}
+func (UnimplementedAgentServer) DeleteConversationTurns(context.Context, *DeleteConversationTurnsRequest) (*DeleteConversationTurnsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteConversationTurns not implemented")
 }
 func (UnimplementedAgentServer) mustEmbedUnimplementedAgentServer() {}
 func (UnimplementedAgentServer) testEmbeddedByValue()               {}
@@ -1196,6 +1234,42 @@ func _Agent_GetProviderCapabilities_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Agent_ProposeContextEdit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProposeContextEditRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).ProposeContextEdit(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_ProposeContextEdit_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).ProposeContextEdit(ctx, req.(*ProposeContextEditRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_DeleteConversationTurns_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteConversationTurnsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).DeleteConversationTurns(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_DeleteConversationTurns_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).DeleteConversationTurns(ctx, req.(*DeleteConversationTurnsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Agent_ServiceDesc is the grpc.ServiceDesc for Agent service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1318,6 +1392,14 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetProviderCapabilities",
 			Handler:    _Agent_GetProviderCapabilities_Handler,
+		},
+		{
+			MethodName: "ProposeContextEdit",
+			Handler:    _Agent_ProposeContextEdit_Handler,
+		},
+		{
+			MethodName: "DeleteConversationTurns",
+			Handler:    _Agent_DeleteConversationTurns_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -85,6 +85,13 @@ service Agent {
 
   // GetProviderCapabilities reports what the active provider supports.
   rpc GetProviderCapabilities (GetProviderCapabilitiesRequest) returns (GetProviderCapabilitiesResponse) {}
+
+  // ProposeContextEdit runs the picker model over a conversation's turn summaries
+  // and returns a validated deletion proposal. Read-only — no turns are deleted.
+  rpc ProposeContextEdit (ProposeContextEditRequest) returns (ProposeContextEditResponse) {}
+
+  // DeleteConversationTurns hard-deletes the named turns from a conversation.
+  rpc DeleteConversationTurns (DeleteConversationTurnsRequest) returns (DeleteConversationTurnsResponse) {}
 }
 
 // Incremental token from LLM streaming.
@@ -412,7 +419,13 @@ message ContextTurn {
   string kind       = 2; // "text" | "tool_use" | "tool_result"
   string preview    = 3; // flattened, truncated, display-ready
   int32  est_tokens = 4; // contextmeter tokenizer estimate
+  string id         = 5; // persistent turn ID (UUID)
 }
+
+message ProposeContextEditRequest  { string conversation_id = 1; string instruction = 2; }
+message ProposeContextEditResponse { repeated string delete_ids = 1; string rationale = 2; }
+message DeleteConversationTurnsRequest  { string conversation_id = 1; repeated string turn_id = 2; }
+message DeleteConversationTurnsResponse { int32 deleted = 1; }
 
 // BuiltinTool summarises one registered agent tool — surfaced by ListTools
 // for the CLI's /tools listing.

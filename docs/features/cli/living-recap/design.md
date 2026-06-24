@@ -1,6 +1,10 @@
 # Living Recap — Design
 
-**Status:** Design approved 2026-06-21. Implementation not started.
+**Status:** Implemented. Store column, debounced local-only generator, proto +
+`GetConversation` RPC, agentclient, and CLI rendering (footer, history picker,
+resume banner) are all in place. Recap regeneration is scheduled on both
+persistence paths — the legacy SmartRouter path (inside the agent) and the
+native tool-loop path (via `Agent.ScheduleRecap` from the streaming server).
 
 A one-line, continuously-maintained summary of the work in a Cercano CLI/agent
 session — analogous to Claude Code's "recap." It is generated locally, persisted

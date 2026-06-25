@@ -228,6 +228,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	convRef := &struct{ id string }{}
 	slash.RegisterHistory(reg, ag, func() string { return convRef.id })
 	slash.RegisterRuntime(reg)
+	slash.RegisterLocus(reg, ag)
 	slash.RegisterContextView(reg)
 
 	splash := banner.NewAnimModel(p, banner.Meta{

@@ -33,7 +33,13 @@ func main() {
 
 	summarize := agentSummarizer(client)
 	tok := contextmeter.Default()
-	budget := compaction.Budget{VerbatimRecent: 4, SegmentTokens: 32000}
+	// SegmentTokens is sized to the small illustrative corpus (older spans are
+	// tens-to-hundreds of tokens) so the older history actually splits into
+	// multiple segments — otherwise every fixture is one segment and
+	// map-reduce/model degenerates to map-reduce/mechanical, making the B-vs-C
+	// comparison inert. A production run over large real conversations would use
+	// a realistic budget (e.g. 32000).
+	budget := compaction.Budget{VerbatimRecent: 4, SegmentTokens: 40}
 
 	contenders := []compaction.Compactor{
 		compaction.RollingCompactor{},

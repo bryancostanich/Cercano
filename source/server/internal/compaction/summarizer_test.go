@@ -52,6 +52,54 @@ STATE: fixed`
 	}
 }
 
+func TestParseSummary_LenientBulletsAndMalformed(t *testing.T) {
+	in := `GOAL:
+DECISIONS:
+1. numbered decision
+2) paren decision
+* star decision
+FILES:
+- a.go: kept
+- malformed line with no colon
+- 1.txt: numeric leading name
+OPEN:
+- a thread`
+	s := ParseSummary(in)
+	if s.Goal != "" {
+		t.Errorf("empty GOAL value should parse to empty, got %q", s.Goal)
+	}
+	if len(s.Decisions) != 3 ||
+		s.Decisions[0] != "numbered decision" ||
+		s.Decisions[1] != "paren decision" ||
+		s.Decisions[2] != "star decision" {
+		t.Errorf("numbered/paren/star bullets not stripped: %v", s.Decisions)
+	}
+	if s.Files["a.go"] != "kept" {
+		t.Errorf("well-formed FILES entry lost: %v", s.Files)
+	}
+	if _, bad := s.Files["malformed line with no colon"]; bad {
+		t.Error("a FILES line with no colon should be dropped, not keyed by the whole line")
+	}
+	if s.Files["1.txt"] != "numeric leading name" {
+		t.Errorf("numeric-leading filename mangled by bullet stripping: %v", s.Files)
+	}
+	if len(s.OpenThreads) != 1 || s.OpenThreads[0] != "a thread" {
+		t.Errorf("OpenThreads = %v", s.OpenThreads)
+	}
+}
+
+func TestParseSummary_BulletBeforeAnyLabelIgnored(t *testing.T) {
+	in := `- this bullet precedes every section label
+GOAL: real goal`
+	s := ParseSummary(in)
+	if s.Goal != "real goal" {
+		t.Errorf("Goal = %q", s.Goal)
+	}
+	if len(s.Decisions) != 0 || len(s.OpenThreads) != 0 {
+		t.Errorf("a bullet before any section must be ignored: %+v", s)
+	}
+}
+
 func TestParseSummary_GarbageIsEmpty(t *testing.T) {
 	s := ParseSummary("the model rambled with no sections at all")
 	if s.Goal != "" || s.State != "" || len(s.Decisions) != 0 {

@@ -99,10 +99,13 @@ func stripBullet(line string) string {
 			return strings.TrimSpace(line[len(p):])
 		}
 	}
-	// "1." / "2)" style
+	// "1. " / "2) " style — require the marker to be followed by a space (or end)
+	// so a numeric-leading filename like "1.txt: foo" is not mistaken for a bullet.
 	if i := strings.IndexAny(line, ".)"); i > 0 && i <= 3 {
 		if _, err := fmt.Sscanf(line[:i], "%d", new(int)); err == nil {
-			return strings.TrimSpace(line[i+1:])
+			if i+1 >= len(line) || line[i+1] == ' ' {
+				return strings.TrimSpace(line[i+1:])
+			}
 		}
 	}
 	return line

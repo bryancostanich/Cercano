@@ -15,8 +15,11 @@ import (
 // the placeholder is replaced, but we freeze for total determinism.
 var frozenTurnStart = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-// scriptedTurn is the canned StreamMsg script driven through both the pre-move
-// and post-move paths: token → progress → tool lifecycle → token → done.
+// scriptedTurn is the canned StreamMsg script (token → progress → tool lifecycle
+// → token → done) driven through the post-move driver+Apply path. At capture
+// time (commit 64503b4) it was asserted byte-identical to the legacy
+// applyStreamMsg path before that machine was deleted; the committed golden is
+// therefore provably equal to the old machine's output and frozen as the gate.
 func scriptedTurn() []agentclient.StreamMsg {
 	return []agentclient.StreamMsg{
 		{Type: agentclient.TypeRouteSelected, RouteModel: "local-fast", RouteCloud: false},

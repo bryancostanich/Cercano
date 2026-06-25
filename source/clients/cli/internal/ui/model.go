@@ -521,7 +521,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.mouseInPrompt(mouse) {
-			m.clearSelection()
+			m.chat.ClearSelection()
 			m.input.MouseDown(mouse.X, mouse.Y-m.promptTop())
 			return m, nil
 		}
@@ -550,18 +550,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.MouseDrag(mouse.X, mouse.Y-m.promptTop())
 			return m, nil
 		}
-		// An active scrollbar drag is unambiguous and takes priority over text
-		// selection — otherwise a left-over selection.Dragging would swallow the
-		// motion and the bar wouldn't scroll.
-		if m.chat.ScrollbarDragging() {
-			m.chat.scrollbarScrub(mouse.Y - m.scrollbarTop)
-			return m, nil
-		}
-		if m.chat.SelectionDragging() {
-			cmd := m.chat.MouseDrag(mouse.X, mouse.Y-m.scrollbarTop)
-			return m, cmd
-		}
-		return m, nil
+		// MouseDrag checks scrollbarDragging first (priority over text selection)
+		// then falls through to the selection extend path.
+		cmd := m.chat.MouseDrag(mouse.X, mouse.Y-m.scrollbarTop)
+		return m, cmd
 
 	case tea.MouseReleaseMsg:
 		if m.contentPageActive() {
@@ -569,24 +561,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		mouse := msg.Mouse()
-		m.chat.StopDragScroll()
 		if m.input.Dragging() {
 			m.input.MouseUp(mouse.X, mouse.Y-m.promptTop())
 			return m, nil
 		}
-		if m.chat.SelectionDragging() {
-			m.chat.updateSelection(mouse.X, mouse.Y-m.scrollbarTop, true)
-			m.chat.ClearSelectionDrag()
-			if m.chat.selectionEmpty() {
-				m.chat.ClearSelection()
-			} else if text := m.chat.selectedText(); text != "" {
-				m.selectionNotice = "copied selection"
-				m.chat.StopScrollbarDrag()
-				return m, selectionClipboardCmd(text)
-			}
+		cmd, copied := m.chat.MouseUp(mouse.X, mouse.Y-m.scrollbarTop)
+		if copied {
+			m.selectionNotice = "copied selection"
 		}
-		m.chat.StopScrollbarDrag()
-		return m, nil
+		return m, cmd
 
 	case tea.KeyboardEnhancementsMsg:
 		return m, nil
@@ -1529,7 +1512,7 @@ func (m *Model) refreshViewport() {
 func (m Model) preparePromptInput() Model {
 	needsRefresh := m.focusedToolIdx >= 0
 	if m.chat.SelectionActive() {
-		m.clearSelection()
+		m.chat.ClearSelection()
 	}
 	m.selectionNotice = ""
 	if needsRefresh {

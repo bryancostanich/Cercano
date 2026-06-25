@@ -69,60 +69,6 @@ func (s textSelection) lineRange(line, width int) (int, int, bool) {
 	}
 }
 
-func (m Model) mouseInViewportText(mouse tea.Mouse) bool {
-	return mouse.X >= 0 &&
-		mouse.X < m.chat.Width() &&
-		mouse.Y >= m.scrollbarTop &&
-		mouse.Y < m.scrollbarTop+m.chat.Height()
-}
-
-func (m *Model) beginSelection(mouse tea.Mouse) {
-	m.selectionNotice = ""
-	pt := m.selectionPointFromMouse(mouse, false)
-	m.chat.selection = textSelection{
-		Active:   true,
-		Dragging: true,
-		Anchor:   pt,
-		Cursor:   pt,
-	}
-}
-
-func (m *Model) updateSelection(mouse tea.Mouse, allowScroll bool) {
-	if !m.chat.selection.Active {
-		return
-	}
-	m.chat.selection.Cursor = m.selectionPointFromMouse(mouse, allowScroll)
-}
-
-func (m *Model) clearSelection() {
-	m.chat.ClearSelection()
-}
-
-func (m *Model) selectionPointFromMouse(mouse tea.Mouse, allowScroll bool) selectionPoint {
-	height := m.chat.Height()
-	row := mouse.Y - m.scrollbarTop
-	if allowScroll {
-		switch {
-		case row < 0:
-			m.chat.ScrollUp(1)
-			row = 0
-		case row >= height:
-			m.chat.ScrollDown(1)
-			row = height - 1
-		}
-	}
-	row = clampInt(row, 0, maxInt(0, height-1))
-	line := m.chat.YOffset() + row
-	plainLines := m.chat.PlainLines()
-	if len(plainLines) > 0 {
-		line = clampInt(line, 0, len(plainLines)-1)
-	}
-	return selectionPoint{
-		Line: line,
-		Col:  clampInt(mouse.X, 0, m.chat.Width()),
-	}
-}
-
 // selectionBg is the SGR for the selection background — a muted slate blue laid
 // UNDER the existing text so the syntax colors show through, like a native
 // selection rather than a flat one-color block.

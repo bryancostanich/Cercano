@@ -285,3 +285,15 @@ weaker for the stated goal. **Parity gate:** re-pointed stream-order/queue/cance
 confirm suites + new `chatView.Apply` event tests + a frozen-`turnStatus`
 scripted-event golden (byte-identical transcript across the move) + a new
 footer-telemetry test. Reversible (worktree).
+
+- **Step-3 outcome:** D3 applied across 5 tasks (`8c7730c..d167b51`). Main chat
+  fully event-driven: `chatView` owns entries + transcript machine
+  (`chatView.Apply`) + queue + tool-nav; `mainAgentDriver` owns the StreamChat
+  drain; host is a thin router; the 139-LOC `applyStreamMsg` deleted. Whole-branch
+  opus review: **Ready to proceed — no Critical/Important.** Parity proof verified
+  genuine (scripted golden was asserted byte-identical to the old machine in
+  commit `64503b4` before `applyStreamMsg` was deleted; frozen + unchanged at head
+  → provably equal). Agent-agnostic invariant holds (`chat_view.go` has no
+  `agentclient` import; the StreamMsg→event map lives in the driver). Additive
+  events don't regress `/c`. 1 Minor (stale "both paths" comment in
+  `scripted_golden_test.go`) — fixed.

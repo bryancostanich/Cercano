@@ -66,10 +66,50 @@ erosion is real regardless.
 - **Winner: C (map-reduce / model reduce).** Drop rolling.
 - Confirm across 2–3 more real sessions (below) before locking C in for 2b.
 
-## Run 3 — real session
+## Run 3 — real session (few, large messages → 5 segments)
 
-_(pending)_
+`-maxtokens 48000 -segtokens 8000 -verbatim 6` → **36 messages / ~46k tokens /
+5 segments**. All pairing-valid; reduction ~63–64% across all three.
 
-## Run 4 — real session
+| contender | summary content (lines) | read |
+|---|---|---|
+| rolling | 17 | coherent — **did not collapse** at 5 segments |
+| B mechanical | 30 | richest, redundant |
+| C model | 21 | tightest coherent — best |
 
-_(pending)_
+Key point: with only **5 generations**, rolling held up (non-empty, coherent).
+Contrast Run 2's 9 segments where it collapsed. C still the tidiest; B the most
+redundant.
+
+## Run 4 — real session (44 msgs → 9 segments)
+
+`-maxtokens 80000 -segtokens 8000 -verbatim 6` → **44 messages / ~80k tokens /
+9 segments**. All pairing-valid; reduction ~78–80%.
+
+| contender | summary content (lines) | read |
+|---|---|---|
+| rolling | 23 | eroded (leanest, lost detail) — did NOT fully collapse here |
+| B mechanical | 48 | heavy redundancy (grows with segment count) |
+| C model | 30 | consolidated B's 48→30, coherent — best |
+
+Note: rolling at 9 segments survived here but collapsed in Run 2 — its failure
+is **stochastic** (local-model variance), but the erosion trend is consistent
+(rolling always carries the least content). B's redundancy **grows with segment
+count** (30 lines @5 seg → 48 @9 seg); C reconciles it back down each time.
+
+## Conclusion (3 real sessions)
+
+- **Winner: C (map-reduce / model reduce).** Consistently the tidiest *coherent*
+  summary — keeps the substance, dedupes B's sprawl, right-sized regardless of
+  segment count. Costs one extra model call per run; clearly worth it.
+- **B (map-reduce / mechanical):** complete but redundancy compounds with length;
+  viable fallback, and notably C's reduce pass is exactly what fixes it.
+- **Rolling: disqualified.** Erodes monotonically with generations and can
+  collapse to an empty summary (Run 2). Unreliable for long sessions.
+- The synthetic-corpus verdict (Run 1) was inverted by real data — small
+  fixtures couldn't exercise erosion or accumulation. **Real-session testing was
+  decisive.**
+
+**Decision for 2b: wire C (map-reduce / model reduce) as the compactor**, with
+frozen-segment caching layered on top (C maps each segment once; freezing those
+maps is the natural cost optimization).

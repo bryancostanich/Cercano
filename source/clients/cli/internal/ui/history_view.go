@@ -337,6 +337,30 @@ func (h *historyView) View() string {
 	return renderScrollable(lines, height, dashboardPanelWidth(h.width), h.scrollOffset, h.styles)
 }
 
+// handleClick handles a left-click on the history panel. yLocal is the click
+// row relative to the page's top content row (i.e. mouse.Y - contentTop()).
+// If the click lands on a row's arrowCell and x is within the arrow columns
+// (x <= 2), the row is selected and its expansion is toggled. Collapsing
+// returns (nil, true); expanding returns (expandSelected(), true). Any other
+// click returns (nil, false).
+func (h *historyView) handleClick(x, yLocal int) (tea.Cmd, bool) {
+	_, meta := h.rowsLines()
+	idx := h.scrollOffset + yLocal
+	if idx < 0 || idx >= len(meta) {
+		return nil, false
+	}
+	m := meta[idx]
+	if m.row < 0 || !m.arrowCell || x > 2 {
+		return nil, false
+	}
+	h.cursor = m.row
+	if h.rows[m.row].expanded {
+		h.rows[m.row].expanded = false
+		return nil, true
+	}
+	return h.expandSelected(), true
+}
+
 // --- scroller ---
 
 func (h *historyView) ScrollBy(delta int)  { h.scrollOffset += delta; h.clampScroll() }

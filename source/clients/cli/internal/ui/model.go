@@ -550,6 +550,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 			}
+			if hv, ok := m.content.(*historyView); ok && mouse.Button == tea.MouseLeft {
+				if cmd, handled := hv.handleClick(mouse.X, mouse.Y-m.contentTop()); handled {
+					return m, cmd
+				}
+			}
 			return m, nil
 		}
 		if mouse.Button != tea.MouseLeft {

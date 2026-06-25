@@ -229,3 +229,57 @@ func TestHistoryApplyTurns_FillsAndRenders(t *testing.T) {
 		t.Errorf("expanded+loaded row should show the turn preview")
 	}
 }
+
+func TestHistoryHandleClick_TogglesArrowRow(t *testing.T) {
+	rows := []histRow{
+		{id: "a", name: "first", recap: "rc", meta: "m"},
+		{id: "b", name: "second", recap: "rc2", meta: "m2"},
+	}
+	h := newTestHistoryView(rows, 100, 30)
+
+	// Find the arrow line for row 1 (second row) in the rendered meta.
+	_, meta := h.rowsLines()
+	var row1ArrowLine int = -1
+	for i, lm := range meta {
+		if lm.row == 1 && lm.arrowCell {
+			row1ArrowLine = i
+			break
+		}
+	}
+	if row1ArrowLine < 0 {
+		t.Fatal("could not find arrow line for row 1")
+	}
+
+	// Click x=1 (within arrow columns), yLocal = row1ArrowLine - scrollOffset.
+	yLocal := row1ArrowLine - h.scrollOffset
+	cmd, handled := h.handleClick(1, yLocal)
+	if !handled {
+		t.Fatal("click on arrow cell should be handled")
+	}
+	if h.cursor != 1 {
+		t.Errorf("cursor = %d, want 1", h.cursor)
+	}
+	if !h.rows[1].expanded {
+		t.Error("row 1 should be expanded after click")
+	}
+	// No agent → expandSelected returns nil cmd (turns already nil/not needed).
+	_ = cmd
+
+	// Second click collapses.
+	cmd2, handled2 := h.handleClick(1, yLocal)
+	if !handled2 {
+		t.Fatal("second click on arrow cell should be handled")
+	}
+	if h.rows[1].expanded {
+		t.Error("row 1 should be collapsed after second click")
+	}
+	if cmd2 != nil {
+		t.Error("collapse should return nil cmd")
+	}
+
+	// Click on x=5 (not arrow column) should not be handled.
+	_, handled3 := h.handleClick(5, yLocal)
+	if handled3 {
+		t.Error("click outside arrow columns should not be handled")
+	}
+}

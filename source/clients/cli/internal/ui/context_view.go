@@ -459,33 +459,7 @@ func (c *contextView) renderScrollableContent(full string, height int) string {
 	}
 	lines := strings.Split(full, "\n")
 	c.scrollOffset = clampInt(c.scrollOffset, 0, maxInt(0, len(lines)-height))
-	panelW := dashboardPanelWidth(c.width)
-	col := scrollbarColumn(len(lines), height, c.scrollOffset)
-	var b strings.Builder
-	for i := 0; i < height; i++ {
-		line := ""
-		if src := c.scrollOffset + i; src >= 0 && src < len(lines) {
-			line = lines[src]
-		}
-		b.WriteString(padToWidth(ansi.Truncate(line, panelW, ""), panelW))
-		b.WriteString(" ")
-		if i < len(col) {
-			switch col[i] {
-			case '█':
-				b.WriteString(c.styles.Border.Render("█"))
-			case '░':
-				b.WriteString(c.styles.BorderDim.Render("░"))
-			default:
-				b.WriteString(" ")
-			}
-		} else {
-			b.WriteString(" ")
-		}
-		if i < height-1 {
-			b.WriteString("\n")
-		}
-	}
-	return b.String()
+	return renderScrollable(lines, height, dashboardPanelWidth(c.width), c.scrollOffset, c.styles)
 }
 
 // --- small formatters ---

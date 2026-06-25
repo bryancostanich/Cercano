@@ -100,8 +100,8 @@ func TestRenderScrollable_WindowsAndPaintsBar(t *testing.T) {
 		t.Fatalf("got %d rows, want 5 (height window)", len(rows))
 	}
 	for _, r := range rows {
-		if w := lipgloss.Width(r); w != 31 { // panelW(30) + space? bar is appended after a space
-			t.Fatalf("row width = %d, want 31 (panelW + bar gutter)", w)
+		if w := lipgloss.Width(r); w != 32 { // panelW(30) + 1 gutter space + 1 bar glyph
+			t.Fatalf("row width = %d, want 32 (panelW + space + bar)", w)
 		}
 	}
 	if !strings.ContainsRune(out, '█') {

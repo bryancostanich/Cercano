@@ -411,19 +411,88 @@ func (s *Server) InvokeTool(ctx context.Context, req *proto.InvokeToolRequest) (
 // GetContextUsage implements proto.AgentServer — reports cumulative token
 // usage vs. the active model's context-window size for a conversation.
 func (s *Server) GetContextUsage(ctx context.Context, req *proto.GetContextUsageRequest) (*proto.GetContextUsageResponse, error) {
-	used, max := s.agent.GetContextUsage(ctx, req.GetConversationId())
+	convID := req.GetConversationId()
+	_, max := s.agent.GetContextUsage(ctx, convID)
+	sent, raw := 0, 0
+	if store := s.agent.PersistentStore(); store != nil && convID != "" {
+		if turns, err := store.GetTurns(ctx, convID); err == nil {
+			state, _ := store.GetCompaction(ctx, convID)
+			tok := contextmeter.Default()
+			view, _ := compactor.BuildSendView(turns, state)
+			sent = compaction.TotalTokens(tok, view)
+			raw = compaction.TotalTokens(tok, agent.BuildLLMHistory(turns))
+		}
+	}
 	var pct float64
 	if max > 0 {
-		pct = float64(used) / float64(max)
+		pct = float64(sent) / float64(max)
 		if pct > 1 {
 			pct = 1
 		}
 	}
 	return &proto.GetContextUsageResponse{
-		TokensUsed: int32(used),
-		ModelMax:   int32(max),
-		Percent:    pct,
+		TokensUsed: int32(sent), ModelMax: int32(max), Percent: pct,
+		RawTokens: int32(raw), Compacting: s.agent.IsCompacting(convID),
 	}, nil
+}
+
+// GetCompactionState implements proto.AgentServer — the compaction summary +
+// frozen/live split for the /c viewer.
+func (s *Server) GetCompactionState(ctx context.Context, req *proto.GetCompactionStateRequest) (*proto.GetCompactionStateResponse, error) {
+	convID := req.GetConversationId()
+	out := &proto.GetCompactionStateResponse{Compacting: s.agent.IsCompacting(convID)}
+	store := s.agent.PersistentStore()
+	if store == nil || convID == "" {
+		return out, nil
+	}
+	turns, err := store.GetTurns(ctx, convID)
+	if err != nil {
+		return out, nil
+	}
+	state, _ := store.GetCompaction(ctx, convID)
+	tok := contextmeter.Default()
+	view, _ := compactor.BuildSendView(turns, state)
+	out.SentTokens = int32(compaction.TotalTokens(tok, view))
+	out.RawTokens = int32(compaction.TotalTokens(tok, agent.BuildLLMHistory(turns)))
+	out.FrozenThrough = state.FrozenThrough
+	for _, t := range turns {
+		if t.CreatedAt.Unix() <= state.FrozenThrough {
+			out.FrozenTurns++
+		} else {
+			out.LiveTurns++
+		}
+	}
+	if state.SegmentSummariesJSON != "" {
+		var segs []compaction.StructuredSummary
+		if json.Unmarshal([]byte(state.SegmentSummariesJSON), &segs) == nil {
+			out.CompactedSegments = int32(len(segs))
+		}
+	}
+	if state.ConsolidatedJSON != "" {
+		var cs compaction.StructuredSummary
+		if json.Unmarshal([]byte(state.ConsolidatedJSON), &cs) == nil {
+			out.ConsolidatedSummary = cs.RenderBlock().Text
+		}
+	}
+	return out, nil
+}
+
+// ExportContext implements proto.AgentServer — the full uncapped raw history as
+// a JSON []llm.Message.
+func (s *Server) ExportContext(ctx context.Context, req *proto.ExportContextRequest) (*proto.ExportContextResponse, error) {
+	store := s.agent.PersistentStore()
+	if store == nil || req.GetConversationId() == "" {
+		return &proto.ExportContextResponse{}, nil
+	}
+	turns, err := store.GetTurns(ctx, req.GetConversationId())
+	if err != nil {
+		return nil, err
+	}
+	b, err := json.Marshal(agent.BuildLLMHistory(turns))
+	if err != nil {
+		return nil, err
+	}
+	return &proto.ExportContextResponse{Json: string(b)}, nil
 }
 
 // GetConfig implements proto.AgentServer — reports the current runtime config

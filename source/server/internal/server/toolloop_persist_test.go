@@ -415,8 +415,8 @@ func TestStreamToolLoop_ReplaysHistoryNoDuplication(t *testing.T) {
 }
 
 // TestStreamToolLoop_UpdatesContextMeter verifies that after a tool-loop turn
-// the context meter reflects the provider-reported token counts against the
-// cloud model's window size.
+// GetContextUsage returns a tokenizer-estimated sent size > 0 and the correct
+// model-max for the active cloud model.
 func TestStreamToolLoop_UpdatesContextMeter(t *testing.T) {
 	srv, _ := newServerWithStore(t)
 	prov := &scriptedProvider{
@@ -436,8 +436,10 @@ func TestStreamToolLoop_UpdatesContextMeter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetContextUsage: %v", err)
 	}
-	if resp.TokensUsed != 4321+99 {
-		t.Errorf("TokensUsed = %d, want %d", resp.TokensUsed, 4321+99)
+	// TokensUsed is now the tokenizer-estimated sent size (compaction-aware),
+	// not the provider-reported count. Just verify it reflects the stored turns.
+	if resp.TokensUsed <= 0 {
+		t.Errorf("TokensUsed = %d, want > 0 (tokenizer estimate of stored turns)", resp.TokensUsed)
 	}
 	if want := int32(contextmeter.ModelMax("test-model")); resp.ModelMax != want {
 		t.Errorf("ModelMax = %d, want %d (cloud window)", resp.ModelMax, want)

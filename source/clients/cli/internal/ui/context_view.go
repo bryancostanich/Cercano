@@ -191,7 +191,6 @@ func (c *contextView) regionHeights() (turnsH, paneH int) {
 // turnLineMeta describes each line emitted by turnsLines for hit-testing (Task 3).
 type turnLineMeta struct {
 	turnID    string
-	header    bool // first line of the turn (carries the arrow)
 	arrowCell bool // header line of an expandable turn (clickable)
 }
 
@@ -262,7 +261,7 @@ func (c *contextView) appendTurn(lines *[]string, meta *[]turnLineMeta, i int, t
 	add := func(s string, m turnLineMeta) { *lines = append(*lines, s); *meta = append(*meta, m) }
 
 	bodyLines := c.turnBodyLines(t)
-	expandable := c.turnExpandable(t)
+	expandable := t.Truncated || len(bodyLines) > c.collapsedCount(t)
 	open := c.expanded[t.ID]
 
 	shown := bodyLines
@@ -293,7 +292,7 @@ func (c *contextView) appendTurn(lines *[]string, meta *[]turnLineMeta, i int, t
 			firstLine = shown[0]
 		}
 		header := c.styles.Dim.Render(fmt.Sprintf("%s%s %s  %s", arrow, badge, toks, firstLine))
-		add(header, turnLineMeta{turnID: t.ID, header: true, arrowCell: expandable})
+		add(header, turnLineMeta{turnID: t.ID, arrowCell: expandable})
 	} else {
 		badge := c.styles.Info.Render("[" + t.Role + "]")
 		switch t.Kind {
@@ -309,7 +308,7 @@ func (c *contextView) appendTurn(lines *[]string, meta *[]turnLineMeta, i int, t
 			firstLine = shown[0]
 		}
 		header := fmt.Sprintf("%s%s %s  %s", arrow, badge, toks, firstLine)
-		add(header, turnLineMeta{turnID: t.ID, header: true, arrowCell: expandable})
+		add(header, turnLineMeta{turnID: t.ID, arrowCell: expandable})
 	}
 
 	// Remaining shown lines with hang-indent
@@ -384,16 +383,23 @@ func (c *contextView) handleClick(x, yLocal int) bool {
 
 // focusNextExpandable advances focusedTurn by dir (+1 or -1) to the next index
 // where turnExpandable returns true, wrapping around. No-op if no expandable turns.
+// From the neutral start (focusedTurn == -1): forward lands on the first expandable,
+// backward lands on the last expandable.
 func (c *contextView) focusNextExpandable(dir int) {
 	n := len(c.snapshot.Turns)
 	if n == 0 {
 		return
 	}
-	for step := 1; step <= n; step++ {
-		i := (c.focusedTurn + dir*step + n*step) % n
-		if i < 0 {
-			i += n
+	start := c.focusedTurn
+	if start < 0 {
+		if dir > 0 {
+			start = -1 // first step gives index 0
+		} else {
+			start = n // first step gives index n-1
 		}
+	}
+	for step := 1; step <= n; step++ {
+		i := ((start + dir*step) % n + n) % n
 		if c.turnExpandable(c.snapshot.Turns[i]) {
 			c.focusedTurn = i
 			return

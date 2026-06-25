@@ -38,3 +38,8 @@ func TestContextManagerDriver_EmptyProposalDone(t *testing.T) {
 		t.Fatalf("want chatDoneMsg with text on empty proposal, got %T", msg)
 	}
 }
+
+// errString is a minimal error type for test assertions.
+type errString string
+
+func (e errString) Error() string { return string(e) }

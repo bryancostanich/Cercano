@@ -9,7 +9,7 @@ import (
 )
 
 // streamMsgToEvent is the pure StreamMsg → event map. Each StreamMsg type maps
-// to exactly one agent-agnostic chatPaneMsg with its payload transposed.
+// to exactly one agent-agnostic chat event with its payload transposed.
 func TestStreamMsgToEvent(t *testing.T) {
 	bashErr := errors.New("boom")
 	cases := []struct {

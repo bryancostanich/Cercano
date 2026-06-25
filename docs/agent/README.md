@@ -188,4 +188,3 @@ The decision is **agent-side**. The CLI just renders the `PermissionRequired` st
 
 - **`/tool` invoking W/X-tier** requires `/bypass` mode. The unary `InvokeTool` RPC can't stream a confirm prompt back to the CLI. Model-driven tool calls in normal chat flow always go through the gate correctly.
 - **Inline tool-call expand/collapse keybind** isn't implemented yet. Tool entries render folded; scroll your terminal to see args/results.
-- **Project context injection** (`.cercano/context.md` into system prompt) is on the legacy path but not yet wired into the streaming tool-loop path. Easy follow-up if it becomes a friction point.

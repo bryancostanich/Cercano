@@ -31,6 +31,30 @@ message array.
 
 2b's shape depends on 2a's result, so 2a ships and is measured first.
 
+## Layering — agent-owned, client-agnostic (hard constraint)
+
+**All compaction logic lives in the agent (server) layer, never in a client.**
+The CLI is a thin gRPC consumer; VS Code, Zed, and any MCP consumer must get the
+same functionality through the same surface. Concretely:
+
+- The `Compactor`, the shared substrate, segmentation, the derived-layer
+  persistence, the background trigger, and retention enforcement all live under
+  `source/server/internal/...` (e.g. a new `compaction` package), beside `recap`
+  and `conversation`. No client reimplements any of it.
+- The agent **service interface** (`source/proto/agent.proto`) is the only way
+  clients touch it, following the existing context-operation RPCs
+  (`ProposeContextEdit`, `DeleteConversationTurns`, `GetConversationTurns`,
+  `GetContextUsage`). New RPCs (named in 2b) cover: **trigger compaction
+  explicitly**, **query compaction/derived-layer state**, and **read the
+  original (raw) behind a compacted turn**. Retention settings ride the existing
+  `UpdateConfig` / `GetConfig` RPCs. Where it fits, the same operations are
+  exposed as MCP tools so non-gRPC consumers reach them too.
+- Compaction runs **automatically in the background** in the agent *and* is
+  **callable on demand** through the API — so a client can request it, but no
+  client is required to drive it.
+- A client's only job is presentation: render the derived (sent) view, the
+  meter, "show original," and titles from agent-provided data (the CLI's `/c`).
+
 ## The tool-use constraint (what the cloud model rejects)
 
 The Anthropic Messages API requires that **every `tool_use` block is answered by

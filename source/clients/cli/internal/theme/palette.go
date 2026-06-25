@@ -73,9 +73,10 @@ func Cracker() Palette {
 // stays the buffer's base color and is intentionally not muted.
 const (
 	bufLinkHex = "#2EA8BC" // muted cyan  — markdown links
-	bufCodeHex = "#3A6A73" // darker, more desaturated teal — inline code, code-fence lang
+	bufCodeHex = "#B7A6E0" // muted lavender — inline code, code-fence lang (distinct from cyan links)
 	bufLimeHex = "#A9CE21" // muted Accent — tool ✓, focus caret, echoed user ▶
 	bufRedHex  = "#D95C5C" // muted Error  — tool ⚠
+	bufUserBgHex = "#1F4163" // muted navy — fill behind echoed user prompts in scrollback
 )
 
 // Buffer-muted lipgloss colors derived from the hexes above. Exported so the
@@ -85,4 +86,5 @@ var (
 	BufferCode  = lipgloss.Color(bufCodeHex)
 	BufferLime  = lipgloss.Color(bufLimeHex)
 	BufferError = lipgloss.Color(bufRedHex)
+	BufferUserBg = lipgloss.Color(bufUserBgHex)
 )

@@ -1648,14 +1648,16 @@ func (m *Model) renderEntry(e *Entry, idx int) string {
 
 	switch e.Role {
 	case RoleUser:
-		// User entries: bullet on the first line, hanging indent on wrapped lines.
+		// User entries: lime ▶ marker on a full-width navy fill so prompts stand
+		// out when scrolling back. Each wrapped line is padded to the content
+		// width, then the navy background spans the whole line (marker + body).
 		wrapped := lipgloss.NewStyle().Width(textW).Render(e.Content)
 		lines := strings.Split(wrapped, "\n")
 		for i := range lines {
 			if i == 0 {
-				lines[i] = m.styles.BufferUserPrompt.Render("▶ ") + lines[i]
+				lines[i] = m.styles.BufferUserMarker.Render("▶ ") + m.styles.BufferUserLine.Render(lines[i])
 			} else {
-				lines[i] = pad + lines[i]
+				lines[i] = m.styles.BufferUserLine.Render(pad + lines[i])
 			}
 		}
 		return strings.Join(lines, "\n")

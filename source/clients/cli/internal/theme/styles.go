@@ -21,8 +21,10 @@ type Styles struct {
 	UserPrompt  lipgloss.Style // lime ▶ prefix for the live input line
 	AgentProse  lipgloss.Style // default assistant text
 
-	BufferCode       lipgloss.Style // darker teal — code-fence lang in scrollback (echoes inline code)
+	BufferCode       lipgloss.Style // muted lavender — code-fence lang in scrollback (echoes inline code)
 	BufferUserPrompt lipgloss.Style // muted lime ▶ for echoed user input in scrollback
+	BufferUserLine   lipgloss.Style // navy background fill behind echoed user prompt lines
+	BufferUserMarker lipgloss.Style // muted lime ▶ on the navy fill
 	MeterFill   lipgloss.Style // lime block
 	MeterEmpty  lipgloss.Style // dim-amber block
 	BypassFlag  lipgloss.Style // red ! BYPASS block
@@ -48,6 +50,8 @@ func NewStyles(p Palette) Styles {
 
 		BufferCode:       lipgloss.NewStyle().Foreground(BufferCode),
 		BufferUserPrompt: lipgloss.NewStyle().Foreground(BufferLime).Bold(true),
+		BufferUserLine:   lipgloss.NewStyle().Background(BufferUserBg),
+		BufferUserMarker: lipgloss.NewStyle().Foreground(BufferLime).Background(BufferUserBg).Bold(true),
 		MeterFill:  lipgloss.NewStyle().Foreground(p.Accent),
 		MeterEmpty: lipgloss.NewStyle().Foreground(p.DimAmber),
 		BypassFlag: lipgloss.NewStyle().Foreground(lipgloss.Color("#1A1A1A")).Background(p.Error).Bold(true),

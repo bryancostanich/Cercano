@@ -38,7 +38,14 @@ func main() {
 	segTokens := flag.Int("segtokens", 8000, "for -transcript: per-segment token budget (keep under the local model's context window)")
 	verbatim := flag.Int("verbatim", 6, "for -transcript: number of trailing messages kept verbatim")
 	anchors := flag.String("anchors", "", "for -transcript: comma-separated must-keep substrings to score retention")
+	statsDir := flag.String("statsdir", "", "analyze token/turn/tool distributions across all .jsonl transcripts under this dir (no model needed); prints stats and exits")
 	flag.Parse()
+
+	// Stats mode is deterministic and needs no agent — handle before dialing.
+	if *statsDir != "" {
+		runStats(*statsDir)
+		return
+	}
 
 	ctx := context.Background()
 	client, err := agentclient.Dial(ctx, *addr)

@@ -40,8 +40,9 @@ func CrackerMarkdownStyle() ansi.StyleConfig {
 	sc.Strong.Bold = boolp(true)
 	sc.Emph.Italic = boolp(true)
 
-	// Inline code uses a darker, desaturated teal (bufCodeHex) — distinct from
-	// links and calmer than the vivid chrome cyan (hexInfo).
+	// Inline code uses a muted lavender (bufCodeHex) — high enough contrast on the
+	// charcoal background, and hue-distinct from both the amber prose and the
+	// cyan links so code spans read as obviously different.
 	sc.Code.Color = strp(bufCodeHex)
 	// Zero the code-block margin so the body aligns flush-left under the
 	// horizontal rules we draw around it (see codeRule in the ui package).

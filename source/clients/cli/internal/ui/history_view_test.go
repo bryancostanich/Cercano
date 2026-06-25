@@ -327,3 +327,27 @@ func TestHistoryHandleClick_NegativeYLocal_NotHandled(t *testing.T) {
 		}
 	}
 }
+
+// When a row is expanded the drawer shows the full recap, so the collapsed
+// one-line preview must NOT also render — otherwise the recap appears twice.
+func TestHistoryExpand_NoDuplicateRecapPreview(t *testing.T) {
+	rows := []histRow{{id: "a", name: "n", recap: "UNIQUERECAPTOKEN", meta: "m"}}
+	h := newTestHistoryView(rows, 100, 30)
+	count := func() int {
+		lines, _ := h.rowsLines()
+		n := 0
+		for _, l := range lines {
+			if strings.Contains(l, "UNIQUERECAPTOKEN") {
+				n++
+			}
+		}
+		return n
+	}
+	if c := count(); c != 1 {
+		t.Fatalf("collapsed: recap appears %d times, want 1 (preview line)", c)
+	}
+	h.rows[0].expanded = true
+	if c := count(); c != 1 {
+		t.Fatalf("expanded: recap appears %d times, want 1 (drawer only, no duplicate preview)", c)
+	}
+}

@@ -36,17 +36,12 @@ func (c MapReduceCompactor) Compact(ctx context.Context, raw []llm.Message, summ
 			}
 			parts = append(parts, s)
 		}
-		if c.ModelReduce && len(parts) > 1 {
-			// Reduce pass: hand the rendered segment summaries back to the model.
-			var input []llm.Message
-			for _, p := range parts {
-				input = append(input, renderSummaryMessages(p)...)
-			}
-			s, err := summarize(ctx, input)
+		if c.ModelReduce {
+			r, err := Reduce(ctx, parts, summarize)
 			if err != nil {
 				return Result{}, err
 			}
-			sum = s
+			sum = r
 		} else {
 			sum = MergeSummaries(parts)
 		}

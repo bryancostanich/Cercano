@@ -35,8 +35,9 @@ type chatView struct {
 	plainLines     []string
 	focusedToolIdx int
 
-	turn      turnStatus
-	selection textSelection
+	turn              turnStatus
+	selection         textSelection
+	scrollbarDragging bool
 }
 
 // newChatView constructs a chatView sized to vpWidth × vpHeight. The host
@@ -364,6 +365,78 @@ func (c *chatView) SelectionHasRange() bool { return c.selection.hasRange() }
 
 // SelectionDragging reports whether a selection drag is in progress.
 func (c *chatView) SelectionDragging() bool { return c.selection.Dragging }
+
+// ── scrollbar drag surface ─────────────────────────────────────────────────
+
+// ScrollbarHit reports whether a local point is on the grabbable scrollbar
+// column. The bar sits at the viewport's right edge (column Width()); accept
+// that column and one past — terminals sometimes report the rightmost visible
+// cell as Width() or Width()+1.
+func (c *chatView) ScrollbarHit(localX, localY int) bool {
+	return localX >= c.vp.Width() && localY >= 0 && localY < c.vp.Height()
+}
+
+// scrollbarScrub jumps the scroll offset to match the local click row.
+func (c *chatView) scrollbarScrub(localY int) {
+	off := scrollOffsetFromClick(localY, 0, c.vp.Height(), c.vp.TotalLineCount())
+	c.vp.SetYOffset(off)
+}
+
+// ScrollbarDragging reports whether a scrollbar drag is in progress.
+func (c *chatView) ScrollbarDragging() bool { return c.scrollbarDragging }
+
+// StopScrollbarDrag clears the scrollbar drag flag.
+func (c *chatView) StopScrollbarDrag() { c.scrollbarDragging = false }
+
+// ClearSelectionDrag clears the selection's Dragging flag without clearing the
+// selection itself. Used when a competing gesture (pending confirm, etc.) must
+// cancel an in-progress selection drag.
+func (c *chatView) ClearSelectionDrag() { c.selection.Dragging = false }
+
+// selectionEmpty reports whether the selection covers no range.
+func (c *chatView) selectionEmpty() bool { return c.selection.empty() }
+
+// beginSelection starts a new selection drag anchored at localX/localY.
+func (c *chatView) beginSelection(localX, localY int) {
+	pt := c.selectionPointFromLocal(localX, localY, false)
+	c.selection = textSelection{
+		Active:   true,
+		Dragging: true,
+		Anchor:   pt,
+		Cursor:   pt,
+	}
+}
+
+// updateSelection extends the selection cursor to localX/localY (host has
+// already translated from screen coords). If allowScroll is true and the row
+// is out of bounds, the viewport is scrolled one line in the appropriate
+// direction.
+func (c *chatView) updateSelection(localX, localY int, allowScroll bool) {
+	if !c.selection.Active {
+		return
+	}
+	c.selection.Cursor = c.selectionPointFromLocal(localX, localY, allowScroll)
+}
+
+// MouseDown is the unified handler for a left-click inside the viewport region.
+// localX/localY are already translated to viewport-local coordinates (host
+// subtracts scrollbarTop from Y).
+func (c *chatView) MouseDown(localX, localY int) {
+	if c.ScrollbarHit(localX, localY) {
+		// A bar grab is a scroll gesture, not a text selection; cancel any
+		// in-progress selection drag so it can't hijack subsequent motion.
+		c.selection.Dragging = false
+		c.scrollbarDragging = true
+		c.scrollbarScrub(localY)
+		return
+	}
+	if c.MouseInText(localX, localY) {
+		c.scrollbarDragging = false
+		c.beginSelection(localX, localY)
+		return
+	}
+	c.ClearSelection()
+}
 
 // HandleSelectionKey handles a key press while a selection is active.
 // Returns (cmd, handled, copied): cmd is a clipboard cmd or nil; handled=true

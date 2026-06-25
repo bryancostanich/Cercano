@@ -41,6 +41,44 @@ func barDrag(t *testing.T, m Model) int {
 	return m.chat.YOffset()
 }
 
+// PROBE: verify the ScrollbarHit threshold maps the four canonical X values
+// correctly at the test fixture's dimensions (width=80, contentW=79, vp.Width=79).
+//
+// The bar is painted at screen column 79 (width-1=79). The viewport text width
+// is 79 (contentW-2 = 80-2=78... wait, buildDragModel sets vpWidth=w-1=79).
+// So c.Width()=79: bar is at col 79, text is cols 0..78.
+// Expected: ScrollbarHit(79,·)=true, ScrollbarHit(80,·)=true (off-by-one terminal),
+//
+//	ScrollbarHit(78,·)=false (last text col), ScrollbarHit(5,·)=false (text col).
+func TestScrollbarHitProbe(t *testing.T) {
+	m := buildDragModel()
+	cv := &m.chat
+	// cv.Width() == 79 (vpWidth passed to newChatView is w-1 = 79)
+	if w := cv.Width(); w != 79 {
+		t.Fatalf("PROBE: expected c.Width()=79, got %d (fixture changed?)", w)
+	}
+	// Bar column (79) must hit.
+	if !cv.ScrollbarHit(79, 5) {
+		t.Error("PROBE: ScrollbarHit(79,5) want true (bar col), got false")
+	}
+	// Off-by-one (80) must also hit.
+	if !cv.ScrollbarHit(80, 5) {
+		t.Error("PROBE: ScrollbarHit(80,5) want true (terminal off-by-one), got false")
+	}
+	// Last text col (78) must NOT hit.
+	if cv.ScrollbarHit(78, 5) {
+		t.Error("PROBE: ScrollbarHit(78,5) want false (text col), got true — threshold too low")
+	}
+	// Typical text col (5) must NOT hit.
+	if cv.ScrollbarHit(5, 5) {
+		t.Error("PROBE: ScrollbarHit(5,5) want false (text col), got true")
+	}
+	// Text col (2) must NOT hit.
+	if cv.ScrollbarHit(2, 5) {
+		t.Error("PROBE: ScrollbarHit(2,5) want false (text col), got true")
+	}
+}
+
 // Regression (root cause from live trace): a click in the rightmost column is
 // reported by some terminals as X=width — one past the bar at width-1. The grab
 // must still register and the drag must scroll.
@@ -86,7 +124,7 @@ func TestScrollbarDragAfterViewportSelectAndCopy(t *testing.T) {
 	m = send(t, m, tea.MouseMotionMsg{X: 6, Y: 4, Button: tea.MouseLeft})  // drag-select
 	m = send(t, m, tea.MouseReleaseMsg{X: 6, Y: 4, Button: tea.MouseLeft}) // release → auto-copy
 	t.Logf("after select+copy: selDrag=%v selActive=%v sbDrag=%v",
-		m.chat.SelectionDragging(), m.chat.SelectionActive(), m.scrollbarDragging)
+		m.chat.SelectionDragging(), m.chat.SelectionActive(), m.chat.ScrollbarDragging())
 	if got := barDrag(t, m); got == 0 {
 		t.Fatalf("scrollbar drag after viewport select+copy did not scroll (yoff=0)")
 	}

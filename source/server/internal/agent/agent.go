@@ -107,6 +107,7 @@ func (a *Agent) ScheduleRecap(conversationID string) {
 type CompactionScheduler interface {
 	Schedule(conversationID string)
 	CompactNow(ctx context.Context, conversationID string) error
+	IsCompacting(conversationID string) bool
 }
 
 // WithCompactionScheduler attaches the background compaction generator.
@@ -127,6 +128,14 @@ func (a *Agent) CompactNow(ctx context.Context, conversationID string) error {
 		return a.compaction.CompactNow(ctx, conversationID)
 	}
 	return nil
+}
+
+// IsCompacting reports whether a compaction pass is currently running. Nil-safe.
+func (a *Agent) IsCompacting(conversationID string) bool {
+	if a.compaction != nil {
+		return a.compaction.IsCompacting(conversationID)
+	}
+	return false
 }
 
 // NewAgent creates a new Agent orchestrator.

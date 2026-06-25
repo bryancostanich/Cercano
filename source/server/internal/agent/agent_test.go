@@ -542,8 +542,9 @@ func TestScheduleRecap_NilSchedulerNoPanic(t *testing.T) {
 }
 
 type fakeCompactionScheduler struct {
-	scheduled []string
-	nowCalls  int
+	scheduled  []string
+	nowCalls   int
+	compacting bool
 }
 
 func (f *fakeCompactionScheduler) Schedule(id string) { f.scheduled = append(f.scheduled, id) }
@@ -551,6 +552,7 @@ func (f *fakeCompactionScheduler) CompactNow(_ context.Context, _ string) error 
 	f.nowCalls++
 	return nil
 }
+func (f *fakeCompactionScheduler) IsCompacting(string) bool { return f.compacting }
 
 func TestScheduleCompaction_NilSafeAndDelegates(t *testing.T) {
 	// Nil-safe: no scheduler attached.
@@ -569,5 +571,17 @@ func TestScheduleCompaction_NilSafeAndDelegates(t *testing.T) {
 	}
 	if fc.nowCalls != 1 {
 		t.Errorf("CompactNow not delegated: %d", fc.nowCalls)
+	}
+}
+
+func TestAgentIsCompacting_NilSafeAndDelegates(t *testing.T) {
+	a := NewAgent(nil, nil)
+	if a.IsCompacting("c1") {
+		t.Error("nil scheduler → IsCompacting false")
+	}
+	fc := &fakeCompactionScheduler{compacting: true}
+	a2 := NewAgent(nil, nil, WithCompactionScheduler(fc))
+	if !a2.IsCompacting("c1") {
+		t.Error("should delegate to the scheduler")
 	}
 }

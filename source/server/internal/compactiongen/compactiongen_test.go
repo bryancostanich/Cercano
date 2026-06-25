@@ -81,3 +81,34 @@ func TestCompactNow_SmallContextSavesNothing(t *testing.T) {
 		t.Error("below activation floor should save nothing")
 	}
 }
+
+func TestIsCompacting_TrueDuringPass(t *testing.T) {
+	fs := &fakeStore{turns: bigTurns(12, 1000)}
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	summarize := func(context.Context, []llm.Message) (compaction.StructuredSummary, error) {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release // block so the pass stays in-flight
+		return compaction.StructuredSummary{Goal: "g"}, nil
+	}
+	cfg := compactor.Config{ActivationFloorTokens: 1000, SegmentTokens: 4000, VerbatimRecent: 2}
+	g := New(fs, summarize, cfg, contextmeter.Default(), 10*time.Millisecond)
+
+	go func() { _ = g.CompactNow(context.Background(), "c1") }()
+	<-entered
+	if !g.IsCompacting("c1") {
+		t.Error("IsCompacting should be true while a pass runs")
+	}
+	close(release)
+	// Wait for the pass to finish, then it must be false.
+	deadline := time.Now().Add(2 * time.Second)
+	for g.IsCompacting("c1") && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if g.IsCompacting("c1") {
+		t.Error("IsCompacting should clear after the pass finishes")
+	}
+}

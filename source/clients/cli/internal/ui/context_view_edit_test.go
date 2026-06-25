@@ -22,7 +22,7 @@ func newEditTestView() *contextView {
 		}},
 	}
 	cv.driver = d
-	cv.pane = newChatPane(d, s, p, 80, 24)
+	cv.chat = newChatView(s, p, "", "", 78, 24)
 	return cv
 }
 
@@ -34,11 +34,11 @@ func TestContextView_ProposalMarksTurnsAndRationale(t *testing.T) {
 	cv.applyProposal(agentclient.Proposal{DeleteIDs: []string{"a"}, Rationale: "removed the tangent"})
 	// Rationale is now in the pane (driver calls appendAssistant via chatConfirmMsg);
 	// simulate that path directly.
-	cv.pane.appendAssistant("removed the tangent")
+	cv.chat.Apply(chatAssistantMsg{text: "removed the tangent"})
 
 	// Rationale should appear in the pane's entries.
 	found := false
-	for _, e := range cv.pane.entries {
+	for _, e := range cv.chat.Entries() {
 		if strings.Contains(e.Content, "removed the tangent") {
 			found = true
 		}

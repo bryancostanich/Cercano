@@ -24,7 +24,7 @@ func TestContextView_SplitLayout_EmptyPaneDoesNotEatPanel(t *testing.T) {
 		})
 	}
 	cv.snapshot.Usage = &agentclient.ContextUsage{ModelMax: 1000}
-	cv.pane = newChatPane(&contextManagerDriver{}, cv.styles, cv.palette, cv.width, cv.height) // empty
+	cv.chat = newChatView(cv.styles, cv.palette, "", "", cv.width-2, cv.height) // empty
 
 	out := stripAnsiCSI(cv.View())
 	lines := strings.Split(out, "\n")
@@ -49,10 +49,11 @@ func TestContextView_SplitLayout_PaneGrowsCapped(t *testing.T) {
 	}
 	cv.snapshot.Turns = []agentclient.ContextTurn{{ID: "a", Role: "user", Preview: "ctx", EstTokens: 1}}
 	cv.snapshot.Usage = &agentclient.ContextUsage{ModelMax: 1000}
-	cv.pane = newChatPane(&contextManagerDriver{}, cv.styles, cv.palette, cv.width, cv.height)
+	cv.chat = newChatView(cv.styles, cv.palette, "", "", cv.width-2, cv.height)
 	for i := 0; i < 50; i++ {
-		cv.pane.Apply(chatAssistantMsg{text: fmt.Sprintf("msg-%d", i)})
+		cv.chat.Apply(chatAssistantMsg{text: fmt.Sprintf("msg-%d", i)})
 	}
+	cv.chat.rebuild() // push entries into the viewport so DesiredHeight sees the lines
 	out := cv.View()
 	lines := strings.Split(out, "\n")
 	totalH := dashboardContentHeight(30)

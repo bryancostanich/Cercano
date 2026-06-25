@@ -36,7 +36,7 @@ type contextView struct {
 
 	md     *render.Markdown
 	driver *contextManagerDriver
-	pane   *chatPane
+	chat   chatView
 }
 
 func loadContextSnapshot(ag *agentclient.Client, convID string) contextSnapshot {
@@ -81,7 +81,7 @@ func newContextView(ag *agentclient.Client, p theme.Palette, s theme.Styles, con
 		mark:   cv.applyProposalIDs,
 		unmark: cv.cancelProposal,
 	}
-	cv.pane = newChatPane(cv.driver, s, p, w, h)
+	cv.chat = newChatView(s, p, "", "", w-2, h)
 	return cv, nil
 }
 
@@ -90,11 +90,13 @@ func (c *contextView) ID() contentPageID { return contentPageContext }
 func (c *contextView) SetSize(w, h int) {
 	c.width = w
 	c.height = h
-	if c.pane != nil {
-		c.pane.SetSize(w, h)
-	}
+	c.chat.SetSize(w-2, h)
 	c.clampScroll()
 }
+
+// busy reports whether a context-edit turn is in flight — i.e. the chat holds
+// an open streaming placeholder (mirrors the main page's notion of busy).
+func (c *contextView) busy() bool { return c.chat.streamingTextEntry() != nil }
 
 // Update handles keys that the model hasn't intercepted. For *contextView,
 // the model's handleContextViewKey owns most keys; this method handles the
@@ -163,11 +165,11 @@ func (c *contextView) markedForDelete(id string) bool {
 func (c *contextView) View() string {
 	turnsH, paneH := c.regionHeights()
 	turnsBlock := c.renderScrollableContent(strings.Join(c.turnsLinesOnly(), "\n"), turnsH)
-	paneBlock := padLines("", paneH)
-	if c.pane != nil {
-		c.pane.SetSize(c.width, paneH)
-		paneBlock = padLines(c.pane.View(), paneH)
-	}
+	c.chat.SetSize(c.width-2, paneH)
+	// The /c chat band has no scroll handler of its own (up/down move the turns
+	// list), so it always follows the bottom — mirroring the old pane's follow=true.
+	c.chat.GotoBottom()
+	paneBlock := padLines(c.chat.View(), paneH)
 	return turnsBlock + "\n" + paneBlock
 }
 
@@ -178,11 +180,8 @@ func (c *contextView) regionHeights() (turnsH, paneH int) {
 	if totalH < 2 {
 		totalH = 2
 	}
-	paneH = 1
-	if c.pane != nil {
-		c.pane.SetSize(c.width, totalH) // set width so DesiredHeight wraps correctly
-		paneH = clampInt(c.pane.DesiredHeight(), 1, maxInt(1, totalH/2))
-	}
+	c.chat.SetSize(c.width-2, totalH) // set width so DesiredHeight wraps correctly
+	paneH = clampInt(c.chat.DesiredHeight(), 1, maxInt(1, totalH/2))
 	turnsH = totalH - paneH
 	if turnsH < 1 {
 		turnsH = 1

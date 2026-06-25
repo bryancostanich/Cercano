@@ -751,7 +751,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
-		if cv.showingProposal || (cv.pane != nil && cv.pane.Busy()) {
+		if cv.showingProposal || cv.busy() {
 			return m, contextRefreshTick()
 		}
 		return m, tea.Batch(loadContextSnapshotCmd(cv.agent, cv.convID), contextRefreshTick())
@@ -938,9 +938,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshViewport()
 			return m, progressAnimTick()
 		}
-		// Also keep ticking while the /c chatPane is busy so its animated
+		// Also keep ticking while the /c chat is busy so its animated
 		// status line repaints on every frame.
-		if cv, ok := m.content.(*contextView); ok && cv.pane != nil && cv.pane.Busy() {
+		if cv, ok := m.content.(*contextView); ok && cv.busy() {
 			return m, progressAnimTick()
 		}
 		return m, nil
@@ -1704,9 +1704,7 @@ func (m Model) handleContextViewKey(cv *contextView, msg tea.KeyPressMsg) (Model
 			return m, nil
 		}
 		// Closing /c — drop any queued pane messages.
-		if cv.pane != nil {
-			cv.pane.clearQueue()
-		}
+		cv.chat.ClearQueue()
 		m.content = nil
 		m.contentScrollbarDragging = false
 		return m, nil
@@ -1719,7 +1717,7 @@ func (m Model) handleContextViewKey(cv *contextView, msg tea.KeyPressMsg) (Model
 			return m, nil
 		}
 		m.input.SetValue("")
-		return m, cv.pane.Submit(text)
+		return m.submitContextEdit(cv, text)
 	case "tab":
 		cv.focusNextExpandable(+1)
 		return m, nil
@@ -1729,8 +1727,8 @@ func (m Model) handleContextViewKey(cv *contextView, msg tea.KeyPressMsg) (Model
 	case "up":
 		// Pop the last queued message back into the prompt bar for editing
 		// (mirrors d808952 unstageLastQueued behaviour in the main chat).
-		if m.input.Value() == "" && cv.pane != nil {
-			if msg, ok := cv.pane.unstageLastQueued(); ok {
+		if m.input.Value() == "" {
+			if msg, ok := cv.chat.UnstageLast(); ok {
 				m.input.SetValue(msg)
 				return m, nil
 			}
@@ -1764,28 +1762,54 @@ func (m Model) handleContextViewKey(cv *contextView, msg tea.KeyPressMsg) (Model
 	return m, cmd
 }
 
-// routeChatMsg routes a chat-pane event to the active *contextView. On
-// chatConfirmMsg it appends the assistant message to the pane and raises the
-// shared confirm gate. All other events are forwarded to pane.Apply.
+// submitContextEdit submits a /c edit instruction: enqueue while busy, else
+// append the user entry + an open streaming placeholder, set the working status,
+// and fire the driver. Mirrors the main page's submit path (sendChatMessage).
+func (m Model) submitContextEdit(cv *contextView, input string) (Model, tea.Cmd) {
+	if cv.busy() {
+		cv.chat.Enqueue(input)
+		return m, nil
+	}
+	cv.chat.AppendEntry(&Entry{Role: RoleUser, Content: input})
+	cv.chat.AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
+	cv.chat.SetTurnStatus(turnStatus{activity: "working…", start: time.Now()})
+	cv.chat.rebuild()
+	return m, tea.Batch(cv.driver.Submit(context.Background(), input), progressAnimTick())
+}
+
+// routeChatMsg routes a chat event to the active *contextView. On chatConfirmMsg
+// it appends the assistant rationale to the chat and raises the shared confirm
+// gate; on onNo it closes the open streaming placeholder. All other events flow
+// through chatView.Apply, with the queue auto-draining when a turn ends.
 func (m Model) routeChatMsg(msg tea.Msg) (Model, tea.Cmd) {
 	cv, ok := m.content.(*contextView)
 	if !ok {
 		return m, nil
 	}
 	if cm, isConfirm := msg.(chatConfirmMsg); isConfirm {
-		cv.pane.appendAssistant(cm.assistant)
+		cv.chat.Apply(chatAssistantMsg{text: cm.assistant})
+		cv.chat.rebuild()
 		onYes, onNo := cm.onYes, cm.onNo
 		m.pendingConfirm = &confirmRequest{
 			onYes: func(m Model) (Model, tea.Cmd) { m.pendingConfirm = nil; return m, onYes },
-			onNo:  func(m Model) (Model, tea.Cmd) { m.pendingConfirm = nil; cv.pane.clearBusy(); return m, onNo },
+			onNo: func(m Model) (Model, tea.Cmd) {
+				m.pendingConfirm = nil
+				cv.chat.Apply(chatDoneMsg{}) // close the open placeholder
+				cv.chat.rebuild()
+				return m, onNo
+			},
 		}
 		return m, progressAnimTick()
 	}
-	drain := cv.pane.Apply(msg)
-	if cv.pane.Busy() {
-		return m, tea.Batch(drain, progressAnimTick())
+	cv.chat.Apply(msg)
+	cv.chat.rebuild()
+	if !cv.busy() {
+		if next, ok := cv.chat.DrainNext(); ok {
+			return m.submitContextEdit(cv, next)
+		}
+		return m, nil
 	}
-	return m, drain
+	return m, progressAnimTick()
 }
 
 // truncateArgs renders the JSON args compactly for the confirm prompt one-liner.

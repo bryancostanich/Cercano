@@ -3,8 +3,6 @@ package ui
 import (
 	"strings"
 	"testing"
-
-	"cercano/source/server/pkg/agentclient"
 )
 
 // stripFooterAnsi reuses the package-level stripAnsiCSI helper defined in
@@ -13,14 +11,12 @@ import (
 
 func driveStreamDone(t *testing.T, m *Model, tokIn, tokOut int, notice, model string) {
 	t.Helper()
-	next, _ := m.applyStreamMsg(agentclient.StreamMsg{
-		Type:   agentclient.TypeDone,
-		TokIn:  tokIn,
-		TokOut: tokOut,
-		Notice: notice,
-		Model:  model,
+	m.applyTurnTelemetry(chatDoneMsg{
+		tokIn:  tokIn,
+		tokOut: tokOut,
+		notice: notice,
+		model:  model,
 	})
-	*m = next.(Model)
 }
 
 // TestFooterReflectsLastTurn drives a scripted Done event and asserts the

@@ -77,6 +77,12 @@ func TestScheduleDebouncesToOneGeneration(t *testing.T) {
 	if calls != 2 {
 		t.Errorf("complete called %d times, want 2 (one recap + one title per coalesced cycle)", calls)
 	}
+	fs.mu.Lock()
+	nTitles := len(fs.titles)
+	fs.mu.Unlock()
+	if nTitles != 1 {
+		t.Errorf("SetGeneratedTitle called %d times, want exactly 1 per coalesced cycle", nTitles)
+	}
 }
 
 func TestGenerationFailureKeepsPriorRecap(t *testing.T) {

@@ -147,3 +147,55 @@ symptom. Do NOT push. Do NOT merge to main.
 
 - **Reversible:** yes (worktree, pre-merge). Not a hard-stop. Golden gate + full
   suite re-verify after the fix.
+
+### D2 — Coordinate boundary for moving selection/scroll into `chatView` (step 2)
+
+- **Decision point:** Mouse text-selection, grabbable scrollbar-drag, and edge
+  drag-scroll live on `Model` and key off the **absolute** screen origin
+  `m.scrollbarTop` (`selection.go:72-124`, model.go mouse handlers). To move them
+  into `chatView`, where does screen→local coordinate translation happen, and who
+  owns the interaction state (`selection`, `scrollbarDragging`, `dragScrolling`,
+  `dragMouse`)?
+
+- **Options (4 dims):**
+  - **A — `chatView` is a self-contained widget in LOCAL coords (recommended).**
+    `chatView` owns the selection/scrollbar-drag/drag-scroll state and does all
+    hit-testing in its own (0,0 = top-left) space; it applies the selection
+    overlay inside `View()` (the step-1 `selOverlay` callback is removed). The host
+    keeps layout, translates screen mouse coords → local (subtract `scrollbarTop`,
+    etc.), and forwards to `chatView` mouse/key methods. Cost: a thin
+    translate+forward layer in the host's 4 mouse handlers; selection.go methods
+    reparent `(m Model)`→`(c *chatView)`. Risk: translate math must be right —
+    **loud** (the existing selection/scroll tests catch it). Reward: `chatView`
+    becomes a true reusable widget with no screen-coord knowledge — the whole point
+    of the migration; `/c` (step 4) reuses its interaction wholesale. Side effect:
+    host mouse handlers shrink to translate+forward.
+  - **B — `chatView` owns state but is told its screen origin** (`SetOrigin(top)`)
+    and translates internally. Cost: similar, plus an origin field the host must
+    re-sync every layout. Risk: **silent** mis-targeting if the host forgets to
+    push the origin on a resize / splash toggle. Reward: same encapsulation goal.
+    Side effect: origin state duplicated (host `scrollbarTop` + `chatView` copy).
+  - **C — leave selection/scroll state on `Model`; only the overlay in `chatView`**
+    (step-1 status quo). Cost: ~none. Risk: none new. Reward: none — **fails the
+    step's objective**: selection stays `Model`-bound and cannot be reused by `/c`,
+    perpetuating the duplicate-surface problem the whole migration exists to kill.
+    Side effect: blocks step 4.
+
+- **Hacks:** C is the do-nothing non-option (fails the goal). B's host-pushed
+  origin is a mild smell (duplicated, sync-obligated state).
+
+- **Counter-cases (step 5):** For B — putting translation "inside the widget"
+  sounds like better encapsulation, but it forces the host to push origin updates,
+  a sync obligation that's easy to miss exactly on the events that move the origin
+  (resize, splash on/off); A puts translation where the layout knowledge already
+  lives, so there is no sync obligation. For C — less work, but it explicitly does
+  not move selection into the component, so step 4 (`/c` reuse) stays blocked;
+  not viable for the objective.
+
+- **Chosen: A** — `chatView` as a self-contained local-coord widget; host
+  translates + forwards. Cleanest, no origin-sync wart, unblocks `/c` reuse.
+  Unambiguous after counter-cases → taken. The step-1 `View(selOverlay)` callback
+  is removed (selection now internal).
+
+- **Reversible:** yes (worktree). Existing selection/scrollbar-drag/drag-scroll
+  tests + full suite are the parity gate after the move.

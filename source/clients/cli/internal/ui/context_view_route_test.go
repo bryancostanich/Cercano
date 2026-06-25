@@ -37,7 +37,7 @@ func modelWithContextView() Model {
 		convID:  "c1",
 	}
 	cv.driver = d
-	cv.pane = newChatPane(d, s, p, w, h)
+	cv.chat = newChatView(s, p, "", "", w-2, h)
 	m.content = cv
 	return m
 }
@@ -52,7 +52,7 @@ func TestContextView_PaneSubmitFromPromptBar(t *testing.T) {
 	if cmd == nil {
 		t.Error("enter should submit to the pane (a cmd)")
 	}
-	if !cv.pane.Busy() {
+	if !cv.busy() {
 		t.Error("pane should be busy after submit")
 	}
 	if next.input.Value() != "" {
@@ -73,7 +73,7 @@ func TestContextView_ChatConfirmRaisesGate(t *testing.T) {
 	}
 	// the rationale should be in the pane log
 	found := false
-	for _, e := range cv.pane.entries {
+	for _, e := range cv.chat.Entries() {
 		if e.Content == "r" {
 			found = true
 		}
@@ -87,12 +87,12 @@ func TestContextView_ChatDoneClears(t *testing.T) {
 	m := modelWithContextView()
 	cv := m.content.(*contextView)
 	// Submit first to get busy
-	cv.pane.Submit("hi")
-	if !cv.pane.Busy() {
+	m, _ = m.submitContextEdit(cv, "hi")
+	if !cv.busy() {
 		t.Fatal("pane should be busy")
 	}
 	m.routeChatMsg(chatDoneMsg{text: "done"})
-	if cv.pane.Busy() {
+	if cv.busy() {
 		t.Error("chatDoneMsg should clear busy")
 	}
 }
@@ -101,8 +101,8 @@ func TestContextView_UpUnstagesLastQueued(t *testing.T) {
 	m := modelWithContextView()
 	cv := m.content.(*contextView)
 	// Submit to make busy, then queue a second message
-	cv.pane.Submit("first")
-	cv.pane.Submit("second") // enqueued
+	m, _ = m.submitContextEdit(cv, "first")
+	cv.chat.Enqueue("second") // enqueued while busy
 	next, _ := m.handleContextViewKey(cv, tea.KeyPressMsg{Code: tea.KeyUp})
 	if next.input.Value() != "second" {
 		t.Errorf("up should pop last queued into input, got %q", next.input.Value())
@@ -112,14 +112,14 @@ func TestContextView_UpUnstagesLastQueued(t *testing.T) {
 func TestContextView_EscClosesPageAndClearsQueue(t *testing.T) {
 	m := modelWithContextView()
 	cv := m.content.(*contextView)
-	cv.pane.Submit("first")
-	cv.pane.Submit("queued") // enqueued
+	m, _ = m.submitContextEdit(cv, "first")
+	cv.chat.Enqueue("queued") // enqueued while busy
 	// esc with empty input should close page and clear queue
 	next, _ := m.handleContextViewKey(cv, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if next.content != nil {
 		t.Error("esc with empty input should close the /c page")
 	}
-	if len(cv.pane.queued) != 0 {
+	if len(cv.chat.Queued()) != 0 {
 		t.Error("esc should clear the pane queue")
 	}
 }
@@ -154,7 +154,7 @@ func TestContextViewRoute_ProposalRaisesConfirm(t *testing.T) {
 	cv := m.content.(*contextView)
 	cv.snapshot = contextSnapshot{Turns: []agentclient.ContextTurn{{ID: "a", Role: "user", Preview: "x"}}}
 	// Simulate the driver emitting a chatConfirmMsg that also marks turns.
-	cv.pane.appendAssistant("delete rationale")
+	cv.chat.Apply(chatAssistantMsg{text: "delete rationale"})
 	cv.applyProposalIDs([]string{"a"})
 	msg := chatConfirmMsg{
 		assistant: "",
@@ -208,12 +208,12 @@ func TestContextViewRoute_EnterWithEmptyInputIsNoop(t *testing.T) {
 func TestContextViewRoute_DeleteErrorSurfacesScrollback(t *testing.T) {
 	m := modelWithContextView()
 	cv := m.content.(*contextView)
-	before := len(cv.pane.entries)
+	before := len(cv.chat.Entries())
 	m.routeChatMsg(chatErrorMsg{err: errors.New("rpc: unavailable")})
-	if len(cv.pane.entries) <= before {
+	if len(cv.chat.Entries()) <= before {
 		t.Fatal("delete error should append an entry to the pane log")
 	}
-	last := cv.pane.entries[len(cv.pane.entries)-1]
+	last := cv.chat.Entries()[len(cv.chat.Entries())-1]
 	if !strings.Contains(last.Content, "rpc: unavailable") {
 		t.Errorf("pane error entry should contain error text, got: %q", last.Content)
 	}
@@ -223,15 +223,15 @@ func TestContextViewRoute_DeleteErrorSurfacesScrollback(t *testing.T) {
 func TestContextViewRoute_EmptyProposalNoConfirm(t *testing.T) {
 	m := modelWithContextView()
 	cv := m.content.(*contextView)
-	before := len(cv.pane.entries)
+	before := len(cv.chat.Entries())
 	m2, _ := m.routeChatMsg(chatDoneMsg{text: "nothing to remove."})
 	if m2.pendingConfirm != nil {
 		t.Error("chatDoneMsg should not raise a pendingConfirm")
 	}
-	if len(cv.pane.entries) <= before {
+	if len(cv.chat.Entries()) <= before {
 		t.Fatal("chatDoneMsg should append an entry to the pane log")
 	}
-	last := cv.pane.entries[len(cv.pane.entries)-1]
+	last := cv.chat.Entries()[len(cv.chat.Entries())-1]
 	if !strings.Contains(last.Content, "nothing to remove") {
 		t.Errorf("last entry should contain 'nothing to remove', got: %q", last.Content)
 	}

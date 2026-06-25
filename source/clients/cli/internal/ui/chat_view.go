@@ -264,6 +264,12 @@ func (c *chatView) Apply(msg tea.Msg) tea.Cmd {
 			t.ResultSummary = humanizeResult(m.detail, m.summary, m.isError, time.Since(t.StartedAt))
 		}
 
+	case chatAssistantMsg:
+		// Whole-message append (the /c confirm rationale and any non-streaming
+		// driver use this instead of delta-extend). A complete assistant entry,
+		// not streaming.
+		c.AppendEntry(&Entry{Role: RoleAssistant, Content: m.text})
+
 	case chatDoneMsg:
 		e := c.streamingTextEntry()
 		if e == nil && m.text != "" {
@@ -414,6 +420,20 @@ func (c *chatView) Width() int { return c.vp.Width() }
 
 // Height returns the viewport height.
 func (c *chatView) Height() int { return c.vp.Height() }
+
+// DesiredHeight reports how many rows the chat wants — its rendered content lines
+// plus the queued chrome rows the host pins above the prompt. A host (the /c split
+// view) uses this to size the chat band so it grows with the transcript instead of
+// eating the whole panel. The streaming placeholder, when open, is a real entry and
+// is already counted in the content lines.
+func (c *chatView) DesiredHeight() int {
+	n := c.vp.TotalLineCount()
+	n += len(c.queued)
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
 
 // TotalLineCount returns the total number of content lines.
 func (c *chatView) TotalLineCount() int { return c.vp.TotalLineCount() }

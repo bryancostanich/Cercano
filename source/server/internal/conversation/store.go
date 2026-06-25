@@ -80,6 +80,11 @@ type Store interface {
 	// never overwritten by subsequent appends.
 	Rename(ctx context.Context, conversationID, title string) error
 
+	// SetGeneratedTitle sets an auto-generated title, but only when the
+	// conversation's title was not user-chosen (title_source != 'user').
+	// A no-op for user-renamed conversations. Idempotent.
+	SetGeneratedTitle(ctx context.Context, conversationID, title string) error
+
 	// UpdateRecap sets the LLM-generated living recap and its timestamp.
 	UpdateRecap(ctx context.Context, conversationID, recap string) error
 
@@ -144,6 +149,7 @@ func Open(path string) (Store, error) {
 	for _, alter := range []string{
 		`ALTER TABLE conversations ADD COLUMN recap TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE conversations ADD COLUMN recap_updated_at INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE conversations ADD COLUMN title_source TEXT NOT NULL DEFAULT 'user'`,
 	} {
 		if _, err := db.Exec(alter); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			db.Close()
@@ -214,8 +220,8 @@ func (s *sqliteStore) EnsureConversation(ctx context.Context, id, projectDir, mo
 	defer s.mu.Unlock()
 	now := time.Now().Unix()
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO conversations (id, project_dir, model, started_at, last_turn_at)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO conversations (id, project_dir, model, title_source, started_at, last_turn_at)
+		VALUES (?, ?, ?, 'auto', ?, ?)
 		ON CONFLICT(id) DO NOTHING`,
 		id, projectDir, model, now, now)
 	return err
@@ -381,7 +387,21 @@ func (s *sqliteStore) Rename(ctx context.Context, conversationID, title string) 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err := s.db.ExecContext(ctx, `UPDATE conversations SET title = ? WHERE id = ?`, title, conversationID)
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE conversations SET title = ?, title_source = 'user' WHERE id = ?`,
+		title, conversationID)
+	return err
+}
+
+func (s *sqliteStore) SetGeneratedTitle(ctx context.Context, conversationID, title string) error {
+	if conversationID == "" {
+		return errors.New("conversation id required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE conversations SET title = ? WHERE id = ? AND title_source != 'user'`,
+		title, conversationID)
 	return err
 }
 

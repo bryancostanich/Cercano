@@ -898,7 +898,7 @@ func (s *Server) ProcessRequest(ctx context.Context, req *proto.ProcessRequestRe
 func (s *Server) StreamProcessRequest(req *proto.ProcessRequestRequest, stream proto.Agent_StreamProcessRequestServer) error {
 	fmt.Printf("Received request (Stream): %s\n", req.Input)
 
-	if s.cloudLLMProvider != nil && s.toolRegistry != nil {
+	if (s.cloudLLMProvider != nil || s.localLLMProvider != nil) && s.toolRegistry != nil {
 		return s.streamProcessRequestWithToolLoop(req, stream)
 	}
 
@@ -1154,14 +1154,32 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 
 	ctx = anthropic.WithSessionID(ctx, req.GetConversationId())
 
-	// The native tool-loop provider is the configured cloud (Anthropic) engine.
-	// Announce the route up front so the client can show the engine badge from
-	// the first frame.
+	// Resolve the provider per the active Locus Mode.
+	provider, isCloud, fellBack, err := s.resolveMainProvider()
+	if err != nil {
+		// *_only mode with its required tier unavailable — hard fail, no silent cross.
+		return stream.Send(&proto.StreamProcessResponse{
+			Payload: &proto.StreamProcessResponse_FinalResponse{
+				FinalResponse: &proto.ProcessRequestResponse{Output: "Locus: " + err.Error()},
+			},
+		})
+	}
+	if fellBack {
+		stream.Send(&proto.StreamProcessResponse{
+			Payload: &proto.StreamProcessResponse_Progress{
+				Progress: &proto.ProgressUpdate{
+					Message: fmt.Sprintf("⚠ preferred tier unavailable — falling back to %s (%s)", provider.Name(), s.mainModelFor(isCloud)),
+				},
+			},
+		})
+	}
+
+	// Announce the true route so the client can show the correct engine badge.
 	stream.Send(&proto.StreamProcessResponse{
 		Payload: &proto.StreamProcessResponse_RouteSelected{
 			RouteSelected: &proto.RouteSelected{
-				Model:   s.currentConfig.CloudModel,
-				IsCloud: true,
+				Model:   s.mainModelFor(isCloud),
+				IsCloud: isCloud,
 			},
 		},
 	})
@@ -1172,32 +1190,21 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	}
 	injectedLen := len(convHistory)
 
-	result, err := agent.RunToolLoop(ctx, agent.ToolLoopInput{
-		Provider:            s.cloudLLMProvider,
-		Registry:            s.toolRegistry,
-		Permissions:         s.permStore,
-		UserInput:           req.GetInput(),
-		Model:               s.currentConfig.CloudModel,
-		System:              s.buildSystemPrompt(req.GetWorkDir()),
-		EventSink:           sink,
-		PermissionRequester: requester,
-		ConvHistory:         convHistory,
-		// Forward assistant text deltas so the CLI renders the reply live,
-		// token-by-token, instead of one block at the end.
-		OnTextDelta: func(t string) {
+	result, loopErr := s.runMainLoop(ctx, req, provider, isCloud, sink, requester, convHistory,
+		func(t string) {
 			stream.Send(&proto.StreamProcessResponse{
 				Payload: &proto.StreamProcessResponse_TokenDelta{
 					TokenDelta: &proto.TokenDelta{Content: t},
 				},
 			})
 		},
-	})
-	if err != nil {
-		return fmt.Errorf("tool loop error: %w", err)
+	)
+	if loopErr != nil {
+		return fmt.Errorf("tool loop error: %w", loopErr)
 	}
 
 	s.persistToolLoopTurns(ctx, req, result, injectedLen)
-	s.agent.RecordContextUsage(req.GetConversationId(), s.currentConfig.CloudModel,
+	s.agent.RecordContextUsage(req.GetConversationId(), s.mainModelFor(isCloud),
 		result.InputTokens, result.OutputTokens)
 
 	return stream.Send(&proto.StreamProcessResponse{
@@ -1205,10 +1212,45 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 			FinalResponse: &proto.ProcessRequestResponse{
 				Output: strings.ToValidUTF8(result.FinalText, "�"),
 				RoutingMetadata: &proto.RoutingMetadata{
-					ModelName: s.cloudLLMProvider.Name(),
+					ModelName: provider.Name(),
 				},
 			},
 		},
+	})
+}
+
+// mainModelFor returns the configured model name for the active tier.
+func (s *Server) mainModelFor(isCloud bool) string {
+	if isCloud {
+		return s.currentConfig.CloudModel
+	}
+	return s.currentConfig.LocalModel
+}
+
+// runMainLoop drives the native tool-loop on the given provider/tier.
+// Factored out so Task 6 (fallback) can reuse it without duplicating the
+// RunToolLoop call site.
+func (s *Server) runMainLoop(
+	ctx context.Context,
+	req *proto.ProcessRequestRequest,
+	provider llm.Provider,
+	isCloud bool,
+	sink func(agent.LoopEvent),
+	requester func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission) (bool, error),
+	convHistory []llm.Message,
+	onTextDelta func(string),
+) (agent.ToolLoopResult, error) {
+	return agent.RunToolLoop(ctx, agent.ToolLoopInput{
+		Provider:            provider,
+		Registry:            s.toolRegistry,
+		Permissions:         s.permStore,
+		UserInput:           req.GetInput(),
+		Model:               s.mainModelFor(isCloud),
+		System:              s.buildSystemPrompt(req.GetWorkDir()),
+		EventSink:           sink,
+		PermissionRequester: requester,
+		ConvHistory:         convHistory,
+		OnTextDelta:         onTextDelta,
 	})
 }
 

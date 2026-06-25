@@ -38,6 +38,27 @@ type chatView struct {
 	turn              turnStatus
 	selection         textSelection
 	scrollbarDragging bool
+
+	// dragMouse is the last pointer position during a text-selection drag,
+	// stored in LOCAL coordinates (host subtracts scrollbarTop before forwarding).
+	// dragScrolling is true while the edge auto-scroll tick loop is running.
+	dragMouse     tea.Mouse
+	dragScrolling bool
+}
+
+// dragScrollTickMsg drives continuous auto-scroll while a selection drag is
+// held past the viewport's top/bottom edge (no mouse motion required).
+type dragScrollTickMsg struct{}
+
+func dragScrollTick() tea.Cmd {
+	return tea.Tick(60*time.Millisecond, func(time.Time) tea.Msg { return dragScrollTickMsg{} })
+}
+
+// atScrollEdge reports whether the last drag pointer position (local coords)
+// sits past the top or bottom edge of the viewport.
+func (c *chatView) atScrollEdge() bool {
+	row := c.dragMouse.Y // dragMouse is already in local coords
+	return row < 0 || row >= c.Height()
 }
 
 // newChatView constructs a chatView sized to vpWidth × vpHeight. The host
@@ -392,6 +413,56 @@ func (c *chatView) StopScrollbarDrag() { c.scrollbarDragging = false }
 // selection itself. Used when a competing gesture (pending confirm, etc.) must
 // cancel an in-progress selection drag.
 func (c *chatView) ClearSelectionDrag() { c.selection.Dragging = false }
+
+// MouseDrag handles a drag motion event in local viewport coordinates.
+// If a scrollbar drag is active it scrubs; if a selection drag is active it
+// extends the selection and starts the edge auto-scroll tick when needed.
+// Returns the tick cmd (or nil) so the host can return it directly.
+func (c *chatView) MouseDrag(localX, localY int) tea.Cmd {
+	if c.scrollbarDragging {
+		c.scrollbarScrub(localY)
+		return nil
+	}
+	if !c.selection.Dragging {
+		return nil
+	}
+	c.dragMouse = tea.Mouse{X: localX, Y: localY}
+	c.updateSelection(localX, localY, true)
+	if c.atScrollEdge() && !c.dragScrolling {
+		c.dragScrolling = true
+		return dragScrollTick()
+	}
+	return nil
+}
+
+// DragScrollTick is called by the host when a dragScrollTickMsg arrives.
+// It continues the edge auto-scroll loop while the drag is held at an edge.
+// Returns (cmd, true) when the loop reschedules, (nil, false) when it stops.
+func (c *chatView) DragScrollTick() (tea.Cmd, bool) {
+	if !c.selection.Dragging || !c.atScrollEdge() {
+		c.dragScrolling = false
+		return nil, false
+	}
+	c.updateSelection(c.dragMouse.X, c.dragMouse.Y, true)
+	return dragScrollTick(), true
+}
+
+// StopDragScroll clears the edge auto-scroll flag.
+func (c *chatView) StopDragScroll() { c.dragScrolling = false }
+
+// DragScrolling reports whether the edge auto-scroll tick loop is active.
+func (c *chatView) DragScrolling() bool { return c.dragScrolling }
+
+// Wheel scrolls the viewport up or down by promptWheelDelta lines.
+// Provisional for step-4 reuse; the host's chat-wheel path keeps Update(msg)
+// for byte-identical behavior (zero behavior change for now).
+func (c *chatView) Wheel(up bool) {
+	if up {
+		c.ScrollUp(promptWheelDelta)
+	} else {
+		c.ScrollDown(promptWheelDelta)
+	}
+}
 
 // selectionEmpty reports whether the selection covers no range.
 func (c *chatView) selectionEmpty() bool { return c.selection.empty() }

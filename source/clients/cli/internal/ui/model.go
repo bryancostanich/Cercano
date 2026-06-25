@@ -63,13 +63,6 @@ type Model struct {
 	// page scrollbar rather than the main chat scrollback.
 	contentScrollbarDragging bool
 
-	// dragMouse is the last pointer position during a text-selection drag.
-	// dragScrolling is true while the edge auto-scroll tick loop is running, so
-	// holding the pointer past the top/bottom edge keeps scrolling without
-	// needing mouse motion. See dragScrollTickMsg.
-	dragMouse     tea.Mouse
-	dragScrolling bool
-
 	// root and home are resolved once at construction; used to humanize tool-call
 	// path arguments (relative to the project root, ~-abbreviated under home).
 	root string
@@ -430,21 +423,6 @@ func progressAnimTick() tea.Cmd {
 	return tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg { return progressAnimTickMsg(t) })
 }
 
-// dragScrollTickMsg drives continuous auto-scroll while a selection drag is held
-// past the viewport's top/bottom edge (no mouse motion required).
-type dragScrollTickMsg struct{}
-
-func dragScrollTick() tea.Cmd {
-	return tea.Tick(60*time.Millisecond, func(time.Time) tea.Msg { return dragScrollTickMsg{} })
-}
-
-// atScrollEdge reports whether the last drag pointer position sits past the top
-// or bottom edge of the viewport — the condition for edge auto-scroll.
-func (m Model) atScrollEdge() bool {
-	row := m.dragMouse.Y - m.scrollbarTop
-	return row < 0 || row >= m.chat.Height()
-}
-
 func waitForStream(ch <-chan agentclient.StreamMsg) tea.Cmd {
 	return func() tea.Msg {
 		msg, ok := <-ch
@@ -580,15 +558,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.chat.SelectionDragging() {
-			m.dragMouse = mouse
-			m.updateSelection(mouse, true)
-			// Held past an edge → start the auto-scroll tick so it keeps
-			// scrolling even when the pointer stops moving.
-			if m.atScrollEdge() && !m.dragScrolling {
-				m.dragScrolling = true
-				return m, dragScrollTick()
-			}
-			return m, nil
+			cmd := m.chat.MouseDrag(mouse.X, mouse.Y-m.scrollbarTop)
+			return m, cmd
 		}
 		return m, nil
 
@@ -598,7 +569,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		mouse := msg.Mouse()
-		m.dragScrolling = false
+		m.chat.StopDragScroll()
 		if m.input.Dragging() {
 			m.input.MouseUp(mouse.X, mouse.Y-m.promptTop())
 			return m, nil
@@ -979,14 +950,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case dragScrollTickMsg:
-		// Continuous edge auto-scroll: while the drag is still held past an
-		// edge, scroll one line and extend the selection, then reschedule.
-		if !m.chat.SelectionDragging() || !m.atScrollEdge() {
-			m.dragScrolling = false
-			return m, nil
-		}
-		m.updateSelection(m.dragMouse, true)
-		return m, dragScrollTick()
+		cmd, _ := m.chat.DragScrollTick()
+		return m, cmd
 
 	case progressAnimTickMsg:
 		// Keep ticking while there's an assistant entry awaiting its first

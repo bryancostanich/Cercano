@@ -73,6 +73,20 @@ func Advance(ctx context.Context, turns []conversation.Turn, state conversation.
 	}
 	eligible := live[:len(live)-cfg.VerbatimRecent]
 
+	// Never freeze a turn that shares the first verbatim turn's wall-clock second.
+	// FrozenThrough is a second-granularity timestamp and liveTurns keeps turns
+	// strictly after it, so a frozen turn at the same second as a live one would
+	// exclude that live turn forever (neither frozen nor live → dropped). Trimming
+	// keeps the boundary strictly below every live turn. Tool-use bursts routinely
+	// persist several turns in one second, so this case is common, not theoretical.
+	boundarySec := live[len(live)-cfg.VerbatimRecent].CreatedAt.Unix()
+	for len(eligible) > 0 && eligible[len(eligible)-1].CreatedAt.Unix() >= boundarySec {
+		eligible = eligible[:len(eligible)-1]
+	}
+	if len(eligible) == 0 {
+		return state, false, nil // all eligible share the verbatim window's second; wait
+	}
+
 	eligibleMsgs := agent.BuildLLMHistory(eligible)
 	if compaction.TotalTokens(tok, eligibleMsgs) < cfg.SegmentTokens {
 		return state, false, nil // cadence gate — let the tail accumulate

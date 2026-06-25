@@ -25,6 +25,24 @@ func flat(msgs []llm.Message) string {
 	return b.String()
 }
 
+func TestBuildSendView_OrphanToolResultInLiveTailIsRepaired(t *testing.T) {
+	// A tool_use is frozen away (created <= boundary); its tool_result is still
+	// live. The live tool_result is orphaned and must be repaired out, leaving a
+	// pairing-valid send view.
+	turns := []conversation.Turn{
+		{ID: "u1", Role: "assistant", BlocksJSON: `[{"type":"tool_use","id":"x1","name":"read","input":{}}]`, CreatedAt: time.Unix(100, 0)},
+		{ID: "r1", Role: "user", BlocksJSON: `[{"type":"tool_result","tool_use_id":"x1","content":"data"}]`, CreatedAt: time.Unix(200, 0)},
+	}
+	state := conversation.Compaction{FrozenThrough: 150, ConsolidatedJSON: `{"Goal":"G"}`}
+	view, err := BuildSendView(turns, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !llm.IsValidPairing(view) {
+		t.Error("orphan tool_result (its tool_use frozen away) must be repaired out → pairing-valid")
+	}
+}
+
 func TestBuildSendView_NoStateIsFullHistory(t *testing.T) {
 	turns := []conversation.Turn{turn("a", "user", "hello", 100), turn("b", "assistant", "hi", 101)}
 	view, err := BuildSendView(turns, conversation.Compaction{})

@@ -24,6 +24,18 @@ type Config struct {
 	CloudBaseURL string            `yaml:"cloud_base_url"`
 	Port         string            `yaml:"port"`
 	LlamaServer  LlamaServerConfig `yaml:"llama_server"`
+	Compaction   CompactionConfig  `yaml:"compaction"`
+}
+
+// CompactionConfig controls background context compaction. Thresholds are token
+// counts; HardOverridePct is a fraction of the cloud model's max context above
+// which the request path compacts synchronously.
+type CompactionConfig struct {
+	Enabled               bool    `yaml:"enabled"`
+	ActivationFloorTokens int     `yaml:"activation_floor_tokens"`
+	SegmentTokens         int     `yaml:"segment_tokens"`
+	VerbatimRecent        int     `yaml:"verbatim_recent"`
+	HardOverridePct       float64 `yaml:"hard_override_pct"`
 }
 
 // LlamaServerConfig controls the optional managed llama-server sidecar.
@@ -87,6 +99,13 @@ func Defaults() Config {
 				MaxAttempts: 3,
 				Backoff:     "2s",
 			},
+		},
+		Compaction: CompactionConfig{
+			Enabled:               true,
+			ActivationFloorTokens: 40000,
+			SegmentTokens:         8000,
+			VerbatimRecent:        6,
+			HardOverridePct:       0.9,
 		},
 	}
 }

@@ -2,7 +2,10 @@
 // model by routing summarization through a running cercano agent. It is a
 // validation tool, not part of the test suite.
 //
-// Usage: compaction-bakeoff -addr localhost:50051
+// Synthetic corpus:  compaction-bakeoff -addr localhost:50052
+// Real session:      compaction-bakeoff -addr localhost:50052 \
+//                        -transcript ~/.claude/projects/<proj>/<id>.jsonl \
+//                        -maxtokens 150000 -anchors "goal phrase,key file.go"
 package main
 
 import (
@@ -10,6 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -19,8 +23,19 @@ import (
 	"cercano/source/server/pkg/agentclient"
 )
 
+func contenders() []compaction.Compactor {
+	return []compaction.Compactor{
+		compaction.RollingCompactor{},
+		compaction.MapReduceCompactor{ModelReduce: false},
+		compaction.MapReduceCompactor{ModelReduce: true},
+	}
+}
+
 func main() {
-	addr := flag.String("addr", "localhost:50051", "running cercano agent gRPC address")
+	addr := flag.String("addr", "localhost:50052", "running cercano agent gRPC address")
+	transcript := flag.String("transcript", "", "path to a Claude Code JSONL session to use as a real fixture (instead of the synthetic corpus)")
+	maxTokens := flag.Int("maxtokens", 150000, "for -transcript: slice the session to ~this many tokens from the start")
+	anchors := flag.String("anchors", "", "for -transcript: comma-separated must-keep substrings to score retention")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -33,24 +48,27 @@ func main() {
 
 	summarize := agentSummarizer(client)
 	tok := contextmeter.Default()
+
+	if *transcript != "" {
+		runTranscript(ctx, summarize, tok, *transcript, *maxTokens, *anchors)
+		return
+	}
+	runCorpus(ctx, summarize, tok)
+}
+
+// runCorpus scores every contender over the synthetic fixture corpus.
+func runCorpus(ctx context.Context, summarize compaction.SummarizeFunc, tok contextmeter.Tokenizer) {
 	// SegmentTokens is sized to the small illustrative corpus (older spans are
 	// tens-to-hundreds of tokens) so the older history actually splits into
 	// multiple segments — otherwise every fixture is one segment and
 	// map-reduce/model degenerates to map-reduce/mechanical, making the B-vs-C
-	// comparison inert. A production run over large real conversations would use
-	// a realistic budget (e.g. 32000).
+	// comparison inert. The -transcript path uses a realistic budget instead.
 	budget := compaction.Budget{VerbatimRecent: 4, SegmentTokens: 40}
-
-	contenders := []compaction.Compactor{
-		compaction.RollingCompactor{},
-		compaction.MapReduceCompactor{ModelReduce: false},
-		compaction.MapReduceCompactor{ModelReduce: true},
-	}
 
 	fmt.Printf("%-22s %-18s %8s %10s %8s %6s %6s\n",
 		"contender", "fixture", "reduce", "anchors", "dedup", "valid", "calls")
 	invalid := false
-	for _, c := range contenders {
+	for _, c := range contenders() {
 		for _, f := range compaction.Corpus() {
 			m, err := compaction.Score(ctx, c, f, summarize, tok, budget)
 			if err != nil {
@@ -69,6 +87,81 @@ func main() {
 		fmt.Fprintln(os.Stderr, "FAIL: at least one send-view was pairing-invalid")
 		os.Exit(1)
 	}
+}
+
+// runTranscript runs every contender over one real Claude Code session and
+// prints metrics plus each contender's final summary side by side, so the
+// quality difference (did compounding loss erode the thread?) is legible.
+func runTranscript(ctx context.Context, summarize compaction.SummarizeFunc, tok contextmeter.Tokenizer, path string, maxTokens int, anchorsCSV string) {
+	msgs, err := LoadTranscript(path, maxTokens, tok)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "load transcript: %v\n", err)
+		os.Exit(1)
+	}
+	if len(msgs) == 0 {
+		fmt.Fprintln(os.Stderr, "transcript produced no convertible messages")
+		os.Exit(1)
+	}
+	var anchors []string
+	for _, a := range strings.Split(anchorsCSV, ",") {
+		if a = strings.TrimSpace(a); a != "" {
+			anchors = append(anchors, a)
+		}
+	}
+
+	budget := compaction.Budget{VerbatimRecent: 6, SegmentTokens: 32000}
+	rawTok := compaction.TotalTokens(tok, msgs)
+	fmt.Printf("transcript %s: %d messages, ~%d tokens (sliced to <=%d), %d anchors\n\n",
+		filepath.Base(path), len(msgs), rawTok, maxTokens, len(anchors))
+
+	for _, c := range contenders() {
+		calls := 0
+		counted := func(cx context.Context, m []llm.Message) (compaction.StructuredSummary, error) {
+			calls++
+			return summarize(cx, m)
+		}
+		res, err := c.Compact(ctx, msgs, counted, budget)
+		if err != nil {
+			fmt.Printf("== %s ==\n  ERROR: %v\n\n", c.Name(), err)
+			continue
+		}
+		sentTok := compaction.TotalTokens(tok, res.SendView)
+		reduction := 0.0
+		if rawTok > 0 {
+			reduction = 1 - float64(sentTok)/float64(rawTok)
+		}
+		flat := flattenSendView(res.SendView)
+		kept := 0
+		for _, a := range anchors {
+			if strings.Contains(flat, a) {
+				kept++
+			}
+		}
+		fmt.Printf("== %s ==\n", c.Name())
+		fmt.Printf("  reduction=%.0f%%  calls=%d  pairingValid=%v", reduction*100, calls, llm.IsValidPairing(res.SendView))
+		if len(anchors) > 0 {
+			fmt.Printf("  anchors=%d/%d", kept, len(anchors))
+		}
+		fmt.Print("\n  --- final summary ---\n")
+		if len(res.Summaries) > 0 {
+			for _, line := range strings.Split(res.Summaries[0].RenderBlock().Text, "\n") {
+				fmt.Println("  " + line)
+			}
+		}
+		fmt.Println()
+	}
+}
+
+func flattenSendView(msgs []llm.Message) string {
+	var b strings.Builder
+	for _, m := range msgs {
+		for _, blk := range m.Blocks {
+			b.WriteString(blk.Text)
+			b.WriteString(blk.Content)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
 }
 
 // agentSummarizer builds a SummarizeFunc that sends the summary prompt through

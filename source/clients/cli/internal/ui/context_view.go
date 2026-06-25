@@ -134,34 +134,70 @@ func (c *contextView) markedForDelete(id string) bool {
 
 // (proposeCmd and deleteCmd removed — the contextManagerDriver owns those RPCs now.)
 
+// View renders two stacked regions — the turns list (top) and the chat pane
+// (bottom) — each with its OWN scrollbar. The pane is sized to the height it
+// needs (capped at half the panel) instead of being embedded inside the turns
+// scroller, which previously nested a second scrollbar and let an empty pane eat
+// the panel.
 func (c *contextView) View() string {
-	full, contentH := c.fullContent()
-	return c.renderScrollableContent(full, contentH)
+	turnsH, paneH := c.regionHeights()
+	turnsBlock := c.renderScrollableContent(strings.Join(c.turnsLines(), "\n"), turnsH)
+	paneBlock := padLines("", paneH)
+	if c.pane != nil {
+		c.pane.SetSize(c.width, paneH)
+		paneBlock = padLines(c.pane.View(), paneH)
+	}
+	return turnsBlock + "\n" + paneBlock
 }
 
-func (c *contextView) fullContent() (string, int) {
-	var lines []string
-	lines = append(lines, c.renderHeader())
-	lines = append(lines, "")
-	if c.convID == "" {
+// regionHeights splits the content area: the chat pane takes what it needs
+// (capped at half), the turns list gets the rest (at least one row).
+func (c *contextView) regionHeights() (turnsH, paneH int) {
+	totalH := dashboardContentHeight(c.height)
+	if totalH < 2 {
+		totalH = 2
+	}
+	paneH = 1
+	if c.pane != nil {
+		c.pane.SetSize(c.width, totalH) // set width so DesiredHeight wraps correctly
+		paneH = clampInt(c.pane.DesiredHeight(), 1, maxInt(1, totalH/2))
+	}
+	turnsH = totalH - paneH
+	if turnsH < 1 {
+		turnsH = 1
+	}
+	return turnsH, paneH
+}
+
+// turnsLines renders the header + the turns list (or the empty/error states).
+func (c *contextView) turnsLines() []string {
+	lines := []string{c.renderHeader(), ""}
+	switch {
+	case c.convID == "":
 		lines = append(lines, c.styles.Muted.Render("no conversation yet"))
-	} else if c.snapshot.TurnsErr != nil {
+	case c.snapshot.TurnsErr != nil:
 		lines = append(lines, c.styles.Error.Render("turns unavailable: "+c.snapshot.TurnsErr.Error()))
-	} else if len(c.snapshot.Turns) == 0 {
+	case len(c.snapshot.Turns) == 0:
 		lines = append(lines, c.styles.Muted.Render("context is empty"))
-	} else {
+	default:
 		for i, t := range c.snapshot.Turns {
 			lines = append(lines, c.renderTurn(i, t))
 		}
 	}
-	lines = append(lines, "")
-	// Chat pane: shows the instruction log + animated status line.
-	if c.pane != nil {
-		lines = append(lines, c.pane.View())
-	} else {
-		lines = append(lines, c.styles.Muted.Render("type to edit · enter to propose · esc: back"))
+	return lines
+}
+
+// padLines forces s to exactly n lines (pad with blanks / truncate) so a region
+// fills its allotted band height precisely.
+func padLines(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	for len(lines) < n {
+		lines = append(lines, "")
 	}
-	return strings.Join(lines, "\n"), dashboardContentHeight(c.height)
+	if len(lines) > n {
+		lines = lines[:n]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (c *contextView) renderHeader() string {
@@ -196,9 +232,9 @@ func (c *contextView) renderTurn(i int, t agentclient.ContextTurn) string {
 func (c *contextView) ScrollBy(delta int) { c.scrollOffset += delta; c.clampScroll() }
 func (c *contextView) ScrollTo(offset int) { c.scrollOffset = offset; c.clampScroll() }
 func (c *contextView) ScrollState() contentPageScrollState {
-	full, contentH := c.fullContent()
-	total := countLines([]string{full})
-	return contentPageScrollState{Total: total, Height: contentH, Offset: clampInt(c.scrollOffset, 0, maxInt(0, total-contentH))}
+	turnsH, _ := c.regionHeights()
+	total := len(c.turnsLines())
+	return contentPageScrollState{Total: total, Height: turnsH, Offset: clampInt(c.scrollOffset, 0, maxInt(0, total-turnsH))}
 }
 func (c *contextView) clampScroll() { c.scrollOffset = c.ScrollState().Offset }
 

@@ -52,6 +52,7 @@ type chatPane struct {
 	started      time.Time
 	queued       []string // FIFO; messages submitted while busy (mirrors main chat d808952)
 	scrollOffset int
+	follow       bool // when true, View pins to the bottom against the CURRENT height
 }
 
 func newChatPane(d ChatDriver, s theme.Styles, p theme.Palette, w, h int) *chatPane {
@@ -62,8 +63,12 @@ func newChatPane(d ChatDriver, s theme.Styles, p theme.Palette, w, h int) *chatP
 		width:   w,
 		height:  h,
 		md:      render.NewMarkdown(theme.CrackerMarkdownStyle()),
+		follow:  true,
 	}
 }
+
+// maxScroll is the largest valid scroll offset for the current content + height.
+func (c *chatPane) maxScroll() int { return maxInt(0, len(c.contentLines())-c.contentHeight()) }
 
 func (c *chatPane) Busy() bool { return c.busy }
 
@@ -162,10 +167,18 @@ func renderChatEntry(e *Entry, md *render.Markdown, s theme.Styles, width int) s
 }
 
 // ScrollBy advances the scroll offset by delta lines (positive = down).
-func (c *chatPane) ScrollBy(delta int) { c.scrollOffset += delta; c.clampScroll() }
+func (c *chatPane) ScrollBy(delta int) {
+	c.scrollOffset += delta
+	c.clampScroll()
+	c.follow = c.scrollOffset >= c.maxScroll()
+}
 
 // ScrollTo sets the scroll offset to a specific line.
-func (c *chatPane) ScrollTo(offset int) { c.scrollOffset = offset; c.clampScroll() }
+func (c *chatPane) ScrollTo(offset int) {
+	c.scrollOffset = offset
+	c.clampScroll()
+	c.follow = c.scrollOffset >= c.maxScroll()
+}
 
 // ScrollState returns a snapshot of the current scroll geometry.
 func (c *chatPane) ScrollState() contentPageScrollState {
@@ -184,8 +197,8 @@ func (c *chatPane) clampScroll() { c.scrollOffset = c.ScrollState().Offset }
 // scrollToBottom pins the view to the most-recent line. The sentinel value is
 // clamped to the real maximum by clampScroll / ScrollState.
 func (c *chatPane) scrollToBottom() {
-	c.scrollOffset = 1 << 30 // clamped to real max by clampScroll
-	c.clampScroll()
+	c.follow = true
+	c.scrollOffset = c.maxScroll()
 }
 
 // contentHeight is the scrollable area: total height minus the pinned rows
@@ -201,6 +214,21 @@ func (c *chatPane) contentHeight() int {
 		h = 1
 	}
 	return h
+}
+
+// DesiredHeight reports how many rows the pane wants — its content lines plus the
+// pinned status/queued rows. A host (e.g. the /c split view) uses this to size
+// the pane's band so it grows with the chat instead of eating the whole panel.
+func (c *chatPane) DesiredHeight() int {
+	n := len(c.contentLines())
+	if c.busy {
+		n++
+	}
+	n += len(c.queued)
+	if n < 1 {
+		n = 1
+	}
+	return n
 }
 
 // contentLines renders all entries into a flat line slice for windowing.
@@ -225,7 +253,11 @@ func (c *chatPane) View() string {
 	contentH := c.contentHeight()
 	allLines := c.contentLines()
 	total := len(allLines)
-	c.scrollOffset = clampInt(c.scrollOffset, 0, maxInt(0, total-contentH))
+	if c.follow {
+		c.scrollOffset = maxInt(0, total-contentH)
+	} else {
+		c.scrollOffset = clampInt(c.scrollOffset, 0, maxInt(0, total-contentH))
+	}
 	col := scrollbarColumn(total, contentH, c.scrollOffset)
 	contentW := c.width - 2
 	if contentW < 1 {

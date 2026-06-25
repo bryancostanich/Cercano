@@ -69,7 +69,7 @@ func TestScrollbarDragWinsOverStuckSelection(t *testing.T) {
 	// Press in viewport text → beginSelection sets selection.Dragging = true,
 	// then (modeling the real failing flow) no clearing release arrives.
 	m = send(t, m, tea.MouseClickMsg{X: 5, Y: 5, Button: tea.MouseLeft})
-	if !m.selection.Dragging {
+	if !m.chat.SelectionDragging() {
 		t.Fatalf("precondition: expected selection.Dragging true after text press")
 	}
 	if got := barDrag(t, m); got == 0 {
@@ -86,7 +86,7 @@ func TestScrollbarDragAfterViewportSelectAndCopy(t *testing.T) {
 	m = send(t, m, tea.MouseMotionMsg{X: 6, Y: 4, Button: tea.MouseLeft})  // drag-select
 	m = send(t, m, tea.MouseReleaseMsg{X: 6, Y: 4, Button: tea.MouseLeft}) // release → auto-copy
 	t.Logf("after select+copy: selDrag=%v selActive=%v sbDrag=%v",
-		m.selection.Dragging, m.selection.Active, m.scrollbarDragging)
+		m.chat.SelectionDragging(), m.chat.SelectionActive(), m.scrollbarDragging)
 	if got := barDrag(t, m); got == 0 {
 		t.Fatalf("scrollbar drag after viewport select+copy did not scroll (yoff=0)")
 	}

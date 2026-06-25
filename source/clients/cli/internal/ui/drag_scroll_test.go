@@ -22,7 +22,7 @@ func TestDragScroll_ContinuesWhileHeldAtEdge(t *testing.T) {
 
 	// Begin a drag inside the viewport, then "move" the pointer above the top
 	// edge and hold it there (one motion event, then ticks with no motion).
-	m.selection = textSelection{Active: true, Dragging: true,
+	m.chat.selection = textSelection{Active: true, Dragging: true,
 		Anchor: selectionPoint{Line: startOffset, Col: 0}}
 	aboveTop := tea.Mouse{X: 5, Y: m.scrollbarTop - 1}
 

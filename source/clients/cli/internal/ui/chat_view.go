@@ -35,7 +35,8 @@ type chatView struct {
 	plainLines     []string
 	focusedToolIdx int
 
-	turn turnStatus
+	turn      turnStatus
+	selection textSelection
 }
 
 // newChatView constructs a chatView sized to vpWidth × vpHeight. The host
@@ -135,9 +136,9 @@ func (c *chatView) SetEntries(entries []*Entry) {
 	}
 }
 
-// View renders the viewport with a one-column scrollbar using the provided
-// selOverlay function to apply selection highlighting per line.
-func (c *chatView) View(selOverlay func(line string, contentLine int) string) string {
+// View renders the viewport with a one-column scrollbar, applying selection
+// highlighting internally.
+func (c *chatView) View() string {
 	body := c.vp.View()
 	lines := strings.Split(body, "\n")
 	height := c.vp.Height()
@@ -145,7 +146,7 @@ func (c *chatView) View(selOverlay func(line string, contentLine int) string) st
 	var b strings.Builder
 	for i, line := range lines {
 		contentLine := c.vp.YOffset() + i
-		line = selOverlay(line, contentLine)
+		line = c.renderSelectionOnLine(line, contentLine)
 		// Clamp to the viewport width so an over-wide content line (Glamour
 		// pads prose a few columns past the wrap width) can't push the
 		// composited row past m.width and wrap in the terminal — which would
@@ -270,4 +271,127 @@ func (c *chatView) renderMdBlock(b render.MdBlock, textW int) string {
 	default:
 		return c.md.Render(b.Raw, textW)
 	}
+}
+
+// ── selection surface ──────────────────────────────────────────────────────
+
+// renderSelectionOnLine applies selection highlighting to one rendered line.
+func (c *chatView) renderSelectionOnLine(line string, contentLine int) string {
+	start, end, ok := c.selection.lineRange(contentLine, c.vp.Width())
+	if !ok {
+		return line
+	}
+	return highlightRange(line, start, end)
+}
+
+// selectedText returns the plain-text content covered by the current selection.
+func (c *chatView) selectedText() string {
+	plainLns := c.plainLines
+	if !c.selection.hasRange() || len(plainLns) == 0 {
+		return ""
+	}
+	start, end := c.selection.ordered()
+	start.Line = clampInt(start.Line, 0, len(plainLns)-1)
+	end.Line = clampInt(end.Line, 0, len(plainLns)-1)
+	if beforePoint(end, start) {
+		return ""
+	}
+
+	parts := make([]string, 0, end.Line-start.Line+1)
+	for line := start.Line; line <= end.Line; line++ {
+		text := plainLns[line]
+		switch {
+		case start.Line == end.Line:
+			parts = append(parts, ansi.Cut(text, start.Col, end.Col))
+		case line == start.Line:
+			parts = append(parts, ansi.Cut(text, start.Col, ansi.StringWidth(text)))
+		case line == end.Line:
+			parts = append(parts, ansi.Cut(text, 0, end.Col))
+		default:
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// selectionPointFromLocal converts a LOCAL coordinate (row already relative to
+// the viewport top, i.e. host has subtracted scrollbarTop) to a selectionPoint.
+// If allowScroll is true and the row is out of bounds, the viewport is scrolled
+// one line in the appropriate direction.
+func (c *chatView) selectionPointFromLocal(localX, localY int, allowScroll bool) selectionPoint {
+	height := c.vp.Height()
+	row := localY
+	if allowScroll {
+		switch {
+		case row < 0:
+			c.vp.ScrollUp(1)
+			row = 0
+		case row >= height:
+			c.vp.ScrollDown(1)
+			row = height - 1
+		}
+	}
+	row = clampInt(row, 0, maxInt(0, height-1))
+	line := c.vp.YOffset() + row
+	if len(c.plainLines) > 0 {
+		line = clampInt(line, 0, len(c.plainLines)-1)
+	}
+	return selectionPoint{
+		Line: line,
+		Col:  clampInt(localX, 0, c.vp.Width()),
+	}
+}
+
+// MouseInText reports whether a LOCAL coordinate falls inside the viewport text
+// region (not on the scrollbar column).
+func (c *chatView) MouseInText(localX, localY int) bool {
+	return localX >= 0 &&
+		localX < c.vp.Width() &&
+		localY >= 0 &&
+		localY < c.vp.Height()
+}
+
+// ClearSelection resets the selection state.
+func (c *chatView) ClearSelection() {
+	c.selection = textSelection{}
+}
+
+// SelectionActive reports whether a selection is active.
+func (c *chatView) SelectionActive() bool { return c.selection.Active }
+
+// SelectionHasRange reports whether the selection covers a non-empty range.
+func (c *chatView) SelectionHasRange() bool { return c.selection.hasRange() }
+
+// SelectionDragging reports whether a selection drag is in progress.
+func (c *chatView) SelectionDragging() bool { return c.selection.Dragging }
+
+// HandleSelectionKey handles a key press while a selection is active.
+// Returns (cmd, handled, copied): cmd is a clipboard cmd or nil; handled=true
+// means the host should not process the key further; copied=true means the host
+// should set its status notice.
+func (c *chatView) HandleSelectionKey(msg tea.KeyPressMsg) (tea.Cmd, bool, bool) {
+	switch msg.String() {
+	case "esc":
+		c.ClearSelection()
+		return nil, true, false
+	case "enter", "c", "y", "ctrl+c":
+		text := c.selectedText()
+		c.ClearSelection()
+		if text == "" {
+			return nil, true, false
+		}
+		return selectionClipboardCmd(text), true, true
+	}
+	if isSelectionCopyKey(msg) {
+		text := c.selectedText()
+		c.ClearSelection()
+		if text == "" {
+			return nil, true, false
+		}
+		return selectionClipboardCmd(text), true, true
+	}
+	if msg.Text != "" {
+		c.ClearSelection()
+	}
+	return nil, false, false
 }

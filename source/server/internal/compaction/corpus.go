@@ -36,6 +36,8 @@ func Corpus() []Fixture {
 		repeatedReadsFixture(),
 		refactorManyFilesFixture(),
 		lightQAFixture(),
+		longDebugFixture(),
+		researchFetchesFixture(),
 	}
 }
 
@@ -91,5 +93,50 @@ func lightQAFixture() Fixture {
 			bUser("Okay, go with the mutex."),
 		},
 		MustKeep: []string{"mutex", "recap timer"},
+	}
+}
+
+// longDebugFixture: a long debugging session that revisits one hypothesis across
+// many turns, reading the same file repeatedly, before the real root cause is
+// found. Tests whether the goal and the FINAL root cause survive summarization.
+func longDebugFixture() Fixture {
+	var msgs []llm.Message
+	msgs = append(msgs, bUser("Tests flake intermittently in TestPager — find why"))
+	for i := 1; i <= 8; i++ {
+		id := fmt.Sprintf("d%d", i)
+		msgs = append(msgs, bToolCall(id, "read", `{"path":"pager_test.go"}`))
+		msgs = append(msgs, bToolResult(id, fmt.Sprintf("pager_test.go inspection pass %d", i)))
+		msgs = append(msgs, bAssistant(fmt.Sprintf("Hypothesis %d: maybe a timing issue; not confirmed.", i)))
+	}
+	msgs = append(msgs, bAssistant("Root cause found: a shared map is written without a lock in paginate()."))
+	return Fixture{
+		Name:        "long-debug",
+		Description: "Long debug session revisiting one hypothesis; final root cause must survive.",
+		Messages:    msgs,
+		MustKeep:    []string{"flake", "TestPager", "shared map", "without a lock"},
+	}
+}
+
+// researchFetchesFixture: many distinct web fetches, each a different finding.
+// Tests whether distinct facts are retained rather than blurred together.
+func researchFetchesFixture() Fixture {
+	findings := []struct{ url, fact string }{
+		{"a.example/rram", "RRAM endurance is ~10^6 cycles"},
+		{"b.example/sram", "SRAM bitcell is 6T, ~0.2 um^2 in this node"},
+		{"c.example/mram", "MRAM retention exceeds 10 years at 85C"},
+		{"d.example/flash", "Flash needs ~18V for erase"},
+	}
+	msgs := []llm.Message{bUser("Compare emerging memory technologies for the edge accelerator")}
+	for i, f := range findings {
+		id := fmt.Sprintf("w%d", i)
+		msgs = append(msgs, bToolCall(id, "fetch", fmt.Sprintf(`{"url":%q}`, f.url)))
+		msgs = append(msgs, bToolResult(id, f.fact))
+	}
+	msgs = append(msgs, bAssistant("Compiled the comparison across RRAM, SRAM, MRAM, and Flash."))
+	return Fixture{
+		Name:        "research-fetches",
+		Description: "Many distinct fetches; each finding must be retained, not blurred.",
+		Messages:    msgs,
+		MustKeep:    []string{"RRAM", "10 years", "18V", "6T"},
 	}
 }

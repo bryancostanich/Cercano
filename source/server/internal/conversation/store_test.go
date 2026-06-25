@@ -367,3 +367,47 @@ func TestDeleteTurns_RemovesOnlyNamed(t *testing.T) {
 		t.Errorf("empty delete errored: %v", err)
 	}
 }
+
+func TestSetGeneratedTitle_SetsAutoTitle(t *testing.T) {
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	if err := s.EnsureConversation(ctx, "c1", "/proj", "m"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetGeneratedTitle(ctx, "c1", "Fix The Scrollbar"); err != nil {
+		t.Fatal(err)
+	}
+	info, err := s.Get(ctx, "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Title != "Fix The Scrollbar" {
+		t.Errorf("title = %q, want %q", info.Title, "Fix The Scrollbar")
+	}
+}
+
+func TestSetGeneratedTitle_NeverOverwritesUserRename(t *testing.T) {
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	if err := s.EnsureConversation(ctx, "c1", "/proj", "m"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Rename(ctx, "c1", "My Title"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetGeneratedTitle(ctx, "c1", "Generated Title"); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := s.Get(ctx, "c1")
+	if info.Title != "My Title" {
+		t.Errorf("user title was overwritten: got %q, want %q", info.Title, "My Title")
+	}
+}

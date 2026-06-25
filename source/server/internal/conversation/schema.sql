@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     title        TEXT NOT NULL DEFAULT '',
     project_dir  TEXT NOT NULL DEFAULT '',
     model        TEXT NOT NULL DEFAULT '',
+    title_source TEXT NOT NULL DEFAULT 'user',
     started_at   INTEGER NOT NULL,
     last_turn_at INTEGER NOT NULL,
     recap            TEXT NOT NULL DEFAULT '',

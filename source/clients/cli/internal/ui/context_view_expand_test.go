@@ -94,6 +94,30 @@ func TestContextView_ClickArrowToggles(t *testing.T) {
 	}
 }
 
+func TestContextView_ShiftTabFocusesLastExpandable(t *testing.T) {
+	cv := expandTestView()
+	cv.snapshot.Turns = []agentclient.ContextTurn{
+		{ID: "a", Role: "assistant", Kind: "text", Body: "L1\nL2\nL3\nL4\nL5"}, // expandable, index 0
+		{ID: "u", Role: "user", Kind: "text", Body: "short", Preview: "short"}, // not expandable, index 1
+		{ID: "b", Role: "assistant", Kind: "text", Body: "M1\nM2\nM3\nM4\nM5"}, // expandable, index 2
+	}
+	// shift+tab from neutral (-1) should land on last expandable turn (index 2)
+	cv.focusNextExpandable(-1)
+	if cv.focusedTurn != 2 {
+		t.Fatalf("shift+tab from -1 should focus last expandable (index 2), got %d", cv.focusedTurn)
+	}
+	// another shift+tab should wrap to index 0 (skipping non-expandable index 1)
+	cv.focusNextExpandable(-1)
+	if cv.focusedTurn != 0 {
+		t.Fatalf("second shift+tab should wrap to index 0, got %d", cv.focusedTurn)
+	}
+	// forward tab from index 0 should land on index 2 (skipping non-expandable index 1)
+	cv.focusNextExpandable(1)
+	if cv.focusedTurn != 2 {
+		t.Fatalf("tab from 0 should skip non-expandable and land on 2, got %d", cv.focusedTurn)
+	}
+}
+
 func TestContextView_TabFocusEnterToggles(t *testing.T) {
 	m := modelWithContextView()
 	cv := m.content.(*contextView)

@@ -266,8 +266,10 @@ func (s *sqliteStore) Append(ctx context.Context, t Turn) error {
 		return fmt.Errorf("update conv last_turn_at: %w", err)
 	}
 	// Auto-derive a title from the first user turn only if no title exists
-	// yet. Once set (either auto-derived or user-renamed), it sticks — never
-	// overwritten by later turns.
+	// yet, and never overwrite an existing title here. The auto-derived title
+	// keeps title_source='auto', so SetGeneratedTitle may later replace it with
+	// a model-generated one; a user Rename sets title_source='user' and is
+	// never touched by either path.
 	if t.Role == "user" {
 		title := DeriveTitle(t.Content)
 		if title != "" {

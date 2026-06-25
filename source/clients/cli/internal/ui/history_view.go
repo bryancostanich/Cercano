@@ -132,6 +132,12 @@ func (h *historyView) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 		r := h.rows[h.cursor]
 		return func() tea.Msg { return resumeRequestedMsg{ConversationID: r.id, Title: r.name} }, true
+	case "right", "l":
+		return h.expandSelected(), false
+	case "left", "h":
+		if h.cursor >= 0 && h.cursor < len(h.rows) {
+			h.rows[h.cursor].expanded = false
+		}
 	case "pgup", "ctrl+b":
 		h.ScrollBy(-dashboardContentHeight(h.height))
 	case "pgdown", "ctrl+f":
@@ -204,13 +210,17 @@ func (h *historyView) appendRow(lines *[]string, meta *[]histLineMeta, i, panelW
 	add := func(s string, m histLineMeta) { *lines = append(*lines, s); *meta = append(*meta, m) }
 	r := h.rows[i]
 
-	arrow := "▸ "
+	glyph := "▸ "
+	if r.expanded {
+		glyph = "▾ "
+	}
 	nameStyle := h.styles.Muted
+	var arrow string
 	if i == h.cursor {
-		arrow = h.styles.Accent.Render("▸ ")
+		arrow = h.styles.Accent.Render(glyph)
 		nameStyle = h.styles.Bright
 	} else {
-		arrow = h.styles.Dim.Render(arrow)
+		arrow = h.styles.Dim.Render(glyph)
 	}
 
 	// Line 1: " <arrow><name padded>  <meta>" budgeted so meta sits at the right.
@@ -234,6 +244,90 @@ func (h *historyView) appendRow(lines *[]string, meta *[]histLineMeta, i, panelW
 	indent := "      "
 	recapTxt := ansi.Truncate(recap, maxInt(8, panelW-lipgloss.Width(indent)), "…")
 	add(indent+h.styles.Primary.Render(recapTxt), histLineMeta{row: i})
+
+	if r.expanded {
+		panelInner := panelW
+		// Full recap wrapped, indented under the row.
+		recapFull := strings.TrimSpace(r.recap)
+		if recapFull == "" {
+			recapFull = "(no recap)"
+		}
+		for _, l := range strings.Split(ansi.Wrap(recapFull, maxInt(8, panelInner-lipgloss.Width(indent)), ""), "\n") {
+			add(indent+h.styles.Muted.Render(l), histLineMeta{row: i})
+		}
+		if !r.turnsLoaded {
+			add(indent+h.styles.Dim.Render("loading…"), histLineMeta{row: i})
+		} else if len(r.turns) > 0 {
+			add(indent+h.styles.Dim.Render("recent:"), histLineMeta{row: i})
+			for _, l := range historyTailLines(r.turns, 3, panelInner, h.styles) {
+				add(l, histLineMeta{row: i})
+			}
+		}
+	}
+}
+
+// expandSelected marks the selected row expanded and, if its turns aren't loaded
+// yet, returns a Cmd that fetches them.
+func (h *historyView) expandSelected() tea.Cmd {
+	if h.cursor < 0 || h.cursor >= len(h.rows) {
+		return nil
+	}
+	h.rows[h.cursor].expanded = true
+	r := h.rows[h.cursor]
+	if r.turnsLoaded || h.agent == nil {
+		return nil
+	}
+	id := r.id
+	ag := h.agent
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		turns, err := ag.GetConversationTurns(ctx, id)
+		if err != nil {
+			turns = nil
+		}
+		return historyTurnsLoadedMsg{id: id, turns: turns}
+	}
+}
+
+// historyTurnsLoadedMsg carries lazily-fetched turns back to the model, which
+// routes them to applyTurns.
+type historyTurnsLoadedMsg struct {
+	id    string
+	turns []agentclient.ContextTurn
+}
+
+func (h *historyView) applyTurns(id string, turns []agentclient.ContextTurn) {
+	for i := range h.rows {
+		if h.rows[i].id == id {
+			h.rows[i].turns = turns
+			h.rows[i].turnsLoaded = true
+			return
+		}
+	}
+}
+
+// historyTailLines renders the last n PROSE turns (tool_use/tool_result skipped)
+// as indented "role · preview" lines, each clipped to width.
+func historyTailLines(turns []agentclient.ContextTurn, n, width int, styles theme.Styles) []string {
+	var prose []agentclient.ContextTurn
+	for _, t := range turns {
+		if t.Kind == "tool_use" || t.Kind == "tool_result" {
+			continue
+		}
+		prose = append(prose, t)
+	}
+	if len(prose) > n {
+		prose = prose[len(prose)-n:]
+	}
+	indent := "        "
+	w := maxInt(8, width-lipgloss.Width(indent))
+	out := make([]string, 0, len(prose))
+	for _, t := range prose {
+		line := t.Role + " · " + strings.TrimSpace(t.Preview)
+		out = append(out, indent+styles.Muted.Render(ansi.Truncate(line, w, "…")))
+	}
+	return out
 }
 
 func (h *historyView) View() string {

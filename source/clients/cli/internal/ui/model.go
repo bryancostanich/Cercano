@@ -1914,6 +1914,29 @@ func (m Model) resolvePromptColor(token string) color.Color {
 	return m.promptBorderColor
 }
 
+// resumeEntries maps persisted turns to scrollback entries, dropping turns with
+// no displayable prose. Lossless persistence stores tool_use (assistant) and
+// tool_result (user) turns whose Content is empty — their payload lives in
+// content_json, which the resume RPC does not carry. Rendering those as entries
+// produces blank gaps with floating ▶ markers, so they are skipped here.
+func resumeEntries(turns []agentclient.PersistedTurn) []*Entry {
+	entries := make([]*Entry, 0, len(turns))
+	for _, t := range turns {
+		if strings.TrimSpace(t.Content) == "" {
+			continue
+		}
+		role := RoleSystem
+		switch t.Role {
+		case "user":
+			role = RoleUser
+		case "assistant":
+			role = RoleAssistant
+		}
+		entries = append(entries, &Entry{Role: role, Content: t.Content})
+	}
+	return entries
+}
+
 // applyResume updates the model + the convRef shared with the slash registry,
 // then rehydrates scrollback from the persisted turns.
 func (m Model) applyResume(conversationID string) Model {
@@ -1934,18 +1957,8 @@ func (m Model) applyResume(conversationID string) Model {
 	m.cumOut = 0
 	m.focusedToolIdx = -1
 	m.splashShown = false
+	m.entries = append(m.entries, resumeEntries(turns)...)
 	for _, t := range turns {
-		role := RoleSystem
-		switch t.Role {
-		case "user":
-			role = RoleUser
-		case "assistant":
-			role = RoleAssistant
-		}
-		m.entries = append(m.entries, &Entry{
-			Role:    role,
-			Content: t.Content,
-		})
 		m.cumIn += t.TokensIn
 		m.cumOut += t.TokensOut
 	}

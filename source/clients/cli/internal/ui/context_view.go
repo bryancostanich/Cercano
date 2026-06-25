@@ -204,6 +204,16 @@ func (c *contextView) turnsLines() []string {
 	return lines
 }
 
+// padToWidth right-pads s with spaces to exactly w visible columns (ANSI-aware),
+// so a scrollbar glyph appended after it lands at a fixed far-right column rather
+// than at the row's text-end. Assumes s is already truncated to <= w.
+func padToWidth(s string, w int) string {
+	if pad := w - ansi.StringWidth(s); pad > 0 {
+		return s + strings.Repeat(" ", pad)
+	}
+	return s
+}
+
 // padLines forces s to exactly n lines (pad with blanks / truncate) so a region
 // fills its allotted band height precisely.
 func padLines(s string, n int) string {
@@ -269,7 +279,7 @@ func (c *contextView) renderScrollableContent(full string, height int) string {
 		if src := c.scrollOffset + i; src >= 0 && src < len(lines) {
 			line = lines[src]
 		}
-		b.WriteString(ansi.Truncate(line, panelW, ""))
+		b.WriteString(padToWidth(ansi.Truncate(line, panelW, ""), panelW))
 		b.WriteString(" ")
 		if i < len(col) {
 			switch col[i] {

@@ -31,9 +31,33 @@ All review gates passed. Branch `cedit-rework` complete (4 commits: confirm refa
 
 # Autonomous Run #2 — 2026-06-24 · chatView switchover (step 1)
 
-## Status (end-of-run summary — filled at completion)
+## Status (end-of-run summary)
 
-_In progress._
+**COMPLETE — merge-ready, NOT pushed, NOT merged** (awaiting Bryan's per-act authorization).
+
+- **Outcome:** Step 1 of the chatView migration is done and passed a whole-branch
+  opus review (**Ready to merge: Yes**, no Critical/Important). The main page now
+  renders its transcript through the new `chatView` component, with **byte-identical
+  output** (frozen golden parity gate, verified non-vacuous) + direct `chatView`
+  unit tests. Full `go test ./...` green.
+- **Decisions made:** D1 — hold `chatView` as a value field, not a nillable pointer
+  (deleted 13 dead nil-guards; restores the old `viewport viewport.Model` never-nil
+  property). Taken autonomously (cleanest, unambiguous after counter-cases).
+- **Blocked:** none.
+- **Deferred (NOT done — out of step-1 scope):** the *full* switchover is steps 2–4
+  of the roadmap (`design.md`) and each needs its own brainstorm→spec→plan:
+  step 2 = move scroll + mouse selection + scrollbar-drag into `chatView`;
+  step 3 = `chatView` takes entry ownership + the `ChatDriver`/event model +
+  `mainAgentDriver` (streaming behind the driver); step 4 = `/c` adopts `chatView`,
+  retire the thin `chatpane.go`/`renderChatEntry`. These were intentionally not
+  done autonomously — they are architectural design forks that belong with Bryan,
+  not unplanned implementation.
+- **Commits (branch `chat-view`, base `3a4e561`):**
+  `dbc16bb` run log · `bddad74` golden net · `f317960` extract chatView ·
+  `3e0f962` D1 value-field fix · `b7cffb4` chatView unit tests.
+- **Review first:** `f317960` (the extraction — confirm faithfulness) and the
+  golden gate (`chat_view_golden_test.go` + `testdata/chatview/` — the zero-
+  behavior-change proof); then `3e0f962` (D1) against decision D1 below.
 
 **Objective (handed off):** Complete the chatView switchover for the main page.
 Concretely: execute the approved **step 1** of the chat-view migration — extract
@@ -62,4 +86,64 @@ symptom. Do NOT push. Do NOT merge to main.
 
 ## Decision log (7-step protocol; one entry per fork)
 
-_(none yet)_
+### D1 — Hold `chatView` on `Model` as a value field, not a nillable pointer
+
+- **Decision point:** Task 2 extracted the transcript view but stored it as
+  `chat *chatView` (pointer). Bare `Model{}` test literals (pre-existing tests
+  that don't call `New`) then nil-panic on `m.chat.*`, so the implementer added
+  **13 `m.chat == nil` guards** across `model.go` + `selection.go`. `chat` is
+  assigned only in `New`, so every guard is dead at runtime; two (`model.go:562`,
+  `:1562`) subtly fork behavior (`height := 0; if m.chat != nil {…}` vs the old
+  value-type's real default). How should `Model` hold `chatView` so bare-Model
+  tests don't panic without polluting production with an impossible nil path?
+
+- **Options (4 dimensions each):**
+  - **A — pointer + 13 nil-guards (as built).** Cost: 13 dead branches, 0 extra
+    test edits. Risk: masks real nil bugs; 2 guards silently change a zero-Model's
+    reported height. Reward: smallest diff, no future unlock. Side effect: every
+    future chatView-touching path must remember the guard pattern (propagating
+    debt).
+  - **B — value field `chat chatView` (recommended).** Cost: field-type change +
+    `New` init; **all 13 guards delete.** Risk: zero-value `chatView` must be
+    safe on the guarded paths — it is: those paths call only `vp`/size methods, and
+    a zero `viewport.Model` returns 0 / empty without panic (exactly the old
+    `viewport` value field's property); render paths (md access) require
+    construction, same as the old `md` pointer always did. Reward: restores the
+    never-nil invariant the old `viewport viewport.Model` field had — the
+    extraction becomes structurally faithful, production guard-free, no
+    out-of-scope test churn. Side effect: simplifies all future call sites;
+    matches bubbletea's value-sub-model idiom (the old `m.viewport, cmd = …Update`
+    pattern).
+  - **C — pointer + one lazy accessor `chatView()` that constructs on first use.**
+    Cost: 1 guard, but ~13 call sites switch to the accessor. Risk: a "read" that
+    mutates (hidden construction) — a mild smell; reintroduces nil risk if a
+    caller forgets the accessor. Reward: production mostly clean. Side effect:
+    callers must use the accessor, not the field.
+  - **D — pointer, no guards, fix the bare-Model tests to construct `chat`.**
+    Cost: touches pre-existing out-of-scope test files (`confirm_test`,
+    `context_view_route_test`, `runtime_dashboard_test`, …). Risk: scope creep into
+    unrelated files. Reward: production clean. Side effect: test-only churn that B
+    avoids entirely.
+
+- **Hacks:** A is the hack — defensive branches added because bare-Model tests
+  *happen to* skip construction; it's the fewer-lines path, not the right design
+  (design_decisions.md: "any approach you'd pick because it's fewer lines
+  changed"). C's lazy-init (read mutates) is a milder hack.
+
+- **Counter-cases (step 5):** For A — smallest diff and golden-green, but 13 dead
+  branches + 2 behavior forks fail correctness+cleanliness. For C — centralizes to
+  1 guard, but its only edge over B is "keeps the pointer," and nothing needs a
+  nil `chatView`; `viewport.Model` is copy-safe by design, so B has no copy
+  hazard and C's lazy-init smell is pure downside. For D — clean production, but B
+  reaches the same clean production *without* touching out-of-scope files (zero
+  `chatView` is valid). B dominates each alternative on correctness→cleanliness→
+  future-cost.
+
+- **Chosen: B** (value field). Unambiguously cleanest after honest counter-cases;
+  per the autonomous protocol (no human at step 7), taken. Fold in the review's
+  Minor at the same time: route the few direct `m.chat.vp` pokes
+  (`model.go:521/814`, `selection.go:105`) through the component's `Update`/scroll
+  surface (add `ScrollUp/ScrollDown` to it) so `vp` stays private.
+
+- **Reversible:** yes (worktree, pre-merge). Not a hard-stop. Golden gate + full
+  suite re-verify after the fix.

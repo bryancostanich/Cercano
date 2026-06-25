@@ -212,13 +212,15 @@ func (h *historyView) appendRow(lines *[]string, meta *[]histLineMeta, i, panelW
 	if r.expanded {
 		glyph = "▾ "
 	}
-	nameStyle := h.styles.Muted
+	// Session titles render in the markdown H1 style (bright amber, bold; see
+	// CrackerMarkdownStyle H1). Selection is shown by the arrow colour — lime for
+	// the cursor row, muted grey otherwise — so the clickable arrow stays visible.
+	titleStyle := h.styles.Bright.Bold(true)
 	var arrow string
 	if i == h.cursor {
 		arrow = h.styles.Accent.Render(glyph)
-		nameStyle = h.styles.Bright
 	} else {
-		arrow = h.styles.Dim.Render(glyph)
+		arrow = h.styles.Muted.Render(glyph)
 	}
 
 	// Line 1: " <arrow><name padded>  <meta>" budgeted so meta sits at the right.
@@ -230,7 +232,7 @@ func (h *historyView) appendRow(lines *[]string, meta *[]histLineMeta, i, panelW
 		nameW = 8
 	}
 	nameTxt := ansi.Truncate(r.name, nameW, "…")
-	nameCell := nameStyle.Render(nameTxt) + strings.Repeat(" ", maxInt(0, nameW-lipgloss.Width(nameTxt)))
+	nameCell := titleStyle.Render(nameTxt) + strings.Repeat(" ", maxInt(0, nameW-lipgloss.Width(nameTxt)))
 	line1 := " " + arrow + nameCell + "  " + metaCell
 	add(line1, histLineMeta{row: i, arrowCell: true})
 
@@ -254,9 +256,9 @@ func (h *historyView) appendRow(lines *[]string, meta *[]histLineMeta, i, panelW
 			add(indent+h.styles.Muted.Render(l), histLineMeta{row: i})
 		}
 		if !r.turnsLoaded {
-			add(indent+h.styles.Dim.Render("loading…"), histLineMeta{row: i})
+			add(indent+h.styles.Muted.Render("loading…"), histLineMeta{row: i})
 		} else if len(r.turns) > 0 {
-			add(indent+h.styles.Dim.Render("recent:"), histLineMeta{row: i})
+			add(indent+h.styles.Info.Render("recent:"), histLineMeta{row: i})
 			for _, l := range historyTailLines(r.turns, 3, panelInner, h.styles) {
 				add(l, histLineMeta{row: i})
 			}

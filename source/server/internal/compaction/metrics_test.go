@@ -26,9 +26,12 @@ func TestScore_ElisionBaselineOverCorpus(t *testing.T) {
 		if m.ModelCalls != 0 {
 			t.Errorf("%s: elision baseline made %d model calls", f.Name, m.ModelCalls)
 		}
-		// Elision never touches prose, so every anchor must survive on the
-		// fixtures whose anchors are not inside a superseded result.
-		if f.Name != "repeated-reads" && m.AnchorsKept != m.AnchorsTotal {
+		// Elision never touches prose and keeps the LATEST tool result verbatim
+		// (only superseded earlier duplicates are stubbed), so every declared
+		// anchor must survive on every fixture — including repeated-reads, whose
+		// "revision 5" anchor lives in the surviving last read. This is the
+		// suite's strongest guard against a supersession inversion.
+		if m.AnchorsKept != m.AnchorsTotal {
 			t.Errorf("%s: anchors %d/%d kept", f.Name, m.AnchorsKept, m.AnchorsTotal)
 		}
 	}

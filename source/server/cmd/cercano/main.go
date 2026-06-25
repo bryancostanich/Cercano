@@ -22,6 +22,9 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
+	"cercano/source/server/internal/compaction"
+	"cercano/source/server/internal/compactiongen"
+	"cercano/source/server/internal/compactor"
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
@@ -31,6 +34,7 @@ import (
 	llamaengine "cercano/source/server/internal/engine/llamaserver"
 	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/legacymodels"
+	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/llm/anthropic"
 	"cercano/source/server/internal/localruntime"
 	runtimellama "cercano/source/server/internal/localruntime/llamaserver"
@@ -209,6 +213,22 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		}
 		recapGen := recap.New(persistentStore, recapComplete, 8*time.Second, 12)
 		agentOpts = append(agentOpts, agent.WithRecapScheduler(recapGen))
+	}
+	if persistentStore != nil && cfg.Compaction.Enabled {
+		compactSummarize := func(ctx context.Context, msgs []llm.Message) (compaction.StructuredSummary, error) {
+			resp, err := localProvider.Process(ctx, &agent.Request{Input: compaction.BuildSummaryPrompt(msgs)})
+			if err != nil {
+				return compaction.StructuredSummary{}, err
+			}
+			return compaction.ParseSummary(resp.Output), nil
+		}
+		compCfg := compactor.Config{
+			ActivationFloorTokens: cfg.Compaction.ActivationFloorTokens,
+			SegmentTokens:         cfg.Compaction.SegmentTokens,
+			VerbatimRecent:        cfg.Compaction.VerbatimRecent,
+		}
+		compGen := compactiongen.New(persistentStore, compactSummarize, compCfg, contextmeter.Default(), 10*time.Second)
+		agentOpts = append(agentOpts, agent.WithCompactionScheduler(compGen))
 	}
 	orchestrator := agent.NewAgent(lazyRouter, coordinator, agentOpts...)
 

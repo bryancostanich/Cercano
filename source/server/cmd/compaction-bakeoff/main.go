@@ -35,6 +35,8 @@ func main() {
 	addr := flag.String("addr", "localhost:50052", "running cercano agent gRPC address")
 	transcript := flag.String("transcript", "", "path to a Claude Code JSONL session to use as a real fixture (instead of the synthetic corpus)")
 	maxTokens := flag.Int("maxtokens", 150000, "for -transcript: slice the session to ~this many tokens from the start")
+	segTokens := flag.Int("segtokens", 8000, "for -transcript: per-segment token budget (keep under the local model's context window)")
+	verbatim := flag.Int("verbatim", 6, "for -transcript: number of trailing messages kept verbatim")
 	anchors := flag.String("anchors", "", "for -transcript: comma-separated must-keep substrings to score retention")
 	flag.Parse()
 
@@ -50,7 +52,7 @@ func main() {
 	tok := contextmeter.Default()
 
 	if *transcript != "" {
-		runTranscript(ctx, summarize, tok, *transcript, *maxTokens, *anchors)
+		runTranscript(ctx, summarize, tok, *transcript, *maxTokens, *segTokens, *verbatim, *anchors)
 		return
 	}
 	runCorpus(ctx, summarize, tok)
@@ -92,7 +94,7 @@ func runCorpus(ctx context.Context, summarize compaction.SummarizeFunc, tok cont
 // runTranscript runs every contender over one real Claude Code session and
 // prints metrics plus each contender's final summary side by side, so the
 // quality difference (did compounding loss erode the thread?) is legible.
-func runTranscript(ctx context.Context, summarize compaction.SummarizeFunc, tok contextmeter.Tokenizer, path string, maxTokens int, anchorsCSV string) {
+func runTranscript(ctx context.Context, summarize compaction.SummarizeFunc, tok contextmeter.Tokenizer, path string, maxTokens, segTokens, verbatim int, anchorsCSV string) {
 	msgs, err := LoadTranscript(path, maxTokens, tok)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load transcript: %v\n", err)
@@ -109,10 +111,10 @@ func runTranscript(ctx context.Context, summarize compaction.SummarizeFunc, tok 
 		}
 	}
 
-	budget := compaction.Budget{VerbatimRecent: 6, SegmentTokens: 32000}
+	budget := compaction.Budget{VerbatimRecent: verbatim, SegmentTokens: segTokens}
 	rawTok := compaction.TotalTokens(tok, msgs)
-	fmt.Printf("transcript %s: %d messages, ~%d tokens (sliced to <=%d), %d anchors\n\n",
-		filepath.Base(path), len(msgs), rawTok, maxTokens, len(anchors))
+	fmt.Printf("transcript %s: %d messages, ~%d tokens (sliced to <=%d), seg=%d verbatim=%d, %d anchors\n\n",
+		filepath.Base(path), len(msgs), rawTok, maxTokens, segTokens, verbatim, len(anchors))
 
 	for _, c := range contenders() {
 		calls := 0

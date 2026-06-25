@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"cercano/source/clients/cli/internal/theme"
+	"cercano/source/server/pkg/agentclient"
 )
 
 // keyPress builds a KeyPressMsg for special-key names ("enter", "up", "down",
@@ -179,5 +180,52 @@ func TestHistoryScrollState_BoundsToContentHeight(t *testing.T) {
 	}
 	if st.Total <= st.Height {
 		t.Errorf("Total (%d) should exceed Height (%d) for 50 rows", st.Total, st.Height)
+	}
+}
+
+func TestHistoryTailLines_LastThreeProseSkipsTools(t *testing.T) {
+	s := theme.NewStyles(theme.Cracker())
+	turns := []agentclient.ContextTurn{
+		{Role: "user", Kind: "text", Preview: "u1"},
+		{Role: "assistant", Kind: "tool_use", Preview: "Read(...)"},
+		{Role: "user", Kind: "tool_result", Preview: "...output..."},
+		{Role: "assistant", Kind: "text", Preview: "a1"},
+		{Role: "user", Kind: "text", Preview: "u2"},
+		{Role: "assistant", Kind: "text", Preview: "a2"},
+	}
+	got := historyTailLines(turns, 3, 80, s)
+	if len(got) != 3 {
+		t.Fatalf("got %d tail lines, want 3", len(got))
+	}
+	joined := strings.Join(got, "\n")
+	if strings.Contains(joined, "Read(") || strings.Contains(joined, "output") {
+		t.Errorf("tool turns should be skipped:\n%s", joined)
+	}
+	if !strings.Contains(joined, "a2") || !strings.Contains(joined, "u2") || !strings.Contains(joined, "a1") {
+		t.Errorf("expected last 3 prose previews a1,u2,a2:\n%s", joined)
+	}
+}
+
+func TestHistoryExpand_ShowsDrawerAndLoading(t *testing.T) {
+	rows := []histRow{{id: "a", name: "n", recap: "full recap text", meta: "m"}}
+	h := newTestHistoryView(rows, 100, 30)
+	h.rows[0].expanded = true // not yet loaded
+	lines, _ := h.rowsLines()
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "loading") {
+		t.Errorf("unloaded expanded row should show loading…:\n%s", joined)
+	}
+}
+
+func TestHistoryApplyTurns_FillsAndRenders(t *testing.T) {
+	rows := []histRow{{id: "a", name: "n", recap: "rc", meta: "m", expanded: true}}
+	h := newTestHistoryView(rows, 100, 30)
+	h.applyTurns("a", []agentclient.ContextTurn{{Role: "assistant", Kind: "text", Preview: "hello-turn"}})
+	if !h.rows[0].turnsLoaded {
+		t.Fatalf("applyTurns should mark turnsLoaded")
+	}
+	lines, _ := h.rowsLines()
+	if !strings.Contains(strings.Join(lines, "\n"), "hello-turn") {
+		t.Errorf("expanded+loaded row should show the turn preview")
 	}
 }

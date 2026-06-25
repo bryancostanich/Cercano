@@ -884,6 +884,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case historyTurnsLoadedMsg:
+		if hv, ok := m.content.(*historyView); ok {
+			hv.applyTurns(msg.id, msg.turns)
+		}
+		return m, nil
+
 	case runtimeDashboardActionMsg:
 		if dashboard, ok := m.content.(*runtimeDashboard); ok {
 			return m, dashboard.applyActionMsg(msg)

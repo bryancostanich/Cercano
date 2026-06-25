@@ -37,58 +37,5 @@ func BuildLLMHistory(turns []conversation.Turn) []llm.Message {
 		}
 		msgs = append(msgs, llm.Message{Role: role, Blocks: blocks})
 	}
-	return repairPairing(msgs)
-}
-
-// repairPairing removes orphaned tool_use / tool_result blocks so the array is
-// always valid to send. A tool_use is kept only if a tool_result referencing
-// its id appears in a LATER message; a tool_result is kept only if a tool_use
-// declaring its id appears in an EARLIER message. This positional rule (not a
-// global presence check) guarantees the use-before-result ordering the provider
-// requires, even if stored data is out of order.
-func repairPairing(msgs []llm.Message) []llm.Message {
-	// First occurrence (message index) of each declared tool_use id.
-	useIdx := map[string]int{}
-	for i, m := range msgs {
-		for _, b := range m.Blocks {
-			if b.Type == llm.BlockToolUse {
-				if _, ok := useIdx[b.ToolUseID]; !ok {
-					useIdx[b.ToolUseID] = i
-				}
-			}
-		}
-	}
-	// tool_use ids that have a matching tool_result in a strictly later message.
-	resolvedAfter := map[string]bool{}
-	for i, m := range msgs {
-		for _, b := range m.Blocks {
-			if b.Type == llm.BlockToolResult {
-				if j, ok := useIdx[b.ToolUseRef]; ok && i > j {
-					resolvedAfter[b.ToolUseRef] = true
-				}
-			}
-		}
-	}
-	out := make([]llm.Message, 0, len(msgs))
-	for i, m := range msgs {
-		kept := make([]llm.Block, 0, len(m.Blocks))
-		for _, b := range m.Blocks {
-			switch b.Type {
-			case llm.BlockToolUse:
-				if !resolvedAfter[b.ToolUseID] {
-					continue
-				}
-			case llm.BlockToolResult:
-				if j, ok := useIdx[b.ToolUseRef]; !ok || i <= j {
-					continue
-				}
-			}
-			kept = append(kept, b)
-		}
-		if len(kept) == 0 {
-			continue
-		}
-		out = append(out, llm.Message{Role: m.Role, Blocks: kept})
-	}
-	return out
+	return llm.RepairPairing(msgs)
 }

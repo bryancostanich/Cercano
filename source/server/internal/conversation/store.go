@@ -53,6 +53,17 @@ type Turn struct {
 	CreatedAt      time.Time
 }
 
+// Compaction is the persisted derived compaction layer for a conversation.
+// Summaries are opaque JSON here; the compactor package owns their structure.
+type Compaction struct {
+	ConversationID       string
+	FrozenThrough        int64 // turns with CreatedAt.Unix() <= this are frozen
+	SegmentSummariesJSON string
+	ConsolidatedJSON     string
+	CompactedTokens      int
+	UpdatedAt            time.Time
+}
+
 // Store is the persistent conversation store interface. The runtime
 // implementation is SQLite-backed (modernc.org/sqlite, pure Go — no cgo).
 type Store interface {
@@ -87,6 +98,12 @@ type Store interface {
 
 	// UpdateRecap sets the LLM-generated living recap and its timestamp.
 	UpdateRecap(ctx context.Context, conversationID, recap string) error
+
+	// GetCompaction returns the derived compaction state, or a zero value
+	// (FrozenThrough 0, empty JSON) if none exists yet.
+	GetCompaction(ctx context.Context, conversationID string) (Compaction, error)
+	// SaveCompaction upserts the derived compaction state.
+	SaveCompaction(ctx context.Context, c Compaction) error
 
 	// DeleteTurns removes the named turns from a conversation. Unknown ids are
 	// ignored (idempotent); other conversations are never affected.
@@ -446,4 +463,47 @@ func (s *sqliteStore) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.db.Close()
+}
+
+func (s *sqliteStore) GetCompaction(ctx context.Context, conversationID string) (Compaction, error) {
+	if conversationID == "" {
+		return Compaction{}, errors.New("conversation id required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c := Compaction{ConversationID: conversationID}
+	var updated int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT frozen_through, segment_summaries, consolidated, compacted_tokens, updated_at
+		 FROM conversation_compaction WHERE conversation_id = ?`, conversationID).
+		Scan(&c.FrozenThrough, &c.SegmentSummariesJSON, &c.ConsolidatedJSON, &c.CompactedTokens, &updated)
+	if err == sql.ErrNoRows {
+		return Compaction{ConversationID: conversationID}, nil
+	}
+	if err != nil {
+		return Compaction{}, err
+	}
+	c.UpdatedAt = time.Unix(updated, 0)
+	return c, nil
+}
+
+func (s *sqliteStore) SaveCompaction(ctx context.Context, c Compaction) error {
+	if c.ConversationID == "" {
+		return errors.New("conversation id required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO conversation_compaction
+			(conversation_id, frozen_through, segment_summaries, consolidated, compacted_tokens, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(conversation_id) DO UPDATE SET
+			frozen_through=excluded.frozen_through,
+			segment_summaries=excluded.segment_summaries,
+			consolidated=excluded.consolidated,
+			compacted_tokens=excluded.compacted_tokens,
+			updated_at=excluded.updated_at`,
+		c.ConversationID, c.FrozenThrough, c.SegmentSummariesJSON, c.ConsolidatedJSON,
+		c.CompactedTokens, time.Now().Unix())
+	return err
 }

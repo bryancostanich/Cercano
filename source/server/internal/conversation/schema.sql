@@ -33,3 +33,16 @@ CREATE INDEX IF NOT EXISTS idx_turns_conv ON turns(conversation_id, created_at);
 -- and use `content`. Idempotency is handled in Go (PRAGMA table_info check)
 -- because SQLite ALTER TABLE ADD COLUMN has no IF NOT EXISTS in the embedded
 -- modernc.org/sqlite version.
+
+-- conversation_compaction: the derived compaction layer (1:1 with a
+-- conversation). Holds opaque JSON summaries + the frozen boundary; raw turns
+-- remain the source of truth. CREATE IF NOT EXISTS runs on every Open, so this
+-- table is created for both fresh and pre-existing DBs (no separate migration).
+CREATE TABLE IF NOT EXISTS conversation_compaction (
+    conversation_id   TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+    frozen_through    INTEGER NOT NULL DEFAULT 0,
+    segment_summaries TEXT    NOT NULL DEFAULT '',
+    consolidated      TEXT    NOT NULL DEFAULT '',
+    compacted_tokens  INTEGER NOT NULL DEFAULT 0,
+    updated_at        INTEGER NOT NULL DEFAULT 0
+);

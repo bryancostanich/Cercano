@@ -297,3 +297,54 @@ footer-telemetry test. Reversible (worktree).
   `agentclient` import; the StreamMsg→event map lives in the driver). Additive
   events don't regress `/c`. 1 Minor (stale "both paths" comment in
   `scripted_golden_test.go`) — fixed.
+
+### D4 — Step-4: `/c` adopts `chatView`, retire `chatPane` (G1–G7)
+
+Full quantification in `docs/features/cli/chat-view/step4-design.md`. Cross-cutting
+principle: the migration thesis (chatpane-design: "`/c` becomes a second agent chat
+with the **same UX as the main page**") makes UX *convergence* the correct outcome,
+not a regression; "fully ported" = `chatPane` deleted, one component.
+
+- **G1 = a** — `/c`'s "working…" busy state renders via the SAME streaming-placeholder
+  path the main chat uses (host opens a `Streaming` placeholder entry on submit,
+  fed by `turnStatus`). One busy concept. **Consequence to flag for Bryan:** `/c`'s
+  busy indicator changes from a pinned bottom status line to the in-transcript
+  spinner+lime-sweep placeholder — this is the intended convergence to "same UX as
+  the main page," not a bug. Counter-cases: G1-b (explicit `busy`+pinned line in
+  chatView) re-introduces the dual busy concept the migration deletes (HACK-ish,
+  un-unifies); G1-c (busy flag in contextView) leaves two render owners in `/c`.
+  Both preserve `/c`'s divergent UX, contradicting the unification goal — weaker.
+- **G2 = a** — add a `chatAssistantMsg` (whole-append) arm to `chatView.Apply`; the
+  `/c` host emits it for the confirm rationale (replacing `appendAssistant`), giving
+  the previously test-only event a production emitter. Unified component handles
+  whole-append AND delta-extend. Counter-case G2-c (drop the event, fold into the
+  shared `chatDoneMsg` arm): removes a dead event but mutates the SHARED done arm
+  → main-chat regression risk; G2-a avoids touching main chat. G2-b (force deltas
+  on a non-streaming driver) = wrong mental model.
+- **G3 = a** — keep `/c` on `chatConfirmMsg` (host-routed to `pendingConfirm`); main
+  keeps `permissionRequiredMsg`. Both gates host-owned; coexisting confirm shapes is
+  already the state. G3-b (unify the confirm events) = out of step-4 scope, main-chat
+  regression surface — rejected.
+- **G4 = a** — add `DesiredHeight()` to `chatView` (content-lines + status rows, same
+  shape `chatPane` had); `/c`'s `regionHeights` calls it unchanged → band-split parity.
+  G4-b (fixed split) re-opens the "empty pane eats the panel" bug `regionHeights` fixed
+  (HACK); G4-c leaks layout math into `contextView` (duplication).
+- **G5 = a** — move the SHARED event types + `ChatDriver` to a new neutral
+  `chat_events.go`; delete `chatpane.go` wholesale. G5-b (into `chat_view.go`, already
+  879 LOC) bloats it; G5-c (events-only `chatpane.go`) leaves a misnamed file = HACK,
+  contradicts "retire chatpane.go".
+- **G6 = a** — the host calls `contextManagerDriver.Submit` for `/c` (symmetric with
+  how the main host calls `mainAgentDriver`); no `chatView.Submit`. G6-b re-adds a
+  pane-ish method only `/c` would use (asymmetry).
+- **G7 = b** — phased 3 sub-tasks (each builds green, `/c` works throughout):
+  (1) add the `chatView` surface (chatAssistantMsg arm, `DesiredHeight`, placeholder
+  busy support) + move shared types to `chat_events.go` — `chatPane` still used;
+  (2) swap `contextView` onto `chatView` + host wiring, re-point `/c` tests;
+  (3) delete `chatPane` + `chatpane_test.go` + `renderChatEntry`. G7-a (atomic) has
+  no intermediate green (hard to bisect a large behavior-bearing swap).
+
+**No tie / no BLOCK.** Parity gate: re-point `/c` tests' `cv.pane.*` → `chatView`
+surface keeping observable assertions identical (entry counts, "removed N turn(s)."/
+"nothing to remove."/rationale/error/queued rows, band heights); `context_manager_driver_test.go`
+stays UNCHANGED + green (the driver event contract is the behavior-preservation spine);
+step-1 + scripted goldens byte-identical; manual `/c` smoke. Reversible (worktree).

@@ -509,6 +509,26 @@ func (c *chatView) MouseDown(localX, localY int) {
 	c.ClearSelection()
 }
 
+// MouseUp finalizes a left release in the viewport (local coords). It stops any
+// edge auto-scroll and scrollbar drag. If a selection drag was in progress and
+// covers a non-empty range, the text is auto-copied; copied=true signals the
+// host to set its status notice. cmd is the clipboard cmd or nil.
+func (c *chatView) MouseUp(localX, localY int) (tea.Cmd, bool) {
+	c.StopDragScroll()
+	if c.selection.Dragging {
+		c.updateSelection(localX, localY, true)
+		c.selection.Dragging = false
+		if c.selection.empty() {
+			c.ClearSelection()
+		} else if text := c.selectedText(); text != "" {
+			c.scrollbarDragging = false
+			return selectionClipboardCmd(text), true
+		}
+	}
+	c.scrollbarDragging = false
+	return nil, false
+}
+
 // HandleSelectionKey handles a key press while a selection is active.
 // Returns (cmd, handled, copied): cmd is a clipboard cmd or nil; handled=true
 // means the host should not process the key further; copied=true means the host

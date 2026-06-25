@@ -73,15 +73,12 @@ func TestSelectionPointFromMouseUsesViewportOffset(t *testing.T) {
 	cv.vp.SetYOffset(10)
 	cv.plainLines = lines
 
-	m := Model{
-		scrollbarTop: 2,
-		chat:         cv,
-	}
-
-	got := m.selectionPointFromMouse(tea.Mouse{X: 3, Y: 4}, false)
+	// scrollbarTop=2, screen mouse.Y=4 → local Y = 4-2 = 2
+	// YOffset=10 + localY=2 → line 12. X=3 → col 3.
+	got := cv.selectionPointFromLocal(3, 4-2, false)
 	want := selectionPoint{Line: 12, Col: 3}
 	if got != want {
-		t.Fatalf("selectionPointFromMouse() = %#v, want %#v", got, want)
+		t.Fatalf("selectionPointFromLocal() = %#v, want %#v", got, want)
 	}
 }
 

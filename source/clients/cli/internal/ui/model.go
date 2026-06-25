@@ -91,10 +91,10 @@ type Model struct {
 	historyIdx   int
 	historyStash string
 
-	streamCh  <-chan agentclient.StreamMsg
 	streaming bool
 	// cancelStream cancels the context of the in-flight StreamChat so Esc can
-	// abort a running prompt. Nil when nothing is streaming.
+	// abort a running prompt. Nil when nothing is streaming. The driver returns
+	// it from Submit; the host stores it here.
 	cancelStream context.CancelFunc
 
 	tokIn, tokOut  int
@@ -119,11 +119,6 @@ type Model struct {
 	content contentPage
 
 	recap string // living one-line work summary; shown in the chat footer
-
-	// queued holds messages submitted while a response was streaming, FIFO.
-	// They render just above the prompt, drain (front) as each stream completes,
-	// and the most-recent (back) can be popped back into the prompt with ↑.
-	queued []string
 
 	// convRef shares the current convID with the slash registry by reference,
 	// so /rename always targets whatever conversation the model currently has
@@ -371,8 +366,8 @@ func fetchConfigCmd(ag *agentclient.Client) tea.Cmd {
 	}
 }
 
-// streamTickMsg signals "drain one message from the active stream channel."
-type streamTickMsg struct{ msg agentclient.StreamMsg }
+// streamEndMsg signals the StreamChat channel closed (turn complete). Emitted
+// by the mainAgentDriver's drain cmd on channel close.
 type streamEndMsg struct{}
 
 // ctxUsageMsg carries the result of an asynchronous GetContextUsage call.
@@ -420,16 +415,6 @@ type progressAnimTickMsg time.Time
 
 func progressAnimTick() tea.Cmd {
 	return tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg { return progressAnimTickMsg(t) })
-}
-
-func waitForStream(ch <-chan agentclient.StreamMsg) tea.Cmd {
-	return func() tea.Msg {
-		msg, ok := <-ch
-		if !ok {
-			return streamEndMsg{}
-		}
-		return streamTickMsg{msg: msg}
-	}
 }
 
 // Update is the Bubble Tea reducer.
@@ -740,7 +725,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Submitting mid-stream queues the message instead of starting a
 			// second turn; it sends when the current stream completes.
 			if m.streaming {
-				m.queued = append(m.queued, text)
+				m.chat.Enqueue(text)
 				m.relayout()
 				return m, nil
 			}
@@ -821,12 +806,48 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case streamTickMsg:
-		// Ignore late messages from a stream we already canceled.
+	case chatStreamMsg:
+		// Ignore late events from a stream we already canceled.
 		if !m.streaming {
 			return m, nil
 		}
-		return m.applyStreamMsg(msg.msg)
+		// Route by event class: telemetry → footer, transcript → chatView.Apply,
+		// permission → host confirm gate. turnActivity/turnTokOut are derived
+		// here from the event type, exactly as the old applyStreamMsg machine did.
+		switch ev := msg.ev.(type) {
+		case chatStatusMsg:
+			// RouteSelected telemetry: engine badge for the footer.
+			m.turnModel = ev.model
+			m.turnCloud = ev.cloud
+		case chatProgressMsg:
+			m.turnActivity = "routing"
+			m.chat.Apply(ev)
+		case chatAssistantDeltaMsg:
+			m.turnActivity = "writing"
+			m.turnTokOut++ // one delta ≈ one token (approximate live count)
+			m.chat.Apply(ev)
+		case toolEntryStartMsg:
+			m.turnActivity = "running " + ev.name
+			m.chat.Apply(ev)
+		case chatDoneMsg:
+			m.applyTurnTelemetry(ev) // footer fields
+			m.chat.Apply(ev)         // transcript finalize + notice
+		case permissionRequiredMsg:
+			tc := &pendingToolCall{
+				ToolUseID:  ev.id,
+				Name:       ev.name,
+				Args:       ev.argsJSON,
+				Permission: ev.tier,
+			}
+			m.pendingConfirm = toolConfirm(tc)
+			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: m.renderConfirmPrompt(tc)})
+		default:
+			// Remaining transcript events (tool stop/exec-start/exec-complete,
+			// error) carry no turn-telemetry side effect.
+			m.chat.Apply(ev)
+		}
+		m.refreshViewport()
+		return m, msg.next
 
 	case ctxUsageMsg:
 		// Authoritative context-window meter from the agent; overrides
@@ -903,9 +924,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the local cumIn approximation we incremented during streaming.
 		done := tea.Batch(fetchContextUsage(m.agent, m.convID), fetchRecap(m.agent, m.convID))
 		// Drain the next queued message: each completed turn fires the next.
-		if len(m.queued) > 0 {
-			nextMsg := m.queued[0]
-			m.queued = m.queued[1:]
+		if nextMsg, ok := m.chat.DrainNext(); ok {
 			m.relayout()
 			nm, cmd := m.submit(nextMsg)
 			return nm, tea.Batch(cmd, done)
@@ -976,17 +995,15 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 
 	// Pass cwd so the agent prepends .cercano/context.md if present.
 	wd, _ := os.Getwd()
-	ctx, cancel := context.WithCancel(context.Background())
-	ch, err := m.agent.StreamChat(ctx, m.convID, text, wd)
+	driver := &mainAgentDriver{agent: m.agent, convID: m.convID, workDir: wd}
+	cmd, cancel, err := driver.Submit(context.Background(), text)
 	if err != nil {
-		cancel()
 		m.errMsg = err.Error()
 		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "error: " + err.Error()})
 		m.refreshViewport()
 		return m, nil
 	}
 	m.cancelStream = cancel
-	m.streamCh = ch
 	m.streaming = true
 	// Reset live turn telemetry; the engine fields fill in on RouteSelected.
 	m.turnStart = time.Now()
@@ -994,9 +1011,9 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 	m.turnTokOut = 0
 	m.turnModel = ""
 	m.turnCloud = false
-	// Fire both the stream drainer and the progress-text animator; both
-	// re-issue themselves until streaming ends.
-	return m, tea.Batch(waitForStream(ch), progressAnimTick())
+	// Fire both the driver's self-re-arming drain and the progress-text
+	// animator; both re-issue themselves until streaming ends.
+	return m, tea.Batch(cmd, progressAnimTick())
 }
 
 // recallHistoryPrev steps the prompt back to an older submitted input. Returns
@@ -1045,21 +1062,20 @@ func (m *Model) setInputValue(s string) {
 
 // cancelCurrentStream aborts an in-flight prompt: cancel the StreamChat context
 // (the gRPC stream closes), drop streaming state, finalize the placeholder, and
-// append a muted "canceled" note. Any late messages are ignored by the
-// streamTickMsg guard once m.streaming is false.
+// append a muted "canceled" note. Any late events are ignored by the
+// chatStreamMsg guard once m.streaming is false.
 func (m *Model) cancelCurrentStream() {
 	if m.cancelStream != nil {
 		m.cancelStream()
 		m.cancelStream = nil
 	}
 	m.streaming = false
-	m.streamCh = nil
 	if e := m.chat.lastAssistantEntry(); e != nil {
 		e.Streaming = false
 	}
 	m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "⊘ canceled"})
 	// Esc aborts the train of thought — drop any queued follow-ups too.
-	m.queued = nil
+	m.chat.ClearQueue()
 	m.relayout()
 }
 
@@ -1274,7 +1290,11 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: prompt})
 	}
 	m.refreshViewport()
-	return m, waitForStream(m.streamCh)
+	// The live path no longer drives applyStreamMsg (the driver + chatView.Apply
+	// own streaming as of step-3 Task 3). This method survives only for the
+	// footer-telemetry regression test until Task 4 deletes it; it no longer
+	// re-arms a drain loop.
+	return m, nil
 }
 
 // applyTurnTelemetry folds a done event's telemetry into the host footer
@@ -1345,7 +1365,7 @@ func (m *Model) relayout() {
 	if m.recap != "" {
 		recapH = 2 // blank spacer line + the recap line itself
 	}
-	queuedH := len(m.queued) // one row per queued message, rendered above the prompt
+	queuedH := len(m.chat.Queued()) // one row per queued message, rendered above the prompt
 	// Size the input first — DynamicHeight re-fits it to the wrapped content at
 	// this width; the body claims whatever rows are left.
 	m.input.SetWidth(contentW - 4)
@@ -1428,7 +1448,7 @@ func (m Model) promptTop() int {
 	if m.recap != "" {
 		top += 2 // blank spacer line + the recap line
 	}
-	top += len(m.queued) // queued messages render above the prompt border
+	top += len(m.chat.Queued()) // queued messages render above the prompt border
 	top++                // prompt border above the input
 	if hint := m.renderSlashSuggestions(); hint != "" && !m.contentPageActive() {
 		top += strings.Count(hint, "\n") + 1
@@ -2186,12 +2206,11 @@ func (m Model) renderSlashSuggestions() string {
 // for editing and drops it from the queue. Returns false when the queue is
 // empty so callers can fall through to history recall.
 func (m *Model) unstageLastQueued() bool {
-	n := len(m.queued)
-	if n == 0 {
+	last, ok := m.chat.UnstageLast()
+	if !ok {
 		return false
 	}
-	m.input.SetValue(m.queued[n-1])
-	m.queued = m.queued[:n-1]
+	m.input.SetValue(last)
 	m.relayout()
 	return true
 }
@@ -2200,13 +2219,14 @@ func (m *Model) unstageLastQueued() bool {
 // lines just above the prompt — indented to the content margin, one per line,
 // truncated to width. Empty when nothing is queued.
 func (m Model) renderQueued() string {
-	if len(m.queued) == 0 {
+	queued := m.chat.Queued()
+	if len(queued) == 0 {
 		return ""
 	}
 	pad := strings.Repeat(" ", entryIndent)
 	avail := m.width - entryIndent - 2 // leave room for the "⊕ " marker
-	lines := make([]string, len(m.queued))
-	for i, q := range m.queued {
+	lines := make([]string, len(queued))
+	for i, q := range queued {
 		text := q
 		if avail > 1 && lipgloss.Width(text) > avail {
 			r := []rune(text)

@@ -9,25 +9,31 @@ import (
 	"cercano/source/clients/cli/internal/theme"
 )
 
-// newStreamTestModel builds a Model wired enough to drive applyStreamMsg
-// (styles + a sized viewport + a user turn and the streaming assistant
-// placeholder, exactly as submit() leaves things).
+// newStreamTestModel builds a Model wired enough to drive the post-move stream
+// path (styles + a sized viewport + a user turn and the streaming assistant
+// placeholder, exactly as submit() leaves things). streaming is set so the
+// chatStreamMsg route is live.
 func newStreamTestModel() Model {
 	p := theme.Cracker()
 	m := Model{
-		styles:  theme.NewStyles(p),
-		palette: p,
-		width:   80,
-		chat:    newChatView(theme.NewStyles(p), p, "", "", 79, 20),
+		styles:    theme.NewStyles(p),
+		palette:   p,
+		width:     80,
+		streaming: true,
+		chat:      newChatView(theme.NewStyles(p), p, "", "", 79, 20),
 	}
 	m.chat.AppendEntry(&Entry{Role: RoleUser, Content: "read the readme"})
 	m.chat.AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
 	return m
 }
 
+// drive feeds one StreamMsg through the NEW path: map it via streamMsgToEvent,
+// then route it exactly as the chatStreamMsg case does (telemetry → host fields,
+// transcript → chatView.Apply, permission → host). Ordering expectations are
+// unchanged — this proves the driver+Apply port is behavior-neutral.
 func (m *Model) drive(t *testing.T, sm agentclient.StreamMsg) {
 	t.Helper()
-	next, _ := m.applyStreamMsg(sm)
+	next, _ := m.Update(chatStreamMsg{ev: streamMsgToEvent(sm)})
 	*m = next.(Model)
 }
 

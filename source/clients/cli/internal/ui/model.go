@@ -860,6 +860,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case chatStatusMsg, chatAssistantMsg, chatDoneMsg, chatErrorMsg, chatConfirmMsg:
 		return m.routeChatMsg(msg)
 
+	case contextRefreshTickMsg:
+		// /c auto-refresh. Stops ticking once /c is closed. Skips the reload mid-
+		// edit (active proposal or a busy pane) to avoid disrupting the
+		// interaction, but keeps the tick alive.
+		cv, ok := m.content.(*contextView)
+		if !ok {
+			return m, nil
+		}
+		if cv.showingProposal || (cv.pane != nil && cv.pane.Busy()) {
+			return m, contextRefreshTick()
+		}
+		return m, tea.Batch(loadContextSnapshotCmd(cv.agent, cv.convID), contextRefreshTick())
+
+	case contextSnapshotMsg:
+		if cv, ok := m.content.(*contextView); ok {
+			cv.snapshot = msg.snap
+		}
+		return m, nil
+
 	case runtimeDashboardActionMsg:
 		if dashboard, ok := m.content.(*runtimeDashboard); ok {
 			return m, dashboard.applyActionMsg(msg)
@@ -1148,7 +1167,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 	case slash.ResultOpenContextView:
 		cv, cmd := newContextView(m.agent, m.palette, m.styles, m.convID, m.width, m.height)
 		m.content = cv
-		return m, cmd
+		return m, tea.Batch(cmd, contextRefreshTick())
 	case slash.ResultResumeConversation:
 		// /resume <id> path — slash already validated against the agent.
 		m = m.applyResume(res.Text)

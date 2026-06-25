@@ -3395,6 +3395,8 @@ type ContextTurn struct {
 	Preview       string                 `protobuf:"bytes,3,opt,name=preview,proto3" json:"preview,omitempty"`                       // flattened, truncated, display-ready
 	EstTokens     int32                  `protobuf:"varint,4,opt,name=est_tokens,json=estTokens,proto3" json:"est_tokens,omitempty"` // contextmeter tokenizer estimate
 	Id            string                 `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`                                 // persistent turn ID (UUID)
+	Body          string                 `protobuf:"bytes,6,opt,name=body,proto3" json:"body,omitempty"`                             // un-flattened content (newlines preserved), capped at 4 KB
+	Truncated     bool                   `protobuf:"varint,7,opt,name=truncated,proto3" json:"truncated,omitempty"`                  // true if body was capped
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3462,6 +3464,20 @@ func (x *ContextTurn) GetId() string {
 		return x.Id
 	}
 	return ""
+}
+
+func (x *ContextTurn) GetBody() string {
+	if x != nil {
+		return x.Body
+	}
+	return ""
+}
+
+func (x *ContextTurn) GetTruncated() bool {
+	if x != nil {
+		return x.Truncated
+	}
+	return false
 }
 
 type ProposeContextEditRequest struct {
@@ -5366,14 +5382,16 @@ const file_agent_proto_rawDesc = "" +
 	"\x1bGetConversationTurnsRequest\x12'\n" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\"H\n" +
 	"\x1cGetConversationTurnsResponse\x12(\n" +
-	"\x05turns\x18\x01 \x03(\v2\x12.agent.ContextTurnR\x05turns\"~\n" +
+	"\x05turns\x18\x01 \x03(\v2\x12.agent.ContextTurnR\x05turns\"\xb0\x01\n" +
 	"\vContextTurn\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x18\n" +
 	"\apreview\x18\x03 \x01(\tR\apreview\x12\x1d\n" +
 	"\n" +
 	"est_tokens\x18\x04 \x01(\x05R\testTokens\x12\x0e\n" +
-	"\x02id\x18\x05 \x01(\tR\x02id\"f\n" +
+	"\x02id\x18\x05 \x01(\tR\x02id\x12\x12\n" +
+	"\x04body\x18\x06 \x01(\tR\x04body\x12\x1c\n" +
+	"\ttruncated\x18\a \x01(\bR\ttruncated\"f\n" +
 	"\x19ProposeContextEditRequest\x12'\n" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12 \n" +
 	"\vinstruction\x18\x02 \x01(\tR\vinstruction\"Y\n" +

@@ -445,6 +445,8 @@ type ContextTurn struct {
 	Role      string
 	Kind      string
 	Preview   string
+	Body      string
+	Truncated bool
 	EstTokens int
 }
 
@@ -461,6 +463,8 @@ func (c *Client) GetConversationTurns(ctx context.Context, conversationID string
 			Role:      t.GetRole(),
 			Kind:      t.GetKind(),
 			Preview:   t.GetPreview(),
+			Body:      t.GetBody(),
+			Truncated: t.GetTruncated(),
 			EstTokens: int(t.GetEstTokens()),
 		})
 	}

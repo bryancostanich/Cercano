@@ -7,6 +7,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/pkg/proto"
@@ -54,6 +55,33 @@ func TestGetConversationTurns_SummariesAndSideEffectFree(t *testing.T) {
 		t.Errorf("GetConversationTurns mutated the meter: used = %d, want 0", used)
 	}
 }
+
+func TestContextTurnView_BodyMultilineAndCap(t *testing.T) {
+	tok := contextmeter.Default()
+	// multi-line text turn → body keeps newlines; preview is flattened.
+	multi := conversation.Turn{Role: "assistant", Content: "line one\nline two\nline three"}
+	ct := contextTurnView(multi, tok)
+	if ct.Body != "line one\nline two\nline three" {
+		t.Errorf("body should preserve newlines, got %q", ct.Body)
+	}
+	if ct.Truncated {
+		t.Error("short body should not be truncated")
+	}
+	if contains(ct.Preview, "\n") {
+		t.Errorf("preview should stay single-line, got %q", ct.Preview)
+	}
+	// over-cap body → truncated, valid UTF-8.
+	big := conversation.Turn{Role: "assistant", Content: strings.Repeat("x", 5000)}
+	bct := contextTurnView(big, tok)
+	if !bct.Truncated || len(bct.Body) > 4096 {
+		t.Errorf("body should be capped+flagged: len=%d truncated=%v", len(bct.Body), bct.Truncated)
+	}
+	if !utf8.ValidString(bct.Body) {
+		t.Error("capped body must be valid UTF-8")
+	}
+}
+
+func contains(s, sub string) bool { return strings.Contains(s, sub) }
 
 func TestCtTruncate_RuneBoundary(t *testing.T) {
 	// 60 CJK runes = 180 bytes; truncating at 121 bytes splits a rune.

@@ -420,6 +420,8 @@ message ContextTurn {
   string preview    = 3; // flattened, truncated, display-ready
   int32  est_tokens = 4; // contextmeter tokenizer estimate
   string id         = 5; // persistent turn ID (UUID)
+  string body       = 6; // un-flattened content (newlines preserved), capped at 4 KB
+  bool   truncated  = 7; // true if body was capped
 }
 
 message ProposeContextEditRequest  { string conversation_id = 1; string instruction = 2; }

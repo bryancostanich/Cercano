@@ -1,0 +1,84 @@
+// Package compactiongen debounces per-conversation context compaction off the
+// request path (mirrors the recap generator). It calls compactor.Advance and
+// persists the derived state; failures are swallowed so a turn is never blocked.
+package compactiongen
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"cercano/source/server/internal/compaction"
+	"cercano/source/server/internal/compactor"
+	"cercano/source/server/internal/contextmeter"
+	"cercano/source/server/internal/conversation"
+)
+
+// Store is the subset of conversation.Store the generator needs.
+type Store interface {
+	GetTurns(ctx context.Context, conversationID string) ([]conversation.Turn, error)
+	GetCompaction(ctx context.Context, conversationID string) (conversation.Compaction, error)
+	SaveCompaction(ctx context.Context, c conversation.Compaction) error
+}
+
+const runTimeout = 2 * time.Minute
+
+// Generator debounces compaction per conversation.
+type Generator struct {
+	store     Store
+	summarize compaction.SummarizeFunc
+	cfg       compactor.Config
+	tok       contextmeter.Tokenizer
+	debounce  time.Duration
+
+	mu     sync.Mutex
+	timers map[string]*time.Timer
+}
+
+func New(store Store, summarize compaction.SummarizeFunc, cfg compactor.Config, tok contextmeter.Tokenizer, debounce time.Duration) *Generator {
+	return &Generator{
+		store: store, summarize: summarize, cfg: cfg, tok: tok, debounce: debounce,
+		timers: make(map[string]*time.Timer),
+	}
+}
+
+// Schedule requests a debounced compaction pass; rapid calls coalesce.
+func (g *Generator) Schedule(conversationID string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if t, ok := g.timers[conversationID]; ok {
+		t.Reset(g.debounce)
+		return
+	}
+	g.timers[conversationID] = time.AfterFunc(g.debounce, func() {
+		g.mu.Lock()
+		delete(g.timers, conversationID)
+		g.mu.Unlock()
+		ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
+		defer cancel()
+		_ = g.runCompaction(ctx, conversationID)
+	})
+}
+
+// CompactNow runs a compaction pass synchronously (used by the request-path
+// hard-limit override).
+func (g *Generator) CompactNow(ctx context.Context, conversationID string) error {
+	return g.runCompaction(ctx, conversationID)
+}
+
+func (g *Generator) runCompaction(ctx context.Context, conversationID string) error {
+	turns, err := g.store.GetTurns(ctx, conversationID)
+	if err != nil || len(turns) == 0 {
+		return err
+	}
+	state, err := g.store.GetCompaction(ctx, conversationID)
+	if err != nil {
+		return err
+	}
+	state.ConversationID = conversationID
+	newState, changed, err := compactor.Advance(ctx, turns, state, g.summarize, g.cfg, g.tok)
+	if err != nil || !changed {
+		return err
+	}
+	return g.store.SaveCompaction(ctx, newState)
+}

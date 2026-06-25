@@ -1725,13 +1725,36 @@ func (m Model) handleContextViewKey(cv *contextView, msg tea.KeyPressMsg) (Model
 		cv.focusNextExpandable(-1)
 		return m, nil
 	case "up":
-		// Pop the last queued message back into the prompt bar for editing
-		// (mirrors d808952 unstageLastQueued behaviour in the main chat).
+		// With an empty prompt: first pop the last queued message back for
+		// editing (mirrors d808952 in the main chat); otherwise move the section
+		// focus backward (right/left arrows expand/collapse — see below). With a
+		// non-empty prompt, fall through so the textarea owns cursor movement.
 		if m.input.Value() == "" {
 			if msg, ok := cv.chat.UnstageLast(); ok {
 				m.input.SetValue(msg)
 				return m, nil
 			}
+			cv.focusNextExpandable(-1)
+			return m, nil
+		}
+	case "down":
+		// Empty prompt: move the section focus forward (does NOT expand).
+		// Non-empty prompt: fall through to the textarea.
+		if m.input.Value() == "" {
+			cv.focusNextExpandable(+1)
+			return m, nil
+		}
+	case "right":
+		// Empty prompt: expand the focused section. Non-empty: textarea cursor.
+		if m.input.Value() == "" {
+			cv.setFocusedExpanded(true)
+			return m, nil
+		}
+	case "left":
+		// Empty prompt: collapse the focused section. Non-empty: textarea cursor.
+		if m.input.Value() == "" {
+			cv.setFocusedExpanded(false)
+			return m, nil
 		}
 	case "pgup", "ctrl+b":
 		cv.ScrollBy(-dashboardContentHeight(cv.height))

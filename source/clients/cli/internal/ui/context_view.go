@@ -418,6 +418,18 @@ func (c *contextView) handleClick(x, yLocal int) bool {
 	return false
 }
 
+// setFocusedExpanded opens (open=true) or collapses (false) the focused turn —
+// the right/left arrow path. No-op when nothing is focused.
+func (c *contextView) setFocusedExpanded(open bool) {
+	if c.focusedTurn < 0 || c.focusedTurn >= len(c.snapshot.Turns) {
+		return
+	}
+	if c.expanded == nil {
+		c.expanded = map[string]bool{}
+	}
+	c.expanded[c.snapshot.Turns[c.focusedTurn].ID] = open
+}
+
 // focusNextExpandable advances focusedTurn by dir (+1 or -1) to the next index
 // where turnExpandable returns true, wrapping around. No-op if no expandable turns.
 // From the neutral start (focusedTurn == -1): forward lands on the first expandable,

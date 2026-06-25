@@ -199,3 +199,14 @@ symptom. Do NOT push. Do NOT merge to main.
 
 - **Reversible:** yes (worktree). Existing selection/scrollbar-drag/drag-scroll
   tests + full suite are the parity gate after the move.
+
+- **Step-2 outcome:** D2 applied across 4 tasks (`788533e..4704354`). Whole-branch
+  opus review: structurally excellent, boundary clean, dead code removed. Found
+  **1 Critical** (review-fix `016844d`): `ScrollbarHit` used `localX >= vp.Width()`
+  which grabbed the 1-col gap (`width-2`) in production — a silent behavior change
+  vs the old `mouse.X >= width-1`. Root cause: the PROBE test fixture sized the
+  chat `w-1` instead of production's `w-2`, so it validated the wrong geometry.
+  Fixed to `localX >= vp.Width()+1` and corrected the fixture to production
+  geometry; re-PROBED: `X=78(gap)→MISS, X=79/80→HIT` ≡ old behavior. Lesson for
+  review-first: PROBE fixtures must mirror production `relayout` sizing
+  (`contentW-2`). 2 Minor noted (provisional unused `Wheel`, a stray comment).

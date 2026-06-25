@@ -9,12 +9,14 @@ import (
 	"cercano/source/clients/cli/internal/theme"
 )
 
-// buildDragModel makes a Model with an overflowing chat viewport positioned
-// like the real layout (top row 2, width-1 content, bar at column width-1).
+// buildDragModel makes a Model with an overflowing chat viewport sized to match
+// production geometry: relayout does m.chat.SetSize(contentW-2, bodyH) where
+// contentW = m.width, so vp.Width() = w-2 = 78. The bar is painted at screen
+// column w-1 = 79; the gap is at w-2 = 78.
 func buildDragModel() Model {
 	const w, vh = 80, 10
 	p := theme.Cracker()
-	cv := newChatView(theme.NewStyles(p), p, w-1, vh)
+	cv := newChatView(theme.NewStyles(p), p, w-2, vh)
 	content := strings.Repeat("xxxxxxxx\n", 50) // total 50 > height 10 → overflow
 	cv.vp.SetContent(content)
 	cv.plainLines = plainLines(content)
@@ -41,33 +43,34 @@ func barDrag(t *testing.T, m Model) int {
 	return m.chat.YOffset()
 }
 
-// PROBE: verify the ScrollbarHit threshold maps the four canonical X values
-// correctly at the test fixture's dimensions (width=80, contentW=79, vp.Width=79).
+// PROBE: verify ScrollbarHit at PRODUCTION geometry (width=80, vp.Width=78).
 //
-// The bar is painted at screen column 79 (width-1=79). The viewport text width
-// is 79 (contentW-2 = 80-2=78... wait, buildDragModel sets vpWidth=w-1=79).
-// So c.Width()=79: bar is at col 79, text is cols 0..78.
-// Expected: ScrollbarHit(79,·)=true, ScrollbarHit(80,·)=true (off-by-one terminal),
+// Layout: text cols 0..77, gap col 78 (Width()), bar col 79 (Width()+1=width-1).
+// ScrollbarHit threshold = Width()+1 = 79, equivalent to old `mouse.X >= m.width-1`.
 //
-//	ScrollbarHit(78,·)=false (last text col), ScrollbarHit(5,·)=false (text col).
+//	X=79 (bar col)        → HIT
+//	X=80 (terminal +1)    → HIT
+//	X=78 (gap col)        → MISS  ← was incorrectly HIT before fix
+//	X=5  (text col)       → MISS
+//	X=2  (text col)       → MISS
 func TestScrollbarHitProbe(t *testing.T) {
 	m := buildDragModel()
 	cv := &m.chat
-	// cv.Width() == 79 (vpWidth passed to newChatView is w-1 = 79)
-	if w := cv.Width(); w != 79 {
-		t.Fatalf("PROBE: expected c.Width()=79, got %d (fixture changed?)", w)
+	// cv.Width() == 78 (production: relayout sets vp.Width = m.width-2 = 78)
+	if w := cv.Width(); w != 78 {
+		t.Fatalf("PROBE: expected c.Width()=78, got %d (fixture changed?)", w)
 	}
-	// Bar column (79) must hit.
+	// Bar column (79 = Width()+1 = width-1) must hit.
 	if !cv.ScrollbarHit(79, 5) {
 		t.Error("PROBE: ScrollbarHit(79,5) want true (bar col), got false")
 	}
-	// Off-by-one (80) must also hit.
+	// Terminal off-by-one (80 = width) must also hit.
 	if !cv.ScrollbarHit(80, 5) {
 		t.Error("PROBE: ScrollbarHit(80,5) want true (terminal off-by-one), got false")
 	}
-	// Last text col (78) must NOT hit.
+	// Gap column (78 = Width()) must NOT hit — was the bug.
 	if cv.ScrollbarHit(78, 5) {
-		t.Error("PROBE: ScrollbarHit(78,5) want false (text col), got true — threshold too low")
+		t.Error("PROBE: ScrollbarHit(78,5) want false (gap col), got true — threshold too low")
 	}
 	// Typical text col (5) must NOT hit.
 	if cv.ScrollbarHit(5, 5) {

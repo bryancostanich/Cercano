@@ -390,11 +390,13 @@ func (c *chatView) SelectionDragging() bool { return c.selection.Dragging }
 // ── scrollbar drag surface ─────────────────────────────────────────────────
 
 // ScrollbarHit reports whether a local point is on the grabbable scrollbar
-// column. The bar sits at the viewport's right edge (column Width()); accept
-// that column and one past — terminals sometimes report the rightmost visible
-// cell as Width() or Width()+1.
+// column. The host reserves two columns to the right of the viewport: column
+// Width() is the gap, Width()+1 is the bar. Accept Width()+1 and one more —
+// terminals sometimes report the rightmost visible cell as Width()+2.
+// This is equivalent to the old host-side test `mouse.X >= m.width-1` because
+// production sets vp.Width() = m.width-2, so Width()+1 = m.width-1.
 func (c *chatView) ScrollbarHit(localX, localY int) bool {
-	return localX >= c.vp.Width() && localY >= 0 && localY < c.vp.Height()
+	return localX >= c.vp.Width()+1 && localY >= 0 && localY < c.vp.Height()
 }
 
 // scrollbarScrub jumps the scroll offset to match the local click row.

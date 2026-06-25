@@ -110,3 +110,41 @@ func TestApply_DoesNotTouchTelemetry(t *testing.T) {
 		t.Fatalf("done should finalize the assistant entry")
 	}
 }
+
+// chatAssistantMsg appends a whole, non-streaming RoleAssistant entry.
+func TestChatView_Apply_AssistantMsg_WholeAppend(t *testing.T) {
+	c := newApplyTestView()
+	c.Apply(chatAssistantMsg{text: "delete rationale"})
+	es := c.Entries()
+	if len(es) != 1 {
+		t.Fatalf("want 1 entry, got %d", len(es))
+	}
+	if es[0].Role != RoleAssistant || es[0].Content != "delete rationale" {
+		t.Fatalf("want whole-appended assistant entry, got role=%v content=%q", es[0].Role, es[0].Content)
+	}
+	if es[0].Streaming {
+		t.Error("whole-append entry must not be Streaming")
+	}
+}
+
+// DesiredHeight is at least 1 on an empty view, grows with content, and adds one
+// row per queued message.
+func TestChatView_DesiredHeight_GrowsWithContentAndQueue(t *testing.T) {
+	c := newApplyTestView()
+	base := c.DesiredHeight()
+	if base < 1 {
+		t.Fatalf("DesiredHeight must be >= 1, got %d", base)
+	}
+	for i := 0; i < 5; i++ {
+		c.Apply(chatAssistantMsg{text: "line"})
+	}
+	c.rebuild() // push entries into the viewport so TotalLineCount reflects them
+	grown := c.DesiredHeight()
+	if grown <= base {
+		t.Errorf("DesiredHeight should grow with content: base=%d grown=%d", base, grown)
+	}
+	c.Enqueue("queued one")
+	if c.DesiredHeight() != grown+1 {
+		t.Errorf("each queued message adds one row: got %d want %d", c.DesiredHeight(), grown+1)
+	}
+}

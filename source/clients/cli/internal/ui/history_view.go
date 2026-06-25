@@ -94,18 +94,59 @@ func (h *historyView) SetSize(w, hgt int) {
 	h.clampScroll()
 }
 
-// Update: nav/resume land in Task 3. Here, only close + scroll keys so the
-// contentPage contract is valid.
 func (h *historyView) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	switch msg.String() {
 	case "esc", "q":
 		return nil, true
+	case "up", "k":
+		h.moveCursor(-1)
+	case "down", "j":
+		h.moveCursor(1)
+	case "enter":
+		if h.cursor < 0 || h.cursor >= len(h.rows) {
+			return nil, false
+		}
+		r := h.rows[h.cursor]
+		return func() tea.Msg { return resumeRequestedMsg{ConversationID: r.id, Title: r.name} }, true
 	case "pgup", "ctrl+b":
 		h.ScrollBy(-dashboardContentHeight(h.height))
 	case "pgdown", "ctrl+f":
 		h.ScrollBy(dashboardContentHeight(h.height))
 	}
 	return nil, false
+}
+
+// moveCursor shifts the selection by dir (clamped) and scrolls so the selected
+// row's first line stays within the viewport window.
+func (h *historyView) moveCursor(dir int) {
+	if len(h.rows) == 0 {
+		return
+	}
+	h.cursor = clampInt(h.cursor+dir, 0, len(h.rows)-1)
+	h.scrollToCursor()
+}
+
+// scrollToCursor adjusts scrollOffset so the selected row's first line is within
+// [scrollOffset, scrollOffset+height).
+func (h *historyView) scrollToCursor() {
+	_, meta := h.rowsLines()
+	first := -1
+	for i, m := range meta {
+		if m.row == h.cursor {
+			first = i
+			break
+		}
+	}
+	if first < 0 {
+		return
+	}
+	height := dashboardContentHeight(h.height)
+	if first < h.scrollOffset {
+		h.scrollOffset = first
+	} else if first >= h.scrollOffset+height {
+		h.scrollOffset = first - height + 1
+	}
+	h.clampScroll()
 }
 
 // rowsLines renders the # History heading then two lines per row, returning

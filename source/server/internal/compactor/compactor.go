@@ -4,10 +4,12 @@
 package compactor
 
 import (
+	"context"
 	"encoding/json"
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/compaction"
+	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/llm"
 )
@@ -50,4 +52,65 @@ func liveTurns(turns []conversation.Turn, frozenThrough int64) []conversation.Tu
 		}
 	}
 	return out
+}
+
+// Advance runs one stateful compaction pass. It freezes new segments of the
+// eligible (older, un-frozen) history and re-reduces; frozen segments are reused
+// untouched. Returns the updated state and whether anything changed. Pure: no
+// I/O. Gates: total < ActivationFloorTokens, or eligible < one SegmentTokens →
+// unchanged.
+func Advance(ctx context.Context, turns []conversation.Turn, state conversation.Compaction,
+	summarize compaction.SummarizeFunc, cfg Config, tok contextmeter.Tokenizer) (conversation.Compaction, bool, error) {
+
+	all := agent.BuildLLMHistory(turns)
+	if compaction.TotalTokens(tok, all) < cfg.ActivationFloorTokens {
+		return state, false, nil // activation gate
+	}
+
+	live := liveTurns(turns, state.FrozenThrough)
+	if len(live) <= cfg.VerbatimRecent {
+		return state, false, nil // nothing past the verbatim window
+	}
+	eligible := live[:len(live)-cfg.VerbatimRecent]
+
+	eligibleMsgs := agent.BuildLLMHistory(eligible)
+	if compaction.TotalTokens(tok, eligibleMsgs) < cfg.SegmentTokens {
+		return state, false, nil // cadence gate — let the tail accumulate
+	}
+
+	// Map each new segment from raw (after mechanical elision).
+	elided, _ := compaction.ElideSupersededToolResults(eligibleMsgs)
+	var newParts []compaction.StructuredSummary
+	for _, seg := range compaction.SegmentByTokens(elided, tok, cfg.SegmentTokens) {
+		s, err := summarize(ctx, seg.Messages)
+		if err != nil {
+			return state, false, err
+		}
+		newParts = append(newParts, s)
+	}
+
+	// Reuse the already-frozen segment summaries; append the new ones.
+	var parts []compaction.StructuredSummary
+	if state.SegmentSummariesJSON != "" {
+		if err := json.Unmarshal([]byte(state.SegmentSummariesJSON), &parts); err != nil {
+			parts = nil // corrupt → rebuild from new
+		}
+	}
+	parts = append(parts, newParts...)
+
+	consolidated, err := compaction.Reduce(ctx, parts, summarize)
+	if err != nil {
+		return state, false, err
+	}
+
+	segJSON, _ := json.Marshal(parts)
+	conJSON, _ := json.Marshal(consolidated)
+	newState := conversation.Compaction{
+		ConversationID:       state.ConversationID,
+		FrozenThrough:        eligible[len(eligible)-1].CreatedAt.Unix(),
+		SegmentSummariesJSON: string(segJSON),
+		ConsolidatedJSON:     string(conJSON),
+		CompactedTokens:      state.CompactedTokens + compaction.TotalTokens(tok, elided),
+	}
+	return newState, true, nil
 }

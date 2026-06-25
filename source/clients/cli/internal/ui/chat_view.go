@@ -185,7 +185,7 @@ func (c *chatView) rebuild() {
 // → confirm gate). Apply never touches host footer state and never calls
 // rebuild(); the host calls refreshViewport after routing, as before.
 //
-// Returns a tea.Cmd for symmetry with chatPane.Apply (main chat returns nil).
+// Returns a tea.Cmd (always nil; present for driver symmetry).
 func (c *chatView) Apply(msg tea.Msg) tea.Cmd {
 	switch m := msg.(type) {
 	case chatAssistantDeltaMsg:

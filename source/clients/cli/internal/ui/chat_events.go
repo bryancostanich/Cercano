@@ -7,7 +7,7 @@ import (
 )
 
 // ChatDriver plugs an agent into a chat surface. Submit returns a tea.Cmd that
-// emits chatPaneMsg events (chatStatusMsg / chatAssistantMsg / chatConfirmMsg /
+// emits chat events (chatStatusMsg / chatAssistantMsg / chatConfirmMsg /
 // chatDoneMsg / chatErrorMsg). The chat surface is agent-agnostic; all agent
 // specifics live in the driver.
 type ChatDriver interface {
@@ -15,10 +15,9 @@ type ChatDriver interface {
 	Submit(ctx context.Context, input string) tea.Cmd
 }
 
-// chatPaneMsg is the SHARED set of events a driver emits. They are top-level
-// tea.Msg values routed by the model to the active surface. The set is shared
-// between the /c chatPane and the main chatView; main-chat-only events and
-// fields are additive — chatPane.Apply reads only the OLD fields, so the
+// chatDriverMsg is the set of events a driver emits. They are top-level
+// tea.Msg values routed by the model to the active surface. Main-chat-only
+// events and fields are additive — the /c driver never emits them, so the
 // additive fields default-zero on the /c path and are ignored there.
 //
 // chatStatusMsg's tokOut/model/cloud are main-chat turn telemetry (footer);
@@ -58,9 +57,9 @@ type toolEntryExecCompleteMsg struct {
 type permissionRequiredMsg struct{ id, name, argsJSON, tier string }
 
 // chatDoneMsg signals the end of a driver turn. text is an optional closing
-// line for /c (pane appends it as a system entry). tokIn/tokOut/notice/model
+// line for /c (chatView appends it as a system entry). tokIn/tokOut/notice/model
 // carry main-chat turn telemetry; the /c driver never sets them so they
-// default to zero and are ignored by chatPane.Apply.
+// default to zero and are ignored by chatView.Apply on the /c path.
 type chatDoneMsg struct {
 	text   string // /c: optional closing system line
 	tokIn  int    // main-chat: input tokens for the completed turn

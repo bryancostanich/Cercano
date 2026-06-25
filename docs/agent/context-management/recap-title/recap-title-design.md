@@ -23,6 +23,14 @@ Today:
   algorithmic slice of the first user prompt. Untitled sessions render
   `(untitled)` in the `-r` history screen (`history_view.go:96`).
 
+## Layering — agent-owned, client-agnostic
+
+Both changes live entirely in the agent (server) layer: the recap width and the
+title generation are in `recap` / `conversation` under `source/server/internal/`,
+running off the request path. Clients (CLI, VS Code, Zed) consume the resulting
+`Title` / `Recap` through the existing `GetConversation` / `ListConversations`
+RPCs and only render them. No client generates titles or recaps locally.
+
 ## 1. Recap length: 80 → 160
 
 `recap.maxRecapChars` becomes **160**. This is the cap passed to the prompt

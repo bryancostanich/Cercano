@@ -81,6 +81,7 @@ func buildConfigRows(ag *agentclient.Client) []overlay.Row {
 		{Key: "cloud-provider", Label: "cloud-provider", Value: cfg.CloudProvider, Editable: true},
 		{Key: "cloud-model", Label: "cloud-model", Value: cfg.CloudModel, Editable: true},
 		{Key: "cloud-base-url", Label: "cloud-base-url", Value: cfg.CloudBaseURL, Editable: true},
+		{Key: "locus-mode", Label: "locus-mode", Value: cfg.LocusMode, Editable: true, Hint: "cloud_only | cloud_primary | local_primary | local_only"},
 		{Key: "cloud-api-key", Label: "cloud-api-key", Value: apiKey, Editable: true, Masked: true},
 		{Key: "embedding-model", Label: "embedding-model", Value: cfg.EmbeddingModel, ReadOnly: true, Hint: "(read-only)"},
 		{Key: "cloud-state", Label: "cloud-state", Value: cfg.CloudState, ReadOnly: true, Hint: "(read-only)"},
@@ -108,6 +109,8 @@ func saveSingle(ag *agentclient.Client, wireKey, value string) (string, error) {
 		u.CloudAPIKey = value
 	case "cloud-base-url":
 		u.CloudBaseURL = value
+	case "locus-mode":
+		u.LocusMode = value
 	default:
 		return "", &editorError{Reason: "unsupported field: " + wireKey}
 	}

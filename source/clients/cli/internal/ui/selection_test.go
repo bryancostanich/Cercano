@@ -131,7 +131,7 @@ func TestPasteMsgClearsSelectionAndToolFocus(t *testing.T) {
 	m := New(nil, false)
 	m.width = 80
 	m.height = 24
-	m.focusedToolIdx = 1
+	m.chat.focusedToolIdx = 1
 	m.chat.selection = textSelection{
 		Active: true,
 		Anchor: selectionPoint{Line: 0, Col: 0},
@@ -152,8 +152,8 @@ func TestPasteMsgClearsSelectionAndToolFocus(t *testing.T) {
 	if got.selectionNotice != "" {
 		t.Fatalf("selectionNotice = %q, want cleared notice", got.selectionNotice)
 	}
-	if got.focusedToolIdx != -1 {
-		t.Fatalf("focusedToolIdx = %d, want -1", got.focusedToolIdx)
+	if got.chat.InToolNav() {
+		t.Fatalf("paste should exit tool-nav mode (focusedToolIdx should be -1)")
 	}
 }
 

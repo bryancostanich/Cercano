@@ -154,11 +154,6 @@ type Model struct {
 	// /bypass /mode slash handlers.
 	permissionMode string
 
-	// focusedToolIdx points into m.entries at the tool entry the user is
-	// currently navigating; -1 means the input box owns focus (default). Esc
-	// on empty input enters nav mode at the most recent tool entry; up/down
-	// cycle, enter/tab toggle Folded, esc returns to input.
-	focusedToolIdx int
 }
 
 // pendingToolCall is a queued tool invocation awaiting user confirmation.
@@ -260,7 +255,6 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 		modelMaxTokens:     128_000, // placeholder until the agent serves real ctx limits
 		openHistoryOnStart: openHistoryOnStart,
 		promptBorderColor:  p.Accent,
-		focusedToolIdx:     -1,
 	}
 }
 
@@ -632,40 +626,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// rather than the input box. Up/down cycle (clamped at edges),
 		// enter/tab toggle Folded, esc returns to input. Any other key
 		// returns to input and is then handled by the normal input path.
-		if m.focusedToolIdx >= 0 {
+		if m.chat.InToolNav() {
 			switch {
 			case key.Matches(msg, keys.NavUp):
-				indices := m.chat.toolEntryIndices()
-				for i, idx := range indices {
-					if idx == m.focusedToolIdx {
-						if i > 0 {
-							m.focusedToolIdx = indices[i-1]
-							m.refreshViewport()
-						}
-						break
-					}
-				}
+				m.chat.NavPrev()
+				m.refreshViewport()
 				return m, nil
 			case key.Matches(msg, keys.NavDown):
-				indices := m.chat.toolEntryIndices()
-				for i, idx := range indices {
-					if idx == m.focusedToolIdx {
-						if i < len(indices)-1 {
-							m.focusedToolIdx = indices[i+1]
-							m.refreshViewport()
-						}
-						break
-					}
-				}
+				m.chat.NavNext()
+				m.refreshViewport()
 				return m, nil
 			case key.Matches(msg, keys.ToggleTool):
-				if m.focusedToolIdx < len(m.chat.Entries()) && m.chat.Entries()[m.focusedToolIdx].Tool != nil {
-					m.chat.Entries()[m.focusedToolIdx].Tool.Folded = !m.chat.Entries()[m.focusedToolIdx].Tool.Folded
-					m.refreshViewport()
-				}
+				m.chat.ToggleFocusedFold()
+				m.refreshViewport()
 				return m, nil
 			case key.Matches(msg, keys.Back):
-				m.focusedToolIdx = -1
+				m.chat.ExitToolNav()
 				m.refreshViewport()
 				return m, nil
 			}
@@ -678,9 +654,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Esc on empty input enters tool-entry navigation mode, focusing the
 		// most-recent tool entry. No-op when scrollback has no tool entries.
 		if key.Matches(msg, keys.Back) && m.input.Value() == "" {
-			indices := m.chat.toolEntryIndices()
-			if len(indices) > 0 {
-				m.focusedToolIdx = indices[len(indices)-1]
+			if m.chat.EnterToolNav() {
 				m.refreshViewport()
 				return m, nil
 			}
@@ -1093,7 +1067,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.sessionTitle = ""
 		m.cumIn = 0
 		m.cumOut = 0
-		m.focusedToolIdx = -1
+		m.chat.ExitToolNav()
 		m.refreshViewport()
 	case slash.ResultOpenConfigEditor:
 		ed, _ := newConfigEditor(m.agent, m.palette, m.styles, m.width, m.height)
@@ -1338,10 +1312,9 @@ func (m Model) splashEffective() bool {
 }
 
 // refreshViewport rebuilds the viewport content from the chatView's owned
-// entries at the current width. Syncs turn telemetry and focusedToolIdx first
-// so the render has current state, then delegates to chatView.rebuild().
+// entries at the current width. Syncs turn telemetry first so the render
+// has current state, then delegates to chatView.rebuild().
 func (m *Model) refreshViewport() {
-	m.chat.SetFocusedTool(m.focusedToolIdx)
 	m.chat.SetTurnStatus(turnStatus{
 		activity: m.turnActivity,
 		start:    m.turnStart,
@@ -1353,13 +1326,13 @@ func (m *Model) refreshViewport() {
 }
 
 func (m Model) preparePromptInput() Model {
-	needsRefresh := m.focusedToolIdx >= 0
+	needsRefresh := m.chat.InToolNav()
 	if m.chat.SelectionActive() {
 		m.chat.ClearSelection()
 	}
 	m.selectionNotice = ""
 	if needsRefresh {
-		m.focusedToolIdx = -1
+		m.chat.ExitToolNav()
 		m.refreshViewport()
 	}
 	return m
@@ -1611,7 +1584,7 @@ func (m Model) applyResume(conversationID string) Model {
 	m.chat.SetEntriesSlice(nil)
 	m.cumIn = 0
 	m.cumOut = 0
-	m.focusedToolIdx = -1
+	m.chat.ExitToolNav()
 	m.splashShown = false
 	m.chat.SetEntriesSlice(resumeEntries(turns))
 	for _, t := range turns {

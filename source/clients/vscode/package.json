@@ -58,12 +58,6 @@
           "default": "local",
           "description": "The AI provider to use."
         },
-        "cercano.locusMode": {
-          "type": "string",
-          "enum": ["cloud_only", "cloud_primary", "local_primary", "local_only"],
-          "default": "local_primary",
-          "description": "Locus Mode: controls whether the main LLM and co-processor tasks run on cloud or local models."
-        },
         "cercano.model": {
           "type": "string",
           "default": "gemini-3-flash-preview",

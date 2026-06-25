@@ -14,6 +14,7 @@ import (
 )
 
 const contextTurnPreviewMax = 120
+const contextTurnBodyMax = 4096
 
 // GetConversationTurns returns side-effect-free, display-ready summaries of a
 // conversation's turns for the /c context viewer. Reads the store only.
@@ -38,12 +39,13 @@ func (s *Server) GetConversationTurns(ctx context.Context, req *proto.GetConvers
 	return out, nil
 }
 
-// contextTurnView derives a display summary (kind, preview, token estimate) from
-// a stored turn. Pure — no I/O. tool turns synthesize a label since their
+// contextTurnView derives a display summary (kind, preview, body, token estimate)
+// from a stored turn. Pure — no I/O. tool turns synthesize a label since their
 // Content may be empty.
 func contextTurnView(t conversation.Turn, tok contextmeter.Tokenizer) *proto.ContextTurn {
 	kind := "text"
 	preview := t.Content
+	body := t.Content
 	tokenSrc := t.Content
 
 	if t.BlocksJSON != "" {
@@ -55,25 +57,44 @@ func contextTurnView(t conversation.Turn, tok contextmeter.Tokenizer) *proto.Con
 				case llm.BlockToolUse:
 					kind = "tool_use"
 					preview = b.ToolName + " " + ctPreview(string(b.ToolInput))
+					body = b.ToolName + " " + string(b.ToolInput)
 				case llm.BlockToolResult:
 					kind = "tool_result"
 					preview = "→ " + ctPreview(b.Content)
+					body = b.Content
 				case llm.BlockText:
 					if preview == "" {
 						preview = b.Text
+					}
+					if body == "" {
+						body = b.Text
 					}
 				}
 			}
 		}
 	}
 
+	bodyStr, truncated := capBody(body, contextTurnBodyMax)
 	return &proto.ContextTurn{
 		Id:        t.ID,
 		Role:      t.Role,
 		Kind:      kind,
 		Preview:   ctTruncate(ctPreview(preview), contextTurnPreviewMax),
+		Body:      bodyStr,
+		Truncated: truncated,
 		EstTokens: int32(tok.Count(tokenSrc)),
 	}
+}
+
+// capBody truncates s to <= max bytes on a rune boundary, reporting whether it cut.
+func capBody(s string, max int) (string, bool) {
+	if len(s) <= max {
+		return s, false
+	}
+	for max > 0 && !utf8.RuneStart(s[max]) {
+		max--
+	}
+	return s[:max], true
 }
 
 func ctPreview(s string) string { return strings.Join(strings.Fields(s), " ") }

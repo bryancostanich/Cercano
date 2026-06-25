@@ -2072,7 +2072,9 @@ func (m Model) handleContextViewKey(cv *contextView, msg tea.KeyPressMsg) (Model
 	case "ctrl+d":
 		cv.ScrollBy(maxInt(1, dashboardContentHeight(cv.height)/2))
 		return m, nil
-	case "r":
+	case "ctrl+r":
+		// Manual refresh. Must NOT be a bare "r" — in /c the prompt bar is the
+		// input, so a bare letter hotkey would swallow that letter while typing.
 		cv.snapshot = loadContextSnapshot(cv.agent, cv.convID)
 		return m, nil
 	}

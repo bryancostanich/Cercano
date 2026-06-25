@@ -180,11 +180,10 @@ func (c *chatView) rebuild() {
 // ── transcript state machine (Apply) ─────────────────────────────────────────
 
 // Apply runs the main-chat transcript state machine for one agent-agnostic
-// transcript event, mutating c.entries. It is the chatView counterpart of the
-// host's old applyStreamMsg, ported verbatim minus the telemetry and permission
-// arms (those are filtered out by the host BEFORE Apply — telemetry → footer,
-// permission → confirm gate). Apply never touches host footer state and never
-// calls rebuild(); the host calls refreshViewport after routing, as before.
+// transcript event, mutating c.entries. Telemetry and permission events are
+// filtered by the host before Apply is called (telemetry → footer, permission
+// → confirm gate). Apply never touches host footer state and never calls
+// rebuild(); the host calls refreshViewport after routing, as before.
 //
 // Returns a tea.Cmd for symmetry with chatPane.Apply (main chat returns nil).
 func (c *chatView) Apply(msg tea.Msg) tea.Cmd {

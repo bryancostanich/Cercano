@@ -813,7 +813,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Route by event class: telemetry → footer, transcript → chatView.Apply,
 		// permission → host confirm gate. turnActivity/turnTokOut are derived
-		// here from the event type, exactly as the old applyStreamMsg machine did.
+		// from the event type here.
 		switch ev := msg.ev.(type) {
 		case chatStatusMsg:
 			// RouteSelected telemetry: engine badge for the footer.
@@ -1160,146 +1160,8 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
-	switch sm.Type {
-	case agentclient.TypeToken:
-		// Append to the open text entry, or start a fresh one if the previous
-		// segment was closed by a tool call — so post-tool prose lands BELOW the
-		// tools in scrollback rather than in the pre-tool placeholder.
-		e := m.chat.streamingTextEntry()
-		if e == nil {
-			e = &Entry{Role: RoleAssistant, Streaming: true}
-			m.chat.AppendEntry(e)
-		}
-		e.Content += sm.Token
-		// Once real tokens arrive, the pre-stream progress note is
-		// no longer relevant; clear so the renderer drops it.
-		e.Status = ""
-		m.turnActivity = "writing"
-		m.turnTokOut++ // one delta ≈ one token (approximate live count)
-	case agentclient.TypeRouteSelected:
-		// Engine chosen for this turn — fills the footer's local/cloud badge.
-		m.turnModel = sm.RouteModel
-		m.turnCloud = sm.RouteCloud
-	case agentclient.TypeProgress:
-		m.turnActivity = "routing"
-		// Collapse progress messages onto the open (empty) assistant entry's
-		// Status field — one line that mutates as the agent advances through
-		// phases. Falls back to a normal system entry if there's no open
-		// streaming assistant to attach to.
-		note := normalizeProgress(sm.Note)
-		if e := m.chat.streamingTextEntry(); e != nil && e.Content == "" {
-			e.Status = note
-		} else {
-			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: note})
-		}
-	case agentclient.TypeDone:
-		e := m.chat.streamingTextEntry()
-		if e == nil && sm.Final != "" {
-			// Tools ran but no post-tool tokens streamed; surface the final
-			// answer as a fresh entry below them.
-			e = &Entry{Role: RoleAssistant}
-			m.chat.AppendEntry(e)
-		}
-		if e != nil {
-			// If we never received any tokens, fall back to the full final response.
-			if e.Content == "" {
-				e.Content = sm.Final
-			}
-			e.Streaming = false
-		}
-		// Surface non-fatal notices (e.g. "cloud not configured — answered
-		// locally") as a system entry above the assistant content.
-		if sm.Notice != "" {
-			m.chat.insertNoticeAboveLast(&Entry{Role: RoleSystem, Content: "⚠ " + sm.Notice})
-		}
-		// Fold telemetry into host footer fields via the extracted helper so
-		// the same path survives when the transcript machine moves to chatView.
-		m.applyTurnTelemetry(chatDoneMsg{
-			notice: sm.Notice,
-			tokIn:  sm.TokIn,
-			tokOut: sm.TokOut,
-			model:  sm.Model,
-		})
-	case agentclient.TypeError:
-		if e := m.chat.streamingTextEntry(); e != nil {
-			e.Streaming = false
-		}
-		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "stream error: " + sm.Err.Error()})
-	case agentclient.TypeToolUseStart:
-		// Model just emitted a tool_use block. Close the open assistant text
-		// entry first: drop it if it's only the empty "thinking" placeholder,
-		// otherwise stop its streaming indicator. Then drop a folded in-progress
-		// line so the user sees what's being invoked. Args summary fills in on
-		// TypeToolUseStop; result fills in on TypeToolExecComplete.
-		m.turnActivity = "running " + sm.ToolName
-		if e := m.chat.streamingTextEntry(); e != nil {
-			if e.Content == "" {
-				m.chat.dropLastEntry()
-			} else {
-				e.Streaming = false
-			}
-		}
-		m.chat.AppendEntry(&Entry{
-			Role: RoleSystem,
-			Tool: &ToolEntry{
-				ToolUseID: sm.ToolUseID,
-				ToolName:  sm.ToolName,
-				Status:    ToolStatusInProgress,
-				StartedAt: time.Now(), // fallback timing anchor until exec-start tightens it
-				Folded:    true,
-			},
-		})
-	case agentclient.TypeToolUseStop:
-		// Args block finished streaming — humanize the raw call JSON into a
-		// readable one-liner. Silent skip if the start event was missed.
-		if t := m.chat.findToolEntry(sm.ToolUseID); t != nil {
-			t.ArgsSummary = humanizeArgs(t.ToolName, sm.ArgsSummary, m.chat.root, m.chat.home)
-		}
-	case agentclient.TypeToolExecStart:
-		// Server is now running the tool. Re-anchor the timing clock here so the
-		// measured duration covers execution, not arg streaming. We already show
-		// InProgress from TypeToolUseStart.
-		if t := m.chat.findToolEntry(sm.ToolUseID); t != nil {
-			t.Status = ToolStatusInProgress
-			t.StartedAt = time.Now()
-		}
-	case agentclient.TypeToolExecComplete:
-		// Tool finished — flip status to ✓ or ⚠ and build the result blurb
-		// (detail · CLI-measured timing).
-		if t := m.chat.findToolEntry(sm.ToolUseID); t != nil {
-			if sm.IsError {
-				t.Status = ToolStatusError
-			} else {
-				t.Status = ToolStatusComplete
-			}
-			t.ResultSummary = humanizeResult(sm.Detail, sm.Summary, sm.IsError, time.Since(t.StartedAt))
-		}
-	case agentclient.TypePermissionRequired:
-		// Server-side tool loop hit a W/X tool and is blocked on a decision.
-		// Raise the confirm prompt; the y/n/esc resolver will RPC back via
-		// AllowToolCall/DenyToolCall to unblock the loop.
-		tc := &pendingToolCall{
-			ToolUseID:  sm.ToolUseID,
-			Name:       sm.ToolName,
-			Args:       sm.ArgsJSON,
-			Permission: sm.Tier,
-		}
-		m.pendingConfirm = toolConfirm(tc)
-		prompt := m.renderConfirmPrompt(tc)
-		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: prompt})
-	}
-	m.refreshViewport()
-	// The live path no longer drives applyStreamMsg (the driver + chatView.Apply
-	// own streaming as of step-3 Task 3). This method survives only for the
-	// footer-telemetry regression test until Task 4 deletes it; it no longer
-	// re-arms a drain loop.
-	return m, nil
-}
-
 // applyTurnTelemetry folds a done event's telemetry into the host footer
-// fields. Pulled out of applyStreamMsg so the host keeps owning the footer
-// after the transcript machine moves into chatView (step 3).
+// fields. The host owns the footer; chatView.Apply owns the transcript.
 func (m *Model) applyTurnTelemetry(d chatDoneMsg) {
 	if d.notice != "" {
 		m.cloudState = "NONE"

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"cercano/source/server/pkg/agentclient"
 	"cercano/source/clients/cli/internal/theme"
+	"cercano/source/server/pkg/agentclient"
 )
 
 // frozenTurnStart is a fixed wall-clock so the inline turn-status placeholder
@@ -61,33 +61,11 @@ func driveNewPath(t *testing.T) string {
 	return m.renderViewportWithScrollbar()
 }
 
-// driveOldPath runs the same script through the legacy host machine, for the
-// in-run dynamic parity assertion (pre-move == post-move).
-func driveOldPath(t *testing.T) string {
-	t.Helper()
-	m := newScriptedModel()
-	for _, sm := range scriptedTurn() {
-		m.turnStart = frozenTurnStart
-		next, _ := m.applyStreamMsg(sm)
-		m = next.(Model)
-	}
-	m.turnStart = frozenTurnStart
-	m.refreshViewport()
-	return m.renderViewportWithScrollbar()
-}
-
-// TestScriptedTurnTranscript is the dynamic parity proof: the same StreamMsg
-// script rendered through the post-move driver+Apply path must be byte-identical
-// to (a) the legacy applyStreamMsg path, and (b) the frozen committed golden.
+// TestScriptedTurnTranscript asserts the post-move driver+Apply path renders
+// byte-identically to the frozen committed golden.
 func TestScriptedTurnTranscript(t *testing.T) {
 	got := driveNewPath(t)
 
-	// (a) dynamic parity: new path == old path, same run, same frozen inputs.
-	if old := driveOldPath(t); got != old {
-		t.Fatalf("post-move transcript diverges from pre-move path:\n--- new ---\n%s\n--- old ---\n%s", got, old)
-	}
-
-	// (b) frozen golden parity.
 	path := filepath.Join("testdata", "chatview", "scripted_turn.golden")
 	if os.Getenv("UPDATE_SCRIPTED_GOLDEN") == "1" {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

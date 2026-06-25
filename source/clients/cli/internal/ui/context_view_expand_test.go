@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"cercano/source/clients/cli/internal/render"
 	"cercano/source/clients/cli/internal/theme"
 	"cercano/source/server/pkg/agentclient"
 )
@@ -115,6 +116,47 @@ func TestContextView_ShiftTabFocusesLastExpandable(t *testing.T) {
 	cv.focusNextExpandable(1)
 	if cv.focusedTurn != 2 {
 		t.Fatalf("tab from 0 should skip non-expandable and land on 2, got %d", cv.focusedTurn)
+	}
+}
+
+func TestContextView_ExpandRendersMarkdown(t *testing.T) {
+	cv := expandTestView()
+	cv.md = render.NewMarkdown(theme.CrackerMarkdownStyle())
+	cv.snapshot.Turns = []agentclient.ContextTurn{
+		{ID: "a", Role: "assistant", Kind: "text",
+			Body: "# Heading\n\nSome **bold** text and a list:\n\n- one\n- two\n- three"},
+	}
+	cv.toggleExpand("a")
+	out := stripAnsiCSI(strings.Join(cv.turnsLinesOnly(), "\n"))
+
+	// Markdown markup is rendered away, not shown literally.
+	if strings.Contains(out, "**bold**") {
+		t.Errorf("expanded assistant body should not contain literal ** markup:\n%s", out)
+	}
+	if strings.Contains(out, "# Heading") {
+		t.Errorf("heading marker '#' should be rendered away:\n%s", out)
+	}
+	// The content survives the formatting.
+	for _, want := range []string{"Heading", "bold", "one", "two", "three"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expanded markdown should contain %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestContextView_ToolTurnStaysPlainWhenExpanded(t *testing.T) {
+	cv := expandTestView()
+	cv.md = render.NewMarkdown(theme.CrackerMarkdownStyle())
+	cv.snapshot.Turns = []agentclient.ContextTurn{
+		{ID: "t", Role: "assistant", Kind: "tool_use",
+			Body: "read_file\nwith **stars** kept\nline3\nline4\nline5"},
+	}
+	cv.toggleExpand("t")
+	out := stripAnsiCSI(strings.Join(cv.turnsLinesOnly(), "\n"))
+
+	// Tool turns are not markdown — the raw markup must survive verbatim.
+	if !strings.Contains(out, "**stars**") {
+		t.Errorf("tool turn body should stay plain (markup preserved):\n%s", out)
 	}
 }
 

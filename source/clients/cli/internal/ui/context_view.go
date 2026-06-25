@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"cercano/source/clients/cli/internal/render"
 	"cercano/source/clients/cli/internal/theme"
 	"cercano/source/server/pkg/agentclient"
 )
@@ -33,6 +34,7 @@ type contextView struct {
 	expanded        map[string]bool
 	focusedTurn     int
 
+	md     *render.Markdown
 	driver *contextManagerDriver
 	pane   *chatPane
 }
@@ -67,7 +69,7 @@ func contextRefreshTick() tea.Cmd {
 }
 
 func newContextView(ag *agentclient.Client, p theme.Palette, s theme.Styles, convID string, w, h int) (*contextView, tea.Cmd) {
-	cv := &contextView{palette: p, styles: s, agent: ag, convID: convID, width: w, height: h, expanded: map[string]bool{}, focusedTurn: -1}
+	cv := &contextView{palette: p, styles: s, agent: ag, convID: convID, width: w, height: h, expanded: map[string]bool{}, focusedTurn: -1, md: render.NewMarkdown(theme.CrackerMarkdownStyle())}
 	cv.snapshot = loadContextSnapshot(ag, convID)
 	cv.driver = &contextManagerDriver{
 		agent:  ag,
@@ -256,6 +258,27 @@ func (c *contextView) turnExpandable(t agentclient.ContextTurn) bool {
 	return len(c.turnBodyLines(t)) > c.collapsedCount(t)
 }
 
+// bodyIsMarkdown reports whether a turn's body should render as markdown when
+// expanded. Tool calls/results carry JSON or raw output, not prose, so they
+// stay plain.
+func (c *contextView) bodyIsMarkdown(t agentclient.ContextTurn) bool {
+	switch t.Kind {
+	case "tool_use", "tool_result":
+		return false
+	}
+	return true
+}
+
+// markdownBodyLines renders a turn's body through the markdown engine, wrapped
+// to the body column width. Used only for expanded text turns.
+func (c *contextView) markdownBodyLines(t agentclient.ContextTurn) []string {
+	w := dashboardPanelWidth(c.width) - 8 // arrow + token gutter + 4-space indent
+	if w < 8 {
+		w = 8
+	}
+	return strings.Split(c.md.Render(strings.TrimSpace(t.Body), w), "\n")
+}
+
 // appendTurn pushes the rendered lines + meta for one turn.
 func (c *contextView) appendTurn(lines *[]string, meta *[]turnLineMeta, i int, t agentclient.ContextTurn) {
 	add := func(s string, m turnLineMeta) { *lines = append(*lines, s); *meta = append(*meta, m) }
@@ -263,9 +286,18 @@ func (c *contextView) appendTurn(lines *[]string, meta *[]turnLineMeta, i int, t
 	bodyLines := c.turnBodyLines(t)
 	expandable := t.Truncated || len(bodyLines) > c.collapsedCount(t)
 	open := c.expanded[t.ID]
+	deleted := c.markedForDelete(t.ID)
+
+	// Expanded text turns render their full body through the markdown engine and
+	// keep the metadata (badge + tokens) on a header line of its own. All other
+	// states keep the compact preview with the first body line on the header.
+	mdExpanded := open && !deleted && c.bodyIsMarkdown(t) && c.md != nil && strings.TrimSpace(t.Body) != ""
 
 	shown := bodyLines
-	if !open {
+	switch {
+	case mdExpanded:
+		shown = c.markdownBodyLines(t)
+	case !open:
 		limit := c.collapsedCount(t)
 		if limit > len(bodyLines) {
 			limit = len(bodyLines)
@@ -283,18 +315,13 @@ func (c *contextView) appendTurn(lines *[]string, meta *[]turnLineMeta, i int, t
 		}
 	}
 
-	// Build the header line
-	if c.markedForDelete(t.ID) {
-		badge := c.styles.Error.Render("✗ [" + t.Role + "]")
-		toks := c.styles.Dim.Render(fmt.Sprintf("≈%s", formatTokens(t.EstTokens)))
-		firstLine := ""
-		if len(shown) > 0 {
-			firstLine = shown[0]
-		}
-		header := c.styles.Dim.Render(fmt.Sprintf("%s%s %s  %s", arrow, badge, toks, firstLine))
-		add(header, turnLineMeta{turnID: t.ID, arrowCell: expandable})
+	// Badge + token count.
+	var badge, toks string
+	if deleted {
+		badge = c.styles.Error.Render("✗ [" + t.Role + "]")
+		toks = c.styles.Dim.Render(fmt.Sprintf("≈%s", formatTokens(t.EstTokens)))
 	} else {
-		badge := c.styles.Info.Render("[" + t.Role + "]")
+		badge = c.styles.Info.Render("[" + t.Role + "]")
 		switch t.Kind {
 		case "tool_use", "tool_result":
 			badge = c.styles.Muted.Render("[" + t.Kind + "]")
@@ -302,23 +329,31 @@ func (c *contextView) appendTurn(lines *[]string, meta *[]turnLineMeta, i int, t
 		if i == c.focusedTurn {
 			badge = c.styles.Bright.Render("[" + t.Role + "]")
 		}
-		toks := c.styles.Muted.Render(fmt.Sprintf("≈%s", formatTokens(t.EstTokens)))
-		firstLine := ""
-		if len(shown) > 0 {
-			firstLine = shown[0]
-		}
-		header := fmt.Sprintf("%s%s %s  %s", arrow, badge, toks, firstLine)
-		add(header, turnLineMeta{turnID: t.ID, arrowCell: expandable})
+		toks = c.styles.Muted.Render(fmt.Sprintf("≈%s", formatTokens(t.EstTokens)))
 	}
 
-	// Remaining shown lines with hang-indent
-	if len(shown) > 1 {
-		for _, l := range shown[1:] {
-			add("    "+l, turnLineMeta{turnID: t.ID})
-		}
+	// The header carries the first preview line only when NOT markdown-expanded.
+	firstLine := ""
+	bodyStart := 0
+	if !mdExpanded && len(shown) > 0 {
+		firstLine = shown[0]
+		bodyStart = 1
+	}
+	header := fmt.Sprintf("%s%s %s", arrow, badge, toks)
+	if firstLine != "" {
+		header += "  " + firstLine
+	}
+	if deleted {
+		header = c.styles.Dim.Render(header)
+	}
+	add(header, turnLineMeta{turnID: t.ID, arrowCell: expandable})
+
+	// Body lines below the header, hang-indented.
+	for _, l := range shown[bodyStart:] {
+		add("    "+l, turnLineMeta{turnID: t.ID})
 	}
 
-	// Truncated indicator when expanded
+	// Truncated indicator when expanded.
 	if open && t.Truncated {
 		add(c.styles.Dim.Render("    …(truncated)"), turnLineMeta{turnID: t.ID})
 	}

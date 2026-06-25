@@ -15,18 +15,18 @@ func TestRecapAppearanceReservesViewportRow(t *testing.T) {
 	m = m.SeedAssistantMarkdown("some prior reply\n")
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 
-	h0 := m.viewport.Height()
+	h0 := m.chat.Height()
 
 	next, _ := m.Update(recapLoadedMsg{recap: "wired the engine badge"})
 	m = next.(Model)
-	if got := m.viewport.Height(); got != h0-2 {
+	if got := m.chat.Height(); got != h0-2 {
 		t.Errorf("recap appearing should shrink viewport by 2 (blank spacer + recap line): %d -> %d, want %d", h0, got, h0-2)
 	}
 
 	// Clearing it frees the row again.
 	next, _ = m.Update(recapLoadedMsg{recap: ""})
 	m = next.(Model)
-	if got := m.viewport.Height(); got != h0 {
+	if got := m.chat.Height(); got != h0 {
 		t.Errorf("recap clearing should restore viewport height: want %d, got %d", h0, got)
 	}
 }

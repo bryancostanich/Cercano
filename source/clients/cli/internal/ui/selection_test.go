@@ -4,26 +4,37 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"cercano/source/clients/cli/internal/theme"
 )
 
+// newSelectionModel builds a minimal Model for selection tests. It sets up a
+// chatView sized to vpWidth×vpHeight and pre-seeds plain lines for copy tests.
+func newSelectionModel(vpWidth, vpHeight int, content string, plainLns []string) Model {
+	p := theme.Cracker()
+	cv := newChatView(theme.NewStyles(p), p, vpWidth, vpHeight)
+	if content != "" {
+		cv.vp.SetContent(content)
+	}
+	if plainLns != nil {
+		cv.plainLines = plainLns
+	}
+	return Model{chat: cv}
+}
+
 func TestSelectedTextSingleLine(t *testing.T) {
-	m := Model{
-		viewportPlainLines: []string{"hello world"},
-		selection: textSelection{
-			Active: true,
-			Anchor: selectionPoint{
-				Line: 0,
-				Col:  6,
-			},
-			Cursor: selectionPoint{
-				Line: 0,
-				Col:  11,
-			},
+	m := newSelectionModel(0, 0, "", []string{"hello world"})
+	m.selection = textSelection{
+		Active: true,
+		Anchor: selectionPoint{
+			Line: 0,
+			Col:  6,
+		},
+		Cursor: selectionPoint{
+			Line: 0,
+			Col:  11,
 		},
 	}
 
@@ -33,18 +44,16 @@ func TestSelectedTextSingleLine(t *testing.T) {
 }
 
 func TestSelectedTextMultilineReverseDrag(t *testing.T) {
-	m := Model{
-		viewportPlainLines: []string{"first line", "second", "third"},
-		selection: textSelection{
-			Active: true,
-			Anchor: selectionPoint{
-				Line: 2,
-				Col:  2,
-			},
-			Cursor: selectionPoint{
-				Line: 0,
-				Col:  6,
-			},
+	m := newSelectionModel(0, 0, "", []string{"first line", "second", "third"})
+	m.selection = textSelection{
+		Active: true,
+		Anchor: selectionPoint{
+			Line: 2,
+			Col:  2,
+		},
+		Cursor: selectionPoint{
+			Line: 0,
+			Col:  6,
 		},
 	}
 
@@ -58,14 +67,15 @@ func TestSelectionPointFromMouseUsesViewportOffset(t *testing.T) {
 	for i := range lines {
 		lines[i] = "line"
 	}
-	vp := viewport.New(viewport.WithWidth(20), viewport.WithHeight(4))
-	vp.SetContent(strings.Join(lines, "\n"))
-	vp.SetYOffset(10)
+	p := theme.Cracker()
+	cv := newChatView(theme.NewStyles(p), p, 20, 4)
+	cv.vp.SetContent(strings.Join(lines, "\n"))
+	cv.vp.SetYOffset(10)
+	cv.plainLines = lines
 
 	m := Model{
-		scrollbarTop:       2,
-		viewport:           vp,
-		viewportPlainLines: lines,
+		scrollbarTop: 2,
+		chat:         cv,
 	}
 
 	got := m.selectionPointFromMouse(tea.Mouse{X: 3, Y: 4}, false)
@@ -76,16 +86,17 @@ func TestSelectionPointFromMouseUsesViewportOffset(t *testing.T) {
 }
 
 func TestMouseReleaseCopiesDragSelection(t *testing.T) {
-	vp := viewport.New(viewport.WithWidth(20), viewport.WithHeight(4))
-	vp.SetContent("hello world")
+	p := theme.Cracker()
+	cv := newChatView(theme.NewStyles(p), p, 20, 4)
+	cv.vp.SetContent("hello world")
+	cv.plainLines = []string{"hello world"}
 
 	m := Model{
-		scrollbarTop:       0,
-		viewport:           vp,
-		viewportPlainLines: []string{"hello world"},
-		selection:          textSelection{Active: true, Dragging: true, Anchor: selectionPoint{Line: 0, Col: 0}, Cursor: selectionPoint{Line: 0, Col: 1}},
-		selectionNotice:    "",
-		scrollbarDragging:  true,
+		scrollbarTop:      0,
+		chat:              cv,
+		selection:         textSelection{Active: true, Dragging: true, Anchor: selectionPoint{Line: 0, Col: 0}, Cursor: selectionPoint{Line: 0, Col: 1}},
+		selectionNotice:   "",
+		scrollbarDragging: true,
 	}
 
 	next, cmd := m.Update(tea.MouseReleaseMsg{X: 5, Y: 0, Button: tea.MouseLeft})
@@ -151,12 +162,10 @@ func TestPasteMsgClearsSelectionAndToolFocus(t *testing.T) {
 
 func TestRenderSelectionOnLinePreservesPlainText(t *testing.T) {
 	p := theme.Cracker()
+	cv := newChatView(theme.NewStyles(p), p, 10, 3)
 	m := Model{
 		palette: p,
-		viewport: viewport.New(
-			viewport.WithWidth(10),
-			viewport.WithHeight(3),
-		),
+		chat:    cv,
 		selection: textSelection{
 			Active: true,
 			Anchor: selectionPoint{Line: 0, Col: 2},
@@ -212,3 +221,4 @@ func TestIsSelectionCopyKeyRecognizesCommandC(t *testing.T) {
 		})
 	}
 }
+

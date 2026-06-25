@@ -56,7 +56,7 @@ func TestChatView_TurnStatusPlaceholder(t *testing.T) {
 		cloud:    true,
 	})
 	c.SetEntries([]*Entry{{Role: RoleAssistant, Streaming: true, Content: ""}})
-	out := c.View(func(l string, _ int) string { return l })
+	out := c.View()
 	// Strip ANSI so we match visible text.
 	visible := plain(out)
 	if !strings.Contains(visible, "routing") {
@@ -76,7 +76,7 @@ func TestChatView_TurnStatusPlaceholder(t *testing.T) {
 func TestChatView_ViewIdentityOverlayMatchesNoSelection(t *testing.T) {
 	c := newTestChatView(50, 6)
 	c.SetEntries([]*Entry{{Role: RoleUser, Content: "hello world"}})
-	out := c.View(func(l string, _ int) string { return l })
+	out := c.View()
 	if strings.TrimSpace(out) == "" {
 		t.Fatalf("View produced empty output for a user entry")
 	}

@@ -91,7 +91,6 @@ type Model struct {
 	splash      banner.AnimModel
 	entries     []*Entry
 	chat        chatView
-	selection   textSelection
 	selectionNotice    string
 	input              promptInput
 
@@ -501,7 +500,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.pendingConfirm != nil {
 			return m, nil
 		}
-		if m.selection.Dragging {
+		if m.chat.selection.Dragging {
 			return m, nil
 		}
 		mouse := msg.Mouse()
@@ -563,7 +562,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if onBar {
 			// Grabbing the scrollbar is a scroll gesture, not a selection;
 			// cancel any in-progress selection drag so it can't hijack motion.
-			m.selection.Dragging = false
+			m.chat.selection.Dragging = false
 			m.scrollbarDragging = true
 			off := scrollOffsetFromClick(mouse.Y, m.scrollbarTop, height, m.chat.TotalLineCount())
 			m.chat.SetYOffset(off)
@@ -588,7 +587,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.pendingConfirm != nil {
 			m.scrollbarDragging = false
-			m.selection.Dragging = false
+			m.chat.selection.Dragging = false
 			m.input.CancelDrag()
 			return m, nil
 		}
@@ -606,7 +605,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.SetYOffset(off)
 			return m, nil
 		}
-		if m.selection.Dragging {
+		if m.chat.selection.Dragging {
 			m.dragMouse = mouse
 			m.updateSelection(mouse, true)
 			// Held past an edge → start the auto-scroll tick so it keeps
@@ -630,12 +629,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.MouseUp(mouse.X, mouse.Y-m.promptTop())
 			return m, nil
 		}
-		if m.selection.Dragging {
+		if m.chat.selection.Dragging {
 			m.updateSelection(mouse, true)
-			m.selection.Dragging = false
-			if m.selection.empty() {
+			m.chat.selection.Dragging = false
+			if m.chat.selection.empty() {
 				m.clearSelection()
-			} else if text := m.selectedText(); text != "" {
+			} else if text := m.chat.selectedText(); text != "" {
 				m.selectionNotice = "copied selection"
 				m.scrollbarDragging = false
 				return m, selectionClipboardCmd(text)
@@ -708,12 +707,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancelCurrentStream()
 			return m, nil
 		}
-		if m.selection.Active {
-			next, cmd, handled := m.handleSelectionKey(msg)
-			if handled {
-				return next, cmd
+		if m.chat.SelectionActive() {
+			cmd, handled, copied := m.chat.HandleSelectionKey(msg)
+			if copied {
+				m.selectionNotice = "copied selection"
 			}
-			m = next
+			if handled {
+				return m, cmd
+			}
 		}
 		// Tool-entry navigation mode: focus is on a scrollback tool entry
 		// rather than the input box. Up/down cycle (clamped at edges),
@@ -1006,7 +1007,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dragScrollTickMsg:
 		// Continuous edge auto-scroll: while the drag is still held past an
 		// edge, scroll one line and extend the selection, then reschedule.
-		if !m.selection.Dragging || !m.atScrollEdge() {
+		if !m.chat.selection.Dragging || !m.atScrollEdge() {
 			m.dragScrolling = false
 			return m, nil
 		}
@@ -1588,7 +1589,7 @@ func (m *Model) refreshViewport() {
 
 func (m Model) preparePromptInput() Model {
 	needsRefresh := m.focusedToolIdx >= 0
-	if m.selection.Active {
+	if m.chat.SelectionActive() {
 		m.clearSelection()
 	}
 	m.selectionNotice = ""
@@ -2363,7 +2364,7 @@ func (m Model) renderRecap() string {
 // renderViewportWithScrollbar renders the chat viewport with a one-column
 // vertical scrollbar on its right edge. Delegates to chatView.View.
 func (m Model) renderViewportWithScrollbar() string {
-	return m.chat.View(m.renderSelectionOnLine)
+	return m.chat.View()
 }
 
 func (m Model) renderHeader() string {
@@ -2432,7 +2433,7 @@ func (m Model) renderStatus() string {
 	// The footer stays put during a turn — the live turn status renders inline on
 	// the assistant placeholder, not here.
 	help := m.styles.Muted.Render("/help for cmds")
-	if m.selection.hasRange() {
+	if m.chat.SelectionHasRange() {
 		if m.selectionNotice != "" {
 			help = m.styles.Success.Render(m.selectionNotice) +
 				m.styles.Muted.Render("  ") +

@@ -26,7 +26,7 @@ func newSelectionModel(vpWidth, vpHeight int, content string, plainLns []string)
 
 func TestSelectedTextSingleLine(t *testing.T) {
 	m := newSelectionModel(0, 0, "", []string{"hello world"})
-	m.selection = textSelection{
+	m.chat.selection = textSelection{
 		Active: true,
 		Anchor: selectionPoint{
 			Line: 0,
@@ -38,14 +38,14 @@ func TestSelectedTextSingleLine(t *testing.T) {
 		},
 	}
 
-	if got, want := m.selectedText(), "world"; got != want {
+	if got, want := m.chat.selectedText(), "world"; got != want {
 		t.Fatalf("selectedText() = %q, want %q", got, want)
 	}
 }
 
 func TestSelectedTextMultilineReverseDrag(t *testing.T) {
 	m := newSelectionModel(0, 0, "", []string{"first line", "second", "third"})
-	m.selection = textSelection{
+	m.chat.selection = textSelection{
 		Active: true,
 		Anchor: selectionPoint{
 			Line: 2,
@@ -57,7 +57,7 @@ func TestSelectedTextMultilineReverseDrag(t *testing.T) {
 		},
 	}
 
-	if got, want := m.selectedText(), "line\nsecond\nth"; got != want {
+	if got, want := m.chat.selectedText(), "line\nsecond\nth"; got != want {
 		t.Fatalf("selectedText() = %q, want %q", got, want)
 	}
 }
@@ -90,11 +90,11 @@ func TestMouseReleaseCopiesDragSelection(t *testing.T) {
 	cv := newChatView(theme.NewStyles(p), p, 20, 4)
 	cv.vp.SetContent("hello world")
 	cv.plainLines = []string{"hello world"}
+	cv.selection = textSelection{Active: true, Dragging: true, Anchor: selectionPoint{Line: 0, Col: 0}, Cursor: selectionPoint{Line: 0, Col: 1}}
 
 	m := Model{
 		scrollbarTop:      0,
 		chat:              cv,
-		selection:         textSelection{Active: true, Dragging: true, Anchor: selectionPoint{Line: 0, Col: 0}, Cursor: selectionPoint{Line: 0, Col: 1}},
 		selectionNotice:   "",
 		scrollbarDragging: true,
 	}
@@ -110,7 +110,7 @@ func TestMouseReleaseCopiesDragSelection(t *testing.T) {
 	if got.scrollbarDragging {
 		t.Fatal("scrollbarDragging should be cleared")
 	}
-	if !got.selection.hasRange() {
+	if !got.chat.SelectionHasRange() {
 		t.Fatal("selection should remain visible after auto-copy")
 	}
 }
@@ -135,7 +135,7 @@ func TestPasteMsgClearsSelectionAndToolFocus(t *testing.T) {
 	m.width = 80
 	m.height = 24
 	m.focusedToolIdx = 1
-	m.selection = textSelection{
+	m.chat.selection = textSelection{
 		Active: true,
 		Anchor: selectionPoint{Line: 0, Col: 0},
 		Cursor: selectionPoint{Line: 0, Col: 2},
@@ -149,7 +149,7 @@ func TestPasteMsgClearsSelectionAndToolFocus(t *testing.T) {
 	if got.input.Value() != "pasted" {
 		t.Fatalf("input.Value() = %q, want pasted text", got.input.Value())
 	}
-	if got.selection.Active {
+	if got.chat.SelectionActive() {
 		t.Fatal("paste should clear active viewport selection")
 	}
 	if got.selectionNotice != "" {
@@ -163,18 +163,14 @@ func TestPasteMsgClearsSelectionAndToolFocus(t *testing.T) {
 func TestRenderSelectionOnLinePreservesPlainText(t *testing.T) {
 	p := theme.Cracker()
 	cv := newChatView(theme.NewStyles(p), p, 10, 3)
-	m := Model{
-		palette: p,
-		chat:    cv,
-		selection: textSelection{
-			Active: true,
-			Anchor: selectionPoint{Line: 0, Col: 2},
-			Cursor: selectionPoint{Line: 0, Col: 5},
-		},
+	cv.selection = textSelection{
+		Active: true,
+		Anchor: selectionPoint{Line: 0, Col: 2},
+		Cursor: selectionPoint{Line: 0, Col: 5},
 	}
 
 	line := lipgloss.NewStyle().Foreground(p.Primary).Render("0123456789")
-	got := m.renderSelectionOnLine(line, 0)
+	got := cv.renderSelectionOnLine(line, 0)
 	if stripped := lipgloss.Width(got); stripped != 10 {
 		t.Fatalf("renderSelectionOnLine width = %d, want 10", stripped)
 	}

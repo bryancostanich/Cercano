@@ -79,7 +79,7 @@ func (m Model) mouseInViewportText(mouse tea.Mouse) bool {
 func (m *Model) beginSelection(mouse tea.Mouse) {
 	m.selectionNotice = ""
 	pt := m.selectionPointFromMouse(mouse, false)
-	m.selection = textSelection{
+	m.chat.selection = textSelection{
 		Active:   true,
 		Dragging: true,
 		Anchor:   pt,
@@ -88,14 +88,14 @@ func (m *Model) beginSelection(mouse tea.Mouse) {
 }
 
 func (m *Model) updateSelection(mouse tea.Mouse, allowScroll bool) {
-	if !m.selection.Active {
+	if !m.chat.selection.Active {
 		return
 	}
-	m.selection.Cursor = m.selectionPointFromMouse(mouse, allowScroll)
+	m.chat.selection.Cursor = m.selectionPointFromMouse(mouse, allowScroll)
 }
 
 func (m *Model) clearSelection() {
-	m.selection = textSelection{}
+	m.chat.ClearSelection()
 }
 
 func (m *Model) selectionPointFromMouse(mouse tea.Mouse, allowScroll bool) selectionPoint {
@@ -130,14 +130,6 @@ const selectionBg = "\x1b[48;2;45;79;97m" // #2D4F61
 
 var ansiResetRe = regexp.MustCompile("\x1b\\[0?m")
 
-func (m Model) renderSelectionOnLine(line string, contentLine int) string {
-	start, end, ok := m.selection.lineRange(contentLine, m.chat.Width())
-	if !ok {
-		return line
-	}
-	return highlightRange(line, start, end)
-}
-
 // highlightRange overlays the selection background on the visible columns
 // [start,end) of an already-styled line, preserving the per-character foreground
 // colors. The background is re-applied after every SGR reset so inner resets
@@ -162,41 +154,6 @@ func highlightRange(line string, start, end int) string {
 	return before + mid + after
 }
 
-func (m Model) handleSelectionKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
-	switch msg.String() {
-	case "esc":
-		m.clearSelection()
-		return m, nil, true
-	case "enter", "c", "y", "ctrl+c":
-		text := m.selectedText()
-		if text == "" {
-			m.clearSelection()
-			return m, nil, true
-		}
-		m.clearSelection()
-		m.selectionNotice = "copied selection"
-		return m, selectionClipboardCmd(text), true
-	}
-	if isSelectionCopyKey(msg) {
-		text := m.selectedText()
-		if text == "" {
-			m.clearSelection()
-			return m, nil, true
-		}
-		m.clearSelection()
-		m.selectionNotice = "copied selection"
-		return m, selectionClipboardCmd(text), true
-	}
-
-	// Let navigation keys keep the selection while the viewport scrolls. If the
-	// user starts typing, clear the highlight and pass the key through to the
-	// input so the app still feels like a normal prompt.
-	if msg.Text != "" {
-		m.clearSelection()
-	}
-	return m, nil, false
-}
-
 func isSelectionCopyKey(msg tea.KeyPressMsg) bool {
 	key := msg.Key()
 	if key.Code != 'c' && key.Code != 'C' && key.BaseCode != 'c' && key.BaseCode != 'C' {
@@ -219,35 +176,6 @@ func pbcopyCmd(text string) tea.Cmd {
 		_ = cmd.Run()
 		return nil
 	}
-}
-
-func (m Model) selectedText() string {
-	plainLines := m.chat.PlainLines()
-	if !m.selection.hasRange() || len(plainLines) == 0 {
-		return ""
-	}
-	start, end := m.selection.ordered()
-	start.Line = clampInt(start.Line, 0, len(plainLines)-1)
-	end.Line = clampInt(end.Line, 0, len(plainLines)-1)
-	if beforePoint(end, start) {
-		return ""
-	}
-
-	parts := make([]string, 0, end.Line-start.Line+1)
-	for line := start.Line; line <= end.Line; line++ {
-		text := plainLines[line]
-		switch {
-		case start.Line == end.Line:
-			parts = append(parts, ansi.Cut(text, start.Col, end.Col))
-		case line == start.Line:
-			parts = append(parts, ansi.Cut(text, start.Col, ansi.StringWidth(text)))
-		case line == end.Line:
-			parts = append(parts, ansi.Cut(text, 0, end.Col))
-		default:
-			parts = append(parts, text)
-		}
-	}
-	return strings.Join(parts, "\n")
 }
 
 func maxInt(a, b int) int {

@@ -7,9 +7,6 @@ import (
 	"strconv"
 	"testing"
 
-	"charm.land/bubbles/v2/viewport"
-
-	"cercano/source/clients/cli/internal/render"
 	"cercano/source/clients/cli/internal/theme"
 )
 
@@ -18,15 +15,9 @@ var updateGolden = flag.Bool("update", false, "regenerate chatview golden files"
 // newRenderModel builds a Model sized for rendering only (no agent needed for
 // refreshViewport/renderViewportWithScrollbar). Host reserves 2 cols (gap +
 // scrollbar), mirroring relayout's contentW-2.
-//
-// TASK 2 REWIRE: after the extraction the viewport + md move into chatView.
-// Change this body to `m.chat = newChatView(m.styles, m.palette, width-2, height)`
-// and delete the viewport/md lines. Do NOT pass -update — the goldens must still
-// match byte-for-byte; that match is the whole point of this file.
 func newRenderModel(width, height int) Model {
 	m := Model{styles: theme.NewStyles(theme.Cracker()), palette: theme.Cracker(), focusedToolIdx: -1}
-	m.viewport = viewport.New(viewport.WithWidth(width-2), viewport.WithHeight(height))
-	m.md = render.NewMarkdown(theme.CrackerMarkdownStyle())
+	m.chat = newChatView(m.styles, m.palette, width-2, height)
 	return m
 }
 
@@ -37,7 +28,7 @@ func renderFixture(t *testing.T, name string, entries []*Entry, width, height, y
 	m := newRenderModel(width, height)
 	m.entries = entries
 	m.refreshViewport()
-	m.viewport.SetYOffset(yOffset)
+	m.chat.SetYOffset(yOffset)
 	got := m.renderViewportWithScrollbar()
 
 	path := filepath.Join("testdata", "chatview", name+".golden")

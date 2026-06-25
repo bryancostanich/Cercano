@@ -4,14 +4,14 @@ import (
 	"strings"
 	"testing"
 
-	"cercano/source/clients/cli/internal/render"
 	"cercano/source/clients/cli/internal/theme"
 )
 
 func TestSeedAssistantMarkdown_SeedsRenderedEntry(t *testing.T) {
+	p := theme.Cracker()
 	m := Model{
-		styles: theme.NewStyles(theme.Cracker()),
-		md:     render.NewMarkdown(theme.CrackerMarkdownStyle()),
+		styles: theme.NewStyles(p),
+		chat:   newChatView(theme.NewStyles(p), p, 0, 0),
 	}
 	m = m.SeedAssistantMarkdown("# Hi\n\n**bold**\n")
 
@@ -24,7 +24,7 @@ func TestSeedAssistantMarkdown_SeedsRenderedEntry(t *testing.T) {
 	if m.splashShown {
 		t.Fatalf("splash should be hidden in mdtest mode")
 	}
-	vis := plain(m.renderAssistantMarkdown(m.entries[0], 60))
+	vis := plain(m.chat.renderAssistantMarkdown(m.entries[0], 60))
 	if !strings.Contains(vis, "Hi") || !strings.Contains(vis, "bold") {
 		t.Fatalf("rendered content missing: %q", vis)
 	}

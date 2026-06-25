@@ -4,22 +4,25 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+
+	"cercano/source/clients/cli/internal/theme"
 )
 
 // buildDragModel makes a Model with an overflowing chat viewport positioned
 // like the real layout (top row 2, width-1 content, bar at column width-1).
 func buildDragModel() Model {
 	const w, vh = 80, 10
-	vp := viewport.New(viewport.WithWidth(w-1), viewport.WithHeight(vh))
-	vp.SetContent(strings.Repeat("xxxxxxxx\n", 50)) // total 50 > height 10 → overflow
+	p := theme.Cracker()
+	cv := newChatView(theme.NewStyles(p), p, w-1, vh)
+	content := strings.Repeat("xxxxxxxx\n", 50) // total 50 > height 10 → overflow
+	cv.vp.SetContent(content)
+	cv.plainLines = plainLines(content)
 	return Model{
-		width:              w,
-		height:             vh + 6,
-		scrollbarTop:       2, // header(1) + divider(1), no splash
-		viewport:           vp,
-		viewportPlainLines: plainLines(strings.Repeat("xxxxxxxx\n", 50)),
+		width:        w,
+		height:       vh + 6,
+		scrollbarTop: 2, // header(1) + divider(1), no splash
+		chat:         cv,
 	}
 }
 
@@ -35,7 +38,7 @@ func barDrag(t *testing.T, m Model) int {
 	t.Helper()
 	m = send(t, m, tea.MouseClickMsg{X: 79, Y: 2, Button: tea.MouseLeft})
 	m = send(t, m, tea.MouseMotionMsg{X: 79, Y: 9, Button: tea.MouseLeft})
-	return m.viewport.YOffset()
+	return m.chat.YOffset()
 }
 
 // Regression (root cause from live trace): a click in the rightmost column is
@@ -45,7 +48,7 @@ func TestScrollbarGrabAtRightEdge(t *testing.T) {
 	m := buildDragModel() // width 80 → bar at column 79
 	m = send(t, m, tea.MouseClickMsg{X: 80, Y: 2, Button: tea.MouseLeft})  // X == width (off by one)
 	m = send(t, m, tea.MouseMotionMsg{X: 80, Y: 9, Button: tea.MouseLeft}) // drag down
-	if got := m.viewport.YOffset(); got == 0 {
+	if got := m.chat.YOffset(); got == 0 {
 		t.Fatalf("bar grab at right edge (X=width=%d) did not scroll (yoff=0)", 80)
 	}
 }

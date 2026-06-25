@@ -14,7 +14,6 @@ import (
 	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -83,10 +82,6 @@ type Model struct {
 	palette theme.Palette
 	styles  theme.Styles
 
-	// md renders assistant markdown prose. Holds per-width Glamour renderers
-	// and a render cache for committed blocks.
-	md *render.Markdown
-
 	agent  *agentclient.Client
 	convID string
 
@@ -95,12 +90,8 @@ type Model struct {
 	splashShown bool // hide after first user input
 	splash      banner.AnimModel
 	entries     []*Entry
-	viewport    viewport.Model
-	// viewportPlainLines mirrors the rendered viewport content with ANSI
-	// styling stripped. It lets mouse selection copy clean text while the
-	// viewport itself keeps the styled display string.
-	viewportPlainLines []string
-	selection          textSelection
+	chat        *chatView
+	selection   textSelection
 	selectionNotice    string
 	input              promptInput
 
@@ -243,8 +234,6 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	})
 	ti.Focus()
 
-	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(10))
-
 	reg := slash.New()
 	slash.RegisterBasics(reg)
 	slash.RegisterConfig(reg, ag)
@@ -277,14 +266,13 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 		home:               home,
 		palette:            p,
 		styles:             s,
-		md:                 render.NewMarkdown(theme.CrackerMarkdownStyle()),
+		chat:               newChatView(s, p, 80, 10),
 		agent:              ag,
 		convID:             initialConvID,
 		convRef:            convRef,
 		registry:           reg,
 		splashShown:        !openHistoryOnStart,
 		splash:             splash,
-		viewport:           vp,
 		input:              ti,
 		lastModel:          "qwen3-coder",
 		modelMaxTokens:     128_000, // placeholder until the agent serves real ctx limits
@@ -458,8 +446,11 @@ func dragScrollTick() tea.Cmd {
 // atScrollEdge reports whether the last drag pointer position sits past the top
 // or bottom edge of the viewport — the condition for edge auto-scroll.
 func (m Model) atScrollEdge() bool {
+	if m.chat == nil {
+		return false
+	}
 	row := m.dragMouse.Y - m.scrollbarTop
-	return row < 0 || row >= m.viewport.Height()
+	return row < 0 || row >= m.chat.Height()
 }
 
 func waitForStream(ch <-chan agentclient.StreamMsg) tea.Cmd {
@@ -527,7 +518,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		var cmd tea.Cmd
-		m.viewport, cmd = m.viewport.Update(msg)
+		if m.chat != nil {
+			m.chat.vp, cmd = m.chat.vp.Update(msg)
+		}
 		return m, cmd
 
 	case tea.MouseClickMsg:
@@ -565,7 +558,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.MouseDown(mouse.X, mouse.Y-m.promptTop())
 			return m, nil
 		}
-		height := m.viewport.Height()
+		height := 0
+		if m.chat != nil {
+			height = m.chat.Height()
+		}
 		// The bar occupies the last column (width-1). Accept the rightmost column
 		// and anything past it: terminals report a click in the final column as
 		// X=width-1 or, in some cases, X=width (one past) — an exact == match made
@@ -578,8 +574,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// cancel any in-progress selection drag so it can't hijack motion.
 			m.selection.Dragging = false
 			m.scrollbarDragging = true
-			off := scrollOffsetFromClick(mouse.Y, m.scrollbarTop, height, m.viewport.TotalLineCount())
-			m.viewport.SetYOffset(off)
+			if m.chat != nil {
+				off := scrollOffsetFromClick(mouse.Y, m.scrollbarTop, height, m.chat.TotalLineCount())
+				m.chat.SetYOffset(off)
+			}
 			return m, nil
 		}
 		if m.mouseInViewportText(mouse) {
@@ -614,9 +612,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// selection — otherwise a left-over selection.Dragging would swallow the
 		// motion and the bar wouldn't scroll.
 		if m.scrollbarDragging {
-			height := m.viewport.Height()
-			off := scrollOffsetFromClick(mouse.Y, m.scrollbarTop, height, m.viewport.TotalLineCount())
-			m.viewport.SetYOffset(off)
+			if m.chat != nil {
+				height := m.chat.Height()
+				off := scrollOffsetFromClick(mouse.Y, m.scrollbarTop, height, m.chat.TotalLineCount())
+				m.chat.SetYOffset(off)
+			}
 			return m, nil
 		}
 		if m.selection.Dragging {
@@ -811,7 +811,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Route navigation keys to the scrollback viewport. Keeps the
 			// textinput's normal arrow / line-edit semantics intact.
 			var cmd tea.Cmd
-			m.viewport, cmd = m.viewport.Update(msg)
+			if m.chat != nil {
+				m.chat.vp, cmd = m.chat.vp.Update(msg)
+			}
 			return m, cmd
 		}
 		unmodifiedArrow := msg.Key().Mod == 0
@@ -1449,6 +1451,9 @@ func (m Model) streamingTextEntry() *Entry {
 //	─────   (1)
 //	status  (1)
 func (m *Model) relayout() {
+	if m.chat == nil {
+		return
+	}
 	contentW := m.width
 	if contentW < 20 {
 		contentW = 20
@@ -1461,7 +1466,7 @@ func (m *Model) relayout() {
 	// Viewport's first screen row = header (1) + divider (1) + splash height.
 	m.scrollbarTop = 2 + splashH
 	suggestH := 0
-	if m.viewport.Width() > 0 && !m.contentPageActive() {
+	if m.chat.Width() > 0 && !m.contentPageActive() {
 		// Width may not yet match contentW on the first paint; the
 		// suggestion uses m.width which we've just updated above.
 		if hint := m.renderSlashSuggestions(); hint != "" {
@@ -1484,8 +1489,7 @@ func (m *Model) relayout() {
 	if bodyH < 3 {
 		bodyH = 3
 	}
-	m.viewport.SetWidth(contentW - 2) // reserve two right columns: a gap + the scrollbar
-	m.viewport.SetHeight(bodyH)
+	m.chat.SetSize(contentW-2, bodyH) // reserve two right columns: a gap + the scrollbar
 	m.refreshViewport()
 }
 
@@ -1555,7 +1559,9 @@ func (m Model) handleCtrlCKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 func (m Model) promptTop() int {
 	top := m.contentTop()
-	top += m.viewport.Height()
+	if m.chat != nil {
+		top += m.chat.Height()
+	}
 	if m.recap != "" {
 		top += 2 // blank spacer line + the recap line
 	}
@@ -1587,30 +1593,21 @@ func (m Model) splashEffective() bool {
 }
 
 // refreshViewport rebuilds the viewport content from raw entries at the
-// current width. Auto-scrolls to bottom ONLY if the user was already at the
-// bottom — preserves scroll position when they've paged up to read history.
+// current width. Delegates to chatView.SetEntries; syncs turn telemetry and
+// focusedToolIdx first so the render has current state.
 func (m *Model) refreshViewport() {
-	wasAtBottom := m.viewport.AtBottom()
-	var b strings.Builder
-	for i, e := range m.entries {
-		if i > 0 {
-			// A blank line separates the user prompt, tool calls, and assistant
-			// output so they don't squish together — but consecutive tool-call
-			// entries stay tight as a group.
-			if m.entries[i-1].Tool != nil && e.Tool != nil {
-				b.WriteString("\n")
-			} else {
-				b.WriteString("\n\n")
-			}
-		}
-		b.WriteString(m.renderEntry(e, i))
+	if m.chat == nil {
+		return
 	}
-	content := b.String()
-	m.viewportPlainLines = plainLines(content)
-	m.viewport.SetContent(content)
-	if wasAtBottom {
-		m.viewport.GotoBottom()
-	}
+	m.chat.SetFocusedTool(m.focusedToolIdx)
+	m.chat.SetTurnStatus(turnStatus{
+		activity: m.turnActivity,
+		start:    m.turnStart,
+		tokOut:   m.turnTokOut,
+		model:    m.turnModel,
+		cloud:    m.turnCloud,
+	})
+	m.chat.SetEntries(m.entries)
 }
 
 func (m Model) preparePromptInput() Model {
@@ -1628,105 +1625,9 @@ func (m Model) preparePromptInput() Model {
 
 const entryIndent = 2
 
-func (m *Model) renderEntry(e *Entry, idx int) string {
-	wrapW := m.viewport.Width()
-	if wrapW < 10 {
-		wrapW = 10
-	}
-	textW := wrapW - entryIndent
-	if textW < 8 {
-		textW = 8
-	}
-	pad := strings.Repeat(" ", entryIndent)
-
-	// Tool-call entries get their own renderer — folded one-liner with arrow
-	// marker + status glyph. Indented to match the prose left-margin so the
-	// scrollback's vertical rhythm stays consistent.
-	if e.Tool != nil {
-		return indentBlock(pad, renderToolEntry(*e.Tool, textW, idx == m.focusedToolIdx))
-	}
-
-	switch e.Role {
-	case RoleUser:
-		// User entries: lime ▶ marker on a full-width navy fill so prompts stand
-		// out when scrolling back. Each wrapped line is padded to the content
-		// width, then the navy background spans the whole line (marker + body).
-		wrapped := lipgloss.NewStyle().Width(textW).Render(e.Content)
-		lines := strings.Split(wrapped, "\n")
-		for i := range lines {
-			if i == 0 {
-				lines[i] = m.styles.BufferUserMarker.Render("▶ ") + m.styles.BufferUserLine.Render(lines[i])
-			} else {
-				lines[i] = m.styles.BufferUserLine.Render(pad + lines[i])
-			}
-		}
-		return strings.Join(lines, "\n")
-
-	case RoleAssistant:
-		// Pre-text placeholder: no prose yet — show the live turn status inline
-		// (activity · elapsed · tokens · engine) where the agent is working.
-		if e.Streaming && e.Content == "" {
-			activity := m.turnActivity
-			if activity == "" {
-				activity = "thinking"
-			}
-			line := turnStatusLine(activity, time.Since(m.turnStart), m.turnTokOut, m.turnModel, m.turnCloud)
-			content := animateSpinnerGlyph() + " " + animateLimeSweep(line)
-			return indentBlock(pad, content)
-		}
-		rendered := m.renderAssistantMarkdown(e, textW)
-		if e.Streaming {
-			rendered += m.styles.Accent.Render(" ⟳")
-		}
-		return indentBlock(pad, rendered)
-
-	case RoleSystem:
-		styled := m.styles.Muted.Render(e.Content)
-		wrapped := lipgloss.NewStyle().Width(textW).Render(styled)
-		return indentBlock(pad, wrapped)
-	}
-	return e.Content
-}
-
-// renderAssistantMarkdown splits the assistant buffer into completed blocks plus
-// a live tail, rendering prose via Glamour and tables via the responsive Table
-// renderer. Committed blocks are cached; the tail renders live (with any open
-// code fence synthetically closed) so streaming code highlights as it grows.
-func (m *Model) renderAssistantMarkdown(e *Entry, textW int) string {
-	blocks, tail := render.SplitBlocks(e.Content)
-	var parts []string
-	for _, b := range blocks {
-		s := m.renderMdBlock(b, textW)
-		// A blank line before a heading gives it breathing room — but not when
-		// the heading is the very first thing in the reply.
-		if len(parts) > 0 && isHeadingBlock(b) {
-			s = "\n" + s
-		}
-		parts = append(parts, s)
-	}
-	if strings.TrimSpace(tail) != "" {
-		parts = append(parts, m.md.RenderLive(closeOpenFence(tail), textW))
-	}
-	return strings.Join(parts, "\n")
-}
-
 // isHeadingBlock reports whether a prose block leads with an ATX heading marker.
 func isHeadingBlock(b render.MdBlock) bool {
 	return b.Kind == render.MdProse && strings.HasPrefix(strings.TrimSpace(b.Raw), "#")
-}
-
-func (m *Model) renderMdBlock(b render.MdBlock, textW int) string {
-	switch {
-	case b.Kind == render.MdTable && b.Table != nil:
-		return b.Table.Render(textW, m.styles)
-	case b.Kind == render.MdCode:
-		body := trimBlankEdgeLines(m.md.Render(b.Raw, textW))
-		top := codeRule(b.Lang, textW, m.styles)
-		bottom := codeRule("", textW, m.styles)
-		return top + "\n" + body + "\n" + bottom
-	default:
-		return m.md.Render(b.Raw, textW)
-	}
 }
 
 // trimBlankEdgeLines drops leading and trailing lines that are visually empty —
@@ -2484,44 +2385,12 @@ func (m Model) renderRecap() string {
 }
 
 // renderViewportWithScrollbar renders the chat viewport with a one-column
-// vertical scrollbar on its right edge. The bar paints a thumb (█) + track (░)
-// in subtle greys only when the content overflows; otherwise the reserved
-// column is blank, so the bar appears and disappears without reflowing text.
+// vertical scrollbar on its right edge. Delegates to chatView.View.
 func (m Model) renderViewportWithScrollbar() string {
-	body := m.viewport.View()
-	lines := strings.Split(body, "\n")
-	height := m.viewport.Height()
-	col := scrollbarColumn(m.viewport.TotalLineCount(), height, m.viewport.YOffset())
-	var b strings.Builder
-	for i, line := range lines {
-		contentLine := m.viewport.YOffset() + i
-		line = m.renderSelectionOnLine(line, contentLine)
-		// Clamp to the viewport width so an over-wide content line (Glamour
-		// pads prose a few columns past the wrap width) can't push the
-		// composited row past m.width and wrap in the terminal — which would
-		// shove the scrollbar onto a wrapped row and make it vanish.
-		line = ansi.Truncate(line, m.viewport.Width(), "")
-		b.WriteString(line)
-		b.WriteString(" ") // one-column gap so content doesn't touch the scrollbar
-		// Guard against any row-count mismatch between the rendered body and
-		// the computed column.
-		if i < len(col) {
-			switch col[i] {
-			case '█':
-				b.WriteString(m.styles.Border.Render("█"))
-			case '░':
-				b.WriteString(m.styles.BorderDim.Render("░"))
-			default:
-				b.WriteString(" ")
-			}
-		} else {
-			b.WriteString(" ")
-		}
-		if i < len(lines)-1 {
-			b.WriteString("\n")
-		}
+	if m.chat == nil {
+		return ""
 	}
-	return b.String()
+	return m.chat.View(m.renderSelectionOnLine)
 }
 
 func (m Model) renderHeader() string {

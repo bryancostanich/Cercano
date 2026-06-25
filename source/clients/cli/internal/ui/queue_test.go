@@ -55,10 +55,10 @@ func TestQueuedLinesReserveViewportRows(t *testing.T) {
 	m = m.SeedAssistantMarkdown("prior reply\n")
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 
-	h0 := m.viewport.Height()
+	h0 := m.chat.Height()
 	m.queued = []string{"one", "two"}
 	m.relayout()
-	if got := m.viewport.Height(); got != h0-2 {
+	if got := m.chat.Height(); got != h0-2 {
 		t.Errorf("two queued lines should reserve two rows: %d -> %d, want %d", h0, got, h0-2)
 	}
 }

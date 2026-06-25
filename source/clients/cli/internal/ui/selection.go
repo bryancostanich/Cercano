@@ -70,10 +70,13 @@ func (s textSelection) lineRange(line, width int) (int, int, bool) {
 }
 
 func (m Model) mouseInViewportText(mouse tea.Mouse) bool {
+	if m.chat == nil {
+		return false
+	}
 	return mouse.X >= 0 &&
-		mouse.X < m.viewport.Width() &&
+		mouse.X < m.chat.Width() &&
 		mouse.Y >= m.scrollbarTop &&
-		mouse.Y < m.scrollbarTop+m.viewport.Height()
+		mouse.Y < m.scrollbarTop+m.chat.Height()
 }
 
 func (m *Model) beginSelection(mouse tea.Mouse) {
@@ -99,26 +102,30 @@ func (m *Model) clearSelection() {
 }
 
 func (m *Model) selectionPointFromMouse(mouse tea.Mouse, allowScroll bool) selectionPoint {
-	height := m.viewport.Height()
+	if m.chat == nil {
+		return selectionPoint{}
+	}
+	height := m.chat.Height()
 	row := mouse.Y - m.scrollbarTop
 	if allowScroll {
 		switch {
 		case row < 0:
-			m.viewport.ScrollUp(1)
+			m.chat.vp.ScrollUp(1)
 			row = 0
 		case row >= height:
-			m.viewport.ScrollDown(1)
+			m.chat.vp.ScrollDown(1)
 			row = height - 1
 		}
 	}
 	row = clampInt(row, 0, maxInt(0, height-1))
-	line := m.viewport.YOffset() + row
-	if len(m.viewportPlainLines) > 0 {
-		line = clampInt(line, 0, len(m.viewportPlainLines)-1)
+	line := m.chat.YOffset() + row
+	plainLines := m.chat.PlainLines()
+	if len(plainLines) > 0 {
+		line = clampInt(line, 0, len(plainLines)-1)
 	}
 	return selectionPoint{
 		Line: line,
-		Col:  clampInt(mouse.X, 0, m.viewport.Width()),
+		Col:  clampInt(mouse.X, 0, m.chat.Width()),
 	}
 }
 
@@ -130,7 +137,10 @@ const selectionBg = "\x1b[48;2;45;79;97m" // #2D4F61
 var ansiResetRe = regexp.MustCompile("\x1b\\[0?m")
 
 func (m Model) renderSelectionOnLine(line string, contentLine int) string {
-	start, end, ok := m.selection.lineRange(contentLine, m.viewport.Width())
+	if m.chat == nil {
+		return line
+	}
+	start, end, ok := m.selection.lineRange(contentLine, m.chat.Width())
 	if !ok {
 		return line
 	}
@@ -221,19 +231,20 @@ func pbcopyCmd(text string) tea.Cmd {
 }
 
 func (m Model) selectedText() string {
-	if !m.selection.hasRange() || len(m.viewportPlainLines) == 0 {
+	plainLines := m.chat.PlainLines()
+	if !m.selection.hasRange() || len(plainLines) == 0 {
 		return ""
 	}
 	start, end := m.selection.ordered()
-	start.Line = clampInt(start.Line, 0, len(m.viewportPlainLines)-1)
-	end.Line = clampInt(end.Line, 0, len(m.viewportPlainLines)-1)
+	start.Line = clampInt(start.Line, 0, len(plainLines)-1)
+	end.Line = clampInt(end.Line, 0, len(plainLines)-1)
 	if beforePoint(end, start) {
 		return ""
 	}
 
 	parts := make([]string, 0, end.Line-start.Line+1)
 	for line := start.Line; line <= end.Line; line++ {
-		text := m.viewportPlainLines[line]
+		text := plainLines[line]
 		switch {
 		case start.Line == end.Line:
 			parts = append(parts, ansi.Cut(text, start.Col, end.Col))

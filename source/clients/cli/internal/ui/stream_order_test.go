@@ -5,10 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/bubbles/v2/viewport"
-
 	"cercano/source/server/pkg/agentclient"
-	"cercano/source/clients/cli/internal/render"
 	"cercano/source/clients/cli/internal/theme"
 )
 
@@ -18,11 +15,10 @@ import (
 func newStreamTestModel() Model {
 	p := theme.Cracker()
 	m := Model{
-		styles:   theme.NewStyles(p),
-		palette:  p,
-		width:    80,
-		viewport: viewport.New(viewport.WithWidth(79), viewport.WithHeight(20)),
-		md:       render.NewMarkdown(theme.CrackerMarkdownStyle()),
+		styles:  theme.NewStyles(p),
+		palette: p,
+		width:   80,
+		chat:    newChatView(theme.NewStyles(p), p, 79, 20),
 	}
 	m.entries = append(m.entries,
 		&Entry{Role: RoleUser, Content: "read the readme"},

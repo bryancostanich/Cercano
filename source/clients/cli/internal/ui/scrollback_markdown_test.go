@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"cercano/source/clients/cli/internal/render"
 	"cercano/source/clients/cli/internal/theme"
 )
 
@@ -15,18 +14,21 @@ var ansiRE = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 func plain(s string) string { return ansiRE.ReplaceAllString(s, "") }
 
+// newMdChatView returns a chatView sized to zero (only used for md rendering).
+func newMdChatView() *chatView {
+	p := theme.Cracker()
+	return newChatView(theme.NewStyles(p), p, 0, 0)
+}
+
 // Renders an assistant entry the way renderEntry does for committed blocks,
 // proving prose is Glamour-formatted and tables go through render.Table.
 func TestAssistantMarkdown_FormatsProseAndTable(t *testing.T) {
-	m := &Model{
-		styles: theme.NewStyles(theme.Cracker()),
-		md:     render.NewMarkdown(theme.CrackerMarkdownStyle()),
-	}
+	cv := newMdChatView()
 	e := &Entry{
 		Role:    RoleAssistant,
 		Content: "# Header\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\ntrailing prose\n",
 	}
-	out := m.renderAssistantMarkdown(e, 60)
+	out := cv.renderAssistantMarkdown(e, 60)
 	vis := plain(out)
 
 	// Prose went through Glamour: ANSI styling applied and the heading line is
@@ -47,12 +49,9 @@ func TestAssistantMarkdown_FormatsProseAndTable(t *testing.T) {
 }
 
 func TestAssistantMarkdown_HeadingsDropHashMarker(t *testing.T) {
-	m := &Model{
-		styles: theme.NewStyles(theme.Cracker()),
-		md:     render.NewMarkdown(theme.CrackerMarkdownStyle()),
-	}
+	cv := newMdChatView()
 	e := &Entry{Role: RoleAssistant, Content: "# Title\n\n## Subtitle\n\nbody\n"}
-	vis := plain(m.renderAssistantMarkdown(e, 60))
+	vis := plain(cv.renderAssistantMarkdown(e, 60))
 	if strings.Contains(vis, "#") {
 		t.Fatalf("expected no '#' markers in rendered headings: %q", vis)
 	}
@@ -62,12 +61,9 @@ func TestAssistantMarkdown_HeadingsDropHashMarker(t *testing.T) {
 }
 
 func TestAssistantMarkdown_BlankLineBeforeHeadings(t *testing.T) {
-	m := &Model{
-		styles: theme.NewStyles(theme.Cracker()),
-		md:     render.NewMarkdown(theme.CrackerMarkdownStyle()),
-	}
+	cv := newMdChatView()
 	e := &Entry{Role: RoleAssistant, Content: "intro paragraph\n\n## Section\n\nbody\n"}
-	vis := plain(m.renderAssistantMarkdown(e, 60))
+	vis := plain(cv.renderAssistantMarkdown(e, 60))
 
 	// A blank line should separate the intro paragraph from the heading.
 	if !strings.Contains(vis, "intro paragraph") {
@@ -85,24 +81,18 @@ func TestAssistantMarkdown_BlankLineBeforeHeadings(t *testing.T) {
 }
 
 func TestAssistantMarkdown_FirstHeadingHasNoLeadingBlank(t *testing.T) {
-	m := &Model{
-		styles: theme.NewStyles(theme.Cracker()),
-		md:     render.NewMarkdown(theme.CrackerMarkdownStyle()),
-	}
+	cv := newMdChatView()
 	e := &Entry{Role: RoleAssistant, Content: "# Title\n\nbody\n"}
-	vis := plain(m.renderAssistantMarkdown(e, 60))
+	vis := plain(cv.renderAssistantMarkdown(e, 60))
 	if strings.HasPrefix(vis, "\n") {
 		t.Fatalf("first heading should not start with a blank line: %q", vis)
 	}
 }
 
 func TestAssistantMarkdown_CodeBlockHasLabeledRules(t *testing.T) {
-	m := &Model{
-		styles: theme.NewStyles(theme.Cracker()),
-		md:     render.NewMarkdown(theme.CrackerMarkdownStyle()),
-	}
+	cv := newMdChatView()
 	e := &Entry{Role: RoleAssistant, Content: "intro\n\n```go\nx := 1\n```\n\nouttro\n"}
-	vis := plain(m.renderAssistantMarkdown(e, 40))
+	vis := plain(cv.renderAssistantMarkdown(e, 40))
 
 	// Language label present on the opening rule.
 	if !strings.Contains(vis, "─── go ") {
@@ -118,12 +108,9 @@ func TestAssistantMarkdown_CodeBlockHasLabeledRules(t *testing.T) {
 }
 
 func TestAssistantMarkdown_OpenFenceTailRenders(t *testing.T) {
-	m := &Model{
-		styles: theme.NewStyles(theme.Cracker()),
-		md:     render.NewMarkdown(theme.CrackerMarkdownStyle()),
-	}
+	cv := newMdChatView()
 	e := &Entry{Role: RoleAssistant, Content: "intro\n\n```go\nx := 1"}
-	out := plain(m.renderAssistantMarkdown(e, 60))
+	out := plain(cv.renderAssistantMarkdown(e, 60))
 	if !strings.Contains(out, "x := 1") {
 		t.Fatalf("open-fence tail code missing: %q", out)
 	}

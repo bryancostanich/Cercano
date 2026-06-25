@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,50 @@ import (
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/llm"
 )
+
+func TestAdvance_SameSecondBoundaryDoesNotDropTurn(t *testing.T) {
+	tok := contextmeter.Default()
+	cfg := Config{ActivationFloorTokens: 1000, SegmentTokens: 4000, VerbatimRecent: 2}
+	body := strings.Repeat("lorem ipsum dolor sit amet ", 100)
+	// 12 turns; the last eligible (t9) shares second 1000 with the first verbatim
+	// turn (t10) — the exact straddle that would drop t10 without the trim.
+	ats := []int64{100, 101, 102, 103, 104, 105, 106, 107, 108, 1000, 1000, 1001}
+	var turns []conversation.Turn
+	for i, at := range ats {
+		c := body
+		switch i {
+		case 9:
+			c = "MARK9 " + body
+		case 10:
+			c = "MARK10 " + body
+		}
+		turns = append(turns, conversation.Turn{
+			ID: fmt.Sprintf("t%d", i), Role: "user", Content: c, CreatedAt: time.Unix(at, 0),
+		})
+	}
+	rec := &recSummarize{}
+	st, changed, err := Advance(context.Background(), turns, conversation.Compaction{}, rec.fn, cfg, tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("expected compaction to run")
+	}
+	if st.FrozenThrough >= 1000 {
+		t.Errorf("FrozenThrough=%d must be strictly below the shared boundary second 1000", st.FrozenThrough)
+	}
+	view, err := BuildSendView(turns, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := flat(view)
+	if !strings.Contains(out, "MARK10") {
+		t.Error("the same-second verbatim turn (t10) was dropped from the send view")
+	}
+	if !strings.Contains(out, "MARK9") {
+		t.Error("t9 (held back to avoid the collision) should be live, not dropped")
+	}
+}
 
 // recSummarize records how many times it's called and returns a marked summary.
 type recSummarize struct{ n int }

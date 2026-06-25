@@ -348,3 +348,38 @@ surface keeping observable assertions identical (entry counts, "removed N turn(s
 "nothing to remove."/rationale/error/queued rows, band heights); `context_manager_driver_test.go`
 stays UNCHANGED + green (the driver event contract is the behavior-preservation spine);
 step-1 + scripted goldens byte-identical; manual `/c` smoke. Reversible (worktree).
+
+- **Step-4 outcome + G1 refinement (review-fix):** D4 applied across 3 tasks
+  (`a6a3fef..ccb06c7`); `chatPane` fully retired (424 LOC), grep-clean, goldens
+  byte-identical, driver-test spine unchanged. Whole-branch opus review found **1
+  Critical**: G1-a's "busy = last entry is streaming" assumption HOLDS for the main
+  chat (continuous stream → done closes the open entry) but BREAKS for `/c`'s
+  *confirm-gated* flow — the host appended the rationale entry AFTER the open
+  placeholder on `chatConfirmMsg`, so the placeholder was never last, never closed
+  → a frozen `working…` spinner orphaned on every successful context edit, and
+  `busy()` wrongly read false during the confirm gate (auto-refresh no longer
+  suppressed). **G1 refined:** the placeholder stays the propose-phase VISUAL, but
+  (a) `chatConfirmMsg` FILLS-and-closes the open placeholder with the rationale
+  (mirrors the `chatDoneMsg` fill semantics) instead of appending, and (b) `/c`
+  busy STATE is an explicit `contextView` flag (set on Submit, cleared on
+  done/error) — NOT derived from the placeholder. (This grafts G1-c's explicit
+  state flag onto G1-a's visual; pure G1-a was insufficient for a gated single-shot
+  flow — a real gap the design's quantification missed.) Plus a lifecycle test
+  (submit→confirm→done leaves zero `{streaming,empty}` entries; no `working…` in the
+  rendered `/c` view after completion) — the regression slipped because nothing
+  asserted placeholder lifecycle on the confirm path.
+
+- **G1 fix applied (2026-06-25):** 3 files changed, new test file added.
+  `chat_view.go`: `FillOpenAssistant(text string) bool` — fills+closes the open
+  streaming entry, returns false if none open (host falls back to append).
+  `context_view.go`: `busyFlag bool` field added; `busy()` reads it instead of
+  `streamingTextEntry()`.
+  `model.go`: `submitContextEdit` sets `cv.busyFlag = true`; `routeChatMsg`
+  `chatConfirmMsg` arm calls `cv.chat.FillOpenAssistant(cm.assistant)` (not append);
+  `onNo` arm sets `cv.busyFlag = false` directly; general arm clears `busyFlag` on
+  `chatDoneMsg`/`chatErrorMsg` before `Apply`.
+  `context_view_busy_test.go`: 2 lifecycle tests (submit→confirm-yes→done and
+  submit→confirm-no) asserting (a) zero `{Streaming:true,Content==""}` entries,
+  (b) no `working…` in rendered view, (c) rationale/done text present, (d) busy
+  spans the gate. Build clean, vet clean, `go test ./... -count=1` green (all 6
+  packages), goldens byte-identical, driver test unchanged.

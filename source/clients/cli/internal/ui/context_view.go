@@ -33,6 +33,7 @@ type contextView struct {
 	proposal        agentclient.Proposal
 	expanded        map[string]bool
 	focusedTurn     int
+	busyFlag        bool // true while a context-edit turn is in flight
 
 	md     *render.Markdown
 	driver *contextManagerDriver
@@ -94,9 +95,11 @@ func (c *contextView) SetSize(w, h int) {
 	c.clampScroll()
 }
 
-// busy reports whether a context-edit turn is in flight — i.e. the chat holds
-// an open streaming placeholder (mirrors the main page's notion of busy).
-func (c *contextView) busy() bool { return c.chat.streamingTextEntry() != nil }
+// busy reports whether a context-edit turn is in flight. The flag is set by
+// submitContextEdit and cleared by chatDoneMsg / chatErrorMsg, so it spans the
+// full propose→confirm→done lifecycle rather than just the streaming-placeholder
+// window (which ends when chatConfirmMsg fills the placeholder with the rationale).
+func (c *contextView) busy() bool { return c.busyFlag }
 
 // Update handles keys that the model hasn't intercepted. For *contextView,
 // the model's handleContextViewKey owns most keys; this method handles the

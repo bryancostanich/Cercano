@@ -28,8 +28,8 @@ func TestDragScroll_ContinuesWhileHeldAtEdge(t *testing.T) {
 
 	next, cmd := m.Update(tea.MouseMotionMsg(aboveTop))
 	m = next.(Model)
-	if !m.dragScrolling || cmd == nil {
-		t.Fatalf("expected edge auto-scroll to start (dragScrolling=%v, cmd=%v)", m.dragScrolling, cmd != nil)
+	if !m.chat.DragScrolling() || cmd == nil {
+		t.Fatalf("expected edge auto-scroll to start (dragScrolling=%v, cmd=%v)", m.chat.DragScrolling(), cmd != nil)
 	}
 	afterMotion := m.chat.YOffset()
 	if afterMotion >= startOffset {
@@ -51,7 +51,7 @@ func TestDragScroll_ContinuesWhileHeldAtEdge(t *testing.T) {
 	// Releasing stops the loop.
 	next, _ = m.Update(tea.MouseReleaseMsg(tea.Mouse{X: 5, Y: m.scrollbarTop - 1}))
 	m = next.(Model)
-	if m.dragScrolling {
+	if m.chat.DragScrolling() {
 		t.Fatalf("release should stop the auto-scroll loop")
 	}
 	next, cmd = m.Update(dragScrollTickMsg{})

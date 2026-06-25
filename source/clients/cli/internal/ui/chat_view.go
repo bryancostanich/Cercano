@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/viewport"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -39,8 +40,8 @@ type chatView struct {
 
 // newChatView constructs a chatView sized to vpWidth × vpHeight. The host
 // reserves two columns to the right of this width for the gap and scrollbar.
-func newChatView(styles theme.Styles, palette theme.Palette, vpWidth, vpHeight int) *chatView {
-	return &chatView{
+func newChatView(styles theme.Styles, palette theme.Palette, vpWidth, vpHeight int) chatView {
+	return chatView{
 		styles:         styles,
 		palette:        palette,
 		md:             render.NewMarkdown(theme.CrackerMarkdownStyle()),
@@ -89,6 +90,21 @@ func (c *chatView) AtBottom() bool { return c.vp.AtBottom() }
 
 // GotoBottom scrolls to the last line.
 func (c *chatView) GotoBottom() { c.vp.GotoBottom() }
+
+// ScrollUp scrolls the viewport up by n lines.
+func (c *chatView) ScrollUp(n int) { c.vp.ScrollUp(n) }
+
+// ScrollDown scrolls the viewport down by n lines.
+func (c *chatView) ScrollDown(n int) { c.vp.ScrollDown(n) }
+
+// Update passes a bubbletea message to the underlying viewport and returns any
+// resulting command. Callers outside chat_view.go must use this instead of
+// accessing vp directly.
+func (c *chatView) Update(msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
+	c.vp, cmd = c.vp.Update(msg)
+	return cmd
+}
 
 // PlainLines returns the ANSI-stripped content lines (for selection copy).
 func (c *chatView) PlainLines() []string { return c.plainLines }

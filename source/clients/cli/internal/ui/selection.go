@@ -70,9 +70,6 @@ func (s textSelection) lineRange(line, width int) (int, int, bool) {
 }
 
 func (m Model) mouseInViewportText(mouse tea.Mouse) bool {
-	if m.chat == nil {
-		return false
-	}
 	return mouse.X >= 0 &&
 		mouse.X < m.chat.Width() &&
 		mouse.Y >= m.scrollbarTop &&
@@ -102,18 +99,15 @@ func (m *Model) clearSelection() {
 }
 
 func (m *Model) selectionPointFromMouse(mouse tea.Mouse, allowScroll bool) selectionPoint {
-	if m.chat == nil {
-		return selectionPoint{}
-	}
 	height := m.chat.Height()
 	row := mouse.Y - m.scrollbarTop
 	if allowScroll {
 		switch {
 		case row < 0:
-			m.chat.vp.ScrollUp(1)
+			m.chat.ScrollUp(1)
 			row = 0
 		case row >= height:
-			m.chat.vp.ScrollDown(1)
+			m.chat.ScrollDown(1)
 			row = height - 1
 		}
 	}
@@ -137,9 +131,6 @@ const selectionBg = "\x1b[48;2;45;79;97m" // #2D4F61
 var ansiResetRe = regexp.MustCompile("\x1b\\[0?m")
 
 func (m Model) renderSelectionOnLine(line string, contentLine int) string {
-	if m.chat == nil {
-		return line
-	}
 	start, end, ok := m.selection.lineRange(contentLine, m.chat.Width())
 	if !ok {
 		return line

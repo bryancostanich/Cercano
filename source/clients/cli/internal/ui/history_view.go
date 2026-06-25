@@ -236,14 +236,18 @@ func (h *historyView) appendRow(lines *[]string, meta *[]histLineMeta, i, panelW
 	line1 := " " + arrow + nameCell + "  " + metaCell
 	add(line1, histLineMeta{row: i, arrowCell: true})
 
-	// Line 2: indented recap preview.
-	recap := r.recap
-	if strings.TrimSpace(recap) == "" {
-		recap = "(no recap)"
-	}
 	indent := "      "
-	recapTxt := ansi.Truncate(recap, maxInt(8, panelW-lipgloss.Width(indent)), "…")
-	add(indent+h.styles.Primary.Render(recapTxt), histLineMeta{row: i})
+	// Line 2 (collapsed only): one-line recap preview. When the row is expanded,
+	// the drawer below renders the full recap, so skip the preview to avoid
+	// showing the recap twice.
+	if !r.expanded {
+		recap := r.recap
+		if strings.TrimSpace(recap) == "" {
+			recap = "(no recap)"
+		}
+		recapTxt := ansi.Truncate(recap, maxInt(8, panelW-lipgloss.Width(indent)), "…")
+		add(indent+h.styles.Primary.Render(recapTxt), histLineMeta{row: i})
+	}
 
 	if r.expanded {
 		panelInner := panelW

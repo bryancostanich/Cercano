@@ -1974,10 +1974,10 @@ func (m Model) applyResume(conversationID string) Model {
 		m.cumOut += t.TokensOut
 	}
 	m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: fmt.Sprintf("⟲ resumed %d turn(s)", len(turns))})
-	// Surface the prior session's living recap as a one-line banner + footer.
+	// Restore the prior session's living recap into the footer line (renderRecap).
+	// Don't also push it into scrollback — that showed the recap twice on resume.
 	if info, err := m.agent.GetConversation(ctx, conversationID); err == nil && info.Recap != "" {
 		m.recap = info.Recap
-		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "Recap: " + info.Recap})
 	}
 	m.relayout()
 	return m

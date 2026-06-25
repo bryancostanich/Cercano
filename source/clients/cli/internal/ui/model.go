@@ -1193,25 +1193,18 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 			e.Streaming = false
 		}
 		// Surface non-fatal notices (e.g. "cloud not configured — answered
-		// locally") as a system entry above the assistant content. Sticks
-		// the cloud state to NONE so the status bar shows it.
+		// locally") as a system entry above the assistant content.
 		if sm.Notice != "" {
 			m.chat.insertNoticeAboveLast(&Entry{Role: RoleSystem, Content: "⚠ " + sm.Notice})
-			m.cloudState = "NONE"
-		} else {
-			m.cloudState = "ok"
 		}
-		m.tokIn = sm.TokIn
-		m.tokOut = sm.TokOut
-		m.hadTurn = true
-		// cumIn/cumOut here are local approximations until the agent
-		// answers GetContextUsage below; the RPC's authoritative cumulative
-		// total overrides cumIn (Used) on arrival.
-		m.cumIn += sm.TokIn
-		m.cumOut += sm.TokOut
-		if sm.Model != "" {
-			m.lastModel = sm.Model
-		}
+		// Fold telemetry into host footer fields via the extracted helper so
+		// the same path survives when the transcript machine moves to chatView.
+		m.applyTurnTelemetry(chatDoneMsg{
+			notice: sm.Notice,
+			tokIn:  sm.TokIn,
+			tokOut: sm.TokOut,
+			model:  sm.Model,
+		})
 	case agentclient.TypeError:
 		if e := m.chat.streamingTextEntry(); e != nil {
 			e.Streaming = false
@@ -1282,6 +1275,27 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 	}
 	m.refreshViewport()
 	return m, waitForStream(m.streamCh)
+}
+
+// applyTurnTelemetry folds a done event's telemetry into the host footer
+// fields. Pulled out of applyStreamMsg so the host keeps owning the footer
+// after the transcript machine moves into chatView (step 3).
+func (m *Model) applyTurnTelemetry(d chatDoneMsg) {
+	if d.notice != "" {
+		m.cloudState = "NONE"
+	} else {
+		m.cloudState = "ok"
+	}
+	m.tokIn = d.tokIn
+	m.tokOut = d.tokOut
+	m.hadTurn = true
+	// cumIn/cumOut here are local approximations until the agent answers
+	// GetContextUsage; the RPC's authoritative total overrides cumIn on arrival.
+	m.cumIn += d.tokIn
+	m.cumOut += d.tokOut
+	if d.model != "" {
+		m.lastModel = d.model
+	}
 }
 
 // relayout sets viewport / input widths and the viewport height so the

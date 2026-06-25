@@ -31,6 +31,13 @@ type chatView struct {
 	palette theme.Palette
 	md      *render.Markdown
 
+	// entries is the authoritative slice of scrollback entries. All host
+	// append/read operations go through the mutation methods below.
+	entries []*Entry
+	// root and home are construction-time constants used by humanizeArgs/humanizeResult.
+	root string
+	home string
+
 	vp             viewport.Model
 	plainLines     []string
 	focusedToolIdx int
@@ -63,14 +70,108 @@ func (c *chatView) atScrollEdge() bool {
 
 // newChatView constructs a chatView sized to vpWidth × vpHeight. The host
 // reserves two columns to the right of this width for the gap and scrollbar.
-func newChatView(styles theme.Styles, palette theme.Palette, vpWidth, vpHeight int) chatView {
+// root and home are resolved once at construction; used to humanize tool-call
+// path arguments (relative to the project root, ~-abbreviated under home).
+func newChatView(styles theme.Styles, palette theme.Palette, root, home string, vpWidth, vpHeight int) chatView {
 	return chatView{
 		styles:         styles,
 		palette:        palette,
+		root:           root,
+		home:           home,
 		md:             render.NewMarkdown(theme.CrackerMarkdownStyle()),
 		vp:             viewport.New(viewport.WithWidth(vpWidth), viewport.WithHeight(vpHeight)),
 		focusedToolIdx: -1,
 	}
+}
+
+// ── entry ownership ────────────────────────────────────────────────────────
+
+// Entries returns the slice of scrollback entries (read-only; callers must not
+// mutate the slice directly — use the methods below).
+func (c *chatView) Entries() []*Entry { return c.entries }
+
+// AppendEntry appends a single entry to the scrollback.
+func (c *chatView) AppendEntry(e *Entry) { c.entries = append(c.entries, e) }
+
+// SetEntriesSlice replaces the entire entry slice (for /clear and applyResume).
+func (c *chatView) SetEntriesSlice(es []*Entry) { c.entries = es }
+
+// insertNoticeAboveLast inserts e at position len-1, pushing the last entry
+// down. Used by the TypeDone arm to slot the ⚠ notice above the final reply.
+// No-op if entries is empty.
+func (c *chatView) insertNoticeAboveLast(e *Entry) {
+	n := len(c.entries)
+	if n == 0 {
+		c.entries = append(c.entries, e)
+		return
+	}
+	c.entries = append(c.entries, nil)
+	copy(c.entries[n-1+1:], c.entries[n-1:])
+	c.entries[n-1] = e
+}
+
+// dropLastEntry removes the last entry. No-op if entries is empty.
+func (c *chatView) dropLastEntry() {
+	if n := len(c.entries); n > 0 {
+		c.entries = c.entries[:n-1]
+	}
+}
+
+// toolEntryIndices returns the positions of every tool-call entry, in order.
+// Used by the up/down nav handlers to cycle focus among tool entries.
+func (c *chatView) toolEntryIndices() []int {
+	var out []int
+	for i, e := range c.entries {
+		if e.Tool != nil {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// findToolEntry returns the ToolEntry whose ToolUseID matches id, or nil.
+// Used by stream-event handlers to update an in-flight tool-call line.
+func (c *chatView) findToolEntry(id string) *ToolEntry {
+	if id == "" {
+		return nil
+	}
+	for i := len(c.entries) - 1; i >= 0; i-- {
+		if t := c.entries[i].Tool; t != nil && t.ToolUseID == id {
+			return t
+		}
+	}
+	return nil
+}
+
+// lastAssistantEntry returns the last entry with RoleAssistant, or nil.
+func (c *chatView) lastAssistantEntry() *Entry {
+	for i := len(c.entries) - 1; i >= 0; i-- {
+		if c.entries[i].Role == RoleAssistant {
+			return c.entries[i]
+		}
+	}
+	return nil
+}
+
+// streamingTextEntry returns the currently-open assistant text entry: the last
+// entry, and only if it is a streaming assistant. Returns nil when the last
+// entry is anything else (tool call, system message, etc.), which signals that
+// the next text starts a fresh entry positioned BELOW the tools.
+func (c *chatView) streamingTextEntry() *Entry {
+	if n := len(c.entries); n > 0 {
+		if e := c.entries[n-1]; e.Role == RoleAssistant && e.Streaming {
+			return e
+		}
+	}
+	return nil
+}
+
+// rebuild re-renders the viewport content from c.entries (the authoritative
+// slice). refreshViewport calls this after pushing telemetry state. It is
+// equivalent to the old SetEntries(m.entries) call, but reads from the owned
+// slice instead of accepting an external snapshot.
+func (c *chatView) rebuild() {
+	c.SetEntries(c.entries)
 }
 
 // SetSize resizes the underlying viewport. Call from relayout.

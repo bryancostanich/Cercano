@@ -69,7 +69,7 @@ func TestResolveConfirmKey_N_Cancels(t *testing.T) {
 	if cmd != nil {
 		t.Errorf("n should not return a cmd; got %v", cmd)
 	}
-	if len(next.entries) == 0 {
+	if len(next.chat.Entries()) == 0 {
 		t.Errorf("expected a cancellation system entry")
 	}
 }
@@ -95,14 +95,14 @@ func TestResolveConfirmKey_D_RevealsArgsAndKeepsPending(t *testing.T) {
 		t.Errorf("d should not return a cmd")
 	}
 	found := false
-	for _, e := range next.entries {
+	for _, e := range next.chat.Entries() {
 		if strings.Contains(e.Content, `"path":"a.go"`) {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("d should append a system entry with the args; entries: %+v", next.entries)
+		t.Errorf("d should append a system entry with the args; entries: %+v", next.chat.Entries())
 	}
 }
 

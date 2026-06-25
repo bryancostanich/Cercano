@@ -22,10 +22,12 @@ type Store interface {
 	Get(ctx context.Context, conversationID string) (conversation.Info, error)
 	GetTurns(ctx context.Context, conversationID string) ([]conversation.Turn, error)
 	UpdateRecap(ctx context.Context, conversationID, recap string) error
+	SetGeneratedTitle(ctx context.Context, conversationID, title string) error
 }
 
 const (
-	maxRecapChars = 80
+	maxRecapChars = 160
+	maxTitleChars = 48
 	genTimeout    = 30 * time.Second
 )
 
@@ -93,6 +95,18 @@ func (g *Generator) regenerate(conversationID string) {
 		return
 	}
 	_ = g.store.UpdateRecap(ctx, conversationID, line)
+
+	// Derive a short session title from the fresh recap (next-tightest rung).
+	// Best-effort: failures leave the existing title untouched.
+	titleOut, err := g.complete(ctx, buildTitlePrompt(line))
+	if err != nil {
+		return
+	}
+	title := firstLine(titleOut, maxTitleChars)
+	if title == "" {
+		return
+	}
+	_ = g.store.SetGeneratedTitle(ctx, conversationID, title)
 }
 
 // buildPrompt produces an incremental summarization prompt from the prior
@@ -119,6 +133,15 @@ func buildPrompt(prior string, turns []conversation.Turn, maxTurns int) string {
 			"Write ONE updated line, past tense, at most %d characters, describing "+
 			"what the session has accomplished so far. Output ONLY the line, no quotes, no preamble.",
 		priorLine, b.String(), maxRecapChars)
+}
+
+// buildTitlePrompt turns a one-line recap into a short session title.
+func buildTitlePrompt(recap string) string {
+	return fmt.Sprintf(
+		"Given this one-line summary of a coding session, write a short title "+
+			"of 3 to 6 words in Title Case, with no quotes and no trailing "+
+			"punctuation.\nSummary: %s\nOutput ONLY the title.",
+		recap)
 }
 
 // firstLine returns the first non-empty trimmed line, truncated to maxChars

@@ -224,6 +224,21 @@ func TestSave_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestDefaults_Compaction(t *testing.T) {
+	c := Defaults()
+	if !c.Compaction.Enabled {
+		t.Error("compaction should default to enabled")
+	}
+	if c.Compaction.ActivationFloorTokens != 40000 ||
+		c.Compaction.SegmentTokens != 8000 ||
+		c.Compaction.VerbatimRecent != 6 {
+		t.Errorf("compaction defaults = %+v", c.Compaction)
+	}
+	if c.Compaction.HardOverridePct != 0.9 {
+		t.Errorf("hard override = %v, want 0.9", c.Compaction.HardOverridePct)
+	}
+}
+
 func TestDefaultPath(t *testing.T) {
 	path := DefaultPath()
 	if path == "" {

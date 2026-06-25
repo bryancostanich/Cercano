@@ -47,6 +47,23 @@ func loadContextSnapshot(ag *agentclient.Client, convID string) contextSnapshot 
 	return snap
 }
 
+// contextSnapshotMsg carries an async-loaded snapshot back to the model.
+type contextSnapshotMsg struct{ snap contextSnapshot }
+
+// contextRefreshTickMsg drives /c auto-refresh while the page is open.
+type contextRefreshTickMsg struct{}
+
+// loadContextSnapshotCmd loads the snapshot off the UI thread (the load can block
+// up to 2s on the RPCs, so it must not run inline).
+func loadContextSnapshotCmd(ag *agentclient.Client, convID string) tea.Cmd {
+	return func() tea.Msg { return contextSnapshotMsg{snap: loadContextSnapshot(ag, convID)} }
+}
+
+// contextRefreshTick schedules the next /c auto-refresh.
+func contextRefreshTick() tea.Cmd {
+	return tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg { return contextRefreshTickMsg{} })
+}
+
 func newContextView(ag *agentclient.Client, p theme.Palette, s theme.Styles, convID string, w, h int) (*contextView, tea.Cmd) {
 	cv := &contextView{palette: p, styles: s, agent: ag, convID: convID, width: w, height: h}
 	cv.snapshot = loadContextSnapshot(ag, convID)

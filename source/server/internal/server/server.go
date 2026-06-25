@@ -14,7 +14,10 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
+	"cercano/source/server/internal/compaction"
+	"cercano/source/server/internal/compactor"
 	projectctx "cercano/source/server/internal/context"
+	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/legacymodels"
@@ -1032,11 +1035,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 
 	var convHistory []llm.Message
 	if store := s.agent.PersistentStore(); store != nil && req.GetConversationId() != "" {
-		if turns, err := store.GetTurns(ctx, req.GetConversationId()); err != nil {
-			fmt.Fprintf(os.Stderr, "[tool-loop] GetTurns(%s) failed: %v\n", req.GetConversationId(), err)
-		} else {
-			convHistory = agent.BuildLLMHistory(turns)
-		}
+		convHistory = s.assembleHistory(ctx, store, req.GetConversationId())
 	}
 	injectedLen := len(convHistory)
 
@@ -1130,6 +1129,33 @@ func (s *Server) persistToolLoopTurns(ctx context.Context, req *proto.ProcessReq
 	// must trigger the recap too — otherwise recaps never update in the native
 	// tool-calling (cloud) flow the CLI uses.
 	s.agent.ScheduleRecap(convID)
+	s.agent.ScheduleCompaction(convID)
+}
+
+// assembleHistory builds the conversation history to send: the compacted view
+// (consolidated summary + live tail) when compaction state exists, else the full
+// history. If the assembled history exceeds the hard-override fraction of the
+// model's max context, it compacts synchronously once and reassembles.
+func (s *Server) assembleHistory(ctx context.Context, store conversation.Store, convID string) []llm.Message {
+	turns, err := store.GetTurns(ctx, convID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[tool-loop] GetTurns(%s) failed: %v\n", convID, err)
+		return nil
+	}
+	state, _ := store.GetCompaction(ctx, convID)
+	view, _ := compactor.BuildSendView(turns, state)
+
+	pct := s.currentConfig.Compaction.HardOverridePct
+	if s.currentConfig.Compaction.Enabled && pct > 0 {
+		hardLimit := int(float64(contextmeter.ModelMax(s.currentConfig.CloudModel)) * pct)
+		if compaction.TotalTokens(contextmeter.Default(), view) > hardLimit {
+			if err := s.agent.CompactNow(ctx, convID); err == nil {
+				state, _ = store.GetCompaction(ctx, convID)
+				view, _ = compactor.BuildSendView(turns, state)
+			}
+		}
+	}
+	return view
 }
 
 func (s *Server) mapRequest(req *proto.ProcessRequestRequest) *agent.Request {

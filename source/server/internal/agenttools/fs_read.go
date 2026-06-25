@@ -151,6 +151,10 @@ func (listDirTool) Execute(ctx context.Context, raw json.RawMessage) (*Result, e
 		}
 		row := map[string]any{
 			"name": name,
+			// Full path (relative to the same base the caller used) so the model
+			// can address the entry directly instead of re-deriving the parent —
+			// re-deriving is what makes it fumble nested paths.
+			"path": filepath.Join(a.Path, name),
 			"type": kind,
 		}
 		if err == nil {

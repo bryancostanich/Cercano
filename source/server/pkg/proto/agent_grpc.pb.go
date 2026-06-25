@@ -29,6 +29,8 @@ const (
 	Agent_RenameConversation_FullMethodName         = "/agent.Agent/RenameConversation"
 	Agent_GetConversation_FullMethodName            = "/agent.Agent/GetConversation"
 	Agent_GetContextUsage_FullMethodName            = "/agent.Agent/GetContextUsage"
+	Agent_GetCompactionState_FullMethodName         = "/agent.Agent/GetCompactionState"
+	Agent_ExportContext_FullMethodName              = "/agent.Agent/ExportContext"
 	Agent_GetConversationTurns_FullMethodName       = "/agent.Agent/GetConversationTurns"
 	Agent_ListTools_FullMethodName                  = "/agent.Agent/ListTools"
 	Agent_InvokeTool_FullMethodName                 = "/agent.Agent/InvokeTool"
@@ -82,6 +84,11 @@ type AgentClient interface {
 	// context window for a conversation. The CLI status bar polls this after
 	// each streamed turn.
 	GetContextUsage(ctx context.Context, in *GetContextUsageRequest, opts ...grpc.CallOption) (*GetContextUsageResponse, error)
+	// GetCompactionState returns the compaction summary + frozen/live split for
+	// the /c context viewer.
+	GetCompactionState(ctx context.Context, in *GetCompactionStateRequest, opts ...grpc.CallOption) (*GetCompactionStateResponse, error)
+	// ExportContext returns the full uncapped raw history as a JSON []llm.Message.
+	ExportContext(ctx context.Context, in *ExportContextRequest, opts ...grpc.CallOption) (*ExportContextResponse, error)
 	// GetConversationTurns returns display-ready, side-effect-free summaries of a
 	// conversation's turns for the /c context viewer. Unlike ResumeConversation
 	// it does NOT re-hydrate server session state.
@@ -241,6 +248,26 @@ func (c *agentClient) GetContextUsage(ctx context.Context, in *GetContextUsageRe
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetContextUsageResponse)
 	err := c.cc.Invoke(ctx, Agent_GetContextUsage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) GetCompactionState(ctx context.Context, in *GetCompactionStateRequest, opts ...grpc.CallOption) (*GetCompactionStateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetCompactionStateResponse)
+	err := c.cc.Invoke(ctx, Agent_GetCompactionState_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) ExportContext(ctx context.Context, in *ExportContextRequest, opts ...grpc.CallOption) (*ExportContextResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExportContextResponse)
+	err := c.cc.Invoke(ctx, Agent_ExportContext_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -514,6 +541,11 @@ type AgentServer interface {
 	// context window for a conversation. The CLI status bar polls this after
 	// each streamed turn.
 	GetContextUsage(context.Context, *GetContextUsageRequest) (*GetContextUsageResponse, error)
+	// GetCompactionState returns the compaction summary + frozen/live split for
+	// the /c context viewer.
+	GetCompactionState(context.Context, *GetCompactionStateRequest) (*GetCompactionStateResponse, error)
+	// ExportContext returns the full uncapped raw history as a JSON []llm.Message.
+	ExportContext(context.Context, *ExportContextRequest) (*ExportContextResponse, error)
 	// GetConversationTurns returns display-ready, side-effect-free summaries of a
 	// conversation's turns for the /c context viewer. Unlike ResumeConversation
 	// it does NOT re-hydrate server session state.
@@ -599,6 +631,12 @@ func (UnimplementedAgentServer) GetConversation(context.Context, *GetConversatio
 }
 func (UnimplementedAgentServer) GetContextUsage(context.Context, *GetContextUsageRequest) (*GetContextUsageResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetContextUsage not implemented")
+}
+func (UnimplementedAgentServer) GetCompactionState(context.Context, *GetCompactionStateRequest) (*GetCompactionStateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetCompactionState not implemented")
+}
+func (UnimplementedAgentServer) ExportContext(context.Context, *ExportContextRequest) (*ExportContextResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExportContext not implemented")
 }
 func (UnimplementedAgentServer) GetConversationTurns(context.Context, *GetConversationTurnsRequest) (*GetConversationTurnsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetConversationTurns not implemented")
@@ -859,6 +897,42 @@ func _Agent_GetContextUsage_Handler(srv interface{}, ctx context.Context, dec fu
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AgentServer).GetContextUsage(ctx, req.(*GetContextUsageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_GetCompactionState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetCompactionStateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).GetCompactionState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_GetCompactionState_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).GetCompactionState(ctx, req.(*GetCompactionStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_ExportContext_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExportContextRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).ExportContext(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_ExportContext_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).ExportContext(ctx, req.(*ExportContextRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1312,6 +1386,14 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetContextUsage",
 			Handler:    _Agent_GetContextUsage_Handler,
+		},
+		{
+			MethodName: "GetCompactionState",
+			Handler:    _Agent_GetCompactionState_Handler,
+		},
+		{
+			MethodName: "ExportContext",
+			Handler:    _Agent_ExportContext_Handler,
 		},
 		{
 			MethodName: "GetConversationTurns",

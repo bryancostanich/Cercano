@@ -180,6 +180,14 @@ func (m *mockAgentClient) DeleteConversationTurns(ctx context.Context, in *proto
 	return &proto.DeleteConversationTurnsResponse{}, nil
 }
 
+func (m *mockAgentClient) GetCompactionState(ctx context.Context, in *proto.GetCompactionStateRequest, opts ...grpc.CallOption) (*proto.GetCompactionStateResponse, error) {
+	return &proto.GetCompactionStateResponse{}, nil
+}
+
+func (m *mockAgentClient) ExportContext(ctx context.Context, in *proto.ExportContextRequest, opts ...grpc.CallOption) (*proto.ExportContextResponse, error) {
+	return &proto.ExportContextResponse{}, nil
+}
+
 func TestNewServer_RegistersTools(t *testing.T) {
 	mock := &mockAgentClient{}
 	s := NewServer(mock)

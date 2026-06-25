@@ -34,6 +34,13 @@ service Agent {
   // each streamed turn.
   rpc GetContextUsage (GetContextUsageRequest) returns (GetContextUsageResponse) {}
 
+  // GetCompactionState returns the compaction summary + frozen/live split for
+  // the /c context viewer.
+  rpc GetCompactionState (GetCompactionStateRequest) returns (GetCompactionStateResponse) {}
+
+  // ExportContext returns the full uncapped raw history as a JSON []llm.Message.
+  rpc ExportContext (ExportContextRequest) returns (ExportContextResponse) {}
+
   // GetConversationTurns returns display-ready, side-effect-free summaries of a
   // conversation's turns for the /c context viewer. Unlike ResumeConversation
   // it does NOT re-hydrate server session state.
@@ -407,10 +414,26 @@ message GetConversationRequest { string conversation_id = 1; }
 // counts when available); not exact for non-OpenAI families.
 message GetContextUsageRequest  { string conversation_id = 1; }
 message GetContextUsageResponse {
-  int32  tokens_used = 1;
+  int32  tokens_used = 1; // the SENT (compacted) size
   int32  model_max   = 2;
   double percent     = 3;
+  int32  raw_tokens  = 4; // the uncompacted size
+  bool   compacting  = 5; // a compaction pass is currently running
 }
+
+message GetCompactionStateRequest  { string conversation_id = 1; }
+message GetCompactionStateResponse {
+  int64  frozen_through       = 1;
+  int32  frozen_turns         = 2;
+  int32  live_turns           = 3;
+  int32  compacted_segments   = 4;
+  int32  raw_tokens           = 5;
+  int32  sent_tokens          = 6;
+  string consolidated_summary = 7;
+  bool   compacting           = 8;
+}
+message ExportContextRequest  { string conversation_id = 1; }
+message ExportContextResponse { string json = 1; }
 
 message GetConversationTurnsRequest  { string conversation_id = 1; }
 message GetConversationTurnsResponse { repeated ContextTurn turns = 1; }

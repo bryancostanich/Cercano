@@ -270,7 +270,7 @@ func (c *chatPane) View() string {
 		if src := c.scrollOffset + i; src >= 0 && src < total {
 			line = allLines[src]
 		}
-		b.WriteString(ansi.Truncate(line, contentW, ""))
+		b.WriteString(padToWidth(ansi.Truncate(line, contentW, ""), contentW))
 		b.WriteString(" ")
 		if i < len(col) {
 			switch col[i] {

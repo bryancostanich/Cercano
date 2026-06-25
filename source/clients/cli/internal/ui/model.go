@@ -1770,6 +1770,7 @@ func (m Model) submitContextEdit(cv *contextView, input string) (Model, tea.Cmd)
 		cv.chat.Enqueue(input)
 		return m, nil
 	}
+	cv.busyFlag = true
 	cv.chat.AppendEntry(&Entry{Role: RoleUser, Content: input})
 	cv.chat.AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
 	cv.chat.SetTurnStatus(turnStatus{activity: "working…", start: time.Now()})
@@ -1778,28 +1779,38 @@ func (m Model) submitContextEdit(cv *contextView, input string) (Model, tea.Cmd)
 }
 
 // routeChatMsg routes a chat event to the active *contextView. On chatConfirmMsg
-// it appends the assistant rationale to the chat and raises the shared confirm
-// gate; on onNo it closes the open streaming placeholder. All other events flow
-// through chatView.Apply, with the queue auto-draining when a turn ends.
+// it fills-and-closes the open streaming placeholder with the rationale (so no
+// orphaned working… entry remains) and raises the shared confirm gate. On done
+// and error it clears the explicit busy flag. All other events flow through
+// chatView.Apply, with the queue auto-draining when a turn ends.
 func (m Model) routeChatMsg(msg tea.Msg) (Model, tea.Cmd) {
 	cv, ok := m.content.(*contextView)
 	if !ok {
 		return m, nil
 	}
 	if cm, isConfirm := msg.(chatConfirmMsg); isConfirm {
-		cv.chat.Apply(chatAssistantMsg{text: cm.assistant})
+		// Fill the open streaming placeholder with the rationale rather than
+		// appending after it — prevents a frozen working… orphan mid-transcript.
+		// Fall back to a fresh append if no placeholder is open.
+		if !cv.chat.FillOpenAssistant(cm.assistant) {
+			cv.chat.Apply(chatAssistantMsg{text: cm.assistant})
+		}
 		cv.chat.rebuild()
 		onYes, onNo := cm.onYes, cm.onNo
 		m.pendingConfirm = &confirmRequest{
 			onYes: func(m Model) (Model, tea.Cmd) { m.pendingConfirm = nil; return m, onYes },
 			onNo: func(m Model) (Model, tea.Cmd) {
 				m.pendingConfirm = nil
-				cv.chat.Apply(chatDoneMsg{}) // close the open placeholder
+				cv.busyFlag = false
 				cv.chat.rebuild()
 				return m, onNo
 			},
 		}
 		return m, progressAnimTick()
+	}
+	switch msg.(type) {
+	case chatDoneMsg, chatErrorMsg:
+		cv.busyFlag = false
 	}
 	cv.chat.Apply(msg)
 	cv.chat.rebuild()

@@ -169,6 +169,23 @@ func (c *chatView) streamingTextEntry() *Entry {
 	return nil
 }
 
+// FillOpenAssistant fills the open streaming placeholder with text and clears
+// its Streaming flag (mirrors the chatDoneMsg fill semantics). Returns true if
+// a placeholder was found and closed; false if there was no open entry (caller
+// should fall back to appending). Used by the /c confirm path so the rationale
+// replaces the working… placeholder rather than appending after it.
+func (c *chatView) FillOpenAssistant(text string) bool {
+	e := c.streamingTextEntry()
+	if e == nil {
+		return false
+	}
+	if text != "" {
+		e.Content = text
+	}
+	e.Streaming = false
+	return true
+}
+
 // rebuild re-renders the viewport content from c.entries (the authoritative
 // slice). refreshViewport calls this after pushing telemetry state. It is
 // equivalent to the old SetEntries(m.entries) call, but reads from the owned

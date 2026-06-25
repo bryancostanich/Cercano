@@ -92,11 +92,11 @@ func TestMouseReleaseCopiesDragSelection(t *testing.T) {
 	cv.plainLines = []string{"hello world"}
 	cv.selection = textSelection{Active: true, Dragging: true, Anchor: selectionPoint{Line: 0, Col: 0}, Cursor: selectionPoint{Line: 0, Col: 1}}
 
+	cv.scrollbarDragging = true
 	m := Model{
-		scrollbarTop:      0,
-		chat:              cv,
-		selectionNotice:   "",
-		scrollbarDragging: true,
+		scrollbarTop:    0,
+		chat:            cv,
+		selectionNotice: "",
 	}
 
 	next, cmd := m.Update(tea.MouseReleaseMsg{X: 5, Y: 0, Button: tea.MouseLeft})
@@ -107,7 +107,7 @@ func TestMouseReleaseCopiesDragSelection(t *testing.T) {
 	if got.selectionNotice != "copied selection" {
 		t.Fatalf("selectionNotice = %q, want copied selection", got.selectionNotice)
 	}
-	if got.scrollbarDragging {
+	if got.chat.ScrollbarDragging() {
 		t.Fatal("scrollbarDragging should be cleared")
 	}
 	if !got.chat.SelectionHasRange() {

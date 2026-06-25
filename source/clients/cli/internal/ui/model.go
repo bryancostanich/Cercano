@@ -59,10 +59,6 @@ type Model struct {
 	// used to hit-test scrollbar mouse events. Set in relayout().
 	scrollbarTop int
 
-	// scrollbarDragging is true while the user holds the mouse on the
-	// scrollbar; motion events then scrub the viewport scroll position.
-	scrollbarDragging bool
-
 	// contentScrollbarDragging is the same gesture, but for a reusable content
 	// page scrollbar rather than the main chat scrollback.
 	contentScrollbarDragging bool
@@ -500,7 +496,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.pendingConfirm != nil {
 			return m, nil
 		}
-		if m.chat.selection.Dragging {
+		if m.chat.SelectionDragging() {
 			return m, nil
 		}
 		mouse := msg.Mouse()
@@ -551,28 +547,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.MouseDown(mouse.X, mouse.Y-m.promptTop())
 			return m, nil
 		}
-		height := m.chat.Height()
-		// The bar occupies the last column (width-1). Accept the rightmost column
-		// and anything past it: terminals report a click in the final column as
-		// X=width-1 or, in some cases, X=width (one past) — an exact == match made
-		// the 1-column bar unreliable to grab. Viewport text is X < width-1, so
-		// this never steals a text click.
-		onBar := mouse.X >= m.width-1 &&
-			mouse.Y >= m.scrollbarTop && mouse.Y < m.scrollbarTop+height
-		if onBar {
-			// Grabbing the scrollbar is a scroll gesture, not a selection;
-			// cancel any in-progress selection drag so it can't hijack motion.
-			m.chat.selection.Dragging = false
-			m.scrollbarDragging = true
-			off := scrollOffsetFromClick(mouse.Y, m.scrollbarTop, height, m.chat.TotalLineCount())
-			m.chat.SetYOffset(off)
-			return m, nil
-		}
-		if m.mouseInViewportText(mouse) {
-			m.beginSelection(mouse)
-			return m, nil
-		}
-		m.clearSelection()
+		// Translate screen coords to viewport-local and forward to chatView.
+		m.chat.MouseDown(mouse.X, mouse.Y-m.scrollbarTop)
 		return m, nil
 
 	case tea.MouseMotionMsg:
@@ -586,8 +562,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.pendingConfirm != nil {
-			m.scrollbarDragging = false
-			m.chat.selection.Dragging = false
+			m.chat.StopScrollbarDrag()
+			m.chat.ClearSelectionDrag()
 			m.input.CancelDrag()
 			return m, nil
 		}
@@ -599,13 +575,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// An active scrollbar drag is unambiguous and takes priority over text
 		// selection — otherwise a left-over selection.Dragging would swallow the
 		// motion and the bar wouldn't scroll.
-		if m.scrollbarDragging {
-			height := m.chat.Height()
-			off := scrollOffsetFromClick(mouse.Y, m.scrollbarTop, height, m.chat.TotalLineCount())
-			m.chat.SetYOffset(off)
+		if m.chat.ScrollbarDragging() {
+			m.chat.scrollbarScrub(mouse.Y - m.scrollbarTop)
 			return m, nil
 		}
-		if m.chat.selection.Dragging {
+		if m.chat.SelectionDragging() {
 			m.dragMouse = mouse
 			m.updateSelection(mouse, true)
 			// Held past an edge → start the auto-scroll tick so it keeps
@@ -629,18 +603,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.MouseUp(mouse.X, mouse.Y-m.promptTop())
 			return m, nil
 		}
-		if m.chat.selection.Dragging {
-			m.updateSelection(mouse, true)
-			m.chat.selection.Dragging = false
-			if m.chat.selection.empty() {
-				m.clearSelection()
+		if m.chat.SelectionDragging() {
+			m.chat.updateSelection(mouse.X, mouse.Y-m.scrollbarTop, true)
+			m.chat.ClearSelectionDrag()
+			if m.chat.selectionEmpty() {
+				m.chat.ClearSelection()
 			} else if text := m.chat.selectedText(); text != "" {
 				m.selectionNotice = "copied selection"
-				m.scrollbarDragging = false
+				m.chat.StopScrollbarDrag()
 				return m, selectionClipboardCmd(text)
 			}
 		}
-		m.scrollbarDragging = false
+		m.chat.StopScrollbarDrag()
 		return m, nil
 
 	case tea.KeyboardEnhancementsMsg:
@@ -1007,7 +981,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dragScrollTickMsg:
 		// Continuous edge auto-scroll: while the drag is still held past an
 		// edge, scroll one line and extend the selection, then reschedule.
-		if !m.chat.selection.Dragging || !m.atScrollEdge() {
+		if !m.chat.SelectionDragging() || !m.atScrollEdge() {
 			m.dragScrolling = false
 			return m, nil
 		}

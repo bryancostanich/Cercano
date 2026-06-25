@@ -424,6 +424,8 @@ type ContextUsage struct {
 	TokensUsed int
 	ModelMax   int
 	Percent    float64
+	RawTokens  int
+	Compacting bool
 }
 
 // GetContextUsage fetches the live context-window meter for a conversation.
@@ -436,7 +438,47 @@ func (c *Client) GetContextUsage(ctx context.Context, conversationID string) (*C
 		TokensUsed: int(resp.GetTokensUsed()),
 		ModelMax:   int(resp.GetModelMax()),
 		Percent:    resp.GetPercent(),
+		RawTokens:  int(resp.GetRawTokens()),
+		Compacting: resp.GetCompacting(),
 	}, nil
+}
+
+// CompactionState mirrors GetCompactionStateResponse for the /c viewer.
+type CompactionState struct {
+	FrozenThrough       int64
+	FrozenTurns         int
+	LiveTurns           int
+	CompactedSegments   int
+	RawTokens           int
+	SentTokens          int
+	ConsolidatedSummary string
+	Compacting          bool
+}
+
+func (c *Client) GetCompactionState(ctx context.Context, conversationID string) (*CompactionState, error) {
+	resp, err := c.agent.GetCompactionState(ctx, &proto.GetCompactionStateRequest{ConversationId: conversationID})
+	if err != nil {
+		return nil, err
+	}
+	return &CompactionState{
+		FrozenThrough:       resp.GetFrozenThrough(),
+		FrozenTurns:         int(resp.GetFrozenTurns()),
+		LiveTurns:           int(resp.GetLiveTurns()),
+		CompactedSegments:   int(resp.GetCompactedSegments()),
+		RawTokens:           int(resp.GetRawTokens()),
+		SentTokens:          int(resp.GetSentTokens()),
+		ConsolidatedSummary: resp.GetConsolidatedSummary(),
+		Compacting:          resp.GetCompacting(),
+	}, nil
+}
+
+// ExportContext returns the full uncapped raw history as a JSON []llm.Message.
+func (c *Client) ExportContext(ctx context.Context, conversationID string) (string, error) {
+	resp, err := c.agent.ExportContext(ctx, &proto.ExportContextRequest{ConversationId: conversationID})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetJson(), nil
 }
 
 // ContextTurn is one display-ready turn summary from GetConversationTurns.

@@ -90,7 +90,7 @@ type Model struct {
 	splashShown bool // hide after first user input
 	splash      banner.AnimModel
 	entries     []*Entry
-	chat        *chatView
+	chat        chatView
 	selection   textSelection
 	selectionNotice    string
 	input              promptInput
@@ -446,9 +446,6 @@ func dragScrollTick() tea.Cmd {
 // atScrollEdge reports whether the last drag pointer position sits past the top
 // or bottom edge of the viewport — the condition for edge auto-scroll.
 func (m Model) atScrollEdge() bool {
-	if m.chat == nil {
-		return false
-	}
 	row := m.dragMouse.Y - m.scrollbarTop
 	return row < 0 || row >= m.chat.Height()
 }
@@ -517,10 +514,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		var cmd tea.Cmd
-		if m.chat != nil {
-			m.chat.vp, cmd = m.chat.vp.Update(msg)
-		}
+		cmd := m.chat.Update(msg)
 		return m, cmd
 
 	case tea.MouseClickMsg:
@@ -558,10 +552,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.MouseDown(mouse.X, mouse.Y-m.promptTop())
 			return m, nil
 		}
-		height := 0
-		if m.chat != nil {
-			height = m.chat.Height()
-		}
+		height := m.chat.Height()
 		// The bar occupies the last column (width-1). Accept the rightmost column
 		// and anything past it: terminals report a click in the final column as
 		// X=width-1 or, in some cases, X=width (one past) — an exact == match made
@@ -574,10 +565,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// cancel any in-progress selection drag so it can't hijack motion.
 			m.selection.Dragging = false
 			m.scrollbarDragging = true
-			if m.chat != nil {
-				off := scrollOffsetFromClick(mouse.Y, m.scrollbarTop, height, m.chat.TotalLineCount())
-				m.chat.SetYOffset(off)
-			}
+			off := scrollOffsetFromClick(mouse.Y, m.scrollbarTop, height, m.chat.TotalLineCount())
+			m.chat.SetYOffset(off)
 			return m, nil
 		}
 		if m.mouseInViewportText(mouse) {
@@ -612,11 +601,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// selection — otherwise a left-over selection.Dragging would swallow the
 		// motion and the bar wouldn't scroll.
 		if m.scrollbarDragging {
-			if m.chat != nil {
-				height := m.chat.Height()
-				off := scrollOffsetFromClick(mouse.Y, m.scrollbarTop, height, m.chat.TotalLineCount())
-				m.chat.SetYOffset(off)
-			}
+			height := m.chat.Height()
+			off := scrollOffsetFromClick(mouse.Y, m.scrollbarTop, height, m.chat.TotalLineCount())
+			m.chat.SetYOffset(off)
 			return m, nil
 		}
 		if m.selection.Dragging {
@@ -810,10 +797,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.Matches(msg, keys.ScrollKeys) {
 			// Route navigation keys to the scrollback viewport. Keeps the
 			// textinput's normal arrow / line-edit semantics intact.
-			var cmd tea.Cmd
-			if m.chat != nil {
-				m.chat.vp, cmd = m.chat.vp.Update(msg)
-			}
+			cmd := m.chat.Update(msg)
 			return m, cmd
 		}
 		unmodifiedArrow := msg.Key().Mod == 0
@@ -1451,9 +1435,6 @@ func (m Model) streamingTextEntry() *Entry {
 //	─────   (1)
 //	status  (1)
 func (m *Model) relayout() {
-	if m.chat == nil {
-		return
-	}
 	contentW := m.width
 	if contentW < 20 {
 		contentW = 20
@@ -1559,9 +1540,7 @@ func (m Model) handleCtrlCKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 func (m Model) promptTop() int {
 	top := m.contentTop()
-	if m.chat != nil {
-		top += m.chat.Height()
-	}
+	top += m.chat.Height()
 	if m.recap != "" {
 		top += 2 // blank spacer line + the recap line
 	}
@@ -1596,9 +1575,6 @@ func (m Model) splashEffective() bool {
 // current width. Delegates to chatView.SetEntries; syncs turn telemetry and
 // focusedToolIdx first so the render has current state.
 func (m *Model) refreshViewport() {
-	if m.chat == nil {
-		return
-	}
 	m.chat.SetFocusedTool(m.focusedToolIdx)
 	m.chat.SetTurnStatus(turnStatus{
 		activity: m.turnActivity,
@@ -2387,9 +2363,6 @@ func (m Model) renderRecap() string {
 // renderViewportWithScrollbar renders the chat viewport with a one-column
 // vertical scrollbar on its right edge. Delegates to chatView.View.
 func (m Model) renderViewportWithScrollbar() string {
-	if m.chat == nil {
-		return ""
-	}
 	return m.chat.View(m.renderSelectionOnLine)
 }
 

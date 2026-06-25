@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"cercano/source/clients/cli/internal/theme"
 	"cercano/source/server/pkg/agentclient"
 )
@@ -12,7 +14,7 @@ func expandTestView() *contextView {
 	cv := &contextView{
 		width: 70, height: 30,
 		palette: theme.Cracker(), styles: theme.NewStyles(theme.Cracker()),
-		convID: "c1", expanded: map[string]bool{},
+		convID: "c1", expanded: map[string]bool{}, focusedTurn: -1,
 	}
 	cv.snapshot.Usage = &agentclient.ContextUsage{ModelMax: 1000}
 	return cv
@@ -59,5 +61,56 @@ func TestContextView_OneLineTurnNoArrow(t *testing.T) {
 	out := stripAnsiCSI(strings.Join(cv.turnsLinesOnly(), "\n"))
 	if strings.Contains(out, "▸") || strings.Contains(out, "▾") {
 		t.Errorf("non-overflowing turn must have no arrow:\n%s", out)
+	}
+}
+
+func TestContextView_ClickArrowToggles(t *testing.T) {
+	cv := expandTestView()
+	cv.snapshot.Turns = []agentclient.ContextTurn{
+		{ID: "a", Role: "assistant", Kind: "text", Body: "L1\nL2\nL3\nL4\nL5\nL6"},
+	}
+	_, meta := cv.turnsLines()
+	// find the arrow row (header of the expandable turn)
+	row := -1
+	for i, m := range meta {
+		if m.arrowCell {
+			row = i
+			break
+		}
+	}
+	if row < 0 {
+		t.Fatal("no arrow cell found")
+	}
+	if !cv.handleClick(0, row) { // x=0 (arrow column), yLocal=row (scroll offset 0)
+		t.Fatal("click on arrow should be handled")
+	}
+	if !cv.expanded["a"] {
+		t.Error("click should have expanded turn a")
+	}
+	// click off the arrow column → no toggle
+	cv.handleClick(40, row)
+	if !cv.expanded["a"] {
+		t.Error("off-arrow click should not collapse")
+	}
+}
+
+func TestContextView_TabFocusEnterToggles(t *testing.T) {
+	m := modelWithContextView()
+	cv := m.content.(*contextView)
+	cv.expanded = map[string]bool{}
+	cv.focusedTurn = -1
+	cv.snapshot.Turns = []agentclient.ContextTurn{
+		{ID: "a", Role: "assistant", Kind: "text", Body: "L1\nL2\nL3\nL4\nL5"},
+	}
+	// tab focuses the first expandable turn
+	m, _ = m.handleContextViewKey(cv, tea.KeyPressMsg{Code: tea.KeyTab})
+	if cv.focusedTurn != 0 {
+		t.Fatalf("tab should focus turn 0, got %d", cv.focusedTurn)
+	}
+	// enter with empty input toggles the focused turn (not submit)
+	m.input.SetValue("")
+	m, _ = m.handleContextViewKey(cv, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !cv.expanded["a"] {
+		t.Error("enter on focused turn (empty input) should expand it")
 	}
 }

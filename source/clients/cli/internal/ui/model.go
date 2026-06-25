@@ -545,6 +545,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.contentScrollbarDragging = false
+			if cv, ok := m.content.(*contextView); ok && mouse.Button == tea.MouseLeft {
+				if cv.handleClick(mouse.X, mouse.Y-m.contentTop()) {
+					return m, nil
+				}
+			}
 			return m, nil
 		}
 		if mouse.Button != tea.MouseLeft {
@@ -2066,10 +2071,19 @@ func (m Model) handleContextViewKey(cv *contextView, msg tea.KeyPressMsg) (Model
 	case "enter":
 		text := strings.TrimSpace(m.input.Value())
 		if text == "" {
+			if cv.focusedTurn >= 0 && cv.focusedTurn < len(cv.snapshot.Turns) {
+				cv.toggleExpand(cv.snapshot.Turns[cv.focusedTurn].ID)
+			}
 			return m, nil
 		}
 		m.input.SetValue("")
 		return m, cv.pane.Submit(text)
+	case "tab":
+		cv.focusNextExpandable(+1)
+		return m, nil
+	case "shift+tab":
+		cv.focusNextExpandable(-1)
+		return m, nil
 	case "up":
 		// Pop the last queued message back into the prompt bar for editing
 		// (mirrors d808952 unstageLastQueued behaviour in the main chat).

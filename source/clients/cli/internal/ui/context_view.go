@@ -361,6 +361,46 @@ func (c *contextView) renderHeader() string {
 }
 
 
+// handleClick toggles a turn's expansion when the click lands on its arrow cell.
+// yLocal is the click row relative to the page's top content row (i.e. after
+// subtracting m.contentTop() from the raw mouse Y).
+func (c *contextView) handleClick(x, yLocal int) bool {
+	turnsH, _ := c.regionHeights()
+	if yLocal < 0 || yLocal >= turnsH {
+		return false // outside the turns region
+	}
+	_, meta := c.turnsLines()
+	idx := c.scrollOffset + yLocal
+	if idx < 0 || idx >= len(meta) {
+		return false
+	}
+	m := meta[idx]
+	if m.arrowCell && x <= 1 { // arrow occupies the leading 1-2 columns
+		c.toggleExpand(m.turnID)
+		return true
+	}
+	return false
+}
+
+// focusNextExpandable advances focusedTurn by dir (+1 or -1) to the next index
+// where turnExpandable returns true, wrapping around. No-op if no expandable turns.
+func (c *contextView) focusNextExpandable(dir int) {
+	n := len(c.snapshot.Turns)
+	if n == 0 {
+		return
+	}
+	for step := 1; step <= n; step++ {
+		i := (c.focusedTurn + dir*step + n*step) % n
+		if i < 0 {
+			i += n
+		}
+		if c.turnExpandable(c.snapshot.Turns[i]) {
+			c.focusedTurn = i
+			return
+		}
+	}
+}
+
 // --- scroller (mirrors runtimeDashboard) ---
 
 func (c *contextView) ScrollBy(delta int) { c.scrollOffset += delta; c.clampScroll() }

@@ -30,6 +30,8 @@ type contextView struct {
 	scrollOffset    int
 	showingProposal bool
 	proposal        agentclient.Proposal
+	expanded        map[string]bool
+	focusedTurn     int
 
 	driver *contextManagerDriver
 	pane   *chatPane
@@ -65,7 +67,7 @@ func contextRefreshTick() tea.Cmd {
 }
 
 func newContextView(ag *agentclient.Client, p theme.Palette, s theme.Styles, convID string, w, h int) (*contextView, tea.Cmd) {
-	cv := &contextView{palette: p, styles: s, agent: ag, convID: convID, width: w, height: h}
+	cv := &contextView{palette: p, styles: s, agent: ag, convID: convID, width: w, height: h, expanded: map[string]bool{}, focusedTurn: -1}
 	cv.snapshot = loadContextSnapshot(ag, convID)
 	cv.driver = &contextManagerDriver{
 		agent:  ag,
@@ -158,7 +160,7 @@ func (c *contextView) markedForDelete(id string) bool {
 // the panel.
 func (c *contextView) View() string {
 	turnsH, paneH := c.regionHeights()
-	turnsBlock := c.renderScrollableContent(strings.Join(c.turnsLines(), "\n"), turnsH)
+	turnsBlock := c.renderScrollableContent(strings.Join(c.turnsLinesOnly(), "\n"), turnsH)
 	paneBlock := padLines("", paneH)
 	if c.pane != nil {
 		c.pane.SetSize(c.width, paneH)
@@ -186,22 +188,141 @@ func (c *contextView) regionHeights() (turnsH, paneH int) {
 	return turnsH, paneH
 }
 
-// turnsLines renders the header + the turns list (or the empty/error states).
-func (c *contextView) turnsLines() []string {
-	lines := []string{c.renderHeader(), ""}
+// turnLineMeta describes each line emitted by turnsLines for hit-testing (Task 3).
+type turnLineMeta struct {
+	turnID    string
+	header    bool // first line of the turn (carries the arrow)
+	arrowCell bool // header line of an expandable turn (clickable)
+}
+
+// turnsLines renders the header + turns list and returns parallel line/meta slices.
+func (c *contextView) turnsLines() ([]string, []turnLineMeta) {
+	var lines []string
+	var meta []turnLineMeta
+	add := func(s string, m turnLineMeta) { lines = append(lines, s); meta = append(meta, m) }
+	add(c.renderHeader(), turnLineMeta{})
+	add("", turnLineMeta{})
 	switch {
 	case c.convID == "":
-		lines = append(lines, c.styles.Muted.Render("no conversation yet"))
+		add(c.styles.Muted.Render("no conversation yet"), turnLineMeta{})
 	case c.snapshot.TurnsErr != nil:
-		lines = append(lines, c.styles.Error.Render("turns unavailable: "+c.snapshot.TurnsErr.Error()))
+		add(c.styles.Error.Render("turns unavailable: "+c.snapshot.TurnsErr.Error()), turnLineMeta{})
 	case len(c.snapshot.Turns) == 0:
-		lines = append(lines, c.styles.Muted.Render("context is empty"))
+		add(c.styles.Muted.Render("context is empty"), turnLineMeta{})
 	default:
 		for i, t := range c.snapshot.Turns {
-			lines = append(lines, c.renderTurn(i, t))
+			c.appendTurn(&lines, &meta, i, t)
 		}
 	}
-	return lines
+	return lines, meta
+}
+
+// turnsLinesOnly returns only the lines (discarding meta); used by View/ScrollState.
+func (c *contextView) turnsLinesOnly() []string { l, _ := c.turnsLines(); return l }
+
+// toggleExpand toggles the expanded state for a turn by ID.
+func (c *contextView) toggleExpand(id string) {
+	if c.expanded == nil {
+		c.expanded = map[string]bool{}
+	}
+	c.expanded[id] = !c.expanded[id]
+}
+
+// turnBodyLines returns the body wrapped to content width (falls back to Preview).
+func (c *contextView) turnBodyLines(t agentclient.ContextTurn) []string {
+	body := t.Body
+	if strings.TrimSpace(body) == "" {
+		body = t.Preview
+	}
+	w := dashboardPanelWidth(c.width) - 4 // room for arrow + token gutter
+	if w < 8 {
+		w = 8
+	}
+	return strings.Split(ansi.Wrap(body, w, ""), "\n")
+}
+
+// collapsedCount returns the number of body lines shown when a turn is collapsed.
+func (c *contextView) collapsedCount(t agentclient.ContextTurn) int {
+	if t.Role == "assistant" {
+		return 3
+	}
+	return 1
+}
+
+// turnExpandable reports whether a turn should show an expand arrow.
+func (c *contextView) turnExpandable(t agentclient.ContextTurn) bool {
+	if t.Truncated {
+		return true
+	}
+	return len(c.turnBodyLines(t)) > c.collapsedCount(t)
+}
+
+// appendTurn pushes the rendered lines + meta for one turn.
+func (c *contextView) appendTurn(lines *[]string, meta *[]turnLineMeta, i int, t agentclient.ContextTurn) {
+	add := func(s string, m turnLineMeta) { *lines = append(*lines, s); *meta = append(*meta, m) }
+
+	bodyLines := c.turnBodyLines(t)
+	expandable := c.turnExpandable(t)
+	open := c.expanded[t.ID]
+
+	shown := bodyLines
+	if !open {
+		limit := c.collapsedCount(t)
+		if limit > len(bodyLines) {
+			limit = len(bodyLines)
+		}
+		shown = bodyLines[:limit]
+	}
+
+	// Arrow gutter
+	arrow := "  "
+	if expandable {
+		if open {
+			arrow = "▾ "
+		} else {
+			arrow = "▸ "
+		}
+	}
+
+	// Build the header line
+	if c.markedForDelete(t.ID) {
+		badge := c.styles.Error.Render("✗ [" + t.Role + "]")
+		toks := c.styles.Dim.Render(fmt.Sprintf("≈%s", formatTokens(t.EstTokens)))
+		firstLine := ""
+		if len(shown) > 0 {
+			firstLine = shown[0]
+		}
+		header := c.styles.Dim.Render(fmt.Sprintf("%s%s %s  %s", arrow, badge, toks, firstLine))
+		add(header, turnLineMeta{turnID: t.ID, header: true, arrowCell: expandable})
+	} else {
+		badge := c.styles.Info.Render("[" + t.Role + "]")
+		switch t.Kind {
+		case "tool_use", "tool_result":
+			badge = c.styles.Muted.Render("[" + t.Kind + "]")
+		}
+		if i == c.focusedTurn {
+			badge = c.styles.Bright.Render("[" + t.Role + "]")
+		}
+		toks := c.styles.Muted.Render(fmt.Sprintf("≈%s", formatTokens(t.EstTokens)))
+		firstLine := ""
+		if len(shown) > 0 {
+			firstLine = shown[0]
+		}
+		header := fmt.Sprintf("%s%s %s  %s", arrow, badge, toks, firstLine)
+		add(header, turnLineMeta{turnID: t.ID, header: true, arrowCell: expandable})
+	}
+
+	// Remaining shown lines with hang-indent
+	if len(shown) > 1 {
+		for _, l := range shown[1:] {
+			add("    "+l, turnLineMeta{turnID: t.ID})
+		}
+	}
+
+	// Truncated indicator when expanded
+	if open && t.Truncated {
+		add(c.styles.Dim.Render("    …(truncated)"), turnLineMeta{turnID: t.ID})
+	}
 }
 
 // padToWidth right-pads s with spaces to exactly w visible columns (ANSI-aware),
@@ -239,20 +360,6 @@ func (c *contextView) renderHeader() string {
 		formatThousands(u.TokensUsed), formatThousands(u.ModelMax), pct, bar)
 }
 
-func (c *contextView) renderTurn(i int, t agentclient.ContextTurn) string {
-	if c.markedForDelete(t.ID) {
-		badge := c.styles.Error.Render("✗ [" + t.Role + "]")
-		toks := c.styles.Dim.Render(fmt.Sprintf("≈%s", formatTokens(t.EstTokens)))
-		return c.styles.Dim.Render(fmt.Sprintf("%s %s  %s", badge, toks, t.Preview))
-	}
-	badge := c.styles.Info.Render("[" + t.Role + "]")
-	switch t.Kind {
-	case "tool_use", "tool_result":
-		badge = c.styles.Muted.Render("[" + t.Kind + "]")
-	}
-	toks := c.styles.Muted.Render(fmt.Sprintf("≈%s", formatTokens(t.EstTokens)))
-	return fmt.Sprintf("%s %s  %s", badge, toks, t.Preview)
-}
 
 // --- scroller (mirrors runtimeDashboard) ---
 
@@ -260,7 +367,7 @@ func (c *contextView) ScrollBy(delta int) { c.scrollOffset += delta; c.clampScro
 func (c *contextView) ScrollTo(offset int) { c.scrollOffset = offset; c.clampScroll() }
 func (c *contextView) ScrollState() contentPageScrollState {
 	turnsH, _ := c.regionHeights()
-	total := len(c.turnsLines())
+	total := len(c.turnsLinesOnly())
 	return contentPageScrollState{Total: total, Height: turnsH, Offset: clampInt(c.scrollOffset, 0, maxInt(0, total-turnsH))}
 }
 func (c *contextView) clampScroll() { c.scrollOffset = c.ScrollState().Offset }

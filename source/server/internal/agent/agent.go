@@ -75,6 +75,7 @@ type Agent struct {
 	meterModel    string // active local model name, used as Max() baseline
 	contextLoader ContextLoader
 	recap         RecapScheduler
+	compaction    CompactionScheduler
 }
 
 // RecapScheduler requests a (debounced) recap regeneration for a conversation.
@@ -98,6 +99,34 @@ func (a *Agent) ScheduleRecap(conversationID string) {
 	if a.recap != nil {
 		a.recap.Schedule(conversationID)
 	}
+}
+
+// CompactionScheduler requests background context compaction for a conversation
+// and can run it synchronously. Implemented by *compactiongen.Generator; an
+// interface so agent doesn't import the generator package.
+type CompactionScheduler interface {
+	Schedule(conversationID string)
+	CompactNow(ctx context.Context, conversationID string) error
+}
+
+// WithCompactionScheduler attaches the background compaction generator.
+func WithCompactionScheduler(cs CompactionScheduler) AgentOption {
+	return func(a *Agent) { a.compaction = cs }
+}
+
+// ScheduleCompaction requests a debounced compaction pass. Nil-safe.
+func (a *Agent) ScheduleCompaction(conversationID string) {
+	if a.compaction != nil {
+		a.compaction.Schedule(conversationID)
+	}
+}
+
+// CompactNow runs a synchronous compaction pass. Nil-safe (returns nil).
+func (a *Agent) CompactNow(ctx context.Context, conversationID string) error {
+	if a.compaction != nil {
+		return a.compaction.CompactNow(ctx, conversationID)
+	}
+	return nil
 }
 
 // NewAgent creates a new Agent orchestrator.
@@ -206,6 +235,7 @@ func (a *Agent) storeConversationTurn(ctx context.Context, conversationID, origi
 			fmt.Fprintf(os.Stderr, "[persistent-store] Append(assistant, %s) failed: %v\n", conversationID, err)
 		}
 		a.ScheduleRecap(conversationID)
+		a.ScheduleCompaction(conversationID)
 	}
 }
 

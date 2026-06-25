@@ -2357,12 +2357,23 @@ func (m Model) renderContextMeter() string {
 	fillN := int(pct * float64(cells))
 	bar := m.styles.MeterFill.Render(strings.Repeat("█", fillN)) +
 		m.styles.MeterEmpty.Render(strings.Repeat("░", cells-fillN))
+	// While a background compaction pass runs, the meter shows an animated
+	// "compacting…" sweep in place of the bar.
+	if m.compacting {
+		return m.styles.Bright.Render("context") + "  " +
+			animateSpinnerGlyph() + " " + animateLimeSweep("compacting…")
+	}
 	pctStyle := m.styles.Muted
 	switch {
 	case pct >= 0.9:
 		pctStyle = m.styles.Error
 	case pct >= 0.7:
 		pctStyle = m.styles.Warn
+	}
+	badge := ""
+	if m.ctxRaw > used && used > 0 {
+		saved := int(100 * (1 - float64(used)/float64(m.ctxRaw)))
+		badge = m.styles.Muted.Render(fmt.Sprintf("  ·  ▣ %d%%↓", saved))
 	}
 	return strings.Join([]string{
 		m.styles.Muted.Render("ctx "),
@@ -2373,6 +2384,7 @@ func (m Model) renderContextMeter() string {
 		m.styles.Muted.Render(formatTokens(max)),
 		m.styles.Muted.Render(" "),
 		pctStyle.Render(fmt.Sprintf("%d%%", int(pct*100))),
+		badge,
 	}, "")
 }
 

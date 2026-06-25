@@ -26,3 +26,40 @@ Hard stops: design ties, irreversible actions, 5 failed fixes on one issue.
 
 ## OUTCOME
 All review gates passed. Branch `cedit-rework` complete (4 commits: confirm refactor, decision doc, /c rewire, error-fix). NOT merged to main, NOT pushed — awaiting user's per-act merge authorization on return.
+
+---
+
+# Autonomous Run #2 — 2026-06-24 · chatView switchover (step 1)
+
+## Status (end-of-run summary — filled at completion)
+
+_In progress._
+
+**Objective (handed off):** Complete the chatView switchover for the main page.
+Concretely: execute the approved **step 1** of the chat-view migration — extract
+the main page's transcript rendering + viewport into a new `chatView` component
+that `Model` delegates to, with **zero behavior change**. Done = the main page
+renders via `chatView` with full passing test coverage (byte-identical golden
+parity + direct `chatView` unit tests). Spec/plan:
+`docs/features/cli/chat-view/{design,plan}.md` (both approved "go" before this run).
+
+**Mode:** subagent-driven (implement + review + fix per task, final review).
+Worktree `chat-view`. Ranking: correctness > cleanliness > future cost.
+Hard stops: tied options after step 5, irreversible action, 5 failed fixes on one
+symptom. Do NOT push. Do NOT merge to main.
+
+## Approved decisions (made with Bryan in brainstorming — not autonomous forks)
+
+- **Approach:** extract-and-generalize — lift the main page's real transcript code
+  into `chatView`; `/c` adopts it last; retire the thin `renderChatEntry`. (design.md)
+- **Step-1 boundary:** `chatView` owns entry rendering + viewport + scrollbar;
+  `Model` keeps entries, the streaming state machine, mouse selection, scrollbar
+  drag (those move in later steps). (design.md)
+- **Selection seam:** `chatView.View(selOverlay func(string,int) string)` takes the
+  host's `renderSelectionOnLine` as a callback in step 1. (plan.md)
+- **Placeholder seam:** `chatView` renders the pre-token "working…" line from an
+  injected `turnStatus`, not by reaching into `Model`. (plan.md)
+
+## Decision log (7-step protocol; one entry per fork)
+
+_(none yet)_

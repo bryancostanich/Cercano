@@ -99,6 +99,9 @@ type Model struct {
 
 	tokIn, tokOut  int
 	cumIn, cumOut  int
+	ctxRaw         int
+	compacting     bool
+	ctxPollTicks   int
 	lastLatencyMs  int
 	modelMaxTokens int
 	lastModel      string // local model name (from config)
@@ -366,8 +369,10 @@ type streamEndMsg struct{}
 
 // ctxUsageMsg carries the result of an asynchronous GetContextUsage call.
 type ctxUsageMsg struct {
-	Used, Max int
-	Percent   float64
+	Used, Max  int
+	Percent    float64
+	Raw        int
+	Compacting bool
 }
 
 // fetchContextUsage produces a tea.Cmd that asks the agent for the live
@@ -380,7 +385,10 @@ func fetchContextUsage(ag *agentclient.Client, convID string) tea.Cmd {
 		if err != nil || u == nil {
 			return ctxUsageMsg{}
 		}
-		return ctxUsageMsg{Used: u.TokensUsed, Max: u.ModelMax, Percent: u.Percent}
+		return ctxUsageMsg{
+				Used: u.TokensUsed, Max: u.ModelMax, Percent: u.Percent,
+				Raw: u.RawTokens, Compacting: u.Compacting,
+			}
 	}
 }
 
@@ -409,6 +417,17 @@ type progressAnimTickMsg time.Time
 
 func progressAnimTick() tea.Cmd {
 	return tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg { return progressAnimTickMsg(t) })
+}
+
+// ctxUsageTickMsg fires after a 2-second delay to re-poll context usage during
+// the background-compaction window.
+type ctxUsageTickMsg struct{}
+
+// ctxUsageTick polls the context meter on a slow cadence so the footer catches
+// background compaction (which fires ~debounce seconds after a turn, off the
+// request path).
+func ctxUsageTick() tea.Cmd {
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return ctxUsageTickMsg{} })
 }
 
 // Update is the Bubble Tea reducer.
@@ -832,7 +851,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Max > 0 {
 			m.modelMaxTokens = msg.Max
 		}
-		return m, nil
+		m.ctxRaw = msg.Raw
+		wasCompacting := m.compacting
+		m.compacting = msg.Compacting
+		// Kick the per-frame animation loop when a pass starts.
+		var cmd tea.Cmd
+		if m.compacting && !wasCompacting {
+			cmd = progressAnimTick()
+		}
+		return m, cmd
 
 	case recapLoadedMsg:
 		// When the recap's presence toggles, the recap line claims (or frees) a
@@ -896,7 +923,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Poll the agent for the authoritative context-window usage on the
 		// same conversation. Result arrives as a ctxUsageMsg and overrides
 		// the local cumIn approximation we incremented during streaming.
-		done := tea.Batch(fetchContextUsage(m.agent, m.convID), fetchRecap(m.agent, m.convID))
+		m.ctxPollTicks = 20 // ~40s warm window covers the compaction debounce
+		done := tea.Batch(fetchContextUsage(m.agent, m.convID), fetchRecap(m.agent, m.convID), ctxUsageTick())
 		// Drain the next queued message: each completed turn fires the next.
 		if nextMsg, ok := m.chat.DrainNext(); ok {
 			m.relayout()
@@ -928,6 +956,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd, _ := m.chat.DragScrollTick()
 		return m, cmd
 
+	case ctxUsageTickMsg:
+		if m.convID == "" {
+			return m, nil
+		}
+		if m.ctxPollTicks > 0 {
+			m.ctxPollTicks--
+		}
+		// Keep polling while we're in a warm window after a turn, or actively
+		// compacting; otherwise let the loop go idle until the next turn.
+		if m.ctxPollTicks > 0 || m.compacting {
+			return m, tea.Batch(fetchContextUsage(m.agent, m.convID), ctxUsageTick())
+		}
+		return m, fetchContextUsage(m.agent, m.convID) // one final settle, no re-tick
+
 	case progressAnimTickMsg:
 		// Keep ticking while there's an assistant entry awaiting its first
 		// token — that's when the animated status line is visible. Each tick
@@ -941,6 +983,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Also keep ticking while the /c chat is busy so its animated
 		// status line repaints on every frame.
 		if cv, ok := m.content.(*contextView); ok && cv.busy() {
+			return m, progressAnimTick()
+		}
+		if m.compacting {
 			return m, progressAnimTick()
 		}
 		return m, nil

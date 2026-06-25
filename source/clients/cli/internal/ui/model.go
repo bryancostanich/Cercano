@@ -102,6 +102,7 @@ type Model struct {
 	ctxRaw         int
 	compacting     bool
 	ctxPollTicks   int
+	ctxPolling     bool // a ctxUsageTick loop is currently running (avoid double-scheduling)
 	lastLatencyMs  int
 	modelMaxTokens int
 	lastModel      string // local model name (from config)
@@ -924,7 +925,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// same conversation. Result arrives as a ctxUsageMsg and overrides
 		// the local cumIn approximation we incremented during streaming.
 		m.ctxPollTicks = 20 // ~40s warm window covers the compaction debounce
-		done := tea.Batch(fetchContextUsage(m.agent, m.convID), fetchRecap(m.agent, m.convID), ctxUsageTick())
+		// Only spawn the poll ticker if one isn't already running, so rapid
+		// back-to-back turns don't multiply concurrent ctxUsageTick loops.
+		pollCmds := []tea.Cmd{fetchContextUsage(m.agent, m.convID), fetchRecap(m.agent, m.convID)}
+		if !m.ctxPolling {
+			m.ctxPolling = true
+			pollCmds = append(pollCmds, ctxUsageTick())
+		}
+		done := tea.Batch(pollCmds...)
 		// Drain the next queued message: each completed turn fires the next.
 		if nextMsg, ok := m.chat.DrainNext(); ok {
 			m.relayout()
@@ -968,6 +976,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.ctxPollTicks > 0 || m.compacting {
 			return m, tea.Batch(fetchContextUsage(m.agent, m.convID), ctxUsageTick())
 		}
+		m.ctxPolling = false                          // loop goes idle; the next turn restarts it
 		return m, fetchContextUsage(m.agent, m.convID) // one final settle, no re-tick
 
 	case progressAnimTickMsg:

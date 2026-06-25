@@ -15,6 +15,30 @@ import (
 	"cercano/source/server/pkg/agentclient"
 )
 
+// resumeRequestedMsg is emitted when the user selects a conversation; the root
+// model turns it into applyResume + an active-conversation switch.
+type resumeRequestedMsg struct {
+	ConversationID string
+	Title          string
+}
+
+// relativeTime renders a coarse "5m ago" / "3h ago" / "2d ago" string.
+func relativeTime(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < 60*time.Second:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	case d < 7*24*time.Hour:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	default:
+		return t.Format("2006-01-02")
+	}
+}
+
 // histRow is one conversation in the history list.
 type histRow struct {
 	id, name, recap, meta string

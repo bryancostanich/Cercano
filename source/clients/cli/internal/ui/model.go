@@ -490,8 +490,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// -r boot: open the history picker on the first sized frame.
 		if m.openHistoryOnStart && m.width > 0 {
 			m.openHistoryOnStart = false
-			hp, _ := newHistoryPicker(m.agent, m.palette, m.styles, m.width, m.height, m.convID)
-			m.content = hp
+			hv, _ := newHistoryView(m.agent, m.palette, m.styles, m.convID, m.width, m.height)
+			m.content = hv
 		}
 		// Force a full alt-screen redraw on resize. Without ClearScreen,
 		// rows in the terminal that were occupied at the OLD size but not
@@ -1164,8 +1164,8 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		ed, _ := newConfigEditor(m.agent, m.palette, m.styles, m.width, m.height)
 		m.content = ed
 	case slash.ResultOpenHistoryPicker:
-		hp, _ := newHistoryPicker(m.agent, m.palette, m.styles, m.width, m.height, m.convID)
-		m.content = hp
+		hv, _ := newHistoryView(m.agent, m.palette, m.styles, m.convID, m.width, m.height)
+		m.content = hv
 	case slash.ResultOpenRuntimeDashboard:
 		dashboard, _ := newRuntimeDashboard(m.agent, m.palette, m.styles, m.width, m.height)
 		m.content = dashboard

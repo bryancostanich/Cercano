@@ -338,10 +338,67 @@ func (c *chatView) SetSize(w, h int) {
 	c.vp.SetHeight(h)
 }
 
-// SetFocusedTool sets the tool entry index that is currently keyboard-focused.
-// Pass -1 to clear (input has focus).
-func (c *chatView) SetFocusedTool(idx int) {
-	c.focusedToolIdx = idx
+// ── tool-entry navigation ──────────────────────────────────────────────────
+
+// InToolNav reports whether the user is in tool-entry navigation mode (a tool
+// entry holds keyboard focus rather than the input box).
+func (c *chatView) InToolNav() bool { return c.focusedToolIdx >= 0 }
+
+// EnterToolNav enters tool-entry navigation mode by focusing the most-recent
+// tool entry. Returns true if there are tool entries to navigate; false (and
+// no state change) when scrollback has no tool entries.
+func (c *chatView) EnterToolNav() bool {
+	indices := c.toolEntryIndices()
+	if len(indices) == 0 {
+		return false
+	}
+	c.focusedToolIdx = indices[len(indices)-1]
+	return true
+}
+
+// ExitToolNav exits tool-entry navigation mode, returning focus to the input
+// box. Safe to call when not in nav mode.
+func (c *chatView) ExitToolNav() {
+	c.focusedToolIdx = -1
+}
+
+// NavPrev moves focus to the previous (earlier) tool entry, clamped at the
+// first tool entry. No-op when not in nav mode or already at the top.
+func (c *chatView) NavPrev() {
+	indices := c.toolEntryIndices()
+	for i, idx := range indices {
+		if idx == c.focusedToolIdx {
+			if i > 0 {
+				c.focusedToolIdx = indices[i-1]
+			}
+			break
+		}
+	}
+}
+
+// NavNext moves focus to the next (later) tool entry, clamped at the last
+// tool entry. No-op when not in nav mode or already at the bottom.
+func (c *chatView) NavNext() {
+	indices := c.toolEntryIndices()
+	for i, idx := range indices {
+		if idx == c.focusedToolIdx {
+			if i < len(indices)-1 {
+				c.focusedToolIdx = indices[i+1]
+			}
+			break
+		}
+	}
+}
+
+// ToggleFocusedFold toggles the Folded state of the currently focused tool
+// entry. No-op when not in nav mode or the focused entry has no tool data.
+func (c *chatView) ToggleFocusedFold() {
+	if c.focusedToolIdx < 0 || c.focusedToolIdx >= len(c.entries) {
+		return
+	}
+	if t := c.entries[c.focusedToolIdx].Tool; t != nil {
+		t.Folded = !t.Folded
+	}
 }
 
 // SetTurnStatus updates the live turn telemetry used while a streaming turn is

@@ -21,10 +21,9 @@ func (stubDriver) Submit(_ context.Context, _ string) tea.Cmd {
 
 func modelWithContextView() Model {
 	m := Model{
-		palette:        theme.Cracker(),
-		styles:         theme.NewStyles(theme.Cracker()),
-		convID:         "c1",
-		focusedToolIdx: -1,
+		palette: theme.Cracker(),
+		styles:  theme.NewStyles(theme.Cracker()),
+		convID:  "c1",
 	}
 	m.input = newPromptInput()
 	m.input.Focus()

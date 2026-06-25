@@ -16,7 +16,7 @@ var updateGolden = flag.Bool("update", false, "regenerate chatview golden files"
 // refreshViewport/renderViewportWithScrollbar). Host reserves 2 cols (gap +
 // scrollbar), mirroring relayout's contentW-2.
 func newRenderModel(width, height int) Model {
-	m := Model{styles: theme.NewStyles(theme.Cracker()), palette: theme.Cracker(), focusedToolIdx: -1}
+	m := Model{styles: theme.NewStyles(theme.Cracker()), palette: theme.Cracker()}
 	m.chat = newChatView(m.styles, m.palette, "", "", width-2, height)
 	return m
 }

@@ -25,7 +25,17 @@ type ChatDriver interface {
 // tea.Msg values routed by the model to the active pane.
 type chatStatusMsg struct{ activity string }
 type chatAssistantMsg struct{ text string }
-type chatDoneMsg struct{ text string } // optional closing line; clears busy
+// chatDoneMsg signals the end of a driver turn. text is an optional closing
+// line for /c (pane appends it as a system entry). tokIn/tokOut/notice/model
+// carry main-chat turn telemetry; the /c driver never sets them so they
+// default to zero and are ignored by chatPane.Apply.
+type chatDoneMsg struct {
+	text   string // /c: optional closing system line
+	tokIn  int    // main-chat: input tokens for the completed turn
+	tokOut int    // main-chat: output tokens for the completed turn
+	notice string // main-chat: non-fatal notice (e.g. "cloud not configured")
+	model  string // main-chat: local model name reported by the agent
+}
 type chatErrorMsg struct{ err error }
 
 // chatConfirmMsg asks the host to raise the shared confirm gate. onYes/onNo are

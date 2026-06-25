@@ -50,6 +50,10 @@ func ElideSupersededToolResults(msgs []llm.Message) ([]llm.Message, int) {
 	return out, collapsed
 }
 
+// toolKey identifies an identical tool call by name + raw input bytes. Input is
+// compared verbatim, so two semantically-equal calls that differ only in
+// whitespace/key-order are treated as distinct (and not deduped). A part-2
+// algorithm that wants tighter dedup can normalize ToolInput before keying.
 func toolKey(b llm.Block) string {
 	return b.ToolName + "\x00" + string(b.ToolInput)
 }

@@ -210,3 +210,78 @@ symptom. Do NOT push. Do NOT merge to main.
   geometry; re-PROBED: `X=78(gap)→MISS, X=79/80→HIT` ≡ old behavior. Lesson for
   review-first: PROBE fixtures must mirror production `relayout` sizing
   (`contentW-2`). 2 Minor noted (provisional unused `Wheel`, a stray comment).
+
+### D3 — Step-3 architecture: full event-driven port (F1–F7)
+
+Full quantification of all 7 forks is in `docs/features/cli/chat-view/step3-design.md`
+(symmetric 4-dimension scoring per fork). This entry records the DECISIONS + the
+two cross-cutting constraints that resolve them, and the counter-cases.
+
+**Cross-cutting constraints (the tie-breakers):**
+1. **Objective = "fully ported"** (Bryan's handoff). Options that move entry
+   ownership but never land `mainAgentDriver`/the event model (F1-B, F2-C) leave
+   the migration permanently half-done — the design itself flags F1-B as "ownership
+   moved but Model still drives" risking becoming the permanent state. Rejected for
+   the stated objective; this is not hedging toward the easier option.
+2. **Agent-agnostic invariant** (chatpane-design.md, load-bearing): the reusable
+   component must NOT depend on `agentclient.StreamMsg`; agent specifics live in
+   the driver. So `chatView.Apply` takes typed agent-agnostic events, NOT
+   `StreamMsg` (rejects F2-C). The existing `chatPane` already honors this; the
+   unified component must too.
+
+**Decisions:**
+- **F1 = A** — the streaming machine becomes event-driven, SPLIT cleanly:
+  *transcript* mutations (append/extend/tool-entry lifecycle, the 139-LOC core)
+  move into `chatView.Apply(event)`; *telemetry* bookkeeping
+  (`tokIn/tokOut/model/cloud/activity`) stays host chrome — the host reads it off
+  the events as they pass and pushes `turnStatus` to `chatView` (the existing
+  step-1 seam). Counter-case (B/C, keep machine host-side): smaller + lower drift
+  risk, but does not build the driver/event model the objective requires; the
+  drift risk is covered loud by re-pointed `stream_order_test.go` + a scripted
+  golden, so A's main downside is mitigated.
+- **F2 = A** — extend the shared `chatPaneMsg` set ADDITIVELY (`assistantDelta`,
+  4 `toolEntry*`, enrich `status` with `tokOut/model/cloud`, enrich `done` with
+  `tokIn/tokOut/notice`). Additive → `chatPane` (which only emits the old events
+  and reads only old fields) is not regressed; `chatpane_test.go` guards it.
+  Counter-case (B separate set): zero /c-coupling but duplicate vocabulary step 4
+  must merge — A reaches the one-event-model end state directly and the coupling
+  is additive-only, so A is cleaner end state at acceptable risk. C rejected
+  (agent-agnostic invariant).
+- **F3 = A** — `PermissionRequired` is routed HOST-side to the existing
+  `toolConfirm` + `pendingConfirm` gate (reused verbatim, incl. `AllowToolCall`/
+  `DenyToolCall` by `ToolUseID`); it is NOT a `chatView` transcript event. Keeps
+  the gate single-owner (boundary 1b). Counter-case (B `chatConfirmMsg{onYes,onNo}`):
+  one event for both surfaces, but wrapping the `ToolUseID` Allow/Deny as cmds
+  risks a SILENT server-loop hang if the Allow path is dropped — A reuses the
+  proven path with no silent-failure mode. C (chatView owns gate) = flagged hack,
+  rejected by the boundary.
+- **F4a = move** the queue STATE into `chatView` (matches `chatPane`; rides with
+  the submit/drain lifecycle that moves under F1-A). Host still RENDERS it
+  (`renderQueued`, above the input = chrome) and handles unstage (writes
+  `m.input`) by reading `chatView.Queued()` — same state-in-component / chrome-in-host
+  split as the selection notice.
+- **F4b = telemetry stays host** — the enriched `status`/`done` events carry
+  `tokOut/model/cloud/tokIn`; the host reads them for the bottom status bar +
+  pushes `turnStatus` to `chatView` for the inline placeholder. No reach-in.
+- **F4c = move tool-nav** (fold/cycle) into `chatView` (it owns entries +
+  `focusedToolIdx`); host detects the trigger (esc on empty input) and delegates,
+  mirroring the selection pattern. Sequenced LAST (lowest-risk-last).
+- **F5 = decomposition** (the design's arc, F4 folded in): (1) entry-storage move
+  into `chatView` + mutation methods, host machine still drives — pure refactor;
+  (2) telemetry-publish boundary; (3) `mainAgentDriver` + `chatView.Apply` typed
+  events + queue move, re-point stream-order tests; (4) delete host
+  `applyStreamMsg`; (5) tool-nav move. Each builds green, no two-live-machines
+  except within (3) which the re-pointed tests gate.
+- **F6 = `chatView`-owned entries.** Shared-pointer = flagged silent-aliasing
+  hack (rejected); status-quo snapshot blocks the event model. Owned is the only
+  option compatible with F1-A.
+- **F7 = driver owns the drain.** `mainAgentDriver.Submit` reads `StreamChat` and
+  emits events (mirrors `contextManagerDriver`); host deletes its drain loop. Esc
+  cancel must cancel the driver ctx — guarded loud by `cancel_test.go`.
+
+**No tie / no BLOCK.** The objective + the agent-agnostic invariant make the "full
+event model" path the clear correctness winner; counter-cases are genuinely
+weaker for the stated goal. **Parity gate:** re-pointed stream-order/queue/cancel/
+confirm suites + new `chatView.Apply` event tests + a frozen-`turnStatus`
+scripted-event golden (byte-identical transcript across the move) + a new
+footer-telemetry test. Reversible (worktree).

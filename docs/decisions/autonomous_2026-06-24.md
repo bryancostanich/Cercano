@@ -33,31 +33,41 @@ All review gates passed. Branch `cedit-rework` complete (4 commits: confirm refa
 
 ## Status (end-of-run summary)
 
-**COMPLETE — merge-ready, NOT pushed, NOT merged** (awaiting Bryan's per-act authorization).
+**FULLY PORTED — all 4 steps COMPLETE, merge-ready, NOT pushed, NOT merged**
+(awaiting Bryan's per-act authorization). Updated objective from Bryan mid-run:
+"keep going, don't merge until fully ported." Done.
 
-- **Outcome:** Step 1 of the chatView migration is done and passed a whole-branch
-  opus review (**Ready to merge: Yes**, no Critical/Important). The main page now
-  renders its transcript through the new `chatView` component, with **byte-identical
-  output** (frozen golden parity gate, verified non-vacuous) + direct `chatView`
-  unit tests. Full `go test ./...` green.
-- **Decisions made:** D1 — hold `chatView` as a value field, not a nillable pointer
-  (deleted 13 dead nil-guards; restores the old `viewport viewport.Model` never-nil
-  property). Taken autonomously (cleanest, unambiguous after counter-cases).
-- **Blocked:** none.
-- **Deferred (NOT done — out of step-1 scope):** the *full* switchover is steps 2–4
-  of the roadmap (`design.md`) and each needs its own brainstorm→spec→plan:
-  step 2 = move scroll + mouse selection + scrollbar-drag into `chatView`;
-  step 3 = `chatView` takes entry ownership + the `ChatDriver`/event model +
-  `mainAgentDriver` (streaming behind the driver); step 4 = `/c` adopts `chatView`,
-  retire the thin `chatpane.go`/`renderChatEntry`. These were intentionally not
-  done autonomously — they are architectural design forks that belong with Bryan,
-  not unplanned implementation.
-- **Commits (branch `chat-view`, base `3a4e561`):**
-  `dbc16bb` run log · `bddad74` golden net · `f317960` extract chatView ·
-  `3e0f962` D1 value-field fix · `b7cffb4` chatView unit tests.
-- **Review first:** `f317960` (the extraction — confirm faithfulness) and the
-  golden gate (`chat_view_golden_test.go` + `testdata/chatview/` — the zero-
-  behavior-change proof); then `3e0f962` (D1) against decision D1 below.
+- **Outcome:** The entire chatView migration is complete. There is now ONE chat
+  component (`chatView`); both the main chat and `/c` drive it via their own
+  `ChatDriver` (`mainAgentDriver` / `contextManagerDriver`); the thin `chatPane`
+  is deleted. 27 commits on `chat-view` (base `3a4e561`); +5530/−1389 across 45
+  files. `go vet`/`go build`/`go test ./...` all green. The main page's render is
+  **byte-identical** throughout (step-1 golden + a scripted-event golden, both
+  frozen and verified non-vacuous).
+- **Each step passed its own whole-branch opus review:**
+  - Step 1 (extract transcript+viewport): Ready to merge, no Critical/Important.
+  - Step 2 (move scroll/selection/scrollbar-drag in): 1 Critical fixed (`ScrollbarHit`
+    grabbed the gap column — PROBE fixture mismatched production geometry; `016844d`).
+  - Step 3 (entry ownership + event model + `mainAgentDriver`, delete `applyStreamMsg`):
+    Ready, no Critical/Important; parity proof verified genuine.
+  - Step 4 (`/c` adopts `chatView`, retire `chatPane`): 1 Critical fixed (confirm-flow
+    orphan placeholder — G1 refined to fill-and-close + explicit busy flag; `d77efb4`).
+- **Decisions made (autonomous forks, full 7-step in the log below):** D1 (value
+  field), D2 (local-coord widget boundary), D3 (F1–F7: full event-driven port,
+  agent-agnostic), D4 (G1–G7: `/c` adopts `chatView`; G1 refined at review).
+- **Blocked:** none. No tie, no 5-fix-loop, no irreversible action.
+- **Two review-found Criticals, both fixed + regression-tested** (`ScrollbarHit`
+  geometry, `/c` confirm orphan). Both were silent defects the green suite missed
+  until the adversarial whole-branch reviews — the review layer earned its keep.
+- **Review first (for Bryan):** (1) the two Critical fixes `016844d` + `d77efb4`
+  against D2/D4-G1 in this log; (2) the parity gates — `chat_view_golden_test.go` +
+  `testdata/chatview/{*.golden,scripted_turn.golden}` (byte-identical main render)
+  and `context_manager_driver_test.go` (unchanged = `/c` behavior spine); (3) the
+  ONE intended UX change: `/c`'s "working…" now shows as the in-transcript spinner
+  (converged to the main page's UX), not a pinned status line.
+- **Smoke before merge:** run `cercano`, stream a turn with a tool call + a
+  permission prompt + a queued follow-up; then `/c`: propose an edit → confirm →
+  "removed N", and an empty proposal → "nothing to remove".
 
 **Objective (handed off):** Complete the chatView switchover for the main page.
 Concretely: execute the approved **step 1** of the chat-view migration — extract

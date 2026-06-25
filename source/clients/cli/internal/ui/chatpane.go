@@ -21,10 +21,47 @@ type ChatDriver interface {
 	Submit(ctx context.Context, input string) tea.Cmd
 }
 
-// chatPaneMsg is the closed set of events a driver emits. They are top-level
-// tea.Msg values routed by the model to the active pane.
-type chatStatusMsg struct{ activity string }
+// chatPaneMsg is the SHARED set of events a driver emits. They are top-level
+// tea.Msg values routed by the model to the active surface. The set is shared
+// between the /c chatPane and the main chatView; main-chat-only events and
+// fields are additive — chatPane.Apply reads only the OLD fields, so the
+// additive fields default-zero on the /c path and are ignored there.
+//
+// chatStatusMsg's tokOut/model/cloud are main-chat turn telemetry (footer);
+// /c sets only activity.
+type chatStatusMsg struct {
+	activity string
+	tokOut   int    // main-chat: live output-token count for the footer
+	model    string // main-chat: engine handling the turn (RouteSelected)
+	cloud    bool   // main-chat: true when the turn routed to a cloud engine
+}
 type chatAssistantMsg struct{ text string }
+
+// ── additive main-chat transcript events (F2-A) ─────────────────────────────
+// These are emitted ONLY by the main agent driver and consumed by
+// chatView.Apply. /c never emits them.
+
+// chatAssistantDeltaMsg carries one streamed token of assistant prose.
+type chatAssistantDeltaMsg struct{ token string }
+
+// chatProgressMsg carries a routing/phase note for the open assistant entry's
+// inline status line (distinct from chatStatusMsg, which is /c-compatible).
+type chatProgressMsg struct{ note string }
+
+// toolEntry* events drive the tool-call lifecycle in scrollback.
+type toolEntryStartMsg struct{ id, name string }
+type toolEntryStopMsg struct{ id, argsSummary string }
+type toolEntryExecStartMsg struct{ id string }
+type toolEntryExecCompleteMsg struct {
+	id      string
+	detail  string
+	summary string
+	isError bool
+}
+
+// permissionRequiredMsg is host-routed (raises the confirm gate); it is NOT a
+// chatView.Apply event.
+type permissionRequiredMsg struct{ id, name, argsJSON, tier string }
 // chatDoneMsg signals the end of a driver turn. text is an optional closing
 // line for /c (pane appends it as a system entry). tokIn/tokOut/notice/model
 // carry main-chat turn telemetry; the /c driver never sets them so they

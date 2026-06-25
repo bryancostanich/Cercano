@@ -41,9 +41,9 @@ func TestCancel_EscStopsStreaming(t *testing.T) {
 		t.Fatalf("expected a canceled note, got %+v", last)
 	}
 
-	// A late stream message after cancel must be ignored (no panic, no change).
+	// A late stream event after cancel must be ignored (no panic, no change).
 	before := len(m.chat.Entries())
-	next, _ = m.Update(streamTickMsg{msg: agentclient.StreamMsg{Type: agentclient.TypeToken, Token: "late"}})
+	next, _ = m.Update(chatStreamMsg{ev: streamMsgToEvent(agentclient.StreamMsg{Type: agentclient.TypeToken, Token: "late"})})
 	m = next.(Model)
 	if len(m.chat.Entries()) != before {
 		t.Fatalf("late stream message after cancel should be ignored")

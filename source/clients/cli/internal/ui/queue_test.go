@@ -18,8 +18,8 @@ func TestSubmitWhileStreamingQueues(t *testing.T) {
 	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(Model)
 
-	if len(m.queued) != 1 || m.queued[0] != "check the tests" {
-		t.Fatalf("expected queued [check the tests], got %v", m.queued)
+	if q := m.chat.Queued(); len(q) != 1 || q[0] != "check the tests" {
+		t.Fatalf("expected queued [check the tests], got %v", q)
 	}
 	if strings.TrimSpace(m.input.Value()) != "" {
 		t.Errorf("input should clear after queuing, got %q", m.input.Value())
@@ -34,7 +34,8 @@ func TestSubmitWhileStreamingQueues(t *testing.T) {
 func TestUpArrowUnstagesLastQueued(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
-	m.queued = []string{"check the tests", "run the linter"}
+	m.chat.Enqueue("check the tests")
+	m.chat.Enqueue("run the linter")
 	m.input.SetValue("")
 
 	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
@@ -43,8 +44,8 @@ func TestUpArrowUnstagesLastQueued(t *testing.T) {
 	if m.input.Value() != "run the linter" {
 		t.Errorf("up-arrow should unstage the last queued message, got input %q", m.input.Value())
 	}
-	if len(m.queued) != 1 || m.queued[0] != "check the tests" {
-		t.Errorf("unstaged item should leave the queue, got %v", m.queued)
+	if q := m.chat.Queued(); len(q) != 1 || q[0] != "check the tests" {
+		t.Errorf("unstaged item should leave the queue, got %v", q)
 	}
 }
 
@@ -56,7 +57,8 @@ func TestQueuedLinesReserveViewportRows(t *testing.T) {
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	h0 := m.chat.Height()
-	m.queued = []string{"one", "two"}
+	m.chat.Enqueue("one")
+	m.chat.Enqueue("two")
 	m.relayout()
 	if got := m.chat.Height(); got != h0-2 {
 		t.Errorf("two queued lines should reserve two rows: %d -> %d, want %d", h0, got, h0-2)

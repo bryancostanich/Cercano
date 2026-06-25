@@ -37,6 +37,9 @@ type chatView struct {
 	// root and home are construction-time constants used by humanizeArgs/humanizeResult.
 	root string
 	home string
+	// queued holds messages submitted while a turn streams (FIFO). The host
+	// renders them above the prompt and unstages by reading the methods below.
+	queued []string
 
 	vp             viewport.Model
 	plainLines     []string
@@ -173,6 +176,162 @@ func (c *chatView) streamingTextEntry() *Entry {
 func (c *chatView) rebuild() {
 	c.SetEntries(c.entries)
 }
+
+// ── transcript state machine (Apply) ─────────────────────────────────────────
+
+// Apply runs the main-chat transcript state machine for one agent-agnostic
+// transcript event, mutating c.entries. It is the chatView counterpart of the
+// host's old applyStreamMsg, ported verbatim minus the telemetry and permission
+// arms (those are filtered out by the host BEFORE Apply — telemetry → footer,
+// permission → confirm gate). Apply never touches host footer state and never
+// calls rebuild(); the host calls refreshViewport after routing, as before.
+//
+// Returns a tea.Cmd for symmetry with chatPane.Apply (main chat returns nil).
+func (c *chatView) Apply(msg tea.Msg) tea.Cmd {
+	switch m := msg.(type) {
+	case chatAssistantDeltaMsg:
+		// Append to the open text entry, or start a fresh one if the previous
+		// segment was closed by a tool call — so post-tool prose lands BELOW the
+		// tools in scrollback rather than in the pre-tool placeholder.
+		e := c.streamingTextEntry()
+		if e == nil {
+			e = &Entry{Role: RoleAssistant, Streaming: true}
+			c.AppendEntry(e)
+		}
+		e.Content += m.token
+		// Once real tokens arrive, the pre-stream progress note is no longer
+		// relevant; clear so the renderer drops it.
+		e.Status = ""
+
+	case chatProgressMsg:
+		// Collapse progress messages onto the open (empty) assistant entry's
+		// Status field — one line that mutates as the agent advances through
+		// phases. Falls back to a normal system entry if there's no open
+		// streaming assistant to attach to.
+		if e := c.streamingTextEntry(); e != nil && e.Content == "" {
+			e.Status = m.note
+		} else {
+			c.AppendEntry(&Entry{Role: RoleSystem, Content: m.note})
+		}
+
+	case toolEntryStartMsg:
+		// Model just emitted a tool_use block. Close the open assistant text
+		// entry first: drop it if it's only the empty "thinking" placeholder,
+		// otherwise stop its streaming indicator. Then drop a folded in-progress
+		// line so the user sees what's being invoked. Args summary fills in on
+		// toolEntryStopMsg; result fills in on toolEntryExecCompleteMsg.
+		if e := c.streamingTextEntry(); e != nil {
+			if e.Content == "" {
+				c.dropLastEntry()
+			} else {
+				e.Streaming = false
+			}
+		}
+		c.AppendEntry(&Entry{
+			Role: RoleSystem,
+			Tool: &ToolEntry{
+				ToolUseID: m.id,
+				ToolName:  m.name,
+				Status:    ToolStatusInProgress,
+				StartedAt: time.Now(), // fallback timing anchor until exec-start tightens it
+				Folded:    true,
+			},
+		})
+
+	case toolEntryStopMsg:
+		// Args block finished streaming — humanize the raw call JSON into a
+		// readable one-liner. Silent skip if the start event was missed.
+		if t := c.findToolEntry(m.id); t != nil {
+			t.ArgsSummary = humanizeArgs(t.ToolName, m.argsSummary, c.root, c.home)
+		}
+
+	case toolEntryExecStartMsg:
+		// Server is now running the tool. Re-anchor the timing clock here so the
+		// measured duration covers execution, not arg streaming.
+		if t := c.findToolEntry(m.id); t != nil {
+			t.Status = ToolStatusInProgress
+			t.StartedAt = time.Now()
+		}
+
+	case toolEntryExecCompleteMsg:
+		// Tool finished — flip status to ✓ or ⚠ and build the result blurb
+		// (detail · CLI-measured timing).
+		if t := c.findToolEntry(m.id); t != nil {
+			if m.isError {
+				t.Status = ToolStatusError
+			} else {
+				t.Status = ToolStatusComplete
+			}
+			t.ResultSummary = humanizeResult(m.detail, m.summary, m.isError, time.Since(t.StartedAt))
+		}
+
+	case chatDoneMsg:
+		e := c.streamingTextEntry()
+		if e == nil && m.text != "" {
+			// Tools ran but no post-tool tokens streamed; surface the final
+			// answer as a fresh entry below them.
+			e = &Entry{Role: RoleAssistant}
+			c.AppendEntry(e)
+		}
+		if e != nil {
+			// If we never received any tokens, fall back to the full final response.
+			if e.Content == "" {
+				e.Content = m.text
+			}
+			e.Streaming = false
+		}
+		// Surface non-fatal notices (e.g. "cloud not configured — answered
+		// locally") as a system entry above the assistant content.
+		if m.notice != "" {
+			c.insertNoticeAboveLast(&Entry{Role: RoleSystem, Content: "⚠ " + m.notice})
+		}
+
+	case chatErrorMsg:
+		if e := c.streamingTextEntry(); e != nil {
+			e.Streaming = false
+		}
+		c.AppendEntry(&Entry{Role: RoleSystem, Content: "stream error: " + m.err.Error()})
+	}
+	return nil
+}
+
+// ── message queue (F4a) ──────────────────────────────────────────────────────
+
+// queued holds messages submitted while a turn was streaming, FIFO. They render
+// just above the prompt, drain (front) as each stream completes, and the
+// most-recent (back) can be popped back into the prompt with ↑.
+//
+// Queued returns the queued messages (read-only snapshot for rendering).
+func (c *chatView) Queued() []string { return c.queued }
+
+// Enqueue appends a message to the back of the queue.
+func (c *chatView) Enqueue(s string) { c.queued = append(c.queued, s) }
+
+// DrainNext pops the oldest queued message off the front. Returns ("", false)
+// when the queue is empty.
+func (c *chatView) DrainNext() (string, bool) {
+	if len(c.queued) == 0 {
+		return "", false
+	}
+	next := c.queued[0]
+	c.queued = c.queued[1:]
+	return next, true
+}
+
+// UnstageLast pops the most-recently-queued message off the back (for the host
+// to put back into the prompt for editing). Returns ("", false) when empty.
+func (c *chatView) UnstageLast() (string, bool) {
+	n := len(c.queued)
+	if n == 0 {
+		return "", false
+	}
+	last := c.queued[n-1]
+	c.queued = c.queued[:n-1]
+	return last, true
+}
+
+// ClearQueue drops all pending messages (cancel/esc).
+func (c *chatView) ClearQueue() { c.queued = nil }
 
 // SetSize resizes the underlying viewport. Call from relayout.
 func (c *chatView) SetSize(w, h int) {

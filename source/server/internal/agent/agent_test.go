@@ -540,3 +540,34 @@ func TestScheduleRecap_NilSchedulerNoPanic(t *testing.T) {
 	a := NewAgent(nil, nil) // no recap scheduler attached
 	a.ScheduleRecap("conv-1")
 }
+
+type fakeCompactionScheduler struct {
+	scheduled []string
+	nowCalls  int
+}
+
+func (f *fakeCompactionScheduler) Schedule(id string) { f.scheduled = append(f.scheduled, id) }
+func (f *fakeCompactionScheduler) CompactNow(_ context.Context, _ string) error {
+	f.nowCalls++
+	return nil
+}
+
+func TestScheduleCompaction_NilSafeAndDelegates(t *testing.T) {
+	// Nil-safe: no scheduler attached.
+	a := NewAgent(nil, nil)
+	a.ScheduleCompaction("c1") // must not panic
+	if err := a.CompactNow(context.Background(), "c1"); err != nil {
+		t.Errorf("nil CompactNow should be a no-op nil, got %v", err)
+	}
+
+	fc := &fakeCompactionScheduler{}
+	a2 := NewAgent(nil, nil, WithCompactionScheduler(fc))
+	a2.ScheduleCompaction("c1")
+	_ = a2.CompactNow(context.Background(), "c1")
+	if len(fc.scheduled) != 1 || fc.scheduled[0] != "c1" {
+		t.Errorf("Schedule not delegated: %v", fc.scheduled)
+	}
+	if fc.nowCalls != 1 {
+		t.Errorf("CompactNow not delegated: %d", fc.nowCalls)
+	}
+}

@@ -31,14 +31,16 @@ type Generator struct {
 	tok       contextmeter.Tokenizer
 	debounce  time.Duration
 
-	mu     sync.Mutex
-	timers map[string]*time.Timer
+	mu       sync.Mutex
+	timers   map[string]*time.Timer
+	inflight map[string]bool
 }
 
 func New(store Store, summarize compaction.SummarizeFunc, cfg compactor.Config, tok contextmeter.Tokenizer, debounce time.Duration) *Generator {
 	return &Generator{
 		store: store, summarize: summarize, cfg: cfg, tok: tok, debounce: debounce,
-		timers: make(map[string]*time.Timer),
+		timers:   make(map[string]*time.Timer),
+		inflight: make(map[string]bool),
 	}
 }
 
@@ -67,6 +69,15 @@ func (g *Generator) CompactNow(ctx context.Context, conversationID string) error
 }
 
 func (g *Generator) runCompaction(ctx context.Context, conversationID string) error {
+	g.mu.Lock()
+	g.inflight[conversationID] = true
+	g.mu.Unlock()
+	defer func() {
+		g.mu.Lock()
+		delete(g.inflight, conversationID)
+		g.mu.Unlock()
+	}()
+
 	turns, err := g.store.GetTurns(ctx, conversationID)
 	if err != nil || len(turns) == 0 {
 		return err
@@ -81,4 +92,12 @@ func (g *Generator) runCompaction(ctx context.Context, conversationID string) er
 		return err
 	}
 	return g.store.SaveCompaction(ctx, newState)
+}
+
+// IsCompacting reports whether a compaction pass is currently running for the
+// conversation.
+func (g *Generator) IsCompacting(conversationID string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.inflight[conversationID]
 }

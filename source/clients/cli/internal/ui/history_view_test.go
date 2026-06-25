@@ -39,7 +39,7 @@ func keyPress(s string) tea.KeyPressMsg {
 func newTestHistoryView(rows []histRow, w, h int) *historyView {
 	s := theme.NewStyles(theme.Cracker())
 	return &historyView{
-		palette: theme.Cracker(), styles: s,
+		styles: s,
 		width: w, height: h, rows: rows, cursor: 0,
 		md: newHistoryMarkdown(),
 	}
@@ -281,5 +281,49 @@ func TestHistoryHandleClick_TogglesArrowRow(t *testing.T) {
 	_, handled3 := h.handleClick(5, yLocal)
 	if handled3 {
 		t.Error("click outside arrow columns should not be handled")
+	}
+}
+
+// TestHistoryHandleClick_NegativeYLocal_NotHandled is a regression test for the
+// lower-bound guard in handleClick. When the list is scrolled (scrollOffset > 0)
+// a click in the header band produces yLocal < 0. Without the guard, idx =
+// scrollOffset + yLocal can be a valid-but-wrong positive index, toggling the
+// wrong row. With the guard the click must be silently ignored.
+func TestHistoryHandleClick_NegativeYLocal_NotHandled(t *testing.T) {
+	// Build enough rows to force scrolling.
+	rows := make([]histRow, 20)
+	for i := range rows {
+		rows[i] = histRow{id: "x", name: "n", recap: "r", meta: "m"}
+	}
+	h := newTestHistoryView(rows, 100, 10)
+
+	// Scroll down so scrollOffset > 0.
+	h.ScrollBy(5)
+	if h.scrollOffset <= 0 {
+		t.Fatal("precondition: scrollOffset must be positive after ScrollBy(5)")
+	}
+
+	// Snapshot state before the bad click.
+	prevCursor := h.cursor
+	prevExpanded := make([]bool, len(h.rows))
+	for i, r := range h.rows {
+		prevExpanded[i] = r.expanded
+	}
+
+	// yLocal = -1 simulates a click in the header band above the content area.
+	cmd, handled := h.handleClick(1, -1)
+	if handled {
+		t.Error("click with yLocal=-1 should not be handled (negative lower bound)")
+	}
+	if cmd != nil {
+		t.Error("click with yLocal=-1 should return nil cmd")
+	}
+	if h.cursor != prevCursor {
+		t.Errorf("cursor moved from %d to %d; negative yLocal click must not move cursor", prevCursor, h.cursor)
+	}
+	for i, r := range h.rows {
+		if r.expanded != prevExpanded[i] {
+			t.Errorf("row %d expanded changed from %v to %v; negative yLocal click must not toggle expansion", i, prevExpanded[i], r.expanded)
+		}
 	}
 }

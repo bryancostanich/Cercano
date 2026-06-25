@@ -56,10 +56,8 @@ type histLineMeta struct {
 
 type historyView struct {
 	width, height int
-	palette       theme.Palette
 	styles        theme.Styles
 	agent         *agentclient.Client
-	currentID     string
 	rows          []histRow
 	cursor        int
 	scrollOffset  int
@@ -70,9 +68,9 @@ func newHistoryMarkdown() *render.Markdown { return render.NewMarkdown(theme.Cra
 
 // newHistoryView loads the conversation list synchronously (matching the old
 // picker + contextView) and returns the page. The turn drawer loads lazily.
-func newHistoryView(ag *agentclient.Client, p theme.Palette, s theme.Styles, currentID string, w, h int) (*historyView, tea.Cmd) {
+func newHistoryView(ag *agentclient.Client, _ theme.Palette, s theme.Styles, w, h int) (*historyView, tea.Cmd) {
 	hv := &historyView{
-		palette: p, styles: s, agent: ag, currentID: currentID,
+		styles: s, agent: ag,
 		width: w, height: h, cursor: 0, md: newHistoryMarkdown(),
 	}
 	hv.rows = loadHistoryRows(ag)
@@ -344,6 +342,9 @@ func (h *historyView) View() string {
 // returns (nil, true); expanding returns (expandSelected(), true). Any other
 // click returns (nil, false).
 func (h *historyView) handleClick(x, yLocal int) (tea.Cmd, bool) {
+	if yLocal < 0 {
+		return nil, false
+	}
 	_, meta := h.rowsLines()
 	idx := h.scrollOffset + yLocal
 	if idx < 0 || idx >= len(meta) {

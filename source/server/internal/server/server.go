@@ -1190,17 +1190,42 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	}
 	injectedLen := len(convHistory)
 
-	result, loopErr := s.runMainLoop(ctx, req, provider, isCloud, sink, requester, convHistory,
-		func(t string) {
+	onTextDelta := func(t string) {
+		stream.Send(&proto.StreamProcessResponse{
+			Payload: &proto.StreamProcessResponse_TokenDelta{
+				TokenDelta: &proto.TokenDelta{Content: t},
+			},
+		})
+	}
+
+	result, loopErr := s.runMainLoop(ctx, req, provider, isCloud, sink, requester, convHistory, onTextDelta)
+	if loopErr != nil {
+		mode, _ := locus.ParseMode(s.currentConfig.LocusMode)
+		res := mode.Main()
+		fbProv := s.cloudLLMProvider
+		fbCloud := true
+		if res.Fallback == locus.TierLocal {
+			fbProv, fbCloud = s.localLLMProvider, false
+		}
+		if !fellBack && res.CrossAllowed && fbProv != nil {
 			stream.Send(&proto.StreamProcessResponse{
-				Payload: &proto.StreamProcessResponse_TokenDelta{
-					TokenDelta: &proto.TokenDelta{Content: t},
+				Payload: &proto.StreamProcessResponse_Progress{
+					Progress: &proto.ProgressUpdate{
+						Message: fmt.Sprintf("⚠ %s failed (%v) — retrying on %s", provider.Name(), loopErr, fbProv.Name()),
+					},
 				},
 			})
-		},
-	)
-	if loopErr != nil {
-		return fmt.Errorf("tool loop error: %w", loopErr)
+			stream.Send(&proto.StreamProcessResponse{
+				Payload: &proto.StreamProcessResponse_RouteSelected{
+					RouteSelected: &proto.RouteSelected{Model: s.mainModelFor(fbCloud), IsCloud: fbCloud},
+				},
+			})
+			provider = fbProv
+			result, loopErr = s.runMainLoop(ctx, req, fbProv, fbCloud, sink, requester, convHistory, onTextDelta)
+		}
+		if loopErr != nil {
+			return fmt.Errorf("tool loop error: %w", loopErr)
+		}
 	}
 
 	s.persistToolLoopTurns(ctx, req, result, injectedLen)

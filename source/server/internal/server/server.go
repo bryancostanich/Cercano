@@ -408,6 +408,17 @@ func (s *Server) InvokeTool(ctx context.Context, req *proto.InvokeToolRequest) (
 	return resp, nil
 }
 
+// estimateRawTokens is a fast len/4 token estimate over the turns' text — used
+// for the displayed raw/savings figure so the footer's frequent GetContextUsage
+// poll never tokenizes the full uncompacted history with tiktoken.
+func estimateRawTokens(turns []conversation.Turn) int {
+	n := 0
+	for _, t := range turns {
+		n += len(t.Content) + len(t.BlocksJSON)
+	}
+	return (n + 3) / 4
+}
+
 // GetContextUsage implements proto.AgentServer — reports cumulative token
 // usage vs. the active model's context-window size for a conversation.
 func (s *Server) GetContextUsage(ctx context.Context, req *proto.GetContextUsageRequest) (*proto.GetContextUsageResponse, error) {
@@ -416,11 +427,14 @@ func (s *Server) GetContextUsage(ctx context.Context, req *proto.GetContextUsage
 	sent, raw := 0, 0
 	if store := s.agent.PersistentStore(); store != nil && convID != "" {
 		if turns, err := store.GetTurns(ctx, convID); err == nil {
+			raw = estimateRawTokens(turns)
 			state, _ := store.GetCompaction(ctx, convID)
-			tok := contextmeter.Default()
-			view, _ := compactor.BuildSendView(turns, state)
-			sent = compaction.TotalTokens(tok, view)
-			raw = compaction.TotalTokens(tok, agent.BuildLLMHistory(turns))
+			if state.ConsolidatedJSON == "" {
+				sent = raw // no compaction → sent is the full history
+			} else {
+				view, _ := compactor.BuildSendView(turns, state)
+				sent = compaction.TotalTokens(contextmeter.Default(), view)
+			}
 		}
 	}
 	var pct float64
@@ -450,10 +464,9 @@ func (s *Server) GetCompactionState(ctx context.Context, req *proto.GetCompactio
 		return out, nil
 	}
 	state, _ := store.GetCompaction(ctx, convID)
-	tok := contextmeter.Default()
 	view, _ := compactor.BuildSendView(turns, state)
-	out.SentTokens = int32(compaction.TotalTokens(tok, view))
-	out.RawTokens = int32(compaction.TotalTokens(tok, agent.BuildLLMHistory(turns)))
+	out.SentTokens = int32(compaction.TotalTokens(contextmeter.Default(), view))
+	out.RawTokens = int32(estimateRawTokens(turns))
 	out.FrozenThrough = state.FrozenThrough
 	for _, t := range turns {
 		if t.CreatedAt.Unix() <= state.FrozenThrough {

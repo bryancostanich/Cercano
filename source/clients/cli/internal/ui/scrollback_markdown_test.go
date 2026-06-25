@@ -17,7 +17,7 @@ func plain(s string) string { return ansiRE.ReplaceAllString(s, "") }
 // newMdChatView returns a chatView sized to zero (only used for md rendering).
 func newMdChatView() *chatView {
 	p := theme.Cracker()
-	cv := newChatView(theme.NewStyles(p), p, 0, 0)
+	cv := newChatView(theme.NewStyles(p), p, "", "", 0, 0)
 	return &cv
 }
 

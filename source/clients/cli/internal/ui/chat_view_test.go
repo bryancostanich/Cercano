@@ -12,7 +12,7 @@ import (
 // newChatView returns a value, so we take its address here.
 func newTestChatView(w, h int) *chatView {
 	p := theme.Cracker()
-	cv := newChatView(theme.NewStyles(p), p, w, h)
+	cv := newChatView(theme.NewStyles(p), p, "", "", w, h)
 	return &cv
 }
 

@@ -78,7 +78,6 @@ type Model struct {
 
 	splashShown bool // hide after first user input
 	splash      banner.AnimModel
-	entries     []*Entry
 	chat        chatView
 	selectionNotice    string
 	input              promptInput
@@ -254,7 +253,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 		home:               home,
 		palette:            p,
 		styles:             s,
-		chat:               newChatView(s, p, 80, 10),
+		chat:               newChatView(s, p, root, home, 80, 10),
 		agent:              ag,
 		convID:             initialConvID,
 		convRef:            convRef,
@@ -280,7 +279,7 @@ func newConvID() string {
 // given markdown, for the `--mdtest` render-testing mode. Hides the splash so
 // the rendered doc is visible immediately. No agent round-trip occurs.
 func (m Model) SeedAssistantMarkdown(doc string) Model {
-	m.entries = append(m.entries, &Entry{Role: RoleAssistant, Content: doc})
+	m.chat.AppendEntry(&Entry{Role: RoleAssistant, Content: doc})
 	m.splashShown = false
 	return m
 }
@@ -651,7 +650,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.focusedToolIdx >= 0 {
 			switch {
 			case key.Matches(msg, keys.NavUp):
-				indices := m.toolEntryIndices()
+				indices := m.chat.toolEntryIndices()
 				for i, idx := range indices {
 					if idx == m.focusedToolIdx {
 						if i > 0 {
@@ -663,7 +662,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			case key.Matches(msg, keys.NavDown):
-				indices := m.toolEntryIndices()
+				indices := m.chat.toolEntryIndices()
 				for i, idx := range indices {
 					if idx == m.focusedToolIdx {
 						if i < len(indices)-1 {
@@ -675,8 +674,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			case key.Matches(msg, keys.ToggleTool):
-				if m.focusedToolIdx < len(m.entries) && m.entries[m.focusedToolIdx].Tool != nil {
-					m.entries[m.focusedToolIdx].Tool.Folded = !m.entries[m.focusedToolIdx].Tool.Folded
+				if m.focusedToolIdx < len(m.chat.Entries()) && m.chat.Entries()[m.focusedToolIdx].Tool != nil {
+					m.chat.Entries()[m.focusedToolIdx].Tool.Folded = !m.chat.Entries()[m.focusedToolIdx].Tool.Folded
 					m.refreshViewport()
 				}
 				return m, nil
@@ -694,7 +693,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Esc on empty input enters tool-entry navigation mode, focusing the
 		// most-recent tool entry. No-op when scrollback has no tool entries.
 		if key.Matches(msg, keys.Back) && m.input.Value() == "" {
-			indices := m.toolEntryIndices()
+			indices := m.chat.toolEntryIndices()
 			if len(indices) > 0 {
 				m.focusedToolIdx = indices[len(indices)-1]
 				m.refreshViewport()
@@ -884,7 +883,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			body = slash.RenderToolResult(msg.Res)
 		}
-		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: body})
+		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: body})
 		m.refreshViewport()
 		return m, nil
 
@@ -895,7 +894,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancelStream = nil
 		}
 		// Finalize the streaming entry so it stops showing the spinner.
-		if e := m.lastAssistantEntry(); e != nil {
+		if e := m.chat.lastAssistantEntry(); e != nil {
 			e.Streaming = false
 		}
 		m.refreshViewport()
@@ -942,7 +941,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// must call refreshViewport so the per-frame color sweep is pushed
 		// into the viewport's content cache; without this, View renders the
 		// last-set content and the animation appears frozen.
-		if e := m.streamingTextEntry(); e != nil && e.Content == "" {
+		if e := m.chat.streamingTextEntry(); e != nil && e.Content == "" {
 			m.refreshViewport()
 			return m, progressAnimTick()
 		}
@@ -970,9 +969,9 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 		return next, cmd
 	}
 	// User turn
-	m.entries = append(m.entries, &Entry{Role: RoleUser, Content: text})
+	m.chat.AppendEntry(&Entry{Role: RoleUser, Content: text})
 	// Assistant placeholder
-	m.entries = append(m.entries, &Entry{Role: RoleAssistant, Content: "", Streaming: true})
+	m.chat.AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
 	m.refreshViewport()
 
 	// Pass cwd so the agent prepends .cercano/context.md if present.
@@ -982,7 +981,7 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 	if err != nil {
 		cancel()
 		m.errMsg = err.Error()
-		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "error: " + err.Error()})
+		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "error: " + err.Error()})
 		m.refreshViewport()
 		return m, nil
 	}
@@ -1055,10 +1054,10 @@ func (m *Model) cancelCurrentStream() {
 	}
 	m.streaming = false
 	m.streamCh = nil
-	if e := m.lastAssistantEntry(); e != nil {
+	if e := m.chat.lastAssistantEntry(); e != nil {
 		e.Streaming = false
 	}
-	m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "⊘ canceled"})
+	m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "⊘ canceled"})
 	// Esc aborts the train of thought — drop any queued follow-ups too.
 	m.queued = nil
 	m.relayout()
@@ -1070,7 +1069,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 	case slash.ResultQuit:
 		return m, tea.Quit
 	case slash.ResultClearConversation:
-		m.entries = nil
+		m.chat.SetEntriesSlice(nil)
 		m.convID = newConvID()
 		if m.convRef != nil {
 			m.convRef.id = m.convID
@@ -1098,11 +1097,11 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		m = m.applyResume(res.Text)
 	case slash.ResultSetPromptColor:
 		m.promptBorderColor = m.resolvePromptColor(res.Text)
-		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "prompt color set"})
+		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "prompt color set"})
 		m.refreshViewport()
 	case slash.ResultSetSessionTitle:
 		m.sessionTitle = res.Text
-		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "renamed to: " + res.Text})
+		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "renamed to: " + res.Text})
 		m.refreshViewport()
 	case slash.ResultSetPermissionMode:
 		// Fire-and-forget: server persistence is the source of truth, but the
@@ -1115,7 +1114,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 			_ = ag.SetPermissionMode(context.Background(), mode)
 		}()
 		m.permissionMode = mode
-		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "Permission mode → " + mode})
+		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "Permission mode → " + mode})
 		m.refreshViewport()
 	case slash.ResultInvokeTool:
 		// Decide locally whether to prompt: R-tier runs silently, W/X
@@ -1128,7 +1127,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 			return m, invokeToolCmd(m.agent, res.ToolName, res.ToolArgs)
 		}
 		if perm == "R" {
-			m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: m.styles.Muted.Render("running tool:" + res.ToolName)})
+			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("running tool:" + res.ToolName)})
 			m.refreshViewport()
 			return m, invokeToolCmd(m.agent, res.ToolName, res.ToolArgs)
 		}
@@ -1136,10 +1135,10 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		tc := &pendingToolCall{Name: res.ToolName, Args: res.ToolArgs, Permission: perm}
 		m.pendingConfirm = toolConfirm(tc)
 		prompt := m.renderConfirmPrompt(tc)
-		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: prompt})
+		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: prompt})
 		m.refreshViewport()
 	case slash.ResultText:
-		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: res.Text})
+		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: res.Text})
 		m.refreshViewport()
 	}
 	return m, nil
@@ -1151,10 +1150,10 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 		// Append to the open text entry, or start a fresh one if the previous
 		// segment was closed by a tool call — so post-tool prose lands BELOW the
 		// tools in scrollback rather than in the pre-tool placeholder.
-		e := m.streamingTextEntry()
+		e := m.chat.streamingTextEntry()
 		if e == nil {
 			e = &Entry{Role: RoleAssistant, Streaming: true}
-			m.entries = append(m.entries, e)
+			m.chat.AppendEntry(e)
 		}
 		e.Content += sm.Token
 		// Once real tokens arrive, the pre-stream progress note is
@@ -1173,18 +1172,18 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 		// phases. Falls back to a normal system entry if there's no open
 		// streaming assistant to attach to.
 		note := normalizeProgress(sm.Note)
-		if e := m.streamingTextEntry(); e != nil && e.Content == "" {
+		if e := m.chat.streamingTextEntry(); e != nil && e.Content == "" {
 			e.Status = note
 		} else {
-			m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: note})
+			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: note})
 		}
 	case agentclient.TypeDone:
-		e := m.streamingTextEntry()
+		e := m.chat.streamingTextEntry()
 		if e == nil && sm.Final != "" {
 			// Tools ran but no post-tool tokens streamed; surface the final
 			// answer as a fresh entry below them.
 			e = &Entry{Role: RoleAssistant}
-			m.entries = append(m.entries, e)
+			m.chat.AppendEntry(e)
 		}
 		if e != nil {
 			// If we never received any tokens, fall back to the full final response.
@@ -1197,7 +1196,7 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 		// locally") as a system entry above the assistant content. Sticks
 		// the cloud state to NONE so the status bar shows it.
 		if sm.Notice != "" {
-			m.entries = append(m.entries[:len(m.entries)-1], &Entry{Role: RoleSystem, Content: "⚠ " + sm.Notice}, m.entries[len(m.entries)-1])
+			m.chat.insertNoticeAboveLast(&Entry{Role: RoleSystem, Content: "⚠ " + sm.Notice})
 			m.cloudState = "NONE"
 		} else {
 			m.cloudState = "ok"
@@ -1214,10 +1213,10 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 			m.lastModel = sm.Model
 		}
 	case agentclient.TypeError:
-		if e := m.streamingTextEntry(); e != nil {
+		if e := m.chat.streamingTextEntry(); e != nil {
 			e.Streaming = false
 		}
-		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "stream error: " + sm.Err.Error()})
+		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "stream error: " + sm.Err.Error()})
 	case agentclient.TypeToolUseStart:
 		// Model just emitted a tool_use block. Close the open assistant text
 		// entry first: drop it if it's only the empty "thinking" placeholder,
@@ -1225,14 +1224,14 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 		// line so the user sees what's being invoked. Args summary fills in on
 		// TypeToolUseStop; result fills in on TypeToolExecComplete.
 		m.turnActivity = "running " + sm.ToolName
-		if e := m.streamingTextEntry(); e != nil {
+		if e := m.chat.streamingTextEntry(); e != nil {
 			if e.Content == "" {
-				m.entries = m.entries[:len(m.entries)-1]
+				m.chat.dropLastEntry()
 			} else {
 				e.Streaming = false
 			}
 		}
-		m.entries = append(m.entries, &Entry{
+		m.chat.AppendEntry(&Entry{
 			Role: RoleSystem,
 			Tool: &ToolEntry{
 				ToolUseID: sm.ToolUseID,
@@ -1245,21 +1244,21 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 	case agentclient.TypeToolUseStop:
 		// Args block finished streaming — humanize the raw call JSON into a
 		// readable one-liner. Silent skip if the start event was missed.
-		if t := m.findToolEntry(sm.ToolUseID); t != nil {
-			t.ArgsSummary = humanizeArgs(t.ToolName, sm.ArgsSummary, m.root, m.home)
+		if t := m.chat.findToolEntry(sm.ToolUseID); t != nil {
+			t.ArgsSummary = humanizeArgs(t.ToolName, sm.ArgsSummary, m.chat.root, m.chat.home)
 		}
 	case agentclient.TypeToolExecStart:
 		// Server is now running the tool. Re-anchor the timing clock here so the
 		// measured duration covers execution, not arg streaming. We already show
 		// InProgress from TypeToolUseStart.
-		if t := m.findToolEntry(sm.ToolUseID); t != nil {
+		if t := m.chat.findToolEntry(sm.ToolUseID); t != nil {
 			t.Status = ToolStatusInProgress
 			t.StartedAt = time.Now()
 		}
 	case agentclient.TypeToolExecComplete:
 		// Tool finished — flip status to ✓ or ⚠ and build the result blurb
 		// (detail · CLI-measured timing).
-		if t := m.findToolEntry(sm.ToolUseID); t != nil {
+		if t := m.chat.findToolEntry(sm.ToolUseID); t != nil {
 			if sm.IsError {
 				t.Status = ToolStatusError
 			} else {
@@ -1279,62 +1278,10 @@ func (m Model) applyStreamMsg(sm agentclient.StreamMsg) (tea.Model, tea.Cmd) {
 		}
 		m.pendingConfirm = toolConfirm(tc)
 		prompt := m.renderConfirmPrompt(tc)
-		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: prompt})
+		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: prompt})
 	}
 	m.refreshViewport()
 	return m, waitForStream(m.streamCh)
-}
-
-// toolEntryIndices returns the m.entries positions of every tool-call entry,
-// in order. Used by the up/down nav handlers to cycle focus among tool entries
-// while skipping prose / system entries.
-func (m Model) toolEntryIndices() []int {
-	var out []int
-	for i, e := range m.entries {
-		if e.Tool != nil {
-			out = append(out, i)
-		}
-	}
-	return out
-}
-
-// findToolEntry returns the ToolEntry whose ToolUseID matches id, or nil if
-// no such entry exists. Used by the stream-event handlers to update an
-// in-flight tool-call line as it transitions through use-stop → exec-start →
-// exec-complete.
-func (m Model) findToolEntry(id string) *ToolEntry {
-	if id == "" {
-		return nil
-	}
-	for i := len(m.entries) - 1; i >= 0; i-- {
-		if t := m.entries[i].Tool; t != nil && t.ToolUseID == id {
-			return t
-		}
-	}
-	return nil
-}
-
-func (m Model) lastAssistantEntry() *Entry {
-	for i := len(m.entries) - 1; i >= 0; i-- {
-		if m.entries[i].Role == RoleAssistant {
-			return m.entries[i]
-		}
-	}
-	return nil
-}
-
-// streamingTextEntry returns the currently-open assistant text entry: the last
-// entry, and only if it is a streaming assistant. Streamed tokens append here.
-// Appending any other entry (e.g. a tool call) "closes" it, so the next text
-// starts a fresh entry positioned BELOW the tools — keeping scrollback in the
-// order things actually happened (pre-tool prose, tool calls, then the answer).
-func (m Model) streamingTextEntry() *Entry {
-	if n := len(m.entries); n > 0 {
-		if e := m.entries[n-1]; e.Role == RoleAssistant && e.Streaming {
-			return e
-		}
-	}
-	return nil
 }
 
 // relayout sets viewport / input widths and the viewport height so the
@@ -1494,9 +1441,9 @@ func (m Model) splashEffective() bool {
 	return m.splashShown && m.width >= banner.Width
 }
 
-// refreshViewport rebuilds the viewport content from raw entries at the
-// current width. Delegates to chatView.SetEntries; syncs turn telemetry and
-// focusedToolIdx first so the render has current state.
+// refreshViewport rebuilds the viewport content from the chatView's owned
+// entries at the current width. Syncs turn telemetry and focusedToolIdx first
+// so the render has current state, then delegates to chatView.rebuild().
 func (m *Model) refreshViewport() {
 	m.chat.SetFocusedTool(m.focusedToolIdx)
 	m.chat.SetTurnStatus(turnStatus{
@@ -1506,7 +1453,7 @@ func (m *Model) refreshViewport() {
 		model:    m.turnModel,
 		cloud:    m.turnCloud,
 	})
-	m.chat.SetEntries(m.entries)
+	m.chat.rebuild()
 }
 
 func (m Model) preparePromptInput() Model {
@@ -1757,7 +1704,7 @@ func (m Model) applyResume(conversationID string) Model {
 	defer cancel()
 	turns, err := m.agent.ResumeConversation(ctx, conversationID)
 	if err != nil {
-		m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: "resume failed: " + err.Error()})
+		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "resume failed: " + err.Error()})
 		m.refreshViewport()
 		return m
 	}
@@ -1765,17 +1712,17 @@ func (m Model) applyResume(conversationID string) Model {
 	if m.convRef != nil {
 		m.convRef.id = conversationID
 	}
-	m.entries = nil
+	m.chat.SetEntriesSlice(nil)
 	m.cumIn = 0
 	m.cumOut = 0
 	m.focusedToolIdx = -1
 	m.splashShown = false
-	m.entries = append(m.entries, resumeEntries(turns)...)
+	m.chat.SetEntriesSlice(resumeEntries(turns))
 	for _, t := range turns {
 		m.cumIn += t.TokensIn
 		m.cumOut += t.TokensOut
 	}
-	m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: fmt.Sprintf("⟲ resumed %d turn(s)", len(turns))})
+	m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: fmt.Sprintf("⟲ resumed %d turn(s)", len(turns))})
 	// Restore the prior session's living recap into the footer line (renderRecap).
 	// Don't also push it into scrollback — that showed the recap twice on resume.
 	if info, err := m.agent.GetConversation(ctx, conversationID); err == nil && info.Recap != "" {
@@ -1834,7 +1781,7 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 	return &confirmRequest{
 		onYes: func(m Model) (Model, tea.Cmd) {
 			m.pendingConfirm = nil
-			m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: m.styles.Accent.Render("✓ approved — running…")})
+			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Accent.Render("✓ approved — running…")})
 			m.refreshViewport()
 			if tc.ToolUseID != "" {
 				// Stream-event origin: unblock the server-side tool loop.
@@ -1849,7 +1796,7 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 		},
 		onNo: func(m Model) (Model, tea.Cmd) {
 			m.pendingConfirm = nil
-			m.entries = append(m.entries, &Entry{Role: RoleSystem, Content: m.styles.Muted.Render("canceled.")})
+			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("canceled.")})
 			m.refreshViewport()
 			if tc.ToolUseID != "" {
 				ag, id := m.agent, tc.ToolUseID
@@ -1861,13 +1808,13 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 		},
 		extras: map[string]func(Model) (Model, tea.Cmd){
 			"d": func(m Model) (Model, tea.Cmd) {
-				m.entries = append(m.entries, &Entry{Role: RoleSystem,
+				m.chat.AppendEntry(&Entry{Role: RoleSystem,
 					Content: "args:\n```json\n" + tc.Args + "\n```"})
 				m.refreshViewport()
 				return m, nil
 			},
 			"D": func(m Model) (Model, tea.Cmd) {
-				m.entries = append(m.entries, &Entry{Role: RoleSystem,
+				m.chat.AppendEntry(&Entry{Role: RoleSystem,
 					Content: "args:\n```json\n" + tc.Args + "\n```"})
 				m.refreshViewport()
 				return m, nil

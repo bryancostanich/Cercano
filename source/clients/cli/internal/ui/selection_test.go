@@ -14,7 +14,7 @@ import (
 // chatView sized to vpWidth×vpHeight and pre-seeds plain lines for copy tests.
 func newSelectionModel(vpWidth, vpHeight int, content string, plainLns []string) Model {
 	p := theme.Cracker()
-	cv := newChatView(theme.NewStyles(p), p, vpWidth, vpHeight)
+	cv := newChatView(theme.NewStyles(p), p, "", "", vpWidth, vpHeight)
 	if content != "" {
 		cv.vp.SetContent(content)
 	}
@@ -68,7 +68,7 @@ func TestSelectionPointFromMouseUsesViewportOffset(t *testing.T) {
 		lines[i] = "line"
 	}
 	p := theme.Cracker()
-	cv := newChatView(theme.NewStyles(p), p, 20, 4)
+	cv := newChatView(theme.NewStyles(p), p, "", "", 20, 4)
 	cv.vp.SetContent(strings.Join(lines, "\n"))
 	cv.vp.SetYOffset(10)
 	cv.plainLines = lines
@@ -84,7 +84,7 @@ func TestSelectionPointFromMouseUsesViewportOffset(t *testing.T) {
 
 func TestMouseReleaseCopiesDragSelection(t *testing.T) {
 	p := theme.Cracker()
-	cv := newChatView(theme.NewStyles(p), p, 20, 4)
+	cv := newChatView(theme.NewStyles(p), p, "", "", 20, 4)
 	cv.vp.SetContent("hello world")
 	cv.plainLines = []string{"hello world"}
 	cv.selection = textSelection{Active: true, Dragging: true, Anchor: selectionPoint{Line: 0, Col: 0}, Cursor: selectionPoint{Line: 0, Col: 1}}
@@ -159,7 +159,7 @@ func TestPasteMsgClearsSelectionAndToolFocus(t *testing.T) {
 
 func TestRenderSelectionOnLinePreservesPlainText(t *testing.T) {
 	p := theme.Cracker()
-	cv := newChatView(theme.NewStyles(p), p, 10, 3)
+	cv := newChatView(theme.NewStyles(p), p, "", "", 10, 3)
 	cv.selection = textSelection{
 		Active: true,
 		Anchor: selectionPoint{Line: 0, Col: 2},

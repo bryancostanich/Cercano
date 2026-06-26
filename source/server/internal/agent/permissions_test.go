@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -83,5 +84,53 @@ func TestPermissionStore_RoundTrip(t *testing.T) {
 	s2, _ := LoadPermissionStore(path)
 	if s2.Mode() != ModeStrict {
 		t.Errorf("mode did not persist: %s", s2.Mode())
+	}
+}
+
+// A running agent holds the store in memory but the file on disk is the live
+// source of truth: an external edit (a hand-edit, or a SetMode from another
+// client sharing the singleton) must propagate without a restart.
+func TestPermissionStore_LiveReloadOnExternalEdit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "permissions.yaml")
+	s, err := LoadPermissionStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetMode(ModeStrict); err != nil {
+		t.Fatal(err)
+	}
+	if s.Mode() != ModeStrict {
+		t.Fatalf("expected strict after SetMode, got %s", s.Mode())
+	}
+	// Simulate an external edit flipping the file back to permissive.
+	if err := os.WriteFile(path, []byte("mode: permissive\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Mode(); got != ModePermissive {
+		t.Errorf("external edit not picked up: Mode()=%s want permissive", got)
+	}
+}
+
+// A transiently missing or malformed file must never silently flip the gate
+// open: the last-known mode is retained.
+func TestPermissionStore_RetainsModeOnBadFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "permissions.yaml")
+	s, _ := LoadPermissionStore(path)
+	if err := s.SetMode(ModeStrict); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Mode(); got != ModeStrict {
+		t.Errorf("missing file should retain strict, got %s", got)
+	}
+	if err := os.WriteFile(path, []byte("}{ not yaml"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Mode(); got != ModeStrict {
+		t.Errorf("malformed file should retain strict, got %s", got)
 	}
 }

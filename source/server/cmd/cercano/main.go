@@ -254,6 +254,12 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	}
 	pending := agent.NewPendingDecisions()
 	srv.SetPermissions(permStore, pending)
+	// Watch permissions.yaml for out-of-band edits (hand-edits, tools) and push
+	// the change to connected clients. Non-fatal: the SetPermissionMode RPC path
+	// still broadcasts, and the gate re-reads the file on every decision.
+	if err := srv.StartPermissionWatcher(context.Background(), permsPath); err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] permission file watcher not started (%v) — /strict etc. still push; hand-edits won't.\n", err)
+	}
 
 	// Layered LLM provider for native tool calling. Constructed only when
 	// the cloud is actually configured (anthropic-only for V1). When absent,

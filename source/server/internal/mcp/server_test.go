@@ -89,6 +89,10 @@ func (m *mockAgentClient) StreamRuntimeLogs(ctx context.Context, in *proto.Strea
 	return nil, nil
 }
 
+func (m *mockAgentClient) SubscribeEvents(ctx context.Context, in *proto.SubscribeEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[proto.ClientEvent], error) {
+	return nil, nil
+}
+
 func (m *mockAgentClient) UpdateConfig(ctx context.Context, in *proto.UpdateConfigRequest, opts ...grpc.CallOption) (*proto.UpdateConfigResponse, error) {
 	m.lastConfigReq = in
 	if m.configResp != nil {

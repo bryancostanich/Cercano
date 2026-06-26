@@ -75,9 +75,24 @@ func LoadPermissionStore(path string) (*PermissionStore, error) {
 	return s, nil
 }
 
+// Mode returns the active permission mode, re-reading the file on disk so an
+// external edit — a hand-edit, or a SetMode from another client sharing this
+// singleton agent — propagates live without a restart. The file is the source
+// of truth; the in-memory field is a fallback for when it is transiently
+// missing or malformed (in which case the gate must NOT silently flip open, so
+// the last-known mode is retained). Mode is consulted per tool-gate decision
+// (human-speed), so re-reading a one-line file here is negligible.
 func (s *PermissionStore) Mode() PermissionMode {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if data, err := os.ReadFile(s.path); err == nil {
+		var f permsFile
+		if yaml.Unmarshal(data, &f) == nil && f.Mode != "" {
+			if m, perr := ParseMode(f.Mode); perr == nil {
+				s.mode = m
+			}
+		}
+	}
 	return s.mode
 }
 

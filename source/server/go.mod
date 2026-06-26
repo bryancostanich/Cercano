@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/PuerkitoBio/goquery v1.12.0
 	github.com/anthropics/anthropic-sdk-go v1.51.0
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/modelcontextprotocol/go-sdk v1.3.1
 	github.com/ollama/ollama v0.30.10
 	github.com/pkoukk/tiktoken-go v0.1.8

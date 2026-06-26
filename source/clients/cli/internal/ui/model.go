@@ -280,7 +280,7 @@ func (m Model) SeedAssistantMarkdown(doc string) Model {
 
 // Init is called by Bubble Tea once at startup.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.input.Focus(), m.splash.Init(), fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent))
+	return tea.Batch(m.input.Focus(), m.splash.Init(), fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent), subscribeEventsCmd(m.agent))
 }
 
 // permissionModeMsg carries the result of the startup GetPermissionMode RPC.
@@ -899,6 +899,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case permissionModeMsg:
 		m.permissionMode = msg.Mode
 		return m, nil
+
+	case permissionModeChangedMsg:
+		// Pushed by the agent (another client's /strict, or a hand-edit to
+		// permissions.yaml). Update the chip and re-arm the drain loop.
+		if msg.mode != "" {
+			m.permissionMode = msg.mode
+		}
+		return m, msg.next
 
 	case toolsLoadedMsg:
 		cache := make(map[string]agentclient.ToolInfo, len(msg.Tools))

@@ -1,0 +1,102 @@
+package ui
+
+import (
+	"bytes"
+	"encoding/json"
+	"regexp"
+	"strings"
+
+	"github.com/charmbracelet/x/ansi"
+
+	"cercano/source/clients/cli/internal/render"
+)
+
+// tool_body_render.go renders a tool result/args body for both the /c viewer and
+// the main-chat tool expand. The render mode is decided by an authoritative
+// content type when the agent provides one (the future (c) path), and otherwise
+// by sniffing the body — JSON is pretty-printed in a fenced block, prose with
+// markdown markers is rendered as markdown, and everything else stays verbatim
+// (so code, logs, and raw output are never mangled).
+
+// resolveToolBodyKind maps a declared content type (mime-ish or short form) to a
+// render kind, falling back to sniffing the body when the type is unknown/empty.
+// declaredType is the seam where the real-content-type (c) feature plugs in.
+func resolveToolBodyKind(body, declaredType string) string {
+	switch strings.ToLower(strings.TrimSpace(declaredType)) {
+	case "json", "application/json":
+		return "json"
+	case "markdown", "md", "text/markdown":
+		return "markdown"
+	case "plain", "text", "text/plain":
+		return "plain"
+	}
+	return classifyToolBody(body)
+}
+
+// classifyToolBody sniffs a body into "json" | "markdown" | "plain".
+func classifyToolBody(body string) string {
+	s := strings.TrimSpace(body)
+	if s == "" {
+		return "plain"
+	}
+	if (s[0] == '{' || s[0] == '[') && json.Valid([]byte(s)) {
+		return "json"
+	}
+	if hasMarkdownMarkers(s) {
+		return "markdown"
+	}
+	return "plain"
+}
+
+var (
+	mdHeading    = regexp.MustCompile(`(?m)^#{1,6}\s`)
+	mdFence      = regexp.MustCompile("(?m)^```")
+	mdBlockquote = regexp.MustCompile(`(?m)^>\s`)
+	mdTableSep   = regexp.MustCompile(`(?m)^\s*\|?[\s:|-]*-[\s:|-]*\|[\s:|-]*$`)
+	mdListItem   = regexp.MustCompile(`(?m)^\s*([-*+]\s|\d+\.\s)`)
+)
+
+// hasMarkdownMarkers reports whether s contains block-level markdown structure.
+// Block-level only (headings, fences, blockquotes, tables, ≥2 list items) — inline
+// emphasis/backticks/links are deliberately NOT enough, since they false-positive
+// on code and logs (a `*` glob, a back-quoted shell token), which we'd rather keep
+// verbatim than mangle into italics.
+func hasMarkdownMarkers(s string) bool {
+	if mdHeading.MatchString(s) || mdFence.MatchString(s) ||
+		mdBlockquote.MatchString(s) || mdTableSep.MatchString(s) {
+		return true
+	}
+	return len(mdListItem.FindAllString(s, 2)) >= 2
+}
+
+// prettyJSON re-indents a JSON body; returns the input unchanged if it is not
+// valid JSON.
+func prettyJSON(s string) string {
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, []byte(strings.TrimSpace(s)), "", "  "); err != nil {
+		return s
+	}
+	return buf.String()
+}
+
+// renderToolBody renders a tool body to display lines at the given width.
+// declaredType, when set, picks the render mode; otherwise the body is sniffed.
+// JSON → pretty-printed in a ```json fence; markdown → rendered; else verbatim.
+func renderToolBody(body, declaredType string, md *render.Markdown, width int) []string {
+	if width < 8 {
+		width = 8
+	}
+	kind := resolveToolBodyKind(body, declaredType)
+	if md == nil { // no engine → never mangle
+		kind = "plain"
+	}
+	switch kind {
+	case "json":
+		src := "```json\n" + prettyJSON(strings.TrimSpace(body)) + "\n```"
+		return strings.Split(md.Render(src, width), "\n")
+	case "markdown":
+		return strings.Split(md.Render(strings.TrimSpace(body), width), "\n")
+	default:
+		return strings.Split(ansi.Wrap(body, width, ""), "\n")
+	}
+}

@@ -64,6 +64,10 @@ type Compaction struct {
 	UpdatedAt            time.Time
 }
 
+// PrunedBodyStub replaces a frozen turn's content when it ages out of raw
+// retention; the consolidated summary carries the substance.
+const PrunedBodyStub = "[pruned after 90 days — see summary]"
+
 // Store is the persistent conversation store interface. The runtime
 // implementation is SQLite-backed (modernc.org/sqlite, pure Go — no cgo).
 type Store interface {
@@ -108,6 +112,13 @@ type Store interface {
 	// DeleteTurns removes the named turns from a conversation. Unknown ids are
 	// ignored (idempotent); other conversations are never affected.
 	DeleteTurns(ctx context.Context, conversationID string, ids []string) error
+
+	// PruneRawBodies stubs the content of frozen turns (created_at <=
+	// frozenThrough) older than beforeUnix; returns the number changed.
+	PruneRawBodies(ctx context.Context, conversationID string, beforeUnix, frozenThrough int64) (int, error)
+	// CollapseConversation deletes the compaction row and all turns, keeping the
+	// conversations identity row (title + recap).
+	CollapseConversation(ctx context.Context, conversationID string) error
 
 	// Get returns a single conversation's Info, or an error if not found.
 	Get(ctx context.Context, conversationID string) (Info, error)
@@ -398,6 +409,43 @@ func (s *sqliteStore) DeleteTurns(ctx context.Context, conversationID string, id
 	query := "DELETE FROM turns WHERE conversation_id = ? AND id IN (" + strings.Join(placeholders, ",") + ")"
 	_, err := s.db.ExecContext(ctx, query, args...)
 	return err
+}
+
+func (s *sqliteStore) PruneRawBodies(ctx context.Context, conversationID string, beforeUnix, frozenThrough int64) (int, error) {
+	if conversationID == "" {
+		return 0, errors.New("conversation id required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE turns SET content = ?, content_json = ''
+		WHERE conversation_id = ? AND created_at <= ? AND created_at < ? AND content != ?`,
+		PrunedBodyStub, conversationID, frozenThrough, beforeUnix, PrunedBodyStub)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
+func (s *sqliteStore) CollapseConversation(ctx context.Context, conversationID string) error {
+	if conversationID == "" {
+		return errors.New("conversation id required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM conversation_compaction WHERE conversation_id = ?`, conversationID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM turns WHERE conversation_id = ?`, conversationID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *sqliteStore) Rename(ctx context.Context, conversationID, title string) error {

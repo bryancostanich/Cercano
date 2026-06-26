@@ -57,3 +57,32 @@ func TestContextView_ScrollState(t *testing.T) {
 		t.Errorf("ScrollBy did not advance offset: %d -> %d", st0.Offset, cv.ScrollState().Offset)
 	}
 }
+
+func TestContextTurns_SentViewHidesFrozenShowsSummary(t *testing.T) {
+	cv := expandTestView()
+	cv.snapshot.Turns = []agentclient.ContextTurn{
+		{ID: "a", Role: "user", Kind: "text", Preview: "FROZEN-1"},
+		{ID: "b", Role: "assistant", Kind: "text", Preview: "FROZEN-2"},
+		{ID: "c", Role: "user", Kind: "text", Preview: "LIVE-1"},
+	}
+	cv.snapshot.Compaction = &agentclient.CompactionState{
+		FrozenTurns: 2, LiveTurns: 1,
+		ConsolidatedSummary: "[conversation summary]\nGoal: SUMMARY-GOAL",
+	}
+	out := stripAnsiCSI(strings.Join(cv.turnsLinesOnly(), "\n"))
+	if !strings.Contains(out, "SUMMARY-GOAL") {
+		t.Error("sent view should show the consolidated summary")
+	}
+	if !strings.Contains(out, "LIVE-1") {
+		t.Error("sent view should show live turns")
+	}
+	if strings.Contains(out, "FROZEN-1") || strings.Contains(out, "FROZEN-2") {
+		t.Error("sent view must hide frozen turns (they're in the summary)")
+	}
+
+	cv.showOriginal = true
+	out = stripAnsiCSI(strings.Join(cv.turnsLinesOnly(), "\n"))
+	if !strings.Contains(out, "FROZEN-1") || strings.Contains(out, "SUMMARY-GOAL") {
+		t.Error("original view should show all turns and no summary")
+	}
+}

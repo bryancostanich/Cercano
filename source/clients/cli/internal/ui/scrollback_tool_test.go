@@ -17,7 +17,7 @@ func TestToolEntry_FoldedRender(t *testing.T) {
 		ResultSummary: "32 lines",
 		Folded:        true,
 	}
-	s := stripAnsiCSI(renderToolEntry(e, 80, false))
+	s := stripAnsiCSI(renderToolEntry(e, 80, false, nil))
 	if !strings.Contains(s, "▸ read_file") {
 		t.Errorf("expected fold marker + name, got: %q", s)
 	}
@@ -32,8 +32,8 @@ func TestToolEntry_FoldedRender(t *testing.T) {
 func TestToolEntry_ArgsColumnAligned(t *testing.T) {
 	// Short tool names pad to a fixed column so args start at the same offset
 	// regardless of name length.
-	short := stripAnsiCSI(renderToolEntry(ToolEntry{ToolName: "LS", ArgsSummary: "X", Status: ToolStatusComplete, Folded: true}, 80, false))
-	long := stripAnsiCSI(renderToolEntry(ToolEntry{ToolName: "Bash", ArgsSummary: "X", Status: ToolStatusComplete, Folded: true}, 80, false))
+	short := stripAnsiCSI(renderToolEntry(ToolEntry{ToolName: "LS", ArgsSummary: "X", Status: ToolStatusComplete, Folded: true}, 80, false, nil))
+	long := stripAnsiCSI(renderToolEntry(ToolEntry{ToolName: "Bash", ArgsSummary: "X", Status: ToolStatusComplete, Folded: true}, 80, false, nil))
 	if strings.Index(short, "X") != strings.Index(long, "X") {
 		t.Errorf("args column not aligned: LS arg at %d, Bash arg at %d\n%q\n%q",
 			strings.Index(short, "X"), strings.Index(long, "X"), short, long)
@@ -43,7 +43,7 @@ func TestToolEntry_ArgsColumnAligned(t *testing.T) {
 func TestToolEntry_StatusRightAligned(t *testing.T) {
 	e := ToolEntry{ToolName: "Bash", ArgsSummary: "x", Status: ToolStatusComplete, ResultSummary: "exit 1 · 686ms", Folded: true}
 	const w = 60
-	s := stripAnsiCSI(renderToolEntry(e, w, false))
+	s := stripAnsiCSI(renderToolEntry(e, w, false, nil))
 	if !strings.HasSuffix(s, "✓ exit 1 · 686ms") {
 		t.Errorf("status should be at the right edge, got: %q", s)
 	}
@@ -61,7 +61,7 @@ func TestToolEntry_ExpandedRender(t *testing.T) {
 		Status:      ToolStatusComplete,
 		Folded:      false,
 	}
-	s := stripAnsiCSI(renderToolEntry(e, 80, false))
+	s := stripAnsiCSI(renderToolEntry(e, 80, false, nil))
 	if !strings.Contains(s, "▾ read_file") {
 		t.Errorf("expected unfold marker, got: %q", s)
 	}
@@ -72,7 +72,7 @@ func TestToolEntry_ExpandedRender(t *testing.T) {
 
 func TestToolEntry_InProgress(t *testing.T) {
 	e := ToolEntry{ToolName: "grep", Status: ToolStatusInProgress, Folded: true}
-	s := stripAnsiCSI(renderToolEntry(e, 80, false))
+	s := stripAnsiCSI(renderToolEntry(e, 80, false, nil))
 	if !strings.Contains(s, "grep") {
 		t.Errorf("name missing: %q", s)
 	}
@@ -80,7 +80,7 @@ func TestToolEntry_InProgress(t *testing.T) {
 
 func TestToolEntry_FocusedRender(t *testing.T) {
 	e := ToolEntry{ToolName: "list_dir", Status: ToolStatusComplete, Folded: true}
-	s := stripAnsiCSI(renderToolEntry(e, 80, true))
+	s := stripAnsiCSI(renderToolEntry(e, 80, true, nil))
 	if !strings.Contains(s, "▶") {
 		t.Errorf("focused render should have a ▶ focus indicator, got: %q", s)
 	}
@@ -88,8 +88,8 @@ func TestToolEntry_FocusedRender(t *testing.T) {
 
 func TestToolEntry_UnfocusedRenderDiffers(t *testing.T) {
 	e := ToolEntry{ToolName: "list_dir", Status: ToolStatusComplete, Folded: true}
-	sFocused := stripAnsiCSI(renderToolEntry(e, 80, true))
-	sUnfocused := stripAnsiCSI(renderToolEntry(e, 80, false))
+	sFocused := stripAnsiCSI(renderToolEntry(e, 80, true, nil))
+	sUnfocused := stripAnsiCSI(renderToolEntry(e, 80, false, nil))
 	if sFocused == sUnfocused {
 		t.Errorf("focused and unfocused should differ visually; both = %q", sFocused)
 	}

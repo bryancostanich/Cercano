@@ -567,7 +567,7 @@ func (c *chatView) renderEntry(e *Entry, idx int) string {
 	// marker + status glyph. Indented to match the prose left-margin so the
 	// scrollback's vertical rhythm stays consistent.
 	if e.Tool != nil {
-		return indentBlock(pad, renderToolEntry(*e.Tool, textW, idx == c.focusedToolIdx))
+		return indentBlock(pad, renderToolEntry(*e.Tool, textW, idx == c.focusedToolIdx, c.md))
 	}
 
 	switch e.Role {

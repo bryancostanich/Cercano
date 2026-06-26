@@ -16,6 +16,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"cercano/source/clients/cli/internal/render"
 	"cercano/source/clients/cli/internal/theme"
 )
 
@@ -76,7 +77,7 @@ var (
 // focused renders a left-margin caret in the accent color so the user can see
 // which entry the up/down nav cursor is currently on. When false, a two-space
 // gutter holds the slot so toggling fold doesn't shift the body horizontally.
-func renderToolEntry(e ToolEntry, width int, focused bool) string {
+func renderToolEntry(e ToolEntry, width int, focused bool, md *render.Markdown) string {
 	marker := "▸"
 	if !e.Folded {
 		marker = "▾"
@@ -170,7 +171,15 @@ func renderToolEntry(e ToolEntry, width int, focused bool) string {
 		body = append(body, toolEntryFaint.Render("    args: "+e.FullArgs))
 	}
 	if e.FullResult != "" {
-		body = append(body, "    "+indentToolBody(e.FullResult, "    "))
+		// Render the result by type (JSON pretty-printed, markdown rendered, raw
+		// verbatim) through the same path /c uses, indented under the entry.
+		bw := width - 4
+		if bw < 8 {
+			bw = 8
+		}
+		for _, l := range renderToolBody(e.FullResult, "", md, bw) {
+			body = append(body, "    "+l)
+		}
 	}
 	return strings.Join(body, "\n")
 }

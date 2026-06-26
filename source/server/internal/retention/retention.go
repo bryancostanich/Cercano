@@ -5,6 +5,8 @@ package retention
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"time"
 
 	"cercano/source/server/internal/conversation"
@@ -52,16 +54,25 @@ func (s *Sweeper) Sweep(ctx context.Context, now time.Time) {
 	}
 	collapseBefore := now.Add(-time.Duration(s.cfg.CompactedRetentionDays) * 24 * time.Hour)
 	rawCutoff := now.Add(-time.Duration(s.cfg.RawRetentionDays) * 24 * time.Hour).Unix()
+	var collapsed, prunedBodies int
 	for _, info := range infos {
 		if info.LastTurnAt.Before(collapseBefore) {
-			_ = s.store.CollapseConversation(ctx, info.ID)
+			if err := s.store.CollapseConversation(ctx, info.ID); err == nil {
+				collapsed++
+			}
 			continue
 		}
 		comp, err := s.store.GetCompaction(ctx, info.ID)
 		if err != nil || comp.FrozenThrough == 0 {
 			continue // never compacted → nothing frozen to prune
 		}
-		_, _ = s.store.PruneRawBodies(ctx, info.ID, rawCutoff, comp.FrozenThrough)
+		if n, err := s.store.PruneRawBodies(ctx, info.ID, rawCutoff, comp.FrozenThrough); err == nil {
+			prunedBodies += n
+		}
+	}
+	// Visibility for a destructive operation: one line per sweep when it acted.
+	if collapsed > 0 || prunedBodies > 0 {
+		fmt.Fprintf(os.Stderr, "[retention] sweep: collapsed %d conversation(s), pruned %d raw body(ies)\n", collapsed, prunedBodies)
 	}
 }
 

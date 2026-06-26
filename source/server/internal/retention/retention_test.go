@@ -35,7 +35,6 @@ func (f *fakeStore) CollapseConversation(_ context.Context, id string) error {
 
 func TestSweep_CollapsesDeadStubsAged(t *testing.T) {
 	now := time.Unix(1_000_000_000, 0)
-	day := int64(86400)
 	fs := &fakeStore{
 		infos: []conversation.Info{
 			{ID: "dead", LastTurnAt: now.Add(-200 * 24 * time.Hour)},     // >180d → collapse
@@ -70,7 +69,6 @@ func TestSweep_CollapsesDeadStubsAged(t *testing.T) {
 	if _, ok := fs.pruned["fresh"]; ok {
 		t.Error("'fresh' must not be touched")
 	}
-	_ = day
 }
 
 func TestSweep_KeepForeverDoesNothing(t *testing.T) {

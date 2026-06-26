@@ -16,7 +16,7 @@ func TestRenderToolEntryFoldedSingleLine(t *testing.T) {
 		Status:        ToolStatusComplete,
 		Folded:        true,
 	}
-	got := renderToolEntry(e, 80, false)
+	got := renderToolEntry(e, 80, false, nil)
 	if strings.Contains(got, "\n") {
 		t.Fatalf("folded tool entry must be one line; got embedded newline:\n%q", got)
 	}

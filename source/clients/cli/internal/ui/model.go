@@ -9,6 +9,7 @@ import (
 	"image/color"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -779,6 +780,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case contextSnapshotMsg:
 		if cv, ok := m.content.(*contextView); ok {
 			cv.snapshot = msg.snap
+		}
+		return m, nil
+
+	case exportDoneMsg:
+		if cv, ok := m.content.(*contextView); ok {
+			if msg.err != nil {
+				cv.notice = "export failed: " + msg.err.Error()
+			} else {
+				cv.notice = "exported full context → " + msg.path
+			}
 		}
 		return m, nil
 
@@ -1746,6 +1757,42 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 	}
 }
 
+// writeExport writes the export JSON to <dir>/cercano-context-<conv8>.json and
+// returns the absolute path.
+func writeExport(dir, convID, jsonBody string) (string, error) {
+	id := convID
+	if len(id) > 8 {
+		id = id[:8]
+	}
+	path := filepath.Join(dir, "cercano-context-"+id+".json")
+	if err := os.WriteFile(path, []byte(jsonBody), 0o644); err != nil {
+		return "", err
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs, nil
+	}
+	return path, nil
+}
+
+type exportDoneMsg struct {
+	path string
+	err  error
+}
+
+func exportContextCmd(ag *agentclient.Client, convID string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		body, err := ag.ExportContext(ctx, convID)
+		if err != nil {
+			return exportDoneMsg{err: err}
+		}
+		dir, _ := os.Getwd()
+		path, err := writeExport(dir, convID, body)
+		return exportDoneMsg{path: path, err: err}
+	}
+}
+
 // handleContextViewKey owns the keyboard while the /c context viewer is the
 // active page: typing edits the main prompt bar, enter submits an edit
 // instruction to the pane, scroll keys move the turn list, and esc on an empty
@@ -1832,6 +1879,8 @@ func (m Model) handleContextViewKey(cv *contextView, msg tea.KeyPressMsg) (Model
 		cv.showOriginal = !cv.showOriginal
 		cv.ScrollTo(0)
 		return m, nil
+	case "ctrl+e":
+		return m, exportContextCmd(cv.agent, cv.convID)
 	}
 	// Everything else edits the prompt bar.
 	m = m.preparePromptInput()

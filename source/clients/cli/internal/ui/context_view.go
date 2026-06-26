@@ -220,15 +220,13 @@ func (c *contextView) turnsLines() ([]string, []turnLineMeta) {
 	default:
 		turns := c.snapshot.Turns
 		cs := c.snapshot.Compaction
-		frozenN := 0
-		if !c.showOriginal && cs != nil && cs.FrozenTurns > 0 {
-			frozenN = cs.FrozenTurns
-			if frozenN > len(turns) {
-				frozenN = len(turns)
-			}
+		frozenN := c.frozenFloor()
+		if frozenN > 0 {
 			// Consolidated summary block, then a collapsed marker for the frozen span.
-			for _, line := range strings.Split(cs.ConsolidatedSummary, "\n") {
-				add(c.styles.Muted.Render(line), turnLineMeta{})
+			if cs.ConsolidatedSummary != "" {
+				for _, line := range strings.Split(cs.ConsolidatedSummary, "\n") {
+					add(c.styles.Muted.Render(line), turnLineMeta{})
+				}
 			}
 			add(c.styles.Dim.Render(fmt.Sprintf("  ▣ %d turns compacted into the summary above  (Ctrl+O: show original)", frozenN)), turnLineMeta{})
 			add("", turnLineMeta{})
@@ -468,21 +466,40 @@ func (c *contextView) setFocusedExpanded(open bool) {
 // where turnExpandable returns true, wrapping around. No-op if no expandable turns.
 // From the neutral start (focusedTurn == -1): forward lands on the first expandable,
 // backward lands on the last expandable.
+// frozenFloor is the index of the first turn actually RENDERED in the current
+// view. In the sent view the frozen prefix is hidden (it lives in the summary),
+// so focus/iteration must start here; in the original view (or with no
+// compaction) it's 0. turnsLines and focusNextExpandable share this so the
+// focusable range can never drift from the rendered range.
+func (c *contextView) frozenFloor() int {
+	cs := c.snapshot.Compaction
+	if c.showOriginal || cs == nil || cs.FrozenTurns <= 0 {
+		return 0
+	}
+	if cs.FrozenTurns > len(c.snapshot.Turns) {
+		return len(c.snapshot.Turns)
+	}
+	return cs.FrozenTurns
+}
+
 func (c *contextView) focusNextExpandable(dir int) {
 	n := len(c.snapshot.Turns)
-	if n == 0 {
+	lo := c.frozenFloor() // never focus a hidden frozen turn
+	span := n - lo
+	if span <= 0 {
 		return
 	}
 	start := c.focusedTurn
-	if start < 0 {
+	if start < lo {
 		if dir > 0 {
-			start = -1 // first step gives index 0
+			start = lo - 1 // first step gives index lo
 		} else {
 			start = n // first step gives index n-1
 		}
 	}
-	for step := 1; step <= n; step++ {
-		i := ((start + dir*step) % n + n) % n
+	js := start - lo
+	for step := 1; step <= span; step++ {
+		i := lo + (((js+dir*step)%span)+span)%span
 		if c.turnExpandable(c.snapshot.Turns[i]) {
 			c.focusedTurn = i
 			return

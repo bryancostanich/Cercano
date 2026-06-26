@@ -1875,8 +1875,11 @@ func (m Model) handleContextViewKey(cv *contextView, msg tea.KeyPressMsg) (Model
 		cv.snapshot = loadContextSnapshot(cv.agent, cv.convID)
 		return m, nil
 	case "ctrl+o":
-		// Toggle between the sent (compacted) view and the full original.
+		// Toggle between the sent (compacted) view and the full original. Reset
+		// focus (the visible turn range changes) and clear any export notice.
 		cv.showOriginal = !cv.showOriginal
+		cv.focusedTurn = -1
+		cv.notice = ""
 		cv.ScrollTo(0)
 		return m, nil
 	case "ctrl+e":

@@ -86,3 +86,35 @@ func TestContextTurns_SentViewHidesFrozenShowsSummary(t *testing.T) {
 		t.Error("original view should show all turns and no summary")
 	}
 }
+
+func TestFocusNextExpandable_SkipsFrozenInSentView(t *testing.T) {
+	cv := expandTestView()
+	// Two frozen turns (hidden in sent view) + one live, all expandable.
+	long := "L1\nL2\nL3\nL4\nL5\nL6"
+	cv.snapshot.Turns = []agentclient.ContextTurn{
+		{ID: "a", Role: "assistant", Kind: "text", Body: long}, // frozen index 0
+		{ID: "b", Role: "assistant", Kind: "text", Body: long}, // frozen index 1
+		{ID: "c", Role: "assistant", Kind: "text", Body: long}, // live index 2
+	}
+	cv.snapshot.Compaction = &agentclient.CompactionState{FrozenTurns: 2, ConsolidatedSummary: "Goal: G"}
+
+	// Tab from no focus must land on the first VISIBLE turn (index 2), never a
+	// hidden frozen one (0 or 1).
+	cv.focusNextExpandable(+1)
+	if cv.focusedTurn != 2 {
+		t.Errorf("sent view: tab should focus the first live turn (2), got %d", cv.focusedTurn)
+	}
+	// Shift+Tab from no focus also lands on a visible turn.
+	cv.focusedTurn = -1
+	cv.focusNextExpandable(-1)
+	if cv.focusedTurn < 2 {
+		t.Errorf("sent view: shift+tab must not focus a hidden frozen turn, got %d", cv.focusedTurn)
+	}
+	// In original view all turns are focusable again.
+	cv.showOriginal = true
+	cv.focusedTurn = -1
+	cv.focusNextExpandable(+1)
+	if cv.focusedTurn != 0 {
+		t.Errorf("original view: tab should focus turn 0, got %d", cv.focusedTurn)
+	}
+}

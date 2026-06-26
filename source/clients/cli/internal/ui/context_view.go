@@ -260,23 +260,20 @@ func (c *contextView) turnExpandable(t agentclient.ContextTurn) bool {
 	return len(c.turnBodyLines(t)) > c.collapsedCount(t)
 }
 
-// bodyIsMarkdown reports whether a turn's body should render as markdown when
-// expanded. Tool calls/results carry JSON or raw output, not prose, so they
-// stay plain.
-func (c *contextView) bodyIsMarkdown(t agentclient.ContextTurn) bool {
-	switch t.Kind {
-	case "tool_use", "tool_result":
-		return false
-	}
-	return true
-}
-
-// markdownBodyLines renders a turn's body through the markdown engine, wrapped
-// to the body column width. Used only for expanded text turns.
-func (c *contextView) markdownBodyLines(t agentclient.ContextTurn) []string {
+// expandedBodyLines renders a turn's full body for the expanded view. Prose
+// turns go through the markdown engine; tool_use/tool_result bodies go through
+// the shared tool-body renderer (JSON pretty-printed in a fence, markdown
+// rendered, raw output kept verbatim).
+func (c *contextView) expandedBodyLines(t agentclient.ContextTurn) []string {
 	w := dashboardPanelWidth(c.width) - 8 // arrow + token gutter + 4-space indent
 	if w < 8 {
 		w = 8
+	}
+	switch t.Kind {
+	case "tool_use", "tool_result":
+		// "" declared type → sniff. The real-content-type (c) signal slots in
+		// here once the agent carries a type on tool results.
+		return renderToolBody(t.Body, "", c.md, w)
 	}
 	return strings.Split(c.md.Render(strings.TrimSpace(t.Body), w), "\n")
 }
@@ -293,12 +290,12 @@ func (c *contextView) appendTurn(lines *[]string, meta *[]turnLineMeta, i int, t
 	// Expanded text turns render their full body through the markdown engine and
 	// keep the metadata (badge + tokens) on a header line of its own. All other
 	// states keep the compact preview with the first body line on the header.
-	mdExpanded := open && !deleted && c.bodyIsMarkdown(t) && c.md != nil && strings.TrimSpace(t.Body) != ""
+	richExpanded := open && !deleted && c.md != nil && strings.TrimSpace(t.Body) != ""
 
 	shown := bodyLines
 	switch {
-	case mdExpanded:
-		shown = c.markdownBodyLines(t)
+	case richExpanded:
+		shown = c.expandedBodyLines(t)
 	case !open:
 		limit := c.collapsedCount(t)
 		if limit > len(bodyLines) {
@@ -337,7 +334,7 @@ func (c *contextView) appendTurn(lines *[]string, meta *[]turnLineMeta, i int, t
 	// The header carries the first preview line only when NOT markdown-expanded.
 	firstLine := ""
 	bodyStart := 0
-	if !mdExpanded && len(shown) > 0 {
+	if !richExpanded && len(shown) > 0 {
 		firstLine = shown[0]
 		bodyStart = 1
 	}

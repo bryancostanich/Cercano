@@ -37,6 +37,7 @@ type contextView struct {
 	busyFlag        bool // true while a context-edit turn is in flight
 
 	showOriginal bool
+	notice       string
 
 	md     *render.Markdown
 	driver *contextManagerDriver
@@ -422,6 +423,9 @@ func (c *contextView) renderHeader() string {
 			badge = c.styles.Accent.Render("  ·  compacting…")
 		}
 		head += badge
+	}
+	if c.notice != "" {
+		head += "\n" + c.styles.Accent.Render(c.notice)
 	}
 	return head
 }

@@ -684,6 +684,43 @@ func (c *Client) StreamRuntimeLogs(ctx context.Context, tail int, source string)
 	return out, nil
 }
 
+// PermissionModeEvent is pushed when the agent's active permission mode
+// changes — via a /strict-style command from any client, or an out-of-band
+// edit to permissions.yaml. Err is set if the stream itself failed.
+type PermissionModeEvent struct {
+	Mode string
+	Err  error
+}
+
+// SubscribeEvents opens the standing server->client event stream and returns a
+// channel of permission-mode changes. The client holds this open for its whole
+// session so the agent can push state changes instead of the client polling.
+// The channel closes when the stream ends (server shutdown / disconnect).
+func (c *Client) SubscribeEvents(ctx context.Context) (<-chan PermissionModeEvent, error) {
+	stream, err := c.agent.SubscribeEvents(ctx, &proto.SubscribeEventsRequest{})
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan PermissionModeEvent, 8)
+	go func() {
+		defer close(out)
+		for {
+			ev, err := stream.Recv()
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			if err != nil {
+				out <- PermissionModeEvent{Err: err}
+				return
+			}
+			if pm := ev.GetPermissionModeChanged(); pm != nil {
+				out <- PermissionModeEvent{Mode: pm.GetMode()}
+			}
+		}
+	}()
+	return out, nil
+}
+
 // UpdateConfig sends a runtime config patch. Returns the agent's confirmation
 // summary line (e.g. "updated: [local_model=qwen3-coder, cloud=anthropic/...]").
 func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, error) {

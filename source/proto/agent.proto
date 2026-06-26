@@ -85,6 +85,13 @@ service Agent {
   // GetPermissionMode reads the current mode.
   rpc GetPermissionMode (GetPermissionModeRequest) returns (GetPermissionModeResponse) {}
 
+  // SubscribeEvents is a standing server->client stream the client holds open
+  // for its whole session. The agent pushes unsolicited state changes here so
+  // clients never poll. First event type is PermissionModeChanged (fired when
+  // the mode is changed via SetPermissionMode by any client, or when the
+  // permissions file is edited out-of-band by a human or a tool).
+  rpc SubscribeEvents (SubscribeEventsRequest) returns (stream ClientEvent) {}
+
   // AllowToolCall + DenyToolCall are how a client replies to a
   // PermissionRequired stream event.
   rpc AllowToolCall (AllowToolCallRequest) returns (AllowToolCallResponse) {}
@@ -528,6 +535,21 @@ message SetPermissionModeResponse { bool ok = 1; string error = 2; }
 
 message GetPermissionModeRequest  {}
 message GetPermissionModeResponse { string mode = 1; }
+
+// SubscribeEvents transport. The request is empty today; a client_id may be
+// added later for targeted pushes. ClientEvent is a oneof so new server->client
+// event types can be added without a new RPC.
+message SubscribeEventsRequest {}
+
+message ClientEvent {
+  oneof event {
+    PermissionModeChanged permission_mode_changed = 1;
+  }
+}
+
+// PermissionModeChanged carries the new active mode. Clients update their
+// status bar from this — no fetch, no poll.
+message PermissionModeChanged { string mode = 1; }
 
 // Allow/Deny pair the asynchronous PermissionRequired stream event with a
 // client reply. tool_use_id is the same id the event carried.

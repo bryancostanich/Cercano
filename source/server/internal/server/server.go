@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"cercano/source/server/internal/agent"
@@ -55,6 +56,10 @@ type Server struct {
 	cloudLLMProvider    llm.Provider
 	runtimeManager      localruntime.Manager
 	contextLoader       *projectctx.Loader
+
+	events        *eventHub  // server->client push fan-out (SubscribeEvents)
+	permBcastMu   sync.Mutex // guards lastBcastMode
+	lastBcastMode string     // last permission mode broadcast; dedupes file-watcher vs SetMode
 }
 
 // SetContextLoader wires the project-context loader so the native tool-loop can
@@ -92,6 +97,7 @@ func NewServer(a *agent.Agent, localProvider *legacymodels.LocalModelProvider, r
 		coordinator:   coordinator,
 		cloudFactory:  cloudFactory,
 		registry:      registry,
+		events:        newEventHub(),
 	}
 }
 
@@ -1263,6 +1269,10 @@ func (s *Server) SetPermissionMode(ctx context.Context, req *proto.SetPermission
 	if err := s.permStore.SetMode(m); err != nil {
 		return &proto.SetPermissionModeResponse{Ok: false, Error: err.Error()}, nil
 	}
+	// Push to every connected client so their status bars update reactively.
+	// The file watcher also fires for this same write; broadcastPermissionMode
+	// dedupes by value so the two paths collapse to one event.
+	s.broadcastPermissionMode(string(m))
 	return &proto.SetPermissionModeResponse{Ok: true}, nil
 }
 

@@ -49,6 +49,7 @@ const (
 	Agent_GetSkill_FullMethodName                   = "/agent.Agent/GetSkill"
 	Agent_SetPermissionMode_FullMethodName          = "/agent.Agent/SetPermissionMode"
 	Agent_GetPermissionMode_FullMethodName          = "/agent.Agent/GetPermissionMode"
+	Agent_SubscribeEvents_FullMethodName            = "/agent.Agent/SubscribeEvents"
 	Agent_AllowToolCall_FullMethodName              = "/agent.Agent/AllowToolCall"
 	Agent_DenyToolCall_FullMethodName               = "/agent.Agent/DenyToolCall"
 	Agent_GetProviderCapabilities_FullMethodName    = "/agent.Agent/GetProviderCapabilities"
@@ -124,6 +125,12 @@ type AgentClient interface {
 	SetPermissionMode(ctx context.Context, in *SetPermissionModeRequest, opts ...grpc.CallOption) (*SetPermissionModeResponse, error)
 	// GetPermissionMode reads the current mode.
 	GetPermissionMode(ctx context.Context, in *GetPermissionModeRequest, opts ...grpc.CallOption) (*GetPermissionModeResponse, error)
+	// SubscribeEvents is a standing server->client stream the client holds open
+	// for its whole session. The agent pushes unsolicited state changes here so
+	// clients never poll. First event type is PermissionModeChanged (fired when
+	// the mode is changed via SetPermissionMode by any client, or when the
+	// permissions file is edited out-of-band by a human or a tool).
+	SubscribeEvents(ctx context.Context, in *SubscribeEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ClientEvent], error)
 	// AllowToolCall + DenyToolCall are how a client replies to a
 	// PermissionRequired stream event.
 	AllowToolCall(ctx context.Context, in *AllowToolCallRequest, opts ...grpc.CallOption) (*AllowToolCallResponse, error)
@@ -463,6 +470,25 @@ func (c *agentClient) GetPermissionMode(ctx context.Context, in *GetPermissionMo
 	return out, nil
 }
 
+func (c *agentClient) SubscribeEvents(ctx context.Context, in *SubscribeEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ClientEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[2], Agent_SubscribeEvents_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[SubscribeEventsRequest, ClientEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_SubscribeEventsClient = grpc.ServerStreamingClient[ClientEvent]
+
 func (c *agentClient) AllowToolCall(ctx context.Context, in *AllowToolCallRequest, opts ...grpc.CallOption) (*AllowToolCallResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AllowToolCallResponse)
@@ -581,6 +607,12 @@ type AgentServer interface {
 	SetPermissionMode(context.Context, *SetPermissionModeRequest) (*SetPermissionModeResponse, error)
 	// GetPermissionMode reads the current mode.
 	GetPermissionMode(context.Context, *GetPermissionModeRequest) (*GetPermissionModeResponse, error)
+	// SubscribeEvents is a standing server->client stream the client holds open
+	// for its whole session. The agent pushes unsolicited state changes here so
+	// clients never poll. First event type is PermissionModeChanged (fired when
+	// the mode is changed via SetPermissionMode by any client, or when the
+	// permissions file is edited out-of-band by a human or a tool).
+	SubscribeEvents(*SubscribeEventsRequest, grpc.ServerStreamingServer[ClientEvent]) error
 	// AllowToolCall + DenyToolCall are how a client replies to a
 	// PermissionRequired stream event.
 	AllowToolCall(context.Context, *AllowToolCallRequest) (*AllowToolCallResponse, error)
@@ -691,6 +723,9 @@ func (UnimplementedAgentServer) SetPermissionMode(context.Context, *SetPermissio
 }
 func (UnimplementedAgentServer) GetPermissionMode(context.Context, *GetPermissionModeRequest) (*GetPermissionModeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetPermissionMode not implemented")
+}
+func (UnimplementedAgentServer) SubscribeEvents(*SubscribeEventsRequest, grpc.ServerStreamingServer[ClientEvent]) error {
+	return status.Error(codes.Unimplemented, "method SubscribeEvents not implemented")
 }
 func (UnimplementedAgentServer) AllowToolCall(context.Context, *AllowToolCallRequest) (*AllowToolCallResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AllowToolCall not implemented")
@@ -1254,6 +1289,17 @@ func _Agent_GetPermissionMode_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Agent_SubscribeEvents_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(SubscribeEventsRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AgentServer).SubscribeEvents(m, &grpc.GenericServerStream[SubscribeEventsRequest, ClientEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_SubscribeEventsServer = grpc.ServerStreamingServer[ClientEvent]
+
 func _Agent_AllowToolCall_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AllowToolCallRequest)
 	if err := dec(in); err != nil {
@@ -1493,6 +1539,11 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "StreamRuntimeLogs",
 			Handler:       _Agent_StreamRuntimeLogs_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "SubscribeEvents",
+			Handler:       _Agent_SubscribeEvents_Handler,
 			ServerStreams: true,
 		},
 	},

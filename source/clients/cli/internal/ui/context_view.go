@@ -15,10 +15,11 @@ import (
 )
 
 type contextSnapshot struct {
-	Turns    []agentclient.ContextTurn
-	TurnsErr error
-	Usage    *agentclient.ContextUsage
-	UsageErr error
+	Turns      []agentclient.ContextTurn
+	TurnsErr   error
+	Usage      *agentclient.ContextUsage
+	UsageErr   error
+	Compaction *agentclient.CompactionState
 }
 
 type contextView struct {
@@ -49,6 +50,7 @@ func loadContextSnapshot(ag *agentclient.Client, convID string) contextSnapshot 
 	defer cancel()
 	snap.Turns, snap.TurnsErr = ag.GetConversationTurns(ctx, convID)
 	snap.Usage, snap.UsageErr = ag.GetContextUsage(ctx, convID)
+	snap.Compaction, _ = ag.GetCompactionState(ctx, convID) // best-effort; nil on error
 	return snap
 }
 
@@ -388,9 +390,23 @@ func (c *contextView) renderHeader() string {
 	u := c.snapshot.Usage
 	pct := int(u.Percent*100 + 0.5)
 	bar := renderMeterBar(u.Percent, 10, c.styles)
-	return fmt.Sprintf("%s  %s / %s  · %d%%  %s",
+	head := fmt.Sprintf("%s  %s / %s  · %d%%  %s",
 		c.styles.Bright.Render("context"),
 		formatThousands(u.TokensUsed), formatThousands(u.ModelMax), pct, bar)
+
+	cs := c.snapshot.Compaction
+	if cs != nil && cs.FrozenTurns > 0 {
+		saved := 0
+		if cs.RawTokens > 0 {
+			saved = int(100 * (1 - float64(cs.SentTokens)/float64(cs.RawTokens)))
+		}
+		badge := c.styles.Muted.Render(fmt.Sprintf("  ·  ▣ %d%%↓  ·  %d compacted · %d live", saved, cs.FrozenTurns, cs.LiveTurns))
+		if cs.Compacting {
+			badge = c.styles.Accent.Render("  ·  compacting…")
+		}
+		head += badge
+	}
+	return head
 }
 
 

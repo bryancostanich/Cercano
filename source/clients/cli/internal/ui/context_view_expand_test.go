@@ -180,3 +180,17 @@ func TestContextView_TabFocusEnterToggles(t *testing.T) {
 		t.Error("enter on focused turn (empty input) should expand it")
 	}
 }
+
+func TestContextHeader_ShowsSavingsAndCounts(t *testing.T) {
+	cv := expandTestView()
+	cv.snapshot.Usage = &agentclient.ContextUsage{TokensUsed: 18000, ModelMax: 200000, Percent: 0.09}
+	cv.snapshot.Compaction = &agentclient.CompactionState{
+		FrozenTurns: 84, LiveTurns: 12, RawTokens: 340000, SentTokens: 18000,
+	}
+	out := stripAnsiCSI(cv.renderHeader())
+	for _, want := range []string{"↓", "84", "12"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("header missing %q:\n%s", want, out)
+		}
+	}
+}

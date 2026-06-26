@@ -36,6 +36,8 @@ type contextView struct {
 	focusedTurn     int
 	busyFlag        bool // true while a context-edit turn is in flight
 
+	showOriginal bool
+
 	md     *render.Markdown
 	driver *contextManagerDriver
 	chat   chatView
@@ -215,8 +217,23 @@ func (c *contextView) turnsLines() ([]string, []turnLineMeta) {
 	case len(c.snapshot.Turns) == 0:
 		add(c.styles.Muted.Render("context is empty"), turnLineMeta{})
 	default:
-		for i, t := range c.snapshot.Turns {
-			c.appendTurn(&lines, &meta, i, t)
+		turns := c.snapshot.Turns
+		cs := c.snapshot.Compaction
+		frozenN := 0
+		if !c.showOriginal && cs != nil && cs.FrozenTurns > 0 {
+			frozenN = cs.FrozenTurns
+			if frozenN > len(turns) {
+				frozenN = len(turns)
+			}
+			// Consolidated summary block, then a collapsed marker for the frozen span.
+			for _, line := range strings.Split(cs.ConsolidatedSummary, "\n") {
+				add(c.styles.Muted.Render(line), turnLineMeta{})
+			}
+			add(c.styles.Dim.Render(fmt.Sprintf("  ▣ %d turns compacted into the summary above  (Ctrl+O: show original)", frozenN)), turnLineMeta{})
+			add("", turnLineMeta{})
+		}
+		for i := frozenN; i < len(turns); i++ {
+			c.appendTurn(&lines, &meta, i, turns[i])
 		}
 	}
 	return lines, meta

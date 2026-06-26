@@ -1827,6 +1827,11 @@ func (m Model) handleContextViewKey(cv *contextView, msg tea.KeyPressMsg) (Model
 		// input, so a bare letter hotkey would swallow that letter while typing.
 		cv.snapshot = loadContextSnapshot(cv.agent, cv.convID)
 		return m, nil
+	case "ctrl+o":
+		// Toggle between the sent (compacted) view and the full original.
+		cv.showOriginal = !cv.showOriginal
+		cv.ScrollTo(0)
+		return m, nil
 	}
 	// Everything else edits the prompt bar.
 	m = m.preparePromptInput()

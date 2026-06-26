@@ -31,11 +31,20 @@ type Config struct {
 // counts; HardOverridePct is a fraction of the cloud model's max context above
 // which the request path compacts synchronously.
 type CompactionConfig struct {
-	Enabled               bool    `yaml:"enabled"`
-	ActivationFloorTokens int     `yaml:"activation_floor_tokens"`
-	SegmentTokens         int     `yaml:"segment_tokens"`
-	VerbatimRecent        int     `yaml:"verbatim_recent"`
-	HardOverridePct       float64 `yaml:"hard_override_pct"`
+	Enabled               bool            `yaml:"enabled"`
+	ActivationFloorTokens int             `yaml:"activation_floor_tokens"`
+	SegmentTokens         int             `yaml:"segment_tokens"`
+	VerbatimRecent        int             `yaml:"verbatim_recent"`
+	HardOverridePct       float64         `yaml:"hard_override_pct"`
+	Retention             RetentionConfig `yaml:"retention"`
+}
+
+// RetentionConfig bounds how long raw turn bodies and the compacted layer are
+// kept. CompactedRetentionDays should be >= RawRetentionDays.
+type RetentionConfig struct {
+	RawRetentionDays       int  `yaml:"raw_retention_days"`
+	CompactedRetentionDays int  `yaml:"compacted_retention_days"`
+	KeepForever            bool `yaml:"keep_forever"`
 }
 
 // LlamaServerConfig controls the optional managed llama-server sidecar.
@@ -106,6 +115,11 @@ func Defaults() Config {
 			SegmentTokens:         8000,
 			VerbatimRecent:        6,
 			HardOverridePct:       0.9,
+			Retention: RetentionConfig{
+				RawRetentionDays:       90,
+				CompactedRetentionDays: 180,
+				KeepForever:            false,
+			},
 		},
 	}
 }

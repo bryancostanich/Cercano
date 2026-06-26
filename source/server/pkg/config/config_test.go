@@ -251,3 +251,10 @@ func TestDefaultPath(t *testing.T) {
 		t.Errorf("expected config.yaml filename, got %q", filepath.Base(path))
 	}
 }
+
+func TestDefaults_Retention(t *testing.T) {
+	r := Defaults().Compaction.Retention
+	if r.RawRetentionDays != 90 || r.CompactedRetentionDays != 180 || r.KeepForever {
+		t.Errorf("retention defaults = %+v, want {90,180,false}", r)
+	}
+}

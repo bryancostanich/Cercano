@@ -388,6 +388,16 @@ func TestSweep_KeepForeverDoesNothing(t *testing.T) {
 		t.Error("keep_forever must disable all aging")
 	}
 }
+
+func TestSweep_ZeroHorizonDoesNothing(t *testing.T) {
+	// A misconfigured 0-day horizon must NOT nuke everything — it disables aging.
+	now := time.Unix(1_000_000_000, 0)
+	fs := &fakeStore{infos: []conversation.Info{{ID: "dead", LastTurnAt: now.Add(-500 * 24 * time.Hour)}}}
+	New(fs, Config{RawRetentionDays: 0, CompactedRetentionDays: 0}, time.Hour).Sweep(context.Background(), now)
+	if len(fs.collapsed) != 0 || len(fs.pruned) != 0 {
+		t.Error("a non-positive retention horizon must disable aging, not prune everything")
+	}
+}
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -439,7 +449,11 @@ func New(store Store, cfg Config, interval time.Duration) *Sweeper {
 // Sweep applies the policy once, as of now. Pure w.r.t. time (now injected).
 // Per-conversation errors are swallowed so one bad row never aborts the sweep.
 func (s *Sweeper) Sweep(ctx context.Context, now time.Time) {
-	if s.cfg.KeepForever {
+	// Safety clamp: keep-forever, or any non-positive horizon (a misconfig — e.g.
+	// a config that zeroed the retention block), disables ALL aging. A 0-day
+	// horizon would otherwise collapse/prune everything immediately, so the safe
+	// failure mode is to do nothing.
+	if s.cfg.KeepForever || s.cfg.RawRetentionDays <= 0 || s.cfg.CompactedRetentionDays <= 0 {
 		return
 	}
 	infos, err := s.store.List(ctx, "", 0)

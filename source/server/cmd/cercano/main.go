@@ -41,6 +41,7 @@ import (
 	"cercano/source/server/internal/loop"
 	mcpserver "cercano/source/server/internal/mcp"
 	"cercano/source/server/internal/recap"
+	"cercano/source/server/internal/retention"
 	"cercano/source/server/internal/server"
 	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/internal/tools"
@@ -229,6 +230,14 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		}
 		compGen := compactiongen.New(persistentStore, compactSummarize, compCfg, contextmeter.Default(), 10*time.Second)
 		agentOpts = append(agentOpts, agent.WithCompactionScheduler(compGen))
+	}
+	if persistentStore != nil {
+		sweeper := retention.New(persistentStore, retention.Config{
+			RawRetentionDays:       cfg.Compaction.Retention.RawRetentionDays,
+			CompactedRetentionDays: cfg.Compaction.Retention.CompactedRetentionDays,
+			KeepForever:            cfg.Compaction.Retention.KeepForever,
+		}, 12*time.Hour)
+		sweeper.Start(context.Background())
 	}
 	orchestrator := agent.NewAgent(lazyRouter, coordinator, agentOpts...)
 

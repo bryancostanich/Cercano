@@ -96,14 +96,25 @@ local grunt work).
 
 ## Open items / risks
 
-- **Cost under Cloud Only.** "Everything that calls the model" means a single
-  `deep_research` (which fans many internal model calls) routes *all* of them to
-  cloud under Cloud Only. Intended per the scope decision, but worth a note in
-  the tool docs — it's the user's explicit trade.
-- **`use_model` vs locus.** `research`/`deep_research` already accept a
-  per-request `use_model` override (→ `model_override`). Define precedence:
-  proposed — an explicit `use_model` wins over the locus tier's default model,
-  but still runs on the locus-resolved tier. Confirm during planning.
-- **Hard-fail UX.** Under `*_only` with the required tier down, co-proc tools
-  return a tool error ("Local Only: Ollama unreachable") rather than crossing —
-  consistent with the main-tier rule.
+_All items resolved. See Decisions (finalized) below._
+
+## Decisions (finalized — Task 6)
+
+- **`use_model` precedence:** An explicit `use_model` sets `ModelOverride` (the
+  model name) but the request still runs on the locus-resolved tier. Both
+  `Coproc: true` and `ModelOverride` are set; the agent honors both. Model
+  selection is narrowed by the override, but local-vs-cloud routing still
+  follows locus.
+
+- **Cost under Cloud Only:** `deep_research` fans many internal model calls
+  (via `grpcModelCaller` / `grpcModelCallerWithTokens`). Under Cloud Only, all
+  of them route to cloud — intended. This is the user's explicit trade when they
+  set Cloud Only. Worth surfacing in tool docs if cost concerns arise; no
+  behavior change needed.
+
+- **`cercano_local` stays explicitly local:** `handleLocal` (the `cercano_local`
+  tool) is the named force-local escape hatch. It sets neither `DirectLocal` nor
+  `Coproc` — its `ProcessRequest` call carries no routing flag, so it follows
+  the default (normal main-tier) routing rather than the co-proc locus table.
+  This is correct: `cercano_local` is the one tool that explicitly bypasses
+  locus-managed co-proc routing by design.

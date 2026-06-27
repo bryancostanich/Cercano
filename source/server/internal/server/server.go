@@ -27,6 +27,7 @@ import (
 	"cercano/source/server/internal/localruntime"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
+	mcphost "cercano/source/server/internal/mcp_host"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 )
@@ -37,6 +38,15 @@ import (
 type RouterCloudUpdater interface {
 	SetCloudProvider(p agent.ModelProvider)
 	GetModelProviders() map[string]agent.ModelProvider
+}
+
+// McpManager is the subset of *mcphost.Manager the RPC handlers use. An
+// interface so tests can inject a fake.
+type McpManager interface {
+	List() []mcphost.ServerStatus
+	Add(ctx context.Context, name string, cfg mcphost.ServerConfig) error
+	Remove(ctx context.Context, name string) error
+	Restart(ctx context.Context, name string) error
 }
 
 // Server is the gRPC server for the Agent service.
@@ -53,6 +63,7 @@ type Server struct {
 	currentConfig       config.Config      // current config state for persistence
 	toolRegistry        *agenttools.Registry
 	permStore           *agent.PermissionStore
+	mcpManager          McpManager
 	pendingDecisions    *agent.PendingDecisions
 	cloudLLMProvider    llm.Provider
 	localLLMProvider    llm.Provider // native-tool-loop local provider (Ollama)
@@ -77,6 +88,59 @@ func (s *Server) SetToolRegistry(r *agenttools.Registry) { s.toolRegistry = r }
 func (s *Server) SetPermissions(store *agent.PermissionStore, pending *agent.PendingDecisions) {
 	s.permStore = store
 	s.pendingDecisions = pending
+}
+
+// SetMcpManager wires the MCP host manager so the RPC handlers can delegate to it.
+func (s *Server) SetMcpManager(m McpManager) { s.mcpManager = m }
+
+// ListMcpServers implements proto.AgentServer — returns a snapshot of all hosted MCP servers.
+func (s *Server) ListMcpServers(ctx context.Context, _ *proto.ListMcpServersRequest) (*proto.ListMcpServersResponse, error) {
+	out := &proto.ListMcpServersResponse{}
+	if s.mcpManager == nil {
+		return out, nil
+	}
+	for _, st := range s.mcpManager.List() {
+		out.Servers = append(out.Servers, &proto.McpServerInfo{
+			Name: st.Name, State: string(st.State), ToolCount: int32(st.ToolCount), Error: st.Err,
+		})
+	}
+	return out, nil
+}
+
+// AddMcpServer implements proto.AgentServer — connects a new MCP server and persists it.
+func (s *Server) AddMcpServer(ctx context.Context, req *proto.AddMcpServerRequest) (*proto.AddMcpServerResponse, error) {
+	if s.mcpManager == nil {
+		return &proto.AddMcpServerResponse{Ok: false, Error: "mcp host not enabled"}, nil
+	}
+	err := s.mcpManager.Add(ctx, req.GetName(), mcphost.ServerConfig{
+		Command: req.GetCommand(), Args: req.GetArgs(), Env: req.GetEnv(),
+	})
+	if err != nil {
+		return &proto.AddMcpServerResponse{Ok: false, Error: err.Error()}, nil
+	}
+	return &proto.AddMcpServerResponse{Ok: true}, nil
+}
+
+// RemoveMcpServer implements proto.AgentServer — stops an MCP server and removes it from config.
+func (s *Server) RemoveMcpServer(ctx context.Context, req *proto.RemoveMcpServerRequest) (*proto.RemoveMcpServerResponse, error) {
+	if s.mcpManager == nil {
+		return &proto.RemoveMcpServerResponse{Ok: false, Error: "mcp host not enabled"}, nil
+	}
+	if err := s.mcpManager.Remove(ctx, req.GetName()); err != nil {
+		return &proto.RemoveMcpServerResponse{Ok: false, Error: err.Error()}, nil
+	}
+	return &proto.RemoveMcpServerResponse{Ok: true}, nil
+}
+
+// RestartMcpServer implements proto.AgentServer — tears down and reconnects a hosted MCP server.
+func (s *Server) RestartMcpServer(ctx context.Context, req *proto.RestartMcpServerRequest) (*proto.RestartMcpServerResponse, error) {
+	if s.mcpManager == nil {
+		return &proto.RestartMcpServerResponse{Ok: false, Error: "mcp host not enabled"}, nil
+	}
+	if err := s.mcpManager.Restart(ctx, req.GetName()); err != nil {
+		return &proto.RestartMcpServerResponse{Ok: false, Error: err.Error()}, nil
+	}
+	return &proto.RestartMcpServerResponse{Ok: true}, nil
 }
 
 // SetCloudLLMProvider attaches the native-tool-calling cloud provider used by

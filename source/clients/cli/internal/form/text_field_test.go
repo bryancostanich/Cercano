@@ -9,6 +9,8 @@ import (
 func enter() tea.KeyPressMsg      { return tea.KeyPressMsg{Code: tea.KeyEnter} }
 func esc() tea.KeyPressMsg        { return tea.KeyPressMsg{Code: tea.KeyEscape} }
 func arrowDown() tea.KeyPressMsg  { return tea.KeyPressMsg{Code: tea.KeyDown} }
+func arrowLeft() tea.KeyPressMsg  { return tea.KeyPressMsg{Code: tea.KeyLeft} }
+func arrowRight() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyRight} }
 func typ(r rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: r, Text: string(r)}
 }

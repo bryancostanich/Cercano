@@ -22,7 +22,7 @@ func RegisterConfig(r *Registry, c *agentclient.Client) {
 
 			if len(args) == 0 {
 				// Open the interactive editor.
-				return Result{Kind: ResultOpenConfigEditor}
+				return Result{Kind: ResultOpenSettings}
 			}
 			// One-arg form: `/config show` prints current state without
 			// opening the editor (handy for piping or scripted use).

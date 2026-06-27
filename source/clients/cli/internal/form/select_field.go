@@ -70,6 +70,10 @@ func (f *SelectField) Update(msg tea.KeyPressMsg) (tea.Cmd, bool, string) {
 			f.cursor++
 		}
 	case tea.KeyEnter:
+		if len(f.options) == 0 {
+			f.open = false
+			return nil, false, ""
+		}
 		f.current = f.cursor
 		f.open = false
 		return nil, true, f.options[f.current].Value

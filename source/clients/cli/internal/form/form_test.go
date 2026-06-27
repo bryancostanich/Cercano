@@ -67,3 +67,15 @@ func TestFormViewRendersSectionTitles(t *testing.T) {
 		t.Fatalf("View missing section title or field label:\n%s", out)
 	}
 }
+
+func TestFormCommitTriggersReload(t *testing.T) {
+	reloaded := []Section{{Title: "B", Fields: []Field{NewReadOnly("b1", "b1", "v", "")}}}
+	f := New([]Section{{Title: "A", Fields: []Field{NewText("a1", "a1", "old", "")}}})
+	f.OnCommit = func(key, value string) (string, tea.Cmd, error) { return "saved", nil, nil }
+	f.OnReload = func() []Section { return reloaded }
+	f.Update(enter())          // begin edit
+	f.Update(enter())          // commit -> OnCommit -> OnReload
+	if len(f.Sections) != 1 || f.Sections[0].Title != "B" {
+		t.Fatalf("OnReload should have replaced Sections with B, got %+v", f.Sections)
+	}
+}

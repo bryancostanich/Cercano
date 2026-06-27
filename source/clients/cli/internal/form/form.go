@@ -132,7 +132,7 @@ func (f *Form) View(width int, palette theme.Palette, styles theme.Styles) strin
 	for _, sec := range f.Sections {
 		var body strings.Builder
 		title := styles.Accent.Render("─ " + sec.Title + " ")
-		body.WriteString(title + styles.BorderDim.Render(strings.Repeat("─", panelW-lipgloss.Width(title))) + "\n\n")
+		body.WriteString(title + styles.BorderDim.Render(strings.Repeat("─", max(0, panelW-lipgloss.Width(title)))) + "\n\n")
 		for _, fld := range sec.Fields {
 			focused := idx == f.cursor
 			marker := "   "

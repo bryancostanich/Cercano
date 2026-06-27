@@ -134,3 +134,55 @@ func TestPermissionStore_RetainsModeOnBadFile(t *testing.T) {
 		t.Errorf("malformed file should retain strict, got %s", got)
 	}
 }
+
+func TestGateDecisionForMCP(t *testing.T) {
+	cases := []struct {
+		mode        PermissionMode
+		isMCP       bool
+		allowlisted bool
+		want        bool // true == confirm required
+	}{
+		// Built-in W in permissive: silent (unchanged behavior).
+		{ModePermissive, false, false, false},
+		// MCP in permissive, not allowlisted: confirm.
+		{ModePermissive, true, false, true},
+		// MCP in permissive, allowlisted: silent.
+		{ModePermissive, true, true, false},
+		// MCP under bypass: silent.
+		{ModeBypass, true, false, false},
+		// MCP under strict, not allowlisted: confirm.
+		{ModeStrict, true, false, true},
+	}
+	for _, c := range cases {
+		got := GateDecisionForMCP(c.mode, llm.PermW, c.isMCP, c.allowlisted)
+		if got != c.want {
+			t.Errorf("mode=%s mcp=%v allow=%v: got %v want %v",
+				c.mode, c.isMCP, c.allowlisted, got, c.want)
+		}
+	}
+}
+
+func TestMCPAllowlistGlob(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "permissions.yaml")
+	s, _ := LoadPermissionStore(p)
+	if err := s.AddMCPAllow("mcp__github__*"); err != nil {
+		t.Fatal(err)
+	}
+	if !s.IsMCPAllowed("mcp__github__create_issue") {
+		t.Fatal("glob should match")
+	}
+	if s.IsMCPAllowed("mcp__gitlab__create_issue") {
+		t.Fatal("glob should not match other server")
+	}
+	// Persists across reload, preserving mode.
+	if err := s.SetMode(ModeStrict); err != nil {
+		t.Fatal(err)
+	}
+	s2, _ := LoadPermissionStore(p)
+	if !s2.IsMCPAllowed("mcp__github__create_issue") {
+		t.Fatal("allowlist not persisted")
+	}
+	if s2.Mode() != ModeStrict {
+		t.Fatal("mode clobbered by allowlist write")
+	}
+}

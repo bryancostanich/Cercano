@@ -226,6 +226,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	slash.RegisterColor(reg)
 	slash.RegisterContext(reg)
 	slash.RegisterTools(reg, ag)
+	slash.RegisterMcp(reg, ag)
 	slash.RegisterPermissions(reg, ag)
 	// currentConv is captured by reference so it always returns the active
 	// conversation id even after /resume swaps it.
@@ -1691,14 +1692,14 @@ func (m Model) applyResume(conversationID string) Model {
 
 // renderConfirmPrompt builds the single-line confirm message shown in
 // scrollback while pendingConfirm is set. W-tier renders normally; X-tier
-// gets a red ⚠ destructive emphasis.
+// gets a red ⚠ destructive emphasis. MCP tools get an additional [a]lways key.
 func (m Model) renderConfirmPrompt(p *pendingToolCall) string {
 	head := m.styles.Accent.Render("▸ ")
 	if p.Permission == "X" {
 		head = m.styles.Error.Render("▸ ⚠ DESTRUCTIVE ")
 	}
-	summary := p.Name + " " + truncateArgs(p.Args, 80)
-	return head +
+	summary := displayToolName(p.Name) + " " + truncateArgs(p.Args, 80)
+	out := head +
 		m.styles.AgentProse.Render(summary) +
 		m.styles.BorderDim.Render("   ·   ") +
 		m.styles.Muted.Render("[") +
@@ -1708,6 +1709,25 @@ func (m Model) renderConfirmPrompt(p *pendingToolCall) string {
 		m.styles.Muted.Render("]o / [") +
 		m.styles.Accent.Render("d") +
 		m.styles.Muted.Render("]iff")
+	if strings.HasPrefix(p.Name, "mcp__") {
+		out += m.styles.Muted.Render(" / [") +
+			m.styles.Accent.Render("a") +
+			m.styles.Muted.Render("]lways")
+	}
+	return out
+}
+
+// displayToolName converts MCP tool names (mcp__server__tool) to a readable
+// slash form (mcp/server/tool). Non-MCP names are returned unchanged.
+func displayToolName(name string) string {
+	if !strings.HasPrefix(name, "mcp__") {
+		return name
+	}
+	rest := strings.TrimPrefix(name, "mcp__")
+	if i := strings.Index(rest, "__"); i >= 0 {
+		return "mcp/" + rest[:i] + "/" + rest[i+2:]
+	}
+	return name
 }
 
 // resolveConfirmKey processes a keystroke while a confirm is pending.
@@ -1734,8 +1754,10 @@ func (m Model) resolveConfirmKey(key string) (Model, tea.Cmd) {
 // toolConfirm builds the confirmRequest for a tool-permission decision,
 // preserving the prior behavior: y approves (Allow RPC for stream-origin call,
 // else local invoke), n denies (Deny RPC for stream-origin), d/D reveals args.
+// MCP tools (mcp__*) additionally expose an [a]lways key that persists the
+// allow server-side so future calls run silently.
 func toolConfirm(tc *pendingToolCall) *confirmRequest {
-	return &confirmRequest{
+	cr := &confirmRequest{
 		onYes: func(m Model) (Model, tea.Cmd) {
 			m.pendingConfirm = nil
 			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Accent.Render("✓ approved — running…")})
@@ -1778,6 +1800,24 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 			},
 		},
 	}
+	// MCP tools are confirm-by-default; offer always-allow, which persists a
+	// silent allowlist rule server-side so future calls bypass the prompt.
+	if strings.HasPrefix(tc.Name, "mcp__") {
+		cr.extras["a"] = func(m Model) (Model, tea.Cmd) {
+			m.pendingConfirm = nil
+			m.chat.AppendEntry(&Entry{Role: RoleSystem,
+				Content: m.styles.Accent.Render("✓ always-allowed — running…")})
+			m.refreshViewport()
+			if tc.ToolUseID != "" {
+				ag, id := m.agent, tc.ToolUseID
+				if ag != nil {
+					go func() { _ = ag.AllowToolCallPersist(context.Background(), id, true) }()
+				}
+			}
+			return m, nil
+		}
+	}
+	return cr
 }
 
 // writeExport writes the export JSON to <dir>/cercano-context-<conv8>.json and

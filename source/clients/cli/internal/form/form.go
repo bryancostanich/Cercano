@@ -159,12 +159,20 @@ func (f *Form) View(width int, palette theme.Palette, styles theme.Styles) strin
 			// wrapping flush under the label. When the column is too tight, fall
 			// back to label-on-its-own-line with a small indent.
 			colOffset := 3 + labelW + 2
-			valueW := panelW - colOffset
+			// The bordered, padded box reserves 4 columns (1 border + 1 padding
+			// on each side), so the usable text width is panelW-4. Size the
+			// value column to fit inside it, or lipgloss re-wraps the overflow
+			// flush to the left margin instead of under the value column.
+			innerW := panelW - 4
+			if innerW < 8 {
+				innerW = 8
+			}
+			valueW := innerW - colOffset
 			narrow := valueW < 16
 			fieldW := valueW
 			indent := colOffset
 			if narrow {
-				fieldW = panelW - 4
+				fieldW = innerW - 4
 				indent = 4
 			}
 			if fieldW < 1 {

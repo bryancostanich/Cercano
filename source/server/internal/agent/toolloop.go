@@ -233,7 +233,9 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		results = append(results, rResults...)
 
 		for _, pc := range wxCalls {
-			if GateDecision(mode, pc.tier) {
+			isMCP := agenttools.OriginOf(pc.tool) == agenttools.OriginMCP
+			allowlisted := in.Permissions != nil && in.Permissions.IsMCPAllowed(pc.block.ToolName)
+			if GateDecisionForMCP(mode, pc.tier, isMCP, allowlisted) {
 				if in.PermissionRequester == nil {
 					results = append(results, llm.Block{
 						Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID,

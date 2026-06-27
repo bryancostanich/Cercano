@@ -66,6 +66,14 @@ func (r *Registry) All() []Tool {
 	return out
 }
 
+// Unregister removes a Tool by name. No-op if absent. Used by the MCP host to
+// drop a server's tools on remove/restart.
+func (r *Registry) Unregister(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.tools, name)
+}
+
 // Filter returns tools matching the given Permission (or all when perm is
 // empty). Useful for /tools split-by-tier displays.
 func (r *Registry) Filter(perm Permission) []Tool {

@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"os"
+	"path"
 	"sync"
 
 	"gopkg.in/yaml.v3"
@@ -43,19 +44,34 @@ func GateDecision(mode PermissionMode, tier llm.Permission) bool {
 	return true
 }
 
+// GateDecisionForMCP extends GateDecision with MCP origin. MCP tools are
+// untrusted third-party code: they confirm by default even in permissive mode,
+// unless allowlisted. Bypass still skips everything.
+func GateDecisionForMCP(mode PermissionMode, tier llm.Permission, isMCP, allowlisted bool) bool {
+	if mode == ModeBypass {
+		return false
+	}
+	if isMCP {
+		return !allowlisted
+	}
+	return GateDecision(mode, tier)
+}
+
 type PermissionStore struct {
-	mu   sync.Mutex
-	path string
-	mode PermissionMode
+	mu       sync.Mutex
+	path     string
+	mode     PermissionMode
+	mcpAllow []string
 }
 
 type permsFile struct {
-	Mode string `yaml:"mode"`
+	Mode     string   `yaml:"mode"`
+	MCPAllow []string `yaml:"mcp_allow"`
 }
 
-func LoadPermissionStore(path string) (*PermissionStore, error) {
-	s := &PermissionStore{path: path, mode: ModePermissive}
-	data, err := os.ReadFile(path)
+func LoadPermissionStore(filePath string) (*PermissionStore, error) {
+	s := &PermissionStore{path: filePath, mode: ModePermissive}
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return s, nil
@@ -72,6 +88,7 @@ func LoadPermissionStore(path string) (*PermissionStore, error) {
 			s.mode = m
 		}
 	}
+	s.mcpAllow = f.MCPAllow
 	return s, nil
 }
 
@@ -96,10 +113,44 @@ func (s *PermissionStore) Mode() PermissionMode {
 	return s.mode
 }
 
+// persistLocked writes the current in-memory mode and mcpAllow to disk.
+// Caller must hold s.mu.
+func (s *PermissionStore) persistLocked() error {
+	f := permsFile{Mode: string(s.mode), MCPAllow: s.mcpAllow}
+	data, _ := yaml.Marshal(f)
+	return os.WriteFile(s.path, data, 0o644)
+}
+
 func (s *PermissionStore) SetMode(m PermissionMode) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.mode = m
-	data, _ := yaml.Marshal(permsFile{Mode: string(m)})
-	return os.WriteFile(s.path, data, 0o644)
+	return s.persistLocked()
+}
+
+// AddMCPAllow appends a glob pattern to the MCP allowlist and persists it.
+func (s *PermissionStore) AddMCPAllow(pattern string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.mcpAllow = append(s.mcpAllow, pattern)
+	return s.persistLocked()
+}
+
+// IsMCPAllowed reports whether an mcp__server__tool name matches any allowlist
+// pattern. Re-reads the file so hand-edits take effect live, mirroring Mode().
+func (s *PermissionStore) IsMCPAllowed(name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if data, err := os.ReadFile(s.path); err == nil {
+		var f permsFile
+		if yaml.Unmarshal(data, &f) == nil {
+			s.mcpAllow = f.MCPAllow
+		}
+	}
+	for _, pat := range s.mcpAllow {
+		if ok, _ := path.Match(pat, name); ok {
+			return true
+		}
+	}
+	return false
 }

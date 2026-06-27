@@ -38,6 +38,10 @@ func TestResolveMainProvider(t *testing.T) {
 	if p, isCloud, fb, err := mk("local_primary", cloud, nil).resolveMainProvider(); err != nil || !isCloud || !fb || p.Name() != "anthropic" {
 		t.Errorf("local_primary fallback: %v isCloud=%v fb=%v err=%v", p, isCloud, fb, err)
 	}
+	// Cloud Primary, cloud missing → fall back to local (mirror of the above).
+	if p, isCloud, fb, err := mk("cloud_primary", nil, local).resolveMainProvider(); err != nil || isCloud || !fb || p.Name() != "ollama" {
+		t.Errorf("cloud_primary fallback: %v isCloud=%v fb=%v err=%v", p, isCloud, fb, err)
+	}
 	// Cloud Only, cloud missing → hard error (no cross).
 	if _, _, _, err := mk("cloud_only", nil, local).resolveMainProvider(); err == nil {
 		t.Error("cloud_only with no cloud should error")

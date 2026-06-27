@@ -726,7 +726,7 @@ func (s *Server) handleSummarize(ctx context.Context, request *gomcp.CallToolReq
 	prompt := fmt.Sprintf("Summarize the following text in %s. Focus on the most important information. Output only the summary, no preamble.\n\nText to summarize:\n%s", lengthInstruction, content)
 	prompt = s.withContext(args.ProjectDir, prompt)
 
-	notifyProgress(ctx, request, "Summarizing locally...", 0, 1)
+	notifyProgress(ctx, request, "Summarizing...", 0, 1)
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
 		Input:  prompt,
 		Coproc: true,

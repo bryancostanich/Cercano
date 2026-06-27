@@ -23,8 +23,9 @@ type Form struct {
 	// OnReload returns a fresh section snapshot after a successful commit. Optional.
 	OnReload func() []Section
 
-	cursor int // index into the flattened field list
-	status string
+	cursor      int // index into the flattened field list
+	status      string
+	focusedLine int // output line (0-based) of the focused field; refreshed on each View call
 }
 
 // New builds a form positioned on the first focusable field.
@@ -32,6 +33,10 @@ func New(sections []Section) *Form { return &Form{Sections: sections} }
 
 // Cursor returns the flattened-field index of the focused field.
 func (f *Form) Cursor() int { return f.cursor }
+
+// FocusedLine returns the zero-based output line of the focused field as of
+// the last View (or Lines) call.
+func (f *Form) FocusedLine() int { return f.focusedLine }
 
 func (f *Form) flat() []Field {
 	var out []Field
@@ -133,11 +138,14 @@ func (f *Form) View(width int, palette theme.Palette, styles theme.Styles) strin
 		var body strings.Builder
 		title := styles.Accent.Render("─ " + sec.Title + " ")
 		body.WriteString(title + styles.BorderDim.Render(strings.Repeat("─", max(0, panelW-lipgloss.Width(title)))) + "\n\n")
+		sectionFocusedIdx := -1
+		fieldInSection := 0
 		for _, fld := range sec.Fields {
 			focused := idx == f.cursor
 			marker := "   "
 			if focused {
 				marker = styles.Accent.Render(" ▶ ")
+				sectionFocusedIdx = fieldInSection
 			}
 			label := styles.Muted.Render(fld.Label())
 			if focused && !fld.Editing() {
@@ -146,13 +154,23 @@ func (f *Form) View(width int, palette theme.Palette, styles theme.Styles) strin
 			pad := strings.Repeat(" ", labelW-lipgloss.Width(fld.Label())+2)
 			body.WriteString(marker + label + pad + fld.View(focused, panelW, styles) + "\n")
 			idx++
+			fieldInSection++
 		}
-		out.WriteString(lipgloss.NewStyle().
+		// Capture base before writing this section's box so focusedLine is a
+		// valid index into strings.Split(View(...), "\n").
+		base := strings.Count(out.String(), "\n")
+		box := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(palette.Border).
 			Padding(0, 1).
 			Width(panelW).
-			Render(body.String()))
+			Render(body.String())
+		if sectionFocusedIdx >= 0 {
+			// Box layout: line 0 = top border, line 1 = section title,
+			// line 2 = blank (from the "\n\n" after the title), line 3+ = fields.
+			f.focusedLine = base + 3 + sectionFocusedIdx
+		}
+		out.WriteString(box)
 		out.WriteString("\n")
 	}
 

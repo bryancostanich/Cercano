@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"cercano/source/clients/cli/internal/theme"
 )
@@ -119,9 +120,13 @@ func (f *Form) Lines(width int, palette theme.Palette, styles theme.Styles) []st
 
 // View renders all sections as titled panels plus a footer.
 func (f *Form) View(width int, palette theme.Palette, styles theme.Styles) string {
-	panelW := width - 6
-	if panelW < 40 {
-		panelW = 40
+	// Match the scrollbar-reserving width the host renders into (width-2, the
+	// same as dashboardPanelWidth) so the boxes fill the content region. A low
+	// floor lets the box shrink with a narrow terminal instead of overflowing
+	// and getting truncated.
+	panelW := width - 2
+	if panelW < 24 {
+		panelW = 24
 	}
 	labelW := 0
 	for _, sec := range f.Sections {
@@ -138,14 +143,19 @@ func (f *Form) View(width int, palette theme.Palette, styles theme.Styles) strin
 		var body strings.Builder
 		title := styles.Accent.Render("─ " + sec.Title + " ")
 		body.WriteString(title + styles.BorderDim.Render(strings.Repeat("─", max(0, panelW-lipgloss.Width(title)))) + "\n\n")
-		sectionFocusedIdx := -1
-		fieldInSection := 0
+		// bodyLine tracks how many lines have been written into body. The title
+		// rule and the blank line after it occupy body lines 0 and 1, so the
+		// first field starts at line 2. We track real line counts (not field
+		// index) because a field can render multiple lines — an open select
+		// picker, or any field in the narrow under-label layout.
+		bodyLine := 2
+		focusedBodyLine := -1
 		for _, fld := range sec.Fields {
 			focused := idx == f.cursor
 			marker := "   "
 			if focused {
 				marker = styles.Accent.Render(" ▶ ")
-				sectionFocusedIdx = fieldInSection
+				focusedBodyLine = bodyLine
 			}
 			label := styles.Muted.Render(fld.Label())
 			if focused && !fld.Editing() {
@@ -153,16 +163,15 @@ func (f *Form) View(width int, palette theme.Palette, styles theme.Styles) strin
 			}
 			pad := strings.Repeat(" ", labelW-lipgloss.Width(fld.Label())+2)
 			// The value column starts after the marker (3 cols) + label/pad
-			// (labelW+2). A field that renders multiple lines (e.g. an open
-			// select picker) keeps its continuation lines aligned under that
-			// column, so options read as a right-hand second column rather than
-			// wrapping flush under the label. When the column is too tight, fall
-			// back to label-on-its-own-line with a small indent.
+			// (labelW+2). When there's room, the value (and any wrapped lines,
+			// e.g. an open select picker's options) forms a right-hand second
+			// column aligned under that offset. When the box is too narrow for a
+			// usable second column, the value drops under the label with a small
+			// indent instead.
 			colOffset := 3 + labelW + 2
 			// The bordered, padded box reserves 4 columns (1 border + 1 padding
-			// on each side), so the usable text width is panelW-4. Size the
-			// value column to fit inside it, or lipgloss re-wraps the overflow
-			// flush to the left margin instead of under the value column.
+			// per side), so usable text width is panelW-4. Size the value column
+			// to fit, or lipgloss re-wraps the overflow flush to the left margin.
 			innerW := panelW - 4
 			if innerW < 8 {
 				innerW = 8
@@ -178,20 +187,32 @@ func (f *Form) View(width int, palette theme.Palette, styles theme.Styles) strin
 			if fieldW < 1 {
 				fieldW = 1
 			}
-			cellLines := strings.Split(fld.View(focused, fieldW, styles), "\n")
-			if narrow && len(cellLines) > 1 {
+			// Hard-wrap each rendered line to the value-column width so an
+			// over-long value (URL, model name) wraps as a hanging indent in the
+			// value column instead of overflowing the box and being re-wrapped
+			// flush against the left margin by lipgloss. SelectField already
+			// wraps to fieldW, so its lines pass through unchanged.
+			var cellLines []string
+			for _, raw := range strings.Split(fld.View(focused, fieldW, styles), "\n") {
+				cellLines = append(cellLines, strings.Split(ansi.Hardwrap(raw, fieldW, false), "\n")...)
+			}
+			if narrow {
+				// Label on its own line; value(s) wrap beneath, indented.
 				body.WriteString(marker + label + "\n")
+				bodyLine++
 				for _, cl := range cellLines {
 					body.WriteString(strings.Repeat(" ", indent) + cl + "\n")
+					bodyLine++
 				}
 			} else {
 				body.WriteString(marker + label + pad + cellLines[0] + "\n")
+				bodyLine++
 				for _, cl := range cellLines[1:] {
 					body.WriteString(strings.Repeat(" ", indent) + cl + "\n")
+					bodyLine++
 				}
 			}
 			idx++
-			fieldInSection++
 		}
 		// Capture base before writing this section's box so focusedLine is a
 		// valid index into strings.Split(View(...), "\n").
@@ -202,10 +223,9 @@ func (f *Form) View(width int, palette theme.Palette, styles theme.Styles) strin
 			Padding(0, 1).
 			Width(panelW).
 			Render(body.String())
-		if sectionFocusedIdx >= 0 {
-			// Box layout: line 0 = top border, line 1 = section title,
-			// line 2 = blank (from the "\n\n" after the title), line 3+ = fields.
-			f.focusedLine = base + 3 + sectionFocusedIdx
+		if focusedBodyLine >= 0 {
+			// +1 for the box's top border line above the body.
+			f.focusedLine = base + 1 + focusedBodyLine
 		}
 		out.WriteString(box)
 		out.WriteString("\n")

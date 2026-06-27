@@ -215,6 +215,37 @@ func TestResolveConfirmKey_Generic(t *testing.T) {
 	}
 }
 
+func TestMCPConfirmOffersAlwaysAllow(t *testing.T) {
+	tc := &pendingToolCall{Name: "mcp__github__create_issue", Permission: "W", ToolUseID: "t1"}
+	c := toolConfirm(tc)
+	if _, ok := c.extras["a"]; !ok {
+		t.Fatal("MCP tool confirm should expose an [a]lways-allow key")
+	}
+}
+
+func TestBuiltinConfirmHasNoAlwaysAllow(t *testing.T) {
+	tc := &pendingToolCall{Name: "Write", Permission: "W", ToolUseID: "t2"}
+	c := toolConfirm(tc)
+	if _, ok := c.extras["a"]; ok {
+		t.Fatal("built-in confirm must not expose always-allow")
+	}
+}
+
+func TestDisplayToolName(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"mcp__github__create_issue", "mcp/github/create_issue"},
+		{"mcp__myserver__do_thing", "mcp/myserver/do_thing"},
+		{"Write", "Write"},
+		{"Bash", "Bash"},
+	}
+	for _, tc := range cases {
+		got := displayToolName(tc.in)
+		if got != tc.want {
+			t.Errorf("displayToolName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 // stripAnsiCSI removes ANSI CSI sequences so substring assertions match
 // against the literal text. Local copy to avoid coupling the test to
 // implementation packages.

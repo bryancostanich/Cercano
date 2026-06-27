@@ -1062,3 +1062,69 @@ func (c *Client) GetProviderCapabilities(ctx context.Context) (ProviderCaps, err
 		MaxToolsPerCall:       res.GetMaxToolsPerCall(),
 	}, nil
 }
+
+// McpServer is a point-in-time view of one hosted MCP server.
+type McpServer struct {
+	Name      string
+	State     string
+	ToolCount int
+	Err       string
+}
+
+// ListMcpServers returns a snapshot of all hosted MCP servers.
+func (c *Client) ListMcpServers(ctx context.Context) ([]McpServer, error) {
+	resp, err := c.agent.ListMcpServers(ctx, &proto.ListMcpServersRequest{})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]McpServer, 0, len(resp.GetServers()))
+	for _, s := range resp.GetServers() {
+		out = append(out, McpServer{Name: s.GetName(), State: s.GetState(),
+			ToolCount: int(s.GetToolCount()), Err: s.GetError()})
+	}
+	return out, nil
+}
+
+// AddMcpServer connects a new MCP server by name and persists it to mcp.yaml.
+func (c *Client) AddMcpServer(ctx context.Context, name, command string, args []string, env map[string]string) error {
+	resp, err := c.agent.AddMcpServer(ctx, &proto.AddMcpServerRequest{
+		Name: name, Command: command, Args: args, Env: env})
+	if err != nil {
+		return err
+	}
+	if !resp.GetOk() {
+		return fmt.Errorf("%s", resp.GetError())
+	}
+	return nil
+}
+
+// RemoveMcpServer stops a hosted MCP server and removes it from mcp.yaml.
+func (c *Client) RemoveMcpServer(ctx context.Context, name string) error {
+	resp, err := c.agent.RemoveMcpServer(ctx, &proto.RemoveMcpServerRequest{Name: name})
+	if err != nil {
+		return err
+	}
+	if !resp.GetOk() {
+		return fmt.Errorf("%s", resp.GetError())
+	}
+	return nil
+}
+
+// RestartMcpServer tears down and reconnects a hosted MCP server.
+func (c *Client) RestartMcpServer(ctx context.Context, name string) error {
+	resp, err := c.agent.RestartMcpServer(ctx, &proto.RestartMcpServerRequest{Name: name})
+	if err != nil {
+		return err
+	}
+	if !resp.GetOk() {
+		return fmt.Errorf("%s", resp.GetError())
+	}
+	return nil
+}
+
+// AllowToolCallPersist approves a paused tool call and, when persist is true,
+// asks the agent to allowlist it for silent future runs.
+func (c *Client) AllowToolCallPersist(ctx context.Context, toolUseID string, persist bool) error {
+	_, err := c.agent.AllowToolCall(ctx, &proto.AllowToolCallRequest{ToolUseId: toolUseID, Persist: persist})
+	return err
+}

@@ -310,3 +310,19 @@ func TestGitLog_ReturnsCommitRows(t *testing.T) {
 		}
 	}
 }
+
+func TestOriginOfDefaultsBuiltin(t *testing.T) {
+	if got := OriginOf(ReadFile()); got != OriginBuiltin {
+		t.Fatalf("builtin tool origin = %q, want builtin", got)
+	}
+}
+
+type fakeMCP struct{ readFileTool }
+
+func (fakeMCP) Origin() Origin { return OriginMCP }
+
+func TestOriginOfHonorsOptionalInterface(t *testing.T) {
+	if got := OriginOf(fakeMCP{}); got != OriginMCP {
+		t.Fatalf("origin = %q, want mcp", got)
+	}
+}

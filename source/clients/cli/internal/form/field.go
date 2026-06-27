@@ -27,3 +27,11 @@ type Field interface {
 	// View renders the field's value cell (label is rendered by the Form).
 	View(focused bool, width int, s theme.Styles) string
 }
+
+// stackable is an optional Field capability: render as a single vertical column
+// (one item per line) for the narrow under-label layout, where the normal
+// horizontal render would read as a cramped list. Fields that don't implement
+// it fall back to View.
+type stackable interface {
+	ViewStacked(focused bool, width int, s theme.Styles) string
+}

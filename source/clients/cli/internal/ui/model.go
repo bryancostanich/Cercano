@@ -614,7 +614,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if closed {
 				m.content = nil
 				m.contentScrollbarDragging = false
-				if pageID == contentPageConfig {
+				if pageID == contentPageSettings {
 					// Refresh the header bar's model names — the editor may
 					// have just changed local-model / cloud-model / cloud-base-url.
 					return m, fetchConfigCmd(m.agent)

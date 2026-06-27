@@ -5,10 +5,10 @@ import tea "charm.land/bubbletea/v2"
 type contentPageID string
 
 const (
-	contentPageConfig  contentPageID = "config"
-	contentPageContext contentPageID = "context"
-	contentPageHistory contentPageID = "history"
-	contentPageModels  contentPageID = "models"
+	contentPageSettings contentPageID = "settings"
+	contentPageContext  contentPageID = "context"
+	contentPageHistory  contentPageID = "history"
+	contentPageModels   contentPageID = "models"
 )
 
 // contentPage owns the TUI's main content region between the header and the

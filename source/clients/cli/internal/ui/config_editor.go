@@ -44,7 +44,7 @@ func newConfigEditor(ag *agentclient.Client, p theme.Palette, s theme.Styles, w,
 }
 
 func (ed *configEditor) ID() contentPageID {
-	return contentPageConfig
+	return contentPageSettings
 }
 
 func (ed *configEditor) SetSize(w, h int) {

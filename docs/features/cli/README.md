@@ -103,12 +103,12 @@ These are intentional changes discovered/decided during implementation; the task
 - [x] Task 5.5: Build/test/run W-tier + auto-detect (`run.go`; validators in `internal/tools/` — go/node/python/rust/dotnet)
 - [x] Task 5.6: Allowlist + permissions config loader (`permissions.yaml`, `PermissionStore`)
 
-**Phase 6 — MCP host runtime (agent)** ❌ not started
-- [ ] Task 6.1: MCP client over stdio (official Go SDK)
-- [ ] Task 6.2: Server lifecycle manager (start/stop/restart/health)
-- [ ] Task 6.3: MCP tool adapter — register external tools as `mcp/<server>/<tool>` (default W tier)
-- [ ] Task 6.4: Config loader — merge global + project `mcp.yaml`
-- [ ] Task 6.5: Wire into agent + MCP host RPCs
+**Phase 6 — MCP host runtime (agent)** ✅
+- [x] Task 6.1: MCP client over stdio (official Go SDK)
+- [x] Task 6.2: Server lifecycle manager (start/stop/restart/health)
+- [x] Task 6.3: MCP tool adapter — register external tools as `mcp/<server>/<tool>` (default W tier)
+- [x] Task 6.4: Config loader — merge global + project `mcp.yaml`
+- [x] Task 6.5: Wire into agent + MCP host RPCs
 
 **Phase 7 — Slash RPCs + streaming verification (agent)** 🟡 partial
 - [~] Task 7.1: `Clear` ✓ and `ListModels` ✓ shipped; `SwitchProject`/`GetProjectContext`/`GetUsage` not added as RPCs
@@ -162,9 +162,9 @@ These are intentional changes discovered/decided during implementation; the task
 - [x] Task 14.2: `/resume`, `/history` (+ living-recap shown in picker & resume banner)
 - [ ] Task 14.3: `/diff`, `/undo` (per-turn backups + `RevertLastTurn` RPC) — **not built**
 
-**Phase 15 — MCP UI** ❌ not started *(blocked on phase 6)*
-- [~] Task 15.1: `/tools` listing — built-ins listed; MCP tools pending phase 6
-- [ ] Task 15.2: `/mcp list|add|remove|restart`
+**Phase 15 — MCP UI** ✅
+- [x] Task 15.1: `/tools` listing — MCP tools now appear in `/tools`
+- [x] Task 15.2: `/mcp list|add|remove|restart`
 
 **Phase 16 — Permission-mode UI** ✅ *(redesigned — see Deviations: was "Bypass UI")*
 - [—] Task 16.1: ~~Bypass state machine (Off/Full/Tiered)~~ → three modes **Strict / Permissive / Bypass**
@@ -186,7 +186,7 @@ These are intentional changes discovered/decided during implementation; the task
 - [~] Task 18.3: README + skill docs — standalone-agent README + `--mdtest` harness added; CLI skill docs pending
 - [ ] Task 18.4: Homebrew formula — install `cercano-cli` alongside `cercano`
 
-**Plan-track features still outstanding (rollup):** MCP host runtime + `/mcp` UI (6, 15); diff renderer + `/diff` / `/undo` (12.3, 14.3); font picker (17); `SwitchProject`/`GetProjectContext`/`GetUsage` RPCs (7.1); formal acceptance pass + Homebrew CLI formula (18). ✅ *CLI relocated to its own module at `source/clients/cli/`.*
+**Plan-track features still outstanding (rollup):** diff renderer + `/diff` / `/undo` (12.3, 14.3); font picker (17); `SwitchProject`/`GetProjectContext`/`GetUsage` RPCs (7.1); formal acceptance pass + Homebrew CLI formula (18). ✅ *CLI relocated to its own module at `source/clients/cli/`.*
 
 ### Self-review checklist (completed by plan author before handoff)
 - [x] Algorithmic > LLM enforced across dispatch / slash / font / title / classify / autodetect

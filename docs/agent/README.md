@@ -68,6 +68,7 @@ Switch with `/strict`, `/permissive`, `/bypass`, or `/mode <name>`. Persists to 
 | `/s` `/settings` | Open the settings page (sectioned: local model, cloud, routing, permissions, UI/theme) |
 | `/cloud` | Cloud provider settings shortcut |
 | `/context` | Inspect the current context window usage |
+| `/mcp` | List/add/remove/restart hosted MCP servers |
 | `/help` | Show keymap and command list |
 | `/quit` | Quit (or press Ctrl+C twice) |
 

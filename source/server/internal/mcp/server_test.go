@@ -192,6 +192,22 @@ func (m *mockAgentClient) ExportContext(ctx context.Context, in *proto.ExportCon
 	return &proto.ExportContextResponse{}, nil
 }
 
+func (m *mockAgentClient) ListMcpServers(ctx context.Context, in *proto.ListMcpServersRequest, opts ...grpc.CallOption) (*proto.ListMcpServersResponse, error) {
+	return &proto.ListMcpServersResponse{}, nil
+}
+
+func (m *mockAgentClient) AddMcpServer(ctx context.Context, in *proto.AddMcpServerRequest, opts ...grpc.CallOption) (*proto.AddMcpServerResponse, error) {
+	return &proto.AddMcpServerResponse{}, nil
+}
+
+func (m *mockAgentClient) RemoveMcpServer(ctx context.Context, in *proto.RemoveMcpServerRequest, opts ...grpc.CallOption) (*proto.RemoveMcpServerResponse, error) {
+	return &proto.RemoveMcpServerResponse{}, nil
+}
+
+func (m *mockAgentClient) RestartMcpServer(ctx context.Context, in *proto.RestartMcpServerRequest, opts ...grpc.CallOption) (*proto.RestartMcpServerResponse, error) {
+	return &proto.RestartMcpServerResponse{}, nil
+}
+
 func TestNewServer_RegistersTools(t *testing.T) {
 	mock := &mockAgentClient{}
 	s := NewServer(mock)

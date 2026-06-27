@@ -64,7 +64,8 @@ Switch with `/strict`, `/permissive`, `/bypass`, or `/mode <name>`. Persists to 
 | `/rename <title>` | Rename the current conversation |
 | `/clear` | Wipe in-memory state for this session |
 | `/color <name|hex>` | Change the prompt border accent color |
-| `/config` | Open the live config editor |
+| `/config` | Open the settings page (or `/config <key> <value>` to set one value directly; `/config show` to print current config) |
+| `/s` `/settings` | Open the settings page (sectioned: local model, cloud, routing, permissions, UI/theme) |
 | `/cloud` | Cloud provider settings shortcut |
 | `/context` | Inspect the current context window usage |
 | `/help` | Show keymap and command list |

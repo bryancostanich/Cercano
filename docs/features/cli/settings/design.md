@@ -136,7 +136,7 @@ After a successful config commit the page re-snapshots (re-reads `GetConfig`) so
 
 ## Status
 
-Design approved. Implementation plan pending (writing-plans).
+Implemented. Built via subagent-driven development on branch feat/settings-page. New `internal/form` widget package (Field interface + ReadOnly/Text/Masked/Select/Toggle widgets + Form) and `settingsPage` content page; `/s` `/settings` `/config` route to it; old `config_editor.go` removed.
 
 ## Open Questions / Notes
 

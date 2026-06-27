@@ -79,3 +79,23 @@ func TestFormCommitTriggersReload(t *testing.T) {
 		t.Fatalf("OnReload should have replaced Sections with B, got %+v", f.Sections)
 	}
 }
+
+func TestFormFocusedLineTracksCursor(t *testing.T) {
+	p, s := testStyles()
+	sections := []Section{
+		{Title: "A", Fields: []Field{NewText("a1", "a1", "v", ""), NewText("a2", "a2", "v", "")}},
+		{Title: "B", Fields: []Field{NewText("b1", "b1", "v", "")}},
+	}
+	f := New(sections)
+	f.View(80, p, s)
+	first := f.FocusedLine()
+	if first != 3 {
+		t.Fatalf("focused line for first field = %d, want 3 (top border + title + blank)", first)
+	}
+	f.Update(arrowDown())
+	f.Update(arrowDown()) // into section B's first field
+	f.View(80, p, s)
+	if f.FocusedLine() <= first {
+		t.Fatalf("focused line should grow as cursor descends across sections; got %d (was %d)", f.FocusedLine(), first)
+	}
+}

@@ -56,16 +56,41 @@ func (sp *settingsPage) ID() contentPageID { return contentPageSettings }
 
 func (sp *settingsPage) SetSize(w, h int) { sp.width, sp.height = w, h }
 
+// viewportHeight is the content-region height after the root chrome (header,
+// divider, prompt rules+line, status bar) is reserved — matches how
+// runtimeDashboard / contextView size their scroll regions.
+func (sp *settingsPage) viewportHeight() int {
+	h := dashboardContentHeight(sp.height)
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
+
 func (sp *settingsPage) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	cmd, closed := sp.form.Update(msg)
-	sp.clampScroll()
+	sp.scrollToFocus()
 	return cmd, closed
+}
+
+// scrollToFocus moves the scroll offset so the focused field stays within the
+// visible viewport after keyboard navigation.
+func (sp *settingsPage) scrollToFocus() {
+	sp.form.Lines(sp.width, sp.palette, sp.styles) // refresh focusedLine
+	fl := sp.form.FocusedLine()
+	vh := sp.viewportHeight()
+	if fl < sp.offset {
+		sp.offset = fl
+	} else if fl >= sp.offset+vh {
+		sp.offset = fl - vh + 1
+	}
+	sp.clampScroll()
 }
 
 func (sp *settingsPage) View() string {
 	lines := sp.form.Lines(sp.width, sp.palette, sp.styles)
 	sp.clampScroll()
-	return renderScrollable(lines, sp.height, sp.width-2, sp.offset, sp.styles)
+	return renderScrollable(lines, sp.viewportHeight(), sp.width-2, sp.offset, sp.styles)
 }
 
 // onCommit routes a committed field to its sink.
@@ -103,12 +128,12 @@ func (sp *settingsPage) ScrollBy(delta int) { sp.offset += delta; sp.clampScroll
 func (sp *settingsPage) ScrollTo(offset int) { sp.offset = offset; sp.clampScroll() }
 func (sp *settingsPage) ScrollState() contentPageScrollState {
 	total := len(sp.form.Lines(sp.width, sp.palette, sp.styles))
-	return contentPageScrollState{Total: total, Height: sp.height, Offset: sp.offset}
+	return contentPageScrollState{Total: total, Height: sp.viewportHeight(), Offset: sp.offset}
 }
 
 func (sp *settingsPage) clampScroll() {
 	total := len(sp.form.Lines(sp.width, sp.palette, sp.styles))
-	max := total - sp.height
+	max := total - sp.viewportHeight()
 	if max < 0 {
 		max = 0
 	}

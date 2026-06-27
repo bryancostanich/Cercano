@@ -141,6 +141,10 @@ func (s *Server) SetConfigPersistence(path string, cfg config.Config) {
 	s.refreshRuntimeEndpoints()
 }
 
+// LocusMode returns the currently configured Locus Mode (live; reflects
+// UpdateConfig). Used by the agent for co-processor tier resolution.
+func (s *Server) LocusMode() string { return s.currentConfig.LocusMode }
+
 // UpdateConfig implements proto.AgentServer — updates runtime config without restart.
 func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigRequest) (*proto.UpdateConfigResponse, error) {
 	var changes []string

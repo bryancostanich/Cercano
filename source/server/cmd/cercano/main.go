@@ -252,6 +252,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	srv.SetRuntimeManager(runtimeManager)
 	srv.SetContextLoader(ctxLoader)
 	srv.SetConfigPersistence(config.DefaultPath(), cfg)
+	orchestrator.SetLocusModeGetter(srv.LocusMode)
 	srv.SetToolRegistry(agenttools.DefaultRegistry())
 
 	// Permission store + pending-decisions barrier for the native tool-calling

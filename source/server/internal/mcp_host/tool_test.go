@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/agenttools"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestMCPToolMetadata(t *testing.T) {
@@ -56,5 +57,46 @@ func TestMCPToolExecuteUnavailable(t *testing.T) {
 	_, err := tl.Execute(context.Background(), json.RawMessage(`{}`))
 	if err == nil {
 		t.Fatal("want error when server unavailable")
+	}
+	if !errors.Is(err, errors.New("warming")) && err.Error() == "" {
+		t.Fatalf("error message empty")
+	}
+	// underlying cause must be wrapped
+	if err.Error() == "mcp server \"github\" unavailable — /mcp restart github" {
+		t.Fatalf("underlying error not wrapped: %v", err)
+	}
+}
+
+func TestMCPToolExecuteToolError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Stand up a server with a tool that returns IsError:true
+	srv := mcp.NewServer(&mcp.Implementation{Name: "errsrv", Version: "0.0.1"}, nil)
+	mcp.AddTool(srv, &mcp.Tool{Name: "fail", Description: "always fails"},
+		func(ctx context.Context, req *mcp.CallToolRequest, in struct{}) (*mcp.CallToolResult, any, error) {
+			return &mcp.CallToolResult{
+				IsError: true,
+				Content: []mcp.Content{&mcp.TextContent{Text: "boom"}},
+			}, nil, nil
+		})
+	serverT, clientT := mcp.NewInMemoryTransports()
+	go func() { _ = srv.Run(ctx, serverT) }()
+
+	c, err := dial(ctx, clientT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.close()
+
+	ready := func(ctx context.Context) (*conn, error) { return c, nil }
+	tl := newMCPTool("errsrv", remoteTool{Name: "fail"}, ready)
+
+	_, execErr := tl.Execute(ctx, json.RawMessage(`{}`))
+	if execErr == nil {
+		t.Fatal("want error when tool returns IsError:true")
+	}
+	if execErr.Error() != "boom" {
+		t.Fatalf("error message = %q, want \"boom\"", execErr.Error())
 	}
 }

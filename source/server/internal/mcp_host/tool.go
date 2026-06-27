@@ -52,7 +52,7 @@ func (t *mcpTool) Schema() json.RawMessage          { return t.schema }
 func (t *mcpTool) Execute(ctx context.Context, raw json.RawMessage) (*agenttools.Result, error) {
 	c, err := t.ready(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("mcp server %q unavailable — /mcp restart %s", t.server, t.server)
+		return nil, fmt.Errorf("mcp server %q unavailable: %w — /mcp restart %s", t.server, err, t.server)
 	}
 	text, isToolErr, callErr := c.call(ctx, t.tool, raw)
 	if callErr != nil {

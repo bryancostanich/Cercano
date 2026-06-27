@@ -55,6 +55,10 @@ const (
 	Agent_GetProviderCapabilities_FullMethodName    = "/agent.Agent/GetProviderCapabilities"
 	Agent_ProposeContextEdit_FullMethodName         = "/agent.Agent/ProposeContextEdit"
 	Agent_DeleteConversationTurns_FullMethodName    = "/agent.Agent/DeleteConversationTurns"
+	Agent_ListMcpServers_FullMethodName             = "/agent.Agent/ListMcpServers"
+	Agent_AddMcpServer_FullMethodName               = "/agent.Agent/AddMcpServer"
+	Agent_RemoveMcpServer_FullMethodName            = "/agent.Agent/RemoveMcpServer"
+	Agent_RestartMcpServer_FullMethodName           = "/agent.Agent/RestartMcpServer"
 )
 
 // AgentClient is the client API for Agent service.
@@ -142,6 +146,11 @@ type AgentClient interface {
 	ProposeContextEdit(ctx context.Context, in *ProposeContextEditRequest, opts ...grpc.CallOption) (*ProposeContextEditResponse, error)
 	// DeleteConversationTurns hard-deletes the named turns from a conversation.
 	DeleteConversationTurns(ctx context.Context, in *DeleteConversationTurnsRequest, opts ...grpc.CallOption) (*DeleteConversationTurnsResponse, error)
+	// ---- MCP host ----
+	ListMcpServers(ctx context.Context, in *ListMcpServersRequest, opts ...grpc.CallOption) (*ListMcpServersResponse, error)
+	AddMcpServer(ctx context.Context, in *AddMcpServerRequest, opts ...grpc.CallOption) (*AddMcpServerResponse, error)
+	RemoveMcpServer(ctx context.Context, in *RemoveMcpServerRequest, opts ...grpc.CallOption) (*RemoveMcpServerResponse, error)
+	RestartMcpServer(ctx context.Context, in *RestartMcpServerRequest, opts ...grpc.CallOption) (*RestartMcpServerResponse, error)
 }
 
 type agentClient struct {
@@ -539,6 +548,46 @@ func (c *agentClient) DeleteConversationTurns(ctx context.Context, in *DeleteCon
 	return out, nil
 }
 
+func (c *agentClient) ListMcpServers(ctx context.Context, in *ListMcpServersRequest, opts ...grpc.CallOption) (*ListMcpServersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListMcpServersResponse)
+	err := c.cc.Invoke(ctx, Agent_ListMcpServers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) AddMcpServer(ctx context.Context, in *AddMcpServerRequest, opts ...grpc.CallOption) (*AddMcpServerResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AddMcpServerResponse)
+	err := c.cc.Invoke(ctx, Agent_AddMcpServer_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) RemoveMcpServer(ctx context.Context, in *RemoveMcpServerRequest, opts ...grpc.CallOption) (*RemoveMcpServerResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveMcpServerResponse)
+	err := c.cc.Invoke(ctx, Agent_RemoveMcpServer_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) RestartMcpServer(ctx context.Context, in *RestartMcpServerRequest, opts ...grpc.CallOption) (*RestartMcpServerResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RestartMcpServerResponse)
+	err := c.cc.Invoke(ctx, Agent_RestartMcpServer_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServer is the server API for Agent service.
 // All implementations must embed UnimplementedAgentServer
 // for forward compatibility.
@@ -624,6 +673,11 @@ type AgentServer interface {
 	ProposeContextEdit(context.Context, *ProposeContextEditRequest) (*ProposeContextEditResponse, error)
 	// DeleteConversationTurns hard-deletes the named turns from a conversation.
 	DeleteConversationTurns(context.Context, *DeleteConversationTurnsRequest) (*DeleteConversationTurnsResponse, error)
+	// ---- MCP host ----
+	ListMcpServers(context.Context, *ListMcpServersRequest) (*ListMcpServersResponse, error)
+	AddMcpServer(context.Context, *AddMcpServerRequest) (*AddMcpServerResponse, error)
+	RemoveMcpServer(context.Context, *RemoveMcpServerRequest) (*RemoveMcpServerResponse, error)
+	RestartMcpServer(context.Context, *RestartMcpServerRequest) (*RestartMcpServerResponse, error)
 	mustEmbedUnimplementedAgentServer()
 }
 
@@ -741,6 +795,18 @@ func (UnimplementedAgentServer) ProposeContextEdit(context.Context, *ProposeCont
 }
 func (UnimplementedAgentServer) DeleteConversationTurns(context.Context, *DeleteConversationTurnsRequest) (*DeleteConversationTurnsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteConversationTurns not implemented")
+}
+func (UnimplementedAgentServer) ListMcpServers(context.Context, *ListMcpServersRequest) (*ListMcpServersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListMcpServers not implemented")
+}
+func (UnimplementedAgentServer) AddMcpServer(context.Context, *AddMcpServerRequest) (*AddMcpServerResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AddMcpServer not implemented")
+}
+func (UnimplementedAgentServer) RemoveMcpServer(context.Context, *RemoveMcpServerRequest) (*RemoveMcpServerResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RemoveMcpServer not implemented")
+}
+func (UnimplementedAgentServer) RestartMcpServer(context.Context, *RestartMcpServerRequest) (*RestartMcpServerResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RestartMcpServer not implemented")
 }
 func (UnimplementedAgentServer) mustEmbedUnimplementedAgentServer() {}
 func (UnimplementedAgentServer) testEmbeddedByValue()               {}
@@ -1390,6 +1456,78 @@ func _Agent_DeleteConversationTurns_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Agent_ListMcpServers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListMcpServersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).ListMcpServers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_ListMcpServers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).ListMcpServers(ctx, req.(*ListMcpServersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_AddMcpServer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddMcpServerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).AddMcpServer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_AddMcpServer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).AddMcpServer(ctx, req.(*AddMcpServerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_RemoveMcpServer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveMcpServerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).RemoveMcpServer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_RemoveMcpServer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).RemoveMcpServer(ctx, req.(*RemoveMcpServerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_RestartMcpServer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RestartMcpServerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).RestartMcpServer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_RestartMcpServer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).RestartMcpServer(ctx, req.(*RestartMcpServerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Agent_ServiceDesc is the grpc.ServiceDesc for Agent service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1528,6 +1666,22 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteConversationTurns",
 			Handler:    _Agent_DeleteConversationTurns_Handler,
+		},
+		{
+			MethodName: "ListMcpServers",
+			Handler:    _Agent_ListMcpServers_Handler,
+		},
+		{
+			MethodName: "AddMcpServer",
+			Handler:    _Agent_AddMcpServer_Handler,
+		},
+		{
+			MethodName: "RemoveMcpServer",
+			Handler:    _Agent_RemoveMcpServer_Handler,
+		},
+		{
+			MethodName: "RestartMcpServer",
+			Handler:    _Agent_RestartMcpServer_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

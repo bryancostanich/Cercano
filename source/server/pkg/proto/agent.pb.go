@@ -5562,6 +5562,475 @@ func (x *PermissionRequired) GetTier() string {
 	return ""
 }
 
+// MCP host management messages.
+type McpServerInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	State         string                 `protobuf:"bytes,2,opt,name=state,proto3" json:"state,omitempty"` // "warming" | "ready" | "failed"
+	ToolCount     int32                  `protobuf:"varint,3,opt,name=tool_count,json=toolCount,proto3" json:"tool_count,omitempty"`
+	Error         string                 `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *McpServerInfo) Reset() {
+	*x = McpServerInfo{}
+	mi := &file_source_proto_agent_proto_msgTypes[90]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *McpServerInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*McpServerInfo) ProtoMessage() {}
+
+func (x *McpServerInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_source_proto_agent_proto_msgTypes[90]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use McpServerInfo.ProtoReflect.Descriptor instead.
+func (*McpServerInfo) Descriptor() ([]byte, []int) {
+	return file_source_proto_agent_proto_rawDescGZIP(), []int{90}
+}
+
+func (x *McpServerInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *McpServerInfo) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *McpServerInfo) GetToolCount() int32 {
+	if x != nil {
+		return x.ToolCount
+	}
+	return 0
+}
+
+func (x *McpServerInfo) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type ListMcpServersRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListMcpServersRequest) Reset() {
+	*x = ListMcpServersRequest{}
+	mi := &file_source_proto_agent_proto_msgTypes[91]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListMcpServersRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListMcpServersRequest) ProtoMessage() {}
+
+func (x *ListMcpServersRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_source_proto_agent_proto_msgTypes[91]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListMcpServersRequest.ProtoReflect.Descriptor instead.
+func (*ListMcpServersRequest) Descriptor() ([]byte, []int) {
+	return file_source_proto_agent_proto_rawDescGZIP(), []int{91}
+}
+
+type ListMcpServersResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Servers       []*McpServerInfo       `protobuf:"bytes,1,rep,name=servers,proto3" json:"servers,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListMcpServersResponse) Reset() {
+	*x = ListMcpServersResponse{}
+	mi := &file_source_proto_agent_proto_msgTypes[92]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListMcpServersResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListMcpServersResponse) ProtoMessage() {}
+
+func (x *ListMcpServersResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_source_proto_agent_proto_msgTypes[92]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListMcpServersResponse.ProtoReflect.Descriptor instead.
+func (*ListMcpServersResponse) Descriptor() ([]byte, []int) {
+	return file_source_proto_agent_proto_rawDescGZIP(), []int{92}
+}
+
+func (x *ListMcpServersResponse) GetServers() []*McpServerInfo {
+	if x != nil {
+		return x.Servers
+	}
+	return nil
+}
+
+type AddMcpServerRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Command       string                 `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"`
+	Args          []string               `protobuf:"bytes,3,rep,name=args,proto3" json:"args,omitempty"`
+	Env           map[string]string      `protobuf:"bytes,4,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AddMcpServerRequest) Reset() {
+	*x = AddMcpServerRequest{}
+	mi := &file_source_proto_agent_proto_msgTypes[93]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddMcpServerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddMcpServerRequest) ProtoMessage() {}
+
+func (x *AddMcpServerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_source_proto_agent_proto_msgTypes[93]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddMcpServerRequest.ProtoReflect.Descriptor instead.
+func (*AddMcpServerRequest) Descriptor() ([]byte, []int) {
+	return file_source_proto_agent_proto_rawDescGZIP(), []int{93}
+}
+
+func (x *AddMcpServerRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *AddMcpServerRequest) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
+}
+
+func (x *AddMcpServerRequest) GetArgs() []string {
+	if x != nil {
+		return x.Args
+	}
+	return nil
+}
+
+func (x *AddMcpServerRequest) GetEnv() map[string]string {
+	if x != nil {
+		return x.Env
+	}
+	return nil
+}
+
+type AddMcpServerResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AddMcpServerResponse) Reset() {
+	*x = AddMcpServerResponse{}
+	mi := &file_source_proto_agent_proto_msgTypes[94]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddMcpServerResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddMcpServerResponse) ProtoMessage() {}
+
+func (x *AddMcpServerResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_source_proto_agent_proto_msgTypes[94]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddMcpServerResponse.ProtoReflect.Descriptor instead.
+func (*AddMcpServerResponse) Descriptor() ([]byte, []int) {
+	return file_source_proto_agent_proto_rawDescGZIP(), []int{94}
+}
+
+func (x *AddMcpServerResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *AddMcpServerResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type RemoveMcpServerRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoveMcpServerRequest) Reset() {
+	*x = RemoveMcpServerRequest{}
+	mi := &file_source_proto_agent_proto_msgTypes[95]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveMcpServerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveMcpServerRequest) ProtoMessage() {}
+
+func (x *RemoveMcpServerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_source_proto_agent_proto_msgTypes[95]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveMcpServerRequest.ProtoReflect.Descriptor instead.
+func (*RemoveMcpServerRequest) Descriptor() ([]byte, []int) {
+	return file_source_proto_agent_proto_rawDescGZIP(), []int{95}
+}
+
+func (x *RemoveMcpServerRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type RemoveMcpServerResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoveMcpServerResponse) Reset() {
+	*x = RemoveMcpServerResponse{}
+	mi := &file_source_proto_agent_proto_msgTypes[96]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveMcpServerResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveMcpServerResponse) ProtoMessage() {}
+
+func (x *RemoveMcpServerResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_source_proto_agent_proto_msgTypes[96]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveMcpServerResponse.ProtoReflect.Descriptor instead.
+func (*RemoveMcpServerResponse) Descriptor() ([]byte, []int) {
+	return file_source_proto_agent_proto_rawDescGZIP(), []int{96}
+}
+
+func (x *RemoveMcpServerResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *RemoveMcpServerResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type RestartMcpServerRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RestartMcpServerRequest) Reset() {
+	*x = RestartMcpServerRequest{}
+	mi := &file_source_proto_agent_proto_msgTypes[97]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestartMcpServerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestartMcpServerRequest) ProtoMessage() {}
+
+func (x *RestartMcpServerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_source_proto_agent_proto_msgTypes[97]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestartMcpServerRequest.ProtoReflect.Descriptor instead.
+func (*RestartMcpServerRequest) Descriptor() ([]byte, []int) {
+	return file_source_proto_agent_proto_rawDescGZIP(), []int{97}
+}
+
+func (x *RestartMcpServerRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type RestartMcpServerResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	ToolCount     int32                  `protobuf:"varint,3,opt,name=tool_count,json=toolCount,proto3" json:"tool_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RestartMcpServerResponse) Reset() {
+	*x = RestartMcpServerResponse{}
+	mi := &file_source_proto_agent_proto_msgTypes[98]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestartMcpServerResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestartMcpServerResponse) ProtoMessage() {}
+
+func (x *RestartMcpServerResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_source_proto_agent_proto_msgTypes[98]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestartMcpServerResponse.ProtoReflect.Descriptor instead.
+func (*RestartMcpServerResponse) Descriptor() ([]byte, []int) {
+	return file_source_proto_agent_proto_rawDescGZIP(), []int{98}
+}
+
+func (x *RestartMcpServerResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *RestartMcpServerResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *RestartMcpServerResponse) GetToolCount() int32 {
+	if x != nil {
+		return x.ToolCount
+	}
+	return 0
+}
+
 var File_source_proto_agent_proto protoreflect.FileDescriptor
 
 const file_source_proto_agent_proto_rawDesc = "" +
@@ -5971,7 +6440,39 @@ const file_source_proto_agent_proto_rawDesc = "" +
 	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\x12\x1b\n" +
 	"\ttool_name\x18\x02 \x01(\tR\btoolName\x12\x1b\n" +
 	"\targs_json\x18\x03 \x01(\tR\bargsJson\x12\x12\n" +
-	"\x04tier\x18\x04 \x01(\tR\x04tier*0\n" +
+	"\x04tier\x18\x04 \x01(\tR\x04tier\"n\n" +
+	"\rMcpServerInfo\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
+	"\x05state\x18\x02 \x01(\tR\x05state\x12\x1d\n" +
+	"\n" +
+	"tool_count\x18\x03 \x01(\x05R\ttoolCount\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"\x17\n" +
+	"\x15ListMcpServersRequest\"H\n" +
+	"\x16ListMcpServersResponse\x12.\n" +
+	"\aservers\x18\x01 \x03(\v2\x14.agent.McpServerInfoR\aservers\"\xc6\x01\n" +
+	"\x13AddMcpServerRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
+	"\acommand\x18\x02 \x01(\tR\acommand\x12\x12\n" +
+	"\x04args\x18\x03 \x03(\tR\x04args\x125\n" +
+	"\x03env\x18\x04 \x03(\v2#.agent.AddMcpServerRequest.EnvEntryR\x03env\x1a6\n" +
+	"\bEnvEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"<\n" +
+	"\x14AddMcpServerResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\",\n" +
+	"\x16RemoveMcpServerRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"?\n" +
+	"\x17RemoveMcpServerResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"-\n" +
+	"\x17RestartMcpServerRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"_\n" +
+	"\x18RestartMcpServerResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1d\n" +
+	"\n" +
+	"tool_count\x18\x03 \x01(\x05R\ttoolCount*0\n" +
 	"\n" +
 	"FileAction\x12\n" +
 	"\n" +
@@ -5979,7 +6480,7 @@ const file_source_proto_agent_proto_rawDesc = "" +
 	"\n" +
 	"\x06UPDATE\x10\x01\x12\n" +
 	"\n" +
-	"\x06DELETE\x10\x022\x92\x18\n" +
+	"\x06DELETE\x10\x022\xd9\x1a\n" +
 	"\x05Agent\x12O\n" +
 	"\x0eProcessRequest\x12\x1c.agent.ProcessRequestRequest\x1a\x1d.agent.ProcessRequestResponse\"\x00\x12V\n" +
 	"\x14StreamProcessRequest\x12\x1c.agent.ProcessRequestRequest\x1a\x1c.agent.StreamProcessResponse\"\x000\x01\x12I\n" +
@@ -6019,7 +6520,11 @@ const file_source_proto_agent_proto_rawDesc = "" +
 	"\fDenyToolCall\x12\x1a.agent.DenyToolCallRequest\x1a\x1b.agent.DenyToolCallResponse\"\x00\x12j\n" +
 	"\x17GetProviderCapabilities\x12%.agent.GetProviderCapabilitiesRequest\x1a&.agent.GetProviderCapabilitiesResponse\"\x00\x12[\n" +
 	"\x12ProposeContextEdit\x12 .agent.ProposeContextEditRequest\x1a!.agent.ProposeContextEditResponse\"\x00\x12j\n" +
-	"\x17DeleteConversationTurns\x12%.agent.DeleteConversationTurnsRequest\x1a&.agent.DeleteConversationTurnsResponse\"\x00B!Z\x1fcercano/source/server/pkg/protob\x06proto3"
+	"\x17DeleteConversationTurns\x12%.agent.DeleteConversationTurnsRequest\x1a&.agent.DeleteConversationTurnsResponse\"\x00\x12O\n" +
+	"\x0eListMcpServers\x12\x1c.agent.ListMcpServersRequest\x1a\x1d.agent.ListMcpServersResponse\"\x00\x12I\n" +
+	"\fAddMcpServer\x12\x1a.agent.AddMcpServerRequest\x1a\x1b.agent.AddMcpServerResponse\"\x00\x12R\n" +
+	"\x0fRemoveMcpServer\x12\x1d.agent.RemoveMcpServerRequest\x1a\x1e.agent.RemoveMcpServerResponse\"\x00\x12U\n" +
+	"\x10RestartMcpServer\x12\x1e.agent.RestartMcpServerRequest\x1a\x1f.agent.RestartMcpServerResponse\"\x00B!Z\x1fcercano/source/server/pkg/protob\x06proto3"
 
 var (
 	file_source_proto_agent_proto_rawDescOnce sync.Once
@@ -6034,7 +6539,7 @@ func file_source_proto_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_source_proto_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_source_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 90)
+var file_source_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 100)
 var file_source_proto_agent_proto_goTypes = []any{
 	(FileAction)(0),                            // 0: agent.FileAction
 	(*TokenDelta)(nil),                         // 1: agent.TokenDelta
@@ -6127,114 +6632,134 @@ var file_source_proto_agent_proto_goTypes = []any{
 	(*ToolExecStart)(nil),                      // 88: agent.ToolExecStart
 	(*ToolExecComplete)(nil),                   // 89: agent.ToolExecComplete
 	(*PermissionRequired)(nil),                 // 90: agent.PermissionRequired
+	(*McpServerInfo)(nil),                      // 91: agent.McpServerInfo
+	(*ListMcpServersRequest)(nil),              // 92: agent.ListMcpServersRequest
+	(*ListMcpServersResponse)(nil),             // 93: agent.ListMcpServersResponse
+	(*AddMcpServerRequest)(nil),                // 94: agent.AddMcpServerRequest
+	(*AddMcpServerResponse)(nil),               // 95: agent.AddMcpServerResponse
+	(*RemoveMcpServerRequest)(nil),             // 96: agent.RemoveMcpServerRequest
+	(*RemoveMcpServerResponse)(nil),            // 97: agent.RemoveMcpServerResponse
+	(*RestartMcpServerRequest)(nil),            // 98: agent.RestartMcpServerRequest
+	(*RestartMcpServerResponse)(nil),           // 99: agent.RestartMcpServerResponse
+	nil,                                        // 100: agent.AddMcpServerRequest.EnvEntry
 }
 var file_source_proto_agent_proto_depIdxs = []int32{
-	4,  // 0: agent.StreamProcessResponse.progress:type_name -> agent.ProgressUpdate
-	8,  // 1: agent.StreamProcessResponse.final_response:type_name -> agent.ProcessRequestResponse
-	1,  // 2: agent.StreamProcessResponse.token_delta:type_name -> agent.TokenDelta
-	86, // 3: agent.StreamProcessResponse.tool_use_start:type_name -> agent.ToolUseStart
-	87, // 4: agent.StreamProcessResponse.tool_use_stop:type_name -> agent.ToolUseStop
-	88, // 5: agent.StreamProcessResponse.tool_exec_start:type_name -> agent.ToolExecStart
-	89, // 6: agent.StreamProcessResponse.tool_exec_complete:type_name -> agent.ToolExecComplete
-	90, // 7: agent.StreamProcessResponse.permission_required:type_name -> agent.PermissionRequired
-	3,  // 8: agent.StreamProcessResponse.route_selected:type_name -> agent.RouteSelected
-	9,  // 9: agent.ProcessRequestResponse.file_changes:type_name -> agent.FileChange
-	10, // 10: agent.ProcessRequestResponse.routing_metadata:type_name -> agent.RoutingMetadata
-	0,  // 11: agent.FileChange.action:type_name -> agent.FileAction
-	12, // 12: agent.ListModelsResponse.models:type_name -> agent.ModelInfo
-	14, // 13: agent.GetRuntimeStatusResponse.models:type_name -> agent.RuntimeModel
-	15, // 14: agent.GetRuntimeStatusResponse.instances:type_name -> agent.RuntimeInstance
-	16, // 15: agent.GetRuntimeStatusResponse.endpoints:type_name -> agent.RuntimeEndpoint
-	17, // 16: agent.GetRuntimeStatusResponse.logs:type_name -> agent.RuntimeLogEntry
-	14, // 17: agent.ListRuntimeModelsResponse.models:type_name -> agent.RuntimeModel
-	16, // 18: agent.ListRuntimeEndpointsResponse.endpoints:type_name -> agent.RuntimeEndpoint
-	15, // 19: agent.StartRuntimeModelResponse.instance:type_name -> agent.RuntimeInstance
-	15, // 20: agent.RestartRuntimeResponse.instance:type_name -> agent.RuntimeInstance
-	14, // 21: agent.DownloadRuntimeModelResponse.model:type_name -> agent.RuntimeModel
-	14, // 22: agent.CancelRuntimeModelDownloadResponse.model:type_name -> agent.RuntimeModel
-	37, // 23: agent.ListConversationsResponse.conversations:type_name -> agent.Conversation
-	38, // 24: agent.ResumeConversationResponse.turns:type_name -> agent.PersistedTurn
-	56, // 25: agent.GetConversationTurnsResponse.turns:type_name -> agent.ContextTurn
-	61, // 26: agent.ListToolsResponse.tools:type_name -> agent.BuiltinTool
-	69, // 27: agent.ListSkillsResponse.skills:type_name -> agent.SkillInfo
-	79, // 28: agent.ClientEvent.permission_mode_changed:type_name -> agent.PermissionModeChanged
-	5,  // 29: agent.Agent.ProcessRequest:input_type -> agent.ProcessRequestRequest
-	5,  // 30: agent.Agent.StreamProcessRequest:input_type -> agent.ProcessRequestRequest
-	6,  // 31: agent.Agent.UpdateConfig:input_type -> agent.UpdateConfigRequest
-	66, // 32: agent.Agent.GetConfig:input_type -> agent.GetConfigRequest
-	39, // 33: agent.Agent.ListConversations:input_type -> agent.ListConversationsRequest
-	41, // 34: agent.Agent.ResumeConversation:input_type -> agent.ResumeConversationRequest
-	43, // 35: agent.Agent.DeleteConversation:input_type -> agent.DeleteConversationRequest
-	45, // 36: agent.Agent.RenameConversation:input_type -> agent.RenameConversationRequest
-	47, // 37: agent.Agent.GetConversation:input_type -> agent.GetConversationRequest
-	48, // 38: agent.Agent.GetContextUsage:input_type -> agent.GetContextUsageRequest
-	50, // 39: agent.Agent.GetCompactionState:input_type -> agent.GetCompactionStateRequest
-	52, // 40: agent.Agent.ExportContext:input_type -> agent.ExportContextRequest
-	54, // 41: agent.Agent.GetConversationTurns:input_type -> agent.GetConversationTurnsRequest
-	62, // 42: agent.Agent.ListTools:input_type -> agent.ListToolsRequest
-	64, // 43: agent.Agent.InvokeTool:input_type -> agent.InvokeToolRequest
-	11, // 44: agent.Agent.ListModels:input_type -> agent.ListModelsRequest
-	18, // 45: agent.Agent.GetRuntimeStatus:input_type -> agent.GetRuntimeStatusRequest
-	20, // 46: agent.Agent.ListRuntimeModels:input_type -> agent.ListRuntimeModelsRequest
-	22, // 47: agent.Agent.ListRuntimeEndpoints:input_type -> agent.ListRuntimeEndpointsRequest
-	24, // 48: agent.Agent.StartRuntimeModel:input_type -> agent.StartRuntimeModelRequest
-	26, // 49: agent.Agent.StopRuntimeModel:input_type -> agent.StopRuntimeModelRequest
-	28, // 50: agent.Agent.RestartRuntime:input_type -> agent.RestartRuntimeRequest
-	30, // 51: agent.Agent.DownloadRuntimeModel:input_type -> agent.DownloadRuntimeModelRequest
-	32, // 52: agent.Agent.CancelRuntimeModelDownload:input_type -> agent.CancelRuntimeModelDownloadRequest
-	34, // 53: agent.Agent.DeleteRuntimeModel:input_type -> agent.DeleteRuntimeModelRequest
-	36, // 54: agent.Agent.StreamRuntimeLogs:input_type -> agent.StreamRuntimeLogsRequest
-	68, // 55: agent.Agent.ListSkills:input_type -> agent.ListSkillsRequest
-	71, // 56: agent.Agent.GetSkill:input_type -> agent.GetSkillRequest
-	73, // 57: agent.Agent.SetPermissionMode:input_type -> agent.SetPermissionModeRequest
-	75, // 58: agent.Agent.GetPermissionMode:input_type -> agent.GetPermissionModeRequest
-	77, // 59: agent.Agent.SubscribeEvents:input_type -> agent.SubscribeEventsRequest
-	80, // 60: agent.Agent.AllowToolCall:input_type -> agent.AllowToolCallRequest
-	82, // 61: agent.Agent.DenyToolCall:input_type -> agent.DenyToolCallRequest
-	84, // 62: agent.Agent.GetProviderCapabilities:input_type -> agent.GetProviderCapabilitiesRequest
-	57, // 63: agent.Agent.ProposeContextEdit:input_type -> agent.ProposeContextEditRequest
-	59, // 64: agent.Agent.DeleteConversationTurns:input_type -> agent.DeleteConversationTurnsRequest
-	8,  // 65: agent.Agent.ProcessRequest:output_type -> agent.ProcessRequestResponse
-	2,  // 66: agent.Agent.StreamProcessRequest:output_type -> agent.StreamProcessResponse
-	7,  // 67: agent.Agent.UpdateConfig:output_type -> agent.UpdateConfigResponse
-	67, // 68: agent.Agent.GetConfig:output_type -> agent.GetConfigResponse
-	40, // 69: agent.Agent.ListConversations:output_type -> agent.ListConversationsResponse
-	42, // 70: agent.Agent.ResumeConversation:output_type -> agent.ResumeConversationResponse
-	44, // 71: agent.Agent.DeleteConversation:output_type -> agent.DeleteConversationResponse
-	46, // 72: agent.Agent.RenameConversation:output_type -> agent.RenameConversationResponse
-	37, // 73: agent.Agent.GetConversation:output_type -> agent.Conversation
-	49, // 74: agent.Agent.GetContextUsage:output_type -> agent.GetContextUsageResponse
-	51, // 75: agent.Agent.GetCompactionState:output_type -> agent.GetCompactionStateResponse
-	53, // 76: agent.Agent.ExportContext:output_type -> agent.ExportContextResponse
-	55, // 77: agent.Agent.GetConversationTurns:output_type -> agent.GetConversationTurnsResponse
-	63, // 78: agent.Agent.ListTools:output_type -> agent.ListToolsResponse
-	65, // 79: agent.Agent.InvokeTool:output_type -> agent.InvokeToolResponse
-	13, // 80: agent.Agent.ListModels:output_type -> agent.ListModelsResponse
-	19, // 81: agent.Agent.GetRuntimeStatus:output_type -> agent.GetRuntimeStatusResponse
-	21, // 82: agent.Agent.ListRuntimeModels:output_type -> agent.ListRuntimeModelsResponse
-	23, // 83: agent.Agent.ListRuntimeEndpoints:output_type -> agent.ListRuntimeEndpointsResponse
-	25, // 84: agent.Agent.StartRuntimeModel:output_type -> agent.StartRuntimeModelResponse
-	27, // 85: agent.Agent.StopRuntimeModel:output_type -> agent.StopRuntimeModelResponse
-	29, // 86: agent.Agent.RestartRuntime:output_type -> agent.RestartRuntimeResponse
-	31, // 87: agent.Agent.DownloadRuntimeModel:output_type -> agent.DownloadRuntimeModelResponse
-	33, // 88: agent.Agent.CancelRuntimeModelDownload:output_type -> agent.CancelRuntimeModelDownloadResponse
-	35, // 89: agent.Agent.DeleteRuntimeModel:output_type -> agent.DeleteRuntimeModelResponse
-	17, // 90: agent.Agent.StreamRuntimeLogs:output_type -> agent.RuntimeLogEntry
-	70, // 91: agent.Agent.ListSkills:output_type -> agent.ListSkillsResponse
-	72, // 92: agent.Agent.GetSkill:output_type -> agent.GetSkillResponse
-	74, // 93: agent.Agent.SetPermissionMode:output_type -> agent.SetPermissionModeResponse
-	76, // 94: agent.Agent.GetPermissionMode:output_type -> agent.GetPermissionModeResponse
-	78, // 95: agent.Agent.SubscribeEvents:output_type -> agent.ClientEvent
-	81, // 96: agent.Agent.AllowToolCall:output_type -> agent.AllowToolCallResponse
-	83, // 97: agent.Agent.DenyToolCall:output_type -> agent.DenyToolCallResponse
-	85, // 98: agent.Agent.GetProviderCapabilities:output_type -> agent.GetProviderCapabilitiesResponse
-	58, // 99: agent.Agent.ProposeContextEdit:output_type -> agent.ProposeContextEditResponse
-	60, // 100: agent.Agent.DeleteConversationTurns:output_type -> agent.DeleteConversationTurnsResponse
-	65, // [65:101] is the sub-list for method output_type
-	29, // [29:65] is the sub-list for method input_type
-	29, // [29:29] is the sub-list for extension type_name
-	29, // [29:29] is the sub-list for extension extendee
-	0,  // [0:29] is the sub-list for field type_name
+	4,   // 0: agent.StreamProcessResponse.progress:type_name -> agent.ProgressUpdate
+	8,   // 1: agent.StreamProcessResponse.final_response:type_name -> agent.ProcessRequestResponse
+	1,   // 2: agent.StreamProcessResponse.token_delta:type_name -> agent.TokenDelta
+	86,  // 3: agent.StreamProcessResponse.tool_use_start:type_name -> agent.ToolUseStart
+	87,  // 4: agent.StreamProcessResponse.tool_use_stop:type_name -> agent.ToolUseStop
+	88,  // 5: agent.StreamProcessResponse.tool_exec_start:type_name -> agent.ToolExecStart
+	89,  // 6: agent.StreamProcessResponse.tool_exec_complete:type_name -> agent.ToolExecComplete
+	90,  // 7: agent.StreamProcessResponse.permission_required:type_name -> agent.PermissionRequired
+	3,   // 8: agent.StreamProcessResponse.route_selected:type_name -> agent.RouteSelected
+	9,   // 9: agent.ProcessRequestResponse.file_changes:type_name -> agent.FileChange
+	10,  // 10: agent.ProcessRequestResponse.routing_metadata:type_name -> agent.RoutingMetadata
+	0,   // 11: agent.FileChange.action:type_name -> agent.FileAction
+	12,  // 12: agent.ListModelsResponse.models:type_name -> agent.ModelInfo
+	14,  // 13: agent.GetRuntimeStatusResponse.models:type_name -> agent.RuntimeModel
+	15,  // 14: agent.GetRuntimeStatusResponse.instances:type_name -> agent.RuntimeInstance
+	16,  // 15: agent.GetRuntimeStatusResponse.endpoints:type_name -> agent.RuntimeEndpoint
+	17,  // 16: agent.GetRuntimeStatusResponse.logs:type_name -> agent.RuntimeLogEntry
+	14,  // 17: agent.ListRuntimeModelsResponse.models:type_name -> agent.RuntimeModel
+	16,  // 18: agent.ListRuntimeEndpointsResponse.endpoints:type_name -> agent.RuntimeEndpoint
+	15,  // 19: agent.StartRuntimeModelResponse.instance:type_name -> agent.RuntimeInstance
+	15,  // 20: agent.RestartRuntimeResponse.instance:type_name -> agent.RuntimeInstance
+	14,  // 21: agent.DownloadRuntimeModelResponse.model:type_name -> agent.RuntimeModel
+	14,  // 22: agent.CancelRuntimeModelDownloadResponse.model:type_name -> agent.RuntimeModel
+	37,  // 23: agent.ListConversationsResponse.conversations:type_name -> agent.Conversation
+	38,  // 24: agent.ResumeConversationResponse.turns:type_name -> agent.PersistedTurn
+	56,  // 25: agent.GetConversationTurnsResponse.turns:type_name -> agent.ContextTurn
+	61,  // 26: agent.ListToolsResponse.tools:type_name -> agent.BuiltinTool
+	69,  // 27: agent.ListSkillsResponse.skills:type_name -> agent.SkillInfo
+	79,  // 28: agent.ClientEvent.permission_mode_changed:type_name -> agent.PermissionModeChanged
+	91,  // 29: agent.ListMcpServersResponse.servers:type_name -> agent.McpServerInfo
+	100, // 30: agent.AddMcpServerRequest.env:type_name -> agent.AddMcpServerRequest.EnvEntry
+	5,   // 31: agent.Agent.ProcessRequest:input_type -> agent.ProcessRequestRequest
+	5,   // 32: agent.Agent.StreamProcessRequest:input_type -> agent.ProcessRequestRequest
+	6,   // 33: agent.Agent.UpdateConfig:input_type -> agent.UpdateConfigRequest
+	66,  // 34: agent.Agent.GetConfig:input_type -> agent.GetConfigRequest
+	39,  // 35: agent.Agent.ListConversations:input_type -> agent.ListConversationsRequest
+	41,  // 36: agent.Agent.ResumeConversation:input_type -> agent.ResumeConversationRequest
+	43,  // 37: agent.Agent.DeleteConversation:input_type -> agent.DeleteConversationRequest
+	45,  // 38: agent.Agent.RenameConversation:input_type -> agent.RenameConversationRequest
+	47,  // 39: agent.Agent.GetConversation:input_type -> agent.GetConversationRequest
+	48,  // 40: agent.Agent.GetContextUsage:input_type -> agent.GetContextUsageRequest
+	50,  // 41: agent.Agent.GetCompactionState:input_type -> agent.GetCompactionStateRequest
+	52,  // 42: agent.Agent.ExportContext:input_type -> agent.ExportContextRequest
+	54,  // 43: agent.Agent.GetConversationTurns:input_type -> agent.GetConversationTurnsRequest
+	62,  // 44: agent.Agent.ListTools:input_type -> agent.ListToolsRequest
+	64,  // 45: agent.Agent.InvokeTool:input_type -> agent.InvokeToolRequest
+	11,  // 46: agent.Agent.ListModels:input_type -> agent.ListModelsRequest
+	18,  // 47: agent.Agent.GetRuntimeStatus:input_type -> agent.GetRuntimeStatusRequest
+	20,  // 48: agent.Agent.ListRuntimeModels:input_type -> agent.ListRuntimeModelsRequest
+	22,  // 49: agent.Agent.ListRuntimeEndpoints:input_type -> agent.ListRuntimeEndpointsRequest
+	24,  // 50: agent.Agent.StartRuntimeModel:input_type -> agent.StartRuntimeModelRequest
+	26,  // 51: agent.Agent.StopRuntimeModel:input_type -> agent.StopRuntimeModelRequest
+	28,  // 52: agent.Agent.RestartRuntime:input_type -> agent.RestartRuntimeRequest
+	30,  // 53: agent.Agent.DownloadRuntimeModel:input_type -> agent.DownloadRuntimeModelRequest
+	32,  // 54: agent.Agent.CancelRuntimeModelDownload:input_type -> agent.CancelRuntimeModelDownloadRequest
+	34,  // 55: agent.Agent.DeleteRuntimeModel:input_type -> agent.DeleteRuntimeModelRequest
+	36,  // 56: agent.Agent.StreamRuntimeLogs:input_type -> agent.StreamRuntimeLogsRequest
+	68,  // 57: agent.Agent.ListSkills:input_type -> agent.ListSkillsRequest
+	71,  // 58: agent.Agent.GetSkill:input_type -> agent.GetSkillRequest
+	73,  // 59: agent.Agent.SetPermissionMode:input_type -> agent.SetPermissionModeRequest
+	75,  // 60: agent.Agent.GetPermissionMode:input_type -> agent.GetPermissionModeRequest
+	77,  // 61: agent.Agent.SubscribeEvents:input_type -> agent.SubscribeEventsRequest
+	80,  // 62: agent.Agent.AllowToolCall:input_type -> agent.AllowToolCallRequest
+	82,  // 63: agent.Agent.DenyToolCall:input_type -> agent.DenyToolCallRequest
+	84,  // 64: agent.Agent.GetProviderCapabilities:input_type -> agent.GetProviderCapabilitiesRequest
+	57,  // 65: agent.Agent.ProposeContextEdit:input_type -> agent.ProposeContextEditRequest
+	59,  // 66: agent.Agent.DeleteConversationTurns:input_type -> agent.DeleteConversationTurnsRequest
+	92,  // 67: agent.Agent.ListMcpServers:input_type -> agent.ListMcpServersRequest
+	94,  // 68: agent.Agent.AddMcpServer:input_type -> agent.AddMcpServerRequest
+	96,  // 69: agent.Agent.RemoveMcpServer:input_type -> agent.RemoveMcpServerRequest
+	98,  // 70: agent.Agent.RestartMcpServer:input_type -> agent.RestartMcpServerRequest
+	8,   // 71: agent.Agent.ProcessRequest:output_type -> agent.ProcessRequestResponse
+	2,   // 72: agent.Agent.StreamProcessRequest:output_type -> agent.StreamProcessResponse
+	7,   // 73: agent.Agent.UpdateConfig:output_type -> agent.UpdateConfigResponse
+	67,  // 74: agent.Agent.GetConfig:output_type -> agent.GetConfigResponse
+	40,  // 75: agent.Agent.ListConversations:output_type -> agent.ListConversationsResponse
+	42,  // 76: agent.Agent.ResumeConversation:output_type -> agent.ResumeConversationResponse
+	44,  // 77: agent.Agent.DeleteConversation:output_type -> agent.DeleteConversationResponse
+	46,  // 78: agent.Agent.RenameConversation:output_type -> agent.RenameConversationResponse
+	37,  // 79: agent.Agent.GetConversation:output_type -> agent.Conversation
+	49,  // 80: agent.Agent.GetContextUsage:output_type -> agent.GetContextUsageResponse
+	51,  // 81: agent.Agent.GetCompactionState:output_type -> agent.GetCompactionStateResponse
+	53,  // 82: agent.Agent.ExportContext:output_type -> agent.ExportContextResponse
+	55,  // 83: agent.Agent.GetConversationTurns:output_type -> agent.GetConversationTurnsResponse
+	63,  // 84: agent.Agent.ListTools:output_type -> agent.ListToolsResponse
+	65,  // 85: agent.Agent.InvokeTool:output_type -> agent.InvokeToolResponse
+	13,  // 86: agent.Agent.ListModels:output_type -> agent.ListModelsResponse
+	19,  // 87: agent.Agent.GetRuntimeStatus:output_type -> agent.GetRuntimeStatusResponse
+	21,  // 88: agent.Agent.ListRuntimeModels:output_type -> agent.ListRuntimeModelsResponse
+	23,  // 89: agent.Agent.ListRuntimeEndpoints:output_type -> agent.ListRuntimeEndpointsResponse
+	25,  // 90: agent.Agent.StartRuntimeModel:output_type -> agent.StartRuntimeModelResponse
+	27,  // 91: agent.Agent.StopRuntimeModel:output_type -> agent.StopRuntimeModelResponse
+	29,  // 92: agent.Agent.RestartRuntime:output_type -> agent.RestartRuntimeResponse
+	31,  // 93: agent.Agent.DownloadRuntimeModel:output_type -> agent.DownloadRuntimeModelResponse
+	33,  // 94: agent.Agent.CancelRuntimeModelDownload:output_type -> agent.CancelRuntimeModelDownloadResponse
+	35,  // 95: agent.Agent.DeleteRuntimeModel:output_type -> agent.DeleteRuntimeModelResponse
+	17,  // 96: agent.Agent.StreamRuntimeLogs:output_type -> agent.RuntimeLogEntry
+	70,  // 97: agent.Agent.ListSkills:output_type -> agent.ListSkillsResponse
+	72,  // 98: agent.Agent.GetSkill:output_type -> agent.GetSkillResponse
+	74,  // 99: agent.Agent.SetPermissionMode:output_type -> agent.SetPermissionModeResponse
+	76,  // 100: agent.Agent.GetPermissionMode:output_type -> agent.GetPermissionModeResponse
+	78,  // 101: agent.Agent.SubscribeEvents:output_type -> agent.ClientEvent
+	81,  // 102: agent.Agent.AllowToolCall:output_type -> agent.AllowToolCallResponse
+	83,  // 103: agent.Agent.DenyToolCall:output_type -> agent.DenyToolCallResponse
+	85,  // 104: agent.Agent.GetProviderCapabilities:output_type -> agent.GetProviderCapabilitiesResponse
+	58,  // 105: agent.Agent.ProposeContextEdit:output_type -> agent.ProposeContextEditResponse
+	60,  // 106: agent.Agent.DeleteConversationTurns:output_type -> agent.DeleteConversationTurnsResponse
+	93,  // 107: agent.Agent.ListMcpServers:output_type -> agent.ListMcpServersResponse
+	95,  // 108: agent.Agent.AddMcpServer:output_type -> agent.AddMcpServerResponse
+	97,  // 109: agent.Agent.RemoveMcpServer:output_type -> agent.RemoveMcpServerResponse
+	99,  // 110: agent.Agent.RestartMcpServer:output_type -> agent.RestartMcpServerResponse
+	71,  // [71:111] is the sub-list for method output_type
+	31,  // [31:71] is the sub-list for method input_type
+	31,  // [31:31] is the sub-list for extension type_name
+	31,  // [31:31] is the sub-list for extension extendee
+	0,   // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_source_proto_agent_proto_init() }
@@ -6262,7 +6787,7 @@ func file_source_proto_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_source_proto_agent_proto_rawDesc), len(file_source_proto_agent_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   90,
+			NumMessages:   100,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -106,6 +106,12 @@ service Agent {
 
   // DeleteConversationTurns hard-deletes the named turns from a conversation.
   rpc DeleteConversationTurns (DeleteConversationTurnsRequest) returns (DeleteConversationTurnsResponse) {}
+
+  // ---- MCP host ----
+  rpc ListMcpServers (ListMcpServersRequest) returns (ListMcpServersResponse) {}
+  rpc AddMcpServer (AddMcpServerRequest) returns (AddMcpServerResponse) {}
+  rpc RemoveMcpServer (RemoveMcpServerRequest) returns (RemoveMcpServerResponse) {}
+  rpc RestartMcpServer (RestartMcpServerRequest) returns (RestartMcpServerResponse) {}
 }
 
 // Incremental token from LLM streaming.
@@ -595,3 +601,27 @@ message PermissionRequired {
   string args_json = 3;
   string tier = 4;       // "W" | "X"
 }
+
+// MCP host management messages.
+message McpServerInfo {
+  string name       = 1;
+  string state      = 2; // "warming" | "ready" | "failed"
+  int32  tool_count = 3;
+  string error      = 4;
+}
+message ListMcpServersRequest  {}
+message ListMcpServersResponse { repeated McpServerInfo servers = 1; }
+
+message AddMcpServerRequest {
+  string name              = 1;
+  string command           = 2;
+  repeated string args      = 3;
+  map<string, string> env  = 4;
+}
+message AddMcpServerResponse { bool ok = 1; string error = 2; }
+
+message RemoveMcpServerRequest  { string name = 1; }
+message RemoveMcpServerResponse { bool ok = 1; string error = 2; }
+
+message RestartMcpServerRequest  { string name = 1; }
+message RestartMcpServerResponse { bool ok = 1; string error = 2; int32 tool_count = 3; }

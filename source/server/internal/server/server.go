@@ -1153,7 +1153,16 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		}); err != nil {
 			return false, err
 		}
-		return s.pendingDecisions.Wait(ctx, toolUseID)
+		d, err := s.pendingDecisions.Wait(ctx, toolUseID)
+		if err != nil {
+			return false, err
+		}
+		if d.Allow && d.Persist && s.permStore != nil {
+			if tool, ok := s.toolRegistry.Get(name); ok && agenttools.OriginOf(tool) == agenttools.OriginMCP {
+				_ = s.permStore.AddMCPAllow(name)
+			}
+		}
+		return d.Allow, nil
 	}
 
 	ctx = anthropic.WithSessionID(ctx, req.GetConversationId())
@@ -1407,7 +1416,7 @@ func (s *Server) AllowToolCall(ctx context.Context, req *proto.AllowToolCallRequ
 	if s.pendingDecisions == nil {
 		return &proto.AllowToolCallResponse{Ok: false}, nil
 	}
-	ok := s.pendingDecisions.Resolve(req.GetToolUseId(), true)
+	ok := s.pendingDecisions.Resolve(req.GetToolUseId(), agent.Decision{Allow: true, Persist: req.GetPersist()})
 	return &proto.AllowToolCallResponse{Ok: ok}, nil
 }
 
@@ -1416,7 +1425,7 @@ func (s *Server) DenyToolCall(ctx context.Context, req *proto.DenyToolCallReques
 	if s.pendingDecisions == nil {
 		return &proto.DenyToolCallResponse{Ok: false}, nil
 	}
-	ok := s.pendingDecisions.Resolve(req.GetToolUseId(), false)
+	ok := s.pendingDecisions.Resolve(req.GetToolUseId(), agent.Decision{Allow: false})
 	return &proto.DenyToolCallResponse{Ok: ok}, nil
 }
 

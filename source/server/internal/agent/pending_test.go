@@ -10,13 +10,25 @@ func TestPending_WaitResolves(t *testing.T) {
 	p := NewPendingDecisions()
 	go func() {
 		time.Sleep(10 * time.Millisecond)
-		p.Resolve("u1", true)
+		p.Resolve("u1", Decision{Allow: true})
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	allow, err := p.Wait(ctx, "u1")
-	if err != nil || !allow {
-		t.Errorf("expected allow=true, err=nil; got %v %v", allow, err)
+	d, err := p.Wait(ctx, "u1")
+	if err != nil || !d.Allow {
+		t.Errorf("expected allow=true, err=nil; got %v %v", d.Allow, err)
+	}
+}
+
+func TestPendingCarriesPersist(t *testing.T) {
+	p := NewPendingDecisions()
+	go func() { p.Resolve("t1", Decision{Allow: true, Persist: true}) }()
+	d, err := p.Wait(context.Background(), "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.Allow || !d.Persist {
+		t.Fatalf("decision = %+v", d)
 	}
 }
 

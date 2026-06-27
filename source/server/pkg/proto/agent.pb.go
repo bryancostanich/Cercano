@@ -4977,6 +4977,7 @@ func (x *PermissionModeChanged) GetMode() string {
 type AllowToolCallRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ToolUseId     string                 `protobuf:"bytes,1,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`
+	Persist       bool                   `protobuf:"varint,2,opt,name=persist,proto3" json:"persist,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5016,6 +5017,13 @@ func (x *AllowToolCallRequest) GetToolUseId() string {
 		return x.ToolUseId
 	}
 	return ""
+}
+
+func (x *AllowToolCallRequest) GetPersist() bool {
+	if x != nil {
+		return x.Persist
+	}
+	return false
 }
 
 type AllowToolCallResponse struct {
@@ -5929,9 +5937,10 @@ const file_source_proto_agent_proto_rawDesc = "" +
 	"\x17permission_mode_changed\x18\x01 \x01(\v2\x1c.agent.PermissionModeChangedH\x00R\x15permissionModeChangedB\a\n" +
 	"\x05event\"+\n" +
 	"\x15PermissionModeChanged\x12\x12\n" +
-	"\x04mode\x18\x01 \x01(\tR\x04mode\"6\n" +
+	"\x04mode\x18\x01 \x01(\tR\x04mode\"P\n" +
 	"\x14AllowToolCallRequest\x12\x1e\n" +
-	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\"'\n" +
+	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\x12\x18\n" +
+	"\apersist\x18\x02 \x01(\bR\apersist\"'\n" +
 	"\x15AllowToolCallResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\"5\n" +
 	"\x13DenyToolCallRequest\x12\x1e\n" +

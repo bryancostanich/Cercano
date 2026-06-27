@@ -1,6 +1,6 @@
 # MCP Host
 
-> Status: Planned — design approved, implementation not started.
+> Status: Built — phases 6 + 15.
 
 ## Overview / Goal
 

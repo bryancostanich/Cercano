@@ -3,6 +3,7 @@ package mcphost
 
 import (
 	"context"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,6 +34,8 @@ type ServerStatus struct {
 }
 
 // serverHandle tracks the live state of one hosted server.
+// Lock ordering: Manager.mu must always be acquired before serverHandle.mu.
+// Never acquire Manager.mu while holding a serverHandle.mu.
 type serverHandle struct {
 	name    string
 	cfg     ServerConfig
@@ -40,8 +43,10 @@ type serverHandle struct {
 	conn    *conn
 	state   ServerState
 	err     string
-	tools   []string      // registered tool names (for unregister on remove/restart)
-	readyCh chan struct{}  // closed once state reaches Ready or Failed
+	tools   []string           // registered tool names (for unregister on remove/restart)
+	readyCh chan struct{}       // closed once state reaches Ready or Failed
+	defunct bool               // set by teardown; goroutine must not register if true
+	cancel  context.CancelFunc // cancels the in-flight dialFn/listTools context
 }
 
 // Manager connects to external MCP servers, lists their tools, and registers
@@ -84,18 +89,32 @@ func (m *Manager) stdioDial(ctx context.Context, cfg ServerConfig) (*conn, error
 // startServer connects to one server, lists its tools, and registers them.
 // Synchronous: callers that want background warm-up invoke it in a goroutine
 // (see Start). A failed connect marks the server failed and registers nothing.
+//
+// readyCh is closed exactly once per handle, on exactly one of three paths:
+//   - fail() — dial or listTools returned an error (paths 1 & 2 below)
+//   - success, defunct=false — tools registered, state=Ready (path 3)
+//   - success, defunct=true — handle was superseded; closes without registering (path 4)
+//
+// Paths 1/2 are triggered by dialFn/listTools returning an error (including context
+// cancellation from teardown calling h.cancel). They return before the h.mu.Lock()
+// block, so they never race with paths 3/4. Paths 3 and 4 are mutually exclusive
+// inside the same h.mu.Lock() block (if/else). One close per handle, guaranteed.
 func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig) {
 	h := &serverHandle{name: name, cfg: cfg, state: StateWarming, readyCh: make(chan struct{})}
+	// Derive a cancellable context so teardown can abort a slow dial/listTools.
+	// h.cancel is set before publishing h to m.servers, so teardown always finds it set.
+	cctx, cancel := context.WithCancel(ctx)
+	h.cancel = cancel
 	m.mu.Lock()
 	m.servers[name] = h
 	m.mu.Unlock()
 
-	c, err := m.dialFn(ctx, cfg)
+	c, err := m.dialFn(cctx, cfg) // path 1 on error
 	if err != nil {
 		h.fail(err)
 		return
 	}
-	tools, err := c.listTools(ctx)
+	tools, err := c.listTools(cctx) // path 2 on error
 	if err != nil {
 		_ = c.close()
 		h.fail(err)
@@ -103,6 +122,17 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 	}
 
 	h.mu.Lock()
+	if h.defunct {
+		// Path 4: teardown ran while we were connecting. This handle is superseded.
+		// Close the conn we just opened and bail — register nothing.
+		_ = c.close()
+		h.state = StateFailed
+		h.err = "superseded during restart"
+		close(h.readyCh)
+		h.mu.Unlock()
+		return
+	}
+	// Path 3: normal success path.
 	h.conn = c
 	h.state = StateReady
 	for _, rt := range tools {
@@ -155,6 +185,9 @@ func (h *serverHandle) ready(wait time.Duration) readyFunc {
 }
 
 // List returns a snapshot of every hosted server's status.
+// Lock ordering: Manager.mu is held for the duration; each serverHandle.mu is
+// acquired and released sequentially inside. This is the only place both mutexes
+// are held at once, and the ordering is always Manager.mu → serverHandle.mu.
 func (m *Manager) List() []ServerStatus {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -170,7 +203,10 @@ func (m *Manager) List() []ServerStatus {
 // Start connects to every configured server in the background. Returns
 // immediately; tools appear in the registry as each server finishes listing.
 func (m *Manager) Start(ctx context.Context) {
-	cfg, _ := LoadConfig(m.dir)
+	cfg, err := LoadConfig(m.dir)
+	if err != nil {
+		log.Printf("mcphost: load config: %v", err)
+	}
 	for name, sc := range cfg.Servers {
 		name, sc := name, sc
 		go m.startServer(ctx, name, sc)
@@ -213,8 +249,14 @@ func (m *Manager) Restart(ctx context.Context, name string) error {
 }
 
 // teardown unregisters a server's tools and closes its connection.
+// It marks h.defunct and cancels h's dial/listTools context so any in-flight
+// startServer goroutine for this handle will bail without registering.
 func (m *Manager) teardown(h *serverHandle) {
 	h.mu.Lock()
+	h.defunct = true
+	if h.cancel != nil {
+		h.cancel()
+	}
 	for _, name := range h.tools {
 		m.reg.Unregister(name)
 	}

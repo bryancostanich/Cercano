@@ -160,3 +160,28 @@ func isUTF8Boundary(b byte) bool {
 	// Continuation byte: 10xxxxxx (0x80..0xBF). Not a boundary.
 	return (b & 0xC0) != 0x80
 }
+
+// Origin tags where a Tool came from. Built-ins are first-party; MCP tools are
+// third-party code hosted from an external server and are gated more strictly.
+type Origin string
+
+const (
+	OriginBuiltin Origin = "builtin"
+	OriginMCP     Origin = "mcp"
+)
+
+// Originer is an optional interface a Tool may implement to declare its origin.
+// Tools that do not implement it are treated as built-in, so the 15 first-party
+// tools need no changes.
+type Originer interface {
+	Origin() Origin
+}
+
+// OriginOf returns a tool's origin, defaulting to OriginBuiltin when the tool
+// does not implement Originer.
+func OriginOf(t Tool) Origin {
+	if o, ok := t.(Originer); ok {
+		return o.Origin()
+	}
+	return OriginBuiltin
+}

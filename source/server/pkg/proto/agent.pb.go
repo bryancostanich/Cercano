@@ -421,6 +421,7 @@ type ProcessRequestRequest struct {
 	ConversationId string `protobuf:"bytes,5,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"` // Optional conversation ID for multi-turn history
 	DirectLocal    bool   `protobuf:"varint,6,opt,name=direct_local,json=directLocal,proto3" json:"direct_local,omitempty"`         // Skip SmartRouter, go directly to local provider
 	ModelOverride  string `protobuf:"bytes,7,opt,name=model_override,json=modelOverride,proto3" json:"model_override,omitempty"`    // Use this model instead of the configured default (temporary, per-request)
+	Coproc         bool   `protobuf:"varint,8,opt,name=coproc,proto3" json:"coproc,omitempty"`                                      // Route per Locus Mode's co-processor tier (local/cloud)
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -495,6 +496,13 @@ func (x *ProcessRequestRequest) GetModelOverride() string {
 		return x.ModelOverride
 	}
 	return ""
+}
+
+func (x *ProcessRequestRequest) GetCoproc() bool {
+	if x != nil {
+		return x.Coproc
+	}
+	return false
 }
 
 // Runtime configuration update request.
@@ -819,6 +827,7 @@ type RoutingMetadata struct {
 	Escalated     bool                   `protobuf:"varint,3,opt,name=escalated,proto3" json:"escalated,omitempty"`                     // Whether the request was escalated to cloud
 	Endpoint      string                 `protobuf:"bytes,4,opt,name=endpoint,proto3" json:"endpoint,omitempty"`                        // Active Ollama endpoint URL that served the request
 	IsFallback    bool                   `protobuf:"varint,5,opt,name=is_fallback,json=isFallback,proto3" json:"is_fallback,omitempty"` // Whether the fallback (local) endpoint was used
+	IsCloud       bool                   `protobuf:"varint,6,opt,name=is_cloud,json=isCloud,proto3" json:"is_cloud,omitempty"`          // Locus: the request was served by the cloud tier
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -884,6 +893,13 @@ func (x *RoutingMetadata) GetEndpoint() string {
 func (x *RoutingMetadata) GetIsFallback() bool {
 	if x != nil {
 		return x.IsFallback
+	}
+	return false
+}
+
+func (x *RoutingMetadata) GetIsCloud() bool {
+	if x != nil {
+		return x.IsCloud
 	}
 	return false
 }
@@ -5562,14 +5578,15 @@ const file_source_proto_agent_proto_rawDesc = "" +
 	"\x05model\x18\x01 \x01(\tR\x05model\x12\x19\n" +
 	"\bis_cloud\x18\x02 \x01(\bR\aisCloud\"*\n" +
 	"\x0eProgressUpdate\x12\x18\n" +
-	"\amessage\x18\x01 \x01(\tR\amessage\"\xd8\x01\n" +
+	"\amessage\x18\x01 \x01(\tR\amessage\"\xf0\x01\n" +
 	"\x15ProcessRequestRequest\x12\x14\n" +
 	"\x05input\x18\x01 \x01(\tR\x05input\x12\x19\n" +
 	"\bwork_dir\x18\x03 \x01(\tR\aworkDir\x12\x1b\n" +
 	"\tfile_name\x18\x04 \x01(\tR\bfileName\x12'\n" +
 	"\x0fconversation_id\x18\x05 \x01(\tR\x0econversationId\x12!\n" +
 	"\fdirect_local\x18\x06 \x01(\bR\vdirectLocal\x12%\n" +
-	"\x0emodel_override\x18\a \x01(\tR\rmodelOverride\"\xab\x02\n" +
+	"\x0emodel_override\x18\a \x01(\tR\rmodelOverride\x12\x16\n" +
+	"\x06coproc\x18\b \x01(\bR\x06coproc\"\xab\x02\n" +
 	"\x13UpdateConfigRequest\x12\x1f\n" +
 	"\vlocal_model\x18\x01 \x01(\tR\n" +
 	"localModel\x12%\n" +
@@ -5598,7 +5615,7 @@ const file_source_proto_agent_proto_rawDesc = "" +
 	"FileChange\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\tR\acontent\x12)\n" +
-	"\x06action\x18\x03 \x01(\x0e2\x11.agent.FileActionR\x06action\"\xab\x01\n" +
+	"\x06action\x18\x03 \x01(\x0e2\x11.agent.FileActionR\x06action\"\xc6\x01\n" +
 	"\x0fRoutingMetadata\x12\x1d\n" +
 	"\n" +
 	"model_name\x18\x01 \x01(\tR\tmodelName\x12\x1e\n" +
@@ -5608,7 +5625,8 @@ const file_source_proto_agent_proto_rawDesc = "" +
 	"\tescalated\x18\x03 \x01(\bR\tescalated\x12\x1a\n" +
 	"\bendpoint\x18\x04 \x01(\tR\bendpoint\x12\x1f\n" +
 	"\vis_fallback\x18\x05 \x01(\bR\n" +
-	"isFallback\"\x13\n" +
+	"isFallback\x12\x19\n" +
+	"\bis_cloud\x18\x06 \x01(\bR\aisCloud\"\x13\n" +
 	"\x11ListModelsRequest\"T\n" +
 	"\tModelInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +

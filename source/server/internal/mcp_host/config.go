@@ -1,6 +1,13 @@
 package mcphost
 
-import "strings"
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
 
 // ServerConfig describes one external MCP server launched over stdio.
 type ServerConfig struct {
@@ -33,4 +40,37 @@ func DisplayName(fqName string) string {
 		return fqName
 	}
 	return "mcp/" + parts[0] + "/" + parts[1]
+}
+
+// LoadConfig reads <dir>/mcp.yaml as the canonical config and, if present,
+// imports <dir>/mcp.json (Claude Code shape). On key collision YAML wins.
+// Missing files are not an error — they yield an empty Config.
+func LoadConfig(dir string) (Config, error) {
+	out := Config{Servers: map[string]ServerConfig{}}
+
+	if data, err := os.ReadFile(filepath.Join(dir, "mcp.json")); err == nil {
+		var c Config
+		if err := json.Unmarshal(data, &c); err != nil {
+			return out, err
+		}
+		for k, v := range c.Servers {
+			out.Servers[k] = v
+		}
+	} else if !os.IsNotExist(err) {
+		return out, err
+	}
+
+	if data, err := os.ReadFile(filepath.Join(dir, "mcp.yaml")); err == nil {
+		var c Config
+		if err := yaml.Unmarshal(data, &c); err != nil {
+			return out, err
+		}
+		for k, v := range c.Servers { // YAML overrides JSON
+			out.Servers[k] = v
+		}
+	} else if !os.IsNotExist(err) {
+		return out, err
+	}
+
+	return out, nil
 }

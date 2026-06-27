@@ -112,9 +112,8 @@ _All items resolved. See Decisions (finalized) below._
   set Cloud Only. Worth surfacing in tool docs if cost concerns arise; no
   behavior change needed.
 
-- **`cercano_local` stays explicitly local:** `handleLocal` (the `cercano_local`
-  tool) is the named force-local escape hatch. It sets neither `DirectLocal` nor
-  `Coproc` — its `ProcessRequest` call carries no routing flag, so it follows
-  the default (normal main-tier) routing rather than the co-proc locus table.
-  This is correct: `cercano_local` is the one tool that explicitly bypasses
-  locus-managed co-proc routing by design.
+- **`cercano_local` follows default SmartRouter routing:** `handleLocal` (the
+  `cercano_local` tool) sets neither `DirectLocal` nor `Coproc` — its
+  `ProcessRequest` call carries no routing flag, so it follows the default
+  SmartRouter path (which may route to cloud). It bypasses locus-managed co-proc
+  routing by design, but is NOT guaranteed to run locally.

@@ -39,6 +39,27 @@ func formatGRPCError(err error, operation string) error {
 	return fmt.Errorf("%s: %s%s", operation, msg, hint)
 }
 
+// CoprocMeta is the structured routing metadata returned alongside a
+// co-processor tool's text result. Clients (CLI, host agents) decide how to
+// surface it; Tier is "local" or "cloud".
+type CoprocMeta struct {
+	Model  string `json:"model"`
+	Tier   string `json:"tier"`
+	Notice string `json:"notice,omitempty"`
+}
+
+func coprocMeta(resp *proto.ProcessRequestResponse) CoprocMeta {
+	tier := "local"
+	if resp.GetRoutingMetadata().GetIsCloud() {
+		tier = "cloud"
+	}
+	return CoprocMeta{
+		Model:  resp.GetRoutingMetadata().GetModelName(),
+		Tier:   tier,
+		Notice: resp.GetNotice(),
+	}
+}
+
 // Server wraps the MCP server and its gRPC client connection to the Cercano agent.
 type Server struct {
 	mcpServer       *gomcp.Server
@@ -707,8 +728,8 @@ func (s *Server) handleSummarize(ctx context.Context, request *gomcp.CallToolReq
 
 	notifyProgress(ctx, request, "Summarizing locally...", 0, 1)
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
-		Input:       prompt,
-		DirectLocal: true,
+		Input:  prompt,
+		Coproc: true,
 	})
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_summarize")
@@ -721,7 +742,7 @@ func (s *Server) handleSummarize(ctx context.Context, request *gomcp.CallToolReq
 			&gomcp.TextContent{Text: resp.Output},
 		},
 	}
-	return s.maybeNudge(args.ProjectDir, result), nil, nil
+	return s.maybeNudge(args.ProjectDir, result), coprocMeta(resp), nil
 }
 
 // handleExtract processes a cercano_extract tool call.
@@ -753,8 +774,8 @@ func (s *Server) handleExtract(ctx context.Context, request *gomcp.CallToolReque
 	prompt = s.withContext(args.ProjectDir, prompt)
 
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
-		Input:       prompt,
-		DirectLocal: true,
+		Input:  prompt,
+		Coproc: true,
 	})
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_extract")
@@ -766,7 +787,7 @@ func (s *Server) handleExtract(ctx context.Context, request *gomcp.CallToolReque
 			&gomcp.TextContent{Text: resp.Output},
 		},
 	}
-	return s.maybeNudge(args.ProjectDir, result), nil, nil
+	return s.maybeNudge(args.ProjectDir, result), coprocMeta(resp), nil
 }
 
 // handleClassify processes a cercano_classify tool call.
@@ -800,8 +821,8 @@ func (s *Server) handleClassify(ctx context.Context, request *gomcp.CallToolRequ
 	prompt = s.withContext(args.ProjectDir, prompt)
 
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
-		Input:       prompt,
-		DirectLocal: true,
+		Input:  prompt,
+		Coproc: true,
 	})
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_classify")
@@ -813,7 +834,7 @@ func (s *Server) handleClassify(ctx context.Context, request *gomcp.CallToolRequ
 			&gomcp.TextContent{Text: resp.Output},
 		},
 	}
-	return s.maybeNudge(args.ProjectDir, result), nil, nil
+	return s.maybeNudge(args.ProjectDir, result), coprocMeta(resp), nil
 }
 
 // handleExplain processes a cercano_explain tool call.
@@ -842,8 +863,8 @@ func (s *Server) handleExplain(ctx context.Context, request *gomcp.CallToolReque
 	prompt = s.withContext(args.ProjectDir, prompt)
 
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
-		Input:       prompt,
-		DirectLocal: true,
+		Input:  prompt,
+		Coproc: true,
 	})
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_explain")
@@ -855,7 +876,7 @@ func (s *Server) handleExplain(ctx context.Context, request *gomcp.CallToolReque
 			&gomcp.TextContent{Text: resp.Output},
 		},
 	}
-	return s.maybeNudge(args.ProjectDir, result), nil, nil
+	return s.maybeNudge(args.ProjectDir, result), coprocMeta(resp), nil
 }
 
 // handleSkills processes a cercano_skills tool call.
@@ -1235,19 +1256,21 @@ func (s *Server) handleDocument(ctx context.Context, request *gomcp.CallToolRequ
 	var edits []document.DocEdit
 	var documented []string
 	var skipped []string
+	var lastResp *proto.ProcessRequestResponse
 
 	for _, sym := range undocumented {
 		prompt := document.BuildPrompt(sym, style)
 		prompt = s.withContext(args.ProjectDir, prompt)
 
 		resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
-			Input:       prompt,
-			DirectLocal: true,
+			Input:  prompt,
+			Coproc: true,
 		})
 		if err != nil {
 			skipped = append(skipped, fmt.Sprintf("%s (inference error)", sym.Name))
 			continue
 		}
+		lastResp = resp
 		s.emitEvent("cercano_document", resp, startTime, true, &args.cloudTokenFields, EstimateTokens(sym.Body)*2)
 
 		comment := document.FormatAsGoDoc(resp.Output)
@@ -1298,7 +1321,7 @@ func (s *Server) handleDocument(ctx context.Context, request *gomcp.CallToolRequ
 			&gomcp.TextContent{Text: sb.String()},
 		},
 	}
-	return s.maybeNudge(args.ProjectDir, result), nil, nil
+	return s.maybeNudge(args.ProjectDir, result), coprocMeta(lastResp), nil
 }
 
 // handleDeepResearch processes a cercano_deep_research tool call.

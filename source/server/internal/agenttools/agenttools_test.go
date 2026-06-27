@@ -319,10 +319,23 @@ func TestOriginOfDefaultsBuiltin(t *testing.T) {
 
 type fakeMCP struct{ readFileTool }
 
-func (fakeMCP) Origin() Origin { return OriginMCP }
+func (fakeMCP) Origin() Origin    { return OriginMCP }
+func (fakeMCP) Destructive() bool { return true }
 
 func TestOriginOfHonorsOptionalInterface(t *testing.T) {
 	if got := OriginOf(fakeMCP{}); got != OriginMCP {
 		t.Fatalf("origin = %q, want mcp", got)
+	}
+}
+
+func TestIsDestructiveDefaultsFalse(t *testing.T) {
+	if IsDestructive(ReadFile()) {
+		t.Fatal("builtin tool must not be destructive by default")
+	}
+}
+
+func TestIsDestructiveHonorsOptionalInterface(t *testing.T) {
+	if !IsDestructive(fakeMCP{}) {
+		t.Fatal("tool implementing Destructiver()=true should report destructive")
 	}
 }

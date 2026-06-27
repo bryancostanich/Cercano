@@ -223,7 +223,7 @@ func TestToolLoop_UserDeniesWTier_TerminatesTurn(t *testing.T) {
 	perms, _ := LoadPermissionStore(dir + "/perms.yaml")
 	_ = perms.SetMode(ModeStrict)
 
-	requester := func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission) (bool, error) {
+	requester := func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission, destructive bool) (bool, error) {
 		return false, nil
 	}
 
@@ -362,7 +362,7 @@ func TestToolLoopMCPConfirmsInPermissive(t *testing.T) {
 		Registry:    reg,
 		Permissions: perms,
 		UserInput:   "go",
-		PermissionRequester: func(_ context.Context, _, _ string, _ json.RawMessage, _ llm.Permission) (bool, error) {
+		PermissionRequester: func(_ context.Context, _, _ string, _ json.RawMessage, _ llm.Permission, _ bool) (bool, error) {
 			denied = true // confirm was requested
 			return false, nil
 		},

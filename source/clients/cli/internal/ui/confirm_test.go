@@ -47,6 +47,26 @@ func TestRenderConfirmPrompt_X_HasDestructiveEmphasis(t *testing.T) {
 	}
 }
 
+func TestRenderConfirmPrompt_DestructiveMCP_HasWarnGlyph(t *testing.T) {
+	m := minimalModel()
+	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
+		Name: "mcp__github__delete_repo", Args: "{}", Permission: "W", Destructive: true,
+	}))
+	if !strings.Contains(s, "⚠") {
+		t.Errorf("destructive MCP tool prompt should carry ⚠ glyph: %q", s)
+	}
+}
+
+func TestRenderConfirmPrompt_NonDestructiveMCP_NoWarnGlyph(t *testing.T) {
+	m := minimalModel()
+	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
+		Name: "mcp__github__list_issues", Args: "{}", Permission: "W", Destructive: false,
+	}))
+	if strings.Contains(s, "⚠") {
+		t.Errorf("non-destructive MCP tool prompt must not carry ⚠ glyph: %q", s)
+	}
+}
+
 func TestRenderConfirmPrompt_TruncatesLongArgs(t *testing.T) {
 	m := minimalModel()
 	bigArgs := `{"content":"` + strings.Repeat("x", 500) + `"}`

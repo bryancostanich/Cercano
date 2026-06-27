@@ -3958,8 +3958,9 @@ type BuiltinTool struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Description   string                 `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
-	Permission    string                 `protobuf:"bytes,3,opt,name=permission,proto3" json:"permission,omitempty"` // "R" | "W" | "X"
-	Schema        string                 `protobuf:"bytes,4,opt,name=schema,proto3" json:"schema,omitempty"`         // JSON Schema as a string
+	Permission    string                 `protobuf:"bytes,3,opt,name=permission,proto3" json:"permission,omitempty"`    // "R" | "W" | "X"
+	Schema        string                 `protobuf:"bytes,4,opt,name=schema,proto3" json:"schema,omitempty"`            // JSON Schema as a string
+	Destructive   bool                   `protobuf:"varint,5,opt,name=destructive,proto3" json:"destructive,omitempty"` // display-only ⚠ hint (MCP destructiveHint); never affects gating
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4020,6 +4021,13 @@ func (x *BuiltinTool) GetSchema() string {
 		return x.Schema
 	}
 	return ""
+}
+
+func (x *BuiltinTool) GetDestructive() bool {
+	if x != nil {
+		return x.Destructive
+	}
+	return false
 }
 
 type ListToolsRequest struct {
@@ -5499,7 +5507,8 @@ type PermissionRequired struct {
 	ToolUseId     string                 `protobuf:"bytes,1,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`
 	ToolName      string                 `protobuf:"bytes,2,opt,name=tool_name,json=toolName,proto3" json:"tool_name,omitempty"`
 	ArgsJson      string                 `protobuf:"bytes,3,opt,name=args_json,json=argsJson,proto3" json:"args_json,omitempty"`
-	Tier          string                 `protobuf:"bytes,4,opt,name=tier,proto3" json:"tier,omitempty"` // "W" | "X"
+	Tier          string                 `protobuf:"bytes,4,opt,name=tier,proto3" json:"tier,omitempty"`                // "W" | "X"
+	Destructive   bool                   `protobuf:"varint,5,opt,name=destructive,proto3" json:"destructive,omitempty"` // display-only ⚠ hint (MCP destructiveHint); never affects gating
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5560,6 +5569,13 @@ func (x *PermissionRequired) GetTier() string {
 		return x.Tier
 	}
 	return ""
+}
+
+func (x *PermissionRequired) GetDestructive() bool {
+	if x != nil {
+		return x.Destructive
+	}
+	return false
 }
 
 // MCP host management messages.
@@ -6340,14 +6356,15 @@ const file_source_proto_agent_proto_rawDesc = "" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12\x17\n" +
 	"\aturn_id\x18\x02 \x03(\tR\x06turnId\";\n" +
 	"\x1fDeleteConversationTurnsResponse\x12\x18\n" +
-	"\adeleted\x18\x01 \x01(\x05R\adeleted\"{\n" +
+	"\adeleted\x18\x01 \x01(\x05R\adeleted\"\x9d\x01\n" +
 	"\vBuiltinTool\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x1e\n" +
 	"\n" +
 	"permission\x18\x03 \x01(\tR\n" +
 	"permission\x12\x16\n" +
-	"\x06schema\x18\x04 \x01(\tR\x06schema\"\x12\n" +
+	"\x06schema\x18\x04 \x01(\tR\x06schema\x12 \n" +
+	"\vdestructive\x18\x05 \x01(\bR\vdestructive\"\x12\n" +
 	"\x10ListToolsRequest\"=\n" +
 	"\x11ListToolsResponse\x12(\n" +
 	"\x05tools\x18\x01 \x03(\v2\x12.agent.BuiltinToolR\x05tools\"D\n" +
@@ -6435,12 +6452,13 @@ const file_source_proto_agent_proto_rawDesc = "" +
 	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\x12\x18\n" +
 	"\asummary\x18\x02 \x01(\tR\asummary\x12\x19\n" +
 	"\bis_error\x18\x03 \x01(\bR\aisError\x12\x16\n" +
-	"\x06detail\x18\x04 \x01(\tR\x06detail\"\x82\x01\n" +
+	"\x06detail\x18\x04 \x01(\tR\x06detail\"\xa4\x01\n" +
 	"\x12PermissionRequired\x12\x1e\n" +
 	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\x12\x1b\n" +
 	"\ttool_name\x18\x02 \x01(\tR\btoolName\x12\x1b\n" +
 	"\targs_json\x18\x03 \x01(\tR\bargsJson\x12\x12\n" +
-	"\x04tier\x18\x04 \x01(\tR\x04tier\"n\n" +
+	"\x04tier\x18\x04 \x01(\tR\x04tier\x12 \n" +
+	"\vdestructive\x18\x05 \x01(\bR\vdestructive\"n\n" +
 	"\rMcpServerInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05state\x18\x02 \x01(\tR\x05state\x12\x1d\n" +

@@ -140,7 +140,16 @@ func (s *Server) RestartMcpServer(ctx context.Context, req *proto.RestartMcpServ
 	if err := s.mcpManager.Restart(ctx, req.GetName()); err != nil {
 		return &proto.RestartMcpServerResponse{Ok: false, Error: err.Error()}, nil
 	}
-	return &proto.RestartMcpServerResponse{Ok: true}, nil
+	// Restart re-lists synchronously, so the post-restart tool count is
+	// available immediately from the manager's status snapshot.
+	var toolCount int32
+	for _, st := range s.mcpManager.List() {
+		if st.Name == req.GetName() {
+			toolCount = int32(st.ToolCount)
+			break
+		}
+	}
+	return &proto.RestartMcpServerResponse{Ok: true, ToolCount: toolCount}, nil
 }
 
 // SetCloudLLMProvider attaches the native-tool-calling cloud provider used by
@@ -479,6 +488,7 @@ func (s *Server) ListTools(ctx context.Context, req *proto.ListToolsRequest) (*p
 			Description: t.Description(),
 			Permission:  string(t.Permission()),
 			Schema:      string(t.Schema()),
+			Destructive: agenttools.IsDestructive(t),
 		})
 	}
 	return out, nil
@@ -1201,17 +1211,18 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		}
 	}
 
-	requester := func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission) (bool, error) {
+	requester := func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission, destructive bool) (bool, error) {
 		if s.pendingDecisions == nil {
 			return false, nil
 		}
 		if err := stream.Send(&proto.StreamProcessResponse{
 			Payload: &proto.StreamProcessResponse_PermissionRequired{
 				PermissionRequired: &proto.PermissionRequired{
-					ToolUseId: toolUseID,
-					ToolName:  name,
-					ArgsJson:  string(args),
-					Tier:      string(tier),
+					ToolUseId:   toolUseID,
+					ToolName:    name,
+					ArgsJson:    string(args),
+					Tier:        string(tier),
+					Destructive: destructive,
 				},
 			},
 		}); err != nil {
@@ -1341,7 +1352,7 @@ func (s *Server) runMainLoop(
 	provider llm.Provider,
 	isCloud bool,
 	sink func(agent.LoopEvent),
-	requester func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission) (bool, error),
+	requester func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission, destructive bool) (bool, error),
 	convHistory []llm.Message,
 	onTextDelta func(string),
 ) (agent.ToolLoopResult, error) {

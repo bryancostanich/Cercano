@@ -172,10 +172,11 @@ type pendingToolCall struct {
 	// empty for legacy local-/tool invocations that route directly through
 	// InvokeTool. The y/n resolver uses it to RPC Allow/DenyToolCall back
 	// to the agent so the server-side tool loop can unblock.
-	ToolUseID  string
-	Name       string
-	Args       string
-	Permission string // "R" | "W" | "X" — R never reaches here, but kept for symmetry
+	ToolUseID   string
+	Name        string
+	Args        string
+	Permission  string // "R" | "W" | "X" — R never reaches here, but kept for symmetry
+	Destructive bool   // display-only ⚠ hint (MCP destructiveHint)
 }
 
 // confirmRequest is a generic confirmation gate. Any feature raises one; the
@@ -847,10 +848,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.Apply(ev)         // transcript finalize + notice
 		case permissionRequiredMsg:
 			tc := &pendingToolCall{
-				ToolUseID:  ev.id,
-				Name:       ev.name,
-				Args:       ev.argsJSON,
-				Permission: ev.tier,
+				ToolUseID:   ev.id,
+				Name:        ev.name,
+				Args:        ev.argsJSON,
+				Permission:  ev.tier,
+				Destructive: ev.destructive,
 			}
 			m.pendingConfirm = toolConfirm(tc)
 			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: m.renderConfirmPrompt(tc)})
@@ -1697,6 +1699,10 @@ func (m Model) renderConfirmPrompt(p *pendingToolCall) string {
 	head := m.styles.Accent.Render("▸ ")
 	if p.Permission == "X" {
 		head = m.styles.Error.Render("▸ ⚠ DESTRUCTIVE ")
+	} else if p.Destructive {
+		// MCP tool that self-reports a destructive hint: surface a ⚠ marker
+		// (display-only — gating is unchanged; the hint never escalates tier).
+		head = m.styles.Accent.Render("▸ ⚠ ")
 	}
 	summary := displayToolName(p.Name) + " " + truncateArgs(p.Args, 80)
 	out := head +

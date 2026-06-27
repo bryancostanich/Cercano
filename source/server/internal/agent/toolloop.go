@@ -21,14 +21,15 @@ const (
 )
 
 type LoopEvent struct {
-	Kind      LoopEventKind
-	ToolUseID string
-	ToolName  string
-	ArgsJSON  string
-	Tier      string
-	Summary   string
-	Detail    string
-	IsError   bool
+	Kind        LoopEventKind
+	ToolUseID   string
+	ToolName    string
+	ArgsJSON    string
+	Tier        string
+	Destructive bool // display-only ⚠ hint (MCP destructiveHint); never affects gating
+	Summary     string
+	Detail      string
+	IsError     bool
 }
 
 type ToolLoopInput struct {
@@ -42,7 +43,7 @@ type ToolLoopInput struct {
 
 	// PermissionRequester is the callback the loop uses to surface a
 	// confirm prompt to the active client (nil = auto-allow, useful in tests).
-	PermissionRequester func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission) (allow bool, err error)
+	PermissionRequester func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission, destructive bool) (allow bool, err error)
 
 	// EventSink receives lifecycle events as the loop runs. Nil-safe.
 	EventSink func(ev LoopEvent)
@@ -244,8 +245,9 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 					hist = append(hist, llm.Message{Role: llm.RoleUser, Blocks: results})
 					return ToolLoopResult{FinalText: finalText, Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, nil
 				}
-				emit(LoopEvent{Kind: LoopPermissionRequired, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, ArgsJSON: string(pc.block.ToolInput), Tier: string(pc.tier)})
-				allow, err := in.PermissionRequester(ctx, pc.block.ToolUseID, pc.block.ToolName, pc.block.ToolInput, pc.tier)
+				destructive := agenttools.IsDestructive(pc.tool)
+				emit(LoopEvent{Kind: LoopPermissionRequired, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, ArgsJSON: string(pc.block.ToolInput), Tier: string(pc.tier), Destructive: destructive})
+				allow, err := in.PermissionRequester(ctx, pc.block.ToolUseID, pc.block.ToolName, pc.block.ToolInput, pc.tier, destructive)
 				if err != nil {
 					return ToolLoopResult{}, err
 				}

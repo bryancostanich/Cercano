@@ -36,7 +36,11 @@ func RegisterTools(r *Registry, c *agentclient.Client) {
 				if len(desc) > 200 {
 					desc = desc[:200] + "…"
 				}
-				fmt.Fprintf(&b, "| %s | %s | %s |\n", t.Name, t.Permission, escapePipes(desc))
+				name := t.Name
+				if t.Destructive {
+					name = "⚠ " + name
+				}
+				fmt.Fprintf(&b, "| %s | %s | %s |\n", name, t.Permission, escapePipes(desc))
 			}
 			return Result{Kind: ResultText, Text: b.String()}
 		},

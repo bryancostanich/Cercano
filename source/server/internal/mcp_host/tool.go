@@ -47,6 +47,7 @@ func (t *mcpTool) Name() string                     { return t.fqName }
 func (t *mcpTool) Description() string              { return t.desc }
 func (t *mcpTool) Permission() agenttools.Permission { return agenttools.PermW }
 func (t *mcpTool) Origin() agenttools.Origin        { return agenttools.OriginMCP }
+func (t *mcpTool) Destructive() bool                { return t.destructive }
 func (t *mcpTool) Schema() json.RawMessage          { return t.schema }
 
 func (t *mcpTool) Execute(ctx context.Context, raw json.RawMessage) (*agenttools.Result, error) {

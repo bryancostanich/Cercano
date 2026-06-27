@@ -1367,6 +1367,7 @@ func (s *Server) mapRequest(req *proto.ProcessRequestRequest) *agent.Request {
 		ConversationID: req.ConversationId,
 		DirectLocal:    req.DirectLocal,
 		ModelOverride:  req.ModelOverride,
+		Coproc:         req.Coproc,
 	}
 }
 
@@ -1471,6 +1472,7 @@ func (s *Server) mapResponse(response *agent.Response) *proto.ProcessRequestResp
 		ModelName:  response.RoutingMetadata.ModelName,
 		Confidence: float32(response.RoutingMetadata.Confidence),
 		Escalated:  response.RoutingMetadata.Escalated,
+		IsCloud:    response.RoutingMetadata.IsCloud,
 	}
 
 	if s.registry != nil {

@@ -1223,7 +1223,9 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		}
 		if d.Allow && d.Persist && s.permStore != nil {
 			if tool, ok := s.toolRegistry.Get(name); ok && agenttools.OriginOf(tool) == agenttools.OriginMCP {
-				_ = s.permStore.AddMCPAllow(name)
+				if err := s.permStore.AddMCPAllow(name); err != nil {
+					fmt.Fprintf(os.Stderr, "[mcp] persist always-allow for %s: %v\n", name, err)
+				}
 			}
 		}
 		return d.Allow, nil

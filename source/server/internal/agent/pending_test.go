@@ -23,7 +23,9 @@ func TestPending_WaitResolves(t *testing.T) {
 func TestPendingCarriesPersist(t *testing.T) {
 	p := NewPendingDecisions()
 	go func() { p.Resolve("t1", Decision{Allow: true, Persist: true}) }()
-	d, err := p.Wait(context.Background(), "t1")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	d, err := p.Wait(ctx, "t1")
 	if err != nil {
 		t.Fatal(err)
 	}

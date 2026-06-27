@@ -200,6 +200,21 @@ func (m *Manager) List() []ServerStatus {
 	return out
 }
 
+// Stop tears down every hosted server: cancels in-flight connects, closes
+// connections, and unregisters their tools. Safe to call once at agent exit.
+func (m *Manager) Stop() {
+	m.mu.Lock()
+	handles := make([]*serverHandle, 0, len(m.servers))
+	for _, h := range m.servers {
+		handles = append(handles, h)
+	}
+	m.servers = map[string]*serverHandle{}
+	m.mu.Unlock()
+	for _, h := range handles {
+		m.teardown(h)
+	}
+}
+
 // Start connects to every configured server in the background. Returns
 // immediately; tools appear in the registry as each server finishes listing.
 func (m *Manager) Start(ctx context.Context) {
@@ -214,7 +229,18 @@ func (m *Manager) Start(ctx context.Context) {
 }
 
 // Add connects a new server now and persists it to mcp.yaml.
+// If a server with the same name already exists, it is torn down before the
+// new one starts (prevents a leaked connection and orphaned tool registrations).
 func (m *Manager) Add(ctx context.Context, name string, cfg ServerConfig) error {
+	m.mu.Lock()
+	old := m.servers[name]
+	m.mu.Unlock()
+	if old != nil {
+		m.teardown(old)
+		m.mu.Lock()
+		delete(m.servers, name)
+		m.mu.Unlock()
+	}
 	m.startServer(ctx, name, cfg)
 	return m.persistAdd(name, cfg)
 }

@@ -263,7 +263,8 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	cfgDir := filepath.Dir(config.DefaultPath())
 	mcpMgr := mcphost.New(reg, cfgDir, 10*time.Second)
 	srv.SetMcpManager(mcpMgr)
-	mcpMgr.Start(context.Background())
+	mcpCtx, mcpCancel := context.WithCancel(context.Background())
+	mcpMgr.Start(mcpCtx)
 
 	// Permission store + pending-decisions barrier for the native tool-calling
 	// loop. Path mirrors config.yaml: ~/.config/cercano/permissions.yaml.
@@ -310,6 +311,8 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	}()
 
 	cleanup := func() {
+		mcpCancel()
+		mcpMgr.Stop()
 		s.GracefulStop()
 	}
 

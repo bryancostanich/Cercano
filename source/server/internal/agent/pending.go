@@ -6,7 +6,8 @@ import (
 )
 
 type Decision struct {
-	Allow bool
+	Allow   bool
+	Persist bool
 }
 
 type PendingDecisions struct {
@@ -18,7 +19,7 @@ func NewPendingDecisions() *PendingDecisions {
 	return &PendingDecisions{channels: map[string]chan Decision{}}
 }
 
-func (p *PendingDecisions) Wait(ctx context.Context, toolUseID string) (bool, error) {
+func (p *PendingDecisions) Wait(ctx context.Context, toolUseID string) (Decision, error) {
 	ch := make(chan Decision, 1)
 	p.mu.Lock()
 	p.channels[toolUseID] = ch
@@ -30,19 +31,19 @@ func (p *PendingDecisions) Wait(ctx context.Context, toolUseID string) (bool, er
 	}()
 	select {
 	case d := <-ch:
-		return d.Allow, nil
+		return d, nil
 	case <-ctx.Done():
-		return false, ctx.Err()
+		return Decision{}, ctx.Err()
 	}
 }
 
-func (p *PendingDecisions) Resolve(toolUseID string, allow bool) bool {
+func (p *PendingDecisions) Resolve(toolUseID string, d Decision) bool {
 	p.mu.Lock()
 	ch, ok := p.channels[toolUseID]
 	p.mu.Unlock()
 	if !ok {
 		return false
 	}
-	ch <- Decision{Allow: allow}
+	ch <- d
 	return true
 }

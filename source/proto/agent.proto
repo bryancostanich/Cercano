@@ -557,7 +557,7 @@ message PermissionModeChanged { string mode = 1; }
 
 // Allow/Deny pair the asynchronous PermissionRequired stream event with a
 // client reply. tool_use_id is the same id the event carried.
-message AllowToolCallRequest  { string tool_use_id = 1; }
+message AllowToolCallRequest  { string tool_use_id = 1; bool persist = 2; }
 message AllowToolCallResponse { bool ok = 1; }
 
 message DenyToolCallRequest  { string tool_use_id = 1; }

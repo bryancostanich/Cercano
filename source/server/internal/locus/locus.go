@@ -56,6 +56,16 @@ func (m Mode) Main() Resolution {
 	}
 }
 
+// Coproc resolves the tier policy for one-shot co-processor work (summarize,
+// extract, classify, explain, …). Identical to Main except Cloud Primary, which
+// keeps grunt work local while the main LLM runs on cloud.
+func (m Mode) Coproc() Resolution {
+	if m == CloudPrimary {
+		return Resolution{TierLocal, TierCloud, true}
+	}
+	return m.Main()
+}
+
 // ParseMode validates a config string. Empty resolves to DefaultMode.
 func ParseMode(s string) (Mode, error) {
 	switch Mode(s) {

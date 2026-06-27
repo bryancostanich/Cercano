@@ -127,3 +127,21 @@ func (f *SelectField) View(focused bool, width int, s theme.Styles) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// ViewStacked renders the open picker as a single vertical column — one option
+// per line, no separators — for the narrow under-label layout where a
+// horizontal row reads as a cramped list. Closed, it matches View.
+func (f *SelectField) ViewStacked(focused bool, width int, s theme.Styles) string {
+	if !f.open {
+		return f.View(focused, width, s)
+	}
+	lines := make([]string, 0, len(f.options))
+	for i, o := range f.options {
+		if i == f.cursor {
+			lines = append(lines, s.Accent.Render("‹"+o.Label+"›"))
+		} else {
+			lines = append(lines, s.Muted.Render(o.Label))
+		}
+	}
+	return strings.Join(lines, "\n")
+}

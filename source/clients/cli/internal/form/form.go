@@ -187,13 +187,21 @@ func (f *Form) View(width int, palette theme.Palette, styles theme.Styles) strin
 			if fieldW < 1 {
 				fieldW = 1
 			}
+			// In the narrow under-label layout, a field may opt into a single
+			// vertical column (one item per line) so it doesn't read as a cramped
+			// horizontal list. Otherwise use the normal horizontal render.
+			rendered := fld.View(focused, fieldW, styles)
+			if narrow {
+				if sf, ok := fld.(stackable); ok {
+					rendered = sf.ViewStacked(focused, fieldW, styles)
+				}
+			}
 			// Hard-wrap each rendered line to the value-column width so an
 			// over-long value (URL, model name) wraps as a hanging indent in the
 			// value column instead of overflowing the box and being re-wrapped
-			// flush against the left margin by lipgloss. SelectField already
-			// wraps to fieldW, so its lines pass through unchanged.
+			// flush against the left margin by lipgloss.
 			var cellLines []string
-			for _, raw := range strings.Split(fld.View(focused, fieldW, styles), "\n") {
+			for _, raw := range strings.Split(rendered, "\n") {
 				cellLines = append(cellLines, strings.Split(ansi.Hardwrap(raw, fieldW, false), "\n")...)
 			}
 			if narrow {

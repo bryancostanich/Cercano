@@ -133,4 +133,20 @@ func TestSettingsNarrowSelectGoesUnderLabel(t *testing.T) {
 	if !strings.Contains(joined, "cloud_only") {
 		t.Fatalf("options should appear under the label:\n%s", out)
 	}
+	// In the narrow under-label layout the options must form a single vertical
+	// column: one per line, no "·" separators, never two on a row.
+	for _, ln := range lines {
+		if strings.Contains(ln, "·") {
+			t.Fatalf("narrow under-label options must not use horizontal separators:\n%s", ln)
+		}
+		opts := 0
+		for _, o := range []string{"cloud_only", "cloud_primary", "local_primary", "local_only"} {
+			if strings.Contains(ln, o) {
+				opts++
+			}
+		}
+		if opts > 1 {
+			t.Fatalf("narrow under-label options must be one per line, found %d on:\n%s", opts, ln)
+		}
+	}
 }

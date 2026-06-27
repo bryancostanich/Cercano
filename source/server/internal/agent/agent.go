@@ -389,6 +389,10 @@ func (a *Agent) RenameConversation(ctx context.Context, conversationID, title st
 
 // ProcessRequest orchestrates the flow: Route -> Classify -> Execute Strategy.
 func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, error) {
+	if req.Coproc {
+		return a.processCoproc(ctx, req)
+	}
+
 	// Load conversation history
 	augmentedInput, originalInput := a.loadHistory(ctx, req)
 
@@ -486,6 +490,57 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 	}
 	a.storeConversationTurn(ctx, req.ConversationID, originalInput, augmentedInput, res)
 	return res, nil
+}
+
+// processCoproc serves a one-shot co-processor request on the tier chosen by
+// the active Locus Mode. Bidirectional fallback for *_primary; hard error for
+// *_only when its tier is unavailable. Sets IsCloud + a Notice on fallback.
+func (a *Agent) processCoproc(ctx context.Context, req *Request) (*Response, error) {
+	augmentedInput, originalInput := a.loadHistory(ctx, req)
+
+	mode, _ := locus.ParseMode(a.currentLocusMode())
+	res := mode.Coproc()
+	providers := a.router.GetModelProviders()
+
+	pick := func(t locus.Tier) ModelProvider {
+		if t == locus.TierCloud {
+			if cp := providers["CloudModel"]; cp != nil && cp.Name() != "NONE" {
+				return cp
+			}
+			return nil
+		}
+		if lp := providers["LocalModel"]; lp != nil {
+			return lp
+		}
+		return nil
+	}
+
+	prov := pick(res.Preferred)
+	isCloud := res.Preferred == locus.TierCloud
+	fellBack := false
+	if prov == nil && res.CrossAllowed {
+		prov = pick(res.Fallback)
+		isCloud = res.Fallback == locus.TierCloud
+		fellBack = true
+	}
+	if prov == nil {
+		return nil, fmt.Errorf("locus mode %q: no %s provider available for co-processor work", mode, res.Preferred)
+	}
+
+	out, err := prov.Process(ctx, &Request{Input: augmentedInput, ModelOverride: req.ModelOverride})
+	if err != nil {
+		return nil, err
+	}
+	modelName := prov.Name()
+	if req.ModelOverride != "" {
+		modelName = req.ModelOverride
+	}
+	out.RoutingMetadata = RoutingMetadata{ModelName: modelName, Confidence: 1.0, IsCloud: isCloud}
+	if fellBack {
+		out.Notice = fmt.Sprintf("locus: preferred co-processor tier unavailable — ran on %s (%s)", res.Fallback, modelName)
+	}
+	a.storeConversationTurn(ctx, req.ConversationID, originalInput, augmentedInput, out)
+	return out, nil
 }
 
 // ProcessRequestStream orchestrates the flow with progress updates.

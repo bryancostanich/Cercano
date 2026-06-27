@@ -137,6 +137,10 @@ type Model struct {
 	// sets it at runtime.
 	promptBorderColor color.Color
 
+	// promptColorToken is the token form of promptBorderColor ("palette:<key>"
+	// or "#RRGGBB"), kept so the settings page can show the current selection.
+	promptColorToken string
+
 	// sessionTitle is the current conversation's display title. Shown in the
 	// header. Empty for fresh sessions (header omits the title slot until
 	// /rename or /resume sets one).
@@ -230,6 +234,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	slash.RegisterRuntime(reg)
 	slash.RegisterLocus(reg, ag)
 	slash.RegisterContextView(reg)
+	slash.RegisterSettings(reg)
 
 	splash := banner.NewAnimModel(p, banner.Meta{
 		Tagline: "local-first ai coprocessor",
@@ -261,6 +266,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 		modelMaxTokens:     128_000, // placeholder until the agent serves real ctx limits
 		openHistoryOnStart: openHistoryOnStart,
 		promptBorderColor:  p.Accent,
+		promptColorToken:   "palette:accent",
 	}
 }
 
@@ -901,6 +907,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.permissionMode = msg.Mode
 		return m, nil
 
+	case settingsColorMsg:
+		m.promptBorderColor = m.resolvePromptColor(msg.token)
+		m.promptColorToken = msg.token
+		m.refreshViewport()
+		return m, nil
+
 	case permissionModeChangedMsg:
 		// Pushed by the agent (another client's /strict, or a hand-edit to
 		// permissions.yaml). Update the chip and re-arm the drain loop.
@@ -1143,9 +1155,10 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.cumOut = 0
 		m.chat.ExitToolNav()
 		m.refreshViewport()
-	case slash.ResultOpenConfigEditor:
-		ed, _ := newConfigEditor(m.agent, m.palette, m.styles, m.width, m.height)
-		m.content = ed
+	case slash.ResultOpenSettings:
+		sp, cmd := newSettingsPage(m.agent, m.palette, m.styles, m.promptColorToken, m.width, m.height)
+		m.content = sp
+		return m, cmd
 	case slash.ResultOpenHistoryPicker:
 		hv, _ := newHistoryView(m.agent, m.palette, m.styles, m.width, m.height)
 		m.content = hv
@@ -1161,6 +1174,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		m = m.applyResume(res.Text)
 	case slash.ResultSetPromptColor:
 		m.promptBorderColor = m.resolvePromptColor(res.Text)
+		m.promptColorToken = res.Text
 		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "prompt color set"})
 		m.refreshViewport()
 	case slash.ResultSetSessionTitle:

@@ -24,7 +24,7 @@ const (
 	ResultText ResultKind = iota
 	ResultQuit
 	ResultClearConversation
-	ResultOpenConfigEditor
+	ResultOpenSettings
 	ResultOpenHistoryPicker
 	ResultOpenRuntimeDashboard
 	ResultOpenContextView

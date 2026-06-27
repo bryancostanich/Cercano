@@ -14,6 +14,30 @@ func testStyles() (theme.Palette, theme.Styles) {
 	return p, theme.NewStyles(p)
 }
 
+func TestFormOpenSelectKeepsFocusedLineOnLabel(t *testing.T) {
+	p, s := testStyles()
+	sel := NewSelect("locus", "locus", []Option{
+		{Label: "cloud_only", Value: "cloud_only"},
+		{Label: "cloud_primary", Value: "cloud_primary"},
+		{Label: "local_primary", Value: "local_primary"},
+		{Label: "local_only", Value: "local_only"},
+	}, "cloud_only")
+	f := New([]Section{{Title: "Routing", Fields: []Field{sel}}})
+	f.Update(enter()) // open the picker (focus is on sel)
+	if !sel.Editing() {
+		t.Fatal("select should be open after enter")
+	}
+	out := f.View(50, p, s) // narrow enough that options wrap to multiple lines
+	if !strings.Contains(out, "cloud_only") || !strings.Contains(out, "local_only") {
+		t.Fatalf("open picker should render all options:\n%s", out)
+	}
+	// The focused line must still point at the field's label line, not drift
+	// because the picker added lines below it.
+	if f.FocusedLine() != 3 {
+		t.Fatalf("focusedLine = %d, want 3 (label line of the open select)", f.FocusedLine())
+	}
+}
+
 func TestFormNavSkipsHeadersAndClamps(t *testing.T) {
 	sections := []Section{
 		{Title: "A", Fields: []Field{NewText("a1", "a1", "v", ""), NewReadOnly("a2", "a2", "v", "")}},

@@ -152,7 +152,36 @@ func (f *Form) View(width int, palette theme.Palette, styles theme.Styles) strin
 				label = styles.Bright.Render(fld.Label())
 			}
 			pad := strings.Repeat(" ", labelW-lipgloss.Width(fld.Label())+2)
-			body.WriteString(marker + label + pad + fld.View(focused, panelW, styles) + "\n")
+			// The value column starts after the marker (3 cols) + label/pad
+			// (labelW+2). A field that renders multiple lines (e.g. an open
+			// select picker) keeps its continuation lines aligned under that
+			// column, so options read as a right-hand second column rather than
+			// wrapping flush under the label. When the column is too tight, fall
+			// back to label-on-its-own-line with a small indent.
+			colOffset := 3 + labelW + 2
+			valueW := panelW - colOffset
+			narrow := valueW < 16
+			fieldW := valueW
+			indent := colOffset
+			if narrow {
+				fieldW = panelW - 4
+				indent = 4
+			}
+			if fieldW < 1 {
+				fieldW = 1
+			}
+			cellLines := strings.Split(fld.View(focused, fieldW, styles), "\n")
+			if narrow && len(cellLines) > 1 {
+				body.WriteString(marker + label + "\n")
+				for _, cl := range cellLines {
+					body.WriteString(strings.Repeat(" ", indent) + cl + "\n")
+				}
+			} else {
+				body.WriteString(marker + label + pad + cellLines[0] + "\n")
+				for _, cl := range cellLines[1:] {
+					body.WriteString(strings.Repeat(" ", indent) + cl + "\n")
+				}
+			}
 			idx++
 			fieldInSection++
 		}

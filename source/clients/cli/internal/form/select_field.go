@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"cercano/source/clients/cli/internal/theme"
 )
@@ -61,11 +62,12 @@ func (f *SelectField) Update(msg tea.KeyPressMsg) (tea.Cmd, bool, string) {
 	case tea.KeyEscape:
 		f.open = false
 		return nil, false, ""
-	case tea.KeyUp:
+	case tea.KeyLeft:
+		// Options are laid out horizontally, so left/right moves the cursor.
 		if f.cursor > 0 {
 			f.cursor--
 		}
-	case tea.KeyDown:
+	case tea.KeyRight:
 		if f.cursor < len(f.options)-1 {
 			f.cursor++
 		}
@@ -89,16 +91,39 @@ func (f *SelectField) View(focused bool, width int, s theme.Styles) string {
 		}
 		return s.Primary.Render(d)
 	}
-	var b strings.Builder
-	for i, o := range f.options {
-		if i == f.cursor {
-			b.WriteString(s.Accent.Render("‹" + o.Label + "›"))
-		} else {
-			b.WriteString(s.Muted.Render(o.Label))
-		}
-		if i < len(f.options)-1 {
-			b.WriteString(s.BorderDim.Render(" · "))
-		}
+	// Options render horizontally, separated by " · ", and wrap onto further
+	// lines when they don't fit in width. The caller (Form) indents wrapped
+	// lines so they align as a right-hand column under the first option.
+	if width < 1 {
+		width = 1
 	}
-	return b.String()
+	sep := s.BorderDim.Render(" · ")
+	sepW := lipgloss.Width(sep)
+	var lines []string
+	var cur strings.Builder
+	curW := 0
+	for i, o := range f.options {
+		var seg string
+		if i == f.cursor {
+			seg = s.Accent.Render("‹" + o.Label + "›")
+		} else {
+			seg = s.Muted.Render(o.Label)
+		}
+		segW := lipgloss.Width(seg)
+		if curW > 0 && curW+sepW+segW > width {
+			lines = append(lines, cur.String())
+			cur.Reset()
+			curW = 0
+		}
+		if curW > 0 {
+			cur.WriteString(sep)
+			curW += sepW
+		}
+		cur.WriteString(seg)
+		curW += segW
+	}
+	if cur.Len() > 0 {
+		lines = append(lines, cur.String())
+	}
+	return strings.Join(lines, "\n")
 }

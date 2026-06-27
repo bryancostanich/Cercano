@@ -319,3 +319,58 @@ func TestToolLoop_EmitsExpectedEvents(t *testing.T) {
 
 // Cap enforcement + graceful degradation is covered by
 // TestToolLoop_HitsCap_DegradesToFinalAnswer.
+
+// fakeMCPTool is a minimal PermW tool that declares MCP origin.
+type fakeMCPTool struct {
+	executed bool
+}
+
+func (*fakeMCPTool) Name() string                       { return "mcp__x__do" }
+func (*fakeMCPTool) Description() string                { return "d" }
+func (*fakeMCPTool) Permission() agenttools.Permission  { return agenttools.PermW }
+func (*fakeMCPTool) Origin() agenttools.Origin          { return agenttools.OriginMCP }
+func (*fakeMCPTool) Schema() json.RawMessage            { return json.RawMessage(`{"type":"object"}`) }
+func (m *fakeMCPTool) Execute(_ context.Context, _ json.RawMessage) (*agenttools.Result, error) {
+	m.executed = true
+	return agenttools.NewTextResult("ok"), nil
+}
+
+// TestToolLoopMCPConfirmsInPermissive verifies that an MCP-origin W tool
+// triggers the PermissionRequester even under ModePermissive (confirm-by-default).
+func TestToolLoopMCPConfirmsInPermissive(t *testing.T) {
+	// Script: first turn emits an MCP tool call; second turn is a plain-text
+	// terminator in case the gate doesn't fire (RED path: tool executes and loop
+	// continues). After the fix the PermissionRequester denies and the loop
+	// returns early — the second script is never reached.
+	prov := &mockProvider{
+		scripts: [][]llm.Block{
+			{{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "mcp__x__do",
+				ToolInput: json.RawMessage(`{}`)}},
+			{{Type: llm.BlockText, Text: "done"}},
+		},
+		caps: llm.Capabilities{SupportsTools: true},
+	}
+	tool := &fakeMCPTool{}
+	reg := agenttools.NewRegistry()
+	reg.MustRegister(tool)
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+	// Default mode is ModePermissive — no explicit SetMode needed.
+
+	denied := false
+	_, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider:    prov,
+		Registry:    reg,
+		Permissions: perms,
+		UserInput:   "go",
+		PermissionRequester: func(_ context.Context, _, _ string, _ json.RawMessage, _ llm.Permission) (bool, error) {
+			denied = true // confirm was requested
+			return false, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !denied {
+		t.Fatal("MCP tool must trigger a permission request in permissive mode")
+	}
+}

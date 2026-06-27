@@ -185,8 +185,8 @@ func notifyProgress(ctx context.Context, req *gomcp.CallToolRequest, message str
 func (s *Server) preCheckModelForResearch(ctx context.Context) string {
 	// Probe the current model name with a minimal request
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
-		Input:       "hi",
-		DirectLocal: true,
+		Input:  "hi",
+		Coproc: true,
 	})
 	if err != nil || resp == nil || resp.RoutingMetadata == nil {
 		return ""
@@ -1004,8 +1004,8 @@ type grpcModelCaller struct {
 
 func (g *grpcModelCaller) Call(ctx context.Context, prompt string) (string, error) {
 	resp, err := g.client.ProcessRequest(ctx, &proto.ProcessRequestRequest{
-		Input:       prompt,
-		DirectLocal: true,
+		Input:  prompt,
+		Coproc: true,
 	})
 	if err != nil {
 		return "", err
@@ -1027,7 +1027,7 @@ type grpcModelCallerWithTokens struct {
 func (g *grpcModelCallerWithTokens) Call(ctx context.Context, prompt string) (string, error) {
 	resp, err := g.client.ProcessRequest(ctx, &proto.ProcessRequestRequest{
 		Input:         prompt,
-		DirectLocal:   true,
+		Coproc:        true,
 		ModelOverride: g.modelOverride,
 	})
 	if err != nil {
@@ -1148,10 +1148,10 @@ func (s *Server) handleInit(ctx context.Context, request *gomcp.CallToolRequest,
 	builder := projectctx.NewBuilder()
 	prompt, filesSummary := builder.BuildPrompt(files, args.Context)
 
-	// Send to local model
+	// Send to co-processor (locus-resolved tier)
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
-		Input:       prompt,
-		DirectLocal: true,
+		Input:  prompt,
+		Coproc: true,
 	})
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_init")

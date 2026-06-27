@@ -116,8 +116,10 @@ func (s *PermissionStore) Mode() PermissionMode {
 // persistLocked writes the current in-memory mode and mcpAllow to disk.
 // Caller must hold s.mu.
 func (s *PermissionStore) persistLocked() error {
-	f := permsFile{Mode: string(s.mode), MCPAllow: s.mcpAllow}
-	data, _ := yaml.Marshal(f)
+	data, err := yaml.Marshal(permsFile{Mode: string(s.mode), MCPAllow: s.mcpAllow})
+	if err != nil {
+		return err
+	}
 	return os.WriteFile(s.path, data, 0o644)
 }
 
@@ -129,9 +131,15 @@ func (s *PermissionStore) SetMode(m PermissionMode) error {
 }
 
 // AddMCPAllow appends a glob pattern to the MCP allowlist and persists it.
+// If the pattern is already present the call is a no-op.
 func (s *PermissionStore) AddMCPAllow(pattern string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for _, p := range s.mcpAllow {
+		if p == pattern {
+			return nil
+		}
+	}
 	s.mcpAllow = append(s.mcpAllow, pattern)
 	return s.persistLocked()
 }

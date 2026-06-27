@@ -186,3 +186,31 @@ func TestMCPAllowlistGlob(t *testing.T) {
 		t.Fatal("mode clobbered by allowlist write")
 	}
 }
+
+func TestAddMCPAllow_Idempotent(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "permissions.yaml")
+	s, _ := LoadPermissionStore(p)
+
+	// Call AddMCPAllow twice with the same pattern.
+	if err := s.AddMCPAllow("mcp__github__*"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddMCPAllow("mcp__github__*"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reload from disk and count occurrences of the pattern.
+	s2, err := LoadPermissionStore(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, entry := range s2.mcpAllow {
+		if entry == "mcp__github__*" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 entry for pattern, got %d", count)
+	}
+}

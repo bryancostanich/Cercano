@@ -41,6 +41,7 @@ import (
 	runtimellama "cercano/source/server/internal/localruntime/llamaserver"
 	"cercano/source/server/internal/loop"
 	mcpserver "cercano/source/server/internal/mcp"
+	mcphost "cercano/source/server/internal/mcp_host"
 	"cercano/source/server/internal/recap"
 	"cercano/source/server/internal/retention"
 	"cercano/source/server/internal/server"
@@ -253,7 +254,16 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	srv.SetContextLoader(ctxLoader)
 	srv.SetConfigPersistence(config.DefaultPath(), cfg)
 	orchestrator.SetLocusModeGetter(srv.LocusMode)
-	srv.SetToolRegistry(agenttools.DefaultRegistry())
+	reg := agenttools.DefaultRegistry()
+	srv.SetToolRegistry(reg)
+
+	// MCP host: load global servers and connect them in the background. Tools
+	// register into `reg` as each server lists; a slow/dead server never blocks
+	// boot (a call to a not-ready server blocks only that call — see mcphost).
+	cfgDir := filepath.Dir(config.DefaultPath())
+	mcpMgr := mcphost.New(reg, cfgDir, 10*time.Second)
+	srv.SetMcpManager(mcpMgr)
+	mcpMgr.Start(context.Background())
 
 	// Permission store + pending-decisions barrier for the native tool-calling
 	// loop. Path mirrors config.yaml: ~/.config/cercano/permissions.yaml.

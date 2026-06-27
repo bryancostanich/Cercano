@@ -8,6 +8,7 @@ import (
 
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
+	"cercano/source/server/internal/locus"
 )
 
 // ProgressFunc defines a callback for progress updates.
@@ -76,6 +77,7 @@ type Agent struct {
 	contextLoader ContextLoader
 	recap         RecapScheduler
 	compaction    CompactionScheduler
+	locusMode     func() string // live getter for the configured Locus Mode
 }
 
 // RecapScheduler requests a (debounced) recap regeneration for a conversation.
@@ -113,6 +115,17 @@ type CompactionScheduler interface {
 // WithCompactionScheduler attaches the background compaction generator.
 func WithCompactionScheduler(cs CompactionScheduler) AgentOption {
 	return func(a *Agent) { a.compaction = cs }
+}
+
+// SetLocusModeGetter wires a live getter for the active Locus Mode so co-proc
+// routing reflects runtime UpdateConfig changes. Nil getter → DefaultMode.
+func (a *Agent) SetLocusModeGetter(f func() string) { a.locusMode = f }
+
+func (a *Agent) currentLocusMode() string {
+	if a.locusMode == nil {
+		return string(locus.DefaultMode)
+	}
+	return a.locusMode()
 }
 
 // ScheduleCompaction requests a debounced compaction pass. Nil-safe.

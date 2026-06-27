@@ -6,8 +6,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-func enter() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyEnter} }
-func esc() tea.KeyPressMsg   { return tea.KeyPressMsg{Code: tea.KeyEscape} }
+func enter() tea.KeyPressMsg      { return tea.KeyPressMsg{Code: tea.KeyEnter} }
+func esc() tea.KeyPressMsg        { return tea.KeyPressMsg{Code: tea.KeyEscape} }
+func arrowDown() tea.KeyPressMsg  { return tea.KeyPressMsg{Code: tea.KeyDown} }
 func typ(r rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: r, Text: string(r)}
 }

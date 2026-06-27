@@ -475,6 +475,7 @@ message BuiltinTool {
   string description = 2;
   string permission  = 3; // "R" | "W" | "X"
   string schema      = 4; // JSON Schema as a string
+  bool   destructive = 5; // display-only ⚠ hint (MCP destructiveHint); never affects gating
 }
 
 message ListToolsRequest  {}
@@ -600,6 +601,7 @@ message PermissionRequired {
   string tool_name = 2;
   string args_json = 3;
   string tier = 4;       // "W" | "X"
+  bool   destructive = 5; // display-only ⚠ hint (MCP destructiveHint); never affects gating
 }
 
 // MCP host management messages.

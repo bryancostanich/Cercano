@@ -54,7 +54,10 @@ type toolEntryExecCompleteMsg struct {
 
 // permissionRequiredMsg is host-routed (raises the confirm gate); it is NOT a
 // chatView.Apply event.
-type permissionRequiredMsg struct{ id, name, argsJSON, tier string }
+type permissionRequiredMsg struct {
+	id, name, argsJSON, tier string
+	destructive              bool
+}
 
 // chatDoneMsg signals the end of a driver turn. text is an optional closing
 // line for /c (chatView appends it as a system entry). tokIn/tokOut/notice/model

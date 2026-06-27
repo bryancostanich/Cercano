@@ -185,3 +185,19 @@ func OriginOf(t Tool) Origin {
 	}
 	return OriginBuiltin
 }
+
+// Destructiver is an optional interface a Tool may implement to report that it
+// performs destructive updates (per the MCP destructiveHint). This is a
+// display-only signal — clients surface a ⚠ marker — and never changes gating.
+type Destructiver interface {
+	Destructive() bool
+}
+
+// IsDestructive reports whether a tool advertises itself as destructive,
+// defaulting to false when the tool does not implement Destructiver.
+func IsDestructive(t Tool) bool {
+	if d, ok := t.(Destructiver); ok {
+		return d.Destructive()
+	}
+	return false
+}

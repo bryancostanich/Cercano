@@ -373,6 +373,7 @@ type ToolInfo struct {
 	Description string
 	Permission  string // "R" | "W" | "X"
 	Schema      string // JSON Schema
+	Destructive bool   // display-only ⚠ hint (MCP destructiveHint)
 }
 
 // ListTools enumerates the agent's registered tools.
@@ -388,6 +389,7 @@ func (c *Client) ListTools(ctx context.Context) ([]ToolInfo, error) {
 			Description: t.GetDescription(),
 			Permission:  t.GetPermission(),
 			Schema:      t.GetSchema(),
+			Destructive: t.GetDestructive(),
 		})
 	}
 	return out, nil
@@ -887,6 +889,7 @@ type StreamMsg struct {
 	RouteModel  string // for TypeRouteSelected (engine handling the turn)
 	RouteCloud  bool   // for TypeRouteSelected (true = cloud, false = local)
 	Tier        string // for TypePermissionRequired ("W" | "X")
+	Destructive bool   // for TypePermissionRequired (display-only ⚠ hint)
 }
 
 type StreamMsgType int
@@ -985,11 +988,12 @@ func (c *Client) StreamChat(ctx context.Context, conversationID, input, workDir 
 			}
 			if pr := msg.GetPermissionRequired(); pr != nil {
 				out <- StreamMsg{
-					Type:      TypePermissionRequired,
-					ToolUseID: pr.GetToolUseId(),
-					ToolName:  pr.GetToolName(),
-					ArgsJSON:  pr.GetArgsJson(),
-					Tier:      pr.GetTier(),
+					Type:        TypePermissionRequired,
+					ToolUseID:   pr.GetToolUseId(),
+					ToolName:    pr.GetToolName(),
+					ArgsJSON:    pr.GetArgsJson(),
+					Tier:        pr.GetTier(),
+					Destructive: pr.GetDestructive(),
 				}
 				continue
 			}

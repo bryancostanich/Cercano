@@ -87,10 +87,11 @@ func streamMsgToEvent(sm agentclient.StreamMsg) tea.Msg {
 		}
 	case agentclient.TypePermissionRequired:
 		return permissionRequiredMsg{
-			id:       sm.ToolUseID,
-			name:     sm.ToolName,
-			argsJSON: sm.ArgsJSON,
-			tier:     sm.Tier,
+			id:          sm.ToolUseID,
+			name:        sm.ToolName,
+			argsJSON:    sm.ArgsJSON,
+			tier:        sm.Tier,
+			destructive: sm.Destructive,
 		}
 	case agentclient.TypeError:
 		return chatErrorMsg{err: sm.Err}

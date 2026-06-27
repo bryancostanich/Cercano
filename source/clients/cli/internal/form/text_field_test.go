@@ -30,8 +30,8 @@ func TestTextFieldEditCommit(t *testing.T) {
 	if f.Editing() {
 		t.Fatal("commit should exit editing")
 	}
-	if val == "" {
-		t.Fatalf("committed value should be non-empty, got %q", val)
+	if val != "http://oldx" {
+		t.Fatalf("committed value = %q, want http://oldx (typed char must be appended)", val)
 	}
 }
 

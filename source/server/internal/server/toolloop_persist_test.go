@@ -244,7 +244,7 @@ func TestPersistToolLoopTurns_DeltaOnly(t *testing.T) {
 		{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: "reply"}}},    // new
 	}}
 
-	srv.persistToolLoopTurns(ctx, req, result, 2)
+	srv.persistToolLoopTurns(ctx, req, result, 2, "qwen3-coder")
 
 	turns, err := store.GetTurns(ctx, "conv-delta")
 	if err != nil {
@@ -255,6 +255,13 @@ func TestPersistToolLoopTurns_DeltaOnly(t *testing.T) {
 	}
 	if turns[0].Content != "second" || turns[1].Content != "reply" {
 		t.Errorf("unexpected delta turns: %q, %q", turns[0].Content, turns[1].Content)
+	}
+	// The served-tier model name is recorded on the conversation row, not a
+	// hardcoded cloud model.
+	if info, err := store.Get(ctx, "conv-delta"); err != nil {
+		t.Fatalf("Get: %v", err)
+	} else if info.Model != "qwen3-coder" {
+		t.Errorf("conversation model = %q, want qwen3-coder", info.Model)
 	}
 }
 

@@ -1221,6 +1221,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 				},
 			})
 			provider = fbProv
+			isCloud = fbCloud
 			result, loopErr = s.runMainLoop(ctx, req, fbProv, fbCloud, sink, requester, convHistory, onTextDelta)
 		}
 		if loopErr != nil {
@@ -1228,7 +1229,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		}
 	}
 
-	s.persistToolLoopTurns(ctx, req, result, injectedLen)
+	s.persistToolLoopTurns(ctx, req, result, injectedLen, s.mainModelFor(isCloud))
 	s.agent.RecordContextUsage(req.GetConversationId(), s.mainModelFor(isCloud),
 		result.InputTokens, result.OutputTokens)
 
@@ -1284,7 +1285,7 @@ func (s *Server) runMainLoop(
 // every role, with BlocksJSON and concatenated text Content — so that user
 // tool_result messages are saved alongside assistant turns. Best-effort:
 // store errors are logged but never surfaced to the caller.
-func (s *Server) persistToolLoopTurns(ctx context.Context, req *proto.ProcessRequestRequest, result agent.ToolLoopResult, injectedLen int) {
+func (s *Server) persistToolLoopTurns(ctx context.Context, req *proto.ProcessRequestRequest, result agent.ToolLoopResult, injectedLen int, model string) {
 	if s.agent == nil {
 		return
 	}
@@ -1293,7 +1294,7 @@ func (s *Server) persistToolLoopTurns(ctx context.Context, req *proto.ProcessReq
 	if store == nil || convID == "" {
 		return
 	}
-	if err := store.EnsureConversation(ctx, convID, req.GetWorkDir(), s.currentConfig.CloudModel); err != nil {
+	if err := store.EnsureConversation(ctx, convID, req.GetWorkDir(), model); err != nil {
 		fmt.Fprintf(os.Stderr, "[tool-loop] EnsureConversation(%s) failed: %v\n", convID, err)
 		return
 	}

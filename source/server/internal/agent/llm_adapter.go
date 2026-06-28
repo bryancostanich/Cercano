@@ -50,6 +50,6 @@ func (a *llmModelProvider) Process(ctx context.Context, req *Request) (*Response
 		Output:          sb.String(),
 		InputTokens:     chatResp.InputTokens,
 		OutputTokens:    chatResp.OutputTokens,
-		RoutingMetadata: RoutingMetadata{ModelName: a.p.Name(), IsCloud: true},
+		RoutingMetadata: RoutingMetadata{ModelName: model},
 	}, nil
 }

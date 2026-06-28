@@ -117,3 +117,83 @@ func TestStreamChat_ToolDeltaEvents(t *testing.T) {
 		t.Fatalf("tokens on EventMessageStop: got input=%d output=%d, want 4/6", inputToks, outputToks)
 	}
 }
+
+// TestStreamChat_SeparateUsageChunk verifies that the real OpenAI include_usage
+// shape — where finish_reason and usage arrive in SEPARATE chunks — still
+// produces the correct InputTokens/OutputTokens on EventMessageStop.
+//
+// Wire shape:
+//  1. text delta chunk
+//  2. chunk with choices[0].finish_reason="stop" and empty delta  (no usage yet)
+//  3. chunk with choices=[] and usage object                       (len==0 path)
+//  4. [DONE]
+//
+// The reader must skip the empty-choices chunk (continue) but still capture the
+// usage before emitting EventMessageStop at EOF.
+func TestStreamChat_SeparateUsageChunk(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sse(w,
+			// chunk 1: text content
+			`{"choices":[{"delta":{"content":"hello"}}]}`,
+			// chunk 2: finish_reason only — no usage yet
+			`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+			// chunk 3: usage only — choices array is empty (the len==0 continue path)
+			`{"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3}}`,
+			// SSE terminator
+			`[DONE]`,
+		)
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "gpt-x"})
+	rd, err := c.StreamChat(context.Background(), llm.ChatRequest{
+		Messages: []llm.Message{
+			{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "hi"}}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rd.Close()
+
+	var (
+		text        string
+		sawMsgStart bool
+		stopReason  string
+		inputToks   int
+		outputToks  int
+	)
+
+	for {
+		ev, ok, err := rd.Next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			break
+		}
+		switch ev.Type {
+		case llm.EventMessageStart:
+			sawMsgStart = true
+		case llm.EventTextDelta:
+			text += ev.TextDelta
+		case llm.EventMessageStop:
+			stopReason = ev.StopReason
+			inputToks = ev.InputTokens
+			outputToks = ev.OutputTokens
+		}
+	}
+
+	if !sawMsgStart {
+		t.Fatal("expected EventMessageStart")
+	}
+	if text != "hello" {
+		t.Fatalf("text: got %q, want %q", text, "hello")
+	}
+	if stopReason != "stop" {
+		t.Fatalf("stopReason: got %q, want %q", stopReason, "stop")
+	}
+	if inputToks != 7 || outputToks != 3 {
+		t.Fatalf("tokens on EventMessageStop: got input=%d output=%d, want 7/3", inputToks, outputToks)
+	}
+}

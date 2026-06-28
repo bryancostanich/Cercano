@@ -36,6 +36,7 @@ func newTestServer() (*Server, *fakeRouter) {
 			CloudProfiles: []config.CloudProfile{
 				{Name: "messages-one", Flavor: "messages", Model: "claude-3-5-haiku-20241022"},
 				{Name: "cc-one", Flavor: "chat_completions", Model: "gpt-4o"},
+				{Name: "unsup-one", Flavor: "responses", Model: "x"},
 			},
 		},
 	}
@@ -49,8 +50,8 @@ func TestGetCloudProfilesListsBoth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetCloudProfiles: %v", err)
 	}
-	if len(resp.Profiles) != 2 {
-		t.Fatalf("want 2 profiles, got %d", len(resp.Profiles))
+	if len(resp.Profiles) != 3 {
+		t.Fatalf("want 3 profiles, got %d", len(resp.Profiles))
 	}
 	// No keys set yet — both should be false.
 	for _, p := range resp.Profiles {
@@ -96,15 +97,15 @@ func TestSetActiveCloudProfileMessagesOk(t *testing.T) {
 
 func TestSetActiveCloudProfileUnsupportedFlavorGoesAbsent(t *testing.T) {
 	s, r := newTestServer()
-	if err := s.secrets.Set("cc-one", "sk-test"); err != nil {
+	if err := s.secrets.Set("unsup-one", "sk-test"); err != nil {
 		t.Fatal(err)
 	}
-	resp, err := s.SetActiveCloudProfile(context.Background(), &proto.SetActiveCloudProfileRequest{Name: "cc-one"})
+	resp, err := s.SetActiveCloudProfile(context.Background(), &proto.SetActiveCloudProfileRequest{Name: "unsup-one"})
 	if err != nil {
 		t.Fatalf("SetActiveCloudProfile: %v", err)
 	}
 	if resp.Ok {
-		t.Error("want Ok=false for unsupported flavor chat_completions")
+		t.Error("want Ok=false for unsupported flavor responses")
 	}
 	if s.cloudLLMProvider != nil {
 		t.Error("cloudLLMProvider should be nil (cleared) on build failure")

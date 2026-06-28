@@ -17,16 +17,17 @@ Extend `internal/llm/messages.go` `Block`:
 ```go
 const BlockImage BlockType = "image"
 
-// added to Block:
-MediaType string `json:"media_type,omitempty"` // e.g. "image/png", "image/jpeg"
+// added to Block (exactly one of ImageData / ImageURL is set):
+MediaType string `json:"media_type,omitempty"` // e.g. "image/png" (required for base64; optional hint for URL)
 ImageData string `json:"image_data,omitempty"` // base64-encoded image bytes
+ImageURL  string `json:"image_url,omitempty"`  // http(s) image URL
 ```
 
-**Base64 is the canonical (and only) representation** — not URLs. Ollama cannot
-fetch a URL; it requires raw image bytes. Base64 (media type + data) is the one
-form that translates to all three backends, so every adapter stays on a single
-path. URL support can be added later if a need appears; it is explicitly out of
-scope here.
+**Both forms are supported** — base64 bytes *and* an http(s) URL — because the
+cloud providers accept either natively. **Exactly one** of `ImageData` / `ImageURL`
+is set per block. The asymmetry to design around: **Ollama (local) takes raw bytes
+only — no URLs** — so a URL image bound for Ollama is fetched server-side and
+base64-encoded before sending (see §2).
 
 An image rides inside a normal message: a user `llm.Message` may carry
 `Blocks: [BlockText, BlockImage]` (text + one or more images).
@@ -36,18 +37,25 @@ An image rides inside a normal message: a user `llm.Message` may carry
 Each provider adapter gains image handling and flips
 `Capabilities().SupportsVision` to `true`.
 
-- **Anthropic** (`internal/llm/anthropic/adapter.go`) — `BlockImage` →
-  `{type:"image", source:{type:"base64", media_type:MediaType, data:ImageData}}`
-  (the SDK's base64 image source param).
+- **Anthropic** (`internal/llm/anthropic/adapter.go`) — both native:
+  `ImageData` → `{type:"image", source:{type:"base64", media_type, data}}`;
+  `ImageURL` → `{type:"image", source:{type:"url", url}}`.
 - **OpenAI** (`internal/llm/openai/adapter.go`, new in the sibling sub-project) —
-  the user message becomes multi-part content: a text part plus an `image_url`
-  part whose URL is a data URI `data:<MediaType>;base64,<ImageData>`.
-- **Ollama** (`internal/llm/ollama/adapter.go`) — append the decoded bytes
-  (`base64.StdEncoding.DecodeString(ImageData)`) to the message's `Images` field;
-  text stays in `Content`.
+  multi-part content with an `image_url` part: `ImageURL` → the URL directly;
+  `ImageData` → a data URI `data:<MediaType>;base64,<ImageData>`.
+- **Ollama** (`internal/llm/ollama/adapter.go`) — bytes only. `ImageData` →
+  `base64.StdEncoding.DecodeString` → message `Images`. `ImageURL` → **fetch it
+  server-side** (HTTP GET, with a context timeout and a sane size cap) → bytes →
+  `Images`. A shared helper (e.g. `llm.ResolveImageBytes(ctx, block)`) does the
+  base64-decode-or-fetch so the logic isn't Ollama-specific.
 
 A message with mixed text + image blocks must produce the provider's correct
 multi-part user message (text and image together), not two separate messages.
+
+**Note on URL fetching:** the Ollama fetch issues an outbound GET to a
+caller-supplied URL. With no inbound path yet, no untrusted URL reaches it, but
+when the inbound path lands, that fetch is an SSRF surface — bound it (timeout,
+max size, and ideally an http(s)-only / no-internal-address check) at that time.
 
 ## 3. Capabilities
 
@@ -66,19 +74,19 @@ types; if one does, add the `BlockImage` case.)
 
 - **messages**: `BlockImage` round-trips through any JSON marshal/unmarshal in the
   `llm` package.
-- **anthropic adapter**: a user message with text + image → SDK params containing
-  the base64 image source with the right media type; `SupportsVision` true.
-- **ollama adapter**: text + image → `Content` plus `Images` with the decoded
-  bytes; `SupportsVision` true.
-- **openai adapter**: covered in the OpenAI sub-project — text + image → multi-part
-  content with the `data:` URI; `SupportsVision` true.
-- Decode-error handling: a `BlockImage` with non-base64 `ImageData` surfaces a
-  clear error rather than sending garbage (at least for Ollama, which decodes).
+- **anthropic adapter**: text + base64 image → base64 source; text + URL image →
+  url source; right media type; `SupportsVision` true.
+- **ollama adapter**: base64 image → `Images` with decoded bytes; URL image →
+  fetched (against an `httptest` server) → `Images`; `SupportsVision` true.
+- **`ResolveImageBytes`**: base64 path decodes; URL path GETs (mock server);
+  non-base64 `ImageData` and a failed/oversized fetch surface clear errors.
+- **openai adapter**: covered in the OpenAI sub-project — text + image (URL → URL
+  part; base64 → `data:` URI part); `SupportsVision` true.
 
 ## Out of scope
 
 - **Inbound path** — CLI/clients attaching images, and a proto/request image
   field. Nothing produces image blocks yet; this plumbing is exercised only by
-  adapter tests until that lands.
-- **Image URLs** (base64 only, per §1).
+  adapter tests until that lands. (The full SSRF hardening of the URL fetch also
+  lands with the inbound path — see §2 note.)
 - Image *outputs* / generation; document/PDF inputs.

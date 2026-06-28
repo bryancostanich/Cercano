@@ -84,8 +84,9 @@ case FlavorChatCompletions:
 `Capabilities{SupportsTools: true, SupportsParallelTools: true, SupportsCaching: false, SupportsVision: true}`
 (`SupportsCaching` off — compat endpoints vary). The adapter includes **image
 translation** per [vision-input.md](./vision-input.md): a `BlockImage` becomes a
-multi-part `image_url` content part with a `data:<MediaType>;base64,<ImageData>`
-URI. Vision plumbing is built together with this provider (foundation first).
+multi-part `image_url` content part — `ImageURL` passed through directly, or
+`ImageData` as a `data:<MediaType>;base64,<ImageData>` URI. Vision plumbing is
+built together with this provider (foundation first).
 
 ## 5. Google / compat usage
 

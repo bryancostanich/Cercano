@@ -129,10 +129,6 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	})
 
 	catalog := agenttools.BuildToolCatalog(in.Registry)
-	mode := ModePermissive
-	if in.Permissions != nil {
-		mode = in.Permissions.Mode()
-	}
 	consecutiveErrors := 0
 	var lastIn, lastOut int
 
@@ -234,6 +230,14 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		results = append(results, rResults...)
 
 		for _, pc := range wxCalls {
+			// Read the permission mode per call (not once per turn) so a
+			// mid-turn /strict|/permissive|/bypass change takes effect
+			// immediately — consistent with the per-call allowlist read below
+			// and with PermissionStore.Mode()'s "per gate decision" contract.
+			mode := ModePermissive
+			if in.Permissions != nil {
+				mode = in.Permissions.Mode()
+			}
 			isMCP := agenttools.OriginOf(pc.tool) == agenttools.OriginMCP
 			allowlisted := in.Permissions != nil && in.Permissions.IsMCPAllowed(pc.block.ToolName)
 			if GateDecisionForMCP(mode, pc.tier, isMCP, allowlisted) {

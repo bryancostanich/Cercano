@@ -16,6 +16,9 @@ func messagesToOpenAI(msgs []llm.Message, system string) []goopenai.ChatCompleti
 		out = append(out, goopenai.ChatCompletionMessage{Role: goopenai.ChatMessageRoleSystem, Content: system})
 	}
 	for _, m := range msgs {
+		// A tool_result turn carries only tool results — OpenAI requires each to be its
+		// own role:"tool" message. By protocol invariant such a message holds no other
+		// block types; if it ever did, those would be skipped by the continue below.
 		// A tool_result block becomes its own role:"tool" message.
 		isToolResult := false
 		for _, b := range m.Blocks {

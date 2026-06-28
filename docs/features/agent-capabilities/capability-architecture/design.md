@@ -74,14 +74,20 @@ capability may need:
 
 ```go
 type Services struct {
-    Providers   llm.ProviderSet      // cloud + local providers
-    Engine      engine.InferenceEngine
-    Config      *config.Config
+    CloudProvider llm.Provider          // may be nil (local-only deployments)
+    LocalProvider llm.Provider
+    Engine        engine.InferenceEngine
+    Config        *config.Config        // pkg/config.Config
     Conversations conversation.Store
-    ProjectCtx  projectcontext.Loader
+    ProjectCtx    *projectctx.Loader    // internal/context, imported as projectctx
     // ... extended as new capability kinds need more
 }
 ```
+
+Note: there is no `ProviderSet` type today — the agent server holds `cloudLLMProvider`
+and `localLLMProvider` as two discrete `llm.Provider` fields and selects per-request via
+Locus Mode. `Services` mirrors that. A capability that needs "the active provider" gets a
+helper (`Services.MainProvider(isCloud)`) rather than a set.
 
 **`Call`** — per-invocation state, constructed by the adapter for each tool call:
 
@@ -127,11 +133,35 @@ Two adapters wrap **any** capability — they are not written per-capability.
 **MCP adapter** (`internal/capabilities/mcpadapter`):
 - Registers each `mcp`-surface capability as a `cercano_<name>` tool via
   `gomcp.AddTool`, deriving the schema from `Schema()`.
-- Executes the capability **in-process** — the agent is embedded in `--mcp` mode, so the
-  internal handler → gRPC `AgentClient` → agent hop is removed.
+- Each handler is a thin forwarder to a single generic gRPC RPC,
+  `InvokeCapability(name, argsJSON) → resultJSON`, served by the agent server. The agent
+  resolves the capability from the shared registry and runs `Execute` with `Services`.
+  The MCP server and agent server keep their existing gRPC boundary — the same boundary
+  that lets the MCP server target a remote `cercano agent`. The N bespoke proxy handlers
+  (each hand-building a prompt and calling `ProcessRequest`) collapse into this one path:
+  the duplicated logic is gone even though the transport stays.
 - `Tier` is declared as metadata; the host's own permission system does the gating.
   `Call.RequestPermission` resolves to a no-op (allow) since Cercano does not double-gate
   inside someone else's agent.
+
+### New gRPC RPC: `InvokeCapability`
+
+The recon confirmed the MCP server holds no in-process handle to the agent — even in
+embedded `--mcp` mode it dials the agent over gRPC on a loopback listener
+(`mcpserver.NewServer(grpcClient)` gets only a `proto.AgentClient`), and in external
+mode it targets a remote `cercano agent`. Rather than restructure that wiring, unification
+adds one generic RPC the agent serves:
+
+```
+rpc InvokeCapability(InvokeCapabilityRequest) returns (InvokeCapabilityResponse);
+
+message InvokeCapabilityRequest  { string name = 1; bytes args_json = 2; string work_dir = 3; }
+message InvokeCapabilityResponse { bytes result_json = 1; bool is_error = 2; string error = 3; }
+```
+
+This is deliberate: the gRPC server-comm architecture is foundational for longer-term
+goals (remote agents, multiple clients sharing one agent). Unification removes duplicated
+*logic*, not the transport.
 
 ### Naming across surfaces
 
@@ -171,7 +201,9 @@ duplication.
    the shared registry through the agent adapter. One read-file implementation total.
 3. **The MCP co-processor handlers** (`summarize`, `extract`, `classify`, `explain`,
    `fetch`, `research`, `document`, `deep_research`) → become capabilities, exposed via
-   the MCP adapter, executed in-process. The internal gRPC hop for these is removed.
+   the MCP adapter. Each is invoked through the generic `InvokeCapability` RPC instead of
+   its own bespoke `ProcessRequest`-with-a-hand-built-prompt handler. The gRPC boundary
+   stays; the per-handler duplication does not.
 
 ### What stays as-is (deliberately not forced into the model)
 
@@ -179,9 +211,11 @@ duplication.
   management, not model-invoked work; they remain MCP tools / RPCs.
 - **`dispatch`** stays for now. It is the subagent engine (Tier 2) and will fold into the
   subagent capability there, not in this foundation.
-- **The CLI ↔ agent-server gRPC boundary** stays. That is a legitimate process split
-  (the CLI is a separate process from the singleton agent). Only the *internal*
-  MCP-handler → gRPC hop is removed, and only where the agent is already embedded.
+- **The gRPC server-comm architecture** stays — for both the CLI ↔ agent split and the
+  MCP ↔ agent split (the latter also enables pointing the MCP server at a remote
+  `cercano agent`). This is deliberate and foundational for longer-term goals.
+  Unification removes duplicated *logic*, not the transport: the bespoke per-tool proxy
+  handlers are replaced by one generic `InvokeCapability` RPC.
 - **Provider layer, conversation store, SmartRouter, context meter** — untouched.
 
 ## Data flow
@@ -201,9 +235,11 @@ model emits tool_use ("Edit")
 ```
 host calls cercano_summarize
   → mcp adapter validates args against Schema
-  → builds *Call (args, workdir, RequestPermission=allow, Emit=mcp progress)
-  → Capability.Execute(ctx, call) using Services (in-process)
-  → *Result → MCP CallToolResult → back to host
+  → forwards to agent via InvokeCapability("summarize", argsJSON) over gRPC
+  → agent resolves "summarize" in the shared registry
+  → builds *Call (args, workdir, RequestPermission=allow, Emit=progress)
+  → Capability.Execute(ctx, call) using Services
+  → resultJSON → MCP CallToolResult → back to host
 ```
 
 ## Error handling

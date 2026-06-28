@@ -133,6 +133,8 @@ type Call struct {
 	// Emit streams progress events back to the surface. Nil-safe — capabilities
 	// must tolerate a nil Emit.
 	Emit func(note string)
+	// Svc gives the capability access to shared services; set by the adapter/handler that invokes it.
+	Svc Services
 }
 
 // Capability is the single implementation surface for a thing Cercano can do.

@@ -259,15 +259,31 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		fmt.Fprintf(os.Stderr, "[WARN] keychain unavailable (%v) — cloud profiles can't load keys; fallback deferred.\n", err)
 	}
 
-	// One-time relocation: if a legacy inline API key is still in the config
-	// and the keychain has no entry for the active profile yet, move it over
-	// and blank the YAML field so it doesn't persist in plain text.
+	// One-time relocation: if a legacy inline API key is still in the config,
+	// ensure it is safely in the keychain and then blank the YAML field so it
+	// never persists in plain text.  Two cases are handled:
+	//   1. Key not yet in keychain → Set it, then blank+save.
+	//   2. Key already in keychain but yaml still set (previous run saved the
+	//      keychain entry but failed to blank the yaml) → blank+save only.
+	// We NEVER blank the yaml unless the key is confirmed present in the keychain.
 	if cfg.CloudAPIKey != "" && cfg.ActiveCloudProfile != "" {
 		if store, err := secrets.OpenKeychain(); err == nil {
-			if _, gerr := store.Get(cfg.ActiveCloudProfile); gerr != nil {
+			keySafe := false
+			if _, gerr := store.Get(cfg.ActiveCloudProfile); gerr == nil {
+				// Already in keychain.
+				keySafe = true
+			} else {
+				// Not in keychain yet — store it first.
 				if serr := store.Set(cfg.ActiveCloudProfile, cfg.CloudAPIKey); serr == nil {
-					cfg.CloudAPIKey = ""
-					_ = config.Save(cfg, config.DefaultPath())
+					keySafe = true
+				} else {
+					fmt.Fprintf(os.Stderr, "[WARN] keychain Set failed (%v) — plaintext key NOT blanked in config\n", serr)
+				}
+			}
+			if keySafe {
+				cfg.CloudAPIKey = ""
+				if sverr := config.Save(cfg, config.DefaultPath()); sverr != nil {
+					fmt.Fprintf(os.Stderr, "[WARN] config save failed after key relocation (%v) — plaintext key may persist\n", sverr)
 				}
 			}
 		}

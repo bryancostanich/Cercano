@@ -222,6 +222,14 @@ func (s *Server) rebuildCloud() error {
 			key = k
 		}
 	}
+	// If neither a key nor a proxy BaseURL is present the profile cannot
+	// authenticate.  Install the absent sentinel rather than wiring a dead
+	// provider.  The BaseURL carve-out preserves proxy/Meridian setups where
+	// the proxy handles auth and an empty key is intentional.
+	if key == "" && p.BaseURL == "" {
+		s.installAbsentCloud("no API key for profile " + p.Name)
+		return fmt.Errorf("no API key for profile %s", p.Name)
+	}
 	prov, err := cloudfactory.BuildCloudProvider(p, key)
 	if err != nil {
 		s.installAbsentCloud(err.Error())

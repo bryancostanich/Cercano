@@ -35,8 +35,8 @@ import (
 	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
-	"cercano/source/server/internal/llm/anthropic"
 	ollamallm "cercano/source/server/internal/llm/ollama"
+	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/localruntime"
 	runtimellama "cercano/source/server/internal/localruntime/llamaserver"
 	"cercano/source/server/internal/loop"
@@ -118,42 +118,10 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	localEngine, localModel := selectLocalEngine(cfg, ollamaEng, llamaEng)
 	localProvider := legacymodels.NewLocalModelProvider(localEngine, localModel)
 
-	// Cloud provider: only construct a real one when there's enough config to
-	// actually reach a cloud. Otherwise return a sentinel that auto-degrades
-	// to local at turn time with a visible scrollback notice. No silent mock.
-	//
-	// Dual-path note (native tool calling migration; see docs/features/cli/native-tool-calling/design.md):
-	//   - Anthropic cloud: StreamProcessRequest uses the new layered provider
-	//     wired below via srv.SetCloudLLMProvider (internal/llm/anthropic).
-	//     The legacymodels.NewCloudModelProvider built here remains as the
-	//     fallback path for the older ProcessRequestStream entrypoint.
-	//   - Other providers (Google, etc.) + local: legacy ModelProvider path
-	//     via langchaingo. internal/legacymodels/langchain.go stays in place
-	//     un-imported elsewhere; scheduled for cleanup once all providers
-	//     migrate to the layered interface.
-	var cloudProvider agent.ModelProvider
-	canConfigureCloud := cfg.CloudProvider != "" && (cfg.CloudAPIKey != "" || cfg.CloudBaseURL != "")
-	if canConfigureCloud {
-		fmt.Fprintf(os.Stderr, "Initializing Cloud Provider (%s)...\n", cfg.CloudProvider)
-		if cfg.CloudBaseURL != "" {
-			fmt.Fprintf(os.Stderr, "  baseURL: %s\n", cfg.CloudBaseURL)
-		}
-		cp, err := legacymodels.NewCloudModelProvider(context.Background(), cfg.CloudProvider, cfg.CloudModel, cfg.CloudAPIKey, cfg.CloudBaseURL)
-		if err == nil {
-			cloudProvider = cp
-		} else {
-			fmt.Fprintf(os.Stderr, "Failed to init Cloud Provider: %v — cloud routing will degrade to local.\n", err)
-			cloudProvider = legacymodels.NewAbsentCloudProvider("provider init failed: " + err.Error())
-		}
-	}
-	if cloudProvider == nil {
-		reason := "no API key or base URL configured"
-		if cfg.CloudProvider == "" {
-			reason = "no provider selected"
-		}
-		cloudProvider = legacymodels.NewAbsentCloudProvider(reason)
-		fmt.Fprintf(os.Stderr, "Cloud provider absent (%s); routing will degrade to local with notice.\n", reason)
-	}
+	// Cloud provider: start with the absent sentinel; RebuildCloud() (called
+	// after secrets are wired below) resolves the active profile's key from
+	// the OS keychain and installs the real provider.
+	cloudProvider := legacymodels.NewAbsentCloudProvider("pending profile resolution")
 
 	validator := tools.NewAutoValidator(tools.DefaultLoader(), tools.DefaultKindToValidator())
 	sessionSvc := session.InMemoryService()
@@ -283,16 +251,32 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		fmt.Fprintf(os.Stderr, "[WARN] permission file watcher not started (%v) — /strict etc. still push; hand-edits won't.\n", err)
 	}
 
-	// Layered LLM provider for native tool calling. Constructed only when
-	// the cloud is actually configured (anthropic-only for V1). When absent,
-	// StreamProcessRequest falls back to the legacy ProcessRequestStream path.
-	if canConfigureCloud && strings.EqualFold(cfg.CloudProvider, "anthropic") {
-		client := anthropic.NewClient(anthropic.Config{
-			BaseURL: cfg.CloudBaseURL,
-			APIKey:  cfg.CloudAPIKey,
-			Model:   cfg.CloudModel,
-		})
-		srv.SetCloudLLMProvider(client)
+	// Open OS keychain and attach it so profile RPCs and rebuildCloud can
+	// read API keys. Failure is non-fatal: cloud stays absent.
+	if store, err := secrets.OpenKeychain(); err == nil {
+		srv.SetSecrets(store)
+	} else {
+		fmt.Fprintf(os.Stderr, "[WARN] keychain unavailable (%v) — cloud profiles can't load keys; fallback deferred.\n", err)
+	}
+
+	// One-time relocation: if a legacy inline API key is still in the config
+	// and the keychain has no entry for the active profile yet, move it over
+	// and blank the YAML field so it doesn't persist in plain text.
+	if cfg.CloudAPIKey != "" && cfg.ActiveCloudProfile != "" {
+		if store, err := secrets.OpenKeychain(); err == nil {
+			if _, gerr := store.Get(cfg.ActiveCloudProfile); gerr != nil {
+				if serr := store.Set(cfg.ActiveCloudProfile, cfg.CloudAPIKey); serr == nil {
+					cfg.CloudAPIKey = ""
+					_ = config.Save(cfg, config.DefaultPath())
+				}
+			}
+		}
+	}
+
+	// Resolve the active cloud profile and wire both the legacy and native
+	// cloud providers. Errors are logged but not fatal.
+	if err := srv.RebuildCloud(); err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] cloud profile resolution failed: %v — cloud routing will degrade to local.\n", err)
 	}
 
 	// Native tool-loop local provider (Ollama). Wired unconditionally so Local

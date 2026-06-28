@@ -184,15 +184,21 @@ func (h *serverHandle) ready(wait time.Duration) readyFunc {
 	}
 }
 
-// List returns a snapshot of every hosted server's status.
-// Lock ordering: Manager.mu is held for the duration; each serverHandle.mu is
-// acquired and released sequentially inside. This is the only place both mutexes
-// are held at once, and the ordering is always Manager.mu → serverHandle.mu.
+// List returns a snapshot of every hosted server's status. It copies the handle
+// set under Manager.mu, releases it, then reads each handle under its own
+// serverHandle.mu — so a slow handle read never blocks Add/Remove/Restart that
+// also need Manager.mu. The two mutexes are never held simultaneously here;
+// where both are taken elsewhere the order is always Manager.mu → serverHandle.mu.
 func (m *Manager) List() []ServerStatus {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := make([]ServerStatus, 0, len(m.servers))
+	handles := make([]*serverHandle, 0, len(m.servers))
 	for _, h := range m.servers {
+		handles = append(handles, h)
+	}
+	m.mu.Unlock()
+
+	out := make([]ServerStatus, 0, len(handles))
+	for _, h := range handles {
 		h.mu.Lock()
 		out = append(out, ServerStatus{Name: h.name, State: h.state, ToolCount: len(h.tools), Err: h.err})
 		h.mu.Unlock()
@@ -276,20 +282,27 @@ func (m *Manager) Restart(ctx context.Context, name string) error {
 
 // teardown unregisters a server's tools and closes its connection.
 // It marks h.defunct and cancels h's dial/listTools context so any in-flight
-// startServer goroutine for this handle will bail without registering.
+// startServer goroutine for this handle will bail without registering. The tool
+// names and connection are captured under h.mu, then the lock is released before
+// the per-tool Unregister calls (which take the registry lock) and the conn
+// close — so a concurrent ready() on this handle isn't stalled for the whole
+// teardown. Marking defunct under the lock first guarantees the in-flight
+// goroutine can't register new tools after this snapshot.
 func (m *Manager) teardown(h *serverHandle) {
 	h.mu.Lock()
 	h.defunct = true
 	if h.cancel != nil {
 		h.cancel()
 	}
-	for _, name := range h.tools {
-		m.reg.Unregister(name)
-	}
+	tools := h.tools
 	h.tools = nil
 	c := h.conn
 	h.conn = nil
 	h.mu.Unlock()
+
+	for _, name := range tools {
+		m.reg.Unregister(name)
+	}
 	if c != nil {
 		_ = c.close()
 	}

@@ -92,9 +92,6 @@ func flattenContent(content []mcp.Content) string {
 			b.WriteString(tc.Text)
 		}
 	}
-	if b.Len() == 0 {
-		return ""
-	}
 	return b.String()
 }
 

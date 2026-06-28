@@ -8,6 +8,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// CloudProfile is one named cloud provider configuration. The API key is NOT
+// stored here — it lives in the OS keychain keyed by Name.
+type CloudProfile struct {
+	Name    string `yaml:"name"`
+	Flavor  string `yaml:"flavor"` // messages | chat_completions | responses | bedrock
+	BaseURL string `yaml:"base_url"`
+	Model   string `yaml:"model"`
+}
+
 // Config holds all Cercano configuration values.
 type Config struct {
 	OllamaURL      string `yaml:"ollama_url"`
@@ -21,11 +30,13 @@ type Config struct {
 	// Use this to point cercano at a local Anthropic-compatible proxy such as
 	// Meridian (default http://127.0.0.1:3456). When set with the anthropic
 	// provider, an empty API key is accepted — the proxy handles auth.
-	CloudBaseURL string            `yaml:"cloud_base_url"`
-	LocusMode    string            `yaml:"locus_mode"` // cloud_only|cloud_primary|local_primary|local_only
-	Port         string            `yaml:"port"`
-	LlamaServer  LlamaServerConfig `yaml:"llama_server"`
-	Compaction   CompactionConfig  `yaml:"compaction"`
+	CloudBaseURL       string           `yaml:"cloud_base_url"`
+	CloudProfiles      []CloudProfile   `yaml:"cloud_profiles"`
+	ActiveCloudProfile string           `yaml:"active_cloud_profile"`
+	LocusMode          string           `yaml:"locus_mode"` // cloud_only|cloud_primary|local_primary|local_only
+	Port               string           `yaml:"port"`
+	LlamaServer        LlamaServerConfig `yaml:"llama_server"`
+	Compaction         CompactionConfig  `yaml:"compaction"`
 }
 
 // CompactionConfig controls background context compaction. Thresholds are token
@@ -135,6 +146,28 @@ func DefaultPath() string {
 	return filepath.Join(home, ".config", "cercano", "config.yaml")
 }
 
+// migrateCloudProfiles synthesizes a "default" profile from the legacy
+// single-cloud fields when no profiles exist yet. Metadata only — the inline
+// cloud_api_key is relocated to the keychain by the startup wiring, not here
+// (config has no keychain dependency). No-op if profiles already exist or no
+// legacy cloud is configured.
+func migrateCloudProfiles(cfg *Config) {
+	if len(cfg.CloudProfiles) > 0 || cfg.CloudProvider == "" {
+		return
+	}
+	flavor := ""
+	if cfg.CloudProvider == "anthropic" {
+		flavor = "messages"
+	}
+	cfg.CloudProfiles = []CloudProfile{{
+		Name:    "default",
+		Flavor:  flavor,
+		BaseURL: cfg.CloudBaseURL,
+		Model:   cfg.CloudModel,
+	}}
+	cfg.ActiveCloudProfile = "default"
+}
+
 // Load reads config from the given path, merges with defaults, then applies
 // environment variable overrides. Returns defaults if the file doesn't exist.
 func Load(path string) (Config, error) {
@@ -176,6 +209,7 @@ func Load(path string) (Config, error) {
 	}
 
 	applyEnvOverrides(&cfg)
+	migrateCloudProfiles(&cfg)
 	return cfg, nil
 }
 

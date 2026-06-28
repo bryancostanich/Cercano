@@ -44,9 +44,10 @@ active_cloud_profile: claude
 
 ## 2. Secrets — OS keychain
 
-A new `internal/secrets` package wraps a cross-platform library
-(`zalando/go-keyring`: macOS Keychain, Windows Credential Manager, Linux Secret
-Service). Interface:
+A new `internal/secrets` package wraps `99designs/keyring` (macOS Keychain,
+Windows Credential Manager, Linux Secret Service — chosen over `zalando/go-keyring`
+for its pluggable fallback backends, which the deferred headless case will reuse).
+Interface:
 
 ```go
 Get(profile string) (string, error)
@@ -70,17 +71,42 @@ APIKey, Model})`. Any other flavor returns `fmt.Errorf("flavor %q not yet
 supported", p.Flavor)`. **This is the single extension point** for sub-projects
 2–4.
 
-## 4. Wiring
+## 4. Wiring — one cloud system (untangle the dual paths)
 
-At startup and whenever the active profile (or its key) changes: resolve the
-active profile → fetch its key from the keychain → `BuildCloudProvider` →
-`srv.SetCloudLLMProvider(...)`.
+Cercano has two cloud client systems today:
+- **Native tool-loop cloud** — `s.cloudLLMProvider` (`llm.Provider`); the modern
+  path the main agent loop uses. Anthropic-only.
+- **Legacy langchaingo cloud** — `legacymodels.CloudModelProvider`
+  (`agent.ModelProvider`), registered in the router as `"CloudModel"`. Hardwired
+  to `anthropic` + `googleai` (the only two langchaingo imports). **The
+  co-processor cloud tier uses this one** (`processCoproc` grabs
+  `providers["CloudModel"]`).
 
-The existing legacy langchaingo co-processor cloud (`CloudModel` via
-`legacymodels.NewCloudModelProvider`) is also driven from the active profile's
-fields (provider-name mapped from flavor where possible, plus model / base_url /
-key), so co-proc cloud keeps working. **Full unification of the two cloud paths
-(native `llm.Provider` vs legacy langchaingo) is out of scope.**
+Leaving these split means a new profile (e.g. OpenAI) would serve the main
+tool-loop but **not** the co-proc tier under Cloud Only (langchaingo can't serve
+it) — a silent gap exactly for the providers we're adding. So this sub-project
+**unifies onto the native factory**:
+
+1. Add an adapter `llmProviderModelProvider` that wraps any `llm.Provider` as an
+   `agent.ModelProvider` — its `Process(req)` does a one-shot `Chat` (no tools)
+   and returns the text as a `*agent.Response`.
+2. Build the active profile's `llm.Provider` via `BuildCloudProvider`, feed it to
+   the native tool-loop (`srv.SetCloudLLMProvider`) **and**, wrapped in the
+   adapter, register it as the router's `"CloudModel"` — replacing the langchaingo
+   provider.
+3. Resolve/rebuild both at startup and whenever the active profile (or its key)
+   changes.
+
+Result: one cloud system. Every profile works for the tool-loop **and** the
+co-proc tier. This also retires the langchaingo cloud path (progress toward the
+deferred SmartRouter-shelving cleanup).
+
+**Consequence — `google`:** langchaingo is the *only* current backend for Google.
+Retiring it means a `google` profile has no resolvable flavor until the
+`chat_completions` flavor lands (sub-project 2, which reaches Gemini via its
+OpenAI-compatible endpoint). Practically minor — the wired/configured cloud is
+Anthropic — but noted: Google cloud is unsupported in the window between this
+sub-project and sub-project 2.
 
 ## 5. Runtime management (CLI + RPC)
 
@@ -105,9 +131,8 @@ On config load, if `cloud_profiles` is empty but the legacy
 3. Set `active_cloud_profile = default`.
 
 One-time and automatic; it also de-plaintexts the existing key. A `google` legacy
-provider becomes a profile with no resolvable native flavor yet — it stays
-metadata-only (and keeps working through the legacy co-proc path) until a
-matching flavor lands.
+config becomes a profile with no resolvable flavor yet (see §4 consequence) — it
+is metadata-only until the `chat_completions` flavor lands in sub-project 2.
 
 ## 7. Error handling
 
@@ -123,7 +148,10 @@ matching flavor lands.
   yaml field blanked.
 - Factory: `messages` → anthropic client; unknown flavor → error.
 - Secrets layer against a mock keyring (Get/Set/Delete).
-- Active-switch rebuilds the native cloud provider.
+- `llmProviderModelProvider` adapter: `Process` does a one-shot `Chat` and maps
+  the result to `*agent.Response` (against a fake `llm.Provider`).
+- Active-switch rebuilds both the native cloud provider and the router's
+  `"CloudModel"`.
 
 ## Out of scope (explicit)
 

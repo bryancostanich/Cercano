@@ -58,15 +58,16 @@ flatter, so the adapter maps:
 
 OpenAI streams `choices[0].delta`. Two wrinkles the reader handles:
 
-- **Fragmented tool calls:** `delta.ToolCalls[i]` arrive in pieces — the first
-  chunk carries `Index`, `ID`, `Function.Name`; later chunks append
-  `Function.Arguments` fragments. The reader **accumulates arguments per index**
-  and emits the `llm.StreamEvent`s the tool-loop expects (text deltas as they
-  arrive; a tool-use event with the complete `ToolInputRaw` once that tool call’s
-  arguments finish, i.e. at the next index or stream end).
+- **Fragmented tool calls:** `delta.ToolCalls[i]` arrive in pieces. The reader
+  mirrors `internal/llm/anthropic/stream.go`: emits `EventToolUseStart` when a
+  tool index first appears, `EventToolUseInputDelta` events for each argument
+  fragment (carried in the event’s TextDelta field) as they arrive, and
+  `EventToolUseStop` when that index ends (new index or stream end). The tool-loop
+  reassembles the complete arguments from the fragments.
 - **Usage:** OpenAI omits `usage` from streams unless asked. The request sets
-  `StreamOptions{IncludeUsage: true}`; the final usage chunk populates
-  `InputTokens`/`OutputTokens` on the terminal `llm.StreamEvent`.
+  `StreamOptions{IncludeUsage: true}`; the terminal `EventMessageStop` carries
+  both `InputTokens` and `OutputTokens` (OpenAI reports usage only on a final
+  `include_usage` chunk).
 
 Emit `llm.StreamEvent`s matching the existing `StreamEventType` vocabulary the
 anthropic reader produces (message start/stop, text delta, tool-use), so the
@@ -101,16 +102,15 @@ No auto-migration (decided). A user reaches Gemini, Groq, etc. by creating a
 | Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | Requires Gemini API key |
 | Groq | `https://api.groq.com/openai/v1` | Requires Groq API key |
 
-**Setup flow:**
+**Setup flow** — store the key, then add a profile and activate it:
 
 ```bash
 /cloud key <name> <API_KEY>
 ```
 
-Then edit `~/.config/cercano/config.yaml` to add a profile:
-
 ```yaml
-profiles:
+# ~/.config/cercano/config.yaml
+cloud_profiles:
   - name: gemini
     flavor: chat_completions
     base_url: https://generativelanguage.googleapis.com/v1beta/openai

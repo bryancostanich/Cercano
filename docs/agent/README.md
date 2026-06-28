@@ -76,7 +76,15 @@ Switch with `/strict`, `/permissive`, `/bypass`, or `/mode <name>`. Persists to 
 
 See [cloud-profiles.md](cloud-profiles.md) for full profile management and the `/cloud` CLI commands.
 
-The agent supports two cloud paths:
+The agent supports multiple cloud providers:
+
+### Supported cloud providers
+
+- **Anthropic** — via direct API key or Meridian (Claude Max OAuth)
+- **OpenAI-compatible** — OpenAI, Gemini, Groq, and others (see [cloud-openai.md](cloud-openai.md#5-openai-compatible-endpoints) for endpoint examples and setup)
+- **Local** — Ollama (offline, no API key needed)
+
+### Providers
 
 ### Meridian (Claude Max via OAuth)
 
@@ -134,7 +142,7 @@ Layered abstraction. The shared `Provider` interface exposes `Chat`, `StreamChat
 - `internal/llm/anthropic/` — uses `github.com/anthropics/anthropic-sdk-go` v1.51. Custom User-Agent RoundTripper for Meridian fingerprint compatibility.
 - `internal/llm/ollama/` — uses `github.com/ollama/ollama/api`.
 
-The internal `Block` type carries text / `tool_use` / `tool_result` and is the lingua franca. Each adapter translates SDK types ↔ `Block`.
+The internal `Block` type carries text / `tool_use` / `tool_result` / `image` and is the lingua franca. Each adapter translates SDK types ↔ `Block`. Image translation is plumbed at the provider layer ([vision-input.md](vision-input.md)), but the inbound path (CLI image attach) is not yet implemented.
 
 ### Tool loop (`internal/agent/toolloop.go`)
 
@@ -192,3 +200,4 @@ The decision is **agent-side**. The CLI just renders the `PermissionRequired` st
 
 - **`/tool` invoking W/X-tier** requires `/bypass` mode. The unary `InvokeTool` RPC can't stream a confirm prompt back to the CLI. Model-driven tool calls in normal chat flow always go through the gate correctly.
 - **Inline tool-call expand/collapse keybind** isn't implemented yet. Tool entries render folded; scroll your terminal to see args/results.
+- **Image input** is not yet implemented. Vision support is plumbed at the provider layer and adapters support images, but there is no CLI/inbound path to attach images to messages.

@@ -1,6 +1,6 @@
 # Vision (Image Input) — Provider-Layer Plumbing — Design
 
-**Status:** Design approved 2026-06-27. Not yet implemented. Built together with
+**Status:** Provider-layer plumbing implemented 2026-06-27. Inbound path still deferred. Built together with
 [cloud-openai.md](./cloud-openai.md) (the OpenAI provider's adapter consumes the
 image block).
 

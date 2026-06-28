@@ -193,6 +193,18 @@ func (s *Server) persistConfig() {
 	}
 }
 
+// installAbsentCloud clears the native cloud provider and points both the
+// router and the coordinator's CloudModel at the absent sentinel, so a failed
+// rebuild never leaves a half-wired cloud.
+func (s *Server) installAbsentCloud(reason string) {
+	s.SetCloudLLMProvider(nil)
+	absent := legacymodels.NewAbsentCloudProvider(reason)
+	s.router.SetCloudProvider(absent)
+	if s.coordinator != nil {
+		s.coordinator.SetCloudProvider(absent)
+	}
+}
+
 // rebuildCloud resolves the active profile + its key and rewires BOTH the native
 // tool-loop cloud provider and the router/coordinator CloudModel. On any failure
 // (no active profile, no key, unsupported flavor, keychain down) it clears the
@@ -201,8 +213,7 @@ func (s *Server) persistConfig() {
 func (s *Server) rebuildCloud() error {
 	p, ok := s.activeProfile()
 	if !ok {
-		s.SetCloudLLMProvider(nil)
-		s.router.SetCloudProvider(legacymodels.NewAbsentCloudProvider("no active cloud profile"))
+		s.installAbsentCloud("no active cloud profile")
 		return fmt.Errorf("no active cloud profile")
 	}
 	key := ""
@@ -213,8 +224,7 @@ func (s *Server) rebuildCloud() error {
 	}
 	prov, err := cloudfactory.BuildCloudProvider(p, key)
 	if err != nil {
-		s.SetCloudLLMProvider(nil)
-		s.router.SetCloudProvider(legacymodels.NewAbsentCloudProvider(err.Error()))
+		s.installAbsentCloud(err.Error())
 		return err
 	}
 	s.SetCloudLLMProvider(prov)

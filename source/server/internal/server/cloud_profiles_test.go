@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
@@ -85,7 +86,7 @@ func TestSetActiveCloudProfileMessagesOk(t *testing.T) {
 }
 
 func TestSetActiveCloudProfileUnsupportedFlavorGoesAbsent(t *testing.T) {
-	s, _ := newTestServer()
+	s, r := newTestServer()
 	if err := s.secrets.Set("cc-one", "sk-test"); err != nil {
 		t.Fatal(err)
 	}
@@ -99,6 +100,9 @@ func TestSetActiveCloudProfileUnsupportedFlavorGoesAbsent(t *testing.T) {
 	if s.cloudLLMProvider != nil {
 		t.Error("cloudLLMProvider should be nil (cleared) on build failure")
 	}
+	if _, ok := r.last.(*legacymodels.AbsentCloudProvider); !ok {
+		t.Errorf("router should hold AbsentCloudProvider after build failure, got %T", r.last)
+	}
 }
 
 func TestSetActiveCloudProfileNonexistent(t *testing.T) {
@@ -110,4 +114,46 @@ func TestSetActiveCloudProfileNonexistent(t *testing.T) {
 	if resp.Ok {
 		t.Error("want Ok=false for nonexistent profile")
 	}
+}
+
+func TestSetCloudProfileKey(t *testing.T) {
+	t.Run("existing profile sets key and has_key becomes true", func(t *testing.T) {
+		s, _ := newTestServer()
+		resp, err := s.SetCloudProfileKey(context.Background(), &proto.SetCloudProfileKeyRequest{
+			Name:   "messages-one",
+			ApiKey: "sk-test-key",
+		})
+		if err != nil {
+			t.Fatalf("SetCloudProfileKey: %v", err)
+		}
+		if !resp.Ok {
+			t.Fatalf("want Ok=true, got false: %s", resp.Error)
+		}
+		// GetCloudProfiles should now report has_key=true for messages-one.
+		listResp, err := s.GetCloudProfiles(context.Background(), &proto.GetCloudProfilesRequest{})
+		if err != nil {
+			t.Fatalf("GetCloudProfiles: %v", err)
+		}
+		hasKey := map[string]bool{}
+		for _, p := range listResp.Profiles {
+			hasKey[p.Name] = p.HasKey
+		}
+		if !hasKey["messages-one"] {
+			t.Error("messages-one: HasKey should be true after SetCloudProfileKey")
+		}
+	})
+
+	t.Run("nonexistent profile returns Ok=false", func(t *testing.T) {
+		s, _ := newTestServer()
+		resp, err := s.SetCloudProfileKey(context.Background(), &proto.SetCloudProfileKeyRequest{
+			Name:   "no-such-profile",
+			ApiKey: "sk-test-key",
+		})
+		if err != nil {
+			t.Fatalf("SetCloudProfileKey: %v", err)
+		}
+		if resp.Ok {
+			t.Error("want Ok=false for nonexistent profile name")
+		}
+	})
 }

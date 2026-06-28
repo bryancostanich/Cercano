@@ -208,6 +208,18 @@ func (m *mockAgentClient) RestartMcpServer(ctx context.Context, in *proto.Restar
 	return &proto.RestartMcpServerResponse{}, nil
 }
 
+func (m *mockAgentClient) GetCloudProfiles(ctx context.Context, in *proto.GetCloudProfilesRequest, opts ...grpc.CallOption) (*proto.GetCloudProfilesResponse, error) {
+	return &proto.GetCloudProfilesResponse{}, nil
+}
+
+func (m *mockAgentClient) SetActiveCloudProfile(ctx context.Context, in *proto.SetActiveCloudProfileRequest, opts ...grpc.CallOption) (*proto.SetActiveCloudProfileResponse, error) {
+	return &proto.SetActiveCloudProfileResponse{Ok: true}, nil
+}
+
+func (m *mockAgentClient) SetCloudProfileKey(ctx context.Context, in *proto.SetCloudProfileKeyRequest, opts ...grpc.CallOption) (*proto.SetCloudProfileKeyResponse, error) {
+	return &proto.SetCloudProfileKeyResponse{Ok: true}, nil
+}
+
 func TestNewServer_RegistersTools(t *testing.T) {
 	mock := &mockAgentClient{}
 	s := NewServer(mock)

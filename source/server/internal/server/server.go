@@ -237,6 +237,9 @@ func (s *Server) rebuildCloud() error {
 	return nil
 }
 
+// RebuildCloud exports rebuildCloud for use by cmd/cercano/main.go at startup.
+func (s *Server) RebuildCloud() error { return s.rebuildCloud() }
+
 // GetCloudProfiles implements proto.AgentServer — returns the list of configured cloud profiles.
 func (s *Server) GetCloudProfiles(ctx context.Context, req *proto.GetCloudProfilesRequest) (*proto.GetCloudProfilesResponse, error) {
 	out := &proto.GetCloudProfilesResponse{Active: s.currentConfig.ActiveCloudProfile}

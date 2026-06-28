@@ -1,6 +1,6 @@
 # OpenAI Chat Completions Provider — Design
 
-**Status:** Design approved 2026-06-27. Not yet implemented.
+**Status:** Implemented 2026-06-27 (foundation-level).
 
 Sub-project 2 of the multi-cloud effort (foundation = [cloud-profiles.md](./cloud-profiles.md)).
 Add an `llm.Provider` that speaks the OpenAI **Chat Completions** API, parameterized
@@ -88,19 +88,38 @@ multi-part `image_url` content part — `ImageURL` passed through directly, or
 `ImageData` as a `data:<MediaType>;base64,<ImageData>` URI. Vision plumbing is
 built together with this provider (foundation first).
 
-## 5. Google / compat usage
+## 5. OpenAI-compatible endpoints
 
 No auto-migration (decided). A user reaches Gemini, Groq, etc. by creating a
-`chat_completions` profile with the right `base_url` + key + model, e.g.:
+`chat_completions` profile with the right `base_url` + key + model.
 
-```
-/cloud key gemini <GEMINI_API_KEY>
-# config.yaml profile: { name: gemini, flavor: chat_completions,
-#   base_url: https://generativelanguage.googleapis.com/v1beta/openai, model: gemini-2.5-flash }
+**Common endpoints:**
+
+| Provider | base_url | Notes |
+|---|---|---|
+| OpenAI | `(empty)` | Defaults to `api.openai.com` |
+| Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | Requires Gemini API key |
+| Groq | `https://api.groq.com/openai/v1` | Requires Groq API key |
+
+**Setup flow:**
+
+```bash
+/cloud key <name> <API_KEY>
 ```
 
-Document a couple of common `base_url`s (OpenAI default, Gemini-compat, Groq) in
-the agent docs. SP2 ships no provider-specific base_url logic — it's all
+Then edit `~/.config/cercano/config.yaml` to add a profile:
+
+```yaml
+profiles:
+  - name: gemini
+    flavor: chat_completions
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    model: gemini-2.5-flash
+```
+
+Activate with `/cloud use <name>`.
+
+SP2 ships no provider-specific base_url logic — it's all
 `base_url + key + model`.
 
 ## 6. Testing

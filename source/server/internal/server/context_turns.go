@@ -69,6 +69,14 @@ func contextTurnView(t conversation.Turn, tok contextmeter.Tokenizer) *proto.Con
 					if body == "" {
 						body = b.Text
 					}
+				case llm.BlockImage:
+					kind = "image"
+					if preview == "" {
+						preview = "[image]"
+					}
+					if body == "" {
+						body = "[image]"
+					}
 				}
 			}
 		}

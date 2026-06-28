@@ -112,6 +112,11 @@ service Agent {
   rpc AddMcpServer (AddMcpServerRequest) returns (AddMcpServerResponse) {}
   rpc RemoveMcpServer (RemoveMcpServerRequest) returns (RemoveMcpServerResponse) {}
   rpc RestartMcpServer (RestartMcpServerRequest) returns (RestartMcpServerResponse) {}
+
+  // ---- Cloud profile management ----
+  rpc GetCloudProfiles (GetCloudProfilesRequest) returns (GetCloudProfilesResponse) {}
+  rpc SetActiveCloudProfile (SetActiveCloudProfileRequest) returns (SetActiveCloudProfileResponse) {}
+  rpc SetCloudProfileKey (SetCloudProfileKeyRequest) returns (SetCloudProfileKeyResponse) {}
 }
 
 // Incremental token from LLM streaming.
@@ -627,3 +632,21 @@ message RemoveMcpServerResponse { bool ok = 1; string error = 2; }
 
 message RestartMcpServerRequest  { string name = 1; }
 message RestartMcpServerResponse { bool ok = 1; string error = 2; int32 tool_count = 3; }
+
+// Cloud profile management messages.
+message CloudProfileInfo {
+  string name = 1;
+  string flavor = 2;
+  string base_url = 3;
+  string model = 4;
+  bool   has_key = 5; // a key exists in the keychain for this profile
+}
+message GetCloudProfilesRequest {}
+message GetCloudProfilesResponse {
+  repeated CloudProfileInfo profiles = 1;
+  string active = 2;
+}
+message SetActiveCloudProfileRequest  { string name = 1; }
+message SetActiveCloudProfileResponse { bool ok = 1; string error = 2; }
+message SetCloudProfileKeyRequest  { string name = 1; string api_key = 2; }
+message SetCloudProfileKeyResponse { bool ok = 1; string error = 2; }

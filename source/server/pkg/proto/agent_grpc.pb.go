@@ -59,6 +59,9 @@ const (
 	Agent_AddMcpServer_FullMethodName               = "/agent.Agent/AddMcpServer"
 	Agent_RemoveMcpServer_FullMethodName            = "/agent.Agent/RemoveMcpServer"
 	Agent_RestartMcpServer_FullMethodName           = "/agent.Agent/RestartMcpServer"
+	Agent_GetCloudProfiles_FullMethodName           = "/agent.Agent/GetCloudProfiles"
+	Agent_SetActiveCloudProfile_FullMethodName      = "/agent.Agent/SetActiveCloudProfile"
+	Agent_SetCloudProfileKey_FullMethodName         = "/agent.Agent/SetCloudProfileKey"
 )
 
 // AgentClient is the client API for Agent service.
@@ -151,6 +154,10 @@ type AgentClient interface {
 	AddMcpServer(ctx context.Context, in *AddMcpServerRequest, opts ...grpc.CallOption) (*AddMcpServerResponse, error)
 	RemoveMcpServer(ctx context.Context, in *RemoveMcpServerRequest, opts ...grpc.CallOption) (*RemoveMcpServerResponse, error)
 	RestartMcpServer(ctx context.Context, in *RestartMcpServerRequest, opts ...grpc.CallOption) (*RestartMcpServerResponse, error)
+	// ---- Cloud profile management ----
+	GetCloudProfiles(ctx context.Context, in *GetCloudProfilesRequest, opts ...grpc.CallOption) (*GetCloudProfilesResponse, error)
+	SetActiveCloudProfile(ctx context.Context, in *SetActiveCloudProfileRequest, opts ...grpc.CallOption) (*SetActiveCloudProfileResponse, error)
+	SetCloudProfileKey(ctx context.Context, in *SetCloudProfileKeyRequest, opts ...grpc.CallOption) (*SetCloudProfileKeyResponse, error)
 }
 
 type agentClient struct {
@@ -588,6 +595,36 @@ func (c *agentClient) RestartMcpServer(ctx context.Context, in *RestartMcpServer
 	return out, nil
 }
 
+func (c *agentClient) GetCloudProfiles(ctx context.Context, in *GetCloudProfilesRequest, opts ...grpc.CallOption) (*GetCloudProfilesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetCloudProfilesResponse)
+	err := c.cc.Invoke(ctx, Agent_GetCloudProfiles_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) SetActiveCloudProfile(ctx context.Context, in *SetActiveCloudProfileRequest, opts ...grpc.CallOption) (*SetActiveCloudProfileResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetActiveCloudProfileResponse)
+	err := c.cc.Invoke(ctx, Agent_SetActiveCloudProfile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) SetCloudProfileKey(ctx context.Context, in *SetCloudProfileKeyRequest, opts ...grpc.CallOption) (*SetCloudProfileKeyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetCloudProfileKeyResponse)
+	err := c.cc.Invoke(ctx, Agent_SetCloudProfileKey_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServer is the server API for Agent service.
 // All implementations must embed UnimplementedAgentServer
 // for forward compatibility.
@@ -678,6 +715,10 @@ type AgentServer interface {
 	AddMcpServer(context.Context, *AddMcpServerRequest) (*AddMcpServerResponse, error)
 	RemoveMcpServer(context.Context, *RemoveMcpServerRequest) (*RemoveMcpServerResponse, error)
 	RestartMcpServer(context.Context, *RestartMcpServerRequest) (*RestartMcpServerResponse, error)
+	// ---- Cloud profile management ----
+	GetCloudProfiles(context.Context, *GetCloudProfilesRequest) (*GetCloudProfilesResponse, error)
+	SetActiveCloudProfile(context.Context, *SetActiveCloudProfileRequest) (*SetActiveCloudProfileResponse, error)
+	SetCloudProfileKey(context.Context, *SetCloudProfileKeyRequest) (*SetCloudProfileKeyResponse, error)
 	mustEmbedUnimplementedAgentServer()
 }
 
@@ -807,6 +848,15 @@ func (UnimplementedAgentServer) RemoveMcpServer(context.Context, *RemoveMcpServe
 }
 func (UnimplementedAgentServer) RestartMcpServer(context.Context, *RestartMcpServerRequest) (*RestartMcpServerResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RestartMcpServer not implemented")
+}
+func (UnimplementedAgentServer) GetCloudProfiles(context.Context, *GetCloudProfilesRequest) (*GetCloudProfilesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetCloudProfiles not implemented")
+}
+func (UnimplementedAgentServer) SetActiveCloudProfile(context.Context, *SetActiveCloudProfileRequest) (*SetActiveCloudProfileResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetActiveCloudProfile not implemented")
+}
+func (UnimplementedAgentServer) SetCloudProfileKey(context.Context, *SetCloudProfileKeyRequest) (*SetCloudProfileKeyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetCloudProfileKey not implemented")
 }
 func (UnimplementedAgentServer) mustEmbedUnimplementedAgentServer() {}
 func (UnimplementedAgentServer) testEmbeddedByValue()               {}
@@ -1528,6 +1578,60 @@ func _Agent_RestartMcpServer_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Agent_GetCloudProfiles_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetCloudProfilesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).GetCloudProfiles(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_GetCloudProfiles_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).GetCloudProfiles(ctx, req.(*GetCloudProfilesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_SetActiveCloudProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetActiveCloudProfileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).SetActiveCloudProfile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_SetActiveCloudProfile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).SetActiveCloudProfile(ctx, req.(*SetActiveCloudProfileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_SetCloudProfileKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetCloudProfileKeyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).SetCloudProfileKey(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_SetCloudProfileKey_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).SetCloudProfileKey(ctx, req.(*SetCloudProfileKeyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Agent_ServiceDesc is the grpc.ServiceDesc for Agent service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1682,6 +1786,18 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RestartMcpServer",
 			Handler:    _Agent_RestartMcpServer_Handler,
+		},
+		{
+			MethodName: "GetCloudProfiles",
+			Handler:    _Agent_GetCloudProfiles_Handler,
+		},
+		{
+			MethodName: "SetActiveCloudProfile",
+			Handler:    _Agent_SetActiveCloudProfile_Handler,
+		},
+		{
+			MethodName: "SetCloudProfileKey",
+			Handler:    _Agent_SetCloudProfileKey_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

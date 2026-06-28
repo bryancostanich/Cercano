@@ -74,6 +74,8 @@ Switch with `/strict`, `/permissive`, `/bypass`, or `/mode <name>`. Persists to 
 
 ## Cloud setup
 
+See [cloud-profiles.md](cloud-profiles.md) for full profile management and the `/cloud` CLI commands.
+
 The agent supports two cloud paths:
 
 ### Meridian (Claude Max via OAuth)

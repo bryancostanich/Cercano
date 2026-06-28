@@ -50,6 +50,38 @@ func TestBlock_RoundTrip_ToolResult(t *testing.T) {
 	}
 }
 
+func TestBlock_RoundTrip_Image_Base64(t *testing.T) {
+	in := Block{
+		Type:      BlockImage,
+		MediaType: "image/png",
+		ImageData: "QUJD",
+	}
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out Block
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Type != BlockImage || out.MediaType != "image/png" || out.ImageData != "QUJD" {
+		t.Errorf("image base64 round-trip mismatch: %+v", out)
+	}
+}
+
+func TestBlock_RoundTrip_Image_URL(t *testing.T) {
+	in := Block{
+		Type:     BlockImage,
+		ImageURL: "https://example.com/img.png",
+	}
+	b, _ := json.Marshal(in)
+	var out Block
+	_ = json.Unmarshal(b, &out)
+	if out.Type != BlockImage || out.ImageURL != "https://example.com/img.png" {
+		t.Errorf("image url round-trip mismatch: %+v", out)
+	}
+}
+
 func TestMessage_OrderedBlocks(t *testing.T) {
 	m := Message{Role: RoleAssistant, Blocks: []Block{
 		{Type: BlockText, Text: "I'll read it."},

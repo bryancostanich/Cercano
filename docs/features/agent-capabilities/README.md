@@ -88,6 +88,13 @@ Tier 2:  [5 Subagent engine] ←─────────┘
   planning, and subagent-execution sub-projects (Tier 2). Conductor's plan format is
   preferred; Superpowers' execution model is preferred.
 
+## Design notes (captured during planning, for the sub-projects they affect)
+
+- **Planning mode (#7):** at the end of generating a plan, do NOT just point the user at
+  the plan file to read. Offer to produce a concise, heavily bullet-pointed version of
+  the plan for review, and generate it on request. (Pointing someone to "go read the
+  plan" is a poor handoff; a tight bulleted digest respects their time.)
+
 ## Status
 
 - Tier 0 designs written; foundation is the current focus.

@@ -404,6 +404,9 @@ func collectStream(ctx context.Context, rdr llm.StreamReader, onText func(string
 			if ev.StopReason != "" {
 				out.StopReason = ev.StopReason
 			}
+			if ev.InputTokens > 0 {
+				out.InputTokens = ev.InputTokens
+			}
 			if ev.OutputTokens > 0 {
 				out.OutputTokens = ev.OutputTokens
 			}

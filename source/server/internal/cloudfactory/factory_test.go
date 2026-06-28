@@ -13,10 +13,14 @@ func TestBuildMessagesProvider(t *testing.T) {
 	}
 }
 
-func TestBuildUnsupportedFlavor(t *testing.T) {
-	if _, err := BuildCloudProvider(config.CloudProfile{Name: "c", Flavor: "chat_completions"}, "sk"); err == nil {
-		t.Error("chat_completions should be unsupported in the foundation")
+func TestBuildChatCompletionsProvider(t *testing.T) {
+	p, err := BuildCloudProvider(config.CloudProfile{Name: "o", Flavor: "chat_completions", Model: "gpt-4o"}, "sk")
+	if err != nil || p == nil || p.Name() != "openai" {
+		t.Fatalf("chat_completions → %v, %v", p, err)
 	}
+}
+
+func TestBuildUnsupportedFlavor(t *testing.T) {
 	if _, err := BuildCloudProvider(config.CloudProfile{Name: "c", Flavor: ""}, "sk"); err == nil {
 		t.Error("empty flavor should error")
 	}

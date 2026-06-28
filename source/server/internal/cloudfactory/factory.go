@@ -8,6 +8,7 @@ import (
 
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/llm/anthropic"
+	"cercano/source/server/internal/llm/openai"
 	"cercano/source/server/pkg/config"
 )
 
@@ -28,6 +29,8 @@ func BuildCloudProvider(p config.CloudProfile, apiKey string) (llm.Provider, err
 			APIKey:  apiKey,
 			Model:   p.Model,
 		}), nil
+	case FlavorChatCompletions:
+		return openai.NewClient(openai.Config{BaseURL: p.BaseURL, APIKey: apiKey, Model: p.Model}), nil
 	default:
 		return nil, fmt.Errorf("flavor %q not yet supported", p.Flavor)
 	}

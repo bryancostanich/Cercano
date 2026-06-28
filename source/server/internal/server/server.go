@@ -15,6 +15,7 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
+	"cercano/source/server/internal/cloudfactory"
 	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/compactor"
 	projectctx "cercano/source/server/internal/context"
@@ -28,6 +29,7 @@ import (
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
 	mcphost "cercano/source/server/internal/mcp_host"
+	"cercano/source/server/internal/secrets"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 )
@@ -67,6 +69,7 @@ type Server struct {
 	pendingDecisions    *agent.PendingDecisions
 	cloudLLMProvider    llm.Provider
 	localLLMProvider    llm.Provider // native-tool-loop local provider (Ollama)
+	secrets             secrets.Store
 	runtimeManager      localruntime.Manager
 	contextLoader       *projectctx.Loader
 
@@ -159,6 +162,120 @@ func (s *Server) SetCloudLLMProvider(p llm.Provider) { s.cloudLLMProvider = p }
 
 // SetLocalLLMProvider attaches the native-tool-calling local provider (Ollama).
 func (s *Server) SetLocalLLMProvider(p llm.Provider) { s.localLLMProvider = p }
+
+// SetSecrets attaches the secrets store used to retrieve profile API keys.
+func (s *Server) SetSecrets(st secrets.Store) { s.secrets = st }
+
+// activeProfile returns the configured active cloud profile, or false if none.
+func (s *Server) activeProfile() (config.CloudProfile, bool) {
+	for _, p := range s.currentConfig.CloudProfiles {
+		if p.Name == s.currentConfig.ActiveCloudProfile {
+			return p, true
+		}
+	}
+	return config.CloudProfile{}, false
+}
+
+// profileByName looks up a profile by name.
+func profileByName(profiles []config.CloudProfile, name string) (config.CloudProfile, bool) {
+	for _, p := range profiles {
+		if p.Name == name {
+			return p, true
+		}
+	}
+	return config.CloudProfile{}, false
+}
+
+// persistConfig saves the current config to disk if a configPath is set.
+func (s *Server) persistConfig() {
+	if s.configPath != "" {
+		_ = config.Save(s.currentConfig, s.configPath)
+	}
+}
+
+// rebuildCloud resolves the active profile + its key and rewires BOTH the native
+// tool-loop cloud provider and the router/coordinator CloudModel. On any failure
+// (no active profile, no key, unsupported flavor, keychain down) it clears the
+// native cloud provider and installs the absent-cloud sentinel — the agent keeps
+// running with cloud absent.
+func (s *Server) rebuildCloud() error {
+	p, ok := s.activeProfile()
+	if !ok {
+		s.SetCloudLLMProvider(nil)
+		s.router.SetCloudProvider(legacymodels.NewAbsentCloudProvider("no active cloud profile"))
+		return fmt.Errorf("no active cloud profile")
+	}
+	key := ""
+	if s.secrets != nil {
+		if k, err := s.secrets.Get(p.Name); err == nil {
+			key = k
+		}
+	}
+	prov, err := cloudfactory.BuildCloudProvider(p, key)
+	if err != nil {
+		s.SetCloudLLMProvider(nil)
+		s.router.SetCloudProvider(legacymodels.NewAbsentCloudProvider(err.Error()))
+		return err
+	}
+	s.SetCloudLLMProvider(prov)
+	mp := agent.NewLLMModelProvider(prov, p.Model)
+	s.router.SetCloudProvider(mp)
+	if s.coordinator != nil {
+		s.coordinator.SetCloudProvider(mp)
+	}
+	s.currentConfig.CloudModel = p.Model // keep CloudModel reporting consistent
+	return nil
+}
+
+// GetCloudProfiles implements proto.AgentServer — returns the list of configured cloud profiles.
+func (s *Server) GetCloudProfiles(ctx context.Context, req *proto.GetCloudProfilesRequest) (*proto.GetCloudProfilesResponse, error) {
+	out := &proto.GetCloudProfilesResponse{Active: s.currentConfig.ActiveCloudProfile}
+	for _, p := range s.currentConfig.CloudProfiles {
+		hasKey := false
+		if s.secrets != nil {
+			if _, err := s.secrets.Get(p.Name); err == nil {
+				hasKey = true
+			}
+		}
+		out.Profiles = append(out.Profiles, &proto.CloudProfileInfo{
+			Name: p.Name, Flavor: p.Flavor, BaseUrl: p.BaseURL, Model: p.Model, HasKey: hasKey,
+		})
+	}
+	return out, nil
+}
+
+// SetActiveCloudProfile implements proto.AgentServer — switches the active cloud profile.
+func (s *Server) SetActiveCloudProfile(ctx context.Context, req *proto.SetActiveCloudProfileRequest) (*proto.SetActiveCloudProfileResponse, error) {
+	if _, ok := profileByName(s.currentConfig.CloudProfiles, req.GetName()); !ok {
+		return &proto.SetActiveCloudProfileResponse{Ok: false, Error: fmt.Sprintf("no profile %q", req.GetName())}, nil
+	}
+	s.currentConfig.ActiveCloudProfile = req.GetName()
+	if err := s.rebuildCloud(); err != nil {
+		// active is set, but the provider couldn't be built — report it, keep going.
+		s.persistConfig()
+		return &proto.SetActiveCloudProfileResponse{Ok: false, Error: err.Error()}, nil
+	}
+	s.persistConfig()
+	return &proto.SetActiveCloudProfileResponse{Ok: true}, nil
+}
+
+// SetCloudProfileKey implements proto.AgentServer — stores an API key for a profile.
+func (s *Server) SetCloudProfileKey(ctx context.Context, req *proto.SetCloudProfileKeyRequest) (*proto.SetCloudProfileKeyResponse, error) {
+	if s.secrets == nil {
+		return &proto.SetCloudProfileKeyResponse{Ok: false, Error: "keychain unavailable"}, nil
+	}
+	if _, ok := profileByName(s.currentConfig.CloudProfiles, req.GetName()); !ok {
+		return &proto.SetCloudProfileKeyResponse{Ok: false, Error: fmt.Sprintf("no profile %q", req.GetName())}, nil
+	}
+	if err := s.secrets.Set(req.GetName(), req.GetApiKey()); err != nil {
+		return &proto.SetCloudProfileKeyResponse{Ok: false, Error: err.Error()}, nil
+	}
+	// If the key belongs to the active profile, rebuild so it takes effect now.
+	if req.GetName() == s.currentConfig.ActiveCloudProfile {
+		_ = s.rebuildCloud()
+	}
+	return &proto.SetCloudProfileKeyResponse{Ok: true}, nil
+}
 
 // resolveMainProvider picks the llm.Provider for the main tool-loop per the
 // active Locus Mode. Returns the provider, whether it's the cloud tier, whether

@@ -81,8 +81,11 @@ case FlavorChatCompletions:
     return openai.NewClient(openai.Config{BaseURL: p.BaseURL, APIKey: apiKey, Model: p.Model}), nil
 ```
 
-`Capabilities{SupportsTools: true, SupportsParallelTools: true, SupportsCaching: false, SupportsVision: false}`
-— conservative; compat endpoints vary and the tool-loop only needs `SupportsTools`.
+`Capabilities{SupportsTools: true, SupportsParallelTools: true, SupportsCaching: false, SupportsVision: true}`
+(`SupportsCaching` off — compat endpoints vary). The adapter includes **image
+translation** per [vision-input.md](./vision-input.md): a `BlockImage` becomes a
+multi-part `image_url` content part with a `data:<MediaType>;base64,<ImageData>`
+URI. Vision plumbing is built together with this provider (foundation first).
 
 ## 5. Google / compat usage
 
@@ -112,7 +115,9 @@ the agent docs. SP2 ships no provider-specific base_url logic — it's all
 ## Out of scope
 
 - OpenAI **Responses API** (sub-project 3) and **Bedrock** (sub-project 4).
-- Vision/image inputs and explicit prompt-caching controls.
+- Explicit prompt-caching controls.
+- The image **inbound path** (CLI attach + proto field) — see vision-input.md;
+  this sub-project plumbs image *translation* in the adapter, not image *capture*.
 - Auto-migrating legacy `google` configs (manual profile by decision).
 - Per-endpoint tool-calling fidelity: some compat backends support tools poorly or
   not at all — that surfaces as a runtime error from the backend, not something

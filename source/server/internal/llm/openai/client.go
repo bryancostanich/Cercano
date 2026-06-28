@@ -2,7 +2,6 @@ package openai
 
 import (
 	"context"
-	"fmt"
 
 	goopenai "github.com/sashabaranov/go-openai"
 
@@ -49,6 +48,11 @@ func (c *Client) buildRequest(req llm.ChatRequest, stream bool) goopenai.ChatCom
 		Tools:    toolsToOpenAI(req.Tools),
 		Stream:   stream,
 	}
+	if stream {
+		// Request usage on the final chunk so InputTokens/OutputTokens are
+		// available for EventMessageStop.
+		r.StreamOptions = &goopenai.StreamOptions{IncludeUsage: true}
+	}
 	if req.MaxTokens > 0 {
 		r.MaxTokens = req.MaxTokens
 	}
@@ -79,8 +83,12 @@ func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatRespons
 	return out, nil
 }
 
-// StreamChat is a TEMPORARY stub — real implementation lands in Task 6.
-// Remove this method when Task 6 is implemented.
-func (c *Client) StreamChat(_ context.Context, _ llm.ChatRequest) (llm.StreamReader, error) {
-	return nil, fmt.Errorf("openai: StreamChat not implemented (Task 6)")
+// StreamChat opens a streaming chat completion and returns a StreamReader that
+// emits llm.StreamEvents following the START→DELTA→STOP contract.
+func (c *Client) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.StreamReader, error) {
+	stream, err := c.api.CreateChatCompletionStream(ctx, c.buildRequest(req, true))
+	if err != nil {
+		return nil, err
+	}
+	return newStreamReader(stream), nil
 }

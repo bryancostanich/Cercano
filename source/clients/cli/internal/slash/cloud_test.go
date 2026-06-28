@@ -43,6 +43,9 @@ func TestFormatCloudProfilesMarksActive(t *testing.T) {
 			alphaLine = l
 		}
 	}
+	if alphaLine == "" {
+		t.Fatal("alpha row not found in output")
+	}
 	if strings.Contains(alphaLine, "*") {
 		t.Errorf("alpha row should not have active marker: %q", alphaLine)
 	}

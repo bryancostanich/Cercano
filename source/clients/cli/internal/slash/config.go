@@ -144,22 +144,6 @@ func formatConfig(cfg *agentclient.Config) string {
 	return b.String()
 }
 
-func formatCloud(cfg *agentclient.Config) string {
-	if cfg.CloudProvider == "" {
-		return "cloud: not configured. Set cloud-provider, then cloud-base-url and/or cloud-api-key."
-	}
-	endpoint := "default endpoint"
-	if cfg.CloudBaseURL != "" {
-		endpoint = cfg.CloudBaseURL
-	}
-	auth := "no api key"
-	if cfg.CloudAPIKeySet {
-		auth = "api key set"
-	}
-	return fmt.Sprintf("cloud: %s / %s @ %s (%s)  ·  last-turn state: %s",
-		cfg.CloudProvider, orDash(cfg.CloudModel), endpoint, auth, cfg.CloudState)
-}
-
 func orDash(s string) string {
 	if s == "" {
 		return "—"

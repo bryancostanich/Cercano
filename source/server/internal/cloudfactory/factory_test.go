@@ -25,3 +25,12 @@ func TestBuildUnsupportedFlavor(t *testing.T) {
 		t.Error("empty flavor should error")
 	}
 }
+
+func TestBuildChatCompletionsWithBackend(t *testing.T) {
+	p, err := BuildCloudProvider(config.CloudProfile{
+		Name: "g", Flavor: "chat_completions", Backend: "gemini", Model: "gemini-2.5-flash",
+	}, "sk")
+	if err != nil || p == nil || p.Name() != "openai" {
+		t.Fatalf("chat_completions+backend → %v, %v", p, err)
+	}
+}

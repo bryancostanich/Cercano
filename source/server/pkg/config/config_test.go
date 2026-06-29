@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestDefaults(t *testing.T) {
@@ -293,5 +295,16 @@ func TestMigrateIdempotent(t *testing.T) {
 	migrateCloudProfiles(&cfg)
 	if len(cfg.CloudProfiles) != 1 || cfg.CloudProfiles[0].Name != "x" {
 		t.Errorf("should not overwrite existing profiles: %+v", cfg.CloudProfiles)
+	}
+}
+
+func TestCloudProfileBackendYAML(t *testing.T) {
+	var p CloudProfile
+	y := "name: g\nflavor: chat_completions\nbackend: gemini\nbase_url: x\nmodel: m\n"
+	if err := yaml.Unmarshal([]byte(y), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Backend != "gemini" {
+		t.Errorf("backend=%q, want gemini", p.Backend)
 	}
 }

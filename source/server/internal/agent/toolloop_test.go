@@ -374,3 +374,25 @@ func TestToolLoopMCPConfirmsInPermissive(t *testing.T) {
 		t.Fatal("MCP tool must trigger a permission request in permissive mode")
 	}
 }
+
+func TestCollectStreamCarriesReasoning(t *testing.T) {
+	events := []llm.StreamEvent{
+		{Type: llm.EventReasoning, ReasoningID: "rs_1", ReasoningData: "ENC"},
+		{Type: llm.EventTextDelta, TextDelta: "hi"},
+		{Type: llm.EventMessageStop, InputTokens: 1, OutputTokens: 1},
+	}
+	rd := &scriptedStream{events: events}
+	resp, err := collectStream(context.Background(), rd, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Blocks) != 2 {
+		t.Fatalf("want 2 blocks, got %d: %+v", len(resp.Blocks), resp.Blocks)
+	}
+	if resp.Blocks[0].Type != llm.BlockReasoning || resp.Blocks[0].ReasoningID != "rs_1" || resp.Blocks[0].ReasoningData != "ENC" {
+		t.Fatalf("block0 = %+v", resp.Blocks[0])
+	}
+	if resp.Blocks[1].Type != llm.BlockText || resp.Blocks[1].Text != "hi" {
+		t.Fatalf("block1 = %+v", resp.Blocks[1])
+	}
+}

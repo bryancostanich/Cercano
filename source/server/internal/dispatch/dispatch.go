@@ -7,23 +7,26 @@ import (
 	"log"
 	"time"
 
+	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/engine"
 )
 
 // Loop runs an agentic tool-use conversation against an InferenceEngine.
 type Loop struct {
 	engine   engine.InferenceEngine
-	registry *Registry
+	reg      *capabilities.Registry
+	names    []string
 	model    string
 	maxTurns int
 }
 
-// NewLoop wires a Loop with the given engine, tool registry, model name, and turn cap.
-func NewLoop(eng engine.InferenceEngine, reg *Registry, model string, maxTurns int) *Loop {
+// NewLoop wires a Loop with the given engine, capability registry, capability
+// name allowlist, model name, and turn cap.
+func NewLoop(eng engine.InferenceEngine, reg *capabilities.Registry, names []string, model string, maxTurns int) *Loop {
 	if maxTurns <= 0 {
 		maxTurns = 50
 	}
-	return &Loop{engine: eng, registry: reg, model: model, maxTurns: maxTurns}
+	return &Loop{engine: eng, reg: reg, names: names, model: model, maxTurns: maxTurns}
 }
 
 // Run starts the loop in a goroutine. It returns an event channel and a
@@ -56,7 +59,7 @@ func (l *Loop) Run(ctx context.Context, seed []engine.ChatMessage, userMsg strin
 			req := engine.ChatRequest{
 				Model:    l.model,
 				Messages: *historyRef,
-				Tools:    schemasAsJSON(l.registry.Schemas()),
+				Tools:    l.schemasForNames(),
 			}
 			engineStart := time.Now()
 			resp, err := l.engine.ChatWithTools(ctx, req)
@@ -136,35 +139,45 @@ func (l *Loop) Run(ctx context.Context, seed []engine.ChatMessage, userMsg strin
 	return out, finalHistory
 }
 
-// runTool looks up the tool, runs it, and returns (resultText, ok, err).
+// runTool looks up the capability, runs it, and returns (resultText, ok, err).
 // ok=false indicates the result should be presented to the model as a failure
-// (unknown tool, bad args, tool returned error). err is non-nil only when the
-// tool itself failed to execute.
+// (unknown tool, bad args, capability returned error). err is non-nil only when
+// the capability itself failed to execute.
 func (l *Loop) runTool(ctx context.Context, tc engine.ToolCall) (string, bool, error) {
-	tool, ok := l.registry.Get(tc.Function.Name)
+	cap, ok := l.reg.Get(tc.Function.Name)
 	if !ok {
 		return fmt.Sprintf("tool %q not registered", tc.Function.Name), false, nil
 	}
 	if !json.Valid(tc.Function.Arguments) {
 		return fmt.Sprintf("invalid arguments: not valid JSON: %s", string(tc.Function.Arguments)), false, nil
 	}
-	result, err := tool.Run(ctx, tc.Function.Arguments)
+	res, err := cap.Execute(ctx, &capabilities.Call{Args: tc.Function.Arguments})
 	if err != nil {
 		return "", false, err
 	}
-	return result, true, nil
+	return res.LLMContent(), true, nil
 }
 
-// schemasAsJSON wraps Registry.Schemas() in the Ollama-expected envelope.
-func schemasAsJSON(in []ToolSchema) []engine.ToolSchemaJSON {
-	out := make([]engine.ToolSchemaJSON, 0, len(in))
-	for _, s := range in {
+// schemasForNames builds engine tool schemas for the named capabilities,
+// skipping any name not found in the registry.
+func (l *Loop) schemasForNames() []engine.ToolSchemaJSON {
+	out := make([]engine.ToolSchemaJSON, 0, len(l.names))
+	for _, name := range l.names {
+		cap, ok := l.reg.Get(name)
+		if !ok {
+			continue
+		}
+		var params map[string]interface{}
+		if err := json.Unmarshal(cap.Schema(), &params); err != nil {
+			log.Printf("dispatch: schema parse error for %q: %v", name, err)
+			continue
+		}
 		out = append(out, engine.ToolSchemaJSON{
 			Type: "function",
 			Function: engine.ToolFunctionJSON{
-				Name:        s.Name,
-				Description: s.Description,
-				Parameters:  s.Parameters,
+				Name:        cap.Name(),
+				Description: cap.Description(),
+				Parameters:  params,
 			},
 		})
 	}

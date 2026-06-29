@@ -9,6 +9,7 @@ import (
 
 	"google.golang.org/adk/session"
 
+	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/engine"
 
@@ -42,7 +43,7 @@ func newServerWithDispatch(t *testing.T, eng engine.InferenceEngine) *Server {
 	t.Helper()
 	mock := &mockAgentClient{}
 	s := NewServer(mock)
-	loop := dispatch.NewLoop(eng, dispatch.NewRegistry(), "qwen3-coder", 50)
+	loop := dispatch.NewLoop(eng, capabilities.NewRegistry(capabilities.Services{}), []string{}, "qwen3-coder", 50)
 	store := dispatch.NewStore(session.InMemoryService(), 100)
 	s.SetDispatch(loop, store)
 	return s

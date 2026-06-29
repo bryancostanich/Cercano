@@ -12,7 +12,7 @@ func TestBuildToolLoopSystem(t *testing.T) {
 		WorkDir: "/home/u/proj", Platform: "darwin", Date: "2026-06-24",
 		GitRepo: true, GitBranch: "main",
 	}
-	s := buildToolLoopSystem(env, "Cercano/\nkhalkulo/\nnotes.txt", "Cercano is a local-first AI dev tool.")
+	s := buildToolLoopSystem(env, "", "Cercano/\nkhalkulo/\nnotes.txt", "Cercano is a local-first AI dev tool.")
 
 	for _, want := range []string{
 		"/home/u/proj", "darwin", "2026-06-24", "branch main",
@@ -25,7 +25,7 @@ func TestBuildToolLoopSystem(t *testing.T) {
 }
 
 func TestBuildToolLoopSystem_NoGitNoExtras(t *testing.T) {
-	s := buildToolLoopSystem(loopEnv{WorkDir: "/p", Platform: "linux", Date: "2026-06-24"}, "", "")
+	s := buildToolLoopSystem(loopEnv{WorkDir: "/p", Platform: "linux", Date: "2026-06-24"}, "", "", "")
 	if !strings.Contains(s, "Is a git repository: no") {
 		t.Errorf("expected non-repo line, got:\n%s", s)
 	}

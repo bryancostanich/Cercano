@@ -249,6 +249,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	slash.RegisterLocus(reg, ag)
 	slash.RegisterContextView(reg)
 	slash.RegisterSettings(reg)
+	slash.RegisterTheme(reg)
 
 	splash := banner.NewAnimModel(p, banner.Meta{
 		Tagline: "local-first ai coprocessor",

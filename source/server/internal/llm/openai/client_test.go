@@ -1,7 +1,11 @@
 package openai
 
 import (
+	"bytes"
 	"context"
+	"image"
+	"image/color"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -44,5 +48,69 @@ func TestNewClientDefaultQuirks(t *testing.T) {
 	c := NewClient(Config{}) // empty backend → defensive default
 	if !c.quirks.ImagesAsBase64 || !c.quirks.NormalizeErrors {
 		t.Errorf("empty backend should get defensive quirks, got %+v", c.quirks)
+	}
+}
+
+// redPNGBytes returns a small solid-red PNG. http.DetectContentType reports
+// "image/png" for it.
+func redPNGBytes(t *testing.T) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	for y := 0; y < 8; y++ {
+		for x := 0; x < 8; x++ {
+			img.Set(x, y, color.RGBA{R: 220, G: 20, B: 20, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestResolveImageURLs(t *testing.T) {
+	pngBytes := redPNGBytes(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(pngBytes)
+	}))
+	defer srv.Close()
+
+	msgs := []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{
+		{Type: llm.BlockText, Text: "what color?"},
+		{Type: llm.BlockImage, ImageURL: srv.URL},
+	}}}
+
+	out, err := resolveImageURLs(context.Background(), msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := out[0].Blocks[1]
+	if got.ImageURL != "" {
+		t.Error("ImageURL should be cleared after resolution")
+	}
+	if got.ImageData == "" {
+		t.Error("ImageData should be populated")
+	}
+	if got.MediaType != "image/png" {
+		t.Errorf("MediaType = %q, want image/png", got.MediaType)
+	}
+	// Copy-on-write: the caller's original slice must be untouched.
+	if msgs[0].Blocks[1].ImageURL != srv.URL {
+		t.Error("resolveImageURLs mutated the caller's messages")
+	}
+}
+
+func TestResolveImageURLsNoop(t *testing.T) {
+	// A base64 block (no URL) and a text block pass through unchanged.
+	msgs := []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{
+		{Type: llm.BlockText, Text: "hi"},
+		{Type: llm.BlockImage, MediaType: "image/png", ImageData: "AAAA"},
+	}}}
+	out, err := resolveImageURLs(context.Background(), msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(out, msgs) {
+		t.Errorf("no-op changed messages: %+v", out)
 	}
 }

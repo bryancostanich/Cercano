@@ -27,8 +27,9 @@ import (
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
+	"cercano/source/server/internal/capabilities"
+	"cercano/source/server/internal/capabilities/builtins"
 	"cercano/source/server/internal/dispatch"
-	"cercano/source/server/internal/dispatch/builtin"
 	"cercano/source/server/internal/engine"
 	llamaengine "cercano/source/server/internal/engine/llamaserver"
 	"cercano/source/server/internal/engine/ollama"
@@ -1179,12 +1180,10 @@ func runMCPMode(cfg config.Config, externalGRPC string) {
 	// Wire cercano_dispatch: agentic local-LLM tool-use loop. Uses its own
 	// Ollama engine + in-memory session store (separate from the gRPC server's).
 	dispatchEng := ollama.NewOllamaEngine(cfg.OllamaURL)
-	dispatchReg := dispatch.NewRegistry()
-	_ = dispatchReg.Register(builtin.NewReadFile())
-	_ = dispatchReg.Register(builtin.NewWriteFile())
-	_ = dispatchReg.Register(builtin.NewShellExec())
-	_ = dispatchReg.Register(builtin.NewWebFetch())
-	dispatchLoop := dispatch.NewLoop(dispatchEng, dispatchReg, cfg.LocalModel, 50)
+	capReg := capabilities.NewRegistry(capabilities.Services{Engine: dispatchEng})
+	builtins.Register(capReg)
+	dispatchLoop := dispatch.NewLoop(dispatchEng, capReg,
+		[]string{"read_file", "write_file", "run_command"}, cfg.LocalModel, 50)
 	dispatchStore := dispatch.NewStore(session.InMemoryService(), 200)
 	s.SetDispatch(dispatchLoop, dispatchStore)
 

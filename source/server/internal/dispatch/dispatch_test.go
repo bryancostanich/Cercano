@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/engine"
 )
 
@@ -43,24 +44,32 @@ func (s *scriptedEngine) ChatWithTools(_ context.Context, req engine.ChatRequest
 	return r, e
 }
 
-type echoTool struct{}
+// echoCapability is a test capability that echoes its raw args back.
+type echoCapability struct{}
 
-func (echoTool) Name() string { return "echo" }
-func (echoTool) Schema() ToolSchema {
-	return ToolSchema{Name: "echo", Description: "echo arg", Parameters: map[string]interface{}{"type": "object"}}
+func (echoCapability) Name() string        { return "echo" }
+func (echoCapability) Description() string { return "echo arg" }
+func (echoCapability) Tier() capabilities.Tier { return capabilities.TierR }
+func (echoCapability) Schema() capabilities.Schema {
+	return json.RawMessage(`{"type":"object"}`)
 }
-func (echoTool) Run(_ context.Context, args json.RawMessage) (string, error) {
-	return "echoed:" + string(args), nil
+func (echoCapability) Surfaces() capabilities.Surface { return capabilities.SurfaceAgent }
+func (echoCapability) Execute(_ context.Context, call *capabilities.Call) (*capabilities.Result, error) {
+	return capabilities.NewTextResult("echoed:" + string(call.Args)), nil
 }
 
-type erroringTool struct{}
+// erroringCapability always returns an error.
+type erroringCapability struct{}
 
-func (erroringTool) Name() string { return "bad" }
-func (erroringTool) Schema() ToolSchema {
-	return ToolSchema{Name: "bad"}
+func (erroringCapability) Name() string        { return "bad" }
+func (erroringCapability) Description() string { return "" }
+func (erroringCapability) Tier() capabilities.Tier { return capabilities.TierR }
+func (erroringCapability) Schema() capabilities.Schema {
+	return json.RawMessage(`{"type":"object"}`)
 }
-func (erroringTool) Run(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", errors.New("boom")
+func (erroringCapability) Surfaces() capabilities.Surface { return capabilities.SurfaceAgent }
+func (erroringCapability) Execute(_ context.Context, _ *capabilities.Call) (*capabilities.Result, error) {
+	return nil, errors.New("boom")
 }
 
 func collectEvents(ch <-chan Event) []Event {
@@ -71,17 +80,17 @@ func collectEvents(ch <-chan Event) []Event {
 	return out
 }
 
-func newRegistryWith(tools ...Tool) *Registry {
-	r := NewRegistry()
-	for _, tool := range tools {
-		_ = r.Register(tool)
+func newCapRegistry(caps ...capabilities.Capability) *capabilities.Registry {
+	r := capabilities.NewRegistry(capabilities.Services{})
+	for _, c := range caps {
+		_ = r.Register(c)
 	}
 	return r
 }
 
 func TestLoop_PlainTextResponse(t *testing.T) {
 	eng := &scriptedEngine{responses: []engine.ChatResponse{{Content: "hello world"}}}
-	loop := NewLoop(eng, newRegistryWith(), "qwen3-coder", 50)
+	loop := NewLoop(eng, newCapRegistry(), []string{}, "qwen3-coder", 50)
 	ch, _ := loop.Run(context.Background(), nil, "hi")
 	events := collectEvents(ch)
 	if len(events) != 2 {
@@ -102,7 +111,7 @@ func TestLoop_SingleToolCallThenText(t *testing.T) {
 		}},
 		{Content: "done"},
 	}}
-	loop := NewLoop(eng, newRegistryWith(echoTool{}), "qwen3-coder", 50)
+	loop := NewLoop(eng, newCapRegistry(echoCapability{}), []string{"echo"}, "qwen3-coder", 50)
 	ch, _ := loop.Run(context.Background(), nil, "do it")
 	events := collectEvents(ch)
 	if len(events) != 4 {
@@ -129,7 +138,7 @@ func TestLoop_ToolErrorFedBackContinues(t *testing.T) {
 		}},
 		{Content: "oh well"},
 	}}
-	loop := NewLoop(eng, newRegistryWith(erroringTool{}), "x", 50)
+	loop := NewLoop(eng, newCapRegistry(erroringCapability{}), []string{"bad"}, "x", 50)
 	ch, _ := loop.Run(context.Background(), nil, "try it")
 	events := collectEvents(ch)
 	var foundFail bool
@@ -150,7 +159,7 @@ func TestLoop_UnknownToolFedBack(t *testing.T) {
 		}},
 		{Content: "ok"},
 	}}
-	loop := NewLoop(eng, newRegistryWith(), "x", 50)
+	loop := NewLoop(eng, newCapRegistry(), []string{}, "x", 50)
 	ch, _ := loop.Run(context.Background(), nil, "go")
 	events := collectEvents(ch)
 	var found bool
@@ -171,7 +180,7 @@ func TestLoop_InvalidArgsFedBack(t *testing.T) {
 		}},
 		{Content: "k"},
 	}}
-	loop := NewLoop(eng, newRegistryWith(erroringTool{}), "x", 50)
+	loop := NewLoop(eng, newCapRegistry(erroringCapability{}), []string{"bad"}, "x", 50)
 	ch, _ := loop.Run(context.Background(), nil, "")
 	events := collectEvents(ch)
 	if events[1].Kind != EventToolResult || events[1].ToolOK {
@@ -187,7 +196,7 @@ func TestLoop_Cancellation(t *testing.T) {
 		{Content: "should not happen"},
 	}}
 	ctx, cancel := context.WithCancel(context.Background())
-	loop := NewLoop(eng, newRegistryWith(echoTool{}), "x", 50)
+	loop := NewLoop(eng, newCapRegistry(echoCapability{}), []string{"echo"}, "x", 50)
 	ch, _ := loop.Run(ctx, nil, "go")
 
 	first := <-ch
@@ -214,7 +223,7 @@ func TestLoop_MaxTurnsCap(t *testing.T) {
 		}})
 	}
 	eng := &scriptedEngine{responses: resp}
-	loop := NewLoop(eng, newRegistryWith(echoTool{}), "x", 50)
+	loop := NewLoop(eng, newCapRegistry(echoCapability{}), []string{"echo"}, "x", 50)
 	ch, _ := loop.Run(context.Background(), nil, "go")
 	events := collectEvents(ch)
 	last := events[len(events)-1]
@@ -230,7 +239,7 @@ func TestLoop_HistoryAccumulates(t *testing.T) {
 		}},
 		{Content: "done"},
 	}}
-	loop := NewLoop(eng, newRegistryWith(echoTool{}), "x", 50)
+	loop := NewLoop(eng, newCapRegistry(echoCapability{}), []string{"echo"}, "x", 50)
 	ch, finalHist := loop.Run(context.Background(), nil, "go")
 	collectEvents(ch)
 	hist := finalHist()

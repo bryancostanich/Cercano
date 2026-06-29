@@ -37,8 +37,10 @@ func (f *ColorField) Update(msg tea.KeyPressMsg) (tea.Cmd, bool, string) {
 	if !f.editing {
 		if f.editable && msg.Code == tea.KeyEnter {
 			ti := textinput.New()
-			ti.CharLimit = 0
+			ti.CharLimit = 7
 			cmd := ti.Focus()
+			ti.SetValue(f.hex)
+			ti.CursorEnd()
 			f.input = ti
 			f.editing = true
 			return cmd, false, ""

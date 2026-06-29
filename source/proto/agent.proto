@@ -117,6 +117,8 @@ service Agent {
   rpc GetCloudProfiles (GetCloudProfilesRequest) returns (GetCloudProfilesResponse) {}
   rpc SetActiveCloudProfile (SetActiveCloudProfileRequest) returns (SetActiveCloudProfileResponse) {}
   rpc SetCloudProfileKey (SetCloudProfileKeyRequest) returns (SetCloudProfileKeyResponse) {}
+  rpc UpsertCloudProfile (UpsertCloudProfileRequest) returns (UpsertCloudProfileResponse) {}
+  rpc RemoveCloudProfile (RemoveCloudProfileRequest) returns (RemoveCloudProfileResponse) {}
 }
 
 // Incremental token from LLM streaming.
@@ -651,6 +653,7 @@ message CloudProfileInfo {
   string base_url = 3;
   string model = 4;
   bool   has_key = 5; // a key exists in the keychain for this profile
+  string backend = 6; // chat_completions quirks selector (openai|gemini|groq|…)
 }
 message GetCloudProfilesRequest {}
 message GetCloudProfilesResponse {
@@ -661,3 +664,13 @@ message SetActiveCloudProfileRequest  { string name = 1; }
 message SetActiveCloudProfileResponse { bool ok = 1; string error = 2; }
 message SetCloudProfileKeyRequest  { string name = 1; string api_key = 2; }
 message SetCloudProfileKeyResponse { bool ok = 1; string error = 2; }
+message UpsertCloudProfileRequest {
+  string name = 1;
+  string flavor = 2;
+  string backend = 3;
+  string base_url = 4;
+  string model = 5;
+}
+message UpsertCloudProfileResponse { bool ok = 1; string error = 2; }
+message RemoveCloudProfileRequest  { string name = 1; }
+message RemoveCloudProfileResponse { bool ok = 1; string error = 2; }

@@ -66,3 +66,9 @@ func selectLines(text string, start, end int) string {
 
 // isSymlink reports whether a FileMode represents a symbolic link.
 func isSymlink(m fs.FileMode) bool { return m&fs.ModeSymlink != 0 }
+
+// editDetail describes a single-span replacement as "+added −removed", where
+// the minus sign is U+2212 to match the rest of the UI.
+func editDetail(oldText, newText string) string {
+	return fmt.Sprintf("+%d −%d", lineCount(newText), lineCount(oldText))
+}

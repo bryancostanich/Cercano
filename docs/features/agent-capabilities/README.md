@@ -119,12 +119,16 @@ Tier 2:  [5 Subagent engine] ←─────────┘
 - **0a capability foundation (Tasks 1–10): built** in this worktree, each task reviewed
   clean. Not yet merged to main. 15 file/git tools unified as capabilities on both
   surfaces; `dispatch.Tool` retired; `InvokeCapability` + MCP adapter live.
-- **0a dispatch engine (1b): design complete + implementation plan written**
-  (`dispatch-engine/design.md`, `dispatch-engine/plan.md`). Scope decision: **unify
-  everything first** — migrate co-processor work and the agentic loop onto `llm.Provider`,
-  build the `Dispatch` primitive on that one boundary (15 tasks / 8 phases). Recon found
-  the main agent's `RunToolLoop` is already a reusable, fully-parameterized provider tool
-  loop, so Agentic dispatch reuses it. Not yet built. Supersedes the old Task 11.
+- **0a dispatch engine (1b): BUILT** (worktree branch, 16 commits, whole-branch review =
+  ready to merge; not merged). Scope: **unify everything first** — co-processor work and
+  the agentic loop now both run on `llm.Provider` through one `Dispatch` primitive with a
+  single seam for routing (`dispatch.Select`), project-context injection (`ContextAware`),
+  and usage (`usage.RecordingProvider`). OneShot + Agentic modes; Agentic reuses the
+  main agent's `RunToolLoop`. Migrated: co-processor execution + the summarize/extract/
+  classify/explain commands (now capabilities on both surfaces). Added `dispatch`/`workflow`
+  and `review` capabilities; least-privilege subagent tool grants. Retired the legacy
+  `ModelProvider` coproc path and the engine-based `dispatch.Loop`. Supersedes the old Task 11.
+  → [`dispatch-engine/plan.md`](dispatch-engine/plan.md)
 - **0b steering & protocol substrate: BUILT** (worktree branch, whole-branch review = ready
   to merge; not merged). Protocol library + steering block + `get_protocol` + `protocols sync`.
 - Tier 1 (task model, git workflows) and remaining Tier 2 (brainstorming, planning,

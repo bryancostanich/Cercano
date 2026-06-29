@@ -259,7 +259,7 @@ func (s *Server) GetCloudProfiles(ctx context.Context, req *proto.GetCloudProfil
 			}
 		}
 		out.Profiles = append(out.Profiles, &proto.CloudProfileInfo{
-			Name: p.Name, Flavor: p.Flavor, BaseUrl: p.BaseURL, Model: p.Model, HasKey: hasKey,
+			Name: p.Name, Flavor: p.Flavor, BaseUrl: p.BaseURL, Model: p.Model, HasKey: hasKey, Backend: p.Backend,
 		})
 	}
 	return out, nil
@@ -296,6 +296,74 @@ func (s *Server) SetCloudProfileKey(ctx context.Context, req *proto.SetCloudProf
 		_ = s.rebuildCloud()
 	}
 	return &proto.SetCloudProfileKeyResponse{Ok: true}, nil
+}
+
+// knownFlavor reports whether the flavor is a recognized enum value (whether or
+// not it is implemented yet — coming-soon flavors are storable but won't activate).
+func knownFlavor(f string) bool {
+	switch f {
+	case cloudfactory.FlavorMessages, cloudfactory.FlavorChatCompletions,
+		cloudfactory.FlavorResponses, cloudfactory.FlavorBedrock:
+		return true
+	}
+	return false
+}
+
+// UpsertCloudProfile implements proto.AgentServer — creates or updates a profile's
+// metadata (the API key is managed separately via SetCloudProfileKey).
+func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudProfileRequest) (*proto.UpsertCloudProfileResponse, error) {
+	name := strings.TrimSpace(req.GetName())
+	if name == "" {
+		return &proto.UpsertCloudProfileResponse{Ok: false, Error: "profile name is required"}, nil
+	}
+	if !knownFlavor(req.GetFlavor()) {
+		return &proto.UpsertCloudProfileResponse{Ok: false, Error: fmt.Sprintf("unknown flavor %q", req.GetFlavor())}, nil
+	}
+	if req.GetFlavor() == cloudfactory.FlavorChatCompletions && strings.TrimSpace(req.GetBaseUrl()) == "" {
+		return &proto.UpsertCloudProfileResponse{Ok: false, Error: "base_url is required for chat_completions"}, nil
+	}
+	np := config.CloudProfile{
+		Name: name, Flavor: req.GetFlavor(), Backend: req.GetBackend(),
+		BaseURL: req.GetBaseUrl(), Model: req.GetModel(),
+	}
+	replaced := false
+	for i, p := range s.currentConfig.CloudProfiles {
+		if p.Name == name {
+			s.currentConfig.CloudProfiles[i] = np
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		s.currentConfig.CloudProfiles = append(s.currentConfig.CloudProfiles, np)
+	}
+	s.persistConfig()
+	return &proto.UpsertCloudProfileResponse{Ok: true}, nil
+}
+
+// RemoveCloudProfile implements proto.AgentServer — deletes a profile and its
+// keychain key. Clears the active profile (→ absent cloud) if it was active.
+func (s *Server) RemoveCloudProfile(ctx context.Context, req *proto.RemoveCloudProfileRequest) (*proto.RemoveCloudProfileResponse, error) {
+	name := req.GetName()
+	if _, ok := profileByName(s.currentConfig.CloudProfiles, name); !ok {
+		return &proto.RemoveCloudProfileResponse{Ok: false, Error: fmt.Sprintf("no profile %q", name)}, nil
+	}
+	kept := s.currentConfig.CloudProfiles[:0]
+	for _, p := range s.currentConfig.CloudProfiles {
+		if p.Name != name {
+			kept = append(kept, p)
+		}
+	}
+	s.currentConfig.CloudProfiles = kept
+	if s.secrets != nil {
+		_ = s.secrets.Delete(name) // best-effort; missing key is not an error
+	}
+	if s.currentConfig.ActiveCloudProfile == name {
+		s.currentConfig.ActiveCloudProfile = ""
+		s.installAbsentCloud("active cloud profile removed")
+	}
+	s.persistConfig()
+	return &proto.RemoveCloudProfileResponse{Ok: true}, nil
 }
 
 // resolveMainProvider picks the llm.Provider for the main tool-loop per the

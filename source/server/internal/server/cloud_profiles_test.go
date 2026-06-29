@@ -243,3 +243,122 @@ func TestInstallAbsentCloudCoordinatorNilSafe(t *testing.T) {
 		t.Errorf("router should hold AbsentCloudProvider after installAbsentCloud, got %T", r.last)
 	}
 }
+
+func TestUpsertCloudProfileCreatesAndUpdates(t *testing.T) {
+	s, _ := newTestServer()
+	// Create a new profile.
+	resp, err := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{
+		Name: "openai", Flavor: "chat_completions", Backend: "openai",
+		BaseUrl: "https://api.openai.com/v1", Model: "gpt-x",
+	})
+	if err != nil {
+		t.Fatalf("UpsertCloudProfile: %v", err)
+	}
+	if !resp.Ok {
+		t.Fatalf("want Ok, got error: %s", resp.Error)
+	}
+	p, ok := profileByName(s.currentConfig.CloudProfiles, "openai")
+	if !ok {
+		t.Fatal("profile openai was not added")
+	}
+	if p.Backend != "openai" || p.BaseURL != "https://api.openai.com/v1" || p.Model != "gpt-x" {
+		t.Fatalf("created profile wrong: %+v", p)
+	}
+	// Update the same name in place (no duplicate row).
+	if _, err := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{
+		Name: "openai", Flavor: "chat_completions", Backend: "openai",
+		BaseUrl: "https://api.openai.com/v1", Model: "gpt-y",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, pr := range s.currentConfig.CloudProfiles {
+		if pr.Name == "openai" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("update should not duplicate; got %d openai rows", count)
+	}
+	p2, _ := profileByName(s.currentConfig.CloudProfiles, "openai")
+	if p2.Model != "gpt-y" {
+		t.Fatalf("update did not change model: %+v", p2)
+	}
+}
+
+func TestUpsertCloudProfileValidation(t *testing.T) {
+	s, _ := newTestServer()
+	// Empty name rejected.
+	if resp, _ := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{
+		Name: "", Flavor: "messages",
+	}); resp.Ok {
+		t.Error("empty name should be rejected")
+	}
+	// chat_completions requires a base_url.
+	if resp, _ := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{
+		Name: "x", Flavor: "chat_completions", BaseUrl: "",
+	}); resp.Ok {
+		t.Error("chat_completions without base_url should be rejected")
+	}
+	// Unknown flavor rejected.
+	if resp, _ := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{
+		Name: "x", Flavor: "not_a_flavor",
+	}); resp.Ok {
+		t.Error("unknown flavor should be rejected")
+	}
+}
+
+func TestRemoveCloudProfile(t *testing.T) {
+	s, _ := newTestServer()
+	// Seed a key for messages-one so we can verify deletion.
+	if err := s.secrets.Set("messages-one", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	s.currentConfig.ActiveCloudProfile = "messages-one"
+	resp, err := s.RemoveCloudProfile(context.Background(), &proto.RemoveCloudProfileRequest{Name: "messages-one"})
+	if err != nil {
+		t.Fatalf("RemoveCloudProfile: %v", err)
+	}
+	if !resp.Ok {
+		t.Fatalf("want Ok, got: %s", resp.Error)
+	}
+	if _, ok := profileByName(s.currentConfig.CloudProfiles, "messages-one"); ok {
+		t.Error("profile should be gone")
+	}
+	if _, err := s.secrets.Get("messages-one"); err == nil {
+		t.Error("key should be deleted from keychain")
+	}
+	if s.currentConfig.ActiveCloudProfile != "" {
+		t.Errorf("active should be cleared, got %q", s.currentConfig.ActiveCloudProfile)
+	}
+}
+
+func TestRemoveCloudProfileNonexistent(t *testing.T) {
+	s, _ := newTestServer()
+	resp, err := s.RemoveCloudProfile(context.Background(), &proto.RemoveCloudProfileRequest{Name: "no-such"})
+	if err != nil {
+		t.Fatalf("RemoveCloudProfile: %v", err)
+	}
+	if resp.Ok {
+		t.Error("want Ok=false for nonexistent profile")
+	}
+}
+
+func TestGetCloudProfilesReportsBackend(t *testing.T) {
+	s, _ := newTestServer()
+	s.currentConfig.CloudProfiles = append(s.currentConfig.CloudProfiles,
+		config.CloudProfile{Name: "g", Flavor: "chat_completions", Backend: "gemini", BaseURL: "u", Model: "m"})
+	resp, _ := s.GetCloudProfiles(context.Background(), &proto.GetCloudProfilesRequest{})
+	var found bool
+	for _, p := range resp.Profiles {
+		if p.Name == "g" {
+			found = true
+			if p.Backend != "gemini" {
+				t.Errorf("Backend = %q, want gemini", p.Backend)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("profile g not returned")
+	}
+}

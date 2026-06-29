@@ -20,8 +20,17 @@ the tiers; within a tier, pieces are largely independent.
    standalone tools (`agenttools.Tool`), the dispatch loop's tools (`dispatch.Tool`),
    and the MCP handlers are three parallel implementations with no shared core. This
    sub-project introduces one `Capability` model, migrates all existing tools onto it,
-   and retires `dispatch.Tool`.
+   and retires `dispatch.Tool`. **Tasks 1–10 built.**
    → [`capability-architecture/design.md`](capability-architecture/design.md)
+
+   **1b. Dispatch engine (folded into 0a).** Co-processor commands and subagent calls
+   are one primitive ("delegated model work"). Adds the one-shot/agentic `Dispatch`
+   primitive, a provider-boundary cloud-vs-local usage layer, surface-aware
+   project-context injection, the co-processor capabilities, the `dispatch`/`workflow`
+   capability, and a `review` capability. **Pulls sub-project #5 (subagent engine)
+   forward into 0a.** Design complete; implementation plan pending; protocol/watchdog
+   pieces depend on #2.
+   → [`dispatch-engine/design.md`](dispatch-engine/design.md)
 
 2. **Steering & protocol substrate** — Plain-English steering plus the workflow
    protocol library (ported from the `hardwAIr_hckr` "Dave" plugin and the generic
@@ -42,10 +51,10 @@ the tiers; within a tier, pieces are largely independent.
 
 ### Tier 2 — Modes & engines
 
-5. **Subagent execution engine** — Spawnable sub-agent loops for plan execution, with
-   smart model routing (a lighter/faster model for simple tasks), protocol-aware
-   context setup, and adversarial review. Aliased to the `workflow` name so host models
-   that reach for "the workflow tool" find it. Depends on Tier 0 and Tier 1.
+5. **Subagent execution engine** — **Pulled forward into 0a as the dispatch engine
+   (see 1b above).** Spawnable sub-agent loops, smart model routing (via the routing
+   seam + locus mode), protocol-aware context, adversarial review (the `review`
+   capability), and the `workflow` alias. No longer a separate Tier-2 item.
 
 6. **Brainstorming mode** — An interactive design dialogue, modeled on (and improving)
    the Superpowers brainstorming skill. Depends on the steering substrate.
@@ -97,7 +106,13 @@ Tier 2:  [5 Subagent engine] ←─────────┘
 
 ## Status
 
-- Tier 0 designs written; foundation is the current focus.
-- Tiers 1 and 2 are not yet specced.
+- **0a capability foundation (Tasks 1–10): built** in this worktree, each task reviewed
+  clean. Not yet merged to main. 15 file/git tools unified as capabilities on both
+  surfaces; `dispatch.Tool` retired; `InvokeCapability` + MCP adapter live.
+- **0a dispatch engine (1b): design complete** (`dispatch-engine/design.md`);
+  implementation plan not yet written. Supersedes the old Task 11.
+- **0b steering & protocol substrate: spec + plan written, not built.**
+- Tier 1 (task model, git workflows) and remaining Tier 2 (brainstorming, planning,
+  autonomous) not yet specced.
 </content>
 </invoke>

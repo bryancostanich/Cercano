@@ -1,10 +1,11 @@
 # Dispatch Engine — Design (in progress)
 
-**Status:** Active brainstorm. Decisions below are settled with the user; open forks are listed at the end. Supersedes Spec 0a's "Task 11 / co-processor migration" — the co-processor work is now part of this.
+**Status:** Design complete on the core architecture (settled decisions below); feature-set forks drafted + confirmed. **Folded into Spec 0a** as extended phases (user decision) — this is part of the 0a deliverable, not a separate spec. **Supersedes 0a's old "Task 11 / co-processor migration"** — that work is now this engine.
 
 **Relationship to other specs:**
-- Sits on the **Spec 0a** capability foundation (Capability/Registry/Services, agent + MCP adapters, `InvokeCapability`).
-- Pulls forward and merges the original Tier-2 **subagent execution engine** (#5 in the [roadmap](../README.md)) with the co-processor migration. They are the same primitive.
+- Part of **Spec 0a** (extended): sits on the same capability foundation (Capability/Registry/Services, agent + MCP adapters, `InvokeCapability`) built in 0a Tasks 1–10.
+- Pulls the original Tier-2 **subagent execution engine** (#5 in the [roadmap](../README.md)) forward into 0a and merges it with the co-processor migration. They are the same primitive.
+- Depends on **Spec 0b** for protocol injection + the watchdog (review enforcement).
 
 ## Core concept: delegated model work
 
@@ -101,6 +102,6 @@ Superpowers is mechanically closest to **Option 1**, not 3: the subagent-spawn p
 
 Net: keep superpowers' correct instinct (dumb engine, composed review), but elevate review to a **capability** and move enforcement to the **watchdog**.
 
-## Doc-structure note
-Scope has grown from "extend 0a" toward a distinct engine spec. Revisit whether this stays folded into 0a or becomes its own spec once the open forks are resolved.
+## Doc-structure note (resolved)
+Folded into Spec 0a as extended phases (user decision). 0a's Tasks 1–10 (capability foundation + 15-tool migration + dispatch consolidation + `InvokeCapability` + MCP adapter) are done; the old Task 11 is superseded by this engine. The dispatch-engine phases (one-shot/agentic Dispatch primitive, provider-boundary usage layer, project-context flag, co-processor capabilities on the primitive, `dispatch`/`workflow` capability, `review` capability) still need an implementation plan written before building — and the protocol/watchdog pieces depend on 0b landing.
 </content>

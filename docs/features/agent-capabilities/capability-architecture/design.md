@@ -265,10 +265,23 @@ host calls cercano_summarize
   This makes the migration provably behavior-preserving, not a rewrite.
 - **Full Go test suite** (`go test ./...`) green in both modules.
 
+## Extension — Dispatch engine (co-processor + subagent), folded into 0a
+
+This spec (Tasks 1–10) covers the capability foundation: the model, the 15-tool migration,
+dispatch-loop consolidation, `InvokeCapability`, and the MCP adapter — all built. The
+original **Task 11 (co-processor migration) is superseded** by the **dispatch engine**,
+which is folded into 0a as extended phases (user decision). The dispatch engine treats
+co-processor commands and subagent calls as one primitive ("delegated model work"), adds
+a shared provider-boundary usage layer, surface-aware project-context injection, and a
+`review` capability. Its full design — and how it pulls the Tier-2 subagent engine
+forward and improves on the superpowers patterns — lives in
+[`../dispatch-engine/design.md`](../dispatch-engine/design.md). An implementation plan for
+the dispatch-engine phases still needs to be written, and its protocol/watchdog pieces
+depend on Spec 0b.
+
 ## Out of scope (here)
 
-- New capabilities (plan, brainstorm, protocols) — those are Spec 0b and Tier 1/2.
+- New *non-dispatch* capabilities (plan, brainstorm, protocols) — Spec 0b and Tier 1/2.
 - Collapsing the `agenttools.Tool` interface entirely (kept as a thin alias in 0a to
   avoid touching `toolloop.go`; a later cleanup can remove it).
-- Folding `dispatch` into a subagent capability — Tier 2.
 </content>

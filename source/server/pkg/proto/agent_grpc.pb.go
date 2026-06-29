@@ -34,6 +34,7 @@ const (
 	Agent_GetConversationTurns_FullMethodName       = "/agent.Agent/GetConversationTurns"
 	Agent_ListTools_FullMethodName                  = "/agent.Agent/ListTools"
 	Agent_InvokeTool_FullMethodName                 = "/agent.Agent/InvokeTool"
+	Agent_InvokeCapability_FullMethodName           = "/agent.Agent/InvokeCapability"
 	Agent_ListModels_FullMethodName                 = "/agent.Agent/ListModels"
 	Agent_GetRuntimeStatus_FullMethodName           = "/agent.Agent/GetRuntimeStatus"
 	Agent_ListRuntimeModels_FullMethodName          = "/agent.Agent/ListRuntimeModels"
@@ -107,6 +108,9 @@ type AgentClient interface {
 	// agent's chat path will dispatch tools via this same RPC once the
 	// algorithmic-dispatcher lands.
 	InvokeTool(ctx context.Context, in *InvokeToolRequest, opts ...grpc.CallOption) (*InvokeToolResponse, error)
+	// InvokeCapability runs a named agent capability (skill) with JSON-encoded
+	// args and returns a JSON-encoded result or error.
+	InvokeCapability(ctx context.Context, in *InvokeCapabilityRequest, opts ...grpc.CallOption) (*InvokeCapabilityResponse, error)
 	// ListModels returns the models available on the active Ollama instance.
 	ListModels(ctx context.Context, in *ListModelsRequest, opts ...grpc.CallOption) (*ListModelsResponse, error)
 	// Runtime dashboard APIs expose managed runtimes, external endpoints, and
@@ -314,6 +318,16 @@ func (c *agentClient) InvokeTool(ctx context.Context, in *InvokeToolRequest, opt
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(InvokeToolResponse)
 	err := c.cc.Invoke(ctx, Agent_InvokeTool_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) InvokeCapability(ctx context.Context, in *InvokeCapabilityRequest, opts ...grpc.CallOption) (*InvokeCapabilityResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InvokeCapabilityResponse)
+	err := c.cc.Invoke(ctx, Agent_InvokeCapability_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -634,6 +648,9 @@ type AgentServer interface {
 	// agent's chat path will dispatch tools via this same RPC once the
 	// algorithmic-dispatcher lands.
 	InvokeTool(context.Context, *InvokeToolRequest) (*InvokeToolResponse, error)
+	// InvokeCapability runs a named agent capability (skill) with JSON-encoded
+	// args and returns a JSON-encoded result or error.
+	InvokeCapability(context.Context, *InvokeCapabilityRequest) (*InvokeCapabilityResponse, error)
 	// ListModels returns the models available on the active Ollama instance.
 	ListModels(context.Context, *ListModelsRequest) (*ListModelsResponse, error)
 	// Runtime dashboard APIs expose managed runtimes, external endpoints, and
@@ -732,6 +749,9 @@ func (UnimplementedAgentServer) ListTools(context.Context, *ListToolsRequest) (*
 }
 func (UnimplementedAgentServer) InvokeTool(context.Context, *InvokeToolRequest) (*InvokeToolResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method InvokeTool not implemented")
+}
+func (UnimplementedAgentServer) InvokeCapability(context.Context, *InvokeCapabilityRequest) (*InvokeCapabilityResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method InvokeCapability not implemented")
 }
 func (UnimplementedAgentServer) ListModels(context.Context, *ListModelsRequest) (*ListModelsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListModels not implemented")
@@ -1088,6 +1108,24 @@ func _Agent_InvokeTool_Handler(srv interface{}, ctx context.Context, dec func(in
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AgentServer).InvokeTool(ctx, req.(*InvokeToolRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_InvokeCapability_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InvokeCapabilityRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).InvokeCapability(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_InvokeCapability_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).InvokeCapability(ctx, req.(*InvokeCapabilityRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1590,6 +1628,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "InvokeTool",
 			Handler:    _Agent_InvokeTool_Handler,
+		},
+		{
+			MethodName: "InvokeCapability",
+			Handler:    _Agent_InvokeCapability_Handler,
 		},
 		{
 			MethodName: "ListModels",

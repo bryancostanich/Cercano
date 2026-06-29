@@ -57,6 +57,10 @@ service Agent {
   // algorithmic-dispatcher lands.
   rpc InvokeTool (InvokeToolRequest) returns (InvokeToolResponse) {}
 
+  // InvokeCapability runs a named agent capability (skill) with JSON-encoded
+  // args and returns a JSON-encoded result or error.
+  rpc InvokeCapability (InvokeCapabilityRequest) returns (InvokeCapabilityResponse) {}
+
   // ListModels returns the models available on the active Ollama instance.
   rpc ListModels (ListModelsRequest) returns (ListModelsResponse) {}
 
@@ -495,6 +499,17 @@ message InvokeToolResponse {
   bool   truncated   = 5;
   string note        = 6;
   string error       = 7; // populated when tool execution fails
+}
+
+message InvokeCapabilityRequest {
+  string name      = 1;
+  bytes  args_json = 2;
+  string work_dir  = 3;
+}
+message InvokeCapabilityResponse {
+  bytes  result_json = 1;
+  bool   is_error    = 2;
+  string error       = 3;
 }
 
 message GetConfigRequest {}

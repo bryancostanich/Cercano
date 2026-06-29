@@ -166,6 +166,11 @@ func (sp *settingsPage) View() string {
 
 // onCommit routes a committed field to its sink.
 func (sp *settingsPage) onCommit(key, value string) (string, tea.Cmd, error) {
+	// Cloud provider keys — handled before everything else.
+	if ca := classifyCloudCommit(key, value); ca.kind != cloudCommitNone {
+		return sp.commitCloud(ca)
+	}
+
 	// Color edits — handled before classifyCommit (not a config/permission key).
 	if strings.HasPrefix(key, "color:") {
 		fieldKey := strings.TrimPrefix(key, "color:")

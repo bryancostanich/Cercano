@@ -45,9 +45,6 @@ func TestClassifyCommit(t *testing.T) {
 	if a := classifyCommit("local-model", "qwen"); a.kind != commitConfig || a.update.LocalModel != "qwen" {
 		t.Fatalf("local-model -> %+v", a)
 	}
-	if a := classifyCommit("cloud-api-key", "sk-1"); a.kind != commitConfig || a.update.CloudAPIKey != "sk-1" {
-		t.Fatalf("cloud-api-key -> %+v", a)
-	}
 	if a := classifyCommit("locus-mode", "local_only"); a.kind != commitConfig || a.update.LocusMode != "local_only" {
 		t.Fatalf("locus-mode -> %+v", a)
 	}

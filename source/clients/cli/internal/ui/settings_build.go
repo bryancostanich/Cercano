@@ -74,14 +74,6 @@ func classifyCommit(key, value string) commitAction {
 		u.LocalModel = value
 	case "ollama-url":
 		u.OllamaURL = value
-	case "cloud-provider":
-		u.CloudProvider = value
-	case "cloud-model":
-		u.CloudModel = value
-	case "cloud-base-url":
-		u.CloudBaseURL = value
-	case "cloud-api-key":
-		u.CloudAPIKey = value
 	case "locus-mode":
 		u.LocusMode = value
 	case "permission-mode":

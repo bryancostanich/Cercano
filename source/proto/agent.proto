@@ -560,12 +560,23 @@ message SubscribeEventsRequest {}
 message ClientEvent {
   oneof event {
     PermissionModeChanged permission_mode_changed = 1;
+    ConfigChanged config_changed = 2;
   }
 }
 
 // PermissionModeChanged carries the new active mode. Clients update their
 // status bar from this — no fetch, no poll.
 message PermissionModeChanged { string mode = 1; }
+
+// ConfigChanged carries one config field that just changed (RPC or file
+// watcher). Field is a top-level config key as it appears in UpdateConfigRequest
+// (e.g. "cloud_model", "ollama_url"). Value is the new value as a string;
+// secrets are reported as a presence marker, never the raw value. When several
+// fields change together, one event is emitted per field.
+message ConfigChanged {
+  string field = 1;
+  string value = 2;
+}
 
 // Allow/Deny pair the asynchronous PermissionRequired stream event with a
 // client reply. tool_use_id is the same id the event carried.

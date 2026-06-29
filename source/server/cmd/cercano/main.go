@@ -250,6 +250,11 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	if err := srv.StartPermissionWatcher(context.Background(), permsPath); err != nil {
 		fmt.Fprintf(os.Stderr, "[WARN] permission file watcher not started (%v) — /strict etc. still push; hand-edits won't.\n", err)
 	}
+	// Watch config.yaml for out-of-band edits and replay hot-reloadable fields
+	// through UpdateConfig. Non-fatal: the /config RPC path still works.
+	if err := srv.StartConfigWatcher(context.Background(), config.DefaultPath()); err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] config file watcher not started (%v) — /config still applies live; hand-edits won't.\n", err)
+	}
 
 	// Open OS keychain and attach it so profile RPCs and rebuildCloud can
 	// read API keys. Failure is non-fatal: cloud stays absent.

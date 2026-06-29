@@ -92,6 +92,23 @@ func (s *Server) SubscribeEvents(_ *proto.SubscribeEventsRequest, stream proto.A
 	}
 }
 
+// broadcastConfigChanged pushes a ConfigChanged event for a single field to all
+// clients. Both the UpdateConfig RPC and the config-file watcher route through
+// the same UpdateConfig path, so this is the one place a value-actually-changed
+// event is emitted. No dedupe: UpdateConfig only calls in for fields that
+// passed validation and were actually applied, so a repeat broadcast for the
+// same value can't happen from the agent side.
+func (s *Server) broadcastConfigChanged(field, value string) {
+	if s.events == nil {
+		return
+	}
+	s.events.broadcast(&proto.ClientEvent{
+		Event: &proto.ClientEvent_ConfigChanged{
+			ConfigChanged: &proto.ConfigChanged{Field: field, Value: value},
+		},
+	})
+}
+
 // broadcastPermissionMode pushes a PermissionModeChanged event to all clients,
 // deduped by value: the SetPermissionMode RPC and the file watcher both fire on
 // the same write, and a no-op rewrite (same mode) shouldn't spam clients. Only a

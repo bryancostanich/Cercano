@@ -51,14 +51,6 @@ type ToolEntry struct {
 	Folded        bool      // V1: always true; reserved for future expand/collapse
 }
 
-// Package-level styles so renderToolEntry doesn't need a palette parameter.
-// Initialized from the active palette (Cracker) which matches what New() uses.
-var (
-	toolEntryFaint   = lipgloss.NewStyle().Faint(true)
-	toolEntrySuccess = lipgloss.NewStyle().Foreground(theme.BufferLime)  // muted lime ✓
-	toolEntryError   = lipgloss.NewStyle().Foreground(theme.BufferError) // muted red ⚠
-)
-
 // renderToolEntry produces the scrollback text for one tool call.
 //
 // Folded view (one line):
@@ -77,7 +69,11 @@ var (
 // focused renders a left-margin caret in the accent color so the user can see
 // which entry the up/down nav cursor is currently on. When false, a two-space
 // gutter holds the slot so toggling fold doesn't shift the body horizontally.
-func renderToolEntry(e ToolEntry, width int, focused bool, md *render.Markdown) string {
+func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, md *render.Markdown) string {
+	toolEntryFaint := lipgloss.NewStyle().Faint(true)
+	toolEntrySuccess := styles.ToolSuccess
+	toolEntryError := styles.ToolError
+
 	marker := "▸"
 	if !e.Folded {
 		marker = "▾"
@@ -85,7 +81,7 @@ func renderToolEntry(e ToolEntry, width int, focused bool, md *render.Markdown) 
 
 	gutter := "  "
 	if focused {
-		gutter = lipgloss.NewStyle().Foreground(theme.BufferLime).Render("▶ ")
+		gutter = styles.ToolFocus.Render("▶ ")
 	}
 
 	var statusBit string

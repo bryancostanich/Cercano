@@ -87,38 +87,45 @@ func (s *Server) reloadConfigFromDisk(ctx context.Context) {
 		return
 	}
 
+	// Snapshot the current in-memory config under the read lock, then diff
+	// against the snapshot. UpdateConfig (below) takes the write lock itself,
+	// so we must NOT hold cfgMu across that call — release before the diff.
+	s.cfgMu.RLock()
+	snap := s.currentConfig
+	s.cfgMu.RUnlock()
+
 	req := &proto.UpdateConfigRequest{}
-	if newCfg.OllamaURL != s.currentConfig.OllamaURL {
+	if newCfg.OllamaURL != snap.OllamaURL {
 		req.OllamaUrl = newCfg.OllamaURL
 	}
-	if newCfg.LocalModel != s.currentConfig.LocalModel {
+	if newCfg.LocalModel != snap.LocalModel {
 		req.LocalModel = newCfg.LocalModel
 	}
-	if newCfg.LocalRuntime != s.currentConfig.LocalRuntime {
+	if newCfg.LocalRuntime != snap.LocalRuntime {
 		req.LocalRuntime = newCfg.LocalRuntime
 	}
-	if newCfg.CloudProvider != s.currentConfig.CloudProvider {
+	if newCfg.CloudProvider != snap.CloudProvider {
 		req.CloudProvider = newCfg.CloudProvider
 	}
-	if newCfg.CloudModel != s.currentConfig.CloudModel {
+	if newCfg.CloudModel != snap.CloudModel {
 		req.CloudModel = newCfg.CloudModel
 	}
-	if newCfg.CloudAPIKey != s.currentConfig.CloudAPIKey {
+	if newCfg.CloudAPIKey != snap.CloudAPIKey {
 		req.CloudApiKey = newCfg.CloudAPIKey
 	}
-	if newCfg.CloudBaseURL != s.currentConfig.CloudBaseURL {
+	if newCfg.CloudBaseURL != snap.CloudBaseURL {
 		req.CloudBaseUrl = newCfg.CloudBaseURL
 	}
-	if newCfg.LocusMode != s.currentConfig.LocusMode {
+	if newCfg.LocusMode != snap.LocusMode {
 		req.LocusMode = newCfg.LocusMode
 	}
 
 	// Warn on fields that UpdateConfig doesn't hot-reload. The agent keeps
 	// running on the old in-memory values until a restart.
-	if newCfg.Port != s.currentConfig.Port {
-		fmt.Printf("ConfigWatcher: port change (%q → %q) requires a restart\n", s.currentConfig.Port, newCfg.Port)
+	if newCfg.Port != snap.Port {
+		fmt.Printf("ConfigWatcher: port change (%q → %q) requires a restart\n", snap.Port, newCfg.Port)
 	}
-	if newCfg.EmbeddingModel != s.currentConfig.EmbeddingModel {
+	if newCfg.EmbeddingModel != snap.EmbeddingModel {
 		fmt.Printf("ConfigWatcher: embedding_model change requires a restart\n")
 	}
 

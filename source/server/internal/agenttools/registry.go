@@ -74,6 +74,19 @@ func (r *Registry) Unregister(name string) {
 	delete(r.tools, name)
 }
 
+// Subset returns a new Registry containing only the named tools that exist in
+// r. Unknown names are silently ignored (the caller validates intent). Used to
+// grant a least-privilege tool set to a dispatched subagent.
+func (r *Registry) Subset(names []string) *Registry {
+	out := NewRegistry()
+	for _, name := range names {
+		if t, ok := r.Get(name); ok {
+			_ = out.Register(t)
+		}
+	}
+	return out
+}
+
 // Filter returns tools matching the given Permission (or all when perm is
 // empty). Useful for /tools split-by-tier displays.
 func (r *Registry) Filter(perm Permission) []Tool {

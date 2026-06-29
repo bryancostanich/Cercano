@@ -32,9 +32,11 @@ func TestFormOpenSelectKeepsFocusedLineOnLabel(t *testing.T) {
 		t.Fatalf("open picker should render all options:\n%s", out)
 	}
 	// The focused line must still point at the field's label line, not drift
-	// because the picker added lines below it.
-	if f.FocusedLine() != 3 {
-		t.Fatalf("focusedLine = %d, want 3 (label line of the open select)", f.FocusedLine())
+	// because the picker added lines below it. The section header is 3 lines
+	// (title, rule, blank) plus the box's top border, so the first field is at
+	// line 4.
+	if f.FocusedLine() != 4 {
+		t.Fatalf("focusedLine = %d, want 4 (label line of the open select)", f.FocusedLine())
 	}
 }
 
@@ -113,8 +115,8 @@ func TestFormFocusedLineTracksCursor(t *testing.T) {
 	f := New(sections)
 	f.View(80, p, s)
 	first := f.FocusedLine()
-	if first != 3 {
-		t.Fatalf("focused line for first field = %d, want 3 (top border + title + blank)", first)
+	if first != 4 {
+		t.Fatalf("focused line for first field = %d, want 4 (top border + title + rule + blank)", first)
 	}
 	f.Update(arrowDown())
 	f.Update(arrowDown()) // into section B's first field

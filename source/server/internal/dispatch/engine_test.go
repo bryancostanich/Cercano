@@ -5,9 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
-	projectctx "cercano/source/server/internal/context"
+	"cercano/source/server/internal/usage"
 )
 
 // echoProvider implements llm.Provider for testing.
@@ -94,6 +95,46 @@ func TestOneShotAgenticReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not yet implemented") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestOneShotEmitsSourceLabeledUsage(t *testing.T) {
+	var captured []usage.Usage
+	sink := func(u usage.Usage) { captured = append(captured, u) }
+
+	prov := echoProvider{}
+	eng := NewEngine(
+		Providers{Local: prov},
+		func() locus.Mode { return locus.LocalOnly },
+		nil,
+	)
+	eng.SetModelFor(func(isCloud bool) string { return "local-model" })
+	eng.SetUsageSink(sink)
+
+	_, err := eng.Dispatch(context.Background(), Spec{
+		Mode:   OneShot,
+		Role:   RoleCoproc,
+		Prompt: "summarize this",
+		Source: "coproc:summarize",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(captured) != 1 {
+		t.Fatalf("expected exactly 1 usage event, got %d", len(captured))
+	}
+	u := captured[0]
+	if u.Source != "coproc:summarize" {
+		t.Errorf("Source=%q, want %q", u.Source, "coproc:summarize")
+	}
+	if u.Model != "local-model" {
+		t.Errorf("Model=%q, want %q", u.Model, "local-model")
+	}
+	if u.IsCloud {
+		t.Errorf("IsCloud=true, want false for LocalOnly locus")
+	}
+	if u.InputTokens != 9 || u.OutputTokens != 4 {
+		t.Errorf("tokens=%d/%d, want 9/4", u.InputTokens, u.OutputTokens)
 	}
 }
 

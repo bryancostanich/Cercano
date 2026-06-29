@@ -7,6 +7,7 @@ import (
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
+	"cercano/source/server/internal/usage"
 )
 
 // Mode selects the dispatch execution model.
@@ -46,15 +47,24 @@ type Engine struct {
 	modeFn    func() locus.Mode
 	ctxLoader *projectctx.Loader
 	modelFor  func(isCloud bool) string
+	usageSink func(usage.Usage)
 }
 
 // NewEngine constructs an Engine. ctx may be nil (project context injection skipped).
+// IMPORTANT: pass RAW (unwrapped) providers here. Engine wraps each provider per-dispatch
+// via usage.Wrap to label usage by source; passing already-wrapped providers causes double-counting.
 func NewEngine(p Providers, modeFn func() locus.Mode, ctx *projectctx.Loader) *Engine {
 	return &Engine{
 		providers: p,
 		modeFn:    modeFn,
 		ctxLoader: ctx,
 	}
+}
+
+// SetUsageSink installs a sink that receives one Usage per completed Chat call,
+// labeled by Spec.Source. A nil sink disables recording (safe).
+func (e *Engine) SetUsageSink(fn func(usage.Usage)) {
+	e.usageSink = fn
 }
 
 // SetModelFor installs a function that maps provider tier to a model name string.
@@ -103,8 +113,9 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 		},
 	}
 
-	// 5. Call provider.
-	resp, err := sel.Provider.Chat(ctx, req)
+	// 5. Call provider, wrapped for source-labeled usage recording.
+	prov := usage.Wrap(sel.Provider, spec.Source, sel.IsCloud, e.usageSink)
+	resp, err := prov.Chat(ctx, req)
 	if err != nil {
 		return Result{}, err
 	}

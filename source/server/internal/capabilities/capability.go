@@ -139,10 +139,15 @@ type Call struct {
 
 // Capability is the single implementation surface for a thing Cercano can do.
 type Capability interface {
-	Name() string        // canonical snake_case id
+	Name() string // canonical snake_case id
 	Description() string
 	Tier() Tier
 	Schema() Schema
 	Surfaces() Surface
 	Execute(ctx context.Context, call *Call) (*Result, error)
 }
+
+// ContextAware is implemented by capabilities that want the project-context
+// digest prepended to their dispatched prompt. Capabilities that don't
+// implement it default to no project context (e.g. fetch).
+type ContextAware interface{ WantsProjectContext() bool }

@@ -184,7 +184,8 @@ func (sp *settingsPage) onCommit(key, value string) (string, tea.Cmd, error) {
 			return "", nil, err
 		}
 		sp.dirty = false
-		return "saved " + sp.working.Name, nil, nil
+		w := sp.working
+		return "saved " + sp.working.Name, func() tea.Msg { return settingsThemeMsg{working: w} }, nil
 	case "theme-save-as":
 		name := strings.TrimSpace(value)
 		if name == "" {
@@ -201,6 +202,9 @@ func (sp *settingsPage) onCommit(key, value string) (string, tea.Cmd, error) {
 		sp.dirty = false
 		return "saved as " + name, func() tea.Msg { return settingsThemeMsg{working: nt, persistName: name} }, nil
 	case "theme-delete":
+		if sp.themes.IsBuiltin(sp.working.Name) {
+			return "can't delete built-in theme", nil, nil
+		}
 		name := sp.working.Name
 		if err := sp.themes.Remove(name); err != nil {
 			return "", nil, err

@@ -8,6 +8,7 @@ import (
 
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
+	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/locus"
 )
 
@@ -78,6 +79,7 @@ type Agent struct {
 	recap         RecapScheduler
 	compaction    CompactionScheduler
 	locusMode     func() string // live getter for the configured Locus Mode
+	engine        *dispatch.Engine
 }
 
 // RecapScheduler requests a (debounced) recap regeneration for a conversation.
@@ -120,6 +122,10 @@ func WithCompactionScheduler(cs CompactionScheduler) AgentOption {
 // SetLocusModeGetter wires a live getter for the active Locus Mode so co-proc
 // routing reflects runtime UpdateConfig changes. Nil getter → DefaultMode.
 func (a *Agent) SetLocusModeGetter(f func() string) { a.locusMode = f }
+
+// SetDispatchEngine wires the unified dispatch engine used for co-processor
+// (one-shot) work. Must be set before any Coproc request is processed.
+func (a *Agent) SetDispatchEngine(e *dispatch.Engine) { a.engine = e }
 
 func (a *Agent) currentLocusMode() string {
 	if a.locusMode == nil {
@@ -493,51 +499,30 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 }
 
 // processCoproc serves a one-shot co-processor request on the tier chosen by
-// the active Locus Mode. Bidirectional fallback for *_primary; hard error for
-// *_only when its tier is unavailable. Sets IsCloud + a Notice on fallback.
+// the active Locus Mode, routed through the dispatch.Engine on llm.Provider.
 func (a *Agent) processCoproc(ctx context.Context, req *Request) (*Response, error) {
 	augmentedInput, originalInput := a.loadHistory(ctx, req)
-
-	mode, _ := locus.ParseMode(a.currentLocusMode())
-	res := mode.Coproc()
-	providers := a.router.GetModelProviders()
-
-	pick := func(t locus.Tier) ModelProvider {
-		if t == locus.TierCloud {
-			if cp := providers["CloudModel"]; cp != nil && cp.Name() != "NONE" {
-				return cp
-			}
-			return nil
-		}
-		if lp := providers["LocalModel"]; lp != nil {
-			return lp
-		}
-		return nil
+	if a.engine == nil {
+		return nil, fmt.Errorf("co-processor dispatch engine not configured")
 	}
-
-	prov := pick(res.Preferred)
-	isCloud := res.Preferred == locus.TierCloud
-	fellBack := false
-	if prov == nil && res.CrossAllowed {
-		prov = pick(res.Fallback)
-		isCloud = res.Fallback == locus.TierCloud
-		fellBack = true
-	}
-	if prov == nil {
-		return nil, fmt.Errorf("locus mode %q: no %s provider available for co-processor work", mode, res.Preferred)
-	}
-
-	out, err := prov.Process(ctx, &Request{Input: augmentedInput, ModelOverride: req.ModelOverride})
+	res, err := a.engine.Dispatch(ctx, dispatch.Spec{
+		Mode:           dispatch.OneShot,
+		Role:           dispatch.RoleCoproc,
+		Prompt:         augmentedInput,
+		ModelOverride:  req.ModelOverride,
+		Source:         "coproc",
+		ConversationID: req.ConversationID,
+		// WantsProjectContext intentionally false: loadHistory already prepended context.
+	})
 	if err != nil {
 		return nil, err
 	}
-	modelName := prov.Name()
-	if req.ModelOverride != "" {
-		modelName = req.ModelOverride
-	}
-	out.RoutingMetadata = RoutingMetadata{ModelName: modelName, Confidence: 1.0, IsCloud: isCloud}
-	if fellBack {
-		out.Notice = fmt.Sprintf("locus: preferred co-processor tier unavailable — ran on %s (%s)", res.Fallback, modelName)
+	out := &Response{
+		Output:          res.Text,
+		InputTokens:     res.InputTokens,
+		OutputTokens:    res.OutputTokens,
+		RoutingMetadata: RoutingMetadata{ModelName: res.Model, Confidence: 1.0, IsCloud: res.IsCloud},
+		Notice:          res.Notice,
 	}
 	a.storeConversationTurn(ctx, req.ConversationID, originalInput, augmentedInput, out)
 	return out, nil

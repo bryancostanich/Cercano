@@ -39,6 +39,7 @@ import (
 	ollamallm "cercano/source/server/internal/llm/ollama"
 	"cercano/source/server/internal/localruntime"
 	runtimellama "cercano/source/server/internal/localruntime/llamaserver"
+	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
 	mcpserver "cercano/source/server/internal/mcp"
 	mcphost "cercano/source/server/internal/mcp_host"
@@ -46,9 +47,9 @@ import (
 	"cercano/source/server/internal/recap"
 	"cercano/source/server/internal/retention"
 	"cercano/source/server/internal/server"
-	"cercano/source/server/internal/usage"
 	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/internal/tools"
+	"cercano/source/server/internal/usage"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 	"cercano/source/server/pkg/update"
@@ -293,21 +294,44 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	// Layered LLM provider for native tool calling. Constructed only when
 	// the cloud is actually configured (anthropic-only for V1). When absent,
 	// StreamProcessRequest falls back to the legacy ProcessRequestStream path.
+	// rawCloud holds the unwrapped provider for the dispatch engine (avoids
+	// double-counting usage when the engine wraps per-dispatch).
+	var rawCloud llm.Provider
 	if canConfigureCloud && strings.EqualFold(cfg.CloudProvider, "anthropic") {
 		client := anthropic.NewClient(anthropic.Config{
 			BaseURL: cfg.CloudBaseURL,
 			APIKey:  cfg.CloudAPIKey,
 			Model:   cfg.CloudModel,
 		})
+		rawCloud = client
 		srv.SetCloudLLMProvider(usage.Wrap(client, "main", true, sink))
 	}
 
 	// Native tool-loop local provider (Ollama). Wired unconditionally so Local
 	// modes can drive the tool-calling loop; availability is enforced per turn.
-	srv.SetLocalLLMProvider(usage.Wrap(ollamallm.NewClient(ollamallm.Config{
+	// rawLocal holds the unwrapped provider for the dispatch engine.
+	rawLocal := ollamallm.NewClient(ollamallm.Config{
 		BaseURL: cfg.OllamaURL,
 		Model:   cfg.LocalModel,
-	}), "main", false, sink))
+	})
+	srv.SetLocalLLMProvider(usage.Wrap(rawLocal, "main", false, sink))
+
+	// Wire the co-processor dispatch engine. RAW (unwrapped) providers are
+	// passed so the engine's own per-dispatch usage.Wrap doesn't double-count.
+	// NB: SetUsageSink deliberately omitted here — coproc telemetry stays
+	// MCP-side to avoid double-counting; engine-side usage activated later.
+	coprocEngine := dispatch.NewEngine(
+		dispatch.Providers{Cloud: rawCloud, Local: rawLocal},
+		func() locus.Mode { m, _ := locus.ParseMode(srv.LocusMode()); return m },
+		ctxLoader,
+	)
+	coprocEngine.SetModelFor(func(isCloud bool) string {
+		if isCloud {
+			return cfg.CloudModel
+		}
+		return cfg.LocalModel
+	})
+	orchestrator.SetDispatchEngine(coprocEngine)
 
 	// Build the capability registry with live Services (providers, config, and
 	// context loader all set above) and wire it as the server's tool registry.

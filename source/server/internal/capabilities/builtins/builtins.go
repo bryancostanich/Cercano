@@ -1,6 +1,25 @@
 package builtins
 
-import "cercano/source/server/internal/capabilities"
+import (
+	"cercano/source/server/internal/capabilities"
+	"cercano/source/server/internal/capabilities/mcpadapter"
+)
+
+func init() {
+	capabilities.RegisterMCPCatalogSource(func() []mcpadapter.CapMeta {
+		reg := capabilities.NewRegistry(capabilities.Services{})
+		Register(reg)
+		var out []mcpadapter.CapMeta
+		for _, c := range reg.ForSurface(capabilities.SurfaceMCP) {
+			out = append(out, mcpadapter.CapMeta{
+				Name:        c.Name(),
+				Description: c.Description(),
+				Schema:      c.Schema(),
+			})
+		}
+		return out
+	})
+}
 
 // Register adds every built-in capability to reg.
 func Register(reg *capabilities.Registry) {

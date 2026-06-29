@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"cercano/source/server/internal/capabilities"
+	"cercano/source/server/internal/capabilities/mcpadapter"
 	"cercano/source/server/pkg/config"
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/dispatch"
@@ -540,6 +542,11 @@ func (s *Server) registerTools() {
 		Name:        "cercano_dispatch",
 		Description: "Dispatch a task to Cercano's local LLM as an autonomous agent with full tool-use capability (read_file, write_file, run_command). Runs an agentic loop locally — the model can read code, run commands, fetch URLs, and edit files until it decides the task is done. Streams events as progress notifications so you can see what's happening; cancel any time. No cloud calls, no validator loop, no SmartRouter — raw local dispatch under your control. Multi-turn via conversation_id.",
 	}, s.handleDispatch)
+
+	// Register all mcp-surface capabilities as cercano_<name> tools that
+	// forward to the agent via InvokeCapability. Requires builtins to be
+	// imported (directly or transitively) for MCPCatalog to return non-nil.
+	mcpadapter.RegisterCapabilities(s.mcpServer, s.grpcClient, capabilities.MCPCatalog())
 }
 
 // handleLocal processes a cercano_local tool call.

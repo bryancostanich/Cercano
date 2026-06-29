@@ -52,6 +52,28 @@ func openLocus(sp *settingsPage) {
 	sp.form.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 }
 
+// TestSettingsScrollReachesLastField navigates with the down arrow to the last
+// field on a terminal short enough to require scrolling, and verifies the field
+// lands inside the visible viewport (offset .. offset+viewportHeight) rather
+// than below the fold behind the prompt bar.
+func TestSettingsScrollReachesLastField(t *testing.T) {
+	sp := sampleSettingsPage(96, 39)
+	down := tea.KeyPressMsg{Code: tea.KeyDown}
+	total := len(sp.form.Lines(sp.width, sp.palette, sp.styles))
+	vh := sp.viewportHeight()
+	if total <= vh {
+		t.Fatalf("test needs a form taller than the viewport (total=%d vh=%d)", total, vh)
+	}
+	for i := 0; i < 40; i++ { // more than enough to reach the last field
+		sp.Update(down)
+	}
+	fl := sp.form.FocusedLine()
+	off := sp.ScrollState().Offset
+	if fl < off || fl >= off+vh {
+		t.Fatalf("last field at line %d is outside the visible window [%d,%d) — cannot scroll to bottom", fl, off, off+vh)
+	}
+}
+
 // TestSettingsBoxesFillWidth checks the section boxes span the content region
 // (width-2, matching the scrollbar reservation) at a wide terminal, rather than
 // stopping short of the scrollbar.

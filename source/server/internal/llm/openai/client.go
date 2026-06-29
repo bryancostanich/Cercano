@@ -8,6 +8,7 @@ import (
 	goopenai "github.com/sashabaranov/go-openai"
 
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/llm/httpx"
 )
 
 // Config holds the OpenAI client configuration.
@@ -26,15 +27,17 @@ type Client struct {
 }
 
 // NewClient constructs a Client from cfg. The HTTP transport is wrapped in a
-// normalizingDoer so per-backend response quirks (transient retries, array-shaped
-// error bodies) are repaired before go-openai parses them.
+// normalizingDoer so per-backend response quirks (array-shaped error bodies) are
+// repaired before go-openai parses them. Transient retries are handled by the
+// httpx.RetryTransport that the normalizer wraps.
 func NewClient(cfg Config) *Client {
 	c := goopenai.DefaultConfig(cfg.APIKey)
 	if cfg.BaseURL != "" {
 		c.BaseURL = cfg.BaseURL
 	}
 	q := quirksFor(cfg.Backend)
-	c.HTTPClient = &normalizingDoer{next: &http.Client{}, quirks: q}
+	retry := &httpx.RetryTransport{Next: &http.Client{}, Policy: q.Retry}
+	c.HTTPClient = &normalizingDoer{next: retry, quirks: q}
 	return &Client{api: goopenai.NewClientWithConfig(c), model: cfg.Model, quirks: q}
 }
 

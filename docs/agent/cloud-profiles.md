@@ -141,6 +141,18 @@ API keys are **never stored in YAML** — they live in the OS keychain (macOS Ke
 | `/cloud use <name>` | Set the active profile; rebuilds the cloud provider immediately |
 | `/cloud key <name> <api-key>` | Store (or update) the API key for a profile in the OS keychain |
 
+### Settings page (cercano-cli)
+
+The `/s` settings page has a **Cloud Providers** section: a vertical list of your
+configured profiles plus known-provider templates (anthropic, openai, gemini,
+groq, deepinfra, together, openrouter, deepseek) and `+ other` for any
+OpenAI-compatible endpoint. Selecting a row opens an inline editor for its
+base URL, model, and API key (stored in the OS keychain), with save / activate /
+delete actions. Untested backends are labeled `(untested)`; flavors not yet
+implemented (`bedrock`, the OpenAI Responses API) are labeled `(coming soon)`
+and cannot be activated. Backed by the `UpsertCloudProfile` / `RemoveCloudProfile`
+/ `SetActiveCloudProfile` / `SetCloudProfileKey` RPCs.
+
 ### Key auto-migration
 
 If you have a legacy single-cloud configuration (the old `cloud_api_key`, `cloud_model`, `cloud_base_url` fields in your YAML), Cercano auto-migrates on first run:

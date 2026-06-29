@@ -30,6 +30,7 @@ import (
 	"cercano/source/server/internal/localruntime"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
+	"cercano/source/server/internal/protocols"
 	mcphost "cercano/source/server/internal/mcp_host"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
@@ -1060,9 +1061,13 @@ type loopEnv struct {
 // children, and the project's .cercano/context.md when present. The cwd + the
 // snapshot are what stop the cloud model from hunting the filesystem to locate
 // the project before it can do any real work.
-func buildToolLoopSystem(env loopEnv, dirSnapshot, projectContext string) string {
+func buildToolLoopSystem(env loopEnv, steering, dirSnapshot, projectContext string) string {
 	var b strings.Builder
 	b.WriteString("You are Cercano, an agentic coding assistant operating in a terminal.\n\n")
+	if strings.TrimSpace(steering) != "" {
+		b.WriteString(steering)
+		b.WriteString("\n\n")
+	}
 	b.WriteString("<env>\n")
 	if env.WorkDir != "" {
 		fmt.Fprintf(&b, "Working directory: %s\n", env.WorkDir)
@@ -1108,7 +1113,8 @@ func (s *Server) buildSystemPrompt(workDir string) string {
 	if workDir != "" {
 		env.GitRepo, env.GitBranch = gitInfo(workDir)
 	}
-	return buildToolLoopSystem(env, directorySnapshot(workDir, 80), s.loadProjectContext(workDir))
+	steering := protocols.SteeringBlock(protocols.ForDomain(protocols.DomainCore))
+	return buildToolLoopSystem(env, steering, directorySnapshot(workDir, 80), s.loadProjectContext(workDir))
 }
 
 // directorySnapshot lists the immediate children of dir — directories first

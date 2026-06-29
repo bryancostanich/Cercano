@@ -2,12 +2,14 @@ package ui
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"cercano/source/clients/cli/internal/form"
 	"cercano/source/clients/cli/internal/theme"
+	"cercano/source/clients/cli/internal/uiconfig"
 	"cercano/source/server/pkg/agentclient"
 )
 
@@ -15,6 +17,14 @@ import (
 // model resolves the token and updates promptBorderColor (CLI-local, mirrors
 // ResultSetPromptColor).
 type settingsColorMsg struct{ token string }
+
+// settingsThemeMsg is emitted when the working theme changes (selection, edit,
+// save-as, delete, or import). The root model calls applyTheme and optionally
+// persists the active theme name.
+type settingsThemeMsg struct {
+	working     theme.Theme
+	persistName string // when non-empty, persist as the active theme
+}
 
 // settingsPage is the sectioned settings content page (opened by /s, /settings,
 // /config). It replaces the old flat configEditor.
@@ -26,10 +36,13 @@ type settingsPage struct {
 	accentToken   string
 	form          *form.Form
 	offset        int
+	themes        *theme.Registry
+	working       theme.Theme
+	dirty         bool
 }
 
-func newSettingsPage(ag *agentclient.Client, p theme.Palette, s theme.Styles, accentToken string, w, h int) (*settingsPage, tea.Cmd) {
-	sp := &settingsPage{agent: ag, palette: p, styles: s, accentToken: accentToken, width: w, height: h}
+func newSettingsPage(ag *agentclient.Client, p theme.Palette, s theme.Styles, accentToken string, w, h int, themes *theme.Registry, active theme.Theme) (*settingsPage, tea.Cmd) {
+	sp := &settingsPage{agent: ag, palette: p, styles: s, accentToken: accentToken, width: w, height: h, themes: themes, working: active}
 	sp.form = form.New(sp.snapshotSections())
 	sp.form.OnCommit = sp.onCommit
 	sp.form.OnReload = sp.snapshotSections
@@ -49,7 +62,22 @@ func (sp *settingsPage) snapshotSections() []form.Section {
 	if err != nil {
 		mode = ""
 	}
-	return buildSettingsSections(cfg, mode, sp.accentToken)
+	secs := buildSettingsSections(cfg, mode, sp.accentToken)
+	if sp.themes != nil {
+		builtin := sp.themes.IsBuiltin(sp.working.Name)
+		secs = append(secs, buildThemeSections(sp.working, sp.themes.Names(), builtin, sp.dirty)...)
+	}
+	return secs
+}
+
+// SetStyles refreshes palette/styles and rebuilds the form in-place (called by
+// Model.applyTheme when the settings page is active).
+func (sp *settingsPage) SetStyles(s theme.Styles, p theme.Palette) {
+	sp.styles = s
+	sp.palette = p
+	sp.form = form.New(sp.snapshotSections())
+	sp.form.OnCommit = sp.onCommit
+	sp.form.OnReload = sp.snapshotSections
 }
 
 func (sp *settingsPage) ID() contentPageID { return contentPageSettings }
@@ -101,6 +129,22 @@ func (sp *settingsPage) View() string {
 
 // onCommit routes a committed field to its sink.
 func (sp *settingsPage) onCommit(key, value string) (string, tea.Cmd, error) {
+	// Color edits — handled before classifyCommit (not a config/permission key).
+	if strings.HasPrefix(key, "color:") {
+		fieldKey := strings.TrimPrefix(key, "color:")
+		if c, err := theme.ParseHex(value); err == nil {
+			pc := sp.working.Palette
+			if ptr := theme.FieldPtr(&pc, fieldKey); ptr != nil {
+				*ptr = c
+				sp.working.Palette = pc
+				sp.dirty = true
+				w := sp.working
+				return "edited " + fieldKey, func() tea.Msg { return settingsThemeMsg{working: w} }, nil
+			}
+		}
+		return "bad color", nil, nil
+	}
+
 	action := classifyCommit(key, value)
 	switch action.kind {
 	case commitConfig:
@@ -125,6 +169,58 @@ func (sp *settingsPage) onCommit(key, value string) (string, tea.Cmd, error) {
 			return settingsColorMsg{token: token}
 		}, nil
 	}
+
+	// Theme-specific keys (fall through classifyCommit as commitNoop).
+	switch key {
+	case "theme-select":
+		if t, ok := sp.themes.Get(value); ok {
+			sp.working = t
+			sp.dirty = false
+			return "theme: " + value, func() tea.Msg { return settingsThemeMsg{working: t, persistName: value} }, nil
+		}
+		return "no such theme", nil, nil
+	case "theme-save":
+		if err := uiconfig.SaveCustomTheme(sp.working); err != nil {
+			return "", nil, err
+		}
+		sp.dirty = false
+		return "saved " + sp.working.Name, nil, nil
+	case "theme-save-as":
+		name := strings.TrimSpace(value)
+		if name == "" {
+			return "name required", nil, nil
+		}
+		nt := theme.Theme{Name: name, Palette: sp.working.Palette}
+		if err := sp.themes.Add(nt); err != nil {
+			return "", nil, err
+		}
+		if err := uiconfig.SaveCustomTheme(nt); err != nil {
+			return "", nil, err
+		}
+		sp.working = nt
+		sp.dirty = false
+		return "saved as " + name, func() tea.Msg { return settingsThemeMsg{working: nt, persistName: name} }, nil
+	case "theme-delete":
+		name := sp.working.Name
+		if err := sp.themes.Remove(name); err != nil {
+			return "", nil, err
+		}
+		_ = uiconfig.DeleteCustomTheme(name)
+		cracker, _ := sp.themes.Get("cracker")
+		sp.working = cracker
+		sp.dirty = false
+		return "deleted " + name, func() tea.Msg { return settingsThemeMsg{working: cracker, persistName: "cracker"} }, nil
+	case "theme-import":
+		t, err := uiconfig.ImportTheme(strings.TrimSpace(value))
+		if err != nil {
+			return "", nil, err
+		}
+		_ = sp.themes.Add(t)
+		sp.working = t
+		sp.dirty = false
+		return "imported " + t.Name, func() tea.Msg { return settingsThemeMsg{working: t, persistName: t.Name} }, nil
+	}
+
 	return "", nil, nil
 }
 

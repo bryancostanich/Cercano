@@ -53,9 +53,6 @@ func buildSettingsSections(cfg *agentclient.Config, mode, accentToken string) []
 				{Label: "bypass", Value: "bypass"},
 			}, mode),
 		}},
-		{Title: "UI / Theme", Fields: []form.Field{
-			form.NewSelect("accent-color", "accent-color", accentColorOptions(), accentToken),
-		}},
 		{Title: "Server", Fields: []form.Field{
 			form.NewReadOnly("port", "port", cfg.Port, "(read-only)"),
 		}},

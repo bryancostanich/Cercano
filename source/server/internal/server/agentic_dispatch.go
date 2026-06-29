@@ -2,12 +2,46 @@ package server
 
 import (
 	"context"
+	"log"
 	"strings"
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/dispatch"
 )
+
+// grantedRegistry builds the least-privilege tool registry for an agentic
+// dispatch. With no requested tools, it grants read-only tools. With requested
+// tools, it grants the named subset — but bounded by the parent permission
+// mode: a non-interactive dispatch under a non-bypass mode cannot wield W/X
+// tools (no human to confirm), so those are dropped (and logged).
+func (s *Server) grantedRegistry(tools []string, mode agent.PermissionMode) *agenttools.Registry {
+	var candidate *agenttools.Registry
+	if len(tools) > 0 {
+		candidate = s.toolRegistry.Subset(tools)
+	} else {
+		candidate = agenttools.NewRegistry()
+		for _, t := range s.toolRegistry.Filter(agenttools.PermR) {
+			_ = candidate.Register(t)
+		}
+	}
+	if mode == agent.ModeBypass {
+		return candidate
+	}
+	bounded := agenttools.NewRegistry()
+	var dropped []string
+	for _, t := range candidate.All() {
+		if t.Permission() == agenttools.PermR {
+			_ = bounded.Register(t)
+		} else {
+			dropped = append(dropped, t.Name())
+		}
+	}
+	if len(dropped) > 0 {
+		log.Printf("[dispatch] subagent grant bounded by parent permission mode %q: dropped non-read tools %v", mode, dropped)
+	}
+	return bounded
+}
 
 // runAgenticDispatch implements dispatch.AgenticRunner. It is wired onto the
 // dispatch.Engine via SetDispatchEngine so that internal/dispatch need not
@@ -16,19 +50,14 @@ import (
 // It builds a least-privilege registry, assembles a system prompt, and runs
 // agent.RunToolLoop, returning the final text and token counts.
 func (s *Server) runAgenticDispatch(ctx context.Context, spec dispatch.Spec, sel dispatch.Selection, model string) (dispatch.Result, error) {
-	// 1. Build the least-privilege tool registry.
-	var reg *agenttools.Registry
-	if len(spec.Tools) > 0 {
-		// Caller supplied an explicit allowlist — use it verbatim.
-		reg = s.toolRegistry.Subset(spec.Tools)
-	} else {
-		// Default: R-tier only. R-tier tools never gate (run silently),
-		// making them safe for unattended agentic sub-tasks.
-		reg = agenttools.NewRegistry()
-		for _, t := range s.toolRegistry.Filter(agenttools.PermR) {
-			_ = reg.Register(t) // can't duplicate; Filter returns each tool once
-		}
+	// 1. Build the least-privilege tool registry, bounded by parent permission mode.
+	// A non-interactive dispatch cannot prompt a human, so W/X tools are
+	// dropped unless the parent mode is bypass (which explicitly disables all gating).
+	mode := agent.ModePermissive
+	if s.permStore != nil {
+		mode = s.permStore.Mode()
 	}
+	reg := s.grantedRegistry(spec.Tools, mode)
 
 	// 2. Build system prompt (env grounding + steering block + project context).
 	system := s.buildSystemPrompt(spec.WorkDir)

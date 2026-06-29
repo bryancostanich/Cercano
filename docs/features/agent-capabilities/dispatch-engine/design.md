@@ -41,9 +41,15 @@ Co-processor = the degenerate case (fixed prompt, no tools, one-shot). Subagent 
 5. **MCP long-running comms: synchronous + best-effort progress (now).** The MCP tool call blocks until the dispatch finishes and returns the full result; progress notifications are emitted but nothing depends on them. Matches what hosts actually support.
    - **Future upgrade (documented, not built now):** a "sync default + async job+poll opt-in" mode — dispatch returns a job id, host polls a status/result tool — for genuinely long work that risks host-side tool-call timeouts. Captured here so it isn't lost.
 
+6. **Routing is a consumed seam governed by locus mode; not owned by this engine.**
+   - The dispatch primitive asks a **router seam** "for this work, under the current locus mode, which provider + model?" — it does not implement the routing intelligence.
+   - **Locus mode is the hard governor.** `internal/locus/locus.go`: `cloud_only`/`local_only` forbid the other tier; `cloud_primary`/`local_primary` set preferred + fallback with escalation when cross-allowed. `mode.Main()` vs `mode.Coproc()` already return per-path tier policy; co-processor work already routes via `mode.Coproc()` in `processCoproc`. Whatever the router proposes is bounded by locus.
+   - **Today's seam implementation:** reuse the existing locus-driven selection + `SmartRouter`; the dispatch primitive just unifies the call site so one-shot and agentic dispatch route consistently.
+   - **Caller hints** (a role/tier preference, or `ModelOverride`) are advisory inputs the router *may* honor within locus bounds — never an override of locus.
+   - **Future upgrade (documented, not built now):** an embedded small-model router that analyzes the prompt and references a **model×capability matrix** to choose the target. The matrix is greenfield today (only `llm.Capabilities` + a binary code/research split in `internal/research/modelcheck.go`). When it lands, only the seam's *implementation* changes — the dispatch engine does not.
+
 ## Open forks (to resolve next)
 
-- **Model routing policy** — how the model is chosen for a dispatched unit (light vs heavy; local vs cloud escalation); how explicit vs automatic.
 - **Workflow-protocol injection** — which protocols get injected into subagent context, and how selected (ties to Spec 0b).
 - **Adversarial review** — in scope now or a later layer.
 - **`workflow` alias** — aliasing the subagent entry to `workflow` (Claude reaches for "the workflow tool").

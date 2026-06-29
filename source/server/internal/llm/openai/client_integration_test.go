@@ -190,3 +190,23 @@ func TestIntegration_Vision(t *testing.T) {
 		t.Logf("note: reply did not mention 'red' (model: %s) — inspect manually", c.model)
 	}
 }
+
+func TestIntegration_CleanError(t *testing.T) {
+	c := liveClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// A bogus model name is rejected by the backend. With error normalization
+	// the message must be human-readable, not go-openai's "unmarshal array".
+	_, err := c.Chat(ctx, llm.ChatRequest{
+		Model:    "definitely-not-a-real-model-xyz",
+		Messages: []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "hi"}}}},
+	})
+	if err == nil {
+		t.Fatal("expected an error for a bogus model")
+	}
+	if strings.Contains(err.Error(), "unmarshal array") {
+		t.Errorf("error not normalized: %v", err)
+	}
+	t.Logf("clean error: %v", err)
+}

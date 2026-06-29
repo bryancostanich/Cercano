@@ -1,6 +1,6 @@
 # Per-Backend Quirks Layer — Design
 
-**Status:** Designed 2026-06-28. Follow-on robustness work for the
+**Status:** Implemented 2026-06-28. Follow-on robustness work for the
 `chat_completions` provider ([cloud-openai.md](./cloud-openai.md)); informed by
 the live Gemini findings in [llm-backend-notes.md](./llm-backend-notes.md).
 

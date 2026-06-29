@@ -91,3 +91,18 @@ func TestMessage_OrderedBlocks(t *testing.T) {
 		t.Errorf("message blocks not preserved: %+v", m)
 	}
 }
+
+func TestBlockReasoningRoundTrip(t *testing.T) {
+	b := Block{Type: BlockReasoning, ReasoningID: "rs_1", ReasoningData: "ENCRYPTED"}
+	data, err := json.Marshal(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Block
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Type != BlockReasoning || got.ReasoningID != "rs_1" || got.ReasoningData != "ENCRYPTED" {
+		t.Fatalf("round-trip lost data: %+v", got)
+	}
+}

@@ -9,6 +9,7 @@ const (
 	BlockToolUse    BlockType = "tool_use"
 	BlockToolResult BlockType = "tool_result"
 	BlockImage      BlockType = "image"
+	BlockReasoning  BlockType = "reasoning"
 )
 
 type Role string
@@ -35,6 +36,11 @@ type Block struct {
 	MediaType string `json:"media_type,omitempty"` // image: "image/png" etc (required for base64)
 	ImageData string `json:"image_data,omitempty"` // image: base64 bytes
 	ImageURL  string `json:"image_url,omitempty"`  // image: http(s) URL
+
+	// reasoning: opaque encrypted reasoning carried across turns (Responses API).
+	// We never read ReasoningData — it is stored and sent back verbatim.
+	ReasoningID   string `json:"reasoning_id,omitempty"`
+	ReasoningData string `json:"reasoning_data,omitempty"`
 
 	ProviderExtras map[string]any `json:"-"`
 }

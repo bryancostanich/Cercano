@@ -10,6 +10,7 @@ const (
 	EventToolUseStart      StreamEventType = "tool_use_start"
 	EventToolUseInputDelta StreamEventType = "tool_use_input_delta"
 	EventToolUseStop       StreamEventType = "tool_use_stop"
+	EventReasoning         StreamEventType = "reasoning"
 	EventMessageStop       StreamEventType = "message_stop"
 	EventError             StreamEventType = "error"
 )
@@ -22,6 +23,10 @@ type StreamEvent struct {
 	ToolUseID    string
 	ToolName     string
 	ToolInputRaw json.RawMessage
+
+	// Set on EventReasoning: the opaque encrypted reasoning item to carry forward.
+	ReasoningID   string
+	ReasoningData string
 
 	StopReason string
 

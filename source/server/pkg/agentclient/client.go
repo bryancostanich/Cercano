@@ -1133,6 +1133,7 @@ type CloudProfileInfo struct {
 	BaseURL string
 	Model   string
 	HasKey  bool // a key exists in the keychain for this profile
+	Backend string
 }
 
 // GetCloudProfiles returns all configured cloud profiles and the name of the
@@ -1150,6 +1151,7 @@ func (c *Client) GetCloudProfiles(ctx context.Context) ([]CloudProfileInfo, stri
 			BaseURL: p.GetBaseUrl(),
 			Model:   p.GetModel(),
 			HasKey:  p.GetHasKey(),
+			Backend: p.GetBackend(),
 		})
 	}
 	return out, resp.GetActive(), nil
@@ -1170,6 +1172,32 @@ func (c *Client) SetActiveCloudProfile(ctx context.Context, name string) error {
 // SetCloudProfileKey stores an API key for the named cloud profile.
 func (c *Client) SetCloudProfileKey(ctx context.Context, name, key string) error {
 	resp, err := c.agent.SetCloudProfileKey(ctx, &proto.SetCloudProfileKeyRequest{Name: name, ApiKey: key})
+	if err != nil {
+		return err
+	}
+	if !resp.GetOk() {
+		return fmt.Errorf("%s", resp.GetError())
+	}
+	return nil
+}
+
+// UpsertCloudProfile creates or updates a cloud profile's metadata.
+func (c *Client) UpsertCloudProfile(ctx context.Context, p CloudProfileInfo) error {
+	resp, err := c.agent.UpsertCloudProfile(ctx, &proto.UpsertCloudProfileRequest{
+		Name: p.Name, Flavor: p.Flavor, Backend: p.Backend, BaseUrl: p.BaseURL, Model: p.Model,
+	})
+	if err != nil {
+		return err
+	}
+	if !resp.GetOk() {
+		return fmt.Errorf("%s", resp.GetError())
+	}
+	return nil
+}
+
+// RemoveCloudProfile deletes a cloud profile and its keychain key.
+func (c *Client) RemoveCloudProfile(ctx context.Context, name string) error {
+	resp, err := c.agent.RemoveCloudProfile(ctx, &proto.RemoveCloudProfileRequest{Name: name})
 	if err != nil {
 		return err
 	}

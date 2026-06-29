@@ -23,6 +23,7 @@ import (
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
+	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
@@ -193,26 +194,14 @@ func (s *Server) SetLocalLLMProvider(p llm.Provider) { s.localLLMProvider = p }
 // forbids crossing and the required tier has no provider wired.
 func (s *Server) resolveMainProvider() (llm.Provider, bool, bool, error) {
 	mode, _ := locus.ParseMode(s.currentConfig.LocusMode)
-	res := mode.Main()
-
-	provForTier := func(t locus.Tier) llm.Provider {
-		if t == locus.TierCloud {
-			return s.cloudLLMProvider
-		}
-		return s.localLLMProvider
+	sel, err := dispatch.Select(mode, dispatch.RoleMain, dispatch.Providers{
+		Cloud: s.cloudLLMProvider,
+		Local: s.localLLMProvider,
+	})
+	if err != nil {
+		return nil, false, false, err
 	}
-
-	if p := provForTier(res.Preferred); p != nil {
-		return p, res.Preferred == locus.TierCloud, false, nil
-	}
-	if res.CrossAllowed {
-		if p := provForTier(res.Fallback); p != nil {
-			return p, res.Fallback == locus.TierCloud, true, nil
-		}
-	}
-	return nil, false, false, fmt.Errorf(
-		"locus mode %q: no %s provider available (and fallback not permitted)",
-		mode, res.Preferred)
+	return sel.Provider, sel.IsCloud, sel.FellBack, nil
 }
 
 // SetRuntimeManager attaches the local runtime/dashboard state manager.

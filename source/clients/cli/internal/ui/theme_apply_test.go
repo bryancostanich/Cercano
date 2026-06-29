@@ -14,3 +14,12 @@ func TestChatSetStylesReplacesMarkdownRenderer(t *testing.T) {
 		t.Fatal("SetStyles must replace the markdown renderer (flush cache)")
 	}
 }
+
+func TestRegistryIncludesCustomAndBuiltins(t *testing.T) {
+	r := theme.NewRegistry(theme.BuiltinThemes())
+	_ = r.Add(theme.Theme{Name: "mine", Palette: theme.Cracker()})
+	names := r.Names()
+	if names[0] != "cracker" || names[len(names)-1] != "mine" {
+		t.Fatalf("registry order = %v", names)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"os"
 
 	mcpserver "cercano/source/server/internal/mcp"
+	_ "cercano/source/server/internal/capabilities/builtins" // registers MCPCatalog source via init
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/grpc"

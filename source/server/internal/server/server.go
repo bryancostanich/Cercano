@@ -337,6 +337,10 @@ func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudP
 	if !replaced {
 		s.currentConfig.CloudProfiles = append(s.currentConfig.CloudProfiles, np)
 	}
+	// If this is the active profile, rebuild so metadata changes take effect now.
+	if name == s.currentConfig.ActiveCloudProfile {
+		_ = s.rebuildCloud()
+	}
 	s.persistConfig()
 	return &proto.UpsertCloudProfileResponse{Ok: true}, nil
 }

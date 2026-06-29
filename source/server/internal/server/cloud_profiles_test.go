@@ -286,6 +286,39 @@ func TestUpsertCloudProfileCreatesAndUpdates(t *testing.T) {
 	}
 }
 
+func TestUpsertCloudProfileRebuildsActiveProvider(t *testing.T) {
+	s, _ := newTestServer()
+	// Set a key so rebuildCloud can succeed for the messages flavor.
+	if err := s.secrets.Set("messages-one", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	// Make messages-one the active profile and trigger an initial rebuild.
+	s.currentConfig.ActiveCloudProfile = "messages-one"
+	if err := s.rebuildCloud(); err != nil {
+		t.Fatalf("initial rebuildCloud: %v", err)
+	}
+	if s.cloudLLMProvider == nil {
+		t.Fatal("cloudLLMProvider should be non-nil after initial rebuild")
+	}
+	// Upsert the active profile with a new model.
+	resp, err := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{
+		Name: "messages-one", Flavor: "messages", Model: "claude-opus-5",
+	})
+	if err != nil {
+		t.Fatalf("UpsertCloudProfile: %v", err)
+	}
+	if !resp.Ok {
+		t.Fatalf("want Ok, got: %s", resp.Error)
+	}
+	// rebuildCloud sets s.currentConfig.CloudModel from the active profile's Model.
+	if s.cloudLLMProvider == nil {
+		t.Error("cloudLLMProvider should be non-nil after upsert of active profile")
+	}
+	if s.currentConfig.CloudModel != "claude-opus-5" {
+		t.Errorf("CloudModel = %q after rebuild, want claude-opus-5", s.currentConfig.CloudModel)
+	}
+}
+
 func TestUpsertCloudProfileValidation(t *testing.T) {
 	s, _ := newTestServer()
 	// Empty name rejected.
@@ -309,7 +342,7 @@ func TestUpsertCloudProfileValidation(t *testing.T) {
 }
 
 func TestRemoveCloudProfile(t *testing.T) {
-	s, _ := newTestServer()
+	s, r := newTestServer()
 	// Seed a key for messages-one so we can verify deletion.
 	if err := s.secrets.Set("messages-one", "sk-test"); err != nil {
 		t.Fatal(err)
@@ -330,6 +363,12 @@ func TestRemoveCloudProfile(t *testing.T) {
 	}
 	if s.currentConfig.ActiveCloudProfile != "" {
 		t.Errorf("active should be cleared, got %q", s.currentConfig.ActiveCloudProfile)
+	}
+	if s.cloudLLMProvider != nil {
+		t.Error("cloudLLMProvider should be nil after removing active profile")
+	}
+	if _, ok := r.last.(*legacymodels.AbsentCloudProvider); !ok {
+		t.Errorf("router should hold AbsentCloudProvider after removing active profile, got %T", r.last)
 	}
 }
 

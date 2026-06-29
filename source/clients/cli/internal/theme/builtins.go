@@ -8,10 +8,10 @@ import (
 
 func hc(s string) color.Color { return lipgloss.Color(s) }
 
-// BuiltinThemes returns the always-present, read-only themes, cracker first.
+// BuiltinThemes returns the always-present, read-only themes, default (cr4k3r_j4x) first.
 func BuiltinThemes() []Theme {
 	return []Theme{
-		{Name: "cracker", Palette: Cracker()},
+		{Name: "cr4k3r_j4x", Palette: Cracker()},
 		{Name: "phosphor", Palette: phosphorPalette()},
 		{Name: "synthwave", Palette: synthwavePalette()},
 		{Name: "daylight", Palette: daylightPalette()},

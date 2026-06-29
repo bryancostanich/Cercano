@@ -42,7 +42,7 @@ func sampleSettingsPage(w, h int) *settingsPage {
 		palette: p, styles: s, width: w, height: h,
 		cfg: cfg, mode: "permissive",
 		themes:  theme.NewRegistry(theme.BuiltinThemes()),
-		working: theme.Theme{Name: "cracker", Palette: theme.Cracker()},
+		working: theme.Theme{Name: "cr4k3r_j4x", Palette: theme.Cracker()},
 	}
 	sp.form = form.New(sp.snapshotSections())
 	sp.form.OnCommit = sp.onCommit

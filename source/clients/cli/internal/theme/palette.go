@@ -1,5 +1,5 @@
 // Package theme defines the cercano-cli color palette and pre-built lipgloss
-// styles. The default theme is "cracker" — amber + lime on charcoal, evoking
+// styles. The default theme is "cr4k3r_j4x" — amber + lime on charcoal, evoking
 // 80s phosphor terminals and demoscene cracker intros.
 package theme
 

@@ -11,7 +11,7 @@ import (
 func TestActiveThemeRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CERCANO_UI_CONFIG", filepath.Join(dir, "ui.yaml"))
-	if got := LoadActiveTheme(); got != "cracker" {
+	if got := LoadActiveTheme(); got != "cr4k3r_j4x" {
 		t.Fatalf("default = %q, want cracker", got)
 	}
 	if err := SaveActiveTheme("phosphor"); err != nil {

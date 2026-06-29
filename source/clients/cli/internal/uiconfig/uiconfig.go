@@ -41,15 +41,15 @@ type uiFile struct {
 	Theme string `yaml:"theme"`
 }
 
-// LoadActiveTheme returns the persisted active theme name, or "cracker".
+// LoadActiveTheme returns the persisted active theme name, or "cr4k3r_j4x".
 func LoadActiveTheme() string {
 	data, err := os.ReadFile(ConfigPath())
 	if err != nil {
-		return "cracker"
+		return "cr4k3r_j4x"
 	}
 	var f uiFile
 	if yaml.Unmarshal(data, &f) != nil || f.Theme == "" {
-		return "cracker"
+		return "cr4k3r_j4x"
 	}
 	return f.Theme
 }

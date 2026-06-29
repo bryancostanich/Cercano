@@ -231,10 +231,10 @@ func (sp *settingsPage) onCommit(key, value string) (string, tea.Cmd, error) {
 			return "", nil, err
 		}
 		_ = uiconfig.DeleteCustomTheme(name)
-		cracker, _ := sp.themes.Get("cracker")
+		cracker, _ := sp.themes.Get("cr4k3r_j4x")
 		sp.working = cracker
 		sp.dirty = false
-		return "deleted " + name, func() tea.Msg { return settingsThemeMsg{working: cracker, persistName: "cracker"} }, nil
+		return "deleted " + name, func() tea.Msg { return settingsThemeMsg{working: cracker, persistName: "cr4k3r_j4x"} }, nil
 	case "theme-import":
 		t, err := uiconfig.ImportTheme(strings.TrimSpace(value))
 		if err != nil {

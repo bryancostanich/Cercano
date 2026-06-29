@@ -205,7 +205,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	activeName := uiconfig.LoadActiveTheme()
 	active, ok := themes.Get(activeName)
 	if !ok {
-		active, _ = themes.Get("cracker")
+		active, _ = themes.Get("cr4k3r_j4x")
 	}
 	p := active.Palette
 	s := theme.NewStyles(p)

@@ -21,6 +21,9 @@ Verified by the live integration tests (`internal/llm/openai/client_integration_
 
 (Gemini verified 2026-06-28 on `gemini-2.5-flash` via `https://generativelanguage.googleapis.com/v1beta/openai`.)
 
+The cercano-cli settings page wires these up (`/s` → Cloud Providers); untested
+rows there carry an `(untested)` label that mirrors the `—` cells above.
+
 ## Findings (2026-06-28, live Gemini run)
 
 ### 1. Image URLs are not portable — base64 is

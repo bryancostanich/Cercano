@@ -101,6 +101,7 @@ No auto-migration (decided). A user reaches Gemini, Groq, etc. by creating a
 | OpenAI | `(empty)` | Defaults to `api.openai.com` |
 | Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | Requires Gemini API key |
 | Groq | `https://api.groq.com/openai/v1` | Requires Groq API key |
+| DeepInfra | `https://api.deepinfra.com/v1/openai` | Requires DeepInfra token; faithful compat (docs: only base_url/key/model change) |
 
 **Setup flow** — store the key, then add a profile and activate it:
 

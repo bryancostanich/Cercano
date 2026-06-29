@@ -34,3 +34,10 @@ func TestBuildChatCompletionsWithBackend(t *testing.T) {
 		t.Fatalf("chat_completions+backend → %v, %v", p, err)
 	}
 }
+
+func TestBuildResponsesProvider(t *testing.T) {
+	p, err := BuildCloudProvider(config.CloudProfile{Name: "r", Flavor: "responses", Model: "gpt-5"}, "sk")
+	if err != nil || p == nil || p.Name() != "openai-responses" {
+		t.Fatalf("responses → %v, %v", p, err)
+	}
+}

@@ -29,6 +29,7 @@ import (
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/capabilities/builtins"
+	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/engine"
 	llamaengine "cercano/source/server/internal/engine/llamaserver"
@@ -412,6 +413,23 @@ func main() {
 			// Intended for scripts and CI — no TTY, no UI.
 			runHeadless(os.Args[2:])
 			return
+		case "protocols":
+			// cercano protocols sync [dir] — write protocol SKILL.md files for host discovery.
+			if len(os.Args) >= 3 && os.Args[2] == "sync" {
+				root := "."
+				if len(os.Args) >= 4 {
+					root = os.Args[3]
+				}
+				written, err := protocols.WriteSkillFiles(root)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "protocols sync:", err)
+					os.Exit(1)
+				}
+				fmt.Printf("Wrote %d protocol skill files under %s\n", len(written), root)
+				return
+			}
+			fmt.Fprintln(os.Stderr, "usage: cercano protocols sync [dir]")
+			os.Exit(2)
 		}
 	}
 

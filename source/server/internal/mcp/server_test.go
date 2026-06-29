@@ -141,6 +141,10 @@ func (m *mockAgentClient) InvokeTool(ctx context.Context, in *proto.InvokeToolRe
 	return &proto.InvokeToolResponse{}, nil
 }
 
+func (m *mockAgentClient) InvokeCapability(ctx context.Context, in *proto.InvokeCapabilityRequest, opts ...grpc.CallOption) (*proto.InvokeCapabilityResponse, error) {
+	return &proto.InvokeCapabilityResponse{}, nil
+}
+
 func (m *mockAgentClient) ListSkills(ctx context.Context, in *proto.ListSkillsRequest, opts ...grpc.CallOption) (*proto.ListSkillsResponse, error) {
 	if m.skillsResp != nil {
 		return m.skillsResp, m.skillsErr

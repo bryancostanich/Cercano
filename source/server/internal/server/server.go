@@ -30,8 +30,8 @@ import (
 	"cercano/source/server/internal/localruntime"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
-	"cercano/source/server/internal/protocols"
 	mcphost "cercano/source/server/internal/mcp_host"
+	"cercano/source/server/internal/protocols"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 )

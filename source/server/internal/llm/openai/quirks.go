@@ -1,26 +1,20 @@
 package openai
 
-import "time"
+import (
+	"time"
 
-// RetryPolicy controls transient-failure retries in the transport wrapper.
-type RetryPolicy struct {
-	MaxAttempts int           // total attempts incl. the first; <2 disables retry
-	BaseDelay   time.Duration // first backoff; doubles each subsequent attempt
-	OnStatus    []int         // HTTP statuses that trigger a retry
-}
+	"cercano/source/server/internal/llm/httpx"
+)
 
 // Quirks captures a backend's known deviations from OpenAI Chat Completions.
-// The zero value is the strict-OpenAI baseline; quirksFor turns on the
-// defensive options that are safe everywhere.
 type Quirks struct {
-	ImagesAsBase64  bool // resolve URL images to base64 before send
-	NormalizeErrors bool // rewrite array-shaped error bodies to object shape
-	Retry           RetryPolicy
+	ImagesAsBase64  bool
+	NormalizeErrors bool
+	Retry           httpx.RetryPolicy
 }
 
-// defaultRetry is the transient-failure policy shared by all known backends.
-func defaultRetry() RetryPolicy {
-	return RetryPolicy{
+func defaultRetry() httpx.RetryPolicy {
+	return httpx.RetryPolicy{
 		MaxAttempts: 3,
 		BaseDelay:   500 * time.Millisecond,
 		OnStatus:    []int{429, 500, 502, 503},

@@ -104,6 +104,16 @@ Tier 2:  [5 Subagent engine] ←─────────┘
   the plan for review, and generate it on request. (Pointing someone to "go read the
   plan" is a poor handoff; a tight bulleted digest respects their time.)
 
+## Candidate capabilities (not yet scheduled)
+
+- **`cercano_compact` capability** — expose the existing, well-developed `internal/compaction`
+  subsystem (rolling / map-reduce / summarizer / dedup / elision) as a capability: feed it
+  text or a transcript, get back a compacted summary. Built on the dispatch engine's
+  capability model (one-shot mode), so it lights up on both surfaces. It would **not**
+  auto-manage a host's context window (a host owns its own context; capabilities return
+  data), but a host could call it deliberately to compact large material locally. Candidate
+  once the dispatch engine lands.
+
 ## Status
 
 - **0a capability foundation (Tasks 1–10): built** in this worktree, each task reviewed

@@ -10,8 +10,8 @@ import (
 )
 
 func TestBuildThemeSections(t *testing.T) {
-	secs := buildThemeSections(theme.Theme{Name: "cracker", Palette: theme.Cracker()},
-		[]string{"cracker", "phosphor"}, true /*builtin*/, false /*dirty*/)
+	secs := buildThemeSections(theme.Theme{Name: "cr4k3r_j4x", Palette: theme.Cracker()},
+		[]string{"cr4k3r_j4x", "phosphor"}, true /*builtin*/, false /*dirty*/)
 	titles := map[string]bool{}
 	keys := map[string]bool{}
 	for _, s := range secs {

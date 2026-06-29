@@ -19,7 +19,7 @@ func TestRegistryIncludesCustomAndBuiltins(t *testing.T) {
 	r := theme.NewRegistry(theme.BuiltinThemes())
 	_ = r.Add(theme.Theme{Name: "mine", Palette: theme.Cracker()})
 	names := r.Names()
-	if names[0] != "cracker" || names[len(names)-1] != "mine" {
+	if names[0] != "cr4k3r_j4x" || names[len(names)-1] != "mine" {
 		t.Fatalf("registry order = %v", names)
 	}
 }

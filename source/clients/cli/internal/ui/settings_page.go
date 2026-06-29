@@ -45,6 +45,16 @@ type settingsPage struct {
 	// config or permission commit so the next reload re-fetches fresh values.
 	cfg  *agentclient.Config
 	mode string
+	// Cloud provider list + inline detail-editor state. profiles/activeProfile
+	// cache GetCloudProfiles like cfg caches GetConfig; profilesLoaded gates the
+	// fetch. cloudSelected is the expanded row's ID ("" = none); cloudDraft holds
+	// the in-progress edit; cloudDraftNew is true when creating (template/other).
+	profiles       []agentclient.CloudProfileInfo
+	activeProfile  string
+	profilesLoaded bool
+	cloudSelected  string
+	cloudDraft     cloudDraft
+	cloudDraftNew  bool
 }
 
 func newSettingsPage(ag *agentclient.Client, p theme.Palette, s theme.Styles, accentToken string, w, h int, themes *theme.Registry, active theme.Theme) (*settingsPage, tea.Cmd) {
@@ -72,7 +82,17 @@ func (sp *settingsPage) snapshotSections() []form.Section {
 		sp.cfg = cfg
 		sp.mode = mode
 	}
+	if !sp.profilesLoaded && sp.agent != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if profs, active, err := sp.agent.GetCloudProfiles(ctx); err == nil {
+			sp.profiles = profs
+			sp.activeProfile = active
+			sp.profilesLoaded = true
+		}
+	}
 	secs := buildSettingsSections(sp.cfg, sp.mode, sp.accentToken)
+	secs = append(secs, sp.buildCloudSection())
 	if sp.themes != nil {
 		builtin := sp.themes.IsBuiltin(sp.working.Name)
 		secs = append(secs, buildThemeSections(sp.working, sp.themes.Names(), builtin, sp.dirty)...)

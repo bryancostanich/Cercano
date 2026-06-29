@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"cercano/source/clients/cli/internal/render"
+	"cercano/source/clients/cli/internal/theme"
 )
 
 // A folded tool entry that is wider than the viewport must WRAP to multiple
@@ -18,7 +20,7 @@ func TestRenderToolEntryFoldedWrapsToWidth(t *testing.T) {
 		Folded:        true,
 	}
 	const width = 40
-	got := renderToolEntry(e, width, false, nil)
+	got := renderToolEntry(e, width, false, theme.NewStyles(theme.Cracker()), render.NewMarkdown(theme.MarkdownStyle(theme.Cracker())))
 	if !strings.Contains(got, "\n") {
 		t.Fatalf("long folded entry should wrap to multiple lines, got one line")
 	}
@@ -33,7 +35,7 @@ func TestRenderToolEntryFoldedWrapsToWidth(t *testing.T) {
 // "  ▸ Bash " prefix (visible width 9), so the wrap reads as one entry.
 func TestRenderToolEntryFoldedHangingIndent(t *testing.T) {
 	e := ToolEntry{ToolName: "Bash", ArgsSummary: strings.Repeat("x", 200), ResultSummary: "ok", Status: ToolStatusComplete, Folded: true}
-	lines := strings.Split(renderToolEntry(e, 40, false, nil), "\n")
+	lines := strings.Split(renderToolEntry(e, 40, false, theme.NewStyles(theme.Cracker()), render.NewMarkdown(theme.MarkdownStyle(theme.Cracker()))), "\n")
 	if len(lines) < 2 {
 		t.Fatalf("expected the long entry to wrap")
 	}
@@ -48,7 +50,7 @@ func TestRenderToolEntryFoldedHangingIndent(t *testing.T) {
 // A folded entry that fits must stay a single line (no spurious wrapping/pad).
 func TestRenderToolEntryFoldedShortStaysOneLine(t *testing.T) {
 	e := ToolEntry{ToolName: "Read", ArgsSummary: "main.go", ResultSummary: "ok", Status: ToolStatusComplete, Folded: true}
-	got := renderToolEntry(e, 80, false, nil)
+	got := renderToolEntry(e, 80, false, theme.NewStyles(theme.Cracker()), render.NewMarkdown(theme.MarkdownStyle(theme.Cracker())))
 	if strings.Contains(got, "\n") {
 		t.Fatalf("short folded entry should stay one line, got:\n%q", got)
 	}

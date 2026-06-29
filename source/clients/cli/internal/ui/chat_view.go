@@ -81,7 +81,7 @@ func newChatView(styles theme.Styles, palette theme.Palette, root, home string, 
 		palette:        palette,
 		root:           root,
 		home:           home,
-		md:             render.NewMarkdown(theme.CrackerMarkdownStyle()),
+		md:             render.NewMarkdown(theme.MarkdownStyle(palette)),
 		vp:             viewport.New(viewport.WithWidth(vpWidth), viewport.WithHeight(vpHeight)),
 		focusedToolIdx: -1,
 	}

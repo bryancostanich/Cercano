@@ -75,7 +75,7 @@ func contextRefreshTick() tea.Cmd {
 }
 
 func newContextView(ag *agentclient.Client, p theme.Palette, s theme.Styles, convID string, w, h int) (*contextView, tea.Cmd) {
-	cv := &contextView{palette: p, styles: s, agent: ag, convID: convID, width: w, height: h, expanded: map[string]bool{}, focusedTurn: -1, md: render.NewMarkdown(theme.CrackerMarkdownStyle())}
+	cv := &contextView{palette: p, styles: s, agent: ag, convID: convID, width: w, height: h, expanded: map[string]bool{}, focusedTurn: -1, md: render.NewMarkdown(theme.MarkdownStyle(p))}
 	cv.snapshot = loadContextSnapshot(ag, convID)
 	cv.driver = &contextManagerDriver{
 		agent:  ag,

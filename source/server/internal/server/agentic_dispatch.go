@@ -19,6 +19,17 @@ func (s *Server) grantedRegistry(tools []string, mode agent.PermissionMode) *age
 	var candidate *agenttools.Registry
 	if len(tools) > 0 {
 		candidate = s.toolRegistry.Subset(tools)
+		// No silent caps: Subset drops names that match no registered tool, so
+		// surface those so a typo'd grant doesn't quietly yield a smaller set.
+		var unknown []string
+		for _, name := range tools {
+			if _, ok := s.toolRegistry.Get(name); !ok {
+				unknown = append(unknown, name)
+			}
+		}
+		if len(unknown) > 0 {
+			log.Printf("[dispatch] subagent grant: ignored unknown tool names %v", unknown)
+		}
 	} else {
 		candidate = agenttools.NewRegistry()
 		for _, t := range s.toolRegistry.Filter(agenttools.PermR) {

@@ -9,7 +9,12 @@ package openai
 //     go test ./internal/llm/openai/ -run Integration -v
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"strings"
 	"testing"
@@ -17,6 +22,24 @@ import (
 
 	"cercano/source/server/internal/llm"
 )
+
+// redPNGBase64 returns a solid-red 64x64 PNG as base64. Inline bytes work on
+// every backend (OpenAI, Gemini-compat, …) unlike image URLs, which some compat
+// endpoints refuse to fetch.
+func redPNGBase64(t *testing.T) string {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 64, 64))
+	for y := 0; y < 64; y++ {
+		for x := 0; x < 64; x++ {
+			img.Set(x, y, color.RGBA{R: 220, G: 20, B: 20, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(buf.Bytes())
+}
 
 func liveClient(t *testing.T) *Client {
 	t.Helper()
@@ -142,12 +165,12 @@ func TestIntegration_Vision(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	// A small, stable public image (1x1-ish solid red PNG hosted by Wikimedia).
-	const imgURL = "https://upload.wikimedia.org/wikipedia/commons/thumb/5/5b/Solid_red.svg/240px-Solid_red.svg.png"
+	// Inline base64 image — works across OpenAI + compat endpoints (Gemini's
+	// compat shim refuses to fetch external image URLs).
 	resp, err := c.Chat(ctx, llm.ChatRequest{
 		Messages: []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{
 			{Type: llm.BlockText, Text: "What single color dominates this image? Answer with one word."},
-			{Type: llm.BlockImage, ImageURL: imgURL},
+			{Type: llm.BlockImage, MediaType: "image/png", ImageData: redPNGBase64(t)},
 		}}},
 	})
 	if err != nil {

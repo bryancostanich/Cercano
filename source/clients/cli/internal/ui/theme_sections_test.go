@@ -3,6 +3,9 @@ package ui
 import (
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
+	"cercano/source/clients/cli/internal/form"
 	"cercano/source/clients/cli/internal/theme"
 )
 
@@ -26,5 +29,25 @@ func TestBuildThemeSections(t *testing.T) {
 		if !keys[want] {
 			t.Errorf("missing field %q", want)
 		}
+	}
+
+	// Assert that color fields are NOT editable for built-in themes: pressing
+	// Enter must not flip the field into editing mode.
+	var accentField form.Field
+outer:
+	for _, s := range secs {
+		for _, f := range s.Fields {
+			if f.Key() == "color:accent" {
+				accentField = f
+				break outer
+			}
+		}
+	}
+	if accentField == nil {
+		t.Fatal("color:accent field not found in sections")
+	}
+	accentField.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if accentField.Editing() {
+		t.Error("color:accent must not enter edit mode for a built-in theme (read-only field)")
 	}
 }

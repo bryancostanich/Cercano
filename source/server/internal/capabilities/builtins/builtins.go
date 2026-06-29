@@ -42,6 +42,7 @@ func Register(reg *capabilities.Registry) {
 	reg.MustRegister(RunCommand())
 	reg.MustRegister(GitAdd())
 	reg.MustRegister(GitCommit())
+	reg.MustRegister(Dispatch())
 	// X-tier
 	reg.MustRegister(RmFile())
 	reg.MustRegister(GitPush())
@@ -58,6 +59,7 @@ func AgentAliases() map[string]string {
 		"write_file":  "Write",
 		"edit_file":   "Edit",
 		"run_command": "Bash",
+		"dispatch":    "workflow",
 		// stat_file, git_*, rm_file keep their canonical names as display names.
 	}
 }

@@ -135,6 +135,12 @@ func (s *Server) InstallCapabilities() {
 			}
 			return res.Text, nil
 		},
+		Dispatch: func(ctx context.Context, spec dispatch.Spec) (dispatch.Result, error) {
+			if s.dispatchEngine == nil {
+				return dispatch.Result{}, fmt.Errorf("dispatch engine not configured")
+			}
+			return s.dispatchEngine.Dispatch(ctx, spec)
+		},
 	})
 	builtins.Register(capReg)
 	s.capRegistry = capReg

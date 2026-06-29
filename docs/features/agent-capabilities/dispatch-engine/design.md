@@ -48,15 +48,58 @@ Co-processor = the degenerate case (fixed prompt, no tools, one-shot). Subagent 
    - **Caller hints** (a role/tier preference, or `ModelOverride`) are advisory inputs the router *may* honor within locus bounds — never an override of locus.
    - **Future upgrade (documented, not built now):** an embedded small-model router that analyzes the prompt and references a **model×capability matrix** to choose the target. The matrix is greenfield today (only `llm.Capabilities` + a binary code/research split in `internal/research/modelcheck.go`). When it lands, only the seam's *implementation* changes — the dispatch engine does not.
 
-## Open forks (to resolve next)
+## Subagent engine — feature design (DRAFT, unconfirmed)
 
-- **Workflow-protocol injection** — which protocols get injected into subagent context, and how selected (ties to Spec 0b).
-- **Adversarial review** — in scope now or a later layer.
-- **`workflow` alias** — aliasing the subagent entry to `workflow` (Claude reaches for "the workflow tool").
-- **Parallel fan-out** — multiple subagents concurrently.
-- **Dispatch primitive API shape** — what config it takes; where it lives (agent-side).
-- **Subagent tool access** — which capabilities a subagent is granted (subset of the registry).
-- **Standalone invocation surface** — how the main agent/user launches a subagent (tool call, slash command, both).
+Drafted by the assistant; not yet user-confirmed. Consequential items are pulled out to a decision-matrix review with the user (see "Adversarial review" below).
+
+### Dispatch primitive (draft)
+- One agent-side entry: `Dispatch(ctx, DispatchSpec) (DispatchResult, error)`.
+- `DispatchSpec = { Mode: OneShot|Agentic; Prompt/Task; Tools []string (capability names); WantsProjectContext bool; Protocols (auto|explicit); ModelHint; ConversationID }`.
+- **OneShot** → a single routed model call + context injection + usage recording. Co-processor capabilities call this with their fixed template.
+- **Agentic** → a bounded tool loop over the granted capability subset (reuses the existing tool-loop / `dispatch.Loop` machinery), routed via the seam, with live status events standalone / synchronous result over MCP.
+- Routing, project-context injection, protocol injection, and usage recording all attach here (the single seam from the settled decisions).
+
+### Standalone invocation (draft)
+- The main agent launches a subagent by calling a built-in **agentic-dispatch capability** (`dispatch`), **aliased to `workflow`** so host models that reach for "the workflow tool" find it. (Alias: confirmed-cheap, yes.)
+- Optional `/dispatch` / `/workflow` slash command later; not required for v1.
+- MCP: the existing `cercano_dispatch` tool maps to Agentic mode (sync + best-effort progress per the comms decision).
+
+### Subagent tool access (draft — recommendation; say if you want this matrixed)
+- The spec declares an **explicit capability-name subset**. Default grant = R-tier inspect/read capabilities; W/X granted only when explicitly listed.
+- **Never exceeds the parent session's permission mode** — a subagent cannot escalate beyond what the parent could do. Bypass-mode parents can grant W/X; strict/permissive parents gate the subagent's W/X the same way.
+
+### Workflow-protocol injection (draft seam; specifics pend Spec 0b)
+- Agentic dispatch composes the subagent's system prompt from: persona + the **0b steering block** + task-triggered protocol bodies (via 0b `get_protocol`) + project context (if flagged).
+- Seam only for now; concrete protocol selection waits until the 0b protocol substrate exists.
+
+### Parallel fan-out (draft — later)
+- The primitive is single-dispatch; an orchestrator launches N concurrently under a **bounded concurrency cap** (modeled on superpowers `dispatching-parallel-agents`).
+- Build sequential first; parallel as a fast-follow.
+
+### Adversarial review — RESOLVED: review as its own capability (Option 3)
+
+Decided via the khalkulo decision framework. The fork was *how* review attaches to agentic dispatch:
+1. Caller-driven orchestration (engine dumb; orchestrator composes review).
+2. Baked into agentic Dispatch (a `Review` config inside the primitive).
+3. **Review as its own capability** (chosen).
+
+**Decision:** `review`/`verify` is a **first-class capability** built on Dispatch (a refute-style prompt + a verdict schema), invoked by orchestrators/protocols. The engine stays a clean primitive (rejects Option 2's coupling). Enforcement that it actually *runs* comes from the **0b protocols + watchdog** (e.g. the watchdog requires `review` before a commit/merge for risk classes), not from baking review into Dispatch.
+
+**Trigger policy:** protocol/watchdog-required for risk classes; opt-in otherwise. Not always-on (wasteful), not model's-whim (skip-risk).
+
+#### How superpowers does this, and how we improve it
+(Per the original ask: "lean heavily on superpowers and improve it." First-hand from running these skills.)
+
+Superpowers is mechanically closest to **Option 1**, not 3: the subagent-spawn primitive is **dumb**, and review is an **orchestration recipe encoded in skills + prompt templates** that the controller follows —
+- `subagent-driven-development`: controller dispatches a fresh **implementer** per task → implementer self-reviews + commits → controller builds a diff package → dispatches a separate **task-reviewer** subagent returning spec-compliance + quality verdicts (Critical/Important/Minor) → dispatches **fix** subagents for Critical/Important → re-reviews → final **whole-branch reviewer** (`requesting-code-review`).
+- Adversarial patterns: N independent **skeptics** each prompted to *refute*, kill on majority-refute; perspective-diverse lenses; judge panels; loop-until-dry.
+- The reviewer is "just another subagent with a reviewer prompt"; review is composed, not baked into the engine — the philosophy Options 1 and 3 share (and why we reject 2).
+
+**Superpowers' weaknesses → our improvements:**
+1. **Review is a soft skill instruction**, enforced by prose ("Never skip task review", "RED FLAGS", "you MUST") — it relies on the agent *choosing* to follow the skill, i.e. the rationalize-and-skip failure mode. **Our improvement:** `review` is a **named capability** (discoverable, reusable on both surfaces) and the **0b watchdog hard-enforces** it for risk classes (no `review` before commit → blocked). Enforcement moves from "please follow the skill" to a structural gate.
+2. **Review topology is hand-rolled** in the controller each time. **Our improvement:** as a capability with a verdict schema, review is consistent and composable — an orchestrator or protocol calls `review`, optionally fanning out N skeptics with diverse lenses.
+
+Net: keep superpowers' correct instinct (dumb engine, composed review), but elevate review to a **capability** and move enforcement to the **watchdog**.
 
 ## Doc-structure note
 Scope has grown from "extend 0a" toward a distinct engine spec. Revisit whether this stays folded into 0a or becomes its own spec once the open forks are resolved.

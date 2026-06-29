@@ -489,27 +489,36 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 
 	if req.OllamaUrl != "" {
 		s.currentConfig.OllamaURL = req.OllamaUrl
+		s.broadcastConfigChanged("ollama_url", req.OllamaUrl)
 	}
 	if req.LocalModel != "" {
 		s.currentConfig.LocalModel = req.LocalModel
+		s.broadcastConfigChanged("local_model", req.LocalModel)
 	}
 	if req.LocalRuntime != "" {
 		s.currentConfig.LocalRuntime = req.LocalRuntime
+		s.broadcastConfigChanged("local_runtime", req.LocalRuntime)
 	}
 	if req.CloudProvider != "" {
 		s.currentConfig.CloudProvider = req.CloudProvider
+		s.broadcastConfigChanged("cloud_provider", req.CloudProvider)
 	}
 	if req.CloudModel != "" {
 		s.currentConfig.CloudModel = req.CloudModel
+		s.broadcastConfigChanged("cloud_model", req.CloudModel)
 	}
 	if req.CloudApiKey != "" {
 		s.currentConfig.CloudAPIKey = req.CloudApiKey
+		// Presence marker only — never broadcast a raw secret.
+		s.broadcastConfigChanged("cloud_api_key", "set")
 	}
 	if req.CloudBaseUrl != "" {
 		s.currentConfig.CloudBaseURL = req.CloudBaseUrl
+		s.broadcastConfigChanged("cloud_base_url", req.CloudBaseUrl)
 	}
 	if req.LocusMode != "" {
 		s.currentConfig.LocusMode = req.LocusMode
+		s.broadcastConfigChanged("locus_mode", req.LocusMode)
 	}
 	s.refreshRuntimeEndpoints()
 

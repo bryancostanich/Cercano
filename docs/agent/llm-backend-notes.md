@@ -15,6 +15,7 @@ Verified by the live integration tests (`internal/llm/openai/client_integration_
 | OpenAI (chat_completions) | — | — | — | — | — |
 | Gemini-compat (chat_completions) | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Groq (chat_completions) | — | — | — | — | — |
+| DeepInfra (chat_completions) | — | — | — | — | — |
 | Anthropic (messages) | ✅ (prod) | ✅ | ✅ | — | — |
 | Ollama (local) | ✅ (prod) | ✅ | ✅ | — | — |
 

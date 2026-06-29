@@ -173,18 +173,24 @@ func TestLoop_UnknownToolFedBack(t *testing.T) {
 	}
 }
 
-func TestLoop_InvalidArgsFedBack(t *testing.T) {
+func TestLoop_InvalidJSONFedBack(t *testing.T) {
 	eng := &scriptedEngine{responses: []engine.ChatResponse{
 		{ToolCalls: []engine.ToolCall{
-			{ID: "tc_1", Function: engine.ToolCallFunc{Name: "bad", Arguments: json.RawMessage(`{}`)}},
+			{ID: "tc_1", Function: engine.ToolCallFunc{Name: "echo", Arguments: json.RawMessage(`{bad`)}},
 		}},
 		{Content: "k"},
 	}}
-	loop := NewLoop(eng, newCapRegistry(erroringCapability{}), []string{"bad"}, "x", 50)
+	loop := NewLoop(eng, newCapRegistry(echoCapability{}), []string{"echo"}, "x", 50)
 	ch, _ := loop.Run(context.Background(), nil, "")
 	events := collectEvents(ch)
-	if events[1].Kind != EventToolResult || events[1].ToolOK {
-		t.Errorf("expected ok=false ToolResult, got %+v", events[1])
+	var foundInvalidJSON bool
+	for _, e := range events {
+		if e.Kind == EventToolResult && !e.ToolOK && strings.Contains(e.ToolResult, "not valid JSON") {
+			foundInvalidJSON = true
+		}
+	}
+	if !foundInvalidJSON {
+		t.Errorf("expected ToolResult ok=false with 'not valid JSON', got %+v", events)
 	}
 }
 

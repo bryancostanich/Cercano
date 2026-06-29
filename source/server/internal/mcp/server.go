@@ -538,7 +538,7 @@ func (s *Server) registerTools() {
 
 	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
 		Name:        "cercano_dispatch",
-		Description: "Dispatch a task to Cercano's local LLM as an autonomous agent with full tool-use capability (read_file, write_file, shell_exec, web_fetch). Runs an agentic loop locally — the model can read code, run commands, fetch URLs, and edit files until it decides the task is done. Streams events as progress notifications so you can see what's happening; cancel any time. No cloud calls, no validator loop, no SmartRouter — raw local dispatch under your control. Multi-turn via conversation_id.",
+		Description: "Dispatch a task to Cercano's local LLM as an autonomous agent with full tool-use capability (read_file, write_file, run_command). Runs an agentic loop locally — the model can read code, run commands, fetch URLs, and edit files until it decides the task is done. Streams events as progress notifications so you can see what's happening; cancel any time. No cloud calls, no validator loop, no SmartRouter — raw local dispatch under your control. Multi-turn via conversation_id.",
 	}, s.handleDispatch)
 }
 

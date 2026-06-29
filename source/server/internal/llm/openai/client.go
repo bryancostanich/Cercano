@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
 
 	goopenai "github.com/sashabaranov/go-openai"
@@ -35,6 +36,38 @@ func NewClient(cfg Config) *Client {
 	q := quirksFor(cfg.Backend)
 	c.HTTPClient = &normalizingDoer{next: &http.Client{}, quirks: q}
 	return &Client{api: goopenai.NewClientWithConfig(c), model: cfg.Model, quirks: q}
+}
+
+// resolveImageURLs replaces URL image blocks with inline base64, so backends
+// that won't fetch image URLs (e.g. the Gemini-compat shim) still receive the
+// image. Called only when quirks.ImagesAsBase64 is set. Text blocks and
+// already-base64 image blocks pass through. The caller's slice is not mutated
+// (copy-on-write per message).
+func resolveImageURLs(ctx context.Context, msgs []llm.Message) ([]llm.Message, error) {
+	out := make([]llm.Message, len(msgs))
+	for i, m := range msgs {
+		out[i] = m
+		blocks := m.Blocks
+		copied := false
+		for j, b := range m.Blocks {
+			if b.Type != llm.BlockImage || b.ImageURL == "" {
+				continue
+			}
+			data, err := llm.ResolveImageBytes(ctx, b)
+			if err != nil {
+				return nil, err
+			}
+			if !copied {
+				blocks = append([]llm.Block(nil), m.Blocks...)
+				copied = true
+			}
+			blocks[j].ImageURL = ""
+			blocks[j].ImageData = base64.StdEncoding.EncodeToString(data)
+			blocks[j].MediaType = http.DetectContentType(data)
+		}
+		out[i].Blocks = blocks
+	}
+	return out, nil
 }
 
 func (c *Client) Name() string { return "openai" }
@@ -75,6 +108,13 @@ func modelOr(def, override string) string {
 
 // Chat sends a non-streaming chat completion request and returns mapped blocks + usage.
 func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	if c.quirks.ImagesAsBase64 {
+		msgs, err := resolveImageURLs(ctx, req.Messages)
+		if err != nil {
+			return llm.ChatResponse{}, err
+		}
+		req.Messages = msgs
+	}
 	resp, err := c.api.CreateChatCompletion(ctx, c.buildRequest(req, false))
 	if err != nil {
 		return llm.ChatResponse{}, err
@@ -93,6 +133,13 @@ func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatRespons
 // StreamChat opens a streaming chat completion and returns a StreamReader that
 // emits llm.StreamEvents following the START→DELTA→STOP contract.
 func (c *Client) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.StreamReader, error) {
+	if c.quirks.ImagesAsBase64 {
+		msgs, err := resolveImageURLs(ctx, req.Messages)
+		if err != nil {
+			return nil, err
+		}
+		req.Messages = msgs
+	}
 	stream, err := c.api.CreateChatCompletionStream(ctx, c.buildRequest(req, true))
 	if err != nil {
 		return nil, err

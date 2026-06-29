@@ -128,12 +128,18 @@ vocabulary (`stream.go:8-14`) so the tool-loop is provider-agnostic:
 | `response.completed` | `EventMessageStop` (+ usage from the final response) |
 | `response.error` / `error` | `EventError` |
 
-- **Reasoning while streaming:** the encrypted reasoning arrives on the reasoning
-  item's `response.output_item.done` (it is not a token delta). The reader captures
-  `id` + `encrypted_content` there and surfaces it so the tool-loop can persist a
-  `BlockReasoning` — carried on the terminal `EventMessageStop` (a new optional
-  field on `StreamEvent`, e.g. `Reasoning *struct{ID, Data string}`, or a dedicated
-  event; pick the smallest change during impl and keep the tool-loop edit minimal).
+- **Reasoning while streaming (decided — dedicated event):** the encrypted reasoning
+  arrives on the reasoning item's `response.output_item.done` (it is not a token
+  delta). Add a new stream event `EventReasoning` to the vocabulary
+  (`stream.go`), carrying `ReasoningID` + `ReasoningData` (reuse the existing
+  `StreamEvent.ToolUseID`/a new field, but keep it explicit). The Responses reader
+  emits it when a reasoning item completes; `collectStream` (`toolloop.go:343`)
+  gains one case that flushes any in-progress text/tool block and appends a
+  `BlockReasoning` — so the streamed block order matches the non-streaming adapter
+  (reasoning *before* the `function_call`), multiple reasoning items are each
+  preserved, and the anthropic/openai readers (which never emit `EventReasoning`)
+  are unaffected. This makes reasoning a first-class stream event that a future
+  Anthropic extended-thinking path could reuse.
 - Tool-call arguments stream as fragments and are reassembled by the existing
   tool-loop exactly as for the other providers (START → INPUT_DELTA… → STOP).
 - Usage: `response.completed` carries the final `usage`; emit both token counts on
@@ -163,16 +169,18 @@ cloud_profiles:
 
 ## 6. Transport, retries, errors
 
-- **Retry.** Reuse transient-failure retry (429/500/502/503, exponential backoff)
-  so Responses gets the same resilience as the chat provider. The chat retry lives
-  in `internal/llm/openai`'s `normalizingDoer` (unexported). To share without
-  coupling the two provider packages, extract the retry round-tripper into a small
-  shared `internal/llm/httpx` package (a plain `http.RoundTripper`/`Do` wrapper
-  parameterized by a retry policy), and have BOTH the Responses client and (as a
-  follow-up, optional) the chat client use it. The Responses client needs **only**
-  retry — not the array-error normalization (that is Chat-Completions-error-shape
-  specific). If extraction proves noisy, the fallback is a tiny retry helper local
-  to the responses package; decide at implementation, but prefer the shared package.
+- **Retry (decided — shared `internal/llm/httpx`).** Reuse transient-failure retry
+  (429/500/502/503, exponential backoff) so Responses gets the same resilience as
+  the chat provider. The chat retry currently lives in `internal/llm/openai`'s
+  `normalizingDoer` (unexported), entangled with array-error normalization. Extract
+  the retry round-tripper into a new neutral `internal/llm/httpx` package (a plain
+  `Do`/`http.RoundTripper` wrapper parameterized by a `RetryPolicy`), and have BOTH
+  providers depend on it rather than on each other: the Responses client uses it
+  directly; `openai`'s `normalizingDoer` is refactored to **compose**
+  `httpx.RetryTransport` + keep its own error normalization. The existing
+  `internal/llm/openai/transport_test.go` (six tests) guards that refactor. The
+  Responses client needs **only** retry — not array-error normalization (that is
+  Chat-Completions-error-shape specific).
 - **Errors.** Responses returns object-shaped errors (`{"error":{...}}`). The
   hand-rolled client decodes that into a Go error carrying status + message — no
   array normalization needed. A non-2xx with an unparseable body yields a generic

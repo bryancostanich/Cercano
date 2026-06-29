@@ -38,8 +38,15 @@ func sampleSettingsPage(w, h int) *settingsPage {
 		EmbeddingModel: "nomic-embed-text", CloudProvider: "anthropic", CloudModel: "claude-opus-4-7",
 		CloudBaseURL: "http://127.0.0.1:3456", CloudState: "ok", Port: "50052", LocusMode: "cloud_only",
 	}
-	sp := &settingsPage{palette: p, styles: s, width: w, height: h}
-	sp.form = form.New(buildSettingsSections(cfg, "permissive", "palette:accent"))
+	sp := &settingsPage{
+		palette: p, styles: s, width: w, height: h,
+		cfg: cfg, mode: "permissive",
+		themes:  theme.NewRegistry(theme.BuiltinThemes()),
+		working: theme.Theme{Name: "cracker", Palette: theme.Cracker()},
+	}
+	sp.form = form.New(sp.snapshotSections())
+	sp.form.OnCommit = sp.onCommit
+	sp.form.OnReload = sp.snapshotSections
 	return sp
 }
 
@@ -71,6 +78,24 @@ func TestSettingsScrollReachesLastField(t *testing.T) {
 	off := sp.ScrollState().Offset
 	if fl < off || fl >= off+vh {
 		t.Fatalf("last field at line %d is outside the visible window [%d,%d) — cannot scroll to bottom", fl, off, off+vh)
+	}
+}
+
+// TestSettingsSetStylesPreservesCursor verifies a live theme edit (which
+// rebuilds the form via SetStyles) keeps the focused field, rather than jumping
+// the cursor back to the top.
+func TestSettingsSetStylesPreservesCursor(t *testing.T) {
+	sp := sampleSettingsPage(96, 40)
+	for i := 0; i < 5; i++ {
+		sp.form.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	}
+	want := sp.form.Cursor()
+	if want == 0 {
+		t.Fatal("precondition: cursor should have advanced past 0")
+	}
+	sp.SetStyles(theme.NewStyles(theme.Cracker()), theme.Cracker())
+	if got := sp.form.Cursor(); got != want {
+		t.Fatalf("cursor after SetStyles = %d, want %d (must be preserved)", got, want)
 	}
 }
 
@@ -156,19 +181,25 @@ func TestSettingsNarrowSelectGoesUnderLabel(t *testing.T) {
 		t.Fatalf("options should appear under the label:\n%s", out)
 	}
 	// In the narrow under-label layout the options must form a single vertical
-	// column: one per line, no "·" separators, never two on a row.
+	// column: one per line, with no "·" separator joining options. (Only lines
+	// that actually carry locus options are checked — section titles like
+	// "Theme · Chrome" legitimately contain a middle dot.)
+	opts := []string{"cloud_only", "cloud_primary", "local_primary", "local_only"}
 	for _, ln := range lines {
-		if strings.Contains(ln, "·") {
-			t.Fatalf("narrow under-label options must not use horizontal separators:\n%s", ln)
-		}
-		opts := 0
-		for _, o := range []string{"cloud_only", "cloud_primary", "local_primary", "local_only"} {
+		n := 0
+		for _, o := range opts {
 			if strings.Contains(ln, o) {
-				opts++
+				n++
 			}
 		}
-		if opts > 1 {
-			t.Fatalf("narrow under-label options must be one per line, found %d on:\n%s", opts, ln)
+		if n == 0 {
+			continue // not an option line
+		}
+		if n > 1 {
+			t.Fatalf("narrow under-label options must be one per line, found %d on:\n%s", n, ln)
+		}
+		if strings.Contains(ln, "·") {
+			t.Fatalf("narrow under-label option line must not use a horizontal separator:\n%s", ln)
 		}
 	}
 }

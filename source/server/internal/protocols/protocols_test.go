@@ -23,3 +23,14 @@ func TestGetAndForDomain(t *testing.T) {
 		t.Fatal("unknown protocol should not be found")
 	}
 }
+
+// Builtins is specced to return its catalog sorted by name; assert it so a
+// sort-order regression can't pass silently.
+func TestBuiltinsSortedByName(t *testing.T) {
+	all := Builtins()
+	for i := 1; i < len(all); i++ {
+		if all[i-1].Name > all[i].Name {
+			t.Fatalf("Builtins not sorted by name: %q before %q", all[i-1].Name, all[i].Name)
+		}
+	}
+}

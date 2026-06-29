@@ -52,17 +52,15 @@ range from a tolerant wrapper around go-openai errors to a hand-rolled client
 Gemini free tier returns `503 UNAVAILABLE "high demand"` intermittently — not a
 client bug. Retry/backoff is a backend-experience concern (currently none).
 
-## Open question — per-backend robustness strategy
+## Robustness strategy — per-backend quirks layer
 
-How do we guarantee a good experience across backends that share one client but
-diverge (image handling, error shapes, tool-calling fidelity, unsupported params,
-retries)? Candidate approaches under discussion:
-- Defensive normalization in the shared adapter (e.g. always base64 images,
-  tolerant error parsing).
-- A small per-flavor/per-backend "quirks" layer (explicit known-deviations).
-- Hand-rolled clients for backends go-openai serves poorly.
-- A conformance test matrix (the integration tests, run per backend) to *measure*
-  support and gate claims.
+**Decided.** See [per-backend-quirks.md](./per-backend-quirks.md).
 
-(Design discussion in progress — this section will be replaced by the chosen
-approach.)
+Canonical format stays OpenAI Chat Completions (go-openai as the engine); each
+backend's known deviations live in a small `Quirks` descriptor selected by an
+explicit `backend` field on the profile, applied at two seams — a request-side
+transform (URL images → base64) and a transport-side `HTTPDoer` wrapper (error
+normalization + retry). The findings above map directly onto it: Finding 1 →
+`ImagesAsBase64`, Finding 2 → `NormalizeErrors`, Finding 3 → `Retry`. The
+conformance matrix here remains the measurement layer that gates per-backend
+claims. Hand-rolling the client stays the reserved escape hatch, untriggered.

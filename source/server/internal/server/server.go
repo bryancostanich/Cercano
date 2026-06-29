@@ -339,7 +339,11 @@ func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudP
 	}
 	// If this is the active profile, rebuild so metadata changes take effect now.
 	if name == s.currentConfig.ActiveCloudProfile {
-		_ = s.rebuildCloud()
+		if err := s.rebuildCloud(); err != nil {
+			// active is set, but the provider couldn't be built — report it, keep going.
+			s.persistConfig()
+			return &proto.UpsertCloudProfileResponse{Ok: false, Error: err.Error()}, nil
+		}
 	}
 	s.persistConfig()
 	return &proto.UpsertCloudProfileResponse{Ok: true}, nil

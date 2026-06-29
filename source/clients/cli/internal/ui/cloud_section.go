@@ -38,21 +38,6 @@ func (sp *settingsPage) selectCloudRow(rowID string) {
 	}
 }
 
-// presetByTemplateID resolves the preset for a "template:<id>" row, or nil.
-func presetByTemplateID(rowID string) *cloudPreset {
-	if len(rowID) <= 9 || rowID[:9] != "template:" {
-		return nil
-	}
-	id := rowID[9:]
-	for i, pr := range cloudPresets() {
-		if pr.ID == id {
-			ps := cloudPresets()[i]
-			return &ps
-		}
-	}
-	return nil
-}
-
 // buildCloudSection renders the Cloud Providers list with an inline detail editor
 // under the selected row.
 func (sp *settingsPage) buildCloudSection() form.Section {

@@ -134,8 +134,17 @@ func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatRespons
 	return out, nil
 }
 
-// StreamChat is implemented in stream.go (Task 5). Placeholder kept minimal so the
-// package compiles; replaced in the next task.
+// StreamChat opens a streaming Responses request and returns a StreamReader that
+// emits llm.StreamEvents.
 func (c *Client) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.StreamReader, error) {
-	return nil, fmt.Errorf("responses: streaming not yet implemented")
+	httpResp, err := c.do(ctx, c.buildRequest(req, true))
+	if err != nil {
+		return nil, err
+	}
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		body, _ := io.ReadAll(httpResp.Body)
+		httpResp.Body.Close()
+		return nil, errorFromBody(httpResp.StatusCode, body)
+	}
+	return newStreamReader(httpResp.Body), nil
 }

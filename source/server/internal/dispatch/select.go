@@ -46,6 +46,10 @@ func Select(mode locus.Mode, role Role, p Providers) (Selection, error) {
 		}
 		return p.Local
 	}
+	label := "main"
+	if role == RoleCoproc {
+		label = "co-processor"
+	}
 	if prov := pick(res.Preferred); prov != nil {
 		return Selection{Provider: prov, IsCloud: res.Preferred == locus.TierCloud}, nil
 	}
@@ -55,9 +59,9 @@ func Select(mode locus.Mode, role Role, p Providers) (Selection, error) {
 				Provider: prov,
 				IsCloud:  res.Fallback == locus.TierCloud,
 				FellBack: true,
-				Notice:   fmt.Sprintf("locus: preferred co-processor tier unavailable — ran on %s (%s)", res.Fallback, prov.Name()),
+				Notice:   fmt.Sprintf("locus: preferred %s tier unavailable — ran on %s (%s)", label, res.Fallback, prov.Name()),
 			}, nil
 		}
 	}
-	return Selection{}, fmt.Errorf("locus mode %q: no %s provider available for co-processor work", mode, res.Preferred)
+	return Selection{}, fmt.Errorf("locus mode %q: no %s provider available for %s work", mode, res.Preferred, label)
 }

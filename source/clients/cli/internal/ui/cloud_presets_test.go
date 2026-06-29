@@ -8,26 +8,55 @@ import (
 )
 
 func TestCloudPresetsCoverAllProviders(t *testing.T) {
+	presets := cloudPresets()
 	got := map[string]cloudPreset{}
-	for _, p := range cloudPresets() {
+	for _, p := range presets {
 		got[p.ID] = p
 	}
-	for _, id := range []string{"anthropic", "openai", "gemini", "groq", "deepinfra", "together", "openrouter", "deepseek", "bedrock", "openai-responses"} {
-		if _, ok := got[id]; !ok {
-			t.Errorf("missing preset %q", id)
+
+	// Assert exactly 10 presets exist.
+	if len(got) != 10 {
+		t.Fatalf("expected 10 presets, got %d", len(got))
+	}
+
+	// Table of expected values for each preset.
+	expectations := []struct {
+		id       string
+		flavor   string
+		backend  string
+		baseURL  string
+		tier     cloudTier
+	}{
+		{id: "anthropic", flavor: "messages", backend: "", baseURL: "", tier: tierVerified},
+		{id: "openai", flavor: "chat_completions", backend: "openai", baseURL: "https://api.openai.com/v1", tier: tierUntested},
+		{id: "gemini", flavor: "chat_completions", backend: "gemini", baseURL: "https://generativelanguage.googleapis.com/v1beta/openai", tier: tierVerified},
+		{id: "groq", flavor: "chat_completions", backend: "groq", baseURL: "https://api.groq.com/openai/v1", tier: tierUntested},
+		{id: "deepinfra", flavor: "chat_completions", backend: "", baseURL: "https://api.deepinfra.com/v1/openai", tier: tierUntested},
+		{id: "together", flavor: "chat_completions", backend: "", baseURL: "https://api.together.xyz/v1", tier: tierUntested},
+		{id: "openrouter", flavor: "chat_completions", backend: "", baseURL: "https://openrouter.ai/api/v1", tier: tierUntested},
+		{id: "deepseek", flavor: "chat_completions", backend: "", baseURL: "https://api.deepseek.com", tier: tierUntested},
+		{id: "bedrock", flavor: "bedrock", backend: "", baseURL: "", tier: tierComingSoon},
+		{id: "openai-responses", flavor: "responses", backend: "", baseURL: "https://api.openai.com/v1", tier: tierComingSoon},
+	}
+
+	for _, exp := range expectations {
+		preset, ok := got[exp.id]
+		if !ok {
+			t.Errorf("missing preset %q", exp.id)
+			continue
 		}
-	}
-	if got["gemini"].BaseURL != "https://generativelanguage.googleapis.com/v1beta/openai" {
-		t.Errorf("gemini base URL wrong: %q", got["gemini"].BaseURL)
-	}
-	if got["gemini"].Tier != tierVerified || got["anthropic"].Tier != tierVerified {
-		t.Error("anthropic and gemini must be tierVerified")
-	}
-	if got["openai"].Tier != tierUntested {
-		t.Error("openai must be tierUntested")
-	}
-	if got["bedrock"].Tier != tierComingSoon || got["openai-responses"].Tier != tierComingSoon {
-		t.Error("bedrock and openai-responses must be tierComingSoon")
+		if preset.Flavor != exp.flavor {
+			t.Errorf("preset %q flavor: want %q, got %q", exp.id, exp.flavor, preset.Flavor)
+		}
+		if preset.Backend != exp.backend {
+			t.Errorf("preset %q backend: want %q, got %q", exp.id, exp.backend, preset.Backend)
+		}
+		if preset.BaseURL != exp.baseURL {
+			t.Errorf("preset %q baseURL: want %q, got %q", exp.id, exp.baseURL, preset.BaseURL)
+		}
+		if preset.Tier != exp.tier {
+			t.Errorf("preset %q tier: want %v, got %v", exp.id, exp.tier, preset.Tier)
+		}
 	}
 }
 
@@ -58,17 +87,49 @@ func TestBuildCloudRowsOrderAndStatus(t *testing.T) {
 }
 
 func TestRowAnnotation(t *testing.T) {
-	profileRow := cloudRow{ID: "profile:x", IsProfile: true, HasKey: true, Active: true}
-	a := rowAnnotation(profileRow)
-	if !strings.Contains(a, "✓ key") || !strings.Contains(a, "active") {
-		t.Errorf("profile annotation wrong: %q", a)
+	tests := []struct {
+		name     string
+		row      cloudRow
+		expected string
+	}{
+		{
+			name:     "profile row with key + active",
+			row:      cloudRow{ID: "profile:x", IsProfile: true, HasKey: true, Active: true},
+			expected: "✓ key  (active)",
+		},
+		{
+			name:     "profile row without key, not active",
+			row:      cloudRow{ID: "profile:x", IsProfile: true, HasKey: false, Active: false},
+			expected: "— no key",
+		},
+		{
+			name:     "other row",
+			row:      cloudRow{ID: "other"},
+			expected: "(custom endpoint)",
+		},
+		{
+			name:     "template row (verified tier)",
+			row:      cloudRow{ID: "template:gemini", Tier: tierVerified},
+			expected: "",
+		},
+		{
+			name:     "template row (coming soon)",
+			row:      cloudRow{ID: "template:bedrock", Tier: tierComingSoon, ComingSoon: true},
+			expected: "(coming soon)",
+		},
+		{
+			name:     "template row (untested)",
+			row:      cloudRow{ID: "template:openai", Tier: tierUntested},
+			expected: "(untested)",
+		},
 	}
-	tmpl := cloudRow{ID: "template:bedrock", Tier: tierComingSoon, ComingSoon: true}
-	if rowAnnotation(tmpl) != "(coming soon)" {
-		t.Errorf("coming-soon annotation wrong: %q", rowAnnotation(tmpl))
-	}
-	tmpl2 := cloudRow{ID: "template:openai", Tier: tierUntested}
-	if rowAnnotation(tmpl2) != "(untested)" {
-		t.Errorf("untested annotation wrong: %q", rowAnnotation(tmpl2))
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := rowAnnotation(tt.row)
+			if got != tt.expected {
+				t.Errorf("annotation: want %q, got %q", tt.expected, got)
+			}
+		})
 	}
 }

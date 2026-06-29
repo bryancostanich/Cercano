@@ -220,6 +220,14 @@ func (m *mockAgentClient) SetCloudProfileKey(ctx context.Context, in *proto.SetC
 	return &proto.SetCloudProfileKeyResponse{Ok: true}, nil
 }
 
+func (m *mockAgentClient) UpsertCloudProfile(ctx context.Context, in *proto.UpsertCloudProfileRequest, opts ...grpc.CallOption) (*proto.UpsertCloudProfileResponse, error) {
+	return &proto.UpsertCloudProfileResponse{Ok: true}, nil
+}
+
+func (m *mockAgentClient) RemoveCloudProfile(ctx context.Context, in *proto.RemoveCloudProfileRequest, opts ...grpc.CallOption) (*proto.RemoveCloudProfileResponse, error) {
+	return &proto.RemoveCloudProfileResponse{Ok: true}, nil
+}
+
 func TestNewServer_RegistersTools(t *testing.T) {
 	mock := &mockAgentClient{}
 	s := NewServer(mock)

@@ -88,12 +88,13 @@ func TestOneShotModelOverride(t *testing.T) {
 func TestOneShotAgenticReturnsError(t *testing.T) {
 	prov := echoProvider{}
 	eng := NewEngine(Providers{Local: prov}, func() locus.Mode { return locus.LocalOnly }, nil)
+	// No AgenticRunner installed — must return a clear error.
 
-	_, err := eng.Dispatch(context.Background(), Spec{Mode: Agentic, Role: RoleCoproc, Prompt: "x"})
+	_, err := eng.Dispatch(context.Background(), Spec{Mode: Agentic, Role: RoleCoproc, Task: "x"})
 	if err == nil {
-		t.Fatal("expected error for Agentic mode")
+		t.Fatal("expected error for Agentic mode with no runner")
 	}
-	if !strings.Contains(err.Error(), "not yet implemented") {
+	if !strings.Contains(err.Error(), "agentic runner not configured") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

@@ -29,6 +29,23 @@ type Spec struct {
 	ConversationID      string
 	Source              string
 	ModelOverride       string // advisory model name within locus bounds
+
+	// Agentic-only fields (ignored for OneShot).
+
+	// Task is the open-ended instruction for the agentic tool loop.
+	Task string
+
+	// Tools is the capability/tool name allowlist for agentic dispatch.
+	// Empty means: grant R-tier tools only (least-privilege default).
+	Tools []string
+
+	// Interactive, when true, signals that a human is watching the loop
+	// and event progress should be forwarded (reserved for future use).
+	Interactive bool
+
+	// MaxIterations caps the number of LLM round-trips in the loop.
+	// 0 means use the package default (agent.MaxToolLoopIterations = 50).
+	MaxIterations int
 }
 
 // Result holds the outcome of a dispatched call.
@@ -43,11 +60,12 @@ type Result struct {
 
 // Engine routes dispatch calls to the appropriate provider.
 type Engine struct {
-	providers Providers
-	modeFn    func() locus.Mode
-	ctxLoader *projectctx.Loader
-	modelFor  func(isCloud bool) string
-	usageSink func(usage.Usage)
+	providers     Providers
+	modeFn        func() locus.Mode
+	ctxLoader     *projectctx.Loader
+	modelFor      func(isCloud bool) string
+	usageSink     func(usage.Usage)
+	agenticRunner AgenticRunner
 }
 
 // NewEngine constructs an Engine. ctx may be nil (project context injection skipped).
@@ -74,10 +92,6 @@ func (e *Engine) SetModelFor(fn func(isCloud bool) string) {
 
 // Dispatch executes spec and returns a Result.
 func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
-	if spec.Mode == Agentic {
-		return Result{}, errors.New("dispatch: agentic mode not yet implemented")
-	}
-
 	// 1. Select provider via locus.
 	sel, err := Select(e.modeFn(), spec.Role, e.providers)
 	if err != nil {
@@ -93,7 +107,16 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 		model = spec.ModelOverride
 	}
 
-	// 3. Optionally prepend project context.
+	// 3a. Agentic: delegate to the installed runner (lives in internal/server
+	// to avoid an import cycle with internal/agent).
+	if spec.Mode == Agentic {
+		if e.agenticRunner == nil {
+			return Result{}, errors.New("dispatch: agentic runner not configured")
+		}
+		return e.agenticRunner(ctx, spec, sel, model)
+	}
+
+	// 3b. Optionally prepend project context (OneShot only).
 	prompt := spec.Prompt
 	if spec.WantsProjectContext && spec.WorkDir != "" && e.ctxLoader != nil {
 		prompt = e.ctxLoader.PrependContext(spec.WorkDir, prompt)

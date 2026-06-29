@@ -87,8 +87,16 @@ type Server struct {
 func (s *Server) SetContextLoader(l *projectctx.Loader) { s.contextLoader = l }
 
 // SetDispatchEngine wires the unified dispatch engine so capability Services
-// (RunCoproc) can run one-shot co-processor work. Call before InstallCapabilities.
-func (s *Server) SetDispatchEngine(e *dispatch.Engine) { s.dispatchEngine = e }
+// (RunCoproc) can run one-shot co-processor work, and installs the agentic
+// runner so Agentic dispatches can call agent.RunToolLoop without creating an
+// import cycle between internal/dispatch and internal/agent.
+// Call before InstallCapabilities.
+func (s *Server) SetDispatchEngine(e *dispatch.Engine) {
+	s.dispatchEngine = e
+	if e != nil {
+		e.SetAgenticRunner(s.runAgenticDispatch)
+	}
+}
 
 // SetToolRegistry attaches the agent's tool registry. The CLI's /tools and
 // /tool commands route through ListTools / InvokeTool RPCs to it.

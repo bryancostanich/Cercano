@@ -236,8 +236,7 @@ func TestNewServer_RegistersTools(t *testing.T) {
 
 	// List tools and verify expected tools are registered.
 	want := map[string]bool{
-		"cercano_local":    false,
-		"cercano_dispatch": false,
+		"cercano_local": false,
 	}
 	for tool, err := range cs.Tools(ctx, nil) {
 		if err != nil {

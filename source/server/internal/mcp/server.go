@@ -2,9 +2,7 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,9 +12,7 @@ import (
 	"cercano/source/server/internal/capabilities/mcpadapter"
 	"cercano/source/server/pkg/config"
 	projectctx "cercano/source/server/internal/context"
-	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/document"
-	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/research"
 	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/internal/web"
@@ -72,15 +68,6 @@ type Server struct {
 	updateVersion   string               // latest available version, empty if up to date
 	updateCommand   string               // upgrade command to show the user
 	updateNudgeSent bool                 // true after the first tool response nudge
-	dispatchLoop    *dispatch.Loop       // optional; nil disables cercano_dispatch
-	dispatchStore   *dispatch.Store      // history persistence for dispatch
-}
-
-// SetDispatch wires the cercano_dispatch tool's loop + history store.
-// If never called, cercano_dispatch returns a configuration error per call.
-func (s *Server) SetDispatch(loop *dispatch.Loop, store *dispatch.Store) {
-	s.dispatchLoop = loop
-	s.dispatchStore = store
 }
 
 // NewServer creates a new MCP server backed by the given gRPC client.
@@ -439,14 +426,6 @@ type DocumentRequest struct {
 	cloudTokenFields
 }
 
-// DispatchRequest is the input schema for the cercano_dispatch tool.
-type DispatchRequest struct {
-	Prompt         string `json:"prompt" jsonschema:"The task / instruction for the local LLM."`
-	System         string `json:"system,omitempty" jsonschema:"Optional system message override. Defaults to the built-in dispatch system prompt."`
-	ConversationID string `json:"conversation_id,omitempty" jsonschema:"Conversation ID for multi-turn dispatch across calls."`
-	cloudTokenFields
-}
-
 // DeepResearchRequest is the input schema for the cercano_deep_research tool.
 type DeepResearchRequest struct {
 	Topic      string   `json:"topic" jsonschema:"The research topic to investigate."`
@@ -537,11 +516,6 @@ func (s *Server) registerTools() {
 		Name:        "cercano_deep_research",
 		Description: "Deep multi-source research tool. Takes a topic and intent, identifies authoritative sources (academic, industry, news, reference), systematically searches each one, analyzes and ranks findings by relevance and impact, chases cited references, and compiles a structured report with executive summary, contradiction detection, gap analysis, and follow-up suggestions. The entire pipeline runs locally. Use output_dir for thorough research — writes findings as individual files.",
 	}, s.handleDeepResearch)
-
-	gomcp.AddTool(s.mcpServer, &gomcp.Tool{
-		Name:        "cercano_dispatch",
-		Description: "Dispatch a task to Cercano's local LLM as an autonomous agent with full tool-use capability (read_file, write_file, run_command). Runs an agentic loop locally — the model can read code, run commands, fetch URLs, and edit files until it decides the task is done. Streams events as progress notifications so you can see what's happening; cancel any time. No cloud calls, no validator loop, no SmartRouter — raw local dispatch under your control. Multi-turn via conversation_id.",
-	}, s.handleDispatch)
 
 	// Register all mcp-surface capabilities as cercano_<name> tools that
 	// forward to the agent via InvokeCapability. Requires builtins to be
@@ -1459,133 +1433,3 @@ func (a *webFetchAdapter) FetchURL(url string) (*research.FetchResult, error) {
 	}, nil
 }
 
-// handleDispatch processes a cercano_dispatch tool call.
-func (s *Server) handleDispatch(ctx context.Context, request *gomcp.CallToolRequest, args DispatchRequest) (*gomcp.CallToolResult, any, error) {
-	handlerStart := time.Now()
-	log.Printf("handler: enter convID=%q prompt_len=%d system_len=%d",
-		args.ConversationID, len(args.Prompt), len(args.System))
-
-	if result, ok := s.checkDegraded(); ok {
-		log.Printf("handler: server degraded, returning early")
-		return result, nil, nil
-	}
-	if s.dispatchLoop == nil || s.dispatchStore == nil {
-		log.Printf("handler: dispatch not configured, returning error")
-		return &gomcp.CallToolResult{
-			IsError: true,
-			Content: []gomcp.Content{&gomcp.TextContent{Text: "cercano_dispatch is not configured on this server"}},
-		}, nil, nil
-	}
-
-	// Probe whether the host included a progress token.
-	hasToken := false
-	if request != nil && request.Params != nil {
-		hasToken = request.Params.GetProgressToken() != nil
-	}
-	log.Printf("handler: progress_token_present=%v", hasToken)
-
-	loadStart := time.Now()
-	hist, err := s.dispatchStore.Load(ctx, args.ConversationID)
-	log.Printf("handler: store.Load returned in %s, history_len=%d, err=%v",
-		time.Since(loadStart), len(hist), err)
-	if err != nil {
-		return nil, nil, fmt.Errorf("load history: %w", err)
-	}
-
-	if args.System != "" {
-		hasSystem := len(hist) > 0 && hist[0].Role == "system"
-		if !hasSystem {
-			hist = append([]engine.ChatMessage{{Role: "system", Content: args.System}}, hist...)
-		}
-	}
-
-	startTime := time.Now().UnixNano()
-
-	log.Printf("handler: invoking dispatch.Loop.Run")
-	eventCh, finalHistory := s.dispatchLoop.Run(ctx, hist, args.Prompt)
-
-	var (
-		finalText     string
-		turns         int
-		toolCallsMade int
-		cancelled     bool
-		doneErr       string
-		eventCount    int
-	)
-	for ev := range eventCh {
-		eventCount++
-		evStart := time.Now()
-		if body, mErr := json.Marshal(ev); mErr == nil {
-			notifyProgress(ctx, request, string(body), 0, 0)
-		}
-		notifyDur := time.Since(evStart)
-		if notifyDur > 50*time.Millisecond {
-			log.Printf("handler: event %d (%s) notifyProgress took %s",
-				eventCount, ev.Kind, notifyDur)
-		}
-		switch ev.Kind {
-		case dispatch.EventTextChunk:
-			finalText += ev.Text
-			turns++
-		case dispatch.EventToolCall:
-			toolCallsMade++
-		case dispatch.EventDone:
-			cancelled = ev.Cancelled
-			doneErr = ev.DoneError
-		}
-	}
-	log.Printf("handler: event loop drained after %s, events=%d, cancelled=%v, doneErr=%q, ctx.Err=%v",
-		time.Since(handlerStart), eventCount, cancelled, doneErr, ctx.Err())
-
-	saveStart := time.Now()
-	hist2 := finalHistory()
-	if persistErr := s.dispatchStore.Save(ctx, args.ConversationID, hist2); persistErr != nil {
-		log.Printf("handler: store.Save FAILED after %s for %q: %v",
-			time.Since(saveStart), args.ConversationID, persistErr)
-		fmt.Fprintf(os.Stderr, "dispatch: failed to persist history for %q: %v\n", args.ConversationID, persistErr)
-	} else {
-		log.Printf("handler: store.Save returned in %s, history_msgs=%d",
-			time.Since(saveStart), len(hist2))
-	}
-
-	// Telemetry: count this call even though there's no gRPC response.
-	telemStart := time.Now()
-	if s.collector != nil {
-		s.collector.Emit(&telemetry.Event{
-			Timestamp:  time.Unix(0, startTime),
-			ToolName:   "cercano_dispatch",
-			DurationMs: time.Since(time.Unix(0, startTime)).Milliseconds(),
-		})
-		if args.HostCloudTokensIn > 0 || args.HostCloudTokensOut > 0 {
-			s.collector.EmitCloudUsage(telemetry.CloudUsageReport{
-				Timestamp:         time.Now(),
-				CloudInputTokens:  args.HostCloudTokensIn,
-				CloudOutputTokens: args.HostCloudTokensOut,
-			})
-		}
-	}
-	log.Printf("handler: telemetry emit took %s", time.Since(telemStart))
-
-	if doneErr != "" {
-		log.Printf("handler: returning error result after %s: %s", time.Since(handlerStart), doneErr)
-		return &gomcp.CallToolResult{
-			IsError: true,
-			Content: []gomcp.Content{&gomcp.TextContent{Text: fmt.Sprintf("dispatch failed: %s", doneErr)}},
-		}, nil, nil
-	}
-
-	resultBody := map[string]interface{}{
-		"text": finalText,
-		"summary": map[string]interface{}{
-			"turns":           turns,
-			"tool_calls_made": toolCallsMade,
-			"cancelled":       cancelled,
-		},
-	}
-	b, _ := json.MarshalIndent(resultBody, "", "  ")
-	log.Printf("handler: returning success result after %s, result_bytes=%d (text=%d, tool_calls=%d, turns=%d)",
-		time.Since(handlerStart), len(b), len(finalText), toolCallsMade, turns)
-	return &gomcp.CallToolResult{
-		Content: []gomcp.Content{&gomcp.TextContent{Text: string(b)}},
-	}, nil, nil
-}

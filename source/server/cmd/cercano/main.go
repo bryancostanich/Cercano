@@ -46,6 +46,7 @@ import (
 	"cercano/source/server/internal/recap"
 	"cercano/source/server/internal/retention"
 	"cercano/source/server/internal/server"
+	"cercano/source/server/internal/usage"
 	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/internal/tools"
 	"cercano/source/server/pkg/config"
@@ -273,6 +274,22 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		fmt.Fprintf(os.Stderr, "[WARN] permission file watcher not started (%v) — /strict etc. still push; hand-edits won't.\n", err)
 	}
 
+	// Agent-server telemetry: mirrors the MCP-mode collector setup so
+	// provider calls in the native tool-calling loop are recorded.
+	// DE: shared usage sink; dispatch engine will reuse it.
+	var sink func(usage.Usage)
+	agentTelemetryPath := filepath.Join(filepath.Dir(config.DefaultPath()), "telemetry.db")
+	agentTelemetryStore, err := telemetry.NewSQLiteStore(agentTelemetryPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] Failed to initialize agent telemetry: %v\n", err)
+	} else {
+		agentCollector := telemetry.NewCollector(agentTelemetryStore, 256)
+		agentCollector.SetSessionID(generateSessionID())
+		defer agentCollector.Close()
+		defer agentTelemetryStore.Close()
+		sink = server.UsageEventSink(agentCollector.Emit)
+	}
+
 	// Layered LLM provider for native tool calling. Constructed only when
 	// the cloud is actually configured (anthropic-only for V1). When absent,
 	// StreamProcessRequest falls back to the legacy ProcessRequestStream path.
@@ -282,15 +299,15 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 			APIKey:  cfg.CloudAPIKey,
 			Model:   cfg.CloudModel,
 		})
-		srv.SetCloudLLMProvider(client)
+		srv.SetCloudLLMProvider(usage.Wrap(client, "main", true, sink))
 	}
 
 	// Native tool-loop local provider (Ollama). Wired unconditionally so Local
 	// modes can drive the tool-calling loop; availability is enforced per turn.
-	srv.SetLocalLLMProvider(ollamallm.NewClient(ollamallm.Config{
+	srv.SetLocalLLMProvider(usage.Wrap(ollamallm.NewClient(ollamallm.Config{
 		BaseURL: cfg.OllamaURL,
 		Model:   cfg.LocalModel,
-	}))
+	}), "main", false, sink))
 
 	// Build the capability registry with live Services (providers, config, and
 	// context loader all set above) and wire it as the server's tool registry.

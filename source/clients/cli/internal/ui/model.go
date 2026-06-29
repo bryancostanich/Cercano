@@ -23,6 +23,7 @@ import (
 	"cercano/source/clients/cli/internal/render"
 	"cercano/source/clients/cli/internal/slash"
 	"cercano/source/clients/cli/internal/theme"
+	"cercano/source/clients/cli/internal/uiconfig"
 	"cercano/source/server/pkg/agentclient"
 )
 
@@ -197,9 +198,17 @@ const armedInputPlaceholder = "(press ^C again to quit, or type a message)"
 // openHistoryOnStart=true makes the CLI open the /history picker as soon as
 // the terminal size is known (used by the `cercano -r` flag).
 func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
-	p := theme.Cracker()
-	s := theme.NewStyles(p)
 	themes := theme.NewRegistry(theme.BuiltinThemes())
+	for _, ct := range uiconfig.LoadCustomThemes() {
+		_ = themes.Add(ct) // skip collisions silently
+	}
+	activeName := uiconfig.LoadActiveTheme()
+	active, ok := themes.Get(activeName)
+	if !ok {
+		active, _ = themes.Get("cracker")
+	}
+	p := active.Palette
+	s := theme.NewStyles(p)
 
 	ti := newPromptInput()
 	ti.Placeholder = defaultInputPlaceholder
@@ -259,7 +268,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 		home:               home,
 		palette:            p,
 		styles:             s,
-		theme:              theme.Theme{Name: "cracker", Palette: p},
+		theme:              active,
 		themes:             themes,
 		chat:               newChatView(s, p, root, home, 80, 10),
 		agent:              ag,

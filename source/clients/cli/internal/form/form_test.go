@@ -40,6 +40,22 @@ func TestFormOpenSelectKeepsFocusedLineOnLabel(t *testing.T) {
 	}
 }
 
+func TestFormSetCursorClamps(t *testing.T) {
+	f := New([]Section{{Title: "A", Fields: []Field{NewText("a", "a", "v", ""), NewText("b", "b", "v", "")}}})
+	f.SetCursor(1)
+	if f.Cursor() != 1 {
+		t.Fatalf("SetCursor(1) -> %d, want 1", f.Cursor())
+	}
+	f.SetCursor(99)
+	if f.Cursor() != 1 {
+		t.Fatalf("SetCursor(99) should clamp to last (1), got %d", f.Cursor())
+	}
+	f.SetCursor(-5)
+	if f.Cursor() != 0 {
+		t.Fatalf("SetCursor(-5) should clamp to 0, got %d", f.Cursor())
+	}
+}
+
 func TestFormNavSkipsHeadersAndClamps(t *testing.T) {
 	sections := []Section{
 		{Title: "A", Fields: []Field{NewText("a1", "a1", "v", ""), NewReadOnly("a2", "a2", "v", "")}},

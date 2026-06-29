@@ -85,9 +85,16 @@ func (sp *settingsPage) snapshotSections() []form.Section {
 func (sp *settingsPage) SetStyles(s theme.Styles, p theme.Palette) {
 	sp.styles = s
 	sp.palette = p
+	cursor := 0
+	if sp.form != nil {
+		cursor = sp.form.Cursor()
+	}
 	sp.form = form.New(sp.snapshotSections())
 	sp.form.OnCommit = sp.onCommit
 	sp.form.OnReload = sp.snapshotSections
+	// Preserve focus across the rebuild so a live theme edit (which reconstructs
+	// the form via Model.applyTheme → SetStyles) doesn't jump the cursor to top.
+	sp.form.SetCursor(cursor)
 }
 
 func (sp *settingsPage) ID() contentPageID { return contentPageSettings }

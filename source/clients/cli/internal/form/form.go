@@ -35,6 +35,24 @@ func New(sections []Section) *Form { return &Form{Sections: sections} }
 // Cursor returns the flattened-field index of the focused field.
 func (f *Form) Cursor() int { return f.cursor }
 
+// SetCursor moves the focused-field index, clamped to the valid range. Used to
+// preserve the focus position when a host rebuilds the form (e.g. a live theme
+// edit that reconstructs the sections).
+func (f *Form) SetCursor(i int) {
+	n := len(f.flat())
+	if n == 0 {
+		f.cursor = 0
+		return
+	}
+	if i < 0 {
+		i = 0
+	}
+	if i > n-1 {
+		i = n - 1
+	}
+	f.cursor = i
+}
+
 // FocusedLine returns the zero-based output line of the focused field as of
 // the last View (or Lines) call.
 func (f *Form) FocusedLine() int { return f.focusedLine }

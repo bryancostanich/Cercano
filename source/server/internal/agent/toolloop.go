@@ -52,6 +52,14 @@ type ToolLoopInput struct {
 	// the provider, so the server can forward them to the client for live
 	// token-by-token rendering. Nil-safe.
 	OnTextDelta func(string)
+
+	// MaxIterations caps the number of LLM round-trips this call may make.
+	// 0 means use MaxToolLoopIterations (the package default, currently 50).
+	MaxIterations int
+
+	// MaxTokensPerTurn sets the MaxTokens field on each llm.ChatRequest.
+	// 0 means use the package default (4096).
+	MaxTokensPerTurn int
 }
 
 type ToolLoopResult struct {
@@ -122,6 +130,15 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		}
 	}
 
+	maxIters := MaxToolLoopIterations
+	if in.MaxIterations > 0 {
+		maxIters = in.MaxIterations
+	}
+	maxTokens := 4096
+	if in.MaxTokensPerTurn > 0 {
+		maxTokens = in.MaxTokensPerTurn
+	}
+
 	hist := append([]llm.Message{}, in.ConvHistory...)
 	hist = append(hist, llm.Message{
 		Role:   llm.RoleUser,
@@ -132,13 +149,13 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	consecutiveErrors := 0
 	var lastIn, lastOut int
 
-	for iter := 0; iter < MaxToolLoopIterations; iter++ {
+	for iter := 0; iter < maxIters; iter++ {
 		req := llm.ChatRequest{
 			Model:     in.Model,
 			System:    in.System,
 			Messages:  hist,
 			Tools:     catalog,
-			MaxTokens: 4096,
+			MaxTokens: maxTokens,
 		}
 		rdr, err := in.Provider.StreamChat(ctx, req)
 		if err != nil {
@@ -306,17 +323,17 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		Role: llm.RoleUser,
 		Blocks: []llm.Block{{Type: llm.BlockText, Text: fmt.Sprintf(
 			"You've reached the %d-step tool limit for this turn. Stop calling tools and give your best answer now using what you've gathered.",
-			MaxToolLoopIterations)}},
+			maxIters)}},
 	})
-	finalReq := llm.ChatRequest{Model: in.Model, System: in.System, Messages: hist, MaxTokens: 4096}
+	finalReq := llm.ChatRequest{Model: in.Model, System: in.System, Messages: hist, MaxTokens: maxTokens}
 	rdr, err := in.Provider.StreamChat(ctx, finalReq)
 	if err != nil {
-		return ToolLoopResult{Iterations: MaxToolLoopIterations, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, err
+		return ToolLoopResult{Iterations: maxIters, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, err
 	}
 	resp, err := collectStream(ctx, rdr, in.OnTextDelta)
 	rdr.Close()
 	if err != nil {
-		return ToolLoopResult{Iterations: MaxToolLoopIterations, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, err
+		return ToolLoopResult{Iterations: maxIters, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, err
 	}
 	var finalText string
 	for _, b := range resp.Blocks {
@@ -327,7 +344,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	hist = append(hist, llm.Message{Role: llm.RoleAssistant, Blocks: resp.Blocks})
 	return ToolLoopResult{
 		FinalText: finalText, FinalBlocks: resp.Blocks,
-		Iterations: MaxToolLoopIterations, History: hist,
+		Iterations: maxIters, History: hist,
 		InputTokens: resp.InputTokens, OutputTokens: resp.OutputTokens,
 	}, nil
 }

@@ -15,6 +15,9 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
+	"cercano/source/server/internal/capabilities"
+	"cercano/source/server/internal/capabilities/agentadapter"
+	"cercano/source/server/internal/capabilities/builtins"
 	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/compactor"
 	projectctx "cercano/source/server/internal/context"
@@ -62,6 +65,7 @@ type Server struct {
 	configPath          string             // path to config.yaml for persistence
 	currentConfig       config.Config      // current config state for persistence
 	toolRegistry        *agenttools.Registry
+	capRegistry         *capabilities.Registry
 	permStore           *agent.PermissionStore
 	mcpManager          McpManager
 	pendingDecisions    *agent.PendingDecisions
@@ -82,6 +86,28 @@ func (s *Server) SetContextLoader(l *projectctx.Loader) { s.contextLoader = l }
 // SetToolRegistry attaches the agent's tool registry. The CLI's /tools and
 // /tool commands route through ListTools / InvokeTool RPCs to it.
 func (s *Server) SetToolRegistry(r *agenttools.Registry) { s.toolRegistry = r }
+
+// ToolRegistry returns the current agent tool registry. Used by the MCP host
+// to register dynamically connected tools into the same registry.
+func (s *Server) ToolRegistry() *agenttools.Registry { return s.toolRegistry }
+
+// InstallCapabilities builds the capability registry from the server's current
+// providers, config, and context loader, then wires the resulting
+// agenttools.Registry as the server's tool registry. Call AFTER
+// SetCloudLLMProvider / SetLocalLLMProvider / SetContextLoader so that
+// Services carries live runtime values.
+func (s *Server) InstallCapabilities() {
+	capReg := capabilities.NewRegistry(capabilities.Services{
+		CloudProvider: s.cloudLLMProvider,
+		LocalProvider: s.localLLMProvider,
+		Config:        &s.currentConfig,
+		ProjectCtx:    s.contextLoader,
+		// Engine/Conversations/RunCoproc wired in Phase 5; nil-safe until then.
+	})
+	builtins.Register(capReg)
+	s.capRegistry = capReg
+	s.SetToolRegistry(agentadapter.BuildAgentRegistry(capReg, builtins.AgentAliases()))
+}
 
 // SetPermissions wires the permission store and pending-decisions barrier used
 // by the SetPermissionMode / GetPermissionMode / Allow|DenyToolCall RPCs.

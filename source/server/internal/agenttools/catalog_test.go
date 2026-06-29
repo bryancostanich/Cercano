@@ -1,14 +1,26 @@
-package agenttools
+package agenttools_test
 
 import (
 	"testing"
 
+	"cercano/source/server/internal/agenttools"
+	"cercano/source/server/internal/capabilities"
+	"cercano/source/server/internal/capabilities/agentadapter"
+	"cercano/source/server/internal/capabilities/builtins"
 	"cercano/source/server/internal/llm"
 )
 
+// buildTestRegistry constructs the agenttools.Registry the same way the server
+// does at runtime, using an empty Services (no providers needed by builtins).
+func buildTestRegistry() *agenttools.Registry {
+	capReg := capabilities.NewRegistry(capabilities.Services{})
+	builtins.Register(capReg)
+	return agentadapter.BuildAgentRegistry(capReg, builtins.AgentAliases())
+}
+
 func TestBuildToolCatalog_CoversAllRegistered(t *testing.T) {
-	reg := DefaultRegistry()
-	cat := BuildToolCatalog(reg)
+	reg := buildTestRegistry()
+	cat := agenttools.BuildToolCatalog(reg)
 	if len(cat) != len(reg.All()) {
 		t.Errorf("catalog len %d != registry len %d", len(cat), len(reg.All()))
 	}
@@ -25,8 +37,8 @@ func TestBuildToolCatalog_CoversAllRegistered(t *testing.T) {
 }
 
 func TestBuildToolCatalog_PreservesPermissionTier(t *testing.T) {
-	reg := DefaultRegistry()
-	cat := BuildToolCatalog(reg)
+	reg := buildTestRegistry()
+	cat := agenttools.BuildToolCatalog(reg)
 	byName := map[string]llm.Tool{}
 	for _, tl := range cat {
 		byName[tl.Name] = tl

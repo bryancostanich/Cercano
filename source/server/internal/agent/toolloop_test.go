@@ -96,7 +96,7 @@ func (p *loopingProvider) StreamChat(ctx context.Context, req llm.ChatRequest) (
 
 func TestToolLoop_HitsCap_DegradesToFinalAnswer(t *testing.T) {
 	prov := &loopingProvider{}
-	reg := agenttools.DefaultRegistry()
+	reg := testDefaultRegistry()
 	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
 
 	result, err := RunToolLoop(t.Context(), ToolLoopInput{
@@ -120,7 +120,7 @@ func TestToolLoop_PlainText_TerminatesImmediately(t *testing.T) {
 		}},
 		caps: llm.Capabilities{SupportsTools: true},
 	}
-	reg := agenttools.DefaultRegistry()
+	reg := testDefaultRegistry()
 	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
 
 	result, err := RunToolLoop(t.Context(), ToolLoopInput{
@@ -150,7 +150,7 @@ func TestToolLoop_SingleToolCall_FeedsResultAndContinues(t *testing.T) {
 		},
 		caps: llm.Capabilities{SupportsTools: true},
 	}
-	reg := agenttools.DefaultRegistry()
+	reg := testDefaultRegistry()
 	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
 
 	result, err := RunToolLoop(t.Context(), ToolLoopInput{
@@ -181,7 +181,7 @@ func TestToolLoop_RTierRunsConcurrently(t *testing.T) {
 		},
 		caps: llm.Capabilities{SupportsTools: true, SupportsParallelTools: true},
 	}
-	reg := agenttools.DefaultRegistry()
+	reg := testDefaultRegistry()
 	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
 
 	result, err := RunToolLoop(t.Context(), ToolLoopInput{
@@ -218,7 +218,7 @@ func TestToolLoop_UserDeniesWTier_TerminatesTurn(t *testing.T) {
 		}},
 		caps: llm.Capabilities{SupportsTools: true},
 	}
-	reg := agenttools.DefaultRegistry()
+	reg := testDefaultRegistry()
 	dir := t.TempDir()
 	perms, _ := LoadPermissionStore(dir + "/perms.yaml")
 	_ = perms.SetMode(ModeStrict)
@@ -290,7 +290,7 @@ func TestToolLoop_EmitsExpectedEvents(t *testing.T) {
 		},
 		caps: llm.Capabilities{SupportsTools: true},
 	}
-	reg := agenttools.DefaultRegistry()
+	reg := testDefaultRegistry()
 	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
 	var events []LoopEventKind
 	_, err := RunToolLoop(t.Context(), ToolLoopInput{

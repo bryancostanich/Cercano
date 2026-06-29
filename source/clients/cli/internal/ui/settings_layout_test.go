@@ -43,6 +43,9 @@ func sampleSettingsPage(w, h int) *settingsPage {
 		cfg: cfg, mode: "permissive",
 		themes:  theme.NewRegistry(theme.BuiltinThemes()),
 		working: theme.Theme{Name: "cr4k3r_j4x", Palette: theme.Cracker()},
+		// profilesLoaded=true prevents snapshotSections from calling GetCloudProfiles
+		// on a nil agent during tests.
+		profilesLoaded: true,
 	}
 	sp.form = form.New(sp.snapshotSections())
 	sp.form.OnCommit = sp.onCommit
@@ -50,10 +53,10 @@ func sampleSettingsPage(w, h int) *settingsPage {
 	return sp
 }
 
-// openLocus navigates to and opens the locus-mode select (flat field index 9:
-// Local Model has 4 fields, Cloud has 5).
+// openLocus navigates to and opens the locus-mode select (flat field index 4:
+// Local Model has 4 fields; the legacy Cloud section is removed).
 func openLocus(sp *settingsPage) {
-	for i := 0; i < 9; i++ {
+	for i := 0; i < 4; i++ {
 		sp.form.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 	sp.form.Update(tea.KeyPressMsg{Code: tea.KeyEnter})

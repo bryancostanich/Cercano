@@ -10,6 +10,9 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
+	"cercano/source/server/internal/capabilities"
+	"cercano/source/server/internal/capabilities/agentadapter"
+	"cercano/source/server/internal/capabilities/builtins"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
@@ -129,7 +132,9 @@ func newServerWithStore(t *testing.T) (*Server, conversation.Store) {
 	)
 	srv := NewServer(a, nil, nil, nil, nil, nil)
 	srv.SetConfigPersistence("", config.Config{CloudModel: "test-model"})
-	srv.SetToolRegistry(agenttools.DefaultRegistry())
+	capReg := capabilities.NewRegistry(capabilities.Services{})
+	builtins.Register(capReg)
+	srv.SetToolRegistry(agentadapter.BuildAgentRegistry(capReg, builtins.AgentAliases()))
 	return srv, store
 }
 

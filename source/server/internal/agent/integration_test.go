@@ -5,7 +5,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/llm/anthropic"
 )
 
@@ -77,7 +76,7 @@ func TestIntegration_FullTurnWithToolCall(t *testing.T) {
 	prov := anthropic.NewClient(anthropic.Config{
 		BaseURL: srv.URL, APIKey: "dummy", Model: "claude",
 	})
-	reg := agenttools.DefaultRegistry()
+	reg := testDefaultRegistry()
 	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
 
 	result, err := RunToolLoop(t.Context(), ToolLoopInput{

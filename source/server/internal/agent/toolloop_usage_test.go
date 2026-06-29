@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/llm"
 )
 
@@ -49,7 +48,7 @@ func TestRunToolLoop_ReturnsLastCallUsage(t *testing.T) {
 		usages: [][2]int{{100, 10}, {250, 20}},
 	}
 	res, err := RunToolLoop(context.Background(), ToolLoopInput{
-		Provider: prov, Registry: agenttools.DefaultRegistry(), UserInput: "list",
+		Provider: prov, Registry: testDefaultRegistry(), UserInput: "list",
 	})
 	if err != nil {
 		t.Fatalf("RunToolLoop: %v", err)

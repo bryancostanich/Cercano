@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"cercano/source/server/internal/agent"
-	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/compactiongen"
 	"cercano/source/server/internal/compactor"
@@ -254,17 +253,6 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	srv.SetContextLoader(ctxLoader)
 	srv.SetConfigPersistence(config.DefaultPath(), cfg)
 	orchestrator.SetLocusModeGetter(srv.LocusMode)
-	reg := agenttools.DefaultRegistry()
-	srv.SetToolRegistry(reg)
-
-	// MCP host: load global servers and connect them in the background. Tools
-	// register into `reg` as each server lists; a slow/dead server never blocks
-	// boot (a call to a not-ready server blocks only that call — see mcphost).
-	cfgDir := filepath.Dir(config.DefaultPath())
-	mcpMgr := mcphost.New(reg, cfgDir, 10*time.Second)
-	srv.SetMcpManager(mcpMgr)
-	mcpCtx, mcpCancel := context.WithCancel(context.Background())
-	mcpMgr.Start(mcpCtx)
 
 	// Permission store + pending-decisions barrier for the native tool-calling
 	// loop. Path mirrors config.yaml: ~/.config/cercano/permissions.yaml.
@@ -301,6 +289,21 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		BaseURL: cfg.OllamaURL,
 		Model:   cfg.LocalModel,
 	}))
+
+	// Build the capability registry with live Services (providers, config, and
+	// context loader all set above) and wire it as the server's tool registry.
+	// Must run after the provider setters so Services carries real values.
+	srv.InstallCapabilities()
+
+	// MCP host: load global servers and connect them in the background. Tools
+	// register into the same agenttools.Registry as each server lists; a
+	// slow/dead server never blocks boot (a call to a not-ready server blocks
+	// only that call — see mcphost).
+	cfgDir := filepath.Dir(config.DefaultPath())
+	mcpMgr := mcphost.New(srv.ToolRegistry(), cfgDir, 10*time.Second)
+	srv.SetMcpManager(mcpMgr)
+	mcpCtx, mcpCancel := context.WithCancel(context.Background())
+	mcpMgr.Start(mcpCtx)
 
 	proto.RegisterAgentServer(s, srv)
 

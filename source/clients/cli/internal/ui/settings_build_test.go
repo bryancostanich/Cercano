@@ -22,7 +22,7 @@ func TestBuildSettingsSectionsCoversKeys(t *testing.T) {
 			keys[f.Key()] = true
 		}
 	}
-	for _, want := range []string{"Local Model", "Cloud", "Routing", "Permissions", "UI / Theme", "Server"} {
+	for _, want := range []string{"Local Model", "Cloud", "Routing", "Permissions", "Server"} {
 		if !titles[want] {
 			t.Errorf("missing section %q", want)
 		}
@@ -30,7 +30,7 @@ func TestBuildSettingsSectionsCoversKeys(t *testing.T) {
 	for _, want := range []string{
 		"local-runtime", "local-model", "ollama-url", "embedding-model",
 		"cloud-provider", "cloud-model", "cloud-base-url", "cloud-api-key", "cloud-state",
-		"locus-mode", "permission-mode", "accent-color", "port",
+		"locus-mode", "permission-mode", "port",
 	} {
 		if !keys[want] {
 			t.Errorf("missing field %q", want)

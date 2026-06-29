@@ -22,6 +22,9 @@ func colorFields(p *Palette) map[string]*color.Color {
 	}
 }
 
+// FieldPtr returns a pointer to the palette color for a yaml key, or nil.
+func FieldPtr(p *Palette, key string) *color.Color { return colorFields(p)[key] }
+
 // MarshalTheme serializes a theme's colors to YAML.
 func MarshalTheme(t Theme) ([]byte, error) {
 	p := t.Palette

@@ -310,6 +310,9 @@ func (m *Model) applyTheme(t theme.Theme) {
 	m.styles = theme.NewStyles(t.Palette)
 	m.chat.SetStyles(m.styles, m.palette)
 	m.promptBorderColor = m.resolvePromptColor(m.promptColorToken)
+	if sp, ok := m.content.(*settingsPage); ok {
+		sp.SetStyles(m.styles, m.palette)
+	}
 	m.refreshViewport()
 }
 
@@ -942,6 +945,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, nil
 
+	case settingsThemeMsg:
+		m.applyTheme(msg.working)
+		if msg.persistName != "" {
+			_ = uiconfig.SaveActiveTheme(msg.persistName)
+		}
+		return m, nil
+
 	case permissionModeChangedMsg:
 		// Pushed by the agent (another client's /strict, or a hand-edit to
 		// permissions.yaml). Update the chip and re-arm the drain loop.
@@ -1185,7 +1195,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.chat.ExitToolNav()
 		m.refreshViewport()
 	case slash.ResultOpenSettings:
-		sp, cmd := newSettingsPage(m.agent, m.palette, m.styles, m.promptColorToken, m.width, m.height)
+		sp, cmd := newSettingsPage(m.agent, m.palette, m.styles, m.promptColorToken, m.width, m.height, m.themes, m.theme)
 		m.content = sp
 		return m, cmd
 	case slash.ResultOpenHistoryPicker:

@@ -43,3 +43,31 @@ func TestCustomThemeSaveLoadDelete(t *testing.T) {
 		t.Fatal("theme should be gone after delete")
 	}
 }
+
+func TestImportThemeCopiesIntoThemesDir(t *testing.T) {
+	src := t.TempDir()
+	themesDir := t.TempDir()
+	t.Setenv("CERCANO_THEMES_DIR", themesDir)
+
+	// write a source theme yaml named "cool.yaml" outside the themes dir
+	data, err := theme.MarshalTheme(theme.Theme{Name: "cool", Palette: theme.Cracker()})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	srcPath := filepath.Join(src, "cool.yaml")
+	if err := os.WriteFile(srcPath, data, 0o644); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+
+	got, err := ImportTheme(srcPath)
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if got.Name != "cool" {
+		t.Fatalf("imported name = %q, want cool", got.Name)
+	}
+	loaded := LoadCustomThemes()
+	if len(loaded) != 1 || loaded[0].Name != "cool" {
+		t.Fatalf("theme not copied into themes dir: %v", loaded)
+	}
+}

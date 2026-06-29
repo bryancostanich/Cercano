@@ -1,6 +1,6 @@
 # OpenAI Responses API Provider — Design
 
-**Status:** Designed 2026-06-29. Sub-project 3 of the multi-cloud effort
+**Status:** Implemented 2026-06-29. Sub-project 3 of the multi-cloud effort
 (foundation = [cloud-profiles.md](./cloud-profiles.md); SP2 = [cloud-openai.md](./cloud-openai.md)).
 
 Add an `llm.Provider` that speaks the OpenAI **Responses API** (`POST /v1/responses`),

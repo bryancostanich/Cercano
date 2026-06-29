@@ -31,6 +31,7 @@ func Register(reg *capabilities.Registry) {
 	reg.MustRegister(Grep())
 	reg.MustRegister(GitStatus())
 	reg.MustRegister(GitLog())
+	reg.MustRegister(GetProtocol())
 	// W-tier
 	reg.MustRegister(WriteFile())
 	reg.MustRegister(EditFile())

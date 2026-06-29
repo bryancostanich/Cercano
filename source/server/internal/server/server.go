@@ -75,6 +75,7 @@ type Server struct {
 	localLLMProvider    llm.Provider // native-tool-loop local provider (Ollama)
 	runtimeManager      localruntime.Manager
 	contextLoader       *projectctx.Loader
+	dispatchEngine      *dispatch.Engine
 
 	events        *eventHub  // server->client push fan-out (SubscribeEvents)
 	permBcastMu   sync.Mutex // guards lastBcastMode
@@ -84,6 +85,10 @@ type Server struct {
 // SetContextLoader wires the project-context loader so the native tool-loop can
 // include .cercano/context.md (and the working directory) in its system prompt.
 func (s *Server) SetContextLoader(l *projectctx.Loader) { s.contextLoader = l }
+
+// SetDispatchEngine wires the unified dispatch engine so capability Services
+// (RunCoproc) can run one-shot co-processor work. Call before InstallCapabilities.
+func (s *Server) SetDispatchEngine(e *dispatch.Engine) { s.dispatchEngine = e }
 
 // SetToolRegistry attaches the agent's tool registry. The CLI's /tools and
 // /tool commands route through ListTools / InvokeTool RPCs to it.
@@ -104,7 +109,24 @@ func (s *Server) InstallCapabilities() {
 		LocalProvider: s.localLLMProvider,
 		Config:        &s.currentConfig,
 		ProjectCtx:    s.contextLoader,
-		// Engine/Conversations/RunCoproc wired in Phase 5; nil-safe until then.
+		// Engine/Conversations wired in a later phase; nil-safe until then.
+		RunCoproc: func(ctx context.Context, prompt, projectDir string) (string, error) {
+			if s.dispatchEngine == nil {
+				return "", fmt.Errorf("dispatch engine not configured")
+			}
+			res, err := s.dispatchEngine.Dispatch(ctx, dispatch.Spec{
+				Mode:                dispatch.OneShot,
+				Role:                dispatch.RoleCoproc,
+				Prompt:              prompt,
+				WantsProjectContext: true,
+				WorkDir:             projectDir,
+				Source:              "coproc",
+			})
+			if err != nil {
+				return "", err
+			}
+			return res.Text, nil
+		},
 	})
 	builtins.Register(capReg)
 	s.capRegistry = capReg

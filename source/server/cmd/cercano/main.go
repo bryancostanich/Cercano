@@ -332,6 +332,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		return cfg.LocalModel
 	})
 	orchestrator.SetDispatchEngine(coprocEngine)
+	srv.SetDispatchEngine(coprocEngine)
 
 	// Build the capability registry with live Services (providers, config, and
 	// context loader all set above) and wire it as the server's tool registry.

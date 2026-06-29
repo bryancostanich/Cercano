@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"net/http"
 
 	goopenai "github.com/sashabaranov/go-openai"
 
@@ -13,21 +14,27 @@ type Config struct {
 	BaseURL string
 	APIKey  string
 	Model   string
+	Backend string // selects per-backend quirks; empty → defensive default
 }
 
 // Client implements llm.Provider using the OpenAI chat completions API.
 type Client struct {
-	api   *goopenai.Client
-	model string
+	api    *goopenai.Client
+	model  string
+	quirks Quirks
 }
 
-// NewClient constructs a Client from cfg.
+// NewClient constructs a Client from cfg. The HTTP transport is wrapped in a
+// normalizingDoer so per-backend response quirks (transient retries, array-shaped
+// error bodies) are repaired before go-openai parses them.
 func NewClient(cfg Config) *Client {
 	c := goopenai.DefaultConfig(cfg.APIKey)
 	if cfg.BaseURL != "" {
 		c.BaseURL = cfg.BaseURL
 	}
-	return &Client{api: goopenai.NewClientWithConfig(c), model: cfg.Model}
+	q := quirksFor(cfg.Backend)
+	c.HTTPClient = &normalizingDoer{next: &http.Client{}, quirks: q}
+	return &Client{api: goopenai.NewClientWithConfig(c), model: cfg.Model, quirks: q}
 }
 
 func (c *Client) Name() string { return "openai" }

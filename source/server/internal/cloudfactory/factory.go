@@ -30,7 +30,7 @@ func BuildCloudProvider(p config.CloudProfile, apiKey string) (llm.Provider, err
 			Model:   p.Model,
 		}), nil
 	case FlavorChatCompletions:
-		return openai.NewClient(openai.Config{BaseURL: p.BaseURL, APIKey: apiKey, Model: p.Model}), nil
+		return openai.NewClient(openai.Config{BaseURL: p.BaseURL, APIKey: apiKey, Model: p.Model, Backend: p.Backend}), nil
 	default:
 		return nil, fmt.Errorf("flavor %q not yet supported", p.Flavor)
 	}

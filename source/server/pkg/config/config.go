@@ -13,6 +13,7 @@ import (
 type CloudProfile struct {
 	Name    string `yaml:"name"`
 	Flavor  string `yaml:"flavor"` // messages | chat_completions | responses | bedrock
+	Backend string `yaml:"backend,omitempty"` // chat_completions only: selects per-backend quirks (openai|gemini|groq|…); empty → defensive default
 	BaseURL string `yaml:"base_url"`
 	Model   string `yaml:"model"`
 }

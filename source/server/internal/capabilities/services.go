@@ -5,6 +5,7 @@ import (
 
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/conversation"
+	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/pkg/config"
@@ -26,6 +27,10 @@ type Services struct {
 	// model output. Set by the agent server when it builds the registry; used
 	// by the co-processor capabilities (Phase 5). May be nil in tests.
 	RunCoproc func(ctx context.Context, prompt, projectDir string) (string, error)
+
+	// Dispatch runs an agentic (or one-shot) unit of delegated model work through
+	// the unified dispatch engine. Nil until wired by the server.
+	Dispatch func(ctx context.Context, spec dispatch.Spec) (dispatch.Result, error)
 }
 
 // MainProvider returns the provider for a turn: cloud when isCloud and a cloud

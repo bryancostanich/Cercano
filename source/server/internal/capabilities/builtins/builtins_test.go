@@ -10,18 +10,18 @@ func TestRegister_Count(t *testing.T) {
 	reg := capabilities.NewRegistry(capabilities.Services{})
 	Register(reg)
 	all := reg.All()
-	if len(all) != 20 {
+	if len(all) != 21 {
 		names := make([]string, len(all))
 		for i, c := range all {
 			names[i] = c.Name()
 		}
-		t.Fatalf("expected 20 capabilities, got %d: %v", len(all), names)
+		t.Fatalf("expected 21 capabilities, got %d: %v", len(all), names)
 	}
 }
 
 func TestAgentAliases_Count(t *testing.T) {
 	aliases := AgentAliases()
-	want := 7
+	want := 8
 	if len(aliases) != want {
 		t.Fatalf("expected %d aliases, got %d: %v", want, len(aliases), aliases)
 	}

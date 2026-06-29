@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"cercano/source/clients/cli/internal/form"
 	"cercano/source/clients/cli/internal/theme"
 	"cercano/source/server/pkg/agentclient"
 )
@@ -72,6 +73,20 @@ func TestCloudSectionShowsDetailForSelectedProfile(t *testing.T) {
 	}
 	if sp.cloudDraftNew {
 		t.Error("editing an existing profile is not a new draft")
+	}
+	// Verify cloud-name field is read-only for existing (non-new) profile.
+	var cloudNameField form.Field
+	for _, f := range sec.Fields {
+		if f.Key() == "cloud-name" {
+			cloudNameField = f
+			break
+		}
+	}
+	if cloudNameField == nil {
+		t.Fatal("cloud-name field not found")
+	}
+	if _, ok := cloudNameField.(*form.ReadOnlyField); !ok {
+		t.Errorf("cloud-name field for existing profile must be *ReadOnlyField, got %T", cloudNameField)
 	}
 }
 

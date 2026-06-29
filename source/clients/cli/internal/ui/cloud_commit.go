@@ -70,8 +70,6 @@ func (sp *settingsPage) applyCloudDraftEdit(field, value string) {
 // optional tea.Cmd, and an error. Profile mutations invalidate the cache so the
 // next snapshot re-fetches.
 func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	switch ca.kind {
 	case cloudCommitSelect:
 		sp.selectCloudRow(ca.rowID)
@@ -83,6 +81,8 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		if sp.agent == nil {
 			return "no agent", nil, nil
 		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		d := sp.cloudDraft
 		err := sp.agent.UpsertCloudProfile(ctx, agentclient.CloudProfileInfo{
 			Name: d.Name, Flavor: d.Flavor, Backend: d.Backend, BaseURL: d.BaseURL, Model: d.Model,
@@ -98,6 +98,8 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		if sp.agent == nil {
 			return "no agent", nil, nil
 		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		if err := sp.agent.SetActiveCloudProfile(ctx, sp.cloudDraft.Name); err != nil {
 			return "", nil, err
 		}
@@ -107,6 +109,8 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		if sp.agent == nil {
 			return "no agent", nil, nil
 		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		name := sp.cloudDraft.Name
 		if err := sp.agent.RemoveCloudProfile(ctx, name); err != nil {
 			return "", nil, err
@@ -118,6 +122,8 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		if sp.agent == nil {
 			return "no agent", nil, nil
 		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		if err := sp.agent.SetCloudProfileKey(ctx, sp.cloudDraft.Name, ca.value); err != nil {
 			return "", nil, err
 		}

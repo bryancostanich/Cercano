@@ -39,6 +39,12 @@ type settingsPage struct {
 	themes        *theme.Registry
 	working       theme.Theme
 	dirty         bool
+	// cfg/mode cache the last successful GetConfig/GetPermissionMode results so
+	// that theme-color edits (which trigger snapshotSections) don't issue a
+	// gRPC round-trip per keystroke. Invalidated to nil after a successful
+	// config or permission commit so the next reload re-fetches fresh values.
+	cfg  *agentclient.Config
+	mode string
 }
 
 func newSettingsPage(ag *agentclient.Client, p theme.Palette, s theme.Styles, accentToken string, w, h int, themes *theme.Registry, active theme.Theme) (*settingsPage, tea.Cmd) {
@@ -50,19 +56,23 @@ func newSettingsPage(ag *agentclient.Client, p theme.Palette, s theme.Styles, ac
 }
 
 func (sp *settingsPage) snapshotSections() []form.Section {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	cfg, err := sp.agent.GetConfig(ctx)
-	if err != nil {
-		return []form.Section{{Title: "Settings", Fields: []form.Field{
-			form.NewReadOnly("error", "error", err.Error(), ""),
-		}}}
+	if sp.cfg == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		cfg, err := sp.agent.GetConfig(ctx)
+		if err != nil {
+			return []form.Section{{Title: "Settings", Fields: []form.Field{
+				form.NewReadOnly("error", "error", err.Error(), ""),
+			}}}
+		}
+		mode, err := sp.agent.GetPermissionMode(ctx)
+		if err != nil {
+			mode = ""
+		}
+		sp.cfg = cfg
+		sp.mode = mode
 	}
-	mode, err := sp.agent.GetPermissionMode(ctx)
-	if err != nil {
-		mode = ""
-	}
-	secs := buildSettingsSections(cfg, mode, sp.accentToken)
+	secs := buildSettingsSections(sp.cfg, sp.mode, sp.accentToken)
 	if sp.themes != nil {
 		builtin := sp.themes.IsBuiltin(sp.working.Name)
 		secs = append(secs, buildThemeSections(sp.working, sp.themes.Names(), builtin, sp.dirty)...)
@@ -151,6 +161,9 @@ func (sp *settingsPage) onCommit(key, value string) (string, tea.Cmd, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		status, err := sp.agent.UpdateConfig(ctx, action.update)
+		if err == nil {
+			sp.cfg = nil
+		}
 		return status, nil, err
 	case commitPermission:
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -158,6 +171,7 @@ func (sp *settingsPage) onCommit(key, value string) (string, tea.Cmd, error) {
 		if err := sp.agent.SetPermissionMode(ctx, action.value); err != nil {
 			return "", nil, err
 		}
+		sp.cfg = nil
 		mode := action.value
 		return "permission mode: " + mode, func() tea.Msg {
 			return permissionModeChangedMsg{mode: mode}

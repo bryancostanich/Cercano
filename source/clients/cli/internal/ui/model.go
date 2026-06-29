@@ -216,21 +216,6 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	// the cap the prompt scrolls internally.
 	ti.MinHeight = 1
 	ti.MaxHeight = maxInputLines
-	// Lime "▶ " on the first line; a 2-space hang indent on wrapped/extra lines
-	// so continuation text aligns under the first line's content.
-	ti.SetPromptFunc(2, func(info promptInfo) string {
-		if info.LineNumber == 0 {
-			return s.UserPrompt.Render("▶ ")
-		}
-		return "  "
-	})
-	ti.SetStyles(promptInputStyles{
-		Text:        lipgloss.NewStyle().Foreground(p.Primary),
-		Placeholder: lipgloss.NewStyle().Foreground(p.Muted),
-		Selection: lipgloss.NewStyle().
-			Foreground(p.BgDeep).
-			Background(p.Info),
-	})
 	ti.Focus()
 
 	reg := slash.New()
@@ -264,7 +249,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	root, _ := os.Getwd()
 	home, _ := os.UserHomeDir()
 
-	return Model{
+	m := Model{
 		root:               root,
 		home:               home,
 		palette:            p,
@@ -285,6 +270,8 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 		promptBorderColor:  p.Accent,
 		promptColorToken:   "palette:accent",
 	}
+	m.applyInputStyles()
+	return m
 }
 
 func newConvID() string {
@@ -302,6 +289,25 @@ func (m Model) SeedAssistantMarkdown(doc string) Model {
 	return m
 }
 
+// applyInputStyles (re)applies the prompt marker + text/placeholder/selection
+// styles from the current theme. Called at startup and on every theme switch so
+// the live input line recolors like everything else.
+func (m *Model) applyInputStyles() {
+	s := m.styles
+	p := m.palette
+	m.input.SetPromptFunc(2, func(info promptInfo) string {
+		if info.LineNumber == 0 {
+			return s.UserPrompt.Render("▶ ")
+		}
+		return "  "
+	})
+	m.input.SetStyles(promptInputStyles{
+		Text:        lipgloss.NewStyle().Foreground(p.Primary),
+		Placeholder: lipgloss.NewStyle().Foreground(p.Muted),
+		Selection:   lipgloss.NewStyle().Foreground(p.BgDeep).Background(p.Info),
+	})
+}
+
 // applyTheme swaps the active theme and live-repaints: rebuild styles, push them
 // to the chat (which flushes its markdown cache), re-resolve the prompt border,
 // and refresh.
@@ -310,6 +316,7 @@ func (m *Model) applyTheme(t theme.Theme) {
 	m.palette = t.Palette
 	m.styles = theme.NewStyles(t.Palette)
 	m.chat.SetStyles(m.styles, m.palette)
+	m.applyInputStyles()
 	m.promptBorderColor = m.resolvePromptColor(m.promptColorToken)
 	if sp, ok := m.content.(*settingsPage); ok {
 		sp.SetStyles(m.styles, m.palette)

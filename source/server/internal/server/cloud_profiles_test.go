@@ -36,7 +36,7 @@ func newTestServer() (*Server, *fakeRouter) {
 			CloudProfiles: []config.CloudProfile{
 				{Name: "messages-one", Flavor: "messages", Model: "claude-3-5-haiku-20241022"},
 				{Name: "cc-one", Flavor: "chat_completions", Model: "gpt-4o"},
-				{Name: "unsup-one", Flavor: "responses", Model: "x"},
+				{Name: "unsup-one", Flavor: "bedrock", Model: "x"},
 			},
 		},
 	}
@@ -105,7 +105,7 @@ func TestSetActiveCloudProfileUnsupportedFlavorGoesAbsent(t *testing.T) {
 		t.Fatalf("SetActiveCloudProfile: %v", err)
 	}
 	if resp.Ok {
-		t.Error("want Ok=false for unsupported flavor responses")
+		t.Error("want Ok=false for unsupported flavor bedrock")
 	}
 	if s.cloudLLMProvider != nil {
 		t.Error("cloudLLMProvider should be nil (cleared) on build failure")

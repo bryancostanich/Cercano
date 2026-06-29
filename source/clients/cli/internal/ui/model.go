@@ -71,6 +71,8 @@ type Model struct {
 
 	palette theme.Palette
 	styles  theme.Styles
+	theme   theme.Theme
+	themes  *theme.Registry
 
 	agent  *agentclient.Client
 	convID string
@@ -197,6 +199,7 @@ const armedInputPlaceholder = "(press ^C again to quit, or type a message)"
 func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	p := theme.Cracker()
 	s := theme.NewStyles(p)
+	themes := theme.NewRegistry(theme.BuiltinThemes())
 
 	ti := newPromptInput()
 	ti.Placeholder = defaultInputPlaceholder
@@ -256,6 +259,8 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 		home:               home,
 		palette:            p,
 		styles:             s,
+		theme:              theme.Theme{Name: "cracker", Palette: p},
+		themes:             themes,
 		chat:               newChatView(s, p, root, home, 80, 10),
 		agent:              ag,
 		convID:             initialConvID,
@@ -285,6 +290,18 @@ func (m Model) SeedAssistantMarkdown(doc string) Model {
 	m.chat.AppendEntry(&Entry{Role: RoleAssistant, Content: doc})
 	m.splashShown = false
 	return m
+}
+
+// applyTheme swaps the active theme and live-repaints: rebuild styles, push them
+// to the chat (which flushes its markdown cache), re-resolve the prompt border,
+// and refresh.
+func (m *Model) applyTheme(t theme.Theme) {
+	m.theme = t
+	m.palette = t.Palette
+	m.styles = theme.NewStyles(t.Palette)
+	m.chat.SetStyles(m.styles, m.palette)
+	m.promptBorderColor = m.resolvePromptColor(m.promptColorToken)
+	m.refreshViewport()
 }
 
 // Init is called by Bubble Tea once at startup.

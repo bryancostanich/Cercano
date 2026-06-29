@@ -87,6 +87,16 @@ func newChatView(styles theme.Styles, palette theme.Palette, root, home string, 
 	}
 }
 
+// SetStyles swaps the chat's styles/palette and rebuilds. The markdown renderer
+// is replaced wholesale so its per-width glamour cache is flushed and committed
+// entries re-render in the new theme.
+func (c *chatView) SetStyles(s theme.Styles, p theme.Palette) {
+	c.styles = s
+	c.palette = p
+	c.md = render.NewMarkdown(theme.MarkdownStyle(p))
+	c.rebuild()
+}
+
 // ── entry ownership ────────────────────────────────────────────────────────
 
 // Entries returns the slice of scrollback entries (read-only; callers must not

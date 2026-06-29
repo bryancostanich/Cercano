@@ -52,23 +52,30 @@ func (sp *settingsPage) buildCloudSection() form.Section {
 	return form.Section{Title: "Cloud Providers", Fields: fields}
 }
 
-// cloudDetailFields are the editor fields shown beneath the selected row.
+// cloudDetailIndent prefixes detail-field labels so the editor reads as a set of
+// sub-settings nested under the selected provider row, rather than aligning flush
+// with the sibling provider rows below it.
+const cloudDetailIndent = "  "
+
+// cloudDetailFields are the editor fields shown beneath the selected row. Their
+// labels are indented (cloudDetailIndent) to signal they belong to the row above.
 func (sp *settingsPage) cloudDetailFields(r cloudRow) []form.Field {
 	d := sp.cloudDraft
+	il := func(s string) string { return cloudDetailIndent + s }
 	var out []form.Field
 	if sp.cloudDraftNew {
-		out = append(out, form.NewText("cloud-name", "name", d.Name, "profile name"))
+		out = append(out, form.NewText("cloud-name", il("name"), d.Name, "profile name"))
 	} else {
-		out = append(out, form.NewReadOnly("cloud-name", "name", d.Name, ""))
+		out = append(out, form.NewReadOnly("cloud-name", il("name"), d.Name, ""))
 	}
 	// flavor/backend: editable only for the custom "other" row; read-only otherwise.
 	if r.ID == "other" {
 		out = append(out,
-			form.NewSelect("cloud-flavor", "flavor", []form.Option{
+			form.NewSelect("cloud-flavor", il("flavor"), []form.Option{
 				{Label: "chat_completions", Value: "chat_completions"},
 				{Label: "messages", Value: "messages"},
 			}, d.Flavor),
-			form.NewSelect("cloud-backend", "backend", []form.Option{
+			form.NewSelect("cloud-backend", il("backend"), []form.Option{
 				{Label: "default", Value: ""},
 				{Label: "openai", Value: "openai"},
 				{Label: "gemini", Value: "gemini"},
@@ -76,24 +83,24 @@ func (sp *settingsPage) cloudDetailFields(r cloudRow) []form.Field {
 			}, d.Backend),
 		)
 	} else {
-		out = append(out, form.NewReadOnly("cloud-flavor", "flavor", d.Flavor, ""))
+		out = append(out, form.NewReadOnly("cloud-flavor", il("flavor"), d.Flavor, ""))
 		if d.Flavor == "chat_completions" {
 			be := d.Backend
 			if be == "" {
 				be = "default"
 			}
-			out = append(out, form.NewReadOnly("cloud-backend", "backend", be, ""))
+			out = append(out, form.NewReadOnly("cloud-backend", il("backend"), be, ""))
 		}
 	}
 	out = append(out,
-		form.NewText("cloud-base-url", "base-url", d.BaseURL, "https://…"),
-		form.NewText("cloud-model", "model", d.Model, "model id"),
-		form.NewMasked("cloud-key", "api-key", sp.draftHasKey(r)),
-		form.NewButton("cloud-save", "save", true),
-		form.NewButton("cloud-activate", "activate", !r.ComingSoon),
+		form.NewText("cloud-base-url", il("base-url"), d.BaseURL, "https://…"),
+		form.NewText("cloud-model", il("model"), d.Model, "model id"),
+		form.NewMasked("cloud-key", il("api-key"), sp.draftHasKey(r)),
+		form.NewButton("cloud-save", il("save"), true),
+		form.NewButton("cloud-activate", il("activate"), !r.ComingSoon),
 	)
 	if !sp.cloudDraftNew {
-		out = append(out, form.NewButton("cloud-delete", "delete", true))
+		out = append(out, form.NewButton("cloud-delete", il("delete"), true))
 	}
 	return out
 }

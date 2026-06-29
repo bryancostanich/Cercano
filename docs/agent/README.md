@@ -66,6 +66,7 @@ Switch with `/strict`, `/permissive`, `/bypass`, or `/mode <name>`. Persists to 
 | `/color <name|hex>` | Change the prompt border accent color |
 | `/config` | Open the settings page (or `/config <key> <value>` to set one value directly; `/config show` to print current config) |
 | `/s` `/settings` | Open the settings page (sectioned: local model, cloud, routing, permissions, UI/theme) |
+| `/theme` | Open settings to switch/edit the color theme |
 | `/cloud` | Cloud provider settings shortcut |
 | `/context` | Inspect the current context window usage |
 | `/mcp` | List/add/remove/restart hosted MCP servers |

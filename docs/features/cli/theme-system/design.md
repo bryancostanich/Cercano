@@ -131,7 +131,7 @@ After any apply/save/select the page rebuilds its form so swatches, values, edit
 
 ## Status
 
-Design approved (shape). Spec under review.
+Implemented.
 
 ## Open Questions / Notes
 

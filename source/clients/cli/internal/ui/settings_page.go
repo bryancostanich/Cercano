@@ -73,16 +73,22 @@ func (sp *settingsPage) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	return cmd, closed
 }
 
+// scrollFocusMargin is how many rows of breathing room to keep above/below the
+// focused field when scroll-following. clampScroll still bounds the offset to
+// the real content, so this never pads the page with trailing whitespace — at
+// the very top or bottom the margin simply collapses.
+const scrollFocusMargin = 2
+
 // scrollToFocus moves the scroll offset so the focused field stays within the
-// visible viewport after keyboard navigation.
+// visible viewport (with a small margin) after keyboard navigation.
 func (sp *settingsPage) scrollToFocus() {
 	sp.form.Lines(sp.width, sp.palette, sp.styles) // refresh focusedLine
 	fl := sp.form.FocusedLine()
 	vh := sp.viewportHeight()
-	if fl < sp.offset {
-		sp.offset = fl
-	} else if fl >= sp.offset+vh {
-		sp.offset = fl - vh + 1
+	if fl < sp.offset+scrollFocusMargin {
+		sp.offset = fl - scrollFocusMargin
+	} else if fl >= sp.offset+vh-scrollFocusMargin {
+		sp.offset = fl - vh + 1 + scrollFocusMargin
 	}
 	sp.clampScroll()
 }

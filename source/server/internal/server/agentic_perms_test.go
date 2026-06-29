@@ -1,6 +1,9 @@
 package server
 
 import (
+	"bytes"
+	"log"
+	"strings"
 	"testing"
 
 	"cercano/source/server/internal/agent"
@@ -64,6 +67,33 @@ func TestGrantedRegistry_Bypass(t *testing.T) {
 	}
 	if !hasToolNamed(reg, "w_write") {
 		t.Error("bypass: expected w_write to be present")
+	}
+}
+
+// TestGrantedRegistry_LogsUnknownToolNames verifies that requested tool names
+// matching no registered tool are surfaced (no silent caps). Uses bypass mode
+// so the W/X-drop log can't be the source of the asserted output.
+func TestGrantedRegistry_LogsUnknownToolNames(t *testing.T) {
+	srv := buildPermsServer(t)
+
+	var buf bytes.Buffer
+	prevOut := log.Writer()
+	prevFlags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	defer func() {
+		log.SetOutput(prevOut)
+		log.SetFlags(prevFlags)
+	}()
+
+	srv.grantedRegistry([]string{"r_read", "bogus_tool"}, agent.ModeBypass)
+
+	out := buf.String()
+	if !strings.Contains(out, "bogus_tool") {
+		t.Fatalf("expected unknown tool name to be logged, got: %q", out)
+	}
+	if strings.Contains(out, "r_read") {
+		t.Errorf("known tool r_read should not be reported as unknown: %q", out)
 	}
 }
 

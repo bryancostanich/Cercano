@@ -203,35 +203,49 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 	return strings.Join(body, "\n")
 }
 
+// groupRenderOpts controls renderToolGroup's behavior. The zero value renders
+// a collapsed multi-entry group with no focus.
+type groupRenderOpts struct {
+	// Expanded forces per-entry rendering even when len(entries) > 1: each
+	// entry shows as its own per-call line (respecting that entry's Folded
+	// state), instead of being folded into the rolling-consumption summary.
+	Expanded bool
+	// Focused draws the accent-colored ▶ on the summary line's gutter when
+	// the group is collapsed (a sibling of renderToolEntry's focused gutter).
+	Focused bool
+	// FocusedIdx is the index within entries of the focused entry, used when
+	// rendering per-entry (single-entry "group" or Expanded). -1 = no focus.
+	FocusedIdx int
+}
+
 // renderToolGroup renders a contiguous run of ToolEntries as a "rolling
-// consumption" group. Completed entries are summarized into a single line at
-// the top; the in-progress entry (at most one — the model only fires one tool
-// at a time today) renders standalone below the summary. The whole block
-// counts as one entry in the scrollback's vertical rhythm.
+// consumption" group, or as per-entry per-call lines when opts.Expanded (or
+// when entries is a single-entry run, since folding a single entry compresses
+// nothing).
 //
-// Layout examples:
+// Layout examples (collapsed multi-entry):
 //
-//	1 completed, none in progress:
-//	  ▸ 1 tool call (Read)                                          8ms ✓
-//
-//	3 completed, 1 in progress:
+//	3 completed, 0 in progress:
 //	  ▸ 3 tool calls (2 Read, Edit)                                23ms ✓
+//
+//	2 completed, 1 in progress:
+//	  ▸ 2 tool calls (2 Read)                                      12ms ✓
 //	  ▸ Editing  internal/server/server.go                         …
 //
 //	0 completed, 1 in progress:
 //	  ▸ Reading  internal/meridian/manager.go                      …
 //
-// width is the same column budget renderToolEntry uses. styles + md are
-// passed through to the per-call renderer for the active entry.
-func renderToolGroup(entries []ToolEntry, width int, styles theme.Styles, md *render.Markdown) string {
-	// Single-entry runs render directly — no summary, full per-entry detail.
-	// Rolling-consumption folding only adds value when there's a meaningful
-	// "many" to summarise; a "1 tool call" summary just hides the args and
-	// result blurb without compressing anything.
-	if len(entries) == 1 {
-		e := entries[0]
-		e.Folded = true
-		return renderToolEntry(e, width, false, styles, md)
+// width is the same column budget renderToolEntry uses.
+func renderToolGroup(entries []ToolEntry, width int, styles theme.Styles, md *render.Markdown, opts groupRenderOpts) string {
+	// Per-entry path: a single-entry "group" (folding compresses nothing) or
+	// a user-expanded multi-entry group. Each entry renders as its own line,
+	// respecting its own Folded state so Enter can drill into args+result.
+	if len(entries) == 1 || opts.Expanded {
+		lines := make([]string, 0, len(entries))
+		for i, e := range entries {
+			lines = append(lines, renderToolEntry(e, width, i == opts.FocusedIdx, styles, md))
+		}
+		return strings.Join(lines, "\n")
 	}
 	var completed []ToolEntry
 	var active []ToolEntry
@@ -244,11 +258,11 @@ func renderToolGroup(entries []ToolEntry, width int, styles theme.Styles, md *re
 	}
 	var lines []string
 	if len(completed) > 0 {
-		lines = append(lines, renderGroupSummary(completed, width, styles))
+		lines = append(lines, renderGroupSummary(completed, width, styles, opts.Focused))
 	}
 	for _, e := range active {
-		// In-progress entries always render expanded — they are the live row.
-		// focused=false; group focus is Phase C.
+		// In-progress entries always render folded — they are the live row.
+		// No per-entry focus in collapsed view; focus belongs to the group.
 		e.Folded = true
 		lines = append(lines, renderToolEntry(e, width, false, styles, md))
 	}
@@ -272,7 +286,7 @@ func renderToolGroup(entries []ToolEntry, width int, styles theme.Styles, md *re
 //
 // width drives right-alignment of the timing column; an over-budget summary
 // falls back to inline rendering on a single line.
-func renderGroupSummary(completed []ToolEntry, width int, styles theme.Styles) string {
+func renderGroupSummary(completed []ToolEntry, width int, styles theme.Styles, focused bool) string {
 	if len(completed) == 0 {
 		return ""
 	}
@@ -316,8 +330,13 @@ func renderGroupSummary(completed []ToolEntry, width int, styles theme.Styles) s
 		glyphStyle = styles.ToolError
 	}
 	// 2-space gutter matches renderToolEntry's unfocused gutter, so summary
-	// and per-call lines share the same left margin.
+	// and per-call lines share the same left margin. When the group is
+	// focused (keyboard nav landed in it), swap for the accent ▶ marker —
+	// same scheme renderToolEntry uses for per-entry focus.
 	gutter := "  "
+	if focused {
+		gutter = styles.ToolFocus.Render("▶ ")
+	}
 	left := gutter + "▸ " + label + toolEntryFaint.Render(breakdown)
 	timing := formatDur(total)
 	rightPlain := timing + " " + glyph

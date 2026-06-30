@@ -46,6 +46,11 @@ type chatView struct {
 	vp             viewport.Model
 	plainLines     []string
 	focusedToolIdx int
+	// groupExpanded tracks which collapsed multi-entry tool-call groups have
+	// been expanded by Enter on a focused group. Key is the entries-slice
+	// index of the FIRST tool entry in the group's contiguous run; stable
+	// for the session since entries are append-only.
+	groupExpanded map[int]bool
 
 	turn              turnStatus
 	selection         textSelection
@@ -86,6 +91,7 @@ func newChatView(styles theme.Styles, palette theme.Palette, root, home string, 
 		md:             render.NewMarkdown(theme.MarkdownStyle(palette)),
 		vp:             viewport.New(viewport.WithWidth(vpWidth), viewport.WithHeight(vpHeight)),
 		focusedToolIdx: -1,
+		groupExpanded:  map[int]bool{},
 	}
 }
 
@@ -447,15 +453,52 @@ func (c *chatView) NavNext() {
 	}
 }
 
-// ToggleFocusedFold toggles the Folded state of the currently focused tool
-// entry. No-op when not in nav mode or the focused entry has no tool data.
+// ToggleFocusedFold context-aware toggle for the focused tool entry:
+//   - in a collapsed multi-entry group → expand the group (each entry becomes
+//     its own per-call line)
+//   - in an expanded group or a single-entry "group" → toggle the focused
+//     entry's Folded (per-call line ⇄ full args+result body)
+//
+// No-op when not in nav mode or the focused entry has no tool data.
 func (c *chatView) ToggleFocusedFold() {
 	if c.focusedToolIdx < 0 || c.focusedToolIdx >= len(c.entries) {
 		return
 	}
-	if t := c.entries[c.focusedToolIdx].Tool; t != nil {
-		t.Folded = !t.Folded
+	t := c.entries[c.focusedToolIdx].Tool
+	if t == nil {
+		return
 	}
+	start, end := c.focusedGroupRange()
+	if start < 0 {
+		return
+	}
+	isMulti := end > start
+	if isMulti && !c.groupExpanded[start] {
+		c.groupExpanded[start] = true
+		return
+	}
+	t.Folded = !t.Folded
+}
+
+// focusedGroupRange returns the [start, end] inclusive entries-index range of
+// the contiguous tool run containing the focused tool entry. Returns (-1,-1)
+// when not in tool-nav mode or the focused entry is not a tool entry.
+func (c *chatView) focusedGroupRange() (int, int) {
+	if c.focusedToolIdx < 0 || c.focusedToolIdx >= len(c.entries) {
+		return -1, -1
+	}
+	if c.entries[c.focusedToolIdx].Tool == nil {
+		return -1, -1
+	}
+	start := c.focusedToolIdx
+	for start > 0 && c.entries[start-1].Tool != nil {
+		start--
+	}
+	end := c.focusedToolIdx
+	for end+1 < len(c.entries) && c.entries[end+1].Tool != nil {
+		end++
+	}
+	return start, end
 }
 
 // SetTurnStatus updates the live turn telemetry used while a streaming turn is
@@ -540,7 +583,7 @@ func (c *chatView) SetEntries(entries []*Entry) {
 			for j < len(entries) && entries[j].Tool != nil {
 				j++
 			}
-			b.WriteString(c.renderToolGroupBlock(entries[i:j]))
+			b.WriteString(c.renderToolGroupBlock(entries[i:j], i))
 			i = j
 		} else {
 			b.WriteString(c.renderEntry(entries[i], i))
@@ -559,7 +602,11 @@ func (c *chatView) SetEntries(entries []*Entry) {
 // renderToolGroupBlock turns a contiguous slice of Tool-bearing entries into
 // the indented group block used by SetEntries. Shares the left-margin
 // indentation with renderEntry so tool blocks line up with prose.
-func (c *chatView) renderToolGroupBlock(run []*Entry) string {
+//
+// startIdx is the index of run[0] in the parent entries slice; used to look up
+// per-group state (groupExpanded) and to translate the chatView-global focus
+// index into a slice-local one for the renderer.
+func (c *chatView) renderToolGroupBlock(run []*Entry, startIdx int) string {
 	wrapW := c.vp.Width()
 	if wrapW < 10 {
 		wrapW = 10
@@ -569,12 +616,19 @@ func (c *chatView) renderToolGroupBlock(run []*Entry) string {
 		textW = 8
 	}
 	pad := strings.Repeat(" ", entryIndent)
-	// Flatten the pointers into ToolEntry values for the renderer.
 	tools := make([]ToolEntry, 0, len(run))
 	for _, e := range run {
 		tools = append(tools, *e.Tool)
 	}
-	return indentBlock(pad, renderToolGroup(tools, textW, c.styles, c.md))
+	opts := groupRenderOpts{
+		Expanded:   c.groupExpanded[startIdx],
+		FocusedIdx: -1,
+	}
+	if c.focusedToolIdx >= startIdx && c.focusedToolIdx < startIdx+len(run) {
+		opts.Focused = true
+		opts.FocusedIdx = c.focusedToolIdx - startIdx
+	}
+	return indentBlock(pad, renderToolGroup(tools, textW, c.styles, c.md, opts))
 }
 
 // View renders the viewport with a one-column scrollbar, applying selection

@@ -219,3 +219,28 @@ func TestGitLandRiskyVerdictStops(t *testing.T) {
 		t.Fatal("must NOT finalize to trunk when review flags risk")
 	}
 }
+
+// TestGitLandSafeVerdictLands: a SAFE review verdict must allow the land to finalize —
+// main must contain feature afterward.
+func TestGitLandSafeVerdictLands(t *testing.T) {
+	dir := landConflictRepo(t, "trunk: main\ntest_command: \"true\"\n")
+	if err := os.WriteFile(filepath.Join(dir, "shared.txt"), []byte("resolved"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := capabilities.Services{
+		Dispatch: func(_ context.Context, spec dispatch.Spec) (dispatch.Result, error) {
+			return dispatch.Result{Text: "VERDICT: SAFE\nREASONING: trivial"}, nil
+		},
+	}
+	args, _ := json.Marshal(map[string]any{"feature": "feature", "continue": true, "cwd": dir})
+	res, err := GitLand().Execute(context.Background(), &capabilities.Call{Args: args, WorkDir: dir, Svc: svc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "ready to push") {
+		t.Fatalf("expected ready-to-push after safe verdict, got %q", res.Text)
+	}
+	if !mainContainsFeature(dir) {
+		t.Fatal("feature must be ancestor of main after safe verdict land")
+	}
+}

@@ -23,6 +23,29 @@ func TestUsageEventSinkMapsFields(t *testing.T) {
 	}
 }
 
+func TestUsageEventSinkMapsSavingsFields(t *testing.T) {
+	var got *telemetry.Event
+	sink := UsageEventSink(func(e *telemetry.Event) { got = e })
+	sink(usage.Usage{
+		Source:               "coproc:summarize",
+		Model:                "local-q",
+		IsCloud:              false,
+		InputTokens:          50,
+		OutputTokens:         10,
+		ContentTokensAvoided: 2000,
+		TokenSaving:          true,
+	})
+	if got == nil {
+		t.Fatal("no event emitted")
+	}
+	if got.ContentTokensAvoided != 2000 {
+		t.Fatalf("ContentTokensAvoided want 2000, got %d", got.ContentTokensAvoided)
+	}
+	if !got.TokenSaving {
+		t.Fatal("TokenSaving want true, got false")
+	}
+}
+
 func TestUsageEventSinkNilEmitNoPanic(t *testing.T) {
 	UsageEventSink(nil)(usage.Usage{Source: "x"}) // must not panic
 }

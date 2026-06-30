@@ -22,6 +22,8 @@ func UsageEventSink(emit func(*telemetry.Event)) func(usage.Usage) {
 			InputTokens:  u.InputTokens,
 			OutputTokens: u.OutputTokens,
 		}
+		e.ContentTokensAvoided = u.ContentTokensAvoided
+		e.TokenSaving = u.TokenSaving
 		// Mirror emitEvent convention: for cloud calls, populate the cloud
 		// identification fields so telemetry can distinguish tiers.
 		if u.IsCloud {

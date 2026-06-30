@@ -188,3 +188,52 @@ func (r *Repo) Finalize(ctx context.Context, feature, trunk string) error {
 	}
 	return nil
 }
+
+// ResolutionSignals holds deterministic risk signals computed from a resolved
+// conflict file set and repo config.
+type ResolutionSignals struct {
+	Files         []string
+	HandEdited    int
+	SensitiveHits []string
+	Diff          string
+}
+
+func matchesAny(globs []string, path string) bool {
+	for _, g := range globs {
+		if ok, _ := filepath.Match(g, path); ok {
+			return true
+		}
+		// also match against the basename so "*.pb.go" matches "api/x.pb.go"
+		if ok, _ := filepath.Match(g, filepath.Base(path)); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolutionSignalsFor computes deterministic risk signals from the conflicted
+// file set and config. Generated files (matched by a Regen glob) are not counted
+// as hand-edited. Pure: no model, no mutation.
+func (r *Repo) ResolutionSignalsFor(ctx context.Context, files []string, cfg Config) ResolutionSignals {
+	sig := ResolutionSignals{Files: files}
+	var regenGlobs []string
+	for g := range cfg.Regen {
+		regenGlobs = append(regenGlobs, g)
+	}
+	for _, f := range files {
+		if !matchesAny(regenGlobs, f) {
+			sig.HandEdited++
+		}
+		if matchesAny(cfg.SensitivePaths, f) {
+			sig.SensitiveHits = append(sig.SensitiveHits, f)
+		}
+	}
+	const cap = 16 * 1024
+	if d, err := r.run(ctx, "diff", "HEAD"); err == nil {
+		if len(d) > cap {
+			d = d[:cap] + "\n… (diff truncated)"
+		}
+		sig.Diff = d
+	}
+	return sig
+}

@@ -33,7 +33,8 @@ type Role int
 const (
 	RoleUser Role = iota
 	RoleAssistant
-	RoleSystem // /help output, errors, progress notes
+	RoleSystem   // /help output, errors, progress notes
+	RoleDivider  // full-width horizontal rule with a centered label, used to mark the freeze boundary on resume
 )
 
 // Entry is one item in the scrollback. Stored raw; re-wrapped on every render.
@@ -1891,12 +1892,22 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 	m.chat.ExitToolNav()
 	m.splashShown = false
 	m.chat.SetEntriesSlice(resumeEntries(turns))
-	m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: fmt.Sprintf("⟲ resumed %d turn(s)", len(turns))})
 	// Restore the prior session's living recap into the footer line (renderRecap).
 	// Don't also push it into scrollback — that showed the recap twice on resume.
+	hasRecap := false
 	if info, err := m.agent.GetConversation(ctx, conversationID); err == nil && info.Recap != "" {
 		m.recap = info.Recap
+		hasRecap = true
 	}
+	// Divider message reflects the actual compaction state: when a recap
+	// exists, the resumed turns above are in the model's recap (summarized);
+	// when no recap, the model still has the full text but the divider marks
+	// the boundary between resumed and live so the user can tell what's new.
+	label := fmt.Sprintf("⟲ resumed %d turn(s)", len(turns))
+	if hasRecap {
+		label = fmt.Sprintf("⟲ %d prior turn(s) summarized into recap · model sees recap above", len(turns))
+	}
+	m.chat.AppendEntry(&Entry{Role: RoleDivider, Content: label})
 	m.relayout()
 	return m, fetchContextUsage(m.agent, m.convID)
 }

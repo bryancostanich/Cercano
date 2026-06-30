@@ -742,8 +742,33 @@ func (c *chatView) renderEntry(e *Entry, idx int) string {
 		styled := c.styles.Muted.Render(e.Content)
 		wrapped := lipgloss.NewStyle().Width(textW).Render(styled)
 		return indentBlock(pad, wrapped)
+
+	case RoleDivider:
+		return indentBlock(pad, renderDivider(e.Content, textW, c.styles))
 	}
 	return e.Content
+}
+
+// renderDivider produces a full-width horizontal rule with a centered label,
+// used to mark the freeze boundary on resume: the message communicates that
+// scrollback above this line is part of the recap (the model sees a summary,
+// not the verbatim turns). Label is padded with `─` on both sides to fill
+// the available text width.
+func renderDivider(label string, width int, styles theme.Styles) string {
+	if width < 8 {
+		width = 8
+	}
+	rule := styles.BorderDim
+	// Leave 1 space gap between rule and label on each side: "─── label ───"
+	labelW := lipgloss.Width(label) + 2 // +2 for the surrounding spaces
+	if labelW >= width-2 {
+		// Label wider than budget; just render label muted with no rule.
+		return styles.Muted.Render(label)
+	}
+	side := (width - labelW) / 2
+	left := strings.Repeat("─", side)
+	right := strings.Repeat("─", width-side-labelW)
+	return rule.Render(left) + " " + styles.Muted.Render(label) + " " + rule.Render(right)
 }
 
 // renderAssistantMarkdown splits the assistant buffer into completed blocks plus

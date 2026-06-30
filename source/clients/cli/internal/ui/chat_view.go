@@ -53,6 +53,12 @@ type chatView struct {
 	groupExpanded map[int]bool
 
 	turn              turnStatus
+	// streaming mirrors the host's m.streaming so the chat can render a
+	// trailing "still working" indicator between the moment the assistant
+	// finishes writing/tool-running and the moment the next event arrives.
+	// Without this, multi-step turns go dark visually once the first phase
+	// completes.
+	streaming         bool
 	selection         textSelection
 	scrollbarDragging bool
 
@@ -521,6 +527,51 @@ func (c *chatView) SetTurnStatus(ts turnStatus) {
 	c.turn = ts
 }
 
+// SetStreaming mirrors the host's m.streaming so the chat can render a
+// trailing "still working" indicator while waiting between phases of a
+// multi-step turn. The model toggles this true on Submit and false on
+// chatDoneMsg / stream cancel.
+func (c *chatView) SetStreaming(s bool) {
+	c.streaming = s
+}
+
+// IsBetweenPhases reports whether the turn is streaming but no visible
+// activity (in-progress tool or streaming text entry) is currently the
+// focus of the agent's work. That's the gap a trailing animated line
+// covers — the model is processing tool results or queueing the next
+// step, and the user needs SOMETHING to read as "still alive".
+func (c *chatView) IsBetweenPhases() bool {
+	if !c.streaming {
+		return false
+	}
+	if c.hasInProgressTool() {
+		return false
+	}
+	if e := c.streamingTextEntry(); e != nil {
+		return false
+	}
+	// There has to be at least one entry — fresh-prompt placeholder ALSO
+	// counts as "between phases" but is already its own loud indicator,
+	// covered by streamingTextEntry above.
+	if len(c.entries) == 0 {
+		return false
+	}
+	return true
+}
+
+// renderTrailingActivity produces the "still working" line shown at the
+// tail of scrollback while IsBetweenPhases. Same loud amber-spinner +
+// lime-sweep treatment the pre-text placeholder uses — the conceptual
+// state is identical (model is thinking; no visible artifact yet).
+func (c *chatView) renderTrailingActivity(textW int) string {
+	activity := c.turn.activity
+	if activity == "" {
+		activity = "thinking"
+	}
+	line := turnStatusLine(activity, time.Since(c.turn.start), c.turn.tokOut, c.turn.model, c.turn.cloud)
+	return animateSpinnerGlyph() + " " + animateLimeSweep(line)
+}
+
 // ── scroll surface ─────────────────────────────────────────────────────────
 
 // Width returns the viewport width.
@@ -604,6 +655,24 @@ func (c *chatView) SetEntries(entries []*Entry) {
 			i++
 		}
 		first = false
+	}
+	// Trailing "still working" line: appears below the last entry while the
+	// turn is in flight but no entry is the visible focus of work. Matches
+	// the prose left-margin so it reads as another entry without being one.
+	if c.IsBetweenPhases() {
+		wrapW := c.vp.Width()
+		if wrapW < 10 {
+			wrapW = 10
+		}
+		textW := wrapW - entryIndent
+		if textW < 8 {
+			textW = 8
+		}
+		pad := strings.Repeat(" ", entryIndent)
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(indentBlock(pad, c.renderTrailingActivity(textW)))
 	}
 	content := b.String()
 	c.plainLines = plainLines(content)

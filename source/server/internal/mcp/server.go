@@ -10,12 +10,13 @@ import (
 
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/capabilities/mcpadapter"
-	"cercano/source/server/pkg/config"
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/document"
 	"cercano/source/server/internal/research"
 	"cercano/source/server/internal/telemetry"
+	"cercano/source/server/internal/tokens"
 	"cercano/source/server/internal/web"
+	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -214,14 +215,6 @@ func (s *Server) preCheckModelForResearch(ctx context.Context) string {
 		"For significantly better research results, pull a general-purpose model:\n\n"+
 		"  ollama pull qwen2.5\n\n"+
 		"Then re-run with: use_model: \"qwen2.5\"", currentModel)
-}
-
-// EstimateTokens approximates token count from a string using the ~4 chars/token heuristic.
-func EstimateTokens(content string) int {
-	if len(content) == 0 {
-		return 0
-	}
-	return len(content) / 4
 }
 
 // emitEvent is a helper that emits a telemetry event if a collector is configured.
@@ -544,7 +537,7 @@ func (s *Server) handleLocal(ctx context.Context, request *gomcp.CallToolRequest
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_local")
 	}
-	s.emitEvent("cercano_local", resp, startTime, true, &args.cloudTokenFields, EstimateTokens(input))
+	s.emitEvent("cercano_local", resp, startTime, true, &args.cloudTokenFields, tokens.Estimate(input))
 
 	output := resp.Output
 	if len(resp.FileChanges) > 0 {
@@ -715,7 +708,7 @@ func (s *Server) handleSummarize(ctx context.Context, request *gomcp.CallToolReq
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_summarize")
 	}
-	s.emitEvent("cercano_summarize", resp, startTime, true, &args.cloudTokenFields, EstimateTokens(content))
+	s.emitEvent("cercano_summarize", resp, startTime, true, &args.cloudTokenFields, tokens.Estimate(content))
 	notifyProgress(ctx, request, "Summarization complete", 1, 1)
 
 	result := &gomcp.CallToolResult{
@@ -761,7 +754,7 @@ func (s *Server) handleExtract(ctx context.Context, request *gomcp.CallToolReque
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_extract")
 	}
-	s.emitEvent("cercano_extract", resp, startTime, true, &args.cloudTokenFields, EstimateTokens(content))
+	s.emitEvent("cercano_extract", resp, startTime, true, &args.cloudTokenFields, tokens.Estimate(content))
 
 	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{
@@ -808,7 +801,7 @@ func (s *Server) handleClassify(ctx context.Context, request *gomcp.CallToolRequ
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_classify")
 	}
-	s.emitEvent("cercano_classify", resp, startTime, true, &args.cloudTokenFields, EstimateTokens(content))
+	s.emitEvent("cercano_classify", resp, startTime, true, &args.cloudTokenFields, tokens.Estimate(content))
 
 	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{
@@ -850,7 +843,7 @@ func (s *Server) handleExplain(ctx context.Context, request *gomcp.CallToolReque
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_explain")
 	}
-	s.emitEvent("cercano_explain", resp, startTime, true, &args.cloudTokenFields, EstimateTokens(content))
+	s.emitEvent("cercano_explain", resp, startTime, true, &args.cloudTokenFields, tokens.Estimate(content))
 
 	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{
@@ -1252,7 +1245,7 @@ func (s *Server) handleDocument(ctx context.Context, request *gomcp.CallToolRequ
 			continue
 		}
 		lastResp = resp
-		s.emitEvent("cercano_document", resp, startTime, true, &args.cloudTokenFields, EstimateTokens(sym.Body)*2)
+		s.emitEvent("cercano_document", resp, startTime, true, &args.cloudTokenFields, tokens.Estimate(sym.Body)*2)
 
 		comment := document.FormatAsGoDoc(resp.Output)
 		if comment == "" {
@@ -1432,4 +1425,3 @@ func (a *webFetchAdapter) FetchURL(url string) (*research.FetchResult, error) {
 		Content: result.Content,
 	}, nil
 }
-

@@ -663,6 +663,7 @@ message CloudProfileInfo {
   string model = 4;
   bool   has_key = 5; // a key exists in the keychain for this profile
   string backend = 6; // chat_completions quirks selector (openai|gemini|groq|…)
+  string route = 7;   // direct (default) | meridian | ccr (future) — selects adapter-specific auth/header conventions
 }
 message GetCloudProfilesRequest {}
 message GetCloudProfilesResponse {

@@ -64,5 +64,5 @@ func (classifyCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 	}
 
 	prompt := fmt.Sprintf("Classify the following text. %s\n\nRespond with exactly this format:\nCategory: <category>\nConfidence: <high/medium/low>\nReasoning: <one sentence explanation>\n\nText:\n%s", categoryInstruction, content)
-	return runCoproc(ctx, call, prompt)
+	return runCoproc(ctx, call, "classify", prompt, content)
 }

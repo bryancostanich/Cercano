@@ -252,12 +252,14 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	// the server, which wraps the selected provider in resolveMainProvider —
 	// keeping the server's stored providers raw so the dispatch engine can wrap
 	// them per-dispatch without double-counting.
+	// agentCollector is hoisted so the coproc engine sink can reference it below.
+	var agentCollector *telemetry.Collector
 	agentTelemetryPath := filepath.Join(filepath.Dir(config.DefaultPath()), "telemetry.db")
 	agentTelemetryStore, err := telemetry.NewSQLiteStore(agentTelemetryPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[WARN] Failed to initialize agent telemetry: %v\n", err)
 	} else {
-		agentCollector := telemetry.NewCollector(agentTelemetryStore, 256)
+		agentCollector = telemetry.NewCollector(agentTelemetryStore, 256)
 		agentCollector.SetSessionID(generateSessionID())
 		defer agentCollector.Close()
 		defer agentTelemetryStore.Close()
@@ -326,8 +328,6 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	// dispatch from the server's RAW (unwrapped) providers, so a runtime cloud
 	// swap (cloud-profile change → RebuildCloud) is honored and the engine's
 	// own per-dispatch usage.Wrap doesn't double-count.
-	// NB: SetUsageSink deliberately omitted here — coproc telemetry stays
-	// MCP-side to avoid double-counting; engine-side usage activated later.
 	coprocEngine := dispatch.NewEngine(
 		func() dispatch.Providers {
 			return dispatch.Providers{Cloud: srv.CloudLLMProvider(), Local: srv.LocalLLMProvider()}
@@ -341,6 +341,12 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		}
 		return cfg.LocalModel
 	})
+	// Activate the usage sink so capabilities that set RecordUsage=true (the coproc
+	// caps) emit one event per dispatch. processCoproc/research/document leave
+	// RecordUsage false, so they stay MCP-side — no double-counting.
+	if agentCollector != nil {
+		coprocEngine.SetUsageSink(server.UsageEventSink(agentCollector.Emit))
+	}
 	orchestrator.SetDispatchEngine(coprocEngine)
 	srv.SetDispatchEngine(coprocEngine)
 

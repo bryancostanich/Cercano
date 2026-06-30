@@ -37,7 +37,7 @@ func (c *Client) Capabilities() llm.Capabilities {
 		SupportsTools:         true,
 		SupportsParallelTools: false,
 		SupportsCaching:       false,
-		SupportsVision:        false,
+		SupportsVision:        true,
 	}
 }
 
@@ -47,7 +47,11 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 		msgs = append(msgs, api.Message{Role: "system", Content: req.System})
 	}
 	for _, m := range req.Messages {
-		msgs = append(msgs, messageToOllama(m))
+		om, err := messageToOllama(ctx, m)
+		if err != nil {
+			return ChatResponse{}, err
+		}
+		msgs = append(msgs, om)
 	}
 	opts := map[string]any{}
 	if req.MaxTokens > 0 {

@@ -38,7 +38,12 @@ func (c *Client) StreamChat(ctx context.Context, req ChatRequest) (llm.StreamRea
 		msgs = append(msgs, api.Message{Role: "system", Content: req.System})
 	}
 	for _, m := range req.Messages {
-		msgs = append(msgs, messageToOllama(m))
+		om, err := messageToOllama(ctx, m)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+		msgs = append(msgs, om)
 	}
 	freq := &api.ChatRequest{
 		Model:    req.Model,

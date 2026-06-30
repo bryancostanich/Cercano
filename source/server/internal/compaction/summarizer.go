@@ -28,6 +28,8 @@ func BuildSummaryPrompt(messages []llm.Message) string {
 				fmt.Fprintf(&b, "%s: [tool %s %s]\n", m.Role, blk.ToolName, string(blk.ToolInput))
 			case llm.BlockToolResult:
 				fmt.Fprintf(&b, "%s: [tool result] %s\n", m.Role, blk.Content)
+			case llm.BlockImage:
+				fmt.Fprintf(&b, "%s: [image]\n", m.Role)
 			}
 		}
 	}

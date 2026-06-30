@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestDefaults(t *testing.T) {
@@ -262,5 +264,47 @@ func TestDefaults_Retention(t *testing.T) {
 func TestDefaultsLocusMode(t *testing.T) {
 	if got := Defaults().LocusMode; got != "local_primary" {
 		t.Errorf("Defaults().LocusMode = %q; want local_primary", got)
+	}
+}
+
+func TestMigrateLegacyCloudToProfile(t *testing.T) {
+	// A config with only the legacy single-cloud fields set migrates to one
+	// "default" profile + active selection on Load. We exercise the helper
+	// directly to avoid file IO.
+	cfg := Config{CloudProvider: "anthropic", CloudModel: "claude-sonnet-4-6", CloudBaseURL: "http://x"}
+	migrateCloudProfiles(&cfg)
+	if len(cfg.CloudProfiles) != 1 || cfg.ActiveCloudProfile != "default" {
+		t.Fatalf("profiles=%+v active=%q", cfg.CloudProfiles, cfg.ActiveCloudProfile)
+	}
+	p := cfg.CloudProfiles[0]
+	if p.Name != "default" || p.Flavor != "messages" || p.Model != "claude-sonnet-4-6" || p.BaseURL != "http://x" {
+		t.Errorf("profile = %+v", p)
+	}
+}
+
+func TestMigrateNoLegacyNoProfiles(t *testing.T) {
+	cfg := Config{} // nothing set
+	migrateCloudProfiles(&cfg)
+	if len(cfg.CloudProfiles) != 0 || cfg.ActiveCloudProfile != "" {
+		t.Errorf("expected no migration, got %+v / %q", cfg.CloudProfiles, cfg.ActiveCloudProfile)
+	}
+}
+
+func TestMigrateIdempotent(t *testing.T) {
+	cfg := Config{CloudProvider: "anthropic", CloudProfiles: []CloudProfile{{Name: "x", Flavor: "messages"}}}
+	migrateCloudProfiles(&cfg)
+	if len(cfg.CloudProfiles) != 1 || cfg.CloudProfiles[0].Name != "x" {
+		t.Errorf("should not overwrite existing profiles: %+v", cfg.CloudProfiles)
+	}
+}
+
+func TestCloudProfileBackendYAML(t *testing.T) {
+	var p CloudProfile
+	y := "name: g\nflavor: chat_completions\nbackend: gemini\nbase_url: x\nmodel: m\n"
+	if err := yaml.Unmarshal([]byte(y), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Backend != "gemini" {
+		t.Errorf("backend=%q, want gemini", p.Backend)
 	}
 }

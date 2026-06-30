@@ -23,6 +23,7 @@ import (
 	"cercano/source/clients/cli/internal/render"
 	"cercano/source/clients/cli/internal/slash"
 	"cercano/source/clients/cli/internal/theme"
+	"cercano/source/clients/cli/internal/uiconfig"
 	"cercano/source/server/pkg/agentclient"
 )
 
@@ -71,6 +72,8 @@ type Model struct {
 
 	palette theme.Palette
 	styles  theme.Styles
+	theme   theme.Theme
+	themes  *theme.Registry
 
 	agent  *agentclient.Client
 	convID string
@@ -195,7 +198,16 @@ const armedInputPlaceholder = "(press ^C again to quit, or type a message)"
 // openHistoryOnStart=true makes the CLI open the /history picker as soon as
 // the terminal size is known (used by the `cercano -r` flag).
 func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
-	p := theme.Cracker()
+	themes := theme.NewRegistry(theme.BuiltinThemes())
+	for _, ct := range uiconfig.LoadCustomThemes() {
+		_ = themes.Add(ct) // skip collisions silently
+	}
+	activeName := uiconfig.LoadActiveTheme()
+	active, ok := themes.Get(activeName)
+	if !ok {
+		active, _ = themes.Get("cr4k3r_j4x")
+	}
+	p := active.Palette
 	s := theme.NewStyles(p)
 
 	ti := newPromptInput()
@@ -204,21 +216,6 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	// the cap the prompt scrolls internally.
 	ti.MinHeight = 1
 	ti.MaxHeight = maxInputLines
-	// Lime "▶ " on the first line; a 2-space hang indent on wrapped/extra lines
-	// so continuation text aligns under the first line's content.
-	ti.SetPromptFunc(2, func(info promptInfo) string {
-		if info.LineNumber == 0 {
-			return s.UserPrompt.Render("▶ ")
-		}
-		return "  "
-	})
-	ti.SetStyles(promptInputStyles{
-		Text:        lipgloss.NewStyle().Foreground(p.Primary),
-		Placeholder: lipgloss.NewStyle().Foreground(p.Muted),
-		Selection: lipgloss.NewStyle().
-			Foreground(p.BgDeep).
-			Background(p.Info),
-	})
 	ti.Focus()
 
 	reg := slash.New()
@@ -237,6 +234,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	slash.RegisterLocus(reg, ag)
 	slash.RegisterContextView(reg)
 	slash.RegisterSettings(reg)
+	slash.RegisterTheme(reg)
 
 	splash := banner.NewAnimModel(p, banner.Meta{
 		Tagline: "local-first ai coprocessor",
@@ -251,11 +249,13 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	root, _ := os.Getwd()
 	home, _ := os.UserHomeDir()
 
-	return Model{
+	m := Model{
 		root:               root,
 		home:               home,
 		palette:            p,
 		styles:             s,
+		theme:              active,
+		themes:             themes,
 		chat:               newChatView(s, p, root, home, 80, 10),
 		agent:              ag,
 		convID:             initialConvID,
@@ -270,6 +270,8 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 		promptBorderColor:  p.Accent,
 		promptColorToken:   "palette:accent",
 	}
+	m.applyInputStyles()
+	return m
 }
 
 func newConvID() string {
@@ -285,6 +287,41 @@ func (m Model) SeedAssistantMarkdown(doc string) Model {
 	m.chat.AppendEntry(&Entry{Role: RoleAssistant, Content: doc})
 	m.splashShown = false
 	return m
+}
+
+// applyInputStyles (re)applies the prompt marker + text/placeholder/selection
+// styles from the current theme. Called at startup and on every theme switch so
+// the live input line recolors like everything else.
+func (m *Model) applyInputStyles() {
+	s := m.styles
+	p := m.palette
+	m.input.SetPromptFunc(2, func(info promptInfo) string {
+		if info.LineNumber == 0 {
+			return s.UserPrompt.Render("▶ ")
+		}
+		return "  "
+	})
+	m.input.SetStyles(promptInputStyles{
+		Text:        lipgloss.NewStyle().Foreground(p.Primary),
+		Placeholder: lipgloss.NewStyle().Foreground(p.Muted),
+		Selection:   lipgloss.NewStyle().Foreground(p.BgDeep).Background(p.Info),
+	})
+}
+
+// applyTheme swaps the active theme and live-repaints: rebuild styles, push them
+// to the chat (which flushes its markdown cache), re-resolve the prompt border,
+// and refresh.
+func (m *Model) applyTheme(t theme.Theme) {
+	m.theme = t
+	m.palette = t.Palette
+	m.styles = theme.NewStyles(t.Palette)
+	m.chat.SetStyles(m.styles, m.palette)
+	m.applyInputStyles()
+	m.promptBorderColor = m.resolvePromptColor(m.promptColorToken)
+	if sp, ok := m.content.(*settingsPage); ok {
+		sp.SetStyles(m.styles, m.palette)
+	}
+	m.refreshViewport()
 }
 
 // Init is called by Bubble Tea once at startup.
@@ -916,6 +953,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, nil
 
+	case settingsThemeMsg:
+		m.applyTheme(msg.working)
+		if msg.persistName != "" {
+			_ = uiconfig.SaveActiveTheme(msg.persistName)
+		}
+		return m, nil
+
 	case permissionModeChangedMsg:
 		// Pushed by the agent (another client's /strict, or a hand-edit to
 		// permissions.yaml). Update the chip and re-arm the drain loop.
@@ -1159,7 +1203,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.chat.ExitToolNav()
 		m.refreshViewport()
 	case slash.ResultOpenSettings:
-		sp, cmd := newSettingsPage(m.agent, m.palette, m.styles, m.promptColorToken, m.width, m.height)
+		sp, cmd := newSettingsPage(m.agent, m.palette, m.styles, m.promptColorToken, m.width, m.height, m.themes, m.theme)
 		m.content = sp
 		return m, cmd
 	case slash.ResultOpenHistoryPicker:
@@ -1559,6 +1603,32 @@ func animateLimeSweep(text string) string {
 			Foreground(progressColorAt(col, sweepPos, tail)).
 			Render(string(r)))
 		col++
+	}
+	return b.String()
+}
+
+// shimmerBar renders n filled meter cells with the same lime→white sweep
+// animateLimeSweep uses, so the context meter visibly works during a
+// compaction pass instead of being replaced by a label. Wall-clock-driven
+// like the other animators; re-renders are pumped by the existing
+// progressAnimTick loop that already fires while m.compacting is true.
+func shimmerBar(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	const (
+		cycleMs = 1500
+		tail    = 4.0
+		padCols = 4.0
+	)
+	phaseMs := time.Now().UnixMilli() % int64(cycleMs)
+	progress := float64(phaseMs) / float64(cycleMs)
+	sweepPos := -padCols + progress*(float64(n)+2*padCols)
+	var b strings.Builder
+	for col := 0; col < n; col++ {
+		b.WriteString(lipgloss.NewStyle().
+			Foreground(progressColorAt(col, sweepPos, tail)).
+			Render("█"))
 	}
 	return b.String()
 }
@@ -2490,14 +2560,17 @@ func (m Model) renderContextMeter() string {
 	}
 	const cells = 20
 	fillN := int(pct * float64(cells))
-	bar := m.styles.MeterFill.Render(strings.Repeat("█", fillN)) +
-		m.styles.MeterEmpty.Render(strings.Repeat("░", cells-fillN))
-	// While a background compaction pass runs, the meter shows an animated
-	// "compacting…" sweep in place of the bar.
+	// During a compaction pass, the filled portion runs the same lime→white
+	// sweep as the "compacting…" label, so the meter visibly works instead of
+	// being replaced. The empty cells stay static — they represent headroom
+	// that compaction isn't touching.
+	var fillRendered string
 	if m.compacting {
-		return m.styles.Bright.Render("context") + "  " +
-			animateSpinnerGlyph() + " " + animateLimeSweep("compacting…")
+		fillRendered = shimmerBar(fillN)
+	} else {
+		fillRendered = m.styles.MeterFill.Render(strings.Repeat("█", fillN))
 	}
+	bar := fillRendered + m.styles.MeterEmpty.Render(strings.Repeat("░", cells-fillN))
 	pctStyle := m.styles.Muted
 	switch {
 	case pct >= 0.9:
@@ -2506,7 +2579,12 @@ func (m Model) renderContextMeter() string {
 		pctStyle = m.styles.Warn
 	}
 	badge := ""
-	if m.ctxRaw > used && used > 0 {
+	switch {
+	case m.compacting:
+		// Spinner + sweeping label sit where the savings badge normally
+		// lives, so the bar above keeps its full information density.
+		badge = m.styles.Muted.Render("  ·  ") + animateSpinnerGlyph() + " " + animateLimeSweep("compacting…")
+	case m.ctxRaw > used && used > 0:
 		saved := int(100 * (1 - float64(used)/float64(m.ctxRaw)))
 		badge = m.styles.Muted.Render(fmt.Sprintf("  ·  ▣ %d%%↓", saved))
 	}

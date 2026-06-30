@@ -1,5 +1,5 @@
 // Package theme defines the cercano-cli color palette and pre-built lipgloss
-// styles. The default theme is "cracker" — amber + lime on charcoal, evoking
+// styles. The default theme is "cr4k3r_j4x" — amber + lime on charcoal, evoking
 // 80s phosphor terminals and demoscene cracker intros.
 package theme
 
@@ -24,6 +24,13 @@ type Palette struct {
 	Success     color.Color // confirmations, build pass
 	Warn        color.Color // meter mid-range, advisory
 	Error       color.Color // failures, bypass indicator
+
+	// Content colors (scrollback + markdown prose).
+	BufferLink   color.Color // markdown links
+	BufferCode   color.Color // inline code / code-fence lang
+	BufferLime   color.Color // tool ✓, focus caret, echoed user ▶
+	BufferError  color.Color // tool ⚠
+	BufferUserBg color.Color // fill behind echoed user prompts
 }
 
 // Cracker palette hex codes — the single source of truth for both the lipgloss
@@ -63,6 +70,12 @@ func Cracker() Palette {
 		Success:   lipgloss.Color(hexSuccess),
 		Warn:      lipgloss.Color(hexWarn),
 		Error:     lipgloss.Color(hexError),
+
+		BufferLink:   lipgloss.Color(bufLinkHex),
+		BufferCode:   lipgloss.Color(bufCodeHex),
+		BufferLime:   lipgloss.Color(bufLimeHex),
+		BufferError:  lipgloss.Color(bufRedHex),
+		BufferUserBg: lipgloss.Color(bufUserBgHex),
 	}
 }
 
@@ -79,12 +92,3 @@ const (
 	bufUserBgHex = "#1F4163" // muted navy — fill behind echoed user prompts in scrollback
 )
 
-// Buffer-muted lipgloss colors derived from the hexes above. Exported so the
-// ui package can color scrollback content without reaching into chrome styles.
-var (
-	BufferLink  = lipgloss.Color(bufLinkHex)
-	BufferCode  = lipgloss.Color(bufCodeHex)
-	BufferLime  = lipgloss.Color(bufLimeHex)
-	BufferError = lipgloss.Color(bufRedHex)
-	BufferUserBg = lipgloss.Color(bufUserBgHex)
-)

@@ -61,7 +61,7 @@ func TestPrettyJSON(t *testing.T) {
 }
 
 func TestRenderToolBody(t *testing.T) {
-	md := render.NewMarkdown(theme.CrackerMarkdownStyle())
+	md := render.NewMarkdown(theme.MarkdownStyle(theme.Cracker()))
 	// JSON → fenced + indented (rendered text contains the indented key).
 	jsonLines := strings.Join(renderToolBody(`{"a":1,"b":2}`, "", md, 60), "\n")
 	if !strings.Contains(plain(jsonLines), `"a": 1`) {

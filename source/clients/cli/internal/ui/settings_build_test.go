@@ -22,15 +22,18 @@ func TestBuildSettingsSectionsCoversKeys(t *testing.T) {
 			keys[f.Key()] = true
 		}
 	}
-	for _, want := range []string{"Local Model", "Cloud", "Routing", "Permissions", "UI / Theme", "Server"} {
+	// "Cloud" section is removed; "Cloud Providers" is now built by buildCloudSection.
+	for _, want := range []string{"Local Model", "Routing", "Permissions", "Server"} {
 		if !titles[want] {
 			t.Errorf("missing section %q", want)
 		}
 	}
+	if titles["Cloud"] {
+		t.Errorf("legacy \"Cloud\" section should not exist in buildSettingsSections output")
+	}
 	for _, want := range []string{
 		"local-runtime", "local-model", "ollama-url", "embedding-model",
-		"cloud-provider", "cloud-model", "cloud-base-url", "cloud-api-key", "cloud-state",
-		"locus-mode", "permission-mode", "accent-color", "port",
+		"locus-mode", "permission-mode", "port",
 	} {
 		if !keys[want] {
 			t.Errorf("missing field %q", want)
@@ -41,9 +44,6 @@ func TestBuildSettingsSectionsCoversKeys(t *testing.T) {
 func TestClassifyCommit(t *testing.T) {
 	if a := classifyCommit("local-model", "qwen"); a.kind != commitConfig || a.update.LocalModel != "qwen" {
 		t.Fatalf("local-model -> %+v", a)
-	}
-	if a := classifyCommit("cloud-api-key", "sk-1"); a.kind != commitConfig || a.update.CloudAPIKey != "sk-1" {
-		t.Fatalf("cloud-api-key -> %+v", a)
 	}
 	if a := classifyCommit("locus-mode", "local_only"); a.kind != commitConfig || a.update.LocusMode != "local_only" {
 		t.Fatalf("locus-mode -> %+v", a)

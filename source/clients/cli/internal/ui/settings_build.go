@@ -19,7 +19,6 @@ func accentColorOptions() []form.Option {
 }
 
 func buildSettingsSections(cfg *agentclient.Config, mode, accentToken string) []form.Section {
-	apiSet := cfg.CloudAPIKeySet
 	return []form.Section{
 		{Title: "Local Model", Fields: []form.Field{
 			form.NewSelect("local-runtime", "local-runtime", []form.Option{
@@ -28,15 +27,6 @@ func buildSettingsSections(cfg *agentclient.Config, mode, accentToken string) []
 			form.NewText("local-model", "local-model", cfg.LocalModel, ""),
 			form.NewText("ollama-url", "ollama-url", cfg.OllamaURL, ""),
 			form.NewReadOnly("embedding-model", "embedding-model", cfg.EmbeddingModel, "(read-only)"),
-		}},
-		{Title: "Cloud", Fields: []form.Field{
-			form.NewSelect("cloud-provider", "cloud-provider", []form.Option{
-				{Label: "anthropic", Value: "anthropic"}, {Label: "google", Value: "google"},
-			}, cfg.CloudProvider),
-			form.NewText("cloud-model", "cloud-model", cfg.CloudModel, ""),
-			form.NewText("cloud-base-url", "cloud-base-url", cfg.CloudBaseURL, ""),
-			form.NewMasked("cloud-api-key", "cloud-api-key", apiSet),
-			form.NewReadOnly("cloud-state", "cloud-state", cfg.CloudState, "(read-only)"),
 		}},
 		{Title: "Routing", Fields: []form.Field{
 			form.NewSelect("locus-mode", "locus-mode", []form.Option{
@@ -52,9 +42,6 @@ func buildSettingsSections(cfg *agentclient.Config, mode, accentToken string) []
 				{Label: "permissive", Value: "permissive"},
 				{Label: "bypass", Value: "bypass"},
 			}, mode),
-		}},
-		{Title: "UI / Theme", Fields: []form.Field{
-			form.NewSelect("accent-color", "accent-color", accentColorOptions(), accentToken),
 		}},
 		{Title: "Server", Fields: []form.Field{
 			form.NewReadOnly("port", "port", cfg.Port, "(read-only)"),
@@ -87,14 +74,6 @@ func classifyCommit(key, value string) commitAction {
 		u.LocalModel = value
 	case "ollama-url":
 		u.OllamaURL = value
-	case "cloud-provider":
-		u.CloudProvider = value
-	case "cloud-model":
-		u.CloudModel = value
-	case "cloud-base-url":
-		u.CloudBaseURL = value
-	case "cloud-api-key":
-		u.CloudAPIKey = value
 	case "locus-mode":
 		u.LocusMode = value
 	case "permission-mode":

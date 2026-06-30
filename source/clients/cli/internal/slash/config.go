@@ -68,15 +68,48 @@ func RegisterConfig(r *Registry, c *agentclient.Client) {
 
 	r.Register(Command{
 		Name: "cloud",
-		Help: "Show current cloud config (provider, model, baseURL, key state, last-turn cloud status).",
+		Help: "Manage cloud profiles. Usage: /cloud [list] | /cloud use <name> | /cloud key <name> <api-key>.",
 		Handler: func(args []string) Result {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			cfg, err := c.GetConfig(ctx)
-			if err != nil {
-				return Result{Kind: ResultText, Text: "cloud: " + err.Error()}
+
+			sub := ""
+			if len(args) > 0 {
+				sub = args[0]
 			}
-			return Result{Kind: ResultText, Text: formatCloud(cfg)}
+
+			switch sub {
+			case "", "list":
+				profiles, active, err := c.GetCloudProfiles(ctx)
+				if err != nil {
+					return Result{Kind: ResultText, Text: "cloud list: " + err.Error()}
+				}
+				return Result{Kind: ResultText, Text: formatCloudProfiles(profiles, active)}
+
+			case "use":
+				if len(args) < 2 {
+					return Result{Kind: ResultText, Text: "usage: /cloud use <name>"}
+				}
+				name := args[1]
+				if err := c.SetActiveCloudProfile(ctx, name); err != nil {
+					return Result{Kind: ResultText, Text: "cloud use: " + err.Error()}
+				}
+				return Result{Kind: ResultText, Text: "active profile set to " + name}
+
+			case "key":
+				if len(args) < 3 {
+					return Result{Kind: ResultText, Text: "usage: /cloud key <name> <api-key>"}
+				}
+				name := args[1]
+				key := strings.Join(args[2:], " ")
+				if err := c.SetCloudProfileKey(ctx, name, key); err != nil {
+					return Result{Kind: ResultText, Text: "cloud key: " + err.Error()}
+				}
+				return Result{Kind: ResultText, Text: "key stored for profile " + name + " (" + maskKey(key) + ")"}
+
+			default:
+				return Result{Kind: ResultText, Text: "unknown subcommand " + sub + ". Usage: /cloud [list] | /cloud use <name> | /cloud key <name> <api-key>"}
+			}
 		},
 	})
 }
@@ -111,25 +144,58 @@ func formatConfig(cfg *agentclient.Config) string {
 	return b.String()
 }
 
-func formatCloud(cfg *agentclient.Config) string {
-	if cfg.CloudProvider == "" {
-		return "cloud: not configured. Set cloud-provider, then cloud-base-url and/or cloud-api-key."
-	}
-	endpoint := "default endpoint"
-	if cfg.CloudBaseURL != "" {
-		endpoint = cfg.CloudBaseURL
-	}
-	auth := "no api key"
-	if cfg.CloudAPIKeySet {
-		auth = "api key set"
-	}
-	return fmt.Sprintf("cloud: %s / %s @ %s (%s)  ·  last-turn state: %s",
-		cfg.CloudProvider, orDash(cfg.CloudModel), endpoint, auth, cfg.CloudState)
-}
-
 func orDash(s string) string {
 	if s == "" {
 		return "—"
 	}
 	return s
+}
+
+// formatCloudProfiles renders a compact table of cloud profiles.
+// active is the currently selected profile name; an asterisk marks it.
+func formatCloudProfiles(profiles []agentclient.CloudProfileInfo, active string) string {
+	if len(profiles) == 0 {
+		return "cloud: no profiles configured"
+	}
+
+	// Column widths: name, flavor, model — compute from data.
+	wName, wFlavor, wModel := len("name"), len("flavor"), len("model")
+	for _, p := range profiles {
+		if n := len(p.Name); n > wName {
+			wName = n
+		}
+		if n := len(p.Flavor); n > wFlavor {
+			wFlavor = n
+		}
+		if n := len(p.Model); n > wModel {
+			wModel = n
+		}
+	}
+
+	var b strings.Builder
+	// Header.
+	b.WriteString(fmt.Sprintf("%-*s  %-*s  %-*s  active  key\n",
+		wName, "name", wFlavor, "flavor", wModel, "model"))
+	for _, p := range profiles {
+		activeMarker := " "
+		if p.Name == active {
+			activeMarker = "*"
+		}
+		keyMarker := "✗"
+		if p.HasKey {
+			keyMarker = "✓"
+		}
+		b.WriteString(fmt.Sprintf("%-*s  %-*s  %-*s  %-6s  %s\n",
+			wName, p.Name, wFlavor, p.Flavor, wModel, p.Model, activeMarker, keyMarker))
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// maskKey returns a masked representation of an API key safe to display.
+// Shows first 4 characters followed by ellipsis, or just "***" for short keys.
+func maskKey(key string) string {
+	if len(key) <= 4 {
+		return "***"
+	}
+	return key[:4] + "..."
 }

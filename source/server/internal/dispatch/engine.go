@@ -60,7 +60,7 @@ type Result struct {
 
 // Engine routes dispatch calls to the appropriate provider.
 type Engine struct {
-	providers     Providers
+	providersFn   func() Providers
 	modeFn        func() locus.Mode
 	ctxLoader     *projectctx.Loader
 	modelFor      func(isCloud bool) string
@@ -69,13 +69,17 @@ type Engine struct {
 }
 
 // NewEngine constructs an Engine. ctx may be nil (project context injection skipped).
-// IMPORTANT: pass RAW (unwrapped) providers here. Engine wraps each provider per-dispatch
-// via usage.Wrap to label usage by source; passing already-wrapped providers causes double-counting.
-func NewEngine(p Providers, modeFn func() locus.Mode, ctx *projectctx.Loader) *Engine {
+//
+// providersFn is called per dispatch to resolve the current candidate providers,
+// so a runtime cloud-provider swap (e.g. a cloud-profile change) is honored
+// without rebuilding the engine. IMPORTANT: it must return RAW (unwrapped)
+// providers — the engine wraps the selected provider per-dispatch via usage.Wrap
+// to label usage by source; returning already-wrapped providers double-counts.
+func NewEngine(providersFn func() Providers, modeFn func() locus.Mode, ctx *projectctx.Loader) *Engine {
 	return &Engine{
-		providers: p,
-		modeFn:    modeFn,
-		ctxLoader: ctx,
+		providersFn: providersFn,
+		modeFn:      modeFn,
+		ctxLoader:   ctx,
 	}
 }
 
@@ -92,8 +96,8 @@ func (e *Engine) SetModelFor(fn func(isCloud bool) string) {
 
 // Dispatch executes spec and returns a Result.
 func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
-	// 1. Select provider via locus.
-	sel, err := Select(e.modeFn(), spec.Role, e.providers)
+	// 1. Select provider via locus (providers resolved fresh each dispatch).
+	sel, err := Select(e.modeFn(), spec.Role, e.providersFn())
 	if err != nil {
 		return Result{}, err
 	}

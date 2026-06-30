@@ -64,14 +64,14 @@ type historyView struct {
 	md            *render.Markdown
 }
 
-func newHistoryMarkdown() *render.Markdown { return render.NewMarkdown(theme.CrackerMarkdownStyle()) }
+func newHistoryMarkdown(p theme.Palette) *render.Markdown { return render.NewMarkdown(theme.MarkdownStyle(p)) }
 
 // newHistoryView loads the conversation list synchronously (matching the old
 // picker + contextView) and returns the page. The turn drawer loads lazily.
-func newHistoryView(ag *agentclient.Client, _ theme.Palette, s theme.Styles, w, h int) (*historyView, tea.Cmd) {
+func newHistoryView(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h int) (*historyView, tea.Cmd) {
 	hv := &historyView{
 		styles: s, agent: ag,
-		width: w, height: h, cursor: 0, md: newHistoryMarkdown(),
+		width: w, height: h, cursor: 0, md: newHistoryMarkdown(p),
 	}
 	hv.rows = loadHistoryRows(ag)
 	return hv, nil

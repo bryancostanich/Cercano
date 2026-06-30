@@ -72,7 +72,7 @@ func TestCoprocDispatchFallbackNotice(t *testing.T) {
 // TestCoprocDispatchNoProviderError verifies a hard error when no provider available.
 func TestCoprocDispatchNoProviderError(t *testing.T) {
 	eng := dispatch.NewEngine(
-		dispatch.Providers{}, // both nil
+		func() dispatch.Providers { return dispatch.Providers{} }, // both nil
 		func() locus.Mode { return locus.LocalOnly },
 		nil,
 	)

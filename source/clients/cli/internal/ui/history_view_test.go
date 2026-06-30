@@ -37,11 +37,12 @@ func keyPress(s string) tea.KeyPressMsg {
 // newTestHistoryView builds a historyView from hand-made rows, bypassing the
 // agent (newHistoryView needs a live client; the pure render/nav logic does not).
 func newTestHistoryView(rows []histRow, w, h int) *historyView {
-	s := theme.NewStyles(theme.Cracker())
+	p := theme.Cracker()
+	s := theme.NewStyles(p)
 	return &historyView{
 		styles: s,
 		width: w, height: h, rows: rows, cursor: 0,
-		md: newHistoryMarkdown(),
+		md: newHistoryMarkdown(p),
 	}
 }
 

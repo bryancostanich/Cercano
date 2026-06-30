@@ -3,6 +3,9 @@ package ui
 import (
 	"strings"
 	"testing"
+
+	"cercano/source/clients/cli/internal/render"
+	"cercano/source/clients/cli/internal/theme"
 )
 
 // A folded tool entry must be a single line. Tool summaries can carry newlines
@@ -16,7 +19,7 @@ func TestRenderToolEntryFoldedSingleLine(t *testing.T) {
 		Status:        ToolStatusComplete,
 		Folded:        true,
 	}
-	got := renderToolEntry(e, 80, false, nil)
+	got := renderToolEntry(e, 80, false, theme.NewStyles(theme.Cracker()), render.NewMarkdown(theme.MarkdownStyle(theme.Cracker())))
 	if strings.Contains(got, "\n") {
 		t.Fatalf("folded tool entry must be one line; got embedded newline:\n%q", got)
 	}

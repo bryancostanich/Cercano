@@ -86,6 +86,22 @@ func TestToolsToSDK_PanicsOnBadSchema(t *testing.T) {
 	_ = toolsToSDK([]llm.Tool{{Name: "x", Schema: json.RawMessage(`{not json`)}})
 }
 
+func TestBlockToSDK_ImageBase64(t *testing.T) {
+	b := llm.Block{Type: llm.BlockImage, MediaType: "image/png", ImageData: "QUJD"}
+	got := blockToSDK(b)
+	if got.OfImage == nil || got.OfImage.Source.OfBase64 == nil {
+		t.Errorf("expected base64 image block, got %+v", got)
+	}
+}
+
+func TestBlockToSDK_ImageURL(t *testing.T) {
+	b := llm.Block{Type: llm.BlockImage, ImageURL: "https://x/y.png"}
+	got := blockToSDK(b)
+	if got.OfImage == nil || got.OfImage.Source.OfURL == nil {
+		t.Errorf("expected URL image block, got %+v", got)
+	}
+}
+
 func TestRoundTrip(t *testing.T) {
 	original := llm.Block{
 		Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "read_file",

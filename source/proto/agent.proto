@@ -116,6 +116,13 @@ service Agent {
   rpc AddMcpServer (AddMcpServerRequest) returns (AddMcpServerResponse) {}
   rpc RemoveMcpServer (RemoveMcpServerRequest) returns (RemoveMcpServerResponse) {}
   rpc RestartMcpServer (RestartMcpServerRequest) returns (RestartMcpServerResponse) {}
+
+  // ---- Cloud profile management ----
+  rpc GetCloudProfiles (GetCloudProfilesRequest) returns (GetCloudProfilesResponse) {}
+  rpc SetActiveCloudProfile (SetActiveCloudProfileRequest) returns (SetActiveCloudProfileResponse) {}
+  rpc SetCloudProfileKey (SetCloudProfileKeyRequest) returns (SetCloudProfileKeyResponse) {}
+  rpc UpsertCloudProfile (UpsertCloudProfileRequest) returns (UpsertCloudProfileResponse) {}
+  rpc RemoveCloudProfile (RemoveCloudProfileRequest) returns (RemoveCloudProfileResponse) {}
 }
 
 // Incremental token from LLM streaming.
@@ -570,12 +577,23 @@ message SubscribeEventsRequest {}
 message ClientEvent {
   oneof event {
     PermissionModeChanged permission_mode_changed = 1;
+    ConfigChanged config_changed = 2;
   }
 }
 
 // PermissionModeChanged carries the new active mode. Clients update their
 // status bar from this — no fetch, no poll.
 message PermissionModeChanged { string mode = 1; }
+
+// ConfigChanged carries one config field that just changed (RPC or file
+// watcher). Field is a top-level config key as it appears in UpdateConfigRequest
+// (e.g. "cloud_model", "ollama_url"). Value is the new value as a string;
+// secrets are reported as a presence marker, never the raw value. When several
+// fields change together, one event is emitted per field.
+message ConfigChanged {
+  string field = 1;
+  string value = 2;
+}
 
 // Allow/Deny pair the asynchronous PermissionRequired stream event with a
 // client reply. tool_use_id is the same id the event carried.
@@ -642,3 +660,32 @@ message RemoveMcpServerResponse { bool ok = 1; string error = 2; }
 
 message RestartMcpServerRequest  { string name = 1; }
 message RestartMcpServerResponse { bool ok = 1; string error = 2; int32 tool_count = 3; }
+
+// Cloud profile management messages.
+message CloudProfileInfo {
+  string name = 1;
+  string flavor = 2;
+  string base_url = 3;
+  string model = 4;
+  bool   has_key = 5; // a key exists in the keychain for this profile
+  string backend = 6; // chat_completions quirks selector (openai|gemini|groq|…)
+}
+message GetCloudProfilesRequest {}
+message GetCloudProfilesResponse {
+  repeated CloudProfileInfo profiles = 1;
+  string active = 2;
+}
+message SetActiveCloudProfileRequest  { string name = 1; }
+message SetActiveCloudProfileResponse { bool ok = 1; string error = 2; }
+message SetCloudProfileKeyRequest  { string name = 1; string api_key = 2; }
+message SetCloudProfileKeyResponse { bool ok = 1; string error = 2; }
+message UpsertCloudProfileRequest {
+  string name = 1;
+  string flavor = 2;
+  string backend = 3;
+  string base_url = 4;
+  string model = 5;
+}
+message UpsertCloudProfileResponse { bool ok = 1; string error = 2; }
+message RemoveCloudProfileRequest  { string name = 1; }
+message RemoveCloudProfileResponse { bool ok = 1; string error = 2; }

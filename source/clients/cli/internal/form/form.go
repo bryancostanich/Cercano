@@ -35,6 +35,24 @@ func New(sections []Section) *Form { return &Form{Sections: sections} }
 // Cursor returns the flattened-field index of the focused field.
 func (f *Form) Cursor() int { return f.cursor }
 
+// SetCursor moves the focused-field index, clamped to the valid range. Used to
+// preserve the focus position when a host rebuilds the form (e.g. a live theme
+// edit that reconstructs the sections).
+func (f *Form) SetCursor(i int) {
+	n := len(f.flat())
+	if n == 0 {
+		f.cursor = 0
+		return
+	}
+	if i < 0 {
+		i = 0
+	}
+	if i > n-1 {
+		i = n - 1
+	}
+	f.cursor = i
+}
+
 // FocusedLine returns the zero-based output line of the focused field as of
 // the last View (or Lines) call.
 func (f *Form) FocusedLine() int { return f.focusedLine }
@@ -142,13 +160,20 @@ func (f *Form) View(width int, palette theme.Palette, styles theme.Styles) strin
 	for _, sec := range f.Sections {
 		var body strings.Builder
 		title := styles.Accent.Render("─ " + sec.Title + " ")
-		body.WriteString(title + styles.BorderDim.Render(strings.Repeat("─", max(0, panelW-lipgloss.Width(title)))) + "\n\n")
-		// bodyLine tracks how many lines have been written into body. The title
-		// rule and the blank line after it occupy body lines 0 and 1, so the
-		// first field starts at line 2. We track real line counts (not field
-		// index) because a field can render multiple lines — an open select
-		// picker, or any field in the narrow under-label layout.
-		bodyLine := 2
+		// Title line, then an underline rule, then a blank line — written as
+		// explicit lines with the rule sized to the box text width (panelW-4:
+		// border+padding both sides) so lipgloss never wraps them. Wrapping would
+		// desync the focusedLine accounting below, which assumes this fixed
+		// 3-line section header.
+		body.WriteString(title + "\n")
+		body.WriteString(styles.BorderDim.Render(strings.Repeat("─", max(0, panelW-4))) + "\n")
+		body.WriteString("\n")
+		// bodyLine tracks how many lines have been written into body. The section
+		// header (title, rule, blank) occupies body lines 0-2, so the first field
+		// starts at line 3. We track real line counts (not field index) because a
+		// field can render multiple lines — an open select picker, or any field in
+		// the narrow under-label layout.
+		bodyLine := 3
 		focusedBodyLine := -1
 		for _, fld := range sec.Fields {
 			focused := idx == f.cursor

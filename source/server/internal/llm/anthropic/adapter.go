@@ -17,6 +17,11 @@ func blockToSDK(b llm.Block) sdk.ContentBlockParamUnion {
 		return sdk.NewToolUseBlock(b.ToolUseID, b.ToolInput, b.ToolName)
 	case llm.BlockToolResult:
 		return sdk.NewToolResultBlock(b.ToolUseRef, b.Content, b.IsError)
+	case llm.BlockImage:
+		if b.ImageURL != "" {
+			return sdk.NewImageBlock(sdk.URLImageSourceParam{URL: b.ImageURL})
+		}
+		return sdk.NewImageBlockBase64(b.MediaType, b.ImageData)
 	}
 	return sdk.ContentBlockParamUnion{}
 }

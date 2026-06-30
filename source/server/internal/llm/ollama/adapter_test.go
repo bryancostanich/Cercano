@@ -1,30 +1,39 @@
 package ollama
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"cercano/source/server/internal/llm"
 )
 
 func TestBlockToOllama_Text(t *testing.T) {
-	msg := messageToOllama(llm.Message{
+	msg, err := messageToOllama(context.Background(), llm.Message{
 		Role:   llm.RoleUser,
 		Blocks: []llm.Block{{Type: llm.BlockText, Text: "hi"}},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if msg.Role != "user" || msg.Content != "hi" {
 		t.Errorf("ollama msg: %+v", msg)
 	}
 }
 
 func TestBlockToOllama_ToolUse_InAssistant(t *testing.T) {
-	msg := messageToOllama(llm.Message{
+	msg, err := messageToOllama(context.Background(), llm.Message{
 		Role: llm.RoleAssistant,
 		Blocks: []llm.Block{{
 			Type: llm.BlockToolUse, ToolUseID: "u1",
 			ToolName: "read_file", ToolInput: json.RawMessage(`{"path":"x"}`),
 		}},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if msg.Role != "assistant" || len(msg.ToolCalls) != 1 {
 		t.Errorf("expected one tool_call, got %+v", msg)
 	}
@@ -37,12 +46,15 @@ func TestBlockToOllama_ToolUse_InAssistant(t *testing.T) {
 }
 
 func TestBlockToOllama_ToolResult_InUser(t *testing.T) {
-	msg := messageToOllama(llm.Message{
+	msg, err := messageToOllama(context.Background(), llm.Message{
 		Role: llm.RoleUser,
 		Blocks: []llm.Block{{
 			Type: llm.BlockToolResult, ToolUseRef: "u1", Content: "32 lines",
 		}},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if msg.Role != "tool" || msg.Content != "32 lines" {
 		t.Errorf("tool result in user msg: %+v", msg)
 	}
@@ -81,5 +93,31 @@ func TestToolsToOllama_PassesPropertiesAndRequired(t *testing.T) {
 	}
 	if len(prop.Type) != 1 || prop.Type[0] != "string" {
 		t.Errorf("prop type: %+v", prop.Type)
+	}
+}
+
+func TestMessageToOllama_ImageBase64(t *testing.T) {
+	m := llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{
+		{Type: llm.BlockText, Text: "what is this"},
+		{Type: llm.BlockImage, MediaType: "image/png", ImageData: "QUJD"}, // "ABC"
+	}}
+	out, err := messageToOllama(context.Background(), m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Content != "what is this" || len(out.Images) != 1 || string(out.Images[0]) != "ABC" {
+		t.Errorf("got content=%q images=%v", out.Content, out.Images)
+	}
+}
+
+func TestMessageToOllama_ImageURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("XYZ"))
+	}))
+	defer srv.Close()
+	m := llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockImage, ImageURL: srv.URL}}}
+	out, err := messageToOllama(context.Background(), m)
+	if err != nil || len(out.Images) != 1 || string(out.Images[0]) != "XYZ" {
+		t.Fatalf("got %v / %v", out.Images, err)
 	}
 }

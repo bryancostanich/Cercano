@@ -413,6 +413,14 @@ func collectStream(ctx context.Context, rdr llm.StreamReader, onText func(string
 			toolArgsBuf.WriteString(ev.TextDelta)
 		case llm.EventToolUseStop:
 			flushTool()
+		case llm.EventReasoning:
+			flushText()
+			flushTool()
+			out.Blocks = append(out.Blocks, llm.Block{
+				Type:          llm.BlockReasoning,
+				ReasoningID:   ev.ReasoningID,
+				ReasoningData: ev.ReasoningData,
+			})
 		case llm.EventMessageStart:
 			out.InputTokens = ev.InputTokens
 		case llm.EventMessageStop:
@@ -420,6 +428,9 @@ func collectStream(ctx context.Context, rdr llm.StreamReader, onText func(string
 			flushTool()
 			if ev.StopReason != "" {
 				out.StopReason = ev.StopReason
+			}
+			if ev.InputTokens > 0 {
+				out.InputTokens = ev.InputTokens
 			}
 			if ev.OutputTokens > 0 {
 				out.OutputTokens = ev.OutputTokens

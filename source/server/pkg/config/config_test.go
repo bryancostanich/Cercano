@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -332,5 +333,72 @@ func TestAutoDetectMeridianRoute(t *testing.T) {
 				t.Errorf("Route = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// Save must strip the four legacy cloud_* fields when profiles are present.
+// The profile is the source of truth; leaving the legacy mirrors on disk is
+// what made it possible for cloud_model and the active profile's model to
+// disagree (split-state bug).
+func TestSave_StripsLegacyCloudFieldsWhenProfilesPresent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	cfg := Config{
+		CloudProvider:      "anthropic",
+		CloudModel:         "claude-stale-mirror",
+		CloudAPIKey:        "sk-leaky",
+		CloudBaseURL:       "http://127.0.0.1:3456",
+		CloudProfiles:      []CloudProfile{{Name: "default", Flavor: "messages", Model: "claude-real"}},
+		ActiveCloudProfile: "default",
+	}
+	if err := Save(cfg, path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	text := string(data)
+	for _, banned := range []string{"cloud_provider:", "cloud_model:", "cloud_api_key:", "cloud_base_url:"} {
+		if strings.Contains(text, banned) {
+			t.Errorf("legacy key %q must not be saved when profiles exist:\n%s", banned, text)
+		}
+	}
+	if !strings.Contains(text, "claude-real") {
+		t.Errorf("profile model missing from saved YAML:\n%s", text)
+	}
+	// Round-trip: in-memory cfg keeps its mirrors (unchanged), but a fresh
+	// Load gives empty legacy fields and the profile intact.
+	if cfg.CloudModel != "claude-stale-mirror" {
+		t.Errorf("Save must not mutate caller's struct")
+	}
+	reloaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded.CloudModel != "" || reloaded.CloudProvider != "" || reloaded.CloudAPIKey != "" || reloaded.CloudBaseURL != "" {
+		t.Errorf("reloaded config has stale legacy fields: %+v", reloaded)
+	}
+	if len(reloaded.CloudProfiles) != 1 || reloaded.CloudProfiles[0].Model != "claude-real" {
+		t.Errorf("profile lost on round-trip: %+v", reloaded.CloudProfiles)
+	}
+}
+
+// Save must NOT strip legacy fields when no profiles exist yet — that's
+// the upgrade path where the legacy fields are the actual source of truth
+// and migrateCloudProfiles will synthesize a profile from them on next load.
+func TestSave_KeepsLegacyCloudFieldsBeforeMigration(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	cfg := Config{
+		CloudProvider: "anthropic",
+		CloudModel:    "claude-pre-migration",
+	}
+	if err := Save(cfg, path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "cloud_model: claude-pre-migration") {
+		t.Errorf("legacy model field dropped before migration:\n%s", data)
 	}
 }

@@ -34,19 +34,22 @@ type CloudProfile struct {
 }
 
 // Config holds all Cercano configuration values.
+//
+// The four "Cloud*" top-level fields (CloudProvider, CloudModel, CloudAPIKey,
+// CloudBaseURL) are legacy — pre-profile shape that gets migrated into a
+// "default" entry in CloudProfiles on first load. They remain as
+// load-tolerant inputs and as in-memory mirrors for proto reporting, but Save
+// strips them so disk reflects the profile-only world. New code should
+// always read through the active profile (see Server.activeCloudModel).
 type Config struct {
 	OllamaURL      string `yaml:"ollama_url"`
 	LocalRuntime   string `yaml:"local_runtime"`
 	LocalModel     string `yaml:"local_model"`
 	EmbeddingModel string `yaml:"embedding_model"`
-	CloudProvider  string `yaml:"cloud_provider"`
-	CloudModel     string `yaml:"cloud_model"`
-	CloudAPIKey    string `yaml:"cloud_api_key"`
-	// CloudBaseURL overrides the cloud provider's default endpoint when set.
-	// Use this to point cercano at a local Anthropic-compatible proxy such as
-	// Meridian (default http://127.0.0.1:3456). When set with the anthropic
-	// provider, an empty API key is accepted — the proxy handles auth.
-	CloudBaseURL       string           `yaml:"cloud_base_url"`
+	CloudProvider  string `yaml:"cloud_provider,omitempty"`
+	CloudModel     string `yaml:"cloud_model,omitempty"`
+	CloudAPIKey    string `yaml:"cloud_api_key,omitempty"`
+	CloudBaseURL   string `yaml:"cloud_base_url,omitempty"`
 	CloudProfiles      []CloudProfile   `yaml:"cloud_profiles"`
 	ActiveCloudProfile string           `yaml:"active_cloud_profile"`
 	LocusMode          string           `yaml:"locus_mode"` // cloud_only|cloud_primary|local_primary|local_only
@@ -321,10 +324,23 @@ func VenvPython() string {
 }
 
 // Save writes the config to the given path, creating directories as needed.
+// When CloudProfiles is populated (post-migration), the four legacy cloud
+// fields are stripped from the saved YAML — they're maintained in memory as
+// mirrors for legacy proto reporting, but disk should reflect the
+// profile-only world so users editing the file don't get bitten by the
+// split-state bug that motivated this refactor (cloud_model edited, profile
+// untouched, runtime still on the old model).
 func Save(cfg Config, path string) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory %q: %w", dir, err)
+	}
+
+	if len(cfg.CloudProfiles) > 0 {
+		cfg.CloudProvider = ""
+		cfg.CloudModel = ""
+		cfg.CloudAPIKey = ""
+		cfg.CloudBaseURL = ""
 	}
 
 	data, err := yaml.Marshal(cfg)

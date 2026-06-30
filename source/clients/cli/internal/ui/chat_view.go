@@ -150,6 +150,20 @@ func (c *chatView) toolEntryIndices() []int {
 	return out
 }
 
+// hasInProgressTool reports whether any tool entry is currently in flight
+// (status == InProgress). Used by the animation tick loop to decide whether
+// to keep firing — without this, the spinner on the active tool line would
+// freeze once the assistant text starts streaming (the placeholder loop's
+// stop condition).
+func (c *chatView) hasInProgressTool() bool {
+	for _, e := range c.entries {
+		if e.Tool != nil && e.Tool.Status == ToolStatusInProgress {
+			return true
+		}
+	}
+	return false
+}
+
 // findToolEntry returns the ToolEntry whose ToolUseID matches id, or nil.
 // Used by stream-event handlers to update an in-flight tool-call line.
 func (c *chatView) findToolEntry(id string) *ToolEntry {

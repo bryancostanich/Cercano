@@ -4,34 +4,52 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 // CloudProfile is one named cloud provider configuration. The API key is NOT
 // stored here — it lives in the OS keychain keyed by Name.
+//
+// Route names a specific access path with its own auth + identification
+// conventions:
+//   - "direct" (or "")  — vanilla path to the upstream provider (Anthropic
+//     direct, OpenAI direct, etc.). API key auth, no special headers.
+//   - "meridian"        — Meridian local OAuth bridge. Cercano emits
+//     opencode-style identification headers so Meridian routes through its
+//     OpenCode adapter (4-turn SDK cap vs. the default 3-turn). Borrowed
+//     identity; see anthropic/client.go for the TODO to negotiate a native
+//     Cercano adapter upstream.
+//
+// Route is an open enum — future bridges (CCR, etc.) get their own value and
+// adapter-specific handling. Empty string is treated as "direct".
 type CloudProfile struct {
 	Name    string `yaml:"name"`
 	Flavor  string `yaml:"flavor"` // messages | chat_completions | responses | bedrock
 	Backend string `yaml:"backend,omitempty"` // chat_completions only: selects per-backend quirks (openai|gemini|groq|…); empty → defensive default
+	Route   string `yaml:"route,omitempty"`   // direct (default) | meridian | ccr (future) | …
 	BaseURL string `yaml:"base_url"`
 	Model   string `yaml:"model"`
 }
 
 // Config holds all Cercano configuration values.
+//
+// The four "Cloud*" top-level fields (CloudProvider, CloudModel, CloudAPIKey,
+// CloudBaseURL) are legacy — pre-profile shape that gets migrated into a
+// "default" entry in CloudProfiles on first load. They remain as
+// load-tolerant inputs and as in-memory mirrors for proto reporting, but Save
+// strips them so disk reflects the profile-only world. New code should
+// always read through the active profile (see Server.activeCloudModel).
 type Config struct {
 	OllamaURL      string `yaml:"ollama_url"`
 	LocalRuntime   string `yaml:"local_runtime"`
 	LocalModel     string `yaml:"local_model"`
 	EmbeddingModel string `yaml:"embedding_model"`
-	CloudProvider  string `yaml:"cloud_provider"`
-	CloudModel     string `yaml:"cloud_model"`
-	CloudAPIKey    string `yaml:"cloud_api_key"`
-	// CloudBaseURL overrides the cloud provider's default endpoint when set.
-	// Use this to point cercano at a local Anthropic-compatible proxy such as
-	// Meridian (default http://127.0.0.1:3456). When set with the anthropic
-	// provider, an empty API key is accepted — the proxy handles auth.
-	CloudBaseURL       string           `yaml:"cloud_base_url"`
+	CloudProvider  string `yaml:"cloud_provider,omitempty"`
+	CloudModel     string `yaml:"cloud_model,omitempty"`
+	CloudAPIKey    string `yaml:"cloud_api_key,omitempty"`
+	CloudBaseURL   string `yaml:"cloud_base_url,omitempty"`
 	CloudProfiles      []CloudProfile   `yaml:"cloud_profiles"`
 	ActiveCloudProfile string           `yaml:"active_cloud_profile"`
 	LocusMode          string           `yaml:"locus_mode"` // cloud_only|cloud_primary|local_primary|local_only
@@ -169,6 +187,26 @@ func migrateCloudProfiles(cfg *Config) {
 	cfg.ActiveCloudProfile = "default"
 }
 
+// autoDetectMeridianRoute promotes profiles that look like Meridian (default
+// local OAuth bridge port) to route=meridian on first load. Without this,
+// users upgrading from a pre-route config would silently lose Meridian's
+// OpenCode-adapter treatment (3-turn SDK cap instead of 4). Heuristic only —
+// users can hand-edit afterwards. Safe: never overrides an explicit Route.
+//
+// The "127.0.0.1:3456" needle is Meridian's documented default port. If you
+// run Meridian on a different host/port, set route: meridian manually.
+func autoDetectMeridianRoute(cfg *Config) {
+	for i := range cfg.CloudProfiles {
+		p := &cfg.CloudProfiles[i]
+		if p.Route != "" {
+			continue
+		}
+		if strings.Contains(p.BaseURL, "127.0.0.1:3456") || strings.Contains(p.BaseURL, "localhost:3456") {
+			p.Route = "meridian"
+		}
+	}
+}
+
 // Load reads config from the given path, merges with defaults, then applies
 // environment variable overrides. Returns defaults if the file doesn't exist.
 func Load(path string) (Config, error) {
@@ -211,6 +249,7 @@ func Load(path string) (Config, error) {
 
 	applyEnvOverrides(&cfg)
 	migrateCloudProfiles(&cfg)
+	autoDetectMeridianRoute(&cfg)
 	return cfg, nil
 }
 
@@ -285,10 +324,23 @@ func VenvPython() string {
 }
 
 // Save writes the config to the given path, creating directories as needed.
+// When CloudProfiles is populated (post-migration), the four legacy cloud
+// fields are stripped from the saved YAML — they're maintained in memory as
+// mirrors for legacy proto reporting, but disk should reflect the
+// profile-only world so users editing the file don't get bitten by the
+// split-state bug that motivated this refactor (cloud_model edited, profile
+// untouched, runtime still on the old model).
 func Save(cfg Config, path string) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory %q: %w", dir, err)
+	}
+
+	if len(cfg.CloudProfiles) > 0 {
+		cfg.CloudProvider = ""
+		cfg.CloudModel = ""
+		cfg.CloudAPIKey = ""
+		cfg.CloudBaseURL = ""
 	}
 
 	data, err := yaml.Marshal(cfg)

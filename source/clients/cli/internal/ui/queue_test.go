@@ -34,8 +34,8 @@ func TestSubmitWhileStreamingQueues(t *testing.T) {
 func TestUpArrowUnstagesLastQueued(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
-	m.chat.Enqueue("check the tests")
-	m.chat.Enqueue("run the linter")
+	m.chat.Enqueue("check the tests", nil)
+	m.chat.Enqueue("run the linter", nil)
 	m.input.SetValue("")
 
 	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
@@ -57,8 +57,8 @@ func TestQueuedLinesReserveViewportRows(t *testing.T) {
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	h0 := m.chat.Height()
-	m.chat.Enqueue("one")
-	m.chat.Enqueue("two")
+	m.chat.Enqueue("one", nil)
+	m.chat.Enqueue("two", nil)
 	m.relayout()
 	if got := m.chat.Height(); got != h0-2 {
 		t.Errorf("two queued lines should reserve two rows: %d -> %d, want %d", h0, got, h0-2)

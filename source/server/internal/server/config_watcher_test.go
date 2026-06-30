@@ -112,7 +112,16 @@ func TestStartConfigWatcher_EndToEnd(t *testing.T) {
 	srv.SetConfigPersistence(path, cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// Cancel + drain BEFORE TempDir cleanup runs: the watcher goroutine may
+	// be mid-writeback (UpdateConfig → config.Save) when the test returns,
+	// and racing that against rm -r on the watched dir causes "directory not
+	// empty". A short sleep is the simplest expression of "let the watcher
+	// finish what it's doing"; making the watcher synchronously joinable
+	// would be over-engineering for production where it's fire-and-forget.
+	defer func() {
+		cancel()
+		time.Sleep(100 * time.Millisecond)
+	}()
 	if err := srv.StartConfigWatcher(ctx, path); err != nil {
 		t.Fatalf("StartConfigWatcher: %v", err)
 	}

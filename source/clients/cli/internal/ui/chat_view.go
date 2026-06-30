@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 
 	"cercano/source/clients/cli/internal/render"
 	"cercano/source/clients/cli/internal/theme"
+	"cercano/source/server/pkg/agentclient"
 )
 
 // turnStatus holds the live streaming telemetry that renderEntry needs while a
@@ -39,7 +41,7 @@ type chatView struct {
 	home string
 	// queued holds messages submitted while a turn streams (FIFO). The host
 	// renders them above the prompt and unstages by reading the methods below.
-	queued []string
+	queued []queuedTurn
 
 	vp             viewport.Model
 	plainLines     []string
@@ -329,40 +331,60 @@ func (c *chatView) Apply(msg tea.Msg) tea.Cmd {
 
 // ── message queue (F4a) ──────────────────────────────────────────────────────
 
+// queuedTurn is one turn queued while a prior turn streams. It carries both
+// the prompt text and any inline images so they survive the queue round-trip.
+type queuedTurn struct {
+	text   string
+	images []agentclient.InlineImage
+}
+
 // queued holds messages submitted while a turn was streaming, FIFO. They render
 // just above the prompt, drain (front) as each stream completes, and the
 // most-recent (back) can be popped back into the prompt with ↑.
 //
-// Queued returns the queued messages (read-only snapshot for rendering).
-func (c *chatView) Queued() []string { return c.queued }
+// Queued returns the display strings for each queued turn (read-only snapshot
+// for the renderer). Image counts are appended when images are attached.
+func (c *chatView) Queued() []string {
+	out := make([]string, len(c.queued))
+	for i, t := range c.queued {
+		if len(t.images) > 0 {
+			out[i] = fmt.Sprintf("%s  (%d image%s)", t.text, len(t.images), plural(len(t.images)))
+		} else {
+			out[i] = t.text
+		}
+	}
+	return out
+}
 
-// Enqueue appends a message to the back of the queue.
-func (c *chatView) Enqueue(s string) { c.queued = append(c.queued, s) }
+// Enqueue appends a turn to the back of the queue.
+func (c *chatView) Enqueue(text string, images []agentclient.InlineImage) {
+	c.queued = append(c.queued, queuedTurn{text: text, images: images})
+}
 
-// DrainNext pops the oldest queued message off the front. Returns ("", false)
+// DrainNext pops the oldest queued turn off the front. Returns (zero, false)
 // when the queue is empty.
-func (c *chatView) DrainNext() (string, bool) {
+func (c *chatView) DrainNext() (queuedTurn, bool) {
 	if len(c.queued) == 0 {
-		return "", false
+		return queuedTurn{}, false
 	}
 	next := c.queued[0]
 	c.queued = c.queued[1:]
 	return next, true
 }
 
-// UnstageLast pops the most-recently-queued message off the back (for the host
-// to put back into the prompt for editing). Returns ("", false) when empty.
-func (c *chatView) UnstageLast() (string, bool) {
+// UnstageLast pops the most-recently-queued turn off the back (for the host
+// to put back into the prompt for editing). Returns (zero, false) when empty.
+func (c *chatView) UnstageLast() (queuedTurn, bool) {
 	n := len(c.queued)
 	if n == 0 {
-		return "", false
+		return queuedTurn{}, false
 	}
 	last := c.queued[n-1]
 	c.queued = c.queued[:n-1]
 	return last, true
 }
 
-// ClearQueue drops all pending messages (cancel/esc).
+// ClearQueue drops all pending turns (cancel/esc).
 func (c *chatView) ClearQueue() { c.queued = nil }
 
 // SetSize resizes the underlying viewport. Call from relayout.

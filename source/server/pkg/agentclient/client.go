@@ -29,6 +29,14 @@ type Client struct {
 	ServerLog    string // path to the auto-launched server's log file, if any
 }
 
+// InlineImage is a user-attached image sent with a chat turn. Index matches the
+// "[image <Index>]" marker in the input text.
+type InlineImage struct {
+	Index     int32
+	Data      []byte
+	MediaType string
+}
+
 // Dial connects to a cercano agent. If no listener exists at addr, auto-launches
 // `cercano` (the agent binary) in the background and waits for it to come up.
 // The spawned server outlives the CLI so VS Code / Zed / other clients can share it.
@@ -57,9 +65,15 @@ func Dial(ctx context.Context, addr string) (*Client, error) {
 func connect(ctx context.Context, addr string, timeout time.Duration) (*Client, error) {
 	dialCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	// 64 MiB matches the server recv limit; also future-proofs large responses.
+	const maxGRPCMsgBytes = 64 << 20
 	conn, err := grpc.DialContext(dialCtx, addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithBlock(),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallSendMsgSize(maxGRPCMsgBytes),
+			grpc.MaxCallRecvMsgSize(maxGRPCMsgBytes),
+		),
 	)
 	if err != nil {
 		return nil, err
@@ -907,15 +921,32 @@ const (
 	TypeRouteSelected
 )
 
+func toProtoImages(images []InlineImage) []*proto.InlineImage {
+	if len(images) == 0 {
+		return nil
+	}
+	out := make([]*proto.InlineImage, 0, len(images))
+	for _, img := range images {
+		out = append(out, &proto.InlineImage{
+			Index:     img.Index,
+			Data:      img.Data,
+			MediaType: img.MediaType,
+		})
+	}
+	return out
+}
+
 // StreamChat opens a streaming chat call and emits typed messages on the
 // returned channel. workDir is the active project root; the agent uses it
 // to prepend the project's .cercano/context.md to the prompt for project
-// awareness. The channel closes when the stream ends.
-func (c *Client) StreamChat(ctx context.Context, conversationID, input, workDir string) (<-chan StreamMsg, error) {
+// awareness. images are user-attached images spliced in at "[image N]" markers.
+// The channel closes when the stream ends.
+func (c *Client) StreamChat(ctx context.Context, conversationID, input, workDir string, images ...InlineImage) (<-chan StreamMsg, error) {
 	stream, err := c.agent.StreamProcessRequest(ctx, &proto.ProcessRequestRequest{
 		Input:          input,
 		ConversationId: conversationID,
 		WorkDir:        workDir,
+		Images:         toProtoImages(images),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("stream open: %w", err)

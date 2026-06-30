@@ -17,7 +17,19 @@ type Config struct {
 	APIKey    string
 	Model     string
 	UserAgent string
+	// Route names the access path. "" / "direct" → vanilla Anthropic API.
+	// "meridian" → emit opencode-style identification headers so the local
+	// Meridian OAuth bridge routes through its OpenCode adapter (4-turn cap
+	// instead of the default 3). See routeMeridian for the header set.
+	Route string
 }
+
+// Known route values. Kept here so the adapter is the single place that
+// names access paths it handles.
+const (
+	routeDirect   = "direct"
+	routeMeridian = "meridian"
+)
 
 type ChatRequest = llm.ChatRequest
 type ChatResponse = llm.ChatResponse
@@ -43,18 +55,27 @@ func sessionIDFromContext(ctx context.Context) string {
 }
 
 type headerRoundTripper struct {
-	base http.RoundTripper
-	ua   string
+	base  http.RoundTripper
+	ua    string
+	route string // when "meridian", emit opencode-style identification headers
 }
 
 func (h *headerRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
 	if h.ua != "" {
 		r.Header.Set("User-Agent", h.ua)
 	}
-	if sid := sessionIDFromContext(r.Context()); sid != "" {
-		r.Header.Set("x-opencode-session", sid)
-		r.Header.Set("x-opencode-request", newMessageID())
-		r.Header.Set("x-opencode-agent-mode", "primary")
+	// TODO(cercano-native-bridge-adapter): the opencode-* header set is a
+	// borrowed identity — Cercano claims to be OpenCode so Meridian routes
+	// through its OpenCode adapter (4-turn SDK cap vs the default 3-turn
+	// cap which would break our 10-round tool loop). When Meridian (or any
+	// successor bridge) ships a native Cercano adapter, swap these for
+	// x-cercano-* and drop the dishonesty. See docs/agent/README.md.
+	if h.route == routeMeridian {
+		if sid := sessionIDFromContext(r.Context()); sid != "" {
+			r.Header.Set("x-opencode-session", sid)
+			r.Header.Set("x-opencode-request", newMessageID())
+			r.Header.Set("x-opencode-agent-mode", "primary")
+		}
 	}
 	return h.base.RoundTrip(r)
 }
@@ -77,7 +98,7 @@ func NewClient(cfg Config) *Client {
 		opts = append(opts, option.WithBaseURL(cfg.BaseURL))
 	}
 	opts = append(opts, option.WithHTTPClient(&http.Client{
-		Transport: &headerRoundTripper{base: http.DefaultTransport, ua: cfg.UserAgent},
+		Transport: &headerRoundTripper{base: http.DefaultTransport, ua: cfg.UserAgent, route: cfg.Route},
 	}))
 	c := sdk.NewClient(opts...)
 	return &Client{cfg: cfg, sdk: &c}

@@ -46,9 +46,7 @@ func (s *Server) ProposeContextEdit(ctx context.Context, req *proto.ProposeConte
 		}
 	}
 	if s.cloudLLMProvider != nil {
-		s.cfgMu.RLock()
-		cloudModel := s.currentConfig.CloudModel
-		s.cfgMu.RUnlock()
+		cloudModel := s.activeCloudModel()
 		cloud = func(ctx context.Context, prompt string) (string, error) {
 			resp, err := s.cloudLLMProvider.Chat(ctx, llm.ChatRequest{
 				Model:     cloudModel,

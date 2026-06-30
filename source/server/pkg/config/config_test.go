@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -306,5 +307,98 @@ func TestCloudProfileBackendYAML(t *testing.T) {
 	}
 	if p.Backend != "gemini" {
 		t.Errorf("backend=%q, want gemini", p.Backend)
+	}
+}
+
+// Profiles pointed at Meridian's default port get auto-promoted to
+// route: meridian on load. Without this, users upgrading from a pre-route
+// config silently lose Meridian's OpenCode-adapter treatment.
+func TestAutoDetectMeridianRoute(t *testing.T) {
+	cases := []struct {
+		name    string
+		profile CloudProfile
+		want    string
+	}{
+		{"127.0.0.1 default port", CloudProfile{Name: "a", BaseURL: "http://127.0.0.1:3456"}, "meridian"},
+		{"localhost default port", CloudProfile{Name: "b", BaseURL: "http://localhost:3456"}, "meridian"},
+		{"non-default port stays empty", CloudProfile{Name: "c", BaseURL: "http://127.0.0.1:9999"}, ""},
+		{"public URL stays empty", CloudProfile{Name: "d", BaseURL: "https://api.anthropic.com"}, ""},
+		{"explicit route preserved", CloudProfile{Name: "e", BaseURL: "http://127.0.0.1:3456", Route: "direct"}, "direct"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{CloudProfiles: []CloudProfile{tc.profile}}
+			autoDetectMeridianRoute(cfg)
+			if got := cfg.CloudProfiles[0].Route; got != tc.want {
+				t.Errorf("Route = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Save must strip the four legacy cloud_* fields when profiles are present.
+// The profile is the source of truth; leaving the legacy mirrors on disk is
+// what made it possible for cloud_model and the active profile's model to
+// disagree (split-state bug).
+func TestSave_StripsLegacyCloudFieldsWhenProfilesPresent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	cfg := Config{
+		CloudProvider:      "anthropic",
+		CloudModel:         "claude-stale-mirror",
+		CloudAPIKey:        "sk-leaky",
+		CloudBaseURL:       "http://127.0.0.1:3456",
+		CloudProfiles:      []CloudProfile{{Name: "default", Flavor: "messages", Model: "claude-real"}},
+		ActiveCloudProfile: "default",
+	}
+	if err := Save(cfg, path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	text := string(data)
+	for _, banned := range []string{"cloud_provider:", "cloud_model:", "cloud_api_key:", "cloud_base_url:"} {
+		if strings.Contains(text, banned) {
+			t.Errorf("legacy key %q must not be saved when profiles exist:\n%s", banned, text)
+		}
+	}
+	if !strings.Contains(text, "claude-real") {
+		t.Errorf("profile model missing from saved YAML:\n%s", text)
+	}
+	// Round-trip: in-memory cfg keeps its mirrors (unchanged), but a fresh
+	// Load gives empty legacy fields and the profile intact.
+	if cfg.CloudModel != "claude-stale-mirror" {
+		t.Errorf("Save must not mutate caller's struct")
+	}
+	reloaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded.CloudModel != "" || reloaded.CloudProvider != "" || reloaded.CloudAPIKey != "" || reloaded.CloudBaseURL != "" {
+		t.Errorf("reloaded config has stale legacy fields: %+v", reloaded)
+	}
+	if len(reloaded.CloudProfiles) != 1 || reloaded.CloudProfiles[0].Model != "claude-real" {
+		t.Errorf("profile lost on round-trip: %+v", reloaded.CloudProfiles)
+	}
+}
+
+// Save must NOT strip legacy fields when no profiles exist yet — that's
+// the upgrade path where the legacy fields are the actual source of truth
+// and migrateCloudProfiles will synthesize a profile from them on next load.
+func TestSave_KeepsLegacyCloudFieldsBeforeMigration(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	cfg := Config{
+		CloudProvider: "anthropic",
+		CloudModel:    "claude-pre-migration",
+	}
+	if err := Save(cfg, path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "cloud_model: claude-pre-migration") {
+		t.Errorf("legacy model field dropped before migration:\n%s", data)
 	}
 }

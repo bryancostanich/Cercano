@@ -401,3 +401,45 @@ func TestGetCloudProfilesReportsBackend(t *testing.T) {
 		t.Fatal("profile g not returned")
 	}
 }
+
+// UpdateConfig with cloud_model must update the active profile's model —
+// the profile is the source of truth, and any stale-mirror bug like the one
+// at #commit-pre-c99faa3 (cloud_model edited, active profile untouched,
+// requests still went to the old model) lives in this seam. Guards the
+// SoT switch.
+func TestUpdateConfig_CloudModel_UpdatesActiveProfile(t *testing.T) {
+	s, _ := newTestServer()
+	s.currentConfig.ActiveCloudProfile = "messages-one"
+	if err := s.secrets.Set("messages-one", "sk-test"); err != nil {
+		t.Fatalf("seed key: %v", err)
+	}
+	s.events = newEventHub()
+	ch, unsub := s.events.subscribe()
+	defer unsub()
+
+	resp, err := s.UpdateConfig(t.Context(), &proto.UpdateConfigRequest{
+		CloudModel: "claude-opus-4-8",
+	})
+	if err != nil || !resp.Success {
+		t.Fatalf("UpdateConfig: err=%v resp=%+v", err, resp)
+	}
+
+	if got := s.activeCloudModel(); got != "claude-opus-4-8" {
+		t.Errorf("activeCloudModel() = %q, want claude-opus-4-8", got)
+	}
+	p, ok := s.activeProfile()
+	if !ok || p.Model != "claude-opus-4-8" {
+		t.Errorf("active profile model = %q (ok=%v), want claude-opus-4-8", p.Model, ok)
+	}
+
+	select {
+	case ev := <-ch:
+		if ev.GetConfigChanged() == nil {
+			t.Errorf("expected ConfigChanged event, got %T", ev.Event)
+		}
+	default:
+		// Broadcast happens after the rebuild block but before the early
+		// return; if it's missing the watcher loop won't drive UI updates.
+		t.Errorf("expected ConfigChanged broadcast for cloud_model, none received")
+	}
+}

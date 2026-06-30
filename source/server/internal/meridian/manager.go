@@ -1,0 +1,378 @@
+package meridian
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"sync"
+	"time"
+)
+
+// DefaultVersion is the pinned @rynfar/meridian npm version Cercano spawns.
+// Bumping this is a deliberate act — verify the upstream changelog and
+// re-test the full Claude Max round-trip first.
+const DefaultVersion = "1.42.1"
+
+// State is the lifecycle phase of the Meridian subprocess from Cercano's
+// point of view. The transitions are: Disabled → (PrereqsMissing | NeedsAuth
+// | External | Starting), Starting → (Ready | Failed), Ready → Failed (crash)
+// or Disabled (Stop). External is a terminal "we're not in charge" state —
+// some other Meridian (or OpenCode) is already on the port; we reuse it but
+// don't manage its lifecycle.
+type State int
+
+const (
+	StateDisabled        State = iota // not requested, or Stop() was called
+	StatePrereqsMissing               // Node.js too old / missing
+	StateNeedsAuth                    // no Claude OAuth token in keychain
+	StateStarting                     // subprocess spawned, probe not yet succeeded
+	StateReady                        // probe succeeded; meridian is serving
+	StateFailed                       // spawn or probe failed
+	StateExternal                     // another process owns the port; we did not spawn
+)
+
+func (s State) String() string {
+	switch s {
+	case StateDisabled:
+		return "disabled"
+	case StatePrereqsMissing:
+		return "prereqs_missing"
+	case StateNeedsAuth:
+		return "needs_auth"
+	case StateStarting:
+		return "starting"
+	case StateReady:
+		return "ready"
+	case StateFailed:
+		return "failed"
+	case StateExternal:
+		return "external"
+	}
+	return "unknown"
+}
+
+// Status is a point-in-time snapshot of the manager.
+type Status struct {
+	State       State
+	Message     string   // human-readable detail (error, hint, version, etc.)
+	Port        int      // port we manage / are reusing; 0 if Disabled
+	MissingDeps []string // populated when State == StatePrereqsMissing
+}
+
+// Manager owns the local Meridian subprocess. Construct with New, then call
+// Ensure when the active cloud profile needs Meridian and Stop on shutdown.
+// All exported methods are safe for concurrent use.
+type Manager struct {
+	logger  *log.Logger
+	logPath string  // where the subprocess's stdout/stderr is teed (~/.cercano/meridian.log)
+	version string
+
+	// Injection points for tests. In production these are realSpawn / realProbe /
+	// DetectPrereqs / HasClaudeAuth / portInUse.
+	spawnFn    func(ctx context.Context, port int, version string, logSink io.Writer) (*exec.Cmd, error)
+	probeFn    func(ctx context.Context, port int) error
+	prereqsFn  func() Prereqs
+	authFn     func() bool
+	portUsedFn func(port int) bool
+
+	mu       sync.Mutex
+	status   Status
+	cancel   context.CancelFunc // cancels the active supervisor; nil when none
+	cmd      *exec.Cmd          // the spawned meridian process, if we own it
+	listener func(Status)
+}
+
+// New constructs a Manager. logPath should be the file to tee Meridian's
+// stdout/stderr into (typically ~/.cercano/meridian.log). Empty logPath
+// silently discards subprocess output.
+func New(logger *log.Logger, logPath string) *Manager {
+	if logger == nil {
+		logger = log.Default()
+	}
+	return &Manager{
+		logger:     logger,
+		logPath:    logPath,
+		version:    DefaultVersion,
+		spawnFn:    realSpawn,
+		probeFn:    realProbe,
+		prereqsFn:  DetectPrereqs,
+		authFn:     HasClaudeAuth,
+		portUsedFn: portInUse,
+		status:     Status{State: StateDisabled},
+	}
+}
+
+// SetStatusListener registers a callback fired on every state transition.
+// The callback runs synchronously on the goroutine that triggered the change;
+// keep it short (push to a channel or broadcast and return).
+func (m *Manager) SetStatusListener(fn func(Status)) {
+	m.mu.Lock()
+	m.listener = fn
+	m.mu.Unlock()
+}
+
+// Status returns a snapshot of the current state.
+func (m *Manager) Status() Status {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.status
+}
+
+// Ensure asks the manager to ensure Meridian is up on the given port. It
+// checks prereqs and auth first; if either is missing, it sets a terminal
+// state and returns without spawning. If something is already listening on
+// the port, it adopts External state (someone else owns the proxy). Otherwise
+// it kicks off a supervisor goroutine that spawns Meridian and watches it.
+//
+// Idempotent. Calling Ensure(ctx, sameport) while we're already Ready on
+// that port is a no-op. Calling Ensure with a different port stops the
+// current supervisor and starts a new one.
+func (m *Manager) Ensure(ctx context.Context, port int) {
+	m.mu.Lock()
+	// Already managing this exact port and not in a terminal-fail state — nothing to do.
+	if m.status.Port == port &&
+		(m.status.State == StateStarting || m.status.State == StateReady || m.status.State == StateExternal) {
+		m.mu.Unlock()
+		return
+	}
+	// Tear down any prior supervisor (different port, or recovering from Failed).
+	m.stopLocked()
+
+	// Gate 1: prereqs.
+	pre := m.prereqsFn()
+	if !pre.NodeOK {
+		m.setStatusLocked(Status{
+			State:       StatePrereqsMissing,
+			Message:     "Node.js " + strconv.Itoa(minNodeMajor) + "+ required to run Meridian",
+			Port:        port,
+			MissingDeps: pre.MissingNotes,
+		})
+		m.mu.Unlock()
+		return
+	}
+	// Gate 2: claude OAuth token.
+	if !m.authFn() {
+		m.setStatusLocked(Status{
+			State:   StateNeedsAuth,
+			Message: "Sign in to Claude to start Meridian",
+			Port:    port,
+		})
+		m.mu.Unlock()
+		return
+	}
+	// Gate 3: someone else on the port? Adopt it.
+	if m.portUsedFn(port) {
+		m.setStatusLocked(Status{
+			State:   StateExternal,
+			Message: fmt.Sprintf("Meridian already running on port %d (not managed by Cercano)", port),
+			Port:    port,
+		})
+		m.mu.Unlock()
+		return
+	}
+	// Start a supervisor for our own process.
+	sctx, cancel := context.WithCancel(ctx)
+	m.cancel = cancel
+	m.setStatusLocked(Status{
+		State:   StateStarting,
+		Message: "starting Meridian via npx",
+		Port:    port,
+	})
+	m.mu.Unlock()
+
+	go m.supervise(sctx, port)
+}
+
+// Stop tears down the supervisor and the subprocess, returning to Disabled.
+// Safe to call at any time; cheap when already Disabled.
+func (m *Manager) Stop() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stopLocked()
+	m.setStatusLocked(Status{State: StateDisabled})
+}
+
+// stopLocked cancels the supervisor and kills the spawned process. Caller
+// must hold m.mu. Does NOT change status — caller decides what to set it to.
+func (m *Manager) stopLocked() {
+	if m.cancel != nil {
+		m.cancel()
+		m.cancel = nil
+	}
+	if m.cmd != nil && m.cmd.Process != nil {
+		_ = m.cmd.Process.Kill()
+		m.cmd = nil
+	}
+}
+
+// supervise runs in its own goroutine for one Ensure() invocation. It
+// spawns Meridian, polls until the port responds, marks Ready, then waits
+// for the process to exit. On unexpected exit it marks Failed and stops
+// (no auto-restart in v1; the user re-triggers via /config or restart).
+func (m *Manager) supervise(ctx context.Context, port int) {
+	logSink := openLogSink(m.logPath, m.logger)
+	defer func() {
+		if c, ok := logSink.(io.Closer); ok {
+			_ = c.Close()
+		}
+	}()
+
+	cmd, err := m.spawnFn(ctx, port, m.version, logSink)
+	if err != nil {
+		m.transition(Status{
+			State:   StateFailed,
+			Message: "failed to spawn Meridian: " + err.Error(),
+			Port:    port,
+		})
+		return
+	}
+	m.mu.Lock()
+	m.cmd = cmd
+	m.mu.Unlock()
+
+	// Probe for readiness. 60s budget covers cold-cache npx fetch + Node boot.
+	probeCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	if err := waitForReady(probeCtx, port, m.probeFn); err != nil {
+		// Probe failed (timeout or ctx cancellation). Kill the process so we
+		// don't leak it and report failed.
+		m.mu.Lock()
+		if m.cmd != nil && m.cmd.Process != nil {
+			_ = m.cmd.Process.Kill()
+		}
+		m.mu.Unlock()
+		m.transition(Status{
+			State:   StateFailed,
+			Message: "Meridian failed to become ready: " + err.Error(),
+			Port:    port,
+		})
+		return
+	}
+	m.transition(Status{
+		State:   StateReady,
+		Message: "Meridian v" + m.version + " ready on port " + strconv.Itoa(port),
+		Port:    port,
+	})
+
+	// Wait for the process. On exit, if ctx was cancelled (Stop), we're
+	// going to Disabled — the Stop call sets that. Otherwise it's an
+	// unexpected exit; mark Failed.
+	waitErr := cmd.Wait()
+	if ctx.Err() != nil {
+		return // Stop() handles status
+	}
+	msg := "Meridian exited unexpectedly"
+	if waitErr != nil {
+		msg += ": " + waitErr.Error()
+	}
+	m.transition(Status{State: StateFailed, Message: msg, Port: port})
+}
+
+// transition atomically updates status and fires the listener.
+func (m *Manager) transition(s Status) {
+	m.mu.Lock()
+	m.setStatusLocked(s)
+	m.mu.Unlock()
+}
+
+// setStatusLocked writes status and fires the listener. Caller must hold m.mu.
+// The listener is invoked while m.mu is held — keep listener short.
+func (m *Manager) setStatusLocked(s Status) {
+	m.status = s
+	if m.listener != nil {
+		m.listener(s)
+	}
+}
+
+// realSpawn launches `npx -y @rynfar/meridian@<version>` with $CLAUDE_PROXY_PORT
+// set, piping stdout+stderr into logSink.
+func realSpawn(ctx context.Context, port int, version string, logSink io.Writer) (*exec.Cmd, error) {
+	cmd := exec.CommandContext(ctx, "npx", "-y", "@rynfar/meridian@"+version)
+	cmd.Env = append(os.Environ(),
+		"CLAUDE_PROXY_PORT="+strconv.Itoa(port),
+		"CLAUDE_PROXY_HOST=127.0.0.1",
+	)
+	cmd.Stdout = logSink
+	cmd.Stderr = logSink
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	return cmd, nil
+}
+
+// realProbe sends a quick HTTP request to the proxy. Any HTTP response (even
+// a 404) proves the process is serving; only network-level failures count
+// as "not ready".
+func realProbe(ctx context.Context, port int) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		"http://127.0.0.1:"+strconv.Itoa(port)+"/", nil)
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	return nil
+}
+
+// waitForReady polls probeFn until it returns nil or ctx expires. 200ms cadence
+// keeps the startup probe cheap; the ctx supplies the overall budget.
+func waitForReady(ctx context.Context, port int, probe func(context.Context, int) error) error {
+	tick := time.NewTicker(200 * time.Millisecond)
+	defer tick.Stop()
+	// First probe immediately — fast meridian builds can be ready in <100ms.
+	if err := probe(ctx, port); err == nil {
+		return nil
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-tick.C:
+			if err := probe(ctx, port); err == nil {
+				return nil
+			}
+		}
+	}
+}
+
+// portInUse returns true if anything is currently listening on 127.0.0.1:port.
+// We try to bind; if bind fails with EADDRINUSE (any error here, really),
+// something owns the port.
+func portInUse(port int) bool {
+	l, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port))
+	if err != nil {
+		return true
+	}
+	_ = l.Close()
+	return false
+}
+
+// openLogSink opens (or creates+truncates) the log file Meridian's stdout/stderr
+// is teed to. If logPath is empty or the open fails, returns io.Discard so the
+// supervisor still runs.
+func openLogSink(logPath string, logger *log.Logger) io.Writer {
+	if logPath == "" {
+		return io.Discard
+	}
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		logger.Printf("meridian: log dir %s: %v (discarding subprocess output)", filepath.Dir(logPath), err)
+		return io.Discard
+	}
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		logger.Printf("meridian: log file %s: %v (discarding subprocess output)", logPath, err)
+		return io.Discard
+	}
+	return f
+}

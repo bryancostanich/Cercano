@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -382,6 +383,14 @@ type Collector struct {
 	cloud     chan CloudUsageReport
 	done      chan struct{}
 	sessionID string // auto-applied to all emitted events
+
+	// mu guards closed so Emit/EmitCloudUsage never send on the channels after
+	// Close has closed them. Close takes the write lock (waiting for any in-flight
+	// Emit holding the read lock to finish) before closing, so a send-on-closed
+	// panic — which would crash the whole server on a shutdown-during-stream
+	// race — cannot happen.
+	mu     sync.RWMutex
+	closed bool
 }
 
 // NewCollector creates a Collector that drains events to the given store.
@@ -416,6 +425,11 @@ func (c *Collector) Emit(e *Event) {
 	if e.SessionID == "" && c.sessionID != "" {
 		e.SessionID = c.sessionID
 	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.closed {
+		return
+	}
 	select {
 	case c.events <- e:
 	default:
@@ -425,6 +439,11 @@ func (c *Collector) Emit(e *Event) {
 
 // EmitCloudUsage queues a cloud usage report for async persistence.
 func (c *Collector) EmitCloudUsage(r CloudUsageReport) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.closed {
+		return
+	}
 	select {
 	case c.cloud <- r:
 	default:
@@ -433,6 +452,13 @@ func (c *Collector) EmitCloudUsage(r CloudUsageReport) {
 
 // Close drains remaining events and shuts down the collector.
 func (c *Collector) Close() {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	c.closed = true
+	c.mu.Unlock()
 	close(c.events)
 	close(c.cloud)
 	<-c.done

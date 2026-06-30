@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -511,4 +512,36 @@ func TestSQLiteStore_StatsByDay(t *testing.T) {
 	if stats.ByDay[0].Count != 1 {
 		t.Errorf("expected 1 event today, got %d", stats.ByDay[0].Count)
 	}
+}
+
+// TestCollector_EmitDuringCloseNoPanic reproduces the shutdown-during-stream
+// race: concurrent Emit/EmitCloudUsage while Close() closes the channels. Before
+// the closed-flag guard this panicked with "send on closed channel" and crashed
+// the whole server. Run under -race.
+func TestCollector_EmitDuringCloseNoPanic(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "race_telemetry.db")
+	store, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	collector := NewCollector(store, 1) // tiny buffer → sends actually hit the channel
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				e := NewEvent("cercano_summarize", "qwen3-coder")
+				e.Complete(1, 1, false, "", "")
+				collector.Emit(e)                    // must not panic after Close
+				collector.EmitCloudUsage(CloudUsageReport{}) // same guard
+			}
+		}()
+	}
+	// Close while emitters are mid-flight.
+	collector.Close()
+	wg.Wait()
+	// Reaching here without a panic is the assertion.
 }

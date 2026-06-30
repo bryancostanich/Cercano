@@ -915,10 +915,6 @@ const (
 	TypeRouteSelected
 )
 
-// StreamChat opens a streaming chat call and emits typed messages on the
-// returned channel. workDir is the active project root; the agent uses it
-// to prepend the project's .cercano/context.md to the prompt for project
-// awareness. The channel closes when the stream ends.
 func toProtoImages(images []InlineImage) []*proto.InlineImage {
 	if len(images) == 0 {
 		return nil
@@ -934,6 +930,11 @@ func toProtoImages(images []InlineImage) []*proto.InlineImage {
 	return out
 }
 
+// StreamChat opens a streaming chat call and emits typed messages on the
+// returned channel. workDir is the active project root; the agent uses it
+// to prepend the project's .cercano/context.md to the prompt for project
+// awareness. images are user-attached images spliced in at "[image N]" markers.
+// The channel closes when the stream ends.
 func (c *Client) StreamChat(ctx context.Context, conversationID, input, workDir string, images ...InlineImage) (<-chan StreamMsg, error) {
 	stream, err := c.agent.StreamProcessRequest(ctx, &proto.ProcessRequestRequest{
 		Input:          input,

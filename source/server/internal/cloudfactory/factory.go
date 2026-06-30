@@ -29,6 +29,7 @@ func BuildCloudProvider(p config.CloudProfile, apiKey string) (llm.Provider, err
 			BaseURL: p.BaseURL,
 			APIKey:  apiKey,
 			Model:   p.Model,
+			Route:   p.Route,
 		}), nil
 	case FlavorChatCompletions:
 		return openai.NewClient(openai.Config{BaseURL: p.BaseURL, APIKey: apiKey, Model: p.Model, Backend: p.Backend}), nil

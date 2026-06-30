@@ -105,7 +105,9 @@ func TestClient_Chat_SessionHeaders(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(Config{BaseURL: srv.URL, APIKey: "dummy", Model: "claude"})
+	// Headers are gated on Route=="meridian": Meridian uses them to pick its
+	// OpenCode adapter (looser SDK turn cap). Direct route does not emit them.
+	c := NewClient(Config{BaseURL: srv.URL, APIKey: "dummy", Model: "claude", Route: "meridian"})
 	ctx := WithSessionID(t.Context(), "conv-abc-123")
 	_, err := c.Chat(ctx, ChatRequest{Model: "claude", MaxTokens: 10})
 	if err != nil {
@@ -120,6 +122,27 @@ func TestClient_Chat_SessionHeaders(t *testing.T) {
 	}
 	if seenMode != "primary" {
 		t.Errorf("agent-mode: got %q want primary", seenMode)
+	}
+}
+
+// Even with a session id in ctx, the direct route must not emit opencode-*
+// identification headers — those are a Meridian-specific borrowed identity.
+func TestClient_Chat_NoOpencodeHeaders_OnDirectRoute(t *testing.T) {
+	var seenSession string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenSession = r.Header.Get("x-opencode-session")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"id":"m_1","type":"message","role":"assistant","content":[],"model":"claude","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer srv.Close()
+	c := NewClient(Config{BaseURL: srv.URL, APIKey: "dummy", Route: "direct"})
+	ctx := WithSessionID(t.Context(), "conv-direct-1")
+	if _, err := c.Chat(ctx, ChatRequest{Model: "claude", MaxTokens: 10}); err != nil {
+		t.Fatal(err)
+	}
+	if seenSession != "" {
+		t.Errorf("direct route must not send x-opencode-session, got %q", seenSession)
 	}
 }
 

@@ -6199,6 +6199,7 @@ type CloudProfileInfo struct {
 	Model         string                 `protobuf:"bytes,4,opt,name=model,proto3" json:"model,omitempty"`
 	HasKey        bool                   `protobuf:"varint,5,opt,name=has_key,json=hasKey,proto3" json:"has_key,omitempty"` // a key exists in the keychain for this profile
 	Backend       string                 `protobuf:"bytes,6,opt,name=backend,proto3" json:"backend,omitempty"`              // chat_completions quirks selector (openai|gemini|groq|…)
+	Route         string                 `protobuf:"bytes,7,opt,name=route,proto3" json:"route,omitempty"`                  // direct (default) | meridian | ccr (future) — selects adapter-specific auth/header conventions
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6271,6 +6272,13 @@ func (x *CloudProfileInfo) GetHasKey() bool {
 func (x *CloudProfileInfo) GetBackend() string {
 	if x != nil {
 		return x.Backend
+	}
+	return ""
+}
+
+func (x *CloudProfileInfo) GetRoute() string {
+	if x != nil {
+		return x.Route
 	}
 	return ""
 }
@@ -7240,14 +7248,15 @@ const file_agent_proto_rawDesc = "" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1d\n" +
 	"\n" +
-	"tool_count\x18\x03 \x01(\x05R\ttoolCount\"\xa2\x01\n" +
+	"tool_count\x18\x03 \x01(\x05R\ttoolCount\"\xb8\x01\n" +
 	"\x10CloudProfileInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06flavor\x18\x02 \x01(\tR\x06flavor\x12\x19\n" +
 	"\bbase_url\x18\x03 \x01(\tR\abaseUrl\x12\x14\n" +
 	"\x05model\x18\x04 \x01(\tR\x05model\x12\x17\n" +
 	"\ahas_key\x18\x05 \x01(\bR\x06hasKey\x12\x18\n" +
-	"\abackend\x18\x06 \x01(\tR\abackend\"\x19\n" +
+	"\abackend\x18\x06 \x01(\tR\abackend\x12\x14\n" +
+	"\x05route\x18\a \x01(\tR\x05route\"\x19\n" +
 	"\x17GetCloudProfilesRequest\"g\n" +
 	"\x18GetCloudProfilesResponse\x123\n" +
 	"\bprofiles\x18\x01 \x03(\v2\x17.agent.CloudProfileInfoR\bprofiles\x12\x16\n" +

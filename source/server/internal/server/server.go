@@ -271,7 +271,7 @@ func (s *Server) GetCloudProfiles(ctx context.Context, req *proto.GetCloudProfil
 			}
 		}
 		out.Profiles = append(out.Profiles, &proto.CloudProfileInfo{
-			Name: p.Name, Flavor: p.Flavor, BaseUrl: p.BaseURL, Model: p.Model, HasKey: hasKey, Backend: p.Backend,
+			Name: p.Name, Flavor: p.Flavor, BaseUrl: p.BaseURL, Model: p.Model, HasKey: hasKey, Backend: p.Backend, Route: p.Route,
 		})
 	}
 	return out, nil

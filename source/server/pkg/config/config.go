@@ -4,16 +4,31 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 // CloudProfile is one named cloud provider configuration. The API key is NOT
 // stored here — it lives in the OS keychain keyed by Name.
+//
+// Route names a specific access path with its own auth + identification
+// conventions:
+//   - "direct" (or "")  — vanilla path to the upstream provider (Anthropic
+//     direct, OpenAI direct, etc.). API key auth, no special headers.
+//   - "meridian"        — Meridian local OAuth bridge. Cercano emits
+//     opencode-style identification headers so Meridian routes through its
+//     OpenCode adapter (4-turn SDK cap vs. the default 3-turn). Borrowed
+//     identity; see anthropic/client.go for the TODO to negotiate a native
+//     Cercano adapter upstream.
+//
+// Route is an open enum — future bridges (CCR, etc.) get their own value and
+// adapter-specific handling. Empty string is treated as "direct".
 type CloudProfile struct {
 	Name    string `yaml:"name"`
 	Flavor  string `yaml:"flavor"` // messages | chat_completions | responses | bedrock
 	Backend string `yaml:"backend,omitempty"` // chat_completions only: selects per-backend quirks (openai|gemini|groq|…); empty → defensive default
+	Route   string `yaml:"route,omitempty"`   // direct (default) | meridian | ccr (future) | …
 	BaseURL string `yaml:"base_url"`
 	Model   string `yaml:"model"`
 }
@@ -169,6 +184,26 @@ func migrateCloudProfiles(cfg *Config) {
 	cfg.ActiveCloudProfile = "default"
 }
 
+// autoDetectMeridianRoute promotes profiles that look like Meridian (default
+// local OAuth bridge port) to route=meridian on first load. Without this,
+// users upgrading from a pre-route config would silently lose Meridian's
+// OpenCode-adapter treatment (3-turn SDK cap instead of 4). Heuristic only —
+// users can hand-edit afterwards. Safe: never overrides an explicit Route.
+//
+// The "127.0.0.1:3456" needle is Meridian's documented default port. If you
+// run Meridian on a different host/port, set route: meridian manually.
+func autoDetectMeridianRoute(cfg *Config) {
+	for i := range cfg.CloudProfiles {
+		p := &cfg.CloudProfiles[i]
+		if p.Route != "" {
+			continue
+		}
+		if strings.Contains(p.BaseURL, "127.0.0.1:3456") || strings.Contains(p.BaseURL, "localhost:3456") {
+			p.Route = "meridian"
+		}
+	}
+}
+
 // Load reads config from the given path, merges with defaults, then applies
 // environment variable overrides. Returns defaults if the file doesn't exist.
 func Load(path string) (Config, error) {
@@ -211,6 +246,7 @@ func Load(path string) (Config, error) {
 
 	applyEnvOverrides(&cfg)
 	migrateCloudProfiles(&cfg)
+	autoDetectMeridianRoute(&cfg)
 	return cfg, nil
 }
 

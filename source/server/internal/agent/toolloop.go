@@ -38,6 +38,7 @@ type ToolLoopInput struct {
 	Permissions *PermissionStore
 	ConvHistory []llm.Message
 	UserInput   string
+	Images      []InlineImage
 	Model       string
 	System      string
 
@@ -125,7 +126,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	hist := append([]llm.Message{}, in.ConvHistory...)
 	hist = append(hist, llm.Message{
 		Role:   llm.RoleUser,
-		Blocks: []llm.Block{{Type: llm.BlockText, Text: in.UserInput}},
+		Blocks: buildUserBlocks(in.UserInput, in.Images),
 	})
 
 	catalog := agenttools.BuildToolCatalog(in.Registry)

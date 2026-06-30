@@ -1657,6 +1657,7 @@ func (s *Server) runMainLoop(
 		Registry:            s.toolRegistry,
 		Permissions:         s.permStore,
 		UserInput:           req.GetInput(),
+		Images:              mapInlineImages(req.GetImages()),
 		Model:               s.mainModelFor(isCloud),
 		System:              s.buildSystemPrompt(req.GetWorkDir()),
 		EventSink:           sink,
@@ -1749,6 +1750,22 @@ func (s *Server) assembleHistory(ctx context.Context, store conversation.Store, 
 	return view
 }
 
+// mapInlineImages converts proto images to agent.InlineImage.
+func mapInlineImages(in []*proto.InlineImage) []agent.InlineImage {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]agent.InlineImage, 0, len(in))
+	for _, p := range in {
+		out = append(out, agent.InlineImage{
+			Index:     int(p.GetIndex()),
+			Data:      p.GetData(),
+			MediaType: p.GetMediaType(),
+		})
+	}
+	return out
+}
+
 func (s *Server) mapRequest(req *proto.ProcessRequestRequest) *agent.Request {
 	return &agent.Request{
 		Input:          req.Input,
@@ -1758,6 +1775,7 @@ func (s *Server) mapRequest(req *proto.ProcessRequestRequest) *agent.Request {
 		DirectLocal:    req.DirectLocal,
 		ModelOverride:  req.ModelOverride,
 		Coproc:         req.Coproc,
+		Images:         mapInlineImages(req.GetImages()),
 	}
 }
 

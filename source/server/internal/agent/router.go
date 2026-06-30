@@ -69,6 +69,9 @@ type Request struct {
 	DirectLocal    bool   // Skip SmartRouter, go directly to local provider
 	ModelOverride  string // Use this model instead of the configured default (per-request)
 	Coproc         bool   // Route per Locus Mode's co-processor tier (local/cloud)
+	// Images are user-attached images; buildUserBlocks splices them into the
+	// user message at "[image N]" markers in Input.
+	Images []InlineImage
 	// OnRoute, if set, is called once the provider for this turn is chosen, with
 	// the model name and whether it's a cloud engine. Lets the streaming server
 	// announce the route to clients for a live engine badge. Nil-safe.

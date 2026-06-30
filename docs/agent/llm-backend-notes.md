@@ -24,6 +24,17 @@ Verified by the live integration tests (`internal/llm/openai/client_integration_
 The cercano-cli settings page wires these up (`/s` → Cloud Providers); untested
 rows there carry an `(untested)` label that mirrors the `—` cells above.
 
+### User image input
+
+`cercano-cli` can attach images to a turn: drag an image file onto the terminal
+(it arrives as a path paste) or paste a copied image (Cmd+V / Ctrl+V on macOS).
+Each shows as an atomic `[image N]` chip; backspace deletes the whole chip. The
+image travels as bytes in `ProcessRequestRequest.images` and the server splices it
+into the user message at its marker (`buildUserBlocks`), so the model sees the
+image where you dropped it. PNG/JPEG/GIF/WEBP, ≤20 MiB. If the active model can't
+see images the CLI warns but still sends (capability-aware routing will supersede
+this).
+
 ## Findings (2026-06-28, live Gemini run)
 
 ### 1. Image URLs are not portable — base64 is

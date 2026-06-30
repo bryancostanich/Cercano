@@ -35,6 +35,10 @@ CLI checks `localhost:50052` for an existing `cercano` gRPC server. If absent, a
 
 Default theme `cracker` (12 named colors; bg `#1A1A1A`, primary amber `#EA8212`, accent lime `#BDF000`, info cyan `#00C8E8`, etc.). 62-col splash banner with 2-row half-block wordmark + lime rail + status meta. One-pass left-to-right shimmer on boot (1.4 s, amber→white peak→amber, ~30 fps via `tea.Tick`). Main layout: header bar, scrollback, input row, status bar — rounded outer frame. Tool calls render in boxed sub-frame with cyan header + green/red diff gutter. Confirm prompts use single-keypress letter shortcuts `[y]es / [n]o / [d]iff / [e]dit`.
 
+### Attaching images
+
+Drop an image file onto the terminal window or paste a copied image (Cmd+V / Ctrl+V on macOS). Each image appears as an atomic `[image N]` chip in the input; press backspace to remove a chip. Supported formats: PNG, JPEG, GIF, WEBP, up to 20 MiB per image. The image travels with your message to the model, placed at the marker where you dropped or pasted it. If your active model can't see images, the CLI warns you but still sends the image — the model will ignore it.
+
 ### Permission model
 
 Every tool carries a tier — R (read, runs silently), W (write, confirm with preview), X (destructive, always confirms). Bypass permissions mode (`--bypass-permissions` / `--yolo`, `/bypass on|off|status [full|tiered]`, or pinned in `permissions.yaml`) lets power users skip per-call confirms; first engagement shows a red confirmation overlay; status bar leads with red `! BYPASS`; each skipped call shows `⚡ (no confirm — bypass)` in scrollback. Allowlist in `permissions.yaml` can promote specific commands to silent.

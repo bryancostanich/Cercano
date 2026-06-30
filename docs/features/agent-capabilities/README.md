@@ -116,22 +116,29 @@ Tier 2:  [5 Subagent engine] ←─────────┘
 
 ## Status
 
-- **0a capability foundation (Tasks 1–10): built** in this worktree, each task reviewed
-  clean. Not yet merged to main. 15 file/git tools unified as capabilities on both
-  surfaces; `dispatch.Tool` retired; `InvokeCapability` + MCP adapter live.
-- **0a dispatch engine (1b): BUILT** (worktree branch, 16 commits, whole-branch review =
-  ready to merge; not merged). Scope: **unify everything first** — co-processor work and
-  the agentic loop now both run on `llm.Provider` through one `Dispatch` primitive with a
-  single seam for routing (`dispatch.Select`), project-context injection (`ContextAware`),
-  and usage (`usage.RecordingProvider`). OneShot + Agentic modes; Agentic reuses the
-  main agent's `RunToolLoop`. Migrated: co-processor execution + the summarize/extract/
-  classify/explain commands (now capabilities on both surfaces). Added `dispatch`/`workflow`
-  and `review` capabilities; least-privilege subagent tool grants. Retired the legacy
-  `ModelProvider` coproc path and the engine-based `dispatch.Loop`. Supersedes the old Task 11.
-  → [`dispatch-engine/plan.md`](dispatch-engine/plan.md)
-- **0b steering & protocol substrate: BUILT** (worktree branch, whole-branch review = ready
-  to merge; not merged). Protocol library + steering block + `get_protocol` + `protocols sync`.
-- Tier 1 (task model, git workflows) and remaining Tier 2 (brainstorming, planning,
-  autonomous) not yet specced.
+All three foundation phases are **BUILT, merged to `main`, and pushed** (`origin/main`).
+
+- **0a capability foundation: DONE.** One `Capability` model; 15 file/git tools unified as
+  capabilities on both surfaces; `dispatch.Tool` retired; `InvokeCapability` + MCP adapter live.
+- **0b steering & protocol substrate: DONE.** Protocol library + always-on steering block +
+  `get_protocol` capability + `cercano protocols sync` SKILL.md generation. (Watchdog — Part C
+  — designed but not built; see below.)
+- **0a dispatch engine (1b): DONE.** Co-processor work and the agentic loop both run on
+  `llm.Provider` through one `Dispatch` primitive with a single seam for routing
+  (`dispatch.Select`), project-context injection (`ContextAware`), and usage
+  (`usage.RecordingProvider`). OneShot + Agentic modes; Agentic reuses the main agent's
+  `RunToolLoop`. Co-processor execution migrated; `summarize`/`extract`/`classify`/`explain`
+  are now capabilities on both surfaces; added `dispatch`/`workflow` and `review` capabilities;
+  least-privilege subagent grants. Legacy `ModelProvider` coproc path + engine-based
+  `dispatch.Loop` retired. Supersedes the old Task 11.
+  → [`dispatch-engine/plan.md`](dispatch-engine/plan.md) ·
+  [`dispatch-engine/implementation-notes.md`](dispatch-engine/implementation-notes.md)
+  (as-built deviations, telemetry decision, follow-ons)
+
+**Not yet specced** (roadmap bullets only — each gets its own design → plan when started):
+Tier 1 (#3 task model + client surfacing, #4 git workflow tools) and the rest of Tier 2
+(#6 brainstorming, #7 planning, #8 autonomous). The **watchdog** (0b Part C) is designed in
+`steering-protocol-substrate/design.md` but has no plan yet — now unblocked by the dispatch
+engine's small-model routing seam.
 </content>
 </invoke>

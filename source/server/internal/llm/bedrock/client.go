@@ -101,8 +101,21 @@ func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatRespons
 	return resp, nil
 }
 
-// StreamChat is implemented in stream.go (Task 3). Placeholder so the package
-// compiles and satisfies llm.Provider; replaced next task.
+// StreamChat opens a Converse stream and returns an llm.StreamReader.
 func (c *Client) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.StreamReader, error) {
-	return nil, fmt.Errorf("bedrock: streaming not yet implemented")
+	msgs, err := messagesToConverse(ctx, req.Messages)
+	if err != nil {
+		return nil, err
+	}
+	out, err := c.api.ConverseStream(ctx, &bedrockruntime.ConverseStreamInput{
+		ModelId:         aws.String(modelOr(c.model, req.Model)),
+		Messages:        msgs,
+		System:          systemBlocks(req.System),
+		ToolConfig:      toolsToConverse(req.Tools),
+		InferenceConfig: inferenceConfig(req),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("bedrock: converse stream: %w", err)
+	}
+	return newStreamReader(out.GetStream()), nil
 }

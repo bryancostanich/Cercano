@@ -22,12 +22,6 @@ type Services struct {
 	Conversations conversation.Store
 	ProjectCtx    *projectctx.Loader
 
-	// RunCoproc runs a co-processor prompt through the agent's local pipeline
-	// (the equivalent of ProcessRequest with Coproc=true) and returns the
-	// model output. Set by the agent server when it builds the registry; used
-	// by the co-processor capabilities (Phase 5). May be nil in tests.
-	RunCoproc func(ctx context.Context, prompt, projectDir string) (string, error)
-
 	// Dispatch runs an agentic (or one-shot) unit of delegated model work through
 	// the unified dispatch engine. Nil until wired by the server.
 	Dispatch func(ctx context.Context, spec dispatch.Spec) (dispatch.Result, error)

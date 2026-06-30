@@ -63,5 +63,5 @@ func (extractCap) Execute(ctx context.Context, call *capabilities.Call) (*capabi
 	}
 
 	prompt := fmt.Sprintf("Extract the following from the text below: %s\n\nRules:\n- Output ONLY the extracted content, no commentary\n- Preserve the original formatting of extracted sections\n- If nothing matches, respond with \"No matching content found.\"\n\nText:\n%s", a.Query, content)
-	return runCoproc(ctx, call, prompt)
+	return runCoproc(ctx, call, "extract", prompt, content)
 }

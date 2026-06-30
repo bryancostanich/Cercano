@@ -96,9 +96,9 @@ type Server struct {
 func (s *Server) SetContextLoader(l *projectctx.Loader) { s.contextLoader = l }
 
 // SetDispatchEngine wires the unified dispatch engine so capability Services
-// (RunCoproc) can run one-shot co-processor work, and installs the agentic
-// runner so Agentic dispatches can call agent.RunToolLoop without creating an
-// import cycle between internal/dispatch and internal/agent.
+// can dispatch one-shot co-processor work, and installs the agentic runner
+// so Agentic dispatches can call agent.RunToolLoop without creating an import
+// cycle between internal/dispatch and internal/agent.
 // Call before InstallCapabilities.
 func (s *Server) SetDispatchEngine(e *dispatch.Engine) {
 	s.dispatchEngine = e
@@ -127,23 +127,6 @@ func (s *Server) InstallCapabilities() {
 		Config:        &s.currentConfig,
 		ProjectCtx:    s.contextLoader,
 		// Engine/Conversations wired in a later phase; nil-safe until then.
-		RunCoproc: func(ctx context.Context, prompt, projectDir string) (string, error) {
-			if s.dispatchEngine == nil {
-				return "", fmt.Errorf("dispatch engine not configured")
-			}
-			res, err := s.dispatchEngine.Dispatch(ctx, dispatch.Spec{
-				Mode:                dispatch.OneShot,
-				Role:                dispatch.RoleCoproc,
-				Prompt:              prompt,
-				WantsProjectContext: true,
-				WorkDir:             projectDir,
-				Source:              "coproc",
-			})
-			if err != nil {
-				return "", err
-			}
-			return res.Text, nil
-		},
 		Dispatch: func(ctx context.Context, spec dispatch.Spec) (dispatch.Result, error) {
 			if s.dispatchEngine == nil {
 				return dispatch.Result{}, fmt.Errorf("dispatch engine not configured")

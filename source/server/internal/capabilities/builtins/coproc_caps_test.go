@@ -9,17 +9,18 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/capabilities"
+	"cercano/source/server/internal/dispatch"
 )
 
-// fakeCoproc returns a Services with a RunCoproc stub that records the last
-// prompt and returns a fixed reply.
-func fakeCoproc(t *testing.T, reply string) (capabilities.Services, *string) {
+// fakeDispatch returns a Services with a Dispatch stub that records the last
+// Spec and returns a fixed reply.
+func fakeDispatch(t *testing.T, reply string) (capabilities.Services, *dispatch.Spec) {
 	t.Helper()
-	var captured string
+	var captured dispatch.Spec
 	svc := capabilities.Services{
-		RunCoproc: func(_ context.Context, prompt, _ string) (string, error) {
-			captured = prompt
-			return reply, nil
+		Dispatch: func(_ context.Context, spec dispatch.Spec) (dispatch.Result, error) {
+			captured = spec
+			return dispatch.Result{Text: reply}, nil
 		},
 	}
 	return svc, &captured
@@ -32,6 +33,23 @@ func callWith(t *testing.T, svc capabilities.Services, args any) *capabilities.C
 		t.Fatalf("marshal args: %v", err)
 	}
 	return &capabilities.Call{Args: raw, WorkDir: "/proj", Svc: svc}
+}
+
+// assertCommonSpec checks the fields every coproc capability must set.
+func assertCommonSpec(t *testing.T, spec *dispatch.Spec, wantSource string) {
+	t.Helper()
+	if spec.Source != wantSource {
+		t.Errorf("Source = %q, want %q", spec.Source, wantSource)
+	}
+	if !spec.RecordUsage {
+		t.Error("RecordUsage = false, want true")
+	}
+	if !spec.WantsProjectContext {
+		t.Error("WantsProjectContext = false, want true")
+	}
+	if spec.ContentTokensAvoided == 0 {
+		t.Error("ContentTokensAvoided = 0, want non-zero")
+	}
 }
 
 // ---- Summarize ----
@@ -60,20 +78,21 @@ func TestSummarize_Meta(t *testing.T) {
 }
 
 func TestSummarize_Execute_DefaultLength(t *testing.T) {
-	svc, captured := fakeCoproc(t, "summary result")
+	svc, gotSpec := fakeDispatch(t, "summary result")
 	call := callWith(t, svc, map[string]string{"text": "hello world"})
 	res, err := Summarize().Execute(context.Background(), call)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(*captured, "Summarize the following text in one paragraph") {
-		t.Errorf("prompt missing expected fragment; got: %q", *captured)
+	assertCommonSpec(t, gotSpec, "summarize")
+	if !strings.Contains(gotSpec.Prompt, "Summarize the following text in one paragraph") {
+		t.Errorf("prompt missing expected fragment; got: %q", gotSpec.Prompt)
 	}
-	if !strings.Contains(*captured, "Text to summarize:") {
-		t.Errorf("prompt missing 'Text to summarize:'; got: %q", *captured)
+	if !strings.Contains(gotSpec.Prompt, "Text to summarize:") {
+		t.Errorf("prompt missing 'Text to summarize:'; got: %q", gotSpec.Prompt)
 	}
-	if !strings.Contains(*captured, "hello world") {
-		t.Errorf("prompt missing content; got: %q", *captured)
+	if !strings.Contains(gotSpec.Prompt, "hello world") {
+		t.Errorf("prompt missing content; got: %q", gotSpec.Prompt)
 	}
 	if !strings.Contains(res.Text, "summary result") {
 		t.Errorf("result text missing reply; got: %q", res.Text)
@@ -81,26 +100,28 @@ func TestSummarize_Execute_DefaultLength(t *testing.T) {
 }
 
 func TestSummarize_Execute_Brief(t *testing.T) {
-	svc, captured := fakeCoproc(t, "short")
+	svc, gotSpec := fakeDispatch(t, "short")
 	call := callWith(t, svc, map[string]string{"text": "some text", "max_length": "brief"})
 	_, err := Summarize().Execute(context.Background(), call)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(*captured, "1-2 sentences") {
-		t.Errorf("brief prompt missing '1-2 sentences'; got: %q", *captured)
+	assertCommonSpec(t, gotSpec, "summarize")
+	if !strings.Contains(gotSpec.Prompt, "1-2 sentences") {
+		t.Errorf("brief prompt missing '1-2 sentences'; got: %q", gotSpec.Prompt)
 	}
 }
 
 func TestSummarize_Execute_Detailed(t *testing.T) {
-	svc, captured := fakeCoproc(t, "long")
+	svc, gotSpec := fakeDispatch(t, "long")
 	call := callWith(t, svc, map[string]string{"text": "some text", "max_length": "detailed"})
 	_, err := Summarize().Execute(context.Background(), call)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(*captured, "multiple paragraphs covering all key points") {
-		t.Errorf("detailed prompt missing expected fragment; got: %q", *captured)
+	assertCommonSpec(t, gotSpec, "summarize")
+	if !strings.Contains(gotSpec.Prompt, "multiple paragraphs covering all key points") {
+		t.Errorf("detailed prompt missing expected fragment; got: %q", gotSpec.Prompt)
 	}
 }
 
@@ -110,19 +131,20 @@ func TestSummarize_Execute_FilePath(t *testing.T) {
 	if err := os.WriteFile(f, []byte("file content here"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	svc, captured := fakeCoproc(t, "done")
+	svc, gotSpec := fakeDispatch(t, "done")
 	call := callWith(t, svc, map[string]string{"file_path": f})
 	_, err := Summarize().Execute(context.Background(), call)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(*captured, "file content here") {
-		t.Errorf("prompt missing file content; got: %q", *captured)
+	assertCommonSpec(t, gotSpec, "summarize")
+	if !strings.Contains(gotSpec.Prompt, "file content here") {
+		t.Errorf("prompt missing file content; got: %q", gotSpec.Prompt)
 	}
 }
 
 func TestSummarize_Execute_NeitherErrors(t *testing.T) {
-	svc, _ := fakeCoproc(t, "")
+	svc, _ := fakeDispatch(t, "")
 	call := callWith(t, svc, map[string]string{})
 	_, err := Summarize().Execute(context.Background(), call)
 	if err == nil {
@@ -156,20 +178,21 @@ func TestExtract_Meta(t *testing.T) {
 }
 
 func TestExtract_Execute_Basic(t *testing.T) {
-	svc, captured := fakeCoproc(t, "extracted")
+	svc, gotSpec := fakeDispatch(t, "extracted")
 	call := callWith(t, svc, map[string]string{"text": "source text", "query": "find dates"})
 	res, err := Extract().Execute(context.Background(), call)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(*captured, "find dates") {
-		t.Errorf("prompt missing query; got: %q", *captured)
+	assertCommonSpec(t, gotSpec, "extract")
+	if !strings.Contains(gotSpec.Prompt, "find dates") {
+		t.Errorf("prompt missing query; got: %q", gotSpec.Prompt)
 	}
-	if !strings.Contains(*captured, "Extract the following") {
-		t.Errorf("prompt missing 'Extract the following'; got: %q", *captured)
+	if !strings.Contains(gotSpec.Prompt, "Extract the following") {
+		t.Errorf("prompt missing 'Extract the following'; got: %q", gotSpec.Prompt)
 	}
-	if !strings.Contains(*captured, "source text") {
-		t.Errorf("prompt missing content; got: %q", *captured)
+	if !strings.Contains(gotSpec.Prompt, "source text") {
+		t.Errorf("prompt missing content; got: %q", gotSpec.Prompt)
 	}
 	if !strings.Contains(res.Text, "extracted") {
 		t.Errorf("result missing reply; got: %q", res.Text)
@@ -182,19 +205,20 @@ func TestExtract_Execute_FilePath(t *testing.T) {
 	if err := os.WriteFile(f, []byte("file data"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	svc, captured := fakeCoproc(t, "ok")
+	svc, gotSpec := fakeDispatch(t, "ok")
 	call := callWith(t, svc, map[string]string{"file_path": f, "query": "something"})
 	_, err := Extract().Execute(context.Background(), call)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(*captured, "file data") {
-		t.Errorf("prompt missing file content; got: %q", *captured)
+	assertCommonSpec(t, gotSpec, "extract")
+	if !strings.Contains(gotSpec.Prompt, "file data") {
+		t.Errorf("prompt missing file content; got: %q", gotSpec.Prompt)
 	}
 }
 
 func TestExtract_Execute_MissingQueryErrors(t *testing.T) {
-	svc, _ := fakeCoproc(t, "")
+	svc, _ := fakeDispatch(t, "")
 	call := callWith(t, svc, map[string]string{"text": "some text"})
 	_, err := Extract().Execute(context.Background(), call)
 	if err == nil {
@@ -206,7 +230,7 @@ func TestExtract_Execute_MissingQueryErrors(t *testing.T) {
 }
 
 func TestExtract_Execute_NeitherErrors(t *testing.T) {
-	svc, _ := fakeCoproc(t, "")
+	svc, _ := fakeDispatch(t, "")
 	call := callWith(t, svc, map[string]string{"query": "find something"})
 	_, err := Extract().Execute(context.Background(), call)
 	if err == nil {
@@ -240,34 +264,36 @@ func TestClassify_Meta(t *testing.T) {
 }
 
 func TestClassify_Execute_NoCategories(t *testing.T) {
-	svc, captured := fakeCoproc(t, "Category: X\nConfidence: high\nReasoning: because")
+	svc, gotSpec := fakeDispatch(t, "Category: X\nConfidence: high\nReasoning: because")
 	call := callWith(t, svc, map[string]string{"text": "some code"})
 	_, err := Classify().Execute(context.Background(), call)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(*captured, "Determine the most appropriate category.") {
-		t.Errorf("prompt missing default category instruction; got: %q", *captured)
+	assertCommonSpec(t, gotSpec, "classify")
+	if !strings.Contains(gotSpec.Prompt, "Determine the most appropriate category.") {
+		t.Errorf("prompt missing default category instruction; got: %q", gotSpec.Prompt)
 	}
-	if !strings.Contains(*captured, "some code") {
-		t.Errorf("prompt missing content; got: %q", *captured)
+	if !strings.Contains(gotSpec.Prompt, "some code") {
+		t.Errorf("prompt missing content; got: %q", gotSpec.Prompt)
 	}
 }
 
 func TestClassify_Execute_WithCategories(t *testing.T) {
-	svc, captured := fakeCoproc(t, "ok")
-	call := callWith(t, svc, map[string]string{"text": "x", "categories": "bug,feature,docs"})
+	svc, gotSpec := fakeDispatch(t, "ok")
+	call := callWith(t, svc, map[string]string{"text": "some text to classify", "categories": "bug,feature,docs"})
 	_, err := Classify().Execute(context.Background(), call)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(*captured, "Choose from these categories: bug,feature,docs") {
-		t.Errorf("prompt missing category instruction; got: %q", *captured)
+	assertCommonSpec(t, gotSpec, "classify")
+	if !strings.Contains(gotSpec.Prompt, "Choose from these categories: bug,feature,docs") {
+		t.Errorf("prompt missing category instruction; got: %q", gotSpec.Prompt)
 	}
 }
 
 func TestClassify_Execute_NeitherErrors(t *testing.T) {
-	svc, _ := fakeCoproc(t, "")
+	svc, _ := fakeDispatch(t, "")
 	call := callWith(t, svc, map[string]string{})
 	_, err := Classify().Execute(context.Background(), call)
 	if err == nil {
@@ -301,17 +327,18 @@ func TestExplain_Meta(t *testing.T) {
 }
 
 func TestExplain_Execute_Basic(t *testing.T) {
-	svc, captured := fakeCoproc(t, "explanation")
+	svc, gotSpec := fakeDispatch(t, "explanation")
 	call := callWith(t, svc, map[string]string{"text": "func main() {}"})
 	res, err := Explain().Execute(context.Background(), call)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(*captured, "Explain the following code or text") {
-		t.Errorf("prompt missing expected fragment; got: %q", *captured)
+	assertCommonSpec(t, gotSpec, "explain")
+	if !strings.Contains(gotSpec.Prompt, "Explain the following code or text") {
+		t.Errorf("prompt missing expected fragment; got: %q", gotSpec.Prompt)
 	}
-	if !strings.Contains(*captured, "func main() {}") {
-		t.Errorf("prompt missing content; got: %q", *captured)
+	if !strings.Contains(gotSpec.Prompt, "func main() {}") {
+		t.Errorf("prompt missing content; got: %q", gotSpec.Prompt)
 	}
 	if !strings.Contains(res.Text, "explanation") {
 		t.Errorf("result missing reply; got: %q", res.Text)
@@ -319,7 +346,7 @@ func TestExplain_Execute_Basic(t *testing.T) {
 }
 
 func TestExplain_Execute_NeitherErrors(t *testing.T) {
-	svc, _ := fakeCoproc(t, "")
+	svc, _ := fakeDispatch(t, "")
 	call := callWith(t, svc, map[string]string{})
 	_, err := Explain().Execute(context.Background(), call)
 	if err == nil {

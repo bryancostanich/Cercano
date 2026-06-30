@@ -57,5 +57,5 @@ func (explainCap) Execute(ctx context.Context, call *capabilities.Call) (*capabi
 	}
 
 	prompt := fmt.Sprintf("Explain the following code or text. Describe what it does, its key components, and how they interact. Be concise and focus on what a developer needs to understand to work with this code.\n\nCode:\n%s", content)
-	return runCoproc(ctx, call, prompt)
+	return runCoproc(ctx, call, "explain", prompt, content)
 }

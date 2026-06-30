@@ -67,5 +67,5 @@ func (summarizeCap) Execute(ctx context.Context, call *capabilities.Call) (*capa
 	}
 
 	prompt := fmt.Sprintf("Summarize the following text in %s. Focus on the most important information. Output only the summary, no preamble.\n\nText to summarize:\n%s", lengthInstruction, content)
-	return runCoproc(ctx, call, prompt)
+	return runCoproc(ctx, call, "summarize", prompt, content)
 }

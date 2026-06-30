@@ -1033,11 +1033,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case resumeRequestedMsg:
 		// Fired by the history picker's OnSelect after the overlay closes.
-		m = m.applyResume(msg.ConversationID)
+		var resumeCmd tea.Cmd
+		m, resumeCmd = m.applyResume(msg.ConversationID)
 		if msg.Title != "" {
 			m.sessionTitle = msg.Title
 		}
-		return m, nil
+		return m, resumeCmd
 
 	case dragScrollTickMsg:
 		cmd, _ := m.chat.DragScrollTick()
@@ -1218,7 +1219,9 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmd, contextRefreshTick())
 	case slash.ResultResumeConversation:
 		// /resume <id> path — slash already validated against the agent.
-		m = m.applyResume(res.Text)
+		var resumeCmd tea.Cmd
+		m, resumeCmd = m.applyResume(res.Text)
+		return m, resumeCmd
 	case slash.ResultSetPromptColor:
 		m.promptBorderColor = m.resolvePromptColor(res.Text)
 		m.promptColorToken = res.Text
@@ -1728,30 +1731,34 @@ func resumeEntries(turns []agentclient.PersistedTurn) []*Entry {
 }
 
 // applyResume updates the model + the convRef shared with the slash registry,
-// then rehydrates scrollback from the persisted turns.
-func (m Model) applyResume(conversationID string) Model {
+// then rehydrates scrollback from the persisted turns. Returns a tea.Cmd that
+// fetches authoritative context usage from the server — the polling loop only
+// arms after a turn completes, so without this the meter sits at 0 from
+// resume until the user takes their next turn. The cmd is the only way to
+// drive the meter from this code path; callers MUST plumb it through.
+func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	turns, err := m.agent.ResumeConversation(ctx, conversationID)
 	if err != nil {
 		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "resume failed: " + err.Error()})
 		m.refreshViewport()
-		return m
+		return m, nil
 	}
 	m.convID = conversationID
 	if m.convRef != nil {
 		m.convRef.id = conversationID
 	}
 	m.chat.SetEntriesSlice(nil)
+	// cumIn/cumOut wait for fetchContextUsage. The previous local sum here
+	// summed only TokensIn, mishandled tool-call turns, and got overwritten
+	// by the RPC within a roundtrip anyway — a wrong first-paint with no
+	// upside.
 	m.cumIn = 0
 	m.cumOut = 0
 	m.chat.ExitToolNav()
 	m.splashShown = false
 	m.chat.SetEntriesSlice(resumeEntries(turns))
-	for _, t := range turns {
-		m.cumIn += t.TokensIn
-		m.cumOut += t.TokensOut
-	}
 	m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: fmt.Sprintf("⟲ resumed %d turn(s)", len(turns))})
 	// Restore the prior session's living recap into the footer line (renderRecap).
 	// Don't also push it into scrollback — that showed the recap twice on resume.
@@ -1759,7 +1766,7 @@ func (m Model) applyResume(conversationID string) Model {
 		m.recap = info.Recap
 	}
 	m.relayout()
-	return m
+	return m, fetchContextUsage(m.agent, m.convID)
 }
 
 // renderConfirmPrompt builds the single-line confirm message shown in

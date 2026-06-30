@@ -828,9 +828,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			images := promptImagesToInline(m.input.Attachments())
 			m.input.SetValue("")
 			m.splashShown = false
-			// Submitting mid-stream queues the message instead of starting a
-			// second turn; it sends when the current stream completes.
-			if m.streaming {
+			// Slash commands are local navigation / UI actions, never sent to
+			// the model — bypass the mid-stream queue so /c, /m, /rename etc.
+			// take effect immediately even while a turn is in flight.
+			isSlash := strings.HasPrefix(text, "/")
+			// Submitting a non-slash mid-stream queues the message instead of
+			// starting a second turn; it sends when the current stream completes.
+			if m.streaming && !isSlash {
 				m.chat.Enqueue(text, images)
 				m.relayout()
 				return m, nil

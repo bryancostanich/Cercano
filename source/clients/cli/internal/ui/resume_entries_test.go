@@ -18,7 +18,7 @@ func TestResumeEntries_SkipsEmptyToolTurns(t *testing.T) {
 		{Role: "assistant", Content: "   "}, // whitespace-only — also non-prose
 		{Role: "assistant", Content: "Here are the files."},
 	}
-	got := resumeEntries(turns)
+	got := resumeEntries(turns, 0) // frozenThrough=0: no compaction divider
 	if len(got) != 2 {
 		t.Fatalf("got %d entries, want 2 (empty/whitespace tool turns dropped)", len(got))
 	}

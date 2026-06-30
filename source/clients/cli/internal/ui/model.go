@@ -1859,11 +1859,36 @@ func (m Model) resolvePromptColor(token string) color.Color {
 // tool_result (user) turns whose Content is empty — their payload lives in
 // content_json, which the resume RPC does not carry. Rendering those as entries
 // produces blank gaps with floating ▶ markers, so they are skipped here.
-func resumeEntries(turns []agentclient.PersistedTurn) []*Entry {
-	entries := make([]*Entry, 0, len(turns))
+//
+// When frozenThrough > 0 (compaction has happened), a RoleDivider entry is
+// inserted at the freeze boundary so the user sees WHERE in the scrollback
+// the model's verbatim context begins. Turns with CreatedAt.Unix() <=
+// frozenThrough are frozen (in the recap); turns above this timestamp are
+// live (model sees them verbatim). The count of frozen turns is included
+// in the divider label.
+func resumeEntries(turns []agentclient.PersistedTurn, frozenThrough int64) []*Entry {
+	entries := make([]*Entry, 0, len(turns)+1)
+	insertDivider := frozenThrough > 0
+	dividerInserted := false
+	frozenCount := 0
+	if insertDivider {
+		for _, t := range turns {
+			if t.CreatedAt.Unix() <= frozenThrough {
+				frozenCount++
+			}
+		}
+	}
 	for _, t := range turns {
 		if strings.TrimSpace(t.Content) == "" {
 			continue
+		}
+		// Insert the divider before the first live (post-freeze) turn.
+		if insertDivider && !dividerInserted && t.CreatedAt.Unix() > frozenThrough {
+			entries = append(entries, &Entry{
+				Role:    RoleDivider,
+				Content: fmt.Sprintf("⟲ %d turn(s) compacted into recap above · live context below", frozenCount),
+			})
+			dividerInserted = true
 		}
 		role := RoleSystem
 		switch t.Role {
@@ -1873,6 +1898,14 @@ func resumeEntries(turns []agentclient.PersistedTurn) []*Entry {
 			role = RoleAssistant
 		}
 		entries = append(entries, &Entry{Role: role, Content: t.Content})
+	}
+	// All turns were frozen — no live tail. The divider belongs at the end so
+	// the user's next prompt lands clearly below the freeze line.
+	if insertDivider && !dividerInserted {
+		entries = append(entries, &Entry{
+			Role:    RoleDivider,
+			Content: fmt.Sprintf("⟲ %d turn(s) compacted into recap above · live context below", frozenCount),
+		})
 	}
 	return entries
 }
@@ -1905,23 +1938,19 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 	m.cumOut = 0
 	m.chat.ExitToolNav()
 	m.splashShown = false
-	m.chat.SetEntriesSlice(resumeEntries(turns))
+	// Fetch the compaction state so we can place the freeze-boundary divider
+	// in the right spot inside the resumed history. Failure is non-fatal —
+	// the resume still works, just without the divider.
+	var frozenThrough int64
+	if cs, err := m.agent.GetCompactionState(ctx, conversationID); err == nil && cs != nil {
+		frozenThrough = cs.FrozenThrough
+	}
+	m.chat.SetEntriesSlice(resumeEntries(turns, frozenThrough))
 	// Restore the prior session's living recap into the footer line (renderRecap).
 	// Don't also push it into scrollback — that showed the recap twice on resume.
-	hasRecap := false
 	if info, err := m.agent.GetConversation(ctx, conversationID); err == nil && info.Recap != "" {
 		m.recap = info.Recap
-		hasRecap = true
 	}
-	// Divider message reflects the actual compaction state: when a recap
-	// exists, the resumed turns above are in the model's recap (summarized);
-	// when no recap, the model still has the full text but the divider marks
-	// the boundary between resumed and live so the user can tell what's new.
-	label := fmt.Sprintf("⟲ resumed %d turn(s)", len(turns))
-	if hasRecap {
-		label = fmt.Sprintf("⟲ %d prior turn(s) summarized into recap · model sees recap above", len(turns))
-	}
-	m.chat.AppendEntry(&Entry{Role: RoleDivider, Content: label})
 	m.relayout()
 	return m, fetchContextUsage(m.agent, m.convID)
 }

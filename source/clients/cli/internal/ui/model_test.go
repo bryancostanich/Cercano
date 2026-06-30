@@ -29,13 +29,22 @@ func TestContextMeter_CompactingOverlay(t *testing.T) {
 	if !strings.Contains(out, "compacting") {
 		t.Errorf("expected a compacting overlay while a pass runs:\n%s", out)
 	}
-	// The bar and token count must persist through a compaction pass — the
-	// compacting label rides alongside the meter, not on top of it. This
-	// guards against regressing back to the bar-replacement layout.
+	// The "compacting…" label is overlaid on the 20-cell bar itself. With
+	// fillN=1 and the label centered (start=4), col 0 stays a raw █ and
+	// cols 1-3 + 15-19 stay raw ░ — so both glyphs remain visible alongside
+	// the overlaid letters and the bar's fill ratio still reads through.
 	if !strings.Contains(out, "█") {
-		t.Errorf("expected the filled bar to remain visible during compaction:\n%s", out)
+		t.Errorf("expected the un-overlaid filled cell to remain visible:\n%s", out)
+	}
+	if !strings.Contains(out, "░") {
+		t.Errorf("expected un-overlaid empty cells to remain visible:\n%s", out)
 	}
 	if !strings.Contains(out, "18.0k") || !strings.Contains(out, "200.0k") {
 		t.Errorf("expected token count to remain visible during compaction:\n%s", out)
+	}
+	// The label appears exactly once — overlaid on the bar — and is not
+	// also appended as a separate badge after the meter.
+	if strings.Count(out, "compacting") != 1 {
+		t.Errorf("expected exactly one compacting label (overlaid, not appended):\n%s", out)
 	}
 }

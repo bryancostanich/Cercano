@@ -1741,32 +1741,6 @@ func animateLimeSweep(text string) string {
 	return b.String()
 }
 
-// shimmerBar renders n filled meter cells with the same lime→white sweep
-// animateLimeSweep uses, so the context meter visibly works during a
-// compaction pass instead of being replaced by a label. Wall-clock-driven
-// like the other animators; re-renders are pumped by the existing
-// progressAnimTick loop that already fires while m.compacting is true.
-func shimmerBar(n int) string {
-	if n <= 0 {
-		return ""
-	}
-	const (
-		cycleMs = 1500
-		tail    = 4.0
-		padCols = 4.0
-	)
-	phaseMs := time.Now().UnixMilli() % int64(cycleMs)
-	progress := float64(phaseMs) / float64(cycleMs)
-	sweepPos := -padCols + progress*(float64(n)+2*padCols)
-	var b strings.Builder
-	for col := 0; col < n; col++ {
-		b.WriteString(lipgloss.NewStyle().
-			Foreground(progressColorAt(col, sweepPos, tail)).
-			Render("█"))
-	}
-	return b.String()
-}
-
 // progressColorAt returns the rendered color for one column at a given sweep
 // position. Lime base; the inside `tail` columns lerp toward white.
 func progressColorAt(col int, sweepPos float64, tail float64) color.Color {
@@ -2766,17 +2740,20 @@ func (m Model) renderContextMeter() string {
 	}
 	const cells = 20
 	fillN := int(pct * float64(cells))
-	// During a compaction pass, the filled portion runs the same lime→white
-	// sweep as the "compacting…" label, so the meter visibly works instead of
-	// being replaced. The empty cells stay static — they represent headroom
-	// that compaction isn't touching.
-	var fillRendered string
+	// During a compaction pass the "compacting…" label is overlaid on the
+	// bar itself. Cells outside the label render normally — lime→white
+	// shimmer █ for fill, dim ░ for empty. Cells under the label render their
+	// letter with per-cell contrast: dark glyph on the shimmer color when
+	// over the filled portion, shimmer color as the letter's foreground when
+	// over the empty portion — so the sweep animates across both halves of
+	// the label and the bar's fill ratio still reads through.
+	var bar string
 	if m.compacting {
-		fillRendered = shimmerBar(fillN)
+		bar = m.renderCompactingMeterBar(cells, fillN)
 	} else {
-		fillRendered = m.styles.MeterFill.Render(strings.Repeat("█", fillN))
+		bar = m.styles.MeterFill.Render(strings.Repeat("█", fillN)) +
+			m.styles.MeterEmpty.Render(strings.Repeat("░", cells-fillN))
 	}
-	bar := fillRendered + m.styles.MeterEmpty.Render(strings.Repeat("░", cells-fillN))
 	pctStyle := m.styles.Muted
 	switch {
 	case pct >= 0.9:
@@ -2784,13 +2761,11 @@ func (m Model) renderContextMeter() string {
 	case pct >= 0.7:
 		pctStyle = m.styles.Warn
 	}
+	// The savings badge shows whenever ctxRaw > used. During a compaction
+	// pass `used` drops live, so the percentage grows in real time alongside
+	// the overlaid "compacting…" label on the bar above.
 	badge := ""
-	switch {
-	case m.compacting:
-		// Spinner + sweeping label sit where the savings badge normally
-		// lives, so the bar above keeps its full information density.
-		badge = m.styles.Muted.Render("  ·  ") + animateSpinnerGlyph() + " " + animateLimeSweep("compacting…")
-	case m.ctxRaw > used && used > 0:
+	if m.ctxRaw > used && used > 0 {
 		saved := int(100 * (1 - float64(used)/float64(m.ctxRaw)))
 		badge = m.styles.Muted.Render(fmt.Sprintf("  ·  ▣ %d%%↓", saved))
 	}
@@ -2805,6 +2780,59 @@ func (m Model) renderContextMeter() string {
 		pctStyle.Render(fmt.Sprintf("%d%%", int(pct*100))),
 		badge,
 	}, "")
+}
+
+// renderCompactingMeterBar paints the 20-cell context meter with the
+// "compacting…" label overlaid on the bar. Cells outside the label render the
+// usual shimmer █ (fill) / dim ░ (empty). Cells under the label render their
+// letter with per-cell contrast: dark fg on the shimmer color as background
+// when over filled cells, shimmer color as fg on the terminal background
+// when over empty cells. Both halves animate via the same wall-clock
+// lime→white sweep `animateLimeSweep` uses, so the label visibly pulses on
+// either side of the fill boundary.
+func (m Model) renderCompactingMeterBar(cells, fillN int) string {
+	const (
+		cycleMs = 1500
+		tail    = 4.0
+		padCols = 4.0
+	)
+	label := []rune("compacting…")
+	labelLen := len(label)
+	start := (cells - labelLen) / 2
+	if start < 0 {
+		start = 0
+	}
+	end := start + labelLen
+	if end > cells {
+		end = cells
+	}
+	phaseMs := time.Now().UnixMilli() % int64(cycleMs)
+	progress := float64(phaseMs) / float64(cycleMs)
+	sweepPos := -padCols + progress*(float64(cells)+2*padCols)
+
+	var b strings.Builder
+	for col := 0; col < cells; col++ {
+		inLabel := col >= start && col < end
+		onFill := col < fillN
+		switch {
+		case inLabel && onFill:
+			b.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#1A1A1A")).
+				Background(progressColorAt(col, sweepPos, tail)).
+				Render(string(label[col-start])))
+		case inLabel && !onFill:
+			b.WriteString(lipgloss.NewStyle().
+				Foreground(progressColorAt(col, sweepPos, tail)).
+				Render(string(label[col-start])))
+		case !inLabel && onFill:
+			b.WriteString(lipgloss.NewStyle().
+				Foreground(progressColorAt(col, sweepPos, tail)).
+				Render("█"))
+		default: // !inLabel && !onFill
+			b.WriteString(m.styles.MeterEmpty.Render("░"))
+		}
+	}
+	return b.String()
 }
 
 // formatTokens renders 21400 → "21.4k", 1247 → "1.2k", 412 → "412".

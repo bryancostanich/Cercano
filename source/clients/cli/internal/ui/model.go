@@ -2849,12 +2849,13 @@ func (m Model) renderContextMeter() string {
 
 // renderCompactingMeterBar paints the 20-cell context meter with the
 // "compacting…" label overlaid on the bar. Cells outside the label render the
-// usual shimmer █ (fill) / dim ░ (empty). Cells under the label render their
-// letter with per-cell contrast: dark fg on the shimmer color as background
-// when over filled cells, shimmer color as fg on the terminal background
-// when over empty cells. Both halves animate via the same wall-clock
-// lime→white sweep `animateLimeSweep` uses, so the label visibly pulses on
-// either side of the fill boundary.
+// usual shimmer █ (fill) / dim ░ (empty). Cells UNDER the label render the
+// label letter colored as if it were the bar at that position: the shimmer
+// fill color for letters over the filled portion, the dim empty color for
+// letters over the empty portion. The fill boundary reads through the label
+// as a brightness transition across the letters — e.g., `co` bright vs.
+// `mpacting…` dim — so the user still sees how full the bar is. Both halves
+// animate via the same wall-clock lime→white sweep used elsewhere.
 func (m Model) renderCompactingMeterBar(cells, fillN int) string {
 	const (
 		cycleMs = 1500
@@ -2881,14 +2882,15 @@ func (m Model) renderCompactingMeterBar(cells, fillN int) string {
 		onFill := col < fillN
 		switch {
 		case inLabel && onFill:
-			b.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#1A1A1A")).
-				Background(progressColorAt(col, sweepPos, tail)).
-				Render(string(label[col-start])))
-		case inLabel && !onFill:
+			// Letter inherits the bar's bright shimmer color — feels like the
+			// bar's fill is showing through the letter shape.
 			b.WriteString(lipgloss.NewStyle().
 				Foreground(progressColorAt(col, sweepPos, tail)).
 				Render(string(label[col-start])))
+		case inLabel && !onFill:
+			// Letter inherits the bar's dim empty color — same idea, but
+			// for the un-filled side.
+			b.WriteString(m.styles.MeterEmpty.Render(string(label[col-start])))
 		case !inLabel && onFill:
 			b.WriteString(lipgloss.NewStyle().
 				Foreground(progressColorAt(col, sweepPos, tail)).

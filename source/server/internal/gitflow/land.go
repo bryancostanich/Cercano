@@ -50,6 +50,12 @@ type LandState struct {
 	Strategy   Strategy
 }
 
+// ConflictedFiles returns the currently unmerged paths (git diff --name-only --diff-filter=U).
+// It is the exported equivalent of conflictedFiles, for use by capability wrappers.
+func (r *Repo) ConflictedFiles(ctx context.Context) ([]string, error) {
+	return r.conflictedFiles(ctx)
+}
+
 // conflictedFiles returns the unmerged paths (git diff --name-only --diff-filter=U).
 func (r *Repo) conflictedFiles(ctx context.Context) ([]string, error) {
 	out, err := r.run(ctx, "diff", "--name-only", "--diff-filter=U")

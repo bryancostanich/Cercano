@@ -65,9 +65,15 @@ func Dial(ctx context.Context, addr string) (*Client, error) {
 func connect(ctx context.Context, addr string, timeout time.Duration) (*Client, error) {
 	dialCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	// 64 MiB matches the server recv limit; also future-proofs large responses.
+	const maxGRPCMsgBytes = 64 << 20
 	conn, err := grpc.DialContext(dialCtx, addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithBlock(),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallSendMsgSize(maxGRPCMsgBytes),
+			grpc.MaxCallRecvMsgSize(maxGRPCMsgBytes),
+		),
 	)
 	if err != nil {
 		return nil, err

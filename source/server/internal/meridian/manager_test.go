@@ -1,0 +1,199 @@
+package meridian
+
+import (
+	"context"
+	"errors"
+	"io"
+	"os/exec"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+// newTestManager builds a Manager wired entirely to fakes — no real spawns,
+// no network, no keychain. Callers pass nil for any fn they want to use the
+// defaults (NodeOK prereqs, auth=true, no port in use, never-ready probe).
+func newTestManager() *Manager {
+	m := New(nil, "")
+	m.prereqsFn = func() Prereqs { return Prereqs{NodeOK: true, NodeVersion: "v22.10.0"} }
+	m.authFn = func() bool { return true }
+	m.portUsedFn = func(int) bool { return false }
+	m.probeFn = func(context.Context, int) error { return nil } // ready immediately
+	return m
+}
+
+// fakeSpawn returns a long-lived sleep subprocess so the supervisor's
+// cmd.Wait() blocks until we explicitly Kill or Stop. Each spawn increments
+// the counter so tests can assert how many times we spawned.
+func fakeSpawn(counter *int32) func(context.Context, int, string, io.Writer) (*exec.Cmd, error) {
+	return func(ctx context.Context, port int, version string, sink io.Writer) (*exec.Cmd, error) {
+		atomic.AddInt32(counter, 1)
+		// `sleep 60` is plenty for test scope and self-cleans when killed.
+		c := exec.CommandContext(ctx, "sleep", "60")
+		if err := c.Start(); err != nil {
+			return nil, err
+		}
+		return c, nil
+	}
+}
+
+// waitForState busy-waits up to 3s for the manager to enter the given state.
+// Tests fail if it doesn't get there — three seconds is plenty of slack for
+// a goroutine handoff that should take microseconds.
+func waitForState(t *testing.T, m *Manager, want State) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if m.Status().State == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("never reached state %s (current: %s, msg: %q)", want, m.Status().State, m.Status().Message)
+}
+
+func TestEnsure_PrereqsMissing(t *testing.T) {
+	m := newTestManager()
+	m.prereqsFn = func() Prereqs {
+		return Prereqs{NodeOK: false, MissingNotes: []string{"Node.js 22+ not on PATH"}}
+	}
+	var spawned int32
+	m.spawnFn = fakeSpawn(&spawned)
+
+	m.Ensure(context.Background(), 3456)
+
+	if got := m.Status().State; got != StatePrereqsMissing {
+		t.Errorf("state = %s, want prereqs_missing", got)
+	}
+	if len(m.Status().MissingDeps) == 0 {
+		t.Errorf("MissingDeps empty, want at least one note")
+	}
+	if atomic.LoadInt32(&spawned) != 0 {
+		t.Errorf("spawned %d times, want 0 when prereqs missing", spawned)
+	}
+}
+
+func TestEnsure_NeedsAuth(t *testing.T) {
+	m := newTestManager()
+	m.authFn = func() bool { return false }
+	var spawned int32
+	m.spawnFn = fakeSpawn(&spawned)
+
+	m.Ensure(context.Background(), 3456)
+
+	if got := m.Status().State; got != StateNeedsAuth {
+		t.Errorf("state = %s, want needs_auth", got)
+	}
+	if atomic.LoadInt32(&spawned) != 0 {
+		t.Errorf("spawned %d times, want 0 when auth missing", spawned)
+	}
+}
+
+func TestEnsure_PortInUseAdoptsExternal(t *testing.T) {
+	m := newTestManager()
+	m.portUsedFn = func(int) bool { return true }
+	var spawned int32
+	m.spawnFn = fakeSpawn(&spawned)
+
+	m.Ensure(context.Background(), 3456)
+
+	if got := m.Status().State; got != StateExternal {
+		t.Errorf("state = %s, want external", got)
+	}
+	if atomic.LoadInt32(&spawned) != 0 {
+		t.Errorf("spawned when port already in use")
+	}
+}
+
+func TestEnsure_SuccessfulSpawnReachesReady(t *testing.T) {
+	m := newTestManager()
+	var spawned int32
+	m.spawnFn = fakeSpawn(&spawned)
+
+	m.Ensure(context.Background(), 3456)
+	waitForState(t, m, StateReady)
+
+	if atomic.LoadInt32(&spawned) != 1 {
+		t.Errorf("spawned %d times, want exactly 1", spawned)
+	}
+	if got := m.Status().Port; got != 3456 {
+		t.Errorf("Port = %d, want 3456", got)
+	}
+	m.Stop()
+}
+
+func TestEnsure_ProbeNeverSucceedsMarksFailed(t *testing.T) {
+	m := newTestManager()
+	var spawned int32
+	m.spawnFn = fakeSpawn(&spawned)
+	// Probe always fails — simulates a Meridian that started but never bound.
+	m.probeFn = func(context.Context, int) error { return errors.New("connection refused") }
+
+	// Drive supervise with a tight context so we don't wait the full 60s.
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	m.Ensure(ctx, 3456)
+	waitForState(t, m, StateFailed)
+}
+
+func TestEnsure_IdempotentOnSamePort(t *testing.T) {
+	m := newTestManager()
+	var spawned int32
+	m.spawnFn = fakeSpawn(&spawned)
+
+	m.Ensure(context.Background(), 3456)
+	waitForState(t, m, StateReady)
+	m.Ensure(context.Background(), 3456) // should no-op
+	time.Sleep(50 * time.Millisecond)    // give a phantom second spawn a chance to register
+
+	if got := atomic.LoadInt32(&spawned); got != 1 {
+		t.Errorf("spawned %d times, want 1 (second Ensure on same port should no-op)", got)
+	}
+	m.Stop()
+}
+
+func TestStop_FromReadyReturnsToDisabled(t *testing.T) {
+	m := newTestManager()
+	var spawned int32
+	m.spawnFn = fakeSpawn(&spawned)
+
+	m.Ensure(context.Background(), 3456)
+	waitForState(t, m, StateReady)
+
+	m.Stop()
+	if got := m.Status().State; got != StateDisabled {
+		t.Errorf("after Stop state = %s, want disabled", got)
+	}
+}
+
+func TestStatusListener_FiresOnTransitions(t *testing.T) {
+	m := newTestManager()
+	var spawned int32
+	m.spawnFn = fakeSpawn(&spawned)
+
+	var mu sync.Mutex
+	var seen []State
+	m.SetStatusListener(func(s Status) {
+		mu.Lock()
+		seen = append(seen, s.State)
+		mu.Unlock()
+	})
+
+	m.Ensure(context.Background(), 3456)
+	waitForState(t, m, StateReady)
+	m.Stop()
+
+	mu.Lock()
+	defer mu.Unlock()
+	// Expect Starting → Ready → Disabled (Stop sets Disabled directly).
+	want := []State{StateStarting, StateReady, StateDisabled}
+	if len(seen) != len(want) {
+		t.Fatalf("listener saw %v, want %v", seen, want)
+	}
+	for i, s := range seen {
+		if s != want[i] {
+			t.Errorf("transition[%d] = %s, want %s (full: %v)", i, s, want[i], seen)
+		}
+	}
+}

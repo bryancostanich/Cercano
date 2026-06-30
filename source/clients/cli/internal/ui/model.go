@@ -2508,26 +2508,39 @@ func (m *Model) unstageLastQueued() bool {
 	return true
 }
 
-// renderQueued draws the messages queued while a response streams, as dimmed
-// lines just above the prompt — indented to the content margin, one per line,
-// truncated to width. Empty when nothing is queued.
+// renderQueued draws the messages queued while a response streams as a
+// navy-fill strip just above the prompt — one per line, starting at the
+// content margin and spanning to the right edge. The "⊕" marker shows in
+// muted lime; the text in bright amber on the navy fill, so the queued
+// lines read as upcoming user prompts (matching the same palette slot
+// designated for echoed user-prompt rows in the scrollback). Empty when
+// nothing is queued.
 func (m Model) renderQueued() string {
 	queued := m.chat.Queued()
 	if len(queued) == 0 {
 		return ""
 	}
-	pad := strings.Repeat(" ", entryIndent)
-	avail := m.width - entryIndent - 2 // leave room for the "⊕ " marker
+	leftPad := strings.Repeat(" ", entryIndent)
+	avail := m.width - entryIndent - 2 // marker "⊕ " takes 2 cells
+	if avail < 1 {
+		avail = 1
+	}
 	lines := make([]string, len(queued))
 	for i, q := range queued {
 		text := q
-		if avail > 1 && lipgloss.Width(text) > avail {
+		if lipgloss.Width(text) > avail {
 			r := []rune(text)
 			if len(r) > avail-1 {
 				text = string(r[:avail-1]) + "…"
 			}
 		}
-		lines[i] = pad + m.styles.Muted.Render("⊕ "+text)
+		fill := avail - lipgloss.Width(text)
+		if fill < 0 {
+			fill = 0
+		}
+		lines[i] = leftPad +
+			m.styles.BufferUserMarker.Render("⊕ ") +
+			m.styles.BufferUserText.Render(text+strings.Repeat(" ", fill))
 	}
 	return strings.Join(lines, "\n")
 }

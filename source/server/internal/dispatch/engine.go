@@ -30,6 +30,14 @@ type Spec struct {
 	Source              string
 	ModelOverride       string // advisory model name within locus bounds
 
+	// ContentTokensAvoided is the estimated cloud tokens saved by handling this
+	// OneShot locally; recorded in telemetry when RecordUsage is set.
+	ContentTokensAvoided int
+	// RecordUsage, when true, emits one usage event (with the savings metric) to
+	// the engine's usage sink for this dispatch. Co-processor capabilities set it;
+	// processCoproc leaves it false so its telemetry stays MCP-side (no double-count).
+	RecordUsage bool
+
 	// Agentic-only fields (ignored for OneShot).
 
 	// Task is the open-ended instruction for the agentic tool loop.
@@ -73,8 +81,8 @@ type Engine struct {
 // providersFn is called per dispatch to resolve the current candidate providers,
 // so a runtime cloud-provider swap (e.g. a cloud-profile change) is honored
 // without rebuilding the engine. IMPORTANT: it must return RAW (unwrapped)
-// providers — the engine wraps the selected provider per-dispatch via usage.Wrap
-// to label usage by source; returning already-wrapped providers double-counts.
+// providers — the engine emits usage directly and conditionally (controlled by
+// Spec.RecordUsage) so returning already-wrapped providers would double-count.
 func NewEngine(providersFn func() Providers, modeFn func() locus.Mode, ctx *projectctx.Loader) *Engine {
 	return &Engine{
 		providersFn: providersFn,
@@ -140,11 +148,21 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 		},
 	}
 
-	// 5. Call provider, wrapped for source-labeled usage recording.
-	prov := usage.Wrap(sel.Provider, spec.Source, sel.IsCloud, e.usageSink)
-	resp, err := prov.Chat(ctx, req)
+	// 5. Call provider directly; emit usage only when the caller opts in.
+	resp, err := sel.Provider.Chat(ctx, req)
 	if err != nil {
 		return Result{}, err
+	}
+	if spec.RecordUsage && e.usageSink != nil {
+		e.usageSink(usage.Usage{
+			Source:               spec.Source,
+			Model:                model,
+			IsCloud:              sel.IsCloud,
+			InputTokens:          resp.InputTokens,
+			OutputTokens:         resp.OutputTokens,
+			ContentTokensAvoided: spec.ContentTokensAvoided,
+			TokenSaving:          true,
+		})
 	}
 
 	// 6. Collect text blocks.

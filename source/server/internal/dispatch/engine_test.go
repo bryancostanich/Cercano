@@ -116,10 +116,11 @@ func TestOneShotEmitsSourceLabeledUsage(t *testing.T) {
 	eng.SetUsageSink(sink)
 
 	_, err := eng.Dispatch(context.Background(), Spec{
-		Mode:   OneShot,
-		Role:   RoleCoproc,
-		Prompt: "summarize this",
-		Source: "coproc:summarize",
+		Mode:        OneShot,
+		Role:        RoleCoproc,
+		Prompt:      "summarize this",
+		Source:      "coproc:summarize",
+		RecordUsage: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -139,6 +140,71 @@ func TestOneShotEmitsSourceLabeledUsage(t *testing.T) {
 	}
 	if u.InputTokens != 9 || u.OutputTokens != 4 {
 		t.Errorf("tokens=%d/%d, want 9/4", u.InputTokens, u.OutputTokens)
+	}
+}
+
+func TestOneShotRecordsUsageOnlyWhenRequested(t *testing.T) {
+	var captured []usage.Usage
+	sink := func(u usage.Usage) { captured = append(captured, u) }
+
+	prov := echoProvider{}
+	mkEng := func() *Engine {
+		eng := NewEngine(
+			provs(Providers{Local: prov}),
+			func() locus.Mode { return locus.LocalOnly },
+			nil,
+		)
+		eng.SetModelFor(func(isCloud bool) string { return "local-model" })
+		eng.SetUsageSink(sink)
+		return eng
+	}
+
+	// Case 1: RecordUsage=true — must emit exactly one event with savings fields.
+	captured = nil
+	eng := mkEng()
+	_, err := eng.Dispatch(context.Background(), Spec{
+		Mode:                 OneShot,
+		Role:                 RoleCoproc,
+		Prompt:               "do something",
+		Source:               "summarize",
+		RecordUsage:          true,
+		ContentTokensAvoided: 42,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(captured) != 1 {
+		t.Fatalf("RecordUsage=true: expected 1 usage event, got %d", len(captured))
+	}
+	u := captured[0]
+	if u.Source != "summarize" {
+		t.Errorf("Source=%q, want %q", u.Source, "summarize")
+	}
+	if u.ContentTokensAvoided != 42 {
+		t.Errorf("ContentTokensAvoided=%d, want 42", u.ContentTokensAvoided)
+	}
+	if !u.TokenSaving {
+		t.Errorf("TokenSaving=false, want true")
+	}
+	if u.InputTokens != 9 || u.OutputTokens != 4 {
+		t.Errorf("tokens=%d/%d, want 9/4", u.InputTokens, u.OutputTokens)
+	}
+
+	// Case 2: RecordUsage=false — must emit nothing.
+	captured = nil
+	eng2 := mkEng()
+	_, err = eng2.Dispatch(context.Background(), Spec{
+		Mode:        OneShot,
+		Role:        RoleCoproc,
+		Prompt:      "do something",
+		Source:      "coproc:research",
+		RecordUsage: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(captured) != 0 {
+		t.Fatalf("RecordUsage=false: expected 0 usage events, got %d", len(captured))
 	}
 }
 

@@ -105,3 +105,110 @@ func TestGitLandCleanFinalizes(t *testing.T) {
 		t.Fatalf("feature not ancestor of main after land: %v\n%s", err, out)
 	}
 }
+
+// landConflictRepo builds a repo where landing `feature` onto `main` conflicts
+// in shared.txt, writes the given gitflow.yaml on main, then runs git_land
+// (continue=false) to pause mid-rebase. shared.txt is left with conflict markers;
+// callers resolve it and re-invoke with continue=true. Returns the repo dir.
+func landConflictRepo(t *testing.T, gitflowYAML string) string {
+	t.Helper()
+	dir := tempGitRepo(t)
+	sh := func(args ...string) {
+		c := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", args, out)
+		}
+	}
+	write := func(name, content string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("shared.txt", "base")
+	sh("add", "-A")
+	sh("commit", "-m", "chore: base")
+	if err := os.MkdirAll(filepath.Join(dir, ".cercano"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(".cercano/gitflow.yaml", gitflowYAML)
+	sh("add", "-A")
+	sh("commit", "-m", "chore: cfg")
+	sh("checkout", "-b", "feature")
+	write("shared.txt", "feature-change")
+	sh("add", "-A")
+	sh("commit", "-m", "feat: f")
+	sh("checkout", "main")
+	write("shared.txt", "main-change")
+	sh("add", "-A")
+	sh("commit", "-m", "chore: m")
+
+	args, _ := json.Marshal(map[string]any{"feature": "feature", "cwd": dir})
+	res, err := GitLand().Execute(context.Background(), &capabilities.Call{Args: args, WorkDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "Conflicted files") {
+		t.Fatalf("expected a conflict pause, got %q", res.Text)
+	}
+	return dir
+}
+
+func mainContainsFeature(dir string) bool {
+	return exec.Command("git", "-C", dir, "merge-base", "--is-ancestor", "feature", "main").Run() == nil
+}
+
+// TestGitLandFloorRequiresHumanReview: a conflict in a sensitive path must trip
+// the deterministic floor — human review required, NOT finalized, and the model
+// review dispatch is NOT even consulted (floor is checked first).
+func TestGitLandFloorRequiresHumanReview(t *testing.T) {
+	dir := landConflictRepo(t, "trunk: main\ntest_command: \"true\"\nsensitive_paths:\n  - \"shared.txt\"\n")
+	if err := os.WriteFile(filepath.Join(dir, "shared.txt"), []byte("resolved"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dispatchCalled := false
+	svc := capabilities.Services{
+		Dispatch: func(_ context.Context, _ dispatch.Spec) (dispatch.Result, error) {
+			dispatchCalled = true
+			return dispatch.Result{}, nil
+		},
+	}
+	args, _ := json.Marshal(map[string]any{"feature": "feature", "continue": true, "cwd": dir})
+	res, err := GitLand().Execute(context.Background(), &capabilities.Call{Args: args, WorkDir: dir, Svc: svc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "human review required") {
+		t.Fatalf("expected floor to require human review, got %q", res.Text)
+	}
+	if dispatchCalled {
+		t.Fatal("deterministic floor must trip BEFORE the model review dispatch")
+	}
+	if mainContainsFeature(dir) {
+		t.Fatal("must NOT finalize to trunk when the floor requires human review")
+	}
+}
+
+// TestGitLandRiskyVerdictStops: a RISKY review verdict must stop the land —
+// not finalized to trunk.
+func TestGitLandRiskyVerdictStops(t *testing.T) {
+	dir := landConflictRepo(t, "trunk: main\ntest_command: \"true\"\n")
+	if err := os.WriteFile(filepath.Join(dir, "shared.txt"), []byte("resolved"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := capabilities.Services{
+		Dispatch: func(_ context.Context, _ dispatch.Spec) (dispatch.Result, error) {
+			return dispatch.Result{Text: "VERDICT: RISKY\nREASONING: dropped a guard clause"}, nil
+		},
+	}
+	args, _ := json.Marshal(map[string]any{"feature": "feature", "continue": true, "cwd": dir})
+	res, err := GitLand().Execute(context.Background(), &capabilities.Call{Args: args, WorkDir: dir, Svc: svc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "review flagged risk") {
+		t.Fatalf("expected risk stop, got %q", res.Text)
+	}
+	if mainContainsFeature(dir) {
+		t.Fatal("must NOT finalize to trunk when review flags risk")
+	}
+}

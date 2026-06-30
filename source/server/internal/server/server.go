@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -33,6 +34,7 @@ import (
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
 	mcphost "cercano/source/server/internal/mcp_host"
+	"cercano/source/server/internal/meridian"
 	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/usage"
@@ -73,6 +75,7 @@ type Server struct {
 	capRegistry         *capabilities.Registry
 	permStore           *agent.PermissionStore
 	mcpManager          McpManager
+	meridianMgr         *meridian.Manager
 	pendingDecisions    *agent.PendingDecisions
 	cloudLLMProvider    llm.Provider
 	localLLMProvider    llm.Provider // native-tool-loop local provider (Ollama)
@@ -245,6 +248,31 @@ func (s *Server) SetUsageSink(fn func(usage.Usage)) { s.usageSink = fn }
 // SetSecrets attaches the secrets store used to retrieve profile API keys.
 func (s *Server) SetSecrets(st secrets.Store) { s.secrets = st }
 
+// SetupMeridian constructs the local Meridian proxy manager and wires its
+// status listener to the event hub so MeridianStatusChanged is broadcast on
+// every state transition. logPath is the file Meridian's stdout/stderr is
+// teed into (typically ~/.cercano/meridian.log).
+//
+// Call once at startup, after the event hub is initialised. After this,
+// rebuildCloudLocked will Ensure/Stop the proxy as the active profile's
+// route field changes.
+func (s *Server) SetupMeridian(logPath string) {
+	s.meridianMgr = meridian.New(nil, logPath)
+	s.meridianMgr.SetStatusListener(func(st meridian.Status) {
+		s.broadcastMeridianStatus(st)
+	})
+}
+
+// Shutdown tears down long-lived subprocess managers the server owns
+// (currently: Meridian). Safe to call once at process exit; cheap when
+// nothing was started. Does NOT stop the gRPC server itself — that's the
+// caller's job (cmd/cercano/main.go uses GracefulStop).
+func (s *Server) Shutdown() {
+	if s.meridianMgr != nil {
+		s.meridianMgr.Stop()
+	}
+}
+
 // activeCloudModel returns the cloud model from the active profile — the
 // authoritative request-time value. Falls back to the legacy CloudModel
 // field only when no active profile exists (e.g. local-only configs). All
@@ -361,7 +389,48 @@ func (s *Server) rebuildCloudLocked() error {
 		s.coordinator.SetCloudProvider(mp)
 	}
 	s.currentConfig.CloudModel = p.Model // keep CloudModel reporting consistent
+	s.syncMeridianForProfile(p)
 	return nil
+}
+
+// syncMeridianForProfile starts or stops the managed Meridian proxy based on
+// the active profile's Route field. Called at the end of rebuildCloudLocked
+// so a profile change (or initial load) keeps the proxy in sync with what
+// the cloud route expects.
+//
+// No-op when SetupMeridian was never called (tests / minimal embeddings).
+func (s *Server) syncMeridianForProfile(p config.CloudProfile) {
+	if s.meridianMgr == nil {
+		return
+	}
+	if p.Route != "meridian" {
+		s.meridianMgr.Stop()
+		return
+	}
+	port := meridianPortFromBaseURL(p.BaseURL)
+	s.meridianMgr.Ensure(context.Background(), port)
+}
+
+// meridianPortFromBaseURL extracts the TCP port from a profile's BaseURL,
+// falling back to 3456 (Meridian's default) on parse failure or missing port.
+// Only loopback URLs are sensible here — the manager spawns Meridian locally,
+// so a remote BaseURL would mean "talk to someone else's proxy" and is
+// effectively unmanaged.
+func meridianPortFromBaseURL(baseURL string) int {
+	const defaultPort = 3456
+	if baseURL == "" {
+		return defaultPort
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return defaultPort
+	}
+	if p := u.Port(); p != "" {
+		if n, err := strconv.Atoi(p); err == nil {
+			return n
+		}
+	}
+	return defaultPort
 }
 
 // RebuildCloud exports rebuildCloud for use by cmd/cercano/main.go at startup.
@@ -385,6 +454,11 @@ func (s *Server) GetCloudProfiles(ctx context.Context, req *proto.GetCloudProfil
 		out.Profiles = append(out.Profiles, &proto.CloudProfileInfo{
 			Name: p.Name, Flavor: p.Flavor, BaseUrl: p.BaseURL, Model: p.Model, HasKey: hasKey, Backend: p.Backend, Route: p.Route,
 		})
+	}
+	if s.meridianMgr != nil {
+		out.MeridianStatus = meridianStatusToProto(s.meridianMgr.Status())
+	} else {
+		out.MeridianStatus = &proto.MeridianStatus{State: "disabled"}
 	}
 	return out, nil
 }

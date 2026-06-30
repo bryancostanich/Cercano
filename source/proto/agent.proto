@@ -587,6 +587,7 @@ message ClientEvent {
   oneof event {
     PermissionModeChanged permission_mode_changed = 1;
     ConfigChanged config_changed = 2;
+    MeridianStatusChanged meridian_status_changed = 3;
   }
 }
 
@@ -603,6 +604,31 @@ message ConfigChanged {
   string field = 1;
   string value = 2;
 }
+
+// MeridianStatus is the live state of Cercano's managed Meridian proxy
+// subprocess. Clients render a setup card or status pill from this — they
+// never spawn or talk to Meridian directly.
+//
+// state values (string for forward-compat — new states can be added without
+// breaking older clients):
+//   "disabled"         — no active profile uses route=meridian
+//   "prereqs_missing"  — Node.js too old / not installed; see missing_deps
+//   "needs_auth"       — Claude not authenticated; client should offer
+//                        "Sign in to Claude" which shells out to `claude login`
+//   "starting"         — subprocess spawning / readiness probe pending
+//   "ready"            — proxy listening on port and responsive
+//   "failed"           — spawn or probe failed; see message
+//   "external"         — port already in use by something we did not spawn
+//                        (existing meridian / OpenCode / other); we reuse
+message MeridianStatus {
+  string state = 1;
+  string message = 2;
+  int32 port = 3;
+  repeated string missing_deps = 4;
+}
+
+// MeridianStatusChanged is broadcast on every Meridian state transition.
+message MeridianStatusChanged { MeridianStatus status = 1; }
 
 // Allow/Deny pair the asynchronous PermissionRequired stream event with a
 // client reply. tool_use_id is the same id the event carried.
@@ -684,6 +710,11 @@ message GetCloudProfilesRequest {}
 message GetCloudProfilesResponse {
   repeated CloudProfileInfo profiles = 1;
   string active = 2;
+  // Snapshot of the local Meridian proxy state. Always present; "disabled"
+  // when no active profile uses route=meridian. Saves clients a second RPC
+  // for the cloud-config screen — live updates still come via
+  // MeridianStatusChanged events.
+  MeridianStatus meridian_status = 3;
 }
 message SetActiveCloudProfileRequest  { string name = 1; }
 message SetActiveCloudProfileResponse { bool ok = 1; string error = 2; }

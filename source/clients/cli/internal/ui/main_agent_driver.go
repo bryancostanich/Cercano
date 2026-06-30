@@ -32,9 +32,9 @@ type chatStreamMsg struct {
 // host stores cancel (so Esc aborts the turn) and issues waitCmd, which drains
 // one StreamMsg, maps it via streamMsgToEvent, and wraps it in a chatStreamMsg
 // carrying a re-arm of itself. Channel close → streamEndMsg{}.
-func (d *mainAgentDriver) Submit(ctx context.Context, input string) (tea.Cmd, context.CancelFunc, error) {
+func (d *mainAgentDriver) Submit(ctx context.Context, input string, images []agentclient.InlineImage) (tea.Cmd, context.CancelFunc, error) {
 	ctx, cancel := context.WithCancel(ctx)
-	ch, err := d.agent.StreamChat(ctx, d.convID, input, d.workDir)
+	ch, err := d.agent.StreamChat(ctx, d.convID, input, d.workDir, images...)
 	if err != nil {
 		cancel()
 		return nil, nil, err

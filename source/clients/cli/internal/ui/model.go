@@ -166,6 +166,12 @@ type Model struct {
 	// /bypass /mode slash handlers.
 	permissionMode string
 
+	// supportsVision is true when the active provider can accept image
+	// inputs. Fetched once at startup via fetchVisionCmd. Used by
+	// visionNotice to show a dim warning when images are attached but the
+	// model can't see them. Interim until capability-aware routing lands.
+	supportsVision bool
+
 }
 
 // pendingToolCall is a queued tool invocation awaiting user confirmation.
@@ -305,6 +311,7 @@ func (m *Model) applyInputStyles() {
 		Text:        lipgloss.NewStyle().Foreground(p.Primary),
 		Placeholder: lipgloss.NewStyle().Foreground(p.Muted),
 		Selection:   lipgloss.NewStyle().Foreground(p.BgDeep).Background(p.Info),
+		Chip:        lipgloss.NewStyle().Foreground(p.Accent).Bold(true),
 	})
 }
 
@@ -326,7 +333,7 @@ func (m *Model) applyTheme(t theme.Theme) {
 
 // Init is called by Bubble Tea once at startup.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.input.Focus(), m.splash.Init(), fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent), subscribeEventsCmd(m.agent))
+	return tea.Batch(m.input.Focus(), m.splash.Init(), fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent), fetchVisionCmd(m.agent), subscribeEventsCmd(m.agent))
 }
 
 // permissionModeMsg carries the result of the startup GetPermissionMode RPC.
@@ -345,6 +352,33 @@ func fetchPermissionModeCmd(ag *agentclient.Client) tea.Cmd {
 		}
 		return permissionModeMsg{Mode: mode}
 	}
+}
+
+// visionCapsMsg carries the result of the startup GetProviderCapabilities RPC.
+type visionCapsMsg struct{ supported bool }
+
+// fetchVisionCmd asks the agent whether the active provider accepts image
+// inputs and returns a visionCapsMsg. Errors are treated as unsupported so
+// the warning fires when in doubt.
+func fetchVisionCmd(ag *agentclient.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		caps, err := ag.GetProviderCapabilities(ctx)
+		if err != nil {
+			return visionCapsMsg{supported: false}
+		}
+		return visionCapsMsg{supported: caps.SupportsVision}
+	}
+}
+
+// visionNotice returns a dim warning when images are attached but the active
+// model can't accept them. Interim UX until capability-aware routing lands.
+func (m Model) visionNotice() string {
+	if len(m.input.Attachments()) == 0 || m.supportsVision {
+		return ""
+	}
+	return m.styles.Muted.Render("⚠ active model can't see images")
 }
 
 // toolsLoadedMsg carries the result of the startup ListTools RPC; populates
@@ -624,6 +658,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m = m.preparePromptInput()
+		// A drag-dropped image arrives as a paste of its path; a copied image
+		// may arrive as an empty/whitespace paste (bytes live on the clipboard).
+		if strings.TrimSpace(msg.Content) == "" {
+			if (&m).handleClipboardImage() {
+				m.relayout()
+				return m, nil
+			}
+		} else if (&m).handleImagePaste(msg.Content) {
+			m.relayout()
+			return m, nil
+		}
 		var cmd tea.Cmd
 		prevVal := m.input.Value()
 		m.input, cmd = m.input.Update(msg)
@@ -718,6 +763,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.preparePromptInput()
 			// fall through
 		}
+		// ctrl+v: if the clipboard holds an image, attach it; otherwise fall
+		// through so the terminal's native paste mechanism handles it.
+		if keyStr == "ctrl+v" && !m.contentPageActive() && m.pendingConfirm == nil {
+			m = m.preparePromptInput()
+			if (&m).handleClipboardImage() {
+				m.relayout()
+				return m, nil
+			}
+			// no image on clipboard → fall through to normal handling
+		}
 		// Esc on empty input enters tool-entry navigation mode, focusing the
 		// most-recent tool entry. No-op when scrollback has no tool entries.
 		if key.Matches(msg, keys.Back) && m.input.Value() == "" {
@@ -761,18 +816,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if text == "" {
 				return m, nil
 			}
+			images := promptImagesToInline(m.input.Attachments())
 			m.input.SetValue("")
 			m.splashShown = false
 			// Submitting mid-stream queues the message instead of starting a
 			// second turn; it sends when the current stream completes.
 			if m.streaming {
-				m.chat.Enqueue(text)
+				m.chat.Enqueue(text, images)
 				m.relayout()
 				return m, nil
 			}
 			// Reset the input back to one line (and reclaim any splash rows).
 			m.relayout()
-			return m.submit(text)
+			return m.submit(text, images)
 		case "shift+enter":
 			// Insert a hard newline for multi-line composing; relayout so the
 			// input grows by a row (up to the cap).
@@ -976,6 +1032,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.toolCache = cache
 		return m, nil
 
+	case visionCapsMsg:
+		m.supportsVision = msg.supported
+		return m, nil
+
 	case toolResultMsg:
 		var body string
 		if msg.Err != nil {
@@ -1015,7 +1075,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Drain the next queued message: each completed turn fires the next.
 		if nextMsg, ok := m.chat.DrainNext(); ok {
 			m.relayout()
-			nm, cmd := m.submit(nextMsg)
+			nm, cmd := m.submit(nextMsg.text, nextMsg.images)
 			return nm, tea.Batch(cmd, done)
 		}
 		return m, done
@@ -1033,11 +1093,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case resumeRequestedMsg:
 		// Fired by the history picker's OnSelect after the overlay closes.
-		m = m.applyResume(msg.ConversationID)
+		var resumeCmd tea.Cmd
+		m, resumeCmd = m.applyResume(msg.ConversationID)
 		if msg.Title != "" {
 			m.sessionTitle = msg.Title
 		}
-		return m, nil
+		return m, resumeCmd
 
 	case dragScrollTickMsg:
 		cmd, _ := m.chat.DragScrollTick()
@@ -1081,7 +1142,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) submit(text string) (tea.Model, tea.Cmd) {
+// promptImagesToInline converts prompt attachments to agentclient images.
+func promptImagesToInline(atts []promptImage) []agentclient.InlineImage {
+	if len(atts) == 0 {
+		return nil
+	}
+	out := make([]agentclient.InlineImage, 0, len(atts))
+	for _, a := range atts {
+		out = append(out, agentclient.InlineImage{
+			Index:     int32(a.id),
+			Data:      a.data,
+			MediaType: a.mediaType,
+		})
+	}
+	return out
+}
+
+// plural returns "s" for n != 1, "" for n == 1.
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model, tea.Cmd) {
 	// Record for ↑/↓ history recall (skip consecutive duplicates), and reset
 	// the browse position back to the live input.
 	if n := len(m.inputHistory); n == 0 || m.inputHistory[n-1] != text {
@@ -1094,8 +1179,13 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 		next, cmd := m.runSlash(text)
 		return next, cmd
 	}
-	// User turn
-	m.chat.AppendEntry(&Entry{Role: RoleUser, Content: text})
+	// User turn — show markers + image count suffix when images are attached.
+	content := text
+	if len(images) > 0 {
+		content = strings.TrimSpace(content)
+		content += fmt.Sprintf("  (%d image%s)", len(images), plural(len(images)))
+	}
+	m.chat.AppendEntry(&Entry{Role: RoleUser, Content: content})
 	// Assistant placeholder
 	m.chat.AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
 	m.refreshViewport()
@@ -1103,7 +1193,7 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 	// Pass cwd so the agent prepends .cercano/context.md if present.
 	wd, _ := os.Getwd()
 	driver := &mainAgentDriver{agent: m.agent, convID: m.convID, workDir: wd}
-	cmd, cancel, err := driver.Submit(context.Background(), text)
+	cmd, cancel, err := driver.Submit(context.Background(), text, images)
 	if err != nil {
 		m.errMsg = err.Error()
 		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "error: " + err.Error()})
@@ -1218,7 +1308,9 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmd, contextRefreshTick())
 	case slash.ResultResumeConversation:
 		// /resume <id> path — slash already validated against the agent.
-		m = m.applyResume(res.Text)
+		var resumeCmd tea.Cmd
+		m, resumeCmd = m.applyResume(res.Text)
+		return m, resumeCmd
 	case slash.ResultSetPromptColor:
 		m.promptBorderColor = m.resolvePromptColor(res.Text)
 		m.promptColorToken = res.Text
@@ -1388,6 +1480,35 @@ func (m Model) contentScrollbarAt(mouse tea.Mouse) (contentPageScroller, content
 		return nil, contentPageScrollState{}, false
 	}
 	return scroller, state, true
+}
+
+// handleImagePaste attaches image chips if the pasted text resolves to image
+// file path(s). Returns true if it consumed the paste (caller must NOT insert
+// the text literally); false means treat the paste as normal text.
+func (m *Model) handleImagePaste(pasted string) bool {
+	imgs, ok := classifyImagePaste(pasted)
+	if !ok {
+		return false
+	}
+	for _, img := range imgs {
+		m.input.AddImage(img.data, img.mediaType, img.source)
+	}
+	return true
+}
+
+// handleClipboardImage attaches a chip if the OS clipboard holds an image.
+// Returns true if it attached one. Rejects images exceeding maxDroppedImageBytes.
+func (m *Model) handleClipboardImage() bool {
+	data, mt, ok := clipboardImage()
+	if !ok {
+		return false
+	}
+	if len(data) > maxDroppedImageBytes {
+		m.errMsg = fmt.Sprintf("clipboard image too large (%d MiB; limit %d MiB)", len(data)>>20, maxDroppedImageBytes>>20)
+		return false
+	}
+	m.input.AddImage(data, mt, "")
+	return true
 }
 
 // handleCtrlCKey owns the app-wide Ctrl+C contract for every content page:
@@ -1728,30 +1849,34 @@ func resumeEntries(turns []agentclient.PersistedTurn) []*Entry {
 }
 
 // applyResume updates the model + the convRef shared with the slash registry,
-// then rehydrates scrollback from the persisted turns.
-func (m Model) applyResume(conversationID string) Model {
+// then rehydrates scrollback from the persisted turns. Returns a tea.Cmd that
+// fetches authoritative context usage from the server — the polling loop only
+// arms after a turn completes, so without this the meter sits at 0 from
+// resume until the user takes their next turn. The cmd is the only way to
+// drive the meter from this code path; callers MUST plumb it through.
+func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	turns, err := m.agent.ResumeConversation(ctx, conversationID)
 	if err != nil {
 		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "resume failed: " + err.Error()})
 		m.refreshViewport()
-		return m
+		return m, nil
 	}
 	m.convID = conversationID
 	if m.convRef != nil {
 		m.convRef.id = conversationID
 	}
 	m.chat.SetEntriesSlice(nil)
+	// cumIn/cumOut wait for fetchContextUsage. The previous local sum here
+	// summed only TokensIn, mishandled tool-call turns, and got overwritten
+	// by the RPC within a roundtrip anyway — a wrong first-paint with no
+	// upside.
 	m.cumIn = 0
 	m.cumOut = 0
 	m.chat.ExitToolNav()
 	m.splashShown = false
 	m.chat.SetEntriesSlice(resumeEntries(turns))
-	for _, t := range turns {
-		m.cumIn += t.TokensIn
-		m.cumOut += t.TokensOut
-	}
 	m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: fmt.Sprintf("⟲ resumed %d turn(s)", len(turns))})
 	// Restore the prior session's living recap into the footer line (renderRecap).
 	// Don't also push it into scrollback — that showed the recap twice on resume.
@@ -1759,7 +1884,7 @@ func (m Model) applyResume(conversationID string) Model {
 		m.recap = info.Recap
 	}
 	m.relayout()
-	return m
+	return m, fetchContextUsage(m.agent, m.convID)
 }
 
 // renderConfirmPrompt builds the single-line confirm message shown in
@@ -1970,8 +2095,11 @@ func (m Model) handleContextViewKey(cv *contextView, msg tea.KeyPressMsg) (Model
 		// focus backward (right/left arrows expand/collapse — see below). With a
 		// non-empty prompt, fall through so the textarea owns cursor movement.
 		if m.input.Value() == "" {
-			if msg, ok := cv.chat.UnstageLast(); ok {
-				m.input.SetValue(msg)
+			if turn, ok := cv.chat.UnstageLast(); ok {
+				m.input.SetValue(turn.text)
+				for _, img := range turn.images {
+					m.input.RegisterImage(int(img.Index), img.Data, img.MediaType, "")
+				}
 				return m, nil
 			}
 			cv.focusNextExpandable(-1)
@@ -2040,7 +2168,7 @@ func (m Model) handleContextViewKey(cv *contextView, msg tea.KeyPressMsg) (Model
 // and fire the driver. Mirrors the main page's submit path (sendChatMessage).
 func (m Model) submitContextEdit(cv *contextView, input string) (Model, tea.Cmd) {
 	if cv.busy() {
-		cv.chat.Enqueue(input)
+		cv.chat.Enqueue(input, nil)
 		return m, nil
 	}
 	cv.busyFlag = true
@@ -2089,7 +2217,7 @@ func (m Model) routeChatMsg(msg tea.Msg) (Model, tea.Cmd) {
 	cv.chat.rebuild()
 	if !cv.busy() {
 		if next, ok := cv.chat.DrainNext(); ok {
-			return m.submitContextEdit(cv, next)
+			return m.submitContextEdit(cv, next.text)
 		}
 		return m, nil
 	}
@@ -2224,6 +2352,9 @@ func (m Model) View() tea.View {
 	inputIdx := len(parts) + len(promptParts)
 	promptParts = append(promptParts, m.input.View())
 	promptParts = append(promptParts, promptLine)
+	if notice := m.visionNotice(); notice != "" {
+		promptParts = append(promptParts, notice)
+	}
 	promptParts = append(promptParts, m.renderStatus())
 
 	spareRows := m.height - countLines(parts) - countLines(promptParts)
@@ -2348,12 +2479,17 @@ func (m Model) renderSlashSuggestions() string {
 // unstageLastQueued pops the most-recently-queued message back into the prompt
 // for editing and drops it from the queue. Returns false when the queue is
 // empty so callers can fall through to history recall.
+// Images are re-registered via RegisterImage so the existing "[image N]"
+// markers in the restored text resolve without inserting duplicate markers.
 func (m *Model) unstageLastQueued() bool {
 	last, ok := m.chat.UnstageLast()
 	if !ok {
 		return false
 	}
-	m.input.SetValue(last)
+	m.input.SetValue(last.text)
+	for _, img := range last.images {
+		m.input.RegisterImage(int(img.Index), img.Data, img.MediaType, "")
+	}
 	m.relayout()
 	return true
 }

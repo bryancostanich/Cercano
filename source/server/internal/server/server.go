@@ -245,6 +245,22 @@ func (s *Server) SetUsageSink(fn func(usage.Usage)) { s.usageSink = fn }
 // SetSecrets attaches the secrets store used to retrieve profile API keys.
 func (s *Server) SetSecrets(st secrets.Store) { s.secrets = st }
 
+// activeCloudModel returns the cloud model from the active profile — the
+// authoritative request-time value. Falls back to the legacy CloudModel
+// field only when no active profile exists (e.g. local-only configs). All
+// code that asks "what cloud model are we using right now?" should go
+// through this, not currentConfig.CloudModel directly.
+func (s *Server) activeCloudModel() string {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	for _, p := range s.currentConfig.CloudProfiles {
+		if p.Name == s.currentConfig.ActiveCloudProfile {
+			return p.Model
+		}
+	}
+	return s.currentConfig.CloudModel
+}
+
 // activeProfile returns the configured active cloud profile, or false if none.
 func (s *Server) activeProfile() (config.CloudProfile, bool) {
 	s.cfgMu.RLock()
@@ -293,9 +309,29 @@ func (s *Server) installAbsentCloud(reason string) {
 // (no active profile, no key, unsupported flavor, keychain down) it clears the
 // native cloud provider and installs the absent-cloud sentinel — the agent keeps
 // running with cloud absent.
+//
+// Thin lock wrapper around rebuildCloudLocked. UpdateConfig (which already
+// holds cfgMu write lock) calls the Locked variant directly to avoid a
+// re-entrance deadlock.
 func (s *Server) rebuildCloud() error {
-	p, ok := s.activeProfile()
-	if !ok {
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
+	return s.rebuildCloudLocked()
+}
+
+// rebuildCloudLocked is rebuildCloud's body. Caller MUST hold cfgMu write
+// lock. Reads ActiveCloudProfile + CloudProfiles, writes CloudModel mirror.
+func (s *Server) rebuildCloudLocked() error {
+	var p config.CloudProfile
+	found := false
+	for _, pp := range s.currentConfig.CloudProfiles {
+		if pp.Name == s.currentConfig.ActiveCloudProfile {
+			p = pp
+			found = true
+			break
+		}
+	}
+	if !found {
 		s.installAbsentCloud("no active cloud profile")
 		return fmt.Errorf("no active cloud profile")
 	}
@@ -324,9 +360,7 @@ func (s *Server) rebuildCloud() error {
 	if s.coordinator != nil {
 		s.coordinator.SetCloudProvider(mp)
 	}
-	s.cfgMu.Lock()
 	s.currentConfig.CloudModel = p.Model // keep CloudModel reporting consistent
-	s.cfgMu.Unlock()
 	return nil
 }
 
@@ -349,7 +383,7 @@ func (s *Server) GetCloudProfiles(ctx context.Context, req *proto.GetCloudProfil
 			}
 		}
 		out.Profiles = append(out.Profiles, &proto.CloudProfileInfo{
-			Name: p.Name, Flavor: p.Flavor, BaseUrl: p.BaseURL, Model: p.Model, HasKey: hasKey, Backend: p.Backend,
+			Name: p.Name, Flavor: p.Flavor, BaseUrl: p.BaseURL, Model: p.Model, HasKey: hasKey, Backend: p.Backend, Route: p.Route,
 		})
 	}
 	return out, nil
@@ -628,49 +662,62 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		fmt.Printf("UpdateConfig: Locus mode set to %s\n", req.LocusMode)
 	}
 
-	// Cloud provider rebuild: any of provider / model / api_key / base_url
-	// changes is enough to want a rebuild. We require provider to be set
-	// (existing or new) and at least one of api_key / base_url so we don't
-	// silently land back on the absent sentinel.
+	// Cloud changes go through the active profile + rebuildCloud(). The
+	// profile is the single source of truth (see activeCloudModel); writing
+	// req.CloudModel anywhere else just creates the kind of split-state bug
+	// where the displayed/persisted model and the actually-used model
+	// disagree. cloud_provider is treated as a legacy display field with no
+	// effect on routing (flavor on the profile is what matters at request
+	// time).
 	wantCloudRebuild := req.CloudProvider != "" || req.CloudModel != "" || req.CloudApiKey != "" || req.CloudBaseUrl != ""
 	if wantCloudRebuild {
-		provider := req.CloudProvider
-		if provider == "" {
-			provider = s.currentConfig.CloudProvider
+		// Outer cfgMu write lock is held by UpdateConfig — must not re-lock.
+		// Mutate the active profile in place, then drive rebuildCloudLocked.
+		activeName := s.currentConfig.ActiveCloudProfile
+		idx := -1
+		for i, p := range s.currentConfig.CloudProfiles {
+			if p.Name == activeName {
+				idx = i
+				break
+			}
 		}
-		model := req.CloudModel
-		if model == "" {
-			model = s.currentConfig.CloudModel
-		}
-		apiKey := req.CloudApiKey
-		if apiKey == "" {
-			apiKey = s.currentConfig.CloudAPIKey
-		}
-		baseURL := req.CloudBaseUrl
-		if baseURL == "" {
-			baseURL = s.currentConfig.CloudBaseURL
-		}
-		if provider == "" || (apiKey == "" && baseURL == "") {
+		if idx < 0 {
 			return &proto.UpdateConfigResponse{
 				Success: false,
-				Message: "cloud config incomplete: need cloud_provider and at least one of cloud_api_key / cloud_base_url",
+				Message: "no active cloud profile — create one via SetCloudProfile / SetActiveCloudProfile before /config can update cloud fields",
 			}, nil
 		}
-		cp, err := s.cloudFactory(ctx, provider, model, apiKey, baseURL)
-		if err != nil {
+		if req.CloudModel != "" {
+			s.currentConfig.CloudProfiles[idx].Model = req.CloudModel
+		}
+		if req.CloudBaseUrl != "" {
+			s.currentConfig.CloudProfiles[idx].BaseURL = req.CloudBaseUrl
+		}
+		profileName := s.currentConfig.CloudProfiles[idx].Name
+
+		// API key goes to the keychain (keyed by profile name), never to
+		// the profile struct or the legacy CloudAPIKey field.
+		if req.CloudApiKey != "" && s.secrets != nil {
+			if err := s.secrets.Set(profileName, req.CloudApiKey); err != nil {
+				return &proto.UpdateConfigResponse{
+					Success: false,
+					Message: fmt.Sprintf("failed to store API key: %v", err),
+				}, nil
+			}
+		}
+
+		if err := s.rebuildCloudLocked(); err != nil {
 			return &proto.UpdateConfigResponse{
 				Success: false,
-				Message: fmt.Sprintf("failed to create cloud provider: %v", err),
+				Message: fmt.Sprintf("failed to rebuild cloud provider: %v", err),
 			}, nil
 		}
-		s.router.SetCloudProvider(cp)
-		s.coordinator.SetCloudProvider(cp)
-		summary := fmt.Sprintf("%s/%s", provider, model)
-		if baseURL != "" {
-			summary += " @ " + baseURL
+		summary := profileName
+		if req.CloudModel != "" {
+			summary += "/" + req.CloudModel
 		}
 		changes = append(changes, "cloud="+summary)
-		fmt.Printf("UpdateConfig: Cloud provider set to %s\n", summary)
+		fmt.Printf("UpdateConfig: Cloud profile %q rebuilt\n", profileName)
 	}
 
 	if len(changes) == 0 {
@@ -1704,13 +1751,15 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	})
 }
 
-// mainModelFor returns the configured model name for the active tier.
+// mainModelFor returns the configured model name for the active tier. Cloud
+// reads from the active profile (the single source of truth — see
+// activeCloudModel) so a profile-model change propagates without restart.
 func (s *Server) mainModelFor(isCloud bool) string {
+	if isCloud {
+		return s.activeCloudModel()
+	}
 	s.cfgMu.RLock()
 	defer s.cfgMu.RUnlock()
-	if isCloud {
-		return s.currentConfig.CloudModel
-	}
 	return s.currentConfig.LocalModel
 }
 
@@ -1732,6 +1781,7 @@ func (s *Server) runMainLoop(
 		Registry:            s.toolRegistry,
 		Permissions:         s.permStore,
 		UserInput:           req.GetInput(),
+		Images:              mapInlineImages(req.GetImages()),
 		Model:               s.mainModelFor(isCloud),
 		System:              s.buildSystemPrompt(req.GetWorkDir()),
 		EventSink:           sink,
@@ -1809,8 +1859,8 @@ func (s *Server) assembleHistory(ctx context.Context, store conversation.Store, 
 
 	s.cfgMu.RLock()
 	compactionCfg := s.currentConfig.Compaction
-	cloudModel := s.currentConfig.CloudModel
 	s.cfgMu.RUnlock()
+	cloudModel := s.activeCloudModel()
 	pct := compactionCfg.HardOverridePct
 	if compactionCfg.Enabled && pct > 0 {
 		hardLimit := int(float64(contextmeter.ModelMax(cloudModel)) * pct)
@@ -1824,6 +1874,22 @@ func (s *Server) assembleHistory(ctx context.Context, store conversation.Store, 
 	return view
 }
 
+// mapInlineImages converts proto images to agent.InlineImage.
+func mapInlineImages(in []*proto.InlineImage) []agent.InlineImage {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]agent.InlineImage, 0, len(in))
+	for _, p := range in {
+		out = append(out, agent.InlineImage{
+			Index:     int(p.GetIndex()),
+			Data:      p.GetData(),
+			MediaType: p.GetMediaType(),
+		})
+	}
+	return out
+}
+
 func (s *Server) mapRequest(req *proto.ProcessRequestRequest) *agent.Request {
 	return &agent.Request{
 		Input:          req.Input,
@@ -1833,6 +1899,7 @@ func (s *Server) mapRequest(req *proto.ProcessRequestRequest) *agent.Request {
 		DirectLocal:    req.DirectLocal,
 		ModelOverride:  req.ModelOverride,
 		Coproc:         req.Coproc,
+		Images:         mapInlineImages(req.GetImages()),
 	}
 }
 

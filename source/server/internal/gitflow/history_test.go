@@ -10,8 +10,12 @@ func TestSquashToOne(t *testing.T) {
 	r := newTestRepo(t)
 	ctx := context.Background()
 	mustRun(t, r, "checkout", "-b", "feature")
-	writeFile(t, r, "a.txt", "1"); mustRun(t, r, "add", "-A"); mustRun(t, r, "commit", "-m", "wip 1")
-	writeFile(t, r, "b.txt", "2"); mustRun(t, r, "add", "-A"); mustRun(t, r, "commit", "-m", "wip 2")
+	writeFile(t, r, "a.txt", "1")
+	mustRun(t, r, "add", "-A")
+	mustRun(t, r, "commit", "-m", "wip 1")
+	writeFile(t, r, "b.txt", "2")
+	mustRun(t, r, "add", "-A")
+	mustRun(t, r, "commit", "-m", "wip 2")
 
 	sha, err := r.SquashToOne(ctx, "main", "feat: the feature", "Body here.")
 	if err != nil {
@@ -34,7 +38,9 @@ func TestSquashToOne(t *testing.T) {
 func TestSquashRejectsClaude(t *testing.T) {
 	r := newTestRepo(t)
 	mustRun(t, r, "checkout", "-b", "feature")
-	writeFile(t, r, "a.txt", "1"); mustRun(t, r, "add", "-A"); mustRun(t, r, "commit", "-m", "wip")
+	writeFile(t, r, "a.txt", "1")
+	mustRun(t, r, "add", "-A")
+	mustRun(t, r, "commit", "-m", "wip")
 	if _, err := r.SquashToOne(context.Background(), "main", "feat: by Claude", ""); err == nil {
 		t.Fatal("expected rejection of 'claude' in squash message")
 	}

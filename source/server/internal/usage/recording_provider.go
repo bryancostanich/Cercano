@@ -15,11 +15,13 @@ import (
 
 // Usage is one recorded model call.
 type Usage struct {
-	Source       string // who initiated it, e.g. "main", "coproc:summarize", "dispatch"
-	Model        string
-	IsCloud      bool
-	InputTokens  int
-	OutputTokens int
+	Source               string // who initiated it, e.g. "main", "coproc:summarize", "dispatch"
+	Model                string
+	IsCloud              bool
+	InputTokens          int
+	OutputTokens         int
+	ContentTokensAvoided int  // estimated cloud tokens saved by handling locally
+	TokenSaving          bool // true when this call substitutes for a cloud call
 }
 
 // Wrap returns a provider that reports a Usage to sink after each call. sink

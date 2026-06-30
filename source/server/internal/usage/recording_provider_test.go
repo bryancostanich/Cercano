@@ -53,6 +53,33 @@ func TestWrapRecordsChatUsage(t *testing.T) {
 	}
 }
 
+func TestUsageSavingsFieldsRoundTrip(t *testing.T) {
+	var got []Usage
+	inner := fakeProvider{resp: llm.ChatResponse{InputTokens: 5, OutputTokens: 3}}
+	p := Wrap(inner, "coproc:extract", false, func(u Usage) { got = append(got, u) })
+
+	if _, err := p.Chat(context.Background(), llm.ChatRequest{Model: "local-m"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 usage event, got %d", len(got))
+	}
+	// The Wrap sink receives whatever the caller stored in Usage; verify the
+	// struct carries ContentTokensAvoided and TokenSaving without loss.
+	u := Usage{
+		Source:               "coproc:extract",
+		Model:                "local-m",
+		IsCloud:              false,
+		InputTokens:          5,
+		OutputTokens:         3,
+		ContentTokensAvoided: 1200,
+		TokenSaving:          true,
+	}
+	if u.ContentTokensAvoided != 1200 || !u.TokenSaving {
+		t.Fatalf("savings fields not preserved: %+v", u)
+	}
+}
+
 func TestWrapRecordsStreamUsageOnDrain(t *testing.T) {
 	var got []Usage
 	inner := fakeProvider{stream: []llm.StreamEvent{

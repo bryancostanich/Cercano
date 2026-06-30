@@ -104,9 +104,11 @@ func (gitLandCap) Execute(ctx context.Context, call *capabilities.Call) (*capabi
 		return runTestAndFinalize(ctx, r, cfg, feature, trunk, "")
 	}
 
-	// 3. Continue path: capture the pre-resolution conflict set BEFORE LandContinue
-	//    so ResolutionSignalsFor can compute signals over the files that were hand-resolved.
+	// 3. Continue path: capture the pre-resolution conflict set AND the pre-continue
+	//    HEAD BEFORE LandContinue, so the review gate sees the resolved file set and
+	//    the actual resolution diff (preHEAD..HEAD) rather than an empty post-commit diff.
 	preContinueConflicts, _ := r.ConflictedFiles(ctx)
+	preHEAD, _ := r.RevParse(ctx, "HEAD")
 
 	st, err := r.LandContinue(ctx, strategy)
 	if err != nil {
@@ -118,7 +120,7 @@ func (gitLandCap) Execute(ctx context.Context, call *capabilities.Call) (*capabi
 	}
 
 	// 4 + 5. Test gate, then review gate (continue path only), then finalize.
-	return runTestAndReviewAndFinalize(ctx, call, r, cfg, feature, trunk, preContinueConflicts)
+	return runTestAndReviewAndFinalize(ctx, call, r, cfg, feature, trunk, preContinueConflicts, preHEAD)
 }
 
 // runTestAndFinalize runs the test gate and finalizes. No review gate (clean path).
@@ -151,6 +153,7 @@ func runTestAndReviewAndFinalize(
 	cfg gitflow.Config,
 	feature, trunk string,
 	preContinueConflicts []string,
+	preHEAD string,
 ) (*capabilities.Result, error) {
 	// 4. Test gate.
 	noTestNote, stop := testGate(ctx, r, cfg)
@@ -162,6 +165,10 @@ func runTestAndReviewAndFinalize(
 	verdictNote := ""
 	if len(preContinueConflicts) > 0 {
 		sig := r.ResolutionSignalsFor(ctx, preContinueConflicts, cfg)
+		// Feed the ACTUAL resolution (what the continue committed) to the review.
+		if d, derr := r.DiffRange(ctx, preHEAD, "HEAD"); derr == nil {
+			sig.Diff = d
+		}
 
 		// Deterministic floor: sensitive paths OR too many hand-edited files.
 		if len(sig.SensitiveHits) > 0 || sig.HandEdited > cfg.ReviewFloor {

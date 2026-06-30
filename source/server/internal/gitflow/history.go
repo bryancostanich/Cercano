@@ -15,6 +15,13 @@ func (r *Repo) SquashToOne(ctx context.Context, trunk, subject, body string) (st
 	if hasClaude(subject) || hasClaude(body) {
 		return "", fmt.Errorf("gitflow: squash: commit message must not contain \"Claude\"")
 	}
+	branch, err := r.CurrentBranch(ctx)
+	if err != nil {
+		return "", fmt.Errorf("gitflow: squash: %w", err)
+	}
+	if branch == trunk {
+		return "", fmt.Errorf("gitflow: squash: refusing to squash on trunk %q; switch to a feature branch", trunk)
+	}
 	if err := r.RecordSafety(ctx, "history", "HEAD"); err != nil {
 		return "", err
 	}
@@ -33,15 +40,4 @@ func (r *Repo) SquashToOne(ctx context.Context, trunk, subject, body string) (st
 		return "", fmt.Errorf("gitflow: squash: commit: %w", err)
 	}
 	return r.RevParse(ctx, "HEAD")
-}
-
-// Stash saves uncommitted changes (including untracked). Unstash pops them.
-func (r *Repo) Stash(ctx context.Context) error {
-	_, err := r.run(ctx, "stash", "push", "--include-untracked")
-	return err
-}
-
-func (r *Repo) Unstash(ctx context.Context) error {
-	_, err := r.run(ctx, "stash", "pop")
-	return err
 }

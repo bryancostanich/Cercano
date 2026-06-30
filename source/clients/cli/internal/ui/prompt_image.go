@@ -116,3 +116,24 @@ func (p *promptInput) deleteSpan(sp imageSpan) {
 	p.cursor = sp.start
 	p.selectionAnchor = noPromptSelection
 }
+
+// stepLeftOverChip snaps an offset that landed inside a chip back to the chip
+// start, so a left-arrow treats the chip as a single position.
+func (p promptInput) stepLeftOverChip(offset int) int {
+	for _, sp := range p.imageSpans() {
+		if offset > sp.start && offset < sp.end {
+			return sp.start
+		}
+	}
+	return offset
+}
+
+// stepRightOverChip snaps an offset inside a chip forward to the chip end.
+func (p promptInput) stepRightOverChip(offset int) int {
+	for _, sp := range p.imageSpans() {
+		if offset > sp.start && offset < sp.end {
+			return sp.end
+		}
+	}
+	return offset
+}

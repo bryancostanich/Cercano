@@ -107,6 +107,7 @@ type Model struct {
 	compacting     bool
 	ctxPollTicks   int
 	ctxPolling     bool // a ctxUsageTick loop is currently running (avoid double-scheduling)
+	animTickActive bool // a progressAnimTick loop is currently running (avoid double-scheduling)
 	lastLatencyMs  int
 	modelMaxTokens int
 	lastModel      string // local model name (from config)
@@ -943,6 +944,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case toolEntryStartMsg:
 			m.turnActivity = "running " + ev.name
 			m.chat.Apply(ev)
+			// Kick the spinner animation loop if it isn't already running
+			// — the placeholder loop may have stopped once tokens began
+			// streaming, leaving the in-progress tool line without ticks.
+			if !m.animTickActive {
+				m.animTickActive = true
+				return m, tea.Batch(msg.next, progressAnimTick())
+			}
 		case chatDoneMsg:
 			m.applyTurnTelemetry(ev) // footer fields
 			m.chat.Apply(ev)         // transcript finalize + notice
@@ -1133,6 +1141,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, fetchContextUsage(m.agent, m.convID) // one final settle, no re-tick
 
 	case progressAnimTickMsg:
+		// This tick has fired and is no longer "in flight". Set inactive
+		// up-front; if any condition keeps it alive, we set true again
+		// before returning the next tick — that prevents a second kick
+		// (e.g. from toolEntryStartMsg) from doubling the tick rate.
+		m.animTickActive = false
+		keep := false
 		// Keep ticking while there's an assistant entry awaiting its first
 		// token — that's when the animated status line is visible. Each tick
 		// must call refreshViewport so the per-frame color sweep is pushed
@@ -1140,14 +1154,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// last-set content and the animation appears frozen.
 		if e := m.chat.streamingTextEntry(); e != nil && e.Content == "" {
 			m.refreshViewport()
-			return m, progressAnimTick()
+			keep = true
+		}
+		// Tool spinners on in-progress entries need the same per-frame push;
+		// without this branch the placeholder tick stops once the assistant
+		// streams a token, then the active tool line shows a frozen glyph.
+		if m.chat.hasInProgressTool() {
+			m.refreshViewport()
+			keep = true
 		}
 		// Also keep ticking while the /c chat is busy so its animated
 		// status line repaints on every frame.
 		if cv, ok := m.content.(*contextView); ok && cv.busy() {
-			return m, progressAnimTick()
+			keep = true
 		}
 		if m.compacting {
+			keep = true
+		}
+		if keep {
+			m.animTickActive = true
 			return m, progressAnimTick()
 		}
 		return m, nil
@@ -1222,7 +1247,9 @@ func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model,
 	m.turnModel = ""
 	m.turnCloud = false
 	// Fire both the driver's self-re-arming drain and the progress-text
-	// animator; both re-issue themselves until streaming ends.
+	// animator; both re-issue themselves until streaming ends. Mark the
+	// anim loop as running so the tool-start kick path doesn't double-fire it.
+	m.animTickActive = true
 	return m, tea.Batch(cmd, progressAnimTick())
 }
 

@@ -92,7 +92,20 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 	var statusBit string
 	switch e.Status {
 	case ToolStatusInProgress:
-		statusBit = toolEntryFaint.Render("…")
+		// Animated braille spinner makes "this is running" unambiguous — a
+		// static `…` reads as "stalled" once you've seen tool entries flash
+		// past for a few turns. Faint-styled to stay in the same visual
+		// register as the args column. Elapsed time appears alongside once
+		// the call has been running >= 1s; instant tools never expose a
+		// noisy "0s".
+		spin := animateToolSpinner()
+		extra := ""
+		if !e.StartedAt.IsZero() {
+			if d := time.Since(e.StartedAt); d >= time.Second {
+				extra = toolEntryFaint.Render(" · " + d.Round(time.Second).String())
+			}
+		}
+		statusBit = spin + extra
 	case ToolStatusComplete:
 		statusBit = toolEntrySuccess.Render("✓") + toolEntryFaint.Render(" "+flattenSummary(e.ResultSummary))
 	case ToolStatusError:
@@ -372,6 +385,20 @@ func groupBreakdownName(s string) string {
 		return "LS"
 	}
 	return s
+}
+
+// animateToolSpinner renders the in-progress glyph for a tool entry: a faint
+// braille spinner that cycles wall-clock-driven (so phase stays smooth across
+// re-renders without per-entry state). 80ms/frame matches the model-thinking
+// spinner's tempo; the choice of braille (vs. the amber rolling-block used
+// for the assistant placeholder) is deliberate — tools are routine, the
+// indicator should be present-but-quiet, not eye-catching.
+func animateToolSpinner() string {
+	const frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+	const frameMs = 80
+	runes := []rune(frames)
+	glyph := string(runes[int(time.Now().UnixMilli()/frameMs)%len(runes)])
+	return lipgloss.NewStyle().Faint(true).Render(glyph)
 }
 
 // flattenSummary collapses a tool summary to a single line: newlines, tabs and

@@ -25,6 +25,7 @@ type Styles struct {
 	BufferUserPrompt lipgloss.Style // muted lime ▶ for echoed user input in scrollback
 	BufferUserLine   lipgloss.Style // navy background fill behind echoed user prompt lines
 	BufferUserMarker lipgloss.Style // muted lime ▶ on the navy fill
+	BufferUserText   lipgloss.Style // bright amber text on the navy user-prompt fill
 	MeterFill   lipgloss.Style // lime block
 	MeterEmpty  lipgloss.Style // dim-amber block
 	BypassFlag  lipgloss.Style // red ! BYPASS block
@@ -56,6 +57,7 @@ func NewStyles(p Palette) Styles {
 		BufferUserPrompt: lipgloss.NewStyle().Foreground(p.BufferLime).Bold(true),
 		BufferUserLine:   lipgloss.NewStyle().Background(p.BufferUserBg),
 		BufferUserMarker: lipgloss.NewStyle().Foreground(p.BufferLime).Background(p.BufferUserBg).Bold(true),
+		BufferUserText:   lipgloss.NewStyle().Foreground(p.Bright).Background(p.BufferUserBg),
 		MeterFill:  lipgloss.NewStyle().Foreground(p.Accent),
 		MeterEmpty: lipgloss.NewStyle().Foreground(p.DimAmber),
 		BypassFlag: lipgloss.NewStyle().Foreground(lipgloss.Color("#1A1A1A")).Background(p.Error).Bold(true),

@@ -193,13 +193,13 @@ func runTestAndReviewAndFinalize(
 			if err != nil {
 				return nil, fmt.Errorf("git_land: review dispatch: %w", err)
 			}
-			upper := strings.ToUpper(res.Text)
-			if strings.Contains(upper, "RISKY") || strings.Contains(upper, "REFUTED") {
+			v := parseVerdict(res.Text)
+			if v.Risky {
 				return capabilities.NewTextResult(fmt.Sprintf(
 					"review flagged risk, not landing:\n%s", res.Text,
 				)), nil
 			}
-			verdictNote = fmt.Sprintf(" [review: %s]", strings.TrimSpace(res.Text))
+			verdictNote = fmt.Sprintf(" [review: safe — %s]", v.Reasoning)
 		}
 	}
 

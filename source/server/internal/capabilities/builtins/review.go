@@ -78,7 +78,9 @@ func (reviewCap) Execute(ctx context.Context, call *capabilities.Call) (*capabil
 	if err != nil {
 		return nil, err
 	}
-	return capabilities.NewTextResult(res.Text), nil
+	v := parseVerdict(res.Text)
+	b, _ := json.Marshal(v)
+	return &capabilities.Result{Type: capabilities.ResultJSON, JSON: b}, nil
 }
 
 func buildRefutePrompt(claim, context string) string {

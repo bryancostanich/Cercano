@@ -56,8 +56,19 @@ func TestReview_Execute_NoTools_OneShot(t *testing.T) {
 	if !strings.Contains(captured.Prompt, "Go is statically typed") {
 		t.Errorf("prompt does not contain the claim: %q", captured.Prompt)
 	}
-	if !strings.Contains(res.Text, "HOLDS") {
-		t.Errorf("result text = %q, want it to contain HOLDS", res.Text)
+	// Result must be a JSON verdict with Risky=false (HOLDS → safe) and a reasoning.
+	if res.Type != capabilities.ResultJSON {
+		t.Fatalf("result type = %q, want ResultJSON", res.Type)
+	}
+	var v Verdict
+	if err := json.Unmarshal(res.JSON, &v); err != nil {
+		t.Fatalf("unmarshal verdict: %v", err)
+	}
+	if v.Risky {
+		t.Errorf("Risky = true for HOLDS verdict, want false")
+	}
+	if v.Reasoning == "" {
+		t.Errorf("Reasoning is empty, want non-empty")
 	}
 }
 

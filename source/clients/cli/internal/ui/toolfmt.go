@@ -22,6 +22,37 @@ import (
 	"time"
 )
 
+// verbForInProgress maps a tool name to its active-voice present-participle
+// form ("Read" → "Reading"). Used for the in-progress display so the line
+// reads like a live status ("Reading internal/foo.go …") rather than a noun
+// phrase. Falls back to the original name when no special form is mapped —
+// safer than guessing for tools we don't recognise.
+func verbForInProgress(tool string) string {
+	switch strings.ToLower(tool) {
+	case "read":
+		return "Reading"
+	case "write":
+		return "Writing"
+	case "edit":
+		return "Editing"
+	case "bash":
+		return "Running"
+	case "grep":
+		return "Searching"
+	case "glob":
+		return "Matching"
+	case "ls":
+		return "Listing"
+	case "stat_file":
+		return "Stating"
+	case "rm_file":
+		return "Deleting"
+	case "git_status", "git_log", "git_add", "git_commit", "git_push":
+		return "Git"
+	}
+	return tool
+}
+
 // formatDur renders a duration for the result blurb: "686ms", "1.23s", or
 // "<1ms" for anything that rounds below a millisecond (sub-ms timings are noise,
 // not signal, and "0s" reads as broken).

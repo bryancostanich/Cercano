@@ -84,26 +84,48 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 		gutter = styles.ToolFocus.Render("▶ ")
 	}
 
+	// Status glyph and summary text are rendered separately so only the glyph
+	// carries the success/error color — the result blurb reads as faint
+	// secondary text, like the args. Block-coloring the whole status bit gave
+	// a noisy "highlighted ✓ <text>" effect that fought the rest of the line.
 	var statusBit string
 	switch e.Status {
 	case ToolStatusInProgress:
 		statusBit = toolEntryFaint.Render("…")
 	case ToolStatusComplete:
-		statusBit = toolEntrySuccess.Render("✓ " + flattenSummary(e.ResultSummary))
+		statusBit = toolEntrySuccess.Render("✓") + toolEntryFaint.Render(" "+flattenSummary(e.ResultSummary))
 	case ToolStatusError:
-		statusBit = toolEntryError.Render("⚠ " + flattenSummary(e.ResultSummary))
+		statusBit = toolEntryError.Render("⚠") + toolEntryFaint.Render(" "+flattenSummary(e.ResultSummary))
 	}
 
+	// While the call is in progress, render the tool name in active-voice
+	// present-participle form ("Reading" instead of "Read"). The verb form is
+	// 1–2 chars wider than the noun, so the col padding floats accordingly —
+	// in-progress entries only appear one at a time below the rolling group
+	// summary, so misalignment versus completed entries (which use the noun
+	// form) isn't a concern.
+	displayName := e.ToolName
+	if e.Status == ToolStatusInProgress {
+		displayName = verbForInProgress(e.ToolName)
+	}
 	// Pad short tool names to a fixed column so the args lines up down the list.
 	// Longer names (git_commit, git_reset_hard) overflow the column rather than
 	// widening it for everyone — they're comparatively rare.
 	const nameCol = 6
-	name := e.ToolName
+	name := displayName
 	if pad := nameCol - lipgloss.Width(name); pad > 0 {
 		name += strings.Repeat(" ", pad)
 	}
 	prefix := fmt.Sprintf("%s%s %s ", gutter, marker, name)
-	argsRender := toolEntryFaint.Render(flattenSummary(e.ArgsSummary))
+	// Width-aware args elision: if the full args summary won't leave room for
+	// the right-aligned status, segment-elide (paths) or middle-elide so the
+	// line fits one row. width<=0 disables this (no budget known).
+	argsText := flattenSummary(e.ArgsSummary)
+	if width > 0 {
+		budget := width - lipgloss.Width(prefix) - lipgloss.Width(statusBit) - 3 // 3 = inter-column gap
+		argsText = elideArgs(argsText, budget)
+	}
+	argsRender := toolEntryFaint.Render(argsText)
 	left := prefix + argsRender
 
 	// Right-align the status/timing to the right edge when the whole entry fits

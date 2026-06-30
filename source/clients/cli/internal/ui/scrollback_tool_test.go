@@ -73,10 +73,12 @@ func TestToolEntry_ExpandedRender(t *testing.T) {
 }
 
 func TestToolEntry_InProgress(t *testing.T) {
+	// In-progress entries display the verb form of the tool name
+	// ("grep" → "Searching") so the line reads like a live status.
 	e := ToolEntry{ToolName: "grep", Status: ToolStatusInProgress, Folded: true}
 	s := stripAnsiCSI(renderToolEntry(e, 80, false, theme.NewStyles(theme.Cracker()), render.NewMarkdown(theme.MarkdownStyle(theme.Cracker()))))
-	if !strings.Contains(s, "grep") {
-		t.Errorf("name missing: %q", s)
+	if !strings.Contains(s, "Searching") {
+		t.Errorf("expected verb form 'Searching' for grep in progress, got: %q", s)
 	}
 }
 

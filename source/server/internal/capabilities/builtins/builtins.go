@@ -44,10 +44,15 @@ func Register(reg *capabilities.Registry) {
 	reg.MustRegister(GitAdd())
 	reg.MustRegister(GitCommit())
 	reg.MustRegister(Dispatch())
+	reg.MustRegister(GitWorktree())
+	reg.MustRegister(Checkpoint())
+	reg.MustRegister(GitSquash())
+	reg.MustRegister(GitBisect())
 	// X-tier
 	reg.MustRegister(RmFile())
 	reg.MustRegister(GitPush())
 	reg.MustRegister(GitResetHard())
+	reg.MustRegister(GitRecover())
 }
 
 // AgentAliases maps canonical capability names to standalone display names.

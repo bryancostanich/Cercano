@@ -132,3 +132,37 @@ func TestRunTestsRed(t *testing.T) {
 		t.Fatal("expected RunTests to error on a failing command")
 	}
 }
+
+// TestLandContinueStillPausedWhenMarkersRemain guards against committing
+// conflict markers: calling LandContinue without resolving must NOT reconcile.
+func TestLandContinueStillPausedWhenMarkersRemain(t *testing.T) {
+	r := newTestRepo(t)
+	ctx := context.Background()
+	writeFile(t, r, "shared.txt", "base")
+	mustRun(t, r, "add", "-A")
+	mustRun(t, r, "commit", "-m", "chore: base")
+	mustRun(t, r, "checkout", "-b", "feature")
+	writeFile(t, r, "shared.txt", "feature-change")
+	mustRun(t, r, "add", "-A")
+	mustRun(t, r, "commit", "-m", "feat: f")
+	mustRun(t, r, "checkout", "main")
+	writeFile(t, r, "shared.txt", "main-change")
+	mustRun(t, r, "add", "-A")
+	mustRun(t, r, "commit", "-m", "chore: m")
+
+	st, _ := r.Land(ctx, "feature", "main", StrategyRebase)
+	if st.Reconciled {
+		t.Fatal("precondition: expected a conflict pause")
+	}
+	// Do NOT resolve — git's conflict markers remain in shared.txt.
+	st2, err := r.LandContinue(ctx, StrategyRebase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st2.Reconciled {
+		t.Fatal("must not reconcile while conflict markers remain (would commit markers)")
+	}
+	if len(st2.Conflicts) == 0 || st2.Conflicts[0] != "shared.txt" {
+		t.Fatalf("expected still-paused with shared.txt, got %+v", st2)
+	}
+}

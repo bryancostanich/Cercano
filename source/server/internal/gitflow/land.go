@@ -3,7 +3,9 @@ package gitflow
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -96,18 +98,54 @@ func (r *Repo) Land(ctx context.Context, feature, trunk string, strategy Strateg
 	return st, nil
 }
 
+// fileHasConflictMarkers reports whether the working-tree file still contains
+// git conflict markers (i.e. an unresolved conflict). A file deleted as part of
+// resolution is treated as resolved.
+func (r *Repo) fileHasConflictMarkers(path string) (bool, error) {
+	data, err := os.ReadFile(filepath.Join(r.Dir, path))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("gitflow: scan conflict markers %s: %w", path, err)
+	}
+	s := string(data)
+	return strings.HasPrefix(s, "<<<<<<< ") || strings.Contains(s, "\n<<<<<<< ") ||
+		strings.Contains(s, "\n>>>>>>> "), nil
+}
+
 // LandContinue resumes a paused reconcile after the caller resolved conflicts.
-// It stages resolved files first, then checks for any remaining unmerged entries.
+//
+// It must NOT stage blindly: `git add -A` would clear the unmerged index
+// entries regardless of whether the content is actually resolved, so a file
+// still containing conflict markers would be staged and committed by
+// --continue. Instead it reads the still-unmerged file set (which remains
+// unmerged in the index until staged, even after the working tree is edited)
+// and refuses to proceed while any of those files still contain conflict
+// markers — that is the genuine "still paused" guard. Only once every conflict
+// file is marker-free does it stage and continue.
 func (r *Repo) LandContinue(ctx context.Context, strategy Strategy) (LandState, error) {
 	st := LandState{Strategy: strategy}
+	conf, err := r.conflictedFiles(ctx)
+	if err != nil {
+		return st, err
+	}
+	var unresolved []string
+	for _, f := range conf {
+		marked, err := r.fileHasConflictMarkers(f)
+		if err != nil {
+			return st, err
+		}
+		if marked {
+			unresolved = append(unresolved, f)
+		}
+	}
+	if len(unresolved) > 0 {
+		st.Conflicts = unresolved
+		return st, nil // caller must still resolve these files
+	}
 	if _, err := r.run(ctx, "add", "-A"); err != nil {
 		return st, fmt.Errorf("gitflow: land --continue: stage: %w", err)
-	}
-	if conf, err := r.conflictedFiles(ctx); err != nil {
-		return st, err
-	} else if len(conf) > 0 {
-		st.Conflicts = conf
-		return st, nil // still unresolved
 	}
 	op := "rebase"
 	if strategy == StrategyMerge {

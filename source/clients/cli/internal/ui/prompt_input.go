@@ -729,20 +729,44 @@ func (p promptInput) layoutRows() []promptRow {
 	rows := make([]promptRow, 0, maxInt(1, len(p.value)/maxInt(1, textWidth)))
 	rowStart := 0
 	col := 0
-	for i, r := range p.value {
+	lastSpace := -1 // rune index of the last ' ' seen in the current row, for word wrap
+	i := 0
+	for i < len(p.value) {
+		r := p.value[i]
 		if r == '\n' {
 			rows = append(rows, p.rowFromRange(rowStart, i))
 			rowStart = i + 1
 			col = 0
+			lastSpace = -1
+			i++
 			continue
 		}
 		w := runeWidth(r)
 		if col > 0 && col+w > textWidth {
+			// Soft-wrap: prefer breaking after the last space in the row so words
+			// stay intact. The trailing space stays on the current row (no text is
+			// dropped; row ranges remain contiguous). Reprocess from the break.
+			if lastSpace >= rowStart {
+				breakAt := lastSpace + 1
+				rows = append(rows, p.rowFromRange(rowStart, breakAt))
+				rowStart = breakAt
+				i = breakAt
+				col = 0
+				lastSpace = -1
+				continue
+			}
+			// A single word longer than the line — hard-break before this rune.
 			rows = append(rows, p.rowFromRange(rowStart, i))
 			rowStart = i
 			col = 0
+			lastSpace = -1
+			continue
+		}
+		if r == ' ' {
+			lastSpace = i
 		}
 		col += w
+		i++
 	}
 	rows = append(rows, p.rowFromRange(rowStart, len(p.value)))
 	return rows

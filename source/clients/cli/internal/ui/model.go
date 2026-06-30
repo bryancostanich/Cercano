@@ -166,6 +166,12 @@ type Model struct {
 	// /bypass /mode slash handlers.
 	permissionMode string
 
+	// supportsVision is true when the active provider can accept image
+	// inputs. Fetched once at startup via fetchVisionCmd. Used by
+	// visionNotice to show a dim warning when images are attached but the
+	// model can't see them. Interim until capability-aware routing lands.
+	supportsVision bool
+
 }
 
 // pendingToolCall is a queued tool invocation awaiting user confirmation.
@@ -327,7 +333,7 @@ func (m *Model) applyTheme(t theme.Theme) {
 
 // Init is called by Bubble Tea once at startup.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.input.Focus(), m.splash.Init(), fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent), subscribeEventsCmd(m.agent))
+	return tea.Batch(m.input.Focus(), m.splash.Init(), fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent), fetchVisionCmd(m.agent), subscribeEventsCmd(m.agent))
 }
 
 // permissionModeMsg carries the result of the startup GetPermissionMode RPC.
@@ -346,6 +352,33 @@ func fetchPermissionModeCmd(ag *agentclient.Client) tea.Cmd {
 		}
 		return permissionModeMsg{Mode: mode}
 	}
+}
+
+// visionCapsMsg carries the result of the startup GetProviderCapabilities RPC.
+type visionCapsMsg struct{ supported bool }
+
+// fetchVisionCmd asks the agent whether the active provider accepts image
+// inputs and returns a visionCapsMsg. Errors are treated as unsupported so
+// the warning fires when in doubt.
+func fetchVisionCmd(ag *agentclient.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		caps, err := ag.GetProviderCapabilities(ctx)
+		if err != nil {
+			return visionCapsMsg{supported: false}
+		}
+		return visionCapsMsg{supported: caps.SupportsVision}
+	}
+}
+
+// visionNotice returns a dim warning when images are attached but the active
+// model can't accept them. Interim UX until capability-aware routing lands.
+func (m Model) visionNotice() string {
+	if len(m.input.Attachments()) == 0 || m.supportsVision {
+		return ""
+	}
+	return m.styles.Muted.Render("⚠ active model can't see images")
 }
 
 // toolsLoadedMsg carries the result of the startup ListTools RPC; populates
@@ -997,6 +1030,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cache[t.Name] = t
 		}
 		m.toolCache = cache
+		return m, nil
+
+	case visionCapsMsg:
+		m.supportsVision = msg.supported
 		return m, nil
 
 	case toolResultMsg:
@@ -2308,6 +2345,9 @@ func (m Model) View() tea.View {
 	inputIdx := len(parts) + len(promptParts)
 	promptParts = append(promptParts, m.input.View())
 	promptParts = append(promptParts, promptLine)
+	if notice := m.visionNotice(); notice != "" {
+		promptParts = append(promptParts, notice)
+	}
 	promptParts = append(promptParts, m.renderStatus())
 
 	spareRows := m.height - countLines(parts) - countLines(promptParts)

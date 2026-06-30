@@ -19,6 +19,14 @@ type InlineImage struct {
 
 var imageMarkerRe = regexp.MustCompile(`\[image (\d+)\]`)
 
+// UserMessage builds the user llm.Message for a turn — the prompt text with any
+// inline images spliced in at their "[image N]" markers. Exported so the server
+// can persist the user turn up front (before the tool loop runs) for crash
+// resilience, matching the message the loop itself constructs.
+func UserMessage(input string, images []InlineImage) llm.Message {
+	return llm.Message{Role: llm.RoleUser, Blocks: buildUserBlocks(input, images)}
+}
+
 // buildUserBlocks turns a prompt string + inline images into ordered llm blocks:
 // text runs interleaved with image blocks at each "[image N]" marker. With no
 // images it returns a single text block (preserving prior behavior). A marker

@@ -235,38 +235,52 @@ func TestStreamToolLoop_PersistsMultiTurnHistory(t *testing.T) {
 	}
 }
 
-func TestPersistToolLoopTurns_DeltaOnly(t *testing.T) {
+func TestPersistTurn_WritesOneTurn(t *testing.T) {
 	srv, store := newServerWithStore(t)
 	ctx := context.Background()
-	req := &proto.ProcessRequestRequest{Input: "second", ConversationId: "conv-delta"}
-
-	// Simulate a result whose History carries a 2-message injected prefix plus
-	// 2 new messages. Only the 2 new ones should be persisted.
-	result := agent.ToolLoopResult{History: []llm.Message{
-		{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "old-user"}}},      // injected
-		{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: "old-asst"}}}, // injected
-		{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "second"}}},        // new
-		{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: "reply"}}},    // new
-	}}
-
-	srv.persistToolLoopTurns(ctx, req, result, 2, "qwen3-coder")
-
-	turns, err := store.GetTurns(ctx, "conv-delta")
+	if err := store.EnsureConversation(ctx, "conv-one", "", "test-model"); err != nil {
+		t.Fatalf("EnsureConversation: %v", err)
+	}
+	srv.persistTurn(ctx, "conv-one", llm.Message{
+		Role:   llm.RoleAssistant,
+		Blocks: []llm.Block{{Type: llm.BlockText, Text: "hello there"}},
+	})
+	turns, err := store.GetTurns(ctx, "conv-one")
 	if err != nil {
 		t.Fatalf("GetTurns: %v", err)
 	}
-	if len(turns) != 2 {
-		t.Fatalf("expected 2 persisted (delta only), got %d", len(turns))
+	if len(turns) != 1 || turns[0].Role != "assistant" || turns[0].Content != "hello there" {
+		t.Fatalf("persistTurn wrote wrong turn: %+v", turns)
 	}
-	if turns[0].Content != "second" || turns[1].Content != "reply" {
-		t.Errorf("unexpected delta turns: %q, %q", turns[0].Content, turns[1].Content)
+	if turns[0].BlocksJSON == "" {
+		t.Error("BlocksJSON should be populated")
 	}
-	// The served-tier model name is recorded on the conversation row, not a
-	// hardcoded cloud model.
-	if info, err := store.Get(ctx, "conv-delta"); err != nil {
-		t.Fatalf("Get: %v", err)
-	} else if info.Model != "qwen3-coder" {
-		t.Errorf("conversation model = %q, want qwen3-coder", info.Model)
+}
+
+// TestStreamToolLoop_UserTurnPersistedDespiteLLMFailure is the crash-resilience
+// guarantee: the user's prompt is persisted UP FRONT, before the LLM call, so an
+// interruption mid-turn (here simulated by a provider that errors on the first
+// call) can never lose it.
+func TestStreamToolLoop_UserTurnPersistedDespiteLLMFailure(t *testing.T) {
+	srv, store := newServerWithStore(t)
+	prov := &scriptedProvider{
+		scripts: nil, // empty → StreamChat errors immediately on the first call
+		caps:    llm.Capabilities{SupportsTools: true},
+	}
+	srv.SetCloudLLMProvider(prov)
+
+	// The loop errors (no script); the returned error is expected and irrelevant —
+	// the point is the user turn must already be in the store.
+	_ = srv.streamProcessRequestWithToolLoop(
+		&proto.ProcessRequestRequest{Input: "remember me", ConversationId: "conv-durable"},
+		&fakeStream{ctx: context.Background()})
+
+	turns, err := store.GetTurns(context.Background(), "conv-durable")
+	if err != nil {
+		t.Fatalf("GetTurns: %v", err)
+	}
+	if len(turns) < 1 || turns[0].Role != "user" || turns[0].Content != "remember me" {
+		t.Fatalf("user turn must survive an LLM failure (persisted up front), got %+v", turns)
 	}
 }
 

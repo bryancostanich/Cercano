@@ -1766,7 +1766,29 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	if store := s.agent.PersistentStore(); store != nil && req.GetConversationId() != "" {
 		convHistory = s.assembleHistory(ctx, store, req.GetConversationId())
 	}
-	injectedLen := len(convHistory)
+
+	// Crash-resilient persistence. Persist the USER turn up front (before any LLM
+	// call) so an interruption — panic, kill, restart, power loss — can never lose
+	// the prompt. The rest of the turn is persisted incrementally as the loop
+	// produces each assistant / tool-result message (onTurn → OnTurnComplete), so
+	// a crash mid-turn loses at most the reply currently streaming, not the turn.
+	// (On the rare cross-tier fallback retry below, a failed attempt's already-
+	// persisted assistant turns may be redundantly re-persisted — non-destructive;
+	// the user turn is written once here and never via onTurn.)
+	convID := req.GetConversationId()
+	persistEnabled := s.agent != nil && convID != "" && s.agent.PersistentStore() != nil
+	if persistEnabled {
+		if err := s.agent.PersistentStore().EnsureConversation(ctx, convID, req.GetWorkDir(), s.mainModelFor(isCloud)); err != nil {
+			fmt.Fprintf(os.Stderr, "[tool-loop] EnsureConversation(%s) failed: %v\n", convID, err)
+			persistEnabled = false
+		} else {
+			s.persistTurn(ctx, convID, agent.UserMessage(req.GetInput(), mapInlineImages(req.GetImages())))
+		}
+	}
+	var onTurn func(m llm.Message)
+	if persistEnabled {
+		onTurn = func(m llm.Message) { s.persistTurn(ctx, convID, m) }
+	}
 
 	onTextDelta := func(t string) {
 		stream.Send(&proto.StreamProcessResponse{
@@ -1776,7 +1798,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		})
 	}
 
-	result, loopErr := s.runMainLoop(ctx, req, provider, isCloud, sink, requester, convHistory, onTextDelta)
+	result, loopErr := s.runMainLoop(ctx, req, provider, isCloud, sink, requester, convHistory, onTextDelta, onTurn)
 	if loopErr != nil {
 		s.cfgMu.RLock()
 		locusMode := s.currentConfig.LocusMode
@@ -1803,14 +1825,20 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 			})
 			provider = fbProv
 			isCloud = fbCloud
-			result, loopErr = s.runMainLoop(ctx, req, fbProv, fbCloud, sink, requester, convHistory, onTextDelta)
+			result, loopErr = s.runMainLoop(ctx, req, fbProv, fbCloud, sink, requester, convHistory, onTextDelta, onTurn)
 		}
 		if loopErr != nil {
 			return fmt.Errorf("tool loop error: %w", loopErr)
 		}
 	}
 
-	s.persistToolLoopTurns(ctx, req, result, injectedLen, s.mainModelFor(isCloud))
+	// Turns were persisted incrementally above (user turn up front + each
+	// assistant/tool message via onTurn). Now that the turn is complete, refresh
+	// the living recap and schedule background compaction.
+	if persistEnabled {
+		s.agent.ScheduleRecap(convID)
+		s.agent.ScheduleCompaction(convID)
+	}
 	s.agent.RecordContextUsage(req.GetConversationId(), s.mainModelFor(isCloud),
 		result.InputTokens, result.OutputTokens)
 
@@ -1854,6 +1882,7 @@ func (s *Server) runMainLoop(
 	requester func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission, destructive bool) (bool, error),
 	convHistory []llm.Message,
 	onTextDelta func(string),
+	onTurn func(m llm.Message),
 ) (agent.ToolLoopResult, error) {
 	return agent.RunToolLoop(ctx, agent.ToolLoopInput{
 		Provider:            provider,
@@ -1867,60 +1896,42 @@ func (s *Server) runMainLoop(
 		PermissionRequester: requester,
 		ConvHistory:         convHistory,
 		OnTextDelta:         onTextDelta,
+		OnTurnComplete:      onTurn,
 	})
 }
 
-// persistToolLoopTurns persists the messages added this turn into the
-// persistent conversation store. It writes result.History[injectedLen:] —
-// every role, with BlocksJSON and concatenated text Content — so that user
-// tool_result messages are saved alongside assistant turns. Best-effort:
-// store errors are logged but never surfaced to the caller.
-func (s *Server) persistToolLoopTurns(ctx context.Context, req *proto.ProcessRequestRequest, result agent.ToolLoopResult, injectedLen int, model string) {
-	if s.agent == nil {
+// persistTurn writes one conversation turn (any role) to the persistent store,
+// with BlocksJSON and concatenated text Content. Best-effort: store errors are
+// logged but never surfaced, so a write failure can't abort the turn. Called
+// incrementally as the tool loop produces each message (crash resilience).
+func (s *Server) persistTurn(ctx context.Context, convID string, m llm.Message) {
+	if s.agent == nil || convID == "" {
 		return
 	}
 	store := s.agent.PersistentStore()
-	convID := req.GetConversationId()
-	if store == nil || convID == "" {
+	if store == nil {
 		return
 	}
-	if err := store.EnsureConversation(ctx, convID, req.GetWorkDir(), model); err != nil {
-		fmt.Fprintf(os.Stderr, "[tool-loop] EnsureConversation(%s) failed: %v\n", convID, err)
+	blocksJSON, err := json.Marshal(m.Blocks)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[tool-loop] marshal blocks failed: %v\n", err)
 		return
 	}
-	// Persist only the messages added this turn — result.History begins with the
-	// injected ConvHistory prefix, which is already stored. Clamp defensively.
-	if injectedLen < 0 || injectedLen > len(result.History) {
-		injectedLen = 0
-	}
-	for _, m := range result.History[injectedLen:] {
-		blocksJSON, err := json.Marshal(m.Blocks)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[tool-loop] marshal blocks failed: %v\n", err)
-			continue
-		}
-		var text string
-		for _, b := range m.Blocks {
-			if b.Type == llm.BlockText {
-				text += b.Text
-			}
-		}
-		role := string(m.Role)
-		if err := store.Append(ctx, conversation.Turn{
-			ConversationID: convID,
-			Role:           role,
-			Content:        text,
-			BlocksJSON:     string(blocksJSON),
-		}); err != nil {
-			fmt.Fprintf(os.Stderr, "[tool-loop] Append(%s, %s) failed: %v\n", role, convID, err)
+	var text string
+	for _, b := range m.Blocks {
+		if b.Type == llm.BlockText {
+			text += b.Text
 		}
 	}
-	// Refresh the living recap for this conversation. The legacy path schedules
-	// this inside the agent, but the tool-loop path persists turns here, so it
-	// must trigger the recap too — otherwise recaps never update in the native
-	// tool-calling (cloud) flow the CLI uses.
-	s.agent.ScheduleRecap(convID)
-	s.agent.ScheduleCompaction(convID)
+	role := string(m.Role)
+	if err := store.Append(ctx, conversation.Turn{
+		ConversationID: convID,
+		Role:           role,
+		Content:        text,
+		BlocksJSON:     string(blocksJSON),
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "[tool-loop] Append(%s, %s) failed: %v\n", role, convID, err)
+	}
 }
 
 // assembleHistory builds the conversation history to send: the compacted view

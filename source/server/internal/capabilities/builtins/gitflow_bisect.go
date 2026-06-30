@@ -51,6 +51,9 @@ func (gitBisectCap) Execute(ctx context.Context, call *capabilities.Call) (*capa
 	if dir == "" {
 		dir = call.WorkDir
 	}
+	if a.Good == "" {
+		return nil, fmt.Errorf("git_bisect: good is required (a known-good commit/ref)")
+	}
 	r, err := gitflow.Open(dir)
 	if err != nil {
 		return nil, fmt.Errorf("git_bisect: %w", err)

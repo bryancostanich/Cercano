@@ -195,8 +195,10 @@ func TestGitLandRiskyVerdictStops(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "shared.txt"), []byte("resolved"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	var gotPrompt string
 	svc := capabilities.Services{
-		Dispatch: func(_ context.Context, _ dispatch.Spec) (dispatch.Result, error) {
+		Dispatch: func(_ context.Context, spec dispatch.Spec) (dispatch.Result, error) {
+			gotPrompt = spec.Prompt
 			return dispatch.Result{Text: "VERDICT: RISKY\nREASONING: dropped a guard clause"}, nil
 		},
 	}
@@ -207,6 +209,11 @@ func TestGitLandRiskyVerdictStops(t *testing.T) {
 	}
 	if !strings.Contains(res.Text, "review flagged risk") {
 		t.Fatalf("expected risk stop, got %q", res.Text)
+	}
+	// The review must see the ACTUAL resolution, not an empty diff: the prompt
+	// should embed the resolved content.
+	if !strings.Contains(gotPrompt, "resolved") {
+		t.Fatalf("review prompt should contain the resolution diff (the resolved content), got: %q", gotPrompt)
 	}
 	if mainContainsFeature(dir) {
 		t.Fatal("must NOT finalize to trunk when review flags risk")

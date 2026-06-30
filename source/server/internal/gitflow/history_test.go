@@ -45,3 +45,13 @@ func TestSquashRejectsClaude(t *testing.T) {
 		t.Fatal("expected rejection of 'claude' in squash message")
 	}
 }
+
+func TestSquashRefusesOnTrunk(t *testing.T) {
+	r := newTestRepo(t) // checked out on main (the trunk)
+	writeFile(t, r, "a.txt", "1")
+	mustRun(t, r, "add", "-A")
+	mustRun(t, r, "commit", "-m", "wip")
+	if _, err := r.SquashToOne(context.Background(), "main", "feat: x", ""); err == nil {
+		t.Fatal("expected refusal to squash on the trunk branch")
+	}
+}

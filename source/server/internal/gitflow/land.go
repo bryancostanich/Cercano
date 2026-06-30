@@ -234,12 +234,22 @@ func (r *Repo) ResolutionSignalsFor(ctx context.Context, files []string, cfg Con
 			sig.SensitiveHits = append(sig.SensitiveHits, f)
 		}
 	}
-	const cap = 16 * 1024
-	if d, err := r.run(ctx, "diff", "HEAD"); err == nil {
-		if len(d) > cap {
-			d = d[:cap] + "\n… (diff truncated)"
-		}
-		sig.Diff = d
-	}
+	// Diff is intentionally NOT computed here: by the time the resolved file set
+	// is known the reconcile may already be committed, so `git diff HEAD` would
+	// be empty. Callers set sig.Diff from the resolution range via DiffRange.
 	return sig
+}
+
+// DiffRange returns `git diff from..to`, capped at 16 KiB — used to feed the
+// actual resolution into the review seam.
+func (r *Repo) DiffRange(ctx context.Context, from, to string) (string, error) {
+	d, err := r.run(ctx, "diff", from+".."+to)
+	if err != nil {
+		return "", err
+	}
+	const maxDiff = 16 * 1024
+	if len(d) > maxDiff {
+		d = d[:maxDiff] + "\n… (diff truncated)"
+	}
+	return d, nil
 }

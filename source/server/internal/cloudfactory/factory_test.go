@@ -41,3 +41,16 @@ func TestBuildResponsesProvider(t *testing.T) {
 		t.Fatalf("responses → %v, %v", p, err)
 	}
 }
+
+func TestBuildBedrockProvider(t *testing.T) {
+	p, err := BuildCloudProvider(config.CloudProfile{Name: "b", Flavor: "bedrock", Region: "us-east-1", Model: "anthropic.claude-x"}, "")
+	if err != nil || p == nil || p.Name() != "bedrock" {
+		t.Fatalf("bedrock → %v, %v", p, err)
+	}
+}
+
+func TestBuildBedrockMissingRegion(t *testing.T) {
+	if _, err := BuildCloudProvider(config.CloudProfile{Name: "b", Flavor: "bedrock", Model: "m"}, ""); err == nil {
+		t.Error("bedrock without a region should error")
+	}
+}

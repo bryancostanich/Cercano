@@ -370,10 +370,11 @@ func (s *Server) rebuildCloudLocked() error {
 		}
 	}
 	// If neither a key nor a proxy BaseURL is present the profile cannot
-	// authenticate.  Install the absent sentinel rather than wiring a dead
-	// provider.  The BaseURL carve-out preserves proxy/Meridian setups where
-	// the proxy handles auth and an empty key is intentional.
-	if key == "" && p.BaseURL == "" {
+	// authenticate — install the absent sentinel rather than wiring a dead
+	// provider. Carve-outs: a proxy BaseURL (Meridian) handles auth with an
+	// empty key; and bedrock authenticates via the AWS credential chain, so it
+	// legitimately has no keychain key (its failure mode is a missing region).
+	if key == "" && p.BaseURL == "" && p.Flavor != cloudfactory.FlavorBedrock {
 		s.installAbsentCloud("no API key for profile " + p.Name)
 		return fmt.Errorf("no API key for profile %s", p.Name)
 	}

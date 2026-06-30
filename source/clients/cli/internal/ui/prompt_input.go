@@ -46,6 +46,9 @@ type promptInput struct {
 	undo        []promptUndoRecord
 	redo        []promptUndoRecord
 	canCoalesce bool
+
+	attachments []promptImage
+	nextImageID int
 }
 
 type promptUndoRecord struct {
@@ -112,6 +115,8 @@ func (p *promptInput) SetValue(s string) {
 	p.value = []rune(s)
 	p.cursor = len(p.value)
 	p.selectionAnchor = noPromptSelection
+	p.attachments = nil
+	p.nextImageID = 0
 	p.undo = nil
 	p.redo = nil
 	p.breakUndoCoalescing()
@@ -504,6 +509,10 @@ func (p *promptInput) replaceSelectionOrInsert(runes []rune) {
 }
 
 func (p *promptInput) deleteBackward() {
+	if sp, ok := p.spanForBackspace(); ok && !p.selectionRangeOK() {
+		p.deleteSpan(sp)
+		return
+	}
 	if start, end, ok := p.selectionRange(); ok {
 		p.value = append(append([]rune{}, p.value[:start]...), p.value[end:]...)
 		p.cursor = start
@@ -518,6 +527,10 @@ func (p *promptInput) deleteBackward() {
 }
 
 func (p *promptInput) deleteForward() {
+	if sp, ok := p.spanForDeleteForward(); ok && !p.selectionRangeOK() {
+		p.deleteSpan(sp)
+		return
+	}
 	if start, end, ok := p.selectionRange(); ok {
 		p.value = append(append([]rune{}, p.value[:start]...), p.value[end:]...)
 		p.cursor = start

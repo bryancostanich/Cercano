@@ -33,7 +33,7 @@ func (a *llmModelProvider) Process(ctx context.Context, req *Request) (*Response
 		Messages: []llm.Message{
 			{
 				Role:   llm.RoleUser,
-				Blocks: []llm.Block{{Type: llm.BlockText, Text: req.Input}},
+				Blocks: buildUserBlocks(req.Input, req.Images),
 			},
 		},
 	})

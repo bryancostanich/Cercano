@@ -75,3 +75,34 @@ func TestResetClearsAttachments(t *testing.T) {
 		t.Fatalf("Reset must clear attachments")
 	}
 }
+
+func TestCursorSkipsChip(t *testing.T) {
+	p := newPromptInput()
+	p.Focus()
+	p.InsertString("ab")
+	p.AddImage([]byte{1}, "image/png", "") // "ab[image 1]"
+	p.CursorStart()
+	// move right past 'a','b', then one more right should jump the whole chip.
+	p, _ = p.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	p, _ = p.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	before := p.cursor
+	p, _ = p.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	if p.cursor-before <= 1 {
+		t.Fatalf("right arrow should jump over the whole chip, moved %d", p.cursor-before)
+	}
+	if p.cursor != len([]rune(p.Value())) {
+		t.Fatalf("cursor should land at end of chip, got %d of %d", p.cursor, len([]rune(p.Value())))
+	}
+}
+
+func TestSelectionExpandsToWholeChip(t *testing.T) {
+	p := newPromptInput()
+	p.Focus()
+	p.AddImage([]byte{1}, "image/png", "") // "[image 1]"
+	p.cursor = 0
+	p.selectionAnchor = 3 // anchor inside the chip
+	start, end, ok := p.selectionRange()
+	if !ok || start != 0 || end != len([]rune(p.Value())) {
+		t.Fatalf("selection touching a chip must swallow it whole: start=%d end=%d ok=%v", start, end, ok)
+	}
+}

@@ -305,6 +305,7 @@ func (m *Model) applyInputStyles() {
 		Text:        lipgloss.NewStyle().Foreground(p.Primary),
 		Placeholder: lipgloss.NewStyle().Foreground(p.Muted),
 		Selection:   lipgloss.NewStyle().Foreground(p.BgDeep).Background(p.Info),
+		Chip:        lipgloss.NewStyle().Foreground(p.Accent).Bold(true),
 	})
 }
 

@@ -19,6 +19,7 @@ type promptInputStyles struct {
 	Text        lipgloss.Style
 	Placeholder lipgloss.Style
 	Selection   lipgloss.Style
+	Chip        lipgloss.Style
 }
 
 type promptInput struct {
@@ -376,7 +377,7 @@ func (p *promptInput) navigate(nav promptNav, extend, alt, cmd bool) {
 		case alt:
 			next = p.prevWordOffset(old)
 		default:
-			next = maxInt(0, old-1)
+			next = p.stepLeftOverChip(maxInt(0, old-1))
 		}
 	case promptNavRight:
 		switch {
@@ -385,7 +386,7 @@ func (p *promptInput) navigate(nav promptNav, extend, alt, cmd bool) {
 		case alt:
 			next = p.nextWordOffset(old)
 		default:
-			next = minInt(len(p.value), old+1)
+			next = p.stepRightOverChip(minInt(len(p.value), old+1))
 		}
 	case promptNavUp:
 		if cmd {
@@ -565,6 +566,14 @@ func (p promptInput) selectionRange() (int, int, bool) {
 	if b < a {
 		a, b = b, a
 	}
+	for _, sp := range p.imageSpans() {
+		if a > sp.start && a < sp.end {
+			a = sp.start
+		}
+		if b > sp.start && b < sp.end {
+			b = sp.end
+		}
+	}
 	return a, b, a != b
 }
 
@@ -628,20 +637,52 @@ func (p promptInput) View() string {
 }
 
 func (p promptInput) renderRowText(row promptRow, selectionStart, selectionEnd int, hasSelection bool) string {
-	if !hasSelection {
-		return p.styles.Text.Render(row.text)
-	}
-	start := maxInt(selectionStart, row.start)
-	end := minInt(selectionEnd, row.end)
-	if start >= end {
-		return p.styles.Text.Render(row.text)
-	}
-
 	var b strings.Builder
-	b.WriteString(p.styles.Text.Render(string(p.value[row.start:start])))
-	b.WriteString(p.styles.Selection.Render(string(p.value[start:end])))
-	b.WriteString(p.styles.Text.Render(string(p.value[end:row.end])))
+	for i := row.start; i < row.end; {
+		// is i the start of a chip span within this row?
+		if sp, ok := p.chipSpanStartingAt(i); ok && sp.end <= row.end {
+			seg := string(p.value[sp.start:sp.end])
+			if hasSelection && selectionStart <= sp.start && selectionEnd >= sp.end {
+				b.WriteString(p.styles.Selection.Render(seg))
+			} else {
+				b.WriteString(p.styles.Chip.Render(seg))
+			}
+			i = sp.end
+			continue
+		}
+		// plain rune run until the next chip start or row end
+		j := i + 1
+		for j < row.end {
+			if _, ok := p.chipSpanStartingAt(j); ok {
+				break
+			}
+			j++
+		}
+		seg := string(p.value[i:j])
+		if hasSelection {
+			s := maxInt(selectionStart, i)
+			e := minInt(selectionEnd, j)
+			if s < e {
+				b.WriteString(p.styles.Text.Render(string(p.value[i:s])))
+				b.WriteString(p.styles.Selection.Render(string(p.value[s:e])))
+				b.WriteString(p.styles.Text.Render(string(p.value[e:j])))
+				i = j
+				continue
+			}
+		}
+		b.WriteString(p.styles.Text.Render(seg))
+		i = j
+	}
 	return b.String()
+}
+
+func (p promptInput) chipSpanStartingAt(offset int) (imageSpan, bool) {
+	for _, sp := range p.imageSpans() {
+		if sp.start == offset {
+			return sp, true
+		}
+	}
+	return imageSpan{}, false
 }
 
 func (p promptInput) rowLineBreakSelected(row promptRow, selectionStart, selectionEnd int, hasSelection bool) bool {

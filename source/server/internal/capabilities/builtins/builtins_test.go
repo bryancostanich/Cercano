@@ -10,12 +10,12 @@ func TestRegister_Count(t *testing.T) {
 	reg := capabilities.NewRegistry(capabilities.Services{})
 	Register(reg)
 	all := reg.All()
-	if len(all) != 27 {
+	if len(all) != 28 {
 		names := make([]string, len(all))
 		for i, c := range all {
 			names[i] = c.Name()
 		}
-		t.Fatalf("expected 27 capabilities, got %d: %v", len(all), names)
+		t.Fatalf("expected 28 capabilities, got %d: %v", len(all), names)
 	}
 }
 

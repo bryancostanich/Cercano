@@ -1,0 +1,43 @@
+package ui
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestHandleImagePasteAttachesChip(t *testing.T) {
+	dir := t.TempDir()
+	img := filepath.Join(dir, "a.png")
+	os.WriteFile(img, onePxPNG, 0o644)
+
+	m := newTestModelWithPrompt() // helper: a Model with a focused promptInput
+	handled := m.handleImagePaste(img)
+	if !handled {
+		t.Fatal("an image path paste should be handled as a drop")
+	}
+	if !strings.Contains(m.input.Value(), "[image 1]") {
+		t.Fatalf("chip not inserted, prompt = %q", m.input.Value())
+	}
+	if len(m.input.Attachments()) != 1 {
+		t.Fatalf("attachment not registered")
+	}
+}
+
+func TestHandleImagePasteLiteralFallthrough(t *testing.T) {
+	m := newTestModelWithPrompt()
+	if m.handleImagePaste("just text") {
+		t.Fatal("non-image paste must NOT be handled as a drop (so it inserts literally)")
+	}
+	if m.input.Value() != "" {
+		t.Fatalf("literal fallthrough must not modify the prompt here, got %q", m.input.Value())
+	}
+}
+
+func newTestModelWithPrompt() *Model {
+	m := &Model{}
+	m.input = newPromptInput()
+	m.input.Focus()
+	return m
+}

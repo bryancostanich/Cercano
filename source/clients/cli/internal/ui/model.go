@@ -783,6 +783,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if text == "" {
 				return m, nil
 			}
+			images := promptImagesToInline(m.input.Attachments())
 			m.input.SetValue("")
 			m.splashShown = false
 			// Submitting mid-stream queues the message instead of starting a
@@ -794,7 +795,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Reset the input back to one line (and reclaim any splash rows).
 			m.relayout()
-			return m.submit(text)
+			return m.submit(text, images)
 		case "shift+enter":
 			// Insert a hard newline for multi-line composing; relayout so the
 			// input grows by a row (up to the cap).
@@ -1037,7 +1038,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Drain the next queued message: each completed turn fires the next.
 		if nextMsg, ok := m.chat.DrainNext(); ok {
 			m.relayout()
-			nm, cmd := m.submit(nextMsg)
+			nm, cmd := m.submit(nextMsg, nil)
 			return nm, tea.Batch(cmd, done)
 		}
 		return m, done
@@ -1104,7 +1105,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) submit(text string) (tea.Model, tea.Cmd) {
+// promptImagesToInline converts prompt attachments to agentclient images.
+func promptImagesToInline(atts []promptImage) []agentclient.InlineImage {
+	if len(atts) == 0 {
+		return nil
+	}
+	out := make([]agentclient.InlineImage, 0, len(atts))
+	for _, a := range atts {
+		out = append(out, agentclient.InlineImage{
+			Index:     int32(a.id),
+			Data:      a.data,
+			MediaType: a.mediaType,
+		})
+	}
+	return out
+}
+
+// plural returns "s" for n != 1, "" for n == 1.
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model, tea.Cmd) {
 	// Record for ↑/↓ history recall (skip consecutive duplicates), and reset
 	// the browse position back to the live input.
 	if n := len(m.inputHistory); n == 0 || m.inputHistory[n-1] != text {
@@ -1117,8 +1142,13 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 		next, cmd := m.runSlash(text)
 		return next, cmd
 	}
-	// User turn
-	m.chat.AppendEntry(&Entry{Role: RoleUser, Content: text})
+	// User turn — show markers + image count suffix when images are attached.
+	content := text
+	if len(images) > 0 {
+		content = strings.TrimSpace(content)
+		content += fmt.Sprintf("  (%d image%s)", len(images), plural(len(images)))
+	}
+	m.chat.AppendEntry(&Entry{Role: RoleUser, Content: content})
 	// Assistant placeholder
 	m.chat.AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
 	m.refreshViewport()
@@ -1126,7 +1156,7 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 	// Pass cwd so the agent prepends .cercano/context.md if present.
 	wd, _ := os.Getwd()
 	driver := &mainAgentDriver{agent: m.agent, convID: m.convID, workDir: wd}
-	cmd, cancel, err := driver.Submit(context.Background(), text)
+	cmd, cancel, err := driver.Submit(context.Background(), text, images)
 	if err != nil {
 		m.errMsg = err.Error()
 		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "error: " + err.Error()})

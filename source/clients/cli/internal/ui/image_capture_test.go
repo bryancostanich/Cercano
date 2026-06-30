@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"cercano/source/server/pkg/agentclient"
 )
 
 func TestHandleImagePasteAttachesChip(t *testing.T) {
@@ -33,6 +35,21 @@ func TestHandleImagePasteLiteralFallthrough(t *testing.T) {
 	if m.input.Value() != "" {
 		t.Fatalf("literal fallthrough must not modify the prompt here, got %q", m.input.Value())
 	}
+}
+
+func TestPromptAttachmentsMapToInlineImages(t *testing.T) {
+	dir := t.TempDir()
+	img := filepath.Join(dir, "a.png")
+	os.WriteFile(img, onePxPNG, 0o644)
+	m := newTestModelWithPrompt()
+	m.input.InsertString("see ")
+	m.handleImagePaste(img)
+
+	imgs := promptImagesToInline(m.input.Attachments())
+	if len(imgs) != 1 || imgs[0].Index != 1 || imgs[0].MediaType != "image/png" || len(imgs[0].Data) == 0 {
+		t.Fatalf("attachment did not map to InlineImage: %+v", imgs)
+	}
+	_ = agentclient.InlineImage{} // keep import
 }
 
 func newTestModelWithPrompt() *Model {

@@ -54,7 +54,7 @@ func newDispatchCoprocAgent(modeStr string, localProv, cloudProv *fakeLLMProvide
 		m, _ := locus.ParseMode(modeStr)
 		return m
 	}
-	eng := dispatch.NewEngine(dispatch.Providers{Local: dLocal, Cloud: dCloud}, modeFn, nil)
+	eng := dispatch.NewEngine(func() dispatch.Providers { return dispatch.Providers{Local: dLocal, Cloud: dCloud} }, modeFn, nil)
 	eng.SetModelFor(func(isCloud bool) string {
 		if isCloud {
 			return cloudModel

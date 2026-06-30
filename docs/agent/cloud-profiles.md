@@ -1,6 +1,6 @@
 # Multi-Cloud Provider Profiles — Design
 
-**Status:** Design approved 2026-06-27. Not yet implemented.
+**Status:** Foundation implemented 2026-06-27.
 
 The foundation for non-Anthropic cloud support: let Cercano store **multiple named
 cloud provider configurations** ("profiles"), switch the active one at runtime,
@@ -120,6 +120,48 @@ A CLI surface (extend the existing `/cloud` command, or a new `/profiles`) plus 
 config-editor view manage the list and the active selection. Switching active
 rebuilds the native cloud provider with no restart, mirroring today's
 `UpdateConfig` live-swap.
+
+## Using profiles
+
+Profiles are stored in `~/.config/cercano/config.yaml` under `cloud_profiles` (a list) and `active_cloud_profile` (a string):
+
+```yaml
+cloud_profiles:
+  - { name: claude, flavor: messages, base_url: "", model: claude-sonnet-4-6 }
+active_cloud_profile: claude
+```
+
+API keys are **never stored in YAML** — they live in the OS keychain (macOS Keychain, Windows Credential Manager, or Linux Secret Service via the `99designs/keyring` package).
+
+### CLI commands
+
+| Command | What it does |
+|---|---|
+| `/cloud` or `/cloud list` | List all profiles; show which is active |
+| `/cloud use <name>` | Set the active profile; rebuilds the cloud provider immediately |
+| `/cloud key <name> <api-key>` | Store (or update) the API key for a profile in the OS keychain |
+
+### Settings page (cercano-cli)
+
+The `/s` settings page has a **Cloud Providers** section: a vertical list of your
+configured profiles plus known-provider templates (anthropic, openai, gemini,
+groq, deepinfra, together, openrouter, deepseek) and `+ other` for any
+OpenAI-compatible endpoint. Selecting a row opens an inline editor for its
+base URL, model, and API key (stored in the OS keychain), with save / activate /
+delete actions. Untested backends are labeled `(untested)`; flavors not yet
+implemented (`bedrock`, the OpenAI Responses API) are labeled `(coming soon)`
+and cannot be activated. Backed by the `UpsertCloudProfile` / `RemoveCloudProfile`
+/ `SetActiveCloudProfile` / `SetCloudProfileKey` RPCs.
+
+### Key auto-migration
+
+If you have a legacy single-cloud configuration (the old `cloud_api_key`, `cloud_model`, `cloud_base_url` fields in your YAML), Cercano auto-migrates on first run:
+- Creates a `default` profile from the legacy fields.
+- Moves the inline API key to the OS keychain (under the profile name `default`).
+- Blanks the YAML `cloud_api_key` field (you can delete the old fields manually).
+- Sets `active_cloud_profile: default`.
+
+This is a one-time, automatic operation. Your key is no longer stored in plaintext YAML.
 
 ## 6. Migration / backward-compat
 

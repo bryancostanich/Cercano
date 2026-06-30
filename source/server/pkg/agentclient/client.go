@@ -1126,6 +1126,87 @@ func (c *Client) RestartMcpServer(ctx context.Context, name string) error {
 	return nil
 }
 
+// CloudProfileInfo is a point-in-time view of one cloud profile.
+type CloudProfileInfo struct {
+	Name    string
+	Flavor  string
+	BaseURL string
+	Model   string
+	HasKey  bool // a key exists in the keychain for this profile
+	Backend string
+}
+
+// GetCloudProfiles returns all configured cloud profiles and the name of the
+// currently active profile.
+func (c *Client) GetCloudProfiles(ctx context.Context) ([]CloudProfileInfo, string, error) {
+	resp, err := c.agent.GetCloudProfiles(ctx, &proto.GetCloudProfilesRequest{})
+	if err != nil {
+		return nil, "", err
+	}
+	out := make([]CloudProfileInfo, 0, len(resp.GetProfiles()))
+	for _, p := range resp.GetProfiles() {
+		out = append(out, CloudProfileInfo{
+			Name:    p.GetName(),
+			Flavor:  p.GetFlavor(),
+			BaseURL: p.GetBaseUrl(),
+			Model:   p.GetModel(),
+			HasKey:  p.GetHasKey(),
+			Backend: p.GetBackend(),
+		})
+	}
+	return out, resp.GetActive(), nil
+}
+
+// SetActiveCloudProfile switches the active cloud profile to the named one.
+func (c *Client) SetActiveCloudProfile(ctx context.Context, name string) error {
+	resp, err := c.agent.SetActiveCloudProfile(ctx, &proto.SetActiveCloudProfileRequest{Name: name})
+	if err != nil {
+		return err
+	}
+	if !resp.GetOk() {
+		return fmt.Errorf("%s", resp.GetError())
+	}
+	return nil
+}
+
+// SetCloudProfileKey stores an API key for the named cloud profile.
+func (c *Client) SetCloudProfileKey(ctx context.Context, name, key string) error {
+	resp, err := c.agent.SetCloudProfileKey(ctx, &proto.SetCloudProfileKeyRequest{Name: name, ApiKey: key})
+	if err != nil {
+		return err
+	}
+	if !resp.GetOk() {
+		return fmt.Errorf("%s", resp.GetError())
+	}
+	return nil
+}
+
+// UpsertCloudProfile creates or updates a cloud profile's metadata.
+func (c *Client) UpsertCloudProfile(ctx context.Context, p CloudProfileInfo) error {
+	resp, err := c.agent.UpsertCloudProfile(ctx, &proto.UpsertCloudProfileRequest{
+		Name: p.Name, Flavor: p.Flavor, Backend: p.Backend, BaseUrl: p.BaseURL, Model: p.Model,
+	})
+	if err != nil {
+		return err
+	}
+	if !resp.GetOk() {
+		return fmt.Errorf("%s", resp.GetError())
+	}
+	return nil
+}
+
+// RemoveCloudProfile deletes a cloud profile and its keychain key.
+func (c *Client) RemoveCloudProfile(ctx context.Context, name string) error {
+	resp, err := c.agent.RemoveCloudProfile(ctx, &proto.RemoveCloudProfileRequest{Name: name})
+	if err != nil {
+		return err
+	}
+	if !resp.GetOk() {
+		return fmt.Errorf("%s", resp.GetError())
+	}
+	return nil
+}
+
 // AllowToolCallPersist approves a paused tool call and, when persist is true,
 // asks the agent to allowlist it for silent future runs.
 func (c *Client) AllowToolCallPersist(ctx context.Context, toolUseID string, persist bool) error {

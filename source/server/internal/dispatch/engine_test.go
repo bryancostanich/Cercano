@@ -11,6 +11,9 @@ import (
 	"cercano/source/server/internal/usage"
 )
 
+// provs adapts a static Providers value to the func() Providers that NewEngine takes.
+func provs(p Providers) func() Providers { return func() Providers { return p } }
+
 // echoProvider implements llm.Provider for testing.
 // Chat echoes the last user message text back with a prefix and fixed token counts.
 type echoProvider struct{}
@@ -39,7 +42,7 @@ func (echoProvider) StreamChat(context.Context, llm.ChatRequest) (llm.StreamRead
 func TestOneShotReturnsTextAndTokens(t *testing.T) {
 	prov := echoProvider{}
 	eng := NewEngine(
-		Providers{Local: prov},
+		provs(Providers{Local: prov}),
 		func() locus.Mode { return locus.LocalOnly },
 		nil, // no project context loader
 	)
@@ -65,7 +68,7 @@ func TestOneShotReturnsTextAndTokens(t *testing.T) {
 func TestOneShotModelOverride(t *testing.T) {
 	prov := echoProvider{}
 	eng := NewEngine(
-		Providers{Local: prov},
+		provs(Providers{Local: prov}),
 		func() locus.Mode { return locus.LocalOnly },
 		nil,
 	)
@@ -87,7 +90,7 @@ func TestOneShotModelOverride(t *testing.T) {
 
 func TestOneShotAgenticReturnsError(t *testing.T) {
 	prov := echoProvider{}
-	eng := NewEngine(Providers{Local: prov}, func() locus.Mode { return locus.LocalOnly }, nil)
+	eng := NewEngine(provs(Providers{Local: prov}), func() locus.Mode { return locus.LocalOnly }, nil)
 	// No AgenticRunner installed — must return a clear error.
 
 	_, err := eng.Dispatch(context.Background(), Spec{Mode: Agentic, Role: RoleCoproc, Task: "x"})
@@ -105,7 +108,7 @@ func TestOneShotEmitsSourceLabeledUsage(t *testing.T) {
 
 	prov := echoProvider{}
 	eng := NewEngine(
-		Providers{Local: prov},
+		provs(Providers{Local: prov}),
 		func() locus.Mode { return locus.LocalOnly },
 		nil,
 	)
@@ -144,7 +147,7 @@ func TestOneShotWantsProjectContext_NoContextFile(t *testing.T) {
 	prov := echoProvider{}
 	loader := projectctx.NewLoader()
 	eng := NewEngine(
-		Providers{Local: prov},
+		provs(Providers{Local: prov}),
 		func() locus.Mode { return locus.LocalOnly },
 		loader,
 	)

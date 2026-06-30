@@ -15,7 +15,7 @@ import (
 func TestAgenticDispatch_InvokesRunner(t *testing.T) {
 	prov := echoProvider{}
 	eng := NewEngine(
-		Providers{Local: prov},
+		provs(Providers{Local: prov}),
 		func() locus.Mode { return locus.LocalOnly },
 		nil,
 	)
@@ -62,7 +62,7 @@ func TestAgenticDispatch_InvokesRunner(t *testing.T) {
 func TestAgenticDispatch_ModelOverride(t *testing.T) {
 	prov := echoProvider{}
 	eng := NewEngine(
-		Providers{Local: prov},
+		provs(Providers{Local: prov}),
 		func() locus.Mode { return locus.LocalOnly },
 		nil,
 	)
@@ -89,7 +89,7 @@ func TestAgenticDispatch_ModelOverride(t *testing.T) {
 func TestAgenticDispatch_NoRunner(t *testing.T) {
 	prov := echoProvider{}
 	eng := NewEngine(
-		Providers{Local: prov},
+		provs(Providers{Local: prov}),
 		func() locus.Mode { return locus.LocalOnly },
 		nil,
 	)
@@ -109,7 +109,7 @@ func TestAgenticDispatch_NoRunner(t *testing.T) {
 func TestAgenticDispatch_RunnerError(t *testing.T) {
 	prov := echoProvider{}
 	eng := NewEngine(
-		Providers{Local: prov},
+		provs(Providers{Local: prov}),
 		func() locus.Mode { return locus.LocalOnly },
 		nil,
 	)
@@ -131,7 +131,7 @@ func TestAgenticDispatch_RunnerError(t *testing.T) {
 func TestAgenticAndOneShotCoexist(t *testing.T) {
 	prov := echoProvider{}
 	eng := NewEngine(
-		Providers{Local: prov},
+		provs(Providers{Local: prov}),
 		func() locus.Mode { return locus.LocalOnly },
 		nil,
 	)

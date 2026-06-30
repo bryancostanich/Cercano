@@ -199,7 +199,7 @@ func TestSetDispatchEngine_WiresAgenticRunner(t *testing.T) {
 	srv.SetPermissions(perms, nil)
 
 	eng := dispatch.NewEngine(
-		dispatch.Providers{Local: prov},
+		func() dispatch.Providers { return dispatch.Providers{Local: prov} },
 		func() locus.Mode { return locus.LocalOnly },
 		nil,
 	)

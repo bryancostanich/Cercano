@@ -38,18 +38,69 @@ func sampleSettingsPage(w, h int) *settingsPage {
 		EmbeddingModel: "nomic-embed-text", CloudProvider: "anthropic", CloudModel: "claude-opus-4-7",
 		CloudBaseURL: "http://127.0.0.1:3456", CloudState: "ok", Port: "50052", LocusMode: "cloud_only",
 	}
-	sp := &settingsPage{palette: p, styles: s, width: w, height: h}
-	sp.form = form.New(buildSettingsSections(cfg, "permissive", "palette:accent"))
+	sp := &settingsPage{
+		palette: p, styles: s, width: w, height: h,
+		cfg: cfg, mode: "permissive",
+		themes:  theme.NewRegistry(theme.BuiltinThemes()),
+		working: theme.Theme{Name: "cr4k3r_j4x", Palette: theme.Cracker()},
+		// profilesLoaded=true prevents snapshotSections from calling GetCloudProfiles
+		// on a nil agent during tests.
+		profilesLoaded: true,
+	}
+	sp.form = form.New(sp.snapshotSections())
+	sp.form.OnCommit = sp.onCommit
+	sp.form.OnReload = sp.snapshotSections
 	return sp
 }
 
-// openLocus navigates to and opens the locus-mode select (flat field index 9:
-// Local Model has 4 fields, Cloud has 5).
+// openLocus navigates to and opens the locus-mode select (flat field index 4:
+// Local Model has 4 fields; the legacy Cloud section is removed. The new Cloud
+// Providers section is appended after Routing, so it does not shift the locus-mode index).
 func openLocus(sp *settingsPage) {
-	for i := 0; i < 9; i++ {
+	for i := 0; i < 4; i++ {
 		sp.form.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 	sp.form.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+}
+
+// TestSettingsScrollReachesLastField navigates with the down arrow to the last
+// field on a terminal short enough to require scrolling, and verifies the field
+// lands inside the visible viewport (offset .. offset+viewportHeight) rather
+// than below the fold behind the prompt bar.
+func TestSettingsScrollReachesLastField(t *testing.T) {
+	sp := sampleSettingsPage(96, 39)
+	down := tea.KeyPressMsg{Code: tea.KeyDown}
+	total := len(sp.form.Lines(sp.width, sp.palette, sp.styles))
+	vh := sp.viewportHeight()
+	if total <= vh {
+		t.Fatalf("test needs a form taller than the viewport (total=%d vh=%d)", total, vh)
+	}
+	for i := 0; i < 40; i++ { // more than enough to reach the last field
+		sp.Update(down)
+	}
+	fl := sp.form.FocusedLine()
+	off := sp.ScrollState().Offset
+	if fl < off || fl >= off+vh {
+		t.Fatalf("last field at line %d is outside the visible window [%d,%d) — cannot scroll to bottom", fl, off, off+vh)
+	}
+}
+
+// TestSettingsSetStylesPreservesCursor verifies a live theme edit (which
+// rebuilds the form via SetStyles) keeps the focused field, rather than jumping
+// the cursor back to the top.
+func TestSettingsSetStylesPreservesCursor(t *testing.T) {
+	sp := sampleSettingsPage(96, 40)
+	for i := 0; i < 5; i++ {
+		sp.form.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	}
+	want := sp.form.Cursor()
+	if want == 0 {
+		t.Fatal("precondition: cursor should have advanced past 0")
+	}
+	sp.SetStyles(theme.NewStyles(theme.Cracker()), theme.Cracker())
+	if got := sp.form.Cursor(); got != want {
+		t.Fatalf("cursor after SetStyles = %d, want %d (must be preserved)", got, want)
+	}
 }
 
 // TestSettingsBoxesFillWidth checks the section boxes span the content region
@@ -134,19 +185,25 @@ func TestSettingsNarrowSelectGoesUnderLabel(t *testing.T) {
 		t.Fatalf("options should appear under the label:\n%s", out)
 	}
 	// In the narrow under-label layout the options must form a single vertical
-	// column: one per line, no "·" separators, never two on a row.
+	// column: one per line, with no "·" separator joining options. (Only lines
+	// that actually carry locus options are checked — section titles like
+	// "Theme · Chrome" legitimately contain a middle dot.)
+	opts := []string{"cloud_only", "cloud_primary", "local_primary", "local_only"}
 	for _, ln := range lines {
-		if strings.Contains(ln, "·") {
-			t.Fatalf("narrow under-label options must not use horizontal separators:\n%s", ln)
-		}
-		opts := 0
-		for _, o := range []string{"cloud_only", "cloud_primary", "local_primary", "local_only"} {
+		n := 0
+		for _, o := range opts {
 			if strings.Contains(ln, o) {
-				opts++
+				n++
 			}
 		}
-		if opts > 1 {
-			t.Fatalf("narrow under-label options must be one per line, found %d on:\n%s", opts, ln)
+		if n == 0 {
+			continue // not an option line
+		}
+		if n > 1 {
+			t.Fatalf("narrow under-label options must be one per line, found %d on:\n%s", n, ln)
+		}
+		if strings.Contains(ln, "·") {
+			t.Fatalf("narrow under-label option line must not use a horizontal separator:\n%s", ln)
 		}
 	}
 }

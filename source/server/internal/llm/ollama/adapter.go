@@ -1,6 +1,7 @@
 package ollama
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -9,10 +10,10 @@ import (
 	"cercano/source/server/internal/llm"
 )
 
-func messageToOllama(m llm.Message) api.Message {
+func messageToOllama(ctx context.Context, m llm.Message) (api.Message, error) {
 	for _, b := range m.Blocks {
 		if b.Type == llm.BlockToolResult {
-			return api.Message{Role: "tool", Content: b.Content, ToolCallID: b.ToolUseRef}
+			return api.Message{Role: "tool", Content: b.Content, ToolCallID: b.ToolUseRef}, nil
 		}
 	}
 
@@ -31,6 +32,12 @@ func messageToOllama(m llm.Message) api.Message {
 		switch b.Type {
 		case llm.BlockText:
 			text += b.Text
+		case llm.BlockImage:
+			data, err := llm.ResolveImageBytes(ctx, b)
+			if err != nil {
+				return api.Message{}, fmt.Errorf("ollama image: %w", err)
+			}
+			out.Images = append(out.Images, api.ImageData(data))
 		case llm.BlockToolUse:
 			args := api.NewToolCallFunctionArguments()
 			if len(b.ToolInput) > 0 {
@@ -48,7 +55,7 @@ func messageToOllama(m llm.Message) api.Message {
 		}
 	}
 	out.Content = text
-	return out
+	return out, nil
 }
 
 func toolsToOllama(tools []llm.Tool) []api.Tool {

@@ -121,7 +121,7 @@ func TestContextView_ShiftTabFocusesLastExpandable(t *testing.T) {
 
 func TestContextView_ExpandRendersMarkdown(t *testing.T) {
 	cv := expandTestView()
-	cv.md = render.NewMarkdown(theme.CrackerMarkdownStyle())
+	cv.md = render.NewMarkdown(theme.MarkdownStyle(theme.Cracker()))
 	cv.snapshot.Turns = []agentclient.ContextTurn{
 		{ID: "a", Role: "assistant", Kind: "text",
 			Body: "# Heading\n\nSome **bold** text and a list:\n\n- one\n- two\n- three"},
@@ -146,7 +146,7 @@ func TestContextView_ExpandRendersMarkdown(t *testing.T) {
 
 func TestContextView_ToolTurnStaysPlainWhenExpanded(t *testing.T) {
 	cv := expandTestView()
-	cv.md = render.NewMarkdown(theme.CrackerMarkdownStyle())
+	cv.md = render.NewMarkdown(theme.MarkdownStyle(theme.Cracker()))
 	cv.snapshot.Turns = []agentclient.ContextTurn{
 		{ID: "t", Role: "assistant", Kind: "tool_use",
 			Body: "read_file\nwith **stars** kept\nline3\nline4\nline5"},

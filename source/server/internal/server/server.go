@@ -18,6 +18,7 @@ import (
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/capabilities/agentadapter"
 	"cercano/source/server/internal/capabilities/builtins"
+	"cercano/source/server/internal/cloudfactory"
 	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/compactor"
 	projectctx "cercano/source/server/internal/context"
@@ -33,6 +34,8 @@ import (
 	"cercano/source/server/internal/loop"
 	mcphost "cercano/source/server/internal/mcp_host"
 	"cercano/source/server/internal/protocols"
+	"cercano/source/server/internal/secrets"
+	"cercano/source/server/internal/usage"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 )
@@ -73,13 +76,16 @@ type Server struct {
 	pendingDecisions    *agent.PendingDecisions
 	cloudLLMProvider    llm.Provider
 	localLLMProvider    llm.Provider // native-tool-loop local provider (Ollama)
+	secrets             secrets.Store
 	runtimeManager      localruntime.Manager
 	contextLoader       *projectctx.Loader
 	dispatchEngine      *dispatch.Engine
+	usageSink           func(usage.Usage) // wraps the main-loop provider for token recording
 
-	events        *eventHub  // server->client push fan-out (SubscribeEvents)
-	permBcastMu   sync.Mutex // guards lastBcastMode
-	lastBcastMode string     // last permission mode broadcast; dedupes file-watcher vs SetMode
+	events        *eventHub    // server->client push fan-out (SubscribeEvents)
+	permBcastMu   sync.Mutex   // guards lastBcastMode
+	lastBcastMode string       // last permission mode broadcast; dedupes file-watcher vs SetMode
+	cfgMu         sync.RWMutex // guards all access to currentConfig
 }
 
 // SetContextLoader wires the project-context loader so the native tool-loop can
@@ -224,12 +230,266 @@ func (s *Server) SetCloudLLMProvider(p llm.Provider) { s.cloudLLMProvider = p }
 // SetLocalLLMProvider attaches the native-tool-calling local provider (Ollama).
 func (s *Server) SetLocalLLMProvider(p llm.Provider) { s.localLLMProvider = p }
 
+// CloudLLMProvider / LocalLLMProvider return the RAW (unwrapped) providers. The
+// dispatch engine reads these per-dispatch so a runtime cloud swap is honored,
+// and wraps them itself for usage recording — so these must stay unwrapped.
+func (s *Server) CloudLLMProvider() llm.Provider { return s.cloudLLMProvider }
+func (s *Server) LocalLLMProvider() llm.Provider { return s.localLLMProvider }
+
+// SetUsageSink installs the sink that resolveMainProvider uses to wrap the
+// main tool-loop's provider for token-usage recording. The server's stored
+// providers stay raw; wrapping happens at hand-off so the dispatch engine can
+// read raw providers without double-counting.
+func (s *Server) SetUsageSink(fn func(usage.Usage)) { s.usageSink = fn }
+
+// SetSecrets attaches the secrets store used to retrieve profile API keys.
+func (s *Server) SetSecrets(st secrets.Store) { s.secrets = st }
+
+// activeProfile returns the configured active cloud profile, or false if none.
+func (s *Server) activeProfile() (config.CloudProfile, bool) {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	for _, p := range s.currentConfig.CloudProfiles {
+		if p.Name == s.currentConfig.ActiveCloudProfile {
+			return p, true
+		}
+	}
+	return config.CloudProfile{}, false
+}
+
+// profileByName looks up a profile by name.
+func profileByName(profiles []config.CloudProfile, name string) (config.CloudProfile, bool) {
+	for _, p := range profiles {
+		if p.Name == name {
+			return p, true
+		}
+	}
+	return config.CloudProfile{}, false
+}
+
+// persistConfig saves the current config to disk if a configPath is set.
+func (s *Server) persistConfig() {
+	if s.configPath != "" {
+		s.cfgMu.RLock()
+		defer s.cfgMu.RUnlock()
+		_ = config.Save(s.currentConfig, s.configPath)
+	}
+}
+
+// installAbsentCloud clears the native cloud provider and points both the
+// router and the coordinator's CloudModel at the absent sentinel, so a failed
+// rebuild never leaves a half-wired cloud.
+func (s *Server) installAbsentCloud(reason string) {
+	s.SetCloudLLMProvider(nil)
+	absent := legacymodels.NewAbsentCloudProvider(reason)
+	s.router.SetCloudProvider(absent)
+	if s.coordinator != nil {
+		s.coordinator.SetCloudProvider(absent)
+	}
+}
+
+// rebuildCloud resolves the active profile + its key and rewires BOTH the native
+// tool-loop cloud provider and the router/coordinator CloudModel. On any failure
+// (no active profile, no key, unsupported flavor, keychain down) it clears the
+// native cloud provider and installs the absent-cloud sentinel — the agent keeps
+// running with cloud absent.
+func (s *Server) rebuildCloud() error {
+	p, ok := s.activeProfile()
+	if !ok {
+		s.installAbsentCloud("no active cloud profile")
+		return fmt.Errorf("no active cloud profile")
+	}
+	key := ""
+	if s.secrets != nil {
+		if k, err := s.secrets.Get(p.Name); err == nil {
+			key = k
+		}
+	}
+	// If neither a key nor a proxy BaseURL is present the profile cannot
+	// authenticate.  Install the absent sentinel rather than wiring a dead
+	// provider.  The BaseURL carve-out preserves proxy/Meridian setups where
+	// the proxy handles auth and an empty key is intentional.
+	if key == "" && p.BaseURL == "" {
+		s.installAbsentCloud("no API key for profile " + p.Name)
+		return fmt.Errorf("no API key for profile %s", p.Name)
+	}
+	prov, err := cloudfactory.BuildCloudProvider(p, key)
+	if err != nil {
+		s.installAbsentCloud(err.Error())
+		return err
+	}
+	s.SetCloudLLMProvider(prov)
+	mp := agent.NewLLMModelProvider(prov, p.Model)
+	s.router.SetCloudProvider(mp)
+	if s.coordinator != nil {
+		s.coordinator.SetCloudProvider(mp)
+	}
+	s.cfgMu.Lock()
+	s.currentConfig.CloudModel = p.Model // keep CloudModel reporting consistent
+	s.cfgMu.Unlock()
+	return nil
+}
+
+// RebuildCloud exports rebuildCloud for use by cmd/cercano/main.go at startup.
+func (s *Server) RebuildCloud() error { return s.rebuildCloud() }
+
+// GetCloudProfiles implements proto.AgentServer — returns the list of configured cloud profiles.
+func (s *Server) GetCloudProfiles(ctx context.Context, req *proto.GetCloudProfilesRequest) (*proto.GetCloudProfilesResponse, error) {
+	s.cfgMu.RLock()
+	active := s.currentConfig.ActiveCloudProfile
+	profiles := append([]config.CloudProfile(nil), s.currentConfig.CloudProfiles...)
+	s.cfgMu.RUnlock()
+
+	out := &proto.GetCloudProfilesResponse{Active: active}
+	for _, p := range profiles {
+		hasKey := false
+		if s.secrets != nil {
+			if _, err := s.secrets.Get(p.Name); err == nil {
+				hasKey = true
+			}
+		}
+		out.Profiles = append(out.Profiles, &proto.CloudProfileInfo{
+			Name: p.Name, Flavor: p.Flavor, BaseUrl: p.BaseURL, Model: p.Model, HasKey: hasKey, Backend: p.Backend,
+		})
+	}
+	return out, nil
+}
+
+// SetActiveCloudProfile implements proto.AgentServer — switches the active cloud profile.
+func (s *Server) SetActiveCloudProfile(ctx context.Context, req *proto.SetActiveCloudProfileRequest) (*proto.SetActiveCloudProfileResponse, error) {
+	s.cfgMu.Lock()
+	if _, ok := profileByName(s.currentConfig.CloudProfiles, req.GetName()); !ok {
+		s.cfgMu.Unlock()
+		return &proto.SetActiveCloudProfileResponse{Ok: false, Error: fmt.Sprintf("no profile %q", req.GetName())}, nil
+	}
+	s.currentConfig.ActiveCloudProfile = req.GetName()
+	s.cfgMu.Unlock()
+	if err := s.rebuildCloud(); err != nil {
+		// active is set, but the provider couldn't be built — report it, keep going.
+		s.persistConfig()
+		return &proto.SetActiveCloudProfileResponse{Ok: false, Error: err.Error()}, nil
+	}
+	s.persistConfig()
+	return &proto.SetActiveCloudProfileResponse{Ok: true}, nil
+}
+
+// SetCloudProfileKey implements proto.AgentServer — stores an API key for a profile.
+func (s *Server) SetCloudProfileKey(ctx context.Context, req *proto.SetCloudProfileKeyRequest) (*proto.SetCloudProfileKeyResponse, error) {
+	if s.secrets == nil {
+		return &proto.SetCloudProfileKeyResponse{Ok: false, Error: "keychain unavailable"}, nil
+	}
+	s.cfgMu.RLock()
+	_, ok := profileByName(s.currentConfig.CloudProfiles, req.GetName())
+	isActive := req.GetName() == s.currentConfig.ActiveCloudProfile
+	s.cfgMu.RUnlock()
+	if !ok {
+		return &proto.SetCloudProfileKeyResponse{Ok: false, Error: fmt.Sprintf("no profile %q", req.GetName())}, nil
+	}
+	if err := s.secrets.Set(req.GetName(), req.GetApiKey()); err != nil {
+		return &proto.SetCloudProfileKeyResponse{Ok: false, Error: err.Error()}, nil
+	}
+	// If the key belongs to the active profile, rebuild so it takes effect now.
+	if isActive {
+		_ = s.rebuildCloud()
+	}
+	return &proto.SetCloudProfileKeyResponse{Ok: true}, nil
+}
+
+// knownFlavor reports whether the flavor is a recognized enum value (whether or
+// not it is implemented yet — coming-soon flavors are storable but won't activate).
+func knownFlavor(f string) bool {
+	switch f {
+	case cloudfactory.FlavorMessages, cloudfactory.FlavorChatCompletions,
+		cloudfactory.FlavorResponses, cloudfactory.FlavorBedrock:
+		return true
+	}
+	return false
+}
+
+// UpsertCloudProfile implements proto.AgentServer — creates or updates a profile's
+// metadata (the API key is managed separately via SetCloudProfileKey).
+func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudProfileRequest) (*proto.UpsertCloudProfileResponse, error) {
+	name := strings.TrimSpace(req.GetName())
+	if name == "" {
+		return &proto.UpsertCloudProfileResponse{Ok: false, Error: "profile name is required"}, nil
+	}
+	if !knownFlavor(req.GetFlavor()) {
+		return &proto.UpsertCloudProfileResponse{Ok: false, Error: fmt.Sprintf("unknown flavor %q", req.GetFlavor())}, nil
+	}
+	if req.GetFlavor() == cloudfactory.FlavorChatCompletions && strings.TrimSpace(req.GetBaseUrl()) == "" {
+		return &proto.UpsertCloudProfileResponse{Ok: false, Error: "base_url is required for chat_completions"}, nil
+	}
+	np := config.CloudProfile{
+		Name: name, Flavor: req.GetFlavor(), Backend: req.GetBackend(),
+		BaseURL: req.GetBaseUrl(), Model: req.GetModel(),
+	}
+	s.cfgMu.Lock()
+	replaced := false
+	for i, p := range s.currentConfig.CloudProfiles {
+		if p.Name == name {
+			s.currentConfig.CloudProfiles[i] = np
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		s.currentConfig.CloudProfiles = append(s.currentConfig.CloudProfiles, np)
+	}
+	isActive := name == s.currentConfig.ActiveCloudProfile
+	s.cfgMu.Unlock()
+	// If this is the active profile, rebuild so metadata changes take effect now.
+	if isActive {
+		if err := s.rebuildCloud(); err != nil {
+			// active is set, but the provider couldn't be built — report it, keep going.
+			s.persistConfig()
+			return &proto.UpsertCloudProfileResponse{Ok: false, Error: err.Error()}, nil
+		}
+	}
+	s.persistConfig()
+	return &proto.UpsertCloudProfileResponse{Ok: true}, nil
+}
+
+// RemoveCloudProfile implements proto.AgentServer — deletes a profile and its
+// keychain key. Clears the active profile (→ absent cloud) if it was active.
+func (s *Server) RemoveCloudProfile(ctx context.Context, req *proto.RemoveCloudProfileRequest) (*proto.RemoveCloudProfileResponse, error) {
+	name := req.GetName()
+	s.cfgMu.Lock()
+	if _, ok := profileByName(s.currentConfig.CloudProfiles, name); !ok {
+		s.cfgMu.Unlock()
+		return &proto.RemoveCloudProfileResponse{Ok: false, Error: fmt.Sprintf("no profile %q", name)}, nil
+	}
+	kept := s.currentConfig.CloudProfiles[:0]
+	for _, p := range s.currentConfig.CloudProfiles {
+		if p.Name != name {
+			kept = append(kept, p)
+		}
+	}
+	s.currentConfig.CloudProfiles = kept
+	wasActive := s.currentConfig.ActiveCloudProfile == name
+	if wasActive {
+		s.currentConfig.ActiveCloudProfile = ""
+	}
+	s.cfgMu.Unlock()
+
+	if s.secrets != nil {
+		_ = s.secrets.Delete(name) // best-effort; missing key is not an error
+	}
+	if wasActive {
+		s.installAbsentCloud("active cloud profile removed")
+	}
+	s.persistConfig()
+	return &proto.RemoveCloudProfileResponse{Ok: true}, nil
+}
+
 // resolveMainProvider picks the llm.Provider for the main tool-loop per the
 // active Locus Mode. Returns the provider, whether it's the cloud tier, whether
 // this is a fallback (preferred tier unavailable), or an error when the mode
 // forbids crossing and the required tier has no provider wired.
 func (s *Server) resolveMainProvider() (llm.Provider, bool, bool, error) {
-	mode, _ := locus.ParseMode(s.currentConfig.LocusMode)
+	s.cfgMu.RLock()
+	locusMode := s.currentConfig.LocusMode
+	s.cfgMu.RUnlock()
+	mode, _ := locus.ParseMode(locusMode)
 	sel, err := dispatch.Select(mode, dispatch.RoleMain, dispatch.Providers{
 		Cloud: s.cloudLLMProvider,
 		Local: s.localLLMProvider,
@@ -237,7 +497,11 @@ func (s *Server) resolveMainProvider() (llm.Provider, bool, bool, error) {
 	if err != nil {
 		return nil, false, false, err
 	}
-	return sel.Provider, sel.IsCloud, sel.FellBack, nil
+	// Wrap the selected provider for "main" token-usage recording at hand-off.
+	// The stored providers stay raw (the dispatch engine reads them raw and
+	// wraps per-dispatch with its own source), so there's no double-counting.
+	prov := usage.Wrap(sel.Provider, "main", sel.IsCloud, s.usageSink)
+	return prov, sel.IsCloud, sel.FellBack, nil
 }
 
 // SetRuntimeManager attaches the local runtime/dashboard state manager.
@@ -262,16 +526,31 @@ func NewServer(a *agent.Agent, localProvider *legacymodels.LocalModelProvider, r
 // SetConfigPersistence enables config persistence by storing the config path and current state.
 func (s *Server) SetConfigPersistence(path string, cfg config.Config) {
 	s.configPath = path
+	s.cfgMu.Lock()
 	s.currentConfig = cfg
+	s.cfgMu.Unlock()
 	s.refreshRuntimeEndpoints()
 }
 
 // LocusMode returns the currently configured Locus Mode (live; reflects
 // UpdateConfig). Used by the agent for co-processor tier resolution.
-func (s *Server) LocusMode() string { return s.currentConfig.LocusMode }
+func (s *Server) LocusMode() string {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return s.currentConfig.LocusMode
+}
 
 // UpdateConfig implements proto.AgentServer — updates runtime config without restart.
 func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigRequest) (*proto.UpdateConfigResponse, error) {
+	// UpdateConfig calls NO cfgMu-locking method (it mutates/reads currentConfig
+	// fields directly, calls registry/provider/coordinator methods, broadcasts,
+	// applyRuntimeEndpoints, and config.Save — none of which take cfgMu), so the
+	// whole body can hold the write lock without risk of a nested-lock deadlock.
+	// Config updates are rare, so holding the lock across the registry/provider
+	// calls is acceptable.
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
+
 	var changes []string
 
 	if req.OllamaUrl != "" {
@@ -403,29 +682,38 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 
 	if req.OllamaUrl != "" {
 		s.currentConfig.OllamaURL = req.OllamaUrl
+		s.broadcastConfigChanged("ollama_url", req.OllamaUrl)
 	}
 	if req.LocalModel != "" {
 		s.currentConfig.LocalModel = req.LocalModel
+		s.broadcastConfigChanged("local_model", req.LocalModel)
 	}
 	if req.LocalRuntime != "" {
 		s.currentConfig.LocalRuntime = req.LocalRuntime
+		s.broadcastConfigChanged("local_runtime", req.LocalRuntime)
 	}
 	if req.CloudProvider != "" {
 		s.currentConfig.CloudProvider = req.CloudProvider
+		s.broadcastConfigChanged("cloud_provider", req.CloudProvider)
 	}
 	if req.CloudModel != "" {
 		s.currentConfig.CloudModel = req.CloudModel
+		s.broadcastConfigChanged("cloud_model", req.CloudModel)
 	}
 	if req.CloudApiKey != "" {
 		s.currentConfig.CloudAPIKey = req.CloudApiKey
+		// Presence marker only — never broadcast a raw secret.
+		s.broadcastConfigChanged("cloud_api_key", "set")
 	}
 	if req.CloudBaseUrl != "" {
 		s.currentConfig.CloudBaseURL = req.CloudBaseUrl
+		s.broadcastConfigChanged("cloud_base_url", req.CloudBaseUrl)
 	}
 	if req.LocusMode != "" {
 		s.currentConfig.LocusMode = req.LocusMode
+		s.broadcastConfigChanged("locus_mode", req.LocusMode)
 	}
-	s.refreshRuntimeEndpoints()
+	s.applyRuntimeEndpoints(s.currentConfig)
 
 	// Persist changes to disk
 	if s.configPath != "" {
@@ -700,18 +988,21 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 			}
 		}
 	}
+	s.cfgMu.RLock()
+	cfg := s.currentConfig
+	s.cfgMu.RUnlock()
 	return &proto.GetConfigResponse{
-		OllamaUrl:      s.currentConfig.OllamaURL,
-		LocalModel:     s.currentConfig.LocalModel,
-		EmbeddingModel: s.currentConfig.EmbeddingModel,
-		CloudProvider:  s.currentConfig.CloudProvider,
-		CloudModel:     s.currentConfig.CloudModel,
-		CloudBaseUrl:   s.currentConfig.CloudBaseURL,
-		CloudApiKeySet: s.currentConfig.CloudAPIKey != "",
+		OllamaUrl:      cfg.OllamaURL,
+		LocalModel:     cfg.LocalModel,
+		EmbeddingModel: cfg.EmbeddingModel,
+		CloudProvider:  cfg.CloudProvider,
+		CloudModel:     cfg.CloudModel,
+		CloudBaseUrl:   cfg.CloudBaseURL,
+		CloudApiKeySet: cfg.CloudAPIKey != "",
 		CloudState:     state,
-		Port:           s.currentConfig.Port,
-		LocalRuntime:   s.currentConfig.LocalRuntime,
-		LocusMode:      s.currentConfig.LocusMode,
+		Port:           cfg.Port,
+		LocalRuntime:   cfg.LocalRuntime,
+		LocusMode:      cfg.LocusMode,
 	}, nil
 }
 
@@ -720,7 +1011,9 @@ func (s *Server) ListModels(ctx context.Context, req *proto.ListModelsRequest) (
 	if s.registry == nil {
 		return nil, fmt.Errorf("registry not configured")
 	}
+	s.cfgMu.RLock()
 	runtimeName := s.currentConfig.LocalRuntime
+	s.cfgMu.RUnlock()
 	if runtimeName == "" {
 		runtimeName = "ollama"
 	}
@@ -895,11 +1188,27 @@ func (s *Server) StreamRuntimeLogs(req *proto.StreamRuntimeLogsRequest, stream p
 	return nil
 }
 
+// refreshRuntimeEndpoints snapshots the current config under the read lock,
+// releases it, then pushes the derived endpoints. It must NOT be called while
+// cfgMu is already held — callers that hold the lock (UpdateConfig) call
+// applyRuntimeEndpoints directly with the config they already have.
 func (s *Server) refreshRuntimeEndpoints() {
 	if s.runtimeManager == nil {
 		return
 	}
-	s.runtimeManager.SetEndpoints(localruntime.EndpointsFromConfig(s.currentConfig))
+	s.cfgMu.RLock()
+	cfg := s.currentConfig
+	s.cfgMu.RUnlock()
+	s.applyRuntimeEndpoints(cfg)
+}
+
+// applyRuntimeEndpoints derives and pushes runtime endpoints from the given
+// config snapshot. Lock-free: the caller owns lock discipline.
+func (s *Server) applyRuntimeEndpoints(cfg config.Config) {
+	if s.runtimeManager == nil {
+		return
+	}
+	s.runtimeManager.SetEndpoints(localruntime.EndpointsFromConfig(cfg))
 }
 
 func mapRuntimeModels(models []localruntime.ModelRecord) []*proto.RuntimeModel {
@@ -1347,7 +1656,10 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 
 	result, loopErr := s.runMainLoop(ctx, req, provider, isCloud, sink, requester, convHistory, onTextDelta)
 	if loopErr != nil {
-		mode, _ := locus.ParseMode(s.currentConfig.LocusMode)
+		s.cfgMu.RLock()
+		locusMode := s.currentConfig.LocusMode
+		s.cfgMu.RUnlock()
+		mode, _ := locus.ParseMode(locusMode)
 		res := mode.Main()
 		fbProv := s.cloudLLMProvider
 		fbCloud := true
@@ -1394,6 +1706,8 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 
 // mainModelFor returns the configured model name for the active tier.
 func (s *Server) mainModelFor(isCloud bool) string {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
 	if isCloud {
 		return s.currentConfig.CloudModel
 	}
@@ -1493,9 +1807,13 @@ func (s *Server) assembleHistory(ctx context.Context, store conversation.Store, 
 	state, _ := store.GetCompaction(ctx, convID)
 	view, _ := compactor.BuildSendView(turns, state)
 
-	pct := s.currentConfig.Compaction.HardOverridePct
-	if s.currentConfig.Compaction.Enabled && pct > 0 {
-		hardLimit := int(float64(contextmeter.ModelMax(s.currentConfig.CloudModel)) * pct)
+	s.cfgMu.RLock()
+	compactionCfg := s.currentConfig.Compaction
+	cloudModel := s.currentConfig.CloudModel
+	s.cfgMu.RUnlock()
+	pct := compactionCfg.HardOverridePct
+	if compactionCfg.Enabled && pct > 0 {
+		hardLimit := int(float64(contextmeter.ModelMax(cloudModel)) * pct)
 		if compaction.TotalTokens(contextmeter.Default(), view) > hardLimit {
 			if err := s.agent.CompactNow(ctx, convID); err == nil {
 				state, _ = store.GetCompaction(ctx, convID)

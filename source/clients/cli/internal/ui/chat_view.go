@@ -81,10 +81,20 @@ func newChatView(styles theme.Styles, palette theme.Palette, root, home string, 
 		palette:        palette,
 		root:           root,
 		home:           home,
-		md:             render.NewMarkdown(theme.CrackerMarkdownStyle()),
+		md:             render.NewMarkdown(theme.MarkdownStyle(palette)),
 		vp:             viewport.New(viewport.WithWidth(vpWidth), viewport.WithHeight(vpHeight)),
 		focusedToolIdx: -1,
 	}
+}
+
+// SetStyles swaps the chat's styles/palette and rebuilds. The markdown renderer
+// is replaced wholesale so its per-width glamour cache is flushed and committed
+// entries re-render in the new theme.
+func (c *chatView) SetStyles(s theme.Styles, p theme.Palette) {
+	c.styles = s
+	c.palette = p
+	c.md = render.NewMarkdown(theme.MarkdownStyle(p))
+	c.rebuild()
 }
 
 // ── entry ownership ────────────────────────────────────────────────────────
@@ -567,7 +577,7 @@ func (c *chatView) renderEntry(e *Entry, idx int) string {
 	// marker + status glyph. Indented to match the prose left-margin so the
 	// scrollback's vertical rhythm stays consistent.
 	if e.Tool != nil {
-		return indentBlock(pad, renderToolEntry(*e.Tool, textW, idx == c.focusedToolIdx, c.md))
+		return indentBlock(pad, renderToolEntry(*e.Tool, textW, idx == c.focusedToolIdx, c.styles, c.md))
 	}
 
 	switch e.Role {

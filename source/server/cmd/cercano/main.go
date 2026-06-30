@@ -33,7 +33,6 @@ import (
 	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
-	"cercano/source/server/internal/llm/anthropic"
 	ollamallm "cercano/source/server/internal/llm/ollama"
 	"cercano/source/server/internal/localruntime"
 	runtimellama "cercano/source/server/internal/localruntime/llamaserver"
@@ -44,10 +43,10 @@ import (
 	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/recap"
 	"cercano/source/server/internal/retention"
+	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/server"
 	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/internal/tools"
-	"cercano/source/server/internal/usage"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 	"cercano/source/server/pkg/update"
@@ -119,42 +118,10 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	localEngine, localModel := selectLocalEngine(cfg, ollamaEng, llamaEng)
 	localProvider := legacymodels.NewLocalModelProvider(localEngine, localModel)
 
-	// Cloud provider: only construct a real one when there's enough config to
-	// actually reach a cloud. Otherwise return a sentinel that auto-degrades
-	// to local at turn time with a visible scrollback notice. No silent mock.
-	//
-	// Dual-path note (native tool calling migration; see docs/features/cli/native-tool-calling/design.md):
-	//   - Anthropic cloud: StreamProcessRequest uses the new layered provider
-	//     wired below via srv.SetCloudLLMProvider (internal/llm/anthropic).
-	//     The legacymodels.NewCloudModelProvider built here remains as the
-	//     fallback path for the older ProcessRequestStream entrypoint.
-	//   - Other providers (Google, etc.) + local: legacy ModelProvider path
-	//     via langchaingo. internal/legacymodels/langchain.go stays in place
-	//     un-imported elsewhere; scheduled for cleanup once all providers
-	//     migrate to the layered interface.
-	var cloudProvider agent.ModelProvider
-	canConfigureCloud := cfg.CloudProvider != "" && (cfg.CloudAPIKey != "" || cfg.CloudBaseURL != "")
-	if canConfigureCloud {
-		fmt.Fprintf(os.Stderr, "Initializing Cloud Provider (%s)...\n", cfg.CloudProvider)
-		if cfg.CloudBaseURL != "" {
-			fmt.Fprintf(os.Stderr, "  baseURL: %s\n", cfg.CloudBaseURL)
-		}
-		cp, err := legacymodels.NewCloudModelProvider(context.Background(), cfg.CloudProvider, cfg.CloudModel, cfg.CloudAPIKey, cfg.CloudBaseURL)
-		if err == nil {
-			cloudProvider = cp
-		} else {
-			fmt.Fprintf(os.Stderr, "Failed to init Cloud Provider: %v — cloud routing will degrade to local.\n", err)
-			cloudProvider = legacymodels.NewAbsentCloudProvider("provider init failed: " + err.Error())
-		}
-	}
-	if cloudProvider == nil {
-		reason := "no API key or base URL configured"
-		if cfg.CloudProvider == "" {
-			reason = "no provider selected"
-		}
-		cloudProvider = legacymodels.NewAbsentCloudProvider(reason)
-		fmt.Fprintf(os.Stderr, "Cloud provider absent (%s); routing will degrade to local with notice.\n", reason)
-	}
+	// Cloud provider: start with the absent sentinel; RebuildCloud() (called
+	// after secrets are wired below) resolves the active profile's key from
+	// the OS keychain and installs the real provider.
+	cloudProvider := legacymodels.NewAbsentCloudProvider("pending profile resolution")
 
 	validator := tools.NewAutoValidator(tools.DefaultLoader(), tools.DefaultKindToValidator())
 	sessionSvc := session.InMemoryService()
@@ -272,11 +239,17 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	if err := srv.StartPermissionWatcher(context.Background(), permsPath); err != nil {
 		fmt.Fprintf(os.Stderr, "[WARN] permission file watcher not started (%v) — /strict etc. still push; hand-edits won't.\n", err)
 	}
+	// Watch config.yaml for out-of-band edits and replay hot-reloadable fields
+	// through UpdateConfig. Non-fatal: the /config RPC path still works.
+	if err := srv.StartConfigWatcher(context.Background(), config.DefaultPath()); err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] config file watcher not started (%v) — /config still applies live; hand-edits won't.\n", err)
+	}
 
-	// Agent-server telemetry: mirrors the MCP-mode collector setup so
-	// provider calls in the native tool-calling loop are recorded.
-	// DE: shared usage sink; dispatch engine will reuse it.
-	var sink func(usage.Usage)
+	// Agent-server telemetry: mirrors the MCP-mode collector setup so provider
+	// calls in the native tool-calling loop are recorded. The sink is handed to
+	// the server, which wraps the selected provider in resolveMainProvider —
+	// keeping the server's stored providers raw so the dispatch engine can wrap
+	// them per-dispatch without double-counting.
 	agentTelemetryPath := filepath.Join(filepath.Dir(config.DefaultPath()), "telemetry.db")
 	agentTelemetryStore, err := telemetry.NewSQLiteStore(agentTelemetryPath)
 	if err != nil {
@@ -286,40 +259,72 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		agentCollector.SetSessionID(generateSessionID())
 		defer agentCollector.Close()
 		defer agentTelemetryStore.Close()
-		sink = server.UsageEventSink(agentCollector.Emit)
+		srv.SetUsageSink(server.UsageEventSink(agentCollector.Emit))
 	}
 
-	// Layered LLM provider for native tool calling. Constructed only when
-	// the cloud is actually configured (anthropic-only for V1). When absent,
-	// StreamProcessRequest falls back to the legacy ProcessRequestStream path.
-	// rawCloud holds the unwrapped provider for the dispatch engine (avoids
-	// double-counting usage when the engine wraps per-dispatch).
-	var rawCloud llm.Provider
-	if canConfigureCloud && strings.EqualFold(cfg.CloudProvider, "anthropic") {
-		client := anthropic.NewClient(anthropic.Config{
-			BaseURL: cfg.CloudBaseURL,
-			APIKey:  cfg.CloudAPIKey,
-			Model:   cfg.CloudModel,
-		})
-		rawCloud = client
-		srv.SetCloudLLMProvider(usage.Wrap(client, "main", true, sink))
+	// Open OS keychain and attach it so profile RPCs and rebuildCloud can
+	// read API keys. Failure is non-fatal: cloud stays absent.
+	if store, err := secrets.OpenKeychain(); err == nil {
+		srv.SetSecrets(store)
+	} else {
+		fmt.Fprintf(os.Stderr, "[WARN] keychain unavailable (%v) — cloud profiles can't load keys; fallback deferred.\n", err)
+	}
+
+	// One-time relocation: if a legacy inline API key is still in the config,
+	// ensure it is safely in the keychain and then blank the YAML field so it
+	// never persists in plain text.  Two cases are handled:
+	//   1. Key not yet in keychain → Set it, then blank+save.
+	//   2. Key already in keychain but yaml still set (previous run saved the
+	//      keychain entry but failed to blank the yaml) → blank+save only.
+	// We NEVER blank the yaml unless the key is confirmed present in the keychain.
+	if cfg.CloudAPIKey != "" && cfg.ActiveCloudProfile != "" {
+		if store, err := secrets.OpenKeychain(); err == nil {
+			keySafe := false
+			if _, gerr := store.Get(cfg.ActiveCloudProfile); gerr == nil {
+				// Already in keychain.
+				keySafe = true
+			} else {
+				// Not in keychain yet — store it first.
+				if serr := store.Set(cfg.ActiveCloudProfile, cfg.CloudAPIKey); serr == nil {
+					keySafe = true
+				} else {
+					fmt.Fprintf(os.Stderr, "[WARN] keychain Set failed (%v) — plaintext key NOT blanked in config\n", serr)
+				}
+			}
+			if keySafe {
+				cfg.CloudAPIKey = ""
+				if sverr := config.Save(cfg, config.DefaultPath()); sverr != nil {
+					fmt.Fprintf(os.Stderr, "[WARN] config save failed after key relocation (%v) — plaintext key may persist\n", sverr)
+				}
+			}
+		}
+	}
+
+	// Resolve the active cloud profile and wire both the legacy and native
+	// cloud providers. Errors are logged but not fatal.
+	if err := srv.RebuildCloud(); err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] cloud profile resolution failed: %v — cloud routing will degrade to local.\n", err)
 	}
 
 	// Native tool-loop local provider (Ollama). Wired unconditionally so Local
 	// modes can drive the tool-calling loop; availability is enforced per turn.
-	// rawLocal holds the unwrapped provider for the dispatch engine.
-	rawLocal := ollamallm.NewClient(ollamallm.Config{
+	// Stored RAW — resolveMainProvider wraps it for usage at hand-off, and the
+	// dispatch engine reads it raw and wraps per-dispatch (no double-count).
+	srv.SetLocalLLMProvider(ollamallm.NewClient(ollamallm.Config{
 		BaseURL: cfg.OllamaURL,
 		Model:   cfg.LocalModel,
-	})
-	srv.SetLocalLLMProvider(usage.Wrap(rawLocal, "main", false, sink))
+	}))
 
-	// Wire the co-processor dispatch engine. RAW (unwrapped) providers are
-	// passed so the engine's own per-dispatch usage.Wrap doesn't double-count.
+	// Wire the co-processor dispatch engine. Providers are resolved fresh per
+	// dispatch from the server's RAW (unwrapped) providers, so a runtime cloud
+	// swap (cloud-profile change → RebuildCloud) is honored and the engine's
+	// own per-dispatch usage.Wrap doesn't double-count.
 	// NB: SetUsageSink deliberately omitted here — coproc telemetry stays
 	// MCP-side to avoid double-counting; engine-side usage activated later.
 	coprocEngine := dispatch.NewEngine(
-		dispatch.Providers{Cloud: rawCloud, Local: rawLocal},
+		func() dispatch.Providers {
+			return dispatch.Providers{Cloud: srv.CloudLLMProvider(), Local: srv.LocalLLMProvider()}
+		},
 		func() locus.Mode { m, _ := locus.ParseMode(srv.LocusMode()); return m },
 		ctxLoader,
 	)

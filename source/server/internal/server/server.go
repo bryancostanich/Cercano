@@ -1821,6 +1821,10 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 				RoutingMetadata: &proto.RoutingMetadata{
 					ModelName: provider.Name(),
 				},
+				// Carry the turn's token counts so the CLI's "last turn" footer
+				// isn't stuck at 0 — same values RecordContextUsage just stored.
+				InputTokens:  int32(result.InputTokens),
+				OutputTokens: int32(result.OutputTokens),
 			},
 		},
 	})

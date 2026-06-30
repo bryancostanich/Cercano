@@ -461,3 +461,38 @@ func TestStreamToolLoop_UpdatesContextMeter(t *testing.T) {
 		t.Errorf("ModelMax = %d, want %d (cloud window)", resp.ModelMax, want)
 	}
 }
+
+// TestStreamToolLoop_FinalResponseCarriesTokens guards the bug where the
+// streaming final-response builder dropped the turn's token counts (the CLI's
+// "last turn N↑/N↓" footer reads these, so it was stuck at 0/0 even though the
+// context meter — fed by RecordContextUsage from the same values — worked).
+func TestStreamToolLoop_FinalResponseCarriesTokens(t *testing.T) {
+	srv, _ := newServerWithStore(t)
+	prov := &scriptedProvider{
+		scripts: [][]llm.Block{{{Type: llm.BlockText, Text: "hello"}}},
+		caps:    llm.Capabilities{SupportsTools: true},
+		usage:   [2]int{4321, 99},
+	}
+	srv.SetCloudLLMProvider(prov)
+
+	stream := &fakeStream{ctx: context.Background()}
+	if err := srv.streamProcessRequestWithToolLoop(
+		&proto.ProcessRequestRequest{Input: "hi", ConversationId: "conv-tok"},
+		stream); err != nil {
+		t.Fatalf("streamProcessRequestWithToolLoop: %v", err)
+	}
+
+	var fr *proto.ProcessRequestResponse
+	for _, m := range stream.sent {
+		if f := m.GetFinalResponse(); f != nil {
+			fr = f
+		}
+	}
+	if fr == nil {
+		t.Fatal("no FinalResponse was sent")
+	}
+	if fr.GetInputTokens() != 4321 || fr.GetOutputTokens() != 99 {
+		t.Fatalf("FinalResponse tokens = %d↑/%d↓, want 4321↑/99↓ (the CLI 'last turn' footer reads these)",
+			fr.GetInputTokens(), fr.GetOutputTokens())
+	}
+}

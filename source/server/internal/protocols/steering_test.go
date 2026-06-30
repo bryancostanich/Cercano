@@ -30,3 +30,10 @@ func TestSteeringBlockEmptyProtocols(t *testing.T) {
 		t.Fatal("rules must be present even with no protocols")
 	}
 }
+
+func TestSteeringBlockContainsCheckpointNudge(t *testing.T) {
+	out := SteeringBlock(nil)
+	if !strings.Contains(out, "checkpoint") {
+		t.Fatal("steering block must contain checkpoint nudge")
+	}
+}

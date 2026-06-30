@@ -703,24 +703,36 @@ func (c *Client) StreamRuntimeLogs(ctx context.Context, tail int, source string)
 	return out, nil
 }
 
-// PermissionModeEvent is pushed when the agent's active permission mode
-// changes — via a /strict-style command from any client, or an out-of-band
-// edit to permissions.yaml. Err is set if the stream itself failed.
-type PermissionModeEvent struct {
-	Mode string
-	Err  error
+// AgentEvent is one item from the standing server->client SubscribeEvents
+// stream. Exactly one of the typed fields is populated per event (the rest are
+// zero / nil). Err is set if the stream itself failed and is the terminal
+// event on this channel.
+type AgentEvent struct {
+	Mode           string          // populated by PermissionModeChanged events
+	MeridianStatus *MeridianStatus // populated by MeridianStatusChanged events
+	Err            error
+}
+
+// MeridianStatus mirrors proto.MeridianStatus in the client SDK so callers
+// don't need to import the proto package. See server-side meridian.State for
+// the full set of state strings.
+type MeridianStatus struct {
+	State       string
+	Message     string
+	Port        int32
+	MissingDeps []string
 }
 
 // SubscribeEvents opens the standing server->client event stream and returns a
-// channel of permission-mode changes. The client holds this open for its whole
-// session so the agent can push state changes instead of the client polling.
-// The channel closes when the stream ends (server shutdown / disconnect).
-func (c *Client) SubscribeEvents(ctx context.Context) (<-chan PermissionModeEvent, error) {
+// channel of agent events. The client holds this open for its whole session
+// so the agent can push state changes instead of the client polling. The
+// channel closes when the stream ends (server shutdown / disconnect).
+func (c *Client) SubscribeEvents(ctx context.Context) (<-chan AgentEvent, error) {
 	stream, err := c.agent.SubscribeEvents(ctx, &proto.SubscribeEventsRequest{})
 	if err != nil {
 		return nil, err
 	}
-	out := make(chan PermissionModeEvent, 8)
+	out := make(chan AgentEvent, 8)
 	go func() {
 		defer close(out)
 		for {
@@ -729,15 +741,35 @@ func (c *Client) SubscribeEvents(ctx context.Context) (<-chan PermissionModeEven
 				return
 			}
 			if err != nil {
-				out <- PermissionModeEvent{Err: err}
+				out <- AgentEvent{Err: err}
 				return
 			}
 			if pm := ev.GetPermissionModeChanged(); pm != nil {
-				out <- PermissionModeEvent{Mode: pm.GetMode()}
+				out <- AgentEvent{Mode: pm.GetMode()}
+				continue
 			}
+			if ms := ev.GetMeridianStatusChanged(); ms != nil {
+				out <- AgentEvent{MeridianStatus: meridianStatusFromProto(ms.GetStatus())}
+				continue
+			}
+			// Unknown event types are silently dropped — clients that don't
+			// recognise them should not error on forward-compat additions.
 		}
 	}()
 	return out, nil
+}
+
+// meridianStatusFromProto converts the wire proto into the client-side struct.
+func meridianStatusFromProto(p *proto.MeridianStatus) *MeridianStatus {
+	if p == nil {
+		return nil
+	}
+	return &MeridianStatus{
+		State:       p.GetState(),
+		Message:     p.GetMessage(),
+		Port:        p.GetPort(),
+		MissingDeps: append([]string(nil), p.GetMissingDeps()...),
+	}
 }
 
 // UpdateConfig sends a runtime config patch. Returns the agent's confirmation

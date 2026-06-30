@@ -167,6 +167,69 @@ func TestStop_FromReadyReturnsToDisabled(t *testing.T) {
 	}
 }
 
+func TestEnsure_AuthPollerRetriesWhenAuthAppears(t *testing.T) {
+	// Compress the poll interval so the test runs in <1s. Restore after.
+	prev := authPollInterval
+	authPollInterval = 20 * time.Millisecond
+	defer func() { authPollInterval = prev }()
+
+	m := newTestManager()
+	var spawned int32
+	m.spawnFn = fakeSpawn(&spawned)
+
+	// authFn returns false for the first 3 calls (initial gate + a couple
+	// poll cycles), then true thereafter — simulating the user running
+	// `claude login` after seeing the chip.
+	var authCalls int32
+	m.authFn = func() bool {
+		n := atomic.AddInt32(&authCalls, 1)
+		return n > 3
+	}
+
+	m.Ensure(context.Background(), 3456)
+
+	// First state should be NeedsAuth (auth returned false on entry).
+	waitForState(t, m, StateNeedsAuth)
+
+	// Poller should re-Ensure once auth flips, eventually reaching Ready.
+	waitForState(t, m, StateReady)
+
+	if atomic.LoadInt32(&spawned) != 1 {
+		t.Errorf("spawned %d times after auth returned, want 1", spawned)
+	}
+	m.Stop()
+}
+
+func TestStop_StopsAuthPoller(t *testing.T) {
+	prev := authPollInterval
+	authPollInterval = 20 * time.Millisecond
+	defer func() { authPollInterval = prev }()
+
+	m := newTestManager()
+	// authFn never returns true — poller would loop forever absent Stop.
+	var authCalls int32
+	m.authFn = func() bool {
+		atomic.AddInt32(&authCalls, 1)
+		return false
+	}
+
+	m.Ensure(context.Background(), 3456)
+	waitForState(t, m, StateNeedsAuth)
+
+	// Let a few polls happen, then Stop.
+	time.Sleep(80 * time.Millisecond)
+	before := atomic.LoadInt32(&authCalls)
+	m.Stop()
+	time.Sleep(80 * time.Millisecond)
+	after := atomic.LoadInt32(&authCalls)
+
+	// After Stop, polling must cease. Allow a small grace for one in-flight
+	// tick that might race the cancel.
+	if after-before > 1 {
+		t.Errorf("authFn called %d more times after Stop (before=%d after=%d); want ≤1", after-before, before, after)
+	}
+}
+
 func TestStatusListener_FiresOnTransitions(t *testing.T) {
 	m := newTestManager()
 	var spawned int32

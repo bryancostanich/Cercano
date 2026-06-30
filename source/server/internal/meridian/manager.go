@@ -82,12 +82,19 @@ type Manager struct {
 	authFn     func() bool
 	portUsedFn func(port int) bool
 
-	mu       sync.Mutex
-	status   Status
-	cancel   context.CancelFunc // cancels the active supervisor; nil when none
-	cmd      *exec.Cmd          // the spawned meridian process, if we own it
-	listener func(Status)
+	mu             sync.Mutex
+	status         Status
+	cancel         context.CancelFunc // cancels the active supervisor; nil when none
+	cmd            *exec.Cmd          // the spawned meridian process, if we own it
+	listener       func(Status)
+	lastPort       int                // last port requested via Ensure (for auth poller retry)
+	authPollCancel context.CancelFunc // cancels the auth poller; nil when none
 }
+
+// authPollInterval is how often the manager re-checks the keychain while in
+// NeedsAuth state. Tight enough that the user runs `claude login` and the
+// chip clears within a few seconds; loose enough not to spam /usr/bin/security.
+var authPollInterval = 3 * time.Second
 
 // New constructs a Manager. logPath should be the file to tee Meridian's
 // stdout/stderr into (typically ~/.cercano/meridian.log). Empty logPath
@@ -136,6 +143,7 @@ func (m *Manager) Status() Status {
 // current supervisor and starts a new one.
 func (m *Manager) Ensure(ctx context.Context, port int) {
 	m.mu.Lock()
+	m.lastPort = port
 	// Already managing this exact port and not in a terminal-fail state — nothing to do.
 	if m.status.Port == port &&
 		(m.status.State == StateStarting || m.status.State == StateReady || m.status.State == StateExternal) {
@@ -164,6 +172,7 @@ func (m *Manager) Ensure(ctx context.Context, port int) {
 			Message: "Sign in to Claude to start Meridian",
 			Port:    port,
 		})
+		m.startAuthPollerLocked(ctx)
 		m.mu.Unlock()
 		return
 	}
@@ -202,6 +211,7 @@ func (m *Manager) Stop() {
 // stopLocked cancels the supervisor and kills the spawned process. Caller
 // must hold m.mu. Does NOT change status — caller decides what to set it to.
 func (m *Manager) stopLocked() {
+	m.stopAuthPollerLocked()
 	if m.cancel != nil {
 		m.cancel()
 		m.cancel = nil
@@ -209,6 +219,48 @@ func (m *Manager) stopLocked() {
 	if m.cmd != nil && m.cmd.Process != nil {
 		_ = m.cmd.Process.Kill()
 		m.cmd = nil
+	}
+}
+
+// startAuthPollerLocked spawns a background goroutine that re-checks the
+// keychain every authPollInterval. When auth appears (the user has run
+// `claude login`), it calls Ensure to drive the state machine forward
+// without requiring an explicit retry from the client. Caller must hold m.mu.
+//
+// Idempotent: starting a poller while one is already running cancels the
+// previous instance so we never run two at once. Stopped by
+// stopAuthPollerLocked — which is in turn called from stopLocked, so every
+// path that tears the manager down (Stop, Ensure transitions, etc.) also
+// drops the poller.
+func (m *Manager) startAuthPollerLocked(parent context.Context) {
+	if m.authPollCancel != nil {
+		m.authPollCancel()
+	}
+	pctx, cancel := context.WithCancel(parent)
+	m.authPollCancel = cancel
+	port := m.lastPort
+	go func() {
+		t := time.NewTicker(authPollInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-pctx.Done():
+				return
+			case <-t.C:
+				if m.authFn() {
+					m.Ensure(parent, port)
+					return
+				}
+			}
+		}
+	}()
+}
+
+// stopAuthPollerLocked cancels any running auth poller. Caller must hold m.mu.
+func (m *Manager) stopAuthPollerLocked() {
+	if m.authPollCancel != nil {
+		m.authPollCancel()
+		m.authPollCancel = nil
 	}
 }
 

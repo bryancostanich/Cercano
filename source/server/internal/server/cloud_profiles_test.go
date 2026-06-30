@@ -443,3 +443,20 @@ func TestUpdateConfig_CloudModel_UpdatesActiveProfile(t *testing.T) {
 		t.Errorf("expected ConfigChanged broadcast for cloud_model, none received")
 	}
 }
+
+func TestSetActiveCloudProfileBedrockKeylessOk(t *testing.T) {
+	s, r := newTestServer()
+	s.currentConfig.CloudProfiles = append(s.currentConfig.CloudProfiles,
+		config.CloudProfile{Name: "bedrock-one", Flavor: "bedrock", Region: "us-east-1", Model: "anthropic.claude-x"})
+	// No key set for bedrock-one — the keyless guard must NOT send it to absent.
+	resp, err := s.SetActiveCloudProfile(context.Background(), &proto.SetActiveCloudProfileRequest{Name: "bedrock-one"})
+	if err != nil {
+		t.Fatalf("SetActiveCloudProfile: %v", err)
+	}
+	if !resp.Ok {
+		t.Fatalf("want Ok=true for keyless bedrock (creds via AWS chain), got false: %s", resp.Error)
+	}
+	if _, absent := r.last.(*legacymodels.AbsentCloudProvider); absent {
+		t.Error("keyless bedrock should NOT install the absent provider")
+	}
+}

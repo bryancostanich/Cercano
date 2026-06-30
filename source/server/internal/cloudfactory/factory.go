@@ -8,6 +8,7 @@ import (
 
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/llm/anthropic"
+	"cercano/source/server/internal/llm/bedrock"
 	"cercano/source/server/internal/llm/openai"
 	"cercano/source/server/internal/llm/responses"
 	"cercano/source/server/pkg/config"
@@ -35,6 +36,10 @@ func BuildCloudProvider(p config.CloudProfile, apiKey string) (llm.Provider, err
 		return openai.NewClient(openai.Config{BaseURL: p.BaseURL, APIKey: apiKey, Model: p.Model, Backend: p.Backend}), nil
 	case FlavorResponses:
 		return responses.NewClient(responses.Config{BaseURL: p.BaseURL, APIKey: apiKey, Model: p.Model}), nil
+	case FlavorBedrock:
+		return bedrock.NewClient(bedrock.Config{
+			Region: p.Region, Model: p.Model, AWSProfile: p.AWSProfile, BaseURL: p.BaseURL,
+		})
 	default:
 		return nil, fmt.Errorf("flavor %q not yet supported", p.Flavor)
 	}

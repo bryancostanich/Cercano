@@ -402,3 +402,14 @@ func TestSave_KeepsLegacyCloudFieldsBeforeMigration(t *testing.T) {
 		t.Errorf("legacy model field dropped before migration:\n%s", data)
 	}
 }
+
+func TestCloudProfileBedrockYAML(t *testing.T) {
+	var p CloudProfile
+	y := "name: b\nflavor: bedrock\nregion: us-east-1\naws_profile: sso\nmodel: anthropic.claude-x\n"
+	if err := yaml.Unmarshal([]byte(y), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Region != "us-east-1" || p.AWSProfile != "sso" {
+		t.Errorf("region=%q aws_profile=%q", p.Region, p.AWSProfile)
+	}
+}

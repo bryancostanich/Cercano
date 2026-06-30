@@ -25,12 +25,14 @@ import (
 // Route is an open enum — future bridges (CCR, etc.) get their own value and
 // adapter-specific handling. Empty string is treated as "direct".
 type CloudProfile struct {
-	Name    string `yaml:"name"`
-	Flavor  string `yaml:"flavor"` // messages | chat_completions | responses | bedrock
-	Backend string `yaml:"backend,omitempty"` // chat_completions only: selects per-backend quirks (openai|gemini|groq|…); empty → defensive default
-	Route   string `yaml:"route,omitempty"`   // direct (default) | meridian | ccr (future) | …
-	BaseURL string `yaml:"base_url"`
-	Model   string `yaml:"model"`
+	Name       string `yaml:"name"`
+	Flavor     string `yaml:"flavor"` // messages | chat_completions | responses | bedrock
+	Backend    string `yaml:"backend,omitempty"` // chat_completions only: selects per-backend quirks (openai|gemini|groq|…); empty → defensive default
+	Route      string `yaml:"route,omitempty"`   // direct (default) | meridian | ccr (future) | …
+	BaseURL    string `yaml:"base_url"`
+	Model      string `yaml:"model"`
+	Region     string `yaml:"region,omitempty"`      // bedrock: AWS region (required)
+	AWSProfile string `yaml:"aws_profile,omitempty"` // bedrock: optional ~/.aws named profile
 }
 
 // Config holds all Cercano configuration values.

@@ -8,11 +8,17 @@ import (
 func TestAbortInProgressMerge(t *testing.T) {
 	r := newTestRepo(t)
 	ctx := context.Background()
-	writeFile(t, r, "s.txt", "base"); mustRun(t, r, "add", "-A"); mustRun(t, r, "commit", "-m", "base")
+	writeFile(t, r, "s.txt", "base")
+	mustRun(t, r, "add", "-A")
+	mustRun(t, r, "commit", "-m", "base")
 	mustRun(t, r, "checkout", "-b", "feature")
-	writeFile(t, r, "s.txt", "f"); mustRun(t, r, "add", "-A"); mustRun(t, r, "commit", "-m", "f")
+	writeFile(t, r, "s.txt", "f")
+	mustRun(t, r, "add", "-A")
+	mustRun(t, r, "commit", "-m", "f")
 	mustRun(t, r, "checkout", "main")
-	writeFile(t, r, "s.txt", "m"); mustRun(t, r, "add", "-A"); mustRun(t, r, "commit", "-m", "m")
+	writeFile(t, r, "s.txt", "m")
+	mustRun(t, r, "add", "-A")
+	mustRun(t, r, "commit", "-m", "m")
 	st, _ := r.Land(ctx, "feature", "main", StrategyRebase)
 	if st.Reconciled {
 		t.Fatal("precondition: expected conflict/in-progress")
@@ -35,7 +41,9 @@ func TestResetToSafety(t *testing.T) {
 	ctx := context.Background()
 	before, _ := r.RevParse(ctx, "HEAD")
 	r.RecordSafety(ctx, "land", "HEAD")
-	writeFile(t, r, "x.txt", "x"); mustRun(t, r, "add", "-A"); mustRun(t, r, "commit", "-m", "advance")
+	writeFile(t, r, "x.txt", "x")
+	mustRun(t, r, "add", "-A")
+	mustRun(t, r, "commit", "-m", "advance")
 	if err := r.ResetToSafety(ctx, "land", "main"); err != nil {
 		t.Fatal(err)
 	}

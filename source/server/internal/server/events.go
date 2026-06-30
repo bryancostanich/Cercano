@@ -12,6 +12,7 @@ package server
 import (
 	"sync"
 
+	"cercano/source/server/internal/meridian"
 	"cercano/source/server/pkg/proto"
 )
 
@@ -132,4 +133,33 @@ func (s *Server) broadcastPermissionMode(mode string) {
 			PermissionModeChanged: &proto.PermissionModeChanged{Mode: mode},
 		},
 	})
+}
+
+// broadcastMeridianStatus pushes a MeridianStatusChanged event for the current
+// state of the local Meridian proxy. Called from the meridian.Manager status
+// listener wired up in SetupMeridian — there's exactly one source of these
+// events, so no dedupe is needed.
+func (s *Server) broadcastMeridianStatus(st meridian.Status) {
+	if s.events == nil {
+		return
+	}
+	s.events.broadcast(&proto.ClientEvent{
+		Event: &proto.ClientEvent_MeridianStatusChanged{
+			MeridianStatusChanged: &proto.MeridianStatusChanged{
+				Status: meridianStatusToProto(st),
+			},
+		},
+	})
+}
+
+// meridianStatusToProto converts the internal meridian.Status struct to the
+// wire-level proto. Shared by the event broadcast and the GetCloudProfiles
+// initial-fetch path.
+func meridianStatusToProto(st meridian.Status) *proto.MeridianStatus {
+	return &proto.MeridianStatus{
+		State:       st.State.String(),
+		Message:     st.Message,
+		Port:        int32(st.Port),
+		MissingDeps: st.MissingDeps,
+	}
 }

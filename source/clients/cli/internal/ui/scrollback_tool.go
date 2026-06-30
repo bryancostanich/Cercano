@@ -47,8 +47,9 @@ type ToolEntry struct {
 	FullResult    string // full result body; shown when expanded
 	ResultSummary string // short result blurb shown next to ✓ in folded view
 	Status        ToolStatus
-	StartedAt     time.Time // exec-start wall clock; result blurb times against it
-	Folded        bool      // V1: always true; reserved for future expand/collapse
+	StartedAt     time.Time     // exec-start wall clock; result blurb times against it
+	Duration      time.Duration // exec-start → exec-complete; set at the same time ResultSummary is. Used to aggregate group timings.
+	Folded        bool          // V1: always true; reserved for future expand/collapse
 }
 
 // renderToolEntry produces the scrollback text for one tool call.
@@ -200,6 +201,158 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 		}
 	}
 	return strings.Join(body, "\n")
+}
+
+// renderToolGroup renders a contiguous run of ToolEntries as a "rolling
+// consumption" group. Completed entries are summarized into a single line at
+// the top; the in-progress entry (at most one — the model only fires one tool
+// at a time today) renders standalone below the summary. The whole block
+// counts as one entry in the scrollback's vertical rhythm.
+//
+// Layout examples:
+//
+//	1 completed, none in progress:
+//	  ▸ 1 tool call (Read)                                          8ms ✓
+//
+//	3 completed, 1 in progress:
+//	  ▸ 3 tool calls (2 Read, Edit)                                23ms ✓
+//	  ▸ Editing  internal/server/server.go                         …
+//
+//	0 completed, 1 in progress:
+//	  ▸ Reading  internal/meridian/manager.go                      …
+//
+// width is the same column budget renderToolEntry uses. styles + md are
+// passed through to the per-call renderer for the active entry.
+func renderToolGroup(entries []ToolEntry, width int, styles theme.Styles, md *render.Markdown) string {
+	// Single-entry runs render directly — no summary, full per-entry detail.
+	// Rolling-consumption folding only adds value when there's a meaningful
+	// "many" to summarise; a "1 tool call" summary just hides the args and
+	// result blurb without compressing anything.
+	if len(entries) == 1 {
+		e := entries[0]
+		e.Folded = true
+		return renderToolEntry(e, width, false, styles, md)
+	}
+	var completed []ToolEntry
+	var active []ToolEntry
+	for _, e := range entries {
+		if e.Status == ToolStatusInProgress {
+			active = append(active, e)
+		} else {
+			completed = append(completed, e)
+		}
+	}
+	var lines []string
+	if len(completed) > 0 {
+		lines = append(lines, renderGroupSummary(completed, width, styles))
+	}
+	for _, e := range active {
+		// In-progress entries always render expanded — they are the live row.
+		// focused=false; group focus is Phase C.
+		e.Folded = true
+		lines = append(lines, renderToolEntry(e, width, false, styles, md))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// renderGroupSummary builds the one-line summary for the completed members of
+// a tool group. Format mirrors a per-call line so the group reads as a member
+// of the same visual family:
+//
+//	▸ <count_label>  <breakdown>                       <timing> <glyph>
+//
+// where:
+//   - count_label is "N tool call" / "N tool calls" (singular handled)
+//   - breakdown lists tool types in first-seen order with prefix counts:
+//     "(3 Read, 2 Edit, Bash, Write)". Tools that appeared once carry no
+//     prefix count.
+//   - glyph is ✓ when all completed are Complete, ⚠ when any errored.
+//   - The label/breakdown gets faint styling matching the args column; the
+//     timing is faint too; only the glyph carries the success/error color.
+//
+// width drives right-alignment of the timing column; an over-budget summary
+// falls back to inline rendering on a single line.
+func renderGroupSummary(completed []ToolEntry, width int, styles theme.Styles) string {
+	if len(completed) == 0 {
+		return ""
+	}
+	counts := map[string]int{}
+	order := []string{}
+	var total time.Duration
+	anyErr := false
+	for _, e := range completed {
+		if e.Status == ToolStatusError {
+			anyErr = true
+		}
+		total += e.Duration
+		name := groupBreakdownName(e.ToolName)
+		if _, seen := counts[name]; !seen {
+			order = append(order, name)
+		}
+		counts[name]++
+	}
+	parts := make([]string, 0, len(order))
+	for _, n := range order {
+		if counts[n] > 1 {
+			parts = append(parts, fmt.Sprintf("%d %s", counts[n], n))
+		} else {
+			parts = append(parts, n)
+		}
+	}
+	label := fmt.Sprintf("%d tool calls", len(completed))
+	if len(completed) == 1 {
+		label = "1 tool call"
+	}
+	breakdown := ""
+	if len(parts) > 0 {
+		breakdown = " (" + strings.Join(parts, ", ") + ")"
+	}
+
+	toolEntryFaint := lipgloss.NewStyle().Faint(true)
+	glyph := "✓"
+	glyphStyle := styles.ToolSuccess
+	if anyErr {
+		glyph = "⚠"
+		glyphStyle = styles.ToolError
+	}
+	// 2-space gutter matches renderToolEntry's unfocused gutter, so summary
+	// and per-call lines share the same left margin.
+	gutter := "  "
+	left := gutter + "▸ " + label + toolEntryFaint.Render(breakdown)
+	timing := formatDur(total)
+	rightPlain := timing + " " + glyph
+	statusStyled := toolEntryFaint.Render(timing+" ") + glyphStyle.Render(glyph)
+
+	leftW := lipgloss.Width(left)
+	rightW := lipgloss.Width(rightPlain)
+	if width > 0 && leftW+1+rightW <= width {
+		pad := strings.Repeat(" ", width-leftW-rightW)
+		return left + pad + statusStyled
+	}
+	return left + "   " + statusStyled
+}
+
+// groupBreakdownName humanizes a tool name for the group breakdown ("Read",
+// "Edit", "Bash"). Falls back to the original name for unknown / non-builtin
+// tools so MCP-supplied tools surface intact.
+func groupBreakdownName(s string) string {
+	switch strings.ToLower(s) {
+	case "read":
+		return "Read"
+	case "write":
+		return "Write"
+	case "edit":
+		return "Edit"
+	case "bash":
+		return "Bash"
+	case "grep":
+		return "Grep"
+	case "glob":
+		return "Glob"
+	case "ls":
+		return "LS"
+	}
+	return s
 }
 
 // flattenSummary collapses a tool summary to a single line: newlines, tabs and

@@ -143,7 +143,7 @@ func TestChatView_DesiredHeight_GrowsWithContentAndQueue(t *testing.T) {
 	if grown <= base {
 		t.Errorf("DesiredHeight should grow with content: base=%d grown=%d", base, grown)
 	}
-	c.Enqueue("queued one")
+	c.Enqueue("queued one", nil)
 	if c.DesiredHeight() != grown+1 {
 		t.Errorf("each queued message adds one row: got %d want %d", c.DesiredHeight(), grown+1)
 	}

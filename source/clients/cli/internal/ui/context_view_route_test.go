@@ -102,7 +102,7 @@ func TestContextView_UpUnstagesLastQueued(t *testing.T) {
 	cv := m.content.(*contextView)
 	// Submit to make busy, then queue a second message
 	m, _ = m.submitContextEdit(cv, "first")
-	cv.chat.Enqueue("second") // enqueued while busy
+	cv.chat.Enqueue("second", nil) // enqueued while busy
 	next, _ := m.handleContextViewKey(cv, tea.KeyPressMsg{Code: tea.KeyUp})
 	if next.input.Value() != "second" {
 		t.Errorf("up should pop last queued into input, got %q", next.input.Value())
@@ -113,7 +113,7 @@ func TestContextView_EscClosesPageAndClearsQueue(t *testing.T) {
 	m := modelWithContextView()
 	cv := m.content.(*contextView)
 	m, _ = m.submitContextEdit(cv, "first")
-	cv.chat.Enqueue("queued") // enqueued while busy
+	cv.chat.Enqueue("queued", nil) // enqueued while busy
 	// esc with empty input should close page and clear queue
 	next, _ := m.handleContextViewKey(cv, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if next.content != nil {

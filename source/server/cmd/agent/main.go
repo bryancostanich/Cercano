@@ -132,7 +132,9 @@ func main() {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
-	s := grpc.NewServer()
+	// 64 MiB comfortably fits multiple 20 MiB images (the per-image client cap).
+	const maxGRPCMessageBytes = 64 << 20
+	s := grpc.NewServer(grpc.MaxRecvMsgSize(maxGRPCMessageBytes))
 	srv := server.NewServer(orchestrator, localProvider, smartRouter, coordinator, cloudFactory, registry)
 	srv.SetRuntimeManager(runtimeManager)
 	srv.SetConfigPersistence(config.DefaultPath(), cfg)

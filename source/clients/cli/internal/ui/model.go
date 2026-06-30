@@ -822,7 +822,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Submitting mid-stream queues the message instead of starting a
 			// second turn; it sends when the current stream completes.
 			if m.streaming {
-				m.chat.Enqueue(text)
+				m.chat.Enqueue(text, images)
 				m.relayout()
 				return m, nil
 			}
@@ -1075,7 +1075,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Drain the next queued message: each completed turn fires the next.
 		if nextMsg, ok := m.chat.DrainNext(); ok {
 			m.relayout()
-			nm, cmd := m.submit(nextMsg, nil)
+			nm, cmd := m.submit(nextMsg.text, nextMsg.images)
 			return nm, tea.Batch(cmd, done)
 		}
 		return m, done
@@ -1497,10 +1497,14 @@ func (m *Model) handleImagePaste(pasted string) bool {
 }
 
 // handleClipboardImage attaches a chip if the OS clipboard holds an image.
-// Returns true if it attached one.
+// Returns true if it attached one. Rejects images exceeding maxDroppedImageBytes.
 func (m *Model) handleClipboardImage() bool {
 	data, mt, ok := clipboardImage()
 	if !ok {
+		return false
+	}
+	if len(data) > maxDroppedImageBytes {
+		m.errMsg = fmt.Sprintf("clipboard image too large (%d MiB; limit %d MiB)", len(data)>>20, maxDroppedImageBytes>>20)
 		return false
 	}
 	m.input.AddImage(data, mt, "")
@@ -2091,8 +2095,11 @@ func (m Model) handleContextViewKey(cv *contextView, msg tea.KeyPressMsg) (Model
 		// focus backward (right/left arrows expand/collapse — see below). With a
 		// non-empty prompt, fall through so the textarea owns cursor movement.
 		if m.input.Value() == "" {
-			if msg, ok := cv.chat.UnstageLast(); ok {
-				m.input.SetValue(msg)
+			if turn, ok := cv.chat.UnstageLast(); ok {
+				m.input.SetValue(turn.text)
+				for _, img := range turn.images {
+					m.input.RegisterImage(int(img.Index), img.Data, img.MediaType, "")
+				}
 				return m, nil
 			}
 			cv.focusNextExpandable(-1)
@@ -2161,7 +2168,7 @@ func (m Model) handleContextViewKey(cv *contextView, msg tea.KeyPressMsg) (Model
 // and fire the driver. Mirrors the main page's submit path (sendChatMessage).
 func (m Model) submitContextEdit(cv *contextView, input string) (Model, tea.Cmd) {
 	if cv.busy() {
-		cv.chat.Enqueue(input)
+		cv.chat.Enqueue(input, nil)
 		return m, nil
 	}
 	cv.busyFlag = true
@@ -2210,7 +2217,7 @@ func (m Model) routeChatMsg(msg tea.Msg) (Model, tea.Cmd) {
 	cv.chat.rebuild()
 	if !cv.busy() {
 		if next, ok := cv.chat.DrainNext(); ok {
-			return m.submitContextEdit(cv, next)
+			return m.submitContextEdit(cv, next.text)
 		}
 		return m, nil
 	}
@@ -2472,12 +2479,17 @@ func (m Model) renderSlashSuggestions() string {
 // unstageLastQueued pops the most-recently-queued message back into the prompt
 // for editing and drops it from the queue. Returns false when the queue is
 // empty so callers can fall through to history recall.
+// Images are re-registered via RegisterImage so the existing "[image N]"
+// markers in the restored text resolve without inserting duplicate markers.
 func (m *Model) unstageLastQueued() bool {
 	last, ok := m.chat.UnstageLast()
 	if !ok {
 		return false
 	}
-	m.input.SetValue(last)
+	m.input.SetValue(last.text)
+	for _, img := range last.images {
+		m.input.RegisterImage(int(img.Index), img.Data, img.MediaType, "")
+	}
 	m.relayout()
 	return true
 }

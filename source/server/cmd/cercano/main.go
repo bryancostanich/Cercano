@@ -216,7 +216,9 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		return "", nil, fmt.Errorf("failed to listen on %s: %v", bindAddr, err)
 	}
 
-	s := grpc.NewServer()
+	// 64 MiB comfortably fits multiple 20 MiB images (the per-image client cap).
+	const maxGRPCMessageBytes = 64 << 20
+	s := grpc.NewServer(grpc.MaxRecvMsgSize(maxGRPCMessageBytes))
 	srv := server.NewServer(orchestrator, localProvider, lazyRouter, coordinator, cloudFactory, registry)
 	srv.SetRuntimeManager(runtimeManager)
 	srv.SetContextLoader(ctxLoader)

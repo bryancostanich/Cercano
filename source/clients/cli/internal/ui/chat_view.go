@@ -290,7 +290,9 @@ func (c *chatView) Apply(msg tea.Msg) tea.Cmd {
 			} else {
 				t.Status = ToolStatusComplete
 			}
-			t.ResultSummary = humanizeResult(m.detail, m.summary, m.isError, time.Since(t.StartedAt))
+			dur := time.Since(t.StartedAt)
+			t.Duration = dur
+			t.ResultSummary = humanizeResult(m.detail, m.summary, m.isError, dur)
 		}
 
 	case chatAssistantMsg:
@@ -519,21 +521,32 @@ func (c *chatView) PlainLines() []string { return c.plainLines }
 
 // SetEntries rebuilds the viewport content from the provided entries and
 // auto-scrolls to bottom only if the viewport was already there.
+//
+// Tool-call entries are grouped: a contiguous run of Tool-bearing entries
+// renders as one rolling-consumption block (completed entries summarised on
+// a single line; the in-progress entry standalone below). A blank line
+// separates each block from neighbouring user/assistant/system entries.
 func (c *chatView) SetEntries(entries []*Entry) {
 	wasAtBottom := c.vp.AtBottom()
 	var b strings.Builder
-	for i, e := range entries {
-		if i > 0 {
-			// A blank line separates the user prompt, tool calls, and assistant
-			// output so they don't squish together — but consecutive tool-call
-			// entries stay tight as a group.
-			if entries[i-1].Tool != nil && e.Tool != nil {
-				b.WriteString("\n")
-			} else {
-				b.WriteString("\n\n")
-			}
+	first := true
+	for i := 0; i < len(entries); {
+		if !first {
+			b.WriteString("\n\n")
 		}
-		b.WriteString(c.renderEntry(e, i))
+		if entries[i].Tool != nil {
+			// Walk forward to the end of this contiguous tool run.
+			j := i + 1
+			for j < len(entries) && entries[j].Tool != nil {
+				j++
+			}
+			b.WriteString(c.renderToolGroupBlock(entries[i:j]))
+			i = j
+		} else {
+			b.WriteString(c.renderEntry(entries[i], i))
+			i++
+		}
+		first = false
 	}
 	content := b.String()
 	c.plainLines = plainLines(content)
@@ -541,6 +554,27 @@ func (c *chatView) SetEntries(entries []*Entry) {
 	if wasAtBottom {
 		c.vp.GotoBottom()
 	}
+}
+
+// renderToolGroupBlock turns a contiguous slice of Tool-bearing entries into
+// the indented group block used by SetEntries. Shares the left-margin
+// indentation with renderEntry so tool blocks line up with prose.
+func (c *chatView) renderToolGroupBlock(run []*Entry) string {
+	wrapW := c.vp.Width()
+	if wrapW < 10 {
+		wrapW = 10
+	}
+	textW := wrapW - entryIndent
+	if textW < 8 {
+		textW = 8
+	}
+	pad := strings.Repeat(" ", entryIndent)
+	// Flatten the pointers into ToolEntry values for the renderer.
+	tools := make([]ToolEntry, 0, len(run))
+	for _, e := range run {
+		tools = append(tools, *e.Tool)
+	}
+	return indentBlock(pad, renderToolGroup(tools, textW, c.styles, c.md))
 }
 
 // View renders the viewport with a one-column scrollbar, applying selection

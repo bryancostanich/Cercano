@@ -1073,6 +1073,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case streamEndMsg:
 		m.streaming = false
+		m.chat.SetStreaming(false)
 		if m.cancelStream != nil {
 			m.cancelStream() // release the stream context on normal completion
 			m.cancelStream = nil
@@ -1164,6 +1165,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshViewport()
 			keep = true
 		}
+		// Between phases of a multi-step turn (tools done, waiting for the
+		// model's next action), animate the trailing "still working" line —
+		// without this the indicator would freeze on the first frame after
+		// tools complete.
+		if m.chat.IsBetweenPhases() {
+			m.refreshViewport()
+			keep = true
+		}
 		// Also keep ticking while the /c chat is busy so its animated
 		// status line repaints on every frame.
 		if cv, ok := m.content.(*contextView); ok && cv.busy() {
@@ -1241,7 +1250,7 @@ func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model,
 	}
 	m.cancelStream = cancel
 	m.streaming = true
-	// Reset live turn telemetry; the engine fields fill in on RouteSelected.
+	m.chat.SetStreaming(true)
 	m.turnStart = time.Now()
 	m.turnActivity = "thinking"
 	m.turnTokOut = 0
@@ -1308,6 +1317,7 @@ func (m *Model) cancelCurrentStream() {
 		m.cancelStream = nil
 	}
 	m.streaming = false
+	m.chat.SetStreaming(false)
 	if e := m.chat.lastAssistantEntry(); e != nil {
 		e.Streaming = false
 	}

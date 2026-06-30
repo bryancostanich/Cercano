@@ -1438,8 +1438,8 @@ func (m *Model) relayout() {
 	// below the viewport, and promptTop() already accounts for it. Without this
 	// the viewport is one row too tall and shoves the status bar off-screen.
 	recapH := 0
-	if m.recap != "" {
-		recapH = 2 // blank spacer line + the recap line itself
+	if n := len(m.recapLines()); n > 0 {
+		recapH = 1 + n // blank spacer line + the wrapped recap line(s)
 	}
 	queuedH := len(m.chat.Queued()) // one row per queued message, rendered above the prompt
 	// Size the input first — DynamicHeight re-fits it to the wrapped content at
@@ -2531,29 +2531,51 @@ func (m Model) renderQueued() string {
 	return strings.Join(lines, "\n")
 }
 
-// renderRecap draws the living one-line work summary at the bottom of the
-// chat area, dimmed and truncated to terminal width. Only rendered in the
-// default (no-overlay) view.
-func (m Model) renderRecap() string {
-	const labelText = "recap "
+// recapLabelText is the leading label on the recap line; its width also sets the
+// hanging indent for wrapped continuation lines.
+const recapLabelText = "recap "
+
+// recapLines builds the rendered recap line(s): the "recap " label on the first
+// line, the living work summary word-wrapped to the terminal width with a
+// hanging indent so continuation lines align under the text. Returns nil when
+// there's no recap or no room. renderRecap joins these; the layout height calc
+// counts them, so wrapping and reserved rows stay in sync.
+func (m Model) recapLines() []string {
+	if m.recap == "" {
+		return nil
+	}
 	pad := strings.Repeat(" ", entryIndent)
 	// Label in lime (upright) to read as a label; the recap text in bright amber
 	// italic so the two are visually distinct.
 	labelStyle := lipgloss.NewStyle().Foreground(m.palette.Accent)
 	textStyle := lipgloss.NewStyle().Foreground(m.palette.Bright).Italic(true)
-	avail := m.width - entryIndent - lipgloss.Width(labelText)
+	avail := m.width - entryIndent - lipgloss.Width(recapLabelText)
 	if avail < 8 {
-		return ""
+		return nil
 	}
-	text := m.recap
-	if lipgloss.Width(text) > avail {
-		r := []rune(text)
-		if len(r) > avail-1 {
-			text = string(r[:avail-1]) + "…"
+	hang := strings.Repeat(" ", lipgloss.Width(recapLabelText))
+	wrapped := strings.Split(ansi.Wrap(m.recap, avail, ""), "\n")
+	lines := make([]string, 0, len(wrapped))
+	for i, w := range wrapped {
+		if i == 0 {
+			lines = append(lines, pad+labelStyle.Render(recapLabelText)+textStyle.Render(w))
+		} else {
+			lines = append(lines, pad+hang+textStyle.Render(w))
 		}
 	}
-	// Blank line above for breathing room; indented to the content margin.
-	return "\n" + pad + labelStyle.Render(labelText) + textStyle.Render(text)
+	return lines
+}
+
+// renderRecap draws the living work summary at the bottom of the chat area,
+// dimmed and wrapped to terminal width. Only rendered in the default (no-overlay)
+// view.
+func (m Model) renderRecap() string {
+	lines := m.recapLines()
+	if len(lines) == 0 {
+		return ""
+	}
+	// Blank line above for breathing room, then the wrapped recap.
+	return "\n" + strings.Join(lines, "\n")
 }
 
 // renderViewportWithScrollbar renders the chat viewport with a one-column

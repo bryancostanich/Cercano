@@ -38,7 +38,8 @@ func (p *promptInput) AddImage(data []byte, mediaType, source string) {
 // RegisterImage registers an image with an existing marker id already present
 // in the prompt text, without inserting a new marker. Used when restoring a
 // queued turn so existing "[image N]" markers resolve without duplication.
-// If id is greater than nextImageID, nextImageID is advanced past it.
+// nextImageID is raised to at least id so a later AddImage (which
+// pre-increments) can't reuse this id.
 func (p *promptInput) RegisterImage(id int, data []byte, mediaType, source string) {
 	p.attachments = append(p.attachments, promptImage{id: id, data: data, mediaType: mediaType, source: source})
 	if id > p.nextImageID {

@@ -3,10 +3,12 @@
 package ui
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // clipboardImage returns a PNG from the macOS pasteboard if one is present.
@@ -27,7 +29,9 @@ func pngpasteClipboard() ([]byte, bool) {
 	if err != nil {
 		return nil, false
 	}
-	out, err := exec.Command(bin, "-").Output() // "-" → write image to stdout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "-").Output() // "-" → write image to stdout
 	if err != nil || len(out) == 0 {
 		return nil, false
 	}
@@ -56,7 +60,9 @@ func osascriptClipboard() ([]byte, bool) {
 	if err := os.WriteFile(scriptPath, []byte(clipboardExportScript), 0o600); err != nil {
 		return nil, false
 	}
-	out, err := exec.Command("osascript", scriptPath).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "osascript", scriptPath).Output()
 	if err != nil {
 		return nil, false
 	}
@@ -64,6 +70,7 @@ func osascriptClipboard() ([]byte, bool) {
 	if pngPath == "" {
 		return nil, false
 	}
+	defer os.Remove(pngPath)
 	data, err := os.ReadFile(pngPath)
 	if err != nil || len(data) == 0 || sniffImageType(data) != "image/png" {
 		return nil, false

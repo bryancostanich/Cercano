@@ -1,0 +1,3 @@
+[mcp_servers.cercano]
+command = "/Users/bryancostanich/Git_Repos/bryan_costanich/Cercano/source/server/bin/cercano"
+args = ["--mcp"]

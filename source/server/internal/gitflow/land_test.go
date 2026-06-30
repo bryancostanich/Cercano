@@ -86,3 +86,49 @@ func TestLandRebaseConflictPauses(t *testing.T) {
 		t.Fatalf("expected shared.txt conflict, got %v", st.Conflicts)
 	}
 }
+
+func TestLandContinueAndFinalize(t *testing.T) {
+	r := newTestRepo(t)
+	ctx := context.Background()
+	writeFile(t, r, "shared.txt", "base")
+	mustRun(t, r, "add", "-A"); mustRun(t, r, "commit", "-m", "chore: base")
+	mustRun(t, r, "checkout", "-b", "feature")
+	writeFile(t, r, "shared.txt", "feature-change")
+	mustRun(t, r, "add", "-A"); mustRun(t, r, "commit", "-m", "feat: f")
+	mustRun(t, r, "checkout", "main")
+	writeFile(t, r, "shared.txt", "main-change")
+	mustRun(t, r, "add", "-A"); mustRun(t, r, "commit", "-m", "chore: m")
+
+	st, _ := r.Land(ctx, "feature", "main", StrategyRebase)
+	if st.Reconciled {
+		t.Fatal("precondition: expected conflict")
+	}
+	// Resolve the conflict (simulate the agent editing the file).
+	writeFile(t, r, "shared.txt", "resolved")
+	st2, err := r.LandContinue(ctx, StrategyRebase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st2.Reconciled {
+		t.Fatalf("expected reconciled after continue, got %+v", st2)
+	}
+	// Test gate passes.
+	if _, err := r.RunTests(ctx, "true"); err != nil {
+		t.Fatalf("test gate: %v", err)
+	}
+	// Finalize: main fast-forwards to feature.
+	if err := r.Finalize(ctx, "feature", "main"); err != nil {
+		t.Fatal(err)
+	}
+	ff, _ := r.IsAncestor(ctx, "feature", "main")
+	if !ff {
+		t.Fatal("main should contain feature after finalize")
+	}
+}
+
+func TestRunTestsRed(t *testing.T) {
+	r := newTestRepo(t)
+	if _, err := r.RunTests(context.Background(), "false"); err == nil {
+		t.Fatal("expected RunTests to error on a failing command")
+	}
+}

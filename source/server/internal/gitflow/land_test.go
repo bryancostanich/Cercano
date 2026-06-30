@@ -133,6 +133,21 @@ func TestRunTestsRed(t *testing.T) {
 	}
 }
 
+func TestResolutionSignals(t *testing.T) {
+	r := newTestRepo(t)
+	cfg := Config{
+		SensitivePaths: []string{"internal/server/*"},
+		Regen:          map[string]string{"*.pb.go": "protoc ..."},
+	}
+	sig := r.ResolutionSignalsFor(context.Background(), []string{"internal/server/server.go", "api/agent.pb.go", "internal/x/y.go"}, cfg)
+	if sig.HandEdited != 2 { // server.go + y.go; pb.go is generated
+		t.Fatalf("hand-edited count: %d", sig.HandEdited)
+	}
+	if len(sig.SensitiveHits) != 1 || sig.SensitiveHits[0] != "internal/server/server.go" {
+		t.Fatalf("sensitive hits: %v", sig.SensitiveHits)
+	}
+}
+
 // TestLandContinueStillPausedWhenMarkersRemain guards against committing
 // conflict markers: calling LandContinue without resolving must NOT reconcile.
 func TestLandContinueStillPausedWhenMarkersRemain(t *testing.T) {

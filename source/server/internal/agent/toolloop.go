@@ -54,6 +54,13 @@ type ToolLoopInput struct {
 	// token-by-token rendering. Nil-safe.
 	OnTextDelta func(string)
 
+	// OnTurnComplete, when set, is called with each assistant / tool-result
+	// message as soon as it's appended to the history — so the host can persist
+	// turns incrementally (crash resilience) instead of only at end-of-turn. It
+	// is NOT called for the leading user message (the host persists that up front
+	// before the loop runs). Nil-safe.
+	OnTurnComplete func(m llm.Message)
+
 	// MaxIterations caps the number of LLM round-trips this call may make.
 	// 0 means use MaxToolLoopIterations (the package default, currently 50).
 	MaxIterations int
@@ -146,6 +153,17 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		Blocks: buildUserBlocks(in.UserInput, in.Images),
 	})
 
+	// appendTurn records a new (this-turn) assistant or tool-result message into
+	// the history and notifies the host (OnTurnComplete) so it can persist it
+	// immediately. The leading user message above is intentionally NOT routed
+	// through here — the host persists it up front before the loop runs.
+	appendTurn := func(m llm.Message) {
+		hist = append(hist, m)
+		if in.OnTurnComplete != nil {
+			in.OnTurnComplete(m)
+		}
+	}
+
 	catalog := agenttools.BuildToolCatalog(in.Registry)
 	consecutiveErrors := 0
 	var lastIn, lastOut int
@@ -168,7 +186,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			return ToolLoopResult{}, err
 		}
 		lastIn, lastOut = resp.InputTokens, resp.OutputTokens
-		hist = append(hist, llm.Message{Role: llm.RoleAssistant, Blocks: resp.Blocks})
+		appendTurn(llm.Message{Role: llm.RoleAssistant, Blocks: resp.Blocks})
 
 		var toolCalls []llm.Block
 		var finalText string
@@ -264,7 +282,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 						Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID,
 						Content: "no permission requester wired", IsError: true,
 					})
-					hist = append(hist, llm.Message{Role: llm.RoleUser, Blocks: results})
+					appendTurn(llm.Message{Role: llm.RoleUser, Blocks: results})
 					return ToolLoopResult{FinalText: finalText, Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, nil
 				}
 				destructive := agenttools.IsDestructive(pc.tool)
@@ -278,7 +296,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 						Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID,
 						Content: "user denied execution", IsError: true,
 					})
-					hist = append(hist, llm.Message{Role: llm.RoleUser, Blocks: results})
+					appendTurn(llm.Message{Role: llm.RoleUser, Blocks: results})
 					return ToolLoopResult{FinalText: finalText, Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, nil
 				}
 			}
@@ -303,7 +321,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				break
 			}
 		}
-		hist = append(hist, llm.Message{Role: llm.RoleUser, Blocks: results})
+		appendTurn(llm.Message{Role: llm.RoleUser, Blocks: results})
 
 		if allErrored {
 			consecutiveErrors++

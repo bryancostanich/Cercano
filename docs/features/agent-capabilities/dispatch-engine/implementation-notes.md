@@ -63,6 +63,16 @@ Reconciling the two required these changes beyond the plan:
   `Explain`) in favor of `InvokeCapability` routing — eliminates the duplicate prompt
   templates now living in both the MCP handlers and the new capabilities. Do this
   together with activating engine-side co-processor telemetry (above).
+  **CAVEAT (found while scoping this):** NOT a quick cleanup. `mcp/server.go`'s shared
+  `emitEvent` records `ContentTokensAvoided` + `TokenSaving` (the cloud-tokens-saved-by-
+  local-processing metric — Cercano's core savings telemetry). The engine's `usage.Usage`
+  only carries raw in/out tokens, so naively moving these commands to the provider
+  boundary ZEROES their savings telemetry. Doing it right requires extending the usage
+  seam (`usage.Usage` + the engine wrap + the coproc capabilities) to carry
+  `ContentTokensAvoided`, then de-duping `emitEvent` (which is also shared by
+  `cercano_local`/`init`/`deep_research`). This is its own scoped effort against the usage
+  seam, not a handler deletion. Until then, leaving the bespoke handlers in place keeps the
+  savings telemetry intact (the only cost is the duplicate prompt templates).
 - **Retire `legacymodels.CloudModelProvider` (langchaingo) + the `ModelProvider`
   interface** once the SmartRouter main-agent intent path migrates onto `llm.Provider`
   (pairs with the future embedded small-model router).

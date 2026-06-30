@@ -200,20 +200,6 @@ func TestStore_Rename_EmptyTitleClears(t *testing.T) {
 	}
 }
 
-func TestStore_Rename_MissingConvSilentNoOp(t *testing.T) {
-	ctx := context.Background()
-	s, err := Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-	// SQL UPDATE on a non-existent row is not an error in SQLite — verify
-	// that's the behavior here so callers don't need to disambiguate.
-	if err := s.Rename(ctx, "nonexistent", "x"); err != nil {
-		t.Errorf("rename on missing conv should be a no-op: %v", err)
-	}
-}
-
 func TestStore_AppendWithBlocksJSON_RoundTrip(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(":memory:")
@@ -409,5 +395,94 @@ func TestSetGeneratedTitle_NeverOverwritesUserRename(t *testing.T) {
 	info, _ := s.Get(ctx, "c1")
 	if info.Title != "My Title" {
 		t.Errorf("user title was overwritten: got %q, want %q", info.Title, "My Title")
+	}
+}
+
+// TestRename_BeforeEnsure_CreatesRow guards the race where /rename fires
+// before EnsureConversation has inserted the row (e.g., a fresh session where
+// the user renames before sending the first prompt). Pre-fix the SQL was a
+// plain UPDATE; it affected 0 rows and returned nil, the CLI showed a false
+// "renamed to: …" message, and the rename evaporated when EnsureConversation
+// later inserted the row fresh. Upsert reserves the row up-front.
+func TestRename_BeforeEnsure_CreatesRow(t *testing.T) {
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	if err := s.Rename(ctx, "fresh", "User Title"); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	info, err := s.Get(ctx, "fresh")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if info.Title != "User Title" {
+		t.Errorf("title = %q, want %q", info.Title, "User Title")
+	}
+}
+
+// TestRename_BeforeEnsure_SurvivesFullPipeline reproduces the original bug
+// end-to-end: Rename → EnsureConversation (which now backfills project/model
+// on conflict) → Append first user turn (auto-derive guard must skip because
+// title is non-empty) → SetGeneratedTitle (its title_source != 'user' guard
+// must skip). After all of that the user's title still wins and the project
+// context that arrived later is filled in.
+func TestRename_BeforeEnsure_SurvivesFullPipeline(t *testing.T) {
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	if err := s.Rename(ctx, "fresh", "User Title"); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if err := s.EnsureConversation(ctx, "fresh", "/some/proj", "qwen3-coder"); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if err := s.Append(ctx, Turn{ConversationID: "fresh", Role: "user", Content: "what's a goroutine?"}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := s.SetGeneratedTitle(ctx, "fresh", "AI Generated Title"); err != nil {
+		t.Fatalf("set generated: %v", err)
+	}
+	info, err := s.Get(ctx, "fresh")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if info.Title != "User Title" {
+		t.Errorf("user title lost after full pipeline: got %q, want %q", info.Title, "User Title")
+	}
+	if info.ProjectDir != "/some/proj" {
+		t.Errorf("project_dir not backfilled: got %q, want %q", info.ProjectDir, "/some/proj")
+	}
+	if info.Model != "qwen3-coder" {
+		t.Errorf("model not backfilled: got %q, want %q", info.Model, "qwen3-coder")
+	}
+}
+
+// TestEnsureConversation_DoesNotOverwriteExistingProjectAndModel makes sure
+// the new ON CONFLICT branch only fills *empty* project_dir/model. A second
+// EnsureConversation from a re-attached agent (or a concurrent session) must
+// not silently rebrand an existing conversation.
+func TestEnsureConversation_DoesNotOverwriteExistingProjectAndModel(t *testing.T) {
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	if err := s.EnsureConversation(ctx, "c1", "/orig", "model-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EnsureConversation(ctx, "c1", "/different", "model-B"); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := s.Get(ctx, "c1")
+	if info.ProjectDir != "/orig" || info.Model != "model-A" {
+		t.Errorf("re-ensure overwrote project/model: got (%q, %q), want (/orig, model-A)",
+			info.ProjectDir, info.Model)
 	}
 }

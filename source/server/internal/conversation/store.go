@@ -247,10 +247,18 @@ func (s *sqliteStore) EnsureConversation(ctx context.Context, id, projectDir, mo
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now().Unix()
+	// On conflict, backfill project_dir/model if the existing row left them
+	// empty (e.g., an upserting Rename created the row before the first
+	// turn, when the project context wasn't available). Non-empty values
+	// are preserved — multiple sessions or a re-attached agent can't
+	// silently rebrand an existing conversation. Title and title_source are
+	// never touched here; Rename and SetGeneratedTitle own those.
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO conversations (id, project_dir, model, title_source, started_at, last_turn_at)
 		VALUES (?, ?, ?, 'auto', ?, ?)
-		ON CONFLICT(id) DO NOTHING`,
+		ON CONFLICT(id) DO UPDATE SET
+			project_dir = CASE WHEN conversations.project_dir = '' THEN excluded.project_dir ELSE conversations.project_dir END,
+			model       = CASE WHEN conversations.model       = '' THEN excluded.model       ELSE conversations.model       END`,
 		id, projectDir, model, now, now)
 	return err
 }
@@ -454,9 +462,21 @@ func (s *sqliteStore) Rename(ctx context.Context, conversationID, title string) 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE conversations SET title = ?, title_source = 'user' WHERE id = ?`,
-		title, conversationID)
+	// Upsert. The previous UPDATE-only SQL silently no-op'd when /rename
+	// fired before EnsureConversation had inserted the row (a fresh session
+	// where the user renames before their first turn): 0 rows affected is
+	// not an error, the CLI showed "renamed to: …", and later
+	// SetGeneratedTitle from the recap layer won because title_source was
+	// still 'auto' on the freshly-inserted row. Upserting reserves the row
+	// with the user's title and title_source='user' so EnsureConversation's
+	// later insert collapses to a no-op for title and SetGeneratedTitle's
+	// guard (title_source != 'user') keeps the user's choice.
+	now := time.Now().Unix()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO conversations (id, title, title_source, started_at, last_turn_at)
+		VALUES (?, ?, 'user', ?, ?)
+		ON CONFLICT(id) DO UPDATE SET title = excluded.title, title_source = 'user'`,
+		conversationID, title, now, now)
 	return err
 }
 

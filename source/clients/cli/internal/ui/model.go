@@ -625,6 +625,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m = m.preparePromptInput()
+		// A drag-dropped image arrives as a paste of its path; a copied image
+		// may arrive as an empty/whitespace paste (bytes live on the clipboard).
+		if strings.TrimSpace(msg.Content) == "" {
+			if (&m).handleClipboardImage() {
+				m.relayout()
+				return m, nil
+			}
+		} else if (&m).handleImagePaste(msg.Content) {
+			m.relayout()
+			return m, nil
+		}
 		var cmd tea.Cmd
 		prevVal := m.input.Value()
 		m.input, cmd = m.input.Update(msg)
@@ -718,6 +729,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// input box.
 			m = m.preparePromptInput()
 			// fall through
+		}
+		// ctrl+v: if the clipboard holds an image, attach it; otherwise fall
+		// through so the terminal's native paste mechanism handles it.
+		if keyStr == "ctrl+v" && !m.contentPageActive() && m.pendingConfirm == nil {
+			m = m.preparePromptInput()
+			if (&m).handleClipboardImage() {
+				m.relayout()
+				return m, nil
+			}
+			// no image on clipboard → fall through to normal handling
 		}
 		// Esc on empty input enters tool-entry navigation mode, focusing the
 		// most-recent tool entry. No-op when scrollback has no tool entries.
@@ -1392,6 +1413,31 @@ func (m Model) contentScrollbarAt(mouse tea.Mouse) (contentPageScroller, content
 		return nil, contentPageScrollState{}, false
 	}
 	return scroller, state, true
+}
+
+// handleImagePaste attaches image chips if the pasted text resolves to image
+// file path(s). Returns true if it consumed the paste (caller must NOT insert
+// the text literally); false means treat the paste as normal text.
+func (m *Model) handleImagePaste(pasted string) bool {
+	imgs, ok := classifyImagePaste(pasted)
+	if !ok {
+		return false
+	}
+	for _, img := range imgs {
+		m.input.AddImage(img.data, img.mediaType, img.source)
+	}
+	return true
+}
+
+// handleClipboardImage attaches a chip if the OS clipboard holds an image.
+// Returns true if it attached one.
+func (m *Model) handleClipboardImage() bool {
+	data, mt, ok := clipboardImage()
+	if !ok {
+		return false
+	}
+	m.input.AddImage(data, mt, "")
+	return true
 }
 
 // handleCtrlCKey owns the app-wide Ctrl+C contract for every content page:

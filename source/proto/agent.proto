@@ -38,6 +38,12 @@ service Agent {
   // the /c context viewer.
   rpc GetCompactionState (GetCompactionStateRequest) returns (GetCompactionStateResponse) {}
 
+  // SuggestNextPrompt asks the local co-processor model for one short
+  // follow-up the user might type next, given the conversation so far. The
+  // CLI renders the result as ghost text in the input widget. Empty response
+  // means "no suggestion" — the CLI treats it as no-op.
+  rpc SuggestNextPrompt (SuggestNextPromptRequest) returns (SuggestNextPromptResponse) {}
+
   // ExportContext returns the full uncapped raw history as a JSON []llm.Message.
   rpc ExportContext (ExportContextRequest) returns (ExportContextResponse) {}
 
@@ -456,6 +462,9 @@ message GetContextUsageResponse {
   int32  raw_tokens  = 4; // the uncompacted size
   bool   compacting  = 5; // a compaction pass is currently running
 }
+
+message SuggestNextPromptRequest  { string conversation_id = 1; }
+message SuggestNextPromptResponse { string suggestion = 1; }
 
 message GetCompactionStateRequest  { string conversation_id = 1; }
 message GetCompactionStateResponse {

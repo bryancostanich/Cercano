@@ -1023,6 +1023,101 @@ func (s *Server) GetContextUsage(ctx context.Context, req *proto.GetContextUsage
 	}, nil
 }
 
+// SuggestNextPrompt implements proto.AgentServer — asks the local co-processor
+// for one short follow-up prompt the user might send next, based on the
+// conversation's living recap + the tail of recent turns. Degrades to an empty
+// response on any failure (missing store, no dispatch engine, provider error,
+// empty conversation) — the CLI treats "" as "no suggestion", never surfaces
+// a banner. Never routes to the cloud; coproc role only.
+func (s *Server) SuggestNextPrompt(ctx context.Context, req *proto.SuggestNextPromptRequest) (*proto.SuggestNextPromptResponse, error) {
+	empty := &proto.SuggestNextPromptResponse{}
+	convID := req.GetConversationId()
+	if convID == "" || s.dispatchEngine == nil {
+		return empty, nil
+	}
+	store := s.agent.PersistentStore()
+	if store == nil {
+		return empty, nil
+	}
+	turns, err := store.GetTurns(ctx, convID)
+	if err != nil || len(turns) == 0 {
+		return empty, nil
+	}
+	// Pull the recap for background; fall back to just the turn tail when
+	// none has been consolidated yet.
+	recap := ""
+	if info, err := store.Get(ctx, convID); err == nil {
+		recap = info.Recap
+	}
+	// Last 6 turns give the coproc immediate context without ballooning the
+	// prompt on long conversations. Recap covers the deeper history.
+	tailN := 6
+	if len(turns) < tailN {
+		tailN = len(turns)
+	}
+	var tail strings.Builder
+	for _, t := range turns[len(turns)-tailN:] {
+		content := strings.TrimSpace(t.Content)
+		if content == "" {
+			continue
+		}
+		if len(content) > 400 {
+			content = content[:400] + "…"
+		}
+		fmt.Fprintf(&tail, "[%s]\n%s\n\n", t.Role, content)
+	}
+	var promptB strings.Builder
+	promptB.WriteString("You are helping predict what a user might reasonably ask next in an ongoing conversation with an AI coding assistant. ")
+	promptB.WriteString("Output ONE short natural next prompt the user might send, under 80 characters. ")
+	promptB.WriteString("Rules: output ONLY the prompt text; no quotes, no formatting, no leading punctuation, no commentary, no labels.\n\n")
+	if recap != "" {
+		promptB.WriteString("Recap of the conversation so far:\n")
+		promptB.WriteString(recap)
+		promptB.WriteString("\n\n")
+	}
+	promptB.WriteString("Most recent turns:\n")
+	promptB.WriteString(tail.String())
+	promptB.WriteString("\nNext prompt:")
+
+	res, err := s.dispatchEngine.Dispatch(ctx, dispatch.Spec{
+		Mode:        dispatch.OneShot,
+		Role:        dispatch.RoleCoproc,
+		Prompt:      promptB.String(),
+		Source:      "suggest_next_prompt",
+		RecordUsage: true,
+	})
+	if err != nil {
+		return empty, nil
+	}
+	return &proto.SuggestNextPromptResponse{Suggestion: sanitizeSuggestion(res.Text)}, nil
+}
+
+// sanitizeSuggestion normalizes a coproc's suggestion text: single line, no
+// surrounding quotes, capped at 80 characters. Belt-and-suspenders against
+// models that ignore the "no formatting" rule.
+func sanitizeSuggestion(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.TrimSpace(s)
+	// Strip matched surrounding quote characters (", ', `).
+	for len(s) >= 2 {
+		first, last := s[0], s[len(s)-1]
+		if (first == '"' && last == '"') || (first == '\'' && last == '\'') || (first == '`' && last == '`') {
+			s = strings.TrimSpace(s[1 : len(s)-1])
+			continue
+		}
+		break
+	}
+	// Drop leading list/label punctuation the model might inject anyway.
+	s = strings.TrimLeft(s, "-*•> ")
+	if len(s) > 80 {
+		s = s[:80]
+	}
+	return s
+}
+
 // GetCompactionState implements proto.AgentServer — the compaction summary +
 // frozen/live split for the /c viewer.
 func (s *Server) GetCompactionState(ctx context.Context, req *proto.GetCompactionStateRequest) (*proto.GetCompactionStateResponse, error) {

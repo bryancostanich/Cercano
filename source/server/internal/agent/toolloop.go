@@ -272,6 +272,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		}
 		results = append(results, rResults...)
 
+		watchdogIntervened := false
 		for _, pc := range wxCalls {
 			watchdogApproved := false
 			if in.WatchdogGate != nil {
@@ -284,6 +285,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 						Content: "⚡ watchdog (" + wd.Protocol + "): " + wd.Challenge + " Either follow the protocol first, or call `justify` with a reason to override.",
 						IsError: false,
 					})
+					watchdogIntervened = true
 					continue
 				case "block":
 					emit(LoopEvent{Kind: LoopWatchdogChallenge, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Tier: string(pc.tier), Detail: wd.Protocol, Summary: wd.Challenge})
@@ -292,6 +294,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 						Content: "⚡ watchdog (" + wd.Protocol + "): " + wd.Challenge + " Blocked — follow the protocol first (no override available).",
 						IsError: true,
 					})
+					watchdogIntervened = true
 					continue
 				case "escalate":
 					emit(LoopEvent{Kind: LoopWatchdogEscalate, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Tier: string(pc.tier), Detail: wd.Protocol, Summary: wd.Challenge})
@@ -301,6 +304,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 							Content: "⚡ watchdog escalation (" + wd.Protocol + "): no reviewer available — action not executed.",
 							IsError: true,
 						})
+						watchdogIntervened = true
 						continue
 					}
 					allow, err := in.PermissionRequester(ctx, pc.block.ToolUseID, pc.block.ToolName, pc.block.ToolInput, pc.tier, agenttools.IsDestructive(pc.tool))
@@ -313,6 +317,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 							Content: "watchdog escalation upheld by the user — action not executed.",
 							IsError: true,
 						})
+						watchdogIntervened = true
 						continue
 					}
 					// Human explicitly approved via the escalation prompt; skip the
@@ -379,7 +384,12 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		}
 		appendTurn(llm.Message{Role: llm.RoleUser, Blocks: results})
 
-		if allErrored {
+		switch {
+		case watchdogIntervened:
+			// Watchdog challenges/blocks/escalations are deliberate supervisory
+			// refusals, not tool malfunctions — they must not feed the
+			// consecutive-error abort (else strict-mode blocking could kill a turn).
+		case allErrored:
 			consecutiveErrors++
 			if consecutiveErrors >= 3 {
 				return ToolLoopResult{
@@ -387,7 +397,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 					InputTokens: lastIn, OutputTokens: lastOut,
 				}, fmt.Errorf("aborted: 3 consecutive iterations of tool errors")
 			}
-		} else {
+		default:
 			consecutiveErrors = 0
 		}
 	}

@@ -148,6 +148,7 @@ message StreamProcessResponse {
     ToolExecComplete  tool_exec_complete = 7;
     PermissionRequired permission_required = 8;
     RouteSelected     route_selected = 9;
+    WatchdogEvent     watchdog_event = 10;
   }
 }
 
@@ -157,6 +158,14 @@ message StreamProcessResponse {
 message RouteSelected {
   string model = 1;
   bool is_cloud = 2;
+}
+
+// WatchdogEvent is a protocol-supervisor intervention surfaced to the client.
+message WatchdogEvent {
+  string kind     = 1; // "challenge" | "block" | "echo"
+  string protocol = 2; // e.g. "commit-checkpoint" (empty for echo)
+  string text     = 3; // the challenge text, or the echo line
+  string thread   = 4; // echo only: "watchdog" | "main" (empty otherwise)
 }
 
 // Progress update during a long-running task.

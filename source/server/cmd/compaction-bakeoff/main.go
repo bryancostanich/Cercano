@@ -26,8 +26,7 @@ import (
 func contenders() []compaction.Compactor {
 	return []compaction.Compactor{
 		compaction.RollingCompactor{},
-		compaction.MapReduceCompactor{ModelReduce: false},
-		compaction.MapReduceCompactor{ModelReduce: true},
+		compaction.MapReduceCompactor{},
 	}
 }
 

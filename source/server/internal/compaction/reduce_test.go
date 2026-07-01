@@ -1,50 +1,33 @@
 package compaction
 
-import (
-	"context"
-	"strings"
-	"testing"
+import "testing"
 
-	"cercano/source/server/internal/llm"
-)
-
-func TestReduce_SingleIsMerge_NoModel(t *testing.T) {
-	calls := 0
-	fake := func(context.Context, []llm.Message) (StructuredSummary, error) {
-		calls++
-		return StructuredSummary{}, nil
-	}
-	out, err := Reduce(context.Background(), []StructuredSummary{{Goal: "only"}}, fake)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if calls != 0 {
-		t.Errorf("single part should not call the model, got %d calls", calls)
-	}
+func TestReduce_SinglePassthrough(t *testing.T) {
+	out := Reduce([]StructuredSummary{{Goal: "only"}})
 	if out.Goal != "only" {
 		t.Errorf("single part should pass through, got %q", out.Goal)
 	}
 }
 
-func TestReduce_MultiCallsModelWithRenderedParts(t *testing.T) {
-	var seen string
-	fake := func(_ context.Context, m []llm.Message) (StructuredSummary, error) {
-		for _, msg := range m {
-			for _, b := range msg.Blocks {
-				seen += b.Text
-			}
-		}
-		return StructuredSummary{Goal: "reduced"}, nil
+// Reduce must be a deterministic union — never an LLM call — even for multi-
+// part inputs. The prior model-reduce branch fabricated content; this test
+// pins the invariant that the merge is mechanical.
+func TestReduce_MultiIsDeterministicUnion(t *testing.T) {
+	parts := []StructuredSummary{
+		{Goal: "first", Decisions: []string{"A"}, State: "s1", Files: map[string]string{"a.go": "v1"}},
+		{Goal: "second", Decisions: []string{"B", "A"}, State: "s2", Files: map[string]string{"a.go": "v2", "b.go": "new"}},
 	}
-	out, err := Reduce(context.Background(),
-		[]StructuredSummary{{Goal: "g1"}, {Goal: "g2"}}, fake)
-	if err != nil {
-		t.Fatal(err)
+	out := Reduce(parts)
+	if out.Goal != "first" {
+		t.Errorf("Goal should be first non-empty, got %q", out.Goal)
 	}
-	if out.Goal != "reduced" {
-		t.Errorf("multi part should use the model reduce, got %q", out.Goal)
+	if len(out.Decisions) != 2 || out.Decisions[0] != "A" || out.Decisions[1] != "B" {
+		t.Errorf("Decisions should union with dedup, order preserved: %v", out.Decisions)
 	}
-	if !strings.Contains(seen, "g1") || !strings.Contains(seen, "g2") {
-		t.Errorf("reduce input should contain both rendered parts, saw: %s", seen)
+	if out.State != "s2" {
+		t.Errorf("State should be last non-empty, got %q", out.State)
+	}
+	if out.Files["a.go"] != "v2" || out.Files["b.go"] != "new" {
+		t.Errorf("Files should union with recent overriding older: %v", out.Files)
 	}
 }

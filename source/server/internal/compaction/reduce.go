@@ -1,21 +1,12 @@
 package compaction
 
-import (
-	"context"
-
-	"cercano/source/server/internal/llm"
-)
-
-// Reduce reconciles segment summaries into one. With more than one part it runs
-// a model reduce pass over the rendered parts (C's reduce step); with one (or
-// zero) it falls back to the deterministic MergeSummaries.
-func Reduce(ctx context.Context, parts []StructuredSummary, summarize SummarizeFunc) (StructuredSummary, error) {
-	if len(parts) > 1 {
-		var input []llm.Message
-		for _, p := range parts {
-			input = append(input, renderSummaryMessages(p)...)
-		}
-		return summarize(ctx, input)
-	}
-	return MergeSummaries(parts), nil
+// Reduce reconciles segment summaries into one via the deterministic union
+// MergeSummaries. Previously ran an LLM re-summarize pass for len(parts) > 1;
+// that path fabricated content that wasn't in the inputs — summaries had
+// already been reduced to structured form, so a second model pass could only
+// paraphrase or invent. MergeSummaries is lossless: it unions Decisions and
+// OpenThreads with dedup (order preserved), unions Files with recent
+// overriding older, keeps the first non-empty Goal and last non-empty State.
+func Reduce(parts []StructuredSummary) StructuredSummary {
+	return MergeSummaries(parts)
 }

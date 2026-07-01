@@ -671,11 +671,13 @@ type UpdateConfigRequest struct {
 	// Anthropic-compatible proxy URL (e.g., "http://127.0.0.1:3456" for Meridian).
 	// When set, used as the baseURL for the anthropic client; api_key may be empty
 	// because the proxy handles auth (Claude Max OAuth in Meridian's case).
-	CloudBaseUrl  string `protobuf:"bytes,6,opt,name=cloud_base_url,json=cloudBaseUrl,proto3" json:"cloud_base_url,omitempty"`
-	LocalRuntime  string `protobuf:"bytes,7,opt,name=local_runtime,json=localRuntime,proto3" json:"local_runtime,omitempty"` // Local runtime name: "ollama" or "llama_server"
-	LocusMode     string `protobuf:"bytes,8,opt,name=locus_mode,json=locusMode,proto3" json:"locus_mode,omitempty"`          // cloud_only|cloud_primary|local_primary|local_only
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	CloudBaseUrl    string `protobuf:"bytes,6,opt,name=cloud_base_url,json=cloudBaseUrl,proto3" json:"cloud_base_url,omitempty"`
+	LocalRuntime    string `protobuf:"bytes,7,opt,name=local_runtime,json=localRuntime,proto3" json:"local_runtime,omitempty"`          // Local runtime name: "ollama" or "llama_server"
+	LocusMode       string `protobuf:"bytes,8,opt,name=locus_mode,json=locusMode,proto3" json:"locus_mode,omitempty"`                   // cloud_only|cloud_primary|local_primary|local_only
+	WatchdogEnabled string `protobuf:"bytes,9,opt,name=watchdog_enabled,json=watchdogEnabled,proto3" json:"watchdog_enabled,omitempty"` // "" = unchanged, "true"/"false"
+	WatchdogEcho    string `protobuf:"bytes,10,opt,name=watchdog_echo,json=watchdogEcho,proto3" json:"watchdog_echo,omitempty"`         // "" = unchanged, "true"/"false"
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *UpdateConfigRequest) Reset() {
@@ -760,6 +762,20 @@ func (x *UpdateConfigRequest) GetLocalRuntime() string {
 func (x *UpdateConfigRequest) GetLocusMode() string {
 	if x != nil {
 		return x.LocusMode
+	}
+	return ""
+}
+
+func (x *UpdateConfigRequest) GetWatchdogEnabled() string {
+	if x != nil {
+		return x.WatchdogEnabled
+	}
+	return ""
+}
+
+func (x *UpdateConfigRequest) GetWatchdogEcho() string {
+	if x != nil {
+		return x.WatchdogEcho
 	}
 	return ""
 }
@@ -4666,12 +4682,14 @@ type GetConfigResponse struct {
 	CloudApiKeySet bool                   `protobuf:"varint,7,opt,name=cloud_api_key_set,json=cloudApiKeySet,proto3" json:"cloud_api_key_set,omitempty"`
 	// Last observed cloud state: "ok", "absent", "error". Reflects whether the
 	// most recent turn succeeded; useful for surfacing in the CLI status bar.
-	CloudState    string `protobuf:"bytes,8,opt,name=cloud_state,json=cloudState,proto3" json:"cloud_state,omitempty"`
-	Port          string `protobuf:"bytes,9,opt,name=port,proto3" json:"port,omitempty"`
-	LocalRuntime  string `protobuf:"bytes,10,opt,name=local_runtime,json=localRuntime,proto3" json:"local_runtime,omitempty"`
-	LocusMode     string `protobuf:"bytes,11,opt,name=locus_mode,json=locusMode,proto3" json:"locus_mode,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	CloudState      string `protobuf:"bytes,8,opt,name=cloud_state,json=cloudState,proto3" json:"cloud_state,omitempty"`
+	Port            string `protobuf:"bytes,9,opt,name=port,proto3" json:"port,omitempty"`
+	LocalRuntime    string `protobuf:"bytes,10,opt,name=local_runtime,json=localRuntime,proto3" json:"local_runtime,omitempty"`
+	LocusMode       string `protobuf:"bytes,11,opt,name=locus_mode,json=locusMode,proto3" json:"locus_mode,omitempty"`
+	WatchdogEnabled bool   `protobuf:"varint,12,opt,name=watchdog_enabled,json=watchdogEnabled,proto3" json:"watchdog_enabled,omitempty"`
+	WatchdogEcho    bool   `protobuf:"varint,13,opt,name=watchdog_echo,json=watchdogEcho,proto3" json:"watchdog_echo,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *GetConfigResponse) Reset() {
@@ -4779,6 +4797,20 @@ func (x *GetConfigResponse) GetLocusMode() string {
 		return x.LocusMode
 	}
 	return ""
+}
+
+func (x *GetConfigResponse) GetWatchdogEnabled() bool {
+	if x != nil {
+		return x.WatchdogEnabled
+	}
+	return false
+}
+
+func (x *GetConfigResponse) GetWatchdogEcho() bool {
+	if x != nil {
+		return x.WatchdogEcho
+	}
+	return false
 }
 
 type ListSkillsRequest struct {
@@ -7290,7 +7322,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x05index\x18\x01 \x01(\x05R\x05index\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\x12\x1d\n" +
 	"\n" +
-	"media_type\x18\x03 \x01(\tR\tmediaType\"\xab\x02\n" +
+	"media_type\x18\x03 \x01(\tR\tmediaType\"\xfb\x02\n" +
 	"\x13UpdateConfigRequest\x12\x1f\n" +
 	"\vlocal_model\x18\x01 \x01(\tR\n" +
 	"localModel\x12%\n" +
@@ -7303,7 +7335,10 @@ const file_agent_proto_rawDesc = "" +
 	"\x0ecloud_base_url\x18\x06 \x01(\tR\fcloudBaseUrl\x12#\n" +
 	"\rlocal_runtime\x18\a \x01(\tR\flocalRuntime\x12\x1d\n" +
 	"\n" +
-	"locus_mode\x18\b \x01(\tR\tlocusMode\"J\n" +
+	"locus_mode\x18\b \x01(\tR\tlocusMode\x12)\n" +
+	"\x10watchdog_enabled\x18\t \x01(\tR\x0fwatchdogEnabled\x12#\n" +
+	"\rwatchdog_echo\x18\n" +
+	" \x01(\tR\fwatchdogEcho\"J\n" +
 	"\x14UpdateConfigResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\xb6\x02\n" +
@@ -7606,7 +7641,7 @@ const file_agent_proto_rawDesc = "" +
 	"resultJson\x12\x19\n" +
 	"\bis_error\x18\x02 \x01(\bR\aisError\x12\x14\n" +
 	"\x05error\x18\x03 \x01(\tR\x05error\"\x12\n" +
-	"\x10GetConfigRequest\"\x8e\x03\n" +
+	"\x10GetConfigRequest\"\xde\x03\n" +
 	"\x11GetConfigResponse\x12\x1d\n" +
 	"\n" +
 	"ollama_url\x18\x01 \x01(\tR\tollamaUrl\x12\x1f\n" +
@@ -7624,7 +7659,9 @@ const file_agent_proto_rawDesc = "" +
 	"\rlocal_runtime\x18\n" +
 	" \x01(\tR\flocalRuntime\x12\x1d\n" +
 	"\n" +
-	"locus_mode\x18\v \x01(\tR\tlocusMode\"\x13\n" +
+	"locus_mode\x18\v \x01(\tR\tlocusMode\x12)\n" +
+	"\x10watchdog_enabled\x18\f \x01(\bR\x0fwatchdogEnabled\x12#\n" +
+	"\rwatchdog_echo\x18\r \x01(\bR\fwatchdogEcho\"\x13\n" +
 	"\x11ListSkillsRequest\"A\n" +
 	"\tSkillInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +

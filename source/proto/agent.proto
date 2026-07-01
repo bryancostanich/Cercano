@@ -207,6 +207,8 @@ message UpdateConfigRequest {
   string cloud_base_url = 6;
   string local_runtime = 7;  // Local runtime name: "ollama" or "llama_server"
   string locus_mode = 8;     // cloud_only|cloud_primary|local_primary|local_only
+  string watchdog_enabled = 9;  // "" = unchanged, "true"/"false"
+  string watchdog_echo = 10;    // "" = unchanged, "true"/"false"
 }
 
 // Runtime configuration update response.
@@ -561,6 +563,8 @@ message GetConfigResponse {
   string port = 9;
   string local_runtime = 10;
   string locus_mode = 11;
+  bool watchdog_enabled = 12;
+  bool watchdog_echo = 13;
 }
 
 message ListSkillsRequest {}

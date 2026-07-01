@@ -1776,6 +1776,26 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 					},
 				},
 			})
+		case agent.LoopWatchdogChallenge, agent.LoopWatchdogBlock:
+			kind := "challenge"
+			if ev.Kind == agent.LoopWatchdogBlock {
+				kind = "block"
+			}
+			stream.Send(&proto.StreamProcessResponse{
+				Payload: &proto.StreamProcessResponse_WatchdogEvent{
+					WatchdogEvent: &proto.WatchdogEvent{
+						Kind: kind, Protocol: ev.Detail, Text: ev.Summary,
+					},
+				},
+			})
+		case agent.LoopWatchdogEcho:
+			stream.Send(&proto.StreamProcessResponse{
+				Payload: &proto.StreamProcessResponse_WatchdogEvent{
+					WatchdogEvent: &proto.WatchdogEvent{
+						Kind: "echo", Text: ev.Summary, Thread: ev.ToolName,
+					},
+				},
+			})
 		}
 	}
 

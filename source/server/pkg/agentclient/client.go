@@ -927,26 +927,29 @@ func parseRuntimeTime(value string) time.Time {
 
 // StreamMsg is a typed event produced by a streaming chat turn.
 type StreamMsg struct {
-	Type        StreamMsgType
-	Token       string // for TypeToken
-	Note        string // for TypeProgress
-	Final       string // for TypeDone (full response)
-	Notice      string // for TypeDone (agent informational note, e.g. cloud absent)
-	Model       string // for TypeDone
-	TokIn       int    // for TypeDone
-	TokOut      int    // for TypeDone
-	Err         error  // for TypeError
-	ToolUseID   string // for TypeToolUseStart/Stop, TypeToolExecStart/Complete, TypePermissionRequired
-	ToolName    string // for TypeToolUseStart, TypePermissionRequired
-	ArgsSummary string // for TypeToolUseStop
-	ArgsJSON    string // for TypePermissionRequired
-	Summary     string // for TypeToolExecComplete
-	Detail      string // for TypeToolExecComplete (clean outcome token)
-	IsError     bool   // for TypeToolExecComplete
-	RouteModel  string // for TypeRouteSelected (engine handling the turn)
-	RouteCloud  bool   // for TypeRouteSelected (true = cloud, false = local)
-	Tier        string // for TypePermissionRequired ("W" | "X")
-	Destructive bool   // for TypePermissionRequired (display-only ⚠ hint)
+	Type         StreamMsgType
+	Token        string // for TypeToken
+	Note         string // for TypeProgress
+	Final        string // for TypeDone (full response)
+	Notice       string // for TypeDone (agent informational note, e.g. cloud absent)
+	Model        string // for TypeDone
+	TokIn        int    // for TypeDone
+	TokOut       int    // for TypeDone
+	Err          error  // for TypeError
+	ToolUseID    string // for TypeToolUseStart/Stop, TypeToolExecStart/Complete, TypePermissionRequired
+	ToolName     string // for TypeToolUseStart, TypePermissionRequired
+	ArgsSummary  string // for TypeToolUseStop
+	ArgsJSON     string // for TypePermissionRequired
+	Summary      string // for TypeToolExecComplete
+	Detail       string // for TypeToolExecComplete (clean outcome token)
+	IsError      bool   // for TypeToolExecComplete
+	RouteModel   string // for TypeRouteSelected (engine handling the turn)
+	RouteCloud   bool   // for TypeRouteSelected (true = cloud, false = local)
+	Tier         string // for TypePermissionRequired ("W" | "X")
+	Destructive  bool   // for TypePermissionRequired (display-only ⚠ hint)
+	WatchdogKind string // for TypeWatchdog ("challenge" | "block" | "echo")
+	Protocol     string // for TypeWatchdog (protocol name, empty for echo)
+	Thread       string // for TypeWatchdog echo only ("watchdog" | "main")
 }
 
 type StreamMsgType int
@@ -962,6 +965,7 @@ const (
 	TypeToolExecComplete
 	TypePermissionRequired
 	TypeRouteSelected
+	TypeWatchdog
 )
 
 func toProtoImages(images []InlineImage) []*proto.InlineImage {
@@ -1079,9 +1083,25 @@ func (c *Client) StreamChat(ctx context.Context, conversationID, input, workDir 
 				}
 				continue
 			}
+			if we := msg.GetWatchdogEvent(); we != nil {
+				out <- streamMsgFromWatchdogEvent(we)
+				continue
+			}
 		}
 	}()
 	return out, nil
+}
+
+// streamMsgFromWatchdogEvent converts a proto WatchdogEvent into a StreamMsg.
+// Summary carries proto.Text; Protocol and Thread carry their namesake fields.
+func streamMsgFromWatchdogEvent(we *proto.WatchdogEvent) StreamMsg {
+	return StreamMsg{
+		Type:         TypeWatchdog,
+		WatchdogKind: we.GetKind(),
+		Protocol:     we.GetProtocol(),
+		Summary:      we.GetText(),
+		Thread:       we.GetThread(),
+	}
 }
 
 // SetPermissionMode changes the agent's session permission mode.

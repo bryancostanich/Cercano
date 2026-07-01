@@ -21,6 +21,7 @@ const (
 	LoopWatchdogChallenge  LoopEventKind = "watchdog_challenge"
 	LoopWatchdogEscalate   LoopEventKind = "watchdog_escalate"
 	LoopWatchdogEcho       LoopEventKind = "watchdog_echo"
+	LoopWatchdogBlock      LoopEventKind = "watchdog_block"
 )
 
 type LoopEvent struct {
@@ -288,7 +289,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 					watchdogIntervened = true
 					continue
 				case "block":
-					emit(LoopEvent{Kind: LoopWatchdogChallenge, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Tier: string(pc.tier), Detail: wd.Protocol, Summary: wd.Challenge})
+					emit(LoopEvent{Kind: LoopWatchdogBlock, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Tier: string(pc.tier), Detail: wd.Protocol, Summary: wd.Challenge})
 					results = append(results, llm.Block{
 						Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID,
 						Content: "⚡ watchdog (" + wd.Protocol + "): " + wd.Challenge + " Blocked — follow the protocol first (no override available).",

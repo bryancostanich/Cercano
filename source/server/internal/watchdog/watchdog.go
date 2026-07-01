@@ -33,8 +33,9 @@ type Config struct {
 
 // convState holds per-conversation state.
 type convState struct {
-	justified map[string]bool
-	counts    map[string]int
+	justified      map[string]bool
+	counts         map[string]int
+	lastChallenged string // key most recently challenged or escalated for this conversation
 }
 
 // Watchdog runs a set of Checks against agent Actions and enforces a
@@ -119,12 +120,17 @@ func (w *Watchdog) Gate(ctx context.Context, conversationID string, a Action) De
 	}
 	cs.counts[key]++
 	count := cs.counts[key]
+	isStrict := w.cfg.Mode == ModeStrict
+	escalate := count >= w.escalateAfter
+	if escalate || !isStrict {
+		cs.lastChallenged = key
+	}
 	w.mu.Unlock()
 
-	if count >= w.escalateAfter {
+	if escalate {
 		return Decision{Action: "escalate", Protocol: violation.Protocol, Challenge: violation.Challenge}
 	}
-	if w.cfg.Mode == ModeStrict {
+	if isStrict {
 		return Decision{Action: "block", Protocol: violation.Protocol, Challenge: violation.Challenge}
 	}
 	return Decision{Action: "challenge", Protocol: violation.Protocol, Challenge: violation.Challenge}
@@ -137,4 +143,16 @@ func (w *Watchdog) recordJustify(conversationID, key string) {
 	defer w.mu.Unlock()
 	cs := w.getOrCreate(conversationID)
 	cs.justified[key] = true
+}
+
+// lastChallengedKey returns the key most recently challenged or escalated for
+// the given conversation, or "" if none.
+func (w *Watchdog) lastChallengedKey(conversationID string) string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	cs, ok := w.convs[conversationID]
+	if !ok {
+		return ""
+	}
+	return cs.lastChallenged
 }

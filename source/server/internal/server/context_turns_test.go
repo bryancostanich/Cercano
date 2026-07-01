@@ -83,6 +83,39 @@ func TestContextTurnView_BodyMultilineAndCap(t *testing.T) {
 
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
 
+// TestContextTurnView_MixedBlocksPreservesAllContent guards against the
+// regression where an assistant turn with interleaved text and tool_use
+// blocks (a common pattern — "let me check X" + Grep + "and Y" + Read)
+// collapsed to only the last tool_use's preview/body because the earlier
+// implementation unconditionally overwrote them per block. The full content
+// of every block must appear in the preview and body, in order.
+func TestContextTurnView_MixedBlocksPreservesAllContent(t *testing.T) {
+	tok := contextmeter.Default()
+	blocks := []llm.Block{
+		{Type: llm.BlockText, Text: "here's my analysis"},
+		{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "Grep", ToolInput: json.RawMessage(`{"pattern":"foo"}`)},
+		{Type: llm.BlockText, Text: "and now let me check Y"},
+		{Type: llm.BlockToolUse, ToolUseID: "u2", ToolName: "Read", ToolInput: json.RawMessage(`{"path":"a.go"}`)},
+	}
+	raw, _ := json.Marshal(blocks)
+	turn := conversation.Turn{Role: "assistant", BlocksJSON: string(raw)}
+	got := contextTurnView(turn, tok)
+
+	for _, want := range []string{"here's my analysis", "Grep", "and now let me check Y", "Read"} {
+		if !strings.Contains(got.Preview, want) {
+			t.Errorf("preview missing %q — the block-overwrite regression is back:\n%s", want, got.Preview)
+		}
+		if !strings.Contains(got.Body, want) {
+			t.Errorf("body missing %q:\n%s", want, got.Body)
+		}
+	}
+	// Kind still reflects the last non-text block so client-side styling is
+	// unchanged.
+	if got.Kind != "tool_use" {
+		t.Errorf("kind = %q, want tool_use (last non-text block)", got.Kind)
+	}
+}
+
 func TestCtTruncate_RuneBoundary(t *testing.T) {
 	// 60 CJK runes = 180 bytes; truncating at 121 bytes splits a rune.
 	// A correct implementation must back up to a rune boundary.

@@ -119,6 +119,13 @@ func (s *Server) reloadConfigFromDisk(ctx context.Context) {
 	if newCfg.LocusMode != snap.LocusMode {
 		req.LocusMode = newCfg.LocusMode
 	}
+	if newCfg.Compaction.ElideToolResults != snap.Compaction.ElideToolResults {
+		if newCfg.Compaction.ElideToolResults {
+			req.ElideToolResults = "true"
+		} else {
+			req.ElideToolResults = "false"
+		}
+	}
 
 	// Warn on fields that UpdateConfig doesn't hot-reload. The agent keeps
 	// running on the old in-memory values until a restart.

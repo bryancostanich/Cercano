@@ -49,6 +49,7 @@ func buildSettingsSections(cfg *agentclient.Config, mode, accentToken string) []
 		{Title: "Developer", Fields: []form.Field{
 			form.NewToggle("watchdog-enabled", "watchdog-enabled", cfg.WatchdogEnabled),
 			form.NewToggle("watchdog-echo", "watchdog-echo", cfg.WatchdogEcho),
+			form.NewToggle("elide-tool-results", "elide-tool-results", cfg.ElideToolResults),
 		}},
 	}
 }
@@ -84,6 +85,8 @@ func classifyCommit(key, value string) commitAction {
 		u.WatchdogEnabled = value
 	case "watchdog-echo":
 		u.WatchdogEcho = value
+	case "elide-tool-results":
+		u.ElideToolResults = value
 	case "permission-mode":
 		return commitAction{kind: commitPermission, value: value}
 	case "accent-color":

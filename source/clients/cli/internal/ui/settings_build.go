@@ -50,9 +50,6 @@ func buildSettingsSections(cfg *agentclient.Config, mode, accentToken string) []
 			form.NewToggle("watchdog-enabled", "watchdog-enabled", cfg.WatchdogEnabled),
 			form.NewToggle("watchdog-echo", "watchdog-echo", cfg.WatchdogEcho),
 		}},
-		{Title: "Context Management", Fields: []form.Field{
-			form.NewToggle("elide-tool-results", "elide-tool-results", cfg.ElideToolResults),
-		}},
 	}
 }
 

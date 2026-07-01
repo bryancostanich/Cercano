@@ -2138,6 +2138,12 @@ func (s *Server) assembleHistory(ctx context.Context, store conversation.Store, 
 			}
 		}
 	}
+	// Mechanical superseded-tool-result dedup. LLM-free, lossless, and safe to
+	// apply on top of either a summarized view or the raw history — running it
+	// twice is idempotent.
+	if compactionCfg.ElideToolResults {
+		view, _ = compaction.ElideSupersededToolResults(view)
+	}
 	return view
 }
 

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -69,6 +70,52 @@ func TestWatchdogGate_ChallengeSkipsExecution(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected an injected tool-result mentioning 'watchdog'")
+	}
+}
+
+// TestWatchdogBlockDoesNotTripErrorAbort: a watchdog that always blocks must not
+// accumulate "consecutive tool errors" and abort the turn. Without the
+// watchdogIntervened guard, 3 blocked turns would hit the 3-strike abort;
+// with the fix the loop runs to the iteration cap and degrades gracefully.
+func TestWatchdogBlockDoesNotTripErrorAbort(t *testing.T) {
+	// mockProvider with 5 edit_file tool-call turns + 1 final text turn.
+	// The watchdog blocks every edit_file call, so without the fix the
+	// 3-strike consecutive-error abort would fire on turn 3.
+	scripts := make([][]llm.Block, 6)
+	for i := 0; i < 5; i++ {
+		scripts[i] = []llm.Block{{
+			Type:      llm.BlockToolUse,
+			ToolUseID: fmt.Sprintf("u%d", i+1),
+			ToolName:  "edit_file",
+			ToolInput: json.RawMessage(`{}`),
+		}}
+	}
+	scripts[5] = []llm.Block{{Type: llm.BlockText, Text: "gave up"}}
+	blockProv := &mockProvider{scripts: scripts, caps: llm.Capabilities{SupportsTools: true}}
+
+	tool := &fakeWTool{}
+	reg := agenttools.NewRegistry()
+	reg.MustRegister(tool)
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+
+	_, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider:    blockProv,
+		Registry:    reg,
+		Permissions: perms,
+		UserInput:   "do it",
+		PermissionRequester: func(_ context.Context, _, _ string, _ json.RawMessage, _ llm.Permission, _ bool) (bool, error) {
+			return true, nil
+		},
+		WatchdogGate: func(_ context.Context, _ string, _ json.RawMessage, _ []llm.Message) WatchdogDecision {
+			return WatchdogDecision{Action: "block", Protocol: "debug-loop", Challenge: "blocked"}
+		},
+		MaxIterations: 5,
+	})
+	if err != nil && strings.Contains(err.Error(), "3 consecutive iterations of tool errors") {
+		t.Fatalf("watchdog blocks must not trip the consecutive-error abort, got: %v", err)
+	}
+	if tool.executed {
+		t.Fatal("blocked tool must not have executed")
 	}
 }
 

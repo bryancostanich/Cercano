@@ -134,7 +134,13 @@ func main() {
 
 	// 64 MiB comfortably fits multiple 20 MiB images (the per-image client cap).
 	const maxGRPCMessageBytes = 64 << 20
-	s := grpc.NewServer(grpc.MaxRecvMsgSize(maxGRPCMessageBytes))
+	s := grpc.NewServer(
+		grpc.MaxRecvMsgSize(maxGRPCMessageBytes),
+		// Recover handler panics so one bad RPC returns codes.Internal instead of
+		// crashing the singleton agent and dropping every client's stream.
+		grpc.ChainUnaryInterceptor(server.RecoveryUnaryInterceptor()),
+		grpc.ChainStreamInterceptor(server.RecoveryStreamInterceptor()),
+	)
 	srv := server.NewServer(orchestrator, localProvider, smartRouter, coordinator, cloudFactory, registry)
 	srv.SetRuntimeManager(runtimeManager)
 	srv.SetConfigPersistence(config.DefaultPath(), cfg)

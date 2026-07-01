@@ -708,12 +708,14 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		// populates Binary + DefaultModel from the environment (PATH lookup +
 		// GGUF scan) instead of silently landing a swap that fails on the next
 		// inference call. The swap itself proceeds either way — a failed
-		// detection just means SetEngine will be missing prerequisites the
-		// CLI can then prompt to fix (chunk 1c will emit an event for that).
-		var detectErr error
+		// detection lands as a LocalRuntimeStatusChanged{ok=false} event so
+		// the CLI can offer the install/model-picker flow.
+		var detectErr *llamaserver.DetectError
 		if req.LocalRuntime == "llama_server" {
 			if err := llamaserver.Detect(ctx, &s.currentConfig.LlamaServer); err != nil {
-				detectErr = err
+				if de, ok := err.(*llamaserver.DetectError); ok {
+					detectErr = de
+				}
 				fmt.Printf("UpdateConfig: llama-server detection: %v\n", err)
 			} else {
 				fmt.Printf("UpdateConfig: llama-server auto-configured — binary=%s default_model=%s\n",
@@ -730,7 +732,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		s.localProvider.SetEngine(eng, model)
 		changes = append(changes, fmt.Sprintf("local_runtime=%s", req.LocalRuntime))
 		fmt.Printf("UpdateConfig: Local runtime set to %s\n", req.LocalRuntime)
-		_ = detectErr // chunk 1c: emit LocalRuntimeStatusChanged event
+		s.broadcastLocalRuntimeStatus(buildLocalRuntimeStatus(req.LocalRuntime, s.currentConfig, detectErr))
 	}
 
 	if req.LocusMode != "" {

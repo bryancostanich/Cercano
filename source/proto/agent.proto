@@ -610,6 +610,7 @@ message ClientEvent {
     PermissionModeChanged permission_mode_changed = 1;
     ConfigChanged config_changed = 2;
     MeridianStatusChanged meridian_status_changed = 3;
+    LocalRuntimeStatusChanged local_runtime_status_changed = 4;
   }
 }
 
@@ -651,6 +652,32 @@ message MeridianStatus {
 
 // MeridianStatusChanged is broadcast on every Meridian state transition.
 message MeridianStatusChanged { MeridianStatus status = 1; }
+
+// LocalRuntimeStatus is the live state of the active local inference runtime
+// (ollama or llama_server). Emitted after a runtime swap (config edit or
+// UpdateConfig RPC) — clients render a status chip and drive the recovery
+// modal from this.
+//
+// runtime values: "ollama" | "llama_server".
+// missing values (when ok=false): "binary" | "model". Empty when ok=true.
+//   "binary" — the runtime executable is not on PATH / not at Binary path.
+//              CLI should offer the install flow (InstallLocalRuntime RPC).
+//   "model"  — the runtime is available but no usable model is configured.
+//              CLI should surface a model-picker / download flow.
+message LocalRuntimeStatus {
+  bool ok = 1;
+  string runtime = 2;
+  string missing = 3;
+  string message = 4;
+  string suggested_command = 5;
+  string binary_path = 6;
+  string default_model = 7;
+}
+
+// LocalRuntimeStatusChanged is broadcast whenever the local runtime state
+// changes (post-swap detection, install completes, etc.). Clients update
+// their status chip + modal from this — no fetch, no poll.
+message LocalRuntimeStatusChanged { LocalRuntimeStatus status = 1; }
 
 // Allow/Deny pair the asynchronous PermissionRequired stream event with a
 // client reply. tool_use_id is the same id the event carried.

@@ -18,6 +18,8 @@ const (
 	LoopToolExecStart      LoopEventKind = "tool_exec_start"
 	LoopToolExecComplete   LoopEventKind = "tool_exec_complete"
 	LoopPermissionRequired LoopEventKind = "permission_required"
+	LoopWatchdogChallenge  LoopEventKind = "watchdog_challenge"
+	LoopWatchdogEscalate   LoopEventKind = "watchdog_escalate"
 )
 
 type LoopEvent struct {
@@ -48,6 +50,10 @@ type ToolLoopInput struct {
 
 	// EventSink receives lifecycle events as the loop runs. Nil-safe.
 	EventSink func(ev LoopEvent)
+
+	// WatchdogGate, when set, is a protocol-supervision gate consulted before
+	// each W/X tool call, independent of permission mode. nil = disabled.
+	WatchdogGate WatchdogGate
 
 	// OnTextDelta, when set, receives assistant text deltas as they stream from
 	// the provider, so the server can forward them to the client for live
@@ -266,6 +272,55 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		results = append(results, rResults...)
 
 		for _, pc := range wxCalls {
+			watchdogApproved := false
+			if in.WatchdogGate != nil {
+				wd := in.WatchdogGate(ctx, pc.block.ToolName, pc.block.ToolInput, hist)
+				switch wd.Action {
+				case "challenge":
+					emit(LoopEvent{Kind: LoopWatchdogChallenge, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Tier: string(pc.tier), Detail: wd.Protocol, Summary: wd.Challenge})
+					results = append(results, llm.Block{
+						Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID,
+						Content: "⚡ watchdog (" + wd.Protocol + "): " + wd.Challenge + " Either follow the protocol first, or call `justify` with a reason to override.",
+						IsError: false,
+					})
+					continue
+				case "block":
+					emit(LoopEvent{Kind: LoopWatchdogChallenge, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Tier: string(pc.tier), Detail: wd.Protocol, Summary: wd.Challenge})
+					results = append(results, llm.Block{
+						Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID,
+						Content: "⚡ watchdog (" + wd.Protocol + "): " + wd.Challenge + " Blocked — follow the protocol first (no override available).",
+						IsError: true,
+					})
+					continue
+				case "escalate":
+					emit(LoopEvent{Kind: LoopWatchdogEscalate, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Tier: string(pc.tier), Detail: wd.Protocol, Summary: wd.Challenge})
+					if in.PermissionRequester == nil {
+						results = append(results, llm.Block{
+							Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID,
+							Content: "⚡ watchdog escalation (" + wd.Protocol + "): no reviewer available — action not executed.",
+							IsError: true,
+						})
+						continue
+					}
+					allow, err := in.PermissionRequester(ctx, pc.block.ToolUseID, pc.block.ToolName, pc.block.ToolInput, pc.tier, agenttools.IsDestructive(pc.tool))
+					if err != nil {
+						return ToolLoopResult{}, err
+					}
+					if !allow {
+						results = append(results, llm.Block{
+							Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID,
+							Content: "watchdog escalation upheld by the user — action not executed.",
+							IsError: true,
+						})
+						continue
+					}
+					// Human explicitly approved via the escalation prompt; skip the
+					// normal permission gate below to avoid a second prompt.
+					watchdogApproved = true
+				case "allow", "":
+					// fall through to the normal permission gate + execute
+				}
+			}
 			// Read the permission mode per call (not once per turn) so a
 			// mid-turn /strict|/permissive|/bypass change takes effect
 			// immediately — consistent with the per-call allowlist read below
@@ -276,7 +331,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			}
 			isMCP := agenttools.OriginOf(pc.tool) == agenttools.OriginMCP
 			allowlisted := in.Permissions != nil && in.Permissions.IsMCPAllowed(pc.block.ToolName)
-			if GateDecisionForMCP(mode, pc.tier, isMCP, allowlisted) {
+			if !watchdogApproved && GateDecisionForMCP(mode, pc.tier, isMCP, allowlisted) {
 				if in.PermissionRequester == nil {
 					results = append(results, llm.Block{
 						Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID,

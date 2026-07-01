@@ -1056,11 +1056,32 @@ func (s *Server) GetContextUsage(ctx context.Context, req *proto.GetContextUsage
 		if turns, err := store.GetTurns(ctx, convID); err == nil {
 			raw = estimateRawTokens(turns)
 			state, _ := store.GetCompaction(ctx, convID)
-			if state.ConsolidatedJSON == "" {
-				sent = raw // no compaction → sent is the full history
-			} else {
+			s.cfgMu.RLock()
+			elide := s.currentConfig.Compaction.ElideToolResults
+			s.cfgMu.RUnlock()
+			switch {
+			case state.ConsolidatedJSON != "":
+				// Compaction has run. Mirror assembleHistory: summarized view
+				// plus optional post-elision.
 				view, _ := compactor.BuildSendView(turns, state)
+				if elide {
+					view, _ = compaction.ElideSupersededToolResults(view)
+				}
 				sent = compaction.TotalTokens(contextmeter.Default(), view)
+			case elide:
+				// No compaction but elision is on. The meter must reflect the
+				// elided view, not the raw history — otherwise a user turns on
+				// the toggle and sees no change even though the model receives
+				// less. Cost is one full-history tokenize per poll; acceptable
+				// because the elided view is what the request path is already
+				// building on every turn.
+				view := agent.BuildLLMHistory(turns)
+				view, _ = compaction.ElideSupersededToolResults(view)
+				sent = compaction.TotalTokens(contextmeter.Default(), view)
+			default:
+				// Fast path: no compaction, no elision. Cheap len/4 estimate
+				// is intentional — the footer polls this frequently.
+				sent = raw
 			}
 		}
 	}

@@ -350,6 +350,11 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	orchestrator.SetDispatchEngine(coprocEngine)
 	srv.SetDispatchEngine(coprocEngine)
 
+	// Build the protocol-supervision watchdog from config (default-OFF). Must run
+	// after SetDispatchEngine — the watchdog's fast-model OneShot lane routes
+	// through the dispatch engine.
+	srv.InitWatchdog()
+
 	// Build the capability registry with live Services (providers, config, and
 	// context loader all set above) and wire it as the server's tool registry.
 	// Must run after the provider setters so Services carries real values.

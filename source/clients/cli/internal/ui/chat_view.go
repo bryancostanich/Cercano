@@ -353,6 +353,20 @@ func (c *chatView) Apply(msg tea.Msg) tea.Cmd {
 			e.Streaming = false
 		}
 		c.AppendEntry(&Entry{Role: RoleSystem, Content: "stream error: " + m.err.Error()})
+
+	case watchdogEventMsg:
+		if m.kind == "echo" {
+			// Dim single-line: "<thread>: <summary>"
+			c.AppendEntry(&Entry{Role: RoleWatchdog, Content: m.thread + ": " + m.summary})
+		} else {
+			// challenge or block: header line + body line.
+			header := "⚡ watchdog · " + m.protocol
+			if m.kind == "block" {
+				header += " (blocked — no override)"
+			}
+			c.AppendEntry(&Entry{Role: RoleWatchdog, Content: header})
+			c.AppendEntry(&Entry{Role: RoleWatchdog, Content: m.summary})
+		}
 	}
 	return nil
 }
@@ -814,6 +828,18 @@ func (c *chatView) renderEntry(e *Entry, idx int) string {
 
 	case RoleDivider:
 		return indentBlock(pad, renderDivider(e.Content, textW, c.styles))
+
+	case RoleWatchdog:
+		// challenge/block header (starts with ⚡): render with Warn style so it
+		// stands out. echo lines and body text render with Muted (dim).
+		var styled string
+		if strings.HasPrefix(e.Content, "⚡") {
+			styled = c.styles.Warn.Render(e.Content)
+		} else {
+			styled = c.styles.Muted.Render(e.Content)
+		}
+		wrapped := lipgloss.NewStyle().Width(textW).Render(styled)
+		return indentBlock(pad, wrapped)
 	}
 	return e.Content
 }

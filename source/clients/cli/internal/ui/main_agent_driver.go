@@ -93,6 +93,13 @@ func streamMsgToEvent(sm agentclient.StreamMsg) tea.Msg {
 			tier:        sm.Tier,
 			destructive: sm.Destructive,
 		}
+	case agentclient.TypeWatchdog:
+		return watchdogEventMsg{
+			kind:     sm.WatchdogKind,
+			protocol: sm.Protocol,
+			summary:  sm.Summary,
+			thread:   sm.Thread,
+		}
 	case agentclient.TypeError:
 		return chatErrorMsg{err: sm.Err}
 	}

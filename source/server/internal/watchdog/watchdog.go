@@ -48,6 +48,21 @@ type Watchdog struct {
 
 	mu    sync.Mutex
 	convs map[string]*convState
+
+	echo func(thread, text string) // optional; nil means silent
+}
+
+// SetEcho registers a callback that is called on watchdog interventions and
+// justify overrides. thread is "watchdog" or "main". Safe to call on a live
+// Watchdog; replaces any previously registered callback.
+func (w *Watchdog) SetEcho(fn func(thread, text string)) { w.echo = fn }
+
+// emitEcho calls the echo callback if one is registered. Never called while
+// holding w.mu — callers must release the mutex before calling emitEcho.
+func (w *Watchdog) emitEcho(thread, text string) {
+	if w.echo != nil {
+		w.echo(thread, text)
+	}
 }
 
 // New creates a ready Watchdog.
@@ -128,11 +143,14 @@ func (w *Watchdog) Gate(ctx context.Context, conversationID string, a Action) De
 	w.mu.Unlock()
 
 	if escalate {
+		w.emitEcho("watchdog", fmt.Sprintf("[escalate] %s: %s", violation.Protocol, violation.Challenge))
 		return Decision{Action: "escalate", Protocol: violation.Protocol, Challenge: violation.Challenge}
 	}
 	if isStrict {
+		w.emitEcho("watchdog", fmt.Sprintf("[block] %s: %s", violation.Protocol, violation.Challenge))
 		return Decision{Action: "block", Protocol: violation.Protocol, Challenge: violation.Challenge}
 	}
+	w.emitEcho("watchdog", fmt.Sprintf("[challenge] %s: %s", violation.Protocol, violation.Challenge))
 	return Decision{Action: "challenge", Protocol: violation.Protocol, Challenge: violation.Challenge}
 }
 

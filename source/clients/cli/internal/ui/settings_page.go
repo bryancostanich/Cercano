@@ -97,6 +97,17 @@ func (sp *settingsPage) snapshotSections() []form.Section {
 		builtin := sp.themes.IsBuiltin(sp.working.Name)
 		secs = append(secs, buildThemeSections(sp.working, sp.themes.Names(), builtin, sp.dirty)...)
 	}
+	// Development Tools is pinned to the very bottom of the settings page —
+	// below every user-facing section — so it never intrudes on the primary
+	// configuration flow. Inside, related toggles cluster into Groups.
+	secs = append(secs, form.Section{
+		Title: "Development Tools",
+		Groups: []form.Group{
+			{Title: "Context Management", Fields: []form.Field{
+				form.NewToggle("elide-tool-results", "elide-tool-results", sp.cfg.ElideToolResults),
+			}},
+		},
+	})
 	return secs
 }
 

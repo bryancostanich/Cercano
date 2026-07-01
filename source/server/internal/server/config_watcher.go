@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strconv"
 
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
@@ -131,6 +132,19 @@ func (s *Server) reloadConfigFromDisk(ctx context.Context) {
 			req.LossyToolElision = "true"
 		} else {
 			req.LossyToolElision = "false"
+		}
+	}
+	if newCfg.Compaction.Retention.RawRetentionDays != snap.Compaction.Retention.RawRetentionDays {
+		req.RawRetentionDays = strconv.Itoa(newCfg.Compaction.Retention.RawRetentionDays)
+	}
+	if newCfg.Compaction.Retention.CompactedRetentionDays != snap.Compaction.Retention.CompactedRetentionDays {
+		req.CompactedRetentionDays = strconv.Itoa(newCfg.Compaction.Retention.CompactedRetentionDays)
+	}
+	if newCfg.Compaction.Retention.KeepForever != snap.Compaction.Retention.KeepForever {
+		if newCfg.Compaction.Retention.KeepForever {
+			req.KeepForever = "true"
+		} else {
+			req.KeepForever = "false"
 		}
 	}
 

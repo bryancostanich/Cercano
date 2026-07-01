@@ -201,8 +201,9 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		compGen := compactiongen.New(persistentStore, compactSummarize, compCfg, contextmeter.Default(), 10*time.Second)
 		agentOpts = append(agentOpts, agent.WithCompactionScheduler(compGen))
 	}
+	var sweeper *retention.Sweeper
 	if persistentStore != nil {
-		sweeper := retention.New(persistentStore, retention.Config{
+		sweeper = retention.New(persistentStore, retention.Config{
 			RawRetentionDays:       cfg.Compaction.Retention.RawRetentionDays,
 			CompactedRetentionDays: cfg.Compaction.Retention.CompactedRetentionDays,
 			KeepForever:            cfg.Compaction.Retention.KeepForever,
@@ -227,6 +228,9 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	)
 	srv := server.NewServer(orchestrator, localProvider, lazyRouter, coordinator, cloudFactory, registry)
 	srv.SetRuntimeManager(runtimeManager)
+	if sweeper != nil {
+		srv.SetRetentionSweeper(sweeper)
+	}
 	srv.SetContextLoader(ctxLoader)
 	srv.SetConfigPersistence(config.DefaultPath(), cfg)
 	orchestrator.SetLocusModeGetter(srv.LocusMode)

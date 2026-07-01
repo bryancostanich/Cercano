@@ -224,6 +224,11 @@ message UpdateConfigRequest {
   // to match the sparse-patch convention of the other fields (empty = unchanged).
   string elide_tool_results = 11; // Mechanical superseded-tool-result dedup on assemble.
   string lossy_tool_elision = 12; // Recency-window: keep last N tool_results, stub older.
+  // Retention (Development Tools). Strings for the sparse-patch convention;
+  // days must parse as non-negative decimal integers.
+  string raw_retention_days       = 13;
+  string compacted_retention_days = 14;
+  string keep_forever             = 15;
 }
 
 // Runtime configuration update response.
@@ -584,6 +589,11 @@ message GetConfigResponse {
   // always knows the current value.
   bool elide_tool_results = 14;
   bool lossy_tool_elision = 15;
+  // Retention (Development Tools). Integers reported directly; keep_forever
+  // gates any actual aging.
+  int32 raw_retention_days       = 16;
+  int32 compacted_retention_days = 17;
+  bool  keep_forever             = 18;
 }
 
 message ListSkillsRequest {}

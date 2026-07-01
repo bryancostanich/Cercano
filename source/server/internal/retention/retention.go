@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"cercano/source/server/internal/conversation"
@@ -27,9 +28,12 @@ type Store interface {
 	CollapseConversation(ctx context.Context, conversationID string) error
 }
 
-// Sweeper applies the retention policy on a schedule.
+// Sweeper applies the retention policy on a schedule. cfg is guarded by mu so
+// SetConfig can hot-reload it from an UpdateConfig call without racing an
+// in-flight Sweep.
 type Sweeper struct {
 	store    Store
+	mu       sync.Mutex
 	cfg      Config
 	interval time.Duration
 }
@@ -38,22 +42,34 @@ func New(store Store, cfg Config, interval time.Duration) *Sweeper {
 	return &Sweeper{store: store, cfg: cfg, interval: interval}
 }
 
+// SetConfig atomically replaces the sweeper's retention config. Called by the
+// server's UpdateConfig handler when any retention field changes so a /config
+// or settings-page edit takes effect on the next sweep, not the next restart.
+func (s *Sweeper) SetConfig(cfg Config) {
+	s.mu.Lock()
+	s.cfg = cfg
+	s.mu.Unlock()
+}
+
 // Sweep applies the policy once, as of now. Pure w.r.t. time (now injected).
 // Per-conversation errors are swallowed so one bad row never aborts the sweep.
 func (s *Sweeper) Sweep(ctx context.Context, now time.Time) {
+	s.mu.Lock()
+	cfg := s.cfg
+	s.mu.Unlock()
 	// Safety clamp: keep-forever, or any non-positive horizon (a misconfig — e.g.
 	// a config that zeroed the retention block), disables ALL aging. A 0-day
 	// horizon would otherwise collapse/prune everything immediately, so the safe
 	// failure mode is to do nothing.
-	if s.cfg.KeepForever || s.cfg.RawRetentionDays <= 0 || s.cfg.CompactedRetentionDays <= 0 {
+	if cfg.KeepForever || cfg.RawRetentionDays <= 0 || cfg.CompactedRetentionDays <= 0 {
 		return
 	}
 	infos, err := s.store.List(ctx, "", 0)
 	if err != nil {
 		return
 	}
-	collapseBefore := now.Add(-time.Duration(s.cfg.CompactedRetentionDays) * 24 * time.Hour)
-	rawCutoff := now.Add(-time.Duration(s.cfg.RawRetentionDays) * 24 * time.Hour).Unix()
+	collapseBefore := now.Add(-time.Duration(cfg.CompactedRetentionDays) * 24 * time.Hour)
+	rawCutoff := now.Add(-time.Duration(cfg.RawRetentionDays) * 24 * time.Hour).Unix()
 	var collapsed, prunedBodies int
 	for _, info := range infos {
 		if info.LastTurnAt.Before(collapseBefore) {

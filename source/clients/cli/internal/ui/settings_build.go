@@ -88,6 +88,12 @@ func classifyCommit(key, value string) commitAction {
 		u.ElideToolResults = value
 	case "lossy-tool-elision":
 		u.LossyToolElision = value
+	case "raw-retention-days":
+		u.RawRetentionDays = value
+	case "compacted-retention-days":
+		u.CompactedRetentionDays = value
+	case "keep-forever":
+		u.KeepForever = value
 	case "permission-mode":
 		return commitAction{kind: commitPermission, value: value}
 	case "accent-color":

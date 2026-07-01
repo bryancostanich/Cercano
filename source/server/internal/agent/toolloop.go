@@ -20,6 +20,7 @@ const (
 	LoopPermissionRequired LoopEventKind = "permission_required"
 	LoopWatchdogChallenge  LoopEventKind = "watchdog_challenge"
 	LoopWatchdogEscalate   LoopEventKind = "watchdog_escalate"
+	LoopWatchdogEcho       LoopEventKind = "watchdog_echo"
 )
 
 type LoopEvent struct {

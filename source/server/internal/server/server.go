@@ -38,6 +38,7 @@ import (
 	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/usage"
+	"cercano/source/server/internal/watchdog"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 )
@@ -83,7 +84,8 @@ type Server struct {
 	runtimeManager      localruntime.Manager
 	contextLoader       *projectctx.Loader
 	dispatchEngine      *dispatch.Engine
-	usageSink           func(usage.Usage) // wraps the main-loop provider for token recording
+	watchdog            *watchdog.Watchdog // protocol-supervision gate; nil = disabled (default)
+	usageSink           func(usage.Usage)  // wraps the main-loop provider for token recording
 
 	events        *eventHub    // server->client push fan-out (SubscribeEvents)
 	permBcastMu   sync.Mutex   // guards lastBcastMode
@@ -1876,7 +1878,39 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		})
 	}
 
-	result, loopErr := s.runMainLoop(ctx, req, provider, isCloud, sink, requester, convHistory, onTextDelta, onTurn)
+	// Watchdog wiring (default-OFF: s.watchdog == nil ⇒ unchanged behavior).
+	// Per-request gate bound to this conversation + a per-request registry that
+	// augments the base tools with the conversation-scoped justify tool.
+	gateRegistry := s.toolRegistry
+	var wdGate agent.WatchdogGate
+	if s.watchdog != nil {
+		wd := s.watchdog
+		wdGate = func(ctx context.Context, toolName string, args json.RawMessage, transcript []llm.Message) agent.WatchdogDecision {
+			d := wd.Gate(ctx, convID, watchdog.Action{Kind: "tool_call", ToolName: toolName, ToolArgs: args, Transcript: transcript})
+			return agent.WatchdogDecision{Action: d.Action, Protocol: d.Protocol, Challenge: d.Challenge}
+		}
+		reg := agenttools.NewRegistry()
+		for _, t := range s.toolRegistry.All() {
+			_ = reg.Register(t)
+		}
+		_ = reg.Register(wd.JustifyTool(convID))
+		gateRegistry = reg
+
+		// Echo forwarding is per-turn: the interactive server processes one turn
+		// at a time (turns don't overlap), so setting echo on the shared watchdog
+		// here routes its interventions to THIS turn's sink safely. Full
+		// multi-conversation echo isolation is a follow-on.
+		s.cfgMu.RLock()
+		echoOn := s.currentConfig.Watchdog.Echo
+		s.cfgMu.RUnlock()
+		if echoOn {
+			s.watchdog.SetEcho(func(thread, text string) {
+				sink(agent.LoopEvent{Kind: agent.LoopWatchdogEcho, ToolName: thread, Summary: text})
+			})
+		}
+	}
+
+	result, loopErr := s.runMainLoop(ctx, req, provider, isCloud, sink, requester, convHistory, onTextDelta, onTurn, wdGate, gateRegistry)
 	if loopErr != nil {
 		s.cfgMu.RLock()
 		locusMode := s.currentConfig.LocusMode
@@ -1903,7 +1937,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 			})
 			provider = fbProv
 			isCloud = fbCloud
-			result, loopErr = s.runMainLoop(ctx, req, fbProv, fbCloud, sink, requester, convHistory, onTextDelta, onTurn)
+			result, loopErr = s.runMainLoop(ctx, req, fbProv, fbCloud, sink, requester, convHistory, onTextDelta, onTurn, wdGate, gateRegistry)
 		}
 		if loopErr != nil {
 			return fmt.Errorf("tool loop error: %w", loopErr)
@@ -1961,10 +1995,12 @@ func (s *Server) runMainLoop(
 	convHistory []llm.Message,
 	onTextDelta func(string),
 	onTurn func(m llm.Message),
+	watchdogGate agent.WatchdogGate,
+	registry *agenttools.Registry,
 ) (agent.ToolLoopResult, error) {
 	return agent.RunToolLoop(ctx, agent.ToolLoopInput{
 		Provider:            provider,
-		Registry:            s.toolRegistry,
+		Registry:            registry,
 		Permissions:         s.permStore,
 		UserInput:           req.GetInput(),
 		Images:              mapInlineImages(req.GetImages()),
@@ -1975,6 +2011,7 @@ func (s *Server) runMainLoop(
 		ConvHistory:         convHistory,
 		OnTextDelta:         onTextDelta,
 		OnTurnComplete:      onTurn,
+		WatchdogGate:        watchdogGate,
 	})
 }
 

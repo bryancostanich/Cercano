@@ -148,17 +148,19 @@ func (c *Client) Close() error {
 
 // Config is the current runtime config reported by the agent.
 type Config struct {
-	OllamaURL      string
-	LocalRuntime   string
-	LocalModel     string
-	EmbeddingModel string
-	CloudProvider  string
-	CloudModel     string
-	CloudBaseURL   string
-	CloudAPIKeySet bool
-	CloudState     string // "ok" | "absent" | "error"
-	Port           string
-	LocusMode      string
+	OllamaURL       string
+	LocalRuntime    string
+	LocalModel      string
+	EmbeddingModel  string
+	CloudProvider   string
+	CloudModel      string
+	CloudBaseURL    string
+	CloudAPIKeySet  bool
+	CloudState      string // "ok" | "absent" | "error"
+	Port            string
+	LocusMode       string
+	WatchdogEnabled bool
+	WatchdogEcho    bool
 }
 
 // GetConfig fetches the agent's current runtime config.
@@ -168,17 +170,19 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 		return nil, err
 	}
 	return &Config{
-		OllamaURL:      resp.GetOllamaUrl(),
-		LocalRuntime:   resp.GetLocalRuntime(),
-		LocalModel:     resp.GetLocalModel(),
-		EmbeddingModel: resp.GetEmbeddingModel(),
-		CloudProvider:  resp.GetCloudProvider(),
-		CloudModel:     resp.GetCloudModel(),
-		CloudBaseURL:   resp.GetCloudBaseUrl(),
-		CloudAPIKeySet: resp.GetCloudApiKeySet(),
-		CloudState:     resp.GetCloudState(),
-		Port:           resp.GetPort(),
-		LocusMode:      resp.GetLocusMode(),
+		OllamaURL:       resp.GetOllamaUrl(),
+		LocalRuntime:    resp.GetLocalRuntime(),
+		LocalModel:      resp.GetLocalModel(),
+		EmbeddingModel:  resp.GetEmbeddingModel(),
+		CloudProvider:   resp.GetCloudProvider(),
+		CloudModel:      resp.GetCloudModel(),
+		CloudBaseURL:    resp.GetCloudBaseUrl(),
+		CloudAPIKeySet:  resp.GetCloudApiKeySet(),
+		CloudState:      resp.GetCloudState(),
+		Port:            resp.GetPort(),
+		LocusMode:       resp.GetLocusMode(),
+		WatchdogEnabled: resp.GetWatchdogEnabled(),
+		WatchdogEcho:    resp.GetWatchdogEcho(),
 	}, nil
 }
 
@@ -186,14 +190,16 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 // are applied. Use SetCloudAPIKey to explicitly send an empty key when the
 // proxy handles auth.
 type ConfigUpdate struct {
-	OllamaURL     string
-	LocalRuntime  string
-	LocalModel    string
-	CloudProvider string
-	CloudModel    string
-	CloudAPIKey   string
-	CloudBaseURL  string
-	LocusMode     string
+	OllamaURL       string
+	LocalRuntime    string
+	LocalModel      string
+	CloudProvider   string
+	CloudModel      string
+	CloudAPIKey     string
+	CloudBaseURL    string
+	LocusMode       string
+	WatchdogEnabled string // "" = unchanged, "true"/"false"
+	WatchdogEcho    string // "" = unchanged, "true"/"false"
 }
 
 // RuntimeStatus is the provider-neutral model/runtime dashboard snapshot.
@@ -787,14 +793,16 @@ func meridianStatusFromProto(p *proto.MeridianStatus) *MeridianStatus {
 // summary line (e.g. "updated: [local_model=qwen3-coder, cloud=anthropic/...]").
 func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, error) {
 	resp, err := c.agent.UpdateConfig(ctx, &proto.UpdateConfigRequest{
-		OllamaUrl:     u.OllamaURL,
-		LocalRuntime:  u.LocalRuntime,
-		LocalModel:    u.LocalModel,
-		CloudProvider: u.CloudProvider,
-		CloudModel:    u.CloudModel,
-		CloudApiKey:   u.CloudAPIKey,
-		CloudBaseUrl:  u.CloudBaseURL,
-		LocusMode:     u.LocusMode,
+		OllamaUrl:       u.OllamaURL,
+		LocalRuntime:    u.LocalRuntime,
+		LocalModel:      u.LocalModel,
+		CloudProvider:   u.CloudProvider,
+		CloudModel:      u.CloudModel,
+		CloudApiKey:     u.CloudAPIKey,
+		CloudBaseUrl:    u.CloudBaseURL,
+		LocusMode:       u.LocusMode,
+		WatchdogEnabled: u.WatchdogEnabled,
+		WatchdogEcho:    u.WatchdogEcho,
 	})
 	if err != nil {
 		return "", err

@@ -5,6 +5,7 @@ import (
 
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/watchdog"
+	"cercano/source/server/pkg/config"
 )
 
 // buildWatchdog constructs the protocol-supervision watchdog from the current
@@ -15,7 +16,13 @@ func (s *Server) buildWatchdog() *watchdog.Watchdog {
 	s.cfgMu.RLock()
 	wc := s.currentConfig.Watchdog
 	s.cfgMu.RUnlock()
+	return s.buildWatchdogFrom(wc)
+}
 
+// buildWatchdogFrom constructs the watchdog from an already-read config. It
+// takes NO lock, so a caller already holding s.cfgMu (e.g. UpdateConfig) can
+// rebuild the watchdog without deadlocking.
+func (s *Server) buildWatchdogFrom(wc config.WatchdogConfig) *watchdog.Watchdog {
 	if !wc.Enabled {
 		return nil
 	}

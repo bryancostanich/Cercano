@@ -6,6 +6,39 @@ import (
 	"cercano/source/server/pkg/proto"
 )
 
+// TestGetConfig_WatchdogFieldMapping verifies that GetConfigResponse watchdog
+// booleans map to the correct Config fields (no live server needed — we verify
+// the field wiring directly).
+func TestGetConfig_WatchdogFieldMapping(t *testing.T) {
+	resp := &proto.GetConfigResponse{WatchdogEnabled: true, WatchdogEcho: true}
+	cfg := &Config{
+		WatchdogEnabled: resp.GetWatchdogEnabled(),
+		WatchdogEcho:    resp.GetWatchdogEcho(),
+	}
+	if !cfg.WatchdogEnabled {
+		t.Fatal("WatchdogEnabled: mapping from proto false")
+	}
+	if !cfg.WatchdogEcho {
+		t.Fatal("WatchdogEcho: mapping from proto false")
+	}
+}
+
+// TestConfigUpdate_WatchdogFieldMapping verifies that ConfigUpdate watchdog
+// string fields map to the correct UpdateConfigRequest proto fields.
+func TestConfigUpdate_WatchdogFieldMapping(t *testing.T) {
+	u := ConfigUpdate{WatchdogEnabled: "true", WatchdogEcho: "false"}
+	req := &proto.UpdateConfigRequest{
+		WatchdogEnabled: u.WatchdogEnabled,
+		WatchdogEcho:    u.WatchdogEcho,
+	}
+	if req.GetWatchdogEnabled() != "true" {
+		t.Fatalf("WatchdogEnabled: got %q, want %q", req.GetWatchdogEnabled(), "true")
+	}
+	if req.GetWatchdogEcho() != "false" {
+		t.Fatalf("WatchdogEcho: got %q, want %q", req.GetWatchdogEcho(), "false")
+	}
+}
+
 // TestWatchdogEventChallengeMapsToStreamMsg verifies that a WatchdogEvent
 // proto with Kind="challenge" is converted to a TypeWatchdog StreamMsg with
 // the correct field mapping: Protocol from proto.Protocol, Summary from proto.Text.

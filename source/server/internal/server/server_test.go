@@ -10,10 +10,12 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/localruntime"
+	"cercano/source/server/internal/locus"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 
@@ -385,6 +387,63 @@ func TestUpdateConfig_LocalRuntime(t *testing.T) {
 	}
 	if cfg.GetLocalRuntime() != "llama_server" {
 		t.Fatalf("local runtime not persisted in server state: %q", cfg.GetLocalRuntime())
+	}
+}
+
+func TestUpdateConfig_WatchdogEnable(t *testing.T) {
+	eng := dispatch.NewEngine(
+		func() dispatch.Providers { return dispatch.Providers{} },
+		func() locus.Mode { return locus.LocalOnly },
+		nil,
+	)
+	srv := NewServer(nil, nil, nil, nil, nil, engine.NewEngineRegistry())
+	srv.SetDispatchEngine(eng)
+	srv.SetConfigPersistence("", config.Config{})
+
+	// enabling builds a live watchdog
+	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{WatchdogEnabled: "true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Success {
+		t.Fatalf("expected success, got: %s", resp.Message)
+	}
+	if !srv.currentConfig.Watchdog.Enabled {
+		t.Fatal("Enabled not applied")
+	}
+	if srv.watchdog == nil {
+		t.Fatal("watchdog not rebuilt/active after enable")
+	}
+
+	// disabling tears it back down
+	if _, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{WatchdogEnabled: "false"}); err != nil {
+		t.Fatal(err)
+	}
+	if srv.currentConfig.Watchdog.Enabled {
+		t.Fatal("Enabled not cleared")
+	}
+	if srv.watchdog != nil {
+		t.Fatal("watchdog should be nil after disable")
+	}
+}
+
+func TestUpdateConfig_WatchdogEcho_and_GetConfig(t *testing.T) {
+	srv := NewServer(nil, nil, nil, nil, nil, engine.NewEngineRegistry())
+	srv.SetConfigPersistence("", config.Config{})
+
+	if _, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{WatchdogEcho: "true"}); err != nil {
+		t.Fatal(err)
+	}
+	if !srv.currentConfig.Watchdog.Echo {
+		t.Fatal("Echo not applied")
+	}
+
+	resp, err := srv.GetConfig(context.Background(), &proto.GetConfigRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.GetWatchdogEcho() {
+		t.Fatal("GetConfig did not report echo")
 	}
 }
 

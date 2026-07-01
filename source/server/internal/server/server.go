@@ -757,6 +757,20 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		fmt.Printf("UpdateConfig: elide_tool_results set to %s\n", v)
 	}
 
+	if req.LossyToolElision != "" {
+		v := strings.ToLower(strings.TrimSpace(req.LossyToolElision))
+		if v != "true" && v != "false" {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid lossy_tool_elision %q: expected \"true\" or \"false\"", req.LossyToolElision),
+			}, nil
+		}
+		s.currentConfig.Compaction.LossyToolElision = v == "true"
+		changes = append(changes, fmt.Sprintf("lossy_tool_elision=%s", v))
+		s.broadcastConfigChanged("lossy_tool_elision", v)
+		fmt.Printf("UpdateConfig: lossy_tool_elision set to %s\n", v)
+	}
+
 	// Cloud changes go through the active profile + rebuildCloud(). The
 	// profile is the single source of truth (see activeCloudModel); writing
 	// req.CloudModel anywhere else just creates the kind of split-state bug
@@ -1058,6 +1072,7 @@ func (s *Server) GetContextUsage(ctx context.Context, req *proto.GetContextUsage
 			state, _ := store.GetCompaction(ctx, convID)
 			s.cfgMu.RLock()
 			elide := s.currentConfig.Compaction.ElideToolResults
+			lossy := s.currentConfig.Compaction.LossyToolElision
 			s.cfgMu.RUnlock()
 			switch {
 			case state.ConsolidatedJSON != "":
@@ -1067,16 +1082,24 @@ func (s *Server) GetContextUsage(ctx context.Context, req *proto.GetContextUsage
 				if elide {
 					view, _ = compaction.ElideSupersededToolResults(view)
 				}
+				if lossy {
+					view, _ = compaction.KeepLastNToolResults(view, compaction.DefaultLossyElisionKeepLast)
+				}
 				sent = compaction.TotalTokens(contextmeter.Default(), view)
-			case elide:
-				// No compaction but elision is on. The meter must reflect the
-				// elided view, not the raw history — otherwise a user turns on
-				// the toggle and sees no change even though the model receives
-				// less. Cost is one full-history tokenize per poll; acceptable
-				// because the elided view is what the request path is already
-				// building on every turn.
+			case elide || lossy:
+				// No compaction but some elision is on. The meter must reflect
+				// the elided view, not the raw history — otherwise a user
+				// turns on a toggle and sees no change even though the model
+				// receives less. Cost is one full-history tokenize per poll;
+				// acceptable because the elided view is what the request path
+				// is already building on every turn.
 				view := agent.BuildLLMHistory(turns)
-				view, _ = compaction.ElideSupersededToolResults(view)
+				if elide {
+					view, _ = compaction.ElideSupersededToolResults(view)
+				}
+				if lossy {
+					view, _ = compaction.KeepLastNToolResults(view, compaction.DefaultLossyElisionKeepLast)
+				}
 				sent = compaction.TotalTokens(contextmeter.Default(), view)
 			default:
 				// Fast path: no compaction, no elision. Cheap len/4 estimate
@@ -1281,6 +1304,7 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 		WatchdogEnabled:  cfg.Watchdog.Enabled,
 		WatchdogEcho:     cfg.Watchdog.Echo,
 		ElideToolResults: cfg.Compaction.ElideToolResults,
+		LossyToolElision: cfg.Compaction.LossyToolElision,
 	}, nil
 }
 
@@ -2179,6 +2203,13 @@ func (s *Server) assembleHistory(ctx context.Context, store conversation.Store, 
 	// twice is idempotent.
 	if compactionCfg.ElideToolResults {
 		view, _ = compaction.ElideSupersededToolResults(view)
+	}
+	// Recency-window elision. Stubs older tool_result content down to a marker;
+	// keeps the last N intact. Applied after byte-identical dedup because the
+	// two are complementary — the identical-dedup catches literal duplicates
+	// among the kept N; the recency policy handles the long tail.
+	if compactionCfg.LossyToolElision {
+		view, _ = compaction.KeepLastNToolResults(view, compaction.DefaultLossyElisionKeepLast)
 	}
 	return view
 }

@@ -15,7 +15,7 @@ import (
 func RegisterConfig(r *Registry, c *agentclient.Client) {
 	r.Register(Command{
 		Name: "config",
-		Help: "View or update runtime config. Usage: /config [key value]. Keys: local-runtime, local-model, cloud-provider, cloud-model, cloud-api-key, cloud-base-url, ollama-url, elide-tool-results.",
+		Help: "View or update runtime config. Usage: /config [key value]. Keys: local-runtime, local-model, cloud-provider, cloud-model, cloud-api-key, cloud-base-url, ollama-url, elide-tool-results, lossy-tool-elision.",
 		Handler: func(args []string) Result {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -57,8 +57,10 @@ func RegisterConfig(r *Registry, c *agentclient.Client) {
 				update.CloudBaseURL = value
 			case "elide-tool-results", "elide_tool_results":
 				update.ElideToolResults = value
+			case "lossy-tool-elision", "lossy_tool_elision":
+				update.LossyToolElision = value
 			default:
-				return Result{Kind: ResultText, Text: "unknown config key /" + key + " (valid: local-runtime, local-model, ollama-url, cloud-provider, cloud-model, cloud-api-key, cloud-base-url, elide-tool-results)"}
+				return Result{Kind: ResultText, Text: "unknown config key /" + key + " (valid: local-runtime, local-model, ollama-url, cloud-provider, cloud-model, cloud-api-key, cloud-base-url, elide-tool-results, lossy-tool-elision)"}
 			}
 			msg, err := c.UpdateConfig(ctx, update)
 			if err != nil {
@@ -145,6 +147,12 @@ func formatConfig(cfg *agentclient.Config) string {
 	b.WriteString(orDash(cfg.Port))
 	b.WriteString("\n  elide-tool-results: ")
 	if cfg.ElideToolResults {
+		b.WriteString("on")
+	} else {
+		b.WriteString("off")
+	}
+	b.WriteString("\n  lossy-tool-elision: ")
+	if cfg.LossyToolElision {
 		b.WriteString("on")
 	} else {
 		b.WriteString("off")

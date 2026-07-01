@@ -105,6 +105,7 @@ func (sp *settingsPage) snapshotSections() []form.Section {
 		Groups: []form.Group{
 			{Title: "Context Management", Fields: []form.Field{
 				form.NewToggle("elide-tool-results", "elide-tool-results", sp.cfg.ElideToolResults),
+				form.NewToggle("lossy-tool-elision", "lossy-tool-elision", sp.cfg.LossyToolElision),
 			}},
 		},
 	})

@@ -223,6 +223,7 @@ message UpdateConfigRequest {
   // Compaction — Development Tools. String-encoded bool ("" | "true" | "false")
   // to match the sparse-patch convention of the other fields (empty = unchanged).
   string elide_tool_results = 11; // Mechanical superseded-tool-result dedup on assemble.
+  string lossy_tool_elision = 12; // Recency-window: keep last N tool_results, stub older.
 }
 
 // Runtime configuration update response.
@@ -579,9 +580,10 @@ message GetConfigResponse {
   string locus_mode = 11;
   bool watchdog_enabled = 12;
   bool watchdog_echo = 13;
-  // Compaction — Development Tools. Reported as a plain bool since the reader
+  // Compaction — Development Tools. Reported as plain bools since the reader
   // always knows the current value.
   bool elide_tool_results = 14;
+  bool lossy_tool_elision = 15;
 }
 
 message ListSkillsRequest {}

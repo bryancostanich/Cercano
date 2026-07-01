@@ -26,7 +26,7 @@ import (
 // adapter-specific handling. Empty string is treated as "direct".
 type CloudProfile struct {
 	Name       string `yaml:"name"`
-	Flavor     string `yaml:"flavor"` // messages | chat_completions | responses | bedrock
+	Flavor     string `yaml:"flavor"`            // messages | chat_completions | responses | bedrock
 	Backend    string `yaml:"backend,omitempty"` // chat_completions only: selects per-backend quirks (openai|gemini|groq|…); empty → defensive default
 	Route      string `yaml:"route,omitempty"`   // direct (default) | meridian | ccr (future) | …
 	BaseURL    string `yaml:"base_url"`
@@ -44,20 +44,21 @@ type CloudProfile struct {
 // strips them so disk reflects the profile-only world. New code should
 // always read through the active profile (see Server.activeCloudModel).
 type Config struct {
-	OllamaURL      string `yaml:"ollama_url"`
-	LocalRuntime   string `yaml:"local_runtime"`
-	LocalModel     string `yaml:"local_model"`
-	EmbeddingModel string `yaml:"embedding_model"`
-	CloudProvider  string `yaml:"cloud_provider,omitempty"`
-	CloudModel     string `yaml:"cloud_model,omitempty"`
-	CloudAPIKey    string `yaml:"cloud_api_key,omitempty"`
-	CloudBaseURL   string `yaml:"cloud_base_url,omitempty"`
-	CloudProfiles      []CloudProfile   `yaml:"cloud_profiles"`
-	ActiveCloudProfile string           `yaml:"active_cloud_profile"`
-	LocusMode          string           `yaml:"locus_mode"` // cloud_only|cloud_primary|local_primary|local_only
-	Port               string           `yaml:"port"`
+	OllamaURL          string            `yaml:"ollama_url"`
+	LocalRuntime       string            `yaml:"local_runtime"`
+	LocalModel         string            `yaml:"local_model"`
+	EmbeddingModel     string            `yaml:"embedding_model"`
+	CloudProvider      string            `yaml:"cloud_provider,omitempty"`
+	CloudModel         string            `yaml:"cloud_model,omitempty"`
+	CloudAPIKey        string            `yaml:"cloud_api_key,omitempty"`
+	CloudBaseURL       string            `yaml:"cloud_base_url,omitempty"`
+	CloudProfiles      []CloudProfile    `yaml:"cloud_profiles"`
+	ActiveCloudProfile string            `yaml:"active_cloud_profile"`
+	LocusMode          string            `yaml:"locus_mode"` // cloud_only|cloud_primary|local_primary|local_only
+	Port               string            `yaml:"port"`
 	LlamaServer        LlamaServerConfig `yaml:"llama_server"`
 	Compaction         CompactionConfig  `yaml:"compaction"`
+	Watchdog           WatchdogConfig    `yaml:"watchdog"`
 }
 
 // CompactionConfig controls background context compaction. Thresholds are token
@@ -78,6 +79,17 @@ type RetentionConfig struct {
 	RawRetentionDays       int  `yaml:"raw_retention_days"`
 	CompactedRetentionDays int  `yaml:"compacted_retention_days"`
 	KeepForever            bool `yaml:"keep_forever"`
+}
+
+// WatchdogConfig controls the protocol-enforcement supervisor. Disabled by
+// default (opt-in). Mode is "challenge-and-justify" or "strict".
+type WatchdogConfig struct {
+	Enabled       bool     `yaml:"enabled"`
+	Mode          string   `yaml:"mode"`
+	Checks        []string `yaml:"checks"`
+	Model         string   `yaml:"model"`
+	EscalateAfter int      `yaml:"escalate_after"`
+	Echo          bool     `yaml:"echo"`
 }
 
 // LlamaServerConfig controls the optional managed llama-server sidecar.
@@ -154,6 +166,14 @@ func Defaults() Config {
 				CompactedRetentionDays: 180,
 				KeepForever:            false,
 			},
+		},
+		Watchdog: WatchdogConfig{
+			Enabled:       false,
+			Mode:          "challenge-and-justify",
+			Checks:        []string{"debug-loop"},
+			Model:         "",
+			EscalateAfter: 2,
+			Echo:          false,
 		},
 	}
 }

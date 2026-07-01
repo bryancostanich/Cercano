@@ -384,6 +384,60 @@ func TestSave_StripsLegacyCloudFieldsWhenProfilesPresent(t *testing.T) {
 	}
 }
 
+func TestWatchdogDefaults(t *testing.T) {
+	w := Defaults().Watchdog
+	if w.Enabled {
+		t.Error("watchdog should default to disabled")
+	}
+	if w.Mode != "challenge-and-justify" {
+		t.Errorf("Mode = %q, want challenge-and-justify", w.Mode)
+	}
+	if len(w.Checks) != 1 || w.Checks[0] != "debug-loop" {
+		t.Errorf("Checks = %v, want [debug-loop]", w.Checks)
+	}
+	if w.EscalateAfter != 2 {
+		t.Errorf("EscalateAfter = %d, want 2", w.EscalateAfter)
+	}
+	if w.Echo {
+		t.Error("Echo should default to false")
+	}
+}
+
+func TestWatchdogParsesFromYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	os.WriteFile(path, []byte(`
+watchdog:
+  enabled: true
+  mode: strict
+  checks:
+    - debug-loop
+  escalate_after: 3
+  echo: true
+`), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	w := cfg.Watchdog
+	if !w.Enabled {
+		t.Error("expected Enabled=true from YAML")
+	}
+	if w.Mode != "strict" {
+		t.Errorf("Mode = %q, want strict", w.Mode)
+	}
+	if len(w.Checks) != 1 || w.Checks[0] != "debug-loop" {
+		t.Errorf("Checks = %v, want [debug-loop]", w.Checks)
+	}
+	if w.EscalateAfter != 3 {
+		t.Errorf("EscalateAfter = %d, want 3", w.EscalateAfter)
+	}
+	if !w.Echo {
+		t.Error("expected Echo=true from YAML")
+	}
+}
+
 // Save must NOT strip legacy fields when no profiles exist yet — that's
 // the upgrade path where the legacy fields are the actual source of truth
 // and migrateCloudProfiles will synthesize a profile from them on next load.

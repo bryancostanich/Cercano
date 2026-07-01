@@ -780,6 +780,23 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		fmt.Printf("UpdateConfig: Cloud profile %q rebuilt\n", profileName)
 	}
 
+	watchdogChanged := false
+	if req.WatchdogEnabled != "" {
+		s.currentConfig.Watchdog.Enabled = req.WatchdogEnabled == "true"
+		changes = append(changes, fmt.Sprintf("watchdog_enabled=%s", req.WatchdogEnabled))
+		watchdogChanged = true
+	}
+	if req.WatchdogEcho != "" {
+		s.currentConfig.Watchdog.Echo = req.WatchdogEcho == "true"
+		changes = append(changes, fmt.Sprintf("watchdog_echo=%s", req.WatchdogEcho))
+		watchdogChanged = true
+	}
+	if watchdogChanged {
+		// Rebuild the supervisor from the just-applied config. buildWatchdogFrom
+		// takes NO lock, so this is safe under the held cfgMu write lock.
+		s.watchdog = s.buildWatchdogFrom(s.currentConfig.Watchdog)
+	}
+
 	if len(changes) == 0 {
 		return &proto.UpdateConfigResponse{
 			Success: true,
@@ -1194,17 +1211,19 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 	cfg := s.currentConfig
 	s.cfgMu.RUnlock()
 	return &proto.GetConfigResponse{
-		OllamaUrl:      cfg.OllamaURL,
-		LocalModel:     cfg.LocalModel,
-		EmbeddingModel: cfg.EmbeddingModel,
-		CloudProvider:  cfg.CloudProvider,
-		CloudModel:     cfg.CloudModel,
-		CloudBaseUrl:   cfg.CloudBaseURL,
-		CloudApiKeySet: cfg.CloudAPIKey != "",
-		CloudState:     state,
-		Port:           cfg.Port,
-		LocalRuntime:   cfg.LocalRuntime,
-		LocusMode:      cfg.LocusMode,
+		OllamaUrl:       cfg.OllamaURL,
+		LocalModel:      cfg.LocalModel,
+		EmbeddingModel:  cfg.EmbeddingModel,
+		CloudProvider:   cfg.CloudProvider,
+		CloudModel:      cfg.CloudModel,
+		CloudBaseUrl:    cfg.CloudBaseURL,
+		CloudApiKeySet:  cfg.CloudAPIKey != "",
+		CloudState:      state,
+		Port:            cfg.Port,
+		LocalRuntime:    cfg.LocalRuntime,
+		LocusMode:       cfg.LocusMode,
+		WatchdogEnabled: cfg.Watchdog.Enabled,
+		WatchdogEcho:    cfg.Watchdog.Echo,
 	}, nil
 }
 
@@ -1903,8 +1922,10 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	// augments the base tools with the conversation-scoped justify tool.
 	gateRegistry := s.toolRegistry
 	var wdGate agent.WatchdogGate
-	if s.watchdog != nil {
-		wd := s.watchdog
+	s.cfgMu.RLock()
+	wd := s.watchdog
+	s.cfgMu.RUnlock()
+	if wd != nil {
 		wdGate = func(ctx context.Context, toolName string, args json.RawMessage, transcript []llm.Message) agent.WatchdogDecision {
 			d := wd.Gate(ctx, convID, watchdog.Action{Kind: "tool_call", ToolName: toolName, ToolArgs: args, Transcript: transcript})
 			return agent.WatchdogDecision{Action: d.Action, Protocol: d.Protocol, Challenge: d.Challenge}
@@ -1924,7 +1945,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		echoOn := s.currentConfig.Watchdog.Echo
 		s.cfgMu.RUnlock()
 		if echoOn {
-			s.watchdog.SetEcho(func(thread, text string) {
+			wd.SetEcho(func(thread, text string) {
 				sink(agent.LoopEvent{Kind: agent.LoopWatchdogEcho, ToolName: thread, Summary: text})
 			})
 		}

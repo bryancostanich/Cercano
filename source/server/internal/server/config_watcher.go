@@ -126,6 +126,13 @@ func (s *Server) reloadConfigFromDisk(ctx context.Context) {
 			req.ElideToolResults = "false"
 		}
 	}
+	if newCfg.Compaction.LossyToolElision != snap.Compaction.LossyToolElision {
+		if newCfg.Compaction.LossyToolElision {
+			req.LossyToolElision = "true"
+		} else {
+			req.LossyToolElision = "false"
+		}
+	}
 
 	// Warn on fields that UpdateConfig doesn't hot-reload. The agent keeps
 	// running on the old in-memory values until a restart.

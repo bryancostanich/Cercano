@@ -164,6 +164,10 @@ type Config struct {
 	// ElideToolResults: mechanical superseded-tool-result dedup on the
 	// assembled history. Development Tools section in the settings UI.
 	ElideToolResults bool
+	// LossyToolElision: recency-window elision — stub older tool_results,
+	// keep only the last N in full. Wider savings than ElideToolResults but
+	// not byte-preserving.
+	LossyToolElision bool
 }
 
 // GetConfig fetches the agent's current runtime config.
@@ -187,6 +191,7 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 		WatchdogEnabled:  resp.GetWatchdogEnabled(),
 		WatchdogEcho:     resp.GetWatchdogEcho(),
 		ElideToolResults: resp.GetElideToolResults(),
+		LossyToolElision: resp.GetLossyToolElision(),
 	}, nil
 }
 
@@ -207,6 +212,8 @@ type ConfigUpdate struct {
 	// ElideToolResults is string-encoded to preserve the sparse-patch
 	// convention: "" = leave unchanged, "true" / "false" = apply.
 	ElideToolResults string
+	// LossyToolElision — same encoding as ElideToolResults.
+	LossyToolElision string
 }
 
 // RuntimeStatus is the provider-neutral model/runtime dashboard snapshot.
@@ -894,6 +901,7 @@ func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, erro
 		WatchdogEnabled:  u.WatchdogEnabled,
 		WatchdogEcho:     u.WatchdogEcho,
 		ElideToolResults: u.ElideToolResults,
+		LossyToolElision: u.LossyToolElision,
 	})
 	if err != nil {
 		return "", err

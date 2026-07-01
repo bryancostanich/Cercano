@@ -77,6 +77,15 @@ type CompactionConfig struct {
 	// Useful as an interim mitigation for a broken summarizer, and as an
 	// always-on savings pass in the live tail when the summarizer is back on.
 	ElideToolResults bool `yaml:"elide_tool_results"`
+	// LossyToolElision, when true, stubs older tool_result content down to a
+	// one-line marker so only the most recent tool results (keep-last-N, see
+	// compaction.DefaultLossyElisionKeepLast) carry their full content. Not
+	// lossless — the model cannot recall the exact bytes of an older tool
+	// result — but the raw turns are still in the persistent store and the
+	// model can always re-invoke the tool. Recovers materially more tokens
+	// than byte-identical elision (measured ~58% vs ~0.4% on a 190-turn
+	// real conversation).
+	LossyToolElision bool `yaml:"lossy_tool_elision"`
 }
 
 // RetentionConfig bounds how long raw turn bodies and the compacted layer are

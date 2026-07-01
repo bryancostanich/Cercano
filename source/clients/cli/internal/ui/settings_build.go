@@ -86,6 +86,8 @@ func classifyCommit(key, value string) commitAction {
 		u.WatchdogEcho = value
 	case "elide-tool-results":
 		u.ElideToolResults = value
+	case "lossy-tool-elision":
+		u.LossyToolElision = value
 	case "permission-mode":
 		return commitAction{kind: commitPermission, value: value}
 	case "accent-color":

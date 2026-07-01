@@ -37,6 +37,7 @@ import (
 	mcphost "cercano/source/server/internal/mcp_host"
 	"cercano/source/server/internal/meridian"
 	"cercano/source/server/internal/protocols"
+	"cercano/source/server/internal/retention"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/usage"
 	"cercano/source/server/internal/watchdog"
@@ -83,6 +84,7 @@ type Server struct {
 	localLLMProvider    llm.Provider // native-tool-loop local provider (Ollama)
 	secrets             secrets.Store
 	runtimeManager      localruntime.Manager
+	retentionSweeper    *retention.Sweeper
 	contextLoader       *projectctx.Loader
 	dispatchEngine      *dispatch.Engine
 	watchdog            *watchdog.Watchdog // protocol-supervision gate; nil = disabled (default)
@@ -605,6 +607,11 @@ func (s *Server) SetRuntimeManager(m localruntime.Manager) {
 	s.refreshRuntimeEndpoints()
 }
 
+// SetRetentionSweeper attaches the background retention sweeper so that
+// /config and settings-page changes to retention horizons take effect on the
+// next sweep without a restart.
+func (s *Server) SetRetentionSweeper(sw *retention.Sweeper) { s.retentionSweeper = sw }
+
 // NewServer creates a new Agent gRPC server.
 func NewServer(a *agent.Agent, localProvider *legacymodels.LocalModelProvider, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
 	return &Server{
@@ -769,6 +776,60 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		changes = append(changes, fmt.Sprintf("lossy_tool_elision=%s", v))
 		s.broadcastConfigChanged("lossy_tool_elision", v)
 		fmt.Printf("UpdateConfig: lossy_tool_elision set to %s\n", v)
+	}
+
+	retentionChanged := false
+	if req.RawRetentionDays != "" {
+		n, err := strconv.Atoi(strings.TrimSpace(req.RawRetentionDays))
+		if err != nil || n < 0 {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid raw_retention_days %q: expected a non-negative integer", req.RawRetentionDays),
+			}, nil
+		}
+		s.currentConfig.Compaction.Retention.RawRetentionDays = n
+		changes = append(changes, fmt.Sprintf("raw_retention_days=%d", n))
+		s.broadcastConfigChanged("raw_retention_days", strconv.Itoa(n))
+		fmt.Printf("UpdateConfig: raw_retention_days set to %d\n", n)
+		retentionChanged = true
+	}
+	if req.CompactedRetentionDays != "" {
+		n, err := strconv.Atoi(strings.TrimSpace(req.CompactedRetentionDays))
+		if err != nil || n < 0 {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid compacted_retention_days %q: expected a non-negative integer", req.CompactedRetentionDays),
+			}, nil
+		}
+		s.currentConfig.Compaction.Retention.CompactedRetentionDays = n
+		changes = append(changes, fmt.Sprintf("compacted_retention_days=%d", n))
+		s.broadcastConfigChanged("compacted_retention_days", strconv.Itoa(n))
+		fmt.Printf("UpdateConfig: compacted_retention_days set to %d\n", n)
+		retentionChanged = true
+	}
+	if req.KeepForever != "" {
+		v := strings.ToLower(strings.TrimSpace(req.KeepForever))
+		if v != "true" && v != "false" {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid keep_forever %q: expected \"true\" or \"false\"", req.KeepForever),
+			}, nil
+		}
+		s.currentConfig.Compaction.Retention.KeepForever = v == "true"
+		changes = append(changes, fmt.Sprintf("keep_forever=%s", v))
+		s.broadcastConfigChanged("keep_forever", v)
+		fmt.Printf("UpdateConfig: keep_forever set to %s\n", v)
+		retentionChanged = true
+	}
+	// Push the reconciled retention block to the background sweeper so the
+	// next sweep uses the new horizons without waiting for a restart.
+	if retentionChanged && s.retentionSweeper != nil {
+		r := s.currentConfig.Compaction.Retention
+		s.retentionSweeper.SetConfig(retention.Config{
+			RawRetentionDays:       r.RawRetentionDays,
+			CompactedRetentionDays: r.CompactedRetentionDays,
+			KeepForever:            r.KeepForever,
+		})
 	}
 
 	// Cloud changes go through the active profile + rebuildCloud(). The
@@ -1301,10 +1362,13 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 		Port:             cfg.Port,
 		LocalRuntime:     cfg.LocalRuntime,
 		LocusMode:        cfg.LocusMode,
-		WatchdogEnabled:  cfg.Watchdog.Enabled,
-		WatchdogEcho:     cfg.Watchdog.Echo,
-		ElideToolResults: cfg.Compaction.ElideToolResults,
-		LossyToolElision: cfg.Compaction.LossyToolElision,
+		WatchdogEnabled:        cfg.Watchdog.Enabled,
+		WatchdogEcho:           cfg.Watchdog.Echo,
+		ElideToolResults:       cfg.Compaction.ElideToolResults,
+		LossyToolElision:       cfg.Compaction.LossyToolElision,
+		RawRetentionDays:       int32(cfg.Compaction.Retention.RawRetentionDays),
+		CompactedRetentionDays: int32(cfg.Compaction.Retention.CompactedRetentionDays),
+		KeepForever:            cfg.Compaction.Retention.KeepForever,
 	}, nil
 }
 

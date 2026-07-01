@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
@@ -106,6 +107,11 @@ func (sp *settingsPage) snapshotSections() []form.Section {
 			{Title: "Context Management", Fields: []form.Field{
 				form.NewToggle("elide-tool-results", "elide-tool-results", sp.cfg.ElideToolResults),
 				form.NewToggle("lossy-tool-elision", "lossy-tool-elision", sp.cfg.LossyToolElision),
+			}},
+			{Title: "Data Retention", Fields: []form.Field{
+				form.NewText("raw-retention-days", "raw-retention-days", strconv.Itoa(sp.cfg.RawRetentionDays), ""),
+				form.NewText("compacted-retention-days", "compacted-retention-days", strconv.Itoa(sp.cfg.CompactedRetentionDays), ""),
+				form.NewToggle("keep-forever", "keep-forever", sp.cfg.KeepForever),
 			}},
 		},
 	})

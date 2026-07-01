@@ -168,6 +168,10 @@ type Config struct {
 	// keep only the last N in full. Wider savings than ElideToolResults but
 	// not byte-preserving.
 	LossyToolElision bool
+	// Retention horizons in days; KeepForever gates any aging.
+	RawRetentionDays       int
+	CompactedRetentionDays int
+	KeepForever            bool
 }
 
 // GetConfig fetches the agent's current runtime config.
@@ -188,10 +192,13 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 		CloudState:       resp.GetCloudState(),
 		Port:             resp.GetPort(),
 		LocusMode:        resp.GetLocusMode(),
-		WatchdogEnabled:  resp.GetWatchdogEnabled(),
-		WatchdogEcho:     resp.GetWatchdogEcho(),
-		ElideToolResults: resp.GetElideToolResults(),
-		LossyToolElision: resp.GetLossyToolElision(),
+		WatchdogEnabled:        resp.GetWatchdogEnabled(),
+		WatchdogEcho:           resp.GetWatchdogEcho(),
+		ElideToolResults:       resp.GetElideToolResults(),
+		LossyToolElision:       resp.GetLossyToolElision(),
+		RawRetentionDays:       int(resp.GetRawRetentionDays()),
+		CompactedRetentionDays: int(resp.GetCompactedRetentionDays()),
+		KeepForever:            resp.GetKeepForever(),
 	}, nil
 }
 
@@ -214,6 +221,11 @@ type ConfigUpdate struct {
 	ElideToolResults string
 	// LossyToolElision — same encoding as ElideToolResults.
 	LossyToolElision string
+	// Retention — string-encoded to preserve sparse-patch semantics. Days
+	// must parse as non-negative integers; KeepForever is "true" / "false".
+	RawRetentionDays       string
+	CompactedRetentionDays string
+	KeepForever            string
 }
 
 // RuntimeStatus is the provider-neutral model/runtime dashboard snapshot.
@@ -898,10 +910,13 @@ func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, erro
 		CloudApiKey:      u.CloudAPIKey,
 		CloudBaseUrl:     u.CloudBaseURL,
 		LocusMode:        u.LocusMode,
-		WatchdogEnabled:  u.WatchdogEnabled,
-		WatchdogEcho:     u.WatchdogEcho,
-		ElideToolResults: u.ElideToolResults,
-		LossyToolElision: u.LossyToolElision,
+		WatchdogEnabled:        u.WatchdogEnabled,
+		WatchdogEcho:           u.WatchdogEcho,
+		ElideToolResults:       u.ElideToolResults,
+		LossyToolElision:       u.LossyToolElision,
+		RawRetentionDays:       u.RawRetentionDays,
+		CompactedRetentionDays: u.CompactedRetentionDays,
+		KeepForever:            u.KeepForever,
 	})
 	if err != nil {
 		return "", err

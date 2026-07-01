@@ -680,8 +680,13 @@ type UpdateConfigRequest struct {
 	// to match the sparse-patch convention of the other fields (empty = unchanged).
 	ElideToolResults string `protobuf:"bytes,11,opt,name=elide_tool_results,json=elideToolResults,proto3" json:"elide_tool_results,omitempty"` // Mechanical superseded-tool-result dedup on assemble.
 	LossyToolElision string `protobuf:"bytes,12,opt,name=lossy_tool_elision,json=lossyToolElision,proto3" json:"lossy_tool_elision,omitempty"` // Recency-window: keep last N tool_results, stub older.
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Retention (Development Tools). Strings for the sparse-patch convention;
+	// days must parse as non-negative decimal integers.
+	RawRetentionDays       string `protobuf:"bytes,13,opt,name=raw_retention_days,json=rawRetentionDays,proto3" json:"raw_retention_days,omitempty"`
+	CompactedRetentionDays string `protobuf:"bytes,14,opt,name=compacted_retention_days,json=compactedRetentionDays,proto3" json:"compacted_retention_days,omitempty"`
+	KeepForever            string `protobuf:"bytes,15,opt,name=keep_forever,json=keepForever,proto3" json:"keep_forever,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *UpdateConfigRequest) Reset() {
@@ -794,6 +799,27 @@ func (x *UpdateConfigRequest) GetElideToolResults() string {
 func (x *UpdateConfigRequest) GetLossyToolElision() string {
 	if x != nil {
 		return x.LossyToolElision
+	}
+	return ""
+}
+
+func (x *UpdateConfigRequest) GetRawRetentionDays() string {
+	if x != nil {
+		return x.RawRetentionDays
+	}
+	return ""
+}
+
+func (x *UpdateConfigRequest) GetCompactedRetentionDays() string {
+	if x != nil {
+		return x.CompactedRetentionDays
+	}
+	return ""
+}
+
+func (x *UpdateConfigRequest) GetKeepForever() string {
+	if x != nil {
+		return x.KeepForever
 	}
 	return ""
 }
@@ -4710,8 +4736,13 @@ type GetConfigResponse struct {
 	// always knows the current value.
 	ElideToolResults bool `protobuf:"varint,14,opt,name=elide_tool_results,json=elideToolResults,proto3" json:"elide_tool_results,omitempty"`
 	LossyToolElision bool `protobuf:"varint,15,opt,name=lossy_tool_elision,json=lossyToolElision,proto3" json:"lossy_tool_elision,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Retention (Development Tools). Integers reported directly; keep_forever
+	// gates any actual aging.
+	RawRetentionDays       int32 `protobuf:"varint,16,opt,name=raw_retention_days,json=rawRetentionDays,proto3" json:"raw_retention_days,omitempty"`
+	CompactedRetentionDays int32 `protobuf:"varint,17,opt,name=compacted_retention_days,json=compactedRetentionDays,proto3" json:"compacted_retention_days,omitempty"`
+	KeepForever            bool  `protobuf:"varint,18,opt,name=keep_forever,json=keepForever,proto3" json:"keep_forever,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *GetConfigResponse) Reset() {
@@ -4845,6 +4876,27 @@ func (x *GetConfigResponse) GetElideToolResults() bool {
 func (x *GetConfigResponse) GetLossyToolElision() bool {
 	if x != nil {
 		return x.LossyToolElision
+	}
+	return false
+}
+
+func (x *GetConfigResponse) GetRawRetentionDays() int32 {
+	if x != nil {
+		return x.RawRetentionDays
+	}
+	return 0
+}
+
+func (x *GetConfigResponse) GetCompactedRetentionDays() int32 {
+	if x != nil {
+		return x.CompactedRetentionDays
+	}
+	return 0
+}
+
+func (x *GetConfigResponse) GetKeepForever() bool {
+	if x != nil {
+		return x.KeepForever
 	}
 	return false
 }
@@ -7648,7 +7700,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x05index\x18\x01 \x01(\x05R\x05index\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\x12\x1d\n" +
 	"\n" +
-	"media_type\x18\x03 \x01(\tR\tmediaType\"\xd7\x03\n" +
+	"media_type\x18\x03 \x01(\tR\tmediaType\"\xe2\x04\n" +
 	"\x13UpdateConfigRequest\x12\x1f\n" +
 	"\vlocal_model\x18\x01 \x01(\tR\n" +
 	"localModel\x12%\n" +
@@ -7666,7 +7718,10 @@ const file_agent_proto_rawDesc = "" +
 	"\rwatchdog_echo\x18\n" +
 	" \x01(\tR\fwatchdogEcho\x12,\n" +
 	"\x12elide_tool_results\x18\v \x01(\tR\x10elideToolResults\x12,\n" +
-	"\x12lossy_tool_elision\x18\f \x01(\tR\x10lossyToolElision\"J\n" +
+	"\x12lossy_tool_elision\x18\f \x01(\tR\x10lossyToolElision\x12,\n" +
+	"\x12raw_retention_days\x18\r \x01(\tR\x10rawRetentionDays\x128\n" +
+	"\x18compacted_retention_days\x18\x0e \x01(\tR\x16compactedRetentionDays\x12!\n" +
+	"\fkeep_forever\x18\x0f \x01(\tR\vkeepForever\"J\n" +
 	"\x14UpdateConfigResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\xb6\x02\n" +
@@ -7969,7 +8024,7 @@ const file_agent_proto_rawDesc = "" +
 	"resultJson\x12\x19\n" +
 	"\bis_error\x18\x02 \x01(\bR\aisError\x12\x14\n" +
 	"\x05error\x18\x03 \x01(\tR\x05error\"\x12\n" +
-	"\x10GetConfigRequest\"\xba\x04\n" +
+	"\x10GetConfigRequest\"\xc5\x05\n" +
 	"\x11GetConfigResponse\x12\x1d\n" +
 	"\n" +
 	"ollama_url\x18\x01 \x01(\tR\tollamaUrl\x12\x1f\n" +
@@ -7991,7 +8046,10 @@ const file_agent_proto_rawDesc = "" +
 	"\x10watchdog_enabled\x18\f \x01(\bR\x0fwatchdogEnabled\x12#\n" +
 	"\rwatchdog_echo\x18\r \x01(\bR\fwatchdogEcho\x12,\n" +
 	"\x12elide_tool_results\x18\x0e \x01(\bR\x10elideToolResults\x12,\n" +
-	"\x12lossy_tool_elision\x18\x0f \x01(\bR\x10lossyToolElision\"\x13\n" +
+	"\x12lossy_tool_elision\x18\x0f \x01(\bR\x10lossyToolElision\x12,\n" +
+	"\x12raw_retention_days\x18\x10 \x01(\x05R\x10rawRetentionDays\x128\n" +
+	"\x18compacted_retention_days\x18\x11 \x01(\x05R\x16compactedRetentionDays\x12!\n" +
+	"\fkeep_forever\x18\x12 \x01(\bR\vkeepForever\"\x13\n" +
 	"\x11ListSkillsRequest\"A\n" +
 	"\tSkillInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +

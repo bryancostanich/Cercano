@@ -220,6 +220,9 @@ message UpdateConfigRequest {
   string locus_mode = 8;     // cloud_only|cloud_primary|local_primary|local_only
   string watchdog_enabled = 9;  // "" = unchanged, "true"/"false"
   string watchdog_echo = 10;    // "" = unchanged, "true"/"false"
+  // Compaction — Development Tools. String-encoded bool ("" | "true" | "false")
+  // to match the sparse-patch convention of the other fields (empty = unchanged).
+  string elide_tool_results = 11; // Mechanical superseded-tool-result dedup on assemble.
 }
 
 // Runtime configuration update response.
@@ -576,6 +579,9 @@ message GetConfigResponse {
   string locus_mode = 11;
   bool watchdog_enabled = 12;
   bool watchdog_echo = 13;
+  // Compaction — Development Tools. Reported as a plain bool since the reader
+  // always knows the current value.
+  bool elide_tool_results = 14;
 }
 
 message ListSkillsRequest {}

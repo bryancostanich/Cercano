@@ -161,6 +161,9 @@ type Config struct {
 	LocusMode       string
 	WatchdogEnabled bool
 	WatchdogEcho    bool
+	// ElideToolResults: mechanical superseded-tool-result dedup on the
+	// assembled history. Development Tools section in the settings UI.
+	ElideToolResults bool
 }
 
 // GetConfig fetches the agent's current runtime config.
@@ -170,19 +173,20 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 		return nil, err
 	}
 	return &Config{
-		OllamaURL:       resp.GetOllamaUrl(),
-		LocalRuntime:    resp.GetLocalRuntime(),
-		LocalModel:      resp.GetLocalModel(),
-		EmbeddingModel:  resp.GetEmbeddingModel(),
-		CloudProvider:   resp.GetCloudProvider(),
-		CloudModel:      resp.GetCloudModel(),
-		CloudBaseURL:    resp.GetCloudBaseUrl(),
-		CloudAPIKeySet:  resp.GetCloudApiKeySet(),
-		CloudState:      resp.GetCloudState(),
-		Port:            resp.GetPort(),
-		LocusMode:       resp.GetLocusMode(),
-		WatchdogEnabled: resp.GetWatchdogEnabled(),
-		WatchdogEcho:    resp.GetWatchdogEcho(),
+		OllamaURL:        resp.GetOllamaUrl(),
+		LocalRuntime:     resp.GetLocalRuntime(),
+		LocalModel:       resp.GetLocalModel(),
+		EmbeddingModel:   resp.GetEmbeddingModel(),
+		CloudProvider:    resp.GetCloudProvider(),
+		CloudModel:       resp.GetCloudModel(),
+		CloudBaseURL:     resp.GetCloudBaseUrl(),
+		CloudAPIKeySet:   resp.GetCloudApiKeySet(),
+		CloudState:       resp.GetCloudState(),
+		Port:             resp.GetPort(),
+		LocusMode:        resp.GetLocusMode(),
+		WatchdogEnabled:  resp.GetWatchdogEnabled(),
+		WatchdogEcho:     resp.GetWatchdogEcho(),
+		ElideToolResults: resp.GetElideToolResults(),
 	}, nil
 }
 
@@ -200,6 +204,9 @@ type ConfigUpdate struct {
 	LocusMode       string
 	WatchdogEnabled string // "" = unchanged, "true"/"false"
 	WatchdogEcho    string // "" = unchanged, "true"/"false"
+	// ElideToolResults is string-encoded to preserve the sparse-patch
+	// convention: "" = leave unchanged, "true" / "false" = apply.
+	ElideToolResults string
 }
 
 // RuntimeStatus is the provider-neutral model/runtime dashboard snapshot.
@@ -876,16 +883,17 @@ func (c *Client) InstallLocalRuntime(ctx context.Context, runtime string) (<-cha
 // summary line (e.g. "updated: [local_model=qwen3-coder, cloud=anthropic/...]").
 func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, error) {
 	resp, err := c.agent.UpdateConfig(ctx, &proto.UpdateConfigRequest{
-		OllamaUrl:       u.OllamaURL,
-		LocalRuntime:    u.LocalRuntime,
-		LocalModel:      u.LocalModel,
-		CloudProvider:   u.CloudProvider,
-		CloudModel:      u.CloudModel,
-		CloudApiKey:     u.CloudAPIKey,
-		CloudBaseUrl:    u.CloudBaseURL,
-		LocusMode:       u.LocusMode,
-		WatchdogEnabled: u.WatchdogEnabled,
-		WatchdogEcho:    u.WatchdogEcho,
+		OllamaUrl:        u.OllamaURL,
+		LocalRuntime:     u.LocalRuntime,
+		LocalModel:       u.LocalModel,
+		CloudProvider:    u.CloudProvider,
+		CloudModel:       u.CloudModel,
+		CloudApiKey:      u.CloudAPIKey,
+		CloudBaseUrl:     u.CloudBaseURL,
+		LocusMode:        u.LocusMode,
+		WatchdogEnabled:  u.WatchdogEnabled,
+		WatchdogEcho:     u.WatchdogEcho,
+		ElideToolResults: u.ElideToolResults,
 	})
 	if err != nil {
 		return "", err

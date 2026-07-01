@@ -676,8 +676,11 @@ type UpdateConfigRequest struct {
 	LocusMode       string `protobuf:"bytes,8,opt,name=locus_mode,json=locusMode,proto3" json:"locus_mode,omitempty"`                   // cloud_only|cloud_primary|local_primary|local_only
 	WatchdogEnabled string `protobuf:"bytes,9,opt,name=watchdog_enabled,json=watchdogEnabled,proto3" json:"watchdog_enabled,omitempty"` // "" = unchanged, "true"/"false"
 	WatchdogEcho    string `protobuf:"bytes,10,opt,name=watchdog_echo,json=watchdogEcho,proto3" json:"watchdog_echo,omitempty"`         // "" = unchanged, "true"/"false"
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Compaction — Development Tools. String-encoded bool ("" | "true" | "false")
+	// to match the sparse-patch convention of the other fields (empty = unchanged).
+	ElideToolResults string `protobuf:"bytes,11,opt,name=elide_tool_results,json=elideToolResults,proto3" json:"elide_tool_results,omitempty"` // Mechanical superseded-tool-result dedup on assemble.
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *UpdateConfigRequest) Reset() {
@@ -776,6 +779,13 @@ func (x *UpdateConfigRequest) GetWatchdogEnabled() string {
 func (x *UpdateConfigRequest) GetWatchdogEcho() string {
 	if x != nil {
 		return x.WatchdogEcho
+	}
+	return ""
+}
+
+func (x *UpdateConfigRequest) GetElideToolResults() string {
+	if x != nil {
+		return x.ElideToolResults
 	}
 	return ""
 }
@@ -4688,8 +4698,11 @@ type GetConfigResponse struct {
 	LocusMode       string `protobuf:"bytes,11,opt,name=locus_mode,json=locusMode,proto3" json:"locus_mode,omitempty"`
 	WatchdogEnabled bool   `protobuf:"varint,12,opt,name=watchdog_enabled,json=watchdogEnabled,proto3" json:"watchdog_enabled,omitempty"`
 	WatchdogEcho    bool   `protobuf:"varint,13,opt,name=watchdog_echo,json=watchdogEcho,proto3" json:"watchdog_echo,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Compaction — Development Tools. Reported as a plain bool since the reader
+	// always knows the current value.
+	ElideToolResults bool `protobuf:"varint,14,opt,name=elide_tool_results,json=elideToolResults,proto3" json:"elide_tool_results,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *GetConfigResponse) Reset() {
@@ -4809,6 +4822,13 @@ func (x *GetConfigResponse) GetWatchdogEnabled() bool {
 func (x *GetConfigResponse) GetWatchdogEcho() bool {
 	if x != nil {
 		return x.WatchdogEcho
+	}
+	return false
+}
+
+func (x *GetConfigResponse) GetElideToolResults() bool {
+	if x != nil {
+		return x.ElideToolResults
 	}
 	return false
 }
@@ -7612,7 +7632,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x05index\x18\x01 \x01(\x05R\x05index\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\x12\x1d\n" +
 	"\n" +
-	"media_type\x18\x03 \x01(\tR\tmediaType\"\xfb\x02\n" +
+	"media_type\x18\x03 \x01(\tR\tmediaType\"\xa9\x03\n" +
 	"\x13UpdateConfigRequest\x12\x1f\n" +
 	"\vlocal_model\x18\x01 \x01(\tR\n" +
 	"localModel\x12%\n" +
@@ -7628,7 +7648,8 @@ const file_agent_proto_rawDesc = "" +
 	"locus_mode\x18\b \x01(\tR\tlocusMode\x12)\n" +
 	"\x10watchdog_enabled\x18\t \x01(\tR\x0fwatchdogEnabled\x12#\n" +
 	"\rwatchdog_echo\x18\n" +
-	" \x01(\tR\fwatchdogEcho\"J\n" +
+	" \x01(\tR\fwatchdogEcho\x12,\n" +
+	"\x12elide_tool_results\x18\v \x01(\tR\x10elideToolResults\"J\n" +
 	"\x14UpdateConfigResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\xb6\x02\n" +
@@ -7931,7 +7952,7 @@ const file_agent_proto_rawDesc = "" +
 	"resultJson\x12\x19\n" +
 	"\bis_error\x18\x02 \x01(\bR\aisError\x12\x14\n" +
 	"\x05error\x18\x03 \x01(\tR\x05error\"\x12\n" +
-	"\x10GetConfigRequest\"\xde\x03\n" +
+	"\x10GetConfigRequest\"\x8c\x04\n" +
 	"\x11GetConfigResponse\x12\x1d\n" +
 	"\n" +
 	"ollama_url\x18\x01 \x01(\tR\tollamaUrl\x12\x1f\n" +
@@ -7951,7 +7972,8 @@ const file_agent_proto_rawDesc = "" +
 	"\n" +
 	"locus_mode\x18\v \x01(\tR\tlocusMode\x12)\n" +
 	"\x10watchdog_enabled\x18\f \x01(\bR\x0fwatchdogEnabled\x12#\n" +
-	"\rwatchdog_echo\x18\r \x01(\bR\fwatchdogEcho\"\x13\n" +
+	"\rwatchdog_echo\x18\r \x01(\bR\fwatchdogEcho\x12,\n" +
+	"\x12elide_tool_results\x18\x0e \x01(\bR\x10elideToolResults\"\x13\n" +
 	"\x11ListSkillsRequest\"A\n" +
 	"\tSkillInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +

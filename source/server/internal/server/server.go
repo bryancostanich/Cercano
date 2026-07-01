@@ -743,6 +743,20 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		fmt.Printf("UpdateConfig: Locus mode set to %s\n", req.LocusMode)
 	}
 
+	if req.ElideToolResults != "" {
+		v := strings.ToLower(strings.TrimSpace(req.ElideToolResults))
+		if v != "true" && v != "false" {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid elide_tool_results %q: expected \"true\" or \"false\"", req.ElideToolResults),
+			}, nil
+		}
+		s.currentConfig.Compaction.ElideToolResults = v == "true"
+		changes = append(changes, fmt.Sprintf("elide_tool_results=%s", v))
+		s.broadcastConfigChanged("elide_tool_results", v)
+		fmt.Printf("UpdateConfig: elide_tool_results set to %s\n", v)
+	}
+
 	// Cloud changes go through the active profile + rebuildCloud(). The
 	// profile is the single source of truth (see activeCloudModel); writing
 	// req.CloudModel anywhere else just creates the kind of split-state bug
@@ -1232,19 +1246,20 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 	cfg := s.currentConfig
 	s.cfgMu.RUnlock()
 	return &proto.GetConfigResponse{
-		OllamaUrl:       cfg.OllamaURL,
-		LocalModel:      cfg.LocalModel,
-		EmbeddingModel:  cfg.EmbeddingModel,
-		CloudProvider:   cfg.CloudProvider,
-		CloudModel:      cfg.CloudModel,
-		CloudBaseUrl:    cfg.CloudBaseURL,
-		CloudApiKeySet:  cfg.CloudAPIKey != "",
-		CloudState:      state,
-		Port:            cfg.Port,
-		LocalRuntime:    cfg.LocalRuntime,
-		LocusMode:       cfg.LocusMode,
-		WatchdogEnabled: cfg.Watchdog.Enabled,
-		WatchdogEcho:    cfg.Watchdog.Echo,
+		OllamaUrl:        cfg.OllamaURL,
+		LocalModel:       cfg.LocalModel,
+		EmbeddingModel:   cfg.EmbeddingModel,
+		CloudProvider:    cfg.CloudProvider,
+		CloudModel:       cfg.CloudModel,
+		CloudBaseUrl:     cfg.CloudBaseURL,
+		CloudApiKeySet:   cfg.CloudAPIKey != "",
+		CloudState:       state,
+		Port:             cfg.Port,
+		LocalRuntime:     cfg.LocalRuntime,
+		LocusMode:        cfg.LocusMode,
+		WatchdogEnabled:  cfg.Watchdog.Enabled,
+		WatchdogEcho:     cfg.Watchdog.Echo,
+		ElideToolResults: cfg.Compaction.ElideToolResults,
 	}, nil
 }
 

@@ -44,6 +44,17 @@ service Agent {
   // means "no suggestion" — the CLI treats it as no-op.
   rpc SuggestNextPrompt (SuggestNextPromptRequest) returns (SuggestNextPromptResponse) {}
 
+  // InstallLocalRuntime runs the platform install command for a local
+  // inference runtime (today: "llama_server" via `brew install llama.cpp`
+  // on macOS) and streams stdout/stderr line-by-line to the caller. The
+  // final message carries done=true with ok set to the outcome.
+  //
+  // The server re-runs detection after a successful install and emits a
+  // fresh LocalRuntimeStatusChanged event on the SubscribeEvents stream,
+  // so CLIs get the "runtime is now ready" signal through the same channel
+  // they used to render the "needs setup" chip.
+  rpc InstallLocalRuntime (InstallLocalRuntimeRequest) returns (stream InstallProgress) {}
+
   // ExportContext returns the full uncapped raw history as a JSON []llm.Message.
   rpc ExportContext (ExportContextRequest) returns (ExportContextResponse) {}
 
@@ -678,6 +689,28 @@ message LocalRuntimeStatus {
 // changes (post-swap detection, install completes, etc.). Clients update
 // their status chip + modal from this — no fetch, no poll.
 message LocalRuntimeStatusChanged { LocalRuntimeStatus status = 1; }
+
+// InstallLocalRuntimeRequest asks the server to run the platform install
+// command for a local runtime and stream its output back.
+//
+// runtime values today: "llama_server" — future runtimes can be added
+// without breaking the wire format.
+message InstallLocalRuntimeRequest {
+  string runtime = 1;
+}
+
+// InstallProgress is one frame in an install output stream. Frames with
+// done=false carry stdout/stderr lines from the install subprocess as they
+// arrive. The stream terminates with a single frame carrying done=true;
+// ok=true means the subprocess exited cleanly and the runtime should be
+// usable after a fresh detection, ok=false means install failed and the
+// error field explains why.
+message InstallProgress {
+  string line = 1;
+  bool done = 2;
+  bool ok = 3;
+  string error = 4;
+}
 
 // Allow/Deny pair the asynchronous PermissionRequired stream event with a
 // client reply. tool_use_id is the same id the event carried.

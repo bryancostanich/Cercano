@@ -31,6 +31,7 @@ const (
 	Agent_GetContextUsage_FullMethodName            = "/agent.Agent/GetContextUsage"
 	Agent_GetCompactionState_FullMethodName         = "/agent.Agent/GetCompactionState"
 	Agent_SuggestNextPrompt_FullMethodName          = "/agent.Agent/SuggestNextPrompt"
+	Agent_InstallLocalRuntime_FullMethodName        = "/agent.Agent/InstallLocalRuntime"
 	Agent_ExportContext_FullMethodName              = "/agent.Agent/ExportContext"
 	Agent_GetConversationTurns_FullMethodName       = "/agent.Agent/GetConversationTurns"
 	Agent_ListTools_FullMethodName                  = "/agent.Agent/ListTools"
@@ -104,6 +105,16 @@ type AgentClient interface {
 	// CLI renders the result as ghost text in the input widget. Empty response
 	// means "no suggestion" — the CLI treats it as no-op.
 	SuggestNextPrompt(ctx context.Context, in *SuggestNextPromptRequest, opts ...grpc.CallOption) (*SuggestNextPromptResponse, error)
+	// InstallLocalRuntime runs the platform install command for a local
+	// inference runtime (today: "llama_server" via `brew install llama.cpp`
+	// on macOS) and streams stdout/stderr line-by-line to the caller. The
+	// final message carries done=true with ok set to the outcome.
+	//
+	// The server re-runs detection after a successful install and emits a
+	// fresh LocalRuntimeStatusChanged event on the SubscribeEvents stream,
+	// so CLIs get the "runtime is now ready" signal through the same channel
+	// they used to render the "needs setup" chip.
+	InstallLocalRuntime(ctx context.Context, in *InstallLocalRuntimeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[InstallProgress], error)
 	// ExportContext returns the full uncapped raw history as a JSON []llm.Message.
 	ExportContext(ctx context.Context, in *ExportContextRequest, opts ...grpc.CallOption) (*ExportContextResponse, error)
 	// GetConversationTurns returns display-ready, side-effect-free summaries of a
@@ -311,6 +322,25 @@ func (c *agentClient) SuggestNextPrompt(ctx context.Context, in *SuggestNextProm
 	return out, nil
 }
 
+func (c *agentClient) InstallLocalRuntime(ctx context.Context, in *InstallLocalRuntimeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[InstallProgress], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[1], Agent_InstallLocalRuntime_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[InstallLocalRuntimeRequest, InstallProgress]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_InstallLocalRuntimeClient = grpc.ServerStreamingClient[InstallProgress]
+
 func (c *agentClient) ExportContext(ctx context.Context, in *ExportContextRequest, opts ...grpc.CallOption) (*ExportContextResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ExportContextResponse)
@@ -463,7 +493,7 @@ func (c *agentClient) DeleteRuntimeModel(ctx context.Context, in *DeleteRuntimeM
 
 func (c *agentClient) StreamRuntimeLogs(ctx context.Context, in *StreamRuntimeLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RuntimeLogEntry], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[1], Agent_StreamRuntimeLogs_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[2], Agent_StreamRuntimeLogs_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -522,7 +552,7 @@ func (c *agentClient) GetPermissionMode(ctx context.Context, in *GetPermissionMo
 
 func (c *agentClient) SubscribeEvents(ctx context.Context, in *SubscribeEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ClientEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[2], Agent_SubscribeEvents_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[3], Agent_SubscribeEvents_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -715,6 +745,16 @@ type AgentServer interface {
 	// CLI renders the result as ghost text in the input widget. Empty response
 	// means "no suggestion" — the CLI treats it as no-op.
 	SuggestNextPrompt(context.Context, *SuggestNextPromptRequest) (*SuggestNextPromptResponse, error)
+	// InstallLocalRuntime runs the platform install command for a local
+	// inference runtime (today: "llama_server" via `brew install llama.cpp`
+	// on macOS) and streams stdout/stderr line-by-line to the caller. The
+	// final message carries done=true with ok set to the outcome.
+	//
+	// The server re-runs detection after a successful install and emits a
+	// fresh LocalRuntimeStatusChanged event on the SubscribeEvents stream,
+	// so CLIs get the "runtime is now ready" signal through the same channel
+	// they used to render the "needs setup" chip.
+	InstallLocalRuntime(*InstallLocalRuntimeRequest, grpc.ServerStreamingServer[InstallProgress]) error
 	// ExportContext returns the full uncapped raw history as a JSON []llm.Message.
 	ExportContext(context.Context, *ExportContextRequest) (*ExportContextResponse, error)
 	// GetConversationTurns returns display-ready, side-effect-free summaries of a
@@ -828,6 +868,9 @@ func (UnimplementedAgentServer) GetCompactionState(context.Context, *GetCompacti
 }
 func (UnimplementedAgentServer) SuggestNextPrompt(context.Context, *SuggestNextPromptRequest) (*SuggestNextPromptResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SuggestNextPrompt not implemented")
+}
+func (UnimplementedAgentServer) InstallLocalRuntime(*InstallLocalRuntimeRequest, grpc.ServerStreamingServer[InstallProgress]) error {
+	return status.Error(codes.Unimplemented, "method InstallLocalRuntime not implemented")
 }
 func (UnimplementedAgentServer) ExportContext(context.Context, *ExportContextRequest) (*ExportContextResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ExportContext not implemented")
@@ -1163,6 +1206,17 @@ func _Agent_SuggestNextPrompt_Handler(srv interface{}, ctx context.Context, dec 
 	}
 	return interceptor(ctx, in, info, handler)
 }
+
+func _Agent_InstallLocalRuntime_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(InstallLocalRuntimeRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AgentServer).InstallLocalRuntime(m, &grpc.GenericServerStream[InstallLocalRuntimeRequest, InstallProgress]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_InstallLocalRuntimeServer = grpc.ServerStreamingServer[InstallProgress]
 
 func _Agent_ExportContext_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ExportContextRequest)
@@ -1968,6 +2022,11 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "StreamProcessRequest",
 			Handler:       _Agent_StreamProcessRequest_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "InstallLocalRuntime",
+			Handler:       _Agent_InstallLocalRuntime_Handler,
 			ServerStreams: true,
 		},
 		{

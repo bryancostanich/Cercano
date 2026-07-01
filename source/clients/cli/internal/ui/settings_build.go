@@ -46,6 +46,10 @@ func buildSettingsSections(cfg *agentclient.Config, mode, accentToken string) []
 		{Title: "Server", Fields: []form.Field{
 			form.NewReadOnly("port", "port", cfg.Port, "(read-only)"),
 		}},
+		{Title: "Developer", Fields: []form.Field{
+			form.NewToggle("watchdog-enabled", "watchdog-enabled", cfg.WatchdogEnabled),
+			form.NewToggle("watchdog-echo", "watchdog-echo", cfg.WatchdogEcho),
+		}},
 	}
 }
 
@@ -76,6 +80,10 @@ func classifyCommit(key, value string) commitAction {
 		u.OllamaURL = value
 	case "locus-mode":
 		u.LocusMode = value
+	case "watchdog-enabled":
+		u.WatchdogEnabled = value
+	case "watchdog-echo":
+		u.WatchdogEcho = value
 	case "permission-mode":
 		return commitAction{kind: commitPermission, value: value}
 	case "accent-color":

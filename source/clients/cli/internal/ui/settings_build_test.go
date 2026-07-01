@@ -58,3 +58,34 @@ func TestClassifyCommit(t *testing.T) {
 		t.Fatalf("unknown -> %+v", a)
 	}
 }
+
+func TestDeveloperSectionPresent(t *testing.T) {
+	cfg := &agentclient.Config{WatchdogEnabled: true, WatchdogEcho: false}
+	secs := buildSettingsSections(cfg, "permissive", "palette:accent")
+	found := false
+	for _, s := range secs {
+		if s.Title == "Developer" {
+			found = true
+			if len(s.Fields) != 2 {
+				t.Fatalf("Developer section: want 2 fields, got %d", len(s.Fields))
+			}
+			if s.Fields[0].Key() != "watchdog-enabled" || s.Fields[1].Key() != "watchdog-echo" {
+				t.Fatalf("unexpected field keys: %s, %s", s.Fields[0].Key(), s.Fields[1].Key())
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no Developer section")
+	}
+}
+
+func TestClassifyCommit_Watchdog(t *testing.T) {
+	a := classifyCommit("watchdog-enabled", "true")
+	if a.kind != commitConfig || a.update.WatchdogEnabled != "true" {
+		t.Fatalf("watchdog-enabled: %+v", a)
+	}
+	b := classifyCommit("watchdog-echo", "false")
+	if b.kind != commitConfig || b.update.WatchdogEcho != "false" {
+		t.Fatalf("watchdog-echo: %+v", b)
+	}
+}

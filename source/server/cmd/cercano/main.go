@@ -187,7 +187,11 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	}
 	if persistentStore != nil && cfg.Compaction.Enabled {
 		compactSummarize := func(ctx context.Context, msgs []llm.Message) (compaction.StructuredSummary, error) {
-			resp, err := localProvider.Process(ctx, &agent.Request{Input: compaction.BuildSummaryPrompt(msgs)})
+			req := &agent.Request{Input: compaction.BuildSummaryPrompt(msgs)}
+			if cfg.Compaction.SummarizerModel != "" {
+				req.ModelOverride = cfg.Compaction.SummarizerModel
+			}
+			resp, err := localProvider.Process(ctx, req)
 			if err != nil {
 				return compaction.StructuredSummary{}, err
 			}

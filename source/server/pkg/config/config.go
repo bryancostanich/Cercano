@@ -86,6 +86,12 @@ type CompactionConfig struct {
 	// than byte-identical elision (measured ~58% vs ~0.4% on a 190-turn
 	// real conversation).
 	LossyToolElision bool `yaml:"lossy_tool_elision"`
+	// SummarizerModel overrides the local model used for compaction
+	// summarization. Empty falls back to LocalModel (the main-loop model).
+	// Useful because a code-focused model (qwen3-coder) tends to fabricate
+	// when asked to write extractive summaries; a text-focused model
+	// (phi4, llama3.1) grounds better. Not applied to the main tool loop.
+	SummarizerModel string `yaml:"summarizer_model,omitempty"`
 }
 
 // RetentionConfig bounds how long raw turn bodies and the compacted layer are

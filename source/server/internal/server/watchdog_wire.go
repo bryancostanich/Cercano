@@ -33,6 +33,8 @@ func (s *Server) buildWatchdog() *watchdog.Watchdog {
 		switch name {
 		case "debug-loop":
 			checks = append(checks, watchdog.DebugLoopCheck())
+		case "commit-checkpoint":
+			checks = append(checks, watchdog.CommitCheckpointCheck())
 		}
 	}
 

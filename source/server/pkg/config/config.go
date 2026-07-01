@@ -71,6 +71,12 @@ type CompactionConfig struct {
 	VerbatimRecent        int             `yaml:"verbatim_recent"`
 	HardOverridePct       float64         `yaml:"hard_override_pct"`
 	Retention             RetentionConfig `yaml:"retention"`
+	// ElideToolResults, when true, runs the mechanical superseded-tool-result
+	// dedup over every assembled history — independent of Enabled. Lossless and
+	// LLM-free, so it's safe to run even while the summarizer is disabled.
+	// Useful as an interim mitigation for a broken summarizer, and as an
+	// always-on savings pass in the live tail when the summarizer is back on.
+	ElideToolResults bool `yaml:"elide_tool_results"`
 }
 
 // RetentionConfig bounds how long raw turn bodies and the compacted layer are

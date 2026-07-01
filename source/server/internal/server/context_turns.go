@@ -40,13 +40,16 @@ func (s *Server) GetConversationTurns(ctx context.Context, req *proto.GetConvers
 }
 
 // contextTurnView derives a display summary (kind, preview, body, token estimate)
-// from a stored turn. Pure — no I/O. tool turns synthesize a label since their
-// Content may be empty.
+// from a stored turn. Pure — no I/O. Multi-block turns (e.g. an assistant turn
+// with interleaved text and tool_use) contribute every block in order to the
+// preview and body; earlier implementations overwrote preview/body on each tool
+// block, which silently dropped prose from mixed turns and made /c look like
+// there was almost no conversation. Kind still reflects the last non-text
+// block's kind (matching what the client expects for styling).
 func contextTurnView(t conversation.Turn, tok contextmeter.Tokenizer) *proto.ContextTurn {
 	kind := "text"
-	preview := t.Content
-	body := t.Content
 	tokenSrc := t.Content
+	var previewParts, bodyParts []string
 
 	if t.BlocksJSON != "" {
 		var blocks []llm.Block
@@ -56,31 +59,37 @@ func contextTurnView(t conversation.Turn, tok contextmeter.Tokenizer) *proto.Con
 				switch b.Type {
 				case llm.BlockToolUse:
 					kind = "tool_use"
-					preview = b.ToolName + " " + ctPreview(string(b.ToolInput))
-					body = b.ToolName + " " + string(b.ToolInput)
+					previewParts = append(previewParts, b.ToolName+"("+ctPreview(string(b.ToolInput))+")")
+					bodyParts = append(bodyParts, b.ToolName+" "+string(b.ToolInput))
 				case llm.BlockToolResult:
 					kind = "tool_result"
-					preview = "→ " + ctPreview(b.Content)
-					body = b.Content
+					previewParts = append(previewParts, "→ "+ctPreview(b.Content))
+					bodyParts = append(bodyParts, b.Content)
 				case llm.BlockText:
-					if preview == "" {
-						preview = b.Text
+					if b.Text == "" {
+						continue
 					}
-					if body == "" {
-						body = b.Text
-					}
+					previewParts = append(previewParts, b.Text)
+					bodyParts = append(bodyParts, b.Text)
 				case llm.BlockImage:
 					kind = "image"
-					if preview == "" {
-						preview = "[image]"
-					}
-					if body == "" {
-						body = "[image]"
-					}
+					previewParts = append(previewParts, "[image]")
+					bodyParts = append(bodyParts, "[image]")
 				}
 			}
+		} else if t.Content != "" {
+			// Malformed BlocksJSON — fall back to raw content so the turn
+			// isn't invisible in /c.
+			previewParts = append(previewParts, t.Content)
+			bodyParts = append(bodyParts, t.Content)
 		}
+	} else if t.Content != "" {
+		previewParts = append(previewParts, t.Content)
+		bodyParts = append(bodyParts, t.Content)
 	}
+
+	preview := strings.Join(previewParts, " ⏵ ")
+	body := strings.Join(bodyParts, "\n\n")
 
 	bodyStr, truncated := capBody(body, contextTurnBodyMax)
 	return &proto.ContextTurn{

@@ -12,7 +12,9 @@ package server
 import (
 	"sync"
 
+	"cercano/source/server/internal/localruntime/llamaserver"
 	"cercano/source/server/internal/meridian"
+	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 )
 
@@ -162,4 +164,66 @@ func meridianStatusToProto(st meridian.Status) *proto.MeridianStatus {
 		Port:        int32(st.Port),
 		MissingDeps: st.MissingDeps,
 	}
+}
+
+// buildLocalRuntimeStatus builds the wire-level status message from the
+// runtime name, the (possibly-just-updated) config, and an optional
+// DetectError. Detection failure → ok=false with Missing/SuggestedCommand
+// filled from the error; success (nil detectErr) → ok=true with binary +
+// default_model populated from cfg.
+//
+// The runtime name is passed in explicitly rather than read from cfg because
+// cfg.LocalRuntime is only updated later in UpdateConfig, but we need to
+// emit the status for the runtime being SWITCHED TO.
+func buildLocalRuntimeStatus(runtime string, cfg config.Config, detectErr *llamaserver.DetectError) *proto.LocalRuntimeStatus {
+	st := &proto.LocalRuntimeStatus{
+		Runtime: runtime,
+	}
+	if detectErr == nil {
+		st.Ok = true
+		st.BinaryPath = cfg.LlamaServer.Binary
+		st.DefaultModel = cfg.LlamaServer.DefaultModel
+		if runtime == "ollama" {
+			// Ollama has no auto-populated fields; the runtime itself is the
+			// binary. We report ok=true so clients can dismiss any prior
+			// llama-server chip when the user swaps back.
+			st.Message = "ollama runtime active"
+		} else {
+			st.Message = "llama-server runtime configured"
+		}
+		return st
+	}
+	st.Ok = false
+	st.Missing = detectErr.Missing
+	st.Message = detectErr.Error()
+	st.SuggestedCommand = detectErr.SuggestedCommand()
+	// Even on failure, propagate whatever cfg fields did get populated so
+	// the CLI can render a diagnostic like "found llama-server at X but no
+	// GGUFs in ~/.cercano/models".
+	st.BinaryPath = cfg.LlamaServer.Binary
+	st.DefaultModel = cfg.LlamaServer.DefaultModel
+	return st
+}
+
+// broadcastLocalRuntimeStatus pushes a LocalRuntimeStatusChanged event for
+// the current state of the active local inference runtime. Called from the
+// runtime-swap path in UpdateConfig — one event per swap attempt (ok or not)
+// so clients always have a fresh chip regardless of whether the runtime
+// works or is broken.
+//
+// status is passed pre-built so callers can populate fields from a
+// llamaserver.DetectError, from a healthy post-detect config, or from a
+// fresh install-completion event without a helper here having to know all
+// three shapes.
+func (s *Server) broadcastLocalRuntimeStatus(status *proto.LocalRuntimeStatus) {
+	if s.events == nil || status == nil {
+		return
+	}
+	s.events.broadcast(&proto.ClientEvent{
+		Event: &proto.ClientEvent_LocalRuntimeStatusChanged{
+			LocalRuntimeStatusChanged: &proto.LocalRuntimeStatusChanged{
+				Status: status,
+			},
+		},
+	})
 }

@@ -72,6 +72,16 @@ type chatDoneMsg struct {
 }
 type chatErrorMsg struct{ err error }
 
+// watchdogEventMsg is emitted by the main agent driver when the server's
+// watchdog fires. kind is "challenge", "block", or "echo"; chatView.Apply
+// renders each differently in scrollback.
+type watchdogEventMsg struct {
+	kind     string // "challenge" | "block" | "echo"
+	protocol string // protocol name (empty for echo)
+	summary  string // human-readable text (proto.Text)
+	thread   string // "watchdog" | "main" (echo only)
+}
+
 // chatConfirmMsg asks the host to raise the shared confirm gate. onYes/onNo are
 // the driver's follow-up cmds (e.g. perform the delete, or cancel). The pane
 // renders `assistant` as the agent's message; the MODEL raises the confirm

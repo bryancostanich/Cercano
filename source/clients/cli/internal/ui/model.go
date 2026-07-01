@@ -35,6 +35,7 @@ const (
 	RoleAssistant
 	RoleSystem   // /help output, errors, progress notes
 	RoleDivider  // full-width horizontal rule with a centered label, used to mark the freeze boundary on resume
+	RoleWatchdog // supervisor callout (challenge/block header + body, or dim echo line)
 )
 
 // Entry is one item in the scrollback. Stored raw; re-wrapped on every render.

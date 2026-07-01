@@ -491,6 +491,17 @@ func (c *Client) GetCompactionState(ctx context.Context, conversationID string) 
 	}, nil
 }
 
+// SuggestNextPrompt asks the local co-processor for a one-line follow-up the
+// user might send next, given the conversation so far. Returns "" on any
+// failure — the CLI treats empty as "no suggestion" and hides the ghost text.
+func (c *Client) SuggestNextPrompt(ctx context.Context, conversationID string) (string, error) {
+	resp, err := c.agent.SuggestNextPrompt(ctx, &proto.SuggestNextPromptRequest{ConversationId: conversationID})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetSuggestion(), nil
+}
+
 // ExportContext returns the full uncapped raw history as a JSON []llm.Message.
 func (c *Client) ExportContext(ctx context.Context, conversationID string) (string, error) {
 	resp, err := c.agent.ExportContext(ctx, &proto.ExportContextRequest{ConversationId: conversationID})

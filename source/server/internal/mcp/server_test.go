@@ -192,6 +192,10 @@ func (m *mockAgentClient) GetCompactionState(ctx context.Context, in *proto.GetC
 	return &proto.GetCompactionStateResponse{}, nil
 }
 
+func (m *mockAgentClient) SuggestNextPrompt(ctx context.Context, in *proto.SuggestNextPromptRequest, opts ...grpc.CallOption) (*proto.SuggestNextPromptResponse, error) {
+	return &proto.SuggestNextPromptResponse{}, nil
+}
+
 func (m *mockAgentClient) ExportContext(ctx context.Context, in *proto.ExportContextRequest, opts ...grpc.CallOption) (*proto.ExportContextResponse, error) {
 	return &proto.ExportContextResponse{}, nil
 }

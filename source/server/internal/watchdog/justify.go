@@ -50,6 +50,12 @@ func (j *justifyTool) Execute(_ context.Context, args json.RawMessage) (*agentto
 		return nil, fmt.Errorf("justify: parse args: %w", err)
 	}
 	key := j.w.lastChallengedKey(j.conversationID)
+	if key == "" {
+		return &agenttools.Result{
+			Type: agenttools.ResultText,
+			Text: "no active watchdog challenge to justify",
+		}, nil
+	}
 	j.w.recordJustify(j.conversationID, key)
 	log.Printf("watchdog: justify override recorded for conversation %q key %q reason: %s", j.conversationID, key, a.Reason)
 	return &agenttools.Result{

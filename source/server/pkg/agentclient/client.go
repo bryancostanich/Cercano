@@ -725,9 +725,10 @@ func (c *Client) StreamRuntimeLogs(ctx context.Context, tail int, source string)
 // zero / nil). Err is set if the stream itself failed and is the terminal
 // event on this channel.
 type AgentEvent struct {
-	Mode           string          // populated by PermissionModeChanged events
-	MeridianStatus *MeridianStatus // populated by MeridianStatusChanged events
-	Err            error
+	Mode               string              // populated by PermissionModeChanged events
+	MeridianStatus     *MeridianStatus     // populated by MeridianStatusChanged events
+	LocalRuntimeStatus *LocalRuntimeStatus // populated by LocalRuntimeStatusChanged events
+	Err                error
 }
 
 // MeridianStatus mirrors proto.MeridianStatus in the client SDK so callers
@@ -738,6 +739,20 @@ type MeridianStatus struct {
 	Message     string
 	Port        int32
 	MissingDeps []string
+}
+
+// LocalRuntimeStatus mirrors proto.LocalRuntimeStatus in the client SDK.
+// Ok=true means the runtime is ready; ok=false + Missing tells the CLI what
+// recovery flow to offer (install, model picker). SuggestedCommand is the
+// shell command that would resolve Missing (e.g. "brew install llama.cpp").
+type LocalRuntimeStatus struct {
+	Ok               bool
+	Runtime          string
+	Missing          string
+	Message          string
+	SuggestedCommand string
+	BinaryPath       string
+	DefaultModel     string
 }
 
 // SubscribeEvents opens the standing server->client event stream and returns a
@@ -769,6 +784,10 @@ func (c *Client) SubscribeEvents(ctx context.Context) (<-chan AgentEvent, error)
 				out <- AgentEvent{MeridianStatus: meridianStatusFromProto(ms.GetStatus())}
 				continue
 			}
+			if lr := ev.GetLocalRuntimeStatusChanged(); lr != nil {
+				out <- AgentEvent{LocalRuntimeStatus: localRuntimeStatusFromProto(lr.GetStatus())}
+				continue
+			}
 			// Unknown event types are silently dropped — clients that don't
 			// recognise them should not error on forward-compat additions.
 		}
@@ -787,6 +806,70 @@ func meridianStatusFromProto(p *proto.MeridianStatus) *MeridianStatus {
 		Port:        p.GetPort(),
 		MissingDeps: append([]string(nil), p.GetMissingDeps()...),
 	}
+}
+
+// localRuntimeStatusFromProto converts the wire proto into the client-side
+// struct. Nil-safe so callers can invoke unconditionally.
+func localRuntimeStatusFromProto(p *proto.LocalRuntimeStatus) *LocalRuntimeStatus {
+	if p == nil {
+		return nil
+	}
+	return &LocalRuntimeStatus{
+		Ok:               p.GetOk(),
+		Runtime:          p.GetRuntime(),
+		Missing:          p.GetMissing(),
+		Message:          p.GetMessage(),
+		SuggestedCommand: p.GetSuggestedCommand(),
+		BinaryPath:       p.GetBinaryPath(),
+		DefaultModel:     p.GetDefaultModel(),
+	}
+}
+
+// InstallProgress is one frame from an InstallLocalRuntime stream. Frames
+// with Done=false carry a Line of subprocess output. The stream terminates
+// with a single Done=true frame carrying Ok+Error (Err populated only when
+// the stream itself failed, distinct from a subprocess non-zero exit).
+type InstallProgress struct {
+	Line  string
+	Done  bool
+	Ok    bool
+	Error string
+	Err   error
+}
+
+// InstallLocalRuntime opens the InstallLocalRuntime streaming RPC for the
+// given runtime and returns a channel of progress frames. The channel closes
+// after the terminal Done=true frame (or after a stream error). Cancelling
+// ctx kills the install subprocess server-side.
+func (c *Client) InstallLocalRuntime(ctx context.Context, runtime string) (<-chan InstallProgress, error) {
+	stream, err := c.agent.InstallLocalRuntime(ctx, &proto.InstallLocalRuntimeRequest{Runtime: runtime})
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan InstallProgress, 8)
+	go func() {
+		defer close(out)
+		for {
+			frame, err := stream.Recv()
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			if err != nil {
+				out <- InstallProgress{Err: err}
+				return
+			}
+			out <- InstallProgress{
+				Line:  frame.GetLine(),
+				Done:  frame.GetDone(),
+				Ok:    frame.GetOk(),
+				Error: frame.GetError(),
+			}
+			if frame.GetDone() {
+				return
+			}
+		}
+	}()
+	return out, nil
 }
 
 // UpdateConfig sends a runtime config patch. Returns the agent's confirmation

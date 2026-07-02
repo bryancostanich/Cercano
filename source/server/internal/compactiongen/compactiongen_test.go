@@ -16,13 +16,14 @@ import (
 )
 
 type fakeStore struct {
-	mu    sync.Mutex
-	turns []conversation.Turn
-	saved *conversation.Compaction
+	mu       sync.Mutex
+	turns    []conversation.Turn
+	turnsErr error
+	saved    *conversation.Compaction
 }
 
 func (f *fakeStore) GetTurns(context.Context, string) ([]conversation.Turn, error) {
-	return f.turns, nil
+	return f.turns, f.turnsErr
 }
 func (f *fakeStore) GetCompaction(context.Context, string) (conversation.Compaction, error) {
 	return conversation.Compaction{}, nil
@@ -132,6 +133,57 @@ func TestRunCompaction_LogsPassFailed(t *testing.T) {
 		t.Errorf("expected conversation id in log; got:\n%s", out)
 	}
 	if !strings.Contains(out, "summarize error") {
+		t.Errorf("expected error text in log; got:\n%s", out)
+	}
+}
+
+func TestRunCompaction_LogsNoOpTerminalLine(t *testing.T) {
+	fs := &fakeStore{turns: bigTurns(3, 100)} // ~300 tokens, below floor → changed=false
+	summarize := func(context.Context, []llm.Message) (compaction.StructuredSummary, error) {
+		return compaction.StructuredSummary{}, nil
+	}
+	cfg := compactor.Config{ActivationFloorTokens: 100000, SegmentTokens: 8000, VerbatimRecent: 6}
+	g := New(fs, summarize, cfg, contextmeter.Default(), 10*time.Millisecond)
+	var buf strings.Builder
+	g.logf = func(f string, a ...any) { fmt.Fprintf(&buf, f, a...) }
+
+	if err := g.CompactNow(context.Background(), "conv-noop"); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "pass start") {
+		t.Errorf("expected 'pass start' in log; got:\n%s", out)
+	}
+	if !strings.Contains(out, "pass no-op") {
+		t.Errorf("expected 'pass no-op' terminal line in log; got:\n%s", out)
+	}
+	if !strings.Contains(out, "conv-noop") {
+		t.Errorf("expected conversation id in log; got:\n%s", out)
+	}
+}
+
+func TestRunCompaction_LogsPrePassStoreFailure(t *testing.T) {
+	fs := &fakeStore{turnsErr: fmt.Errorf("db locked")}
+	summarize := func(context.Context, []llm.Message) (compaction.StructuredSummary, error) {
+		return compaction.StructuredSummary{}, nil
+	}
+	cfg := compactor.Config{ActivationFloorTokens: 1000, SegmentTokens: 4000, VerbatimRecent: 2}
+	g := New(fs, summarize, cfg, contextmeter.Default(), 10*time.Millisecond)
+	var buf strings.Builder
+	g.logf = func(f string, a ...any) { fmt.Fprintf(&buf, f, a...) }
+
+	err := g.CompactNow(context.Background(), "conv-prefail")
+	if err == nil {
+		t.Fatal("expected error from failing store, got nil")
+	}
+	out := buf.String()
+	if !strings.Contains(out, "pass FAILED") {
+		t.Errorf("expected 'pass FAILED' in log; got:\n%s", out)
+	}
+	if !strings.Contains(out, "conv-prefail") {
+		t.Errorf("expected conversation id in log; got:\n%s", out)
+	}
+	if !strings.Contains(out, "db locked") {
 		t.Errorf("expected error text in log; got:\n%s", out)
 	}
 }

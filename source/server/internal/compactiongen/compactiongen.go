@@ -98,17 +98,26 @@ func (g *Generator) runCompaction(ctx context.Context, conversationID string) er
 	}()
 
 	turns, err := g.store.GetTurns(ctx, conversationID)
-	if err != nil || len(turns) == 0 {
+	if err != nil {
+		g.logf("[compaction] pass FAILED %s: %v\n", conversationID, err)
 		return err
+	}
+	if len(turns) == 0 {
+		// Nothing to compact and no start line was emitted — stay silent.
+		return nil
 	}
 	state, err := g.store.GetCompaction(ctx, conversationID)
 	if err != nil {
+		g.logf("[compaction] pass FAILED %s: %v\n", conversationID, err)
 		return err
 	}
 	state.ConversationID = conversationID
 
 	start := time.Now()
-	preView, _ := compactor.BuildSendView(turns, state)
+	preView, err := compactor.BuildSendView(turns, state)
+	if err != nil {
+		g.logf("[compaction] view build failed %s (pre-pass): %v\n", conversationID, err)
+	}
 	pre := compaction.TotalTokens(g.tok, preView)
 	g.logf("[compaction] pass start %s: %d tokens\n", conversationID, pre)
 
@@ -118,13 +127,17 @@ func (g *Generator) runCompaction(ctx context.Context, conversationID string) er
 		return err
 	}
 	if !changed {
+		g.logf("[compaction] pass no-op %s: nothing to do\n", conversationID)
 		return nil
 	}
 	if err := g.store.SaveCompaction(ctx, newState); err != nil {
 		g.logf("[compaction] pass FAILED %s after %s: %v\n", conversationID, time.Since(start).Round(time.Millisecond), err)
 		return err
 	}
-	postView, _ := compactor.BuildSendView(turns, newState)
+	postView, err := compactor.BuildSendView(turns, newState)
+	if err != nil {
+		g.logf("[compaction] view build failed %s (post-pass): %v\n", conversationID, err)
+	}
 	post := compaction.TotalTokens(g.tok, postView)
 	g.logf("[compaction] pass ok %s: %d -> %d tokens in %s (more=%v)\n", conversationID, pre, post, time.Since(start).Round(time.Millisecond), more)
 	if more {

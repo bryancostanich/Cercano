@@ -53,15 +53,25 @@ type Watchdog struct {
 }
 
 // SetEcho registers a callback that is called on watchdog interventions and
-// justify overrides. thread is "watchdog" or "main". Safe to call on a live
-// Watchdog; replaces any previously registered callback.
-func (w *Watchdog) SetEcho(fn func(thread, text string)) { w.echo = fn }
+// justify overrides. thread is "watchdog" or "main". Synchronized with w.mu,
+// so it may be called on a live Watchdog; note the callback is global to the
+// Watchdog, not per-conversation — under concurrent conversations, echo lines
+// from all of them reach the same callback.
+func (w *Watchdog) SetEcho(fn func(thread, text string)) {
+	w.mu.Lock()
+	w.echo = fn
+	w.mu.Unlock()
+}
 
-// emitEcho calls the echo callback if one is registered. Never called while
-// holding w.mu — callers must release the mutex before calling emitEcho.
+// emitEcho calls the echo callback if one is registered. The callback itself
+// is invoked outside w.mu (snapshot under lock, call outside), so callers may
+// hold or not hold the mutex freely and the callback can never deadlock us.
 func (w *Watchdog) emitEcho(thread, text string) {
-	if w.echo != nil {
-		w.echo(thread, text)
+	w.mu.Lock()
+	fn := w.echo
+	w.mu.Unlock()
+	if fn != nil {
+		fn(thread, text)
 	}
 }
 

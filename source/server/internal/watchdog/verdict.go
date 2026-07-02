@@ -21,7 +21,10 @@ func parseVerdict(protocol, modelText string) Verdict {
 		switch {
 		case strings.HasPrefix(low, "violation:"):
 			val := strings.TrimSpace(low[len("violation:"):])
-			v.Violation = val == "yes" || val == "true"
+			// Prefix match: fast local models sometimes decorate the verdict
+			// ("yes.", "yes (clearly)"). Anything else — including "no" and
+			// genuine garbage — fails open (no violation).
+			v.Violation = strings.HasPrefix(val, "yes") || strings.HasPrefix(val, "true")
 		case strings.HasPrefix(low, "challenge:"):
 			v.Challenge = strings.TrimSpace(l[len("challenge:"):])
 		}

@@ -19,6 +19,20 @@ func TestDebugLoopApplies(t *testing.T) {
 	}
 }
 
+func TestDebugLoopNilOneShotFailsOpen(t *testing.T) {
+	a := Action{Kind: "tool_call", ToolName: "edit_file", ToolArgs: []byte(`{"path":"x.go"}`)}
+	v, err := DebugLoopCheck().Evaluate(context.Background(), a, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Violation {
+		t.Fatal("nil oneShot must fail open (no violation)")
+	}
+	if v.Protocol != "debug-loop" {
+		t.Fatalf("protocol: %q", v.Protocol)
+	}
+}
+
 func TestDebugLoopEvaluate(t *testing.T) {
 	var gotPrompt string
 	oneShot := func(_ context.Context, prompt string) (string, error) {

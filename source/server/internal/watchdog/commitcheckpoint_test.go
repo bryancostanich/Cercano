@@ -15,10 +15,6 @@ func toolUse(name, input string) llm.Message {
 	}}
 }
 
-func editAction2() Action {
-	return Action{Kind: "tool_call", ToolName: "edit_file", ToolArgs: []byte(`{"path":"b.go"}`)}
-}
-
 func TestCommitCheckpointApplies(t *testing.T) {
 	c := CommitCheckpointCheck()
 

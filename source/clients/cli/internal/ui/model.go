@@ -529,9 +529,28 @@ func fetchRecap(ag *agentclient.Client, convID string) tea.Cmd {
 		if err != nil {
 			return recapLoadedMsg{}
 		}
-		return recapLoadedMsg{recap: info.Recap}
+		return recapLoadedMsg{recap: recapDisplay(info)}
 	}
 }
+
+// recapDisplay returns what the recap slot should show for a conversation:
+// the real recap when present, an "unavailable" placeholder when the
+// conversation has enough turns to have generated one but never has (a
+// signal that the local recap model is misconfigured or offline), or "" when
+// it's too early to conclude anything. The recapUnavailableMinTurns floor
+// keeps a placeholder from flickering on brand-new conversations before the
+// first debounced generation has had a chance to run.
+func recapDisplay(info agentclient.ConversationInfo) string {
+	if info.Recap != "" {
+		return info.Recap
+	}
+	if info.TurnCount >= recapUnavailableMinTurns && info.RecapUpdatedAt.IsZero() {
+		return "recap unavailable — check /config local-runtime"
+	}
+	return ""
+}
+
+const recapUnavailableMinTurns = 4
 
 // progressAnimTickMsg fires every ~50ms while a streaming assistant entry is
 // awaiting its first token. Triggers a View re-render so the per-char sweep
@@ -2051,10 +2070,12 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 		frozenThrough = cs.FrozenThrough
 	}
 	m.chat.SetEntriesSlice(resumeEntries(turns, frozenThrough))
-	// Restore the prior session's living recap into the footer line (renderRecap).
-	// Don't also push it into scrollback — that showed the recap twice on resume.
-	if info, err := m.agent.GetConversation(ctx, conversationID); err == nil && info.Recap != "" {
-		m.recap = info.Recap
+	// Restore the prior session's living recap into the footer line (renderRecap),
+	// or show a "recap unavailable" placeholder if the recap generator has been
+	// silently failing (e.g. local runtime misconfigured). Don't push into
+	// scrollback — that showed the recap twice on resume.
+	if info, err := m.agent.GetConversation(ctx, conversationID); err == nil {
+		m.recap = recapDisplay(info)
 	}
 	m.relayout()
 	return m, fetchContextUsage(m.agent, m.convID)

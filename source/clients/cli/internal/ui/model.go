@@ -193,6 +193,14 @@ type Model struct {
 	// walks a small state machine — idle → running → done|failed — driven
 	// by InstallLocalRuntime stream events.
 	localRuntimeModal *localRuntimeInstallModal
+
+	// pendingRuntimeSwitch, when non-empty, is a runtime id ("llama_server")
+	// whose UpdateConfig(local-runtime=...) call is queued to fire once the
+	// install-modal reports success. Set by openLocalRuntimeInstallModalMsg
+	// (emitted by the settings page when the user picks a runtime that
+	// isn't ready), cleared by every modal-close path (dispatched on
+	// success, dropped on cancel/failed).
+	pendingRuntimeSwitch string
 }
 
 // pendingToolCall is a queued tool invocation awaiting user confirmation.
@@ -1147,15 +1155,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case msg.err != "":
 			m.localRuntimeModal.setFailed(msg.err)
+			m.pendingRuntimeSwitch = "" // failed install — the queued switch is dropped
 		case !msg.ok:
 			m.localRuntimeModal.setFailed("install exited with error")
+			m.pendingRuntimeSwitch = ""
 		default:
 			// Success — wait for LocalRuntimeStatusChanged{ok:true} to
 			// confirm the runtime is actually usable, then flip to done.
 			// If the event doesn't arrive within a reasonable window we
 			// still show the completion to unblock the user.
 			m.localRuntimeModal.state = runtimeModalDone
+			// If the settings gate queued a runtime switch, dispatch it
+			// now — the modal's install succeeded so the runtime is
+			// ready to use.
+			if m.pendingRuntimeSwitch != "" {
+				runtime := m.pendingRuntimeSwitch
+				m.pendingRuntimeSwitch = ""
+				return m, dispatchLocalRuntimeSwitch(m.agent, runtime)
+			}
 		}
+		return m, nil
+
+	case openLocalRuntimeInstallModalMsg:
+		// Emitted by the settings page when the user tries to switch to
+		// a runtime that isn't ready. Opens the install modal in its
+		// idle state and remembers the switch to dispatch on success.
+		if m.localRuntimeModal == nil {
+			m.localRuntimeModal = newLocalRuntimeInstallModal(msg.status)
+		}
+		m.pendingRuntimeSwitch = msg.pending
 		return m, nil
 
 	case localRuntimeStatusChangedMsg:

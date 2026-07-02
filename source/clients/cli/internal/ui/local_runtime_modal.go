@@ -11,6 +11,7 @@ package ui
 import (
 	"context"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -69,6 +70,17 @@ type localRuntimeInstallModal struct {
 // Model and re-renders.
 func newLocalRuntimeInstallModal(st agentclient.LocalRuntimeStatus) *localRuntimeInstallModal {
 	return &localRuntimeInstallModal{status: st, state: runtimeModalIdle}
+}
+
+// openLocalRuntimeInstallModalMsg is emitted from the settings page when the
+// user tries to switch to a runtime that isn't ready. Carries the status
+// snapshot to render in the idle state, plus the runtime id whose switch is
+// queued to fire after a successful install. If the user cancels, the
+// pending switch is dropped — no UpdateConfig is dispatched, and the
+// runtime toggle reverts to whatever the server currently has.
+type openLocalRuntimeInstallModalMsg struct {
+	status  agentclient.LocalRuntimeStatus
+	pending string // runtime id to switch to on install success ("" = none)
 }
 
 // appendLog records one line of streamed install output. Trimming trailing
@@ -268,19 +280,23 @@ func (m Model) handleLocalRuntimeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) 
 		}
 		if key == "esc" || key == "q" {
 			m.localRuntimeModal = nil
+			m.pendingRuntimeSwitch = "" // user rejected the switch
 		}
 	case runtimeModalRunning:
 		if key == "esc" {
 			// Cancel the install: the stream context gets torn down
 			// when the modal closes; the server-side subprocess is
-			// killed and the drain loop exits.
+			// killed and the drain loop exits. The queued switch is
+			// dropped — the runtime isn't ready.
 			if m.localRuntimeModal.cancel != nil {
 				m.localRuntimeModal.cancel()
 			}
 			m.localRuntimeModal = nil
+			m.pendingRuntimeSwitch = ""
 		}
 	case runtimeModalDone:
-		// Any key dismisses.
+		// Any key dismisses. pendingRuntimeSwitch was already cleared
+		// by runtimeInstallDoneMsg (either dispatched or dropped).
 		m.localRuntimeModal = nil
 	case runtimeModalFailed:
 		if key == "enter" {
@@ -291,9 +307,24 @@ func (m Model) handleLocalRuntimeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) 
 		}
 		if key == "esc" || key == "q" {
 			m.localRuntimeModal = nil
+			m.pendingRuntimeSwitch = "" // failed install; drop the queued switch too
 		}
 	}
 	return m, nil
+}
+
+// dispatchLocalRuntimeSwitch fires an UpdateConfig(local-runtime=runtime) in
+// the background after a successful install. Errors are swallowed — the
+// server broadcasts its own ConfigChanged / LocalRuntimeStatusChanged events
+// so any status change becomes visible via the normal channels without a
+// custom msg round-trip.
+func dispatchLocalRuntimeSwitch(ag *agentclient.Client, runtime string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = ag.UpdateConfig(ctx, agentclient.ConfigUpdate{LocalRuntime: runtime})
+		return nil
+	}
 }
 
 // runtimeInstallStartedMsg is the first message emitted by

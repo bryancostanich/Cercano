@@ -14,6 +14,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 
 	"cercano/source/server/internal/localruntime/llamaserver"
@@ -80,4 +81,38 @@ func sendTerminalFrame(stream proto.Agent_InstallLocalRuntimeServer, ok bool, er
 func buildLocalRuntimeStatusFromDetectError(cfg config.Config, err error) *proto.LocalRuntimeStatus {
 	de, _ := err.(*llamaserver.DetectError)
 	return buildLocalRuntimeStatus("llama_server", cfg, de)
+}
+
+// GetLocalRuntimeStatus implements proto.AgentServer — pull-side snapshot
+// for CLI startup. Re-runs headless detection against the currently
+// selected local runtime and returns the same LocalRuntimeStatus shape
+// pushed by LocalRuntimeStatusChanged. Cheap (a couple filesystem checks)
+// so no caching — always fresh.
+func (s *Server) GetLocalRuntimeStatus(_ context.Context, _ *proto.GetLocalRuntimeStatusRequest) (*proto.GetLocalRuntimeStatusResponse, error) {
+	s.cfgMu.RLock()
+	cfg := s.currentConfig
+	s.cfgMu.RUnlock()
+	runtime := cfg.LocalRuntime
+	if runtime == "" {
+		runtime = "ollama"
+	}
+	if runtime != "llama_server" {
+		// Ollama and future runtimes don't need setup surfacing today — we
+		// return an ok=true snapshot so the client hides the chip.
+		return &proto.GetLocalRuntimeStatusResponse{
+			Status: buildLocalRuntimeStatus(runtime, cfg, nil),
+		}, nil
+	}
+	llamaCfg := cfg.LlamaServer
+	detectErr := llamaserver.Detect(context.Background(), &llamaCfg)
+	var de *llamaserver.DetectError
+	if detectErr != nil {
+		de, _ = detectErr.(*llamaserver.DetectError)
+	}
+	// Detect populated llamaCfg's Binary/DefaultModel in place — reflect
+	// those into the snapshot so the client sees the resolved fields.
+	cfg.LlamaServer = llamaCfg
+	return &proto.GetLocalRuntimeStatusResponse{
+		Status: buildLocalRuntimeStatus("llama_server", cfg, de),
+	}, nil
 }

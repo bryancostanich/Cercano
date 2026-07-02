@@ -196,6 +196,18 @@ type Model struct {
 	// not offered.
 	localRuntimeStatus *agentclient.LocalRuntimeStatus
 
+	// connState mirrors the SDK's connection health so the status bar can
+	// render a "reconnecting…" chip when the agent server dies and the
+	// reconnect loop is trying to bring it back. Zero value is Connected,
+	// matching the SDK convention.
+	connState        agentclient.ConnState
+	connAttempt      int // current reconnect attempt number, 1-based (0 when Connected)
+	connFailErrMsg   string
+	// lastSubmittedPrompt stashes the user's last submitted turn text so
+	// that if the agent crashes mid-stream we can restore it into the
+	// input for one-key re-submit. Cleared on successful streamEndMsg.
+	lastSubmittedPrompt string
+
 	// localRuntimeModal is the open install-modal state (nil = closed). It
 	// walks a small state machine — idle → running → done|failed — driven
 	// by InstallLocalRuntime stream events.
@@ -369,7 +381,7 @@ func (m *Model) applyTheme(t theme.Theme) {
 
 // Init is called by Bubble Tea once at startup.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.input.Focus(), m.splash.Init(), fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent), fetchLocalRuntimeStatusCmd(m.agent), fetchVisionCmd(m.agent), subscribeEventsCmd(m.agent))
+	return tea.Batch(m.input.Focus(), m.splash.Init(), fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent), fetchLocalRuntimeStatusCmd(m.agent), fetchVisionCmd(m.agent), subscribeEventsCmd(m.agent), subscribeConnStateCmd(m.agent))
 }
 
 // permissionModeMsg carries the result of the startup GetPermissionMode RPC.
@@ -1276,6 +1288,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, msg.next
 
+	case connStateChangedMsg:
+		// SDK reconnect loop reporting a transport-health change. On
+		// Reconnecting, if we were mid-stream, treat the current turn
+		// as lost and rehydrate the input with the user's prompt so
+		// they can re-send with one keystroke.
+		prev := m.connState
+		m.connState = msg.state
+		m.connAttempt = msg.attempt
+		m.connFailErrMsg = msg.errMsg
+		if msg.state == agentclient.ConnStateReconnecting && prev == agentclient.ConnStateConnected {
+			if m.streaming && m.lastSubmittedPrompt != "" {
+				m.input.SetValue(m.lastSubmittedPrompt)
+				m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "⚠ agent disconnected mid-turn — prompt restored to the input; press Enter to re-submit once the agent is back."})
+				m.streaming = false
+				m.chat.SetStreaming(false)
+				if e := m.chat.lastAssistantEntry(); e != nil {
+					e.Streaming = false
+				}
+				m.refreshViewport()
+			}
+		}
+		if msg.state == agentclient.ConnStateFailed {
+			// Terminal — the reconnect loop exhausted its retries.
+			// Surface once as a system message; further guidance is
+			// user-driven (restart cercano manually).
+			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "✕ agent unreachable — reconnect failed after retries. Restart cercano to recover."})
+			m.refreshViewport()
+		}
+		return m, msg.next
+
 	case toolsLoadedMsg:
 		cache := make(map[string]agentclient.ToolInfo, len(msg.Tools))
 		for _, t := range msg.Tools {
@@ -1304,6 +1346,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case streamEndMsg:
 		m.streaming = false
 		m.chat.SetStreaming(false)
+		// Turn completed normally; the rehydration cache is stale.
+		m.lastSubmittedPrompt = ""
 		if m.cancelStream != nil {
 			m.cancelStream() // release the stream context on normal completion
 			m.cancelStream = nil
@@ -1461,6 +1505,10 @@ func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model,
 		next, cmd := m.runSlash(text)
 		return next, cmd
 	}
+	// Stash the prompt so we can rehydrate the input if the agent crashes
+	// mid-turn. Cleared on successful streamEndMsg; consumed on
+	// connStateChangedMsg(Reconnecting) if the current turn is in flight.
+	m.lastSubmittedPrompt = text
 	// User turn — show markers + image count suffix when images are attached.
 	content := text
 	if len(images) > 0 {
@@ -3004,6 +3052,7 @@ func (m Model) renderStatus() string {
 		cloudPart,
 		m.renderMeridianChip(),
 		m.renderLocalRuntimeChip(),
+		m.renderConnStateChip(),
 		m.renderPermissionModeChip(),
 		m.styles.BorderDim.Render("  ·  "),
 		help,
@@ -3065,6 +3114,23 @@ func (m Model) renderLocalRuntimeChip() string {
 		label = "⚠ local runtime: setup (F1)"
 	}
 	return m.styles.BorderDim.Render("  ·  ") + m.styles.Primary.Render(label)
+}
+
+// renderConnStateChip surfaces gRPC transport health. Amber "reconnecting
+// (N/3)…" while the SDK's reconnect loop is retrying; red "agent
+// unreachable" when the loop has given up. Empty (silent) when the
+// connection is healthy so the status bar isn't cluttered by the common
+// case.
+func (m Model) renderConnStateChip() string {
+	switch m.connState {
+	case agentclient.ConnStateReconnecting:
+		label := fmt.Sprintf("⚠ agent reconnecting (%d/%d)…", m.connAttempt, 3)
+		return m.styles.BorderDim.Render("  ·  ") + m.styles.Primary.Render(label)
+	case agentclient.ConnStateFailed:
+		return m.styles.BorderDim.Render("  ·  ") + m.styles.Error.Render("✕ agent unreachable")
+	default:
+		return ""
+	}
 }
 
 // renderPermissionModeChip renders the session-mode chip for the status bar:

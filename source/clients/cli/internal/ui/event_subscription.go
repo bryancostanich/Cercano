@@ -62,3 +62,37 @@ func subscribeEventsCmd(ag *agentclient.Client) tea.Cmd {
 		return wait()
 	}
 }
+
+// connStateChangedMsg is delivered when the SDK's reconnect loop
+// transitions the gRPC connection between healthy / reconnecting /
+// terminally-failed. Drives the status-bar chip and the prompt-
+// rehydration flow (see Model.handleConnStateChanged).
+type connStateChangedMsg struct {
+	state   agentclient.ConnState
+	attempt int
+	errMsg  string
+	next    tea.Cmd
+}
+
+// subscribeConnStateCmd hooks the SDK's connection-state channel into
+// the bubbletea event loop. Mirrors the shape of subscribeEventsCmd:
+// one message per state transition, with next re-arming the drain.
+// When the channel closes (Client.Close) the drain stops.
+func subscribeConnStateCmd(ag *agentclient.Client) tea.Cmd {
+	return func() tea.Msg {
+		ch, _ := ag.ConnStateChanges()
+		var wait tea.Cmd
+		wait = func() tea.Msg {
+			ev, ok := <-ch
+			if !ok {
+				return nil
+			}
+			msg := connStateChangedMsg{state: ev.State, attempt: ev.Attempt, next: wait}
+			if ev.Err != nil {
+				msg.errMsg = ev.Err.Error()
+			}
+			return msg
+		}
+		return wait()
+	}
+}

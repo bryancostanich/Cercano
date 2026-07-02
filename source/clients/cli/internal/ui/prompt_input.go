@@ -24,8 +24,14 @@ type promptInputStyles struct {
 
 type promptInput struct {
 	Placeholder string
-	MinHeight   int
-	MaxHeight   int
+	// Suggestion is ghost-text rendered in place of Placeholder when the
+	// input is empty. Displayed with the same muted style as the
+	// placeholder so it reads as "you can Tab to accept this" rather than
+	// as typed input. Cleared when the user starts typing (the model
+	// syncs this) or accepted by Tab (the model consumes it).
+	Suggestion string
+	MinHeight  int
+	MaxHeight  int
 
 	value  []rune
 	cursor int
@@ -618,10 +624,19 @@ func (p promptInput) View() string {
 		}
 		row := rows[rowIdx]
 		lineText := row.text
-		if len(p.value) == 0 && rowIdx == 0 && p.Placeholder != "" {
-			placeholder := ansi.Truncate(p.Placeholder, textWidth, "")
-			lineText = p.styles.Placeholder.Render(placeholder)
-			lines = append(lines, prompt+lineText+strings.Repeat(" ", maxInt(0, textWidth-lipgloss.Width(placeholder))))
+		if len(p.value) == 0 && rowIdx == 0 && (p.Placeholder != "" || p.Suggestion != "") {
+			// Prefer the model-generated Suggestion over the static
+			// Placeholder — when a "what to do next" ghost is available,
+			// it's more useful to show than the generic "type a message"
+			// prompt. Both render in the same Placeholder style so the
+			// input still reads as empty.
+			ghost := p.Placeholder
+			if p.Suggestion != "" {
+				ghost = p.Suggestion
+			}
+			ghost = ansi.Truncate(ghost, textWidth, "")
+			lineText = p.styles.Placeholder.Render(ghost)
+			lines = append(lines, prompt+lineText+strings.Repeat(" ", maxInt(0, textWidth-lipgloss.Width(ghost))))
 			continue
 		}
 

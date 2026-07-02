@@ -103,6 +103,21 @@ func TestRowAnnotation(t *testing.T) {
 			expected: "— no key",
 		},
 		{
+			name:     "profile row with model + key + active",
+			row:      cloudRow{ID: "profile:x", IsProfile: true, HasKey: true, Active: true, Profile: &agentclient.CloudProfileInfo{Model: "claude-opus-4-8"}},
+			expected: "claude-opus-4-8  ✓ key  (active)",
+		},
+		{
+			name:     "profile row with meridian route hides no-key text",
+			row:      cloudRow{ID: "profile:x", IsProfile: true, HasKey: false, Active: true, Profile: &agentclient.CloudProfileInfo{Model: "claude-opus-4-8", Route: "meridian"}},
+			expected: "claude-opus-4-8  meridian  (active)",
+		},
+		{
+			name:     "profile row with meridian route and no model",
+			row:      cloudRow{ID: "profile:x", IsProfile: true, HasKey: false, Active: false, Profile: &agentclient.CloudProfileInfo{Route: "meridian"}},
+			expected: "— no model  meridian",
+		},
+		{
 			name:     "other row",
 			row:      cloudRow{ID: "other"},
 			expected: "(custom endpoint)",

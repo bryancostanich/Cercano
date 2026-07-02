@@ -1417,13 +1417,33 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 	s.cfgMu.RLock()
 	cfg := s.currentConfig
 	s.cfgMu.RUnlock()
+	// Cloud fields fall back to the active profile when the legacy top-level
+	// slots are empty — profiles are the single source of truth (see
+	// activeCloudModel), and the legacy fields are only populated for
+	// backwards compat. Without the fallback, GetConfig responds with an
+	// empty CloudModel for any config that migrated to profile-only auth,
+	// which drops "c:model" from the header.
+	cloudModel := cfg.CloudModel
+	if cloudModel == "" {
+		cloudModel = s.activeCloudModel()
+	}
+	cloudProvider := cfg.CloudProvider
+	cloudBaseURL := cfg.CloudBaseURL
+	if p, ok := s.activeProfile(); ok {
+		if cloudProvider == "" {
+			cloudProvider = p.Flavor
+		}
+		if cloudBaseURL == "" {
+			cloudBaseURL = p.BaseURL
+		}
+	}
 	return &proto.GetConfigResponse{
 		OllamaUrl:              cfg.OllamaURL,
 		LocalModel:             cfg.LocalModel,
 		EmbeddingModel:         cfg.EmbeddingModel,
-		CloudProvider:          cfg.CloudProvider,
-		CloudModel:             cfg.CloudModel,
-		CloudBaseUrl:           cfg.CloudBaseURL,
+		CloudProvider:          cloudProvider,
+		CloudModel:             cloudModel,
+		CloudBaseUrl:           cloudBaseURL,
 		CloudApiKeySet:         cfg.CloudAPIKey != "",
 		CloudState:             state,
 		Port:                   cfg.Port,

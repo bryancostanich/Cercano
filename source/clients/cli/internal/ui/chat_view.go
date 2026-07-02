@@ -980,6 +980,121 @@ func (c *chatView) MouseInText(localX, localY int) bool {
 		localY < c.vp.Height()
 }
 
+// MouseToggleFold checks whether a local click landed on a tool entry line
+// and, if so, focuses that entry and toggles its Folded state (mirroring the
+// keyboard ToggleFocusedFold path). Returns true when the click was handled —
+// the host should refresh the viewport and skip its selection begin. Returns
+// false for clicks outside the text region, on non-tool lines, or when the
+// current render can't unambiguously map lines back to entries (grouped
+// collapsed runs — those still respond to keyboard nav).
+func (c *chatView) MouseToggleFold(localX, localY int) bool {
+	if !c.MouseInText(localX, localY) {
+		return false
+	}
+	absLine := c.vp.YOffset() + localY
+	idx := c.toolEntryAtLine(absLine)
+	if idx < 0 {
+		return false
+	}
+	c.focusedToolIdx = idx
+	c.ToggleFocusedFold()
+	return true
+}
+
+// toolEntryAtLine maps an absolute line index (into c.plainLines) to the
+// corresponding entries[] index of the tool call whose render spans that
+// line, or -1 when the mapping is ambiguous.
+//
+// Two rendering patterns need to be handled:
+//   - Individual/expanded tool entries: each entry renders one line
+//     starting with ▸ or ▾ ("▸ read /path/..."). Arrow count matches the
+//     total tool-entry count in c.entries.
+//   - Collapsed multi-entry groups: N consecutive entries render as ONE
+//     summary line ("▸ 3 tool calls (2 Read, Edit)"). Arrow count matches
+//     the GROUP count.
+//
+// Cases: when arrow count == total tool entries, arrows and entries pair
+// 1:1 by document order. When arrow count == group count, each arrow maps
+// to the first entry of its group — clicking a group summary focuses that
+// entry, and the existing ToggleFocusedFold path expands the whole group
+// (mirroring the keyboard "expand collapsed group" behavior). Mixed
+// renderings (some groups collapsed, some expanded) return -1.
+func (c *chatView) toolEntryAtLine(line int) int {
+	if line < 0 || line >= len(c.plainLines) {
+		return -1
+	}
+	// Group c.entries by contiguous runs of tool entries.
+	var groups [][]int
+	var currentGroup []int
+	for i, e := range c.entries {
+		if e.Tool != nil {
+			currentGroup = append(currentGroup, i)
+			continue
+		}
+		if len(currentGroup) > 0 {
+			groups = append(groups, currentGroup)
+			currentGroup = nil
+		}
+	}
+	if len(currentGroup) > 0 {
+		groups = append(groups, currentGroup)
+	}
+	totalEntries := 0
+	for _, g := range groups {
+		totalEntries += len(g)
+	}
+	// Scan for arrow lines.
+	var arrowLines []int
+	for i, ln := range c.plainLines {
+		head := ln
+		if len(head) > 32 {
+			head = head[:32]
+		}
+		if strings.Contains(head, "▸ ") || strings.Contains(head, "▾ ") {
+			arrowLines = append(arrowLines, i)
+		}
+	}
+	if len(arrowLines) == 0 {
+		return -1
+	}
+	// Find which arrow-line range contains `line`.
+	arrowIdx := -1
+	for i, start := range arrowLines {
+		end := len(c.plainLines)
+		if i+1 < len(arrowLines) {
+			end = arrowLines[i+1]
+		}
+		if line >= start && line < end {
+			arrowIdx = i
+			break
+		}
+	}
+	if arrowIdx < 0 {
+		return -1
+	}
+	// Map arrow index → entry index. Two clean cases handled; mixed bails.
+	switch len(arrowLines) {
+	case totalEntries:
+		// Each arrow is one tool entry. Walk in doc order.
+		count := 0
+		for _, g := range groups {
+			for _, idx := range g {
+				if count == arrowIdx {
+					return idx
+				}
+				count++
+			}
+		}
+	case len(groups):
+		// Each arrow is one group's summary line. Focus the first entry —
+		// ToggleFocusedFold's group-aware logic then expands the group.
+		if arrowIdx < len(groups) {
+			return groups[arrowIdx][0]
+		}
+	}
+	return -1
+}
+
 // ClearSelection resets the selection state.
 func (c *chatView) ClearSelection() {
 	c.selection = textSelection{}

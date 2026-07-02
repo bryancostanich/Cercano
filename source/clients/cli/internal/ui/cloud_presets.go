@@ -1,6 +1,10 @@
 package ui
 
-import "cercano/source/server/pkg/agentclient"
+import (
+	"strings"
+
+	"cercano/source/server/pkg/agentclient"
+)
 
 type cloudTier int
 
@@ -75,14 +79,33 @@ func rowAnnotation(r cloudRow) string {
 		return "(custom endpoint)"
 	}
 	if r.IsProfile {
-		s := "— no key"
-		if r.HasKey {
-			s = "✓ key"
+		var parts []string
+		// Show the model at row level so users don't have to expand the
+		// detail editor to see what's actually configured. Only emitted
+		// when Profile is non-nil (tests may construct bare cloudRows
+		// without one).
+		if r.Profile != nil {
+			if r.Profile.Model != "" {
+				parts = append(parts, r.Profile.Model)
+			} else {
+				parts = append(parts, "— no model")
+			}
+		}
+		// Auth indicator: Meridian routes use Claude Max OAuth, not a stored
+		// key, so "no key" is misleading — show "meridian" instead. Direct
+		// routes fall back to the key check.
+		switch {
+		case r.Profile != nil && r.Profile.Route == "meridian":
+			parts = append(parts, "meridian")
+		case r.HasKey:
+			parts = append(parts, "✓ key")
+		default:
+			parts = append(parts, "— no key")
 		}
 		if r.Active {
-			s += "  (active)"
+			parts = append(parts, "(active)")
 		}
-		return s
+		return strings.Join(parts, "  ")
 	}
 	switch r.Tier {
 	case tierUntested:

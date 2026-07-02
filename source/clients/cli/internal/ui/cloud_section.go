@@ -1,6 +1,9 @@
 package ui
 
 import (
+	"context"
+	"time"
+
 	"cercano/source/clients/cli/internal/form"
 )
 
@@ -10,11 +13,16 @@ type cloudDraft struct {
 }
 
 // selectCloudRow expands a list row's detail editor and seeds the draft from the
-// matching configured profile (edit) or preset template (create).
+// matching configured profile (edit) or preset template (create). Also clears
+// the cloud-model catalog cache so the next detail-fields build fetches a
+// fresh catalog for THIS profile's endpoint rather than reusing a stale one
+// from the previously-selected row.
 func (sp *settingsPage) selectCloudRow(rowID string) {
 	sp.cloudSelected = rowID
 	sp.cloudDraft = cloudDraft{}
 	sp.cloudDraftNew = true
+	sp.cloudModels = nil
+	sp.cloudModelsFetched = false
 	switch {
 	case rowID == "other":
 		sp.cloudDraft.Flavor = "chat_completions"
@@ -94,7 +102,18 @@ func (sp *settingsPage) cloudDetailFields(r cloudRow) []form.Field {
 	}
 	out = append(out,
 		form.NewText("cloud-base-url", il("base-url"), d.BaseURL, "https://…"),
-		form.NewText("cloud-model", il("model"), d.Model, "model id"),
+	)
+	// Model field: anthropic-style profiles (flavor=messages) get a curated
+	// Select populated from the profile's /v1/models catalog; other flavors
+	// keep the free-form text input because we don't have a shared model-
+	// catalog shape for them yet. Falls back to a static Claude model list
+	// when the live fetch fails.
+	if d.Flavor == "messages" {
+		out = append(out, form.NewSelect("cloud-model", il("model"), sp.cloudModelOptions(r, d.Model), d.Model))
+	} else {
+		out = append(out, form.NewText("cloud-model", il("model"), d.Model, "model id"))
+	}
+	out = append(out,
 		form.NewMasked("cloud-key", il("api-key"), sp.draftHasKey(r)),
 		form.NewButton("cloud-save", il("save"), true),
 		form.NewButton("cloud-activate", il("activate"), !r.ComingSoon),
@@ -109,4 +128,27 @@ func (sp *settingsPage) cloudDetailFields(r cloudRow) []form.Field {
 // the masked field's "(stored)" vs "(not set)" hint).
 func (sp *settingsPage) draftHasKey(r cloudRow) bool {
 	return r.IsProfile && r.HasKey
+}
+
+// cloudModelOptions returns the model Select options for the currently
+// selected anthropic-style profile row. First fetches the live catalog from
+// the profile's endpoint (through Meridian for meridian routes, direct API
+// key otherwise); falls back to the curated static Claude list when the
+// fetch fails (no Meridian running, wrong URL, timeout, etc.). Cached per
+// row-selection so we don't re-fetch on every form re-render.
+func (sp *settingsPage) cloudModelOptions(r cloudRow, currentID string) []form.Option {
+	if !sp.cloudModelsFetched && r.IsProfile && sp.agent != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		models, _, err := sp.agent.ListCloudProfileModels(ctx, sp.cloudDraft.Name)
+		cancel()
+		if err == nil && len(models) > 0 {
+			sp.cloudModels = models
+		}
+		sp.cloudModelsFetched = true
+	}
+	models := sp.cloudModels
+	if len(models) == 0 {
+		models = fallbackClaudeModels()
+	}
+	return modelOptionsFromCatalog(models, currentID)
 }

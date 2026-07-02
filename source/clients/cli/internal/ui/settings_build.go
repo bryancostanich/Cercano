@@ -93,7 +93,7 @@ func buildSettingsSections(cfg *agentclient.Config, mode, accentToken string) []
 	return []form.Section{
 		{Title: "Local Model", Fields: []form.Field{
 			form.NewSelect("local-runtime", "local-runtime", []form.Option{
-				{Label: "ollama", Value: "ollama"}, {Label: "llama_server", Value: "llama_server"},
+				{Label: "ollama", Value: "ollama"}, {Label: "embedded llama-server", Value: "llama_server"},
 			}, cfg.LocalRuntime),
 			form.NewText("local-model", "local-model", cfg.LocalModel, ""),
 			form.NewText("ollama-url", "ollama-url", cfg.OllamaURL, ""),

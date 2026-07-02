@@ -1376,6 +1376,30 @@ func (c *Client) RestartMcpServer(ctx context.Context, name string) error {
 	return nil
 }
 
+// CloudModelInfo is one entry in a cloud profile's model catalog.
+type CloudModelInfo struct {
+	ID          string
+	DisplayName string // human-friendly label; may equal ID
+}
+
+// ListCloudProfileModels fetches the model catalog available to a specific
+// cloud profile (through Meridian for meridian-routed profiles, or via a
+// direct API-key request for others). Returns (models, "") on success. On
+// failure the models slice is empty and the second return is a short
+// human-readable reason so the caller can render a curated fallback list
+// and surface why the live fetch didn't work.
+func (c *Client) ListCloudProfileModels(ctx context.Context, profileName string) ([]CloudModelInfo, string, error) {
+	resp, err := c.agent.ListCloudProfileModels(ctx, &proto.ListCloudProfileModelsRequest{ProfileName: profileName})
+	if err != nil {
+		return nil, "", err
+	}
+	out := make([]CloudModelInfo, 0, len(resp.GetModels()))
+	for _, m := range resp.GetModels() {
+		out = append(out, CloudModelInfo{ID: m.GetId(), DisplayName: m.GetDisplayName()})
+	}
+	return out, resp.GetError(), nil
+}
+
 // CloudProfileInfo is a point-in-time view of one cloud profile.
 type CloudProfileInfo struct {
 	Name    string
@@ -1384,6 +1408,7 @@ type CloudProfileInfo struct {
 	Model   string
 	HasKey  bool // a key exists in the keychain for this profile
 	Backend string
+	Route   string // "direct" (default), "meridian", "ccr" (future) — selects adapter-specific auth
 }
 
 // GetCloudProfiles returns all configured cloud profiles and the name of the
@@ -1402,6 +1427,7 @@ func (c *Client) GetCloudProfiles(ctx context.Context) ([]CloudProfileInfo, stri
 			Model:   p.GetModel(),
 			HasKey:  p.GetHasKey(),
 			Backend: p.GetBackend(),
+			Route:   p.GetRoute(),
 		})
 	}
 	return out, resp.GetActive(), nil

@@ -5921,7 +5921,13 @@ func (x *LocalRuntimeStatusChanged) GetStatus() *LocalRuntimeStatus {
 // LocalRuntimeStatusChanged. Empty request — the server always returns the
 // snapshot for the currently-selected local runtime.
 type GetLocalRuntimeStatusRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Runtime to detect against ("ollama" | "llama_server"). Empty falls
+	// back to the currently-selected runtime — used by the CLI startup
+	// fetch to render the chip. The settings-page gate uses this explicit
+	// form to probe a runtime BEFORE switching to it, so a user can be
+	// asked to install BEFORE the config is silently accepted.
+	Runtime       string `protobuf:"bytes,1,opt,name=runtime,proto3" json:"runtime,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5954,6 +5960,13 @@ func (x *GetLocalRuntimeStatusRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use GetLocalRuntimeStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetLocalRuntimeStatusRequest) Descriptor() ([]byte, []int) {
 	return file_agent_proto_rawDescGZIP(), []int{90}
+}
+
+func (x *GetLocalRuntimeStatusRequest) GetRuntime() string {
+	if x != nil {
+		return x.Runtime
+	}
+	return ""
 }
 
 type GetLocalRuntimeStatusResponse struct {
@@ -8258,8 +8271,9 @@ const file_agent_proto_rawDesc = "" +
 	"binaryPath\x12#\n" +
 	"\rdefault_model\x18\a \x01(\tR\fdefaultModel\"N\n" +
 	"\x19LocalRuntimeStatusChanged\x121\n" +
-	"\x06status\x18\x01 \x01(\v2\x19.agent.LocalRuntimeStatusR\x06status\"\x1e\n" +
-	"\x1cGetLocalRuntimeStatusRequest\"R\n" +
+	"\x06status\x18\x01 \x01(\v2\x19.agent.LocalRuntimeStatusR\x06status\"8\n" +
+	"\x1cGetLocalRuntimeStatusRequest\x12\x18\n" +
+	"\aruntime\x18\x01 \x01(\tR\aruntime\"R\n" +
 	"\x1dGetLocalRuntimeStatusResponse\x121\n" +
 	"\x06status\x18\x01 \x01(\v2\x19.agent.LocalRuntimeStatusR\x06status\"6\n" +
 	"\x1aInstallLocalRuntimeRequest\x12\x18\n" +

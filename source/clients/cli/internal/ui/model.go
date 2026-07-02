@@ -392,7 +392,7 @@ func fetchLocalRuntimeStatusCmd(ag *agentclient.Client) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		st, err := ag.GetLocalRuntimeStatus(ctx)
+		st, err := ag.GetLocalRuntimeStatus(ctx, "")
 		if err != nil || st == nil {
 			return nil
 		}

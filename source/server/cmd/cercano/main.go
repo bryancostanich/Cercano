@@ -185,9 +185,14 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		recapGen := recap.New(persistentStore, recapComplete, 8*time.Second, 12)
 		agentOpts = append(agentOpts, agent.WithRecapScheduler(recapGen))
 	}
-	if persistentStore != nil && cfg.Compaction.Enabled {
+	var compGen *compactiongen.Generator
+	if persistentStore != nil {
 		compactSummarize := func(ctx context.Context, msgs []llm.Message) (compaction.StructuredSummary, error) {
-			resp, err := localProvider.Process(ctx, &agent.Request{Input: compaction.BuildSummaryPrompt(msgs)})
+			req := &agent.Request{Input: compaction.BuildSummaryPrompt(msgs)}
+			if cfg.Compaction.SummarizerModel != "" {
+				req.ModelOverride = cfg.Compaction.SummarizerModel
+			}
+			resp, err := localProvider.Process(ctx, req)
 			if err != nil {
 				return compaction.StructuredSummary{}, err
 			}
@@ -198,11 +203,16 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 			SegmentTokens:         cfg.Compaction.SegmentTokens,
 			VerbatimRecent:        cfg.Compaction.VerbatimRecent,
 		}
-		compGen := compactiongen.New(persistentStore, compactSummarize, compCfg, contextmeter.Default(), 10*time.Second)
+		compGen = compactiongen.New(persistentStore, compactSummarize, compCfg, contextmeter.Default(), 10*time.Second)
+		// Runtime kill switch — Schedule noops until enabled. Wiring the
+		// scheduler unconditionally lets /config compaction-enabled true flip
+		// the switch at runtime; the OLD gate required a restart.
+		compGen.SetEnabled(cfg.Compaction.Enabled)
 		agentOpts = append(agentOpts, agent.WithCompactionScheduler(compGen))
 	}
+	var sweeper *retention.Sweeper
 	if persistentStore != nil {
-		sweeper := retention.New(persistentStore, retention.Config{
+		sweeper = retention.New(persistentStore, retention.Config{
 			RawRetentionDays:       cfg.Compaction.Retention.RawRetentionDays,
 			CompactedRetentionDays: cfg.Compaction.Retention.CompactedRetentionDays,
 			KeepForever:            cfg.Compaction.Retention.KeepForever,
@@ -218,9 +228,21 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 
 	// 64 MiB comfortably fits multiple 20 MiB images (the per-image client cap).
 	const maxGRPCMessageBytes = 64 << 20
-	s := grpc.NewServer(grpc.MaxRecvMsgSize(maxGRPCMessageBytes))
+	s := grpc.NewServer(
+		grpc.MaxRecvMsgSize(maxGRPCMessageBytes),
+		// Recover handler panics so one bad RPC returns codes.Internal instead of
+		// crashing the singleton agent and dropping every client's stream.
+		grpc.ChainUnaryInterceptor(server.RecoveryUnaryInterceptor()),
+		grpc.ChainStreamInterceptor(server.RecoveryStreamInterceptor()),
+	)
 	srv := server.NewServer(orchestrator, localProvider, lazyRouter, coordinator, cloudFactory, registry)
 	srv.SetRuntimeManager(runtimeManager)
+	if sweeper != nil {
+		srv.SetRetentionSweeper(sweeper)
+	}
+	if compGen != nil {
+		srv.SetCompactionGenerator(compGen)
+	}
 	srv.SetContextLoader(ctxLoader)
 	srv.SetConfigPersistence(config.DefaultPath(), cfg)
 	orchestrator.SetLocusModeGetter(srv.LocusMode)

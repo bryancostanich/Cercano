@@ -44,6 +44,23 @@ service Agent {
   // means "no suggestion" — the CLI treats it as no-op.
   rpc SuggestNextPrompt (SuggestNextPromptRequest) returns (SuggestNextPromptResponse) {}
 
+  // GetLocalRuntimeStatus returns the current headless-detection outcome
+  // for the selected local runtime. Callers use it once at startup to
+  // populate the CLI chip / install modal without waiting for a config
+  // change to fire a LocalRuntimeStatusChanged event.
+  rpc GetLocalRuntimeStatus (GetLocalRuntimeStatusRequest) returns (GetLocalRuntimeStatusResponse) {}
+
+  // InstallLocalRuntime runs the platform install command for a local
+  // inference runtime (today: "llama_server" via `brew install llama.cpp`
+  // on macOS) and streams stdout/stderr line-by-line to the caller. The
+  // final message carries done=true with ok set to the outcome.
+  //
+  // The server re-runs detection after a successful install and emits a
+  // fresh LocalRuntimeStatusChanged event on the SubscribeEvents stream,
+  // so CLIs get the "runtime is now ready" signal through the same channel
+  // they used to render the "needs setup" chip.
+  rpc InstallLocalRuntime (InstallLocalRuntimeRequest) returns (stream InstallProgress) {}
+
   // ExportContext returns the full uncapped raw history as a JSON []llm.Message.
   rpc ExportContext (ExportContextRequest) returns (ExportContextResponse) {}
 
@@ -209,9 +226,22 @@ message UpdateConfigRequest {
   string locus_mode = 8;     // cloud_only|cloud_primary|local_primary|local_only
   string watchdog_enabled = 9;  // "" = unchanged, "true"/"false"
   string watchdog_echo = 10;    // "" = unchanged, "true"/"false"
-  string watchdog_mode = 11;            // "" = unchanged; "challenge-and-justify"|"strict"
-  string watchdog_checks = 12;          // "" = unchanged; "-" = empty; else comma-joined
-  string watchdog_escalate_after = 13;  // "" = unchanged; positive int
+  // Compaction — Development Tools. String-encoded bool ("" | "true" | "false")
+  // to match the sparse-patch convention of the other fields (empty = unchanged).
+  string elide_tool_results = 11; // Mechanical superseded-tool-result dedup on assemble.
+  string lossy_tool_elision = 12; // Recency-window: keep last N tool_results, stub older.
+  // Retention (Development Tools). Strings for the sparse-patch convention;
+  // days must parse as non-negative decimal integers.
+  string raw_retention_days       = 13;
+  string compacted_retention_days = 14;
+  string keep_forever             = 15;
+  // Compaction master switch. When "true", the summarization pass runs on
+  // eligible conversations. "" leaves unchanged.
+  string compaction_enabled       = 16;
+  // Watchdog (Development Tools). Sparse-patch convention: "" = unchanged.
+  string watchdog_mode = 17;            // "challenge-and-justify"|"strict"
+  string watchdog_checks = 18;          // "-" = empty; else comma-joined
+  string watchdog_escalate_after = 19;  // positive int
 }
 
 // Runtime configuration update response.
@@ -568,9 +598,21 @@ message GetConfigResponse {
   string locus_mode = 11;
   bool watchdog_enabled = 12;
   bool watchdog_echo = 13;
-  string watchdog_mode = 14;
-  string watchdog_checks = 15;          // comma-joined
-  string watchdog_escalate_after = 16;  // int as string
+  // Compaction — Development Tools. Reported as plain bools since the reader
+  // always knows the current value.
+  bool elide_tool_results = 14;
+  bool lossy_tool_elision = 15;
+  // Retention (Development Tools). Integers reported directly; keep_forever
+  // gates any actual aging.
+  int32 raw_retention_days       = 16;
+  int32 compacted_retention_days = 17;
+  bool  keep_forever             = 18;
+  // Compaction master switch state.
+  bool  compaction_enabled       = 19;
+  // Watchdog (Development Tools) — current values.
+  string watchdog_mode = 20;
+  string watchdog_checks = 21;          // comma-joined
+  string watchdog_escalate_after = 22;  // int as string
 }
 
 message ListSkillsRequest {}
@@ -616,6 +658,7 @@ message ClientEvent {
     PermissionModeChanged permission_mode_changed = 1;
     ConfigChanged config_changed = 2;
     MeridianStatusChanged meridian_status_changed = 3;
+    LocalRuntimeStatusChanged local_runtime_status_changed = 4;
   }
 }
 
@@ -657,6 +700,60 @@ message MeridianStatus {
 
 // MeridianStatusChanged is broadcast on every Meridian state transition.
 message MeridianStatusChanged { MeridianStatus status = 1; }
+
+// LocalRuntimeStatus is the live state of the active local inference runtime
+// (ollama or llama_server). Emitted after a runtime swap (config edit or
+// UpdateConfig RPC) — clients render a status chip and drive the recovery
+// modal from this.
+//
+// runtime values: "ollama" | "llama_server".
+// missing values (when ok=false): "binary" | "model". Empty when ok=true.
+//   "binary" — the runtime executable is not on PATH / not at Binary path.
+//              CLI should offer the install flow (InstallLocalRuntime RPC).
+//   "model"  — the runtime is available but no usable model is configured.
+//              CLI should surface a model-picker / download flow.
+message LocalRuntimeStatus {
+  bool ok = 1;
+  string runtime = 2;
+  string missing = 3;
+  string message = 4;
+  string suggested_command = 5;
+  string binary_path = 6;
+  string default_model = 7;
+}
+
+// LocalRuntimeStatusChanged is broadcast whenever the local runtime state
+// changes (post-swap detection, install completes, etc.). Clients update
+// their status chip + modal from this — no fetch, no poll.
+message LocalRuntimeStatusChanged { LocalRuntimeStatus status = 1; }
+
+// GetLocalRuntimeStatus is the pull-side counterpart to
+// LocalRuntimeStatusChanged. Empty request — the server always returns the
+// snapshot for the currently-selected local runtime.
+message GetLocalRuntimeStatusRequest {}
+message GetLocalRuntimeStatusResponse { LocalRuntimeStatus status = 1; }
+
+// InstallLocalRuntimeRequest asks the server to run the platform install
+// command for a local runtime and stream its output back.
+//
+// runtime values today: "llama_server" — future runtimes can be added
+// without breaking the wire format.
+message InstallLocalRuntimeRequest {
+  string runtime = 1;
+}
+
+// InstallProgress is one frame in an install output stream. Frames with
+// done=false carry stdout/stderr lines from the install subprocess as they
+// arrive. The stream terminates with a single frame carrying done=true;
+// ok=true means the subprocess exited cleanly and the runtime should be
+// usable after a fresh detection, ok=false means install failed and the
+// error field explains why.
+message InstallProgress {
+  string line = 1;
+  bool done = 2;
+  bool ok = 3;
+  string error = 4;
+}
 
 // Allow/Deny pair the asynchronous PermissionRequired stream event with a
 // client reply. tool_use_id is the same id the event carried.

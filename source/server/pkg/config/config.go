@@ -71,6 +71,27 @@ type CompactionConfig struct {
 	VerbatimRecent        int             `yaml:"verbatim_recent"`
 	HardOverridePct       float64         `yaml:"hard_override_pct"`
 	Retention             RetentionConfig `yaml:"retention"`
+	// ElideToolResults, when true, runs the mechanical superseded-tool-result
+	// dedup over every assembled history — independent of Enabled. Lossless and
+	// LLM-free, so it's safe to run even while the summarizer is disabled.
+	// Useful as an interim mitigation for a broken summarizer, and as an
+	// always-on savings pass in the live tail when the summarizer is back on.
+	ElideToolResults bool `yaml:"elide_tool_results"`
+	// LossyToolElision, when true, stubs older tool_result content down to a
+	// one-line marker so only the most recent tool results (keep-last-N, see
+	// compaction.DefaultLossyElisionKeepLast) carry their full content. Not
+	// lossless — the model cannot recall the exact bytes of an older tool
+	// result — but the raw turns are still in the persistent store and the
+	// model can always re-invoke the tool. Recovers materially more tokens
+	// than byte-identical elision (measured ~58% vs ~0.4% on a 190-turn
+	// real conversation).
+	LossyToolElision bool `yaml:"lossy_tool_elision"`
+	// SummarizerModel overrides the local model used for compaction
+	// summarization. Empty falls back to LocalModel (the main-loop model).
+	// Useful because a code-focused model (qwen3-coder) tends to fabricate
+	// when asked to write extractive summaries; a text-focused model
+	// (phi4, llama3.1) grounds better. Not applied to the main tool loop.
+	SummarizerModel string `yaml:"summarizer_model,omitempty"`
 }
 
 // RetentionConfig bounds how long raw turn bodies and the compacted layer are

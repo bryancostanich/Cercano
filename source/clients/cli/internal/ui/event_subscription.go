@@ -25,6 +25,15 @@ type meridianStatusChangedMsg struct {
 	next   tea.Cmd
 }
 
+// localRuntimeStatusChangedMsg is delivered when the agent pushes a
+// LocalRuntimeStatusChanged event — the local-runtime detection outcome
+// after a config-driven runtime swap. Non-ok statuses drive the chip and
+// the install modal; ok statuses clear both.
+type localRuntimeStatusChangedMsg struct {
+	status *agentclient.LocalRuntimeStatus
+	next   tea.Cmd
+}
+
 // subscribeEventsCmd opens the standing server->client event stream and returns
 // a cmd that drains one event and re-arms itself. This is how the status bar
 // learns about mode changes and Meridian state without polling. On stream
@@ -44,6 +53,9 @@ func subscribeEventsCmd(ag *agentclient.Client) tea.Cmd {
 			}
 			if ev.MeridianStatus != nil {
 				return meridianStatusChangedMsg{status: ev.MeridianStatus, next: wait}
+			}
+			if ev.LocalRuntimeStatus != nil {
+				return localRuntimeStatusChangedMsg{status: ev.LocalRuntimeStatus, next: wait}
 			}
 			return permissionModeChangedMsg{mode: ev.Mode, next: wait}
 		}

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
@@ -97,6 +98,25 @@ func (sp *settingsPage) snapshotSections() []form.Section {
 		builtin := sp.themes.IsBuiltin(sp.working.Name)
 		secs = append(secs, buildThemeSections(sp.working, sp.themes.Names(), builtin, sp.dirty)...)
 	}
+	// Development Tools is pinned to the very bottom of the settings page —
+	// below every user-facing section — so it never intrudes on the primary
+	// configuration flow. Inside, related toggles cluster into Groups.
+	secs = append(secs, form.Section{
+		Title: "Development Tools",
+		Groups: []form.Group{
+			{Title: "Context Management", Fields: []form.Field{
+				form.NewToggle("compaction-enabled", "compaction-enabled", sp.cfg.CompactionEnabled),
+				form.NewToggle("elide-tool-results", "elide-tool-results", sp.cfg.ElideToolResults),
+				form.NewToggle("lossy-tool-elision", "lossy-tool-elision", sp.cfg.LossyToolElision),
+			}},
+			{Title: "Data Retention", Fields: []form.Field{
+				form.NewText("raw-retention-days", "raw-retention-days", strconv.Itoa(sp.cfg.RawRetentionDays), ""),
+				form.NewText("compacted-retention-days", "compacted-retention-days", strconv.Itoa(sp.cfg.CompactedRetentionDays), ""),
+				form.NewToggle("keep-forever", "keep-forever", sp.cfg.KeepForever),
+			}},
+			{Title: "Watchdog", Fields: buildDevFields(sp.cfg)},
+		},
+	})
 	return secs
 }
 

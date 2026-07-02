@@ -10,8 +10,18 @@ import (
 	"cercano/source/clients/cli/internal/theme"
 )
 
-// Section is a titled group of fields.
+// Section is a titled group of fields. When Groups is non-empty, Fields is
+// ignored and each Group renders as a subheading with its own fields.
 type Section struct {
+	Title  string
+	Fields []Field
+	Groups []Group
+}
+
+// Group is a titled sub-cluster of fields within a section — a subheading that
+// keeps related fields visually clustered under one section title. Zero-title
+// groups render their fields with no header line.
+type Group struct {
 	Title  string
 	Fields []Field
 }
@@ -60,6 +70,12 @@ func (f *Form) FocusedLine() int { return f.focusedLine }
 func (f *Form) flat() []Field {
 	var out []Field
 	for _, sec := range f.Sections {
+		if len(sec.Groups) > 0 {
+			for _, grp := range sec.Groups {
+				out = append(out, grp.Fields...)
+			}
+			continue
+		}
 		out = append(out, sec.Fields...)
 	}
 	return out
@@ -148,7 +164,14 @@ func (f *Form) View(width int, palette theme.Palette, styles theme.Styles) strin
 	}
 	labelW := 0
 	for _, sec := range f.Sections {
-		for _, fld := range sec.Fields {
+		fields := sec.Fields
+		if len(sec.Groups) > 0 {
+			fields = nil
+			for _, grp := range sec.Groups {
+				fields = append(fields, grp.Fields...)
+			}
+		}
+		for _, fld := range fields {
 			if lw := lipgloss.Width(fld.Label()); lw > labelW {
 				labelW = lw
 			}
@@ -175,7 +198,7 @@ func (f *Form) View(width int, palette theme.Palette, styles theme.Styles) strin
 		// the narrow under-label layout.
 		bodyLine := 3
 		focusedBodyLine := -1
-		for _, fld := range sec.Fields {
+		renderField := func(fld Field) {
 			focused := idx == f.cursor
 			marker := "   "
 			if focused {
@@ -246,6 +269,25 @@ func (f *Form) View(width int, palette theme.Palette, styles theme.Styles) strin
 				}
 			}
 			idx++
+		}
+		if len(sec.Groups) > 0 {
+			for gi, grp := range sec.Groups {
+				if gi > 0 {
+					body.WriteString("\n")
+					bodyLine++
+				}
+				if grp.Title != "" {
+					body.WriteString("  " + styles.Muted.Render(grp.Title) + "\n")
+					bodyLine++
+				}
+				for _, fld := range grp.Fields {
+					renderField(fld)
+				}
+			}
+		} else {
+			for _, fld := range sec.Fields {
+				renderField(fld)
+			}
 		}
 		// Capture base before writing this section's box so focusedLine is a
 		// valid index into strings.Split(View(...), "\n").

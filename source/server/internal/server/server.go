@@ -21,6 +21,7 @@ import (
 	"cercano/source/server/internal/capabilities/builtins"
 	"cercano/source/server/internal/cloudfactory"
 	"cercano/source/server/internal/compaction"
+	"cercano/source/server/internal/compactiongen"
 	"cercano/source/server/internal/compactor"
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/contextmeter"
@@ -31,11 +32,13 @@ import (
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/llm/anthropic"
 	"cercano/source/server/internal/localruntime"
+	"cercano/source/server/internal/localruntime/llamaserver"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
 	mcphost "cercano/source/server/internal/mcp_host"
 	"cercano/source/server/internal/meridian"
 	"cercano/source/server/internal/protocols"
+	"cercano/source/server/internal/retention"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/usage"
 	"cercano/source/server/internal/watchdog"
@@ -82,6 +85,8 @@ type Server struct {
 	localLLMProvider    llm.Provider // native-tool-loop local provider (Ollama)
 	secrets             secrets.Store
 	runtimeManager      localruntime.Manager
+	retentionSweeper    *retention.Sweeper
+	compactionGen       *compactiongen.Generator
 	contextLoader       *projectctx.Loader
 	dispatchEngine      *dispatch.Engine
 	watchdog            *watchdog.Watchdog // protocol-supervision gate; nil = disabled (default)
@@ -604,6 +609,15 @@ func (s *Server) SetRuntimeManager(m localruntime.Manager) {
 	s.refreshRuntimeEndpoints()
 }
 
+// SetRetentionSweeper attaches the background retention sweeper so that
+// /config and settings-page changes to retention horizons take effect on the
+// next sweep without a restart.
+func (s *Server) SetRetentionSweeper(sw *retention.Sweeper) { s.retentionSweeper = sw }
+
+// SetCompactionGenerator attaches the background compaction scheduler so that
+// /config compaction-enabled true|false flips it at runtime without a restart.
+func (s *Server) SetCompactionGenerator(g *compactiongen.Generator) { s.compactionGen = g }
+
 // NewServer creates a new Agent gRPC server.
 func NewServer(a *agent.Agent, localProvider *legacymodels.LocalModelProvider, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
 	return &Server{
@@ -702,6 +716,25 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 				Message: fmt.Sprintf("local runtime %q is not available: %v", req.LocalRuntime, err),
 			}, nil
 		}
+		// Runtime-swap auto-configure: for llama_server, run headless detection
+		// so an edit like `local_runtime: llama_server` in config.yaml
+		// populates Binary + DefaultModel from the environment (PATH lookup +
+		// GGUF scan) instead of silently landing a swap that fails on the next
+		// inference call. The swap itself proceeds either way — a failed
+		// detection lands as a LocalRuntimeStatusChanged{ok=false} event so
+		// the CLI can offer the install/model-picker flow.
+		var detectErr *llamaserver.DetectError
+		if req.LocalRuntime == "llama_server" {
+			if err := llamaserver.Detect(ctx, &s.currentConfig.LlamaServer); err != nil {
+				if de, ok := err.(*llamaserver.DetectError); ok {
+					detectErr = de
+				}
+				fmt.Printf("UpdateConfig: llama-server detection: %v\n", err)
+			} else {
+				fmt.Printf("UpdateConfig: llama-server auto-configured — binary=%s default_model=%s\n",
+					s.currentConfig.LlamaServer.Binary, s.currentConfig.LlamaServer.DefaultModel)
+			}
+		}
 		model := req.LocalModel
 		if model == "" && req.LocalRuntime == "llama_server" {
 			model = s.currentConfig.LlamaServer.DefaultModel
@@ -712,6 +745,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		s.localProvider.SetEngine(eng, model)
 		changes = append(changes, fmt.Sprintf("local_runtime=%s", req.LocalRuntime))
 		fmt.Printf("UpdateConfig: Local runtime set to %s\n", req.LocalRuntime)
+		s.broadcastLocalRuntimeStatus(buildLocalRuntimeStatus(req.LocalRuntime, s.currentConfig, detectErr))
 	}
 
 	if req.LocusMode != "" {
@@ -720,6 +754,109 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		}
 		changes = append(changes, fmt.Sprintf("locus_mode=%s", req.LocusMode))
 		fmt.Printf("UpdateConfig: Locus mode set to %s\n", req.LocusMode)
+	}
+
+	if req.ElideToolResults != "" {
+		v := strings.ToLower(strings.TrimSpace(req.ElideToolResults))
+		if v != "true" && v != "false" {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid elide_tool_results %q: expected \"true\" or \"false\"", req.ElideToolResults),
+			}, nil
+		}
+		s.currentConfig.Compaction.ElideToolResults = v == "true"
+		changes = append(changes, fmt.Sprintf("elide_tool_results=%s", v))
+		s.broadcastConfigChanged("elide_tool_results", v)
+		fmt.Printf("UpdateConfig: elide_tool_results set to %s\n", v)
+	}
+
+	if req.LossyToolElision != "" {
+		v := strings.ToLower(strings.TrimSpace(req.LossyToolElision))
+		if v != "true" && v != "false" {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid lossy_tool_elision %q: expected \"true\" or \"false\"", req.LossyToolElision),
+			}, nil
+		}
+		s.currentConfig.Compaction.LossyToolElision = v == "true"
+		changes = append(changes, fmt.Sprintf("lossy_tool_elision=%s", v))
+		s.broadcastConfigChanged("lossy_tool_elision", v)
+		fmt.Printf("UpdateConfig: lossy_tool_elision set to %s\n", v)
+	}
+
+	if req.CompactionEnabled != "" {
+		v := strings.ToLower(strings.TrimSpace(req.CompactionEnabled))
+		if v != "true" && v != "false" {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid compaction_enabled %q: expected \"true\" or \"false\"", req.CompactionEnabled),
+			}, nil
+		}
+		enabled := v == "true"
+		s.currentConfig.Compaction.Enabled = enabled
+		// Flip the runtime kill switch. In-flight passes finish; new Schedule
+		// calls noop when disabled. Nil-guarded because the server may run
+		// without a persistent store (no compGen wired).
+		if s.compactionGen != nil {
+			s.compactionGen.SetEnabled(enabled)
+		}
+		changes = append(changes, fmt.Sprintf("compaction_enabled=%s", v))
+		s.broadcastConfigChanged("compaction_enabled", v)
+		fmt.Printf("UpdateConfig: compaction_enabled set to %s\n", v)
+	}
+
+	retentionChanged := false
+	if req.RawRetentionDays != "" {
+		n, err := strconv.Atoi(strings.TrimSpace(req.RawRetentionDays))
+		if err != nil || n < 0 {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid raw_retention_days %q: expected a non-negative integer", req.RawRetentionDays),
+			}, nil
+		}
+		s.currentConfig.Compaction.Retention.RawRetentionDays = n
+		changes = append(changes, fmt.Sprintf("raw_retention_days=%d", n))
+		s.broadcastConfigChanged("raw_retention_days", strconv.Itoa(n))
+		fmt.Printf("UpdateConfig: raw_retention_days set to %d\n", n)
+		retentionChanged = true
+	}
+	if req.CompactedRetentionDays != "" {
+		n, err := strconv.Atoi(strings.TrimSpace(req.CompactedRetentionDays))
+		if err != nil || n < 0 {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid compacted_retention_days %q: expected a non-negative integer", req.CompactedRetentionDays),
+			}, nil
+		}
+		s.currentConfig.Compaction.Retention.CompactedRetentionDays = n
+		changes = append(changes, fmt.Sprintf("compacted_retention_days=%d", n))
+		s.broadcastConfigChanged("compacted_retention_days", strconv.Itoa(n))
+		fmt.Printf("UpdateConfig: compacted_retention_days set to %d\n", n)
+		retentionChanged = true
+	}
+	if req.KeepForever != "" {
+		v := strings.ToLower(strings.TrimSpace(req.KeepForever))
+		if v != "true" && v != "false" {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid keep_forever %q: expected \"true\" or \"false\"", req.KeepForever),
+			}, nil
+		}
+		s.currentConfig.Compaction.Retention.KeepForever = v == "true"
+		changes = append(changes, fmt.Sprintf("keep_forever=%s", v))
+		s.broadcastConfigChanged("keep_forever", v)
+		fmt.Printf("UpdateConfig: keep_forever set to %s\n", v)
+		retentionChanged = true
+	}
+	// Push the reconciled retention block to the background sweeper so the
+	// next sweep uses the new horizons without waiting for a restart.
+	if retentionChanged && s.retentionSweeper != nil {
+		r := s.currentConfig.Compaction.Retention
+		s.retentionSweeper.SetConfig(retention.Config{
+			RawRetentionDays:       r.RawRetentionDays,
+			CompactedRetentionDays: r.CompactedRetentionDays,
+			KeepForever:            r.KeepForever,
+		})
 	}
 
 	// Cloud changes go through the active profile + rebuildCloud(). The
@@ -1049,11 +1186,41 @@ func (s *Server) GetContextUsage(ctx context.Context, req *proto.GetContextUsage
 		if turns, err := store.GetTurns(ctx, convID); err == nil {
 			raw = estimateRawTokens(turns)
 			state, _ := store.GetCompaction(ctx, convID)
-			if state.ConsolidatedJSON == "" {
-				sent = raw // no compaction → sent is the full history
-			} else {
+			s.cfgMu.RLock()
+			elide := s.currentConfig.Compaction.ElideToolResults
+			lossy := s.currentConfig.Compaction.LossyToolElision
+			s.cfgMu.RUnlock()
+			switch {
+			case state.ConsolidatedJSON != "":
+				// Compaction has run. Mirror assembleHistory: summarized view
+				// plus optional post-elision.
 				view, _ := compactor.BuildSendView(turns, state)
+				if elide {
+					view, _ = compaction.ElideSupersededToolResults(view)
+				}
+				if lossy {
+					view, _ = compaction.KeepLastNToolResults(view, compaction.DefaultLossyElisionKeepLast)
+				}
 				sent = compaction.TotalTokens(contextmeter.Default(), view)
+			case elide || lossy:
+				// No compaction but some elision is on. The meter must reflect
+				// the elided view, not the raw history — otherwise a user
+				// turns on a toggle and sees no change even though the model
+				// receives less. Cost is one full-history tokenize per poll;
+				// acceptable because the elided view is what the request path
+				// is already building on every turn.
+				view := agent.BuildLLMHistory(turns)
+				if elide {
+					view, _ = compaction.ElideSupersededToolResults(view)
+				}
+				if lossy {
+					view, _ = compaction.KeepLastNToolResults(view, compaction.DefaultLossyElisionKeepLast)
+				}
+				sent = compaction.TotalTokens(contextmeter.Default(), view)
+			default:
+				// Fast path: no compaction, no elision. Cheap len/4 estimate
+				// is intentional — the footer polls this frequently.
+				sent = raw
 			}
 		}
 	}
@@ -1239,22 +1406,28 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 	cfg := s.currentConfig
 	s.cfgMu.RUnlock()
 	return &proto.GetConfigResponse{
-		OllamaUrl:             cfg.OllamaURL,
-		LocalModel:            cfg.LocalModel,
-		EmbeddingModel:        cfg.EmbeddingModel,
-		CloudProvider:         cfg.CloudProvider,
-		CloudModel:            cfg.CloudModel,
-		CloudBaseUrl:          cfg.CloudBaseURL,
-		CloudApiKeySet:        cfg.CloudAPIKey != "",
-		CloudState:            state,
-		Port:                  cfg.Port,
-		LocalRuntime:          cfg.LocalRuntime,
-		LocusMode:             cfg.LocusMode,
-		WatchdogEnabled:       cfg.Watchdog.Enabled,
-		WatchdogEcho:          cfg.Watchdog.Echo,
-		WatchdogMode:          cfg.Watchdog.Mode,
-		WatchdogChecks:        strings.Join(cfg.Watchdog.Checks, ","),
-		WatchdogEscalateAfter: strconv.Itoa(cfg.Watchdog.EscalateAfter),
+		OllamaUrl:              cfg.OllamaURL,
+		LocalModel:             cfg.LocalModel,
+		EmbeddingModel:         cfg.EmbeddingModel,
+		CloudProvider:          cfg.CloudProvider,
+		CloudModel:             cfg.CloudModel,
+		CloudBaseUrl:           cfg.CloudBaseURL,
+		CloudApiKeySet:         cfg.CloudAPIKey != "",
+		CloudState:             state,
+		Port:                   cfg.Port,
+		LocalRuntime:           cfg.LocalRuntime,
+		LocusMode:              cfg.LocusMode,
+		WatchdogEnabled:        cfg.Watchdog.Enabled,
+		WatchdogEcho:           cfg.Watchdog.Echo,
+		WatchdogMode:           cfg.Watchdog.Mode,
+		WatchdogChecks:         strings.Join(cfg.Watchdog.Checks, ","),
+		WatchdogEscalateAfter:  strconv.Itoa(cfg.Watchdog.EscalateAfter),
+		ElideToolResults:       cfg.Compaction.ElideToolResults,
+		LossyToolElision:       cfg.Compaction.LossyToolElision,
+		RawRetentionDays:       int32(cfg.Compaction.Retention.RawRetentionDays),
+		CompactedRetentionDays: int32(cfg.Compaction.Retention.CompactedRetentionDays),
+		KeepForever:            cfg.Compaction.Retention.KeepForever,
+		CompactionEnabled:      cfg.Compaction.Enabled,
 	}, nil
 }
 
@@ -2154,6 +2327,19 @@ func (s *Server) assembleHistory(ctx context.Context, store conversation.Store, 
 				view, _ = compactor.BuildSendView(turns, state)
 			}
 		}
+	}
+	// Mechanical superseded-tool-result dedup. LLM-free, lossless, and safe to
+	// apply on top of either a summarized view or the raw history — running it
+	// twice is idempotent.
+	if compactionCfg.ElideToolResults {
+		view, _ = compaction.ElideSupersededToolResults(view)
+	}
+	// Recency-window elision. Stubs older tool_result content down to a marker;
+	// keeps the last N intact. Applied after byte-identical dedup because the
+	// two are complementary — the identical-dedup catches literal duplicates
+	// among the kept N; the recency policy handles the long tail.
+	if compactionCfg.LossyToolElision {
+		view, _ = compaction.KeepLastNToolResults(view, compaction.DefaultLossyElisionKeepLast)
 	}
 	return view
 }

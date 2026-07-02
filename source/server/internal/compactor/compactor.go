@@ -112,10 +112,7 @@ func Advance(ctx context.Context, turns []conversation.Turn, state conversation.
 	}
 	parts = append(parts, newParts...)
 
-	consolidated, err := compaction.Reduce(ctx, parts, summarize)
-	if err != nil {
-		return state, false, err
-	}
+	consolidated := compaction.Reduce(parts)
 
 	segJSON, _ := json.Marshal(parts)
 	conJSON, _ := json.Marshal(consolidated)

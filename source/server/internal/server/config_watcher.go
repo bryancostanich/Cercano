@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strconv"
 
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
@@ -118,6 +119,40 @@ func (s *Server) reloadConfigFromDisk(ctx context.Context) {
 	}
 	if newCfg.LocusMode != snap.LocusMode {
 		req.LocusMode = newCfg.LocusMode
+	}
+	if newCfg.Compaction.ElideToolResults != snap.Compaction.ElideToolResults {
+		if newCfg.Compaction.ElideToolResults {
+			req.ElideToolResults = "true"
+		} else {
+			req.ElideToolResults = "false"
+		}
+	}
+	if newCfg.Compaction.LossyToolElision != snap.Compaction.LossyToolElision {
+		if newCfg.Compaction.LossyToolElision {
+			req.LossyToolElision = "true"
+		} else {
+			req.LossyToolElision = "false"
+		}
+	}
+	if newCfg.Compaction.Retention.RawRetentionDays != snap.Compaction.Retention.RawRetentionDays {
+		req.RawRetentionDays = strconv.Itoa(newCfg.Compaction.Retention.RawRetentionDays)
+	}
+	if newCfg.Compaction.Retention.CompactedRetentionDays != snap.Compaction.Retention.CompactedRetentionDays {
+		req.CompactedRetentionDays = strconv.Itoa(newCfg.Compaction.Retention.CompactedRetentionDays)
+	}
+	if newCfg.Compaction.Retention.KeepForever != snap.Compaction.Retention.KeepForever {
+		if newCfg.Compaction.Retention.KeepForever {
+			req.KeepForever = "true"
+		} else {
+			req.KeepForever = "false"
+		}
+	}
+	if newCfg.Compaction.Enabled != snap.Compaction.Enabled {
+		if newCfg.Compaction.Enabled {
+			req.CompactionEnabled = "true"
+		} else {
+			req.CompactionEnabled = "false"
+		}
 	}
 
 	// Warn on fields that UpdateConfig doesn't hot-reload. The agent keeps

@@ -166,6 +166,19 @@ type Config struct {
 	WatchdogMode          string
 	WatchdogChecks        []string
 	WatchdogEscalateAfter int
+	// ElideToolResults: mechanical superseded-tool-result dedup on the
+	// assembled history. Development Tools section in the settings UI.
+	ElideToolResults bool
+	// LossyToolElision: recency-window elision — stub older tool_results,
+	// keep only the last N in full. Wider savings than ElideToolResults but
+	// not byte-preserving.
+	LossyToolElision bool
+	// Retention horizons in days; KeepForever gates any aging.
+	RawRetentionDays       int
+	CompactedRetentionDays int
+	KeepForever            bool
+	// CompactionEnabled is the master switch for the summarization pass.
+	CompactionEnabled bool
 }
 
 // GetConfig fetches the agent's current runtime config.
@@ -175,22 +188,28 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 		return nil, err
 	}
 	return &Config{
-		OllamaURL:             resp.GetOllamaUrl(),
-		LocalRuntime:          resp.GetLocalRuntime(),
-		LocalModel:            resp.GetLocalModel(),
-		EmbeddingModel:        resp.GetEmbeddingModel(),
-		CloudProvider:         resp.GetCloudProvider(),
-		CloudModel:            resp.GetCloudModel(),
-		CloudBaseURL:          resp.GetCloudBaseUrl(),
-		CloudAPIKeySet:        resp.GetCloudApiKeySet(),
-		CloudState:            resp.GetCloudState(),
-		Port:                  resp.GetPort(),
-		LocusMode:             resp.GetLocusMode(),
-		WatchdogEnabled:       resp.GetWatchdogEnabled(),
-		WatchdogEcho:          resp.GetWatchdogEcho(),
-		WatchdogMode:          resp.GetWatchdogMode(),
-		WatchdogChecks:        splitChecks(resp.GetWatchdogChecks()),
-		WatchdogEscalateAfter: atoiOr(resp.GetWatchdogEscalateAfter(), 0),
+		OllamaURL:              resp.GetOllamaUrl(),
+		LocalRuntime:           resp.GetLocalRuntime(),
+		LocalModel:             resp.GetLocalModel(),
+		EmbeddingModel:         resp.GetEmbeddingModel(),
+		CloudProvider:          resp.GetCloudProvider(),
+		CloudModel:             resp.GetCloudModel(),
+		CloudBaseURL:           resp.GetCloudBaseUrl(),
+		CloudAPIKeySet:         resp.GetCloudApiKeySet(),
+		CloudState:             resp.GetCloudState(),
+		Port:                   resp.GetPort(),
+		LocusMode:              resp.GetLocusMode(),
+		WatchdogEnabled:        resp.GetWatchdogEnabled(),
+		WatchdogEcho:           resp.GetWatchdogEcho(),
+		WatchdogMode:           resp.GetWatchdogMode(),
+		WatchdogChecks:         splitChecks(resp.GetWatchdogChecks()),
+		WatchdogEscalateAfter:  atoiOr(resp.GetWatchdogEscalateAfter(), 0),
+		ElideToolResults:       resp.GetElideToolResults(),
+		LossyToolElision:       resp.GetLossyToolElision(),
+		RawRetentionDays:       int(resp.GetRawRetentionDays()),
+		CompactedRetentionDays: int(resp.GetCompactedRetentionDays()),
+		KeepForever:            resp.GetKeepForever(),
+		CompactionEnabled:      resp.GetCompactionEnabled(),
 	}, nil
 }
 
@@ -211,6 +230,18 @@ type ConfigUpdate struct {
 	WatchdogMode          string // "" = unchanged, "challenge-and-justify"/"strict"
 	WatchdogChecks        string // "" = unchanged, "-" = empty list, else comma-separated
 	WatchdogEscalateAfter string // "" = unchanged, else integer >= 1
+	// ElideToolResults is string-encoded to preserve the sparse-patch
+	// convention: "" = leave unchanged, "true" / "false" = apply.
+	ElideToolResults string
+	// LossyToolElision — same encoding as ElideToolResults.
+	LossyToolElision string
+	// Retention — string-encoded to preserve sparse-patch semantics. Days
+	// must parse as non-negative integers; KeepForever is "true" / "false".
+	RawRetentionDays       string
+	CompactedRetentionDays string
+	KeepForever            string
+	// CompactionEnabled — sparse-patch bool. "" | "true" | "false".
+	CompactionEnabled string
 }
 
 // RuntimeStatus is the provider-neutral model/runtime dashboard snapshot.
@@ -736,9 +767,10 @@ func (c *Client) StreamRuntimeLogs(ctx context.Context, tail int, source string)
 // zero / nil). Err is set if the stream itself failed and is the terminal
 // event on this channel.
 type AgentEvent struct {
-	Mode           string          // populated by PermissionModeChanged events
-	MeridianStatus *MeridianStatus // populated by MeridianStatusChanged events
-	Err            error
+	Mode               string              // populated by PermissionModeChanged events
+	MeridianStatus     *MeridianStatus     // populated by MeridianStatusChanged events
+	LocalRuntimeStatus *LocalRuntimeStatus // populated by LocalRuntimeStatusChanged events
+	Err                error
 }
 
 // MeridianStatus mirrors proto.MeridianStatus in the client SDK so callers
@@ -749,6 +781,20 @@ type MeridianStatus struct {
 	Message     string
 	Port        int32
 	MissingDeps []string
+}
+
+// LocalRuntimeStatus mirrors proto.LocalRuntimeStatus in the client SDK.
+// Ok=true means the runtime is ready; ok=false + Missing tells the CLI what
+// recovery flow to offer (install, model picker). SuggestedCommand is the
+// shell command that would resolve Missing (e.g. "brew install llama.cpp").
+type LocalRuntimeStatus struct {
+	Ok               bool
+	Runtime          string
+	Missing          string
+	Message          string
+	SuggestedCommand string
+	BinaryPath       string
+	DefaultModel     string
 }
 
 // SubscribeEvents opens the standing server->client event stream and returns a
@@ -780,6 +826,10 @@ func (c *Client) SubscribeEvents(ctx context.Context) (<-chan AgentEvent, error)
 				out <- AgentEvent{MeridianStatus: meridianStatusFromProto(ms.GetStatus())}
 				continue
 			}
+			if lr := ev.GetLocalRuntimeStatusChanged(); lr != nil {
+				out <- AgentEvent{LocalRuntimeStatus: localRuntimeStatusFromProto(lr.GetStatus())}
+				continue
+			}
 			// Unknown event types are silently dropped — clients that don't
 			// recognise them should not error on forward-compat additions.
 		}
@@ -800,23 +850,104 @@ func meridianStatusFromProto(p *proto.MeridianStatus) *MeridianStatus {
 	}
 }
 
+// localRuntimeStatusFromProto converts the wire proto into the client-side
+// struct. Nil-safe so callers can invoke unconditionally.
+func localRuntimeStatusFromProto(p *proto.LocalRuntimeStatus) *LocalRuntimeStatus {
+	if p == nil {
+		return nil
+	}
+	return &LocalRuntimeStatus{
+		Ok:               p.GetOk(),
+		Runtime:          p.GetRuntime(),
+		Missing:          p.GetMissing(),
+		Message:          p.GetMessage(),
+		SuggestedCommand: p.GetSuggestedCommand(),
+		BinaryPath:       p.GetBinaryPath(),
+		DefaultModel:     p.GetDefaultModel(),
+	}
+}
+
+// InstallProgress is one frame from an InstallLocalRuntime stream. Frames
+// with Done=false carry a Line of subprocess output. The stream terminates
+// with a single Done=true frame carrying Ok+Error (Err populated only when
+// the stream itself failed, distinct from a subprocess non-zero exit).
+type InstallProgress struct {
+	Line  string
+	Done  bool
+	Ok    bool
+	Error string
+	Err   error
+}
+
+// GetLocalRuntimeStatus fetches the current local-runtime detection snapshot
+// for the selected runtime. Callers use this once at startup to populate the
+// chip / install modal without waiting for a push event.
+func (c *Client) GetLocalRuntimeStatus(ctx context.Context) (*LocalRuntimeStatus, error) {
+	resp, err := c.agent.GetLocalRuntimeStatus(ctx, &proto.GetLocalRuntimeStatusRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return localRuntimeStatusFromProto(resp.GetStatus()), nil
+}
+
+// InstallLocalRuntime opens the InstallLocalRuntime streaming RPC for the
+// given runtime and returns a channel of progress frames. The channel closes
+// after the terminal Done=true frame (or after a stream error). Cancelling
+// ctx kills the install subprocess server-side.
+func (c *Client) InstallLocalRuntime(ctx context.Context, runtime string) (<-chan InstallProgress, error) {
+	stream, err := c.agent.InstallLocalRuntime(ctx, &proto.InstallLocalRuntimeRequest{Runtime: runtime})
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan InstallProgress, 8)
+	go func() {
+		defer close(out)
+		for {
+			frame, err := stream.Recv()
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			if err != nil {
+				out <- InstallProgress{Err: err}
+				return
+			}
+			out <- InstallProgress{
+				Line:  frame.GetLine(),
+				Done:  frame.GetDone(),
+				Ok:    frame.GetOk(),
+				Error: frame.GetError(),
+			}
+			if frame.GetDone() {
+				return
+			}
+		}
+	}()
+	return out, nil
+}
+
 // UpdateConfig sends a runtime config patch. Returns the agent's confirmation
 // summary line (e.g. "updated: [local_model=qwen3-coder, cloud=anthropic/...]").
 func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, error) {
 	resp, err := c.agent.UpdateConfig(ctx, &proto.UpdateConfigRequest{
-		OllamaUrl:             u.OllamaURL,
-		LocalRuntime:          u.LocalRuntime,
-		LocalModel:            u.LocalModel,
-		CloudProvider:         u.CloudProvider,
-		CloudModel:            u.CloudModel,
-		CloudApiKey:           u.CloudAPIKey,
-		CloudBaseUrl:          u.CloudBaseURL,
-		LocusMode:             u.LocusMode,
-		WatchdogEnabled:       u.WatchdogEnabled,
-		WatchdogEcho:          u.WatchdogEcho,
-		WatchdogMode:          u.WatchdogMode,
-		WatchdogChecks:        u.WatchdogChecks,
-		WatchdogEscalateAfter: u.WatchdogEscalateAfter,
+		OllamaUrl:              u.OllamaURL,
+		LocalRuntime:           u.LocalRuntime,
+		LocalModel:             u.LocalModel,
+		CloudProvider:          u.CloudProvider,
+		CloudModel:             u.CloudModel,
+		CloudApiKey:            u.CloudAPIKey,
+		CloudBaseUrl:           u.CloudBaseURL,
+		LocusMode:              u.LocusMode,
+		WatchdogEnabled:        u.WatchdogEnabled,
+		WatchdogEcho:           u.WatchdogEcho,
+		WatchdogMode:           u.WatchdogMode,
+		WatchdogChecks:         u.WatchdogChecks,
+		WatchdogEscalateAfter:  u.WatchdogEscalateAfter,
+		ElideToolResults:       u.ElideToolResults,
+		LossyToolElision:       u.LossyToolElision,
+		RawRetentionDays:       u.RawRetentionDays,
+		CompactedRetentionDays: u.CompactedRetentionDays,
+		KeepForever:            u.KeepForever,
+		CompactionEnabled:      u.CompactionEnabled,
 	})
 	if err != nil {
 		return "", err

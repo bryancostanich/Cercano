@@ -244,6 +244,10 @@ func (m *mockAgentClient) InstallLocalRuntime(ctx context.Context, in *proto.Ins
 	return nil, nil
 }
 
+func (m *mockAgentClient) ListCloudProfileModels(ctx context.Context, in *proto.ListCloudProfileModelsRequest, opts ...grpc.CallOption) (*proto.ListCloudProfileModelsResponse, error) {
+	return &proto.ListCloudProfileModelsResponse{}, nil
+}
+
 func TestNewServer_RegistersTools(t *testing.T) {
 	mock := &mockAgentClient{}
 	s := NewServer(mock)
@@ -811,7 +815,6 @@ func TestCercanoConfig_InvalidAction(t *testing.T) {
 	}
 	t.Error("expected error for invalid action")
 }
-
 
 func TestCercanoLocal_MultiTurn(t *testing.T) {
 	callCount := 0

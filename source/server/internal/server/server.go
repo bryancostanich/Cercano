@@ -1922,12 +1922,17 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	// augments the base tools with the conversation-scoped justify tool.
 	gateRegistry := s.toolRegistry
 	var wdGate agent.WatchdogGate
+	var wdTurnEnd agent.WatchdogTurnEnd
 	s.cfgMu.RLock()
 	wd := s.watchdog
 	s.cfgMu.RUnlock()
 	if wd != nil {
 		wdGate = func(ctx context.Context, toolName string, args json.RawMessage, transcript []llm.Message) agent.WatchdogDecision {
 			d := wd.Gate(ctx, convID, watchdog.Action{Kind: "tool_call", ToolName: toolName, ToolArgs: args, Transcript: transcript})
+			return agent.WatchdogDecision{Action: d.Action, Protocol: d.Protocol, Challenge: d.Challenge}
+		}
+		wdTurnEnd = func(ctx context.Context, finalText string, transcript []llm.Message) agent.WatchdogDecision {
+			d := wd.Gate(ctx, convID, watchdog.Action{Kind: "turn_end", Text: finalText, Transcript: transcript})
 			return agent.WatchdogDecision{Action: d.Action, Protocol: d.Protocol, Challenge: d.Challenge}
 		}
 		reg := agenttools.NewRegistry()
@@ -1951,7 +1956,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		}
 	}
 
-	result, loopErr := s.runMainLoop(ctx, req, provider, isCloud, sink, requester, convHistory, onTextDelta, onTurn, wdGate, gateRegistry)
+	result, loopErr := s.runMainLoop(ctx, req, provider, isCloud, sink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry)
 	if loopErr != nil {
 		s.cfgMu.RLock()
 		locusMode := s.currentConfig.LocusMode
@@ -1978,7 +1983,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 			})
 			provider = fbProv
 			isCloud = fbCloud
-			result, loopErr = s.runMainLoop(ctx, req, fbProv, fbCloud, sink, requester, convHistory, onTextDelta, onTurn, wdGate, gateRegistry)
+			result, loopErr = s.runMainLoop(ctx, req, fbProv, fbCloud, sink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry)
 		}
 		if loopErr != nil {
 			return fmt.Errorf("tool loop error: %w", loopErr)
@@ -2037,6 +2042,7 @@ func (s *Server) runMainLoop(
 	onTextDelta func(string),
 	onTurn func(m llm.Message),
 	watchdogGate agent.WatchdogGate,
+	watchdogTurnEnd agent.WatchdogTurnEnd,
 	registry *agenttools.Registry,
 ) (agent.ToolLoopResult, error) {
 	return agent.RunToolLoop(ctx, agent.ToolLoopInput{
@@ -2053,6 +2059,7 @@ func (s *Server) runMainLoop(
 		OnTextDelta:         onTextDelta,
 		OnTurnComplete:      onTurn,
 		WatchdogGate:        watchdogGate,
+		WatchdogTurnEnd:     watchdogTurnEnd,
 	})
 }
 

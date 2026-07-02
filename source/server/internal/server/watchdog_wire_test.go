@@ -65,6 +65,38 @@ func TestBuildWatchdogSkipsUnknownChecks(t *testing.T) {
 	}
 }
 
+// TestTurnEndAdapterMapsDecisionFields: the per-request turn-end adapter maps a
+// watchdog.Decision to agent.WatchdogDecision field-for-field, mirroring the
+// tool-call gate adapter. A plain-english violation is returned by a stub OneShot
+// that asserts protocol and challenge are carried through unchanged.
+func TestTurnEndAdapterMapsDecisionFields(t *testing.T) {
+	oneShot := func(_ context.Context, _ string) (string, error) {
+		return "VIOLATION: yes\nCHALLENGE: answer in plain english please", nil
+	}
+	wd := watchdog.New(
+		watchdog.Config{Mode: watchdog.ModeChallenge, EscalateAfter: 2},
+		[]watchdog.Check{watchdog.PlainEnglishCheck()},
+		oneShot,
+	)
+
+	// Adapter identical to the one built in the runMainLoop caller.
+	turnEnd := func(ctx context.Context, finalText string, transcript []llm.Message) agent.WatchdogDecision {
+		d := wd.Gate(ctx, "conv-1", watchdog.Action{Kind: "turn_end", Text: finalText, Transcript: transcript})
+		return agent.WatchdogDecision{Action: d.Action, Protocol: d.Protocol, Challenge: d.Challenge}
+	}
+
+	got := turnEnd(context.Background(), "Here is the stack trace: 0x00deadbeef null ptr", nil)
+	if got.Action != "challenge" {
+		t.Fatalf("expected challenge action, got %q", got.Action)
+	}
+	if got.Protocol != "plain-english" {
+		t.Fatalf("expected plain-english protocol, got %q", got.Protocol)
+	}
+	if got.Challenge == "" {
+		t.Fatal("expected non-empty challenge text carried through the adapter")
+	}
+}
+
 // TestGateAdapterMapsDecisionFields: the per-request gate closure maps a
 // watchdog.Decision to agent.WatchdogDecision field-for-field. A debug-loop
 // violation is only surfaced by the OneShot model, so with a stub OneShot that

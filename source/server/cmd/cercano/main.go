@@ -29,6 +29,7 @@ import (
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
+	"cercano/source/server/internal/crashlog"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/engine"
 	llamaengine "cercano/source/server/internal/engine/llamaserver"
@@ -1238,13 +1239,45 @@ func generateSessionID() string {
 
 // runServerMode starts the gRPC server in standalone mode (for IDE clients).
 func runServerMode(cfg config.Config) {
+	// Persistent crash log. Sits alongside config.yaml so operators can
+	// find it after the fact. Failure to open the log is non-fatal —
+	// crash recording is nice-to-have; the server should still start.
+	crashLogPath := filepath.Join(filepath.Dir(config.DefaultPath()), "crash.log")
+	crashWriter, cwErr := crashlog.NewWriter(crashLogPath, version)
+	if cwErr != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] Failed to open crash log at %s: %v (server continues without crash capture)\n", crashLogPath, cwErr)
+	}
+	// Top-level panic recovery: catches anything the gRPC-handler
+	// recovery interceptors missed (background goroutine panics that
+	// propagated up, main-goroutine panics during startup, etc.). We
+	// log then re-panic so the process still dies — the point is
+	// observability, not resurrection.
+	defer func() {
+		if r := recover(); r != nil {
+			if crashWriter != nil {
+				crashWriter.LogPanic(fmt.Sprintf("%v", r), []byte(runtimeStack(true)), map[string]any{
+					"stage": "runServerMode",
+				})
+				_ = crashWriter.Close()
+			}
+			panic(r)
+		}
+	}()
+
 	fmt.Printf("Starting Cercano gRPC server (v%s)...\n", version)
 	fmt.Printf("Local model: %s\n", cfg.LocalModel)
 	fmt.Printf("Ollama URL: %s\n", cfg.OllamaURL)
+	if crashWriter != nil {
+		fmt.Printf("Crash log: %s\n", crashLogPath)
+	}
 
 	addr, cleanup, err := startGRPCServer(cfg, ":"+cfg.Port)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "\n[ERROR] %v\n", err)
+		if crashWriter != nil {
+			crashWriter.LogPanic("server startup failed: "+err.Error(), nil, map[string]any{"stage": "startGRPCServer"})
+			_ = crashWriter.Close()
+		}
 		os.Exit(1)
 	}
 
@@ -1253,17 +1286,39 @@ func runServerMode(cfg config.Config) {
 	// Serve until signaled. The dev launcher SIGTERMs stale agents on every
 	// rebuild; dying instantly here severed every in-flight stream (clients
 	// saw "Unavailable: error reading from server: EOF"), so drain instead.
+	//
+	// Every signal now also gets recorded to the crash log so operators
+	// can distinguish a graceful stop from a mysterious disappearance.
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	sig := <-sigCh
 	fmt.Printf("Received %v — draining in-flight requests (signal again to force quit)...\n", sig)
+	if crashWriter != nil {
+		crashWriter.LogSignal(sig.String(), map[string]any{"stage": "runServerMode", "graceful": true})
+	}
 	go func() {
 		<-sigCh
+		if crashWriter != nil {
+			crashWriter.LogSignal("second-signal-force-quit", nil)
+			_ = crashWriter.Close()
+		}
 		fmt.Fprintln(os.Stderr, "Second signal — exiting immediately")
 		os.Exit(1)
 	}()
 	cleanup()
+	if crashWriter != nil {
+		_ = crashWriter.Close()
+	}
 	fmt.Println("Shutdown complete")
+}
+
+// runtimeStack returns a stack trace suitable for crash-log capture.
+// When all=true it includes every live goroutine (useful for OOM /
+// deadlock investigations); when false it's just the calling goroutine.
+func runtimeStack(all bool) string {
+	buf := make([]byte, 1<<20)
+	n := runtime.Stack(buf, all)
+	return string(buf[:n])
 }
 
 // runMCPMode starts the MCP server. If no external gRPC address is provided,

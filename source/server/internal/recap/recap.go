@@ -6,6 +6,7 @@ package recap
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -88,10 +89,15 @@ func (g *Generator) regenerate(conversationID string) {
 
 	out, err := g.complete(ctx, prompt)
 	if err != nil {
-		return // keep prior recap on failure
+		// Keep prior recap on failure, but log so a persistent silent
+		// failure (e.g. Ollama unreachable, model refusing the prompt)
+		// can be diagnosed. Debounced retry on next turn.
+		fmt.Fprintf(os.Stderr, "[recap] complete failed for %s: %v\n", conversationID, err)
+		return
 	}
 	line := firstLine(out, maxRecapChars)
 	if line == "" {
+		fmt.Fprintf(os.Stderr, "[recap] complete returned no usable line for %s (raw %d bytes)\n", conversationID, len(out))
 		return
 	}
 	_ = g.store.UpdateRecap(ctx, conversationID, line)
@@ -110,13 +116,27 @@ func (g *Generator) regenerate(conversationID string) {
 }
 
 // buildPrompt produces an incremental summarization prompt from the prior
-// recap plus the most recent maxTurns turns.
+// recap plus the most recent maxTurns turns that carry prose.
+//
+// Filter first, then slice: tool_use and tool_result turns write full JSON to
+// BlocksJSON but leave Content empty (persistTurn concatenates only BlockText
+// blocks). A naive "last N turns" pass over a tool-heavy conversation gives
+// the model ~9 empty role lines and 3 real ones — the model correctly
+// responds with nothing, and the recap generator silently no-ops. Filtering
+// to non-empty Content up front keeps the prompt information-dense and lets
+// recap survive long stretches of tool-only activity.
 func buildPrompt(prior string, turns []conversation.Turn, maxTurns int) string {
-	if maxTurns > 0 && len(turns) > maxTurns {
-		turns = turns[len(turns)-maxTurns:]
+	withText := turns[:0:0]
+	for _, t := range turns {
+		if strings.TrimSpace(t.Content) != "" {
+			withText = append(withText, t)
+		}
+	}
+	if maxTurns > 0 && len(withText) > maxTurns {
+		withText = withText[len(withText)-maxTurns:]
 	}
 	var b strings.Builder
-	for _, t := range turns {
+	for _, t := range withText {
 		c := t.Content
 		if len(c) > 500 {
 			c = c[:500]

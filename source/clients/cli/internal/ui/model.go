@@ -489,10 +489,14 @@ func fetchConfigCmd(ag *agentclient.Client) tea.Cmd {
 		if err != nil || cfg == nil {
 			return configLoadedMsg{}
 		}
-		// Treat "cloud configured" as: provider AND (api-key OR base-url) are
-		// set. Otherwise we'd show a cloud model name that the agent will
-		// never actually route to.
-		configured := cfg.CloudProvider != "" && (cfg.CloudAPIKeySet || cfg.CloudBaseURL != "")
+		// Treat "cloud configured" as: the server's CloudState reports "ok" —
+		// that flag reflects whether the router actually has a live cloud
+		// provider registered (see server.GetConfig's cloud_state derivation).
+		// The old check that summed legacy CloudProvider + CloudAPIKeySet +
+		// CloudBaseURL fields broke when cloud config migrated to the
+		// active-profile model, where those legacy fields can be empty even
+		// while a profile with a keychain-stored key is happily routing.
+		configured := cfg.CloudState == "ok"
 		return configLoadedMsg{
 			LocalModel:      cfg.LocalModel,
 			CloudModel:      cfg.CloudModel,

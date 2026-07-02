@@ -102,11 +102,20 @@ func (g *Generator) runCompaction(ctx context.Context, conversationID string) er
 		return err
 	}
 	state.ConversationID = conversationID
-	newState, changed, err := compactor.Advance(ctx, turns, state, g.summarize, g.cfg, g.tok)
+	newState, changed, more, err := compactor.Advance(ctx, turns, state, g.summarize, g.cfg, g.tok)
 	if err != nil || !changed {
 		return err
 	}
-	return g.store.SaveCompaction(ctx, newState)
+	if err := g.store.SaveCompaction(ctx, newState); err != nil {
+		return err
+	}
+	if more {
+		// Backlog remains; a bounded pass persisted its progress. Reschedule so
+		// the next chunk runs after the debounce — the backlog converges one
+		// bounded pass at a time.
+		g.Schedule(conversationID)
+	}
+	return nil
 }
 
 // IsCompacting reports whether a compaction pass is currently running for the

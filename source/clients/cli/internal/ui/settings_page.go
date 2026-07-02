@@ -220,6 +220,26 @@ func (sp *settingsPage) onCommit(key, value string) (string, tea.Cmd, error) {
 	action := classifyCommit(key, value, currentChecks)
 	switch action.kind {
 	case commitConfig:
+		// Guard: switching to llama_server requires its binary + a model
+		// to be ready. If either is missing, open the install modal and
+		// DON'T dispatch UpdateConfig — the modal's cancel path leaves
+		// the config unchanged (switch rejected), and its install-success
+		// path dispatches the UpdateConfig at the moment the runtime is
+		// actually usable. Force sp.cfg to nil so the form snapshot that
+		// runs immediately after this commit reflects the server's
+		// (unchanged) runtime, reverting the toggle back to ollama.
+		if action.update.LocalRuntime == "llama_server" {
+			gctx, gcancel := context.WithTimeout(context.Background(), 3*time.Second)
+			st, gerr := sp.agent.GetLocalRuntimeStatus(gctx)
+			gcancel()
+			if gerr == nil && st != nil && !st.Ok {
+				sp.cfg = nil
+				statusCopy := *st
+				return "install required — see modal", func() tea.Msg {
+					return openLocalRuntimeInstallModalMsg{status: statusCopy, pending: "llama_server"}
+				}, nil
+			}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		status, err := sp.agent.UpdateConfig(ctx, action.update)

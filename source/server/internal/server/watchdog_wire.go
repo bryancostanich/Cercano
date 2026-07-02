@@ -44,6 +44,8 @@ func (s *Server) buildWatchdogFrom(wc config.WatchdogConfig) *watchdog.Watchdog 
 			checks = append(checks, watchdog.CommitCheckpointCheck())
 		case "plain-english":
 			checks = append(checks, watchdog.PlainEnglishCheck())
+		case "worktree-first":
+			checks = append(checks, watchdog.WorktreeFirstCheck())
 		}
 	}
 

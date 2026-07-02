@@ -42,3 +42,9 @@ test/sandbox/
 
 # Brainstorm/visual-companion session artifacts (per-session, regenerated)
 .superpowers/
+
+# Linked git worktrees. Each subdirectory is a git worktree checkout
+# managed by the git_worktree tool — see the worktree-first protocol.
+# Excluded so their internal HEAD drift and the worktree directories
+# themselves do not show up in the root worktree's status.
+.claude/worktrees/

@@ -1,8 +1,10 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
+	"cercano/source/clients/cli/internal/form"
 	"cercano/source/server/pkg/agentclient"
 )
 
@@ -94,6 +96,19 @@ func TestWatchdogGroupModeChecksEscalateFields(t *testing.T) {
 		if !keys[want] {
 			t.Fatalf("missing field %q", want)
 		}
+	}
+}
+
+func TestWatchdogChecksFromForm(t *testing.T) {
+	cfg := &agentclient.Config{WatchdogChecks: []string{"debug-loop", "plain-english"}}
+	f := form.New([]form.Section{
+		{Title: "Development Tools", Groups: []form.Group{
+			{Title: "Watchdog", Fields: buildDevFields(cfg)},
+		}},
+	})
+	got := watchdogChecksFromForm(f)
+	if strings.Join(got, ",") != "debug-loop,plain-english" {
+		t.Fatalf("live derivation: %v", got)
 	}
 }
 

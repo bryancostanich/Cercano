@@ -207,8 +207,14 @@ func (sp *settingsPage) onCommit(key, value string) (string, tea.Cmd, error) {
 		return "bad color", nil, nil
 	}
 
+	// Derive the current check set from the live form fields, not the cached
+	// config — immune to a stale/nil sp.cfg after a failed re-fetch. The
+	// just-committed toggle has already flipped its state, and toggleCheck
+	// sets membership explicitly, so double-application is idempotent.
 	var currentChecks []string
-	if sp.cfg != nil {
+	if sp.form != nil {
+		currentChecks = watchdogChecksFromForm(sp.form)
+	} else if sp.cfg != nil {
 		currentChecks = sp.cfg.WatchdogChecks
 	}
 	action := classifyCommit(key, value, currentChecks)

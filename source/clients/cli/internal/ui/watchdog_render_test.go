@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"cercano/source/clients/cli/internal/render"
 	"cercano/source/clients/cli/internal/theme"
 	"cercano/source/server/pkg/agentclient"
 )
@@ -32,8 +31,6 @@ func TestWatchdogRender_Challenge(t *testing.T) {
 	}
 
 	var rendered string
-	md := render.NewMarkdown(theme.MarkdownStyle(theme.Cracker()))
-	_ = md
 	for _, e := range c.entries {
 		rendered += stripAnsiCSI(c.renderEntry(e, 0))
 	}
@@ -82,8 +79,8 @@ func TestWatchdogRender_Block(t *testing.T) {
 	if !strings.Contains(rendered, "commit-checkpoint") {
 		t.Errorf("block render missing protocol, got: %q", rendered)
 	}
-	if !strings.Contains(rendered, "blocked") {
-		t.Errorf("block render missing 'blocked', got: %q", rendered)
+	if !strings.Contains(rendered, "(blocked — no override)") {
+		t.Errorf("block render missing '(blocked — no override)', got: %q", rendered)
 	}
 }
 

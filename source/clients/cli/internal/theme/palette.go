@@ -44,7 +44,7 @@ const (
 	hexBorder    = "#6F6F6F"
 	hexPrimary   = "#EA8212"
 	hexBright    = "#FFB84D"
-	hexDimAmber  = "#5A3308"
+	hexDimAmber  = "#8A5810"
 	hexAccent    = "#BDF000"
 	hexInfo      = "#00C8E8"
 	hexMuted     = "#888888"

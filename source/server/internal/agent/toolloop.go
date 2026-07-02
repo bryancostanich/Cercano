@@ -216,7 +216,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				switch wd.Action {
 				case "challenge", "block":
 					note := "⚡ watchdog (" + wd.Protocol + "): " + wd.Challenge +
-						" Rewrite your reply in plain, colleague-level English"
+						". Rewrite your reply in plain, colleague-level English"
 					if wd.Action == "block" {
 						note += " (rewrite required — no override)."
 					} else {

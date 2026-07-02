@@ -15,11 +15,18 @@ type themeFile struct {
 func colorFields(p *Palette) map[string]*color.Color {
 	return map[string]*color.Color{
 		"bg_deep": &p.BgDeep, "surface": &p.Surface, "border_dim": &p.BorderDim, "border": &p.Border,
-		"primary": &p.Primary, "bright": &p.Bright, "dim_amber": &p.DimAmber, "accent": &p.Accent,
+		"primary": &p.Primary, "bright": &p.Bright, "dim": &p.Dim, "accent": &p.Accent,
 		"info": &p.Info, "muted": &p.Muted, "success": &p.Success, "warn": &p.Warn, "error": &p.Error,
 		"buffer_link": &p.BufferLink, "buffer_code": &p.BufferCode, "buffer_lime": &p.BufferLime,
 		"buffer_error": &p.BufferError, "buffer_user_bg": &p.BufferUserBg,
 	}
+}
+
+// legacyColorKeys maps deprecated yaml keys to their current names, used on
+// read only. Keeps saved custom themes from silently reverting when a field is
+// renamed for clarity. Marshal always writes the current key.
+var legacyColorKeys = map[string]string{
+	"dim_amber": "dim", // renamed 2026-07: shouldn't couple palette slot to a hue
 }
 
 // FieldPtr returns a pointer to the palette color for a yaml key, or nil.
@@ -49,6 +56,20 @@ func UnmarshalTheme(name string, data []byte) (Theme, error) {
 		if hex, ok := tf.Colors[key]; ok {
 			if c, err := ParseHex(hex); err == nil {
 				*ptr = c
+			}
+		}
+	}
+	// Legacy key fallback — only applied when the current key was NOT present,
+	// so a partially-migrated file with both keys honors the new one.
+	for legacy, current := range legacyColorKeys {
+		if _, hasCurrent := tf.Colors[current]; hasCurrent {
+			continue
+		}
+		if hex, ok := tf.Colors[legacy]; ok {
+			if ptr := fields[current]; ptr != nil {
+				if c, err := ParseHex(hex); err == nil {
+					*ptr = c
+				}
 			}
 		}
 	}

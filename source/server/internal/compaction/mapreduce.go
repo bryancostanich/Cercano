@@ -8,20 +8,14 @@ import (
 )
 
 // MapReduceCompactor summarizes each older segment from raw (no compounding),
-// then reduces the segment summaries — mechanically (MergeSummaries) or via a
-// second model pass (ModelReduce).
-type MapReduceCompactor struct {
-	ModelReduce bool
-}
+// then reduces the segment summaries via the deterministic MergeSummaries. A
+// prior ModelReduce mode was removed after the second model pass was shown to
+// fabricate content (see reduce.go).
+type MapReduceCompactor struct{}
 
-func (c MapReduceCompactor) Name() string {
-	if c.ModelReduce {
-		return "map-reduce/model"
-	}
-	return "map-reduce/mechanical"
-}
+func (MapReduceCompactor) Name() string { return "map-reduce" }
 
-func (c MapReduceCompactor) Compact(ctx context.Context, raw []llm.Message, summarize SummarizeFunc, b Budget) (Result, error) {
+func (MapReduceCompactor) Compact(ctx context.Context, raw []llm.Message, summarize SummarizeFunc, b Budget) (Result, error) {
 	elided, _ := ElideSupersededToolResults(raw)
 	older, recent := splitRecent(elided, b.VerbatimRecent)
 
@@ -36,15 +30,7 @@ func (c MapReduceCompactor) Compact(ctx context.Context, raw []llm.Message, summ
 			}
 			parts = append(parts, s)
 		}
-		if c.ModelReduce {
-			r, err := Reduce(ctx, parts, summarize)
-			if err != nil {
-				return Result{}, err
-			}
-			sum = r
-		} else {
-			sum = MergeSummaries(parts)
-		}
+		sum = MergeSummaries(parts)
 	}
 	return Result{SendView: AssembleSendView(sum, recent), Summaries: []StructuredSummary{sum}}, nil
 }

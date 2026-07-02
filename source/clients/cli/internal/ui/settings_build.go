@@ -88,10 +88,12 @@ func buildSettingsSections(cfg *agentclient.Config, mode, accentToken string) []
 		{Title: "Server", Fields: []form.Field{
 			form.NewReadOnly("port", "port", cfg.Port, "(read-only)"),
 		}},
-		{Title: "Developer", Fields: buildDevFields(cfg)},
 	}
 }
 
+// buildDevFields builds the watchdog controls. They render as the "Watchdog"
+// group inside the Development Tools section pinned to the bottom of the
+// settings page (see settingsPage.snapshotSections).
 func buildDevFields(cfg *agentclient.Config) []form.Field {
 	devFields := []form.Field{
 		form.NewToggle("watchdog-enabled", "watchdog-enabled", cfg.WatchdogEnabled),
@@ -149,6 +151,18 @@ func classifyCommit(key, value string, currentChecks []string) commitAction {
 		u.WatchdogMode = value
 	case "watchdog-escalate-after":
 		u.WatchdogEscalateAfter = value
+	case "elide-tool-results":
+		u.ElideToolResults = value
+	case "lossy-tool-elision":
+		u.LossyToolElision = value
+	case "raw-retention-days":
+		u.RawRetentionDays = value
+	case "compacted-retention-days":
+		u.CompactedRetentionDays = value
+	case "keep-forever":
+		u.KeepForever = value
+	case "compaction-enabled":
+		u.CompactionEnabled = value
 	case "permission-mode":
 		return commitAction{kind: commitPermission, value: value}
 	case "accent-color":

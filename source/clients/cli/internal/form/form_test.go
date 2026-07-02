@@ -122,6 +122,46 @@ func TestFormCommitTriggersReload(t *testing.T) {
 	}
 }
 
+// A section with Groups must (a) render the group title as a subheading,
+// (b) render each group's fields, and (c) let nav flow through the flattened
+// group fields as if the whole section were flat.
+func TestFormGroupsRenderAndNavigate(t *testing.T) {
+	p, s := testStyles()
+	sections := []Section{
+		{Title: "Development Tools", Groups: []Group{
+			{Title: "Context Management", Fields: []Field{
+				NewToggle("elide", "elide-tool-results", false),
+			}},
+			{Title: "Diagnostics", Fields: []Field{
+				NewText("verbose", "verbose", "off", ""),
+			}},
+		}},
+	}
+	f := New(sections)
+	out := f.View(80, p, s)
+	for _, want := range []string{"Development Tools", "Context Management", "elide-tool-results", "Diagnostics", "verbose"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("View missing %q\n%s", want, out)
+		}
+	}
+	// flat() must include both group fields, so nav lands on the second one.
+	f.Update(arrowDown())
+	if f.Cursor() != 1 {
+		t.Errorf("cursor after one down = %d, want 1 (into second group's field)", f.Cursor())
+	}
+}
+
+// Falling back to Fields when Groups is empty must still work — this
+// backwards-compatibility path is what every existing section relies on.
+func TestFormFieldsWithoutGroupsStillRender(t *testing.T) {
+	p, s := testStyles()
+	f := New([]Section{{Title: "Plain", Fields: []Field{NewText("k", "k", "v", "")}}})
+	out := f.View(80, p, s)
+	if !strings.Contains(out, "Plain") || !strings.Contains(out, "k") {
+		t.Fatalf("plain (no-groups) section should still render:\n%s", out)
+	}
+}
+
 func TestFormFocusedLineTracksCursor(t *testing.T) {
 	p, s := testStyles()
 	sections := []Section{

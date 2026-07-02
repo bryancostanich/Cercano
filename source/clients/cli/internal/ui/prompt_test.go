@@ -564,6 +564,68 @@ func TestPrompt_MouseDragSelection(t *testing.T) {
 	}
 }
 
+// TestModel_PasteIntoEmptyRendersInView reproduces the reported bug at the
+// Model level: the promptInput's own View() renders paste-into-empty
+// correctly, so if the composed Model view is missing the text, the fault is
+// in the composition path (m.Update handling, m.View assembly, or a stale
+// bubble-tea-level render).
+func TestModel_PasteIntoEmptyRendersInView(t *testing.T) {
+	m := New(nil, false)
+	m.width = 80
+	m.height = 24
+	m.relayout()
+
+	pasted := "form fields - need radio and checkbox input components for "
+	next, _ := m.Update(tea.PasteMsg{Content: pasted})
+	got := next.(Model)
+
+	if v := got.input.Value(); v != pasted {
+		t.Fatalf("input buffer got %q, want %q", v, pasted)
+	}
+	view := stripAnsiCSI(got.View().Content)
+	if !strings.Contains(view, pasted) {
+		t.Errorf("Model.View() does not contain the pasted text:\n%s", view)
+	}
+	t.Logf("=== FULL VIEW after paste-into-empty ===\n%s\n=== END VIEW ===", view)
+}
+
+// TestPrompt_PasteIntoEmptyRendersInView is the direct reproducer for the
+// reported paste bug: paste 60 characters into a fresh empty prompt; the
+// buffer takes the content but the rendered view is missing it. If View()
+// contains the pasted text, the bug lives above the promptInput layer (in
+// the Model composition, cursor placement, or Bubble Tea plumbing).
+func TestPrompt_PasteIntoEmptyRendersInView(t *testing.T) {
+	p := newTestPromptInput(80)
+	pasted := "form fields - need radio and checkbox input components for "
+	p, _ = p.Update(tea.PasteMsg{Content: pasted})
+
+	if got := p.Value(); got != pasted {
+		t.Fatalf("buffer got %q, want %q", got, pasted)
+	}
+	if got, want := p.cursor, utf8.RuneCountInString(pasted); got != want {
+		t.Errorf("cursor at %d, want %d (end of pasted text)", got, want)
+	}
+	view := stripAnsiCSI(p.View())
+	if !strings.Contains(view, pasted) {
+		t.Errorf("View() does not contain the pasted text — bug is in promptInput.\nview:\n%s", view)
+	}
+}
+
+// TestPrompt_PasteIntoNonEmptyRendersInView is the control: paste after some
+// existing content must also render. If the empty case fails but this one
+// passes, the bug is specifically about the empty→non-empty transition.
+func TestPrompt_PasteIntoNonEmptyRendersInView(t *testing.T) {
+	p := newTestPromptInput(80)
+	p, _ = updatePromptText(p, "existing ")
+	pasted := "form fields - need radio and checkbox input components for "
+	p, _ = p.Update(tea.PasteMsg{Content: pasted})
+
+	view := stripAnsiCSI(p.View())
+	if !strings.Contains(view, "existing "+pasted) {
+		t.Errorf("View() missing existing+pasted text:\n%s", view)
+	}
+}
+
 func TestPrompt_UndoRedoPasteSingleStep(t *testing.T) {
 	p := newTestPromptInput(80)
 	p, _ = p.Update(tea.PasteMsg{Content: "one\ntwo\nthree"})

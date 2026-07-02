@@ -9,7 +9,7 @@ import (
 // order, paired with their yaml key (matching theme.colorFields) and label.
 var chromeColorRows = []struct{ key, label string }{
 	{"bg_deep", "background"}, {"surface", "surface"}, {"border_dim", "border-dim"}, {"border", "border"},
-	{"primary", "primary"}, {"bright", "bright"}, {"dim_amber", "dim"}, {"accent", "accent"},
+	{"primary", "primary"}, {"bright", "bright"}, {"dim", "dim"}, {"accent", "accent"},
 	{"info", "info"}, {"muted", "muted"}, {"success", "success"}, {"warn", "warn"}, {"error", "error"},
 }
 

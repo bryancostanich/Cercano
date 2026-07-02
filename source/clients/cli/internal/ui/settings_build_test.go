@@ -3,7 +3,6 @@ package ui
 import (
 	"testing"
 
-	"cercano/source/clients/cli/internal/form"
 	"cercano/source/server/pkg/agentclient"
 )
 
@@ -60,20 +59,14 @@ func TestClassifyCommit(t *testing.T) {
 	}
 }
 
-func TestDeveloperSectionPresent(t *testing.T) {
+func TestWatchdogGroupFields(t *testing.T) {
+	// The watchdog controls render as the "Watchdog" group inside the pinned
+	// Development Tools section (settings_page.go); buildDevFields is the
+	// group's field builder.
 	cfg := &agentclient.Config{WatchdogEnabled: true, WatchdogEcho: false}
-	secs := buildSettingsSections(cfg, "permissive", "palette:accent")
-	found := false
-	for _, s := range secs {
-		if s.Title == "Developer" {
-			found = true
-			if s.Fields[0].Key() != "watchdog-enabled" || s.Fields[1].Key() != "watchdog-echo" {
-				t.Fatalf("unexpected first two field keys: %s, %s", s.Fields[0].Key(), s.Fields[1].Key())
-			}
-		}
-	}
-	if !found {
-		t.Fatal("no Developer section")
+	fields := buildDevFields(cfg)
+	if fields[0].Key() != "watchdog-enabled" || fields[1].Key() != "watchdog-echo" {
+		t.Fatalf("unexpected first two field keys: %s, %s", fields[0].Key(), fields[1].Key())
 	}
 }
 
@@ -88,23 +81,13 @@ func TestClassifyCommit_Watchdog(t *testing.T) {
 	}
 }
 
-func TestDeveloperSectionWatchdogFields(t *testing.T) {
+func TestWatchdogGroupModeChecksEscalateFields(t *testing.T) {
 	cfg := &agentclient.Config{
 		WatchdogEnabled: true, WatchdogMode: "strict",
 		WatchdogChecks: []string{"debug-loop"}, WatchdogEscalateAfter: 2,
 	}
-	secs := buildSettingsSections(cfg, "permissive", "palette:accent")
-	var dev *form.Section
-	for i := range secs {
-		if secs[i].Title == "Developer" {
-			dev = &secs[i]
-		}
-	}
-	if dev == nil {
-		t.Fatal("no Developer section")
-	}
 	keys := map[string]bool{}
-	for _, f := range dev.Fields {
+	for _, f := range buildDevFields(cfg) {
 		keys[f.Key()] = true
 	}
 	for _, want := range []string{"watchdog-mode", "watchdog-check-debug-loop", "watchdog-check-commit-checkpoint", "watchdog-check-plain-english", "watchdog-escalate-after"} {

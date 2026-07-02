@@ -3110,9 +3110,13 @@ func (m Model) renderCompactingMeterBar(cells, fillN int) string {
 				Foreground(progressColorAt(col, sweepPos, tail)).
 				Render(string(label[col-start])))
 		case inLabel && !onFill:
-			// Letter inherits the bar's dim empty color — same idea, but
-			// for the un-filled side.
-			b.WriteString(m.styles.MeterEmpty.Render(string(label[col-start])))
+			// Empty-side letters need to stand out against the dim ░
+			// background, so we use Bright — the same accent used for
+			// active/focus states elsewhere in the chrome. This inverts
+			// the "letter inherits the cell" idea: on the filled side
+			// the letter blends with the shimmer; on the empty side it
+			// pops against the dim background instead.
+			b.WriteString(m.styles.Bright.Render(string(label[col-start])))
 		case !inLabel && onFill:
 			b.WriteString(lipgloss.NewStyle().
 				Foreground(progressColorAt(col, sweepPos, tail)).

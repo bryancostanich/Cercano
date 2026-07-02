@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"cercano/source/server/internal/agent"
@@ -480,4 +481,60 @@ func (e *namedTestEngine) ChatWithTools(ctx context.Context, req engine.ChatRequ
 
 func (e *namedTestEngine) ListModels(ctx context.Context) ([]engine.ModelInfo, error) {
 	return []engine.ModelInfo{{Name: e.name + "-model"}}, nil
+}
+
+func TestUpdateConfig_WatchdogModeChecksEscalate(t *testing.T) {
+	srv := NewServer(nil, nil, nil, nil, nil, engine.NewEngineRegistry())
+	srv.SetConfigPersistence("", config.Config{})
+
+	_, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{
+		WatchdogMode: "strict", WatchdogEscalateAfter: "3", WatchdogChecks: "debug-loop,plain-english",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := srv.currentConfig.Watchdog
+	if w.Mode != "strict" {
+		t.Fatalf("mode=%q", w.Mode)
+	}
+	if w.EscalateAfter != 3 {
+		t.Fatalf("escalate=%d", w.EscalateAfter)
+	}
+	if strings.Join(w.Checks, ",") != "debug-loop,plain-english" {
+		t.Fatalf("checks=%v", w.Checks)
+	}
+
+	// "-" sentinel → empty list
+	if _, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{WatchdogChecks: "-"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(srv.currentConfig.Watchdog.Checks) != 0 {
+		t.Fatalf("expected empty checks, got %v", srv.currentConfig.Watchdog.Checks)
+	}
+
+	// invalid escalate ignored
+	before := srv.currentConfig.Watchdog.EscalateAfter
+	if _, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{WatchdogEscalateAfter: "nope"}); err != nil {
+		t.Fatal(err)
+	}
+	if srv.currentConfig.Watchdog.EscalateAfter != before {
+		t.Fatal("invalid escalate must be ignored")
+	}
+
+	// invalid mode ignored
+	if _, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{WatchdogMode: "permissive"}); err != nil {
+		t.Fatal(err)
+	}
+	if srv.currentConfig.Watchdog.Mode != "strict" {
+		t.Fatalf("invalid mode must be ignored, got %q", srv.currentConfig.Watchdog.Mode)
+	}
+
+	// GetConfig reports them
+	resp, err := srv.GetConfig(context.Background(), &proto.GetConfigRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.GetWatchdogMode() != "strict" || resp.GetWatchdogEscalateAfter() != "3" {
+		t.Fatalf("GetConfig: mode=%q escalate=%q", resp.GetWatchdogMode(), resp.GetWatchdogEscalateAfter())
+	}
 }

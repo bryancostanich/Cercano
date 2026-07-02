@@ -62,6 +62,19 @@ func (h *eventHub) broadcast(ev *proto.ClientEvent) {
 	}
 }
 
+// closeAll closes every subscriber channel and empties the hub, ending each
+// standing SubscribeEvents handler loop with a nil error. Shutdown-only:
+// without this, GracefulStop blocks forever on attached clients. Previously
+// returned unsubscribe funcs stay safe — they find their id already deleted.
+func (h *eventHub) closeAll() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for id, ch := range h.subs {
+		delete(h.subs, id)
+		close(ch)
+	}
+}
+
 // subscriberCount reports how many streams are currently open (test/observability).
 func (h *eventHub) subscriberCount() int {
 	h.mu.Lock()

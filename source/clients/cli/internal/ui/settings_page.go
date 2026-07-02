@@ -56,6 +56,15 @@ type settingsPage struct {
 	cloudSelected  string
 	cloudDraft     cloudDraft
 	cloudDraftNew  bool
+	// Cloud model catalog for the selected profile. Fetched lazily by
+	// selectCloudRow via ListCloudProfileModels when the row is anthropic-
+	// style; cleared on row-selection change so a switch between profiles
+	// (each of which may have its own accessible catalog) doesn't leak
+	// stale entries. cloudModelsFetched marks that the fetch has been
+	// attempted (even if it failed) so the fallback list rendering path
+	// isn't confused with "not yet loaded".
+	cloudModels        []agentclient.CloudModelInfo
+	cloudModelsFetched bool
 }
 
 func newSettingsPage(ag *agentclient.Client, p theme.Palette, s theme.Styles, accentToken string, w, h int, themes *theme.Registry, active theme.Theme) (*settingsPage, tea.Cmd) {

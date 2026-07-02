@@ -82,6 +82,32 @@ func TestEchoOnJustify(t *testing.T) {
 	}
 }
 
+func TestEchoOnBlock(t *testing.T) {
+	w := New(Config{Mode: ModeStrict}, []Check{fakeCheck{applies: true, verdict: Verdict{Violation: true, Protocol: "debug-loop", Challenge: "blocked-c"}}}, nil)
+	var got []string
+	w.SetEcho(func(thread, text string) { got = append(got, thread+"|"+text) })
+	if d := w.Gate(context.Background(), "conv", editAction()); d.Action != "block" {
+		t.Fatalf("expected block, got %+v", d)
+	}
+	if len(got) != 1 || !strings.Contains(got[0], "watchdog|") || !strings.Contains(got[0], "blocked-c") {
+		t.Fatalf("block must emit one watchdog-thread line with the challenge: %v", got)
+	}
+}
+
+func TestEchoOnEscalate(t *testing.T) {
+	w := New(Config{Mode: ModeChallenge, EscalateAfter: 2}, []Check{fakeCheck{applies: true, verdict: Verdict{Violation: true, Protocol: "debug-loop", Challenge: "esc-c"}}}, nil)
+	var got []string
+	w.SetEcho(func(thread, text string) { got = append(got, thread+"|"+text) })
+	w.Gate(context.Background(), "conv", editAction()) // challenge (1st emit)
+	got = nil
+	if d := w.Gate(context.Background(), "conv", editAction()); d.Action != "escalate" {
+		t.Fatalf("expected escalate, got %+v", d)
+	}
+	if len(got) != 1 || !strings.Contains(got[0], "watchdog|") || !strings.Contains(got[0], "esc-c") {
+		t.Fatalf("escalate must emit one watchdog-thread line: %v", got)
+	}
+}
+
 // TestEchoNilSafeWhenUnset verifies that Gate does not panic when SetEcho was
 // never called, and returns the expected decision.
 func TestEchoNilSafeWhenUnset(t *testing.T) {

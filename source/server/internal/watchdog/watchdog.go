@@ -63,9 +63,10 @@ func (w *Watchdog) SetEcho(fn func(thread, text string)) {
 	w.mu.Unlock()
 }
 
-// emitEcho calls the echo callback if one is registered. The callback itself
-// is invoked outside w.mu (snapshot under lock, call outside), so callers may
-// hold or not hold the mutex freely and the callback can never deadlock us.
+// emitEcho calls the echo callback if one is registered. It briefly acquires
+// w.mu to snapshot the callback, so callers must NOT hold w.mu (sync.Mutex is
+// not reentrant). The callback itself runs outside the lock, so it can never
+// deadlock the watchdog.
 func (w *Watchdog) emitEcho(thread, text string) {
 	w.mu.Lock()
 	fn := w.echo

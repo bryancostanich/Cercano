@@ -81,9 +81,14 @@ func New(cfg Config, checks []Check, oneShot OneShotFunc) *Watchdog {
 }
 
 // keyFor returns the action-identity key for dedup / justify tracking.
-// Format: protocol + "|" + toolName + "|" + first-12-hex-chars-of-sha256(toolArgs).
+// Format: protocol + "|" + toolName + "|" + first-12-hex-chars-of-sha256(identity).
+// For turn_end actions the identity is the reply text; for tool_call it is ToolArgs.
 func keyFor(protocol string, a Action) string {
-	sum := sha256.Sum256(a.ToolArgs)
+	identity := a.ToolArgs
+	if a.Kind == "turn_end" {
+		identity = []byte(a.Text)
+	}
+	sum := sha256.Sum256(identity)
 	return fmt.Sprintf("%s|%s|%x", protocol, a.ToolName, sum[:6]) // 6 bytes = 12 hex chars
 }
 

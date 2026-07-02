@@ -1,10 +1,12 @@
 // Package compactiongen debounces per-conversation context compaction off the
 // request path (mirrors the recap generator). It calls compactor.Advance and
-// persists the derived state; failures are swallowed so a turn is never blocked.
+// persists the derived state; failures log to stderr so a turn is never blocked.
 package compactiongen
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -30,6 +32,7 @@ type Generator struct {
 	cfg       compactor.Config
 	tok       contextmeter.Tokenizer
 	debounce  time.Duration
+	logf      func(string, ...any) // injectable for tests; defaults to stderr
 
 	mu       sync.Mutex
 	enabled  bool // guarded by mu — the runtime kill switch
@@ -40,6 +43,7 @@ type Generator struct {
 func New(store Store, summarize compaction.SummarizeFunc, cfg compactor.Config, tok contextmeter.Tokenizer, debounce time.Duration) *Generator {
 	return &Generator{
 		store: store, summarize: summarize, cfg: cfg, tok: tok, debounce: debounce,
+		logf:     func(f string, a ...any) { fmt.Fprintf(os.Stderr, f, a...) },
 		timers:   make(map[string]*time.Timer),
 		inflight: make(map[string]bool),
 	}
@@ -102,13 +106,27 @@ func (g *Generator) runCompaction(ctx context.Context, conversationID string) er
 		return err
 	}
 	state.ConversationID = conversationID
+
+	start := time.Now()
+	preView, _ := compactor.BuildSendView(turns, state)
+	pre := compaction.TotalTokens(g.tok, preView)
+	g.logf("[compaction] pass start %s: %d tokens\n", conversationID, pre)
+
 	newState, changed, more, err := compactor.Advance(ctx, turns, state, g.summarize, g.cfg, g.tok)
-	if err != nil || !changed {
+	if err != nil {
+		g.logf("[compaction] pass FAILED %s after %s: %v\n", conversationID, time.Since(start).Round(time.Millisecond), err)
 		return err
+	}
+	if !changed {
+		return nil
 	}
 	if err := g.store.SaveCompaction(ctx, newState); err != nil {
+		g.logf("[compaction] pass FAILED %s after %s: %v\n", conversationID, time.Since(start).Round(time.Millisecond), err)
 		return err
 	}
+	postView, _ := compactor.BuildSendView(turns, newState)
+	post := compaction.TotalTokens(g.tok, postView)
+	g.logf("[compaction] pass ok %s: %d -> %d tokens in %s (more=%v)\n", conversationID, pre, post, time.Since(start).Round(time.Millisecond), more)
 	if more {
 		// Backlog remains; a bounded pass persisted its progress. Reschedule so
 		// the next chunk runs after the debounce — the backlog converges one

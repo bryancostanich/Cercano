@@ -11,11 +11,21 @@ live investigation (server log, lsof, Ollama state, conversations.db):
    so the turn blocks for effectively unbounded time. Ollama serializes
    requests, so every other session queues behind the first. Sessions appear
    "stalled talking to claude" while never reaching the cloud.
-2. **The accumulation.** Compaction's own output is unbounded: the incident
-   conversation had `compacted_tokens = 338,394` — the *compacted view* itself
-   was 338k tokens (2,147 turns; segment summaries accumulate and are never
-   re-consolidated). A view permanently over the hard limit re-fires the
-   synchronous pass on every turn.
+2. **The accumulation.** Compaction's own output is unbounded. The incident
+   conversation had `compacted_tokens = 338,394` — this is the **cumulative
+   digested-token counter** (total tokens absorbed into compacted state across
+   all past passes), not the current send-view size. The actual view grew via
+   three distinct mechanisms: (a) the un-frozen live tail kept accumulating for
+   two days after passes stopped succeeding; (b) each catch-up attempt covered
+   the entire accumulated backlog at once and exceeded the 2-minute generator
+   timeout, so no pass ever completed (all-or-nothing `Advance`); (c) `Reduce`
+   is a mechanical merge whose output grows with the segment count — accumulated
+   segment summaries were never re-consolidated into the consolidated block.
+   §2's fix maps to (b) via the per-pass segment cap (each pass covers at most
+   one bounded chunk, so catch-up converges) and to (c) via the re-consolidation
+   bound (summaries fold back into the consolidated block instead of
+   accumulating). A view permanently over the hard limit re-fires the synchronous
+   pass on every turn.
 3. **The silence.** Compaction passes had also stopped completing (last success
    two days before the incident — the window where the local lane was
    misconfigured during llama-server testing), and nothing logs when a pass

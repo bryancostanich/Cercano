@@ -3,6 +3,7 @@ package ui
 import (
 	"testing"
 
+	"cercano/source/clients/cli/internal/form"
 	"cercano/source/server/pkg/agentclient"
 )
 
@@ -42,19 +43,19 @@ func TestBuildSettingsSectionsCoversKeys(t *testing.T) {
 }
 
 func TestClassifyCommit(t *testing.T) {
-	if a := classifyCommit("local-model", "qwen"); a.kind != commitConfig || a.update.LocalModel != "qwen" {
+	if a := classifyCommit("local-model", "qwen", nil); a.kind != commitConfig || a.update.LocalModel != "qwen" {
 		t.Fatalf("local-model -> %+v", a)
 	}
-	if a := classifyCommit("locus-mode", "local_only"); a.kind != commitConfig || a.update.LocusMode != "local_only" {
+	if a := classifyCommit("locus-mode", "local_only", nil); a.kind != commitConfig || a.update.LocusMode != "local_only" {
 		t.Fatalf("locus-mode -> %+v", a)
 	}
-	if a := classifyCommit("permission-mode", "bypass"); a.kind != commitPermission || a.value != "bypass" {
+	if a := classifyCommit("permission-mode", "bypass", nil); a.kind != commitPermission || a.value != "bypass" {
 		t.Fatalf("permission-mode -> %+v", a)
 	}
-	if a := classifyCommit("accent-color", "palette:info"); a.kind != commitColor || a.value != "palette:info" {
+	if a := classifyCommit("accent-color", "palette:info", nil); a.kind != commitColor || a.value != "palette:info" {
 		t.Fatalf("accent-color -> %+v", a)
 	}
-	if a := classifyCommit("unknown", "x"); a.kind != commitNoop {
+	if a := classifyCommit("unknown", "x", nil); a.kind != commitNoop {
 		t.Fatalf("unknown -> %+v", a)
 	}
 }
@@ -66,11 +67,8 @@ func TestDeveloperSectionPresent(t *testing.T) {
 	for _, s := range secs {
 		if s.Title == "Developer" {
 			found = true
-			if len(s.Fields) != 2 {
-				t.Fatalf("Developer section: want 2 fields, got %d", len(s.Fields))
-			}
 			if s.Fields[0].Key() != "watchdog-enabled" || s.Fields[1].Key() != "watchdog-echo" {
-				t.Fatalf("unexpected field keys: %s, %s", s.Fields[0].Key(), s.Fields[1].Key())
+				t.Fatalf("unexpected first two field keys: %s, %s", s.Fields[0].Key(), s.Fields[1].Key())
 			}
 		}
 	}
@@ -80,12 +78,65 @@ func TestDeveloperSectionPresent(t *testing.T) {
 }
 
 func TestClassifyCommit_Watchdog(t *testing.T) {
-	a := classifyCommit("watchdog-enabled", "true")
+	a := classifyCommit("watchdog-enabled", "true", nil)
 	if a.kind != commitConfig || a.update.WatchdogEnabled != "true" {
 		t.Fatalf("watchdog-enabled: %+v", a)
 	}
-	b := classifyCommit("watchdog-echo", "false")
+	b := classifyCommit("watchdog-echo", "false", nil)
 	if b.kind != commitConfig || b.update.WatchdogEcho != "false" {
 		t.Fatalf("watchdog-echo: %+v", b)
+	}
+}
+
+func TestDeveloperSectionWatchdogFields(t *testing.T) {
+	cfg := &agentclient.Config{
+		WatchdogEnabled: true, WatchdogMode: "strict",
+		WatchdogChecks: []string{"debug-loop"}, WatchdogEscalateAfter: 2,
+	}
+	secs := buildSettingsSections(cfg, "permissive", "palette:accent")
+	var dev *form.Section
+	for i := range secs {
+		if secs[i].Title == "Developer" {
+			dev = &secs[i]
+		}
+	}
+	if dev == nil {
+		t.Fatal("no Developer section")
+	}
+	keys := map[string]bool{}
+	for _, f := range dev.Fields {
+		keys[f.Key()] = true
+	}
+	for _, want := range []string{"watchdog-mode", "watchdog-check-debug-loop", "watchdog-check-commit-checkpoint", "watchdog-check-plain-english", "watchdog-escalate-after"} {
+		if !keys[want] {
+			t.Fatalf("missing field %q", want)
+		}
+	}
+}
+
+func TestClassifyCommit_WatchdogModeChecksEscalate(t *testing.T) {
+	cur := []string{"debug-loop", "commit-checkpoint", "plain-english"}
+	// mode
+	if a := classifyCommit("watchdog-mode", "strict", cur); a.kind != commitConfig || a.update.WatchdogMode != "strict" {
+		t.Fatalf("mode: %+v", a)
+	}
+	// escalate
+	if a := classifyCommit("watchdog-escalate-after", "4", cur); a.kind != commitConfig || a.update.WatchdogEscalateAfter != "4" {
+		t.Fatalf("escalate: %+v", a)
+	}
+	// turn a check OFF → new full list without it
+	a := classifyCommit("watchdog-check-plain-english", "false", cur)
+	if a.kind != commitConfig || a.update.WatchdogChecks != "debug-loop,commit-checkpoint" {
+		t.Fatalf("check off: %+v", a)
+	}
+	// turn a check ON when absent → appended (known-order)
+	b := classifyCommit("watchdog-check-plain-english", "true", []string{"debug-loop"})
+	if b.update.WatchdogChecks != "debug-loop,plain-english" {
+		t.Fatalf("check on: %+v", b)
+	}
+	// last check OFF → "-" sentinel
+	c := classifyCommit("watchdog-check-debug-loop", "false", []string{"debug-loop"})
+	if c.update.WatchdogChecks != "-" {
+		t.Fatalf("empty sentinel: %+v", c)
 	}
 }

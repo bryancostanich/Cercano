@@ -1,9 +1,51 @@
 package ui
 
 import (
+	"strconv"
+	"strings"
+
 	"cercano/source/clients/cli/internal/form"
 	"cercano/source/server/pkg/agentclient"
 )
+
+// knownWatchdogChecks must stay in sync with the check-map in
+// internal/server/watchdog_wire.go.
+var knownWatchdogChecks = []string{"debug-loop", "commit-checkpoint", "plain-english"}
+
+func hasCheck(list []string, name string) bool {
+	for _, c := range list {
+		if c == name {
+			return true
+		}
+	}
+	return false
+}
+
+// toggleCheck returns the new active-checks list with `name` added or removed,
+// ordered by knownWatchdogChecks for determinism.
+func toggleCheck(current []string, name string, on bool) []string {
+	want := map[string]bool{}
+	for _, c := range current {
+		want[c] = true
+	}
+	want[name] = on
+	out := []string{}
+	for _, c := range knownWatchdogChecks {
+		if want[c] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// encodeChecks joins the list for the sparse update, using "-" for empty
+// (distinguishing it from "" = unchanged).
+func encodeChecks(list []string) string {
+	if len(list) == 0 {
+		return "-"
+	}
+	return strings.Join(list, ",")
+}
 
 // accentColorOptions lists the palette tokens accepted by Model.resolvePromptColor.
 // Value tokens use the "palette:<key>" shape; the hex escape hatch stays on /color.
@@ -46,11 +88,24 @@ func buildSettingsSections(cfg *agentclient.Config, mode, accentToken string) []
 		{Title: "Server", Fields: []form.Field{
 			form.NewReadOnly("port", "port", cfg.Port, "(read-only)"),
 		}},
-		{Title: "Developer", Fields: []form.Field{
-			form.NewToggle("watchdog-enabled", "watchdog-enabled", cfg.WatchdogEnabled),
-			form.NewToggle("watchdog-echo", "watchdog-echo", cfg.WatchdogEcho),
-		}},
+		{Title: "Developer", Fields: buildDevFields(cfg)},
 	}
+}
+
+func buildDevFields(cfg *agentclient.Config) []form.Field {
+	devFields := []form.Field{
+		form.NewToggle("watchdog-enabled", "watchdog-enabled", cfg.WatchdogEnabled),
+		form.NewToggle("watchdog-echo", "watchdog-echo", cfg.WatchdogEcho),
+		form.NewSelect("watchdog-mode", "watchdog-mode", []form.Option{
+			{Label: "challenge-and-justify", Value: "challenge-and-justify"},
+			{Label: "strict", Value: "strict"},
+		}, cfg.WatchdogMode),
+	}
+	for _, name := range knownWatchdogChecks {
+		devFields = append(devFields, form.NewToggle("watchdog-check-"+name, name, hasCheck(cfg.WatchdogChecks, name)))
+	}
+	devFields = append(devFields, form.NewText("watchdog-escalate-after", "escalate-after", strconv.Itoa(cfg.WatchdogEscalateAfter), ""))
+	return devFields
 }
 
 type commitKind int
@@ -69,7 +124,13 @@ type commitAction struct {
 }
 
 // classifyCommit maps a committed (key,value) to the sink that should apply it.
-func classifyCommit(key, value string) commitAction {
+// currentChecks is the current WatchdogChecks list (needed for check-toggle prefix).
+func classifyCommit(key, value string, currentChecks []string) commitAction {
+	if name, ok := strings.CutPrefix(key, "watchdog-check-"); ok {
+		var u agentclient.ConfigUpdate
+		u.WatchdogChecks = encodeChecks(toggleCheck(currentChecks, name, value == "true"))
+		return commitAction{kind: commitConfig, update: u}
+	}
 	var u agentclient.ConfigUpdate
 	switch key {
 	case "local-runtime":
@@ -84,6 +145,10 @@ func classifyCommit(key, value string) commitAction {
 		u.WatchdogEnabled = value
 	case "watchdog-echo":
 		u.WatchdogEcho = value
+	case "watchdog-mode":
+		u.WatchdogMode = value
+	case "watchdog-escalate-after":
+		u.WatchdogEscalateAfter = value
 	case "permission-mode":
 		return commitAction{kind: commitPermission, value: value}
 	case "accent-color":

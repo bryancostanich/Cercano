@@ -187,7 +187,11 @@ func (sp *settingsPage) onCommit(key, value string) (string, tea.Cmd, error) {
 		return "bad color", nil, nil
 	}
 
-	action := classifyCommit(key, value)
+	var currentChecks []string
+	if sp.cfg != nil {
+		currentChecks = sp.cfg.WatchdogChecks
+	}
+	action := classifyCommit(key, value, currentChecks)
 	switch action.kind {
 	case commitConfig:
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -276,7 +280,7 @@ func (sp *settingsPage) onCommit(key, value string) (string, tea.Cmd, error) {
 
 // --- contentPageScroller ---
 
-func (sp *settingsPage) ScrollBy(delta int) { sp.offset += delta; sp.clampScroll() }
+func (sp *settingsPage) ScrollBy(delta int)  { sp.offset += delta; sp.clampScroll() }
 func (sp *settingsPage) ScrollTo(offset int) { sp.offset = offset; sp.clampScroll() }
 func (sp *settingsPage) ScrollState() contentPageScrollState {
 	total := len(sp.form.Lines(sp.width, sp.palette, sp.styles))

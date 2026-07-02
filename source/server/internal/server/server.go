@@ -791,6 +791,34 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		changes = append(changes, fmt.Sprintf("watchdog_echo=%s", req.WatchdogEcho))
 		watchdogChanged = true
 	}
+	if req.WatchdogMode == "challenge-and-justify" || req.WatchdogMode == "strict" {
+		s.currentConfig.Watchdog.Mode = req.WatchdogMode
+		changes = append(changes, "watchdog_mode="+req.WatchdogMode)
+		watchdogChanged = true
+	}
+	if req.WatchdogEscalateAfter != "" {
+		if n, err := strconv.Atoi(req.WatchdogEscalateAfter); err == nil && n >= 1 {
+			s.currentConfig.Watchdog.EscalateAfter = n
+			changes = append(changes, fmt.Sprintf("watchdog_escalate_after=%d", n))
+			watchdogChanged = true
+		}
+	}
+	if req.WatchdogChecks != "" {
+		if req.WatchdogChecks == "-" {
+			s.currentConfig.Watchdog.Checks = []string{}
+		} else {
+			parts := strings.Split(req.WatchdogChecks, ",")
+			checks := make([]string, 0, len(parts))
+			for _, p := range parts {
+				if trimmed := strings.TrimSpace(p); trimmed != "" {
+					checks = append(checks, trimmed)
+				}
+			}
+			s.currentConfig.Watchdog.Checks = checks
+		}
+		changes = append(changes, "watchdog_checks="+req.WatchdogChecks)
+		watchdogChanged = true
+	}
 	if watchdogChanged {
 		// Rebuild the supervisor from the just-applied config. buildWatchdogFrom
 		// takes NO lock, so this is safe under the held cfgMu write lock.
@@ -1211,19 +1239,22 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 	cfg := s.currentConfig
 	s.cfgMu.RUnlock()
 	return &proto.GetConfigResponse{
-		OllamaUrl:       cfg.OllamaURL,
-		LocalModel:      cfg.LocalModel,
-		EmbeddingModel:  cfg.EmbeddingModel,
-		CloudProvider:   cfg.CloudProvider,
-		CloudModel:      cfg.CloudModel,
-		CloudBaseUrl:    cfg.CloudBaseURL,
-		CloudApiKeySet:  cfg.CloudAPIKey != "",
-		CloudState:      state,
-		Port:            cfg.Port,
-		LocalRuntime:    cfg.LocalRuntime,
-		LocusMode:       cfg.LocusMode,
-		WatchdogEnabled: cfg.Watchdog.Enabled,
-		WatchdogEcho:    cfg.Watchdog.Echo,
+		OllamaUrl:             cfg.OllamaURL,
+		LocalModel:            cfg.LocalModel,
+		EmbeddingModel:        cfg.EmbeddingModel,
+		CloudProvider:         cfg.CloudProvider,
+		CloudModel:            cfg.CloudModel,
+		CloudBaseUrl:          cfg.CloudBaseURL,
+		CloudApiKeySet:        cfg.CloudAPIKey != "",
+		CloudState:            state,
+		Port:                  cfg.Port,
+		LocalRuntime:          cfg.LocalRuntime,
+		LocusMode:             cfg.LocusMode,
+		WatchdogEnabled:       cfg.Watchdog.Enabled,
+		WatchdogEcho:          cfg.Watchdog.Echo,
+		WatchdogMode:          cfg.Watchdog.Mode,
+		WatchdogChecks:        strings.Join(cfg.Watchdog.Checks, ","),
+		WatchdogEscalateAfter: strconv.Itoa(cfg.Watchdog.EscalateAfter),
 	}, nil
 }
 

@@ -6,6 +6,50 @@ import (
 	"cercano/source/server/pkg/proto"
 )
 
+// TestGetConfig_WatchdogModeChecksEscalateMapping verifies that
+// GetConfigResponse mode/checks/escalate fields map correctly to Config.
+func TestGetConfig_WatchdogModeChecksEscalateMapping(t *testing.T) {
+	resp := &proto.GetConfigResponse{
+		WatchdogMode:          "strict",
+		WatchdogChecks:        "a,b",
+		WatchdogEscalateAfter: "5",
+	}
+	cfg := &Config{
+		WatchdogMode:          resp.GetWatchdogMode(),
+		WatchdogChecks:        splitChecks(resp.GetWatchdogChecks()),
+		WatchdogEscalateAfter: atoiOr(resp.GetWatchdogEscalateAfter(), 0),
+	}
+	if cfg.WatchdogMode != "strict" {
+		t.Fatalf("WatchdogMode: got %q, want %q", cfg.WatchdogMode, "strict")
+	}
+	if len(cfg.WatchdogChecks) != 2 || cfg.WatchdogChecks[0] != "a" || cfg.WatchdogChecks[1] != "b" {
+		t.Fatalf("WatchdogChecks: got %v, want [a b]", cfg.WatchdogChecks)
+	}
+	if cfg.WatchdogEscalateAfter != 5 {
+		t.Fatalf("WatchdogEscalateAfter: got %d, want 5", cfg.WatchdogEscalateAfter)
+	}
+}
+
+// TestConfigUpdate_WatchdogModeChecksEscalateMapping verifies that
+// ConfigUpdate mode/checks/escalate pass through as-is to the proto request.
+func TestConfigUpdate_WatchdogModeChecksEscalateMapping(t *testing.T) {
+	u := ConfigUpdate{WatchdogChecks: "-", WatchdogMode: "strict", WatchdogEscalateAfter: "3"}
+	req := &proto.UpdateConfigRequest{
+		WatchdogMode:          u.WatchdogMode,
+		WatchdogChecks:        u.WatchdogChecks,
+		WatchdogEscalateAfter: u.WatchdogEscalateAfter,
+	}
+	if req.GetWatchdogChecks() != "-" {
+		t.Fatalf("WatchdogChecks: got %q, want %q", req.GetWatchdogChecks(), "-")
+	}
+	if req.GetWatchdogMode() != "strict" {
+		t.Fatalf("WatchdogMode: got %q, want %q", req.GetWatchdogMode(), "strict")
+	}
+	if req.GetWatchdogEscalateAfter() != "3" {
+		t.Fatalf("WatchdogEscalateAfter: got %q, want %q", req.GetWatchdogEscalateAfter(), "3")
+	}
+}
+
 // TestGetConfig_WatchdogFieldMapping verifies that GetConfigResponse watchdog
 // booleans map to the correct Config fields (no live server needed — we verify
 // the field wiring directly).

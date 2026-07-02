@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -148,19 +150,22 @@ func (c *Client) Close() error {
 
 // Config is the current runtime config reported by the agent.
 type Config struct {
-	OllamaURL       string
-	LocalRuntime    string
-	LocalModel      string
-	EmbeddingModel  string
-	CloudProvider   string
-	CloudModel      string
-	CloudBaseURL    string
-	CloudAPIKeySet  bool
-	CloudState      string // "ok" | "absent" | "error"
-	Port            string
-	LocusMode       string
-	WatchdogEnabled bool
-	WatchdogEcho    bool
+	OllamaURL             string
+	LocalRuntime          string
+	LocalModel            string
+	EmbeddingModel        string
+	CloudProvider         string
+	CloudModel            string
+	CloudBaseURL          string
+	CloudAPIKeySet        bool
+	CloudState            string // "ok" | "absent" | "error"
+	Port                  string
+	LocusMode             string
+	WatchdogEnabled       bool
+	WatchdogEcho          bool
+	WatchdogMode          string
+	WatchdogChecks        []string
+	WatchdogEscalateAfter int
 }
 
 // GetConfig fetches the agent's current runtime config.
@@ -170,19 +175,22 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 		return nil, err
 	}
 	return &Config{
-		OllamaURL:       resp.GetOllamaUrl(),
-		LocalRuntime:    resp.GetLocalRuntime(),
-		LocalModel:      resp.GetLocalModel(),
-		EmbeddingModel:  resp.GetEmbeddingModel(),
-		CloudProvider:   resp.GetCloudProvider(),
-		CloudModel:      resp.GetCloudModel(),
-		CloudBaseURL:    resp.GetCloudBaseUrl(),
-		CloudAPIKeySet:  resp.GetCloudApiKeySet(),
-		CloudState:      resp.GetCloudState(),
-		Port:            resp.GetPort(),
-		LocusMode:       resp.GetLocusMode(),
-		WatchdogEnabled: resp.GetWatchdogEnabled(),
-		WatchdogEcho:    resp.GetWatchdogEcho(),
+		OllamaURL:             resp.GetOllamaUrl(),
+		LocalRuntime:          resp.GetLocalRuntime(),
+		LocalModel:            resp.GetLocalModel(),
+		EmbeddingModel:        resp.GetEmbeddingModel(),
+		CloudProvider:         resp.GetCloudProvider(),
+		CloudModel:            resp.GetCloudModel(),
+		CloudBaseURL:          resp.GetCloudBaseUrl(),
+		CloudAPIKeySet:        resp.GetCloudApiKeySet(),
+		CloudState:            resp.GetCloudState(),
+		Port:                  resp.GetPort(),
+		LocusMode:             resp.GetLocusMode(),
+		WatchdogEnabled:       resp.GetWatchdogEnabled(),
+		WatchdogEcho:          resp.GetWatchdogEcho(),
+		WatchdogMode:          resp.GetWatchdogMode(),
+		WatchdogChecks:        splitChecks(resp.GetWatchdogChecks()),
+		WatchdogEscalateAfter: atoiOr(resp.GetWatchdogEscalateAfter(), 0),
 	}, nil
 }
 
@@ -190,16 +198,19 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 // are applied. Use SetCloudAPIKey to explicitly send an empty key when the
 // proxy handles auth.
 type ConfigUpdate struct {
-	OllamaURL       string
-	LocalRuntime    string
-	LocalModel      string
-	CloudProvider   string
-	CloudModel      string
-	CloudAPIKey     string
-	CloudBaseURL    string
-	LocusMode       string
-	WatchdogEnabled string // "" = unchanged, "true"/"false"
-	WatchdogEcho    string // "" = unchanged, "true"/"false"
+	OllamaURL             string
+	LocalRuntime          string
+	LocalModel            string
+	CloudProvider         string
+	CloudModel            string
+	CloudAPIKey           string
+	CloudBaseURL          string
+	LocusMode             string
+	WatchdogEnabled       string // "" = unchanged, "true"/"false"
+	WatchdogEcho          string // "" = unchanged, "true"/"false"
+	WatchdogMode          string // "" = unchanged, "challenge-and-justify"/"strict"
+	WatchdogChecks        string // "" = unchanged, "-" = empty list, else comma-separated
+	WatchdogEscalateAfter string // "" = unchanged, else integer >= 1
 }
 
 // RuntimeStatus is the provider-neutral model/runtime dashboard snapshot.
@@ -793,16 +804,19 @@ func meridianStatusFromProto(p *proto.MeridianStatus) *MeridianStatus {
 // summary line (e.g. "updated: [local_model=qwen3-coder, cloud=anthropic/...]").
 func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, error) {
 	resp, err := c.agent.UpdateConfig(ctx, &proto.UpdateConfigRequest{
-		OllamaUrl:       u.OllamaURL,
-		LocalRuntime:    u.LocalRuntime,
-		LocalModel:      u.LocalModel,
-		CloudProvider:   u.CloudProvider,
-		CloudModel:      u.CloudModel,
-		CloudApiKey:     u.CloudAPIKey,
-		CloudBaseUrl:    u.CloudBaseURL,
-		LocusMode:       u.LocusMode,
-		WatchdogEnabled: u.WatchdogEnabled,
-		WatchdogEcho:    u.WatchdogEcho,
+		OllamaUrl:             u.OllamaURL,
+		LocalRuntime:          u.LocalRuntime,
+		LocalModel:            u.LocalModel,
+		CloudProvider:         u.CloudProvider,
+		CloudModel:            u.CloudModel,
+		CloudApiKey:           u.CloudAPIKey,
+		CloudBaseUrl:          u.CloudBaseURL,
+		LocusMode:             u.LocusMode,
+		WatchdogEnabled:       u.WatchdogEnabled,
+		WatchdogEcho:          u.WatchdogEcho,
+		WatchdogMode:          u.WatchdogMode,
+		WatchdogChecks:        u.WatchdogChecks,
+		WatchdogEscalateAfter: u.WatchdogEscalateAfter,
 	})
 	if err != nil {
 		return "", err
@@ -1314,4 +1328,28 @@ func (c *Client) RemoveCloudProfile(ctx context.Context, name string) error {
 func (c *Client) AllowToolCallPersist(ctx context.Context, toolUseID string, persist bool) error {
 	_, err := c.agent.AllowToolCall(ctx, &proto.AllowToolCallRequest{ToolUseId: toolUseID, Persist: persist})
 	return err
+}
+
+// splitChecks splits a comma-separated watchdog checks string into a slice.
+// Empty or whitespace-only input returns nil (no checks configured).
+func splitChecks(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// atoiOr parses s as an integer, returning def on failure.
+func atoiOr(s string, def int) int {
+	if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
+		return n
+	}
+	return def
 }

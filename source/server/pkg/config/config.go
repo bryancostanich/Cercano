@@ -170,7 +170,7 @@ func Defaults() Config {
 		Watchdog: WatchdogConfig{
 			Enabled:       false,
 			Mode:          "challenge-and-justify",
-			Checks:        []string{"debug-loop", "commit-checkpoint"},
+			Checks:        []string{"debug-loop", "commit-checkpoint", "plain-english"},
 			Model:         "",
 			EscalateAfter: 2,
 			Echo:          false,

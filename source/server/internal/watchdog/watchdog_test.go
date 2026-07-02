@@ -104,3 +104,19 @@ func TestKeyForStable(t *testing.T) {
 		t.Fatal("different protocol must produce different key")
 	}
 }
+
+func TestKeyForTurnEndUsesText(t *testing.T) {
+	a1 := Action{Kind: "turn_end", Text: "reply one"}
+	a2 := Action{Kind: "turn_end", Text: "reply two"}
+	if keyFor("plain-english", a1) == keyFor("plain-english", a2) {
+		t.Fatal("different turn_end texts must yield different keys")
+	}
+	if keyFor("plain-english", a1) != keyFor("plain-english", Action{Kind: "turn_end", Text: "reply one"}) {
+		t.Fatal("same turn_end text must yield the same key")
+	}
+	// tool_call identity unchanged (keys on ToolArgs, not Text)
+	tc := Action{Kind: "tool_call", ToolName: "edit_file", ToolArgs: []byte(`{"p":"a"}`), Text: "ignored"}
+	if keyFor("debug-loop", tc) != keyFor("debug-loop", Action{Kind: "tool_call", ToolName: "edit_file", ToolArgs: []byte(`{"p":"a"}`), Text: "different"}) {
+		t.Fatal("tool_call key must ignore Text")
+	}
+}

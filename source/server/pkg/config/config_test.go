@@ -392,8 +392,8 @@ func TestWatchdogDefaults(t *testing.T) {
 	if w.Mode != "challenge-and-justify" {
 		t.Errorf("Mode = %q, want challenge-and-justify", w.Mode)
 	}
-	if len(w.Checks) != 2 || w.Checks[0] != "debug-loop" || w.Checks[1] != "commit-checkpoint" {
-		t.Errorf("Checks = %v, want [debug-loop commit-checkpoint]", w.Checks)
+	if len(w.Checks) != 3 || w.Checks[0] != "debug-loop" || w.Checks[1] != "commit-checkpoint" || w.Checks[2] != "plain-english" {
+		t.Errorf("Checks = %v, want [debug-loop commit-checkpoint plain-english]", w.Checks)
 	}
 	if w.EscalateAfter != 2 {
 		t.Errorf("EscalateAfter = %d, want 2", w.EscalateAfter)

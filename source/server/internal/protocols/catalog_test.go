@@ -6,7 +6,7 @@ import (
 )
 
 func TestCoreCatalogComplete(t *testing.T) {
-	want := []string{"compute-before-simulate", "design-decisions", "systematic-debugging", "verification-strategy"}
+	want := []string{"compute-before-simulate", "design-decisions", "systematic-debugging", "verification-strategy", "worktree-first"}
 	for _, name := range want {
 		p, ok := Get(name)
 		if !ok {
@@ -21,6 +21,23 @@ func TestCoreCatalogComplete(t *testing.T) {
 		if !strings.HasSuffix(p.Trigger, ".") {
 			t.Fatalf("%s trigger should be a full sentence", name)
 		}
+	}
+}
+
+func TestWorktreeFirstNamesTheGitWorktreeTool(t *testing.T) {
+	p, ok := Get("worktree-first")
+	if !ok {
+		t.Fatal("worktree-first missing")
+	}
+	// The whole point of the protocol is to steer agents to the
+	// git_worktree tool. If future edits accidentally rewrite it to
+	// generic "use a worktree" language, agents won't know which tool
+	// to reach for.
+	if !strings.Contains(p.Body, "git_worktree") {
+		t.Fatal("worktree-first body must name the git_worktree tool explicitly")
+	}
+	if !strings.Contains(p.Trigger, "git_worktree") {
+		t.Fatal("worktree-first trigger must name the git_worktree tool so the steering block surfaces it")
 	}
 }
 

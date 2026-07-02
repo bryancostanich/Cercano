@@ -672,6 +672,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.MouseDown(mouse.X, mouse.Y-m.promptTop())
 			return m, nil
 		}
+		// Tool-entry fold click: if the click landed on a tool entry line,
+		// focus it and toggle its Folded state — mirrors keyboard
+		// ToggleFocusedFold. Short-circuits before selection so a click on
+		// a tool entry never starts a text-selection drag.
+		if m.chat.MouseToggleFold(mouse.X, mouse.Y-m.scrollbarTop) {
+			m.refreshViewport()
+			return m, nil
+		}
 		// Translate screen coords to viewport-local and forward to chatView.
 		m.chat.MouseDown(mouse.X, mouse.Y-m.scrollbarTop)
 		return m, nil

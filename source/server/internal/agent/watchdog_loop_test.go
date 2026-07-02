@@ -192,6 +192,74 @@ func TestWatchdogTurnEnd_AllowReturns(t *testing.T) {
 	}
 }
 
+// TestWatchdogTurnEnd_BlockReopensWithoutOverride: when the gate blocks the
+// first reply, the loop reopens the turn and the injected note must state that
+// no override is available (and must NOT offer `justify`).
+func TestWatchdogTurnEnd_BlockReopensWithoutOverride(t *testing.T) {
+	prov := &scriptedProvider{replies: []string{"first reply", "revised reply"}}
+	calls := 0
+	gate := func(_ context.Context, _ string, _ []llm.Message) WatchdogDecision {
+		calls++
+		if calls == 1 {
+			return WatchdogDecision{Action: "block", Protocol: "plain-english", Challenge: "rewrite it"}
+		}
+		return WatchdogDecision{Action: "allow"}
+	}
+	res, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider: prov, Registry: emptyRegistry(t), UserInput: "hi",
+		WatchdogTurnEnd: gate, MaxIterations: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.FinalText != "revised reply" {
+		t.Fatalf("block must reopen the turn; got %q", res.FinalText)
+	}
+	// The injected revise note must state no override is available and must
+	// NOT offer justify.
+	var note string
+	for _, m := range res.History {
+		for _, b := range m.Blocks {
+			if b.Type == llm.BlockText && strings.Contains(b.Text, "watchdog") {
+				note = b.Text
+			}
+		}
+	}
+	if !strings.Contains(note, "no override") || strings.Contains(note, "justify") {
+		t.Fatalf("block note wrong: %q", note)
+	}
+}
+
+// TestWatchdogTurnEnd_EscalateReturnsReply: when the gate escalates, the loop
+// must return the reply unchanged and emit a LoopWatchdogEscalate event.
+func TestWatchdogTurnEnd_EscalateReturnsReply(t *testing.T) {
+	prov := &scriptedProvider{replies: []string{"the reply"}}
+	gate := func(_ context.Context, _ string, _ []llm.Message) WatchdogDecision {
+		return WatchdogDecision{Action: "escalate", Protocol: "plain-english", Challenge: "again"}
+	}
+	var kinds []LoopEventKind
+	res, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider: prov, Registry: emptyRegistry(t), UserInput: "hi",
+		WatchdogTurnEnd: gate, MaxIterations: 5,
+		EventSink: func(ev LoopEvent) { kinds = append(kinds, ev.Kind) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.FinalText != "the reply" {
+		t.Fatalf("escalate must return the reply unchanged, got %q", res.FinalText)
+	}
+	found := false
+	for _, k := range kinds {
+		if k == LoopWatchdogEscalate {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("escalate must emit LoopWatchdogEscalate")
+	}
+}
+
 // TestWatchdogGate_AllowExecutes: when the gate returns "allow", the tool runs
 // exactly as it would with no gate (subject to the normal permission gate).
 func TestWatchdogGate_AllowExecutes(t *testing.T) {

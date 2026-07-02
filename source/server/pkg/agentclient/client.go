@@ -172,6 +172,8 @@ type Config struct {
 	RawRetentionDays       int
 	CompactedRetentionDays int
 	KeepForever            bool
+	// CompactionEnabled is the master switch for the summarization pass.
+	CompactionEnabled bool
 }
 
 // GetConfig fetches the agent's current runtime config.
@@ -199,6 +201,7 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 		RawRetentionDays:       int(resp.GetRawRetentionDays()),
 		CompactedRetentionDays: int(resp.GetCompactedRetentionDays()),
 		KeepForever:            resp.GetKeepForever(),
+		CompactionEnabled:      resp.GetCompactionEnabled(),
 	}, nil
 }
 
@@ -226,6 +229,8 @@ type ConfigUpdate struct {
 	RawRetentionDays       string
 	CompactedRetentionDays string
 	KeepForever            string
+	// CompactionEnabled — sparse-patch bool. "" | "true" | "false".
+	CompactionEnabled string
 }
 
 // RuntimeStatus is the provider-neutral model/runtime dashboard snapshot.
@@ -917,6 +922,7 @@ func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, erro
 		RawRetentionDays:       u.RawRetentionDays,
 		CompactedRetentionDays: u.CompactedRetentionDays,
 		KeepForever:            u.KeepForever,
+		CompactionEnabled:      u.CompactionEnabled,
 	})
 	if err != nil {
 		return "", err

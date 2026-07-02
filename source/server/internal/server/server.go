@@ -21,6 +21,7 @@ import (
 	"cercano/source/server/internal/capabilities/builtins"
 	"cercano/source/server/internal/cloudfactory"
 	"cercano/source/server/internal/compaction"
+	"cercano/source/server/internal/compactiongen"
 	"cercano/source/server/internal/compactor"
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/contextmeter"
@@ -85,6 +86,7 @@ type Server struct {
 	secrets             secrets.Store
 	runtimeManager      localruntime.Manager
 	retentionSweeper    *retention.Sweeper
+	compactionGen       *compactiongen.Generator
 	contextLoader       *projectctx.Loader
 	dispatchEngine      *dispatch.Engine
 	watchdog            *watchdog.Watchdog // protocol-supervision gate; nil = disabled (default)
@@ -612,6 +614,10 @@ func (s *Server) SetRuntimeManager(m localruntime.Manager) {
 // next sweep without a restart.
 func (s *Server) SetRetentionSweeper(sw *retention.Sweeper) { s.retentionSweeper = sw }
 
+// SetCompactionGenerator attaches the background compaction scheduler so that
+// /config compaction-enabled true|false flips it at runtime without a restart.
+func (s *Server) SetCompactionGenerator(g *compactiongen.Generator) { s.compactionGen = g }
+
 // NewServer creates a new Agent gRPC server.
 func NewServer(a *agent.Agent, localProvider *legacymodels.LocalModelProvider, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
 	return &Server{
@@ -776,6 +782,27 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		changes = append(changes, fmt.Sprintf("lossy_tool_elision=%s", v))
 		s.broadcastConfigChanged("lossy_tool_elision", v)
 		fmt.Printf("UpdateConfig: lossy_tool_elision set to %s\n", v)
+	}
+
+	if req.CompactionEnabled != "" {
+		v := strings.ToLower(strings.TrimSpace(req.CompactionEnabled))
+		if v != "true" && v != "false" {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid compaction_enabled %q: expected \"true\" or \"false\"", req.CompactionEnabled),
+			}, nil
+		}
+		enabled := v == "true"
+		s.currentConfig.Compaction.Enabled = enabled
+		// Flip the runtime kill switch. In-flight passes finish; new Schedule
+		// calls noop when disabled. Nil-guarded because the server may run
+		// without a persistent store (no compGen wired).
+		if s.compactionGen != nil {
+			s.compactionGen.SetEnabled(enabled)
+		}
+		changes = append(changes, fmt.Sprintf("compaction_enabled=%s", v))
+		s.broadcastConfigChanged("compaction_enabled", v)
+		fmt.Printf("UpdateConfig: compaction_enabled set to %s\n", v)
 	}
 
 	retentionChanged := false
@@ -1369,6 +1396,7 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 		RawRetentionDays:       int32(cfg.Compaction.Retention.RawRetentionDays),
 		CompactedRetentionDays: int32(cfg.Compaction.Retention.CompactedRetentionDays),
 		KeepForever:            cfg.Compaction.Retention.KeepForever,
+		CompactionEnabled:      cfg.Compaction.Enabled,
 	}, nil
 }
 

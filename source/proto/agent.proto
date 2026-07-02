@@ -44,6 +44,12 @@ service Agent {
   // means "no suggestion" — the CLI treats it as no-op.
   rpc SuggestNextPrompt (SuggestNextPromptRequest) returns (SuggestNextPromptResponse) {}
 
+  // GetLocalRuntimeStatus returns the current headless-detection outcome
+  // for the selected local runtime. Callers use it once at startup to
+  // populate the CLI chip / install modal without waiting for a config
+  // change to fire a LocalRuntimeStatusChanged event.
+  rpc GetLocalRuntimeStatus (GetLocalRuntimeStatusRequest) returns (GetLocalRuntimeStatusResponse) {}
+
   // InstallLocalRuntime runs the platform install command for a local
   // inference runtime (today: "llama_server" via `brew install llama.cpp`
   // on macOS) and streams stdout/stderr line-by-line to the caller. The
@@ -229,6 +235,9 @@ message UpdateConfigRequest {
   string raw_retention_days       = 13;
   string compacted_retention_days = 14;
   string keep_forever             = 15;
+  // Compaction master switch. When "true", the summarization pass runs on
+  // eligible conversations. "" leaves unchanged.
+  string compaction_enabled       = 16;
 }
 
 // Runtime configuration update response.
@@ -594,6 +603,8 @@ message GetConfigResponse {
   int32 raw_retention_days       = 16;
   int32 compacted_retention_days = 17;
   bool  keep_forever             = 18;
+  // Compaction master switch state.
+  bool  compaction_enabled       = 19;
 }
 
 message ListSkillsRequest {}
@@ -707,6 +718,12 @@ message LocalRuntimeStatus {
 // changes (post-swap detection, install completes, etc.). Clients update
 // their status chip + modal from this — no fetch, no poll.
 message LocalRuntimeStatusChanged { LocalRuntimeStatus status = 1; }
+
+// GetLocalRuntimeStatus is the pull-side counterpart to
+// LocalRuntimeStatusChanged. Empty request — the server always returns the
+// snapshot for the currently-selected local runtime.
+message GetLocalRuntimeStatusRequest {}
+message GetLocalRuntimeStatusResponse { LocalRuntimeStatus status = 1; }
 
 // InstallLocalRuntimeRequest asks the server to run the platform install
 // command for a local runtime and stream its output back.

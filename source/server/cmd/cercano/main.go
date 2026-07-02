@@ -185,7 +185,8 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		recapGen := recap.New(persistentStore, recapComplete, 8*time.Second, 12)
 		agentOpts = append(agentOpts, agent.WithRecapScheduler(recapGen))
 	}
-	if persistentStore != nil && cfg.Compaction.Enabled {
+	var compGen *compactiongen.Generator
+	if persistentStore != nil {
 		compactSummarize := func(ctx context.Context, msgs []llm.Message) (compaction.StructuredSummary, error) {
 			req := &agent.Request{Input: compaction.BuildSummaryPrompt(msgs)}
 			if cfg.Compaction.SummarizerModel != "" {
@@ -202,7 +203,11 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 			SegmentTokens:         cfg.Compaction.SegmentTokens,
 			VerbatimRecent:        cfg.Compaction.VerbatimRecent,
 		}
-		compGen := compactiongen.New(persistentStore, compactSummarize, compCfg, contextmeter.Default(), 10*time.Second)
+		compGen = compactiongen.New(persistentStore, compactSummarize, compCfg, contextmeter.Default(), 10*time.Second)
+		// Runtime kill switch — Schedule noops until enabled. Wiring the
+		// scheduler unconditionally lets /config compaction-enabled true flip
+		// the switch at runtime; the OLD gate required a restart.
+		compGen.SetEnabled(cfg.Compaction.Enabled)
 		agentOpts = append(agentOpts, agent.WithCompactionScheduler(compGen))
 	}
 	var sweeper *retention.Sweeper
@@ -234,6 +239,9 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	srv.SetRuntimeManager(runtimeManager)
 	if sweeper != nil {
 		srv.SetRetentionSweeper(sweeper)
+	}
+	if compGen != nil {
+		srv.SetCompactionGenerator(compGen)
 	}
 	srv.SetContextLoader(ctxLoader)
 	srv.SetConfigPersistence(config.DefaultPath(), cfg)

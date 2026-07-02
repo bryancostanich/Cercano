@@ -147,6 +147,13 @@ func (s *Server) reloadConfigFromDisk(ctx context.Context) {
 			req.KeepForever = "false"
 		}
 	}
+	if newCfg.Compaction.Enabled != snap.Compaction.Enabled {
+		if newCfg.Compaction.Enabled {
+			req.CompactionEnabled = "true"
+		} else {
+			req.CompactionEnabled = "false"
+		}
+	}
 
 	// Warn on fields that UpdateConfig doesn't hot-reload. The agent keeps
 	// running on the old in-memory values until a restart.

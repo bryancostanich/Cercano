@@ -803,9 +803,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, cmd
 		}
-		// Esc cancels an in-flight prompt execution.
+		// Esc cancels an in-flight prompt execution. If there's a queued
+		// follow-up (user typed while waiting), it stays queued through the
+		// cancel and immediately becomes the next turn — canceling stops
+		// the current work but preserves the user's already-typed next
+		// intent. Double-esc still cancels the follow-up too (each esc only
+		// touches one in-flight turn at a time).
 		if m.streaming && key.Matches(msg, keys.Back) {
 			m.cancelCurrentStream()
+			if next, ok := m.chat.DrainNext(); ok {
+				m.relayout()
+				nm, cmd := m.submit(next.text, next.images)
+				return nm, cmd
+			}
 			return m, nil
 		}
 		if m.chat.SelectionActive() {
@@ -1478,8 +1488,10 @@ func (m *Model) cancelCurrentStream() {
 		e.Streaming = false
 	}
 	m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "⊘ canceled"})
-	// Esc aborts the train of thought — drop any queued follow-ups too.
-	m.chat.ClearQueue()
+	// Queued follow-ups are preserved: canceling stops the current work but
+	// anything the user typed while waiting is a real intent they still want
+	// executed. The Esc-key caller drains the next queued message and
+	// submits it after this returns.
 	m.relayout()
 }
 

@@ -68,10 +68,11 @@ func subscribeEventsCmd(ag *agentclient.Client) tea.Cmd {
 // terminally-failed. Drives the status-bar chip and the prompt-
 // rehydration flow (see Model.handleConnStateChanged).
 type connStateChangedMsg struct {
-	state   agentclient.ConnState
-	attempt int
-	errMsg  string
-	next    tea.Cmd
+	state        agentclient.ConnState
+	attempt      int
+	errMsg       string
+	crashSummary string // populated on Connected → Reconnecting when the crash log has a fresh entry
+	next         tea.Cmd
 }
 
 // subscribeConnStateCmd hooks the SDK's connection-state channel into
@@ -87,7 +88,12 @@ func subscribeConnStateCmd(ag *agentclient.Client) tea.Cmd {
 			if !ok {
 				return nil
 			}
-			msg := connStateChangedMsg{state: ev.State, attempt: ev.Attempt, next: wait}
+			msg := connStateChangedMsg{
+				state:        ev.State,
+				attempt:      ev.Attempt,
+				crashSummary: ev.CrashSummary,
+				next:         wait,
+			}
 			if ev.Err != nil {
 				msg.errMsg = ev.Err.Error()
 			}

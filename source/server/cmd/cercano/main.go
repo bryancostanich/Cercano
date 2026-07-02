@@ -502,6 +502,12 @@ func main() {
 		case "stats":
 			runStats()
 			return
+		case "logs":
+			// cercano logs --crashes [--tail N] — inspect the server's
+			// persistent crash log. See runLogs for the actual flag
+			// parsing and output format.
+			runLogs(os.Args[2:])
+			return
 		case "agent":
 			// Explicit server mode: starts the gRPC agent in the foreground.
 			// Used by `cercano-cli` auto-launch and by IDE extensions that want
@@ -1207,6 +1213,69 @@ func promptYesNo(out io.Writer, in io.Reader, prompt string, defaultYes bool) bo
 		return defaultYes
 	}
 	return line == "y" || line == "yes"
+}
+
+// runLogs implements the `cercano logs` subcommand. Today it only
+// supports --crashes (inspect the crash log); a future flag can add
+// other log surfaces without changing the subcommand name.
+//
+// Usage: cercano logs --crashes [--tail N]
+//   --crashes: pretty-print the last N crash-log entries (default 10).
+//   --tail N : override the count.
+//
+// Output is human-readable, one entry per block with a divider — meant
+// for a person eyeballing the log. For structured consumption, the raw
+// JSONL file at ~/.config/cercano/crash.log is the authoritative
+// source.
+func runLogs(args []string) {
+	fs := flag.NewFlagSet("logs", flag.ExitOnError)
+	crashes := fs.Bool("crashes", false, "show the persistent crash log")
+	tail := fs.Int("tail", 10, "number of most-recent entries to show")
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+	if !*crashes {
+		fmt.Fprintln(os.Stderr, "usage: cercano logs --crashes [--tail N]")
+		os.Exit(2)
+	}
+	path := filepath.Join(filepath.Dir(config.DefaultPath()), "crash.log")
+	entries, err := crashlog.TailEntries(path, *tail)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "logs: read %s: %v\n", path, err)
+		os.Exit(1)
+	}
+	if len(entries) == 0 {
+		fmt.Printf("No crashes recorded at %s.\n", path)
+		return
+	}
+	fmt.Printf("Crash log: %s (showing %d most-recent, newest-first)\n\n", path, len(entries))
+	for i, e := range entries {
+		if i > 0 {
+			fmt.Println(strings.Repeat("─", 60))
+		}
+		fmt.Printf("[%s] %s\n", e.Timestamp.Local().Format("2006-01-02 15:04:05"), e.Kind)
+		if e.CercanoVersion != "" {
+			fmt.Printf("  cercano version: %s\n", e.CercanoVersion)
+		}
+		if e.Uptime > 0 {
+			fmt.Printf("  uptime at crash: %s\n", e.Uptime.Round(time.Second))
+		}
+		if e.Signal != "" {
+			fmt.Printf("  signal: %s\n", e.Signal)
+		}
+		if e.Reason != "" {
+			fmt.Printf("  reason: %s\n", e.Reason)
+		}
+		for k, v := range e.Extra {
+			fmt.Printf("  %s: %v\n", k, v)
+		}
+		if e.Stack != "" {
+			fmt.Println("  stack:")
+			for _, line := range strings.Split(strings.TrimRight(e.Stack, "\n"), "\n") {
+				fmt.Printf("    %s\n", line)
+			}
+		}
+	}
 }
 
 // runStats prints cumulative usage statistics and exits.

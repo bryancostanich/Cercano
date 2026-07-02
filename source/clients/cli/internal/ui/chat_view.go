@@ -980,6 +980,70 @@ func (c *chatView) MouseInText(localX, localY int) bool {
 		localY < c.vp.Height()
 }
 
+// MouseToggleFold checks whether a local click landed on a tool entry line
+// and, if so, focuses that entry and toggles its Folded state (mirroring the
+// keyboard ToggleFocusedFold path). Returns true when the click was handled —
+// the host should refresh the viewport and skip its selection begin. Returns
+// false for clicks outside the text region, on non-tool lines, or when the
+// current render can't unambiguously map lines back to entries (grouped
+// collapsed runs — those still respond to keyboard nav).
+func (c *chatView) MouseToggleFold(localX, localY int) bool {
+	if !c.MouseInText(localX, localY) {
+		return false
+	}
+	absLine := c.vp.YOffset() + localY
+	idx := c.toolEntryAtLine(absLine)
+	if idx < 0 {
+		return false
+	}
+	c.focusedToolIdx = idx
+	c.ToggleFocusedFold()
+	return true
+}
+
+// toolEntryAtLine maps an absolute line index (into c.plainLines) to the
+// corresponding entries[] index of the tool call whose render spans that
+// line, or -1 when the line isn't part of a tool call render. Works by
+// scanning c.plainLines for the fold-arrow marker (▸ or ▾) that every
+// non-grouped tool entry renders at column 2-4, then pairing the arrow
+// lines 1:1 with entries whose Tool != nil in document order. When counts
+// mismatch (a collapsed tool group renders one summary line for multiple
+// entries), returns -1 rather than guessing.
+func (c *chatView) toolEntryAtLine(line int) int {
+	if line < 0 || line >= len(c.plainLines) {
+		return -1
+	}
+	var arrowLines []int
+	for i, ln := range c.plainLines {
+		head := ln
+		if len(head) > 32 {
+			head = head[:32]
+		}
+		if strings.Contains(head, "▸ ") || strings.Contains(head, "▾ ") {
+			arrowLines = append(arrowLines, i)
+		}
+	}
+	var toolEntries []int
+	for i, e := range c.entries {
+		if e.Tool != nil {
+			toolEntries = append(toolEntries, i)
+		}
+	}
+	if len(arrowLines) != len(toolEntries) {
+		return -1
+	}
+	for i, start := range arrowLines {
+		end := len(c.plainLines)
+		if i+1 < len(arrowLines) {
+			end = arrowLines[i+1]
+		}
+		if line >= start && line < end {
+			return toolEntries[i]
+		}
+	}
+	return -1
+}
+
 // ClearSelection resets the selection state.
 func (c *chatView) ClearSelection() {
 	c.selection = textSelection{}

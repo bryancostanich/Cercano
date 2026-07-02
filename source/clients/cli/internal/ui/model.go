@@ -1300,7 +1300,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.state == agentclient.ConnStateReconnecting && prev == agentclient.ConnStateConnected {
 			if m.streaming && m.lastSubmittedPrompt != "" {
 				m.input.SetValue(m.lastSubmittedPrompt)
-				m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "⚠ agent disconnected mid-turn — prompt restored to the input; press Enter to re-submit once the agent is back."})
+				body := "⚠ agent disconnected mid-turn — prompt restored to the input; press Enter to re-submit once the agent is back."
+				if msg.crashSummary != "" {
+					body += "\n  cause: " + msg.crashSummary + " (full trace in ~/.config/cercano/crash.log)"
+				}
+				m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: body})
 				m.streaming = false
 				m.chat.SetStreaming(false)
 				if e := m.chat.lastAssistantEntry(); e != nil {

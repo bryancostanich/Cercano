@@ -23,6 +23,8 @@ package agentclient
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -30,8 +32,21 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/status"
 
+	"cercano/source/server/internal/crashlog"
 	"cercano/source/server/pkg/proto"
 )
+
+// defaultCrashLogPath returns the standard crash-log location for
+// Cercano — matches what runServerMode writes to. Reproduced here so
+// agentclient doesn't need to depend on the config package (which
+// would enlarge the SDK's dependency footprint for embedders).
+func defaultCrashLogPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "cercano", "crash.log")
+}
 
 // ConnState is the coarse-grained connection health that observers care
 // about. gRPC's own connectivity states are more granular (IDLE / CONNECTING
@@ -68,10 +83,18 @@ func (s ConnState) String() string {
 // transition. Attempt is 0 for the initial Connected event and increments
 // per reconnect attempt so UIs can render "reconnecting (2/3)…". Err is
 // non-nil only on the transition into ConnStateFailed.
+//
+// CrashSummary is set on the FIRST transition into Reconnecting after a
+// server death — the reconnect flow reads the most recent line from
+// ~/.config/cercano/crash.log (if present) so the CLI can tell the
+// user WHY the server died, not just that it did. Empty when the log
+// is missing, on subsequent Reconnecting transitions within the same
+// recovery cycle, or when the state change wasn't triggered by a crash.
 type ConnStateChanged struct {
-	State   ConnState
-	Attempt int
-	Err     error
+	State        ConnState
+	Attempt      int
+	Err          error
+	CrashSummary string
 }
 
 // maxReconnectAttempts bounds the retry loop. Beyond this the client
@@ -162,9 +185,15 @@ func (c *Client) currentState() ConnState {
 
 // setState atomically updates and broadcasts the new state. No-op if the
 // state hasn't actually changed (silences duplicate events).
+//
+// On a Connected → Reconnecting transition (which means the transport
+// just died), this method also reads the tail of the crash log so the
+// event carries a short summary of WHY the server died. Attach is
+// best-effort; a missing log or malformed entry just means no summary.
 func (c *Client) setState(next ConnState, attempt int, err error) {
 	c.stateMu.Lock()
-	changed := c.state != next
+	prev := c.state
+	changed := prev != next
 	c.state = next
 	c.stateMu.Unlock()
 	if !changed {
@@ -173,7 +202,11 @@ func (c *Client) setState(next ConnState, attempt int, err error) {
 	if c.stateBroker == nil {
 		c.stateBroker = newStateBroker()
 	}
-	c.stateBroker.broadcast(ConnStateChanged{State: next, Attempt: attempt, Err: err})
+	ev := ConnStateChanged{State: next, Attempt: attempt, Err: err}
+	if prev == ConnStateConnected && next == ConnStateReconnecting {
+		ev.CrashSummary = crashlog.LatestSummary(defaultCrashLogPath())
+	}
+	c.stateBroker.broadcast(ev)
 }
 
 // watchConn is the background goroutine spawned in Dial. It observes the

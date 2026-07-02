@@ -236,6 +236,14 @@ func (m *mockAgentClient) RemoveCloudProfile(ctx context.Context, in *proto.Remo
 	return &proto.RemoveCloudProfileResponse{Ok: true}, nil
 }
 
+func (m *mockAgentClient) GetLocalRuntimeStatus(ctx context.Context, in *proto.GetLocalRuntimeStatusRequest, opts ...grpc.CallOption) (*proto.GetLocalRuntimeStatusResponse, error) {
+	return &proto.GetLocalRuntimeStatusResponse{}, nil
+}
+
+func (m *mockAgentClient) InstallLocalRuntime(ctx context.Context, in *proto.InstallLocalRuntimeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[proto.InstallProgress], error) {
+	return nil, nil
+}
+
 func TestNewServer_RegistersTools(t *testing.T) {
 	mock := &mockAgentClient{}
 	s := NewServer(mock)

@@ -1168,10 +1168,22 @@ func (s *Server) InvokeTool(ctx context.Context, req *proto.InvokeToolRequest) (
 // estimateRawTokens is a fast len/4 token estimate over the turns' text — used
 // for the displayed raw/savings figure so the footer's frequent GetContextUsage
 // poll never tokenizes the full uncompacted history with tiktoken.
+//
+// Uses the LARGER of Content and BlocksJSON per turn, not the sum: BlocksJSON
+// is the canonical block-array serialization (what feeds BuildLLMHistory) and
+// already contains every text body as a JSON string, so summing it with
+// Content double-counts the text portion — inflating the number by ~8% on a
+// text-heavy conversation. Content is retained only as the fallback for
+// pre-BlocksJSON turns (older rows may have Content but an empty
+// content_json column, since it defaulted to '' when added).
 func estimateRawTokens(turns []conversation.Turn) int {
 	n := 0
 	for _, t := range turns {
-		n += len(t.Content) + len(t.BlocksJSON)
+		if len(t.BlocksJSON) > len(t.Content) {
+			n += len(t.BlocksJSON)
+		} else {
+			n += len(t.Content)
+		}
 	}
 	return (n + 3) / 4
 }

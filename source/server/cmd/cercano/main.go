@@ -14,10 +14,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"cercano/source/server/internal/agent"
@@ -98,6 +100,14 @@ func checkOllama(baseURL string) error {
 	}
 	return nil
 }
+
+// drainGrace bounds how long a shutting-down agent waits for in-flight turns
+// to finish before hard-stopping. It is a zombie-guard, not a tuning knob: an
+// agentic turn legitimately runs for minutes (model calls + tool executions),
+// and the drained process holds no resources a replacement needs — the
+// listener port frees the moment the drain starts. Only a truly wedged
+// handler should ever hit this. A second signal forces immediate exit.
+const drainGrace = 10 * time.Minute
 
 // startGRPCServer initializes all providers and starts the gRPC server.
 // Returns the listener address and a cleanup function.
@@ -401,10 +411,15 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	}()
 
 	cleanup := func() {
+		// Drain before teardown: in-flight turns still need the MCP manager
+		// and providers, so those stop only after the streams finish. The
+		// standing SubscribeEvents streams must end first or GracefulStop
+		// waits on attached clients forever.
+		srv.BeginShutdown()
+		server.DrainThenStop(s, drainGrace)
 		mcpCancel()
 		mcpMgr.Stop()
 		srv.Shutdown()
-		s.GracefulStop()
 	}
 
 	return lis.Addr().String(), cleanup, nil
@@ -1224,7 +1239,7 @@ func runServerMode(cfg config.Config) {
 	fmt.Printf("Local model: %s\n", cfg.LocalModel)
 	fmt.Printf("Ollama URL: %s\n", cfg.OllamaURL)
 
-	addr, _, err := startGRPCServer(cfg, ":"+cfg.Port)
+	addr, cleanup, err := startGRPCServer(cfg, ":"+cfg.Port)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "\n[ERROR] %v\n", err)
 		os.Exit(1)
@@ -1232,8 +1247,20 @@ func runServerMode(cfg config.Config) {
 
 	fmt.Printf("Server listening at %s\n", addr)
 
-	// Block forever (gRPC server runs in its own goroutine via Serve)
-	select {}
+	// Serve until signaled. The dev launcher SIGTERMs stale agents on every
+	// rebuild; dying instantly here severed every in-flight stream (clients
+	// saw "Unavailable: error reading from server: EOF"), so drain instead.
+	sigCh := make(chan os.Signal, 2)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	sig := <-sigCh
+	fmt.Printf("Received %v — draining in-flight requests (signal again to force quit)...\n", sig)
+	go func() {
+		<-sigCh
+		fmt.Fprintln(os.Stderr, "Second signal — exiting immediately")
+		os.Exit(1)
+	}()
+	cleanup()
+	fmt.Println("Shutdown complete")
 }
 
 // runMCPMode starts the MCP server. If no external gRPC address is provided,

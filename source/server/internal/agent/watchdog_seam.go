@@ -19,3 +19,8 @@ type WatchdogDecision struct {
 // executes. It supervises protocol compliance independent of the permission
 // mode. nil = disabled (the loop behaves exactly as before).
 type WatchdogGate func(ctx context.Context, toolName string, args json.RawMessage, transcript []llm.Message) WatchdogDecision
+
+// WatchdogTurnEnd, when set, is consulted with the model's final reply text
+// before the turn returns. nil = disabled. Fail-open: any error → the reply is
+// returned unchanged; the turn is reopened only on an explicit challenge/block.
+type WatchdogTurnEnd func(ctx context.Context, finalText string, transcript []llm.Message) WatchdogDecision

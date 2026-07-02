@@ -209,6 +209,9 @@ message UpdateConfigRequest {
   string locus_mode = 8;     // cloud_only|cloud_primary|local_primary|local_only
   string watchdog_enabled = 9;  // "" = unchanged, "true"/"false"
   string watchdog_echo = 10;    // "" = unchanged, "true"/"false"
+  string watchdog_mode = 11;            // "" = unchanged; "challenge-and-justify"|"strict"
+  string watchdog_checks = 12;          // "" = unchanged; "-" = empty; else comma-joined
+  string watchdog_escalate_after = 13;  // "" = unchanged; positive int
 }
 
 // Runtime configuration update response.
@@ -565,6 +568,9 @@ message GetConfigResponse {
   string locus_mode = 11;
   bool watchdog_enabled = 12;
   bool watchdog_echo = 13;
+  string watchdog_mode = 14;
+  string watchdog_checks = 15;          // comma-joined
+  string watchdog_escalate_after = 16;  // int as string
 }
 
 message ListSkillsRequest {}

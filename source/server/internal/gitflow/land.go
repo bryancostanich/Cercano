@@ -72,10 +72,14 @@ func (r *Repo) conflictedFiles(ctx context.Context) ([]string, error) {
 // pauses (leaves the repo mid-rebase/merge) and returns the conflicted files.
 func (r *Repo) Land(ctx context.Context, feature, trunk string, strategy Strategy) (LandState, error) {
 	st := LandState{Strategy: strategy}
-	if clean, err := r.Clean(ctx); err != nil {
+	// Untracked files ride along undisturbed through fast-forward merges
+	// and rebases — refusing on their presence turns unrelated worktree
+	// directories into a landing blocker. Only staged/modified changes
+	// to tracked files can collide.
+	if clean, err := r.CleanIgnoringUntracked(ctx); err != nil {
 		return st, err
 	} else if !clean {
-		return st, fmt.Errorf("gitflow: land: working tree not clean — commit or checkpoint first")
+		return st, fmt.Errorf("gitflow: land: working tree has staged or unstaged changes — commit, checkpoint, or stash first")
 	}
 	if err := r.RecordSafety(ctx, "land", trunk); err != nil {
 		return st, err

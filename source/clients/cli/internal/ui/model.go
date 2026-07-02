@@ -131,6 +131,13 @@ type Model struct {
 
 	recap string // living one-line work summary; shown in the chat footer
 
+	// nextPromptSuggestion is a locally-generated "what to do next" one-liner
+	// fetched after each streamEndMsg. Renders as ghost text in the empty
+	// input (via input.Suggestion); Tab accepts it into the value. Overwritten
+	// by the next successful fetch; not actively cleared on typing (the
+	// promptInput render already hides ghost text when value is non-empty).
+	nextPromptSuggestion string
+
 	// convRef shares the current convID with the slash registry by reference,
 	// so /rename always targets whatever conversation the model currently has
 	// active (including after /resume).
@@ -525,6 +532,31 @@ func fetchContextUsage(ag *agentclient.Client, convID string) tea.Cmd {
 
 type recapLoadedMsg struct{ recap string }
 
+// nextPromptSuggestionMsg carries the result of a SuggestNextPrompt call.
+// Empty suggestion means the server couldn't produce one (missing recap,
+// dispatch engine offline, etc.) — the CLI treats "" as "no ghost text",
+// never renders a banner.
+type nextPromptSuggestionMsg struct{ suggestion string }
+
+// fetchNextPromptSuggestion asks the agent's local coproc for a one-line
+// "what to do next" ghost. Longer timeout than the recap poll because
+// generation runs a small local-model completion; still bounded so a stuck
+// coproc doesn't hang the poll cycle.
+func fetchNextPromptSuggestion(ag *agentclient.Client, convID string) tea.Cmd {
+	return func() tea.Msg {
+		if convID == "" {
+			return nextPromptSuggestionMsg{}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		defer cancel()
+		s, err := ag.SuggestNextPrompt(ctx, convID)
+		if err != nil {
+			return nextPromptSuggestionMsg{}
+		}
+		return nextPromptSuggestionMsg{suggestion: strings.TrimSpace(s)}
+	}
+}
+
 // fetchRecap asks the agent for the conversation's latest living recap.
 func fetchRecap(ag *agentclient.Client, convID string) tea.Cmd {
 	return func() tea.Msg {
@@ -882,6 +914,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+		// Tab accepts the ghost-text "next prompt" suggestion when the input
+		// is empty. Puts the suggestion into the input as editable text so
+		// the user can tweak before submitting. Slash-command tab-completion
+		// only applies when the input is non-empty and starts with "/", so
+		// the two Tab modes don't collide.
+		if keyStr == "tab" && m.input.Value() == "" && m.nextPromptSuggestion != "" {
+			accepted := m.nextPromptSuggestion
+			m.nextPromptSuggestion = ""
+			m.input.Suggestion = ""
+			m.input.SetValue(accepted)
+			m.input.CursorEnd()
+			return m, nil
+		}
 		// Tab completion for slash commands.
 		if keyStr == "tab" {
 			val := m.input.Value()
@@ -1088,6 +1133,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 
+	case nextPromptSuggestionMsg:
+		// Cache in Model and sync to the prompt input so its View renders
+		// the ghost text. Empty suggestion clears any prior ghost.
+		m.nextPromptSuggestion = msg.suggestion
+		m.input.Suggestion = msg.suggestion
+		return m, nil
+
 	case recapLoadedMsg:
 		// When the recap's presence toggles, the recap line claims (or frees) a
 		// row below the viewport. relayout() must re-run so the viewport resizes
@@ -1263,7 +1315,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ctxPollTicks = 20 // ~40s warm window covers the compaction debounce
 		// Only spawn the poll ticker if one isn't already running, so rapid
 		// back-to-back turns don't multiply concurrent ctxUsageTick loops.
-		pollCmds := []tea.Cmd{fetchContextUsage(m.agent, m.convID), fetchRecap(m.agent, m.convID)}
+		pollCmds := []tea.Cmd{
+			fetchContextUsage(m.agent, m.convID),
+			fetchRecap(m.agent, m.convID),
+			fetchNextPromptSuggestion(m.agent, m.convID),
+		}
 		if !m.ctxPolling {
 			m.ctxPolling = true
 			pollCmds = append(pollCmds, ctxUsageTick())

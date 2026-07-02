@@ -40,7 +40,7 @@ func NewStyles(p Palette) Styles {
 	return Styles{
 		Primary:   lipgloss.NewStyle().Foreground(p.Primary),
 		Bright:    lipgloss.NewStyle().Foreground(p.Bright),
-		Dim:       lipgloss.NewStyle().Foreground(p.DimAmber),
+		Dim:       lipgloss.NewStyle().Foreground(p.Dim),
 		Accent:    lipgloss.NewStyle().Foreground(p.Accent),
 		Info:      lipgloss.NewStyle().Foreground(p.Info),
 		Muted:     lipgloss.NewStyle().Foreground(p.Muted),
@@ -59,7 +59,7 @@ func NewStyles(p Palette) Styles {
 		BufferUserMarker: lipgloss.NewStyle().Foreground(p.BufferLime).Background(p.BufferUserBg).Bold(true),
 		BufferUserText:   lipgloss.NewStyle().Foreground(p.Bright).Background(p.BufferUserBg),
 		MeterFill:  lipgloss.NewStyle().Foreground(p.Accent),
-		MeterEmpty: lipgloss.NewStyle().Foreground(p.DimAmber),
+		MeterEmpty: lipgloss.NewStyle().Foreground(p.Dim),
 		BypassFlag: lipgloss.NewStyle().Foreground(lipgloss.Color("#1A1A1A")).Background(p.Error).Bold(true),
 		ToolSuccess: lipgloss.NewStyle().Foreground(p.BufferLime),
 		ToolError:   lipgloss.NewStyle().Foreground(p.BufferError),

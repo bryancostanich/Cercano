@@ -17,7 +17,7 @@ type Palette struct {
 	Border      color.Color // inner gridlines
 	Primary     color.Color // wordmark, default text
 	Bright      color.Color // active state, focus
-	DimAmber    color.Color // meter empty, ghost text
+	Dim         color.Color // meter empty, ghost text — the "faint" foreground
 	Accent      color.Color // lime — user sigil, accent rail, success peak
 	Info        color.Color // cyan — metadata, paths
 	Muted       color.Color // secondary text
@@ -44,7 +44,7 @@ const (
 	hexBorder    = "#6F6F6F"
 	hexPrimary   = "#EA8212"
 	hexBright    = "#FFB84D"
-	hexDimAmber  = "#8A5810"
+	hexDim       = "#8A5810"
 	hexAccent    = "#BDF000"
 	hexInfo      = "#00C8E8"
 	hexMuted     = "#888888"
@@ -63,7 +63,7 @@ func Cracker() Palette {
 		Border:    lipgloss.Color(hexBorder),
 		Primary:   lipgloss.Color(hexPrimary),
 		Bright:    lipgloss.Color(hexBright),
-		DimAmber:  lipgloss.Color(hexDimAmber),
+		Dim:       lipgloss.Color(hexDim),
 		Accent:    lipgloss.Color(hexAccent),
 		Info:      lipgloss.Color(hexInfo),
 		Muted:     lipgloss.Color(hexMuted),

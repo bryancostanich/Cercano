@@ -1,10 +1,69 @@
 package agentclient
 
 import (
+	"context"
+	"io"
 	"testing"
+
+	"google.golang.org/grpc"
 
 	"cercano/source/server/pkg/proto"
 )
+
+// fakeProcessStream feeds canned StreamProcessResponses then io.EOF.
+type fakeProcessStream struct {
+	proto.Agent_StreamProcessRequestClient // embed; unused methods panic if called
+	msgs                                   []*proto.StreamProcessResponse
+	i                                      int
+}
+
+func (f *fakeProcessStream) Recv() (*proto.StreamProcessResponse, error) {
+	if f.i >= len(f.msgs) {
+		return nil, io.EOF
+	}
+	m := f.msgs[f.i]
+	f.i++
+	return m, nil
+}
+
+// fakeAgentClient returns the fake stream from StreamProcessRequest.
+type fakeAgentClient struct {
+	proto.AgentClient // embed; unused methods panic if called
+	stream            proto.Agent_StreamProcessRequestClient
+}
+
+func (f *fakeAgentClient) StreamProcessRequest(ctx context.Context, in *proto.ProcessRequestRequest, opts ...grpc.CallOption) (proto.Agent_StreamProcessRequestClient, error) {
+	return f.stream, nil
+}
+
+// TestStreamLoopDeliversWatchdogEvent exercises the real StreamChat payload loop
+// with a fake gRPC stream that emits one WatchdogEvent, verifying that the
+// event is converted to a TypeWatchdog StreamMsg with the correct fields.
+func TestStreamLoopDeliversWatchdogEvent(t *testing.T) {
+	fake := &fakeAgentClient{stream: &fakeProcessStream{msgs: []*proto.StreamProcessResponse{
+		{Payload: &proto.StreamProcessResponse_WatchdogEvent{WatchdogEvent: &proto.WatchdogEvent{
+			Kind: "challenge", Protocol: "commit-checkpoint", Text: "commit first",
+		}}},
+	}}}
+	c := &Client{agent: fake}
+	out, err := c.StreamChat(context.Background(), "", "hi", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got *StreamMsg
+	for m := range out {
+		if m.Type == TypeWatchdog {
+			mm := m
+			got = &mm
+		}
+	}
+	if got == nil {
+		t.Fatal("no TypeWatchdog StreamMsg delivered through the real payload loop")
+	}
+	if got.WatchdogKind != "challenge" || got.Protocol != "commit-checkpoint" || got.Summary != "commit first" {
+		t.Fatalf("mapping wrong: %+v", got)
+	}
+}
 
 // TestGetConfig_WatchdogModeChecksEscalateMapping verifies that
 // GetConfigResponse mode/checks/escalate fields map correctly to Config.

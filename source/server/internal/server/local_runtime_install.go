@@ -88,11 +88,17 @@ func buildLocalRuntimeStatusFromDetectError(cfg config.Config, err error) *proto
 // selected local runtime and returns the same LocalRuntimeStatus shape
 // pushed by LocalRuntimeStatusChanged. Cheap (a couple filesystem checks)
 // so no caching — always fresh.
-func (s *Server) GetLocalRuntimeStatus(_ context.Context, _ *proto.GetLocalRuntimeStatusRequest) (*proto.GetLocalRuntimeStatusResponse, error) {
+func (s *Server) GetLocalRuntimeStatus(_ context.Context, req *proto.GetLocalRuntimeStatusRequest) (*proto.GetLocalRuntimeStatusResponse, error) {
 	s.cfgMu.RLock()
 	cfg := s.currentConfig
 	s.cfgMu.RUnlock()
-	runtime := cfg.LocalRuntime
+	// Explicit request overrides the currently-selected runtime — the CLI's
+	// settings-page gate uses this to probe a runtime it's about to switch
+	// to. Empty falls back to what's currently active.
+	runtime := req.GetRuntime()
+	if runtime == "" {
+		runtime = cfg.LocalRuntime
+	}
 	if runtime == "" {
 		runtime = "ollama"
 	}

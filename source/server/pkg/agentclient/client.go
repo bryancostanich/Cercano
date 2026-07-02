@@ -879,11 +879,14 @@ type InstallProgress struct {
 	Err   error
 }
 
-// GetLocalRuntimeStatus fetches the current local-runtime detection snapshot
-// for the selected runtime. Callers use this once at startup to populate the
-// chip / install modal without waiting for a push event.
-func (c *Client) GetLocalRuntimeStatus(ctx context.Context) (*LocalRuntimeStatus, error) {
-	resp, err := c.agent.GetLocalRuntimeStatus(ctx, &proto.GetLocalRuntimeStatusRequest{})
+// GetLocalRuntimeStatus fetches the local-runtime detection snapshot. When
+// runtime is empty, the server reports against its currently-selected
+// runtime (used by the CLI startup fetch that renders the chip). When
+// runtime is set explicitly ("ollama" | "llama_server"), the server probes
+// THAT runtime — used by the settings-page gate to check whether a switch
+// is safe before dispatching UpdateConfig.
+func (c *Client) GetLocalRuntimeStatus(ctx context.Context, runtime string) (*LocalRuntimeStatus, error) {
+	resp, err := c.agent.GetLocalRuntimeStatus(ctx, &proto.GetLocalRuntimeStatusRequest{Runtime: runtime})
 	if err != nil {
 		return nil, err
 	}

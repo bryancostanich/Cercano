@@ -230,7 +230,7 @@ func (sp *settingsPage) onCommit(key, value string) (string, tea.Cmd, error) {
 		// (unchanged) runtime, reverting the toggle back to ollama.
 		if action.update.LocalRuntime == "llama_server" {
 			gctx, gcancel := context.WithTimeout(context.Background(), 3*time.Second)
-			st, gerr := sp.agent.GetLocalRuntimeStatus(gctx)
+			st, gerr := sp.agent.GetLocalRuntimeStatus(gctx, "llama_server")
 			gcancel()
 			if gerr == nil && st != nil && !st.Ok {
 				sp.cfg = nil

@@ -730,7 +730,14 @@ message LocalRuntimeStatusChanged { LocalRuntimeStatus status = 1; }
 // GetLocalRuntimeStatus is the pull-side counterpart to
 // LocalRuntimeStatusChanged. Empty request — the server always returns the
 // snapshot for the currently-selected local runtime.
-message GetLocalRuntimeStatusRequest {}
+message GetLocalRuntimeStatusRequest {
+  // Runtime to detect against ("ollama" | "llama_server"). Empty falls
+  // back to the currently-selected runtime — used by the CLI startup
+  // fetch to render the chip. The settings-page gate uses this explicit
+  // form to probe a runtime BEFORE switching to it, so a user can be
+  // asked to install BEFORE the config is silently accepted.
+  string runtime = 1;
+}
 message GetLocalRuntimeStatusResponse { LocalRuntimeStatus status = 1; }
 
 // InstallLocalRuntimeRequest asks the server to run the platform install

@@ -120,13 +120,13 @@ func main() {
 
 	fmt.Println("running compactor.Advance...")
 	start := time.Now()
-	newState, changed, err := compactor.Advance(ctx, turns, state, summarize, cfg, tok)
+	newState, changed, more, err := compactor.Advance(ctx, turns, state, summarize, cfg, tok)
 	elapsed := time.Since(start)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "\nAdvance failed after %s: %v\n", elapsed, err)
 		os.Exit(1)
 	}
-	fmt.Printf("elapsed=%s summarizer_calls=%d changed=%v\n\n", elapsed, summarizerCalls, changed)
+	fmt.Printf("elapsed=%s summarizer_calls=%d changed=%v more=%v\n\n", elapsed, summarizerCalls, changed, more)
 	if !changed {
 		fmt.Println("compactor.Advance did not run — inputs may be below activation floor. Try -floor 500 or a longer conversation.")
 		return

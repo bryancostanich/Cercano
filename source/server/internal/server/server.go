@@ -1175,7 +1175,7 @@ func (s *Server) InvokeTool(ctx context.Context, req *proto.InvokeToolRequest) (
 // Content double-counts the text portion — inflating the number by ~8% on a
 // text-heavy conversation. Content is retained only as the fallback for
 // pre-BlocksJSON turns (older rows may have Content but an empty
-// content_json column, since it defaulted to '' when added).
+// content_json column, since it defaulted to ” when added).
 func estimateRawTokens(turns []conversation.Turn) int {
 	n := 0
 	for _, t := range turns {
@@ -2316,7 +2316,8 @@ func (s *Server) persistTurn(ctx context.Context, convID string, m llm.Message) 
 // assembleHistory builds the conversation history to send: the compacted view
 // (consolidated summary + live tail) when compaction state exists, else the full
 // history. If the assembled history exceeds the hard-override fraction of the
-// model's max context, it compacts synchronously once and reassembles.
+// model's max context, it schedules a background compaction pass and degrades
+// the view with LLM-free elision and front-drop rather than blocking.
 func (s *Server) assembleHistory(ctx context.Context, store conversation.Store, convID string) []llm.Message {
 	turns, err := store.GetTurns(ctx, convID)
 	if err != nil {
@@ -2334,9 +2335,27 @@ func (s *Server) assembleHistory(ctx context.Context, store conversation.Store, 
 	if compactionCfg.Enabled && pct > 0 {
 		hardLimit := int(float64(contextmeter.ModelMax(cloudModel)) * pct)
 		if compaction.TotalTokens(contextmeter.Default(), view) > hardLimit {
-			if err := s.agent.CompactNow(ctx, convID); err == nil {
-				state, _ = store.GetCompaction(ctx, convID)
-				view, _ = compactor.BuildSendView(turns, state)
+			// Never compact inline — kick the background generator (debounced,
+			// deduped, timeout-bounded) and bring THIS turn under the limit with
+			// LLM-free steps only.
+			s.agent.ScheduleCompaction(convID)
+			pre := compaction.TotalTokens(contextmeter.Default(), view)
+			view, _ = compaction.ElideSupersededToolResults(view)
+			if compaction.TotalTokens(contextmeter.Default(), view) > hardLimit {
+				view, _ = compaction.KeepLastNToolResults(view, compaction.DefaultLossyElisionKeepLast)
+			}
+			if compaction.TotalTokens(contextmeter.Default(), view) > hardLimit {
+				preserve := 0
+				if state.ConsolidatedJSON != "" {
+					preserve = 1 // keep the consolidated-summary preamble
+				}
+				var dropped int
+				view, dropped = compaction.TruncateOldestToFit(view, contextmeter.Default(), hardLimit, preserve)
+				fmt.Fprintf(os.Stderr, "[compaction] hard-override %s: %d tokens > limit %d — truncated %d oldest messages (background pass scheduled)\n",
+					convID, pre, hardLimit, dropped)
+			} else {
+				fmt.Fprintf(os.Stderr, "[compaction] hard-override %s: %d tokens > limit %d — elision brought it under (background pass scheduled)\n",
+					convID, pre, hardLimit)
 			}
 		}
 	}

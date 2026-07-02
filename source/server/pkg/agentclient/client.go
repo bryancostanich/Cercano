@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -23,12 +24,33 @@ import (
 	"cercano/source/server/pkg/proto"
 )
 
+// grpcConnAlias is used by reconnect.go so its helpers can hold a
+// package-scoped conn type without importing grpc directly. The value
+// is always the same underlying *grpc.ClientConn we hold here.
+type grpcConnAlias = grpc.ClientConn
+
 // Client owns the gRPC connection and exposes a high-level streaming API.
+//
+// conn + agent are protected by connMu so the reconnect flow can swap
+// them atomically when the underlying server dies and comes back. All
+// SDK methods read c.conn / c.agent through readConn — never touch the
+// fields directly outside that helper.
 type Client struct {
+	connMu       sync.Mutex
 	conn         *grpc.ClientConn
 	agent        proto.AgentClient
 	AutoLaunched bool   // true if Dial spawned a new cercano process
 	ServerLog    string // path to the auto-launched server's log file, if any
+
+	// addr is the dial target — kept so reconnect() can redial after a
+	// crash without threading it through every callsite.
+	addr string
+
+	// Connection-state observation (see reconnect.go).
+	stateMu     sync.Mutex
+	state       ConnState
+	stateBroker *stateBroker
+	stopWatch   chan struct{} // closed by Close() to stop watchConn
 }
 
 // InlineImage is a user-attached image sent with a chat turn. Index matches the
@@ -42,9 +64,17 @@ type InlineImage struct {
 // Dial connects to a cercano agent. If no listener exists at addr, auto-launches
 // `cercano` (the agent binary) in the background and waits for it to come up.
 // The spawned server outlives the CLI so VS Code / Zed / other clients can share it.
+//
+// After a successful dial, Dial starts a background goroutine that
+// watches the underlying connection for TRANSIENT_FAILURE (server crash
+// / network partition) and automatically reconnects — respawning the
+// server if necessary. See reconnect.go for the recovery flow.
 func Dial(ctx context.Context, addr string) (*Client, error) {
 	// First try: short connect against an existing server.
 	if c, err := connect(ctx, addr, 600*time.Millisecond); err == nil {
+		c.addr = addr
+		c.stopWatch = make(chan struct{})
+		go c.watchConn(context.Background())
 		return c, nil
 	}
 
@@ -61,6 +91,9 @@ func Dial(ctx context.Context, addr string) (*Client, error) {
 	}
 	c.AutoLaunched = true
 	c.ServerLog = logPath
+	c.addr = addr
+	c.stopWatch = make(chan struct{})
+	go c.watchConn(context.Background())
 	return c, nil
 }
 
@@ -140,12 +173,27 @@ func waitForPort(addr string, timeout time.Duration) error {
 	return fmt.Errorf("port did not become listenable within %s", timeout)
 }
 
-// Close releases the gRPC connection.
+// Close releases the gRPC connection and stops the background
+// connection-state watcher. Safe to call on a nil / never-Dialed client.
 func (c *Client) Close() error {
-	if c == nil || c.conn == nil {
+	if c == nil {
 		return nil
 	}
-	return c.conn.Close()
+	if c.stopWatch != nil {
+		select {
+		case <-c.stopWatch:
+			// already closed
+		default:
+			close(c.stopWatch)
+		}
+	}
+	c.connMu.Lock()
+	conn := c.conn
+	c.connMu.Unlock()
+	if conn == nil {
+		return nil
+	}
+	return conn.Close()
 }
 
 // Config is the current runtime config reported by the agent.
@@ -802,39 +850,91 @@ type LocalRuntimeStatus struct {
 // so the agent can push state changes instead of the client polling. The
 // channel closes when the stream ends (server shutdown / disconnect).
 func (c *Client) SubscribeEvents(ctx context.Context) (<-chan AgentEvent, error) {
-	stream, err := c.agent.SubscribeEvents(ctx, &proto.SubscribeEventsRequest{})
+	// Open the initial stream synchronously so callers get an error at
+	// setup time if the very first attempt fails. Subsequent stream
+	// errors during the drain loop route through the reconnect path.
+	c.connMu.Lock()
+	agent := c.agent
+	c.connMu.Unlock()
+	stream, err := agent.SubscribeEvents(ctx, &proto.SubscribeEventsRequest{})
 	if err != nil {
 		return nil, err
 	}
 	out := make(chan AgentEvent, 8)
-	go func() {
-		defer close(out)
-		for {
-			ev, err := stream.Recv()
-			if errors.Is(err, io.EOF) {
+	go c.drainSubscribeEvents(ctx, stream, out)
+	return out, nil
+}
+
+// drainSubscribeEvents runs the event-drain loop for the whole client
+// lifetime. On a transport error (server crash mid-stream) it waits for
+// the background reconnect goroutine to restore the connection and then
+// re-opens the SubscribeEvents stream. Only permanent failures (context
+// cancelled, terminal ConnStateFailed, or a non-Unavailable RPC error)
+// close the channel.
+func (c *Client) drainSubscribeEvents(ctx context.Context, stream proto.Agent_SubscribeEventsClient, out chan<- AgentEvent) {
+	defer close(out)
+	for {
+		if stream == nil {
+			// Re-open after a reconnect. If reconnect ultimately
+			// failed, currentState() will be Failed and we bail here.
+			if c.currentState() == ConnStateFailed {
+				out <- AgentEvent{Err: fmt.Errorf("agentclient: reconnect failed; event stream terminated")}
 				return
 			}
+			c.connMu.Lock()
+			agent := c.agent
+			c.connMu.Unlock()
+			s, err := agent.SubscribeEvents(ctx, &proto.SubscribeEventsRequest{})
 			if err != nil {
+				if isUnavailable(err) {
+					// Still bad — trigger a reconnect and try again.
+					if rErr := c.reconnect(ctx); rErr != nil {
+						out <- AgentEvent{Err: rErr}
+						return
+					}
+					continue
+				}
 				out <- AgentEvent{Err: err}
 				return
 			}
-			if pm := ev.GetPermissionModeChanged(); pm != nil {
-				out <- AgentEvent{Mode: pm.GetMode()}
-				continue
-			}
-			if ms := ev.GetMeridianStatusChanged(); ms != nil {
-				out <- AgentEvent{MeridianStatus: meridianStatusFromProto(ms.GetStatus())}
-				continue
-			}
-			if lr := ev.GetLocalRuntimeStatusChanged(); lr != nil {
-				out <- AgentEvent{LocalRuntimeStatus: localRuntimeStatusFromProto(lr.GetStatus())}
-				continue
-			}
-			// Unknown event types are silently dropped — clients that don't
-			// recognise them should not error on forward-compat additions.
+			stream = s
 		}
-	}()
-	return out, nil
+		ev, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			if isUnavailable(err) {
+				// Server death mid-stream. Ask the reconnector to
+				// bring us back and loop to re-open the stream.
+				stream = nil
+				if rErr := c.reconnect(ctx); rErr != nil {
+					out <- AgentEvent{Err: rErr}
+					return
+				}
+				continue
+			}
+			out <- AgentEvent{Err: err}
+			return
+		}
+		if pm := ev.GetPermissionModeChanged(); pm != nil {
+			out <- AgentEvent{Mode: pm.GetMode()}
+			continue
+		}
+		if ms := ev.GetMeridianStatusChanged(); ms != nil {
+			out <- AgentEvent{MeridianStatus: meridianStatusFromProto(ms.GetStatus())}
+			continue
+		}
+		if lr := ev.GetLocalRuntimeStatusChanged(); lr != nil {
+			out <- AgentEvent{LocalRuntimeStatus: localRuntimeStatusFromProto(lr.GetStatus())}
+			continue
+		}
+		// Unknown event types are silently dropped — clients that don't
+		// recognise them should not error on forward-compat additions.
+	}
 }
 
 // meridianStatusFromProto converts the wire proto into the client-side struct.

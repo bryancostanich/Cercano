@@ -1384,6 +1384,7 @@ type CloudProfileInfo struct {
 	Model   string
 	HasKey  bool // a key exists in the keychain for this profile
 	Backend string
+	Route   string // "direct" (default), "meridian", "ccr" (future) — selects adapter-specific auth
 }
 
 // GetCloudProfiles returns all configured cloud profiles and the name of the
@@ -1402,6 +1403,7 @@ func (c *Client) GetCloudProfiles(ctx context.Context) ([]CloudProfileInfo, stri
 			Model:   p.GetModel(),
 			HasKey:  p.GetHasKey(),
 			Backend: p.GetBackend(),
+			Route:   p.GetRoute(),
 		})
 	}
 	return out, resp.GetActive(), nil

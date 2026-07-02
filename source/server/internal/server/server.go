@@ -1175,7 +1175,7 @@ func (s *Server) InvokeTool(ctx context.Context, req *proto.InvokeToolRequest) (
 // Content double-counts the text portion — inflating the number by ~8% on a
 // text-heavy conversation. Content is retained only as the fallback for
 // pre-BlocksJSON turns (older rows may have Content but an empty
-// content_json column, since it defaulted to ” when added).
+// content_json column, since it defaulted to the empty string when added).
 func estimateRawTokens(turns []conversation.Turn) int {
 	n := 0
 	for _, t := range turns {

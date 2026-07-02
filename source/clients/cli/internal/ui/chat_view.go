@@ -1003,16 +1003,47 @@ func (c *chatView) MouseToggleFold(localX, localY int) bool {
 
 // toolEntryAtLine maps an absolute line index (into c.plainLines) to the
 // corresponding entries[] index of the tool call whose render spans that
-// line, or -1 when the line isn't part of a tool call render. Works by
-// scanning c.plainLines for the fold-arrow marker (▸ or ▾) that every
-// non-grouped tool entry renders at column 2-4, then pairing the arrow
-// lines 1:1 with entries whose Tool != nil in document order. When counts
-// mismatch (a collapsed tool group renders one summary line for multiple
-// entries), returns -1 rather than guessing.
+// line, or -1 when the mapping is ambiguous.
+//
+// Two rendering patterns need to be handled:
+//   - Individual/expanded tool entries: each entry renders one line
+//     starting with ▸ or ▾ ("▸ read /path/..."). Arrow count matches the
+//     total tool-entry count in c.entries.
+//   - Collapsed multi-entry groups: N consecutive entries render as ONE
+//     summary line ("▸ 3 tool calls (2 Read, Edit)"). Arrow count matches
+//     the GROUP count.
+//
+// Cases: when arrow count == total tool entries, arrows and entries pair
+// 1:1 by document order. When arrow count == group count, each arrow maps
+// to the first entry of its group — clicking a group summary focuses that
+// entry, and the existing ToggleFocusedFold path expands the whole group
+// (mirroring the keyboard "expand collapsed group" behavior). Mixed
+// renderings (some groups collapsed, some expanded) return -1.
 func (c *chatView) toolEntryAtLine(line int) int {
 	if line < 0 || line >= len(c.plainLines) {
 		return -1
 	}
+	// Group c.entries by contiguous runs of tool entries.
+	var groups [][]int
+	var currentGroup []int
+	for i, e := range c.entries {
+		if e.Tool != nil {
+			currentGroup = append(currentGroup, i)
+			continue
+		}
+		if len(currentGroup) > 0 {
+			groups = append(groups, currentGroup)
+			currentGroup = nil
+		}
+	}
+	if len(currentGroup) > 0 {
+		groups = append(groups, currentGroup)
+	}
+	totalEntries := 0
+	for _, g := range groups {
+		totalEntries += len(g)
+	}
+	// Scan for arrow lines.
 	var arrowLines []int
 	for i, ln := range c.plainLines {
 		head := ln
@@ -1023,22 +1054,42 @@ func (c *chatView) toolEntryAtLine(line int) int {
 			arrowLines = append(arrowLines, i)
 		}
 	}
-	var toolEntries []int
-	for i, e := range c.entries {
-		if e.Tool != nil {
-			toolEntries = append(toolEntries, i)
-		}
-	}
-	if len(arrowLines) != len(toolEntries) {
+	if len(arrowLines) == 0 {
 		return -1
 	}
+	// Find which arrow-line range contains `line`.
+	arrowIdx := -1
 	for i, start := range arrowLines {
 		end := len(c.plainLines)
 		if i+1 < len(arrowLines) {
 			end = arrowLines[i+1]
 		}
 		if line >= start && line < end {
-			return toolEntries[i]
+			arrowIdx = i
+			break
+		}
+	}
+	if arrowIdx < 0 {
+		return -1
+	}
+	// Map arrow index → entry index. Two clean cases handled; mixed bails.
+	switch len(arrowLines) {
+	case totalEntries:
+		// Each arrow is one tool entry. Walk in doc order.
+		count := 0
+		for _, g := range groups {
+			for _, idx := range g {
+				if count == arrowIdx {
+					return idx
+				}
+				count++
+			}
+		}
+	case len(groups):
+		// Each arrow is one group's summary line. Focus the first entry —
+		// ToggleFocusedFold's group-aware logic then expands the group.
+		if arrowIdx < len(groups) {
+			return groups[arrowIdx][0]
 		}
 	}
 	return -1

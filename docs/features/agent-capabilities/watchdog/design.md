@@ -141,6 +141,13 @@ pairs are justified-or-satisfied (don't re-challenge) and the repeat counters. A
 normalized hash of the tool args)`, so re-issuing the *same* edit is recognized as a
 repeat while an unrelated later edit is not.
 
+**v1 behavior notes (turn_end):** at turn boundaries, `escalate` is graceful —
+the loop emits the escalate event and returns the reply rather than prompting
+the human (the confirm-prompt described above applies to the tool-call path).
+The turn_end repeat counter keys on the exact reply text, so only
+verbatim-repeated output reaches `escalate_after`; for varied output the
+loop's iteration cap is the backstop.
+
 ## Configuration
 
 A `watchdog` config block:

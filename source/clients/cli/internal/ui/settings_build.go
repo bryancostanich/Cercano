@@ -8,9 +8,38 @@ import (
 	"cercano/source/server/pkg/agentclient"
 )
 
-// knownWatchdogChecks must stay in sync with the check-map in
-// internal/server/watchdog_wire.go.
+// knownWatchdogChecks must stay in sync with the check switch in the server's
+// buildWatchdogFrom (source/server/internal/server/watchdog_wire.go) and the
+// default checks list in pkg/config.
 var knownWatchdogChecks = []string{"debug-loop", "commit-checkpoint", "plain-english"}
+
+// watchdogChecksFromForm reads the current watchdog-check toggle states from
+// the live form — the source of truth at commit time, immune to a stale or
+// nil cached config. Order follows knownWatchdogChecks. ToggleField renders
+// "on"/"off" via Display().
+func watchdogChecksFromForm(f *form.Form) []string {
+	on := map[string]bool{}
+	collect := func(fields []form.Field) {
+		for _, fld := range fields {
+			if name, ok := strings.CutPrefix(fld.Key(), "watchdog-check-"); ok {
+				on[name] = fld.Display() == "on"
+			}
+		}
+	}
+	for _, s := range f.Sections {
+		collect(s.Fields)
+		for _, g := range s.Groups {
+			collect(g.Fields)
+		}
+	}
+	out := []string{}
+	for _, c := range knownWatchdogChecks {
+		if on[c] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
 
 func hasCheck(list []string, name string) bool {
 	for _, c := range list {

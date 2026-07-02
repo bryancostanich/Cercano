@@ -82,6 +82,60 @@ func TestCompactNow_SmallContextSavesNothing(t *testing.T) {
 	}
 }
 
+func TestRunCompaction_LogsPassOk(t *testing.T) {
+	fs := &fakeStore{turns: bigTurns(12, 1000)}
+	summarize := func(context.Context, []llm.Message) (compaction.StructuredSummary, error) {
+		return compaction.StructuredSummary{Goal: "g"}, nil
+	}
+	cfg := compactor.Config{ActivationFloorTokens: 1000, SegmentTokens: 4000, VerbatimRecent: 2}
+	g := New(fs, summarize, cfg, contextmeter.Default(), 10*time.Millisecond)
+	var buf strings.Builder
+	g.logf = func(f string, a ...any) { fmt.Fprintf(&buf, f, a...) }
+
+	if err := g.CompactNow(context.Background(), "conv-ok"); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "pass ok") {
+		t.Errorf("expected 'pass ok' in log; got:\n%s", out)
+	}
+	if !strings.Contains(out, "conv-ok") {
+		t.Errorf("expected conversation id in log; got:\n%s", out)
+	}
+	if !strings.Contains(out, "tokens") {
+		t.Errorf("expected token counts in log; got:\n%s", out)
+	}
+	if !strings.Contains(out, "more=") {
+		t.Errorf("expected more flag in log; got:\n%s", out)
+	}
+}
+
+func TestRunCompaction_LogsPassFailed(t *testing.T) {
+	fs := &fakeStore{turns: bigTurns(12, 1000)}
+	summarize := func(context.Context, []llm.Message) (compaction.StructuredSummary, error) {
+		return compaction.StructuredSummary{}, fmt.Errorf("summarize error")
+	}
+	cfg := compactor.Config{ActivationFloorTokens: 1000, SegmentTokens: 4000, VerbatimRecent: 2}
+	g := New(fs, summarize, cfg, contextmeter.Default(), 10*time.Millisecond)
+	var buf strings.Builder
+	g.logf = func(f string, a ...any) { fmt.Fprintf(&buf, f, a...) }
+
+	err := g.CompactNow(context.Background(), "conv-fail")
+	if err == nil {
+		t.Fatal("expected error from failed summarize, got nil")
+	}
+	out := buf.String()
+	if !strings.Contains(out, "pass FAILED") {
+		t.Errorf("expected 'pass FAILED' in log; got:\n%s", out)
+	}
+	if !strings.Contains(out, "conv-fail") {
+		t.Errorf("expected conversation id in log; got:\n%s", out)
+	}
+	if !strings.Contains(out, "summarize error") {
+		t.Errorf("expected error text in log; got:\n%s", out)
+	}
+}
+
 func TestIsCompacting_TrueDuringPass(t *testing.T) {
 	fs := &fakeStore{turns: bigTurns(12, 1000)}
 	release := make(chan struct{})

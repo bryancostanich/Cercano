@@ -213,6 +213,9 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 			SegmentTokens:         cfg.Compaction.SegmentTokens,
 			VerbatimRecent:        cfg.Compaction.VerbatimRecent,
 		}
+		if cfg.Compaction.SummarizerModel == "" {
+			fmt.Fprintf(os.Stderr, "[compaction] WARN: no summarizer_model configured — compaction summarizes with the interactive local model (%s), which can be very slow for large histories\n", cfg.LocalModel)
+		}
 		compGen = compactiongen.New(persistentStore, compactSummarize, compCfg, contextmeter.Default(), 10*time.Second)
 		// Runtime kill switch — Schedule noops until enabled. Wiring the
 		// scheduler unconditionally lets /config compaction-enabled true flip

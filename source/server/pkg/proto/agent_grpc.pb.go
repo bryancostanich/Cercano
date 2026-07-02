@@ -31,6 +31,7 @@ const (
 	Agent_GetContextUsage_FullMethodName            = "/agent.Agent/GetContextUsage"
 	Agent_GetCompactionState_FullMethodName         = "/agent.Agent/GetCompactionState"
 	Agent_SuggestNextPrompt_FullMethodName          = "/agent.Agent/SuggestNextPrompt"
+	Agent_GetLocalRuntimeStatus_FullMethodName      = "/agent.Agent/GetLocalRuntimeStatus"
 	Agent_InstallLocalRuntime_FullMethodName        = "/agent.Agent/InstallLocalRuntime"
 	Agent_ExportContext_FullMethodName              = "/agent.Agent/ExportContext"
 	Agent_GetConversationTurns_FullMethodName       = "/agent.Agent/GetConversationTurns"
@@ -105,6 +106,11 @@ type AgentClient interface {
 	// CLI renders the result as ghost text in the input widget. Empty response
 	// means "no suggestion" — the CLI treats it as no-op.
 	SuggestNextPrompt(ctx context.Context, in *SuggestNextPromptRequest, opts ...grpc.CallOption) (*SuggestNextPromptResponse, error)
+	// GetLocalRuntimeStatus returns the current headless-detection outcome
+	// for the selected local runtime. Callers use it once at startup to
+	// populate the CLI chip / install modal without waiting for a config
+	// change to fire a LocalRuntimeStatusChanged event.
+	GetLocalRuntimeStatus(ctx context.Context, in *GetLocalRuntimeStatusRequest, opts ...grpc.CallOption) (*GetLocalRuntimeStatusResponse, error)
 	// InstallLocalRuntime runs the platform install command for a local
 	// inference runtime (today: "llama_server" via `brew install llama.cpp`
 	// on macOS) and streams stdout/stderr line-by-line to the caller. The
@@ -316,6 +322,16 @@ func (c *agentClient) SuggestNextPrompt(ctx context.Context, in *SuggestNextProm
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SuggestNextPromptResponse)
 	err := c.cc.Invoke(ctx, Agent_SuggestNextPrompt_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) GetLocalRuntimeStatus(ctx context.Context, in *GetLocalRuntimeStatusRequest, opts ...grpc.CallOption) (*GetLocalRuntimeStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetLocalRuntimeStatusResponse)
+	err := c.cc.Invoke(ctx, Agent_GetLocalRuntimeStatus_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -745,6 +761,11 @@ type AgentServer interface {
 	// CLI renders the result as ghost text in the input widget. Empty response
 	// means "no suggestion" — the CLI treats it as no-op.
 	SuggestNextPrompt(context.Context, *SuggestNextPromptRequest) (*SuggestNextPromptResponse, error)
+	// GetLocalRuntimeStatus returns the current headless-detection outcome
+	// for the selected local runtime. Callers use it once at startup to
+	// populate the CLI chip / install modal without waiting for a config
+	// change to fire a LocalRuntimeStatusChanged event.
+	GetLocalRuntimeStatus(context.Context, *GetLocalRuntimeStatusRequest) (*GetLocalRuntimeStatusResponse, error)
 	// InstallLocalRuntime runs the platform install command for a local
 	// inference runtime (today: "llama_server" via `brew install llama.cpp`
 	// on macOS) and streams stdout/stderr line-by-line to the caller. The
@@ -868,6 +889,9 @@ func (UnimplementedAgentServer) GetCompactionState(context.Context, *GetCompacti
 }
 func (UnimplementedAgentServer) SuggestNextPrompt(context.Context, *SuggestNextPromptRequest) (*SuggestNextPromptResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SuggestNextPrompt not implemented")
+}
+func (UnimplementedAgentServer) GetLocalRuntimeStatus(context.Context, *GetLocalRuntimeStatusRequest) (*GetLocalRuntimeStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetLocalRuntimeStatus not implemented")
 }
 func (UnimplementedAgentServer) InstallLocalRuntime(*InstallLocalRuntimeRequest, grpc.ServerStreamingServer[InstallProgress]) error {
 	return status.Error(codes.Unimplemented, "method InstallLocalRuntime not implemented")
@@ -1203,6 +1227,24 @@ func _Agent_SuggestNextPrompt_Handler(srv interface{}, ctx context.Context, dec 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AgentServer).SuggestNextPrompt(ctx, req.(*SuggestNextPromptRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_GetLocalRuntimeStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetLocalRuntimeStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).GetLocalRuntimeStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_GetLocalRuntimeStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).GetLocalRuntimeStatus(ctx, req.(*GetLocalRuntimeStatusRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1884,6 +1926,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SuggestNextPrompt",
 			Handler:    _Agent_SuggestNextPrompt_Handler,
+		},
+		{
+			MethodName: "GetLocalRuntimeStatus",
+			Handler:    _Agent_GetLocalRuntimeStatus_Handler,
 		},
 		{
 			MethodName: "ExportContext",

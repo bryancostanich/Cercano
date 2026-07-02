@@ -15,7 +15,7 @@ import (
 func RegisterConfig(r *Registry, c *agentclient.Client) {
 	r.Register(Command{
 		Name: "config",
-		Help: "View or update runtime config. Usage: /config [key value]. Keys: local-runtime, local-model, cloud-provider, cloud-model, cloud-api-key, cloud-base-url, ollama-url, elide-tool-results, lossy-tool-elision, raw-retention-days, compacted-retention-days, keep-forever.",
+		Help: "View or update runtime config. Usage: /config [key value]. Keys: local-runtime, local-model, cloud-provider, cloud-model, cloud-api-key, cloud-base-url, ollama-url, compaction-enabled, elide-tool-results, lossy-tool-elision, raw-retention-days, compacted-retention-days, keep-forever.",
 		Handler: func(args []string) Result {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -65,6 +65,8 @@ func RegisterConfig(r *Registry, c *agentclient.Client) {
 				update.CompactedRetentionDays = value
 			case "keep-forever", "keep_forever":
 				update.KeepForever = value
+			case "compaction-enabled", "compaction_enabled":
+				update.CompactionEnabled = value
 			default:
 				return Result{Kind: ResultText, Text: "unknown config key /" + key + " (valid: local-runtime, local-model, ollama-url, cloud-provider, cloud-model, cloud-api-key, cloud-base-url, elide-tool-results, lossy-tool-elision, raw-retention-days, compacted-retention-days, keep-forever)"}
 			}
@@ -153,6 +155,12 @@ func formatConfig(cfg *agentclient.Config) string {
 	b.WriteString(orDash(cfg.Port))
 	b.WriteString("\n  elide-tool-results: ")
 	if cfg.ElideToolResults {
+		b.WriteString("on")
+	} else {
+		b.WriteString("off")
+	}
+	b.WriteString("\n  compaction-enabled: ")
+	if cfg.CompactionEnabled {
 		b.WriteString("on")
 	} else {
 		b.WriteString("off")

@@ -94,6 +94,8 @@ func classifyCommit(key, value string) commitAction {
 		u.CompactedRetentionDays = value
 	case "keep-forever":
 		u.KeepForever = value
+	case "compaction-enabled":
+		u.CompactionEnabled = value
 	case "permission-mode":
 		return commitAction{kind: commitPermission, value: value}
 	case "accent-color":

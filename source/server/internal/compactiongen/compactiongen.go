@@ -32,6 +32,7 @@ type Generator struct {
 	debounce  time.Duration
 
 	mu       sync.Mutex
+	enabled  bool // guarded by mu — the runtime kill switch
 	timers   map[string]*time.Timer
 	inflight map[string]bool
 }
@@ -44,10 +45,24 @@ func New(store Store, summarize compaction.SummarizeFunc, cfg compactor.Config, 
 	}
 }
 
+// SetEnabled atomically flips the runtime kill switch. When disabled, Schedule
+// noops and no compaction pass will start. In-flight passes complete
+// normally. Called at startup with cfg.Compaction.Enabled and again from the
+// server's UpdateConfig handler when the toggle changes at runtime.
+func (g *Generator) SetEnabled(v bool) {
+	g.mu.Lock()
+	g.enabled = v
+	g.mu.Unlock()
+}
+
 // Schedule requests a debounced compaction pass; rapid calls coalesce.
+// Noops when the kill switch is off.
 func (g *Generator) Schedule(conversationID string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if !g.enabled {
+		return
+	}
 	if t, ok := g.timers[conversationID]; ok {
 		t.Reset(g.debounce)
 		return

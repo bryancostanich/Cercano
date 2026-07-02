@@ -68,6 +68,7 @@ const (
 	Agent_SetCloudProfileKey_FullMethodName         = "/agent.Agent/SetCloudProfileKey"
 	Agent_UpsertCloudProfile_FullMethodName         = "/agent.Agent/UpsertCloudProfile"
 	Agent_RemoveCloudProfile_FullMethodName         = "/agent.Agent/RemoveCloudProfile"
+	Agent_ListCloudProfileModels_FullMethodName     = "/agent.Agent/ListCloudProfileModels"
 )
 
 // AgentClient is the client API for Agent service.
@@ -189,6 +190,11 @@ type AgentClient interface {
 	SetCloudProfileKey(ctx context.Context, in *SetCloudProfileKeyRequest, opts ...grpc.CallOption) (*SetCloudProfileKeyResponse, error)
 	UpsertCloudProfile(ctx context.Context, in *UpsertCloudProfileRequest, opts ...grpc.CallOption) (*UpsertCloudProfileResponse, error)
 	RemoveCloudProfile(ctx context.Context, in *RemoveCloudProfileRequest, opts ...grpc.CallOption) (*RemoveCloudProfileResponse, error)
+	// ListCloudProfileModels fetches the model catalog available to a specific
+	// cloud profile's endpoint (e.g. Anthropic /v1/models through Meridian).
+	// Used by the settings UI to populate a curated model dropdown instead of
+	// asking the user to type an ID.
+	ListCloudProfileModels(ctx context.Context, in *ListCloudProfileModelsRequest, opts ...grpc.CallOption) (*ListCloudProfileModelsResponse, error)
 }
 
 type agentClient struct {
@@ -725,6 +731,16 @@ func (c *agentClient) RemoveCloudProfile(ctx context.Context, in *RemoveCloudPro
 	return out, nil
 }
 
+func (c *agentClient) ListCloudProfileModels(ctx context.Context, in *ListCloudProfileModelsRequest, opts ...grpc.CallOption) (*ListCloudProfileModelsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListCloudProfileModelsResponse)
+	err := c.cc.Invoke(ctx, Agent_ListCloudProfileModels_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServer is the server API for Agent service.
 // All implementations must embed UnimplementedAgentServer
 // for forward compatibility.
@@ -844,6 +860,11 @@ type AgentServer interface {
 	SetCloudProfileKey(context.Context, *SetCloudProfileKeyRequest) (*SetCloudProfileKeyResponse, error)
 	UpsertCloudProfile(context.Context, *UpsertCloudProfileRequest) (*UpsertCloudProfileResponse, error)
 	RemoveCloudProfile(context.Context, *RemoveCloudProfileRequest) (*RemoveCloudProfileResponse, error)
+	// ListCloudProfileModels fetches the model catalog available to a specific
+	// cloud profile's endpoint (e.g. Anthropic /v1/models through Meridian).
+	// Used by the settings UI to populate a curated model dropdown instead of
+	// asking the user to type an ID.
+	ListCloudProfileModels(context.Context, *ListCloudProfileModelsRequest) (*ListCloudProfileModelsResponse, error)
 	mustEmbedUnimplementedAgentServer()
 }
 
@@ -1000,6 +1021,9 @@ func (UnimplementedAgentServer) UpsertCloudProfile(context.Context, *UpsertCloud
 }
 func (UnimplementedAgentServer) RemoveCloudProfile(context.Context, *RemoveCloudProfileRequest) (*RemoveCloudProfileResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RemoveCloudProfile not implemented")
+}
+func (UnimplementedAgentServer) ListCloudProfileModels(context.Context, *ListCloudProfileModelsRequest) (*ListCloudProfileModelsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListCloudProfileModels not implemented")
 }
 func (UnimplementedAgentServer) mustEmbedUnimplementedAgentServer() {}
 func (UnimplementedAgentServer) testEmbeddedByValue()               {}
@@ -1876,6 +1900,24 @@ func _Agent_RemoveCloudProfile_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Agent_ListCloudProfileModels_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListCloudProfileModelsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).ListCloudProfileModels(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_ListCloudProfileModels_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).ListCloudProfileModels(ctx, req.(*ListCloudProfileModelsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Agent_ServiceDesc is the grpc.ServiceDesc for Agent service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2062,6 +2104,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RemoveCloudProfile",
 			Handler:    _Agent_RemoveCloudProfile_Handler,
+		},
+		{
+			MethodName: "ListCloudProfileModels",
+			Handler:    _Agent_ListCloudProfileModels_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

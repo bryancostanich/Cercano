@@ -131,6 +131,13 @@ type Model struct {
 
 	recap string // living one-line work summary; shown in the chat footer
 
+	// nextPromptSuggestion is a locally-generated "what to do next" one-liner
+	// fetched after each streamEndMsg. Renders as ghost text in the empty
+	// input (via input.Suggestion); Tab accepts it into the value. Overwritten
+	// by the next successful fetch; not actively cleared on typing (the
+	// promptInput render already hides ghost text when value is non-empty).
+	nextPromptSuggestion string
+
 	// convRef shares the current convID with the slash registry by reference,
 	// so /rename always targets whatever conversation the model currently has
 	// active (including after /resume).
@@ -482,10 +489,14 @@ func fetchConfigCmd(ag *agentclient.Client) tea.Cmd {
 		if err != nil || cfg == nil {
 			return configLoadedMsg{}
 		}
-		// Treat "cloud configured" as: provider AND (api-key OR base-url) are
-		// set. Otherwise we'd show a cloud model name that the agent will
-		// never actually route to.
-		configured := cfg.CloudProvider != "" && (cfg.CloudAPIKeySet || cfg.CloudBaseURL != "")
+		// Treat "cloud configured" as: the server's CloudState reports "ok" —
+		// that flag reflects whether the router actually has a live cloud
+		// provider registered (see server.GetConfig's cloud_state derivation).
+		// The old check that summed legacy CloudProvider + CloudAPIKeySet +
+		// CloudBaseURL fields broke when cloud config migrated to the
+		// active-profile model, where those legacy fields can be empty even
+		// while a profile with a keychain-stored key is happily routing.
+		configured := cfg.CloudState == "ok"
 		return configLoadedMsg{
 			LocalModel:      cfg.LocalModel,
 			CloudModel:      cfg.CloudModel,
@@ -524,6 +535,31 @@ func fetchContextUsage(ag *agentclient.Client, convID string) tea.Cmd {
 }
 
 type recapLoadedMsg struct{ recap string }
+
+// nextPromptSuggestionMsg carries the result of a SuggestNextPrompt call.
+// Empty suggestion means the server couldn't produce one (missing recap,
+// dispatch engine offline, etc.) — the CLI treats "" as "no ghost text",
+// never renders a banner.
+type nextPromptSuggestionMsg struct{ suggestion string }
+
+// fetchNextPromptSuggestion asks the agent's local coproc for a one-line
+// "what to do next" ghost. Longer timeout than the recap poll because
+// generation runs a small local-model completion; still bounded so a stuck
+// coproc doesn't hang the poll cycle.
+func fetchNextPromptSuggestion(ag *agentclient.Client, convID string) tea.Cmd {
+	return func() tea.Msg {
+		if convID == "" {
+			return nextPromptSuggestionMsg{}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		defer cancel()
+		s, err := ag.SuggestNextPrompt(ctx, convID)
+		if err != nil {
+			return nextPromptSuggestionMsg{}
+		}
+		return nextPromptSuggestionMsg{suggestion: strings.TrimSpace(s)}
+	}
+}
 
 // fetchRecap asks the agent for the conversation's latest living recap.
 func fetchRecap(ag *agentclient.Client, convID string) tea.Cmd {
@@ -672,6 +708,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.MouseDown(mouse.X, mouse.Y-m.promptTop())
 			return m, nil
 		}
+		// Tool-entry fold click: if the click landed on a tool entry line,
+		// focus it and toggle its Folded state — mirrors keyboard
+		// ToggleFocusedFold. Short-circuits before selection so a click on
+		// a tool entry never starts a text-selection drag.
+		if m.chat.MouseToggleFold(mouse.X, mouse.Y-m.scrollbarTop) {
+			m.refreshViewport()
+			return m, nil
+		}
 		// Translate screen coords to viewport-local and forward to chatView.
 		m.chat.MouseDown(mouse.X, mouse.Y-m.scrollbarTop)
 		return m, nil
@@ -803,9 +847,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, cmd
 		}
-		// Esc cancels an in-flight prompt execution.
+		// Esc cancels an in-flight prompt execution. If there's a queued
+		// follow-up (user typed while waiting), it stays queued through the
+		// cancel and immediately becomes the next turn — canceling stops
+		// the current work but preserves the user's already-typed next
+		// intent. Double-esc still cancels the follow-up too (each esc only
+		// touches one in-flight turn at a time).
 		if m.streaming && key.Matches(msg, keys.Back) {
 			m.cancelCurrentStream()
+			if next, ok := m.chat.DrainNext(); ok {
+				m.relayout()
+				nm, cmd := m.submit(next.text, next.images)
+				return nm, cmd
+			}
 			return m, nil
 		}
 		if m.chat.SelectionActive() {
@@ -863,6 +917,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refreshViewport()
 				return m, nil
 			}
+		}
+		// Tab accepts the ghost-text "next prompt" suggestion when the input
+		// is empty. Puts the suggestion into the input as editable text so
+		// the user can tweak before submitting. Slash-command tab-completion
+		// only applies when the input is non-empty and starts with "/", so
+		// the two Tab modes don't collide.
+		if keyStr == "tab" && m.input.Value() == "" && m.nextPromptSuggestion != "" {
+			accepted := m.nextPromptSuggestion
+			m.nextPromptSuggestion = ""
+			m.input.Suggestion = ""
+			m.input.SetValue(accepted)
+			m.input.CursorEnd()
+			return m, nil
 		}
 		// Tab completion for slash commands.
 		if keyStr == "tab" {
@@ -1070,6 +1137,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 
+	case nextPromptSuggestionMsg:
+		// Cache in Model and sync to the prompt input so its View renders
+		// the ghost text. Empty suggestion clears any prior ghost.
+		m.nextPromptSuggestion = msg.suggestion
+		m.input.Suggestion = msg.suggestion
+		return m, nil
+
 	case recapLoadedMsg:
 		// When the recap's presence toggles, the recap line claims (or frees) a
 		// row below the viewport. relayout() must re-run so the viewport resizes
@@ -1245,7 +1319,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ctxPollTicks = 20 // ~40s warm window covers the compaction debounce
 		// Only spawn the poll ticker if one isn't already running, so rapid
 		// back-to-back turns don't multiply concurrent ctxUsageTick loops.
-		pollCmds := []tea.Cmd{fetchContextUsage(m.agent, m.convID), fetchRecap(m.agent, m.convID)}
+		pollCmds := []tea.Cmd{
+			fetchContextUsage(m.agent, m.convID),
+			fetchRecap(m.agent, m.convID),
+			fetchNextPromptSuggestion(m.agent, m.convID),
+		}
 		if !m.ctxPolling {
 			m.ctxPolling = true
 			pollCmds = append(pollCmds, ctxUsageTick())
@@ -1478,8 +1556,10 @@ func (m *Model) cancelCurrentStream() {
 		e.Streaming = false
 	}
 	m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "⊘ canceled"})
-	// Esc aborts the train of thought — drop any queued follow-ups too.
-	m.chat.ClearQueue()
+	// Queued follow-ups are preserved: canceling stops the current work but
+	// anything the user typed while waiting is a real intent they still want
+	// executed. The Esc-key caller drains the next queued message and
+	// submits it after this returns.
 	m.relayout()
 }
 
@@ -3110,9 +3190,13 @@ func (m Model) renderCompactingMeterBar(cells, fillN int) string {
 				Foreground(progressColorAt(col, sweepPos, tail)).
 				Render(string(label[col-start])))
 		case inLabel && !onFill:
-			// Letter inherits the bar's dim empty color — same idea, but
-			// for the un-filled side.
-			b.WriteString(m.styles.MeterEmpty.Render(string(label[col-start])))
+			// Empty-side letters need to stand out against the dim ░
+			// background, so we use Bright — the same accent used for
+			// active/focus states elsewhere in the chrome. This inverts
+			// the "letter inherits the cell" idea: on the filled side
+			// the letter blends with the shimmer; on the empty side it
+			// pops against the dim background instead.
+			b.WriteString(m.styles.Bright.Render(string(label[col-start])))
 		case !inLabel && onFill:
 			b.WriteString(lipgloss.NewStyle().
 				Foreground(progressColorAt(col, sweepPos, tail)).

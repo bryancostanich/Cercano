@@ -51,6 +51,33 @@ func (r *Repo) Clean(ctx context.Context) (bool, error) {
 	return out == "", nil
 }
 
+// CleanIgnoringUntracked reports whether the working tree has no staged or
+// unstaged changes to tracked files. Untracked entries (porcelain "?? ...")
+// don't count.
+//
+// Rationale: fast-forward merges and rebases only fail on untracked files
+// when the operation would write to that exact path; otherwise untracked
+// files ride along undisturbed. Refusing to land whenever any untracked
+// file exists is over-strict — it turns "an unrelated session created a
+// worktree directory next to yours" into a landing blocker. If a real
+// collision does happen, the underlying merge/rebase reports it clearly
+// and the caller sees the same error they would have seen post-check.
+func (r *Repo) CleanIgnoringUntracked(ctx context.Context) (bool, error) {
+	out, err := r.run(ctx, "status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	if out == "" {
+		return true, nil
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.HasPrefix(line, "?? ") {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 // CurrentBranch returns the checked-out branch name (or an error in detached HEAD).
 func (r *Repo) CurrentBranch(ctx context.Context) (string, error) {
 	out, err := r.run(ctx, "symbolic-ref", "--short", "HEAD")

@@ -285,8 +285,14 @@ in the root goes onto **your** branch, not the trunk.
    ` + "`git worktree add`" + ` from the shell — the tool wraps both and adds the
    safety checks (clean baseline, target dir git-ignored, trunk
    resolution). Pass:
-   - ` + "`path`" + `: ` + "`.claude/worktrees/<feature-slug>`" + ` — matches the
-     convention already in use in the repo.
+   - ` + "`path`" + `: ` + "`../<repo-name>-<feature-slug>`" + ` — a **sibling**
+     directory to the repo root, not a subdirectory of it. Sibling paths
+     avoid gitlink-submodule confusion (git treats a linked-worktree
+     directory *inside* the tracked tree as a submodule pointer, which
+     creates persistent ` + "`M`" + ` entries in ` + "`git status`" + ` on
+     the root as the worktree's HEAD advances). Example: for a repo at
+     ` + "`/git_repos/foo/Cercano`" + `, a good worktree path is
+     ` + "`/git_repos/foo/Cercano-runtime-dashboard`" + `.
    - ` + "`branch`" + `: ` + "`feat/<feature-slug>`" + ` or ` + "`fix/<feature-slug>`" + `.
    - ` + "`trunk`" + `: the target trunk (usually ` + "`main`" + `).
 
@@ -306,8 +312,10 @@ when they touch the repo. If your feature branch is checked out there:
 
 - Other agents committing "quick fixes" for unrelated tracks land on
   your branch instead of trunk.
-- Every commit any session makes that touches ` + "`.claude/worktrees/*`" + `
-  becomes a submodule-pointer conflict for you.
+- Any nested worktree left inside the tracked tree gets recorded as a
+  submodule pointer whose HEAD keeps drifting — showing up as a
+  persistent conflict every time you rebase. The sibling convention
+  above sidesteps this entirely.
 - Rebasing back onto trunk multiplies conflicts by every stowaway
   commit — each one carries its own worktree-pointer noise that has to
   be reconciled per commit.
@@ -321,12 +329,33 @@ now trades minutes for hours of rebase conflict resolution later.
 ## What This Prevents
 
 - Concurrent-modification hazards between agent sessions sharing the root
-- Submodule-pointer conflicts on ` + "`.claude/worktrees/*`" + ` paths you never
-  touched
+- Submodule-pointer conflicts on nested-worktree paths you never touched
+  (avoided entirely by the sibling-directory convention above)
 - Unrelated commits from other sessions accumulating on your feature
   branch
 - "How did I end up with 14 commits I don't recognize?" investigations
   mid-rebase
+
+## Fast Path for Trivial Changes
+
+For genuinely trivial changes — a typo, a label rename, a comment fix,
+a one-line copy tweak — the worktree ceremony is disproportionate. The
+fast path is:
+
+- Applies to changes ≤ 5 lines across ≤ 2 files with no logic changes.
+- **Create a feature branch in the root** with ` + "`git checkout -b fix/<slug>`" + `.
+  The worktree-first watchdog check is expected to fire here; overriding
+  it is the fast-path escape valve, and the user is asked to authorize.
+- **Stage only your intended files** with an explicit path list.
+  Root may have other sessions' in-progress edits — never ` + "`git add -A`" + `.
+- **Commit via the checkpoint tool.**
+- **Land via ` + "`git_land`" + `.** The test gate and safety refs still run —
+  the fast path saves worktree ceremony, not the safety guarantees.
+- **Delete the branch** after landing.
+
+The fast path is deliberately narrow. Anything with a logic change, a
+new file, or touching more than a couple of files goes through the
+full worktree flow. When in doubt: use the worktree.
 `,
 	},
 }

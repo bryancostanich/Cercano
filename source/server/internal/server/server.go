@@ -2372,7 +2372,10 @@ func (s *Server) assembleHistory(ctx context.Context, store conversation.Store, 
 	if compactionCfg.LossyToolElision {
 		view, _ = compaction.KeepLastNToolResults(view, compaction.DefaultLossyElisionKeepLast)
 	}
-	return view
+	// Final pairing repair: idempotent on a valid view, and insurance for the
+	// one degrade edge (a lone surviving tool_result after truncation) that
+	// would otherwise reach the provider as an invalid message array.
+	return llm.RepairPairing(view)
 }
 
 // mapInlineImages converts proto images to agent.InlineImage.

@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
@@ -352,5 +354,82 @@ func TestAdvanceShrinkFailureSurfaces(t *testing.T) {
 	// Original state returned verbatim — a grown state is never persisted.
 	if st.FrozenThrough != 42 || st.SegmentSummariesJSON != string(seededJSON) || st.ConsolidatedJSON != "orig" {
 		t.Fatalf("shrink failure must return the original state, got %+v", st)
+	}
+}
+
+// TestEligibleMessagesWithTurnsMirrorsBuildLLMHistory is a drift guard:
+// eligibleMessagesWithTurns duplicates agent.BuildLLMHistory + llm.RepairPairing
+// so it can carry per-message turn provenance. If either canonical function
+// changes and the mirror is not updated, the two silently diverge — the frozen
+// boundary would then double-summarize or drop turns. This test pins the mirror
+// to the canonical pipeline over adversarial turn shapes.
+func TestEligibleMessagesWithTurnsMirrorsBuildLLMHistory(t *testing.T) {
+	use := func(id string) string {
+		return fmt.Sprintf(`[{"type":"tool_use","id":"%s","name":"read","input":{"path":"x"}}]`, id)
+	}
+	res := func(id string) string {
+		return fmt.Sprintf(`[{"type":"tool_result","tool_use_id":"%s","content":"data"}]`, id)
+	}
+	at := func(i int) time.Time { return time.Unix(int64(100+i), 0) }
+
+	cases := []struct {
+		name  string
+		turns []conversation.Turn
+	}{
+		{"empty turns dropped", []conversation.Turn{
+			{ID: "t0", Role: "user", Content: "hello", CreatedAt: at(0)},
+			{ID: "t1", Role: "user", Content: "", CreatedAt: at(1)}, // no blocks, no content
+			{ID: "t2", Role: "assistant", Content: "world", CreatedAt: at(2)},
+		}},
+		{"content-only turns", []conversation.Turn{
+			{ID: "t0", Role: "user", Content: "a", CreatedAt: at(0)},
+			{ID: "t1", Role: "assistant", Content: "b", CreatedAt: at(1)},
+			{ID: "t2", Role: "system", Content: "c", CreatedAt: at(2)},
+		}},
+		{"orphaned tool_use dropped", []conversation.Turn{
+			{ID: "t0", Role: "user", Content: "q", CreatedAt: at(0)},
+			{ID: "t1", Role: "assistant", BlocksJSON: use("x1"), CreatedAt: at(1)}, // no result follows
+			{ID: "t2", Role: "user", Content: "next", CreatedAt: at(2)},
+		}},
+		{"orphaned tool_result dropped", []conversation.Turn{
+			{ID: "t0", Role: "user", BlocksJSON: res("ghost"), CreatedAt: at(0)}, // no prior use
+			{ID: "t1", Role: "user", Content: "next", CreatedAt: at(1)},
+		}},
+		{"cross-turn tool pair kept", []conversation.Turn{
+			{ID: "t0", Role: "assistant", BlocksJSON: use("x1"), CreatedAt: at(0)},
+			{ID: "t1", Role: "user", BlocksJSON: res("x1"), CreatedAt: at(1)},
+			{ID: "t2", Role: "user", Content: "next", CreatedAt: at(2)},
+		}},
+		{"mixed", []conversation.Turn{
+			{ID: "t0", Role: "user", Content: "start", CreatedAt: at(0)},
+			{ID: "t1", Role: "user", Content: "", CreatedAt: at(1)},                // empty → dropped
+			{ID: "t2", Role: "assistant", BlocksJSON: use("x1"), CreatedAt: at(2)}, // paired
+			{ID: "t3", Role: "user", BlocksJSON: res("x1"), CreatedAt: at(3)},
+			{ID: "t4", Role: "assistant", BlocksJSON: use("x2"), CreatedAt: at(4)}, // orphaned use → dropped
+			{ID: "t5", Role: "user", BlocksJSON: res("ghost"), CreatedAt: at(5)},   // orphaned result → dropped
+			{ID: "t6", Role: "assistant", Content: "done", CreatedAt: at(6)},
+			{ID: "t7", Role: "user", BlocksJSON: `not json`, Content: "fallback", CreatedAt: at(7)}, // corrupt blocks → Content
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			want := agent.BuildLLMHistory(tc.turns)
+			got, idxs := eligibleMessagesWithTurns(tc.turns)
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("mirror diverged from BuildLLMHistory:\n got: %+v\nwant: %+v", got, want)
+			}
+			if len(idxs) != len(got) {
+				t.Fatalf("provenance length %d != message count %d", len(idxs), len(got))
+			}
+			for i, ti := range idxs {
+				if ti < 0 || ti >= len(tc.turns) {
+					t.Fatalf("idxs[%d]=%d out of range", i, ti)
+				}
+				if i > 0 && ti <= idxs[i-1] {
+					t.Fatalf("provenance not strictly increasing: idxs[%d]=%d after %d", i, ti, idxs[i-1])
+				}
+			}
+		})
 	}
 }

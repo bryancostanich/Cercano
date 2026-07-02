@@ -123,6 +123,7 @@ func Advance(ctx context.Context, turns []conversation.Turn, state conversation.
 		}
 	}
 	if coveredMsgs == 0 {
+		// more=false intentional: identical input can't progress; rescheduling would spin.
 		return state, false, false, nil // nothing to freeze
 	}
 
@@ -136,6 +137,7 @@ func Advance(ctx context.Context, turns []conversation.Turn, state conversation.
 		b--
 	}
 	if b < 0 {
+		// more=false intentional: identical input can't progress; rescheduling would spin.
 		return state, false, false, nil // capped chunk collapses into one second; wait
 	}
 
@@ -148,6 +150,12 @@ func Advance(ctx context.Context, turns []conversation.Turn, state conversation.
 			break
 		}
 		frozen++
+	}
+	if frozen == 0 {
+		// A pathological same-second mega-burst can trim b below every covered
+		// message's turn: never advance FrozenThrough with zero new summaries.
+		// more=false intentional: identical input can't progress; rescheduling would spin.
+		return state, false, false, nil
 	}
 	frozenMsgs := elided[:frozen]
 

@@ -868,6 +868,17 @@ type InstallProgress struct {
 	Err   error
 }
 
+// GetLocalRuntimeStatus fetches the current local-runtime detection snapshot
+// for the selected runtime. Callers use this once at startup to populate the
+// chip / install modal without waiting for a push event.
+func (c *Client) GetLocalRuntimeStatus(ctx context.Context) (*LocalRuntimeStatus, error) {
+	resp, err := c.agent.GetLocalRuntimeStatus(ctx, &proto.GetLocalRuntimeStatusRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return localRuntimeStatusFromProto(resp.GetStatus()), nil
+}
+
 // InstallLocalRuntime opens the InstallLocalRuntime streaming RPC for the
 // given runtime and returns a channel of progress frames. The channel closes
 // after the terminal Done=true frame (or after a stream error). Cancelling

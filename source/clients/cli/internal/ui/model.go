@@ -354,7 +354,7 @@ func (m *Model) applyTheme(t theme.Theme) {
 
 // Init is called by Bubble Tea once at startup.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.input.Focus(), m.splash.Init(), fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent), fetchVisionCmd(m.agent), subscribeEventsCmd(m.agent))
+	return tea.Batch(m.input.Focus(), m.splash.Init(), fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent), fetchLocalRuntimeStatusCmd(m.agent), fetchVisionCmd(m.agent), subscribeEventsCmd(m.agent))
 }
 
 // permissionModeMsg carries the result of the startup GetPermissionMode RPC.
@@ -372,6 +372,26 @@ func fetchPermissionModeCmd(ag *agentclient.Client) tea.Cmd {
 			return permissionModeMsg{Mode: "permissive"}
 		}
 		return permissionModeMsg{Mode: mode}
+	}
+}
+
+// fetchLocalRuntimeStatusCmd asks the agent for the current local-runtime
+// detection snapshot. Used on CLI startup so the chip appears immediately
+// when the user is running with a partially-configured runtime (e.g. they
+// edited local_runtime: llama_server in the yaml but never installed the
+// binary). Push events cover subsequent state changes.
+func fetchLocalRuntimeStatusCmd(ag *agentclient.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		st, err := ag.GetLocalRuntimeStatus(ctx)
+		if err != nil || st == nil {
+			return nil
+		}
+		// Reuse the change-msg shape so the Update handler for it can
+		// cover both initial-fetch and push-event paths uniformly. next
+		// is nil — this is a one-shot, not a stream drain.
+		return localRuntimeStatusChangedMsg{status: st}
 	}
 }
 

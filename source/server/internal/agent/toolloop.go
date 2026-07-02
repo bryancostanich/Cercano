@@ -57,6 +57,10 @@ type ToolLoopInput struct {
 	// each W/X tool call, independent of permission mode. nil = disabled.
 	WatchdogGate WatchdogGate
 
+	// WatchdogTurnEnd supervises the model's final reply text at turn boundaries.
+	// nil = disabled.
+	WatchdogTurnEnd WatchdogTurnEnd
+
 	// OnTextDelta, when set, receives assistant text deltas as they stream from
 	// the provider, so the server can forward them to the client for live
 	// token-by-token rendering. Nil-safe.
@@ -207,6 +211,30 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			}
 		}
 		if len(toolCalls) == 0 {
+			if in.WatchdogTurnEnd != nil && strings.TrimSpace(finalText) != "" {
+				wd := in.WatchdogTurnEnd(ctx, finalText, hist)
+				switch wd.Action {
+				case "challenge", "block":
+					note := "⚡ watchdog (" + wd.Protocol + "): " + wd.Challenge +
+						" Rewrite your reply in plain, colleague-level English"
+					if wd.Action == "block" {
+						note += " (rewrite required — no override)."
+					} else {
+						note += ", or call `justify` with a reason."
+					}
+					emit(LoopEvent{Kind: LoopWatchdogChallenge, Detail: wd.Protocol, Summary: wd.Challenge})
+					// The assistant turn was already appended above (line 201); append
+					// only the revise user message so the assistant reply appears once.
+					appendTurn(llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: note}}})
+					continue
+				case "escalate":
+					// v1: give up gracefully — surface the escalation and return the
+					// reply (a human-confirm for turn_end is a follow-on).
+					emit(LoopEvent{Kind: LoopWatchdogEscalate, Detail: wd.Protocol, Summary: wd.Challenge})
+				case "allow", "":
+					// fall through to return
+				}
+			}
 			return ToolLoopResult{
 				FinalText: finalText, FinalBlocks: resp.Blocks,
 				Iterations: iter + 1, History: hist,

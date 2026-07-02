@@ -119,6 +119,79 @@ func TestWatchdogBlockDoesNotTripErrorAbort(t *testing.T) {
 	}
 }
 
+// scriptedProvider is a minimal llm.Provider that returns successive plain-text
+// replies from a slice. SupportsTools is required by RunToolLoop.
+type scriptedProvider struct {
+	replies []string
+	calls   int
+}
+
+func (p *scriptedProvider) Name() string { return "scripted" }
+func (p *scriptedProvider) Capabilities() llm.Capabilities {
+	return llm.Capabilities{SupportsTools: true}
+}
+func (p *scriptedProvider) Chat(_ context.Context, _ llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, nil
+}
+func (p *scriptedProvider) StreamChat(_ context.Context, _ llm.ChatRequest) (llm.StreamReader, error) {
+	if p.calls >= len(p.replies) {
+		return nil, fmt.Errorf("scriptedProvider: no reply for call %d", p.calls)
+	}
+	text := p.replies[p.calls]
+	p.calls++
+	return &scriptedStream{events: blocksToEvents([]llm.Block{{Type: llm.BlockText, Text: text}})}, nil
+}
+
+// emptyRegistry returns an agenttools.Registry with no tools registered.
+func emptyRegistry(_ *testing.T) *agenttools.Registry {
+	return agenttools.NewRegistry()
+}
+
+// TestWatchdogTurnEnd_ChallengeReopensTurn: when the gate challenges the first
+// reply, the loop reopens the turn and the model provides a clean second reply.
+func TestWatchdogTurnEnd_ChallengeReopensTurn(t *testing.T) {
+	prov := &scriptedProvider{replies: []string{"jargon-laden reply here", "clean reply"}}
+	calls := 0
+	gate := func(_ context.Context, finalText string, _ []llm.Message) WatchdogDecision {
+		calls++
+		if calls == 1 {
+			return WatchdogDecision{Action: "challenge", Protocol: "plain-english", Challenge: "too much jargon"}
+		}
+		return WatchdogDecision{Action: "allow"}
+	}
+	res, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider: prov, Registry: emptyRegistry(t), Permissions: nil,
+		UserInput: "hi", WatchdogTurnEnd: gate, MaxIterations: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.FinalText != "clean reply" {
+		t.Fatalf("expected the revised reply to be returned, got %q", res.FinalText)
+	}
+	if calls != 2 {
+		t.Fatalf("gate should fire on both turn ends, got %d", calls)
+	}
+}
+
+// TestWatchdogTurnEnd_AllowReturns: when the gate allows, the reply is returned
+// unchanged without reopening the turn.
+func TestWatchdogTurnEnd_AllowReturns(t *testing.T) {
+	prov := &scriptedProvider{replies: []string{"a perfectly fine substantive reply"}}
+	gate := func(_ context.Context, _ string, _ []llm.Message) WatchdogDecision {
+		return WatchdogDecision{Action: "allow"}
+	}
+	res, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider: prov, Registry: emptyRegistry(t), UserInput: "hi", WatchdogTurnEnd: gate, MaxIterations: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.FinalText != "a perfectly fine substantive reply" {
+		t.Fatalf("allow must return the reply unchanged, got %q", res.FinalText)
+	}
+}
+
 // TestWatchdogGate_AllowExecutes: when the gate returns "allow", the tool runs
 // exactly as it would with no gate (subject to the normal permission gate).
 func TestWatchdogGate_AllowExecutes(t *testing.T) {

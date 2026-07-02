@@ -258,4 +258,75 @@ Before running any simulation, you should be able to answer:
 If you can't answer these, you don't understand the system well enough to simulate it.
 `,
 	},
+	{
+		Name:        "worktree-first",
+		Description: "Isolate every feature branch in its own worktree; never share the root workspace.",
+		Domain:      DomainCore,
+		Trigger:     "Before creating a new feature branch → use the `git_worktree` tool to create a linked worktree; never `git checkout -b` in the shared root workspace.",
+		Body: `# Worktree-First Protocol
+
+## When This Applies
+
+Any time you're about to start a new feature or fix that needs its own
+branch. If your next step is ` + "`git checkout -b <newbranch>`" + ` in a shared
+workspace, this protocol is mandatory.
+
+## The Rule
+
+**Create a worktree; never share the root workspace.** The root worktree
+(the top-level repository directory) is a shared physical checkout —
+multiple concurrent sessions read from it and write to it. If you check
+out a feature branch in the root, every commit any other session makes
+in the root goes onto **your** branch, not the trunk.
+
+## Steps
+
+1. **Use the ` + "`git_worktree`" + ` tool.** Not raw ` + "`git checkout -b`" + `, not
+   ` + "`git worktree add`" + ` from the shell — the tool wraps both and adds the
+   safety checks (clean baseline, target dir git-ignored, trunk
+   resolution). Pass:
+   - ` + "`path`" + `: ` + "`.claude/worktrees/<feature-slug>`" + ` — matches the
+     convention already in use in the repo.
+   - ` + "`branch`" + `: ` + "`feat/<feature-slug>`" + ` or ` + "`fix/<feature-slug>`" + `.
+   - ` + "`trunk`" + `: the target trunk (usually ` + "`main`" + `).
+
+2. **Do all work inside the worktree.** Every ` + "`cd`" + `, test run, edit, and
+   commit lives in the isolated directory. The root stays on trunk,
+   untouched.
+
+3. **Do not ` + "`git checkout <branch>`" + ` in the root worktree** while your
+   feature is active. If you need to look at trunk state, do it in the
+   root (which is already on trunk). If you need to look at your branch,
+   do it in the worktree.
+
+## Why This Exists
+
+The root worktree is the default directory other sessions operate in
+when they touch the repo. If your feature branch is checked out there:
+
+- Other agents committing "quick fixes" for unrelated tracks land on
+  your branch instead of trunk.
+- Every commit any session makes that touches ` + "`.claude/worktrees/*`" + `
+  becomes a submodule-pointer conflict for you.
+- Rebasing back onto trunk multiplies conflicts by every stowaway
+  commit — each one carries its own worktree-pointer noise that has to
+  be reconciled per commit.
+- Rolling back is dangerous — other sessions may still be reading the
+  checked-out working tree.
+
+A worktree is one tool call to create with ` + "`git_worktree`" + `. It isolates
+all of this at zero ongoing cost. Skipping the worktree to save one step
+now trades minutes for hours of rebase conflict resolution later.
+
+## What This Prevents
+
+- Concurrent-modification hazards between agent sessions sharing the root
+- Submodule-pointer conflicts on ` + "`.claude/worktrees/*`" + ` paths you never
+  touched
+- Unrelated commits from other sessions accumulating on your feature
+  branch
+- "How did I end up with 14 commits I don't recognize?" investigations
+  mid-rebase
+`,
+	},
 }

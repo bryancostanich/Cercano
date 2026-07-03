@@ -1201,7 +1201,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case contextRegenDoneMsg:
 		if msg.err != "" || !msg.ok {
-			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "context-regen failed: " + msg.err})
+			text := "context-regen failed: " + msg.err
+			// A severed stream means the agent went away mid-rebuild (the dev
+			// launcher SIGTERMs stale agents on rebuild). That is not lost
+			// work — every completed pass is persisted, and the background
+			// compactor digests the remainder — but the raw rpc error invites
+			// exactly the wrong reaction (re-running regen starts over from
+			// scratch), so explain instead.
+			if isTransportLoss(msg.err) {
+				text = "context-regen interrupted: the agent went away mid-rebuild (restart or rebuild). " +
+					"Completed passes are saved — the background compactor finishes the remainder after your next message. " +
+					"Only re-run /context-regen if you want a full rebuild from scratch."
+			}
+			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: text})
 			m.refreshViewport()
 			return m, fetchContextUsage(m.agent, m.convID)
 		}

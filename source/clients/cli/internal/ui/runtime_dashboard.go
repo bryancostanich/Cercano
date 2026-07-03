@@ -50,6 +50,11 @@ type runtimeDashboard struct {
 	styles          theme.Styles
 	agent           *agentclient.Client
 	snapshot        runtimeDashboardSnapshot
+	// estimates caches resolved RAM estimates by estimateKey;
+	// estimatePending tracks in-flight fetches so cursor movement
+	// doesn't double-dispatch. See runtime_estimate.go.
+	estimates       map[string]agentclient.ModelRAMEstimate
+	estimatePending map[string]bool
 	focus           runtimeDashboardFocus
 	catalogSearch   textinput.Model
 	catalogCursor   int
@@ -109,16 +114,18 @@ func newRuntimeDashboard(ag *agentclient.Client, p theme.Palette, s theme.Styles
 	search.SetWidth(32)
 	blinkCmd := search.Focus()
 	dashboard := &runtimeDashboard{
-		palette:       p,
-		styles:        s,
-		agent:         ag,
-		width:         w,
-		height:        h,
-		focus:         runtimeFocusCatalog,
-		catalogSearch: search,
+		palette:         p,
+		styles:          s,
+		agent:           ag,
+		width:           w,
+		height:          h,
+		focus:           runtimeFocusCatalog,
+		catalogSearch:   search,
+		estimates:       make(map[string]agentclient.ModelRAMEstimate),
+		estimatePending: make(map[string]bool),
 	}
 	dashboard.snapshot = loadRuntimeDashboardSnapshot(ag)
-	return dashboard, blinkCmd
+	return dashboard, tea.Batch(blinkCmd, dashboard.maybeFetchEstimate())
 }
 
 func (d *runtimeDashboard) ID() contentPageID {
@@ -382,25 +389,25 @@ func (d *runtimeDashboard) updateCatalog(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			d.catalogCursor--
 		}
 		d.keepCatalogCursorVisible(d.catalogRowBudget(), len(filteredCatalogModels(d.catalogModels(), d.catalogSearch.Value())))
-		return nil, false
+		return d.maybeFetchEstimate(), false
 	case "down":
 		models := filteredCatalogModels(d.catalogModels(), d.catalogSearch.Value())
 		if d.catalogCursor < len(models)-1 {
 			d.catalogCursor++
 		}
 		d.keepCatalogCursorVisible(d.catalogRowBudget(), len(models))
-		return nil, false
+		return d.maybeFetchEstimate(), false
 	case "home":
 		d.catalogCursor = 0
 		d.catalogTop = 0
-		return nil, false
+		return d.maybeFetchEstimate(), false
 	case "end":
 		models := filteredCatalogModels(d.catalogModels(), d.catalogSearch.Value())
 		if len(models) > 0 {
 			d.catalogCursor = len(models) - 1
 		}
 		d.keepCatalogCursorVisible(d.catalogRowBudget(), len(models))
-		return nil, false
+		return d.maybeFetchEstimate(), false
 	case "enter":
 		models := filteredCatalogModels(d.catalogModels(), d.catalogSearch.Value())
 		if len(models) == 0 {
@@ -429,6 +436,7 @@ func (d *runtimeDashboard) updateCatalog(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		d.catalogCursor = 0
 		d.catalogTop = 0
 		d.catalogMessage = ""
+		cmd = tea.Batch(cmd, d.maybeFetchEstimate())
 	}
 	return cmd, false
 }
@@ -491,7 +499,7 @@ func (d *runtimeDashboard) applyCatalogRefresh(msg runtimeCatalogRefreshDoneMsg)
 		return nil
 	}
 	d.catalogMessage = fmt.Sprintf("catalog refreshed · %d models", msg.result.ModelCount)
-	return d.refreshSnapshot()
+	return tea.Batch(d.refreshSnapshot(), d.maybeFetchEstimate())
 }
 
 type runtimeDashboardField struct {
@@ -636,7 +644,8 @@ func (d *runtimeDashboard) renderCatalogBlock(rowLimit int) string {
 	if len(models) > 0 {
 		selected = models[d.catalogCursor]
 	}
-	details := catalogDetailLines(selected, detailW, d.styles)
+	est, estPending := d.selectedEstimate(selected)
+	details := catalogDetailLines(selected, est, estPending, detailW, d.styles)
 
 	lines := []string{searchLine}
 	start := d.catalogTop
@@ -998,21 +1007,42 @@ func catalogEmptyMessage(allModels []agentclient.RuntimeModel, query string) str
 	return "no catalog models available"
 }
 
-func catalogDetailLines(model agentclient.RuntimeModel, width int, styles theme.Styles) []string {
+func catalogDetailLines(model agentclient.RuntimeModel, est *agentclient.ModelRAMEstimate, estPending bool, width int, styles theme.Styles) []string {
 	if model.ID == "" {
 		return []string{
 			styles.Dim.Render("Select a catalog model to see details."),
 		}
 	}
 	caps := runtimeCapabilitiesHint(model.SupportsChat, model.SupportsEmbed, model.SupportsTools)
+	sizeVal := formatBytes(model.SizeBytes)
+	if sizeVal == "" && est != nil && est.Err == nil {
+		// Online entries carry no size until the manifest is resolved —
+		// the estimate knows the exact blob size.
+		sizeVal = formatBytes(est.WeightsBytes)
+	}
 	lines := []string{
 		detailLine("name", firstNonEmpty(model.DisplayName, shortModelName(model.ID)), width, styles),
 		detailLine("family", strings.Join(nonEmptyParts(model.Family, model.Quantization), " · "), width, styles),
-		detailLine("size", formatBytes(model.SizeBytes), width, styles),
+		detailLine("size", sizeVal, width, styles),
+	}
+	switch {
+	case estPending:
+		lines = append(lines, detailLine("memory", "estimating...", width, styles))
+	case est != nil && est.Err != nil:
+		lines = append(lines, detailLine("memory", "estimate unavailable", width, styles))
+	case est != nil:
+		if mem := estimateMemoryLine(*est); mem != "" {
+			lines = append(lines, detailLine("memory", mem, width, styles))
+		}
+		if fit := estimateFitLine(*est); fit != "" {
+			lines = append(lines, detailLine("fit", fit, width, styles))
+		}
+	}
+	lines = append(lines,
 		detailLine("runtime", strings.Join(nonEmptyParts(model.Runtime, model.Source), " · "), width, styles),
 		detailLine("state", strings.Join(nonEmptyParts(downloadStatusText(model), model.RuntimeState), " · "), width, styles),
 		detailLine("supports", caps, width, styles),
-	}
+	)
 	if progress := downloadProgressBar(model, 18); progress != "" {
 		lines = append(lines, detailLine("progress", progress+" "+downloadByteStatus(model), width, styles))
 	}

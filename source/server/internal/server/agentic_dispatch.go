@@ -11,38 +11,75 @@ import (
 	"cercano/source/server/internal/dispatch"
 )
 
+// resolveGrantName maps a caller-supplied tool name to a registered tool.
+// Exact match wins; only on miss does it strip a leading `mcp__<server>__`
+// segment and try again. This lets callers who accidentally emit host-prefixed
+// names (e.g. an MCP host that presents Cercano's tools as `mcp__oc__Read` to
+// the model, then passes the same string as data into `workflow.tools`) still
+// find the underlying tool — without shadowing a legitimately hosted MCP tool
+// that happens to be registered under its literal fully-qualified name.
+//
+// Returns the resolved name and true on success, or ("", false) on miss.
+func (s *Server) resolveGrantName(requested string) (string, bool) {
+	if _, ok := s.toolRegistry.Get(requested); ok {
+		return requested, true
+	}
+	if rest, ok := strings.CutPrefix(requested, "mcp__"); ok {
+		if idx := strings.Index(rest, "__"); idx >= 0 {
+			stripped := rest[idx+2:]
+			if stripped != "" {
+				if _, ok := s.toolRegistry.Get(stripped); ok {
+					return stripped, true
+				}
+			}
+		}
+	}
+	return "", false
+}
+
 // grantedRegistry builds the least-privilege tool registry for an agentic
 // dispatch. With no requested tools, it grants read-only tools. With requested
 // tools, it grants the named subset — but bounded by the parent permission
 // mode: a non-interactive dispatch under a non-bypass mode cannot wield W/X
 // tools (no human to confirm), so those are dropped (and logged).
 //
-// Returns an error when every requested tool name is unknown: spawning a
-// sub-agent with an empty catalog is never what the caller intended, and the
-// resulting loop (model improvises tool calls with no schema, gets errors,
-// hits the 3-consecutive-error abort) is far worse than a clear error.
+// Returns an error whenever the resulting catalog would be empty. Spawning a
+// sub-agent with no tools is never what the caller intended, and the resulting
+// loop (model improvises tool calls with no schema, gets errors, hits the
+// 3-consecutive-error abort) is far worse than a clear error naming the
+// offending inputs and the registered tools available.
 func (s *Server) grantedRegistry(tools []string, mode agent.PermissionMode) (*agenttools.Registry, error) {
 	var candidate *agenttools.Registry
 	if len(tools) > 0 {
-		candidate = s.toolRegistry.Subset(tools)
-		// No silent caps: Subset drops names that match no registered tool, so
-		// surface those so a typo'd grant doesn't quietly yield a smaller set.
+		candidate = agenttools.NewRegistry()
 		var unknown []string
 		for _, name := range tools {
-			if _, ok := s.toolRegistry.Get(name); !ok {
+			resolved, ok := s.resolveGrantName(name)
+			if !ok {
 				unknown = append(unknown, name)
+				continue
 			}
+			t, _ := s.toolRegistry.Get(resolved)
+			_ = candidate.Register(t)
 		}
 		if len(unknown) > 0 {
 			log.Printf("[dispatch] subagent grant: ignored unknown tool names %v", unknown)
 		}
 		if len(candidate.All()) == 0 {
-			return nil, fmt.Errorf("dispatch: none of the requested tools are registered: %v (use tool names as they appear in the registry, without any host prefix)", tools)
+			return nil, fmt.Errorf(
+				"dispatch: none of the requested tools are registered: %v; %s",
+				tools, s.availableToolsHint(mode),
+			)
 		}
 	} else {
 		candidate = agenttools.NewRegistry()
 		for _, t := range s.toolRegistry.Filter(agenttools.PermR) {
 			_ = candidate.Register(t)
+		}
+		if len(candidate.All()) == 0 {
+			return nil, fmt.Errorf(
+				"dispatch: no read-only tools available in the registry to grant as the default sub-agent catalog",
+			)
 		}
 	}
 	if mode == agent.ModeBypass {
@@ -61,9 +98,40 @@ func (s *Server) grantedRegistry(tools []string, mode agent.PermissionMode) (*ag
 		log.Printf("[dispatch] subagent grant bounded by parent permission mode %q: dropped non-read tools %v", mode, dropped)
 	}
 	if len(bounded.All()) == 0 {
-		return nil, fmt.Errorf("dispatch: no read-only tools available in the requested grant %v under permission mode %q (only read-tier tools survive a non-bypass mode; either request some R-tier tools or run in bypass mode)", tools, mode)
+		return nil, fmt.Errorf(
+			"dispatch: every requested tool %v was dropped by permission mode %q (only read-tier tools survive a non-bypass mode); %s",
+			tools, mode, s.availableToolsHint(mode),
+		)
 	}
 	return bounded, nil
+}
+
+// availableToolsHint returns a comma-separated list of registered tool names
+// appropriate for the given permission mode, truncated so a pathological
+// registry doesn't blow up the error message. R-tier only under strict/
+// permissive (those are the only tools a sub-agent can actually wield);
+// everything under bypass.
+func (s *Server) availableToolsHint(mode agent.PermissionMode) string {
+	const cap = 30
+	var pool []agenttools.Tool
+	if mode == agent.ModeBypass {
+		pool = s.toolRegistry.All()
+	} else {
+		pool = s.toolRegistry.Filter(agenttools.PermR)
+	}
+	if len(pool) == 0 {
+		return "no tools are registered in the sub-agent's catalog"
+	}
+	names := make([]string, 0, len(pool))
+	for _, t := range pool {
+		names = append(names, t.Name())
+	}
+	suffix := ""
+	if len(names) > cap {
+		names = names[:cap]
+		suffix = fmt.Sprintf(" (+%d more)", len(pool)-cap)
+	}
+	return fmt.Sprintf("available tools: %s%s", strings.Join(names, ", "), suffix)
 }
 
 // runAgenticDispatch implements dispatch.AgenticRunner. It is wired onto the

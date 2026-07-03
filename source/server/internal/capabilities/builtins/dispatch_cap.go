@@ -21,7 +21,7 @@ func (dispatchCap) Surfaces() capabilities.Surface {
 	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
 }
 func (dispatchCap) Description() string {
-	return "Run a sub-agent: hand off an open-ended task to a bounded tool-use loop over a granted set of tools (default: read-only tools). Returns the sub-agent's final result."
+	return "Run a sub-agent: hand off an open-ended task to a bounded tool-use loop over a granted set of tools (default: read-only tools). Returns the sub-agent's final result. Tool names passed in `tools` must be the plain registered names (e.g. \"Read\", \"Glob\") — do NOT include any host/MCP prefix like \"mcp__oc__\"."
 }
 func (dispatchCap) Schema() capabilities.Schema {
 	return capabilities.Schema(`{
@@ -29,7 +29,7 @@ func (dispatchCap) Schema() capabilities.Schema {
 		"required": ["task"],
 		"properties": {
 			"task":            {"type": "string", "description": "Open-ended instruction for the sub-agent tool loop."},
-			"tools":           {"type": "array", "items": {"type": "string"}, "description": "Tool or capability names to grant. Omit to default to read-only tools."},
+			"tools":           {"type": "array", "items": {"type": "string"}, "description": "Tool or capability names to grant, using the plain registered names (e.g. \"Read\", \"Glob\", \"Grep\", \"Bash\") — no host or MCP prefix. Omit to default to read-only tools."},
 			"conversation_id": {"type": "string", "description": "Optional conversation ID to associate with this dispatch."}
 		}
 	}`)

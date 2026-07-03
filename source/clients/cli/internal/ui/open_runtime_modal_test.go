@@ -174,3 +174,39 @@ func TestInstallErrorIsMissingModel_MatchesServerErrorShape(t *testing.T) {
 		}
 	}
 }
+
+func TestLocalRuntimeModal_OfferSwitchTitleAndActions(t *testing.T) {
+	pal := theme.Cracker()
+	styles := theme.NewStyles(pal)
+	mo := newOpenRuntimeInstallModal(agentclient.OpenRuntimeStatus{Missing: "binary"})
+	mo.setOfferSwitch("llama_server", "ollama")
+	view := mo.View(styles, pal, 120, 40)
+
+	// Title must be affirmative about the install — the user just watched
+	// llama-server install successfully. Not a scary "failed" tone.
+	if !strings.Contains(view, "llama-server ready") {
+		t.Fatalf("OfferSwitch title missing \"llama-server ready\":\n%s", view)
+	}
+	// Actions must name both options with the runtimes explicit so the
+	// user knows exactly what happens on each key.
+	if !strings.Contains(view, "[Enter] Switch to llama_server") {
+		t.Fatalf("OfferSwitch missing Switch-to action:\n%s", view)
+	}
+	if !strings.Contains(view, "[Esc] Keep ollama") {
+		t.Fatalf("OfferSwitch must name what user is keeping if they decline:\n%s", view)
+	}
+}
+
+func TestLocalRuntimeModal_OfferSwitchDefaultsToOllamaWhenActiveEmpty(t *testing.T) {
+	// The server treats empty local_runtime as ollama; the UI must match
+	// so users on a freshly-installed config (no explicit choice) still
+	// see the right "keep" label instead of a blank.
+	pal := theme.Cracker()
+	styles := theme.NewStyles(pal)
+	mo := newOpenRuntimeInstallModal(agentclient.OpenRuntimeStatus{Missing: "binary"})
+	mo.setOfferSwitch("llama_server", "")
+	view := mo.View(styles, pal, 120, 40)
+	if !strings.Contains(view, "[Esc] Keep ollama") {
+		t.Fatalf("empty active runtime must render as ollama:\n%s", view)
+	}
+}

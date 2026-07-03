@@ -252,6 +252,10 @@ func (m *mockAgentClient) RefreshOnlineCatalog(ctx context.Context, in *proto.Re
 	return &proto.RefreshOnlineCatalogResponse{}, nil
 }
 
+func (m *mockAgentClient) GetModelRAMEstimate(ctx context.Context, in *proto.GetModelRAMEstimateRequest, opts ...grpc.CallOption) (*proto.GetModelRAMEstimateResponse, error) {
+	return &proto.GetModelRAMEstimateResponse{}, nil
+}
+
 func (m *mockAgentClient) ListCloudProfileModels(ctx context.Context, in *proto.ListCloudProfileModelsRequest, opts ...grpc.CallOption) (*proto.ListCloudProfileModelsResponse, error) {
 	return &proto.ListCloudProfileModelsResponse{}, nil
 }

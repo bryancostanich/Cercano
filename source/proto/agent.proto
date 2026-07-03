@@ -111,6 +111,7 @@ service Agent {
   // (Ollama's public library) — bypasses the 24h TTL. Returns after the
   // fetch completes. Used by the CLI's dashboard "R" refresh key.
   rpc RefreshOnlineCatalog (RefreshOnlineCatalogRequest) returns (RefreshOnlineCatalogResponse) {}
+  rpc GetModelRAMEstimate (GetModelRAMEstimateRequest) returns (GetModelRAMEstimateResponse) {}
   rpc StreamRuntimeLogs (StreamRuntimeLogsRequest) returns (stream RuntimeLogEntry) {}
 
   // ListSkills returns the catalog of available Agent Skills (name + description).
@@ -420,6 +421,38 @@ message ListRuntimeModelsResponse {
   // dashboard uses this to render "Catalog updated Nh ago" and to
   // decide when to switch to a stale/error color.
   string catalog_updated_at = 2;
+}
+
+// GetModelRAMEstimate resolves the numbers a client needs to predict
+// a model's runtime memory at arbitrary context sizes:
+//
+//   total(ctx) ~= weights_bytes + ctx * kv_bytes_per_token + overhead
+//
+// For online catalog entries (ollama_ref set) this costs at most one
+// manifest fetch plus a 256 KiB ranged blob fetch; results are cached
+// by digest so repeat calls are free. For downloaded models (runtime +
+// model_id set) the GGUF header is read straight off disk.
+message GetModelRAMEstimateRequest {
+  // ollama_ref selects an online catalog entry ("name:tag"; a bare
+  // family name is normalized to ":latest" server-side). Mutually
+  // exclusive with runtime/model_id.
+  string ollama_ref = 1;
+  // runtime + model_id select a model already in the local inventory.
+  string runtime = 2;
+  string model_id = 3;
+}
+message GetModelRAMEstimateResponse {
+  int64 weights_bytes = 1;
+  int64 kv_bytes_per_token = 2;
+  int64 max_context_tokens = 3;
+  string architecture = 4;
+  // system_ram_bytes is the machine's total physical memory, so the
+  // client can render a fit verdict without a second RPC. 0 when the
+  // platform probe fails.
+  int64 system_ram_bytes = 5;
+  // error is set (empty on success) so clients can degrade to a
+  // size-only display instead of handling an RPC failure.
+  string error = 6;
 }
 
 // RefreshOnlineCatalog force-refreshes the cached model catalog.

@@ -16,6 +16,7 @@ require (
 	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/sashabaranov/go-openai v1.41.2
 	github.com/tmc/langchaingo v0.1.14
+	golang.org/x/sys v0.45.0
 	google.golang.org/adk v0.5.0
 	google.golang.org/genai v1.40.0
 	google.golang.org/grpc v1.77.0
@@ -95,7 +96,6 @@ require (
 	golang.org/x/net v0.52.0 // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/term v0.41.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 	golang.org/x/time v0.14.0 // indirect

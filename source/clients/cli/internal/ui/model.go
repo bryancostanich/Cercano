@@ -859,6 +859,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// no-op (falls through).
 		if keyStr == "f1" && m.openRuntimeStatus != nil && !m.openRuntimeStatus.Ok {
 			m.openRuntimeModal = newOpenRuntimeInstallModal(*m.openRuntimeStatus)
+			if modalOpensScanning(*m.openRuntimeStatus) {
+				return m, fetchModalGGUFsCmd(m.agent)
+			}
 			return m, nil
 		}
 		// Active content pages own the middle region, but global keys stay
@@ -1339,12 +1342,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case openOpenRuntimeInstallModalMsg:
 		// Emitted by the settings page when the user tries to switch to
-		// a runtime that isn't ready. Opens the install modal in its
-		// idle state and remembers the switch to dispatch on success.
+		// a runtime that isn't ready. Opens the install modal (idle for a
+		// missing binary; scanning for a missing/ambiguous model) and
+		// remembers the switch to dispatch on success.
 		if m.openRuntimeModal == nil {
 			m.openRuntimeModal = newOpenRuntimeInstallModal(msg.status)
+			m.pendingRuntimeSwitch = msg.pending
+			if modalOpensScanning(msg.status) {
+				return m, fetchModalGGUFsCmd(m.agent)
+			}
+			return m, nil
 		}
 		m.pendingRuntimeSwitch = msg.pending
+		return m, nil
+
+	case modalModelsLoadedMsg:
+		// Reply to fetchModalGGUFsCmd. Routes the scanning state: fetch
+		// error or zero GGUFs → NeedsModel (browse/download), one or
+		// more → the picker. Ignored if the user closed the modal (or an
+		// install started) while the fetch was in flight.
+		if m.openRuntimeModal == nil || m.openRuntimeModal.state != runtimeModalScanningModels {
+			return m, nil
+		}
+		if msg.err != nil || len(msg.models) == 0 {
+			needsMsg := m.openRuntimeModal.status.Message
+			if msg.err != nil {
+				needsMsg = "model scan failed: " + msg.err.Error()
+			}
+			m.openRuntimeModal.setNeedsModel(needsMsg)
+			return m, nil
+		}
+		m.openRuntimeModal.setPickModel(msg.models)
 		return m, nil
 
 	case openRuntimeDashboardMsg:

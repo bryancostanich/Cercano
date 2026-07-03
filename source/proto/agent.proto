@@ -252,6 +252,12 @@ message UpdateConfigRequest {
   string watchdog_mode = 17;            // "challenge-and-justify"|"strict"
   string watchdog_checks = 18;          // "-" = empty; else comma-joined
   string watchdog_escalate_after = 19;  // positive int
+  // llama_server.default_model — the GGUF the managed runtime loads. Distinct
+  // from open_model (which is the ollama-flavored local model name) so a
+  // GGUF pick never clobbers the user's ollama tag. Applied BEFORE any
+  // open_runtime switch in the same request, so a request carrying both
+  // resolves an ambiguous-model detection in one round trip.
+  string open_default_model = 20;
 }
 
 // Runtime configuration update response.

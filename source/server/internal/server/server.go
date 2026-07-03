@@ -711,6 +711,16 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		fmt.Printf("UpdateConfig: Local model set to %s\n", req.OpenModel)
 	}
 
+	if req.OpenDefaultModel != "" {
+		// Applied before the open_runtime switch below so a request carrying
+		// both resolves an ambiguous-model detection in one round trip —
+		// detection and the engine-model pick both read
+		// currentConfig.LlamaServer.DefaultModel.
+		s.currentConfig.LlamaServer.DefaultModel = req.OpenDefaultModel
+		changes = append(changes, fmt.Sprintf("open_default_model=%s", req.OpenDefaultModel))
+		fmt.Printf("UpdateConfig: llama-server default model set to %s\n", req.OpenDefaultModel)
+	}
+
 	if req.OpenRuntime != "" {
 		if req.OpenRuntime != "ollama" && req.OpenRuntime != "llama_server" {
 			return &proto.UpdateConfigResponse{
@@ -995,6 +1005,11 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	if req.OpenRuntime != "" {
 		s.currentConfig.OpenRuntime = req.OpenRuntime
 		s.broadcastConfigChanged("local_runtime", req.OpenRuntime)
+	}
+	if req.OpenDefaultModel != "" {
+		// currentConfig.LlamaServer.DefaultModel was already set up top
+		// (before the runtime switch) — only the broadcast belongs here.
+		s.broadcastConfigChanged("open_default_model", req.OpenDefaultModel)
 	}
 	if req.CloudProvider != "" {
 		s.currentConfig.CloudProvider = req.CloudProvider

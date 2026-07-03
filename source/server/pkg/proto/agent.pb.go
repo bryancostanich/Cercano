@@ -692,8 +692,14 @@ type UpdateConfigRequest struct {
 	WatchdogMode          string `protobuf:"bytes,17,opt,name=watchdog_mode,json=watchdogMode,proto3" json:"watchdog_mode,omitempty"`                              // "challenge-and-justify"|"strict"
 	WatchdogChecks        string `protobuf:"bytes,18,opt,name=watchdog_checks,json=watchdogChecks,proto3" json:"watchdog_checks,omitempty"`                        // "-" = empty; else comma-joined
 	WatchdogEscalateAfter string `protobuf:"bytes,19,opt,name=watchdog_escalate_after,json=watchdogEscalateAfter,proto3" json:"watchdog_escalate_after,omitempty"` // positive int
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// llama_server.default_model — the GGUF the managed runtime loads. Distinct
+	// from open_model (which is the ollama-flavored local model name) so a
+	// GGUF pick never clobbers the user's ollama tag. Applied BEFORE any
+	// open_runtime switch in the same request, so a request carrying both
+	// resolves an ambiguous-model detection in one round trip.
+	OpenDefaultModel string `protobuf:"bytes,20,opt,name=open_default_model,json=openDefaultModel,proto3" json:"open_default_model,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *UpdateConfigRequest) Reset() {
@@ -855,6 +861,13 @@ func (x *UpdateConfigRequest) GetWatchdogChecks() string {
 func (x *UpdateConfigRequest) GetWatchdogEscalateAfter() string {
 	if x != nil {
 		return x.WatchdogEscalateAfter
+	}
+	return ""
+}
+
+func (x *UpdateConfigRequest) GetOpenDefaultModel() string {
+	if x != nil {
+		return x.OpenDefaultModel
 	}
 	return ""
 }
@@ -8160,7 +8173,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x05index\x18\x01 \x01(\x05R\x05index\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\x12\x1d\n" +
 	"\n" +
-	"media_type\x18\x03 \x01(\tR\tmediaType\"\x93\x06\n" +
+	"media_type\x18\x03 \x01(\tR\tmediaType\"\xc1\x06\n" +
 	"\x13UpdateConfigRequest\x12\x1d\n" +
 	"\n" +
 	"open_model\x18\x01 \x01(\tR\topenModel\x12%\n" +
@@ -8185,7 +8198,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x12compaction_enabled\x18\x10 \x01(\tR\x11compactionEnabled\x12#\n" +
 	"\rwatchdog_mode\x18\x11 \x01(\tR\fwatchdogMode\x12'\n" +
 	"\x0fwatchdog_checks\x18\x12 \x01(\tR\x0ewatchdogChecks\x126\n" +
-	"\x17watchdog_escalate_after\x18\x13 \x01(\tR\x15watchdogEscalateAfter\"J\n" +
+	"\x17watchdog_escalate_after\x18\x13 \x01(\tR\x15watchdogEscalateAfter\x12,\n" +
+	"\x12open_default_model\x18\x14 \x01(\tR\x10openDefaultModel\"J\n" +
 	"\x14UpdateConfigResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\xb6\x02\n" +

@@ -27,6 +27,26 @@ type settingsThemeMsg struct {
 	persistName string // when non-empty, persist as the active theme
 }
 
+// settingsCommitDoneMsg is delivered when a background config/permission
+// commit finishes. cfg/mode carry fresh server state fetched by the same
+// background cmd, so the form reload that follows is a cache hit instead of
+// a blocking GetConfig inside the update loop.
+type settingsCommitDoneMsg struct {
+	status   string
+	err      error
+	cfg      *agentclient.Config
+	mode     string
+	followup tea.Cmd
+}
+
+// settingsSpinnerTickMsg repaints the status-line spinner while a commit is
+// pending. Re-armed by applySpinnerTick until pendingCommit drops.
+type settingsSpinnerTickMsg time.Time
+
+func settingsSpinnerTick() tea.Cmd {
+	return tea.Tick(80*time.Millisecond, func(t time.Time) tea.Msg { return settingsSpinnerTickMsg(t) })
+}
+
 // settingsPage is the sectioned settings content page (opened by /s, /settings,
 // /config). It replaces the old flat configEditor.
 type settingsPage struct {
@@ -65,6 +85,10 @@ type settingsPage struct {
 	// isn't confused with "not yet loaded".
 	cloudModels        []agentclient.CloudModelInfo
 	cloudModelsFetched bool
+	// pendingCommit is true while a config/permission commit is running in a
+	// background cmd. It gates re-entry (a second Enter mid-flight is a
+	// no-op) and drives the spinner on the form's status line.
+	pendingCommit bool
 }
 
 func newSettingsPage(ag *agentclient.Client, p theme.Palette, s theme.Styles, accentToken string, w, h int, themes *theme.Registry, active theme.Theme) (*settingsPage, tea.Cmd) {
@@ -161,6 +185,34 @@ func (sp *settingsPage) viewportHeight() int {
 	return h
 }
 
+// applyCommitDone finishes a background commit: drops the pending flag,
+// installs the freshly-fetched config so the form reload below is a cache
+// hit, and surfaces the outcome on the status line.
+func (sp *settingsPage) applyCommitDone(msg settingsCommitDoneMsg) tea.Cmd {
+	sp.pendingCommit = false
+	if msg.err != nil {
+		sp.form.SetStatus("save failed: " + msg.err.Error())
+		return msg.followup
+	}
+	if msg.cfg != nil {
+		sp.cfg = msg.cfg
+		sp.mode = msg.mode
+	}
+	sp.form.SetStatus(msg.status)
+	sp.form.Reload()
+	return msg.followup
+}
+
+// applySpinnerTick advances the pending-commit spinner and re-arms the tick.
+// Returns nil once the commit has completed, ending the tick loop.
+func (sp *settingsPage) applySpinnerTick() tea.Cmd {
+	if !sp.pendingCommit {
+		return nil
+	}
+	sp.form.SetStatus(animateToolSpinner() + " applying…")
+	return settingsSpinnerTick()
+}
+
 func (sp *settingsPage) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	cmd, closed := sp.form.Update(msg)
 	sp.scrollToFocus()
@@ -229,44 +281,76 @@ func (sp *settingsPage) onCommit(key, value string) (string, tea.Cmd, error) {
 	action := classifyCommit(key, value, currentChecks)
 	switch action.kind {
 	case commitConfig:
-		// Guard: switching to llama_server requires its binary + a model
-		// to be ready. If either is missing, open the install modal and
-		// DON'T dispatch UpdateConfig — the modal's cancel path leaves
-		// the config unchanged (switch rejected), and its install-success
-		// path dispatches the UpdateConfig at the moment the runtime is
-		// actually usable. Force sp.cfg to nil so the form snapshot that
-		// runs immediately after this commit reflects the server's
-		// (unchanged) runtime, reverting the toggle back to ollama.
-		if action.update.OpenRuntime == "llama_server" {
-			gctx, gcancel := context.WithTimeout(context.Background(), 3*time.Second)
-			st, gerr := sp.agent.GetOpenRuntimeStatus(gctx, "llama_server")
-			gcancel()
-			if gerr == nil && st != nil && !st.Ok {
-				sp.cfg = nil
-				statusCopy := *st
-				return "install required — see modal", func() tea.Msg {
-					return openOpenRuntimeInstallModalMsg{status: statusCopy, pending: "llama_server"}
-				}, nil
+		// Applied in a background cmd so the update loop keeps painting (the
+		// probe + UpdateConfig round-trips used to freeze the UI for up to
+		// 8s). The form re-snapshots immediately from the still-cached old
+		// config — fields show the server's current state until the commit
+		// lands — and applyCommitDone installs the fresh snapshot fetched by
+		// the same background cmd, so no reload path blocks on a gRPC call.
+		if sp.pendingCommit {
+			return "…still applying", nil, nil
+		}
+		sp.pendingCommit = true
+		ag := sp.agent
+		update := action.update
+		return animateToolSpinner() + " applying…", tea.Batch(settingsSpinnerTick(), func() tea.Msg {
+			// Guard: switching to llama_server requires its binary + a model
+			// to be ready. If either is missing, open the install modal and
+			// DON'T dispatch UpdateConfig — the modal's cancel path leaves
+			// the config unchanged (switch rejected), and its install-success
+			// path dispatches the UpdateConfig at the moment the runtime is
+			// actually usable.
+			if update.OpenRuntime == "llama_server" {
+				gctx, gcancel := context.WithTimeout(context.Background(), 3*time.Second)
+				st, gerr := ag.GetOpenRuntimeStatus(gctx, "llama_server")
+				gcancel()
+				if gerr == nil && st != nil && !st.Ok {
+					statusCopy := *st
+					return settingsCommitDoneMsg{
+						status: "install required — see modal",
+						followup: func() tea.Msg {
+							return openOpenRuntimeInstallModalMsg{status: statusCopy, pending: "llama_server"}
+						},
+					}
+				}
 			}
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		status, err := sp.agent.UpdateConfig(ctx, action.update)
-		if err == nil {
-			sp.cfg = nil
-		}
-		return status, nil, err
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			status, err := ag.UpdateConfig(ctx, update)
+			if err != nil {
+				return settingsCommitDoneMsg{err: err}
+			}
+			fctx, fcancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer fcancel()
+			cfg, _ := ag.GetConfig(fctx)
+			mode, _ := ag.GetPermissionMode(fctx)
+			return settingsCommitDoneMsg{status: status, cfg: cfg, mode: mode}
+		}), nil
 	case commitPermission:
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := sp.agent.SetPermissionMode(ctx, action.value); err != nil {
-			return "", nil, err
+		if sp.pendingCommit {
+			return "…still applying", nil, nil
 		}
-		sp.cfg = nil
+		sp.pendingCommit = true
+		ag := sp.agent
 		mode := action.value
-		return "permission mode: " + mode, func() tea.Msg {
-			return permissionModeChangedMsg{mode: mode}
-		}, nil
+		return animateToolSpinner() + " applying…", tea.Batch(settingsSpinnerTick(), func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := ag.SetPermissionMode(ctx, mode); err != nil {
+				return settingsCommitDoneMsg{err: err}
+			}
+			fctx, fcancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer fcancel()
+			cfg, _ := ag.GetConfig(fctx)
+			return settingsCommitDoneMsg{
+				status: "permission mode: " + mode,
+				cfg:    cfg,
+				mode:   mode,
+				followup: func() tea.Msg {
+					return permissionModeChangedMsg{mode: mode}
+				},
+			}
+		}), nil
 	case commitColor:
 		sp.accentToken = action.value
 		token := action.value

@@ -974,7 +974,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	if watchdogChanged {
 		// Rebuild the supervisor from the just-applied config. buildWatchdogFrom
 		// takes NO lock, so this is safe under the held cfgMu write lock.
-		s.watchdog = s.buildWatchdogFrom(s.currentConfig.Watchdog)
+		s.watchdog = s.buildWatchdogFrom(s.currentConfig.Watchdog, s.currentConfig.Models)
 	}
 
 	if len(changes) == 0 {

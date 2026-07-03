@@ -15,14 +15,15 @@ import (
 func (s *Server) buildWatchdog() *watchdog.Watchdog {
 	s.cfgMu.RLock()
 	wc := s.currentConfig.Watchdog
+	mc := s.currentConfig.Models
 	s.cfgMu.RUnlock()
-	return s.buildWatchdogFrom(wc)
+	return s.buildWatchdogFrom(wc, mc)
 }
 
-// buildWatchdogFrom constructs the watchdog from an already-read config. It
-// takes NO lock, so a caller already holding s.cfgMu (e.g. UpdateConfig) can
-// rebuild the watchdog without deadlocking.
-func (s *Server) buildWatchdogFrom(wc config.WatchdogConfig) *watchdog.Watchdog {
+// buildWatchdogFrom constructs the watchdog from already-read config sections.
+// It takes NO lock, so a caller already holding s.cfgMu (e.g. UpdateConfig)
+// can rebuild the watchdog without deadlocking.
+func (s *Server) buildWatchdogFrom(wc config.WatchdogConfig, mc config.ModelsConfig) *watchdog.Watchdog {
 	if !wc.Enabled {
 		return nil
 	}
@@ -51,16 +52,19 @@ func (s *Server) buildWatchdogFrom(wc config.WatchdogConfig) *watchdog.Watchdog 
 		}
 	}
 
-	// OneShot is the fast-model handle the checks call. For now the "router fast
-	// class" is the co-processor role's model lane (dispatch.RoleCoproc); wc.Model
-	// overrides it. When the matrix-router lands this becomes a smarter resolution
-	// with no call-site change.
+	// OneShot is the fast-model handle the checks call, running on the
+	// co-processor lane (dispatch.RoleCoproc). Model resolution: explicit
+	// watchdog.model config wins, else the models taxonomy's fast_light_text
+	// tier (open side — this lane is local), else the lane's own default.
+	// Resolved at build time; a models-section change takes effect on the
+	// next watchdog rebuild (config reload / watchdog-field update).
+	oneShotModel := watchdogModelFor(wc, mc)
 	oneShot := func(ctx context.Context, prompt string) (string, error) {
 		res, err := s.dispatchEngine.Dispatch(ctx, dispatch.Spec{
 			Mode:          dispatch.OneShot,
 			Role:          dispatch.RoleCoproc,
 			Prompt:        prompt,
-			ModelOverride: wc.Model, // "" → RoleCoproc model resolution (the lightweight lane)
+			ModelOverride: oneShotModel, // "" → RoleCoproc model resolution (the lightweight lane)
 			Source:        "watchdog",
 		})
 		if err != nil {

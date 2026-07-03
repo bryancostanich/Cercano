@@ -59,6 +59,7 @@ type Config struct {
 	LlamaServer        LlamaServerConfig `yaml:"llama_server"`
 	Compaction         CompactionConfig  `yaml:"compaction"`
 	Watchdog           WatchdogConfig    `yaml:"watchdog"`
+	Models             ModelsConfig      `yaml:"models"`
 }
 
 // CompactionConfig controls background context compaction. Thresholds are token
@@ -164,6 +165,7 @@ func Defaults() Config {
 		EmbeddingModel: "nomic-embed-text",
 		LocusMode:      "open_primary",
 		Port:           "50052",
+		Models:         ModelsConfig{DefaultProvider: ProviderOpen},
 		LlamaServer: LlamaServerConfig{
 			ModelDirs:        []string{"~/.cercano/models"},
 			Host:             "127.0.0.1",

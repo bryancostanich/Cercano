@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 )
 
 // Mode controls how the Watchdog responds to a first-time violation.
@@ -28,9 +29,14 @@ type Decision struct {
 // Config tunes Watchdog behaviour.
 // EscalateAfter: number of times the same key must be seen before escalation.
 // Zero means default (2).
+// CheckTimeout bounds each Gate call's check evaluation. Zero means default
+// (15s). Supervision must never wedge the supervised: a turn-end gate runs
+// after the reply has already streamed, so an unbounded check against a sick
+// model lane holds the stream open and the client queues everything.
 type Config struct {
 	Mode          Mode
 	EscalateAfter int
+	CheckTimeout  time.Duration
 }
 
 // convState holds per-conversation state.
@@ -47,6 +53,7 @@ type Watchdog struct {
 	checks        []Check
 	oneShot       OneShotFunc
 	escalateAfter int
+	checkTimeout  time.Duration
 
 	mu    sync.Mutex
 	convs map[string]*convState
@@ -84,11 +91,16 @@ func New(cfg Config, checks []Check, oneShot OneShotFunc) *Watchdog {
 	if ea <= 0 {
 		ea = 2
 	}
+	ct := cfg.CheckTimeout
+	if ct <= 0 {
+		ct = 15 * time.Second
+	}
 	return &Watchdog{
 		cfg:           cfg,
 		checks:        checks,
 		oneShot:       oneShot,
 		escalateAfter: ea,
+		checkTimeout:  ct,
 		convs:         make(map[string]*convState),
 	}
 }
@@ -121,6 +133,12 @@ func (w *Watchdog) getOrCreate(conversationID string) *convState {
 
 // Gate evaluates all checks against action a and returns a Decision.
 func (w *Watchdog) Gate(ctx context.Context, conversationID string, a Action) Decision {
+	// Bound the whole evaluation: a supervision verdict that takes longer than
+	// checkTimeout is useless, and on the turn_end path an unbounded check
+	// holds the client's stream open behind it. Deadline expiry rides the
+	// existing fail-open error path below.
+	ctx, cancel := context.WithTimeout(ctx, w.checkTimeout)
+	defer cancel()
 	// Run checks; fail-open on error.
 	var violation *Verdict
 	for _, ch := range w.checks {

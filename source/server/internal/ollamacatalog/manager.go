@@ -141,6 +141,11 @@ func (m *Manager) Refresh(ctx context.Context) error {
 		Models:    models,
 	}
 	m.mu.Lock()
+	// Estimates are keyed by immutable digests and revalidated on
+	// their own TTL — a catalog refresh must not throw them away.
+	if m.cache != nil {
+		fresh.Estimates = m.cache.Estimates
+	}
 	m.cache = fresh
 	m.mu.Unlock()
 	// Write to disk. Save errors are worth surfacing (misconfigured

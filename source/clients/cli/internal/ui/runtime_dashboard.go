@@ -54,16 +54,19 @@ type runtimeDashboard struct {
 	catalogCursor   int
 	catalogTop      int
 	catalogMessage  string
+	catalogBusy     bool
 	operationCursor int
 	actionMessage   string
 	scrollOffset    int
 }
 
 type runtimeDashboardSnapshot struct {
-	Config    *agentclient.Config
-	ConfigErr error
-	Status    *agentclient.RuntimeStatus
-	StatusErr error
+	Config     *agentclient.Config
+	ConfigErr  error
+	Status     *agentclient.RuntimeStatus
+	StatusErr  error
+	Catalog    agentclient.RuntimeModelCatalog
+	CatalogErr error
 }
 
 type runtimeDashboardAction struct {
@@ -333,6 +336,14 @@ func (d *runtimeDashboard) clampOperationCursor() {
 
 func (d *runtimeDashboard) updateCatalog(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	switch msg.String() {
+	case "ctrl+r":
+		if d.catalogBusy {
+			d.catalogMessage = "refresh already running"
+			return nil, false
+		}
+		d.catalogBusy = true
+		d.catalogMessage = "refreshing catalog..."
+		return runtimeCatalogRefreshCmd(d.agent), false
 	case "esc":
 		if d.catalogSearch.Value() != "" {
 			d.catalogSearch.SetValue("")
@@ -345,10 +356,10 @@ func (d *runtimeDashboard) updateCatalog(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		if d.catalogCursor > 0 {
 			d.catalogCursor--
 		}
-		d.keepCatalogCursorVisible(d.catalogRowBudget(), len(filteredCatalogModels(runtimeStatusModels(d.snapshot.Status), d.catalogSearch.Value())))
+		d.keepCatalogCursorVisible(d.catalogRowBudget(), len(filteredCatalogModels(d.catalogModels(), d.catalogSearch.Value())))
 		return nil, false
 	case "down":
-		models := filteredCatalogModels(runtimeStatusModels(d.snapshot.Status), d.catalogSearch.Value())
+		models := filteredCatalogModels(d.catalogModels(), d.catalogSearch.Value())
 		if d.catalogCursor < len(models)-1 {
 			d.catalogCursor++
 		}
@@ -359,14 +370,14 @@ func (d *runtimeDashboard) updateCatalog(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		d.catalogTop = 0
 		return nil, false
 	case "end":
-		models := filteredCatalogModels(runtimeStatusModels(d.snapshot.Status), d.catalogSearch.Value())
+		models := filteredCatalogModels(d.catalogModels(), d.catalogSearch.Value())
 		if len(models) > 0 {
 			d.catalogCursor = len(models) - 1
 		}
 		d.keepCatalogCursorVisible(d.catalogRowBudget(), len(models))
 		return nil, false
 	case "enter":
-		models := filteredCatalogModels(runtimeStatusModels(d.snapshot.Status), d.catalogSearch.Value())
+		models := filteredCatalogModels(d.catalogModels(), d.catalogSearch.Value())
 		if len(models) == 0 {
 			d.catalogMessage = "no model selected"
 			return nil, false
@@ -414,7 +425,48 @@ func loadRuntimeDashboardSnapshot(ag *agentclient.Client) runtimeDashboardSnapsh
 	snap.Status, snap.StatusErr = ag.GetRuntimeStatus(statusCtx)
 	statusCancel()
 
+	catalogCtx, catalogCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	snap.Catalog, snap.CatalogErr = ag.ListRuntimeModels(catalogCtx)
+	catalogCancel()
+
 	return snap
+}
+
+// catalogModels is the model list backing the download-catalog pane.
+// ListRuntimeModels is the richer source (it merges the online Ollama
+// library and carries the fetch timestamp); the runtime-status model
+// list is the fallback when that RPC failed, so the pane degrades to
+// the pre-online behavior instead of going blank.
+func (d *runtimeDashboard) catalogModels() []agentclient.RuntimeModel {
+	if d.snapshot.CatalogErr == nil && len(d.snapshot.Catalog.Models) > 0 {
+		return d.snapshot.Catalog.Models
+	}
+	return runtimeStatusModels(d.snapshot.Status)
+}
+
+type runtimeCatalogRefreshDoneMsg struct {
+	result agentclient.CatalogRefreshResult
+}
+
+func runtimeCatalogRefreshCmd(ag *agentclient.Client) tea.Cmd {
+	return func() tea.Msg {
+		if ag == nil {
+			return runtimeCatalogRefreshDoneMsg{result: agentclient.CatalogRefreshResult{Err: errors.New("agent client unavailable")}}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return runtimeCatalogRefreshDoneMsg{result: ag.RefreshOnlineCatalog(ctx)}
+	}
+}
+
+func (d *runtimeDashboard) applyCatalogRefresh(msg runtimeCatalogRefreshDoneMsg) tea.Cmd {
+	d.catalogBusy = false
+	if msg.result.Err != nil {
+		d.catalogMessage = "refresh failed: " + msg.result.Err.Error()
+		return nil
+	}
+	d.catalogMessage = fmt.Sprintf("catalog refreshed · %d models", msg.result.ModelCount)
+	return d.refreshSnapshot()
 }
 
 type runtimeDashboardField struct {
@@ -522,7 +574,7 @@ func (d *runtimeDashboard) renderCatalogBlock(rowLimit int) string {
 	}
 	totalW := dashboardPanelWidth(d.width)
 	contentW := dashboardBlockContentWidth(totalW)
-	models := filteredCatalogModels(runtimeStatusModels(d.snapshot.Status), d.catalogSearch.Value())
+	models := filteredCatalogModels(d.catalogModels(), d.catalogSearch.Value())
 	if len(models) > 0 {
 		d.catalogCursor = clampIndex(d.catalogCursor, len(models))
 	} else {
@@ -569,7 +621,7 @@ func (d *runtimeDashboard) renderCatalogBlock(rowLimit int) string {
 		if idx < len(models) {
 			left = d.renderCatalogModelRow(models[idx], idx == d.catalogCursor, listW)
 		} else if i == 0 && len(models) == 0 {
-			left = d.styles.Dim.Render(catalogEmptyMessage(runtimeStatusModels(d.snapshot.Status), d.catalogSearch.Value()))
+			left = d.styles.Dim.Render(catalogEmptyMessage(d.catalogModels(), d.catalogSearch.Value()))
 		}
 		right := ""
 		if i < len(details) {
@@ -591,7 +643,25 @@ func (d *runtimeDashboard) renderCatalogBlock(rowLimit int) string {
 			lines[0] = searchLine + d.styles.BorderDim.Render(fmt.Sprintf("  %d-%d/%d", start+1, end, len(models)))
 		}
 	}
+	lines = append(lines, d.renderCatalogFooter(contentW))
 	return renderRuntimeDashboardTextBlock("download catalog", lines, totalW, 0, d.palette, d.styles)
+}
+
+// renderCatalogFooter names the online catalog's freshness. The
+// timestamp is the server's last successful fetch of Ollama's library;
+// zero means the online catalog has never loaded (e.g. offline first
+// run) and only built-in entries are listed above.
+func (d *runtimeDashboard) renderCatalogFooter(width int) string {
+	var s string
+	switch {
+	case d.catalogBusy:
+		s = "refreshing catalog..."
+	case d.snapshot.Catalog.CatalogUpdatedAt.IsZero():
+		s = "online catalog not loaded · ctrl+r to fetch"
+	default:
+		s = "catalog updated " + relativeTime(d.snapshot.Catalog.CatalogUpdatedAt) + " · ctrl+r to refresh"
+	}
+	return d.styles.Dim.Render(truncatePlain(s, width))
 }
 
 func (d *runtimeDashboard) catalogRowBudget() int {

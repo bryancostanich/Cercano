@@ -1108,6 +1108,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case runtimeCatalogRefreshDoneMsg:
+		if dashboard, ok := m.content.(*runtimeDashboard); ok {
+			return m, dashboard.applyCatalogRefresh(msg)
+		}
+		return m, nil
+
 	case chatStreamMsg:
 		// Ignore late events from a stream we already canceled.
 		if !m.streaming {

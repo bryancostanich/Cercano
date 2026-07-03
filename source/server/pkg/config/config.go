@@ -191,7 +191,7 @@ func Defaults() Config {
 		Watchdog: WatchdogConfig{
 			Enabled:       false,
 			Mode:          "challenge-and-justify",
-			Checks:        []string{"debug-loop", "commit-checkpoint", "plain-english", "worktree-first"},
+			Checks:        []string{"debug-loop", "commit-checkpoint", "plain-english", "worktree-first", "follow-through"},
 			Model:         "",
 			EscalateAfter: 2,
 			Echo:          false,

@@ -17,6 +17,9 @@ func TestBuildToolLoopSystem(t *testing.T) {
 	for _, want := range []string{
 		"/home/u/proj", "darwin", "2026-06-24", "branch main",
 		"Cercano/", "notes.txt", "Cercano is a local-first AI dev tool.",
+		// Follow-through steering: the model must never end a turn on an
+		// announced-but-unperformed action.
+		"Never end your turn on a promise",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("system prompt missing %q in:\n%s", want, s)

@@ -13,6 +13,9 @@ type WatchdogDecision struct {
 	Action    string
 	Protocol  string
 	Challenge string
+	// Revise is the corrective instruction for the reopening note — what the
+	// model should DO about the violation. Empty falls back to a generic line.
+	Revise string
 }
 
 // WatchdogGate, when set on ToolLoopInput, is called before each W/X tool

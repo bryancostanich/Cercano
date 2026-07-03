@@ -21,6 +21,8 @@ type Decision struct {
 	Action    string // "allow" | "challenge" | "block" | "escalate"
 	Protocol  string
 	Challenge string
+	// Revise carries the violated check's corrective instruction (Verdict.Revise).
+	Revise string
 }
 
 // Config tunes Watchdog behaviour.
@@ -160,14 +162,14 @@ func (w *Watchdog) Gate(ctx context.Context, conversationID string, a Action) De
 
 	if escalate {
 		w.emitEcho("watchdog", fmt.Sprintf("[escalate] %s: %s", violation.Protocol, violation.Challenge))
-		return Decision{Action: "escalate", Protocol: violation.Protocol, Challenge: violation.Challenge}
+		return Decision{Action: "escalate", Protocol: violation.Protocol, Challenge: violation.Challenge, Revise: violation.Revise}
 	}
 	if isStrict {
 		w.emitEcho("watchdog", fmt.Sprintf("[block] %s: %s", violation.Protocol, violation.Challenge))
-		return Decision{Action: "block", Protocol: violation.Protocol, Challenge: violation.Challenge}
+		return Decision{Action: "block", Protocol: violation.Protocol, Challenge: violation.Challenge, Revise: violation.Revise}
 	}
 	w.emitEcho("watchdog", fmt.Sprintf("[challenge] %s: %s", violation.Protocol, violation.Challenge))
-	return Decision{Action: "challenge", Protocol: violation.Protocol, Challenge: violation.Challenge}
+	return Decision{Action: "challenge", Protocol: violation.Protocol, Challenge: violation.Challenge, Revise: violation.Revise}
 }
 
 // recordJustify marks key as justified for the given conversation so Gate

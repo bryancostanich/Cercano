@@ -46,6 +46,8 @@ func (s *Server) buildWatchdogFrom(wc config.WatchdogConfig) *watchdog.Watchdog 
 			checks = append(checks, watchdog.PlainEnglishCheck())
 		case "worktree-first":
 			checks = append(checks, watchdog.WorktreeFirstCheck())
+		case "follow-through":
+			checks = append(checks, watchdog.FollowThroughCheck())
 		}
 	}
 

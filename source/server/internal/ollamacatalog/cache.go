@@ -37,6 +37,10 @@ type Cache struct {
 	// Models is the fetched list (family names + tags, if we've walked
 	// tags into the cache).
 	Models []Model `json:"models"`
+	// Estimates maps "name:tag" refs to resolved RAM-estimation
+	// numbers (see estimate.go). Nil on caches written by older
+	// builds — treated as empty.
+	Estimates map[string]Estimate `json:"estimates,omitempty"`
 }
 
 // IsStale reports whether the cache should be refreshed. A zero

@@ -23,13 +23,13 @@ type transcriptLine struct {
 
 // contentBlock covers the block shapes inside message.content / tool_result.content.
 type contentBlock struct {
-	Type       string          `json:"type"`
-	Text       string          `json:"text"`
-	ID         string          `json:"id"`
-	Name       string          `json:"name"`
-	Input      json.RawMessage `json:"input"`
-	ToolUseID  string          `json:"tool_use_id"`
-	Content    json.RawMessage `json:"content"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text"`
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Input     json.RawMessage `json:"input"`
+	ToolUseID string          `json:"tool_use_id"`
+	Content   json.RawMessage `json:"content"`
 }
 
 // LoadTranscript reads a Claude Code JSONL session file and returns it as a

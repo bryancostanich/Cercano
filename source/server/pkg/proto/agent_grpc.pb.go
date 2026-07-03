@@ -50,6 +50,7 @@ const (
 	Agent_CancelRuntimeModelDownload_FullMethodName = "/agent.Agent/CancelRuntimeModelDownload"
 	Agent_DeleteRuntimeModel_FullMethodName         = "/agent.Agent/DeleteRuntimeModel"
 	Agent_RefreshOnlineCatalog_FullMethodName       = "/agent.Agent/RefreshOnlineCatalog"
+	Agent_GetModelRAMEstimate_FullMethodName        = "/agent.Agent/GetModelRAMEstimate"
 	Agent_StreamRuntimeLogs_FullMethodName          = "/agent.Agent/StreamRuntimeLogs"
 	Agent_ListSkills_FullMethodName                 = "/agent.Agent/ListSkills"
 	Agent_GetSkill_FullMethodName                   = "/agent.Agent/GetSkill"
@@ -166,6 +167,7 @@ type AgentClient interface {
 	// (Ollama's public library) — bypasses the 24h TTL. Returns after the
 	// fetch completes. Used by the CLI's dashboard "R" refresh key.
 	RefreshOnlineCatalog(ctx context.Context, in *RefreshOnlineCatalogRequest, opts ...grpc.CallOption) (*RefreshOnlineCatalogResponse, error)
+	GetModelRAMEstimate(ctx context.Context, in *GetModelRAMEstimateRequest, opts ...grpc.CallOption) (*GetModelRAMEstimateResponse, error)
 	StreamRuntimeLogs(ctx context.Context, in *StreamRuntimeLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RuntimeLogEntry], error)
 	// ListSkills returns the catalog of available Agent Skills (name + description).
 	ListSkills(ctx context.Context, in *ListSkillsRequest, opts ...grpc.CallOption) (*ListSkillsResponse, error)
@@ -555,6 +557,16 @@ func (c *agentClient) RefreshOnlineCatalog(ctx context.Context, in *RefreshOnlin
 	return out, nil
 }
 
+func (c *agentClient) GetModelRAMEstimate(ctx context.Context, in *GetModelRAMEstimateRequest, opts ...grpc.CallOption) (*GetModelRAMEstimateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetModelRAMEstimateResponse)
+	err := c.cc.Invoke(ctx, Agent_GetModelRAMEstimate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *agentClient) StreamRuntimeLogs(ctx context.Context, in *StreamRuntimeLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RuntimeLogEntry], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[3], Agent_StreamRuntimeLogs_FullMethodName, cOpts...)
@@ -876,6 +888,7 @@ type AgentServer interface {
 	// (Ollama's public library) — bypasses the 24h TTL. Returns after the
 	// fetch completes. Used by the CLI's dashboard "R" refresh key.
 	RefreshOnlineCatalog(context.Context, *RefreshOnlineCatalogRequest) (*RefreshOnlineCatalogResponse, error)
+	GetModelRAMEstimate(context.Context, *GetModelRAMEstimateRequest) (*GetModelRAMEstimateResponse, error)
 	StreamRuntimeLogs(*StreamRuntimeLogsRequest, grpc.ServerStreamingServer[RuntimeLogEntry]) error
 	// ListSkills returns the catalog of available Agent Skills (name + description).
 	ListSkills(context.Context, *ListSkillsRequest) (*ListSkillsResponse, error)
@@ -1020,6 +1033,9 @@ func (UnimplementedAgentServer) DeleteRuntimeModel(context.Context, *DeleteRunti
 }
 func (UnimplementedAgentServer) RefreshOnlineCatalog(context.Context, *RefreshOnlineCatalogRequest) (*RefreshOnlineCatalogResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RefreshOnlineCatalog not implemented")
+}
+func (UnimplementedAgentServer) GetModelRAMEstimate(context.Context, *GetModelRAMEstimateRequest) (*GetModelRAMEstimateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetModelRAMEstimate not implemented")
 }
 func (UnimplementedAgentServer) StreamRuntimeLogs(*StreamRuntimeLogsRequest, grpc.ServerStreamingServer[RuntimeLogEntry]) error {
 	return status.Error(codes.Unimplemented, "method StreamRuntimeLogs not implemented")
@@ -1642,6 +1658,24 @@ func _Agent_RefreshOnlineCatalog_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Agent_GetModelRAMEstimate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetModelRAMEstimateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).GetModelRAMEstimate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_GetModelRAMEstimate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).GetModelRAMEstimate(ctx, req.(*GetModelRAMEstimateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Agent_StreamRuntimeLogs_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(StreamRuntimeLogsRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -2124,6 +2158,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RefreshOnlineCatalog",
 			Handler:    _Agent_RefreshOnlineCatalog_Handler,
+		},
+		{
+			MethodName: "GetModelRAMEstimate",
+			Handler:    _Agent_GetModelRAMEstimate_Handler,
 		},
 		{
 			MethodName: "ListSkills",

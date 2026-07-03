@@ -1110,6 +1110,46 @@ func (c *Client) RefreshOnlineCatalog(ctx context.Context) CatalogRefreshResult 
 	return out
 }
 
+// ModelRAMEstimate carries the numbers needed to predict a model's
+// runtime memory: total(ctx) ~= WeightsBytes + ctx*KVBytesPerToken +
+// overhead. SystemRAMBytes lets the caller render a fit verdict
+// without a second RPC; 0 means the platform probe failed.
+type ModelRAMEstimate struct {
+	WeightsBytes     int64
+	KVBytesPerToken  int64
+	MaxContextTokens int64
+	Architecture     string
+	SystemRAMBytes   int64
+	Err              error
+}
+
+// GetModelRAMEstimate resolves RAM-estimation numbers for either an
+// online catalog entry (ollamaRef, "name:tag" or bare family) or a
+// model in the local inventory (runtime + modelID). Estimate failures
+// come back in Err with SystemRAMBytes still populated; transport
+// failures also land in Err.
+func (c *Client) GetModelRAMEstimate(ctx context.Context, ollamaRef, runtime, modelID string) ModelRAMEstimate {
+	resp, err := c.agent.GetModelRAMEstimate(ctx, &proto.GetModelRAMEstimateRequest{
+		OllamaRef: ollamaRef,
+		Runtime:   runtime,
+		ModelId:   modelID,
+	})
+	if err != nil {
+		return ModelRAMEstimate{Err: err}
+	}
+	out := ModelRAMEstimate{
+		WeightsBytes:     resp.GetWeightsBytes(),
+		KVBytesPerToken:  resp.GetKvBytesPerToken(),
+		MaxContextTokens: resp.GetMaxContextTokens(),
+		Architecture:     resp.GetArchitecture(),
+		SystemRAMBytes:   resp.GetSystemRamBytes(),
+	}
+	if s := resp.GetError(); s != "" {
+		out.Err = fmt.Errorf("%s", s)
+	}
+	return out
+}
+
 // InstallOpenRuntime opens the InstallOpenRuntime streaming RPC for the
 // given runtime and returns a channel of progress frames. The channel closes
 // after the terminal Done=true frame (or after a stream error). Cancelling

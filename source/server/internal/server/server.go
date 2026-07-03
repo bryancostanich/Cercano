@@ -1855,6 +1855,7 @@ type loopEnv struct {
 func buildToolLoopSystem(env loopEnv, steering, dirSnapshot, projectContext string) string {
 	var b strings.Builder
 	b.WriteString("You are Cercano, an agentic coding assistant operating in a terminal.\n\n")
+	b.WriteString("A note on tool naming: depending on your cloud route, some tools in your schema may appear under a host prefix like `mcp__oc__Read` instead of plain `Read`. That prefix is a wire-level routing artifact from the provider (e.g. an OpenCode/Meridian adapter) — it does not mean you are running inside a different host. You are Cercano either way. Call tools using whatever name is in your schema. But when you pass tool names as data — for example, in the `tools` argument of `dispatch` or `workflow` — always use the plain registered names (Read, Write, Edit, Bash, Glob, Grep, LS, git_status, etc.) without any host prefix.\n\n")
 	if strings.TrimSpace(steering) != "" {
 		b.WriteString(steering)
 		b.WriteString("\n\n")

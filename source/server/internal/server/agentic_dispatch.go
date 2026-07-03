@@ -112,7 +112,7 @@ func (s *Server) grantedRegistry(tools []string, mode agent.PermissionMode) (*ag
 // permissive (those are the only tools a sub-agent can actually wield);
 // everything under bypass.
 func (s *Server) availableToolsHint(mode agent.PermissionMode) string {
-	const cap = 30
+	const maxNames = 30
 	var pool []agenttools.Tool
 	if mode == agent.ModeBypass {
 		pool = s.toolRegistry.All()
@@ -127,9 +127,9 @@ func (s *Server) availableToolsHint(mode agent.PermissionMode) string {
 		names = append(names, t.Name())
 	}
 	suffix := ""
-	if len(names) > cap {
-		names = names[:cap]
-		suffix = fmt.Sprintf(" (+%d more)", len(pool)-cap)
+	if len(names) > maxNames {
+		names = names[:maxNames]
+		suffix = fmt.Sprintf(" (+%d more)", len(pool)-maxNames)
 	}
 	return fmt.Sprintf("available tools: %s%s", strings.Join(names, ", "), suffix)
 }

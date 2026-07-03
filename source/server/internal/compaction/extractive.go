@@ -50,6 +50,7 @@ func BuildExtractivePrompt(messages []llm.Message) string {
 	b.WriteString("- Quote identifiers, signatures, config keys, YAML, and code exactly as written.\n")
 	b.WriteString("- Write each quote as plain text: no surrounding quotation marks, no escaping — keep real newlines and quote characters exactly as they appear in the conversation.\n")
 	b.WriteString("- Omit any section with nothing worth quoting. Never invent a quote.\n")
+	b.WriteString("- Each quote may appear once, in the single most fitting section — never repeat a quote across sections or within one.\n")
 	b.WriteString("\n")
 	b.WriteString("Use only these section labels:\n\n")
 	b.WriteString("GOAL: <short verbatim quote naming the objective>\n")

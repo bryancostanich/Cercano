@@ -337,6 +337,11 @@ type RuntimeModel struct {
 	SupportsTools      bool
 	OllamaRef          string
 	Active             bool
+	// KVBytesPerToken/MaxContextTokens are pre-warmed RAM-estimation
+	// numbers embedded by the server (0 = not warmed yet; callers fall
+	// back to GetModelRAMEstimate).
+	KVBytesPerToken  int64
+	MaxContextTokens int64
 }
 
 type RuntimeInstance struct {
@@ -706,6 +711,10 @@ func (c *Client) GetRuntimeStatus(ctx context.Context) (*RuntimeStatus, error) {
 type RuntimeModelCatalog struct {
 	Models           []RuntimeModel
 	CatalogUpdatedAt time.Time
+	// SystemRAMBytes is the server machine's total physical memory,
+	// for rendering fit verdicts against embedded estimates. 0 when
+	// the platform probe failed.
+	SystemRAMBytes int64
 }
 
 func (c *Client) ListRuntimeModels(ctx context.Context) (RuntimeModelCatalog, error) {
@@ -713,7 +722,10 @@ func (c *Client) ListRuntimeModels(ctx context.Context) (RuntimeModelCatalog, er
 	if err != nil {
 		return RuntimeModelCatalog{}, err
 	}
-	out := RuntimeModelCatalog{Models: mapRuntimeModels(resp.GetModels())}
+	out := RuntimeModelCatalog{
+		Models:         mapRuntimeModels(resp.GetModels()),
+		SystemRAMBytes: resp.GetSystemRamBytes(),
+	}
 	if s := resp.GetCatalogUpdatedAt(); s != "" {
 		if t, terr := time.Parse(time.RFC3339, s); terr == nil {
 			out.CatalogUpdatedAt = t
@@ -1255,6 +1267,8 @@ func mapRuntimeModel(model *proto.RuntimeModel) RuntimeModel {
 		SupportsTools:      model.GetSupportsTools(),
 		Active:             model.GetActive(),
 		OllamaRef:          model.GetOllamaRef(),
+		KVBytesPerToken:    model.GetKvBytesPerToken(),
+		MaxContextTokens:   model.GetMaxContextTokens(),
 	}
 }
 

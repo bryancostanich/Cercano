@@ -361,6 +361,12 @@ message RuntimeModel {
   // DownloadRuntimeModel handler uses the OCI blob path via
   // registry.ollama.ai instead of a direct HTTP GET of download_url.
   string ollama_ref = 21;
+  // RAM-estimation numbers pre-resolved by the server's background
+  // warmer (see GetModelRAMEstimate for the on-demand equivalent and
+  // the meaning of each field). 0 = not warmed yet — clients fall
+  // back to the RPC.
+  int64 kv_bytes_per_token = 22;
+  int64 max_context_tokens = 23;
 }
 
 message RuntimeInstance {
@@ -421,6 +427,10 @@ message ListRuntimeModelsResponse {
   // dashboard uses this to render "Catalog updated Nh ago" and to
   // decide when to switch to a stale/error color.
   string catalog_updated_at = 2;
+  // system_ram_bytes is the machine's total physical memory so the
+  // client can render fit verdicts for embedded estimates without a
+  // per-model RPC. 0 when the platform probe fails.
+  int64 system_ram_bytes = 3;
 }
 
 // GetModelRAMEstimate resolves the numbers a client needs to predict

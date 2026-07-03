@@ -24,7 +24,7 @@ func TestContextMeter_NoBadgeWhenNotCompacted(t *testing.T) {
 }
 
 func TestContextMeter_CompactingOverlay(t *testing.T) {
-	m := Model{styles: theme.NewStyles(theme.Cracker()), cumIn: 18000, ctxRaw: 340000, modelMaxTokens: 200000, compacting: true}
+	m := Model{styles: theme.NewStyles(theme.Cracker()), palette: theme.Cracker(), cumIn: 18000, ctxRaw: 340000, modelMaxTokens: 200000, compacting: true}
 	out := stripAnsiCSI(m.renderContextMeter())
 	if !strings.Contains(out, "compacting") {
 		t.Errorf("expected a compacting overlay while a pass runs:\n%s", out)

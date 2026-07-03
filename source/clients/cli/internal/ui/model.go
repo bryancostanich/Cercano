@@ -2283,6 +2283,18 @@ func animateLimeSweep(text string) string {
 	return b.String()
 }
 
+// fadeColor scales a color's RGB toward black by factor k (0 = black,
+// 1 = unchanged). Used for "translucent overlay" backgrounds — terminals have
+// no alpha, so a darkened tone of the underlying color is the closest read.
+func fadeColor(c color.Color, k float64) color.Color {
+	if c == nil {
+		return lipgloss.Color("#000000")
+	}
+	r, g, b, _ := c.RGBA()
+	scale := func(v uint32) uint8 { return uint8(float64(v>>8) * k) }
+	return lipgloss.Color(fmt.Sprintf("#%02X%02X%02X", scale(r), scale(g), scale(b)))
+}
+
 // progressColorAt returns the rendered color for one column at a given sweep
 // position. Lime base; the inside `tail` columns lerp toward white.
 func progressColorAt(col int, sweepPos float64, tail float64) color.Color {
@@ -3494,12 +3506,14 @@ func (m Model) renderCompactingMeterBar(cells, fillN int) string {
 				Background(progressColorAt(col, sweepPos, tail)).
 				Render(string(label[col-start])))
 		case inLabel && !onFill:
-			// Empty-side letters render in the bright amber the empty checker
-			// belongs to. A terminal cell holds one glyph, so the ░ under a
-			// letter can't literally show through — the letter takes the
-			// checker's color family instead, and the surrounding ░ cells
-			// carry the texture right up to the glyph.
-			b.WriteString(m.styles.Bright.Render(string(label[col-start])))
+			// Empty-side letters are an overlay on the checker: bright amber
+			// text on a faded (darkened) version of the checker's own color,
+			// so the label region reads as a translucent band over the empty
+			// texture rather than letters floating on the bare background.
+			b.WriteString(lipgloss.NewStyle().
+				Foreground(m.palette.Bright).
+				Background(fadeColor(m.palette.Dim, 0.45)).
+				Render(string(label[col-start])))
 		case !inLabel && onFill:
 			// Background-paint (space glyph), not a █ foreground glyph: the
 			// label cells are background-painted, and a font's full-block

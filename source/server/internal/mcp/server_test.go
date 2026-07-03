@@ -244,6 +244,10 @@ func (m *mockAgentClient) InstallOpenRuntime(ctx context.Context, in *proto.Inst
 	return nil, nil
 }
 
+func (m *mockAgentClient) RefreshOnlineCatalog(ctx context.Context, in *proto.RefreshOnlineCatalogRequest, opts ...grpc.CallOption) (*proto.RefreshOnlineCatalogResponse, error) {
+	return &proto.RefreshOnlineCatalogResponse{}, nil
+}
+
 func (m *mockAgentClient) ListCloudProfileModels(ctx context.Context, in *proto.ListCloudProfileModelsRequest, opts ...grpc.CallOption) (*proto.ListCloudProfileModelsResponse, error) {
 	return &proto.ListCloudProfileModelsResponse{}, nil
 }

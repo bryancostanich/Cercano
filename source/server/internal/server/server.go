@@ -32,6 +32,7 @@ import (
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/llm/anthropic"
 	"cercano/source/server/internal/localruntime"
+	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/localruntime/llamaserver"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
@@ -85,6 +86,10 @@ type Server struct {
 	openLLMProvider    llm.Provider // native-tool-loop local provider (Ollama)
 	secrets             secrets.Store
 	runtimeManager      localruntime.Manager
+	// catalogManager (optional) surfaces Ollama's public library as an
+	// online model catalog. Nil = no online catalog (dashboard just
+	// shows the hardcoded local catalog + any downloaded files).
+	catalogManager *ollamacatalog.Manager
 	retentionSweeper    *retention.Sweeper
 	compactionGen       *compactiongen.Generator
 	contextLoader       *projectctx.Loader
@@ -609,6 +614,14 @@ func (s *Server) resolveMainProvider() (llm.Provider, bool, bool, error) {
 func (s *Server) SetRuntimeManager(m localruntime.Manager) {
 	s.runtimeManager = m
 	s.refreshRuntimeEndpoints()
+}
+
+// SetCatalogManager attaches the online-catalog manager so
+// ListRuntimeModels can surface Ollama's public library alongside the
+// hardcoded catalog + downloaded files, and RefreshOnlineCatalog is
+// wired to the manager's Refresh method.
+func (s *Server) SetCatalogManager(cm *ollamacatalog.Manager) {
+	s.catalogManager = cm
 }
 
 // SetRetentionSweeper attaches the background retention sweeper so that
@@ -1517,6 +1530,16 @@ func (s *Server) GetRuntimeStatus(ctx context.Context, req *proto.GetRuntimeStat
 }
 
 // ListRuntimeModels implements proto.AgentServer.
+//
+// Returns three merged lists: (1) downloaded files on disk, (2) the
+// hardcoded llama-server catalog, (3) the online Ollama library catalog
+// (if the catalog manager is attached). Online catalog entries are
+// deduped against the hardcoded catalog by family name — hardcoded
+// wins because it has richer metadata (family, quantization) baked in.
+//
+// The response also carries catalog_updated_at (RFC3339) so the CLI
+// dashboard can render "Catalog updated Nh ago" and color the label
+// based on staleness.
 func (s *Server) ListRuntimeModels(ctx context.Context, req *proto.ListRuntimeModelsRequest) (*proto.ListRuntimeModelsResponse, error) {
 	if s.runtimeManager == nil {
 		return &proto.ListRuntimeModelsResponse{}, nil
@@ -1525,7 +1548,96 @@ func (s *Server) ListRuntimeModels(ctx context.Context, req *proto.ListRuntimeMo
 	if err != nil {
 		return nil, err
 	}
-	return &proto.ListRuntimeModelsResponse{Models: mapRuntimeModels(models)}, nil
+	resp := &proto.ListRuntimeModelsResponse{Models: mapRuntimeModels(models)}
+	if s.catalogManager != nil {
+		online := s.catalogManager.Models()
+		if len(online) > 0 {
+			// Dedupe by family name against what we've already mapped.
+			// Anything already present in models (hardcoded catalog OR
+			// downloaded on disk) keeps its richer entry.
+			seen := make(map[string]bool, len(resp.Models))
+			for _, m := range resp.Models {
+				if m.GetFamily() != "" {
+					seen[m.GetFamily()] = true
+				}
+			}
+			for _, m := range online {
+				if seen[m.Name] {
+					continue
+				}
+				resp.Models = append(resp.Models, onlineCatalogModelToProto(m))
+			}
+		}
+		if fa := s.catalogManager.FetchedAt(); !fa.IsZero() {
+			resp.CatalogUpdatedAt = fa.UTC().Format(time.RFC3339)
+		}
+	}
+	return resp, nil
+}
+
+// onlineCatalogModelToProto converts one ollamacatalog.Model to the
+// wire-level RuntimeModel shape. Sparse — the family list from
+// ListModels doesn't include tags or sizes, so most fields are empty
+// until the CLI drills into the family (which triggers a tag fetch on
+// the next release). What we can fill in: display name (title-cased
+// family), family, runtime (llama_server), source (catalog-online),
+// format (gguf), download state (not_downloaded), and ollama_ref
+// (which is what the download handler will use to route through the
+// OCI blob flow).
+func onlineCatalogModelToProto(m ollamacatalog.Model) *proto.RuntimeModel {
+	return &proto.RuntimeModel{
+		Id:            "llama_server:online:" + m.Name,
+		DisplayName:   titleCase(m.Name),
+		Runtime:       "llama_server",
+		Source:        "catalog-online",
+		Format:        "gguf",
+		Family:        m.Name,
+		DownloadState: "not_downloaded",
+		OllamaRef:     m.Name, // colon+tag will be appended by CLI when user picks a size
+		SupportsChat:  true,
+	}
+}
+
+// titleCase renders "qwen2.5-coder" as "Qwen2.5 Coder" for display —
+// cheap heuristic that gets Ollama's kebab-case names to something
+// user-facing.
+func titleCase(s string) string {
+	if s == "" {
+		return ""
+	}
+	// Split on hyphens; capitalize each token; join with a space.
+	parts := strings.Split(s, "-")
+	for i, p := range parts {
+		if p == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(p[:1]) + p[1:]
+	}
+	return strings.Join(parts, " ")
+}
+
+// RefreshOnlineCatalog implements proto.AgentServer — forces a fresh
+// fetch of the online catalog, bypassing the 24h TTL. Used by the
+// CLI dashboard's "R" refresh key.
+func (s *Server) RefreshOnlineCatalog(ctx context.Context, req *proto.RefreshOnlineCatalogRequest) (*proto.RefreshOnlineCatalogResponse, error) {
+	if s.catalogManager == nil {
+		return &proto.RefreshOnlineCatalogResponse{Error: "online catalog not configured"}, nil
+	}
+	if err := s.catalogManager.Refresh(ctx); err != nil {
+		// Refresh failure leaves the previous cache in place — surface
+		// the error so the CLI can render it, but keep the timestamp
+		// pointing at the most-recent SUCCESSFUL fetch so users can
+		// still tell how stale the current view is.
+		resp := &proto.RefreshOnlineCatalogResponse{Error: err.Error()}
+		if fa := s.catalogManager.FetchedAt(); !fa.IsZero() {
+			resp.CatalogUpdatedAt = fa.UTC().Format(time.RFC3339)
+		}
+		return resp, nil
+	}
+	return &proto.RefreshOnlineCatalogResponse{
+		CatalogUpdatedAt: s.catalogManager.FetchedAt().UTC().Format(time.RFC3339),
+		ModelCount:       int32(len(s.catalogManager.Models())),
+	}, nil
 }
 
 // ListRuntimeEndpoints implements proto.AgentServer.

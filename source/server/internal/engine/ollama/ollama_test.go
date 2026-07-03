@@ -144,7 +144,7 @@ func TestOllamaEngine_CompleteStream(t *testing.T) {
 	eng := NewOllamaEngine(srv.URL)
 
 	var streamed []string
-	result, err := eng.CompleteStream(context.Background(), "test-model", "prompt", "", func(token string) {
+	result, err := eng.CompleteStream(context.Background(), "test-model", "prompt", "", engine.GenOptions{}, func(token string) {
 		streamed = append(streamed, token)
 	})
 
@@ -165,5 +165,41 @@ func TestOllamaEngine_CompleteStream(t *testing.T) {
 	}
 	if result.OutputTokens != 20 {
 		t.Errorf("expected 20 output tokens, got %d", result.OutputTokens)
+	}
+}
+
+func TestOllamaEngine_TemperatureOption(t *testing.T) {
+	var sawOptions map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Options map[string]interface{} `json:"options"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		sawOptions = payload.Options
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(generateResponse{Response: "ok", Done: true})
+	}))
+	defer srv.Close()
+
+	eng := NewOllamaEngine(srv.URL)
+
+	if _, err := eng.Complete(context.Background(), "m", "p", "", engine.Greedy()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	temp, ok := sawOptions["temperature"]
+	if !ok {
+		t.Fatal("greedy request must carry temperature in options")
+	}
+	if temp != 0.0 {
+		t.Fatalf("greedy temperature = %v, want 0", temp)
+	}
+
+	if _, err := eng.Complete(context.Background(), "m", "p", "", engine.GenOptions{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := sawOptions["temperature"]; ok {
+		t.Fatal("default request must not override the server's temperature")
 	}
 }

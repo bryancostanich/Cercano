@@ -15,13 +15,15 @@ type mockEngine struct {
 	completeResult string
 	completeError  error
 	streamChunks   []string
+	gotOpts        engine.GenOptions
 }
 
-func (m *mockEngine) Complete(ctx context.Context, model, prompt, systemPrompt string) (engine.CompletionResult, error) {
+func (m *mockEngine) Complete(ctx context.Context, model, prompt, systemPrompt string, opts engine.GenOptions) (engine.CompletionResult, error) {
+	m.gotOpts = opts
 	return engine.CompletionResult{Output: m.completeResult, InputTokens: 10, OutputTokens: 5}, m.completeError
 }
 
-func (m *mockEngine) CompleteStream(ctx context.Context, model, prompt, systemPrompt string, onToken func(string)) (engine.CompletionResult, error) {
+func (m *mockEngine) CompleteStream(ctx context.Context, model, prompt, systemPrompt string, opts engine.GenOptions, onToken func(string)) (engine.CompletionResult, error) {
 	var accumulated strings.Builder
 	for _, chunk := range m.streamChunks {
 		if onToken != nil {
@@ -93,5 +95,28 @@ func TestOpenModelProvider_SetModelName(t *testing.T) {
 	provider.SetModelName("new-model")
 	if provider.Name() != "new-model" {
 		t.Errorf("expected 'new-model', got %q", provider.Name())
+	}
+}
+
+// Compaction summarization depends on Temperature surviving this hop: the
+// summarizer pins greedy decoding for reproducibility, and a silently dropped
+// override would reintroduce sampling variance without any test failing.
+func TestOpenModelProvider_ForwardsTemperature(t *testing.T) {
+	eng := &mockEngine{name: "mock", completeResult: "ok"}
+	provider := legacymodels.NewOpenModelProvider(eng, "test-model")
+
+	zero := 0.0
+	if _, err := provider.Process(context.Background(), &agent.Request{Input: "x", Temperature: &zero}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if eng.gotOpts.Temperature == nil || *eng.gotOpts.Temperature != 0 {
+		t.Fatalf("engine temperature = %v, want pointer to 0", eng.gotOpts.Temperature)
+	}
+
+	if _, err := provider.Process(context.Background(), &agent.Request{Input: "x"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if eng.gotOpts.Temperature != nil {
+		t.Fatalf("engine temperature = %v, want nil (engine default)", *eng.gotOpts.Temperature)
 	}
 }

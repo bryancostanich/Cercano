@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"cercano/source/server/internal/legacymodels"
-	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/engine/ollama"
+	"cercano/source/server/internal/legacymodels"
 )
 
 const integrationTestModelName = "qwen3-coder"

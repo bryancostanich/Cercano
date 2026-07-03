@@ -40,7 +40,7 @@ func TestComplete_StartsRuntimeAndCallsChatCompletions(t *testing.T) {
 		startEndpoint: server.URL,
 	}
 	eng := NewEngine(manager)
-	result, err := eng.Complete(context.Background(), "/models/model-a.gguf", "hi", "be brief")
+	result, err := eng.Complete(context.Background(), "/models/model-a.gguf", "hi", "be brief", engine.GenOptions{})
 	if err != nil {
 		t.Fatalf("Complete returned error: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestCompleteStream_DecodesSSE(t *testing.T) {
 		}},
 	}
 	var tokens []string
-	result, err := NewEngine(manager).CompleteStream(context.Background(), "", "hi", "", func(token string) {
+	result, err := NewEngine(manager).CompleteStream(context.Background(), "", "hi", "", engine.GenOptions{}, func(token string) {
 		tokens = append(tokens, token)
 	})
 	if err != nil {
@@ -222,3 +222,45 @@ func (m *fakeRuntimeManager) Logs(context.Context, localruntime.LogRequest) ([]l
 	return nil, nil
 }
 func (m *fakeRuntimeManager) WriteLog(localruntime.LogEntry) {}
+
+func TestComplete_TemperatureOption(t *testing.T) {
+	var sawPayload chatCompletionRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Decode into a fresh struct: reusing sawPayload would leave request 1's
+		// Temperature pointer in place when request 2 omits the key entirely.
+		var payload chatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		sawPayload = payload
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices": [{"message": {"role": "assistant", "content": "ok"}}]}`))
+	}))
+	defer server.Close()
+
+	manager := &fakeRuntimeManager{
+		models: []localruntime.ModelRecord{{
+			ID:          "llama_server:model-a",
+			DisplayName: "Model A",
+			Runtime:     runtimeName,
+			Path:        "/models/model-a.gguf",
+			Active:      true,
+		}},
+		startEndpoint: server.URL,
+	}
+	eng := NewEngine(manager)
+
+	if _, err := eng.Complete(context.Background(), "/models/model-a.gguf", "hi", "", engine.Greedy()); err != nil {
+		t.Fatalf("Complete returned error: %v", err)
+	}
+	if sawPayload.Temperature == nil || *sawPayload.Temperature != 0 {
+		t.Fatalf("greedy request temperature = %v, want pointer to 0", sawPayload.Temperature)
+	}
+
+	if _, err := eng.Complete(context.Background(), "/models/model-a.gguf", "hi", "", engine.GenOptions{}); err != nil {
+		t.Fatalf("Complete returned error: %v", err)
+	}
+	if sawPayload.Temperature != nil {
+		t.Fatalf("default request temperature = %v, want unset", *sawPayload.Temperature)
+	}
+}

@@ -66,9 +66,13 @@ type Request struct {
 	WorkDir        string
 	FileName       string
 	ConversationID string
-	DirectOpen    bool   // Skip SmartRouter, go directly to local provider
+	DirectOpen     bool   // Skip SmartRouter, go directly to local provider
 	ModelOverride  string // Use this model instead of the configured default (per-request)
-	Coproc         bool   // Route per Locus Mode's co-processor tier (local/cloud)
+	// Temperature overrides the engine's sampling temperature for this request.
+	// Nil keeps the engine default; a pointer to 0 requests greedy decoding
+	// (used by compaction summarization, which must be reproducible).
+	Temperature *float64
+	Coproc      bool // Route per Locus Mode's co-processor tier (local/cloud)
 	// Images are user-attached images; buildUserBlocks splices them into the
 	// user message at "[image N]" markers in Input.
 	Images []InlineImage
@@ -127,8 +131,8 @@ type Router interface {
 type CloudFactory func(ctx context.Context, provider, model, apiKey, baseURL string) (ModelProvider, error)
 
 const (
-	similarityThreshold   = 0.50
-	classificationTopK    = 3
+	similarityThreshold = 0.50
+	classificationTopK  = 3
 )
 
 // SmartRouter implements the Router interface with routing logic based on semantic similarity.
@@ -175,7 +179,7 @@ func NewSmartRouterFromBytes(local, cloud ModelProvider, embeddingModel string, 
 
 	sr := &SmartRouter{
 		ModelProviders: map[string]ModelProvider{
-			"OpenModel": local,
+			"OpenModel":  local,
 			"CloudModel": cloud,
 		},
 		EmbeddingModelName: embeddingModel,
@@ -362,4 +366,3 @@ func (sr *SmartRouter) SelectProvider(req *Request, intent Intent) (ModelProvide
 
 	return nil, fmt.Errorf("could not determine classification for input: '%s'", req.Input)
 }
-

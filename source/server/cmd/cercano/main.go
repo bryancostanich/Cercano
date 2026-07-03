@@ -38,12 +38,12 @@ import (
 	"cercano/source/server/internal/llm"
 	ollamallm "cercano/source/server/internal/llm/ollama"
 	"cercano/source/server/internal/localruntime"
-	"cercano/source/server/internal/ollamacatalog"
 	runtimellama "cercano/source/server/internal/localruntime/llamaserver"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
 	mcpserver "cercano/source/server/internal/mcp"
 	mcphost "cercano/source/server/internal/mcp_host"
+	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/recap"
 	"cercano/source/server/internal/retention"
@@ -200,7 +200,13 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	var compGen *compactiongen.Generator
 	if persistentStore != nil {
 		compactSummarize := func(ctx context.Context, msgs []llm.Message) (compaction.StructuredSummary, error) {
-			req := &agent.Request{Input: compaction.BuildSummaryPrompt(msgs)}
+			// Greedy decoding is a correctness requirement here, not a tuning
+			// choice: the frames-matrix bakeoff (compaction-bakeoff-findings.md)
+			// showed default-temperature summarization is a coin flip — the same
+			// window swung 0/7 to 7/7 on anchor retention between samples, while
+			// temperature 0 reproduced exactly and kept every proposal anchor.
+			greedy := engine.Greedy()
+			req := &agent.Request{Input: compaction.BuildSummaryPrompt(msgs), Temperature: greedy.Temperature}
 			if cfg.Compaction.SummarizerModel != "" {
 				req.ModelOverride = cfg.Compaction.SummarizerModel
 			}
@@ -1246,8 +1252,9 @@ func promptYesNo(out io.Writer, in io.Reader, prompt string, defaultYes bool) bo
 // other log surfaces without changing the subcommand name.
 //
 // Usage: cercano logs --crashes [--tail N]
-//   --crashes: pretty-print the last N crash-log entries (default 10).
-//   --tail N : override the count.
+//
+//	--crashes: pretty-print the last N crash-log entries (default 10).
+//	--tail N : override the count.
 //
 // Output is human-readable, one entry per block with a divider — meant
 // for a person eyeballing the log. For structured consumption, the raw

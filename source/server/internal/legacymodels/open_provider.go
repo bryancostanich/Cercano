@@ -55,7 +55,7 @@ func (p *OpenModelProvider) Process(ctx context.Context, req *agent.Request) (*a
 		modelName = req.ModelOverride
 	}
 
-	result, err := eng.Complete(ctx, modelName, req.Input, "")
+	result, err := eng.Complete(ctx, modelName, req.Input, "", engine.GenOptions{Temperature: req.Temperature})
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +73,7 @@ func (p *OpenModelProvider) ProcessStream(ctx context.Context, req *agent.Reques
 	eng := p.Engine
 	p.mu.RUnlock()
 
-	result, err := eng.CompleteStream(ctx, modelName, req.Input, "", func(t string) {
+	result, err := eng.CompleteStream(ctx, modelName, req.Input, "", engine.GenOptions{Temperature: req.Temperature}, func(t string) {
 		if onToken != nil {
 			onToken(t)
 		}

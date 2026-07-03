@@ -300,15 +300,17 @@ func (mo *openRuntimeInstallModal) renderActions(styles theme.Styles) string {
 		return primary + "    " + secondary + errLine
 	case runtimeModalNeedsModel:
 		// The install itself succeeded — Retry would just reinstall
-		// llama-server pointlessly. The user needs to either drop a
-		// .gguf into ~/.cercano/models/ or set llama_server.default_model
-		// in config.yaml. Copy walks them through both paths.
-		primary := styles.Success.Bold(true).Render("[Esc] Close")
-		hint := styles.Muted.Render("Next steps:\n" +
-			"  • add a .gguf model to ~/.cercano/models/\n" +
-			"  • or set llama_server.default_model in ~/.config/cercano/config.yaml\n" +
-			"Then reopen this modal (F1) to verify.")
-		return primary + "\n" + hint
+		// llama-server pointlessly. Primary path is now "Browse
+		// models" which opens the runtime dashboard where the online
+		// catalog is searchable + downloadable. Alternative paths
+		// (dropping a .gguf manually, setting default_model in yaml)
+		// stay listed for users who prefer them.
+		primary := styles.Success.Bold(true).Render("[Enter] Browse models")
+		secondary := styles.Muted.Render("[Esc] Close")
+		hint := styles.Muted.Render("Or, out-of-band:\n" +
+			"  • add a .gguf to ~/.cercano/models/\n" +
+			"  • or set llama_server.default_model in ~/.config/cercano/config.yaml")
+		return primary + "    " + secondary + "\n" + hint
 	case runtimeModalOfferSwitch:
 		// Install succeeded and we detected the runtime is not the
 		// currently-active one. Ask explicitly rather than deciding.
@@ -388,8 +390,14 @@ func (m Model) handleOpenRuntimeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m.pendingRuntimeSwitch = "" // failed install; drop the queued switch too
 		}
 	case runtimeModalNeedsModel:
-		// Any key dismisses — there's no in-modal recovery for a
-		// missing GGUF; the user resolves it out-of-band and reopens.
+		// Enter or "b" opens the runtime dashboard where the online
+		// catalog is browsable. Anything else dismisses (user chose
+		// to add a GGUF out-of-band).
+		if key == "enter" || key == "b" {
+			m.openRuntimeModal = nil
+			m.pendingRuntimeSwitch = ""
+			return m, openRuntimeDashboardCmd()
+		}
 		m.openRuntimeModal = nil
 		m.pendingRuntimeSwitch = ""
 	case runtimeModalOfferSwitch:
@@ -462,4 +470,17 @@ func startOpenRuntimeInstallCmd(ag *agentclient.Client, runtime string) tea.Cmd 
 		}
 		return runtimeInstallStartedMsg{cancel: cancel, next: drain}
 	}
+}
+
+// openRuntimeDashboardMsg is emitted by the install modal's "Browse
+// models" action. Model's Update handler catches it and swaps the
+// content page to a fresh runtime dashboard — same as pressing the
+// isRuntimeDashboardKey (Cmd+M).
+type openRuntimeDashboardMsg struct{}
+
+// openRuntimeDashboardCmd wraps openRuntimeDashboardMsg in a tea.Cmd so
+// key handlers can request the transition without knowing about the
+// dashboard type.
+func openRuntimeDashboardCmd() tea.Cmd {
+	return func() tea.Msg { return openRuntimeDashboardMsg{} }
 }

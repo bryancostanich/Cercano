@@ -33,6 +33,7 @@ const (
 	ResultSetSessionTitle    // Text field carries the new title
 	ResultInvokeTool         // ToolName + ToolArgs carry the tool to invoke (CLI may prompt-confirm first)
 	ResultSetPermissionMode  // PermissionMode carries the new mode (strict|permissive|bypass)
+	ResultDevMode            // WorkDir carries the resolved Cercano repo root
 )
 
 // Result is what a slash command produces.
@@ -42,6 +43,7 @@ type Result struct {
 	ToolName       string // for ResultInvokeTool
 	ToolArgs       string // for ResultInvokeTool (JSON-encoded args)
 	PermissionMode string // for ResultSetPermissionMode
+	WorkDir        string // for ResultDevMode
 }
 
 // Registry holds the set of registered commands and supports prefix dispatch.

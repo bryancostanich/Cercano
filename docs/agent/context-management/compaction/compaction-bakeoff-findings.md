@@ -113,3 +113,72 @@ count** (30 lines @5 seg → 48 @9 seg); C reconciles it back down each time.
 **Decision for 2b: wire C (map-reduce / model reduce) as the compactor**, with
 frozen-segment caching layered on top (C maps each segment once; freezing those
 maps is the natural cost optimization).
+
+---
+
+# Frames matrix (second series, 2026-07)
+
+Separate experiment series from the map-reduce bakeoff above. Compares the five
+survey frames (A rolling baseline, B adaptive, C elision-first, D extractive,
+E retrieval-backed) over a stored conversation window: conv `80109e871fba4e18`
+around turn `adfada03…` (the models×tiers design proposal), 40 before / 10
+after, ~11.3k tokens, 7 must-keep anchors, model `qwen3-coder-next:latest`.
+Harness: `compaction-bakeoff -conv` matrix mode.
+
+## Runs 1–3 — default temperature (3 reps each, 9 samples/frame)
+
+| frame | anchors range | reduction |
+|---|---|---|
+| rolling | 4/7 – 7/7 | ~88% |
+| adaptive | 0/7 – 7/7 | ~68% |
+| elision-first | 7/7 always | 13% always |
+| extractive | 0/7 – 7/7 | ~87% |
+| retrieval(rolling) | 5/7 | ~79% |
+
+**Sampling variance dominated every LLM frame** — identical input swung scores
+from worst to perfect between reps. Two harness fixes landed during this span:
+unwrap model quote-wrapping before the grounding check (run 3), and add the
+baseline's dedup rule to the extractive prompt (run 4).
+
+## Run 4 — greedy decoding (temperature 0, 2 reps)
+
+| frame | anchors | grounded | reduction |
+|---|---|---|---|
+| rolling | 5/7 | — | 88% |
+| adaptive | 5/7 | — | 68% |
+| elision-first | 7/7 | — | 13% |
+| extractive | 0/7 | 3/6 | 87% |
+| retrieval(rolling) | 5/7 | — | 78% |
+
+**Every frame reproduced exactly across reps** (rep 1 == rep 2 on all scores).
+The run-1–3 spread was pure sampling noise; temperature 0 removes it.
+
+Findings:
+
+- **Rolling at temp 0 kept all five design-proposal anchors** (`most_capable`,
+  `fast_light`, `models.Resolve`, `default_provider`, `tier`) — the two misses
+  were the incidental model tags (`claude-haiku-4-5-20251001`, `phi4`). The
+  fidelity guardrails + greedy decoding preserve the load-bearing proposal
+  deterministically.
+- **Extractive is deterministic-bad at temp 0**: it fixates on the dominant
+  recent topic (tool-click debugging), quotes large code blocks verbatim
+  (burning budget), and skips the design proposal entirely — in *both* map
+  segments, including the one containing the proposal. Greedy decoding locks
+  this failure in.
+- **Quote fidelity cannot be prompted into this model**: even quote-only
+  instructions at temp 0 yield 3/6 grounded bullets — half are paraphrases.
+  Frame D is not viable with qwen3-coder-next.
+- **Elision-first stays the only 7/7 frame** but its 13% reduction does no real
+  compaction work; it is a floor, not a compactor.
+
+## Conclusions for production
+
+1. **Run the summarizer at temperature 0.** Production compaction currently
+   samples at default temperature — the single highest-leverage change from
+   this series. Makes compaction reproducible and keeps the proposal anchors.
+2. **Keep the deterministic elision floor + verbatim tail** under whatever
+   summarizer runs above it (composition already in place).
+3. **Drop frame D (extractive)** for this model class; revisit only with a
+   model that can actually quote.
+4. Adaptive's lower reduction (68%) bought no anchor advantage over rolling —
+   no reason to switch the prompt shape on this evidence.

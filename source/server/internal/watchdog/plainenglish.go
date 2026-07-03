@@ -29,7 +29,11 @@ func (plainEnglishCheck) Evaluate(ctx context.Context, a Action, oneShot OneShot
 	if err != nil {
 		return Verdict{}, err
 	}
-	return parseVerdict("plain-english", out), nil
+	v := parseVerdict("plain-english", out)
+	if v.Violation {
+		v.Revise = "Rewrite your reply in plain, colleague-level English"
+	}
+	return v, nil
 }
 
 func buildPlainEnglishPrompt(text string) string {

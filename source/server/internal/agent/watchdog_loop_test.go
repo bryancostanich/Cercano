@@ -292,3 +292,47 @@ func TestWatchdogGate_AllowExecutes(t *testing.T) {
 		t.Fatal("allow must let the tool execute")
 	}
 }
+
+// TestWatchdogTurnEnd_ChallengeUsesReviseInstruction: the reopening note must
+// carry the check's own corrective instruction, not a hardcoded plain-english
+// rewrite line — a follow-through challenge needs "do the work now", not
+// "rewrite your prose".
+func TestWatchdogTurnEnd_ChallengeUsesReviseInstruction(t *testing.T) {
+	prov := &scriptedProvider{replies: []string{"Let me check the log now.", "checked; here is the result"}}
+	calls := 0
+	revise := "Perform the action you announced NOW, in this same turn, using tool calls"
+	gate := func(_ context.Context, _ string, _ []llm.Message) WatchdogDecision {
+		calls++
+		if calls == 1 {
+			return WatchdogDecision{Action: "challenge", Protocol: "follow-through",
+				Challenge: "you announced a check you never ran", Revise: revise}
+		}
+		return WatchdogDecision{Action: "allow"}
+	}
+	res, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider: prov, Registry: emptyRegistry(t), UserInput: "hi",
+		WatchdogTurnEnd: gate, MaxIterations: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var note string
+	for _, m := range res.History {
+		if m.Role == llm.RoleUser {
+			for _, b := range m.Blocks {
+				if b.Type == llm.BlockText && strings.Contains(b.Text, "watchdog (follow-through)") {
+					note = b.Text
+				}
+			}
+		}
+	}
+	if note == "" {
+		t.Fatal("expected a follow-through watchdog note in history")
+	}
+	if !strings.Contains(note, revise) {
+		t.Errorf("note must carry the check's revise instruction, got: %q", note)
+	}
+	if strings.Contains(note, "plain, colleague-level English") {
+		t.Errorf("note must not carry the plain-english rewrite line for a follow-through challenge: %q", note)
+	}
+}

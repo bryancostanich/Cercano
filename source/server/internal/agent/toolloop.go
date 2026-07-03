@@ -215,10 +215,13 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				wd := in.WatchdogTurnEnd(ctx, finalText, hist)
 				switch wd.Action {
 				case "challenge", "block":
-					note := "⚡ watchdog (" + wd.Protocol + "): " + wd.Challenge +
-						". Rewrite your reply in plain, colleague-level English"
+					revise := wd.Revise
+					if revise == "" {
+						revise = "Address the issue and revise your reply"
+					}
+					note := "⚡ watchdog (" + wd.Protocol + "): " + wd.Challenge + ". " + revise
 					if wd.Action == "block" {
-						note += " (rewrite required — no override)."
+						note += " (required — no override)."
 					} else {
 						note += ", or call `justify` with a reason."
 					}

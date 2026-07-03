@@ -7,6 +7,10 @@ type Verdict struct {
 	Violation bool
 	Protocol  string
 	Challenge string
+	// Revise is the check's corrective instruction shown to the model on a
+	// challenge/block — what to DO about the violation (rewrite the prose,
+	// perform the announced action, …). Set by check code, not model output.
+	Revise string
 }
 
 // parseVerdict reads a fast-model completion of the form

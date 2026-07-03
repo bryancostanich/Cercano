@@ -53,6 +53,8 @@ type matrixConfig struct {
 	Anchors    []string
 	CSVPath    string
 	PerFrame   time.Duration
+	Repeat     int    // matrix repetitions; LLM frames are sampled, one run is one sample
+	DumpDir    string // when set, save every prompt/response pair here
 }
 
 // runMatrix scores every frame over one stored conversation window and prints
@@ -73,67 +75,87 @@ func runMatrix(ctx context.Context, cfg matrixConfig) error {
 		return fmt.Errorf("bad ollama url: %w", err)
 	}
 
+	reps := cfg.Repeat
+	if reps < 1 {
+		reps = 1
+	}
+	if cfg.DumpDir != "" {
+		if err := os.MkdirAll(cfg.DumpDir, 0o755); err != nil {
+			return fmt.Errorf("dumpdir: %w", err)
+		}
+	}
+
 	var rows [][]string
-	fmt.Printf("%-20s %8s %10s %10s %8s %6s %8s\n",
-		"frame", "reduce", "anchors", "grounded", "calls", "valid", "elapsed")
-	for _, f := range frames() {
-		var summarize compaction.SummarizeFunc
-		calls := 0
-		if f.prompt != nil {
-			inner := ollamaSummarizer(base, cfg.Model, f.prompt)
-			summarize = func(cx context.Context, m []llm.Message) (compaction.StructuredSummary, error) {
-				calls++
-				return inner(cx, m)
+	fmt.Printf("%-20s %4s %8s %10s %10s %8s %6s %8s\n",
+		"frame", "rep", "reduce", "anchors", "grounded", "calls", "valid", "elapsed")
+	for rep := 1; rep <= reps; rep++ {
+		for _, f := range frames() {
+			name := f.compactor.Name()
+			var summarize compaction.SummarizeFunc
+			calls := 0
+			if f.prompt != nil {
+				var dump func(prompt, response string)
+				if cfg.DumpDir != "" {
+					dump = func(prompt, response string) {
+						stem := fmt.Sprintf("%s/rep%d-%s-call%d", cfg.DumpDir, rep, sanitize(name), calls)
+						_ = os.WriteFile(stem+"-prompt.txt", []byte(prompt), 0o644)
+						_ = os.WriteFile(stem+"-response.txt", []byte(response), 0o644)
+					}
+				}
+				inner := ollamaSummarizer(base, cfg.Model, f.prompt, dump)
+				summarize = func(cx context.Context, m []llm.Message) (compaction.StructuredSummary, error) {
+					calls++
+					return inner(cx, m)
+				}
 			}
-		}
 
-		fctx, cancel := context.WithTimeout(ctx, cfg.PerFrame)
-		start := time.Now()
-		res, err := f.compactor.Compact(fctx, msgs, summarize,
-			compaction.Budget{VerbatimRecent: cfg.Verbatim, SegmentTokens: cfg.SegTokens})
-		elapsed := time.Since(start)
-		cancel()
-		name := f.compactor.Name()
-		if err != nil {
-			fmt.Printf("%-20s ERROR after %s: %v\n", name, elapsed.Round(time.Second), err)
-			rows = append(rows, []string{name, cfg.ConvID, "ERROR", err.Error()})
-			continue
-		}
-
-		sent := compaction.TotalTokens(tok, res.SendView)
-		reduction := 0.0
-		if rawTok > 0 {
-			reduction = 1 - float64(sent)/float64(rawTok)
-		}
-		flat := flattenSendView(res.SendView)
-		kept := 0
-		for _, a := range cfg.Anchors {
-			if strings.Contains(flat, a) {
-				kept++
+			fctx, cancel := context.WithTimeout(ctx, cfg.PerFrame)
+			start := time.Now()
+			res, err := f.compactor.Compact(fctx, msgs, summarize,
+				compaction.Budget{VerbatimRecent: cfg.Verbatim, SegmentTokens: cfg.SegTokens})
+			elapsed := time.Since(start)
+			cancel()
+			if err != nil {
+				fmt.Printf("%-20s %4d ERROR after %s: %v\n", name, rep, elapsed.Round(time.Second), err)
+				rows = append(rows, []string{name, fmt.Sprint(rep), cfg.ConvID, "ERROR", err.Error()})
+				continue
 			}
+
+			sent := compaction.TotalTokens(tok, res.SendView)
+			reduction := 0.0
+			if rawTok > 0 {
+				reduction = 1 - float64(sent)/float64(rawTok)
+			}
+			flat := flattenSendView(res.SendView)
+			kept := 0
+			for _, a := range cfg.Anchors {
+				if strings.Contains(flat, a) {
+					kept++
+				}
+			}
+			grounded, bullets := 0, 0
+			for _, s := range res.Summaries {
+				g, n := compaction.GroundedBullets(s, rawFlat)
+				grounded += g
+				bullets += n
+			}
+			groundedCol := "-"
+			if bullets > 0 {
+				groundedCol = fmt.Sprintf("%d/%d", grounded, bullets)
+			}
+			valid := llm.IsValidPairing(res.SendView)
+			fmt.Printf("%-20s %4d %7.0f%% %7d/%-2d %10s %8d %6v %8s\n",
+				name, rep, reduction*100, kept, len(cfg.Anchors), groundedCol, calls, valid,
+				elapsed.Round(time.Second))
+			rows = append(rows, []string{
+				name, fmt.Sprint(rep), cfg.ConvID,
+				fmt.Sprint(rawTok), fmt.Sprint(sent), fmt.Sprintf("%.3f", reduction),
+				fmt.Sprint(kept), fmt.Sprint(len(cfg.Anchors)),
+				fmt.Sprint(grounded), fmt.Sprint(bullets),
+				fmt.Sprint(calls), fmt.Sprint(valid),
+				fmt.Sprintf("%.1f", elapsed.Seconds()),
+			})
 		}
-		grounded, bullets := 0, 0
-		for _, s := range res.Summaries {
-			g, n := compaction.GroundedBullets(s, rawFlat)
-			grounded += g
-			bullets += n
-		}
-		groundedCol := "-"
-		if bullets > 0 {
-			groundedCol = fmt.Sprintf("%d/%d", grounded, bullets)
-		}
-		valid := llm.IsValidPairing(res.SendView)
-		fmt.Printf("%-20s %7.0f%% %7d/%-2d %10s %8d %6v %8s\n",
-			name, reduction*100, kept, len(cfg.Anchors), groundedCol, calls, valid,
-			elapsed.Round(time.Second))
-		rows = append(rows, []string{
-			name, cfg.ConvID,
-			fmt.Sprint(rawTok), fmt.Sprint(sent), fmt.Sprintf("%.3f", reduction),
-			fmt.Sprint(kept), fmt.Sprint(len(cfg.Anchors)),
-			fmt.Sprint(grounded), fmt.Sprint(bullets),
-			fmt.Sprint(calls), fmt.Sprint(valid),
-			fmt.Sprintf("%.1f", elapsed.Seconds()),
-		})
 	}
 
 	if cfg.CSVPath != "" {
@@ -178,22 +200,41 @@ func loadConvWindow(ctx context.Context, cfg matrixConfig) ([]llm.Message, error
 }
 
 // ollamaSummarizer builds a SummarizeFunc that renders the frame's prompt and
-// calls Ollama directly — no running agent needed.
-func ollamaSummarizer(base *url.URL, model string, build func([]llm.Message) string) compaction.SummarizeFunc {
+// calls Ollama directly — no running agent needed. When dump is non-nil it
+// receives every prompt/response pair for post-mortems: ParseSummary is
+// lenient by design, so a format-breaking model reply degrades to an empty
+// summary silently and only the raw text can explain a bad score.
+func ollamaSummarizer(base *url.URL, model string, build func([]llm.Message) string,
+	dump func(prompt, response string)) compaction.SummarizeFunc {
 	client := ollamaapi.NewClient(base, http.DefaultClient)
 	return func(ctx context.Context, msgs []llm.Message) (compaction.StructuredSummary, error) {
 		stream := false
+		prompt := build(msgs)
 		var out strings.Builder
-		req := &ollamaapi.GenerateRequest{Model: model, Prompt: build(msgs), Stream: &stream}
+		req := &ollamaapi.GenerateRequest{Model: model, Prompt: prompt, Stream: &stream}
 		err := client.Generate(ctx, req, func(r ollamaapi.GenerateResponse) error {
 			out.WriteString(r.Response)
 			return nil
 		})
+		if dump != nil {
+			dump(prompt, out.String())
+		}
 		if err != nil {
 			return compaction.StructuredSummary{}, err
 		}
 		return compaction.ParseSummary(out.String()), nil
 	}
+}
+
+// sanitize makes a frame name filesystem-friendly for dump filenames.
+func sanitize(name string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '(', ')', '/', ' ':
+			return '-'
+		}
+		return r
+	}, name)
 }
 
 // appendCSV appends rows, writing the header first when the file is new.
@@ -207,7 +248,7 @@ func appendCSV(path string, rows [][]string) error {
 	w := csv.NewWriter(f)
 	if os.IsNotExist(statErr) {
 		if err := w.Write([]string{
-			"frame", "conv", "raw_tokens", "sent_tokens", "reduction",
+			"frame", "rep", "conv", "raw_tokens", "sent_tokens", "reduction",
 			"anchors_kept", "anchors_total", "grounded", "bullets",
 			"model_calls", "pairing_valid", "elapsed_s",
 		}); err != nil {

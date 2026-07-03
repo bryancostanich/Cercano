@@ -1187,7 +1187,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case contextRegenProgressMsg:
 		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("context-regen: " + msg.line)})
 		m.refreshViewport()
-		return m, msg.next
+		// Also poll the meter: the server reports Compacting=true while the
+		// rebuild holds the compaction claim, and that flag (via ctxUsageMsg)
+		// is what starts the meter's compacting animation and its re-poll
+		// loop. Without this fetch the meter would sit still until done.
+		return m, tea.Batch(msg.next, fetchContextUsage(m.agent, m.convID))
 
 	case contextRegenDoneMsg:
 		if msg.err != "" || !msg.ok {

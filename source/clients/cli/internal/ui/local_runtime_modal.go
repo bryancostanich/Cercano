@@ -39,6 +39,13 @@ const (
 	// runtimeModalFailed means the install RPC returned an error (nonzero
 	// exit, missing brew, unsupported platform). Offers "Retry" and "Close".
 	runtimeModalFailed
+	// runtimeModalNeedsModel means the install subprocess itself succeeded
+	// (llama-server binary is now available) but post-install detection
+	// still can't proceed because no default GGUF model is set. This is
+	// distinct from Failed — retrying the install won't help; the user
+	// needs to drop a .gguf file into ~/.cercano/models/ or set
+	// llama_server.default_model in config.yaml.
+	runtimeModalNeedsModel
 )
 
 // localRuntimeInstallModal owns the modal's transient state — the reason we
@@ -93,6 +100,24 @@ func (mo *localRuntimeInstallModal) appendLog(line string) {
 func (mo *localRuntimeInstallModal) setFailed(msg string) {
 	mo.state = runtimeModalFailed
 	mo.errMsg = msg
+}
+
+// setNeedsModel transitions to the "install succeeded, but pick a model"
+// state. Retry is disabled here — retrying the install can't fix a
+// missing / ambiguous GGUF selection.
+func (mo *localRuntimeInstallModal) setNeedsModel(msg string) {
+	mo.state = runtimeModalNeedsModel
+	mo.errMsg = msg
+}
+
+// installErrorIsMissingModel reports whether an install-done terminal error
+// indicates the install itself succeeded but post-install detection can't
+// pick a GGUF model. Matches the format from
+// llamaserver.DetectError.Error() (kept coupled deliberately —
+// TestInstallErrorIsMissingModel guards the string contract).
+func installErrorIsMissingModel(errMsg string) bool {
+	return strings.Contains(errMsg, "install completed but detection still fails") &&
+		strings.Contains(errMsg, "detection: model:")
 }
 
 // View renders the modal as a bordered box sized to fit the given terminal
@@ -175,6 +200,8 @@ func (mo *localRuntimeInstallModal) renderHeader(styles theme.Styles) string {
 		title = "Install complete"
 	case runtimeModalFailed:
 		title = "Install failed"
+	case runtimeModalNeedsModel:
+		title = "llama-server ready — pick a GGUF model"
 	}
 	return styles.Primary.Bold(true).Render(title)
 }
@@ -244,6 +271,17 @@ func (mo *localRuntimeInstallModal) renderActions(styles theme.Styles) string {
 			errLine = "\n" + styles.Error.Render("  "+mo.errMsg)
 		}
 		return primary + "    " + secondary + errLine
+	case runtimeModalNeedsModel:
+		// The install itself succeeded — Retry would just reinstall
+		// llama-server pointlessly. The user needs to either drop a
+		// .gguf into ~/.cercano/models/ or set llama_server.default_model
+		// in config.yaml. Copy walks them through both paths.
+		primary := styles.Success.Bold(true).Render("[Esc] Close")
+		hint := styles.Muted.Render("Next steps:\n" +
+			"  • add a .gguf model to ~/.cercano/models/\n" +
+			"  • or set llama_server.default_model in ~/.config/cercano/config.yaml\n" +
+			"Then reopen this modal (F1) to verify.")
+		return primary + "\n" + hint
 	}
 	return ""
 }
@@ -309,6 +347,11 @@ func (m Model) handleLocalRuntimeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) 
 			m.localRuntimeModal = nil
 			m.pendingRuntimeSwitch = "" // failed install; drop the queued switch too
 		}
+	case runtimeModalNeedsModel:
+		// Any key dismisses — there's no in-modal recovery for a
+		// missing GGUF; the user resolves it out-of-band and reopens.
+		m.localRuntimeModal = nil
+		m.pendingRuntimeSwitch = ""
 	}
 	return m, nil
 }

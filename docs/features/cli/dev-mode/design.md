@@ -1,6 +1,6 @@
 # Development Mode (`/d`) — Design
 
-**Status:** Design approved 2026-07-03. Implementation not started.
+**Status:** Implemented 2026-07-03. See plan.md for the task breakdown.
 
 Cercano should be able to work on itself. Today, starting a "work on Cercano"
 session means manually cd-ing into the repo, re-explaining the architecture,

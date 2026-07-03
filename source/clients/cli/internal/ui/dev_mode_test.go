@@ -36,3 +36,14 @@ func TestApplyDevMode(t *testing.T) {
 		t.Fatalf("no dev-mode system entry appended: %+v", entries)
 	}
 }
+
+func TestRenderDevChip(t *testing.T) {
+	off := Model{}
+	if got := off.renderDevChip(); got != "" {
+		t.Fatalf("chip should be empty when dev mode off, got %q", got)
+	}
+	on := Model{workDirOverride: "/tmp/cercano-repo"}
+	if got := on.renderDevChip(); !strings.Contains(got, "DEV") {
+		t.Fatalf("chip missing DEV label: %q", got)
+	}
+}

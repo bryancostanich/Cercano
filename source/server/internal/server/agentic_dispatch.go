@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 
@@ -15,7 +16,12 @@ import (
 // tools, it grants the named subset — but bounded by the parent permission
 // mode: a non-interactive dispatch under a non-bypass mode cannot wield W/X
 // tools (no human to confirm), so those are dropped (and logged).
-func (s *Server) grantedRegistry(tools []string, mode agent.PermissionMode) *agenttools.Registry {
+//
+// Returns an error when every requested tool name is unknown: spawning a
+// sub-agent with an empty catalog is never what the caller intended, and the
+// resulting loop (model improvises tool calls with no schema, gets errors,
+// hits the 3-consecutive-error abort) is far worse than a clear error.
+func (s *Server) grantedRegistry(tools []string, mode agent.PermissionMode) (*agenttools.Registry, error) {
 	var candidate *agenttools.Registry
 	if len(tools) > 0 {
 		candidate = s.toolRegistry.Subset(tools)
@@ -30,6 +36,9 @@ func (s *Server) grantedRegistry(tools []string, mode agent.PermissionMode) *age
 		if len(unknown) > 0 {
 			log.Printf("[dispatch] subagent grant: ignored unknown tool names %v", unknown)
 		}
+		if len(candidate.All()) == 0 {
+			return nil, fmt.Errorf("dispatch: none of the requested tools are registered: %v (use tool names as they appear in the registry, without any host prefix)", tools)
+		}
 	} else {
 		candidate = agenttools.NewRegistry()
 		for _, t := range s.toolRegistry.Filter(agenttools.PermR) {
@@ -37,7 +46,7 @@ func (s *Server) grantedRegistry(tools []string, mode agent.PermissionMode) *age
 		}
 	}
 	if mode == agent.ModeBypass {
-		return candidate
+		return candidate, nil
 	}
 	bounded := agenttools.NewRegistry()
 	var dropped []string
@@ -51,7 +60,10 @@ func (s *Server) grantedRegistry(tools []string, mode agent.PermissionMode) *age
 	if len(dropped) > 0 {
 		log.Printf("[dispatch] subagent grant bounded by parent permission mode %q: dropped non-read tools %v", mode, dropped)
 	}
-	return bounded
+	if len(bounded.All()) == 0 {
+		return nil, fmt.Errorf("dispatch: no read-only tools available in the requested grant %v under permission mode %q (only read-tier tools survive a non-bypass mode; either request some R-tier tools or run in bypass mode)", tools, mode)
+	}
+	return bounded, nil
 }
 
 // runAgenticDispatch implements dispatch.AgenticRunner. It is wired onto the
@@ -68,7 +80,10 @@ func (s *Server) runAgenticDispatch(ctx context.Context, spec dispatch.Spec, sel
 	if s.permStore != nil {
 		mode = s.permStore.Mode()
 	}
-	reg := s.grantedRegistry(spec.Tools, mode)
+	reg, err := s.grantedRegistry(spec.Tools, mode)
+	if err != nil {
+		return dispatch.Result{}, err
+	}
 
 	// 2. Build system prompt (env grounding + steering block + project context).
 	system := s.buildSystemPrompt(spec.WorkDir)

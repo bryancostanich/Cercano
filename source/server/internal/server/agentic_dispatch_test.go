@@ -181,7 +181,11 @@ func TestRunAgenticDispatch_ExplicitToolsSubset(t *testing.T) {
 func TestSetDispatchEngine_WiresAgenticRunner(t *testing.T) {
 	srv := NewServer(nil, nil, nil, nil, nil, nil)
 	// Minimal registry so runAgenticDispatch doesn't panic on nil toolRegistry.
+	// Include one R-tier tool so the default grant isn't empty; the wiring
+	// test doesn't actually exercise the tool, just proves the runner is
+	// installed and returns text.
 	reg := agenttools.NewRegistry()
+	reg.MustRegister(stubDispatchTool{name: "r_stub", perm: agenttools.PermR})
 	srv.SetToolRegistry(reg)
 
 	// modeFn returning nil would panic inside Select; use a provider that

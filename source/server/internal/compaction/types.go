@@ -36,7 +36,7 @@ type Budget struct {
 
 // Result is what a Compactor produces.
 type Result struct {
-	SendView  []llm.Message      // assembled, pairing-valid array to send
+	SendView  []llm.Message       // assembled, pairing-valid array to send
 	Summaries []StructuredSummary // summaries produced (for persistence/inspection)
 }
 

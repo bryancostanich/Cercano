@@ -15,7 +15,7 @@ type Metrics struct {
 	Reduction      float64 // 1 - SentTokens/RawTokens (0 when RawTokens == 0)
 	AnchorsKept    int
 	AnchorsTotal   int
-	DedupCollapsed int  // count of elision stub markers in the send-view
+	DedupCollapsed int // count of elision stub markers in the send-view
 	PairingValid   bool
 	ModelCalls     int
 }

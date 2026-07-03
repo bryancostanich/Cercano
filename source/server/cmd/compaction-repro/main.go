@@ -118,15 +118,32 @@ func main() {
 	state.SegmentSummariesJSON = ""
 	state.ConsolidatedJSON = ""
 
-	fmt.Println("running compactor.Advance...")
+	fmt.Println("running compactor.Advance in a loop until more=false...")
 	start := time.Now()
-	newState, changed, more, err := compactor.Advance(ctx, turns, state, summarize, cfg, tok)
-	elapsed := time.Since(start)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "\nAdvance failed after %s: %v\n", elapsed, err)
-		os.Exit(1)
+	var newState = state
+	var changed, more bool
+	pass := 0
+	for {
+		pass++
+		passStart := time.Now()
+		next, chg, m, err := compactor.Advance(ctx, turns, newState, summarize, cfg, tok)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\nAdvance pass %d failed after %s: %v\n", pass, time.Since(start), err)
+			os.Exit(1)
+		}
+		fmt.Printf("pass=%d elapsed=%s summarizer_calls_total=%d changed=%v more=%v\n",
+			pass, time.Since(passStart), summarizerCalls, chg, m)
+		newState = next
+		if chg {
+			changed = true
+		}
+		more = m
+		if !more || !chg {
+			break
+		}
 	}
-	fmt.Printf("elapsed=%s summarizer_calls=%d changed=%v more=%v\n\n", elapsed, summarizerCalls, changed, more)
+	elapsed := time.Since(start)
+	fmt.Printf("\ntotal_elapsed=%s summarizer_calls=%d passes=%d\n\n", elapsed, summarizerCalls, pass)
 	if !changed {
 		fmt.Println("compactor.Advance did not run — inputs may be below activation floor. Try -floor 500 or a longer conversation.")
 		return

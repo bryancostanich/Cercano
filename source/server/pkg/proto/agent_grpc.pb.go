@@ -48,6 +48,7 @@ const (
 	Agent_DownloadRuntimeModel_FullMethodName       = "/agent.Agent/DownloadRuntimeModel"
 	Agent_CancelRuntimeModelDownload_FullMethodName = "/agent.Agent/CancelRuntimeModelDownload"
 	Agent_DeleteRuntimeModel_FullMethodName         = "/agent.Agent/DeleteRuntimeModel"
+	Agent_RefreshOnlineCatalog_FullMethodName       = "/agent.Agent/RefreshOnlineCatalog"
 	Agent_StreamRuntimeLogs_FullMethodName          = "/agent.Agent/StreamRuntimeLogs"
 	Agent_ListSkills_FullMethodName                 = "/agent.Agent/ListSkills"
 	Agent_GetSkill_FullMethodName                   = "/agent.Agent/GetSkill"
@@ -153,6 +154,10 @@ type AgentClient interface {
 	DownloadRuntimeModel(ctx context.Context, in *DownloadRuntimeModelRequest, opts ...grpc.CallOption) (*DownloadRuntimeModelResponse, error)
 	CancelRuntimeModelDownload(ctx context.Context, in *CancelRuntimeModelDownloadRequest, opts ...grpc.CallOption) (*CancelRuntimeModelDownloadResponse, error)
 	DeleteRuntimeModel(ctx context.Context, in *DeleteRuntimeModelRequest, opts ...grpc.CallOption) (*DeleteRuntimeModelResponse, error)
+	// RefreshOnlineCatalog forces a fresh fetch of the online model catalog
+	// (Ollama's public library) — bypasses the 24h TTL. Returns after the
+	// fetch completes. Used by the CLI's dashboard "R" refresh key.
+	RefreshOnlineCatalog(ctx context.Context, in *RefreshOnlineCatalogRequest, opts ...grpc.CallOption) (*RefreshOnlineCatalogResponse, error)
 	StreamRuntimeLogs(ctx context.Context, in *StreamRuntimeLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RuntimeLogEntry], error)
 	// ListSkills returns the catalog of available Agent Skills (name + description).
 	ListSkills(ctx context.Context, in *ListSkillsRequest, opts ...grpc.CallOption) (*ListSkillsResponse, error)
@@ -513,6 +518,16 @@ func (c *agentClient) DeleteRuntimeModel(ctx context.Context, in *DeleteRuntimeM
 	return out, nil
 }
 
+func (c *agentClient) RefreshOnlineCatalog(ctx context.Context, in *RefreshOnlineCatalogRequest, opts ...grpc.CallOption) (*RefreshOnlineCatalogResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RefreshOnlineCatalogResponse)
+	err := c.cc.Invoke(ctx, Agent_RefreshOnlineCatalog_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *agentClient) StreamRuntimeLogs(ctx context.Context, in *StreamRuntimeLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RuntimeLogEntry], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[2], Agent_StreamRuntimeLogs_FullMethodName, cOpts...)
@@ -823,6 +838,10 @@ type AgentServer interface {
 	DownloadRuntimeModel(context.Context, *DownloadRuntimeModelRequest) (*DownloadRuntimeModelResponse, error)
 	CancelRuntimeModelDownload(context.Context, *CancelRuntimeModelDownloadRequest) (*CancelRuntimeModelDownloadResponse, error)
 	DeleteRuntimeModel(context.Context, *DeleteRuntimeModelRequest) (*DeleteRuntimeModelResponse, error)
+	// RefreshOnlineCatalog forces a fresh fetch of the online model catalog
+	// (Ollama's public library) — bypasses the 24h TTL. Returns after the
+	// fetch completes. Used by the CLI's dashboard "R" refresh key.
+	RefreshOnlineCatalog(context.Context, *RefreshOnlineCatalogRequest) (*RefreshOnlineCatalogResponse, error)
 	StreamRuntimeLogs(*StreamRuntimeLogsRequest, grpc.ServerStreamingServer[RuntimeLogEntry]) error
 	// ListSkills returns the catalog of available Agent Skills (name + description).
 	ListSkills(context.Context, *ListSkillsRequest) (*ListSkillsResponse, error)
@@ -961,6 +980,9 @@ func (UnimplementedAgentServer) CancelRuntimeModelDownload(context.Context, *Can
 }
 func (UnimplementedAgentServer) DeleteRuntimeModel(context.Context, *DeleteRuntimeModelRequest) (*DeleteRuntimeModelResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteRuntimeModel not implemented")
+}
+func (UnimplementedAgentServer) RefreshOnlineCatalog(context.Context, *RefreshOnlineCatalogRequest) (*RefreshOnlineCatalogResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RefreshOnlineCatalog not implemented")
 }
 func (UnimplementedAgentServer) StreamRuntimeLogs(*StreamRuntimeLogsRequest, grpc.ServerStreamingServer[RuntimeLogEntry]) error {
 	return status.Error(codes.Unimplemented, "method StreamRuntimeLogs not implemented")
@@ -1554,6 +1576,24 @@ func _Agent_DeleteRuntimeModel_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Agent_RefreshOnlineCatalog_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RefreshOnlineCatalogRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).RefreshOnlineCatalog(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_RefreshOnlineCatalog_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).RefreshOnlineCatalog(ctx, req.(*RefreshOnlineCatalogRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Agent_StreamRuntimeLogs_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(StreamRuntimeLogsRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -2032,6 +2072,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteRuntimeModel",
 			Handler:    _Agent_DeleteRuntimeModel_Handler,
+		},
+		{
+			MethodName: "RefreshOnlineCatalog",
+			Handler:    _Agent_RefreshOnlineCatalog_Handler,
 		},
 		{
 			MethodName: "ListSkills",

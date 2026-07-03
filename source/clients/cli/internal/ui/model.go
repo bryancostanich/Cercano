@@ -208,6 +208,13 @@ type Model struct {
 	// input for one-key re-submit. Cleared on successful streamEndMsg.
 	lastSubmittedPrompt string
 
+	// currentOpenRuntime mirrors config.open_runtime — updated by the
+	// configLoadedMsg handler on startup and after each config edit.
+	// The install modal reads this to decide whether to prompt the user
+	// to switch runtimes after a successful install (only meaningful
+	// when the install target differs from what's currently active).
+	currentOpenRuntime string
+
 	// openRuntimeModal is the open install-modal state (nil = closed). It
 	// walks a small state machine — idle → running → done|failed — driven
 	// by InstallOpenRuntime stream events.
@@ -485,7 +492,8 @@ func invokeToolCmd(ag *agentclient.Client, name, argsJSON string) tea.Cmd {
 
 // configLoadedMsg carries the result of the startup / post-edit GetConfig RPC.
 type configLoadedMsg struct {
-	OpenModel      string
+	OpenModel   string
+	OpenRuntime string
 	CloudModel      string
 	CloudConfigured bool
 }
@@ -510,7 +518,8 @@ func fetchConfigCmd(ag *agentclient.Client) tea.Cmd {
 		// while a profile with a keychain-stored key is happily routing.
 		configured := cfg.CloudState == "ok"
 		return configLoadedMsg{
-			OpenModel:      cfg.OpenModel,
+			OpenModel:   cfg.OpenModel,
+			OpenRuntime: cfg.OpenRuntime,
 			CloudModel:      cfg.CloudModel,
 			CloudConfigured: configured,
 		}
@@ -1172,6 +1181,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.OpenModel != "" {
 			m.lastModel = msg.OpenModel
 		}
+		// currentLocalRuntime is used by the install modal's OfferSwitch
+		// state to decide whether to prompt "switch runtime after
+		// install?" — empty is a legitimate value (defaults to ollama),
+		// so we always take the fresh value from the config load.
+		m.currentOpenRuntime = msg.OpenRuntime
 		if msg.CloudConfigured {
 			m.cloudModel = msg.CloudModel
 		} else {
@@ -1254,18 +1268,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openRuntimeModal.setFailed("install exited with error")
 			m.pendingRuntimeSwitch = ""
 		default:
-			// Success — wait for OpenRuntimeStatusChanged{ok:true} to
-			// confirm the runtime is actually usable, then flip to done.
-			// If the event doesn't arrive within a reasonable window we
-			// still show the completion to unblock the user.
-			m.openRuntimeModal.state = runtimeModalDone
-			// If the settings gate queued a runtime switch, dispatch it
-			// now — the modal's install succeeded so the runtime is
-			// ready to use.
+			// Success. Three sub-paths:
+			//   1. A runtime switch was pre-queued (user came via the
+			//      settings dropdown) → dispatch it and flip to Done.
+			//   2. No switch queued AND llama_server isn't the current
+			//      runtime → the user came via the F1 chip and probably
+			//      wants to actually use what they just installed. Ask
+			//      explicitly rather than silently deciding either way.
+			//   3. No switch queued AND llama_server IS already active
+			//      → just flip to Done.
 			if m.pendingRuntimeSwitch != "" {
 				runtime := m.pendingRuntimeSwitch
 				m.pendingRuntimeSwitch = ""
+				m.openRuntimeModal.state = runtimeModalDone
 				return m, dispatchOpenRuntimeSwitch(m.agent, runtime)
+			}
+			// Normalize the empty default: server treats empty as ollama.
+			active := m.currentOpenRuntime
+			if active == "" {
+				active = "ollama"
+			}
+			if active != "llama_server" {
+				m.openRuntimeModal.setOfferSwitch("llama_server", active)
+			} else {
+				m.openRuntimeModal.state = runtimeModalDone
 			}
 		}
 		return m, nil

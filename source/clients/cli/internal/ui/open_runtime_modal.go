@@ -46,6 +46,14 @@ const (
 	// needs to drop a .gguf file into ~/.cercano/models/ or set
 	// llama_server.default_model in config.yaml.
 	runtimeModalNeedsModel
+	// runtimeModalOfferSwitch means the install completed successfully
+	// but the runtime we just made available (llama_server) is not the
+	// runtime currently selected in config.local_runtime. Ask the user
+	// whether to make it the active runtime. This is only entered when
+	// the modal was opened from the F1 status-chip path — the settings-
+	// dropdown path pre-queues the switch via pendingRuntimeSwitch and
+	// bypasses this state.
+	runtimeModalOfferSwitch
 )
 
 // openRuntimeInstallModal owns the modal's transient state — the reason we
@@ -70,6 +78,12 @@ type openRuntimeInstallModal struct {
 	// stream is opened, called on Esc during running-state to abort. nil
 	// when no install is in flight.
 	cancel context.CancelFunc
+	// offerRuntime / activeRuntime carry the copy for runtimeModalOfferSwitch.
+	// offerRuntime is the runtime id we'd activate (e.g. "llama_server");
+	// activeRuntime is what's currently active (e.g. "ollama") so the
+	// [Esc] Keep <name> label can name it correctly.
+	offerRuntime  string
+	activeRuntime string
 }
 
 // newOpenRuntimeInstallModal opens the modal in idle state carrying the
@@ -108,6 +122,17 @@ func (mo *openRuntimeInstallModal) setFailed(msg string) {
 func (mo *openRuntimeInstallModal) setNeedsModel(msg string) {
 	mo.state = runtimeModalNeedsModel
 	mo.errMsg = msg
+}
+
+// setOfferSwitch transitions to the "install succeeded, switch runtime?"
+// state. offerRuntime is the runtime id (e.g. "llama_server") that would
+// be activated on Enter; activeRuntime is the currently-active id used
+// to render the "keep <name>" option so users know what they're
+// declining.
+func (mo *openRuntimeInstallModal) setOfferSwitch(offerRuntime, activeRuntime string) {
+	mo.state = runtimeModalOfferSwitch
+	mo.offerRuntime = offerRuntime
+	mo.activeRuntime = activeRuntime
 }
 
 // installErrorIsMissingModel reports whether an install-done terminal error
@@ -202,6 +227,8 @@ func (mo *openRuntimeInstallModal) renderHeader(styles theme.Styles) string {
 		title = "Install failed"
 	case runtimeModalNeedsModel:
 		title = "llama-server ready — pick a GGUF model"
+	case runtimeModalOfferSwitch:
+		title = "llama-server ready — switch to it?"
 	}
 	return styles.Primary.Bold(true).Render(title)
 }
@@ -282,6 +309,19 @@ func (mo *openRuntimeInstallModal) renderActions(styles theme.Styles) string {
 			"  • or set llama_server.default_model in ~/.config/cercano/config.yaml\n" +
 			"Then reopen this modal (F1) to verify.")
 		return primary + "\n" + hint
+	case runtimeModalOfferSwitch:
+		// Install succeeded and we detected the runtime is not the
+		// currently-active one. Ask explicitly rather than deciding.
+		primary := styles.Success.Bold(true).Render("[Enter] Switch to " + mo.offerRuntime)
+		keepLabel := "[Esc] Keep " + mo.activeRuntime
+		if mo.activeRuntime == "" {
+			// currentLocalRuntime is empty by default (server treats
+			// empty as ollama). Show that to the user rather than an
+			// awkward blank.
+			keepLabel = "[Esc] Keep ollama"
+		}
+		secondary := styles.Muted.Render(keepLabel)
+		return primary + "    " + secondary
 	}
 	return ""
 }
@@ -352,6 +392,18 @@ func (m Model) handleOpenRuntimeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		// missing GGUF; the user resolves it out-of-band and reopens.
 		m.openRuntimeModal = nil
 		m.pendingRuntimeSwitch = ""
+	case runtimeModalOfferSwitch:
+		if key == "enter" {
+			// Confirmed: fire UpdateConfig(local-runtime=offerRuntime).
+			runtime := m.openRuntimeModal.offerRuntime
+			m.openRuntimeModal = nil
+			m.pendingRuntimeSwitch = ""
+			return m, dispatchOpenRuntimeSwitch(m.agent, runtime)
+		}
+		if key == "esc" || key == "q" {
+			m.openRuntimeModal = nil
+			m.pendingRuntimeSwitch = ""
+		}
 	}
 	return m, nil
 }

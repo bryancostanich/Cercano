@@ -22,18 +22,25 @@ func (m AliasMap) display(canonical string) string {
 	return canonical
 }
 
-// capTool adapts a Capability to agenttools.Tool.
+// capTool adapts a Capability to agenttools.Tool. It captures the Services
+// container so the underlying Capability sees the same live collaborators
+// (providers, config, dispatch closure, project context) at execute time that
+// were wired when the registry was built.
 type capTool struct {
 	cap     capabilities.Capability
 	display string
+	svc     capabilities.Services
 }
 
-// AsTool wraps cap as an agenttools.Tool using the given display name.
-func AsTool(cap capabilities.Capability, display string) agenttools.Tool {
+// AsTool wraps cap as an agenttools.Tool using the given display name, binding
+// svc so the Capability's Execute call receives the wired Services. Passing a
+// zero-value Services silently disables Services-dependent capabilities
+// (dispatch/workflow, review, coproc caps); prefer the registry's Services.
+func AsTool(cap capabilities.Capability, display string, svc capabilities.Services) agenttools.Tool {
 	if display == "" {
 		display = cap.Name()
 	}
-	return capTool{cap: cap, display: display}
+	return capTool{cap: cap, display: display, svc: svc}
 }
 
 func (t capTool) Name() string                 { return t.display }
@@ -49,6 +56,7 @@ func (t capTool) Execute(ctx context.Context, args json.RawMessage) (*agenttools
 		// behavior-preserving for the migrated tools.
 		RequestPermission: func(context.Context, string) (bool, error) { return true, nil },
 		Emit:              func(string) {},
+		Svc:               t.svc,
 	}
 	res, err := t.cap.Execute(ctx, call)
 	if err != nil {
@@ -79,16 +87,20 @@ type SynonymMap map[string][]string
 // under its display name (from aliases, defaulting to canonical). Any
 // synonyms are registered as additional tools pointing at the same
 // capability, skipping any synonym that would collide with the primary name.
+// The registry's Services are captured on every wrapped tool so
+// Services-dependent capabilities (dispatch/workflow, review, coproc caps)
+// see the wired providers/config/dispatch closure at execute time.
 func BuildAgentRegistry(reg *capabilities.Registry, aliases AliasMap, synonyms SynonymMap) *agenttools.Registry {
 	ar := agenttools.NewRegistry()
+	svc := reg.Services()
 	for _, c := range reg.ForSurface(capabilities.SurfaceAgent) {
 		primary := aliases.display(c.Name())
-		ar.MustRegister(AsTool(c, primary))
+		ar.MustRegister(AsTool(c, primary, svc))
 		for _, syn := range synonyms[c.Name()] {
 			if syn == "" || syn == primary {
 				continue
 			}
-			ar.MustRegister(AsTool(c, syn))
+			ar.MustRegister(AsTool(c, syn, svc))
 		}
 	}
 	return ar

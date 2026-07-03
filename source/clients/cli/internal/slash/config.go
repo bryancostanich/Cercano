@@ -3,6 +3,7 @@ package slash
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -40,6 +41,18 @@ func RegisterConfig(r *Registry, c *agentclient.Client) {
 			value := strings.Join(args[1:], " ")
 
 			var update agentclient.ConfigUpdate
+			// Model taxonomy: /config models.<tier>.<provider> <model-id>
+			// (or models.default_provider cloud|open; "-" clears a slot).
+			// Key validation lives server-side in ApplyModelTierPatch.
+			if strings.HasPrefix(key, "models.") {
+				update.ModelTierKey = strings.TrimPrefix(key, "models.")
+				update.ModelTierValue = value
+				msg, err := c.UpdateConfig(ctx, update)
+				if err != nil {
+					return Result{Kind: ResultText, Text: "config update failed: " + err.Error()}
+				}
+				return Result{Kind: ResultText, Text: msg}
+			}
 			switch key {
 			case "local-runtime", "local_runtime":
 				update.OpenRuntime = value
@@ -68,7 +81,7 @@ func RegisterConfig(r *Registry, c *agentclient.Client) {
 			case "compaction-enabled", "compaction_enabled":
 				update.CompactionEnabled = value
 			default:
-				return Result{Kind: ResultText, Text: "unknown config key /" + key + " (valid: local-runtime, local-model, ollama-url, cloud-provider, cloud-model, cloud-api-key, cloud-base-url, elide-tool-results, lossy-tool-elision, raw-retention-days, compacted-retention-days, keep-forever)"}
+				return Result{Kind: ResultText, Text: "unknown config key /" + key + " (valid: local-runtime, local-model, ollama-url, cloud-provider, cloud-model, cloud-api-key, cloud-base-url, elide-tool-results, lossy-tool-elision, raw-retention-days, compacted-retention-days, keep-forever, models.<tier>.<provider>, models.default_provider)"}
 			}
 			msg, err := c.UpdateConfig(ctx, update)
 			if err != nil {
@@ -178,6 +191,19 @@ func formatConfig(cfg *agentclient.Config) string {
 		b.WriteString("on")
 	} else {
 		b.WriteString("off")
+	}
+	if len(cfg.ModelTiers) > 0 || cfg.ModelsDefaultProvider != "" {
+		b.WriteString("\n  models:")
+		b.WriteString("\n    default-provider: ")
+		b.WriteString(orDash(cfg.ModelsDefaultProvider))
+		keys := make([]string, 0, len(cfg.ModelTiers))
+		for k := range cfg.ModelTiers {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(&b, "\n    %s: %s", k, cfg.ModelTiers[k])
+		}
 	}
 	return b.String()
 }

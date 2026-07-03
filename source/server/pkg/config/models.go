@@ -1,5 +1,10 @@
 package config
 
+import (
+	"fmt"
+	"strings"
+)
+
 // Tier names a capability class in the model taxonomy. Consumers ask for a
 // tier, not a model id — which model serves a tier is configuration.
 type Tier string
@@ -81,6 +86,77 @@ func (p Provider) other() Provider {
 		return ProviderOpen
 	}
 	return ProviderCloud
+}
+
+// tierSlot returns a pointer to the named tier's struct, or nil for unknown.
+func (m *ModelsConfig) tierSlot(t Tier) *ModelTier {
+	switch t {
+	case TierMostCapable:
+		return &m.Tiers.MostCapable
+	case TierEveryday:
+		return &m.Tiers.Everyday
+	case TierFastLight:
+		return &m.Tiers.FastLight
+	case TierFastLightText:
+		return &m.Tiers.FastLightText
+	}
+	return nil
+}
+
+// ApplyModelTierPatch applies one sparse-patch update to the taxonomy:
+// key "default_provider" sets the preferred side (cloud|open); key
+// "<tier>.<provider>" sets that slot's model id, with "-" clearing it.
+// Returns a short change description for the caller's change log.
+func ApplyModelTierPatch(m *ModelsConfig, key, value string) (string, error) {
+	if key == "default_provider" {
+		p := Provider(value)
+		if p != ProviderCloud && p != ProviderOpen {
+			return "", fmt.Errorf("models.default_provider must be %q or %q, got %q", ProviderCloud, ProviderOpen, value)
+		}
+		m.DefaultProvider = p
+		return "models.default_provider=" + value, nil
+	}
+	tierName, provName, ok := strings.Cut(key, ".")
+	if !ok {
+		return "", fmt.Errorf("model tier key %q must be \"default_provider\" or \"<tier>.<provider>\"", key)
+	}
+	slot := m.tierSlot(Tier(tierName))
+	if slot == nil {
+		return "", fmt.Errorf("unknown model tier %q (want %s|%s|%s|%s)", tierName,
+			TierMostCapable, TierEveryday, TierFastLight, TierFastLightText)
+	}
+	if value == "-" {
+		value = ""
+	}
+	switch Provider(provName) {
+	case ProviderCloud:
+		slot.Cloud = value
+	case ProviderOpen:
+		slot.Open = value
+	default:
+		return "", fmt.Errorf("unknown provider %q in model tier key (want %s|%s)", provName, ProviderCloud, ProviderOpen)
+	}
+	shown := value
+	if shown == "" {
+		shown = "-"
+	}
+	return "models." + key + "=" + shown, nil
+}
+
+// TierSlots enumerates the non-empty tier slots keyed "<tier>.<provider>" —
+// the read-side view served by GetConfig and rendered by /config show.
+func (m ModelsConfig) TierSlots() map[string]string {
+	out := map[string]string{}
+	for _, t := range []Tier{TierMostCapable, TierEveryday, TierFastLight, TierFastLightText} {
+		mt := m.tier(t)
+		if mt.Cloud != "" {
+			out[string(t)+".cloud"] = mt.Cloud
+		}
+		if mt.Open != "" {
+			out[string(t)+".open"] = mt.Open
+		}
+	}
+	return out
 }
 
 // Resolve returns the configured model for a tier. prefer picks the provider

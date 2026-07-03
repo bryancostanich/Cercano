@@ -258,6 +258,12 @@ message UpdateConfigRequest {
   // open_runtime switch in the same request, so a request carrying both
   // resolves an ambiguous-model detection in one round trip.
   string open_default_model = 20;
+  // Model taxonomy (sparse-patch): model_tier_key selects the slot —
+  // "default_provider", or "<tier>.<provider>" with tier one of
+  // most_capable|everyday|fast_light|fast_light_text and provider cloud|open.
+  // model_tier_value is the model id; "-" clears the slot. Empty key = unchanged.
+  string model_tier_key = 21;
+  string model_tier_value = 22;
 }
 
 // Runtime configuration update response.
@@ -665,6 +671,10 @@ message GetConfigResponse {
   string watchdog_mode = 20;
   string watchdog_checks = 21;          // comma-joined
   string watchdog_escalate_after = 22;  // int as string
+  // Model taxonomy — current tier slots, keyed "<tier>.<provider>" (only
+  // non-empty slots are present), plus the default provider side.
+  map<string, string> model_tiers = 23;
+  string models_default_provider = 24;
 }
 
 message ListSkillsRequest {}

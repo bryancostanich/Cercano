@@ -1,9 +1,11 @@
 package server
 
 import (
+	"strings"
 	"testing"
 
 	"cercano/source/server/pkg/config"
+	"cercano/source/server/pkg/proto"
 )
 
 // TestResolveTierModel_EverydayFallsThroughToLiveConfig pins the no-stale-
@@ -72,5 +74,67 @@ func TestWatchdogModelFor(t *testing.T) {
 	mc.Tiers.FastLightText.Open = ""
 	if got := watchdogModelFor(wc, mc); got != "" {
 		t.Errorf("cloud-only tier: got %q, want empty (no cross-provider leak)", got)
+	}
+}
+
+// TestUpdateConfig_ModelTier pins the /config write path: a model_tier_key
+// patch updates the taxonomy, broadcasts the change, rebuilds the watchdog
+// (its one-shot model is resolved at build time), and reports via GetConfig.
+func TestUpdateConfig_ModelTier(t *testing.T) {
+	s, _ := newTestServer()
+	s.events = newEventHub()
+	s.currentConfig.Watchdog.Enabled = true
+	s.watchdog = s.buildWatchdog()
+	oldWatchdog := s.watchdog
+	ch, unsub := s.events.subscribe()
+	defer unsub()
+
+	resp, err := s.UpdateConfig(t.Context(), &proto.UpdateConfigRequest{
+		ModelTierKey: "fast_light_text.open", ModelTierValue: "phi4:14b",
+	})
+	if err != nil || !resp.Success {
+		t.Fatalf("UpdateConfig: err=%v resp=%+v", err, resp)
+	}
+	if got := s.currentConfig.Models.Tiers.FastLightText.Open; got != "phi4:14b" {
+		t.Errorf("tier slot = %q, want phi4:14b", got)
+	}
+	if s.watchdog == oldWatchdog {
+		t.Error("watchdog should be rebuilt when a model tier changes (one-shot model is bound at build time)")
+	}
+	select {
+	case ev := <-ch:
+		cc := ev.GetConfigChanged()
+		if cc == nil || cc.Field != "models.fast_light_text.open" || cc.Value != "phi4:14b" {
+			t.Errorf("broadcast = %+v, want models.fast_light_text.open/phi4:14b", cc)
+		}
+	default:
+		t.Error("expected a ConfigChanged broadcast for the tier patch")
+	}
+
+	gc, err := s.GetConfig(t.Context(), &proto.GetConfigRequest{})
+	if err != nil {
+		t.Fatalf("GetConfig: %v", err)
+	}
+	if gc.ModelTiers["fast_light_text.open"] != "phi4:14b" {
+		t.Errorf("GetConfig.ModelTiers = %v", gc.ModelTiers)
+	}
+}
+
+// TestUpdateConfig_ModelTierInvalid pins that a bad key fails loudly without
+// mutating anything.
+func TestUpdateConfig_ModelTierInvalid(t *testing.T) {
+	s, _ := newTestServer()
+
+	resp, err := s.UpdateConfig(t.Context(), &proto.UpdateConfigRequest{
+		ModelTierKey: "medium_rare.open", ModelTierValue: "x",
+	})
+	if err != nil {
+		t.Fatalf("UpdateConfig transport err: %v", err)
+	}
+	if resp.Success {
+		t.Error("invalid tier key must fail")
+	}
+	if !strings.Contains(resp.Message, "medium_rare") {
+		t.Errorf("error should name the bad tier, got %q", resp.Message)
 	}
 }

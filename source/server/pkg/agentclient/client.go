@@ -227,6 +227,10 @@ type Config struct {
 	KeepForever            bool
 	// CompactionEnabled is the master switch for the summarization pass.
 	CompactionEnabled bool
+	// ModelTiers is the taxonomy's non-empty slots keyed "<tier>.<provider>";
+	// ModelsDefaultProvider is the preferred side ("cloud"|"open"|"").
+	ModelTiers            map[string]string
+	ModelsDefaultProvider string
 }
 
 // GetConfig fetches the agent's current runtime config.
@@ -258,6 +262,8 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 		CompactedRetentionDays: int(resp.GetCompactedRetentionDays()),
 		KeepForever:            resp.GetKeepForever(),
 		CompactionEnabled:      resp.GetCompactionEnabled(),
+		ModelTiers:             resp.GetModelTiers(),
+		ModelsDefaultProvider:  resp.GetModelsDefaultProvider(),
 	}, nil
 }
 
@@ -294,6 +300,11 @@ type ConfigUpdate struct {
 	KeepForever            string
 	// CompactionEnabled — sparse-patch bool. "" | "true" | "false".
 	CompactionEnabled string
+	// Model taxonomy sparse-patch: ModelTierKey is "default_provider" or
+	// "<tier>.<provider>"; ModelTierValue is the model id ("-" clears).
+	// Empty key = unchanged.
+	ModelTierKey   string
+	ModelTierValue string
 }
 
 // RuntimeStatus is the provider-neutral model/runtime dashboard snapshot.
@@ -1110,6 +1121,8 @@ func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, erro
 		CompactedRetentionDays: u.CompactedRetentionDays,
 		KeepForever:            u.KeepForever,
 		CompactionEnabled:      u.CompactionEnabled,
+		ModelTierKey:           u.ModelTierKey,
+		ModelTierValue:         u.ModelTierValue,
 	})
 	if err != nil {
 		return "", err

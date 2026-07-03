@@ -71,7 +71,10 @@ files:
 12 tests covering HTML parsing, manifest handling, blob streaming +
 Range resume, and cache atomic-write / staleness. All green.
 
-## Remaining work (chunks 2-5)
+## Implementation (chunks 2-5) — all shipped
+
+Everything below is implemented on this branch; the chunk descriptions
+are kept as the design rationale.
 
 ### Chunk 2: Server RPC integration
 
@@ -177,9 +180,29 @@ state (config, telemetry, permissions, crash log). TTL is hardcoded to
   UI while refreshing? Alternative: refresh in background, show
   timestamp updating in real time.
 
-## What's checkpointed
+## What shipped
 
-`2f8b02b4 feat(server): ollamacatalog package — online catalog fetcher,
-OCI blob client, on-disk cache` on branch `feat/model-catalog-online`.
+All chunks landed on `feat/model-catalog-online`:
 
-Next session picks up chunk 2.
+- ollamacatalog package: online catalog fetcher, OCI blob client,
+  on-disk cache (24h TTL at `~/.config/cercano/catalog-cache.json`)
+- Manager: cache loader + background refresher, wired into
+  `ListRuntimeModels` (merged + deduped, with `catalog_updated_at`)
+  and a `RefreshOnlineCatalog` RPC
+- OCI-backed downloads: `OCIResolver` on the runtime manager, JIT
+  manifest→blob resolution, server-side enrolment of un-enrolled
+  online entries via `OllamaRef` on the download request
+- CLI dashboard: catalog pane sources from `ListRuntimeModels` with
+  status-model fallback, freshness footer, ctrl+r refresh with
+  reentry guard
+- CLI install modal: "Browse models" primary action in the
+  NeedsModel state
+
+## Deferred
+
+- **Tag/quant picker**: online entries are family-level; downloads
+  default to `:latest` (`normalizeOllamaRef` in
+  `internal/server/server.go`). A picker needs a per-model tag-list
+  fetch (lazy, on selection) and a small chooser UI.
+- **HF escape hatch**: paste a HuggingFace URL for models not in
+  Ollama's library. Not blocking.

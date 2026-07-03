@@ -14,7 +14,8 @@ import (
 // Structured (not prose) so merges are deterministic and degradation is bounded.
 type StructuredSummary struct {
 	Goal        string            // the session's objective
-	Decisions   []string          // key decisions made
+	Decisions   []string          // key decisions made (confirmed / applied)
+	Proposals   []string          // designs, plans, or approaches proposed but not yet accepted or rejected
 	Files       map[string]string // path -> latest known state/summary
 	OpenThreads []string          // unresolved questions / next steps
 	State       string            // one-line current state

@@ -9,14 +9,36 @@ import (
 
 // BuildSummaryPrompt renders messages to a transcript and asks the model for a
 // fixed section-tagged summary. The format is parsed by ParseSummary.
+//
+// Prompt design notes:
+//   - PROPOSALS exists as its own slot so design/approach proposals that are
+//     still awaiting user approval have a home. Without it, the LLM had
+//     nowhere to record them (not a DECISION, not a FILE, not an OPEN
+//     one-liner) and would silently drop the proposal body — the failure
+//     mode that lost the models×tiers design in conversation
+//     80109e871fba4e18.
+//   - The fidelity guardrail tells the LLM to preserve config YAML, tier /
+//     enum / option lists, and function / RPC signatures verbatim rather
+//     than paraphrasing them. Those shapes are the load-bearing content of
+//     both proposals and decisions.
+//   - The dedup guardrail is a cheap fix for LLMs that occasionally loop
+//     and produce the same bullet repeated many times.
 func BuildSummaryPrompt(messages []llm.Message) string {
 	var b strings.Builder
 	b.WriteString("Summarize the following conversation span for later reference.\n")
+	b.WriteString("\n")
+	b.WriteString("Fidelity rules (apply to every section):\n")
+	b.WriteString("- Preserve verbatim any config YAML, code fences, tier / enum / field lists, and function / RPC / type signatures. Do NOT paraphrase these — copy the exact identifiers and shapes.\n")
+	b.WriteString("- Preserve exact identifier names (types, functions, fields, files, YAML keys) rather than describing them in prose.\n")
+	b.WriteString("- Within a section, each bullet must be unique — do not repeat the same bullet.\n")
+	b.WriteString("- A DECISION is confirmed or applied. A PROPOSAL is offered but not yet accepted or rejected. Do not promote proposals to decisions; do not drop proposals just because they are unconfirmed.\n")
+	b.WriteString("\n")
 	b.WriteString("Respond ONLY in this exact format, omitting a section if empty:\n\n")
 	b.WriteString("GOAL: <one line: the objective>\n")
-	b.WriteString("DECISIONS:\n- <key decision>\n")
+	b.WriteString("DECISIONS:\n- <confirmed decision>\n")
+	b.WriteString("PROPOSALS:\n- <design / approach / plan proposed but not yet accepted or rejected — include the proposal's concrete shape (config keys, tier names, signatures) verbatim>\n")
 	b.WriteString("FILES:\n- <path>: <latest state>\n")
-	b.WriteString("OPEN:\n- <unresolved thread>\n")
+	b.WriteString("OPEN:\n- <unresolved question or next step>\n")
 	b.WriteString("STATE: <one line: current state>\n\n")
 	b.WriteString("--- conversation ---\n")
 	for _, m := range messages {
@@ -37,7 +59,7 @@ func BuildSummaryPrompt(messages []llm.Message) string {
 }
 
 var summaryLabels = map[string]bool{
-	"GOAL": true, "DECISIONS": true, "FILES": true, "OPEN": true, "STATE": true,
+	"GOAL": true, "DECISIONS": true, "PROPOSALS": true, "FILES": true, "OPEN": true, "STATE": true,
 }
 
 // ParseSummary leniently extracts the section-tagged summary. Unknown/leading
@@ -68,6 +90,8 @@ func ParseSummary(text string) StructuredSummary {
 		switch section {
 		case "DECISIONS":
 			s.Decisions = append(s.Decisions, item)
+		case "PROPOSALS":
+			s.Proposals = append(s.Proposals, item)
 		case "OPEN":
 			s.OpenThreads = append(s.OpenThreads, item)
 		case "FILES":

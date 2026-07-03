@@ -16,5 +16,6 @@ func AssembleSendView(summary StructuredSummary, body []llm.Message) []llm.Messa
 
 func (s StructuredSummary) isEmpty() bool {
 	return s.Goal == "" && s.State == "" &&
-		len(s.Decisions) == 0 && len(s.OpenThreads) == 0 && len(s.Files) == 0
+		len(s.Decisions) == 0 && len(s.Proposals) == 0 &&
+		len(s.OpenThreads) == 0 && len(s.Files) == 0
 }

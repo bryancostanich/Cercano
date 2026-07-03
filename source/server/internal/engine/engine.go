@@ -73,9 +73,22 @@ type ChatResponse struct {
 }
 
 // InferenceEngine defines the interface for local text generation backends.
+// GenOptions carries per-call sampling parameters for a completion.
+type GenOptions struct {
+	// Temperature is the sampling temperature. Nil uses the engine's default;
+	// a pointer to 0 requests greedy decoding (deterministic output).
+	Temperature *float64
+}
+
+// Greedy returns GenOptions pinned to temperature 0 (deterministic decoding).
+func Greedy() GenOptions {
+	t := 0.0
+	return GenOptions{Temperature: &t}
+}
+
 type InferenceEngine interface {
-	Complete(ctx context.Context, model, prompt, systemPrompt string) (CompletionResult, error)
-	CompleteStream(ctx context.Context, model, prompt, systemPrompt string, onToken func(string)) (CompletionResult, error)
+	Complete(ctx context.Context, model, prompt, systemPrompt string, opts GenOptions) (CompletionResult, error)
+	CompleteStream(ctx context.Context, model, prompt, systemPrompt string, opts GenOptions, onToken func(string)) (CompletionResult, error)
 	ChatWithTools(ctx context.Context, req ChatRequest) (ChatResponse, error)
 	ListModels(ctx context.Context) ([]ModelInfo, error)
 	Name() string

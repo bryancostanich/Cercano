@@ -1,9 +1,9 @@
 package legacymodels
 
 import (
+	"cercano/source/server/internal/agent"
 	"context"
 	"testing"
-	"cercano/source/server/internal/agent"
 )
 
 func TestCloudModelProvider_Interface(t *testing.T) {

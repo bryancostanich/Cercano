@@ -36,13 +36,13 @@ func NewEngine(manager localruntime.Manager) *Engine {
 
 func (e *Engine) Name() string { return runtimeName }
 
-func (e *Engine) Complete(ctx context.Context, model, prompt, systemPrompt string) (engine.CompletionResult, error) {
+func (e *Engine) Complete(ctx context.Context, model, prompt, systemPrompt string, opts engine.GenOptions) (engine.CompletionResult, error) {
 	var messages []openAIMessage
 	if systemPrompt != "" {
 		messages = append(messages, openAIMessage{Role: "system", Content: systemPrompt})
 	}
 	messages = append(messages, openAIMessage{Role: "user", Content: prompt})
-	resp, err := e.chat(ctx, model, messages, nil, false, nil)
+	resp, err := e.chat(ctx, model, messages, nil, opts, false, nil)
 	if err != nil {
 		return engine.CompletionResult{}, err
 	}
@@ -53,13 +53,13 @@ func (e *Engine) Complete(ctx context.Context, model, prompt, systemPrompt strin
 	}, nil
 }
 
-func (e *Engine) CompleteStream(ctx context.Context, model, prompt, systemPrompt string, onToken func(string)) (engine.CompletionResult, error) {
+func (e *Engine) CompleteStream(ctx context.Context, model, prompt, systemPrompt string, opts engine.GenOptions, onToken func(string)) (engine.CompletionResult, error) {
 	var messages []openAIMessage
 	if systemPrompt != "" {
 		messages = append(messages, openAIMessage{Role: "system", Content: systemPrompt})
 	}
 	messages = append(messages, openAIMessage{Role: "user", Content: prompt})
-	resp, err := e.chat(ctx, model, messages, nil, true, onToken)
+	resp, err := e.chat(ctx, model, messages, nil, opts, true, onToken)
 	if err != nil {
 		return engine.CompletionResult{}, err
 	}
@@ -76,7 +76,7 @@ func (e *Engine) ChatWithTools(ctx context.Context, req engine.ChatRequest) (eng
 		messages = append(messages, openAIMessageFromEngine(msg))
 	}
 	model := req.Model
-	resp, err := e.chat(ctx, model, messages, req.Tools, false, nil)
+	resp, err := e.chat(ctx, model, messages, req.Tools, engine.GenOptions{}, false, nil)
 	if err != nil {
 		return engine.ChatResponse{}, err
 	}
@@ -121,7 +121,7 @@ type chatResult struct {
 	OutputTokens int
 }
 
-func (e *Engine) chat(ctx context.Context, model string, messages []openAIMessage, tools []engine.ToolSchemaJSON, stream bool, onToken func(string)) (chatResult, error) {
+func (e *Engine) chat(ctx context.Context, model string, messages []openAIMessage, tools []engine.ToolSchemaJSON, opts engine.GenOptions, stream bool, onToken func(string)) (chatResult, error) {
 	endpoint, resolvedModel, err := e.endpointFor(ctx, model)
 	if err != nil {
 		return chatResult{}, err
@@ -136,6 +136,7 @@ func (e *Engine) chat(ctx context.Context, model string, messages []openAIMessag
 		Stream:          stream,
 		ParseToolCalls:  len(tools) > 0,
 		ParallelToolUse: len(tools) > 0,
+		Temperature:     opts.Temperature,
 	}
 	if len(tools) > 0 {
 		payload.ToolChoice = "auto"
@@ -264,6 +265,9 @@ type chatCompletionRequest struct {
 	Stream          bool                    `json:"stream"`
 	ParseToolCalls  bool                    `json:"parse_tool_calls,omitempty"`
 	ParallelToolUse bool                    `json:"parallel_tool_calls,omitempty"`
+	// Temperature is a pointer so 0 (greedy decoding) survives serialization
+	// instead of being dropped as a zero value; nil keeps the server default.
+	Temperature *float64 `json:"temperature,omitempty"`
 }
 
 type openAIMessage struct {

@@ -1,10 +1,10 @@
 package legacymodels
 
 import (
+	"cercano/source/server/internal/agent"
 	"context"
 	"os"
 	"testing"
-	"cercano/source/server/internal/agent"
 )
 
 func TestCloudModelProvider_Integration_Gemini(t *testing.T) {

@@ -467,12 +467,12 @@ type namedTestEngine struct {
 
 func (e *namedTestEngine) Name() string { return e.name }
 
-func (e *namedTestEngine) Complete(ctx context.Context, model, prompt, systemPrompt string) (engine.CompletionResult, error) {
+func (e *namedTestEngine) Complete(ctx context.Context, model, prompt, systemPrompt string, opts engine.GenOptions) (engine.CompletionResult, error) {
 	return engine.CompletionResult{Output: e.name + ":" + model + ":" + prompt}, nil
 }
 
-func (e *namedTestEngine) CompleteStream(ctx context.Context, model, prompt, systemPrompt string, onToken func(string)) (engine.CompletionResult, error) {
-	return e.Complete(ctx, model, prompt, systemPrompt)
+func (e *namedTestEngine) CompleteStream(ctx context.Context, model, prompt, systemPrompt string, opts engine.GenOptions, onToken func(string)) (engine.CompletionResult, error) {
+	return e.Complete(ctx, model, prompt, systemPrompt, opts)
 }
 
 func (e *namedTestEngine) ChatWithTools(ctx context.Context, req engine.ChatRequest) (engine.ChatResponse, error) {

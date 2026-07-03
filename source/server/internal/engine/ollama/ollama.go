@@ -174,21 +174,21 @@ type generateRequest struct {
 }
 
 type generateResponse struct {
-	Response       string `json:"response"`
-	Done           bool   `json:"done"`
-	PromptEvalCount int   `json:"prompt_eval_count"`
-	EvalCount       int   `json:"eval_count"`
+	Response        string `json:"response"`
+	Done            bool   `json:"done"`
+	PromptEvalCount int    `json:"prompt_eval_count"`
+	EvalCount       int    `json:"eval_count"`
 }
 
 // Complete generates a response using the Ollama inference engine with the given model, prompt, and system prompt.
-func (e *OllamaEngine) Complete(ctx context.Context, model, prompt, systemPrompt string) (engine.CompletionResult, error) {
+func (e *OllamaEngine) Complete(ctx context.Context, model, prompt, systemPrompt string, opts engine.GenOptions) (engine.CompletionResult, error) {
 	url := fmt.Sprintf("%s/api/generate", e.GetActiveURL())
 	payload := generateRequest{
 		Model:   model,
 		Prompt:  prompt,
 		System:  systemPrompt,
 		Stream:  false,
-		Options: map[string]interface{}{"num_ctx": 32768},
+		Options: generateOptions(opts),
 	}
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
@@ -217,14 +217,25 @@ func (e *OllamaEngine) Complete(ctx context.Context, model, prompt, systemPrompt
 }
 
 // CompleteStream sends a streaming generate request to the Ollama API and returns the accumulated response, invoking onToken for each received chunk.
-func (e *OllamaEngine) CompleteStream(ctx context.Context, model, prompt, systemPrompt string, onToken func(string)) (engine.CompletionResult, error) {
+// generateOptions builds the Ollama options map from GenOptions. num_ctx is
+// always pinned; sampling params are included only when explicitly set, so an
+// empty GenOptions preserves the server's defaults.
+func generateOptions(opts engine.GenOptions) map[string]interface{} {
+	o := map[string]interface{}{"num_ctx": 32768}
+	if opts.Temperature != nil {
+		o["temperature"] = *opts.Temperature
+	}
+	return o
+}
+
+func (e *OllamaEngine) CompleteStream(ctx context.Context, model, prompt, systemPrompt string, opts engine.GenOptions, onToken func(string)) (engine.CompletionResult, error) {
 	url := fmt.Sprintf("%s/api/generate", e.GetActiveURL())
 	payload := generateRequest{
 		Model:   model,
 		Prompt:  prompt,
 		System:  systemPrompt,
 		Stream:  true,
-		Options: map[string]interface{}{"num_ctx": 32768},
+		Options: generateOptions(opts),
 	}
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))

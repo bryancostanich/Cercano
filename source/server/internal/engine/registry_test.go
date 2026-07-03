@@ -11,11 +11,11 @@ type mockEngine struct {
 	name string
 }
 
-func (m *mockEngine) Complete(ctx context.Context, model, prompt, systemPrompt string) (engine.CompletionResult, error) {
+func (m *mockEngine) Complete(ctx context.Context, model, prompt, systemPrompt string, opts engine.GenOptions) (engine.CompletionResult, error) {
 	return engine.CompletionResult{}, nil
 }
 
-func (m *mockEngine) CompleteStream(ctx context.Context, model, prompt, systemPrompt string, onToken func(string)) (engine.CompletionResult, error) {
+func (m *mockEngine) CompleteStream(ctx context.Context, model, prompt, systemPrompt string, opts engine.GenOptions, onToken func(string)) (engine.CompletionResult, error) {
 	return engine.CompletionResult{}, nil
 }
 

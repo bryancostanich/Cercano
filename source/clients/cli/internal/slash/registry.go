@@ -34,6 +34,7 @@ const (
 	ResultInvokeTool         // ToolName + ToolArgs carry the tool to invoke (CLI may prompt-confirm first)
 	ResultSetPermissionMode  // PermissionMode carries the new mode (strict|permissive|bypass)
 	ResultDevMode            // WorkDir carries the resolved Cercano repo root
+	ResultRegenContext       // rebuild the current conversation's context from raw turns
 )
 
 // Result is what a slash command produces.

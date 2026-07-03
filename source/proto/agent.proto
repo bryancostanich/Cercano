@@ -61,6 +61,14 @@ service Agent {
   // they used to render the "needs setup" chip.
   rpc InstallOpenRuntime (InstallOpenRuntimeRequest) returns (stream InstallProgress) {}
 
+  // RegenerateContext rebuilds a conversation's derived context from its raw
+  // turns: clears the stored compaction state and re-runs compaction to
+  // completion, persisting each pass. Raw turns are never modified. Streams
+  // human-readable progress; the final frame carries before/after send-view
+  // token counts so clients can update their context meter without a
+  // follow-up call.
+  rpc RegenerateContext (RegenerateContextRequest) returns (stream RegenerateContextProgress) {}
+
   // ExportContext returns the full uncapped raw history as a JSON []llm.Message.
   rpc ExportContext (ExportContextRequest) returns (ExportContextResponse) {}
 
@@ -822,6 +830,21 @@ message InstallProgress {
   bool done = 2;
   bool ok = 3;
   string error = 4;
+}
+
+message RegenerateContextRequest {
+  string conversation_id = 1;
+}
+
+message RegenerateContextProgress {
+  string line = 1;  // human-readable progress ("pass 2: 41200 -> 12400 tokens")
+  bool done = 2;
+  bool ok = 3;
+  string error = 4;
+  // Set on the final (done) frame: send-view token counts before the rebuild
+  // and after it, so clients can update a context meter immediately.
+  int32 pre_tokens = 5;
+  int32 post_tokens = 6;
 }
 
 // Allow/Deny pair the asynchronous PermissionRequired stream event with a

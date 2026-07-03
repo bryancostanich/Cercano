@@ -6,6 +6,20 @@ import (
 	"path/filepath"
 )
 
+// RegisterContextRegen wires /context-regen — rebuilds the current
+// conversation's derived context (compaction state) from its raw turns on the
+// server. The UI owns the conversation id and the streaming call; this command
+// just signals intent.
+func RegisterContextRegen(r *Registry) {
+	r.Register(Command{
+		Name: "context-regen",
+		Help: "Rebuild this conversation's context from its raw turns (re-runs compaction, updates the context meter).",
+		Handler: func(args []string) Result {
+			return Result{Kind: ResultRegenContext}
+		},
+	})
+}
+
 // RegisterContext wires /context — shows the project context the agent
 // will prepend to your turns (from .cercano/context.md under the effective
 // work dir). Reads the file directly client-side; no RPC. workDir is called

@@ -3120,6 +3120,7 @@ func (m Model) renderStatus() string {
 		m.renderOpenRuntimeChip(),
 		m.renderConnStateChip(),
 		m.renderPermissionModeChip(),
+		m.renderDevChip(),
 		m.styles.BorderDim.Render("  ·  "),
 		help,
 	}
@@ -3219,6 +3220,15 @@ func (m Model) renderPermissionModeChip() string {
 	return m.styles.BorderDim.Render("  ·  ") +
 		m.styles.Muted.Render("mode:") +
 		valStyle.Render(" "+m.permissionMode)
+}
+
+// renderDevChip shows a lime DEV marker while the /d workDir override is
+// active, so it stays visible that tools are pointed at the Cercano repo.
+func (m Model) renderDevChip() string {
+	if m.workDirOverride == "" {
+		return ""
+	}
+	return m.styles.BorderDim.Render("  ·  ") + m.styles.Accent.Render("DEV")
 }
 
 func (m Model) renderContextMeter() string {

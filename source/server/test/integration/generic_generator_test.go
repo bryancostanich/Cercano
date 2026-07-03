@@ -25,7 +25,7 @@ func TestGenericGenerator_Integration_GenerateValidCode(t *testing.T) {
 
 	// Assume Ollama is running at localhost:11434
 	// We use a known small coding model. Ensure this model is pulled in Ollama.
-	provider := legacymodels.NewLocalModelProvider(ollama.NewOllamaEngine("http://localhost:11434"), integrationTestModelName)
+	provider := legacymodels.NewOpenModelProvider(ollama.NewOllamaEngine("http://localhost:11434"), integrationTestModelName)
 	handler := tools.NewGenericGenerator(provider)
 
 	// Input: A simple Go function

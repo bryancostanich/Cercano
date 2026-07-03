@@ -23,19 +23,19 @@ func TestLazyRouter_DoesNotBuildUntilUsed(t *testing.T) {
 		atomic.AddInt32(&builds, 1)
 		return nil, errors.New("factory should not have been called")
 	}
-	local := &stubProvider{name: "LocalModel"}
+	local := &stubProvider{name: "OpenModel"}
 	cloud := &stubProvider{name: "CloudModel"}
 
 	lr := NewLazyRouter(factory, local, cloud)
 
-	// GetModelProviders must NOT trigger construction — the DirectLocal bypass
+	// GetModelProviders must NOT trigger construction — the DirectOpen bypass
 	// relies on reading providers without the router ever being built.
 	providers := lr.GetModelProviders()
 	if len(providers) != 2 {
 		t.Fatalf("expected 2 providers, got %d", len(providers))
 	}
-	if providers["LocalModel"] != local {
-		t.Error("LocalModel provider missing or wrong")
+	if providers["OpenModel"] != local {
+		t.Error("OpenModel provider missing or wrong")
 	}
 	if providers["CloudModel"] != cloud {
 		t.Error("CloudModel provider missing or wrong")
@@ -54,7 +54,7 @@ func TestLazyRouter_ClassifyIntent_BuildsOnce(t *testing.T) {
 		// nomic-embed-text is missing on the Ollama host.
 		return nil, errors.New("failed to get embedding for prototype 'foo': ollama error: {\"error\":\"model \\\"nomic-embed-text\\\" not found, try pulling it first\"}")
 	}
-	lr := NewLazyRouter(factory, &stubProvider{name: "LocalModel"}, nil)
+	lr := NewLazyRouter(factory, &stubProvider{name: "OpenModel"}, nil)
 
 	// First call triggers the factory and surfaces the wrapped error.
 	_, err := lr.ClassifyIntent(&Request{Input: "test"})
@@ -81,7 +81,7 @@ func TestLazyRouter_SetCloudProvider_BeforeBuild(t *testing.T) {
 	factory := func() (*SmartRouter, error) {
 		return nil, errors.New("not built yet")
 	}
-	lr := NewLazyRouter(factory, &stubProvider{name: "LocalModel"}, nil)
+	lr := NewLazyRouter(factory, &stubProvider{name: "OpenModel"}, nil)
 
 	newCloud := &stubProvider{name: "NewCloud"}
 	lr.SetCloudProvider(newCloud)

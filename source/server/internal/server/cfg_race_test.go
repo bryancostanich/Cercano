@@ -46,7 +46,7 @@ func TestConfigConcurrentAccessRace(t *testing.T) {
 
 	// Watcher apply-path workers: drive UpdateConfig (write lock) concurrently
 	// with the profile mutations above.
-	modes := []string{"local_only", "cloud_only", "local_primary", "cloud_primary"}
+	modes := []string{"open_only", "cloud_only", "open_primary", "cloud_primary"}
 	for g := 0; g < 2; g++ {
 		wg.Add(1)
 		go func(g int) {

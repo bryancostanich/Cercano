@@ -22,7 +22,7 @@ import (
 
 // ADKCoordinator implements agent.Coordinator using an ADK LoopAgent.
 type ADKCoordinator struct {
-	localProvider       agentmod.ModelProvider
+	openProvider       agentmod.ModelProvider
 	cloudProvider       agentmod.ModelProvider
 	validator           tools.Validator
 	sessionService      session.Service
@@ -33,7 +33,7 @@ type ADKCoordinator struct {
 // NewADKCoordinator creates an ADKCoordinator with local and cloud providers.
 func NewADKCoordinator(local, cloud agentmod.ModelProvider, val tools.Validator, sessionSvc session.Service) *ADKCoordinator {
 	return &ADKCoordinator{
-		localProvider:       local,
+		openProvider:       local,
 		cloudProvider:       cloud,
 		validator:           val,
 		sessionService:      sessionSvc,
@@ -65,7 +65,7 @@ func (c *ADKCoordinator) CoordinateStream(ctx context.Context, instruction, inpu
 		"Based on the instruction '%s' and the current file '%s', what is the single filename that should be modified or created? Return ONLY the filename.",
 		instruction, fileName,
 	)
-	if resp, err := c.localProvider.Process(ctx, &agentmod.Request{Input: inferPrompt}); err == nil {
+	if resp, err := c.openProvider.Process(ctx, &agentmod.Request{Input: inferPrompt}); err == nil {
 		name := strings.TrimSpace(resp.Output)
 		if name != "" && !strings.Contains(name, " ") && strings.Contains(name, ".") && name != fileName {
 			fmt.Printf(">> ADKCoordinator: Inferred target file '%s' (was '%s')\n", name, fileName)
@@ -95,7 +95,7 @@ func (c *ADKCoordinator) CoordinateStream(ctx context.Context, instruction, inpu
 	}
 
 	// 3. Create agents.
-	genAgent, err := adapters.NewGeneratorAgent(c.localProvider, c.cloudProvider)
+	genAgent, err := adapters.NewGeneratorAgent(c.openProvider, c.cloudProvider)
 	if err != nil {
 		restore()
 		return nil, nil, fmt.Errorf("failed to create generator agent: %w", err)

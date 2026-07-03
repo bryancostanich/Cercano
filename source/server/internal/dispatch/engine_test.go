@@ -42,8 +42,8 @@ func (echoProvider) StreamChat(context.Context, llm.ChatRequest) (llm.StreamRead
 func TestOneShotReturnsTextAndTokens(t *testing.T) {
 	prov := echoProvider{}
 	eng := NewEngine(
-		provs(Providers{Local: prov}),
-		func() locus.Mode { return locus.LocalOnly },
+		provs(Providers{Open: prov}),
+		func() locus.Mode { return locus.OpenOnly },
 		nil, // no project context loader
 	)
 	eng.SetModelFor(func(isCloud bool) string { return "local-model" })
@@ -68,8 +68,8 @@ func TestOneShotReturnsTextAndTokens(t *testing.T) {
 func TestOneShotModelOverride(t *testing.T) {
 	prov := echoProvider{}
 	eng := NewEngine(
-		provs(Providers{Local: prov}),
-		func() locus.Mode { return locus.LocalOnly },
+		provs(Providers{Open: prov}),
+		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
 	eng.SetModelFor(func(isCloud bool) string { return "default-model" })
@@ -90,7 +90,7 @@ func TestOneShotModelOverride(t *testing.T) {
 
 func TestOneShotAgenticReturnsError(t *testing.T) {
 	prov := echoProvider{}
-	eng := NewEngine(provs(Providers{Local: prov}), func() locus.Mode { return locus.LocalOnly }, nil)
+	eng := NewEngine(provs(Providers{Open: prov}), func() locus.Mode { return locus.OpenOnly }, nil)
 	// No AgenticRunner installed — must return a clear error.
 
 	_, err := eng.Dispatch(context.Background(), Spec{Mode: Agentic, Role: RoleCoproc, Task: "x"})
@@ -108,8 +108,8 @@ func TestOneShotEmitsSourceLabeledUsage(t *testing.T) {
 
 	prov := echoProvider{}
 	eng := NewEngine(
-		provs(Providers{Local: prov}),
-		func() locus.Mode { return locus.LocalOnly },
+		provs(Providers{Open: prov}),
+		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
 	eng.SetModelFor(func(isCloud bool) string { return "local-model" })
@@ -136,7 +136,7 @@ func TestOneShotEmitsSourceLabeledUsage(t *testing.T) {
 		t.Errorf("Model=%q, want %q", u.Model, "local-model")
 	}
 	if u.IsCloud {
-		t.Errorf("IsCloud=true, want false for LocalOnly locus")
+		t.Errorf("IsCloud=true, want false for OpenOnly locus")
 	}
 	if u.InputTokens != 9 || u.OutputTokens != 4 {
 		t.Errorf("tokens=%d/%d, want 9/4", u.InputTokens, u.OutputTokens)
@@ -150,8 +150,8 @@ func TestOneShotRecordsUsageOnlyWhenRequested(t *testing.T) {
 	prov := echoProvider{}
 	mkEng := func() *Engine {
 		eng := NewEngine(
-			provs(Providers{Local: prov}),
-			func() locus.Mode { return locus.LocalOnly },
+			provs(Providers{Open: prov}),
+			func() locus.Mode { return locus.OpenOnly },
 			nil,
 		)
 		eng.SetModelFor(func(isCloud bool) string { return "local-model" })
@@ -213,8 +213,8 @@ func TestOneShotWantsProjectContext_NoContextFile(t *testing.T) {
 	prov := echoProvider{}
 	loader := projectctx.NewLoader()
 	eng := NewEngine(
-		provs(Providers{Local: prov}),
-		func() locus.Mode { return locus.LocalOnly },
+		provs(Providers{Open: prov}),
+		func() locus.Mode { return locus.OpenOnly },
 		loader,
 	)
 	eng.SetModelFor(func(isCloud bool) string { return "local-model" })

@@ -12,7 +12,7 @@ import (
 // reloadConfigFromDisk picks up an out-of-band edit, applies hot-reloadable
 // fields through UpdateConfig, and broadcasts a ConfigChanged event per
 // applied field. We use locus_mode because it routes through UpdateConfig
-// without needing a localProvider / coordinator / cloudFactory.
+// without needing a openProvider / coordinator / cloudFactory.
 func TestReloadConfigFromDisk_AppliesAndBroadcasts(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
@@ -33,14 +33,14 @@ func TestReloadConfigFromDisk_AppliesAndBroadcasts(t *testing.T) {
 
 	// Out-of-band edit: change locus_mode and rewrite the file.
 	edited := initial
-	edited.LocusMode = "local_primary"
+	edited.LocusMode = "open_primary"
 	if err := config.Save(edited, path); err != nil {
 		t.Fatalf("edit config: %v", err)
 	}
 
 	srv.reloadConfigFromDisk(context.Background())
 
-	if got := srv.currentConfig.LocusMode; got != "local_primary" {
+	if got := srv.currentConfig.LocusMode; got != "open_primary" {
 		t.Errorf("currentConfig.LocusMode = %q, want local_primary", got)
 	}
 
@@ -50,7 +50,7 @@ func TestReloadConfigFromDisk_AppliesAndBroadcasts(t *testing.T) {
 		if cc == nil {
 			t.Fatalf("expected ConfigChanged event, got %T", ev.Event)
 		}
-		if cc.Field != "locus_mode" || cc.Value != "local_primary" {
+		if cc.Field != "locus_mode" || cc.Value != "open_primary" {
 			t.Errorf("event = {field:%q value:%q}, want {locus_mode local_primary}", cc.Field, cc.Value)
 		}
 	case <-time.After(time.Second):
@@ -132,7 +132,7 @@ func TestStartConfigWatcher_EndToEnd(t *testing.T) {
 	// Give the watcher goroutine a moment to register; then write a change.
 	time.Sleep(50 * time.Millisecond)
 	edited := cfg
-	edited.LocusMode = "local_only"
+	edited.LocusMode = "open_only"
 	if err := config.Save(edited, path); err != nil {
 		t.Fatalf("edit config: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestStartConfigWatcher_EndToEnd(t *testing.T) {
 		select {
 		case ev := <-ch:
 			cc := ev.GetConfigChanged()
-			if cc != nil && cc.Field == "locus_mode" && cc.Value == "local_only" {
+			if cc != nil && cc.Field == "locus_mode" && cc.Value == "open_only" {
 				return // success
 			}
 		case <-deadline:

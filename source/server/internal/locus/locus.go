@@ -10,12 +10,12 @@ type Mode string
 const (
 	CloudOnly    Mode = "cloud_only"
 	CloudPrimary Mode = "cloud_primary"
-	LocalPrimary Mode = "local_primary"
-	LocalOnly    Mode = "local_only"
+	OpenPrimary Mode = "open_primary"
+	OpenOnly    Mode = "open_only"
 )
 
 // DefaultMode preserves Cercano's local-first intent.
-const DefaultMode = LocalPrimary
+const DefaultMode = OpenPrimary
 
 type Tier int
 
@@ -47,9 +47,9 @@ func (m Mode) Main() Resolution {
 		return Resolution{TierCloud, TierCloud, false}
 	case CloudPrimary:
 		return Resolution{TierCloud, TierLocal, true}
-	case LocalOnly:
+	case OpenOnly:
 		return Resolution{TierLocal, TierLocal, false}
-	case LocalPrimary:
+	case OpenPrimary:
 		fallthrough
 	default:
 		return Resolution{TierLocal, TierCloud, true}
@@ -71,7 +71,7 @@ func ParseMode(s string) (Mode, error) {
 	switch Mode(s) {
 	case "":
 		return DefaultMode, nil
-	case CloudOnly, CloudPrimary, LocalPrimary, LocalOnly:
+	case CloudOnly, CloudPrimary, OpenPrimary, OpenOnly:
 		return Mode(s), nil
 	default:
 		return "", fmt.Errorf("invalid locus_mode %q (want cloud_only|cloud_primary|local_primary|local_only)", s)

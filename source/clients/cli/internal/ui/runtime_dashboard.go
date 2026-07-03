@@ -162,7 +162,7 @@ func (d *runtimeDashboard) fullContent() (string, int) {
 		d.renderProcessesBlock(),
 	}
 	logRows := contentH - countLines(parts)
-	parts = append(parts, d.renderLocalServerLogBlock(logRows))
+	parts = append(parts, d.renderOpenServerLogBlock(logRows))
 	return strings.Join(parts, "\n"), contentH
 }
 
@@ -440,7 +440,7 @@ func (d *runtimeDashboard) renderRuntimeStatusBlock() string {
 	cfg := d.snapshot.Config
 	runtimeName := "llama_server"
 	if cfg != nil {
-		runtimeName = firstNonEmpty(cfg.LocalRuntime, runtimeName)
+		runtimeName = firstNonEmpty(cfg.OpenRuntime, runtimeName)
 	}
 	var running []agentclient.RuntimeInstance
 	for _, instance := range runtimeStatusInstances(status) {
@@ -494,10 +494,10 @@ func renderRuntimeStatusLine(fields []runtimeDashboardField, width int, styles t
 	return line
 }
 
-func (d *runtimeDashboard) renderLocalServerLogBlock(height int) string {
+func (d *runtimeDashboard) renderOpenServerLogBlock(height int) string {
 	totalW := dashboardPanelWidth(d.width)
 	contentW := dashboardBlockContentWidth(totalW)
-	logs := localModelServerLogs(runtimeStatusLogs(d.snapshot.Status))
+	logs := openModelServerLogs(runtimeStatusLogs(d.snapshot.Status))
 	lines := make([]string, 0, maxDashboardLogs)
 	if len(logs) == 0 {
 		lines = append(lines, d.styles.Dim.Render("no local model server logs yet"))
@@ -724,11 +724,11 @@ func localConfigFields(s runtimeDashboardSnapshot) []runtimeDashboardField {
 		return []runtimeDashboardField{{Label: "config", Value: "unavailable"}}
 	}
 	return []runtimeDashboardField{
-		{Label: "runtime", Value: firstNonEmpty(cfg.LocalRuntime, "ollama")},
-		{Label: "chat model", Value: cfg.LocalModel},
+		{Label: "runtime", Value: firstNonEmpty(cfg.OpenRuntime, "ollama")},
+		{Label: "chat model", Value: cfg.OpenModel},
 		{Label: "embedding", Value: cfg.EmbeddingModel},
 		{Label: "ollama URL", Value: cfg.OllamaURL},
-		{Label: "llama-server", Value: localServerSummary(s.Status, cfg.LocalRuntime)},
+		{Label: "llama-server", Value: localServerSummary(s.Status, cfg.OpenRuntime)},
 	}
 }
 
@@ -946,7 +946,7 @@ func detailLine(label, value string, width int, styles theme.Styles) string {
 	return line
 }
 
-func localModelServerLogs(logs []agentclient.RuntimeLogEntry) []agentclient.RuntimeLogEntry {
+func openModelServerLogs(logs []agentclient.RuntimeLogEntry) []agentclient.RuntimeLogEntry {
 	out := make([]agentclient.RuntimeLogEntry, 0, len(logs))
 	for _, entry := range logs {
 		source := strings.ToLower(entry.Source)

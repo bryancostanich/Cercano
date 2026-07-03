@@ -21,7 +21,7 @@ func (a *Agent) degradeIfCloudFailure(ctx context.Context, provider ModelProvide
 	if originalErr == nil {
 		return nil, false
 	}
-	local, ok := a.router.GetModelProviders()["LocalModel"]
+	local, ok := a.router.GetModelProviders()["OpenModel"]
 	if !ok || provider == local {
 		return nil, false
 	}

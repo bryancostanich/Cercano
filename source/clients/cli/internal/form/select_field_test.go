@@ -71,8 +71,8 @@ func TestSelectFieldWrapsToWidth(t *testing.T) {
 	opts := []Option{
 		{Label: "cloud_only", Value: "cloud_only"},
 		{Label: "cloud_primary", Value: "cloud_primary"},
-		{Label: "local_primary", Value: "local_primary"},
-		{Label: "local_only", Value: "local_only"},
+		{Label: "open_primary", Value: "open_primary"},
+		{Label: "open_only", Value: "open_only"},
 	}
 	f := NewSelect("locus", "locus", opts, "cloud_only")
 	f.Update(enter()) // open

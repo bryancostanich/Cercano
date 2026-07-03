@@ -9,9 +9,9 @@ import (
 	"cercano/source/server/pkg/config"
 )
 
-func TestBuildLocalRuntimeStatus_OllamaSuccess(t *testing.T) {
-	cfg := config.Config{LocalRuntime: "ollama"}
-	st := buildLocalRuntimeStatus("ollama", cfg, nil)
+func TestBuildOpenRuntimeStatus_OllamaSuccess(t *testing.T) {
+	cfg := config.Config{OpenRuntime: "ollama"}
+	st := buildOpenRuntimeStatus("ollama", cfg, nil)
 
 	if !st.Ok {
 		t.Errorf("Ok should be true when runtime is ollama and no error, got %+v", st)
@@ -27,15 +27,15 @@ func TestBuildLocalRuntimeStatus_OllamaSuccess(t *testing.T) {
 	}
 }
 
-func TestBuildLocalRuntimeStatus_LlamaServerSuccess(t *testing.T) {
+func TestBuildOpenRuntimeStatus_LlamaServerSuccess(t *testing.T) {
 	cfg := config.Config{
-		LocalRuntime: "llama_server",
+		OpenRuntime: "llama_server",
 		LlamaServer: config.LlamaServerConfig{
 			Binary:       "/opt/homebrew/bin/llama-server",
 			DefaultModel: "/models/qwen3.gguf",
 		},
 	}
-	st := buildLocalRuntimeStatus("llama_server", cfg, nil)
+	st := buildOpenRuntimeStatus("llama_server", cfg, nil)
 
 	if !st.Ok {
 		t.Errorf("Ok should be true on success, got %+v", st)
@@ -48,11 +48,11 @@ func TestBuildLocalRuntimeStatus_LlamaServerSuccess(t *testing.T) {
 	}
 }
 
-func TestBuildLocalRuntimeStatus_MissingBinary(t *testing.T) {
-	cfg := config.Config{LocalRuntime: "llama_server"}
+func TestBuildOpenRuntimeStatus_MissingBinary(t *testing.T) {
+	cfg := config.Config{OpenRuntime: "llama_server"}
 	// Simulate a real detect error — no exec, we just construct the value.
 	de := &llamaserver.DetectError{Missing: "binary", Cause: errors.New("exec: \"llama-server\": executable file not found in $PATH")}
-	st := buildLocalRuntimeStatus("llama_server", cfg, de)
+	st := buildOpenRuntimeStatus("llama_server", cfg, de)
 
 	if st.Ok {
 		t.Errorf("Ok should be false when detection failed, got %+v", st)
@@ -68,17 +68,17 @@ func TestBuildLocalRuntimeStatus_MissingBinary(t *testing.T) {
 	}
 }
 
-func TestBuildLocalRuntimeStatus_MissingModelPreservesPartialConfig(t *testing.T) {
+func TestBuildOpenRuntimeStatus_MissingModelPreservesPartialConfig(t *testing.T) {
 	// Even when detection fails at the model step, we've already found the
 	// binary — cfg.LlamaServer.Binary is populated. The status must carry
 	// that through so the CLI can render "found llama-server at X but no
 	// GGUFs" instead of "nothing found."
 	cfg := config.Config{
-		LocalRuntime: "llama_server",
+		OpenRuntime: "llama_server",
 		LlamaServer:  config.LlamaServerConfig{Binary: "/opt/homebrew/bin/llama-server"},
 	}
 	de := &llamaserver.DetectError{Missing: "model", Cause: errors.New("no GGUF files")}
-	st := buildLocalRuntimeStatus("llama_server", cfg, de)
+	st := buildOpenRuntimeStatus("llama_server", cfg, de)
 
 	if st.Ok {
 		t.Errorf("Ok should be false, got %+v", st)

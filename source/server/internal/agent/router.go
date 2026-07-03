@@ -66,7 +66,7 @@ type Request struct {
 	WorkDir        string
 	FileName       string
 	ConversationID string
-	DirectLocal    bool   // Skip SmartRouter, go directly to local provider
+	DirectOpen    bool   // Skip SmartRouter, go directly to local provider
 	ModelOverride  string // Use this model instead of the configured default (per-request)
 	Coproc         bool   // Route per Locus Mode's co-processor tier (local/cloud)
 	// Images are user-attached images; buildUserBlocks splices them into the
@@ -175,7 +175,7 @@ func NewSmartRouterFromBytes(local, cloud ModelProvider, embeddingModel string, 
 
 	sr := &SmartRouter{
 		ModelProviders: map[string]ModelProvider{
-			"LocalModel": local,
+			"OpenModel": local,
 			"CloudModel": cloud,
 		},
 		EmbeddingModelName: embeddingModel,
@@ -348,9 +348,9 @@ func (sr *SmartRouter) SelectProvider(req *Request, intent Intent) (ModelProvide
 	sr.mu.RLock()
 	defer sr.mu.RUnlock()
 
-	// If LocalModel is selected, return the local provider
+	// If OpenModel is selected, return the local provider
 	if finalCategory == "Provider:Local" {
-		if provider, ok := sr.ModelProviders["LocalModel"]; ok {
+		if provider, ok := sr.ModelProviders["OpenModel"]; ok {
 			return provider, nil
 		}
 	}

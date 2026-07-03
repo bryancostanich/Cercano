@@ -9,7 +9,7 @@ import (
 
 func TestBuildRuntimeManagerRegistersLlamaServerCatalogWhenOllamaActive(t *testing.T) {
 	cfg := config.Defaults()
-	cfg.LocalRuntime = "ollama"
+	cfg.OpenRuntime = "ollama"
 	cfg.LlamaServer.Enabled = false
 	cfg.LlamaServer.DefaultModel = ""
 

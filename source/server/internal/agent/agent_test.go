@@ -323,11 +323,11 @@ func TestAgent_ProcessRequestStream_NilTokenCallback(t *testing.T) {
 }
 
 func TestAgent_ProcessRequest_ExplicitCloudOverride(t *testing.T) {
-	// Router says LocalModel, but input says "use cloud"
+	// Router says OpenModel, but input says "use cloud"
 	cloudProvider := &mockModelProvider{name: "CloudModel"}
 	router := &mockRouter{
 		intent:   IntentChat,
-		provider: &mockModelProvider{name: "LocalModel"},
+		provider: &mockModelProvider{name: "OpenModel"},
 		ModelProviders: map[string]ModelProvider{
 			"CloudModel": cloudProvider,
 		},
@@ -448,9 +448,9 @@ func TestAgent_ProcessRequest_NoConversationID_NoHistory(t *testing.T) {
 	}
 }
 
-func TestAgent_ProcessRequest_DirectLocal(t *testing.T) {
-	localProvider := &mockModelProviderFunc{
-		name:     "LocalModel",
+func TestAgent_ProcessRequest_DirectOpen(t *testing.T) {
+	openProvider := &mockModelProviderFunc{
+		name:     "OpenModel",
 		response: &Response{Output: "local summary"},
 	}
 	cloudProvider := &mockModelProvider{name: "CloudModel"}
@@ -459,7 +459,7 @@ func TestAgent_ProcessRequest_DirectLocal(t *testing.T) {
 		intent:   IntentChat,
 		provider: cloudProvider, // Router would normally pick cloud
 		ModelProviders: map[string]ModelProvider{
-			"LocalModel": localProvider,
+			"OpenModel": openProvider,
 			"CloudModel": cloudProvider,
 		},
 	}
@@ -469,7 +469,7 @@ func TestAgent_ProcessRequest_DirectLocal(t *testing.T) {
 	ctx := context.Background()
 	res, err := a.ProcessRequest(ctx, &Request{
 		Input:       "Summarize this text...",
-		DirectLocal: true,
+		DirectOpen: true,
 	})
 	if err != nil {
 		t.Fatalf("ProcessRequest failed: %v", err)
@@ -477,18 +477,18 @@ func TestAgent_ProcessRequest_DirectLocal(t *testing.T) {
 	if res.Output != "local summary" {
 		t.Errorf("Expected 'local summary', got %q", res.Output)
 	}
-	if res.RoutingMetadata.ModelName != "LocalModel" {
-		t.Errorf("Expected routing to LocalModel, got %s", res.RoutingMetadata.ModelName)
+	if res.RoutingMetadata.ModelName != "OpenModel" {
+		t.Errorf("Expected routing to OpenModel, got %s", res.RoutingMetadata.ModelName)
 	}
 	if res.RoutingMetadata.Confidence != 1.0 {
 		t.Errorf("Expected confidence 1.0, got %f", res.RoutingMetadata.Confidence)
 	}
 	// Verify the provider actually received the request
-	if localProvider.capturedReq == nil {
+	if openProvider.capturedReq == nil {
 		t.Fatal("expected local provider to capture request")
 	}
-	if !localProvider.capturedReq.DirectLocal {
-		t.Error("expected DirectLocal to be passed through to provider request")
+	if !openProvider.capturedReq.DirectOpen {
+		t.Error("expected DirectOpen to be passed through to provider request")
 	}
 }
 

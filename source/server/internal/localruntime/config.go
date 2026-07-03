@@ -18,7 +18,7 @@ func EndpointsFromConfig(cfg config.Config) []EndpointRecord {
 			Scope:       endpointScope(cfg.OllamaURL, "local"),
 			State:       StateUnknown,
 			ActiveRoles: []string{"local_inference", "embeddings"},
-			Models:      uniqueNonEmpty(cfg.LocalModel, cfg.EmbeddingModel),
+			Models:      uniqueNonEmpty(cfg.OpenModel, cfg.EmbeddingModel),
 			AuthState:   "none",
 		},
 	}

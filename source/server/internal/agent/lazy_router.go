@@ -20,7 +20,7 @@ type SmartRouterFactory func() (*SmartRouter, error)
 // See GitHub issue #5.
 type LazyRouter struct {
 	factory        SmartRouterFactory
-	localProvider  ModelProvider
+	openProvider  ModelProvider
 	cloudProvider  ModelProvider
 	pendingCloudMu sync.Mutex
 	pendingCloud   ModelProvider
@@ -31,13 +31,13 @@ type LazyRouter struct {
 }
 
 // NewLazyRouter returns a LazyRouter that will invoke factory on first use.
-// localProvider and cloudProvider are held so GetModelProviders() works before
-// the underlying SmartRouter is built (e.g. for DirectLocal bypass paths that
+// openProvider and cloudProvider are held so GetModelProviders() works before
+// the underlying SmartRouter is built (e.g. for DirectOpen bypass paths that
 // only need the providers, not classification).
-func NewLazyRouter(factory SmartRouterFactory, localProvider, cloudProvider ModelProvider) *LazyRouter {
+func NewLazyRouter(factory SmartRouterFactory, openProvider, cloudProvider ModelProvider) *LazyRouter {
 	return &LazyRouter{
 		factory:       factory,
-		localProvider: localProvider,
+		openProvider: openProvider,
 		cloudProvider: cloudProvider,
 	}
 }
@@ -81,7 +81,7 @@ func (lr *LazyRouter) SelectProvider(req *Request, intent Intent) (ModelProvider
 }
 
 // GetModelProviders returns providers without triggering router construction.
-// The DirectLocal bypass and cloud-provider override paths only need the raw
+// The DirectOpen bypass and cloud-provider override paths only need the raw
 // providers, not classification — forcing a build here would re-introduce the
 // eager-init bug for those paths.
 func (lr *LazyRouter) GetModelProviders() map[string]ModelProvider {
@@ -91,7 +91,7 @@ func (lr *LazyRouter) GetModelProviders() map[string]ModelProvider {
 		return lr.real.GetModelProviders()
 	}
 	providers := map[string]ModelProvider{
-		"LocalModel": lr.localProvider,
+		"OpenModel": lr.openProvider,
 	}
 	lr.pendingCloudMu.Lock()
 	cloud := lr.pendingCloud

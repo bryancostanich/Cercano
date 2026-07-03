@@ -310,8 +310,8 @@ type cloudTokenFields struct {
 	HostCloudTokensOut int `json:"host_cloud_tokens_out,omitempty" jsonschema:"Your cloud output tokens since the last cercano call. Include this to help track cloud vs local usage."`
 }
 
-// LocalRequest is the input schema for the cercano_local tool.
-type LocalRequest struct {
+// OpenRequest is the input schema for the cercano_local tool.
+type OpenRequest struct {
 	Prompt         string `json:"prompt" jsonschema:"The prompt to run against local models"`
 	FilePath       string `json:"file_path,omitempty" jsonschema:"Target file path for code changes. When provided with work_dir, enables the agentic code generation loop with validation."`
 	WorkDir        string `json:"work_dir,omitempty" jsonschema:"Working directory for code validation (go build/test). When provided with file_path, enables the agentic code generation loop."`
@@ -323,8 +323,8 @@ type LocalRequest struct {
 // ConfigRequest is the input schema for the cercano_config tool.
 type ConfigRequest struct {
 	Action        string `json:"action" jsonschema:"get (list available Ollama models) or set (change configuration)"`
-	LocalRuntime  string `json:"local_runtime,omitempty" jsonschema:"Local runtime to use for generation (ollama or llama_server)"`
-	LocalModel    string `json:"local_model,omitempty" jsonschema:"Local model name to set (use action 'get' to see available models)"`
+	OpenRuntime  string `json:"local_runtime,omitempty" jsonschema:"Local runtime to use for generation (ollama or llama_server)"`
+	OpenModel    string `json:"local_model,omitempty" jsonschema:"Local model name to set (use action 'get' to see available models)"`
 	CloudProvider string `json:"cloud_provider,omitempty" jsonschema:"Cloud provider to set (google or anthropic)"`
 	CloudModel    string `json:"cloud_model,omitempty" jsonschema:"Cloud model to set"`
 	OllamaURL     string `json:"ollama_url,omitempty" jsonschema:"Ollama endpoint URL (e.g. http://mac-studio.local:11434)"`
@@ -458,7 +458,7 @@ func (s *Server) registerTools() {
 }
 
 // handleLocal processes a cercano_local tool call.
-func (s *Server) handleLocal(ctx context.Context, request *gomcp.CallToolRequest, args LocalRequest) (*gomcp.CallToolResult, any, error) {
+func (s *Server) handleLocal(ctx context.Context, request *gomcp.CallToolRequest, args OpenRequest) (*gomcp.CallToolResult, any, error) {
 	if result, ok := s.checkDegraded(); ok {
 		return result, nil, nil
 	}
@@ -581,8 +581,8 @@ func (s *Server) handleConfig(ctx context.Context, request *gomcp.CallToolReques
 
 	case "set":
 		resp, err := s.grpcClient.UpdateConfig(ctx, &proto.UpdateConfigRequest{
-			LocalRuntime:  args.LocalRuntime,
-			LocalModel:    args.LocalModel,
+			OpenRuntime:  args.OpenRuntime,
+			OpenModel:    args.OpenModel,
 			CloudProvider: args.CloudProvider,
 			CloudModel:    args.CloudModel,
 			OllamaUrl:     args.OllamaURL,

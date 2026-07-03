@@ -86,7 +86,7 @@ func TestSectionHeader(t *testing.T) {
 	}
 }
 
-func TestLocalVsCloudBar(t *testing.T) {
+func TestOpenVsCloudBar(t *testing.T) {
 	result := localVsCloudBar(100, 900)
 	if !strings.Contains(result, "10.0%") {
 		t.Error("should show correct percentage")
@@ -112,7 +112,7 @@ func TestFormatStatsASCII(t *testing.T) {
 		TotalOutputTokens:      14537,
 		TotalCloudInputTokens:  30063,
 		TotalCloudOutputTokens: 973521,
-		LocalPercentage:        10.0,
+		OpenPercentage:        10.0,
 		ByTool: []GroupStats{
 			{Name: "cercano_extract", Count: 8, InputTokens: 40000, OutputTokens: 9961},
 			{Name: "cercano_research", Count: 6, InputTokens: 35000, OutputTokens: 6276},
@@ -165,7 +165,7 @@ func TestFormatStatsASCII_NoCloudTokens(t *testing.T) {
 		TotalRequests:     5,
 		TotalInputTokens:  10000,
 		TotalOutputTokens: 2000,
-		LocalTokensSaved:  12000,
+		OpenTokensSaved:  12000,
 		ByTool: []GroupStats{
 			{Name: "cercano_local", Count: 5, InputTokens: 10000, OutputTokens: 2000},
 		},

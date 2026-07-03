@@ -44,12 +44,12 @@ func (m *mockEngine) ChatWithTools(ctx context.Context, req engine.ChatRequest) 
 	return engine.ChatResponse{}, nil
 }
 
-func TestLocalModelProvider_Process(t *testing.T) {
+func TestOpenModelProvider_Process(t *testing.T) {
 	eng := &mockEngine{
 		name:           "mock",
 		completeResult: "success",
 	}
-	provider := legacymodels.NewLocalModelProvider(eng, "test-model")
+	provider := legacymodels.NewOpenModelProvider(eng, "test-model")
 
 	resp, err := provider.Process(context.Background(), &agent.Request{Input: "hello"})
 	if err != nil {
@@ -60,12 +60,12 @@ func TestLocalModelProvider_Process(t *testing.T) {
 	}
 }
 
-func TestLocalModelProvider_ProcessStream(t *testing.T) {
+func TestOpenModelProvider_ProcessStream(t *testing.T) {
 	eng := &mockEngine{
 		name:         "mock",
 		streamChunks: []string{"a", "b", "c"},
 	}
-	provider := legacymodels.NewLocalModelProvider(eng, "test-model")
+	provider := legacymodels.NewOpenModelProvider(eng, "test-model")
 
 	var tokens []string
 	resp, err := provider.ProcessStream(context.Background(), &agent.Request{Input: "hello"}, func(token string) {
@@ -82,9 +82,9 @@ func TestLocalModelProvider_ProcessStream(t *testing.T) {
 	}
 }
 
-func TestLocalModelProvider_SetModelName(t *testing.T) {
+func TestOpenModelProvider_SetModelName(t *testing.T) {
 	eng := &mockEngine{name: "mock"}
-	provider := legacymodels.NewLocalModelProvider(eng, "test-model")
+	provider := legacymodels.NewOpenModelProvider(eng, "test-model")
 
 	if provider.Name() != "test-model" {
 		t.Errorf("expected 'test-model', got %q", provider.Name())

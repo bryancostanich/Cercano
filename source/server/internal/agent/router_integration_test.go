@@ -22,7 +22,7 @@ func TestSmartRouter_Integration_SelectProvider(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 
-	mockLocal := &mockModelProvider{name: "LocalModel"}
+	mockLocal := &mockModelProvider{name: "OpenModel"}
 	mockCloud := &mockModelProvider{name: "CloudModel"}
 
 	smartRouter, err := agent.NewSmartRouter(mockLocal, mockCloud, integrationTestModelName, nil, "prototypes.yaml", func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.ModelProvider, error) {
@@ -37,26 +37,26 @@ func TestSmartRouter_Integration_SelectProvider(t *testing.T) {
 		input                string
 		expectedClassification string
 	}{
-		// --- LocalModel (Novel Phrasings) ---
+		// --- OpenModel (Novel Phrasings) ---
 		{
 			name:                 "Refactor: Extract method",
 			input:                "Pull the logic inside this for-loop out into a separate function called 'processItem'.",
-			expectedClassification: "LocalModel",
+			expectedClassification: "OpenModel",
 		},
 		{
 			name:                 "File System: Cleanup",
 			input:                "Get rid of all the .tmp files in the current folder.",
-			expectedClassification: "LocalModel",
+			expectedClassification: "OpenModel",
 		},
 		{
 			name:                 "Analysis: Complexity",
 			input:                "Calculate the cyclomatic complexity of the 'NewSmartRouter' function.",
-			expectedClassification: "LocalModel",
+			expectedClassification: "OpenModel",
 		},
 		{
 			name:                 "Editing: Typo fix",
 			input:                "Fix the spelling mistake in the variable 'threshold'.",
-			expectedClassification: "LocalModel",
+			expectedClassification: "OpenModel",
 		},
 
 		// --- CloudModel (Novel Phrasings) ---

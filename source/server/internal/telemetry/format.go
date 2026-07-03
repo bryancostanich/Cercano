@@ -39,7 +39,7 @@ func FormatStatsASCII(stats *Stats) string {
 		out.WriteString("\n")
 		out.WriteString(localVsCloudBar(totalLocal, totalCloud))
 	} else {
-		out.WriteString(fmt.Sprintf("  Tokens Saved:    ~%s (estimated)\n", formatNumber(stats.LocalTokensSaved)))
+		out.WriteString(fmt.Sprintf("  Tokens Saved:    ~%s (estimated)\n", formatNumber(stats.OpenTokensSaved)))
 	}
 	out.WriteString("\n")
 

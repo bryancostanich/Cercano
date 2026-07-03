@@ -42,9 +42,9 @@ func RegisterConfig(r *Registry, c *agentclient.Client) {
 			var update agentclient.ConfigUpdate
 			switch key {
 			case "local-runtime", "local_runtime":
-				update.LocalRuntime = value
+				update.OpenRuntime = value
 			case "local-model", "local_model":
-				update.LocalModel = value
+				update.OpenModel = value
 			case "ollama-url", "ollama_url":
 				update.OllamaURL = value
 			case "cloud-provider", "cloud_provider":
@@ -130,11 +130,11 @@ func formatConfig(cfg *agentclient.Config) string {
 	var b strings.Builder
 	b.WriteString("current config:\n")
 	b.WriteString("  local-runtime:  ")
-	b.WriteString(orDash(cfg.LocalRuntime))
+	b.WriteString(orDash(cfg.OpenRuntime))
 	b.WriteString("\n  ollama-url:      ")
 	b.WriteString(orDash(cfg.OllamaURL))
 	b.WriteString("\n  local-model:     ")
-	b.WriteString(orDash(cfg.LocalModel))
+	b.WriteString(orDash(cfg.OpenModel))
 	b.WriteString("\n  embedding-model: ")
 	b.WriteString(orDash(cfg.EmbeddingModel))
 	b.WriteString("\n  cloud-provider:  ")

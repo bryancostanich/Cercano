@@ -237,15 +237,15 @@ func (sp *settingsPage) onCommit(key, value string) (string, tea.Cmd, error) {
 		// actually usable. Force sp.cfg to nil so the form snapshot that
 		// runs immediately after this commit reflects the server's
 		// (unchanged) runtime, reverting the toggle back to ollama.
-		if action.update.LocalRuntime == "llama_server" {
+		if action.update.OpenRuntime == "llama_server" {
 			gctx, gcancel := context.WithTimeout(context.Background(), 3*time.Second)
-			st, gerr := sp.agent.GetLocalRuntimeStatus(gctx, "llama_server")
+			st, gerr := sp.agent.GetOpenRuntimeStatus(gctx, "llama_server")
 			gcancel()
 			if gerr == nil && st != nil && !st.Ok {
 				sp.cfg = nil
 				statusCopy := *st
 				return "install required — see modal", func() tea.Msg {
-					return openLocalRuntimeInstallModalMsg{status: statusCopy, pending: "llama_server"}
+					return openOpenRuntimeInstallModalMsg{status: statusCopy, pending: "llama_server"}
 				}, nil
 			}
 		}

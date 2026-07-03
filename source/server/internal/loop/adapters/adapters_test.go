@@ -202,8 +202,8 @@ func TestGeneratorAgent_Error(t *testing.T) {
 	}
 }
 
-// TestGeneratorAgent_SelectsLocalByDefault: without use_cloud state, local is used.
-func TestGeneratorAgent_SelectsLocalByDefault(t *testing.T) {
+// TestGeneratorAgent_SelectsOpenByDefault: without use_cloud state, local is used.
+func TestGeneratorAgent_SelectsOpenByDefault(t *testing.T) {
 	local := &stubProvider{name: "local", output: "local output"}
 	cloud := &stubProvider{name: "cloud", output: "cloud output"}
 	gen, err := adapters.NewGeneratorAgent(local, cloud)

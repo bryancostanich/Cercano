@@ -43,7 +43,7 @@ func TestPropose_JSONInProse(t *testing.T) {
 	}
 }
 
-func TestPropose_LocalFailsCloudFallback(t *testing.T) {
+func TestPropose_OpenFailsCloudFallback(t *testing.T) {
 	local := fixed("", errors.New("local down"))
 	cloud := fixed(`{"delete_ids":["a"],"rationale":"z"}`, nil)
 	p, err := Propose(context.Background(), "i", sampleTurns, local, cloud)

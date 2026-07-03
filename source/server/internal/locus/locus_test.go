@@ -4,11 +4,11 @@ import "testing"
 
 func TestParseMode(t *testing.T) {
 	cases := map[string]Mode{
-		"":              LocalPrimary,
-		"local_primary": LocalPrimary,
+		"":              OpenPrimary,
+		"open_primary": OpenPrimary,
 		"cloud_only":    CloudOnly,
 		"cloud_primary": CloudPrimary,
-		"local_only":    LocalOnly,
+		"open_only":    OpenOnly,
 	}
 	for in, want := range cases {
 		got, err := ParseMode(in)
@@ -30,8 +30,8 @@ func TestMainResolution(t *testing.T) {
 	}{
 		{CloudOnly, TierCloud, TierCloud, false},
 		{CloudPrimary, TierCloud, TierLocal, true},
-		{LocalPrimary, TierLocal, TierCloud, true},
-		{LocalOnly, TierLocal, TierLocal, false},
+		{OpenPrimary, TierLocal, TierCloud, true},
+		{OpenOnly, TierLocal, TierLocal, false},
 	}
 	for _, c := range cases {
 		r := c.mode.Main()
@@ -50,8 +50,8 @@ func TestCoprocResolution(t *testing.T) {
 	}{
 		{CloudOnly, TierCloud, TierCloud, false},
 		{CloudPrimary, TierLocal, TierCloud, true}, // differs from Main(): local-preferred
-		{LocalPrimary, TierLocal, TierCloud, true},
-		{LocalOnly, TierLocal, TierLocal, false},
+		{OpenPrimary, TierLocal, TierCloud, true},
+		{OpenOnly, TierLocal, TierLocal, false},
 	}
 	for _, c := range cases {
 		r := c.mode.Coproc()

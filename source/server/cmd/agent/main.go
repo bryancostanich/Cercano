@@ -55,7 +55,7 @@ func main() {
 		cfg = config.Defaults()
 	}
 
-	fmt.Printf("Local model: %s\n", cfg.LocalModel)
+	fmt.Printf("Local model: %s\n", cfg.OpenModel)
 	fmt.Printf("Ollama URL: %s\n", cfg.OllamaURL)
 	if cfg.CloudProvider != "" {
 		fmt.Printf("Cloud provider: %s (%s)\n", cfg.CloudProvider, cfg.CloudModel)
@@ -77,8 +77,8 @@ func main() {
 	registry.RegisterEngine(llamaEng)
 
 	// Initialize Providers
-	localEngine, localModel := selectLocalEngine(cfg, ollamaEng, llamaEng)
-	localProvider := legacymodels.NewLocalModelProvider(localEngine, localModel)
+	openEngine, openModel := selectOpenEngine(cfg, ollamaEng, llamaEng)
+	openProvider := legacymodels.NewOpenModelProvider(openEngine, openModel)
 
 	// Cloud provider construction: only build a real one when there's enough
 	// config to actually reach a cloud (API key OR a proxy baseURL). Otherwise
@@ -103,9 +103,9 @@ func main() {
 
 	validator := tools.NewAutoValidator(tools.DefaultLoader(), tools.DefaultKindToValidator())
 	sessionSvc := session.InMemoryService()
-	coordinator := loop.NewADKCoordinator(localProvider, cloudProvider, validator, sessionSvc)
+	coordinator := loop.NewADKCoordinator(openProvider, cloudProvider, validator, sessionSvc)
 
-	smartRouter, err := agent.NewSmartRouterFromBytes(localProvider, cloudProvider, cfg.EmbeddingModel, ollamaEng, agent.DefaultPrototypes(), func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.ModelProvider, error) {
+	smartRouter, err := agent.NewSmartRouterFromBytes(openProvider, cloudProvider, cfg.EmbeddingModel, ollamaEng, agent.DefaultPrototypes(), func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.ModelProvider, error) {
 		return legacymodels.NewCloudModelProvider(ctx, provider, model, apiKey, baseURL)
 	})
 	if err != nil {
@@ -141,7 +141,7 @@ func main() {
 		grpc.ChainUnaryInterceptor(server.RecoveryUnaryInterceptor()),
 		grpc.ChainStreamInterceptor(server.RecoveryStreamInterceptor()),
 	)
-	srv := server.NewServer(orchestrator, localProvider, smartRouter, coordinator, cloudFactory, registry)
+	srv := server.NewServer(orchestrator, openProvider, smartRouter, coordinator, cloudFactory, registry)
 	srv.SetRuntimeManager(runtimeManager)
 	srv.SetConfigPersistence(config.DefaultPath(), cfg)
 	proto.RegisterAgentServer(s, srv)
@@ -183,16 +183,16 @@ func buildRuntimeManager(cfg config.Config) localruntime.Manager {
 }
 
 func llamaServerEnabled(cfg config.Config) bool {
-	return cfg.LlamaServer.Enabled || strings.EqualFold(cfg.LocalRuntime, "llama_server")
+	return cfg.LlamaServer.Enabled || strings.EqualFold(cfg.OpenRuntime, "llama_server")
 }
 
-func selectLocalEngine(cfg config.Config, ollamaEng engine.InferenceEngine, llamaEng engine.InferenceEngine) (engine.InferenceEngine, string) {
-	if strings.EqualFold(cfg.LocalRuntime, "llama_server") {
+func selectOpenEngine(cfg config.Config, ollamaEng engine.InferenceEngine, llamaEng engine.InferenceEngine) (engine.InferenceEngine, string) {
+	if strings.EqualFold(cfg.OpenRuntime, "llama_server") {
 		model := strings.TrimSpace(cfg.LlamaServer.DefaultModel)
 		if model == "" {
-			model = cfg.LocalModel
+			model = cfg.OpenModel
 		}
 		return llamaEng, model
 	}
-	return ollamaEng, cfg.LocalModel
+	return ollamaEng, cfg.OpenModel
 }

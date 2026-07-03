@@ -14,11 +14,11 @@ func TestDefaults(t *testing.T) {
 	if cfg.OllamaURL != "http://localhost:11434" {
 		t.Errorf("expected default OllamaURL, got %q", cfg.OllamaURL)
 	}
-	if cfg.LocalRuntime != "ollama" {
-		t.Errorf("expected default LocalRuntime, got %q", cfg.LocalRuntime)
+	if cfg.OpenRuntime != "ollama" {
+		t.Errorf("expected default OpenRuntime, got %q", cfg.OpenRuntime)
 	}
-	if cfg.LocalModel != "qwen3-coder" {
-		t.Errorf("expected default LocalModel, got %q", cfg.LocalModel)
+	if cfg.OpenModel != "qwen3-coder" {
+		t.Errorf("expected default OpenModel, got %q", cfg.OpenModel)
 	}
 	if cfg.EmbeddingModel != "nomic-embed-text" {
 		t.Errorf("expected default EmbeddingModel, got %q", cfg.EmbeddingModel)
@@ -56,8 +56,8 @@ func TestLoad_FromFile(t *testing.T) {
 	if cfg.OllamaURL != "http://mac-studio.local:11434" {
 		t.Errorf("expected OllamaURL from file, got %q", cfg.OllamaURL)
 	}
-	if cfg.LocalModel != "GLM-4.7-Flash" {
-		t.Errorf("expected LocalModel from file, got %q", cfg.LocalModel)
+	if cfg.OpenModel != "GLM-4.7-Flash" {
+		t.Errorf("expected OpenModel from file, got %q", cfg.OpenModel)
 	}
 	// Defaults should fill in unset fields
 	if cfg.EmbeddingModel != "nomic-embed-text" {
@@ -109,8 +109,8 @@ func TestLoad_EnvOverridesFile(t *testing.T) {
 		t.Errorf("expected env override for OllamaURL, got %q", cfg.OllamaURL)
 	}
 	// File value should remain where no env var exists
-	if cfg.LocalModel != "file-model" {
-		t.Errorf("expected LocalModel from file, got %q", cfg.LocalModel)
+	if cfg.OpenModel != "file-model" {
+		t.Errorf("expected OpenModel from file, got %q", cfg.OpenModel)
 	}
 }
 
@@ -122,8 +122,8 @@ func TestLoad_EnvOverridesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
-	if cfg.LocalModel != "env-model" {
-		t.Errorf("expected env LocalModel, got %q", cfg.LocalModel)
+	if cfg.OpenModel != "env-model" {
+		t.Errorf("expected env OpenModel, got %q", cfg.OpenModel)
 	}
 	if cfg.Port != "9999" {
 		t.Errorf("expected env Port, got %q", cfg.Port)
@@ -197,7 +197,7 @@ func TestSave_RoundTrip(t *testing.T) {
 
 	cfg := Config{
 		OllamaURL:      "http://studio.local:11434",
-		LocalModel:     "GLM-4.7-Flash",
+		OpenModel:     "GLM-4.7-Flash",
 		EmbeddingModel: "nomic-embed-text",
 		CloudProvider:  "google",
 		CloudModel:     "gemini-2.0-flash",
@@ -216,8 +216,8 @@ func TestSave_RoundTrip(t *testing.T) {
 	if loaded.OllamaURL != cfg.OllamaURL {
 		t.Errorf("OllamaURL mismatch: %q vs %q", loaded.OllamaURL, cfg.OllamaURL)
 	}
-	if loaded.LocalModel != cfg.LocalModel {
-		t.Errorf("LocalModel mismatch: %q vs %q", loaded.LocalModel, cfg.LocalModel)
+	if loaded.OpenModel != cfg.OpenModel {
+		t.Errorf("OpenModel mismatch: %q vs %q", loaded.OpenModel, cfg.OpenModel)
 	}
 	if loaded.CloudProvider != cfg.CloudProvider {
 		t.Errorf("CloudProvider mismatch: %q vs %q", loaded.CloudProvider, cfg.CloudProvider)
@@ -263,8 +263,52 @@ func TestDefaults_Retention(t *testing.T) {
 }
 
 func TestDefaultsLocusMode(t *testing.T) {
-	if got := Defaults().LocusMode; got != "local_primary" {
-		t.Errorf("Defaults().LocusMode = %q; want local_primary", got)
+	if got := Defaults().LocusMode; got != "open_primary" {
+		t.Errorf("Defaults().LocusMode = %q; want open_primary", got)
+	}
+}
+
+func TestLoad_LegacyLocalKeysBackwardCompat(t *testing.T) {
+	// Pre-rename YAML with `local_model` / `local_runtime` / legacy locus_mode
+	// values should still load into the new Open* fields and normalized modes.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	os.WriteFile(path, []byte(`
+local_model: legacy-model
+local_runtime: llama_server
+locus_mode: local_primary
+`), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.OpenModel != "legacy-model" {
+		t.Errorf("expected legacy local_model to populate OpenModel, got %q", cfg.OpenModel)
+	}
+	if cfg.OpenRuntime != "llama_server" {
+		t.Errorf("expected legacy local_runtime to populate OpenRuntime, got %q", cfg.OpenRuntime)
+	}
+	if cfg.LocusMode != "open_primary" {
+		t.Errorf("expected locus_mode local_primary to normalize to open_primary, got %q", cfg.LocusMode)
+	}
+}
+
+func TestLoad_OpenKeysWinOverLegacy(t *testing.T) {
+	// When both `open_*` and `local_*` are set, `open_*` wins.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	os.WriteFile(path, []byte(`
+open_model: new-key-model
+local_model: legacy-model
+`), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.OpenModel != "new-key-model" {
+		t.Errorf("open_model should win over local_model, got %q", cfg.OpenModel)
 	}
 }
 

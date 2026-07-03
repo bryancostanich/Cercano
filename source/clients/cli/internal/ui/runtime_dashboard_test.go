@@ -57,8 +57,8 @@ func TestRuntimeDashboardViewShowsRuntimeDashboardData(t *testing.T) {
 	m := New(nil, false)
 	snapshot := runtimeDashboardSnapshot{
 		Config: &agentclient.Config{
-			LocalRuntime:   "llama_server",
-			LocalModel:     "qwen.gguf",
+			OpenRuntime:   "llama_server",
+			OpenModel:     "qwen.gguf",
 			EmbeddingModel: "nomic-embed-text",
 			CloudProvider:  "openai",
 			CloudModel:     "gpt-test",
@@ -137,13 +137,13 @@ func TestRuntimeDashboardViewShowsRuntimeDashboardData(t *testing.T) {
 	assertActionRowContains(t, rows, "restart", "running.gguf")
 }
 
-func TestRuntimeDashboardViewSeparatesConfigAndLocalLogs(t *testing.T) {
+func TestRuntimeDashboardViewSeparatesConfigAndOpenLogs(t *testing.T) {
 	m := New(nil, false)
 	snapshot := runtimeDashboardSnapshot{
 		Config: &agentclient.Config{
 			OllamaURL:      "http://mac-studio.local:11434",
-			LocalRuntime:   "llama_server",
-			LocalModel:     "qwen.gguf",
+			OpenRuntime:   "llama_server",
+			OpenModel:     "qwen.gguf",
 			EmbeddingModel: "nomic-embed-text",
 			CloudProvider:  "openai",
 			CloudModel:     "gpt-test",
@@ -250,7 +250,7 @@ func TestRuntimeDashboardCatalogSearchFiltersAndShowsDetails(t *testing.T) {
 		palette: m.palette,
 		styles:  m.styles,
 		snapshot: runtimeDashboardSnapshot{
-			Config: &agentclient.Config{LocalRuntime: "llama_server"},
+			Config: &agentclient.Config{OpenRuntime: "llama_server"},
 			Status: &agentclient.RuntimeStatus{
 				Models: []agentclient.RuntimeModel{
 					{
@@ -301,7 +301,7 @@ func TestRuntimeDashboardCatalogTypingFiltersByDefault(t *testing.T) {
 		palette: m.palette,
 		styles:  m.styles,
 		snapshot: runtimeDashboardSnapshot{
-			Config: &agentclient.Config{LocalRuntime: "llama_server"},
+			Config: &agentclient.Config{OpenRuntime: "llama_server"},
 			Status: &agentclient.RuntimeStatus{
 				Models: []agentclient.RuntimeModel{{
 					ID:            "catalog:qwen2.5-coder-7b-q4",
@@ -340,8 +340,8 @@ func TestRuntimeDashboardBlocksUseFullPageWidth(t *testing.T) {
 		styles:  m.styles,
 		snapshot: runtimeDashboardSnapshot{
 			Config: &agentclient.Config{
-				LocalRuntime:  "llama_server",
-				LocalModel:    "qwen.gguf",
+				OpenRuntime:  "llama_server",
+				OpenModel:    "qwen.gguf",
 				CloudProvider: "openai",
 				CloudModel:    "gpt-test",
 			},
@@ -371,7 +371,7 @@ func TestRuntimeDashboardBlocksUseFullPageWidth(t *testing.T) {
 	if got := maxRenderedLineWidth(dashboard.renderConfigBlocks()); got != pageW {
 		t.Fatalf("config row width = %d, want %d:\n%s", got, pageW, ansi.Strip(dashboard.renderConfigBlocks()))
 	}
-	logBlock := dashboard.renderLocalServerLogBlock(8)
+	logBlock := dashboard.renderOpenServerLogBlock(8)
 	if got := maxRenderedLineWidth(logBlock); got != pageW {
 		t.Fatalf("log block width = %d, want %d:\n%s", got, pageW, ansi.Strip(logBlock))
 	}
@@ -397,7 +397,7 @@ func TestRuntimeDashboardLogBlockFillsRemainingContentHeight(t *testing.T) {
 		palette: m.palette,
 		styles:  m.styles,
 		snapshot: runtimeDashboardSnapshot{
-			Config: &agentclient.Config{LocalRuntime: "llama_server"},
+			Config: &agentclient.Config{OpenRuntime: "llama_server"},
 			Status: &agentclient.RuntimeStatus{
 				Logs: []agentclient.RuntimeLogEntry{{
 					Source:    "cercano.runtime.llama_server",
@@ -587,8 +587,8 @@ func overflowingRuntimeDashboard(t *testing.T, height int) *runtimeDashboard {
 	}
 	snapshot := runtimeDashboardSnapshot{
 		Config: &agentclient.Config{
-			LocalRuntime:   "llama_server",
-			LocalModel:     "qwen.gguf",
+			OpenRuntime:   "llama_server",
+			OpenModel:     "qwen.gguf",
 			EmbeddingModel: "nomic-embed-text",
 			CloudProvider:  "anthropic",
 			CloudModel:     "claude-test",

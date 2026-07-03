@@ -38,7 +38,7 @@ func (m *mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 
 func TestRouter_ClassifiesUnitTestGenerationAsLocal(t *testing.T) {
 	// Setup Mocks
-	localProvider := &MockModelProvider{name: "LocalModel"}
+	openProvider := &MockModelProvider{name: "OpenModel"}
 	cloudProvider := &MockModelProvider{name: "CloudModel"}
 
 	mockResponses := map[string]string{
@@ -58,7 +58,7 @@ func TestRouter_ClassifiesUnitTestGenerationAsLocal(t *testing.T) {
 	embedder := &mockEmbedder{responses: mockResponses}
 
 	// Initialize Router with mocked client
-	r, err := NewSmartRouter(localProvider, cloudProvider, "nomic-embed-text", embedder, "prototypes.yaml", func(ctx context.Context, provider, model, apiKey, baseURL string) (ModelProvider, error) {
+	r, err := NewSmartRouter(openProvider, cloudProvider, "nomic-embed-text", embedder, "prototypes.yaml", func(ctx context.Context, provider, model, apiKey, baseURL string) (ModelProvider, error) {
 		return &MockModelProvider{name: provider}, nil
 	})
 	if err != nil {
@@ -73,7 +73,7 @@ func TestRouter_ClassifiesUnitTestGenerationAsLocal(t *testing.T) {
 	}{
 		{
 			input:          "Generate unit tests for this function",
-			expectedSource: "LocalModel",
+			expectedSource: "OpenModel",
 			expectedIntent: IntentCoding,
 			mockEmbedding:  `{"embedding": [1.0, 0.0]}`, // Matches Coding Intent and Local Provider
 		},

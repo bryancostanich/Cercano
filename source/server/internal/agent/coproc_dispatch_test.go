@@ -9,11 +9,11 @@ import (
 	"cercano/source/server/internal/locus"
 )
 
-// TestCoprocDispatchLocalPick verifies that local_primary routes coproc to local.
-func TestCoprocDispatchLocalPick(t *testing.T) {
+// TestCoprocDispatchOpenPick verifies that local_primary routes coproc to local.
+func TestCoprocDispatchOpenPick(t *testing.T) {
 	local := &fakeLLMProvider{name: "ollama", out: "local response"}
 	cloud := &fakeLLMProvider{name: "anthropic", out: "cloud response"}
-	a := newDispatchCoprocAgent("local_primary", local, cloud)
+	a := newDispatchCoprocAgent("open_primary", local, cloud)
 
 	r, err := a.ProcessRequest(context.Background(), &Request{Input: "hello", Coproc: true})
 	if err != nil {
@@ -55,7 +55,7 @@ func TestCoprocDispatchCloudPrimaryKeepsLocal(t *testing.T) {
 func TestCoprocDispatchFallbackNotice(t *testing.T) {
 	// local_primary, no local available → falls back to cloud.
 	cloud := &fakeLLMProvider{name: "anthropic", out: "cloud response"}
-	a := newDispatchCoprocAgent("local_primary", nil, cloud)
+	a := newDispatchCoprocAgent("open_primary", nil, cloud)
 
 	r, err := a.ProcessRequest(context.Background(), &Request{Input: "hello", Coproc: true})
 	if err != nil {
@@ -73,13 +73,13 @@ func TestCoprocDispatchFallbackNotice(t *testing.T) {
 func TestCoprocDispatchNoProviderError(t *testing.T) {
 	eng := dispatch.NewEngine(
 		func() dispatch.Providers { return dispatch.Providers{} }, // both nil
-		func() locus.Mode { return locus.LocalOnly },
+		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
 	eng.SetModelFor(func(isCloud bool) string { return "local-model" })
 
 	a := NewAgent(&fakeCoprocRouter{providers: map[string]ModelProvider{}}, nil)
-	a.SetLocusModeGetter(func() string { return "local_only" })
+	a.SetLocusModeGetter(func() string { return "open_only" })
 	a.SetDispatchEngine(eng)
 
 	_, err := a.ProcessRequest(context.Background(), &Request{Input: "hello", Coproc: true})
@@ -94,7 +94,7 @@ func TestCoprocDispatchNoProviderError(t *testing.T) {
 // TestCoprocDispatchModelOverride verifies ModelOverride reflected in RoutingMetadata.ModelName.
 func TestCoprocDispatchModelOverride(t *testing.T) {
 	local := &fakeLLMProvider{name: "ollama", out: "local response"}
-	a := newDispatchCoprocAgent("local_only", local, nil)
+	a := newDispatchCoprocAgent("open_only", local, nil)
 
 	const override = "my-special-model"
 	r, err := a.ProcessRequest(context.Background(), &Request{
@@ -127,7 +127,7 @@ func TestCoprocDispatchNoEngine(t *testing.T) {
 // TestCoprocDispatchTokensPopulated verifies input/output token counts propagate.
 func TestCoprocDispatchTokensPopulated(t *testing.T) {
 	local := &fakeLLMProvider{name: "ollama", out: "some output"}
-	a := newDispatchCoprocAgent("local_only", local, nil)
+	a := newDispatchCoprocAgent("open_only", local, nil)
 
 	r, err := a.ProcessRequest(context.Background(), &Request{Input: "hello", Coproc: true})
 	if err != nil {

@@ -199,8 +199,8 @@ func TestSetDispatchEngine_WiresAgenticRunner(t *testing.T) {
 	srv.SetPermissions(perms, nil)
 
 	eng := dispatch.NewEngine(
-		func() dispatch.Providers { return dispatch.Providers{Local: prov} },
-		func() locus.Mode { return locus.LocalOnly },
+		func() dispatch.Providers { return dispatch.Providers{Open: prov} },
+		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
 	eng.SetModelFor(func(isCloud bool) string { return "local-model" })

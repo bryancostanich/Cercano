@@ -37,8 +37,8 @@ func TestFormOpenSelectDoesNotWrapFlushLeft(t *testing.T) {
 	sel := NewSelect("locus-mode", "locus-mode", []Option{
 		{Label: "cloud_only", Value: "cloud_only"},
 		{Label: "cloud_primary", Value: "cloud_primary"},
-		{Label: "local_primary", Value: "local_primary"},
-		{Label: "local_only", Value: "local_only"},
+		{Label: "open_primary", Value: "open_primary"},
+		{Label: "open_only", Value: "open_only"},
 	}, "cloud_only")
 	// A sibling read-only field with a 15-char label forces colOffset = 20,
 	// matching the real settings page (widest label "embedding-model").
@@ -51,7 +51,7 @@ func TestFormOpenSelectDoesNotWrapFlushLeft(t *testing.T) {
 	}
 
 	out := ansiStrip(f.View(53, p, s))
-	for _, opt := range []string{"cloud_primary", "local_primary", "local_only"} {
+	for _, opt := range []string{"cloud_primary", "open_primary", "open_only"} {
 		// A flush-left wrap renders as the option immediately after the box
 		// border + single padding space: "│ <option>".
 		if strings.Contains(out, "│ "+opt) {
@@ -59,7 +59,7 @@ func TestFormOpenSelectDoesNotWrapFlushLeft(t *testing.T) {
 		}
 	}
 	// Sanity: every option is still present somewhere.
-	for _, opt := range []string{"cloud_only", "cloud_primary", "local_primary", "local_only"} {
+	for _, opt := range []string{"cloud_only", "cloud_primary", "open_primary", "open_only"} {
 		if !strings.Contains(out, opt) {
 			t.Fatalf("option %q missing from render:\n%s", opt, out)
 		}

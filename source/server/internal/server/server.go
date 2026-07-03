@@ -67,7 +67,7 @@ type McpManager interface {
 type Server struct {
 	proto.UnimplementedAgentServer
 	agent               *agent.Agent
-	localProvider       *legacymodels.LocalModelProvider
+	openProvider       *legacymodels.OpenModelProvider
 	router              RouterCloudUpdater
 	coordinator         *loop.ADKCoordinator
 	cloudFactory        agent.CloudFactory
@@ -82,7 +82,7 @@ type Server struct {
 	meridianMgr         *meridian.Manager
 	pendingDecisions    *agent.PendingDecisions
 	cloudLLMProvider    llm.Provider
-	localLLMProvider    llm.Provider // native-tool-loop local provider (Ollama)
+	openLLMProvider    llm.Provider // native-tool-loop local provider (Ollama)
 	secrets             secrets.Store
 	runtimeManager      localruntime.Manager
 	retentionSweeper    *retention.Sweeper
@@ -125,12 +125,12 @@ func (s *Server) ToolRegistry() *agenttools.Registry { return s.toolRegistry }
 // InstallCapabilities builds the capability registry from the server's current
 // providers, config, and context loader, then wires the resulting
 // agenttools.Registry as the server's tool registry. Call AFTER
-// SetCloudLLMProvider / SetLocalLLMProvider / SetContextLoader so that
+// SetCloudLLMProvider / SetOpenLLMProvider / SetContextLoader so that
 // Services carries live runtime values.
 func (s *Server) InstallCapabilities() {
 	capReg := capabilities.NewRegistry(capabilities.Services{
 		CloudProvider: s.cloudLLMProvider,
-		LocalProvider: s.localLLMProvider,
+		OpenProvider: s.openLLMProvider,
 		Config:        &s.currentConfig,
 		ProjectCtx:    s.contextLoader,
 		// Engine/Conversations wired in a later phase; nil-safe until then.
@@ -220,14 +220,14 @@ func (s *Server) RestartMcpServer(ctx context.Context, req *proto.RestartMcpServ
 // back to a hardcoded Anthropic-shaped capability snapshot.
 func (s *Server) SetCloudLLMProvider(p llm.Provider) { s.cloudLLMProvider = p }
 
-// SetLocalLLMProvider attaches the native-tool-calling local provider (Ollama).
-func (s *Server) SetLocalLLMProvider(p llm.Provider) { s.localLLMProvider = p }
+// SetOpenLLMProvider attaches the native-tool-calling local provider (Ollama).
+func (s *Server) SetOpenLLMProvider(p llm.Provider) { s.openLLMProvider = p }
 
-// CloudLLMProvider / LocalLLMProvider return the RAW (unwrapped) providers. The
+// CloudLLMProvider / OpenLLMProvider return the RAW (unwrapped) providers. The
 // dispatch engine reads these per-dispatch so a runtime cloud swap is honored,
 // and wraps them itself for usage recording — so these must stay unwrapped.
 func (s *Server) CloudLLMProvider() llm.Provider { return s.cloudLLMProvider }
-func (s *Server) LocalLLMProvider() llm.Provider { return s.localLLMProvider }
+func (s *Server) OpenLLMProvider() llm.Provider { return s.openLLMProvider }
 
 // SetUsageSink installs the sink that resolveMainProvider uses to wrap the
 // main tool-loop's provider for token-usage recording. The server's stored
@@ -591,7 +591,7 @@ func (s *Server) resolveMainProvider() (llm.Provider, bool, bool, error) {
 	mode, _ := locus.ParseMode(locusMode)
 	sel, err := dispatch.Select(mode, dispatch.RoleMain, dispatch.Providers{
 		Cloud: s.cloudLLMProvider,
-		Local: s.localLLMProvider,
+		Open:  s.openLLMProvider,
 	})
 	if err != nil {
 		return nil, false, false, err
@@ -619,10 +619,10 @@ func (s *Server) SetRetentionSweeper(sw *retention.Sweeper) { s.retentionSweeper
 func (s *Server) SetCompactionGenerator(g *compactiongen.Generator) { s.compactionGen = g }
 
 // NewServer creates a new Agent gRPC server.
-func NewServer(a *agent.Agent, localProvider *legacymodels.LocalModelProvider, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
+func NewServer(a *agent.Agent, openProvider *legacymodels.OpenModelProvider, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
 	return &Server{
 		agent:         a,
-		localProvider: localProvider,
+		openProvider: openProvider,
 		router:        router,
 		coordinator:   coordinator,
 		cloudFactory:  cloudFactory,
@@ -690,17 +690,17 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		fmt.Printf("UpdateConfig: Ollama URL set to %s (health monitor started)\n", req.OllamaUrl)
 	}
 
-	if req.LocalModel != "" {
-		s.localProvider.SetModelName(req.LocalModel)
-		changes = append(changes, fmt.Sprintf("local_model=%s", req.LocalModel))
-		fmt.Printf("UpdateConfig: Local model set to %s\n", req.LocalModel)
+	if req.OpenModel != "" {
+		s.openProvider.SetModelName(req.OpenModel)
+		changes = append(changes, fmt.Sprintf("local_model=%s", req.OpenModel))
+		fmt.Printf("UpdateConfig: Local model set to %s\n", req.OpenModel)
 	}
 
-	if req.LocalRuntime != "" {
-		if req.LocalRuntime != "ollama" && req.LocalRuntime != "llama_server" {
+	if req.OpenRuntime != "" {
+		if req.OpenRuntime != "ollama" && req.OpenRuntime != "llama_server" {
 			return &proto.UpdateConfigResponse{
 				Success: false,
-				Message: fmt.Sprintf("invalid local_runtime %q: expected ollama or llama_server", req.LocalRuntime),
+				Message: fmt.Sprintf("invalid local_runtime %q: expected ollama or llama_server", req.OpenRuntime),
 			}, nil
 		}
 		if s.registry == nil {
@@ -709,11 +709,11 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 				Message: "engine registry is not configured",
 			}, nil
 		}
-		eng, err := s.registry.GetEngine(req.LocalRuntime)
+		eng, err := s.registry.GetEngine(req.OpenRuntime)
 		if err != nil {
 			return &proto.UpdateConfigResponse{
 				Success: false,
-				Message: fmt.Sprintf("local runtime %q is not available: %v", req.LocalRuntime, err),
+				Message: fmt.Sprintf("local runtime %q is not available: %v", req.OpenRuntime, err),
 			}, nil
 		}
 		// Runtime-swap auto-configure: for llama_server, run headless detection
@@ -721,10 +721,10 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		// populates Binary + DefaultModel from the environment (PATH lookup +
 		// GGUF scan) instead of silently landing a swap that fails on the next
 		// inference call. The swap itself proceeds either way — a failed
-		// detection lands as a LocalRuntimeStatusChanged{ok=false} event so
+		// detection lands as a OpenRuntimeStatusChanged{ok=false} event so
 		// the CLI can offer the install/model-picker flow.
 		var detectErr *llamaserver.DetectError
-		if req.LocalRuntime == "llama_server" {
+		if req.OpenRuntime == "llama_server" {
 			if err := llamaserver.Detect(ctx, &s.currentConfig.LlamaServer); err != nil {
 				if de, ok := err.(*llamaserver.DetectError); ok {
 					detectErr = de
@@ -735,17 +735,17 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 					s.currentConfig.LlamaServer.Binary, s.currentConfig.LlamaServer.DefaultModel)
 			}
 		}
-		model := req.LocalModel
-		if model == "" && req.LocalRuntime == "llama_server" {
+		model := req.OpenModel
+		if model == "" && req.OpenRuntime == "llama_server" {
 			model = s.currentConfig.LlamaServer.DefaultModel
 		}
 		if model == "" {
-			model = s.currentConfig.LocalModel
+			model = s.currentConfig.OpenModel
 		}
-		s.localProvider.SetEngine(eng, model)
-		changes = append(changes, fmt.Sprintf("local_runtime=%s", req.LocalRuntime))
-		fmt.Printf("UpdateConfig: Local runtime set to %s\n", req.LocalRuntime)
-		s.broadcastLocalRuntimeStatus(buildLocalRuntimeStatus(req.LocalRuntime, s.currentConfig, detectErr))
+		s.openProvider.SetEngine(eng, model)
+		changes = append(changes, fmt.Sprintf("local_runtime=%s", req.OpenRuntime))
+		fmt.Printf("UpdateConfig: Local runtime set to %s\n", req.OpenRuntime)
+		s.broadcastOpenRuntimeStatus(buildOpenRuntimeStatus(req.OpenRuntime, s.currentConfig, detectErr))
 	}
 
 	if req.LocusMode != "" {
@@ -973,13 +973,13 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		s.currentConfig.OllamaURL = req.OllamaUrl
 		s.broadcastConfigChanged("ollama_url", req.OllamaUrl)
 	}
-	if req.LocalModel != "" {
-		s.currentConfig.LocalModel = req.LocalModel
-		s.broadcastConfigChanged("local_model", req.LocalModel)
+	if req.OpenModel != "" {
+		s.currentConfig.OpenModel = req.OpenModel
+		s.broadcastConfigChanged("local_model", req.OpenModel)
 	}
-	if req.LocalRuntime != "" {
-		s.currentConfig.LocalRuntime = req.LocalRuntime
-		s.broadcastConfigChanged("local_runtime", req.LocalRuntime)
+	if req.OpenRuntime != "" {
+		s.currentConfig.OpenRuntime = req.OpenRuntime
+		s.broadcastConfigChanged("local_runtime", req.OpenRuntime)
 	}
 	if req.CloudProvider != "" {
 		s.currentConfig.CloudProvider = req.CloudProvider
@@ -1439,7 +1439,7 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 	}
 	return &proto.GetConfigResponse{
 		OllamaUrl:              cfg.OllamaURL,
-		LocalModel:             cfg.LocalModel,
+		OpenModel:             cfg.OpenModel,
 		EmbeddingModel:         cfg.EmbeddingModel,
 		CloudProvider:          cloudProvider,
 		CloudModel:             cloudModel,
@@ -1447,7 +1447,7 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 		CloudApiKeySet:         cfg.CloudAPIKey != "",
 		CloudState:             state,
 		Port:                   cfg.Port,
-		LocalRuntime:           cfg.LocalRuntime,
+		OpenRuntime:           cfg.OpenRuntime,
 		LocusMode:              cfg.LocusMode,
 		WatchdogEnabled:        cfg.Watchdog.Enabled,
 		WatchdogEcho:           cfg.Watchdog.Echo,
@@ -1469,7 +1469,7 @@ func (s *Server) ListModels(ctx context.Context, req *proto.ListModelsRequest) (
 		return nil, fmt.Errorf("registry not configured")
 	}
 	s.cfgMu.RLock()
-	runtimeName := s.currentConfig.LocalRuntime
+	runtimeName := s.currentConfig.OpenRuntime
 	s.cfgMu.RUnlock()
 	if runtimeName == "" {
 		runtimeName = "ollama"
@@ -1794,7 +1794,7 @@ func (s *Server) ProcessRequest(ctx context.Context, req *proto.ProcessRequestRe
 func (s *Server) StreamProcessRequest(req *proto.ProcessRequestRequest, stream proto.Agent_StreamProcessRequestServer) error {
 	fmt.Printf("Received request (Stream): %s\n", req.Input)
 
-	if (s.cloudLLMProvider != nil || s.localLLMProvider != nil) && s.toolRegistry != nil {
+	if (s.cloudLLMProvider != nil || s.openLLMProvider != nil) && s.toolRegistry != nil {
 		return s.streamProcessRequestWithToolLoop(req, stream)
 	}
 
@@ -2202,7 +2202,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		fbProv := s.cloudLLMProvider
 		fbCloud := true
 		if res.Fallback == locus.TierLocal {
-			fbProv, fbCloud = s.localLLMProvider, false
+			fbProv, fbCloud = s.openLLMProvider, false
 		}
 		if !fellBack && res.CrossAllowed && fbProv != nil {
 			stream.Send(&proto.StreamProcessResponse{
@@ -2261,7 +2261,7 @@ func (s *Server) mainModelFor(isCloud bool) string {
 	}
 	s.cfgMu.RLock()
 	defer s.cfgMu.RUnlock()
-	return s.currentConfig.LocalModel
+	return s.currentConfig.OpenModel
 }
 
 // runMainLoop drives the native tool-loop on the given provider/tier.
@@ -2420,7 +2420,7 @@ func (s *Server) mapRequest(req *proto.ProcessRequestRequest) *agent.Request {
 		WorkDir:        req.WorkDir,
 		FileName:       req.FileName,
 		ConversationID: req.ConversationId,
-		DirectLocal:    req.DirectLocal,
+		DirectOpen:    req.DirectOpen,
 		ModelOverride:  req.ModelOverride,
 		Coproc:         req.Coproc,
 		Images:         mapInlineImages(req.GetImages()),

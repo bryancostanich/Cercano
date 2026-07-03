@@ -36,9 +36,9 @@ func (s *Server) ProposeContextEdit(ctx context.Context, req *proto.ProposeConte
 	}
 
 	var local, cloud contextedit.CompleteFunc
-	if s.localProvider != nil {
+	if s.openProvider != nil {
 		local = func(ctx context.Context, prompt string) (string, error) {
-			resp, err := s.localProvider.Process(ctx, &agent.Request{Input: prompt})
+			resp, err := s.openProvider.Process(ctx, &agent.Request{Input: prompt})
 			if err != nil {
 				return "", err
 			}

@@ -179,17 +179,17 @@ func meridianStatusToProto(st meridian.Status) *proto.MeridianStatus {
 	}
 }
 
-// buildLocalRuntimeStatus builds the wire-level status message from the
+// buildOpenRuntimeStatus builds the wire-level status message from the
 // runtime name, the (possibly-just-updated) config, and an optional
 // DetectError. Detection failure → ok=false with Missing/SuggestedCommand
 // filled from the error; success (nil detectErr) → ok=true with binary +
 // default_model populated from cfg.
 //
 // The runtime name is passed in explicitly rather than read from cfg because
-// cfg.LocalRuntime is only updated later in UpdateConfig, but we need to
+// cfg.OpenRuntime is only updated later in UpdateConfig, but we need to
 // emit the status for the runtime being SWITCHED TO.
-func buildLocalRuntimeStatus(runtime string, cfg config.Config, detectErr *llamaserver.DetectError) *proto.LocalRuntimeStatus {
-	st := &proto.LocalRuntimeStatus{
+func buildOpenRuntimeStatus(runtime string, cfg config.Config, detectErr *llamaserver.DetectError) *proto.OpenRuntimeStatus {
+	st := &proto.OpenRuntimeStatus{
 		Runtime: runtime,
 	}
 	if detectErr == nil {
@@ -218,7 +218,7 @@ func buildLocalRuntimeStatus(runtime string, cfg config.Config, detectErr *llama
 	return st
 }
 
-// broadcastLocalRuntimeStatus pushes a LocalRuntimeStatusChanged event for
+// broadcastOpenRuntimeStatus pushes a OpenRuntimeStatusChanged event for
 // the current state of the active local inference runtime. Called from the
 // runtime-swap path in UpdateConfig — one event per swap attempt (ok or not)
 // so clients always have a fresh chip regardless of whether the runtime
@@ -228,13 +228,13 @@ func buildLocalRuntimeStatus(runtime string, cfg config.Config, detectErr *llama
 // llamaserver.DetectError, from a healthy post-detect config, or from a
 // fresh install-completion event without a helper here having to know all
 // three shapes.
-func (s *Server) broadcastLocalRuntimeStatus(status *proto.LocalRuntimeStatus) {
+func (s *Server) broadcastOpenRuntimeStatus(status *proto.OpenRuntimeStatus) {
 	if s.events == nil || status == nil {
 		return
 	}
 	s.events.broadcast(&proto.ClientEvent{
-		Event: &proto.ClientEvent_LocalRuntimeStatusChanged{
-			LocalRuntimeStatusChanged: &proto.LocalRuntimeStatusChanged{
+		Event: &proto.ClientEvent_OpenRuntimeStatusChanged{
+			OpenRuntimeStatusChanged: &proto.OpenRuntimeStatusChanged{
 				Status: status,
 			},
 		},

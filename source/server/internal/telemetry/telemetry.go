@@ -85,10 +85,10 @@ type Stats struct {
 	TotalRequests          int
 	TotalInputTokens       int
 	TotalOutputTokens      int
-	LocalTokensSaved       int     // input + output for non-escalated requests
+	OpenTokensSaved       int     // input + output for non-escalated requests
 	TotalCloudInputTokens  int
 	TotalCloudOutputTokens int
-	LocalPercentage        float64 // percentage of total tokens handled locally (0-100)
+	OpenPercentage        float64 // percentage of total tokens handled locally (0-100)
 	TotalContentAvoided    int     // sum of content_tokens_avoided across all events
 	EstimatedNetSavings    int     // TotalContentAvoided - overhead
 	ByTool                 []GroupStats
@@ -97,13 +97,13 @@ type Stats struct {
 	BySession              []SessionStats
 }
 
-// ComputeSavings calculates the LocalPercentage and EstimatedNetSavings.
+// ComputeSavings calculates the OpenPercentage and EstimatedNetSavings.
 func (s *Stats) ComputeSavings() {
-	totalLocal := s.LocalTokensSaved
+	totalLocal := s.OpenTokensSaved
 	totalCloud := s.TotalCloudInputTokens + s.TotalCloudOutputTokens
 	total := totalLocal + totalCloud
 	if total > 0 {
-		s.LocalPercentage = float64(totalLocal) / float64(total) * 100
+		s.OpenPercentage = float64(totalLocal) / float64(total) * 100
 	}
 
 	// Net savings = content avoided - per-call overhead
@@ -267,7 +267,7 @@ func (s *SQLiteStore) GetStats(ctx context.Context) (*Stats, error) {
 			COALESCE(SUM(content_tokens_avoided), 0)
 		FROM events
 	`)
-	if err := row.Scan(&stats.TotalRequests, &stats.TotalInputTokens, &stats.TotalOutputTokens, &stats.LocalTokensSaved, &stats.TotalContentAvoided); err != nil {
+	if err := row.Scan(&stats.TotalRequests, &stats.TotalInputTokens, &stats.TotalOutputTokens, &stats.OpenTokensSaved, &stats.TotalContentAvoided); err != nil {
 		return nil, fmt.Errorf("failed to query event stats: %w", err)
 	}
 

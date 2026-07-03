@@ -13,5 +13,5 @@ import (
 func testDefaultRegistry() *agenttools.Registry {
 	capReg := capabilities.NewRegistry(capabilities.Services{})
 	builtins.Register(capReg)
-	return agentadapter.BuildAgentRegistry(capReg, builtins.AgentAliases())
+	return agentadapter.BuildAgentRegistry(capReg, builtins.AgentAliases(), builtins.CapabilitySynonyms())
 }

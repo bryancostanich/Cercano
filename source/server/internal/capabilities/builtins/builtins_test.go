@@ -21,7 +21,7 @@ func TestRegister_Count(t *testing.T) {
 
 func TestAgentAliases_Count(t *testing.T) {
 	aliases := AgentAliases()
-	want := 8
+	want := 7
 	if len(aliases) != want {
 		t.Fatalf("expected %d aliases, got %d: %v", want, len(aliases), aliases)
 	}
@@ -47,5 +47,25 @@ func TestAgentAliases_Entries(t *testing.T) {
 		if got != v {
 			t.Errorf("alias[%q] = %q, want %q", k, got, v)
 		}
+	}
+}
+
+func TestAgentAliases_ExcludesSynonyms(t *testing.T) {
+	// dispatch <-> workflow lives in CapabilitySynonyms (both names visible),
+	// not in AgentAliases (which would rename it and hide the canonical).
+	aliases := AgentAliases()
+	if _, ok := aliases["dispatch"]; ok {
+		t.Errorf("dispatch must not be in AgentAliases; it belongs in CapabilitySynonyms")
+	}
+}
+
+func TestCapabilitySynonyms_DispatchWorkflow(t *testing.T) {
+	syns := CapabilitySynonyms()
+	got, ok := syns["dispatch"]
+	if !ok {
+		t.Fatalf("expected synonyms for %q, got none: %v", "dispatch", syns)
+	}
+	if len(got) != 1 || got[0] != "workflow" {
+		t.Errorf("dispatch synonyms = %v, want [workflow]", got)
 	}
 }

@@ -48,6 +48,7 @@ func BuildExtractivePrompt(messages []llm.Message) string {
 	b.WriteString("- Every bullet must be an exact, character-for-character quote copied from the conversation (you may trim leading/trailing whitespace, nothing else).\n")
 	b.WriteString("- Do not paraphrase, merge, or complete sentences. If a passage is too long, quote its most load-bearing contiguous span.\n")
 	b.WriteString("- Quote identifiers, signatures, config keys, YAML, and code exactly as written.\n")
+	b.WriteString("- Write each quote as plain text: no surrounding quotation marks, no escaping — keep real newlines and quote characters exactly as they appear in the conversation.\n")
 	b.WriteString("- Omit any section with nothing worth quoting. Never invent a quote.\n")
 	b.WriteString("\n")
 	b.WriteString("Use only these section labels:\n\n")
@@ -67,11 +68,16 @@ func BuildExtractivePrompt(messages []llm.Message) string {
 // mechanical hallucination metric: for the extractive frame ungrounded
 // bullets are defects by construction; for paraphrase frames the grounded
 // fraction is a (looser) drift signal.
+//
+// Bullets are unwrapped before matching: models quote-wrap extracted spans
+// (- "...") and JSON-escape newlines and inner quotes inside them, neither of
+// which exists in the source text. Without unwrapping, genuinely verbatim
+// quotes score 0 — observed on every frame in matrix run 2.
 func GroundedBullets(s StructuredSummary, source string) (grounded, total int) {
 	src := normalizeSpace(source)
 	check := func(item string) {
 		total++
-		if item != "" && strings.Contains(src, normalizeSpace(item)) {
+		if item != "" && strings.Contains(src, normalizeSpace(unwrapQuote(item))) {
 			grounded++
 		}
 	}
@@ -94,4 +100,18 @@ func GroundedBullets(s StructuredSummary, source string) (grounded, total int) {
 // and indentation differences don't defeat substring matching.
 func normalizeSpace(s string) string {
 	return strings.Join(strings.Fields(s), " ")
+}
+
+// unwrapQuote strips a surrounding quote pair and undoes JSON-style escapes
+// (\n, \t, \") that models introduce when quoting multi-line spans.
+func unwrapQuote(s string) string {
+	s = strings.TrimSpace(s)
+	for _, q := range []struct{ open, close string }{{`"`, `"`}, {"“", "”"}, {"'", "'"}} {
+		if len(s) >= 2 && strings.HasPrefix(s, q.open) && strings.HasSuffix(s, q.close) {
+			s = strings.TrimSuffix(strings.TrimPrefix(s, q.open), q.close)
+			break
+		}
+	}
+	r := strings.NewReplacer(`\n`, " ", `\t`, " ", `\"`, `"`)
+	return r.Replace(s)
 }

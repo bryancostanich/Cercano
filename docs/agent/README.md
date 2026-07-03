@@ -15,11 +15,11 @@ The standalone Cercano agent is a daily-driver AI coding assistant with native t
 
 ### Install the dev launcher
 
-The launcher rebuilds-if-stale and kills stale agents on each invocation:
+The launcher rebuilds-if-stale and kills stale agents on each invocation.
+Generate it (bakes this clone's path in, exports `CERCANO_REPO`):
 
 ```bash
-cp source/server/scripts/cercano-launcher.sh ~/bin/cercano
-chmod +x ~/bin/cercano
+cd source/server && make launcher
 ```
 
 Then `cercano` runs the CLI when stdin is a TTY, and `cercano agent` runs the gRPC agent server. The CLI auto-launches the agent if no server is on `:50052`.
@@ -56,6 +56,7 @@ Switch with `/strict`, `/permissive`, `/bypass`, or `/mode <name>`. Persists to 
 
 | Command | What it does |
 |---|---|
+| `/d [repo-path]` | Development mode — point the session at the Cercano repo and prime the agent to work on itself |
 | `/tools` | List the agent's registered tools |
 | `/tool <name> <json>` | Invoke a tool directly (W/X requires `/bypass`) |
 | `/strict` `/permissive` `/bypass` `/mode <m>` | Change permission mode |

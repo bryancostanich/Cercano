@@ -29,12 +29,13 @@ func TestContextMeter_CompactingOverlay(t *testing.T) {
 	if !strings.Contains(out, "compacting") {
 		t.Errorf("expected a compacting overlay while a pass runs:\n%s", out)
 	}
-	// The "compacting…" label is overlaid on the 20-cell bar itself. With
-	// fillN=1 and the label centered (start=4), col 0 stays a raw █ and
-	// cols 1-3 + 15-19 stay raw ░ — so both glyphs remain visible alongside
-	// the overlaid letters and the bar's fill ratio still reads through.
-	if !strings.Contains(out, "█") {
-		t.Errorf("expected the un-overlaid filled cell to remain visible:\n%s", out)
+	// During compaction every filled cell is BACKGROUND-painted (space glyph,
+	// fill color as the cell background) so the bar height is uniform with
+	// the background-painted label cells. A █ foreground glyph doesn't flood
+	// the cell the way a background does, and mixing the two made the label
+	// region render taller than the rest of the bar.
+	if strings.Contains(out, "█") {
+		t.Errorf("filled cells must be background-painted during compaction, not █ glyphs:\n%s", out)
 	}
 	if !strings.Contains(out, "░") {
 		t.Errorf("expected un-overlaid empty cells to remain visible:\n%s", out)

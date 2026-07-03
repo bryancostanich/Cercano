@@ -3489,9 +3489,14 @@ func (m Model) renderCompactingMeterBar(cells, fillN int) string {
 			// carry the texture right up to the glyph.
 			b.WriteString(m.styles.Bright.Render(string(label[col-start])))
 		case !inLabel && onFill:
+			// Background-paint (space glyph), not a █ foreground glyph: the
+			// label cells are background-painted, and a font's full-block
+			// glyph doesn't flood the whole cell the way a background color
+			// does — mixing the two makes the label cells look taller than
+			// the rest of the bar.
 			b.WriteString(lipgloss.NewStyle().
-				Foreground(progressColorAt(col, sweepPos, tail)).
-				Render("█"))
+				Background(progressColorAt(col, sweepPos, tail)).
+				Render(" "))
 		default: // !inLabel && !onFill
 			b.WriteString(m.styles.MeterEmpty.Render("░"))
 		}

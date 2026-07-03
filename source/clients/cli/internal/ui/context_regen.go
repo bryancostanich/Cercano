@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -22,6 +23,18 @@ type contextRegenDoneMsg struct {
 	err  string
 	pre  int
 	post int
+}
+
+// isTransportLoss reports whether a regen error string looks like the stream
+// transport died (agent shutdown/restart) rather than the rebuild itself
+// failing server-side.
+func isTransportLoss(err string) bool {
+	for _, marker := range []string{"Unavailable", "graceful_stop", "goaway", "error reading from server: EOF", "connection refused", "transport is closing"} {
+		if strings.Contains(err, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // startContextRegenCmd opens the RegenerateContext streaming RPC for the

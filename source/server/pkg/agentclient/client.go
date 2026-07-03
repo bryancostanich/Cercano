@@ -682,12 +682,28 @@ func (c *Client) GetRuntimeStatus(ctx context.Context) (*RuntimeStatus, error) {
 	}, nil
 }
 
-func (c *Client) ListRuntimeModels(ctx context.Context) ([]RuntimeModel, error) {
+// RuntimeModelCatalog is the full downloadable-model catalog: locally
+// enrolled models, the hardcoded llama-server catalog, and (when the
+// online catalog manager is attached server-side) Ollama's public
+// library. CatalogUpdatedAt is zero when no online fetch has ever
+// succeeded.
+type RuntimeModelCatalog struct {
+	Models           []RuntimeModel
+	CatalogUpdatedAt time.Time
+}
+
+func (c *Client) ListRuntimeModels(ctx context.Context) (RuntimeModelCatalog, error) {
 	resp, err := c.agent.ListRuntimeModels(ctx, &proto.ListRuntimeModelsRequest{})
 	if err != nil {
-		return nil, err
+		return RuntimeModelCatalog{}, err
 	}
-	return mapRuntimeModels(resp.GetModels()), nil
+	out := RuntimeModelCatalog{Models: mapRuntimeModels(resp.GetModels())}
+	if s := resp.GetCatalogUpdatedAt(); s != "" {
+		if t, terr := time.Parse(time.RFC3339, s); terr == nil {
+			out.CatalogUpdatedAt = t
+		}
+	}
+	return out, nil
 }
 
 func (c *Client) ListRuntimeEndpoints(ctx context.Context) ([]RuntimeEndpoint, error) {

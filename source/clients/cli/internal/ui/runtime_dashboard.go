@@ -13,6 +13,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"cercano/source/clients/cli/internal/overlay"
 	"cercano/source/clients/cli/internal/theme"
 	"cercano/source/server/pkg/agentclient"
 )
@@ -58,6 +59,9 @@ type runtimeDashboard struct {
 	operationCursor int
 	actionMessage   string
 	scrollOffset    int
+	// tierPicker, when non-nil, is the floating model picker for a taxonomy
+	// slot; it captures all key input until closed.
+	tierPicker *overlay.RowList
 }
 
 type runtimeDashboardSnapshot struct {
@@ -74,6 +78,9 @@ type runtimeDashboardAction struct {
 	Runtime    string
 	ModelID    string
 	InstanceID string
+	// TierKey names the model-taxonomy slot for tier-pick actions
+	// ("default_provider" or "<tier>.<provider>").
+	TierKey string
 }
 
 type runtimeDashboardActionMsg struct {
@@ -125,6 +132,16 @@ func (d *runtimeDashboard) SetSize(w, h int) {
 }
 
 func (d *runtimeDashboard) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	if d.tierPicker != nil {
+		next, cmd, closed := d.tierPicker.Update(msg, d.styles)
+		if closed {
+			d.tierPicker = nil
+			// Refresh so the tiers section reflects a just-applied change.
+			return d.refreshSnapshot(), false
+		}
+		d.tierPicker = &next
+		return cmd, false
+	}
 	switch msg.String() {
 	case "tab":
 		d.toggleFocus()
@@ -149,6 +166,9 @@ func (d *runtimeDashboard) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 }
 
 func (d *runtimeDashboard) View() string {
+	if d.tierPicker != nil {
+		return d.tierPicker.View(d.width, d.palette, d.styles)
+	}
 	full, contentH := d.fullContent()
 	return d.renderScrollableContent(full, contentH)
 }
@@ -163,6 +183,7 @@ func (d *runtimeDashboard) fullContent() (string, int) {
 		d.renderDownloadsBlock(),
 		d.renderInstalledModelsBlock(),
 		d.renderProcessesBlock(),
+		d.renderTiersBlock(),
 	}
 	logRows := contentH - countLines(parts)
 	parts = append(parts, d.renderOpenServerLogBlock(logRows))
@@ -309,6 +330,10 @@ func (d *runtimeDashboard) updateOperations(msg tea.KeyPressMsg) (tea.Cmd, bool)
 		}
 		d.operationCursor = clampIndex(d.operationCursor, len(actions))
 		action := actions[d.operationCursor]
+		if action.Kind == runtimeActionTierPick {
+			d.openTierPicker(action.TierKey)
+			return nil, false
+		}
 		d.actionMessage = runtimeDashboardPendingStatus(action)
 		return runtimeDashboardActionCmd(d.agent, action), false
 	}
@@ -1071,6 +1096,10 @@ func (d *runtimeDashboard) renderProcessesBlock() string {
 	return d.renderActionBlock("running processes", rows)
 }
 
+func (d *runtimeDashboard) renderTiersBlock() string {
+	return d.renderActionBlock("model tiers", tierRows(d.snapshot.Config))
+}
+
 func (d *runtimeDashboard) renderActionBlock(title string, rows []runtimeDashboardActionRow) string {
 	totalW := dashboardPanelWidth(d.width)
 	contentW := dashboardBlockContentWidth(totalW)
@@ -1146,6 +1175,9 @@ func (d *runtimeDashboard) operationRows() []runtimeDashboardActionRow {
 	rows = append(rows, d.downloadRows()...)
 	rows = append(rows, d.installedModelRows()...)
 	rows = append(rows, d.processRows()...)
+	// Tier rows come last; keep this order in sync with fullContent's block
+	// order so cursor index → action mapping stays consistent.
+	rows = append(rows, tierRows(d.snapshot.Config)...)
 	return rows
 }
 

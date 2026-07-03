@@ -96,6 +96,9 @@ func (d *runtimeDashboard) maybeFetchEstimate() tea.Cmd {
 		return nil
 	}
 	model := models[clampIndex(d.catalogCursor, len(models))]
+	if d.embeddedEstimate(model) != nil {
+		return nil // server already warmed this entry
+	}
 	key := estimateKey(model)
 	if key == "" {
 		return nil
@@ -125,9 +128,29 @@ func (d *runtimeDashboard) applyEstimate(msg runtimeEstimateMsg) tea.Cmd {
 	return d.maybeFetchEstimate()
 }
 
-// selectedEstimate returns the cached estimate for the given model and
-// whether a fetch is currently in flight.
+// embeddedEstimate synthesizes an estimate from numbers the server
+// pre-warmed into the model record itself (ListRuntimeModels embeds
+// them once the background warmer has resolved the entry). Nil when
+// the entry isn't warmed yet.
+func (d *runtimeDashboard) embeddedEstimate(model agentclient.RuntimeModel) *agentclient.ModelRAMEstimate {
+	if model.KVBytesPerToken <= 0 || model.MaxContextTokens <= 0 || model.SizeBytes <= 0 {
+		return nil
+	}
+	return &agentclient.ModelRAMEstimate{
+		WeightsBytes:     model.SizeBytes,
+		KVBytesPerToken:  model.KVBytesPerToken,
+		MaxContextTokens: model.MaxContextTokens,
+		SystemRAMBytes:   d.snapshot.Catalog.SystemRAMBytes,
+	}
+}
+
+// selectedEstimate returns the estimate for the given model and
+// whether a fetch is currently in flight. Server-embedded numbers win
+// (no RPC ever happened); the lazily-fetched cache covers the rest.
 func (d *runtimeDashboard) selectedEstimate(model agentclient.RuntimeModel) (est *agentclient.ModelRAMEstimate, pending bool) {
+	if e := d.embeddedEstimate(model); e != nil {
+		return e, false
+	}
 	key := estimateKey(model)
 	if key == "" {
 		return nil, false

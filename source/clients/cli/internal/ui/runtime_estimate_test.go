@@ -158,3 +158,46 @@ func TestMaybeFetchEstimate_NilForUnestimatable(t *testing.T) {
 		t.Fatal("HF-URL entry should not dispatch an estimate fetch")
 	}
 }
+
+func TestSelectedEstimate_PrefersServerEmbeddedNumbers(t *testing.T) {
+	d := newCatalogTestDashboard(runtimeDashboardSnapshot{
+		Catalog: agentclient.RuntimeModelCatalog{
+			SystemRAMBytes: 64 << 30,
+			Models: []agentclient.RuntimeModel{{
+				ID:               "llama_server:online:qwen2.5-coder",
+				OllamaRef:        "qwen2.5-coder",
+				DownloadState:    "not_downloaded",
+				SizeBytes:        4683074048,
+				KVBytesPerToken:  57344,
+				MaxContextTokens: 32768,
+			}},
+		},
+	})
+	model := d.catalogModels()[0]
+	est, pending := d.selectedEstimate(model)
+	if pending {
+		t.Fatal("embedded estimate should never be pending")
+	}
+	if est == nil || est.KVBytesPerToken != 57344 || est.SystemRAMBytes != 64<<30 {
+		t.Fatalf("embedded estimate = %+v", est)
+	}
+	// Warmed entries must not dispatch a fetch.
+	if cmd := d.maybeFetchEstimate(); cmd != nil {
+		t.Fatal("warmed entry dispatched an estimate fetch")
+	}
+}
+
+func TestSelectedEstimate_FallsBackToLazyFetchWhenUnwarmed(t *testing.T) {
+	d := newCatalogTestDashboard(runtimeDashboardSnapshot{
+		Catalog: agentclient.RuntimeModelCatalog{
+			Models: []agentclient.RuntimeModel{{
+				ID:            "llama_server:online:newmodel",
+				OllamaRef:     "newmodel",
+				DownloadState: "not_downloaded",
+			}},
+		},
+	})
+	if cmd := d.maybeFetchEstimate(); cmd == nil {
+		t.Fatal("unwarmed entry should fall back to the lazy fetch")
+	}
+}

@@ -1029,7 +1029,7 @@ func catalogDetailLines(model agentclient.RuntimeModel, est *agentclient.ModelRA
 	case estPending:
 		lines = append(lines, detailLine("memory", "estimating...", width, styles))
 	case est != nil && est.Err != nil:
-		lines = append(lines, detailLine("memory", "estimate unavailable", width, styles))
+		lines = append(lines, detailLine("memory", "estimate unavailable — "+est.Err.Error(), width, styles))
 	case est != nil:
 		if mem := estimateMemoryLine(*est); mem != "" {
 			lines = append(lines, detailLine("memory", mem, width, styles))

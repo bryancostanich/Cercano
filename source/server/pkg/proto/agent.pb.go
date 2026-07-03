@@ -1357,9 +1357,15 @@ type RuntimeModel struct {
 	// Format is "name:tag" — e.g. "qwen2.5-coder:7b". When set, the
 	// DownloadRuntimeModel handler uses the OCI blob path via
 	// registry.ollama.ai instead of a direct HTTP GET of download_url.
-	OllamaRef     string `protobuf:"bytes,21,opt,name=ollama_ref,json=ollamaRef,proto3" json:"ollama_ref,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	OllamaRef string `protobuf:"bytes,21,opt,name=ollama_ref,json=ollamaRef,proto3" json:"ollama_ref,omitempty"`
+	// RAM-estimation numbers pre-resolved by the server's background
+	// warmer (see GetModelRAMEstimate for the on-demand equivalent and
+	// the meaning of each field). 0 = not warmed yet — clients fall
+	// back to the RPC.
+	KvBytesPerToken  int64 `protobuf:"varint,22,opt,name=kv_bytes_per_token,json=kvBytesPerToken,proto3" json:"kv_bytes_per_token,omitempty"`
+	MaxContextTokens int64 `protobuf:"varint,23,opt,name=max_context_tokens,json=maxContextTokens,proto3" json:"max_context_tokens,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RuntimeModel) Reset() {
@@ -1537,6 +1543,20 @@ func (x *RuntimeModel) GetOllamaRef() string {
 		return x.OllamaRef
 	}
 	return ""
+}
+
+func (x *RuntimeModel) GetKvBytesPerToken() int64 {
+	if x != nil {
+		return x.KvBytesPerToken
+	}
+	return 0
+}
+
+func (x *RuntimeModel) GetMaxContextTokens() int64 {
+	if x != nil {
+		return x.MaxContextTokens
+	}
+	return 0
 }
 
 type RuntimeInstance struct {
@@ -2052,8 +2072,12 @@ type ListRuntimeModelsResponse struct {
 	// dashboard uses this to render "Catalog updated Nh ago" and to
 	// decide when to switch to a stale/error color.
 	CatalogUpdatedAt string `protobuf:"bytes,2,opt,name=catalog_updated_at,json=catalogUpdatedAt,proto3" json:"catalog_updated_at,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// system_ram_bytes is the machine's total physical memory so the
+	// client can render fit verdicts for embedded estimates without a
+	// per-model RPC. 0 when the platform probe fails.
+	SystemRamBytes int64 `protobuf:"varint,3,opt,name=system_ram_bytes,json=systemRamBytes,proto3" json:"system_ram_bytes,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ListRuntimeModelsResponse) Reset() {
@@ -2098,6 +2122,13 @@ func (x *ListRuntimeModelsResponse) GetCatalogUpdatedAt() string {
 		return x.CatalogUpdatedAt
 	}
 	return ""
+}
+
+func (x *ListRuntimeModelsResponse) GetSystemRamBytes() int64 {
+	if x != nil {
+		return x.SystemRamBytes
+	}
+	return 0
 }
 
 // GetModelRAMEstimate resolves the numbers a client needs to predict
@@ -8566,7 +8597,7 @@ const file_agent_proto_rawDesc = "" +
 	"\vmodified_at\x18\x03 \x01(\tR\n" +
 	"modifiedAt\">\n" +
 	"\x12ListModelsResponse\x12(\n" +
-	"\x06models\x18\x01 \x03(\v2\x10.agent.ModelInfoR\x06models\"\xb8\x05\n" +
+	"\x06models\x18\x01 \x03(\v2\x10.agent.ModelInfoR\x06models\"\x93\x06\n" +
 	"\fRuntimeModel\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12\x18\n" +
@@ -8592,7 +8623,9 @@ const file_agent_proto_rawDesc = "" +
 	"\x14download_total_bytes\x18\x13 \x01(\x03R\x12downloadTotalBytes\x12%\n" +
 	"\x0edownload_error\x18\x14 \x01(\tR\rdownloadError\x12\x1d\n" +
 	"\n" +
-	"ollama_ref\x18\x15 \x01(\tR\tollamaRef\"\x87\x03\n" +
+	"ollama_ref\x18\x15 \x01(\tR\tollamaRef\x12+\n" +
+	"\x12kv_bytes_per_token\x18\x16 \x01(\x03R\x0fkvBytesPerToken\x12,\n" +
+	"\x12max_context_tokens\x18\x17 \x01(\x03R\x10maxContextTokens\"\x87\x03\n" +
 	"\x0fRuntimeInstance\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aruntime\x18\x02 \x01(\tR\aruntime\x12\x19\n" +
@@ -8642,10 +8675,11 @@ const file_agent_proto_rawDesc = "" +
 	"\tinstances\x18\x02 \x03(\v2\x16.agent.RuntimeInstanceR\tinstances\x124\n" +
 	"\tendpoints\x18\x03 \x03(\v2\x16.agent.RuntimeEndpointR\tendpoints\x12*\n" +
 	"\x04logs\x18\x04 \x03(\v2\x16.agent.RuntimeLogEntryR\x04logs\"\x1a\n" +
-	"\x18ListRuntimeModelsRequest\"v\n" +
+	"\x18ListRuntimeModelsRequest\"\xa0\x01\n" +
 	"\x19ListRuntimeModelsResponse\x12+\n" +
 	"\x06models\x18\x01 \x03(\v2\x13.agent.RuntimeModelR\x06models\x12,\n" +
-	"\x12catalog_updated_at\x18\x02 \x01(\tR\x10catalogUpdatedAt\"p\n" +
+	"\x12catalog_updated_at\x18\x02 \x01(\tR\x10catalogUpdatedAt\x12(\n" +
+	"\x10system_ram_bytes\x18\x03 \x01(\x03R\x0esystemRamBytes\"p\n" +
 	"\x1aGetModelRAMEstimateRequest\x12\x1d\n" +
 	"\n" +
 	"ollama_ref\x18\x01 \x01(\tR\tollamaRef\x12\x18\n" +

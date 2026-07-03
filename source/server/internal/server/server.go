@@ -33,6 +33,7 @@ import (
 	"cercano/source/server/internal/llm/anthropic"
 	"cercano/source/server/internal/localruntime"
 	"cercano/source/server/internal/ollamacatalog"
+	"cercano/source/server/internal/sysram"
 	"cercano/source/server/internal/localruntime/llamaserver"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
@@ -1599,7 +1600,26 @@ func (s *Server) ListRuntimeModels(ctx context.Context, req *proto.ListRuntimeMo
 		if fa := s.catalogManager.FetchedAt(); !fa.IsZero() {
 			resp.CatalogUpdatedAt = fa.UTC().Format(time.RFC3339)
 		}
+		// Enrich every ollama-backed entry with warmed estimate numbers
+		// so the dashboard renders memory/fit lines with zero per-row
+		// RPCs. Un-warmed entries keep zeros — the client falls back to
+		// GetModelRAMEstimate on selection.
+		for _, pm := range resp.Models {
+			if pm.GetOllamaRef() == "" {
+				continue
+			}
+			est, ok := s.catalogManager.CachedEstimate(pm.GetOllamaRef())
+			if !ok {
+				continue
+			}
+			pm.KvBytesPerToken = est.KVBytesPerToken
+			pm.MaxContextTokens = est.MaxContextTokens
+			if pm.GetSizeBytes() == 0 {
+				pm.SizeBytes = est.WeightsBytes
+			}
+		}
 	}
+	resp.SystemRamBytes = sysram.Total()
 	return resp, nil
 }
 

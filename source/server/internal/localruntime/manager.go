@@ -44,6 +44,25 @@ type InMemoryManager struct {
 	httpClient   *http.Client
 	logs         []LogEntry
 	logLimit     int
+
+	// ociResolver resolves an OllamaRef ("name:tag") into a concrete
+	// blob URL by fetching the manifest from registry.ollama.ai.
+	// Optional — nil means DownloadModel will refuse to fetch ollama-
+	// library entries (they'll still list, but Download errors clearly
+	// rather than trying an empty URL). Set via SetOCIResolver.
+	ociResolver OCIResolver
+}
+
+// OCIResolver produces a concrete download URL (and total size) from
+// an Ollama library reference. Implementation lives in the
+// ollamacatalog package; this interface keeps localruntime from
+// importing it directly (avoids a package cycle if ollamacatalog ever
+// needs to import localruntime types for testing).
+type OCIResolver interface {
+	// Resolve returns the blob download URL for an Ollama library
+	// reference of the form "name:tag" (e.g. "qwen2.5-coder:7b").
+	// Size is the manifest's model-layer size in bytes.
+	Resolve(ctx context.Context, ref string) (downloadURL string, sizeBytes int64, err error)
 }
 
 type downloadJob struct {

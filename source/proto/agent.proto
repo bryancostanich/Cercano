@@ -98,6 +98,11 @@ service Agent {
   rpc DownloadRuntimeModel (DownloadRuntimeModelRequest) returns (DownloadRuntimeModelResponse) {}
   rpc CancelRuntimeModelDownload (CancelRuntimeModelDownloadRequest) returns (CancelRuntimeModelDownloadResponse) {}
   rpc DeleteRuntimeModel (DeleteRuntimeModelRequest) returns (DeleteRuntimeModelResponse) {}
+
+  // RefreshOnlineCatalog forces a fresh fetch of the online model catalog
+  // (Ollama's public library) — bypasses the 24h TTL. Returns after the
+  // fetch completes. Used by the CLI's dashboard "R" refresh key.
+  rpc RefreshOnlineCatalog (RefreshOnlineCatalogRequest) returns (RefreshOnlineCatalogResponse) {}
   rpc StreamRuntimeLogs (StreamRuntimeLogsRequest) returns (stream RuntimeLogEntry) {}
 
   // ListSkills returns the catalog of available Agent Skills (name + description).
@@ -329,6 +334,12 @@ message RuntimeModel {
   int64 downloaded_bytes = 18;
   int64 download_total_bytes = 19;
   string download_error = 20;
+  // ollama_ref is set on entries backed by Ollama's public library
+  // (as opposed to the hardcoded catalog with direct HuggingFace URLs).
+  // Format is "name:tag" — e.g. "qwen2.5-coder:7b". When set, the
+  // DownloadRuntimeModel handler uses the OCI blob path via
+  // registry.ollama.ai instead of a direct HTTP GET of download_url.
+  string ollama_ref = 21;
 }
 
 message RuntimeInstance {
@@ -381,7 +392,32 @@ message GetRuntimeStatusResponse {
 }
 
 message ListRuntimeModelsRequest {}
-message ListRuntimeModelsResponse { repeated RuntimeModel models = 1; }
+message ListRuntimeModelsResponse {
+  repeated RuntimeModel models = 1;
+  // catalog_updated_at is the RFC3339 timestamp of the last successful
+  // online-catalog fetch. Empty string means the server hasn't
+  // successfully fetched yet (first run or repeated failures). The
+  // dashboard uses this to render "Catalog updated Nh ago" and to
+  // decide when to switch to a stale/error color.
+  string catalog_updated_at = 2;
+}
+
+// RefreshOnlineCatalog force-refreshes the cached model catalog.
+// Blocks until the fetch completes so the CLI can update its display
+// immediately on return.
+message RefreshOnlineCatalogRequest {}
+message RefreshOnlineCatalogResponse {
+  // catalog_updated_at is the RFC3339 timestamp of the just-completed
+  // fetch. Empty on failure — see error for the reason.
+  string catalog_updated_at = 1;
+  // model_count is the number of families the fetch pulled from
+  // Ollama's library, so the CLI can flash a "12 new models" note.
+  int32 model_count = 2;
+  // error is set (empty on success) so the CLI can render the failure
+  // reason next to the previous-fetch timestamp instead of throwing an
+  // unhandled RPC error.
+  string error = 3;
+}
 
 message ListRuntimeEndpointsRequest {}
 message ListRuntimeEndpointsResponse { repeated RuntimeEndpoint endpoints = 1; }

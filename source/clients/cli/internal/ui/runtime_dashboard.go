@@ -62,6 +62,11 @@ type runtimeDashboard struct {
 	catalogMessage  string
 	catalogBusy     bool
 	operationCursor int
+	// renderActionOrdinal is render-pass state: the running count of
+	// actionable rows emitted so far across all action blocks, reset
+	// by fullContent. Lets renderActionBlock map the flat
+	// operationCursor onto whichever block the cursor's row lives in.
+	renderActionOrdinal int
 	actionMessage   string
 	scrollOffset    int
 	// tierPicker, when non-nil, is the floating model picker for a taxonomy
@@ -181,6 +186,11 @@ func (d *runtimeDashboard) View() string {
 }
 
 func (d *runtimeDashboard) fullContent() (string, int) {
+	// The action blocks below (downloads, installed models, processes,
+	// tiers) share one flat cursor space — operationRows() — so the
+	// selection ordinal must run continuously across them rather than
+	// restarting per block. Reset once per render pass.
+	d.renderActionOrdinal = 0
 	configBlock := d.renderConfigBlocks()
 	contentH := dashboardContentHeight(d.height)
 	parts := []string{
@@ -1137,12 +1147,15 @@ func (d *runtimeDashboard) renderActionBlock(title string, rows []runtimeDashboa
 	if d.focus == runtimeFocusActions && d.actionMessage != "" {
 		lines = append(lines, d.styles.BorderDim.Render(truncatePlain(d.actionMessage, contentW)))
 	}
-	actionOrdinal := 0
 	for _, row := range rows {
 		selected := false
 		if row.Action.Kind != "" {
-			selected = d.focus == runtimeFocusActions && actionOrdinal == d.operationCursor
-			actionOrdinal++
+			// d.renderActionOrdinal runs across ALL action blocks in
+			// this render pass (reset in fullContent) — a per-block
+			// counter would highlight the Nth row of every block at
+			// once.
+			selected = d.focus == runtimeFocusActions && d.renderActionOrdinal == d.operationCursor
+			d.renderActionOrdinal++
 		}
 		lines = append(lines, d.renderActionRow(row, selected, contentW))
 	}

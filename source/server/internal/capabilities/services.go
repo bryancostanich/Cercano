@@ -16,7 +16,7 @@ import (
 // cloud + local providers as two discrete fields, so Services mirrors that.
 type Services struct {
 	CloudProvider llm.Provider // may be nil (local-only deployments)
-	LocalProvider llm.Provider
+	OpenProvider llm.Provider
 	Engine        engine.InferenceEngine
 	Config        *config.Config
 	Conversations conversation.Store
@@ -33,5 +33,5 @@ func (s Services) MainProvider(isCloud bool) llm.Provider {
 	if isCloud && s.CloudProvider != nil {
 		return s.CloudProvider
 	}
-	return s.LocalProvider
+	return s.OpenProvider
 }

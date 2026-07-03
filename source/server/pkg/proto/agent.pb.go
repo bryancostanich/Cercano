@@ -504,7 +504,7 @@ type ProcessRequestRequest struct {
 	WorkDir        string         `protobuf:"bytes,3,opt,name=work_dir,json=workDir,proto3" json:"work_dir,omitempty"`                      // Optional working directory for agentic tasks
 	FileName       string         `protobuf:"bytes,4,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`                   // Optional filename for agentic tasks
 	ConversationId string         `protobuf:"bytes,5,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"` // Optional conversation ID for multi-turn history
-	DirectLocal    bool           `protobuf:"varint,6,opt,name=direct_local,json=directLocal,proto3" json:"direct_local,omitempty"`         // Skip SmartRouter, go directly to local provider
+	DirectOpen     bool           `protobuf:"varint,6,opt,name=direct_open,json=directOpen,proto3" json:"direct_open,omitempty"`            // Skip SmartRouter, go directly to the open-weight provider
 	ModelOverride  string         `protobuf:"bytes,7,opt,name=model_override,json=modelOverride,proto3" json:"model_override,omitempty"`    // Use this model instead of the configured default (temporary, per-request)
 	Coproc         bool           `protobuf:"varint,8,opt,name=coproc,proto3" json:"coproc,omitempty"`                                      // Route per Locus Mode's co-processor tier (local/cloud)
 	Images         []*InlineImage `protobuf:"bytes,9,rep,name=images,proto3" json:"images,omitempty"`                                       // user-attached images, spliced in at "[image N]" markers in input
@@ -570,9 +570,9 @@ func (x *ProcessRequestRequest) GetConversationId() string {
 	return ""
 }
 
-func (x *ProcessRequestRequest) GetDirectLocal() bool {
+func (x *ProcessRequestRequest) GetDirectOpen() bool {
 	if x != nil {
-		return x.DirectLocal
+		return x.DirectOpen
 	}
 	return false
 }
@@ -663,7 +663,7 @@ func (x *InlineImage) GetMediaType() string {
 // Runtime configuration update request.
 type UpdateConfigRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	LocalModel    string                 `protobuf:"bytes,1,opt,name=local_model,json=localModel,proto3" json:"local_model,omitempty"`          // Local model name (Ollama tag or managed runtime model id/path)
+	OpenModel     string                 `protobuf:"bytes,1,opt,name=open_model,json=openModel,proto3" json:"open_model,omitempty"`             // Open-weight model name (Ollama tag or managed runtime model id/path)
 	CloudProvider string                 `protobuf:"bytes,2,opt,name=cloud_provider,json=cloudProvider,proto3" json:"cloud_provider,omitempty"` // Cloud provider name (e.g., "google", "anthropic")
 	CloudModel    string                 `protobuf:"bytes,3,opt,name=cloud_model,json=cloudModel,proto3" json:"cloud_model,omitempty"`          // Cloud model name (e.g., "gemini-1.5-flash", "claude-3-opus")
 	CloudApiKey   string                 `protobuf:"bytes,4,opt,name=cloud_api_key,json=cloudApiKey,proto3" json:"cloud_api_key,omitempty"`     // API key for the cloud provider
@@ -672,8 +672,8 @@ type UpdateConfigRequest struct {
 	// When set, used as the baseURL for the anthropic client; api_key may be empty
 	// because the proxy handles auth (Claude Max OAuth in Meridian's case).
 	CloudBaseUrl    string `protobuf:"bytes,6,opt,name=cloud_base_url,json=cloudBaseUrl,proto3" json:"cloud_base_url,omitempty"`
-	LocalRuntime    string `protobuf:"bytes,7,opt,name=local_runtime,json=localRuntime,proto3" json:"local_runtime,omitempty"`          // Local runtime name: "ollama" or "llama_server"
-	LocusMode       string `protobuf:"bytes,8,opt,name=locus_mode,json=locusMode,proto3" json:"locus_mode,omitempty"`                   // cloud_only|cloud_primary|local_primary|local_only
+	OpenRuntime     string `protobuf:"bytes,7,opt,name=open_runtime,json=openRuntime,proto3" json:"open_runtime,omitempty"`             // Open-weight runtime name: "ollama" or "llama_server"
+	LocusMode       string `protobuf:"bytes,8,opt,name=locus_mode,json=locusMode,proto3" json:"locus_mode,omitempty"`                   // cloud_only|cloud_primary|open_primary|open_only
 	WatchdogEnabled string `protobuf:"bytes,9,opt,name=watchdog_enabled,json=watchdogEnabled,proto3" json:"watchdog_enabled,omitempty"` // "" = unchanged, "true"/"false"
 	WatchdogEcho    string `protobuf:"bytes,10,opt,name=watchdog_echo,json=watchdogEcho,proto3" json:"watchdog_echo,omitempty"`         // "" = unchanged, "true"/"false"
 	// Compaction — Development Tools. String-encoded bool ("" | "true" | "false")
@@ -726,9 +726,9 @@ func (*UpdateConfigRequest) Descriptor() ([]byte, []int) {
 	return file_agent_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *UpdateConfigRequest) GetLocalModel() string {
+func (x *UpdateConfigRequest) GetOpenModel() string {
 	if x != nil {
-		return x.LocalModel
+		return x.OpenModel
 	}
 	return ""
 }
@@ -768,9 +768,9 @@ func (x *UpdateConfigRequest) GetCloudBaseUrl() string {
 	return ""
 }
 
-func (x *UpdateConfigRequest) GetLocalRuntime() string {
+func (x *UpdateConfigRequest) GetOpenRuntime() string {
 	if x != nil {
-		return x.LocalRuntime
+		return x.OpenRuntime
 	}
 	return ""
 }
@@ -4753,7 +4753,7 @@ func (*GetConfigRequest) Descriptor() ([]byte, []int) {
 type GetConfigResponse struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	OllamaUrl      string                 `protobuf:"bytes,1,opt,name=ollama_url,json=ollamaUrl,proto3" json:"ollama_url,omitempty"`
-	LocalModel     string                 `protobuf:"bytes,2,opt,name=local_model,json=localModel,proto3" json:"local_model,omitempty"`
+	OpenModel      string                 `protobuf:"bytes,2,opt,name=open_model,json=openModel,proto3" json:"open_model,omitempty"`
 	EmbeddingModel string                 `protobuf:"bytes,3,opt,name=embedding_model,json=embeddingModel,proto3" json:"embedding_model,omitempty"`
 	CloudProvider  string                 `protobuf:"bytes,4,opt,name=cloud_provider,json=cloudProvider,proto3" json:"cloud_provider,omitempty"`
 	CloudModel     string                 `protobuf:"bytes,5,opt,name=cloud_model,json=cloudModel,proto3" json:"cloud_model,omitempty"`
@@ -4763,7 +4763,7 @@ type GetConfigResponse struct {
 	// most recent turn succeeded; useful for surfacing in the CLI status bar.
 	CloudState      string `protobuf:"bytes,8,opt,name=cloud_state,json=cloudState,proto3" json:"cloud_state,omitempty"`
 	Port            string `protobuf:"bytes,9,opt,name=port,proto3" json:"port,omitempty"`
-	LocalRuntime    string `protobuf:"bytes,10,opt,name=local_runtime,json=localRuntime,proto3" json:"local_runtime,omitempty"`
+	OpenRuntime     string `protobuf:"bytes,10,opt,name=open_runtime,json=openRuntime,proto3" json:"open_runtime,omitempty"`
 	LocusMode       string `protobuf:"bytes,11,opt,name=locus_mode,json=locusMode,proto3" json:"locus_mode,omitempty"`
 	WatchdogEnabled bool   `protobuf:"varint,12,opt,name=watchdog_enabled,json=watchdogEnabled,proto3" json:"watchdog_enabled,omitempty"`
 	WatchdogEcho    bool   `protobuf:"varint,13,opt,name=watchdog_echo,json=watchdogEcho,proto3" json:"watchdog_echo,omitempty"`
@@ -4823,9 +4823,9 @@ func (x *GetConfigResponse) GetOllamaUrl() string {
 	return ""
 }
 
-func (x *GetConfigResponse) GetLocalModel() string {
+func (x *GetConfigResponse) GetOpenModel() string {
 	if x != nil {
-		return x.LocalModel
+		return x.OpenModel
 	}
 	return ""
 }
@@ -4879,9 +4879,9 @@ func (x *GetConfigResponse) GetPort() string {
 	return ""
 }
 
-func (x *GetConfigResponse) GetLocalRuntime() string {
+func (x *GetConfigResponse) GetOpenRuntime() string {
 	if x != nil {
-		return x.LocalRuntime
+		return x.OpenRuntime
 	}
 	return ""
 }
@@ -5427,7 +5427,7 @@ type ClientEvent struct {
 	//	*ClientEvent_PermissionModeChanged
 	//	*ClientEvent_ConfigChanged
 	//	*ClientEvent_MeridianStatusChanged
-	//	*ClientEvent_LocalRuntimeStatusChanged
+	//	*ClientEvent_OpenRuntimeStatusChanged
 	Event         isClientEvent_Event `protobuf_oneof:"event"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5497,10 +5497,10 @@ func (x *ClientEvent) GetMeridianStatusChanged() *MeridianStatusChanged {
 	return nil
 }
 
-func (x *ClientEvent) GetLocalRuntimeStatusChanged() *LocalRuntimeStatusChanged {
+func (x *ClientEvent) GetOpenRuntimeStatusChanged() *OpenRuntimeStatusChanged {
 	if x != nil {
-		if x, ok := x.Event.(*ClientEvent_LocalRuntimeStatusChanged); ok {
-			return x.LocalRuntimeStatusChanged
+		if x, ok := x.Event.(*ClientEvent_OpenRuntimeStatusChanged); ok {
+			return x.OpenRuntimeStatusChanged
 		}
 	}
 	return nil
@@ -5522,8 +5522,8 @@ type ClientEvent_MeridianStatusChanged struct {
 	MeridianStatusChanged *MeridianStatusChanged `protobuf:"bytes,3,opt,name=meridian_status_changed,json=meridianStatusChanged,proto3,oneof"`
 }
 
-type ClientEvent_LocalRuntimeStatusChanged struct {
-	LocalRuntimeStatusChanged *LocalRuntimeStatusChanged `protobuf:"bytes,4,opt,name=local_runtime_status_changed,json=localRuntimeStatusChanged,proto3,oneof"`
+type ClientEvent_OpenRuntimeStatusChanged struct {
+	OpenRuntimeStatusChanged *OpenRuntimeStatusChanged `protobuf:"bytes,4,opt,name=open_runtime_status_changed,json=openRuntimeStatusChanged,proto3,oneof"`
 }
 
 func (*ClientEvent_PermissionModeChanged) isClientEvent_Event() {}
@@ -5532,7 +5532,7 @@ func (*ClientEvent_ConfigChanged) isClientEvent_Event() {}
 
 func (*ClientEvent_MeridianStatusChanged) isClientEvent_Event() {}
 
-func (*ClientEvent_LocalRuntimeStatusChanged) isClientEvent_Event() {}
+func (*ClientEvent_OpenRuntimeStatusChanged) isClientEvent_Event() {}
 
 // PermissionModeChanged carries the new active mode. Clients update their
 // status bar from this — no fetch, no poll.
@@ -5766,7 +5766,7 @@ func (x *MeridianStatusChanged) GetStatus() *MeridianStatus {
 	return nil
 }
 
-// LocalRuntimeStatus is the live state of the active local inference runtime
+// OpenRuntimeStatus is the live state of the active open-weight inference runtime
 // (ollama or llama_server). Emitted after a runtime swap (config edit or
 // UpdateConfig RPC) — clients render a status chip and drive the recovery
 // modal from this.
@@ -5775,10 +5775,10 @@ func (x *MeridianStatusChanged) GetStatus() *MeridianStatus {
 // missing values (when ok=false): "binary" | "model". Empty when ok=true.
 //
 //	"binary" — the runtime executable is not on PATH / not at Binary path.
-//	           CLI should offer the install flow (InstallLocalRuntime RPC).
+//	           CLI should offer the install flow (InstallOpenRuntime RPC).
 //	"model"  — the runtime is available but no usable model is configured.
 //	           CLI should surface a model-picker / download flow.
-type LocalRuntimeStatus struct {
+type OpenRuntimeStatus struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	Ok               bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
 	Runtime          string                 `protobuf:"bytes,2,opt,name=runtime,proto3" json:"runtime,omitempty"`
@@ -5791,20 +5791,20 @@ type LocalRuntimeStatus struct {
 	sizeCache        protoimpl.SizeCache
 }
 
-func (x *LocalRuntimeStatus) Reset() {
-	*x = LocalRuntimeStatus{}
+func (x *OpenRuntimeStatus) Reset() {
+	*x = OpenRuntimeStatus{}
 	mi := &file_agent_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *LocalRuntimeStatus) String() string {
+func (x *OpenRuntimeStatus) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*LocalRuntimeStatus) ProtoMessage() {}
+func (*OpenRuntimeStatus) ProtoMessage() {}
 
-func (x *LocalRuntimeStatus) ProtoReflect() protoreflect.Message {
+func (x *OpenRuntimeStatus) ProtoReflect() protoreflect.Message {
 	mi := &file_agent_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -5816,84 +5816,84 @@ func (x *LocalRuntimeStatus) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use LocalRuntimeStatus.ProtoReflect.Descriptor instead.
-func (*LocalRuntimeStatus) Descriptor() ([]byte, []int) {
+// Deprecated: Use OpenRuntimeStatus.ProtoReflect.Descriptor instead.
+func (*OpenRuntimeStatus) Descriptor() ([]byte, []int) {
 	return file_agent_proto_rawDescGZIP(), []int{88}
 }
 
-func (x *LocalRuntimeStatus) GetOk() bool {
+func (x *OpenRuntimeStatus) GetOk() bool {
 	if x != nil {
 		return x.Ok
 	}
 	return false
 }
 
-func (x *LocalRuntimeStatus) GetRuntime() string {
+func (x *OpenRuntimeStatus) GetRuntime() string {
 	if x != nil {
 		return x.Runtime
 	}
 	return ""
 }
 
-func (x *LocalRuntimeStatus) GetMissing() string {
+func (x *OpenRuntimeStatus) GetMissing() string {
 	if x != nil {
 		return x.Missing
 	}
 	return ""
 }
 
-func (x *LocalRuntimeStatus) GetMessage() string {
+func (x *OpenRuntimeStatus) GetMessage() string {
 	if x != nil {
 		return x.Message
 	}
 	return ""
 }
 
-func (x *LocalRuntimeStatus) GetSuggestedCommand() string {
+func (x *OpenRuntimeStatus) GetSuggestedCommand() string {
 	if x != nil {
 		return x.SuggestedCommand
 	}
 	return ""
 }
 
-func (x *LocalRuntimeStatus) GetBinaryPath() string {
+func (x *OpenRuntimeStatus) GetBinaryPath() string {
 	if x != nil {
 		return x.BinaryPath
 	}
 	return ""
 }
 
-func (x *LocalRuntimeStatus) GetDefaultModel() string {
+func (x *OpenRuntimeStatus) GetDefaultModel() string {
 	if x != nil {
 		return x.DefaultModel
 	}
 	return ""
 }
 
-// LocalRuntimeStatusChanged is broadcast whenever the local runtime state
+// OpenRuntimeStatusChanged is broadcast whenever the open runtime state
 // changes (post-swap detection, install completes, etc.). Clients update
 // their status chip + modal from this — no fetch, no poll.
-type LocalRuntimeStatusChanged struct {
+type OpenRuntimeStatusChanged struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        *LocalRuntimeStatus    `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Status        *OpenRuntimeStatus     `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *LocalRuntimeStatusChanged) Reset() {
-	*x = LocalRuntimeStatusChanged{}
+func (x *OpenRuntimeStatusChanged) Reset() {
+	*x = OpenRuntimeStatusChanged{}
 	mi := &file_agent_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *LocalRuntimeStatusChanged) String() string {
+func (x *OpenRuntimeStatusChanged) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*LocalRuntimeStatusChanged) ProtoMessage() {}
+func (*OpenRuntimeStatusChanged) ProtoMessage() {}
 
-func (x *LocalRuntimeStatusChanged) ProtoReflect() protoreflect.Message {
+func (x *OpenRuntimeStatusChanged) ProtoReflect() protoreflect.Message {
 	mi := &file_agent_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -5905,22 +5905,22 @@ func (x *LocalRuntimeStatusChanged) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use LocalRuntimeStatusChanged.ProtoReflect.Descriptor instead.
-func (*LocalRuntimeStatusChanged) Descriptor() ([]byte, []int) {
+// Deprecated: Use OpenRuntimeStatusChanged.ProtoReflect.Descriptor instead.
+func (*OpenRuntimeStatusChanged) Descriptor() ([]byte, []int) {
 	return file_agent_proto_rawDescGZIP(), []int{89}
 }
 
-func (x *LocalRuntimeStatusChanged) GetStatus() *LocalRuntimeStatus {
+func (x *OpenRuntimeStatusChanged) GetStatus() *OpenRuntimeStatus {
 	if x != nil {
 		return x.Status
 	}
 	return nil
 }
 
-// GetLocalRuntimeStatus is the pull-side counterpart to
-// LocalRuntimeStatusChanged. Empty request — the server always returns the
-// snapshot for the currently-selected local runtime.
-type GetLocalRuntimeStatusRequest struct {
+// GetOpenRuntimeStatus is the pull-side counterpart to
+// OpenRuntimeStatusChanged. Empty request — the server always returns the
+// snapshot for the currently-selected open runtime.
+type GetOpenRuntimeStatusRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Runtime to detect against ("ollama" | "llama_server"). Empty falls
 	// back to the currently-selected runtime — used by the CLI startup
@@ -5932,20 +5932,20 @@ type GetLocalRuntimeStatusRequest struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *GetLocalRuntimeStatusRequest) Reset() {
-	*x = GetLocalRuntimeStatusRequest{}
+func (x *GetOpenRuntimeStatusRequest) Reset() {
+	*x = GetOpenRuntimeStatusRequest{}
 	mi := &file_agent_proto_msgTypes[90]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *GetLocalRuntimeStatusRequest) String() string {
+func (x *GetOpenRuntimeStatusRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*GetLocalRuntimeStatusRequest) ProtoMessage() {}
+func (*GetOpenRuntimeStatusRequest) ProtoMessage() {}
 
-func (x *GetLocalRuntimeStatusRequest) ProtoReflect() protoreflect.Message {
+func (x *GetOpenRuntimeStatusRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_agent_proto_msgTypes[90]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -5957,39 +5957,39 @@ func (x *GetLocalRuntimeStatusRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GetLocalRuntimeStatusRequest.ProtoReflect.Descriptor instead.
-func (*GetLocalRuntimeStatusRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use GetOpenRuntimeStatusRequest.ProtoReflect.Descriptor instead.
+func (*GetOpenRuntimeStatusRequest) Descriptor() ([]byte, []int) {
 	return file_agent_proto_rawDescGZIP(), []int{90}
 }
 
-func (x *GetLocalRuntimeStatusRequest) GetRuntime() string {
+func (x *GetOpenRuntimeStatusRequest) GetRuntime() string {
 	if x != nil {
 		return x.Runtime
 	}
 	return ""
 }
 
-type GetLocalRuntimeStatusResponse struct {
+type GetOpenRuntimeStatusResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        *LocalRuntimeStatus    `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Status        *OpenRuntimeStatus     `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *GetLocalRuntimeStatusResponse) Reset() {
-	*x = GetLocalRuntimeStatusResponse{}
+func (x *GetOpenRuntimeStatusResponse) Reset() {
+	*x = GetOpenRuntimeStatusResponse{}
 	mi := &file_agent_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *GetLocalRuntimeStatusResponse) String() string {
+func (x *GetOpenRuntimeStatusResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*GetLocalRuntimeStatusResponse) ProtoMessage() {}
+func (*GetOpenRuntimeStatusResponse) ProtoMessage() {}
 
-func (x *GetLocalRuntimeStatusResponse) ProtoReflect() protoreflect.Message {
+func (x *GetOpenRuntimeStatusResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_agent_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -6001,44 +6001,44 @@ func (x *GetLocalRuntimeStatusResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GetLocalRuntimeStatusResponse.ProtoReflect.Descriptor instead.
-func (*GetLocalRuntimeStatusResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use GetOpenRuntimeStatusResponse.ProtoReflect.Descriptor instead.
+func (*GetOpenRuntimeStatusResponse) Descriptor() ([]byte, []int) {
 	return file_agent_proto_rawDescGZIP(), []int{91}
 }
 
-func (x *GetLocalRuntimeStatusResponse) GetStatus() *LocalRuntimeStatus {
+func (x *GetOpenRuntimeStatusResponse) GetStatus() *OpenRuntimeStatus {
 	if x != nil {
 		return x.Status
 	}
 	return nil
 }
 
-// InstallLocalRuntimeRequest asks the server to run the platform install
-// command for a local runtime and stream its output back.
+// InstallOpenRuntimeRequest asks the server to run the platform install
+// command for an open-weight runtime and stream its output back.
 //
 // runtime values today: "llama_server" — future runtimes can be added
 // without breaking the wire format.
-type InstallLocalRuntimeRequest struct {
+type InstallOpenRuntimeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Runtime       string                 `protobuf:"bytes,1,opt,name=runtime,proto3" json:"runtime,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *InstallLocalRuntimeRequest) Reset() {
-	*x = InstallLocalRuntimeRequest{}
+func (x *InstallOpenRuntimeRequest) Reset() {
+	*x = InstallOpenRuntimeRequest{}
 	mi := &file_agent_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *InstallLocalRuntimeRequest) String() string {
+func (x *InstallOpenRuntimeRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*InstallLocalRuntimeRequest) ProtoMessage() {}
+func (*InstallOpenRuntimeRequest) ProtoMessage() {}
 
-func (x *InstallLocalRuntimeRequest) ProtoReflect() protoreflect.Message {
+func (x *InstallOpenRuntimeRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_agent_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -6050,12 +6050,12 @@ func (x *InstallLocalRuntimeRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use InstallLocalRuntimeRequest.ProtoReflect.Descriptor instead.
-func (*InstallLocalRuntimeRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use InstallOpenRuntimeRequest.ProtoReflect.Descriptor instead.
+func (*InstallOpenRuntimeRequest) Descriptor() ([]byte, []int) {
 	return file_agent_proto_rawDescGZIP(), []int{92}
 }
 
-func (x *InstallLocalRuntimeRequest) GetRuntime() string {
+func (x *InstallOpenRuntimeRequest) GetRuntime() string {
 	if x != nil {
 		return x.Runtime
 	}
@@ -8001,13 +8001,14 @@ const file_agent_proto_rawDesc = "" +
 	"\x04text\x18\x03 \x01(\tR\x04text\x12\x16\n" +
 	"\x06thread\x18\x04 \x01(\tR\x06thread\"*\n" +
 	"\x0eProgressUpdate\x12\x18\n" +
-	"\amessage\x18\x01 \x01(\tR\amessage\"\x9c\x02\n" +
+	"\amessage\x18\x01 \x01(\tR\amessage\"\x9a\x02\n" +
 	"\x15ProcessRequestRequest\x12\x14\n" +
 	"\x05input\x18\x01 \x01(\tR\x05input\x12\x19\n" +
 	"\bwork_dir\x18\x03 \x01(\tR\aworkDir\x12\x1b\n" +
 	"\tfile_name\x18\x04 \x01(\tR\bfileName\x12'\n" +
-	"\x0fconversation_id\x18\x05 \x01(\tR\x0econversationId\x12!\n" +
-	"\fdirect_local\x18\x06 \x01(\bR\vdirectLocal\x12%\n" +
+	"\x0fconversation_id\x18\x05 \x01(\tR\x0econversationId\x12\x1f\n" +
+	"\vdirect_open\x18\x06 \x01(\bR\n" +
+	"directOpen\x12%\n" +
 	"\x0emodel_override\x18\a \x01(\tR\rmodelOverride\x12\x16\n" +
 	"\x06coproc\x18\b \x01(\bR\x06coproc\x12*\n" +
 	"\x06images\x18\t \x03(\v2\x12.agent.InlineImageR\x06images\"V\n" +
@@ -8015,18 +8016,18 @@ const file_agent_proto_rawDesc = "" +
 	"\x05index\x18\x01 \x01(\x05R\x05index\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\x12\x1d\n" +
 	"\n" +
-	"media_type\x18\x03 \x01(\tR\tmediaType\"\x97\x06\n" +
-	"\x13UpdateConfigRequest\x12\x1f\n" +
-	"\vlocal_model\x18\x01 \x01(\tR\n" +
-	"localModel\x12%\n" +
+	"media_type\x18\x03 \x01(\tR\tmediaType\"\x93\x06\n" +
+	"\x13UpdateConfigRequest\x12\x1d\n" +
+	"\n" +
+	"open_model\x18\x01 \x01(\tR\topenModel\x12%\n" +
 	"\x0ecloud_provider\x18\x02 \x01(\tR\rcloudProvider\x12\x1f\n" +
 	"\vcloud_model\x18\x03 \x01(\tR\n" +
 	"cloudModel\x12\"\n" +
 	"\rcloud_api_key\x18\x04 \x01(\tR\vcloudApiKey\x12\x1d\n" +
 	"\n" +
 	"ollama_url\x18\x05 \x01(\tR\tollamaUrl\x12$\n" +
-	"\x0ecloud_base_url\x18\x06 \x01(\tR\fcloudBaseUrl\x12#\n" +
-	"\rlocal_runtime\x18\a \x01(\tR\flocalRuntime\x12\x1d\n" +
+	"\x0ecloud_base_url\x18\x06 \x01(\tR\fcloudBaseUrl\x12!\n" +
+	"\fopen_runtime\x18\a \x01(\tR\vopenRuntime\x12\x1d\n" +
 	"\n" +
 	"locus_mode\x18\b \x01(\tR\tlocusMode\x12)\n" +
 	"\x10watchdog_enabled\x18\t \x01(\tR\x0fwatchdogEnabled\x12#\n" +
@@ -8343,12 +8344,12 @@ const file_agent_proto_rawDesc = "" +
 	"resultJson\x12\x19\n" +
 	"\bis_error\x18\x02 \x01(\bR\aisError\x12\x14\n" +
 	"\x05error\x18\x03 \x01(\tR\x05error\"\x12\n" +
-	"\x10GetConfigRequest\"\xfa\x06\n" +
+	"\x10GetConfigRequest\"\xf6\x06\n" +
 	"\x11GetConfigResponse\x12\x1d\n" +
 	"\n" +
-	"ollama_url\x18\x01 \x01(\tR\tollamaUrl\x12\x1f\n" +
-	"\vlocal_model\x18\x02 \x01(\tR\n" +
-	"localModel\x12'\n" +
+	"ollama_url\x18\x01 \x01(\tR\tollamaUrl\x12\x1d\n" +
+	"\n" +
+	"open_model\x18\x02 \x01(\tR\topenModel\x12'\n" +
 	"\x0fembedding_model\x18\x03 \x01(\tR\x0eembeddingModel\x12%\n" +
 	"\x0ecloud_provider\x18\x04 \x01(\tR\rcloudProvider\x12\x1f\n" +
 	"\vcloud_model\x18\x05 \x01(\tR\n" +
@@ -8357,9 +8358,9 @@ const file_agent_proto_rawDesc = "" +
 	"\x11cloud_api_key_set\x18\a \x01(\bR\x0ecloudApiKeySet\x12\x1f\n" +
 	"\vcloud_state\x18\b \x01(\tR\n" +
 	"cloudState\x12\x12\n" +
-	"\x04port\x18\t \x01(\tR\x04port\x12#\n" +
-	"\rlocal_runtime\x18\n" +
-	" \x01(\tR\flocalRuntime\x12\x1d\n" +
+	"\x04port\x18\t \x01(\tR\x04port\x12!\n" +
+	"\fopen_runtime\x18\n" +
+	" \x01(\tR\vopenRuntime\x12\x1d\n" +
 	"\n" +
 	"locus_mode\x18\v \x01(\tR\tlocusMode\x12)\n" +
 	"\x10watchdog_enabled\x18\f \x01(\bR\x0fwatchdogEnabled\x12#\n" +
@@ -8392,12 +8393,12 @@ const file_agent_proto_rawDesc = "" +
 	"\x18GetPermissionModeRequest\"/\n" +
 	"\x19GetPermissionModeResponse\x12\x12\n" +
 	"\x04mode\x18\x01 \x01(\tR\x04mode\"\x18\n" +
-	"\x16SubscribeEventsRequest\"\xea\x02\n" +
+	"\x16SubscribeEventsRequest\"\xe7\x02\n" +
 	"\vClientEvent\x12V\n" +
 	"\x17permission_mode_changed\x18\x01 \x01(\v2\x1c.agent.PermissionModeChangedH\x00R\x15permissionModeChanged\x12=\n" +
 	"\x0econfig_changed\x18\x02 \x01(\v2\x14.agent.ConfigChangedH\x00R\rconfigChanged\x12V\n" +
-	"\x17meridian_status_changed\x18\x03 \x01(\v2\x1c.agent.MeridianStatusChangedH\x00R\x15meridianStatusChanged\x12c\n" +
-	"\x1clocal_runtime_status_changed\x18\x04 \x01(\v2 .agent.LocalRuntimeStatusChangedH\x00R\x19localRuntimeStatusChangedB\a\n" +
+	"\x17meridian_status_changed\x18\x03 \x01(\v2\x1c.agent.MeridianStatusChangedH\x00R\x15meridianStatusChanged\x12`\n" +
+	"\x1bopen_runtime_status_changed\x18\x04 \x01(\v2\x1f.agent.OpenRuntimeStatusChangedH\x00R\x18openRuntimeStatusChangedB\a\n" +
 	"\x05event\"+\n" +
 	"\x15PermissionModeChanged\x12\x12\n" +
 	"\x04mode\x18\x01 \x01(\tR\x04mode\";\n" +
@@ -8410,8 +8411,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x04port\x18\x03 \x01(\x05R\x04port\x12!\n" +
 	"\fmissing_deps\x18\x04 \x03(\tR\vmissingDeps\"F\n" +
 	"\x15MeridianStatusChanged\x12-\n" +
-	"\x06status\x18\x01 \x01(\v2\x15.agent.MeridianStatusR\x06status\"\xe5\x01\n" +
-	"\x12LocalRuntimeStatus\x12\x0e\n" +
+	"\x06status\x18\x01 \x01(\v2\x15.agent.MeridianStatusR\x06status\"\xe4\x01\n" +
+	"\x11OpenRuntimeStatus\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
 	"\aruntime\x18\x02 \x01(\tR\aruntime\x12\x18\n" +
 	"\amissing\x18\x03 \x01(\tR\amissing\x12\x18\n" +
@@ -8419,14 +8420,14 @@ const file_agent_proto_rawDesc = "" +
 	"\x11suggested_command\x18\x05 \x01(\tR\x10suggestedCommand\x12\x1f\n" +
 	"\vbinary_path\x18\x06 \x01(\tR\n" +
 	"binaryPath\x12#\n" +
-	"\rdefault_model\x18\a \x01(\tR\fdefaultModel\"N\n" +
-	"\x19LocalRuntimeStatusChanged\x121\n" +
-	"\x06status\x18\x01 \x01(\v2\x19.agent.LocalRuntimeStatusR\x06status\"8\n" +
-	"\x1cGetLocalRuntimeStatusRequest\x12\x18\n" +
-	"\aruntime\x18\x01 \x01(\tR\aruntime\"R\n" +
-	"\x1dGetLocalRuntimeStatusResponse\x121\n" +
-	"\x06status\x18\x01 \x01(\v2\x19.agent.LocalRuntimeStatusR\x06status\"6\n" +
-	"\x1aInstallLocalRuntimeRequest\x12\x18\n" +
+	"\rdefault_model\x18\a \x01(\tR\fdefaultModel\"L\n" +
+	"\x18OpenRuntimeStatusChanged\x120\n" +
+	"\x06status\x18\x01 \x01(\v2\x18.agent.OpenRuntimeStatusR\x06status\"7\n" +
+	"\x1bGetOpenRuntimeStatusRequest\x12\x18\n" +
+	"\aruntime\x18\x01 \x01(\tR\aruntime\"P\n" +
+	"\x1cGetOpenRuntimeStatusResponse\x120\n" +
+	"\x06status\x18\x01 \x01(\v2\x18.agent.OpenRuntimeStatusR\x06status\"5\n" +
+	"\x19InstallOpenRuntimeRequest\x12\x18\n" +
 	"\aruntime\x18\x01 \x01(\tR\aruntime\"_\n" +
 	"\x0fInstallProgress\x12\x12\n" +
 	"\x04line\x18\x01 \x01(\tR\x04line\x12\x12\n" +
@@ -8553,7 +8554,7 @@ const file_agent_proto_rawDesc = "" +
 	"\n" +
 	"\x06UPDATE\x10\x01\x12\n" +
 	"\n" +
-	"\x06DELETE\x10\x022\x83\"\n" +
+	"\x06DELETE\x10\x022\xfe!\n" +
 	"\x05Agent\x12O\n" +
 	"\x0eProcessRequest\x12\x1c.agent.ProcessRequestRequest\x1a\x1d.agent.ProcessRequestResponse\"\x00\x12V\n" +
 	"\x14StreamProcessRequest\x12\x1c.agent.ProcessRequestRequest\x1a\x1c.agent.StreamProcessResponse\"\x000\x01\x12I\n" +
@@ -8566,9 +8567,9 @@ const file_agent_proto_rawDesc = "" +
 	"\x0fGetConversation\x12\x1d.agent.GetConversationRequest\x1a\x13.agent.Conversation\"\x00\x12R\n" +
 	"\x0fGetContextUsage\x12\x1d.agent.GetContextUsageRequest\x1a\x1e.agent.GetContextUsageResponse\"\x00\x12[\n" +
 	"\x12GetCompactionState\x12 .agent.GetCompactionStateRequest\x1a!.agent.GetCompactionStateResponse\"\x00\x12X\n" +
-	"\x11SuggestNextPrompt\x12\x1f.agent.SuggestNextPromptRequest\x1a .agent.SuggestNextPromptResponse\"\x00\x12d\n" +
-	"\x15GetLocalRuntimeStatus\x12#.agent.GetLocalRuntimeStatusRequest\x1a$.agent.GetLocalRuntimeStatusResponse\"\x00\x12T\n" +
-	"\x13InstallLocalRuntime\x12!.agent.InstallLocalRuntimeRequest\x1a\x16.agent.InstallProgress\"\x000\x01\x12L\n" +
+	"\x11SuggestNextPrompt\x12\x1f.agent.SuggestNextPromptRequest\x1a .agent.SuggestNextPromptResponse\"\x00\x12a\n" +
+	"\x14GetOpenRuntimeStatus\x12\".agent.GetOpenRuntimeStatusRequest\x1a#.agent.GetOpenRuntimeStatusResponse\"\x00\x12R\n" +
+	"\x12InstallOpenRuntime\x12 .agent.InstallOpenRuntimeRequest\x1a\x16.agent.InstallProgress\"\x000\x01\x12L\n" +
 	"\rExportContext\x12\x1b.agent.ExportContextRequest\x1a\x1c.agent.ExportContextResponse\"\x00\x12a\n" +
 	"\x14GetConversationTurns\x12\".agent.GetConversationTurnsRequest\x1a#.agent.GetConversationTurnsResponse\"\x00\x12@\n" +
 	"\tListTools\x12\x17.agent.ListToolsRequest\x1a\x18.agent.ListToolsResponse\"\x00\x12C\n" +
@@ -8713,11 +8714,11 @@ var file_agent_proto_goTypes = []any{
 	(*ConfigChanged)(nil),                      // 86: agent.ConfigChanged
 	(*MeridianStatus)(nil),                     // 87: agent.MeridianStatus
 	(*MeridianStatusChanged)(nil),              // 88: agent.MeridianStatusChanged
-	(*LocalRuntimeStatus)(nil),                 // 89: agent.LocalRuntimeStatus
-	(*LocalRuntimeStatusChanged)(nil),          // 90: agent.LocalRuntimeStatusChanged
-	(*GetLocalRuntimeStatusRequest)(nil),       // 91: agent.GetLocalRuntimeStatusRequest
-	(*GetLocalRuntimeStatusResponse)(nil),      // 92: agent.GetLocalRuntimeStatusResponse
-	(*InstallLocalRuntimeRequest)(nil),         // 93: agent.InstallLocalRuntimeRequest
+	(*OpenRuntimeStatus)(nil),                  // 89: agent.OpenRuntimeStatus
+	(*OpenRuntimeStatusChanged)(nil),           // 90: agent.OpenRuntimeStatusChanged
+	(*GetOpenRuntimeStatusRequest)(nil),        // 91: agent.GetOpenRuntimeStatusRequest
+	(*GetOpenRuntimeStatusResponse)(nil),       // 92: agent.GetOpenRuntimeStatusResponse
+	(*InstallOpenRuntimeRequest)(nil),          // 93: agent.InstallOpenRuntimeRequest
 	(*InstallProgress)(nil),                    // 94: agent.InstallProgress
 	(*AllowToolCallRequest)(nil),               // 95: agent.AllowToolCallRequest
 	(*AllowToolCallResponse)(nil),              // 96: agent.AllowToolCallResponse
@@ -8789,10 +8790,10 @@ var file_agent_proto_depIdxs = []int32{
 	85,  // 30: agent.ClientEvent.permission_mode_changed:type_name -> agent.PermissionModeChanged
 	86,  // 31: agent.ClientEvent.config_changed:type_name -> agent.ConfigChanged
 	88,  // 32: agent.ClientEvent.meridian_status_changed:type_name -> agent.MeridianStatusChanged
-	90,  // 33: agent.ClientEvent.local_runtime_status_changed:type_name -> agent.LocalRuntimeStatusChanged
+	90,  // 33: agent.ClientEvent.open_runtime_status_changed:type_name -> agent.OpenRuntimeStatusChanged
 	87,  // 34: agent.MeridianStatusChanged.status:type_name -> agent.MeridianStatus
-	89,  // 35: agent.LocalRuntimeStatusChanged.status:type_name -> agent.LocalRuntimeStatus
-	89,  // 36: agent.GetLocalRuntimeStatusResponse.status:type_name -> agent.LocalRuntimeStatus
+	89,  // 35: agent.OpenRuntimeStatusChanged.status:type_name -> agent.OpenRuntimeStatus
+	89,  // 36: agent.GetOpenRuntimeStatusResponse.status:type_name -> agent.OpenRuntimeStatus
 	106, // 37: agent.ListMcpServersResponse.servers:type_name -> agent.McpServerInfo
 	129, // 38: agent.AddMcpServerRequest.env:type_name -> agent.AddMcpServerRequest.EnvEntry
 	115, // 39: agent.GetCloudProfilesResponse.profiles:type_name -> agent.CloudProfileInfo
@@ -8810,8 +8811,8 @@ var file_agent_proto_depIdxs = []int32{
 	50,  // 51: agent.Agent.GetContextUsage:input_type -> agent.GetContextUsageRequest
 	54,  // 52: agent.Agent.GetCompactionState:input_type -> agent.GetCompactionStateRequest
 	52,  // 53: agent.Agent.SuggestNextPrompt:input_type -> agent.SuggestNextPromptRequest
-	91,  // 54: agent.Agent.GetLocalRuntimeStatus:input_type -> agent.GetLocalRuntimeStatusRequest
-	93,  // 55: agent.Agent.InstallLocalRuntime:input_type -> agent.InstallLocalRuntimeRequest
+	91,  // 54: agent.Agent.GetOpenRuntimeStatus:input_type -> agent.GetOpenRuntimeStatusRequest
+	93,  // 55: agent.Agent.InstallOpenRuntime:input_type -> agent.InstallOpenRuntimeRequest
 	56,  // 56: agent.Agent.ExportContext:input_type -> agent.ExportContextRequest
 	58,  // 57: agent.Agent.GetConversationTurns:input_type -> agent.GetConversationTurnsRequest
 	66,  // 58: agent.Agent.ListTools:input_type -> agent.ListToolsRequest
@@ -8860,8 +8861,8 @@ var file_agent_proto_depIdxs = []int32{
 	51,  // 101: agent.Agent.GetContextUsage:output_type -> agent.GetContextUsageResponse
 	55,  // 102: agent.Agent.GetCompactionState:output_type -> agent.GetCompactionStateResponse
 	53,  // 103: agent.Agent.SuggestNextPrompt:output_type -> agent.SuggestNextPromptResponse
-	92,  // 104: agent.Agent.GetLocalRuntimeStatus:output_type -> agent.GetLocalRuntimeStatusResponse
-	94,  // 105: agent.Agent.InstallLocalRuntime:output_type -> agent.InstallProgress
+	92,  // 104: agent.Agent.GetOpenRuntimeStatus:output_type -> agent.GetOpenRuntimeStatusResponse
+	94,  // 105: agent.Agent.InstallOpenRuntime:output_type -> agent.InstallProgress
 	57,  // 106: agent.Agent.ExportContext:output_type -> agent.ExportContextResponse
 	59,  // 107: agent.Agent.GetConversationTurns:output_type -> agent.GetConversationTurnsResponse
 	67,  // 108: agent.Agent.ListTools:output_type -> agent.ListToolsResponse
@@ -8926,7 +8927,7 @@ func file_agent_proto_init() {
 		(*ClientEvent_PermissionModeChanged)(nil),
 		(*ClientEvent_ConfigChanged)(nil),
 		(*ClientEvent_MeridianStatusChanged)(nil),
-		(*ClientEvent_LocalRuntimeStatusChanged)(nil),
+		(*ClientEvent_OpenRuntimeStatusChanged)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

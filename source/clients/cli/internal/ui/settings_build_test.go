@@ -10,7 +10,7 @@ import (
 
 func TestBuildSettingsSectionsCoversKeys(t *testing.T) {
 	cfg := &agentclient.Config{
-		LocalRuntime: "ollama", LocalModel: "qwen3-coder", OllamaURL: "http://x",
+		OpenRuntime: "ollama", OpenModel: "qwen3-coder", OllamaURL: "http://x",
 		EmbeddingModel: "nomic", CloudProvider: "anthropic", CloudModel: "claude",
 		CloudBaseURL: "http://m", CloudAPIKeySet: true, CloudState: "ok",
 		Port: "50052", LocusMode: "cloud_primary",
@@ -25,7 +25,7 @@ func TestBuildSettingsSectionsCoversKeys(t *testing.T) {
 		}
 	}
 	// "Cloud" section is removed; "Cloud Providers" is now built by buildCloudSection.
-	for _, want := range []string{"Local Model", "Routing", "Permissions", "Server"} {
+	for _, want := range []string{"Open Model", "Routing", "Permissions", "Server"} {
 		if !titles[want] {
 			t.Errorf("missing section %q", want)
 		}
@@ -44,10 +44,10 @@ func TestBuildSettingsSectionsCoversKeys(t *testing.T) {
 }
 
 func TestClassifyCommit(t *testing.T) {
-	if a := classifyCommit("local-model", "qwen", nil); a.kind != commitConfig || a.update.LocalModel != "qwen" {
+	if a := classifyCommit("local-model", "qwen", nil); a.kind != commitConfig || a.update.OpenModel != "qwen" {
 		t.Fatalf("local-model -> %+v", a)
 	}
-	if a := classifyCommit("locus-mode", "local_only", nil); a.kind != commitConfig || a.update.LocusMode != "local_only" {
+	if a := classifyCommit("locus-mode", "open_only", nil); a.kind != commitConfig || a.update.LocusMode != "open_only" {
 		t.Fatalf("locus-mode -> %+v", a)
 	}
 	if a := classifyCommit("permission-mode", "bypass", nil); a.kind != commitPermission || a.value != "bypass" {

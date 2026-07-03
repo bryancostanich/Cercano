@@ -8,8 +8,8 @@ import (
 	"cercano/source/server/pkg/agentclient"
 )
 
-func TestLocalRuntimeModal_InitialStateIsIdle(t *testing.T) {
-	mo := newLocalRuntimeInstallModal(agentclient.LocalRuntimeStatus{
+func TestOpenRuntimeModal_InitialStateIsIdle(t *testing.T) {
+	mo := newOpenRuntimeInstallModal(agentclient.OpenRuntimeStatus{
 		Missing:          "binary",
 		Message:          "llama-server not on PATH",
 		SuggestedCommand: "brew install llama.cpp",
@@ -22,8 +22,8 @@ func TestLocalRuntimeModal_InitialStateIsIdle(t *testing.T) {
 	}
 }
 
-func TestLocalRuntimeModal_AppendLogTrimsCRLF(t *testing.T) {
-	mo := newLocalRuntimeInstallModal(agentclient.LocalRuntimeStatus{})
+func TestOpenRuntimeModal_AppendLogTrimsCRLF(t *testing.T) {
+	mo := newOpenRuntimeInstallModal(agentclient.OpenRuntimeStatus{})
 	mo.appendLog("installing llama.cpp\r\n")
 	mo.appendLog("done   ")
 	if got := mo.logLines[0]; got != "installing llama.cpp" {
@@ -34,8 +34,8 @@ func TestLocalRuntimeModal_AppendLogTrimsCRLF(t *testing.T) {
 	}
 }
 
-func TestLocalRuntimeModal_SetFailedRecordsMessage(t *testing.T) {
-	mo := newLocalRuntimeInstallModal(agentclient.LocalRuntimeStatus{})
+func TestOpenRuntimeModal_SetFailedRecordsMessage(t *testing.T) {
+	mo := newOpenRuntimeInstallModal(agentclient.OpenRuntimeStatus{})
 	mo.state = runtimeModalRunning
 	mo.setFailed("brew: command not found")
 	if mo.state != runtimeModalFailed {
@@ -46,10 +46,10 @@ func TestLocalRuntimeModal_SetFailedRecordsMessage(t *testing.T) {
 	}
 }
 
-func TestLocalRuntimeModal_ViewIncludesTitleAndSuggestedCommand(t *testing.T) {
+func TestOpenRuntimeModal_ViewIncludesTitleAndSuggestedCommand(t *testing.T) {
 	pal := theme.Cracker()
 	styles := theme.NewStyles(pal)
-	mo := newLocalRuntimeInstallModal(agentclient.LocalRuntimeStatus{
+	mo := newOpenRuntimeInstallModal(agentclient.OpenRuntimeStatus{
 		Missing:          "binary",
 		Message:          "llama-server not on PATH",
 		SuggestedCommand: "brew install llama.cpp",
@@ -66,8 +66,8 @@ func TestLocalRuntimeModal_ViewIncludesTitleAndSuggestedCommand(t *testing.T) {
 	}
 }
 
-func TestLocalRuntimeModal_DimReflectsFrameSize(t *testing.T) {
-	mo := newLocalRuntimeInstallModal(agentclient.LocalRuntimeStatus{})
+func TestOpenRuntimeModal_DimReflectsFrameSize(t *testing.T) {
+	mo := newOpenRuntimeInstallModal(agentclient.OpenRuntimeStatus{})
 	// Wide frame: box clamps to 80.
 	w, h := mo.modalDim(200, 60)
 	if w != 80 {
@@ -88,10 +88,10 @@ func TestLocalRuntimeModal_DimReflectsFrameSize(t *testing.T) {
 	}
 }
 
-func TestLocalRuntimeModal_ViewFailedShowsErrorAndRetry(t *testing.T) {
+func TestOpenRuntimeModal_ViewFailedShowsErrorAndRetry(t *testing.T) {
 	pal := theme.Cracker()
 	styles := theme.NewStyles(pal)
-	mo := newLocalRuntimeInstallModal(agentclient.LocalRuntimeStatus{
+	mo := newOpenRuntimeInstallModal(agentclient.OpenRuntimeStatus{
 		Missing: "binary",
 	})
 	mo.setFailed("brew: command not found")
@@ -104,10 +104,10 @@ func TestLocalRuntimeModal_ViewFailedShowsErrorAndRetry(t *testing.T) {
 	}
 }
 
-func TestLocalRuntimeModal_NeedsModelTitleAndActions(t *testing.T) {
+func TestOpenRuntimeModal_NeedsModelTitleAndActions(t *testing.T) {
 	pal := theme.Cracker()
 	styles := theme.NewStyles(pal)
-	mo := newLocalRuntimeInstallModal(agentclient.LocalRuntimeStatus{Missing: "binary"})
+	mo := newOpenRuntimeInstallModal(agentclient.OpenRuntimeStatus{Missing: "binary"})
 	mo.setNeedsModel("install completed but detection still fails: llama-server detection: model: found 2 GGUF models; set llama_server.default_model to disambiguate")
 	view := mo.View(styles, pal, 120, 40)
 

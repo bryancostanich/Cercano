@@ -189,12 +189,12 @@ type Model struct {
 	// setup hints.
 	meridianStatus *agentclient.MeridianStatus
 
-	// localRuntimeStatus is the most recent LocalRuntimeStatusChanged event
+	// openRuntimeStatus is the most recent OpenRuntimeStatusChanged event
 	// from the agent — populated on a config-driven runtime swap when the
 	// server's headless detection can't find the binary or a model. nil
 	// (or ok=true) means the chip stays hidden and the install modal is
 	// not offered.
-	localRuntimeStatus *agentclient.LocalRuntimeStatus
+	openRuntimeStatus *agentclient.OpenRuntimeStatus
 
 	// connState mirrors the SDK's connection health so the status bar can
 	// render a "reconnecting…" chip when the agent server dies and the
@@ -208,14 +208,14 @@ type Model struct {
 	// input for one-key re-submit. Cleared on successful streamEndMsg.
 	lastSubmittedPrompt string
 
-	// localRuntimeModal is the open install-modal state (nil = closed). It
+	// openRuntimeModal is the open install-modal state (nil = closed). It
 	// walks a small state machine — idle → running → done|failed — driven
-	// by InstallLocalRuntime stream events.
-	localRuntimeModal *localRuntimeInstallModal
+	// by InstallOpenRuntime stream events.
+	openRuntimeModal *openRuntimeInstallModal
 
 	// pendingRuntimeSwitch, when non-empty, is a runtime id ("llama_server")
 	// whose UpdateConfig(local-runtime=...) call is queued to fire once the
-	// install-modal reports success. Set by openLocalRuntimeInstallModalMsg
+	// install-modal reports success. Set by openOpenRuntimeInstallModalMsg
 	// (emitted by the settings page when the user picks a runtime that
 	// isn't ready), cleared by every modal-close path (dispatched on
 	// success, dropped on cancel/failed).
@@ -381,7 +381,7 @@ func (m *Model) applyTheme(t theme.Theme) {
 
 // Init is called by Bubble Tea once at startup.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.input.Focus(), m.splash.Init(), fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent), fetchLocalRuntimeStatusCmd(m.agent), fetchVisionCmd(m.agent), subscribeEventsCmd(m.agent), subscribeConnStateCmd(m.agent))
+	return tea.Batch(m.input.Focus(), m.splash.Init(), fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent), fetchOpenRuntimeStatusCmd(m.agent), fetchVisionCmd(m.agent), subscribeEventsCmd(m.agent), subscribeConnStateCmd(m.agent))
 }
 
 // permissionModeMsg carries the result of the startup GetPermissionMode RPC.
@@ -402,23 +402,23 @@ func fetchPermissionModeCmd(ag *agentclient.Client) tea.Cmd {
 	}
 }
 
-// fetchLocalRuntimeStatusCmd asks the agent for the current local-runtime
+// fetchOpenRuntimeStatusCmd asks the agent for the current local-runtime
 // detection snapshot. Used on CLI startup so the chip appears immediately
 // when the user is running with a partially-configured runtime (e.g. they
 // edited local_runtime: llama_server in the yaml but never installed the
 // binary). Push events cover subsequent state changes.
-func fetchLocalRuntimeStatusCmd(ag *agentclient.Client) tea.Cmd {
+func fetchOpenRuntimeStatusCmd(ag *agentclient.Client) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		st, err := ag.GetLocalRuntimeStatus(ctx, "")
+		st, err := ag.GetOpenRuntimeStatus(ctx, "")
 		if err != nil || st == nil {
 			return nil
 		}
 		// Reuse the change-msg shape so the Update handler for it can
 		// cover both initial-fetch and push-event paths uniformly. next
 		// is nil — this is a one-shot, not a stream drain.
-		return localRuntimeStatusChangedMsg{status: st}
+		return openRuntimeStatusChangedMsg{status: st}
 	}
 }
 
@@ -485,7 +485,7 @@ func invokeToolCmd(ag *agentclient.Client, name, argsJSON string) tea.Cmd {
 
 // configLoadedMsg carries the result of the startup / post-edit GetConfig RPC.
 type configLoadedMsg struct {
-	LocalModel      string
+	OpenModel      string
 	CloudModel      string
 	CloudConfigured bool
 }
@@ -510,7 +510,7 @@ func fetchConfigCmd(ag *agentclient.Client) tea.Cmd {
 		// while a profile with a keychain-stored key is happily routing.
 		configured := cfg.CloudState == "ok"
 		return configLoadedMsg{
-			LocalModel:      cfg.LocalModel,
+			OpenModel:      cfg.OpenModel,
 			CloudModel:      cfg.CloudModel,
 			CloudConfigured: configured,
 		}
@@ -820,16 +820,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The local-runtime install modal takes precedence over every
 		// other surface — it's a floating overlay, so its keys must be
 		// consumed before content pages or the input see them.
-		if m.localRuntimeModal != nil {
-			next, cmd := m.handleLocalRuntimeModalKey(msg)
+		if m.openRuntimeModal != nil {
+			next, cmd := m.handleOpenRuntimeModalKey(msg)
 			return next, cmd
 		}
 		// F1 opens the install modal when the chip is showing. Global so
 		// it works whether the user is on chat, settings, or any content
 		// page. If no unresolved local-runtime setup is queued, F1 is a
 		// no-op (falls through).
-		if keyStr == "f1" && m.localRuntimeStatus != nil && !m.localRuntimeStatus.Ok {
-			m.localRuntimeModal = newLocalRuntimeInstallModal(*m.localRuntimeStatus)
+		if keyStr == "f1" && m.openRuntimeStatus != nil && !m.openRuntimeStatus.Ok {
+			m.openRuntimeModal = newOpenRuntimeInstallModal(*m.openRuntimeStatus)
 			return m, nil
 		}
 		// Active content pages own the middle region, but global keys stay
@@ -1169,8 +1169,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case configLoadedMsg:
-		if msg.LocalModel != "" {
-			m.lastModel = msg.LocalModel
+		if msg.OpenModel != "" {
+			m.lastModel = msg.OpenModel
 		}
 		if msg.CloudConfigured {
 			m.cloudModel = msg.CloudModel
@@ -1211,7 +1211,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, msg.next
 
 	case runtimeInstallStartedMsg:
-		if m.localRuntimeModal == nil {
+		if m.openRuntimeModal == nil {
 			// User closed the modal between Enter and stream open — cancel
 			// the pending RPC and drop everything.
 			if msg.cancel != nil {
@@ -1220,24 +1220,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.err != nil {
-			m.localRuntimeModal.setFailed(msg.err.Error())
+			m.openRuntimeModal.setFailed(msg.err.Error())
 			return m, nil
 		}
-		m.localRuntimeModal.cancel = msg.cancel
+		m.openRuntimeModal.cancel = msg.cancel
 		return m, msg.next
 
 	case runtimeInstallProgressMsg:
-		if m.localRuntimeModal == nil {
+		if m.openRuntimeModal == nil {
 			return m, nil // modal closed; discard remaining frames
 		}
-		m.localRuntimeModal.appendLog(msg.line)
+		m.openRuntimeModal.appendLog(msg.line)
 		return m, msg.next
 
 	case runtimeInstallDoneMsg:
-		if m.localRuntimeModal == nil {
+		if m.openRuntimeModal == nil {
 			return m, nil
 		}
-		m.localRuntimeModal.cancel = nil
+		m.openRuntimeModal.cancel = nil
 		switch {
 		case msg.err != "" && installErrorIsMissingModel(msg.err):
 			// Install subprocess itself succeeded; the terminal frame
@@ -1245,54 +1245,54 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// to add a GGUF or set llama_server.default_model — retrying
 			// the install won't fix anything, so surface that state
 			// distinctly.
-			m.localRuntimeModal.setNeedsModel(msg.err)
+			m.openRuntimeModal.setNeedsModel(msg.err)
 			m.pendingRuntimeSwitch = ""
 		case msg.err != "":
-			m.localRuntimeModal.setFailed(msg.err)
+			m.openRuntimeModal.setFailed(msg.err)
 			m.pendingRuntimeSwitch = "" // failed install — the queued switch is dropped
 		case !msg.ok:
-			m.localRuntimeModal.setFailed("install exited with error")
+			m.openRuntimeModal.setFailed("install exited with error")
 			m.pendingRuntimeSwitch = ""
 		default:
-			// Success — wait for LocalRuntimeStatusChanged{ok:true} to
+			// Success — wait for OpenRuntimeStatusChanged{ok:true} to
 			// confirm the runtime is actually usable, then flip to done.
 			// If the event doesn't arrive within a reasonable window we
 			// still show the completion to unblock the user.
-			m.localRuntimeModal.state = runtimeModalDone
+			m.openRuntimeModal.state = runtimeModalDone
 			// If the settings gate queued a runtime switch, dispatch it
 			// now — the modal's install succeeded so the runtime is
 			// ready to use.
 			if m.pendingRuntimeSwitch != "" {
 				runtime := m.pendingRuntimeSwitch
 				m.pendingRuntimeSwitch = ""
-				return m, dispatchLocalRuntimeSwitch(m.agent, runtime)
+				return m, dispatchOpenRuntimeSwitch(m.agent, runtime)
 			}
 		}
 		return m, nil
 
-	case openLocalRuntimeInstallModalMsg:
+	case openOpenRuntimeInstallModalMsg:
 		// Emitted by the settings page when the user tries to switch to
 		// a runtime that isn't ready. Opens the install modal in its
 		// idle state and remembers the switch to dispatch on success.
-		if m.localRuntimeModal == nil {
-			m.localRuntimeModal = newLocalRuntimeInstallModal(msg.status)
+		if m.openRuntimeModal == nil {
+			m.openRuntimeModal = newOpenRuntimeInstallModal(msg.status)
 		}
 		m.pendingRuntimeSwitch = msg.pending
 		return m, nil
 
-	case localRuntimeStatusChangedMsg:
+	case openRuntimeStatusChangedMsg:
 		// Pushed on runtime swap or startup — the headless detection
 		// outcome for the currently-selected local runtime. Cache for
 		// chip rendering and re-arm the drain loop. When ok=true, drop
 		// the cache so the chip disappears and any open install-success
 		// modal knows to auto-dismiss.
 		if msg.status != nil && msg.status.Ok {
-			m.localRuntimeStatus = nil
-			if m.localRuntimeModal != nil && m.localRuntimeModal.state == runtimeModalRunning {
-				m.localRuntimeModal.state = runtimeModalDone
+			m.openRuntimeStatus = nil
+			if m.openRuntimeModal != nil && m.openRuntimeModal.state == runtimeModalRunning {
+				m.openRuntimeModal.state = runtimeModalDone
 			}
 		} else {
-			m.localRuntimeStatus = msg.status
+			m.openRuntimeStatus = msg.status
 		}
 		return m, msg.next
 
@@ -2736,8 +2736,8 @@ func (m Model) View() tea.View {
 	// Composite floating modals on top of the base frame. Currently only
 	// the local-runtime install modal — future overlays (about box, etc.)
 	// splice here in z-order.
-	if m.localRuntimeModal != nil {
-		boxW, boxH := m.localRuntimeModal.modalDim(m.width, m.height)
+	if m.openRuntimeModal != nil {
+		boxW, boxH := m.openRuntimeModal.modalDim(m.width, m.height)
 		x := (m.width - boxW) / 2
 		y := (m.height - boxH) / 2
 		if x < 0 {
@@ -2746,7 +2746,7 @@ func (m Model) View() tea.View {
 		if y < 0 {
 			y = 0
 		}
-		box := m.localRuntimeModal.View(m.styles, m.palette, m.width, m.height)
+		box := m.openRuntimeModal.View(m.styles, m.palette, m.width, m.height)
 		out = composeOverlay(out, box, x, y)
 	}
 	v := tea.NewView(out)
@@ -3063,7 +3063,7 @@ func (m Model) renderStatus() string {
 		turnPart,
 		cloudPart,
 		m.renderMeridianChip(),
-		m.renderLocalRuntimeChip(),
+		m.renderOpenRuntimeChip(),
 		m.renderConnStateChip(),
 		m.renderPermissionModeChip(),
 		m.styles.BorderDim.Render("  ·  "),
@@ -3106,18 +3106,18 @@ func (m Model) renderMeridianChip() string {
 	return m.styles.BorderDim.Render("  ·  ") + valStyle.Render(label)
 }
 
-// renderLocalRuntimeChip surfaces local-runtime detection state — currently
+// renderOpenRuntimeChip surfaces local-runtime detection state — currently
 // only used when the user has switched local_runtime to llama_server (via
 // config file edit or /config) and the agent's headless detection couldn't
 // find the binary or a GGUF model. In that case we show an amber chip
 // telling the user to press F1 to open the install modal. When status is
 // nil or ok, the chip is hidden.
-func (m Model) renderLocalRuntimeChip() string {
-	if m.localRuntimeStatus == nil || m.localRuntimeStatus.Ok {
+func (m Model) renderOpenRuntimeChip() string {
+	if m.openRuntimeStatus == nil || m.openRuntimeStatus.Ok {
 		return ""
 	}
 	var label string
-	switch m.localRuntimeStatus.Missing {
+	switch m.openRuntimeStatus.Missing {
 	case "binary":
 		label = "⚠ llama-server not installed (F1)"
 	case "model":

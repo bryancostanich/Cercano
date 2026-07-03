@@ -403,10 +403,10 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 	augmentedInput, originalInput := a.loadHistory(ctx, req)
 
 	// Direct local bypass — skip SmartRouter for co-processor tools
-	if req.DirectLocal {
-		fmt.Println("Agent: DirectLocal — bypassing SmartRouter, using local provider.")
-		local := a.router.GetModelProviders()["LocalModel"]
-		augReq := &Request{Input: augmentedInput, DirectLocal: true, ModelOverride: req.ModelOverride}
+	if req.DirectOpen {
+		fmt.Println("Agent: DirectOpen — bypassing SmartRouter, using local provider.")
+		local := a.router.GetModelProviders()["OpenModel"]
+		augReq := &Request{Input: augmentedInput, DirectOpen: true, ModelOverride: req.ModelOverride}
 		res, err := local.Process(ctx, augReq)
 		if err != nil {
 			return nil, err
@@ -478,7 +478,7 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 		if newRes, ok := a.degradeIfCloudFailure(ctx, provider, augReq, err, nil); ok {
 			res = newRes
 			err = nil
-			provider = a.router.GetModelProviders()["LocalModel"]
+			provider = a.router.GetModelProviders()["OpenModel"]
 		}
 	}
 	if err != nil {
@@ -639,7 +639,7 @@ func (a *Agent) ProcessRequestStream(ctx context.Context, req *Request, progress
 		if newRes, ok := a.degradeIfCloudFailure(ctx, provider, augReq, err, progress); ok {
 			res = newRes
 			err = nil
-			provider = a.router.GetModelProviders()["LocalModel"]
+			provider = a.router.GetModelProviders()["OpenModel"]
 		}
 	}
 	if err != nil {

@@ -30,7 +30,7 @@ func TestBuildWatchdogDisabledByDefault(t *testing.T) {
 func TestBuildWatchdogEnabled(t *testing.T) {
 	eng := dispatch.NewEngine(
 		func() dispatch.Providers { return dispatch.Providers{} },
-		func() locus.Mode { return locus.LocalOnly },
+		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
 	s := &Server{dispatchEngine: eng}
@@ -51,7 +51,7 @@ func TestBuildWatchdogEnabled(t *testing.T) {
 func TestBuildWatchdogSkipsUnknownChecks(t *testing.T) {
 	eng := dispatch.NewEngine(
 		func() dispatch.Providers { return dispatch.Providers{} },
-		func() locus.Mode { return locus.LocalOnly },
+		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
 	s := &Server{dispatchEngine: eng}

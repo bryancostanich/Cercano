@@ -54,7 +54,7 @@ func (m *mockRouter) ClassifyIntent(req *agent.Request) (agent.Intent, error) {
 
 func (m *mockRouter) GetModelProviders() map[string]agent.ModelProvider {
 	return map[string]agent.ModelProvider{
-		"LocalModel": &mockProvider{name: "MockLocal"},
+		"OpenModel": &mockProvider{name: "MockLocal"},
 		"CloudModel": &mockProvider{name: "MockCloud"},
 	}
 }
@@ -135,7 +135,7 @@ func TestGetRuntimeStatus_IncludesConfiguredEndpoints(t *testing.T) {
 	srv.SetRuntimeManager(localruntime.NewManager())
 	srv.SetConfigPersistence("", config.Config{
 		OllamaURL:      "http://mac-studio.local:11434",
-		LocalModel:     "qwen3-coder",
+		OpenModel:     "qwen3-coder",
 		EmbeddingModel: "nomic-embed-text",
 		CloudProvider:  "anthropic",
 		CloudModel:     "claude-test",
@@ -198,7 +198,7 @@ func TestUpdateConfig_OllamaURL(t *testing.T) {
 	registry := engine.NewEngineRegistry()
 	eng := ollama.NewOllamaEngine("http://localhost:11434")
 	registry.RegisterEngine(eng)
-	provider := legacymodels.NewLocalModelProvider(eng, "test-model")
+	provider := legacymodels.NewOpenModelProvider(eng, "test-model")
 
 	srv := NewServer(nil, provider, nil, nil, nil, registry)
 
@@ -325,14 +325,14 @@ func TestUpdateConfig_OllamaURL_WithModel(t *testing.T) {
 	registry := engine.NewEngineRegistry()
 	eng := ollama.NewOllamaEngine("http://localhost:11434")
 	registry.RegisterEngine(eng)
-	provider := legacymodels.NewLocalModelProvider(eng, "test-model")
+	provider := legacymodels.NewOpenModelProvider(eng, "test-model")
 
 	srv := NewServer(nil, provider, nil, nil, nil, registry)
 
 	// Set both URL and model in one call
 	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{
 		OllamaUrl:  "http://192.168.1.100:11434",
-		LocalModel: "llama3",
+		OpenModel: "llama3",
 	})
 	if err != nil {
 		t.Fatalf("UpdateConfig failed: %v", err)
@@ -349,25 +349,25 @@ func TestUpdateConfig_OllamaURL_WithModel(t *testing.T) {
 	}
 }
 
-func TestUpdateConfig_LocalRuntime(t *testing.T) {
+func TestUpdateConfig_OpenRuntime(t *testing.T) {
 	registry := engine.NewEngineRegistry()
 	ollamaEng := &namedTestEngine{name: "ollama"}
 	llamaEng := &namedTestEngine{name: "llama_server"}
 	registry.RegisterEngine(ollamaEng)
 	registry.RegisterEngine(llamaEng)
-	provider := legacymodels.NewLocalModelProvider(ollamaEng, "ollama-model")
+	provider := legacymodels.NewOpenModelProvider(ollamaEng, "ollama-model")
 
 	srv := NewServer(nil, provider, nil, nil, nil, registry)
 	srv.SetConfigPersistence("", config.Config{
-		LocalRuntime: "ollama",
-		LocalModel:   "ollama-model",
+		OpenRuntime: "ollama",
+		OpenModel:   "ollama-model",
 		LlamaServer: config.LlamaServerConfig{
 			DefaultModel: "/models/model-a.gguf",
 		},
 	})
 
 	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{
-		LocalRuntime: "llama_server",
+		OpenRuntime: "llama_server",
 	})
 	if err != nil {
 		t.Fatalf("UpdateConfig failed: %v", err)
@@ -386,15 +386,15 @@ func TestUpdateConfig_LocalRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetConfig failed: %v", err)
 	}
-	if cfg.GetLocalRuntime() != "llama_server" {
-		t.Fatalf("local runtime not persisted in server state: %q", cfg.GetLocalRuntime())
+	if cfg.GetOpenRuntime() != "llama_server" {
+		t.Fatalf("local runtime not persisted in server state: %q", cfg.GetOpenRuntime())
 	}
 }
 
 func TestUpdateConfig_WatchdogEnable(t *testing.T) {
 	eng := dispatch.NewEngine(
 		func() dispatch.Providers { return dispatch.Providers{} },
-		func() locus.Mode { return locus.LocalOnly },
+		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
 	srv := NewServer(nil, nil, nil, nil, nil, engine.NewEngineRegistry())
@@ -448,10 +448,10 @@ func TestUpdateConfig_WatchdogEcho_and_GetConfig(t *testing.T) {
 	}
 }
 
-func TestUpdateConfig_LocalRuntime_Invalid(t *testing.T) {
+func TestUpdateConfig_OpenRuntime_Invalid(t *testing.T) {
 	srv := NewServer(nil, nil, nil, nil, nil, engine.NewEngineRegistry())
 	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{
-		LocalRuntime: "tensor_vibes",
+		OpenRuntime: "tensor_vibes",
 	})
 	if err != nil {
 		t.Fatalf("UpdateConfig returned error: %v", err)

@@ -25,12 +25,12 @@ type meridianStatusChangedMsg struct {
 	next   tea.Cmd
 }
 
-// localRuntimeStatusChangedMsg is delivered when the agent pushes a
-// LocalRuntimeStatusChanged event — the local-runtime detection outcome
+// openRuntimeStatusChangedMsg is delivered when the agent pushes a
+// OpenRuntimeStatusChanged event — the local-runtime detection outcome
 // after a config-driven runtime swap. Non-ok statuses drive the chip and
 // the install modal; ok statuses clear both.
-type localRuntimeStatusChangedMsg struct {
-	status *agentclient.LocalRuntimeStatus
+type openRuntimeStatusChangedMsg struct {
+	status *agentclient.OpenRuntimeStatus
 	next   tea.Cmd
 }
 
@@ -54,8 +54,8 @@ func subscribeEventsCmd(ag *agentclient.Client) tea.Cmd {
 			if ev.MeridianStatus != nil {
 				return meridianStatusChangedMsg{status: ev.MeridianStatus, next: wait}
 			}
-			if ev.LocalRuntimeStatus != nil {
-				return localRuntimeStatusChangedMsg{status: ev.LocalRuntimeStatus, next: wait}
+			if ev.OpenRuntimeStatus != nil {
+				return openRuntimeStatusChangedMsg{status: ev.OpenRuntimeStatus, next: wait}
 			}
 			return permissionModeChangedMsg{mode: ev.Mode, next: wait}
 		}

@@ -21,7 +21,7 @@ func (p stubProvider) StreamChat(context.Context, llm.ChatRequest) (llm.StreamRe
 func TestMainProviderSelectsByFlag(t *testing.T) {
 	cloud := stubProvider{name: "cloud"}
 	local := stubProvider{name: "local"}
-	s := Services{CloudProvider: cloud, LocalProvider: local}
+	s := Services{CloudProvider: cloud, OpenProvider: local}
 	if s.MainProvider(true).Name() != "cloud" {
 		t.Fatal("isCloud=true should pick cloud provider")
 	}
@@ -30,9 +30,9 @@ func TestMainProviderSelectsByFlag(t *testing.T) {
 	}
 }
 
-func TestMainProviderFallsBackToLocalWhenNoCloud(t *testing.T) {
+func TestMainProviderFallsBackToOpenWhenNoCloud(t *testing.T) {
 	local := stubProvider{name: "local"}
-	s := Services{LocalProvider: local}
+	s := Services{OpenProvider: local}
 	if s.MainProvider(true).Name() != "local" {
 		t.Fatal("nil cloud should fall back to local")
 	}

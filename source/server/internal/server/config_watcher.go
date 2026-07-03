@@ -99,11 +99,11 @@ func (s *Server) reloadConfigFromDisk(ctx context.Context) {
 	if newCfg.OllamaURL != snap.OllamaURL {
 		req.OllamaUrl = newCfg.OllamaURL
 	}
-	if newCfg.LocalModel != snap.LocalModel {
-		req.LocalModel = newCfg.LocalModel
+	if newCfg.OpenModel != snap.OpenModel {
+		req.OpenModel = newCfg.OpenModel
 	}
-	if newCfg.LocalRuntime != snap.LocalRuntime {
-		req.LocalRuntime = newCfg.LocalRuntime
+	if newCfg.OpenRuntime != snap.OpenRuntime {
+		req.OpenRuntime = newCfg.OpenRuntime
 	}
 	if newCfg.CloudProvider != snap.CloudProvider {
 		req.CloudProvider = newCfg.CloudProvider

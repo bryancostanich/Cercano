@@ -30,13 +30,13 @@ func (f *fakeLLMProvider) StreamChat(context.Context, llm.ChatRequest) (llm.Stre
 }
 
 // newDispatchCoprocAgent builds an Agent with a dispatch.Engine backed by fake
-// llm.Providers. localModel/cloudModel are the model name strings returned by
+// llm.Providers. openModel/cloudModel are the model name strings returned by
 // SetModelFor (they appear in RoutingMetadata.ModelName). A nil local or cloud
 // provider means that tier is absent.
 func newDispatchCoprocAgent(modeStr string, localProv, cloudProv *fakeLLMProvider) *Agent {
-	var localModel, cloudModel string
+	var openModel, cloudModel string
 	if localProv != nil {
-		localModel = localProv.name
+		openModel = localProv.name
 	}
 	if cloudProv != nil {
 		cloudModel = cloudProv.name
@@ -54,12 +54,12 @@ func newDispatchCoprocAgent(modeStr string, localProv, cloudProv *fakeLLMProvide
 		m, _ := locus.ParseMode(modeStr)
 		return m
 	}
-	eng := dispatch.NewEngine(func() dispatch.Providers { return dispatch.Providers{Local: dLocal, Cloud: dCloud} }, modeFn, nil)
+	eng := dispatch.NewEngine(func() dispatch.Providers { return dispatch.Providers{Open: dLocal, Cloud: dCloud} }, modeFn, nil)
 	eng.SetModelFor(func(isCloud bool) string {
 		if isCloud {
 			return cloudModel
 		}
-		return localModel
+		return openModel
 	})
 
 	// Agent still needs a Router (for non-coproc paths); use a stub.
@@ -85,7 +85,7 @@ func TestCoprocRoutesPerMode(t *testing.T) {
 	ctx := context.Background()
 
 	// local_primary → local
-	r, err := newDispatchCoprocAgent("local_primary",
+	r, err := newDispatchCoprocAgent("open_primary",
 		&fakeLLMProvider{name: "ollama", out: "local-out"},
 		&fakeLLMProvider{name: "anthropic", out: "cloud-out"},
 	).ProcessRequest(ctx, &Request{Input: "x", Coproc: true})
@@ -126,10 +126,10 @@ func TestCoprocCloudPrimaryPrefersLocal(t *testing.T) {
 	}
 }
 
-func TestCoprocLocalPrimaryFallsBackToCloud(t *testing.T) {
+func TestCoprocOpenPrimaryFallsBackToCloud(t *testing.T) {
 	// local_primary with no local provider must fall back to cloud and set
 	// IsCloud=true and a non-empty Notice (the caller must know it fell back).
-	a := newDispatchCoprocAgent("local_primary",
+	a := newDispatchCoprocAgent("open_primary",
 		nil,
 		&fakeLLMProvider{name: "anthropic", out: "cloud-out"},
 	)
@@ -148,9 +148,9 @@ func TestCoprocLocalPrimaryFallsBackToCloud(t *testing.T) {
 	}
 }
 
-func TestCoprocLocalOnlyHardFailsWhenAbsent(t *testing.T) {
+func TestCoprocOpenOnlyHardFailsWhenAbsent(t *testing.T) {
 	// local_only with no local provider must return an error — no cloud crossover allowed.
-	a := newDispatchCoprocAgent("local_only",
+	a := newDispatchCoprocAgent("open_only",
 		nil,
 		&fakeLLMProvider{name: "anthropic", out: "cloud-out"},
 	)

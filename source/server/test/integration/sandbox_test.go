@@ -29,7 +29,7 @@ func TestSandbox_GenerateAndRunTests(t *testing.T) {
 		t.Fatalf("Failed to read calculator.go: %v", err)
 	}
 
-	provider := legacymodels.NewLocalModelProvider(ollama.NewOllamaEngine("http://localhost:11434"), "qwen3-coder")
+	provider := legacymodels.NewOpenModelProvider(ollama.NewOllamaEngine("http://localhost:11434"), "qwen3-coder")
 	handler := tools.NewGenericGenerator(provider)
 	validator := tools.NewGoValidator()
 	coordinator := loop.NewGenerationCoordinator(handler, handler, validator)

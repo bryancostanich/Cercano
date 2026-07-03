@@ -9,7 +9,7 @@ import (
 )
 
 var locusModes = map[string]bool{
-	"cloud_only": true, "cloud_primary": true, "local_primary": true, "local_only": true,
+	"cloud_only": true, "cloud_primary": true, "open_primary": true, "open_only": true,
 }
 
 func validLocusMode(s string) bool { return locusModes[s] }
@@ -29,7 +29,7 @@ func RegisterLocus(r *Registry, c *agentclient.Client) {
 				}
 				mode := cfg.LocusMode
 				if mode == "" {
-					mode = "local_primary"
+					mode = "open_primary"
 				}
 				return Result{Kind: ResultText, Text: "locus mode: " + mode}
 			}

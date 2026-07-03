@@ -26,16 +26,16 @@ func TestResolveMainProvider(t *testing.T) {
 	mk := func(mode string, c, l llm.Provider) *Server {
 		s := &Server{currentConfig: config.Config{LocusMode: mode}}
 		s.cloudLLMProvider = c
-		s.localLLMProvider = l
+		s.openLLMProvider = l
 		return s
 	}
 
 	// Local Primary, both available → local, not fallback.
-	if p, isCloud, fb, err := mk("local_primary", cloud, local).resolveMainProvider(); err != nil || isCloud || fb || p.Name() != "ollama" {
+	if p, isCloud, fb, err := mk("open_primary", cloud, local).resolveMainProvider(); err != nil || isCloud || fb || p.Name() != "ollama" {
 		t.Errorf("local_primary both: %v isCloud=%v fb=%v err=%v", p, isCloud, fb, err)
 	}
 	// Local Primary, local missing → fall back to cloud.
-	if p, isCloud, fb, err := mk("local_primary", cloud, nil).resolveMainProvider(); err != nil || !isCloud || !fb || p.Name() != "anthropic" {
+	if p, isCloud, fb, err := mk("open_primary", cloud, nil).resolveMainProvider(); err != nil || !isCloud || !fb || p.Name() != "anthropic" {
 		t.Errorf("local_primary fallback: %v isCloud=%v fb=%v err=%v", p, isCloud, fb, err)
 	}
 	// Cloud Primary, cloud missing → fall back to local (mirror of the above).
@@ -47,7 +47,7 @@ func TestResolveMainProvider(t *testing.T) {
 		t.Error("cloud_only with no cloud should error")
 	}
 	// Local Only, local missing → hard error (no cross even though cloud present).
-	if _, _, _, err := mk("local_only", cloud, nil).resolveMainProvider(); err == nil {
+	if _, _, _, err := mk("open_only", cloud, nil).resolveMainProvider(); err == nil {
 		t.Error("local_only with no local should error")
 	}
 }

@@ -8,28 +8,28 @@ import (
 	"cercano/source/server/internal/engine"
 )
 
-type LocalModelProvider struct {
+type OpenModelProvider struct {
 	mu        sync.RWMutex
 	ModelName string
 	Engine    engine.InferenceEngine
 }
 
-func NewLocalModelProvider(engine engine.InferenceEngine, modelName string) *LocalModelProvider {
-	return &LocalModelProvider{
+func NewOpenModelProvider(engine engine.InferenceEngine, modelName string) *OpenModelProvider {
+	return &OpenModelProvider{
 		ModelName: modelName,
 		Engine:    engine,
 	}
 }
 
 // SetModelName updates the model name at runtime (thread-safe).
-func (p *LocalModelProvider) SetModelName(name string) {
+func (p *OpenModelProvider) SetModelName(name string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.ModelName = name
 }
 
 // SetEngine updates the local inference backend at runtime.
-func (p *LocalModelProvider) SetEngine(eng engine.InferenceEngine, modelName string) {
+func (p *OpenModelProvider) SetEngine(eng engine.InferenceEngine, modelName string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.Engine = eng
@@ -38,13 +38,13 @@ func (p *LocalModelProvider) SetEngine(eng engine.InferenceEngine, modelName str
 	}
 }
 
-func (p *LocalModelProvider) Name() string {
+func (p *OpenModelProvider) Name() string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.ModelName
 }
 
-func (p *LocalModelProvider) Process(ctx context.Context, req *agent.Request) (*agent.Response, error) {
+func (p *OpenModelProvider) Process(ctx context.Context, req *agent.Request) (*agent.Response, error) {
 	p.mu.RLock()
 	modelName := p.ModelName
 	eng := p.Engine
@@ -67,7 +67,7 @@ func (p *LocalModelProvider) Process(ctx context.Context, req *agent.Request) (*
 	}, nil
 }
 
-func (p *LocalModelProvider) ProcessStream(ctx context.Context, req *agent.Request, onToken agent.TokenFunc) (*agent.Response, error) {
+func (p *OpenModelProvider) ProcessStream(ctx context.Context, req *agent.Request, onToken agent.TokenFunc) (*agent.Response, error) {
 	p.mu.RLock()
 	modelName := p.ModelName
 	eng := p.Engine

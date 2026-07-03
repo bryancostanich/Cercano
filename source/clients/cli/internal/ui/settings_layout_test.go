@@ -34,7 +34,7 @@ func sampleSettingsPage(w, h int) *settingsPage {
 	p := theme.Cracker()
 	s := theme.NewStyles(p)
 	cfg := &agentclient.Config{
-		LocalRuntime: "ollama", LocalModel: "qwen3-coder-next:latest", OllamaURL: "http://localhost:11434",
+		OpenRuntime: "ollama", OpenModel: "qwen3-coder-next:latest", OllamaURL: "http://localhost:11434",
 		EmbeddingModel: "nomic-embed-text", CloudProvider: "anthropic", CloudModel: "claude-opus-4-7",
 		CloudBaseURL: "http://127.0.0.1:3456", CloudState: "ok", Port: "50052", LocusMode: "cloud_only",
 	}
@@ -188,7 +188,7 @@ func TestSettingsNarrowSelectGoesUnderLabel(t *testing.T) {
 	// column: one per line, with no "·" separator joining options. (Only lines
 	// that actually carry locus options are checked — section titles like
 	// "Theme · Chrome" legitimately contain a middle dot.)
-	opts := []string{"cloud_only", "cloud_primary", "local_primary", "local_only"}
+	opts := []string{"cloud_only", "cloud_primary", "open_primary", "open_only"}
 	for _, ln := range lines {
 		n := 0
 		for _, o := range opts {

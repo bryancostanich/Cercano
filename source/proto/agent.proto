@@ -44,22 +44,22 @@ service Agent {
   // means "no suggestion" — the CLI treats it as no-op.
   rpc SuggestNextPrompt (SuggestNextPromptRequest) returns (SuggestNextPromptResponse) {}
 
-  // GetLocalRuntimeStatus returns the current headless-detection outcome
-  // for the selected local runtime. Callers use it once at startup to
+  // GetOpenRuntimeStatus returns the current headless-detection outcome
+  // for the selected open runtime. Callers use it once at startup to
   // populate the CLI chip / install modal without waiting for a config
-  // change to fire a LocalRuntimeStatusChanged event.
-  rpc GetLocalRuntimeStatus (GetLocalRuntimeStatusRequest) returns (GetLocalRuntimeStatusResponse) {}
+  // change to fire a OpenRuntimeStatusChanged event.
+  rpc GetOpenRuntimeStatus (GetOpenRuntimeStatusRequest) returns (GetOpenRuntimeStatusResponse) {}
 
-  // InstallLocalRuntime runs the platform install command for a local
+  // InstallOpenRuntime runs the platform install command for an open-weight
   // inference runtime (today: "llama_server" via `brew install llama.cpp`
   // on macOS) and streams stdout/stderr line-by-line to the caller. The
   // final message carries done=true with ok set to the outcome.
   //
   // The server re-runs detection after a successful install and emits a
-  // fresh LocalRuntimeStatusChanged event on the SubscribeEvents stream,
+  // fresh OpenRuntimeStatusChanged event on the SubscribeEvents stream,
   // so CLIs get the "runtime is now ready" signal through the same channel
   // they used to render the "needs setup" chip.
-  rpc InstallLocalRuntime (InstallLocalRuntimeRequest) returns (stream InstallProgress) {}
+  rpc InstallOpenRuntime (InstallOpenRuntimeRequest) returns (stream InstallProgress) {}
 
   // ExportContext returns the full uncapped raw history as a JSON []llm.Message.
   rpc ExportContext (ExportContextRequest) returns (ExportContextResponse) {}
@@ -202,7 +202,7 @@ message ProcessRequestRequest {
   string work_dir = 3;  // Optional working directory for agentic tasks
   string file_name = 4; // Optional filename for agentic tasks
   string conversation_id = 5; // Optional conversation ID for multi-turn history
-  bool direct_local = 6; // Skip SmartRouter, go directly to local provider
+  bool direct_open = 6; // Skip SmartRouter, go directly to the open-weight provider
   string model_override = 7; // Use this model instead of the configured default (temporary, per-request)
   bool coproc = 8; // Route per Locus Mode's co-processor tier (local/cloud)
   repeated InlineImage images = 9; // user-attached images, spliced in at "[image N]" markers in input
@@ -218,7 +218,7 @@ message InlineImage {
 
 // Runtime configuration update request.
 message UpdateConfigRequest {
-  string local_model = 1;    // Local model name (Ollama tag or managed runtime model id/path)
+  string open_model = 1;    // Open-weight model name (Ollama tag or managed runtime model id/path)
   string cloud_provider = 2; // Cloud provider name (e.g., "google", "anthropic")
   string cloud_model = 3;    // Cloud model name (e.g., "gemini-1.5-flash", "claude-3-opus")
   string cloud_api_key = 4;  // API key for the cloud provider
@@ -227,8 +227,8 @@ message UpdateConfigRequest {
   // When set, used as the baseURL for the anthropic client; api_key may be empty
   // because the proxy handles auth (Claude Max OAuth in Meridian's case).
   string cloud_base_url = 6;
-  string local_runtime = 7;  // Local runtime name: "ollama" or "llama_server"
-  string locus_mode = 8;     // cloud_only|cloud_primary|local_primary|local_only
+  string open_runtime = 7;  // Open-weight runtime name: "ollama" or "llama_server"
+  string locus_mode = 8;     // cloud_only|cloud_primary|open_primary|open_only
   string watchdog_enabled = 9;  // "" = unchanged, "true"/"false"
   string watchdog_echo = 10;    // "" = unchanged, "true"/"false"
   // Compaction — Development Tools. String-encoded bool ("" | "true" | "false")
@@ -589,7 +589,7 @@ message InvokeCapabilityResponse {
 message GetConfigRequest {}
 message GetConfigResponse {
   string ollama_url = 1;
-  string local_model = 2;
+  string open_model = 2;
   string embedding_model = 3;
   string cloud_provider = 4;
   string cloud_model = 5;
@@ -599,7 +599,7 @@ message GetConfigResponse {
   // most recent turn succeeded; useful for surfacing in the CLI status bar.
   string cloud_state = 8;
   string port = 9;
-  string local_runtime = 10;
+  string open_runtime = 10;
   string locus_mode = 11;
   bool watchdog_enabled = 12;
   bool watchdog_echo = 13;
@@ -663,7 +663,7 @@ message ClientEvent {
     PermissionModeChanged permission_mode_changed = 1;
     ConfigChanged config_changed = 2;
     MeridianStatusChanged meridian_status_changed = 3;
-    LocalRuntimeStatusChanged local_runtime_status_changed = 4;
+    OpenRuntimeStatusChanged open_runtime_status_changed = 4;
   }
 }
 
@@ -706,7 +706,7 @@ message MeridianStatus {
 // MeridianStatusChanged is broadcast on every Meridian state transition.
 message MeridianStatusChanged { MeridianStatus status = 1; }
 
-// LocalRuntimeStatus is the live state of the active local inference runtime
+// OpenRuntimeStatus is the live state of the active open-weight inference runtime
 // (ollama or llama_server). Emitted after a runtime swap (config edit or
 // UpdateConfig RPC) — clients render a status chip and drive the recovery
 // modal from this.
@@ -714,10 +714,10 @@ message MeridianStatusChanged { MeridianStatus status = 1; }
 // runtime values: "ollama" | "llama_server".
 // missing values (when ok=false): "binary" | "model". Empty when ok=true.
 //   "binary" — the runtime executable is not on PATH / not at Binary path.
-//              CLI should offer the install flow (InstallLocalRuntime RPC).
+//              CLI should offer the install flow (InstallOpenRuntime RPC).
 //   "model"  — the runtime is available but no usable model is configured.
 //              CLI should surface a model-picker / download flow.
-message LocalRuntimeStatus {
+message OpenRuntimeStatus {
   bool ok = 1;
   string runtime = 2;
   string missing = 3;
@@ -727,15 +727,15 @@ message LocalRuntimeStatus {
   string default_model = 7;
 }
 
-// LocalRuntimeStatusChanged is broadcast whenever the local runtime state
+// OpenRuntimeStatusChanged is broadcast whenever the open runtime state
 // changes (post-swap detection, install completes, etc.). Clients update
 // their status chip + modal from this — no fetch, no poll.
-message LocalRuntimeStatusChanged { LocalRuntimeStatus status = 1; }
+message OpenRuntimeStatusChanged { OpenRuntimeStatus status = 1; }
 
-// GetLocalRuntimeStatus is the pull-side counterpart to
-// LocalRuntimeStatusChanged. Empty request — the server always returns the
-// snapshot for the currently-selected local runtime.
-message GetLocalRuntimeStatusRequest {
+// GetOpenRuntimeStatus is the pull-side counterpart to
+// OpenRuntimeStatusChanged. Empty request — the server always returns the
+// snapshot for the currently-selected open runtime.
+message GetOpenRuntimeStatusRequest {
   // Runtime to detect against ("ollama" | "llama_server"). Empty falls
   // back to the currently-selected runtime — used by the CLI startup
   // fetch to render the chip. The settings-page gate uses this explicit
@@ -743,14 +743,14 @@ message GetLocalRuntimeStatusRequest {
   // asked to install BEFORE the config is silently accepted.
   string runtime = 1;
 }
-message GetLocalRuntimeStatusResponse { LocalRuntimeStatus status = 1; }
+message GetOpenRuntimeStatusResponse { OpenRuntimeStatus status = 1; }
 
-// InstallLocalRuntimeRequest asks the server to run the platform install
-// command for a local runtime and stream its output back.
+// InstallOpenRuntimeRequest asks the server to run the platform install
+// command for an open-weight runtime and stream its output back.
 //
 // runtime values today: "llama_server" — future runtimes can be added
 // without breaking the wire format.
-message InstallLocalRuntimeRequest {
+message InstallOpenRuntimeRequest {
   string runtime = 1;
 }
 

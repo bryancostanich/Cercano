@@ -18,7 +18,7 @@ const (
 // Providers holds the candidate providers; either may be nil/absent.
 type Providers struct {
 	Cloud llm.Provider
-	Local llm.Provider
+	Open  llm.Provider
 }
 
 // Selection is the resolved provider for a unit of work.
@@ -44,7 +44,7 @@ func Select(mode locus.Mode, role Role, p Providers) (Selection, error) {
 			}
 			return nil
 		}
-		return p.Local
+		return p.Open
 	}
 	label := "main"
 	if role == RoleCoproc {

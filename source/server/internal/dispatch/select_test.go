@@ -20,10 +20,10 @@ func (stubLLM) StreamChat(context.Context, llm.ChatRequest) (llm.StreamReader, e
 	return nil, nil
 }
 
-func TestSelectCoprocPrefersLocalUnderCloudPrimary(t *testing.T) {
+func TestSelectCoprocPrefersOpenUnderCloudPrimary(t *testing.T) {
 	local := stubLLM{"local"}
 	cloud := stubLLM{"cloud"}
-	sel, err := Select(locus.CloudPrimary, RoleCoproc, Providers{Cloud: cloud, Local: local})
+	sel, err := Select(locus.CloudPrimary, RoleCoproc, Providers{Cloud: cloud, Open: local})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestSelectCoprocPrefersLocalUnderCloudPrimary(t *testing.T) {
 func TestSelectFallbackNotice(t *testing.T) {
 	cloud := stubLLM{"cloud"}
 	// local_primary, no local available -> fall back to cloud, with notice.
-	sel, err := Select(locus.LocalPrimary, RoleCoproc, Providers{Cloud: cloud, Local: nil})
+	sel, err := Select(locus.OpenPrimary, RoleCoproc, Providers{Cloud: cloud, Open: nil})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,14 +48,14 @@ func TestSelectFallbackNotice(t *testing.T) {
 }
 
 func TestSelectNoProviderErrors(t *testing.T) {
-	if _, err := Select(locus.LocalOnly, RoleCoproc, Providers{}); err == nil {
+	if _, err := Select(locus.OpenOnly, RoleCoproc, Providers{}); err == nil {
 		t.Fatal("expected error when no provider is available")
 	}
 }
 
 func TestSelectCloudOnlyForbidsLocal(t *testing.T) {
 	local := stubLLM{"local"}
-	if _, err := Select(locus.CloudOnly, RoleMain, Providers{Local: local}); err == nil {
+	if _, err := Select(locus.CloudOnly, RoleMain, Providers{Open: local}); err == nil {
 		t.Fatal("cloud_only with only local available must error, never run local")
 	}
 }
@@ -63,7 +63,7 @@ func TestSelectCloudOnlyForbidsLocal(t *testing.T) {
 func TestSelectMainFallbackNotice(t *testing.T) {
 	cloud := stubLLM{"cloud"}
 	// local_primary, no local available, RoleMain -> fall back to cloud, notice says "main".
-	sel, err := Select(locus.LocalPrimary, RoleMain, Providers{Cloud: cloud, Local: nil})
+	sel, err := Select(locus.OpenPrimary, RoleMain, Providers{Cloud: cloud, Open: nil})
 	if err != nil {
 		t.Fatal(err)
 	}

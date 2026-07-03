@@ -1478,7 +1478,7 @@ func TestAnalyzeAllWithPrefetch_SkipsThinContent(t *testing.T) {
 
 func TestFilterByKeywordOverlap(t *testing.T) {
 	pubs := []Publication{
-		{Title: "Local LLM inference performance on Apple Silicon"},
+		{Title: "Open-Weight LLM inference performance on Apple Silicon"},
 		{Title: "Best restaurants in downtown Portland"},
 		{Title: "Ollama: running large language models locally"},
 		{Title: "Weather forecast for next week"},

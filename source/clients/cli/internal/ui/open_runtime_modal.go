@@ -22,7 +22,7 @@ import (
 )
 
 // runtimeModalState walks a small state machine driven by user keypress and
-// the InstallLocalRuntime stream.
+// the InstallOpenRuntime stream.
 type runtimeModalState int
 
 const (
@@ -33,7 +33,7 @@ const (
 	// hidden and we accumulate log lines.
 	runtimeModalRunning
 	// runtimeModalDone means the install completed successfully and the
-	// LocalRuntimeStatusChanged event flipped ok=true. Auto-dismisses on
+	// OpenRuntimeStatusChanged event flipped ok=true. Auto-dismisses on
 	// the next key.
 	runtimeModalDone
 	// runtimeModalFailed means the install RPC returned an error (nonzero
@@ -48,15 +48,15 @@ const (
 	runtimeModalNeedsModel
 )
 
-// localRuntimeInstallModal owns the modal's transient state — the reason we
+// openRuntimeInstallModal owns the modal's transient state — the reason we
 // opened (a snapshot of the status event), the state machine, buffered log
 // lines, and the terminal error if any. Kept separate from Model so tests
 // can exercise state transitions without wiring the full TUI.
-type localRuntimeInstallModal struct {
+type openRuntimeInstallModal struct {
 	// status is the snapshot that opened the modal; it's what we render at
 	// the top ("llama-server not installed" etc). Not updated live — we
 	// close on success rather than mutating in place.
-	status agentclient.LocalRuntimeStatus
+	status agentclient.OpenRuntimeStatus
 	// state is the current step in the install lifecycle.
 	state runtimeModalState
 	// logLines accumulates streamed install output — one entry per line.
@@ -72,32 +72,32 @@ type localRuntimeInstallModal struct {
 	cancel context.CancelFunc
 }
 
-// newLocalRuntimeInstallModal opens the modal in idle state carrying the
+// newOpenRuntimeInstallModal opens the modal in idle state carrying the
 // status snapshot that triggered it. Caller stashes the returned pointer on
 // Model and re-renders.
-func newLocalRuntimeInstallModal(st agentclient.LocalRuntimeStatus) *localRuntimeInstallModal {
-	return &localRuntimeInstallModal{status: st, state: runtimeModalIdle}
+func newOpenRuntimeInstallModal(st agentclient.OpenRuntimeStatus) *openRuntimeInstallModal {
+	return &openRuntimeInstallModal{status: st, state: runtimeModalIdle}
 }
 
-// openLocalRuntimeInstallModalMsg is emitted from the settings page when the
+// openOpenRuntimeInstallModalMsg is emitted from the settings page when the
 // user tries to switch to a runtime that isn't ready. Carries the status
 // snapshot to render in the idle state, plus the runtime id whose switch is
 // queued to fire after a successful install. If the user cancels, the
 // pending switch is dropped — no UpdateConfig is dispatched, and the
 // runtime toggle reverts to whatever the server currently has.
-type openLocalRuntimeInstallModalMsg struct {
-	status  agentclient.LocalRuntimeStatus
+type openOpenRuntimeInstallModalMsg struct {
+	status  agentclient.OpenRuntimeStatus
 	pending string // runtime id to switch to on install success ("" = none)
 }
 
 // appendLog records one line of streamed install output. Trimming trailing
 // whitespace keeps the render tidy even if the subprocess emits CR+LF.
-func (mo *localRuntimeInstallModal) appendLog(line string) {
+func (mo *openRuntimeInstallModal) appendLog(line string) {
 	mo.logLines = append(mo.logLines, strings.TrimRight(line, " \r\n\t"))
 }
 
 // setFailed transitions to the failed state carrying an error message.
-func (mo *localRuntimeInstallModal) setFailed(msg string) {
+func (mo *openRuntimeInstallModal) setFailed(msg string) {
 	mo.state = runtimeModalFailed
 	mo.errMsg = msg
 }
@@ -105,7 +105,7 @@ func (mo *localRuntimeInstallModal) setFailed(msg string) {
 // setNeedsModel transitions to the "install succeeded, but pick a model"
 // state. Retry is disabled here — retrying the install can't fix a
 // missing / ambiguous GGUF selection.
-func (mo *localRuntimeInstallModal) setNeedsModel(msg string) {
+func (mo *openRuntimeInstallModal) setNeedsModel(msg string) {
 	mo.state = runtimeModalNeedsModel
 	mo.errMsg = msg
 }
@@ -123,7 +123,7 @@ func installErrorIsMissingModel(errMsg string) bool {
 // View renders the modal as a bordered box sized to fit the given terminal
 // frame. Width caps at 80 cells to keep the box readable; height caps at
 // max(20, frameHeight-6) to reserve room for header + prompt.
-func (mo *localRuntimeInstallModal) View(styles theme.Styles, palette theme.Palette, frameW, frameH int) string {
+func (mo *openRuntimeInstallModal) View(styles theme.Styles, palette theme.Palette, frameW, frameH int) string {
 	// Sizing.
 	boxW := 80
 	if frameW-4 < boxW {
@@ -163,7 +163,7 @@ func (mo *localRuntimeInstallModal) View(styles theme.Styles, palette theme.Pale
 
 // modalDim returns the (width, height) the last-View'd box would occupy in
 // the frame. Used by the compositor to center the modal.
-func (mo *localRuntimeInstallModal) modalDim(frameW, frameH int) (int, int) {
+func (mo *openRuntimeInstallModal) modalDim(frameW, frameH int) (int, int) {
 	// Match View sizing exactly.
 	boxW := 80
 	if frameW-4 < boxW {
@@ -182,7 +182,7 @@ func (mo *localRuntimeInstallModal) modalDim(frameW, frameH int) (int, int) {
 	return boxW, boxH
 }
 
-func (mo *localRuntimeInstallModal) renderHeader(styles theme.Styles) string {
+func (mo *openRuntimeInstallModal) renderHeader(styles theme.Styles) string {
 	var title string
 	switch mo.state {
 	case runtimeModalIdle:
@@ -206,7 +206,7 @@ func (mo *localRuntimeInstallModal) renderHeader(styles theme.Styles) string {
 	return styles.Primary.Bold(true).Render(title)
 }
 
-func (mo *localRuntimeInstallModal) renderBody(styles theme.Styles, w int) string {
+func (mo *openRuntimeInstallModal) renderBody(styles theme.Styles, w int) string {
 	msg := strings.TrimSpace(mo.status.Message)
 	if msg == "" {
 		msg = "Detection couldn't find the required prerequisites."
@@ -225,7 +225,7 @@ func (mo *localRuntimeInstallModal) renderBody(styles theme.Styles, w int) strin
 	return body + "\n" + label + "\n" + block
 }
 
-func (mo *localRuntimeInstallModal) renderLogs(styles theme.Styles, w, h int) string {
+func (mo *openRuntimeInstallModal) renderLogs(styles theme.Styles, w, h int) string {
 	if mo.state == runtimeModalIdle {
 		return styles.Muted.Render("(logs will appear here once install starts)")
 	}
@@ -253,7 +253,7 @@ func (mo *localRuntimeInstallModal) renderLogs(styles theme.Styles, w, h int) st
 	return styles.Muted.Render(strings.Join(rendered, "\n"))
 }
 
-func (mo *localRuntimeInstallModal) renderActions(styles theme.Styles) string {
+func (mo *openRuntimeInstallModal) renderActions(styles theme.Styles) string {
 	switch mo.state {
 	case runtimeModalIdle:
 		primary := styles.Success.Bold(true).Render("[Enter] Install now")
@@ -302,22 +302,22 @@ type runtimeInstallDoneMsg struct {
 	err string
 }
 
-// handleLocalRuntimeModalKey resolves a key while the install modal is
+// handleOpenRuntimeModalKey resolves a key while the install modal is
 // open. Returns the new Model + any cmd. Modal-active state is the only
 // place these bindings apply — global key handling stays untouched.
-func (m Model) handleLocalRuntimeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
-	if m.localRuntimeModal == nil {
+func (m Model) handleOpenRuntimeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	if m.openRuntimeModal == nil {
 		return m, nil
 	}
 	key := msg.String()
-	switch m.localRuntimeModal.state {
+	switch m.openRuntimeModal.state {
 	case runtimeModalIdle:
 		if key == "enter" {
-			m.localRuntimeModal.state = runtimeModalRunning
-			return m, startLocalRuntimeInstallCmd(m.agent, "llama_server")
+			m.openRuntimeModal.state = runtimeModalRunning
+			return m, startOpenRuntimeInstallCmd(m.agent, "llama_server")
 		}
 		if key == "esc" || key == "q" {
-			m.localRuntimeModal = nil
+			m.openRuntimeModal = nil
 			m.pendingRuntimeSwitch = "" // user rejected the switch
 		}
 	case runtimeModalRunning:
@@ -326,52 +326,52 @@ func (m Model) handleLocalRuntimeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) 
 			// when the modal closes; the server-side subprocess is
 			// killed and the drain loop exits. The queued switch is
 			// dropped — the runtime isn't ready.
-			if m.localRuntimeModal.cancel != nil {
-				m.localRuntimeModal.cancel()
+			if m.openRuntimeModal.cancel != nil {
+				m.openRuntimeModal.cancel()
 			}
-			m.localRuntimeModal = nil
+			m.openRuntimeModal = nil
 			m.pendingRuntimeSwitch = ""
 		}
 	case runtimeModalDone:
 		// Any key dismisses. pendingRuntimeSwitch was already cleared
 		// by runtimeInstallDoneMsg (either dispatched or dropped).
-		m.localRuntimeModal = nil
+		m.openRuntimeModal = nil
 	case runtimeModalFailed:
 		if key == "enter" {
-			m.localRuntimeModal.state = runtimeModalRunning
-			m.localRuntimeModal.errMsg = ""
-			m.localRuntimeModal.logLines = nil
-			return m, startLocalRuntimeInstallCmd(m.agent, "llama_server")
+			m.openRuntimeModal.state = runtimeModalRunning
+			m.openRuntimeModal.errMsg = ""
+			m.openRuntimeModal.logLines = nil
+			return m, startOpenRuntimeInstallCmd(m.agent, "llama_server")
 		}
 		if key == "esc" || key == "q" {
-			m.localRuntimeModal = nil
+			m.openRuntimeModal = nil
 			m.pendingRuntimeSwitch = "" // failed install; drop the queued switch too
 		}
 	case runtimeModalNeedsModel:
 		// Any key dismisses — there's no in-modal recovery for a
 		// missing GGUF; the user resolves it out-of-band and reopens.
-		m.localRuntimeModal = nil
+		m.openRuntimeModal = nil
 		m.pendingRuntimeSwitch = ""
 	}
 	return m, nil
 }
 
-// dispatchLocalRuntimeSwitch fires an UpdateConfig(local-runtime=runtime) in
+// dispatchOpenRuntimeSwitch fires an UpdateConfig(local-runtime=runtime) in
 // the background after a successful install. Errors are swallowed — the
-// server broadcasts its own ConfigChanged / LocalRuntimeStatusChanged events
+// server broadcasts its own ConfigChanged / OpenRuntimeStatusChanged events
 // so any status change becomes visible via the normal channels without a
 // custom msg round-trip.
-func dispatchLocalRuntimeSwitch(ag *agentclient.Client, runtime string) tea.Cmd {
+func dispatchOpenRuntimeSwitch(ag *agentclient.Client, runtime string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_, _ = ag.UpdateConfig(ctx, agentclient.ConfigUpdate{LocalRuntime: runtime})
+		_, _ = ag.UpdateConfig(ctx, agentclient.ConfigUpdate{OpenRuntime: runtime})
 		return nil
 	}
 }
 
 // runtimeInstallStartedMsg is the first message emitted by
-// startLocalRuntimeInstallCmd — it wires the RPC's cancel func back to
+// startOpenRuntimeInstallCmd — it wires the RPC's cancel func back to
 // Model so Esc-during-running can abort the subprocess, and it kicks off
 // the drain loop. err is set when opening the stream itself failed.
 type runtimeInstallStartedMsg struct {
@@ -380,16 +380,16 @@ type runtimeInstallStartedMsg struct {
 	err    error
 }
 
-// startLocalRuntimeInstallCmd opens the InstallLocalRuntime streaming RPC
+// startOpenRuntimeInstallCmd opens the InstallOpenRuntime streaming RPC
 // and returns a bubbletea command whose first message is a
 // runtimeInstallStartedMsg carrying (a) the cancel func Model must stash on
 // the modal, and (b) a drain cmd that emits one InstallProgress frame per
 // tick and re-arms itself until the stream terminates. Runtime is the
 // server-side runtime id ("llama_server" for now).
-func startLocalRuntimeInstallCmd(ag *agentclient.Client, runtime string) tea.Cmd {
+func startOpenRuntimeInstallCmd(ag *agentclient.Client, runtime string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithCancel(context.Background())
-		ch, err := ag.InstallLocalRuntime(ctx, runtime)
+		ch, err := ag.InstallOpenRuntime(ctx, runtime)
 		if err != nil {
 			cancel()
 			return runtimeInstallStartedMsg{err: err}

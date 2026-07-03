@@ -236,11 +236,11 @@ func (m *mockAgentClient) RemoveCloudProfile(ctx context.Context, in *proto.Remo
 	return &proto.RemoveCloudProfileResponse{Ok: true}, nil
 }
 
-func (m *mockAgentClient) GetLocalRuntimeStatus(ctx context.Context, in *proto.GetLocalRuntimeStatusRequest, opts ...grpc.CallOption) (*proto.GetLocalRuntimeStatusResponse, error) {
-	return &proto.GetLocalRuntimeStatusResponse{}, nil
+func (m *mockAgentClient) GetOpenRuntimeStatus(ctx context.Context, in *proto.GetOpenRuntimeStatusRequest, opts ...grpc.CallOption) (*proto.GetOpenRuntimeStatusResponse, error) {
+	return &proto.GetOpenRuntimeStatusResponse{}, nil
 }
 
-func (m *mockAgentClient) InstallLocalRuntime(ctx context.Context, in *proto.InstallLocalRuntimeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[proto.InstallProgress], error) {
+func (m *mockAgentClient) InstallOpenRuntime(ctx context.Context, in *proto.InstallOpenRuntimeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[proto.InstallProgress], error) {
 	return nil, nil
 }
 
@@ -515,7 +515,7 @@ func TestNewServer_RegistersConfigTool(t *testing.T) {
 	}
 }
 
-func TestCercanoConfig_SetLocalModel(t *testing.T) {
+func TestCercanoConfig_SetOpenModel(t *testing.T) {
 	mock := &mockAgentClient{
 		configResp: &proto.UpdateConfigResponse{
 			Success: true,
@@ -545,8 +545,8 @@ func TestCercanoConfig_SetLocalModel(t *testing.T) {
 	if mock.lastConfigReq == nil {
 		t.Fatal("expected UpdateConfig gRPC call")
 	}
-	if mock.lastConfigReq.LocalModel != "GLM-4.7-Flash" {
-		t.Errorf("expected local_model 'GLM-4.7-Flash', got %q", mock.lastConfigReq.LocalModel)
+	if mock.lastConfigReq.OpenModel != "GLM-4.7-Flash" {
+		t.Errorf("expected local_model 'GLM-4.7-Flash', got %q", mock.lastConfigReq.OpenModel)
 	}
 
 	text := result.Content[0].(*gomcp.TextContent).Text
@@ -555,7 +555,7 @@ func TestCercanoConfig_SetLocalModel(t *testing.T) {
 	}
 }
 
-func TestCercanoConfig_SetLocalRuntime(t *testing.T) {
+func TestCercanoConfig_SetOpenRuntime(t *testing.T) {
 	mock := &mockAgentClient{
 		configResp: &proto.UpdateConfigResponse{
 			Success: true,
@@ -585,8 +585,8 @@ func TestCercanoConfig_SetLocalRuntime(t *testing.T) {
 	if mock.lastConfigReq == nil {
 		t.Fatal("expected UpdateConfig gRPC call")
 	}
-	if mock.lastConfigReq.LocalRuntime != "llama_server" {
-		t.Errorf("expected local_runtime 'llama_server', got %q", mock.lastConfigReq.LocalRuntime)
+	if mock.lastConfigReq.OpenRuntime != "llama_server" {
+		t.Errorf("expected local_runtime 'llama_server', got %q", mock.lastConfigReq.OpenRuntime)
 	}
 
 	text := result.Content[0].(*gomcp.TextContent).Text

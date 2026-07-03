@@ -45,8 +45,8 @@ type CloudProfile struct {
 // always read through the active profile (see Server.activeCloudModel).
 type Config struct {
 	OllamaURL          string            `yaml:"ollama_url"`
-	LocalRuntime       string            `yaml:"local_runtime"`
-	LocalModel         string            `yaml:"local_model"`
+	OpenRuntime       string            `yaml:"open_runtime"`
+	OpenModel         string            `yaml:"open_model"`
 	EmbeddingModel     string            `yaml:"embedding_model"`
 	CloudProvider      string            `yaml:"cloud_provider,omitempty"`
 	CloudModel         string            `yaml:"cloud_model,omitempty"`
@@ -54,7 +54,7 @@ type Config struct {
 	CloudBaseURL       string            `yaml:"cloud_base_url,omitempty"`
 	CloudProfiles      []CloudProfile    `yaml:"cloud_profiles"`
 	ActiveCloudProfile string            `yaml:"active_cloud_profile"`
-	LocusMode          string            `yaml:"locus_mode"` // cloud_only|cloud_primary|local_primary|local_only
+	LocusMode          string            `yaml:"locus_mode"` // cloud_only|cloud_primary|open_primary|open_only
 	Port               string            `yaml:"port"`
 	LlamaServer        LlamaServerConfig `yaml:"llama_server"`
 	Compaction         CompactionConfig  `yaml:"compaction"`
@@ -87,7 +87,7 @@ type CompactionConfig struct {
 	// real conversation).
 	LossyToolElision bool `yaml:"lossy_tool_elision"`
 	// SummarizerModel overrides the local model used for compaction
-	// summarization. Empty falls back to LocalModel (the main-loop model).
+	// summarization. Empty falls back to OpenModel (the main-loop model).
 	// Useful because a code-focused model (qwen3-coder) tends to fabricate
 	// when asked to write extractive summaries; a text-focused model
 	// (phi4, llama3.1) grounds better. Not applied to the main tool loop.
@@ -159,10 +159,10 @@ func (r *RestartConfig) UnmarshalYAML(value *yaml.Node) error {
 func Defaults() Config {
 	return Config{
 		OllamaURL:      "http://localhost:11434",
-		LocalRuntime:   "ollama",
-		LocalModel:     "qwen3-coder",
+		OpenRuntime:   "ollama",
+		OpenModel:     "qwen3-coder",
 		EmbeddingModel: "nomic-embed-text",
-		LocusMode:      "local_primary",
+		LocusMode:      "open_primary",
 		Port:           "50052",
 		LlamaServer: LlamaServerConfig{
 			ModelDirs:        []string{"~/.cercano/models"},
@@ -270,16 +270,23 @@ func Load(path string) (Config, error) {
 			return cfg, fmt.Errorf("failed to parse config file %q: %w", path, err)
 		}
 
+		// Backward-compat: accept the pre-rename `local_model` /
+		// `local_runtime` YAML keys (and `locus_mode` values
+		// `local_primary` / `local_only`). Prefer the new `open_*`
+		// keys when both are present. Save() only writes the new
+		// spelling, so this shim is read-only.
+		applyLegacyLocalKeys(data, &cfg)
+
 		// Re-apply defaults for any fields not set in the file
 		defaults := Defaults()
 		if cfg.OllamaURL == "" {
 			cfg.OllamaURL = defaults.OllamaURL
 		}
-		if cfg.LocalRuntime == "" {
-			cfg.LocalRuntime = defaults.LocalRuntime
+		if cfg.OpenRuntime == "" {
+			cfg.OpenRuntime = defaults.OpenRuntime
 		}
-		if cfg.LocalModel == "" {
-			cfg.LocalModel = defaults.LocalModel
+		if cfg.OpenModel == "" {
+			cfg.OpenModel = defaults.OpenModel
 		}
 		if cfg.EmbeddingModel == "" {
 			cfg.EmbeddingModel = defaults.EmbeddingModel
@@ -294,6 +301,38 @@ func Load(path string) (Config, error) {
 	migrateCloudProfiles(&cfg)
 	autoDetectMeridianRoute(&cfg)
 	return cfg, nil
+}
+
+// applyLegacyLocalKeys parses the raw YAML for the pre-rename `local_model`
+// and `local_runtime` keys, and normalizes `locus_mode` values
+// `local_primary` / `local_only` to their `open_*` equivalents.
+//
+// The check has to look at raw YAML presence (not the merged Config value)
+// because Defaults() pre-populates OpenModel/OpenRuntime, so we can't
+// distinguish "YAML didn't set it, so defaults remain" from "YAML set it to
+// the same value as defaults." Presence wins: if the file has a legacy key
+// and no new-name key, we use the legacy value.
+//
+// Save() emits only the new spelling; this shim is a one-way read migration.
+func applyLegacyLocalKeys(data []byte, cfg *Config) {
+	var raw map[string]any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return
+	}
+	_, hasOpenModel := raw["open_model"]
+	if legacy, ok := raw["local_model"].(string); ok && !hasOpenModel && legacy != "" {
+		cfg.OpenModel = legacy
+	}
+	_, hasOpenRuntime := raw["open_runtime"]
+	if legacy, ok := raw["local_runtime"].(string); ok && !hasOpenRuntime && legacy != "" {
+		cfg.OpenRuntime = legacy
+	}
+	switch cfg.LocusMode {
+	case "local_primary":
+		cfg.LocusMode = "open_primary"
+	case "local_only":
+		cfg.LocusMode = "open_only"
+	}
 }
 
 func applyLlamaServerDefaults(cfg *LlamaServerConfig, defaults LlamaServerConfig) {
@@ -329,11 +368,20 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("OLLAMA_URL"); v != "" {
 		cfg.OllamaURL = v
 	}
+	// CERCANO_OPEN_* is the primary naming; CERCANO_LOCAL_* is accepted for
+	// backward compat with earlier releases. When both are set the new
+	// spelling wins.
 	if v := os.Getenv("CERCANO_LOCAL_MODEL"); v != "" {
-		cfg.LocalModel = v
+		cfg.OpenModel = v
+	}
+	if v := os.Getenv("CERCANO_OPEN_MODEL"); v != "" {
+		cfg.OpenModel = v
 	}
 	if v := os.Getenv("CERCANO_LOCAL_RUNTIME"); v != "" {
-		cfg.LocalRuntime = v
+		cfg.OpenRuntime = v
+	}
+	if v := os.Getenv("CERCANO_OPEN_RUNTIME"); v != "" {
+		cfg.OpenRuntime = v
 	}
 	if v := os.Getenv("CERCANO_EMBEDDING_MODEL"); v != "" {
 		cfg.EmbeddingModel = v

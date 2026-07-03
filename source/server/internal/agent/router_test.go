@@ -163,7 +163,7 @@ providers:
 	}
 	tmpFile.Close()
 
-	mockLocal := &MockModelProvider{name: "LocalModel"}
+	mockLocal := &MockModelProvider{name: "OpenModel"}
 	mockCloud := &MockModelProvider{name: "CloudModel"}
 
 	// Mock responses for initialization
@@ -192,7 +192,7 @@ providers:
 		{
 			name:               "Close to local",
 			input:              "do something local",
-			expectedModel:      "LocalModel",
+			expectedModel:      "OpenModel",
 			mockOllamaResponse: `{"embedding": [0.9, 0.1]}`,
 		},
 		{
@@ -368,7 +368,7 @@ providers:
 	tmpFile.Write([]byte(protoContent))
 	tmpFile.Close()
 
-	mockLocal := &MockModelProvider{name: "LocalModel"}
+	mockLocal := &MockModelProvider{name: "OpenModel"}
 	mockCloud := &MockModelProvider{name: "CloudModel"}
 
 	// Local prototypes cluster near [1,0], cloud near [0,1]
@@ -396,8 +396,8 @@ providers:
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	if provider.Name() != "LocalModel" {
-		t.Errorf("Expected LocalModel, got %s", provider.Name())
+	if provider.Name() != "OpenModel" {
+		t.Errorf("Expected OpenModel, got %s", provider.Name())
 	}
 }
 
@@ -667,7 +667,7 @@ providers:
 	tmpFile.Write([]byte(protoContent))
 	tmpFile.Close()
 
-	mockLocal := &MockModelProvider{name: "LocalModel"}
+	mockLocal := &MockModelProvider{name: "OpenModel"}
 	mockCloud := &MockModelProvider{name: "MockCloud"}
 
 	mockResponses := map[string]string{

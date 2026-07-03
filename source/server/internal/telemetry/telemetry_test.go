@@ -105,8 +105,8 @@ func TestSQLiteStore_RecordAndQuery(t *testing.T) {
 	if stats.TotalOutputTokens != 150 {
 		t.Errorf("expected 150 output tokens, got %d", stats.TotalOutputTokens)
 	}
-	if stats.LocalTokensSaved != 850 {
-		t.Errorf("expected 850 local tokens saved, got %d", stats.LocalTokensSaved)
+	if stats.OpenTokensSaved != 850 {
+		t.Errorf("expected 850 local tokens saved, got %d", stats.OpenTokensSaved)
 	}
 }
 
@@ -308,8 +308,8 @@ func TestStats_ComputeSavings(t *testing.T) {
 		t.Fatalf("GetStats failed: %v", err)
 	}
 	// 800 local / (800 local + 200 cloud) = 80%
-	if stats.LocalPercentage < 79.9 || stats.LocalPercentage > 80.1 {
-		t.Errorf("expected ~80%% local, got %.1f%%", stats.LocalPercentage)
+	if stats.OpenPercentage < 79.9 || stats.OpenPercentage > 80.1 {
+		t.Errorf("expected ~80%% local, got %.1f%%", stats.OpenPercentage)
 	}
 }
 

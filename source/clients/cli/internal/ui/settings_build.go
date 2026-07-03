@@ -91,11 +91,11 @@ func accentColorOptions() []form.Option {
 
 func buildSettingsSections(cfg *agentclient.Config, mode, accentToken string) []form.Section {
 	return []form.Section{
-		{Title: "Local Model", Fields: []form.Field{
+		{Title: "Open Model", Fields: []form.Field{
 			form.NewSelect("local-runtime", "local-runtime", []form.Option{
 				{Label: "ollama", Value: "ollama"}, {Label: "embedded llama-server", Value: "llama_server"},
-			}, cfg.LocalRuntime),
-			form.NewText("local-model", "local-model", cfg.LocalModel, ""),
+			}, cfg.OpenRuntime),
+			form.NewText("local-model", "local-model", cfg.OpenModel, ""),
 			form.NewText("ollama-url", "ollama-url", cfg.OllamaURL, ""),
 			form.NewReadOnly("embedding-model", "embedding-model", cfg.EmbeddingModel, "(read-only)"),
 		}},
@@ -103,8 +103,8 @@ func buildSettingsSections(cfg *agentclient.Config, mode, accentToken string) []
 			form.NewSelect("locus-mode", "locus-mode", []form.Option{
 				{Label: "cloud_only", Value: "cloud_only"},
 				{Label: "cloud_primary", Value: "cloud_primary"},
-				{Label: "local_primary", Value: "local_primary"},
-				{Label: "local_only", Value: "local_only"},
+				{Label: "open_primary", Value: "open_primary"},
+				{Label: "open_only", Value: "open_only"},
 			}, cfg.LocusMode),
 		}},
 		{Title: "Permissions", Fields: []form.Field{
@@ -165,9 +165,9 @@ func classifyCommit(key, value string, currentChecks []string) commitAction {
 	var u agentclient.ConfigUpdate
 	switch key {
 	case "local-runtime":
-		u.LocalRuntime = value
+		u.OpenRuntime = value
 	case "local-model":
-		u.LocalModel = value
+		u.OpenModel = value
 	case "ollama-url":
 		u.OllamaURL = value
 	case "locus-mode":

@@ -199,8 +199,8 @@ func (c *Client) Close() error {
 // Config is the current runtime config reported by the agent.
 type Config struct {
 	OllamaURL             string
-	LocalRuntime          string
-	LocalModel            string
+	OpenRuntime          string
+	OpenModel            string
 	EmbeddingModel        string
 	CloudProvider         string
 	CloudModel            string
@@ -237,8 +237,8 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 	}
 	return &Config{
 		OllamaURL:              resp.GetOllamaUrl(),
-		LocalRuntime:           resp.GetLocalRuntime(),
-		LocalModel:             resp.GetLocalModel(),
+		OpenRuntime:           resp.GetOpenRuntime(),
+		OpenModel:             resp.GetOpenModel(),
 		EmbeddingModel:         resp.GetEmbeddingModel(),
 		CloudProvider:          resp.GetCloudProvider(),
 		CloudModel:             resp.GetCloudModel(),
@@ -266,8 +266,8 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 // proxy handles auth.
 type ConfigUpdate struct {
 	OllamaURL             string
-	LocalRuntime          string
-	LocalModel            string
+	OpenRuntime          string
+	OpenModel            string
 	CloudProvider         string
 	CloudModel            string
 	CloudAPIKey           string
@@ -817,7 +817,7 @@ func (c *Client) StreamRuntimeLogs(ctx context.Context, tail int, source string)
 type AgentEvent struct {
 	Mode               string              // populated by PermissionModeChanged events
 	MeridianStatus     *MeridianStatus     // populated by MeridianStatusChanged events
-	LocalRuntimeStatus *LocalRuntimeStatus // populated by LocalRuntimeStatusChanged events
+	OpenRuntimeStatus *OpenRuntimeStatus // populated by OpenRuntimeStatusChanged events
 	Err                error
 }
 
@@ -831,11 +831,11 @@ type MeridianStatus struct {
 	MissingDeps []string
 }
 
-// LocalRuntimeStatus mirrors proto.LocalRuntimeStatus in the client SDK.
+// OpenRuntimeStatus mirrors proto.OpenRuntimeStatus in the client SDK.
 // Ok=true means the runtime is ready; ok=false + Missing tells the CLI what
 // recovery flow to offer (install, model picker). SuggestedCommand is the
 // shell command that would resolve Missing (e.g. "brew install llama.cpp").
-type LocalRuntimeStatus struct {
+type OpenRuntimeStatus struct {
 	Ok               bool
 	Runtime          string
 	Missing          string
@@ -928,8 +928,8 @@ func (c *Client) drainSubscribeEvents(ctx context.Context, stream proto.Agent_Su
 			out <- AgentEvent{MeridianStatus: meridianStatusFromProto(ms.GetStatus())}
 			continue
 		}
-		if lr := ev.GetLocalRuntimeStatusChanged(); lr != nil {
-			out <- AgentEvent{LocalRuntimeStatus: localRuntimeStatusFromProto(lr.GetStatus())}
+		if lr := ev.GetOpenRuntimeStatusChanged(); lr != nil {
+			out <- AgentEvent{OpenRuntimeStatus: openRuntimeStatusFromProto(lr.GetStatus())}
 			continue
 		}
 		// Unknown event types are silently dropped — clients that don't
@@ -950,13 +950,13 @@ func meridianStatusFromProto(p *proto.MeridianStatus) *MeridianStatus {
 	}
 }
 
-// localRuntimeStatusFromProto converts the wire proto into the client-side
+// openRuntimeStatusFromProto converts the wire proto into the client-side
 // struct. Nil-safe so callers can invoke unconditionally.
-func localRuntimeStatusFromProto(p *proto.LocalRuntimeStatus) *LocalRuntimeStatus {
+func openRuntimeStatusFromProto(p *proto.OpenRuntimeStatus) *OpenRuntimeStatus {
 	if p == nil {
 		return nil
 	}
-	return &LocalRuntimeStatus{
+	return &OpenRuntimeStatus{
 		Ok:               p.GetOk(),
 		Runtime:          p.GetRuntime(),
 		Missing:          p.GetMissing(),
@@ -967,7 +967,7 @@ func localRuntimeStatusFromProto(p *proto.LocalRuntimeStatus) *LocalRuntimeStatu
 	}
 }
 
-// InstallProgress is one frame from an InstallLocalRuntime stream. Frames
+// InstallProgress is one frame from an InstallOpenRuntime stream. Frames
 // with Done=false carry a Line of subprocess output. The stream terminates
 // with a single Done=true frame carrying Ok+Error (Err populated only when
 // the stream itself failed, distinct from a subprocess non-zero exit).
@@ -979,26 +979,26 @@ type InstallProgress struct {
 	Err   error
 }
 
-// GetLocalRuntimeStatus fetches the local-runtime detection snapshot. When
+// GetOpenRuntimeStatus fetches the local-runtime detection snapshot. When
 // runtime is empty, the server reports against its currently-selected
 // runtime (used by the CLI startup fetch that renders the chip). When
 // runtime is set explicitly ("ollama" | "llama_server"), the server probes
 // THAT runtime — used by the settings-page gate to check whether a switch
 // is safe before dispatching UpdateConfig.
-func (c *Client) GetLocalRuntimeStatus(ctx context.Context, runtime string) (*LocalRuntimeStatus, error) {
-	resp, err := c.agent.GetLocalRuntimeStatus(ctx, &proto.GetLocalRuntimeStatusRequest{Runtime: runtime})
+func (c *Client) GetOpenRuntimeStatus(ctx context.Context, runtime string) (*OpenRuntimeStatus, error) {
+	resp, err := c.agent.GetOpenRuntimeStatus(ctx, &proto.GetOpenRuntimeStatusRequest{Runtime: runtime})
 	if err != nil {
 		return nil, err
 	}
-	return localRuntimeStatusFromProto(resp.GetStatus()), nil
+	return openRuntimeStatusFromProto(resp.GetStatus()), nil
 }
 
-// InstallLocalRuntime opens the InstallLocalRuntime streaming RPC for the
+// InstallOpenRuntime opens the InstallOpenRuntime streaming RPC for the
 // given runtime and returns a channel of progress frames. The channel closes
 // after the terminal Done=true frame (or after a stream error). Cancelling
 // ctx kills the install subprocess server-side.
-func (c *Client) InstallLocalRuntime(ctx context.Context, runtime string) (<-chan InstallProgress, error) {
-	stream, err := c.agent.InstallLocalRuntime(ctx, &proto.InstallLocalRuntimeRequest{Runtime: runtime})
+func (c *Client) InstallOpenRuntime(ctx context.Context, runtime string) (<-chan InstallProgress, error) {
+	stream, err := c.agent.InstallOpenRuntime(ctx, &proto.InstallOpenRuntimeRequest{Runtime: runtime})
 	if err != nil {
 		return nil, err
 	}
@@ -1033,8 +1033,8 @@ func (c *Client) InstallLocalRuntime(ctx context.Context, runtime string) (<-cha
 func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, error) {
 	resp, err := c.agent.UpdateConfig(ctx, &proto.UpdateConfigRequest{
 		OllamaUrl:              u.OllamaURL,
-		LocalRuntime:           u.LocalRuntime,
-		LocalModel:             u.LocalModel,
+		OpenRuntime:           u.OpenRuntime,
+		OpenModel:             u.OpenModel,
 		CloudProvider:          u.CloudProvider,
 		CloudModel:             u.CloudModel,
 		CloudApiKey:            u.CloudAPIKey,

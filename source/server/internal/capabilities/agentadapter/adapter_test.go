@@ -7,6 +7,7 @@ import (
 
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/capabilities"
+	"cercano/source/server/internal/dispatch"
 )
 
 type echoCap struct{}
@@ -21,7 +22,7 @@ func (echoCap) Execute(_ context.Context, call *capabilities.Call) (*capabilitie
 }
 
 func TestAsToolAppliesAliasAndTier(t *testing.T) {
-	tool := AsTool(echoCap{}, "Read")
+	tool := AsTool(echoCap{}, "Read", capabilities.Services{})
 	if tool.Name() != "Read" {
 		t.Fatalf("display name = %q, want Read", tool.Name())
 	}
@@ -73,5 +74,59 @@ func TestBuildAgentRegistrySkipsSynonymCollidingWithPrimary(t *testing.T) {
 	)
 	if _, ok := ar.Get("Read"); !ok {
 		t.Fatal("primary display 'Read' missing")
+	}
+}
+
+// spyCap records the Call it received so tests can assert Services plumbing.
+type spyCap struct{ got *capabilities.Call }
+
+func (*spyCap) Name() string                { return "spy" }
+func (*spyCap) Description() string         { return "spy" }
+func (*spyCap) Tier() capabilities.Tier     { return capabilities.TierR }
+func (*spyCap) Schema() capabilities.Schema { return capabilities.Schema(`{"type":"object"}`) }
+func (*spyCap) Surfaces() capabilities.Surface {
+	return capabilities.SurfaceAgent
+}
+func (s *spyCap) Execute(_ context.Context, call *capabilities.Call) (*capabilities.Result, error) {
+	s.got = call
+	return capabilities.NewTextResult("ok"), nil
+}
+
+// TestBuildAgentRegistryPlumbsServices guards against regressing the bug where
+// capTool.Execute built a Call without Svc, silently zeroing Services and
+// breaking dispatch/workflow, review, and the coproc capabilities.
+func TestBuildAgentRegistryPlumbsServices(t *testing.T) {
+	sentinel := make(chan struct{}, 1)
+	svc := capabilities.Services{
+		Dispatch: func(context.Context, dispatch.Spec) (dispatch.Result, error) {
+			sentinel <- struct{}{}
+			return dispatch.Result{}, nil
+		},
+	}
+	spy := &spyCap{}
+	reg := capabilities.NewRegistry(svc)
+	reg.MustRegister(spy)
+	ar := BuildAgentRegistry(reg, nil, nil)
+
+	tool, ok := ar.Get("spy")
+	if !ok {
+		t.Fatal("spy tool missing")
+	}
+	if _, err := tool.Execute(context.Background(), json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if spy.got == nil {
+		t.Fatal("capability did not record the Call")
+	}
+	if spy.got.Svc.Dispatch == nil {
+		t.Fatal("Services.Dispatch was nil at Execute; agentadapter is dropping Services")
+	}
+	if _, err := spy.got.Svc.Dispatch(context.Background(), dispatch.Spec{}); err != nil {
+		t.Fatalf("Dispatch closure: %v", err)
+	}
+	select {
+	case <-sentinel:
+	default:
+		t.Fatal("registry's Dispatch closure was not the one seen by the capability")
 	}
 }

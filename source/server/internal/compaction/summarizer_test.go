@@ -1,6 +1,7 @@
 package compaction
 
 import (
+	"strings"
 	"testing"
 
 	"cercano/source/server/internal/llm"
@@ -104,6 +105,54 @@ func TestParseSummary_GarbageIsEmpty(t *testing.T) {
 	s := ParseSummary("the model rambled with no sections at all")
 	if s.Goal != "" || s.State != "" || len(s.Decisions) != 0 {
 		t.Errorf("garbage must parse to empty summary, got %+v", s)
+	}
+}
+
+func TestParseSummary_Proposals(t *testing.T) {
+	// PROPOSALS is its own section — proposals must not be dropped or promoted
+	// to DECISIONS. Regression pin for the failure that lost the models×tiers
+	// design from conversation 80109e871fba4e18.
+	in := `GOAL: design model routing
+DECISIONS:
+- keep Reduce deterministic
+PROPOSALS:
+- 3 tiers: most_capable, everyday, fast_light
+- models.Resolve(tier, preferredProvider) → (modelID, provider, ok)
+STATE: awaiting user approval on tier names`
+	s := ParseSummary(in)
+	if len(s.Decisions) != 1 || s.Decisions[0] != "keep Reduce deterministic" {
+		t.Errorf("Decisions bled into Proposals or vice versa: %v", s.Decisions)
+	}
+	if len(s.Proposals) != 2 {
+		t.Fatalf("Proposals count = %d, want 2: %v", len(s.Proposals), s.Proposals)
+	}
+	if s.Proposals[0] != "3 tiers: most_capable, everyday, fast_light" {
+		t.Errorf("Proposal[0] identifiers not preserved verbatim: %q", s.Proposals[0])
+	}
+	if s.Proposals[1] != "models.Resolve(tier, preferredProvider) → (modelID, provider, ok)" {
+		t.Errorf("Proposal[1] signature not preserved verbatim: %q", s.Proposals[1])
+	}
+}
+
+func TestBuildSummaryPrompt_ContractInvariants(t *testing.T) {
+	// The prompt has to teach the model three things or the summarizer
+	// silently drops load-bearing content. Test each requirement so the
+	// fix can't regress via a future prompt tweak.
+	body := BuildSummaryPrompt([]llm.Message{textMsg(llm.RoleUser, "hi")})
+
+	cases := []struct {
+		want string
+		why  string
+	}{
+		{"PROPOSALS:", "PROPOSALS section must be present so unconfirmed designs have a slot"},
+		{"verbatim", "prompt must instruct the model to preserve config/code/identifiers verbatim"},
+		{"unique", "prompt must instruct the model to deduplicate bullets within a section"},
+		{"A DECISION is confirmed", "prompt must distinguish confirmed decisions from proposals"},
+	}
+	for _, c := range cases {
+		if !strings.Contains(body, c.want) {
+			t.Errorf("BuildSummaryPrompt missing %q — %s", c.want, c.why)
+		}
 	}
 }
 

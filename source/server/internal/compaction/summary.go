@@ -19,6 +19,7 @@ func MergeSummaries(sums []StructuredSummary) StructuredSummary {
 			out.Goal = s.Goal
 		}
 		out.Decisions = appendUnique(out.Decisions, s.Decisions)
+		out.Proposals = appendUnique(out.Proposals, s.Proposals)
 		out.OpenThreads = appendUnique(out.OpenThreads, s.OpenThreads)
 		for path, state := range s.Files {
 			out.Files[path] = state
@@ -56,6 +57,12 @@ func (s StructuredSummary) RenderBlock() llm.Block {
 		b.WriteString("Decisions:\n")
 		for _, d := range s.Decisions {
 			fmt.Fprintf(&b, "  - %s\n", d)
+		}
+	}
+	if len(s.Proposals) > 0 {
+		b.WriteString("Proposals (awaiting decision):\n")
+		for _, p := range s.Proposals {
+			fmt.Fprintf(&b, "  - %s\n", p)
 		}
 	}
 	if len(s.Files) > 0 {

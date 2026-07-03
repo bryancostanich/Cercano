@@ -1326,6 +1326,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingRuntimeSwitch = msg.pending
 		return m, nil
 
+	case openRuntimeDashboardMsg:
+		// Emitted by the install modal's "Browse models" action.
+		// Same transition as pressing Cmd+M — swaps the content page
+		// to a fresh runtime dashboard.
+		dashboard, cmd := newRuntimeDashboard(m.agent, m.palette, m.styles, m.width, m.height)
+		m.content = dashboard
+		if dashboard.hasActiveDownloads() {
+			cmd = tea.Batch(cmd, runtimeDashboardRefreshTick())
+		}
+		return m, cmd
+
 	case openRuntimeStatusChangedMsg:
 		// Pushed on runtime swap or startup — the headless detection
 		// outcome for the currently-selected local runtime. Cache for

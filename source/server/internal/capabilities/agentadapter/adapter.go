@@ -69,12 +69,27 @@ func toAgentResult(r *capabilities.Result) *agenttools.Result {
 	}
 }
 
+// SynonymMap maps a capability's canonical name to alternate names that
+// should ALSO be registered as tools pointing at the same capability. Unlike
+// AliasMap (a pure rename), synonyms are additive.
+type SynonymMap map[string][]string
+
 // BuildAgentRegistry constructs an agenttools.Registry from the agent-surface
-// capabilities in reg, applying the alias map for display names.
-func BuildAgentRegistry(reg *capabilities.Registry, aliases AliasMap) *agenttools.Registry {
+// capabilities in reg. The primary tool for each capability is registered
+// under its display name (from aliases, defaulting to canonical). Any
+// synonyms are registered as additional tools pointing at the same
+// capability, skipping any synonym that would collide with the primary name.
+func BuildAgentRegistry(reg *capabilities.Registry, aliases AliasMap, synonyms SynonymMap) *agenttools.Registry {
 	ar := agenttools.NewRegistry()
 	for _, c := range reg.ForSurface(capabilities.SurfaceAgent) {
-		ar.MustRegister(AsTool(c, aliases.display(c.Name())))
+		primary := aliases.display(c.Name())
+		ar.MustRegister(AsTool(c, primary))
+		for _, syn := range synonyms[c.Name()] {
+			if syn == "" || syn == primary {
+				continue
+			}
+			ar.MustRegister(AsTool(c, syn))
+		}
 	}
 	return ar
 }

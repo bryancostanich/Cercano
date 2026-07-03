@@ -143,7 +143,7 @@ func (s *Server) InstallCapabilities() {
 	})
 	builtins.Register(capReg)
 	s.capRegistry = capReg
-	s.SetToolRegistry(agentadapter.BuildAgentRegistry(capReg, builtins.AgentAliases()))
+	s.SetToolRegistry(agentadapter.BuildAgentRegistry(capReg, builtins.AgentAliases(), builtins.CapabilitySynonyms()))
 }
 
 // SetPermissions wires the permission store and pending-decisions barrier used

@@ -15,7 +15,7 @@ import (
 func buildTestRegistry() *agenttools.Registry {
 	capReg := capabilities.NewRegistry(capabilities.Services{})
 	builtins.Register(capReg)
-	return agentadapter.BuildAgentRegistry(capReg, builtins.AgentAliases())
+	return agentadapter.BuildAgentRegistry(capReg, builtins.AgentAliases(), builtins.CapabilitySynonyms())
 }
 
 func TestBuildToolCatalog_CoversAllRegistered(t *testing.T) {

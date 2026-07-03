@@ -40,8 +40,38 @@ func TestAsToolAppliesAliasAndTier(t *testing.T) {
 func TestBuildAgentRegistryUsesAgentSurfaceOnly(t *testing.T) {
 	reg := capabilities.NewRegistry(capabilities.Services{})
 	reg.MustRegister(echoCap{}) // agent-only
-	ar := BuildAgentRegistry(reg, AliasMap{"read_file": "Read"})
+	ar := BuildAgentRegistry(reg, AliasMap{"read_file": "Read"}, nil)
 	if _, ok := ar.Get("Read"); !ok {
 		t.Fatal("expected Read in agent registry")
+	}
+}
+
+func TestBuildAgentRegistryRegistersSynonyms(t *testing.T) {
+	reg := capabilities.NewRegistry(capabilities.Services{})
+	reg.MustRegister(echoCap{}) // canonical "read_file"
+	ar := BuildAgentRegistry(
+		reg,
+		AliasMap{"read_file": "Read"},
+		SynonymMap{"read_file": {"open_file"}},
+	)
+	if _, ok := ar.Get("Read"); !ok {
+		t.Fatal("primary display 'Read' missing")
+	}
+	if _, ok := ar.Get("open_file"); !ok {
+		t.Fatal("synonym 'open_file' missing")
+	}
+}
+
+func TestBuildAgentRegistrySkipsSynonymCollidingWithPrimary(t *testing.T) {
+	reg := capabilities.NewRegistry(capabilities.Services{})
+	reg.MustRegister(echoCap{})
+	// Synonym equals primary display => must be skipped, not double-registered.
+	ar := BuildAgentRegistry(
+		reg,
+		AliasMap{"read_file": "Read"},
+		SynonymMap{"read_file": {"Read"}},
+	)
+	if _, ok := ar.Get("Read"); !ok {
+		t.Fatal("primary display 'Read' missing")
 	}
 }

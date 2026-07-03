@@ -1114,6 +1114,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case settingsCommitDoneMsg:
+		// The commit outcome still applies server-side even if the user has
+		// left the settings page — ConfigChanged events keep the chips fresh —
+		// so a missing page just drops the status repaint, never the change.
+		if sp, ok := m.content.(*settingsPage); ok {
+			return m, sp.applyCommitDone(msg)
+		}
+		return m, nil
+
+	case settingsSpinnerTickMsg:
+		if sp, ok := m.content.(*settingsPage); ok {
+			return m, sp.applySpinnerTick()
+		}
+		return m, nil
+
 	case chatStreamMsg:
 		// Ignore late events from a stream we already canceled.
 		if !m.streaming {

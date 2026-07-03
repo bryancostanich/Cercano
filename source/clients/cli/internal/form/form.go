@@ -147,6 +147,19 @@ func (f *Form) commit(key, val string, fieldCmd tea.Cmd) tea.Cmd {
 	return tea.Batch(fieldCmd, cmd)
 }
 
+// SetStatus replaces the footer status line. Used by hosts that complete a
+// commit asynchronously — OnCommit returned before the outcome was known, so
+// the host pushes the real result (or a spinner frame) in later.
+func (f *Form) SetStatus(s string) { f.status = s }
+
+// Reload re-snapshots sections via OnReload. Async-commit hosts call this
+// once fresh values are cached so the rebuilt fields reflect the server.
+func (f *Form) Reload() {
+	if f.OnReload != nil {
+		f.Sections = f.OnReload()
+	}
+}
+
 // Lines renders the form as individual lines (for scroller hosts).
 func (f *Form) Lines(width int, palette theme.Palette, styles theme.Styles) []string {
 	return strings.Split(f.View(width, palette, styles), "\n")

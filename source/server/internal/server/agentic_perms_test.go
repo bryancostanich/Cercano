@@ -34,7 +34,10 @@ func hasToolNamed(reg *agenttools.Registry, name string) bool {
 // TestGrantedRegistry_Strict verifies W tools are dropped under strict mode.
 func TestGrantedRegistry_Strict(t *testing.T) {
 	srv := buildPermsServer(t)
-	reg := srv.grantedRegistry([]string{"r_read", "w_write"}, agent.ModeStrict)
+	reg, err := srv.grantedRegistry([]string{"r_read", "w_write"}, agent.ModeStrict)
+	if err != nil {
+		t.Fatalf("grantedRegistry: %v", err)
+	}
 
 	if !hasToolNamed(reg, "r_read") {
 		t.Error("strict: expected r_read to be present")
@@ -47,7 +50,10 @@ func TestGrantedRegistry_Strict(t *testing.T) {
 // TestGrantedRegistry_Permissive verifies W tools are dropped under permissive mode.
 func TestGrantedRegistry_Permissive(t *testing.T) {
 	srv := buildPermsServer(t)
-	reg := srv.grantedRegistry([]string{"r_read", "w_write"}, agent.ModePermissive)
+	reg, err := srv.grantedRegistry([]string{"r_read", "w_write"}, agent.ModePermissive)
+	if err != nil {
+		t.Fatalf("grantedRegistry: %v", err)
+	}
 
 	if !hasToolNamed(reg, "r_read") {
 		t.Error("permissive: expected r_read to be present")
@@ -60,7 +66,10 @@ func TestGrantedRegistry_Permissive(t *testing.T) {
 // TestGrantedRegistry_Bypass verifies both R and W tools are kept under bypass mode.
 func TestGrantedRegistry_Bypass(t *testing.T) {
 	srv := buildPermsServer(t)
-	reg := srv.grantedRegistry([]string{"r_read", "w_write"}, agent.ModeBypass)
+	reg, err := srv.grantedRegistry([]string{"r_read", "w_write"}, agent.ModeBypass)
+	if err != nil {
+		t.Fatalf("grantedRegistry: %v", err)
+	}
 
 	if !hasToolNamed(reg, "r_read") {
 		t.Error("bypass: expected r_read to be present")
@@ -86,7 +95,9 @@ func TestGrantedRegistry_LogsUnknownToolNames(t *testing.T) {
 		log.SetFlags(prevFlags)
 	}()
 
-	srv.grantedRegistry([]string{"r_read", "bogus_tool"}, agent.ModeBypass)
+	if _, err := srv.grantedRegistry([]string{"r_read", "bogus_tool"}, agent.ModeBypass); err != nil {
+		t.Fatalf("grantedRegistry: %v", err)
+	}
 
 	out := buf.String()
 	if !strings.Contains(out, "bogus_tool") {
@@ -97,11 +108,50 @@ func TestGrantedRegistry_LogsUnknownToolNames(t *testing.T) {
 	}
 }
 
+// TestGrantedRegistry_AllUnknownReturnsError verifies that when every requested
+// tool name is unknown (e.g. the caller passed prefixed names like
+// "mcp__oc__Read" that don't match Cercano's plain-name registry), the sub-agent
+// is not spawned with an empty catalog — the caller gets a clear error.
+func TestGrantedRegistry_AllUnknownReturnsError(t *testing.T) {
+	srv := buildPermsServer(t)
+
+	_, err := srv.grantedRegistry([]string{"mcp__oc__Read", "mcp__oc__Glob"}, agent.ModeBypass)
+	if err == nil {
+		t.Fatal("expected error when all requested tools are unknown, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "mcp__oc__Read") {
+		t.Errorf("expected error to name the unknown tool, got: %q", msg)
+	}
+	if !strings.Contains(msg, "host prefix") {
+		t.Errorf("expected error to hint about host prefixes, got: %q", msg)
+	}
+}
+
+// TestGrantedRegistry_AllWTierUnderNonBypassReturnsError verifies that when
+// every requested tool is registered but gets dropped by the permission-mode
+// binding (all W/X under strict or permissive), the caller gets a clear error
+// rather than an empty catalog.
+func TestGrantedRegistry_AllWTierUnderNonBypassReturnsError(t *testing.T) {
+	srv := buildPermsServer(t)
+
+	_, err := srv.grantedRegistry([]string{"w_write"}, agent.ModePermissive)
+	if err == nil {
+		t.Fatal("expected error when every requested tool is dropped by permission mode, got nil")
+	}
+	if !strings.Contains(err.Error(), "read-only") {
+		t.Errorf("expected error to mention the read-only bound, got: %q", err.Error())
+	}
+}
+
 // TestGrantedRegistry_NilTools_Strict verifies the R-tier default (nil tools) under strict
 // mode: only R-tier tools, no W.
 func TestGrantedRegistry_NilTools_Strict(t *testing.T) {
 	srv := buildPermsServer(t)
-	reg := srv.grantedRegistry(nil, agent.ModeStrict)
+	reg, err := srv.grantedRegistry(nil, agent.ModeStrict)
+	if err != nil {
+		t.Fatalf("grantedRegistry: %v", err)
+	}
 
 	if !hasToolNamed(reg, "r_read") {
 		t.Error("nil+strict: expected r_read to be present")

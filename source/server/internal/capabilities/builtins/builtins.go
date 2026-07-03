@@ -39,6 +39,10 @@ func Register(reg *capabilities.Registry) {
 	reg.MustRegister(Classify())
 	reg.MustRegister(Explain())
 	reg.MustRegister(Review())
+	reg.MustRegister(Fetch())
+	reg.MustRegister(Research())
+	reg.MustRegister(DeepResearch())
+	reg.MustRegister(Local())
 	// W-tier
 	reg.MustRegister(WriteFile())
 	reg.MustRegister(EditFile())

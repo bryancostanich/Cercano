@@ -10,12 +10,33 @@ func TestRegister_Count(t *testing.T) {
 	reg := capabilities.NewRegistry(capabilities.Services{})
 	Register(reg)
 	all := reg.All()
-	if len(all) != 28 {
+	if len(all) != 32 {
 		names := make([]string, len(all))
 		for i, c := range all {
 			names[i] = c.Name()
 		}
-		t.Fatalf("expected 28 capabilities, got %d: %v", len(all), names)
+		t.Fatalf("expected 32 capabilities, got %d: %v", len(all), names)
+	}
+}
+
+func TestWebCapabilities_AgentSurfaceOnly(t *testing.T) {
+	// fetch, research, deep_research, and local must stay off the MCP
+	// surface: the MCP server hand-registers legacy cercano_<name> handlers
+	// for them, and the capability bridge would collide on those names.
+	reg := capabilities.NewRegistry(capabilities.Services{})
+	Register(reg)
+	for _, name := range []string{"fetch", "research", "deep_research", "local"} {
+		c, ok := reg.Get(name)
+		if !ok {
+			t.Errorf("capability %q not registered", name)
+			continue
+		}
+		if !c.Surfaces().Has(capabilities.SurfaceAgent) {
+			t.Errorf("%q must be exposed on the agent surface", name)
+		}
+		if c.Surfaces().Has(capabilities.SurfaceMCP) {
+			t.Errorf("%q must NOT be on the MCP surface (legacy cercano_%s handler owns that name)", name, name)
+		}
 	}
 }
 

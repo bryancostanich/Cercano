@@ -3,9 +3,10 @@
 // validation tool, not part of the test suite.
 //
 // Synthetic corpus:  compaction-bakeoff -addr localhost:50052
-// Real session:      compaction-bakeoff -addr localhost:50052 \
-//                        -transcript ~/.claude/projects/<proj>/<id>.jsonl \
-//                        -maxtokens 150000 -anchors "goal phrase,key file.go"
+//
+//	Real session:      compaction-bakeoff -addr localhost:50052 \
+//	                       -transcript ~/.claude/projects/<proj>/<id>.jsonl \
+//	                       -maxtokens 150000 -anchors "goal phrase,key file.go"
 package main
 
 import (
@@ -36,13 +37,51 @@ func main() {
 	maxTokens := flag.Int("maxtokens", 150000, "for -transcript: slice the session to ~this many tokens from the start")
 	segTokens := flag.Int("segtokens", 8000, "for -transcript: per-segment token budget (keep under the local model's context window)")
 	verbatim := flag.Int("verbatim", 6, "for -transcript: number of trailing messages kept verbatim")
-	anchors := flag.String("anchors", "", "for -transcript: comma-separated must-keep substrings to score retention")
+	anchors := flag.String("anchors", "", "for -transcript/-conv: comma-separated must-keep substrings to score retention")
 	statsDir := flag.String("statsdir", "", "analyze token/turn/tool distributions across all .jsonl transcripts under this dir (no model needed); prints stats and exits")
+	conv := flag.String("conv", "", "matrix mode: score every frame over this stored conversation id (talks to Ollama directly, no agent needed)")
+	dbPath := flag.String("db", os.ExpandEnv("$HOME/.config/cercano/conversations.db"), "for -conv: conversations database")
+	aroundTurn := flag.String("aroundturn", "", "for -conv: slice a window around this turn id (default: whole conversation)")
+	before := flag.Int("before", 40, "for -conv with -aroundturn: turns of context before the target")
+	after := flag.Int("after", 10, "for -conv with -aroundturn: turns of context after the target")
+	model := flag.String("model", "qwen3-coder-next:latest", "for -conv: Ollama model tag")
+	ollamaURL := flag.String("ollama", "http://localhost:11434", "for -conv: Ollama base URL")
+	csvPath := flag.String("csv", "", "for -conv: append machine-readable result rows to this CSV")
+	perFrame := flag.Duration("frametimeout", 30*time.Minute, "for -conv: per-frame timeout")
 	flag.Parse()
 
 	// Stats mode is deterministic and needs no agent — handle before dialing.
 	if *statsDir != "" {
 		runStats(*statsDir)
+		return
+	}
+
+	// Matrix mode talks to Ollama directly — also no agent.
+	if *conv != "" {
+		var must []string
+		for _, a := range strings.Split(*anchors, ",") {
+			if a = strings.TrimSpace(a); a != "" {
+				must = append(must, a)
+			}
+		}
+		err := runMatrix(context.Background(), matrixConfig{
+			DBPath:     *dbPath,
+			ConvID:     *conv,
+			AroundTurn: *aroundTurn,
+			Before:     *before,
+			After:      *after,
+			Model:      *model,
+			OllamaURL:  *ollamaURL,
+			SegTokens:  *segTokens,
+			Verbatim:   *verbatim,
+			Anchors:    must,
+			CSVPath:    *csvPath,
+			PerFrame:   *perFrame,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "matrix: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 

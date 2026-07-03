@@ -176,6 +176,10 @@ type Model struct {
 	// /bypass /mode slash handlers.
 	permissionMode string
 
+	// workDirOverride, when non-empty, replaces os.Getwd() as the work_dir
+	// sent with every turn. Set by /d (development mode); empty = normal.
+	workDirOverride string
+
 	// supportsVision is true when the active provider can accept image
 	// inputs. Fetched once at startup via fetchVisionCmd. Used by
 	// visionNotice to show a dim warning when images are attached but the
@@ -294,6 +298,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	slash.RegisterRuntime(reg)
 	slash.RegisterLocus(reg, ag)
 	slash.RegisterContextView(reg)
+	slash.RegisterDev(reg)
 	slash.RegisterSettings(reg)
 	slash.RegisterTheme(reg)
 
@@ -1558,9 +1563,9 @@ func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model,
 	m.chat.AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
 	m.refreshViewport()
 
-	// Pass cwd so the agent prepends .cercano/context.md if present.
-	wd, _ := os.Getwd()
-	driver := &mainAgentDriver{agent: m.agent, convID: m.convID, workDir: wd}
+	// Pass the effective workDir so the agent chdirs there and prepends its
+	// .cercano/context.md if present (/d pins this to the Cercano repo).
+	driver := &mainAgentDriver{agent: m.agent, convID: m.convID, workDir: m.effectiveWorkDir()}
 	cmd, cancel, err := driver.Submit(context.Background(), text, images)
 	if err != nil {
 		m.errMsg = err.Error()
@@ -1581,6 +1586,25 @@ func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model,
 	// anim loop as running so the tool-start kick path doesn't double-fire it.
 	m.animTickActive = true
 	return m, tea.Batch(cmd, progressAnimTick())
+}
+
+// effectiveWorkDir returns the work_dir to send with a turn: the /d override
+// when set, else the process cwd.
+func (m Model) effectiveWorkDir() string {
+	if m.workDirOverride != "" {
+		return m.workDirOverride
+	}
+	wd, _ := os.Getwd()
+	return wd
+}
+
+// applyDevMode enters development mode: pin the session workDir to the repo
+// and return the canned kickoff prompt for the caller to submit through the
+// normal chat path (so it streams, persists, and meters like a typed turn).
+func (m *Model) applyDevMode(repo string) string {
+	m.workDirOverride = repo
+	m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "dev mode: working on " + repo})
+	return slash.DevKickoff(repo)
 }
 
 // recallHistoryPrev steps the prompt back to an older submitted input. Returns
@@ -1727,6 +1751,10 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		prompt := m.renderConfirmPrompt(tc)
 		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: prompt})
 		m.refreshViewport()
+	case slash.ResultDevMode:
+		kickoff := m.applyDevMode(res.WorkDir)
+		m.refreshViewport()
+		return m.submit(kickoff, nil)
 	case slash.ResultText:
 		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: res.Text})
 		m.refreshViewport()

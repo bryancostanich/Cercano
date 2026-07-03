@@ -103,3 +103,74 @@ func TestLocalRuntimeModal_ViewFailedShowsErrorAndRetry(t *testing.T) {
 		t.Fatalf("view missing retry action, got: %q", view)
 	}
 }
+
+func TestLocalRuntimeModal_NeedsModelTitleAndActions(t *testing.T) {
+	pal := theme.Cracker()
+	styles := theme.NewStyles(pal)
+	mo := newLocalRuntimeInstallModal(agentclient.LocalRuntimeStatus{Missing: "binary"})
+	mo.setNeedsModel("install completed but detection still fails: llama-server detection: model: found 2 GGUF models; set llama_server.default_model to disambiguate")
+	view := mo.View(styles, pal, 120, 40)
+
+	// Title must NOT say "Install failed" — the install succeeded.
+	if strings.Contains(view, "Install failed") {
+		t.Fatalf("NeedsModel state must not render as Install failed:\n%s", view)
+	}
+	// Title must say llama-server is ready + point at the model step.
+	if !strings.Contains(view, "llama-server ready") {
+		t.Fatalf("NeedsModel title missing \"llama-server ready\" phrasing:\n%s", view)
+	}
+	// Actions must offer Close (Enter is not a Retry here — retrying can't
+	// fix a missing model).
+	if !strings.Contains(view, "[Esc] Close") {
+		t.Fatalf("NeedsModel view must offer Close, got:\n%s", view)
+	}
+	if strings.Contains(view, "[Enter] Retry") {
+		t.Fatalf("NeedsModel view must NOT offer Retry — install already succeeded:\n%s", view)
+	}
+	// Guidance for the two recovery paths must be present so the user
+	// knows how to unblock themselves.
+	if !strings.Contains(view, ".gguf") {
+		t.Fatalf("NeedsModel view must mention the .gguf file convention:\n%s", view)
+	}
+	if !strings.Contains(view, "llama_server.default_model") {
+		t.Fatalf("NeedsModel view must mention the config key:\n%s", view)
+	}
+}
+
+func TestInstallErrorIsMissingModel_MatchesServerErrorShape(t *testing.T) {
+	// The exact format comes from llamaserver.DetectError.Error() wrapped
+	// by the server-side install handler. Coupling is intentional — the
+	// server side is under our control, and this test is what catches a
+	// server-side rename before it silently regresses the UX.
+	cases := []struct {
+		name string
+		err  string
+		want bool
+	}{
+		{
+			name: "model missing after install",
+			err:  "install completed but detection still fails: llama-server detection: model: found 2 GGUF models; set llama_server.default_model to disambiguate",
+			want: true,
+		},
+		{
+			name: "binary missing after install (should NOT be treated as needs-model)",
+			err:  "install completed but detection still fails: llama-server detection: binary: exec: \"llama-server\" not found",
+			want: false,
+		},
+		{
+			name: "install itself failed (brew errored)",
+			err:  "brew install llama.cpp: exit status 1",
+			want: false,
+		},
+		{
+			name: "empty",
+			err:  "",
+			want: false,
+		},
+	}
+	for _, c := range cases {
+		if got := installErrorIsMissingModel(c.err); got != c.want {
+			t.Errorf("%s: installErrorIsMissingModel(%q) = %v, want %v", c.name, c.err, got, c.want)
+		}
+	}
+}

@@ -1239,6 +1239,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.localRuntimeModal.cancel = nil
 		switch {
+		case msg.err != "" && installErrorIsMissingModel(msg.err):
+			// Install subprocess itself succeeded; the terminal frame
+			// carries the post-install detection failure. The user needs
+			// to add a GGUF or set llama_server.default_model — retrying
+			// the install won't fix anything, so surface that state
+			// distinctly.
+			m.localRuntimeModal.setNeedsModel(msg.err)
+			m.pendingRuntimeSwitch = ""
 		case msg.err != "":
 			m.localRuntimeModal.setFailed(msg.err)
 			m.pendingRuntimeSwitch = "" // failed install — the queued switch is dropped

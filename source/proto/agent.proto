@@ -877,6 +877,11 @@ message InstallProgress {
 
 message RegenerateContextRequest {
   string conversation_id = 1;
+  // incremental=false (default): full rebuild — clear the derived compaction
+  // state first, then re-run compaction from the first turn.
+  // incremental=true: keep existing state and digest only the current
+  // backlog from FrozenThrough forward (the /compact command).
+  bool incremental = 2;
 }
 
 message RegenerateContextProgress {

@@ -64,7 +64,9 @@ type historyView struct {
 	md            *render.Markdown
 }
 
-func newHistoryMarkdown(p theme.Palette) *render.Markdown { return render.NewMarkdown(theme.MarkdownStyle(p)) }
+func newHistoryMarkdown(p theme.Palette) *render.Markdown {
+	return render.NewMarkdown(theme.MarkdownStyle(p))
+}
 
 // newHistoryView loads the conversation list synchronously (matching the old
 // picker + contextView) and returns the page. The turn drawer loads lazily.
@@ -226,7 +228,7 @@ func (h *historyView) appendRow(lines *[]string, meta *[]histLineMeta, i, panelW
 	// Line 1: " <arrow><name padded>  <meta>" budgeted so meta sits at the right.
 	metaCell := h.styles.Muted.Render(r.meta)
 	metaW := lipgloss.Width(metaCell)
-	const lead = 1 + 2 // leading space + arrow cell
+	const lead = 1 + 2                 // leading space + arrow cell
 	nameW := panelW - lead - metaW - 2 // 2-space gap before meta
 	if nameW < 8 {
 		nameW = 8
@@ -377,5 +379,5 @@ func (h *historyView) ScrollState() contentPageScrollState {
 	height := dashboardContentHeight(h.height)
 	return contentPageScrollState{Total: total, Height: height, Offset: clampInt(h.scrollOffset, 0, maxInt(0, total-height))}
 }
-func (h *historyView) clampScroll() { h.scrollOffset = h.ScrollState().Offset }
+func (h *historyView) clampScroll()   { h.scrollOffset = h.ScrollState().Offset }
 func (h *historyView) lineCount() int { l, _ := h.rowsLines(); return len(l) }

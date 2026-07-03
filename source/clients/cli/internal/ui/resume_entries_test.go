@@ -13,8 +13,8 @@ import (
 func TestResumeEntries_SkipsEmptyToolTurns(t *testing.T) {
 	turns := []agentclient.PersistedTurn{
 		{Role: "user", Content: "list the files"},
-		{Role: "assistant", Content: ""},   // tool_use turn (blocks only)
-		{Role: "user", Content: ""},        // tool_result turn (blocks only)
+		{Role: "assistant", Content: ""},    // tool_use turn (blocks only)
+		{Role: "user", Content: ""},         // tool_result turn (blocks only)
 		{Role: "assistant", Content: "   "}, // whitespace-only — also non-prose
 		{Role: "assistant", Content: "Here are the files."},
 	}

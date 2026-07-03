@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
@@ -54,7 +54,7 @@ type chatView struct {
 	// for the session since entries are append-only.
 	groupExpanded map[int]bool
 
-	turn              turnStatus
+	turn turnStatus
 	// streaming mirrors the host's m.streaming so the chat can render a
 	// trailing "still working" indicator between the moment the assistant
 	// finishes writing/tool-running and the moment the next event arrives.

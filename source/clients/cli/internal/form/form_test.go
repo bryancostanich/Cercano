@@ -115,8 +115,8 @@ func TestFormCommitTriggersReload(t *testing.T) {
 	f := New([]Section{{Title: "A", Fields: []Field{NewText("a1", "a1", "old", "")}}})
 	f.OnCommit = func(key, value string) (string, tea.Cmd, error) { return "saved", nil, nil }
 	f.OnReload = func() []Section { return reloaded }
-	f.Update(enter())          // begin edit
-	f.Update(enter())          // commit -> OnCommit -> OnReload
+	f.Update(enter()) // begin edit
+	f.Update(enter()) // commit -> OnCommit -> OnReload
 	if len(f.Sections) != 1 || f.Sections[0].Title != "B" {
 		t.Fatalf("OnReload should have replaced Sections with B, got %+v", f.Sections)
 	}

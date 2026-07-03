@@ -239,7 +239,7 @@ func TestRegenerate_RebuildsFromRaw(t *testing.T) {
 	g := New(fs, summarize, cfg, contextmeter.Default(), 10*time.Millisecond)
 
 	var lines []string
-	pre, post, err := g.Regenerate(context.Background(), "c1", func(l string) { lines = append(lines, l) })
+	pre, post, err := g.Regenerate(context.Background(), "c1", false, func(l string) { lines = append(lines, l) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +280,7 @@ func TestRegenerate_SmallConversationClearsState(t *testing.T) {
 	cfg := compactor.Config{ActivationFloorTokens: 100000, SegmentTokens: 4000, VerbatimRecent: 2}
 	g := New(fs, summarize, cfg, contextmeter.Default(), 10*time.Millisecond)
 
-	if _, _, err := g.Regenerate(context.Background(), "c1", nil); err != nil {
+	if _, _, err := g.Regenerate(context.Background(), "c1", false, nil); err != nil {
 		t.Fatal(err)
 	}
 	fs.mu.Lock()
@@ -298,7 +298,7 @@ func TestRegenerate_RefusesWhilePassInFlight(t *testing.T) {
 		t.Fatal("claim should succeed on idle conversation")
 	}
 	defer g.release("c1")
-	if _, _, err := g.Regenerate(context.Background(), "c1", nil); err == nil {
+	if _, _, err := g.Regenerate(context.Background(), "c1", false, nil); err == nil {
 		t.Fatal("want error while another pass holds the claim")
 	}
 }
@@ -328,5 +328,29 @@ func TestScheduledPass_DefersWhileClaimHeld(t *testing.T) {
 	defer fs.mu.Unlock()
 	if fs.saved != nil {
 		t.Fatal("deferred pass must not persist state")
+	}
+}
+
+func TestRegenerate_IncrementalKeepsExistingState(t *testing.T) {
+	// /compact must digest only the backlog: existing consolidated state
+	// survives, unlike the full rebuild which clears it first.
+	fs := &fakeStore{
+		turns: bigTurns(3, 50),
+		state: conversation.Compaction{ConversationID: "c1", ConsolidatedJSON: `{"goal":"existing summary"}`},
+	}
+	summarize := func(context.Context, []llm.Message) (compaction.StructuredSummary, error) {
+		t.Fatal("summarizer must not run below the activation floor")
+		return compaction.StructuredSummary{}, nil
+	}
+	cfg := compactor.Config{ActivationFloorTokens: 100000, SegmentTokens: 4000, VerbatimRecent: 2}
+	g := New(fs, summarize, cfg, contextmeter.Default(), 10*time.Millisecond)
+
+	if _, _, err := g.Regenerate(context.Background(), "c1", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if fs.state.ConsolidatedJSON != `{"goal":"existing summary"}` {
+		t.Fatalf("incremental compaction must not clear existing state: %+v", fs.state)
 	}
 }

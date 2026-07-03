@@ -57,8 +57,8 @@ func TestRuntimeDashboardViewShowsRuntimeDashboardData(t *testing.T) {
 	m := New(nil, false)
 	snapshot := runtimeDashboardSnapshot{
 		Config: &agentclient.Config{
-			OpenRuntime:   "llama_server",
-			OpenModel:     "qwen.gguf",
+			OpenRuntime:    "llama_server",
+			OpenModel:      "qwen.gguf",
 			EmbeddingModel: "nomic-embed-text",
 			CloudProvider:  "openai",
 			CloudModel:     "gpt-test",
@@ -142,8 +142,8 @@ func TestRuntimeDashboardViewSeparatesConfigAndOpenLogs(t *testing.T) {
 	snapshot := runtimeDashboardSnapshot{
 		Config: &agentclient.Config{
 			OllamaURL:      "http://mac-studio.local:11434",
-			OpenRuntime:   "llama_server",
-			OpenModel:     "qwen.gguf",
+			OpenRuntime:    "llama_server",
+			OpenModel:      "qwen.gguf",
 			EmbeddingModel: "nomic-embed-text",
 			CloudProvider:  "openai",
 			CloudModel:     "gpt-test",
@@ -340,8 +340,8 @@ func TestRuntimeDashboardBlocksUseFullPageWidth(t *testing.T) {
 		styles:  m.styles,
 		snapshot: runtimeDashboardSnapshot{
 			Config: &agentclient.Config{
-				OpenRuntime:  "llama_server",
-				OpenModel:    "qwen.gguf",
+				OpenRuntime:   "llama_server",
+				OpenModel:     "qwen.gguf",
 				CloudProvider: "openai",
 				CloudModel:    "gpt-test",
 			},
@@ -587,8 +587,8 @@ func overflowingRuntimeDashboard(t *testing.T, height int) *runtimeDashboard {
 	}
 	snapshot := runtimeDashboardSnapshot{
 		Config: &agentclient.Config{
-			OpenRuntime:   "llama_server",
-			OpenModel:     "qwen.gguf",
+			OpenRuntime:    "llama_server",
+			OpenModel:      "qwen.gguf",
 			EmbeddingModel: "nomic-embed-text",
 			CloudProvider:  "anthropic",
 			CloudModel:     "claude-test",

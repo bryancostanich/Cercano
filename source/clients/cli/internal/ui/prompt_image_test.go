@@ -53,8 +53,8 @@ func TestDeleteForwardDeletesWholeChip(t *testing.T) {
 func TestAttachmentsFollowMarkers(t *testing.T) {
 	p := newPromptInput()
 	p.Focus()
-	p.AddImage([]byte{1}, "image/png", "")  // [image 1]
-	p.AddImage([]byte{2}, "image/gif", "")  // [image 2]
+	p.AddImage([]byte{1}, "image/png", "") // [image 1]
+	p.AddImage([]byte{2}, "image/gif", "") // [image 2]
 	if len(p.Attachments()) != 2 {
 		t.Fatalf("want 2 attachments, got %d", len(p.Attachments()))
 	}

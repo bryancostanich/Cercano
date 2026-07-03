@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/lipgloss/v2"
 	"cercano/source/clients/cli/internal/theme"
+	"charm.land/lipgloss/v2"
 )
 
 // renderDivider centers the label between two stretches of `─` filling the

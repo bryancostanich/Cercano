@@ -86,7 +86,7 @@ func TestScrollbarHitProbe(t *testing.T) {
 // reported by some terminals as X=width — one past the bar at width-1. The grab
 // must still register and the drag must scroll.
 func TestScrollbarGrabAtRightEdge(t *testing.T) {
-	m := buildDragModel() // width 80 → bar at column 79
+	m := buildDragModel()                                                  // width 80 → bar at column 79
 	m = send(t, m, tea.MouseClickMsg{X: 80, Y: 2, Button: tea.MouseLeft})  // X == width (off by one)
 	m = send(t, m, tea.MouseMotionMsg{X: 80, Y: 9, Button: tea.MouseLeft}) // drag down
 	if got := m.chat.YOffset(); got == 0 {

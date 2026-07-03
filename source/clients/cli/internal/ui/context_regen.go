@@ -17,10 +17,13 @@ type contextRegenProgressMsg struct {
 }
 
 // contextRegenDoneMsg is the terminal frame of a context regen: ok/err from
-// the server plus the before/after send-view token counts.
+// the server plus the before/after send-view token counts. line carries the
+// server's summary wording ("context rebuilt/compacted: ~X → ~Y tokens"),
+// which knows whether the run was a full rebuild or incremental.
 type contextRegenDoneMsg struct {
 	ok   bool
 	err  string
+	line string
 	pre  int
 	post int
 }
@@ -39,11 +42,13 @@ func isTransportLoss(err string) bool {
 
 // startContextRegenCmd opens the RegenerateContext streaming RPC for the
 // conversation and drains it one frame per message, mirroring the runtime
-// install pattern. The rebuild runs server-side to completion regardless of
-// what the UI does with the stream.
-func startContextRegenCmd(ag *agentclient.Client, convID string) tea.Cmd {
+// install pattern. incremental=false is the full /context-regen rebuild;
+// incremental=true is /compact (digest backlog, keep summaries). The work
+// runs server-side to completion regardless of what the UI does with the
+// stream.
+func startContextRegenCmd(ag *agentclient.Client, convID string, incremental bool) tea.Cmd {
 	return func() tea.Msg {
-		ch, err := ag.RegenerateContext(context.Background(), convID)
+		ch, err := ag.RegenerateContext(context.Background(), convID, incremental)
 		if err != nil {
 			return contextRegenDoneMsg{err: err.Error()}
 		}
@@ -57,10 +62,14 @@ func startContextRegenCmd(ag *agentclient.Client, convID string) tea.Cmd {
 				return contextRegenDoneMsg{err: frame.Err.Error()}
 			}
 			if frame.Done {
-				return contextRegenDoneMsg{ok: frame.Ok, err: frame.Error, pre: frame.PreTokens, post: frame.PostTokens}
+				return contextRegenDoneMsg{ok: frame.Ok, err: frame.Error, line: frame.Line, pre: frame.PreTokens, post: frame.PostTokens}
 			}
 			return contextRegenProgressMsg{line: frame.Line, next: drain}
 		}
-		return contextRegenProgressMsg{line: "rebuilding context from raw turns…", next: drain}
+		first := "rebuilding context from raw turns…"
+		if incremental {
+			first = "compacting context backlog…"
+		}
+		return contextRegenProgressMsg{line: first, next: drain}
 	}
 }

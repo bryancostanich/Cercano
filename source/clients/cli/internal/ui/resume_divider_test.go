@@ -27,9 +27,9 @@ func TestResumeEntries_NoDividerWhenNoCompaction(t *testing.T) {
 // Frozen turns have CreatedAt.Unix() <= frozenThrough.
 func TestResumeEntries_DividerAtFreezeBoundary(t *testing.T) {
 	turns := []agentclient.PersistedTurn{
-		{Role: "user", Content: "first", CreatedAt: time.Unix(100, 0)},     // frozen
+		{Role: "user", Content: "first", CreatedAt: time.Unix(100, 0)},       // frozen
 		{Role: "assistant", Content: "second", CreatedAt: time.Unix(150, 0)}, // frozen
-		{Role: "user", Content: "third", CreatedAt: time.Unix(200, 0)},     // live (first post-freeze)
+		{Role: "user", Content: "third", CreatedAt: time.Unix(200, 0)},       // live (first post-freeze)
 		{Role: "assistant", Content: "fourth", CreatedAt: time.Unix(210, 0)}, // live
 	}
 	got := resumeEntries(turns, 150)
@@ -91,9 +91,9 @@ func TestResumeEntries_DividerAtTopWhenNoneFrozen(t *testing.T) {
 // relative to the kept turns.
 func TestResumeEntries_BoundaryRespectsSkippedEmptyTurns(t *testing.T) {
 	turns := []agentclient.PersistedTurn{
-		{Role: "user", Content: "first", CreatedAt: time.Unix(100, 0)},  // frozen, kept
-		{Role: "assistant", Content: "", CreatedAt: time.Unix(150, 0)},  // frozen, skipped (empty)
-		{Role: "user", Content: "third", CreatedAt: time.Unix(200, 0)},  // live, kept
+		{Role: "user", Content: "first", CreatedAt: time.Unix(100, 0)}, // frozen, kept
+		{Role: "assistant", Content: "", CreatedAt: time.Unix(150, 0)}, // frozen, skipped (empty)
+		{Role: "user", Content: "third", CreatedAt: time.Unix(200, 0)}, // live, kept
 	}
 	got := resumeEntries(turns, 150)
 	// Expected: first, [divider], third — 3 entries.

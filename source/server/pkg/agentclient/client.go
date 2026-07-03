@@ -1041,11 +1041,13 @@ type RegenProgress struct {
 	Err        error
 }
 
-// RegenerateContext rebuilds the conversation's derived context (compaction
-// state) from its raw turns on the server, streaming progress. The returned
-// channel closes after the terminal (Done) frame.
-func (c *Client) RegenerateContext(ctx context.Context, conversationID string) (<-chan RegenProgress, error) {
-	stream, err := c.agent.RegenerateContext(ctx, &proto.RegenerateContextRequest{ConversationId: conversationID})
+// RegenerateContext runs compaction to completion on the server, streaming
+// progress. incremental=false clears the derived state first (full rebuild
+// from raw turns); incremental=true digests only the current backlog and
+// keeps existing summaries (/compact). The returned channel closes after the
+// terminal (Done) frame.
+func (c *Client) RegenerateContext(ctx context.Context, conversationID string, incremental bool) (<-chan RegenProgress, error) {
+	stream, err := c.agent.RegenerateContext(ctx, &proto.RegenerateContextRequest{ConversationId: conversationID, Incremental: incremental})
 	if err != nil {
 		return nil, err
 	}

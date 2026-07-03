@@ -27,9 +27,9 @@ func NewMasked(key, label string, set bool) *TextField {
 	return &TextField{key: key, label: label, masked: true, set: set}
 }
 
-func (f *TextField) Key() string     { return f.key }
-func (f *TextField) Label() string   { return f.label }
-func (f *TextField) Editing() bool   { return f.editing }
+func (f *TextField) Key() string   { return f.key }
+func (f *TextField) Label() string { return f.label }
+func (f *TextField) Editing() bool { return f.editing }
 
 func (f *TextField) Display() string {
 	if f.masked {

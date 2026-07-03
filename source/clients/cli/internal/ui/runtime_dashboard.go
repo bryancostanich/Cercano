@@ -45,11 +45,11 @@ const (
 // chrome in the root model and renders native dashboard sections in the page
 // body so each section can get its own width and height budget.
 type runtimeDashboard struct {
-	width, height   int
-	palette         theme.Palette
-	styles          theme.Styles
-	agent           *agentclient.Client
-	snapshot        runtimeDashboardSnapshot
+	width, height int
+	palette       theme.Palette
+	styles        theme.Styles
+	agent         *agentclient.Client
+	snapshot      runtimeDashboardSnapshot
 	// estimates caches resolved RAM estimates by estimateKey;
 	// estimatePending tracks in-flight fetches so cursor movement
 	// doesn't double-dispatch. See runtime_estimate.go.
@@ -67,8 +67,8 @@ type runtimeDashboard struct {
 	// by fullContent. Lets renderActionBlock map the flat
 	// operationCursor onto whichever block the cursor's row lives in.
 	renderActionOrdinal int
-	actionMessage   string
-	scrollOffset    int
+	actionMessage       string
+	scrollOffset        int
 	// tierPicker, when non-nil, is the floating model picker for a taxonomy
 	// slot; it captures all key input until closed.
 	tierPicker *overlay.RowList

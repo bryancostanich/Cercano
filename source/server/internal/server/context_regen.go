@@ -20,16 +20,20 @@ func (s *Server) RegenerateContext(req *proto.RegenerateContextRequest, stream p
 		return stream.Send(&proto.RegenerateContextProgress{Done: true, Ok: false, Error: "compaction is not available (agent is running without a conversation store)"})
 	}
 
-	pre, post, err := s.compactionGen.Regenerate(stream.Context(), convID, func(line string) {
+	pre, post, err := s.compactionGen.Regenerate(stream.Context(), convID, req.GetIncremental(), func(line string) {
 		_ = stream.Send(&proto.RegenerateContextProgress{Line: line})
 	})
 	if err != nil {
 		return stream.Send(&proto.RegenerateContextProgress{Done: true, Ok: false, Error: err.Error(), PreTokens: int32(pre)})
 	}
+	verb := "rebuilt"
+	if req.GetIncremental() {
+		verb = "compacted"
+	}
 	return stream.Send(&proto.RegenerateContextProgress{
 		Done:       true,
 		Ok:         true,
-		Line:       fmt.Sprintf("context rebuilt: ~%d → ~%d tokens", pre, post),
+		Line:       fmt.Sprintf("context %s: ~%d → ~%d tokens", verb, pre, post),
 		PreTokens:  int32(pre),
 		PostTokens: int32(post),
 	})

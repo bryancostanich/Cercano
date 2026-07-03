@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/lipgloss/v2"
 	"cercano/source/clients/cli/internal/render"
 	"cercano/source/clients/cli/internal/theme"
+	"charm.land/lipgloss/v2"
 )
 
 // stripAnsiCSI is defined in confirm_test.go (same package). Reused here.

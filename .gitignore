@@ -48,3 +48,4 @@ test/sandbox/
 # Excluded so their internal HEAD drift and the worktree directories
 # themselves do not show up in the root worktree's status.
 .claude/worktrees/
+source/server/compaction-bakeoff

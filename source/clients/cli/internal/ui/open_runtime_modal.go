@@ -54,6 +54,16 @@ const (
 	// dropdown path pre-queues the switch via pendingRuntimeSwitch and
 	// bypasses this state.
 	runtimeModalOfferSwitch
+	// runtimeModalScanningModels is the opening state when detection said
+	// the BINARY is fine but the model is missing/ambiguous. Installing
+	// the runtime can't help, so instead of idle's "Install now" we fetch
+	// the discovered GGUF list to decide: zero models → NeedsModel
+	// (browse/download), one or more → PickModel (disambiguate).
+	runtimeModalScanningModels
+	// runtimeModalPickModel lists the GGUFs detection found so the user
+	// can pick one as llama_server.default_model. Enter dispatches the
+	// pick + runtime switch in one UpdateConfig round trip.
+	runtimeModalPickModel
 )
 
 // openRuntimeInstallModal owns the modal's transient state — the reason we
@@ -84,13 +94,66 @@ type openRuntimeInstallModal struct {
 	// [Esc] Keep <name> label can name it correctly.
 	offerRuntime  string
 	activeRuntime string
+	// pickModels / pickCursor drive runtimeModalPickModel: the downloaded
+	// llama_server GGUFs detection found, and which one the cursor is on.
+	pickModels []agentclient.RuntimeModel
+	pickCursor int
 }
 
-// newOpenRuntimeInstallModal opens the modal in idle state carrying the
-// status snapshot that triggered it. Caller stashes the returned pointer on
-// Model and re-renders.
+// modalOpensScanning reports whether the modal should open in the
+// scanning-models state instead of idle: detection said the binary is fine
+// but the model is missing/ambiguous, so idle's "Install now" can't help.
+// Callers that see true must batch fetchModalGGUFsCmd alongside opening.
+func modalOpensScanning(st agentclient.OpenRuntimeStatus) bool {
+	return st.Missing == "model"
+}
+
+// newOpenRuntimeInstallModal opens the modal carrying the status snapshot
+// that triggered it. Missing=="model" starts in scanning state (the caller
+// must batch fetchModalGGUFsCmd — see modalOpensScanning); everything else
+// starts idle. Caller stashes the returned pointer on Model and re-renders.
 func newOpenRuntimeInstallModal(st agentclient.OpenRuntimeStatus) *openRuntimeInstallModal {
-	return &openRuntimeInstallModal{status: st, state: runtimeModalIdle}
+	state := runtimeModalIdle
+	if modalOpensScanning(st) {
+		state = runtimeModalScanningModels
+	}
+	return &openRuntimeInstallModal{status: st, state: state}
+}
+
+// setPickModel transitions to the GGUF picker carrying the discovered
+// models. Cursor starts on the first entry.
+func (mo *openRuntimeInstallModal) setPickModel(models []agentclient.RuntimeModel) {
+	mo.state = runtimeModalPickModel
+	mo.pickModels = models
+	mo.pickCursor = 0
+}
+
+// modalModelsLoadedMsg carries the reply to fetchModalGGUFsCmd — the
+// downloaded llama_server GGUFs, or the fetch error.
+type modalModelsLoadedMsg struct {
+	models []agentclient.RuntimeModel
+	err    error
+}
+
+// fetchModalGGUFsCmd lists runtime models and filters to downloaded
+// llama_server GGUFs — the same set detection scanned. The reply routes the
+// scanning state to NeedsModel (zero) or PickModel (one or more).
+func fetchModalGGUFsCmd(ag *agentclient.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		catalog, err := ag.ListRuntimeModels(ctx)
+		if err != nil {
+			return modalModelsLoadedMsg{err: err}
+		}
+		var ggufs []agentclient.RuntimeModel
+		for _, mdl := range catalog.Models {
+			if mdl.Runtime == "llama_server" && mdl.DownloadState == "downloaded" {
+				ggufs = append(ggufs, mdl)
+			}
+		}
+		return modalModelsLoadedMsg{models: ggufs}
+	}
 }
 
 // openOpenRuntimeInstallModalMsg is emitted from the settings page when the
@@ -229,8 +292,39 @@ func (mo *openRuntimeInstallModal) renderHeader(styles theme.Styles) string {
 		title = "llama-server ready — pick a GGUF model"
 	case runtimeModalOfferSwitch:
 		title = "llama-server ready — switch to it?"
+	case runtimeModalScanningModels:
+		title = "Checking GGUF models…"
+	case runtimeModalPickModel:
+		title = "Pick a GGUF model"
 	}
 	return styles.Primary.Bold(true).Render(title)
+}
+
+// renderModelPicker renders the discovered-GGUF list for PickModel state:
+// one row per model with a cursor marker, display name, quantization, and
+// size. Kept width-safe by truncating the name, never the annotations.
+func (mo *openRuntimeInstallModal) renderModelPicker(styles theme.Styles, w int) string {
+	rows := make([]string, 0, len(mo.pickModels))
+	for i, mdl := range mo.pickModels {
+		marker := "  "
+		style := styles.Muted
+		if i == mo.pickCursor {
+			marker = "▶ "
+			style = styles.Primary.Bold(true)
+		}
+		annot := mdl.Quantization
+		if mdl.SizeBytes > 0 {
+			annot += "  " + formatBytes(mdl.SizeBytes)
+		}
+		name := mdl.DisplayName
+		// Truncate the name so marker+name+annotations fit the box.
+		maxName := w - len(marker) - len(annot) - 4
+		if maxName > 0 && len(name) > maxName {
+			name = ansi.Truncate(name, maxName, "…")
+		}
+		rows = append(rows, marker+style.Render(name)+"  "+styles.Muted.Render(annot))
+	}
+	return strings.Join(rows, "\n")
 }
 
 func (mo *openRuntimeInstallModal) renderBody(styles theme.Styles, w int) string {
@@ -255,6 +349,14 @@ func (mo *openRuntimeInstallModal) renderBody(styles theme.Styles, w int) string
 func (mo *openRuntimeInstallModal) renderLogs(styles theme.Styles, w, h int) string {
 	if mo.state == runtimeModalIdle {
 		return styles.Muted.Render("(logs will appear here once install starts)")
+	}
+	// The log-pane slot doubles as the picker region — there are never
+	// install logs and a model list on screen at the same time.
+	if mo.state == runtimeModalScanningModels {
+		return styles.Muted.Render("(scanning model directories…)")
+	}
+	if mo.state == runtimeModalPickModel {
+		return mo.renderModelPicker(styles, w)
 	}
 	if h < 1 {
 		h = 1
@@ -286,6 +388,14 @@ func (mo *openRuntimeInstallModal) renderActions(styles theme.Styles) string {
 		primary := styles.Success.Bold(true).Render("[Enter] Install now")
 		secondary := styles.Muted.Render("[Esc] Cancel")
 		return primary + "    " + secondary
+	case runtimeModalScanningModels:
+		return styles.Muted.Render("Scanning… ([Esc] Cancel)")
+	case runtimeModalPickModel:
+		primary := styles.Success.Bold(true).Render("[Enter] Use selected")
+		browse := styles.Muted.Render("[b] Browse models")
+		secondary := styles.Muted.Render("[Esc] Cancel")
+		hint := styles.Muted.Render("[↑/↓] select")
+		return primary + "    " + browse + "    " + secondary + "    " + hint
 	case runtimeModalRunning:
 		return styles.Muted.Render("Installing… (Esc to abort)")
 	case runtimeModalDone:
@@ -412,8 +522,64 @@ func (m Model) handleOpenRuntimeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m.openRuntimeModal = nil
 			m.pendingRuntimeSwitch = ""
 		}
+	case runtimeModalScanningModels:
+		// The GGUF-list fetch is in flight; only cancel is meaningful.
+		if key == "esc" || key == "q" {
+			m.openRuntimeModal = nil
+			m.pendingRuntimeSwitch = ""
+		}
+	case runtimeModalPickModel:
+		switch key {
+		case "up", "k":
+			if m.openRuntimeModal.pickCursor > 0 {
+				m.openRuntimeModal.pickCursor--
+			}
+		case "down", "j":
+			if m.openRuntimeModal.pickCursor < len(m.openRuntimeModal.pickModels)-1 {
+				m.openRuntimeModal.pickCursor++
+			}
+		case "enter":
+			if len(m.openRuntimeModal.pickModels) == 0 {
+				return m, nil
+			}
+			picked := m.openRuntimeModal.pickModels[m.openRuntimeModal.pickCursor]
+			// The switch target defaults to llama_server even without a
+			// queued switch (F1 path) — a user picking a GGUF wants the
+			// managed runtime to use it.
+			runtime := m.pendingRuntimeSwitch
+			if runtime == "" {
+				runtime = "llama_server"
+			}
+			m.openRuntimeModal = nil
+			m.pendingRuntimeSwitch = ""
+			return m, dispatchOpenModelPick(m.agent, runtime, picked.Path)
+		case "b":
+			m.openRuntimeModal = nil
+			m.pendingRuntimeSwitch = ""
+			return m, openRuntimeDashboardCmd()
+		case "esc", "q":
+			m.openRuntimeModal = nil
+			m.pendingRuntimeSwitch = ""
+		}
 	}
 	return m, nil
+}
+
+// dispatchOpenModelPick fires the picker's outcome in the background: set
+// llama_server.default_model to the chosen GGUF and switch to the runtime,
+// one UpdateConfig round trip. Errors are swallowed for the same reason as
+// dispatchOpenRuntimeSwitch — the server broadcasts ConfigChanged /
+// OpenRuntimeStatusChanged either way, so outcomes surface via the chip.
+func dispatchOpenModelPick(ag *agentclient.Client, runtime, ggufPath string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = ag.UpdateConfig(ctx, agentclient.ConfigUpdate{
+			OpenRuntime:      runtime,
+			OpenDefaultModel: ggufPath,
+		})
+		return nil
+	}
 }
 
 // dispatchOpenRuntimeSwitch fires an UpdateConfig(local-runtime=runtime) in

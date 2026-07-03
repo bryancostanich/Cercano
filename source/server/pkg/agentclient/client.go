@@ -268,6 +268,10 @@ type ConfigUpdate struct {
 	OllamaURL             string
 	OpenRuntime          string
 	OpenModel            string
+	// OpenDefaultModel sets llama_server.default_model — the GGUF the managed
+	// runtime loads. Distinct from OpenModel so a GGUF pick never clobbers
+	// the user's ollama tag.
+	OpenDefaultModel     string
 	CloudProvider         string
 	CloudModel            string
 	CloudAPIKey           string
@@ -1089,6 +1093,7 @@ func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, erro
 		OllamaUrl:              u.OllamaURL,
 		OpenRuntime:           u.OpenRuntime,
 		OpenModel:             u.OpenModel,
+		OpenDefaultModel:      u.OpenDefaultModel,
 		CloudProvider:          u.CloudProvider,
 		CloudModel:             u.CloudModel,
 		CloudApiKey:            u.CloudAPIKey,

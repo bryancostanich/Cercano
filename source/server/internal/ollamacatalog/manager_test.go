@@ -174,3 +174,56 @@ func TestManager_RefreshErrorDoesNotWipePreviousCache(t *testing.T) {
 		t.Fatalf("previous cache was wiped by failed refresh (%d → %d models)", len(before), len(after))
 	}
 }
+
+func TestResolve_SucceedsWithModelLayerManifest(t *testing.T) {
+	// httptest server that returns a manifest with a valid model layer
+	// when asked for /v2/library/qwen2.5-coder/manifests/7b.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/library/qwen2.5-coder/manifests/7b" {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, `{"schemaVersion":2,"layers":[{"mediaType":"application/vnd.ollama.image.model","digest":"sha256:blob-model","size":4700000000}]}`)
+	}))
+	defer srv.Close()
+
+	m := NewManager(&Fetcher{RegistryURL: srv.URL}, "")
+	url, size, err := m.Resolve(context.Background(), "qwen2.5-coder:7b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := srv.URL + "/v2/library/qwen2.5-coder/blobs/sha256:blob-model"
+	if url != want {
+		t.Errorf("url = %q, want %q", url, want)
+	}
+	if size != 4700000000 {
+		t.Errorf("size = %d, want 4700000000", size)
+	}
+}
+
+func TestResolve_ErrorsOnMalformedRef(t *testing.T) {
+	// Guard: refs without a colon (or with an empty side) are unusable.
+	// Resolve must reject them explicitly so the caller can distinguish
+	// "you sent me a bad ref" from "the network is down".
+	m := NewManager(&Fetcher{}, "")
+	cases := []string{"", "qwen2.5-coder", ":7b", "qwen:", "only-family"}
+	for _, ref := range cases {
+		if _, _, err := m.Resolve(context.Background(), ref); err == nil {
+			t.Errorf("expected error for ref %q, got nil", ref)
+		}
+	}
+}
+
+func TestResolve_ErrorsWhenManifestHasNoModelLayer(t *testing.T) {
+	// Simulates a manifest that carries only template/system/license
+	// layers (no model). Resolve must not fall through to a bogus blob
+	// URL — that would download the template as if it were a GGUF.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"schemaVersion":2,"layers":[{"mediaType":"application/vnd.ollama.image.license","digest":"sha256:lic","size":100}]}`)
+	}))
+	defer srv.Close()
+	m := NewManager(&Fetcher{RegistryURL: srv.URL}, "")
+	if _, _, err := m.Resolve(context.Background(), "name:tag"); err == nil {
+		t.Fatal("expected error when manifest has no model layer, got nil")
+	}
+}

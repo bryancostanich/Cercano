@@ -18,6 +18,7 @@ package ollamacatalog
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -217,4 +218,42 @@ func (m *Manager) needsRefresh() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.cache.IsStale(time.Now(), m.ttl)
+}
+
+// Resolve implements localruntime.OCIResolver: given an Ollama library
+// reference of the form "name:tag" (e.g. "qwen2.5-coder:7b"), fetches
+// the manifest from registry.ollama.ai, picks the model layer, and
+// returns the blob URL + total size in bytes. Callers (the download
+// manager) then treat the URL like any other HTTP GET — the blob is a
+// raw GGUF file that both local runtimes can consume directly.
+//
+// Errors on malformed refs (missing colon or empty name/tag), on
+// manifest fetch failure, and on manifests that have no model layer.
+func (m *Manager) Resolve(ctx context.Context, ref string) (string, int64, error) {
+	name, tag, ok := splitOllamaRef(ref)
+	if !ok {
+		return "", 0, fmt.Errorf("ollamacatalog: invalid ollama ref %q (want name:tag)", ref)
+	}
+	manifest, err := m.fetcher.FetchManifest(name, tag)
+	if err != nil {
+		return "", 0, err
+	}
+	layer, err := manifest.ModelLayer()
+	if err != nil {
+		return "", 0, err
+	}
+	url := fmt.Sprintf("%s/v2/library/%s/blobs/%s", m.fetcher.registryURL(), name, layer.Digest)
+	return url, layer.Size, nil
+}
+
+// splitOllamaRef parses "name:tag" into its components. Empty name
+// or tag returns ok=false. The colon must be present and both sides
+// must be non-empty — a bare family name isn't downloadable because
+// we don't know which quant/size the user wants.
+func splitOllamaRef(ref string) (name, tag string, ok bool) {
+	idx := strings.Index(ref, ":")
+	if idx <= 0 || idx == len(ref)-1 {
+		return "", "", false
+	}
+	return ref[:idx], ref[idx+1:], true
 }

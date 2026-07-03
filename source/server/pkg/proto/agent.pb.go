@@ -2582,9 +2582,14 @@ func (x *RestartRuntimeResponse) GetInstance() *RuntimeInstance {
 }
 
 type DownloadRuntimeModelRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Runtime       string                 `protobuf:"bytes,1,opt,name=runtime,proto3" json:"runtime,omitempty"`
-	ModelId       string                 `protobuf:"bytes,2,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Runtime string                 `protobuf:"bytes,1,opt,name=runtime,proto3" json:"runtime,omitempty"`
+	ModelId string                 `protobuf:"bytes,2,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
+	// ollama_ref is optional; when set (e.g. "qwen2.5-coder:7b") the
+	// server enrolls a fresh ModelRecord backed by Ollama's registry
+	// rather than looking the model up through providers. Used for
+	// downloading online-catalog entries the provider hasn't cached.
+	OllamaRef     string `protobuf:"bytes,3,opt,name=ollama_ref,json=ollamaRef,proto3" json:"ollama_ref,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2629,6 +2634,13 @@ func (x *DownloadRuntimeModelRequest) GetRuntime() string {
 func (x *DownloadRuntimeModelRequest) GetModelId() string {
 	if x != nil {
 		return x.ModelId
+	}
+	return ""
+}
+
+func (x *DownloadRuntimeModelRequest) GetOllamaRef() string {
+	if x != nil {
+		return x.OllamaRef
 	}
 	return ""
 }
@@ -8318,10 +8330,12 @@ const file_agent_proto_rawDesc = "" +
 	"\x16RestartRuntimeResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x122\n" +
-	"\binstance\x18\x03 \x01(\v2\x16.agent.RuntimeInstanceR\binstance\"R\n" +
+	"\binstance\x18\x03 \x01(\v2\x16.agent.RuntimeInstanceR\binstance\"q\n" +
 	"\x1bDownloadRuntimeModelRequest\x12\x18\n" +
 	"\aruntime\x18\x01 \x01(\tR\aruntime\x12\x19\n" +
-	"\bmodel_id\x18\x02 \x01(\tR\amodelId\"o\n" +
+	"\bmodel_id\x18\x02 \x01(\tR\amodelId\x12\x1d\n" +
+	"\n" +
+	"ollama_ref\x18\x03 \x01(\tR\tollamaRef\"o\n" +
 	"\x1cDownloadRuntimeModelResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12)\n" +

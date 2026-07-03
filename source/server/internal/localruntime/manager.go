@@ -93,6 +93,17 @@ func (m *InMemoryManager) RegisterProvider(provider Provider) {
 	m.providers[provider.Name()] = provider
 }
 
+// SetOCIResolver attaches the resolver used to translate an
+// ollama-library ref into a concrete blob URL. Nil (the default) means
+// online-library entries will error on Download with a clear message —
+// they'll still list, they just can't be fetched. Called from main.go
+// wire-up with the ollamacatalog.Manager, which implements OCIResolver.
+func (m *InMemoryManager) SetOCIResolver(r OCIResolver) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ociResolver = r
+}
+
 func (m *InMemoryManager) Providers() []ProviderInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -226,6 +237,37 @@ func (m *InMemoryManager) DownloadModel(ctx context.Context, req DownloadRequest
 	}
 	if model.DownloadState == "downloaded" {
 		return &model, nil
+	}
+	// Just-in-time OCI resolution: online-catalog entries (from
+	// Ollama's public library) arrive with OllamaRef but no
+	// DownloadURL, because we don't want to fetch a manifest for every
+	// browsed model. Do the fetch now, right before the URL check, so
+	// only models the user actually clicks Download on incur the cost.
+	if model.DownloadURL == "" && model.OllamaRef != "" {
+		if m.ociResolver == nil {
+			return nil, fmt.Errorf("model %q needs OCI resolution but no OCIResolver is attached", req.ModelID)
+		}
+		url, size, resErr := m.ociResolver.Resolve(ctx, model.OllamaRef)
+		if resErr != nil {
+			return nil, fmt.Errorf("resolve OCI manifest for %s: %w", model.OllamaRef, resErr)
+		}
+		model.DownloadURL = url
+		if model.DownloadTotalBytes == 0 {
+			model.DownloadTotalBytes = size
+		}
+		if model.SizeBytes == 0 {
+			model.SizeBytes = size
+		}
+		if model.Path == "" {
+			// Default target: ~/.cercano/models/<name>-<tag>.gguf
+			home, herr := os.UserHomeDir()
+			if herr == nil {
+				modelDir := filepath.Join(home, ".cercano", "models")
+				// Sanitize the ref into a safe filename.
+				filename := strings.ReplaceAll(model.OllamaRef, ":", "-") + ".gguf"
+				model.Path = filepath.Join(modelDir, filename)
+			}
+		}
 	}
 	if model.DownloadURL == "" {
 		return nil, fmt.Errorf("model %q does not have a download URL", req.ModelID)
@@ -363,6 +405,12 @@ func (m *InMemoryManager) Logs(_ context.Context, req LogRequest) ([]LogEntry, e
 }
 
 func (m *InMemoryManager) findDownloadModel(ctx context.Context, req DownloadRequest) (ModelRecord, error) {
+	// Check enrolled entries first. Server-side handlers may pre-enrol
+	// online-catalog entries here so the download path can find them
+	// without requiring the provider's Discover to know about them.
+	if existing, ok := m.download(req.ModelID); ok && existing.Runtime == req.Runtime {
+		return existing, nil
+	}
 	models, err := m.Inventory(ctx)
 	if err != nil && len(models) == 0 {
 		return ModelRecord{}, err
@@ -373,6 +421,21 @@ func (m *InMemoryManager) findDownloadModel(ctx context.Context, req DownloadReq
 		}
 	}
 	return ModelRecord{}, fmt.Errorf("runtime model %q not found", req.ModelID)
+}
+
+// EnrollDownload pre-registers a ModelRecord as a download target so
+// findDownloadModel can find it even though no provider's Discover
+// surfaces it. Used by the server's DownloadRuntimeModel handler to
+// register online-catalog entries (from Ollama's library) before the
+// runtime layer's inventory logic runs.
+//
+// The enrolled entry is expected to have OllamaRef set (for JIT
+// resolution) or DownloadURL set (for direct download). State should
+// be "not_downloaded" — the download loop transitions it forward.
+func (m *InMemoryManager) EnrollDownload(model ModelRecord) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.downloads[model.ID] = model
 }
 
 func (m *InMemoryManager) runDownload(ctx context.Context, model ModelRecord, job *downloadJob) {

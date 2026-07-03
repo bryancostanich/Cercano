@@ -1701,11 +1701,23 @@ func (s *Server) RestartRuntime(ctx context.Context, req *proto.RestartRuntimeRe
 // enumerated: enroll a fresh ModelRecord with the ref so the
 // InMemoryManager's findDownloadModel finds it, then hand off to the
 // existing DownloadModel path (which performs JIT OCI resolution).
+// normalizeOllamaRef defaults a bare family name ("qwen2.5-coder") to
+// the :latest tag. Online catalog entries carry tagless refs, but the
+// registry needs a tag and the OCI resolver rejects tagless refs;
+// Ollama's registry defines :latest for every library model. Empty
+// stays empty (no online-catalog enrolment requested).
+func normalizeOllamaRef(ref string) string {
+	if ref == "" || strings.Contains(ref, ":") {
+		return ref
+	}
+	return ref + ":latest"
+}
+
 func (s *Server) DownloadRuntimeModel(ctx context.Context, req *proto.DownloadRuntimeModelRequest) (*proto.DownloadRuntimeModelResponse, error) {
 	if s.runtimeManager == nil {
 		return &proto.DownloadRuntimeModelResponse{Ok: false, Error: "runtime manager not configured"}, nil
 	}
-	if ref := req.GetOllamaRef(); ref != "" {
+	if ref := normalizeOllamaRef(req.GetOllamaRef()); ref != "" {
 		// Only the concrete InMemoryManager supports enrolment. If a
 		// future alternative implementation is wired in, this branch
 		// is a no-op and the download will fall back to the provider

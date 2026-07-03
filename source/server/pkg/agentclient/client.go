@@ -320,6 +320,7 @@ type RuntimeModel struct {
 	SupportsChat       bool
 	SupportsEmbed      bool
 	SupportsTools      bool
+	OllamaRef          string
 	Active             bool
 }
 
@@ -756,10 +757,16 @@ func (c *Client) RestartRuntime(ctx context.Context, instanceID, runtimeName, mo
 	return &instance, nil
 }
 
-func (c *Client) DownloadRuntimeModel(ctx context.Context, runtimeName, modelID string) (*RuntimeModel, error) {
+// DownloadRuntimeModel starts (or resumes) a model download. ollamaRef
+// is only needed for online-catalog entries that aren't enrolled with
+// the runtime manager yet (e.g. "qwen2.5-coder:7b" or a bare family
+// name, which the server defaults to the :latest tag); pass "" for
+// already-enrolled models.
+func (c *Client) DownloadRuntimeModel(ctx context.Context, runtimeName, modelID, ollamaRef string) (*RuntimeModel, error) {
 	resp, err := c.agent.DownloadRuntimeModel(ctx, &proto.DownloadRuntimeModelRequest{
-		Runtime: runtimeName,
-		ModelId: modelID,
+		Runtime:   runtimeName,
+		ModelId:   modelID,
+		OllamaRef: ollamaRef,
 	})
 	if err != nil {
 		return nil, err
@@ -1141,6 +1148,7 @@ func mapRuntimeModel(model *proto.RuntimeModel) RuntimeModel {
 		SupportsEmbed:      model.GetSupportsEmbed(),
 		SupportsTools:      model.GetSupportsTools(),
 		Active:             model.GetActive(),
+		OllamaRef:          model.GetOllamaRef(),
 	}
 }
 

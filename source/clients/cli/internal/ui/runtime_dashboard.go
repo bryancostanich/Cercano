@@ -1306,7 +1306,7 @@ func runtimeDashboardActionCmd(ag *agentclient.Client, action runtimeDashboardAc
 		case runtimeActionDownload:
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
-			model, err := ag.DownloadRuntimeModel(ctx, action.Runtime, action.ModelID)
+			model, err := ag.DownloadRuntimeModel(ctx, action.Runtime, action.ModelID, "")
 			if err != nil {
 				return runtimeDashboardActionMsg{Status: "download failed: " + err.Error(), CatalogMessage: "download failed"}
 			}
@@ -1374,7 +1374,7 @@ func runtimeDashboardDownloadCmd(ag *agentclient.Client, model agentclient.Runti
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		download, err := ag.DownloadRuntimeModel(ctx, model.Runtime, model.ID)
+		download, err := ag.DownloadRuntimeModel(ctx, model.Runtime, model.ID, model.OllamaRef)
 		if err != nil {
 			return runtimeDashboardActionMsg{
 				Status:         "download failed: " + err.Error(),

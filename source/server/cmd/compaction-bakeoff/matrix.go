@@ -211,7 +211,15 @@ func ollamaSummarizer(base *url.URL, model string, build func([]llm.Message) str
 		stream := false
 		prompt := build(msgs)
 		var out strings.Builder
-		req := &ollamaapi.GenerateRequest{Model: model, Prompt: prompt, Stream: &stream}
+		// Greedy decoding: the matrix compares prompts and algorithms, and
+		// sampling noise at default temperature swamped both (anchor scores
+		// swung 0/7..7/7 for identical inputs across runs 1-3).
+		req := &ollamaapi.GenerateRequest{
+			Model:   model,
+			Prompt:  prompt,
+			Stream:  &stream,
+			Options: map[string]any{"temperature": 0},
+		}
 		err := client.Generate(ctx, req, func(r ollamaapi.GenerateResponse) error {
 			out.WriteString(r.Response)
 			return nil

@@ -23,19 +23,18 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
-
-	ollamaapi "github.com/ollama/ollama/api"
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/compactor"
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
+	"cercano/source/server/internal/engine"
+	"cercano/source/server/internal/engine/ollama"
+	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
 )
 
@@ -51,6 +50,9 @@ func main() {
 	tells := flag.String("tells", "race condition,tests pass,rename-before-ensure,merge conflict",
 		"comma-separated fabrication tells that SHOULD NOT appear (weren't discussed here)")
 	timeout := flag.Duration("timeout", 5*time.Minute, "total run timeout")
+	aroundTurn := flag.String("aroundturn", "", "slice a window around this turn id (default: whole conversation)")
+	before := flag.Int("before", 40, "with -aroundturn: turns of context before the target")
+	after := flag.Int("after", 10, "with -aroundturn: turns of context after the target")
 	flag.Parse()
 
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
@@ -67,13 +69,27 @@ func main() {
 		fmt.Fprintf(os.Stderr, "getturns %s: %v (or empty)\n", *convID, err)
 		os.Exit(1)
 	}
-
-	ollamaBase, err := url.Parse(*ollamaURL)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "bad ollama url %q: %v\n", *ollamaURL, err)
-		os.Exit(1)
+	if *aroundTurn != "" {
+		target := -1
+		for i, t := range turns {
+			if t.ID == *aroundTurn {
+				target = i
+				break
+			}
+		}
+		if target < 0 {
+			fmt.Fprintf(os.Stderr, "turn %s not found in %s (%d turns)\n", *aroundTurn, *convID, len(turns))
+			os.Exit(1)
+		}
+		lo := max(0, target-*before)
+		hi := min(len(turns), target+*after+1)
+		turns = turns[lo:hi]
 	}
-	ollama := ollamaapi.NewClient(ollamaBase, http.DefaultClient)
+
+	// Summarize through the production stack (engine → OpenModelProvider →
+	// agent.Request), not a raw Ollama client, so this tool reproduces exactly
+	// what the agent does — including the greedy-decoding pin below.
+	provider := legacymodels.NewOpenModelProvider(ollama.NewOllamaEngine(*ollamaURL), *model)
 
 	msgs := agent.BuildLLMHistory(turns)
 	tok := contextmeter.Default()
@@ -87,18 +103,15 @@ func main() {
 	summarizerCalls := 0
 	summarize := func(ctx context.Context, m []llm.Message) (compaction.StructuredSummary, error) {
 		summarizerCalls++
-		prompt := compaction.BuildSummaryPrompt(m)
-		var out strings.Builder
-		stream := false
-		req := &ollamaapi.GenerateRequest{Model: *model, Prompt: prompt, Stream: &stream}
-		err := ollama.Generate(ctx, req, func(r ollamaapi.GenerateResponse) error {
-			out.WriteString(r.Response)
-			return nil
-		})
+		// Mirrors compactSummarize in cmd/cercano/main.go: greedy decoding is
+		// pinned so summaries are reproducible run to run.
+		greedy := engine.Greedy()
+		req := &agent.Request{Input: compaction.BuildSummaryPrompt(m), Temperature: greedy.Temperature}
+		resp, err := provider.Process(ctx, req)
 		if err != nil {
 			return compaction.StructuredSummary{}, err
 		}
-		return compaction.ParseSummary(out.String()), nil
+		return compaction.ParseSummary(resp.Output), nil
 	}
 
 	cfg := compactor.Config{

@@ -1118,6 +1118,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case runtimeEstimateMsg:
+		if dashboard, ok := m.content.(*runtimeDashboard); ok {
+			return m, dashboard.applyEstimate(msg)
+		}
+		return m, nil
+
 	case settingsCommitDoneMsg:
 		// The commit outcome still applies server-side even if the user has
 		// left the settings page — ConfigChanged events keep the chips fresh —

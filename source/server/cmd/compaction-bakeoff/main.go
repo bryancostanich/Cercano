@@ -48,6 +48,8 @@ func main() {
 	ollamaURL := flag.String("ollama", "http://localhost:11434", "for -conv: Ollama base URL")
 	csvPath := flag.String("csv", "", "for -conv: append machine-readable result rows to this CSV")
 	perFrame := flag.Duration("frametimeout", 30*time.Minute, "for -conv: per-frame timeout")
+	repeat := flag.Int("repeat", 1, "for -conv: matrix repetitions (LLM frames are sampled; one run is one sample)")
+	dumpDir := flag.String("dumpdir", "", "for -conv: save every prompt/response pair to this directory")
 	flag.Parse()
 
 	// Stats mode is deterministic and needs no agent — handle before dialing.
@@ -77,6 +79,8 @@ func main() {
 			Anchors:    must,
 			CSVPath:    *csvPath,
 			PerFrame:   *perFrame,
+			Repeat:     *repeat,
+			DumpDir:    *dumpDir,
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "matrix: %v\n", err)

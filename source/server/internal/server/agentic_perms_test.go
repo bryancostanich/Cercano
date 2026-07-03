@@ -109,29 +109,79 @@ func TestGrantedRegistry_LogsUnknownToolNames(t *testing.T) {
 }
 
 // TestGrantedRegistry_AllUnknownReturnsError verifies that when every requested
-// tool name is unknown (e.g. the caller passed prefixed names like
-// "mcp__oc__Read" that don't match Cercano's plain-name registry), the sub-agent
-// is not spawned with an empty catalog — the caller gets a clear error.
+// tool name is unknown (after prefix normalization), the sub-agent is not
+// spawned with an empty catalog — the caller gets a clear error naming the
+// offending inputs and the registered tools available.
 func TestGrantedRegistry_AllUnknownReturnsError(t *testing.T) {
 	srv := buildPermsServer(t)
 
-	_, err := srv.grantedRegistry([]string{"mcp__oc__Read", "mcp__oc__Glob"}, agent.ModeBypass)
+	_, err := srv.grantedRegistry([]string{"totally_bogus", "also_bogus"}, agent.ModeBypass)
 	if err == nil {
 		t.Fatal("expected error when all requested tools are unknown, got nil")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "mcp__oc__Read") {
+	if !strings.Contains(msg, "totally_bogus") {
 		t.Errorf("expected error to name the unknown tool, got: %q", msg)
 	}
-	if !strings.Contains(msg, "host prefix") {
-		t.Errorf("expected error to hint about host prefixes, got: %q", msg)
+	if !strings.Contains(msg, "available tools") {
+		t.Errorf("expected error to list available tools, got: %q", msg)
+	}
+	// Under bypass, both R and W tools should show as available.
+	if !strings.Contains(msg, "r_read") || !strings.Contains(msg, "w_write") {
+		t.Errorf("bypass hint should list all registered tools (R and W), got: %q", msg)
+	}
+}
+
+// TestGrantedRegistry_PrefixedNameResolvesToPlainTool verifies that when a
+// caller passes a host-prefixed name like "mcp__oc__r_read" and no tool is
+// registered under that exact name, grantedRegistry strips the prefix and
+// finds "r_read" — so a misgranted-but-recognizable name still works.
+func TestGrantedRegistry_PrefixedNameResolvesToPlainTool(t *testing.T) {
+	srv := buildPermsServer(t)
+
+	reg, err := srv.grantedRegistry([]string{"mcp__oc__r_read"}, agent.ModeBypass)
+	if err != nil {
+		t.Fatalf("prefix normalization should resolve mcp__oc__r_read to r_read, got: %v", err)
+	}
+	if !hasToolNamed(reg, "r_read") {
+		t.Errorf("expected r_read to be in the resulting registry after prefix strip")
+	}
+}
+
+// TestGrantedRegistry_ExactNameWinsOverStrippedForm verifies the "exact match
+// first" rule: if a tool is registered under the literal fully-qualified name
+// mcp__oc__X (as happens when Cercano hosts an MCP server named "oc"), the
+// grant resolves to that tool, NOT to a plain-named X that happens to exist.
+func TestGrantedRegistry_ExactNameWinsOverStrippedForm(t *testing.T) {
+	t.Helper()
+	// Register a plain "widget" AND a fully-qualified "mcp__oc__widget" —
+	// both real tools. Grant the fully-qualified name; expect the exact one.
+	plain := stubDispatchTool{name: "widget", perm: agenttools.PermR}
+	hosted := stubDispatchTool{name: "mcp__oc__widget", perm: agenttools.PermR}
+
+	reg := agenttools.NewRegistry()
+	reg.MustRegister(plain)
+	reg.MustRegister(hosted)
+
+	srv := NewServer(nil, nil, nil, nil, nil, nil)
+	srv.SetToolRegistry(reg)
+
+	out, err := srv.grantedRegistry([]string{"mcp__oc__widget"}, agent.ModeBypass)
+	if err != nil {
+		t.Fatalf("grantedRegistry: %v", err)
+	}
+	if !hasToolNamed(out, "mcp__oc__widget") {
+		t.Errorf("exact match should have resolved to the fully-qualified tool, got registry: %+v", out.All())
+	}
+	if hasToolNamed(out, "widget") {
+		t.Errorf("exact match should NOT have fallen through to the stripped form")
 	}
 }
 
 // TestGrantedRegistry_AllWTierUnderNonBypassReturnsError verifies that when
 // every requested tool is registered but gets dropped by the permission-mode
 // binding (all W/X under strict or permissive), the caller gets a clear error
-// rather than an empty catalog.
+// naming both the requested tools and the available R-tier alternatives.
 func TestGrantedRegistry_AllWTierUnderNonBypassReturnsError(t *testing.T) {
 	srv := buildPermsServer(t)
 
@@ -139,8 +189,15 @@ func TestGrantedRegistry_AllWTierUnderNonBypassReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when every requested tool is dropped by permission mode, got nil")
 	}
-	if !strings.Contains(err.Error(), "read-only") {
-		t.Errorf("expected error to mention the read-only bound, got: %q", err.Error())
+	msg := err.Error()
+	if !strings.Contains(msg, "read-tier") {
+		t.Errorf("expected error to mention the read-tier bound, got: %q", msg)
+	}
+	if !strings.Contains(msg, "w_write") {
+		t.Errorf("expected error to name the requested tool, got: %q", msg)
+	}
+	if !strings.Contains(msg, "r_read") {
+		t.Errorf("permissive-mode hint should suggest available R-tier tools, got: %q", msg)
 	}
 }
 

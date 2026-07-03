@@ -993,6 +993,37 @@ func (c *Client) GetOpenRuntimeStatus(ctx context.Context, runtime string) (*Ope
 	return openRuntimeStatusFromProto(resp.GetStatus()), nil
 }
 
+// CatalogRefreshResult carries the outcome of a RefreshOnlineCatalog
+// call. On success, Err is nil and UpdatedAt names the fresh fetch
+// time. On failure, Err is set and UpdatedAt reflects the last
+// SUCCESSFUL fetch so the CLI can still render staleness.
+type CatalogRefreshResult struct {
+	UpdatedAt  time.Time
+	ModelCount int
+	Err        error
+}
+
+// RefreshOnlineCatalog forces a fresh fetch of the model catalog from
+// Ollama's public library. Blocks until the fetch completes so callers
+// (typically the CLI dashboard's "R" refresh key) can update their
+// timestamp display immediately on return.
+func (c *Client) RefreshOnlineCatalog(ctx context.Context) CatalogRefreshResult {
+	resp, err := c.agent.RefreshOnlineCatalog(ctx, &proto.RefreshOnlineCatalogRequest{})
+	if err != nil {
+		return CatalogRefreshResult{Err: err}
+	}
+	out := CatalogRefreshResult{ModelCount: int(resp.GetModelCount())}
+	if s := resp.GetCatalogUpdatedAt(); s != "" {
+		if t, terr := time.Parse(time.RFC3339, s); terr == nil {
+			out.UpdatedAt = t
+		}
+	}
+	if s := resp.GetError(); s != "" {
+		out.Err = fmt.Errorf("%s", s)
+	}
+	return out
+}
+
 // InstallOpenRuntime opens the InstallOpenRuntime streaming RPC for the
 // given runtime and returns a channel of progress frames. The channel closes
 // after the terminal Done=true frame (or after a stream error). Cancelling

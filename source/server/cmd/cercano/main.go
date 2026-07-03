@@ -38,6 +38,7 @@ import (
 	"cercano/source/server/internal/llm"
 	ollamallm "cercano/source/server/internal/llm/ollama"
 	"cercano/source/server/internal/localruntime"
+	"cercano/source/server/internal/ollamacatalog"
 	runtimellama "cercano/source/server/internal/localruntime/llamaserver"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
@@ -251,6 +252,19 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	)
 	srv := server.NewServer(orchestrator, openProvider, lazyRouter, coordinator, cloudFactory, registry)
 	srv.SetRuntimeManager(runtimeManager)
+
+	// Attach the online-catalog manager so the runtime dashboard has
+	// Ollama's public library available (in addition to the hardcoded
+	// catalog + files on disk). LoadCache is best-effort — a missing
+	// cache on first run just means the background refresher will
+	// populate it shortly. Start() is what kicks the periodic refresh.
+	catalogCachePath := filepath.Join(filepath.Dir(config.DefaultPath()), "catalog-cache.json")
+	catalogManager := ollamacatalog.NewManager(&ollamacatalog.Fetcher{}, catalogCachePath)
+	if err := catalogManager.LoadCache(); err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] Could not load online-catalog cache at %s: %v (starting fresh)\n", catalogCachePath, err)
+	}
+	catalogManager.Start(context.Background())
+	srv.SetCatalogManager(catalogManager)
 	if sweeper != nil {
 		srv.SetRetentionSweeper(sweeper)
 	}

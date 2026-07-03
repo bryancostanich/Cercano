@@ -1017,6 +1017,54 @@ type InstallProgress struct {
 	Err   error
 }
 
+// RegenProgress is one frame of a RegenerateContext stream. Err carries a
+// transport-level failure; Error carries a server-reported one.
+type RegenProgress struct {
+	Line       string
+	Done       bool
+	Ok         bool
+	Error      string
+	PreTokens  int
+	PostTokens int
+	Err        error
+}
+
+// RegenerateContext rebuilds the conversation's derived context (compaction
+// state) from its raw turns on the server, streaming progress. The returned
+// channel closes after the terminal (Done) frame.
+func (c *Client) RegenerateContext(ctx context.Context, conversationID string) (<-chan RegenProgress, error) {
+	stream, err := c.agent.RegenerateContext(ctx, &proto.RegenerateContextRequest{ConversationId: conversationID})
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan RegenProgress, 8)
+	go func() {
+		defer close(out)
+		for {
+			frame, err := stream.Recv()
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			if err != nil {
+				out <- RegenProgress{Err: err}
+				return
+			}
+			out <- RegenProgress{
+				Line:       frame.GetLine(),
+				Done:       frame.GetDone(),
+				Ok:         frame.GetOk(),
+				Error:      frame.GetError(),
+				PreTokens:  int(frame.GetPreTokens()),
+				PostTokens: int(frame.GetPostTokens()),
+			}
+			if frame.GetDone() {
+				return
+			}
+		}
+	}()
+	return out, nil
+}
+
 // GetOpenRuntimeStatus fetches the local-runtime detection snapshot. When
 // runtime is empty, the server reports against its currently-selected
 // runtime (used by the CLI startup fetch that renders the chip). When

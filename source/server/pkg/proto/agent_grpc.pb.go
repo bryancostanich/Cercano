@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             v7.34.1
-// source: source/proto/agent.proto
+// source: agent.proto
 
 package proto
 
@@ -33,6 +33,7 @@ const (
 	Agent_SuggestNextPrompt_FullMethodName          = "/agent.Agent/SuggestNextPrompt"
 	Agent_GetOpenRuntimeStatus_FullMethodName       = "/agent.Agent/GetOpenRuntimeStatus"
 	Agent_InstallOpenRuntime_FullMethodName         = "/agent.Agent/InstallOpenRuntime"
+	Agent_RegenerateContext_FullMethodName          = "/agent.Agent/RegenerateContext"
 	Agent_ExportContext_FullMethodName              = "/agent.Agent/ExportContext"
 	Agent_GetConversationTurns_FullMethodName       = "/agent.Agent/GetConversationTurns"
 	Agent_ListTools_FullMethodName                  = "/agent.Agent/ListTools"
@@ -123,6 +124,13 @@ type AgentClient interface {
 	// so CLIs get the "runtime is now ready" signal through the same channel
 	// they used to render the "needs setup" chip.
 	InstallOpenRuntime(ctx context.Context, in *InstallOpenRuntimeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[InstallProgress], error)
+	// RegenerateContext rebuilds a conversation's derived context from its raw
+	// turns: clears the stored compaction state and re-runs compaction to
+	// completion, persisting each pass. Raw turns are never modified. Streams
+	// human-readable progress; the final frame carries before/after send-view
+	// token counts so clients can update their context meter without a
+	// follow-up call.
+	RegenerateContext(ctx context.Context, in *RegenerateContextRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RegenerateContextProgress], error)
 	// ExportContext returns the full uncapped raw history as a JSON []llm.Message.
 	ExportContext(ctx context.Context, in *ExportContextRequest, opts ...grpc.CallOption) (*ExportContextResponse, error)
 	// GetConversationTurns returns display-ready, side-effect-free summaries of a
@@ -368,6 +376,25 @@ func (c *agentClient) InstallOpenRuntime(ctx context.Context, in *InstallOpenRun
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Agent_InstallOpenRuntimeClient = grpc.ServerStreamingClient[InstallProgress]
 
+func (c *agentClient) RegenerateContext(ctx context.Context, in *RegenerateContextRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RegenerateContextProgress], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[2], Agent_RegenerateContext_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[RegenerateContextRequest, RegenerateContextProgress]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_RegenerateContextClient = grpc.ServerStreamingClient[RegenerateContextProgress]
+
 func (c *agentClient) ExportContext(ctx context.Context, in *ExportContextRequest, opts ...grpc.CallOption) (*ExportContextResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ExportContextResponse)
@@ -530,7 +557,7 @@ func (c *agentClient) RefreshOnlineCatalog(ctx context.Context, in *RefreshOnlin
 
 func (c *agentClient) StreamRuntimeLogs(ctx context.Context, in *StreamRuntimeLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RuntimeLogEntry], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[2], Agent_StreamRuntimeLogs_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[3], Agent_StreamRuntimeLogs_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -589,7 +616,7 @@ func (c *agentClient) GetPermissionMode(ctx context.Context, in *GetPermissionMo
 
 func (c *agentClient) SubscribeEvents(ctx context.Context, in *SubscribeEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ClientEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[3], Agent_SubscribeEvents_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[4], Agent_SubscribeEvents_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -807,6 +834,13 @@ type AgentServer interface {
 	// so CLIs get the "runtime is now ready" signal through the same channel
 	// they used to render the "needs setup" chip.
 	InstallOpenRuntime(*InstallOpenRuntimeRequest, grpc.ServerStreamingServer[InstallProgress]) error
+	// RegenerateContext rebuilds a conversation's derived context from its raw
+	// turns: clears the stored compaction state and re-runs compaction to
+	// completion, persisting each pass. Raw turns are never modified. Streams
+	// human-readable progress; the final frame carries before/after send-view
+	// token counts so clients can update their context meter without a
+	// follow-up call.
+	RegenerateContext(*RegenerateContextRequest, grpc.ServerStreamingServer[RegenerateContextProgress]) error
 	// ExportContext returns the full uncapped raw history as a JSON []llm.Message.
 	ExportContext(context.Context, *ExportContextRequest) (*ExportContextResponse, error)
 	// GetConversationTurns returns display-ready, side-effect-free summaries of a
@@ -935,6 +969,9 @@ func (UnimplementedAgentServer) GetOpenRuntimeStatus(context.Context, *GetOpenRu
 }
 func (UnimplementedAgentServer) InstallOpenRuntime(*InstallOpenRuntimeRequest, grpc.ServerStreamingServer[InstallProgress]) error {
 	return status.Error(codes.Unimplemented, "method InstallOpenRuntime not implemented")
+}
+func (UnimplementedAgentServer) RegenerateContext(*RegenerateContextRequest, grpc.ServerStreamingServer[RegenerateContextProgress]) error {
+	return status.Error(codes.Unimplemented, "method RegenerateContext not implemented")
 }
 func (UnimplementedAgentServer) ExportContext(context.Context, *ExportContextRequest) (*ExportContextResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ExportContext not implemented")
@@ -1305,6 +1342,17 @@ func _Agent_InstallOpenRuntime_Handler(srv interface{}, stream grpc.ServerStream
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Agent_InstallOpenRuntimeServer = grpc.ServerStreamingServer[InstallProgress]
+
+func _Agent_RegenerateContext_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(RegenerateContextRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AgentServer).RegenerateContext(m, &grpc.GenericServerStream[RegenerateContextRequest, RegenerateContextProgress]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_RegenerateContextServer = grpc.ServerStreamingServer[RegenerateContextProgress]
 
 func _Agent_ExportContext_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ExportContextRequest)
@@ -2166,6 +2214,11 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 		{
+			StreamName:    "RegenerateContext",
+			Handler:       _Agent_RegenerateContext_Handler,
+			ServerStreams: true,
+		},
+		{
 			StreamName:    "StreamRuntimeLogs",
 			Handler:       _Agent_StreamRuntimeLogs_Handler,
 			ServerStreams: true,
@@ -2176,5 +2229,5 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "source/proto/agent.proto",
+	Metadata: "agent.proto",
 }

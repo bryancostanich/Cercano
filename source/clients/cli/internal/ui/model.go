@@ -292,6 +292,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	slash.RegisterBasics(reg)
 	slash.RegisterConfig(reg, ag)
 	slash.RegisterColor(reg)
+	slash.RegisterContextRegen(reg)
 	// wdRef is shared with the slash registry so /context tracks the active
 	// workDir even after /d, /clear, or /resume update it.
 	wdRef := &struct{ dir string }{}
@@ -1183,6 +1184,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, msg.next
 
+	case contextRegenProgressMsg:
+		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("context-regen: " + msg.line)})
+		m.refreshViewport()
+		return m, msg.next
+
+	case contextRegenDoneMsg:
+		if msg.err != "" || !msg.ok {
+			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "context-regen failed: " + msg.err})
+			m.refreshViewport()
+			return m, fetchContextUsage(m.agent, m.convID)
+		}
+		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: fmt.Sprintf("context rebuilt from raw turns: ~%d → ~%d tokens", msg.pre, msg.post)})
+		m.refreshViewport()
+		// The terminal frame already carries the numbers, but the meter's
+		// authoritative source is GetContextUsage — refetch so every derived
+		// field (max, compacting flag) settles too.
+		return m, fetchContextUsage(m.agent, m.convID)
+
 	case ctxUsageMsg:
 		// Authoritative context-window meter from the agent; overrides
 		// our locally-summed cumIn approximation.
@@ -1785,6 +1804,13 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		cv, cmd := newContextView(m.agent, m.palette, m.styles, m.convID, m.width, m.height)
 		m.content = cv
 		return m, tea.Batch(cmd, contextRefreshTick())
+	case slash.ResultRegenContext:
+		if m.convID == "" {
+			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "no conversation yet — nothing to rebuild"})
+			m.refreshViewport()
+			return m, nil
+		}
+		return m, startContextRegenCmd(m.agent, m.convID)
 	case slash.ResultResumeConversation:
 		// /resume <id> path — slash already validated against the agent.
 		var resumeCmd tea.Cmd

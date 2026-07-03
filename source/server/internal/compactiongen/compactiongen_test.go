@@ -20,18 +20,22 @@ type fakeStore struct {
 	turns    []conversation.Turn
 	turnsErr error
 	saved    *conversation.Compaction
+	state    conversation.Compaction // returned by GetCompaction; updated by SaveCompaction
 }
 
 func (f *fakeStore) GetTurns(context.Context, string) ([]conversation.Turn, error) {
 	return f.turns, f.turnsErr
 }
 func (f *fakeStore) GetCompaction(context.Context, string) (conversation.Compaction, error) {
-	return conversation.Compaction{}, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.state, nil
 }
 func (f *fakeStore) SaveCompaction(_ context.Context, c conversation.Compaction) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.saved = &c
+	f.state = c
 	return nil
 }
 
@@ -216,5 +220,85 @@ func TestIsCompacting_TrueDuringPass(t *testing.T) {
 	}
 	if g.IsCompacting("c1") {
 		t.Error("IsCompacting should clear after the pass finishes")
+	}
+}
+
+func TestRegenerate_RebuildsFromRaw(t *testing.T) {
+	fs := &fakeStore{
+		turns: bigTurns(12, 1000),
+		state: conversation.Compaction{
+			ConversationID:   "c1",
+			FrozenThrough:    9,
+			ConsolidatedJSON: `{"goal":"poisoned summary from the default-temperature era"}`,
+		},
+	}
+	summarize := func(context.Context, []llm.Message) (compaction.StructuredSummary, error) {
+		return compaction.StructuredSummary{Goal: "fresh"}, nil
+	}
+	cfg := compactor.Config{ActivationFloorTokens: 1000, SegmentTokens: 4000, VerbatimRecent: 2}
+	g := New(fs, summarize, cfg, contextmeter.Default(), 10*time.Millisecond)
+
+	var lines []string
+	pre, post, err := g.Regenerate(context.Background(), "c1", func(l string) { lines = append(lines, l) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pre <= 0 || post <= 0 {
+		t.Fatalf("want positive token counts, got pre=%d post=%d", pre, post)
+	}
+	if post >= pre {
+		t.Fatalf("rebuild should compact: pre=%d post=%d", pre, post)
+	}
+	if len(lines) < 2 {
+		t.Fatalf("want at least a start line and one pass line, got %v", lines)
+	}
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if fs.saved == nil {
+		t.Fatal("expected rebuilt state to be persisted")
+	}
+	if strings.Contains(fs.saved.ConsolidatedJSON, "poisoned") {
+		t.Fatalf("old state survived the rebuild: %s", fs.saved.ConsolidatedJSON)
+	}
+	if fs.saved.ConsolidatedJSON == "" || fs.saved.FrozenThrough == 0 {
+		t.Errorf("rebuilt state incomplete: %+v", fs.saved)
+	}
+}
+
+func TestRegenerate_SmallConversationClearsState(t *testing.T) {
+	// Below the activation floor there is nothing to summarize — but regen
+	// must still wipe the poisoned derived state so the context truly comes
+	// from raw turns again.
+	fs := &fakeStore{
+		turns: bigTurns(3, 50),
+		state: conversation.Compaction{ConversationID: "c1", ConsolidatedJSON: `{"goal":"poisoned"}`},
+	}
+	summarize := func(context.Context, []llm.Message) (compaction.StructuredSummary, error) {
+		t.Fatal("summarizer must not run below the activation floor")
+		return compaction.StructuredSummary{}, nil
+	}
+	cfg := compactor.Config{ActivationFloorTokens: 100000, SegmentTokens: 4000, VerbatimRecent: 2}
+	g := New(fs, summarize, cfg, contextmeter.Default(), 10*time.Millisecond)
+
+	if _, _, err := g.Regenerate(context.Background(), "c1", nil); err != nil {
+		t.Fatal(err)
+	}
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if fs.state.ConsolidatedJSON != "" || fs.state.FrozenThrough != 0 {
+		t.Fatalf("derived state not cleared: %+v", fs.state)
+	}
+}
+
+func TestRegenerate_RefusesWhilePassInFlight(t *testing.T) {
+	fs := &fakeStore{turns: bigTurns(3, 50)}
+	g := New(fs, nil, compactor.Config{}, contextmeter.Default(), 10*time.Millisecond)
+
+	if !g.claim("c1") {
+		t.Fatal("claim should succeed on idle conversation")
+	}
+	defer g.release("c1")
+	if _, _, err := g.Regenerate(context.Background(), "c1", nil); err == nil {
+		t.Fatal("want error while another pass holds the claim")
 	}
 }

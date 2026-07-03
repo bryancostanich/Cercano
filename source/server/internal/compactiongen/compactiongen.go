@@ -87,15 +87,34 @@ func (g *Generator) CompactNow(ctx context.Context, conversationID string) error
 	return g.runCompaction(ctx, conversationID)
 }
 
-func (g *Generator) runCompaction(ctx context.Context, conversationID string) error {
+// claim marks a conversation as having a pass in flight. It returns false when
+// another pass (scheduled or an explicit Regenerate) already holds the claim,
+// so two passes never interleave Advance/SaveCompaction on one conversation.
+func (g *Generator) claim(conversationID string) bool {
 	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.inflight[conversationID] {
+		return false
+	}
 	g.inflight[conversationID] = true
+	return true
+}
+
+func (g *Generator) release(conversationID string) {
+	g.mu.Lock()
+	delete(g.inflight, conversationID)
 	g.mu.Unlock()
-	defer func() {
-		g.mu.Lock()
-		delete(g.inflight, conversationID)
-		g.mu.Unlock()
-	}()
+}
+
+func (g *Generator) runCompaction(ctx context.Context, conversationID string) error {
+	if !g.claim(conversationID) {
+		// Another pass holds the conversation; reschedule rather than skip so
+		// the debounced backlog isn't silently dropped.
+		g.logf("[compaction] pass deferred %s: another pass is in flight\n", conversationID)
+		g.Schedule(conversationID)
+		return nil
+	}
+	defer g.release(conversationID)
 
 	turns, err := g.store.GetTurns(ctx, conversationID)
 	if err != nil {
@@ -147,6 +166,75 @@ func (g *Generator) runCompaction(ctx context.Context, conversationID string) er
 		g.Schedule(conversationID)
 	}
 	return nil
+}
+
+// Regenerate rebuilds the conversation's derived compaction state from its raw
+// turns: the stored state is cleared and persisted, then Advance re-runs to
+// completion, persisting after every pass. Raw turns are never modified — the
+// worst a failed run can leave behind is a cleared state that the next
+// Regenerate (or scheduled pass) rebuilds. progress (nil-safe) receives one
+// human-readable line per step. Unlike Schedule this ignores the kill switch:
+// it only ever runs as an explicit user action.
+func (g *Generator) Regenerate(ctx context.Context, conversationID string, progress func(string)) (preTokens, postTokens int, err error) {
+	if progress == nil {
+		progress = func(string) {}
+	}
+	if !g.claim(conversationID) {
+		return 0, 0, fmt.Errorf("a compaction pass is already running for %s — try again in a moment", conversationID)
+	}
+	defer g.release(conversationID)
+
+	turns, err := g.store.GetTurns(ctx, conversationID)
+	if err != nil {
+		return 0, 0, err
+	}
+	if len(turns) == 0 {
+		return 0, 0, fmt.Errorf("conversation %s has no turns", conversationID)
+	}
+	state, err := g.store.GetCompaction(ctx, conversationID)
+	if err != nil {
+		return 0, 0, err
+	}
+	state.ConversationID = conversationID
+
+	if preView, verr := compactor.BuildSendView(turns, state); verr == nil {
+		preTokens = compaction.TotalTokens(g.tok, preView)
+	}
+	progress(fmt.Sprintf("rebuilding from %d raw turns (current view ~%d tokens)", len(turns), preTokens))
+
+	state.FrozenThrough = 0
+	state.SegmentSummariesJSON = ""
+	state.ConsolidatedJSON = ""
+	if err := g.store.SaveCompaction(ctx, state); err != nil {
+		return preTokens, 0, fmt.Errorf("clear derived state: %w", err)
+	}
+
+	pass := 0
+	for {
+		pass++
+		start := time.Now()
+		next, changed, more, err := compactor.Advance(ctx, turns, state, g.summarize, g.cfg, g.tok)
+		if err != nil {
+			return preTokens, 0, fmt.Errorf("pass %d: %w", pass, err)
+		}
+		if changed {
+			if err := g.store.SaveCompaction(ctx, next); err != nil {
+				return preTokens, 0, fmt.Errorf("persist pass %d: %w", pass, err)
+			}
+			state = next
+		}
+		postTokens = 0
+		if view, verr := compactor.BuildSendView(turns, state); verr == nil {
+			postTokens = compaction.TotalTokens(g.tok, view)
+		}
+		progress(fmt.Sprintf("pass %d: view ~%d tokens (%s)", pass, postTokens, time.Since(start).Round(time.Second)))
+		if !more {
+			return preTokens, postTokens, nil
+		}
+		if !changed {
+			return preTokens, postTokens, fmt.Errorf("pass %d reported more work but made no progress — aborting rather than spinning", pass)
+		}
+	}
 }
 
 // IsCompacting reports whether a compaction pass is currently running for the

@@ -52,3 +52,15 @@ func TestRegisterContext_NilWorkDirFallsBackToGetwd(t *testing.T) {
 	// Either "no project context" or actual file content — both are valid.
 	// The key contract is no panic.
 }
+
+func TestContextRegen_ReturnsRegenResult(t *testing.T) {
+	r := New()
+	RegisterContextRegen(r)
+	res, ok := r.Dispatch("/context-regen")
+	if !ok {
+		t.Fatal("expected /context-regen to dispatch")
+	}
+	if res.Kind != ResultRegenContext {
+		t.Fatalf("kind = %v, want ResultRegenContext", res.Kind)
+	}
+}

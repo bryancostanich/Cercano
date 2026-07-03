@@ -3,6 +3,7 @@ package watchdog
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 func editAction() Action {
@@ -118,5 +119,44 @@ func TestKeyForTurnEndUsesText(t *testing.T) {
 	tc := Action{Kind: "tool_call", ToolName: "edit_file", ToolArgs: []byte(`{"p":"a"}`), Text: "ignored"}
 	if keyFor("debug-loop", tc) != keyFor("debug-loop", Action{Kind: "tool_call", ToolName: "edit_file", ToolArgs: []byte(`{"p":"a"}`), Text: "different"}) {
 		t.Fatal("tool_call key must ignore Text")
+	}
+}
+
+// slowCheck blocks until its context is canceled, simulating a check whose
+// oneShot lane is drowning (cold model load, saturated Ollama). It honors ctx
+// like the real dispatch-backed oneShot does.
+type slowCheck struct{}
+
+func (slowCheck) Name() string          { return "slow-check" }
+func (slowCheck) Applies(a Action) bool { return true }
+func (slowCheck) Evaluate(ctx context.Context, _ Action, _ OneShotFunc) (Verdict, error) {
+	<-ctx.Done()
+	return Verdict{}, ctx.Err()
+}
+
+// TestGate_CheckTimeoutFailsOpen pins the stream-lockout fix: a check that
+// hangs must be cut off by the gate's own deadline and fail open, so a sick
+// local model lane can never hold a turn's stream open behind supervision.
+func TestGate_CheckTimeoutFailsOpen(t *testing.T) {
+	w := New(Config{Mode: ModeChallenge, CheckTimeout: 30 * time.Millisecond}, []Check{slowCheck{}}, nil)
+
+	start := time.Now()
+	d := w.Gate(context.Background(), "conv", Action{Kind: "turn_end", Text: "some final reply"})
+	elapsed := time.Since(start)
+
+	if d.Action != "allow" {
+		t.Errorf("hung check must fail open, got action %q", d.Action)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("gate took %v; the check timeout did not bound it", elapsed)
+	}
+}
+
+// TestGate_CheckTimeoutDefaulted pins that a zero CheckTimeout gets a sane
+// default rather than no deadline at all.
+func TestGate_CheckTimeoutDefaulted(t *testing.T) {
+	w := New(Config{Mode: ModeChallenge}, nil, nil)
+	if w.checkTimeout <= 0 {
+		t.Fatalf("checkTimeout = %v, want a positive default", w.checkTimeout)
 	}
 }

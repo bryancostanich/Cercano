@@ -14,19 +14,21 @@ func TestGroundedBullets(t *testing.T) {
 		"assistant: the config lives under models.tiers in config.yaml\n"
 	sum := StructuredSummary{
 		Decisions: []string{
-			"we agreed to use models.Resolve(tier, preferredProvider)", // exact
-			"the config lives   under models.tiers",                    // whitespace-differing, still grounded
+			"we agreed to use models.Resolve(tier, preferredProvider)",   // exact
+			"the config lives   under models.tiers",                      // whitespace-differing, still grounded
+			`"we agreed to use models.Resolve(tier, preferredProvider)"`, // model quote-wrapped, still grounded
+			`the config lives\nunder models.tiers`,                       // JSON-escaped newline, still grounded
 		},
 		Proposals:   []string{"switch the CLI to protobuf-over-websocket"}, // fabricated
 		OpenThreads: []string{"config.yaml"},                               // exact
 		Files:       map[string]string{"config.yaml": "not in source at all"},
 	}
 	grounded, total := GroundedBullets(sum, source)
-	if total != 5 {
-		t.Fatalf("total = %d, want 5", total)
+	if total != 7 {
+		t.Fatalf("total = %d, want 7", total)
 	}
-	if grounded != 3 {
-		t.Errorf("grounded = %d, want 3", grounded)
+	if grounded != 5 {
+		t.Errorf("grounded = %d, want 5", grounded)
 	}
 }
 

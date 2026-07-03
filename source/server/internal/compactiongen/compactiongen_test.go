@@ -302,3 +302,31 @@ func TestRegenerate_RefusesWhilePassInFlight(t *testing.T) {
 		t.Fatal("want error while another pass holds the claim")
 	}
 }
+
+func TestScheduledPass_DefersWhileClaimHeld(t *testing.T) {
+	// The normal compaction routine must not run while /context-regen holds
+	// the conversation: a scheduled or hard-override pass defers (reschedules)
+	// instead of interleaving Advance/Save with the rebuild.
+	fs := &fakeStore{turns: bigTurns(12, 1000)}
+	summarize := func(context.Context, []llm.Message) (compaction.StructuredSummary, error) {
+		t.Error("no pass may run while another holds the claim")
+		return compaction.StructuredSummary{}, nil
+	}
+	cfg := compactor.Config{ActivationFloorTokens: 1000, SegmentTokens: 4000, VerbatimRecent: 2}
+	g := New(fs, summarize, cfg, contextmeter.Default(), time.Hour) // debounce far off: the deferred reschedule must not fire mid-test
+	g.SetEnabled(true)
+
+	if !g.claim("c1") {
+		t.Fatal("claim should succeed on idle conversation")
+	}
+	defer g.release("c1")
+
+	if err := g.CompactNow(context.Background(), "c1"); err != nil {
+		t.Fatalf("deferred pass should be a clean no-op, got %v", err)
+	}
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if fs.saved != nil {
+		t.Fatal("deferred pass must not persist state")
+	}
+}

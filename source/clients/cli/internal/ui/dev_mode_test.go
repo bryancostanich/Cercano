@@ -2,8 +2,13 @@ package ui
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
+
+	"cercano/source/clients/cli/internal/slash"
 )
 
 func TestEffectiveWorkDirDefaultsToCwd(t *testing.T) {
@@ -45,5 +50,70 @@ func TestRenderDevChip(t *testing.T) {
 	on := Model{workDirOverride: "/tmp/cercano-repo"}
 	if got := on.renderDevChip(); !strings.Contains(got, "DEV") {
 		t.Fatalf("chip missing DEV label: %q", got)
+	}
+}
+
+// makeDevRepo creates a minimal temp directory satisfying the Cercano repo
+// markers (mirrors the helper in slash/dev_test.go).
+func makeDevRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	serverDir := filepath.Join(root, "source", "server", "cmd", "cercano")
+	if err := os.MkdirAll(serverDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cliDir := filepath.Join(root, "source", "clients", "cli")
+	if err := os.MkdirAll(cliDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cliDir, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+// TestDevModeStreamingQueuesKickoff asserts that when /d is run while a stream
+// is in flight, the kickoff is enqueued (not submitted) and workDirOverride is
+// set. No agent is attached, which also proves no submit was attempted.
+func TestDevModeStreamingQueuesKickoff(t *testing.T) {
+	repo := makeDevRepo(t)
+
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	// Replace registry with one containing only RegisterDev (no agent needed).
+	reg := slash.New()
+	slash.RegisterDev(reg)
+	m.registry = reg
+	m.streaming = true
+
+	got, _ := m.runSlash("/d " + repo)
+	next := got.(Model)
+
+	if next.workDirOverride != repo {
+		t.Fatalf("workDirOverride = %q, want %q", next.workDirOverride, repo)
+	}
+	q := next.chat.Queued()
+	if len(q) == 0 {
+		t.Fatal("kickoff not enqueued while streaming")
+	}
+	if !strings.Contains(q[0], "development mode") {
+		t.Fatalf("queued text doesn't look like a kickoff: %q", q[0])
+	}
+}
+
+// TestClearResetsDevModeOverride asserts that /clear clears workDirOverride.
+func TestClearResetsDevModeOverride(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	reg := slash.New()
+	slash.RegisterBasics(reg)
+	m.registry = reg
+	m.workDirOverride = "/some/dev/repo"
+
+	got, _ := m.runSlash("/clear")
+	next := got.(Model)
+
+	if next.workDirOverride != "" {
+		t.Fatalf("workDirOverride not cleared after /clear: %q", next.workDirOverride)
 	}
 }

@@ -143,6 +143,11 @@ type Model struct {
 	// active (including after /resume).
 	convRef *struct{ id string }
 
+	// wdRef shares the current workDirOverride with the slash registry by
+	// reference, so /context always reads from the active work dir (set by /d,
+	// cleared by /clear and /resume).
+	wdRef *struct{ dir string }
+
 	openHistoryOnStart bool // -r flag → open the history picker after first WindowSizeMsg
 
 	// promptBorderColor is the color of the lines immediately above and
@@ -287,7 +292,16 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	slash.RegisterBasics(reg)
 	slash.RegisterConfig(reg, ag)
 	slash.RegisterColor(reg)
-	slash.RegisterContext(reg)
+	// wdRef is shared with the slash registry so /context tracks the active
+	// workDir even after /d, /clear, or /resume update it.
+	wdRef := &struct{ dir string }{}
+	slash.RegisterContext(reg, func() string {
+		if wdRef.dir != "" {
+			return wdRef.dir
+		}
+		wd, _ := os.Getwd()
+		return wd
+	})
 	slash.RegisterTools(reg, ag)
 	slash.RegisterMcp(reg, ag)
 	slash.RegisterPermissions(reg, ag)
@@ -326,6 +340,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 		agent:              ag,
 		convID:             initialConvID,
 		convRef:            convRef,
+		wdRef:              wdRef,
 		registry:           reg,
 		splashShown:        !openHistoryOnStart,
 		splash:             splash,
@@ -1603,6 +1618,9 @@ func (m Model) effectiveWorkDir() string {
 // normal chat path (so it streams, persists, and meters like a typed turn).
 func (m *Model) applyDevMode(repo string) string {
 	m.workDirOverride = repo
+	if m.wdRef != nil {
+		m.wdRef.dir = repo
+	}
 	m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "dev mode: working on " + repo})
 	return slash.DevKickoff(repo)
 }
@@ -1684,6 +1702,10 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		if m.convRef != nil {
 			m.convRef.id = m.convID
 		}
+		m.workDirOverride = ""
+		if m.wdRef != nil {
+			m.wdRef.dir = ""
+		}
 		m.sessionTitle = ""
 		m.cumIn = 0
 		m.cumOut = 0
@@ -1754,6 +1776,13 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 	case slash.ResultDevMode:
 		kickoff := m.applyDevMode(res.WorkDir)
 		m.refreshViewport()
+		if m.streaming {
+			// A stream is already in flight: enqueue the kickoff so it drains
+			// at streamEndMsg, just like any typed follow-up.
+			m.chat.Enqueue(kickoff, nil)
+			m.relayout()
+			return m, nil
+		}
 		return m.submit(kickoff, nil)
 	case slash.ResultText:
 		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: res.Text})
@@ -2274,6 +2303,10 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 	m.convID = conversationID
 	if m.convRef != nil {
 		m.convRef.id = conversationID
+	}
+	m.workDirOverride = ""
+	if m.wdRef != nil {
+		m.wdRef.dir = ""
 	}
 	m.chat.SetEntriesSlice(nil)
 	// cumIn/cumOut wait for fetchContextUsage. The previous local sum here

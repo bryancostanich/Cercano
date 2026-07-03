@@ -104,6 +104,38 @@ func TestDevCommandDispatchAlias(t *testing.T) {
 	}
 }
 
+// TestResolveDevRepoEnvFallbackRelativeIsAbsolute asserts that a relative path
+// in CERCANO_REPO is normalized to an absolute path (via filepath.Abs) before
+// being returned, regardless of how the caller expressed it.
+func TestResolveDevRepoEnvFallbackRelativeIsAbsolute(t *testing.T) {
+	repo := makeRepo(t)
+	// Change the process cwd to the repo's parent so that just the base name
+	// is a valid relative path to the repo.
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origDir) //nolint:errcheck
+	if err := os.Chdir(filepath.Dir(repo)); err != nil {
+		t.Skipf("chdir: %v", err)
+	}
+	rel := filepath.Base(repo) // relative path from current dir
+
+	got, err := ResolveDevRepo("", t.TempDir(), rel)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !filepath.IsAbs(got) {
+		t.Fatalf("want absolute path, got %q", got)
+	}
+	// Normalize symlinks (macOS /var → /private/var) before comparing.
+	gotReal, _ := filepath.EvalSymlinks(got)
+	repoReal, _ := filepath.EvalSymlinks(repo)
+	if gotReal != repoReal {
+		t.Fatalf("got %q (real %q), want %q (real %q)", got, gotReal, repo, repoReal)
+	}
+}
+
 func TestDevKickoffNamesTheDocs(t *testing.T) {
 	kick := DevKickoff("/tmp/x")
 	for _, want := range []string{

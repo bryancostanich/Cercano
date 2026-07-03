@@ -64,6 +64,11 @@ type Result struct {
 	Notice       string
 	InputTokens  int
 	OutputTokens int
+
+	// SubConversationID names the persisted conversation holding the
+	// sub-agent's full tool loop (agentic dispatches with a store wired).
+	// Empty when persistence is unavailable.
+	SubConversationID string
 }
 
 // Engine routes dispatch calls to the appropriate provider.

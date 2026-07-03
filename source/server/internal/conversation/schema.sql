@@ -9,7 +9,12 @@ CREATE TABLE IF NOT EXISTS conversations (
     started_at   INTEGER NOT NULL,
     last_turn_at INTEGER NOT NULL,
     recap            TEXT NOT NULL DEFAULT '',
-    recap_updated_at INTEGER NOT NULL DEFAULT 0
+    recap_updated_at INTEGER NOT NULL DEFAULT 0,
+    -- kind: 'main' for user-facing conversations, 'subagent' for persisted
+    -- dispatch tool loops (hidden from List). parent_id links a subagent loop
+    -- to the conversation whose dispatch spawned it.
+    kind      TEXT NOT NULL DEFAULT 'main',
+    parent_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_conv_project ON conversations(project_dir, last_turn_at DESC);
 CREATE INDEX IF NOT EXISTS idx_conv_last_turn ON conversations(last_turn_at DESC);

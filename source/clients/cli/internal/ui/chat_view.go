@@ -2,7 +2,9 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -75,6 +77,27 @@ type dragScrollTickMsg struct{}
 
 func dragScrollTick() tea.Cmd {
 	return tea.Tick(60*time.Millisecond, func(time.Time) tea.Msg { return dragScrollTickMsg{} })
+}
+
+// toolClickLog is a stderr-safe append-only log used while debugging tool-line
+// click handling. Writes to /tmp/cercano-toolclick.log. Guarded by a mutex so
+// concurrent bubbletea handlers can't interleave lines.
+var (
+	toolClickLogMu sync.Mutex
+	toolClickLogF  *os.File
+)
+
+func toolClickLogf(format string, args ...any) {
+	toolClickLogMu.Lock()
+	defer toolClickLogMu.Unlock()
+	if toolClickLogF == nil {
+		f, err := os.OpenFile("/tmp/cercano-toolclick.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return
+		}
+		toolClickLogF = f
+	}
+	fmt.Fprintf(toolClickLogF, format, args...)
 }
 
 // atScrollEdge reports whether the last drag pointer position (local coords)
@@ -985,40 +1008,40 @@ func (c *chatView) MouseInText(localX, localY int) bool {
 // keyboard ToggleFocusedFold path). Returns true when the click was handled —
 // the host should refresh the viewport and skip its selection begin. Returns
 // false for clicks outside the text region, on non-tool lines, or when the
-// current render can't unambiguously map lines back to entries (grouped
-// collapsed runs — those still respond to keyboard nav).
+// current render can't unambiguously map lines back to entries.
 func (c *chatView) MouseToggleFold(localX, localY int) bool {
 	if !c.MouseInText(localX, localY) {
+		toolClickLogf("[toolclick] miss: outside text region (x=%d y=%d)\n", localX, localY)
 		return false
 	}
 	absLine := c.vp.YOffset() + localY
 	idx := c.toolEntryAtLine(absLine)
+	toolClickLogf("[toolclick] click x=%d y=%d line=%d → idx=%d\n", localX, localY, absLine, idx)
 	if idx < 0 {
 		return false
 	}
 	c.focusedToolIdx = idx
 	c.ToggleFocusedFold()
+	toolClickLogf("[toolclick] toggled entry idx=%d\n", idx)
 	return true
 }
 
 // toolEntryAtLine maps an absolute line index (into c.plainLines) to the
 // corresponding entries[] index of the tool call whose render spans that
-// line, or -1 when the mapping is ambiguous.
+// line, or -1 when the mapping can't be resolved.
 //
-// Two rendering patterns need to be handled:
-//   - Individual/expanded tool entries: each entry renders one line
-//     starting with ▸ or ▾ ("▸ read /path/..."). Arrow count matches the
-//     total tool-entry count in c.entries.
-//   - Collapsed multi-entry groups: N consecutive entries render as ONE
-//     summary line ("▸ 3 tool calls (2 Read, Edit)"). Arrow count matches
-//     the GROUP count.
-//
-// Cases: when arrow count == total tool entries, arrows and entries pair
-// 1:1 by document order. When arrow count == group count, each arrow maps
-// to the first entry of its group — clicking a group summary focuses that
-// entry, and the existing ToggleFocusedFold path expands the whole group
-// (mirroring the keyboard "expand collapsed group" behavior). Mixed
-// renderings (some groups collapsed, some expanded) return -1.
+// Rendering patterns handled (see renderToolGroup):
+//   - Single-entry "group": 1 arrow line → maps to that entry.
+//   - Expanded multi-entry group (groupExpanded[start]=true): N arrow lines,
+//     one per entry, in document order.
+//   - Collapsed multi-entry group with completed members: 1 summary arrow
+//     line ("▸ N tool calls (…)") — clicking it focuses the group's first
+//     entry so ToggleFocusedFold's group-aware branch expands the group.
+//   - Collapsed multi-entry group with in-progress members: one per-entry
+//     arrow line for each in-progress entry.
+//   - The two collapsed sub-cases can coexist (summary + trailing
+//     in-progress lines), which is the mixed case earlier versions bailed
+//     on.
 func (c *chatView) toolEntryAtLine(line int) int {
 	if line < 0 || line >= len(c.plainLines) {
 		return -1
@@ -1039,10 +1062,6 @@ func (c *chatView) toolEntryAtLine(line int) int {
 	if len(currentGroup) > 0 {
 		groups = append(groups, currentGroup)
 	}
-	totalEntries := 0
-	for _, g := range groups {
-		totalEntries += len(g)
-	}
 	// Scan for arrow lines.
 	var arrowLines []int
 	for i, ln := range c.plainLines {
@@ -1055,41 +1074,53 @@ func (c *chatView) toolEntryAtLine(line int) int {
 		}
 	}
 	if len(arrowLines) == 0 {
+		toolClickLogf("[toolclick] no arrow lines found\n")
+		return -1
+	}
+	// Build the expected arrow→entry mapping in document order by replaying
+	// each group's render layout.
+	mapping := make([]int, 0, len(arrowLines))
+	for _, g := range groups {
+		expanded := c.groupExpanded[g[0]]
+		if len(g) == 1 || expanded {
+			// Per-entry render: one arrow per entry.
+			for _, idx := range g {
+				mapping = append(mapping, idx)
+			}
+			continue
+		}
+		// Collapsed multi-entry group: split by status.
+		var completedIdxs, inProgressIdxs []int
+		for _, idx := range g {
+			if c.entries[idx].Tool.Status == ToolStatusInProgress {
+				inProgressIdxs = append(inProgressIdxs, idx)
+			} else {
+				completedIdxs = append(completedIdxs, idx)
+			}
+		}
+		if len(completedIdxs) > 0 {
+			// Summary arrow → focus first entry; toggle expands the group.
+			mapping = append(mapping, g[0])
+		}
+		for _, idx := range inProgressIdxs {
+			mapping = append(mapping, idx)
+		}
+	}
+	toolClickLogf("[toolclick] scan: line=%d arrows=%d groups=%d mapping=%d\n",
+		line, len(arrowLines), len(groups), len(mapping))
+	if len(mapping) != len(arrowLines) {
+		// Render layout didn't match our replay — bail rather than
+		// misdirect the click.
 		return -1
 	}
 	// Find which arrow-line range contains `line`.
-	arrowIdx := -1
 	for i, start := range arrowLines {
 		end := len(c.plainLines)
 		if i+1 < len(arrowLines) {
 			end = arrowLines[i+1]
 		}
 		if line >= start && line < end {
-			arrowIdx = i
-			break
-		}
-	}
-	if arrowIdx < 0 {
-		return -1
-	}
-	// Map arrow index → entry index. Two clean cases handled; mixed bails.
-	switch len(arrowLines) {
-	case totalEntries:
-		// Each arrow is one tool entry. Walk in doc order.
-		count := 0
-		for _, g := range groups {
-			for _, idx := range g {
-				if count == arrowIdx {
-					return idx
-				}
-				count++
-			}
-		}
-	case len(groups):
-		// Each arrow is one group's summary line. Focus the first entry —
-		// ToggleFocusedFold's group-aware logic then expands the group.
-		if arrowIdx < len(groups) {
-			return groups[arrowIdx][0]
+			return mapping[i]
 		}
 	}
 	return -1

@@ -981,6 +981,17 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		changes = append(changes, "watchdog_checks="+req.WatchdogChecks)
 		watchdogChanged = true
 	}
+	if req.ModelTierKey != "" {
+		desc, err := config.ApplyModelTierPatch(&s.currentConfig.Models, req.ModelTierKey, req.ModelTierValue)
+		if err != nil {
+			return &proto.UpdateConfigResponse{Success: false, Message: err.Error()}, nil
+		}
+		changes = append(changes, desc)
+		s.broadcastConfigChanged("models."+req.ModelTierKey, req.ModelTierValue)
+		// The watchdog resolves its one-shot model from the taxonomy at build
+		// time, so a tier change must rebuild it to take effect.
+		watchdogChanged = true
+	}
 	if watchdogChanged {
 		// Rebuild the supervisor from the just-applied config. buildWatchdogFrom
 		// takes NO lock, so this is safe under the held cfgMu write lock.
@@ -1490,6 +1501,8 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 		CompactedRetentionDays: int32(cfg.Compaction.Retention.CompactedRetentionDays),
 		KeepForever:            cfg.Compaction.Retention.KeepForever,
 		CompactionEnabled:      cfg.Compaction.Enabled,
+		ModelTiers:             cfg.Models.TierSlots(),
+		ModelsDefaultProvider:  string(cfg.Models.DefaultProvider),
 	}, nil
 }
 

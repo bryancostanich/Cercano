@@ -88,3 +88,64 @@ func TestDefaults_ModelsProvider(t *testing.T) {
 		t.Errorf("Defaults().Models.DefaultProvider = %q, want open", got)
 	}
 }
+
+// TestApplyModelTierPatch pins the sparse-patch contract used by /config:
+// "<tier>.<provider>" sets a slot, "default_provider" sets the preference,
+// "-" clears, and unknown tiers/providers are rejected with an error.
+func TestApplyModelTierPatch(t *testing.T) {
+	var m ModelsConfig
+
+	desc, err := ApplyModelTierPatch(&m, "fast_light_text.open", "phi4:14b")
+	if err != nil {
+		t.Fatalf("set slot: %v", err)
+	}
+	if m.Tiers.FastLightText.Open != "phi4:14b" {
+		t.Errorf("slot not set: %+v", m.Tiers.FastLightText)
+	}
+	if !strings.Contains(desc, "fast_light_text.open") {
+		t.Errorf("change description should name the slot, got %q", desc)
+	}
+
+	if _, err := ApplyModelTierPatch(&m, "default_provider", "cloud"); err != nil {
+		t.Fatalf("set default_provider: %v", err)
+	}
+	if m.DefaultProvider != ProviderCloud {
+		t.Errorf("DefaultProvider = %q", m.DefaultProvider)
+	}
+	if _, err := ApplyModelTierPatch(&m, "default_provider", "banana"); err == nil {
+		t.Error("invalid default_provider value must be rejected")
+	}
+
+	if _, err := ApplyModelTierPatch(&m, "fast_light_text.open", "-"); err != nil {
+		t.Fatalf("clear slot: %v", err)
+	}
+	if m.Tiers.FastLightText.Open != "" {
+		t.Errorf("slot not cleared: %q", m.Tiers.FastLightText.Open)
+	}
+
+	if _, err := ApplyModelTierPatch(&m, "medium_rare.open", "x"); err == nil {
+		t.Error("unknown tier must be rejected")
+	}
+	if _, err := ApplyModelTierPatch(&m, "everyday.hybrid", "x"); err == nil {
+		t.Error("unknown provider must be rejected")
+	}
+	if _, err := ApplyModelTierPatch(&m, "everyday", "x"); err == nil {
+		t.Error("missing provider segment must be rejected")
+	}
+}
+
+// TestModelTierSlots pins the read-side enumeration used by GetConfig and
+// /config show: only non-empty slots, keyed "<tier>.<provider>".
+func TestModelTierSlots(t *testing.T) {
+	var m ModelsConfig
+	m.Tiers.FastLightText.Open = "phi4:14b"
+	m.Tiers.Everyday.Cloud = "claude-fable-5"
+
+	slots := m.TierSlots()
+	if len(slots) != 2 {
+		t.Fatalf("slots = %v, want 2 entries", slots)
+	}
+	if slots["fast_light_text.open"] != "phi4:14b" || slots["everyday.cloud"] != "claude-fable-5" {
+		t.Errorf("slots = %v", slots)
+	}
+}

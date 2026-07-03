@@ -1712,12 +1712,30 @@ func runtimeModelKey(runtimeName, modelID string) string {
 	return runtimeName + "\x00" + modelID
 }
 
+// modelValue summarizes an installed model: size, quant, projected RAM
+// (when the server pre-warmed estimate numbers onto the record), and
+// only NOTABLE state. Runtime, family, and "downloaded | stopped" are
+// deliberately omitted — the row lives in the "installed models"
+// section (so it's downloaded), the label carries the name, and the
+// hint column carries the runtime.
 func modelValue(model agentclient.RuntimeModel, running agentclient.RuntimeInstance) string {
-	parts := nonEmptyParts(model.Runtime, model.DownloadState, model.RuntimeState, model.Family, model.Quantization, formatBytes(model.SizeBytes))
+	parts := nonEmptyParts(formatBytes(model.SizeBytes), model.Quantization)
+	if model.KVBytesPerToken > 0 && model.SizeBytes > 0 && model.MaxContextTokens > 0 {
+		est := agentclient.ModelRAMEstimate{
+			WeightsBytes:     model.SizeBytes,
+			KVBytesPerToken:  model.KVBytesPerToken,
+			MaxContextTokens: model.MaxContextTokens,
+		}
+		ctx := min64(8192, model.MaxContextTokens)
+		parts = append(parts, "~"+formatBytes(estimateTotalAt(est, ctx))+" RAM @"+fmtContextTokens(ctx))
+	}
+	if state := strings.ToLower(model.DownloadState); state != "" && state != "downloaded" {
+		parts = append(parts, state)
+	}
 	if running.ID != "" {
 		parts = append(parts, "process:"+running.State)
 	}
-	return strings.Join(parts, " | ")
+	return strings.Join(parts, " · ")
 }
 
 func modelHint(model agentclient.RuntimeModel, running agentclient.RuntimeInstance) string {
@@ -1816,11 +1834,28 @@ func shortModelName(modelID string) string {
 	if modelID == "" {
 		return "unknown"
 	}
-	base := filepath.Base(modelID)
+	base := filepath.Base(stripModelIDPrefix(modelID))
 	if base == "." || base == string(filepath.Separator) {
 		base = modelID
 	}
 	return shorten(base, 44)
+}
+
+// stripModelIDPrefix removes the runtime (and source qualifier) from
+// inventory-style IDs like "llama_server:catalog:qwen2.5-coder-1.5b"
+// or "llama_server:f1f3470efd49" — users care about the trailing model
+// name, not the namespace. Ollama-style "name:tag" refs pass through
+// untouched (their first segment isn't a runtime name).
+func stripModelIDPrefix(id string) string {
+	parts := strings.Split(id, ":")
+	if len(parts) < 2 || (parts[0] != "llama_server" && parts[0] != "ollama") {
+		return id
+	}
+	rest := parts[1:]
+	if len(rest) >= 2 && (rest[0] == "catalog" || rest[0] == "online") {
+		rest = rest[1:]
+	}
+	return strings.Join(rest, ":")
 }
 
 func shortID(id string) string {

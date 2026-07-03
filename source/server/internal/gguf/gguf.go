@@ -54,13 +54,30 @@ type Meta struct {
 	// embedding/head_count). Zero means "derive from embedding length".
 	KeyLength   uint64
 	ValueLength uint64
+	// KVHeadsTotal is the sum of KV heads across all layers, set when
+	// head_count_kv is a per-layer array — hybrid architectures like
+	// qwen3next interleave linear-attention layers (0 KV heads) with
+	// full-attention layers, so no uniform per-layer value exists.
+	// Zero means "uniform: derive as BlockCount * HeadCountKV".
+	KVHeadsTotal uint64
+}
+
+// kvHeadsTotal is the total KV-head count across all layers: the
+// per-layer array sum when present (hybrid architectures), otherwise
+// uniform layers x per-layer heads.
+func (m *Meta) kvHeadsTotal() uint64 {
+	if m.KVHeadsTotal > 0 {
+		return m.KVHeadsTotal
+	}
+	return m.BlockCount * m.HeadCountKV
 }
 
 // KVBytesPerToken returns the KV-cache cost of one context token in
 // bytes, assuming the llama.cpp default f16 cache (2 bytes/element):
-// layers x kv_heads x (key_dim + value_dim) x 2.
+// total_kv_heads x (key_dim + value_dim) x 2.
 func (m *Meta) KVBytesPerToken() int64 {
-	if m.BlockCount == 0 || m.HeadCountKV == 0 {
+	total := m.kvHeadsTotal()
+	if total == 0 {
 		return 0
 	}
 	keyDim := m.KeyLength
@@ -77,18 +94,20 @@ func (m *Meta) KVBytesPerToken() int64 {
 			valDim = headDim
 		}
 	}
-	return int64(m.BlockCount) * int64(m.HeadCountKV) * int64(keyDim+valDim) * 2
+	return int64(total) * int64(keyDim+valDim) * 2
 }
 
 // complete reports whether every field required for an estimate is set.
 // KeyLength/ValueLength stay optional — most architectures derive them.
+// The KV-head requirement is satisfied by either form: a uniform
+// scalar (HeadCountKV) or a per-layer array sum (KVHeadsTotal).
 func (m *Meta) complete() bool {
 	return m.Architecture != "" &&
 		m.BlockCount != 0 &&
 		m.ContextLength != 0 &&
 		m.EmbeddingLength != 0 &&
 		m.HeadCount != 0 &&
-		m.HeadCountKV != 0
+		(m.HeadCountKV != 0 || m.KVHeadsTotal != 0)
 }
 
 // ParseMeta reads GGUF header metadata from r until it has all the
@@ -184,7 +203,7 @@ func (m *Meta) consume(r io.Reader, key string, valType uint32) error {
 	case m.Architecture != "" && key == m.Architecture+".attention.head_count":
 		return m.readUint(r, valType, &m.HeadCount, key)
 	case m.Architecture != "" && key == m.Architecture+".attention.head_count_kv":
-		return m.readUint(r, valType, &m.HeadCountKV, key)
+		return m.readKVHeads(r, valType, key)
 	case m.Architecture != "" && key == m.Architecture+".attention.key_length":
 		return m.readUint(r, valType, &m.KeyLength, key)
 	case m.Architecture != "" && key == m.Architecture+".attention.value_length":
@@ -241,8 +260,8 @@ func (m *Meta) readUint(r io.Reader, valType uint32, dst *uint64, key string) er
 		}
 		*dst = uint64(v)
 	case typeArray:
-		// A handful of models publish per-layer head_count_kv arrays.
-		// Uniform layers dominate; take the first element as the
+		// Array-valued scalars outside head_count_kv (which has its
+		// own summing reader) are rare; take the first element as the
 		// representative value and skip the rest.
 		var elemType uint32
 		var count uint64
@@ -266,6 +285,37 @@ func (m *Meta) readUint(r io.Reader, valType uint32, dst *uint64, key string) er
 	default:
 		return fmt.Errorf("gguf: %s has unexpected type %d", key, valType)
 	}
+	return nil
+}
+
+// readKVHeads handles both publication forms of attention.head_count_kv:
+// a uniform scalar (stored in HeadCountKV), or a per-layer array —
+// hybrid architectures like qwen3next publish one entry per layer,
+// zero for the linear-attention layers — summed into KVHeadsTotal.
+func (m *Meta) readKVHeads(r io.Reader, valType uint32, key string) error {
+	if valType != typeArray {
+		return m.readUint(r, valType, &m.HeadCountKV, key)
+	}
+	var elemType uint32
+	var count uint64
+	if err := binary.Read(r, binary.LittleEndian, &elemType); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &count); err != nil {
+		return err
+	}
+	if count == 0 {
+		return fmt.Errorf("gguf: %s is an empty array", key)
+	}
+	var total uint64
+	for i := uint64(0); i < count; i++ {
+		var v uint64
+		if err := m.readUint(r, elemType, &v, key); err != nil {
+			return err
+		}
+		total += v
+	}
+	m.KVHeadsTotal = total
 	return nil
 }
 

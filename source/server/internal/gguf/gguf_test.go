@@ -167,10 +167,10 @@ func TestParseMeta_GemmaKeyLengthOverride(t *testing.T) {
 	}
 }
 
-func TestParseMeta_HeadCountKVArrayTakesFirst(t *testing.T) {
+func TestParseMeta_HeadCountKVArraySums(t *testing.T) {
 	b := &ggufBuilder{}
 	b.addString("general.architecture", "llama").
-		addUint32("llama.block_count", 32).
+		addUint32("llama.block_count", 4).
 		addUint32("llama.context_length", 4096).
 		addUint32("llama.embedding_length", 4096).
 		addUint32("llama.attention.head_count", 32).
@@ -179,8 +179,42 @@ func TestParseMeta_HeadCountKVArrayTakesFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseMeta: %v", err)
 	}
-	if meta.HeadCountKV != 8 {
-		t.Errorf("HeadCountKV = %d, want 8", meta.HeadCountKV)
+	if meta.KVHeadsTotal != 32 {
+		t.Errorf("KVHeadsTotal = %d, want 32", meta.KVHeadsTotal)
+	}
+	// Uniform array: same result as scalar form — 32 total heads x
+	// (128+128) dims x 2 bytes.
+	if got := meta.KVBytesPerToken(); got != 16384 {
+		t.Errorf("KVBytesPerToken = %d, want 16384", got)
+	}
+}
+
+// qwen3next-style hybrid: most layers are linear attention (0 KV
+// heads), a few carry full attention. The first element being 0 must
+// not fail the parse (the original bug), and the sum must drive the
+// estimate.
+func TestParseMeta_HybridAttentionZeroFirstLayer(t *testing.T) {
+	heads := make([]uint32, 48)
+	for i := 3; i < 48; i += 4 {
+		heads[i] = 2 // every 4th layer has 2 KV heads -> sum 24
+	}
+	b := &ggufBuilder{}
+	b.addString("general.architecture", "qwen3next").
+		addUint32("qwen3next.block_count", 48).
+		addUint32("qwen3next.context_length", 262144).
+		addUint32("qwen3next.embedding_length", 2048).
+		addUint32("qwen3next.attention.head_count", 16).
+		addUint32Array("qwen3next.attention.head_count_kv", heads)
+	meta, err := ParseMeta(bytes.NewReader(b.bytes()))
+	if err != nil {
+		t.Fatalf("ParseMeta on hybrid model: %v", err)
+	}
+	if meta.KVHeadsTotal != 24 {
+		t.Errorf("KVHeadsTotal = %d, want 24", meta.KVHeadsTotal)
+	}
+	// 24 total heads x (128+128) dims x 2 bytes = 12288.
+	if got := meta.KVBytesPerToken(); got != 12288 {
+		t.Errorf("KVBytesPerToken = %d, want 12288", got)
 	}
 }
 

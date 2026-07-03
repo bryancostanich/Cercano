@@ -53,3 +53,49 @@ func TestSelectCommitExpandsRow(t *testing.T) {
 	}
 	_ = status
 }
+
+// TestShouldApplyModelEdit pins when a committed cloud-section field edit is
+// pushed to the server immediately instead of parking in the draft. Picking a
+// model on an EXISTING profile must apply right away — the draft-only path
+// silently discarded the choice when the user left the page without pressing
+// save. New drafts still go through explicit save (they may lack name/flavor),
+// and structural fields (name, base_url, …) keep the draft+save flow.
+func TestShouldApplyModelEdit(t *testing.T) {
+	cases := []struct {
+		field    string
+		draftNew bool
+		want     bool
+	}{
+		{"cloud-model", false, true},
+		{"cloud-model", true, false},
+		{"cloud-base-url", false, false},
+		{"cloud-name", false, false},
+		{"cloud-flavor", false, false},
+	}
+	for _, c := range cases {
+		if got := shouldApplyModelEdit(c.field, c.draftNew); got != c.want {
+			t.Errorf("shouldApplyModelEdit(%q, draftNew=%v) = %v, want %v", c.field, c.draftNew, got, c.want)
+		}
+	}
+}
+
+// TestFallbackClaudeModelsIncludeCurrentGeneration pins that the offline
+// fallback catalog carries the current top-tier models, so a user without a
+// live catalog fetch can still pick them.
+func TestFallbackClaudeModelsIncludeCurrentGeneration(t *testing.T) {
+	want := map[string]bool{
+		"claude-fable-5":    false,
+		"claude-opus-4-8":   false,
+		"claude-sonnet-4-6": false,
+	}
+	for _, m := range fallbackClaudeModels() {
+		if _, ok := want[m.ID]; ok {
+			want[m.ID] = true
+		}
+	}
+	for id, found := range want {
+		if !found {
+			t.Errorf("fallbackClaudeModels missing %s", id)
+		}
+	}
+}

@@ -460,3 +460,66 @@ func TestSetActiveCloudProfileBedrockKeylessOk(t *testing.T) {
 		t.Error("keyless bedrock should NOT install the absent provider")
 	}
 }
+
+// TestUpsertCloudProfile_ActiveBroadcastsCloudModel verifies that editing the
+// ACTIVE profile's model pushes a cloud_model ConfigChanged event, so the CLI
+// header chip updates live instead of showing the stale model.
+func TestUpsertCloudProfile_ActiveBroadcastsCloudModel(t *testing.T) {
+	s, _ := newTestServer()
+	if err := s.secrets.Set("messages-one", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	s.currentConfig.ActiveCloudProfile = "messages-one"
+	if err := s.rebuildCloud(); err != nil {
+		t.Fatalf("initial rebuildCloud: %v", err)
+	}
+	s.events = newEventHub()
+	ch, unsub := s.events.subscribe()
+	defer unsub()
+
+	resp, err := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{
+		Name: "messages-one", Flavor: "messages", Model: "claude-fable-5",
+	})
+	if err != nil || !resp.Ok {
+		t.Fatalf("UpsertCloudProfile: err=%v resp=%+v", err, resp)
+	}
+
+	select {
+	case ev := <-ch:
+		cc := ev.GetConfigChanged()
+		if cc == nil {
+			t.Fatalf("expected ConfigChanged event, got %T", ev.Event)
+		}
+		if cc.Field != "cloud_model" || cc.Value != "claude-fable-5" {
+			t.Errorf("event = %s/%s, want cloud_model/claude-fable-5", cc.Field, cc.Value)
+		}
+	default:
+		t.Error("expected a cloud_model ConfigChanged broadcast for active-profile upsert, got none")
+	}
+}
+
+// TestUpsertCloudProfile_InactiveDoesNotBroadcast pins the inverse: editing a
+// non-active profile must not touch the chip.
+func TestUpsertCloudProfile_InactiveDoesNotBroadcast(t *testing.T) {
+	s, _ := newTestServer()
+	s.currentConfig.ActiveCloudProfile = "messages-one"
+	s.events = newEventHub()
+	ch, unsub := s.events.subscribe()
+	defer unsub()
+
+	resp, err := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{
+		Name: "other-profile", Flavor: "messages", Model: "claude-fable-5",
+	})
+	if err != nil || !resp.Ok {
+		t.Fatalf("UpsertCloudProfile: err=%v resp=%+v", err, resp)
+	}
+
+	select {
+	case ev := <-ch:
+		if ev.GetConfigChanged() != nil {
+			t.Errorf("unexpected ConfigChanged broadcast for non-active profile: %+v", ev.GetConfigChanged())
+		}
+	default:
+		// good — no broadcast
+	}
+}

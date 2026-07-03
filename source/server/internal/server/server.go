@@ -536,13 +536,15 @@ func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudP
 	}
 	isActive := name == s.currentConfig.ActiveCloudProfile
 	s.cfgMu.Unlock()
-	// If this is the active profile, rebuild so metadata changes take effect now.
+	// If this is the active profile, rebuild so metadata changes take effect
+	// now, and broadcast the model so client chrome (header chip) updates live.
 	if isActive {
 		if err := s.rebuildCloud(); err != nil {
 			// active is set, but the provider couldn't be built — report it, keep going.
 			s.persistConfig()
 			return &proto.UpsertCloudProfileResponse{Ok: false, Error: err.Error()}, nil
 		}
+		s.broadcastConfigChanged("cloud_model", np.Model)
 	}
 	s.persistConfig()
 	return &proto.UpsertCloudProfileResponse{Ok: true}, nil

@@ -50,6 +50,16 @@ func classifyCloudCommit(key, value string) cloudCommitAction {
 	return cloudCommitAction{kind: cloudCommitNone}
 }
 
+// shouldApplyModelEdit reports whether a committed cloud-section field edit is
+// pushed to the server immediately instead of parking in the draft. Model
+// changes on an EXISTING profile apply right away: picking a model in the
+// Select and leaving the page must not silently discard the choice. New
+// drafts still go through explicit save (they may lack name/flavor), and
+// structural fields (name, base_url, …) keep the draft+save flow.
+func shouldApplyModelEdit(field string, draftNew bool) bool {
+	return field == "cloud-model" && !draftNew
+}
+
 // applyCloudDraftEdit writes one committed detail field into the draft.
 func (sp *settingsPage) applyCloudDraftEdit(field, value string) {
 	switch field {
@@ -76,6 +86,19 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		return "", nil, nil
 	case cloudCommitDraftEdit:
 		sp.applyCloudDraftEdit(ca.field, ca.value)
+		if shouldApplyModelEdit(ca.field, sp.cloudDraftNew) && sp.agent != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			d := sp.cloudDraft
+			err := sp.agent.UpsertCloudProfile(ctx, agentclient.CloudProfileInfo{
+				Name: d.Name, Flavor: d.Flavor, Backend: d.Backend, BaseURL: d.BaseURL, Model: d.Model,
+			})
+			if err != nil {
+				return "", nil, err
+			}
+			sp.profilesLoaded = false
+			return "model applied: " + d.Model, nil, nil
+		}
 		return "", nil, nil
 	case cloudCommitSave:
 		if sp.agent == nil {

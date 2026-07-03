@@ -56,7 +56,7 @@ Switch with `/strict`, `/permissive`, `/bypass`, or `/mode <name>`. Persists to 
 
 | Command | What it does |
 |---|---|
-| `/d [repo-path]` | Development mode — point the session at the Cercano repo and prime the agent to work on itself |
+| `/d [repo-path]` (alias `/dev`) | Development mode — point the session at the Cercano repo and prime the agent to work on itself |
 | `/tools` | List the agent's registered tools |
 | `/tool <name> <json>` | Invoke a tool directly (W/X requires `/bypass`) |
 | `/strict` `/permissive` `/bypass` `/mode <m>` | Change permission mode |

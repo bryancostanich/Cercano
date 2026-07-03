@@ -19,9 +19,7 @@
 #      next CLI launch spawns a fresh one).
 #   3. Exec the CLI with the original args.
 #
-# Install:
-#   cp source/server/scripts/cercano-launcher.sh ~/bin/cercano
-#   chmod +x ~/bin/cercano
+# Install: run scripts/install-launcher.sh (or: make launcher, from source/server)
 #
 # Override the source repo path via CERCANO_REPO env var if needed.
 

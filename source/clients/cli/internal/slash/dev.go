@@ -65,8 +65,13 @@ func ResolveDevRepo(explicit, cwd, env string) (string, error) {
 		}
 		dir = parent
 	}
-	if env != "" && IsCercanoRepo(env) {
-		return env, nil
+	if env != "" {
+		if absEnv, err := filepath.Abs(env); err == nil {
+			env = absEnv
+		}
+		if IsCercanoRepo(env) {
+			return env, nil
+		}
 	}
 	return "", fmt.Errorf("could not find the Cercano repo — run from inside the repo, pass /d <path>, or set CERCANO_REPO (the generated launcher sets it for you)")
 }

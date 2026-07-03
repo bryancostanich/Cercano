@@ -131,6 +131,20 @@ func (m *Manager) ResolveEstimate(ctx context.Context, ref string) (Estimate, er
 	return est, nil
 }
 
+// CachedEstimate returns the stored estimate for ref (bare family
+// names are normalized to :latest), regardless of TTL. Display
+// callers prefer slightly-stale numbers over none — architecture
+// never changes under a digest, and freshness is the warmer's job.
+func (m *Manager) CachedEstimate(ref string) (Estimate, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.cache == nil {
+		return Estimate{}, false
+	}
+	est, ok := m.cache.Estimates[EnsureTag(ref)]
+	return est, ok
+}
+
 // cachedEstimate returns a fresh (within-TTL) estimate for ref.
 func (m *Manager) cachedEstimate(ref string, now time.Time) (Estimate, bool) {
 	m.mu.RLock()

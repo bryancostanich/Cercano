@@ -153,7 +153,6 @@ func TestGrantedRegistry_PrefixedNameResolvesToPlainTool(t *testing.T) {
 // mcp__oc__X (as happens when Cercano hosts an MCP server named "oc"), the
 // grant resolves to that tool, NOT to a plain-named X that happens to exist.
 func TestGrantedRegistry_ExactNameWinsOverStrippedForm(t *testing.T) {
-	t.Helper()
 	// Register a plain "widget" AND a fully-qualified "mcp__oc__widget" —
 	// both real tools. Grant the fully-qualified name; expect the exact one.
 	plain := stubDispatchTool{name: "widget", perm: agenttools.PermR}

@@ -35,6 +35,7 @@ const (
 	ResultSetPermissionMode  // PermissionMode carries the new mode (strict|permissive|bypass)
 	ResultDevMode            // WorkDir carries the resolved Cercano repo root
 	ResultRegenContext       // rebuild the current conversation's context from raw turns
+	ResultCompactContext     // incrementally compact the current conversation's backlog
 )
 
 // Result is what a slash command produces.

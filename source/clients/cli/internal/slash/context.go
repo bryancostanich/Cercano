@@ -20,6 +20,19 @@ func RegisterContextRegen(r *Registry) {
 	})
 }
 
+// RegisterCompact wires /compact — digests the current compaction backlog
+// incrementally, keeping existing summaries. The gentle sibling of
+// /context-regen (which clears and rebuilds from scratch).
+func RegisterCompact(r *Registry) {
+	r.Register(Command{
+		Name: "compact",
+		Help: "Compact this conversation's context incrementally (digest the backlog, keep existing summaries).",
+		Handler: func(args []string) Result {
+			return Result{Kind: ResultCompactContext}
+		},
+	})
+}
+
 // RegisterContext wires /context — shows the project context the agent
 // will prepend to your turns (from .cercano/context.md under the effective
 // work dir). Reads the file directly client-side; no RPC. workDir is called

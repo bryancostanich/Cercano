@@ -274,4 +274,3 @@ func softWrap(text string, lineWidth, hangIndent int) string {
 	}
 	return out.String()
 }
-

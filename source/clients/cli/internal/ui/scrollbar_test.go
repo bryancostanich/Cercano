@@ -47,9 +47,9 @@ func TestScrollOffsetFromClick(t *testing.T) {
 	cases := []struct {
 		clickRow, want int
 	}{
-		{2, 0},    // top row → offset 0
-		{11, 30},  // bottom row (top+height-1) → max offset 30
-		{2 - 5, 0},  // above viewport → clamp 0
+		{2, 0},        // top row → offset 0
+		{11, 30},      // bottom row (top+height-1) → max offset 30
+		{2 - 5, 0},    // above viewport → clamp 0
 		{2 + 100, 30}, // far below → clamp max
 	}
 	for _, c := range cases {

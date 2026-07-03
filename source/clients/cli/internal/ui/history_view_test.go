@@ -41,7 +41,7 @@ func newTestHistoryView(rows []histRow, w, h int) *historyView {
 	s := theme.NewStyles(p)
 	return &historyView{
 		styles: s,
-		width: w, height: h, rows: rows, cursor: 0,
+		width:  w, height: h, rows: rows, cursor: 0,
 		md: newHistoryMarkdown(p),
 	}
 }

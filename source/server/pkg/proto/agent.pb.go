@@ -6527,8 +6527,13 @@ func (x *InstallProgress) GetError() string {
 type RegenerateContextRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ConversationId string                 `protobuf:"bytes,1,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// incremental=false (default): full rebuild — clear the derived compaction
+	// state first, then re-run compaction from the first turn.
+	// incremental=true: keep existing state and digest only the current
+	// backlog from FrozenThrough forward (the /compact command).
+	Incremental   bool `protobuf:"varint,2,opt,name=incremental,proto3" json:"incremental,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RegenerateContextRequest) Reset() {
@@ -6566,6 +6571,13 @@ func (x *RegenerateContextRequest) GetConversationId() string {
 		return x.ConversationId
 	}
 	return ""
+}
+
+func (x *RegenerateContextRequest) GetIncremental() bool {
+	if x != nil {
+		return x.Incremental
+	}
+	return false
 }
 
 type RegenerateContextProgress struct {
@@ -8986,9 +8998,10 @@ const file_agent_proto_rawDesc = "" +
 	"\x04line\x18\x01 \x01(\tR\x04line\x12\x12\n" +
 	"\x04done\x18\x02 \x01(\bR\x04done\x12\x0e\n" +
 	"\x02ok\x18\x03 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\"C\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"e\n" +
 	"\x18RegenerateContextRequest\x12'\n" +
-	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\"\xa9\x01\n" +
+	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12 \n" +
+	"\vincremental\x18\x02 \x01(\bR\vincremental\"\xa9\x01\n" +
 	"\x19RegenerateContextProgress\x12\x12\n" +
 	"\x04line\x18\x01 \x01(\tR\x04line\x12\x12\n" +
 	"\x04done\x18\x02 \x01(\bR\x04done\x12\x0e\n" +

@@ -11,19 +11,19 @@ import (
 
 // Palette is the set of named colors a theme exposes.
 type Palette struct {
-	BgDeep      color.Color // terminal background fallback
-	Surface     color.Color // overlay panel background
-	BorderDim   color.Color // outer chrome lines
-	Border      color.Color // inner gridlines
-	Primary     color.Color // wordmark, default text
-	Bright      color.Color // active state, focus
-	Dim         color.Color // meter empty, ghost text — the "faint" foreground
-	Accent      color.Color // lime — user sigil, accent rail, success peak
-	Info        color.Color // cyan — metadata, paths
-	Muted       color.Color // secondary text
-	Success     color.Color // confirmations, build pass
-	Warn        color.Color // meter mid-range, advisory
-	Error       color.Color // failures, bypass indicator
+	BgDeep    color.Color // terminal background fallback
+	Surface   color.Color // overlay panel background
+	BorderDim color.Color // outer chrome lines
+	Border    color.Color // inner gridlines
+	Primary   color.Color // wordmark, default text
+	Bright    color.Color // active state, focus
+	Dim       color.Color // meter empty, ghost text — the "faint" foreground
+	Accent    color.Color // lime — user sigil, accent rail, success peak
+	Info      color.Color // cyan — metadata, paths
+	Muted     color.Color // secondary text
+	Success   color.Color // confirmations, build pass
+	Warn      color.Color // meter mid-range, advisory
+	Error     color.Color // failures, bypass indicator
 
 	// Content colors (scrollback + markdown prose).
 	BufferLink   color.Color // markdown links
@@ -85,10 +85,9 @@ func Cracker() Palette {
 // Same hue as the palette accents with the edge taken off; amber (Primary)
 // stays the buffer's base color and is intentionally not muted.
 const (
-	bufLinkHex = "#2EA8BC" // muted cyan  — markdown links
-	bufCodeHex = "#B7A6E0" // muted lavender — inline code, code-fence lang (distinct from cyan links)
-	bufLimeHex = "#A9CE21" // muted Accent — tool ✓, focus caret, echoed user ▶
-	bufRedHex  = "#D95C5C" // muted Error  — tool ⚠
+	bufLinkHex   = "#2EA8BC" // muted cyan  — markdown links
+	bufCodeHex   = "#B7A6E0" // muted lavender — inline code, code-fence lang (distinct from cyan links)
+	bufLimeHex   = "#A9CE21" // muted Accent — tool ✓, focus caret, echoed user ▶
+	bufRedHex    = "#D95C5C" // muted Error  — tool ⚠
 	bufUserBgHex = "#1F4163" // muted navy — fill behind echoed user prompts in scrollback
 )
-

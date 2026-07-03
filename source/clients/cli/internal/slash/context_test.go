@@ -64,3 +64,15 @@ func TestContextRegen_ReturnsRegenResult(t *testing.T) {
 		t.Fatalf("kind = %v, want ResultRegenContext", res.Kind)
 	}
 }
+
+func TestCompact_ReturnsCompactResult(t *testing.T) {
+	r := New()
+	RegisterCompact(r)
+	res, ok := r.Dispatch("/compact")
+	if !ok {
+		t.Fatal("expected /compact to dispatch")
+	}
+	if res.Kind != ResultCompactContext {
+		t.Fatalf("kind = %v, want ResultCompactContext", res.Kind)
+	}
+}

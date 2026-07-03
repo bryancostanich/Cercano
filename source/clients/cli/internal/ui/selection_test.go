@@ -214,4 +214,3 @@ func TestIsSelectionCopyKeyRecognizesCommandC(t *testing.T) {
 		})
 	}
 }
-

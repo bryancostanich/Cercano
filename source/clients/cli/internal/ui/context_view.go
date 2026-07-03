@@ -428,7 +428,6 @@ func (c *contextView) renderHeader() string {
 	return head
 }
 
-
 // handleClick toggles a turn's expansion when the click lands on its arrow cell.
 // yLocal is the click row relative to the page's top content row (i.e. after
 // subtracting m.contentTop() from the raw mouse Y).
@@ -509,7 +508,7 @@ func (c *contextView) focusNextExpandable(dir int) {
 
 // --- scroller (mirrors runtimeDashboard) ---
 
-func (c *contextView) ScrollBy(delta int) { c.scrollOffset += delta; c.clampScroll() }
+func (c *contextView) ScrollBy(delta int)  { c.scrollOffset += delta; c.clampScroll() }
 func (c *contextView) ScrollTo(offset int) { c.scrollOffset = offset; c.clampScroll() }
 func (c *contextView) ScrollState() contentPageScrollState {
 	turnsH, _ := c.regionHeights()

@@ -16,10 +16,10 @@ func NewReadOnly(key, label, value, hint string) *ReadOnlyField {
 	return &ReadOnlyField{key: key, label: label, value: value, hint: hint}
 }
 
-func (f *ReadOnlyField) Key() string                            { return f.key }
-func (f *ReadOnlyField) Label() string                          { return f.label }
-func (f *ReadOnlyField) Display() string                        { return f.value }
-func (f *ReadOnlyField) Editing() bool                          { return false }
+func (f *ReadOnlyField) Key() string     { return f.key }
+func (f *ReadOnlyField) Label() string   { return f.label }
+func (f *ReadOnlyField) Display() string { return f.value }
+func (f *ReadOnlyField) Editing() bool   { return false }
 func (f *ReadOnlyField) Update(tea.KeyPressMsg) (tea.Cmd, bool, string) {
 	return nil, false, ""
 }

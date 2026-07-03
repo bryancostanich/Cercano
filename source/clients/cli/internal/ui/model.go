@@ -82,11 +82,11 @@ type Model struct {
 
 	registry *slash.Registry
 
-	splashShown bool // hide after first user input
-	splash      banner.AnimModel
-	chat        chatView
-	selectionNotice    string
-	input              promptInput
+	splashShown     bool // hide after first user input
+	splash          banner.AnimModel
+	chat            chatView
+	selectionNotice string
+	input           promptInput
 
 	// inputHistory holds every submitted prompt (messages and slash commands),
 	// oldest first, for shell-style ↑/↓ recall. historyIdx is the browse
@@ -209,9 +209,9 @@ type Model struct {
 	// render a "reconnecting…" chip when the agent server dies and the
 	// reconnect loop is trying to bring it back. Zero value is Connected,
 	// matching the SDK convention.
-	connState        agentclient.ConnState
-	connAttempt      int // current reconnect attempt number, 1-based (0 when Connected)
-	connFailErrMsg   string
+	connState      agentclient.ConnState
+	connAttempt    int // current reconnect attempt number, 1-based (0 when Connected)
+	connFailErrMsg string
 	// lastSubmittedPrompt stashes the user's last submitted turn text so
 	// that if the agent crashes mid-stream we can restore it into the
 	// input for one-key re-submit. Cleared on successful streamEndMsg.
@@ -293,6 +293,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	slash.RegisterConfig(reg, ag)
 	slash.RegisterColor(reg)
 	slash.RegisterContextRegen(reg)
+	slash.RegisterCompact(reg)
 	// wdRef is shared with the slash registry so /context tracks the active
 	// workDir even after /d, /clear, or /resume update it.
 	wdRef := &struct{ dir string }{}
@@ -513,8 +514,8 @@ func invokeToolCmd(ag *agentclient.Client, name, argsJSON string) tea.Cmd {
 
 // configLoadedMsg carries the result of the startup / post-edit GetConfig RPC.
 type configLoadedMsg struct {
-	OpenModel   string
-	OpenRuntime string
+	OpenModel       string
+	OpenRuntime     string
 	CloudModel      string
 	CloudConfigured bool
 }
@@ -539,8 +540,8 @@ func fetchConfigCmd(ag *agentclient.Client) tea.Cmd {
 		// while a profile with a keychain-stored key is happily routing.
 		configured := cfg.CloudState == "ok"
 		return configLoadedMsg{
-			OpenModel:   cfg.OpenModel,
-			OpenRuntime: cfg.OpenRuntime,
+			OpenModel:       cfg.OpenModel,
+			OpenRuntime:     cfg.OpenRuntime,
 			CloudModel:      cfg.CloudModel,
 			CloudConfigured: configured,
 		}
@@ -570,9 +571,9 @@ func fetchContextUsage(ag *agentclient.Client, convID string) tea.Cmd {
 			return ctxUsageMsg{}
 		}
 		return ctxUsageMsg{
-				Used: u.TokensUsed, Max: u.ModelMax, Percent: u.Percent,
-				Raw: u.RawTokens, Compacting: u.Compacting,
-			}
+			Used: u.TokensUsed, Max: u.ModelMax, Percent: u.Percent,
+			Raw: u.RawTokens, Compacting: u.Compacting,
+		}
 	}
 }
 
@@ -1217,7 +1218,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshViewport()
 			return m, fetchContextUsage(m.agent, m.convID)
 		}
-		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: fmt.Sprintf("context rebuilt from raw turns: ~%d → ~%d tokens", msg.pre, msg.post)})
+		doneLine := msg.line
+		if doneLine == "" {
+			doneLine = fmt.Sprintf("context rebuilt: ~%d → ~%d tokens", msg.pre, msg.post)
+		}
+		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: doneLine})
 		m.refreshViewport()
 		// The terminal frame already carries the numbers, but the meter's
 		// authoritative source is GetContextUsage — refetch so every derived
@@ -1581,7 +1586,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.ctxPollTicks > 0 || m.compacting {
 			return m, tea.Batch(fetchContextUsage(m.agent, m.convID), ctxUsageTick())
 		}
-		m.ctxPolling = false                          // loop goes idle; the next turn restarts it
+		m.ctxPolling = false                           // loop goes idle; the next turn restarts it
 		return m, fetchContextUsage(m.agent, m.convID) // one final settle, no re-tick
 
 	case progressAnimTickMsg:
@@ -1837,7 +1842,14 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 			m.refreshViewport()
 			return m, nil
 		}
-		return m, startContextRegenCmd(m.agent, m.convID)
+		return m, startContextRegenCmd(m.agent, m.convID, false)
+	case slash.ResultCompactContext:
+		if m.convID == "" {
+			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "no conversation yet — nothing to compact"})
+			m.refreshViewport()
+			return m, nil
+		}
+		return m, startContextRegenCmd(m.agent, m.convID, true)
 	case slash.ResultResumeConversation:
 		// /resume <id> path — slash already validated against the agent.
 		var resumeCmd tea.Cmd
@@ -2084,7 +2096,7 @@ func (m Model) promptTop() int {
 		top += 2 // blank spacer line + the recap line
 	}
 	top += len(m.chat.Queued()) // queued messages render above the prompt border
-	top++                // prompt border above the input
+	top++                       // prompt border above the input
 	if hint := m.renderSlashSuggestions(); hint != "" && !m.contentPageActive() {
 		top += strings.Count(hint, "\n") + 1
 	}

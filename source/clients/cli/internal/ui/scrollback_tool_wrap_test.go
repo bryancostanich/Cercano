@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/lipgloss/v2"
 	"cercano/source/clients/cli/internal/render"
 	"cercano/source/clients/cli/internal/theme"
+	"charm.land/lipgloss/v2"
 )
 
 // A folded tool entry whose args are too long even after middle-elision must

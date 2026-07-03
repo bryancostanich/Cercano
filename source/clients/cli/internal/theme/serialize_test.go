@@ -34,7 +34,9 @@ func TestUnmarshalMissingKeyFallsBack(t *testing.T) {
 	}
 }
 
-func mustHex(s string) (c interface{ RGBA() (uint32, uint32, uint32, uint32) }) {
+func mustHex(s string) (c interface {
+	RGBA() (uint32, uint32, uint32, uint32)
+}) {
 	col, err := ParseHex(s)
 	if err != nil {
 		panic(err)

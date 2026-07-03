@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"cercano/source/server/pkg/agentclient"
 	"cercano/source/clients/cli/internal/theme"
+	"cercano/source/server/pkg/agentclient"
 )
 
 // newStreamTestModel builds a Model wired enough to drive the post-move stream

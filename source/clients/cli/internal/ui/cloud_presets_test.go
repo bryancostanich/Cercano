@@ -21,11 +21,11 @@ func TestCloudPresetsCoverAllProviders(t *testing.T) {
 
 	// Table of expected values for each preset.
 	expectations := []struct {
-		id       string
-		flavor   string
-		backend  string
-		baseURL  string
-		tier     cloudTier
+		id      string
+		flavor  string
+		backend string
+		baseURL string
+		tier    cloudTier
 	}{
 		{id: "anthropic", flavor: "messages", backend: "", baseURL: "", tier: tierVerified},
 		{id: "openai", flavor: "chat_completions", backend: "openai", baseURL: "https://api.openai.com/v1", tier: tierUntested},

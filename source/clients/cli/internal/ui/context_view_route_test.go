@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
 	"cercano/source/clients/cli/internal/theme"
 	"cercano/source/server/pkg/agentclient"
+	tea "charm.land/bubbletea/v2"
 )
 
 // stubDriver is a no-op ChatDriver for tests that don't need real RPCs.

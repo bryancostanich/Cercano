@@ -46,7 +46,7 @@ func TestSelectFieldEscCancels(t *testing.T) {
 
 func TestSelectFieldEmptyOptionsNoPanic(t *testing.T) {
 	f := NewSelect("k", "k", nil, "")
-	f.Update(enter()) // open
+	f.Update(enter())                      // open
 	_, committed, val := f.Update(enter()) // must not panic
 	if committed || val != "" {
 		t.Fatalf("empty-options commit should be a no-op, got committed=%v val=%q", committed, val)

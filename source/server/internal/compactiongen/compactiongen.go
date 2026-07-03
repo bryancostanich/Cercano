@@ -168,14 +168,16 @@ func (g *Generator) runCompaction(ctx context.Context, conversationID string) er
 	return nil
 }
 
-// Regenerate rebuilds the conversation's derived compaction state from its raw
-// turns: the stored state is cleared and persisted, then Advance re-runs to
-// completion, persisting after every pass. Raw turns are never modified — the
-// worst a failed run can leave behind is a cleared state that the next
-// Regenerate (or scheduled pass) rebuilds. progress (nil-safe) receives one
-// human-readable line per step. Unlike Schedule this ignores the kill switch:
-// it only ever runs as an explicit user action.
-func (g *Generator) Regenerate(ctx context.Context, conversationID string, progress func(string)) (preTokens, postTokens int, err error) {
+// Regenerate runs compaction to completion for one conversation, persisting
+// after every pass. With incremental=false the stored derived state is cleared
+// (and the clear persisted) first — a full rebuild from the first raw turn.
+// With incremental=true existing state is kept and only the backlog from
+// FrozenThrough forward is digested (the /compact path). Raw turns are never
+// modified — the worst a failed full rebuild can leave behind is a cleared
+// state that the next run (or scheduled pass) rebuilds. progress (nil-safe)
+// receives one human-readable line per step. Unlike Schedule this ignores the
+// kill switch: it only ever runs as an explicit user action.
+func (g *Generator) Regenerate(ctx context.Context, conversationID string, incremental bool, progress func(string)) (preTokens, postTokens int, err error) {
 	if progress == nil {
 		progress = func(string) {}
 	}
@@ -200,13 +202,16 @@ func (g *Generator) Regenerate(ctx context.Context, conversationID string, progr
 	if preView, verr := compactor.BuildSendView(turns, state); verr == nil {
 		preTokens = compaction.TotalTokens(g.tok, preView)
 	}
-	progress(fmt.Sprintf("rebuilding from %d raw turns (current view ~%d tokens)", len(turns), preTokens))
-
-	state.FrozenThrough = 0
-	state.SegmentSummariesJSON = ""
-	state.ConsolidatedJSON = ""
-	if err := g.store.SaveCompaction(ctx, state); err != nil {
-		return preTokens, 0, fmt.Errorf("clear derived state: %w", err)
+	if incremental {
+		progress(fmt.Sprintf("compacting backlog over %d raw turns (current view ~%d tokens)", len(turns), preTokens))
+	} else {
+		progress(fmt.Sprintf("rebuilding from %d raw turns (current view ~%d tokens)", len(turns), preTokens))
+		state.FrozenThrough = 0
+		state.SegmentSummariesJSON = ""
+		state.ConsolidatedJSON = ""
+		if err := g.store.SaveCompaction(ctx, state); err != nil {
+			return preTokens, 0, fmt.Errorf("clear derived state: %w", err)
+		}
 	}
 
 	pass := 0

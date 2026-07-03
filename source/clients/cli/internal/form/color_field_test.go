@@ -68,7 +68,7 @@ func TestColorFieldViewHasSwatch(t *testing.T) {
 
 func TestColorFieldEditSeededWithCurrent(t *testing.T) {
 	f := NewColor("accent", "accent", "#bdf000", true)
-	f.Update(enter())            // begin edit — input should be pre-seeded
+	f.Update(enter())                      // begin edit — input should be pre-seeded
 	_, committed, val := f.Update(enter()) // commit immediately, no typing
 	if !committed || val != "#bdf000" {
 		t.Fatalf("commit without typing should yield the seeded value, got committed=%v val=%q", committed, val)

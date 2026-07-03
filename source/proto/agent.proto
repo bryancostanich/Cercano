@@ -452,6 +452,11 @@ message RestartRuntimeResponse {
 message DownloadRuntimeModelRequest {
   string runtime = 1;
   string model_id = 2;
+  // ollama_ref is optional; when set (e.g. "qwen2.5-coder:7b") the
+  // server enrolls a fresh ModelRecord backed by Ollama's registry
+  // rather than looking the model up through providers. Used for
+  // downloading online-catalog entries the provider hasn't cached.
+  string ollama_ref = 3;
 }
 message DownloadRuntimeModelResponse {
   bool ok = 1;

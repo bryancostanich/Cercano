@@ -1695,9 +1695,31 @@ func (s *Server) RestartRuntime(ctx context.Context, req *proto.RestartRuntimeRe
 }
 
 // DownloadRuntimeModel implements proto.AgentServer.
+//
+// If the request carries an OllamaRef (e.g. "qwen2.5-coder:7b"), we
+// treat this as an online-catalog entry that no provider has yet
+// enumerated: enroll a fresh ModelRecord with the ref so the
+// InMemoryManager's findDownloadModel finds it, then hand off to the
+// existing DownloadModel path (which performs JIT OCI resolution).
 func (s *Server) DownloadRuntimeModel(ctx context.Context, req *proto.DownloadRuntimeModelRequest) (*proto.DownloadRuntimeModelResponse, error) {
 	if s.runtimeManager == nil {
 		return &proto.DownloadRuntimeModelResponse{Ok: false, Error: "runtime manager not configured"}, nil
+	}
+	if ref := req.GetOllamaRef(); ref != "" {
+		// Only the concrete InMemoryManager supports enrolment. If a
+		// future alternative implementation is wired in, this branch
+		// is a no-op and the download will fall back to the provider
+		// lookup below (which will fail cleanly with "not found").
+		if imm, ok := s.runtimeManager.(*localruntime.InMemoryManager); ok {
+			imm.EnrollDownload(localruntime.ModelRecord{
+				ID:            req.GetModelId(),
+				Runtime:       req.GetRuntime(),
+				OllamaRef:     ref,
+				DownloadState: "not_downloaded",
+				Format:        "gguf",
+				SupportsChat:  true,
+			})
+		}
 	}
 	model, err := s.runtimeManager.DownloadModel(ctx, localruntime.DownloadRequest{
 		Runtime: req.GetRuntime(),

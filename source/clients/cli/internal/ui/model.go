@@ -1222,11 +1222,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.modelMaxTokens = msg.Max
 		}
 		m.ctxRaw = msg.Raw
-		wasCompacting := m.compacting
 		m.compacting = msg.Compacting
-		// Kick the per-frame animation loop when a pass starts.
+		// Kick the per-frame animation loop whenever compacting is reported
+		// and no tick is in flight — not just on the false→true edge. The
+		// edge-trigger missed real cases (compacting already true at session
+		// start, a dropped kick, gaps between scheduled passes) and left the
+		// meter frozen; this restarts the loop on every poll at worst, and
+		// the animTickActive guard keeps the tick rate single.
 		var cmd tea.Cmd
-		if m.compacting && !wasCompacting {
+		if m.compacting && !m.animTickActive {
+			m.animTickActive = true
 			cmd = progressAnimTick()
 		}
 		return m, cmd
@@ -3455,18 +3460,21 @@ func (m Model) renderCompactingMeterBar(cells, fillN int) string {
 		onFill := col < fillN
 		switch {
 		case inLabel && onFill:
-			// Letter inherits the bar's bright shimmer color — feels like the
-			// bar's fill is showing through the letter shape.
+			// The bar must stay visible under the label: the filled cell keeps
+			// its (animated) fill color as the BACKGROUND and the letter is
+			// knocked out of it in the terminal background color — reads as a
+			// solid green bar with the label punched through it. The sweep
+			// animates the background, so the fill shimmer survives the label.
 			b.WriteString(lipgloss.NewStyle().
-				Foreground(progressColorAt(col, sweepPos, tail)).
+				Foreground(m.palette.BgDeep).
+				Background(progressColorAt(col, sweepPos, tail)).
 				Render(string(label[col-start])))
 		case inLabel && !onFill:
-			// Empty-side letters need to stand out against the dim ░
-			// background, so we use Bright — the same accent used for
-			// active/focus states elsewhere in the chrome. This inverts
-			// the "letter inherits the cell" idea: on the filled side
-			// the letter blends with the shimmer; on the empty side it
-			// pops against the dim background instead.
+			// Empty-side letters render in the bright amber the empty checker
+			// belongs to. A terminal cell holds one glyph, so the ░ under a
+			// letter can't literally show through — the letter takes the
+			// checker's color family instead, and the surrounding ░ cells
+			// carry the texture right up to the glyph.
 			b.WriteString(m.styles.Bright.Render(string(label[col-start])))
 		case !inLabel && onFill:
 			b.WriteString(lipgloss.NewStyle().

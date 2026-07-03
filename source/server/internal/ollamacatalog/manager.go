@@ -50,6 +50,14 @@ type Manager struct {
 	// goroutine to exit. nil when the background refresher isn't
 	// running (the constructor doesn't start it — Start() does).
 	stopBg chan struct{}
+
+	// Estimate-warming state (see warm.go). warmAttempted tracks the
+	// last attempt per ref so failures back off instead of hammering
+	// the registry every wake; the intervals are test overrides (zero
+	// means the package defaults).
+	warmAttempted map[string]time.Time
+	warmThrottle  time.Duration
+	warmWake      time.Duration
 }
 
 // NewManager constructs a Manager with the given fetcher and cache
@@ -172,6 +180,7 @@ func (m *Manager) Start(ctx context.Context) {
 	m.mu.Unlock()
 
 	go m.refresherLoop(ctx, stop)
+	go m.warmLoop(ctx, stop)
 }
 
 // Stop terminates the background refresher. Safe to call before

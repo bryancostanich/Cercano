@@ -38,6 +38,12 @@ type Info struct {
 
 	Recap          string
 	RecapUpdatedAt time.Time
+
+	// Kind is "main" for user-facing conversations, "subagent" for persisted
+	// dispatch tool loops. ParentID links a subagent loop to the conversation
+	// whose dispatch spawned it (empty when unknown).
+	Kind     string
+	ParentID string
 }
 
 // Turn is one persisted role-emission inside a conversation.
@@ -74,6 +80,12 @@ type Store interface {
 	// EnsureConversation idempotently creates the conversation row. Title is
 	// auto-derived from the first user turn (deferred to first Append).
 	EnsureConversation(ctx context.Context, id, projectDir, model string) error
+
+	// EnsureSubagentConversation idempotently creates a conversation row of
+	// kind "subagent", linked to the parent conversation whose dispatch
+	// spawned it (parentID may be empty). Subagent conversations are hidden
+	// from List but fully readable via Get/GetTurns for post-mortems.
+	EnsureSubagentConversation(ctx context.Context, id, parentID, projectDir, model string) error
 
 	// Append records one turn. Updates the conversation's last_turn_at. If
 	// this is the first user turn and the conversation has no title, derives
@@ -178,6 +190,8 @@ func Open(path string) (Store, error) {
 		`ALTER TABLE conversations ADD COLUMN recap TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE conversations ADD COLUMN recap_updated_at INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE conversations ADD COLUMN title_source TEXT NOT NULL DEFAULT 'user'`,
+		`ALTER TABLE conversations ADD COLUMN kind TEXT NOT NULL DEFAULT 'main'`,
+		`ALTER TABLE conversations ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := db.Exec(alter); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			db.Close()
@@ -220,6 +234,11 @@ func newID() string {
 	return hex.EncodeToString(b[:])
 }
 
+// NewID mints a random conversation/turn id. Exported so callers creating
+// conversations out-of-band (e.g. persisted dispatch sub-agent loops) mint
+// ids in the same format the store uses internally.
+func NewID() string { return newID() }
+
 // DeriveTitle returns a short title from the first user prompt. Algorithmic
 // (no LLM): drop leading slash commands, trim, take up to 60 chars at the
 // last whitespace boundary, append `…` if truncated.
@@ -260,6 +279,21 @@ func (s *sqliteStore) EnsureConversation(ctx context.Context, id, projectDir, mo
 			project_dir = CASE WHEN conversations.project_dir = '' THEN excluded.project_dir ELSE conversations.project_dir END,
 			model       = CASE WHEN conversations.model       = '' THEN excluded.model       ELSE conversations.model       END`,
 		id, projectDir, model, now, now)
+	return err
+}
+
+func (s *sqliteStore) EnsureSubagentConversation(ctx context.Context, id, parentID, projectDir, model string) error {
+	if id == "" {
+		return errors.New("conversation id required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().Unix()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO conversations (id, project_dir, model, title_source, kind, parent_id, started_at, last_turn_at)
+		VALUES (?, ?, ?, 'auto', 'subagent', ?, ?, ?)
+		ON CONFLICT(id) DO NOTHING`,
+		id, projectDir, model, parentID, now, now)
 	return err
 }
 
@@ -326,12 +360,14 @@ func (s *sqliteStore) List(ctx context.Context, projectDir string, limit int) ([
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Subagent conversations (persisted dispatch loops) are hidden from the
+	// picker; they stay reachable by id via Get/GetTurns.
 	query := `
 		SELECT c.id, c.title, c.project_dir, c.model, c.started_at, c.last_turn_at,
 		       c.recap, c.recap_updated_at,
 		       (SELECT COUNT(*) FROM turns t WHERE t.conversation_id = c.id) AS turn_count
 		FROM conversations c
-		WHERE (? = '' OR c.project_dir = ?)
+		WHERE (? = '' OR c.project_dir = ?) AND c.kind = 'main'
 		ORDER BY c.last_turn_at DESC`
 	args := []any{projectDir, projectDir}
 	if limit > 0 {
@@ -511,11 +547,11 @@ func (s *sqliteStore) Get(ctx context.Context, conversationID string) (Info, err
 	var startedAt, lastTurnAt, recapAt int64
 	err := s.db.QueryRowContext(ctx, `
 		SELECT c.id, c.title, c.project_dir, c.model, c.started_at, c.last_turn_at,
-		       c.recap, c.recap_updated_at,
+		       c.recap, c.recap_updated_at, c.kind, c.parent_id,
 		       (SELECT COUNT(*) FROM turns t WHERE t.conversation_id = c.id) AS turn_count
 		FROM conversations c WHERE c.id = ?`, conversationID).
 		Scan(&info.ID, &info.Title, &info.ProjectDir, &info.Model,
-			&startedAt, &lastTurnAt, &info.Recap, &recapAt, &info.TurnCount)
+			&startedAt, &lastTurnAt, &info.Recap, &recapAt, &info.Kind, &info.ParentID, &info.TurnCount)
 	if err != nil {
 		return Info{}, err
 	}

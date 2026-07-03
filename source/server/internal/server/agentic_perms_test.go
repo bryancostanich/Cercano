@@ -100,11 +100,23 @@ func TestGrantedRegistry_LogsUnknownToolNames(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "bogus_tool") {
-		t.Fatalf("expected unknown tool name to be logged, got: %q", out)
+	// The success grant line also mentions r_read, so scope the "not reported
+	// as unknown" assertion to the unknown-names line itself.
+	var unknownLine string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "ignored unknown tool names") {
+			unknownLine = line
+			break
+		}
 	}
-	if strings.Contains(out, "r_read") {
-		t.Errorf("known tool r_read should not be reported as unknown: %q", out)
+	if unknownLine == "" {
+		t.Fatalf("expected an unknown-tool-names log line, got: %q", out)
+	}
+	if !strings.Contains(unknownLine, "bogus_tool") {
+		t.Fatalf("expected unknown tool name in %q", unknownLine)
+	}
+	if strings.Contains(unknownLine, "r_read") {
+		t.Errorf("known tool r_read should not be reported as unknown: %q", unknownLine)
 	}
 }
 

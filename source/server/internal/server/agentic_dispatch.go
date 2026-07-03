@@ -8,7 +8,9 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
+	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
+	"cercano/source/server/internal/llm"
 )
 
 // resolveGrantName maps a caller-supplied tool name to a registered tool.
@@ -50,6 +52,7 @@ func (s *Server) resolveGrantName(requested string) (string, bool) {
 // offending inputs and the registered tools available.
 func (s *Server) grantedRegistry(tools []string, mode agent.PermissionMode) (*agenttools.Registry, error) {
 	var candidate *agenttools.Registry
+	var normalized []string // "requested→resolved" pairs where the prefix strip fired
 	if len(tools) > 0 {
 		candidate = agenttools.NewRegistry()
 		var unknown []string
@@ -58,6 +61,9 @@ func (s *Server) grantedRegistry(tools []string, mode agent.PermissionMode) (*ag
 			if !ok {
 				unknown = append(unknown, name)
 				continue
+			}
+			if resolved != name {
+				normalized = append(normalized, name+"→"+resolved)
 			}
 			t, _ := s.toolRegistry.Get(resolved)
 			_ = candidate.Register(t)
@@ -83,6 +89,7 @@ func (s *Server) grantedRegistry(tools []string, mode agent.PermissionMode) (*ag
 		}
 	}
 	if mode == agent.ModeBypass {
+		logGrantSuccess(candidate, mode, normalized)
 		return candidate, nil
 	}
 	bounded := agenttools.NewRegistry()
@@ -103,7 +110,31 @@ func (s *Server) grantedRegistry(tools []string, mode agent.PermissionMode) (*ag
 			tools, mode, s.availableToolsHint(mode),
 		)
 	}
+	logGrantSuccess(bounded, mode, normalized)
 	return bounded, nil
+}
+
+// registryToolNames returns the names of every tool in reg, for logging.
+func registryToolNames(reg *agenttools.Registry) []string {
+	all := reg.All()
+	names := make([]string, 0, len(all))
+	for _, t := range all {
+		names = append(names, t.Name())
+	}
+	return names
+}
+
+// logGrantSuccess makes the grant success path visible in the agent log. The
+// silent-success gap bit hard once: a cleanly normalized grant emitted no log
+// lines at all, and "no dispatch log lines" was then read as "no dispatch
+// happened" during a live post-mortem.
+func logGrantSuccess(reg *agenttools.Registry, mode agent.PermissionMode, normalized []string) {
+	note := ""
+	if len(normalized) > 0 {
+		note = fmt.Sprintf(" (normalized: %v)", normalized)
+	}
+	names := registryToolNames(reg)
+	log.Printf("[dispatch] subagent grant: granted %d tool(s) %v mode=%s%s", len(names), names, mode, note)
 }
 
 // availableToolsHint returns a comma-separated list of registered tool names
@@ -156,24 +187,46 @@ func (s *Server) runAgenticDispatch(ctx context.Context, spec dispatch.Spec, sel
 	// 2. Build system prompt (env grounding + steering block + project context).
 	system := s.buildSystemPrompt(spec.WorkDir)
 
-	// 3. Run the bounded tool loop.
+	// 3. Set up sub-agent persistence (best-effort). The loop's turns land in
+	// a hidden "subagent" conversation linked to the parent, so a failed
+	// dispatch can be post-mortemed from the DB instead of dead-ending at the
+	// parent's tool_result.
+	subConvID := ""
+	var onTurn func(m llm.Message)
+	if store := s.dispatchStore(); store != nil {
+		id := conversation.NewID()
+		if perr := store.EnsureSubagentConversation(ctx, id, spec.ConversationID, spec.WorkDir, model); perr != nil {
+			log.Printf("[dispatch] subagent persistence unavailable: %v", perr)
+		} else {
+			subConvID = id
+			s.persistTurn(ctx, subConvID, agent.UserMessage(spec.Task, nil))
+			onTurn = func(m llm.Message) { s.persistTurn(ctx, subConvID, m) }
+		}
+	}
+	log.Printf("[dispatch] subagent start: conv=%s model=%s tools=%v", subConvID, model, registryToolNames(reg))
+
+	// 4. Run the bounded tool loop.
 	var buf strings.Builder
 	res, err := agent.RunToolLoop(ctx, agent.ToolLoopInput{
-		Provider:      sel.Provider,
-		Model:         model,
-		System:        system,
-		Registry:      reg,
-		Permissions:   s.permStore, // parent store; R-tier never gates regardless
-		UserInput:     spec.Task,
-		MaxIterations: spec.MaxIterations,
-		OnTextDelta:   func(t string) { buf.WriteString(t) },
+		Provider:       sel.Provider,
+		Model:          model,
+		System:         system,
+		Registry:       reg,
+		Permissions:    s.permStore, // parent store; R-tier never gates regardless
+		UserInput:      spec.Task,
+		MaxIterations:  spec.MaxIterations,
+		OnTextDelta:    func(t string) { buf.WriteString(t) },
+		OnTurnComplete: onTurn,
 		// EventSink: nil — non-interactive; PermissionRequester: nil — R-tier won't gate.
 	})
 	if err != nil {
+		log.Printf("[dispatch] subagent done: conv=%s err=%v", subConvID, err)
 		return dispatch.Result{}, err
 	}
+	log.Printf("[dispatch] subagent done: conv=%s iterations=%d tokens_in=%d tokens_out=%d",
+		subConvID, res.Iterations, res.InputTokens, res.OutputTokens)
 
-	// 4. Assemble result. Prefer ToolLoopResult.FinalText (the last assistant
+	// 5. Assemble result. Prefer ToolLoopResult.FinalText (the last assistant
 	// text block from the loop); fall back to the streamed buf if it's empty
 	// (should not happen in practice, but defensive).
 	text := res.FinalText
@@ -182,10 +235,21 @@ func (s *Server) runAgenticDispatch(ctx context.Context, spec dispatch.Spec, sel
 	}
 
 	return dispatch.Result{
-		Text:         text,
-		Model:        model,
-		IsCloud:      sel.IsCloud,
-		InputTokens:  res.InputTokens,
-		OutputTokens: res.OutputTokens,
+		Text:              text,
+		Model:             model,
+		IsCloud:           sel.IsCloud,
+		InputTokens:       res.InputTokens,
+		OutputTokens:      res.OutputTokens,
+		SubConversationID: subConvID,
 	}, nil
+}
+
+// dispatchStore returns the persistent conversation store used for sub-agent
+// loop persistence, or nil when no agent/store is wired (persistence is then
+// skipped; dispatch still runs).
+func (s *Server) dispatchStore() conversation.Store {
+	if s.agent == nil {
+		return nil
+	}
+	return s.agent.PersistentStore()
 }

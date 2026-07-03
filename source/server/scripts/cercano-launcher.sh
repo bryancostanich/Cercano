@@ -28,6 +28,8 @@
 set -euo pipefail
 
 REPO="${CERCANO_REPO:-$HOME/git_repos/bryan_costanich/cercano}"
+# Exported so the CLI (and its /d development mode) can find the repo.
+export CERCANO_REPO="$REPO"
 SERVER_DIR="$REPO/source/server"
 CLI_DIR="$REPO/source/clients/cli"
 

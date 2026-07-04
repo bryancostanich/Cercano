@@ -50,9 +50,14 @@ type runtimeEstimateMsg struct {
 
 // estimateIsLocal reports whether the model's GGUF is already on disk,
 // in which case the server reads the header locally instead of hitting
-// the registry.
+// the registry. A record mid-download has Path set to its DESTINATION
+// while the file is still partial — those must route through the
+// registry resolver, not a local read that would fail.
 func estimateIsLocal(m agentclient.RuntimeModel) bool {
-	return m.Path != "" || strings.EqualFold(m.DownloadState, "downloaded")
+	if strings.EqualFold(m.DownloadState, "downloaded") {
+		return true
+	}
+	return m.Path != "" && m.DownloadState == ""
 }
 
 // estimateKey identifies a model in the estimate cache. Empty means

@@ -1777,6 +1777,29 @@ func normalizeOllamaRef(ref string) string {
 	return ref + ":latest"
 }
 
+// enrollmentRecord builds the inventory record for an ollama-backed
+// download. Family and DisplayName MUST be set here: ListRuntimeModels
+// dedupes online-catalog entries against the inventory by family name,
+// so an enrolled record without one renders as a duplicate of the
+// catalog entry it came from (and shows "family: (unknown)" in the
+// detail panel) for its entire life.
+func enrollmentRecord(modelID, runtime, ref string) localruntime.ModelRecord {
+	family := ref
+	if i := strings.Index(family, ":"); i > 0 {
+		family = family[:i]
+	}
+	return localruntime.ModelRecord{
+		ID:            modelID,
+		Runtime:       runtime,
+		OllamaRef:     ref,
+		Family:        family,
+		DisplayName:   titleCase(family),
+		DownloadState: "not_downloaded",
+		Format:        "gguf",
+		SupportsChat:  true,
+	}
+}
+
 func (s *Server) DownloadRuntimeModel(ctx context.Context, req *proto.DownloadRuntimeModelRequest) (*proto.DownloadRuntimeModelResponse, error) {
 	if s.runtimeManager == nil {
 		return &proto.DownloadRuntimeModelResponse{Ok: false, Error: "runtime manager not configured"}, nil
@@ -1787,14 +1810,7 @@ func (s *Server) DownloadRuntimeModel(ctx context.Context, req *proto.DownloadRu
 		// is a no-op and the download will fall back to the provider
 		// lookup below (which will fail cleanly with "not found").
 		if imm, ok := s.runtimeManager.(*localruntime.InMemoryManager); ok {
-			imm.EnrollDownload(localruntime.ModelRecord{
-				ID:            req.GetModelId(),
-				Runtime:       req.GetRuntime(),
-				OllamaRef:     ref,
-				DownloadState: "not_downloaded",
-				Format:        "gguf",
-				SupportsChat:  true,
-			})
+			imm.EnrollDownload(enrollmentRecord(req.GetModelId(), req.GetRuntime(), ref))
 		}
 	}
 	model, err := s.runtimeManager.DownloadModel(ctx, localruntime.DownloadRequest{

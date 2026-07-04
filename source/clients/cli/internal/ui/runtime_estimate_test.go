@@ -201,3 +201,28 @@ func TestSelectedEstimate_FallsBackToLazyFetchWhenUnwarmed(t *testing.T) {
 		t.Fatal("unwarmed entry should fall back to the lazy fetch")
 	}
 }
+
+// A record mid-download has Path set to its destination while the file
+// is still partial — the estimate must route through the registry
+// resolver, not a doomed local header read.
+func TestEstimateIsLocal_DownloadingRecordIsNotLocal(t *testing.T) {
+	downloading := agentclient.RuntimeModel{
+		Path:          "/tmp/dest.gguf",
+		DownloadState: "downloading",
+		OllamaRef:     "nomic-embed-text:latest",
+	}
+	if estimateIsLocal(downloading) {
+		t.Error("downloading record treated as local")
+	}
+	if key := estimateKey(downloading); key != "ref:nomic-embed-text:latest" {
+		t.Errorf("key = %q, want the ref route", key)
+	}
+	done := agentclient.RuntimeModel{Path: "/tmp/dest.gguf", DownloadState: "downloaded"}
+	if !estimateIsLocal(done) {
+		t.Error("downloaded record should be local")
+	}
+	onDisk := agentclient.RuntimeModel{Path: "/tmp/found.gguf"}
+	if !estimateIsLocal(onDisk) {
+		t.Error("stateless on-disk record should be local")
+	}
+}

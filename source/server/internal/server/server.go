@@ -982,7 +982,23 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		changes = append(changes, "watchdog_checks="+req.WatchdogChecks)
 		watchdogChanged = true
 	}
-	if req.ModelTierKey != "" {
+	if req.ModelTierKey == "embedding.open" {
+		// The embedding slot is tier UI over the real embedding_model
+		// config field — NOT a Models-taxonomy entry — so there's a
+		// single source of truth. The embedding engine is built at
+		// startup, so the change persists now and applies on restart.
+		val := strings.TrimSpace(req.ModelTierValue)
+		if val == "-" {
+			val = ""
+		}
+		s.currentConfig.EmbeddingModel = val
+		desc := "embedding_model=" + val
+		if val == "" {
+			desc = "embedding_model unset"
+		}
+		changes = append(changes, desc+" (takes effect on restart)")
+		s.broadcastConfigChanged("embedding_model", val)
+	} else if req.ModelTierKey != "" {
 		desc, err := config.ApplyModelTierPatch(&s.currentConfig.Models, req.ModelTierKey, req.ModelTierValue)
 		if err != nil {
 			return &proto.UpdateConfigResponse{Success: false, Message: err.Error()}, nil

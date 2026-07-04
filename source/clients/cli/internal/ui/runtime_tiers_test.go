@@ -18,8 +18,8 @@ func TestTierRows(t *testing.T) {
 		},
 	}
 	rows := tierRows(cfg)
-	if len(rows) != 9 {
-		t.Fatalf("rows = %d, want 9 (default provider + 4 tiers × 2 providers)", len(rows))
+	if len(rows) != 10 {
+		t.Fatalf("rows = %d, want 10 (default provider + 4 tiers × 2 providers + embedding)", len(rows))
 	}
 	if rows[0].Action.TierKey != "default_provider" || rows[0].Value != "open" {
 		t.Errorf("row 0 = %+v, want the default-provider row", rows[0])

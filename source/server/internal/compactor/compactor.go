@@ -159,13 +159,61 @@ func Advance(ctx context.Context, turns []conversation.Turn, state conversation.
 	}
 	frozenMsgs := elided[:frozen]
 
+	frozenSegs := compaction.SegmentByTokens(frozenMsgs, tok, cfg.SegmentTokens)
 	var newParts []compaction.StructuredSummary
-	for _, seg := range compaction.SegmentByTokens(frozenMsgs, tok, cfg.SegmentTokens) {
+	var segErr error
+	for _, seg := range frozenSegs {
 		s, err := summarize(ctx, seg.Messages)
 		if err != nil {
-			return state, false, false, err
+			segErr = err
+			break
 		}
 		newParts = append(newParts, s)
+	}
+	if segErr != nil {
+		// Keep the segments that DID summarize instead of discarding the whole
+		// pass. Without this, a pass whose deadline expires on its last segment
+		// loses every completed summary, retries the identical work, and times
+		// out again — the scheduler livelocks and the backlog only grows.
+		// Coverage shrinks to the largest completed-segment prefix whose
+		// recomputed boundary keeps summaries and FrozenThrough in lockstep
+		// (the same-second trim must not cut into a kept segment).
+		if len(newParts) == 0 {
+			return state, false, false, segErr
+		}
+		ok := false
+		for k := len(newParts); k >= 1; k-- {
+			covered := 0
+			for _, seg := range frozenSegs[:k] {
+				covered += len(seg.Messages)
+			}
+			pb := turnIdx[covered-1]
+			for pb >= 0 && pb+1 < len(eligible) && eligible[pb].CreatedAt.Unix() >= eligible[pb+1].CreatedAt.Unix() {
+				pb--
+			}
+			if pb < 0 {
+				continue
+			}
+			pfrozen := 0
+			for _, ti := range turnIdx {
+				if ti > pb {
+					break
+				}
+				pfrozen++
+			}
+			if pfrozen != covered {
+				continue // trim cut into a kept segment; try fewer segments
+			}
+			newParts = newParts[:k]
+			b, frozen = pb, pfrozen
+			frozenMsgs = elided[:frozen]
+			more = true
+			ok = true
+			break
+		}
+		if !ok {
+			return state, false, false, segErr
+		}
 	}
 
 	// Reuse the already-frozen segment summaries; append the new ones.

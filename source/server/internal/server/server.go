@@ -1250,7 +1250,13 @@ func estimateRawTokens(turns []conversation.Turn) int {
 // usage vs. the active model's context-window size for a conversation.
 func (s *Server) GetContextUsage(ctx context.Context, req *proto.GetContextUsageRequest) (*proto.GetContextUsageResponse, error) {
 	convID := req.GetConversationId()
-	_, max := s.agent.GetContextUsage(ctx, convID)
+	// The denominator is the locus route's PRIMARY model window — stable
+	// across agent restarts and unaffected by per-turn fallbacks or background
+	// summarizer traffic. The per-conversation meter counter's max follows
+	// whatever model served the last turn and defaults to the open model on a
+	// fresh registry, which made the bar jump (e.g. 200k → 128k) after every
+	// restart until the first cloud-served turn re-baselined it.
+	max := contextmeter.ModelMax(s.primaryModel())
 	sent, raw := 0, 0
 	if store := s.agent.PersistentStore(); store != nil && convID != "" {
 		if turns, err := store.GetTurns(ctx, convID); err == nil {
@@ -2485,6 +2491,24 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 // mainModelFor returns the configured model name for the active tier. Cloud
 // reads from the active profile (the single source of truth — see
 // activeCloudModel) so a profile-model change propagates without restart.
+// primaryModel returns the model the context meter measures against: the
+// locus route's primary serving model. cloud_only/cloud_primary → the active
+// cloud model (falling back to the open model when no cloud is configured);
+// open_primary/open_only → the open model.
+func (s *Server) primaryModel() string {
+	s.cfgMu.RLock()
+	locus := s.currentConfig.LocusMode
+	open := s.currentConfig.OpenModel
+	s.cfgMu.RUnlock()
+	switch locus {
+	case "cloud_only", "cloud_primary":
+		if m := s.activeCloudModel(); m != "" {
+			return m
+		}
+	}
+	return open
+}
+
 func (s *Server) mainModelFor(isCloud bool) string {
 	if isCloud {
 		return s.activeCloudModel()

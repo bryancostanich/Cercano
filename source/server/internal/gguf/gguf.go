@@ -97,17 +97,43 @@ func (m *Meta) KVBytesPerToken() int64 {
 	return int64(total) * int64(keyDim+valDim) * 2
 }
 
+// coreComplete reports whether every field except the KV-head count is
+// set. The KV count is special-cased because its absence is meaningful
+// (see finalize), unlike the core keys, whose absence means we simply
+// haven't read far enough.
+func (m *Meta) coreComplete() bool {
+	return m.Architecture != "" &&
+		m.BlockCount != 0 &&
+		m.ContextLength != 0 &&
+		m.EmbeddingLength != 0 &&
+		m.HeadCount != 0
+}
+
 // complete reports whether every field required for an estimate is set.
 // KeyLength/ValueLength stay optional — most architectures derive them.
 // The KV-head requirement is satisfied by either form: a uniform
 // scalar (HeadCountKV) or a per-layer array sum (KVHeadsTotal).
 func (m *Meta) complete() bool {
-	return m.Architecture != "" &&
-		m.BlockCount != 0 &&
-		m.ContextLength != 0 &&
-		m.EmbeddingLength != 0 &&
-		m.HeadCount != 0 &&
-		(m.HeadCountKV != 0 || m.KVHeadsTotal != 0)
+	return m.coreComplete() && (m.HeadCountKV != 0 || m.KVHeadsTotal != 0)
+}
+
+// finalize is called once it's clear no more architecture keys are
+// coming (tokenizer boundary, end of the KV list, or EOF). If only
+// head_count_kv is missing, the GGUF convention applies: it defaults
+// to head_count (no grouped-query attention). Encoder architectures
+// (bert-family embedding models) omit the key entirely — for them the
+// defaulted KV term is negligible at their small max contexts, and
+// the weights-dominated estimate comes out right. Returns whether the
+// meta is usable.
+func (m *Meta) finalize() bool {
+	if m.complete() {
+		return true
+	}
+	if m.coreComplete() {
+		m.HeadCountKV = m.HeadCount
+		return true
+	}
+	return false
 }
 
 // ParseMeta reads GGUF header metadata from r until it has all the
@@ -140,7 +166,7 @@ func ParseMeta(r io.Reader) (*Meta, error) {
 	for i := uint64(0); i < kvCount; i++ {
 		key, err := readString(r)
 		if err != nil {
-			if meta.complete() {
+			if meta.finalize() {
 				return meta, nil
 			}
 			return nil, incomplete(fmt.Errorf("gguf: read key %d: %w", i, err))
@@ -149,19 +175,22 @@ func ParseMeta(r io.Reader) (*Meta, error) {
 		// other attention keys; once we're past the architecture block
 		// and into the tokenizer section they will not appear, so stop
 		// before touching the multi-megabyte vocab arrays (which a
-		// bounded window has likely truncated anyway).
-		if meta.complete() && isTokenizerKey(key) {
+		// bounded window has likely truncated anyway). Reaching the
+		// tokenizer section also means a missing head_count_kv is
+		// genuinely absent (not merely unread) — finalize applies the
+		// spec default in that case.
+		if isTokenizerKey(key) && meta.finalize() {
 			return meta, nil
 		}
 		var valType uint32
 		if err := binary.Read(r, binary.LittleEndian, &valType); err != nil {
-			if meta.complete() {
+			if meta.finalize() {
 				return meta, nil
 			}
 			return nil, incomplete(fmt.Errorf("gguf: read type of %q: %w", key, err))
 		}
 		if err := meta.consume(r, key, valType); err != nil {
-			if meta.complete() {
+			if meta.finalize() {
 				return meta, nil
 			}
 			return nil, incomplete(err)
@@ -170,7 +199,7 @@ func ParseMeta(r io.Reader) (*Meta, error) {
 			return meta, nil
 		}
 	}
-	if meta.complete() {
+	if meta.finalize() {
 		return meta, nil
 	}
 	return nil, incomplete(nil)

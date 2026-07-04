@@ -294,3 +294,45 @@ func TestParseMeta_ExactWindow(t *testing.T) {
 		t.Error("meta should be complete")
 	}
 }
+
+// Encoder architectures (bert-family embedding models) omit
+// head_count_kv entirely — no autoregressive KV cache exists. The
+// parser must apply the GGUF spec default (head_count) at the
+// tokenizer boundary instead of failing.
+func TestParseMeta_EncoderWithoutKVHeads(t *testing.T) {
+	b := &ggufBuilder{}
+	b.addString("general.architecture", "nomic-bert-moe").
+		addUint32("nomic-bert-moe.block_count", 12).
+		addUint32("nomic-bert-moe.context_length", 2048).
+		addUint32("nomic-bert-moe.embedding_length", 768).
+		addUint32("nomic-bert-moe.attention.head_count", 12).
+		addStringArray("tokenizer.ggml.tokens", []string{"a", "b"})
+	meta, err := ParseMeta(bytes.NewReader(b.bytes()))
+	if err != nil {
+		t.Fatalf("ParseMeta on encoder header: %v", err)
+	}
+	if meta.HeadCountKV != 12 {
+		t.Errorf("HeadCountKV = %d, want head_count default 12", meta.HeadCountKV)
+	}
+	if meta.KVBytesPerToken() == 0 {
+		t.Error("expected a nonzero (if negligible) KV estimate")
+	}
+}
+
+// Same shape but the list simply ends without tokenizer keys — the
+// end-of-list finalize path.
+func TestParseMeta_EncoderWithoutKVHeadsAtListEnd(t *testing.T) {
+	b := &ggufBuilder{}
+	b.addString("general.architecture", "bert").
+		addUint32("bert.block_count", 6).
+		addUint32("bert.context_length", 512).
+		addUint32("bert.embedding_length", 384).
+		addUint32("bert.attention.head_count", 6)
+	meta, err := ParseMeta(bytes.NewReader(b.bytes()))
+	if err != nil {
+		t.Fatalf("ParseMeta: %v", err)
+	}
+	if meta.HeadCountKV != 6 {
+		t.Errorf("HeadCountKV = %d, want 6", meta.HeadCountKV)
+	}
+}

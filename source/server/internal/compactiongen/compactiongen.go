@@ -23,7 +23,12 @@ type Store interface {
 	SaveCompaction(ctx context.Context, c conversation.Compaction) error
 }
 
-const runTimeout = 2 * time.Minute
+// runTimeout bounds one scheduled compaction pass. It must comfortably fit
+// maxSegmentsPerPass summarizer calls at local-model speed (~40s each at 8k
+// segment tokens) plus an occasional re-consolidation call — the previous
+// 2-minute budget could expire mid-pass on every attempt. Advance now keeps
+// partial progress on deadline expiry, so this is headroom, not a cliff.
+const runTimeout = 6 * time.Minute
 
 // Generator debounces compaction per conversation.
 type Generator struct {

@@ -433,3 +433,43 @@ func TestEligibleMessagesWithTurnsMirrorsBuildLLMHistory(t *testing.T) {
 		})
 	}
 }
+
+func TestAdvance_KeepsPartialProgressWhenSegmentFails(t *testing.T) {
+	tok := contextmeter.Default()
+	cfg := Config{ActivationFloorTokens: 1000, SegmentTokens: 500, VerbatimRecent: 2}
+	turns := bigTurns(12, 3000)
+
+	// Summarizer succeeds twice then fails — models a pass whose deadline
+	// expires partway through its segments.
+	calls, failAfter := 0, 2
+	summarize := func(ctx context.Context, msgs []llm.Message) (compaction.StructuredSummary, error) {
+		calls++
+		if calls > failAfter {
+			return compaction.StructuredSummary{}, context.DeadlineExceeded
+		}
+		return compaction.StructuredSummary{Goal: "g"}, nil
+	}
+
+	st, changed, more, err := Advance(context.Background(), turns, conversation.Compaction{}, summarize, cfg, tok)
+	if err != nil {
+		t.Fatalf("partial progress must not surface the segment error: %v", err)
+	}
+	if !changed || !more {
+		t.Fatalf("expected persisted partial progress with backlog: changed=%v more=%v", changed, more)
+	}
+	if st.FrozenThrough <= 0 {
+		t.Fatal("FrozenThrough must advance for the completed segments")
+	}
+	var parts []compaction.StructuredSummary
+	if err := json.Unmarshal([]byte(st.SegmentSummariesJSON), &parts); err != nil || len(parts) != failAfter {
+		t.Fatalf("want %d kept segment summaries, got %d (err=%v)", failAfter, len(parts), err)
+	}
+
+	// Zero completed segments: nothing to keep — the error must surface so
+	// real failures (model down) stay visible.
+	calls, failAfter = 0, 0
+	_, changed, more, err = Advance(context.Background(), turns, conversation.Compaction{}, summarize, cfg, tok)
+	if err == nil || changed || more {
+		t.Fatalf("zero completed segments must surface the error: err=%v changed=%v more=%v", err, changed, more)
+	}
+}

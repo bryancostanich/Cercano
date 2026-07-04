@@ -24,6 +24,9 @@ var tierSlotOrder = []struct{ Key, Label string }{
 	{"fast_light.open", "fast-light · open"},
 	{"fast_light_text.cloud", "fast-light-text · cloud"},
 	{"fast_light_text.open", "fast-light-text · open"},
+	// The embedding slot is tier UI over the embedding_model config
+	// field (single source of truth server-side), not a taxonomy entry.
+	{"embedding.open", "embedding · open"},
 }
 
 // tierRows builds the /m "model tiers" section: every taxonomy slot as an
@@ -35,9 +38,12 @@ func tierRows(cfg *agentclient.Config) []runtimeDashboardActionRow {
 	rows := make([]runtimeDashboardActionRow, 0, len(tierSlotOrder))
 	for _, slot := range tierSlotOrder {
 		value := ""
-		if slot.Key == "default_provider" {
+		switch slot.Key {
+		case "default_provider":
 			value = cfg.ModelsDefaultProvider
-		} else {
+		case "embedding.open":
+			value = cfg.EmbeddingModel
+		default:
 			value = cfg.ModelTiers[slot.Key]
 		}
 		if value == "" {
@@ -86,6 +92,42 @@ func tierPickerRows(tierKey string, cfg *agentclient.Config, status *agentclient
 	return rows
 }
 
+// embeddingTierPickerRows lists candidates for the embedding slot: the
+// open engine's own installed models first (ollama /api/tags — that's
+// what the embedding engine serves through today), then downloaded
+// GGUFs from the runtime inventory.
+func embeddingTierPickerRows(ag *agentclient.Client, cfg *agentclient.Config, status *agentclient.RuntimeStatus) []overlay.Row {
+	current := ""
+	if cfg != nil {
+		current = cfg.EmbeddingModel
+	}
+	var rows []overlay.Row
+	if ag != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if models, err := ag.ListModels(ctx); err == nil {
+			for _, m := range models {
+				rows = append(rows, overlay.Row{
+					Key:   m.Name,
+					Label: m.Name,
+					Value: formatBytes(m.SizeBytes),
+					Hint:  currentHint(m.Name, current),
+				})
+			}
+		}
+		cancel()
+	}
+	for _, m := range downloadedRuntimeModels(runtimeStatusModels(status)) {
+		rows = append(rows, overlay.Row{
+			Key:   m.ID,
+			Label: firstNonEmpty(m.DisplayName, m.ID),
+			Value: m.Runtime,
+			Hint:  currentHint(m.ID, current),
+		})
+	}
+	rows = append(rows, overlay.Row{Key: "-", Label: "(clear)", Value: "unset embedding model"})
+	return rows
+}
+
 // cloudTierPickerRows builds .cloud slot candidates from a fetched catalog,
 // falling back to the curated static Claude list when the fetch failed.
 func cloudTierPickerRows(tierKey string, cfg *agentclient.Config, catalog []agentclient.CloudModelInfo) []overlay.Row {
@@ -126,7 +168,9 @@ func isCloudTierKey(key string) bool {
 // budget, static fallback on failure) — same source the cloud settings use.
 func (d *runtimeDashboard) openTierPicker(tierKey string) {
 	var rows []overlay.Row
-	if isCloudTierKey(tierKey) {
+	if tierKey == "embedding.open" {
+		rows = embeddingTierPickerRows(d.agent, d.snapshot.Config, d.snapshot.Status)
+	} else if isCloudTierKey(tierKey) {
 		var catalog []agentclient.CloudModelInfo
 		if d.agent != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

@@ -1124,6 +1124,34 @@ func (c *Client) RefreshOnlineCatalog(ctx context.Context) CatalogRefreshResult 
 	return out
 }
 
+// InstalledOpenModel is one model reported by the active open-runtime
+// engine's own listing (e.g. ollama's /api/tags) — models the engine
+// can serve directly, as opposed to the runtime manager's GGUF
+// inventory.
+type InstalledOpenModel struct {
+	Name       string
+	SizeBytes  int64
+	ModifiedAt string
+}
+
+// ListModels returns the active open runtime engine's installed
+// models. For the ollama runtime this is the daemon's /api/tags list.
+func (c *Client) ListModels(ctx context.Context) ([]InstalledOpenModel, error) {
+	resp, err := c.agent.ListModels(ctx, &proto.ListModelsRequest{})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]InstalledOpenModel, 0, len(resp.GetModels()))
+	for _, m := range resp.GetModels() {
+		out = append(out, InstalledOpenModel{
+			Name:       m.GetName(),
+			SizeBytes:  m.GetSize(),
+			ModifiedAt: m.GetModifiedAt(),
+		})
+	}
+	return out, nil
+}
+
 // ModelRAMEstimate carries the numbers needed to predict a model's
 // runtime memory: total(ctx) ~= WeightsBytes + ctx*KVBytesPerToken +
 // overhead. SystemRAMBytes lets the caller render a fit verdict

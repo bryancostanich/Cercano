@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
 
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/dispatch"
@@ -23,18 +22,12 @@ func venvReady() bool {
 	return err == nil
 }
 
-// ddgScriptPath resolves the DuckDuckGo search script relative to the running
-// binary, matching the MCP surface's resolution (<bin dir>/../scripts/ddg_search.py).
-func ddgScriptPath() string {
-	exePath, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	p := filepath.Join(filepath.Dir(exePath), "..", "scripts", "ddg_search.py")
-	if abs, err := filepath.Abs(p); err == nil {
-		return abs
-	}
-	return p
+// searchScriptPath materializes the embedded DuckDuckGo search script and
+// returns its on-disk path. Replaces the former <bin dir>/../scripts/
+// resolution, which only worked for repo-layout builds and silently broke
+// web search on installed binaries.
+func searchScriptPath() (string, error) {
+	return web.EnsureSearchScript("")
 }
 
 // dispatchModelCaller implements web.ModelCaller (and the research package's

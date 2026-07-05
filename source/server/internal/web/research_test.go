@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -123,9 +124,12 @@ func TestSearchAll(t *testing.T) {
 		},
 	}
 	p := NewResearchPipeline(nil, searcher, nil)
-	results := p.SearchAll(context.Background(), []string{"query1", "query2"}, 5)
+	results, errs := p.SearchAll(context.Background(), []string{"query1", "query2"}, 5)
 	if len(results) != 2 {
 		t.Fatalf("got %d results, want 2", len(results))
+	}
+	if len(errs) != 0 {
+		t.Fatalf("got %d errors, want 0", len(errs))
 	}
 }
 
@@ -138,7 +142,7 @@ func TestSearchAllPartialFailure(t *testing.T) {
 		},
 	}
 	p := NewResearchPipeline(nil, searcher, nil)
-	results := p.SearchAll(context.Background(), []string{"query1", "query2"}, 5)
+	results, _ := p.SearchAll(context.Background(), []string{"query1", "query2"}, 5)
 	if len(results) != 1 {
 		t.Fatalf("got %d results, want 1", len(results))
 	}
@@ -266,5 +270,18 @@ func TestRunNoSearchResults(t *testing.T) {
 	_, err := p.Run(context.Background(), "something with no results", 5)
 	if err == nil {
 		t.Fatal("expected error for no search results")
+	}
+}
+
+func TestRunAllSearchesFailedSurfacesCause(t *testing.T) {
+	model := &mockModelCaller{responses: []string{"1. query one\n2. query two"}}
+	searcher := &mockSearcher{err: errors.New("ddg search failed: can't open file")}
+	p := NewResearchPipeline(model, searcher, nil)
+	_, err := p.Run(context.Background(), "anything", 3)
+	if err == nil {
+		t.Fatal("want error when every search fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "searches failed") || !strings.Contains(err.Error(), "can't open file") {
+		t.Fatalf("error should surface the underlying cause, got: %v", err)
 	}
 }

@@ -55,7 +55,11 @@ func (researchCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 		return nil, errors.New("research: " + venvMissingMessage)
 	}
 
-	searcher := web.NewSearcher(config.VenvPython(), ddgScriptPath())
+	scriptPath, err := searchScriptPath()
+	if err != nil {
+		return nil, fmt.Errorf("research: search script: %w", err)
+	}
+	searcher := web.NewSearcher(config.VenvPython(), scriptPath)
 	model := &dispatchModelCaller{call: call, source: "research"}
 	pipeline := web.NewResearchPipeline(model, searcher, web.NewFetcher())
 

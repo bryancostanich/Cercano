@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -154,6 +155,7 @@ func main() {
 
 func buildRuntimeManager(cfg config.Config) localruntime.Manager {
 	manager := localruntime.NewManager(localruntime.WithEndpoints(localruntime.EndpointsFromConfig(cfg)))
+	sweepStalePartials(cfg, manager)
 	if !llamaServerEnabled(cfg) {
 		return manager
 	}
@@ -180,6 +182,30 @@ func buildRuntimeManager(cfg config.Config) localruntime.Manager {
 		})
 	}
 	return manager
+}
+
+// sweepStalePartials removes .part files older than a week from the
+// configured model directories — orphans from server kills mid-
+// download. Recent partials are kept; they feed download resume.
+func sweepStalePartials(cfg config.Config, manager localruntime.Manager) {
+	for _, dir := range cfg.LlamaServer.ModelDirs {
+		if strings.HasPrefix(dir, "~/") {
+			if home, err := os.UserHomeDir(); err == nil {
+				dir = filepath.Join(home, dir[2:])
+			}
+		}
+		removed, err := localruntime.SweepStalePartials(dir, localruntime.DefaultPartialMaxAge)
+		if err != nil {
+			continue
+		}
+		for _, p := range removed {
+			manager.WriteLog(localruntime.LogEntry{
+				Source:  "cercano.runtime.download",
+				Level:   "info",
+				Message: "removed stale partial " + filepath.Base(p),
+			})
+		}
+	}
 }
 
 func llamaServerEnabled(cfg config.Config) bool {

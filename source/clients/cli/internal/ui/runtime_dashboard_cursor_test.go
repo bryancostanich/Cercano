@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/textinput"
 	"github.com/charmbracelet/x/ansi"
 
 	"cercano/source/server/pkg/agentclient"
@@ -15,12 +16,19 @@ import (
 // slot is an enter-to-change row).
 func newActionCursorTestDashboard() *runtimeDashboard {
 	m := New(nil, false)
+	// The catalog pane renders its own pane-local cursor marker
+	// regardless of focus — and downloaded models stay listed there
+	// (app-store semantics). Filter the catalog to nothing so these
+	// tests measure only the ACTION blocks' shared cursor space.
+	search := textinput.New()
+	search.SetValue("match-nothing-zzz")
 	return &runtimeDashboard{
-		width:   112,
-		height:  40,
-		palette: m.palette,
-		styles:  m.styles,
-		focus:   runtimeFocusActions,
+		width:         112,
+		height:        40,
+		palette:       m.palette,
+		styles:        m.styles,
+		focus:         runtimeFocusActions,
+		catalogSearch: search,
 		snapshot: runtimeDashboardSnapshot{
 			Config: &agentclient.Config{},
 			Status: &agentclient.RuntimeStatus{

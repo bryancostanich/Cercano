@@ -8,10 +8,10 @@ import (
 // concurrent calls from the agent's turn flow (which may interleave Add and
 // Used / Percent reads from different goroutines).
 type Counter struct {
-	mu       sync.Mutex
-	tok      Tokenizer
-	max      int
-	tokens   int
+	mu     sync.Mutex
+	tok    Tokenizer
+	max    int
+	tokens int
 }
 
 // NewCounter constructs a counter against the given tokenizer and model max.

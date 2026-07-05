@@ -53,6 +53,12 @@ type Entry struct {
 	// are ignored and renderToolEntry produces the visible row. expand /
 	// collapse via tab-focus is a follow-up; V1 renders folded.
 	Tool *ToolEntry
+
+	// Banner, when non-nil, makes this entry the CERCANO wordmark banner —
+	// Role/Content are ignored. Rendered static (no shimmer) from the live
+	// palette at paint time, so it recolors on theme switches; falls back to
+	// a compact one-liner when the viewport is narrower than the banner.
+	Banner *banner.Meta
 }
 
 // Model is the Bubble Tea root model.
@@ -1011,6 +1017,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			images := promptImagesToInline(m.input.Attachments())
 			m.input.SetValue("")
+			// The splash chrome hands off to a persistent scrollback banner:
+			// dismissing it on first submit moves the wordmark to entry zero
+			// instead of dropping it entirely.
+			if m.splashShown {
+				m.chat.PrependBanner(m.splash.Meta)
+			}
 			m.splashShown = false
 			// Slash commands are local navigation / UI actions, never sent to
 			// the model — bypass the mid-stream queue so /c, /m, /rename etc.
@@ -2461,6 +2473,7 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 		frozenThrough = cs.FrozenThrough
 	}
 	m.chat.SetEntriesSlice(resumeEntries(turns, frozenThrough))
+	m.chat.PrependBanner(m.splash.Meta)
 	// Restore the prior session's living recap into the footer line (renderRecap),
 	// or show a "recap unavailable" placeholder if the recap generator has been
 	// silently failing (e.g. local runtime misconfigured). Don't push into

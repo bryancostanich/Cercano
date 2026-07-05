@@ -790,10 +790,11 @@ func (s *Server) handleResearch(ctx context.Context, request *gomcp.CallToolRequ
 		}, nil, nil
 	}
 
-	// Resolve script path relative to the binary
-	exePath, _ := os.Executable()
-	scriptPath := filepath.Join(filepath.Dir(exePath), "..", "scripts", "ddg_search.py")
-	scriptPath, _ = filepath.Abs(scriptPath)
+	// Materialize the embedded search script
+	scriptPath, err := web.EnsureSearchScript("")
+	if err != nil {
+		return nil, nil, fmt.Errorf("cercano_research: search script: %w", err)
+	}
 
 	// Build pipeline dependencies
 	modelCaller := &grpcModelCallerWithTokens{client: s.grpcClient}
@@ -1089,9 +1090,10 @@ func (s *Server) handleDeepResearch(ctx context.Context, request *gomcp.CallTool
 	// Set up dependencies
 	modelCaller := &grpcModelCallerWithTokens{client: s.grpcClient, modelOverride: args.UseModel}
 
-	exePath, _ := os.Executable()
-	serverRoot := filepath.Dir(filepath.Dir(exePath))
-	scriptPath := filepath.Join(serverRoot, "scripts", "ddg_search.py")
+	scriptPath, err := web.EnsureSearchScript("")
+	if err != nil {
+		return nil, nil, fmt.Errorf("cercano_deep_research: search script: %w", err)
+	}
 	pythonPath := config.VenvPython()
 	ddgSearcher := web.NewSearcher(pythonPath, scriptPath)
 

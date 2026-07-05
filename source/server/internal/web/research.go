@@ -74,10 +74,14 @@ Question: %s`, question)
 	return queries, nil
 }
 
-// SearchAll runs searches for all queries concurrently and returns combined results.
-func (p *ResearchPipeline) SearchAll(ctx context.Context, queries []string, maxPerQuery int) []SearchResult {
+// SearchAll runs searches for all queries concurrently and returns combined
+// results plus the errors from failed queries. A partial failure is fine —
+// the surviving queries still feed the pipeline — but callers must be able
+// to tell "every search broke" apart from "the web had nothing to say".
+func (p *ResearchPipeline) SearchAll(ctx context.Context, queries []string, maxPerQuery int) ([]SearchResult, []error) {
 	var mu sync.Mutex
 	var all []SearchResult
+	var errs []error
 	var wg sync.WaitGroup
 
 	for _, q := range queries {
@@ -85,16 +89,17 @@ func (p *ResearchPipeline) SearchAll(ctx context.Context, queries []string, maxP
 		go func(query string) {
 			defer wg.Done()
 			results, err := p.searcher.Search(ctx, query, maxPerQuery)
-			if err != nil {
-				return // graceful degradation — skip failed queries
-			}
 			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				errs = append(errs, err)
+				return
+			}
 			all = append(all, results...)
-			mu.Unlock()
 		}(q)
 	}
 	wg.Wait()
-	return all
+	return all, errs
 }
 
 // DeduplicateResults removes duplicate URLs, preserving first occurrence order.
@@ -186,11 +191,16 @@ func (p *ResearchPipeline) Run(ctx context.Context, question string, maxResults 
 	}
 
 	// Step 2: Search all queries in parallel
-	allResults := p.SearchAll(ctx, queries, maxResults)
+	allResults, searchErrs := p.SearchAll(ctx, queries, maxResults)
 
 	// Step 3: Deduplicate
 	deduped := DeduplicateResults(allResults)
 	if len(deduped) == 0 {
+		// When every query errored the cause is the search layer, not the
+		// query content — surface it instead of a misleading "no results".
+		if len(searchErrs) > 0 && len(searchErrs) == len(queries) {
+			return nil, fmt.Errorf("all %d searches failed: %w", len(queries), searchErrs[0])
+		}
 		return nil, fmt.Errorf("no search results found for: %s", question)
 	}
 

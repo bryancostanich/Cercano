@@ -87,7 +87,11 @@ func (deepResearchCap) Execute(ctx context.Context, call *capabilities.Call) (*c
 	// routing metadata; natively the dispatch engine owns model selection, so
 	// that probe is skipped here.
 	model := &dispatchModelCaller{call: call, source: "deep_research", model: a.Model}
-	searcher := web.NewSearcher(config.VenvPython(), ddgScriptPath())
+	scriptPath, err := searchScriptPath()
+	if err != nil {
+		return nil, fmt.Errorf("deep_research: search script: %w", err)
+	}
+	searcher := web.NewSearcher(config.VenvPython(), scriptPath)
 	dispatcher := research.NewSearchDispatcher(&researchSearchAdapter{searcher: searcher})
 	pipeline := research.NewPipeline(model, dispatcher, &researchFetchAdapter{fetcher: web.NewFetcher()})
 

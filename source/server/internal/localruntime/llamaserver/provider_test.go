@@ -77,7 +77,7 @@ func TestArgsForBuildsLlamaServerCommand(t *testing.T) {
 		Threads:     6,
 		ExtraArgs:   []string{"--no-webui"},
 	})
-	model := modelRecord("/models/test.gguf", fakeFileInfo{size: 42})
+	model := provider.modelRecord("/models/test.gguf", fakeFileInfo{size: 42})
 
 	got := provider.argsFor(model, 8123)
 	want := []string{

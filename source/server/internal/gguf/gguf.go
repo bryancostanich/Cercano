@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 )
 
 const ggufMagic = 0x46554747 // "GGUF" little-endian
@@ -41,9 +42,16 @@ const (
 // this long, and the tokenizer arrays we skip element-by-element.
 const maxStringLen = 1 << 20
 
-// Meta holds the header fields needed for RAM estimation.
+// Meta holds the header fields needed for RAM estimation, plus the
+// identity metadata (name, quantization) that spares callers from
+// guessing those from filenames.
 type Meta struct {
-	Architecture    string
+	// Name is general.name — the model's self-declared display name.
+	Name string
+	// FileType is general.file_type, the llama.cpp LLAMA_FTYPE enum
+	// naming the overall quantization. -1 when the key is absent.
+	FileType     int64
+	Architecture string
 	BlockCount      uint64
 	ContextLength   uint64
 	EmbeddingLength uint64
@@ -60,6 +68,33 @@ type Meta struct {
 	// full-attention layers, so no uniform per-layer value exists.
 	// Zero means "uniform: derive as BlockCount * HeadCountKV".
 	KVHeadsTotal uint64
+}
+
+// fileTypeLabels maps the llama.cpp LLAMA_FTYPE enum (general.file_type)
+// to the conventional quantization label. Unknown values label as ""
+// so callers fall back to their own inference.
+var fileTypeLabels = map[int64]string{
+	0: "F32", 1: "F16", 2: "Q4_0", 3: "Q4_1",
+	7: "Q8_0", 8: "Q5_0", 9: "Q5_1",
+	10: "Q2_K", 11: "Q3_K_S", 12: "Q3_K_M", 13: "Q3_K_L",
+	14: "Q4_K_S", 15: "Q4_K_M", 16: "Q5_K_S", 17: "Q5_K_M",
+	18: "Q6_K", 19: "IQ2_XXS", 20: "IQ2_XS", 21: "Q2_K_S",
+	22: "IQ3_XS", 23: "IQ3_XXS", 24: "IQ1_S", 25: "IQ4_NL",
+	26: "IQ3_S", 27: "IQ3_M", 28: "IQ2_S", 29: "IQ2_M",
+	30: "IQ4_XS", 31: "IQ1_M", 32: "BF16",
+}
+
+// QuantLabel names the overall quantization ("Q4_K_M") from
+// general.file_type, or "" when the key was absent or unrecognized.
+func (m *Meta) QuantLabel() string {
+	return fileTypeLabels[m.FileType]
+}
+
+// IsEncoder reports whether the architecture is an embedding-style
+// encoder (bert family) rather than a generative decoder. Heuristic by
+// architecture name — the GGUF header carries no explicit flag.
+func (m *Meta) IsEncoder() bool {
+	return strings.Contains(m.Architecture, "bert")
 }
 
 // kvHeadsTotal is the total KV-head count across all layers: the
@@ -162,7 +197,7 @@ func ParseMeta(r io.Reader) (*Meta, error) {
 		return nil, fmt.Errorf("gguf: read kv count: %w", err)
 	}
 
-	meta := &Meta{}
+	meta := &Meta{FileType: -1}
 	for i := uint64(0); i < kvCount; i++ {
 		key, err := readString(r)
 		if err != nil {
@@ -222,6 +257,20 @@ func (m *Meta) consume(r io.Reader, key string, valType uint32) error {
 			return fmt.Errorf("gguf: read architecture: %w", err)
 		}
 		m.Architecture = s
+		return nil
+	case key == "general.name":
+		s, err := readString(r)
+		if err != nil {
+			return fmt.Errorf("gguf: read name: %w", err)
+		}
+		m.Name = s
+		return nil
+	case key == "general.file_type":
+		var v uint64
+		if err := m.readUint(r, valType, &v, key); err != nil {
+			return err
+		}
+		m.FileType = int64(v)
 		return nil
 	case m.Architecture != "" && key == m.Architecture+".block_count":
 		return m.readUint(r, valType, &m.BlockCount, key)

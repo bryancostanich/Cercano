@@ -336,3 +336,38 @@ func TestParseMeta_EncoderWithoutKVHeadsAtListEnd(t *testing.T) {
 		t.Errorf("HeadCountKV = %d, want 6", meta.HeadCountKV)
 	}
 }
+
+func TestParseMeta_IdentityKeys(t *testing.T) {
+	b := &ggufBuilder{}
+	b.addString("general.architecture", "qwen2").
+		addString("general.name", "Qwen2.5 Coder 7B Instruct").
+		addUint32("general.file_type", 15). // Q4_K_M
+		addUint32("qwen2.block_count", 28).
+		addUint32("qwen2.context_length", 32768).
+		addUint32("qwen2.embedding_length", 3584).
+		addUint32("qwen2.attention.head_count", 28).
+		addUint32("qwen2.attention.head_count_kv", 4)
+	meta, err := ParseMeta(bytes.NewReader(b.bytes()))
+	if err != nil {
+		t.Fatalf("ParseMeta: %v", err)
+	}
+	if meta.Name != "Qwen2.5 Coder 7B Instruct" {
+		t.Errorf("Name = %q", meta.Name)
+	}
+	if meta.QuantLabel() != "Q4_K_M" {
+		t.Errorf("QuantLabel = %q (file_type %d)", meta.QuantLabel(), meta.FileType)
+	}
+	if meta.IsEncoder() {
+		t.Error("qwen2 is not an encoder")
+	}
+}
+
+func TestQuantLabel_AbsentFileType(t *testing.T) {
+	meta, err := ParseMeta(bytes.NewReader(qwenStyle().bytes()))
+	if err != nil {
+		t.Fatalf("ParseMeta: %v", err)
+	}
+	if meta.FileType != -1 || meta.QuantLabel() != "" {
+		t.Errorf("absent file_type: FileType=%d QuantLabel=%q", meta.FileType, meta.QuantLabel())
+	}
+}

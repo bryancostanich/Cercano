@@ -199,6 +199,16 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	}
 	var compGen *compactiongen.Generator
 	if persistentStore != nil {
+		// Summarizer model precedence: explicit compaction.summarizer_model →
+		// the fast_light_text tier's open side (the taxonomy slot for
+		// prose-judgment background work, same rule the watchdog uses) → the
+		// interactive open model as the fallback of last resort.
+		summarizerModel := cfg.Compaction.SummarizerModel
+		if summarizerModel == "" {
+			if id, _, ok := cfg.Models.Resolve(config.TierFastLightText, config.ProviderOpen, true); ok {
+				summarizerModel = id
+			}
+		}
 		compactSummarize := func(ctx context.Context, msgs []llm.Message) (compaction.StructuredSummary, error) {
 			// Greedy decoding is a correctness requirement here, not a tuning
 			// choice: the frames-matrix bakeoff (compaction-bakeoff-findings.md)
@@ -207,8 +217,8 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 			// temperature 0 reproduced exactly and kept every proposal anchor.
 			greedy := engine.Greedy()
 			req := &agent.Request{Input: compaction.BuildSummaryPrompt(msgs), Temperature: greedy.Temperature}
-			if cfg.Compaction.SummarizerModel != "" {
-				req.ModelOverride = cfg.Compaction.SummarizerModel
+			if summarizerModel != "" {
+				req.ModelOverride = summarizerModel
 			}
 			resp, err := openProvider.Process(ctx, req)
 			if err != nil {
@@ -221,8 +231,8 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 			SegmentTokens:         cfg.Compaction.SegmentTokens,
 			VerbatimRecent:        cfg.Compaction.VerbatimRecent,
 		}
-		if cfg.Compaction.SummarizerModel == "" {
-			fmt.Fprintf(os.Stderr, "[compaction] WARN: no summarizer_model configured — compaction summarizes with the interactive local model (%s), which can be very slow for large histories\n", cfg.OpenModel)
+		if summarizerModel == "" {
+			fmt.Fprintf(os.Stderr, "[compaction] WARN: no summarizer_model and no models.tiers.fast_light_text.open configured — compaction summarizes with the interactive open model (%s), which can be very slow for large histories\n", cfg.OpenModel)
 		}
 		compGen = compactiongen.New(persistentStore, compactSummarize, compCfg, contextmeter.Default(), 10*time.Second)
 		// Runtime kill switch — Schedule noops until enabled. Wiring the

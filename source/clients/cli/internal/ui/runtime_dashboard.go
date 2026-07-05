@@ -107,8 +107,18 @@ type runtimeDashboardActionRow struct {
 
 type runtimeDashboardRefreshMsg struct{}
 
-func runtimeDashboardRefreshTick() tea.Cmd {
-	return tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg { return runtimeDashboardRefreshMsg{} })
+// refreshTick schedules the next snapshot reload: fast while a
+// download is streaming so progress feels live, relaxed otherwise.
+// The loop must ALWAYS reschedule while the page is open — gating its
+// survival on hasActiveDownloads meant a single failed or momentarily
+// inconsistent status fetch killed live updates until the page was
+// reopened.
+func (d *runtimeDashboard) refreshTick() tea.Cmd {
+	interval := 2 * time.Second
+	if d.hasActiveDownloads() {
+		interval = 500 * time.Millisecond
+	}
+	return tea.Tick(interval, func(time.Time) tea.Msg { return runtimeDashboardRefreshMsg{} })
 }
 
 func newRuntimeDashboard(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h int) (*runtimeDashboard, tea.Cmd) {
@@ -281,19 +291,13 @@ func (d *runtimeDashboard) applyActionMsg(msg runtimeDashboardActionMsg) tea.Cmd
 		d.catalogMessage = msg.CatalogMessage
 	}
 	d.actionMessage = msg.Status
-	if d.hasActiveDownloads() {
-		return runtimeDashboardRefreshTick()
-	}
-	return nil
+	return d.refreshTick()
 }
 
 func (d *runtimeDashboard) refreshSnapshot() tea.Cmd {
 	d.snapshot = loadRuntimeDashboardSnapshot(d.agent)
 	d.clampOperationCursor()
-	if d.hasActiveDownloads() {
-		return runtimeDashboardRefreshTick()
-	}
-	return nil
+	return d.refreshTick()
 }
 
 func (d *runtimeDashboard) hasActiveDownloads() bool {

@@ -250,36 +250,65 @@ type groupRenderOpts struct {
 //
 // width is the same column budget renderToolEntry uses.
 func renderToolGroup(entries []ToolEntry, width int, styles theme.Styles, md *render.Markdown, opts groupRenderOpts) string {
+	s, _ := renderToolGroupSpans(entries, width, styles, md, opts)
+	return s
+}
+
+// toolArrowRow marks one clickable fold-toggle row inside a rendered tool
+// group block. Line is relative to the block's first line; Entry indexes the
+// entries slice passed in. Rows are recorded while the lines are emitted, so
+// the mapping is correct by construction — click handling must never
+// re-derive (or glyph-sniff) the rendered layout after the fact.
+type toolArrowRow struct {
+	Line  int
+	Entry int
+}
+
+// renderToolGroupSpans is renderToolGroup plus the arrow-row map.
+func renderToolGroupSpans(entries []ToolEntry, width int, styles theme.Styles, md *render.Markdown, opts groupRenderOpts) (string, []toolArrowRow) {
 	// Per-entry path: a single-entry "group" (folding compresses nothing) or
-	// a user-expanded multi-entry group. Each entry renders as its own line,
-	// respecting its own Folded state so Enter can drill into args+result.
+	// a user-expanded multi-entry group. Each entry renders as its own arrow
+	// line (plus body lines when unfolded), respecting its own Folded state
+	// so Enter can drill into args+result.
 	if len(entries) == 1 || opts.Expanded {
 		lines := make([]string, 0, len(entries))
+		rows := make([]toolArrowRow, 0, len(entries))
+		cursor := 0
 		for i, e := range entries {
-			lines = append(lines, renderToolEntry(e, width, i == opts.FocusedIdx, styles, md))
+			seg := renderToolEntry(e, width, i == opts.FocusedIdx, styles, md)
+			rows = append(rows, toolArrowRow{Line: cursor, Entry: i})
+			lines = append(lines, seg)
+			cursor += strings.Count(seg, "\n") + 1
 		}
-		return strings.Join(lines, "\n")
+		return strings.Join(lines, "\n"), rows
 	}
 	var completed []ToolEntry
-	var active []ToolEntry
-	for _, e := range entries {
+	var activeIdx []int
+	for i, e := range entries {
 		if e.Status == ToolStatusInProgress {
-			active = append(active, e)
+			activeIdx = append(activeIdx, i)
 		} else {
 			completed = append(completed, e)
 		}
 	}
 	var lines []string
+	var rows []toolArrowRow
 	if len(completed) > 0 {
+		// The summary arrow maps to the group's first entry;
+		// ToggleFocusedFold's group-aware branch turns that toggle into
+		// "expand the group".
+		rows = append(rows, toolArrowRow{Line: 0, Entry: 0})
 		lines = append(lines, renderGroupSummary(completed, width, styles, opts.Focused))
 	}
-	for _, e := range active {
+	for _, i := range activeIdx {
+		e := entries[i]
 		// In-progress entries always render folded — they are the live row.
 		// No per-entry focus in collapsed view; focus belongs to the group.
 		e.Folded = true
+		rows = append(rows, toolArrowRow{Line: len(lines), Entry: i})
 		lines = append(lines, renderToolEntry(e, width, false, styles, md))
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n"), rows
 }
 
 // renderGroupSummary builds the one-line summary for the completed members of

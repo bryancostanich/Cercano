@@ -2372,6 +2372,13 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		if err := s.agent.PersistentStore().EnsureConversation(ctx, convID, req.GetWorkDir(), s.mainModelFor(isCloud)); err != nil {
 			fmt.Fprintf(os.Stderr, "[tool-loop] EnsureConversation(%s) failed: %v\n", convID, err)
 			persistEnabled = false
+			// Persistence silently vanishing cost real forensics time (see
+			// docs/bugs/2026-07-04-user-message-tear.md) — tell the user.
+			stream.Send(&proto.StreamProcessResponse{
+				Payload: &proto.StreamProcessResponse_Progress{
+					Progress: &proto.ProgressUpdate{Message: "⚠ conversation persistence unavailable this turn — it will not appear in /resume"},
+				},
+			})
 		} else {
 			s.persistTurn(ctx, convID, agent.UserMessage(req.GetInput(), mapInlineImages(req.GetImages())))
 		}

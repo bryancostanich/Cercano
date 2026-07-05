@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"cercano/source/clients/cli/internal/banner"
 	"cercano/source/clients/cli/internal/render"
 	"cercano/source/clients/cli/internal/theme"
 	"cercano/source/server/pkg/agentclient"
@@ -126,6 +127,18 @@ func (c *chatView) AppendEntry(e *Entry) { c.entries = append(c.entries, e) }
 
 // SetEntriesSlice replaces the entire entry slice (for /clear and applyResume).
 func (c *chatView) SetEntriesSlice(es []*Entry) { c.entries = es }
+
+// PrependBanner inserts the wordmark banner as entry zero, so it persists at
+// the top of the transcript once the splash chrome is dismissed. Idempotent.
+// Must be called before any tool-group interaction: groupExpanded keys are
+// entry indexes, and prepending shifts them — both call sites (first submit,
+// applyResume) run before the user can have expanded anything.
+func (c *chatView) PrependBanner(meta banner.Meta) {
+	if len(c.entries) > 0 && c.entries[0].Banner != nil {
+		return
+	}
+	c.entries = append([]*Entry{{Banner: &meta}}, c.entries...)
+}
 
 // insertNoticeAboveLast inserts e at position len-1, pushing the last entry
 // down. Used by the TypeDone arm to slot the ⚠ notice above the final reply.
@@ -803,6 +816,18 @@ func (c *chatView) renderEntry(e *Entry, idx int) string {
 	// scrollback's vertical rhythm stays consistent.
 	if e.Tool != nil {
 		return indentBlock(pad, renderToolEntry(*e.Tool, textW, idx == c.focusedToolIdx, c.styles, c.md))
+	}
+
+	// Banner entry: the fixed-width wordmark block when it fits, otherwise a
+	// compact one-liner — the 62-col chrome wraps catastrophically below that.
+	if e.Banner != nil {
+		if textW >= banner.Width {
+			return indentBlock(pad, banner.Render(c.palette, *e.Banner))
+		}
+		line := c.styles.Accent.Render("CERCANO") +
+			c.styles.Muted.Render(" · "+e.Banner.Tagline+" · ") +
+			c.styles.Info.Render(e.Banner.Version)
+		return indentBlock(pad, lipgloss.NewStyle().Width(textW).Render(line))
 	}
 
 	switch e.Role {

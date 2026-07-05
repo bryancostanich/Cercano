@@ -888,10 +888,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if isRuntimeDashboardKey(msg) {
 			dashboard, cmd := newRuntimeDashboard(m.agent, m.palette, m.styles, m.width, m.height)
 			m.content = dashboard
-			if dashboard.hasActiveDownloads() {
-				cmd = tea.Batch(cmd, runtimeDashboardRefreshTick())
-			}
-			return m, cmd
+			return m, tea.Batch(cmd, dashboard.refreshTick())
 		}
 		// Esc cancels an in-flight prompt execution. If there's a queued
 		// follow-up (user typed while waiting), it stays queued through the
@@ -1432,10 +1429,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// to a fresh runtime dashboard.
 		dashboard, cmd := newRuntimeDashboard(m.agent, m.palette, m.styles, m.width, m.height)
 		m.content = dashboard
-		if dashboard.hasActiveDownloads() {
-			cmd = tea.Batch(cmd, runtimeDashboardRefreshTick())
-		}
-		return m, cmd
+		return m, tea.Batch(cmd, dashboard.refreshTick())
 
 	case openRuntimeStatusChangedMsg:
 		// Pushed on runtime swap or startup — the headless detection

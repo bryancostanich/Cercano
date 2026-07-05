@@ -21,8 +21,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -53,15 +55,23 @@ func main() {
 	aroundTurn := flag.String("aroundturn", "", "slice a window around this turn id (default: whole conversation)")
 	before := flag.Int("before", 40, "with -aroundturn: turns of context before the target")
 	after := flag.Int("after", 10, "with -aroundturn: turns of context after the target")
+	dbFlag := flag.String("db", os.ExpandEnv("$HOME/.config/cercano/conversations.db"), "conversations database to read (any sliced copy works — nothing is written)")
+	jsonOut := flag.Bool("json", false, "emit one machine-readable JSON result object on stdout (human output moves to stderr)")
 	flag.Parse()
+
+	// hout carries all human-oriented output. In -json mode it moves to
+	// stderr so stdout is exactly one parseable JSON object.
+	hout := io.Writer(os.Stdout)
+	if *jsonOut {
+		hout = os.Stderr
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
-	dbPath := os.ExpandEnv("$HOME/.config/cercano/conversations.db")
-	store, err := conversation.Open(dbPath)
+	store, err := conversation.Open(*dbFlag)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "open %s: %v\n", dbPath, err)
+		fmt.Fprintf(os.Stderr, "open %s: %v\n", *dbFlag, err)
 		os.Exit(1)
 	}
 	turns, err := store.GetTurns(ctx, *convID)
@@ -95,9 +105,9 @@ func main() {
 	tok := contextmeter.Default()
 	rawTok := compaction.TotalTokens(tok, msgs)
 
-	fmt.Printf("conv=%s model=%s ollama=%s\n", *convID, *model, *ollamaURL)
-	fmt.Printf("turns=%d msgs=%d raw_tokens=%d\n", len(turns), len(msgs), rawTok)
-	fmt.Printf("thresholds: activation_floor=%d segment_tokens=%d verbatim_recent=%d\n\n",
+	fmt.Fprintf(hout, "conv=%s model=%s ollama=%s\n", *convID, *model, *ollamaURL)
+	fmt.Fprintf(hout, "turns=%d msgs=%d raw_tokens=%d\n", len(turns), len(msgs), rawTok)
+	fmt.Fprintf(hout, "thresholds: activation_floor=%d segment_tokens=%d verbatim_recent=%d\n\n",
 		*floor, *segTokens, *verbatim)
 
 	summarizerCalls := 0
@@ -131,21 +141,21 @@ func main() {
 	state.SegmentSummariesJSON = ""
 	state.ConsolidatedJSON = ""
 
-	fmt.Println("running compactor.Advance in a loop until more=false...")
+	fmt.Fprintln(hout, "running compactor.Advance in a loop until more=false...")
 	start := time.Now()
 	var newState = state
 	var changed, more bool
-	pass := 0
+	passCount := 0
 	for {
-		pass++
+		passCount++
 		passStart := time.Now()
 		next, chg, m, err := compactor.Advance(ctx, turns, newState, summarize, cfg, tok)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "\nAdvance pass %d failed after %s: %v\n", pass, time.Since(start), err)
+			fmt.Fprintf(os.Stderr, "\nAdvance pass %d failed after %s: %v\n", passCount, time.Since(start), err)
 			os.Exit(1)
 		}
-		fmt.Printf("pass=%d elapsed=%s summarizer_calls_total=%d changed=%v more=%v\n",
-			pass, time.Since(passStart), summarizerCalls, chg, m)
+		fmt.Fprintf(hout, "pass=%d elapsed=%s summarizer_calls_total=%d changed=%v more=%v\n",
+			passCount, time.Since(passStart), summarizerCalls, chg, m)
 		newState = next
 		if chg {
 			changed = true
@@ -156,13 +166,13 @@ func main() {
 		}
 	}
 	elapsed := time.Since(start)
-	fmt.Printf("\ntotal_elapsed=%s summarizer_calls=%d passes=%d\n\n", elapsed, summarizerCalls, pass)
+	fmt.Fprintf(hout, "\ntotal_elapsed=%s summarizer_calls=%d passes=%d\n\n", elapsed, summarizerCalls, passCount)
 	if !changed {
-		fmt.Println("compactor.Advance did not run — inputs may be below activation floor. Try -floor 500 or a longer conversation.")
+		fmt.Fprintln(hout, "compactor.Advance did not run — inputs may be below activation floor. Try -floor 500 or a longer conversation.")
 		return
 	}
 
-	fmt.Println("--- consolidated summary (what the compaction layer stored) ---")
+	fmt.Fprintln(hout, "--- consolidated summary (what the compaction layer stored) ---")
 	var consolidated compaction.StructuredSummary
 	if newState.ConsolidatedJSON != "" {
 		// Round-trip through the RenderBlock so we see it the way the model on
@@ -170,28 +180,69 @@ func main() {
 		_ = consolidated
 	}
 	// Re-parse for direct inspection.
-	fmt.Println(newState.ConsolidatedJSON)
-	fmt.Println()
+	fmt.Fprintln(hout, newState.ConsolidatedJSON)
+	fmt.Fprintln(hout)
 
 	// Anchor / fabrication analysis over the JSON representation of the summary
 	// (which contains every section's text).
 	summary := strings.ToLower(newState.ConsolidatedJSON)
-	fmt.Println("--- grounding analysis ---")
-	fmt.Printf("%-8s  %-40s  %s\n", "kind", "substring", "found?")
-	fmt.Printf("%-8s  %-40s  %s\n", "--------", "----------------------------------------", "------")
+	fmt.Fprintln(hout, "--- grounding analysis ---")
+	fmt.Fprintf(hout, "%-8s  %-40s  %s\n", "kind", "substring", "found?")
+	fmt.Fprintf(hout, "%-8s  %-40s  %s\n", "--------", "----------------------------------------", "------")
+	type anchorResult struct {
+		Name string `json:"name"`
+		Hit  bool   `json:"hit"`
+	}
+	type tellResult struct {
+		Name       string `json:"name"`
+		Fabricated bool   `json:"fabricated"`
+	}
+	var anchorResults []anchorResult
+	var tellResults []tellResult
+	pass := true
 	for _, a := range splitCSV(*anchors) {
+		hit := strings.Contains(summary, strings.ToLower(a))
 		mark := "MISS"
-		if strings.Contains(summary, strings.ToLower(a)) {
+		if hit {
 			mark = "hit"
+		} else {
+			pass = false
 		}
-		fmt.Printf("%-8s  %-40s  %s\n", "anchor", a, mark)
+		anchorResults = append(anchorResults, anchorResult{Name: a, Hit: hit})
+		fmt.Fprintf(hout, "%-8s  %-40s  %s\n", "anchor", a, mark)
 	}
 	for _, t := range splitCSV(*tells) {
+		fab := strings.Contains(summary, strings.ToLower(t))
 		mark := "clean"
-		if strings.Contains(summary, strings.ToLower(t)) {
+		if fab {
 			mark = "FABRICATED"
+			pass = false
 		}
-		fmt.Printf("%-8s  %-40s  %s\n", "tell", t, mark)
+		tellResults = append(tellResults, tellResult{Name: t, Fabricated: fab})
+		fmt.Fprintf(hout, "%-8s  %-40s  %s\n", "tell", t, mark)
+	}
+	if *jsonOut {
+		result := struct {
+			Model           string         `json:"model"`
+			ConversationID  string         `json:"conversation_id"`
+			Passes          int            `json:"passes"`
+			SummarizerCalls int            `json:"summarizer_calls"`
+			ElapsedSeconds  float64        `json:"elapsed_seconds"`
+			Anchors         []anchorResult `json:"anchors"`
+			Tells           []tellResult   `json:"tells"`
+			Pass            bool           `json:"pass"`
+			Summary         string         `json:"consolidated_summary_json"`
+		}{
+			Model: *model, ConversationID: *convID,
+			Passes: passCount, SummarizerCalls: summarizerCalls,
+			ElapsedSeconds: elapsed.Seconds(),
+			Anchors:        anchorResults, Tells: tellResults,
+			Pass: pass, Summary: newState.ConsolidatedJSON,
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+			fmt.Fprintf(os.Stderr, "encode result: %v\n", err)
+			os.Exit(1)
+		}
 	}
 }
 

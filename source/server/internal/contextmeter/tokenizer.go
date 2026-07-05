@@ -36,7 +36,11 @@ func ModelMax(model string) int {
 		return 131_072 // 128K
 	case strings.Contains(m, "qwen"):
 		return 131_072
-	case strings.Contains(m, "claude-opus") || strings.Contains(m, "claude-sonnet") || strings.Contains(m, "claude-haiku"):
+	case strings.Contains(m, "claude"):
+		// All current Claude models (Opus/Sonnet/Haiku 4.x, Fable/Mythos 5)
+		// publish a 200K conventional window. A generic match beats a name
+		// list here: an unlisted new Claude model falling through to the
+		// 128K default silently shrinks the meter denominator.
 		return 200_000
 	case strings.Contains(m, "gemini-1.5-pro"):
 		return 2_000_000

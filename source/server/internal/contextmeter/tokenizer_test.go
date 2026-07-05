@@ -21,7 +21,7 @@ func TestDefault_Empty(t *testing.T) {
 
 func TestModelMax(t *testing.T) {
 	cases := []struct {
-		model     string
+		model       string
 		wantAtLeast int
 	}{
 		{"qwen3-coder-next:latest", 200_000}, // 256K
@@ -88,8 +88,8 @@ func TestCounter_Percent_Caps(t *testing.T) {
 
 func TestCounter_NilSafe(t *testing.T) {
 	var c *Counter
-	c.Add("anything")    // should not panic
-	c.AddCount(5)        // should not panic
+	c.Add("anything") // should not panic
+	c.AddCount(5)     // should not panic
 	c.Reset()
 	if c.Used() != 0 || c.Max() != 0 || c.Percent() != 0 {
 		t.Error("nil Counter should report zeros without panicking")
@@ -123,5 +123,15 @@ func TestRegistry_Drop(t *testing.T) {
 	}
 	if c2.Used() != 0 {
 		t.Errorf("dropped counter recreated should be empty, got %d", c2.Used())
+	}
+}
+
+func TestModelMax_ClaudeGenericMatch(t *testing.T) {
+	// claude-fable-5 was falling through to the 128K unknown-model default,
+	// silently shrinking the context meter's denominator.
+	for _, m := range []string{"claude-fable-5", "claude-mythos-5", "claude-opus-4-8", "CLAUDE-SONNET-5"} {
+		if got := ModelMax(m); got != 200_000 {
+			t.Errorf("ModelMax(%q) = %d, want 200000", m, got)
+		}
 	}
 }

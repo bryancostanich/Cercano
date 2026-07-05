@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"cercano/source/server/internal/gguf"
 	"cercano/source/server/internal/localruntime"
 	"cercano/source/server/pkg/config"
 )
@@ -71,6 +72,59 @@ type Provider struct {
 	client  *http.Client
 	mu      sync.RWMutex
 	running map[string]*managedInstance
+
+	// headerCache memoizes per-file GGUF identity metadata (name,
+	// architecture, quantization) so Discover — which runs on every
+	// dashboard tick — reads each file's header once, not repeatedly.
+	// Invalidated by mtime+size. Failed parses are cached too, so a
+	// corrupt file doesn't get re-read every tick.
+	headerMu    sync.Mutex
+	headerCache map[string]headerIdentity
+}
+
+// headerIdentity is the cached result of reading a GGUF's identity
+// metadata off disk.
+type headerIdentity struct {
+	modTime time.Time
+	size    int64
+	name    string
+	family  string
+	quant   string
+	encoder bool
+	ok      bool
+}
+
+// identityHeaderWindow bounds the header read — same window the RAM
+// estimator uses; identity keys sit even earlier in the file.
+const identityHeaderWindow = 256 * 1024
+
+// headerIdentity returns the file's parsed identity, from cache when
+// the file hasn't changed.
+func (p *Provider) headerIdentity(path string, info os.FileInfo) headerIdentity {
+	p.headerMu.Lock()
+	cached, hit := p.headerCache[path]
+	p.headerMu.Unlock()
+	if hit && cached.modTime.Equal(info.ModTime()) && cached.size == info.Size() {
+		return cached
+	}
+	id := headerIdentity{modTime: info.ModTime(), size: info.Size()}
+	if f, err := os.Open(path); err == nil {
+		if meta, perr := gguf.ParseMeta(io.LimitReader(f, identityHeaderWindow)); perr == nil {
+			id.name = meta.Name
+			id.family = meta.Architecture
+			id.quant = meta.QuantLabel()
+			id.encoder = meta.IsEncoder()
+			id.ok = true
+		}
+		_ = f.Close()
+	}
+	p.headerMu.Lock()
+	if p.headerCache == nil {
+		p.headerCache = make(map[string]headerIdentity)
+	}
+	p.headerCache[path] = id
+	p.headerMu.Unlock()
+	return id
 }
 
 type managedInstance struct {
@@ -145,7 +199,7 @@ func (p *Provider) Discover(ctx context.Context) ([]localruntime.ModelRecord, er
 			if err != nil {
 				return nil
 			}
-			model := modelRecord(path, info)
+			model := p.modelRecord(path, info)
 			model.Active = matchesModel(p.cfg.DefaultModel, model)
 			models = append(models, model)
 			return nil
@@ -306,7 +360,7 @@ func (p *Provider) resolveModel(ctx context.Context, requested string) (localrun
 		path, err := expandPath(requested)
 		if err == nil {
 			if info, statErr := os.Stat(path); statErr == nil && !info.IsDir() && strings.ToLower(filepath.Ext(path)) == ".gguf" {
-				return modelRecord(path, info), nil
+				return p.modelRecord(path, info), nil
 			}
 		}
 		return localruntime.ModelRecord{}, fmt.Errorf("llama-server model %q not found in configured model_dirs", requested)
@@ -585,9 +639,9 @@ func (p *Provider) restartBackoff() time.Duration {
 	return d
 }
 
-func modelRecord(path string, info os.FileInfo) localruntime.ModelRecord {
+func (p *Provider) modelRecord(path string, info os.FileInfo) localruntime.ModelRecord {
 	display := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	return localruntime.ModelRecord{
+	rec := localruntime.ModelRecord{
 		ID:            runtimeName + ":" + shortID(path),
 		DisplayName:   display,
 		Runtime:       runtimeName,
@@ -602,6 +656,24 @@ func modelRecord(path string, info os.FileInfo) localruntime.ModelRecord {
 		RuntimeState:  localruntime.StateStopped,
 		SupportsChat:  true,
 	}
+	// The GGUF header is the authority on identity — the filename
+	// inference above is only the fallback for unparseable files.
+	if id := p.headerIdentity(path, info); id.ok {
+		if id.name != "" {
+			rec.DisplayName = id.name
+		}
+		if id.family != "" {
+			rec.Family = id.family
+		}
+		if id.quant != "" {
+			rec.Quantization = id.quant
+		}
+		if id.encoder {
+			rec.SupportsChat = false
+			rec.SupportsEmbed = true
+		}
+	}
+	return rec
 }
 
 func (p *Provider) catalogModels() []localruntime.ModelRecord {

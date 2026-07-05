@@ -49,3 +49,4 @@ test/sandbox/
 # themselves do not show up in the root worktree's status.
 .claude/worktrees/
 source/server/compaction-bakeoff
+source/server/cercano

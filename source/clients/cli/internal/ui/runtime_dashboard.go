@@ -978,7 +978,10 @@ func isCatalogDownloadModel(model agentclient.RuntimeModel) bool {
 		return true
 	}
 	switch state {
-	case "not_downloaded", "downloading", "failed", "cancelled":
+	// "downloaded" stays listed on purpose — app-store semantics: a
+	// model doesn't vanish from catalog search the moment its download
+	// finishes; it shows as downloaded (Enter is guarded upstream).
+	case "not_downloaded", "downloading", "downloaded", "failed", "cancelled":
 		return true
 	default:
 		return false

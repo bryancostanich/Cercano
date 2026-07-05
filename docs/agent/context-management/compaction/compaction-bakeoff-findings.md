@@ -182,3 +182,50 @@ Findings:
    model that can actually quote.
 4. Adaptive's lower reduction (68%) bought no anchor advantage over rolling —
    no reason to switch the prompt shape on this evidence.
+
+---
+
+# Summarizer model selection (fast_light_text tier), 2026-07-05
+
+The compaction summarizer now resolves its model as: explicit
+`compaction.summarizer_model` → `models.tiers.fast_light_text.open` → the
+interactive open model. Populating the tier is how you switch the summarizer;
+this section records the audition method and the first result.
+
+## Audition method
+
+Production-path check on the tiers-proposal window (conv `80109e871fba4e18`
+around turn `adfada03…`), greedy decoding, five must-keep anchors plus
+fabrication tells:
+
+```
+compaction-repro -conv 80109e871fba4e18 -aroundturn adfada03679f33c3a13fa50a \
+  -before 40 -after 10 -model <tag> \
+  -anchors 'most_capable,fast_light,models.Resolve,default_provider,tier'
+```
+
+**Bar to clear: 5/5 anchors, all tells clean.** Anything less does not get to
+summarize history — a missed anchor here is a dropped design decision in
+production.
+
+## Results
+
+| model | anchors | time (2 calls) |
+|---|---|---|
+| qwen3-coder-next (current) | 5/5 | ~30 s |
+| phi4:14b | 4/5 | ~55 s |
+
+phi4 dropped `models.Resolve` — a function-signature anchor, exactly the
+load-bearing identifier class the PROPOSALS/fidelity work protects — and was
+slower despite being 5× smaller on disk: qwen3-coder-next is sparse
+mixture-of-experts, so parameter count on disk is a poor latency predictor.
+Part of phi4's 55 s is cold-load, but there is no fidelity-neutral speed win.
+
+## Standing decision
+
+- `fast_light_text.open` stays **unset**; the summarizer stays on the
+  interactive open model (qwen3-coder-next), the best-measured option.
+- Candidates for the tier (e.g. a 4B-class text model) must pass the audition
+  above before being configured.
+- Dense-vs-MoE lesson: judge summarizer candidates on measured latency and
+  anchor retention, never on parameter size.

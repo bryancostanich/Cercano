@@ -67,6 +67,14 @@ type runtimeDashboard struct {
 	// by fullContent. Lets renderActionBlock map the flat
 	// operationCursor onto whichever block the cursor's row lives in.
 	renderActionOrdinal int
+	// blockStartLine / selectedActionLine are render-pass state too:
+	// fullContent records where each action block starts, and
+	// renderActionBlock records the absolute line of the selected
+	// action row — what scrollFollowAction uses to keep the selection
+	// on screen while arrowing through blocks below the fold (the
+	// tiers section was unreachable-by-sight without this).
+	blockStartLine     int
+	selectedActionLine int
 	actionMessage       string
 	scrollOffset        int
 	// tierPicker, when non-nil, is the floating model picker for a taxonomy
@@ -165,8 +173,14 @@ func (d *runtimeDashboard) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return cmd, false
 	}
 	switch msg.String() {
-	case "tab":
+	case "tab", "shift+tab":
+		// Two focus areas, so forward and reverse cycling are the same
+		// toggle — shift+tab exists so the reverse gesture users
+		// expect doesn't dead-end (or get eaten by the search input).
 		d.toggleFocus()
+		if d.focus == runtimeFocusActions {
+			d.scrollFollowAction()
+		}
 		return nil, false
 	case "pgup", "ctrl+b":
 		d.ScrollBy(-dashboardContentHeight(d.height))
@@ -201,16 +215,24 @@ func (d *runtimeDashboard) fullContent() (string, int) {
 	// selection ordinal must run continuously across them rather than
 	// restarting per block. Reset once per render pass.
 	d.renderActionOrdinal = 0
+	d.selectedActionLine = -1
 	configBlock := d.renderConfigBlocks()
 	contentH := dashboardContentHeight(d.height)
 	parts := []string{
 		configBlock,
 		d.renderRuntimeStatusBlock(),
 		d.renderCatalogBlock(d.catalogRowBudget()),
-		d.renderDownloadsBlock(),
-		d.renderInstalledModelsBlock(),
-		d.renderProcessesBlock(),
-		d.renderTiersBlock(),
+	}
+	// Action blocks render one at a time so renderActionBlock can
+	// translate its block-local selected row into an absolute line.
+	for _, render := range []func() string{
+		d.renderDownloadsBlock,
+		d.renderInstalledModelsBlock,
+		d.renderProcessesBlock,
+		d.renderTiersBlock,
+	} {
+		d.blockStartLine = countLines(parts)
+		parts = append(parts, render())
 	}
 	logRows := contentH - countLines(parts)
 	parts = append(parts, d.renderOpenServerLogBlock(logRows))
@@ -321,6 +343,23 @@ func (d *runtimeDashboard) toggleFocus() {
 	_ = d.catalogSearch.Focus()
 }
 
+// scrollFollowAction scrolls the page so the selected action row is
+// visible. fullContent recomputes selectedActionLine as a side effect
+// of rendering, so a state-only recompute is a full render — cheap at
+// terminal sizes, and identical to what View would produce.
+func (d *runtimeDashboard) scrollFollowAction() {
+	_, contentH := d.fullContent()
+	if d.selectedActionLine < 0 || contentH <= 0 {
+		return
+	}
+	if d.selectedActionLine < d.scrollOffset {
+		d.scrollOffset = maxInt(0, d.selectedActionLine-1)
+	} else if d.selectedActionLine >= d.scrollOffset+contentH {
+		d.scrollOffset = d.selectedActionLine - contentH + 2
+	}
+	d.clampScroll()
+}
+
 func (d *runtimeDashboard) updateOperations(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	actions := d.operationActions()
 	switch msg.String() {
@@ -330,19 +369,23 @@ func (d *runtimeDashboard) updateOperations(msg tea.KeyPressMsg) (tea.Cmd, bool)
 		if d.operationCursor > 0 {
 			d.operationCursor--
 		}
+		d.scrollFollowAction()
 		return nil, false
 	case "down":
 		if d.operationCursor < len(actions)-1 {
 			d.operationCursor++
 		}
+		d.scrollFollowAction()
 		return nil, false
 	case "home":
 		d.operationCursor = 0
+		d.scrollFollowAction()
 		return nil, false
 	case "end":
 		if len(actions) > 0 {
 			d.operationCursor = len(actions) - 1
 		}
+		d.scrollFollowAction()
 		return nil, false
 	case "enter":
 		if len(actions) == 0 {
@@ -1163,6 +1206,11 @@ func (d *runtimeDashboard) renderActionBlock(title string, rows []runtimeDashboa
 			// once.
 			selected = d.focus == runtimeFocusActions && d.renderActionOrdinal == d.operationCursor
 			d.renderActionOrdinal++
+		}
+		if selected {
+			// Absolute line of this row in the assembled page: the
+			// block's start + top border + title line + content index.
+			d.selectedActionLine = d.blockStartLine + 2 + len(lines)
 		}
 		lines = append(lines, d.renderActionRow(row, selected, contentW))
 	}

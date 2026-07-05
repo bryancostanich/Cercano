@@ -352,6 +352,8 @@ func (m *InMemoryManager) DeleteModel(ctx context.Context, req DeleteModelReques
 	if err := os.Remove(model.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	// A leftover partial from a failed attempt goes with the model.
+	_ = os.Remove(model.Path + ".part")
 	_ = os.Remove(model.Path + ".part")
 	model.DownloadState = "not_downloaded"
 	model.DownloadedBytes = 0
@@ -445,10 +447,22 @@ func (m *InMemoryManager) runDownload(ctx context.Context, model ModelRecord, jo
 		return
 	}
 	tempPath := model.Path + ".part"
+	// Resume support: a failed attempt's partial survives (see the
+	// failure paths below), so a retry picks up where it left off via
+	// a Range request instead of re-transferring gigabytes. Servers
+	// that ignore Range reply 200 with the full body — handled by
+	// starting over.
+	var resumeFrom int64
+	if fi, statErr := os.Stat(tempPath); statErr == nil && fi.Size() > 0 {
+		resumeFrom = fi.Size()
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, model.DownloadURL, nil)
 	if err != nil {
 		m.failDownload(model, err)
 		return
+	}
+	if resumeFrom > 0 {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", resumeFrom))
 	}
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
@@ -460,23 +474,48 @@ func (m *InMemoryManager) runDownload(ctx context.Context, model ModelRecord, jo
 		return
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+	switch {
+	case resumeFrom > 0 && resp.StatusCode == http.StatusPartialContent:
+		m.WriteLog(LogEntry{
+			Source:  "cercano.runtime.download",
+			Level:   "info",
+			ModelID: model.ID,
+			Message: fmt.Sprintf("resuming download from %d bytes", resumeFrom),
+		})
+		if total := contentRangeTotal(resp.Header.Get("Content-Range")); total > 0 {
+			model.DownloadTotalBytes = total
+			if model.SizeBytes == 0 {
+				model.SizeBytes = total
+			}
+			m.updateDownload(model)
+		}
+	case resp.StatusCode == http.StatusOK:
+		// Fresh download — or the server ignored our Range header and
+		// sent the full body, in which case the partial is discarded.
+		resumeFrom = 0
+		if resp.ContentLength > 0 {
+			model.DownloadTotalBytes = resp.ContentLength
+			if model.SizeBytes == 0 {
+				model.SizeBytes = resp.ContentLength
+			}
+			m.updateDownload(model)
+		}
+	default:
 		m.failDownload(model, fmt.Errorf("download returned HTTP %d", resp.StatusCode))
 		return
 	}
-	if resp.ContentLength > 0 {
-		model.DownloadTotalBytes = resp.ContentLength
-		if model.SizeBytes == 0 {
-			model.SizeBytes = resp.ContentLength
-		}
-		m.updateDownload(model)
+	var file *os.File
+	if resumeFrom > 0 {
+		file, err = os.OpenFile(tempPath, os.O_WRONLY|os.O_APPEND, 0o644)
+	} else {
+		file, err = os.Create(tempPath)
 	}
-	file, err := os.Create(tempPath)
 	if err != nil {
 		m.failDownload(model, err)
 		return
 	}
-	var written int64
+	written := resumeFrom
+	model.DownloadedBytes = written
 	buf := make([]byte, 256*1024)
 	lastUpdate := time.Now()
 	for {
@@ -490,7 +529,7 @@ func (m *InMemoryManager) runDownload(ctx context.Context, model ModelRecord, jo
 		if n > 0 {
 			if _, err := file.Write(buf[:n]); err != nil {
 				_ = file.Close()
-				_ = os.Remove(tempPath)
+				// Keep the partial — the next attempt resumes from it.
 				m.failDownload(model, err)
 				return
 			}
@@ -506,11 +545,13 @@ func (m *InMemoryManager) runDownload(ctx context.Context, model ModelRecord, jo
 		}
 		if readErr != nil {
 			_ = file.Close()
-			_ = os.Remove(tempPath)
 			if errors.Is(readErr, context.Canceled) || ctx.Err() != nil {
+				// Deliberate cancel discards the partial.
+				_ = os.Remove(tempPath)
 				m.markDownloadCancelled(model)
 				return
 			}
+			// Keep the partial — the next attempt resumes from it.
 			m.failDownload(model, readErr)
 			return
 		}

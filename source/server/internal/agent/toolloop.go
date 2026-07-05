@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"cercano/source/server/internal/agenttools"
@@ -480,6 +481,15 @@ func collectStream(ctx context.Context, rdr llm.StreamReader, onText func(string
 		currentText strings.Builder
 		currentTool *llm.Block
 		toolArgsBuf strings.Builder
+		// Framing guard (see docs/bugs/2026-07-04-user-message-tear.md): content
+		// events are attributable to THIS response only between a message_start
+		// and its message_stop. A proxy/session-resume hiccup can replay stale
+		// stream content outside that window (the 2026-07-04 incident replayed a
+		// severed user-message echo as pre-start text deltas, which was then
+		// persisted as assistant output). Unframed content is dropped, loudly.
+		accepting    bool
+		started      bool
+		droppedBytes int
 	)
 	flushText := func() {
 		if currentText.Len() > 0 {
@@ -511,6 +521,13 @@ func collectStream(ctx context.Context, rdr llm.StreamReader, onText func(string
 		}
 		switch ev.Type {
 		case llm.EventTextDelta:
+			if !accepting {
+				if droppedBytes == 0 {
+					fmt.Fprintf(os.Stderr, "[stream-guard] dropping stream content outside message framing (before message_start / after message_stop)\n")
+				}
+				droppedBytes += len(ev.TextDelta)
+				break
+			}
 			if currentTool != nil {
 				flushTool()
 			}
@@ -519,6 +536,13 @@ func collectStream(ctx context.Context, rdr llm.StreamReader, onText func(string
 				onText(ev.TextDelta)
 			}
 		case llm.EventToolUseStart:
+			if !accepting {
+				if droppedBytes == 0 {
+					fmt.Fprintf(os.Stderr, "[stream-guard] dropping stream content outside message framing (before message_start / after message_stop)\n")
+				}
+				droppedBytes += len(ev.ToolName)
+				break
+			}
 			flushText()
 			flushTool()
 			currentTool = &llm.Block{
@@ -527,10 +551,19 @@ func collectStream(ctx context.Context, rdr llm.StreamReader, onText func(string
 				ToolName:  ev.ToolName,
 			}
 		case llm.EventToolUseInputDelta:
+			if !accepting {
+				break
+			}
 			toolArgsBuf.WriteString(ev.TextDelta)
 		case llm.EventToolUseStop:
+			if !accepting {
+				break
+			}
 			flushTool()
 		case llm.EventReasoning:
+			if !accepting {
+				break
+			}
 			flushText()
 			flushTool()
 			out.Blocks = append(out.Blocks, llm.Block{
@@ -539,10 +572,22 @@ func collectStream(ctx context.Context, rdr llm.StreamReader, onText func(string
 				ReasoningData: ev.ReasoningData,
 			})
 		case llm.EventMessageStart:
+			if started {
+				// One response == one message. A second message_start means the
+				// stream restarted under us — keep only the newest message.
+				fmt.Fprintf(os.Stderr, "[stream-guard] message_start while already accumulating — discarding prior partial message\n")
+				currentText.Reset()
+				currentTool = nil
+				toolArgsBuf.Reset()
+				out.Blocks = nil
+			}
+			started = true
+			accepting = true
 			out.InputTokens = ev.InputTokens
 		case llm.EventMessageStop:
 			flushText()
 			flushTool()
+			accepting = false
 			if ev.StopReason != "" {
 				out.StopReason = ev.StopReason
 			}

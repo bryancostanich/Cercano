@@ -377,6 +377,9 @@ func TestToolLoopMCPConfirmsInPermissive(t *testing.T) {
 
 func TestCollectStreamCarriesReasoning(t *testing.T) {
 	events := []llm.StreamEvent{
+		// message_start required: collectStream's framing guard drops content
+		// arriving outside message_start/message_stop (all adapters emit it).
+		{Type: llm.EventMessageStart, InputTokens: 1},
 		{Type: llm.EventReasoning, ReasoningID: "rs_1", ReasoningData: "ENC"},
 		{Type: llm.EventTextDelta, TextDelta: "hi"},
 		{Type: llm.EventMessageStop, InputTokens: 1, OutputTokens: 1},

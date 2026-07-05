@@ -1656,6 +1656,11 @@ func plural(n int) string {
 }
 
 func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model, tea.Cmd) {
+	// Normalize CR/CRLF line endings to LF at the submission boundary. Bare
+	// CRs from terminal paste artifacts otherwise propagate into the request,
+	// the store, and the provider (see docs/bugs/2026-07-04-user-message-tear.md).
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
 	// Record for ↑/↓ history recall (skip consecutive duplicates), and reset
 	// the browse position back to the live input.
 	if n := len(m.inputHistory); n == 0 || m.inputHistory[n-1] != text {
@@ -3202,7 +3207,7 @@ func (m Model) renderHeader() string {
 		)
 	}
 	rightPieces = append(rightPieces,
-		m.styles.Info.Render("l:"),
+		m.styles.Info.Render("o:"),
 		m.styles.Accent.Render(abbreviateModel(m.lastModel)),
 	)
 	right := lipgloss.JoinHorizontal(lipgloss.Left, rightPieces...)

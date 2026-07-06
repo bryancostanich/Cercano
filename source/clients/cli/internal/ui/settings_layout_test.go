@@ -53,13 +53,9 @@ func sampleSettingsPage(w, h int) *settingsPage {
 	return sp
 }
 
-// openLocus navigates to and opens the locus-mode select (flat field index 4:
-// Local Model has 4 fields; the legacy Cloud section is removed. The new Cloud
-// Providers section is appended after Routing, so it does not shift the locus-mode index).
+// openLocus opens the locus-mode select. After the "Open Model" section was
+// removed, locus-mode is the first field in the form — no navigation needed.
 func openLocus(sp *settingsPage) {
-	for i := 0; i < 4; i++ {
-		sp.form.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	}
 	sp.form.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 }
 

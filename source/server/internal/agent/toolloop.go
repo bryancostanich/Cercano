@@ -260,6 +260,17 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		}
 		var rCalls, wxCalls []pendingCall
 		for _, tc := range toolCalls {
+			// A wrapped malformed input never reaches the tool: answer with
+			// the raw text so the model can see exactly what it emitted and
+			// resend valid JSON.
+			if raw, malformed := llm.MalformedToolInput(tc.ToolInput); malformed {
+				results = append(results, llm.Block{
+					Type: llm.BlockToolResult, ToolUseRef: tc.ToolUseID,
+					Content: fmt.Sprintf("tool input was not valid JSON — resend the call with arguments as a single valid JSON object. Raw input received: %s", truncateForError(raw)),
+					IsError: true,
+				})
+				continue
+			}
 			tool, ok := in.Registry.Get(tc.ToolName)
 			if !ok {
 				results = append(results, llm.Block{
@@ -467,6 +478,15 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	}, nil
 }
 
+// truncateForError bounds raw model output quoted inside an error message.
+func truncateForError(s string) string {
+	const max = 400
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "… (truncated)"
+}
+
 // collectStream consumes a StreamReader and rebuilds the equivalent
 // non-streaming ChatResponse shape the loop logic expects. Text deltas
 // concatenate into BlockText; tool_use_input_delta events concatenate
@@ -502,7 +522,21 @@ func collectStream(ctx context.Context, rdr llm.StreamReader, onText func(string
 	flushTool := func() {
 		if currentTool != nil {
 			if toolArgsBuf.Len() > 0 {
-				currentTool.ToolInput = json.RawMessage(toolArgsBuf.String())
+				raw := toolArgsBuf.String()
+				if json.Valid([]byte(raw)) {
+					currentTool.ToolInput = json.RawMessage(raw)
+				} else {
+					// Invalid input kept raw would poison the turn: persistence
+					// fails (RawMessage refuses to marshal) and replaying the
+					// block corrupts every later request body (observed
+					// 2026-07-06: Meridian streamed unquoted/truncated Bash
+					// args; every follow-up cloud call then 500'd). Wrap it in
+					// a valid envelope; the loop turns it into a clear error
+					// tool_result the model can react to.
+					wrapped, _ := json.Marshal(map[string]string{llm.MalformedToolInputKey: raw})
+					currentTool.ToolInput = json.RawMessage(wrapped)
+					fmt.Fprintf(os.Stderr, "[stream-guard] tool_use %q input is not valid JSON (%d bytes) — wrapped for safe replay\n", currentTool.ToolName, len(raw))
+				}
 			} else if currentTool.ToolInput == nil {
 				currentTool.ToolInput = json.RawMessage("{}")
 			}
@@ -549,6 +583,12 @@ func collectStream(ctx context.Context, rdr llm.StreamReader, onText func(string
 				Type:      llm.BlockToolUse,
 				ToolUseID: ev.ToolUseID,
 				ToolName:  ev.ToolName,
+			}
+			// Some providers deliver the whole input on the start event
+			// (Ollama's tool_calls arrive complete) instead of as
+			// input-delta events. Seed the buffer so flushTool sees it.
+			if len(ev.ToolInputRaw) > 0 {
+				toolArgsBuf.Write(ev.ToolInputRaw)
 			}
 		case llm.EventToolUseInputDelta:
 			if !accepting {

@@ -49,3 +49,27 @@ type Message struct {
 	Role   Role    `json:"role"`
 	Blocks []Block `json:"content"`
 }
+
+// MalformedToolInputKey is the single key of the envelope that wraps
+// structurally invalid streamed tool input. Providers occasionally deliver
+// tool_use input that is not valid JSON (truncated mid-stream, or a proxy
+// re-serialization bug). Kept raw in ToolInput, those bytes poison everything
+// downstream: the turn cannot persist (RawMessage refuses to marshal) and
+// replaying the block corrupts every later request body. The stream collector
+// wraps such input as {"_malformed_tool_input": "<raw text>"} so history
+// stays marshalable and the raw attempt survives for the model to see.
+const MalformedToolInputKey = "_malformed_tool_input"
+
+// MalformedToolInput reports whether input is the malformed-input envelope,
+// returning the original raw text when it is.
+func MalformedToolInput(input json.RawMessage) (string, bool) {
+	if len(input) == 0 {
+		return "", false
+	}
+	var env map[string]string
+	if json.Unmarshal(input, &env) != nil {
+		return "", false
+	}
+	raw, ok := env[MalformedToolInputKey]
+	return raw, ok && len(env) == 1
+}

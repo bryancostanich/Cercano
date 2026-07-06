@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"cercano/source/clients/cli/internal/overlay"
@@ -40,9 +41,18 @@ type wizardPage struct {
 	// picker, when non-nil, is the floating per-slot model picker on the
 	// tiers step; keys route to it until it closes.
 	picker *overlay.RowList
-	recs   config.TierRecommendations
-	recsOK bool
-	status string
+	// keyEntry is the cloud step's masked API-key prompt. The key commits
+	// to the agent immediately (profile + keychain + activate) — it never
+	// touches the plaintext resume file.
+	keyEntry bool
+	keyInput textinput.Model
+	// commitKeyFn / commitMeridianFn mirror applyFn: test indirection over
+	// the concrete gRPC client.
+	commitKeyFn      func(key string) error
+	commitMeridianFn func() error
+	recs             config.TierRecommendations
+	recsOK           bool
+	status           string
 	// applyFn commits the collected answers on finish; defaults to
 	// applyConfig, overridable in tests (agentclient.Client is a concrete
 	// gRPC type with nothing to fake).
@@ -76,8 +86,72 @@ func newWizardPage(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h
 		wp.autofillTiers()
 	}
 	wp.applyFn = wp.applyConfig
+	wp.commitKeyFn = wp.commitAPIKey
+	wp.commitMeridianFn = wp.commitMeridianProfile
 	wp.cursor = wp.defaultCursor()
 	return wp
+}
+
+func wizardPreset(id string) (cloudPreset, bool) {
+	for _, p := range cloudPresets() {
+		if p.ID == id {
+			return p, true
+		}
+	}
+	return cloudPreset{}, false
+}
+
+// commitAPIKey creates the provider's profile from its preset, stores the
+// key, and activates the profile — all immediately, so credentials live
+// where they always do (agent-side) and never in wizard state.
+func (wp *wizardPage) commitAPIKey(key string) error {
+	if wp.agent == nil {
+		return fmt.Errorf("no agent connection")
+	}
+	preset, ok := wizardPreset(wp.state.CloudProvider)
+	if !ok {
+		return fmt.Errorf("unknown provider %q", wp.state.CloudProvider)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := wp.agent.UpsertCloudProfile(ctx, agentclient.CloudProfileInfo{
+		Name: preset.ID, Flavor: preset.Flavor, Backend: preset.Backend, BaseURL: preset.BaseURL,
+	}); err != nil {
+		return err
+	}
+	if err := wp.agent.SetCloudProfileKey(ctx, preset.ID, key); err != nil {
+		return err
+	}
+	return wp.agent.SetActiveCloudProfile(ctx, preset.ID)
+}
+
+// commitMeridianProfile creates/activates an anthropic profile routed
+// through the Meridian proxy; subscription auth, no key stored.
+func (wp *wizardPage) commitMeridianProfile() error {
+	if wp.agent == nil {
+		return fmt.Errorf("no agent connection")
+	}
+	preset, _ := wizardPreset("anthropic")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := wp.agent.UpsertCloudProfile(ctx, agentclient.CloudProfileInfo{
+		Name: "anthropic", Flavor: preset.Flavor, Route: "meridian",
+	}); err != nil {
+		return err
+	}
+	return wp.agent.SetActiveCloudProfile(ctx, "anthropic")
+}
+
+// startKeyEntry opens the masked key prompt. Returns the cursor-blink cmd.
+func (wp *wizardPage) startKeyEntry() tea.Cmd {
+	ti := textinput.New()
+	ti.Prompt = wp.styles.Accent.Render("▸ ")
+	ti.EchoMode = textinput.EchoPassword
+	cmd := ti.Focus()
+	wp.keyInput = ti
+	wp.keyEntry = true
+	wp.status = ""
+	return cmd
 }
 
 // applyConfig pushes the collected answers to the agent: locus mode and
@@ -288,6 +362,32 @@ func (wp *wizardPage) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		wp.picker = &next
 		return cmd, false
 	}
+	if wp.keyEntry {
+		switch msg.String() {
+		case "esc":
+			wp.keyEntry = false
+			wp.status = ""
+			return nil, false // back to the auth-method screen
+		case "enter":
+			key := strings.TrimSpace(wp.keyInput.Value())
+			if key == "" {
+				wp.status = "enter a key, or esc to go back"
+				return nil, false
+			}
+			if err := wp.commitKeyFn(key); err != nil {
+				wp.status = "key setup failed: " + err.Error()
+				return nil, false
+			}
+			wp.keyEntry = false
+			wp.authPick = false
+			wp.status = wp.state.CloudProvider + " key stored, profile activated"
+			wp.advance()
+			return nil, false
+		}
+		var cmd tea.Cmd
+		wp.keyInput, cmd = wp.keyInput.Update(msg)
+		return cmd, false
+	}
 	switch msg.String() {
 	case "up", "k":
 		wp.move(-1)
@@ -296,7 +396,7 @@ func (wp *wizardPage) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	case "esc":
 		return nil, wp.back()
 	case "enter":
-		return nil, wp.selectRow()
+		return wp.selectRow()
 	}
 	return nil, false
 }
@@ -321,15 +421,15 @@ func (wp *wizardPage) back() (closed bool) {
 }
 
 // selectRow applies the highlighted choice for the current screen.
-func (wp *wizardPage) selectRow() (closed bool) {
+func (wp *wizardPage) selectRow() (tea.Cmd, bool) {
 	rows := wp.rows()
 	if wp.cursor >= len(rows) {
-		return false
+		return nil, false
 	}
 	row := rows[wp.cursor]
 	if row.Disabled {
 		wp.status = row.Label + " isn't available yet"
-		return false
+		return nil, false
 	}
 	wp.status = ""
 
@@ -343,35 +443,49 @@ func (wp *wizardPage) selectRow() (closed bool) {
 			wp.authPick = true
 			wp.cursor = 0
 			wp.persist()
-			return false
+			return nil, false
 		}
 		wp.state.AuthMethod = row.Key
-		wp.authPick = false
-		// Credential collection (key entry, sign-in flows) lands with the
-		// auth slices; the choice itself is recorded now.
-		wp.advance()
+		switch row.Key {
+		case "api_key":
+			// authPick stays true so esc from the prompt returns here.
+			return wp.startKeyEntry(), false
+		case "meridian":
+			if err := wp.commitMeridianFn(); err != nil {
+				wp.status = "meridian setup failed: " + err.Error()
+				return nil, false
+			}
+			wp.authPick = false
+			wp.status = "anthropic (meridian) is the active profile"
+			wp.advance()
+		default:
+			// chatgpt — the sign-in flow is a later slice; the choice is
+			// recorded and the summary flags it as pending.
+			wp.authPick = false
+			wp.advance()
+		}
 	case wizard.StepLocus:
 		wp.state.LocusMode = row.Key
 		wp.advance()
 	case wizard.StepTiers:
 		if row.Key == "continue" {
 			wp.advance()
-			return false
+			return nil, false
 		}
 		wp.openTierPicker(row.Key)
 	case wizard.StepDone:
 		if err := wp.applyFn(); err != nil {
 			// State stays persisted: enter retries, esc walks back.
 			wp.status = "apply failed: " + err.Error()
-			return false
+			return nil, false
 		}
 		if err := wizard.Clear(); err != nil {
 			wp.status = "applied, but could not clear wizard state: " + err.Error()
-			return false
+			return nil, false
 		}
-		return true
+		return nil, true
 	}
-	return false
+	return nil, false
 }
 
 // advance moves the state machine forward, autofills on entry to the tiers
@@ -459,8 +573,11 @@ func (wp *wizardPage) summary() string {
 	b.WriteString("Setup complete:\n")
 	fmt.Fprintf(&b, "  primary:  %s\n", wp.state.PrimarySide)
 	if wp.state.CloudProvider != "" {
-		fmt.Fprintf(&b, "  cloud:    %s (%s) — credentials not collected yet; use /cloud key for now\n",
-			wp.state.CloudProvider, wp.state.AuthMethod)
+		note := ""
+		if wp.state.AuthMethod == "chatgpt" {
+			note = " — sign-in flow not built yet; use an api key via /cloud in the meantime"
+		}
+		fmt.Fprintf(&b, "  cloud:    %s (%s)%s\n", wp.state.CloudProvider, wp.state.AuthMethod, note)
 	}
 	fmt.Fprintf(&b, "  locus:    %s\n", wp.state.LocusMode)
 	for _, t := range wizardTierOrder {
@@ -549,6 +666,20 @@ func (wp *wizardPage) tierPickerCandidates(slotKey string) []overlay.Row {
 func (wp *wizardPage) View() string {
 	if wp.picker != nil {
 		return wp.picker.View(wp.width, wp.palette, wp.styles)
+	}
+	if wp.keyEntry {
+		var b strings.Builder
+		b.WriteString(wp.styles.Bright.Render("Setup — api key for " + wp.state.CloudProvider))
+		b.WriteString("\n\n")
+		b.WriteString(wp.styles.Primary.Render("Paste your API key. Input is hidden; the key is stored agent-side, never in wizard state."))
+		b.WriteString("\n\n")
+		b.WriteString(wp.keyInput.View())
+		b.WriteString("\n\n")
+		b.WriteString(wp.styles.Dim.Render("enter save · esc back"))
+		if wp.status != "" {
+			b.WriteString("\n" + wp.styles.Warn.Render(wp.status))
+		}
+		return b.String()
 	}
 	var b strings.Builder
 	idx, total := wp.stepIndex()

@@ -41,6 +41,31 @@ type State struct {
 	LocusMode     string            `yaml:"locus_mode,omitempty"`     // locus.Mode string value
 	OpenModel     string            `yaml:"open_model,omitempty"`     // chosen open-weight primary
 	TierPicks     map[string]string `yaml:"tier_picks,omitempty"`     // "<tier>.<side>" → model id
+	// Baseline is the cloud-profile configuration captured when the run
+	// started, before any eager commits. Abandoning the wizard restores it.
+	// Persisted with the run so a resumed (or crashed) run can still be
+	// abandoned back to the pre-wizard state. Contains no secrets — API keys
+	// live in the OS keychain, never here.
+	Baseline *Baseline `yaml:"baseline,omitempty"`
+}
+
+// Baseline is the pre-wizard cloud configuration used to undo eager commits
+// when the user abandons the run.
+type Baseline struct {
+	ActiveProfile string            `yaml:"active_profile"`
+	Profiles      []ProfileSnapshot `yaml:"profiles,omitempty"`
+}
+
+// ProfileSnapshot is one cloud profile's metadata as it stood at wizard
+// start. Field set mirrors agentclient.CloudProfileInfo minus HasKey (keys
+// are not snapshottable, by design).
+type ProfileSnapshot struct {
+	Name    string `yaml:"name"`
+	Flavor  string `yaml:"flavor"`
+	Backend string `yaml:"backend,omitempty"`
+	BaseURL string `yaml:"base_url,omitempty"`
+	Model   string `yaml:"model,omitempty"`
+	Route   string `yaml:"route,omitempty"`
 }
 
 // New returns a fresh run positioned at the first step.

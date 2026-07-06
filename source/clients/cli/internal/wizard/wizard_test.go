@@ -119,6 +119,35 @@ func TestDoneStepStillResumes(t *testing.T) {
 	}
 }
 
+func TestBaselineRoundTrip(t *testing.T) {
+	// The baseline must survive persistence so a resumed (or crashed) run
+	// can still be abandoned back to the pre-wizard configuration.
+	useTempState(t)
+	s := New()
+	s.Baseline = &Baseline{
+		ActiveProfile: "default",
+		Profiles: []ProfileSnapshot{
+			{Name: "default", Flavor: "messages", BaseURL: "http://127.0.0.1:3456", Model: "claude-fable-5", Route: "meridian"},
+		},
+	}
+	if err := Save(s); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, ok := Load()
+	if !ok {
+		t.Fatal("want resumable state")
+	}
+	if got.Baseline == nil {
+		t.Fatal("resume: baseline lost")
+	}
+	if got.Baseline.ActiveProfile != "default" || len(got.Baseline.Profiles) != 1 {
+		t.Fatalf("resume: baseline %+v", got.Baseline)
+	}
+	if p := got.Baseline.Profiles[0]; p.Route != "meridian" || p.BaseURL != "http://127.0.0.1:3456" {
+		t.Errorf("resume: profile snapshot %+v", p)
+	}
+}
+
 func TestClear(t *testing.T) {
 	path := useTempState(t)
 	if err := Clear(); err != nil {

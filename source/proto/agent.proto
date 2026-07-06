@@ -77,6 +77,12 @@ service Agent {
   // it does NOT re-hydrate server session state.
   rpc GetConversationTurns (GetConversationTurnsRequest) returns (GetConversationTurnsResponse) {}
 
+  // GetToolCall returns the full args + result body for a single tool call in
+  // a conversation, looked up by tool_use_id. Backs the CLI's lazy
+  // expand-on-click of a scrollback tool entry — full args/results are read
+  // from content_json on demand rather than streamed on every turn.
+  rpc GetToolCall (GetToolCallRequest) returns (GetToolCallResponse) {}
+
   // ListTools enumerates the agent's registered tools (name, description,
   // permission tier). /tools in the CLI renders this through the Table
   // primitive.
@@ -635,6 +641,15 @@ message ExportContextResponse { string json = 1; }
 
 message GetConversationTurnsRequest  { string conversation_id = 1; }
 message GetConversationTurnsResponse { repeated ContextTurn turns = 1; }
+
+message GetToolCallRequest  { string conversation_id = 1; string tool_use_id = 2; }
+message GetToolCallResponse {
+  bool   found     = 1; // the tool_use block was located
+  string tool_name = 2;
+  string args_json = 3; // full tool_use input JSON
+  string result    = 4; // full tool_result body (empty if not yet recorded)
+  bool   is_error  = 5;
+}
 message ContextTurn {
   string role       = 1; // "user" | "assistant" | "system"
   string kind       = 2; // "text" | "tool_use" | "tool_result"

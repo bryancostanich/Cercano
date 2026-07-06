@@ -34,11 +34,15 @@ var rowKeys = struct{ Up, Down, Home, End, Enter, Close key.Binding }{
 //   - ReadOnly rows: navigable but Enter does nothing.
 //   - Masked rows start blank on edit (used for secrets so the old value isn't
 //     visible while typing).
+//   - Selected marks the currently active choice in a pick-one list. When any
+//     row in the list has Selected=true, ViewPanel renders ●/◯ radio prefixes
+//     and treats empty Value as blank rather than "(unset)".
 type Row struct {
 	Key      string // opaque to the overlay; forwarded to hooks
 	Label    string
 	Value    string
 	Hint     string // shown dimly after value (e.g. "(read-only)", "current")
+	Selected bool
 	Editable bool
 	ReadOnly bool
 	Masked   bool
@@ -206,6 +210,16 @@ func (r RowList) ViewPanel(panelW int, palette theme.Palette, styles theme.Style
 	if panelW < 40 {
 		panelW = 40
 	}
+	// Radio mode: any row with Selected=true means this is a pick-one list.
+	// Renders ●/◯ prefixes and treats empty Value as blank (not "(unset)").
+	hasRadio := false
+	for _, row := range r.Rows {
+		if row.Selected {
+			hasRadio = true
+			break
+		}
+	}
+
 	labelW := 0
 	for _, row := range r.Rows {
 		if lw := lipgloss.Width(row.Label); lw > labelW {
@@ -222,9 +236,17 @@ func (r RowList) ViewPanel(panelW int, palette theme.Palette, styles theme.Style
 		} else {
 			marker = "   "
 		}
-		label := styles.Muted.Render(row.Label)
+		radioPrefix := ""
+		if hasRadio {
+			if row.Selected {
+				radioPrefix = styles.Accent.Render("● ")
+			} else {
+				radioPrefix = styles.Muted.Render("◯ ")
+			}
+		}
+		label := styles.Muted.Render(radioPrefix + row.Label)
 		if i == r.cursor && !row.ReadOnly && !r.editing {
-			label = styles.Bright.Render(row.Label)
+			label = styles.Bright.Render(radioPrefix + row.Label)
 		}
 		pad := strings.Repeat(" ", labelW-lipgloss.Width(row.Label)+2)
 
@@ -232,6 +254,8 @@ func (r RowList) ViewPanel(panelW int, palette theme.Palette, styles theme.Style
 		switch {
 		case r.editing && i == r.cursor:
 			valueCell = r.input.View()
+		case row.Value == "" && hasRadio:
+			valueCell = ""
 		case row.Value == "":
 			valueCell = styles.Dim.Render("(unset)")
 		default:

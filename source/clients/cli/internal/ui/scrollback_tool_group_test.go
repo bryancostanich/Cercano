@@ -130,7 +130,7 @@ func TestRenderToolGroup_MixedShowsSummaryThenActive(t *testing.T) {
 func TestRenderGroupSummary_RightAlignsTiming(t *testing.T) {
 	styles := theme.NewStyles(theme.Cracker())
 	entries := []ToolEntry{makeCompletedTool("Read", 10*time.Millisecond)}
-	s := stripAnsiCSI(renderGroupSummary(entries, 80, styles, false))
+	s := stripAnsiCSI(renderGroupSummary(entries, 80, styles, false, false))
 	if !strings.HasSuffix(strings.TrimRight(s, " "), "10ms ✓") {
 		t.Errorf("expected right-aligned '10ms ✓' suffix, got: %q", s)
 	}
@@ -139,9 +139,8 @@ func TestRenderGroupSummary_RightAlignsTiming(t *testing.T) {
 	}
 }
 
-// Expanded multi-entry group renders each entry as its own per-call line
-// instead of folding into the summary. The summary's '"N tool calls"' label
-// MUST NOT appear when expanded.
+// Expanded multi-entry group renders a ▾ summary header (the click-to-collapse
+// affordance) followed by each entry as its own per-call line.
 func TestRenderToolGroup_ExpandedRendersPerCallLines(t *testing.T) {
 	styles := theme.NewStyles(theme.Cracker())
 	md := render.NewMarkdown(theme.MarkdownStyle(theme.Cracker()))
@@ -151,16 +150,17 @@ func TestRenderToolGroup_ExpandedRendersPerCallLines(t *testing.T) {
 		makeCompletedTool("Bash", 12*time.Millisecond),
 	}
 	s := stripAnsiCSI(renderToolGroup(entries, 100, styles, md, groupRenderOpts{Expanded: true, FocusedIdx: -1}))
-	if strings.Contains(s, "tool call") {
-		t.Errorf("expanded group must not show summary label, got: %q", s)
-	}
 	lines := strings.Split(s, "\n")
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 per-call lines, got %d: %q", len(lines), s)
+	// Header (▾ + count) plus one per-call line per entry.
+	if len(lines) != 4 {
+		t.Fatalf("expected 1 header + 3 per-call lines, got %d: %q", len(lines), s)
+	}
+	if !strings.Contains(lines[0], "▾") || !strings.Contains(lines[0], "3 tool calls") {
+		t.Errorf("line 0 should be the ▾ collapse header with the count, got: %q", lines[0])
 	}
 	for i, want := range []string{"Read", "Edit", "Bash"} {
-		if !strings.Contains(lines[i], want) {
-			t.Errorf("line %d should mention %q: %q", i, want, lines[i])
+		if !strings.Contains(lines[i+1], want) {
+			t.Errorf("line %d should mention %q: %q", i+1, want, lines[i+1])
 		}
 	}
 }
@@ -196,16 +196,20 @@ func TestRenderToolGroup_ExpandedFocusedMarksFocusedEntry(t *testing.T) {
 	}
 	s := stripAnsiCSI(renderToolGroup(entries, 100, styles, md, groupRenderOpts{Expanded: true, FocusedIdx: 1}))
 	lines := strings.Split(s, "\n")
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 lines, got %d: %q", len(lines), s)
+	// Line 0 is the ▾ collapse header; per-call lines follow at 1..3.
+	if len(lines) != 4 {
+		t.Fatalf("expected 1 header + 3 per-call lines, got %d: %q", len(lines), s)
 	}
 	if strings.Contains(lines[0], "▶") {
-		t.Errorf("line 0 (Read) should not be focused: %q", lines[0])
+		t.Errorf("header line should not carry entry focus: %q", lines[0])
 	}
-	if !strings.Contains(lines[1], "▶") {
-		t.Errorf("line 1 (Edit) should be focused with ▶ marker: %q", lines[1])
+	if strings.Contains(lines[1], "▶") {
+		t.Errorf("line 1 (Read) should not be focused: %q", lines[1])
 	}
-	if strings.Contains(lines[2], "▶") {
-		t.Errorf("line 2 (Bash) should not be focused: %q", lines[2])
+	if !strings.Contains(lines[2], "▶") {
+		t.Errorf("line 2 (Edit) should be focused with ▶ marker: %q", lines[2])
+	}
+	if strings.Contains(lines[3], "▶") {
+		t.Errorf("line 3 (Bash) should not be focused: %q", lines[3])
 	}
 }

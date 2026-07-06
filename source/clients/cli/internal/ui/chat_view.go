@@ -586,8 +586,16 @@ func (c *chatView) ToggleFocusedFold() {
 		return
 	}
 	isMulti := end > start
+	// Collapsed multi-entry run → expand it.
 	if isMulti && !c.groupExpanded[start] {
 		c.groupExpanded[start] = true
+		return
+	}
+	// Expanded run, focus on the first call and it's already folded → collapse
+	// the whole run (keyboard equivalent of clicking the summary header). Any
+	// other position toggles the focused call's own body.
+	if isMulti && c.groupExpanded[start] && c.focusedToolIdx == start && t.Folded {
+		c.groupExpanded[start] = false
 		return
 	}
 	t.Folded = !t.Folded
@@ -749,7 +757,7 @@ func (c *chatView) SetEntries(entries []*Entry) {
 			}
 			block, rows := c.renderToolGroupBlock(entries[i:j], i)
 			for _, r := range rows {
-				c.arrowRows = append(c.arrowRows, arrowRow{line: nl + r.Line, entry: i + r.Entry})
+				c.arrowRows = append(c.arrowRows, arrowRow{line: nl + r.Line, entry: i + r.Entry, group: r.Group})
 			}
 			b.WriteString(block)
 			nl += strings.Count(block, "\n")
@@ -1108,33 +1116,61 @@ func (c *chatView) MouseToggleFold(localX, localY int) bool {
 	if !c.MouseInText(localX, localY) {
 		return false
 	}
-	idx := c.toolArrowEntryAt(c.vp.YOffset() + localY)
-	if idx < 0 {
+	r, ok := c.arrowRowAt(c.vp.YOffset() + localY)
+	if !ok {
 		return false
 	}
-	c.focusedToolIdx = idx
-	c.ToggleFocusedFold()
+	if r.group {
+		// The summary header toggles the whole run collapsed ⇄ expanded.
+		c.toggleGroup(r.entry)
+	} else {
+		// A per-call line toggles just that entry's own body.
+		c.focusedToolIdx = r.entry
+		c.toggleEntryFold(r.entry)
+	}
 	return true
 }
 
-// arrowRow maps an absolute content line (an index into plainLines) to the
-// c.entries index whose fold arrow is drawn on it.
+// toggleGroup flips a multi-entry tool run between its collapsed summary and
+// the expanded per-call view. start is the entries index of the run's first
+// tool entry — the key groupExpanded is recorded under.
+func (c *chatView) toggleGroup(start int) {
+	c.groupExpanded[start] = !c.groupExpanded[start]
+}
+
+// toggleEntryFold flips one tool entry between its folded one-liner and its
+// expanded args+result body. No-op if idx is out of range or not a tool entry.
+func (c *chatView) toggleEntryFold(idx int) {
+	if idx < 0 || idx >= len(c.entries) {
+		return
+	}
+	if t := c.entries[idx].Tool; t != nil {
+		t.Folded = !t.Folded
+	}
+}
+
+// arrowRow maps an absolute content line (an index into plainLines) to a
+// clickable fold toggle drawn on it. group distinguishes the two toggle
+// levels: a group row (the summary header) expands/collapses the whole tool
+// run and keys groupExpanded by entry (the run's first index); a non-group
+// row toggles that single tool entry's own body.
 type arrowRow struct {
 	line  int
 	entry int
+	group bool
 }
 
-// toolArrowEntryAt returns the c.entries index whose fold arrow occupies the
-// given absolute content line, or -1 when the line has none. The map is
-// recorded by SetEntries as the layout is rendered, so it cannot drift from
-// what's on screen.
-func (c *chatView) toolArrowEntryAt(line int) int {
+// arrowRowAt returns the arrow row whose fold toggle occupies the given
+// absolute content line, and whether one was found. The map is recorded by
+// SetEntries as the layout is rendered, so it cannot drift from what's on
+// screen.
+func (c *chatView) arrowRowAt(line int) (arrowRow, bool) {
 	for _, r := range c.arrowRows {
 		if r.line == line {
-			return r.entry
+			return r, true
 		}
 	}
-	return -1
+	return arrowRow{}, false
 }
 
 // ClearSelection resets the selection state.

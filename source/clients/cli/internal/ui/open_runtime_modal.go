@@ -16,6 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"cercano/source/clients/cli/internal/overlay"
 	"cercano/source/clients/cli/internal/theme"
 	"cercano/source/server/pkg/agentclient"
 	"github.com/charmbracelet/x/ansi"
@@ -94,10 +95,12 @@ type openRuntimeInstallModal struct {
 	// [Esc] Keep <name> label can name it correctly.
 	offerRuntime  string
 	activeRuntime string
-	// pickModels / pickCursor drive runtimeModalPickModel: the downloaded
-	// llama_server GGUFs detection found, and which one the cursor is on.
-	pickModels []agentclient.RuntimeModel
-	pickCursor int
+	// picker drives runtimeModalPickModel: the shared RowList overlay
+	// listing the downloaded llama_server GGUFs detection found. Replaces
+	// the bespoke pick widget so selection matches the wizard and /m
+	// dashboard; its OnSelect commits default_model + runtime. Nil outside
+	// the pick step.
+	picker *overlay.RowList
 }
 
 // modalOpensScanning reports whether the modal should open in the
@@ -120,12 +123,51 @@ func newOpenRuntimeInstallModal(st agentclient.OpenRuntimeStatus) *openRuntimeIn
 	return &openRuntimeInstallModal{status: st, state: state}
 }
 
-// setPickModel transitions to the GGUF picker carrying the discovered
-// models. Cursor starts on the first entry.
-func (mo *openRuntimeInstallModal) setPickModel(models []agentclient.RuntimeModel) {
+// setPickModel transitions to the GGUF picker, building the shared RowList
+// overlay from the discovered models. OnSelect commits the chosen GGUF as
+// llama_server.default_model and switches the runtime in one round trip
+// (runtime defaults to llama_server on the F1 path where no switch was
+// queued). ag may be nil in tests — the dispatch cmd is only run on Enter.
+func (mo *openRuntimeInstallModal) setPickModel(ag *agentclient.Client, runtime string, models []agentclient.RuntimeModel) {
 	mo.state = runtimeModalPickModel
-	mo.pickModels = models
-	mo.pickCursor = 0
+	if runtime == "" {
+		runtime = "llama_server"
+	}
+	rows := make([]overlay.Row, 0, len(models))
+	for _, mdl := range models {
+		annot := mdl.Quantization
+		if mdl.SizeBytes > 0 {
+			if annot != "" {
+				annot += "  "
+			}
+			annot += formatBytes(mdl.SizeBytes)
+		}
+		rows = append(rows, overlay.Row{
+			Key:   mdl.Path,
+			Label: firstNonEmpty(mdl.DisplayName, mdl.Path),
+			Value: annot,
+		})
+	}
+	hooks := overlay.Hooks{
+		OnSelect: func(row overlay.Row) (string, bool, tea.Cmd) {
+			return "", true, dispatchOpenModelPick(ag, runtime, row.Key)
+		},
+	}
+	picker := overlay.New("pick a GGUF model", rows, hooks)
+	mo.picker = &picker
+}
+
+// pickerBoxWidth sizes the GGUF picker panel to match the /m dashboard's
+// floating tier picker: a touch under the frame, capped for readability.
+func pickerBoxWidth(frameW int) int {
+	boxW := frameW - 8
+	if boxW > 72 {
+		boxW = 72
+	}
+	if boxW < 40 {
+		boxW = 40
+	}
+	return boxW
 }
 
 // modalModelsLoadedMsg carries the reply to fetchModalGGUFsCmd — the
@@ -212,6 +254,9 @@ func installErrorIsMissingModel(errMsg string) bool {
 // frame. Width caps at 80 cells to keep the box readable; height caps at
 // max(20, frameHeight-6) to reserve room for header + prompt.
 func (mo *openRuntimeInstallModal) View(styles theme.Styles, palette theme.Palette, frameW, frameH int) string {
+	if mo.picker != nil {
+		return mo.picker.ViewPanel(pickerBoxWidth(frameW), palette, styles)
+	}
 	// Sizing.
 	boxW := 80
 	if frameW-4 < boxW {
@@ -252,6 +297,11 @@ func (mo *openRuntimeInstallModal) View(styles theme.Styles, palette theme.Palet
 // modalDim returns the (width, height) the last-View'd box would occupy in
 // the frame. Used by the compositor to center the modal.
 func (mo *openRuntimeInstallModal) modalDim(frameW, frameH int) (int, int) {
+	if mo.picker != nil {
+		// Width is all the compositor needs; it centers on the rendered
+		// panel's line count.
+		return pickerBoxWidth(frameW), 0
+	}
 	// Match View sizing exactly.
 	boxW := 80
 	if frameW-4 < boxW {
@@ -294,37 +344,8 @@ func (mo *openRuntimeInstallModal) renderHeader(styles theme.Styles) string {
 		title = "llama-server ready — switch to it?"
 	case runtimeModalScanningModels:
 		title = "Checking GGUF models…"
-	case runtimeModalPickModel:
-		title = "Pick a GGUF model"
 	}
 	return styles.Primary.Bold(true).Render(title)
-}
-
-// renderModelPicker renders the discovered-GGUF list for PickModel state:
-// one row per model with a cursor marker, display name, quantization, and
-// size. Kept width-safe by truncating the name, never the annotations.
-func (mo *openRuntimeInstallModal) renderModelPicker(styles theme.Styles, w int) string {
-	rows := make([]string, 0, len(mo.pickModels))
-	for i, mdl := range mo.pickModels {
-		marker := "  "
-		style := styles.Muted
-		if i == mo.pickCursor {
-			marker = "▶ "
-			style = styles.Primary.Bold(true)
-		}
-		annot := mdl.Quantization
-		if mdl.SizeBytes > 0 {
-			annot += "  " + formatBytes(mdl.SizeBytes)
-		}
-		name := mdl.DisplayName
-		// Truncate the name so marker+name+annotations fit the box.
-		maxName := w - len(marker) - len(annot) - 4
-		if maxName > 0 && len(name) > maxName {
-			name = ansi.Truncate(name, maxName, "…")
-		}
-		rows = append(rows, marker+style.Render(name)+"  "+styles.Muted.Render(annot))
-	}
-	return strings.Join(rows, "\n")
 }
 
 func (mo *openRuntimeInstallModal) renderBody(styles theme.Styles, w int) string {
@@ -354,9 +375,6 @@ func (mo *openRuntimeInstallModal) renderLogs(styles theme.Styles, w, h int) str
 	// install logs and a model list on screen at the same time.
 	if mo.state == runtimeModalScanningModels {
 		return styles.Muted.Render("(scanning model directories…)")
-	}
-	if mo.state == runtimeModalPickModel {
-		return mo.renderModelPicker(styles, w)
 	}
 	if h < 1 {
 		h = 1
@@ -390,12 +408,6 @@ func (mo *openRuntimeInstallModal) renderActions(styles theme.Styles) string {
 		return primary + "    " + secondary
 	case runtimeModalScanningModels:
 		return styles.Muted.Render("Scanning… ([Esc] Cancel)")
-	case runtimeModalPickModel:
-		primary := styles.Success.Bold(true).Render("[Enter] Use selected")
-		browse := styles.Muted.Render("[b] Browse models")
-		secondary := styles.Muted.Render("[Esc] Cancel")
-		hint := styles.Muted.Render("[↑/↓] select")
-		return primary + "    " + browse + "    " + secondary + "    " + hint
 	case runtimeModalRunning:
 		return styles.Muted.Render("Installing… (Esc to abort)")
 	case runtimeModalDone:
@@ -529,38 +541,20 @@ func (m Model) handleOpenRuntimeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m.pendingRuntimeSwitch = ""
 		}
 	case runtimeModalPickModel:
-		switch key {
-		case "up", "k":
-			if m.openRuntimeModal.pickCursor > 0 {
-				m.openRuntimeModal.pickCursor--
-			}
-		case "down", "j":
-			if m.openRuntimeModal.pickCursor < len(m.openRuntimeModal.pickModels)-1 {
-				m.openRuntimeModal.pickCursor++
-			}
-		case "enter":
-			if len(m.openRuntimeModal.pickModels) == 0 {
-				return m, nil
-			}
-			picked := m.openRuntimeModal.pickModels[m.openRuntimeModal.pickCursor]
-			// The switch target defaults to llama_server even without a
-			// queued switch (F1 path) — a user picking a GGUF wants the
-			// managed runtime to use it.
-			runtime := m.pendingRuntimeSwitch
-			if runtime == "" {
-				runtime = "llama_server"
-			}
-			m.openRuntimeModal = nil
-			m.pendingRuntimeSwitch = ""
-			return m, dispatchOpenModelPick(m.agent, runtime, picked.Path)
-		case "b":
-			m.openRuntimeModal = nil
-			m.pendingRuntimeSwitch = ""
-			return m, openRuntimeDashboardCmd()
-		case "esc", "q":
-			m.openRuntimeModal = nil
-			m.pendingRuntimeSwitch = ""
+		if m.openRuntimeModal.picker == nil {
+			return m, nil
 		}
+		next, cmd, closed := m.openRuntimeModal.picker.Update(msg, m.styles)
+		if closed {
+			// Enter (OnSelect → dispatch cmd) and Esc (cmd nil) both close
+			// the modal; the pick's default_model + runtime switch rides
+			// out on cmd.
+			m.openRuntimeModal = nil
+			m.pendingRuntimeSwitch = ""
+			return m, cmd
+		}
+		m.openRuntimeModal.picker = &next
+		return m, cmd
 	}
 	return m, nil
 }

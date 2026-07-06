@@ -9,6 +9,7 @@
 package ui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -208,7 +209,13 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 		return strings.Join(body, "\n")
 	}
 	if e.FullArgs != "" {
-		body = append(body, toolEntryFaint.Render("    args: "+e.FullArgs))
+		// Edits/writes render as a formatted +/- diff; other tools show the
+		// raw args JSON.
+		if diff := renderToolArgsDiff(e.ToolName, e.FullArgs, width, styles); diff != nil {
+			body = append(body, diff...)
+		} else {
+			body = append(body, toolEntryFaint.Render("    args: "+e.FullArgs))
+		}
 	}
 	if e.FullResult != "" {
 		// Render the result by type (JSON pretty-printed, markdown rendered, raw
@@ -227,6 +234,61 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 		body = append(body, toolEntryFaint.Render("    (no details)"))
 	}
 	return strings.Join(body, "\n")
+}
+
+// renderToolArgsDiff renders a formatted +/- diff for edit/write tool args,
+// parsed from the tool_use input JSON. Returns nil for tools that aren't
+// edits/writes, so the caller falls back to the raw args line.
+func renderToolArgsDiff(toolName, argsJSON string, width int, styles theme.Styles) []string {
+	switch strings.ToLower(toolName) {
+	case "edit", "edit_file":
+		var a struct {
+			Path      string `json:"path"`
+			OldString string `json:"old_string"`
+			NewString string `json:"new_string"`
+		}
+		if json.Unmarshal([]byte(argsJSON), &a) != nil || a.Path == "" {
+			return nil
+		}
+		return renderDiffBlock(a.Path, render.LineDiff(a.OldString, a.NewString), width, styles)
+	case "write", "write_file":
+		var a struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
+		}
+		if json.Unmarshal([]byte(argsJSON), &a) != nil || a.Path == "" {
+			return nil
+		}
+		return renderDiffBlock(a.Path, render.LineDiff("", a.Content), width, styles)
+	}
+	return nil
+}
+
+// renderDiffBlock renders a diff (a faint path header plus colored +/- and
+// context lines) under a tool entry. Lines are truncated to the width budget.
+func renderDiffBlock(path string, ops []render.DiffLine, width int, styles theme.Styles) []string {
+	faint := lipgloss.NewStyle().Faint(true)
+	const indent = "    "
+	budget := width - 6 // indent (4) + "+ " / "- " prefix (2)
+	if budget < 8 {
+		budget = 8
+	}
+	out := make([]string, 0, len(ops)+1)
+	out = append(out, indent+faint.Render(path))
+	for _, op := range ops {
+		var prefix string
+		var st lipgloss.Style
+		switch op.Op {
+		case render.DiffInsert:
+			prefix, st = "+ ", styles.ToolSuccess
+		case render.DiffDelete:
+			prefix, st = "- ", styles.ToolError
+		default:
+			prefix, st = "  ", faint
+		}
+		out = append(out, indent+st.Render(prefix+ansi.Truncate(op.Text, budget, "…")))
+	}
+	return out
 }
 
 // groupRenderOpts controls renderToolGroup's behavior. The zero value renders

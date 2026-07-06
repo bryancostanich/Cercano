@@ -164,14 +164,16 @@ func TestChatView_ToggleAfterExpandUnfoldsFocusedEntry(t *testing.T) {
 	c := newChatView(theme.NewStyles(p), p, "", "", 100, 20)
 	setupChatView(&c, []*Entry{
 		{Tool: &ToolEntry{ToolName: "Read", ArgsSummary: "a.go", FullArgs: `{"path":"a.go"}`, Status: ToolStatusComplete, Duration: 5 * time.Millisecond, Folded: true}},
-		{Tool: &ToolEntry{ToolName: "Edit", ArgsSummary: "b.go", FullArgs: `{"path":"b.go"}`, Status: ToolStatusComplete, Duration: 7 * time.Millisecond, Folded: true}},
+		{Tool: &ToolEntry{ToolName: "Edit", ArgsSummary: "b.go", FullArgs: `{"path":"b.go","old_string":"old line","new_string":"new line"}`, Status: ToolStatusComplete, Duration: 7 * time.Millisecond, Folded: true}},
 	})
 	c.EnterToolNav()      // focuses last (Edit)
 	c.ToggleFocusedFold() // expand group
 	c.ToggleFocusedFold() // toggle focused entry's Folded
 	got := renderChatView(&c)
-	if !strings.Contains(got, `"path":"b.go"`) {
-		t.Errorf("expected focused (Edit) entry's FullArgs after second toggle, got:\n%s", got)
+	// The Edit entry's body is a diff of its args (old_string → new_string);
+	// the new_string only appears once the entry is unfolded.
+	if !strings.Contains(got, "new line") {
+		t.Errorf("expected focused (Edit) entry's diff body after second toggle, got:\n%s", got)
 	}
 	if strings.Contains(got, `"path":"a.go"`) {
 		t.Errorf("unfocused (Read) entry should stay folded, got:\n%s", got)

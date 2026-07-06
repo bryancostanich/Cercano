@@ -16,7 +16,7 @@ func newTestWizardPage(t *testing.T) *wizardPage {
 	t.Helper()
 	t.Setenv("CERCANO_WIZARD_STATE", filepath.Join(t.TempDir(), "wizard_state.yaml"))
 	p := theme.BuiltinThemes()[0]
-	return newWizardPage(nil, theme.NewStyles(p.Palette), 100, 40)
+	return newWizardPage(nil, p.Palette, theme.NewStyles(p.Palette), 100, 40)
 }
 
 func press(t *testing.T, wp *wizardPage, code rune) bool {
@@ -138,7 +138,7 @@ func TestWizardEscResumesMidRun(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "wizard_state.yaml")
 	t.Setenv("CERCANO_WIZARD_STATE", statePath)
 	p := theme.BuiltinThemes()[0]
-	wp := newWizardPage(nil, theme.NewStyles(p.Palette), 100, 40)
+	wp := newWizardPage(nil, p.Palette, theme.NewStyles(p.Palette), 100, 40)
 
 	press(t, wp, tea.KeyDown)
 	press(t, wp, tea.KeyEnter) // cloud
@@ -153,12 +153,79 @@ func TestWizardEscResumesMidRun(t *testing.T) {
 	}
 
 	// A fresh page resumes from the persisted state.
-	wp2 := newWizardPage(nil, theme.NewStyles(p.Palette), 100, 40)
+	wp2 := newWizardPage(nil, p.Palette, theme.NewStyles(p.Palette), 100, 40)
 	if wp2.state.Step != wizard.StepPrimary {
 		t.Fatalf("resume: want %s, got %s", wizard.StepPrimary, wp2.state.Step)
 	}
 	if wp2.state.PrimarySide != wizard.SideCloud {
 		t.Fatalf("resume: want preserved side %s, got %q", wizard.SideCloud, wp2.state.PrimarySide)
+	}
+}
+
+func TestWizardTierPickerRecordsPick(t *testing.T) {
+	wp := newTestWizardPage(t)
+	press(t, wp, tea.KeyEnter) // open primary
+	press(t, wp, tea.KeyEnter) // recommended locus → tiers
+
+	// Enter on the first tier row opens the picker.
+	press(t, wp, tea.KeyEnter)
+	if wp.picker == nil {
+		t.Fatal("enter on tier row: want picker open")
+	}
+	// First candidate is the recommendation, already the autofilled pick.
+	rows := wp.tierPickerCandidates("most_capable.open")
+	if len(rows) < 2 {
+		t.Fatalf("picker: want recommendation + clear rows, got %d", len(rows))
+	}
+	if rows[0].Hint != "current" {
+		t.Errorf("first candidate: want hint current (autofilled), got %q", rows[0].Hint)
+	}
+	if rows[len(rows)-1].Key != "-" {
+		t.Errorf("last row: want clear row, got %q", rows[len(rows)-1].Key)
+	}
+
+	// Down to the clear row, select: pick removed, picker closed, persisted.
+	for range rows {
+		press(t, wp, tea.KeyDown)
+	}
+	press(t, wp, tea.KeyEnter)
+	if wp.picker != nil {
+		t.Fatal("select: want picker closed")
+	}
+	if _, ok := wp.state.TierPicks["most_capable.open"]; ok {
+		t.Error("clear: pick should be removed")
+	}
+	st, ok := wizard.Load()
+	if !ok {
+		t.Fatal("want persisted state")
+	}
+	if _, exists := st.TierPicks["most_capable.open"]; exists {
+		t.Error("clear: persisted state should not carry the removed pick")
+	}
+
+	// Reopen and pick the recommendation again.
+	press(t, wp, tea.KeyEnter)
+	press(t, wp, tea.KeyEnter)
+	if wp.state.TierPicks["most_capable.open"] == "" {
+		t.Error("pick: want slot filled from picker selection")
+	}
+}
+
+func TestWizardPickerEscClosesWithoutChange(t *testing.T) {
+	wp := newTestWizardPage(t)
+	press(t, wp, tea.KeyEnter) // open primary
+	press(t, wp, tea.KeyEnter) // locus → tiers
+	before := wp.state.TierPicks["most_capable.open"]
+	press(t, wp, tea.KeyEnter) // open picker
+	press(t, wp, tea.KeyEscape)
+	if wp.picker != nil {
+		t.Fatal("esc: want picker closed")
+	}
+	if wp.state.TierPicks["most_capable.open"] != before {
+		t.Error("esc: pick must be unchanged")
+	}
+	if wp.state.Step != wizard.StepTiers {
+		t.Errorf("esc: page must stay on tiers, got %s", wp.state.Step)
 	}
 }
 

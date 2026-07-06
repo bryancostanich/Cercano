@@ -483,8 +483,16 @@ func (c *chatView) ClearQueue() { c.queued = nil }
 
 // SetSize resizes the underlying viewport. Call from relayout.
 func (c *chatView) SetSize(w, h int) {
+	// Sample before changing dimensions: shrinking height moves maxYOffset up,
+	// so the old YOffset may no longer satisfy AtBottom() even though the user
+	// was genuinely at the bottom. Re-anchor after the resize so SetEntries'
+	// wasAtBottom check sees the correct state.
+	atBottom := c.vp.AtBottom()
 	c.vp.SetWidth(w)
 	c.vp.SetHeight(h)
+	if atBottom {
+		c.vp.GotoBottom()
+	}
 }
 
 // ── tool-entry navigation ──────────────────────────────────────────────────

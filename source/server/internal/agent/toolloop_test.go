@@ -399,3 +399,63 @@ func TestCollectStreamCarriesReasoning(t *testing.T) {
 		t.Fatalf("block1 = %+v", resp.Blocks[1])
 	}
 }
+
+func TestToolLoop_MalformedToolInput_WrappedAndAnswered(t *testing.T) {
+	// A provider streaming structurally invalid tool input (the 2026-07-06
+	// Meridian incident: unquoted Bash args) must not poison the turn. The
+	// recorded tool_use must carry valid JSON, the tool must not run, and the
+	// model must get an error tool_result quoting its raw attempt.
+	bad := `{"cmd": find /Users -name "*.go"}`
+	prov := &mockProvider{
+		scripts: [][]llm.Block{
+			{{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "Bash",
+				ToolInput: json.RawMessage(bad)}},
+			{{Type: llm.BlockText, Text: "Retrying with valid JSON."}},
+		},
+		caps: llm.Capabilities{SupportsTools: true},
+	}
+	reg := testDefaultRegistry()
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+
+	result, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider: prov, Registry: reg, Permissions: perms,
+		UserInput: "find go files",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FinalText != "Retrying with valid JSON." {
+		t.Errorf("final: %q — the loop must continue past the malformed call", result.FinalText)
+	}
+
+	var toolUse, errResult *llm.Block
+	for i := range result.History {
+		for j := range result.History[i].Blocks {
+			b := &result.History[i].Blocks[j]
+			switch {
+			case b.Type == llm.BlockToolUse && b.ToolUseID == "u1":
+				toolUse = b
+			case b.Type == llm.BlockToolResult && b.ToolUseRef == "u1":
+				errResult = b
+			}
+		}
+	}
+	if toolUse == nil {
+		t.Fatal("history: tool_use u1 not recorded")
+	}
+	if !json.Valid(toolUse.ToolInput) {
+		t.Fatalf("history tool_use input must be valid JSON (persistence + replay), got: %s", toolUse.ToolInput)
+	}
+	if raw, ok := llm.MalformedToolInput(toolUse.ToolInput); !ok || raw != bad {
+		t.Errorf("history input: want envelope carrying %q, got %s", bad, toolUse.ToolInput)
+	}
+	if errResult == nil {
+		t.Fatal("history: error tool_result for u1 not recorded")
+	}
+	if !errResult.IsError {
+		t.Error("tool_result must be flagged as error")
+	}
+	if !strings.Contains(errResult.Content, "not valid JSON") || !strings.Contains(errResult.Content, "find /Users") {
+		t.Errorf("tool_result should explain the failure and quote the raw input, got: %q", errResult.Content)
+	}
+}

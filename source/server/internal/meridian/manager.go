@@ -23,9 +23,10 @@ const DefaultVersion = "1.45.0"
 // State is the lifecycle phase of the Meridian subprocess from Cercano's
 // point of view. The transitions are: Disabled → (PrereqsMissing | NeedsAuth
 // | External | Starting), Starting → (Ready | Failed), Ready → Failed (crash)
-// or Disabled (Stop). External is a terminal "we're not in charge" state —
-// some other Meridian (or OpenCode) is already on the port; we reuse it but
-// don't manage its lifecycle.
+// or Disabled (Stop). External means some other Meridian (or OpenCode) is
+// already on the port; we reuse it but don't manage its lifecycle. A watcher
+// polls the port while External — if the external process dies, the manager
+// re-runs Ensure and spawns its own (External → Starting).
 type State int
 
 const (
@@ -82,19 +83,26 @@ type Manager struct {
 	authFn     func() bool
 	portUsedFn func(port int) bool
 
-	mu             sync.Mutex
-	status         Status
-	cancel         context.CancelFunc // cancels the active supervisor; nil when none
-	cmd            *exec.Cmd          // the spawned meridian process, if we own it
-	listener       func(Status)
-	lastPort       int                // last port requested via Ensure (for auth poller retry)
-	authPollCancel context.CancelFunc // cancels the auth poller; nil when none
+	mu                  sync.Mutex
+	status              Status
+	cancel              context.CancelFunc // cancels the active supervisor; nil when none
+	cmd                 *exec.Cmd          // the spawned meridian process, if we own it
+	listener            func(Status)
+	lastPort            int                // last port requested via Ensure (for auth poller retry)
+	authPollCancel      context.CancelFunc // cancels the auth poller; nil when none
+	externalWatchCancel context.CancelFunc // cancels the external-port watcher; nil when none
 }
 
 // authPollInterval is how often the manager re-checks the keychain while in
 // NeedsAuth state. Tight enough that the user runs `claude login` and the
 // chip clears within a few seconds; loose enough not to spam /usr/bin/security.
 var authPollInterval = 3 * time.Second
+
+// externalPollInterval is how often the manager re-checks the port while in
+// External state. The check is a local TCP bind attempt — cheap enough to run
+// often, and a dead external Meridian means every cloud call is failing, so
+// recovery should be quick.
+var externalPollInterval = 5 * time.Second
 
 // New constructs a Manager. logPath should be the file to tee Meridian's
 // stdout/stderr into (typically ~/.cercano/meridian.log). Empty logPath
@@ -183,13 +191,15 @@ func (m *Manager) Ensure(ctx context.Context, port int) {
 		m.mu.Unlock()
 		return
 	}
-	// Gate 3: someone else on the port? Adopt it.
+	// Gate 3: someone else on the port? Adopt it, and watch it — if the
+	// external process dies, the watcher re-runs Ensure so we spawn our own.
 	if m.portUsedFn(port) {
 		m.setStatusLocked(Status{
 			State:   StateExternal,
 			Message: fmt.Sprintf("Meridian already running on port %d (not managed by Cercano)", port),
 			Port:    port,
 		})
+		m.startExternalWatcherLocked(ctx)
 		m.mu.Unlock()
 		return
 	}
@@ -219,6 +229,7 @@ func (m *Manager) Stop() {
 // must hold m.mu. Does NOT change status — caller decides what to set it to.
 func (m *Manager) stopLocked() {
 	m.stopAuthPollerLocked()
+	m.stopExternalWatcherLocked()
 	if m.cancel != nil {
 		m.cancel()
 		m.cancel = nil
@@ -246,8 +257,9 @@ func (m *Manager) startAuthPollerLocked(parent context.Context) {
 	pctx, cancel := context.WithCancel(parent)
 	m.authPollCancel = cancel
 	port := m.lastPort
+	interval := authPollInterval
 	go func() {
-		t := time.NewTicker(authPollInterval)
+		t := time.NewTicker(interval)
 		defer t.Stop()
 		for {
 			select {
@@ -268,6 +280,50 @@ func (m *Manager) stopAuthPollerLocked() {
 	if m.authPollCancel != nil {
 		m.authPollCancel()
 		m.authPollCancel = nil
+	}
+}
+
+// startExternalWatcherLocked spawns a background goroutine that re-checks the
+// adopted port every externalPollInterval while we're in External state. If
+// the external process goes away, it calls Ensure to drive the state machine
+// forward — Ensure will find the port free and spawn our own Meridian. Caller
+// must hold m.mu.
+//
+// Idempotent: starting a watcher while one is already running cancels the
+// previous instance. Stopped by stopExternalWatcherLocked — called from
+// stopLocked, so Stop and every Ensure transition also drop the watcher.
+func (m *Manager) startExternalWatcherLocked(parent context.Context) {
+	if m.externalWatchCancel != nil {
+		m.externalWatchCancel()
+	}
+	wctx, cancel := context.WithCancel(parent)
+	m.externalWatchCancel = cancel
+	port := m.lastPort
+	interval := externalPollInterval
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-wctx.Done():
+				return
+			case <-t.C:
+				if !m.portUsedFn(port) {
+					m.logger.Printf("meridian: external process on port %d went away; respawning", port)
+					m.Ensure(parent, port)
+					return
+				}
+			}
+		}
+	}()
+}
+
+// stopExternalWatcherLocked cancels any running external-port watcher. Caller
+// must hold m.mu.
+func (m *Manager) stopExternalWatcherLocked() {
+	if m.externalWatchCancel != nil {
+		m.externalWatchCancel()
+		m.externalWatchCancel = nil
 	}
 }
 

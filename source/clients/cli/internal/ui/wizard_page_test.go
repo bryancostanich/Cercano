@@ -28,8 +28,7 @@ func press(t *testing.T, wp *wizardPage, code rune) bool {
 func TestWizardCloudPathEndToEnd(t *testing.T) {
 	wp := newTestWizardPage(t)
 
-	// Step 1: pick cloud (second row).
-	press(t, wp, tea.KeyDown)
+	// Step 1: pick cloud (first row).
 	press(t, wp, tea.KeyEnter)
 	if wp.state.Step != wizard.StepCloud {
 		t.Fatalf("after primary: want %s, got %s", wizard.StepCloud, wp.state.Step)
@@ -95,7 +94,8 @@ func TestWizardCloudPathEndToEnd(t *testing.T) {
 
 func TestWizardApplyFailureKeepsState(t *testing.T) {
 	wp := newTestWizardPage(t)
-	press(t, wp, tea.KeyEnter) // open primary
+	press(t, wp, tea.KeyDown)
+	press(t, wp, tea.KeyEnter) // open (second row)
 	press(t, wp, tea.KeyEnter) // recommended locus
 	for range wp.rows() {
 		press(t, wp, tea.KeyDown)
@@ -122,7 +122,8 @@ func TestWizardApplyFailureKeepsState(t *testing.T) {
 
 func TestWizardOpenPathSkipsCloud(t *testing.T) {
 	wp := newTestWizardPage(t)
-	press(t, wp, tea.KeyEnter) // open is the first row
+	press(t, wp, tea.KeyDown)
+	press(t, wp, tea.KeyEnter) // open (second row)
 	if wp.state.Step != wizard.StepLocus {
 		t.Fatalf("open primary: want %s, got %s", wizard.StepLocus, wp.state.Step)
 	}
@@ -141,8 +142,7 @@ func TestWizardEscResumesMidRun(t *testing.T) {
 	p := theme.BuiltinThemes()[0]
 	wp := newWizardPage(nil, p.Palette, theme.NewStyles(p.Palette), 100, 40)
 
-	press(t, wp, tea.KeyDown)
-	press(t, wp, tea.KeyEnter) // cloud
+	press(t, wp, tea.KeyEnter) // cloud (first row)
 	if closed := press(t, wp, tea.KeyEscape); closed {
 		t.Fatal("esc on cloud step should go back, not close")
 	}
@@ -165,7 +165,8 @@ func TestWizardEscResumesMidRun(t *testing.T) {
 
 func TestWizardTierPickerRecordsPick(t *testing.T) {
 	wp := newTestWizardPage(t)
-	press(t, wp, tea.KeyEnter) // open primary
+	press(t, wp, tea.KeyDown)
+	press(t, wp, tea.KeyEnter) // open (second row)
 	press(t, wp, tea.KeyEnter) // recommended locus → tiers
 
 	// Enter on the first tier row opens the picker.
@@ -214,7 +215,8 @@ func TestWizardTierPickerRecordsPick(t *testing.T) {
 
 func TestWizardPickerEscClosesWithoutChange(t *testing.T) {
 	wp := newTestWizardPage(t)
-	press(t, wp, tea.KeyEnter) // open primary
+	press(t, wp, tea.KeyDown)
+	press(t, wp, tea.KeyEnter) // open (second row)
 	press(t, wp, tea.KeyEnter) // locus → tiers
 	before := wp.state.TierPicks["most_capable.open"]
 	press(t, wp, tea.KeyEnter) // open picker
@@ -232,8 +234,7 @@ func TestWizardPickerEscClosesWithoutChange(t *testing.T) {
 
 func TestWizardAPIKeyFlow(t *testing.T) {
 	wp := newTestWizardPage(t)
-	press(t, wp, tea.KeyDown)
-	press(t, wp, tea.KeyEnter) // cloud
+	press(t, wp, tea.KeyEnter) // cloud (first row)
 	press(t, wp, tea.KeyDown)
 	press(t, wp, tea.KeyEnter) // openai (second preset row)
 	if wp.state.CloudProvider != "openai" {
@@ -282,8 +283,7 @@ func TestWizardAPIKeyFlow(t *testing.T) {
 
 func TestWizardKeyEntryEscReturnsToAuthPick(t *testing.T) {
 	wp := newTestWizardPage(t)
-	press(t, wp, tea.KeyDown)
-	press(t, wp, tea.KeyEnter) // cloud
+	press(t, wp, tea.KeyEnter) // cloud (first row)
 	press(t, wp, tea.KeyEnter) // anthropic
 	press(t, wp, tea.KeyDown)
 	press(t, wp, tea.KeyEnter) // api_key
@@ -301,8 +301,7 @@ func TestWizardKeyEntryEscReturnsToAuthPick(t *testing.T) {
 
 func TestWizardMeridianCommit(t *testing.T) {
 	wp := newTestWizardPage(t)
-	press(t, wp, tea.KeyDown)
-	press(t, wp, tea.KeyEnter) // cloud
+	press(t, wp, tea.KeyEnter) // cloud (first row)
 	press(t, wp, tea.KeyEnter) // anthropic
 
 	wp.commitMeridianFn = func() error { return fmt.Errorf("proxy down") }
@@ -330,8 +329,7 @@ func pressQ(t *testing.T, wp *wizardPage) bool {
 
 func TestWizardAbandonTrapdoor(t *testing.T) {
 	wp := newTestWizardPage(t)
-	press(t, wp, tea.KeyDown)
-	press(t, wp, tea.KeyEnter) // cloud — state now persisted mid-run
+	press(t, wp, tea.KeyEnter) // cloud (first row) — state now persisted mid-run
 
 	rolledBack := false
 	wp.rollbackFn = func() error { rolledBack = true; return nil }
@@ -379,8 +377,7 @@ func TestWizardAbandonDisarmsOnOtherKey(t *testing.T) {
 
 func TestWizardAbandonRollbackFailureStaysOpen(t *testing.T) {
 	wp := newTestWizardPage(t)
-	press(t, wp, tea.KeyDown)
-	press(t, wp, tea.KeyEnter) // cloud
+	press(t, wp, tea.KeyEnter) // cloud (first row)
 
 	wp.rollbackFn = func() error { return fmt.Errorf("agent unreachable") }
 	pressQ(t, wp)
@@ -404,8 +401,7 @@ func TestWizardAbandonRollbackFailureStaysOpen(t *testing.T) {
 
 func TestWizardKeyEntryQTypesIntoPrompt(t *testing.T) {
 	wp := newTestWizardPage(t)
-	press(t, wp, tea.KeyDown)
-	press(t, wp, tea.KeyEnter) // cloud
+	press(t, wp, tea.KeyEnter) // cloud (first row)
 	press(t, wp, tea.KeyEnter) // anthropic
 	press(t, wp, tea.KeyDown)
 	press(t, wp, tea.KeyEnter) // api_key → masked prompt

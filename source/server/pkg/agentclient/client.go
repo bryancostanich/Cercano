@@ -1765,7 +1765,7 @@ func (c *Client) SetCloudProfileKey(ctx context.Context, name, key string) error
 // UpsertCloudProfile creates or updates a cloud profile's metadata.
 func (c *Client) UpsertCloudProfile(ctx context.Context, p CloudProfileInfo) error {
 	resp, err := c.agent.UpsertCloudProfile(ctx, &proto.UpsertCloudProfileRequest{
-		Name: p.Name, Flavor: p.Flavor, Backend: p.Backend, BaseUrl: p.BaseURL, Model: p.Model,
+		Name: p.Name, Flavor: p.Flavor, Backend: p.Backend, BaseUrl: p.BaseURL, Model: p.Model, Route: p.Route,
 	})
 	if err != nil {
 		return err

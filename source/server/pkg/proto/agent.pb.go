@@ -8133,6 +8133,7 @@ type UpsertCloudProfileRequest struct {
 	Backend       string                 `protobuf:"bytes,3,opt,name=backend,proto3" json:"backend,omitempty"`
 	BaseUrl       string                 `protobuf:"bytes,4,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
 	Model         string                 `protobuf:"bytes,5,opt,name=model,proto3" json:"model,omitempty"`
+	Route         string                 `protobuf:"bytes,6,opt,name=route,proto3" json:"route,omitempty"` // direct (default) | meridian | ccr (future); empty preserves an existing profile's route
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8198,6 +8199,13 @@ func (x *UpsertCloudProfileRequest) GetBaseUrl() string {
 func (x *UpsertCloudProfileRequest) GetModel() string {
 	if x != nil {
 		return x.Model
+	}
+	return ""
+}
+
+func (x *UpsertCloudProfileRequest) GetRoute() string {
+	if x != nil {
+		return x.Route
 	}
 	return ""
 }
@@ -9101,13 +9109,14 @@ const file_agent_proto_rawDesc = "" +
 	"\aapi_key\x18\x02 \x01(\tR\x06apiKey\"B\n" +
 	"\x1aSetCloudProfileKeyResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\x92\x01\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"\xa8\x01\n" +
 	"\x19UpsertCloudProfileRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06flavor\x18\x02 \x01(\tR\x06flavor\x12\x18\n" +
 	"\abackend\x18\x03 \x01(\tR\abackend\x12\x19\n" +
 	"\bbase_url\x18\x04 \x01(\tR\abaseUrl\x12\x14\n" +
-	"\x05model\x18\x05 \x01(\tR\x05model\"B\n" +
+	"\x05model\x18\x05 \x01(\tR\x05model\x12\x14\n" +
+	"\x05route\x18\x06 \x01(\tR\x05route\"B\n" +
 	"\x1aUpsertCloudProfileResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\"/\n" +

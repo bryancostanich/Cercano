@@ -1149,12 +1149,16 @@ func (c *chatView) MouseToggleFold(localX, localY int) bool {
 	if !ok {
 		return false
 	}
+	// A mouse interaction is not keyboard navigation: clear any focus caret so
+	// it never renders on a mouse-driven expand, and a stale caret from an
+	// earlier keyboard nav doesn't linger. The ▶ caret is a keyboard-only
+	// affordance.
+	c.focusedToolIdx = -1
 	if r.group {
 		// The summary header toggles the whole run collapsed ⇄ expanded.
 		c.toggleGroup(r.entry)
 	} else {
 		// A per-call line toggles just that entry's own body.
-		c.focusedToolIdx = r.entry
 		c.toggleEntryFold(r.entry)
 	}
 	return true

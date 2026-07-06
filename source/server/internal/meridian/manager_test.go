@@ -106,6 +106,90 @@ func TestEnsure_PortInUseAdoptsExternal(t *testing.T) {
 	}
 }
 
+func TestEnsure_ExternalGoneRespawns(t *testing.T) {
+	m := newTestManager()
+	var portUsed atomic.Bool
+	portUsed.Store(true)
+	m.portUsedFn = func(int) bool { return portUsed.Load() }
+	var spawned int32
+	m.spawnFn = fakeSpawn(&spawned)
+
+	m.Ensure(context.Background(), 3456)
+	if got := m.Status().State; got != StateExternal {
+		t.Fatalf("state = %s, want external", got)
+	}
+
+	// The external Meridian dies (port goes free). A later Ensure on the
+	// same port must notice and spawn our own instead of no-opping.
+	portUsed.Store(false)
+	m.Ensure(context.Background(), 3456)
+	waitForState(t, m, StateReady)
+
+	if atomic.LoadInt32(&spawned) != 1 {
+		t.Errorf("spawned %d times, want 1 after external went away", spawned)
+	}
+	m.Stop()
+}
+
+func TestExternalWatcher_AutoRespawnsWhenExternalDies(t *testing.T) {
+	prev := externalPollInterval
+	externalPollInterval = 20 * time.Millisecond
+	defer func() { externalPollInterval = prev }()
+
+	m := newTestManager()
+	var portUsed atomic.Bool
+	portUsed.Store(true)
+	m.portUsedFn = func(int) bool { return portUsed.Load() }
+	var spawned int32
+	m.spawnFn = fakeSpawn(&spawned)
+
+	m.Ensure(context.Background(), 3456)
+	if got := m.Status().State; got != StateExternal {
+		t.Fatalf("state = %s, want external", got)
+	}
+
+	// The external Meridian dies. The watcher must notice on its own and
+	// respawn — no further Ensure calls from the outside.
+	portUsed.Store(false)
+	waitForState(t, m, StateReady)
+
+	if atomic.LoadInt32(&spawned) != 1 {
+		t.Errorf("spawned %d times, want 1 after watcher respawn", spawned)
+	}
+	m.Stop()
+}
+
+func TestStop_StopsExternalWatcher(t *testing.T) {
+	prev := externalPollInterval
+	externalPollInterval = 20 * time.Millisecond
+	defer func() { externalPollInterval = prev }()
+
+	m := newTestManager()
+	var portUsed atomic.Bool
+	portUsed.Store(true)
+	m.portUsedFn = func(int) bool { return portUsed.Load() }
+	var spawned int32
+	m.spawnFn = fakeSpawn(&spawned)
+
+	m.Ensure(context.Background(), 3456)
+	if got := m.Status().State; got != StateExternal {
+		t.Fatalf("state = %s, want external", got)
+	}
+
+	// Stop while External, then the external process dies. A stopped manager
+	// must stay Disabled — the watcher must not resurrect Meridian.
+	m.Stop()
+	portUsed.Store(false)
+	time.Sleep(100 * time.Millisecond) // several poll intervals
+
+	if got := m.Status().State; got != StateDisabled {
+		t.Errorf("state = %s after Stop, want disabled", got)
+	}
+	if atomic.LoadInt32(&spawned) != 0 {
+		t.Errorf("spawned %d times after Stop, want 0", spawned)
+	}
+}
+
 func TestEnsure_SuccessfulSpawnReachesReady(t *testing.T) {
 	m := newTestManager()
 	var spawned int32

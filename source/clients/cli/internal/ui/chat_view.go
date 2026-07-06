@@ -57,6 +57,11 @@ type chatView struct {
 	// for the session since entries are append-only.
 	groupExpanded map[int]bool
 
+	// pendingToolFetches holds tool_use_ids the user expanded whose full body
+	// hasn't been fetched yet. The host drains this (TakePendingToolFetches)
+	// after a fold toggle and dispatches the lazy GetToolCall fetches.
+	pendingToolFetches []string
+
 	// bannerEpoch is the shimmer start time for the scrollback banner entry,
 	// handed off from the splash AnimModel so the sweep phase is continuous.
 	bannerEpoch time.Time
@@ -232,6 +237,29 @@ func (c *chatView) hasInProgressTool() bool {
 		}
 	}
 	return false
+}
+
+// hasLoadingTool reports whether any tool entry has a lazy body fetch in
+// flight. The host's animation tick loop keeps firing while this is true so
+// the expanded entry's loading spinner animates.
+func (c *chatView) hasLoadingTool() bool {
+	for _, e := range c.entries {
+		if e.Tool != nil && e.Tool.Loading {
+			return true
+		}
+	}
+	return false
+}
+
+// TakePendingToolFetches returns and clears the tool_use_ids queued for a lazy
+// body fetch by an expand toggle. The host dispatches a GetToolCall per id.
+func (c *chatView) TakePendingToolFetches() []string {
+	if len(c.pendingToolFetches) == 0 {
+		return nil
+	}
+	out := c.pendingToolFetches
+	c.pendingToolFetches = nil
+	return out
 }
 
 // findToolEntry returns the ToolEntry whose ToolUseID matches id, or nil.
@@ -598,7 +626,8 @@ func (c *chatView) ToggleFocusedFold() {
 		c.groupExpanded[start] = false
 		return
 	}
-	t.Folded = !t.Folded
+	// Toggle the focused call's own body (and queue its lazy fetch on expand).
+	c.toggleEntryFold(c.focusedToolIdx)
 }
 
 // focusedGroupRange returns the [start, end] inclusive entries-index range of
@@ -1144,8 +1173,16 @@ func (c *chatView) toggleEntryFold(idx int) {
 	if idx < 0 || idx >= len(c.entries) {
 		return
 	}
-	if t := c.entries[idx].Tool; t != nil {
-		t.Folded = !t.Folded
+	t := c.entries[idx].Tool
+	if t == nil {
+		return
+	}
+	t.Folded = !t.Folded
+	// Expanding a call whose full body hasn't been fetched yet queues a lazy
+	// GetToolCall and shows a loading spinner until it returns.
+	if !t.Folded && !t.Loading && t.FullArgs == "" && t.FullResult == "" && t.ToolUseID != "" {
+		t.Loading = true
+		c.pendingToolFetches = append(c.pendingToolFetches, t.ToolUseID)
 	}
 }
 

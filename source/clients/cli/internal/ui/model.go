@@ -599,6 +599,45 @@ func fetchContextUsage(ag *agentclient.Client, convID string) tea.Cmd {
 	}
 }
 
+// toolCallFetchedMsg carries the result of a lazy GetToolCall — the full args
+// and result body for one expanded scrollback tool entry, keyed by tool_use_id.
+type toolCallFetchedMsg struct {
+	id     string
+	detail *agentclient.ToolCallDetail
+	err    error
+}
+
+// fetchToolCallCmd asks the agent for a tool call's full args + result body by
+// tool_use_id (read from the persisted conversation). Backs expand-on-click of
+// a folded scrollback tool entry.
+func fetchToolCallCmd(ag *agentclient.Client, convID, toolUseID string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		d, err := ag.GetToolCall(ctx, convID, toolUseID)
+		return toolCallFetchedMsg{id: toolUseID, detail: d, err: err}
+	}
+}
+
+// dispatchToolFetches drains any tool bodies the chat queued for lazy load
+// (from an expand toggle) and returns the fetch commands, kicking the
+// animation tick so the loading spinner animates while they're in flight.
+func (m *Model) dispatchToolFetches() []tea.Cmd {
+	ids := m.chat.TakePendingToolFetches()
+	if len(ids) == 0 {
+		return nil
+	}
+	cmds := make([]tea.Cmd, 0, len(ids)+1)
+	for _, id := range ids {
+		cmds = append(cmds, fetchToolCallCmd(m.agent, m.convID, id))
+	}
+	if !m.animTickActive {
+		m.animTickActive = true
+		cmds = append(cmds, progressAnimTick())
+	}
+	return cmds
+}
+
 type recapLoadedMsg struct{ recap string }
 
 // nextPromptSuggestionMsg carries the result of a SuggestNextPrompt call.
@@ -784,8 +823,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// ToggleFocusedFold. Short-circuits before selection so a click on
 		// a tool entry never starts a text-selection drag.
 		if m.chat.MouseToggleFold(mouse.X, mouse.Y-m.scrollbarTop) {
+			cmds := m.dispatchToolFetches()
 			m.refreshViewport()
-			return m, nil
+			return m, tea.Batch(cmds...)
 		}
 		// Translate screen coords to viewport-local and forward to chatView.
 		m.chat.MouseDown(mouse.X, mouse.Y-m.scrollbarTop)
@@ -958,8 +998,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case key.Matches(msg, keys.ToggleTool):
 				m.chat.ToggleFocusedFold()
+				cmds := m.dispatchToolFetches()
 				m.refreshViewport()
-				return m, nil
+				return m, tea.Batch(cmds...)
 			case key.Matches(msg, keys.Back):
 				m.chat.ExitToolNav()
 				m.refreshViewport()
@@ -1259,6 +1300,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// authoritative source is GetContextUsage — refetch so every derived
 		// field (max, compacting flag) settles too.
 		return m, fetchContextUsage(m.agent, m.convID)
+
+	case toolCallFetchedMsg:
+		// Lazy tool-body fetch returned — fill the expanded entry (or just
+		// clear the spinner if the fetch failed / found nothing) and repaint.
+		if t := m.chat.findToolEntry(msg.id); t != nil {
+			t.Loading = false
+			if msg.err == nil && msg.detail != nil && msg.detail.Found {
+				t.FullArgs = msg.detail.ArgsJSON
+				t.FullResult = msg.detail.Result
+			}
+			m.refreshViewport()
+		}
+		return m, nil
 
 	case ctxUsageMsg:
 		// Authoritative context-window meter from the agent; overrides
@@ -1652,6 +1706,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// without this branch the placeholder tick stops once the assistant
 		// streams a token, then the active tool line shows a frozen glyph.
 		if m.chat.hasInProgressTool() {
+			m.refreshViewport()
+			keep = true
+		}
+		// Keep ticking while a lazy tool-body fetch is in flight so the
+		// expanded entry's loading spinner animates.
+		if m.chat.hasLoadingTool() {
 			m.refreshViewport()
 			keep = true
 		}

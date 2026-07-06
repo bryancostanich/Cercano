@@ -579,6 +579,35 @@ func (c *Client) GetContextUsage(ctx context.Context, conversationID string) (*C
 	}, nil
 }
 
+// ToolCallDetail is the full args + result body for one tool call, fetched
+// lazily when the CLI expands a scrollback tool entry. Found reports whether
+// the tool_use block was located; Result may be empty when the call is still
+// in flight.
+type ToolCallDetail struct {
+	Found    bool
+	ToolName string
+	ArgsJSON string
+	Result   string
+	IsError  bool
+}
+
+// GetToolCall fetches the full args and result body for a single tool call in
+// a conversation, by tool_use_id. Backs the CLI's expand-on-click of a folded
+// scrollback tool entry.
+func (c *Client) GetToolCall(ctx context.Context, conversationID, toolUseID string) (*ToolCallDetail, error) {
+	resp, err := c.agent.GetToolCall(ctx, &proto.GetToolCallRequest{ConversationId: conversationID, ToolUseId: toolUseID})
+	if err != nil {
+		return nil, err
+	}
+	return &ToolCallDetail{
+		Found:    resp.GetFound(),
+		ToolName: resp.GetToolName(),
+		ArgsJSON: resp.GetArgsJson(),
+		Result:   resp.GetResult(),
+		IsError:  resp.GetIsError(),
+	}, nil
+}
+
 // CompactionState mirrors GetCompactionStateResponse for the /c viewer.
 type CompactionState struct {
 	FrozenThrough       int64

@@ -125,8 +125,15 @@ func (wp *wizardPage) commitAPIKey(key string) error {
 	return wp.agent.SetActiveCloudProfile(ctx, preset.ID)
 }
 
+// defaultMeridianBaseURL is Meridian's documented default listen address
+// (the server's meridian manager and the config migration use the same
+// 127.0.0.1:3456 default).
+const defaultMeridianBaseURL = "http://127.0.0.1:3456"
+
 // commitMeridianProfile creates/activates an anthropic profile routed
-// through the Meridian proxy; subscription auth, no key stored.
+// through the Meridian proxy; subscription auth, no key stored. The BaseURL
+// is required: the server only activates a keyless profile when a proxy
+// BaseURL says who handles auth.
 func (wp *wizardPage) commitMeridianProfile() error {
 	if wp.agent == nil {
 		return fmt.Errorf("no agent connection")
@@ -135,7 +142,7 @@ func (wp *wizardPage) commitMeridianProfile() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := wp.agent.UpsertCloudProfile(ctx, agentclient.CloudProfileInfo{
-		Name: "anthropic", Flavor: preset.Flavor, Route: "meridian",
+		Name: "anthropic", Flavor: preset.Flavor, Route: "meridian", BaseURL: defaultMeridianBaseURL,
 	}); err != nil {
 		return err
 	}

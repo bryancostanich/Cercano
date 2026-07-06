@@ -116,13 +116,17 @@ type Model struct {
 	ctxPollTicks   int
 	ctxPolling     bool // a ctxUsageTick loop is currently running (avoid double-scheduling)
 	animTickActive bool // a progressAnimTick loop is currently running (avoid double-scheduling)
-	lastLatencyMs  int
-	modelMaxTokens int
-	lastModel      string // local model name (from config)
-	cloudModel     string // cloud model name (from config); empty when no cloud configured
-	cloudState     string // "" = unknown, "NONE" = absent, "ok" = real cloud configured
-	ctrlCArmed     bool   // first ctrl-c on empty input arms quit; any other key disarms
-	errMsg         string
+	// bannerTickActive tracks whether the banner.TickMsg chain is alive — it
+	// serves the splash first, then the scrollback banner. applyResume checks
+	// it to restart the loop when resuming without ever having shown a splash.
+	bannerTickActive bool
+	lastLatencyMs    int
+	modelMaxTokens   int
+	lastModel        string // local model name (from config)
+	cloudModel       string // cloud model name (from config); empty when no cloud configured
+	cloudState       string // "" = unknown, "NONE" = absent, "ok" = real cloud configured
+	ctrlCArmed       bool   // first ctrl-c on empty input arms quit; any other key disarms
+	errMsg           string
 
 	// Live turn telemetry, surfaced by renderStatus while a turn streams. Reset
 	// when a turn begins; the engine fields fill in on the RouteSelected event.
@@ -351,6 +355,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 		wdRef:              wdRef,
 		registry:           reg,
 		splashShown:        !openHistoryOnStart,
+		bannerTickActive:   true, // Init batches splash.Init(), which starts the chain
 		splash:             splash,
 		input:              ti,
 		lastModel:          "qwen3-coder",
@@ -1021,7 +1026,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// dismissing it on first submit moves the wordmark to entry zero
 			// instead of dropping it entirely.
 			if m.splashShown {
-				m.chat.PrependBanner(m.splash.Meta)
+				m.chat.PrependBanner(m.splash.Meta, m.splash.Started())
 			}
 			m.splashShown = false
 			// Slash commands are local navigation / UI actions, never sent to
@@ -1557,15 +1562,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, done
 
 	case banner.TickMsg:
-		// Gate forwarding on splashShown — when the splash is dismissed,
-		// returning nil Cmd lets the animation's tick chain die out
-		// naturally without needing the AnimModel itself to track state.
-		if !m.splashShown {
-			return m, nil
+		// One tick chain serves both banner homes. While the splash chrome
+		// is up, forward to the AnimModel (which re-issues the next frame).
+		// After dismissal the same chain keeps the scrollback banner
+		// shimmering: full frame rate while its rows are on-screen, a cheap
+		// visibility poll while scrolled away, and it dies once no banner
+		// entry exists (e.g. --mdtest). bannerTickActive tracks liveness so
+		// applyResume knows whether it must restart the loop.
+		if m.splashShown {
+			var cmd tea.Cmd
+			m.splash, cmd = m.splash.Update(msg)
+			m.bannerTickActive = cmd != nil
+			return m, cmd
 		}
-		var cmd tea.Cmd
-		m.splash, cmd = m.splash.Update(msg)
-		return m, cmd
+		if m.chat.BannerAnimVisible() {
+			m.refreshViewport()
+			m.bannerTickActive = true
+			return m, banner.Tick()
+		}
+		if m.chat.HasBanner() {
+			m.bannerTickActive = true
+			return m, banner.PollTick()
+		}
+		m.bannerTickActive = false
+		return m, nil
 
 	case resumeRequestedMsg:
 		// Fired by the history picker's OnSelect after the overlay closes.
@@ -2473,7 +2493,7 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 		frozenThrough = cs.FrozenThrough
 	}
 	m.chat.SetEntriesSlice(resumeEntries(turns, frozenThrough))
-	m.chat.PrependBanner(m.splash.Meta)
+	m.chat.PrependBanner(m.splash.Meta, m.splash.Started())
 	// Restore the prior session's living recap into the footer line (renderRecap),
 	// or show a "recap unavailable" placeholder if the recap generator has been
 	// silently failing (e.g. local runtime misconfigured). Don't push into
@@ -2482,7 +2502,15 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 		m.recap = recapDisplay(info)
 	}
 	m.relayout()
-	return m, fetchContextUsage(m.agent, m.convID)
+	cmds := []tea.Cmd{fetchContextUsage(m.agent, m.convID)}
+	if !m.bannerTickActive {
+		// The tick chain died before this resume (e.g. launching straight
+		// into the history picker never shows the splash); restart it so the
+		// prepended scrollback banner animates.
+		m.bannerTickActive = true
+		cmds = append(cmds, banner.Tick())
+	}
+	return m, tea.Batch(cmds...)
 }
 
 // renderConfirmPrompt builds the single-line confirm message shown in

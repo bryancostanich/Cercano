@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"cercano/source/clients/cli/internal/banner"
 )
@@ -50,8 +51,8 @@ func TestChatView_BannerEntryNarrowFallback(t *testing.T) {
 func TestChatView_PrependBannerIdempotent(t *testing.T) {
 	c := newTestChatView(80, 12)
 	c.AppendEntry(&Entry{Role: RoleUser, Content: "hello"})
-	c.PrependBanner(testBannerMeta())
-	c.PrependBanner(testBannerMeta())
+	c.PrependBanner(testBannerMeta(), time.Now())
+	c.PrependBanner(testBannerMeta(), time.Now())
 	entries := c.Entries()
 	if len(entries) != 2 {
 		t.Fatalf("len(entries) = %d, want 2 (banner + user)", len(entries))

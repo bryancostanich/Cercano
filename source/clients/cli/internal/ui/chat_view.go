@@ -44,8 +44,8 @@ type chatView struct {
 	// renders them above the prompt and unstages by reading the methods below.
 	queued []queuedTurn
 
-	vp             viewport.Model
-	plainLines     []string
+	vp         viewport.Model
+	plainLines []string
 	// arrowRows maps absolute content lines (indexes into plainLines) to the
 	// entries index whose fold arrow is drawn there. Rebuilt by SetEntries on
 	// every render, so it can never drift from the drawn layout.
@@ -56,6 +56,10 @@ type chatView struct {
 	// index of the FIRST tool entry in the group's contiguous run; stable
 	// for the session since entries are append-only.
 	groupExpanded map[int]bool
+
+	// bannerEpoch is the shimmer start time for the scrollback banner entry,
+	// handed off from the splash AnimModel so the sweep phase is continuous.
+	bannerEpoch time.Time
 
 	turn turnStatus
 	// streaming mirrors the host's m.streaming so the chat can render a
@@ -133,11 +137,42 @@ func (c *chatView) SetEntriesSlice(es []*Entry) { c.entries = es }
 // Must be called before any tool-group interaction: groupExpanded keys are
 // entry indexes, and prepending shifts them — both call sites (first submit,
 // applyResume) run before the user can have expanded anything.
-func (c *chatView) PrependBanner(meta banner.Meta) {
+//
+// epoch is the shimmer animation start time; passing the splash AnimModel's
+// Started() keeps the sweep phase-locked across the chrome→scrollback handoff.
+func (c *chatView) PrependBanner(meta banner.Meta, epoch time.Time) {
+	c.bannerEpoch = epoch
 	if len(c.entries) > 0 && c.entries[0].Banner != nil {
 		return
 	}
 	c.entries = append([]*Entry{{Banner: &meta}}, c.entries...)
+}
+
+// bannerRows is the rendered height of the wide banner block in content lines.
+const bannerRows = 8
+
+// HasBanner reports whether entry zero is the wordmark banner.
+func (c *chatView) HasBanner() bool {
+	return len(c.entries) > 0 && c.entries[0].Banner != nil
+}
+
+// BannerAnimVisible reports whether any of the banner's animated rows sit
+// inside the viewport's visible window. The banner is entry zero, so its rows
+// are content lines [0, bannerRows); any of them shows iff YOffset < bannerRows.
+// The narrow one-line fallback never animates, so a width that fails the wide
+// branch counts as not visible.
+func (c *chatView) BannerAnimVisible() bool {
+	if !c.HasBanner() {
+		return false
+	}
+	wrapW := c.vp.Width()
+	if wrapW < 10 {
+		wrapW = 10
+	}
+	if wrapW-entryIndent < banner.Width {
+		return false
+	}
+	return c.vp.YOffset() < bannerRows
 }
 
 // insertNoticeAboveLast inserts e at position len-1, pushing the last entry
@@ -822,7 +857,10 @@ func (c *chatView) renderEntry(e *Entry, idx int) string {
 	// compact one-liner — the 62-col chrome wraps catastrophically below that.
 	if e.Banner != nil {
 		if textW >= banner.Width {
-			return indentBlock(pad, banner.Render(c.palette, *e.Banner))
+			// Rendered at the current wall-clock shimmer frame; the host's
+			// banner tick loop rebuilds per frame while these rows are
+			// on-screen, so the sweep keeps moving in scrollback.
+			return indentBlock(pad, banner.FrameAt(c.palette, *e.Banner, c.bannerEpoch))
 		}
 		line := c.styles.Accent.Render("CERCANO") +
 			c.styles.Muted.Render(" · "+e.Banner.Tagline+" · ") +

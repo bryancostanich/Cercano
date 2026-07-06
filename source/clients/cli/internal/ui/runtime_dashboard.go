@@ -200,7 +200,28 @@ func (d *runtimeDashboard) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 
 func (d *runtimeDashboard) View() string {
 	if d.tierPicker != nil {
-		return d.tierPicker.View(d.width, d.palette, d.styles)
+		// The picker floats over the dashboard as a modal instead of
+		// replacing the page — the user keeps their bearings (the tier
+		// row they came from stays visible underneath).
+		full, contentH := d.fullContent()
+		base := d.renderScrollableContent(full, contentH)
+		boxW := d.width - 8
+		if boxW > 72 {
+			boxW = 72
+		}
+		if boxW < 40 {
+			boxW = 40
+		}
+		box := d.tierPicker.ViewPanel(boxW, d.palette, d.styles)
+		x := (d.width - boxW) / 2
+		if x < 0 {
+			x = 0
+		}
+		y := (contentH - countLines([]string{box})) / 2
+		if y < 1 {
+			y = 1
+		}
+		return composeOverlay(base, box, x, y)
 	}
 	full, contentH := d.fullContent()
 	return d.renderScrollableContent(full, contentH)

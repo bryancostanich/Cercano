@@ -334,7 +334,7 @@ func (wp *wizardPage) rows() []wizardRow {
 		for _, t := range wizardTierOrder {
 			for _, side := range wp.tierSides() {
 				key := string(t) + "." + side
-				pick := wp.state.TierPicks[key]
+				pick := normalizeModelLabel(wp.state.TierPicks[key])
 				if pick == "" {
 					pick = "—"
 				}
@@ -347,7 +347,7 @@ func (wp *wizardPage) rows() []wizardRow {
 		}
 		// Embedding slot — open side only, not part of the four routing tiers.
 		embKey := "embedding.open"
-		embPick := wp.state.TierPicks[embKey]
+		embPick := normalizeModelLabel(wp.state.TierPicks[embKey])
 		if embPick == "" {
 			embPick = "—"
 		}
@@ -390,8 +390,10 @@ func wizardAuthRows(providerID string) []wizardRow {
 	}
 }
 
-// autofillTiers fills empty tier slots from the shipped recommendations,
-// preserving anything the user already picked (resume keeps edits).
+// autofillTiers fills tier slots from the shipped recommendations. It normalizes
+// any existing picks that carry stale date-suffixed IDs, and replaces picks that
+// are no longer in the current recommendation list (e.g. when the YAML is
+// updated between runs) so resumed state stays current.
 func (wp *wizardPage) autofillTiers() {
 	if !wp.recsOK {
 		return
@@ -399,22 +401,46 @@ func (wp *wizardPage) autofillTiers() {
 	if wp.state.TierPicks == nil {
 		wp.state.TierPicks = map[string]string{}
 	}
+	// Strip date suffixes from any previously-stored IDs (e.g. claude-haiku-4-5-20251001
+	// → claude-haiku-4-5). Safe to do in-place: only affects the suffix form.
+	for key, pick := range wp.state.TierPicks {
+		if n := normalizeModelLabel(pick); n != pick {
+			wp.state.TierPicks[key] = n
+		}
+	}
 	for _, t := range wizardTierOrder {
 		if wp.state.CloudProvider != "" {
 			key := string(t) + "." + wizard.SideCloud
-			if wp.state.TierPicks[key] == "" {
-				if m, ok := config.PickFirst(wp.recs.Candidates(config.ProviderCloud, wp.state.CloudProvider, t), nil); ok {
+			candidates := wp.recs.Candidates(config.ProviderCloud, wp.state.CloudProvider, t)
+			if shouldRefill(wp.state.TierPicks[key], candidates) {
+				if m, ok := config.PickFirst(candidates, nil); ok {
 					wp.state.TierPicks[key] = m
 				}
 			}
 		}
 		key := string(t) + "." + wizard.SideOpen
-		if wp.state.TierPicks[key] == "" {
-			if m, ok := config.PickFirst(wp.recs.Candidates(config.ProviderOpen, "", t), nil); ok {
+		candidates := wp.recs.Candidates(config.ProviderOpen, "", t)
+		if shouldRefill(wp.state.TierPicks[key], candidates) {
+			if m, ok := config.PickFirst(candidates, nil); ok {
 				wp.state.TierPicks[key] = m
 			}
 		}
 	}
+}
+
+// shouldRefill reports whether a tier slot should be (re)filled from
+// recommendations: either it is empty, or its current pick is no longer in the
+// recommendation list (stale autofill from an older YAML).
+func shouldRefill(current string, candidates []string) bool {
+	if current == "" {
+		return true
+	}
+	for _, c := range candidates {
+		if c == current {
+			return false
+		}
+	}
+	return true
 }
 
 // defaultCursor pre-positions the cursor: the locus step starts on the

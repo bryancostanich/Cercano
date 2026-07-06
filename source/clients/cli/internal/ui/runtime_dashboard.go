@@ -173,14 +173,11 @@ func (d *runtimeDashboard) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return cmd, false
 	}
 	switch msg.String() {
-	case "tab", "shift+tab":
-		// Two focus areas, so forward and reverse cycling are the same
-		// toggle — shift+tab exists so the reverse gesture users
-		// expect doesn't dead-end (or get eaten by the search input).
-		d.toggleFocus()
-		if d.focus == runtimeFocusActions {
-			d.scrollFollowAction()
-		}
+	case "tab":
+		d.advanceSection(1)
+		return nil, false
+	case "shift+tab":
+		d.advanceSection(-1)
 		return nil, false
 	case "pgup", "ctrl+b":
 		d.ScrollBy(-dashboardContentHeight(d.height))
@@ -331,17 +328,75 @@ func (d *runtimeDashboard) hasActiveDownloads() bool {
 	return false
 }
 
-func (d *runtimeDashboard) toggleFocus() {
+// sectionStarts returns the flat operations-cursor index of the first
+// actionable row in each action section (downloads, installed models,
+// processes, model tiers), skipping sections that currently have no
+// actionable rows. Must enumerate in the same order as operationRows.
+func (d *runtimeDashboard) sectionStarts() []int {
+	blocks := [][]runtimeDashboardActionRow{
+		d.downloadRows(),
+		d.installedModelRows(),
+		d.processRows(),
+		tierRows(d.snapshot.Config),
+	}
+	var starts []int
+	ordinal := 0
+	for _, rows := range blocks {
+		n := 0
+		for _, row := range rows {
+			if row.Action.Kind != "" {
+				n++
+			}
+		}
+		if n > 0 {
+			starts = append(starts, ordinal)
+		}
+		ordinal += n
+	}
+	return starts
+}
+
+// advanceSection moves focus one SECTION forward (dir=+1, tab) or
+// backward (dir=-1, shift+tab): catalog → each action section's first
+// row → wraps back to catalog. This is what makes the model-tiers
+// section directly tabbable instead of requiring a dozen arrow
+// presses through the sections above it.
+func (d *runtimeDashboard) advanceSection(dir int) {
+	starts := d.sectionStarts()
 	if d.focus == runtimeFocusCatalog {
+		if len(starts) == 0 {
+			return
+		}
 		d.focus = runtimeFocusActions
 		d.catalogSearch.Blur()
 		d.catalogMessage = ""
-		d.clampOperationCursor()
+		if dir > 0 {
+			d.operationCursor = starts[0]
+		} else {
+			// shift+tab from the catalog wraps to the LAST section —
+			// one gesture straight to model tiers.
+			d.operationCursor = starts[len(starts)-1]
+		}
+		d.scrollFollowAction()
 		return
 	}
-	d.focus = runtimeFocusCatalog
-	_ = d.catalogSearch.Focus()
+	current := 0
+	for i, s := range starts {
+		if d.operationCursor >= s {
+			current = i
+		}
+	}
+	next := current + dir
+	if next < 0 || next >= len(starts) {
+		d.focus = runtimeFocusCatalog
+		_ = d.catalogSearch.Focus()
+		return
+	}
+	d.operationCursor = starts[next]
+	d.scrollFollowAction()
 }
+
+
 
 // scrollFollowAction scrolls the page so the selected action row is
 // visible. fullContent recomputes selectedActionLine as a side effect

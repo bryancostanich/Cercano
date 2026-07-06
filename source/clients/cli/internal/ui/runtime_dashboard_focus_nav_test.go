@@ -20,25 +20,56 @@ func focusNavTestDashboard() *runtimeDashboard {
 		},
 	})
 	d.height = 24 // short viewport: tiers sit below the fold
-	// The bare-struct fixture skips the constructor — toggling focus
-	// calls catalogSearch.Focus(), which needs a real textinput.
+	// The bare-struct fixture skips the constructor — focus changes
+	// call catalogSearch.Focus(), which needs a real textinput.
 	d.catalogSearch = textinput.New()
 	return d
 }
 
-func TestShiftTabTogglesFocusBothWays(t *testing.T) {
+// The fixture yields two action sections: installed models (start +
+// delete for the downloaded model) and model tiers (every slot).
+// Downloads and processes are empty and must be skipped by tab.
+func TestTabWalksSections(t *testing.T) {
 	d := focusNavTestDashboard()
-	if d.focus != runtimeFocusCatalog {
-		t.Fatal("fixture should start on catalog")
+	starts := d.sectionStarts()
+	if len(starts) != 2 {
+		t.Fatalf("sectionStarts = %v, want [installed, tiers]", starts)
 	}
+	tab := tea.KeyPressMsg{Code: tea.KeyTab}
+
+	d.Update(tab) // catalog -> installed models
+	if d.focus != runtimeFocusActions || d.operationCursor != starts[0] {
+		t.Fatalf("after 1 tab: focus=%v cursor=%d, want actions@%d", d.focus, d.operationCursor, starts[0])
+	}
+	d.Update(tab) // -> model tiers
+	if d.operationCursor != starts[1] {
+		t.Fatalf("after 2 tabs: cursor=%d, want tiers start %d", d.operationCursor, starts[1])
+	}
+	if d.scrollOffset == 0 {
+		t.Fatal("tabbing into tiers should scroll the viewport down")
+	}
+	d.Update(tab) // wraps back to catalog
+	if d.focus != runtimeFocusCatalog {
+		t.Fatal("tab past the last section should return to the catalog")
+	}
+}
+
+func TestShiftTabWalksSectionsInReverse(t *testing.T) {
+	d := focusNavTestDashboard()
+	starts := d.sectionStarts()
 	shiftTab := tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
-	d.Update(shiftTab)
-	if d.focus != runtimeFocusActions {
-		t.Fatal("shift+tab should move catalog -> actions")
+
+	d.Update(shiftTab) // catalog wraps to the LAST section — model tiers
+	if d.focus != runtimeFocusActions || d.operationCursor != starts[len(starts)-1] {
+		t.Fatalf("shift+tab from catalog: focus=%v cursor=%d, want tiers start %d", d.focus, d.operationCursor, starts[len(starts)-1])
 	}
-	d.Update(shiftTab)
+	d.Update(shiftTab) // -> installed models
+	if d.operationCursor != starts[0] {
+		t.Fatalf("second shift+tab: cursor=%d, want %d", d.operationCursor, starts[0])
+	}
+	d.Update(shiftTab) // -> back out to catalog
 	if d.focus != runtimeFocusCatalog {
-		t.Fatal("shift+tab should move actions -> catalog")
+		t.Fatal("shift+tab past the first section should return to the catalog")
 	}
 }
 

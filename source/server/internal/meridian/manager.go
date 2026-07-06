@@ -146,7 +146,14 @@ func (m *Manager) Ensure(ctx context.Context, port int) {
 	m.lastPort = port
 	// Already managing this exact port and not in a terminal-fail state — nothing to do.
 	if m.status.Port == port &&
-		(m.status.State == StateStarting || m.status.State == StateReady || m.status.State == StateExternal) {
+		(m.status.State == StateStarting || m.status.State == StateReady) {
+		m.mu.Unlock()
+		return
+	}
+	// External adoption only holds while the external process is actually
+	// there. If it died, fall through and re-run the gates (which will now
+	// find the port free and spawn our own).
+	if m.status.Port == port && m.status.State == StateExternal && m.portUsedFn(port) {
 		m.mu.Unlock()
 		return
 	}
@@ -350,6 +357,15 @@ func realSpawn(ctx context.Context, port int, version string, logSink io.Writer)
 	cmd.Env = append(os.Environ(),
 		"CLAUDE_PROXY_PORT="+strconv.Itoa(port),
 		"CLAUDE_PROXY_HOST=127.0.0.1",
+		// Disable Meridian's auto-defer tool loading. Cercano presents 34 tools,
+		// which trips Meridian's default defer threshold (15) and pushes 28 of
+		// them behind the SDK's ToolSearch progressive-discovery path. That churn
+		// — per-turn `discovered=` cycling, re-discovery on every stale-session
+		// eviction — desynced turn correlation and forced the extra (4th) SDK
+		// turn. Loading all tools up front removes the churn; 34 small tools in
+		// the (prompt-cached) system prompt is a modest cost. Appended last so it
+		// wins over any inherited value. See docs/agent/meridian-opencode-route.md.
+		"MERIDIAN_DEFER_TOOL_THRESHOLD=0",
 	)
 	cmd.Stdout = logSink
 	cmd.Stderr = logSink

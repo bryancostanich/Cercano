@@ -808,7 +808,7 @@ func (wp *wizardPage) View() string {
 		b.WriteString("\n\n")
 		b.WriteString(wp.keyInput.View())
 		b.WriteString("\n\n")
-		b.WriteString(wp.styles.Dim.Render("enter save · esc back"))
+		b.WriteString(wp.styles.Muted.Render("enter save · esc back"))
 		if wp.status != "" {
 			b.WriteString("\n" + wp.styles.Warn.Render(wp.status))
 		}
@@ -837,12 +837,12 @@ func (wp *wizardPage) View() string {
 		}
 		b.WriteString(caret + padRight(r.Label, label, 28))
 		if r.Annotation != "" {
-			b.WriteString(wp.styles.Dim.Render(r.Annotation))
+			b.WriteString(wp.styles.Muted.Render(r.Annotation))
 		}
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(wp.styles.Dim.Render("↑/↓ move · enter select · esc back · q abandon"))
+	b.WriteString(wp.styles.Muted.Render("↑/↓ move · enter select · esc back · q abandon"))
 	if wp.status != "" {
 		b.WriteString("\n" + wp.styles.Warn.Render(wp.status))
 	}

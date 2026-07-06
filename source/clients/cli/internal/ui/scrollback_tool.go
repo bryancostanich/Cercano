@@ -49,7 +49,8 @@ type ToolEntry struct {
 	Status        ToolStatus
 	StartedAt     time.Time     // exec-start wall clock; result blurb times against it
 	Duration      time.Duration // exec-start → exec-complete; set at the same time ResultSummary is. Used to aggregate group timings.
-	Folded        bool          // V1: always true; reserved for future expand/collapse
+	Folded        bool          // one-line folded view vs. expanded args+result body
+	Loading       bool          // a lazy GetToolCall fetch for the expanded body is in flight
 }
 
 // renderToolEntry produces the scrollback text for one tool call.
@@ -199,6 +200,13 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 		first = rightAligned
 	}
 	body := []string{first}
+	// Lazy fetch in flight: show an animated spinner so the expand has feedback
+	// even if the store read stalls. The wall-clock spinner animates as long as
+	// the host keeps ticking (hasLoadingTool gates that).
+	if e.Loading {
+		body = append(body, toolEntryFaint.Render("    "+animateToolSpinner()+" loading…"))
+		return strings.Join(body, "\n")
+	}
 	if e.FullArgs != "" {
 		body = append(body, toolEntryFaint.Render("    args: "+e.FullArgs))
 	}
@@ -212,6 +220,11 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 		for _, l := range renderToolBody(e.FullResult, "", md, bw) {
 			body = append(body, "    "+l)
 		}
+	}
+	// Fetched but nothing recorded (or the fetch failed): say so rather than
+	// render a bare header with an empty body.
+	if e.FullArgs == "" && e.FullResult == "" {
+		body = append(body, toolEntryFaint.Render("    (no details)"))
 	}
 	return strings.Join(body, "\n")
 }

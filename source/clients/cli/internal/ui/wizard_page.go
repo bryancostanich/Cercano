@@ -1,8 +1,11 @@
 package ui
 
 import (
+	"context"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -35,6 +38,10 @@ type wizardPage struct {
 	recs          config.TierRecommendations
 	recsOK        bool
 	status        string
+	// applyFn commits the collected answers on finish; defaults to
+	// applyConfig, overridable in tests (agentclient.Client is a concrete
+	// gRPC type with nothing to fake).
+	applyFn func() error
 }
 
 // wizardTierPurpose is the per-tier "what is this for" line shown on the
@@ -63,8 +70,42 @@ func newWizardPage(ag *agentclient.Client, s theme.Styles, w, h int) *wizardPage
 	if st.Step == wizard.StepTiers {
 		wp.autofillTiers()
 	}
+	wp.applyFn = wp.applyConfig
 	wp.cursor = wp.defaultCursor()
 	return wp
+}
+
+// applyConfig pushes the collected answers to the agent: locus mode and
+// default provider in one sparse patch, then one patch per tier pick (the
+// UpdateConfig taxonomy patch takes a single key per call). Synchronous by
+// design — a handful of local RPCs on a once-per-setup action.
+func (wp *wizardPage) applyConfig() error {
+	if wp.agent == nil {
+		return fmt.Errorf("no agent connection")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := wp.agent.UpdateConfig(ctx, agentclient.ConfigUpdate{
+		LocusMode:      wp.state.LocusMode,
+		ModelTierKey:   "default_provider",
+		ModelTierValue: wp.state.PrimarySide,
+	}); err != nil {
+		return err
+	}
+	keys := make([]string, 0, len(wp.state.TierPicks))
+	for k := range wp.state.TierPicks {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if _, err := wp.agent.UpdateConfig(ctx, agentclient.ConfigUpdate{
+			ModelTierKey:   k,
+			ModelTierValue: wp.state.TierPicks[k],
+		}); err != nil {
+			return fmt.Errorf("%s: %w", k, err)
+		}
+	}
+	return nil
 }
 
 func (wp *wizardPage) ID() contentPageID { return contentPageWizard }
@@ -131,7 +172,7 @@ func (wp *wizardPage) rows() []wizardRow {
 		rows = append(rows, wizardRow{Key: "continue", Label: "continue", Annotation: "accept these models"})
 		return rows
 	case wizard.StepDone:
-		return []wizardRow{{Key: "finish", Label: "finish", Annotation: "save and close (config apply lands in a later slice)"}}
+		return []wizardRow{{Key: "finish", Label: "finish", Annotation: "apply these settings and close"}}
 	}
 	return nil
 }
@@ -305,8 +346,13 @@ func (wp *wizardPage) selectRow() (closed bool) {
 		}
 		wp.status = "per-slot model picker lands in a later slice — continue accepts the shown models"
 	case wizard.StepDone:
+		if err := wp.applyFn(); err != nil {
+			// State stays persisted: enter retries, esc walks back.
+			wp.status = "apply failed: " + err.Error()
+			return false
+		}
 		if err := wizard.Clear(); err != nil {
-			wp.status = "could not clear wizard state: " + err.Error()
+			wp.status = "applied, but could not clear wizard state: " + err.Error()
 			return false
 		}
 		return true
@@ -399,7 +445,8 @@ func (wp *wizardPage) summary() string {
 	b.WriteString("Setup complete:\n")
 	fmt.Fprintf(&b, "  primary:  %s\n", wp.state.PrimarySide)
 	if wp.state.CloudProvider != "" {
-		fmt.Fprintf(&b, "  cloud:    %s (%s)\n", wp.state.CloudProvider, wp.state.AuthMethod)
+		fmt.Fprintf(&b, "  cloud:    %s (%s) — credentials not collected yet; use /cloud key for now\n",
+			wp.state.CloudProvider, wp.state.AuthMethod)
 	}
 	fmt.Fprintf(&b, "  locus:    %s\n", wp.state.LocusMode)
 	for _, t := range wizardTierOrder {

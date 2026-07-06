@@ -60,6 +60,17 @@ type chatView struct {
 	// bannerEpoch is the shimmer start time for the scrollback banner entry,
 	// handed off from the splash AnimModel so the sweep phase is continuous.
 	bannerEpoch time.Time
+	// resizeAnchor is the distance-from-bottom captured by SetSize before the
+	// dimensions change. SetEntries consumes it so reflow restores the same
+	// visual anchor (the line at the viewport's bottom stays at the bottom)
+	// instead of preserving the raw YOffset, which drifts on reflow.
+	resizeAnchor    int
+	hasResizeAnchor bool
+	// vpH is the viewport height as last set by SetSize. charm.land/bubbles/v2's
+	// Height() getter returns 0 until SetHeight() is called (WithHeight in the
+	// constructor does not seed it), so we track the value ourselves so SetSize
+	// can compute the correct resize anchor before calling SetHeight.
+	vpH int
 
 	turn turnStatus
 	// streaming mirrors the host's m.streaming so the chat can render a
@@ -105,6 +116,7 @@ func newChatView(styles theme.Styles, palette theme.Palette, root, home string, 
 		home:           home,
 		md:             render.NewMarkdown(theme.MarkdownStyle(palette)),
 		vp:             viewport.New(viewport.WithWidth(vpWidth), viewport.WithHeight(vpHeight)),
+		vpH:            vpHeight,
 		focusedToolIdx: -1,
 		groupExpanded:  map[int]bool{},
 	}
@@ -483,16 +495,23 @@ func (c *chatView) ClearQueue() { c.queued = nil }
 
 // SetSize resizes the underlying viewport. Call from relayout.
 func (c *chatView) SetSize(w, h int) {
-	// Sample before changing dimensions: shrinking height moves maxYOffset up,
-	// so the old YOffset may no longer satisfy AtBottom() even though the user
-	// was genuinely at the bottom. Re-anchor after the resize so SetEntries'
-	// wasAtBottom check sees the correct state.
-	atBottom := c.vp.AtBottom()
+	// Capture distance-from-bottom relative to OLD height before the dimensions
+	// change. SetEntries consumes the pending anchor and restores the visual
+	// position after reflow, so the line at the viewport's bottom stays there.
+	oldTotal := c.TotalLineCount()
+	oldOffset := c.YOffset()
+	// Use c.vpH (manually tracked) rather than c.vp.Height(): in
+	// charm.land/bubbles/v2 the Height() getter returns 0 until SetHeight() is
+	// called, so the constructor's WithHeight option doesn't seed it.
+	d := oldTotal - oldOffset - c.vpH
+	if d < 0 {
+		d = 0
+	}
+	c.resizeAnchor = d
+	c.hasResizeAnchor = true
 	c.vp.SetWidth(w)
 	c.vp.SetHeight(h)
-	if atBottom {
-		c.vp.GotoBottom()
-	}
+	c.vpH = h
 }
 
 // ── tool-entry navigation ──────────────────────────────────────────────────
@@ -764,7 +783,17 @@ func (c *chatView) SetEntries(entries []*Entry) {
 	content := b.String()
 	c.plainLines = plainLines(content)
 	c.vp.SetContent(content)
-	if wasAtBottom {
+	if c.hasResizeAnchor {
+		// Resize reflow: restore the same distance-from-bottom in the newly
+		// wrapped content so the line that was at the viewport's bottom stays
+		// there regardless of whether height grew or shrank.
+		c.hasResizeAnchor = false
+		newOffset := c.TotalLineCount() - c.Height() - c.resizeAnchor
+		if newOffset < 0 {
+			newOffset = 0
+		}
+		c.vp.SetYOffset(newOffset)
+	} else if wasAtBottom {
 		c.vp.GotoBottom()
 	}
 }

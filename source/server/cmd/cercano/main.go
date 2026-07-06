@@ -487,19 +487,32 @@ func buildRuntimeManager(cfg config.Config) localruntime.Manager {
 		})
 		return manager
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
-	defer cancel()
-	if _, err := manager.Start(ctx, localruntime.StartRequest{
-		Runtime: "llama_server",
-		ModelID: cfg.LlamaServer.DefaultModel,
-	}); err != nil {
-		manager.WriteLog(localruntime.LogEntry{
-			Source:  "cercano.runtime.llama_server",
-			Level:   "error",
-			Message: "failed to start llama-server: " + err.Error(),
-		})
-	}
+	startDefaultRuntimeAsync(manager, cfg.LlamaServer.DefaultModel)
 	return manager
+}
+
+// startDefaultRuntimeAsync warms the llama-server default model in the
+// background. The warm-up must not run synchronously in startGRPCServer: a
+// multi-gigabyte GGUF load takes far longer than the CLI's 8-second
+// auto-launch window, and a blocked warm-up holds the gRPC port unbound the
+// whole time. Requests that arrive before the model is ready fail with the
+// runtime's not-ready error; readiness surfaces through the runtime-status
+// event stream like every other runtime state change.
+func startDefaultRuntimeAsync(manager localruntime.Manager, modelID string) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
+		defer cancel()
+		if _, err := manager.Start(ctx, localruntime.StartRequest{
+			Runtime: "llama_server",
+			ModelID: modelID,
+		}); err != nil {
+			manager.WriteLog(localruntime.LogEntry{
+				Source:  "cercano.runtime.llama_server",
+				Level:   "error",
+				Message: "failed to start llama-server: " + err.Error(),
+			})
+		}
+	}()
 }
 
 // sweepStalePartials removes .part files older than a week from the

@@ -1,0 +1,40 @@
+# Setup-wizard tier autofill: ordered candidate model IDs per tier, best
+# first. The wizard suggests the first candidate; for github-copilot it
+# suggests the first candidate present in the live catalog (which varies by
+# subscription plan). Editing this file is a data change — no code updates
+# needed. Cloud keys match the CLI's cloud preset IDs.
+# See docs/features/setup-wizard/README.md.
+version: 1
+
+cloud:
+  anthropic:
+    most_capable: [claude-fable-5, claude-opus-4-8]
+    everyday: [claude-sonnet-5]
+    fast_light: [claude-haiku-4-5-20251001]
+    fast_light_text: [claude-haiku-4-5-20251001]
+  openai:
+    most_capable: [gpt-5.5, gpt-5.3-codex]
+    everyday: [gpt-5.4]
+    fast_light: [gpt-5.4-mini]
+    fast_light_text: [gpt-5.4-mini]
+  gemini:
+    most_capable: [gemini-2.5-pro]
+    everyday: [gemini-2.5-flash]
+    fast_light: [gemini-2.5-flash-lite]
+    fast_light_text: [gemini-2.5-flash-lite]
+  github-copilot:
+    most_capable: [claude-fable-5, gpt-5.5]
+    everyday: [claude-sonnet-5, gpt-5.4]
+    fast_light: [gpt-5.4-mini, claude-haiku-4-5-20251001]
+    fast_light_text: [claude-haiku-4-5-20251001, gpt-5.4-mini]
+  groq:
+    most_capable: [llama-3.3-70b-versatile]
+    everyday: [llama-3.3-70b-versatile]
+    fast_light: [llama-3.1-8b-instant]
+    fast_light_text: [llama-3.1-8b-instant]
+
+open:
+  most_capable: [qwen3-coder]
+  everyday: ["qwen2.5-coder:7b"]
+  fast_light: ["qwen2.5-coder:1.5b"]
+  fast_light_text: [phi4]

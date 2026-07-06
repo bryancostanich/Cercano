@@ -196,6 +196,7 @@ func main() {
 	type tellResult struct {
 		Name       string `json:"name"`
 		Fabricated bool   `json:"fabricated"`
+		InSource   bool   `json:"in_source"`
 	}
 	var anchorResults []anchorResult
 	var tellResults []tellResult
@@ -211,14 +212,33 @@ func main() {
 		anchorResults = append(anchorResults, anchorResult{Name: a, Hit: hit})
 		fmt.Fprintf(hout, "%-8s  %-40s  %s\n", "anchor", a, mark)
 	}
+	// A fabrication tell is only valid if the phrase does NOT occur in the
+	// window's source turns: a summary that quotes genuine source text must
+	// never fail the audition for it. Tells found in the source are reported
+	// but excluded from pass/fail scoring.
+	var srcText strings.Builder
+	for _, t := range turns {
+		srcText.WriteString(strings.ToLower(t.Content))
+		srcText.WriteString("\n")
+		srcText.WriteString(strings.ToLower(t.BlocksJSON))
+		srcText.WriteString("\n")
+	}
+	source := srcText.String()
 	for _, t := range splitCSV(*tells) {
+		inSource := strings.Contains(source, strings.ToLower(t))
 		fab := strings.Contains(summary, strings.ToLower(t))
 		mark := "clean"
-		if fab {
+		switch {
+		case inSource && fab:
+			mark = "in-source (quoted from window; not counted)"
+			fab = false
+		case inSource:
+			mark = "in-source (invalid tell for this window)"
+		case fab:
 			mark = "FABRICATED"
 			pass = false
 		}
-		tellResults = append(tellResults, tellResult{Name: t, Fabricated: fab})
+		tellResults = append(tellResults, tellResult{Name: t, Fabricated: fab, InSource: inSource})
 		fmt.Fprintf(hout, "%-8s  %-40s  %s\n", "tell", t, mark)
 	}
 	if *jsonOut {

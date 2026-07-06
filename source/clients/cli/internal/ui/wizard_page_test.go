@@ -43,7 +43,8 @@ func TestWizardCloudPathEndToEnd(t *testing.T) {
 	if wp.state.CloudProvider != "anthropic" {
 		t.Fatalf("provider: want anthropic, got %s", wp.state.CloudProvider)
 	}
-	// Phase 2: pick meridian.
+	// Phase 2: pick meridian (commits the profile eagerly; stub it).
+	wp.commitMeridianFn = func() error { return nil }
 	press(t, wp, tea.KeyEnter)
 	if wp.state.Step != wizard.StepLocus {
 		t.Fatalf("after cloud: want %s, got %s", wizard.StepLocus, wp.state.Step)
@@ -226,6 +227,98 @@ func TestWizardPickerEscClosesWithoutChange(t *testing.T) {
 	}
 	if wp.state.Step != wizard.StepTiers {
 		t.Errorf("esc: page must stay on tiers, got %s", wp.state.Step)
+	}
+}
+
+func TestWizardAPIKeyFlow(t *testing.T) {
+	wp := newTestWizardPage(t)
+	press(t, wp, tea.KeyDown)
+	press(t, wp, tea.KeyEnter) // cloud
+	press(t, wp, tea.KeyDown)
+	press(t, wp, tea.KeyEnter) // openai (second preset row)
+	if wp.state.CloudProvider != "openai" {
+		t.Fatalf("provider: want openai, got %s", wp.state.CloudProvider)
+	}
+	press(t, wp, tea.KeyDown)
+	press(t, wp, tea.KeyEnter) // api_key (second auth row)
+	if !wp.keyEntry {
+		t.Fatal("api_key: want key prompt open")
+	}
+
+	// Empty key: prompt, no commit.
+	press(t, wp, tea.KeyEnter)
+	if !strings.Contains(wp.status, "enter a key") {
+		t.Errorf("empty key: status %q", wp.status)
+	}
+
+	// Failing commit keeps the prompt.
+	wp.commitKeyFn = func(string) error { return fmt.Errorf("boom") }
+	wp.keyInput.SetValue("sk-test-123")
+	press(t, wp, tea.KeyEnter)
+	if !wp.keyEntry || !strings.Contains(wp.status, "key setup failed") {
+		t.Fatalf("failed commit: want prompt kept + error status, got keyEntry=%v status=%q", wp.keyEntry, wp.status)
+	}
+
+	// Successful commit records the key agent-side and advances.
+	var got string
+	wp.commitKeyFn = func(k string) error { got = k; return nil }
+	press(t, wp, tea.KeyEnter)
+	if got != "sk-test-123" {
+		t.Errorf("commit: want key passed through, got %q", got)
+	}
+	if wp.state.Step != wizard.StepLocus {
+		t.Fatalf("after key: want %s, got %s", wizard.StepLocus, wp.state.Step)
+	}
+
+	// The key must never be persisted in wizard state.
+	st, ok := wizard.Load()
+	if !ok {
+		t.Fatal("want persisted state")
+	}
+	if strings.Contains(fmt.Sprintf("%+v", st), "sk-test-123") {
+		t.Error("resume state must not contain the API key")
+	}
+}
+
+func TestWizardKeyEntryEscReturnsToAuthPick(t *testing.T) {
+	wp := newTestWizardPage(t)
+	press(t, wp, tea.KeyDown)
+	press(t, wp, tea.KeyEnter) // cloud
+	press(t, wp, tea.KeyEnter) // anthropic
+	press(t, wp, tea.KeyDown)
+	press(t, wp, tea.KeyEnter) // api_key
+	if !wp.keyEntry {
+		t.Fatal("want key prompt")
+	}
+	press(t, wp, tea.KeyEscape)
+	if wp.keyEntry {
+		t.Fatal("esc: want prompt closed")
+	}
+	if !wp.authPick {
+		t.Fatal("esc: want auth-method screen back")
+	}
+}
+
+func TestWizardMeridianCommit(t *testing.T) {
+	wp := newTestWizardPage(t)
+	press(t, wp, tea.KeyDown)
+	press(t, wp, tea.KeyEnter) // cloud
+	press(t, wp, tea.KeyEnter) // anthropic
+
+	wp.commitMeridianFn = func() error { return fmt.Errorf("proxy down") }
+	press(t, wp, tea.KeyEnter) // meridian (first auth row)
+	if wp.state.Step != wizard.StepCloud || !strings.Contains(wp.status, "meridian setup failed") {
+		t.Fatalf("failed meridian: want stay on cloud + error, got step=%s status=%q", wp.state.Step, wp.status)
+	}
+
+	called := false
+	wp.commitMeridianFn = func() error { called = true; return nil }
+	press(t, wp, tea.KeyEnter)
+	if !called {
+		t.Error("meridian: commit not called")
+	}
+	if wp.state.Step != wizard.StepLocus {
+		t.Fatalf("after meridian: want %s, got %s", wizard.StepLocus, wp.state.Step)
 	}
 }
 

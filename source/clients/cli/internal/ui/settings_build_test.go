@@ -25,7 +25,7 @@ func TestBuildSettingsSectionsCoversKeys(t *testing.T) {
 		}
 	}
 	// "Cloud" section is removed; "Cloud Providers" is now built by buildCloudSection.
-	for _, want := range []string{"Open Model", "Routing", "Permissions", "Server"} {
+	for _, want := range []string{"Routing", "Permissions", "Server"} {
 		if !titles[want] {
 			t.Errorf("missing section %q", want)
 		}
@@ -33,8 +33,10 @@ func TestBuildSettingsSectionsCoversKeys(t *testing.T) {
 	if titles["Cloud"] {
 		t.Errorf("legacy \"Cloud\" section should not exist in buildSettingsSections output")
 	}
+	if titles["Open Model"] {
+		t.Errorf("\"Open Model\" section should not exist in buildSettingsSections output")
+	}
 	for _, want := range []string{
-		"local-runtime", "local-model", "ollama-url", "embedding-model",
 		"locus-mode", "permission-mode", "port",
 	} {
 		if !keys[want] {

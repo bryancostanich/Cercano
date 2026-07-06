@@ -166,8 +166,10 @@ func (d *runtimeDashboard) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		next, cmd, closed := d.tierPicker.Update(msg, d.styles)
 		if closed {
 			d.tierPicker = nil
-			// Refresh so the tiers section reflects a just-applied change.
-			return d.refreshSnapshot(), false
+			// Refresh so the tiers section reflects a just-applied change;
+			// batch the picker's own cmd so a switch bubbling up (e.g. the
+			// open-runtime install modal) isn't dropped.
+			return tea.Batch(cmd, d.refreshSnapshot()), false
 		}
 		d.tierPicker = &next
 		return cmd, false
@@ -244,6 +246,7 @@ func (d *runtimeDashboard) fullContent() (string, int) {
 	// Action blocks render one at a time so renderActionBlock can
 	// translate its block-local selected row into an absolute line.
 	for _, render := range []func() string{
+		d.renderOpenModelBlock,
 		d.renderDownloadsBlock,
 		d.renderInstalledModelsBlock,
 		d.renderProcessesBlock,
@@ -355,6 +358,7 @@ func (d *runtimeDashboard) hasActiveDownloads() bool {
 // actionable rows. Must enumerate in the same order as operationRows.
 func (d *runtimeDashboard) sectionStarts() []int {
 	blocks := [][]runtimeDashboardActionRow{
+		openModelRows(d.snapshot.Config),
 		d.downloadRows(),
 		d.installedModelRows(),
 		d.processRows(),
@@ -470,8 +474,18 @@ func (d *runtimeDashboard) updateOperations(msg tea.KeyPressMsg) (tea.Cmd, bool)
 		}
 		d.operationCursor = clampIndex(d.operationCursor, len(actions))
 		action := actions[d.operationCursor]
-		if action.Kind == runtimeActionTierPick {
+		switch action.Kind {
+		case runtimeActionTierPick:
 			d.openTierPicker(action.TierKey)
+			return nil, false
+		case runtimeActionOpenRuntimePick:
+			d.openRuntimePicker()
+			return nil, false
+		case runtimeActionOpenModelPick:
+			d.openOpenModelPicker()
+			return nil, false
+		case runtimeActionOllamaURL:
+			d.openOllamaURLPicker()
 			return nil, false
 		}
 		d.actionMessage = runtimeDashboardPendingStatus(action)
@@ -961,10 +975,7 @@ func localConfigFields(s runtimeDashboardSnapshot) []runtimeDashboardField {
 		return []runtimeDashboardField{{Label: "config", Value: "unavailable"}}
 	}
 	return []runtimeDashboardField{
-		{Label: "runtime", Value: firstNonEmpty(cfg.OpenRuntime, "ollama")},
-		{Label: "chat model", Value: cfg.OpenModel},
 		{Label: "embedding", Value: cfg.EmbeddingModel},
-		{Label: "ollama URL", Value: cfg.OllamaURL},
 		{Label: "llama-server", Value: localServerSummary(s.Status, cfg.OpenRuntime)},
 	}
 }
@@ -1266,6 +1277,10 @@ func (d *runtimeDashboard) renderTiersBlock() string {
 	return d.renderActionBlock("model tiers", tierRows(d.snapshot.Config))
 }
 
+func (d *runtimeDashboard) renderOpenModelBlock() string {
+	return d.renderActionBlock("open model", openModelRows(d.snapshot.Config))
+}
+
 func (d *runtimeDashboard) renderActionBlock(title string, rows []runtimeDashboardActionRow) string {
 	totalW := dashboardPanelWidth(d.width)
 	contentW := dashboardBlockContentWidth(totalW)
@@ -1346,11 +1361,12 @@ func actionColumnWidths(width int) (labelW, valueW, hintW int) {
 
 func (d *runtimeDashboard) operationRows() []runtimeDashboardActionRow {
 	var rows []runtimeDashboardActionRow
+	rows = append(rows, openModelRows(d.snapshot.Config)...)
 	rows = append(rows, d.downloadRows()...)
 	rows = append(rows, d.installedModelRows()...)
 	rows = append(rows, d.processRows()...)
-	// Tier rows come last; keep this order in sync with fullContent's block
-	// order so cursor index → action mapping stays consistent.
+	// Keep this order in sync with fullContent's block order so cursor
+	// index → action mapping stays consistent.
 	rows = append(rows, tierRows(d.snapshot.Config)...)
 	return rows
 }

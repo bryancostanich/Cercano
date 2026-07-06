@@ -47,7 +47,7 @@ func TestSettingsPageViewRenders(t *testing.T) {
 	sp := &settingsPage{palette: p, styles: s, width: 100, height: 40}
 	sp.form = form.New(buildSettingsSections(&agentclient.Config{OpenModel: "qwen", Port: "50052"}, "permissive", "palette:accent"))
 	out := sp.View()
-	if !strings.Contains(out, "Open Model") || !strings.Contains(out, "permission-mode") {
+	if !strings.Contains(out, "Routing") || !strings.Contains(out, "permission-mode") {
 		t.Fatalf("settings View missing content:\n%s", out)
 	}
 }

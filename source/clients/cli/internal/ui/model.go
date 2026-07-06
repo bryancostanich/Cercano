@@ -159,6 +159,7 @@ type Model struct {
 	wdRef *struct{ dir string }
 
 	openHistoryOnStart bool // -r flag → open the history picker after first WindowSizeMsg
+	openWizardOnStart  bool // -s/-setup, first run, or wizard resume → open the setup wizard after first WindowSizeMsg
 
 	// promptBorderColor is the color of the lines immediately above and
 	// below the input row. Defaults to the palette's accent (lime). /color
@@ -326,6 +327,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	slash.RegisterContextView(reg)
 	slash.RegisterDev(reg)
 	slash.RegisterSettings(reg)
+	slash.RegisterSetup(reg)
 	slash.RegisterTheme(reg)
 
 	splash := banner.NewAnimModel(p, banner.Meta{
@@ -379,6 +381,15 @@ func newConvID() string {
 // the rendered doc is visible immediately. No agent round-trip occurs.
 func (m Model) SeedAssistantMarkdown(doc string) Model {
 	m.chat.AppendEntry(&Entry{Role: RoleAssistant, Content: doc})
+	m.splashShown = false
+	return m
+}
+
+// OpenWizardOnStart marks the setup wizard page to open on the first sized
+// frame (used by -s / -setup, first run, and wizard resume). Chainable like
+// SeedAssistantMarkdown; splash handling mirrors openHistoryOnStart.
+func (m Model) OpenWizardOnStart() Model {
+	m.openWizardOnStart = true
 	m.splashShown = false
 	return m
 }
@@ -690,6 +701,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openHistoryOnStart = false
 			hv, _ := newHistoryView(m.agent, m.palette, m.styles, m.width, m.height)
 			m.content = hv
+		}
+		// -s boot / first run / wizard resume: the wizard page wins when
+		// both flags are set — setup is the more urgent state.
+		if m.openWizardOnStart && m.width > 0 {
+			m.openWizardOnStart = false
+			m.content = newWizardPage(m.agent, m.styles, m.width, m.height)
 		}
 		// Force a full alt-screen redraw on resize. Without ClearScreen,
 		// rows in the terminal that were occupied at the OLD size but not
@@ -1867,6 +1884,8 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		cv, cmd := newContextView(m.agent, m.palette, m.styles, m.convID, m.width, m.height)
 		m.content = cv
 		return m, tea.Batch(cmd, contextRefreshTick())
+	case slash.ResultOpenWizard:
+		m.content = newWizardPage(m.agent, m.styles, m.width, m.height)
 	case slash.ResultRegenContext:
 		if m.convID == "" {
 			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "no conversation yet — nothing to rebuild"})

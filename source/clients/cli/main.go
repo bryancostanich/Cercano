@@ -16,6 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	cliui "cercano/source/clients/cli/internal/ui"
+	"cercano/source/clients/cli/internal/wizard"
 	"cercano/source/server/pkg/agentclient"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/update"
@@ -33,6 +34,8 @@ func init() {
 func main() {
 	resumeShort := flag.Bool("r", false, "Open the conversation history picker on launch (alias for --resume)")
 	resumeLong := flag.Bool("resume", false, "Open the conversation history picker on launch")
+	setupShort := flag.Bool("s", false, "Open the setup wizard on launch (alias for --setup)")
+	setupLong := flag.Bool("setup", false, "Open the setup wizard on launch")
 	mdtest := flag.Bool("mdtest", false, "Launch the TUI with a markdown doc pre-loaded for render testing (optional file path as a positional arg; built-in sample if omitted)")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
@@ -60,20 +63,31 @@ func main() {
 	}
 
 	openHistory := *resumeShort || *resumeLong
+	// The wizard opens on explicit request, on first run (no config file
+	// yet), or when a previous run was left unfinished (resume).
+	openWizard := *setupShort || *setupLong
+	if !openWizard {
+		if _, statErr := os.Stat(config.DefaultPath()); os.IsNotExist(statErr) {
+			openWizard = true
+		}
+	}
+	if !openWizard {
+		_, openWizard = wizard.Load()
+	}
 	seedDoc := ""
 	if *mdtest {
 		// Render-testing mode: launch the TUI with a markdown doc pre-loaded.
 		// No model round-trip — the doc renders through the normal viewport path.
 		seedDoc = loadMdTestDoc(flag.Arg(0))
 	}
-	runCLI(cfg, openHistory, seedDoc)
+	runCLI(cfg, openHistory, openWizard, seedDoc)
 }
 
 // runCLI launches the cercano TUI. Connects to a running agent on
 // localhost:<cfg.Port>, or auto-launches one (as `cercano agent`) on miss.
 // openHistoryOnStart opens the /history picker immediately after first paint
 // (used by the -r / --resume flag).
-func runCLI(cfg config.Config, openHistoryOnStart bool, seedDoc string) {
+func runCLI(cfg config.Config, openHistoryOnStart, openWizardOnStart bool, seedDoc string) {
 	addr := "localhost:" + cfg.Port
 	fmt.Fprintln(os.Stderr, "cercano: connecting to", addr+"…")
 	ag, err := agentclient.Dial(context.Background(), addr)
@@ -87,6 +101,9 @@ func runCLI(cfg config.Config, openHistoryOnStart bool, seedDoc string) {
 	}
 
 	m := cliui.New(ag, openHistoryOnStart)
+	if openWizardOnStart {
+		m = m.OpenWizardOnStart()
+	}
 	if seedDoc != "" {
 		m = m.SeedAssistantMarkdown(seedDoc)
 	}

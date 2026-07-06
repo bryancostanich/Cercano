@@ -893,7 +893,7 @@ func (wp *wizardPage) View() string {
 		}
 		b.WriteString(caret + padRight(r.Label, label, 28))
 		if r.Annotation != "" {
-			b.WriteString(wp.styles.Muted.Render(r.Annotation))
+			b.WriteString(wp.styles.Info.Render(r.Annotation))
 		}
 		b.WriteString("\n")
 	}

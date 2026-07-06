@@ -526,12 +526,18 @@ func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudP
 	}
 	np := config.CloudProfile{
 		Name: name, Flavor: req.GetFlavor(), Backend: req.GetBackend(),
-		BaseURL: req.GetBaseUrl(), Model: req.GetModel(),
+		BaseURL: req.GetBaseUrl(), Model: req.GetModel(), Route: req.GetRoute(),
 	}
 	s.cfgMu.Lock()
 	replaced := false
 	for i, p := range s.currentConfig.CloudProfiles {
 		if p.Name == name {
+			// An empty route means "unspecified": keep the existing profile's
+			// route so metadata edits from clients that don't know about routes
+			// can't silently demote a meridian profile to direct.
+			if np.Route == "" {
+				np.Route = p.Route
+			}
 			s.currentConfig.CloudProfiles[i] = np
 			replaced = true
 			break

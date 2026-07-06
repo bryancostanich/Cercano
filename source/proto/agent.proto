@@ -991,6 +991,7 @@ message UpsertCloudProfileRequest {
   string backend = 3;
   string base_url = 4;
   string model = 5;
+  string route = 6; // direct (default) | meridian | ccr (future); empty preserves an existing profile's route
 }
 message UpsertCloudProfileResponse { bool ok = 1; string error = 2; }
 message RemoveCloudProfileRequest  { string name = 1; }

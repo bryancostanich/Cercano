@@ -286,6 +286,51 @@ func TestUpsertCloudProfileCreatesAndUpdates(t *testing.T) {
 	}
 }
 
+func TestUpsertCloudProfileRoute(t *testing.T) {
+	s, _ := newTestServer()
+	// Create a meridian-routed profile (the setup wizard's meridian path).
+	resp, err := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{
+		Name: "anthropic", Flavor: "messages", BaseUrl: "http://127.0.0.1:3456", Route: "meridian",
+	})
+	if err != nil {
+		t.Fatalf("UpsertCloudProfile: %v", err)
+	}
+	if !resp.Ok {
+		t.Fatalf("want Ok, got error: %s", resp.Error)
+	}
+	p, ok := profileByName(s.currentConfig.CloudProfiles, "anthropic")
+	if !ok {
+		t.Fatal("profile anthropic was not added")
+	}
+	if p.Route != "meridian" {
+		t.Fatalf("route dropped on create: %+v", p)
+	}
+	// A metadata update that omits route must preserve the existing one —
+	// clients that don't know about routes can't demote meridian to direct.
+	if _, err := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{
+		Name: "anthropic", Flavor: "messages", BaseUrl: "http://127.0.0.1:3456", Model: "claude-fable-5",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	p2, _ := profileByName(s.currentConfig.CloudProfiles, "anthropic")
+	if p2.Route != "meridian" {
+		t.Fatalf("route lost on routeless update: %+v", p2)
+	}
+	if p2.Model != "claude-fable-5" {
+		t.Fatalf("update did not apply: %+v", p2)
+	}
+	// An explicit route replaces the existing one.
+	if _, err := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{
+		Name: "anthropic", Flavor: "messages", BaseUrl: "", Route: "direct",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	p3, _ := profileByName(s.currentConfig.CloudProfiles, "anthropic")
+	if p3.Route != "direct" {
+		t.Fatalf("explicit route not applied: %+v", p3)
+	}
+}
+
 func TestUpsertCloudProfileRebuildsActiveProvider(t *testing.T) {
 	s, _ := newTestServer()
 	// Set a key so rebuildCloud can succeed for the messages flavor.

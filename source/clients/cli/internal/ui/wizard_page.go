@@ -760,11 +760,12 @@ func (wp *wizardPage) tierPickerCandidates(slotKey string) []overlay.Row {
 	var rows []overlay.Row
 	seen := map[string]bool{}
 	for _, m := range wp.recs.Candidates(side, wp.state.CloudProvider, config.Tier(tierName)) {
-		hint := currentHint(m, current)
-		if hint == "" {
-			hint = "recommended"
-		}
-		rows = append(rows, overlay.Row{Key: m, Label: m, Value: m, Hint: hint})
+		rows = append(rows, overlay.Row{
+			Key:      m,
+			Label:    normalizeModelLabel(m),
+			Selected: m == current,
+			Hint:     "recommended",
+		})
 		seen[m] = true
 	}
 	if wp.agent != nil {
@@ -776,7 +777,12 @@ func (wp *wizardPage) tierPickerCandidates(slotKey string) []overlay.Row {
 					if seen[m.ID] {
 						continue
 					}
-					rows = append(rows, overlay.Row{Key: m.ID, Label: firstNonEmpty(m.DisplayName, m.ID), Value: firstNonEmpty(m.Runtime, "llama-server"), Hint: currentHint(m.ID, current)})
+					rows = append(rows, overlay.Row{
+						Key:      m.ID,
+						Label:    normalizeModelLabel(firstNonEmpty(m.DisplayName, m.ID)),
+						Value:    firstNonEmpty(m.Runtime, "llama-server"),
+						Selected: m.ID == current,
+					})
 					seen[m.ID] = true
 				}
 			}
@@ -786,14 +792,38 @@ func (wp *wizardPage) tierPickerCandidates(slotKey string) []overlay.Row {
 					if seen[m.ID] {
 						continue
 					}
-					rows = append(rows, overlay.Row{Key: m.ID, Label: firstNonEmpty(m.DisplayName, m.ID), Value: m.ID, Hint: currentHint(m.ID, current)})
+					rows = append(rows, overlay.Row{
+						Key:      m.ID,
+						Label:    normalizeModelLabel(firstNonEmpty(m.DisplayName, m.ID)),
+						Value:    m.ID,
+						Selected: m.ID == current,
+					})
 					seen[m.ID] = true
 				}
 			}
 		}
 	}
-	rows = append(rows, overlay.Row{Key: "-", Label: "(clear)", Value: "unset this slot"})
+	rows = append(rows, overlay.Row{Key: "-", Label: "clear", Value: "unset this slot", Selected: current == ""})
 	return rows
+}
+
+// normalizeModelLabel strips trailing -YYYYMMDD version suffixes from model IDs
+// for display. The raw ID is preserved as Row.Key so the server receives the
+// canonical form (e.g. "claude-haiku-4-5-20251001" → label "claude-haiku-4-5").
+func normalizeModelLabel(id string) string {
+	if len(id) >= 9 && id[len(id)-9] == '-' {
+		digits := true
+		for _, c := range id[len(id)-8:] {
+			if c < '0' || c > '9' {
+				digits = false
+				break
+			}
+		}
+		if digits {
+			return id[:len(id)-9]
+		}
+	}
+	return id
 }
 
 func (wp *wizardPage) View() string {

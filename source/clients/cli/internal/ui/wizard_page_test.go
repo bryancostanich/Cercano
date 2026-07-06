@@ -178,8 +178,8 @@ func TestWizardTierPickerRecordsPick(t *testing.T) {
 	if len(rows) < 2 {
 		t.Fatalf("picker: want recommendation + clear rows, got %d", len(rows))
 	}
-	if rows[0].Hint != "current" {
-		t.Errorf("first candidate: want hint current (autofilled), got %q", rows[0].Hint)
+	if !rows[0].Selected {
+		t.Errorf("first candidate: want Selected=true (autofilled pick), got false; hint=%q", rows[0].Hint)
 	}
 	if rows[len(rows)-1].Key != "-" {
 		t.Errorf("last row: want clear row, got %q", rows[len(rows)-1].Key)

@@ -706,7 +706,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// both flags are set — setup is the more urgent state.
 		if m.openWizardOnStart && m.width > 0 {
 			m.openWizardOnStart = false
-			m.content = newWizardPage(m.agent, m.styles, m.width, m.height)
+			m.content = newWizardPage(m.agent, m.palette, m.styles, m.width, m.height)
 		}
 		// Force a full alt-screen redraw on resize. Without ClearScreen,
 		// rows in the terminal that were occupied at the OLD size but not
@@ -1885,7 +1885,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.content = cv
 		return m, tea.Batch(cmd, contextRefreshTick())
 	case slash.ResultOpenWizard:
-		m.content = newWizardPage(m.agent, m.styles, m.width, m.height)
+		m.content = newWizardPage(m.agent, m.palette, m.styles, m.width, m.height)
 	case slash.ResultRegenContext:
 		if m.convID == "" {
 			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "no conversation yet — nothing to rebuild"})

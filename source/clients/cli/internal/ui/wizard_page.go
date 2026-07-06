@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"cercano/source/clients/cli/internal/overlay"
 	"cercano/source/clients/cli/internal/theme"
 	"cercano/source/clients/cli/internal/wizard"
 	"cercano/source/server/pkg/agentclient"
@@ -30,14 +31,18 @@ type wizardRow struct {
 // and resume persistence; this type owns rendering and key handling only.
 type wizardPage struct {
 	width, height int
+	palette       theme.Palette
 	styles        theme.Styles
 	agent         *agentclient.Client
 	state         wizard.State
 	cursor        int
 	authPick      bool // cloud step, phase 2: provider chosen, picking auth
-	recs          config.TierRecommendations
-	recsOK        bool
-	status        string
+	// picker, when non-nil, is the floating per-slot model picker on the
+	// tiers step; keys route to it until it closes.
+	picker *overlay.RowList
+	recs   config.TierRecommendations
+	recsOK bool
+	status string
 	// applyFn commits the collected answers on finish; defaults to
 	// applyConfig, overridable in tests (agentclient.Client is a concrete
 	// gRPC type with nothing to fake).
@@ -58,12 +63,12 @@ var wizardTierOrder = []config.Tier{
 }
 
 // newWizardPage resumes a persisted run when one exists, else starts fresh.
-func newWizardPage(ag *agentclient.Client, s theme.Styles, w, h int) *wizardPage {
+func newWizardPage(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h int) *wizardPage {
 	st, ok := wizard.Load()
 	if !ok {
 		st = wizard.New()
 	}
-	wp := &wizardPage{styles: s, agent: ag, state: st, width: w, height: h}
+	wp := &wizardPage{palette: p, styles: s, agent: ag, state: st, width: w, height: h}
 	if recs, err := config.LoadTierRecommendations(); err == nil {
 		wp.recs, wp.recsOK = recs, true
 	}
@@ -274,6 +279,15 @@ func (wp *wizardPage) move(delta int) {
 }
 
 func (wp *wizardPage) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	if wp.picker != nil {
+		next, cmd, closed := wp.picker.Update(msg, wp.styles)
+		if closed {
+			wp.picker = nil
+			return cmd, false
+		}
+		wp.picker = &next
+		return cmd, false
+	}
 	switch msg.String() {
 	case "up", "k":
 		wp.move(-1)
@@ -344,7 +358,7 @@ func (wp *wizardPage) selectRow() (closed bool) {
 			wp.advance()
 			return false
 		}
-		wp.status = "per-slot model picker lands in a later slice — continue accepts the shown models"
+		wp.openTierPicker(row.Key)
 	case wizard.StepDone:
 		if err := wp.applyFn(); err != nil {
 			// State stays persisted: enter retries, esc walks back.
@@ -460,7 +474,82 @@ func (wp *wizardPage) summary() string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// openTierPicker installs the floating model picker for one slot. Unlike
+// the dashboard's picker, selecting only records the pick in wizard state —
+// nothing is applied until finish.
+func (wp *wizardPage) openTierPicker(slotKey string) {
+	if wp.state.TierPicks == nil {
+		wp.state.TierPicks = map[string]string{}
+	}
+	hooks := overlay.Hooks{
+		OnSelect: func(row overlay.Row) (string, bool, tea.Cmd) {
+			if row.Key == "-" {
+				delete(wp.state.TierPicks, slotKey)
+			} else {
+				wp.state.TierPicks[slotKey] = row.Key
+			}
+			wp.persist()
+			return "", true, nil
+		},
+	}
+	picker := overlay.New("model — "+slotKey, wp.tierPickerCandidates(slotKey), hooks)
+	wp.picker = &picker
+}
+
+// tierPickerCandidates lists a slot's options: the shipped recommendations
+// first, then live entries (installed runtime models for .open slots, the
+// active profile's catalog for .cloud slots — best-effort, the wizard often
+// runs before any credentials exist), then the clear row.
+func (wp *wizardPage) tierPickerCandidates(slotKey string) []overlay.Row {
+	tierName, _, _ := strings.Cut(slotKey, ".")
+	current := wp.state.TierPicks[slotKey]
+	side := config.ProviderOpen
+	if isCloudTierKey(slotKey) {
+		side = config.ProviderCloud
+	}
+	var rows []overlay.Row
+	seen := map[string]bool{}
+	for _, m := range wp.recs.Candidates(side, wp.state.CloudProvider, config.Tier(tierName)) {
+		hint := currentHint(m, current)
+		if hint == "" {
+			hint = "recommended"
+		}
+		rows = append(rows, overlay.Row{Key: m, Label: m, Hint: hint})
+		seen[m] = true
+	}
+	if wp.agent != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if side == config.ProviderOpen {
+			if status, err := wp.agent.GetRuntimeStatus(ctx); err == nil {
+				for _, m := range downloadedRuntimeModels(runtimeStatusModels(status)) {
+					if seen[m.ID] {
+						continue
+					}
+					rows = append(rows, overlay.Row{Key: m.ID, Label: firstNonEmpty(m.DisplayName, m.ID), Value: m.Runtime, Hint: currentHint(m.ID, current)})
+					seen[m.ID] = true
+				}
+			}
+		} else if _, active, err := wp.agent.GetCloudProfiles(ctx); err == nil && active != "" {
+			if models, _, err := wp.agent.ListCloudProfileModels(ctx, active); err == nil {
+				for _, m := range models {
+					if seen[m.ID] {
+						continue
+					}
+					rows = append(rows, overlay.Row{Key: m.ID, Label: firstNonEmpty(m.DisplayName, m.ID), Hint: currentHint(m.ID, current)})
+					seen[m.ID] = true
+				}
+			}
+		}
+	}
+	rows = append(rows, overlay.Row{Key: "-", Label: "(clear)", Value: "unset this slot"})
+	return rows
+}
+
 func (wp *wizardPage) View() string {
+	if wp.picker != nil {
+		return wp.picker.View(wp.width, wp.palette, wp.styles)
+	}
 	var b strings.Builder
 	idx, total := wp.stepIndex()
 	header := fmt.Sprintf("Setup — %s (step %d of %d)", wp.stepTitle(), idx, total)

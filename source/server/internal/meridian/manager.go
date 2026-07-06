@@ -11,7 +11,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -82,6 +84,12 @@ type Manager struct {
 	prereqsFn  func() Prereqs
 	authFn     func() bool
 	portUsedFn func(port int) bool
+	// reapOrphanFn reaps a Meridian we previously spawned that a hard-killed
+	// agent left orphaned on the port (its pid is recorded in the pidfile).
+	// Returns true when it reaped one — the caller then spawns a fresh process
+	// instead of adopting the orphan as external, so spawn-time config applies.
+	// Injection point for tests.
+	reapOrphanFn func(port int) bool
 
 	mu                  sync.Mutex
 	status              Status
@@ -111,7 +119,7 @@ func New(logger *log.Logger, logPath string) *Manager {
 	if logger == nil {
 		logger = log.Default()
 	}
-	return &Manager{
+	m := &Manager{
 		logger:     logger,
 		logPath:    logPath,
 		version:    DefaultVersion,
@@ -122,6 +130,87 @@ func New(logger *log.Logger, logPath string) *Manager {
 		portUsedFn: portInUse,
 		status:     Status{State: StateDisabled},
 	}
+	m.reapOrphanFn = m.realReapOrphan
+	return m
+}
+
+// pidFilePath is where the spawned Meridian's pid is recorded, next to the
+// log. Empty when logPath is unset (tests), which disables pidfile tracking.
+func (m *Manager) pidFilePath() string {
+	if m.logPath == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(m.logPath), "meridian.pid")
+}
+
+// writePidFile records pid at path (best-effort; no-op on empty path).
+func writePidFile(path string, pid int) {
+	if path == "" {
+		return
+	}
+	_ = os.WriteFile(path, []byte(strconv.Itoa(pid)), 0o644)
+}
+
+// readPidFile reads a pid from path. Returns (0,false) on empty path, missing
+// file, or malformed contents.
+func readPidFile(path string) (int, bool) {
+	if path == "" {
+		return 0, false
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil || pid <= 0 {
+		return 0, false
+	}
+	return pid, true
+}
+
+// removePidFile deletes the pidfile (best-effort; no-op on empty path).
+func removePidFile(path string) {
+	if path == "" {
+		return
+	}
+	_ = os.Remove(path)
+}
+
+// processAlive reports whether pid names a live process (signal 0 probe).
+func processAlive(pid int) bool {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return proc.Signal(syscall.Signal(0)) == nil
+}
+
+// realReapOrphan is the production reapOrphanFn. When the pidfile names a live
+// process, it is a Meridian we spawned that a hard-killed agent orphaned on the
+// port; kill it so a fresh spawn applies current spawn-time config, and report
+// true. Returns false when there is no pidfile (nothing of ours recorded) or
+// the recorded pid is already gone — in which case the caller adopts whatever
+// is on the port as a genuinely external proxy.
+//
+// Caveat: identity is by recorded pid + liveness, not a port->pid lookup, so a
+// recycled pid could in principle be signalled. Acceptable for a local dev
+// proxy; the alternative is platform-specific socket-ownership inspection.
+func (m *Manager) realReapOrphan(port int) bool {
+	path := m.pidFilePath()
+	pid, ok := readPidFile(path)
+	if !ok {
+		return false
+	}
+	if !processAlive(pid) {
+		removePidFile(path)
+		return false
+	}
+	if proc, err := os.FindProcess(pid); err == nil {
+		_ = proc.Kill()
+	}
+	removePidFile(path)
+	m.logger.Printf("meridian: reaped orphaned Meridian pid %d holding port %d", pid, port)
+	return true
 }
 
 // SetStatusListener registers a callback fired on every state transition.
@@ -191,17 +280,25 @@ func (m *Manager) Ensure(ctx context.Context, port int) {
 		m.mu.Unlock()
 		return
 	}
-	// Gate 3: someone else on the port? Adopt it, and watch it — if the
-	// external process dies, the watcher re-runs Ensure so we spawn our own.
+	// Gate 3: something already on the port?
 	if m.portUsedFn(port) {
-		m.setStatusLocked(Status{
-			State:   StateExternal,
-			Message: fmt.Sprintf("Meridian already running on port %d (not managed by Cercano)", port),
-			Port:    port,
-		})
-		m.startExternalWatcherLocked(ctx)
-		m.mu.Unlock()
-		return
+		// If it's our own Meridian, orphaned by a hard-killed agent that never
+		// ran a clean Stop, reap it so a fresh spawn picks up current spawn-time
+		// config; then fall through to spawn our own. Otherwise it's genuinely
+		// someone else's proxy — adopt and watch it (if it dies, the watcher
+		// re-runs Ensure so we spawn our own).
+		if !m.reapOrphanFn(port) {
+			m.setStatusLocked(Status{
+				State:   StateExternal,
+				Message: fmt.Sprintf("Meridian already running on port %d (not managed by Cercano)", port),
+				Port:    port,
+			})
+			m.startExternalWatcherLocked(ctx)
+			m.mu.Unlock()
+			return
+		}
+		// Reaped our orphan — fall through to spawn our own below. supervise
+		// waits for the port to free before binding.
 	}
 	// Start a supervisor for our own process.
 	sctx, cancel := context.WithCancel(ctx)
@@ -237,6 +334,9 @@ func (m *Manager) stopLocked() {
 	if m.cmd != nil && m.cmd.Process != nil {
 		_ = m.cmd.Process.Kill()
 		m.cmd = nil
+		// Our process is dead by our own hand — drop the pidfile so a later
+		// agent never mistakes a recycled pid for our orphan.
+		removePidFile(m.pidFilePath())
 	}
 }
 
@@ -339,6 +439,17 @@ func (m *Manager) supervise(ctx context.Context, port int) {
 		}
 	}()
 
+	// After reaping an orphan the OS may not have released the listening socket
+	// yet; wait briefly for the port to free before binding. No-op on the
+	// normal path, where Gate 3 already saw the port free.
+	for i := 0; i < 40 && m.portUsedFn(port); i++ {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+
 	cmd, err := m.spawnFn(ctx, port, m.version, logSink)
 	if err != nil {
 		m.transition(Status{
@@ -351,6 +462,11 @@ func (m *Manager) supervise(ctx context.Context, port int) {
 	m.mu.Lock()
 	m.cmd = cmd
 	m.mu.Unlock()
+	// Record the pid so a later agent (after a hard kill orphans this process)
+	// can recognize and reap it instead of adopting it as external.
+	if cmd.Process != nil {
+		writePidFile(m.pidFilePath(), cmd.Process.Pid)
+	}
 
 	// Probe for readiness. 60s budget covers cold-cache npx fetch + Node boot.
 	probeCtx, cancel := context.WithTimeout(ctx, 60*time.Second)

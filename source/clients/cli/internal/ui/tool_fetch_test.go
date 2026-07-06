@@ -74,6 +74,32 @@ func TestToggleEntryFold_CollapseNoFetch(t *testing.T) {
 	}
 }
 
+// A mouse toggle must not leave a keyboard focus caret — the ▶ caret is a
+// keyboard-nav-only affordance, so a mouse click clears any prior nav focus.
+func TestMouseToggleFold_ClearsFocusCaret(t *testing.T) {
+	c := newTestChatView(100, 20)
+	c.SetEntriesSlice([]*Entry{
+		{Tool: &ToolEntry{ToolUseID: "u1", ToolName: "Read", ArgsSummary: "a.go", Status: ToolStatusComplete, Folded: true}},
+	})
+	c.SetEntries(c.Entries()) // build arrowRows
+
+	// Enter keyboard nav first — that legitimately sets the focus caret.
+	if !c.EnterToolNav() {
+		t.Fatal("precondition: EnterToolNav should focus the tool entry")
+	}
+	if !c.InToolNav() {
+		t.Fatal("precondition: should be in keyboard nav")
+	}
+
+	// A mouse click on the entry's arrow row (content line 0) clears it.
+	if !c.MouseToggleFold(4, 0) {
+		t.Fatal("expected the mouse toggle to be handled")
+	}
+	if c.InToolNav() {
+		t.Error("a mouse toggle should clear keyboard focus (no caret on mouse-driven expand)")
+	}
+}
+
 func TestRenderToolEntry_LoadingShowsSpinner(t *testing.T) {
 	styles := theme.NewStyles(theme.Cracker())
 	md := render.NewMarkdown(theme.MarkdownStyle(theme.Cracker()))

@@ -57,6 +57,12 @@ type wizardPage struct {
 	// applyConfig, overridable in tests (agentclient.Client is a concrete
 	// gRPC type with nothing to fake).
 	applyFn func() error
+	// abandonArmed is the q-pressed-once confirm state: the next q abandons
+	// the run (rollback + clear); any other key disarms.
+	abandonArmed bool
+	// rollbackFn undoes eager commits on abandon; defaults to
+	// rollbackBaseline, overridable in tests.
+	rollbackFn func() error
 }
 
 // wizardTierPurpose is the per-tier "what is this for" line shown on the
@@ -88,8 +94,92 @@ func newWizardPage(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h
 	wp.applyFn = wp.applyConfig
 	wp.commitKeyFn = wp.commitAPIKey
 	wp.commitMeridianFn = wp.commitMeridianProfile
+	wp.rollbackFn = wp.rollbackBaseline
+	if !ok {
+		// Fresh run: snapshot the cloud config before any eager commits can
+		// touch it. Resumed runs keep the baseline captured when they started.
+		wp.captureBaseline()
+	}
 	wp.cursor = wp.defaultCursor()
 	return wp
+}
+
+// captureBaseline records the pre-wizard cloud-profile configuration in the
+// run's state so abandoning can restore it. Best-effort: with no agent (or a
+// failed read) abandon still clears the run, it just can't undo commits.
+func (wp *wizardPage) captureBaseline() {
+	if wp.agent == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	profiles, active, err := wp.agent.GetCloudProfiles(ctx)
+	if err != nil {
+		return
+	}
+	b := &wizard.Baseline{ActiveProfile: active}
+	for _, p := range profiles {
+		b.Profiles = append(b.Profiles, wizard.ProfileSnapshot{
+			Name: p.Name, Flavor: p.Flavor, Backend: p.Backend,
+			BaseURL: p.BaseURL, Model: p.Model, Route: p.Route,
+		})
+	}
+	wp.state.Baseline = b
+}
+
+// rollbackBaseline restores the cloud configuration captured at wizard start:
+// profiles the run created are removed (deleting their keychain keys with
+// them), profiles it modified are restored, and the previously active profile
+// is re-activated. A key overwritten on a pre-existing profile cannot be
+// restored — keys are write-only by design.
+func (wp *wizardPage) rollbackBaseline() error {
+	base := wp.state.Baseline
+	if base == nil || wp.agent == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cur, active, err := wp.agent.GetCloudProfiles(ctx)
+	if err != nil {
+		return err
+	}
+	inBase := map[string]bool{}
+	for _, b := range base.Profiles {
+		inBase[b.Name] = true
+	}
+	// Removing a currently-active profile clears the active slot agent-side,
+	// so a wizard-created active profile leaves cloud absent here and the
+	// re-activation below restores the original.
+	for _, p := range cur {
+		if !inBase[p.Name] {
+			if err := wp.agent.RemoveCloudProfile(ctx, p.Name); err != nil {
+				return fmt.Errorf("remove %s: %w", p.Name, err)
+			}
+		}
+	}
+	curByName := map[string]agentclient.CloudProfileInfo{}
+	for _, p := range cur {
+		curByName[p.Name] = p
+	}
+	for _, b := range base.Profiles {
+		c, ok := curByName[b.Name]
+		if ok && c.Flavor == b.Flavor && c.Backend == b.Backend &&
+			c.BaseURL == b.BaseURL && c.Model == b.Model && c.Route == b.Route {
+			continue // untouched by the wizard
+		}
+		if err := wp.agent.UpsertCloudProfile(ctx, agentclient.CloudProfileInfo{
+			Name: b.Name, Flavor: b.Flavor, Backend: b.Backend,
+			BaseURL: b.BaseURL, Model: b.Model, Route: b.Route,
+		}); err != nil {
+			return fmt.Errorf("restore %s: %w", b.Name, err)
+		}
+	}
+	if base.ActiveProfile != "" && base.ActiveProfile != active {
+		if err := wp.agent.SetActiveCloudProfile(ctx, base.ActiveProfile); err != nil {
+			return fmt.Errorf("re-activate %s: %w", base.ActiveProfile, err)
+		}
+	}
+	return nil
 }
 
 func wizardPreset(id string) (cloudPreset, bool) {
@@ -395,6 +485,10 @@ func (wp *wizardPage) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		wp.keyInput, cmd = wp.keyInput.Update(msg)
 		return cmd, false
 	}
+	if wp.abandonArmed && msg.String() != "q" {
+		wp.abandonArmed = false
+		wp.status = ""
+	}
 	switch msg.String() {
 	case "up", "k":
 		wp.move(-1)
@@ -404,8 +498,32 @@ func (wp *wizardPage) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, wp.back()
 	case "enter":
 		return wp.selectRow()
+	case "q":
+		return nil, wp.abandon()
 	}
 	return nil, false
+}
+
+// abandon is the trapdoor: two presses of q close the wizard without keeping
+// anything — eager commits are rolled back to the baseline and the resume
+// file is cleared. The first press only arms and asks.
+func (wp *wizardPage) abandon() (closed bool) {
+	if !wp.abandonArmed {
+		wp.abandonArmed = true
+		wp.status = "abandon setup? changes made so far will be undone — press q again to confirm, any other key to keep going"
+		return false
+	}
+	if err := wp.rollbackFn(); err != nil {
+		wp.abandonArmed = false
+		wp.status = "could not undo setup changes: " + err.Error()
+		return false
+	}
+	if err := wizard.Clear(); err != nil {
+		wp.abandonArmed = false
+		wp.status = "could not clear wizard state: " + err.Error()
+		return false
+	}
+	return true
 }
 
 // back steps to the previous screen; on the first screen it closes the
@@ -716,7 +834,7 @@ func (wp *wizardPage) View() string {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(wp.styles.Dim.Render("↑/↓ move · enter select · esc back"))
+	b.WriteString(wp.styles.Dim.Render("↑/↓ move · enter select · esc back · q abandon"))
 	if wp.status != "" {
 		b.WriteString("\n" + wp.styles.Warn.Render(wp.status))
 	}

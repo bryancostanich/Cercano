@@ -322,6 +322,107 @@ func TestWizardMeridianCommit(t *testing.T) {
 	}
 }
 
+func pressQ(t *testing.T, wp *wizardPage) bool {
+	t.Helper()
+	_, closed := wp.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	return closed
+}
+
+func TestWizardAbandonTrapdoor(t *testing.T) {
+	wp := newTestWizardPage(t)
+	press(t, wp, tea.KeyDown)
+	press(t, wp, tea.KeyEnter) // cloud — state now persisted mid-run
+
+	rolledBack := false
+	wp.rollbackFn = func() error { rolledBack = true; return nil }
+
+	// First q only arms and asks.
+	if closed := pressQ(t, wp); closed {
+		t.Fatal("first q: page must stay open")
+	}
+	if !wp.abandonArmed || !strings.Contains(wp.status, "abandon setup?") {
+		t.Fatalf("first q: want armed + confirm status, got armed=%v status=%q", wp.abandonArmed, wp.status)
+	}
+	if rolledBack {
+		t.Fatal("first q: must not roll back yet")
+	}
+
+	// Second q rolls back, clears the resume file, closes.
+	if closed := pressQ(t, wp); !closed {
+		t.Fatal("second q: want page closed")
+	}
+	if !rolledBack {
+		t.Error("second q: rollbackFn not called")
+	}
+	if _, ok := wizard.Load(); ok {
+		t.Error("abandon: resume state should be cleared")
+	}
+}
+
+func TestWizardAbandonDisarmsOnOtherKey(t *testing.T) {
+	wp := newTestWizardPage(t)
+	wp.rollbackFn = func() error { t.Fatal("disarmed abandon must not roll back"); return nil }
+
+	pressQ(t, wp)
+	press(t, wp, tea.KeyDown) // any other key disarms
+	if wp.abandonArmed {
+		t.Fatal("other key: want disarmed")
+	}
+	if wp.status != "" {
+		t.Errorf("other key: confirm status should clear, got %q", wp.status)
+	}
+	// The next q starts the confirm over instead of closing.
+	if closed := pressQ(t, wp); closed {
+		t.Fatal("q after disarm: must arm again, not close")
+	}
+}
+
+func TestWizardAbandonRollbackFailureStaysOpen(t *testing.T) {
+	wp := newTestWizardPage(t)
+	press(t, wp, tea.KeyDown)
+	press(t, wp, tea.KeyEnter) // cloud
+
+	wp.rollbackFn = func() error { return fmt.Errorf("agent unreachable") }
+	pressQ(t, wp)
+	if closed := pressQ(t, wp); closed {
+		t.Fatal("rollback failure: page must stay open")
+	}
+	if !strings.Contains(wp.status, "could not undo") {
+		t.Errorf("rollback failure: status %q should surface the error", wp.status)
+	}
+	if _, ok := wizard.Load(); !ok {
+		t.Error("rollback failure: resume state must be preserved for retry")
+	}
+
+	// Retry after the failure succeeds and closes.
+	wp.rollbackFn = func() error { return nil }
+	pressQ(t, wp)
+	if closed := pressQ(t, wp); !closed {
+		t.Fatal("retry: want page closed")
+	}
+}
+
+func TestWizardKeyEntryQTypesIntoPrompt(t *testing.T) {
+	wp := newTestWizardPage(t)
+	press(t, wp, tea.KeyDown)
+	press(t, wp, tea.KeyEnter) // cloud
+	press(t, wp, tea.KeyEnter) // anthropic
+	press(t, wp, tea.KeyDown)
+	press(t, wp, tea.KeyEnter) // api_key → masked prompt
+	if !wp.keyEntry {
+		t.Fatal("want key prompt open")
+	}
+	if closed := pressQ(t, wp); closed {
+		t.Fatal("q in key prompt: must not close the page")
+	}
+	if wp.abandonArmed {
+		t.Fatal("q in key prompt: must not arm abandon")
+	}
+	if got := wp.keyInput.Value(); got != "q" {
+		t.Errorf("q in key prompt: want it typed into the input, got %q", got)
+	}
+}
+
 func TestWizardViewRendersTierPurposes(t *testing.T) {
 	wp := newTestWizardPage(t)
 	wp.state.PrimarySide = wizard.SideOpen

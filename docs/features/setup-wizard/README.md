@@ -116,3 +116,25 @@ model serves as fallback (existing behavior).
   file (see step 4); Copilot additionally filters against its live catalog.
 - Quitting mid-wizard resumes where the user left off on the next entry
   (wizard state persisted alongside config; a completed run clears it).
+
+## Decisions (2026-07-05, later)
+
+- **Abandon trapdoor.** `q` (pressed twice — the first press asks for
+  confirmation in the status line) abandons the run without keeping anything:
+  eager commits are rolled back and the resume file is cleared. `esc` keeps
+  its meaning (back / pause-and-resume-later).
+- **Baseline snapshot powers the rollback.** A fresh run snapshots the cloud
+  profiles + active profile into the wizard state file before any eager
+  commits. Abandon restores it: profiles the run created are removed (their
+  keychain keys with them), profiles it modified are restored, the previously
+  active profile is re-activated. Because the baseline is persisted, a
+  crashed or broken run can be relaunched and abandoned back to the
+  pre-wizard configuration. Known limit: a key overwritten on a pre-existing
+  profile can't be restored — keys are write-only.
+- **Meridian profiles carry the proxy base URL.** The wizard's meridian
+  commit sends `base_url` (Meridian's default `http://127.0.0.1:3456`) and
+  `route: meridian`; the server only activates a keyless profile when a proxy
+  base URL says who handles auth. `route` now travels through the
+  `UpsertCloudProfile` RPC, and an empty route on update preserves the
+  existing profile's route so route-unaware clients can't demote meridian
+  to direct.

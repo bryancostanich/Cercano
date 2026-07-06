@@ -293,8 +293,8 @@ func (wp *wizardPage) rows() []wizardRow {
 	switch wp.state.Step {
 	case wizard.StepPrimary:
 		return []wizardRow{
-			{Key: wizard.SideOpen, Label: "open", Annotation: "open-weight model on this machine (local-first default)"},
 			{Key: wizard.SideCloud, Label: "cloud", Annotation: "hosted API provider"},
+			{Key: wizard.SideOpen, Label: "open", Annotation: "open-weight model on this machine (local-first default)"},
 		}
 	case wizard.StepCloud:
 		if wp.authPick {

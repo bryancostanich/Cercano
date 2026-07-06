@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -77,12 +78,44 @@ func TestWizardCloudPathEndToEnd(t *testing.T) {
 		t.Fatalf("after tiers: want %s, got %s", wizard.StepDone, wp.state.Step)
 	}
 
-	// Finish clears the resume file and closes the page.
+	// Finish applies the config, clears the resume file, closes the page.
+	applied := false
+	wp.applyFn = func() error { applied = true; return nil }
 	if closed := press(t, wp, tea.KeyEnter); !closed {
 		t.Fatal("finish: want page closed")
 	}
+	if !applied {
+		t.Error("finish: applyFn not called")
+	}
 	if _, ok := wizard.Load(); ok {
 		t.Error("finish: resume state should be cleared")
+	}
+}
+
+func TestWizardApplyFailureKeepsState(t *testing.T) {
+	wp := newTestWizardPage(t)
+	press(t, wp, tea.KeyEnter) // open primary
+	press(t, wp, tea.KeyEnter) // recommended locus
+	for range wp.rows() {
+		press(t, wp, tea.KeyDown)
+	}
+	press(t, wp, tea.KeyEnter) // continue → done
+
+	wp.applyFn = func() error { return fmt.Errorf("agent unreachable") }
+	if closed := press(t, wp, tea.KeyEnter); closed {
+		t.Fatal("apply failure: page must stay open")
+	}
+	if !strings.Contains(wp.status, "apply failed") {
+		t.Errorf("apply failure: status %q should surface the error", wp.status)
+	}
+	if _, ok := wizard.Load(); !ok {
+		t.Error("apply failure: resume state must be preserved for retry")
+	}
+
+	// Retry after the failure succeeds and closes.
+	wp.applyFn = func() error { return nil }
+	if closed := press(t, wp, tea.KeyEnter); !closed {
+		t.Fatal("retry: want page closed")
 	}
 }
 

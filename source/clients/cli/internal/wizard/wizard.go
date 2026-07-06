@@ -140,13 +140,16 @@ func StatePath() string {
 }
 
 // Load reads a persisted in-progress run. ok is false when there is
-// nothing to resume (no file, unreadable, or already terminal).
+// nothing to resume (no file or unreadable). A file at StepDone still
+// resumes — the run is only complete once the answers were applied, and
+// Clear removes the file at that point; quitting on the summary screen
+// must come back to it.
 func Load() (s State, ok bool) {
 	data, err := os.ReadFile(StatePath())
 	if err != nil {
 		return State{}, false
 	}
-	if yaml.Unmarshal(data, &s) != nil || s.Step == "" || s.Step == StepDone {
+	if yaml.Unmarshal(data, &s) != nil || s.Step == "" {
 		return State{}, false
 	}
 	return s, true

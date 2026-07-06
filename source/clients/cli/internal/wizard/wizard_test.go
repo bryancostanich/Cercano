@@ -103,13 +103,19 @@ func TestResumeRoundTrip(t *testing.T) {
 	}
 }
 
-func TestCompletedRunDoesNotResume(t *testing.T) {
+func TestDoneStepStillResumes(t *testing.T) {
+	// Reaching the summary screen is not completion — only a successful
+	// apply clears the file. Quitting there must resume to the summary.
 	useTempState(t)
-	if err := Save(State{Step: StepDone}); err != nil {
+	if err := Save(State{Step: StepDone, PrimarySide: SideOpen}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	if _, ok := Load(); ok {
-		t.Error("terminal state: want no resume")
+	got, ok := Load()
+	if !ok {
+		t.Fatal("done-step state: want resume")
+	}
+	if got.Step != StepDone {
+		t.Errorf("resume: want %s, got %s", StepDone, got.Step)
 	}
 }
 

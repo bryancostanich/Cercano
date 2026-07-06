@@ -122,6 +122,15 @@ model serves as fallback (existing behavior).
 
 ## Decisions (2026-07-05)
 
+- OAuth sign-in flows (ChatGPT, Copilot device flow) run **agent-side**:
+  the agent owns the OAuth dance (callback server / device polling), token
+  storage (same place API keys live), and request-time refresh. The CLI
+  only renders the verification URL + user code and waits on flow status
+  via RPC. Rationale: tokens never cross the gRPC boundary outbound, every
+  client (CLI, IDE extensions) gets the flows for free, and refresh works
+  even when no client is attached. Profiles select the adapter via the
+  existing Route field ("direct" | "meridian" | "chatgpt" | …).
+
 - ChatGPT sign-in ships in the default provider list; the "unofficial" label
   carries the warning. No config flag gate.
 - Tier autofill for all providers comes from the shipped recommendations

@@ -55,6 +55,13 @@ Auth flow details:
   supported (`copilot-api.<domain>`).
 - **API keys:** masked prompt, validated with a cheap live call before saving.
 
+Profiles created here are seeded with the provider's everyday-tier
+recommended model — the profile's model is what serves main-chat requests,
+so a wizard-created profile must never be activated modelless. The finish
+step then writes the (possibly overridden) everyday-cloud tier pick into the
+active profile, and the agent's `UpsertCloudProfile` preserves an existing
+model on partial-metadata updates (same carve-out as `route`).
+
 ### 3. Locus mode
 
 "How should Cercano split work between cloud and open models?"
@@ -65,6 +72,11 @@ Maps directly onto the four `locus.Mode` values:
   (recommended when a cloud provider was configured in step 2)
 - Open primary, cloud fallback → `open_primary` (Cercano's default)
 - Open only → `open_only`
+
+All four modes stay selectable regardless of the step-1 answer, but the
+final summary screen warns when the choice contradicts it (e.g. primary =
+cloud with `open_primary`, which means main chat never reaches the cloud
+provider that was just configured).
 
 ### 4. Model tier profile
 

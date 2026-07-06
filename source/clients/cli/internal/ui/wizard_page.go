@@ -303,14 +303,16 @@ func (wp *wizardPage) rows() []wizardRow {
 		presets := cloudPresets()
 		rows := make([]wizardRow, 0, len(presets))
 		for _, pr := range presets {
-			if pr.Tier == tierComingSoon {
-				continue
-			}
 			ann := ""
-			if pr.Tier == tierUntested {
+			disabled := false
+			switch pr.Tier {
+			case tierComingSoon:
+				ann = "(coming soon)"
+				disabled = true
+			case tierUntested:
 				ann = "(untested)"
 			}
-			rows = append(rows, wizardRow{Key: pr.ID, Label: pr.Label, Annotation: ann})
+			rows = append(rows, wizardRow{Key: pr.ID, Label: pr.Label, Annotation: ann, Disabled: disabled})
 		}
 		return rows
 	case wizard.StepLocus:

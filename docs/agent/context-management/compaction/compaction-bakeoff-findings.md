@@ -229,3 +229,90 @@ Part of phi4's 55 s is cold-load, but there is no fidelity-neutral speed win.
   above before being configured.
 - Dense-vs-MoE lesson: judge summarizer candidates on measured latency and
   anchor retention, never on parameter size.
+
+---
+
+# Evaluating compaction fidelity, 2026-07-06
+
+The anchor auditions above hand-pick the must-keep set per conversation — fine
+for a known window, but it doesn't scale to arbitrary traffic, and the obvious
+auto-metric (does the summary preserve the source's identifiers verbatim?)
+is *wrong*: our summaries are high-level (Goal / Decisions / Proposals …), so a
+genuinely good summary keeps the decisions but not every filename, and scores
+~0 on verbatim-identifier recall. This section records how to think about
+fidelity on real traffic instead.
+
+## The ground truth is continuation, not preservation
+
+The failure that started this whole effort was a design *proposal the agent was
+mid-implementing* vanishing from the summary — the agent then lost the thread
+and drifted. "Broken compaction" in practice means the agent **regresses**:
+relitigates a settled decision, re-explores a dead end, or repeats a mistake the
+user already corrected. So the real test is behavioral — *can an agent, given
+only the compacted context plus the next user turn, take the action that
+actually came next?* Every static metric is a proxy for that.
+
+## What has to survive (roughly blast-radius order; all are must-preserve)
+
+- **Decisions with their rationale** — the *why*, not just the choice. Drop the
+  why and the agent reopens settled questions.
+- **Open threads / next actions** — lose the "next step" and the agent stalls.
+- **User constraints and corrections** — drop one and the agent repeats the
+  exact mistake the user flagged.
+- **Rejected approaches and why** — without them the agent re-walks dead paths.
+- **Active working-set identifiers** — only those *bound to a live decision or
+  open thread* (e.g. `models.Resolve` because an open decision implements it).
+  A symbol read once and never revisited need not survive. This binding is the
+  filter that resolves the verbatim-recall paradox: recall matters, but only
+  over identifiers *inside a preserved decision/thread*, not the whole source.
+
+The ordering is intuition about what hurts most when lost — it is **not**
+measured and does not feed the metric. All five are must-preserve; the ranking
+only matters as a tie-breaker if a summarizer is so budget-starved it must drop
+a whole category.
+
+## Metric: derive the must-preserve set from raw, then score preservation
+
+Decouple *what mattered here* from *did compaction keep it*:
+
+1. **Extract (once, offline, strong model, generous budget):** run over the
+   **raw** history to produce the per-conversation answer key — decisions, open
+   threads, constraints, rejected approaches, each with its bound identifiers.
+2. **Score (cheap, per candidate):** did the summary keep that set,
+   uncontradicted. This is the automated generalization of the hand-picked
+   anchors.
+
+Our summary schema is already this checklist, so score **recall per section**
+and localize failures ("we're losing content specifically in Proposals" beats a
+single blended number):
+
+- **Goal** — objective of the work.
+- **Decisions** — settled choices (carry rationale).
+- **Proposals** — offered but not yet accepted/rejected (kept distinct from
+  Decisions on purpose; collapsing the two was a real bug).
+- **Files** — concrete file/function targets.
+- **Open threads** — unresolved questions and next steps.
+- **State** — where things stand now.
+
+## Three axes, not one
+
+An LLM-judge matches the mental model *if* it scores against the derived key-fact
+set (not free-form "was this faithful?", which rewards a fluent summary that
+quietly dropped a decision), split into three axes that fail differently:
+
+- **Recall** — fraction of derived key facts present in the summary.
+- **Fabrication** — summary claims not supported by the source.
+- **Contradiction** — summary claims the source refutes (e.g. a Proposal
+  rendered as a settled Decision). Distinct from fabrication; a failure mode we
+  hit.
+
+A summary can be 100% faithful-to-what-it-included while dropping half the
+decisions; one blended score hides that.
+
+## Calibration experiment
+
+Build a small golden set (~10–15 convos) and do the behavioral test by hand —
+compacted context + real next user turn, does a fresh agent do the right thing —
+then use it to calibrate the cheap three-axis judge. Trust the judge at scale
+thereafter. The behavioral test measures the thing we care about; the LLM-judge
+is the scalable proxy calibrated against it.

@@ -301,19 +301,17 @@ func (wp *wizardPage) rows() []wizardRow {
 			return wizardAuthRows(wp.state.CloudProvider)
 		}
 		presets := cloudPresets()
-		rows := make([]wizardRow, 0, len(presets)+1)
+		rows := make([]wizardRow, 0, len(presets))
 		for _, pr := range presets {
-			ann := ""
-			switch pr.Tier {
-			case tierUntested:
-				ann = "(untested)"
-			case tierComingSoon:
-				ann = "(coming soon)"
+			if pr.Tier == tierComingSoon {
+				continue
 			}
-			rows = append(rows, wizardRow{Key: pr.ID, Label: pr.Label, Annotation: ann, Disabled: pr.Tier == tierComingSoon})
+			ann := ""
+			if pr.Tier == tierUntested {
+				ann = "(untested)"
+			}
+			rows = append(rows, wizardRow{Key: pr.ID, Label: pr.Label, Annotation: ann})
 		}
-		// In the design's auth matrix but its device flow isn't built yet.
-		rows = append(rows, wizardRow{Key: "github-copilot", Label: "github copilot", Annotation: "(coming soon)", Disabled: true})
 		return rows
 	case wizard.StepLocus:
 		rec := wp.state.RecommendedLocus()

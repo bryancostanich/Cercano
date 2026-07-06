@@ -9,9 +9,9 @@ version: 1
 cloud:
   anthropic:
     most_capable: [claude-fable-5, claude-opus-4-8]
-    everyday: [claude-sonnet-5]
-    fast_light: [claude-haiku-4-5-20251001]
-    fast_light_text: [claude-haiku-4-5-20251001]
+    everyday: [claude-opus-4-8]
+    fast_light: [claude-haiku-4-5]
+    fast_light_text: [claude-haiku-4-5]
   openai:
     most_capable: [gpt-5.5, gpt-5.3-codex]
     everyday: [gpt-5.4]
@@ -25,8 +25,8 @@ cloud:
   github-copilot:
     most_capable: [claude-fable-5, gpt-5.5]
     everyday: [claude-sonnet-5, gpt-5.4]
-    fast_light: [gpt-5.4-mini, claude-haiku-4-5-20251001]
-    fast_light_text: [claude-haiku-4-5-20251001, gpt-5.4-mini]
+    fast_light: [gpt-5.4-mini, claude-haiku-4-5]
+    fast_light_text: [claude-haiku-4-5, gpt-5.4-mini]
   groq:
     most_capable: [llama-3.3-70b-versatile]
     everyday: [llama-3.3-70b-versatile]
@@ -34,7 +34,7 @@ cloud:
     fast_light_text: [llama-3.1-8b-instant]
 
 open:
-  most_capable: [qwen3-coder]
-  everyday: ["qwen2.5-coder:7b"]
-  fast_light: ["qwen2.5-coder:1.5b"]
+  most_capable: [qwen3-coder-next]
+  everyday: [qwen3-coder-next]
+  fast_light: [qwen3-coder-next]
   fast_light_text: [phi4]

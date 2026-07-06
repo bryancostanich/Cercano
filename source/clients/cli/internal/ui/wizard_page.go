@@ -345,6 +345,13 @@ func (wp *wizardPage) rows() []wizardRow {
 				})
 			}
 		}
+		// Embedding slot — open side only, not part of the four routing tiers.
+		embKey := "embedding.open"
+		embPick := wp.state.TierPicks[embKey]
+		if embPick == "" {
+			embPick = "—"
+		}
+		rows = append(rows, wizardRow{Key: embKey, Label: "embedding · open", Annotation: embPick})
 		rows = append(rows, wizardRow{Key: "continue", Label: "continue", Annotation: "accept these models"})
 		return rows
 	case wizard.StepDone:
@@ -684,6 +691,7 @@ func (wp *wizardPage) stepDesc() string {
 		for _, t := range wizardTierOrder {
 			fmt.Fprintf(&b, "  %-16s %s\n", strings.ReplaceAll(string(t), "_", "-"), wizardTierPurpose[t])
 		}
+		fmt.Fprintf(&b, "  %-16s %s\n", "embedding · open", "vector embedding for semantic search")
 		b.WriteString("These picks are easy to change later — /m or the config file.")
 		return b.String()
 	case wizard.StepDone:
@@ -756,7 +764,7 @@ func (wp *wizardPage) tierPickerCandidates(slotKey string) []overlay.Row {
 		if hint == "" {
 			hint = "recommended"
 		}
-		rows = append(rows, overlay.Row{Key: m, Label: m, Hint: hint})
+		rows = append(rows, overlay.Row{Key: m, Label: m, Value: m, Hint: hint})
 		seen[m] = true
 	}
 	if wp.agent != nil {
@@ -768,7 +776,7 @@ func (wp *wizardPage) tierPickerCandidates(slotKey string) []overlay.Row {
 					if seen[m.ID] {
 						continue
 					}
-					rows = append(rows, overlay.Row{Key: m.ID, Label: firstNonEmpty(m.DisplayName, m.ID), Value: m.Runtime, Hint: currentHint(m.ID, current)})
+					rows = append(rows, overlay.Row{Key: m.ID, Label: firstNonEmpty(m.DisplayName, m.ID), Value: firstNonEmpty(m.Runtime, "llama-server"), Hint: currentHint(m.ID, current)})
 					seen[m.ID] = true
 				}
 			}
@@ -778,7 +786,7 @@ func (wp *wizardPage) tierPickerCandidates(slotKey string) []overlay.Row {
 					if seen[m.ID] {
 						continue
 					}
-					rows = append(rows, overlay.Row{Key: m.ID, Label: firstNonEmpty(m.DisplayName, m.ID), Hint: currentHint(m.ID, current)})
+					rows = append(rows, overlay.Row{Key: m.ID, Label: firstNonEmpty(m.DisplayName, m.ID), Value: m.ID, Hint: currentHint(m.ID, current)})
 					seen[m.ID] = true
 				}
 			}

@@ -75,8 +75,8 @@ type runtimeDashboard struct {
 	// tiers section was unreachable-by-sight without this).
 	blockStartLine     int
 	selectedActionLine int
-	actionMessage       string
-	scrollOffset        int
+	actionMessage      string
+	scrollOffset       int
 	// tierPicker, when non-nil, is the floating model picker for a taxonomy
 	// slot; it captures all key input until closed.
 	tierPicker *overlay.RowList
@@ -420,8 +420,6 @@ func (d *runtimeDashboard) advanceSection(dir int) {
 	d.operationCursor = starts[next]
 	d.scrollFollowAction()
 }
-
-
 
 // scrollFollowAction scrolls the page so the selected action row is
 // visible. fullContent recomputes selectedActionLine as a side effect

@@ -17,11 +17,11 @@ func TestCatalogList_DownloadingModelStaysVisible(t *testing.T) {
 	merged := []agentclient.RuntimeModel{
 		{ID: "llama_server:catalog:phi4-mini", DisplayName: "Phi4 Mini", Family: "phi4-mini", Source: "catalog", DownloadState: "downloaded", Path: "/x/phi4.gguf"},
 		{
-			ID:            "llama_server:online:qwen3-coder-next",
-			DisplayName:   "Qwen3 Coder Next",
-			Family:        "qwen3-coder-next",
-			OllamaRef:     "qwen3-coder-next:latest",
-			DownloadState: "downloading",
+			ID:              "llama_server:online:qwen3-coder-next",
+			DisplayName:     "Qwen3 Coder Next",
+			Family:          "qwen3-coder-next",
+			OllamaRef:       "qwen3-coder-next:latest",
+			DownloadState:   "downloading",
 			DownloadedBytes: 1 << 30, DownloadTotalBytes: 50 << 30,
 			Path: "/x/qwen3-coder-next-latest.gguf",
 		},

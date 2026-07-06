@@ -331,6 +331,32 @@ func TestUpsertCloudProfileRoute(t *testing.T) {
 	}
 }
 
+func TestUpsertCloudProfileModelPreservedOnEmptyUpdate(t *testing.T) {
+	s, _ := newTestServer()
+	// A metadata update that omits the model must preserve the existing one —
+	// the wizard's meridian/key commits send no model, and a modelless active
+	// profile means an empty model on every cloud request (and no header chip).
+	if _, err := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{
+		Name: "messages-one", Flavor: "messages", BaseUrl: "http://127.0.0.1:3456", Route: "meridian",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := profileByName(s.currentConfig.CloudProfiles, "messages-one")
+	if p.Model != "claude-3-5-haiku-20241022" {
+		t.Fatalf("model lost on modelless update: %+v", p)
+	}
+	// An explicit model still replaces the existing one.
+	if _, err := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{
+		Name: "messages-one", Flavor: "messages", Model: "claude-fable-5",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	p2, _ := profileByName(s.currentConfig.CloudProfiles, "messages-one")
+	if p2.Model != "claude-fable-5" {
+		t.Fatalf("explicit model not applied: %+v", p2)
+	}
+}
+
 func TestUpsertCloudProfileRebuildsActiveProvider(t *testing.T) {
 	s, _ := newTestServer()
 	// Set a key so rebuildCloud can succeed for the messages flavor.

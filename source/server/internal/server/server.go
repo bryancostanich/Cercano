@@ -538,6 +538,12 @@ func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudP
 			if np.Route == "" {
 				np.Route = p.Route
 			}
+			// Same for the model: partial-metadata upserts (the wizard's
+			// meridian/key commits) must not strip the request-time model
+			// off a profile that already has one.
+			if np.Model == "" {
+				np.Model = p.Model
+			}
 			s.currentConfig.CloudProfiles[i] = np
 			replaced = true
 			break

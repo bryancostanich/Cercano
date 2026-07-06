@@ -10,6 +10,7 @@ import (
 
 	"cercano/source/clients/cli/internal/theme"
 	"cercano/source/clients/cli/internal/wizard"
+	"cercano/source/server/pkg/config"
 )
 
 func newTestWizardPage(t *testing.T) *wizardPage {
@@ -318,6 +319,75 @@ func TestWizardMeridianCommit(t *testing.T) {
 	}
 	if wp.state.Step != wizard.StepLocus {
 		t.Fatalf("after meridian: want %s, got %s", wizard.StepLocus, wp.state.Step)
+	}
+}
+
+func TestWizardProfileModelFromRecs(t *testing.T) {
+	recs := config.TierRecommendations{
+		Version: 1,
+		Cloud: map[string]config.TierCandidates{
+			"anthropic": {
+				config.TierEveryday: {"claude-opus-4-8", "claude-sonnet-4-6"},
+			},
+		},
+	}
+	// The profile model is the everyday-tier pick: "the default workhorse
+	// for main chat" is exactly what profile.Model serves at request time.
+	if got := wizardProfileModel(recs, "anthropic"); got != "claude-opus-4-8" {
+		t.Fatalf("want everyday-tier first candidate, got %q", got)
+	}
+	// Unknown provider → no recommendation; caller leaves the model unset.
+	if got := wizardProfileModel(recs, "nope"); got != "" {
+		t.Fatalf("unknown provider: want empty, got %q", got)
+	}
+}
+
+func TestWizardFinishUpdateCarriesCloudModel(t *testing.T) {
+	// Cloud path: the everyday-cloud tier pick must land on the active
+	// profile (via UpdateConfig's CloudModel → active-profile rebuild path),
+	// or the profile serves requests with whatever model it was seeded with.
+	u := wizardFinishUpdate(wizard.State{
+		PrimarySide:   wizard.SideCloud,
+		CloudProvider: "anthropic",
+		LocusMode:     "cloud_primary",
+		TierPicks:     map[string]string{"everyday.cloud": "claude-opus-4-8"},
+	})
+	if u.LocusMode != "cloud_primary" || u.ModelTierKey != "default_provider" || u.ModelTierValue != wizard.SideCloud {
+		t.Fatalf("locus/default_provider patch wrong: %+v", u)
+	}
+	if u.CloudModel != "claude-opus-4-8" {
+		t.Fatalf("want everyday.cloud pick as CloudModel, got %q", u.CloudModel)
+	}
+	// Open path: no cloud provider configured → no CloudModel patch (the
+	// wantCloudRebuild branch errors without an active profile).
+	u2 := wizardFinishUpdate(wizard.State{PrimarySide: wizard.SideOpen, LocusMode: "open_primary"})
+	if u2.CloudModel != "" {
+		t.Fatalf("open path must not patch CloudModel, got %q", u2.CloudModel)
+	}
+}
+
+func TestWizardSummaryWarnsOnPrimaryLocusContradiction(t *testing.T) {
+	wp := newTestWizardPage(t)
+	wp.state = wizard.State{
+		Step:          wizard.StepDone,
+		PrimarySide:   wizard.SideCloud,
+		CloudProvider: "anthropic",
+		AuthMethod:    "meridian",
+		LocusMode:     "open_primary",
+	}
+	// primary=cloud + locus=open_primary means main chat never reaches the
+	// cloud provider the user just configured — say so before apply.
+	if s := wp.summary(); !strings.Contains(s, "warning") {
+		t.Fatalf("contradictory summary must carry a warning, got:\n%s", s)
+	}
+	// Consistent answers stay clean.
+	wp.state.LocusMode = "cloud_primary"
+	if s := wp.summary(); strings.Contains(s, "warning") {
+		t.Fatalf("consistent summary must not warn, got:\n%s", s)
+	}
+	wp.state = wizard.State{Step: wizard.StepDone, PrimarySide: wizard.SideOpen, LocusMode: "open_only"}
+	if s := wp.summary(); strings.Contains(s, "warning") {
+		t.Fatalf("open/open summary must not warn, got:\n%s", s)
 	}
 }
 

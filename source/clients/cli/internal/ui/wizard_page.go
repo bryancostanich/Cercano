@@ -191,6 +191,16 @@ func wizardPreset(id string) (cloudPreset, bool) {
 	return cloudPreset{}, false
 }
 
+// wizardProfileModel picks the model to seed a wizard-created profile with:
+// the provider's everyday-tier recommendation ("the default workhorse for
+// main chat" — exactly what profile.Model serves at request time). Empty when
+// the provider has no recommendations; the finish step's everyday-cloud tier
+// pick still lands on the profile via applyConfig.
+func wizardProfileModel(recs config.TierRecommendations, provider string) string {
+	m, _ := config.PickFirst(recs.Candidates(config.ProviderCloud, provider, config.TierEveryday), nil)
+	return m
+}
+
 // commitAPIKey creates the provider's profile from its preset, stores the
 // key, and activates the profile — all immediately, so credentials live
 // where they always do (agent-side) and never in wizard state.
@@ -206,6 +216,7 @@ func (wp *wizardPage) commitAPIKey(key string) error {
 	defer cancel()
 	if err := wp.agent.UpsertCloudProfile(ctx, agentclient.CloudProfileInfo{
 		Name: preset.ID, Flavor: preset.Flavor, Backend: preset.Backend, BaseURL: preset.BaseURL,
+		Model: wizardProfileModel(wp.recs, preset.ID),
 	}); err != nil {
 		return err
 	}
@@ -233,6 +244,7 @@ func (wp *wizardPage) commitMeridianProfile() error {
 	defer cancel()
 	if err := wp.agent.UpsertCloudProfile(ctx, agentclient.CloudProfileInfo{
 		Name: "anthropic", Flavor: preset.Flavor, Route: "meridian", BaseURL: defaultMeridianBaseURL,
+		Model: wizardProfileModel(wp.recs, "anthropic"),
 	}); err != nil {
 		return err
 	}
@@ -251,6 +263,23 @@ func (wp *wizardPage) startKeyEntry() tea.Cmd {
 	return cmd
 }
 
+// wizardFinishUpdate builds the finish step's first config patch: locus mode,
+// default provider, and — on the cloud path — the everyday-cloud tier pick as
+// CloudModel, which UpdateConfig writes into the active profile and rebuilds.
+// The profile model is what actually serves main-chat requests, so the
+// "everyday workhorse" answer must land there, not only in the tier taxonomy.
+func wizardFinishUpdate(st wizard.State) agentclient.ConfigUpdate {
+	u := agentclient.ConfigUpdate{
+		LocusMode:      st.LocusMode,
+		ModelTierKey:   "default_provider",
+		ModelTierValue: st.PrimarySide,
+	}
+	if st.CloudProvider != "" {
+		u.CloudModel = st.TierPicks["everyday."+wizard.SideCloud]
+	}
+	return u
+}
+
 // applyConfig pushes the collected answers to the agent: locus mode and
 // default provider in one sparse patch, then one patch per tier pick (the
 // UpdateConfig taxonomy patch takes a single key per call). Synchronous by
@@ -261,11 +290,7 @@ func (wp *wizardPage) applyConfig() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, err := wp.agent.UpdateConfig(ctx, agentclient.ConfigUpdate{
-		LocusMode:      wp.state.LocusMode,
-		ModelTierKey:   "default_provider",
-		ModelTierValue: wp.state.PrimarySide,
-	}); err != nil {
+	if _, err := wp.agent.UpdateConfig(ctx, wizardFinishUpdate(wp.state)); err != nil {
 		return err
 	}
 	keys := make([]string, 0, len(wp.state.TierPicks))
@@ -739,6 +764,10 @@ func (wp *wizardPage) summary() string {
 		fmt.Fprintf(&b, "  cloud:    %s (%s)%s\n", wp.state.CloudProvider, wp.state.AuthMethod, note)
 	}
 	fmt.Fprintf(&b, "  locus:    %s\n", wp.state.LocusMode)
+	if side := locusMainSide(wp.state.LocusMode); side != "" && side != wp.state.PrimarySide {
+		fmt.Fprintf(&b, "  warning:  you picked %s as your primary model, but the %s locus mode runs main chat on the %s side — main work will not use your %s model\n",
+			wp.state.PrimarySide, strings.ReplaceAll(wp.state.LocusMode, "_", " "), side, wp.state.PrimarySide)
+	}
 	for _, t := range wizardTierOrder {
 		for _, side := range wp.tierSides() {
 			key := string(t) + "." + side
@@ -748,6 +777,18 @@ func (wp *wizardPage) summary() string {
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// locusMainSide maps a locus mode to the side (wizard.SideCloud/SideOpen)
+// that serves main work under it; empty for an unrecognized mode.
+func locusMainSide(mode string) string {
+	switch mode {
+	case "cloud_only", "cloud_primary":
+		return wizard.SideCloud
+	case "open_primary", "open_only":
+		return wizard.SideOpen
+	}
+	return ""
 }
 
 // openTierPicker installs the floating model picker for one slot. Unlike

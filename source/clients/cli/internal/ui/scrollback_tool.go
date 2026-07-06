@@ -262,26 +262,40 @@ func renderToolGroup(entries []ToolEntry, width int, styles theme.Styles, md *re
 type toolArrowRow struct {
 	Line  int
 	Entry int
+	Group bool // true = collapse/expand the whole run; false = toggle this entry's body
 }
 
 // renderToolGroupSpans is renderToolGroup plus the arrow-row map.
 func renderToolGroupSpans(entries []ToolEntry, width int, styles theme.Styles, md *render.Markdown, opts groupRenderOpts) (string, []toolArrowRow) {
-	// Per-entry path: a single-entry "group" (folding compresses nothing) or
-	// a user-expanded multi-entry group. Each entry renders as its own arrow
-	// line (plus body lines when unfolded), respecting its own Folded state
-	// so Enter can drill into args+result.
-	if len(entries) == 1 || opts.Expanded {
-		lines := make([]string, 0, len(entries))
-		rows := make([]toolArrowRow, 0, len(entries))
-		cursor := 0
+	// Single-entry "group": folding compresses nothing, so the one call renders
+	// as its own per-call line with an entry-level toggle. There is no group
+	// header — nothing to collapse.
+	if len(entries) == 1 {
+		seg := renderToolEntry(entries[0], width, opts.FocusedIdx == 0, styles, md)
+		return seg, []toolArrowRow{{Line: 0, Entry: 0, Group: false}}
+	}
+
+	// Expanded multi-entry run: a clickable summary header (▾) that collapses
+	// the whole run, then each call nested one level in with its own
+	// entry-level toggle (▸/▾) for that call's args+result body.
+	if opts.Expanded {
+		lines := make([]string, 0, len(entries)+1)
+		rows := make([]toolArrowRow, 0, len(entries)+1)
+		header := renderGroupSummary(entries, width, styles, opts.Focused, true)
+		lines = append(lines, header)
+		rows = append(rows, toolArrowRow{Line: 0, Entry: 0, Group: true})
+		cursor := strings.Count(header, "\n") + 1
 		for i, e := range entries {
-			seg := renderToolEntry(e, width, i == opts.FocusedIdx, styles, md)
-			rows = append(rows, toolArrowRow{Line: cursor, Entry: i})
+			seg := indentBlock("  ", renderToolEntry(e, width-2, i == opts.FocusedIdx, styles, md))
+			rows = append(rows, toolArrowRow{Line: cursor, Entry: i, Group: false})
 			lines = append(lines, seg)
 			cursor += strings.Count(seg, "\n") + 1
 		}
 		return strings.Join(lines, "\n"), rows
 	}
+
+	// Collapsed multi-entry run: rolling-consumption summary (completed calls
+	// folded into one line) plus any in-progress live rows below it.
 	var completed []ToolEntry
 	var activeIdx []int
 	for i, e := range entries {
@@ -294,18 +308,16 @@ func renderToolGroupSpans(entries []ToolEntry, width int, styles theme.Styles, m
 	var lines []string
 	var rows []toolArrowRow
 	if len(completed) > 0 {
-		// The summary arrow maps to the group's first entry;
-		// ToggleFocusedFold's group-aware branch turns that toggle into
-		// "expand the group".
-		rows = append(rows, toolArrowRow{Line: 0, Entry: 0})
-		lines = append(lines, renderGroupSummary(completed, width, styles, opts.Focused))
+		// The summary header (Group row) toggles the whole run open.
+		rows = append(rows, toolArrowRow{Line: 0, Entry: 0, Group: true})
+		lines = append(lines, renderGroupSummary(completed, width, styles, opts.Focused, false))
 	}
 	for _, i := range activeIdx {
 		e := entries[i]
 		// In-progress entries always render folded — they are the live row.
 		// No per-entry focus in collapsed view; focus belongs to the group.
 		e.Folded = true
-		rows = append(rows, toolArrowRow{Line: len(lines), Entry: i})
+		rows = append(rows, toolArrowRow{Line: len(lines), Entry: i, Group: false})
 		lines = append(lines, renderToolEntry(e, width, false, styles, md))
 	}
 	return strings.Join(lines, "\n"), rows
@@ -328,7 +340,7 @@ func renderToolGroupSpans(entries []ToolEntry, width int, styles theme.Styles, m
 //
 // width drives right-alignment of the timing column; an over-budget summary
 // falls back to inline rendering on a single line.
-func renderGroupSummary(completed []ToolEntry, width int, styles theme.Styles, focused bool) string {
+func renderGroupSummary(completed []ToolEntry, width int, styles theme.Styles, focused, expanded bool) string {
 	if len(completed) == 0 {
 		return ""
 	}
@@ -379,7 +391,13 @@ func renderGroupSummary(completed []ToolEntry, width int, styles theme.Styles, f
 	if focused {
 		gutter = styles.ToolFocus.Render("▶ ")
 	}
-	left := gutter + "▸ " + label + toolEntryFaint.Render(breakdown)
+	// ▾ when the run is expanded (header collapses it on click), ▸ when the
+	// run is collapsed (summary expands it on click).
+	marker := "▸"
+	if expanded {
+		marker = "▾"
+	}
+	left := gutter + marker + " " + label + toolEntryFaint.Render(breakdown)
 	timing := formatDur(total)
 	rightPlain := timing + " " + glyph
 	statusStyled := toolEntryFaint.Render(timing+" ") + glyphStyle.Render(glyph)

@@ -113,11 +113,47 @@ func TestChatView_ToggleExpandsCollapsedMultiEntryGroup(t *testing.T) {
 	c.EnterToolNav()
 	c.ToggleFocusedFold()
 	got := renderChatView(&c)
-	if strings.Contains(got, "tool calls") {
-		t.Errorf("after expand, summary label should be gone, got:\n%s", got)
+	// Expanding keeps the summary as a ▾ collapse header and reveals each
+	// per-call line beneath it.
+	if !strings.Contains(got, "▾") || !strings.Contains(got, "2 tool calls") {
+		t.Errorf("after expand, a ▾ collapse header with the count should remain, got:\n%s", got)
 	}
 	if !strings.Contains(got, "a.go") || !strings.Contains(got, "b.go") {
 		t.Errorf("expanded group should show both per-call entries, got:\n%s", got)
+	}
+}
+
+// Clicking the group's summary header round-trips expand ⇄ collapse — the fix
+// for "expands but there's no way to unexpand". The header sits at content line
+// 0; the first click expands (▸ summary → per-call lines under a ▾ header), the
+// second click on the same header collapses back to the rolling summary.
+func TestChatView_HeaderClickRoundTripsGroupExpandCollapse(t *testing.T) {
+	p := theme.Cracker()
+	c := newChatView(theme.NewStyles(p), p, "", "", 100, 20)
+	setupChatView(&c, []*Entry{
+		{Tool: &ToolEntry{ToolName: "Read", ArgsSummary: "a.go", Status: ToolStatusComplete, Duration: 5 * time.Millisecond, Folded: true}},
+		{Tool: &ToolEntry{ToolName: "Edit", ArgsSummary: "b.go", Status: ToolStatusComplete, Duration: 7 * time.Millisecond, Folded: true}},
+	})
+	// Collapsed: rolling summary present, per-call args folded away.
+	got := renderChatView(&c)
+	if !strings.Contains(got, "2 tool calls") || strings.Contains(got, "a.go") {
+		t.Fatalf("precondition: expected collapsed summary without per-call args, got:\n%s", got)
+	}
+	// Click the summary header (content line 0) → expands to per-call lines.
+	if !c.MouseToggleFold(4, 0) {
+		t.Fatal("click on collapsed group summary header should be handled")
+	}
+	got = renderChatView(&c)
+	if !strings.Contains(got, "a.go") || !strings.Contains(got, "b.go") {
+		t.Fatalf("after header click the group should expand to per-call lines, got:\n%s", got)
+	}
+	// Click the header again (still content line 0, now ▾) → collapses back.
+	if !c.MouseToggleFold(4, 0) {
+		t.Fatal("click on expanded group header should be handled")
+	}
+	got = renderChatView(&c)
+	if !strings.Contains(got, "2 tool calls") || strings.Contains(got, "a.go") {
+		t.Errorf("after second header click the group should collapse back to the summary, got:\n%s", got)
 	}
 }
 

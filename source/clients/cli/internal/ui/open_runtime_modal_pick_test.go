@@ -55,8 +55,11 @@ func TestOpenRuntimeModal_ModelsLoadedRoutesToPicker(t *testing.T) {
 	if nm.openRuntimeModal.state != runtimeModalPickModel {
 		t.Fatalf("state = %v, want runtimeModalPickModel", nm.openRuntimeModal.state)
 	}
-	if len(nm.openRuntimeModal.pickModels) != 2 || nm.openRuntimeModal.pickCursor != 0 {
-		t.Fatalf("picker not initialized: %d models, cursor %d", len(nm.openRuntimeModal.pickModels), nm.openRuntimeModal.pickCursor)
+	// The pick step is now the shared RowList overlay, seeded one row per
+	// discovered GGUF (no clear row — a GGUF must be chosen to make
+	// llama_server usable).
+	if nm.openRuntimeModal.picker == nil || len(nm.openRuntimeModal.picker.Rows) != 2 {
+		t.Fatalf("picker not initialized from the discovered models: %+v", nm.openRuntimeModal.picker)
 	}
 }
 
@@ -93,23 +96,23 @@ func TestOpenRuntimeModal_ModelsLoadedIgnoredWhenModalClosed(t *testing.T) {
 
 func TestOpenRuntimeModal_PickerCursorClampsAtEdges(t *testing.T) {
 	m := modelWithModal(ambiguousStatus())
-	m.openRuntimeModal.setPickModel(twoGGUFs())
+	m.openRuntimeModal.setPickModel(nil, "llama_server", twoGGUFs())
 	// Up at the top stays at 0.
 	nm, _ := m.handleOpenRuntimeModalKey(keyPress("up"))
-	if nm.openRuntimeModal.pickCursor != 0 {
-		t.Fatalf("cursor after up-at-top = %d, want 0", nm.openRuntimeModal.pickCursor)
+	if nm.openRuntimeModal.picker.Cursor() != 0 {
+		t.Fatalf("cursor after up-at-top = %d, want 0", nm.openRuntimeModal.picker.Cursor())
 	}
 	// Down moves to 1; down again clamps at 1.
 	nm, _ = nm.handleOpenRuntimeModalKey(keyPress("down"))
 	nm, _ = nm.handleOpenRuntimeModalKey(keyPress("down"))
-	if nm.openRuntimeModal.pickCursor != 1 {
-		t.Fatalf("cursor after down-at-bottom = %d, want 1", nm.openRuntimeModal.pickCursor)
+	if nm.openRuntimeModal.picker.Cursor() != 1 {
+		t.Fatalf("cursor after down-at-bottom = %d, want 1", nm.openRuntimeModal.picker.Cursor())
 	}
 }
 
 func TestOpenRuntimeModal_PickerEnterDispatchesAndCloses(t *testing.T) {
 	m := modelWithModal(ambiguousStatus())
-	m.openRuntimeModal.setPickModel(twoGGUFs())
+	m.openRuntimeModal.setPickModel(nil, "llama_server", twoGGUFs())
 	m.pendingRuntimeSwitch = "llama_server"
 	nm, cmd := m.handleOpenRuntimeModalKey(keyPress("enter"))
 	if nm.openRuntimeModal != nil {
@@ -125,7 +128,7 @@ func TestOpenRuntimeModal_PickerEnterDispatchesAndCloses(t *testing.T) {
 
 func TestOpenRuntimeModal_PickerEscClosesWithoutDispatch(t *testing.T) {
 	m := modelWithModal(ambiguousStatus())
-	m.openRuntimeModal.setPickModel(twoGGUFs())
+	m.openRuntimeModal.setPickModel(nil, "llama_server", twoGGUFs())
 	m.pendingRuntimeSwitch = "llama_server"
 	nm, cmd := m.handleOpenRuntimeModalKey(keyPress("esc"))
 	if nm.openRuntimeModal != nil || nm.pendingRuntimeSwitch != "" || cmd != nil {
@@ -133,28 +136,13 @@ func TestOpenRuntimeModal_PickerEscClosesWithoutDispatch(t *testing.T) {
 	}
 }
 
-func TestOpenRuntimeModal_PickerBrowseOpensDashboard(t *testing.T) {
-	m := modelWithModal(ambiguousStatus())
-	m.openRuntimeModal.setPickModel(twoGGUFs())
-	nm, cmd := m.handleOpenRuntimeModalKey(keyPress("b"))
-	if nm.openRuntimeModal != nil {
-		t.Fatal("b should close the modal")
-	}
-	if cmd == nil {
-		t.Fatal("b should return the dashboard cmd")
-	}
-	if _, ok := cmd().(openRuntimeDashboardMsg); !ok {
-		t.Fatal("b's cmd should emit openRuntimeDashboardMsg")
-	}
-}
-
-func TestOpenRuntimeModal_PickerViewListsModelsAndActions(t *testing.T) {
+func TestOpenRuntimeModal_PickerViewListsModels(t *testing.T) {
 	pal := theme.Cracker()
 	styles := theme.NewStyles(pal)
 	mo := newOpenRuntimeInstallModal(ambiguousStatus())
-	mo.setPickModel(twoGGUFs())
+	mo.setPickModel(nil, "llama_server", twoGGUFs())
 	out := stripAnsiCSI(mo.View(styles, pal, 120, 40))
-	for _, want := range []string{"Pick a GGUF model", "qwen3-coder-30b-q4", "llama3.3-70b-q3", "Q4_K_M", "[Enter] Use selected", "[b] Browse models"} {
+	for _, want := range []string{"pick a GGUF model", "qwen3-coder-30b-q4", "llama3.3-70b-q3", "Q4_K_M", "esc close"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("picker view missing %q:\n%s", want, out)
 		}

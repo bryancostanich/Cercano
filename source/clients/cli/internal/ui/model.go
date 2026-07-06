@@ -1508,7 +1508,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openRuntimeModal.setNeedsModel(needsMsg)
 			return m, nil
 		}
-		m.openRuntimeModal.setPickModel(msg.models)
+		m.openRuntimeModal.setPickModel(m.agent, m.pendingRuntimeSwitch, msg.models)
 		return m, nil
 
 	case openRuntimeDashboardMsg:
@@ -3080,16 +3080,19 @@ func (m Model) View() tea.View {
 	// the local-runtime install modal — future overlays (about box, etc.)
 	// splice here in z-order.
 	if m.openRuntimeModal != nil {
-		boxW, boxH := m.openRuntimeModal.modalDim(m.width, m.height)
+		box := m.openRuntimeModal.View(m.styles, m.palette, m.width, m.height)
+		boxW, _ := m.openRuntimeModal.modalDim(m.width, m.height)
 		x := (m.width - boxW) / 2
-		y := (m.height - boxH) / 2
+		// Center on the rendered box's line count: the pick-state panel
+		// sizes its own height (modalDim returns 0 there), and for the
+		// install box countLines equals its fixed height.
+		y := (m.height - countLines([]string{box})) / 2
 		if x < 0 {
 			x = 0
 		}
 		if y < 0 {
 			y = 0
 		}
-		box := m.openRuntimeModal.View(m.styles, m.palette, m.width, m.height)
 		out = composeOverlay(out, box, x, y)
 	}
 	v := tea.NewView(out)

@@ -26,6 +26,7 @@ type cloudPreset struct {
 func cloudPresets() []cloudPreset {
 	return []cloudPreset{
 		{ID: "anthropic", Label: "anthropic", Flavor: "messages", BaseURL: "", Tier: tierVerified},
+		{ID: "openai-responses", Label: "openai (responses)", Flavor: "responses", BaseURL: "https://api.openai.com/v1", Tier: tierUntested},
 		{ID: "openai", Label: "openai", Flavor: "chat_completions", Backend: "openai", BaseURL: "https://api.openai.com/v1", Tier: tierUntested},
 		{ID: "gemini", Label: "gemini", Flavor: "chat_completions", Backend: "gemini", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", Tier: tierVerified},
 		{ID: "groq", Label: "groq", Flavor: "chat_completions", Backend: "groq", BaseURL: "https://api.groq.com/openai/v1", Tier: tierUntested},
@@ -34,7 +35,6 @@ func cloudPresets() []cloudPreset {
 		{ID: "openrouter", Label: "openrouter", Flavor: "chat_completions", Backend: "", BaseURL: "https://openrouter.ai/api/v1", Tier: tierUntested},
 		{ID: "deepseek", Label: "deepseek", Flavor: "chat_completions", Backend: "", BaseURL: "https://api.deepseek.com", Tier: tierUntested},
 		{ID: "bedrock", Label: "bedrock", Flavor: "bedrock", BaseURL: "", Tier: tierComingSoon},
-		{ID: "openai-responses", Label: "openai (responses)", Flavor: "responses", BaseURL: "https://api.openai.com/v1", Tier: tierUntested},
 	}
 }
 

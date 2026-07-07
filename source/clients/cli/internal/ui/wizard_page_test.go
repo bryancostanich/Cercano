@@ -236,8 +236,9 @@ func TestWizardPickerEscClosesWithoutChange(t *testing.T) {
 func TestWizardAPIKeyFlow(t *testing.T) {
 	wp := newTestWizardPage(t)
 	press(t, wp, tea.KeyEnter) // cloud (first row)
-	press(t, wp, tea.KeyDown)
-	press(t, wp, tea.KeyEnter) // openai (second preset row)
+	press(t, wp, tea.KeyDown)  // -> openai (responses)
+	press(t, wp, tea.KeyDown)  // -> openai
+	press(t, wp, tea.KeyEnter) // openai (third preset row)
 	if wp.state.CloudProvider != "openai" {
 		t.Fatalf("provider: want openai, got %s", wp.state.CloudProvider)
 	}

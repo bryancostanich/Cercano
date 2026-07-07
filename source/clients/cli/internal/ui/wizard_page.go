@@ -651,7 +651,7 @@ func (wp *wizardPage) selectRow() (tea.Cmd, bool) {
 			wp.authPick = false
 			wp.advance()
 			return func() tea.Msg {
-				return openChatGPTLoginModalMsg{profile: "chatgpt", setActive: true}
+				return openChatGPTLoginModalMsg{profile: "", setActive: true}
 			}, false
 		default:
 			wp.authPick = false

@@ -145,15 +145,13 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		sp.cloudSelected = ""
 		return "deleted " + name, nil, nil
 	case cloudCommitSignIn:
-		// The device-code sign-in runs in a modal owned by the root model;
-		// hand it the profile + model to create and let it drive the stream.
-		profile := strings.TrimSpace(sp.cloudDraft.Name)
-		if profile == "" {
-			profile = "chatgpt"
-		}
+		// The device-code sign-in runs in a modal owned by the root model. The
+		// profile name is owned by the server (canonical "chatgpt"), so send an
+		// empty name — this way /config and the wizard produce the same single
+		// profile instead of one named after whichever row launched it.
 		model := strings.TrimSpace(sp.cloudDraft.Model)
 		return "starting ChatGPT sign-in…", func() tea.Msg {
-			return openChatGPTLoginModalMsg{profile: profile, model: model, setActive: true}
+			return openChatGPTLoginModalMsg{profile: "", model: model, setActive: true}
 		}, nil
 	case cloudCommitKey:
 		if sp.agent == nil {

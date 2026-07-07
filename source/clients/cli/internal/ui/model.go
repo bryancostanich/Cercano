@@ -1530,6 +1530,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.frame.Done {
 			if msg.frame.Ok {
+				// The server owns the canonical profile name; reflect it so the
+				// success message is right even when the client sent none.
+				if msg.frame.ProfileName != "" {
+					m.chatgptLoginModal.profile = msg.frame.ProfileName
+				}
 				m.chatgptLoginModal.setDone(msg.frame.AccountID)
 			} else {
 				m.chatgptLoginModal.setFailed(msg.frame.Error)

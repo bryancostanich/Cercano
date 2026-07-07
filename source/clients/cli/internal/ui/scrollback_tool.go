@@ -343,36 +343,55 @@ func renderToolGroup(entries []ToolEntry, width int, styles theme.Styles, md *re
 // rail anywhere down its length (see MouseToggleFold) — not just the far-up
 // arrow. No-op on lines whose offset-2 byte isn't the expected plain space.
 func railBody(body []string) {
-	rail := lipgloss.NewStyle().Faint(true)
 	for k := 1; k < len(body); k++ {
 		g := "│"
 		if k == len(body)-1 {
 			g = "╰"
 		}
-		if l := body[k]; len(l) >= 3 && l[2] == ' ' {
-			body[k] = l[:2] + rail.Render(g) + l[3:]
-		}
+		body[k] = overlayRail(body[k], 2, g)
 	}
 }
 
-type toolArrowRow struct {
-	Line    int
-	Entry   int
-	Group   bool // true = collapse/expand the whole run; false = toggle this entry's body
-	Rail    bool // a rail line: collapse only when the click is in the left gutter (x <= RailCol)
-	RailCol int  // the rail's column
+// overlayRail replaces the plain space at byte offset col of line with a faint
+// rail glyph, leaving the rest intact. No-op when that byte isn't a space, so it
+// never corrupts styled content — used to draw the collapse rail (both the
+// per-entry and the outer group rail) without re-plumbing the render functions.
+func overlayRail(line string, col int, glyph string) string {
+	if len(line) > col && line[col] == ' ' {
+		return line[:col] + lipgloss.NewStyle().Faint(true).Render(glyph) + line[col+1:]
+	}
+	return line
 }
 
-// entryRailRows emits rail toolArrowRows for an expanded entry's body lines
-// (every line after the header), targeting that entry so a click in the left
-// gutter collapses it. startLine is the entry's first line within the block;
-// railCol is the rail's column relative to the block (2 for a standalone entry,
-// 4 for one nested under a group header).
-func entryRailRows(seg string, startLine, entry, railCol int) []toolArrowRow {
+type toolArrowRow struct {
+	Line  int
+	Entry int
+	Group bool // true = collapse/expand the whole run; false = toggle this entry's body
+	// When RailMax > 0 this row is a rail: it claims a click only within
+	// [RailMin, RailMax) (a bounded left-gutter zone). RailMax == 0 marks a
+	// full-width toggle row (the arrow/header) that claims any x on its line.
+	RailMin int
+	RailMax int
+}
+
+// Absolute click columns for tool collapse rails, = block columns plus the
+// entryIndent pad renderToolGroupBlock applies. A standalone entry's rail (and
+// a group's outer rail) claims the left gutter [0, toolRailContentCol); a nested
+// entry's own rail claims [toolRailContentCol, toolRailNestedContentCol).
+const (
+	toolRailContentCol       = 6
+	toolRailNestedContentCol = 8
+)
+
+// railRows emits rail toolArrowRows for the body lines of seg (every line after
+// its header), targeting entry (or the whole group when group is true) and
+// claiming clicks in [railMin, railMax). startLine is seg's first line within
+// the block.
+func railRows(seg string, startLine, entry int, group bool, railMin, railMax int) []toolArrowRow {
 	n := strings.Count(seg, "\n") + 1
 	rows := make([]toolArrowRow, 0, n-1)
 	for ln := 1; ln < n; ln++ {
-		rows = append(rows, toolArrowRow{Line: startLine + ln, Entry: entry, Group: false, Rail: true, RailCol: railCol})
+		rows = append(rows, toolArrowRow{Line: startLine + ln, Entry: entry, Group: group, RailMin: railMin, RailMax: railMax})
 	}
 	return rows
 }
@@ -386,7 +405,8 @@ func renderToolGroupSpans(entries []ToolEntry, width int, styles theme.Styles, m
 		seg := renderToolEntry(entries[0], width, opts.FocusedIdx == 0, styles, md)
 		rows := []toolArrowRow{{Line: 0, Entry: 0, Group: false}}
 		if !entries[0].Folded {
-			rows = append(rows, entryRailRows(seg, 0, 0, 2)...)
+			// Standalone entry: the whole left gutter collapses it.
+			rows = append(rows, railRows(seg, 0, 0, false, 0, toolRailContentCol)...)
 		}
 		return seg, rows
 	}
@@ -405,12 +425,26 @@ func renderToolGroupSpans(entries []ToolEntry, width int, styles theme.Styles, m
 			seg := indentBlock("  ", renderToolEntry(e, width-2, i == opts.FocusedIdx, styles, md))
 			rows = append(rows, toolArrowRow{Line: cursor, Entry: i, Group: false})
 			if !e.Folded {
-				rows = append(rows, entryRailRows(seg, cursor, i, 4)...)
+				// Nested entry: its own rail is one level in, [content, nested).
+				rows = append(rows, railRows(seg, cursor, i, false, toolRailContentCol, toolRailNestedContentCol)...)
 			}
 			lines = append(lines, seg)
 			cursor += strings.Count(seg, "\n") + 1
 		}
-		return strings.Join(lines, "\n"), rows
+		// Outer group rail: a │ down every line below the header (block col 2,
+		// aligned under the summary ▾), ╰ hook on the last line, with a
+		// group-collapse click zone in the far-left gutter [0, content).
+		blockLines := strings.Split(strings.Join(lines, "\n"), "\n")
+		last := len(blockLines) - 1
+		for ln := 1; ln <= last; ln++ {
+			g := "│"
+			if ln == last {
+				g = "╰"
+			}
+			blockLines[ln] = overlayRail(blockLines[ln], 2, g)
+			rows = append(rows, toolArrowRow{Line: ln, Entry: 0, Group: true, RailMin: 0, RailMax: toolRailContentCol})
+		}
+		return strings.Join(blockLines, "\n"), rows
 	}
 
 	// Collapsed multi-entry run: rolling-consumption summary (completed calls

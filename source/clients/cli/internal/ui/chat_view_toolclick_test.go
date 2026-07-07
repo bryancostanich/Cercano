@@ -86,7 +86,9 @@ func TestMouseToggleFold_EntryArrowTogglesAndBodyFallsThrough(t *testing.T) {
 	c.groupExpanded[1] = true
 	c.rebuild()
 	line := findPlainLine(t, &c, "b.go")
-	if !c.MouseToggleFold(2, line) {
+	// The per-call arrow sits one level in (x=6); the far-left gutter (x<6) is
+	// the outer group rail, so click the arrow column to unfold the entry.
+	if !c.MouseToggleFold(6, line) {
 		t.Fatalf("click on per-entry arrow row %d was not claimed", line)
 	}
 	if entries[2].Tool.Folded {
@@ -94,16 +96,15 @@ func TestMouseToggleFold_EntryArrowTogglesAndBodyFallsThrough(t *testing.T) {
 	}
 	c.rebuild()
 	bodyLine := findPlainLine(t, &c, `"path":"b.go"`)
-	// Clicking the body content (right of the collapse rail) falls through so
-	// tool output stays selectable.
+	// Body content (right of both rails) falls through so output stays selectable.
 	if c.MouseToggleFold(20, bodyLine) {
 		t.Fatalf("click on body content at line %d should not toggle a fold", bodyLine)
 	}
-	// Clicking the rail gutter (left) collapses the entry back.
-	if !c.MouseToggleFold(2, bodyLine) {
-		t.Fatalf("click on the rail gutter at line %d should collapse the entry", bodyLine)
+	// The entry's own rail (one level in) collapses just that entry.
+	if !c.MouseToggleFold(6, bodyLine) {
+		t.Fatalf("click on the entry rail at line %d should collapse the entry", bodyLine)
 	}
 	if !entries[2].Tool.Folded {
-		t.Fatal("rail-gutter click did not re-fold the entry")
+		t.Fatal("entry-rail click did not re-fold the entry")
 	}
 }

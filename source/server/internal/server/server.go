@@ -2344,12 +2344,19 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		case agent.LoopToolUseStop:
 			// Per-tool trace to the server log so a runaway/looping turn is
 			// diagnosable after the fact (which tools, what args, in what order).
-			fmt.Fprintf(os.Stderr, "[tool-loop] call %s args=%s\n", ev.ToolName, ev.ArgsJSON)
+			// Summarized: Edit/Write args carry whole file bodies, which would
+			// otherwise flood the shared singleton log with kilobytes per call.
+			argsSummary := summarizeArgs(ev.ArgsJSON)
+			fmt.Fprintf(os.Stderr, "[tool-loop] call %s args=%s\n", ev.ToolName, argsSummary)
 			stream.Send(&proto.StreamProcessResponse{
 				Payload: &proto.StreamProcessResponse_ToolUseStop{
 					ToolUseStop: &proto.ToolUseStop{
-						ToolUseId:   ev.ToolUseID,
-						ArgsSummary: ev.ArgsJSON,
+						ToolUseId: ev.ToolUseID,
+						// Summary, not the payload: the CLI parses this to render
+						// the folded entry and fetches full args lazily via
+						// GetToolCall. Streaming full file bodies to every client
+						// on every Edit/Write was wasted bandwidth.
+						ArgsSummary: argsSummary,
 					},
 				},
 			})

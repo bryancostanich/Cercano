@@ -1,6 +1,8 @@
 # Meridian / OpenCode-impersonation cloud route — diagnosis
 
-**Status:** diagnosis captured 2026-07-06. Short-term fix = fork Meridian + PR.
+**Status:** diagnosis captured 2026-07-06; cross-session incident root-caused
+and Cercano-side fixes shipped 2026-07-07 (see below). Remaining defect
+(within-conversation turn lag) needs the Meridian-side fix: fork + PR.
 Long-term = native Cercano adapter, possibly re-implement Meridian.
 
 ## What this documents
@@ -82,12 +84,80 @@ the model only sees 6 core tools (read/write/edit/bash/glob/grep) until the rest
 are "discovered." Session eviction repeatedly resets that discovery, so tools
 like `git_status`, `checkpoint`, `dispatch` are re-discovered over and over.
 
+### Symptom 3 — tool results cross-delivered between concurrent sessions (2026-07-07) — ROOT-CAUSED, CERCANO SIDE FIXED
+
+Observed across several concurrent dev threads: tool calls returning output
+belonging to a *different* command — often another thread's; the same stale
+file content replayed for many consecutive calls regardless of what was asked;
+an assistant turn "rewritten" into a different command than the one issued
+(another lineage's tool_use adopted and executed); ~50% intermittent; one-turn
+result lag.
+
+**How Meridian routes a request to a Claude SDK session** (read from the
+shipped v1.45.0 bundle, `src/proxy/` region):
+
+1. `x-opencode-session` header present → `sessionCache[header]`.
+2. Header absent → `fingerprintCache[sha256(cwd + first 2000 chars of the
+   FIRST user message)]` — a pure content key.
+3. The matched entry is lineage-verified by message-hash prefix/suffix
+   overlap. **A mismatch DELETES the cache entry** (`verifyLineage` →
+   `cache.delete`) and evicts; a fuzzy match "allows resume" of the cached SDK
+   session; the resume path can replay another request's unconsumed buffer
+   (the 2026-07-04 bug below).
+4. Sessions persist across Meridian restarts in
+   **`~/.cache/meridian/sessions.json`** (`storeSharedSession` /
+   `lookupSharedSession`), keyed the same way.
+5. Escape hatch: a `requestSource` of `subagent-*` / `fork-*` skips lineage
+   lookup entirely (`isIndependentSession`).
+
+**The Cercano-side hole:** the session id was stamped only at the top of
+`StreamProcess` (the conversation id). Everything else either inherited the
+parent's id with a disjoint history — dispatch subagents, dispatch one-shots,
+`context_edit` — which *evicted the parent conversation's lineage* on every
+call, or went out headerless and collapsed onto the content-fingerprint key,
+which collides across concurrent conversations in the same repo with
+templated prompts. Live evidence: one adapter session's `msgCount` running
+1187→1197 then dropping to 1170 and climbing again (two history views
+alternating on one key); 114 replay-heuristic warnings in a single log
+window.
+
+**Shipped fixes (commit `204fb3cc`):**
+
+- `internal/llm/session.go` — provider-neutral `WithSessionID` /
+  `SessionIDFromContext`; the anthropic helper delegates to it.
+- The anthropic adapter never sends a meridian-route request without a
+  session id: unstamped calls get a random `anon-<hex>` id per request,
+  closing the fingerprint fallback permanently.
+- Dispatch one-shots override the inherited ctx with a fresh `oneshot-<hex>`
+  id; agentic dispatch scopes the subagent loop to its sub-conversation id.
+
+Companion CLI fix (commit `53654a8c`, not Meridian-specific): stream events
+are fenced by turn generation, so a canceled turn's late error/close events
+can no longer tear down the next prompt.
+
+**Recovery after a corruption episode:** poisoned lineage survives Meridian
+restarts via `sessions.json`. Full clean: kill Meridian, delete
+`~/.cache/meridian/sessions.json` (safe — it is only the resume cache;
+conversation history lives in Cercano's SQLite), restart. Continue affected
+work in *fresh* conversations; resuming a corrupted conversation re-adopts
+its tainted lineage key.
+
+**Still open:** Symptom 2's within-conversation one-turn lag — driven by the
+unstable `x-opencode-request` lifecycle — is untouched by the above and
+still reproduces in long resumed threads. That is the Meridian-side work.
+
 ## Fix directions
 
 - **Short term (forking + PR to Meridian):** either make Cercano's impersonation
   faithful enough that the adapter stops evicting sessions (stable
   `x-opencode-request`/session lifecycle), or fix the adapter's stale-session
-  handling and disable deferred-tool discovery for this client.
+  handling and disable deferred-tool discovery for this client. The PR should
+  also cover the Symptom-3 sharp edges: `verifyLineage` must not *delete* a
+  session entry on divergence (bypass it instead), and replay must be scoped
+  strictly to the current request id. Also worth adopting Cercano-side:
+  Meridian already honors a `requestSource` of `subagent-*`/`fork-*` to skip
+  lineage matching — find the carrying header and stamp dispatched work with
+  it as a second layer of isolation.
 - **Long term:** a **native Cercano adapter** in Meridian — handle Cercano's
   real anthropic `tool_result` format directly, swap `x-opencode-*` for
   `x-cercano-*`, drop the impersonation (the `TODO(cercano-native-bridge-adapter)`
@@ -98,7 +168,13 @@ like `git_status`, `checkpoint`, `dispatch` are re-discovered over and over.
 ## Code pointers
 
 - `source/server/internal/llm/anthropic/client.go` — `route=meridian`,
-  `headerRoundTripper`, the `x-opencode-*` headers, `TODO(cercano-native-bridge-adapter)`.
+  `headerRoundTripper`, the `x-opencode-*` headers, the `anon-<hex>` fallback
+  for unstamped calls, `TODO(cercano-native-bridge-adapter)`.
+- `source/server/internal/llm/session.go` — provider-neutral session-identity
+  ctx key; every out-of-conversation call site (dispatch one-shot, agentic
+  subagent) must stamp through it.
+- `~/.cache/meridian/sessions.json` — Meridian's persistent session store
+  (delete to purge poisoned lineage; conversation history is unaffected).
 - `source/server/internal/server/agentic_dispatch.go` — `resolveGrantName`
   strips a leading `mcp__<server>__` prefix (recovers `mcp__oc__Read` → `Read`).
 - `source/server/internal/meridian/` — the local Meridian proxy manager;

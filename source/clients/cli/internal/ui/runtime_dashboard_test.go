@@ -117,14 +117,12 @@ func TestRuntimeDashboardViewShowsRuntimeDashboardData(t *testing.T) {
 	view := ansi.Strip(full)
 	for _, want := range []string{
 		"local config",
-		"cloud / external",
 		"runtime status",
 		"download catalog",
 		"installed models",
 		"running processes",
 		"local model server log",
 		"qwen",
-		"openai proxy",
 		"server ready",
 	} {
 		if !strings.Contains(view, want) {
@@ -216,11 +214,9 @@ func TestRuntimeDashboardViewSeparatesConfigAndOpenLogs(t *testing.T) {
 	view := ansi.Strip(full)
 	for _, want := range []string{
 		"local config",
-		"cloud / external",
 		"download catalog",
 		"local model server log",
 		"llama-server",
-		"openai",
 		"Qwen2.5 Coder",
 		"server ready",
 		"installed models",
@@ -356,17 +352,9 @@ func TestRuntimeDashboardBlocksUseFullPageWidth(t *testing.T) {
 	}
 
 	pageW := dashboardPanelWidth(dashboard.width)
-	leftW, rightW := dashboardConfigBlockWidths(pageW)
-	if leftW != pageW/2 || rightW != pageW-leftW {
-		t.Fatalf("top block widths = %d/%d, want 50%% split of %d", leftW, rightW, pageW)
-	}
-	localBlock := renderRuntimeDashboardBlock("local config", localConfigFields(dashboard.snapshot), leftW, dashboard.palette, dashboard.styles)
-	cloudBlock := renderRuntimeDashboardBlock("cloud / external", cloudConfigFields(dashboard.snapshot), rightW, dashboard.palette, dashboard.styles)
-	if got := maxRenderedLineWidth(localBlock); got != leftW {
-		t.Fatalf("local block width = %d, want %d:\n%s", got, leftW, ansi.Strip(localBlock))
-	}
-	if got := maxRenderedLineWidth(cloudBlock); got != rightW {
-		t.Fatalf("cloud block width = %d, want %d:\n%s", got, rightW, ansi.Strip(cloudBlock))
+	localBlock := renderRuntimeDashboardBlock("local config", localConfigFields(dashboard.snapshot), pageW, dashboard.palette, dashboard.styles)
+	if got := maxRenderedLineWidth(localBlock); got != pageW {
+		t.Fatalf("local block width = %d, want %d:\n%s", got, pageW, ansi.Strip(localBlock))
 	}
 	if got := maxRenderedLineWidth(dashboard.renderConfigBlocks()); got != pageW {
 		t.Fatalf("config row width = %d, want %d:\n%s", got, pageW, ansi.Strip(dashboard.renderConfigBlocks()))

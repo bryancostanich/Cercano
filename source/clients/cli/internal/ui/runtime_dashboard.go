@@ -653,14 +653,11 @@ type runtimeDashboardField struct {
 	Hint  string
 }
 
+// renderConfigBlocks shows only the local runtime config: cloud configuration
+// has a whole tab of its own (Cloud), so the dashboard no longer mirrors it.
 func (d *runtimeDashboard) renderConfigBlocks() string {
 	totalW := dashboardPanelWidth(d.width)
-	leftW, rightW := dashboardConfigBlockWidths(totalW)
-	return lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		renderRuntimeDashboardBlock("local config", localConfigFields(d.snapshot), leftW, d.palette, d.styles),
-		renderRuntimeDashboardBlock("cloud / external", cloudConfigFields(d.snapshot), rightW, d.palette, d.styles),
-	)
+	return renderRuntimeDashboardBlock("local config", localConfigFields(d.snapshot), totalW, d.palette, d.styles)
 }
 
 func (d *runtimeDashboard) renderRuntimeStatusBlock() string {
@@ -978,28 +975,6 @@ func localConfigFields(s runtimeDashboardSnapshot) []runtimeDashboardField {
 	}
 }
 
-func cloudConfigFields(s runtimeDashboardSnapshot) []runtimeDashboardField {
-	if s.ConfigErr != nil {
-		return []runtimeDashboardField{{Label: "config", Value: s.ConfigErr.Error(), Hint: "error"}}
-	}
-	cfg := s.Config
-	if cfg == nil {
-		return []runtimeDashboardField{{Label: "config", Value: "unavailable"}}
-	}
-	keyState := "missing"
-	if cfg.CloudAPIKeySet {
-		keyState = "configured"
-	}
-	endpointValue, endpointHint := externalEndpointSummary(runtimeStatusEndpoints(s.Status))
-	return []runtimeDashboardField{
-		{Label: "provider", Value: cfg.CloudProvider},
-		{Label: "model", Value: cfg.CloudModel},
-		{Label: "base URL", Value: cfg.CloudBaseURL},
-		{Label: "API key", Value: keyState, Hint: cfg.CloudState},
-		{Label: "endpoints", Value: endpointValue, Hint: endpointHint},
-	}
-}
-
 func localServerSummary(status *agentclient.RuntimeStatus, configuredRuntime string) string {
 	if status == nil {
 		return "status unavailable"
@@ -1023,49 +998,6 @@ func localServerSummary(status *agentclient.RuntimeStatus, configuredRuntime str
 		return "not running"
 	}
 	return strings.Join(running, "; ")
-}
-
-func externalEndpointSummary(endpoints []agentclient.RuntimeEndpoint) (string, string) {
-	var external []agentclient.RuntimeEndpoint
-	for _, endpoint := range endpoints {
-		if isExternalEndpoint(endpoint) {
-			external = append(external, endpoint)
-		}
-	}
-	if len(external) == 0 {
-		return "none configured", ""
-	}
-	first := external[0]
-	value := countLabel(len(external), "endpoint")
-	hint := strings.Join(nonEmptyParts(firstNonEmpty(first.DisplayName, first.ID), first.State, first.Scope), " | ")
-	if len(external) > 1 {
-		hint += fmt.Sprintf(" | +%d", len(external)-1)
-	}
-	return value, hint
-}
-
-func isExternalEndpoint(endpoint agentclient.RuntimeEndpoint) bool {
-	id := strings.ToLower(endpoint.ID)
-	scope := strings.ToLower(endpoint.Scope)
-	kind := strings.ToLower(endpoint.Kind)
-	if scope == "local" {
-		return false
-	}
-	return strings.HasPrefix(id, "cloud:") ||
-		scope == "cloud" ||
-		scope == "remote" ||
-		scope == "lan" ||
-		kind == "cloud" ||
-		strings.Contains(kind, "openai") ||
-		strings.Contains(kind, "anthropic") ||
-		strings.Contains(kind, "google")
-}
-
-func runtimeStatusEndpoints(status *agentclient.RuntimeStatus) []agentclient.RuntimeEndpoint {
-	if status == nil {
-		return nil
-	}
-	return status.Endpoints
 }
 
 func runtimeStatusLogs(status *agentclient.RuntimeStatus) []agentclient.RuntimeLogEntry {
@@ -1502,11 +1434,6 @@ func dashboardContentHeight(height int) int {
 		return 1
 	}
 	return contentH
-}
-
-func dashboardConfigBlockWidths(totalW int) (int, int) {
-	leftW := totalW / 2
-	return leftW, totalW - leftW
 }
 
 func dashboardBlockContentWidth(totalW int) int {

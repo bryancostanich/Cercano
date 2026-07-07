@@ -197,6 +197,56 @@ func TestClient_Chat_SessionHeader_FromLLMContextKey(t *testing.T) {
 	}
 }
 
+// A call marked as an independent session (dispatch subagent / one-shot) must
+// emit x-meridian-source with a subagent- prefix on the meridian route, which
+// tells Meridian's adapter to skip lineage matching entirely — a second layer
+// of isolation on top of the unique session id, so a subagent can never be
+// mistaken for a continuation of the parent conversation.
+func TestClient_Chat_IndependentSession_EmitsMeridianSource(t *testing.T) {
+	var seenSource, seenSession string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenSource = r.Header.Get("x-meridian-source")
+		seenSession = r.Header.Get("x-opencode-session")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"id":"m_1","type":"message","role":"assistant","content":[],"model":"claude","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer srv.Close()
+	c := NewClient(Config{BaseURL: srv.URL, APIKey: "dummy", Route: "meridian"})
+	ctx := llm.WithSessionID(t.Context(), "sub-42")
+	ctx = llm.WithIndependentSession(ctx)
+	if _, err := c.Chat(ctx, ChatRequest{Model: "claude", MaxTokens: 10}); err != nil {
+		t.Fatal(err)
+	}
+	if seenSource != "subagent-sub-42" {
+		t.Errorf("x-meridian-source: got %q want subagent-sub-42", seenSource)
+	}
+	if seenSession != "sub-42" {
+		t.Errorf("session header should still ride alongside: got %q", seenSession)
+	}
+}
+
+// A normal conversational turn must NOT emit x-meridian-source — it wants
+// Meridian's lineage matching, not the skip.
+func TestClient_Chat_ConversationalTurn_NoMeridianSource(t *testing.T) {
+	var seenSource string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenSource = r.Header.Get("x-meridian-source")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"id":"m_1","type":"message","role":"assistant","content":[],"model":"claude","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer srv.Close()
+	c := NewClient(Config{BaseURL: srv.URL, APIKey: "dummy", Route: "meridian"})
+	ctx := llm.WithSessionID(t.Context(), "conv-1")
+	if _, err := c.Chat(ctx, ChatRequest{Model: "claude", MaxTokens: 10}); err != nil {
+		t.Fatal(err)
+	}
+	if seenSource != "" {
+		t.Errorf("conversational turn must not emit x-meridian-source, got %q", seenSource)
+	}
+}
+
 func TestClient_Chat_NoSessionHeader_WhenUnset(t *testing.T) {
 	var seenSession string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

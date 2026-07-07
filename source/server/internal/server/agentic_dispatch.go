@@ -215,6 +215,7 @@ func (s *Server) runAgenticDispatch(ctx context.Context, spec dispatch.Spec, sel
 		sessionID = conversation.NewID()
 	}
 	ctx = llm.WithSessionID(ctx, sessionID)
+	ctx = llm.WithIndependentSession(ctx) // skip Meridian lineage matching for subagent turns
 
 	// 4. Run the bounded tool loop.
 	var buf strings.Builder

@@ -666,6 +666,12 @@ type ContextTurn struct {
 	Body      string
 	Truncated bool
 	EstTokens int
+	// Tool metadata from the turn's first tool block (see ContextTurn proto):
+	// lets the /c viewer reuse the main chat's rich tool renderers.
+	ToolName   string // tool_use turns: the tool's name
+	ToolUseID  string // tool_use turns: the call's correlation id
+	ToolArgs   string // tool_use turns: input JSON, capped at 4 KB
+	ToolUseRef string // tool_result turns: originating call's id
 }
 
 // GetConversationTurns returns side-effect-free turn summaries for the /c viewer.
@@ -677,13 +683,17 @@ func (c *Client) GetConversationTurns(ctx context.Context, conversationID string
 	out := make([]ContextTurn, 0, len(resp.GetTurns()))
 	for _, t := range resp.GetTurns() {
 		out = append(out, ContextTurn{
-			ID:        t.GetId(),
-			Role:      t.GetRole(),
-			Kind:      t.GetKind(),
-			Preview:   t.GetPreview(),
-			Body:      t.GetBody(),
-			Truncated: t.GetTruncated(),
-			EstTokens: int(t.GetEstTokens()),
+			ID:         t.GetId(),
+			Role:       t.GetRole(),
+			Kind:       t.GetKind(),
+			Preview:    t.GetPreview(),
+			Body:       t.GetBody(),
+			Truncated:  t.GetTruncated(),
+			EstTokens:  int(t.GetEstTokens()),
+			ToolName:   t.GetToolName(),
+			ToolUseID:  t.GetToolUseId(),
+			ToolArgs:   t.GetToolArgs(),
+			ToolUseRef: t.GetToolUseRef(),
 		})
 	}
 	return out, nil

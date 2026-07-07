@@ -50,6 +50,9 @@ func contextTurnView(t conversation.Turn, tok contextmeter.Tokenizer) *proto.Con
 	kind := "text"
 	tokenSrc := t.Content
 	var previewParts, bodyParts []string
+	// Tool metadata from the turn's first tool block — carried so the /c
+	// viewer can reuse the main chat's rich tool renderers (highlight, diff).
+	var toolName, toolUseID, toolArgs, toolUseRef string
 
 	if t.BlocksJSON != "" {
 		var blocks []llm.Block
@@ -61,10 +64,18 @@ func contextTurnView(t conversation.Turn, tok contextmeter.Tokenizer) *proto.Con
 					kind = "tool_use"
 					previewParts = append(previewParts, b.ToolName+"("+ctPreview(string(b.ToolInput))+")")
 					bodyParts = append(bodyParts, b.ToolName+" "+string(b.ToolInput))
+					if toolName == "" {
+						toolName = b.ToolName
+						toolUseID = b.ToolUseID
+						toolArgs, _ = capBody(string(b.ToolInput), contextTurnBodyMax)
+					}
 				case llm.BlockToolResult:
 					kind = "tool_result"
 					previewParts = append(previewParts, "→ "+ctPreview(b.Content))
 					bodyParts = append(bodyParts, b.Content)
+					if toolUseRef == "" {
+						toolUseRef = b.ToolUseRef
+					}
 				case llm.BlockText:
 					if b.Text == "" {
 						continue
@@ -93,13 +104,17 @@ func contextTurnView(t conversation.Turn, tok contextmeter.Tokenizer) *proto.Con
 
 	bodyStr, truncated := capBody(body, contextTurnBodyMax)
 	return &proto.ContextTurn{
-		Id:        t.ID,
-		Role:      t.Role,
-		Kind:      kind,
-		Preview:   ctTruncate(ctPreview(preview), contextTurnPreviewMax),
-		Body:      bodyStr,
-		Truncated: truncated,
-		EstTokens: int32(tok.Count(tokenSrc)),
+		Id:         t.ID,
+		Role:       t.Role,
+		Kind:       kind,
+		Preview:    ctTruncate(ctPreview(preview), contextTurnPreviewMax),
+		Body:       bodyStr,
+		Truncated:  truncated,
+		EstTokens:  int32(tok.Count(tokenSrc)),
+		ToolName:   toolName,
+		ToolUseId:  toolUseID,
+		ToolArgs:   toolArgs,
+		ToolUseRef: toolUseRef,
 	}
 }
 

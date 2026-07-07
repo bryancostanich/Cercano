@@ -128,3 +128,36 @@ func TestCtTruncate_RuneBoundary(t *testing.T) {
 		t.Errorf("expected ellipsis suffix, got %q", got)
 	}
 }
+
+func TestGetConversationTurns_ToolMetadata(t *testing.T) {
+	srv, store := newServerWithStore(t)
+	ctx := context.Background()
+	convID := "conv-toolmeta"
+	if err := store.EnsureConversation(ctx, convID, "", "test-model"); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	useJSON, _ := json.Marshal([]llm.Block{{Type: llm.BlockToolUse, ToolUseID: "u9", ToolName: "Read", ToolInput: json.RawMessage(`{"path":"main.go"}`)}})
+	resJSON, _ := json.Marshal([]llm.Block{{Type: llm.BlockToolResult, ToolUseRef: "u9", Content: "package main"}})
+	for _, tn := range []conversation.Turn{
+		{ConversationID: convID, Role: "assistant", BlocksJSON: string(useJSON)},
+		{ConversationID: convID, Role: "user", BlocksJSON: string(resJSON)},
+	} {
+		if err := store.Append(ctx, tn); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+	resp, err := srv.GetConversationTurns(ctx, &proto.GetConversationTurnsRequest{ConversationId: convID})
+	if err != nil {
+		t.Fatalf("GetConversationTurns: %v", err)
+	}
+	if len(resp.Turns) != 2 {
+		t.Fatalf("turns = %d, want 2", len(resp.Turns))
+	}
+	use, res := resp.Turns[0], resp.Turns[1]
+	if use.ToolName != "Read" || use.ToolUseId != "u9" || use.ToolArgs != `{"path":"main.go"}` {
+		t.Errorf("tool_use metadata: name %q id %q args %q", use.ToolName, use.ToolUseId, use.ToolArgs)
+	}
+	if res.ToolUseRef != "u9" {
+		t.Errorf("tool_result ref = %q, want u9", res.ToolUseRef)
+	}
+}

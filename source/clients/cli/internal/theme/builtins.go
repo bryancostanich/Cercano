@@ -15,6 +15,8 @@ func BuiltinThemes() []Theme {
 		{Name: "phosphor", Palette: phosphorPalette()},
 		{Name: "synthwave", Palette: synthwavePalette()},
 		{Name: "daylight", Palette: daylightPalette()},
+		{Name: "meadow", Palette: meadowPalette()},
+		{Name: "dawnwave", Palette: dawnwavePalette()},
 	}
 }
 
@@ -42,5 +44,29 @@ func daylightPalette() Palette {
 		Primary: hc("#5A3A0A"), Bright: hc("#7A4E0A"), Dim: hc("#C9B68C"), Accent: hc("#1E7A3C"),
 		Info: hc("#1763A0"), Muted: hc("#8A7A55"), Success: hc("#2E7D32"), Warn: hc("#B8860B"), Error: hc("#B23A3A"),
 		BufferLink: hc("#1763A0"), BufferCode: hc("#6A4BA3"), BufferLime: hc("#1E7A3C"), BufferError: hc("#B23A3A"), BufferUserBg: hc("#E6D7B0"),
+	}
+}
+
+// meadowPalette is the light inverse of phosphor: deep green ink on pale green
+// paper. Same green/teal hue family as phosphor, values flipped for a light bg
+// (dark Primary/Bright text, pale Dim/BufferUserBg, accents darkened to read).
+func meadowPalette() Palette {
+	return Palette{
+		BgDeep: hc("#EDF6E9"), Surface: hc("#E0EED9"), BorderDim: hc("#C4DCB8"), Border: hc("#8DBE80"),
+		Primary: hc("#14571A"), Bright: hc("#1F7A28"), Dim: hc("#B6D3AA"), Accent: hc("#3C7A1E"),
+		Info: hc("#1A7A6E"), Muted: hc("#6A8A61"), Success: hc("#2E7D32"), Warn: hc("#8A6D0A"), Error: hc("#B23A3A"),
+		BufferLink: hc("#1A7A6E"), BufferCode: hc("#5A6A24"), BufferLime: hc("#3C7A1E"), BufferError: hc("#B23A3A"), BufferUserBg: hc("#DAEAD1"),
+	}
+}
+
+// dawnwavePalette is the light inverse of synthwave: magenta/violet ink and
+// cyan accents on pale lavender. Same magenta/cyan/violet hue family as
+// synthwave, values flipped for a light bg.
+func dawnwavePalette() Palette {
+	return Palette{
+		BgDeep: hc("#F7EEFA"), Surface: hc("#EEDFF5"), BorderDim: hc("#D9BFE7"), Border: hc("#B98FD1"),
+		Primary: hc("#7A2A6A"), Bright: hc("#A62E80"), Dim: hc("#D2B6DE"), Accent: hc("#0E86A4"),
+		Info: hc("#6A3FC0"), Muted: hc("#927D9F"), Success: hc("#2E7D5B"), Warn: hc("#B0700B"), Error: hc("#C13060"),
+		BufferLink: hc("#0E86A4"), BufferCode: hc("#7A46BE"), BufferLime: hc("#B0308A"), BufferError: hc("#C13060"), BufferUserBg: hc("#ECD8F0"),
 	}
 }

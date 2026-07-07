@@ -35,6 +35,33 @@ func TestRenderWithSweep_OffScreenEqualsStatic(t *testing.T) {
 	}
 }
 
+func TestRender_EmptyModelOmitsSeparator(t *testing.T) {
+	// With no model set (before the config load lands), the status line must
+	// not render a dangling "· " separator, and must still be exactly 8 lines
+	// of the fixed width.
+	out := Render(theme.Cracker(), Meta{
+		Tagline: "local-first ai coprocessor",
+		Version: "v0.1.0",
+		// Model intentionally empty.
+	})
+	text := stripAnsi(out)
+	lines := strings.Split(text, "\n")
+	if len(lines) != 8 {
+		t.Fatalf("banner: got %d lines, want 8", len(lines))
+	}
+	status := lines[6] // border, blank, wordmark×2, blank, rail, status, border
+	// The version segment ends the visible content; nothing should follow the
+	// version but padding and the right wall.
+	if strings.Contains(status, "· \u2588") {
+		t.Errorf("empty model still rendered a trailing separator: %q", status)
+	}
+	// The version's separator (" · ") appears once (tagline→version); a second
+	// "·" would mean the model separator leaked through.
+	if got := strings.Count(status, "·"); got != 1 {
+		t.Errorf("status line has %d '·' separators, want 1 (empty model): %q", got, status)
+	}
+}
+
 func TestWordmarkCols_Const(t *testing.T) {
 	if WordmarkCols != 28 {
 		t.Errorf("WordmarkCols changed: got %d want 28 (banner layout broken)", WordmarkCols)

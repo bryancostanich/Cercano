@@ -341,7 +341,10 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	splash := banner.NewAnimModel(p, banner.Meta{
 		Tagline: "local-first ai coprocessor",
 		Version: "v0.1.0",
-		Model:   "qwen3-coder",
+		// Model is left empty here and filled in by the configLoadedMsg
+		// handler once the agent reports the active locus + model, so the
+		// splash reflects the real primary profile instead of a hard-coded
+		// name. The banner render omits the segment while it's empty.
 	})
 
 	initialConvID := newConvID()
@@ -548,6 +551,22 @@ type configLoadedMsg struct {
 	OpenRuntime     string
 	CloudModel      string
 	CloudConfigured bool
+	LocusMode       string
+}
+
+// primaryModelName resolves the model that the current Locus Mode routes to
+// first, for display in the banner. cloud_only / cloud_primary favor the cloud
+// model (when a cloud provider is actually configured); the open (local) side
+// is the fallback and the default for open_primary / open_only / unset.
+func primaryModelName(openModel, cloudModel, locus string, cloudConfigured bool) string {
+	cloudSide := locus == "cloud_only" || locus == "cloud_primary"
+	if cloudSide && cloudConfigured && cloudModel != "" {
+		return cloudModel
+	}
+	if openModel != "" {
+		return openModel
+	}
+	return cloudModel
 }
 
 // fetchConfigCmd asks the agent for the current local + cloud model names so
@@ -574,6 +593,7 @@ func fetchConfigCmd(ag *agentclient.Client) tea.Cmd {
 			OpenRuntime:     cfg.OpenRuntime,
 			CloudModel:      cfg.CloudModel,
 			CloudConfigured: configured,
+			LocusMode:       cfg.LocusMode,
 		}
 	}
 }
@@ -1390,6 +1410,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cloudModel = msg.CloudModel
 		} else {
 			m.cloudModel = ""
+		}
+		// Reflect the active primary profile in the splash / scrollback banner
+		// (the scrollback banner is copied from m.splash.Meta at handoff, which
+		// happens on first user input — well after this config load lands).
+		if pm := primaryModelName(msg.OpenModel, msg.CloudModel, msg.LocusMode, msg.CloudConfigured); pm != "" {
+			m.splash.Meta.Model = pm
 		}
 		return m, nil
 

@@ -57,6 +57,7 @@ type cloudRow struct {
 	IsProfile  bool
 	HasKey     bool
 	Active     bool
+	Backup     bool // this profile is the configured fallback
 	ComingSoon bool
 	SubProfile bool // an extra (non-primary) profile listed under its provider
 	Preset     *cloudPreset
@@ -96,6 +97,7 @@ func buildCloudRowsFromProviders(view agentclient.CloudProvidersView) []cloudRow
 		rows = append(rows, cloudRow{
 			ID: "profile:" + profs[0].Name, Label: prov.Label, Tier: tier,
 			IsProfile: true, HasKey: profs[0].HasKey, Active: profs[0].Name == view.Active,
+			Backup: profs[0].Name == view.Backup,
 			Preset: preset, Profile: &profs[0],
 		})
 		// Additional profiles: indented sub-rows labeled by profile name, so two
@@ -104,6 +106,7 @@ func buildCloudRowsFromProviders(view agentclient.CloudProvidersView) []cloudRow
 			rows = append(rows, cloudRow{
 				ID: "profile:" + profs[j].Name, Label: profileSubIndent + profs[j].Name, Tier: tierCustom,
 				IsProfile: true, HasKey: profs[j].HasKey, Active: profs[j].Name == view.Active,
+				Backup:     profs[j].Name == view.Backup,
 				SubProfile: true, Preset: preset, Profile: &profs[j],
 			})
 		}
@@ -114,6 +117,7 @@ func buildCloudRowsFromProviders(view agentclient.CloudProvidersView) []cloudRow
 		rows = append(rows, cloudRow{
 			ID: "profile:" + p.Name, Label: p.Name, Tier: tierCustom,
 			IsProfile: true, HasKey: p.HasKey, Active: p.Name == view.Active,
+			Backup:  p.Name == view.Backup,
 			Profile: &view.CustomProfiles[i],
 		})
 	}
@@ -145,6 +149,11 @@ func rowAnnotation(r cloudRow) string {
 			parts = append(parts, activeLabel(r))
 		} else {
 			parts = append(parts, authHint(r))
+		}
+		// The configured fallback is marked at row level so the pair (active
+		// primary, backup) is visible at a glance.
+		if r.Backup {
+			parts = append(parts, "backup")
 		}
 		return strings.Join(parts, "  ")
 	}

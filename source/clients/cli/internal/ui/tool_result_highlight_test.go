@@ -43,6 +43,25 @@ func TestCodeLangForToolArgs(t *testing.T) {
 	}
 }
 
+func TestCodeLangForToolArgs_FilenameFallback(t *testing.T) {
+	// A bash heredoc writing a Go file → go, via the filename fallback.
+	if got := codeLangForToolArgs("Bash", `{"cmd":["bash","-lc","cd x && cat > source.go <<EOF"]}`); got != "go" {
+		t.Errorf("bash heredoc to source.go = %q, want go", got)
+	}
+	// A python heredoc.
+	if got := codeLangForToolArgs("Bash", `{"cmd":"cat > app.py <<EOF"}`); got != "python" {
+		t.Errorf("cat app.py = %q, want python", got)
+	}
+	// A bash command with no code filename → no highlighting.
+	if got := codeLangForToolArgs("Bash", `{"cmd":["bash","-lc","go test ./internal/x"]}`); got != "" {
+		t.Errorf("bash go test = %q, want empty", got)
+	}
+	// A read of a non-code file still yields nothing (path case falls through).
+	if got := codeLangForToolArgs("Read", `{"path":"notes.txt"}`); got != "" {
+		t.Errorf("read notes.txt = %q, want empty", got)
+	}
+}
+
 func TestRenderToolResultBody_ReadRendersCodeContent(t *testing.T) {
 	md := render.NewMarkdown(theme.MarkdownStyle(theme.Cracker()))
 	lines := renderToolResultBody("Read", `{"path":"main.go"}`, "package main\n\nfunc main() {}", md, 80)

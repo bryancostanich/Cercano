@@ -162,6 +162,10 @@ service Agent {
 
   // ---- Cloud profile management ----
   rpc GetCloudProfiles (GetCloudProfilesRequest) returns (GetCloudProfilesResponse) {}
+  // GetCloudProviders returns the known-provider catalog with each configured
+  // profile already grouped under its provider (primary first). The agent owns
+  // provider knowledge; the CLI renders this view without its own catalog.
+  rpc GetCloudProviders (GetCloudProvidersRequest) returns (GetCloudProvidersResponse) {}
   rpc SetActiveCloudProfile (SetActiveCloudProfileRequest) returns (SetActiveCloudProfileResponse) {}
   rpc SetCloudProfileKey (SetCloudProfileKeyRequest) returns (SetCloudProfileKeyResponse) {}
   rpc UpsertCloudProfile (UpsertCloudProfileRequest) returns (UpsertCloudProfileResponse) {}
@@ -1001,6 +1005,33 @@ message GetCloudProfilesResponse {
   // for the cloud-config screen — live updates still come via
   // MeridianStatusChanged events.
   MeridianStatus meridian_status = 3;
+}
+
+// CloudProvider is one known-provider catalog entry with the configured
+// profiles that belong to it grouped underneath (primary first). The agent
+// derives the grouping; the CLI renders it as a single provider row plus one
+// sub-row per extra profile.
+message CloudProvider {
+  string id       = 1; // stable catalog id / row key ("anthropic", "openai-responses")
+  string label    = 2; // friendly display label ("openai (responses)")
+  string flavor   = 3; // template flavor a new profile for this provider starts from
+  string backend  = 4; // template backend (chat_completions only); empty otherwise
+  string base_url = 5; // template default endpoint; user-editable
+  string tier     = 6; // "verified" | "untested" | "coming_soon"
+  // Configured profiles for this provider, primary first. Empty when the
+  // provider has no profiles yet — render the bare template row.
+  repeated CloudProfileInfo profiles = 7;
+  string primary_profile = 8; // primary profile name; empty when none configured
+}
+message GetCloudProvidersRequest {}
+message GetCloudProvidersResponse {
+  repeated CloudProvider providers = 1;
+  // Profiles that match no known provider (genuinely custom endpoints).
+  repeated CloudProfileInfo custom_profiles = 2;
+  string active = 3;
+  // Same Meridian snapshot as GetCloudProfilesResponse; present so the cloud
+  // screen needs only this one RPC.
+  MeridianStatus meridian_status = 4;
 }
 message SetActiveCloudProfileRequest  { string name = 1; }
 message SetActiveCloudProfileResponse { bool ok = 1; string error = 2; }

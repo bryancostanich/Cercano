@@ -58,3 +58,36 @@ func TestConfigSurfaceBodyKeysFallThrough(t *testing.T) {
 		t.Fatal("Up with a nil form should fall through, not be consumed")
 	}
 }
+
+// TestConfigSurfaceTabCyclesTabs verifies the reported fix: while the tab bar is
+// focused, Tab advances to the next tab and Shift+Tab steps back — keeping focus
+// on the strip so the user can keep cycling. (Cloud/UI/Models build safely with
+// a nil agent, so no live server is needed.)
+func TestConfigSurfaceTabCyclesTabs(t *testing.T) {
+	m := Model{configSurface: &configSurface{active: configTabCloud, focused: true}}
+
+	m, _, handled := m.handleConfigSurfaceKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	if !handled || !m.configSurface.focused || m.configSurface.active != configTabUI {
+		t.Fatalf("Tab on the strip should advance to the next tab and keep focus: handled=%v active=%v focused=%v",
+			handled, m.configSurface.active, m.configSurface.focused)
+	}
+
+	m, _, handled = m.handleConfigSurfaceKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if !handled || !m.configSurface.focused || m.configSurface.active != configTabCloud {
+		t.Fatalf("Shift+Tab on the strip should step back to the previous tab: handled=%v active=%v",
+			handled, m.configSurface.active)
+	}
+}
+
+// TestConfigSurfaceShiftTabInBodyReturnsToTabBar covers the keyboard round-trip:
+// once focus is in the body, Shift+Tab lifts it back to the tab strip so the
+// tabs are always reachable without reaching for the mouse or Esc.
+func TestConfigSurfaceShiftTabInBodyReturnsToTabBar(t *testing.T) {
+	m := Model{content: &settingsPage{}, configSurface: &configSurface{active: configTabUI, focused: false}}
+
+	m, _, handled := m.handleConfigSurfaceKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if !handled || !m.configSurface.focused {
+		t.Fatalf("Shift+Tab in the body should lift focus back to the tab bar: handled=%v focused=%v",
+			handled, m.configSurface.focused)
+	}
+}

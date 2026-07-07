@@ -2,102 +2,96 @@ package server
 
 import (
 	"context"
-	"sync"
 	"testing"
-	"time"
 
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/pkg/proto"
 )
 
-// blockingStream is a fakeStream whose ctx we control, and whose Send blocks on
-// a gate so we can hold a turn "in flight" while a second turn arrives.
-type blockingStream struct {
-	fakeStream
-	firstSend sync.Once
-	gate      chan struct{} // closed to release the first Send
-	released  chan struct{} // closed once the first Send has been let through
-}
-
-func (b *blockingStream) Send(m *proto.StreamProcessResponse) error {
-	b.firstSend.Do(func() {
-		close(b.released)
-		<-b.gate // hold the turn open until the test releases it
-	})
-	return b.fakeStream.Send(m)
-}
-
-// blockingProvider parks in StreamChat until its ctx is canceled, then returns
-// ctx.Err() — modeling a long/stuck upstream turn.
-type blockingProvider struct {
-	caps    llm.Capabilities
-	entered chan struct{}
-	once    sync.Once
-}
-
-func (p *blockingProvider) Name() string                   { return "blocking" }
-func (p *blockingProvider) Capabilities() llm.Capabilities { return p.caps }
-func (p *blockingProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
-	return llm.ChatResponse{}, nil
-}
-func (p *blockingProvider) StreamChat(ctx context.Context, _ llm.ChatRequest) (llm.StreamReader, error) {
-	p.once.Do(func() { close(p.entered) })
-	<-ctx.Done()
-	return nil, ctx.Err()
-}
-
-// A second turn on the SAME conversation must cancel the first turn's context —
-// two turns must never run concurrently against one conversation (they would
-// interleave persistence and share one upstream session key).
-func TestTurnExclusivity_SecondTurnCancelsFirst(t *testing.T) {
+// A second turn on the same conversation supersedes the first: it cancels the
+// first turn's context (so its in-flight provider call / tool loop unwinds) and
+// retires the first's generation, so the first turn's persistence and event
+// emission go quiet. Two turns never run "live" against one conversation.
+func TestBeginTurn_SecondSupersedesFirst(t *testing.T) {
 	srv, _ := newServerWithStore(t)
-	prov := &blockingProvider{caps: llm.Capabilities{SupportsTools: true}, entered: make(chan struct{})}
-	srv.SetCloudLLMProvider(prov)
 
-	// Turn 1: runs in a goroutine, parks in the provider until canceled.
-	firstErr := make(chan error, 1)
-	go func() {
-		s1 := &fakeStream{ctx: context.Background()}
-		firstErr <- srv.streamProcessRequestWithToolLoop(
-			&proto.ProcessRequestRequest{Input: "first", ConversationId: "conv-x"}, s1)
-	}()
-
-	select {
-	case <-prov.entered:
-	case <-time.After(3 * time.Second):
-		t.Fatal("first turn never reached the provider")
+	ctx1, gen1, release1 := srv.beginTurn(context.Background(), "conv-x")
+	defer release1()
+	if !srv.turnIsCurrent("conv-x", gen1) {
+		t.Fatal("first turn should be current immediately after beginTurn")
 	}
 
-	// Turn 2 on the same conversation. It must supersede turn 1 — which means
-	// turn 1's blocked provider call unblocks (ctx canceled) and returns.
-	prov2 := &scriptedProvider{
-		scripts: [][]llm.Block{{{Type: llm.BlockText, Text: "second done"}}},
-		caps:    llm.Capabilities{SupportsTools: true},
+	ctx2, gen2, release2 := srv.beginTurn(context.Background(), "conv-x")
+	defer release2()
+
+	// The first turn's context must now be canceled — its blocked provider
+	// call / tool loop unwinds without any waiting.
+	select {
+	case <-ctx1.Done():
+	default:
+		t.Error("superseding turn did not cancel the first turn's context")
 	}
-	srv.SetCloudLLMProvider(prov2)
-	go func() {
-		s2 := &fakeStream{ctx: context.Background()}
-		_ = srv.streamProcessRequestWithToolLoop(
-			&proto.ProcessRequestRequest{Input: "second", ConversationId: "conv-x"}, s2)
-	}()
+	if gen2 == gen1 {
+		t.Errorf("second turn must get a new generation, got %d twice", gen1)
+	}
+	// The fence: the first turn is no longer current, the second is.
+	if srv.turnIsCurrent("conv-x", gen1) {
+		t.Error("superseded generation still reads as current — its persistence would not be fenced")
+	}
+	if !srv.turnIsCurrent("conv-x", gen2) {
+		t.Error("the live turn's generation must read as current")
+	}
+	_ = ctx2
+}
+
+// A different conversation is independent: beginTurn on conv-b must not cancel
+// or supersede an active turn on conv-a.
+func TestBeginTurn_DifferentConversationsIndependent(t *testing.T) {
+	srv, _ := newServerWithStore(t)
+
+	ctxA, genA, releaseA := srv.beginTurn(context.Background(), "conv-a")
+	defer releaseA()
+	_, _, releaseB := srv.beginTurn(context.Background(), "conv-b")
+	defer releaseB()
 
 	select {
-	case <-firstErr:
-		// Turn 1 returned because turn 2 canceled it. Success.
-	case <-time.After(3 * time.Second):
-		t.Fatal("second turn did not cancel the first — turns ran concurrently on one conversation")
+	case <-ctxA.Done():
+		t.Error("a turn on another conversation canceled conv-a's turn")
+	default:
+	}
+	if !srv.turnIsCurrent("conv-a", genA) {
+		t.Error("conv-a's turn should still be current after a conv-b turn began")
 	}
 }
 
-// A superseded turn's late persistence must not land: once a newer turn owns
-// the conversation, the older turn's onTurn writes are fenced out. Otherwise a
-// stuck turn's tardy assistant turn interleaves into the live turn's history.
-func TestTurnExclusivity_SupersededTurnPersistenceFenced(t *testing.T) {
-	srv, store := newServerWithStore(t)
+// release clears the active-turn registration — but only if it is still ours.
+// A superseded turn's release must NOT remove the newer turn's handle.
+func TestBeginTurn_ReleaseIsOwnershipScoped(t *testing.T) {
+	srv, _ := newServerWithStore(t)
 
-	// gen is the generation the fence sees; a turn persists only if it still
-	// owns the conversation. Drive two turns and assert the first's fenced
-	// writes never appear after the second took over.
+	_, _, release1 := srv.beginTurn(context.Background(), "conv-z")
+	_, gen2, release2 := srv.beginTurn(context.Background(), "conv-z") // supersedes turn 1
+
+	// Turn 1 (superseded) releasing must leave turn 2's registration intact.
+	release1()
+	if !srv.hasActiveTurn("conv-z") {
+		t.Error("superseded turn's release removed the live turn's handle")
+	}
+	if !srv.turnIsCurrent("conv-z", gen2) {
+		t.Error("live turn's generation was disturbed by the superseded turn's release")
+	}
+
+	// Turn 2 releasing clears it for good.
+	release2()
+	if srv.hasActiveTurn("conv-z") {
+		t.Error("active-turn handle leaked after the live turn released")
+	}
+}
+
+// A completed real turn through the handler leaves no active-turn registration
+// (the deferred release fires on return) and persists its turn.
+func TestTurnExclusivity_CompletedTurnReleasesAndPersists(t *testing.T) {
+	srv, store := newServerWithStore(t)
 	prov := &scriptedProvider{
 		scripts: [][]llm.Block{{{Type: llm.BlockText, Text: "turn A"}}},
 		caps:    llm.Capabilities{SupportsTools: true},
@@ -110,12 +104,9 @@ func TestTurnExclusivity_SupersededTurnPersistenceFenced(t *testing.T) {
 		t.Fatalf("turn A: %v", err)
 	}
 
-	// After a clean turn, the conversation must have no lingering active-turn
-	// registration (the handle is released on return).
 	if srv.hasActiveTurn("conv-y") {
 		t.Error("active-turn handle leaked after a completed turn")
 	}
-
 	turns, _ := store.GetTurns(context.Background(), "conv-y")
 	if len(turns) == 0 {
 		t.Fatal("turn A did not persist at all")

@@ -288,12 +288,41 @@ func (c *contextView) expandedBodyLines(t agentclient.ContextTurn) []string {
 		w = 8
 	}
 	switch t.Kind {
-	case "tool_use", "tool_result":
-		// "" declared type → sniff. The real-content-type (c) signal slots in
-		// here once the agent carries a type on tool results.
+	case "tool_use":
+		// Edit/Write args render as the same +/- diff the main chat shows;
+		// other tools fall back to the shared body renderer (JSON fence,
+		// markdown, verbatim).
+		if diff := renderToolArgsDiff(t.ToolName, t.ToolArgs, w, c.styles); diff != nil {
+			return diff
+		}
+		return renderToolBody(t.Body, "", c.md, w)
+	case "tool_result":
+		// Correlate back to the originating tool_use so results render
+		// through the main chat's path — syntax highlight inferred from the
+		// call's args, JSON/markdown/plain sniffing otherwise. "" declared
+		// type → sniff; the real-content-type (c) signal slots in here once
+		// the agent carries a type on tool results.
+		if name, args, ok := c.toolUseFor(t.ToolUseRef); ok {
+			return renderToolResultBody(name, args, t.Body, c.md, w)
+		}
 		return renderToolBody(t.Body, "", c.md, w)
 	}
 	return strings.Split(c.md.Render(strings.TrimSpace(t.Body), w), "\n")
+}
+
+// toolUseFor finds the tool_use turn matching a tool_result's ref and returns
+// its tool name + args JSON. Linear scan — turn counts are small and this only
+// runs while rendering an expanded turn.
+func (c *contextView) toolUseFor(ref string) (name, args string, ok bool) {
+	if ref == "" {
+		return "", "", false
+	}
+	for _, u := range c.snapshot.Turns {
+		if u.ToolUseID == ref {
+			return u.ToolName, u.ToolArgs, true
+		}
+	}
+	return "", "", false
 }
 
 // appendTurn pushes the rendered lines + meta for one turn.
@@ -340,8 +369,18 @@ func (c *contextView) appendTurn(lines *[]string, meta *[]turnLineMeta, i int, t
 	} else {
 		badge = c.styles.Info.Render("[" + t.Role + "]")
 		switch t.Kind {
-		case "tool_use", "tool_result":
-			badge = c.styles.Muted.Render("[" + t.Kind + "]")
+		case "tool_use":
+			label := t.Kind
+			if t.ToolName != "" {
+				label = t.ToolName
+			}
+			badge = c.styles.Muted.Render("[" + label + "]")
+		case "tool_result":
+			label := t.Kind
+			if name, _, ok := c.toolUseFor(t.ToolUseRef); ok && name != "" {
+				label = "→ " + name
+			}
+			badge = c.styles.Muted.Render("[" + label + "]")
 		}
 		if i == c.focusedTurn {
 			badge = c.styles.Bright.Render("[" + t.Role + "]")

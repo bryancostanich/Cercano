@@ -4497,14 +4497,20 @@ func (x *GetToolCallResponse) GetIsError() bool {
 }
 
 type ContextTurn struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Role          string                 `protobuf:"bytes,1,opt,name=role,proto3" json:"role,omitempty"`                             // "user" | "assistant" | "system"
-	Kind          string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`                             // "text" | "tool_use" | "tool_result"
-	Preview       string                 `protobuf:"bytes,3,opt,name=preview,proto3" json:"preview,omitempty"`                       // flattened, truncated, display-ready
-	EstTokens     int32                  `protobuf:"varint,4,opt,name=est_tokens,json=estTokens,proto3" json:"est_tokens,omitempty"` // contextmeter tokenizer estimate
-	Id            string                 `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`                                 // persistent turn ID (UUID)
-	Body          string                 `protobuf:"bytes,6,opt,name=body,proto3" json:"body,omitempty"`                             // un-flattened content (newlines preserved), capped at 4 KB
-	Truncated     bool                   `protobuf:"varint,7,opt,name=truncated,proto3" json:"truncated,omitempty"`                  // true if body was capped
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Role      string                 `protobuf:"bytes,1,opt,name=role,proto3" json:"role,omitempty"`                             // "user" | "assistant" | "system"
+	Kind      string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`                             // "text" | "tool_use" | "tool_result"
+	Preview   string                 `protobuf:"bytes,3,opt,name=preview,proto3" json:"preview,omitempty"`                       // flattened, truncated, display-ready
+	EstTokens int32                  `protobuf:"varint,4,opt,name=est_tokens,json=estTokens,proto3" json:"est_tokens,omitempty"` // contextmeter tokenizer estimate
+	Id        string                 `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`                                 // persistent turn ID (UUID)
+	Body      string                 `protobuf:"bytes,6,opt,name=body,proto3" json:"body,omitempty"`                             // un-flattened content (newlines preserved), capped at 4 KB
+	Truncated bool                   `protobuf:"varint,7,opt,name=truncated,proto3" json:"truncated,omitempty"`                  // true if body was capped
+	// Tool metadata from the turn's FIRST tool block, so the /c viewer can use
+	// the same rich tool renderers as the main chat (syntax highlight, diffs).
+	ToolName      string `protobuf:"bytes,8,opt,name=tool_name,json=toolName,proto3" json:"tool_name,omitempty"`          // tool_use turns: the tool's name
+	ToolUseId     string `protobuf:"bytes,9,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`     // tool_use turns: the call's correlation id
+	ToolArgs      string `protobuf:"bytes,10,opt,name=tool_args,json=toolArgs,proto3" json:"tool_args,omitempty"`         // tool_use turns: input JSON, capped at 4 KB
+	ToolUseRef    string `protobuf:"bytes,11,opt,name=tool_use_ref,json=toolUseRef,proto3" json:"tool_use_ref,omitempty"` // tool_result turns: originating call's id
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4586,6 +4592,34 @@ func (x *ContextTurn) GetTruncated() bool {
 		return x.Truncated
 	}
 	return false
+}
+
+func (x *ContextTurn) GetToolName() string {
+	if x != nil {
+		return x.ToolName
+	}
+	return ""
+}
+
+func (x *ContextTurn) GetToolUseId() string {
+	if x != nil {
+		return x.ToolUseId
+	}
+	return ""
+}
+
+func (x *ContextTurn) GetToolArgs() string {
+	if x != nil {
+		return x.ToolArgs
+	}
+	return ""
+}
+
+func (x *ContextTurn) GetToolUseRef() string {
+	if x != nil {
+		return x.ToolUseRef
+	}
+	return ""
 }
 
 type ProposeContextEditRequest struct {
@@ -9362,7 +9396,7 @@ const file_agent_proto_rawDesc = "" +
 	"\ttool_name\x18\x02 \x01(\tR\btoolName\x12\x1b\n" +
 	"\targs_json\x18\x03 \x01(\tR\bargsJson\x12\x16\n" +
 	"\x06result\x18\x04 \x01(\tR\x06result\x12\x19\n" +
-	"\bis_error\x18\x05 \x01(\bR\aisError\"\xb0\x01\n" +
+	"\bis_error\x18\x05 \x01(\bR\aisError\"\xac\x02\n" +
 	"\vContextTurn\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x18\n" +
@@ -9371,7 +9405,13 @@ const file_agent_proto_rawDesc = "" +
 	"est_tokens\x18\x04 \x01(\x05R\testTokens\x12\x0e\n" +
 	"\x02id\x18\x05 \x01(\tR\x02id\x12\x12\n" +
 	"\x04body\x18\x06 \x01(\tR\x04body\x12\x1c\n" +
-	"\ttruncated\x18\a \x01(\bR\ttruncated\"f\n" +
+	"\ttruncated\x18\a \x01(\bR\ttruncated\x12\x1b\n" +
+	"\ttool_name\x18\b \x01(\tR\btoolName\x12\x1e\n" +
+	"\vtool_use_id\x18\t \x01(\tR\ttoolUseId\x12\x1b\n" +
+	"\ttool_args\x18\n" +
+	" \x01(\tR\btoolArgs\x12 \n" +
+	"\ftool_use_ref\x18\v \x01(\tR\n" +
+	"toolUseRef\"f\n" +
 	"\x19ProposeContextEditRequest\x12'\n" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12 \n" +
 	"\vinstruction\x18\x02 \x01(\tR\vinstruction\"Y\n" +

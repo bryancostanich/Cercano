@@ -668,6 +668,12 @@ message ContextTurn {
   string id         = 5; // persistent turn ID (UUID)
   string body       = 6; // un-flattened content (newlines preserved), capped at 4 KB
   bool   truncated  = 7; // true if body was capped
+  // Tool metadata from the turn's FIRST tool block, so the /c viewer can use
+  // the same rich tool renderers as the main chat (syntax highlight, diffs).
+  string tool_name    = 8;  // tool_use turns: the tool's name
+  string tool_use_id  = 9;  // tool_use turns: the call's correlation id
+  string tool_args    = 10; // tool_use turns: input JSON, capped at 4 KB
+  string tool_use_ref = 11; // tool_result turns: originating call's id
 }
 
 message ProposeContextEditRequest  { string conversation_id = 1; string instruction = 2; }

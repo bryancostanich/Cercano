@@ -54,6 +54,10 @@ type Config struct {
 	CloudBaseURL       string            `yaml:"cloud_base_url,omitempty"`
 	CloudProfiles      []CloudProfile    `yaml:"cloud_profiles"`
 	ActiveCloudProfile string            `yaml:"active_cloud_profile"`
+	// BackupCloudProfile names the profile that serves a request when the
+	// active profile's provider fails (see internal/llm/fallback for what
+	// counts as a failure worth failing over). Empty = no fallback.
+	BackupCloudProfile string `yaml:"backup_cloud_profile,omitempty"`
 	LocusMode          string            `yaml:"locus_mode"` // cloud_only|cloud_primary|open_primary|open_only
 	Port               string            `yaml:"port"`
 	LlamaServer        LlamaServerConfig `yaml:"llama_server"`

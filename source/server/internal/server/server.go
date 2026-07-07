@@ -462,6 +462,10 @@ func (s *Server) rebuildCloudLocked() error {
 		s.installAbsentCloud(err.Error())
 		return err
 	}
+	// A configured backup profile wraps the primary in a fallback composite;
+	// everything downstream (native loop, router, coordinator) sees one
+	// provider. A missing/unbuildable backup leaves the primary bare.
+	prov = s.wrapBackupLocked(prov, p.Name)
 	s.SetCloudLLMProvider(prov)
 	mp := agent.NewLLMModelProvider(prov, p.Model)
 	s.router.SetCloudProvider(mp)
@@ -483,11 +487,20 @@ func (s *Server) syncMeridianForProfile(p config.CloudProfile) {
 	if s.meridianMgr == nil {
 		return
 	}
-	if p.Route != "meridian" {
+	// The proxy must run when EITHER the active or the backup profile routes
+	// through Meridian — the backup dials it mid-failover, long after this
+	// sync. (Production caller rebuildCloudLocked holds cfgMu.)
+	m := p
+	if m.Route != "meridian" {
+		if bp, ok := profileByName(s.currentConfig.CloudProfiles, s.currentConfig.BackupCloudProfile); ok && bp.Route == "meridian" {
+			m = bp
+		}
+	}
+	if m.Route != "meridian" {
 		s.meridianMgr.Stop()
 		return
 	}
-	port := meridianPortFromBaseURL(p.BaseURL)
+	port := meridianPortFromBaseURL(m.BaseURL)
 	s.meridianMgr.Ensure(context.Background(), port)
 }
 

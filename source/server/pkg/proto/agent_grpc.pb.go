@@ -70,6 +70,7 @@ const (
 	Agent_GetCloudProfiles_FullMethodName           = "/agent.Agent/GetCloudProfiles"
 	Agent_GetCloudProviders_FullMethodName          = "/agent.Agent/GetCloudProviders"
 	Agent_SetActiveCloudProfile_FullMethodName      = "/agent.Agent/SetActiveCloudProfile"
+	Agent_SetBackupCloudProfile_FullMethodName      = "/agent.Agent/SetBackupCloudProfile"
 	Agent_SetCloudProfileKey_FullMethodName         = "/agent.Agent/SetCloudProfileKey"
 	Agent_UpsertCloudProfile_FullMethodName         = "/agent.Agent/UpsertCloudProfile"
 	Agent_RemoveCloudProfile_FullMethodName         = "/agent.Agent/RemoveCloudProfile"
@@ -214,6 +215,10 @@ type AgentClient interface {
 	// provider knowledge; the CLI renders this view without its own catalog.
 	GetCloudProviders(ctx context.Context, in *GetCloudProvidersRequest, opts ...grpc.CallOption) (*GetCloudProvidersResponse, error)
 	SetActiveCloudProfile(ctx context.Context, in *SetActiveCloudProfileRequest, opts ...grpc.CallOption) (*SetActiveCloudProfileResponse, error)
+	// SetBackupCloudProfile names the profile that serves requests when the
+	// active profile's provider fails (auth/rate-limit/5xx/network). An empty
+	// name clears the backup.
+	SetBackupCloudProfile(ctx context.Context, in *SetBackupCloudProfileRequest, opts ...grpc.CallOption) (*SetBackupCloudProfileResponse, error)
 	SetCloudProfileKey(ctx context.Context, in *SetCloudProfileKeyRequest, opts ...grpc.CallOption) (*SetCloudProfileKeyResponse, error)
 	UpsertCloudProfile(ctx context.Context, in *UpsertCloudProfileRequest, opts ...grpc.CallOption) (*UpsertCloudProfileResponse, error)
 	RemoveCloudProfile(ctx context.Context, in *RemoveCloudProfileRequest, opts ...grpc.CallOption) (*RemoveCloudProfileResponse, error)
@@ -792,6 +797,16 @@ func (c *agentClient) SetActiveCloudProfile(ctx context.Context, in *SetActiveCl
 	return out, nil
 }
 
+func (c *agentClient) SetBackupCloudProfile(ctx context.Context, in *SetBackupCloudProfileRequest, opts ...grpc.CallOption) (*SetBackupCloudProfileResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetBackupCloudProfileResponse)
+	err := c.cc.Invoke(ctx, Agent_SetBackupCloudProfile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *agentClient) SetCloudProfileKey(ctx context.Context, in *SetCloudProfileKeyRequest, opts ...grpc.CallOption) (*SetCloudProfileKeyResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SetCloudProfileKeyResponse)
@@ -988,6 +1003,10 @@ type AgentServer interface {
 	// provider knowledge; the CLI renders this view without its own catalog.
 	GetCloudProviders(context.Context, *GetCloudProvidersRequest) (*GetCloudProvidersResponse, error)
 	SetActiveCloudProfile(context.Context, *SetActiveCloudProfileRequest) (*SetActiveCloudProfileResponse, error)
+	// SetBackupCloudProfile names the profile that serves requests when the
+	// active profile's provider fails (auth/rate-limit/5xx/network). An empty
+	// name clears the backup.
+	SetBackupCloudProfile(context.Context, *SetBackupCloudProfileRequest) (*SetBackupCloudProfileResponse, error)
 	SetCloudProfileKey(context.Context, *SetCloudProfileKeyRequest) (*SetCloudProfileKeyResponse, error)
 	UpsertCloudProfile(context.Context, *UpsertCloudProfileRequest) (*UpsertCloudProfileResponse, error)
 	RemoveCloudProfile(context.Context, *RemoveCloudProfileRequest) (*RemoveCloudProfileResponse, error)
@@ -1163,6 +1182,9 @@ func (UnimplementedAgentServer) GetCloudProviders(context.Context, *GetCloudProv
 }
 func (UnimplementedAgentServer) SetActiveCloudProfile(context.Context, *SetActiveCloudProfileRequest) (*SetActiveCloudProfileResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetActiveCloudProfile not implemented")
+}
+func (UnimplementedAgentServer) SetBackupCloudProfile(context.Context, *SetBackupCloudProfileRequest) (*SetBackupCloudProfileResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetBackupCloudProfile not implemented")
 }
 func (UnimplementedAgentServer) SetCloudProfileKey(context.Context, *SetCloudProfileKeyRequest) (*SetCloudProfileKeyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetCloudProfileKey not implemented")
@@ -2083,6 +2105,24 @@ func _Agent_SetActiveCloudProfile_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Agent_SetBackupCloudProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetBackupCloudProfileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).SetBackupCloudProfile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_SetBackupCloudProfile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).SetBackupCloudProfile(ctx, req.(*SetBackupCloudProfileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Agent_SetCloudProfileKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SetCloudProfileKeyRequest)
 	if err := dec(in); err != nil {
@@ -2356,6 +2396,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetActiveCloudProfile",
 			Handler:    _Agent_SetActiveCloudProfile_Handler,
+		},
+		{
+			MethodName: "SetBackupCloudProfile",
+			Handler:    _Agent_SetBackupCloudProfile_Handler,
 		},
 		{
 			MethodName: "SetCloudProfileKey",

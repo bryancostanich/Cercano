@@ -57,7 +57,8 @@ func (m *Model) closeConfigSurface() tea.Cmd {
 }
 
 // switchConfigTab rebuilds the page for a newly selected tab, leaving focus on
-// the tab bar so ←/→ keep cycling. Returns the new page's init/refresh cmd.
+// the tab bar so ←/→ and Tab/Shift+Tab keep cycling. Returns the new page's
+// init/refresh cmd.
 func (m *Model) switchConfigTab(tab configTab) tea.Cmd {
 	tab = clampConfigTab(tab)
 	if m.configSurface == nil {
@@ -96,22 +97,25 @@ func (m *Model) buildConfigTabPage(tab configTab) (contentPage, tea.Cmd) {
 // handleConfigSurfaceKey intercepts tab-navigation keys before the active page
 // sees them, returning handled=true when it consumes the key. Focus model:
 //
-//   - Tab bar focused: ←/→ switch tabs (wrapping), 1–5 jump to a tab, ↓/Enter/
-//     Tab drop into the body, Esc closes the surface.
-//   - Body focused: Esc steps back up to the tab bar (a second Esc there
-//     closes), and ↑ at a form's first field climbs back to the strip. Every
-//     other key falls through to the page.
+//   - Tab bar focused: ←/→ and Tab/Shift+Tab switch tabs (wrapping), 1–5 jump
+//     to a tab, ↓/Enter drop into the body, Esc closes the surface.
+//   - Body focused: Shift+Tab lifts focus back up to the tab bar (a reliable
+//     keyboard path back to the tabs from any tab), Esc also steps back up (a
+//     second Esc there closes), and ↑ at a form's first field climbs back to
+//     the strip. Every other key falls through to the page.
 //
 // ←/→ are only claimed while the tab bar is focused, so a focused select field
 // (which uses ←/→ to change its value) and the context viewer (←/→ expand and
-// collapse) keep those keys once you Tab into the body.
+// collapse) keep those keys once you drop into the body.
 func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	cs := m.configSurface
 	if cs == nil {
 		return m, nil, false
 	}
 
-	if msg.String() == "esc" {
+	key := msg.String()
+
+	if key == "esc" {
 		if !cs.focused {
 			cs.focused = true
 			return m, nil, true
@@ -121,24 +125,30 @@ func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 	}
 
 	if cs.focused {
-		switch msg.String() {
-		case "left":
+		switch key {
+		case "left", "shift+tab":
 			return m, m.switchConfigTab(cycleConfigTab(cs.active, -1)), true
-		case "right":
+		case "right", "tab":
 			return m, m.switchConfigTab(cycleConfigTab(cs.active, +1)), true
-		case "down", "enter", "tab":
+		case "down", "enter":
 			cs.focused = false
 			return m, nil, true
 		case "1", "2", "3", "4", "5":
-			return m, m.switchConfigTab(configTab(int(msg.String()[0] - '1'))), true
+			return m, m.switchConfigTab(configTab(int(key[0] - '1'))), true
 		}
 		// The tab bar owns focus: swallow other keys so nothing leaks into the
 		// body while the user is on the strip.
 		return m, nil, true
 	}
 
-	// Body focused: let ↑ at a form's first field climb back to the tab bar.
-	if msg.String() == "up" {
+	// Body focused: Shift+Tab always lifts focus back to the tab strip, so there
+	// is a dependable keyboard route back to the tabs from any tab's body.
+	if key == "shift+tab" {
+		cs.focused = true
+		return m, nil, true
+	}
+	// ↑ at a settings form's first field also climbs back to the tab bar.
+	if key == "up" {
 		if sp, ok := m.content.(*settingsPage); ok && sp.form != nil && sp.form.Cursor() == 0 {
 			cs.focused = true
 			return m, nil, true

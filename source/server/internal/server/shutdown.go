@@ -29,27 +29,49 @@ func (s *Server) BeginShutdown() {
 	}
 }
 
+// stopBackstop bounds the hard-stop phase. grpc's Stop() cannot abort a
+// GracefulStop() that has already reached handlersWG.Wait() holding the server
+// mutex (what a wedged streaming handler causes) — Stop() blocks acquiring that
+// same mutex, so the two deadlock. DrainThenStop is the backstop of last
+// resort: it must always return so the process can exit. If Stop() can't make
+// progress within this window we return anyway; the leaked stop goroutines die
+// with the process.
+const stopBackstop = 2 * time.Second
+
 // DrainThenStop gracefully stops gs, waiting up to grace for in-flight RPCs to
 // finish before hard-stopping. Returns true if the drain completed within
 // grace, false if the backstop fired. Call BeginShutdown first — standing
 // event streams never finish on their own.
+//
+// Guarantees termination: it returns within grace + stopBackstop no matter how
+// wedged the server is. The earlier version called gs.Stop() synchronously on
+// the timeout path, which deadlocked whenever GracefulStop had already parked
+// in handlersWG.Wait() holding the server mutex — Stop() then blocked on that
+// mutex and DrainThenStop never returned.
 func DrainThenStop(gs *grpc.Server, grace time.Duration) bool {
-	done := make(chan struct{})
+	graceful := make(chan struct{})
 	go func() {
 		gs.GracefulStop()
-		close(done)
+		close(graceful)
 	}()
 	select {
-	case <-done:
+	case <-graceful:
 		return true
 	case <-time.After(grace):
-		// Force-close transports and return without waiting for the
-		// GracefulStop goroutine: grpc's stop(graceful=true) waits on
-		// handlersWG unconditionally, so a truly wedged handler would hold
-		// <-done forever even after Stop. Stop itself skips the handler wait
-		// and returns once connections are torn down; the caller is about to
-		// exit the process, so the leaked goroutine is moot.
-		gs.Stop()
-		return false
 	}
+	// Grace expired. Force-close transports to unstick conn-blocked handlers —
+	// but run Stop() off the return path: if it can't acquire the server mutex
+	// (GracefulStop parked in handlersWG.Wait), it would block us forever.
+	// Return as soon as either stop call makes progress, or the backstop fires.
+	hard := make(chan struct{})
+	go func() {
+		gs.Stop()
+		close(hard)
+	}()
+	select {
+	case <-graceful:
+	case <-hard:
+	case <-time.After(stopBackstop):
+	}
+	return false
 }

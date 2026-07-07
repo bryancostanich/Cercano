@@ -146,6 +146,57 @@ func TestClient_Chat_NoOpencodeHeaders_OnDirectRoute(t *testing.T) {
 	}
 }
 
+// On the meridian route, a call with NO session in ctx must still get a
+// session header — a fresh random one per request. Headerless requests fall
+// through to Meridian's content-fingerprint session matching (sha256 of cwd +
+// first user message), which collides across concurrent conversations with
+// templated prompts and cross-delivers their turns. A random id gives the
+// stray call an isolated lineage instead.
+func TestClient_Chat_MeridianRoute_MintsSessionWhenUnset(t *testing.T) {
+	var sessions []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sessions = append(sessions, r.Header.Get("x-opencode-session"))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"id":"m_1","type":"message","role":"assistant","content":[],"model":"claude","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer srv.Close()
+	c := NewClient(Config{BaseURL: srv.URL, APIKey: "dummy", Route: "meridian"})
+	for i := 0; i < 2; i++ {
+		if _, err := c.Chat(t.Context(), ChatRequest{Model: "claude", MaxTokens: 10}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(sessions) != 2 || sessions[0] == "" || sessions[1] == "" {
+		t.Fatalf("expected a minted session header on every unstamped meridian request, got %v", sessions)
+	}
+	if sessions[0] == sessions[1] {
+		t.Errorf("minted session ids must be unique per request, got %q twice", sessions[0])
+	}
+}
+
+// The provider-neutral llm.WithSessionID must reach the wire the same way the
+// adapter-local helper does — callers outside this package (dispatch, server)
+// stamp through it.
+func TestClient_Chat_SessionHeader_FromLLMContextKey(t *testing.T) {
+	var seenSession string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenSession = r.Header.Get("x-opencode-session")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"id":"m_1","type":"message","role":"assistant","content":[],"model":"claude","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer srv.Close()
+	c := NewClient(Config{BaseURL: srv.URL, APIKey: "dummy", Route: "meridian"})
+	ctx := llm.WithSessionID(t.Context(), "llm-scoped-77")
+	if _, err := c.Chat(ctx, ChatRequest{Model: "claude", MaxTokens: 10}); err != nil {
+		t.Fatal(err)
+	}
+	if seenSession != "llm-scoped-77" {
+		t.Errorf("session header: got %q want llm-scoped-77", seenSession)
+	}
+}
+
 func TestClient_Chat_NoSessionHeader_WhenUnset(t *testing.T) {
 	var seenSession string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

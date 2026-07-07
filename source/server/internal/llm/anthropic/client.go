@@ -39,19 +39,12 @@ type Client struct {
 	sdk *sdk.Client
 }
 
-type sessionContextKey struct{}
-
 // WithSessionID attaches a conversation/session ID to ctx so the adapter's
 // RoundTripper can emit opencode-style identification headers per request.
+// Thin alias over the provider-neutral llm.WithSessionID — dispatch and server
+// code stamps through the llm package; both reach the same key.
 func WithSessionID(ctx context.Context, id string) context.Context {
-	return context.WithValue(ctx, sessionContextKey{}, id)
-}
-
-func sessionIDFromContext(ctx context.Context) string {
-	if v, ok := ctx.Value(sessionContextKey{}).(string); ok {
-		return v
-	}
-	return ""
+	return llm.WithSessionID(ctx, id)
 }
 
 type headerRoundTripper struct {
@@ -71,19 +64,31 @@ func (h *headerRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) 
 	// successor bridge) ships a native Cercano adapter, swap these for
 	// x-cercano-* and drop the dishonesty. See docs/agent/README.md.
 	if h.route == routeMeridian {
-		if sid := sessionIDFromContext(r.Context()); sid != "" {
-			r.Header.Set("x-opencode-session", sid)
-			r.Header.Set("x-opencode-request", newMessageID())
-			r.Header.Set("x-opencode-agent-mode", "primary")
+		sid := llm.SessionIDFromContext(r.Context())
+		if sid == "" {
+			// Never send a session-less request through Meridian: its OpenCode
+			// adapter falls back to matching the conversation by a content
+			// fingerprint (cwd + first user message), which collides across
+			// concurrent conversations with templated prompts and cross-delivers
+			// their turns. A fresh random id gives an unstamped call its own
+			// isolated lineage instead.
+			sid = "anon-" + newHexToken()
 		}
+		r.Header.Set("x-opencode-session", sid)
+		r.Header.Set("x-opencode-request", newMessageID())
+		r.Header.Set("x-opencode-agent-mode", "primary")
 	}
 	return h.base.RoundTrip(r)
 }
 
 func newMessageID() string {
+	return "msg-" + newHexToken()
+}
+
+func newHexToken() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
-	return "msg-" + hex.EncodeToString(b[:])
+	return hex.EncodeToString(b[:])
 }
 
 func NewClient(cfg Config) *Client {

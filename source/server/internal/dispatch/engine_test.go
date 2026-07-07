@@ -39,6 +39,55 @@ func (echoProvider) StreamChat(context.Context, llm.ChatRequest) (llm.StreamRead
 	return nil, nil
 }
 
+// sessionEchoProvider records the llm session id each Chat ctx carried.
+type sessionEchoProvider struct {
+	echoProvider
+	seen []string
+}
+
+func (p *sessionEchoProvider) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	p.seen = append(p.seen, llm.SessionIDFromContext(ctx))
+	return p.echoProvider.Chat(ctx, req)
+}
+
+// A one-shot dispatch is not part of the calling conversation — its provider
+// call must not inherit the caller's session identity (upstream bridges key
+// persistent session state on it; a one-message history arriving on the
+// parent's key evicts the parent's lineage). Each one-shot gets a fresh id.
+func TestOneShotScopesOwnProviderSession(t *testing.T) {
+	prov := &sessionEchoProvider{}
+	eng := NewEngine(
+		provs(Providers{Open: prov}),
+		func() locus.Mode { return locus.OpenOnly },
+		nil,
+	)
+	eng.SetModelFor(func(isCloud bool) string { return "local-model" })
+
+	parentCtx := llm.WithSessionID(context.Background(), "parent-session-id")
+	for i := 0; i < 2; i++ {
+		if _, err := eng.Dispatch(parentCtx, Spec{
+			Mode: OneShot, Role: RoleCoproc, Prompt: "summarize this", Source: "coproc:summarize",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if len(prov.seen) != 2 {
+		t.Fatalf("expected 2 provider calls, got %d", len(prov.seen))
+	}
+	for i, sid := range prov.seen {
+		if sid == "parent-session-id" {
+			t.Errorf("one-shot %d inherited the caller's session id", i)
+		}
+		if sid == "" {
+			t.Errorf("one-shot %d carries no session id", i)
+		}
+	}
+	if prov.seen[0] == prov.seen[1] {
+		t.Errorf("one-shots must get distinct session ids, got %q twice", prov.seen[0])
+	}
+}
+
 func TestOneShotReturnsTextAndTokens(t *testing.T) {
 	prov := echoProvider{}
 	eng := NewEngine(

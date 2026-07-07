@@ -6,7 +6,7 @@ func TestThemeOpensSettings(t *testing.T) {
 	r := New()
 	RegisterTheme(r)
 	res, ok := r.Dispatch("/theme")
-	if !ok || res.Kind != ResultOpenSettings {
-		t.Fatalf("/theme -> (%v,%v), want ResultOpenSettings", res.Kind, ok)
+	if !ok || res.Kind != ResultOpenThemeSettings {
+		t.Fatalf("/theme -> (%v,%v), want ResultOpenThemeSettings", res.Kind, ok)
 	}
 }

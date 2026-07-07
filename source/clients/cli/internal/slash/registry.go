@@ -25,6 +25,7 @@ const (
 	ResultQuit
 	ResultClearConversation
 	ResultOpenSettings
+	ResultOpenThemeSettings // like ResultOpenSettings but lands on the UI/theme tab
 	ResultOpenHistoryPicker
 	ResultOpenRuntimeDashboard
 	ResultOpenContextView

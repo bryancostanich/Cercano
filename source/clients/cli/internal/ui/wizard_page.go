@@ -876,16 +876,20 @@ func (wp *wizardPage) tierPickerCandidates(slotKey string) []overlay.Row {
 		if side == config.ProviderOpen {
 			if status, err := wp.agent.GetRuntimeStatus(ctx); err == nil {
 				for _, m := range downloadedRuntimeModels(runtimeStatusModels(status)) {
-					if seen[m.ID] {
+					// Commit the human-readable name, not the hash ID —
+					// same rule as tierPickerRows. Legacy picks may hold
+					// an ID, so selection checks both.
+					name := firstNonEmpty(m.DisplayName, m.ID)
+					if seen[m.ID] || seen[name] {
 						continue
 					}
 					rows = append(rows, overlay.Row{
-						Key:      m.ID,
-						Label:    normalizeModelLabel(firstNonEmpty(m.DisplayName, m.ID)),
+						Key:      name,
+						Label:    normalizeModelLabel(name),
 						Value:    firstNonEmpty(m.Runtime, "llama-server"),
-						Selected: m.ID == current,
+						Selected: name == current || m.ID == current,
 					})
-					seen[m.ID] = true
+					seen[name] = true
 				}
 			}
 		} else if _, active, err := wp.agent.GetCloudProfiles(ctx); err == nil && active != "" {

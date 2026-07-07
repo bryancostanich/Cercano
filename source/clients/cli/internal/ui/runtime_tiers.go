@@ -81,11 +81,20 @@ func tierPickerRows(tierKey string, cfg *agentclient.Config, status *agentclient
 	}
 	var rows []overlay.Row
 	for _, m := range downloadedRuntimeModels(runtimeStatusModels(status)) {
+		// Commit the human-readable name, not the runtime's hash ID: the
+		// stored value is what the tier list and config.yaml render, and the
+		// path-derived ID goes stale when the file moves. Legacy configs may
+		// still hold an ID, so the current-marker checks both.
+		name := firstNonEmpty(m.DisplayName, m.ID)
+		hint := currentHint(name, current)
+		if hint == "" {
+			hint = currentHint(m.ID, current)
+		}
 		rows = append(rows, overlay.Row{
-			Key:   m.ID,
-			Label: firstNonEmpty(m.DisplayName, m.ID),
+			Key:   name,
+			Label: name,
 			Value: m.Runtime,
-			Hint:  currentHint(m.ID, current),
+			Hint:  hint,
 		})
 	}
 	rows = append(rows, overlay.Row{Key: "-", Label: "(clear)", Value: "unset this slot"})
@@ -117,11 +126,19 @@ func embeddingTierPickerRows(ag *agentclient.Client, cfg *agentclient.Config, st
 		cancel()
 	}
 	for _, m := range downloadedRuntimeModels(runtimeStatusModels(status)) {
+		// Same name-over-ID rule as tierPickerRows: the stored value is
+		// user-visible, and legacy configs holding an ID still get the
+		// current marker.
+		name := firstNonEmpty(m.DisplayName, m.ID)
+		hint := currentHint(name, current)
+		if hint == "" {
+			hint = currentHint(m.ID, current)
+		}
 		rows = append(rows, overlay.Row{
-			Key:   m.ID,
-			Label: firstNonEmpty(m.DisplayName, m.ID),
+			Key:   name,
+			Label: name,
 			Value: m.Runtime,
-			Hint:  currentHint(m.ID, current),
+			Hint:  hint,
 		})
 	}
 	rows = append(rows, overlay.Row{Key: "-", Label: "(clear)", Value: "unset embedding model"})

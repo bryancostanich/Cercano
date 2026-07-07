@@ -75,8 +75,9 @@ func TestMouseToggleFold_SummaryArrowExpandsGroup(t *testing.T) {
 	}
 }
 
-// In an expanded group, a per-entry arrow row toggles that entry's fold, and
-// the unfolded body lines do NOT claim clicks — tool output stays selectable.
+// In an expanded group, a per-entry arrow row toggles that entry's fold. Body
+// content clicks fall through (tool output stays selectable), while a click on
+// the left collapse rail folds the entry.
 func TestMouseToggleFold_EntryArrowTogglesAndBodyFallsThrough(t *testing.T) {
 	p := theme.Cracker()
 	c := newChatView(theme.NewStyles(p), p, "", "", 100, 40)
@@ -93,7 +94,16 @@ func TestMouseToggleFold_EntryArrowTogglesAndBodyFallsThrough(t *testing.T) {
 	}
 	c.rebuild()
 	bodyLine := findPlainLine(t, &c, `"path":"b.go"`)
-	if c.MouseToggleFold(2, bodyLine) {
-		t.Fatalf("click on unfolded body line %d was claimed as a fold toggle", bodyLine)
+	// Clicking the body content (right of the collapse rail) falls through so
+	// tool output stays selectable.
+	if c.MouseToggleFold(20, bodyLine) {
+		t.Fatalf("click on body content at line %d should not toggle a fold", bodyLine)
+	}
+	// Clicking the rail gutter (left) collapses the entry back.
+	if !c.MouseToggleFold(2, bodyLine) {
+		t.Fatalf("click on the rail gutter at line %d should collapse the entry", bodyLine)
+	}
+	if !entries[2].Tool.Folded {
+		t.Fatal("rail-gutter click did not re-fold the entry")
 	}
 }

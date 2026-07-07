@@ -786,7 +786,7 @@ func (c *chatView) SetEntries(entries []*Entry) {
 			}
 			block, rows := c.renderToolGroupBlock(entries[i:j], i)
 			for _, r := range rows {
-				c.arrowRows = append(c.arrowRows, arrowRow{line: nl + r.Line, entry: i + r.Entry, group: r.Group})
+				c.arrowRows = append(c.arrowRows, arrowRow{line: nl + r.Line, entry: i + r.Entry, group: r.Group, rail: r.Rail, railCol: r.RailCol})
 			}
 			b.WriteString(block)
 			nl += strings.Count(block, "\n")
@@ -865,6 +865,14 @@ func (c *chatView) renderToolGroupBlock(run []*Entry, startIdx int) (string, []t
 		opts.FocusedIdx = c.focusedToolIdx - startIdx
 	}
 	block, rows := renderToolGroupSpans(tools, textW, c.styles, c.md, opts)
+	// renderToolGroupSpans records RailCol relative to the group block; the
+	// block is about to be indented by pad, so shift rail columns to absolute
+	// so click hit-testing (localX) lines up with the rendered rail.
+	for k := range rows {
+		if rows[k].Rail {
+			rows[k].RailCol += entryIndent
+		}
+	}
 	return indentBlock(pad, block), rows
 }
 
@@ -1149,6 +1157,12 @@ func (c *chatView) MouseToggleFold(localX, localY int) bool {
 	if !ok {
 		return false
 	}
+	// Rail lines collapse only when the click lands in the left gutter (on the
+	// rail); a click on the body text to its right falls through so text
+	// selection still works there.
+	if r.rail && localX > r.railCol+1 {
+		return false
+	}
 	// A mouse interaction is not keyboard navigation: clear any focus caret so
 	// it never renders on a mouse-driven expand, and a stale caret from an
 	// earlier keyboard nav doesn't linger. The ▶ caret is a keyboard-only
@@ -1196,9 +1210,11 @@ func (c *chatView) toggleEntryFold(idx int) {
 // run and keys groupExpanded by entry (the run's first index); a non-group
 // row toggles that single tool entry's own body.
 type arrowRow struct {
-	line  int
-	entry int
-	group bool
+	line    int
+	entry   int
+	group   bool
+	rail    bool
+	railCol int
 }
 
 // arrowRowAt returns the arrow row whose fold toggle occupies the given

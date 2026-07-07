@@ -26,8 +26,11 @@ the branch; this work wired it end to end):
 This rides the **Codex CLI's own OAuth client ID**
 (`app_EMoamEEZ73f0CkXaXp7hrann`) — there is no sanctioned third-party
 registration path. It can stop working whenever OpenAI changes things, and the
-usable model list is restricted to the Codex/ChatGPT-backend allowlist
-(gpt-5.5, gpt-5.3-codex, gpt-5.4, gpt-5.4-mini, …). The `/config` row and the
+usable model list is restricted to what the ChatGPT-account codex backend
+accepts — the plain gpt-5.x names (gpt-5.5, gpt-5.4, gpt-5.4-mini, …). The
+-codex-suffixed names (gpt-5.3-codex, gpt-5.1-codex, …) are REJECTED for
+ChatGPT accounts ("model not supported when using Codex with a ChatGPT
+account"), and the backend requires streaming requests. The `/config` row and the
 wizard both keep an **API key** path one keystroke away as the sanctioned
 fallback. Endpoint shapes are verified against a shipping third-party
 implementation — see `docs/research/cloud-subscription-auth/verified-findings.md`

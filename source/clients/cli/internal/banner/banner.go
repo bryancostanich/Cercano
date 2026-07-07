@@ -78,17 +78,25 @@ func renderWithRowColors(p theme.Palette, m Meta, colorTop, colorBot func(rune, 
 	// Lime rail: 2-col left pad, 56-col rail, 2-col right pad.
 	railLine := wall + "  " + s.Accent.Render(strings.Repeat("━", 56)) + "  " + wall
 
-	// Status line: 2-col left pad, 55-col content, 3-col right pad.
-	status := lipgloss.JoinHorizontal(lipgloss.Left,
+	// Status line: 2-col left pad, 55-col content, 3-col right pad. The model
+	// segment is omitted entirely when unset so we never render a dangling
+	// "· " separator in the brief window before the config load fills it in.
+	statusParts := []string{
 		s.Muted.Render("▶ "),
 		s.Primary.Render(m.Tagline),
 		s.Muted.Render("     · "),
 		s.Info.Render(m.Version),
-		s.Muted.Render(" · "),
-		s.Accent.Render(m.Model),
-	)
+	}
 	// Compute trailing pad to land the right wall at column Width.
-	statusVisible := visibleWidth(m.Tagline) + 2 /*▶ */ + 7 /*     · */ + visibleWidth(m.Version) + 3 /* · */ + visibleWidth(m.Model)
+	statusVisible := visibleWidth(m.Tagline) + 2 /*▶ */ + 7 /*     · */ + visibleWidth(m.Version)
+	if m.Model != "" {
+		statusParts = append(statusParts,
+			s.Muted.Render(" · "),
+			s.Accent.Render(m.Model),
+		)
+		statusVisible += 3 /* · */ + visibleWidth(m.Model)
+	}
+	status := lipgloss.JoinHorizontal(lipgloss.Left, statusParts...)
 	trailingPad := Width - 2 /*walls*/ - 2 /*left pad*/ - statusVisible
 	if trailingPad < 0 {
 		trailingPad = 0

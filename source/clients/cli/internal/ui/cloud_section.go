@@ -113,6 +113,13 @@ func (sp *settingsPage) cloudDetailFields(r cloudRow) []form.Field {
 	} else {
 		out = append(out, form.NewText("cloud-model", il("model"), d.Model, "model id"))
 	}
+	// ChatGPT subscription sign-in: the responses flavor can authenticate with
+	// a ChatGPT Plus/Pro subscription via device-code OAuth instead of an API
+	// key. Offer the button on responses rows; the api-key field stays as the
+	// sanctioned fallback one row below.
+	if r.Preset != nil && r.Preset.Flavor == "responses" {
+		out = append(out, form.NewButton("cloud-signin", il("sign in with ChatGPT"), true))
+	}
 	out = append(out,
 		form.NewMasked("cloud-key", il("api-key"), sp.draftHasKey(r)),
 		form.NewButton("cloud-save", il("save"), true),

@@ -243,3 +243,21 @@ func (mo *chatgptLoginModal) renderActions(styles theme.Styles) string {
 	}
 	return ""
 }
+
+// handleChatGPTLoginModalKey routes a keypress while the sign-in modal is
+// open. In the waiting state, Esc cancels the in-flight sign-in stream and
+// closes the modal; once settled (done/failed) any key dismisses it.
+func (m Model) handleChatGPTLoginModalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	mo := m.chatgptLoginModal
+	if mo.state == chatgptLoginWaiting {
+		if msg.String() == "esc" {
+			if mo.cancel != nil {
+				mo.cancel()
+			}
+			m.chatgptLoginModal = nil
+		}
+		return m, nil
+	}
+	m.chatgptLoginModal = nil
+	return m, nil
+}

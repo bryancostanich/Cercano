@@ -247,6 +247,10 @@ type Model struct {
 	// isn't ready), cleared by every modal-close path (dispatched on
 	// success, dropped on cancel/failed).
 	pendingRuntimeSwitch string
+
+	// chatgptLoginModal is the open ChatGPT subscription sign-in modal (nil =
+	// closed), driven by the StartChatGPTLogin stream.
+	chatgptLoginModal *chatgptLoginModal
 }
 
 // pendingToolCall is a queued tool invocation awaiting user confirmation.
@@ -923,6 +927,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			next, cmd := m.handleOpenRuntimeModalKey(msg)
 			return next, cmd
 		}
+		if m.chatgptLoginModal != nil {
+			return m.handleChatGPTLoginModalKey(msg)
+		}
 		// F1 opens the install modal when the chip is showing. Global so
 		// it works whether the user is on chat, settings, or any content
 		// page. If no unresolved local-runtime setup is queued, F1 is a
@@ -1490,6 +1497,49 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.pendingRuntimeSwitch = msg.pending
+		return m, nil
+
+	case openChatGPTLoginModalMsg:
+		if m.chatgptLoginModal == nil {
+			m.chatgptLoginModal = newChatGPTLoginModal(msg.profile, msg.model)
+			return m, startChatGPTLoginCmd(m.agent, msg.profile, msg.model, msg.setActive)
+		}
+		return m, nil
+
+	case chatgptLoginStartedMsg:
+		if m.chatgptLoginModal == nil {
+			if msg.cancel != nil {
+				msg.cancel()
+			}
+			return m, nil
+		}
+		if msg.err != nil {
+			m.chatgptLoginModal.setFailed(msg.err.Error())
+			return m, nil
+		}
+		m.chatgptLoginModal.cancel = msg.cancel
+		return m, drainChatGPTLoginCmd(msg.ch)
+
+	case chatgptLoginFrameMsg:
+		if m.chatgptLoginModal == nil {
+			return m, nil
+		}
+		if msg.frame.Err != nil {
+			m.chatgptLoginModal.setFailed(msg.frame.Err.Error())
+			return m, nil
+		}
+		if msg.frame.Done {
+			if msg.frame.Ok {
+				m.chatgptLoginModal.setDone(msg.frame.AccountID)
+			} else {
+				m.chatgptLoginModal.setFailed(msg.frame.Error)
+			}
+			return m, nil
+		}
+		m.chatgptLoginModal.setCode(msg.frame.VerificationURL, msg.frame.UserCode)
+		if msg.ch != nil {
+			return m, drainChatGPTLoginCmd(msg.ch)
+		}
 		return m, nil
 
 	case modalModelsLoadedMsg:
@@ -3093,6 +3143,19 @@ func (m Model) View() tea.View {
 		if y < 0 {
 			y = 0
 		}
+		out = composeOverlay(out, box, x, y)
+	}
+	if m.chatgptLoginModal != nil {
+		boxW, boxH := m.chatgptLoginModal.modalDim(m.width, m.height)
+		x := (m.width - boxW) / 2
+		y := (m.height - boxH) / 2
+		if x < 0 {
+			x = 0
+		}
+		if y < 0 {
+			y = 0
+		}
+		box := m.chatgptLoginModal.View(m.styles, m.palette, m.width, m.height)
 		out = composeOverlay(out, box, x, y)
 	}
 	v := tea.NewView(out)

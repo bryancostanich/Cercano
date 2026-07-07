@@ -36,7 +36,7 @@ func TestCloudPresetsCoverAllProviders(t *testing.T) {
 		{id: "openrouter", flavor: "chat_completions", backend: "", baseURL: "https://openrouter.ai/api/v1", tier: tierUntested},
 		{id: "deepseek", flavor: "chat_completions", backend: "", baseURL: "https://api.deepseek.com", tier: tierUntested},
 		{id: "bedrock", flavor: "bedrock", backend: "", baseURL: "", tier: tierComingSoon},
-		{id: "openai-responses", flavor: "responses", backend: "", baseURL: "https://api.openai.com/v1", tier: tierComingSoon},
+		{id: "openai-responses", flavor: "responses", backend: "", baseURL: "https://api.openai.com/v1", tier: tierUntested},
 	}
 
 	for _, exp := range expectations {

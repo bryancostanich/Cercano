@@ -20,6 +20,7 @@ const (
 	cloudCommitActivate
 	cloudCommitDelete
 	cloudCommitKey
+	cloudCommitSignIn
 )
 
 type cloudCommitAction struct {
@@ -46,6 +47,8 @@ func classifyCloudCommit(key, value string) cloudCommitAction {
 		return cloudCommitAction{kind: cloudCommitActivate}
 	case "cloud-delete":
 		return cloudCommitAction{kind: cloudCommitDelete}
+	case "cloud-signin":
+		return cloudCommitAction{kind: cloudCommitSignIn}
 	}
 	return cloudCommitAction{kind: cloudCommitNone}
 }
@@ -141,6 +144,17 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		sp.profilesLoaded = false
 		sp.cloudSelected = ""
 		return "deleted " + name, nil, nil
+	case cloudCommitSignIn:
+		// The device-code sign-in runs in a modal owned by the root model;
+		// hand it the profile + model to create and let it drive the stream.
+		profile := strings.TrimSpace(sp.cloudDraft.Name)
+		if profile == "" {
+			profile = "chatgpt"
+		}
+		model := strings.TrimSpace(sp.cloudDraft.Model)
+		return "starting ChatGPT sign-in…", func() tea.Msg {
+			return openChatGPTLoginModalMsg{profile: profile, model: model, setActive: true}
+		}, nil
 	case cloudCommitKey:
 		if sp.agent == nil {
 			return "no agent", nil, nil

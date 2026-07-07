@@ -228,6 +228,10 @@ func (m *mockAgentClient) GetCloudProviders(ctx context.Context, in *proto.GetCl
 	return &proto.GetCloudProvidersResponse{}, nil
 }
 
+func (m *mockAgentClient) SetBackupCloudProfile(ctx context.Context, in *proto.SetBackupCloudProfileRequest, opts ...grpc.CallOption) (*proto.SetBackupCloudProfileResponse, error) {
+	return &proto.SetBackupCloudProfileResponse{Ok: true}, nil
+}
+
 func (m *mockAgentClient) SetActiveCloudProfile(ctx context.Context, in *proto.SetActiveCloudProfileRequest, opts ...grpc.CallOption) (*proto.SetActiveCloudProfileResponse, error) {
 	return &proto.SetActiveCloudProfileResponse{Ok: true}, nil
 }

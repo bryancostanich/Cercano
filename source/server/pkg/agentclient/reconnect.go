@@ -6,14 +6,14 @@
 // from the shell — the gRPC connection sees a transport EOF and every
 // subsequent RPC returns codes.Unavailable. This file adds:
 //
-//   1. A ConnState enum and a channel where state transitions are
-//      broadcast to observers (CLI status bar chip, etc.).
-//   2. A background goroutine that watches the underlying gRPC conn and
-//      kicks a reconnect when the state stays TRANSIENT_FAILURE for
-//      more than a brief blip.
-//   3. Client.reconnect: closes the dead conn, redials (may succeed if
-//      the server was just slow), and on dial failure spawns a new
-//      server via the existing autoLaunchServer helper.
+//  1. A ConnState enum and a channel where state transitions are
+//     broadcast to observers (CLI status bar chip, etc.).
+//  2. A background goroutine that watches the underlying gRPC conn and
+//     kicks a reconnect when the state stays TRANSIENT_FAILURE for
+//     more than a brief blip.
+//  3. Client.reconnect: closes the dead conn, redials (may succeed if
+//     the server was just slow), and on dial failure spawns a new
+//     server via the existing autoLaunchServer helper.
 //
 // Bounded retry: 3 attempts with 1s / 2s / 4s backoff. Beyond that the
 // client transitions to ConnStateFailed and the observer sees a final

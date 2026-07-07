@@ -167,6 +167,10 @@ service Agent {
   // provider knowledge; the CLI renders this view without its own catalog.
   rpc GetCloudProviders (GetCloudProvidersRequest) returns (GetCloudProvidersResponse) {}
   rpc SetActiveCloudProfile (SetActiveCloudProfileRequest) returns (SetActiveCloudProfileResponse) {}
+  // SetBackupCloudProfile names the profile that serves requests when the
+  // active profile's provider fails (auth/rate-limit/5xx/network). An empty
+  // name clears the backup.
+  rpc SetBackupCloudProfile (SetBackupCloudProfileRequest) returns (SetBackupCloudProfileResponse) {}
   rpc SetCloudProfileKey (SetCloudProfileKeyRequest) returns (SetCloudProfileKeyResponse) {}
   rpc UpsertCloudProfile (UpsertCloudProfileRequest) returns (UpsertCloudProfileResponse) {}
   rpc RemoveCloudProfile (RemoveCloudProfileRequest) returns (RemoveCloudProfileResponse) {}
@@ -1038,9 +1042,13 @@ message GetCloudProvidersResponse {
   // Same Meridian snapshot as GetCloudProfilesResponse; present so the cloud
   // screen needs only this one RPC.
   MeridianStatus meridian_status = 4;
+  // Backup (fallback) profile name; empty when none is configured.
+  string backup = 5;
 }
 message SetActiveCloudProfileRequest  { string name = 1; }
 message SetActiveCloudProfileResponse { bool ok = 1; string error = 2; }
+message SetBackupCloudProfileRequest  { string name = 1; } // empty clears the backup
+message SetBackupCloudProfileResponse { bool ok = 1; string error = 2; }
 message SetCloudProfileKeyRequest  { string name = 1; string api_key = 2; }
 message SetCloudProfileKeyResponse { bool ok = 1; string error = 2; }
 message UpsertCloudProfileRequest {

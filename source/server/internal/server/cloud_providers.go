@@ -17,6 +17,7 @@ import (
 func (s *Server) GetCloudProviders(ctx context.Context, req *proto.GetCloudProvidersRequest) (*proto.GetCloudProvidersResponse, error) {
 	s.cfgMu.RLock()
 	active := s.currentConfig.ActiveCloudProfile
+	backup := s.currentConfig.BackupCloudProfile
 	profiles := append([]config.CloudProfile(nil), s.currentConfig.CloudProfiles...)
 	s.cfgMu.RUnlock()
 
@@ -53,7 +54,7 @@ func (s *Server) GetCloudProviders(ctx context.Context, req *proto.GetCloudProvi
 		}
 	}
 
-	out := &proto.GetCloudProvidersResponse{Active: active}
+	out := &proto.GetCloudProvidersResponse{Active: active, Backup: backup}
 	for _, gp := range grouped {
 		cp := &proto.CloudProvider{
 			Id: gp.ID, Label: gp.Label, Flavor: gp.Flavor, Backend: gp.Backend,

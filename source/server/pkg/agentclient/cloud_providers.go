@@ -28,6 +28,8 @@ type CloudProvidersView struct {
 	Providers      []CloudProvider
 	CustomProfiles []CloudProfileInfo
 	Active         string
+	// Backup is the fallback profile name; empty when none is configured.
+	Backup string
 }
 
 // GetCloudProviders returns the known-provider catalog with configured profiles
@@ -38,7 +40,7 @@ func (c *Client) GetCloudProviders(ctx context.Context) (CloudProvidersView, err
 	if err != nil {
 		return CloudProvidersView{}, err
 	}
-	view := CloudProvidersView{Active: resp.GetActive()}
+	view := CloudProvidersView{Active: resp.GetActive(), Backup: resp.GetBackup()}
 	for _, p := range resp.GetProviders() {
 		cp := CloudProvider{
 			ID:             p.GetId(),

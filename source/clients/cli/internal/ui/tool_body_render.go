@@ -80,6 +80,12 @@ func prettyJSON(s string) string {
 	return buf.String()
 }
 
+// expandTabs replaces tab characters with 4 spaces for display. A terminal
+// renders \t as up to 8 columns while lipgloss.Width counts 1, so any raw tab
+// that survives into a rendered line silently overflows the width budget and
+// wraps at column 0 — left of the collapse rail.
+func expandTabs(s string) string { return strings.ReplaceAll(s, "\t", "    ") }
+
 // renderToolBody renders a tool body to display lines at the given width.
 // declaredType, when set, picks the render mode; otherwise the body is sniffed.
 // JSON → pretty-printed in a ```json fence; markdown → rendered; else verbatim.
@@ -87,6 +93,7 @@ func renderToolBody(body, declaredType string, md *render.Markdown, width int) [
 	if width < 8 {
 		width = 8
 	}
+	body = expandTabs(body)
 	kind := resolveToolBodyKind(body, declaredType)
 	if md == nil { // no engine → never mangle
 		kind = "plain"
@@ -109,7 +116,7 @@ func renderToolBody(body, declaredType string, md *render.Markdown, width int) [
 func renderToolResultBody(toolName, argsJSON, result string, md *render.Markdown, width int) []string {
 	if md != nil {
 		if lang := codeLangForToolArgs(toolName, argsJSON); lang != "" {
-			fenced := "```" + lang + "\n" + result + "\n```"
+			fenced := "```" + lang + "\n" + expandTabs(result) + "\n```"
 			return strings.Split(md.Render(fenced, width), "\n")
 		}
 	}

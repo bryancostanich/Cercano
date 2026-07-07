@@ -18,6 +18,7 @@ const (
 	cloudCommitDraftEdit
 	cloudCommitSave
 	cloudCommitActivate
+	cloudCommitBackup
 	cloudCommitDelete
 	cloudCommitKey
 	cloudCommitSignIn
@@ -45,6 +46,8 @@ func classifyCloudCommit(key, value string) cloudCommitAction {
 		return cloudCommitAction{kind: cloudCommitSave}
 	case "cloud-activate":
 		return cloudCommitAction{kind: cloudCommitActivate}
+	case "cloud-backup":
+		return cloudCommitAction{kind: cloudCommitBackup}
 	case "cloud-delete":
 		return cloudCommitAction{kind: cloudCommitDelete}
 	case "cloud-signin":
@@ -131,6 +134,26 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		}
 		sp.profilesLoaded = false
 		return "active: " + sp.cloudDraft.Name, nil, nil
+	case cloudCommitBackup:
+		if sp.agent == nil {
+			return "no agent", nil, nil
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		// Toggle: pressing the button on the profile that already IS the
+		// backup clears it (the button reads "clear backup" in that state).
+		name := sp.cloudDraft.Name
+		if sp.cloudView.Backup == name {
+			name = ""
+		}
+		if err := sp.agent.SetBackupCloudProfile(ctx, name); err != nil {
+			return "", nil, err
+		}
+		sp.profilesLoaded = false
+		if name == "" {
+			return "backup cleared", nil, nil
+		}
+		return "backup: " + name, nil, nil
 	case cloudCommitDelete:
 		if sp.agent == nil {
 			return "no agent", nil, nil

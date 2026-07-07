@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	"cercano/source/server/pkg/agentclient"
@@ -151,5 +152,40 @@ func TestRowAnnotation(t *testing.T) {
 				t.Errorf("annotation: want %q, got %q", tt.expected, got)
 			}
 		})
+	}
+}
+
+func TestBackupMarkerOnRows(t *testing.T) {
+	view := agentclient.CloudProvidersView{
+		Providers: []agentclient.CloudProvider{
+			{ID: "anthropic", Label: "anthropic", Tier: "verified", PrimaryProfile: "anthropic",
+				Profiles: []agentclient.CloudProfileInfo{{Name: "anthropic", Flavor: "messages", Model: "claude-fable-5"}}},
+			{ID: "openai", Label: "openai", Tier: "untested", PrimaryProfile: "openai",
+				Profiles: []agentclient.CloudProfileInfo{{Name: "openai", Flavor: "chat_completions", Backend: "openai", Model: "gpt-5.5", HasKey: true}}},
+		},
+		Active: "anthropic",
+		Backup: "openai",
+	}
+	rows := buildCloudRowsFromProviders(view)
+	var openaiRow, anthropicRow *cloudRow
+	for i := range rows {
+		switch rows[i].ID {
+		case "profile:openai":
+			openaiRow = &rows[i]
+		case "profile:anthropic":
+			anthropicRow = &rows[i]
+		}
+	}
+	if openaiRow == nil || !openaiRow.Backup {
+		t.Fatalf("openai row should carry Backup, got %+v", openaiRow)
+	}
+	if anthropicRow.Backup {
+		t.Fatal("active anthropic row must not carry Backup")
+	}
+	if ann := rowAnnotation(*openaiRow); !strings.Contains(ann, "backup") {
+		t.Fatalf("backup row annotation %q missing marker", ann)
+	}
+	if ann := rowAnnotation(*anthropicRow); strings.Contains(ann, "backup") {
+		t.Fatalf("active row annotation %q must not carry backup marker", ann)
 	}
 }

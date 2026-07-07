@@ -126,6 +126,14 @@ func (sp *settingsPage) cloudDetailFields(r cloudRow) []form.Field {
 		form.NewButton("cloud-activate", il("activate"), !r.ComingSoon),
 	)
 	if !sp.cloudDraftNew {
+		// Backup toggle: the active profile can't be its own backup (the
+		// server rejects it), so the set button is disabled on the active row.
+		label := "set as backup"
+		enabled := !r.Active && !r.ComingSoon
+		if r.Profile != nil && r.Profile.Name == sp.cloudView.Backup {
+			label, enabled = "clear backup", true
+		}
+		out = append(out, form.NewButton("cloud-backup", il(label), enabled))
 		out = append(out, form.NewButton("cloud-delete", il("delete"), true))
 	}
 	return out

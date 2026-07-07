@@ -34,7 +34,7 @@ func cloudPresets() []cloudPreset {
 		{ID: "openrouter", Label: "openrouter", Flavor: "chat_completions", Backend: "", BaseURL: "https://openrouter.ai/api/v1", Tier: tierUntested},
 		{ID: "deepseek", Label: "deepseek", Flavor: "chat_completions", Backend: "", BaseURL: "https://api.deepseek.com", Tier: tierUntested},
 		{ID: "bedrock", Label: "bedrock", Flavor: "bedrock", BaseURL: "", Tier: tierComingSoon},
-		{ID: "openai-responses", Label: "openai (responses)", Flavor: "responses", BaseURL: "https://api.openai.com/v1", Tier: tierComingSoon},
+		{ID: "openai-responses", Label: "openai (responses)", Flavor: "responses", BaseURL: "https://api.openai.com/v1", Tier: tierUntested},
 	}
 }
 

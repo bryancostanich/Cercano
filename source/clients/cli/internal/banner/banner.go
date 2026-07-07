@@ -11,7 +11,10 @@ import (
 	"cercano/source/clients/cli/internal/theme"
 )
 
-// Width is the fixed banner outer width in columns: 1 left wall + 60 inner + 1 right wall.
+// Width is the banner's minimum outer width in columns: 1 left wall + 60 inner
+// + 1 right wall. The box grows beyond this only when the status line needs the
+// room (long model names); it never shrinks below it, so callers can keep using
+// Width as a layout floor.
 const Width = 62
 
 // wordmark rows (28 cols each).
@@ -32,7 +35,8 @@ type Meta struct {
 const WordmarkCols = 28
 
 // Render returns the 8-line banner as a single string, styled with the given palette.
-// Returned string contains terminal escape sequences; render width per line is `Width`.
+// Returned string contains terminal escape sequences; render width per line is
+// at least `Width` (the box grows to fit a long status line).
 // Equivalent to RenderWithSweep(p, m, +infinity) — no shimmer applied.
 func Render(p theme.Palette, m Meta) string {
 	return renderWith(p, m, func(rune, int) color.Color { return p.Primary })
@@ -57,12 +61,30 @@ func renderWith(p theme.Palette, m Meta, colorFn func(r rune, col int) color.Col
 
 func renderWithRowColors(p theme.Palette, m Meta, colorTop, colorBot func(rune, int) color.Color) string {
 	s := theme.NewStyles(p)
-	borderTop := s.BorderDim.Render("╔" + strings.Repeat("═", Width-2) + "╗")
-	borderBot := s.BorderDim.Render("╚" + strings.Repeat("═", Width-2) + "╝")
-	wall := s.BorderDim.Render("║")
-	blank := wall + strings.Repeat(" ", Width-2) + wall
+	// Status line content width (visible columns). The model segment is
+	// omitted entirely when unset so we never render a dangling "· "
+	// separator in the brief window before the config load fills it in.
+	statusVisible := visibleWidth(m.Tagline) + 2 /*▶ */ + 7 /*     · */ + visibleWidth(m.Version)
+	if m.Model != "" {
+		statusVisible += 3 /* · */ + visibleWidth(m.Model)
+	}
 
-	// Wordmark rows: 2-col left pad, 28-col wordmark, 30-col right pad. Each
+	// Inner width between the walls. The floor is the wordmark block — 60 cols
+	// (2 left pad + 28 wordmark + 30 right pad), i.e. Width-2 — so short model
+	// names keep the familiar box. The box grows only when the status line
+	// (2-col left pad + content + 2-col right breathing pad) needs more room,
+	// so long model names never clip past the right wall.
+	inner := Width - 2
+	if statusInner := 2 /*left pad*/ + statusVisible + 2 /*right pad*/; statusInner > inner {
+		inner = statusInner
+	}
+
+	borderTop := s.BorderDim.Render("╔" + strings.Repeat("═", inner) + "╗")
+	borderBot := s.BorderDim.Render("╚" + strings.Repeat("═", inner) + "╝")
+	wall := s.BorderDim.Render("║")
+	blank := wall + strings.Repeat(" ", inner) + wall
+
+	// Wordmark rows: 2-col left pad, 28-col wordmark, remaining right pad. Each
 	// wordmark cell rendered independently so per-column colors can change.
 	wordmarkLine := func(text string, cf func(rune, int) color.Color) string {
 		var b strings.Builder
@@ -72,32 +94,27 @@ func renderWithRowColors(p theme.Palette, m Meta, colorTop, colorBot func(rune, 
 			b.WriteString(lipgloss.NewStyle().Foreground(c).Render(string(r)))
 			col++
 		}
-		return wall + "  " + b.String() + strings.Repeat(" ", 30) + wall
+		return wall + "  " + b.String() + strings.Repeat(" ", inner-2-WordmarkCols) + wall
 	}
 
-	// Lime rail: 2-col left pad, 56-col rail, 2-col right pad.
-	railLine := wall + "  " + s.Accent.Render(strings.Repeat("━", 56)) + "  " + wall
+	// Lime rail: 2-col left pad, rail, 2-col right pad.
+	railLine := wall + "  " + s.Accent.Render(strings.Repeat("━", inner-4)) + "  " + wall
 
-	// Status line: 2-col left pad, 55-col content, 3-col right pad. The model
-	// segment is omitted entirely when unset so we never render a dangling
-	// "· " separator in the brief window before the config load fills it in.
+	// Status line: 2-col left pad, content, trailing pad to the right wall.
 	statusParts := []string{
 		s.Muted.Render("▶ "),
 		s.Primary.Render(m.Tagline),
 		s.Muted.Render("     · "),
 		s.Info.Render(m.Version),
 	}
-	// Compute trailing pad to land the right wall at column Width.
-	statusVisible := visibleWidth(m.Tagline) + 2 /*▶ */ + 7 /*     · */ + visibleWidth(m.Version)
 	if m.Model != "" {
 		statusParts = append(statusParts,
 			s.Muted.Render(" · "),
 			s.Accent.Render(m.Model),
 		)
-		statusVisible += 3 /* · */ + visibleWidth(m.Model)
 	}
 	status := lipgloss.JoinHorizontal(lipgloss.Left, statusParts...)
-	trailingPad := Width - 2 /*walls*/ - 2 /*left pad*/ - statusVisible
+	trailingPad := inner - 2 /*left pad*/ - statusVisible
 	if trailingPad < 0 {
 		trailingPad = 0
 	}

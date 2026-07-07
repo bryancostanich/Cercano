@@ -218,8 +218,18 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 			body = append(body, diff...)
 		} else {
 			// Plain indent + styled text (see the loading branch) so the rail
-			// overlay lands on a real space at offset 2.
-			body = append(body, "    "+toolEntryFaint.Render("args: "+e.FullArgs))
+			// overlay lands on a real space at offset 2. The args JSON can be
+			// arbitrarily long, so wrap it (ANSI-aware, hard-breaking long
+			// tokens) to the body width — an unwrapped line would overflow and
+			// wrap at column 0, left of the rail.
+			aw := width - 4
+			if aw < 8 {
+				aw = 8
+			}
+			argsBody := toolEntryFaint.Render("args: " + expandTabs(e.FullArgs))
+			for _, l := range strings.Split(ansi.Wrap(argsBody, aw, ""), "\n") {
+				body = append(body, "    "+l)
+			}
 		}
 	}
 	if e.FullResult != "" {
@@ -292,7 +302,7 @@ func renderDiffBlock(path string, ops []render.DiffLine, width int, styles theme
 		default:
 			prefix, st = "  ", faint
 		}
-		out = append(out, indent+st.Render(prefix+ansi.Truncate(op.Text, budget, "…")))
+		out = append(out, indent+st.Render(prefix+ansi.Truncate(expandTabs(op.Text), budget, "…")))
 	}
 	return out
 }

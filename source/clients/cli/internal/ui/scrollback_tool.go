@@ -218,13 +218,13 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 		}
 	}
 	if e.FullResult != "" {
-		// Render the result by type (JSON pretty-printed, markdown rendered, raw
-		// verbatim) through the same path /c uses, indented under the entry.
+		// File contents get syntax-highlighted (language inferred from the read
+		// path); other results fall back to JSON/markdown/plain sniffing.
 		bw := width - 4
 		if bw < 8 {
 			bw = 8
 		}
-		for _, l := range renderToolBody(e.FullResult, "", md, bw) {
+		for _, l := range renderToolResultBody(e.ToolName, e.FullArgs, e.FullResult, md, bw) {
 			body = append(body, "    "+l)
 		}
 	}

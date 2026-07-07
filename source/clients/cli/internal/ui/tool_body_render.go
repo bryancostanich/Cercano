@@ -3,6 +3,7 @@ package ui
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -99,4 +100,80 @@ func renderToolBody(body, declaredType string, md *render.Markdown, width int) [
 	default:
 		return strings.Split(ansi.Wrap(body, width, ""), "\n")
 	}
+}
+
+// renderToolResultBody renders a tool's result body, syntax-highlighting file
+// contents as a fenced code block when the tool read a recognized code file
+// (language inferred from the path in its args). Falls back to renderToolBody
+// (JSON/markdown/plain sniffing) for everything else.
+func renderToolResultBody(toolName, argsJSON, result string, md *render.Markdown, width int) []string {
+	if md != nil {
+		if lang := codeLangForToolArgs(toolName, argsJSON); lang != "" {
+			fenced := "```" + lang + "\n" + result + "\n```"
+			return strings.Split(md.Render(fenced, width), "\n")
+		}
+	}
+	return renderToolBody(result, "", md, width)
+}
+
+// codeLangForToolArgs returns a Chroma/Glamour language for a tool that read a
+// code file — inferred from the path extension in its args — or "" when the
+// tool isn't a file read or the extension isn't a recognized code type.
+func codeLangForToolArgs(toolName, argsJSON string) string {
+	switch strings.ToLower(toolName) {
+	case "read", "read_file":
+		var a struct {
+			Path string `json:"path"`
+		}
+		if json.Unmarshal([]byte(argsJSON), &a) == nil {
+			return langFromExt(a.Path)
+		}
+	}
+	return ""
+}
+
+// langFromExt maps a file extension to a Chroma language name, or "" for
+// unknown / non-code extensions (which then render as plain text).
+func langFromExt(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".go":
+		return "go"
+	case ".py":
+		return "python"
+	case ".ts", ".tsx":
+		return "typescript"
+	case ".js", ".jsx", ".mjs":
+		return "javascript"
+	case ".rs":
+		return "rust"
+	case ".c", ".h":
+		return "c"
+	case ".cpp", ".cc", ".cxx", ".hpp":
+		return "cpp"
+	case ".java":
+		return "java"
+	case ".rb":
+		return "ruby"
+	case ".sh", ".bash", ".zsh":
+		return "bash"
+	case ".json":
+		return "json"
+	case ".yaml", ".yml":
+		return "yaml"
+	case ".toml":
+		return "toml"
+	case ".md", ".markdown":
+		return "markdown"
+	case ".sql":
+		return "sql"
+	case ".proto":
+		return "protobuf"
+	case ".html", ".htm":
+		return "html"
+	case ".css":
+		return "css"
+	case ".rkt":
+		return "scheme"
+	}
+	return ""
 }

@@ -2,6 +2,8 @@ package dispatch
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 
 	projectctx "cercano/source/server/internal/context"
@@ -9,6 +11,14 @@ import (
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/usage"
 )
+
+// newDispatchID mints a short random id for scoping a dispatch's provider
+// session identity.
+func newDispatchID() string {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
 
 // Mode selects the dispatch execution model.
 type Mode int
@@ -133,7 +143,13 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 		return e.agenticRunner(ctx, spec, sel, model)
 	}
 
-	// 3b. Optionally prepend project context (OneShot only).
+	// 3b. A one-shot is not part of the calling conversation: give it its own
+	// provider session identity. Upstream bridges (Meridian's OpenCode adapter)
+	// key persistent session state on this id — a one-message request riding
+	// the caller's id evicts the caller's session lineage there.
+	ctx = llm.WithSessionID(ctx, "oneshot-"+newDispatchID())
+
+	// Optionally prepend project context (OneShot only).
 	prompt := spec.Prompt
 	if spec.WantsProjectContext && spec.WorkDir != "" && e.ctxLoader != nil {
 		prompt = e.ctxLoader.PrependContext(spec.WorkDir, prompt)

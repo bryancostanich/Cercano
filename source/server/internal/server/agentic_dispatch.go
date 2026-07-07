@@ -205,6 +205,17 @@ func (s *Server) runAgenticDispatch(ctx context.Context, spec dispatch.Spec, sel
 	}
 	log.Printf("[dispatch] subagent start: conv=%s model=%s tools=%v", subConvID, model, registryToolNames(reg))
 
+	// The subagent's provider calls must carry their OWN session identity, not
+	// the parent conversation's (inherited via ctx). Upstream bridges key
+	// persistent session state on this id; the subagent's disjoint history
+	// arriving on the parent's key evicts the parent's lineage and cross-
+	// delivers turns between the two.
+	sessionID := subConvID
+	if sessionID == "" {
+		sessionID = conversation.NewID()
+	}
+	ctx = llm.WithSessionID(ctx, sessionID)
+
 	// 4. Run the bounded tool loop.
 	var buf strings.Builder
 	res, err := agent.RunToolLoop(ctx, agent.ToolLoopInput{

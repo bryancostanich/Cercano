@@ -7,6 +7,20 @@ import (
 	"cercano/source/clients/cli/internal/theme"
 )
 
+// bannerWidth returns the common visible width of every banner line, failing
+// the test if the lines are not all equal (a ragged box means the border broke).
+func bannerWidth(t *testing.T, out string) int {
+	t.Helper()
+	lines := strings.Split(out, "\n")
+	w0 := visibleWidth(lines[0])
+	for i, ln := range lines {
+		if got := visibleWidth(ln); got != w0 {
+			t.Fatalf("banner line %d width = %d, want %d (ragged box):\n%s", i, got, w0, out)
+		}
+	}
+	return w0
+}
+
 func TestRender_LineCountAndWidth(t *testing.T) {
 	out := Render(theme.Cracker(), Meta{
 		Tagline: "local-first ai coprocessor",
@@ -16,6 +30,38 @@ func TestRender_LineCountAndWidth(t *testing.T) {
 	lines := strings.Split(out, "\n")
 	if len(lines) != 8 {
 		t.Fatalf("banner: got %d lines, want 8", len(lines))
+	}
+	// A short model keeps the familiar minimum-size box, and every line is
+	// exactly that width.
+	if w := bannerWidth(t, out); w != Width {
+		t.Fatalf("short-model banner width = %d, want %d", w, Width)
+	}
+}
+
+func TestRender_LongModelGrowsAndNeverClips(t *testing.T) {
+	tagline, version := "local-first ai coprocessor", "v0.1.0"
+	short := Render(theme.Cracker(), Meta{Tagline: tagline, Version: version, Model: "qwen3-coder"})
+	long := Render(theme.Cracker(), Meta{Tagline: tagline, Version: version, Model: "claude-opus-4-8"})
+
+	// Both banners are well-formed rectangles (all lines equal width) …
+	sw := bannerWidth(t, short)
+	lw := bannerWidth(t, long)
+	if len(strings.Split(long, "\n")) != 8 {
+		t.Fatalf("long-model banner should still be 8 lines")
+	}
+	// … the box grows to accommodate the longer model name …
+	if lw <= sw {
+		t.Fatalf("long-model width %d should exceed short-model width %d", lw, sw)
+	}
+	// … the model name renders intact on the status line (never clipped) …
+	status := strings.Split(stripAnsi(long), "\n")[6] // border, blank, wm×2, blank, rail, status, border
+	if !strings.Contains(status, "claude-opus-4-8") {
+		t.Fatalf("long model name clipped from status line: %q", status)
+	}
+	// … and the status line fits exactly inside the walls (no overflow past the
+	// right border, which is the bug this guards against).
+	if got := visibleWidth(strings.Split(long, "\n")[6]); got != lw {
+		t.Fatalf("status line width %d != box width %d (model spills the wall)", got, lw)
 	}
 }
 
@@ -38,12 +84,13 @@ func TestRenderWithSweep_OffScreenEqualsStatic(t *testing.T) {
 func TestRender_EmptyModelOmitsSeparator(t *testing.T) {
 	// With no model set (before the config load lands), the status line must
 	// not render a dangling "· " separator, and must still be exactly 8 lines
-	// of the fixed width.
+	// of a well-formed (equal-width) box.
 	out := Render(theme.Cracker(), Meta{
 		Tagline: "local-first ai coprocessor",
 		Version: "v0.1.0",
 		// Model intentionally empty.
 	})
+	bannerWidth(t, out) // still a rectangle
 	text := stripAnsi(out)
 	lines := strings.Split(text, "\n")
 	if len(lines) != 8 {
@@ -65,6 +112,14 @@ func TestRender_EmptyModelOmitsSeparator(t *testing.T) {
 func TestWordmarkCols_Const(t *testing.T) {
 	if WordmarkCols != 28 {
 		t.Errorf("WordmarkCols changed: got %d want 28 (banner layout broken)", WordmarkCols)
+	}
+	// The layout math (right-pad = inner-2-WordmarkCols) assumes the wordmark
+	// rows are exactly WordmarkCols visible columns wide.
+	if got := visibleWidth(wordmarkTop); got != WordmarkCols {
+		t.Errorf("wordmarkTop visible width = %d, want %d", got, WordmarkCols)
+	}
+	if got := visibleWidth(wordmarkBot); got != WordmarkCols {
+		t.Errorf("wordmarkBot visible width = %d, want %d", got, WordmarkCols)
 	}
 }
 

@@ -129,6 +129,10 @@ func (m *mockAgentClient) GetContextUsage(ctx context.Context, in *proto.GetCont
 	return &proto.GetContextUsageResponse{}, nil
 }
 
+func (m *mockAgentClient) GetToolCall(ctx context.Context, in *proto.GetToolCallRequest, opts ...grpc.CallOption) (*proto.GetToolCallResponse, error) {
+	return &proto.GetToolCallResponse{}, nil
+}
+
 func (m *mockAgentClient) GetConversationTurns(ctx context.Context, in *proto.GetConversationTurnsRequest, opts ...grpc.CallOption) (*proto.GetConversationTurnsResponse, error) {
 	return &proto.GetConversationTurnsResponse{}, nil
 }

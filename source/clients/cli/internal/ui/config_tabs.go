@@ -15,14 +15,14 @@ type configTab int
 
 const (
 	configTabGeneral configTab = iota // routing, permissions, server, dev tools (settings form)
-	configTabModels                   // the runtime dashboard (local model management)
 	configTabCloud                    // cloud-profiles editor (settings form, cloud section)
+	configTabModels                   // the runtime dashboard (local model management)
 	configTabUI                       // theme + accent color (settings form)
 	configTabContext                  // read-only context viewer for the active conversation
 )
 
 // configTabLabels are the visible tab titles, indexed by configTab.
-var configTabLabels = []string{"General", "Models", "Cloud", "UI", "Context"}
+var configTabLabels = []string{"General", "Cloud", "Models", "UI", "Context"}
 
 // configTabCount is the number of tabs; kept as a named constant so wrap-around
 // navigation and digit-jump bounds stay in one place.

@@ -9,8 +9,8 @@ func TestCycleConfigTabWrapsBothWays(t *testing.T) {
 	if got := cycleConfigTab(configTabGeneral, -1); got != configTabContext {
 		t.Fatalf("backward wrap: got %v, want Context", got)
 	}
-	if got := cycleConfigTab(configTabGeneral, +1); got != configTabModels {
-		t.Fatalf("forward step: got %v, want Models", got)
+	if got := cycleConfigTab(configTabGeneral, +1); got != configTabCloud {
+		t.Fatalf("forward step: got %v, want Cloud", got)
 	}
 }
 

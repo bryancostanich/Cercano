@@ -206,6 +206,7 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 	// the host keeps ticking (hasLoadingTool gates that).
 	if e.Loading {
 		body = append(body, toolEntryFaint.Render("    "+animateToolSpinner()+" loading…"))
+		railBody(body)
 		return strings.Join(body, "\n")
 	}
 	if e.FullArgs != "" {
@@ -233,6 +234,7 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 	if e.FullArgs == "" && e.FullResult == "" {
 		body = append(body, toolEntryFaint.Render("    (no details)"))
 	}
+	railBody(body)
 	return strings.Join(body, "\n")
 }
 
@@ -334,10 +336,45 @@ func renderToolGroup(entries []ToolEntry, width int, styles theme.Styles, md *re
 // entries slice passed in. Rows are recorded while the lines are emitted, so
 // the mapping is correct by construction — click handling must never
 // re-derive (or glyph-sniff) the rendered layout after the fact.
+// railBody overlays the collapse rail on an expanded entry's body: a faint │
+// under the arrow (byte offset 2, inside the "    " indent) on every line after
+// the header, turning into a ╰ hook on the last line. The arrow at the top plus
+// this rail bracket the expanded region, so it can be collapsed by clicking the
+// rail anywhere down its length (see MouseToggleFold) — not just the far-up
+// arrow. No-op on lines whose offset-2 byte isn't the expected plain space.
+func railBody(body []string) {
+	rail := lipgloss.NewStyle().Faint(true)
+	for k := 1; k < len(body); k++ {
+		g := "│"
+		if k == len(body)-1 {
+			g = "╰"
+		}
+		if l := body[k]; len(l) >= 3 && l[2] == ' ' {
+			body[k] = l[:2] + rail.Render(g) + l[3:]
+		}
+	}
+}
+
 type toolArrowRow struct {
-	Line  int
-	Entry int
-	Group bool // true = collapse/expand the whole run; false = toggle this entry's body
+	Line    int
+	Entry   int
+	Group   bool // true = collapse/expand the whole run; false = toggle this entry's body
+	Rail    bool // a rail line: collapse only when the click is in the left gutter (x <= RailCol)
+	RailCol int  // the rail's column
+}
+
+// entryRailRows emits rail toolArrowRows for an expanded entry's body lines
+// (every line after the header), targeting that entry so a click in the left
+// gutter collapses it. startLine is the entry's first line within the block;
+// railCol is the rail's column relative to the block (2 for a standalone entry,
+// 4 for one nested under a group header).
+func entryRailRows(seg string, startLine, entry, railCol int) []toolArrowRow {
+	n := strings.Count(seg, "\n") + 1
+	rows := make([]toolArrowRow, 0, n-1)
+	for ln := 1; ln < n; ln++ {
+		rows = append(rows, toolArrowRow{Line: startLine + ln, Entry: entry, Group: false, Rail: true, RailCol: railCol})
+	}
+	return rows
 }
 
 // renderToolGroupSpans is renderToolGroup plus the arrow-row map.
@@ -347,7 +384,11 @@ func renderToolGroupSpans(entries []ToolEntry, width int, styles theme.Styles, m
 	// header — nothing to collapse.
 	if len(entries) == 1 {
 		seg := renderToolEntry(entries[0], width, opts.FocusedIdx == 0, styles, md)
-		return seg, []toolArrowRow{{Line: 0, Entry: 0, Group: false}}
+		rows := []toolArrowRow{{Line: 0, Entry: 0, Group: false}}
+		if !entries[0].Folded {
+			rows = append(rows, entryRailRows(seg, 0, 0, 2)...)
+		}
+		return seg, rows
 	}
 
 	// Expanded multi-entry run: a clickable summary header (▾) that collapses
@@ -363,6 +404,9 @@ func renderToolGroupSpans(entries []ToolEntry, width int, styles theme.Styles, m
 		for i, e := range entries {
 			seg := indentBlock("  ", renderToolEntry(e, width-2, i == opts.FocusedIdx, styles, md))
 			rows = append(rows, toolArrowRow{Line: cursor, Entry: i, Group: false})
+			if !e.Folded {
+				rows = append(rows, entryRailRows(seg, cursor, i, 4)...)
+			}
 			lines = append(lines, seg)
 			cursor += strings.Count(seg, "\n") + 1
 		}

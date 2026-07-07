@@ -7,7 +7,7 @@ func RegisterTheme(r *Registry) {
 		Name: "theme",
 		Help: "Open the settings page to switch or edit the color theme.",
 		Handler: func(args []string) Result {
-			return Result{Kind: ResultOpenSettings}
+			return Result{Kind: ResultOpenThemeSettings}
 		},
 	})
 }

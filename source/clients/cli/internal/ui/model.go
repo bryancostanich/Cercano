@@ -139,6 +139,10 @@ type Model struct {
 
 	content contentPage
 
+	// configSurface is non-nil while the unified /config tabbed surface is
+	// open; m.content then holds the active tab's page. See config_surface.go.
+	configSurface *configSurface
+
 	recap string // living one-line work summary; shown in the chat footer
 
 	// nextPromptSuggestion is a locally-generated "what to do next" one-liner
@@ -737,7 +741,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// drawing at its construction-time width/height and the buffer
 		// fragments.
 		if m.content != nil {
-			m.content.SetSize(m.width, m.height)
+			m.content.SetSize(m.width, m.contentPageHeight())
 		}
 		// -r boot: open the history picker on the first sized frame.
 		if m.openHistoryOnStart && m.width > 0 {
@@ -794,6 +798,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mouse := msg.Mouse()
 		if m.contentPageActive() {
 			if mouse.Button != tea.MouseLeft {
+				return m, nil
+			}
+			if m.configSurface != nil && mouse.Y == m.configStripTop() {
+				if tab := configTabAtX(mouse.X); tab >= 0 {
+					return m, m.switchConfigTab(tab)
+				}
 				return m, nil
 			}
 			if scroller, state, ok := m.contentScrollbarAt(mouse); ok {
@@ -944,6 +954,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Active content pages own the middle region, but global keys stay
 		// above this branch.
 		if m.content != nil {
+			if m.configSurface != nil {
+				if next, cmd, handled := m.handleConfigSurfaceKey(msg); handled {
+					return next, cmd
+				}
+			}
 			if cv, ok := m.content.(*contextView); ok {
 				return m.handleContextViewKey(cv, msg)
 			}
@@ -961,9 +976,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		if isRuntimeDashboardKey(msg) {
-			dashboard, cmd := newRuntimeDashboard(m.agent, m.palette, m.styles, m.width, m.height)
-			m.content = dashboard
-			return m, tea.Batch(cmd, dashboard.refreshTick())
+			return m, m.openConfigSurface(configTabModels)
 		}
 		// Esc cancels an in-flight prompt execution. If there's a queued
 		// follow-up (user typed while waiting), it stays queued through the
@@ -1574,12 +1587,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case openRuntimeDashboardMsg:
-		// Emitted by the install modal's "Browse models" action.
-		// Same transition as pressing Cmd+M — swaps the content page
-		// to a fresh runtime dashboard.
-		dashboard, cmd := newRuntimeDashboard(m.agent, m.palette, m.styles, m.width, m.height)
-		m.content = dashboard
-		return m, tea.Batch(cmd, dashboard.refreshTick())
+		// Emitted by the install modal's "Browse models" action — opens the
+		// unified config surface on the Models tab.
+		return m, m.openConfigSurface(configTabModels)
 
 	case openRuntimeStatusChangedMsg:
 		// Pushed on runtime swap or startup — the headless detection
@@ -1993,19 +2003,16 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.chat.ExitToolNav()
 		m.refreshViewport()
 	case slash.ResultOpenSettings:
-		sp, cmd := newSettingsPage(m.agent, m.palette, m.styles, m.promptColorToken, m.width, m.height, m.themes, m.theme)
-		m.content = sp
-		return m, cmd
+		return m, m.openConfigSurface(configTabGeneral)
+	case slash.ResultOpenThemeSettings:
+		return m, m.openConfigSurface(configTabUI)
 	case slash.ResultOpenHistoryPicker:
 		hv, _ := newHistoryView(m.agent, m.palette, m.styles, m.width, m.height)
 		m.content = hv
 	case slash.ResultOpenRuntimeDashboard:
-		dashboard, _ := newRuntimeDashboard(m.agent, m.palette, m.styles, m.width, m.height)
-		m.content = dashboard
+		return m, m.openConfigSurface(configTabModels)
 	case slash.ResultOpenContextView:
-		cv, cmd := newContextView(m.agent, m.palette, m.styles, m.convID, m.width, m.height)
-		m.content = cv
-		return m, tea.Batch(cmd, contextRefreshTick())
+		return m, m.openConfigSurface(configTabContext)
 	case slash.ResultOpenWizard:
 		m.content = newWizardPage(m.agent, m.palette, m.styles, m.width, m.height)
 	case slash.ResultRegenContext:
@@ -2176,6 +2183,9 @@ func (m Model) contentTop() int {
 	top := 2
 	if m.splashEffective() {
 		top += 9
+	}
+	if m.configSurface != nil {
+		top += configStripRows
 	}
 	return top
 }
@@ -3098,6 +3108,9 @@ func (m Model) View() tea.View {
 
 	switch {
 	case m.content != nil:
+		if m.configSurface != nil {
+			parts = append(parts, renderConfigTabStrip(m.width, m.configSurface.active, m.configSurface.focused, m.styles))
+		}
 		parts = append(parts, m.content.View())
 	default:
 		parts = append(parts, m.renderViewportWithScrollbar())

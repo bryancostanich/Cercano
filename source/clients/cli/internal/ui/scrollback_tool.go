@@ -205,7 +205,9 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 	// even if the store read stalls. The wall-clock spinner animates as long as
 	// the host keeps ticking (hasLoadingTool gates that).
 	if e.Loading {
-		body = append(body, toolEntryFaint.Render("    "+animateToolSpinner()+" loading…"))
+		// Keep the "    " indent PLAIN (outside the style) so the rail overlay,
+		// which replaces the byte at offset 2, finds a real space there.
+		body = append(body, "    "+toolEntryFaint.Render(animateToolSpinner()+" loading…"))
 		railBody(body)
 		return strings.Join(body, "\n")
 	}
@@ -215,7 +217,9 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 		if diff := renderToolArgsDiff(e.ToolName, e.FullArgs, width, styles); diff != nil {
 			body = append(body, diff...)
 		} else {
-			body = append(body, toolEntryFaint.Render("    args: "+e.FullArgs))
+			// Plain indent + styled text (see the loading branch) so the rail
+			// overlay lands on a real space at offset 2.
+			body = append(body, "    "+toolEntryFaint.Render("args: "+e.FullArgs))
 		}
 	}
 	if e.FullResult != "" {
@@ -232,7 +236,7 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 	// Fetched but nothing recorded (or the fetch failed): say so rather than
 	// render a bare header with an empty body.
 	if e.FullArgs == "" && e.FullResult == "" {
-		body = append(body, toolEntryFaint.Render("    (no details)"))
+		body = append(body, "    "+toolEntryFaint.Render("(no details)"))
 	}
 	railBody(body)
 	return strings.Join(body, "\n")

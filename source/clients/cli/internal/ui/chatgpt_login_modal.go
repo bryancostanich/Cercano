@@ -64,6 +64,9 @@ type chatgptLoginModal struct {
 	// browserOpened guards the one-shot auto-open so re-draws / extra frames
 	// don't spawn a browser tab per poll.
 	browserOpened bool
+	// copied is set once the user copies the device code, so the actions line
+	// can confirm it.
+	copied bool
 }
 
 // newChatGPTLoginModal opens the modal in the waiting state for a given
@@ -238,7 +241,10 @@ func (mo *chatgptLoginModal) renderBody(styles theme.Styles, w int) string {
 func (mo *chatgptLoginModal) renderActions(styles theme.Styles) string {
 	switch mo.state {
 	case chatgptLoginWaiting:
-		return styles.Muted.Render("Waiting for approval…  [o] open browser  [Esc] Cancel")
+		if mo.copied {
+			return styles.Success.Render("code copied ✓") + styles.Muted.Render("   [o] open browser  [Esc] Cancel")
+		}
+		return styles.Muted.Render("[c] copy code  [o] open browser  [Esc] Cancel  (waiting for approval…)")
 	case chatgptLoginDone:
 		return styles.Success.Render("✓ [any key] to close")
 	case chatgptLoginFailed:
@@ -262,6 +268,11 @@ func (m Model) handleChatGPTLoginModalKey(msg tea.KeyPressMsg) (tea.Model, tea.C
 		case "o":
 			if mo.verificationURL != "" {
 				return m, openBrowserCmd(mo.verificationURL)
+			}
+		case "c":
+			if mo.userCode != "" {
+				mo.copied = true
+				return m, selectionClipboardCmd(mo.userCode)
 			}
 		}
 		return m, nil

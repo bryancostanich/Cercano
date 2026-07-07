@@ -24,3 +24,23 @@ func SessionIDFromContext(ctx context.Context) string {
 	}
 	return ""
 }
+
+// independentSessionKey marks a call as NOT a continuation of any conversation
+// — a dispatch subagent or a one-shot. Providers that multiplex conversations
+// can use it to bypass lineage/session matching entirely (belt-and-suspenders
+// alongside the unique session id).
+type independentSessionKey struct{}
+
+// WithIndependentSession marks ctx as an independent (non-conversational)
+// session. On the Meridian route this emits x-meridian-source: subagent-<id>,
+// which makes Meridian's OpenCode adapter treat the request as an independent
+// session and skip lineage lookup.
+func WithIndependentSession(ctx context.Context) context.Context {
+	return context.WithValue(ctx, independentSessionKey{}, true)
+}
+
+// IsIndependentSession reports whether ctx was marked by WithIndependentSession.
+func IsIndependentSession(ctx context.Context) bool {
+	v, ok := ctx.Value(independentSessionKey{}).(bool)
+	return ok && v
+}

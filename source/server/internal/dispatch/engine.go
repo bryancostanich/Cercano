@@ -144,10 +144,12 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 	}
 
 	// 3b. A one-shot is not part of the calling conversation: give it its own
-	// provider session identity. Upstream bridges (Meridian's OpenCode adapter)
-	// key persistent session state on this id — a one-message request riding
-	// the caller's id evicts the caller's session lineage there.
+	// provider session identity AND mark it independent so upstream bridges skip
+	// lineage matching. Meridian's OpenCode adapter keys persistent session
+	// state on the id — a one-message request riding the caller's id (or matched
+	// by lineage) evicts the caller's session there.
 	ctx = llm.WithSessionID(ctx, "oneshot-"+newDispatchID())
+	ctx = llm.WithIndependentSession(ctx)
 
 	// Optionally prepend project context (OneShot only).
 	prompt := spec.Prompt

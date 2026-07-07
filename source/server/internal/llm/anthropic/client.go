@@ -77,6 +77,13 @@ func (h *headerRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) 
 		r.Header.Set("x-opencode-session", sid)
 		r.Header.Set("x-opencode-request", newMessageID())
 		r.Header.Set("x-opencode-agent-mode", "primary")
+		// An independent session (dispatch subagent / one-shot) additionally
+		// tells Meridian to skip lineage matching: its adapter treats a
+		// requestSource of subagent-*/fork-* as `{type: "diverged"}` and never
+		// resumes a cached session. Second isolation layer over the unique id.
+		if llm.IsIndependentSession(r.Context()) {
+			r.Header.Set("x-meridian-source", "subagent-"+sid)
+		}
 	}
 	return h.base.RoundTrip(r)
 }

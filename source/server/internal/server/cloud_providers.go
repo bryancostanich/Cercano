@@ -30,17 +30,23 @@ func (s *Server) GetCloudProviders(ctx context.Context, req *proto.GetCloudProvi
 	}
 	grouped, custom := cloudcatalog.Group(refs, active)
 
-	// toInfo builds a proto CloudProfileInfo for a grouped ref, filling Model
-	// from the stored profile and checking the keychain for a key (mirrors the
-	// GetCloudProfiles handler's per-profile logic).
-	toInfo := func(ref cloudcatalog.ProfileRef) *proto.CloudProfileInfo {
-		p := byName[ref.Name]
-		hasKey := false
-		if s.secrets != nil {
-			if _, err := s.secrets.Get(p.Name); err == nil {
-				hasKey = true
+	// Stored-key presence comes from the keychain key NAMES (a prompt-free
+	// list) instead of reading each secret, which on macOS raises a Keychain
+	// authorization prompt every time the Cloud settings tab is opened.
+	keyNamesForPresence := map[string]bool{}
+	if s.secrets != nil {
+		if names, err := s.secrets.List(); err == nil {
+			for _, n := range names {
+				keyNamesForPresence[n] = true
 			}
 		}
+	}
+	// toInfo builds a proto CloudProfileInfo for a grouped ref, filling Model
+	// from the stored profile and checking the keychain for a key (prompt-free
+	// presence via the name list above; mirrors GetCloudProfiles).
+	toInfo := func(ref cloudcatalog.ProfileRef) *proto.CloudProfileInfo {
+		p := byName[ref.Name]
+		hasKey := keyNamesForPresence[p.Name]
 		return &proto.CloudProfileInfo{
 			Name: p.Name, Flavor: p.Flavor, BaseUrl: p.BaseURL, Model: p.Model,
 			HasKey: hasKey, Backend: p.Backend, Route: p.Route,

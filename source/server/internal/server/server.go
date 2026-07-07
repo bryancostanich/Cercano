@@ -19,6 +19,7 @@ import (
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/capabilities/agentadapter"
 	"cercano/source/server/internal/capabilities/builtins"
+	"cercano/source/server/internal/chatgptauth"
 	"cercano/source/server/internal/cloudfactory"
 	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/compactiongen"
@@ -32,16 +33,16 @@ import (
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/llm/anthropic"
 	"cercano/source/server/internal/localruntime"
-	"cercano/source/server/internal/ollamacatalog"
-	"cercano/source/server/internal/sysram"
 	"cercano/source/server/internal/localruntime/llamaserver"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
 	mcphost "cercano/source/server/internal/mcp_host"
 	"cercano/source/server/internal/meridian"
+	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/retention"
 	"cercano/source/server/internal/secrets"
+	"cercano/source/server/internal/sysram"
 	"cercano/source/server/internal/usage"
 	"cercano/source/server/internal/watchdog"
 	"cercano/source/server/pkg/config"
@@ -69,7 +70,7 @@ type McpManager interface {
 type Server struct {
 	proto.UnimplementedAgentServer
 	agent               *agent.Agent
-	openProvider       *legacymodels.OpenModelProvider
+	openProvider        *legacymodels.OpenModelProvider
 	router              RouterCloudUpdater
 	coordinator         *loop.ADKCoordinator
 	cloudFactory        agent.CloudFactory
@@ -84,19 +85,19 @@ type Server struct {
 	meridianMgr         *meridian.Manager
 	pendingDecisions    *agent.PendingDecisions
 	cloudLLMProvider    llm.Provider
-	openLLMProvider    llm.Provider // native-tool-loop local provider (Ollama)
+	openLLMProvider     llm.Provider // native-tool-loop local provider (Ollama)
 	secrets             secrets.Store
 	runtimeManager      localruntime.Manager
 	// catalogManager (optional) surfaces Ollama's public library as an
 	// online model catalog. Nil = no online catalog (dashboard just
 	// shows the hardcoded local catalog + any downloaded files).
-	catalogManager *ollamacatalog.Manager
-	retentionSweeper    *retention.Sweeper
-	compactionGen       *compactiongen.Generator
-	contextLoader       *projectctx.Loader
-	dispatchEngine      *dispatch.Engine
-	watchdog            *watchdog.Watchdog // protocol-supervision gate; nil = disabled (default)
-	usageSink           func(usage.Usage)  // wraps the main-loop provider for token recording
+	catalogManager   *ollamacatalog.Manager
+	retentionSweeper *retention.Sweeper
+	compactionGen    *compactiongen.Generator
+	contextLoader    *projectctx.Loader
+	dispatchEngine   *dispatch.Engine
+	watchdog         *watchdog.Watchdog // protocol-supervision gate; nil = disabled (default)
+	usageSink        func(usage.Usage)  // wraps the main-loop provider for token recording
 
 	events        *eventHub    // server->client push fan-out (SubscribeEvents)
 	permBcastMu   sync.Mutex   // guards lastBcastMode
@@ -136,7 +137,7 @@ func (s *Server) ToolRegistry() *agenttools.Registry { return s.toolRegistry }
 func (s *Server) InstallCapabilities() {
 	capReg := capabilities.NewRegistry(capabilities.Services{
 		CloudProvider: s.cloudLLMProvider,
-		OpenProvider: s.openLLMProvider,
+		OpenProvider:  s.openLLMProvider,
 		Config:        &s.currentConfig,
 		ProjectCtx:    s.contextLoader,
 		// Engine/Conversations wired in a later phase; nil-safe until then.
@@ -233,7 +234,7 @@ func (s *Server) SetOpenLLMProvider(p llm.Provider) { s.openLLMProvider = p }
 // dispatch engine reads these per-dispatch so a runtime cloud swap is honored,
 // and wraps them itself for usage recording — so these must stay unwrapped.
 func (s *Server) CloudLLMProvider() llm.Provider { return s.cloudLLMProvider }
-func (s *Server) OpenLLMProvider() llm.Provider { return s.openLLMProvider }
+func (s *Server) OpenLLMProvider() llm.Provider  { return s.openLLMProvider }
 
 // SetUsageSink installs the sink that resolveMainProvider uses to wrap the
 // main tool-loop's provider for token-usage recording. The server's stored
@@ -374,7 +375,14 @@ func (s *Server) rebuildCloudLocked() error {
 		s.installAbsentCloud("no API key for profile " + p.Name)
 		return fmt.Errorf("no API key for profile %s", p.Name)
 	}
-	prov, err := cloudfactory.BuildCloudProvider(p, key)
+	var cloudOpts cloudfactory.Options
+	if p.Flavor == cloudfactory.FlavorResponses && p.Route == cloudfactory.RouteChatGPT {
+		// ChatGPT subscription: authenticate via a refreshing token source over
+		// the keychain (the profile's key slot holds the token JSON), not a
+		// static API key.
+		cloudOpts.TokenSource = chatgptauth.NewSource(s.secrets, p.Name, chatgptauth.Flow{})
+	}
+	prov, err := cloudfactory.BuildCloudProvider(p, key, cloudOpts)
 	if err != nil {
 		s.installAbsentCloud(err.Error())
 		return err
@@ -649,13 +657,13 @@ func (s *Server) SetCompactionGenerator(g *compactiongen.Generator) { s.compacti
 // NewServer creates a new Agent gRPC server.
 func NewServer(a *agent.Agent, openProvider *legacymodels.OpenModelProvider, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
 	return &Server{
-		agent:         a,
+		agent:        a,
 		openProvider: openProvider,
-		router:        router,
-		coordinator:   coordinator,
-		cloudFactory:  cloudFactory,
-		registry:      registry,
-		events:        newEventHub(),
+		router:       router,
+		coordinator:  coordinator,
+		cloudFactory: cloudFactory,
+		registry:     registry,
+		events:       newEventHub(),
 	}
 }
 
@@ -1515,7 +1523,7 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 	}
 	return &proto.GetConfigResponse{
 		OllamaUrl:              cfg.OllamaURL,
-		OpenModel:             cfg.OpenModel,
+		OpenModel:              cfg.OpenModel,
 		EmbeddingModel:         cfg.EmbeddingModel,
 		CloudProvider:          cloudProvider,
 		CloudModel:             cloudModel,
@@ -1523,7 +1531,7 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 		CloudApiKeySet:         cfg.CloudAPIKey != "",
 		CloudState:             state,
 		Port:                   cfg.Port,
-		OpenRuntime:           cfg.OpenRuntime,
+		OpenRuntime:            cfg.OpenRuntime,
 		LocusMode:              cfg.LocusMode,
 		WatchdogEnabled:        cfg.Watchdog.Enabled,
 		WatchdogEcho:           cfg.Watchdog.Echo,
@@ -2693,7 +2701,7 @@ func (s *Server) mapRequest(req *proto.ProcessRequestRequest) *agent.Request {
 		WorkDir:        req.WorkDir,
 		FileName:       req.FileName,
 		ConversationID: req.ConversationId,
-		DirectOpen:    req.DirectOpen,
+		DirectOpen:     req.DirectOpen,
 		ModelOverride:  req.ModelOverride,
 		Coproc:         req.Coproc,
 		Images:         mapInlineImages(req.GetImages()),

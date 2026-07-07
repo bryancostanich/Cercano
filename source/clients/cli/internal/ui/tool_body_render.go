@@ -126,11 +126,23 @@ func codeLangForToolArgs(toolName, argsJSON string) string {
 			Path string `json:"path"`
 		}
 		if json.Unmarshal([]byte(argsJSON), &a) == nil {
-			return langFromExt(a.Path)
+			if l := langFromExt(a.Path); l != "" {
+				return l
+			}
 		}
+	}
+	// Fallback: a code-extension filename anywhere in the args (e.g. a bash
+	// heredoc `cat > source.go`, or a redirect) picks the highlight language for
+	// the whole result body. First recognized extension wins.
+	if m := codeFileRe.FindString(argsJSON); m != "" {
+		return langFromExt(m)
 	}
 	return ""
 }
+
+// codeFileRe matches a filename bearing a recognized code extension, used to
+// infer a highlight language from tool args that reference a file.
+var codeFileRe = regexp.MustCompile(`[\w./-]+\.(?:go|py|ts|tsx|js|jsx|mjs|rs|c|h|cpp|cc|cxx|hpp|java|rb|sh|bash|zsh|json|yaml|yml|toml|md|markdown|sql|proto|html|htm|css|rkt)\b`)
 
 // langFromExt maps a file extension to a Chroma language name, or "" for
 // unknown / non-code extensions (which then render as plain text).

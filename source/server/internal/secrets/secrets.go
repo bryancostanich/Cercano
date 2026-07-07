@@ -19,6 +19,12 @@ type Store interface {
 	Get(profile string) (string, error)
 	Set(profile, key string) error
 	Delete(profile string) error
+	// List returns the names of every profile that has a stored secret. On
+	// macOS this lists keychain item attributes WITHOUT reading secret data,
+	// so it does not trigger the per-item authorization prompt that Get does.
+	// Use it for presence checks (e.g. rendering a "key stored" marker) so
+	// merely browsing profiles never prompts for the login-keychain password.
+	List() ([]string, error)
 }
 
 type keyringStore struct{ kr keyring.Keyring }
@@ -49,6 +55,11 @@ func (s *keyringStore) Set(profile, key string) error {
 }
 
 func (s *keyringStore) Delete(profile string) error { return s.kr.Remove(profile) }
+
+// List returns the stored profile names. keyring.Keys lists item attributes
+// only (no secret data), so on macOS it does not raise the authorization
+// prompt that Get does.
+func (s *keyringStore) List() ([]string, error) { return s.kr.Keys() }
 
 // memoryStore is an in-process Store for tests.
 type memoryStore struct {
@@ -81,4 +92,14 @@ func (s *memoryStore) Delete(profile string) error {
 	defer s.mu.Unlock()
 	delete(s.m, profile)
 	return nil
+}
+
+func (s *memoryStore) List() ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.m))
+	for k := range s.m {
+		out = append(out, k)
+	}
+	return out, nil
 }

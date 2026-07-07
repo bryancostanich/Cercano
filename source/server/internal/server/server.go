@@ -518,6 +518,17 @@ func (s *Server) RebuildCloud() error { return s.rebuildCloud() }
 
 // GetCloudProfiles implements proto.AgentServer — returns the list of configured cloud profiles.
 func (s *Server) GetCloudProfiles(ctx context.Context, req *proto.GetCloudProfilesRequest) (*proto.GetCloudProfilesResponse, error) {
+	// Stored-key presence comes from the keychain key NAMES (a prompt-free
+	// list) instead of reading each secret, which on macOS raises a Keychain
+	// authorization prompt. Browsing the Cloud settings tab must never prompt.
+	keyNamesForPresence := map[string]bool{}
+	if s.secrets != nil {
+		if names, err := s.secrets.List(); err == nil {
+			for _, n := range names {
+				keyNamesForPresence[n] = true
+			}
+		}
+	}
 	s.cfgMu.RLock()
 	active := s.currentConfig.ActiveCloudProfile
 	profiles := append([]config.CloudProfile(nil), s.currentConfig.CloudProfiles...)
@@ -525,12 +536,7 @@ func (s *Server) GetCloudProfiles(ctx context.Context, req *proto.GetCloudProfil
 
 	out := &proto.GetCloudProfilesResponse{Active: active}
 	for _, p := range profiles {
-		hasKey := false
-		if s.secrets != nil {
-			if _, err := s.secrets.Get(p.Name); err == nil {
-				hasKey = true
-			}
-		}
+		hasKey := keyNamesForPresence[p.Name]
 		out.Profiles = append(out.Profiles, &proto.CloudProfileInfo{
 			Name: p.Name, Flavor: p.Flavor, BaseUrl: p.BaseURL, Model: p.Model, HasKey: hasKey, Backend: p.Backend, Route: p.Route,
 		})

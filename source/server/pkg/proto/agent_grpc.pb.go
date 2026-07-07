@@ -73,6 +73,7 @@ const (
 	Agent_UpsertCloudProfile_FullMethodName         = "/agent.Agent/UpsertCloudProfile"
 	Agent_RemoveCloudProfile_FullMethodName         = "/agent.Agent/RemoveCloudProfile"
 	Agent_ListCloudProfileModels_FullMethodName     = "/agent.Agent/ListCloudProfileModels"
+	Agent_StartChatGPTLogin_FullMethodName          = "/agent.Agent/StartChatGPTLogin"
 )
 
 // AgentClient is the client API for Agent service.
@@ -216,6 +217,11 @@ type AgentClient interface {
 	// Used by the settings UI to populate a curated model dropdown instead of
 	// asking the user to type an ID.
 	ListCloudProfileModels(ctx context.Context, in *ListCloudProfileModelsRequest, opts ...grpc.CallOption) (*ListCloudProfileModelsResponse, error)
+	// StartChatGPTLogin runs OpenAI's device-authorization sign-in for ChatGPT
+	// subscription access. The first stream frame carries user_code +
+	// verification_url to display; a terminal frame (done=true) reports the
+	// outcome and the created profile.
+	StartChatGPTLogin(ctx context.Context, in *StartChatGPTLoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StartChatGPTLoginEvent], error)
 }
 
 type agentClient struct {
@@ -811,6 +817,25 @@ func (c *agentClient) ListCloudProfileModels(ctx context.Context, in *ListCloudP
 	return out, nil
 }
 
+func (c *agentClient) StartChatGPTLogin(ctx context.Context, in *StartChatGPTLoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StartChatGPTLoginEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[5], Agent_StartChatGPTLogin_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[StartChatGPTLoginRequest, StartChatGPTLoginEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_StartChatGPTLoginClient = grpc.ServerStreamingClient[StartChatGPTLoginEvent]
+
 // AgentServer is the server API for Agent service.
 // All implementations must embed UnimplementedAgentServer
 // for forward compatibility.
@@ -952,6 +977,11 @@ type AgentServer interface {
 	// Used by the settings UI to populate a curated model dropdown instead of
 	// asking the user to type an ID.
 	ListCloudProfileModels(context.Context, *ListCloudProfileModelsRequest) (*ListCloudProfileModelsResponse, error)
+	// StartChatGPTLogin runs OpenAI's device-authorization sign-in for ChatGPT
+	// subscription access. The first stream frame carries user_code +
+	// verification_url to display; a terminal frame (done=true) reports the
+	// outcome and the created profile.
+	StartChatGPTLogin(*StartChatGPTLoginRequest, grpc.ServerStreamingServer[StartChatGPTLoginEvent]) error
 	mustEmbedUnimplementedAgentServer()
 }
 
@@ -1123,6 +1153,9 @@ func (UnimplementedAgentServer) RemoveCloudProfile(context.Context, *RemoveCloud
 }
 func (UnimplementedAgentServer) ListCloudProfileModels(context.Context, *ListCloudProfileModelsRequest) (*ListCloudProfileModelsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListCloudProfileModels not implemented")
+}
+func (UnimplementedAgentServer) StartChatGPTLogin(*StartChatGPTLoginRequest, grpc.ServerStreamingServer[StartChatGPTLoginEvent]) error {
+	return status.Error(codes.Unimplemented, "method StartChatGPTLogin not implemented")
 }
 func (UnimplementedAgentServer) mustEmbedUnimplementedAgentServer() {}
 func (UnimplementedAgentServer) testEmbeddedByValue()               {}
@@ -2082,6 +2115,17 @@ func _Agent_ListCloudProfileModels_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Agent_StartChatGPTLogin_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(StartChatGPTLoginRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AgentServer).StartChatGPTLogin(m, &grpc.GenericServerStream[StartChatGPTLoginRequest, StartChatGPTLoginEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_StartChatGPTLoginServer = grpc.ServerStreamingServer[StartChatGPTLoginEvent]
+
 // Agent_ServiceDesc is the grpc.ServiceDesc for Agent service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2310,6 +2354,11 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "SubscribeEvents",
 			Handler:       _Agent_SubscribeEvents_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "StartChatGPTLogin",
+			Handler:       _Agent_StartChatGPTLogin_Handler,
 			ServerStreams: true,
 		},
 	},

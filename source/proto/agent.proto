@@ -171,6 +171,12 @@ service Agent {
   // Used by the settings UI to populate a curated model dropdown instead of
   // asking the user to type an ID.
   rpc ListCloudProfileModels (ListCloudProfileModelsRequest) returns (ListCloudProfileModelsResponse) {}
+
+  // StartChatGPTLogin runs OpenAI's device-authorization sign-in for ChatGPT
+  // subscription access. The first stream frame carries user_code +
+  // verification_url to display; a terminal frame (done=true) reports the
+  // outcome and the created profile.
+  rpc StartChatGPTLogin(StartChatGPTLoginRequest) returns (stream StartChatGPTLoginEvent);
 }
 
 // Incremental token from LLM streaming.
@@ -1022,4 +1028,26 @@ message ListCloudProfileModelsResponse {
   // Populated when the fetch failed — the client can render a fallback
   // curated list and surface the reason in a hint.
   string error = 2;
+}
+
+
+// --- ChatGPT subscription sign-in (device authorization) ---
+
+message StartChatGPTLoginRequest {
+  string profile_name = 1; // profile to create/update; default "chatgpt"
+  string model = 2;        // model to set on the profile; default gpt-5.3-codex
+  bool set_active = 3;     // activate the profile on success
+}
+
+// StartChatGPTLoginEvent is one frame of the sign-in stream. The first frame
+// carries user_code + verification_url; the terminal frame sets done=true with
+// ok/error and, on success, profile_name + account_id.
+message StartChatGPTLoginEvent {
+  string verification_url = 1;
+  string user_code = 2;
+  bool done = 3;
+  bool ok = 4;
+  string error = 5;
+  string profile_name = 6;
+  string account_id = 7;
 }

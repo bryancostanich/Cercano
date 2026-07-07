@@ -84,6 +84,7 @@ The agent supports multiple cloud providers:
 
 - **Anthropic** — via direct API key or Meridian (Claude Max OAuth)
 - **OpenAI-compatible** — OpenAI, Gemini, Groq, and others (see [cloud-openai.md](cloud-openai.md#5-openai-compatible-endpoints) for endpoint examples and setup)
+- **OpenAI (ChatGPT subscription)** — sign in with a ChatGPT Plus/Pro account instead of an API key (unofficial; see below)
 - **Local** — Ollama (offline, no API key needed)
 
 ### Providers
@@ -105,6 +106,23 @@ The Anthropic provider streams through Meridian, which uses your Claude Max subs
 ### Direct Anthropic API
 
 Set a real `cloud_api_key` and leave `cloud_base_url` empty.
+
+### ChatGPT subscription (device-code OAuth)
+
+Authenticate the OpenAI provider with a **ChatGPT Plus/Pro subscription**
+instead of a pay-as-you-go API key. In `/config` → Cloud Providers, open the
+**openai (responses)** row and choose **sign in with ChatGPT**; the setup
+wizard offers the same under the OpenAI provider. A device code + URL appear
+— approve them in your browser and the agent stores the OAuth tokens in your
+keychain (refreshing them automatically) under a `chatgpt` profile
+(`flavor: responses`, `route: chatgpt`).
+
+**Unofficial / ToS-gray.** This borrows the Codex CLI's OAuth client id, has no
+sanctioned third-party path, can break whenever OpenAI changes things, and
+limits you to the ChatGPT-backend model allowlist (gpt-5.5, gpt-5.3-codex,
+gpt-5.4, gpt-5.4-mini, …). An API key stays the fully-sanctioned path and is
+one keystroke away in the same UI. Design + endpoint details:
+[docs/features/chatgpt-subscription-auth/design.md](../features/chatgpt-subscription-auth/design.md).
 
 ### Local-only (Ollama)
 

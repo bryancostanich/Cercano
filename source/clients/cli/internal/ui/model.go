@@ -3150,6 +3150,7 @@ func (m Model) View() tea.View {
 	if m.width == 0 || m.height == 0 {
 		v := tea.NewView("")
 		v.AltScreen = true
+		v.BackgroundColor = m.palette.BgDeep // paint our own bg, not the terminal's
 		return v // first paint before WindowSizeMsg
 	}
 
@@ -3240,6 +3241,7 @@ func (m Model) View() tea.View {
 	}
 	v := tea.NewView(out)
 	v.AltScreen = true
+	v.BackgroundColor = m.palette.BgDeep // paint our own bg so themes aren't at the mercy of the terminal's
 	// Request richer Kitty-protocol key reporting so terminals that support it
 	// can deliver Command/Super-modified keys such as Cmd+C to the app-native
 	// selection layer. Terminals that reserve Cmd+C for their own copy action

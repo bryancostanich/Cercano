@@ -174,6 +174,11 @@ type fakeRuntimeManager struct {
 	instances     []localruntime.InstanceRecord
 	startEndpoint string
 	startCount    int
+	// onInstances, when set, overrides the instances list per call (1-based
+	// call counter) — lets a test walk an instance through starting → running
+	// the way the provider's background finishReadiness would.
+	onInstances    func(call int) []localruntime.InstanceRecord
+	instancesCalls int
 }
 
 func (m *fakeRuntimeManager) RegisterProvider(localruntime.Provider) {}
@@ -182,6 +187,10 @@ func (m *fakeRuntimeManager) Inventory(context.Context) ([]localruntime.ModelRec
 	return m.models, nil
 }
 func (m *fakeRuntimeManager) Instances(context.Context) ([]localruntime.InstanceRecord, error) {
+	m.instancesCalls++
+	if m.onInstances != nil {
+		return m.onInstances(m.instancesCalls), nil
+	}
 	return m.instances, nil
 }
 func (m *fakeRuntimeManager) Endpoints(context.Context) ([]localruntime.EndpointRecord, error) {

@@ -185,6 +185,7 @@ func (e *Engine) endpointFor(ctx context.Context, requested string) (endpoint st
 	if err != nil {
 		return "", "", err
 	}
+	startingID := ""
 	for _, instance := range instances {
 		if instance.Runtime != runtimeName || instance.Endpoint == "" {
 			continue
@@ -192,9 +193,22 @@ func (e *Engine) endpointFor(ctx context.Context, requested string) (endpoint st
 		if modelID != "" && instance.ModelID != modelID && instance.ModelID != requested {
 			continue
 		}
-		if isUsableState(instance.State) {
+		switch instance.State {
+		case localruntime.StateRunning, localruntime.StateHealthy:
 			return instance.Endpoint, modelNameForRequest(selected, requested), nil
+		case localruntime.StateStarting:
+			// Still loading the model — its port isn't open yet, so a
+			// request now would get connection-refused. Wait for it below
+			// instead of racing it (or worse, spawning a second copy).
+			startingID = instance.ID
 		}
+	}
+	if startingID != "" {
+		endpoint, err := e.awaitInstanceReady(ctx, startingID)
+		if err != nil {
+			return "", "", err
+		}
+		return endpoint, modelNameForRequest(selected, requested), nil
 	}
 	start, err := e.Manager.Start(ctx, localruntime.StartRequest{
 		Runtime: runtimeName,
@@ -207,6 +221,49 @@ func (e *Engine) endpointFor(ctx context.Context, requested string) (endpoint st
 		return "", "", errors.New("llama-server started without an endpoint")
 	}
 	return start.Endpoint, modelNameForRequest(selected, requested), nil
+}
+
+// awaitInstanceReady blocks until a still-loading instance becomes usable,
+// bounded by the caller's context. The provider keeps a slow initial load
+// alive past its readiness window (finishReadiness flips it to running), so
+// callers that can afford to wait get the warm instance instead of an error.
+func (e *Engine) awaitInstanceReady(ctx context.Context, instanceID string) (string, error) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		instances, err := e.Manager.Instances(ctx)
+		if err != nil {
+			return "", err
+		}
+		found := false
+		for _, instance := range instances {
+			if instance.ID != instanceID {
+				continue
+			}
+			found = true
+			switch instance.State {
+			case localruntime.StateRunning, localruntime.StateHealthy:
+				return instance.Endpoint, nil
+			case localruntime.StateStarting:
+				// keep waiting
+			default:
+				reason := instance.LastError
+				if reason == "" {
+					reason = instance.State
+				}
+				return "", fmt.Errorf("llama-server instance failed while loading: %s", reason)
+			}
+			break
+		}
+		if !found {
+			return "", errors.New("llama-server instance disappeared while loading")
+		}
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("llama-server is still loading the model: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func (e *Engine) httpClient() *http.Client {
@@ -246,15 +303,6 @@ func modelNameForRequest(model localruntime.ModelRecord, requested string) strin
 		return requested
 	}
 	return "default"
-}
-
-func isUsableState(state string) bool {
-	switch state {
-	case localruntime.StateRunning, localruntime.StateHealthy, localruntime.StateStarting:
-		return true
-	default:
-		return false
-	}
 }
 
 type chatCompletionRequest struct {

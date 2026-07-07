@@ -259,13 +259,28 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 		})
 		return &instance.record, err
 	}
+	// The watch goroutine owns the process from birth, so a crash during the
+	// (possibly long) initial model load is observed — and restarted per
+	// config — instead of leaving a stale record behind.
+	go p.watch(id, binary, sink)
 
 	readyCtx, cancel := context.WithTimeout(ctx, p.readinessTimeout())
 	defer cancel()
-	if err := p.waitReady(readyCtx, endpoint); err != nil {
-		_ = p.kill(id)
+	if err := p.waitReady(readyCtx, id, endpoint); err != nil {
+		if p.instanceState(id) == localruntime.StateStarting {
+			// The process is alive and still loading — a large GGUF
+			// legitimately needs longer than the readiness window, and
+			// killing it here would throw the whole load away and pay it
+			// again on the next request. Leave it loading: finishReadiness
+			// flips the record to running when the port comes up, and
+			// callers retry against the warm instance.
+			go p.finishReadiness(id, endpoint, sink)
+			p.emit(sink, "warn", id, model.ID, "llama-server still loading "+model.DisplayName+" after "+p.readinessTimeout().String()+" — leaving it to finish in the background")
+			return &instance.record, fmt.Errorf("llama-server is still loading %s (instance left running — retry shortly): %w", model.DisplayName, err)
+		}
+		// Not starting anymore: the process died. watch has already recorded
+		// the exit (and handles any configured restarts); surface the error.
 		p.updateRecord(id, sink, func(record *localruntime.InstanceRecord) {
-			record.State = localruntime.StateFailed
 			record.LastError = err.Error()
 		})
 		return &instance.record, err
@@ -275,7 +290,6 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 		record.State = localruntime.StateRunning
 		record.ReadyAt = time.Now()
 	})
-	go p.watch(id, binary, sink)
 
 	p.mu.RLock()
 	out := p.running[id].record
@@ -454,11 +468,20 @@ func (p *Provider) argsFor(model localruntime.ModelRecord, port int) []string {
 	return args
 }
 
-func (p *Provider) waitReady(ctx context.Context, endpoint string) error {
+func (p *Provider) waitReady(ctx context.Context, instanceID, endpoint string) error {
 	ticker := time.NewTicker(300 * time.Millisecond)
 	defer ticker.Stop()
 	var lastErr error
 	for {
+		// A dead process never becomes ready — fail immediately instead of
+		// polling a closed port for the rest of the window. (watch owns the
+		// exit and records state/LastError.)
+		if state, procErr := p.instanceStatus(instanceID); state == localruntime.StateFailed || state == localruntime.StateStopped || state == "" {
+			if procErr != "" {
+				return fmt.Errorf("llama-server exited during startup: %s", procErr)
+			}
+			return errors.New("llama-server exited during startup")
+		}
 		req, err := http.NewRequestWithContext(ctx, "GET", endpoint+"/health", nil)
 		if err != nil {
 			return err
@@ -483,6 +506,52 @@ func (p *Provider) waitReady(ctx context.Context, endpoint string) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+// instanceState returns the instance's current lifecycle state, or "" when
+// the record no longer exists.
+func (p *Provider) instanceState(instanceID string) string {
+	state, _ := p.instanceStatus(instanceID)
+	return state
+}
+
+// instanceStatus returns the instance's state and last recorded error.
+func (p *Provider) instanceStatus(instanceID string) (string, string) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if inst, ok := p.running[instanceID]; ok {
+		return inst.record.State, inst.record.LastError
+	}
+	return "", ""
+}
+
+// finishReadinessCap bounds the background wait for a slow initial model
+// load. Generous on purpose — a 50+ GB GGUF on a cold page cache takes
+// minutes — it exists only so an instance wedged before ever binding its
+// port doesn't leak a poller forever. Crash/restart remains watch's job.
+const finishReadinessCap = 30 * time.Minute
+
+// finishReadiness keeps polling a still-loading instance after the caller's
+// readiness window expired and flips it to running when the port comes up.
+// This is what makes a slow-loading model eventually become a WARM instance
+// that later requests reuse, instead of every request re-paying the load.
+func (p *Provider) finishReadiness(instanceID, endpoint string, sink localruntime.LogSink) {
+	ctx, cancel := context.WithTimeout(context.Background(), finishReadinessCap)
+	defer cancel()
+	if err := p.waitReady(ctx, instanceID, endpoint); err != nil {
+		p.updateRecord(instanceID, sink, func(record *localruntime.InstanceRecord) {
+			record.LastError = err.Error()
+		})
+		return
+	}
+	p.updateRecord(instanceID, sink, func(record *localruntime.InstanceRecord) {
+		if record.State == localruntime.StateStarting {
+			record.State = localruntime.StateRunning
+			record.ReadyAt = time.Now()
+			record.LastError = ""
+		}
+	})
+	p.emit(sink, "info", instanceID, "", "llama-server finished loading and is ready")
 }
 
 func (p *Provider) watch(instanceID, binary string, sink localruntime.LogSink) {
@@ -546,21 +615,10 @@ func (p *Provider) watch(instanceID, binary string, sink localruntime.LogSink) {
 		p.mu.RLock()
 		endpoint := p.running[instanceID].record.Endpoint
 		p.mu.RUnlock()
-		readyCtx, cancel := context.WithTimeout(context.Background(), p.readinessTimeout())
-		err = p.waitReady(readyCtx, endpoint)
-		cancel()
-		if err != nil {
-			_ = p.kill(instanceID)
-			p.updateRecord(instanceID, sink, func(record *localruntime.InstanceRecord) {
-				record.LastError = err.Error()
-			})
-			continue
-		}
-		p.updateRecord(instanceID, sink, func(record *localruntime.InstanceRecord) {
-			record.State = localruntime.StateRunning
-			record.ReadyAt = time.Now()
-			record.LastError = ""
-		})
+		// Same leave-it-loading rule as Start: finishReadiness flips the
+		// record to running when the reloaded model binds; if the process
+		// crashes again the Wait at the top of this loop observes it.
+		go p.finishReadiness(instanceID, endpoint, sink)
 	}
 }
 

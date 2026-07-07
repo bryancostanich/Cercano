@@ -727,10 +727,20 @@ func matchesModel(requested string, model localruntime.ModelRecord) bool {
 		return false
 	}
 	expanded, _ := expandPath(requested)
-	return requested == model.ID ||
+	if requested == model.ID ||
 		requested == model.DisplayName ||
 		requested == filepath.Base(model.Path) ||
-		expanded == model.Path
+		expanded == model.Path {
+		return true
+	}
+	// Alias: a bare model name matches a file stem carrying Ollama's ":latest"
+	// tag baked into the filename (qwen3-coder-next → qwen3-coder-next-latest
+	// .gguf). Configs and model tiers written against the Ollama runtime use
+	// bare names; without this the same config silently stops resolving after
+	// a switch to llama_server.
+	stem := strings.TrimSuffix(filepath.Base(model.Path), filepath.Ext(model.Path))
+	name := strings.TrimSuffix(requested, ":latest")
+	return stem == name || stem == name+"-latest"
 }
 
 func expandPath(path string) (string, error) {

@@ -15,31 +15,42 @@ const (
 	tierCustom
 )
 
-// cloudPreset is a known-provider template: pre-filled flavor/backend/base URL.
+// tierFromString maps the agent's tier string (from GetCloudProviders) onto the
+// CLI's annotation enum. Unknown values fall back to "untested".
+func tierFromString(s string) cloudTier {
+	switch s {
+	case "verified":
+		return tierVerified
+	case "coming_soon":
+		return tierComingSoon
+	default:
+		return tierUntested
+	}
+}
+
+// cloudPreset carries one provider's template fields (flavor/backend/base URL)
+// for a rendered row. The provider *catalog* now lives on the agent
+// (GetCloudProviders); this struct is just the per-row carrier the detail editor
+// reads — e.g. to decide whether to offer ChatGPT sign-in on responses rows.
 type cloudPreset struct {
 	ID, Label, Flavor, Backend, BaseURL string
 	Tier                                cloudTier
 }
 
-// cloudPresets returns the known providers, in display order. Base URLs are
-// best-effort defaults; the user can edit them in the detail editor.
-func cloudPresets() []cloudPreset {
-	return []cloudPreset{
-		{ID: "anthropic", Label: "anthropic", Flavor: "messages", BaseURL: "", Tier: tierVerified},
-		{ID: "openai-responses", Label: "openai (responses)", Flavor: "responses", BaseURL: "https://api.openai.com/v1", Tier: tierUntested},
-		{ID: "openai", Label: "openai", Flavor: "chat_completions", Backend: "openai", BaseURL: "https://api.openai.com/v1", Tier: tierUntested},
-		{ID: "gemini", Label: "gemini", Flavor: "chat_completions", Backend: "gemini", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", Tier: tierVerified},
-		{ID: "groq", Label: "groq", Flavor: "chat_completions", Backend: "groq", BaseURL: "https://api.groq.com/openai/v1", Tier: tierUntested},
-		{ID: "deepinfra", Label: "deepinfra", Flavor: "chat_completions", Backend: "", BaseURL: "https://api.deepinfra.com/v1/openai", Tier: tierUntested},
-		{ID: "together", Label: "together", Flavor: "chat_completions", Backend: "", BaseURL: "https://api.together.xyz/v1", Tier: tierUntested},
-		{ID: "openrouter", Label: "openrouter", Flavor: "chat_completions", Backend: "", BaseURL: "https://openrouter.ai/api/v1", Tier: tierUntested},
-		{ID: "deepseek", Label: "deepseek", Flavor: "chat_completions", Backend: "", BaseURL: "https://api.deepseek.com", Tier: tierUntested},
-		{ID: "bedrock", Label: "bedrock", Flavor: "bedrock", BaseURL: "", Tier: tierComingSoon},
+// presetFromProvider builds the per-row template carrier from an agent-catalog
+// provider, translating the agent's string tier into the CLI annotation enum.
+// Shared by the settings row builder and the wizard's provider lookup so the
+// provider→preset mapping lives in exactly one place.
+func presetFromProvider(prov agentclient.CloudProvider) cloudPreset {
+	return cloudPreset{
+		ID: prov.ID, Label: prov.Label, Flavor: prov.Flavor,
+		Backend: prov.Backend, BaseURL: prov.BaseURL, Tier: tierFromString(prov.Tier),
 	}
 }
 
-// cloudRow is one rendered list entry: a configured profile, a known-provider
-// template, or the trailing custom "other" row.
+// cloudRow is one rendered list entry: a configured provider (its primary
+// profile merged in), an extra-profile sub-row, a bare provider template, a
+// custom profile, or the trailing "other" row.
 type cloudRow struct {
 	ID, Label  string
 	Tier       cloudTier
@@ -47,26 +58,63 @@ type cloudRow struct {
 	HasKey     bool
 	Active     bool
 	ComingSoon bool
+	SubProfile bool // an extra (non-primary) profile listed under its provider
 	Preset     *cloudPreset
 	Profile    *agentclient.CloudProfileInfo
 }
 
-// buildCloudRows merges configured profiles (first, in order) with the preset
-// templates (next) and a trailing "other" custom row.
-func buildCloudRows(presets []cloudPreset, profiles []agentclient.CloudProfileInfo, active string) []cloudRow {
-	rows := make([]cloudRow, 0, len(profiles)+len(presets)+1)
-	for i := range profiles {
-		p := profiles[i]
+// profileSubIndent prefixes extra-profile sub-row labels so they read as nested
+// under the provider row above them.
+const profileSubIndent = "  "
+
+// buildCloudRowsFromProviders renders the grouped cloud view (GetCloudProviders)
+// as a flat row list: one row per provider — its primary profile merged in, or a
+// bare template when it has none — an indented sub-row for each additional
+// profile, then any custom (unmatched) profiles, then the trailing "other" row.
+//
+// This is the deduplication fix: a provider that has a configured profile
+// renders as a single row, never as a profile row plus a duplicate template row.
+func buildCloudRowsFromProviders(view agentclient.CloudProvidersView) []cloudRow {
+	rows := make([]cloudRow, 0, len(view.Providers)+len(view.CustomProfiles)+1)
+	for i := range view.Providers {
+		prov := view.Providers[i]
+		tier := tierFromString(prov.Tier)
+		pv := presetFromProvider(prov)
+		preset := &pv
+		if len(prov.Profiles) == 0 {
+			// No configured profile: a bare template row (selecting it creates one).
+			rows = append(rows, cloudRow{
+				ID: "template:" + prov.ID, Label: prov.Label, Tier: tier,
+				ComingSoon: prov.Tier == "coming_soon", Preset: preset,
+			})
+			continue
+		}
+		// Merged provider row: the friendly provider label carries the primary
+		// profile's status. Selecting it edits the primary. profs shares the
+		// view's backing array, so &profs[j] stays valid for the row's lifetime.
+		profs := view.Providers[i].Profiles
+		rows = append(rows, cloudRow{
+			ID: "profile:" + profs[0].Name, Label: prov.Label, Tier: tier,
+			IsProfile: true, HasKey: profs[0].HasKey, Active: profs[0].Name == view.Active,
+			Preset: preset, Profile: &profs[0],
+		})
+		// Additional profiles: indented sub-rows labeled by profile name, so two
+		// accounts for one provider stay distinguishable.
+		for j := 1; j < len(profs); j++ {
+			rows = append(rows, cloudRow{
+				ID: "profile:" + profs[j].Name, Label: profileSubIndent + profs[j].Name, Tier: tierCustom,
+				IsProfile: true, HasKey: profs[j].HasKey, Active: profs[j].Name == view.Active,
+				SubProfile: true, Preset: preset, Profile: &profs[j],
+			})
+		}
+	}
+	// Custom profiles (matched no known provider) render as their own rows.
+	for i := range view.CustomProfiles {
+		p := view.CustomProfiles[i]
 		rows = append(rows, cloudRow{
 			ID: "profile:" + p.Name, Label: p.Name, Tier: tierCustom,
-			IsProfile: true, HasKey: p.HasKey, Active: p.Name == active, Profile: &profiles[i],
-		})
-	}
-	for i := range presets {
-		pr := presets[i]
-		rows = append(rows, cloudRow{
-			ID: "template:" + pr.ID, Label: pr.Label, Tier: pr.Tier,
-			ComingSoon: pr.Tier == tierComingSoon, Preset: &presets[i],
+			IsProfile: true, HasKey: p.HasKey, Active: p.Name == view.Active,
+			Profile: &view.CustomProfiles[i],
 		})
 	}
 	rows = append(rows, cloudRow{ID: "other", Label: "+ other", Tier: tierCustom})
@@ -80,10 +128,9 @@ func rowAnnotation(r cloudRow) string {
 	}
 	if r.IsProfile {
 		var parts []string
-		// Show the model at row level so users don't have to expand the
-		// detail editor to see what's actually configured. Only emitted
-		// when Profile is non-nil (tests may construct bare cloudRows
-		// without one).
+		// Show the model at row level so users don't have to expand the detail
+		// editor to see what's configured. Only emitted when Profile is non-nil
+		// (tests may construct bare cloudRows without one).
 		if r.Profile != nil {
 			if r.Profile.Model != "" {
 				parts = append(parts, r.Profile.Model)
@@ -91,19 +138,13 @@ func rowAnnotation(r cloudRow) string {
 				parts = append(parts, "— no model")
 			}
 		}
-		// Auth indicator: Meridian routes use Claude Max OAuth, not a stored
-		// key, so "no key" is misleading — show "meridian" instead. Direct
-		// routes fall back to the key check.
-		switch {
-		case r.Profile != nil && r.Profile.Route == "meridian":
-			parts = append(parts, "meridian")
-		case r.HasKey:
-			parts = append(parts, "✓ key")
-		default:
-			parts = append(parts, "— no key")
-		}
+		// Active rows get an auth-aware "active (…)" marker so the active
+		// provider is unmistakable and its auth path is visible; inactive rows
+		// show just the auth hint.
 		if r.Active {
-			parts = append(parts, "(active)")
+			parts = append(parts, activeLabel(r))
+		} else {
+			parts = append(parts, authHint(r))
 		}
 		return strings.Join(parts, "  ")
 	}
@@ -114,4 +155,32 @@ func rowAnnotation(r cloudRow) string {
 		return "(coming soon)"
 	}
 	return ""
+}
+
+// activeLabel is the auth-aware marker for the active provider's row. Meridian
+// (Claude Max OAuth) and ChatGPT (the responses OAuth path) are called out so
+// the user sees not just that a provider is active but how it authenticates.
+func activeLabel(r cloudRow) string {
+	switch {
+	case r.Profile != nil && r.Profile.Route == "meridian":
+		return "active (meridian)"
+	case r.Profile != nil && r.Profile.Flavor == "responses":
+		return "active (ChatGPT OAuth)"
+	default:
+		return "active"
+	}
+}
+
+// authHint is the non-active auth indicator. Meridian routes authenticate via
+// Claude Max OAuth (no stored key), so "no key" would mislead — show the route
+// instead. Otherwise reflect keychain presence.
+func authHint(r cloudRow) string {
+	switch {
+	case r.Profile != nil && r.Profile.Route == "meridian":
+		return "meridian"
+	case r.HasKey:
+		return "✓ key"
+	default:
+		return "— no key"
+	}
 }

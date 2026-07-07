@@ -10,6 +10,7 @@ import (
 
 	"cercano/source/clients/cli/internal/theme"
 	"cercano/source/clients/cli/internal/wizard"
+	"cercano/source/server/pkg/agentclient"
 	"cercano/source/server/pkg/config"
 )
 
@@ -17,7 +18,31 @@ func newTestWizardPage(t *testing.T) *wizardPage {
 	t.Helper()
 	t.Setenv("CERCANO_WIZARD_STATE", filepath.Join(t.TempDir(), "wizard_state.yaml"))
 	p := theme.BuiltinThemes()[0]
-	return newWizardPage(nil, p.Palette, theme.NewStyles(p.Palette), 100, 40)
+	wp := newWizardPage(nil, p.Palette, theme.NewStyles(p.Palette), 100, 40)
+	// With a nil agent loadProviders() is a no-op, so seed the provider catalog
+	// the cloud step renders. Mirrors the agent catalog's order/tiers (anthropic,
+	// openai (responses), openai, …) so the step-navigation presses below land on
+	// the providers the assertions expect.
+	wp.providers = wizardTestProviders()
+	return wp
+}
+
+// wizardTestProviders is the fixture catalog the wizard tests navigate. Only ID,
+// Label, and Tier matter here: the eager commit path (commitKeyFn/commitMeridianFn)
+// is stubbed in every test, so flavor/backend/base-URL are irrelevant to them.
+func wizardTestProviders() []agentclient.CloudProvider {
+	return []agentclient.CloudProvider{
+		{ID: "anthropic", Label: "anthropic", Tier: "verified"},
+		{ID: "openai-responses", Label: "openai (responses)", Tier: "untested"},
+		{ID: "openai", Label: "openai", Tier: "untested"},
+		{ID: "gemini", Label: "gemini", Tier: "verified"},
+		{ID: "groq", Label: "groq", Tier: "untested"},
+		{ID: "deepinfra", Label: "deepinfra", Tier: "untested"},
+		{ID: "together", Label: "together", Tier: "untested"},
+		{ID: "openrouter", Label: "openrouter", Tier: "untested"},
+		{ID: "deepseek", Label: "deepseek", Tier: "untested"},
+		{ID: "bedrock", Label: "bedrock", Tier: "coming_soon"},
+	}
 }
 
 func press(t *testing.T, wp *wizardPage, code rune) bool {

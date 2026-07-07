@@ -56,10 +56,10 @@ func settingsSpinnerTick() tea.Cmd {
 type settingsScope int
 
 const (
-	scopeAll settingsScope = iota // every section (legacy single page)
-	scopeGeneral                  // routing, permissions, server, dev tools
-	scopeCloud                    // cloud-profiles editor
-	scopeUI                       // theme sections
+	scopeAll     settingsScope = iota // every section (legacy single page)
+	scopeGeneral                      // routing, permissions, server, dev tools
+	scopeCloud                        // cloud-profiles editor
+	scopeUI                           // theme sections
 )
 
 // settingsPage is the sectioned settings content page (opened by /s, /settings,
@@ -89,9 +89,13 @@ type settingsPage struct {
 	profiles       []agentclient.CloudProfileInfo
 	activeProfile  string
 	profilesLoaded bool
-	cloudSelected  string
-	cloudDraft     cloudDraft
-	cloudDraftNew  bool
+	// cloudView is the grouped provider catalog from GetCloudProviders that the
+	// cloud section renders (one row per provider with its profiles grouped
+	// under it). Loaded alongside profiles under the same profilesLoaded gate.
+	cloudView     agentclient.CloudProvidersView
+	cloudSelected string
+	cloudDraft    cloudDraft
+	cloudDraftNew bool
 	// Cloud model catalog for the selected profile. Fetched lazily by
 	// selectCloudRow via ListCloudProfileModels when the row is anthropic-
 	// style; cleared on row-selection change so a switch between profiles
@@ -148,9 +152,14 @@ func (sp *settingsPage) snapshotSections() []form.Section {
 	if needProfiles && !sp.profilesLoaded && sp.agent != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		if profs, active, err := sp.agent.GetCloudProfiles(ctx); err == nil {
-			sp.profiles = profs
-			sp.activeProfile = active
+		if view, err := sp.agent.GetCloudProviders(ctx); err == nil {
+			sp.cloudView = view
+			sp.activeProfile = view.Active
+			var profs []agentclient.CloudProfileInfo
+			for _, prov := range view.Providers {
+				profs = append(profs, prov.Profiles...)
+			}
+			sp.profiles = append(profs, view.CustomProfiles...)
 			sp.profilesLoaded = true
 		}
 	}

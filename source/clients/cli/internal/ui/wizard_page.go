@@ -35,9 +35,14 @@ type wizardPage struct {
 	palette       theme.Palette
 	styles        theme.Styles
 	agent         *agentclient.Client
-	state         wizard.State
-	cursor        int
-	authPick      bool // cloud step, phase 2: provider chosen, picking auth
+	// providers is the cloud-provider catalog fetched from the agent
+	// (GetCloudProviders) once at construction. The agent owns the catalog;
+	// the cloud step renders and looks up providers against this cached copy.
+	// Empty when there's no agent (tests seed it directly).
+	providers []agentclient.CloudProvider
+	state     wizard.State
+	cursor    int
+	authPick  bool // cloud step, phase 2: provider chosen, picking auth
 	// picker, when non-nil, is the floating per-slot model picker on the
 	// tiers step; keys route to it until it closes.
 	picker *overlay.RowList
@@ -95,6 +100,7 @@ func newWizardPage(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h
 	wp.commitKeyFn = wp.commitAPIKey
 	wp.commitMeridianFn = wp.commitMeridianProfile
 	wp.rollbackFn = wp.rollbackBaseline
+	wp.loadProviders()
 	if !ok {
 		// Fresh run: snapshot the cloud config before any eager commits can
 		// touch it. Resumed runs keep the baseline captured when they started.
@@ -182,10 +188,30 @@ func (wp *wizardPage) rollbackBaseline() error {
 	return nil
 }
 
-func wizardPreset(id string) (cloudPreset, bool) {
-	for _, p := range cloudPresets() {
+// loadProviders caches the cloud-provider catalog from the agent for the
+// cloud step's provider list and profile lookups. Best-effort and nil-guarded,
+// like captureBaseline: with no agent (tests) or a failed read the catalog
+// stays empty and tests seed wp.providers directly.
+func (wp *wizardPage) loadProviders() {
+	if wp.agent == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	view, err := wp.agent.GetCloudProviders(ctx)
+	if err != nil {
+		return
+	}
+	wp.providers = view.Providers
+}
+
+// wizardPreset finds a catalog provider by id in the agent-fetched catalog and
+// returns it as a cloudPreset row carrier. ok is false when the id is unknown
+// (or the catalog failed to load).
+func (wp *wizardPage) wizardPreset(id string) (cloudPreset, bool) {
+	for _, p := range wp.providers {
 		if p.ID == id {
-			return p, true
+			return presetFromProvider(p), true
 		}
 	}
 	return cloudPreset{}, false
@@ -208,7 +234,7 @@ func (wp *wizardPage) commitAPIKey(key string) error {
 	if wp.agent == nil {
 		return fmt.Errorf("no agent connection")
 	}
-	preset, ok := wizardPreset(wp.state.CloudProvider)
+	preset, ok := wp.wizardPreset(wp.state.CloudProvider)
 	if !ok {
 		return fmt.Errorf("unknown provider %q", wp.state.CloudProvider)
 	}
@@ -239,7 +265,7 @@ func (wp *wizardPage) commitMeridianProfile() error {
 	if wp.agent == nil {
 		return fmt.Errorf("no agent connection")
 	}
-	preset, _ := wizardPreset("anthropic")
+	preset, _ := wp.wizardPreset("anthropic")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := wp.agent.UpsertCloudProfile(ctx, agentclient.CloudProfileInfo{
@@ -325,16 +351,15 @@ func (wp *wizardPage) rows() []wizardRow {
 		if wp.authPick {
 			return wizardAuthRows(wp.state.CloudProvider)
 		}
-		presets := cloudPresets()
-		rows := make([]wizardRow, 0, len(presets))
-		for _, pr := range presets {
+		rows := make([]wizardRow, 0, len(wp.providers))
+		for _, pr := range wp.providers {
 			ann := ""
 			disabled := false
 			switch pr.Tier {
-			case tierComingSoon:
+			case "coming_soon":
 				ann = "(coming soon)"
 				disabled = true
-			case tierUntested:
+			case "untested":
 				ann = "(untested)"
 			}
 			rows = append(rows, wizardRow{Key: pr.ID, Label: pr.Label, Annotation: ann, Disabled: disabled})

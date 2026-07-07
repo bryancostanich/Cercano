@@ -103,6 +103,81 @@ type Server struct {
 	permBcastMu   sync.Mutex   // guards lastBcastMode
 	lastBcastMode string       // last permission mode broadcast; dedupes file-watcher vs SetMode
 	cfgMu         sync.RWMutex // guards all access to currentConfig
+
+	// activeTurns enforces one live turn per conversation. A new turn on a
+	// conversation that already has one supersedes it: the prior turn's ctx is
+	// canceled and its generation retired, so its persistence and event
+	// emission become no-ops while it unwinds. Prevents two turns interleaving
+	// history writes or sharing one upstream (Meridian) session key.
+	turnsMu     sync.Mutex
+	activeTurns map[string]*turnHandle
+	turnGens    map[string]uint64 // per-conversation turn generation (monotonic)
+}
+
+// turnHandle tracks one in-flight turn for a conversation. gen is the
+// conversation's turn generation at the moment this turn began; a turn is
+// "current" only while activeTurns[conv] still points at this handle.
+type turnHandle struct {
+	gen    uint64
+	cancel context.CancelFunc
+}
+
+// beginTurn registers a new turn for conv, superseding any turn already running
+// there (cancels its ctx). Returns a ctx that's canceled when this turn is
+// itself superseded or when parent is done, this turn's generation, and a
+// release func the caller must defer. The fence helpers (turnIsCurrent) gate
+// persistence/emission on the returned gen.
+func (s *Server) beginTurn(parent context.Context, conv string) (context.Context, uint64, func()) {
+	ctx, cancel := context.WithCancel(parent)
+	s.turnsMu.Lock()
+	if s.activeTurns == nil {
+		s.activeTurns = make(map[string]*turnHandle)
+	}
+	if prev, ok := s.activeTurns[conv]; ok {
+		prev.cancel() // supersede the turn already running on this conversation
+	}
+	h := &turnHandle{gen: s.turnGenLocked(conv) + 1, cancel: cancel}
+	s.turnGens[conv] = h.gen
+	s.activeTurns[conv] = h
+	s.turnsMu.Unlock()
+
+	release := func() {
+		cancel()
+		s.turnsMu.Lock()
+		// Only clear the registration if it's still ours — a superseding turn
+		// may have replaced it, and must not have its handle removed by us.
+		if cur, ok := s.activeTurns[conv]; ok && cur == h {
+			delete(s.activeTurns, conv)
+		}
+		s.turnsMu.Unlock()
+	}
+	return ctx, h.gen, release
+}
+
+// turnGenLocked returns the current generation for conv. Caller holds turnsMu.
+func (s *Server) turnGenLocked(conv string) uint64 {
+	if s.turnGens == nil {
+		s.turnGens = make(map[string]uint64)
+	}
+	return s.turnGens[conv]
+}
+
+// turnIsCurrent reports whether gen is still the live generation for conv — the
+// fence that gates a turn's persistence and event emission. A superseded turn
+// fails this and goes quiet.
+func (s *Server) turnIsCurrent(conv string, gen uint64) bool {
+	s.turnsMu.Lock()
+	defer s.turnsMu.Unlock()
+	return s.turnGens[conv] == gen
+}
+
+// hasActiveTurn reports whether a turn is currently registered for conv (test
+// seam for the release-on-return invariant).
+func (s *Server) hasActiveTurn(conv string) bool {
+	s.turnsMu.Lock()
+	defer s.turnsMu.Unlock()
+	_, ok := s.activeTurns[conv]
+	return ok
 }
 
 // SetContextLoader wires the project-context loader so the native tool-loop can
@@ -2225,7 +2300,12 @@ func (s *Server) loadProjectContext(workDir string) string {
 // emits per-event stream payloads. Used when a layered LLM provider has been
 // wired via SetCloudLLMProvider.
 func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestRequest, stream proto.Agent_StreamProcessRequestServer) error {
-	ctx := stream.Context()
+	// One live turn per conversation. A new turn here supersedes any turn still
+	// running on the same conversation (cancels its ctx); this turn's own ctx
+	// is canceled if a later turn supersedes IT. turnGen fences persistence so
+	// a superseded turn's late writes never interleave into the live history.
+	ctx, turnGen, releaseTurn := s.beginTurn(stream.Context(), req.GetConversationId())
+	defer releaseTurn()
 
 	// F2: propagate WorkDir into tool execution. Tools that touch the
 	// filesystem (run_command, read_file, git_status) read os.Getwd when
@@ -2405,7 +2485,17 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	}
 	var onTurn func(m llm.Message)
 	if persistEnabled {
-		onTurn = func(m llm.Message) { s.persistTurn(ctx, convID, m) }
+		// Fence persistence on the turn generation: if a newer turn has
+		// superseded this one, its assistant/tool turns must not land in the
+		// live history. The ctx is already canceled in that case, but a write
+		// can be in flight at the moment of supersession — the gen check closes
+		// that window.
+		onTurn = func(m llm.Message) {
+			if !s.turnIsCurrent(convID, turnGen) {
+				return
+			}
+			s.persistTurn(ctx, convID, m)
+		}
 	}
 
 	onTextDelta := func(t string) {

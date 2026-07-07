@@ -8,9 +8,23 @@ import (
 	"os/signal"
 	"strings"
 
+	"cercano/source/server/internal/conversation"
 	"cercano/source/server/pkg/agentclient"
 	"cercano/source/server/pkg/config"
 )
+
+// resolveHeadlessConvID returns the conversation id for a headless run: the
+// explicit --conv value verbatim, or a fresh random id when none was given.
+// A random id (not the old headless-<pid>) is essential — pids recycle, and a
+// recycled pid silently continues a stranger's conversation, which the
+// cross-session incident showed corrupts that conversation's upstream Meridian
+// lineage. Explicit continuation still works via --conv.
+func resolveHeadlessConvID(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	return conversation.NewID()
+}
 
 // runHeadless executes a single prompt against the cercano agent and streams
 // the response to stdout (assistant text) and stderr (diagnostics). Used for
@@ -85,9 +99,7 @@ Output:
 		fmt.Fprintln(os.Stderr, "cercano: auto-launched agent server (log:", client.ServerLog+")")
 	}
 
-	if convID == "" {
-		convID = fmt.Sprintf("headless-%d", os.Getpid())
-	}
+	convID = resolveHeadlessConvID(convID)
 
 	workDir, _ := os.Getwd()
 

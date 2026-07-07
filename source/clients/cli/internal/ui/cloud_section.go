@@ -37,9 +37,9 @@ func (sp *settingsPage) selectCloudRow(rowID string) {
 		}
 	case len(rowID) > 9 && rowID[:9] == "template:":
 		id := rowID[9:]
-		for _, pr := range cloudPresets() {
-			if pr.ID == id {
-				sp.cloudDraft = cloudDraft{Name: pr.ID, Flavor: pr.Flavor, Backend: pr.Backend, BaseURL: pr.BaseURL}
+		for _, prov := range sp.cloudView.Providers {
+			if prov.ID == id {
+				sp.cloudDraft = cloudDraft{Name: prov.ID, Flavor: prov.Flavor, Backend: prov.Backend, BaseURL: prov.BaseURL}
 				return
 			}
 		}
@@ -49,7 +49,7 @@ func (sp *settingsPage) selectCloudRow(rowID string) {
 // buildCloudSection renders the Cloud Providers list with an inline detail editor
 // under the selected row.
 func (sp *settingsPage) buildCloudSection() form.Section {
-	rows := buildCloudRows(cloudPresets(), sp.profiles, sp.activeProfile)
+	rows := buildCloudRowsFromProviders(sp.cloudView)
 	fields := make([]form.Field, 0, len(rows)+8)
 	for _, r := range rows {
 		fields = append(fields, form.NewRow("cloud-row:"+r.ID, r.Label, rowAnnotation(r), r.Active))

@@ -13,12 +13,29 @@ import (
 
 func cloudSamplePage() *settingsPage {
 	p := theme.Cracker()
+	// Grouped view as the agent would return it: the catalog, with one
+	// configured openai profile (active) merged under the openai provider.
+	view := agentclient.CloudProvidersView{
+		Active: "work-openai",
+		Providers: []agentclient.CloudProvider{
+			{ID: "anthropic", Label: "anthropic", Flavor: "messages", Tier: "verified"},
+			{ID: "openai-responses", Label: "openai (responses)", Flavor: "responses", BaseURL: "https://api.openai.com/v1", Tier: "untested"},
+			{ID: "openai", Label: "openai", Flavor: "chat_completions", Backend: "openai", BaseURL: "https://api.openai.com/v1", Tier: "untested",
+				PrimaryProfile: "work-openai",
+				Profiles: []agentclient.CloudProfileInfo{
+					{Name: "work-openai", Flavor: "chat_completions", Backend: "openai", BaseURL: "https://api.openai.com/v1", Model: "gpt-x", HasKey: true},
+				}},
+			{ID: "gemini", Label: "gemini", Flavor: "chat_completions", Backend: "gemini", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", Tier: "verified"},
+			{ID: "bedrock", Label: "bedrock", Flavor: "bedrock", Tier: "coming_soon"},
+		},
+	}
 	sp := &settingsPage{
 		palette: p, styles: theme.NewStyles(p), width: 96, height: 60,
 		cfg:     &agentclient.Config{Port: "50052", LocusMode: "cloud_only"},
 		mode:    "permissive",
 		themes:  theme.NewRegistry(theme.BuiltinThemes()),
 		working: theme.Theme{Name: "cr4k3r_j4x", Palette: p},
+		cloudView: view,
 		profiles: []agentclient.CloudProfileInfo{
 			{Name: "work-openai", Flavor: "chat_completions", Backend: "openai", BaseURL: "https://api.openai.com/v1", Model: "gpt-x", HasKey: true},
 		},
@@ -31,16 +48,27 @@ func cloudSamplePage() *settingsPage {
 func TestCloudSectionListsProfilesAndTemplates(t *testing.T) {
 	sp := cloudSamplePage()
 	sec := sp.buildCloudSection()
-	var labels []string
+	keys := map[string]bool{}
+	labels := map[string]bool{}
 	for _, f := range sec.Fields {
-		labels = append(labels, f.Label())
+		keys[f.Key()] = true
+		labels[f.Label()] = true
 	}
-	joined := strings.Join(labels, "|")
-	if !strings.Contains(joined, "work-openai") {
-		t.Errorf("configured profile row missing: %v", labels)
+	// The configured profile is merged into its provider row (keyed by the
+	// primary profile name), labeled by the friendly provider label.
+	if !keys["cloud-row:profile:work-openai"] {
+		t.Errorf("merged openai provider row (primary work-openai) missing: %v", keys)
 	}
-	if !strings.Contains(joined, "gemini") || !strings.Contains(joined, "+ other") {
-		t.Errorf("template/other rows missing: %v", labels)
+	if !labels["openai"] {
+		t.Errorf("merged provider row should be labeled by provider: %v", labels)
+	}
+	// Providers without profiles render as template rows; the trailing custom
+	// row is always present.
+	if !keys["cloud-row:template:gemini"] {
+		t.Errorf("gemini template row missing: %v", keys)
+	}
+	if !keys["cloud-row:other"] {
+		t.Errorf("+ other row missing: %v", keys)
 	}
 }
 
@@ -74,7 +102,7 @@ func TestCloudSectionShowsDetailForSelectedProfile(t *testing.T) {
 	if sp.cloudDraftNew {
 		t.Error("editing an existing profile is not a new draft")
 	}
-	// Verify cloud-name field is read-only for existing (non-new) profile.
+	// cloud-name is read-only for an existing (non-new) profile.
 	var cloudNameField form.Field
 	for _, f := range sec.Fields {
 		if f.Key() == "cloud-name" {

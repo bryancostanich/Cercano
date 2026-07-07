@@ -21,9 +21,20 @@ const (
 	FlavorBedrock         = "bedrock"
 )
 
+// RouteChatGPT re-exports the responses package's ChatGPT subscription route
+// value so callers select it without importing responses directly.
+const RouteChatGPT = responses.RouteChatGPT
+
+// Options carries optional dependencies for routes that need more than a
+// static API key. TokenSource supplies refreshing ChatGPT subscription
+// bearers for the responses flavor's chatgpt route.
+type Options struct {
+	TokenSource responses.TokenSource
+}
+
 // BuildCloudProvider maps a profile (+ its key) to an llm.Provider. Only the
 // messages (Anthropic) flavor is implemented in the foundation.
-func BuildCloudProvider(p config.CloudProfile, apiKey string) (llm.Provider, error) {
+func BuildCloudProvider(p config.CloudProfile, apiKey string, opts ...Options) (llm.Provider, error) {
 	switch p.Flavor {
 	case FlavorMessages:
 		return anthropic.NewClient(anthropic.Config{
@@ -35,6 +46,16 @@ func BuildCloudProvider(p config.CloudProfile, apiKey string) (llm.Provider, err
 	case FlavorChatCompletions:
 		return openai.NewClient(openai.Config{BaseURL: p.BaseURL, APIKey: apiKey, Model: p.Model, Backend: p.Backend}), nil
 	case FlavorResponses:
+		if p.Route == responses.RouteChatGPT {
+			var ts responses.TokenSource
+			if len(opts) > 0 {
+				ts = opts[0].TokenSource
+			}
+			if ts == nil {
+				return nil, fmt.Errorf("responses route %q requires a token source", p.Route)
+			}
+			return responses.NewClient(responses.Config{Model: p.Model, Route: p.Route, TokenSource: ts}), nil
+		}
 		return responses.NewClient(responses.Config{BaseURL: p.BaseURL, APIKey: apiKey, Model: p.Model}), nil
 	case FlavorBedrock:
 		return bedrock.NewClient(bedrock.Config{

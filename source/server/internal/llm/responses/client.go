@@ -15,11 +15,35 @@ import (
 
 const defaultBaseURL = "https://api.openai.com/v1"
 
+// RouteChatGPT is the profile Route value selecting ChatGPT subscription
+// auth: requests go to the codex backend using an OAuth bearer token plus a
+// ChatGPT-Account-Id header, rather than a static API key against
+// api.openai.com.
+const RouteChatGPT = "chatgpt"
+
+// CodexBaseURL is the ChatGPT subscription backend base. The client appends
+// "/responses" as usual. Used whenever Route == RouteChatGPT, regardless of
+// any BaseURL configured on the profile.
+const CodexBaseURL = "https://chatgpt.com/backend-api/codex"
+
+// TokenSource supplies a valid subscription bearer token and ChatGPT account
+// ID for each request, refreshing transparently. chatgptauth.Source
+// implements it.
+type TokenSource interface {
+	Token(ctx context.Context) (access, accountID string, err error)
+}
+
 // Config holds the Responses client configuration.
 type Config struct {
 	BaseURL string
 	APIKey  string
 	Model   string
+	// Route selects the auth path. Empty (default) uses APIKey against
+	// BaseURL; RouteChatGPT uses TokenSource against the codex backend.
+	Route string
+	// TokenSource, when set, supplies refreshing subscription bearers and is
+	// used instead of APIKey. Required for RouteChatGPT.
+	TokenSource TokenSource
 }
 
 // Client implements llm.Provider using the OpenAI Responses API.
@@ -28,12 +52,17 @@ type Client struct {
 	baseURL string
 	apiKey  string
 	model   string
+	route   string
+	tokens  TokenSource
 }
 
 // NewClient constructs a Client. The HTTP transport retries transient statuses
 // (429/5xx) with backoff, shared with the chat client via internal/llm/httpx.
 func NewClient(cfg Config) *Client {
 	base := cfg.BaseURL
+	if cfg.Route == RouteChatGPT {
+		base = CodexBaseURL // the route pins the backend; ignore any profile BaseURL
+	}
 	if base == "" {
 		base = defaultBaseURL
 	}
@@ -41,7 +70,7 @@ func NewClient(cfg Config) *Client {
 		Next:   &http.Client{},
 		Policy: httpx.RetryPolicy{MaxAttempts: 3, BaseDelay: 500 * time.Millisecond, OnStatus: []int{429, 500, 502, 503}},
 	}
-	return &Client{http: retry, baseURL: base, apiKey: cfg.APIKey, model: cfg.Model}
+	return &Client{http: retry, baseURL: base, apiKey: cfg.APIKey, model: cfg.Model, route: cfg.Route, tokens: cfg.TokenSource}
 }
 
 func (c *Client) Name() string { return "openai-responses" }
@@ -93,8 +122,32 @@ func (c *Client) do(ctx context.Context, body request) (*http.Response, error) {
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	if err := c.authorize(ctx, httpReq); err != nil {
+		return nil, err
+	}
 	return c.http.Do(httpReq)
+}
+
+// authorize sets the auth headers on a request. For the ChatGPT route it
+// pulls a fresh (auto-refreshing) subscription bearer + account ID from the
+// token source and identifies the client the way the codex backend expects;
+// otherwise it uses the static API key.
+func (c *Client) authorize(ctx context.Context, req *http.Request) error {
+	if c.tokens != nil {
+		access, accountID, err := c.tokens.Token(ctx)
+		if err != nil {
+			return fmt.Errorf("responses: chatgpt auth: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+access)
+		if accountID != "" {
+			req.Header.Set("ChatGPT-Account-Id", accountID)
+		}
+		req.Header.Set("originator", "cercano")
+		req.Header.Set("User-Agent", "cercano")
+		return nil
+	}
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	return nil
 }
 
 // errorFromBody turns a non-2xx response into a readable error.

@@ -641,9 +641,19 @@ func (wp *wizardPage) selectRow() (tea.Cmd, bool) {
 			wp.authPick = false
 			wp.status = "anthropic (meridian) is the active profile"
 			wp.advance()
+		case "chatgpt":
+			// ChatGPT subscription sign-in: hand off to the device-code modal,
+			// which is owned by the root model and composited over this wizard
+			// page. It creates + activates the "chatgpt" profile on success; the
+			// wizard's finish (applyConfig) only writes locus + tier picks, so it
+			// won't clobber the profile. Advance so the wizard continues behind
+			// the modal. Empty model lets the agent apply its default.
+			wp.authPick = false
+			wp.advance()
+			return func() tea.Msg {
+				return openChatGPTLoginModalMsg{profile: "chatgpt", setActive: true}
+			}, false
 		default:
-			// chatgpt — the sign-in flow is a later slice; the choice is
-			// recorded and the summary flags it as pending.
 			wp.authPick = false
 			wp.advance()
 		}
@@ -759,7 +769,7 @@ func (wp *wizardPage) summary() string {
 	if wp.state.CloudProvider != "" {
 		note := ""
 		if wp.state.AuthMethod == "chatgpt" {
-			note = " — sign-in flow not built yet; use an api key via /cloud in the meantime"
+			note = " — approve the ChatGPT sign-in window that opens in your browser"
 		}
 		fmt.Fprintf(&b, "  cloud:    %s (%s)%s\n", wp.state.CloudProvider, wp.state.AuthMethod, note)
 	}

@@ -1537,10 +1537,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.chatgptLoginModal.setCode(msg.frame.VerificationURL, msg.frame.UserCode)
+		var cmds []tea.Cmd
 		if msg.ch != nil {
-			return m, drainChatGPTLoginCmd(msg.ch)
+			cmds = append(cmds, drainChatGPTLoginCmd(msg.ch))
 		}
-		return m, nil
+		// Auto-open the verification page once, the moment we have the URL, so
+		// the user lands on it without hunting for the link in the modal.
+		if !m.chatgptLoginModal.browserOpened && m.chatgptLoginModal.verificationURL != "" {
+			m.chatgptLoginModal.browserOpened = true
+			cmds = append(cmds, openBrowserCmd(m.chatgptLoginModal.verificationURL))
+		}
+		return m, tea.Batch(cmds...)
 
 	case modalModelsLoadedMsg:
 		// Reply to fetchModalGGUFsCmd. Routes the scanning state: fetch

@@ -61,6 +61,9 @@ type chatgptLoginModal struct {
 	// cancel tears down the sign-in RPC context — called on Esc during
 	// waiting to abort, nil once the stream has settled.
 	cancel context.CancelFunc
+	// browserOpened guards the one-shot auto-open so re-draws / extra frames
+	// don't spawn a browser tab per poll.
+	browserOpened bool
 }
 
 // newChatGPTLoginModal opens the modal in the waiting state for a given
@@ -209,7 +212,7 @@ func (mo *chatgptLoginModal) renderBody(styles theme.Styles, w int) string {
 		var b strings.Builder
 		b.WriteString(styles.Muted.Render("In your browser, open:"))
 		b.WriteString("\n  ")
-		b.WriteString(styles.Primary.Render(ansi.Truncate(mo.verificationURL, w-2, "…")))
+		b.WriteString(hyperlink(mo.verificationURL, styles.Primary.Render(mo.verificationURL)))
 		b.WriteString("\n\n")
 		b.WriteString(styles.Muted.Render("and enter this code:"))
 		b.WriteString("\n  ")
@@ -235,7 +238,7 @@ func (mo *chatgptLoginModal) renderBody(styles theme.Styles, w int) string {
 func (mo *chatgptLoginModal) renderActions(styles theme.Styles) string {
 	switch mo.state {
 	case chatgptLoginWaiting:
-		return styles.Muted.Render("Waiting for approval…  [Esc] Cancel")
+		return styles.Muted.Render("Waiting for approval…  [o] open browser  [Esc] Cancel")
 	case chatgptLoginDone:
 		return styles.Success.Render("✓ [any key] to close")
 	case chatgptLoginFailed:
@@ -250,11 +253,16 @@ func (mo *chatgptLoginModal) renderActions(styles theme.Styles) string {
 func (m Model) handleChatGPTLoginModalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	mo := m.chatgptLoginModal
 	if mo.state == chatgptLoginWaiting {
-		if msg.String() == "esc" {
+		switch msg.String() {
+		case "esc":
 			if mo.cancel != nil {
 				mo.cancel()
 			}
 			m.chatgptLoginModal = nil
+		case "o":
+			if mo.verificationURL != "" {
+				return m, openBrowserCmd(mo.verificationURL)
+			}
 		}
 		return m, nil
 	}

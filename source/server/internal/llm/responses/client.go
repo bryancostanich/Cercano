@@ -163,6 +163,17 @@ func errorFromBody(status int, body []byte) error {
 
 // Chat sends a non-streaming Responses request and maps output to blocks.
 func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	// The ChatGPT-account codex backend rejects non-streaming requests
+	// ("Stream must be set to true"). For that route, run the streaming path and
+	// aggregate it into the non-streaming ChatResponse shape.
+	if c.route == RouteChatGPT {
+		rdr, err := c.StreamChat(ctx, req)
+		if err != nil {
+			return llm.ChatResponse{}, err
+		}
+		defer rdr.Close()
+		return llm.CollectStream(ctx, rdr, nil)
+	}
 	httpResp, err := c.do(ctx, c.buildRequest(req, false))
 	if err != nil {
 		return llm.ChatResponse{}, err

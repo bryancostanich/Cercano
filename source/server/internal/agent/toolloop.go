@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"cercano/source/server/internal/agenttools"
@@ -487,164 +486,10 @@ func truncateForError(s string) string {
 	return s[:max] + "… (truncated)"
 }
 
-// collectStream consumes a StreamReader and rebuilds the equivalent
-// non-streaming ChatResponse shape the loop logic expects. Text deltas
-// concatenate into BlockText; tool_use_input_delta events concatenate
-// partial JSON into BlockToolUse.ToolInput.
-// collectStream consumes a StreamReader into a ChatResponse. onText, when
-// non-nil, is called with each text delta as it arrives so callers can stream
-// assistant prose to the client live (the loop otherwise only surfaces the
-// fully-buffered text at the end).
+// collectStream delegates to llm.CollectStream, which owns the stream->
+// ChatResponse aggregation (moved to the llm package so provider adapters
+// can reuse it — the codex backend requires streaming). Thin wrapper so the
+// loop call sites stay unchanged.
 func collectStream(ctx context.Context, rdr llm.StreamReader, onText func(string)) (llm.ChatResponse, error) {
-	var (
-		out         llm.ChatResponse
-		currentText strings.Builder
-		currentTool *llm.Block
-		toolArgsBuf strings.Builder
-		// Framing guard (see docs/bugs/2026-07-04-user-message-tear.md): content
-		// events are attributable to THIS response only between a message_start
-		// and its message_stop. A proxy/session-resume hiccup can replay stale
-		// stream content outside that window (the 2026-07-04 incident replayed a
-		// severed user-message echo as pre-start text deltas, which was then
-		// persisted as assistant output). Unframed content is dropped, loudly.
-		accepting    bool
-		started      bool
-		droppedBytes int
-	)
-	flushText := func() {
-		if currentText.Len() > 0 {
-			out.Blocks = append(out.Blocks, llm.Block{
-				Type: llm.BlockText, Text: currentText.String(),
-			})
-			currentText.Reset()
-		}
-	}
-	flushTool := func() {
-		if currentTool != nil {
-			if toolArgsBuf.Len() > 0 {
-				raw := toolArgsBuf.String()
-				if json.Valid([]byte(raw)) {
-					currentTool.ToolInput = json.RawMessage(raw)
-				} else {
-					// Invalid input kept raw would poison the turn: persistence
-					// fails (RawMessage refuses to marshal) and replaying the
-					// block corrupts every later request body (observed
-					// 2026-07-06: Meridian streamed unquoted/truncated Bash
-					// args; every follow-up cloud call then 500'd). Wrap it in
-					// a valid envelope; the loop turns it into a clear error
-					// tool_result the model can react to.
-					wrapped, _ := json.Marshal(map[string]string{llm.MalformedToolInputKey: raw})
-					currentTool.ToolInput = json.RawMessage(wrapped)
-					fmt.Fprintf(os.Stderr, "[stream-guard] tool_use %q input is not valid JSON (%d bytes) — wrapped for safe replay\n", currentTool.ToolName, len(raw))
-				}
-			} else if currentTool.ToolInput == nil {
-				currentTool.ToolInput = json.RawMessage("{}")
-			}
-			out.Blocks = append(out.Blocks, *currentTool)
-			currentTool = nil
-			toolArgsBuf.Reset()
-		}
-	}
-	for {
-		ev, ok, err := rdr.Next()
-		if err != nil {
-			return out, err
-		}
-		if !ok {
-			break
-		}
-		switch ev.Type {
-		case llm.EventTextDelta:
-			if !accepting {
-				if droppedBytes == 0 {
-					fmt.Fprintf(os.Stderr, "[stream-guard] dropping stream content outside message framing (before message_start / after message_stop)\n")
-				}
-				droppedBytes += len(ev.TextDelta)
-				break
-			}
-			if currentTool != nil {
-				flushTool()
-			}
-			currentText.WriteString(ev.TextDelta)
-			if onText != nil {
-				onText(ev.TextDelta)
-			}
-		case llm.EventToolUseStart:
-			if !accepting {
-				if droppedBytes == 0 {
-					fmt.Fprintf(os.Stderr, "[stream-guard] dropping stream content outside message framing (before message_start / after message_stop)\n")
-				}
-				droppedBytes += len(ev.ToolName)
-				break
-			}
-			flushText()
-			flushTool()
-			currentTool = &llm.Block{
-				Type:      llm.BlockToolUse,
-				ToolUseID: ev.ToolUseID,
-				ToolName:  ev.ToolName,
-			}
-			// Some providers deliver the whole input on the start event
-			// (Ollama's tool_calls arrive complete) instead of as
-			// input-delta events. Seed the buffer so flushTool sees it.
-			if len(ev.ToolInputRaw) > 0 {
-				toolArgsBuf.Write(ev.ToolInputRaw)
-			}
-		case llm.EventToolUseInputDelta:
-			if !accepting {
-				break
-			}
-			toolArgsBuf.WriteString(ev.TextDelta)
-		case llm.EventToolUseStop:
-			if !accepting {
-				break
-			}
-			flushTool()
-		case llm.EventReasoning:
-			if !accepting {
-				break
-			}
-			flushText()
-			flushTool()
-			out.Blocks = append(out.Blocks, llm.Block{
-				Type:          llm.BlockReasoning,
-				ReasoningID:   ev.ReasoningID,
-				ReasoningData: ev.ReasoningData,
-			})
-		case llm.EventMessageStart:
-			if started {
-				// One response == one message. A second message_start means the
-				// stream restarted under us — keep only the newest message.
-				fmt.Fprintf(os.Stderr, "[stream-guard] message_start while already accumulating — discarding prior partial message\n")
-				currentText.Reset()
-				currentTool = nil
-				toolArgsBuf.Reset()
-				out.Blocks = nil
-			}
-			started = true
-			accepting = true
-			out.InputTokens = ev.InputTokens
-		case llm.EventMessageStop:
-			flushText()
-			flushTool()
-			accepting = false
-			if ev.StopReason != "" {
-				out.StopReason = ev.StopReason
-			}
-			if ev.InputTokens > 0 {
-				out.InputTokens = ev.InputTokens
-			}
-			if ev.OutputTokens > 0 {
-				out.OutputTokens = ev.OutputTokens
-			}
-		case llm.EventError:
-			return out, fmt.Errorf("stream error: %s", ev.ErrText)
-		}
-		if err := ctx.Err(); err != nil {
-			return out, err
-		}
-	}
-	flushText()
-	flushTool()
-	return out, nil
+	return llm.CollectStream(ctx, rdr, onText)
 }

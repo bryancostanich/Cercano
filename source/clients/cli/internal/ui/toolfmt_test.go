@@ -54,6 +54,9 @@ func TestHumanizeArgs(t *testing.T) {
 		{"bash quote spaces", "Bash", `{"cmd":["grep","-n","foo bar","file"]}`, "grep -n 'foo bar' file"},
 		{"read path", "Read", `{"path":"/home/u/proj/README.md"}`, "README.md"},
 		{"edit path", "Edit", `{"path":"/home/u/proj/internal/ui/model.go","old_string":"a","new_string":"b"}`, "internal/ui/model.go"},
+		// The server now streams summarized args (big content fields truncated
+		// with an ellipsis) — the path must still resolve from that valid JSON.
+		{"edit path from summarized args", "Edit", `{"path":"/home/u/proj/internal/ui/model.go","old_string":"aaaa…","new_string":"bbbb…"}`, "internal/ui/model.go"},
 		{"glob pattern", "Glob", `{"pattern":"README*"}`, "README*"},
 		{"glob pattern in path", "Glob", `{"pattern":"*.go","path":"/home/u/proj/internal"}`, "*.go in internal"},
 		{"grep pattern at root", "Grep", `{"pattern":"TODO","path":"/home/u/proj"}`, "TODO"},

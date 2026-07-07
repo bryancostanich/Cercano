@@ -244,6 +244,10 @@ func (m *mockAgentClient) InstallOpenRuntime(ctx context.Context, in *proto.Inst
 	return nil, nil
 }
 
+func (m *mockAgentClient) StartChatGPTLogin(ctx context.Context, in *proto.StartChatGPTLoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[proto.StartChatGPTLoginEvent], error) {
+	return nil, nil
+}
+
 func (m *mockAgentClient) RegenerateContext(ctx context.Context, in *proto.RegenerateContextRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[proto.RegenerateContextProgress], error) {
 	return nil, nil
 }

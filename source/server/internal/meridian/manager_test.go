@@ -237,6 +237,60 @@ func TestEnsure_IdempotentOnSamePort(t *testing.T) {
 	m.Stop()
 }
 
+// StateFailed must not be a dead end: after a failure, the manager retries
+// Ensure on its own (like the auth poller for NeedsAuth and the port watcher
+// for External).
+func TestFailedState_AutoRetries(t *testing.T) {
+	prev := failedRetryInterval
+	failedRetryInterval = 20 * time.Millisecond
+	defer func() { failedRetryInterval = prev }()
+
+	m := newTestManager()
+	var spawned int32
+	// First spawn fails; subsequent spawns succeed.
+	realSpawnFn := fakeSpawn(&spawned)
+	m.spawnFn = func(ctx context.Context, port int, version string, sink io.Writer) (*exec.Cmd, error) {
+		if atomic.AddInt32(&spawned, 1) == 1 {
+			return nil, errors.New("npx exploded")
+		}
+		atomic.AddInt32(&spawned, -1) // fakeSpawn counts too; don't double-count
+		return realSpawnFn(ctx, port, version, sink)
+	}
+
+	m.Ensure(context.Background(), 3456)
+	waitForState(t, m, StateFailed)
+	// No further Ensure calls from the outside — the retry must fire itself.
+	waitForState(t, m, StateReady)
+	m.Stop()
+}
+
+// Stop while Failed must cancel the pending retry — a stopped manager never
+// resurrects Meridian.
+func TestStop_CancelsFailedRetry(t *testing.T) {
+	prev := failedRetryInterval
+	failedRetryInterval = 20 * time.Millisecond
+	defer func() { failedRetryInterval = prev }()
+
+	m := newTestManager()
+	var spawned int32
+	m.spawnFn = func(ctx context.Context, port int, version string, sink io.Writer) (*exec.Cmd, error) {
+		atomic.AddInt32(&spawned, 1)
+		return nil, errors.New("npx exploded")
+	}
+
+	m.Ensure(context.Background(), 3456)
+	waitForState(t, m, StateFailed)
+	m.Stop()
+
+	time.Sleep(100 * time.Millisecond) // several retry intervals
+	if got := m.Status().State; got != StateDisabled {
+		t.Errorf("state = %s after Stop, want disabled", got)
+	}
+	if got := atomic.LoadInt32(&spawned); got != 1 {
+		t.Errorf("spawn attempted %d times, want 1 (no retries after Stop)", got)
+	}
+}
+
 func TestStop_FromReadyReturnsToDisabled(t *testing.T) {
 	m := newTestManager()
 	var spawned int32

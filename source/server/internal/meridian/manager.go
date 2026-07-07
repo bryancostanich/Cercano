@@ -90,15 +90,22 @@ type Manager struct {
 	// instead of adopting the orphan as external, so spawn-time config applies.
 	// Injection point for tests.
 	reapOrphanFn func(port int) bool
+	// identifyGroupFn reports whether the live process group behind a recorded
+	// pid still looks like a Meridian we spawned. Guards the reaper against
+	// recycled pids: never kill what we can't identify as ours. Injection
+	// point for tests; production is groupLooksLikeMeridian.
+	identifyGroupFn func(pid int) bool
 
 	mu                  sync.Mutex
 	status              Status
 	cancel              context.CancelFunc // cancels the active supervisor; nil when none
 	cmd                 *exec.Cmd          // the spawned meridian process, if we own it
 	listener            func(Status)
-	lastPort            int                // last port requested via Ensure (for auth poller retry)
+	lastPort            int                // last port requested via Ensure (for poller retries)
+	lastCtx             context.Context    // ctx of the last Ensure (for poller retries)
 	authPollCancel      context.CancelFunc // cancels the auth poller; nil when none
 	externalWatchCancel context.CancelFunc // cancels the external-port watcher; nil when none
+	failedRetryCancel   context.CancelFunc // cancels the pending failed-state retry; nil when none
 }
 
 // authPollInterval is how often the manager re-checks the keychain while in
@@ -111,6 +118,12 @@ var authPollInterval = 3 * time.Second
 // often, and a dead external Meridian means every cloud call is failing, so
 // recovery should be quick.
 var externalPollInterval = 5 * time.Second
+
+// failedRetryInterval is how long the manager waits in Failed state before
+// re-running Ensure on its own. Long enough not to hammer npx on a persistent
+// failure; short enough that a transient one (network blip during the npm
+// fetch, port squatter that went away) self-heals without user action.
+var failedRetryInterval = 30 * time.Second
 
 // New constructs a Manager. logPath should be the file to tee Meridian's
 // stdout/stderr into (typically ~/.cercano/meridian.log). Empty logPath
@@ -131,7 +144,29 @@ func New(logger *log.Logger, logPath string) *Manager {
 		status:     Status{State: StateDisabled},
 	}
 	m.reapOrphanFn = m.realReapOrphan
+	m.identifyGroupFn = groupLooksLikeMeridian
 	return m
+}
+
+// groupLooksLikeMeridian reports whether the process group led by pgid has a
+// member whose command line mentions meridian (npx's argv carries
+// @rynfar/meridian; the spawned binary's path carries node_modules/.bin/meridian).
+func groupLooksLikeMeridian(pgid int) bool {
+	return exec.Command("pgrep", "-f", "-g", strconv.Itoa(pgid), "meridian").Run() == nil
+}
+
+// killGroupOrProcess kills the process's entire group (realSpawn puts the npx
+// → Meridian chain in its own group via Setpgid, keyed by the npx pid), falling
+// back to a single-process kill for processes without their own group. Killing
+// only the direct child leaves the Meridian grandchild holding the port — that
+// is exactly how orphans were being created.
+func killGroupOrProcess(proc *os.Process) {
+	if proc == nil {
+		return
+	}
+	if err := syscall.Kill(-proc.Pid, syscall.SIGKILL); err != nil {
+		_ = proc.Kill()
+	}
 }
 
 // pidFilePath is where the spawned Meridian's pid is recorded, next to the
@@ -143,12 +178,13 @@ func (m *Manager) pidFilePath() string {
 	return filepath.Join(filepath.Dir(m.logPath), "meridian.pid")
 }
 
-// writePidFile records pid at path (best-effort; no-op on empty path).
-func writePidFile(path string, pid int) {
+// writePidFile records pid at path (no-op on empty path). The error matters:
+// a pid we failed to record is an orphan the reaper can never find.
+func writePidFile(path string, pid int) error {
 	if path == "" {
-		return
+		return nil
 	}
-	_ = os.WriteFile(path, []byte(strconv.Itoa(pid)), 0o644)
+	return os.WriteFile(path, []byte(strconv.Itoa(pid)), 0o644)
 }
 
 // readPidFile reads a pid from path. Returns (0,false) on empty path, missing
@@ -176,40 +212,37 @@ func removePidFile(path string) {
 	_ = os.Remove(path)
 }
 
-// processAlive reports whether pid names a live process (signal 0 probe).
-func processAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return proc.Signal(syscall.Signal(0)) == nil
-}
-
-// realReapOrphan is the production reapOrphanFn. When the pidfile names a live
-// process, it is a Meridian we spawned that a hard-killed agent orphaned on the
-// port; kill it so a fresh spawn applies current spawn-time config, and report
-// true. Returns false when there is no pidfile (nothing of ours recorded) or
-// the recorded pid is already gone — in which case the caller adopts whatever
-// is on the port as a genuinely external proxy.
-//
-// Caveat: identity is by recorded pid + liveness, not a port->pid lookup, so a
-// recycled pid could in principle be signalled. Acceptable for a local dev
-// proxy; the alternative is platform-specific socket-ownership inspection.
+// realReapOrphan is the production reapOrphanFn. The pidfile records the pid
+// of the npx process we spawned, which (via Setpgid) is also its process-group
+// id — the group covers npx plus the Meridian binary it runs. When that group
+// is still alive AND still identifies as Meridian, it's ours, orphaned by a
+// hard-killed agent: kill the whole group so a fresh spawn applies current
+// spawn-time config, and report true. Returns false when nothing of ours is
+// recorded, the group is gone, or the pid was recycled to something we can't
+// identify — in those cases the caller adopts whatever is on the port as a
+// genuinely external proxy.
 func (m *Manager) realReapOrphan(port int) bool {
 	path := m.pidFilePath()
 	pid, ok := readPidFile(path)
 	if !ok {
 		return false
 	}
-	if !processAlive(pid) {
+	// Signal 0 to the group: any member still alive?
+	if syscall.Kill(-pid, 0) != nil {
 		removePidFile(path)
 		return false
 	}
-	if proc, err := os.FindProcess(pid); err == nil {
-		_ = proc.Kill()
+	// Alive — but is it still ours? A stale pidfile (crash before cleanup)
+	// plus pid recycling can point at an innocent process. Never kill what we
+	// can't identify as Meridian.
+	if !m.identifyGroupFn(pid) {
+		removePidFile(path)
+		m.logger.Printf("meridian: recorded pid %d is alive but not a Meridian (recycled pid?); leaving it alone", pid)
+		return false
 	}
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
 	removePidFile(path)
-	m.logger.Printf("meridian: reaped orphaned Meridian pid %d holding port %d", pid, port)
+	m.logger.Printf("meridian: reaped orphaned Meridian group %d holding port %d", pid, port)
 	return true
 }
 
@@ -241,6 +274,7 @@ func (m *Manager) Status() Status {
 func (m *Manager) Ensure(ctx context.Context, port int) {
 	m.mu.Lock()
 	m.lastPort = port
+	m.lastCtx = ctx
 	// Already managing this exact port and not in a terminal-fail state — nothing to do.
 	if m.status.Port == port &&
 		(m.status.State == StateStarting || m.status.State == StateReady) {
@@ -327,12 +361,13 @@ func (m *Manager) Stop() {
 func (m *Manager) stopLocked() {
 	m.stopAuthPollerLocked()
 	m.stopExternalWatcherLocked()
+	m.stopFailedRetryLocked()
 	if m.cancel != nil {
 		m.cancel()
 		m.cancel = nil
 	}
 	if m.cmd != nil && m.cmd.Process != nil {
-		_ = m.cmd.Process.Kill()
+		killGroupOrProcess(m.cmd.Process)
 		m.cmd = nil
 		// Our process is dead by our own hand — drop the pidfile so a later
 		// agent never mistakes a recycled pid for our orphan.
@@ -427,6 +462,63 @@ func (m *Manager) stopExternalWatcherLocked() {
 	}
 }
 
+// failWithRetry marks the manager Failed and schedules a one-shot re-Ensure
+// after failedRetryInterval, so Failed is not a dead end (NeedsAuth has the
+// auth poller, External has the port watcher — this is the same idea). If the
+// retry fails again, its supervise schedules the next one.
+//
+// No-op when the state machine has already moved on — a Stop set Disabled, or
+// a replacing Ensure is managing a different port — so a stale supervisor's
+// late failure can't clobber the current status or resurrect Meridian.
+func (m *Manager) failWithRetry(s Status) {
+	m.mu.Lock()
+	if m.status.State == StateDisabled || m.lastPort != s.Port {
+		m.mu.Unlock()
+		return
+	}
+	m.setStatusLocked(s)
+	m.startFailedRetryLocked()
+	m.mu.Unlock()
+}
+
+// startFailedRetryLocked schedules a single re-Ensure. Derives from the last
+// Ensure's context — NOT the supervisor's, which the retry's own Ensure
+// cancels via stopLocked. Caller must hold m.mu.
+func (m *Manager) startFailedRetryLocked() {
+	if m.failedRetryCancel != nil {
+		m.failedRetryCancel()
+	}
+	if m.lastCtx == nil {
+		return
+	}
+	rctx, cancel := context.WithCancel(m.lastCtx)
+	m.failedRetryCancel = cancel
+	parent, port, interval := m.lastCtx, m.lastPort, failedRetryInterval
+	go func() {
+		t := time.NewTimer(interval)
+		defer t.Stop()
+		select {
+		case <-rctx.Done():
+			return
+		case <-t.C:
+			if m.Status().State != StateFailed {
+				return
+			}
+			m.logger.Printf("meridian: retrying after failure (port %d)", port)
+			m.Ensure(parent, port)
+		}
+	}()
+}
+
+// stopFailedRetryLocked cancels any pending failed-state retry. Caller must
+// hold m.mu.
+func (m *Manager) stopFailedRetryLocked() {
+	if m.failedRetryCancel != nil {
+		m.failedRetryCancel()
+		m.failedRetryCancel = nil
+	}
+}
+
 // supervise runs in its own goroutine for one Ensure() invocation. It
 // spawns Meridian, polls until the port responds, marks Ready, then waits
 // for the process to exit. On unexpected exit it marks Failed and stops
@@ -452,34 +544,46 @@ func (m *Manager) supervise(ctx context.Context, port int) {
 
 	cmd, err := m.spawnFn(ctx, port, m.version, logSink)
 	if err != nil {
-		m.transition(Status{
+		m.failWithRetry(Status{
 			State:   StateFailed,
 			Message: "failed to spawn Meridian: " + err.Error(),
 			Port:    port,
 		})
 		return
 	}
+	// Record the pid (also the process-group id, via Setpgid) so a later agent
+	// can recognize and reap an orphan instead of adopting it as external.
+	// Written in the same critical section that publishes m.cmd, so a
+	// concurrent Stop can't remove the pidfile and then have us re-create it
+	// naming a dead pid.
 	m.mu.Lock()
 	m.cmd = cmd
-	m.mu.Unlock()
-	// Record the pid so a later agent (after a hard kill orphans this process)
-	// can recognize and reap it instead of adopting it as external.
 	if cmd.Process != nil {
-		writePidFile(m.pidFilePath(), cmd.Process.Pid)
+		if path := m.pidFilePath(); path == "" {
+			m.logger.Printf("meridian: pidfile tracking disabled (no log path) — an orphaned proxy won't be auto-reaped")
+		} else if err := writePidFile(path, cmd.Process.Pid); err != nil {
+			m.logger.Printf("meridian: cannot write pidfile %s: %v — an orphaned proxy won't be auto-reaped", path, err)
+		}
 	}
+	m.mu.Unlock()
 
 	// Probe for readiness. 60s budget covers cold-cache npx fetch + Node boot.
 	probeCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	if err := waitForReady(probeCtx, port, m.probeFn); err != nil {
-		// Probe failed (timeout or ctx cancellation). Kill the process so we
-		// don't leak it and report failed.
+		// Probe failed (timeout or ctx cancellation). Kill OUR spawn's group so
+		// we don't leak it — never m.cmd, which a replacing Ensure may already
+		// have repointed at a fresh process. Drop the pidfile only if it is
+		// still ours: it names a pid we just killed, and a stale pidfile is
+		// what makes recycled-pid reaping possible.
+		killGroupOrProcess(cmd.Process)
 		m.mu.Lock()
-		if m.cmd != nil && m.cmd.Process != nil {
-			_ = m.cmd.Process.Kill()
+		if m.cmd == cmd {
+			m.cmd = nil
+			removePidFile(m.pidFilePath())
 		}
 		m.mu.Unlock()
-		m.transition(Status{
+		m.failWithRetry(Status{
 			State:   StateFailed,
 			Message: "Meridian failed to become ready: " + err.Error(),
 			Port:    port,
@@ -494,16 +598,22 @@ func (m *Manager) supervise(ctx context.Context, port int) {
 
 	// Wait for the process. On exit, if ctx was cancelled (Stop), we're
 	// going to Disabled — the Stop call sets that. Otherwise it's an
-	// unexpected exit; mark Failed.
+	// unexpected exit; drop the now-dead pid's file and mark Failed.
 	waitErr := cmd.Wait()
 	if ctx.Err() != nil {
 		return // Stop() handles status
 	}
+	m.mu.Lock()
+	if m.cmd == cmd {
+		m.cmd = nil
+		removePidFile(m.pidFilePath())
+	}
+	m.mu.Unlock()
 	msg := "Meridian exited unexpectedly"
 	if waitErr != nil {
 		msg += ": " + waitErr.Error()
 	}
-	m.transition(Status{State: StateFailed, Message: msg, Port: port})
+	m.failWithRetry(Status{State: StateFailed, Message: msg, Port: port})
 }
 
 // transition atomically updates status and fires the listener.
@@ -526,6 +636,11 @@ func (m *Manager) setStatusLocked(s Status) {
 // set, piping stdout+stderr into logSink.
 func realSpawn(ctx context.Context, port int, version string, logSink io.Writer) (*exec.Cmd, error) {
 	cmd := exec.CommandContext(ctx, "npx", "-y", "@rynfar/meridian@"+version)
+	// Own process group, keyed by the npx pid. npx runs the Meridian binary as
+	// a child — killing npx alone leaves Meridian holding the port, which is
+	// how orphans were being created. Group membership lets Stop and the
+	// reaper take down the whole chain (same pattern as llamaserver).
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = append(os.Environ(),
 		"CLAUDE_PROXY_PORT="+strconv.Itoa(port),
 		"CLAUDE_PROXY_HOST=127.0.0.1",

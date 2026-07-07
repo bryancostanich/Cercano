@@ -86,7 +86,19 @@ for pid in $(pgrep -f "cercano agent" 2>/dev/null); do
     if (( proc_epoch < bin_mtime )); then
         echo "[cercano] killing stale agent pid=$pid (started $lstart, before binary built)" >&2
         kill "$pid" 2>/dev/null || true
-        sleep 0.2
+        # Give the agent time to run its cleanup (SIGTERM → Shutdown → kills the
+        # Meridian child group). Escalate to SIGKILL only if it hangs — a hard
+        # kill skips cleanup and orphans Meridian (the next agent's reaper will
+        # catch it, but prefer not to create the orphan at all).
+        for _ in $(seq 1 20); do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 0.1
+        done
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "[cercano] agent pid=$pid ignored SIGTERM; escalating to SIGKILL" >&2
+            kill -9 "$pid" 2>/dev/null || true
+            sleep 0.2
+        fi
     fi
 done
 

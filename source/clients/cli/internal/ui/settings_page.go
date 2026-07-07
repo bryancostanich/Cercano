@@ -47,6 +47,21 @@ func settingsSpinnerTick() tea.Cmd {
 	return tea.Tick(80*time.Millisecond, func(t time.Time) tea.Msg { return settingsSpinnerTickMsg(t) })
 }
 
+// settingsScope selects which slice of the settings form a settingsPage
+// renders. The unified /config surface splits the old single form across three
+// tabs — General, Cloud, and UI — each backed by a scoped settingsPage so the
+// existing form machinery (commit routing, async spinner, theme live-preview)
+// is reused verbatim. scopeAll preserves the original all-in-one page as a
+// fallback.
+type settingsScope int
+
+const (
+	scopeAll settingsScope = iota // every section (legacy single page)
+	scopeGeneral                  // routing, permissions, server, dev tools
+	scopeCloud                    // cloud-profiles editor
+	scopeUI                       // theme sections
+)
+
 // settingsPage is the sectioned settings content page (opened by /s, /settings,
 // /config). It replaces the old flat configEditor.
 type settingsPage struct {
@@ -55,6 +70,7 @@ type settingsPage struct {
 	styles        theme.Styles
 	agent         *agentclient.Client
 	accentToken   string
+	scope         settingsScope
 	form          *form.Form
 	offset        int
 	themes        *theme.Registry
@@ -92,7 +108,16 @@ type settingsPage struct {
 }
 
 func newSettingsPage(ag *agentclient.Client, p theme.Palette, s theme.Styles, accentToken string, w, h int, themes *theme.Registry, active theme.Theme) (*settingsPage, tea.Cmd) {
-	sp := &settingsPage{agent: ag, palette: p, styles: s, accentToken: accentToken, width: w, height: h, themes: themes, working: active}
+	return newScopedSettingsPage(ag, p, s, accentToken, w, h, themes, active, scopeAll)
+}
+
+// newScopedSettingsPage builds a settingsPage that renders only the sections
+// for the given scope. The unified /config tabs use this to back the General,
+// Cloud, and UI tabs from one shared form implementation, so commit routing,
+// the async-commit spinner, and theme live-preview all work identically to the
+// legacy single page.
+func newScopedSettingsPage(ag *agentclient.Client, p theme.Palette, s theme.Styles, accentToken string, w, h int, themes *theme.Registry, active theme.Theme, scope settingsScope) (*settingsPage, tea.Cmd) {
+	sp := &settingsPage{agent: ag, palette: p, styles: s, accentToken: accentToken, width: w, height: h, themes: themes, working: active, scope: scope}
 	sp.form = form.New(sp.snapshotSections())
 	sp.form.OnCommit = sp.onCommit
 	sp.form.OnReload = sp.snapshotSections
@@ -100,7 +125,11 @@ func newSettingsPage(ag *agentclient.Client, p theme.Palette, s theme.Styles, ac
 }
 
 func (sp *settingsPage) snapshotSections() []form.Section {
-	if sp.cfg == nil {
+	// Fetch only what the active scope needs: the UI (theme) tab must render
+	// even when the agent is unreachable, so it never triggers GetConfig.
+	needCfg := sp.scope == scopeGeneral || sp.scope == scopeAll
+	needProfiles := sp.scope == scopeCloud || sp.scope == scopeAll
+	if needCfg && sp.cfg == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		cfg, err := sp.agent.GetConfig(ctx)
@@ -116,7 +145,7 @@ func (sp *settingsPage) snapshotSections() []form.Section {
 		sp.cfg = cfg
 		sp.mode = mode
 	}
-	if !sp.profilesLoaded && sp.agent != nil {
+	if needProfiles && !sp.profilesLoaded && sp.agent != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		if profs, active, err := sp.agent.GetCloudProfiles(ctx); err == nil {
@@ -125,16 +154,35 @@ func (sp *settingsPage) snapshotSections() []form.Section {
 			sp.profilesLoaded = true
 		}
 	}
+	switch sp.scope {
+	case scopeGeneral:
+		return append(buildSettingsSections(sp.cfg, sp.mode, sp.accentToken), sp.devToolsSection())
+	case scopeCloud:
+		return []form.Section{sp.buildCloudSection()}
+	case scopeUI:
+		if sp.themes == nil {
+			return nil
+		}
+		builtin := sp.themes.IsBuiltin(sp.working.Name)
+		return buildThemeSections(sp.working, sp.themes.Names(), builtin, sp.dirty)
+	}
+
+	// scopeAll — the legacy single page: every section in order.
 	secs := buildSettingsSections(sp.cfg, sp.mode, sp.accentToken)
 	secs = append(secs, sp.buildCloudSection())
 	if sp.themes != nil {
 		builtin := sp.themes.IsBuiltin(sp.working.Name)
 		secs = append(secs, buildThemeSections(sp.working, sp.themes.Names(), builtin, sp.dirty)...)
 	}
-	// Development Tools is pinned to the very bottom of the settings page —
-	// below every user-facing section — so it never intrudes on the primary
-	// configuration flow. Inside, related toggles cluster into Groups.
-	secs = append(secs, form.Section{
+	secs = append(secs, sp.devToolsSection())
+	return secs
+}
+
+// devToolsSection is the "Development Tools" section pinned below the primary
+// configuration (General tab, and the legacy all-in-one page) so it never
+// intrudes on the main flow. Inside, related toggles cluster into Groups.
+func (sp *settingsPage) devToolsSection() form.Section {
+	return form.Section{
 		Title: "Development Tools",
 		Groups: []form.Group{
 			{Title: "Context Management", Fields: []form.Field{
@@ -149,8 +197,7 @@ func (sp *settingsPage) snapshotSections() []form.Section {
 			}},
 			{Title: "Watchdog", Fields: buildDevFields(sp.cfg)},
 		},
-	})
-	return secs
+	}
 }
 
 // SetStyles refreshes palette/styles and rebuilds the form in-place (called by

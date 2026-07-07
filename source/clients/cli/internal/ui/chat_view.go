@@ -786,7 +786,7 @@ func (c *chatView) SetEntries(entries []*Entry) {
 			}
 			block, rows := c.renderToolGroupBlock(entries[i:j], i)
 			for _, r := range rows {
-				c.arrowRows = append(c.arrowRows, arrowRow{line: nl + r.Line, entry: i + r.Entry, group: r.Group, rail: r.Rail, railCol: r.RailCol})
+				c.arrowRows = append(c.arrowRows, arrowRow{line: nl + r.Line, entry: i + r.Entry, group: r.Group, railMin: r.RailMin, railMax: r.RailMax})
 			}
 			b.WriteString(block)
 			nl += strings.Count(block, "\n")
@@ -865,14 +865,6 @@ func (c *chatView) renderToolGroupBlock(run []*Entry, startIdx int) (string, []t
 		opts.FocusedIdx = c.focusedToolIdx - startIdx
 	}
 	block, rows := renderToolGroupSpans(tools, textW, c.styles, c.md, opts)
-	// renderToolGroupSpans records RailCol relative to the group block; the
-	// block is about to be indented by pad, so shift rail columns to absolute
-	// so click hit-testing (localX) lines up with the rendered rail.
-	for k := range rows {
-		if rows[k].Rail {
-			rows[k].RailCol += entryIndent
-		}
-	}
 	return indentBlock(pad, block), rows
 }
 
@@ -1153,14 +1145,8 @@ func (c *chatView) MouseToggleFold(localX, localY int) bool {
 	if !c.MouseInText(localX, localY) {
 		return false
 	}
-	r, ok := c.arrowRowAt(c.vp.YOffset() + localY)
+	r, ok := c.arrowRowAt(c.vp.YOffset()+localY, localX)
 	if !ok {
-		return false
-	}
-	// Rail lines collapse only when the click lands in the left gutter (on the
-	// rail); a click on the body text to its right falls through so text
-	// selection still works there.
-	if r.rail && localX > r.railCol+1 {
 		return false
 	}
 	// A mouse interaction is not keyboard navigation: clear any focus caret so
@@ -1169,10 +1155,10 @@ func (c *chatView) MouseToggleFold(localX, localY int) bool {
 	// affordance.
 	c.focusedToolIdx = -1
 	if r.group {
-		// The summary header toggles the whole run collapsed ⇄ expanded.
+		// The summary header, or the outer group rail, collapses/expands the run.
 		c.toggleGroup(r.entry)
 	} else {
-		// A per-call line toggles just that entry's own body.
+		// A per-call arrow, or that entry's own rail, toggles just that call's body.
 		c.toggleEntryFold(r.entry)
 	}
 	return true
@@ -1213,19 +1199,34 @@ type arrowRow struct {
 	line    int
 	entry   int
 	group   bool
-	rail    bool
-	railCol int
+	railMin int
+	railMax int // > 0 → a rail row claiming [railMin, railMax); 0 → full-width toggle
 }
 
-// arrowRowAt returns the arrow row whose fold toggle occupies the given
-// absolute content line, and whether one was found. The map is recorded by
-// SetEntries as the layout is rendered, so it cannot drift from what's on
-// screen.
-func (c *chatView) arrowRowAt(line int) (arrowRow, bool) {
+// arrowRowAt returns the clickable row at (line, x). A bounded rail row
+// (railMax > 0) claims a click only within [railMin, railMax); a full-width
+// toggle row (railMax == 0) claims any x on its line. Rail rows take
+// precedence, so clicking a rail's gutter collapses even where a full-width
+// arrow also covers the line. Returns false when nothing claims the point (body
+// text to the right of the rails is left to text selection).
+func (c *chatView) arrowRowAt(line, x int) (arrowRow, bool) {
+	var full arrowRow
+	haveFull := false
 	for _, r := range c.arrowRows {
-		if r.line == line {
-			return r, true
+		if r.line != line {
+			continue
 		}
+		if r.railMax > 0 {
+			if x >= r.railMin && x < r.railMax {
+				return r, true
+			}
+		} else {
+			full = r
+			haveFull = true
+		}
+	}
+	if haveFull {
+		return full, true
 	}
 	return arrowRow{}, false
 }

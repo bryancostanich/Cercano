@@ -23,7 +23,10 @@ func (d *mainAgentDriver) Name() string { return "main agent" }
 // chatStreamMsg wraps one routed event plus the cmd that reads the NEXT event
 // off the stream. The host routes ev, then returns next to re-arm the loop —
 // the same shape as the old streamTickMsg+waitForStream pair, relocated here.
+// gen fences the event to the turn that produced it: a canceled turn's late
+// events must never be attributed to (or tear down) the turn that replaced it.
 type chatStreamMsg struct {
+	gen  int
 	ev   tea.Msg
 	next tea.Cmd
 }
@@ -31,8 +34,10 @@ type chatStreamMsg struct {
 // Submit opens StreamChat and returns (waitCmd, cancel, err). On success the
 // host stores cancel (so Esc aborts the turn) and issues waitCmd, which drains
 // one StreamMsg, maps it via streamMsgToEvent, and wraps it in a chatStreamMsg
-// carrying a re-arm of itself. Channel close → streamEndMsg{}.
-func (d *mainAgentDriver) Submit(ctx context.Context, input string, images []agentclient.InlineImage) (tea.Cmd, context.CancelFunc, error) {
+// carrying a re-arm of itself. Channel close → streamEndMsg{gen}. Every event
+// carries gen — the host's turn generation at submit time — so stale events
+// from a canceled turn are identifiable.
+func (d *mainAgentDriver) Submit(ctx context.Context, gen int, input string, images []agentclient.InlineImage) (tea.Cmd, context.CancelFunc, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	ch, err := d.agent.StreamChat(ctx, d.convID, input, d.workDir, images...)
 	if err != nil {
@@ -43,9 +48,9 @@ func (d *mainAgentDriver) Submit(ctx context.Context, input string, images []age
 	wait = func() tea.Msg {
 		sm, ok := <-ch
 		if !ok {
-			return streamEndMsg{}
+			return streamEndMsg{gen: gen}
 		}
-		return chatStreamMsg{ev: streamMsgToEvent(sm), next: wait}
+		return chatStreamMsg{gen: gen, ev: streamMsgToEvent(sm), next: wait}
 	}
 	return wait, cancel, nil
 }

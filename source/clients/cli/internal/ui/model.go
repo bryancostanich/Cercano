@@ -108,6 +108,14 @@ type Model struct {
 	// abort a running prompt. Nil when nothing is streaming. The driver returns
 	// it from Submit; the host stores it here.
 	cancelStream context.CancelFunc
+	// turnGen identifies the live turn. Bumped on every submit AND every
+	// cancel; stream events carry the gen they were born under, and events
+	// whose gen doesn't match are ghosts of a dead turn — drained, never
+	// applied. Without this, a canceled turn's late error/close events pass
+	// the m.streaming guard once the next turn starts, paint "context
+	// canceled" into the new transcript, and worst of all run the completion
+	// path that invokes m.cancelStream — the NEW turn's cancel func.
+	turnGen int
 
 	tokIn, tokOut  int
 	cumIn, cumOut  int
@@ -599,8 +607,10 @@ func fetchConfigCmd(ag *agentclient.Client) tea.Cmd {
 }
 
 // streamEndMsg signals the StreamChat channel closed (turn complete). Emitted
-// by the mainAgentDriver's drain cmd on channel close.
-type streamEndMsg struct{}
+// by the mainAgentDriver's drain cmd on channel close. gen identifies the turn
+// it belongs to — a canceled turn's late close must not run the completion
+// path for the turn that replaced it.
+type streamEndMsg struct{ gen int }
 
 // ctxUsageMsg carries the result of an asynchronous GetContextUsage call.
 type ctxUsageMsg struct {
@@ -1253,6 +1263,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case chatStreamMsg:
+		// Ghost events from a dead turn (canceled or superseded): never apply
+		// them, but keep draining the channel so its buffered leftovers flush
+		// through to the close.
+		if msg.gen != m.turnGen {
+			return m, msg.next
+		}
 		// Ignore late events from a stream we already canceled.
 		if !m.streaming {
 			return m, nil
@@ -1693,6 +1709,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case streamEndMsg:
+		// A dead turn's channel close is inert: running the completion path
+		// here would tear down the LIVE turn — including invoking
+		// m.cancelStream, which now belongs to it.
+		if msg.gen != m.turnGen {
+			return m, nil
+		}
 		m.streaming = false
 		m.chat.SetStreaming(false)
 		// Turn completed normally; the rehydration cache is stale.
@@ -1897,8 +1919,11 @@ func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model,
 
 	// Pass the effective workDir so the agent chdirs there and prepends its
 	// .cercano/context.md if present (/d pins this to the Cercano repo).
+	// New turn = new generation: stream events from any prior (canceled) turn
+	// become identifiable ghosts.
+	m.turnGen++
 	driver := &mainAgentDriver{agent: m.agent, convID: m.convID, workDir: m.effectiveWorkDir()}
-	cmd, cancel, err := driver.Submit(context.Background(), text, images)
+	cmd, cancel, err := driver.Submit(context.Background(), m.turnGen, text, images)
 	if err != nil {
 		m.errMsg = err.Error()
 		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "error: " + err.Error()})
@@ -1995,6 +2020,10 @@ func (m *Model) cancelCurrentStream() {
 		m.cancelStream()
 		m.cancelStream = nil
 	}
+	// Retire the turn's generation: its remaining in-flight events (the
+	// cancel error, the channel close) are ghosts from here on, even if the
+	// user submits a new prompt before they arrive.
+	m.turnGen++
 	m.streaming = false
 	m.chat.SetStreaming(false)
 	if e := m.chat.lastAssistantEntry(); e != nil {

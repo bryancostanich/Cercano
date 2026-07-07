@@ -199,8 +199,8 @@ func (c *Client) Close() error {
 // Config is the current runtime config reported by the agent.
 type Config struct {
 	OllamaURL             string
-	OpenRuntime          string
-	OpenModel            string
+	OpenRuntime           string
+	OpenModel             string
 	EmbeddingModel        string
 	CloudProvider         string
 	CloudModel            string
@@ -241,8 +241,8 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 	}
 	return &Config{
 		OllamaURL:              resp.GetOllamaUrl(),
-		OpenRuntime:           resp.GetOpenRuntime(),
-		OpenModel:             resp.GetOpenModel(),
+		OpenRuntime:            resp.GetOpenRuntime(),
+		OpenModel:              resp.GetOpenModel(),
 		EmbeddingModel:         resp.GetEmbeddingModel(),
 		CloudProvider:          resp.GetCloudProvider(),
 		CloudModel:             resp.GetCloudModel(),
@@ -271,13 +271,13 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 // are applied. Use SetCloudAPIKey to explicitly send an empty key when the
 // proxy handles auth.
 type ConfigUpdate struct {
-	OllamaURL             string
-	OpenRuntime          string
-	OpenModel            string
+	OllamaURL   string
+	OpenRuntime string
+	OpenModel   string
 	// OpenDefaultModel sets llama_server.default_model — the GGUF the managed
 	// runtime loads. Distinct from OpenModel so a GGUF pick never clobbers
 	// the user's ollama tag.
-	OpenDefaultModel     string
+	OpenDefaultModel      string
 	CloudProvider         string
 	CloudModel            string
 	CloudAPIKey           string
@@ -894,10 +894,10 @@ func (c *Client) StreamRuntimeLogs(ctx context.Context, tail int, source string)
 // zero / nil). Err is set if the stream itself failed and is the terminal
 // event on this channel.
 type AgentEvent struct {
-	Mode               string              // populated by PermissionModeChanged events
-	MeridianStatus     *MeridianStatus     // populated by MeridianStatusChanged events
+	Mode              string             // populated by PermissionModeChanged events
+	MeridianStatus    *MeridianStatus    // populated by MeridianStatusChanged events
 	OpenRuntimeStatus *OpenRuntimeStatus // populated by OpenRuntimeStatusChanged events
-	Err                error
+	Err               error
 }
 
 // MeridianStatus mirrors proto.MeridianStatus in the client SDK so callers
@@ -1261,9 +1261,9 @@ func (c *Client) InstallOpenRuntime(ctx context.Context, runtime string) (<-chan
 func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, error) {
 	resp, err := c.agent.UpdateConfig(ctx, &proto.UpdateConfigRequest{
 		OllamaUrl:              u.OllamaURL,
-		OpenRuntime:           u.OpenRuntime,
-		OpenModel:             u.OpenModel,
-		OpenDefaultModel:      u.OpenDefaultModel,
+		OpenRuntime:            u.OpenRuntime,
+		OpenModel:              u.OpenModel,
+		OpenDefaultModel:       u.OpenDefaultModel,
 		CloudProvider:          u.CloudProvider,
 		CloudModel:             u.CloudModel,
 		CloudApiKey:            u.CloudAPIKey,
@@ -1846,4 +1846,57 @@ func atoiOr(s string, def int) int {
 		return n
 	}
 	return def
+}
+
+// ChatGPTLoginMsg is one frame of the ChatGPT sign-in stream. The first
+// message carries VerificationURL + UserCode to display; the terminal message
+// has Done=true with Ok/Error and (on success) the created ProfileName and
+// AccountID. Err is set only on transport failure and is terminal.
+type ChatGPTLoginMsg struct {
+	VerificationURL string
+	UserCode        string
+	Done            bool
+	Ok              bool
+	Error           string
+	ProfileName     string
+	AccountID       string
+	Err             error
+}
+
+// StartChatGPTLogin opens the ChatGPT subscription sign-in stream and returns
+// a channel of frames. The caller shows the first frame's code + URL, then
+// waits for the terminal (Done) frame. Cancel ctx to abort the sign-in.
+func (c *Client) StartChatGPTLogin(ctx context.Context, profileName, model string, setActive bool) (<-chan ChatGPTLoginMsg, error) {
+	stream, err := c.agent.StartChatGPTLogin(ctx, &proto.StartChatGPTLoginRequest{
+		ProfileName: profileName,
+		Model:       model,
+		SetActive:   setActive,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan ChatGPTLoginMsg, 8)
+	go func() {
+		defer close(out)
+		for {
+			ev, err := stream.Recv()
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			if err != nil {
+				out <- ChatGPTLoginMsg{Err: err}
+				return
+			}
+			out <- ChatGPTLoginMsg{
+				VerificationURL: ev.GetVerificationUrl(),
+				UserCode:        ev.GetUserCode(),
+				Done:            ev.GetDone(),
+				Ok:              ev.GetOk(),
+				Error:           ev.GetError(),
+				ProfileName:     ev.GetProfileName(),
+				AccountID:       ev.GetAccountId(),
+			}
+		}
+	}()
+	return out, nil
 }

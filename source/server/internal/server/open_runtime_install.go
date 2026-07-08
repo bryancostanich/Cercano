@@ -48,21 +48,17 @@ func (s *Server) InstallOpenRuntime(req *proto.InstallOpenRuntimeRequest, stream
 
 	// Install succeeded — re-run detection so the freshly-installed binary
 	// (and any GGUFs the user already had in ~/.cercano/models) get picked
-	// up into currentConfig, then broadcast the ok=true status so the CLI
+	// up into the config, then broadcast the ok=true status so the CLI
 	// modal / chip settle into the "ready" state.
-	s.cfgMu.Lock()
-	cfgCopy := s.currentConfig
+	cfgCopy := s.cfgSvc.Get()
 	if err := llamaserver.Detect(ctx, &cfgCopy.LlamaServer); err != nil {
-		s.currentConfig = cfgCopy
-		s.cfgMu.Unlock()
+		// Write back the partial detect result so the status shows it.
+		s.cfgSvc.Set(cfgCopy)
 		s.broadcastOpenRuntimeStatus(buildOpenRuntimeStatusFromDetectError(cfgCopy, err))
 		return sendTerminalFrame(stream, false, fmt.Sprintf("install completed but detection still fails: %v", err))
 	}
-	s.currentConfig = cfgCopy
-	s.cfgMu.Unlock()
-	if s.configPath != "" {
-		_ = config.Save(cfgCopy, s.configPath)
-	}
+	s.cfgSvc.Set(cfgCopy)
+	s.cfgSvc.Persist()
 	s.broadcastOpenRuntimeStatus(buildOpenRuntimeStatus("llama_server", cfgCopy, nil))
 	return sendTerminalFrame(stream, true, "")
 }
@@ -89,9 +85,7 @@ func buildOpenRuntimeStatusFromDetectError(cfg config.Config, err error) *proto.
 // pushed by OpenRuntimeStatusChanged. Cheap (a couple filesystem checks)
 // so no caching — always fresh.
 func (s *Server) GetOpenRuntimeStatus(_ context.Context, req *proto.GetOpenRuntimeStatusRequest) (*proto.GetOpenRuntimeStatusResponse, error) {
-	s.cfgMu.RLock()
-	cfg := s.currentConfig
-	s.cfgMu.RUnlock()
+	cfg := s.cfgSvc.Get()
 	// Explicit request overrides the currently-selected runtime — the CLI's
 	// settings-page gate uses this to probe a runtime it's about to switch
 	// to. Empty falls back to what's currently active.

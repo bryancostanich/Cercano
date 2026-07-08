@@ -11,11 +11,9 @@ import (
 // copy-based migration, no stale mirror. Other tiers resolve strictly from
 // the models section; unconfigured means !ok and the caller decides.
 //
-// Callers must hold no cfgMu lock expectations — this takes the read lock.
+// Callers must hold no lock expectations — this reads a snapshot from cfgSvc.
 func (s *Server) resolveTierModel(t config.Tier, prefer config.Provider, strict bool) (string, config.Provider, bool) {
-	s.cfgMu.RLock()
-	mc := s.currentConfig.Models
-	s.cfgMu.RUnlock()
+	mc := s.cfgSvc.Get().Models
 
 	if t == config.TierEveryday {
 		if mc.Tiers.Everyday.Cloud == "" {

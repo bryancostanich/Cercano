@@ -409,7 +409,7 @@ func TestUpdateConfig_WatchdogEnable(t *testing.T) {
 	if !resp.Success {
 		t.Fatalf("expected success, got: %s", resp.Message)
 	}
-	if !srv.currentConfig.Watchdog.Enabled {
+	if !srv.cfgSvc.Get().Watchdog.Enabled {
 		t.Fatal("Enabled not applied")
 	}
 	if srv.watchdog == nil {
@@ -420,7 +420,7 @@ func TestUpdateConfig_WatchdogEnable(t *testing.T) {
 	if _, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{WatchdogEnabled: "false"}); err != nil {
 		t.Fatal(err)
 	}
-	if srv.currentConfig.Watchdog.Enabled {
+	if srv.cfgSvc.Get().Watchdog.Enabled {
 		t.Fatal("Enabled not cleared")
 	}
 	if srv.watchdog != nil {
@@ -435,7 +435,7 @@ func TestUpdateConfig_WatchdogEcho_and_GetConfig(t *testing.T) {
 	if _, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{WatchdogEcho: "true"}); err != nil {
 		t.Fatal(err)
 	}
-	if !srv.currentConfig.Watchdog.Echo {
+	if !srv.cfgSvc.Get().Watchdog.Echo {
 		t.Fatal("Echo not applied")
 	}
 
@@ -493,7 +493,7 @@ func TestUpdateConfig_WatchdogModeChecksEscalate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := srv.currentConfig.Watchdog
+	w := srv.cfgSvc.Get().Watchdog
 	if w.Mode != "strict" {
 		t.Fatalf("mode=%q", w.Mode)
 	}
@@ -508,16 +508,16 @@ func TestUpdateConfig_WatchdogModeChecksEscalate(t *testing.T) {
 	if _, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{WatchdogChecks: "-"}); err != nil {
 		t.Fatal(err)
 	}
-	if len(srv.currentConfig.Watchdog.Checks) != 0 {
-		t.Fatalf("expected empty checks, got %v", srv.currentConfig.Watchdog.Checks)
+	if len(srv.cfgSvc.Get().Watchdog.Checks) != 0 {
+		t.Fatalf("expected empty checks, got %v", srv.cfgSvc.Get().Watchdog.Checks)
 	}
 
 	// invalid escalate ignored
-	before := srv.currentConfig.Watchdog.EscalateAfter
+	before := srv.cfgSvc.Get().Watchdog.EscalateAfter
 	if _, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{WatchdogEscalateAfter: "nope"}); err != nil {
 		t.Fatal(err)
 	}
-	if srv.currentConfig.Watchdog.EscalateAfter != before {
+	if srv.cfgSvc.Get().Watchdog.EscalateAfter != before {
 		t.Fatal("invalid escalate must be ignored")
 	}
 
@@ -525,8 +525,8 @@ func TestUpdateConfig_WatchdogModeChecksEscalate(t *testing.T) {
 	if _, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{WatchdogMode: "permissive"}); err != nil {
 		t.Fatal(err)
 	}
-	if srv.currentConfig.Watchdog.Mode != "strict" {
-		t.Fatalf("invalid mode must be ignored, got %q", srv.currentConfig.Watchdog.Mode)
+	if srv.cfgSvc.Get().Watchdog.Mode != "strict" {
+		t.Fatalf("invalid mode must be ignored, got %q", srv.cfgSvc.Get().Watchdog.Mode)
 	}
 
 	// GetConfig reports them

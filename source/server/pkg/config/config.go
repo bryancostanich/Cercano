@@ -456,6 +456,39 @@ func applyEnvOverrides(cfg *Config) {
 	}
 }
 
+// Clone returns a deep copy of c. Every reference-type field (slices inside
+// CloudProfiles, LlamaServer, and Watchdog) is independently allocated so that
+// mutations to the original or the clone cannot race through a shared backing
+// array.
+func (c Config) Clone() Config {
+	out := c // copy all scalar and nested-struct fields
+
+	// CloudProfiles: independent slice + elements are all-scalar structs, so a
+	// slice copy suffices.
+	if c.CloudProfiles != nil {
+		out.CloudProfiles = make([]CloudProfile, len(c.CloudProfiles))
+		copy(out.CloudProfiles, c.CloudProfiles)
+	}
+
+	// LlamaServer contains two slices.
+	if c.LlamaServer.ModelDirs != nil {
+		out.LlamaServer.ModelDirs = make([]string, len(c.LlamaServer.ModelDirs))
+		copy(out.LlamaServer.ModelDirs, c.LlamaServer.ModelDirs)
+	}
+	if c.LlamaServer.ExtraArgs != nil {
+		out.LlamaServer.ExtraArgs = make([]string, len(c.LlamaServer.ExtraArgs))
+		copy(out.LlamaServer.ExtraArgs, c.LlamaServer.ExtraArgs)
+	}
+
+	// Watchdog.Checks is a []string.
+	if c.Watchdog.Checks != nil {
+		out.Watchdog.Checks = make([]string, len(c.Watchdog.Checks))
+		copy(out.Watchdog.Checks, c.Watchdog.Checks)
+	}
+
+	return out
+}
+
 // VenvDir returns the path to Cercano's Python venv (~/.config/cercano/venv/).
 func VenvDir() string {
 	home, err := os.UserHomeDir()

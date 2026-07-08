@@ -18,8 +18,10 @@ import (
 // and must not resolve (local-model-taxonomy design).
 func TestResolveTierModel_EverydayCloudFallsThrough_OpenIsTierOnly(t *testing.T) {
 	s, _ := newTestServer()
-	s.currentConfig.OpenModel = "qwen3-coder" // retired field: must be IGNORED
-	s.currentConfig.ActiveCloudProfile = "messages-one"
+	s.cfgSvc.Mutate(func(c *config.Config) {
+		c.OpenModel = "qwen3-coder" // retired field: must be IGNORED
+		c.ActiveCloudProfile = "messages-one"
+	})
 
 	id, prov, ok := s.resolveTierModel(config.TierEveryday, config.ProviderCloud, false)
 	if !ok || prov != config.ProviderCloud {
@@ -37,7 +39,7 @@ func TestResolveTierModel_EverydayCloudFallsThrough_OpenIsTierOnly(t *testing.T)
 	}
 
 	// An explicitly configured everyday slot resolves.
-	s.currentConfig.Models.Tiers.Everyday.Open = "qwen3-coder-next"
+	s.cfgSvc.Mutate(func(c *config.Config) { c.Models.Tiers.Everyday.Open = "qwen3-coder-next" })
 	id, _, ok = s.resolveTierModel(config.TierEveryday, config.ProviderOpen, false)
 	if !ok || id != "qwen3-coder-next" {
 		t.Errorf("explicit everyday open = (%q,%v), want qwen3-coder-next", id, ok)
@@ -50,7 +52,7 @@ func TestResolveTierModel_EverydayCloudFallsThrough_OpenIsTierOnly(t *testing.T)
 // coder model as its "fast" lane.
 func TestResolveTierModel_OtherTiersNoImplicitFallback(t *testing.T) {
 	s, _ := newTestServer()
-	s.currentConfig.OpenModel = "qwen3-coder"
+	s.cfgSvc.Mutate(func(c *config.Config) { c.OpenModel = "qwen3-coder" })
 
 	if id, _, ok := s.resolveTierModel(config.TierFastLightText, config.ProviderOpen, true); ok {
 		t.Errorf("unconfigured fast_light_text must be !ok, got %q", id)
@@ -89,7 +91,7 @@ func TestWatchdogModelFor(t *testing.T) {
 func TestUpdateConfig_ModelTier(t *testing.T) {
 	s, _ := newTestServer()
 	s.events = newEventHub()
-	s.currentConfig.Watchdog.Enabled = true
+	s.cfgSvc.Mutate(func(c *config.Config) { c.Watchdog.Enabled = true })
 	s.watchdog = s.buildWatchdog()
 	oldWatchdog := s.watchdog
 	ch, unsub := s.events.subscribe()
@@ -101,7 +103,7 @@ func TestUpdateConfig_ModelTier(t *testing.T) {
 	if err != nil || !resp.Success {
 		t.Fatalf("UpdateConfig: err=%v resp=%+v", err, resp)
 	}
-	if got := s.currentConfig.Models.Tiers.FastLightText.Open; got != "phi4:14b" {
+	if got := s.cfgSvc.Get().Models.Tiers.FastLightText.Open; got != "phi4:14b" {
 		t.Errorf("tier slot = %q, want phi4:14b", got)
 	}
 	if s.watchdog == oldWatchdog {
@@ -150,8 +152,10 @@ func TestUpdateConfig_ModelTierInvalid(t *testing.T) {
 // live config reads (no startup capture).
 func TestDispatchModelFor(t *testing.T) {
 	s, _ := newTestServer()
-	s.currentConfig.Models.Tiers.FastLightText.Open = "phi4:14b"
-	s.currentConfig.Models.Tiers.Everyday.Open = "qwen3-coder-next"
+	s.cfgSvc.Mutate(func(c *config.Config) {
+		c.Models.Tiers.FastLightText.Open = "phi4:14b"
+		c.Models.Tiers.Everyday.Open = "qwen3-coder-next"
+	})
 
 	if got := s.DispatchModelFor(false, config.TierFastLightText); got != "phi4:14b" {
 		t.Errorf("fast_light_text open = %q, want phi4:14b", got)
@@ -161,7 +165,7 @@ func TestDispatchModelFor(t *testing.T) {
 		t.Errorf("empty fast_light open = %q, want everyday fall-through qwen3-coder-next", got)
 	}
 	// Live read: a runtime tier change is honored immediately.
-	s.currentConfig.Models.Tiers.FastLightText.Open = "phi4-mini"
+	s.cfgSvc.Mutate(func(c *config.Config) { c.Models.Tiers.FastLightText.Open = "phi4-mini" })
 	if got := s.DispatchModelFor(false, config.TierFastLightText); got != "phi4-mini" {
 		t.Errorf("live read = %q, want phi4-mini", got)
 	}

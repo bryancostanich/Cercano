@@ -23,6 +23,7 @@ import (
 	"cercano/source/server/internal/chatgptauth"
 	"cercano/source/server/internal/cloudfactory"
 	"cercano/source/server/internal/hostsvc/permissions"
+	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/compactiongen"
 	"cercano/source/server/internal/compactor"
@@ -78,8 +79,7 @@ type Server struct {
 	cloudFactory        agent.CloudFactory
 	registry            *engine.EngineRegistry
 	healthMonitorCancel context.CancelFunc // cancel function for the active health monitor
-	configPath          string             // path to config.yaml for persistence
-	currentConfig       config.Config      // current config state for persistence
+	cfgSvc              cfgsvc.Service     // owns configPath, currentConfig, cfgMu, secrets
 	toolRegistry        *agenttools.Registry
 	capRegistry         *capabilities.Registry
 	permBroker          permissions.Broker
@@ -88,7 +88,6 @@ type Server struct {
 	cloudLLMProvider    llm.Provider
 	openLLMProvider     llm.Provider                     // native-tool-loop local provider (Ollama or llama-server)
 	openProviderFactory func(config.Config) llm.Provider // rebuilds openLLMProvider on runtime change
-	secrets             secrets.Store
 	runtimeManager      localruntime.Manager
 	// catalogManager (optional) surfaces Ollama's public library as an
 	// online model catalog. Nil = no online catalog (dashboard just
@@ -101,8 +100,7 @@ type Server struct {
 	watchdog         *watchdog.Watchdog // protocol-supervision gate; nil = disabled (default)
 	usageSink        func(usage.Usage)  // wraps the main-loop provider for token recording
 
-	events *eventHub    // server->client push fan-out (SubscribeEvents)
-	cfgMu  sync.RWMutex // guards all access to currentConfig
+	events *eventHub // server->client push fan-out (SubscribeEvents)
 
 	// activeTurns enforces one live turn per conversation. A new turn on a
 	// conversation that already has one supersedes it: the prior turn's ctx is
@@ -210,10 +208,11 @@ func (s *Server) ToolRegistry() *agenttools.Registry { return s.toolRegistry }
 // SetCloudLLMProvider / SetOpenLLMProvider / SetContextLoader so that
 // Services carries live runtime values.
 func (s *Server) InstallCapabilities() {
+	cfgSnapshot := s.cfgSvc.Get()
 	capReg := capabilities.NewRegistry(capabilities.Services{
 		CloudProvider: s.cloudLLMProvider,
 		OpenProvider:  s.openLLMProvider,
-		Config:        &s.currentConfig,
+		Config:        &cfgSnapshot,
 		ProjectCtx:    s.contextLoader,
 		// Engine/Conversations wired in a later phase; nil-safe until then.
 		Dispatch: func(ctx context.Context, spec dispatch.Spec) (dispatch.Result, error) {
@@ -327,7 +326,7 @@ func (s *Server) OpenLLMProvider() llm.Provider  { return s.openLLMProvider }
 func (s *Server) SetUsageSink(fn func(usage.Usage)) { s.usageSink = fn }
 
 // SetSecrets attaches the secrets store used to retrieve profile API keys.
-func (s *Server) SetSecrets(st secrets.Store) { s.secrets = st }
+func (s *Server) SetSecrets(st secrets.Store) { s.cfgSvc.SetSecrets(st) }
 
 // SetupMeridian constructs the local Meridian proxy manager and wires its
 // status listener to the event hub so MeridianStatusChanged is broadcast on
@@ -358,28 +357,17 @@ func (s *Server) Shutdown() {
 // authoritative request-time value. Falls back to the legacy CloudModel
 // field only when no active profile exists (e.g. local-only configs). All
 // code that asks "what cloud model are we using right now?" should go
-// through this, not currentConfig.CloudModel directly.
+// through cfgSvc.ActiveProfile(), not currentConfig.CloudModel directly.
 func (s *Server) activeCloudModel() string {
-	s.cfgMu.RLock()
-	defer s.cfgMu.RUnlock()
-	for _, p := range s.currentConfig.CloudProfiles {
-		if p.Name == s.currentConfig.ActiveCloudProfile {
-			return p.Model
-		}
+	if p, ok := s.cfgSvc.ActiveProfile(); ok {
+		return p.Model
 	}
-	return s.currentConfig.CloudModel
+	return s.cfgSvc.Get().CloudModel
 }
 
 // activeProfile returns the configured active cloud profile, or false if none.
 func (s *Server) activeProfile() (config.CloudProfile, bool) {
-	s.cfgMu.RLock()
-	defer s.cfgMu.RUnlock()
-	for _, p := range s.currentConfig.CloudProfiles {
-		if p.Name == s.currentConfig.ActiveCloudProfile {
-			return p, true
-		}
-	}
-	return config.CloudProfile{}, false
+	return s.cfgSvc.ActiveProfile()
 }
 
 // profileByName looks up a profile by name.
@@ -392,14 +380,8 @@ func profileByName(profiles []config.CloudProfile, name string) (config.CloudPro
 	return config.CloudProfile{}, false
 }
 
-// persistConfig saves the current config to disk if a configPath is set.
-func (s *Server) persistConfig() {
-	if s.configPath != "" {
-		s.cfgMu.RLock()
-		defer s.cfgMu.RUnlock()
-		_ = config.Save(s.currentConfig, s.configPath)
-	}
-}
+// persistConfig saves the current config to disk if a path is set.
+func (s *Server) persistConfig() { s.cfgSvc.Persist() }
 
 // installAbsentCloud clears the native cloud provider and points both the
 // router and the coordinator's CloudModel at the absent sentinel, so a failed
@@ -419,22 +401,26 @@ func (s *Server) installAbsentCloud(reason string) {
 // native cloud provider and installs the absent-cloud sentinel — the agent keeps
 // running with cloud absent.
 //
-// Thin lock wrapper around rebuildCloudLocked. UpdateConfig (which already
-// holds cfgMu write lock) calls the Locked variant directly to avoid a
-// re-entrance deadlock.
+// After the config-service extraction, rebuildCloud no longer holds cfgMu — it
+// reads a snapshot from cfgSvc. The split between config mutation and provider
+// reconfiguration is now sequential (config updates first via cfgSvc, then
+// rebuildCloud). A concurrent reader can momentarily observe new config with old
+// provider wiring; this window is the documented trade-off of the extraction.
 func (s *Server) rebuildCloud() error {
-	s.cfgMu.Lock()
-	defer s.cfgMu.Unlock()
 	return s.rebuildCloudLocked()
 }
 
-// rebuildCloudLocked is rebuildCloud's body. Caller MUST hold cfgMu write
-// lock. Reads ActiveCloudProfile + CloudProfiles, writes CloudModel mirror.
+// rebuildCloudLocked is rebuildCloud's body. Lock-free: reads config via
+// cfgSvc.Get() snapshot; writes the CloudModel mirror via cfgSvc.SetCloudModel().
+// The name retains "Locked" for call-site compatibility (callers in UpdateConfig
+// that previously relied on cfgMu already being held now call the same method
+// without a separate lock — the cfgSvc handles its own internal locking).
 func (s *Server) rebuildCloudLocked() error {
+	cfg := s.cfgSvc.Get()
 	var p config.CloudProfile
 	found := false
-	for _, pp := range s.currentConfig.CloudProfiles {
-		if pp.Name == s.currentConfig.ActiveCloudProfile {
+	for _, pp := range cfg.CloudProfiles {
+		if pp.Name == cfg.ActiveCloudProfile {
 			p = pp
 			found = true
 			break
@@ -444,9 +430,10 @@ func (s *Server) rebuildCloudLocked() error {
 		s.installAbsentCloud("no active cloud profile")
 		return fmt.Errorf("no active cloud profile")
 	}
+	st := s.cfgSvc.Secrets()
 	key := ""
-	if s.secrets != nil {
-		if k, err := s.secrets.Get(p.Name); err == nil {
+	if st != nil {
+		if k, err := st.Get(p.Name); err == nil {
 			key = k
 		}
 	}
@@ -464,7 +451,7 @@ func (s *Server) rebuildCloudLocked() error {
 		// ChatGPT subscription: authenticate via a refreshing token source over
 		// the keychain (the profile's key slot holds the token JSON), not a
 		// static API key.
-		cloudOpts.TokenSource = chatgptauth.NewSource(s.secrets, p.Name, chatgptauth.Flow{})
+		cloudOpts.TokenSource = chatgptauth.NewSource(st, p.Name, chatgptauth.Flow{})
 	}
 	prov, err := cloudfactory.BuildCloudProvider(p, key, cloudOpts)
 	if err != nil {
@@ -474,15 +461,15 @@ func (s *Server) rebuildCloudLocked() error {
 	// A configured backup profile wraps the primary in a fallback composite;
 	// everything downstream (native loop, router, coordinator) sees one
 	// provider. A missing/unbuildable backup leaves the primary bare.
-	prov = s.wrapBackupLocked(prov, p.Name)
+	prov = s.wrapBackupLocked(prov, p.Name, cfg)
 	s.SetCloudLLMProvider(prov)
 	mp := agent.NewLLMModelProvider(prov, p.Model)
 	s.router.SetCloudProvider(mp)
 	if s.coordinator != nil {
 		s.coordinator.SetCloudProvider(mp)
 	}
-	s.currentConfig.CloudModel = p.Model // keep CloudModel reporting consistent
-	s.syncMeridianForProfile(p)
+	s.cfgSvc.SetCloudModel(p.Model) // keep CloudModel reporting consistent
+	s.syncMeridianForProfile(p, cfg)
 	return nil
 }
 
@@ -492,16 +479,16 @@ func (s *Server) rebuildCloudLocked() error {
 // the cloud route expects.
 //
 // No-op when SetupMeridian was never called (tests / minimal embeddings).
-func (s *Server) syncMeridianForProfile(p config.CloudProfile) {
+// cfg is the config snapshot already held by the caller (avoids a second Get()).
+func (s *Server) syncMeridianForProfile(p config.CloudProfile, cfg config.Config) {
 	if s.meridianMgr == nil {
 		return
 	}
 	// The proxy must run when EITHER the active or the backup profile routes
-	// through Meridian — the backup dials it mid-failover, long after this
-	// sync. (Production caller rebuildCloudLocked holds cfgMu.)
+	// through Meridian — the backup dials it mid-failover, long after this sync.
 	m := p
 	if m.Route != "meridian" {
-		if bp, ok := profileByName(s.currentConfig.CloudProfiles, s.currentConfig.BackupCloudProfile); ok && bp.Route == "meridian" {
+		if bp, ok := profileByName(cfg.CloudProfiles, cfg.BackupCloudProfile); ok && bp.Route == "meridian" {
 			m = bp
 		}
 	}
@@ -544,17 +531,16 @@ func (s *Server) GetCloudProfiles(ctx context.Context, req *proto.GetCloudProfil
 	// list) instead of reading each secret, which on macOS raises a Keychain
 	// authorization prompt. Browsing the Cloud settings tab must never prompt.
 	keyNamesForPresence := map[string]bool{}
-	if s.secrets != nil {
-		if names, err := s.secrets.List(); err == nil {
+	if st := s.cfgSvc.Secrets(); st != nil {
+		if names, err := st.List(); err == nil {
 			for _, n := range names {
 				keyNamesForPresence[n] = true
 			}
 		}
 	}
-	s.cfgMu.RLock()
-	active := s.currentConfig.ActiveCloudProfile
-	profiles := append([]config.CloudProfile(nil), s.currentConfig.CloudProfiles...)
-	s.cfgMu.RUnlock()
+	cfg := s.cfgSvc.Get()
+	active := cfg.ActiveCloudProfile
+	profiles := cfg.CloudProfiles
 
 	out := &proto.GetCloudProfilesResponse{Active: active}
 	for _, p := range profiles {
@@ -584,13 +570,9 @@ func (s *Server) SetActiveCloudProfile(ctx context.Context, req *proto.SetActive
 	defer func() {
 		log.Printf("[cloud] SetActiveCloudProfile(%q) took %v", req.GetName(), time.Since(start).Round(time.Millisecond))
 	}()
-	s.cfgMu.Lock()
-	if _, ok := profileByName(s.currentConfig.CloudProfiles, req.GetName()); !ok {
-		s.cfgMu.Unlock()
+	if !s.cfgSvc.SetActiveProfile(req.GetName()) {
 		return &proto.SetActiveCloudProfileResponse{Ok: false, Error: fmt.Sprintf("no profile %q", req.GetName())}, nil
 	}
-	s.currentConfig.ActiveCloudProfile = req.GetName()
-	s.cfgMu.Unlock()
 	if err := s.rebuildCloud(); err != nil {
 		// active is set, but the provider couldn't be built — report it, keep going.
 		s.persistConfig()
@@ -602,17 +584,15 @@ func (s *Server) SetActiveCloudProfile(ctx context.Context, req *proto.SetActive
 
 // SetCloudProfileKey implements proto.AgentServer — stores an API key for a profile.
 func (s *Server) SetCloudProfileKey(ctx context.Context, req *proto.SetCloudProfileKeyRequest) (*proto.SetCloudProfileKeyResponse, error) {
-	if s.secrets == nil {
+	st := s.cfgSvc.Secrets()
+	if st == nil {
 		return &proto.SetCloudProfileKeyResponse{Ok: false, Error: "keychain unavailable"}, nil
 	}
-	s.cfgMu.RLock()
-	_, ok := profileByName(s.currentConfig.CloudProfiles, req.GetName())
-	isActive := req.GetName() == s.currentConfig.ActiveCloudProfile
-	s.cfgMu.RUnlock()
-	if !ok {
+	exists, isActive := s.cfgSvc.ProfileInfo(req.GetName())
+	if !exists {
 		return &proto.SetCloudProfileKeyResponse{Ok: false, Error: fmt.Sprintf("no profile %q", req.GetName())}, nil
 	}
-	if err := s.secrets.Set(req.GetName(), req.GetApiKey()); err != nil {
+	if err := st.Set(req.GetName(), req.GetApiKey()); err != nil {
 		return &proto.SetCloudProfileKeyResponse{Ok: false, Error: err.Error()}, nil
 	}
 	// If the key belongs to the active profile, rebuild so it takes effect now.
@@ -650,32 +630,25 @@ func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudP
 		Name: name, Flavor: req.GetFlavor(), Backend: req.GetBackend(),
 		BaseURL: req.GetBaseUrl(), Model: req.GetModel(), Route: req.GetRoute(),
 	}
-	s.cfgMu.Lock()
-	replaced := false
-	for i, p := range s.currentConfig.CloudProfiles {
-		if p.Name == name {
-			// An empty route means "unspecified": keep the existing profile's
-			// route so metadata edits from clients that don't know about routes
-			// can't silently demote a meridian profile to direct.
-			if np.Route == "" {
-				np.Route = p.Route
+	// Preserve existing route/model when the request omits them (partial-metadata upsert).
+	// We need to read first, then upsert with merged values.
+	if existing, existsAlready := s.cfgSvc.ProfileInfo(name); existing {
+		// Fetch the existing profile to preserve its route/model if not provided.
+		cfg := s.cfgSvc.Get()
+		for _, p := range cfg.CloudProfiles {
+			if p.Name == name {
+				if np.Route == "" {
+					np.Route = p.Route
+				}
+				if np.Model == "" {
+					np.Model = p.Model
+				}
+				break
 			}
-			// Same for the model: partial-metadata upserts (the wizard's
-			// meridian/key commits) must not strip the request-time model
-			// off a profile that already has one.
-			if np.Model == "" {
-				np.Model = p.Model
-			}
-			s.currentConfig.CloudProfiles[i] = np
-			replaced = true
-			break
 		}
+		_ = existsAlready // used below via cfgSvc.UpsertProfile return
 	}
-	if !replaced {
-		s.currentConfig.CloudProfiles = append(s.currentConfig.CloudProfiles, np)
-	}
-	isActive := name == s.currentConfig.ActiveCloudProfile
-	s.cfgMu.Unlock()
+	_, isActive := s.cfgSvc.UpsertProfile(np)
 	// If this is the active profile, rebuild so metadata changes take effect
 	// now, and broadcast the model so client chrome (header chip) updates live.
 	if isActive {
@@ -694,26 +667,13 @@ func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudP
 // keychain key. Clears the active profile (→ absent cloud) if it was active.
 func (s *Server) RemoveCloudProfile(ctx context.Context, req *proto.RemoveCloudProfileRequest) (*proto.RemoveCloudProfileResponse, error) {
 	name := req.GetName()
-	s.cfgMu.Lock()
-	if _, ok := profileByName(s.currentConfig.CloudProfiles, name); !ok {
-		s.cfgMu.Unlock()
+	existed, wasActive := s.cfgSvc.RemoveProfile(name)
+	if !existed {
 		return &proto.RemoveCloudProfileResponse{Ok: false, Error: fmt.Sprintf("no profile %q", name)}, nil
 	}
-	kept := s.currentConfig.CloudProfiles[:0]
-	for _, p := range s.currentConfig.CloudProfiles {
-		if p.Name != name {
-			kept = append(kept, p)
-		}
-	}
-	s.currentConfig.CloudProfiles = kept
-	wasActive := s.currentConfig.ActiveCloudProfile == name
-	if wasActive {
-		s.currentConfig.ActiveCloudProfile = ""
-	}
-	s.cfgMu.Unlock()
 
-	if s.secrets != nil {
-		_ = s.secrets.Delete(name) // best-effort; missing key is not an error
+	if st := s.cfgSvc.Secrets(); st != nil {
+		_ = st.Delete(name) // best-effort; missing key is not an error
 	}
 	if wasActive {
 		s.installAbsentCloud("active cloud profile removed")
@@ -727,9 +687,7 @@ func (s *Server) RemoveCloudProfile(ctx context.Context, req *proto.RemoveCloudP
 // this is a fallback (preferred tier unavailable), or an error when the mode
 // forbids crossing and the required tier has no provider wired.
 func (s *Server) resolveMainProvider() (llm.Provider, bool, bool, error) {
-	s.cfgMu.RLock()
-	locusMode := s.currentConfig.LocusMode
-	s.cfgMu.RUnlock()
+	locusMode := s.cfgSvc.Get().LocusMode
 	mode, _ := locus.ParseMode(locusMode)
 	sel, err := dispatch.Select(mode, dispatch.RoleMain, dispatch.Providers{
 		Cloud: s.cloudLLMProvider,
@@ -778,36 +736,36 @@ func NewServer(a *agent.Agent, openProvider *legacymodels.OpenModelProvider, rou
 		cloudFactory: cloudFactory,
 		registry:     registry,
 		events:       newEventHub(),
+		cfgSvc:       cfgsvc.New("", config.Config{}, nil),
 	}
 }
 
 // SetConfigPersistence enables config persistence by storing the config path and current state.
 func (s *Server) SetConfigPersistence(path string, cfg config.Config) {
-	s.configPath = path
-	s.cfgMu.Lock()
-	s.currentConfig = cfg
-	s.cfgMu.Unlock()
+	s.cfgSvc.SetPath(path)
+	s.cfgSvc.Set(cfg)
 	s.refreshRuntimeEndpoints()
 }
 
 // LocusMode returns the currently configured Locus Mode (live; reflects
 // UpdateConfig). Used by the agent for co-processor tier resolution.
 func (s *Server) LocusMode() string {
-	s.cfgMu.RLock()
-	defer s.cfgMu.RUnlock()
-	return s.currentConfig.LocusMode
+	return s.cfgSvc.Get().LocusMode
 }
 
 // UpdateConfig implements proto.AgentServer — updates runtime config without restart.
+//
+// Split: the config service owns parse→validate→mutate→persist; the
+// provider/runtime-facing block (health-monitor restart, openProvider.SetEngine,
+// openProviderFactory) stays on the front door and runs AFTER cfgSvc is
+// updated. Config mutation and provider reconfiguration are now sequential
+// (previously atomic under one cfgMu span) — a concurrent reader can momentarily
+// observe new config with old provider wiring (documented trade-off).
 func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigRequest) (*proto.UpdateConfigResponse, error) {
-	// UpdateConfig calls NO cfgMu-locking method (it mutates/reads currentConfig
-	// fields directly, calls registry/provider/coordinator methods, broadcasts,
-	// applyRuntimeEndpoints, and config.Save — none of which take cfgMu), so the
-	// whole body can hold the write lock without risk of a nested-lock deadlock.
-	// Config updates are rare, so holding the lock across the registry/provider
-	// calls is acceptable.
-	s.cfgMu.Lock()
-	defer s.cfgMu.Unlock()
+	// Take a snapshot to work from. Mutations accumulate into this local copy,
+	// then cfgSvc.Set(c) commits everything atomically at the end. This keeps
+	// each individual step free of cfgMu (cfgSvc's internal lock is fine-grained).
+	c := s.cfgSvc.Get()
 
 	var changes []string
 
@@ -819,28 +777,27 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 				Message: fmt.Sprintf("invalid ollama_url %q: must be a valid http:// or https:// URL", req.OllamaUrl),
 			}, nil
 		}
-		// Stop any existing health monitor before switching URLs
+		// Provider block: stop any existing health monitor before switching URLs.
 		if s.healthMonitorCancel != nil {
 			s.healthMonitorCancel()
 		}
-
 		if s.registry != nil {
 			if eng, err := s.registry.GetEngine("ollama"); err == nil {
 				if confEng, ok := eng.(engine.ConfigurableEngine); ok {
 					confEng.SetBaseURL(req.OllamaUrl)
-					// Start health monitor for the new remote endpoint
+					// Start health monitor for the new remote endpoint.
 					monitorCtx, cancel := context.WithCancel(context.Background())
 					s.healthMonitorCancel = cancel
 					confEng.StartHealthMonitor(monitorCtx, 30*time.Second, 3)
 				}
 			}
 		}
-
 		changes = append(changes, fmt.Sprintf("ollama_url=%s", req.OllamaUrl))
 		fmt.Printf("UpdateConfig: Ollama URL set to %s (health monitor started)\n", req.OllamaUrl)
 	}
 
 	if req.OpenModel != "" {
+		// Provider block: direct provider mutation.
 		s.openProvider.SetModelName(req.OpenModel)
 		changes = append(changes, fmt.Sprintf("local_model=%s", req.OpenModel))
 		fmt.Printf("UpdateConfig: Local model set to %s\n", req.OpenModel)
@@ -849,9 +806,8 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	if req.OpenDefaultModel != "" {
 		// Applied before the open_runtime switch below so a request carrying
 		// both resolves an ambiguous-model detection in one round trip —
-		// detection and the engine-model pick both read
-		// currentConfig.LlamaServer.DefaultModel.
-		s.currentConfig.LlamaServer.DefaultModel = req.OpenDefaultModel
+		// detection and the engine-model pick both read LlamaServer.DefaultModel.
+		c.LlamaServer.DefaultModel = req.OpenDefaultModel
 		changes = append(changes, fmt.Sprintf("open_default_model=%s", req.OpenDefaultModel))
 		fmt.Printf("UpdateConfig: llama-server default model set to %s\n", req.OpenDefaultModel)
 	}
@@ -885,27 +841,28 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		// the CLI can offer the install/model-picker flow.
 		var detectErr *llamaserver.DetectError
 		if req.OpenRuntime == "llama_server" {
-			if err := llamaserver.Detect(ctx, &s.currentConfig.LlamaServer); err != nil {
+			if err := llamaserver.Detect(ctx, &c.LlamaServer); err != nil {
 				if de, ok := err.(*llamaserver.DetectError); ok {
 					detectErr = de
 				}
 				fmt.Printf("UpdateConfig: llama-server detection: %v\n", err)
 			} else {
 				fmt.Printf("UpdateConfig: llama-server auto-configured — binary=%s default_model=%s\n",
-					s.currentConfig.LlamaServer.Binary, s.currentConfig.LlamaServer.DefaultModel)
+					c.LlamaServer.Binary, c.LlamaServer.DefaultModel)
 			}
 		}
 		model := req.OpenModel
 		if model == "" && req.OpenRuntime == "llama_server" {
-			model = s.currentConfig.LlamaServer.DefaultModel
+			model = c.LlamaServer.DefaultModel
 		}
 		if model == "" {
-			model = s.currentConfig.OpenChatModel()
+			model = c.OpenChatModel()
 		}
+		// Provider block: wire the engine.
 		s.openProvider.SetEngine(eng, model)
 		changes = append(changes, fmt.Sprintf("local_runtime=%s", req.OpenRuntime))
 		fmt.Printf("UpdateConfig: Local runtime set to %s\n", req.OpenRuntime)
-		s.broadcastOpenRuntimeStatus(buildOpenRuntimeStatus(req.OpenRuntime, s.currentConfig, detectErr))
+		s.broadcastOpenRuntimeStatus(buildOpenRuntimeStatus(req.OpenRuntime, c, detectErr))
 	}
 
 	if req.LocusMode != "" {
@@ -924,7 +881,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 				Message: fmt.Sprintf("invalid elide_tool_results %q: expected \"true\" or \"false\"", req.ElideToolResults),
 			}, nil
 		}
-		s.currentConfig.Compaction.ElideToolResults = v == "true"
+		c.Compaction.ElideToolResults = v == "true"
 		changes = append(changes, fmt.Sprintf("elide_tool_results=%s", v))
 		s.broadcastConfigChanged("elide_tool_results", v)
 		fmt.Printf("UpdateConfig: elide_tool_results set to %s\n", v)
@@ -938,7 +895,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 				Message: fmt.Sprintf("invalid lossy_tool_elision %q: expected \"true\" or \"false\"", req.LossyToolElision),
 			}, nil
 		}
-		s.currentConfig.Compaction.LossyToolElision = v == "true"
+		c.Compaction.LossyToolElision = v == "true"
 		changes = append(changes, fmt.Sprintf("lossy_tool_elision=%s", v))
 		s.broadcastConfigChanged("lossy_tool_elision", v)
 		fmt.Printf("UpdateConfig: lossy_tool_elision set to %s\n", v)
@@ -953,7 +910,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 			}, nil
 		}
 		enabled := v == "true"
-		s.currentConfig.Compaction.Enabled = enabled
+		c.Compaction.Enabled = enabled
 		// Flip the runtime kill switch. In-flight passes finish; new Schedule
 		// calls noop when disabled. Nil-guarded because the server may run
 		// without a persistent store (no compGen wired).
@@ -974,7 +931,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 				Message: fmt.Sprintf("invalid raw_retention_days %q: expected a non-negative integer", req.RawRetentionDays),
 			}, nil
 		}
-		s.currentConfig.Compaction.Retention.RawRetentionDays = n
+		c.Compaction.Retention.RawRetentionDays = n
 		changes = append(changes, fmt.Sprintf("raw_retention_days=%d", n))
 		s.broadcastConfigChanged("raw_retention_days", strconv.Itoa(n))
 		fmt.Printf("UpdateConfig: raw_retention_days set to %d\n", n)
@@ -988,7 +945,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 				Message: fmt.Sprintf("invalid compacted_retention_days %q: expected a non-negative integer", req.CompactedRetentionDays),
 			}, nil
 		}
-		s.currentConfig.Compaction.Retention.CompactedRetentionDays = n
+		c.Compaction.Retention.CompactedRetentionDays = n
 		changes = append(changes, fmt.Sprintf("compacted_retention_days=%d", n))
 		s.broadcastConfigChanged("compacted_retention_days", strconv.Itoa(n))
 		fmt.Printf("UpdateConfig: compacted_retention_days set to %d\n", n)
@@ -1002,7 +959,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 				Message: fmt.Sprintf("invalid keep_forever %q: expected \"true\" or \"false\"", req.KeepForever),
 			}, nil
 		}
-		s.currentConfig.Compaction.Retention.KeepForever = v == "true"
+		c.Compaction.Retention.KeepForever = v == "true"
 		changes = append(changes, fmt.Sprintf("keep_forever=%s", v))
 		s.broadcastConfigChanged("keep_forever", v)
 		fmt.Printf("UpdateConfig: keep_forever set to %s\n", v)
@@ -1011,7 +968,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	// Push the reconciled retention block to the background sweeper so the
 	// next sweep uses the new horizons without waiting for a restart.
 	if retentionChanged && s.retentionSweeper != nil {
-		r := s.currentConfig.Compaction.Retention
+		r := c.Compaction.Retention
 		s.retentionSweeper.SetConfig(retention.Config{
 			RawRetentionDays:       r.RawRetentionDays,
 			CompactedRetentionDays: r.CompactedRetentionDays,
@@ -1028,11 +985,11 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	// time).
 	wantCloudRebuild := req.CloudProvider != "" || req.CloudModel != "" || req.CloudApiKey != "" || req.CloudBaseUrl != ""
 	if wantCloudRebuild {
-		// Outer cfgMu write lock is held by UpdateConfig — must not re-lock.
-		// Mutate the active profile in place, then drive rebuildCloudLocked.
-		activeName := s.currentConfig.ActiveCloudProfile
+		// Mutate the active profile in the local snapshot, commit it to cfgSvc,
+		// then drive rebuildCloudLocked (which reads a fresh snapshot from cfgSvc).
+		activeName := c.ActiveCloudProfile
 		idx := -1
-		for i, p := range s.currentConfig.CloudProfiles {
+		for i, p := range c.CloudProfiles {
 			if p.Name == activeName {
 				idx = i
 				break
@@ -1045,23 +1002,30 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 			}, nil
 		}
 		if req.CloudModel != "" {
-			s.currentConfig.CloudProfiles[idx].Model = req.CloudModel
+			c.CloudProfiles[idx].Model = req.CloudModel
 		}
 		if req.CloudBaseUrl != "" {
-			s.currentConfig.CloudProfiles[idx].BaseURL = req.CloudBaseUrl
+			c.CloudProfiles[idx].BaseURL = req.CloudBaseUrl
 		}
-		profileName := s.currentConfig.CloudProfiles[idx].Name
+		profileName := c.CloudProfiles[idx].Name
 
 		// API key goes to the keychain (keyed by profile name), never to
 		// the profile struct or the legacy CloudAPIKey field.
-		if req.CloudApiKey != "" && s.secrets != nil {
-			if err := s.secrets.Set(profileName, req.CloudApiKey); err != nil {
-				return &proto.UpdateConfigResponse{
-					Success: false,
-					Message: fmt.Sprintf("failed to store API key: %v", err),
-				}, nil
+		if req.CloudApiKey != "" {
+			if st := s.cfgSvc.Secrets(); st != nil {
+				if err := st.Set(profileName, req.CloudApiKey); err != nil {
+					return &proto.UpdateConfigResponse{
+						Success: false,
+						Message: fmt.Sprintf("failed to store API key: %v", err),
+					}, nil
+				}
 			}
 		}
+
+		// Commit the profile mutations before rebuilding so rebuildCloudLocked
+		// reads the updated profile from cfgSvc.
+		s.cfgSvc.Set(c)
+		c = s.cfgSvc.Get() // re-snapshot so subsequent reads are consistent
 
 		if err := s.rebuildCloudLocked(); err != nil {
 			return &proto.UpdateConfigResponse{
@@ -1079,30 +1043,30 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 
 	watchdogChanged := false
 	if req.WatchdogEnabled != "" {
-		s.currentConfig.Watchdog.Enabled = req.WatchdogEnabled == "true"
+		c.Watchdog.Enabled = req.WatchdogEnabled == "true"
 		changes = append(changes, fmt.Sprintf("watchdog_enabled=%s", req.WatchdogEnabled))
 		watchdogChanged = true
 	}
 	if req.WatchdogEcho != "" {
-		s.currentConfig.Watchdog.Echo = req.WatchdogEcho == "true"
+		c.Watchdog.Echo = req.WatchdogEcho == "true"
 		changes = append(changes, fmt.Sprintf("watchdog_echo=%s", req.WatchdogEcho))
 		watchdogChanged = true
 	}
 	if req.WatchdogMode == "challenge-and-justify" || req.WatchdogMode == "strict" {
-		s.currentConfig.Watchdog.Mode = req.WatchdogMode
+		c.Watchdog.Mode = req.WatchdogMode
 		changes = append(changes, "watchdog_mode="+req.WatchdogMode)
 		watchdogChanged = true
 	}
 	if req.WatchdogEscalateAfter != "" {
 		if n, err := strconv.Atoi(req.WatchdogEscalateAfter); err == nil && n >= 1 {
-			s.currentConfig.Watchdog.EscalateAfter = n
+			c.Watchdog.EscalateAfter = n
 			changes = append(changes, fmt.Sprintf("watchdog_escalate_after=%d", n))
 			watchdogChanged = true
 		}
 	}
 	if req.WatchdogChecks != "" {
 		if req.WatchdogChecks == "-" {
-			s.currentConfig.Watchdog.Checks = []string{}
+			c.Watchdog.Checks = []string{}
 		} else {
 			parts := strings.Split(req.WatchdogChecks, ",")
 			checks := make([]string, 0, len(parts))
@@ -1111,7 +1075,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 					checks = append(checks, trimmed)
 				}
 			}
-			s.currentConfig.Watchdog.Checks = checks
+			c.Watchdog.Checks = checks
 		}
 		changes = append(changes, "watchdog_checks="+req.WatchdogChecks)
 		watchdogChanged = true
@@ -1125,7 +1089,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		if val == "-" {
 			val = ""
 		}
-		s.currentConfig.Models.Tiers.Embedding.Open = val
+		c.Models.Tiers.Embedding.Open = val
 		desc := "embedding_model=" + val
 		if val == "" {
 			desc = "embedding_model unset"
@@ -1133,7 +1097,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		changes = append(changes, desc+" (takes effect on restart)")
 		s.broadcastConfigChanged("embedding_model", val)
 	} else if req.ModelTierKey != "" {
-		desc, err := config.ApplyModelTierPatch(&s.currentConfig.Models, req.ModelTierKey, req.ModelTierValue)
+		desc, err := config.ApplyModelTierPatch(&c.Models, req.ModelTierKey, req.ModelTierValue)
 		if err != nil {
 			return &proto.UpdateConfigResponse{Success: false, Message: err.Error()}, nil
 		}
@@ -1144,9 +1108,8 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		watchdogChanged = true
 	}
 	if watchdogChanged {
-		// Rebuild the supervisor from the just-applied config. buildWatchdogFrom
-		// takes NO lock, so this is safe under the held cfgMu write lock.
-		s.watchdog = s.buildWatchdogFrom(s.currentConfig.Watchdog, s.currentConfig.Models)
+		// Rebuild the supervisor from the just-mutated local config snapshot.
+		s.watchdog = s.buildWatchdogFrom(c.Watchdog, c.Models)
 	}
 
 	if len(changes) == 0 {
@@ -1157,57 +1120,54 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	}
 
 	if req.OllamaUrl != "" {
-		s.currentConfig.OllamaURL = req.OllamaUrl
+		c.OllamaURL = req.OllamaUrl
 		s.broadcastConfigChanged("ollama_url", req.OllamaUrl)
 	}
 	if req.OpenModel != "" {
-		s.currentConfig.Models.Tiers.Everyday.Open = req.OpenModel
+		c.Models.Tiers.Everyday.Open = req.OpenModel
 		s.broadcastConfigChanged("local_model", req.OpenModel)
 	}
 	if req.OpenRuntime != "" {
-		s.currentConfig.OpenRuntime = req.OpenRuntime
-		// Rebuild the native open provider for the new runtime — without
-		// this, the dispatch engine's open lane (watchdog, coproc caps)
+		c.OpenRuntime = req.OpenRuntime
+		// Provider block: rebuild the native open provider for the new runtime.
+		// Without this, the dispatch engine's open lane (watchdog, coproc caps)
 		// keeps talking to the previous runtime until the agent restarts.
 		if s.openProviderFactory != nil {
-			s.openLLMProvider = s.openProviderFactory(s.currentConfig)
+			s.openLLMProvider = s.openProviderFactory(c)
 		}
 		s.broadcastConfigChanged("local_runtime", req.OpenRuntime)
 	}
 	if req.OpenDefaultModel != "" {
-		// currentConfig.LlamaServer.DefaultModel was already set up top
-		// (before the runtime switch) — only the broadcast belongs here.
+		// c.LlamaServer.DefaultModel was already set up top (before the runtime
+		// switch) — only the broadcast belongs here.
 		s.broadcastConfigChanged("open_default_model", req.OpenDefaultModel)
 	}
 	if req.CloudProvider != "" {
-		s.currentConfig.CloudProvider = req.CloudProvider
+		c.CloudProvider = req.CloudProvider
 		s.broadcastConfigChanged("cloud_provider", req.CloudProvider)
 	}
 	if req.CloudModel != "" {
-		s.currentConfig.CloudModel = req.CloudModel
+		c.CloudModel = req.CloudModel
 		s.broadcastConfigChanged("cloud_model", req.CloudModel)
 	}
 	if req.CloudApiKey != "" {
-		s.currentConfig.CloudAPIKey = req.CloudApiKey
+		c.CloudAPIKey = req.CloudApiKey
 		// Presence marker only — never broadcast a raw secret.
 		s.broadcastConfigChanged("cloud_api_key", "set")
 	}
 	if req.CloudBaseUrl != "" {
-		s.currentConfig.CloudBaseURL = req.CloudBaseUrl
+		c.CloudBaseURL = req.CloudBaseUrl
 		s.broadcastConfigChanged("cloud_base_url", req.CloudBaseUrl)
 	}
 	if req.LocusMode != "" {
-		s.currentConfig.LocusMode = req.LocusMode
+		c.LocusMode = req.LocusMode
 		s.broadcastConfigChanged("locus_mode", req.LocusMode)
 	}
-	s.applyRuntimeEndpoints(s.currentConfig)
 
-	// Persist changes to disk
-	if s.configPath != "" {
-		if err := config.Save(s.currentConfig, s.configPath); err != nil {
-			fmt.Printf("UpdateConfig: warning — failed to persist config: %v\n", err)
-		}
-	}
+	// Commit all config mutations to the service and persist.
+	s.cfgSvc.Set(c)
+	s.applyRuntimeEndpoints(c)
+	s.cfgSvc.Persist()
 
 	return &proto.UpdateConfigResponse{
 		Success: true,
@@ -1402,10 +1362,9 @@ func (s *Server) GetContextUsage(ctx context.Context, req *proto.GetContextUsage
 		if turns, err := store.GetTurns(ctx, convID); err == nil {
 			raw = estimateRawTokens(turns)
 			state, _ := store.GetCompaction(ctx, convID)
-			s.cfgMu.RLock()
-			elide := s.currentConfig.Compaction.ElideToolResults
-			lossy := s.currentConfig.Compaction.LossyToolElision
-			s.cfgMu.RUnlock()
+			compSnap := s.cfgSvc.Get().Compaction
+			elide := compSnap.ElideToolResults
+			lossy := compSnap.LossyToolElision
 			switch {
 			case state.ConsolidatedJSON != "":
 				// Compaction has run. Mirror assembleHistory: summarized view
@@ -1619,9 +1578,7 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 			}
 		}
 	}
-	s.cfgMu.RLock()
-	cfg := s.currentConfig
-	s.cfgMu.RUnlock()
+	cfg := s.cfgSvc.Get()
 	// Cloud fields fall back to the active profile when the legacy top-level
 	// slots are empty — profiles are the single source of truth (see
 	// activeCloudModel), and the legacy fields are only populated for
@@ -1675,9 +1632,7 @@ func (s *Server) ListModels(ctx context.Context, req *proto.ListModelsRequest) (
 	if s.registry == nil {
 		return nil, fmt.Errorf("registry not configured")
 	}
-	s.cfgMu.RLock()
-	runtimeName := s.currentConfig.OpenRuntime
-	s.cfgMu.RUnlock()
+	runtimeName := s.cfgSvc.Get().OpenRuntime
 	if runtimeName == "" {
 		runtimeName = "ollama"
 	}
@@ -2020,18 +1975,14 @@ func (s *Server) StreamRuntimeLogs(req *proto.StreamRuntimeLogsRequest, stream p
 	return nil
 }
 
-// refreshRuntimeEndpoints snapshots the current config under the read lock,
-// releases it, then pushes the derived endpoints. It must NOT be called while
-// cfgMu is already held — callers that hold the lock (UpdateConfig) call
-// applyRuntimeEndpoints directly with the config they already have.
+// refreshRuntimeEndpoints snapshots the current config via cfgSvc and pushes
+// the derived endpoints. UpdateConfig calls applyRuntimeEndpoints directly
+// with its already-mutated local snapshot instead.
 func (s *Server) refreshRuntimeEndpoints() {
 	if s.runtimeManager == nil {
 		return
 	}
-	s.cfgMu.RLock()
-	cfg := s.currentConfig
-	s.cfgMu.RUnlock()
-	s.applyRuntimeEndpoints(cfg)
+	s.applyRuntimeEndpoints(s.cfgSvc.Get())
 }
 
 // applyRuntimeEndpoints derives and pushes runtime endpoints from the given
@@ -2549,9 +2500,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	gateRegistry := s.toolRegistry
 	var wdGate agent.WatchdogGate
 	var wdTurnEnd agent.WatchdogTurnEnd
-	s.cfgMu.RLock()
 	wd := s.watchdog
-	s.cfgMu.RUnlock()
 	if wd != nil {
 		wdGate = func(ctx context.Context, toolName string, args json.RawMessage, transcript []llm.Message) agent.WatchdogDecision {
 			d := wd.Gate(ctx, convID, watchdog.Action{Kind: "tool_call", ToolName: toolName, ToolArgs: args, Transcript: transcript})
@@ -2572,9 +2521,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		// at a time (turns don't overlap), so setting echo on the shared watchdog
 		// here routes its interventions to THIS turn's sink safely. Full
 		// multi-conversation echo isolation is a follow-on.
-		s.cfgMu.RLock()
-		echoOn := s.currentConfig.Watchdog.Echo
-		s.cfgMu.RUnlock()
+		echoOn := s.cfgSvc.Get().Watchdog.Echo
 		if echoOn {
 			wd.SetEcho(func(thread, text string) {
 				sink(agent.LoopEvent{Kind: agent.LoopWatchdogEcho, ToolName: thread, Summary: text})
@@ -2584,10 +2531,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 
 	result, loopErr := s.runMainLoop(ctx, req, provider, isCloud, sink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry)
 	if loopErr != nil {
-		s.cfgMu.RLock()
-		locusMode := s.currentConfig.LocusMode
-		s.cfgMu.RUnlock()
-		mode, _ := locus.ParseMode(locusMode)
+		mode, _ := locus.ParseMode(s.cfgSvc.Get().LocusMode)
 		res := mode.Main()
 		fbProv := s.cloudLLMProvider
 		fbCloud := true
@@ -2650,26 +2594,22 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 // cloud model (falling back to the open model when no cloud is configured);
 // open_primary/open_only → the open model.
 func (s *Server) primaryModel() string {
-	s.cfgMu.RLock()
-	locus := s.currentConfig.LocusMode
-	open := s.currentConfig.OpenChatModel()
-	s.cfgMu.RUnlock()
-	switch locus {
+	cfgSnap := s.cfgSvc.Get()
+	switch cfgSnap.LocusMode {
 	case "cloud_only", "cloud_primary":
 		if m := s.activeCloudModel(); m != "" {
 			return m
 		}
 	}
-	return open
+	return cfgSnap.OpenChatModel()
 }
 
 func (s *Server) mainModelFor(isCloud bool) string {
 	if isCloud {
 		return s.activeCloudModel()
 	}
-	s.cfgMu.RLock()
-	defer s.cfgMu.RUnlock()
-	return s.currentConfig.OpenChatModel()
+	c := s.cfgSvc.Get()
+	return c.OpenChatModel()
 }
 
 // runMainLoop drives the native tool-loop on the given provider/tier.
@@ -2761,9 +2701,7 @@ func (s *Server) assembleHistory(ctx context.Context, store conversation.Store, 
 	state, _ := store.GetCompaction(ctx, convID)
 	view, _ := compactor.BuildSendView(turns, state)
 
-	s.cfgMu.RLock()
-	compactionCfg := s.currentConfig.Compaction
-	s.cfgMu.RUnlock()
+	compactionCfg := s.cfgSvc.Get().Compaction
 	cloudModel := s.activeCloudModel()
 	pct := compactionCfg.HardOverridePct
 	if compactionCfg.Enabled && pct > 0 {

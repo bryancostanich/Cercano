@@ -118,12 +118,14 @@ as-is (they still resolve at runtime by ID). The `open_model` key is ignored
 4. **Docs** — agent README config surfaces, cloud/local docs, this doc to
    status: shipped.
 
-## Open questions
+## Resolved questions (Bryan, 2026-07-07)
 
-1. Keep `/config local-model` long-term as an ergonomic alias for
-   `models.everyday.open`, or retire the verb after the compat release?
-2. `embedding_model` → `embedding.open` tier: same inversion, same release?
-   (Recommended: yes, it's the same shape and half the readers overlap.)
-3. Ollama daemon health: after this, a llama_server setup has **no** Ollama
-   dependency at all — should the wizard/doctor stop checking for Ollama in
-   that configuration? (Recommended: yes.)
+1. `/config local-model` — **retire.** The server keeps accepting the
+   `ConfigUpdate.OpenModel` RPC field as an everyday.open write during the
+   migration window (old client binaries), but the CLI key is removed; the
+   tier key (`models.everyday.open`) is the way to set it.
+2. `embedding_model` — **retire the same way.** `embedding.open` becomes a
+   real tier slot (`models.tiers.embedding.open`); the legacy key is seeded
+   into it on load and then dropped. All model assignments live in the tiers.
+3. Wizard/doctor **stop checking for an Ollama daemon** when the configured
+   runtime is llama_server (zero Ollama dependency in that configuration).

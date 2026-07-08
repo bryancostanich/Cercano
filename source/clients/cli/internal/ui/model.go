@@ -124,6 +124,11 @@ type Model struct {
 	ctxPollTicks   int
 	ctxPolling     bool // a ctxUsageTick loop is currently running (avoid double-scheduling)
 	animTickActive bool // a progressAnimTick loop is currently running (avoid double-scheduling)
+	// chatDirty marks transcript changes whose repaint was deferred to the
+	// next progressAnimTick frame. High-frequency stream events (token
+	// deltas, progress notes) set it instead of rebuilding per event, so the
+	// rebuild rate is capped at the tick rate instead of the token rate.
+	chatDirty bool
 	// bannerTickActive tracks whether the banner.TickMsg chain is alive — it
 	// serves the splash first, then the scrollback banner. applyResume checks
 	// it to restart the loop when resuming without ever having shown a splash.
@@ -669,9 +674,8 @@ func (m *Model) dispatchToolFetches() []tea.Cmd {
 	for _, id := range ids {
 		cmds = append(cmds, fetchToolCallCmd(m.agent, m.convID, id))
 	}
-	if !m.animTickActive {
-		m.animTickActive = true
-		cmds = append(cmds, progressAnimTick())
+	if kick := m.ensureAnimTick(); kick != nil {
+		cmds = append(cmds, kick)
 	}
 	return cmds
 }
@@ -745,6 +749,17 @@ type progressAnimTickMsg time.Time
 
 func progressAnimTick() tea.Cmd {
 	return tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg { return progressAnimTickMsg(t) })
+}
+
+// ensureAnimTick arms the shared animation/repaint tick loop unless one is
+// already in flight. Returns nil when already armed — safe to pass straight
+// into tea.Batch, which drops nil cmds.
+func (m *Model) ensureAnimTick() tea.Cmd {
+	if m.animTickActive {
+		return nil
+	}
+	m.animTickActive = true
+	return progressAnimTick()
 }
 
 // ctxUsageTickMsg fires after a 2-second delay to re-poll context usage during
@@ -1294,22 +1309,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.turnModel = ev.model
 			m.turnCloud = ev.cloud
 		case chatProgressMsg:
+			// Coalesced: mark the transcript dirty and let the next anim
+			// tick repaint. Rebuilding per event made rebuild rate track
+			// the stream's event rate — the input queue starved behind it.
 			m.turnActivity = "routing"
 			m.chat.Apply(ev)
+			m.chatDirty = true
+			return m, tea.Batch(msg.next, m.ensureAnimTick())
 		case chatAssistantDeltaMsg:
+			// Coalesced, same as chatProgressMsg: token deltas arrive far
+			// faster than 20fps; the tick flushes them in batches.
 			m.turnActivity = "writing"
 			m.turnTokOut++ // one delta ≈ one token (approximate live count)
 			m.chat.Apply(ev)
+			m.chatDirty = true
+			return m, tea.Batch(msg.next, m.ensureAnimTick())
 		case toolEntryStartMsg:
 			m.turnActivity = "running " + ev.name
 			m.chat.Apply(ev)
-			// Kick the spinner animation loop if it isn't already running
-			// — the placeholder loop may have stopped once tokens began
-			// streaming, leaving the in-progress tool line without ticks.
-			if !m.animTickActive {
-				m.animTickActive = true
-				return m, tea.Batch(msg.next, progressAnimTick())
-			}
+			// Re-arm the spinner loop if it stopped (the placeholder loop
+			// dies once tokens begin streaming), and fall through to the
+			// shared repaint so the new tool row appears immediately.
+			m.refreshViewport()
+			return m, tea.Batch(msg.next, m.ensureAnimTick())
 		case chatDoneMsg:
 			m.applyTurnTelemetry(ev) // footer fields
 			m.chat.Apply(ev)         // transcript finalize + notice
@@ -1834,27 +1856,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// before returning the next tick — that prevents a second kick
 		// (e.g. from toolEntryStartMsg) from doubling the tick rate.
 		m.animTickActive = false
+		repaint := false
 		keep := false
-		// Keep ticking while there's an assistant entry awaiting its first
-		// token — that's when the animated status line is visible. Each tick
-		// must call refreshViewport so the per-frame color sweep is pushed
-		// into the viewport's content cache; without this, View renders the
-		// last-set content and the animation appears frozen.
+		// Flush coalesced stream events: token deltas and progress notes set
+		// chatDirty instead of rebuilding per event, so this frame carries
+		// their repaint. Keep ticking while the stream is alive — the next
+		// batch of deltas needs a frame too.
+		if m.chatDirty {
+			repaint = true
+		}
+		if m.streaming {
+			keep = true
+		}
+		// Repaint while there's an assistant entry awaiting its first token —
+		// that's when the animated status line is visible. The per-frame push
+		// moves the color sweep into the viewport's content cache; without
+		// it, View renders the last-set content and the animation freezes.
 		if e := m.chat.streamingTextEntry(); e != nil && e.Content == "" {
-			m.refreshViewport()
+			repaint = true
 			keep = true
 		}
 		// Tool spinners on in-progress entries need the same per-frame push;
 		// without this branch the placeholder tick stops once the assistant
 		// streams a token, then the active tool line shows a frozen glyph.
 		if m.chat.hasInProgressTool() {
-			m.refreshViewport()
+			repaint = true
 			keep = true
 		}
 		// Keep ticking while a lazy tool-body fetch is in flight so the
 		// expanded entry's loading spinner animates.
 		if m.chat.hasLoadingTool() {
-			m.refreshViewport()
+			repaint = true
 			keep = true
 		}
 		// Between phases of a multi-step turn (tools done, waiting for the
@@ -1862,7 +1894,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// without this the indicator would freeze on the first frame after
 		// tools complete.
 		if m.chat.IsBetweenPhases() {
-			m.refreshViewport()
+			repaint = true
 			keep = true
 		}
 		// Also keep ticking while the /c chat is busy so its animated
@@ -1872,6 +1904,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.compacting {
 			keep = true
+		}
+		// One rebuild per frame no matter how many conditions asked for it —
+		// the old shape called refreshViewport once per branch.
+		if repaint {
+			m.refreshViewport()
 		}
 		if keep {
 			m.animTickActive = true
@@ -2385,6 +2422,7 @@ func (m Model) splashEffective() bool {
 // entries at the current width. Syncs turn telemetry first so the render
 // has current state, then delegates to chatView.rebuild().
 func (m *Model) refreshViewport() {
+	m.chatDirty = false // any full rebuild flushes pending coalesced repaints
 	m.chat.SetTurnStatus(turnStatus{
 		activity: m.turnActivity,
 		start:    m.turnStart,

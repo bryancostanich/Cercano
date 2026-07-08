@@ -353,3 +353,67 @@ func TestExplain_Execute_NeitherErrors(t *testing.T) {
 		t.Fatal("expected error when neither text nor file_path provided")
 	}
 }
+
+// ---- WorkDir resolution: relative file_path must resolve against call.WorkDir ----
+
+// callWithDir builds a Call with an explicit WorkDir (not "/proj").
+func callWithDir(t *testing.T, svc capabilities.Services, workDir string, args any) *capabilities.Call {
+	t.Helper()
+	raw, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("marshal args: %v", err)
+	}
+	return &capabilities.Call{Args: raw, WorkDir: workDir, Svc: svc}
+}
+
+func TestExplain_FilePath_RelativeResolvesAgainstWorkDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "src.go"), []byte("package main"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc, _ := fakeDispatch(t, "done")
+	call := callWithDir(t, svc, dir, map[string]string{"file_path": "src.go"})
+	_, err := Explain().Execute(context.Background(), call)
+	if err != nil && strings.Contains(err.Error(), "failed to read file") {
+		t.Fatalf("relative file_path not resolved against WorkDir: %v", err)
+	}
+}
+
+func TestSummarize_FilePath_RelativeResolvesAgainstWorkDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("hello notes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc, _ := fakeDispatch(t, "done")
+	call := callWithDir(t, svc, dir, map[string]string{"file_path": "notes.txt"})
+	_, err := Summarize().Execute(context.Background(), call)
+	if err != nil && strings.Contains(err.Error(), "failed to read file") {
+		t.Fatalf("relative file_path not resolved against WorkDir: %v", err)
+	}
+}
+
+func TestClassify_FilePath_RelativeResolvesAgainstWorkDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "doc.txt"), []byte("some content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc, _ := fakeDispatch(t, "done")
+	call := callWithDir(t, svc, dir, map[string]string{"file_path": "doc.txt"})
+	_, err := Classify().Execute(context.Background(), call)
+	if err != nil && strings.Contains(err.Error(), "failed to read file") {
+		t.Fatalf("relative file_path not resolved against WorkDir: %v", err)
+	}
+}
+
+func TestExtract_FilePath_RelativeResolvesAgainstWorkDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "data.txt"), []byte("data content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc, _ := fakeDispatch(t, "done")
+	call := callWithDir(t, svc, dir, map[string]string{"file_path": "data.txt", "query": "find things"})
+	_, err := Extract().Execute(context.Background(), call)
+	if err != nil && strings.Contains(err.Error(), "failed to read file") {
+		t.Fatalf("relative file_path not resolved against WorkDir: %v", err)
+	}
+}

@@ -70,6 +70,10 @@ func (deepResearchCap) Execute(ctx context.Context, call *capabilities.Call) (*c
 		return nil, errors.New("deep_research: " + venvMissingMessage)
 	}
 
+	if a.OutputDir != "" {
+		a.OutputDir = resolvePath(call.WorkDir, a.OutputDir)
+	}
+
 	// The capability is R-tier (research is read-only), but output_dir makes
 	// it write report files — gate that specific case through the permission
 	// callback rather than promoting the whole capability to W.

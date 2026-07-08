@@ -96,11 +96,21 @@ func (d *runtimeDashboard) openOpenModelPicker() {
 	}
 	var rows []overlay.Row
 	for _, m := range downloadedRuntimeModels(runtimeStatusModels(d.snapshot.Status)) {
+		// Commit the human-readable name, not the runtime's hash ID — same
+		// rule as the tier pickers. open_model must stay resolvable by BOTH
+		// runtimes (a cloud turn that fails over lands on the Ollama adapter,
+		// which 404s on a llama_server:<hash> ID). Legacy configs holding an
+		// ID still get the current marker.
+		name := firstNonEmpty(m.DisplayName, m.ID)
+		hint := currentHint(name, current)
+		if hint == "" {
+			hint = currentHint(m.ID, current)
+		}
 		rows = append(rows, overlay.Row{
-			Key:   m.ID,
-			Label: firstNonEmpty(m.DisplayName, m.ID),
+			Key:   name,
+			Label: name,
 			Value: m.Runtime,
-			Hint:  currentHint(m.ID, current),
+			Hint:  hint,
 		})
 	}
 	rows = append(rows, overlay.Row{Key: "-", Label: "(clear)", Value: "unset chat model"})

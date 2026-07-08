@@ -49,6 +49,14 @@ type Entry struct {
 	// "thinking…" placeholder. Cleared as soon as tokens start arriving.
 	Status string
 
+	// Superseded marks an assistant reply that a watchdog challenge censored
+	// and the model then rewrote (rather than overruling via justify). It
+	// renders folded to a dim one-liner; a click expands it back to the full
+	// body (SupersededOpen), with the same left rail to collapse as tool
+	// entries. Only meaningful on RoleAssistant entries.
+	Superseded     bool
+	SupersededOpen bool
+
 	// Tool, when non-nil, makes this entry a tool-call line — Role/Content
 	// are ignored and renderToolEntry produces the visible row. expand /
 	// collapse via tab-focus is a follow-up; V1 renders folded.

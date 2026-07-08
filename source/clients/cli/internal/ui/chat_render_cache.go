@@ -20,11 +20,13 @@ import (
 // block. Comparable; string equality is O(1) for an unchanged string (same
 // length + backing array short-circuits).
 type entryCacheKey struct {
-	width     int
-	stylesGen int
-	role      Role
-	content   string
-	status    string
+	width          int
+	stylesGen      int
+	role           Role
+	content        string
+	status         string
+	superseded     bool
+	supersededOpen bool
 }
 
 type entryRenderCache struct {
@@ -56,11 +58,13 @@ func (c *chatView) renderEntryCached(e *Entry, idx int) string {
 		return c.renderEntry(e, idx)
 	}
 	key := entryCacheKey{
-		width:     c.vp.Width(),
-		stylesGen: c.stylesGen,
-		role:      e.Role,
-		content:   e.Content,
-		status:    e.Status,
+		width:          c.vp.Width(),
+		stylesGen:      c.stylesGen,
+		role:           e.Role,
+		content:        e.Content,
+		status:         e.Status,
+		superseded:     e.Superseded,
+		supersededOpen: e.SupersededOpen,
 	}
 	if cached, ok := c.entryCache[e]; ok && cached.key == key {
 		return cached.rendered

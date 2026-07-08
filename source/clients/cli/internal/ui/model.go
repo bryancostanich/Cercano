@@ -841,6 +841,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseClickMsg:
 		if m.pendingConfirm != nil {
+			// Confirm pending: the input is dormant, but fold-toggle clicks
+			// on tool entries stay live (like wheel scrolling) so the user
+			// can expand prior tool output to review what the call is about
+			// to touch before answering y/n. All other clicks are ignored.
+			mouse := msg.Mouse()
+			if mouse.Button == tea.MouseLeft && !m.contentPageActive() &&
+				m.chat.MouseToggleFold(mouse.X, mouse.Y-m.scrollbarTop) {
+				cmds := m.dispatchToolFetches()
+				m.refreshViewport()
+				return m, tea.Batch(cmds...)
+			}
 			return m, nil
 		}
 		mouse := msg.Mouse()
@@ -2784,9 +2795,11 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// renderConfirmPrompt builds the single-line confirm message shown in
-// scrollback while pendingConfirm is set. W-tier renders normally; X-tier
-// gets a red ⚠ destructive emphasis. MCP tools get an additional [a]lways key.
+// renderConfirmPrompt builds the confirm message shown in scrollback while
+// pendingConfirm is set: the tool summary on the first line, the key hints
+// on their own second line so a long summary never wraps mid-hint. W-tier
+// renders normally; X-tier gets a red ⚠ destructive emphasis. MCP tools get
+// an additional [a]lways key.
 func (m Model) renderConfirmPrompt(p *pendingToolCall) string {
 	head := m.styles.Accent.Render("▸ ")
 	if p.Permission == "X" {
@@ -2797,10 +2810,7 @@ func (m Model) renderConfirmPrompt(p *pendingToolCall) string {
 		head = m.styles.Accent.Render("▸ ⚠ ")
 	}
 	summary := displayToolName(p.Name) + " " + truncateArgs(p.Args, 80)
-	out := head +
-		m.styles.AgentProse.Render(summary) +
-		m.styles.BorderDim.Render("   ·   ") +
-		m.styles.Muted.Render("[") +
+	hints := m.styles.Muted.Render("[") +
 		m.styles.Accent.Render("y") +
 		m.styles.Muted.Render("]es / [") +
 		m.styles.Accent.Render("n") +
@@ -2808,11 +2818,11 @@ func (m Model) renderConfirmPrompt(p *pendingToolCall) string {
 		m.styles.Accent.Render("d") +
 		m.styles.Muted.Render("]iff")
 	if strings.HasPrefix(p.Name, "mcp__") {
-		out += m.styles.Muted.Render(" / [") +
+		hints += m.styles.Muted.Render(" / [") +
 			m.styles.Accent.Render("a") +
 			m.styles.Muted.Render("]lways")
 	}
-	return out
+	return head + m.styles.AgentProse.Render(summary) + "\n  " + hints
 }
 
 // displayToolName converts MCP tool names (mcp__server__tool) to a readable

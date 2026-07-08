@@ -15,3 +15,12 @@ func killProcess(proc *os.Process) error {
 	}
 	return proc.Kill()
 }
+
+// Orphan sweeping is unix-only: without a reliable liveness + command-line
+// probe, reaping by recorded PID risks killing an unrelated process, so
+// these stubs make SweepOrphans a no-op.
+func processAlive(int) bool { return false }
+
+func processCommand(int) string { return "" }
+
+func terminateGroup(int) {}

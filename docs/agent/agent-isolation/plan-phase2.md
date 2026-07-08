@@ -119,7 +119,11 @@ type Service interface {
 
 **Gotchas:** MANY sites read `s.currentConfig` under `s.cfgMu.RLock()`. Replace each with `cfgSvc.Get()` (returns a snapshot). This is the largest mechanical fan-out in the phase — do it methodically; the compiler finds every site. `broadcastConfigChanged` fans out via the event hub AND triggers `rebuildCloud` (providers) and `syncMeridianForProfile` (runtimes) — for now, keep those cross-service reactions wired via the `Subscribe` callback registered by the front door (front door subscribes and calls the provider/runtime services). Do NOT let config call providers directly.
 
-**Characterization:** `cloud_profiles_test.go`, `config_watcher_test.go` cover this — confirm green throughout.
+**`UpdateConfig` does NOT move verbatim (blocking — read before starting).** Its body (server.go ~800) holds `cfgMu` for the whole span while doing fine-grained provider/runtime mutations that Task 3/T6 own and are still on `Server` when Task 2 runs: it cancels/restarts the Ollama engine health monitor via `s.healthMonitorCancel` + `s.registry.GetEngine("ollama")`, calls `s.openProvider.SetModelName(...)`, and reconfigures runtime endpoints. Moving it verbatim would make config reach into provider internals — forbidden. **Split it:** the config service owns parse → validate → persist → broadcast; the provider/runtime-facing blocks STAY on the front door (as a small helper the front-door `UpdateConfig` delegator calls after `cfgSvc.Update`) until Task 3 homes them in `hostsvc/providers`. Preserve the `reloadConfigFromDisk` funnel (config_watcher.go replays diffed changes through `UpdateConfig` — the split must keep that path working). **Behavior note (call out in the commit):** today config mutation + provider reconfiguration are atomic under one `cfgMu` span; after the split they are sequential, so a concurrent reader can momentarily observe new config with old providers. Almost certainly benign, but it IS a concurrency-semantics change under a zero-behavior-change phase — confirm `cfg_race_test.go` stays green and note the change.
+
+**Split Task 2 into two commits** (the call-site fan-out is the phase's biggest mechanical diff): (a) create the service, move fields/methods, add front-door delegators + the `UpdateConfig` split; (b) the `s.currentConfig` → `cfgSvc.Get()` fan-out across all reader sites. Two reviewable diffs instead of one giant one.
+
+**Characterization:** `cloud_profiles_test.go`, `config_watcher_test.go`, `cfg_race_test.go` cover this — confirm green throughout.
 
 **Commit:** `refactor(server): extract config service into hostsvc/config`
 
@@ -131,7 +135,7 @@ type Service interface {
 - Create: `internal/hostsvc/providers/providers.go`, `providers_test.go`
 - Modify: `internal/server/server.go`, `internal/server/cloud_models.go`, `internal/server/models_resolve.go`
 
-**Fields to move:** `cloudLLMProvider llm.Provider`, `openLLMProvider llm.Provider`, `openProvider *legacymodels.OpenModelProvider`, `cloudFactory agent.CloudFactory`, `router RouterCloudUpdater`, `coordinator *loop.ADKCoordinator`, `registry *engine.EngineRegistry`, `catalogManager *ollamacatalog.Manager`.
+**Fields to move:** `cloudLLMProvider llm.Provider`, `openLLMProvider llm.Provider`, `openProvider *legacymodels.OpenModelProvider`, `cloudFactory agent.CloudFactory`, `router RouterCloudUpdater`, `coordinator *loop.ADKCoordinator`, `registry *engine.EngineRegistry`, `catalogManager *ollamacatalog.Manager`, `healthMonitorCancel context.CancelFunc` (the Ollama engine health monitor — an orphan in the earlier draft; it belongs here).
 
 **Methods to move:** `resolveMainProvider`, `resolveTierModel`, `mainModelFor`, `primaryModel`, `activeCloudModel`, `LocusMode`, `rebuildCloud`, `RebuildCloud`, `rebuildCloudLocked`, `installAbsentCloud`, `applyRuntimeEndpoints`, `refreshRuntimeEndpoints`, `ListModels`, `ListCloudProfileModels`, `GetModelRAMEstimate`, `SetCloudLLMProvider`, `SetOpenLLMProvider`, `CloudLLMProvider`, `OpenLLMProvider`, `SetCatalogManager`. (`ListModels`/`ListCloudProfileModels`/`GetModelRAMEstimate` are RPCs — delegators stay.)
 
@@ -149,9 +153,11 @@ type Resolver interface {
     Open() llm.Provider
 }
 ```
-(Grep `resolveMainProvider`, `s.cloudLLMProvider`, `s.openLLMProvider`, `mainModelFor`, `primaryModel` call sites — `streamProcessRequestWithToolLoop` and `runAgenticDispatch` are the hot consumers. The interface must cover exactly what they call.)
+(Grep `resolveMainProvider`, `s.cloudLLMProvider`, `s.openLLMProvider`, `mainModelFor`, `primaryModel` call sites. Correction from the earlier draft: `resolveMainProvider`'s only non-test consumer is the **main turn loop** (server.go:2437) — NOT `runAgenticDispatch`, which references no provider fields. The interface must cover exactly what the real call sites use.)
 
 **Gotchas:** `resolveMainProvider` reads locus mode from config → takes a `config.Service` dependency (injected). `Rebuild()` is triggered by the config `Subscribe` callback (registered in the front door in Task 2) — verify the wiring lands here. `applyRuntimeEndpoints`/`refreshRuntimeEndpoints` bridge to runtimes (Task 6) — for now they can stay as provider methods reading a runtime-endpoints snapshot; note the coupling for Task 6.
+
+**Home the `UpdateConfig` provider/runtime block parked by Task 2.** Task 2 left the health-monitor restart (`healthMonitorCancel` + `registry.GetEngine("ollama")`) and `openProvider.SetModelName(...)` on the front door as a helper. Move that helper into this service (it owns those fields now) and expose it as a method the front-door `UpdateConfig` delegator calls after `cfgSvc.Update` — e.g. `Reconfigure(cfg cfg.Config)`. After this task, the front door's post-config-update reconfiguration is a single call into `providers.Reconfigure`, no provider fields left on `Server`.
 
 **Characterization:** `models_resolve_test.go`, `cloud_models`-adjacent tests. Add a characterization test for `resolveMainProvider` under each locus mode if not already covered (grep for existing coverage first).
 
@@ -182,7 +188,9 @@ type Catalog interface {
 }
 ```
 
-**Gotchas:** `runAgenticDispatch` is wired onto the `dispatch.Engine` via `SetDispatchEngine` and consumes providers + persistence + permissions (it builds a `ToolLoopInput`). Keep `runAgenticDispatch` in this service but inject the provider resolver, conversation service, and permission broker it needs — it must NOT reach back into `Server`. This is the most cross-cutting method in the phase; give it a constructor that takes those three collaborators. `GetToolCall` reads the conversation store — inject the conversation service.
+**Gotchas:** `runAgenticDispatch` is wired onto the `dispatch.Engine` via `SetDispatchEngine` and builds a `ToolLoopInput`, so it must NOT reach back into `Server`. **Re-derive its collaborator list from the actual references in `agentic_dispatch.go`, not from an assumption** — grepping that file, its real dependencies are: `toolRegistry` (this service), `permStore` (permissions broker), `persistTurn` + `s.agent.PersistentStore()` (persistence service), `buildSystemPrompt`, `dispatchStore`, and the grant helpers (this service). It does NOT reference the provider fields, so the provider resolver is likely NOT a needed collaborator — confirm by grep and drop it if unused.
+
+**`buildSystemPrompt` reach-back (Task 4 vs Task 5 — resolve here).** `runAgenticDispatch` calls `s.buildSystemPrompt`, which Task 5 keeps on the front door. Since Task 4 runs before Task 5, inject it as a plain func collaborator: `systemPrompt func(workDir string) string` in the tools service constructor, passed the front door's `buildSystemPrompt` at wiring time. Do not move `buildSystemPrompt` here. `GetToolCall` reads the conversation store — inject the persistence service (or the store).
 
 **Characterization:** `agentic_dispatch_test.go`, `agentic_observability_test.go`, `agentic_perms_test.go`, `agentic_session_scope_test.go` cover the dispatch path heavily — confirm green throughout. These are the load-bearing guard for the trickiest move.
 
@@ -211,7 +219,7 @@ type Service interface {
     LoadProjectContext(workDir string) string
 }
 ```
-(`persistTurn` and `assembleHistory` are the hot consumers from the turn loop — grep `s.persistTurn` and `s.assembleHistory` call sites; those go through this interface.)
+(`persistTurn` and `assembleHistory` are the hot consumers from the turn loop — grep `s.persistTurn` and `s.assembleHistory` call sites; those go through this interface. Note: `assembleHistory` today takes the store as a parameter (server.go:2723); the interface above drops it since the service owns the store — that's a deliberate signature change, not a verbatim move, so update its call sites accordingly. `buildSystemPrompt` stays on the front door but is also handed to the tools service as the `systemPrompt` func in Task 4 — keep them the same function.)
 
 **Gotchas:** `buildSystemPrompt` calls `loadProjectContext` — decide whether `buildSystemPrompt` stays on the front door (it composes env + steering + project context) consuming the persistence service, or moves. Keep it on the front door for now; it consumes `persistence.LoadProjectContext`. `assembleHistory` reads compaction config from the config service — inject it.
 
@@ -262,7 +270,7 @@ After Tasks 1–6, `Server` holds service interfaces + the turn/broker glue. Thi
 - The `Server` struct should now be: the service interfaces (`config.Service`, `providers.Resolver`, `tools.Catalog`, `persistence.Service`, `runtimes.Supervisors`, `permissions.Broker`), the event hub, the turn/broker state (`turnsMu`, `activeTurns`, `turnGens`), `agent *agent.Agent`, `watchdog`, `usageSink`. Confirm no orphan fields remain.
 - `NewServer` becomes the composition root: construct each service with its collaborators, register the config `Subscribe` callbacks (→ providers.Rebuild, runtimes.SyncMeridianForProfile), inject services into each other, return the wired front door. The many `Set*` methods that tests use to inject collaborators should now forward to the owning service (keep them for test compatibility, delegating).
 - Keep `beginTurn`/`turnIsCurrent`/`turnGenLocked`/`hasActiveTurn`/`runMainLoop`/`streamProcessRequestWithToolLoop`/`SubscribeEvents`/`BeginShutdown`/`Shutdown` on the front door — Phase 3 extracts the turn execution into the runner; this phase leaves them.
-- **Gate:** `go build ./... && go vet ./... && go test ./... -count=1` green; `wc -l internal/server/server.go` is dramatically smaller (target: the bulk of the ~2900 lines has moved to `hostsvc/*`); `grep -c "s\.currentConfig\|s\.cfgMu\|s\.permStore\|s\.pendingDecisions\|s\.toolRegistry\|s\.meridianMgr" internal/server/server.go` is 0 (all field access now goes through services).
+- **Gate:** `go build ./... && go vet ./... && go test ./... -count=1` green; `wc -l internal/server/server.go` is dramatically smaller (target: the bulk of the ~2900 lines has moved to `hostsvc/*`); `grep -c "s\.currentConfig\|s\.cfgMu\|s\.permStore\|s\.pendingDecisions\|s\.toolRegistry\|s\.meridianMgr\|s\.healthMonitorCancel\|s\.registry\|s\.openProvider\|s\.compactionGen" internal/server/server.go` is 0 (all field access now goes through services).
 
 **Commit:** `refactor(server): slim front door to a composition root over hostsvc/*`
 

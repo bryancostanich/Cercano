@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"cercano/source/server/internal/agent"
-	"cercano/source/server/pkg/config"
 	"cercano/source/server/internal/engine"
 	llamaengine "cercano/source/server/internal/engine/llamaserver"
 	"cercano/source/server/internal/engine/ollama"
@@ -22,6 +21,7 @@ import (
 	"cercano/source/server/internal/loop"
 	"cercano/source/server/internal/server"
 	"cercano/source/server/internal/tools"
+	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 
 	"google.golang.org/adk/session"
@@ -56,7 +56,7 @@ func main() {
 		cfg = config.Defaults()
 	}
 
-	fmt.Printf("Local model: %s\n", cfg.OpenModel)
+	fmt.Printf("Local model: %s\n", cfg.OpenChatModel())
 	fmt.Printf("Ollama URL: %s\n", cfg.OllamaURL)
 	if cfg.CloudProvider != "" {
 		fmt.Printf("Cloud provider: %s (%s)\n", cfg.CloudProvider, cfg.CloudModel)
@@ -106,7 +106,7 @@ func main() {
 	sessionSvc := session.InMemoryService()
 	coordinator := loop.NewADKCoordinator(openProvider, cloudProvider, validator, sessionSvc)
 
-	smartRouter, err := agent.NewSmartRouterFromBytes(openProvider, cloudProvider, cfg.EmbeddingModel, ollamaEng, agent.DefaultPrototypes(), func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.ModelProvider, error) {
+	smartRouter, err := agent.NewSmartRouterFromBytes(openProvider, cloudProvider, cfg.OpenEmbeddingModel(), ollamaEng, agent.DefaultPrototypes(), func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.ModelProvider, error) {
 		return legacymodels.NewCloudModelProvider(ctx, provider, model, apiKey, baseURL)
 	})
 	if err != nil {
@@ -216,9 +216,9 @@ func selectOpenEngine(cfg config.Config, ollamaEng engine.InferenceEngine, llama
 	if strings.EqualFold(cfg.OpenRuntime, "llama_server") {
 		model := strings.TrimSpace(cfg.LlamaServer.DefaultModel)
 		if model == "" {
-			model = cfg.OpenModel
+			model = cfg.OpenChatModel()
 		}
 		return llamaEng, model
 	}
-	return ollamaEng, cfg.OpenModel
+	return ollamaEng, cfg.OpenChatModel()
 }

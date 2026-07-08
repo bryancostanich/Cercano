@@ -161,7 +161,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	// since MCP tools never classify intent. Prototypes are embedded in the
 	// binary (see //go:embed in internal/agent/router.go). See GitHub issue #5.
 	routerFactory := func() (*agent.SmartRouter, error) {
-		return agent.NewSmartRouterFromBytes(openProvider, cloudProvider, cfg.EmbeddingModel, ollamaEng, agent.DefaultPrototypes(), cloudFactory)
+		return agent.NewSmartRouterFromBytes(openProvider, cloudProvider, cfg.OpenEmbeddingModel(), ollamaEng, agent.DefaultPrototypes(), cloudFactory)
 	}
 	lazyRouter := agent.NewLazyRouter(routerFactory, openProvider, cloudProvider)
 
@@ -194,7 +194,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	agentOpts := []agent.AgentOption{
 		agent.WithConversationStore(convStore),
 		agent.WithPersistentStore(persistentStore),
-		agent.WithContextMeter(meterRegistry, cfg.OpenModel),
+		agent.WithContextMeter(meterRegistry, cfg.OpenChatModel()),
 		agent.WithContextLoader(ctxLoader),
 	}
 	// Living recap: after each turn, a debounced local-model pass updates a
@@ -256,7 +256,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 			VerbatimRecent:        cfg.Compaction.VerbatimRecent,
 		}
 		if summarizerModel == "" {
-			fmt.Fprintf(os.Stderr, "[compaction] WARN: no summarizer_model and no models.tiers.fast_light.open configured — compaction summarizes with the interactive open model (%s), which can be very slow for large histories\n", cfg.OpenModel)
+			fmt.Fprintf(os.Stderr, "[compaction] WARN: no summarizer_model and no models.tiers.fast_light.open configured — compaction summarizes with the interactive open model (%s), which can be very slow for large histories\n", cfg.OpenChatModel())
 		}
 		compGen = compactiongen.New(persistentStore, compactSummarize, compCfg, contextmeter.Default(), 10*time.Second)
 		// Runtime kill switch — Schedule noops until enabled. Wiring the
@@ -423,7 +423,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	// dispatch engine reads it raw and wraps per-dispatch (no double-count).
 	srv.SetOpenLLMProvider(ollamallm.NewClient(ollamallm.Config{
 		BaseURL: cfg.OllamaURL,
-		Model:   cfg.OpenModel,
+		Model:   cfg.OpenChatModel(),
 	}))
 
 	// Wire the co-processor dispatch engine. Providers are resolved fresh per
@@ -441,7 +441,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		if isCloud {
 			return cfg.CloudModel
 		}
-		return cfg.OpenModel
+		return cfg.OpenChatModel()
 	})
 	// Activate the usage sink so capabilities that set RecordUsage=true (the coproc
 	// caps) emit one event per dispatch. processCoproc/research/document leave
@@ -572,11 +572,11 @@ func selectOpenEngine(cfg config.Config, ollamaEng engine.InferenceEngine, llama
 	if strings.EqualFold(cfg.OpenRuntime, "llama_server") {
 		model := strings.TrimSpace(cfg.LlamaServer.DefaultModel)
 		if model == "" {
-			model = cfg.OpenModel
+			model = cfg.OpenChatModel()
 		}
 		return llamaEng, model
 	}
-	return ollamaEng, cfg.OpenModel
+	return ollamaEng, cfg.OpenChatModel()
 }
 
 func main() {
@@ -787,13 +787,14 @@ func runSetup(installEngine bool) {
 				}
 				fmt.Printf("  OK: %s pulled.\n", picked)
 				cfg.OpenModel = picked
+				cfg.Models.Tiers.Everyday.Open = picked
 			} else {
 				fmt.Fprintln(os.Stderr, "  Skipping model pull. Pull a chat model with `ollama pull <model>` and re-run `cercano setup`.")
 			}
 		} else {
 			// Use the configured model if it's installed; otherwise fall
 			// back to the first installed chat model and update the config.
-			configured := strings.TrimSuffix(cfg.OpenModel, ":latest")
+			configured := strings.TrimSuffix(cfg.OpenChatModel(), ":latest")
 			configuredPresent := false
 			for _, m := range chatModels {
 				if strings.TrimSuffix(m, ":latest") == configured {
@@ -802,11 +803,12 @@ func runSetup(installEngine bool) {
 				}
 			}
 			if configuredPresent {
-				fmt.Printf("  OK: Using %s (from config).\n", cfg.OpenModel)
+				fmt.Printf("  OK: Using %s (from config).\n", cfg.OpenChatModel())
 			} else {
 				chosen := chatModels[0]
-				fmt.Printf("  Configured model %q not installed. Using %s instead.\n", cfg.OpenModel, chosen)
+				fmt.Printf("  Configured model %q not installed. Using %s instead.\n", cfg.OpenChatModel(), chosen)
 				cfg.OpenModel = chosen
+				cfg.Models.Tiers.Everyday.Open = chosen
 			}
 
 			if len(chatModels) > 1 {
@@ -857,14 +859,14 @@ func runSetup(installEngine bool) {
 	if engineAvailable {
 		installed, err := listInstalledModels(cfg.OllamaURL)
 		if err == nil {
-			if hasInstalledModel(installed, cfg.EmbeddingModel) {
-				fmt.Printf("  OK: Embedding model %s is installed.\n", cfg.EmbeddingModel)
+			if hasInstalledModel(installed, cfg.OpenEmbeddingModel()) {
+				fmt.Printf("  OK: Embedding model %s is installed.\n", cfg.OpenEmbeddingModel())
 			} else {
-				fmt.Printf("  Pulling embedding model %s...\n", cfg.EmbeddingModel)
-				if err := pullModel(cfg.OllamaURL, cfg.EmbeddingModel); err != nil {
-					fmt.Fprintf(os.Stderr, "  WARN: Could not pull %s: %v\n", cfg.EmbeddingModel, err)
+				fmt.Printf("  Pulling embedding model %s...\n", cfg.OpenEmbeddingModel())
+				if err := pullModel(cfg.OllamaURL, cfg.OpenEmbeddingModel()); err != nil {
+					fmt.Fprintf(os.Stderr, "  WARN: Could not pull %s: %v\n", cfg.OpenEmbeddingModel(), err)
 				} else {
-					fmt.Printf("  OK: %s pulled.\n", cfg.EmbeddingModel)
+					fmt.Printf("  OK: %s pulled.\n", cfg.OpenEmbeddingModel())
 				}
 			}
 		} else {
@@ -1440,7 +1442,7 @@ func runServerMode(cfg config.Config) {
 	}()
 
 	fmt.Printf("Starting Cercano gRPC server (v%s)...\n", version)
-	fmt.Printf("Local model: %s\n", cfg.OpenModel)
+	fmt.Printf("Local model: %s\n", cfg.OpenChatModel())
 	fmt.Printf("Ollama URL: %s\n", cfg.OllamaURL)
 	if crashWriter != nil {
 		fmt.Printf("Crash log: %s\n", crashLogPath)
@@ -1512,7 +1514,7 @@ func runMCPMode(cfg config.Config, externalGRPC string) {
 	} else {
 		// Embedded mode: start gRPC server in-process on a random port
 		fmt.Fprintf(os.Stderr, "Cercano MCP server (v%s) starting with embedded gRPC server...\n", version)
-		fmt.Fprintf(os.Stderr, "Local model: %s | Ollama: %s\n", cfg.OpenModel, cfg.OllamaURL)
+		fmt.Fprintf(os.Stderr, "Local model: %s | Ollama: %s\n", cfg.OpenChatModel(), cfg.OllamaURL)
 
 		addr, _, err := startGRPCServer(cfg, "localhost:0")
 		if err != nil {

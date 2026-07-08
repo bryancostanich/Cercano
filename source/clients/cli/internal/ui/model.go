@@ -803,7 +803,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.pendingConfirm != nil {
-			return m, nil
+			// Confirm pending: the prompt is dormant, but let the wheel scroll
+			// the scrollback so the user can review context before answering.
+			cmd := m.chat.Update(msg)
+			return m, cmd
 		}
 		if m.chat.SelectionDragging() {
 			return m, nil
@@ -945,9 +948,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tea.KeyPressMsg:
-		// Pending confirm gates ALL keys — until the user resolves it, the
-		// input, scrollback, and any in-flight slash commands stay dormant.
+		// Pending confirm gates keys — until the user resolves it, the
+		// input and any in-flight slash commands stay dormant. Scrollback
+		// navigation stays live, though, so the user can page back to review
+		// what the tool is about to touch before answering y/n.
 		if m.pendingConfirm != nil {
+			if key.Matches(msg, keys.ScrollKeys) {
+				cmd := m.chat.Update(msg)
+				return m, cmd
+			}
 			next, cmd := m.resolveConfirmKey(msg.String())
 			return next, cmd
 		}

@@ -1169,18 +1169,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up":
 			// On an empty prompt, ↑ first unstages the most-recently-queued
 			// message for editing (takes priority over history).
-			if unmodifiedArrow && m.input.Value() == "" && m.input.Line() == 0 && m.unstageLastQueued() {
+			if unmodifiedArrow && m.input.Value() == "" && m.input.CursorOnFirstRow() && m.unstageLastQueued() {
 				return m, nil
 			}
-			// On the first line, ↑ recalls the previous submitted input (shell
-			// style); otherwise it falls through to move the cursor up.
-			if unmodifiedArrow && m.input.Line() == 0 && m.recallHistoryPrev() {
+			// On the first visual row, ↑ recalls the previous submitted input
+			// (shell style); otherwise it falls through to move the cursor up a
+			// row. This counts soft-wrapped rows, not just hard newlines, so ↑
+			// inside a long wrapped line moves the cursor rather than clobbering
+			// the draft with history.
+			if unmodifiedArrow && m.input.CursorOnFirstRow() && m.recallHistoryPrev() {
 				return m, nil
 			}
 		case "down":
-			// On the last line, ↓ steps forward through history; otherwise it
-			// falls through to move the cursor down.
-			if unmodifiedArrow && m.input.Line() == m.input.LineCount()-1 && m.recallHistoryNext() {
+			// On the last visual row, ↓ steps forward through history; otherwise
+			// it falls through to move the cursor down a row.
+			if unmodifiedArrow && m.input.CursorOnLastRow() && m.recallHistoryNext() {
 				return m, nil
 			}
 		}

@@ -187,8 +187,20 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	// Living recap: after each turn, a debounced local-model pass updates a
 	// one-line conversation summary. Only when a persistent store exists.
 	if persistentStore != nil {
+		// Recap rides the fast_light_text tier's open slot — the taxonomy's
+		// prose-judgment lane (watchdog verdicts, summaries, recaps) — so it
+		// never depends on the interactive open model, which may be heavy or
+		// even unloadable. Unset tier keeps the provider default.
+		recapModel := ""
+		if id, _, ok := cfg.Models.Resolve(config.TierFastLightText, config.ProviderOpen, true); ok {
+			recapModel = id
+		}
 		recapComplete := func(ctx context.Context, prompt string) (string, error) {
-			resp, err := openProvider.Process(ctx, &agent.Request{Input: prompt})
+			req := &agent.Request{Input: prompt}
+			if recapModel != "" {
+				req.ModelOverride = recapModel
+			}
+			resp, err := openProvider.Process(ctx, req)
 			if err != nil {
 				return "", err
 			}

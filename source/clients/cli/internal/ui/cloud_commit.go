@@ -82,10 +82,32 @@ func (sp *settingsPage) applyCloudDraftEdit(field, value string) {
 	}
 }
 
+// cloudCommitNeedsAgent reports whether executing the action reaches the
+// agent over gRPC. Row selection and plain draft edits are local; a draft
+// model edit on an existing profile pushes immediately (shouldApplyModelEdit)
+// and so needs the agent too.
+func cloudCommitNeedsAgent(ca cloudCommitAction, draftNew bool) bool {
+	switch ca.kind {
+	case cloudCommitSave, cloudCommitActivate, cloudCommitBackup,
+		cloudCommitDelete, cloudCommitKey, cloudCommitSignIn:
+		return true
+	case cloudCommitDraftEdit:
+		return shouldApplyModelEdit(ca.field, draftNew)
+	}
+	return false
+}
+
 // commitCloud executes a cloud-section action and returns the form status, an
 // optional tea.Cmd, and an error. Profile mutations invalidate the cache so the
 // next snapshot re-fetches.
 func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, error) {
+	// Fail fast while the connection is down: these RPCs block the update
+	// loop for their full deadline and then fail anyway. The reconnect
+	// watcher already knows the agent is restarting — say so instead.
+	if cloudCommitNeedsAgent(ca, sp.cloudDraftNew) && sp.agent != nil &&
+		sp.agent.State() != agentclient.ConnStateConnected {
+		return "agent reconnecting — retry in a moment", nil, nil
+	}
 	switch ca.kind {
 	case cloudCommitSelect:
 		sp.selectCloudRow(ca.rowID)

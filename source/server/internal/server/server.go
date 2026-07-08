@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"os/exec"
@@ -573,6 +574,17 @@ func (s *Server) GetCloudProfiles(ctx context.Context, req *proto.GetCloudProfil
 
 // SetActiveCloudProfile implements proto.AgentServer — switches the active cloud profile.
 func (s *Server) SetActiveCloudProfile(ctx context.Context, req *proto.SetActiveCloudProfileRequest) (*proto.SetActiveCloudProfileResponse, error) {
+	// The client may have given up while this RPC sat in a queue (agent
+	// restart, lock contention). Applying it anyway split-brains client and
+	// server: the CLI reports failure while the switch silently lands. Bail
+	// before mutating; a client that still wants the switch will re-send.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	start := time.Now()
+	defer func() {
+		log.Printf("[cloud] SetActiveCloudProfile(%q) took %v", req.GetName(), time.Since(start).Round(time.Millisecond))
+	}()
 	s.cfgMu.Lock()
 	if _, ok := profileByName(s.currentConfig.CloudProfiles, req.GetName()); !ok {
 		s.cfgMu.Unlock()

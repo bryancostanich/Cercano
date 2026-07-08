@@ -99,3 +99,51 @@ func TestFallbackClaudeModelsIncludeCurrentGeneration(t *testing.T) {
 		}
 	}
 }
+
+// TestCloudCommitNeedsAgent pins which cloud actions reach the agent over
+// gRPC (and so must fail fast while the connection is down) versus the
+// local-only ones that must never be blocked by connection state.
+func TestCloudCommitNeedsAgent(t *testing.T) {
+	rpc := []cloudCommitKind{cloudCommitSave, cloudCommitActivate, cloudCommitBackup,
+		cloudCommitDelete, cloudCommitKey, cloudCommitSignIn}
+	for _, k := range rpc {
+		if !cloudCommitNeedsAgent(cloudCommitAction{kind: k}, false) {
+			t.Errorf("kind %d should need the agent", k)
+		}
+	}
+	local := []cloudCommitKind{cloudCommitNone, cloudCommitSelect}
+	for _, k := range local {
+		if cloudCommitNeedsAgent(cloudCommitAction{kind: k}, false) {
+			t.Errorf("kind %d must stay local", k)
+		}
+	}
+	// Draft edits are local — except a model edit on an existing profile,
+	// which pushes immediately (shouldApplyModelEdit).
+	if cloudCommitNeedsAgent(cloudCommitAction{kind: cloudCommitDraftEdit, field: "cloud-name"}, false) {
+		t.Error("name draft edit must stay local")
+	}
+	if cloudCommitNeedsAgent(cloudCommitAction{kind: cloudCommitDraftEdit, field: "cloud-model"}, true) {
+		t.Error("model edit on a NEW draft must stay local")
+	}
+	if !cloudCommitNeedsAgent(cloudCommitAction{kind: cloudCommitDraftEdit, field: "cloud-model"}, false) {
+		t.Error("model edit on an existing profile pushes immediately — needs the agent")
+	}
+}
+
+// TestCloudCommitNoErrorKeepsSnapshotCache pins the counterpart of the
+// error-path invalidation in onCommit: a commit that does NOT error (here a
+// nil-agent activate, which returns a status) must leave the snapshot cache
+// alone. The error branch itself (profilesLoaded dropped so the form's
+// error-path reload refetches truth) is exercised end-to-end by
+// TestFormCommitErrorReloadsSections plus the three-line branch in onCommit.
+func TestCloudCommitNoErrorKeepsSnapshotCache(t *testing.T) {
+	sp := cloudSamplePage()
+	sp.profilesLoaded = true
+	_, _, err := sp.onCommit("cloud-activate", "activate")
+	if err != nil {
+		t.Fatalf("nil-agent activate should not error (returns status): %v", err)
+	}
+	if !sp.profilesLoaded {
+		t.Fatal("no-error commit must not drop the cache")
+	}
+}

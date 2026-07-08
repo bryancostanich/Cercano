@@ -7,6 +7,7 @@ import (
 
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/locus"
+	"cercano/source/server/pkg/config"
 )
 
 // TestCoprocDispatchOpenPick verifies that local_primary routes coproc to local.
@@ -76,7 +77,7 @@ func TestCoprocDispatchNoProviderError(t *testing.T) {
 		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
-	eng.SetModelFor(func(isCloud bool) string { return "local-model" })
+	eng.SetModelFor(func(isCloud bool, _ config.Tier) string { return "local-model" })
 
 	a := NewAgent(&fakeCoprocRouter{providers: map[string]ModelProvider{}}, nil)
 	a.SetLocusModeGetter(func() string { return "open_only" })

@@ -439,12 +439,10 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		func() locus.Mode { m, _ := locus.ParseMode(srv.LocusMode()); return m },
 		ctxLoader,
 	)
-	coprocEngine.SetModelFor(func(isCloud bool) string {
-		if isCloud {
-			return cfg.CloudModel
-		}
-		return cfg.OpenChatModel()
-	})
+	// Model resolution is tier-aware and live: DispatchModelFor reads the
+	// taxonomy under the config lock per dispatch, so runtime tier/profile
+	// changes are honored and no startup-captured cfg value can go stale.
+	coprocEngine.SetModelFor(srv.DispatchModelFor)
 	// Activate the usage sink so capabilities that set RecordUsage=true (the coproc
 	// caps) emit one event per dispatch. processCoproc/research/document leave
 	// RecordUsage false, so they stay MCP-side — no double-counting.

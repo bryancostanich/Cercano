@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/locus"
+	"cercano/source/server/pkg/config"
 )
 
 // TestAgenticDispatch_InvokesRunner verifies that Dispatch routes an Agentic
@@ -19,7 +20,7 @@ func TestAgenticDispatch_InvokesRunner(t *testing.T) {
 		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
-	eng.SetModelFor(func(isCloud bool) string { return "local-model" })
+	eng.SetModelFor(func(isCloud bool, _ config.Tier) string { return "local-model" })
 
 	var gotSpec Spec
 	var gotSel Selection
@@ -66,7 +67,7 @@ func TestAgenticDispatch_ModelOverride(t *testing.T) {
 		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
-	eng.SetModelFor(func(isCloud bool) string { return "default-model" })
+	eng.SetModelFor(func(isCloud bool, _ config.Tier) string { return "default-model" })
 	eng.SetAgenticRunner(func(_ context.Context, _ Spec, _ Selection, model string) (Result, error) {
 		return Result{Text: "ok", Model: model}, nil
 	})
@@ -93,7 +94,7 @@ func TestAgenticDispatch_NoRunner(t *testing.T) {
 		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
-	eng.SetModelFor(func(isCloud bool) string { return "local-model" })
+	eng.SetModelFor(func(isCloud bool, _ config.Tier) string { return "local-model" })
 	// no SetAgenticRunner call
 
 	_, err := eng.Dispatch(context.Background(), Spec{Mode: Agentic, Role: RoleCoproc, Task: "x"})
@@ -113,7 +114,7 @@ func TestAgenticDispatch_RunnerError(t *testing.T) {
 		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
-	eng.SetModelFor(func(isCloud bool) string { return "local-model" })
+	eng.SetModelFor(func(isCloud bool, _ config.Tier) string { return "local-model" })
 	eng.SetAgenticRunner(func(_ context.Context, _ Spec, _ Selection, _ string) (Result, error) {
 		return Result{}, errors.New("runner exploded")
 	})
@@ -135,7 +136,7 @@ func TestAgenticAndOneShotCoexist(t *testing.T) {
 		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
-	eng.SetModelFor(func(isCloud bool) string { return "local-model" })
+	eng.SetModelFor(func(isCloud bool, _ config.Tier) string { return "local-model" })
 	eng.SetAgenticRunner(func(_ context.Context, _ Spec, _ Selection, _ string) (Result, error) {
 		return Result{Text: "agentic"}, nil
 	})

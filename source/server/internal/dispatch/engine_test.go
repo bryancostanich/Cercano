@@ -9,6 +9,7 @@ import (
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/usage"
+	"cercano/source/server/pkg/config"
 )
 
 // provs adapts a static Providers value to the func() Providers that NewEngine takes.
@@ -61,7 +62,7 @@ func TestOneShotScopesOwnProviderSession(t *testing.T) {
 		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
-	eng.SetModelFor(func(isCloud bool) string { return "local-model" })
+	eng.SetModelFor(func(isCloud bool, _ config.Tier) string { return "local-model" })
 
 	parentCtx := llm.WithSessionID(context.Background(), "parent-session-id")
 	for i := 0; i < 2; i++ {
@@ -95,7 +96,7 @@ func TestOneShotReturnsTextAndTokens(t *testing.T) {
 		func() locus.Mode { return locus.OpenOnly },
 		nil, // no project context loader
 	)
-	eng.SetModelFor(func(isCloud bool) string { return "local-model" })
+	eng.SetModelFor(func(isCloud bool, _ config.Tier) string { return "local-model" })
 
 	res, err := eng.Dispatch(context.Background(), Spec{
 		Mode: OneShot, Role: RoleCoproc, Prompt: "summarize this", Source: "coproc:summarize",
@@ -121,7 +122,7 @@ func TestOneShotModelOverride(t *testing.T) {
 		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
-	eng.SetModelFor(func(isCloud bool) string { return "default-model" })
+	eng.SetModelFor(func(isCloud bool, _ config.Tier) string { return "default-model" })
 
 	res, err := eng.Dispatch(context.Background(), Spec{
 		Mode:          OneShot,
@@ -161,7 +162,7 @@ func TestOneShotEmitsSourceLabeledUsage(t *testing.T) {
 		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
-	eng.SetModelFor(func(isCloud bool) string { return "local-model" })
+	eng.SetModelFor(func(isCloud bool, _ config.Tier) string { return "local-model" })
 	eng.SetUsageSink(sink)
 
 	_, err := eng.Dispatch(context.Background(), Spec{
@@ -203,7 +204,7 @@ func TestOneShotRecordsUsageOnlyWhenRequested(t *testing.T) {
 			func() locus.Mode { return locus.OpenOnly },
 			nil,
 		)
-		eng.SetModelFor(func(isCloud bool) string { return "local-model" })
+		eng.SetModelFor(func(isCloud bool, _ config.Tier) string { return "local-model" })
 		eng.SetUsageSink(sink)
 		return eng
 	}
@@ -266,7 +267,7 @@ func TestOneShotWantsProjectContext_NoContextFile(t *testing.T) {
 		func() locus.Mode { return locus.OpenOnly },
 		loader,
 	)
-	eng.SetModelFor(func(isCloud bool) string { return "local-model" })
+	eng.SetModelFor(func(isCloud bool, _ config.Tier) string { return "local-model" })
 
 	res, err := eng.Dispatch(context.Background(), Spec{
 		Mode:                OneShot,
@@ -281,5 +282,41 @@ func TestOneShotWantsProjectContext_NoContextFile(t *testing.T) {
 	// echoProvider echoes the prompt; since no context file exists, prompt is unchanged.
 	if !strings.Contains(res.Text, "explain this") {
 		t.Fatalf("expected prompt in response, got %q", res.Text)
+	}
+}
+
+// Tier resolution: an explicit Spec.Tier reaches modelFor; empty tiers
+// default by role — RoleMain → everyday, RoleCoproc → fast_light_text.
+func TestDispatchTierResolution(t *testing.T) {
+	var seen []config.Tier
+	eng := NewEngine(
+		provs(Providers{Open: echoProvider{}}),
+		func() locus.Mode { return locus.OpenOnly },
+		nil,
+	)
+	eng.SetModelFor(func(_ bool, tier config.Tier) string {
+		seen = append(seen, tier)
+		return "m-" + string(tier)
+	})
+
+	cases := []struct {
+		spec Spec
+		want config.Tier
+	}{
+		{Spec{Mode: OneShot, Role: RoleCoproc, Prompt: "p"}, config.TierFastLightText},
+		{Spec{Mode: OneShot, Role: RoleMain, Prompt: "p"}, config.TierEveryday},
+		{Spec{Mode: OneShot, Role: RoleCoproc, Prompt: "p", Tier: config.TierEveryday}, config.TierEveryday},
+	}
+	for i, c := range cases {
+		res, err := eng.Dispatch(context.Background(), c.spec)
+		if err != nil {
+			t.Fatalf("case %d: %v", i, err)
+		}
+		if seen[i] != c.want {
+			t.Errorf("case %d: modelFor saw tier %q, want %q", i, seen[i], c.want)
+		}
+		if res.Model != "m-"+string(c.want) {
+			t.Errorf("case %d: model %q, want %q", i, res.Model, "m-"+string(c.want))
+		}
 	}
 }

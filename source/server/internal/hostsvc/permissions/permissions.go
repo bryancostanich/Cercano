@@ -85,7 +85,7 @@ func (p *broker) SetMode(m agent.PermissionMode) error {
 
 func (p *broker) AddMCPAllow(name string) error {
 	if p.store == nil {
-		return fmt.Errorf("permission store not configured")
+		return nil // silent no-op when no store (matches pre-refactor behavior)
 	}
 	return p.store.AddMCPAllow(name)
 }
@@ -96,7 +96,7 @@ func (p *broker) HasPending() bool {
 
 func (p *broker) Wait(ctx context.Context, toolUseID string) (agent.Decision, error) {
 	if p.pending == nil {
-		return agent.Decision{}, fmt.Errorf("no pending-decisions barrier")
+		return agent.Decision{}, nil // no barrier → zero decision (matches pre-refactor)
 	}
 	return p.pending.Wait(ctx, toolUseID)
 }

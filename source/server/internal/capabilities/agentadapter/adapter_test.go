@@ -77,6 +77,35 @@ func TestBuildAgentRegistrySkipsSynonymCollidingWithPrimary(t *testing.T) {
 	}
 }
 
+type stubCapability struct {
+	exec func(context.Context, *capabilities.Call) (*capabilities.Result, error)
+}
+
+func (s stubCapability) Name() string                    { return "stub" }
+func (s stubCapability) Description() string             { return "" }
+func (s stubCapability) Tier() capabilities.Tier         { return capabilities.TierR }
+func (s stubCapability) Schema() capabilities.Schema     { return capabilities.Schema(`{"type":"object"}`) }
+func (s stubCapability) Surfaces() capabilities.Surface  { return capabilities.SurfaceAgent }
+func (s stubCapability) Execute(ctx context.Context, c *capabilities.Call) (*capabilities.Result, error) {
+	return s.exec(ctx, c)
+}
+
+func TestCapTool_ThreadsWorkDirFromContext(t *testing.T) {
+	var seen string
+	cap := stubCapability{exec: func(ctx context.Context, call *capabilities.Call) (*capabilities.Result, error) {
+		seen = call.WorkDir
+		return capabilities.NewTextResult("ok"), nil
+	}}
+	tool := AsTool(cap, "Stub", capabilities.Services{})
+	ctx := agenttools.WithWorkDir(context.Background(), "/repo")
+	if _, err := tool.Execute(ctx, []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	if seen != "/repo" {
+		t.Errorf("call.WorkDir = %q, want /repo", seen)
+	}
+}
+
 // spyCap records the Call it received so tests can assert Services plumbing.
 type spyCap struct{ got *capabilities.Call }
 

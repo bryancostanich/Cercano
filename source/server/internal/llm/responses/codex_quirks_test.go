@@ -6,6 +6,7 @@ package responses
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"cercano/source/server/internal/llm"
@@ -91,3 +92,34 @@ func TestErrorFromBody_Shapes(t *testing.T) {
 type staticTokens struct{}
 
 func (staticTokens) Token(context.Context) (string, string, error) { return "tok", "acct", nil }
+
+// TestStreamErrorMessage_Shapes pins error extraction from every error-frame
+// shape the Responses SSE stream produces. The generic fallback must carry
+// the raw frame — "responses stream error" alone is undiagnosable.
+func TestStreamErrorMessage_Shapes(t *testing.T) {
+	cases := []struct {
+		name  string
+		frame string
+		want  string
+	}{
+		{"response.failed nested", `{"type":"response.failed","response":{"error":{"message":"rate limit exceeded"}}}`,
+			"rate limit exceeded"},
+		{"top-level error event", `{"type":"error","code":"server_error","message":"The server had an error"}`,
+			"server_error: The server had an error"},
+		{"top-level error envelope", `{"type":"error","error":{"message":"boom"}}`,
+			"boom"},
+		{"opaque frame", `{"type":"error","unexpected":"shape"}`,
+			`responses stream error: {"type":"error","unexpected":"shape"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var env streamEnvelope
+			if err := json.Unmarshal([]byte(tc.frame), &env); err != nil {
+				t.Fatalf("frame does not parse: %v", err)
+			}
+			if got := streamErrorMessage(env, tc.frame); got != tc.want {
+				t.Errorf("streamErrorMessage = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

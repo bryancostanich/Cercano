@@ -142,3 +142,62 @@ func TestStreamMsgToEvent_Watchdog(t *testing.T) {
 		t.Errorf("thread = %q, want %q", wdm.thread, "main")
 	}
 }
+
+func TestWatchdogSupersede_RewriteFoldsChallengedReply(t *testing.T) {
+	c := newChatView(theme.NewStyles(theme.Cracker()), theme.Cracker(), "", "", 80, 20)
+
+	c.Apply(chatAssistantDeltaMsg{token: "Too technical."})
+	c.Apply(watchdogEventMsg{kind: "challenge", protocol: "plain-english", summary: "Use plain language"})
+	c.Apply(chatAssistantDeltaMsg{token: "Plain rewrite."})
+
+	if len(c.entries) < 4 {
+		t.Fatalf("entries = %d, want at least 4", len(c.entries))
+	}
+	old := c.entries[0]
+	if !old.Superseded {
+		t.Fatal("challenged reply was not marked superseded after rewrite started")
+	}
+	if old.SupersededOpen {
+		t.Fatal("superseded reply should start collapsed")
+	}
+	newReply := c.entries[len(c.entries)-1]
+	if newReply.Content != "Plain rewrite." {
+		t.Fatalf("rewrite content = %q", newReply.Content)
+	}
+
+	collapsed := stripAnsiCSI(c.renderEntry(old, 0))
+	if !strings.Contains(collapsed, "superseded") {
+		t.Fatalf("collapsed superseded render missing label: %q", collapsed)
+	}
+	if strings.Contains(collapsed, "Too technical") {
+		t.Fatalf("collapsed superseded render leaked original text: %q", collapsed)
+	}
+
+	old.SupersededOpen = true
+	expanded := stripAnsiCSI(c.renderEntry(old, 0))
+	if !strings.Contains(expanded, "Too technical") {
+		t.Fatalf("expanded superseded render missing original text: %q", expanded)
+	}
+}
+
+func TestWatchdogSupersede_JustifyKeepsChallengedReplyVisible(t *testing.T) {
+	c := newChatView(theme.NewStyles(theme.Cracker()), theme.Cracker(), "", "", 80, 20)
+
+	c.Apply(chatAssistantDeltaMsg{token: "I am keeping this reply."})
+	c.Apply(watchdogEventMsg{kind: "challenge", protocol: "plain-english", summary: "Use plain language"})
+	c.Apply(toolEntryStartMsg{id: "justify-1", name: "justify"})
+	c.Apply(toolEntryExecCompleteMsg{id: "justify-1"})
+	c.Apply(chatDoneMsg{})
+
+	old := c.entries[0]
+	if old.Superseded {
+		t.Fatal("justified reply should not be marked superseded")
+	}
+	if c.pendingCensor != nil {
+		t.Fatal("successful justify should clear pending censor")
+	}
+	rendered := stripAnsiCSI(c.renderEntry(old, 0))
+	if !strings.Contains(rendered, "I am keeping this reply") {
+		t.Fatalf("original reply should remain visible, got: %q", rendered)
+	}
+}

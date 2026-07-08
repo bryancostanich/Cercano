@@ -63,7 +63,14 @@ type chatView struct {
 	// arrowRows maps absolute content lines (indexes into plainLines) to the
 	// entries index whose fold arrow is drawn there. Rebuilt by SetEntries on
 	// every render, so it can never drift from the drawn layout.
-	arrowRows      []arrowRow
+	arrowRows []arrowRow
+
+	// pendingCensor is the assistant entry the most recent watchdog
+	// challenge/block fired against. If the model rewrites (a fresh assistant
+	// entry starts streaming), the entry folds away as Superseded; a
+	// successful justify call clears the mark instead, leaving the reply
+	// visible. Nil when no challenge is pending.
+	pendingCensor  *Entry
 	focusedToolIdx int
 	// groupExpanded tracks which collapsed multi-entry tool-call groups have
 	// been expanded by Enter on a focused group. Key is the entries-slice
@@ -320,6 +327,15 @@ func (c *chatView) streamingTextEntry() *Entry {
 	return nil
 }
 
+func (c *chatView) foldPendingCensor() {
+	if c.pendingCensor == nil {
+		return
+	}
+	c.pendingCensor.Superseded = true
+	c.pendingCensor.SupersededOpen = false
+	c.pendingCensor = nil
+}
+
 // FillOpenAssistant fills the open streaming placeholder with text and clears
 // its Streaming flag (mirrors the chatDoneMsg fill semantics). Returns true if
 // a placeholder was found and closed; false if there was no open entry (caller
@@ -364,6 +380,9 @@ func (c *chatView) Apply(msg tea.Msg) tea.Cmd {
 		if e == nil {
 			e = &Entry{Role: RoleAssistant, Streaming: true}
 			c.AppendEntry(e)
+			// A fresh reply after a watchdog challenge is the rewrite. Fold the
+			// reply that triggered the challenge unless a justify call cleared it.
+			c.foldPendingCensor()
 		}
 		e.Content += m.token
 		// Once real tokens arrive, the pre-stream progress note is no longer
@@ -433,12 +452,18 @@ func (c *chatView) Apply(msg tea.Msg) tea.Cmd {
 			t.Duration = dur
 			t.ResultSummary = humanizeResult(m.detail, m.summary, m.isError, dur)
 			t.StartLine = m.startLine
+			if t.ToolName == "justify" && !m.isError {
+				// The model overruled the watchdog — the challenged reply
+				// stands; don't fold it.
+				c.pendingCensor = nil
+			}
 		}
 
 	case chatAssistantMsg:
 		// Whole-message append (the /c confirm rationale and any non-streaming
 		// driver use this instead of delta-extend). A complete assistant entry,
 		// not streaming.
+		c.foldPendingCensor()
 		c.AppendEntry(&Entry{Role: RoleAssistant, Content: m.text})
 
 	case chatDoneMsg:
@@ -448,6 +473,7 @@ func (c *chatView) Apply(msg tea.Msg) tea.Cmd {
 			// answer as a fresh entry below them.
 			e = &Entry{Role: RoleAssistant}
 			c.AppendEntry(e)
+			c.foldPendingCensor()
 		}
 		if e != nil {
 			// If we never received any tokens, fall back to the full final response.
@@ -469,6 +495,12 @@ func (c *chatView) Apply(msg tea.Msg) tea.Cmd {
 		c.AppendEntry(&Entry{Role: RoleSystem, Content: "stream error: " + m.err.Error()})
 
 	case watchdogEventMsg:
+		if m.kind == "challenge" || m.kind == "block" {
+			if e := c.lastAssistantEntry(); e != nil {
+				e.Streaming = false
+				c.pendingCensor = e
+			}
+		}
 		if m.kind == "echo" {
 			// Dim single-line: "<thread>: <summary>"
 			c.AppendEntry(&Entry{Role: RoleWatchdog, Content: m.thread + ": " + m.summary})
@@ -826,6 +858,14 @@ func (c *chatView) SetEntries(entries []*Entry) {
 			i = j
 		} else {
 			seg := c.renderEntryCached(entries[i], i)
+			if entries[i].Superseded {
+				c.arrowRows = append(c.arrowRows, arrowRow{line: nl, entry: i})
+				if entries[i].SupersededOpen {
+					for ln := 1; ln <= strings.Count(seg, "\n"); ln++ {
+						c.arrowRows = append(c.arrowRows, arrowRow{line: nl + ln, entry: i, railMin: 0, railMax: toolRailContentCol})
+					}
+				}
+			}
 			b.WriteString(seg)
 			nl += strings.Count(seg, "\n")
 			i++
@@ -993,6 +1033,21 @@ func (c *chatView) renderEntry(e *Entry, idx int) string {
 		return strings.Join(lines, "\n")
 
 	case RoleAssistant:
+		if e.Superseded {
+			label := c.styles.Muted.Render("▸ ⚡ superseded — rewritten after watchdog challenge")
+			if !e.SupersededOpen {
+				return indentBlock(pad, label)
+			}
+			label = c.styles.Muted.Render("▾ ⚡ superseded — rewritten after watchdog challenge")
+			rendered := c.renderAssistantMarkdown(e, textW)
+			if strings.TrimSpace(rendered) == "" {
+				rendered = c.styles.Muted.Render("(empty reply)")
+			}
+			lines := strings.Split(label+"\n"+rendered, "\n")
+			railBody(lines)
+			return indentBlock(pad, strings.Join(lines, "\n"))
+		}
+
 		// Pre-text placeholder: no prose yet — show the live turn status inline
 		// (activity · elapsed · tokens · engine) where the agent is working.
 		if e.Streaming && e.Content == "" {
@@ -1183,6 +1238,10 @@ func (c *chatView) MouseToggleFold(localX, localY int) bool {
 	// earlier keyboard nav doesn't linger. The ▶ caret is a keyboard-only
 	// affordance.
 	c.focusedToolIdx = -1
+	if r.entry >= 0 && r.entry < len(c.entries) && c.entries[r.entry].Superseded {
+		c.entries[r.entry].SupersededOpen = !c.entries[r.entry].SupersededOpen
+		return true
+	}
 	if r.group {
 		// The summary header, or the outer group rail, collapses/expands the run.
 		c.toggleGroup(r.entry)

@@ -53,6 +53,7 @@ func (writeFileCap) Execute(ctx context.Context, call *capabilities.Call) (*capa
 	if a.Path == "" {
 		return nil, errors.New("write_file: path is required")
 	}
+	a.Path = resolvePath(call.WorkDir, a.Path)
 	mkdir := true
 	if a.Mkdir != nil {
 		mkdir = *a.Mkdir
@@ -131,6 +132,7 @@ func (editFileCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 	if a.Path == "" {
 		return nil, errors.New("edit_file: path is required")
 	}
+	a.Path = resolvePath(call.WorkDir, a.Path)
 	if a.OldString == "" {
 		return nil, errors.New("edit_file: old_string is required")
 	}

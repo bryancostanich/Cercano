@@ -206,3 +206,41 @@ func TestWriteFileCapability_RecordsStartLineOne(t *testing.T) {
 		t.Errorf("StartLine = %d, want 1 (a write always begins at line 1)", res.StartLine)
 	}
 }
+
+// -- WorkDir resolution tests --
+
+func TestWriteFile_RelativePathResolvesAgainstWorkDir(t *testing.T) {
+	workDir := t.TempDir()
+	call := &capabilities.Call{
+		WorkDir: workDir,
+		Args:    []byte(`{"path":"out.txt","content":"data"}`),
+		Emit:    func(string) {},
+	}
+	if _, err := WriteFile().Execute(context.Background(), call); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(workDir, "out.txt"))
+	if err != nil || string(b) != "data" {
+		t.Errorf("file not written under WorkDir: b=%q err=%v", b, err)
+	}
+}
+
+func TestEditFile_RelativePathResolvesAgainstWorkDir(t *testing.T) {
+	workDir := t.TempDir()
+	relPath := "edit.txt"
+	fullPath := filepath.Join(workDir, relPath)
+	os.WriteFile(fullPath, []byte("foo bar"), 0o644)
+
+	call := &capabilities.Call{
+		WorkDir: workDir,
+		Args:    []byte(`{"path":"edit.txt","old_string":"bar","new_string":"BAR"}`),
+		Emit:    func(string) {},
+	}
+	if _, err := EditFile().Execute(context.Background(), call); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	b, err := os.ReadFile(fullPath)
+	if err != nil || string(b) != "foo BAR" {
+		t.Errorf("file not edited at WorkDir path: b=%q err=%v", b, err)
+	}
+}

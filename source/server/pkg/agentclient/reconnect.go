@@ -221,6 +221,12 @@ func (c *Client) currentState() ConnState {
 	return c.state
 }
 
+// State reports the current connection health as tracked by the reconnect
+// watcher. Interactive clients use it to fail RPC-backed actions fast while
+// the agent is restarting, instead of burning a call deadline on a
+// connection that is known to be down.
+func (c *Client) State() ConnState { return c.currentState() }
+
 // setState atomically updates and broadcasts the new state. No-op if the
 // state hasn't actually changed (silences duplicate events).
 //

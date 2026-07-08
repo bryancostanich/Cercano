@@ -1,6 +1,7 @@
 package form
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -179,5 +180,47 @@ func TestFormFocusedLineTracksCursor(t *testing.T) {
 	f.View(80, p, s)
 	if f.FocusedLine() <= first {
 		t.Fatalf("focused line should grow as cursor descends across sections; got %d (was %d)", f.FocusedLine(), first)
+	}
+}
+
+// TestFormCommitErrorReloadsSections pins the error-path reload: a failed
+// commit may still have applied server-side (client deadline racing the
+// server finishing the work), and hosts drop their snapshot caches on error —
+// the form must re-snapshot so it paints the server's truth, and must not
+// swallow the OnCommit followup cmd.
+func TestFormCommitErrorReloadsSections(t *testing.T) {
+	reloaded := false
+	followedUp := false
+	f := New([]Section{{Title: "A", Fields: []Field{NewText("a1", "a1", "old", "")}}})
+	f.OnCommit = func(key, value string) (string, tea.Cmd, error) {
+		return "", func() tea.Msg { followedUp = true; return nil }, fmt.Errorf("deadline exceeded")
+	}
+	f.OnReload = func() []Section {
+		reloaded = true
+		return []Section{{Title: "A", Fields: []Field{NewText("a1", "a1", "fresh", "")}}}
+	}
+	f.Update(enter())
+	cmd, _ := f.Update(enter()) // commit -> OnCommit error
+	if !reloaded {
+		t.Error("failed commit did not reload sections")
+	}
+	if !strings.Contains(f.status, "save failed: deadline exceeded") {
+		t.Errorf("status = %q, want save failed: deadline exceeded", f.status)
+	}
+	if cmd == nil {
+		t.Fatal("followup cmd dropped on error")
+	}
+	// The followup may come back bare or wrapped in a tea.BatchMsg.
+	if msg := cmd(); !followedUp {
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, c := range batch {
+				if c != nil {
+					c()
+				}
+			}
+		}
+	}
+	if !followedUp {
+		t.Error("followup cmd not the one OnCommit returned")
 	}
 }

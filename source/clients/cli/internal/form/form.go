@@ -138,7 +138,15 @@ func (f *Form) commit(key, val string, fieldCmd tea.Cmd) tea.Cmd {
 	status, cmd, err := f.OnCommit(key, val)
 	if err != nil {
 		f.status = "save failed: " + err.Error()
-		return fieldCmd
+		// Reload on failure too: the failed call may still have applied on
+		// the server (e.g. a client deadline expiring while the server
+		// finishes the work), and hosts invalidate their snapshot caches on
+		// error — re-snapshot so the form shows the server's truth rather
+		// than pre-commit state. With caches intact this is a no-op repaint.
+		if f.OnReload != nil {
+			f.Sections = f.OnReload()
+		}
+		return tea.Batch(fieldCmd, cmd)
 	}
 	f.status = status
 	if f.OnReload != nil {

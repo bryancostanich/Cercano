@@ -305,7 +305,15 @@ func (sp *settingsPage) View() string {
 func (sp *settingsPage) onCommit(key, value string) (string, tea.Cmd, error) {
 	// Cloud provider keys — handled before everything else.
 	if ca := classifyCloudCommit(key, value); ca.kind != cloudCommitNone {
-		return sp.commitCloud(ca)
+		status, cmd, err := sp.commitCloud(ca)
+		if err != nil {
+			// The RPC may still have applied server-side (a client deadline
+			// can expire while the server finishes the work). Drop the
+			// snapshot cache so the form's error-path reload refetches the
+			// server's truth instead of repainting stale state.
+			sp.profilesLoaded = false
+		}
+		return status, cmd, err
 	}
 
 	// Color edits — handled before classifyCommit (not a config/permission key).

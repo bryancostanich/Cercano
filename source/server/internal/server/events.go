@@ -125,24 +125,13 @@ func (s *Server) broadcastConfigChanged(field, value string) {
 	})
 }
 
-// broadcastPermissionMode pushes a PermissionModeChanged event to all clients,
-// deduped by value: the SetPermissionMode RPC and the file watcher both fire on
-// the same write, and a no-op rewrite (same mode) shouldn't spam clients. Only a
-// mode that differs from the last broadcast propagates. New subscribers don't
-// rely on a broadcast for their initial value — they fetch it once on connect —
-// so suppressing identical repeats is safe.
+// broadcastPermissionMode pushes a PermissionModeChanged event to all clients.
+// Deduplication is handled by the permissions.Broker (both the SetMode RPC path
+// and the file-watcher path call through the broker before arriving here).
 func (s *Server) broadcastPermissionMode(mode string) {
 	if s.events == nil {
 		return
 	}
-	s.permBcastMu.Lock()
-	if mode == s.lastBcastMode {
-		s.permBcastMu.Unlock()
-		return
-	}
-	s.lastBcastMode = mode
-	s.permBcastMu.Unlock()
-
 	s.events.broadcast(&proto.ClientEvent{
 		Event: &proto.ClientEvent_PermissionModeChanged{
 			PermissionModeChanged: &proto.PermissionModeChanged{Mode: mode},

@@ -22,6 +22,7 @@ import (
 	"cercano/source/server/internal/capabilities/builtins"
 	"cercano/source/server/internal/chatgptauth"
 	"cercano/source/server/internal/cloudfactory"
+	"cercano/source/server/internal/hostsvc/permissions"
 	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/compactiongen"
 	"cercano/source/server/internal/compactor"
@@ -81,10 +82,9 @@ type Server struct {
 	currentConfig       config.Config      // current config state for persistence
 	toolRegistry        *agenttools.Registry
 	capRegistry         *capabilities.Registry
-	permStore           *agent.PermissionStore
+	permBroker          permissions.Broker
 	mcpManager          McpManager
 	meridianMgr         *meridian.Manager
-	pendingDecisions    *agent.PendingDecisions
 	cloudLLMProvider    llm.Provider
 	openLLMProvider     llm.Provider                     // native-tool-loop local provider (Ollama or llama-server)
 	openProviderFactory func(config.Config) llm.Provider // rebuilds openLLMProvider on runtime change
@@ -101,10 +101,8 @@ type Server struct {
 	watchdog         *watchdog.Watchdog // protocol-supervision gate; nil = disabled (default)
 	usageSink        func(usage.Usage)  // wraps the main-loop provider for token recording
 
-	events        *eventHub    // server->client push fan-out (SubscribeEvents)
-	permBcastMu   sync.Mutex   // guards lastBcastMode
-	lastBcastMode string       // last permission mode broadcast; dedupes file-watcher vs SetMode
-	cfgMu         sync.RWMutex // guards all access to currentConfig
+	events *eventHub    // server->client push fan-out (SubscribeEvents)
+	cfgMu  sync.RWMutex // guards all access to currentConfig
 
 	// activeTurns enforces one live turn per conversation. A new turn on a
 	// conversation that already has one supersedes it: the prior turn's ctx is
@@ -233,8 +231,9 @@ func (s *Server) InstallCapabilities() {
 // SetPermissions wires the permission store and pending-decisions barrier used
 // by the SetPermissionMode / GetPermissionMode / Allow|DenyToolCall RPCs.
 func (s *Server) SetPermissions(store *agent.PermissionStore, pending *agent.PendingDecisions) {
-	s.permStore = store
-	s.pendingDecisions = pending
+	s.permBroker = permissions.New(store, pending, func(mode string) {
+		s.broadcastPermissionMode(mode)
+	})
 }
 
 // SetMcpManager wires the MCP host manager so the RPC handlers can delegate to it.
@@ -2429,7 +2428,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	}
 
 	requester := func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission, destructive bool) (bool, error) {
-		if s.pendingDecisions == nil {
+		if s.permBroker == nil || !s.permBroker.HasPending() {
 			return false, nil
 		}
 		if err := stream.Send(&proto.StreamProcessResponse{
@@ -2445,13 +2444,13 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		}); err != nil {
 			return false, err
 		}
-		d, err := s.pendingDecisions.Wait(ctx, toolUseID)
+		d, err := s.permBroker.Wait(ctx, toolUseID)
 		if err != nil {
 			return false, err
 		}
-		if d.Allow && d.Persist && s.permStore != nil {
+		if d.Allow && d.Persist {
 			if tool, ok := s.toolRegistry.Get(name); ok && agenttools.OriginOf(tool) == agenttools.OriginMCP {
-				if err := s.permStore.AddMCPAllow(name); err != nil {
+				if err := s.permBroker.AddMCPAllow(name); err != nil {
 					fmt.Fprintf(os.Stderr, "[mcp] persist always-allow for %s: %v\n", name, err)
 				}
 			}
@@ -2690,10 +2689,14 @@ func (s *Server) runMainLoop(
 	watchdogTurnEnd agent.WatchdogTurnEnd,
 	registry *agenttools.Registry,
 ) (agent.ToolLoopResult, error) {
+	var permStore *agent.PermissionStore
+	if s.permBroker != nil {
+		permStore = s.permBroker.Store()
+	}
 	return agent.RunToolLoop(ctx, agent.ToolLoopInput{
 		Provider:            provider,
 		Registry:            registry,
-		Permissions:         s.permStore,
+		Permissions:         permStore,
 		UserInput:           req.GetInput(),
 		Images:              mapInlineImages(req.GetImages()),
 		Model:               s.mainModelFor(isCloud),
@@ -2840,46 +2843,42 @@ func (s *Server) mapRequest(req *proto.ProcessRequestRequest) *agent.Request {
 
 // SetPermissionMode implements proto.AgentServer.
 func (s *Server) SetPermissionMode(ctx context.Context, req *proto.SetPermissionModeRequest) (*proto.SetPermissionModeResponse, error) {
-	if s.permStore == nil {
+	if s.permBroker == nil {
 		return &proto.SetPermissionModeResponse{Ok: false, Error: "permission store not configured"}, nil
 	}
 	m, err := agent.ParseMode(req.GetMode())
 	if err != nil {
 		return &proto.SetPermissionModeResponse{Ok: false, Error: err.Error()}, nil
 	}
-	if err := s.permStore.SetMode(m); err != nil {
+	if err := s.permBroker.SetMode(m); err != nil {
 		return &proto.SetPermissionModeResponse{Ok: false, Error: err.Error()}, nil
 	}
-	// Push to every connected client so their status bars update reactively.
-	// The file watcher also fires for this same write; broadcastPermissionMode
-	// dedupes by value so the two paths collapse to one event.
-	s.broadcastPermissionMode(string(m))
 	return &proto.SetPermissionModeResponse{Ok: true}, nil
 }
 
 // GetPermissionMode implements proto.AgentServer.
 func (s *Server) GetPermissionMode(ctx context.Context, req *proto.GetPermissionModeRequest) (*proto.GetPermissionModeResponse, error) {
-	if s.permStore == nil {
+	if s.permBroker == nil {
 		return &proto.GetPermissionModeResponse{Mode: string(agent.ModePermissive)}, nil
 	}
-	return &proto.GetPermissionModeResponse{Mode: string(s.permStore.Mode())}, nil
+	return &proto.GetPermissionModeResponse{Mode: string(s.permBroker.Mode())}, nil
 }
 
 // AllowToolCall implements proto.AgentServer.
 func (s *Server) AllowToolCall(ctx context.Context, req *proto.AllowToolCallRequest) (*proto.AllowToolCallResponse, error) {
-	if s.pendingDecisions == nil {
+	if s.permBroker == nil {
 		return &proto.AllowToolCallResponse{Ok: false}, nil
 	}
-	ok := s.pendingDecisions.Resolve(req.GetToolUseId(), agent.Decision{Allow: true, Persist: req.GetPersist()})
+	ok := s.permBroker.Resolve(req.GetToolUseId(), agent.Decision{Allow: true, Persist: req.GetPersist()})
 	return &proto.AllowToolCallResponse{Ok: ok}, nil
 }
 
 // DenyToolCall implements proto.AgentServer.
 func (s *Server) DenyToolCall(ctx context.Context, req *proto.DenyToolCallRequest) (*proto.DenyToolCallResponse, error) {
-	if s.pendingDecisions == nil {
+	if s.permBroker == nil {
 		return &proto.DenyToolCallResponse{Ok: false}, nil
 	}
-	ok := s.pendingDecisions.Resolve(req.GetToolUseId(), agent.Decision{Allow: false})
+	ok := s.permBroker.Resolve(req.GetToolUseId(), agent.Decision{Allow: false})
 	return &proto.DenyToolCallResponse{Ok: ok}, nil
 }
 

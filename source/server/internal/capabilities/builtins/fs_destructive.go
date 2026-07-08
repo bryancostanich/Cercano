@@ -39,6 +39,7 @@ func (rmFileCap) Execute(ctx context.Context, call *capabilities.Call) (*capabil
 	if a.Path == "" {
 		return nil, errors.New("rm_file: path is required")
 	}
+	a.Path = resolvePath(call.WorkDir, a.Path)
 	info, err := os.Stat(a.Path)
 	if err != nil {
 		return nil, fmt.Errorf("rm_file: %w", err)

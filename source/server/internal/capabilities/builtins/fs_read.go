@@ -247,9 +247,15 @@ func (globCap) Execute(ctx context.Context, call *capabilities.Call) (*capabilit
 	if a.Pattern == "" {
 		return nil, errors.New("glob: pattern is required")
 	}
+	base := a.Path
+	if base == "" {
+		base = call.WorkDir
+	} else {
+		base = resolvePath(call.WorkDir, base)
+	}
 	pat := a.Pattern
-	if a.Path != "" {
-		pat = filepath.Join(a.Path, a.Pattern)
+	if base != "" {
+		pat = filepath.Join(base, a.Pattern)
 	}
 	matches, err := filepath.Glob(pat)
 	if err != nil {

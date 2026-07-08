@@ -59,6 +59,7 @@ func (gitWorktreeCap) Execute(ctx context.Context, call *capabilities.Call) (*ca
 	if err != nil {
 		return nil, fmt.Errorf("git_worktree: %w", err)
 	}
+	a.Path = resolvePath(call.WorkDir, a.Path)
 	path, err := r.CreateWorktree(ctx, a.Path, a.Branch, cfg.Trunk)
 	if err != nil {
 		return nil, err

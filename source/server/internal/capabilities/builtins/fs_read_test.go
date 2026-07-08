@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"cercano/source/server/internal/capabilities"
@@ -133,5 +134,20 @@ func TestReadFile_RelativePathResolvesAgainstWorkDir(t *testing.T) {
 	}
 	if res.Text != "hi" {
 		t.Errorf("content = %q, want hi", res.Text)
+	}
+}
+
+func TestGlob_ResolvesAgainstWorkDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "match.go"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	call := &capabilities.Call{WorkDir: dir, Args: []byte(`{"pattern":"*.go"}`), Emit: func(string) {}}
+	res, err := Glob().Execute(context.Background(), call)
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	if !strings.Contains(res.Text, "match.go") {
+		t.Errorf("glob missed the file under WorkDir: %q", res.Text)
 	}
 }

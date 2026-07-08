@@ -51,6 +51,7 @@ func (summarizeCap) Execute(ctx context.Context, call *capabilities.Call) (*capa
 
 	content := a.Text
 	if a.FilePath != "" {
+		a.FilePath = resolvePath(call.WorkDir, a.FilePath)
 		data, err := os.ReadFile(a.FilePath)
 		if err != nil {
 			return nil, fmt.Errorf("summarize: failed to read file %q: %w", a.FilePath, err)

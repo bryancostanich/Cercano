@@ -55,6 +55,7 @@ func (extractCap) Execute(ctx context.Context, call *capabilities.Call) (*capabi
 
 	content := a.Text
 	if a.FilePath != "" {
+		a.FilePath = resolvePath(call.WorkDir, a.FilePath)
 		data, err := os.ReadFile(a.FilePath)
 		if err != nil {
 			return nil, fmt.Errorf("extract: failed to read file %q: %w", a.FilePath, err)

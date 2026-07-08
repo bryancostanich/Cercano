@@ -2276,7 +2276,10 @@ func (m *Model) relayout() {
 	if n := len(m.recapLines()); n > 0 {
 		recapH = 1 + n // blank spacer line + the wrapped recap line(s)
 	}
-	queuedH := len(m.chat.Queued()) // one row per queued message, rendered above the prompt
+	queuedH := 0
+	if !m.contentPageActive() {
+		queuedH = len(m.chat.Queued()) // one row per queued message, rendered above the prompt
+	}
 	// Size the input first — DynamicHeight re-fits it to the wrapped content at
 	// this width; the body claims whatever rows are left.
 	m.input.SetWidth(contentW - 4)
@@ -2391,8 +2394,10 @@ func (m Model) promptTop() int {
 	if m.recap != "" {
 		top += 2 // blank spacer line + the recap line
 	}
-	top += len(m.chat.Queued()) // queued messages render above the prompt border
-	top++                       // prompt border above the input
+	if !m.contentPageActive() {
+		top += len(m.chat.Queued()) // queued messages render above the prompt border
+	}
+	top++ // prompt border above the input
 	if hint := m.renderSlashSuggestions(); hint != "" && !m.contentPageActive() {
 		top += strings.Count(hint, "\n") + 1
 	}
@@ -3237,9 +3242,13 @@ func (m Model) View() tea.View {
 
 	promptLine := lipgloss.NewStyle().Foreground(m.promptBorderColor).Render(strings.Repeat("─", m.width))
 	promptParts := []string{}
-	// Queued messages float just above the prompt border.
-	if q := m.renderQueued(); q != "" {
-		promptParts = append(promptParts, q)
+	// Queued messages float just above the prompt border on the main chat page.
+	// Content pages such as /c should show only their own page body and the prompt;
+	// queued chat turns remain pending but do not leak into the page chrome.
+	if !m.contentPageActive() {
+		if q := m.renderQueued(); q != "" {
+			promptParts = append(promptParts, q)
+		}
 	}
 	promptParts = append(promptParts, promptLine)
 	if hint := m.renderSlashSuggestions(); hint != "" && !m.contentPageActive() {

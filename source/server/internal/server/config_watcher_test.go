@@ -24,6 +24,14 @@ func TestReloadConfigFromDisk_AppliesAndBroadcasts(t *testing.T) {
 	if err := config.Save(initial, path); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
+	// Normalize through Load so currentConfig carries the same finalized
+	// tier slots a real boot would — otherwise the reload diff sees a
+	// spurious everyday.open change (Defaults() leaves tiers empty) and
+	// routes into the openProvider path this test deliberately avoids.
+	initial, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("normalize seed: %v", err)
+	}
 
 	srv := &Server{events: newEventHub()}
 	srv.SetConfigPersistence(path, initial)
@@ -69,6 +77,12 @@ func TestReloadConfigFromDisk_NoChangeNoBroadcast(t *testing.T) {
 	if err := config.Save(cfg, path); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
+	// Normalize through Load (see AppliesAndBroadcasts) so the reload diff
+	// doesn't see a spurious everyday.open change against empty tier slots.
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("normalize seed: %v", err)
+	}
 
 	srv := &Server{events: newEventHub()}
 	srv.SetConfigPersistence(path, cfg)
@@ -106,6 +120,12 @@ func TestStartConfigWatcher_EndToEnd(t *testing.T) {
 	cfg.LocusMode = "cloud_primary"
 	if err := config.Save(cfg, path); err != nil {
 		t.Fatalf("seed config: %v", err)
+	}
+	// Normalize through Load (see AppliesAndBroadcasts) so the reload diff
+	// doesn't see a spurious everyday.open change against empty tier slots.
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("normalize seed: %v", err)
 	}
 
 	srv := &Server{events: newEventHub()}
@@ -150,4 +170,3 @@ func TestStartConfigWatcher_EndToEnd(t *testing.T) {
 		}
 	}
 }
-

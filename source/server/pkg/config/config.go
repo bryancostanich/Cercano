@@ -46,8 +46,8 @@ type CloudProfile struct {
 type Config struct {
 	OllamaURL          string            `yaml:"ollama_url"`
 	OpenRuntime       string            `yaml:"open_runtime"`
-	OpenModel         string            `yaml:"open_model"`
-	EmbeddingModel     string            `yaml:"embedding_model"`
+	OpenModel         string            `yaml:"open_model,omitempty"`
+	EmbeddingModel     string            `yaml:"embedding_model,omitempty"`
 	CloudProvider      string            `yaml:"cloud_provider,omitempty"`
 	CloudModel         string            `yaml:"cloud_model,omitempty"`
 	CloudAPIKey        string            `yaml:"cloud_api_key,omitempty"`
@@ -92,7 +92,7 @@ type CompactionConfig struct {
 	// real conversation).
 	LossyToolElision bool `yaml:"lossy_tool_elision"`
 	// SummarizerModel overrides the local model used for compaction
-	// summarization. Empty falls back to OpenModel (the main-loop model).
+	// summarization. Empty falls back to the fast_light tier's open model.
 	// Useful because a code-focused model (qwen3-coder) tends to fabricate
 	// when asked to write extractive summaries; a text-focused model
 	// (phi4, llama3.1) grounds better. Not applied to the main tool loop.
@@ -164,9 +164,7 @@ func (r *RestartConfig) UnmarshalYAML(value *yaml.Node) error {
 func Defaults() Config {
 	return Config{
 		OllamaURL:      "http://localhost:11434",
-		OpenRuntime:   "ollama",
-		OpenModel:     "qwen3-coder",
-		EmbeddingModel: "nomic-embed-text",
+		OpenRuntime: "ollama",
 		LocusMode:      "open_primary",
 		Port:           "50052",
 		Models:         ModelsConfig{DefaultProvider: ProviderOpen},
@@ -291,6 +289,22 @@ func migrateModelTiers(data []byte, cfg *Config) {
 	}
 }
 
+// finalizeModelTiers completes the taxonomy after migration and env
+// overrides: still-empty slots get the stock local models, and the retired
+// legacy fields are blanked so Save (omitempty) drops open_model /
+// embedding_model from the file for good. Runs LAST in both Load paths —
+// defaults must never mask a file, migration, or env choice.
+func finalizeModelTiers(cfg *Config) {
+	if cfg.Models.Tiers.Everyday.Open == "" {
+		cfg.Models.Tiers.Everyday.Open = "qwen3-coder"
+	}
+	if cfg.Models.Tiers.Embedding.Open == "" {
+		cfg.Models.Tiers.Embedding.Open = "nomic-embed-text"
+	}
+	cfg.OpenModel = ""
+	cfg.EmbeddingModel = ""
+}
+
 // Load reads config from the given path, merges with defaults, then applies
 // environment variable overrides. Returns defaults if the file doesn't exist.
 func Load(path string) (Config, error) {
@@ -302,6 +316,7 @@ func Load(path string) (Config, error) {
 			if os.IsNotExist(err) {
 				// No config file — use defaults + env vars
 				applyEnvOverrides(&cfg)
+				finalizeModelTiers(&cfg)
 				return cfg, nil
 			}
 			return cfg, fmt.Errorf("failed to read config file %q: %w", path, err)
@@ -331,12 +346,6 @@ func Load(path string) (Config, error) {
 		if cfg.OpenRuntime == "" {
 			cfg.OpenRuntime = defaults.OpenRuntime
 		}
-		if cfg.OpenModel == "" {
-			cfg.OpenModel = defaults.OpenModel
-		}
-		if cfg.EmbeddingModel == "" {
-			cfg.EmbeddingModel = defaults.EmbeddingModel
-		}
 		if cfg.Port == "" {
 			cfg.Port = defaults.Port
 		}
@@ -344,6 +353,7 @@ func Load(path string) (Config, error) {
 	}
 
 	applyEnvOverrides(&cfg)
+	finalizeModelTiers(&cfg)
 	migrateCloudProfiles(&cfg)
 	autoDetectMeridianRoute(&cfg)
 	return cfg, nil
@@ -418,10 +428,10 @@ func applyEnvOverrides(cfg *Config) {
 	// backward compat with earlier releases. When both are set the new
 	// spelling wins.
 	if v := os.Getenv("CERCANO_LOCAL_MODEL"); v != "" {
-		cfg.OpenModel = v
+		cfg.Models.Tiers.Everyday.Open = v
 	}
 	if v := os.Getenv("CERCANO_OPEN_MODEL"); v != "" {
-		cfg.OpenModel = v
+		cfg.Models.Tiers.Everyday.Open = v
 	}
 	if v := os.Getenv("CERCANO_LOCAL_RUNTIME"); v != "" {
 		cfg.OpenRuntime = v
@@ -430,7 +440,7 @@ func applyEnvOverrides(cfg *Config) {
 		cfg.OpenRuntime = v
 	}
 	if v := os.Getenv("CERCANO_EMBEDDING_MODEL"); v != "" {
-		cfg.EmbeddingModel = v
+		cfg.Models.Tiers.Embedding.Open = v
 	}
 	if v := os.Getenv("CERCANO_PORT"); v != "" {
 		cfg.Port = v

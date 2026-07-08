@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -49,22 +50,68 @@ models:
 	}
 }
 
-// TestMigrateModelTiers_DefaultsDoNotLeak: with no legacy keys in the FILE,
-// the tier slots stay empty even though Defaults() back-fills the legacy
-// fields after migration — a defaulted model must not masquerade as a user's
-// tier choice.
-func TestMigrateModelTiers_DefaultsDoNotLeak(t *testing.T) {
+// TestTierDefaultsFillEmptySlots: with no model keys in the FILE, the tier
+// slots get the stock defaults — and the retired legacy fields stay blank,
+// so a default can never masquerade as a user's migrated choice.
+func TestTierDefaultsFillEmptySlots(t *testing.T) {
 	cfg := loadFromYAML(t, `
 port: "50052"
 `)
-	if cfg.OpenModel == "" {
-		t.Fatal("precondition: defaults should back-fill the legacy OpenModel field")
+	if got := cfg.Models.Tiers.Everyday.Open; got != "qwen3-coder" {
+		t.Errorf("everyday.open = %q, want stock default", got)
 	}
-	if got := cfg.Models.Tiers.Everyday.Open; got != "" {
-		t.Errorf("everyday.open = %q, want empty (defaults must not leak into tiers)", got)
+	if got := cfg.Models.Tiers.Embedding.Open; got != "nomic-embed-text" {
+		t.Errorf("embedding.open = %q, want stock default", got)
 	}
-	if got := cfg.Models.Tiers.Embedding.Open; got != "" {
-		t.Errorf("embedding.open = %q, want empty", got)
+	if cfg.OpenModel != "" || cfg.EmbeddingModel != "" {
+		t.Errorf("legacy fields = (%q, %q), want blanked after load", cfg.OpenModel, cfg.EmbeddingModel)
+	}
+}
+
+// TestRetiredKeysDroppedOnSave: a migrated config saves WITHOUT the legacy
+// keys — the tier slots carry the values from then on.
+func TestRetiredKeysDroppedOnSave(t *testing.T) {
+	cfg := loadFromYAML(t, `
+open_model: my-chat-model
+embedding_model: my-embed-model
+`)
+	out := filepath.Join(t.TempDir(), "saved.yaml")
+	if err := Save(cfg, out); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if strings.Contains(text, "open_model:") || strings.Contains(text, "embedding_model:") {
+		t.Errorf("saved config still contains retired keys:\n%s", text)
+	}
+	reloaded, err := Load(out)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got := reloaded.Models.Tiers.Everyday.Open; got != "my-chat-model" {
+		t.Errorf("reloaded everyday.open = %q, want migrated value to survive the round trip", got)
+	}
+	if got := reloaded.Models.Tiers.Embedding.Open; got != "my-embed-model" {
+		t.Errorf("reloaded embedding.open = %q", got)
+	}
+}
+
+// TestEnvOverrideLandsInTier: the CERCANO_OPEN_MODEL / CERCANO_EMBEDDING_MODEL
+// env overrides write the tier slots (and win over the file).
+func TestEnvOverrideLandsInTier(t *testing.T) {
+	t.Setenv("CERCANO_OPEN_MODEL", "env-chat")
+	t.Setenv("CERCANO_EMBEDDING_MODEL", "env-embed")
+	cfg := loadFromYAML(t, `
+open_model: file-chat
+`)
+	if got := cfg.Models.Tiers.Everyday.Open; got != "env-chat" {
+		t.Errorf("everyday.open = %q, want env override to win", got)
+	}
+	if got := cfg.Models.Tiers.Embedding.Open; got != "env-embed" {
+		t.Errorf("embedding.open = %q, want env override", got)
 	}
 }
 

@@ -17,11 +17,10 @@ func TestDefaults(t *testing.T) {
 	if cfg.OpenRuntime != "ollama" {
 		t.Errorf("expected default OpenRuntime, got %q", cfg.OpenRuntime)
 	}
-	if cfg.OpenModel != "qwen3-coder" {
-		t.Errorf("expected default OpenModel, got %q", cfg.OpenModel)
-	}
-	if cfg.EmbeddingModel != "nomic-embed-text" {
-		t.Errorf("expected default EmbeddingModel, got %q", cfg.EmbeddingModel)
+	// The legacy model fields are retired: Defaults() leaves them blank and
+	// the stock models land in the tier slots at Load time (finalizeModelTiers).
+	if cfg.OpenModel != "" || cfg.EmbeddingModel != "" {
+		t.Errorf("legacy model fields = (%q, %q), want blank in Defaults", cfg.OpenModel, cfg.EmbeddingModel)
 	}
 	if cfg.Port != "50052" {
 		t.Errorf("expected default Port, got %q", cfg.Port)
@@ -56,12 +55,12 @@ func TestLoad_FromFile(t *testing.T) {
 	if cfg.OllamaURL != "http://mac-studio.local:11434" {
 		t.Errorf("expected OllamaURL from file, got %q", cfg.OllamaURL)
 	}
-	if cfg.OpenModel != "GLM-4.7-Flash" {
-		t.Errorf("expected OpenModel from file, got %q", cfg.OpenModel)
+	if got := cfg.OpenChatModel(); got != "GLM-4.7-Flash" {
+		t.Errorf("expected chat model from file (via legacy local_model migration), got %q", got)
 	}
 	// Defaults should fill in unset fields
-	if cfg.EmbeddingModel != "nomic-embed-text" {
-		t.Errorf("expected default EmbeddingModel, got %q", cfg.EmbeddingModel)
+	if got := cfg.OpenEmbeddingModel(); got != "nomic-embed-text" {
+		t.Errorf("expected default embedding model, got %q", got)
 	}
 	if cfg.Port != "50052" {
 		t.Errorf("expected default Port, got %q", cfg.Port)
@@ -109,8 +108,8 @@ func TestLoad_EnvOverridesFile(t *testing.T) {
 		t.Errorf("expected env override for OllamaURL, got %q", cfg.OllamaURL)
 	}
 	// File value should remain where no env var exists
-	if cfg.OpenModel != "file-model" {
-		t.Errorf("expected OpenModel from file, got %q", cfg.OpenModel)
+	if got := cfg.OpenChatModel(); got != "file-model" {
+		t.Errorf("expected chat model from file, got %q", got)
 	}
 }
 
@@ -122,8 +121,8 @@ func TestLoad_EnvOverridesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
-	if cfg.OpenModel != "env-model" {
-		t.Errorf("expected env OpenModel, got %q", cfg.OpenModel)
+	if got := cfg.OpenChatModel(); got != "env-model" {
+		t.Errorf("expected env chat model, got %q", got)
 	}
 	if cfg.Port != "9999" {
 		t.Errorf("expected env Port, got %q", cfg.Port)
@@ -197,7 +196,7 @@ func TestSave_RoundTrip(t *testing.T) {
 
 	cfg := Config{
 		OllamaURL:      "http://studio.local:11434",
-		OpenModel:     "GLM-4.7-Flash",
+		OpenModel:      "GLM-4.7-Flash",
 		EmbeddingModel: "nomic-embed-text",
 		CloudProvider:  "google",
 		CloudModel:     "gemini-2.0-flash",
@@ -216,8 +215,10 @@ func TestSave_RoundTrip(t *testing.T) {
 	if loaded.OllamaURL != cfg.OllamaURL {
 		t.Errorf("OllamaURL mismatch: %q vs %q", loaded.OllamaURL, cfg.OllamaURL)
 	}
-	if loaded.OpenModel != cfg.OpenModel {
-		t.Errorf("OpenModel mismatch: %q vs %q", loaded.OpenModel, cfg.OpenModel)
+	// open_model migrates to the everyday tier on load; the resolver is the
+	// round-trip-stable accessor.
+	if loaded.OpenChatModel() != cfg.OpenModel {
+		t.Errorf("chat model mismatch: %q vs %q", loaded.OpenChatModel(), cfg.OpenModel)
 	}
 	if loaded.CloudProvider != cfg.CloudProvider {
 		t.Errorf("CloudProvider mismatch: %q vs %q", loaded.CloudProvider, cfg.CloudProvider)
@@ -283,8 +284,8 @@ locus_mode: local_primary
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
-	if cfg.OpenModel != "legacy-model" {
-		t.Errorf("expected legacy local_model to populate OpenModel, got %q", cfg.OpenModel)
+	if got := cfg.OpenChatModel(); got != "legacy-model" {
+		t.Errorf("expected legacy local_model to migrate into the everyday tier, got %q", got)
 	}
 	if cfg.OpenRuntime != "llama_server" {
 		t.Errorf("expected legacy local_runtime to populate OpenRuntime, got %q", cfg.OpenRuntime)
@@ -307,8 +308,8 @@ local_model: legacy-model
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
-	if cfg.OpenModel != "new-key-model" {
-		t.Errorf("open_model should win over local_model, got %q", cfg.OpenModel)
+	if got := cfg.OpenChatModel(); got != "new-key-model" {
+		t.Errorf("open_model should win over local_model, got %q", got)
 	}
 }
 

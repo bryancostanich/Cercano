@@ -62,25 +62,18 @@ type ModelsConfig struct {
 	Tiers           ModelTiers `yaml:"tiers"`
 }
 
-// OpenChatModel resolves the interactive local chat model: the everyday
-// tier's open slot, falling back to the legacy open_model field during the
-// migration window. This is THE way to read "which local model do I chat
-// with" — direct cfg.OpenModel reads are being retired (design:
-// docs/features/local-model-taxonomy/design.md).
+// OpenChatModel resolves the interactive local chat model — the everyday
+// tier's open slot. This is THE way to read "which local model do I chat
+// with"; the legacy open_model key is retired (migrated at load, dropped
+// from Save; design: docs/features/local-model-taxonomy/design.md).
 func (c *Config) OpenChatModel() string {
-	if m := c.Models.Tiers.Everyday.Open; m != "" {
-		return m
-	}
-	return c.OpenModel
+	return c.Models.Tiers.Everyday.Open
 }
 
-// OpenEmbeddingModel resolves the embedding model the same way: embedding
-// tier slot first, legacy embedding_model field during the migration window.
+// OpenEmbeddingModel resolves the embedding model the same way — the
+// embedding tier's open slot (legacy embedding_model key retired).
 func (c *Config) OpenEmbeddingModel() string {
-	if m := c.Models.Tiers.Embedding.Open; m != "" {
-		return m
-	}
-	return c.EmbeddingModel
+	return c.Models.Tiers.Embedding.Open
 }
 
 // tier returns the ModelTier for t (zero value for unknown tiers).

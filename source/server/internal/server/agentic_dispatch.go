@@ -227,6 +227,7 @@ func (s *Server) runAgenticDispatch(ctx context.Context, spec dispatch.Spec, sel
 		Permissions:    s.permStore, // parent store; R-tier never gates regardless
 		UserInput:      spec.Task,
 		MaxIterations:  spec.MaxIterations,
+		WorkDir:        spec.WorkDir,
 		OnTextDelta:    func(t string) { buf.WriteString(t) },
 		OnTurnComplete: onTurn,
 		// EventSink: nil — non-interactive; PermissionRequester: nil — R-tier won't gate.

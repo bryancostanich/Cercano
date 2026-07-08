@@ -43,8 +43,12 @@ func (gitStatusCap) Execute(ctx context.Context, call *capabilities.Call) (*capa
 	}
 	args := []string{"status", "--porcelain=v2", "--untracked-files=all"}
 	cmd := exec.CommandContext(ctx, "git", args...)
-	if a.Path != "" {
-		cmd.Dir = a.Path
+	dir := a.Path
+	if dir == "" {
+		dir = call.WorkDir
+	}
+	if dir != "" {
+		cmd.Dir = dir
 	}
 	out, err := cmd.Output()
 	if err != nil {
@@ -167,8 +171,12 @@ func (gitLogCap) Execute(ctx context.Context, call *capabilities.Call) (*capabil
 		args = append(args, "--since", a.Since)
 	}
 	cmd := exec.CommandContext(ctx, "git", args...)
-	if a.Path != "" {
-		cmd.Dir = a.Path
+	dir := a.Path
+	if dir == "" {
+		dir = call.WorkDir
+	}
+	if dir != "" {
+		cmd.Dir = dir
 	}
 	out, err := cmd.Output()
 	if err != nil {

@@ -80,3 +80,40 @@ func TestGrepCapability_ZeroMatches(t *testing.T) {
 		t.Fatalf("expected detail '0 matches', got %q", res.Detail)
 	}
 }
+
+func TestGrep_SearchesWorkDirByDefault(t *testing.T) {
+	// Create a temp dir with content.
+	contentDir := t.TempDir()
+
+	// Write a unique pattern file only in contentDir.
+	needle := "UNIQUE_NEEDLE_FOR_TEST_12345"
+	if err := os.WriteFile(filepath.Join(contentDir, "found.txt"), []byte(needle), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cap := Grep()
+	// Execute grep with no explicit path (defaults to "."), but with WorkDir set to contentDir.
+	args, _ := json.Marshal(map[string]any{"pattern": needle})
+	res, err := cap.Execute(context.Background(), &capabilities.Call{WorkDir: contentDir, Args: args, Emit: func(string) {}})
+	if err != nil {
+		t.Fatalf("grep failed: %v", err)
+	}
+	if res.Type != capabilities.ResultRows {
+		t.Fatalf("expected rows result, got %q", res.Type)
+	}
+	if len(res.Rows) == 0 {
+		t.Errorf("grep missed the file under WorkDir: got 0 rows, expected >=1")
+	}
+
+	// Verify one of the rows points to the file we created.
+	foundFile := false
+	for _, row := range res.Rows {
+		if p, ok := row["path"].(string); ok && (p == "found.txt" || filepath.Base(p) == "found.txt") {
+			foundFile = true
+			break
+		}
+	}
+	if !foundFile {
+		t.Errorf("grep didn't find the expected file path; rows: %v", res.Rows)
+	}
+}

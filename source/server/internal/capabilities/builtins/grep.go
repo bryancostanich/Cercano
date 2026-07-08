@@ -60,6 +60,7 @@ func (grepCap) Execute(ctx context.Context, call *capabilities.Call) (*capabilit
 	if a.Path == "" {
 		a.Path = "."
 	}
+	a.Path = resolvePath(call.WorkDir, a.Path)
 
 	if _, err := exec.LookPath("rg"); err == nil {
 		return grepRunRipgrep(ctx, a)

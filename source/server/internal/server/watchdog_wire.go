@@ -14,16 +14,13 @@ import (
 // behaves exactly as if the watchdog did not exist. dispatchEngine must already
 // be set — the fast-model OneShot lane routes through it.
 func (s *Server) buildWatchdog() *watchdog.Watchdog {
-	s.cfgMu.RLock()
-	wc := s.currentConfig.Watchdog
-	mc := s.currentConfig.Models
-	s.cfgMu.RUnlock()
-	return s.buildWatchdogFrom(wc, mc)
+	cfg := s.cfgSvc.Get()
+	return s.buildWatchdogFrom(cfg.Watchdog, cfg.Models)
 }
 
 // buildWatchdogFrom constructs the watchdog from already-read config sections.
-// It takes NO lock, so a caller already holding s.cfgMu (e.g. UpdateConfig)
-// can rebuild the watchdog without deadlocking.
+// Lock-free: callers that already hold a config snapshot (UpdateConfig) call
+// this directly with the values they have.
 func (s *Server) buildWatchdogFrom(wc config.WatchdogConfig, mc config.ModelsConfig) *watchdog.Watchdog {
 	if !wc.Enabled {
 		return nil

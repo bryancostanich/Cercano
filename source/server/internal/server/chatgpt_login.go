@@ -29,7 +29,8 @@ const defaultChatGPTModel = "gpt-5.5"
 // StartChatGPTLogin implements proto.AgentServer.
 func (s *Server) StartChatGPTLogin(req *proto.StartChatGPTLoginRequest, stream proto.Agent_StartChatGPTLoginServer) error {
 	ctx := stream.Context()
-	if s.secrets == nil {
+	st := s.cfgSvc.Secrets()
+	if st == nil {
 		return sendChatGPTLoginResult(stream, false, "", "", "keychain unavailable")
 	}
 	profile := strings.TrimSpace(req.GetProfileName())
@@ -61,7 +62,7 @@ func (s *Server) StartChatGPTLogin(req *proto.StartChatGPTLoginRequest, stream p
 
 	// Persist the token set under the profile name (same keychain slot API
 	// keys use — a stored blob is the "signed in" signal).
-	if err := chatgptauth.Save(s.secrets, profile, *ts); err != nil {
+	if err := chatgptauth.Save(st, profile, *ts); err != nil {
 		return sendChatGPTLoginResult(stream, false, "", "", err.Error())
 	}
 
@@ -72,23 +73,11 @@ func (s *Server) StartChatGPTLogin(req *proto.StartChatGPTLoginRequest, stream p
 		Route:  cloudfactory.RouteChatGPT,
 		Model:  model,
 	}
-	s.cfgMu.Lock()
-	replaced := false
-	for i, p := range s.currentConfig.CloudProfiles {
-		if p.Name == profile {
-			s.currentConfig.CloudProfiles[i] = np
-			replaced = true
-			break
-		}
-	}
-	if !replaced {
-		s.currentConfig.CloudProfiles = append(s.currentConfig.CloudProfiles, np)
-	}
+	_, isActive := s.cfgSvc.UpsertProfile(np)
 	if req.GetSetActive() {
-		s.currentConfig.ActiveCloudProfile = profile
+		s.cfgSvc.SetActiveProfile(profile)
+		isActive = true
 	}
-	isActive := profile == s.currentConfig.ActiveCloudProfile
-	s.cfgMu.Unlock()
 
 	if isActive {
 		if err := s.rebuildCloud(); err != nil {

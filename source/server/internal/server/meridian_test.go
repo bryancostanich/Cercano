@@ -31,8 +31,8 @@ func TestMeridianPortFromBaseURL(t *testing.T) {
 func TestSyncMeridianForProfile_NilManagerIsNoOp(t *testing.T) {
 	s := &Server{} // meridianMgr nil
 	// Must not panic regardless of profile.
-	s.syncMeridianForProfile(config.CloudProfile{Route: "meridian", BaseURL: "http://127.0.0.1:3456"})
-	s.syncMeridianForProfile(config.CloudProfile{Route: "direct"})
+	s.syncMeridianForProfile(config.CloudProfile{Route: "meridian", BaseURL: "http://127.0.0.1:3456"}, config.Config{})
+	s.syncMeridianForProfile(config.CloudProfile{Route: "direct"}, config.Config{})
 }
 
 func TestSyncMeridianForProfile_NonMeridianRouteStopsManager(t *testing.T) {
@@ -43,7 +43,7 @@ func TestSyncMeridianForProfile_NonMeridianRouteStopsManager(t *testing.T) {
 	m := meridian.New(nil, "")
 	s := &Server{meridianMgr: m}
 
-	s.syncMeridianForProfile(config.CloudProfile{Route: "direct"})
+	s.syncMeridianForProfile(config.CloudProfile{Route: "direct"}, config.Config{})
 
 	if got := m.Status().State; got != meridian.StateDisabled {
 		t.Errorf("state = %s, want disabled (non-meridian route → Stop)", got)
@@ -66,7 +66,7 @@ func TestSyncMeridianForProfile_MeridianRouteCallsEnsure(t *testing.T) {
 	s.syncMeridianForProfile(config.CloudProfile{
 		Route:   "meridian",
 		BaseURL: "http://127.0.0.1:3456",
-	})
+	}, config.Config{})
 
 	// On any host that doesn't have Node 22+ AND a Claude keychain entry
 	// AND nothing on port 3456, the state will be one of:

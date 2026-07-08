@@ -20,13 +20,12 @@ import (
 // and returns the catalog for the settings UI. Empty models + populated
 // error means "fetch failed; render the curated fallback list instead."
 func (s *Server) ListCloudProfileModels(ctx context.Context, req *proto.ListCloudProfileModelsRequest) (*proto.ListCloudProfileModelsResponse, error) {
-	s.cfgMu.RLock()
 	name := req.GetProfileName()
+	cfg := s.cfgSvc.Get()
 	if name == "" {
-		name = s.currentConfig.ActiveCloudProfile
+		name = cfg.ActiveCloudProfile
 	}
-	p, ok := profileByName(s.currentConfig.CloudProfiles, name)
-	s.cfgMu.RUnlock()
+	p, ok := profileByName(cfg.CloudProfiles, name)
 	if !ok {
 		return &proto.ListCloudProfileModelsResponse{Error: fmt.Sprintf("no profile %q", name)}, nil
 	}
@@ -59,8 +58,8 @@ func (s *Server) ListCloudProfileModels(ctx context.Context, req *proto.ListClou
 		httpReq.Header.Set("x-opencode-request", newHexID(16))
 		httpReq.Header.Set("x-opencode-agent-mode", "primary")
 	default:
-		if s.secrets != nil {
-			if key, err := s.secrets.Get(name); err == nil && key != "" {
+		if st := s.cfgSvc.Secrets(); st != nil {
+			if key, err := st.Get(name); err == nil && key != "" {
 				httpReq.Header.Set("x-api-key", key)
 			}
 		}

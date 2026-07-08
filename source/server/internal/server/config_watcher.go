@@ -78,22 +78,21 @@ func (s *Server) StartConfigWatcher(ctx context.Context, configPath string) erro
 	return nil
 }
 
-// reloadConfigFromDisk reads configPath, diffs against currentConfig, and
-// replays the diff through UpdateConfig. Public-method-private-helper split
-// keeps the watcher loop tiny and makes the apply path testable.
+// reloadConfigFromDisk reads the config path, diffs against the current
+// in-memory config, and replays the diff through UpdateConfig. Public-method-
+// private-helper split keeps the watcher loop tiny and makes the apply path
+// testable.
 func (s *Server) reloadConfigFromDisk(ctx context.Context) {
-	newCfg, err := config.Load(s.configPath)
+	cfgPath := s.cfgSvc.Path()
+	newCfg, err := config.Load(cfgPath)
 	if err != nil {
-		fmt.Printf("ConfigWatcher: failed to reload %s: %v\n", s.configPath, err)
+		fmt.Printf("ConfigWatcher: failed to reload %s: %v\n", cfgPath, err)
 		return
 	}
 
-	// Snapshot the current in-memory config under the read lock, then diff
-	// against the snapshot. UpdateConfig (below) takes the write lock itself,
-	// so we must NOT hold cfgMu across that call — release before the diff.
-	s.cfgMu.RLock()
-	snap := s.currentConfig
-	s.cfgMu.RUnlock()
+	// Snapshot the current in-memory config, then diff. UpdateConfig applies
+	// changes through cfgSvc which handles its own locking.
+	snap := s.cfgSvc.Get()
 
 	req := &proto.UpdateConfigRequest{}
 	if newCfg.OllamaURL != snap.OllamaURL {

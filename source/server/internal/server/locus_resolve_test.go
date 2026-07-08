@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/llm"
+	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/pkg/config"
 )
 
@@ -24,7 +25,7 @@ func TestResolveMainProvider(t *testing.T) {
 	local := stubProv{"ollama"}
 
 	mk := func(mode string, c, l llm.Provider) *Server {
-		s := &Server{currentConfig: config.Config{LocusMode: mode}}
+		s := &Server{cfgSvc: cfgsvc.New("", config.Config{LocusMode: mode}, nil)}
 		s.cloudLLMProvider = c
 		s.openLLMProvider = l
 		return s

@@ -6,6 +6,7 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/cloudfactory"
+	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/pkg/config"
@@ -25,22 +26,23 @@ type fakeRouter struct {
 	last agent.ModelProvider
 }
 
-func (f *fakeRouter) SetCloudProvider(p agent.ModelProvider)              { f.last = p }
-func (f *fakeRouter) GetModelProviders() map[string]agent.ModelProvider   { return nil }
+func (f *fakeRouter) SetCloudProvider(p agent.ModelProvider)            { f.last = p }
+func (f *fakeRouter) GetModelProviders() map[string]agent.ModelProvider { return nil }
 
 func newTestServer() (*Server, *fakeRouter) {
 	r := &fakeRouter{}
-	s := &Server{
-		router: r,
-		currentConfig: config.Config{
-			CloudProfiles: []config.CloudProfile{
-				{Name: "messages-one", Flavor: "messages", Model: "claude-3-5-haiku-20241022"},
-				{Name: "cc-one", Flavor: "chat_completions", Model: "gpt-4o"},
-				{Name: "unsup-one", Flavor: "bedrock", Model: "x"},
-			},
+	cfgService := cfgsvc.New("", config.Config{
+		CloudProfiles: []config.CloudProfile{
+			{Name: "messages-one", Flavor: "messages", Model: "claude-3-5-haiku-20241022"},
+			{Name: "cc-one", Flavor: "chat_completions", Model: "gpt-4o"},
+			{Name: "unsup-one", Flavor: "bedrock", Model: "x"},
 		},
+	}, secrets.NewMemory())
+	s := &Server{
+		cfgSvc: cfgService,
+		router: r,
+		events: newEventHub(),
 	}
-	s.SetSecrets(secrets.NewMemory())
 	return s, r
 }
 
@@ -61,7 +63,7 @@ func TestGetCloudProfilesListsBoth(t *testing.T) {
 	}
 
 	// Set a key for messages-one.
-	if err := s.secrets.Set("messages-one", "sk-test"); err != nil {
+	if err := s.cfgSvc.Secrets().Set("messages-one", "sk-test"); err != nil {
 		t.Fatal(err)
 	}
 	resp2, _ := s.GetCloudProfiles(context.Background(), &proto.GetCloudProfilesRequest{})
@@ -80,7 +82,7 @@ func TestGetCloudProfilesListsBoth(t *testing.T) {
 func TestSetActiveCloudProfileMessagesOk(t *testing.T) {
 	s, _ := newTestServer()
 	// Set a key so rebuildCloud can succeed.
-	if err := s.secrets.Set("messages-one", "sk-test"); err != nil {
+	if err := s.cfgSvc.Secrets().Set("messages-one", "sk-test"); err != nil {
 		t.Fatal(err)
 	}
 	resp, err := s.SetActiveCloudProfile(context.Background(), &proto.SetActiveCloudProfileRequest{Name: "messages-one"})
@@ -90,14 +92,14 @@ func TestSetActiveCloudProfileMessagesOk(t *testing.T) {
 	if !resp.Ok {
 		t.Fatalf("want Ok=true, got false: %s", resp.Error)
 	}
-	if s.cloudLLMProvider == nil {
+	if s.CloudLLMProvider() == nil {
 		t.Error("cloudLLMProvider should be non-nil after successful rebuildCloud")
 	}
 }
 
 func TestSetActiveCloudProfileUnsupportedFlavorGoesAbsent(t *testing.T) {
 	s, r := newTestServer()
-	if err := s.secrets.Set("unsup-one", "sk-test"); err != nil {
+	if err := s.cfgSvc.Secrets().Set("unsup-one", "sk-test"); err != nil {
 		t.Fatal(err)
 	}
 	resp, err := s.SetActiveCloudProfile(context.Background(), &proto.SetActiveCloudProfileRequest{Name: "unsup-one"})
@@ -107,7 +109,7 @@ func TestSetActiveCloudProfileUnsupportedFlavorGoesAbsent(t *testing.T) {
 	if resp.Ok {
 		t.Error("want Ok=false for unsupported flavor bedrock")
 	}
-	if s.cloudLLMProvider != nil {
+	if s.CloudLLMProvider() != nil {
 		t.Error("cloudLLMProvider should be nil (cleared) on build failure")
 	}
 	if _, ok := r.last.(*legacymodels.AbsentCloudProvider); !ok {
@@ -173,14 +175,16 @@ func TestSetCloudProfileKey(t *testing.T) {
 // than wiring a dead provider.
 func TestRebuildCloudKeylessGoesAbsent(t *testing.T) {
 	s, r := newTestServer()
-	s.currentConfig.ActiveCloudProfile = "messages-one"
+	s.cfgSvc.Mutate(func(c *config.Config) {
+		c.ActiveCloudProfile = "messages-one"
+	})
 	// No key stored in memory store — secrets.Get will fail.
 
 	err := s.rebuildCloud()
 	if err == nil {
 		t.Fatal("want error from rebuildCloud with no key and no BaseURL")
 	}
-	if s.cloudLLMProvider != nil {
+	if s.CloudLLMProvider() != nil {
 		t.Error("cloudLLMProvider should be nil (absent) when no key")
 	}
 	if _, ok := r.last.(*legacymodels.AbsentCloudProvider); !ok {
@@ -200,15 +204,17 @@ func TestRebuildCloudKeylessBaseURLCarveout(t *testing.T) {
 		Model:   "claude-3-5-haiku-20241022",
 		BaseURL: "http://proxy.example.com",
 	}
-	s.currentConfig.CloudProfiles = append(s.currentConfig.CloudProfiles, proxyProfile)
-	s.currentConfig.ActiveCloudProfile = "proxy-one"
+	s.cfgSvc.Mutate(func(c *config.Config) {
+		c.CloudProfiles = append(c.CloudProfiles, proxyProfile)
+		c.ActiveCloudProfile = "proxy-one"
+	})
 	// No key stored — but BaseURL is set, so guard must not trigger.
 
 	err := s.rebuildCloud()
 	if err != nil {
 		t.Fatalf("rebuildCloud with BaseURL but no key should not go absent: %v", err)
 	}
-	if s.cloudLLMProvider == nil {
+	if s.CloudLLMProvider() == nil {
 		t.Error("cloudLLMProvider should be non-nil when BaseURL carve-out applies")
 	}
 	// Router should hold a real provider, not AbsentCloudProvider.
@@ -236,7 +242,7 @@ func TestInstallAbsentCloudCoordinatorNilSafe(t *testing.T) {
 	// Must not panic even with nil coordinator.
 	s.installAbsentCloud("test: no key")
 
-	if s.cloudLLMProvider != nil {
+	if s.CloudLLMProvider() != nil {
 		t.Error("cloudLLMProvider should be nil after installAbsentCloud")
 	}
 	if _, ok := r.last.(*legacymodels.AbsentCloudProvider); !ok {
@@ -257,7 +263,8 @@ func TestUpsertCloudProfileCreatesAndUpdates(t *testing.T) {
 	if !resp.Ok {
 		t.Fatalf("want Ok, got error: %s", resp.Error)
 	}
-	p, ok := profileByName(s.currentConfig.CloudProfiles, "openai")
+	c := s.cfgSvc.Get()
+	p, ok := profileByName(c.CloudProfiles, "openai")
 	if !ok {
 		t.Fatal("profile openai was not added")
 	}
@@ -272,7 +279,7 @@ func TestUpsertCloudProfileCreatesAndUpdates(t *testing.T) {
 		t.Fatal(err)
 	}
 	count := 0
-	for _, pr := range s.currentConfig.CloudProfiles {
+	for _, pr := range s.cfgSvc.Get().CloudProfiles {
 		if pr.Name == "openai" {
 			count++
 		}
@@ -280,7 +287,7 @@ func TestUpsertCloudProfileCreatesAndUpdates(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("update should not duplicate; got %d openai rows", count)
 	}
-	p2, _ := profileByName(s.currentConfig.CloudProfiles, "openai")
+	p2, _ := profileByName(s.cfgSvc.Get().CloudProfiles, "openai")
 	if p2.Model != "gpt-y" {
 		t.Fatalf("update did not change model: %+v", p2)
 	}
@@ -298,7 +305,7 @@ func TestUpsertCloudProfileRoute(t *testing.T) {
 	if !resp.Ok {
 		t.Fatalf("want Ok, got error: %s", resp.Error)
 	}
-	p, ok := profileByName(s.currentConfig.CloudProfiles, "anthropic")
+	p, ok := profileByName(s.cfgSvc.Get().CloudProfiles, "anthropic")
 	if !ok {
 		t.Fatal("profile anthropic was not added")
 	}
@@ -312,7 +319,7 @@ func TestUpsertCloudProfileRoute(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	p2, _ := profileByName(s.currentConfig.CloudProfiles, "anthropic")
+	p2, _ := profileByName(s.cfgSvc.Get().CloudProfiles, "anthropic")
 	if p2.Route != "meridian" {
 		t.Fatalf("route lost on routeless update: %+v", p2)
 	}
@@ -325,7 +332,7 @@ func TestUpsertCloudProfileRoute(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	p3, _ := profileByName(s.currentConfig.CloudProfiles, "anthropic")
+	p3, _ := profileByName(s.cfgSvc.Get().CloudProfiles, "anthropic")
 	if p3.Route != "direct" {
 		t.Fatalf("explicit route not applied: %+v", p3)
 	}
@@ -341,7 +348,7 @@ func TestUpsertCloudProfileModelPreservedOnEmptyUpdate(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	p, _ := profileByName(s.currentConfig.CloudProfiles, "messages-one")
+	p, _ := profileByName(s.cfgSvc.Get().CloudProfiles, "messages-one")
 	if p.Model != "claude-3-5-haiku-20241022" {
 		t.Fatalf("model lost on modelless update: %+v", p)
 	}
@@ -351,7 +358,7 @@ func TestUpsertCloudProfileModelPreservedOnEmptyUpdate(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	p2, _ := profileByName(s.currentConfig.CloudProfiles, "messages-one")
+	p2, _ := profileByName(s.cfgSvc.Get().CloudProfiles, "messages-one")
 	if p2.Model != "claude-fable-5" {
 		t.Fatalf("explicit model not applied: %+v", p2)
 	}
@@ -360,15 +367,17 @@ func TestUpsertCloudProfileModelPreservedOnEmptyUpdate(t *testing.T) {
 func TestUpsertCloudProfileRebuildsActiveProvider(t *testing.T) {
 	s, _ := newTestServer()
 	// Set a key so rebuildCloud can succeed for the messages flavor.
-	if err := s.secrets.Set("messages-one", "sk-test"); err != nil {
+	if err := s.cfgSvc.Secrets().Set("messages-one", "sk-test"); err != nil {
 		t.Fatal(err)
 	}
 	// Make messages-one the active profile and trigger an initial rebuild.
-	s.currentConfig.ActiveCloudProfile = "messages-one"
+	s.cfgSvc.Mutate(func(c *config.Config) {
+		c.ActiveCloudProfile = "messages-one"
+	})
 	if err := s.rebuildCloud(); err != nil {
 		t.Fatalf("initial rebuildCloud: %v", err)
 	}
-	if s.cloudLLMProvider == nil {
+	if s.CloudLLMProvider() == nil {
 		t.Fatal("cloudLLMProvider should be non-nil after initial rebuild")
 	}
 	// Upsert the active profile with a new model.
@@ -381,12 +390,12 @@ func TestUpsertCloudProfileRebuildsActiveProvider(t *testing.T) {
 	if !resp.Ok {
 		t.Fatalf("want Ok, got: %s", resp.Error)
 	}
-	// rebuildCloud sets s.currentConfig.CloudModel from the active profile's Model.
-	if s.cloudLLMProvider == nil {
+	// rebuildCloud sets cfgSvc CloudModel from the active profile's Model.
+	if s.CloudLLMProvider() == nil {
 		t.Error("cloudLLMProvider should be non-nil after upsert of active profile")
 	}
-	if s.currentConfig.CloudModel != "claude-opus-5" {
-		t.Errorf("CloudModel = %q after rebuild, want claude-opus-5", s.currentConfig.CloudModel)
+	if s.cfgSvc.Get().CloudModel != "claude-opus-5" {
+		t.Errorf("CloudModel = %q after rebuild, want claude-opus-5", s.cfgSvc.Get().CloudModel)
 	}
 }
 
@@ -415,10 +424,12 @@ func TestUpsertCloudProfileValidation(t *testing.T) {
 func TestRemoveCloudProfile(t *testing.T) {
 	s, r := newTestServer()
 	// Seed a key for messages-one so we can verify deletion.
-	if err := s.secrets.Set("messages-one", "sk-test"); err != nil {
+	if err := s.cfgSvc.Secrets().Set("messages-one", "sk-test"); err != nil {
 		t.Fatal(err)
 	}
-	s.currentConfig.ActiveCloudProfile = "messages-one"
+	s.cfgSvc.Mutate(func(c *config.Config) {
+		c.ActiveCloudProfile = "messages-one"
+	})
 	resp, err := s.RemoveCloudProfile(context.Background(), &proto.RemoveCloudProfileRequest{Name: "messages-one"})
 	if err != nil {
 		t.Fatalf("RemoveCloudProfile: %v", err)
@@ -426,16 +437,17 @@ func TestRemoveCloudProfile(t *testing.T) {
 	if !resp.Ok {
 		t.Fatalf("want Ok, got: %s", resp.Error)
 	}
-	if _, ok := profileByName(s.currentConfig.CloudProfiles, "messages-one"); ok {
+	c := s.cfgSvc.Get()
+	if _, ok := profileByName(c.CloudProfiles, "messages-one"); ok {
 		t.Error("profile should be gone")
 	}
-	if _, err := s.secrets.Get("messages-one"); err == nil {
+	if _, err := s.cfgSvc.Secrets().Get("messages-one"); err == nil {
 		t.Error("key should be deleted from keychain")
 	}
-	if s.currentConfig.ActiveCloudProfile != "" {
-		t.Errorf("active should be cleared, got %q", s.currentConfig.ActiveCloudProfile)
+	if c.ActiveCloudProfile != "" {
+		t.Errorf("active should be cleared, got %q", c.ActiveCloudProfile)
 	}
-	if s.cloudLLMProvider != nil {
+	if s.CloudLLMProvider() != nil {
 		t.Error("cloudLLMProvider should be nil after removing active profile")
 	}
 	if _, ok := r.last.(*legacymodels.AbsentCloudProvider); !ok {
@@ -456,8 +468,10 @@ func TestRemoveCloudProfileNonexistent(t *testing.T) {
 
 func TestGetCloudProfilesReportsBackend(t *testing.T) {
 	s, _ := newTestServer()
-	s.currentConfig.CloudProfiles = append(s.currentConfig.CloudProfiles,
-		config.CloudProfile{Name: "g", Flavor: "chat_completions", Backend: "gemini", BaseURL: "u", Model: "m"})
+	s.cfgSvc.Mutate(func(c *config.Config) {
+		c.CloudProfiles = append(c.CloudProfiles,
+			config.CloudProfile{Name: "g", Flavor: "chat_completions", Backend: "gemini", BaseURL: "u", Model: "m"})
+	})
 	resp, _ := s.GetCloudProfiles(context.Background(), &proto.GetCloudProfilesRequest{})
 	var found bool
 	for _, p := range resp.Profiles {
@@ -480,8 +494,10 @@ func TestGetCloudProfilesReportsBackend(t *testing.T) {
 // SoT switch.
 func TestUpdateConfig_CloudModel_UpdatesActiveProfile(t *testing.T) {
 	s, _ := newTestServer()
-	s.currentConfig.ActiveCloudProfile = "messages-one"
-	if err := s.secrets.Set("messages-one", "sk-test"); err != nil {
+	s.cfgSvc.Mutate(func(c *config.Config) {
+		c.ActiveCloudProfile = "messages-one"
+	})
+	if err := s.cfgSvc.Secrets().Set("messages-one", "sk-test"); err != nil {
 		t.Fatalf("seed key: %v", err)
 	}
 	s.events = newEventHub()
@@ -517,8 +533,10 @@ func TestUpdateConfig_CloudModel_UpdatesActiveProfile(t *testing.T) {
 
 func TestSetActiveCloudProfileBedrockKeylessOk(t *testing.T) {
 	s, r := newTestServer()
-	s.currentConfig.CloudProfiles = append(s.currentConfig.CloudProfiles,
-		config.CloudProfile{Name: "bedrock-one", Flavor: "bedrock", Region: "us-east-1", Model: "anthropic.claude-x"})
+	s.cfgSvc.Mutate(func(c *config.Config) {
+		c.CloudProfiles = append(c.CloudProfiles,
+			config.CloudProfile{Name: "bedrock-one", Flavor: "bedrock", Region: "us-east-1", Model: "anthropic.claude-x"})
+	})
 	// No key set for bedrock-one — the keyless guard must NOT send it to absent.
 	resp, err := s.SetActiveCloudProfile(context.Background(), &proto.SetActiveCloudProfileRequest{Name: "bedrock-one"})
 	if err != nil {
@@ -537,10 +555,12 @@ func TestSetActiveCloudProfileBedrockKeylessOk(t *testing.T) {
 // header chip updates live instead of showing the stale model.
 func TestUpsertCloudProfile_ActiveBroadcastsCloudModel(t *testing.T) {
 	s, _ := newTestServer()
-	if err := s.secrets.Set("messages-one", "sk-test"); err != nil {
+	if err := s.cfgSvc.Secrets().Set("messages-one", "sk-test"); err != nil {
 		t.Fatal(err)
 	}
-	s.currentConfig.ActiveCloudProfile = "messages-one"
+	s.cfgSvc.Mutate(func(c *config.Config) {
+		c.ActiveCloudProfile = "messages-one"
+	})
 	if err := s.rebuildCloud(); err != nil {
 		t.Fatalf("initial rebuildCloud: %v", err)
 	}
@@ -573,7 +593,9 @@ func TestUpsertCloudProfile_ActiveBroadcastsCloudModel(t *testing.T) {
 // non-active profile must not touch the chip.
 func TestUpsertCloudProfile_InactiveDoesNotBroadcast(t *testing.T) {
 	s, _ := newTestServer()
-	s.currentConfig.ActiveCloudProfile = "messages-one"
+	s.cfgSvc.Mutate(func(c *config.Config) {
+		c.ActiveCloudProfile = "messages-one"
+	})
 	s.events = newEventHub()
 	ch, unsub := s.events.subscribe()
 	defer unsub()

@@ -7,6 +7,7 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/dispatch"
+	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/watchdog"
@@ -17,8 +18,9 @@ import (
 // zero-value (Enabled=false) config, buildWatchdog returns nil and the server
 // behaves exactly as today.
 func TestBuildWatchdogDisabledByDefault(t *testing.T) {
-	s := &Server{}
-	s.currentConfig.Watchdog = config.WatchdogConfig{Enabled: false}
+	s := &Server{
+		cfgSvc: cfgsvc.New("", config.Config{Watchdog: config.WatchdogConfig{Enabled: false}}, nil),
+	}
 	if wd := s.buildWatchdog(); wd != nil {
 		t.Fatalf("expected nil watchdog when disabled, got %v", wd)
 	}
@@ -33,12 +35,14 @@ func TestBuildWatchdogEnabled(t *testing.T) {
 		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
-	s := &Server{dispatchEngine: eng}
-	s.currentConfig.Watchdog = config.WatchdogConfig{
-		Enabled:       true,
-		Mode:          "challenge-and-justify",
-		Checks:        []string{"debug-loop"},
-		EscalateAfter: 2,
+	s := &Server{
+		dispatchEngine: eng,
+		cfgSvc: cfgsvc.New("", config.Config{Watchdog: config.WatchdogConfig{
+			Enabled:       true,
+			Mode:          "challenge-and-justify",
+			Checks:        []string{"debug-loop"},
+			EscalateAfter: 2,
+		}}, nil),
 	}
 	wd := s.buildWatchdog()
 	if wd == nil {
@@ -54,11 +58,13 @@ func TestBuildWatchdogSkipsUnknownChecks(t *testing.T) {
 		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
-	s := &Server{dispatchEngine: eng}
-	s.currentConfig.Watchdog = config.WatchdogConfig{
-		Enabled: true,
-		Mode:    "strict",
-		Checks:  []string{"future-check", "debug-loop"},
+	s := &Server{
+		dispatchEngine: eng,
+		cfgSvc: cfgsvc.New("", config.Config{Watchdog: config.WatchdogConfig{
+			Enabled: true,
+			Mode:    "strict",
+			Checks:  []string{"future-check", "debug-loop"},
+		}}, nil),
 	}
 	if wd := s.buildWatchdog(); wd == nil {
 		t.Fatal("expected non-nil watchdog with a mix of known/unknown checks")

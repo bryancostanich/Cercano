@@ -15,11 +15,10 @@ import (
 // Meridian snapshot. It is additive — GetCloudProfiles is left untouched for
 // its existing callers (wizard, runtime-tier resolution).
 func (s *Server) GetCloudProviders(ctx context.Context, req *proto.GetCloudProvidersRequest) (*proto.GetCloudProvidersResponse, error) {
-	s.cfgMu.RLock()
-	active := s.currentConfig.ActiveCloudProfile
-	backup := s.currentConfig.BackupCloudProfile
-	profiles := append([]config.CloudProfile(nil), s.currentConfig.CloudProfiles...)
-	s.cfgMu.RUnlock()
+	cfg := s.cfgSvc.Get()
+	active := cfg.ActiveCloudProfile
+	backup := cfg.BackupCloudProfile
+	profiles := cfg.CloudProfiles
 
 	// Map config profiles onto the grouping input (order preserved) and keep a
 	// name→profile index so we can recover Model when emitting each profile.
@@ -35,8 +34,8 @@ func (s *Server) GetCloudProviders(ctx context.Context, req *proto.GetCloudProvi
 	// list) instead of reading each secret, which on macOS raises a Keychain
 	// authorization prompt every time the Cloud settings tab is opened.
 	keyNamesForPresence := map[string]bool{}
-	if s.secrets != nil {
-		if names, err := s.secrets.List(); err == nil {
+	if st := s.cfgSvc.Secrets(); st != nil {
+		if names, err := st.List(); err == nil {
 			for _, n := range names {
 				keyNamesForPresence[n] = true
 			}

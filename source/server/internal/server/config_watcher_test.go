@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/pkg/config"
 )
 
@@ -33,7 +34,7 @@ func TestReloadConfigFromDisk_AppliesAndBroadcasts(t *testing.T) {
 		t.Fatalf("normalize seed: %v", err)
 	}
 
-	srv := &Server{events: newEventHub()}
+	srv := &Server{events: newEventHub(), cfgSvc: cfgsvc.New("", config.Config{}, nil)}
 	srv.SetConfigPersistence(path, initial)
 
 	ch, unsub := srv.events.subscribe()
@@ -48,8 +49,8 @@ func TestReloadConfigFromDisk_AppliesAndBroadcasts(t *testing.T) {
 
 	srv.reloadConfigFromDisk(context.Background())
 
-	if got := srv.currentConfig.LocusMode; got != "open_primary" {
-		t.Errorf("currentConfig.LocusMode = %q, want local_primary", got)
+	if got := srv.cfgSvc.Get().LocusMode; got != "open_primary" {
+		t.Errorf("cfgSvc.Get().LocusMode = %q, want open_primary", got)
 	}
 
 	select {
@@ -84,7 +85,7 @@ func TestReloadConfigFromDisk_NoChangeNoBroadcast(t *testing.T) {
 		t.Fatalf("normalize seed: %v", err)
 	}
 
-	srv := &Server{events: newEventHub()}
+	srv := &Server{events: newEventHub(), cfgSvc: cfgsvc.New("", config.Config{}, nil)}
 	srv.SetConfigPersistence(path, cfg)
 
 	ch, unsub := srv.events.subscribe()
@@ -104,7 +105,7 @@ func TestReloadConfigFromDisk_NoChangeNoBroadcast(t *testing.T) {
 // matches the permission watcher's behavior so callers don't have to special-
 // case the unconfigured case.
 func TestStartConfigWatcher_EmptyPathIsNoop(t *testing.T) {
-	srv := &Server{}
+	srv := &Server{cfgSvc: cfgsvc.New("", config.Config{}, nil)}
 	if err := srv.StartConfigWatcher(context.Background(), ""); err != nil {
 		t.Errorf("StartConfigWatcher(\"\") = %v, want nil", err)
 	}
@@ -128,7 +129,7 @@ func TestStartConfigWatcher_EndToEnd(t *testing.T) {
 		t.Fatalf("normalize seed: %v", err)
 	}
 
-	srv := &Server{events: newEventHub()}
+	srv := &Server{events: newEventHub(), cfgSvc: cfgsvc.New("", config.Config{}, nil)}
 	srv.SetConfigPersistence(path, cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -166,7 +167,7 @@ func TestStartConfigWatcher_EndToEnd(t *testing.T) {
 				return // success
 			}
 		case <-deadline:
-			t.Fatalf("watcher did not deliver locus_mode change within 2s (currentConfig.LocusMode=%q)", srv.currentConfig.LocusMode)
+			t.Fatalf("watcher did not deliver locus_mode change within 2s (LocusMode=%q)", srv.cfgSvc.Get().LocusMode)
 		}
 	}
 }

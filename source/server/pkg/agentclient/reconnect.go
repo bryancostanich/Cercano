@@ -15,13 +15,19 @@
 //     the server was just slow), and on dial failure spawns a new
 //     server via the existing autoLaunchServer helper.
 //
-// Bounded retry: 3 attempts with 1s / 2s / 4s backoff. Beyond that the
-// client transitions to ConnStateFailed and the observer sees a final
-// state event; further RPCs still error, but no more spawning.
+// Two-phase retry: a fast burst (3 attempts, 1s / 2s / 4s backoff) for
+// transient blips, then an indefinite slow lane — redial every 10s until
+// the server comes back or the client shuts down. Respawn attempts are
+// throttled in the slow lane (every 3rd try) so a genuinely broken
+// binary doesn't fork-bomb. The client never gives up on its own:
+// ConnStateFailed is reserved for client shutdown mid-recovery, not
+// retry exhaustion — a healthy server appearing minutes later is
+// always picked up. Recovery is single-flighted across callers.
 package agentclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -58,10 +64,13 @@ const (
 	// ConnStateConnected is the steady-state healthy connection.
 	ConnStateConnected ConnState = iota
 	// ConnStateReconnecting is set the moment we detect a dead conn and
-	// stays set until we either land on Connected or exhaust retries.
+	// stays set until recovery lands on Connected. The recovery loop
+	// retries indefinitely (fast burst, then a 10s slow lane), so this
+	// state can persist for as long as the server stays down.
 	ConnStateReconnecting
-	// ConnStateFailed is terminal for this Client — bounded retries were
-	// exhausted. Further RPCs will fail; users should restart manually.
+	// ConnStateFailed is terminal for this Client — emitted only when
+	// the client itself shuts down mid-recovery (context cancelled or
+	// Close called), never from retry exhaustion.
 	ConnStateFailed
 )
 
@@ -97,16 +106,45 @@ type ConnStateChanged struct {
 	CrashSummary string
 }
 
-// maxReconnectAttempts bounds the retry loop. Beyond this the client
-// transitions to Failed and stops spawning replacement servers. The
-// backoff schedule (1s, 2s, 4s) sums to 7s of wait — enough for a slow
-// restart, short enough that users notice the loop isn't stuck.
-const maxReconnectAttempts = 3
+// FastReconnectAttempts is the size of the fast burst: quick exponential
+// retries meant to ride out transient blips. Exported so UIs can render
+// "reconnecting (N/3)…" during the burst and switch copy once recovery
+// enters the slow lane.
+const FastReconnectAttempts = 3
 
-// reconnectBackoff returns the sleep before the Nth attempt (1-indexed).
-// Simple exponential: 1s, 2s, 4s.
-func reconnectBackoff(attempt int) time.Duration {
-	return time.Duration(1<<(attempt-1)) * time.Second
+// slowRetryInterval is the steady cadence after the fast burst. The
+// client redials at this interval indefinitely — a server that comes
+// back minutes later is still picked up.
+const slowRetryInterval = 10 * time.Second
+
+// slowRespawnEvery throttles server spawning in the slow lane: a spawn
+// is attempted on the first slow try and every Nth after that, while
+// the (cheap) redial happens on every interval. Keeps a broken binary
+// from being exec'd six times a minute forever.
+const slowRespawnEvery = 3
+
+// errClientClosed is returned by reconnect when the client shuts down
+// mid-recovery; it is the only non-ctx path that emits ConnStateFailed.
+var errClientClosed = errors.New("agentclient: client closed during reconnect")
+
+// reconnectWait returns the sleep before the Nth attempt (1-indexed):
+// 1s / 2s / 4s for the fast burst, then the steady slow-lane interval.
+func reconnectWait(attempt int) time.Duration {
+	if attempt <= FastReconnectAttempts {
+		return time.Duration(1<<(attempt-1)) * time.Second
+	}
+	return slowRetryInterval
+}
+
+// shouldRespawn reports whether the Nth attempt (1-indexed) should
+// escalate a failed dial to spawning a replacement server. Every
+// fast-burst attempt spawns (the original behavior); slow-lane attempts
+// spawn on the first and then every slowRespawnEvery-th.
+func shouldRespawn(attempt int) bool {
+	if attempt <= FastReconnectAttempts {
+		return true
+	}
+	return (attempt-FastReconnectAttempts-1)%slowRespawnEvery == 0
 }
 
 // isUnavailable reports whether err carries the gRPC codes.Unavailable
@@ -254,14 +292,35 @@ func (c *Client) watchConn(ctx context.Context) {
 }
 
 // reconnect performs the actual recovery loop: on each attempt, close
-// the dead conn, redial (short timeout), and if dial fails spawn a
-// replacement server via the existing autoLaunchServer helper. On
-// success it swaps the underlying conn + agent atomically and emits a
-// Connected transition. On exhaustion it emits Failed.
+// the dead conn, redial (short timeout), and — on the throttle
+// schedule — spawn a replacement server via autoLaunchServer. Fast
+// burst first, then the indefinite slow lane (see the package comment).
+// Returns nil once a fresh conn is installed. It errors only when the
+// client is shutting down (ctx cancelled / Close called), which is also
+// the only path that emits ConnStateFailed.
 func (c *Client) reconnect(ctx context.Context) error {
-	for attempt := 1; attempt <= maxReconnectAttempts; attempt++ {
+	// Single-flight: watchConn and the SubscribeEvents drain can both
+	// detect the dead transport and call here concurrently. Whoever
+	// loses the race waits, then returns immediately if the winner
+	// already restored the connection.
+	c.reconnectMu.Lock()
+	defer c.reconnectMu.Unlock()
+	if c.currentState() == ConnStateConnected {
+		if conn := c.readConn(); conn != nil && conn.GetState() == connectivity.Ready {
+			return nil
+		}
+	}
+	for attempt := 1; ; attempt++ {
 		c.setState(ConnStateReconnecting, attempt, nil)
-		time.Sleep(reconnectBackoff(attempt))
+		select {
+		case <-ctx.Done():
+			c.setState(ConnStateFailed, attempt, ctx.Err())
+			return ctx.Err()
+		case <-c.stopWatch:
+			c.setState(ConnStateFailed, attempt, errClientClosed)
+			return errClientClosed
+		case <-time.After(reconnectWait(attempt)):
+		}
 
 		// Close the old conn so any dangling streams see EOF and their
 		// drain loops can restart. Best-effort — a failing close doesn't
@@ -271,15 +330,17 @@ func (c *Client) reconnect(ctx context.Context) error {
 		}
 
 		// Try a short redial first — the server may have simply been
-		// slow. If that fails we escalate to spawning.
+		// slow. If that fails, escalate to spawning on the throttle
+		// schedule.
 		fresh, err := connect(ctx, c.addr, 2*time.Second)
 		if err != nil {
-			// Server truly appears gone; spawn a fresh one.
+			if !shouldRespawn(attempt) {
+				continue
+			}
 			if _, spawnErr := autoLaunchServer(c.addr); spawnErr != nil {
 				// Spawn itself failed (missing binary, permission,
-				// etc.) — no point retrying spawn on next attempt, but
-				// let the backoff run so the port check gets another
-				// shot in case the OLD server is coming back up.
+				// etc.) — the next scheduled attempt gets another shot
+				// in case the OLD server is coming back up.
 				continue
 			}
 			if err := waitForPort(c.addr, 8*time.Second); err != nil {
@@ -298,8 +359,6 @@ func (c *Client) reconnect(ctx context.Context) error {
 		c.setState(ConnStateConnected, attempt, nil)
 		return nil
 	}
-	c.setState(ConnStateFailed, maxReconnectAttempts, fmt.Errorf("agentclient: exhausted %d reconnect attempts", maxReconnectAttempts))
-	return fmt.Errorf("agentclient: reconnect failed after %d attempts", maxReconnectAttempts)
 }
 
 // readConn returns the current gRPC conn under the connection lock.

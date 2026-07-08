@@ -1686,11 +1686,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refreshViewport()
 			}
 		}
+		if msg.state == agentclient.ConnStateConnected && prev == agentclient.ConnStateReconnecting {
+			// Recovery. The server on the other end may be a freshly
+			// spawned replacement, so every startup-fetched snapshot —
+			// config, tools, permission mode, vision caps, runtime
+			// status — could be stale. Re-fetch the lot and tell the
+			// user the link is back.
+			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "✓ agent reconnected"})
+			m.refreshViewport()
+			return m, tea.Batch(msg.next, fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent), fetchVisionCmd(m.agent), fetchOpenRuntimeStatusCmd(m.agent))
+		}
 		if msg.state == agentclient.ConnStateFailed {
-			// Terminal — the reconnect loop exhausted its retries.
-			// Surface once as a system message; further guidance is
-			// user-driven (restart cercano manually).
-			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "✕ agent unreachable — reconnect failed after retries. Restart cercano to recover."})
+			// Only reachable when the client itself is shutting down
+			// mid-recovery — the SDK otherwise retries indefinitely.
+			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "✕ agent connection closed — reconnect abandoned. Restart cercano to recover."})
 			m.refreshViewport()
 		}
 		return m, msg.next
@@ -3640,7 +3649,12 @@ func (m Model) renderOpenRuntimeChip() string {
 func (m Model) renderConnStateChip() string {
 	switch m.connState {
 	case agentclient.ConnStateReconnecting:
-		label := fmt.Sprintf("⚠ agent reconnecting (%d/%d)…", m.connAttempt, 3)
+		label := fmt.Sprintf("⚠ agent reconnecting (%d/%d)…", m.connAttempt, agentclient.FastReconnectAttempts)
+		if m.connAttempt > agentclient.FastReconnectAttempts {
+			// Past the fast burst: the SDK is in its indefinite slow
+			// lane, so a bounded "(N/3)" would be a lie.
+			label = fmt.Sprintf("⚠ agent down — retrying every 10s (attempt %d)…", m.connAttempt)
+		}
 		return m.styles.BorderDim.Render("  ·  ") + m.styles.Primary.Render(label)
 	case agentclient.ConnStateFailed:
 		return m.styles.BorderDim.Render("  ·  ") + m.styles.Error.Render("✕ agent unreachable")

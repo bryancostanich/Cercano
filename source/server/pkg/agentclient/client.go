@@ -51,6 +51,11 @@ type Client struct {
 	state       ConnState
 	stateBroker *stateBroker
 	stopWatch   chan struct{} // closed by Close() to stop watchConn
+	// reconnectMu single-flights recovery: watchConn and the
+	// SubscribeEvents drain loop can both detect a dead transport and
+	// call reconnect() concurrently; without this they'd run competing
+	// retry loops, each spawning replacement servers.
+	reconnectMu sync.Mutex
 }
 
 // InlineImage is a user-attached image sent with a chat turn. Index matches the

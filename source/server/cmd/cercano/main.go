@@ -103,6 +103,19 @@ func checkOllama(baseURL string) error {
 	return nil
 }
 
+// ollamaStartupWarning probes Ollama and, if unreachable, returns a warning
+// for the startup log. Ollama down is never fatal: the configured runtime may
+// be llama_server and the primary route may be cloud, neither of which needs
+// it. Ollama-backed features (Ollama chat models, embeddings, the model
+// catalog) fail at point-of-use instead, matching the lazy SmartRouter and
+// the embedded --mcp degraded-mode paths.
+func ollamaStartupWarning(check func(string) error, baseURL string) string {
+	if err := check(baseURL); err != nil {
+		return fmt.Sprintf("[WARN] Ollama unreachable at %s (%v) — continuing; Ollama-backed models and embeddings unavailable until it comes up.", baseURL, err)
+	}
+	return ""
+}
+
 // drainGrace bounds how long a shutting-down agent waits for in-flight turns
 // to finish before hard-stopping. It is a zombie-guard, not a tuning knob: an
 // agentic turn legitimately runs for minutes (model calls + tool executions),
@@ -114,8 +127,8 @@ const drainGrace = 10 * time.Minute
 // startGRPCServer initializes all providers and starts the gRPC server.
 // Returns the listener address and a cleanup function.
 func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error) {
-	if err := checkOllama(cfg.OllamaURL); err != nil {
-		return "", nil, err
+	if warn := ollamaStartupWarning(checkOllama, cfg.OllamaURL); warn != "" {
+		fmt.Fprintln(os.Stderr, warn)
 	}
 
 	registry := engine.NewEngineRegistry()

@@ -8,6 +8,7 @@ import (
 
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/dispatch"
+	"cercano/source/server/pkg/config"
 )
 
 type dispatchCap struct{}
@@ -55,6 +56,7 @@ func (dispatchCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 	res, err := call.Svc.Dispatch(ctx, dispatch.Spec{
 		Mode:           dispatch.Agentic,
 		Role:           dispatch.RoleMain,
+		Tier:           config.TierEveryday,
 		Task:           a.Task,
 		Tools:          a.Tools,
 		WorkDir:        call.WorkDir,

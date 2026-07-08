@@ -1486,6 +1486,7 @@ func (s *Server) SuggestNextPrompt(ctx context.Context, req *proto.SuggestNextPr
 	res, err := s.dispatchEngine.Dispatch(ctx, dispatch.Spec{
 		Mode:        dispatch.OneShot,
 		Role:        dispatch.RoleCoproc,
+		Tier:        config.TierFastLightText,
 		Prompt:      promptB.String(),
 		Source:      "suggest_next_prompt",
 		RecordUsage: true,

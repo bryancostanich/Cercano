@@ -32,9 +32,10 @@ func TestIsUnavailable_FalseForNilAndPlainErrors(t *testing.T) {
 	}
 }
 
-func TestReconnectBackoff_ExponentialSchedule(t *testing.T) {
-	// Locks in the documented "1s, 2s, 4s" schedule so accidental edits
-	// to the exponent get caught.
+func TestReconnectWait_FastBurstThenSlowLane(t *testing.T) {
+	// Locks in the two-phase schedule: the documented 1s/2s/4s fast
+	// burst, then the steady 10s slow lane forever after — recovery
+	// never stops retrying on its own.
 	cases := []struct {
 		attempt int
 		want    time.Duration
@@ -42,11 +43,32 @@ func TestReconnectBackoff_ExponentialSchedule(t *testing.T) {
 		{1, 1 * time.Second},
 		{2, 2 * time.Second},
 		{3, 4 * time.Second},
+		{4, 10 * time.Second},
+		{5, 10 * time.Second},
+		{42, 10 * time.Second},
 	}
 	for _, c := range cases {
-		got := reconnectBackoff(c.attempt)
+		got := reconnectWait(c.attempt)
 		if got != c.want {
 			t.Errorf("attempt %d: got %s, want %s", c.attempt, got, c.want)
+		}
+	}
+}
+
+func TestShouldRespawn_ThrottleSchedule(t *testing.T) {
+	// Fast-burst attempts always respawn (the original behavior). Slow-
+	// lane attempts respawn on the first and then every 3rd, so a broken
+	// binary isn't exec'd on every 10s tick forever while cheap redials
+	// still happen every interval.
+	want := map[int]bool{
+		1: true, 2: true, 3: true, // fast burst
+		4: true, 5: false, 6: false, // slow lane cycle 1
+		7: true, 8: false, 9: false, // slow lane cycle 2
+		10: true, // slow lane cycle 3
+	}
+	for attempt, expected := range want {
+		if got := shouldRespawn(attempt); got != expected {
+			t.Errorf("shouldRespawn(%d) = %v, want %v", attempt, got, expected)
 		}
 	}
 }

@@ -419,14 +419,24 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		fmt.Fprintf(os.Stderr, "[WARN] cloud profile resolution failed: %v — cloud routing will degrade to local.\n", err)
 	}
 
-	// Native tool-loop local provider (Ollama). Wired unconditionally so Local
-	// modes can drive the tool-calling loop; availability is enforced per turn.
-	// Stored RAW — resolveMainProvider wraps it for usage at hand-off, and the
-	// dispatch engine reads it raw and wraps per-dispatch (no double-count).
-	srv.SetOpenLLMProvider(ollamallm.NewClient(ollamallm.Config{
-		BaseURL: cfg.OllamaURL,
-		Model:   cfg.OpenChatModel(),
-	}))
+	// Native tool-loop local provider — follows the configured runtime.
+	// Under llama_server the provider resolves/warms instances through the
+	// runtime manager per call; otherwise it is the Ollama client. Stored RAW
+	// — resolveMainProvider wraps it for usage at hand-off, and the dispatch
+	// engine reads it raw and wraps per-dispatch (no double-count). The same
+	// factory is installed on the server so an open_runtime change at runtime
+	// rebuilds the provider instead of stranding the old lane.
+	openProviderFor := func(c config.Config) llm.Provider {
+		if strings.EqualFold(c.OpenRuntime, "llama_server") {
+			return llamaengine.NewLLMProvider(llamaEng)
+		}
+		return ollamallm.NewClient(ollamallm.Config{
+			BaseURL: c.OllamaURL,
+			Model:   c.OpenChatModel(),
+		})
+	}
+	srv.SetOpenLLMProvider(openProviderFor(cfg))
+	srv.SetOpenProviderFactory(openProviderFor)
 
 	// Wire the co-processor dispatch engine. Providers are resolved fresh per
 	// dispatch from the server's RAW (unwrapped) providers, so a runtime cloud

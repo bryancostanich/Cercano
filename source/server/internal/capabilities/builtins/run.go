@@ -65,8 +65,12 @@ func (runCommandCap) Execute(ctx context.Context, call *capabilities.Call) (*cap
 	defer cancel()
 
 	cmd := exec.CommandContext(runCtx, a.Cmd[0], a.Cmd[1:]...)
-	if a.Cwd != "" {
-		cmd.Dir = a.Cwd
+	dir := a.Cwd
+	if dir == "" {
+		dir = call.WorkDir
+	}
+	if dir != "" {
+		cmd.Dir = dir
 	}
 	if len(a.Env) > 0 {
 		// Append to the agent's environment so the command sees PATH etc.

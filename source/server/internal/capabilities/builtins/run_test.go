@@ -97,3 +97,19 @@ func TestRunCommandCapability_Timeout(t *testing.T) {
 		t.Fatalf("expected 'timed out' in error, got: %v", err)
 	}
 }
+
+func TestRun_DefaultsCwdToWorkDir(t *testing.T) {
+	dir := t.TempDir()
+	call := &capabilities.Call{
+		WorkDir: dir,
+		Args:    []byte(`{"cmd":["pwd"]}`),
+		Emit:    func(string) {},
+	}
+	res, err := RunCommand().Execute(context.Background(), call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(res.Text); !strings.Contains(got, dir) {
+		t.Errorf("pwd = %q, want WorkDir %q in output", got, dir)
+	}
+}

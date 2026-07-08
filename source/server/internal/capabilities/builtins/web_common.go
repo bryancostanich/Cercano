@@ -38,7 +38,8 @@ func searchScriptPath() (string, error) {
 type dispatchModelCaller struct {
 	call   *capabilities.Call
 	source string
-	model  string // advisory model override; empty for the configured default
+	model  string      // advisory model override; empty for the configured default
+	tier   config.Tier // taxonomy tier the pipeline's model calls run on
 }
 
 func (m *dispatchModelCaller) Call(ctx context.Context, prompt string) (string, error) {
@@ -48,6 +49,7 @@ func (m *dispatchModelCaller) Call(ctx context.Context, prompt string) (string, 
 	res, err := m.call.Svc.Dispatch(ctx, dispatch.Spec{
 		Mode:                 dispatch.OneShot,
 		Role:                 dispatch.RoleCoproc,
+		Tier:                 m.tier,
 		Prompt:               prompt,
 		WorkDir:              m.call.WorkDir,
 		ModelOverride:        m.model,

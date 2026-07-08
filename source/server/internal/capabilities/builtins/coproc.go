@@ -7,6 +7,7 @@ import (
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/tokens"
+	"cercano/source/server/pkg/config"
 )
 
 // runCoproc runs a fixed co-processor prompt through the one-shot dispatch engine,
@@ -20,6 +21,7 @@ func runCoproc(ctx context.Context, call *capabilities.Call, source, prompt, con
 	res, err := call.Svc.Dispatch(ctx, dispatch.Spec{
 		Mode:                 dispatch.OneShot,
 		Role:                 dispatch.RoleCoproc,
+		Tier:                 config.TierFastLightText,
 		Prompt:               prompt,
 		WorkDir:              call.WorkDir,
 		WantsProjectContext:  true,

@@ -9,6 +9,7 @@ import (
 
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/dispatch"
+	"cercano/source/server/pkg/config"
 )
 
 type reviewCap struct{}
@@ -61,6 +62,7 @@ func (reviewCap) Execute(ctx context.Context, call *capabilities.Call) (*capabil
 		spec = dispatch.Spec{
 			Mode:    dispatch.OneShot,
 			Role:    dispatch.RoleMain,
+			Tier:    config.TierEveryday,
 			Prompt:  prompt,
 			WorkDir: call.WorkDir,
 		}
@@ -68,6 +70,7 @@ func (reviewCap) Execute(ctx context.Context, call *capabilities.Call) (*capabil
 		spec = dispatch.Spec{
 			Mode:    dispatch.Agentic,
 			Role:    dispatch.RoleMain,
+			Tier:    config.TierEveryday,
 			Task:    prompt,
 			Tools:   a.Tools,
 			WorkDir: call.WorkDir,

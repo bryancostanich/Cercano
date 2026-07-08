@@ -9,6 +9,7 @@ import (
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/tokens"
+	"cercano/source/server/pkg/config"
 )
 
 type localCap struct{}
@@ -68,6 +69,7 @@ func (localCap) Execute(ctx context.Context, call *capabilities.Call) (*capabili
 	res, err := call.Svc.Dispatch(ctx, dispatch.Spec{
 		Mode:                 dispatch.OneShot,
 		Role:                 dispatch.RoleCoproc,
+		Tier:                 config.TierEveryday,
 		Prompt:               input,
 		WorkDir:              call.WorkDir,
 		WantsProjectContext:  true,

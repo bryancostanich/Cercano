@@ -10,6 +10,7 @@ import (
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/gitflow"
+	"cercano/source/server/pkg/config"
 )
 
 type gitLandCap struct{}
@@ -186,6 +187,7 @@ func runTestAndReviewAndFinalize(
 			res, err := call.Svc.Dispatch(ctx, dispatch.Spec{
 				Mode:    dispatch.OneShot,
 				Role:    dispatch.RoleMain,
+				Tier:    config.TierEveryday,
 				Source:  "gitflow:land-review",
 				Prompt:  prompt,
 				WorkDir: call.WorkDir,

@@ -49,8 +49,12 @@ func (gitAddCap) Execute(ctx context.Context, call *capabilities.Call) (*capabil
 	}
 	args := append([]string{"add", "--"}, a.Paths...)
 	cmd := exec.CommandContext(ctx, "git", args...)
-	if a.Cwd != "" {
-		cmd.Dir = a.Cwd
+	dir := a.Cwd
+	if dir == "" {
+		dir = call.WorkDir
+	}
+	if dir != "" {
+		cmd.Dir = dir
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -100,8 +104,12 @@ func (gitCommitCap) Execute(ctx context.Context, call *capabilities.Call) (*capa
 		return nil, errors.New("git_commit: message is required")
 	}
 	cmd := exec.CommandContext(ctx, "git", "commit", "-m", a.Message)
-	if a.Cwd != "" {
-		cmd.Dir = a.Cwd
+	dir := a.Cwd
+	if dir == "" {
+		dir = call.WorkDir
+	}
+	if dir != "" {
+		cmd.Dir = dir
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -163,8 +171,12 @@ func (gitPushCap) Execute(ctx context.Context, call *capabilities.Call) (*capabi
 		}
 	}
 	cmd := exec.CommandContext(ctx, "git", args...)
-	if a.Cwd != "" {
-		cmd.Dir = a.Cwd
+	dir := a.Cwd
+	if dir == "" {
+		dir = call.WorkDir
+	}
+	if dir != "" {
+		cmd.Dir = dir
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -211,8 +223,12 @@ func (gitResetHardCap) Execute(ctx context.Context, call *capabilities.Call) (*c
 		return nil, errors.New("git_reset_hard: revision is required")
 	}
 	cmd := exec.CommandContext(ctx, "git", "reset", "--hard", a.Revision)
-	if a.Cwd != "" {
-		cmd.Dir = a.Cwd
+	dir := a.Cwd
+	if dir == "" {
+		dir = call.WorkDir
+	}
+	if dir != "" {
+		cmd.Dir = dir
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {

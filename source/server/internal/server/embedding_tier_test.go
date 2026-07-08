@@ -20,8 +20,8 @@ func TestUpdateConfig_EmbeddingTierWritesEmbeddingModel(t *testing.T) {
 	if err != nil || !resp.Success {
 		t.Fatalf("UpdateConfig: err=%v resp=%+v", err, resp)
 	}
-	if got := s.currentConfig.EmbeddingModel; got != "nomic-embed-text-v2-moe" {
-		t.Errorf("EmbeddingModel = %q", got)
+	if got := s.currentConfig.Models.Tiers.Embedding.Open; got != "nomic-embed-text-v2-moe" {
+		t.Errorf("embedding.open tier slot = %q", got)
 	}
 	select {
 	case ev := <-ch:
@@ -37,14 +37,14 @@ func TestUpdateConfig_EmbeddingTierWritesEmbeddingModel(t *testing.T) {
 func TestUpdateConfig_EmbeddingTierClear(t *testing.T) {
 	s, _ := newTestServer()
 	s.events = newEventHub()
-	s.currentConfig.EmbeddingModel = "old-model"
+	s.currentConfig.Models.Tiers.Embedding.Open = "old-model"
 	resp, err := s.UpdateConfig(t.Context(), &proto.UpdateConfigRequest{
 		ModelTierKey: "embedding.open", ModelTierValue: "-",
 	})
 	if err != nil || !resp.Success {
 		t.Fatalf("UpdateConfig: err=%v resp=%+v", err, resp)
 	}
-	if got := s.currentConfig.EmbeddingModel; got != "" {
-		t.Errorf("EmbeddingModel = %q, want cleared", got)
+	if got := s.currentConfig.Models.Tiers.Embedding.Open; got != "" {
+		t.Errorf("embedding.open tier slot = %q, want cleared", got)
 	}
 }

@@ -15,15 +15,11 @@ import (
 func (s *Server) resolveTierModel(t config.Tier, prefer config.Provider, strict bool) (string, config.Provider, bool) {
 	s.cfgMu.RLock()
 	mc := s.currentConfig.Models
-	openModel := s.currentConfig.OpenModel
 	s.cfgMu.RUnlock()
 
 	if t == config.TierEveryday {
 		if mc.Tiers.Everyday.Cloud == "" {
 			mc.Tiers.Everyday.Cloud = s.activeCloudModel()
-		}
-		if mc.Tiers.Everyday.Open == "" {
-			mc.Tiers.Everyday.Open = openModel
 		}
 	}
 	return mc.Resolve(t, prefer, strict)

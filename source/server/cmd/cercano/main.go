@@ -786,7 +786,6 @@ func runSetup(installEngine bool) {
 					os.Exit(1)
 				}
 				fmt.Printf("  OK: %s pulled.\n", picked)
-				cfg.OpenModel = picked
 				cfg.Models.Tiers.Everyday.Open = picked
 			} else {
 				fmt.Fprintln(os.Stderr, "  Skipping model pull. Pull a chat model with `ollama pull <model>` and re-run `cercano setup`.")
@@ -807,7 +806,6 @@ func runSetup(installEngine bool) {
 			} else {
 				chosen := chatModels[0]
 				fmt.Printf("  Configured model %q not installed. Using %s instead.\n", cfg.OpenChatModel(), chosen)
-				cfg.OpenModel = chosen
 				cfg.Models.Tiers.Everyday.Open = chosen
 			}
 

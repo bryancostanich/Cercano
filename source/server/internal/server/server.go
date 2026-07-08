@@ -1105,7 +1105,6 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		if val == "-" {
 			val = ""
 		}
-		s.currentConfig.EmbeddingModel = val
 		s.currentConfig.Models.Tiers.Embedding.Open = val
 		desc := "embedding_model=" + val
 		if val == "" {
@@ -1142,7 +1141,6 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		s.broadcastConfigChanged("ollama_url", req.OllamaUrl)
 	}
 	if req.OpenModel != "" {
-		s.currentConfig.OpenModel = req.OpenModel
 		s.currentConfig.Models.Tiers.Everyday.Open = req.OpenModel
 		s.broadcastConfigChanged("local_model", req.OpenModel)
 	}

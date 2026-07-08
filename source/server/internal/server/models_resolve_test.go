@@ -12,9 +12,13 @@ import (
 // mirror design: an empty everyday slot resolves to the LIVE values (active
 // cloud profile's model / open_model) at resolution time, rather than a
 // copied-at-migration mirror that can drift.
-func TestResolveTierModel_EverydayFallsThroughToLiveConfig(t *testing.T) {
+// TestResolveTierModel_EverydayCloudFallsThrough_OpenIsTierOnly: the cloud
+// side of everyday still falls through to the live active-profile model,
+// but the open side is TIER-ONLY — the legacy open_model field is retired
+// and must not resolve (local-model-taxonomy design).
+func TestResolveTierModel_EverydayCloudFallsThrough_OpenIsTierOnly(t *testing.T) {
 	s, _ := newTestServer()
-	s.currentConfig.OpenModel = "qwen3-coder"
+	s.currentConfig.OpenModel = "qwen3-coder" // retired field: must be IGNORED
 	s.currentConfig.ActiveCloudProfile = "messages-one"
 
 	id, prov, ok := s.resolveTierModel(config.TierEveryday, config.ProviderCloud, false)
@@ -25,12 +29,14 @@ func TestResolveTierModel_EverydayFallsThroughToLiveConfig(t *testing.T) {
 		t.Errorf("everyday cloud = %q, want live active-profile model %q", id, s.activeCloudModel())
 	}
 
+	// Open side, empty tier slot: the retired open_model field must not
+	// resolve; non-strict lookup falls through to the cloud side instead.
 	id, prov, ok = s.resolveTierModel(config.TierEveryday, config.ProviderOpen, false)
-	if !ok || prov != config.ProviderOpen || id != "qwen3-coder" {
-		t.Errorf("everyday open = (%q,%q,%v), want live open_model qwen3-coder", id, prov, ok)
+	if ok && prov == config.ProviderOpen {
+		t.Errorf("everyday open resolved (%q) from the retired open_model field", id)
 	}
 
-	// An explicitly configured everyday slot wins over the live fallback.
+	// An explicitly configured everyday slot resolves.
 	s.currentConfig.Models.Tiers.Everyday.Open = "qwen3-coder-next"
 	id, _, ok = s.resolveTierModel(config.TierEveryday, config.ProviderOpen, false)
 	if !ok || id != "qwen3-coder-next" {

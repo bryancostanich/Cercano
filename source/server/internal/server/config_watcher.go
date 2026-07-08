@@ -99,8 +99,8 @@ func (s *Server) reloadConfigFromDisk(ctx context.Context) {
 	if newCfg.OllamaURL != snap.OllamaURL {
 		req.OllamaUrl = newCfg.OllamaURL
 	}
-	if newCfg.OpenModel != snap.OpenModel {
-		req.OpenModel = newCfg.OpenModel
+	if newCfg.Models.Tiers.Everyday.Open != snap.Models.Tiers.Everyday.Open {
+		req.OpenModel = newCfg.Models.Tiers.Everyday.Open
 	}
 	if newCfg.OpenRuntime != snap.OpenRuntime {
 		req.OpenRuntime = newCfg.OpenRuntime
@@ -160,8 +160,8 @@ func (s *Server) reloadConfigFromDisk(ctx context.Context) {
 	if newCfg.Port != snap.Port {
 		fmt.Printf("ConfigWatcher: port change (%q → %q) requires a restart\n", snap.Port, newCfg.Port)
 	}
-	if newCfg.EmbeddingModel != snap.EmbeddingModel {
-		fmt.Printf("ConfigWatcher: embedding_model change requires a restart\n")
+	if newCfg.Models.Tiers.Embedding.Open != snap.Models.Tiers.Embedding.Open {
+		fmt.Printf("ConfigWatcher: embedding model change requires a restart\n")
 	}
 
 	if _, err := s.UpdateConfig(ctx, req); err != nil {

@@ -227,11 +227,13 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	var compGen *compactiongen.Generator
 	if persistentStore != nil {
 		// Summarizer model precedence: explicit compaction.summarizer_model →
-		// the fast_light tier's open side → the interactive open model as the
-		// fallback of last resort.
+		// the fast_light_text tier's open side → the interactive open model as
+		// the fallback of last resort. Summaries are prose-quality judgment
+		// work — the fast_light_text charter — matching recap above (small
+		// coder models drop anchors; see capability-tier-audit.md).
 		summarizerModel := cfg.Compaction.SummarizerModel
 		if summarizerModel == "" {
-			if id, _, ok := cfg.Models.Resolve(config.TierFastLight, config.ProviderOpen, true); ok {
+			if id, _, ok := cfg.Models.Resolve(config.TierFastLightText, config.ProviderOpen, true); ok {
 				summarizerModel = id
 			}
 		}
@@ -258,7 +260,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 			VerbatimRecent:        cfg.Compaction.VerbatimRecent,
 		}
 		if summarizerModel == "" {
-			fmt.Fprintf(os.Stderr, "[compaction] WARN: no summarizer_model and no models.tiers.fast_light.open configured — compaction summarizes with the interactive open model (%s), which can be very slow for large histories\n", cfg.OpenChatModel())
+			fmt.Fprintf(os.Stderr, "[compaction] WARN: no summarizer_model and no models.tiers.fast_light_text.open configured — compaction summarizes with the interactive open model (%s), which can be very slow for large histories\n", cfg.OpenChatModel())
 		}
 		compGen = compactiongen.New(persistentStore, compactSummarize, compCfg, contextmeter.Default(), 10*time.Second)
 		// Runtime kill switch — Schedule noops until enabled. Wiring the

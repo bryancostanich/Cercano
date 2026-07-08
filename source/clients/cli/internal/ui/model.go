@@ -1377,6 +1377,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.err == nil && msg.detail != nil && msg.detail.Found {
 				t.FullArgs = msg.detail.ArgsJSON
 				t.FullResult = msg.detail.Result
+				t.StartLine = msg.detail.StartLine
 			}
 			m.refreshViewport()
 		}
@@ -3172,7 +3173,7 @@ func (m Model) View() tea.View {
 		v := tea.NewView("")
 		v.AltScreen = true
 		v.BackgroundColor = m.palette.BgDeep // paint our own bg, not the terminal's
-		return v // first paint before WindowSizeMsg
+		return v                             // first paint before WindowSizeMsg
 	}
 
 	var parts []string

@@ -53,6 +53,7 @@ func contextTurnView(t conversation.Turn, tok contextmeter.Tokenizer) *proto.Con
 	// Tool metadata from the turn's first tool block — carried so the /c
 	// viewer can reuse the main chat's rich tool renderers (highlight, diff).
 	var toolName, toolUseID, toolArgs, toolUseRef string
+	var toolStartLine int
 
 	if t.BlocksJSON != "" {
 		var blocks []llm.Block
@@ -75,6 +76,7 @@ func contextTurnView(t conversation.Turn, tok contextmeter.Tokenizer) *proto.Con
 					bodyParts = append(bodyParts, b.Content)
 					if toolUseRef == "" {
 						toolUseRef = b.ToolUseRef
+						toolStartLine = b.StartLine
 					}
 				case llm.BlockText:
 					if b.Text == "" {
@@ -104,17 +106,18 @@ func contextTurnView(t conversation.Turn, tok contextmeter.Tokenizer) *proto.Con
 
 	bodyStr, truncated := capBody(body, contextTurnBodyMax)
 	return &proto.ContextTurn{
-		Id:         t.ID,
-		Role:       t.Role,
-		Kind:       kind,
-		Preview:    ctTruncate(ctPreview(preview), contextTurnPreviewMax),
-		Body:       bodyStr,
-		Truncated:  truncated,
-		EstTokens:  int32(tok.Count(tokenSrc)),
-		ToolName:   toolName,
-		ToolUseId:  toolUseID,
-		ToolArgs:   toolArgs,
-		ToolUseRef: toolUseRef,
+		Id:            t.ID,
+		Role:          t.Role,
+		Kind:          kind,
+		Preview:       ctTruncate(ctPreview(preview), contextTurnPreviewMax),
+		Body:          bodyStr,
+		Truncated:     truncated,
+		EstTokens:     int32(tok.Count(tokenSrc)),
+		ToolName:      toolName,
+		ToolUseId:     toolUseID,
+		ToolArgs:      toolArgs,
+		ToolUseRef:    toolUseRef,
+		ToolStartLine: int32(toolStartLine),
 	}
 }
 

@@ -43,10 +43,10 @@ func AsTool(cap capabilities.Capability, display string, svc capabilities.Servic
 	return capTool{cap: cap, display: display, svc: svc}
 }
 
-func (t capTool) Name() string                 { return t.display }
-func (t capTool) Description() string          { return t.cap.Description() }
+func (t capTool) Name() string                      { return t.display }
+func (t capTool) Description() string               { return t.cap.Description() }
 func (t capTool) Permission() agenttools.Permission { return t.cap.Tier().ToPermission() }
-func (t capTool) Schema() json.RawMessage      { return json.RawMessage(t.cap.Schema()) }
+func (t capTool) Schema() json.RawMessage           { return json.RawMessage(t.cap.Schema()) }
 
 func (t capTool) Execute(ctx context.Context, args json.RawMessage) (*agenttools.Result, error) {
 	call := &capabilities.Call{
@@ -74,6 +74,7 @@ func toAgentResult(r *capabilities.Result) *agenttools.Result {
 		Truncated: r.Truncated,
 		Note:      r.Note,
 		Detail:    r.Detail,
+		StartLine: r.StartLine,
 	}
 }
 

@@ -34,6 +34,9 @@ type LoopEvent struct {
 	Summary     string
 	Detail      string
 	IsError     bool
+	// StartLine mirrors Result.StartLine on tool_exec_complete events: the
+	// 1-based line where a file edit/write began (0 = not applicable).
+	StartLine int
 }
 
 type ToolLoopInput struct {
@@ -303,7 +306,8 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 					emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: err.Error(), IsError: true})
 				} else {
 					out.Content = res.LLMContent()
-					emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: summarizeResult(res), Detail: res.Detail, IsError: false})
+					out.StartLine = res.StartLine
+					emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: summarizeResult(res), Detail: res.Detail, StartLine: res.StartLine, IsError: false})
 				}
 				rChan <- rr{idx: i, res: out}
 			}(i, pc)
@@ -413,7 +417,8 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: err.Error(), IsError: true})
 			} else {
 				out.Content = res.LLMContent()
-				emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: summarizeResult(res), Detail: res.Detail, IsError: false})
+				out.StartLine = res.StartLine
+				emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: summarizeResult(res), Detail: res.Detail, StartLine: res.StartLine, IsError: false})
 			}
 			results = append(results, out)
 		}

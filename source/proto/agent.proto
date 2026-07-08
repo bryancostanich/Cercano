@@ -663,6 +663,7 @@ message GetToolCallResponse {
   string args_json = 3; // full tool_use input JSON
   string result    = 4; // full tool_result body (empty if not yet recorded)
   bool   is_error  = 5;
+  int32  start_line = 6; // 1-based first line of an edit/write (0 = n/a)
 }
 message ContextTurn {
   string role       = 1; // "user" | "assistant" | "system"
@@ -678,6 +679,7 @@ message ContextTurn {
   string tool_use_id  = 9;  // tool_use turns: the call's correlation id
   string tool_args    = 10; // tool_use turns: input JSON, capped at 4 KB
   string tool_use_ref = 11; // tool_result turns: originating call's id
+  int32  tool_start_line = 12; // tool_result turns: 1-based first line of an edit/write (0 = n/a)
 }
 
 message ProposeContextEditRequest  { string conversation_id = 1; string instruction = 2; }
@@ -963,6 +965,10 @@ message ToolExecComplete {
   // detail is a clean, timing-free, content-free outcome token ("480 lines",
   // "12 matches", "+3 −1") rendered by clients next to the status glyph.
   string detail = 4;
+  // start_line is the 1-based line in the target file where a file edit/write
+  // began (edit_file: first line of the replaced span in the pre-edit file;
+  // write_file: 1). Clients number the args diff with it. 0 = not applicable.
+  int32 start_line = 5;
 }
 message PermissionRequired {
   string tool_use_id = 1;

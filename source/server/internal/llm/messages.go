@@ -32,6 +32,12 @@ type Block struct {
 	ToolUseRef string `json:"tool_use_id,omitempty"`
 	Content    string `json:"content,omitempty"`
 	IsError    bool   `json:"is_error,omitempty"`
+	// StartLine is client display metadata on tool_result blocks: the 1-based
+	// line where a file edit/write began, recorded at execute time so diffs
+	// rendered from the persisted args can be numbered after resume. Never
+	// sent to providers — adapters translate field-by-field and skip it.
+	// 0 = not applicable.
+	StartLine int `json:"start_line,omitempty"`
 
 	MediaType string `json:"media_type,omitempty"` // image: "image/png" etc (required for base64)
 	ImageData string `json:"image_data,omitempty"` // image: base64 bytes

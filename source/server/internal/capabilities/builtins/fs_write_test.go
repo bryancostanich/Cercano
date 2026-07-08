@@ -177,3 +177,32 @@ func TestEditFileCapability_Detail(t *testing.T) {
 		t.Fatalf("detail = %q, want \"+3 −1\"", res.Detail)
 	}
 }
+
+// -- start-line metadata tests --
+
+func TestEditFileCapability_RecordsStartLine(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "f.txt")
+	if err := os.WriteFile(p, []byte("l1\nl2\nl3 target\nl4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args, _ := json.Marshal(map[string]any{"path": p, "old_string": "l3 target", "new_string": "l3 changed"})
+	res, err := EditFile().Execute(context.Background(), &capabilities.Call{Args: args})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if res.StartLine != 3 {
+		t.Errorf("StartLine = %d, want 3 (match begins on line 3 of the pre-edit file)", res.StartLine)
+	}
+}
+
+func TestWriteFileCapability_RecordsStartLineOne(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "f.txt")
+	args, _ := json.Marshal(map[string]any{"path": p, "content": "a\nb\n"})
+	res, err := WriteFile().Execute(context.Background(), &capabilities.Call{Args: args})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if res.StartLine != 1 {
+		t.Errorf("StartLine = %d, want 1 (a write always begins at line 1)", res.StartLine)
+	}
+}

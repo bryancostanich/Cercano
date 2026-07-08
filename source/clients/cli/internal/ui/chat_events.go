@@ -46,10 +46,11 @@ type toolEntryStartMsg struct{ id, name string }
 type toolEntryStopMsg struct{ id, argsSummary string }
 type toolEntryExecStartMsg struct{ id string }
 type toolEntryExecCompleteMsg struct {
-	id      string
-	detail  string
-	summary string
-	isError bool
+	id        string
+	detail    string
+	summary   string
+	startLine int // 1-based first line of an edit/write (0 = n/a)
+	isError   bool
 }
 
 // permissionRequiredMsg is host-routed (raises the confirm gate); it is NOT a

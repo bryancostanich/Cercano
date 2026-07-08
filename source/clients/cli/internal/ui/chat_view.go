@@ -411,6 +411,7 @@ func (c *chatView) Apply(msg tea.Msg) tea.Cmd {
 			dur := time.Since(t.StartedAt)
 			t.Duration = dur
 			t.ResultSummary = humanizeResult(m.detail, m.summary, m.isError, dur)
+			t.StartLine = m.startLine
 		}
 
 	case chatAssistantMsg:

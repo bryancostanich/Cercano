@@ -589,11 +589,12 @@ func (c *Client) GetContextUsage(ctx context.Context, conversationID string) (*C
 // the tool_use block was located; Result may be empty when the call is still
 // in flight.
 type ToolCallDetail struct {
-	Found    bool
-	ToolName string
-	ArgsJSON string
-	Result   string
-	IsError  bool
+	Found     bool
+	ToolName  string
+	ArgsJSON  string
+	Result    string
+	IsError   bool
+	StartLine int // 1-based first line of an edit/write (0 = n/a)
 }
 
 // GetToolCall fetches the full args and result body for a single tool call in
@@ -605,11 +606,12 @@ func (c *Client) GetToolCall(ctx context.Context, conversationID, toolUseID stri
 		return nil, err
 	}
 	return &ToolCallDetail{
-		Found:    resp.GetFound(),
-		ToolName: resp.GetToolName(),
-		ArgsJSON: resp.GetArgsJson(),
-		Result:   resp.GetResult(),
-		IsError:  resp.GetIsError(),
+		Found:     resp.GetFound(),
+		ToolName:  resp.GetToolName(),
+		ArgsJSON:  resp.GetArgsJson(),
+		Result:    resp.GetResult(),
+		IsError:   resp.GetIsError(),
+		StartLine: int(resp.GetStartLine()),
 	}, nil
 }
 
@@ -677,6 +679,9 @@ type ContextTurn struct {
 	ToolUseID  string // tool_use turns: the call's correlation id
 	ToolArgs   string // tool_use turns: input JSON, capped at 4 KB
 	ToolUseRef string // tool_result turns: originating call's id
+	// ToolStartLine (tool_result turns): 1-based first line of an edit/write
+	// in the target file, recorded at execute time. 0 = not applicable.
+	ToolStartLine int
 }
 
 // GetConversationTurns returns side-effect-free turn summaries for the /c viewer.
@@ -688,17 +693,18 @@ func (c *Client) GetConversationTurns(ctx context.Context, conversationID string
 	out := make([]ContextTurn, 0, len(resp.GetTurns()))
 	for _, t := range resp.GetTurns() {
 		out = append(out, ContextTurn{
-			ID:         t.GetId(),
-			Role:       t.GetRole(),
-			Kind:       t.GetKind(),
-			Preview:    t.GetPreview(),
-			Body:       t.GetBody(),
-			Truncated:  t.GetTruncated(),
-			EstTokens:  int(t.GetEstTokens()),
-			ToolName:   t.GetToolName(),
-			ToolUseID:  t.GetToolUseId(),
-			ToolArgs:   t.GetToolArgs(),
-			ToolUseRef: t.GetToolUseRef(),
+			ID:            t.GetId(),
+			Role:          t.GetRole(),
+			Kind:          t.GetKind(),
+			Preview:       t.GetPreview(),
+			Body:          t.GetBody(),
+			Truncated:     t.GetTruncated(),
+			EstTokens:     int(t.GetEstTokens()),
+			ToolName:      t.GetToolName(),
+			ToolUseID:     t.GetToolUseId(),
+			ToolArgs:      t.GetToolArgs(),
+			ToolUseRef:    t.GetToolUseRef(),
+			ToolStartLine: int(t.GetToolStartLine()),
 		})
 	}
 	return out, nil
@@ -1447,6 +1453,7 @@ type StreamMsg struct {
 	ArgsJSON     string // for TypePermissionRequired
 	Summary      string // for TypeToolExecComplete
 	Detail       string // for TypeToolExecComplete (clean outcome token)
+	StartLine    int    // for TypeToolExecComplete (1-based first line of an edit/write; 0 = n/a)
 	IsError      bool   // for TypeToolExecComplete
 	RouteModel   string // for TypeRouteSelected (engine handling the turn)
 	RouteCloud   bool   // for TypeRouteSelected (true = cloud, false = local)
@@ -1565,6 +1572,7 @@ func (c *Client) StreamChat(ctx context.Context, conversationID, input, workDir 
 					ToolUseID: tec.GetToolUseId(),
 					Summary:   tec.GetSummary(),
 					Detail:    tec.GetDetail(),
+					StartLine: int(tec.GetStartLine()),
 					IsError:   tec.GetIsError(),
 				}
 				continue

@@ -28,6 +28,7 @@ Threads the turn's `WorkDir` into tool execution and deletes the process-global 
 - Modify `internal/agent/toolloop.go` — `ToolLoopInput.WorkDir`; wrap ctx.
 - Modify `internal/capabilities/agentadapter/adapter.go` — set `call.WorkDir` from ctx.
 - Modify `internal/capabilities/builtins/{run,fs_read,fs_write,grep,git_read,git_write}.go` — resolve against `call.WorkDir`.
+- Modify `internal/capabilities/builtins/{fs_destructive.go (rm_file), fs_read.go (Glob), gitflow_worktree.go (a.Path)}` — remaining path-resolving caps (Task 6). The six `gitflow_*` caps already fall back to `call.WorkDir` for their `dir`; a confirming test locks that.
 - Modify `internal/server/server.go` — delete the `os.Chdir`; set `WorkDir` on the loop input.
 - Modify `internal/server/agentic_dispatch.go` — set `WorkDir` on the subagent loop input.
 
@@ -479,7 +480,117 @@ git add internal/capabilities/builtins/grep.go internal/capabilities/builtins/gi
 git commit -m "feat(tools): grep and git tools default their dir to WorkDir"
 ```
 
-## Task 6: Delete os.Chdir, set WorkDir on the loop, add the cross-talk guard
+## Task 6: Remaining path-resolving caps — Glob, rm_file, gitflow worktree
+
+The initial file list missed three path-resolving caps. They must be fixed **before** Task 7 deletes `os.Chdir` — otherwise a relative-path `glob`/`rm_file`/`gitflow_worktree` loses its process-cwd fallback and breaks. `rm_file` is X-tier: a relative delete against a drifted cwd removes a file in the wrong repo — the destructive instance of exactly the bug this design kills. The six `gitflow_*` caps already fall back to `call.WorkDir` for their working `dir` (verified) — no code change; one confirming test locks that Task 1's plumbing reaches them.
+
+**Files:**
+- Modify: `internal/capabilities/builtins/fs_destructive.go` (`rmFileCap.Execute`, ~line 39)
+- Modify: `internal/capabilities/builtins/fs_read.go` (`globCap.Execute`, ~line 215)
+- Modify: `internal/capabilities/builtins/gitflow_worktree.go` (resolve `a.Path` before `CreateWorktree`, ~line 62)
+- Test: `internal/capabilities/builtins/fs_destructive_test.go`, `fs_read_test.go`, and a gitflow WorkDir test in one of `gitflow_*_test.go`
+
+**Interfaces:**
+- Consumes: `builtins.resolvePath(workDir, p string) string`, `capabilities.Call.WorkDir` (Task 1).
+
+- [ ] **Step 1: Write the failing test for rm_file**
+
+Add to `fs_destructive_test.go`:
+```go
+func TestRmFile_RelativePathResolvesAgainstWorkDir(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "doomed.txt")
+	if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	call := &capabilities.Call{WorkDir: dir, Args: []byte(`{"path":"doomed.txt"}`), Emit: func(string) {}}
+	if _, err := RmFile().Execute(context.Background(), call); err != nil {
+		t.Fatalf("rm: %v", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Errorf("file under WorkDir was not deleted (err=%v)", err)
+	}
+}
+```
+(Grep `fs_destructive.go` for the real public constructor — `RmFile()` — and the cap type. Use the real names.)
+
+- [ ] **Step 2: Run it, verify it fails**
+
+Run: `cd source/server && go test ./internal/capabilities/builtins/ -run TestRmFile_RelativePathResolvesAgainstWorkDir`
+Expected: FAIL — the relative path resolves against the process cwd; the file under `dir` is not found/deleted.
+
+- [ ] **Step 3: Resolve a.Path in rmFileCap.Execute**
+
+In `fs_destructive.go`, right after the `if a.Path == "" { ... }` guard, add:
+```go
+	a.Path = resolvePath(call.WorkDir, a.Path)
+```
+
+- [ ] **Step 4: Run it, verify pass**
+
+Run: `go test ./internal/capabilities/builtins/ -run TestRmFile_RelativePathResolvesAgainstWorkDir`
+Expected: PASS.
+
+- [ ] **Step 5: Write the failing test for Glob**
+
+Add to `fs_read_test.go`:
+```go
+func TestGlob_ResolvesAgainstWorkDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "match.go"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	call := &capabilities.Call{WorkDir: dir, Args: []byte(`{"pattern":"*.go"}`), Emit: func(string) {}}
+	res, err := Glob().Execute(context.Background(), call)
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	if !strings.Contains(res.Text, "match.go") {
+		t.Errorf("glob missed the file under WorkDir: %q", res.Text)
+	}
+}
+```
+(Grep `fs_read.go` for how `globCap.Execute` composes its pattern/path — it uses `filepath.Glob`. Adapt the assertion to the real result shape. Use the real `Glob()` constructor / `Result` text field.)
+
+- [ ] **Step 6: Run it, verify it fails**
+
+Run: `go test ./internal/capabilities/builtins/ -run TestGlob_ResolvesAgainstWorkDir`
+Expected: FAIL — glob runs against the process cwd.
+
+- [ ] **Step 7: Resolve the glob base against WorkDir**
+
+In `globCap.Execute`, resolve the path the pattern is anchored to against `call.WorkDir` before calling `filepath.Glob`. If the cap has a separate `a.Path` base, do `a.Path = resolvePath(call.WorkDir, a.Path)`; if the pattern itself is the only path input and is relative, join it: `pattern = resolvePath(call.WorkDir, pattern)`. Match the cap's actual structure (grep first).
+
+- [ ] **Step 8: Run it, verify pass**
+
+Run: `go test ./internal/capabilities/builtins/ -run TestGlob_ResolvesAgainstWorkDir`
+Expected: PASS.
+
+- [ ] **Step 9: Resolve a.Path in gitflow_worktree**
+
+In `gitflow_worktree.go`, before the `r.CreateWorktree(ctx, a.Path, ...)` call (~line 62), add:
+```go
+	a.Path = resolvePath(call.WorkDir, a.Path)
+```
+(This is separate from the `dir` fallback, which already exists.)
+
+- [ ] **Step 10: Add the gitflow confirming test (no code change expected for `dir`)**
+
+Add a test to one `gitflow_*_test.go` (e.g. `gitflow_history_test.go`) that inits a temp git repo, sets `call.WorkDir` to it with no explicit `cwd` arg, runs the cap, and asserts it operated in that repo (e.g. the output references the temp repo, or a checkpoint/history call succeeds there). This confirms Task 1's plumbing reaches the gitflow suite and guards the `dir = call.WorkDir` fallback against regression. Grep the target cap's args + constructor first.
+
+- [ ] **Step 11: Run the whole builtins package**
+
+Run: `go test ./internal/capabilities/builtins/ -count=1`
+Expected: PASS.
+
+- [ ] **Step 12: Commit**
+
+```bash
+git -C /Users/bryancostanich/git_repos/bryan_costanich/Cercano/.claude/worktrees/agent-isolation-phase1 add internal/capabilities/builtins/fs_destructive.go internal/capabilities/builtins/fs_read.go internal/capabilities/builtins/gitflow_worktree.go internal/capabilities/builtins/fs_destructive_test.go internal/capabilities/builtins/fs_read_test.go internal/capabilities/builtins/gitflow_history_test.go
+git -C /Users/bryancostanich/git_repos/bryan_costanich/Cercano/.claude/worktrees/agent-isolation-phase1 commit -m "feat(tools): Glob, rm_file, gitflow worktree resolve against WorkDir"
+```
+
+## Task 7: Delete os.Chdir, set WorkDir on the loop, add the cross-talk guard
 
 **Files:**
 - Modify: `internal/server/server.go` (delete the `os.Chdir` block ~2336-2344; add `WorkDir` to the `ToolLoopInput` in `runMainLoop` ~2681)

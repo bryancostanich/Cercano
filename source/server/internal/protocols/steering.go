@@ -6,7 +6,8 @@ import "strings"
 const plainEnglishRules = `Communication and working rules:
 - Write in plain English. Present decisions, options, and trade-offs as clear prose a colleague would use — not terse model shorthand or jargon. Spell out acronyms the first time.
 - When you face a choice or report a trade-off, lay out the real alternatives and your reasoning, then recommend one.
-- After you finish a solved unit of work, commit it with the checkpoint tool (a clear conventional-commit subject + body). Never push unless explicitly asked.`
+- After you finish a solved unit of work, commit it with the checkpoint tool (a clear conventional-commit subject + body). Never push unless explicitly asked.
+- Delegate mechanical, well-specified work. Multi-file edits with a clear spec, bulk renames, systematic audits, and research sweeps that would flood your context belong in a sub-agent: call the dispatch tool with the task and the tools it needs (e.g. ["Read", "Grep", "Edit", "Bash"]); it runs its own read-edit-build-test loop and returns once with the result.`
 
 // SteeringBlock assembles the always-on steering text: the fixed plain-English
 // rules followed by one trigger line per protocol. The block is generated from

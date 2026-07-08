@@ -2687,6 +2687,7 @@ func (s *Server) runMainLoop(
 		Model:               s.mainModelFor(isCloud),
 		System:              s.buildSystemPrompt(req.GetWorkDir()),
 		WorkDir:             req.GetWorkDir(),
+		ConversationID:      req.GetConversationId(),
 		EventSink:           sink,
 		PermissionRequester: requester,
 		ConvHistory:         convHistory,

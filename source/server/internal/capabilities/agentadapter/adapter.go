@@ -50,8 +50,9 @@ func (t capTool) Schema() json.RawMessage           { return json.RawMessage(t.c
 
 func (t capTool) Execute(ctx context.Context, args json.RawMessage) (*agenttools.Result, error) {
 	call := &capabilities.Call{
-		Args:    args,
-		WorkDir: agenttools.WorkDirFromContext(ctx),
+		Args:           args,
+		WorkDir:        agenttools.WorkDirFromContext(ctx),
+		ConversationID: agenttools.ConversationIDFromContext(ctx),
 		// The loop has already gated W/X before calling Execute, and emits its
 		// own events around execution, so allow-all + no-op here is correct and
 		// behavior-preserving for the migrated tools.

@@ -119,3 +119,19 @@ func TestReadFileCapability_Surfaces(t *testing.T) {
 		t.Fatalf("surfaces wrong: %v", cap.Surfaces())
 	}
 }
+
+func TestReadFile_RelativePathResolvesAgainstWorkDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args, _ := json.Marshal(map[string]any{"path": "hello.txt"})
+	call := &capabilities.Call{WorkDir: dir, Args: args, Emit: func(string) {}}
+	res, err := ReadFile().Execute(context.Background(), call)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if res.Text != "hi" {
+		t.Errorf("content = %q, want hi", res.Text)
+	}
+}

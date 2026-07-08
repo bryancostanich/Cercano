@@ -55,6 +55,7 @@ func (readFileCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 	if a.Path == "" {
 		return nil, errors.New("read_file: path is required")
 	}
+	a.Path = resolvePath(call.WorkDir, a.Path)
 	data, err := os.ReadFile(a.Path)
 	if err != nil {
 		return nil, fmt.Errorf("read_file: %w", err)
@@ -107,6 +108,7 @@ func (listDirCap) Execute(ctx context.Context, call *capabilities.Call) (*capabi
 	if a.Path == "" {
 		return nil, errors.New("list_dir: path is required")
 	}
+	a.Path = resolvePath(call.WorkDir, a.Path)
 	entries, err := os.ReadDir(a.Path)
 	if err != nil {
 		return nil, fmt.Errorf("list_dir: %w", err)
@@ -179,6 +181,7 @@ func (statFileCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 	if a.Path == "" {
 		return nil, errors.New("stat_file: path is required")
 	}
+	a.Path = resolvePath(call.WorkDir, a.Path)
 	info, err := os.Stat(a.Path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return &capabilities.Result{Type: capabilities.ResultRows, Rows: []map[string]any{{

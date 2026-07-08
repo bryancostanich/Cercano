@@ -88,6 +88,58 @@ func (e *Engine) ChatWithTools(ctx context.Context, req engine.ChatRequest) (eng
 	}, nil
 }
 
+// Embed implements engine.EmbeddingService against a warm llama-server
+// embedding instance. endpointFor reuses a resident instance for the model
+// (spawning one in --embedding mode on first use — argsFor adds the flag for
+// encoder GGUFs), so embeddings follow the configured runtime instead of
+// silently requiring an Ollama daemon.
+func (e *Engine) Embed(ctx context.Context, model, text string) ([]float64, error) {
+	endpoint, resolvedModel, err := e.endpointFor(ctx, model)
+	if err != nil {
+		return nil, err
+	}
+	if resolvedModel == "" {
+		resolvedModel = "default"
+	}
+	payload, err := json.Marshal(embeddingsRequest{Model: resolvedModel, Input: text})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(endpoint, "/")+"/v1/embeddings", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := e.httpClient().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("llama-server embeddings error (status %d): %s", resp.StatusCode, string(body))
+	}
+	var decoded embeddingsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		return nil, err
+	}
+	if len(decoded.Data) == 0 {
+		return nil, errors.New("llama-server embeddings response contained no data")
+	}
+	return decoded.Data[0].Embedding, nil
+}
+
+type embeddingsRequest struct {
+	Model string `json:"model"`
+	Input string `json:"input"`
+}
+
+type embeddingsResponse struct {
+	Data []struct {
+		Embedding []float64 `json:"embedding"`
+	} `json:"data"`
+}
+
 func (e *Engine) ListModels(ctx context.Context) ([]engine.ModelInfo, error) {
 	if e.Manager == nil {
 		return nil, errors.New("llama-server runtime manager is not configured")

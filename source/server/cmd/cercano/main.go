@@ -135,10 +135,12 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	ollamaEng := ollama.NewOllamaEngine(cfg.OllamaURL)
 	registry.RegisterEngine(ollamaEng)
 	registry.RegisterEmbedder(ollamaEng)
+	// llamaEng registers below once constructed — see RegisterEmbedder there.
 
 	runtimeManager := buildRuntimeManager(cfg)
 	llamaEng := llamaengine.NewEngine(runtimeManager)
 	registry.RegisterEngine(llamaEng)
+	registry.RegisterEmbedder(llamaEng)
 
 	openEngine, openModel := selectOpenEngine(cfg, ollamaEng, llamaEng)
 	openProvider := legacymodels.NewOpenModelProvider(openEngine, openModel)
@@ -161,7 +163,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	// since MCP tools never classify intent. Prototypes are embedded in the
 	// binary (see //go:embed in internal/agent/router.go). See GitHub issue #5.
 	routerFactory := func() (*agent.SmartRouter, error) {
-		return agent.NewSmartRouterFromBytes(openProvider, cloudProvider, cfg.OpenEmbeddingModel(), ollamaEng, agent.DefaultPrototypes(), cloudFactory)
+		return agent.NewSmartRouterFromBytes(openProvider, cloudProvider, cfg.OpenEmbeddingModel(), selectEmbedEngine(cfg, ollamaEng, llamaEng), agent.DefaultPrototypes(), cloudFactory)
 	}
 	lazyRouter := agent.NewLazyRouter(routerFactory, openProvider, cloudProvider)
 
@@ -568,6 +570,16 @@ func llamaServerEnabled(cfg config.Config) bool {
 	return cfg.LlamaServer.Enabled || strings.EqualFold(cfg.OpenRuntime, "llama_server")
 }
 
+// selectEmbedEngine picks the embedder for the configured runtime —
+// embeddings run on whatever local runtime is set up, not hardwired to
+// Ollama (local-model-taxonomy design).
+func selectEmbedEngine(cfg config.Config, ollamaEng engine.EmbeddingService, llamaEng engine.EmbeddingService) engine.EmbeddingService {
+	if cfg.OpenRuntime == "llama_server" {
+		return llamaEng
+	}
+	return ollamaEng
+}
+
 func selectOpenEngine(cfg config.Config, ollamaEng engine.InferenceEngine, llamaEng engine.InferenceEngine) (engine.InferenceEngine, string) {
 	if strings.EqualFold(cfg.OpenRuntime, "llama_server") {
 		model := strings.TrimSpace(cfg.LlamaServer.DefaultModel)
@@ -854,7 +866,11 @@ func runSetup(installEngine bool) {
 	// Ensure the embedding model is present. It powers smart routing today and
 	// gives semantic features a known local embedder on first run.
 	fmt.Println("\n[7/8] Checking embedding model...")
-	if engineAvailable {
+	if cfg.OpenRuntime == "llama_server" {
+		// Embeddings ride the llama-server runtime — the encoder GGUF in
+		// model_dirs serves them; no Ollama daemon or pull is involved.
+		fmt.Printf("  Skipped Ollama pull: embeddings run on llama-server (%s).\n", cfg.OpenEmbeddingModel())
+	} else if engineAvailable {
 		installed, err := listInstalledModels(cfg.OllamaURL)
 		if err == nil {
 			if hasInstalledModel(installed, cfg.OpenEmbeddingModel()) {

@@ -25,6 +25,26 @@ func (s *Server) resolveTierModel(t config.Tier, prefer config.Provider, strict 
 	return mc.Resolve(t, prefer, strict)
 }
 
+// DispatchModelFor resolves the model id for a dispatch: the provider side
+// is already chosen by locus, the tier names the capability class. Strict on
+// the requested tier's slot for that side; an unconfigured slot falls through
+// to the everyday workhorse on the same side, so a sparse tier table never
+// yields an empty model. Reads live config via resolveTierModel — a runtime
+// tier or profile change is honored on the very next dispatch.
+func (s *Server) DispatchModelFor(isCloud bool, tier config.Tier) string {
+	side := config.ProviderOpen
+	if isCloud {
+		side = config.ProviderCloud
+	}
+	if id, _, ok := s.resolveTierModel(tier, side, true); ok {
+		return id
+	}
+	if id, _, ok := s.resolveTierModel(config.TierEveryday, side, true); ok {
+		return id
+	}
+	return ""
+}
+
 // watchdogModelFor returns the model override for watchdog one-shot checks.
 // Explicit watchdog.model config wins. Otherwise the fast_light_text tier's
 // OPEN side is used — strictly: the watchdog's oneShot lane dispatches to the

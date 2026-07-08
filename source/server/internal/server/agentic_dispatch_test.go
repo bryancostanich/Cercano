@@ -11,6 +11,7 @@ import (
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
+	"cercano/source/server/pkg/config"
 )
 
 // stubDispatchTool is a minimal agenttools.Tool for testing runAgenticDispatch.
@@ -207,7 +208,7 @@ func TestSetDispatchEngine_WiresAgenticRunner(t *testing.T) {
 		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
-	eng.SetModelFor(func(isCloud bool) string { return "local-model" })
+	eng.SetModelFor(func(isCloud bool, _ config.Tier) string { return "local-model" })
 	srv.SetDispatchEngine(eng)
 
 	// An Agentic dispatch must succeed now (runner is wired).

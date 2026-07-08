@@ -8,6 +8,7 @@ import (
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
+	"cercano/source/server/pkg/config"
 )
 
 // fakeLLMProvider is a minimal llm.Provider for dispatch engine tests.
@@ -55,7 +56,7 @@ func newDispatchCoprocAgent(modeStr string, localProv, cloudProv *fakeLLMProvide
 		return m
 	}
 	eng := dispatch.NewEngine(func() dispatch.Providers { return dispatch.Providers{Open: dLocal, Cloud: dCloud} }, modeFn, nil)
-	eng.SetModelFor(func(isCloud bool) string {
+	eng.SetModelFor(func(isCloud bool, _ config.Tier) string {
 		if isCloud {
 			return cloudModel
 		}

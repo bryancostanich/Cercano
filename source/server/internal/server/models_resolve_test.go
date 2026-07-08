@@ -144,3 +144,29 @@ func TestUpdateConfig_ModelTierInvalid(t *testing.T) {
 		t.Errorf("error should name the bad tier, got %q", resp.Message)
 	}
 }
+
+// TestDispatchModelFor pins the dispatch engine's model hook: strict on the
+// requested tier's side, everyday fall-through when the slot is empty, and
+// live config reads (no startup capture).
+func TestDispatchModelFor(t *testing.T) {
+	s, _ := newTestServer()
+	s.currentConfig.Models.Tiers.FastLightText.Open = "phi4:14b"
+	s.currentConfig.Models.Tiers.Everyday.Open = "qwen3-coder-next"
+
+	if got := s.DispatchModelFor(false, config.TierFastLightText); got != "phi4:14b" {
+		t.Errorf("fast_light_text open = %q, want phi4:14b", got)
+	}
+	// Empty slot falls through to everyday on the SAME side.
+	if got := s.DispatchModelFor(false, config.TierFastLight); got != "qwen3-coder-next" {
+		t.Errorf("empty fast_light open = %q, want everyday fall-through qwen3-coder-next", got)
+	}
+	// Live read: a runtime tier change is honored immediately.
+	s.currentConfig.Models.Tiers.FastLightText.Open = "phi4-mini"
+	if got := s.DispatchModelFor(false, config.TierFastLightText); got != "phi4-mini" {
+		t.Errorf("live read = %q, want phi4-mini", got)
+	}
+	// Cloud side: everyday cloud falls through to the active profile model.
+	if got := s.DispatchModelFor(true, config.TierEveryday); got != s.activeCloudModel() {
+		t.Errorf("everyday cloud = %q, want active profile model %q", got, s.activeCloudModel())
+	}
+}

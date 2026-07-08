@@ -10,6 +10,7 @@ import (
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/usage"
+	"cercano/source/server/pkg/config"
 )
 
 // newDispatchID mints a short random id for scoping a dispatch's provider
@@ -39,6 +40,11 @@ type Spec struct {
 	ConversationID      string
 	Source              string
 	ModelOverride       string // advisory model name within locus bounds
+
+	// Tier names the model-taxonomy tier this dispatch runs on. Empty
+	// defaults by role: RoleMain → everyday, RoleCoproc → fast_light_text.
+	// ModelOverride, when set, wins over tier resolution.
+	Tier config.Tier
 
 	// ContentTokensAvoided is the estimated cloud tokens saved by handling this
 	// OneShot locally; recorded in telemetry when RecordUsage is set.
@@ -86,7 +92,7 @@ type Engine struct {
 	providersFn   func() Providers
 	modeFn        func() locus.Mode
 	ctxLoader     *projectctx.Loader
-	modelFor      func(isCloud bool) string
+	modelFor      func(isCloud bool, tier config.Tier) string
 	usageSink     func(usage.Usage)
 	agenticRunner AgenticRunner
 }
@@ -112,8 +118,9 @@ func (e *Engine) SetUsageSink(fn func(usage.Usage)) {
 	e.usageSink = fn
 }
 
-// SetModelFor installs a function that maps provider tier to a model name string.
-func (e *Engine) SetModelFor(fn func(isCloud bool) string) {
+// SetModelFor installs a function that resolves the model for a dispatch:
+// the already-selected provider side plus the taxonomy tier the work runs on.
+func (e *Engine) SetModelFor(fn func(isCloud bool, tier config.Tier) string) {
 	e.modelFor = fn
 }
 
@@ -125,10 +132,18 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 		return Result{}, err
 	}
 
-	// 2. Resolve model name.
+	// 2. Resolve model name: taxonomy tier first (role default when unset),
+	// then the caller's explicit override wins.
+	tier := spec.Tier
+	if tier == "" {
+		tier = config.TierEveryday
+		if spec.Role == RoleCoproc {
+			tier = config.TierFastLightText
+		}
+	}
 	model := ""
 	if e.modelFor != nil {
-		model = e.modelFor(sel.IsCloud)
+		model = e.modelFor(sel.IsCloud, tier)
 	}
 	if spec.ModelOverride != "" {
 		model = spec.ModelOverride

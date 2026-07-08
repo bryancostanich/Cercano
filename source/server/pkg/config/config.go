@@ -256,6 +256,41 @@ func autoDetectMeridianRoute(cfg *Config) {
 	}
 }
 
+// migrateModelTiers seeds the model taxonomy from the legacy standalone
+// model keys: open_model → tiers.everyday.open, embedding_model →
+// tiers.embedding.open. Seeding only fills EMPTY slots — a file that already
+// assigns a tier slot wins over the legacy key.
+//
+// Like applyLegacyLocalKeys, this must check raw-YAML key presence rather
+// than the merged Config value: Defaults() pre-populates OpenModel and
+// EmbeddingModel before unmarshal, so a merged non-empty value can't
+// distinguish "the user chose this" from "nobody set it." Only values the
+// file actually contains migrate into the tiers.
+//
+// The legacy fields are left populated for now so not-yet-rewired readers
+// keep working; the tier slot is the source of truth and readers migrate to
+// it (design: docs/features/local-model-taxonomy/design.md).
+func migrateModelTiers(data []byte, cfg *Config) {
+	var raw map[string]any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return
+	}
+	filePresent := func(keys ...string) bool {
+		for _, k := range keys {
+			if _, ok := raw[k]; ok {
+				return true
+			}
+		}
+		return false
+	}
+	if cfg.Models.Tiers.Everyday.Open == "" && cfg.OpenModel != "" && filePresent("open_model", "local_model") {
+		cfg.Models.Tiers.Everyday.Open = cfg.OpenModel
+	}
+	if cfg.Models.Tiers.Embedding.Open == "" && cfg.EmbeddingModel != "" && filePresent("embedding_model") {
+		cfg.Models.Tiers.Embedding.Open = cfg.EmbeddingModel
+	}
+}
+
 // Load reads config from the given path, merges with defaults, then applies
 // environment variable overrides. Returns defaults if the file doesn't exist.
 func Load(path string) (Config, error) {
@@ -282,6 +317,11 @@ func Load(path string) (Config, error) {
 		// keys when both are present. Save() only writes the new
 		// spelling, so this shim is read-only.
 		applyLegacyLocalKeys(data, &cfg)
+
+		// Seed the model taxonomy from the legacy standalone model keys —
+		// raw-presence-gated so a defaulted "qwen3-coder" never
+		// masquerades as a user's everyday-tier choice.
+		migrateModelTiers(data, &cfg)
 
 		// Re-apply defaults for any fields not set in the file
 		defaults := Defaults()

@@ -18,6 +18,10 @@ const (
 	// small coder models are poor text judges and small text models are poor
 	// code helpers.
 	TierFastLightText Tier = "fast_light_text"
+	// TierEmbedding is the embedding model slot. Only the open side is
+	// meaningful today (embeddings run on the configured local runtime);
+	// the cloud side exists for shape-consistency and future use.
+	TierEmbedding Tier = "embedding"
 )
 
 // Provider names which side of the taxonomy a model id lives on. "Open" names
@@ -44,6 +48,7 @@ type ModelTiers struct {
 	Everyday      ModelTier `yaml:"everyday"`
 	FastLight     ModelTier `yaml:"fast_light"`
 	FastLightText ModelTier `yaml:"fast_light_text"`
+	Embedding     ModelTier `yaml:"embedding,omitempty"`
 }
 
 // ModelsConfig is the model taxonomy: which model serves each capability tier,
@@ -68,6 +73,8 @@ func (m ModelsConfig) tier(t Tier) ModelTier {
 		return m.Tiers.FastLight
 	case TierFastLightText:
 		return m.Tiers.FastLightText
+	case TierEmbedding:
+		return m.Tiers.Embedding
 	}
 	return ModelTier{}
 }
@@ -99,6 +106,8 @@ func (m *ModelsConfig) tierSlot(t Tier) *ModelTier {
 		return &m.Tiers.FastLight
 	case TierFastLightText:
 		return &m.Tiers.FastLightText
+	case TierEmbedding:
+		return &m.Tiers.Embedding
 	}
 	return nil
 }
@@ -122,8 +131,8 @@ func ApplyModelTierPatch(m *ModelsConfig, key, value string) (string, error) {
 	}
 	slot := m.tierSlot(Tier(tierName))
 	if slot == nil {
-		return "", fmt.Errorf("unknown model tier %q (want %s|%s|%s|%s)", tierName,
-			TierMostCapable, TierEveryday, TierFastLight, TierFastLightText)
+		return "", fmt.Errorf("unknown model tier %q (want %s|%s|%s|%s|%s)", tierName,
+			TierMostCapable, TierEveryday, TierFastLight, TierFastLightText, TierEmbedding)
 	}
 	if value == "-" {
 		value = ""
@@ -147,7 +156,7 @@ func ApplyModelTierPatch(m *ModelsConfig, key, value string) (string, error) {
 // the read-side view served by GetConfig and rendered by /config show.
 func (m ModelsConfig) TierSlots() map[string]string {
 	out := map[string]string{}
-	for _, t := range []Tier{TierMostCapable, TierEveryday, TierFastLight, TierFastLightText} {
+	for _, t := range []Tier{TierMostCapable, TierEveryday, TierFastLight, TierFastLightText, TierEmbedding} {
 		mt := m.tier(t)
 		if mt.Cloud != "" {
 			out[string(t)+".cloud"] = mt.Cloud

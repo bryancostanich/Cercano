@@ -155,7 +155,10 @@ func (s *Server) runAgenticDispatch(ctx context.Context, spec dispatch.Spec, sel
 	// that one approval covers the run, so the sub-loop runs pre-authorized
 	// (static bypass store; the granted registry stays the hard boundary).
 	// R-only grants keep the parent store: R never gates anyway.
-	perms := s.permStore
+	var perms *agent.PermissionStore
+	if s.permBroker != nil {
+		perms = s.permBroker.Store()
+	}
 	for _, t := range reg.All() {
 		if t.Permission() != agenttools.PermR {
 			perms = agent.NewStaticPermissionStore(agent.ModeBypass)

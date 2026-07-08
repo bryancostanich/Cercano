@@ -3,9 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"cercano/source/server/internal/agent"
@@ -310,20 +307,14 @@ func TestStreamToolLoop_NoConversationID_SkipsPersist(t *testing.T) {
 	}
 }
 
-// TestStreamToolLoop_PropagatesWorkDir verifies F2: req.WorkDir becomes the
-// process cwd for the duration of RunToolLoop, so tools that read os.Getwd
-// see the client-supplied project directory, and the prior cwd is restored
-// after the call returns.
+// TestStreamToolLoop_PropagatesWorkDir verifies that req.WorkDir is threaded
+// onto the tool execution context via agenttools.WithWorkDir, so tools can
+// retrieve the client-supplied project directory via agenttools.WorkDirFromContext.
+// No os.Chdir is involved — WorkDir is propagated through ToolLoopInput.WorkDir.
 func TestStreamToolLoop_PropagatesWorkDir(t *testing.T) {
 	srv, _ := newServerWithStore(t)
 
 	tmp := t.TempDir()
-	// macOS /var is a symlink to /private/var; resolve so the comparison is
-	// against the canonical path that os.Getwd reports.
-	wantWd, err := filepath.EvalSymlinks(tmp)
-	if err != nil {
-		t.Fatalf("EvalSymlinks: %v", err)
-	}
 
 	var observed string
 	observerTool := &cwdObserver{out: &observed}
@@ -341,11 +332,6 @@ func TestStreamToolLoop_PropagatesWorkDir(t *testing.T) {
 	}
 	srv.SetCloudLLMProvider(prov)
 
-	priorWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-
 	stream := &fakeStream{ctx: context.Background()}
 	req := &proto.ProcessRequestRequest{
 		Input:          "x",
@@ -356,22 +342,13 @@ func TestStreamToolLoop_PropagatesWorkDir(t *testing.T) {
 		t.Fatalf("streamProcessRequestWithToolLoop: %v", err)
 	}
 
-	// Tool saw the requested WorkDir.
-	if !strings.HasPrefix(observed, wantWd) {
-		t.Errorf("tool observed cwd=%q, want prefix=%q", observed, wantWd)
-	}
-
-	// Prior cwd restored after the helper returned.
-	afterWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd after: %v", err)
-	}
-	if afterWd != priorWd {
-		t.Errorf("cwd not restored: got %q, want %q", afterWd, priorWd)
+	// Tool received WorkDir via context, not via os.Getwd.
+	if observed != tmp {
+		t.Errorf("tool observed workdir=%q, want %q", observed, tmp)
 	}
 }
 
-// cwdObserver is a test-only tool that records os.Getwd() at execution time.
+// cwdObserver is a test-only tool that records agenttools.WorkDirFromContext at execution time.
 type cwdObserver struct {
 	out *string
 }
@@ -381,8 +358,7 @@ func (cwdObserver) Description() string               { return "records cwd for 
 func (cwdObserver) Permission() agenttools.Permission { return agenttools.PermR }
 func (cwdObserver) Schema() json.RawMessage           { return json.RawMessage(`{"type":"object"}`) }
 func (o cwdObserver) Execute(ctx context.Context, args json.RawMessage) (*agenttools.Result, error) {
-	wd, _ := os.Getwd()
-	*o.out = wd
+	*o.out = agenttools.WorkDirFromContext(ctx)
 	return agenttools.NewTextResult("ok"), nil
 }
 

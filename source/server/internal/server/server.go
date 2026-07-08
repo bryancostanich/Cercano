@@ -2326,23 +2326,6 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	ctx, turnGen, releaseTurn := s.beginTurn(stream.Context(), req.GetConversationId())
 	defer releaseTurn()
 
-	// F2: propagate WorkDir into tool execution. Tools that touch the
-	// filesystem (run_command, read_file, git_status) read os.Getwd when
-	// no explicit cwd is passed in their args. Chdir + restore makes them
-	// honor the client-supplied project directory. The legacy path passes
-	// WorkDir as a string param to the coordinator/provider but does NOT
-	// thread it into agenttools — so neither path covers VS Code / Zed
-	// clients properly today. This is the simplest V1 fix.
-	if req.GetWorkDir() != "" {
-		if prev, err := os.Getwd(); err == nil {
-			if err := os.Chdir(req.GetWorkDir()); err == nil {
-				defer os.Chdir(prev)
-			} else {
-				fmt.Fprintf(os.Stderr, "[tool-loop] chdir(%s) failed: %v\n", req.GetWorkDir(), err)
-			}
-		}
-	}
-
 	sink := func(ev agent.LoopEvent) {
 		switch ev.Kind {
 		case agent.LoopToolUseStart:
@@ -2687,6 +2670,7 @@ func (s *Server) runMainLoop(
 		Images:              mapInlineImages(req.GetImages()),
 		Model:               s.mainModelFor(isCloud),
 		System:              s.buildSystemPrompt(req.GetWorkDir()),
+		WorkDir:             req.GetWorkDir(),
 		EventSink:           sink,
 		PermissionRequester: requester,
 		ConvHistory:         convHistory,

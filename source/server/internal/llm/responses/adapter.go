@@ -48,7 +48,7 @@ func messagesToInput(msgs []llm.Message) []inputItem {
 				items = append(items, inputItem{Type: "function_call_output", CallID: b.ToolUseRef, Output: b.Content})
 			case llm.BlockReasoning:
 				flush()
-				items = append(items, inputItem{Type: "reasoning", ID: b.ReasoningID, EncryptedContent: b.ReasoningData})
+				items = append(items, inputItem{Type: "reasoning", ID: b.ReasoningID, EncryptedContent: b.ReasoningData, Summary: json.RawMessage("[]")})
 			}
 		}
 		flush()

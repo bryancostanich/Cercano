@@ -42,6 +42,30 @@ func TestMessagesToInput_AssistantTextIsOutputText(t *testing.T) {
 	}
 }
 
+func TestMessagesToInput_ReasoningCarriesEmptySummary(t *testing.T) {
+	items := messagesToInput([]llm.Message{
+		{Role: llm.RoleAssistant, Blocks: []llm.Block{
+			{Type: llm.BlockReasoning, ReasoningID: "rs_123", ReasoningData: "enc"},
+			{Type: llm.BlockText, Text: "answer"},
+		}},
+	})
+	if len(items) != 2 {
+		t.Fatalf("items = %d, want 2", len(items))
+	}
+	if items[0].Type != "reasoning" {
+		t.Fatalf("items[0].Type = %q, want reasoning", items[0].Type)
+	}
+	// The API requires summary on replayed reasoning items; absent =>
+	// "Missing required parameter: 'input[N].summary'".
+	if got := string(items[0].Summary); got != "[]" {
+		t.Errorf("reasoning Summary = %q, want []", got)
+	}
+	// Non-reasoning items must not grow a summary field.
+	if items[1].Summary != nil {
+		t.Errorf("message item Summary = %q, want absent", items[1].Summary)
+	}
+}
+
 func TestErrorFromBody_Shapes(t *testing.T) {
 	cases := []struct {
 		name string

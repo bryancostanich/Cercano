@@ -127,6 +127,61 @@ func TestChatGPTRoute_Stages(t *testing.T) {
 	}
 }
 
+// TestChatGPTRoute_ReasoningRoundTrip verifies that reasoning items captured
+// from a live turn replay cleanly (the backend requires a summary field on
+// replayed reasoning items — "Missing required parameter: 'input[N].summary'").
+func TestChatGPTRoute_ReasoningRoundTrip(t *testing.T) {
+	c := chatgptLiveClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	weather := llm.Tool{Name: "get_weather", Description: "Get the current weather for a city.",
+		Schema: []byte(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`)}
+	// Phrased to provoke a reasoning item before the tool call so the replay
+	// leg genuinely exercises reasoning-item round-tripping.
+	ask := llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText,
+		Text: "I'm flying from the city that hosted the 1900 World's Fair to the one with the Brandenburg Gate. Work out which city I depart from, then use the tool to get its weather."}}}
+
+	first, err := c.Chat(ctx, llm.ChatRequest{Tools: []llm.Tool{weather}, Messages: []llm.Message{ask}})
+	if err != nil {
+		t.Fatalf("first turn: %v", err)
+	}
+	var toolUse *llm.Block
+	var sawReasoning bool
+	for i := range first.Blocks {
+		switch first.Blocks[i].Type {
+		case llm.BlockReasoning:
+			sawReasoning = true
+		case llm.BlockToolUse:
+			toolUse = &first.Blocks[i]
+		}
+	}
+	if !sawReasoning {
+		t.Log("no reasoning block on turn 1 — replay still exercises the item shape if present in Blocks")
+	}
+	if toolUse == nil {
+		t.Skip("model did not call the tool; cannot exercise the round-trip")
+	}
+	second, err := c.Chat(ctx, llm.ChatRequest{
+		Tools: []llm.Tool{weather},
+		Messages: []llm.Message{
+			ask,
+			{Role: llm.RoleAssistant, Blocks: first.Blocks},
+			{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockToolResult, ToolUseRef: toolUse.ToolUseID, Content: "18C and sunny"}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("second turn (history replayed): %v", err)
+	}
+	var text string
+	for _, b := range second.Blocks {
+		if b.Type == llm.BlockText {
+			text += b.Text
+		}
+	}
+	t.Logf("round-trip final=%q (reasoning on turn1=%v)", text, sawReasoning)
+}
+
 // TestChatGPTRoute_BuildRequestReplica sends exactly what buildRequest produces
 // for a tool-loop-shaped ChatRequest, end to end through StreamChat.
 func TestChatGPTRoute_BuildRequestReplica(t *testing.T) {

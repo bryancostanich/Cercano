@@ -188,7 +188,11 @@ func (p promptInput) LineCount() int {
 // draft with a past submission.
 func (p promptInput) CursorOnFirstRow() bool {
 	rows := p.layoutRows()
-	return p.cursorRowIndexForVertical(rows, p.cursor, -1) == 0
+	// Use the same row mapping the cursor is *rendered* with (cursorRowIndex,
+	// as in Cursor()), not cursorRowIndexForVertical: at a soft-wrap boundary
+	// offset the vertical variant reports the row above, which would recall
+	// history while the user sees their cursor on the second row.
+	return p.cursorRowIndex(rows, p.cursor) == 0
 }
 
 // CursorOnLastRow reports whether the cursor sits on the last *visual* row

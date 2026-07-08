@@ -34,6 +34,11 @@ type inputItem struct {
 	// reasoning
 	ID               string `json:"id,omitempty"`
 	EncryptedContent string `json:"encrypted_content,omitempty"`
+	// Summary is required on replayed reasoning items ("Missing required
+	// parameter: 'input[N].summary'"); we don't retain the model's summary
+	// parts, so the adapter sends an empty array. RawMessage keeps the
+	// field absent (nil) for non-reasoning item types.
+	Summary json.RawMessage `json:"summary,omitempty"`
 }
 
 type contentPart struct {

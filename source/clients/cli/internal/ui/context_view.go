@@ -199,6 +199,7 @@ func (c *contextView) regionHeights() (turnsH, paneH int) {
 
 // turnLineMeta describes each line emitted by turnsLines for hit-testing (Task 3).
 type turnLineMeta struct {
+	railCell bool // body line of an expanded turn: rail gutter click collapses
 	turnID    string
 	arrowCell bool // header line of an expandable turn (clickable)
 }
@@ -404,14 +405,30 @@ func (c *contextView) appendTurn(lines *[]string, meta *[]turnLineMeta, i int, t
 	}
 	add(header, turnLineMeta{turnID: t.ID, arrowCell: expandable})
 
-	// Body lines below the header, hang-indented.
+	// Body lines below the header, hang-indented. Expanded turns get the same
+	// collapse rail as the main chat's tool expand: a faint │ down the left
+	// edge (╰ hook on the last line), and a click anywhere on that gutter
+	// collapses the turn — no scrolling back up to the arrow. The indent stays
+	// PLAIN (outside any style) so overlayRail finds a real space at offset 2.
+	body := make([]string, 0, len(shown[bodyStart:])+1)
 	for _, l := range shown[bodyStart:] {
-		add("    "+l, turnLineMeta{turnID: t.ID})
+		body = append(body, "    "+l)
 	}
-
-	// Truncated indicator when expanded.
 	if open && t.Truncated {
-		add(c.styles.Dim.Render("    …(truncated)"), turnLineMeta{turnID: t.ID})
+		body = append(body, "    "+c.styles.Dim.Render("…(truncated)"))
+	}
+	railed := open && !deleted && len(body) > 0
+	if railed {
+		for k := range body {
+			g := "│"
+			if k == len(body)-1 {
+				g = "╰"
+			}
+			body[k] = overlayRail(body[k], 2, g)
+		}
+	}
+	for _, l := range body {
+		add(l, turnLineMeta{turnID: t.ID, railCell: railed})
 	}
 }
 
@@ -482,6 +499,13 @@ func (c *contextView) handleClick(x, yLocal int) bool {
 	}
 	m := meta[idx]
 	if m.arrowCell && x <= 1 { // arrow occupies the leading 1-2 columns
+		c.toggleExpand(m.turnID)
+		return true
+	}
+	// Rail gutter on an expanded turn's body: the │/╰ sits at column 2 inside
+	// the 4-space indent, so claim [0,4) — content starts at column 4 and
+	// stays selectable.
+	if m.railCell && x <= 3 {
 		c.toggleExpand(m.turnID)
 		return true
 	}

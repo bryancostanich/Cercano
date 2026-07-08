@@ -228,6 +228,7 @@ func (s *Server) runAgenticDispatch(ctx context.Context, spec dispatch.Spec, sel
 		UserInput:      spec.Task,
 		MaxIterations:  spec.MaxIterations,
 		WorkDir:        spec.WorkDir,
+		ConversationID: subConvID, // nested dispatches link to this sub-conversation
 		OnTextDelta:    func(t string) { buf.WriteString(t) },
 		OnTurnComplete: onTurn,
 		// EventSink: nil — non-interactive; PermissionRequester: nil — R-tier won't gate.

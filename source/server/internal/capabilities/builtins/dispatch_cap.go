@@ -53,6 +53,12 @@ func (dispatchCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 	if call.Svc.Dispatch == nil {
 		return nil, errors.New("dispatch: engine not available")
 	}
+	// Parent linkage: the surface-injected conversation id wins over the
+	// model-supplied argument (the model rarely knows its own id).
+	convID := call.ConversationID
+	if convID == "" {
+		convID = a.ConversationID
+	}
 	res, err := call.Svc.Dispatch(ctx, dispatch.Spec{
 		Mode:           dispatch.Agentic,
 		Role:           dispatch.RoleMain,
@@ -60,7 +66,7 @@ func (dispatchCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 		Task:           a.Task,
 		Tools:          a.Tools,
 		WorkDir:        call.WorkDir,
-		ConversationID: a.ConversationID,
+		ConversationID: convID,
 		Interactive:    false,
 	})
 	if err != nil {

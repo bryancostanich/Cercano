@@ -84,6 +84,10 @@ type ToolLoopInput struct {
 	// 0 means use the package default (4096).
 	MaxTokensPerTurn int
 
+	// ConversationID names the conversation this loop serves. Threaded onto
+	// ctx so tools that spawn linked work (dispatch) can record lineage.
+	ConversationID string
+
 	// WorkDir is the turn's working directory. Threaded onto ctx so tools
 	// resolve relative paths against it — never via process cwd.
 	WorkDir string
@@ -148,6 +152,7 @@ func truncateRunes(s string, max int) string {
 
 func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) {
 	ctx = agenttools.WithWorkDir(ctx, in.WorkDir)
+	ctx = agenttools.WithConversationID(ctx, in.ConversationID)
 	if !in.Provider.Capabilities().SupportsTools {
 		return ToolLoopResult{}, fmt.Errorf("provider %s does not support tools", in.Provider.Name())
 	}

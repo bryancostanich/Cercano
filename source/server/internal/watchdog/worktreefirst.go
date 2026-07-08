@@ -62,12 +62,12 @@ func (worktreeFirstCheck) Applies(a Action) bool {
 }
 
 // Evaluate returns a fixed violation whenever Applies matched. The challenge
-// text names the escape hatch (the git_worktree tool) and points at the
-// protocol body so the agent knows where to look for the full rationale.
+// text names the usual escape hatch (the git_worktree tool) and reminds the
+// agent that tiny current-branch edits should be explicit rather than swept up.
 func (worktreeFirstCheck) Evaluate(_ context.Context, _ Action, _ OneShotFunc) (Verdict, error) {
 	return Verdict{
 		Violation: true,
 		Protocol:  "worktree-first",
-		Challenge: "Creating a branch in the shared root workspace is a worktree-first protocol violation. Use the git_worktree tool instead. Run get_protocol('worktree-first') for the full rule.",
+		Challenge: "Do not create a branch in the shared root workspace by default. Use git_worktree for substantial work. For a tiny current-branch edit, ask if unsure and use checkpoint with explicit paths instead. Run get_protocol('worktree-first') for the full rule.",
 	}, nil
 }

@@ -260,24 +260,31 @@ If you can't answer these, you don't understand the system well enough to simula
 	},
 	{
 		Name:        "worktree-first",
-		Description: "Isolate every feature branch in its own worktree; never share the root workspace.",
+		Description: "Use a separate worktree for substantial work; keep tiny, explicit current-branch edits lightweight and safe.",
 		Domain:      DomainCore,
-		Trigger:     "Before creating a new feature branch → use the `git_worktree` tool to create a linked worktree; never `git checkout -b` in the shared root workspace.",
+		Trigger:     "Before creating a new feature branch → use the `git_worktree` tool for substantial work; for tiny current-branch edits, ask when unsure and checkpoint only explicit paths.",
 		Body: `# Worktree-First Protocol
 
 ## When This Applies
 
-Any time you're about to start a new feature or fix that needs its own
-branch. If your next step is ` + "`git checkout -b <newbranch>`" + ` in a shared
-workspace, this protocol is mandatory.
+Any time you're about to decide where a change should happen.
+
+Use a separate worktree for substantial work: new features, risky fixes,
+logic changes, multi-file edits, or anything likely to take more than a
+quick pass.
+
+For tiny, explicit edits — a typo, label rename, comment fix, or one-line
+copy tweak — it is okay to stay on the current branch when that is clearly
+what the user wants. If it is not clear, ask: "Do you want this done here
+or in a separate workspace?"
 
 ## The Rule
 
-**Create a worktree; never share the root workspace.** The root worktree
-(the top-level repository directory) is a shared physical checkout —
-multiple concurrent sessions read from it and write to it. If you check
-out a feature branch in the root, every commit any other session makes
-in the root goes onto **your** branch, not the trunk.
+**Match the workspace to the risk.** The root worktree (the top-level
+repository directory) is a shared physical checkout — multiple concurrent
+sessions read from it and write to it. For substantial work, create an
+isolated worktree. For tiny current-branch work, do not scoop up unrelated
+local changes: checkpoint only the explicit paths you touched.
 
 ## Steps
 
@@ -336,26 +343,23 @@ now trades minutes for hours of rebase conflict resolution later.
 - "How did I end up with 14 commits I don't recognize?" investigations
   mid-rebase
 
-## Fast Path for Trivial Changes
+## Fast Path for Tiny Current-Branch Changes
 
-For genuinely trivial changes — a typo, a label rename, a comment fix,
-a one-line copy tweak — the worktree ceremony is disproportionate. The
-fast path is:
+For genuinely tiny changes — a typo, a label rename, a comment fix, or a
+one-line copy tweak — the worktree ceremony is disproportionate. The fast
+path is:
 
-- Applies to changes ≤ 5 lines across ≤ 2 files with no logic changes.
-- **Create a feature branch in the root** with ` + "`git checkout -b fix/<slug>`" + `.
-  The worktree-first watchdog check is expected to fire here; overriding
-  it is the fast-path escape valve, and the user is asked to authorize.
-- **Stage only your intended files** with an explicit path list.
-  Root may have other sessions' in-progress edits — never ` + "`git add -A`" + `.
-- **Commit via the checkpoint tool.**
-- **Land via ` + "`git_land`" + `.** The test gate and safety refs still run —
-  the fast path saves worktree ceremony, not the safety guarantees.
-- **Delete the branch** after landing.
+- Applies to small edits with no logic changes.
+- Stay on the current branch when the user clearly wants a quick edit here.
+- If it is not clear, ask whether to work here or in a separate workspace.
+- Checkpoint with explicit ` + "`paths`" + ` and, when the current branch is trunk,
+  explicit ` + "`allow_trunk`" + `. This stages only the files you name and leaves
+  unrelated local work alone.
+- Never use raw ` + "`git add -A`" + ` for current-branch quick edits.
 
-The fast path is deliberately narrow. Anything with a logic change, a
-new file, or touching more than a couple of files goes through the
-full worktree flow. When in doubt: use the worktree.
+The fast path is deliberately narrow. Anything with a logic change, a new
+file, or touching more than a couple of files goes through the full
+worktree flow. When in doubt, ask the user which workspace they want.
 `,
 	},
 }

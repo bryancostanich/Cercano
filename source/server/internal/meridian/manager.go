@@ -25,10 +25,12 @@ const DefaultVersion = "1.45.0"
 // State is the lifecycle phase of the Meridian subprocess from Cercano's
 // point of view. The transitions are: Disabled → (PrereqsMissing | NeedsAuth
 // | External | Starting), Starting → (Ready | Failed), Ready → Failed (crash)
-// or Disabled (Stop). External means some other Meridian (or OpenCode) is
-// already on the port; we reuse it but don't manage its lifecycle. A watcher
-// polls the port while External — if the external process dies, the manager
-// re-runs Ensure and spawns its own (External → Starting).
+// or Disabled (Stop). External means someone else owns the Meridian on the
+// port — a non-Cercano proxy (OpenCode), or a sibling cercano process that
+// holds the spawn lock (possibly still starting its Meridian, port not yet
+// serving); we reuse it but don't manage its lifecycle. A watcher polls the
+// port while External — whenever the port isn't serving, the manager re-runs
+// Ensure, which spawns our own if the spawn lock is (now) free.
 type State int
 
 const (
@@ -95,6 +97,12 @@ type Manager struct {
 	// recycled pids: never kill what we can't identify as ours. Injection
 	// point for tests; production is groupLooksLikeMeridian.
 	identifyGroupFn func(pid int) bool
+	// acquireLockFn takes the cross-process spawn lock (non-blocking): exactly
+	// one cercano process (the agent singleton, or any --mcp embedded server)
+	// may own the Meridian lifecycle at a time; everyone else adopts External.
+	// Returns a release func and true when acquired. Injection point for
+	// tests; production is realAcquireLock.
+	acquireLockFn func() (release func(), ok bool)
 
 	mu                  sync.Mutex
 	status              Status
@@ -106,6 +114,13 @@ type Manager struct {
 	authPollCancel      context.CancelFunc // cancels the auth poller; nil when none
 	externalWatchCancel context.CancelFunc // cancels the external-port watcher; nil when none
 	failedRetryCancel   context.CancelFunc // cancels the pending failed-state retry; nil when none
+	// lockRelease releases the held spawn lock; nil when not held. Once
+	// acquired, the lock is held across gate re-runs (Failed retries, External
+	// recoveries) and released only by Stop or process death — releasing on
+	// every re-run would flap ownership to a contender mid-recovery. The
+	// release closure keeps the lock file's *os.File reachable; see
+	// realAcquireLock for why that must not be "cleaned up".
+	lockRelease func()
 }
 
 // authPollInterval is how often the manager re-checks the keychain while in
@@ -145,6 +160,7 @@ func New(logger *log.Logger, logPath string) *Manager {
 	}
 	m.reapOrphanFn = m.realReapOrphan
 	m.identifyGroupFn = groupLooksLikeMeridian
+	m.acquireLockFn = m.realAcquireLock
 	return m
 }
 
@@ -176,6 +192,65 @@ func (m *Manager) pidFilePath() string {
 		return ""
 	}
 	return filepath.Join(filepath.Dir(m.logPath), "meridian.pid")
+}
+
+// lockFilePath is where the cross-process spawn lock lives, next to the log.
+// Empty when logPath is unset (tests), which disables cross-process locking.
+func (m *Manager) lockFilePath() string {
+	if m.logPath == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(m.logPath), "meridian.lock")
+}
+
+// realAcquireLock is the production acquireLockFn: a non-blocking exclusive
+// flock on lockFilePath. The lock belongs to the open file description and
+// the kernel drops it when that description goes away — clean exit, panic,
+// SIGKILL alike — so a dead owner's lock releases itself, with no stale-lock
+// heuristics. flock deliberately, not fcntl POSIX locks: closing ANY fd on a
+// fcntl-locked file drops all the process's locks on it, which is a footgun
+// this code must not be near.
+//
+// Two invariants keep the lock honest:
+//   - The *os.File must stay open (and reachable) for as long as the lock is
+//     held. The release closure is the only reference; it lives in
+//     m.lockRelease. If the file were closed — or garbage-collected via
+//     os.File's finalizer after the last reference dropped — the lock would
+//     release SILENTLY and a contender would become a second owner. Never
+//     "clean up" the file handle out of the closure.
+//   - The fd must not leak into children, or the lock outlives us for as long
+//     as the npx/Meridian chain runs, wedging ownership. Go's os.OpenFile sets
+//     O_CLOEXEC, so realSpawn's exec can't inherit it; keep it that way.
+//
+// The lock is advisory: builds predating it spawn and reap right past it. The
+// pidfile spawner-liveness check in realReapOrphan is the safety net for that
+// window. Errors opening the lock file degrade the same way — report acquired
+// and fall back to that safety net, because refusing to spawn over a lockfile
+// I/O error would turn a coordination aid into an outage.
+func (m *Manager) realAcquireLock() (func(), bool) {
+	path := m.lockFilePath()
+	if path == "" {
+		return func() {}, true
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		m.logger.Printf("meridian: lock dir %s: %v (spawning uncoordinated)", filepath.Dir(path), err)
+		return func() {}, true
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		m.logger.Printf("meridian: lock file %s: %v (spawning uncoordinated)", path, err)
+		return func() {}, true
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		return nil, false
+	}
+	return func() {
+		// Unlock before close is redundant (close releases flock) but makes
+		// the intent explicit and survives refactors that dup the fd.
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}, true
 }
 
 // writePidFile records the spawned Meridian's group pid plus the spawner's
@@ -235,11 +310,10 @@ func removePidFile(path string) {
 // here is how siblings corrupted each other: A spawns and records its pid; B
 // reaps A's Meridian and records ITS pid; A's supervise wakes from cmd.Wait()
 // and, seeing only its own in-memory m.cmd pointer, would delete the file that
-// now names B's live Meridian — destroying B's orphan tracking. This is
-// best-effort coordination (read-then-remove, no file lock; a true lock is a
-// possible follow-up under design discussion): the goal is that concurrent
-// Managers never kill a sibling's healthy Meridian and never delete a pidfile
-// they don't own.
+// now names B's live Meridian — destroying B's orphan tracking. The spawn lock
+// serializes writers among current builds, but this read-then-remove guard
+// stays: builds predating the lock don't take it, and the reaper must stay
+// safe against them.
 func removePidFileIfOwned(path string, pid int) {
 	if path == "" {
 		return
@@ -370,14 +444,40 @@ func (m *Manager) Ensure(ctx context.Context, port int) {
 		m.mu.Unlock()
 		return
 	}
-	// Gate 3: something already on the port?
+	// Gate 3: the cross-process spawn lock. Exactly one cercano process (the
+	// agent singleton, or any --mcp embedded server) may own the Meridian
+	// lifecycle at a time; the kernel releases the lock on any owner death, so
+	// takeover is race-free with no stale-lock heuristics. Losing the race is
+	// not an error — the winner is spawning (its Meridian may not be serving
+	// yet); adopt External and let the port watcher re-run the gates whenever
+	// the port isn't serving, which retries the lock.
+	if m.lockRelease == nil {
+		release, ok := m.acquireLockFn()
+		if !ok {
+			m.setStatusLocked(Status{
+				State:   StateExternal,
+				Message: fmt.Sprintf("Meridian on port %d is managed by another cercano process", port),
+				Port:    port,
+			})
+			m.startExternalWatcherLocked(ctx)
+			m.mu.Unlock()
+			return
+		}
+		m.lockRelease = release
+	}
+	// Gate 4: something already on the port? We hold the spawn lock, so this
+	// is either our own orphan (a prior cercano died — the kernel dropped its
+	// lock, but the Meridian it spawned lives on) or a genuinely foreign proxy
+	// (OpenCode, or a cercano build predating the lock).
 	if m.portUsedFn(port) {
 		// If it's our own Meridian, orphaned by a hard-killed agent that never
 		// ran a clean Stop, reap it so a fresh spawn picks up current spawn-time
 		// config; then fall through to spawn our own. Otherwise it's genuinely
-		// someone else's proxy — adopt and watch it (if it dies, the watcher
-		// re-runs Ensure so we spawn our own).
+		// someone else's proxy — release the spawn lock (we aren't spawning, and
+		// a wedged us holding it would block every sibling's takeover when the
+		// foreign proxy dies), then adopt and watch it.
 		if !m.reapOrphanFn(port) {
+			m.releaseLockLocked()
 			m.setStatusLocked(Status{
 				State:   StateExternal,
 				Message: fmt.Sprintf("Meridian already running on port %d (not managed by Cercano)", port),
@@ -409,7 +509,21 @@ func (m *Manager) Stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.stopLocked()
+	m.releaseLockLocked()
 	m.setStatusLocked(Status{State: StateDisabled})
+}
+
+// releaseLockLocked releases the spawn lock if held. Caller must hold m.mu.
+// Deliberately NOT part of stopLocked: stopLocked runs on every gate re-run
+// (Failed retries, External recoveries, port changes), and dropping the lock
+// there would let a contender grab ownership mid-recovery — the owner must
+// keep the lock across its own retry cycle. Only Stop (clean shutdown), the
+// foreign-proxy adoption path, and process death (kernel-side) release it.
+func (m *Manager) releaseLockLocked() {
+	if m.lockRelease != nil {
+		m.lockRelease()
+		m.lockRelease = nil
+	}
 }
 
 // stopLocked cancels the supervisor and kills the spawned process. Caller
@@ -479,9 +593,11 @@ func (m *Manager) stopAuthPollerLocked() {
 
 // startExternalWatcherLocked spawns a background goroutine that re-checks the
 // adopted port every externalPollInterval while we're in External state. If
-// the external process goes away, it calls Ensure to drive the state machine
-// forward — Ensure will find the port free and spawn our own Meridian. Caller
-// must hold m.mu.
+// the port isn't serving, it calls Ensure to drive the state machine forward —
+// Ensure retries the spawn lock and spawns our own Meridian if it wins (if a
+// sibling still holds the lock, we re-adopt External and keep watching; that
+// polling covers the window where the lock winner is still starting up and
+// hasn't bound the port yet). Caller must hold m.mu.
 //
 // Idempotent: starting a watcher while one is already running cancels the
 // previous instance. Stopped by stopExternalWatcherLocked — called from

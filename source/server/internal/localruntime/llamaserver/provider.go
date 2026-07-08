@@ -455,6 +455,13 @@ func (p *Provider) argsFor(model localruntime.ModelRecord, port int) []string {
 		"--host", p.cfg.Host,
 		"--port", strconv.Itoa(port),
 	}
+	if model.SupportsEmbed && !model.SupportsChat {
+		// Encoder models (bert family — nomic etc.) serve /v1/embeddings;
+		// llama-server only enables that endpoint when spawned with the
+		// flag. Chat models never get it — embedding mode disables the
+		// completions endpoints.
+		args = append(args, "--embedding")
+	}
 	if p.cfg.ContextSize > 0 {
 		args = append(args, "--ctx-size", strconv.Itoa(p.cfg.ContextSize))
 	}

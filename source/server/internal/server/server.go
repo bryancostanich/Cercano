@@ -85,7 +85,8 @@ type Server struct {
 	meridianMgr         *meridian.Manager
 	pendingDecisions    *agent.PendingDecisions
 	cloudLLMProvider    llm.Provider
-	openLLMProvider     llm.Provider // native-tool-loop local provider (Ollama)
+	openLLMProvider     llm.Provider                     // native-tool-loop local provider (Ollama or llama-server)
+	openProviderFactory func(config.Config) llm.Provider // rebuilds openLLMProvider on runtime change
 	secrets             secrets.Store
 	runtimeManager      localruntime.Manager
 	// catalogManager (optional) surfaces Ollama's public library as an
@@ -302,8 +303,16 @@ func (s *Server) RestartMcpServer(ctx context.Context, req *proto.RestartMcpServ
 // back to a hardcoded Anthropic-shaped capability snapshot.
 func (s *Server) SetCloudLLMProvider(p llm.Provider) { s.cloudLLMProvider = p }
 
-// SetOpenLLMProvider attaches the native-tool-calling local provider (Ollama).
+// SetOpenLLMProvider attaches the native-tool-calling local provider (Ollama
+// or the llama-server adapter, per open_runtime).
 func (s *Server) SetOpenLLMProvider(p llm.Provider) { s.openLLMProvider = p }
+
+// SetOpenProviderFactory installs the constructor used to rebuild the native
+// open provider when the local runtime selection changes at runtime (see the
+// open_runtime branch in UpdateConfig).
+func (s *Server) SetOpenProviderFactory(fn func(config.Config) llm.Provider) {
+	s.openProviderFactory = fn
+}
 
 // CloudLLMProvider / OpenLLMProvider return the RAW (unwrapped) providers. The
 // dispatch engine reads these per-dispatch so a runtime cloud swap is honored,
@@ -1146,6 +1155,12 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	}
 	if req.OpenRuntime != "" {
 		s.currentConfig.OpenRuntime = req.OpenRuntime
+		// Rebuild the native open provider for the new runtime — without
+		// this, the dispatch engine's open lane (watchdog, coproc caps)
+		// keeps talking to the previous runtime until the agent restarts.
+		if s.openProviderFactory != nil {
+			s.openLLMProvider = s.openProviderFactory(s.currentConfig)
+		}
 		s.broadcastConfigChanged("local_runtime", req.OpenRuntime)
 	}
 	if req.OpenDefaultModel != "" {

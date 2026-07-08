@@ -44,8 +44,22 @@ type chatView struct {
 	// renders them above the prompt and unstages by reading the methods below.
 	queued []queuedTurn
 
-	vp         viewport.Model
+	vp viewport.Model
+	// content is the assembled transcript from the last SetEntries.
+	// plainLines derives from it lazily (getPlainLines): ansi.Strip over the
+	// whole transcript is O(transcript) and only selection/copy consumes it,
+	// so it is computed on demand instead of on every rebuild.
+	content    string
+	plainDirty bool
 	plainLines []string
+	// stylesGen increments on SetStyles; cached renders carry the generation
+	// they were built under, so a theme switch invalidates every cache.
+	stylesGen int
+	// entryCache / groupCache / streamPrefix serve frozen renders so rebuild
+	// cost tracks the active entry, not the transcript (chat_render_cache.go).
+	entryCache   map[*Entry]entryRenderCache
+	groupCache   map[int]groupRenderCache
+	streamPrefix streamPrefixCache
 	// arrowRows maps absolute content lines (indexes into plainLines) to the
 	// entries index whose fold arrow is drawn there. Rebuilt by SetEntries on
 	// every render, so it can never drift from the drawn layout.
@@ -124,6 +138,8 @@ func newChatView(styles theme.Styles, palette theme.Palette, root, home string, 
 		vpH:            vpHeight,
 		focusedToolIdx: -1,
 		groupExpanded:  map[int]bool{},
+		entryCache:     map[*Entry]entryRenderCache{},
+		groupCache:     map[int]groupRenderCache{},
 	}
 }
 
@@ -134,6 +150,7 @@ func (c *chatView) SetStyles(s theme.Styles, p theme.Palette) {
 	c.styles = s
 	c.palette = p
 	c.md = render.NewMarkdown(theme.MarkdownStyle(p))
+	c.stylesGen++ // invalidate every cached render built under the old theme
 	c.rebuild()
 }
 
@@ -147,7 +164,10 @@ func (c *chatView) Entries() []*Entry { return c.entries }
 func (c *chatView) AppendEntry(e *Entry) { c.entries = append(c.entries, e) }
 
 // SetEntriesSlice replaces the entire entry slice (for /clear and applyResume).
-func (c *chatView) SetEntriesSlice(es []*Entry) { c.entries = es }
+func (c *chatView) SetEntriesSlice(es []*Entry) {
+	c.entries = es
+	c.flushRenderCaches()
+}
 
 // PrependBanner inserts the wordmark banner as entry zero, so it persists at
 // the top of the transcript once the splash chrome is dismissed. Idempotent.
@@ -209,6 +229,7 @@ func (c *chatView) insertNoticeAboveLast(e *Entry) {
 // dropLastEntry removes the last entry. No-op if entries is empty.
 func (c *chatView) dropLastEntry() {
 	if n := len(c.entries); n > 0 {
+		delete(c.entryCache, c.entries[n-1])
 		c.entries = c.entries[:n-1]
 	}
 }
@@ -756,7 +777,18 @@ func (c *chatView) Update(msg tea.Msg) tea.Cmd {
 }
 
 // PlainLines returns the ANSI-stripped content lines (for selection copy).
-func (c *chatView) PlainLines() []string { return c.plainLines }
+func (c *chatView) PlainLines() []string { return c.getPlainLines() }
+
+// getPlainLines materializes the ANSI-stripped transcript lines on first use
+// after a rebuild. Selection and copy are the only consumers, so the strip —
+// a full parse of the rendered transcript — is off the rebuild hot path.
+func (c *chatView) getPlainLines() []string {
+	if c.plainDirty {
+		c.plainLines = plainLines(c.content)
+		c.plainDirty = false
+	}
+	return c.plainLines
+}
 
 // SetEntries rebuilds the viewport content from the provided entries and
 // auto-scrolls to bottom only if the viewport was already there.
@@ -785,7 +817,7 @@ func (c *chatView) SetEntries(entries []*Entry) {
 			for j < len(entries) && entries[j].Tool != nil {
 				j++
 			}
-			block, rows := c.renderToolGroupBlock(entries[i:j], i)
+			block, rows := c.renderToolGroupCached(entries[i:j], i)
 			for _, r := range rows {
 				c.arrowRows = append(c.arrowRows, arrowRow{line: nl + r.Line, entry: i + r.Entry, group: r.Group, railMin: r.RailMin, railMax: r.RailMax})
 			}
@@ -793,7 +825,7 @@ func (c *chatView) SetEntries(entries []*Entry) {
 			nl += strings.Count(block, "\n")
 			i = j
 		} else {
-			seg := c.renderEntry(entries[i], i)
+			seg := c.renderEntryCached(entries[i], i)
 			b.WriteString(seg)
 			nl += strings.Count(seg, "\n")
 			i++
@@ -819,7 +851,8 @@ func (c *chatView) SetEntries(entries []*Entry) {
 		b.WriteString(indentBlock(pad, c.renderTrailingActivity(textW)))
 	}
 	content := b.String()
-	c.plainLines = plainLines(content)
+	c.content = content
+	c.plainDirty = true
 	c.vp.SetContent(content)
 	if c.hasResizeAnchor {
 		// Resize reflow: restore the same distance-from-bottom in the newly
@@ -1028,20 +1061,15 @@ func renderDivider(label string, width int, styles theme.Styles) string {
 // code fence synthetically closed) so streaming code highlights as it grows.
 func (c *chatView) renderAssistantMarkdown(e *Entry, textW int) string {
 	blocks, tail := render.SplitBlocks(e.Content)
-	var parts []string
-	for _, b := range blocks {
-		s := c.renderMdBlock(b, textW)
-		// A blank line before a heading gives it breathing room — but not when
-		// the heading is the very first thing in the reply.
-		if len(parts) > 0 && isHeadingBlock(b) {
-			s = "\n" + s
-		}
-		parts = append(parts, s)
-	}
+	prefix := c.committedPrefix(e, blocks, textW)
 	if strings.TrimSpace(tail) != "" {
-		parts = append(parts, c.md.RenderLive(closeOpenFence(tail), textW))
+		live := c.md.RenderLive(closeOpenFence(tail), textW)
+		if prefix == "" {
+			return live
+		}
+		return prefix + "\n" + live
 	}
-	return strings.Join(parts, "\n")
+	return prefix
 }
 
 func (c *chatView) renderMdBlock(b render.MdBlock, textW int) string {
@@ -1071,7 +1099,7 @@ func (c *chatView) renderSelectionOnLine(line string, contentLine int) string {
 
 // selectedText returns the plain-text content covered by the current selection.
 func (c *chatView) selectedText() string {
-	plainLns := c.plainLines
+	plainLns := c.getPlainLines()
 	if !c.selection.hasRange() || len(plainLns) == 0 {
 		return ""
 	}
@@ -1118,8 +1146,8 @@ func (c *chatView) selectionPointFromLocal(localX, localY int, allowScroll bool)
 	}
 	row = clampInt(row, 0, maxInt(0, height-1))
 	line := c.vp.YOffset() + row
-	if len(c.plainLines) > 0 {
-		line = clampInt(line, 0, len(c.plainLines)-1)
+	if pl := c.getPlainLines(); len(pl) > 0 {
+		line = clampInt(line, 0, len(pl)-1)
 	}
 	return selectionPoint{
 		Line: line,

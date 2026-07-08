@@ -170,53 +170,6 @@ func notifyProgress(ctx context.Context, req *gomcp.CallToolRequest, message str
 	})
 }
 
-// preCheckModelForResearch checks the current model BEFORE running research.
-// Returns a warning message to show the user, or empty string if model is fine.
-func (s *Server) preCheckModelForResearch(ctx context.Context) string {
-	// Probe the current model name with a minimal request
-	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
-		Input:  "hi",
-		Coproc: true,
-	})
-	if err != nil || resp == nil || resp.RoutingMetadata == nil {
-		return ""
-	}
-
-	currentModel := resp.RoutingMetadata.ModelName
-	if !research.IsCodeOnlyModel(currentModel) {
-		return ""
-	}
-
-	// Current model is code-only — check what's available
-	modelsResp, err := s.grpcClient.ListModels(ctx, &proto.ListModelsRequest{})
-	if err != nil || len(modelsResp.Models) == 0 {
-		return ""
-	}
-
-	var modelNames []string
-	for _, m := range modelsResp.Models {
-		modelNames = append(modelNames, m.Name)
-	}
-
-	suggested, found := research.SuggestResearchModel(modelNames)
-	if found {
-		// A better model is available — ask the user
-		return fmt.Sprintf("Your current model (%s) is optimized for code, not research analysis.\n\n"+
-			"A better model is available on your Ollama instance: **%s**\n\n"+
-			"To use it for this research run (without changing your default), re-run with:\n"+
-			"  use_model: \"%s\"\n\n"+
-			"To switch your default model permanently:\n"+
-			"  cercano_config(action: \"set\", local_model: \"%s\")", currentModel, suggested, suggested, suggested)
-	}
-
-	// No better model available — suggest pulling one
-	return fmt.Sprintf("Your current model (%s) is optimized for code, not research analysis.\n\n"+
-		"No research-optimized models were found on your Ollama instance.\n"+
-		"For significantly better research results, pull a general-purpose model:\n\n"+
-		"  ollama pull qwen2.5\n\n"+
-		"Then re-run with: use_model: \"qwen2.5\"", currentModel)
-}
-
 // emitEvent is a helper that emits a telemetry event if a collector is configured.
 // tokenSaving indicates whether this call substitutes for a cloud call (counts toward savings).
 // cloudTokens optionally records host-reported cloud token usage alongside this event.
@@ -390,7 +343,7 @@ type DeepResearchRequest struct {
 	OutputDir  string   `json:"output_dir,omitempty" jsonschema:"Write the report to this directory as multiple files (README.md, findings/, references/, synthesis.md). Recommended for thorough research."`
 	ProjectDir string   `json:"project_dir,omitempty" jsonschema:"Project root directory."`
 	Phase      string   `json:"phase,omitempty" jsonschema:"Run a specific phase: plan (select sources), search (find results), analyze (assess findings), synthesize (write report). Omit to run all phases. Each phase shows results and suggests the next step."`
-	UseModel   string   `json:"use_model,omitempty" jsonschema:"Use this model for the research run instead of the default. Suggested by the model check if your current model is code-optimized."`
+	UseModel   string   `json:"use_model,omitempty" jsonschema:"Use this model for the research run instead of the default."`
 	cloudTokenFields
 }
 
@@ -827,20 +780,6 @@ func (s *Server) handleResearch(ctx context.Context, request *gomcp.CallToolRequ
 	s.emitEvent("cercano_research", resp, startTime, true, &args.cloudTokenFields, int(modelCaller.totalIn))
 	notifyProgress(ctx, request, "Research complete", 2, 2)
 
-	// Check if model is appropriate for research (post-run note for lightweight research)
-	if resp != nil && resp.RoutingMetadata != nil && research.IsCodeOnlyModel(resp.RoutingMetadata.ModelName) {
-		modelsResp, _ := s.grpcClient.ListModels(ctx, &proto.ListModelsRequest{})
-		if modelsResp != nil {
-			var names []string
-			for _, m := range modelsResp.Models {
-				names = append(names, m.Name)
-			}
-			if note := research.CheckResearchModel(resp.RoutingMetadata.ModelName, names); note != "" {
-				output += "\n\n" + note
-			}
-		}
-	}
-
 	toolResult := &gomcp.CallToolResult{
 		Content: []gomcp.Content{
 			&gomcp.TextContent{Text: output},
@@ -1074,17 +1013,6 @@ func (s *Server) handleDeepResearch(ctx context.Context, request *gomcp.CallTool
 				&gomcp.TextContent{Text: venvMissingMessage},
 			},
 		}, nil, nil
-	}
-
-	// Pre-check model suitability (skip if user specified a model)
-	if args.UseModel == "" {
-		if warning := s.preCheckModelForResearch(ctx); warning != "" {
-			return &gomcp.CallToolResult{
-				Content: []gomcp.Content{
-					&gomcp.TextContent{Text: warning},
-				},
-			}, nil, nil
-		}
 	}
 
 	// Set up dependencies

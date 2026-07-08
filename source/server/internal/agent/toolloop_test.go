@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -77,8 +79,10 @@ func blocksToEvents(blocks []llm.Block) []llm.StreamEvent {
 // exercising the final no-tools degradation pass.
 type loopingProvider struct{ calls int }
 
-func (p *loopingProvider) Name() string                   { return "looping" }
-func (p *loopingProvider) Capabilities() llm.Capabilities { return llm.Capabilities{SupportsTools: true} }
+func (p *loopingProvider) Name() string { return "looping" }
+func (p *loopingProvider) Capabilities() llm.Capabilities {
+	return llm.Capabilities{SupportsTools: true}
+}
 func (p *loopingProvider) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
 	return llm.ChatResponse{}, nil
 }
@@ -325,11 +329,11 @@ type fakeMCPTool struct {
 	executed bool
 }
 
-func (*fakeMCPTool) Name() string                       { return "mcp__x__do" }
-func (*fakeMCPTool) Description() string                { return "d" }
-func (*fakeMCPTool) Permission() agenttools.Permission  { return agenttools.PermW }
-func (*fakeMCPTool) Origin() agenttools.Origin          { return agenttools.OriginMCP }
-func (*fakeMCPTool) Schema() json.RawMessage            { return json.RawMessage(`{"type":"object"}`) }
+func (*fakeMCPTool) Name() string                      { return "mcp__x__do" }
+func (*fakeMCPTool) Description() string               { return "d" }
+func (*fakeMCPTool) Permission() agenttools.Permission { return agenttools.PermW }
+func (*fakeMCPTool) Origin() agenttools.Origin         { return agenttools.OriginMCP }
+func (*fakeMCPTool) Schema() json.RawMessage           { return json.RawMessage(`{"type":"object"}`) }
 func (m *fakeMCPTool) Execute(_ context.Context, _ json.RawMessage) (*agenttools.Result, error) {
 	m.executed = true
 	return agenttools.NewTextResult("ok"), nil
@@ -457,5 +461,52 @@ func TestToolLoop_MalformedToolInput_WrappedAndAnswered(t *testing.T) {
 	}
 	if !strings.Contains(errResult.Content, "not valid JSON") || !strings.Contains(errResult.Content, "find /Users") {
 		t.Errorf("tool_result should explain the failure and quote the raw input, got: %q", errResult.Content)
+	}
+}
+
+// A real Edit through the loop records the match's start line on both the
+// tool_exec_complete event and the persisted tool_result block — the two
+// paths clients read it from (live stream, GetToolCall after resume).
+func TestToolLoop_EditRecordsStartLineOnEventAndResultBlock(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "f.txt")
+	if err := os.WriteFile(p, []byte("one\ntwo\nthree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args, _ := json.Marshal(map[string]any{"path": p, "old_string": "two", "new_string": "TWO"})
+	prov := &mockProvider{
+		scripts: [][]llm.Block{
+			{{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "Edit", ToolInput: json.RawMessage(args)}},
+			{{Type: llm.BlockText, Text: "done"}},
+		},
+		caps: llm.Capabilities{SupportsTools: true},
+	}
+	reg := testDefaultRegistry()
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+
+	var evLine int
+	result, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider: prov, Registry: reg, Permissions: perms, UserInput: "edit it",
+		EventSink: func(ev LoopEvent) {
+			if ev.Kind == LoopToolExecComplete && ev.ToolUseID == "u1" {
+				evLine = ev.StartLine
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evLine != 2 {
+		t.Errorf("tool_exec_complete StartLine = %d, want 2", evLine)
+	}
+	var blockLine int
+	for _, m := range result.History {
+		for _, b := range m.Blocks {
+			if b.Type == llm.BlockToolResult && b.ToolUseRef == "u1" {
+				blockLine = b.StartLine
+			}
+		}
+	}
+	if blockLine != 2 {
+		t.Errorf("tool_result block StartLine = %d, want 2", blockLine)
 	}
 }

@@ -20,7 +20,7 @@ func TestGetToolCall_FullArgsResult(t *testing.T) {
 	args := `{"path":"internal/ui","pattern":"foo"}`
 	result := "line one\nline two\nline three"
 	useJSON, _ := json.Marshal([]llm.Block{{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "Grep", ToolInput: json.RawMessage(args)}})
-	resJSON, _ := json.Marshal([]llm.Block{{Type: llm.BlockToolResult, ToolUseRef: "u1", Content: result}})
+	resJSON, _ := json.Marshal([]llm.Block{{Type: llm.BlockToolResult, ToolUseRef: "u1", Content: result, StartLine: 7}})
 	for _, tn := range []conversation.Turn{
 		{ConversationID: convID, Role: "user", Content: "search please"},
 		{ConversationID: convID, Role: "assistant", BlocksJSON: string(useJSON)},
@@ -49,6 +49,9 @@ func TestGetToolCall_FullArgsResult(t *testing.T) {
 	}
 	if resp.IsError {
 		t.Error("is_error should be false for a successful call")
+	}
+	if resp.StartLine != 7 {
+		t.Errorf("start_line = %d, want 7 (recorded on the tool_result block)", resp.StartLine)
 	}
 
 	// Unknown tool_use_id → not found, no error.

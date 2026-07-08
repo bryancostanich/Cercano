@@ -4427,6 +4427,7 @@ type GetToolCallResponse struct {
 	ArgsJson      string                 `protobuf:"bytes,3,opt,name=args_json,json=argsJson,proto3" json:"args_json,omitempty"` // full tool_use input JSON
 	Result        string                 `protobuf:"bytes,4,opt,name=result,proto3" json:"result,omitempty"`                     // full tool_result body (empty if not yet recorded)
 	IsError       bool                   `protobuf:"varint,5,opt,name=is_error,json=isError,proto3" json:"is_error,omitempty"`
+	StartLine     int32                  `protobuf:"varint,6,opt,name=start_line,json=startLine,proto3" json:"start_line,omitempty"` // 1-based first line of an edit/write (0 = n/a)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4496,6 +4497,13 @@ func (x *GetToolCallResponse) GetIsError() bool {
 	return false
 }
 
+func (x *GetToolCallResponse) GetStartLine() int32 {
+	if x != nil {
+		return x.StartLine
+	}
+	return 0
+}
+
 type ContextTurn struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Role      string                 `protobuf:"bytes,1,opt,name=role,proto3" json:"role,omitempty"`                             // "user" | "assistant" | "system"
@@ -4507,10 +4515,11 @@ type ContextTurn struct {
 	Truncated bool                   `protobuf:"varint,7,opt,name=truncated,proto3" json:"truncated,omitempty"`                  // true if body was capped
 	// Tool metadata from the turn's FIRST tool block, so the /c viewer can use
 	// the same rich tool renderers as the main chat (syntax highlight, diffs).
-	ToolName      string `protobuf:"bytes,8,opt,name=tool_name,json=toolName,proto3" json:"tool_name,omitempty"`          // tool_use turns: the tool's name
-	ToolUseId     string `protobuf:"bytes,9,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`     // tool_use turns: the call's correlation id
-	ToolArgs      string `protobuf:"bytes,10,opt,name=tool_args,json=toolArgs,proto3" json:"tool_args,omitempty"`         // tool_use turns: input JSON, capped at 4 KB
-	ToolUseRef    string `protobuf:"bytes,11,opt,name=tool_use_ref,json=toolUseRef,proto3" json:"tool_use_ref,omitempty"` // tool_result turns: originating call's id
+	ToolName      string `protobuf:"bytes,8,opt,name=tool_name,json=toolName,proto3" json:"tool_name,omitempty"`                    // tool_use turns: the tool's name
+	ToolUseId     string `protobuf:"bytes,9,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`               // tool_use turns: the call's correlation id
+	ToolArgs      string `protobuf:"bytes,10,opt,name=tool_args,json=toolArgs,proto3" json:"tool_args,omitempty"`                   // tool_use turns: input JSON, capped at 4 KB
+	ToolUseRef    string `protobuf:"bytes,11,opt,name=tool_use_ref,json=toolUseRef,proto3" json:"tool_use_ref,omitempty"`           // tool_result turns: originating call's id
+	ToolStartLine int32  `protobuf:"varint,12,opt,name=tool_start_line,json=toolStartLine,proto3" json:"tool_start_line,omitempty"` // tool_result turns: 1-based first line of an edit/write (0 = n/a)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4620,6 +4629,13 @@ func (x *ContextTurn) GetToolUseRef() string {
 		return x.ToolUseRef
 	}
 	return ""
+}
+
+func (x *ContextTurn) GetToolStartLine() int32 {
+	if x != nil {
+		return x.ToolStartLine
+	}
+	return 0
 }
 
 type ProposeContextEditRequest struct {
@@ -7287,7 +7303,11 @@ type ToolExecComplete struct {
 	IsError   bool                   `protobuf:"varint,3,opt,name=is_error,json=isError,proto3" json:"is_error,omitempty"`
 	// detail is a clean, timing-free, content-free outcome token ("480 lines",
 	// "12 matches", "+3 −1") rendered by clients next to the status glyph.
-	Detail        string `protobuf:"bytes,4,opt,name=detail,proto3" json:"detail,omitempty"`
+	Detail string `protobuf:"bytes,4,opt,name=detail,proto3" json:"detail,omitempty"`
+	// start_line is the 1-based line in the target file where a file edit/write
+	// began (edit_file: first line of the replaced span in the pre-edit file;
+	// write_file: 1). Clients number the args diff with it. 0 = not applicable.
+	StartLine     int32 `protobuf:"varint,5,opt,name=start_line,json=startLine,proto3" json:"start_line,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7348,6 +7368,13 @@ func (x *ToolExecComplete) GetDetail() string {
 		return x.Detail
 	}
 	return ""
+}
+
+func (x *ToolExecComplete) GetStartLine() int32 {
+	if x != nil {
+		return x.StartLine
+	}
+	return 0
 }
 
 type PermissionRequired struct {
@@ -9495,13 +9522,15 @@ const file_agent_proto_rawDesc = "" +
 	"\x05turns\x18\x01 \x03(\v2\x12.agent.ContextTurnR\x05turns\"]\n" +
 	"\x12GetToolCallRequest\x12'\n" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12\x1e\n" +
-	"\vtool_use_id\x18\x02 \x01(\tR\ttoolUseId\"\x98\x01\n" +
+	"\vtool_use_id\x18\x02 \x01(\tR\ttoolUseId\"\xb7\x01\n" +
 	"\x13GetToolCallResponse\x12\x14\n" +
 	"\x05found\x18\x01 \x01(\bR\x05found\x12\x1b\n" +
 	"\ttool_name\x18\x02 \x01(\tR\btoolName\x12\x1b\n" +
 	"\targs_json\x18\x03 \x01(\tR\bargsJson\x12\x16\n" +
 	"\x06result\x18\x04 \x01(\tR\x06result\x12\x19\n" +
-	"\bis_error\x18\x05 \x01(\bR\aisError\"\xac\x02\n" +
+	"\bis_error\x18\x05 \x01(\bR\aisError\x12\x1d\n" +
+	"\n" +
+	"start_line\x18\x06 \x01(\x05R\tstartLine\"\xd4\x02\n" +
 	"\vContextTurn\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x18\n" +
@@ -9516,7 +9545,8 @@ const file_agent_proto_rawDesc = "" +
 	"\ttool_args\x18\n" +
 	" \x01(\tR\btoolArgs\x12 \n" +
 	"\ftool_use_ref\x18\v \x01(\tR\n" +
-	"toolUseRef\"f\n" +
+	"toolUseRef\x12&\n" +
+	"\x0ftool_start_line\x18\f \x01(\x05R\rtoolStartLine\"f\n" +
 	"\x19ProposeContextEditRequest\x12'\n" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12 \n" +
 	"\vinstruction\x18\x02 \x01(\tR\vinstruction\"Y\n" +
@@ -9692,12 +9722,14 @@ const file_agent_proto_rawDesc = "" +
 	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\x12!\n" +
 	"\fargs_summary\x18\x02 \x01(\tR\vargsSummary\"/\n" +
 	"\rToolExecStart\x12\x1e\n" +
-	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\"\x7f\n" +
+	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\"\x9e\x01\n" +
 	"\x10ToolExecComplete\x12\x1e\n" +
 	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\x12\x18\n" +
 	"\asummary\x18\x02 \x01(\tR\asummary\x12\x19\n" +
 	"\bis_error\x18\x03 \x01(\bR\aisError\x12\x16\n" +
-	"\x06detail\x18\x04 \x01(\tR\x06detail\"\xa4\x01\n" +
+	"\x06detail\x18\x04 \x01(\tR\x06detail\x12\x1d\n" +
+	"\n" +
+	"start_line\x18\x05 \x01(\x05R\tstartLine\"\xa4\x01\n" +
 	"\x12PermissionRequired\x12\x1e\n" +
 	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\x12\x1b\n" +
 	"\ttool_name\x18\x02 \x01(\tR\btoolName\x12\x1b\n" +

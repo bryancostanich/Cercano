@@ -19,9 +19,11 @@ type writeFileCap struct{}
 // WriteFile constructs the write_file capability (display name "Write").
 func WriteFile() capabilities.Capability { return writeFileCap{} }
 
-func (writeFileCap) Name() string                  { return "write_file" }
-func (writeFileCap) Tier() capabilities.Tier        { return capabilities.TierW }
-func (writeFileCap) Surfaces() capabilities.Surface { return capabilities.SurfaceAgent | capabilities.SurfaceMCP }
+func (writeFileCap) Name() string            { return "write_file" }
+func (writeFileCap) Tier() capabilities.Tier { return capabilities.TierW }
+func (writeFileCap) Surfaces() capabilities.Surface {
+	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
+}
 func (writeFileCap) Description() string {
 	return "Create or overwrite a file with the given content. Atomic — writes via temp file + rename. Args: {path: string, content: string, mkdir?: bool (create parent dirs, default true)}."
 }
@@ -83,6 +85,7 @@ func (writeFileCap) Execute(ctx context.Context, call *capabilities.Call) (*capa
 	}
 	res := capabilities.NewTextResult(fmt.Sprintf("wrote %d bytes to %s", len(a.Content), a.Path))
 	res.Detail = countLabel(lineCount(a.Content), "line", "lines")
+	res.StartLine = 1
 	return res, nil
 }
 
@@ -94,9 +97,11 @@ type editFileCap struct{}
 // EditFile constructs the edit_file capability (display name "Edit").
 func EditFile() capabilities.Capability { return editFileCap{} }
 
-func (editFileCap) Name() string                  { return "edit_file" }
-func (editFileCap) Tier() capabilities.Tier        { return capabilities.TierW }
-func (editFileCap) Surfaces() capabilities.Surface { return capabilities.SurfaceAgent | capabilities.SurfaceMCP }
+func (editFileCap) Name() string            { return "edit_file" }
+func (editFileCap) Tier() capabilities.Tier { return capabilities.TierW }
+func (editFileCap) Surfaces() capabilities.Surface {
+	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
+}
 func (editFileCap) Description() string {
 	return "Replace an exact occurrence of old_string with new_string in a file. The old_string must match exactly once — refuses on zero matches (typo) or multiple matches (ambiguous). Args: {path, old_string, new_string}."
 }
@@ -144,6 +149,9 @@ func (editFileCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 	if count > 1 {
 		return nil, fmt.Errorf("edit_file: old_string matches %d times in %s — make it more specific to uniquely identify the target", count, a.Path)
 	}
+	// The unique match's 1-based start line in the pre-edit file, recorded so
+	// clients can number the diff they render from old_string/new_string.
+	startLine := 1 + strings.Count(content[:strings.Index(content, a.OldString)], "\n")
 	updated := strings.Replace(content, a.OldString, a.NewString, 1)
 	// Re-use the atomic-write path so partial writes can't happen.
 	writeArgs := fsWriteMustMarshal(map[string]any{
@@ -157,6 +165,7 @@ func (editFileCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 	}
 	// Override write_file's whole-file line count with the edit delta.
 	res.Detail = editDetail(a.OldString, a.NewString)
+	res.StartLine = startLine
 	return res, nil
 }
 

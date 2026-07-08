@@ -65,6 +65,10 @@ type Result struct {
 	Truncated bool             `json:"truncated,omitempty"`
 	Note      string           `json:"note,omitempty"`
 	Detail    string           `json:"detail,omitempty"`
+	// StartLine is the 1-based line in the target file where a file-mutating
+	// capability's change begins (edit_file: first line of the replaced span,
+	// computed against the pre-edit file; write_file: 1). 0 = not applicable.
+	StartLine int `json:"start_line,omitempty"`
 }
 
 // LLMContent renders the result as the text the model receives.

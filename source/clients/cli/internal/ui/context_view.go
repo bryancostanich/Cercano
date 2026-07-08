@@ -199,7 +199,7 @@ func (c *contextView) regionHeights() (turnsH, paneH int) {
 
 // turnLineMeta describes each line emitted by turnsLines for hit-testing (Task 3).
 type turnLineMeta struct {
-	railCell bool // body line of an expanded turn: rail gutter click collapses
+	railCell  bool // body line of an expanded turn: rail gutter click collapses
 	turnID    string
 	arrowCell bool // header line of an expandable turn (clickable)
 }
@@ -293,7 +293,7 @@ func (c *contextView) expandedBodyLines(t agentclient.ContextTurn) []string {
 		// Edit/Write args render as the same +/- diff the main chat shows;
 		// other tools fall back to the shared body renderer (JSON fence,
 		// markdown, verbatim).
-		if diff := renderToolArgsDiff(t.ToolName, t.ToolArgs, w, c.styles); diff != nil {
+		if diff := renderToolArgsDiff(t.ToolName, t.ToolArgs, c.startLineFor(t.ToolUseID), w, c.styles); diff != nil {
 			return diff
 		}
 		return renderToolBody(t.Body, "", c.md, w)
@@ -314,6 +314,21 @@ func (c *contextView) expandedBodyLines(t agentclient.ContextTurn) []string {
 // toolUseFor finds the tool_use turn matching a tool_result's ref and returns
 // its tool name + args JSON. Linear scan — turn counts are small and this only
 // runs while rendering an expanded turn.
+// startLineFor returns the agent-recorded start line for a call's edit/write,
+// read from the correlated tool_result turn (the result block carries it).
+// 0 when the result hasn't landed or the call wasn't a file edit/write.
+func (c *contextView) startLineFor(toolUseID string) int {
+	if toolUseID == "" {
+		return 0
+	}
+	for _, u := range c.snapshot.Turns {
+		if u.ToolUseRef == toolUseID {
+			return u.ToolStartLine
+		}
+	}
+	return 0
+}
+
 func (c *contextView) toolUseFor(ref string) (name, args string, ok bool) {
 	if ref == "" {
 		return "", "", false

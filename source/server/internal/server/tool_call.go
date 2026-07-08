@@ -53,6 +53,7 @@ func (s *Server) GetToolCall(ctx context.Context, req *proto.GetToolCallRequest)
 				if b.ToolUseRef == useID {
 					out.Result = b.Content
 					out.IsError = b.IsError
+					out.StartLine = int32(b.StartLine)
 				}
 			}
 		}

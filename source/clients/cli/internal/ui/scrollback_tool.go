@@ -11,6 +11,7 @@ package ui
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,11 +48,17 @@ type ToolEntry struct {
 	FullArgs      string // full JSON; shown when expanded
 	FullResult    string // full result body; shown when expanded
 	ResultSummary string // short result blurb shown next to ✓ in folded view
-	Status        ToolStatus
-	StartedAt     time.Time     // exec-start wall clock; result blurb times against it
-	Duration      time.Duration // exec-start → exec-complete; set at the same time ResultSummary is. Used to aggregate group timings.
-	Folded        bool          // one-line folded view vs. expanded args+result body
-	Loading       bool          // a lazy GetToolCall fetch for the expanded body is in flight
+	// StartLine is the 1-based line in the target file where an edit/write
+	// began — recorded agent-side at execute time and carried on the
+	// tool_exec_complete event / GetToolCall detail. Numbers the expanded
+	// args diff. 0 = unknown (in-flight, non-file tools, pre-upgrade
+	// history) → the diff renders unnumbered.
+	StartLine int
+	Status    ToolStatus
+	StartedAt time.Time     // exec-start wall clock; result blurb times against it
+	Duration  time.Duration // exec-start → exec-complete; set at the same time ResultSummary is. Used to aggregate group timings.
+	Folded    bool          // one-line folded view vs. expanded args+result body
+	Loading   bool          // a lazy GetToolCall fetch for the expanded body is in flight
 }
 
 // renderToolEntry produces the scrollback text for one tool call.
@@ -214,7 +221,7 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 	if e.FullArgs != "" {
 		// Edits/writes render as a formatted +/- diff; other tools show the
 		// raw args JSON.
-		if diff := renderToolArgsDiff(e.ToolName, e.FullArgs, width, styles); diff != nil {
+		if diff := renderToolArgsDiff(e.ToolName, e.FullArgs, e.StartLine, width, styles); diff != nil {
 			body = append(body, diff...)
 		} else {
 			// Plain indent + styled text (see the loading branch) so the rail
@@ -254,8 +261,10 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 
 // renderToolArgsDiff renders a formatted +/- diff for edit/write tool args,
 // parsed from the tool_use input JSON. Returns nil for tools that aren't
-// edits/writes, so the caller falls back to the raw args line.
-func renderToolArgsDiff(toolName, argsJSON string, width int, styles theme.Styles) []string {
+// edits/writes, so the caller falls back to the raw args line. startLine is
+// the agent-recorded 1-based line where the change begins (0 = unknown →
+// unnumbered diff).
+func renderToolArgsDiff(toolName, argsJSON string, startLine, width int, styles theme.Styles) []string {
 	switch strings.ToLower(toolName) {
 	case "edit", "edit_file":
 		var a struct {
@@ -266,7 +275,7 @@ func renderToolArgsDiff(toolName, argsJSON string, width int, styles theme.Style
 		if json.Unmarshal([]byte(argsJSON), &a) != nil || a.Path == "" {
 			return nil
 		}
-		return renderDiffBlock(a.Path, render.LineDiff(a.OldString, a.NewString), width, styles)
+		return renderDiffBlock(a.Path, render.LineDiff(a.OldString, a.NewString), startLine, width, styles)
 	case "write", "write_file":
 		var a struct {
 			Path    string `json:"path"`
@@ -275,34 +284,59 @@ func renderToolArgsDiff(toolName, argsJSON string, width int, styles theme.Style
 		if json.Unmarshal([]byte(argsJSON), &a) != nil || a.Path == "" {
 			return nil
 		}
-		return renderDiffBlock(a.Path, render.LineDiff("", a.Content), width, styles)
+		return renderDiffBlock(a.Path, render.LineDiff("", a.Content), startLine, width, styles)
 	}
 	return nil
 }
 
 // renderDiffBlock renders a diff (a faint path header plus colored +/- and
 // context lines) under a tool entry. Lines are truncated to the width budget.
-func renderDiffBlock(path string, ops []render.DiffLine, width int, styles theme.Styles) []string {
+// startLine >= 1 adds a faint right-aligned line-number gutter: deleted lines
+// carry old-file numbers, inserted and context lines carry new-file numbers,
+// both counters seeded at startLine. startLine == 0 renders unnumbered.
+func renderDiffBlock(path string, ops []render.DiffLine, startLine, width int, styles theme.Styles) []string {
 	faint := lipgloss.NewStyle().Faint(true)
 	const indent = "    "
-	budget := width - 6 // indent (4) + "+ " / "- " prefix (2)
+	gutterW := 0
+	if startLine > 0 {
+		// Widest number the block can print: every op advances at most one
+		// of the counters, so startLine+len(ops) bounds both.
+		gutterW = len(strconv.Itoa(startLine + len(ops)))
+	}
+	budget := width - 6 - gutterW // indent (4) + "+ " / "- " prefix (2) + gutter
+	if gutterW > 0 {
+		budget-- // space between number and prefix
+	}
 	if budget < 8 {
 		budget = 8
 	}
 	out := make([]string, 0, len(ops)+1)
 	out = append(out, indent+faint.Render(path))
+	oldN, newN := startLine, startLine
 	for _, op := range ops {
 		var prefix string
 		var st lipgloss.Style
+		var n int
 		switch op.Op {
 		case render.DiffInsert:
 			prefix, st = "+ ", styles.ToolSuccess
+			n = newN
+			newN++
 		case render.DiffDelete:
 			prefix, st = "- ", styles.ToolError
+			n = oldN
+			oldN++
 		default:
 			prefix, st = "  ", faint
+			n = newN
+			oldN++
+			newN++
 		}
-		out = append(out, indent+st.Render(prefix+ansi.Truncate(expandTabs(op.Text), budget, "…")))
+		gutter := ""
+		if gutterW > 0 {
+			gutter = faint.Render(fmt.Sprintf("%*d ", gutterW, n))
+		}
+		out = append(out, indent+gutter+st.Render(prefix+ansi.Truncate(expandTabs(op.Text), budget, "…")))
 	}
 	return out
 }

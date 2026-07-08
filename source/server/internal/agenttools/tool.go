@@ -78,11 +78,11 @@ const (
 // signals the upstream output was longer than the agent context budget;
 // callers should narrow their query if they need full results.
 type Result struct {
-	Type      ResultType        `json:"type"`
-	Rows      []map[string]any  `json:"rows,omitempty"`
-	Text      string            `json:"text,omitempty"`
-	JSON      json.RawMessage   `json:"json,omitempty"`
-	Truncated bool              `json:"truncated,omitempty"`
+	Type      ResultType       `json:"type"`
+	Rows      []map[string]any `json:"rows,omitempty"`
+	Text      string           `json:"text,omitempty"`
+	JSON      json.RawMessage  `json:"json,omitempty"`
+	Truncated bool             `json:"truncated,omitempty"`
 	// Note is an optional one-line addendum surfaced to the user — used to
 	// explain truncation ("220/1500 matches shown — refine the query") or
 	// note that a tool fell back to a slower implementation (e.g. grep
@@ -92,6 +92,11 @@ type Result struct {
 	// "12 matches", "+3 −1") shown by clients next to the status glyph. Unlike
 	// the derived summary, it never carries result content.
 	Detail string `json:"detail,omitempty"`
+	// StartLine is the 1-based line in the target file where a file-mutating
+	// tool's change begins (edit_file: first line of the replaced span,
+	// computed against the pre-edit file; write_file: 1). 0 = not applicable.
+	// Clients use it to number the lines of the args diff they render.
+	StartLine int `json:"start_line,omitempty"`
 }
 
 // LLMContent renders the result as the text the model receives as the tool

@@ -77,10 +77,11 @@ func streamMsgToEvent(sm agentclient.StreamMsg) tea.Msg {
 		return toolEntryExecStartMsg{id: sm.ToolUseID}
 	case agentclient.TypeToolExecComplete:
 		return toolEntryExecCompleteMsg{
-			id:      sm.ToolUseID,
-			detail:  sm.Detail,
-			summary: sm.Summary,
-			isError: sm.IsError,
+			id:        sm.ToolUseID,
+			detail:    sm.Detail,
+			summary:   sm.Summary,
+			startLine: sm.StartLine,
+			isError:   sm.IsError,
 		}
 	case agentclient.TypeDone:
 		return chatDoneMsg{

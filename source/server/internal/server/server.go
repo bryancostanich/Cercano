@@ -2389,6 +2389,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 						ToolUseId: ev.ToolUseID,
 						Summary:   ev.Summary,
 						Detail:    ev.Detail,
+						StartLine: int32(ev.StartLine),
 						IsError:   ev.IsError,
 					},
 				},

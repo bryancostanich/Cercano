@@ -117,3 +117,23 @@ func TestGitBisectCapability_Meta(t *testing.T) {
 		t.Fatalf("surfaces: %v", cap.Surfaces())
 	}
 }
+
+// TestCheckpoint_WorkDirFallback confirms call.WorkDir reaches gitflow caps when no explicit cwd arg is given.
+// This is a no-code-change confirming test that locks the dir=call.WorkDir fallback against regression.
+func TestCheckpoint_WorkDirFallback(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := tempGitRepo(t)
+	exec.Command("git", "-C", dir, "checkout", "-b", "feature").Run()
+	os.WriteFile(filepath.Join(dir, "work.txt"), []byte("work"), 0o644)
+	// No "cwd" in args — WorkDir must supply the repo location.
+	args, _ := json.Marshal(map[string]any{"subject": "test: workdir fallback", "trunk": "main"})
+	res, err := Checkpoint().Execute(context.Background(), &capabilities.Call{Args: args, WorkDir: dir, Emit: func(string) {}})
+	if err != nil {
+		t.Fatalf("checkpoint via WorkDir fallback: %v", err)
+	}
+	if !strings.Contains(res.Text, "checkpoint committed") {
+		t.Fatalf("unexpected result: %q", res.Text)
+	}
+}

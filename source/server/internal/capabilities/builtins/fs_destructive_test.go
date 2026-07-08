@@ -81,3 +81,18 @@ func TestRmFileCapability_NonExistentFile(t *testing.T) {
 		t.Fatalf("expected rm_file error for non-existent file, got %v", err)
 	}
 }
+
+func TestRmFile_RelativePathResolvesAgainstWorkDir(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "doomed.txt")
+	if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	call := &capabilities.Call{WorkDir: dir, Args: []byte(`{"path":"doomed.txt"}`), Emit: func(string) {}}
+	if _, err := RmFile().Execute(context.Background(), call); err != nil {
+		t.Fatalf("rm: %v", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Errorf("file under WorkDir was not deleted (err=%v)", err)
+	}
+}

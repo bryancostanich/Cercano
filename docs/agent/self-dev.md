@@ -150,6 +150,11 @@ Agent-bounce pitfalls:
   rebuild-if-stale step. After changing server code, rebuild into libexec
   (`go build -o ~/bin/.cercano-libexec/cercano ./cmd/cercano/`) or run
   `cercano` itself before trusting a bounce.
+- **Never `cp` over an installed signed binary in place** — macOS caches the
+  code signature per vnode, and the overwritten binary dies with
+  `Killed: 9` on launch even though `codesign -dv` looks fine. `rm` the
+  destination first, then copy (fresh vnode, fresh signature), or build
+  directly to the destination path.
 - Verify a bounce actually happened: compare the agent PID/start time
   (`ps -o pid,lstart -p $(lsof -tiTCP:50052 -sTCP:LISTEN)`) against your kill,
   and count startup banners in the server log. A phantom "killed" echo from a

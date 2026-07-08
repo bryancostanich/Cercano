@@ -880,7 +880,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 			model = s.currentConfig.LlamaServer.DefaultModel
 		}
 		if model == "" {
-			model = s.currentConfig.OpenModel
+			model = s.currentConfig.OpenChatModel()
 		}
 		s.openProvider.SetEngine(eng, model)
 		changes = append(changes, fmt.Sprintf("local_runtime=%s", req.OpenRuntime))
@@ -1106,6 +1106,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 			val = ""
 		}
 		s.currentConfig.EmbeddingModel = val
+		s.currentConfig.Models.Tiers.Embedding.Open = val
 		desc := "embedding_model=" + val
 		if val == "" {
 			desc = "embedding_model unset"
@@ -1142,6 +1143,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	}
 	if req.OpenModel != "" {
 		s.currentConfig.OpenModel = req.OpenModel
+		s.currentConfig.Models.Tiers.Everyday.Open = req.OpenModel
 		s.broadcastConfigChanged("local_model", req.OpenModel)
 	}
 	if req.OpenRuntime != "" {
@@ -1617,8 +1619,8 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 	}
 	return &proto.GetConfigResponse{
 		OllamaUrl:              cfg.OllamaURL,
-		OpenModel:              cfg.OpenModel,
-		EmbeddingModel:         cfg.EmbeddingModel,
+		OpenModel:              cfg.OpenChatModel(),
+		EmbeddingModel:         cfg.OpenEmbeddingModel(),
 		CloudProvider:          cloudProvider,
 		CloudModel:             cloudModel,
 		CloudBaseUrl:           cloudBaseURL,
@@ -2625,7 +2627,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 func (s *Server) primaryModel() string {
 	s.cfgMu.RLock()
 	locus := s.currentConfig.LocusMode
-	open := s.currentConfig.OpenModel
+	open := s.currentConfig.OpenChatModel()
 	s.cfgMu.RUnlock()
 	switch locus {
 	case "cloud_only", "cloud_primary":
@@ -2642,7 +2644,7 @@ func (s *Server) mainModelFor(isCloud bool) string {
 	}
 	s.cfgMu.RLock()
 	defer s.cfgMu.RUnlock()
-	return s.currentConfig.OpenModel
+	return s.currentConfig.OpenChatModel()
 }
 
 // runMainLoop drives the native tool-loop on the given provider/tier.

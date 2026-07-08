@@ -155,3 +155,11 @@ type Capability interface {
 // digest prepended to their dispatched prompt. Capabilities that don't
 // implement it default to no project context (e.g. fetch).
 type ContextAware interface{ WantsProjectContext() bool }
+
+// ArgsTiered is implemented by capabilities whose risk tier depends on the
+// call's arguments. Adapters that gate on tier consult it before the static
+// Tier(). Motivating case: dispatch escalates to TierX when its grant
+// includes write-capable tools, so one human confirm covers the sub-agent run.
+type ArgsTiered interface {
+	TierFor(args json.RawMessage) Tier
+}

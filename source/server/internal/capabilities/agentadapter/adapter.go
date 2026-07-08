@@ -48,6 +48,16 @@ func (t capTool) Description() string               { return t.cap.Description()
 func (t capTool) Permission() agenttools.Permission { return t.cap.Tier().ToPermission() }
 func (t capTool) Schema() json.RawMessage           { return json.RawMessage(t.cap.Schema()) }
 
+// PermissionFor implements agenttools.ArgsPermissioner: capabilities that
+// derive their tier from call arguments (capabilities.ArgsTiered) get their
+// dynamic tier; everything else keeps the static one.
+func (t capTool) PermissionFor(args json.RawMessage) agenttools.Permission {
+	if at, ok := t.cap.(capabilities.ArgsTiered); ok {
+		return at.TierFor(args).ToPermission()
+	}
+	return t.cap.Tier().ToPermission()
+}
+
 func (t capTool) Execute(ctx context.Context, args json.RawMessage) (*agenttools.Result, error) {
 	call := &capabilities.Call{
 		Args:           args,

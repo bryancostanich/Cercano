@@ -85,6 +85,13 @@ type Result struct {
 	// sub-agent's full tool loop (agentic dispatches with a store wired).
 	// Empty when persistence is unavailable.
 	SubConversationID string
+
+	// GrantedTools / IgnoredTools report the sub-agent's actual toolset
+	// (agentic dispatches): what was granted, and which requested names were
+	// ignored as unknown. Surfaced to the caller so a mis-granted sub-agent
+	// is visible immediately instead of failing its task quietly.
+	GrantedTools []string
+	IgnoredTools []string
 }
 
 // Engine routes dispatch calls to the appropriate provider.

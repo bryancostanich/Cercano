@@ -19,7 +19,7 @@ func (debugLoopCheck) Name() string { return "debug-loop" }
 var editTools = map[string]bool{"edit_file": true, "write_file": true, "rm_file": true, "git_reset_hard": true}
 
 func (debugLoopCheck) Applies(a Action) bool {
-	return a.Kind == "tool_call" && editTools[a.ToolName]
+	return a.Kind == "tool_call" && editTools[canonical(a.ToolName)]
 }
 
 func (debugLoopCheck) Evaluate(ctx context.Context, a Action, oneShot OneShotFunc) (Verdict, error) {

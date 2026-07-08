@@ -26,7 +26,7 @@ var workEditTools = map[string]bool{"edit_file": true, "write_file": true, "rm_f
 var commitTools = map[string]bool{"checkpoint": true, "git_commit": true}
 
 func (commitCheckpointCheck) Applies(a Action) bool {
-	if a.Kind != "tool_call" || !workEditTools[a.ToolName] {
+	if a.Kind != "tool_call" || !workEditTools[canonical(a.ToolName)] {
 		return false
 	}
 	return uncommittedEditCount(a.Transcript) > 0
@@ -41,9 +41,9 @@ func uncommittedEditCount(msgs []llm.Message) int {
 			if b.Type != llm.BlockToolUse {
 				continue
 			}
-			if commitTools[b.ToolName] {
+			if commitTools[canonical(b.ToolName)] {
 				n = 0 // a commit clears the running count
-			} else if workEditTools[b.ToolName] {
+			} else if workEditTools[canonical(b.ToolName)] {
 				n++
 			}
 		}
@@ -84,9 +84,9 @@ func uncommittedEditSummary(msgs []llm.Message) []string {
 			if b.Type != llm.BlockToolUse {
 				continue
 			}
-			if commitTools[b.ToolName] {
+			if commitTools[canonical(b.ToolName)] {
 				out = nil
-			} else if workEditTools[b.ToolName] {
+			} else if workEditTools[canonical(b.ToolName)] {
 				arg := string(b.ToolInput)
 				if len(arg) > 120 {
 					arg = arg[:120]

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 
+	"cercano/source/server/internal/capabilities/builtins"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/watchdog"
 	"cercano/source/server/pkg/config"
@@ -32,6 +33,10 @@ func (s *Server) buildWatchdogFrom(wc config.WatchdogConfig, mc config.ModelsCon
 	if wc.Mode == "strict" {
 		mode = watchdog.ModeStrict
 	}
+
+	// Checks match canonical capability names; the standalone registry emits
+	// display aliases (Edit, Bash, …). Teach the watchdog the reverse map.
+	watchdog.SetDisplayAliases(builtins.AgentAliases())
 
 	// Map configured check names to Check implementations. Unknown names are
 	// future checks — skip them silently rather than failing construction. An

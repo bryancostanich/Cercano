@@ -47,7 +47,7 @@ type runCommandInput struct {
 }
 
 func (worktreeFirstCheck) Applies(a Action) bool {
-	if a.Kind != "tool_call" || a.ToolName != runCommandToolName {
+	if a.Kind != "tool_call" || canonical(a.ToolName) != runCommandToolName {
 		return false
 	}
 	var in runCommandInput

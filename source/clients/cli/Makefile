@@ -9,6 +9,7 @@ LDFLAGS := -X main.version=$(VERSION)
 # Build the server binary with: make -C ../../server build
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/cercano-cli .
+	@../../server/scripts/codesign-if-available.sh bin/cercano-cli
 
 clean:
 	rm -f bin/cercano-cli

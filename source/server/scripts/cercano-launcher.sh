@@ -55,6 +55,7 @@ if stale "$SERVER_BIN" "$SERVER_DIR"; then
         echo "[cercano] server build failed" >&2
         exit 1
     fi
+    "$SERVER_DIR/scripts/codesign-if-available.sh" "$SERVER_BIN"
 fi
 
 # 1b. Rebuild the CLI if anything under source/ changed (it depends on the
@@ -65,6 +66,7 @@ if stale "$CLI_BIN" "$REPO/source"; then
         echo "[cercano] CLI build failed" >&2
         exit 1
     fi
+    "$SERVER_DIR/scripts/codesign-if-available.sh" "$CLI_BIN"
 fi
 
 # 2. Kill any stale `cercano agent` processes (started before current server binary).

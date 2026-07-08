@@ -6,6 +6,7 @@ LDFLAGS := -X main.version=$(VERSION)
 # Unified binary (preferred)
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/cercano ./cmd/cercano
+	@scripts/codesign-if-available.sh bin/cercano
 
 # Legacy binaries (kept for backwards compatibility)
 all: build agent mcp

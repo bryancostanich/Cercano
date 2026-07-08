@@ -107,3 +107,54 @@ cloud provider), `permissions.yaml` (permission mode + allowlist), `ui.yaml`
   improvements across the whole project.
 - `docs/features/` and `docs/agent/` — per-feature `design.md` / `plan.md`
   pairs; a plan's unchecked boxes are its remaining work.
+
+## Troubleshooting local models & the agent lifecycle
+
+Hard-won facts from debugging the local-runtime path (2026-07-07). When a
+background job (recap, compaction, watchdog) fails, triage by the error's
+*shape* in the server log:
+
+| Log error | Meaning | Where to look |
+|---|---|---|
+| `model "X" not found in configured model_dirs` | name resolution — the requested name matches no GGUF (`matchesModel` in `internal/localruntime/llamaserver/provider.go`; bare names alias `<name>-latest` stems) | tier values in `config.yaml` vs actual filenames |
+| `llama-server exited during startup: exit status 1` | the file or binary is the problem, not Cercano — reproduce manually (below) | GGUF/llama.cpp compatibility |
+| `chat error (status 400) … exceeds the available context size` | config — `llama_server.context_size` must exceed the caller's prompt (compaction sends ~8k-token segments plus overhead, so 8192 can never fit; 16384+ works) | `llama_server.context_size` |
+
+Reproduce a spawn failure outside the agent (macOS has no `timeout`; use
+background + kill):
+
+```bash
+/opt/homebrew/bin/llama-server -m ~/.cercano/models/<file>.gguf \
+  --host 127.0.0.1 --port 18099 --ctx-size 16384 --gpu-layers auto \
+  > /tmp/lls.log 2>&1 & sleep 5; kill %1; grep -iE 'error|missing' /tmp/lls.log
+```
+
+Known incompatibility: **Ollama-pulled GGUF blobs are not guaranteed to load
+in upstream llama.cpp.** qwen3-coder-next from Ollama's registry fails with
+`missing tensor 'blk.0.ssm_dt.bias'` on every upstream build tried — Ollama
+runs such models on its own engine. Fix by re-sourcing a HuggingFace-converted
+GGUF, not by upgrading llama.cpp.
+
+Model-resolution wiring (all resolved once at agent startup in
+`cmd/cercano/main.go`): compaction summarizer ← `fast_light.open`;
+recap and watchdog ← `fast_light_text.open`; interactive local chat ←
+`open_model`. A broken `open_model` no longer breaks background jobs.
+
+Agent-bounce pitfalls:
+
+- Killing the agent does **not** kill its spawned llama-server children —
+  orphans linger with the old `--ctx-size`. Check `pgrep -fl llama-server`
+  and kill stale ones after a config change.
+- The auto-relaunch path (CLI reconnect) execs the installed
+  `~/bin/.cercano-libexec/cercano` binary **without** the launcher's
+  rebuild-if-stale step. After changing server code, rebuild into libexec
+  (`go build -o ~/bin/.cercano-libexec/cercano ./cmd/cercano/`) or run
+  `cercano` itself before trusting a bounce.
+- Verify a bounce actually happened: compare the agent PID/start time
+  (`ps -o pid,lstart -p $(lsof -tiTCP:50052 -sTCP:LISTEN)`) against your kill,
+  and count startup banners in the server log. A phantom "killed" echo from a
+  mangled PID extraction cost a full debugging round.
+- Compaction pass **success is silent** in the server log — falling token
+  counts across consecutive `pass start` lines are the success signal.
+  Recap success is visible in `conversations.db` (`recap`,
+  `recap_updated_at`).

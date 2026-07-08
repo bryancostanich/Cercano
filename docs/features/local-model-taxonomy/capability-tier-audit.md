@@ -1,5 +1,13 @@
 # Capability → Model-Tier Audit
 
+> **Status:** implemented. Tier-aware dispatch (`343f0904`), per-capability
+> tier declarations (`84b1233d`), parallel-taxonomy deletion (`db92efc4`),
+> compaction summarizer → fast_light_text (`8b433054`). Open Q1 resolved:
+> deep_research runs uniformly on fast_light_text (no synthesize split until
+> quality data says otherwise). Open Q2 (everyday.open recommends a coder
+> model for prose capabilities) remains a data-only decision in
+> `tier_recommendations.yaml`.
+
 Audit of every model-calling capability/skill: how each resolves its model
 today, the proposed tier default for each, the parallel taxonomies to delete,
 and a sanity check of the tier set against real workloads. Follows the

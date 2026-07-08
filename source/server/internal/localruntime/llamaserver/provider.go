@@ -73,6 +73,11 @@ type Provider struct {
 	mu      sync.RWMutex
 	running map[string]*managedInstance
 
+	// registry tracks spawned llama-server PIDs on disk so the next
+	// cercano process can reap them if this one dies without cleanup
+	// (see SweepOrphans). Nil disables tracking.
+	registry *pidRegistry
+
 	// headerCache memoizes per-file GGUF identity metadata (name,
 	// architecture, quantization) so Discover — which runs on every
 	// dashboard tick — reads each file's header once, not repeatedly.
@@ -148,9 +153,10 @@ func NewProvider(cfg config.LlamaServerConfig) *Provider {
 		cfg.Restart.MaxAttempts = 3
 	}
 	return &Provider{
-		cfg:     cfg,
-		client:  &http.Client{Timeout: 2 * time.Second},
-		running: make(map[string]*managedInstance),
+		cfg:      cfg,
+		client:   &http.Client{Timeout: 2 * time.Second},
+		running:  make(map[string]*managedInstance),
+		registry: newPidRegistry(defaultRegistryDir()),
 	}
 }
 
@@ -449,6 +455,16 @@ func (p *Provider) startProcess(instanceID, binary string, sink localruntime.Log
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	// On the books before anything else: if this process dies without
+	// cleanup, the registry entry is how the next cercano finds and reaps
+	// the detached server (SweepOrphans).
+	p.registry.register(serverEntry{
+		PID:       cmd.Process.Pid,
+		Binary:    binary,
+		ModelPath: instance.model.Path,
+		Port:      instance.record.Port,
+		StartedAt: time.Now(),
+	})
 	p.mu.Lock()
 	instance.cmd = cmd
 	instance.record.PID = cmd.Process.Pid
@@ -602,6 +618,10 @@ func (p *Provider) watch(instanceID, binary string, sink localruntime.LogSink) {
 
 		err := cmd.Wait()
 		exitCode := exitCode(err)
+		// The process is gone — it can't be orphaned anymore, so take it
+		// off the books before deciding whether to restart (a restart
+		// registers its new PID in startProcess).
+		p.registry.unregister(cmd.Process.Pid)
 
 		p.mu.Lock()
 		instance, ok = p.running[instanceID]

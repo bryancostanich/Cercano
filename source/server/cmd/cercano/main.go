@@ -511,6 +511,10 @@ func buildRuntimeManager(cfg config.Config) localruntime.Manager {
 	manager := localruntime.NewManager(localruntime.WithEndpoints(localruntime.EndpointsFromConfig(cfg)))
 	sweepStalePartials(cfg, manager)
 	provider := runtimellama.NewProvider(cfg.LlamaServer)
+	// Reap llama-servers orphaned by cercano processes that died without
+	// cleanup — before the enabled check, because orphans from when the
+	// runtime WAS enabled hold GPU memory regardless of current config.
+	provider.SweepOrphans(manager)
 	manager.RegisterProvider(provider)
 	if !llamaServerEnabled(cfg) {
 		return manager

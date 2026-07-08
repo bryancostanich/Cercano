@@ -30,6 +30,13 @@ type streamEnvelope struct {
 	Delta    string      `json:"delta"`
 	Item     *streamItem `json:"item"`
 	Response *response   `json:"response"`
+	// Error fields of a top-level "error" event: unlike "response.failed"
+	// (which nests under response.error), the error event carries
+	// code/message/param at the top of the frame.
+	Message string    `json:"message"`
+	Code    string    `json:"code"`
+	Param   string    `json:"param"`
+	Error   *apiError `json:"error"`
 }
 
 type streamItem struct {
@@ -131,12 +138,36 @@ func (s *streamReader) dispatch(data string) {
 		}
 		s.pending = append(s.pending, ev)
 	case "response.failed", "response.error", "error":
-		msg := "responses stream error"
-		if env.Response != nil && env.Response.Error != nil && env.Response.Error.Message != "" {
-			msg = env.Response.Error.Message
-		}
-		s.pending = append(s.pending, llm.StreamEvent{Type: llm.EventError, ErrText: msg})
+		s.pending = append(s.pending, llm.StreamEvent{Type: llm.EventError, ErrText: streamErrorMessage(env, data)})
 	}
+}
+
+// streamErrorMessage extracts the most specific error text from an error-ish
+// stream frame. "response.failed" nests the error under response.error; a
+// top-level "error" event carries message/code at the frame root; anything
+// else falls back to the raw frame (truncated) — a bare "responses stream
+// error" is undiagnosable and has already cost debugging sessions.
+func streamErrorMessage(env streamEnvelope, raw string) string {
+	if env.Response != nil && env.Response.Error != nil && env.Response.Error.Message != "" {
+		return env.Response.Error.Message
+	}
+	if env.Error != nil && env.Error.Message != "" {
+		return env.Error.Message
+	}
+	if env.Message != "" {
+		if env.Code != "" {
+			return env.Code + ": " + env.Message
+		}
+		return env.Message
+	}
+	snippet := strings.TrimSpace(raw)
+	if len(snippet) > 200 {
+		snippet = snippet[:200] + "…"
+	}
+	if snippet == "" {
+		return "responses stream error"
+	}
+	return "responses stream error: " + snippet
 }
 
 func (s *streamReader) Close() error { return s.rc.Close() }

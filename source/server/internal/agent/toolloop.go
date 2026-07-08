@@ -83,6 +83,10 @@ type ToolLoopInput struct {
 	// MaxTokensPerTurn sets the MaxTokens field on each llm.ChatRequest.
 	// 0 means use the package default (4096).
 	MaxTokensPerTurn int
+
+	// WorkDir is the turn's working directory. Threaded onto ctx so tools
+	// resolve relative paths against it — never via process cwd.
+	WorkDir string
 }
 
 type ToolLoopResult struct {
@@ -143,6 +147,7 @@ func truncateRunes(s string, max int) string {
 }
 
 func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) {
+	ctx = agenttools.WithWorkDir(ctx, in.WorkDir)
 	if !in.Provider.Capabilities().SupportsTools {
 		return ToolLoopResult{}, fmt.Errorf("provider %s does not support tools", in.Provider.Name())
 	}

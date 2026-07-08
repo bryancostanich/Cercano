@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"cercano/source/server/internal/llm"
@@ -101,7 +102,9 @@ func (c *Client) buildRequest(req llm.ChatRequest, stream bool) request {
 		Include:      []string{"reasoning.encrypted_content"},
 		Stream:       stream,
 	}
-	if req.MaxTokens > 0 {
+	// The ChatGPT codex backend rejects max_output_tokens ("Unsupported
+	// parameter"); only the API-key path forwards it.
+	if req.MaxTokens > 0 && c.route != RouteChatGPT {
 		r.MaxOutputTokens = req.MaxTokens
 	}
 	if req.Temperature > 0 {
@@ -150,15 +153,32 @@ func (c *Client) authorize(ctx context.Context, req *http.Request) error {
 	return nil
 }
 
-// errorFromBody turns a non-2xx response into a readable error.
+// errorFromBody turns a non-2xx response into a readable error. Two body
+// shapes exist: api.openai.com wraps errors as {"error":{"message":...}},
+// while the ChatGPT codex backend returns bare {"detail":"..."}. Anything
+// else falls back to the status plus a body snippet — a bare status code is
+// undiagnosable.
 func errorFromBody(status int, body []byte) error {
 	var env struct {
-		Error *apiError `json:"error"`
+		Error  *apiError `json:"error"`
+		Detail string    `json:"detail"`
 	}
-	if json.Unmarshal(body, &env) == nil && env.Error != nil && env.Error.Message != "" {
-		return fmt.Errorf("responses: %s", env.Error.Message)
+	if json.Unmarshal(body, &env) == nil {
+		if env.Error != nil && env.Error.Message != "" {
+			return fmt.Errorf("responses: %s", env.Error.Message)
+		}
+		if env.Detail != "" {
+			return fmt.Errorf("responses: %s", env.Detail)
+		}
 	}
-	return fmt.Errorf("responses: status %d", status)
+	snippet := strings.TrimSpace(string(body))
+	if len(snippet) > 200 {
+		snippet = snippet[:200] + "…"
+	}
+	if snippet == "" {
+		return fmt.Errorf("responses: status %d", status)
+	}
+	return fmt.Errorf("responses: status %d: %s", status, snippet)
 }
 
 // Chat sends a non-streaming Responses request and maps output to blocks.

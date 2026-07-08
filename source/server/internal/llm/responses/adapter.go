@@ -15,6 +15,14 @@ func messagesToInput(msgs []llm.Message) []inputItem {
 	var items []inputItem
 	for _, m := range msgs {
 		role := roleString(m.Role)
+		// Assistant text replays as output_text: the Responses API models
+		// assistant content as output, and the ChatGPT codex backend rejects
+		// input_text on assistant messages outright (api.openai.com merely
+		// tolerates it).
+		textType := "input_text"
+		if m.Role == llm.RoleAssistant {
+			textType = "output_text"
+		}
 		var parts []contentPart
 		flush := func() {
 			if len(parts) > 0 {
@@ -25,7 +33,7 @@ func messagesToInput(msgs []llm.Message) []inputItem {
 		for _, b := range m.Blocks {
 			switch b.Type {
 			case llm.BlockText:
-				parts = append(parts, contentPart{Type: "input_text", Text: b.Text})
+				parts = append(parts, contentPart{Type: textType, Text: b.Text})
 			case llm.BlockImage:
 				url := b.ImageURL
 				if url == "" {

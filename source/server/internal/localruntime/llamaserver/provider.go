@@ -247,7 +247,20 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 		},
 	}
 
+	// One process per model: if a live instance already serves this GGUF,
+	// hand it back instead of spawning another. Every spawn wires the full
+	// model into GPU memory, so a caller that misses the warm-instance
+	// lookup (or several racing at once) must degrade to reuse here — not
+	// to a fleet of duplicate servers that wires out physical RAM. The
+	// check shares the insert's critical section so two concurrent Starts
+	// can't both miss it.
 	p.mu.Lock()
+	if existing := p.liveInstanceForLocked(model.Path); existing != nil {
+		record := existing.record
+		p.mu.Unlock()
+		p.emit(sink, "info", record.ID, model.ID, "reusing running llama-server for "+model.DisplayName)
+		return &record, nil
+	}
 	p.running[id] = instance
 	p.mu.Unlock()
 	p.emit(sink, "info", id, model.ID, "starting llama-server for "+model.DisplayName)
@@ -513,6 +526,21 @@ func (p *Provider) waitReady(ctx context.Context, instanceID, endpoint string) e
 		case <-ticker.C:
 		}
 	}
+}
+
+// liveInstanceForLocked returns an instance already serving the given model
+// file — starting, running, or healthy — or nil. Callers must hold p.mu.
+func (p *Provider) liveInstanceForLocked(modelPath string) *managedInstance {
+	for _, inst := range p.running {
+		if inst.stopping || inst.model.Path != modelPath {
+			continue
+		}
+		switch inst.record.State {
+		case localruntime.StateStarting, localruntime.StateRunning, localruntime.StateHealthy:
+			return inst
+		}
+	}
+	return nil
 }
 
 // instanceState returns the instance's current lifecycle state, or "" when
@@ -787,25 +815,12 @@ func (p *Provider) catalogTargetDir() string {
 	return filepath.Join(home, ".cercano", "models")
 }
 
+// matchesModel delegates to the shared matcher so the provider and the
+// inference engine can never drift apart on what a model name means —
+// drift is how the engine misses a warm instance and Start gets called
+// once per request.
 func matchesModel(requested string, model localruntime.ModelRecord) bool {
-	if requested == "" {
-		return false
-	}
-	expanded, _ := expandPath(requested)
-	if requested == model.ID ||
-		requested == model.DisplayName ||
-		requested == filepath.Base(model.Path) ||
-		expanded == model.Path {
-		return true
-	}
-	// Alias: a bare model name matches a file stem carrying Ollama's ":latest"
-	// tag baked into the filename (qwen3-coder-next → qwen3-coder-next-latest
-	// .gguf). Configs and model tiers written against the Ollama runtime use
-	// bare names; without this the same config silently stops resolving after
-	// a switch to llama_server.
-	stem := strings.TrimSuffix(filepath.Base(model.Path), filepath.Ext(model.Path))
-	name := strings.TrimSuffix(requested, ":latest")
-	return stem == name || stem == name+"-latest"
+	return localruntime.MatchesModel(requested, model)
 }
 
 func expandPath(path string) (string, error) {

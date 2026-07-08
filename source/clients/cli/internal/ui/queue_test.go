@@ -64,3 +64,36 @@ func TestQueuedLinesReserveViewportRows(t *testing.T) {
 		t.Errorf("two queued lines should reserve two rows: %d -> %d, want %d", h0, got, h0-2)
 	}
 }
+
+type queuedPageStub struct{ body string }
+
+func (p *queuedPageStub) ID() contentPageID                      { return contentPageContext }
+func (p *queuedPageStub) SetSize(width, height int)              {}
+func (p *queuedPageStub) Update(tea.KeyPressMsg) (tea.Cmd, bool) { return nil, false }
+func (p *queuedPageStub) View() string                           { return p.body }
+
+// Queued prompts belong to the main chat page. They must stay pending while a
+// content page such as /c is open, but they should not render inside that page's
+// chrome.
+func TestQueuedLinesHiddenWhileContentPageActive(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.chat.Enqueue("queued secret prompt", nil)
+
+	if view := m.View().Content; !strings.Contains(view, "queued secret prompt") {
+		t.Fatal("queued prompt should render above the prompt on the main chat page")
+	}
+
+	m.content = &queuedPageStub{body: "context page body"}
+	m.relayout()
+	view := m.View().Content
+	if !strings.Contains(view, "context page body") {
+		t.Fatal("content page body should render")
+	}
+	if strings.Contains(view, "queued secret prompt") {
+		t.Fatal("queued prompt should stay hidden while a content page is active")
+	}
+	if q := m.chat.Queued(); len(q) != 1 || q[0] != "queued secret prompt" {
+		t.Fatalf("queued prompt should remain pending, got %v", q)
+	}
+}

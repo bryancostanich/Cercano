@@ -69,6 +69,14 @@ type permsFile struct {
 	MCPAllow []string `yaml:"mcp_allow"`
 }
 
+// NewStaticPermissionStore returns an in-memory store pinned to mode, with no
+// backing file (Mode()'s disk re-read no-ops on the empty path). Used for
+// pre-authorized sub-agent loops, where a human already approved the granted
+// toolset via the dispatch call's own confirm — never persist one of these.
+func NewStaticPermissionStore(m PermissionMode) *PermissionStore {
+	return &PermissionStore{mode: m}
+}
+
 func LoadPermissionStore(filePath string) (*PermissionStore, error) {
 	s := &PermissionStore{path: filePath, mode: ModePermissive}
 	data, err := os.ReadFile(filePath)

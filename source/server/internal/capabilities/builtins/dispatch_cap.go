@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/dispatch"
@@ -22,7 +24,7 @@ func (dispatchCap) Surfaces() capabilities.Surface {
 	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
 }
 func (dispatchCap) Description() string {
-	return "Run a sub-agent: hand off an open-ended task to a bounded tool-use loop over a granted set of tools (default: read-only tools). Returns the sub-agent's final result. Tool names passed in `tools` must be the plain registered names (e.g. \"Read\", \"Glob\") — do NOT include any host/MCP prefix like \"mcp__oc__\"."
+	return "Run a sub-agent: hand off an open-ended task to a bounded tool-use loop over a granted set of tools (default: read-only tools). Returns the sub-agent's final result. Tool names passed in `tools` must be the plain registered names (e.g. \"Read\", \"Glob\") — do NOT include any host/MCP prefix like \"mcp__oc__\". Granting write-capable tools (Edit, Write, Bash, git_*) escalates this call to a confirm prompt; one approval authorizes the sub-agent's whole toolset for the run."
 }
 func (dispatchCap) Schema() capabilities.Schema {
 	return capabilities.Schema(`{
@@ -72,5 +74,82 @@ func (dispatchCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 	if err != nil {
 		return nil, err
 	}
-	return capabilities.NewTextResult(res.Text), nil
+	// Lead with the sub-agent's actual toolset so a mis-granted run is
+	// visible to the caller immediately (a read-only sub-agent once burned
+	// 62 turns discovering it couldn't edit).
+	header := ""
+	if len(res.GrantedTools) > 0 {
+		header = "[sub-agent tools: " + strings.Join(res.GrantedTools, ", ")
+		if len(res.IgnoredTools) > 0 {
+			header += " — ignored unknown: " + strings.Join(res.IgnoredTools, ", ")
+		}
+		header += "]\n\n"
+	}
+	return capabilities.NewTextResult(header + res.Text), nil
+}
+
+// agentGrantTiers maps every agent-surface tool name (display aliases and
+// synonyms included) to its tier, for dispatch's dynamic permission. Built
+// once — the built-in catalog is static.
+var (
+	grantTiersOnce sync.Once
+	grantTiers     map[string]capabilities.Tier
+)
+
+func agentGrantTiers() map[string]capabilities.Tier {
+	grantTiersOnce.Do(func() {
+		grantTiers = map[string]capabilities.Tier{}
+		reg := capabilities.NewRegistry(capabilities.Services{})
+		Register(reg)
+		aliases := AgentAliases()
+		syns := CapabilitySynonyms()
+		for _, c := range reg.ForSurface(capabilities.SurfaceAgent) {
+			display := c.Name()
+			if d, ok := aliases[c.Name()]; ok && d != "" {
+				display = d
+			}
+			grantTiers[display] = c.Tier()
+			for _, s := range syns[c.Name()] {
+				grantTiers[s] = c.Tier()
+			}
+		}
+	})
+	return grantTiers
+}
+
+// stripHostPrefix removes a leading mcp__<host>__ segment, mirroring the
+// server's grant-name normalization.
+func stripHostPrefix(name string) string {
+	if rest, ok := strings.CutPrefix(name, "mcp__"); ok {
+		if idx := strings.Index(rest, "__"); idx >= 0 && rest[idx+2:] != "" {
+			return rest[idx+2:]
+		}
+	}
+	return name
+}
+
+// TierFor implements capabilities.ArgsTiered. A dispatch whose grant is all
+// read-only built-ins stays W (silent under permissive, like today); any
+// write-capable or unknown grant (MCP tools, typos) escalates the dispatch
+// call itself to X so a human confirms ONCE — that approval authorizes the
+// sub-agent's whole granted toolset for the run.
+func (dispatchCap) TierFor(args json.RawMessage) capabilities.Tier {
+	var a dispatchArgs
+	if err := json.Unmarshal(args, &a); err != nil {
+		return capabilities.TierW
+	}
+	if len(a.Tools) == 0 {
+		return capabilities.TierW // least-privilege default grant: read-only
+	}
+	tiers := agentGrantTiers()
+	for _, name := range a.Tools {
+		t, ok := tiers[name]
+		if !ok {
+			t, ok = tiers[stripHostPrefix(name)]
+		}
+		if !ok || t != capabilities.TierR {
+			return capabilities.TierX
+		}
+	}
+	return capabilities.TierW
 }

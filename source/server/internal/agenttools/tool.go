@@ -56,6 +56,16 @@ type Tool interface {
 	Execute(ctx context.Context, args json.RawMessage) (*Result, error)
 }
 
+// ArgsPermissioner is optionally implemented by tools whose effective
+// permission tier depends on the call's arguments. The loop consults it when
+// partitioning calls, falling back to Permission() for tools that don't
+// implement it. Motivating case: dispatch — a read-only grant is W, but a
+// grant containing W/X tools escalates the dispatch call itself to X so a
+// human confirms once for the sub-agent's whole toolset.
+type ArgsPermissioner interface {
+	PermissionFor(args json.RawMessage) Permission
+}
+
 // ResultType tells the renderer how to display the Result.
 type ResultType string
 

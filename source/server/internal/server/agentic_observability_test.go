@@ -39,7 +39,7 @@ func TestGrantedRegistry_LogsSuccessfulGrant(t *testing.T) {
 	srv := buildPermsServer(t)
 
 	out := captureLog(t, func() {
-		if _, err := srv.grantedRegistry([]string{"mcp__oc__r_read"}, agent.ModePermissive); err != nil {
+		if _, _, _, err := srv.grantedRegistry([]string{"mcp__oc__r_read"}); err != nil {
 			t.Fatalf("grantedRegistry: %v", err)
 		}
 	})

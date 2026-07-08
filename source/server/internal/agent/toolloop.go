@@ -291,7 +291,11 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				})
 				continue
 			}
-			tier := agenttools.PermissionToLLM(tool.Permission())
+			perm := tool.Permission()
+			if ap, ok := tool.(agenttools.ArgsPermissioner); ok {
+				perm = ap.PermissionFor(tc.ToolInput)
+			}
+			tier := agenttools.PermissionToLLM(perm)
 			pc := pendingCall{block: tc, tool: tool, tier: tier}
 			if tier == llm.PermR {
 				rCalls = append(rCalls, pc)

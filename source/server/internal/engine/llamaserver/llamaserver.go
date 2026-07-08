@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -333,7 +332,11 @@ func matchRuntimeModel(requested string, models []localruntime.ModelRecord) loca
 		if requested == "" && model.Active {
 			return model
 		}
-		if requested == model.ID || requested == model.DisplayName || requested == filepath.Base(model.Path) || requested == model.Path {
+		// Shared matcher — MUST stay in lockstep with the provider's
+		// resolveModel. A name the provider resolves but this misses makes
+		// endpointFor skip every warm instance and spawn a fresh
+		// llama-server per request until physical RAM is gone.
+		if localruntime.MatchesModel(requested, model) {
 			return model
 		}
 	}

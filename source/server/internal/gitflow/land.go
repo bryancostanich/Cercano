@@ -48,6 +48,10 @@ type LandState struct {
 	Reconciled bool
 	Conflicts  []string
 	Strategy   Strategy
+	// Dir is the worktree the reconcile actually ran in. Differs from the
+	// calling Repo's Dir when the feature branch lives in a linked worktree;
+	// callers must run the test gate and signal reads there.
+	Dir string
 }
 
 // ConflictedFiles returns the currently unmerged paths (git diff --name-only --diff-filter=U).
@@ -72,6 +76,15 @@ func (r *Repo) conflictedFiles(ctx context.Context) ([]string, error) {
 // pauses (leaves the repo mid-rebase/merge) and returns the conflicted files.
 func (r *Repo) Land(ctx context.Context, feature, trunk string, strategy Strategy) (LandState, error) {
 	st := LandState{Strategy: strategy}
+	// Worktree-first topology: when the feature branch is checked out in a
+	// DIFFERENT worktree, run the whole reconcile there — a checkout here
+	// would fail ("already used by worktree"), and the branch's files live
+	// there anyway. One level of recursion: the retargeted repo resolves the
+	// branch to itself and proceeds.
+	if wt, wtErr := r.WorktreeFor(ctx, feature); wtErr == nil && wt != "" && !sameDir(wt, r.Dir) {
+		return (&Repo{Dir: wt}).Land(ctx, feature, trunk, strategy)
+	}
+	st.Dir = r.Dir
 	// Untracked files ride along undisturbed through fast-forward merges
 	// and rebases — refusing on their presence turns unrelated worktree
 	// directories into a landing blocker. Only staged/modified changes
@@ -136,6 +149,13 @@ func (r *Repo) fileHasConflictMarkers(path string) (bool, error) {
 // file is marker-free does it stage and continue.
 func (r *Repo) LandContinue(ctx context.Context, strategy Strategy) (LandState, error) {
 	st := LandState{Strategy: strategy}
+	// The paused reconcile lives where Land ran it, which under the
+	// worktree-first topology is the feature's linked worktree — not
+	// necessarily the caller's directory. Retarget before reading state.
+	if wt, wtErr := r.WorktreeMidReconcile(ctx); wtErr == nil && wt != "" && !sameDir(wt, r.Dir) {
+		return (&Repo{Dir: wt}).LandContinue(ctx, strategy)
+	}
+	st.Dir = r.Dir
 	conf, err := r.conflictedFiles(ctx)
 	if err != nil {
 		return st, err
@@ -189,7 +209,22 @@ func (r *Repo) RunTests(ctx context.Context, testCommand string) (string, error)
 }
 
 // Finalize fast-forwards trunk to feature. Errors if not fast-forwardable.
+// The fast-forward runs in whichever worktree holds trunk — under the
+// worktree-first topology that is typically the root workspace while this
+// Repo points at the feature's worktree, and a checkout here would fail.
 func (r *Repo) Finalize(ctx context.Context, feature, trunk string) error {
+	if wt, wtErr := r.WorktreeFor(ctx, trunk); wtErr == nil && wt != "" && !sameDir(wt, r.Dir) {
+		tr := &Repo{Dir: wt}
+		if clean, cErr := tr.CleanIgnoringUntracked(ctx); cErr != nil {
+			return cErr
+		} else if !clean {
+			return fmt.Errorf("gitflow: finalize: trunk worktree %s has staged or unstaged changes — commit or stash there first", wt)
+		}
+		if _, err := tr.run(ctx, "merge", "--ff-only", feature); err != nil {
+			return fmt.Errorf("gitflow: finalize: ff-only merge of %q into %q failed (reconcile first): %w", feature, trunk, err)
+		}
+		return nil
+	}
 	if _, err := r.run(ctx, "checkout", trunk); err != nil {
 		return fmt.Errorf("gitflow: finalize: checkout %q: %w", trunk, err)
 	}

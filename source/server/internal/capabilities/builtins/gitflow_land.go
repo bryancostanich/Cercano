@@ -97,6 +97,14 @@ func (gitLandCap) Execute(ctx context.Context, call *capabilities.Call) (*capabi
 			return nil, fmt.Errorf("git_land: %w", landErr)
 		}
 
+		// The reconcile may have run in the feature's linked worktree —
+		// the test gate and finalize must run from there too.
+		if st.Dir != "" && st.Dir != dir {
+			if r2, oerr := gitflow.Open(st.Dir); oerr == nil {
+				r = r2
+			}
+		}
+
 		if len(st.Conflicts) > 0 {
 			return capabilities.NewTextResult(buildLandConflictMessage(st.Conflicts, cfg, feature, div)), nil
 		}
@@ -108,6 +116,14 @@ func (gitLandCap) Execute(ctx context.Context, call *capabilities.Call) (*capabi
 	// 3. Continue path: capture the pre-resolution conflict set AND the pre-continue
 	//    HEAD BEFORE LandContinue, so the review gate sees the resolved file set and
 	//    the actual resolution diff (preHEAD..HEAD) rather than an empty post-commit diff.
+	// The paused reconcile may live in the feature's linked worktree, not the
+	// caller's cwd — retarget before reading its conflict state, or the
+	// pre-continue snapshot (conflict set + HEAD) reads the wrong worktree.
+	if wt, werr := r.WorktreeMidReconcile(ctx); werr == nil && wt != "" && wt != dir {
+		if r2, oerr := gitflow.Open(wt); oerr == nil {
+			r = r2
+		}
+	}
 	preContinueConflicts, _ := r.ConflictedFiles(ctx)
 	preHEAD, _ := r.RevParse(ctx, "HEAD")
 

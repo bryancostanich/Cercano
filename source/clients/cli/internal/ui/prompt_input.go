@@ -180,6 +180,25 @@ func (p promptInput) LineCount() int {
 	return count
 }
 
+// CursorOnFirstRow reports whether the cursor sits on the first *visual* row,
+// counting soft-wrapped rows — not just hard newlines like Line(). This mirrors
+// the up-navigation no-op condition: it is true exactly when pressing ↑ could
+// not move the cursor to a row above. History recall gates on this so ↑ inside a
+// long soft-wrapped line moves the cursor up a row instead of clobbering the
+// draft with a past submission.
+func (p promptInput) CursorOnFirstRow() bool {
+	rows := p.layoutRows()
+	return p.cursorRowIndexForVertical(rows, p.cursor, -1) == 0
+}
+
+// CursorOnLastRow reports whether the cursor sits on the last *visual* row
+// (soft-wrapped rows included). True exactly when pressing ↓ could not move the
+// cursor to a row below; ↓-history recall gates on this.
+func (p promptInput) CursorOnLastRow() bool {
+	rows := p.layoutRows()
+	return p.cursorRowIndex(rows, p.cursor) == len(rows)-1
+}
+
 func (p promptInput) HasSelection() bool {
 	return p.selectionRangeOK()
 }

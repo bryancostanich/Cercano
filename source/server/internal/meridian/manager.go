@@ -32,13 +32,13 @@ const DefaultVersion = "1.45.0"
 type State int
 
 const (
-	StateDisabled        State = iota // not requested, or Stop() was called
-	StatePrereqsMissing               // Node.js too old / missing
-	StateNeedsAuth                    // no Claude OAuth token in keychain
-	StateStarting                     // subprocess spawned, probe not yet succeeded
-	StateReady                        // probe succeeded; meridian is serving
-	StateFailed                       // spawn or probe failed
-	StateExternal                     // another process owns the port; we did not spawn
+	StateDisabled       State = iota // not requested, or Stop() was called
+	StatePrereqsMissing              // Node.js too old / missing
+	StateNeedsAuth                   // no Claude OAuth token in keychain
+	StateStarting                    // subprocess spawned, probe not yet succeeded
+	StateReady                       // probe succeeded; meridian is serving
+	StateFailed                      // spawn or probe failed
+	StateExternal                    // another process owns the port; we did not spawn
 )
 
 func (s State) String() string {
@@ -74,7 +74,7 @@ type Status struct {
 // All exported methods are safe for concurrent use.
 type Manager struct {
 	logger  *log.Logger
-	logPath string  // where the subprocess's stdout/stderr is teed (~/.cercano/meridian.log)
+	logPath string // where the subprocess's stdout/stderr is teed (~/.cercano/meridian.log)
 	version string
 
 	// Injection points for tests. In production these are realSpawn / realProbe /
@@ -178,35 +178,74 @@ func (m *Manager) pidFilePath() string {
 	return filepath.Join(filepath.Dir(m.logPath), "meridian.pid")
 }
 
-// writePidFile records pid at path (no-op on empty path). The error matters:
-// a pid we failed to record is an orphan the reaper can never find.
-func writePidFile(path string, pid int) error {
+// writePidFile records the spawned Meridian's group pid plus the spawner's
+// own pid at path, one per line (no-op on empty path). The spawner pid is what
+// lets a concurrent Manager tell an orphan from a sibling: multiple cercano
+// processes (the agent singleton, plus one embedded server per --mcp instance)
+// share this pidfile and the port, and "the group looks like Meridian" is true
+// for a healthy sibling's proxy too. Only a dead spawner makes it an orphan.
+// The error matters: a pid we failed to record is an orphan the reaper can
+// never find.
+func writePidFile(path string, pid, spawnerPid int) error {
 	if path == "" {
 		return nil
 	}
-	return os.WriteFile(path, []byte(strconv.Itoa(pid)), 0o644)
+	return os.WriteFile(path,
+		[]byte(strconv.Itoa(pid)+"\n"+strconv.Itoa(spawnerPid)+"\n"), 0o644)
 }
 
-// readPidFile reads a pid from path. Returns (0,false) on empty path, missing
-// file, or malformed contents.
-func readPidFile(path string) (int, bool) {
+// readPidFile reads the Meridian group pid (line 1) and the spawner pid
+// (line 2) from path. Returns ok=false on empty path, missing file, or a
+// malformed group pid. spawnerPid is 0 when unknown — a legacy one-line file
+// from an older build, or a malformed second line; callers must treat unknown
+// as "possibly a live sibling" and never reap on it.
+func readPidFile(path string) (pid, spawnerPid int, ok bool) {
 	if path == "" {
-		return 0, false
+		return 0, 0, false
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return 0, false
+		return 0, 0, false
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	pid, err = strconv.Atoi(strings.TrimSpace(lines[0]))
 	if err != nil || pid <= 0 {
-		return 0, false
+		return 0, 0, false
 	}
-	return pid, true
+	if len(lines) > 1 {
+		if sp, err := strconv.Atoi(strings.TrimSpace(lines[1])); err == nil && sp > 0 {
+			spawnerPid = sp
+		}
+	}
+	return pid, spawnerPid, true
 }
 
-// removePidFile deletes the pidfile (best-effort; no-op on empty path).
+// removePidFile deletes the pidfile (best-effort; no-op on empty path). Only
+// for callers that just validated the file's contents themselves (the reaper);
+// teardown paths cleaning up their own spawn must use removePidFileIfOwned.
 func removePidFile(path string) {
 	if path == "" {
+		return
+	}
+	_ = os.Remove(path)
+}
+
+// removePidFileIfOwned deletes the pidfile only when it still names pid — the
+// process the caller spawned and is now tearing down. Unconditional removal
+// here is how siblings corrupted each other: A spawns and records its pid; B
+// reaps A's Meridian and records ITS pid; A's supervise wakes from cmd.Wait()
+// and, seeing only its own in-memory m.cmd pointer, would delete the file that
+// now names B's live Meridian — destroying B's orphan tracking. This is
+// best-effort coordination (read-then-remove, no file lock; a true lock is a
+// possible follow-up under design discussion): the goal is that concurrent
+// Managers never kill a sibling's healthy Meridian and never delete a pidfile
+// they don't own.
+func removePidFileIfOwned(path string, pid int) {
+	if path == "" {
+		return
+	}
+	recorded, _, ok := readPidFile(path)
+	if !ok || recorded != pid {
 		return
 	}
 	_ = os.Remove(path)
@@ -215,21 +254,38 @@ func removePidFile(path string) {
 // realReapOrphan is the production reapOrphanFn. The pidfile records the pid
 // of the npx process we spawned, which (via Setpgid) is also its process-group
 // id — the group covers npx plus the Meridian binary it runs. When that group
-// is still alive AND still identifies as Meridian, it's ours, orphaned by a
-// hard-killed agent: kill the whole group so a fresh spawn applies current
-// spawn-time config, and report true. Returns false when nothing of ours is
-// recorded, the group is gone, or the pid was recycled to something we can't
-// identify — in those cases the caller adopts whatever is on the port as a
-// genuinely external proxy.
+// is still alive AND its spawner is dead AND it still identifies as Meridian,
+// it's ours, orphaned by a hard-killed agent: kill the whole group so a fresh
+// spawn applies current spawn-time config, and report true. Returns false when
+// nothing of ours is recorded, the group is gone, the spawner is still alive
+// (a healthy sibling's Meridian — several cercano processes share this port
+// and pidfile), or the pid was recycled to something we can't identify — in
+// those cases the caller adopts whatever is on the port as a genuinely
+// external proxy.
 func (m *Manager) realReapOrphan(port int) bool {
 	path := m.pidFilePath()
-	pid, ok := readPidFile(path)
+	pid, spawner, ok := readPidFile(path)
 	if !ok {
 		return false
 	}
 	// Signal 0 to the group: any member still alive?
 	if syscall.Kill(-pid, 0) != nil {
 		removePidFile(path)
+		return false
+	}
+	// A legacy one-line pidfile (older build) has an unknown spawner. Be
+	// conservative: leave the file alone and let the caller adopt the process
+	// as External — safety over spawn-time-config freshness. If it dies later,
+	// the External watcher notices and we spawn our own.
+	if spawner == 0 {
+		return false
+	}
+	// Spawner still alive → this is a live sibling cercano's healthy Meridian,
+	// not an orphan. Killing it starts the reap war: the sibling sees "exited
+	// unexpectedly" → Failed, and its retry reaps ours right back. Don't touch
+	// the pidfile either — the sibling owns it. A pid recycled to something
+	// alive lands here too; false-alive is the safe direction.
+	if syscall.Kill(spawner, 0) == nil {
 		return false
 	}
 	// Alive — but is it still ours? A stale pidfile (crash before cleanup)
@@ -367,11 +423,14 @@ func (m *Manager) stopLocked() {
 		m.cancel = nil
 	}
 	if m.cmd != nil && m.cmd.Process != nil {
+		pid := m.cmd.Process.Pid
 		killGroupOrProcess(m.cmd.Process)
 		m.cmd = nil
 		// Our process is dead by our own hand — drop the pidfile so a later
-		// agent never mistakes a recycled pid for our orphan.
-		removePidFile(m.pidFilePath())
+		// agent never mistakes a recycled pid for our orphan. Only if it still
+		// names our pid: a sibling may have reaped us and recorded its own
+		// Meridian there, and that record is not ours to destroy.
+		removePidFileIfOwned(m.pidFilePath(), pid)
 	}
 }
 
@@ -551,17 +610,18 @@ func (m *Manager) supervise(ctx context.Context, port int) {
 		})
 		return
 	}
-	// Record the pid (also the process-group id, via Setpgid) so a later agent
-	// can recognize and reap an orphan instead of adopting it as external.
-	// Written in the same critical section that publishes m.cmd, so a
-	// concurrent Stop can't remove the pidfile and then have us re-create it
-	// naming a dead pid.
+	// Record the pid (also the process-group id, via Setpgid) plus our own pid
+	// as spawner, so a later agent can recognize and reap an orphan — but only
+	// once we (the spawner) are dead; while we live it's our healthy Meridian,
+	// not an orphan. Written in the same critical section that publishes m.cmd,
+	// so a concurrent Stop can't remove the pidfile and then have us re-create
+	// it naming a dead pid.
 	m.mu.Lock()
 	m.cmd = cmd
 	if cmd.Process != nil {
 		if path := m.pidFilePath(); path == "" {
 			m.logger.Printf("meridian: pidfile tracking disabled (no log path) — an orphaned proxy won't be auto-reaped")
-		} else if err := writePidFile(path, cmd.Process.Pid); err != nil {
+		} else if err := writePidFile(path, cmd.Process.Pid, os.Getpid()); err != nil {
 			m.logger.Printf("meridian: cannot write pidfile %s: %v — an orphaned proxy won't be auto-reaped", path, err)
 		}
 	}
@@ -580,7 +640,7 @@ func (m *Manager) supervise(ctx context.Context, port int) {
 		m.mu.Lock()
 		if m.cmd == cmd {
 			m.cmd = nil
-			removePidFile(m.pidFilePath())
+			removePidFileIfOwned(m.pidFilePath(), cmd.Process.Pid)
 		}
 		m.mu.Unlock()
 		m.failWithRetry(Status{
@@ -598,7 +658,10 @@ func (m *Manager) supervise(ctx context.Context, port int) {
 
 	// Wait for the process. On exit, if ctx was cancelled (Stop), we're
 	// going to Disabled — the Stop call sets that. Otherwise it's an
-	// unexpected exit; drop the now-dead pid's file and mark Failed.
+	// unexpected exit; drop the now-dead pid's file and mark Failed. Ownership
+	// check on the removal: "unexpected exit" includes a sibling cercano
+	// having reaped us and recorded its own Meridian in the pidfile — the
+	// in-memory m.cmd == cmd guard can't see that, only the file can.
 	waitErr := cmd.Wait()
 	if ctx.Err() != nil {
 		return // Stop() handles status
@@ -606,7 +669,7 @@ func (m *Manager) supervise(ctx context.Context, port int) {
 	m.mu.Lock()
 	if m.cmd == cmd {
 		m.cmd = nil
-		removePidFile(m.pidFilePath())
+		removePidFileIfOwned(m.pidFilePath(), cmd.Process.Pid)
 	}
 	m.mu.Unlock()
 	msg := "Meridian exited unexpectedly"

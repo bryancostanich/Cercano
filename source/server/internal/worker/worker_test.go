@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -205,4 +206,71 @@ done:
 	}
 
 	_ = cfgsvc.New // suppress unused import
+}
+
+// TestWorkerServer_RunTurn_NoHalfCloseNoDeadlock pins the C-review fix: the
+// worker must send its terminal TurnDone WITHOUT waiting for the host to
+// half-close the stream. Task 3's host keeps its send direction open until it
+// has read TurnDone, so a worker that blocked the terminal send on the host's
+// close would deadlock. This test never CloseSend()s until AFTER TurnDone.
+func TestWorkerServer_RunTurn_NoHalfCloseNoDeadlock(t *testing.T) {
+	const wantText = "done without half-close"
+
+	provSvc := &fakeResolver{prov: &fixedProvider{text: wantText}}
+	toolSvc := &fakeToolSvc{reg: agenttools.NewRegistry()}
+
+	lis := bufconn.Listen(1 << 20)
+	grpcSrv := grpc.NewServer()
+	ws := worker.NewWithFactories(
+		func(_ *proto.StartTurn) (providers.Resolver, error) { return provSvc, nil },
+		func(_ *proto.StartTurn) (runner.ToolSvc, error) { return toolSvc, nil },
+	)
+	proto.RegisterWorkerServer(grpcSrv, ws)
+	go func() { _ = grpcSrv.Serve(lis) }()
+	defer grpcSrv.Stop()
+
+	conn, err := grpc.NewClient("passthrough:///bufconn",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return lis.DialContext(ctx) }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("grpc.NewClient: %v", err)
+	}
+	defer conn.Close()
+
+	// Bounded ctx so a deadlock fails fast instead of hanging the suite.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	stream, err := proto.NewWorkerClient(conn).RunTurn(ctx)
+	if err != nil {
+		t.Fatalf("RunTurn: %v", err)
+	}
+	if err := stream.Send(&proto.HostToWorker{Msg: &proto.HostToWorker_Start{Start: &proto.StartTurn{
+		ConversationId: "no-halfclose",
+		Input:          "hi",
+		WorkDir:        t.TempDir(),
+		Config:         &proto.ConfigSnapshot{LocusMode: "open_primary"},
+	}}}); err != nil {
+		t.Fatalf("Send StartTurn: %v", err)
+	}
+	// Deliberately DO NOT CloseSend — keep the host->worker direction open,
+	// exactly like the real host waiting to read TurnDone.
+
+	var gotDone *proto.TurnDone
+	for gotDone == nil {
+		msg, err := stream.Recv()
+		if err != nil {
+			t.Fatalf("Recv (deadlock would surface as ctx timeout here): %v", err)
+		}
+		if d := msg.GetDone(); d != nil {
+			gotDone = d
+		} else if e := msg.GetError(); e != nil {
+			t.Fatalf("got TurnError: %s", e.GetMessage())
+		}
+	}
+	if gotDone.GetFinalText() != wantText {
+		t.Errorf("FinalText = %q, want %q", gotDone.GetFinalText(), wantText)
+	}
+	_ = stream.CloseSend() // only now, after the terminal message
 }

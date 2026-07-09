@@ -652,6 +652,12 @@ func main() {
 			}
 			runServerMode(cfg)
 			return
+		case "worker":
+			// Isolated turn-execution worker: serves the Worker gRPC service on a
+			// unix socket, runs ONE conversation's turns, proxies state to the
+			// host. Spawned by the host's workerRunner — not user-invoked.
+			runWorkerMode(os.Args[2:])
+			return
 		case "run":
 			// Headless one-shot: sends a single prompt and streams the response.
 			// Intended for scripts and CI — no TTY, no UI.

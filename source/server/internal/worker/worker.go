@@ -100,7 +100,7 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 	deps, buildErr := w.buildDeps(ctx, start)
 	if buildErr != nil {
 		sndr.close()
-		<-recvDone
+		cancel() // returning finalizes the stream; the recv goroutine unwinds on the Recv error
 		return status.Errorf(codes.Internal, "worker: build deps: %v", buildErr)
 	}
 
@@ -110,7 +110,7 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 		m, err := UnmarshalMessage(pm)
 		if err != nil {
 			sndr.close()
-			<-recvDone
+			cancel()
 			return status.Errorf(codes.InvalidArgument, "worker: unmarshal history: %v", err)
 		}
 		history = append(history, m)
@@ -160,9 +160,16 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 		result, runErr = runner.New(deps).RunTurn(ctx, req, sink, permFn, persistFn)
 	}()
 
-	// Flush sender before final send: close blocks until sender goroutine exits.
+	// Flush sender before the terminal send: close blocks until the sender
+	// goroutine exits, so the direct Send below can't race it.
 	sndr.close()
-	<-recvDone
+
+	// Send the terminal message NOW — do NOT wait for the host to half-close
+	// the stream. The host keeps its send direction open until it reads TurnDone
+	// (it can then Cancel/close), so blocking the terminal send on recvDone would
+	// deadlock. Returning from the handler finalizes the stream, which unwinds
+	// the recv goroutine (its Recv errors); cancel() releases any ctx waiters.
+	defer cancel()
 
 	// Send final outcome directly on stream (sender goroutine is gone).
 	if runErr != nil {

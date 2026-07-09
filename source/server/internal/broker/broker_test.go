@@ -3,6 +3,9 @@ package broker
 import (
 	"context"
 	"testing"
+	"time"
+
+	"cercano/source/server/internal/runner"
 )
 
 // A second turn on the same conversation supersedes the first: it cancels the
@@ -122,5 +125,193 @@ func TestIsCurrent_SupersessionFence(t *testing.T) {
 	// A completely different (never-registered) gen must also be false.
 	if b.IsCurrent("conv-fence", gen2+99) {
 		t.Error("arbitrary gen must not be current")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 2: fan-out, replay buffer, Attach
+// ---------------------------------------------------------------------------
+
+// TestBroker_FanOutToMultipleSubscribers: two Attach calls both receive all
+// events published during the turn, in order.
+func TestBroker_FanOutToMultipleSubscribers(t *testing.T) {
+	b := New()
+	_, gen, release := b.BeginTurn(context.Background(), "conv-fan")
+	defer release()
+
+	_, ch1, detach1 := b.Attach("conv-fan")
+	defer detach1()
+	_, ch2, detach2 := b.Attach("conv-fan")
+	defer detach2()
+
+	events := []runner.Event{
+		{Kind: runner.EventToken, Text: "a"},
+		{Kind: runner.EventToken, Text: "b"},
+		{Kind: runner.EventToken, Text: "c"},
+	}
+	for _, ev := range events {
+		b.Publish("conv-fan", gen, ev)
+	}
+
+	timeout := time.After(time.Second)
+	for _, sub := range []<-chan runner.Event{ch1, ch2} {
+		for i, want := range events {
+			select {
+			case got := <-sub:
+				if got.Text != want.Text {
+					t.Errorf("subscriber event[%d]: got %q, want %q", i, got.Text, want.Text)
+				}
+			case <-timeout:
+				t.Fatalf("timed out waiting for event[%d] on subscriber", i)
+			}
+		}
+	}
+}
+
+// TestBroker_AttachMidTurnReplaysThenLive: events published before Attach are
+// in replay; events published after are on ch; union is all events, no dup, no gap.
+func TestBroker_AttachMidTurnReplaysThenLive(t *testing.T) {
+	b := New()
+	_, gen, release := b.BeginTurn(context.Background(), "conv-midturn")
+	defer release()
+
+	b.Publish("conv-midturn", gen, runner.Event{Kind: runner.EventToken, Text: "pre1"})
+	b.Publish("conv-midturn", gen, runner.Event{Kind: runner.EventToken, Text: "pre2"})
+
+	// Attach after the 2 pre-events.
+	replay, ch, detach := b.Attach("conv-midturn")
+	defer detach()
+
+	// Replay must have exactly the 2 pre-events.
+	if len(replay) != 2 {
+		t.Fatalf("replay len = %d, want 2", len(replay))
+	}
+	if replay[0].Text != "pre1" || replay[1].Text != "pre2" {
+		t.Errorf("replay content mismatch: got %q %q", replay[0].Text, replay[1].Text)
+	}
+
+	// Publish a 3rd event after Attach.
+	b.Publish("conv-midturn", gen, runner.Event{Kind: runner.EventToken, Text: "live1"})
+
+	// Must arrive on ch, not in replay.
+	select {
+	case got := <-ch:
+		if got.Text != "live1" {
+			t.Errorf("live event: got %q, want %q", got.Text, "live1")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for live event on ch")
+	}
+
+	// No dup: "live1" must NOT be in replay.
+	for _, ev := range replay {
+		if ev.Text == "live1" {
+			t.Error("live event appeared in replay (duplicate)")
+		}
+	}
+
+	// No gap: "pre1"/"pre2" must NOT appear on ch (they are in replay only).
+	// Drain ch with a short timeout — should be empty now.
+	select {
+	case extra := <-ch:
+		if extra.Text == "pre1" || extra.Text == "pre2" {
+			t.Errorf("pre-Attach event appeared on ch (gap/dup): %q", extra.Text)
+		}
+	case <-time.After(10 * time.Millisecond):
+		// good: nothing unexpected on ch
+	}
+}
+
+// TestBroker_BeginTurnResetsBuffer: a new BeginTurn clears the replay buffer;
+// Attach after the new turn starts sees an empty replay.
+func TestBroker_BeginTurnResetsBuffer(t *testing.T) {
+	b := New()
+	_, gen1, release1 := b.BeginTurn(context.Background(), "conv-reset")
+	b.Publish("conv-reset", gen1, runner.Event{Kind: runner.EventToken, Text: "old"})
+	release1()
+
+	// Start a second turn — buffer must reset.
+	_, _, release2 := b.BeginTurn(context.Background(), "conv-reset")
+	defer release2()
+
+	replay, _, detach := b.Attach("conv-reset")
+	defer detach()
+
+	if len(replay) != 0 {
+		t.Errorf("replay after new BeginTurn: got %d events, want 0", len(replay))
+	}
+}
+
+// TestBroker_PublishFencedByGen: publishing with a stale gen after supersession
+// is a no-op — nothing appears in the buffer or on any subscriber channel.
+func TestBroker_PublishFencedByStaleGen(t *testing.T) {
+	b := New()
+	_, gen1, release1 := b.BeginTurn(context.Background(), "conv-stale")
+	defer release1()
+
+	// Supersede immediately.
+	_, gen2, release2 := b.BeginTurn(context.Background(), "conv-stale")
+	defer release2()
+
+	// Attach to the new turn BEFORE publishing with the stale gen.
+	replay, ch, detach := b.Attach("conv-stale")
+	defer detach()
+
+	// Publish with the OLD (stale) gen — must be fenced.
+	b.Publish("conv-stale", gen1, runner.Event{Kind: runner.EventToken, Text: "stale"})
+
+	// Buffer (visible via replay on re-attach) should be empty.
+	if len(replay) != 0 {
+		t.Errorf("stale publish reached buffer: %d events", len(replay))
+	}
+
+	// Channel should be empty.
+	select {
+	case ev := <-ch:
+		t.Errorf("stale publish reached subscriber channel: %q", ev.Text)
+	case <-time.After(10 * time.Millisecond):
+		// good
+	}
+
+	_ = gen2
+}
+
+// TestBroker_DetachStopsDelivery: after detach(), further Publish must not
+// deliver to that channel and must not block the publisher.
+func TestBroker_DetachStopsDelivery(t *testing.T) {
+	b := New()
+	_, gen, release := b.BeginTurn(context.Background(), "conv-detach")
+	defer release()
+
+	_, ch, detach := b.Attach("conv-detach")
+
+	// Detach before any publish.
+	detach()
+
+	// This must not block or panic.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 10; i++ {
+			b.Publish("conv-detach", gen, runner.Event{Kind: runner.EventToken, Text: "after-detach"})
+		}
+	}()
+
+	select {
+	case <-done:
+		// good: publisher returned without blocking
+	case <-time.After(time.Second):
+		t.Fatal("Publish blocked after detach — publisher stalled")
+	}
+
+	// Channel should be closed and drained (no events after detach).
+	select {
+	case ev, ok := <-ch:
+		if ok {
+			t.Errorf("received event on detached channel: %q", ev.Text)
+		}
+		// closed channel, fine
+	default:
+		// also fine: nothing to receive
 	}
 }

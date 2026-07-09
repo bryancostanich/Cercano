@@ -93,6 +93,12 @@ Co-processor = the degenerate case (fixed prompt, no tools, one-shot). Subagent 
 
    Dispatch may accept explicit provider/profile hints or `auto`. In `auto`, the router can ask the current cloud model to choose from the configured allowlist using the task, tools, expected output, and risk. The model chooses a profile, not an arbitrary model name; Cercano validates the choice against config and locus. Dispatch results should report the resolved route plainly, for example: `cloud/anthropic/economy: claude-3-5-haiku-latest; reason: read-only catalog check with low risk and easy verification`.
 
+   **As-built (implemented).** §7 is now implemented, with refinements settled during the build:
+
+   - **The cost table is keyed by vendor, and each cloud profile names its vendor.** `CloudProfile` gained a `provider:` field (anthropic|openai|google|…); the table lives at `model_profiles.cloud.providers.<vendor>.{economy,standard,premium}.model`. The profile is the runtime selection unit and is *not* 1:1 with a vendor (two profiles can share a vendor, or share a route), so the profile declares which vendor's lineup it draws from. Empty `provider:` is inferred from the profile's flavor/backend at resolution time.
+   - **Capability tiers map onto cost tiers on the cloud side.** Internal lanes ask for a capability tier (`most_capable`/`everyday`/`fast_light`/`fast_light_text`); on the cloud side that maps to `premium`/`standard`/`economy`. The provider-blind `models.tiers.*.cloud` slots are retired — load-tolerant, no longer read. Open/local models keep their capability-tier `open` slots unchanged.
+   - **Resolution + guard.** Cloud selection = active profile → its vendor → `providers[vendor][costTier].model`, falling back to the profile's own `model` on any miss (vendor-correct by definition). A loud warning fires when a resolved model is neither in the vendor's table nor the profile's own model — surfacing the silent cross-vendor rejection that motivated the work (an Anthropic id sent to the Codex route).
+
 ## Subagent engine — feature design (DRAFT, unconfirmed)
 
 Drafted by the assistant; not yet user-confirmed. Consequential items are pulled out to a decision-matrix review with the user (see "Adversarial review" below).

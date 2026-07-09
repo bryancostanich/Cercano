@@ -66,12 +66,12 @@ func TestWorktreeFirstDocumentsFastPathForTrivialChanges(t *testing.T) {
 	p, _ := Get("worktree-first")
 	// The full worktree ceremony is disproportionate for typo/label
 	// fixes. The Fast Path section documents when it applies and how to
-	// execute it while still routing through git_land (test gate stays).
+	// checkpoint only the intended files.
 	if !strings.Contains(p.Body, "Fast Path") {
 		t.Fatal("worktree-first body must document a Fast Path section for trivial changes")
 	}
-	if !strings.Contains(p.Body, "git_land") {
-		t.Fatal("Fast Path must still route through git_land so the test gate runs — never skip landing")
+	if !strings.Contains(p.Body, "explicit `paths`") || !strings.Contains(p.Body, "allow_trunk") {
+		t.Fatal("Fast Path must explain explicit paths and allow_trunk for safe current-branch checkpoints")
 	}
 }
 

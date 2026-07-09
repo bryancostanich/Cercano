@@ -20,26 +20,30 @@ func (checkpointCap) Surfaces() capabilities.Surface {
 	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
 }
 func (checkpointCap) Description() string {
-	return "Commit a solved unit of work on the current feature branch (never on trunk, never pushed). Args: {subject: string, body?: string, trunk?: string, cwd?: string}."
+	return "Commit a solved unit of work on the current branch (never pushed). By default this refuses trunk and stages all changes; for explicit current-branch work, pass allow_trunk with paths so only those files are saved. Args: {subject: string, body?: string, trunk?: string, cwd?: string, paths?: [string], allow_trunk?: bool}."
 }
 func (checkpointCap) Schema() capabilities.Schema {
 	return capabilities.Schema(`{
 		"type": "object",
 		"required": ["subject"],
 		"properties": {
-			"subject": {"type": "string"},
-			"body":    {"type": "string"},
-			"trunk":   {"type": "string"},
-			"cwd":     {"type": "string"}
+			"subject":     {"type": "string"},
+			"body":        {"type": "string"},
+			"trunk":       {"type": "string"},
+			"cwd":         {"type": "string"},
+			"paths":       {"type": "array", "items": {"type": "string"}},
+			"allow_trunk": {"type": "boolean"}
 		}
 	}`)
 }
 
 type checkpointArgs struct {
-	Subject string `json:"subject"`
-	Body    string `json:"body"`
-	Trunk   string `json:"trunk"`
-	Cwd     string `json:"cwd"`
+	Subject    string   `json:"subject"`
+	Body       string   `json:"body"`
+	Trunk      string   `json:"trunk"`
+	Cwd        string   `json:"cwd"`
+	Paths      []string `json:"paths"`
+	AllowTrunk bool     `json:"allow_trunk"`
 }
 
 func (checkpointCap) Execute(ctx context.Context, call *capabilities.Call) (*capabilities.Result, error) {
@@ -59,7 +63,10 @@ func (checkpointCap) Execute(ctx context.Context, call *capabilities.Call) (*cap
 	if err != nil {
 		return nil, fmt.Errorf("checkpoint: %w", err)
 	}
-	sha, err := r.Checkpoint(ctx, a.Subject, a.Body, cfg.Trunk)
+	sha, err := r.CheckpointWithOptions(ctx, a.Subject, a.Body, cfg.Trunk, gitflow.CheckpointOptions{
+		AllowTrunk: a.AllowTrunk,
+		Paths:      a.Paths,
+	})
 	if err != nil {
 		return nil, err
 	}

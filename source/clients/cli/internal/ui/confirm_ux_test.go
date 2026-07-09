@@ -25,7 +25,7 @@ func TestRenderConfirmPrompt_HintsOnSecondLine(t *testing.T) {
 	if strings.Contains(lines[0], "[y]es") {
 		t.Errorf("key hints must not be on the summary line: %q", lines[0])
 	}
-	for _, want := range []string{"[y]es", "[n]o", "[d]iff"} {
+	for _, want := range []string{"[y]es", "[n]o", "[d]etails"} {
 		if !strings.Contains(lines[1], want) {
 			t.Errorf("expected %q on the hint line, got: %q", want, lines[1])
 		}

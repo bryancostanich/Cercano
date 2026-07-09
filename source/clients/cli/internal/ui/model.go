@@ -2807,10 +2807,10 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 }
 
 // renderConfirmPrompt builds the confirm message shown in scrollback while
-// pendingConfirm is set: the tool summary on the first line, the key hints
-// on their own second line so a long summary never wraps mid-hint. W-tier
-// renders normally; X-tier gets a red ⚠ destructive emphasis. MCP tools get
-// an additional [a]lways key.
+// pendingConfirm is set. The first line names the requested action, optional
+// human-facing intent/details follow, and key hints stay on their own final
+// line so long summaries never wrap mid-hint. W-tier renders normally; X-tier
+// gets a red ⚠ destructive emphasis. MCP tools get an additional [a]lways key.
 func (m Model) renderConfirmPrompt(p *pendingToolCall) string {
 	head := m.styles.Accent.Render("▸ ")
 	if p.Permission == "X" {
@@ -2820,20 +2820,86 @@ func (m Model) renderConfirmPrompt(p *pendingToolCall) string {
 		// (display-only — gating is unchanged; the hint never escalates tier).
 		head = m.styles.Accent.Render("▸ ⚠ ")
 	}
-	summary := displayToolName(p.Name) + " " + summarizeArgs(p.Args, 120)
+
+	lines := []string{head + m.styles.AgentProse.Render(confirmPromptTitle(p))}
+	for _, detail := range confirmPromptDetails(p) {
+		lines = append(lines, "  "+m.styles.AgentProse.Render(detail))
+	}
+	lines = append(lines, "  "+m.confirmPromptHints(p))
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) confirmPromptHints(p *pendingToolCall) string {
 	hints := m.styles.Muted.Render("[") +
 		m.styles.Accent.Render("y") +
 		m.styles.Muted.Render("]es / [") +
 		m.styles.Accent.Render("n") +
 		m.styles.Muted.Render("]o / [") +
 		m.styles.Accent.Render("d") +
-		m.styles.Muted.Render("]iff")
+		m.styles.Muted.Render("]etails")
 	if strings.HasPrefix(p.Name, "mcp__") {
 		hints += m.styles.Muted.Render(" / [") +
 			m.styles.Accent.Render("a") +
 			m.styles.Muted.Render("]lways")
 	}
-	return head + m.styles.AgentProse.Render(summary) + "\n  " + hints
+	return hints
+}
+
+func confirmPromptTitle(p *pendingToolCall) string {
+	if isDispatchTool(p.Name) {
+		return displayToolName(p.Name) + " wants to run a delegated agent"
+	}
+	summary := summarizeArgsWithoutKeys(p.Args, 120, "intent")
+	if summary == "" {
+		return displayToolName(p.Name)
+	}
+	return displayToolName(p.Name) + " " + summary
+}
+
+func confirmPromptDetails(p *pendingToolCall) []string {
+	obj, ok := decodeArgObject(p.Args)
+	if !ok {
+		return nil
+	}
+	details := make([]string, 0, 2)
+	if intent := oneLine(stringArg(obj, "intent")); intent != "" {
+		details = append(details, "Intent: "+truncateArgs(intent, 160))
+	} else if isDispatchTool(p.Name) {
+		if task := oneLine(stringArg(obj, "task")); task != "" {
+			details = append(details, "Task: "+truncateArgs(task, 160))
+		}
+	}
+	if isDispatchTool(p.Name) {
+		if tools := summarizeToolList(obj["tools"]); tools != "" {
+			details = append(details, "Tools: "+truncateArgs(tools, 160))
+		}
+	}
+	return details
+}
+
+func isDispatchTool(name string) bool {
+	return name == "dispatch" || name == "workflow"
+}
+
+func stringArg(obj map[string]any, key string) string {
+	if s, ok := obj[key].(string); ok {
+		return s
+	}
+	return ""
+}
+
+func summarizeToolList(v any) string {
+	items, ok := v.([]any)
+	if !ok || len(items) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		if s, ok := item.(string); ok && s != "" {
+			parts = append(parts, s)
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 // displayToolName converts MCP tool names (mcp__server__tool) to a readable
@@ -2907,13 +2973,13 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 		extras: map[string]func(Model) (Model, tea.Cmd){
 			"d": func(m Model) (Model, tea.Cmd) {
 				m.chat.AppendEntry(&Entry{Role: RoleSystem,
-					Content: "args:\n```json\n" + tc.Args + "\n```"})
+					Content: "details:\n```json\n" + tc.Args + "\n```"})
 				m.refreshViewport()
 				return m, nil
 			},
 			"D": func(m Model) (Model, tea.Cmd) {
 				m.chat.AppendEntry(&Entry{Role: RoleSystem,
-					Content: "args:\n```json\n" + tc.Args + "\n```"})
+					Content: "details:\n```json\n" + tc.Args + "\n```"})
 				m.refreshViewport()
 				return m, nil
 			},
@@ -3144,9 +3210,13 @@ func (m Model) routeChatMsg(msg tea.Msg) (Model, tea.Cmd) {
 
 // summarizeArgs renders tool arguments for the confirm prompt one-liner. JSON
 // objects become key=value summaries so approval prompts explain the requested
-// action instead of showing raw JSON. The [d]iff action still exposes the full
+// action instead of showing raw JSON. The [d]etails action still exposes the full
 // original args when the user wants exact details.
 func summarizeArgs(s string, max int) string {
+	return summarizeArgsWithoutKeys(s, max)
+}
+
+func summarizeArgsWithoutKeys(s string, max int, omit ...string) string {
 	var decoded any
 	dec := json.NewDecoder(strings.NewReader(s))
 	dec.UseNumber()
@@ -3158,6 +3228,12 @@ func summarizeArgs(s string, max int) string {
 	}
 
 	if obj, ok := decoded.(map[string]any); ok && len(obj) > 0 {
+		for _, key := range omit {
+			delete(obj, key)
+		}
+		if len(obj) == 0 {
+			return ""
+		}
 		keys := orderedArgKeys(obj)
 		parts := make([]string, 0, len(keys))
 		for _, key := range keys {
@@ -3167,6 +3243,20 @@ func summarizeArgs(s string, max int) string {
 	}
 
 	return truncateArgs(summarizeArgValue(decoded), max)
+}
+
+func decodeArgObject(s string) (map[string]any, bool) {
+	var decoded any
+	dec := json.NewDecoder(strings.NewReader(s))
+	dec.UseNumber()
+	if err := dec.Decode(&decoded); err != nil {
+		return nil, false
+	}
+	if dec.More() {
+		return nil, false
+	}
+	obj, ok := decoded.(map[string]any)
+	return obj, ok
 }
 
 func orderedArgKeys(obj map[string]any) []string {

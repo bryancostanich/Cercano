@@ -24,7 +24,7 @@ func TestRenderConfirmPrompt_W_ShowsKeyHints(t *testing.T) {
 	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
 		Name: "write_file", Args: `{"path":"x.txt"}`, Permission: "W",
 	}))
-	for _, want := range []string{"write_file", "[y]es", "[n]o", "[d]iff"} {
+	for _, want := range []string{"write_file", "[y]es", "[n]o", "[d]etails"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("expected %q in prompt, got: %q", want, s)
 		}
@@ -67,20 +67,37 @@ func TestRenderConfirmPrompt_NonDestructiveMCP_NoWarnGlyph(t *testing.T) {
 	}
 }
 
-func TestRenderConfirmPrompt_SummarizesJSONArgs(t *testing.T) {
+func TestRenderConfirmPrompt_DispatchFallsBackToTaskAndTools(t *testing.T) {
 	m := minimalModel()
 	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
 		Name:       "dispatch",
 		Args:       `{"task":"In /repo, audit the SKILL.md catalog recommendation","tools":["Read","Grep","Bash"]}`,
 		Permission: "X",
 	}))
-	for _, want := range []string{"dispatch task=In /repo, audit the SKILL.md catalog recommendation", "tools=[Read, Grep, Bash]"} {
+	for _, want := range []string{"dispatch wants to run a delegated agent", "Task: In /repo, audit the SKILL.md catalog recommendation", "Tools: Read, Grep, Bash"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("expected %q in prompt, got: %q", want, s)
 		}
 	}
 	if strings.Contains(s, `{"task"`) || strings.Contains(s, `"tools"`) {
 		t.Errorf("prompt should summarize args instead of showing raw JSON: %q", s)
+	}
+}
+
+func TestRenderConfirmPrompt_DispatchPrefersIntent(t *testing.T) {
+	m := minimalModel()
+	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
+		Name:       "dispatch",
+		Args:       `{"intent":"Audit CLI docs against implementation","task":"In /repo, audit the SKILL.md catalog recommendation","tools":["Read","Grep","Bash"]}`,
+		Permission: "X",
+	}))
+	for _, want := range []string{"dispatch wants to run a delegated agent", "Intent: Audit CLI docs against implementation", "Tools: Read, Grep, Bash"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("expected %q in prompt, got: %q", want, s)
+		}
+	}
+	if strings.Contains(s, "Task:") {
+		t.Errorf("intent should replace the task fallback, got: %q", s)
 	}
 }
 
@@ -123,7 +140,7 @@ func TestResolveConfirmKey_Esc_Cancels(t *testing.T) {
 	}
 }
 
-func TestResolveConfirmKey_D_RevealsArgsAndKeepsPending(t *testing.T) {
+func TestResolveConfirmKey_D_RevealsDetailsAndKeepsPending(t *testing.T) {
 	m := minimalModel()
 	m.pendingConfirm = toolConfirm(&pendingToolCall{Name: "edit_file", Args: `{"path":"a.go"}`, Permission: "W"})
 
@@ -136,13 +153,13 @@ func TestResolveConfirmKey_D_RevealsArgsAndKeepsPending(t *testing.T) {
 	}
 	found := false
 	for _, e := range next.chat.Entries() {
-		if strings.Contains(e.Content, `"path":"a.go"`) {
+		if strings.Contains(e.Content, "details:") && strings.Contains(e.Content, `"path":"a.go"`) {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("d should append a system entry with the args; entries: %+v", next.chat.Entries())
+		t.Errorf("d should append a system entry with the details; entries: %+v", next.chat.Entries())
 	}
 }
 
@@ -218,13 +235,13 @@ func TestResolveConfirmKey_OtherKey_Ignored(t *testing.T) {
 }
 
 func TestResolveConfirmKey_Generic(t *testing.T) {
-	yes, no, diff := false, false, false
+	yes, no, details := false, false, false
 	mk := func() Model {
 		m := minimalModel()
 		m.pendingConfirm = &confirmRequest{
 			onYes:  func(m Model) (Model, tea.Cmd) { yes = true; m.pendingConfirm = nil; return m, nil },
 			onNo:   func(m Model) (Model, tea.Cmd) { no = true; m.pendingConfirm = nil; return m, nil },
-			extras: map[string]func(Model) (Model, tea.Cmd){"d": func(m Model) (Model, tea.Cmd) { diff = true; return m, nil }},
+			extras: map[string]func(Model) (Model, tea.Cmd){"d": func(m Model) (Model, tea.Cmd) { details = true; return m, nil }},
 		}
 		return m
 	}
@@ -244,8 +261,8 @@ func TestResolveConfirmKey_Generic(t *testing.T) {
 	// d (extra) → handler, does NOT clear
 	m = mk()
 	m, _ = m.resolveConfirmKey("d")
-	if !diff || m.pendingConfirm == nil {
-		t.Errorf("d: diff=%v pending=%v", diff, m.pendingConfirm == nil)
+	if !details || m.pendingConfirm == nil {
+		t.Errorf("d: details=%v pending=%v", details, m.pendingConfirm == nil)
 	}
 	// unknown key → ignored, still pending
 	m = mk()

@@ -186,12 +186,17 @@ func (b *Broker) Attach(conv string) (replay []runner.Event, ch <-chan runner.Ev
 
 	detach = func() {
 		b.mu.Lock()
-		cs2, ok := b.convs[conv]
-		if ok {
-			delete(cs2.subs, id)
+		removed := false
+		if cs2, ok := b.convs[conv]; ok {
+			if _, present := cs2.subs[id]; present {
+				delete(cs2.subs, id)
+				removed = true
+			}
 		}
 		b.mu.Unlock()
-		close(c)
+		if removed {
+			close(c) // exactly once; subsequent detach calls are no-ops (idempotent)
+		}
 	}
 	return replay, c, detach
 }

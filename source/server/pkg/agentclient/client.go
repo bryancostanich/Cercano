@@ -1468,6 +1468,14 @@ type StreamMsg struct {
 	WatchdogKind string // for TypeWatchdog ("challenge" | "block" | "echo")
 	Protocol     string // for TypeWatchdog (protocol name, empty for echo)
 	Thread       string // for TypeWatchdog echo only ("watchdog" | "main")
+
+	SubAgentID     string   // for TypeSubAgent
+	SubAgentTitle  string   // for TypeSubAgent
+	SubAgentKind   string   // for TypeSubAgent
+	GrantedTools   []string // for TypeSubAgent
+	IgnoredTools   []string // for TypeSubAgent
+	SubAgentText   string   // for TypeSubAgent
+	SubAgentToolID string   // for TypeSubAgent
 }
 
 type StreamMsgType int
@@ -1484,6 +1492,7 @@ const (
 	TypePermissionRequired
 	TypeRouteSelected
 	TypeWatchdog
+	TypeSubAgent
 )
 
 func toProtoImages(images []InlineImage) []*proto.InlineImage {
@@ -1604,6 +1613,26 @@ func (c *Client) StreamChat(ctx context.Context, conversationID, input, workDir 
 			}
 			if we := msg.GetWatchdogEvent(); we != nil {
 				out <- streamMsgFromWatchdogEvent(we)
+				continue
+			}
+			if se := msg.GetSubAgentEvent(); se != nil {
+				out <- StreamMsg{
+					Type:           TypeSubAgent,
+					SubAgentID:     se.GetId(),
+					SubAgentTitle:  se.GetTitle(),
+					SubAgentKind:   se.GetKind(),
+					GrantedTools:   append([]string(nil), se.GetGrantedTools()...),
+					IgnoredTools:   append([]string(nil), se.GetIgnoredTools()...),
+					SubAgentText:   se.GetText(),
+					SubAgentToolID: se.GetToolUseId(),
+					ToolUseID:      se.GetToolUseId(),
+					ToolName:       se.GetToolName(),
+					ArgsSummary:    se.GetArgsSummary(),
+					Summary:        se.GetSummary(),
+					Detail:         se.GetDetail(),
+					StartLine:      int(se.GetStartLine()),
+					IsError:        se.GetIsError(),
+				}
 				continue
 			}
 		}

@@ -18,6 +18,7 @@ const (
 	LoopToolUseStop        LoopEventKind = "tool_use_stop"
 	LoopToolExecStart      LoopEventKind = "tool_exec_start"
 	LoopToolExecComplete   LoopEventKind = "tool_exec_complete"
+	LoopProgress           LoopEventKind = "progress"
 	LoopPermissionRequired LoopEventKind = "permission_required"
 	LoopWatchdogChallenge  LoopEventKind = "watchdog_challenge"
 	LoopWatchdogEscalate   LoopEventKind = "watchdog_escalate"
@@ -38,6 +39,42 @@ type LoopEvent struct {
 	// StartLine mirrors Result.StartLine on tool_exec_complete events: the
 	// 1-based line where a file edit/write began (0 = not applicable).
 	StartLine int
+
+	SubAgentID    string
+	SubAgentTitle string
+	SubAgentKind  string
+	GrantedTools  []string
+	IgnoredTools  []string
+}
+
+func loopProgressEvent(defaultToolUseID, defaultToolName string, progress agenttools.ProgressEvent) LoopEvent {
+	ev := LoopEvent{
+		Kind:          LoopProgress,
+		ToolUseID:     defaultToolUseID,
+		ToolName:      defaultToolName,
+		Summary:       progress.Text,
+		Detail:        progress.Detail,
+		IsError:       progress.IsError,
+		StartLine:     progress.StartLine,
+		SubAgentID:    progress.SubAgentID,
+		SubAgentTitle: progress.SubAgentTitle,
+		SubAgentKind:  progress.Kind,
+		GrantedTools:  append([]string(nil), progress.GrantedTools...),
+		IgnoredTools:  append([]string(nil), progress.IgnoredTools...),
+	}
+	if progress.ToolUseID != "" {
+		ev.ToolUseID = progress.ToolUseID
+	}
+	if progress.ToolName != "" {
+		ev.ToolName = progress.ToolName
+	}
+	if progress.Summary != "" {
+		ev.Summary = progress.Summary
+	}
+	if ev.Summary == "" {
+		ev.Summary = progress.Text
+	}
+	return ev
 }
 
 type ToolLoopInput struct {
@@ -307,8 +344,11 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		rChan := make(chan rr, len(rCalls))
 		for i, pc := range rCalls {
 			go func(i int, pc pendingCall) {
+				execCtx := agenttools.WithProgressEmitter(ctx, func(progress agenttools.ProgressEvent) {
+					emit(loopProgressEvent(pc.block.ToolUseID, pc.block.ToolName, progress))
+				})
 				emit(LoopEvent{Kind: LoopToolExecStart, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName})
-				res, err := pc.tool.Execute(ctx, pc.block.ToolInput)
+				res, err := pc.tool.Execute(execCtx, pc.block.ToolInput)
 				out := llm.Block{Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID}
 				if err != nil {
 					out.Content = err.Error()
@@ -418,8 +458,11 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 					return ToolLoopResult{FinalText: finalText, Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, nil
 				}
 			}
+			execCtx := agenttools.WithProgressEmitter(ctx, func(progress agenttools.ProgressEvent) {
+				emit(loopProgressEvent(pc.block.ToolUseID, pc.block.ToolName, progress))
+			})
 			emit(LoopEvent{Kind: LoopToolExecStart, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName})
-			res, err := pc.tool.Execute(ctx, pc.block.ToolInput)
+			res, err := pc.tool.Execute(execCtx, pc.block.ToolInput)
 			out := llm.Block{Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID}
 			if err != nil {
 				out.Content = err.Error()

@@ -101,6 +101,7 @@ type Model struct {
 	splashShown     bool // hide after first user input
 	splash          banner.AnimModel
 	chat            chatView
+	chatTabs        chatTabSurface
 	selectionNotice string
 	input           promptInput
 
@@ -896,6 +897,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if mouse.Button != tea.MouseLeft {
 			return m, nil
 		}
+		if m.hasSubAgentTabs() && mouse.Y == m.scrollbarTop-1 {
+			if id, ok := tabStripAtX(m.chatTabItems(), mouse.X); ok {
+				m.switchChatTab(id)
+				return m, nil
+			}
+		}
 		if m.mouseInPrompt(mouse) {
 			m.chat.ClearSelection()
 			m.input.MouseDown(mouse.X, mouse.Y-m.promptTop())
@@ -1351,6 +1358,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Re-arm the spinner loop if it stopped (the placeholder loop
 			// dies once tokens begin streaming), and fall through to the
 			// shared repaint so the new tool row appears immediately.
+			m.refreshViewport()
+			return m, tea.Batch(msg.next, m.ensureAnimTick())
+		case subAgentEventMsg:
+			m.applySubAgentEvent(ev)
 			m.refreshViewport()
 			return m, tea.Batch(msg.next, m.ensureAnimTick())
 		case chatDoneMsg:
@@ -2281,8 +2292,12 @@ func (m *Model) relayout() {
 	if m.splashEffective() {
 		splashH = 9 // 8 banner rows + 1 blank
 	}
-	// Viewport's first screen row = header (1) + divider (1) + splash height.
+	// Viewport's first screen row = header (1) + divider (1) + splash height,
+	// plus the ephemeral chat tab row when sub-agent tabs are visible.
 	m.scrollbarTop = 2 + splashH
+	if m.hasSubAgentTabs() && !m.contentPageActive() {
+		m.scrollbarTop++
+	}
 	suggestH := 0
 	if m.chat.Width() > 0 && !m.contentPageActive() {
 		// Width may not yet match contentW on the first paint; the
@@ -2307,10 +2322,21 @@ func (m *Model) relayout() {
 	m.input.SetWidth(contentW - 4)
 	inputH := m.input.Height()
 	bodyH := m.height - chromeNoInput - inputH - splashH - suggestH - recapH - queuedH
+	if m.hasSubAgentTabs() && !m.contentPageActive() {
+		bodyH-- // chat tab strip row
+	}
 	if bodyH < 3 {
 		bodyH = 3
 	}
 	m.chat.SetSize(contentW-2, bodyH) // reserve two right columns: a gap + the scrollbar
+	m.syncMainChatTab()
+	for id, tab := range m.chatTabs.tabs {
+		if id == mainChatTabID || tab == nil {
+			continue
+		}
+		tab.view.SetSize(contentW-2, bodyH)
+		tab.view.rebuild()
+	}
 	m.refreshViewport()
 }
 
@@ -3435,6 +3461,9 @@ func (m Model) View() tea.View {
 		}
 		parts = append(parts, m.content.View())
 	default:
+		if m.hasSubAgentTabs() {
+			parts = append(parts, m.renderChatTabStrip())
+		}
 		parts = append(parts, m.renderViewportWithScrollbar())
 		if m.recap != "" {
 			parts = append(parts, m.renderRecap())
@@ -3720,6 +3749,11 @@ func (m Model) renderRecap() string {
 // renderViewportWithScrollbar renders the chat viewport with a one-column
 // vertical scrollbar on its right edge. Delegates to chatView.View.
 func (m Model) renderViewportWithScrollbar() string {
+	if m.hasSubAgentTabs() && m.chatTabs.active != mainChatTabID {
+		if tab := m.chatTabs.tabs[m.chatTabs.active]; tab != nil {
+			return tab.view.View()
+		}
+	}
 	return m.chat.View()
 }
 

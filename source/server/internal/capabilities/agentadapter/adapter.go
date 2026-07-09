@@ -59,15 +59,22 @@ func (t capTool) PermissionFor(args json.RawMessage) agenttools.Permission {
 }
 
 func (t capTool) Execute(ctx context.Context, args json.RawMessage) (*agenttools.Result, error) {
+	emit := agenttools.ProgressEmitterFromContext(ctx)
+	emitText := func(string) {}
+	if emit != nil {
+		emitText = func(text string) { emit(agenttools.ProgressEvent{Text: text}) }
+	}
 	call := &capabilities.Call{
 		Args:           args,
 		WorkDir:        agenttools.WorkDirFromContext(ctx),
 		ConversationID: agenttools.ConversationIDFromContext(ctx),
 		// The loop has already gated W/X before calling Execute, and emits its
-		// own events around execution, so allow-all + no-op here is correct and
-		// behavior-preserving for the migrated tools.
+		// own events around execution, so allow-all here is correct and
+		// behavior-preserving for the migrated tools. Progress is relayed through
+		// the execution context when the loop provides an emitter.
 		RequestPermission: func(context.Context, string) (bool, error) { return true, nil },
-		Emit:              func(string) {},
+		Emit:              emitText,
+		EmitProgress:      emit,
 		Svc:               t.svc,
 	}
 	res, err := t.cap.Execute(ctx, call)

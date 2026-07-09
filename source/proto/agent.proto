@@ -212,6 +212,7 @@ message StreamProcessResponse {
     PermissionRequired permission_required = 8;
     RouteSelected     route_selected = 9;
     WatchdogEvent     watchdog_event = 10;
+    SubAgentEvent     sub_agent_event = 11;
   }
 }
 
@@ -234,6 +235,25 @@ message WatchdogEvent {
 // Progress update during a long-running task.
 message ProgressUpdate {
   string message = 1;
+}
+
+// SubAgentEvent carries structured lifecycle and transcript events for a child
+// agent. Clients can route these to an ephemeral child tab without scraping
+// human-readable progress text.
+message SubAgentEvent {
+  string id = 1;
+  string title = 2;
+  string kind = 3; // started|progress|token|tool_use_start|tool_use_stop|tool_exec_start|tool_exec_complete|done|error
+  repeated string granted_tools = 4;
+  repeated string ignored_tools = 5;
+  string text = 6;
+  string tool_use_id = 7;
+  string tool_name = 8;
+  string args_summary = 9;
+  string summary = 10;
+  string detail = 11;
+  int32 start_line = 12;
+  bool is_error = 13;
 }
 
 // The request message for ProcessRequest.

@@ -30,6 +30,8 @@ import (
 	"context"
 	"sync"
 	"syscall"
+
+	"google.golang.org/grpc/connectivity"
 )
 
 // spawnFunc spawns a worker process and returns a connected handle. It is the
@@ -98,29 +100,59 @@ func (p *workerPool) Acquire(ctx context.Context, convID string, gen uint64) (*w
 	}
 
 	p.mu.Lock()
-	// Re-check: another turn on this conversation shouldn't exist (exclusivity),
-	// but if a racing entry appeared, kill ours and don't leak.
+	// Re-check: a racing entry may have appeared while we spawned outside the
+	// lock. Under Phase-4 turn-exclusivity a single conversation is used by at
+	// most one live turn, but during a SUPERSESSION window a new turn's Acquire
+	// can race the old (superseded) turn's Release. Resolve this DETERMINISTICALLY
+	// and BOUNDED — no recursion, no spin, no process thrash:
 	if e, ok := p.byConv[convID]; ok && e.handle != nil {
+		if !e.inUse && workerHealthy(e.handle) {
+			// A reusable warm entry raced in. Prefer it and discard our spawn
+			// (bounded: exactly one extra spawn+kill, no loop).
+			e.inUse = true
+			reuse := e.handle
+			p.mu.Unlock()
+			h.Kill()
+			return reuse, nil
+		}
+		// The racing entry is in-use (the old superseded turn still holds it) or
+		// unhealthy. Do NOT kill it blindly (its owner will Release it, and our
+		// Release-by-handle guard makes that a no-op once we replace the entry)
+		// and do NOT spin. REPLACE the entry with OUR fresh worker; the displaced
+		// handle is now unreferenced by the pool, so the stale turn's
+		// Release(convID, displaced, …) will compare-and-find-mismatch → no-op,
+		// and that turn's own cleanup path Kills its handle. Our fresh worker is
+		// the pool's live entry for the next turn.
+		p.byConv[convID] = &pooledEntry{handle: h, inUse: true}
 		p.mu.Unlock()
-		h.Kill()
-		// Fall back to Acquire semantics on the existing entry: caller retries.
-		// Simplest correct behavior: recurse once.
-		return p.Acquire(ctx, convID, gen)
+		return h, nil
 	}
 	p.byConv[convID] = &pooledEntry{handle: h, inUse: true}
 	p.mu.Unlock()
 	return h, nil
 }
 
-// Release returns a worker to the pool after a turn. healthy → keep it WARM for
-// the next turn (mark not-in-use). NOT healthy (crash/ambiguous state) → kill +
-// remove so the next Acquire spawns fresh. On a warm release the conn is NOT
-// closed (it's owned by the pooled handle and reused next turn).
-func (p *workerPool) Release(convID string, healthy bool) {
+// Release returns a SPECIFIC handle to the pool after a turn. It is a
+// compare-and-act: it only touches the pool entry if that entry STILL holds the
+// exact handle this turn acquired (mirrors the Phase-4 turn-registry `cur == h`
+// release-guard). This disambiguates concurrent handles for one conversation in
+// the supersession window — a stale (superseded) turn whose handle was already
+// REPLACED by a newer Acquire must NOT mark the newer worker not-in-use or evict
+// it. The stale turn instead Kills its own displaced handle so it doesn't leak.
+//
+//   - healthy + entry still holds h → keep it WARM (mark not-in-use). The conn
+//     is NOT closed (owned by the pooled handle, reused next turn).
+//   - NOT healthy (crash/ambiguous) + entry still holds h → evict + kill.
+//   - entry no longer holds h (displaced by a racing Acquire) → this handle is
+//     orphaned; Kill it here so it doesn't leak. The live entry is untouched.
+func (p *workerPool) Release(convID string, h *workerHandle, healthy bool) {
 	p.mu.Lock()
 	e, ok := p.byConv[convID]
-	if !ok {
+	if !ok || e.handle != h {
+		// Our handle was displaced (supersession) or already gone. Don't touch
+		// the pool entry (it belongs to a newer turn). Kill our orphan handle.
 		p.mu.Unlock()
+		h.Kill() // nil-safe; no-op on a nil handle.
 		return
 	}
 	if healthy {
@@ -151,14 +183,44 @@ func (p *workerPool) Shutdown() {
 
 // workerHealthy reports whether a pooled handle is usable for another turn.
 //
-// B1 uses a simple process-alive check; Task B2 strengthens this into a real
-// health probe (conn READY / lightweight ping). The seam is here so B2 only has
-// to fill this function in.
+// B2 strengthens the B1 process-alive check with a cheap gRPC connectivity
+// check so a worker that died BETWEEN turns is caught on the next Acquire and
+// transparently respawned (rather than failing the turn):
+//
+//   - the process must still be alive (signal-0 to the process group), and
+//   - the gRPC conn must not be in a terminal/persistently-broken state
+//     (Shutdown or TransientFailure) — those mean the transport to the worker
+//     is unusable, e.g. the socket closed when the process died.
+//
+// This is a CONNECTIVITY check, NOT a full round-trip: a per-Acquire ping would
+// add latency to every warm turn. Process-alive + conn-state is enough for B2;
+// a real ping remains an optional future refinement.
 func workerHealthy(h *workerHandle) bool {
 	if h == nil {
 		return false
 	}
-	return processAlive(h)
+	if !processAlive(h) {
+		return false
+	}
+	return connUsable(h)
+}
+
+// connUsable reports whether the handle's gRPC conn is not in a terminal or
+// persistently-failed connectivity state. A nil conn (a not-yet-connected or
+// partially-built handle) is treated as usable so we don't evict on absence of
+// a conn; the process-alive gate already covers a dead worker in that case.
+func connUsable(h *workerHandle) bool {
+	if h.conn == nil {
+		return true
+	}
+	switch h.conn.GetState() {
+	case connectivity.Shutdown, connectivity.TransientFailure:
+		return false
+	default:
+		// Idle / Connecting / Ready are all reusable: a fresh RunTurn stream will
+		// drive an Idle conn back to Ready.
+		return true
+	}
 }
 
 // processAlive reports whether the worker's process is still running. A killed

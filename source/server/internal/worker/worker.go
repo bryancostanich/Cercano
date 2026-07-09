@@ -348,29 +348,30 @@ func wrapWorkerBackup(
 		return primary
 	}
 
-	var backup llm.Provider
-	var buildErr error
+	// Fetch the backup's credential via the stream (mirrors wrapBackup's
+	// st.Get(bp.Name)) — for a ChatGPT-sub backup this is the access token, for
+	// a static route the API key. The eager fetch gates the carve-out below for
+	// ALL flavors, exactly like in-process; ChatGPT-sub still installs a lazy
+	// TokenSource for per-call refresh.
+	key := ""
+	if k, _, err := credSource.Fetch(ctx, bp.Name); err == nil {
+		key = k
+	}
+	// Same carve-out as in-process wrapBackup, applied to every flavor: no
+	// credential (e.g. a logged-out ChatGPT-sub backup) + no BaseURL (proxy) +
+	// not bedrock (AWS credential chain) → run without fallback rather than
+	// wrapping an unusable backup.
+	if key == "" && bp.BaseURL == "" && bp.Flavor != cloudfactory.FlavorBedrock {
+		log.Printf("[worker] backup profile %q has no credential; running without fallback", name)
+		return primary
+	}
+	var opts cloudfactory.Options
 	if bp.Flavor == cloudfactory.FlavorResponses && bp.Route == cloudfactory.RouteChatGPT {
 		// ChatGPT subscription: the host owns refresh/OAuth; the worker proxies
-		// the token via the stream, keyed by the backup profile name.
-		ts := &streamTokenSource{creds: credSource, profileName: bp.Name}
-		backup, buildErr = cloudfactory.BuildCloudProvider(bp, "", cloudfactory.Options{TokenSource: ts})
-	} else {
-		// Static-key route: fetch the backup's API key via the stream (mirrors
-		// providers.wrapBackup's st.Get(bp.Name)). A fetch error/miss leaves the
-		// key empty; the carve-out below decides if that is fatal.
-		key := ""
-		if k, _, err := credSource.Fetch(ctx, bp.Name); err == nil {
-			key = k
-		}
-		// Same carve-outs as in-process wrapBackup: a proxy BaseURL (Meridian)
-		// authenticates with no key, and bedrock uses the AWS credential chain.
-		if key == "" && bp.BaseURL == "" && bp.Flavor != cloudfactory.FlavorBedrock {
-			log.Printf("[worker] backup profile %q has no API key; running without fallback", name)
-			return primary
-		}
-		backup, buildErr = cloudfactory.BuildCloudProvider(bp, key)
+		// the token via the stream per call, keyed by the backup profile name.
+		opts.TokenSource = &streamTokenSource{creds: credSource, profileName: bp.Name}
 	}
+	backup, buildErr := cloudfactory.BuildCloudProvider(bp, key, opts)
 	if buildErr != nil {
 		log.Printf("[worker] backup profile %q unbuildable (%v); running without fallback", name, buildErr)
 		return primary

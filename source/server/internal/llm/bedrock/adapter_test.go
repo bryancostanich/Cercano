@@ -148,3 +148,25 @@ func TestBlocksFromConverse(t *testing.T) {
 		t.Errorf("block1 input = %s (err %v)", blocks[1].ToolInput, err)
 	}
 }
+
+// Foreign blocks (e.g. reasoning recorded on the Responses backend) have no
+// Converse representation and are skipped by the block switch. A message left
+// with no content must be dropped whole — Converse rejects empty content with
+// a ValidationException.
+func TestMessagesToConverse_DropsMessagesLeftEmpty(t *testing.T) {
+	out, err := messagesToConverse(context.Background(), []llm.Message{
+		{Role: llm.RoleAssistant, Blocks: []llm.Block{
+			{Type: llm.BlockReasoning, ReasoningID: "rs_1", ReasoningData: "gAAAAA"},
+		}},
+		{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "next"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("expected reasoning-only message dropped, got %d: %+v", len(out), out)
+	}
+	if out[0].Role != types.ConversationRoleUser {
+		t.Errorf("surviving message wrong: %+v", out[0])
+	}
+}

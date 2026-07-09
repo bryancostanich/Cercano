@@ -70,6 +70,12 @@ func messagesToOpenAI(msgs []llm.Message, system string) []goopenai.ChatCompleti
 		} else {
 			cm.Content = text
 		}
+		// A message whose blocks were all foreign (no representable content,
+		// no tool calls) must be dropped whole: strict compat endpoints
+		// reject empty messages, and empty turns are junk context elsewhere.
+		if cm.Content == "" && len(cm.MultiContent) == 0 && len(cm.ToolCalls) == 0 {
+			continue
+		}
 		out = append(out, cm)
 	}
 	return out

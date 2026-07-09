@@ -190,9 +190,10 @@ func TestAttachConversation_TwoSurfacesSeeOneTurn(t *testing.T) {
 	// Broker-published events for "hello world" text block:
 	//   [optional Progress events], EventRouteSelected, EventToken = N broker events
 	// FinalResponse is NOT broker-published; it's sent directly by the turn handler.
-	// At pause point (before EventMessageStart is returned by pausableStream, since
-	// pauseAfter=0 blocks before idx=0 is returned):
-	//   replay = events published before StreamChat was called: Progress + RouteSelected
+	// The stream pauses at pauseAfter=1 — after the runner consumes EventMessageStart
+	// but before the EventTextDelta is returned — so EventToken is not yet published
+	// when the attacher joins:
+	//   replay = events published before the attach: Progress + RouteSelected
 	//   live = events published after resume: Token
 	// The attacher sees replay+live = all broker-published events.
 	// We wait for at least (RouteSelected + Token) = 2 events from the attacher,

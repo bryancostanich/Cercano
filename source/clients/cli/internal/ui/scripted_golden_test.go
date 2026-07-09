@@ -41,10 +41,10 @@ func newScriptedModel() Model {
 		palette:   p,
 		width:     80,
 		streaming: true,
-		chat:      newChatView(theme.NewStyles(p), p, "", "", 78, 20),
 	}
-	m.chat.AppendEntry(&Entry{Role: RoleUser, Content: "list the files"})
-	m.chat.AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
+	m.setMainChat(newChatView(theme.NewStyles(p), p, "", "", 78, 20))
+	m.mainChat().AppendEntry(&Entry{Role: RoleUser, Content: "list the files"})
+	m.mainChat().AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
 	m.turnStart = frozenTurnStart
 	return m
 }

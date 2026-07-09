@@ -22,8 +22,8 @@ func TestCancel_GhostEventsFromCanceledTurn_DoNotKillNextTurn(t *testing.T) {
 	// Turn 1 in flight.
 	m.streaming = true
 	m.cancelStream = func() {}
-	m.chat.AppendEntry(&Entry{Role: RoleUser, Content: "first prompt"})
-	m.chat.AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
+	m.mainChat().AppendEntry(&Entry{Role: RoleUser, Content: "first prompt"})
+	m.mainChat().AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
 	oldGen := m.turnGen
 
 	// Esc cancels turn 1.
@@ -35,9 +35,9 @@ func TestCancel_GhostEventsFromCanceledTurn_DoNotKillNextTurn(t *testing.T) {
 	newTurnCanceled := false
 	m.cancelStream = func() { newTurnCanceled = true }
 	m.streaming = true
-	m.chat.SetStreaming(true)
-	m.chat.AppendEntry(&Entry{Role: RoleUser, Content: "second prompt"})
-	m.chat.AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
+	m.mainChat().SetStreaming(true)
+	m.mainChat().AppendEntry(&Entry{Role: RoleUser, Content: "second prompt"})
+	m.mainChat().AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
 
 	// Turn 1's ghosts land: its cancel error, then its channel close.
 	next, _ = m.Update(chatStreamMsg{gen: oldGen, ev: chatErrorMsg{err: errors.New("rpc error: code = Canceled desc = context canceled")}})
@@ -54,7 +54,7 @@ func TestCancel_GhostEventsFromCanceledTurn_DoNotKillNextTurn(t *testing.T) {
 	if m.cancelStream == nil {
 		t.Error("stale streamEndMsg cleared the new turn's cancel slot")
 	}
-	for _, e := range m.chat.Entries() {
+	for _, e := range m.mainChat().Entries() {
 		if strings.Contains(e.Content, "context canceled") {
 			t.Errorf("canceled turn's ghost error was painted into the new turn's transcript: %q", e.Content)
 		}
@@ -69,7 +69,7 @@ func TestCancel_CurrentTurnEndStillFinalizes(t *testing.T) {
 	m.streaming = true
 	released := false
 	m.cancelStream = func() { released = true }
-	m.chat.AppendEntry(&Entry{Role: RoleAssistant, Content: "answer", Streaming: true})
+	m.mainChat().AppendEntry(&Entry{Role: RoleAssistant, Content: "answer", Streaming: true})
 
 	next, _ := m.Update(streamEndMsg{gen: m.turnGen})
 	m = next.(Model)

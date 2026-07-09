@@ -59,13 +59,14 @@ func buildConfirmClickModel() Model {
 		{Role: RoleAssistant, Content: "prose after the tools"},
 	})
 	cv.rebuild()
-	return Model{
+	m := Model{
 		width:          w,
 		height:         vh + 6,
 		scrollbarTop:   0,
-		chat:           cv,
 		pendingConfirm: &confirmRequest{},
 	}
+	m.setMainChat(cv)
+	return m
 }
 
 // While a confirm is pending, a left click on a tool entry's arrow row still
@@ -73,9 +74,9 @@ func buildConfirmClickModel() Model {
 // answering y/n. The confirm itself must stay pending.
 func TestConfirmPending_ClickTogglesFold(t *testing.T) {
 	m := buildConfirmClickModel()
-	line := findPlainLine(t, &m.chat, "Read")
+	line := findPlainLine(t, m.mainChat(), "Read")
 	m = send(t, m, tea.MouseClickMsg{X: 2, Y: line, Button: tea.MouseLeft})
-	if m.chat.entries[1].Tool.Folded {
+	if m.mainChat().entries[1].Tool.Folded {
 		t.Error("click on the arrow row should unfold the entry while a confirm is pending")
 	}
 	if m.pendingConfirm == nil {
@@ -87,15 +88,15 @@ func TestConfirmPending_ClickTogglesFold(t *testing.T) {
 // pending — no selection drag, no input focus, confirm still pending.
 func TestConfirmPending_ProseClickStaysIgnored(t *testing.T) {
 	m := buildConfirmClickModel()
-	line := findPlainLine(t, &m.chat, "prose after the tools")
+	line := findPlainLine(t, m.mainChat(), "prose after the tools")
 	m = send(t, m, tea.MouseClickMsg{X: 10, Y: line, Button: tea.MouseLeft})
-	if !m.chat.entries[1].Tool.Folded {
+	if !m.mainChat().entries[1].Tool.Folded {
 		t.Error("a prose click must not toggle any fold")
 	}
 	if m.pendingConfirm == nil {
 		t.Error("a prose click must not resolve the pending confirm")
 	}
-	if m.chat.SelectionDragging() {
+	if m.mainChat().SelectionDragging() {
 		t.Error("a click during a pending confirm must not begin a selection drag")
 	}
 }

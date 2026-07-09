@@ -156,7 +156,7 @@ func TestResolveConfirmKey_N_Cancels(t *testing.T) {
 	if cmd != nil {
 		t.Errorf("n should not return a cmd; got %v", cmd)
 	}
-	if len(next.chat.Entries()) == 0 {
+	if len(next.mainChat().Entries()) == 0 {
 		t.Errorf("expected a cancellation system entry")
 	}
 }
@@ -182,7 +182,7 @@ func TestResolveConfirmKey_D_TogglesDetailsAndKeepsPending(t *testing.T) {
 		t.Errorf("d should not return a cmd")
 	}
 	if got := countDetailEntries(next, `"path":"a.go"`); got != 1 {
-		t.Fatalf("first d should append exactly one details entry, got %d; entries: %+v", got, next.chat.Entries())
+		t.Fatalf("first d should append exactly one details entry, got %d; entries: %+v", got, next.mainChat().Entries())
 	}
 
 	next, cmd = next.resolveConfirmKey("d")
@@ -193,13 +193,13 @@ func TestResolveConfirmKey_D_TogglesDetailsAndKeepsPending(t *testing.T) {
 		t.Errorf("second d should not return a cmd")
 	}
 	if got := countDetailEntries(next, `"path":"a.go"`); got != 0 {
-		t.Fatalf("second d should collapse details, got %d; entries: %+v", got, next.chat.Entries())
+		t.Fatalf("second d should collapse details, got %d; entries: %+v", got, next.mainChat().Entries())
 	}
 }
 
 func countDetailEntries(m Model, needle string) int {
 	count := 0
-	for _, e := range m.chat.Entries() {
+	for _, e := range m.mainChat().Entries() {
 		if strings.Contains(e.Content, "details:") && strings.Contains(e.Content, needle) {
 			count++
 		}

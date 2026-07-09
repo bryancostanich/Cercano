@@ -11,11 +11,11 @@ func TestSeedAssistantMarkdown_SeedsRenderedEntry(t *testing.T) {
 	p := theme.Cracker()
 	m := Model{
 		styles: theme.NewStyles(p),
-		chat:   newChatView(theme.NewStyles(p), p, "", "", 0, 0),
 	}
+	m.setMainChat(newChatView(theme.NewStyles(p), p, "", "", 0, 0))
 	m = m.SeedAssistantMarkdown("# Hi\n\n**bold**\n")
 
-	entries := m.chat.Entries()
+	entries := m.mainChat().Entries()
 	if len(entries) != 1 || entries[0].Role != RoleAssistant {
 		t.Fatalf("expected one assistant entry, got %#v", entries)
 	}
@@ -25,7 +25,7 @@ func TestSeedAssistantMarkdown_SeedsRenderedEntry(t *testing.T) {
 	if m.splashShown {
 		t.Fatalf("splash should be hidden in mdtest mode")
 	}
-	vis := plain(m.chat.renderAssistantMarkdown(entries[0], 60))
+	vis := plain(m.mainChat().renderAssistantMarkdown(entries[0], 60))
 	if !strings.Contains(vis, "Hi") || !strings.Contains(vis, "bold") {
 		t.Fatalf("rendered content missing: %q", vis)
 	}

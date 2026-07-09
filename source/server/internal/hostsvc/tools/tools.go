@@ -292,10 +292,10 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{Kind: "error", Text: fmt.Sprintf("sub-agent grant failed: %v", err), IsError: true})
 		return dispatch.Result{}, err
 	}
-	emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentParentID: spec.ConversationID, Kind: "grant", Text: fmt.Sprintf("sub-agent tools granted: %s", strings.Join(granted, ", ")), GrantedTools: granted, IgnoredTools: ignored})
-	if len(ignored) > 0 {
-		emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentParentID: spec.ConversationID, Kind: "ignored_tools", Text: fmt.Sprintf("sub-agent ignored unknown tool names: %s", strings.Join(ignored, ", ")), GrantedTools: granted, IgnoredTools: ignored})
-	}
+	// Grant + ignored-tool details ride on the "started" event below, which
+	// carries GrantedTools/IgnoredTools for the sub-agent tab to render. A
+	// separate pre-start emit here had no SubAgentID yet, so it leaked into
+	// the parent transcript instead of the sub-agent's own tab.
 
 	// Permission scope for the sub-loop. A W/X grant was approved as a set —
 	// that one approval covers the run, so the sub-loop runs pre-authorized

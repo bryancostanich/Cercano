@@ -196,8 +196,10 @@ func TestChatView_SingleEntryGroupTogglesEntryFoldImmediately(t *testing.T) {
 	}
 }
 
-// In a mixed group (some completed, one in-progress), the summary line covers
-// the completed entries and the active entry renders standalone below it.
+// In a mixed group (some completed, one in-progress), the summary line counts
+// the whole run — completed calls plus the in-flight one — and the active
+// entry still renders live below it. Counting the whole run keeps the header
+// from under-reporting (and jumping) as the live call lands.
 func TestChatView_MixedGroupShowsSummaryThenActive(t *testing.T) {
 	p := theme.Cracker()
 	c := newChatView(theme.NewStyles(p), p, "", "", 100, 20)
@@ -209,8 +211,8 @@ func TestChatView_MixedGroupShowsSummaryThenActive(t *testing.T) {
 	c.SetEntries(entries)
 	s := stripAnsiCSI(strings.Join(c.PlainLines(), "\n"))
 
-	if !strings.Contains(s, "2 tool calls") {
-		t.Errorf("expected '2 tool calls' summary, got:\n%s", s)
+	if !strings.Contains(s, "3 tool calls") {
+		t.Errorf("expected '3 tool calls' summary (2 completed + 1 in-flight), got:\n%s", s)
 	}
 	// Active entry uses the verb form from Phase A.
 	if !strings.Contains(s, "Editing") {

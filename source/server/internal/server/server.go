@@ -9,10 +9,14 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
@@ -1934,10 +1938,15 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 
 	convID := req.GetConversationId()
 
-	// Attach the initiator as the first subscriber. replay is empty at this
-	// point — no events have been published for this turn yet (BeginTurn just
-	// reset the buffer). detach closes ch and removes us from the fan-out set.
-	replay, ch, detach := s.turnBroker.Attach(convID)
+	// Attach the initiator as the first subscriber using a LOSSLESS subscription.
+	// replay is empty at this point — no events have been published for this turn
+	// yet (BeginTurn just reset the buffer). detach closes ch and removes us from
+	// the fan-out set.
+	//
+	// The initiator uses AttachLossless (not Attach) because its stream is the
+	// turn's authoritative output: every event must arrive, even if stream.Send
+	// is momentarily slow. Passive Task-4 attachers use Attach (drop-on-full).
+	replay, ch, detach := s.turnBroker.AttachLossless(convID)
 	defer detach()
 
 	// requester gates a W/X permission prompt: blocks until the client responds
@@ -2007,7 +2016,21 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 
 	// Run the turn concurrently so the main goroutine can drain the broker
 	// channel without blocking RunTurn (which calls sink.Emit synchronously).
+	//
+	// Panic recovery: a panic inside RunTurn would otherwise crash the whole
+	// process (kills every client). We recover it here, log the stack (matching
+	// RecoveryStreamInterceptor's style in recovery.go), and write a
+	// codes.Internal result to doneCh so the main goroutine can return cleanly.
+	// doneCh is written exactly once: either the normal return at the end of the
+	// func, or the recover path — never both (the recover fires only when a panic
+	// unwinds past the normal write).
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("panic recovered in StreamProcessRequest: %v\n%s", r, debug.Stack())
+				doneCh <- turnResult{err: grpcstatus.Errorf(codes.Internal, "internal server error")}
+			}
+		}()
 		res, err := s.turnRunner.RunTurn(ctx, runReq, sink, requester, persist)
 		doneCh <- turnResult{result: res, err: err}
 	}()

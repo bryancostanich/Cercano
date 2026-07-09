@@ -12,6 +12,13 @@
 // event is either in replay (published before Attach) or on ch (published
 // after) — never both, never neither.
 //
+// Lossless vs lossy subscribers: Attach returns a cap-64 drop-on-full channel
+// (correct for passive observers). AttachLossless returns a channel backed by
+// an unbounded queue; Publish appends to that queue under mu (never drops,
+// never blocks) and a background drain goroutine forwards to the channel.
+// The atomicity invariant (replay vs live bucketing) is preserved because both
+// paths decide the bucket under mu at Attach/Publish time.
+//
 // broker is proto-free and does not import internal/server.
 package broker
 
@@ -24,6 +31,15 @@ import (
 
 const subChanCap = 64 // buffered subscriber channel capacity; drop-on-full if full
 
+// losslessSub is the mutable state for one AttachLossless subscriber.
+// All fields are guarded by Broker.mu except the channels, which are written
+// under mu and read by the drain goroutine.
+type losslessSub struct {
+	queue  []runner.Event // unbounded buffer; append under mu, pop by drain goroutine
+	notify chan struct{}   // non-blocking signal that queue has new items (cap 1)
+	done   chan struct{}   // closed by detach; tells drain goroutine to exit
+}
+
 // convState bundles all per-conversation mutable state under Broker.mu.
 type convState struct {
 	// turn-exclusivity
@@ -31,9 +47,10 @@ type convState struct {
 	handle *turnHandle     // nil when no active turn
 
 	// fan-out + replay
-	buffer []runner.Event         // current turn's events (reset each BeginTurn)
-	subs   map[int]chan runner.Event // attached subscriber channels
-	nextID int                    // monotonic subscriber-id counter
+	buffer    []runner.Event           // current turn's events (reset each BeginTurn)
+	subs      map[int]chan runner.Event // attached subscriber channels (lossy, cap-64)
+	lsubs     map[int]*losslessSub     // attached lossless subscribers
+	nextID    int                      // monotonic subscriber-id counter (shared across both maps)
 }
 
 // turnHandle tracks one in-flight turn for a conversation.
@@ -61,7 +78,10 @@ func New() *Broker {
 func (b *Broker) convLocked(conv string) *convState {
 	cs, ok := b.convs[conv]
 	if !ok {
-		cs = &convState{subs: make(map[int]chan runner.Event)}
+		cs = &convState{
+			subs:  make(map[int]chan runner.Event),
+			lsubs: make(map[int]*losslessSub),
+		}
 		b.convs[conv] = cs
 	}
 	return cs
@@ -133,8 +153,12 @@ func (b *Broker) HasActiveTurn(conv string) bool {
 // conversation's replay buffer, but ONLY if gen matches the live generation
 // for conv. A stale (superseded) gen is silently dropped.
 //
-// Subscriber sends are non-blocking (drop-on-full): a wedged subscriber cannot
-// stall the publisher or other subscribers.
+// Lossy subscriber sends are non-blocking (drop-on-full): a wedged subscriber
+// cannot stall the publisher or other subscribers.
+//
+// Lossless subscriber delivery is also non-blocking: Publish appends to the
+// sub's unbounded queue and sends a non-blocking signal; the drain goroutine
+// (started by AttachLossless) forwards to the caller's channel outside the lock.
 //
 // Everything runs under b.mu, so a concurrent Attach either sees ev in the
 // buffer (if Attach runs after Publish returns) or on ch (if Attach ran and
@@ -152,6 +176,14 @@ func (b *Broker) Publish(conv string, gen uint64, ev runner.Event) {
 		select {
 		case ch <- ev:
 		default: // drop-on-full; one wedged surface does not stall the turn
+		}
+	}
+	for _, ls := range cs.lsubs {
+		ls.queue = append(ls.queue, ev)
+		// Non-blocking signal: drain goroutine will wake and forward.
+		select {
+		case ls.notify <- struct{}{}:
+		default: // already signaled; drain will pick up all queued items
 		}
 	}
 }
@@ -199,4 +231,87 @@ func (b *Broker) Attach(conv string) (replay []runner.Event, ch <-chan runner.Ev
 		}
 	}
 	return replay, c, detach
+}
+
+// AttachLossless is like Attach but returns a channel whose delivery is
+// guaranteed lossless: Publish never drops events destined for this subscriber,
+// regardless of how fast the caller drains the channel.
+//
+// Mechanism: each lossless subscriber is backed by an unbounded slice-queue.
+// Publish appends to the queue under b.mu (non-blocking) and sends a
+// non-blocking signal. A drain goroutine (started here) forwards events from
+// the queue to the returned channel outside the lock. The goroutine exits when
+// detach() is called.
+//
+// Atomicity invariant: replay vs live bucketing is decided under b.mu at
+// Attach/Publish time, identical to the lossy path. The out-of-lock drain only
+// moves events from the internal queue to the caller's channel — it cannot
+// move an event between replay and live buckets.
+//
+// Disconnect safety: detach closes the done channel, which causes the drain
+// goroutine to exit promptly. Publish never blocks waiting for the receiver.
+//
+// The caller MUST call detach() when done to release the goroutine and the
+// subscriber registration.
+func (b *Broker) AttachLossless(conv string) (replay []runner.Event, ch <-chan runner.Event, detach func()) {
+	b.mu.Lock()
+	cs := b.convLocked(conv)
+
+	// Snapshot the replay buffer under lock (same as Attach).
+	if len(cs.buffer) > 0 {
+		replay = make([]runner.Event, len(cs.buffer))
+		copy(replay, cs.buffer)
+	}
+
+	ls := &losslessSub{
+		notify: make(chan struct{}, 1),
+		done:   make(chan struct{}),
+	}
+	id := cs.nextID
+	cs.nextID++
+	cs.lsubs[id] = ls
+	b.mu.Unlock()
+
+	out := make(chan runner.Event, subChanCap)
+
+	// drain goroutine: forwards from ls.queue to out. Exits when done is closed.
+	go func() {
+		defer close(out)
+		for {
+			select {
+			case <-ls.done:
+				// Drain any remaining items before exiting so the caller sees
+				// all events published before detach() was called.
+				b.mu.Lock()
+				remaining := ls.queue
+				ls.queue = nil
+				b.mu.Unlock()
+				for _, ev := range remaining {
+					out <- ev
+				}
+				return
+			case <-ls.notify:
+				b.mu.Lock()
+				items := ls.queue
+				ls.queue = nil
+				b.mu.Unlock()
+				for _, ev := range items {
+					out <- ev
+				}
+			}
+		}
+	}()
+
+	var detachOnce sync.Once
+	detach = func() {
+		detachOnce.Do(func() {
+			b.mu.Lock()
+			if cs2, ok := b.convs[conv]; ok {
+				delete(cs2.lsubs, id)
+			}
+			b.mu.Unlock()
+			close(ls.done)
+		})
+	}
+	return replay, out, detach
 }

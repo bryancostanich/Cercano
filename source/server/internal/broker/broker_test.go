@@ -315,3 +315,17 @@ func TestBroker_DetachStopsDelivery(t *testing.T) {
 		// also fine: nothing to receive
 	}
 }
+
+// TestBroker_DoubleDetachSafe pins that detach is idempotent — calling it more
+// than once must not panic (close-of-closed-channel). Callers use defer
+// detach(), but a robust cleanup primitive must tolerate repeat calls; Phase 5
+// wires more attach sites.
+func TestBroker_DoubleDetachSafe(t *testing.T) {
+	b := New()
+	b.BeginTurn(context.Background(), "conv")
+	_, _, detach := b.Attach("conv")
+
+	detach()
+	detach() // must be a no-op, not a panic
+	detach() // still safe
+}

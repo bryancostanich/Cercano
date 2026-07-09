@@ -79,7 +79,6 @@ type Server struct {
 	permBroker     permissions.Broker
 	runtimesSvc    runtimessvc.Supervisors  // owns meridianMgr, runtimeManager, mcpManager
 	watchdog       *watchdog.Watchdog       // protocol-supervision gate; nil = disabled (default)
-	usageSink        func(usage.Usage)      // wraps the main-loop provider for token recording
 
 	events *eventHub // server->client push fan-out (SubscribeEvents)
 
@@ -332,7 +331,6 @@ func (s *Server) OpenLLMProvider() llm.Provider  { return s.providerSvc.OpenLLMP
 // providers stay raw; wrapping happens at hand-off so the dispatch engine can
 // read raw providers without double-counting.
 func (s *Server) SetUsageSink(fn func(usage.Usage)) {
-	s.usageSink = fn
 	s.providerSvc.SetUsageSink(fn)
 }
 

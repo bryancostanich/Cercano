@@ -59,6 +59,8 @@ import (
 	"google.golang.org/adk/session"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
+	"cercano/source/server/internal/worker"
 )
 
 // version is set at build time via -ldflags "-X main.version=...".
@@ -1599,6 +1601,36 @@ func runMCPMode(cfg config.Config, externalGRPC string) {
 
 	if err := s.MCPServer().Run(context.Background(), &gomcp.StdioTransport{}); err != nil {
 		fmt.Fprintf(os.Stderr, "MCP server error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// runWorkerMode serves a single RunTurn bidi RPC over a Unix-domain socket.
+// The host launches this process with --socket <path> and connects to it.
+func runWorkerMode(args []string) {
+	var socketPath string
+	for i, arg := range args {
+		if arg == "--socket" && i+1 < len(args) {
+			socketPath = args[i+1]
+		}
+	}
+	if socketPath == "" {
+		fmt.Fprintln(os.Stderr, "worker: --socket <path> required")
+		os.Exit(1)
+	}
+
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "worker: listen %s: %v\n", socketPath, err)
+		os.Exit(1)
+	}
+
+	srv := grpc.NewServer()
+	proto.RegisterWorkerServer(srv, worker.New())
+
+	log.Printf("[worker] serving on unix:%s", socketPath)
+	if err := srv.Serve(ln); err != nil {
+		fmt.Fprintf(os.Stderr, "worker: serve: %v\n", err)
 		os.Exit(1)
 	}
 }

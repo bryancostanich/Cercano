@@ -63,6 +63,7 @@ type Config struct {
 	LlamaServer        LlamaServerConfig `yaml:"llama_server"`
 	Compaction         CompactionConfig  `yaml:"compaction"`
 	Watchdog           WatchdogConfig    `yaml:"watchdog"`
+	ToolLoop           ToolLoopConfig    `yaml:"tool_loop"`
 	Models             ModelsConfig      `yaml:"models"`
 }
 
@@ -116,6 +117,39 @@ type WatchdogConfig struct {
 	Model         string   `yaml:"model"`
 	EscalateAfter int      `yaml:"escalate_after"`
 	Echo          bool     `yaml:"echo"`
+}
+
+const (
+	// DefaultToolLoopMaxIterations is the default cap on LLM round-trips in one
+	// agentic turn. It is the single source of truth for the runtime default and
+	// for the generated default config.
+	DefaultToolLoopMaxIterations = 200
+	// UnlimitedToolLoopMaxIterations disables the turn-level tool-loop cap.
+	UnlimitedToolLoopMaxIterations = -1
+)
+
+// ToolLoopConfig controls the agentic tool loop.
+// MaxIterations caps LLM round-trips per turn; 0 means use the default, and -1
+// disables the cap.
+type ToolLoopConfig struct {
+	MaxIterations int `yaml:"max_iterations"`
+}
+
+// EffectiveMaxIterations resolves the configured tool-loop cap. The boolean is
+// true when the cap is disabled.
+func EffectiveMaxIterations(n int) (max int, unlimited bool) {
+	if n == UnlimitedToolLoopMaxIterations {
+		return 0, true
+	}
+	if n > 0 {
+		return n, false
+	}
+	return DefaultToolLoopMaxIterations, false
+}
+
+// ValidateToolLoopMaxIterations validates the public config/RPC value.
+func ValidateToolLoopMaxIterations(n int) bool {
+	return n >= UnlimitedToolLoopMaxIterations
 }
 
 // LlamaServerConfig controls the optional managed llama-server sidecar.
@@ -199,6 +233,9 @@ func Defaults() Config {
 			Model:         "",
 			EscalateAfter: 2,
 			Echo:          false,
+		},
+		ToolLoop: ToolLoopConfig{
+			MaxIterations: DefaultToolLoopMaxIterations,
 		},
 	}
 }
@@ -350,12 +387,16 @@ func Load(path string) (Config, error) {
 			cfg.Port = defaults.Port
 		}
 		applyLlamaServerDefaults(&cfg.LlamaServer, defaults.LlamaServer)
+		applyToolLoopDefaults(&cfg.ToolLoop, defaults.ToolLoop)
 	}
 
 	applyEnvOverrides(&cfg)
 	finalizeModelTiers(&cfg)
 	migrateCloudProfiles(&cfg)
 	autoDetectMeridianRoute(&cfg)
+	if !ValidateToolLoopMaxIterations(cfg.ToolLoop.MaxIterations) {
+		return cfg, fmt.Errorf("tool_loop.max_iterations must be -1 or a non-negative integer, got %d", cfg.ToolLoop.MaxIterations)
+	}
 	return cfg, nil
 }
 
@@ -388,6 +429,12 @@ func applyLegacyLocalKeys(data []byte, cfg *Config) {
 		cfg.LocusMode = "open_primary"
 	case "local_only":
 		cfg.LocusMode = "open_only"
+	}
+}
+
+func applyToolLoopDefaults(cfg *ToolLoopConfig, defaults ToolLoopConfig) {
+	if cfg.MaxIterations == 0 {
+		cfg.MaxIterations = defaults.MaxIterations
 	}
 }
 

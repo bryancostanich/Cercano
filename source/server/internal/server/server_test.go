@@ -450,6 +450,37 @@ func TestUpdateConfig_WatchdogEnable(t *testing.T) {
 	}
 }
 
+func TestUpdateConfig_ToolLoopMaxIterations(t *testing.T) {
+	srv := NewServer(nil, nil, nil, nil, nil, engine.NewEngineRegistry())
+	srv.SetConfigPersistence("", config.Config{})
+
+	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{ToolLoopMaxIterations: "-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Success {
+		t.Fatalf("expected success, got: %s", resp.Message)
+	}
+	if got := srv.cfgSvc.Get().ToolLoop.MaxIterations; got != config.UnlimitedToolLoopMaxIterations {
+		t.Fatalf("stored max iterations = %d, want unlimited sentinel", got)
+	}
+	cfg, err := srv.GetConfig(context.Background(), &proto.GetConfigRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.GetToolLoopMaxIterations(); got != int32(config.UnlimitedToolLoopMaxIterations) {
+		t.Fatalf("GetConfig max iterations = %d, want unlimited sentinel", got)
+	}
+
+	resp, err = srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{ToolLoopMaxIterations: "-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Success {
+		t.Fatalf("expected invalid value to fail")
+	}
+}
+
 func TestUpdateConfig_WatchdogEcho_and_GetConfig(t *testing.T) {
 	srv := NewServer(nil, nil, nil, nil, nil, engine.NewEngineRegistry())
 	srv.SetConfigPersistence("", config.Config{})

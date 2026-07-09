@@ -146,6 +146,9 @@ func (s *Server) reloadConfigFromDisk(ctx context.Context) {
 			req.KeepForever = "false"
 		}
 	}
+	if newCfg.ToolLoop.MaxIterations != snap.ToolLoop.MaxIterations {
+		req.ToolLoopMaxIterations = strconv.Itoa(newCfg.ToolLoop.MaxIterations)
+	}
 	if newCfg.Compaction.Enabled != snap.Compaction.Enabled {
 		if newCfg.Compaction.Enabled {
 			req.CompactionEnabled = "true"

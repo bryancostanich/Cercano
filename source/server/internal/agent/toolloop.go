@@ -8,6 +8,7 @@ import (
 
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/pkg/config"
 )
 
 type LoopEventKind string
@@ -77,7 +78,7 @@ type ToolLoopInput struct {
 	OnTurnComplete func(m llm.Message)
 
 	// MaxIterations caps the number of LLM round-trips this call may make.
-	// 0 means use MaxToolLoopIterations (the package default, currently 50).
+	// 0 means use config.DefaultToolLoopMaxIterations; -1 means unlimited.
 	MaxIterations int
 
 	// MaxTokensPerTurn sets the MaxTokens field on each llm.ChatRequest.
@@ -102,12 +103,10 @@ type ToolLoopResult struct {
 	OutputTokens int // last LLM call's provider-reported output tokens
 }
 
-// MaxToolLoopIterations caps the LLM round-trips per turn. Agentic work
-// (locate a project, read several docs, multi-file edits) routinely needs many
-// steps — 10 was far too low and turns died mid-task. This is a safety bound,
-// not an expected ceiling; on hitting it the loop degrades to a final no-tools
-// answer rather than erroring out.
-const MaxToolLoopIterations = 50
+// MaxToolLoopIterations caps the LLM round-trips per turn when no explicit
+// ToolLoopInput.MaxIterations is supplied. Kept as an alias for older tests and
+// callers; the config package owns the single source of truth.
+const MaxToolLoopIterations = config.DefaultToolLoopMaxIterations
 
 func summarizeResult(res *agenttools.Result) string {
 	if res == nil {
@@ -163,10 +162,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		}
 	}
 
-	maxIters := MaxToolLoopIterations
-	if in.MaxIterations > 0 {
-		maxIters = in.MaxIterations
-	}
+	maxIters, unlimitedIters := config.EffectiveMaxIterations(in.MaxIterations)
 	maxTokens := 4096
 	if in.MaxTokensPerTurn > 0 {
 		maxTokens = in.MaxTokensPerTurn
@@ -193,7 +189,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	consecutiveErrors := 0
 	var lastIn, lastOut int
 
-	for iter := 0; iter < maxIters; iter++ {
+	for iter := 0; unlimitedIters || iter < maxIters; iter++ {
 		req := llm.ChatRequest{
 			Model:     in.Model,
 			System:    in.System,

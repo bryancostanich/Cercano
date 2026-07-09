@@ -20,22 +20,22 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
+	"cercano/source/server/internal/broker"
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/capabilities/agentadapter"
 	"cercano/source/server/internal/capabilities/builtins"
 	"cercano/source/server/internal/cloudfactory"
+	"cercano/source/server/internal/compactiongen"
+	projectctx "cercano/source/server/internal/context"
+	"cercano/source/server/internal/conversation"
+	"cercano/source/server/internal/dispatch"
+	"cercano/source/server/internal/engine"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/hostsvc/permissions"
 	persistsvc "cercano/source/server/internal/hostsvc/persistence"
 	"cercano/source/server/internal/hostsvc/providers"
 	runtimessvc "cercano/source/server/internal/hostsvc/runtimes"
 	toolssvc "cercano/source/server/internal/hostsvc/tools"
-	"cercano/source/server/internal/broker"
-	"cercano/source/server/internal/compactiongen"
-	projectctx "cercano/source/server/internal/context"
-	"cercano/source/server/internal/conversation"
-	"cercano/source/server/internal/dispatch"
-	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/localruntime"
@@ -46,11 +46,11 @@ import (
 	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/retention"
+	runnersvc "cercano/source/server/internal/runner"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/sysram"
 	"cercano/source/server/internal/usage"
 	"cercano/source/server/internal/watchdog"
-	runnersvc "cercano/source/server/internal/runner"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 )
@@ -75,15 +75,15 @@ type McpManager interface {
 // Server is the gRPC server for the Agent service.
 type Server struct {
 	proto.UnimplementedAgentServer
-	agent        *agent.Agent
-	providerSvc    providers.Resolver       // owns cloud/open providers, router, coordinator, registry, catalogManager
-	cfgSvc         cfgsvc.Service           // owns configPath, currentConfig, cfgMu, secrets
-	toolSvc        toolssvc.Catalog         // owns toolRegistry, capRegistry, dispatchEngine
-	persistSvc     persistsvc.Service       // owns retentionSweeper, compactionGen, contextLoader
-	permBroker     permissions.Broker
-	runtimesSvc    runtimessvc.Supervisors  // owns meridianMgr, runtimeManager, mcpManager
-	watchdog       *watchdog.Watchdog       // protocol-supervision gate; nil = disabled (default)
-	turnRunner     runnersvc.TurnRunner     // executes one conversation turn; rebuilt when perms arrive
+	agent       *agent.Agent
+	providerSvc providers.Resolver // owns cloud/open providers, router, coordinator, registry, catalogManager
+	cfgSvc      cfgsvc.Service     // owns configPath, currentConfig, cfgMu, secrets
+	toolSvc     toolssvc.Catalog   // owns toolRegistry, capRegistry, dispatchEngine
+	persistSvc  persistsvc.Service // owns retentionSweeper, compactionGen, contextLoader
+	permBroker  permissions.Broker
+	runtimesSvc runtimessvc.Supervisors // owns meridianMgr, runtimeManager, mcpManager
+	watchdog    *watchdog.Watchdog      // protocol-supervision gate; nil = disabled (default)
+	turnRunner  runnersvc.TurnRunner    // executes one conversation turn; rebuilt when perms arrive
 
 	events *eventHub // server->client push fan-out (SubscribeEvents)
 
@@ -780,6 +780,20 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		fmt.Printf("UpdateConfig: lossy_tool_elision set to %s\n", v)
 	}
 
+	if req.ToolLoopMaxIterations != "" {
+		n, err := strconv.Atoi(strings.TrimSpace(req.ToolLoopMaxIterations))
+		if err != nil || !config.ValidateToolLoopMaxIterations(n) {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid tool_loop_max_iterations %q: expected -1 or a non-negative integer", req.ToolLoopMaxIterations),
+			}, nil
+		}
+		c.ToolLoop.MaxIterations = n
+		changes = append(changes, fmt.Sprintf("tool_loop.max_iterations=%d", n))
+		s.broadcastConfigChanged("tool_loop.max_iterations", strconv.Itoa(n))
+		fmt.Printf("UpdateConfig: tool_loop.max_iterations set to %d\n", n)
+	}
+
 	if req.CompactionEnabled != "" {
 		v := strings.ToLower(strings.TrimSpace(req.CompactionEnabled))
 		if v != "true" && v != "false" {
@@ -1238,6 +1252,7 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 		CompactedRetentionDays: int32(cfg.Compaction.Retention.CompactedRetentionDays),
 		KeepForever:            cfg.Compaction.Retention.KeepForever,
 		CompactionEnabled:      cfg.Compaction.Enabled,
+		ToolLoopMaxIterations:  int32(cfg.ToolLoop.MaxIterations),
 		ModelTiers:             cfg.Models.TierSlots(),
 		ModelsDefaultProvider:  string(cfg.Models.DefaultProvider),
 	}, nil
@@ -1911,7 +1926,6 @@ func gitInfo(dir string) (bool, string) {
 	}
 	return true, strings.TrimSpace(string(out))
 }
-
 
 // AttachConversation implements proto.AgentServer: a second surface subscribes
 // (read-only) to a conversation's turn events without starting a new turn.

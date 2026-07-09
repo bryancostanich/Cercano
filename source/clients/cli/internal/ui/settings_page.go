@@ -194,6 +194,9 @@ func (sp *settingsPage) devToolsSection() form.Section {
 	return form.Section{
 		Title: "Development Tools",
 		Groups: []form.Group{
+			{Title: "Agent Loop", Fields: []form.Field{
+				form.NewText("tool-loop-max-iterations", "max-tool-steps", strconv.Itoa(sp.cfg.ToolLoopMaxIterations), "-1 = no limit"),
+			}},
 			{Title: "Context Management", Fields: []form.Field{
 				form.NewToggle("compaction-enabled", "compaction-enabled", sp.cfg.CompactionEnabled),
 				form.NewToggle("elide-tool-results", "elide-tool-results", sp.cfg.ElideToolResults),

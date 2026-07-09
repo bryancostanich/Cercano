@@ -184,6 +184,8 @@ func classifyCommit(key, value string, currentChecks []string) commitAction {
 		u.KeepForever = value
 	case "compaction-enabled":
 		u.CompactionEnabled = value
+	case "tool-loop-max-iterations":
+		u.ToolLoopMaxIterations = value
 	case "permission-mode":
 		return commitAction{kind: commitPermission, value: value}
 	case "accent-color":

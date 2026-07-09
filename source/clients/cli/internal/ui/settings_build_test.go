@@ -140,3 +140,29 @@ func TestClassifyCommit_WatchdogModeChecksEscalate(t *testing.T) {
 		t.Fatalf("empty sentinel: %+v", c)
 	}
 }
+
+func TestDevToolsIncludesToolLoopLimit(t *testing.T) {
+	sp := &settingsPage{cfg: &agentclient.Config{ToolLoopMaxIterations: 200}}
+	sec := sp.devToolsSection()
+	for _, g := range sec.Groups {
+		if g.Title != "Agent Loop" {
+			continue
+		}
+		for _, f := range g.Fields {
+			if f.Key() == "tool-loop-max-iterations" {
+				if f.Display() != "200" {
+					t.Fatalf("tool loop field display = %q, want 200", f.Display())
+				}
+				return
+			}
+		}
+	}
+	t.Fatalf("missing Agent Loop tool-loop-max-iterations field: %+v", sec.Groups)
+}
+
+func TestClassifyCommit_ToolLoopMaxIterations(t *testing.T) {
+	a := classifyCommit("tool-loop-max-iterations", "-1", nil)
+	if a.kind != commitConfig || a.update.ToolLoopMaxIterations != "-1" {
+		t.Fatalf("tool-loop-max-iterations: %+v", a)
+	}
+}

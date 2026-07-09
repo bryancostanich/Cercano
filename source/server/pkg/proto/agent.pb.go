@@ -9531,6 +9531,7 @@ type StartTurn struct {
 	Config         *ConfigSnapshot        `protobuf:"bytes,6,opt,name=config,proto3" json:"config,omitempty"`
 	History        []*LLMMessage          `protobuf:"bytes,7,rep,name=history,proto3" json:"history,omitempty"`
 	ProjectContext string                 `protobuf:"bytes,8,opt,name=project_context,json=projectContext,proto3" json:"project_context,omitempty"`
+	PermissionMode string                 `protobuf:"bytes,9,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"` // host's mode: "strict"|"permissive"|"bypass" — worker gating MUST match the host, never default
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -9617,6 +9618,13 @@ func (x *StartTurn) GetHistory() []*LLMMessage {
 func (x *StartTurn) GetProjectContext() string {
 	if x != nil {
 		return x.ProjectContext
+	}
+	return ""
+}
+
+func (x *StartTurn) GetPermissionMode() string {
+	if x != nil {
+		return x.PermissionMode
 	}
 	return ""
 }
@@ -11275,7 +11283,7 @@ const file_agent_proto_rawDesc = "" +
 	"\apersist\x18\x03 \x01(\v2\x12.agent.PersistTurnH\x00R\apersist\x12%\n" +
 	"\x04done\x18\x04 \x01(\v2\x0f.agent.TurnDoneH\x00R\x04done\x12(\n" +
 	"\x05error\x18\x05 \x01(\v2\x10.agent.TurnErrorH\x00R\x05errorB\x05\n" +
-	"\x03msg\"\xa8\x02\n" +
+	"\x03msg\"\xd1\x02\n" +
 	"\tStartTurn\x12'\n" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12\x14\n" +
 	"\x05input\x18\x02 \x01(\tR\x05input\x12*\n" +
@@ -11284,7 +11292,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x03gen\x18\x05 \x01(\x04R\x03gen\x12-\n" +
 	"\x06config\x18\x06 \x01(\v2\x15.agent.ConfigSnapshotR\x06config\x12+\n" +
 	"\ahistory\x18\a \x03(\v2\x11.agent.LLMMessageR\ahistory\x12'\n" +
-	"\x0fproject_context\x18\b \x01(\tR\x0eprojectContext\"[\n" +
+	"\x0fproject_context\x18\b \x01(\tR\x0eprojectContext\x12'\n" +
+	"\x0fpermission_mode\x18\t \x01(\tR\x0epermissionMode\"[\n" +
 	"\n" +
 	"LLMMessage\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x1f\n" +

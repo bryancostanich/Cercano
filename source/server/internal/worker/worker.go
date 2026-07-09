@@ -213,8 +213,16 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn) (r
 		toolSvc = buildWorkerTools()
 	}
 
-	// Build Perms: permissive store — permission gating happens via the stream requester.
-	permStore := agent.NewStaticPermissionStore(agent.ModePermissive)
+	// Build Perms: the store's MODE must match the host's — whether a tool tier
+	// prompts at all depends on it, and the actual prompt round-trips to the host
+	// via the stream requester. Defaulting to permissive when the host is strict
+	// would silently auto-run writes the user asked to be prompted for.
+	// Empty/unparseable falls back to permissive (the host default).
+	mode := agent.ModePermissive
+	if m, err := agent.ParseMode(start.GetPermissionMode()); err == nil {
+		mode = m
+	}
+	permStore := agent.NewStaticPermissionStore(mode)
 	permBroker := permissions.New(permStore, nil, nil)
 
 	return runner.Deps{

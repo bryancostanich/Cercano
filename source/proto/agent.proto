@@ -1166,6 +1166,7 @@ message StartTurn {
   ConfigSnapshot      config           = 6;
   repeated LLMMessage history          = 7;
   string              project_context  = 8;
+  string              permission_mode  = 9; // host's mode: "strict"|"permissive"|"bypass" — worker gating MUST match the host, never default
 }
 
 // LLMMessage is the wire form of llm.Message. Serialization uses the same

@@ -7,15 +7,22 @@ import (
 
 func TestSteeringBlockContainsRulesAndTriggers(t *testing.T) {
 	ps := []Protocol{
-		{Name: "a", Trigger: "Trigger A here."},
-		{Name: "b", Trigger: "Trigger B here."},
+		{Name: "a", Trigger: "Trigger A here.", Body: "Body A must not be injected."},
+		{Name: "b", Trigger: "Trigger B here.", Body: "Body B must not be injected."},
 	}
 	out := SteeringBlock(ps)
 	if !strings.Contains(out, "plain English") {
 		t.Fatal("missing plain-English rule")
 	}
-	if strings.Count(out, "Trigger A here.")+strings.Count(out, "Trigger B here.") != 2 {
+	protocolSection := out[strings.Index(out, "Workflow protocols"):]
+	if strings.Count(protocolSection, "\n- ") != len(ps) {
+		t.Fatalf("got %d trigger lines, want %d", strings.Count(protocolSection, "\n- "), len(ps))
+	}
+	if strings.Count(out, "Trigger A here.") != 1 || strings.Count(out, "Trigger B here.") != 1 {
 		t.Fatal("both triggers must appear exactly once")
+	}
+	if strings.Contains(out, "Body A must not be injected.") || strings.Contains(out, "Body B must not be injected.") {
+		t.Fatal("steering block must include trigger lines only, not protocol bodies")
 	}
 	before := strings.Count(out, "\n")
 	out2 := SteeringBlock(append(ps, Protocol{Name: "c", Trigger: "Trigger C here."}))

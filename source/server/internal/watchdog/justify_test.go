@@ -8,7 +8,7 @@ import (
 
 func TestJustifyToolRecordsOverride(t *testing.T) {
 	w := New(Config{Mode: ModeChallenge},
-		[]Check{fakeCheck{applies: true, verdict: Verdict{Violation: true, Protocol: "debug-loop", Challenge: "c"}}},
+		[]Check{fakeCheck{applies: true, verdict: Verdict{Violation: true, Protocol: "systematic-debugging", Challenge: "c"}}},
 		nil,
 	)
 
@@ -43,7 +43,7 @@ func TestJustifyToolRecordsOverride(t *testing.T) {
 
 func TestJustifyNoActiveChallenge(t *testing.T) {
 	w := New(Config{Mode: ModeChallenge},
-		[]Check{fakeCheck{applies: true, verdict: Verdict{Violation: true, Protocol: "debug-loop", Challenge: "c"}}},
+		[]Check{fakeCheck{applies: true, verdict: Verdict{Violation: true, Protocol: "systematic-debugging", Challenge: "c"}}},
 		nil,
 	)
 

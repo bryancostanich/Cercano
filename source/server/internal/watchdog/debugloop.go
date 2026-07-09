@@ -14,7 +14,7 @@ type debugLoopCheck struct{}
 // the systematic-debugging loop in the recent transcript.
 func DebugLoopCheck() Check { return debugLoopCheck{} }
 
-func (debugLoopCheck) Name() string { return "debug-loop" }
+func (debugLoopCheck) Name() string { return "systematic-debugging" }
 
 var editTools = map[string]bool{"edit_file": true, "write_file": true, "rm_file": true, "git_reset_hard": true}
 
@@ -24,14 +24,18 @@ func (debugLoopCheck) Applies(a Action) bool {
 
 func (debugLoopCheck) Evaluate(ctx context.Context, a Action, oneShot OneShotFunc) (Verdict, error) {
 	if oneShot == nil {
-		return Verdict{Protocol: "debug-loop"}, nil // no model → fail open
+		return Verdict{Protocol: "systematic-debugging"}, nil // no model → fail open
 	}
 	prompt := buildDebugLoopPrompt(a)
 	out, err := oneShot(ctx, prompt)
 	if err != nil {
 		return Verdict{}, err
 	}
-	return parseVerdict("debug-loop", out), nil
+	v := parseVerdict("systematic-debugging", out)
+	if v.Violation {
+		v.Challenge = "You're editing to fix a bug or test failure without evidence of the systematic-debugging protocol — comply by calling get_protocol(\"systematic-debugging\") and following it, or justify why this edit is safe to proceed."
+	}
+	return v, nil
 }
 
 func buildDebugLoopPrompt(a Action) string {

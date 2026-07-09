@@ -41,8 +41,10 @@ func (s *Server) buildWatchdogFrom(wc config.WatchdogConfig, mc config.ModelsCon
 	var checks []watchdog.Check
 	for _, name := range wc.Checks {
 		switch name {
-		case "debug-loop":
+		case "systematic-debugging", "debug-loop":
 			checks = append(checks, watchdog.DebugLoopCheck())
+		case "design-decisions":
+			checks = append(checks, watchdog.DesignDecisionsCheck())
 		case "commit-checkpoint":
 			checks = append(checks, watchdog.CommitCheckpointCheck())
 		case "plain-english":

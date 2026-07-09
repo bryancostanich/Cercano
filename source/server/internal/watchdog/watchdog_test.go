@@ -14,7 +14,7 @@ func editAction() Action {
 
 func TestGateChallengeThenEscalate(t *testing.T) {
 	w := New(Config{Mode: ModeChallenge, EscalateAfter: 2},
-		[]Check{fakeCheck{applies: true, verdict: Verdict{Violation: true, Protocol: "debug-loop", Challenge: "c"}}},
+		[]Check{fakeCheck{applies: true, verdict: Verdict{Violation: true, Protocol: "systematic-debugging", Challenge: "c"}}},
 		nil,
 	)
 	d1 := w.Gate(context.Background(), "conv", editAction())
@@ -29,14 +29,14 @@ func TestGateChallengeThenEscalate(t *testing.T) {
 
 func TestGateJustifyAllows(t *testing.T) {
 	w := New(Config{Mode: ModeChallenge},
-		[]Check{fakeCheck{applies: true, verdict: Verdict{Violation: true, Protocol: "debug-loop", Challenge: "c"}}},
+		[]Check{fakeCheck{applies: true, verdict: Verdict{Violation: true, Protocol: "systematic-debugging", Challenge: "c"}}},
 		nil,
 	)
 	a := editAction()
 	if w.Gate(context.Background(), "conv", a).Action != "challenge" {
 		t.Fatal("expected challenge")
 	}
-	w.recordJustify("conv", keyFor("debug-loop", a))
+	w.recordJustify("conv", keyFor("systematic-debugging", a))
 	if w.Gate(context.Background(), "conv", a).Action != "allow" {
 		t.Fatal("after justify, the same action must be allowed")
 	}
@@ -44,7 +44,7 @@ func TestGateJustifyAllows(t *testing.T) {
 
 func TestGateStrictBlocks(t *testing.T) {
 	w := New(Config{Mode: ModeStrict},
-		[]Check{fakeCheck{applies: true, verdict: Verdict{Violation: true, Protocol: "debug-loop", Challenge: "c"}}},
+		[]Check{fakeCheck{applies: true, verdict: Verdict{Violation: true, Protocol: "systematic-debugging", Challenge: "c"}}},
 		nil,
 	)
 	if w.Gate(context.Background(), "conv", editAction()).Action != "block" {
@@ -80,7 +80,7 @@ func TestGateNoViolationAllows(t *testing.T) {
 func TestGateEscalateAfterDefault(t *testing.T) {
 	// EscalateAfter 0 → default 2: challenge on first, escalate on second
 	w := New(Config{Mode: ModeChallenge, EscalateAfter: 0},
-		[]Check{fakeCheck{applies: true, verdict: Verdict{Violation: true, Protocol: "debug-loop", Challenge: "c"}}},
+		[]Check{fakeCheck{applies: true, verdict: Verdict{Violation: true, Protocol: "systematic-debugging", Challenge: "c"}}},
 		nil,
 	)
 	d1 := w.Gate(context.Background(), "conv", editAction())
@@ -95,8 +95,8 @@ func TestGateEscalateAfterDefault(t *testing.T) {
 
 func TestKeyForStable(t *testing.T) {
 	a := editAction()
-	k1 := keyFor("debug-loop", a)
-	k2 := keyFor("debug-loop", a)
+	k1 := keyFor("systematic-debugging", a)
+	k2 := keyFor("systematic-debugging", a)
 	if k1 != k2 {
 		t.Fatalf("keyFor not stable: %q vs %q", k1, k2)
 	}
@@ -117,7 +117,7 @@ func TestKeyForTurnEndUsesText(t *testing.T) {
 	}
 	// tool_call identity unchanged (keys on ToolArgs, not Text)
 	tc := Action{Kind: "tool_call", ToolName: "edit_file", ToolArgs: []byte(`{"p":"a"}`), Text: "ignored"}
-	if keyFor("debug-loop", tc) != keyFor("debug-loop", Action{Kind: "tool_call", ToolName: "edit_file", ToolArgs: []byte(`{"p":"a"}`), Text: "different"}) {
+	if keyFor("systematic-debugging", tc) != keyFor("systematic-debugging", Action{Kind: "tool_call", ToolName: "edit_file", ToolArgs: []byte(`{"p":"a"}`), Text: "different"}) {
 		t.Fatal("tool_call key must ignore Text")
 	}
 }

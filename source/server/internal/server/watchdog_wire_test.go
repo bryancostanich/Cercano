@@ -39,7 +39,7 @@ func TestBuildWatchdogEnabled(t *testing.T) {
 	s.cfgSvc = cfgsvc.New("", config.Config{Watchdog: config.WatchdogConfig{
 		Enabled:       true,
 		Mode:          "challenge-and-justify",
-		Checks:        []string{"debug-loop"},
+		Checks:        []string{"systematic-debugging"},
 		EscalateAfter: 2,
 	}}, nil)
 	s.SetDispatchEngine(eng)
@@ -61,7 +61,7 @@ func TestBuildWatchdogSkipsUnknownChecks(t *testing.T) {
 	s.cfgSvc = cfgsvc.New("", config.Config{Watchdog: config.WatchdogConfig{
 		Enabled: true,
 		Mode:    "strict",
-		Checks:  []string{"future-check", "debug-loop"},
+		Checks:  []string{"future-check", "systematic-debugging"},
 	}}, nil)
 	s.SetDispatchEngine(eng)
 	if wd := s.buildWatchdog(); wd == nil {
@@ -102,7 +102,7 @@ func TestTurnEndAdapterMapsDecisionFields(t *testing.T) {
 }
 
 // TestGateAdapterMapsDecisionFields: the per-request gate closure maps a
-// watchdog.Decision to agent.WatchdogDecision field-for-field. A debug-loop
+// watchdog.Decision to agent.WatchdogDecision field-for-field. A systematic-debugging
 // violation is only surfaced by the OneShot model, so with a stub OneShot that
 // reports a violation we assert the adapter carries Action/Protocol/Challenge
 // through unchanged.
@@ -127,8 +127,8 @@ func TestGateAdapterMapsDecisionFields(t *testing.T) {
 	if got.Action != "challenge" {
 		t.Fatalf("expected challenge action, got %q", got.Action)
 	}
-	if got.Protocol != "debug-loop" {
-		t.Fatalf("expected debug-loop protocol, got %q", got.Protocol)
+	if got.Protocol != "systematic-debugging" {
+		t.Fatalf("expected systematic-debugging protocol, got %q", got.Protocol)
 	}
 	if got.Challenge == "" {
 		t.Fatal("expected non-empty challenge text carried through the adapter")

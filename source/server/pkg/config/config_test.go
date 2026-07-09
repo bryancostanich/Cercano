@@ -437,8 +437,8 @@ func TestWatchdogDefaults(t *testing.T) {
 	if w.Mode != "challenge-and-justify" {
 		t.Errorf("Mode = %q, want challenge-and-justify", w.Mode)
 	}
-	if len(w.Checks) != 5 || w.Checks[0] != "debug-loop" || w.Checks[1] != "commit-checkpoint" || w.Checks[2] != "plain-english" || w.Checks[3] != "worktree-first" || w.Checks[4] != "follow-through" {
-		t.Errorf("Checks = %v, want [debug-loop commit-checkpoint plain-english worktree-first follow-through]", w.Checks)
+	if len(w.Checks) != 6 || w.Checks[0] != "systematic-debugging" || w.Checks[1] != "design-decisions" || w.Checks[2] != "commit-checkpoint" || w.Checks[3] != "plain-english" || w.Checks[4] != "worktree-first" || w.Checks[5] != "follow-through" {
+		t.Errorf("Checks = %v, want [systematic-debugging design-decisions commit-checkpoint plain-english worktree-first follow-through]", w.Checks)
 	}
 	if w.EscalateAfter != 2 {
 		t.Errorf("EscalateAfter = %d, want 2", w.EscalateAfter)
@@ -456,7 +456,7 @@ watchdog:
   enabled: true
   mode: strict
   checks:
-    - debug-loop
+    - systematic-debugging
   escalate_after: 3
   echo: true
 `), 0644)
@@ -472,8 +472,8 @@ watchdog:
 	if w.Mode != "strict" {
 		t.Errorf("Mode = %q, want strict", w.Mode)
 	}
-	if len(w.Checks) != 1 || w.Checks[0] != "debug-loop" {
-		t.Errorf("Checks = %v, want [debug-loop]", w.Checks)
+	if len(w.Checks) != 1 || w.Checks[0] != "systematic-debugging" {
+		t.Errorf("Checks = %v, want [systematic-debugging]", w.Checks)
 	}
 	if w.EscalateAfter != 3 {
 		t.Errorf("EscalateAfter = %d, want 3", w.EscalateAfter)

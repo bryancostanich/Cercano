@@ -83,7 +83,7 @@ func TestEchoOnJustify(t *testing.T) {
 }
 
 func TestEchoOnBlock(t *testing.T) {
-	w := New(Config{Mode: ModeStrict}, []Check{fakeCheck{applies: true, verdict: Verdict{Violation: true, Protocol: "debug-loop", Challenge: "blocked-c"}}}, nil)
+	w := New(Config{Mode: ModeStrict}, []Check{fakeCheck{applies: true, verdict: Verdict{Violation: true, Protocol: "systematic-debugging", Challenge: "blocked-c"}}}, nil)
 	var got []string
 	w.SetEcho(func(thread, text string) { got = append(got, thread+"|"+text) })
 	if d := w.Gate(context.Background(), "conv", editAction()); d.Action != "block" {
@@ -95,7 +95,7 @@ func TestEchoOnBlock(t *testing.T) {
 }
 
 func TestEchoOnEscalate(t *testing.T) {
-	w := New(Config{Mode: ModeChallenge, EscalateAfter: 2}, []Check{fakeCheck{applies: true, verdict: Verdict{Violation: true, Protocol: "debug-loop", Challenge: "esc-c"}}}, nil)
+	w := New(Config{Mode: ModeChallenge, EscalateAfter: 2}, []Check{fakeCheck{applies: true, verdict: Verdict{Violation: true, Protocol: "systematic-debugging", Challenge: "esc-c"}}}, nil)
 	var got []string
 	w.SetEcho(func(thread, text string) { got = append(got, thread+"|"+text) })
 	w.Gate(context.Background(), "conv", editAction()) // challenge (1st emit)

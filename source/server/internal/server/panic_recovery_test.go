@@ -45,13 +45,13 @@ type discardStream struct {
 	ctx context.Context
 }
 
-func (d *discardStream) Send(*proto.StreamProcessResponse) error   { return nil }
-func (d *discardStream) Context() context.Context                  { return d.ctx }
-func (d *discardStream) SetHeader(metadata.MD) error               { return nil }
-func (d *discardStream) SendHeader(metadata.MD) error              { return nil }
-func (d *discardStream) SetTrailer(metadata.MD)                    {}
-func (d *discardStream) SendMsg(m any) error                       { return nil }
-func (d *discardStream) RecvMsg(m any) error                       { return nil }
+func (d *discardStream) Send(*proto.StreamProcessResponse) error { return nil }
+func (d *discardStream) Context() context.Context                { return d.ctx }
+func (d *discardStream) SetHeader(metadata.MD) error             { return nil }
+func (d *discardStream) SendHeader(metadata.MD) error            { return nil }
+func (d *discardStream) SetTrailer(metadata.MD)                  {}
+func (d *discardStream) SendMsg(m any) error                     { return nil }
+func (d *discardStream) RecvMsg(m any) error                     { return nil }
 
 // Compile-time check: discardStream satisfies grpc.ServerStream.
 var _ grpc.ServerStream = (*discardStream)(nil)
@@ -62,8 +62,8 @@ var _ grpc.ServerStream = (*discardStream)(nil)
 func TestRunTurnPanic_ReturnsCodesInternal(t *testing.T) {
 	b := broker.New()
 	srv := &Server{
-		turnBroker: b,
-		turnRunner: panicTurnRunner{},
+		turnBroker:      b,
+		inProcessRunner: panicTurnRunner{},
 		// permBroker is nil — requester closure checks permBroker != nil before use.
 	}
 
@@ -92,8 +92,8 @@ func TestRunTurnPanic_ReturnsCodesInternal(t *testing.T) {
 func TestRunTurnPanic_NoTurnLeak(t *testing.T) {
 	b := broker.New()
 	srv := &Server{
-		turnBroker: b,
-		turnRunner: panicTurnRunner{},
+		turnBroker:      b,
+		inProcessRunner: panicTurnRunner{},
 	}
 	const convID = "conv-panic-leak"
 

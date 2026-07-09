@@ -20,22 +20,22 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
+	"cercano/source/server/internal/broker"
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/capabilities/agentadapter"
 	"cercano/source/server/internal/capabilities/builtins"
 	"cercano/source/server/internal/cloudfactory"
+	"cercano/source/server/internal/compactiongen"
+	projectctx "cercano/source/server/internal/context"
+	"cercano/source/server/internal/conversation"
+	"cercano/source/server/internal/dispatch"
+	"cercano/source/server/internal/engine"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/hostsvc/permissions"
 	persistsvc "cercano/source/server/internal/hostsvc/persistence"
 	"cercano/source/server/internal/hostsvc/providers"
 	runtimessvc "cercano/source/server/internal/hostsvc/runtimes"
 	toolssvc "cercano/source/server/internal/hostsvc/tools"
-	"cercano/source/server/internal/broker"
-	"cercano/source/server/internal/compactiongen"
-	projectctx "cercano/source/server/internal/context"
-	"cercano/source/server/internal/conversation"
-	"cercano/source/server/internal/dispatch"
-	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/localruntime"
@@ -46,11 +46,11 @@ import (
 	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/retention"
+	runnersvc "cercano/source/server/internal/runner"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/sysram"
 	"cercano/source/server/internal/usage"
 	"cercano/source/server/internal/watchdog"
-	runnersvc "cercano/source/server/internal/runner"
 	"cercano/source/server/internal/worker"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
@@ -76,15 +76,23 @@ type McpManager interface {
 // Server is the gRPC server for the Agent service.
 type Server struct {
 	proto.UnimplementedAgentServer
-	agent        *agent.Agent
-	providerSvc    providers.Resolver       // owns cloud/open providers, router, coordinator, registry, catalogManager
-	cfgSvc         cfgsvc.Service           // owns configPath, currentConfig, cfgMu, secrets
-	toolSvc        toolssvc.Catalog         // owns toolRegistry, capRegistry, dispatchEngine
-	persistSvc     persistsvc.Service       // owns retentionSweeper, compactionGen, contextLoader
-	permBroker     permissions.Broker
-	runtimesSvc    runtimessvc.Supervisors  // owns meridianMgr, runtimeManager, mcpManager
-	watchdog       *watchdog.Watchdog       // protocol-supervision gate; nil = disabled (default)
-	turnRunner     runnersvc.TurnRunner     // executes one conversation turn; rebuilt when perms arrive
+	agent       *agent.Agent
+	providerSvc providers.Resolver // owns cloud/open providers, router, coordinator, registry, catalogManager
+	cfgSvc      cfgsvc.Service     // owns configPath, currentConfig, cfgMu, secrets
+	toolSvc     toolssvc.Catalog   // owns toolRegistry, capRegistry, dispatchEngine
+	persistSvc  persistsvc.Service // owns retentionSweeper, compactionGen, contextLoader
+	permBroker  permissions.Broker
+	runtimesSvc runtimessvc.Supervisors // owns meridianMgr, runtimeManager, mcpManager
+	watchdog    *watchdog.Watchdog      // protocol-supervision gate; nil = disabled (default)
+	// Two runners coexist so the front door can pick per turn. inProcessRunner is
+	// always built (NewServer / SetPermissions) and is the embedded runnersvc.Core
+	// the test suite constructs. workerRunner is nil until SelectExecutionMode
+	// picks worker mode; when non-nil, a turn that touches NO host-side MCP tool
+	// runs in a child process. MCP-involving turns fall back to inProcessRunner
+	// (the worker excludes host-side MCP tools) — see hasMCPTools + the per-turn
+	// pick in streamProcessRequestWithToolLoop.
+	inProcessRunner runnersvc.TurnRunner // in-process turn execution; rebuilt when perms arrive
+	workerRunner    runnersvc.TurnRunner // worker-process execution; nil unless worker mode selected
 
 	events *eventHub // server->client push fan-out (SubscribeEvents)
 
@@ -174,8 +182,8 @@ func (s *Server) SetPermissions(store *agent.PermissionStore, pending *agent.Pen
 	if s.toolSvc != nil {
 		s.toolSvc.SetPermBroker(s.permBroker)
 	}
-	// Rebuild the turn runner now that the permission broker is wired.
-	s.turnRunner = runnersvc.New(s.runnerDeps())
+	// Rebuild the in-process turn runner now that the permission broker is wired.
+	s.inProcessRunner = runnersvc.New(s.runnerDeps())
 }
 
 // SetMcpManager wires the MCP host manager so the RPC handlers can delegate to it.
@@ -615,9 +623,11 @@ func NewServer(a *agent.Agent, openProvider *legacymodels.OpenModelProvider, rou
 		func() conversation.Store { return s.persistSvc.Store() },
 		s.persistSvc.PersistTurn,
 	)
-	// Wire the turn runner with nil Perms (permBroker not yet set). Rebuilt in
-	// SetPermissions once the broker is wired.
-	s.turnRunner = runnersvc.New(s.runnerDeps())
+	// Wire the in-process turn runner with nil Perms (permBroker not yet set).
+	// Rebuilt in SetPermissions once the broker is wired. workerRunner stays nil
+	// until SelectExecutionMode picks worker mode, so a Server built directly (the
+	// test suite) always runs turns in-process and never spawns a worker.
+	s.inProcessRunner = runnersvc.New(s.runnerDeps())
 	return s
 }
 
@@ -638,36 +648,76 @@ func (s *Server) runnerDeps() runnersvc.Deps {
 	}
 }
 
-// SelectExecutionMode chooses the concrete turn runner based on the live
-// config's ExecutionMode. It is the seam that swaps in crash isolation:
+// SelectExecutionMode chooses which turn runners are available based on the
+// live config's ExecutionMode. It is the seam that arms crash isolation:
 //
-//   - "in_process" → keep the default in-process runnersvc.Core (fast, embedded,
-//     what the test suite constructs). This is the ONLY mode reachable without
-//     going through it — NewServer leaves the in-process runner wired, so any
-//     test that builds a Server directly (never calling this method) stays
-//     in-process and never spawns a worker process.
+//   - "in_process" → leave workerRunner nil, so every turn runs on the embedded
+//     in-process runnersvc.Core (fast, what the test suite constructs). A Server
+//     that never calls this method (the hermetic suite) stays in-process and
+//     never spawns a worker process.
 //   - anything else, including the production default "worker" and empty →
-//     swap in the worker.NewWorkerRunner, which runs each turn in a child
-//     process. A worker crash then takes down only that turn's process; the
-//     host survives (see TestWorker_CrashMidTurnIsIsolated).
+//     build the worker.NewWorkerRunner (child-process execution) and hold it
+//     ALONGSIDE the in-process runner. The front door then picks per turn:
+//     turns that touch no host-side MCP tool run in the worker (a crash takes
+//     down only that turn's process; the host survives — see
+//     TestWorker_CrashMidTurnIsIsolated); MCP-involving turns fall back to
+//     in-process because the worker excludes host-side MCP tools.
+//
+// The per-turn pick (not a startup registry snapshot) is deliberate: MCP servers
+// connect in the BACKGROUND after this method runs, and AddMcpServer can register
+// tools at runtime — so a one-time check here would see zero MCP tools even when
+// servers are configured. hasMCPTools reads the live registry at turn time.
 //
 // Called from cmd/cercano/main.go's server wiring AFTER the real config,
-// permissions, and secrets are injected — so production selects worker while
+// permissions, and secrets are injected — so production arms worker mode while
 // the hermetic test suite keeps the in-process default untouched.
 func (s *Server) SelectExecutionMode() {
 	mode := s.cfgSvc.Get().ExecutionMode
 	if mode == "in_process" {
-		// Explicit embedded/test mode: keep the in-process runner.
+		// Explicit embedded/test mode: no worker runner; all turns in-process.
+		s.workerRunner = nil
 		return
 	}
-	// Production default ("worker" or empty): run turns in a child process.
-	s.turnRunner = worker.NewWorkerRunner(
+	// Production default ("worker" or empty): arm worker-process execution. The
+	// in-process runner stays as the fallback for MCP-involving turns.
+	s.workerRunner = worker.NewWorkerRunner(
 		s.persistSvc,       // pre-assembles history + project context
 		s.cfgSvc,           // builds the ConfigSnapshot
 		s.permBroker,       // permission mode + decisions
 		s.cfgSvc.Secrets(), // resolves credentials for the worker's CredentialRequests
 	)
-	log.Printf("[server] execution mode: worker (turns run in isolated child processes)")
+	log.Printf("[server] execution mode: worker (turns run in isolated child processes; " +
+		"MCP-involving turns fall back to in-process — worker MCP proxying is a future refinement)")
+}
+
+// pickTurnRunner chooses the runner for THIS turn. Default: the in-process
+// runner. Use the worker only when worker mode is armed (workerRunner != nil)
+// AND the turn touches no host-side MCP tool — the worker excludes host-side
+// MCP tools, so an MCP-involving turn must run in-process to keep them. One
+// if-check on the hot path; no logging (the mode was logged once at selection).
+func (s *Server) pickTurnRunner() runnersvc.TurnRunner {
+	if s.workerRunner != nil && !s.hasMCPTools() {
+		return s.workerRunner
+	}
+	return s.inProcessRunner
+}
+
+// hasMCPTools reports whether the host tool registry currently holds any
+// MCP-origin tool. Called per turn to route MCP-involving turns to the
+// in-process runner (the worker excludes host-side MCP tools). The registry read
+// is cheap and concurrency-safe (agenttools.Registry guards All() with an
+// RWMutex), so a concurrent AddMcpServer at worst yields a momentarily stale
+// answer — self-correcting on the next turn.
+func (s *Server) hasMCPTools() bool {
+	if s.toolSvc == nil || s.toolSvc.Registry() == nil {
+		return false
+	}
+	for _, t := range s.toolSvc.Registry().All() {
+		if agenttools.OriginOf(t) == agenttools.OriginMCP {
+			return true
+		}
+	}
+	return false
 }
 
 // SetConfigPersistence enables config persistence by storing the config path and current state.
@@ -1945,7 +1995,6 @@ func gitInfo(dir string) (bool, string) {
 	return true, strings.TrimSpace(string(out))
 }
 
-
 // AttachConversation implements proto.AgentServer: a second surface subscribes
 // (read-only) to a conversation's turn events without starting a new turn.
 //
@@ -2111,7 +2160,9 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 				doneCh <- turnResult{err: grpcstatus.Errorf(codes.Internal, "internal server error")}
 			}
 		}()
-		res, err := s.turnRunner.RunTurn(ctx, runReq, sink, requester, persist)
+		// Per-turn runner pick. See pickTurnRunner: in-process by default; the
+		// worker only when armed AND this turn touches no host-side MCP tool.
+		res, err := s.pickTurnRunner().RunTurn(ctx, runReq, sink, requester, persist)
 		doneCh <- turnResult{result: res, err: err}
 	}()
 

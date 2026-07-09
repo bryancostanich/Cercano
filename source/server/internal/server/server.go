@@ -23,13 +23,11 @@ import (
 	"cercano/source/server/internal/cloudfactory"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/hostsvc/permissions"
+	persistsvc "cercano/source/server/internal/hostsvc/persistence"
 	"cercano/source/server/internal/hostsvc/providers"
 	toolssvc "cercano/source/server/internal/hostsvc/tools"
-	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/compactiongen"
-	"cercano/source/server/internal/compactor"
 	projectctx "cercano/source/server/internal/context"
-	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/engine"
@@ -74,17 +72,15 @@ type McpManager interface {
 type Server struct {
 	proto.UnimplementedAgentServer
 	agent        *agent.Agent
-	providerSvc  providers.Resolver // owns cloud/open providers, router, coordinator, registry, catalogManager
-	cfgSvc       cfgsvc.Service     // owns configPath, currentConfig, cfgMu, secrets
-	toolSvc      toolssvc.Catalog   // owns toolRegistry, capRegistry, dispatchEngine
-	permBroker   permissions.Broker
-	mcpManager   McpManager
-	meridianMgr  *meridian.Manager
-	runtimeManager   localruntime.Manager
-	retentionSweeper *retention.Sweeper
-	compactionGen    *compactiongen.Generator
-	contextLoader    *projectctx.Loader
-	watchdog         *watchdog.Watchdog // protocol-supervision gate; nil = disabled (default)
+	providerSvc    providers.Resolver    // owns cloud/open providers, router, coordinator, registry, catalogManager
+	cfgSvc         cfgsvc.Service        // owns configPath, currentConfig, cfgMu, secrets
+	toolSvc        toolssvc.Catalog      // owns toolRegistry, capRegistry, dispatchEngine
+	persistSvc     persistsvc.Service    // owns retentionSweeper, compactionGen, contextLoader
+	permBroker     permissions.Broker
+	mcpManager     McpManager
+	meridianMgr    *meridian.Manager
+	runtimeManager localruntime.Manager
+	watchdog       *watchdog.Watchdog // protocol-supervision gate; nil = disabled (default)
 	usageSink        func(usage.Usage)  // wraps the main-loop provider for token recording
 
 	events *eventHub // server->client push fan-out (SubscribeEvents)
@@ -167,7 +163,7 @@ func (s *Server) hasActiveTurn(conv string) bool {
 
 // SetContextLoader wires the project-context loader so the native tool-loop can
 // include .cercano/context.md (and the working directory) in its system prompt.
-func (s *Server) SetContextLoader(l *projectctx.Loader) { s.contextLoader = l }
+func (s *Server) SetContextLoader(l *projectctx.Loader) { s.persistSvc.SetContextLoader(l) }
 
 // SetDispatchEngine wires the unified dispatch engine so capability Services
 // can dispatch one-shot co-processor work, and installs the agentic runner
@@ -197,7 +193,7 @@ func (s *Server) InstallCapabilities() {
 		CloudProvider: s.providerSvc.Cloud(),
 		OpenProvider:  s.providerSvc.Open(),
 		Config:        &cfgSnapshot,
-		ProjectCtx:    s.contextLoader,
+		ProjectCtx:    s.persistSvc.ContextLoader(),
 		// Engine/Conversations wired in a later phase; nil-safe until then.
 		Dispatch: func(ctx context.Context, spec dispatch.Spec) (dispatch.Result, error) {
 			e := s.toolSvc.Engine()
@@ -630,11 +626,13 @@ func (s *Server) SetCatalogManager(cm *ollamacatalog.Manager) {
 // SetRetentionSweeper attaches the background retention sweeper so that
 // /config and settings-page changes to retention horizons take effect on the
 // next sweep without a restart.
-func (s *Server) SetRetentionSweeper(sw *retention.Sweeper) { s.retentionSweeper = sw }
+func (s *Server) SetRetentionSweeper(sw *retention.Sweeper) { s.persistSvc.SetRetentionSweeper(sw) }
 
 // SetCompactionGenerator attaches the background compaction scheduler so that
 // /config compaction-enabled true|false flips it at runtime without a restart.
-func (s *Server) SetCompactionGenerator(g *compactiongen.Generator) { s.compactionGen = g }
+func (s *Server) SetCompactionGenerator(g *compactiongen.Generator) {
+	s.persistSvc.SetCompactionGenerator(g)
+}
 
 // NewServer creates a new Agent gRPC server.
 func NewServer(a *agent.Agent, openProvider *legacymodels.OpenModelProvider, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
@@ -653,19 +651,28 @@ func NewServer(a *agent.Agent, openProvider *legacymodels.OpenModelProvider, rou
 		s.syncMeridianForProfile(p, c)
 	}
 	s.providerSvc = providers.New(cfgService, openProvider, router, coordinator, cloudFactory, registry, syncMeridianFn, nil)
+	// Construct the persistence service. It wraps the agent for store access;
+	// the agent itself is NOT owned by this service. The func-value collaborators
+	// read live state from providerSvc at call time.
+	s.persistSvc = persistsvc.New(
+		a, // ConvAgent — wraps *agent.Agent; nil-safe in all service methods
+		cfgService,
+		func() string { return s.providerSvc.PrimaryModel() },
+		func() string { return s.activeCloudModel() },
+		func() *dispatch.Engine { return s.toolSvc.Engine() },
+		func() *legacymodels.OpenModelProvider { return s.providerSvc.OpenLegacy() },
+		func() llm.Provider { return s.providerSvc.Cloud() },
+		func() string { return s.activeCloudModel() },
+	)
 	// Construct the tool catalog service. permBroker is not yet wired here
 	// (SetPermissions is called by the caller after construction), so it is
 	// passed nil and updated via toolSvc.SetPermBroker in SetPermissions.
+	// The store and persistTurn func-values are now sourced from persistSvc.
 	s.toolSvc = toolssvc.New(
 		nil, // permBroker — wired in SetPermissions
 		s.buildSystemPrompt,
-		func() conversation.Store {
-			if s.agent == nil {
-				return nil
-			}
-			return s.agent.PersistentStore()
-		},
-		s.persistTurn,
+		func() conversation.Store { return s.persistSvc.Store() },
+		s.persistSvc.PersistTurn,
 	)
 	return s
 }
@@ -824,9 +831,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		// Flip the runtime kill switch. In-flight passes finish; new Schedule
 		// calls noop when disabled. Nil-guarded because the server may run
 		// without a persistent store (no compGen wired).
-		if s.compactionGen != nil {
-			s.compactionGen.SetEnabled(enabled)
-		}
+		s.persistSvc.SetCompactionEnabled(enabled)
 		changes = append(changes, fmt.Sprintf("compaction_enabled=%s", v))
 		s.broadcastConfigChanged("compaction_enabled", v)
 		fmt.Printf("UpdateConfig: compaction_enabled set to %s\n", v)
@@ -877,9 +882,9 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	}
 	// Push the reconciled retention block to the background sweeper so the
 	// next sweep uses the new horizons without waiting for a restart.
-	if retentionChanged && s.retentionSweeper != nil {
+	if retentionChanged {
 		r := c.Compaction.Retention
-		s.retentionSweeper.SetConfig(retention.Config{
+		s.persistSvc.UpdateRetentionConfig(retention.Config{
 			RawRetentionDays:       r.RawRetentionDays,
 			CompactedRetentionDays: r.CompactedRetentionDays,
 			KeepForever:            r.KeepForever,
@@ -1100,89 +1105,29 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	}, nil
 }
 
-// ListConversations implements proto.AgentServer — returns persisted
-// conversation summaries for the /history picker.
+// ListConversations implements proto.AgentServer — delegates to persistSvc.
 func (s *Server) ListConversations(ctx context.Context, req *proto.ListConversationsRequest) (*proto.ListConversationsResponse, error) {
-	infos, err := s.agent.ListConversations(ctx, req.GetProjectDir(), int(req.GetLimit()))
-	if err != nil {
-		return nil, err
-	}
-	out := &proto.ListConversationsResponse{Conversations: make([]*proto.Conversation, 0, len(infos))}
-	for _, i := range infos {
-		out.Conversations = append(out.Conversations, &proto.Conversation{
-			Id:             i.ID,
-			Title:          i.Title,
-			ProjectDir:     i.ProjectDir,
-			Model:          i.Model,
-			StartedAt:      i.StartedAt.Unix(),
-			LastTurnAt:     i.LastTurnAt.Unix(),
-			TurnCount:      int32(i.TurnCount),
-			Recap:          i.Recap,
-			RecapUpdatedAt: i.RecapUpdatedAt.Unix(),
-		})
-	}
-	return out, nil
+	return s.persistSvc.ListConversations(ctx, req)
 }
 
-// GetConversation implements proto.AgentServer — returns a single
-// conversation's metadata including its living recap. Lightweight: no turn
-// rehydration.
+// GetConversation implements proto.AgentServer — delegates to persistSvc.
 func (s *Server) GetConversation(ctx context.Context, req *proto.GetConversationRequest) (*proto.Conversation, error) {
-	i, err := s.agent.GetConversation(ctx, req.GetConversationId())
-	if err != nil {
-		return nil, err
-	}
-	return &proto.Conversation{
-		Id:             i.ID,
-		Title:          i.Title,
-		ProjectDir:     i.ProjectDir,
-		Model:          i.Model,
-		StartedAt:      i.StartedAt.Unix(),
-		LastTurnAt:     i.LastTurnAt.Unix(),
-		TurnCount:      int32(i.TurnCount),
-		Recap:          i.Recap,
-		RecapUpdatedAt: i.RecapUpdatedAt.Unix(),
-	}, nil
+	return s.persistSvc.GetConversation(ctx, req)
 }
 
-// ResumeConversation implements proto.AgentServer — loads persisted turns
-// for a conversation, rehydrates the in-memory session store, returns the
-// turns so the CLI can render them in scrollback.
+// ResumeConversation implements proto.AgentServer — delegates to persistSvc.
 func (s *Server) ResumeConversation(ctx context.Context, req *proto.ResumeConversationRequest) (*proto.ResumeConversationResponse, error) {
-	turns, err := s.agent.ResumeConversation(ctx, req.GetConversationId())
-	if err != nil {
-		return nil, err
-	}
-	out := &proto.ResumeConversationResponse{Turns: make([]*proto.PersistedTurn, 0, len(turns))}
-	for _, t := range turns {
-		out.Turns = append(out.Turns, &proto.PersistedTurn{
-			Id:             t.ID,
-			ConversationId: t.ConversationID,
-			Role:           t.Role,
-			Content:        t.Content,
-			TokensIn:       int32(t.TokensIn),
-			TokensOut:      int32(t.TokensOut),
-			LatencyMs:      int32(t.LatencyMs),
-			CreatedAt:      t.CreatedAt.Unix(),
-		})
-	}
-	return out, nil
+	return s.persistSvc.ResumeConversation(ctx, req)
 }
 
-// DeleteConversation implements proto.AgentServer.
+// DeleteConversation implements proto.AgentServer — delegates to persistSvc.
 func (s *Server) DeleteConversation(ctx context.Context, req *proto.DeleteConversationRequest) (*proto.DeleteConversationResponse, error) {
-	if err := s.agent.DeleteConversation(ctx, req.GetConversationId()); err != nil {
-		return nil, err
-	}
-	return &proto.DeleteConversationResponse{Ok: true}, nil
+	return s.persistSvc.DeleteConversation(ctx, req)
 }
 
-// RenameConversation implements proto.AgentServer.
+// RenameConversation implements proto.AgentServer — delegates to persistSvc.
 func (s *Server) RenameConversation(ctx context.Context, req *proto.RenameConversationRequest) (*proto.RenameConversationResponse, error) {
-	if err := s.agent.RenameConversation(ctx, req.GetConversationId(), req.GetTitle()); err != nil {
-		return nil, err
-	}
-	return &proto.RenameConversationResponse{Ok: true}, nil
+	return s.persistSvc.RenameConversation(ctx, req)
 }
 
 // ListTools implements proto.AgentServer — enumerates the agent's tool
@@ -1250,247 +1195,29 @@ func (s *Server) InvokeTool(ctx context.Context, req *proto.InvokeToolRequest) (
 	return resp, nil
 }
 
-// estimateRawTokens is a fast len/4 token estimate over the turns' text — used
-// for the displayed raw/savings figure so the footer's frequent GetContextUsage
-// poll never tokenizes the full uncompacted history with tiktoken.
-//
-// Uses the LARGER of Content and BlocksJSON per turn, not the sum: BlocksJSON
-// is the canonical block-array serialization (what feeds BuildLLMHistory) and
-// already contains every text body as a JSON string, so summing it with
-// Content double-counts the text portion — inflating the number by ~8% on a
-// text-heavy conversation. Content is retained only as the fallback for
-// pre-BlocksJSON turns (older rows may have Content but an empty
-// content_json column, since it defaulted to the empty string when added).
-func estimateRawTokens(turns []conversation.Turn) int {
-	n := 0
-	for _, t := range turns {
-		if len(t.BlocksJSON) > len(t.Content) {
-			n += len(t.BlocksJSON)
-		} else {
-			n += len(t.Content)
-		}
-	}
-	return (n + 3) / 4
-}
-
-// GetContextUsage implements proto.AgentServer — reports cumulative token
-// usage vs. the active model's context-window size for a conversation.
+// GetContextUsage implements proto.AgentServer — delegates to persistSvc.
 func (s *Server) GetContextUsage(ctx context.Context, req *proto.GetContextUsageRequest) (*proto.GetContextUsageResponse, error) {
-	convID := req.GetConversationId()
-	// The denominator is the locus route's PRIMARY model window — stable
-	// across agent restarts and unaffected by per-turn fallbacks or background
-	// summarizer traffic. The per-conversation meter counter's max follows
-	// whatever model served the last turn and defaults to the open model on a
-	// fresh registry, which made the bar jump (e.g. 200k → 128k) after every
-	// restart until the first cloud-served turn re-baselined it.
-	max := contextmeter.ModelMax(s.primaryModel())
-	sent, raw := 0, 0
-	if store := s.agent.PersistentStore(); store != nil && convID != "" {
-		if turns, err := store.GetTurns(ctx, convID); err == nil {
-			raw = estimateRawTokens(turns)
-			state, _ := store.GetCompaction(ctx, convID)
-			compSnap := s.cfgSvc.Get().Compaction
-			elide := compSnap.ElideToolResults
-			lossy := compSnap.LossyToolElision
-			switch {
-			case state.ConsolidatedJSON != "":
-				// Compaction has run. Mirror assembleHistory: summarized view
-				// plus optional post-elision.
-				view, _ := compactor.BuildSendView(turns, state)
-				if elide {
-					view, _ = compaction.ElideSupersededToolResults(view)
-				}
-				if lossy {
-					view, _ = compaction.KeepLastNToolResults(view, compaction.DefaultLossyElisionKeepLast)
-				}
-				sent = compaction.TotalTokens(contextmeter.Default(), view)
-			case elide || lossy:
-				// No compaction but some elision is on. The meter must reflect
-				// the elided view, not the raw history — otherwise a user
-				// turns on a toggle and sees no change even though the model
-				// receives less. Cost is one full-history tokenize per poll;
-				// acceptable because the elided view is what the request path
-				// is already building on every turn.
-				view := agent.BuildLLMHistory(turns)
-				if elide {
-					view, _ = compaction.ElideSupersededToolResults(view)
-				}
-				if lossy {
-					view, _ = compaction.KeepLastNToolResults(view, compaction.DefaultLossyElisionKeepLast)
-				}
-				sent = compaction.TotalTokens(contextmeter.Default(), view)
-			default:
-				// Fast path: no compaction, no elision. Cheap len/4 estimate
-				// is intentional — the footer polls this frequently.
-				sent = raw
-			}
-		}
-	}
-	var pct float64
-	if max > 0 {
-		pct = float64(sent) / float64(max)
-		if pct > 1 {
-			pct = 1
-		}
-	}
-	return &proto.GetContextUsageResponse{
-		TokensUsed: int32(sent), ModelMax: int32(max), Percent: pct,
-		RawTokens: int32(raw), Compacting: s.agent.IsCompacting(convID),
-	}, nil
+	return s.persistSvc.GetContextUsage(ctx, req)
 }
 
-// SuggestNextPrompt implements proto.AgentServer — asks the local co-processor
-// for one short follow-up prompt the user might send next, based on the
-// conversation's living recap + the tail of recent turns. Degrades to an empty
-// response on any failure (missing store, no dispatch engine, provider error,
-// empty conversation) — the CLI treats "" as "no suggestion", never surfaces
-// a banner. Never routes to the cloud; coproc role only.
+// SuggestNextPrompt implements proto.AgentServer — delegates to persistSvc.
 func (s *Server) SuggestNextPrompt(ctx context.Context, req *proto.SuggestNextPromptRequest) (*proto.SuggestNextPromptResponse, error) {
-	empty := &proto.SuggestNextPromptResponse{}
-	convID := req.GetConversationId()
-	if convID == "" || s.toolSvc.Engine() == nil {
-		return empty, nil
-	}
-	store := s.agent.PersistentStore()
-	if store == nil {
-		return empty, nil
-	}
-	turns, err := store.GetTurns(ctx, convID)
-	if err != nil || len(turns) == 0 {
-		return empty, nil
-	}
-	// Pull the recap for background; fall back to just the turn tail when
-	// none has been consolidated yet.
-	recap := ""
-	if info, err := store.Get(ctx, convID); err == nil {
-		recap = info.Recap
-	}
-	// Last 6 turns give the coproc immediate context without ballooning the
-	// prompt on long conversations. Recap covers the deeper history.
-	tailN := 6
-	if len(turns) < tailN {
-		tailN = len(turns)
-	}
-	var tail strings.Builder
-	for _, t := range turns[len(turns)-tailN:] {
-		content := strings.TrimSpace(t.Content)
-		if content == "" {
-			continue
-		}
-		if len(content) > 400 {
-			content = content[:400] + "…"
-		}
-		fmt.Fprintf(&tail, "[%s]\n%s\n\n", t.Role, content)
-	}
-	var promptB strings.Builder
-	promptB.WriteString("You are helping predict what a user might reasonably ask next in an ongoing conversation with an AI coding assistant. ")
-	promptB.WriteString("Output ONE short natural next prompt the user might send, under 80 characters. ")
-	promptB.WriteString("Rules: output ONLY the prompt text; no quotes, no formatting, no leading punctuation, no commentary, no labels.\n\n")
-	if recap != "" {
-		promptB.WriteString("Recap of the conversation so far:\n")
-		promptB.WriteString(recap)
-		promptB.WriteString("\n\n")
-	}
-	promptB.WriteString("Most recent turns:\n")
-	promptB.WriteString(tail.String())
-	promptB.WriteString("\nNext prompt:")
-
-	res, err := s.toolSvc.Engine().Dispatch(ctx, dispatch.Spec{
-		Mode:        dispatch.OneShot,
-		Role:        dispatch.RoleCoproc,
-		Tier:        config.TierFastLightText,
-		Prompt:      promptB.String(),
-		Source:      "suggest_next_prompt",
-		RecordUsage: true,
-	})
-	if err != nil {
-		return empty, nil
-	}
-	return &proto.SuggestNextPromptResponse{Suggestion: sanitizeSuggestion(res.Text)}, nil
+	return s.persistSvc.SuggestNextPrompt(ctx, req)
 }
 
-// sanitizeSuggestion normalizes a coproc's suggestion text: single line, no
-// surrounding quotes, capped at 80 characters. Belt-and-suspenders against
-// models that ignore the "no formatting" rule.
-func sanitizeSuggestion(s string) string {
-	s = strings.TrimSpace(s)
-	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
-		s = s[:i]
-	}
-	s = strings.TrimSpace(s)
-	// Strip matched surrounding quote characters (", ', `).
-	for len(s) >= 2 {
-		first, last := s[0], s[len(s)-1]
-		if (first == '"' && last == '"') || (first == '\'' && last == '\'') || (first == '`' && last == '`') {
-			s = strings.TrimSpace(s[1 : len(s)-1])
-			continue
-		}
-		break
-	}
-	// Drop leading list/label punctuation the model might inject anyway.
-	s = strings.TrimLeft(s, "-*•> ")
-	if len(s) > 80 {
-		s = s[:80]
-	}
-	return s
-}
+// sanitizeSuggestion is a test shim — the canonical implementation lives in
+// hostsvc/persistence as SanitizeSuggestion. Tests in this package call
+// sanitizeSuggestion (unexported); this delegates so they keep compiling.
+func sanitizeSuggestion(s string) string { return persistsvc.SanitizeSuggestion(s) }
 
-// GetCompactionState implements proto.AgentServer — the compaction summary +
-// frozen/live split for the /c viewer.
+// GetCompactionState implements proto.AgentServer — delegates to persistSvc.
 func (s *Server) GetCompactionState(ctx context.Context, req *proto.GetCompactionStateRequest) (*proto.GetCompactionStateResponse, error) {
-	convID := req.GetConversationId()
-	out := &proto.GetCompactionStateResponse{Compacting: s.agent.IsCompacting(convID)}
-	store := s.agent.PersistentStore()
-	if store == nil || convID == "" {
-		return out, nil
-	}
-	turns, err := store.GetTurns(ctx, convID)
-	if err != nil {
-		return out, nil
-	}
-	state, _ := store.GetCompaction(ctx, convID)
-	view, _ := compactor.BuildSendView(turns, state)
-	out.SentTokens = int32(compaction.TotalTokens(contextmeter.Default(), view))
-	out.RawTokens = int32(estimateRawTokens(turns))
-	out.FrozenThrough = state.FrozenThrough
-	for _, t := range turns {
-		if t.CreatedAt.Unix() <= state.FrozenThrough {
-			out.FrozenTurns++
-		} else {
-			out.LiveTurns++
-		}
-	}
-	if state.SegmentSummariesJSON != "" {
-		var segs []compaction.StructuredSummary
-		if json.Unmarshal([]byte(state.SegmentSummariesJSON), &segs) == nil {
-			out.CompactedSegments = int32(len(segs))
-		}
-	}
-	if state.ConsolidatedJSON != "" {
-		var cs compaction.StructuredSummary
-		if json.Unmarshal([]byte(state.ConsolidatedJSON), &cs) == nil {
-			out.ConsolidatedSummary = cs.RenderBlock().Text
-		}
-	}
-	return out, nil
+	return s.persistSvc.GetCompactionState(ctx, req)
 }
 
-// ExportContext implements proto.AgentServer — the full uncapped raw history as
-// a JSON []llm.Message.
+// ExportContext implements proto.AgentServer — delegates to persistSvc.
 func (s *Server) ExportContext(ctx context.Context, req *proto.ExportContextRequest) (*proto.ExportContextResponse, error) {
-	store := s.agent.PersistentStore()
-	if store == nil || req.GetConversationId() == "" {
-		return &proto.ExportContextResponse{}, nil
-	}
-	turns, err := store.GetTurns(ctx, req.GetConversationId())
-	if err != nil {
-		return nil, err
-	}
-	b, err := json.Marshal(agent.BuildLLMHistory(turns))
-	if err != nil {
-		return nil, err
-	}
-	return &proto.ExportContextResponse{Json: string(b)}, nil
+	return s.persistSvc.ExportContext(ctx, req)
 }
 
 // GetConfig implements proto.AgentServer — reports the current runtime config
@@ -2161,7 +1888,11 @@ func (s *Server) buildSystemPrompt(workDir string) string {
 		env.GitRepo, env.GitBranch = gitInfo(workDir)
 	}
 	steering := protocols.SteeringBlock(protocols.ForDomain(protocols.DomainCore))
-	return buildToolLoopSystem(env, steering, directorySnapshot(workDir, 80), s.loadProjectContext(workDir))
+	projectCtx := ""
+	if s.persistSvc != nil {
+		projectCtx = s.persistSvc.LoadProjectContext(workDir)
+	}
+	return buildToolLoopSystem(env, steering, directorySnapshot(workDir, 80), projectCtx)
 }
 
 // directorySnapshot lists the immediate children of dir — directories first
@@ -2211,15 +1942,6 @@ func gitInfo(dir string) (bool, string) {
 	return true, strings.TrimSpace(string(out))
 }
 
-// loadProjectContext returns the project's .cercano/context.md content, or "" if
-// no loader is wired or none exists. Nil-safe.
-func (s *Server) loadProjectContext(workDir string) string {
-	if s.contextLoader == nil || workDir == "" {
-		return ""
-	}
-	c, _ := s.contextLoader.Load(workDir)
-	return c
-}
 
 // streamProcessRequestWithToolLoop drives the native tool-calling loop and
 // emits per-event stream payloads. Used when a layered LLM provider has been
@@ -2567,101 +2289,17 @@ func (s *Server) runMainLoop(
 	})
 }
 
-// persistTurn writes one conversation turn (any role) to the persistent store,
-// with BlocksJSON and concatenated text Content. Best-effort: store errors are
-// logged but never surfaced, so a write failure can't abort the turn. Called
-// incrementally as the tool loop produces each message (crash resilience).
+// persistTurn is a front-door shim used by the tool loop and tests.
+// The canonical implementation lives in hostsvc/persistence.
 func (s *Server) persistTurn(ctx context.Context, convID string, m llm.Message) {
-	if s.agent == nil || convID == "" {
-		return
-	}
-	store := s.agent.PersistentStore()
-	if store == nil {
-		return
-	}
-	blocksJSON, err := json.Marshal(m.Blocks)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[tool-loop] marshal blocks failed: %v\n", err)
-		return
-	}
-	var text string
-	for _, b := range m.Blocks {
-		if b.Type == llm.BlockText {
-			text += b.Text
-		}
-	}
-	role := string(m.Role)
-	if err := store.Append(ctx, conversation.Turn{
-		ConversationID: convID,
-		Role:           role,
-		Content:        text,
-		BlocksJSON:     string(blocksJSON),
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "[tool-loop] Append(%s, %s) failed: %v\n", role, convID, err)
-	}
+	s.persistSvc.PersistTurn(ctx, convID, m)
 }
 
-// assembleHistory builds the conversation history to send: the compacted view
-// (consolidated summary + live tail) when compaction state exists, else the full
-// history. If the assembled history exceeds the hard-override fraction of the
-// model's max context, it schedules a background compaction pass and degrades
-// the view with LLM-free elision and front-drop rather than blocking.
-func (s *Server) assembleHistory(ctx context.Context, store conversation.Store, convID string) []llm.Message {
-	turns, err := store.GetTurns(ctx, convID)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[tool-loop] GetTurns(%s) failed: %v\n", convID, err)
-		return nil
-	}
-	state, _ := store.GetCompaction(ctx, convID)
-	view, _ := compactor.BuildSendView(turns, state)
-
-	compactionCfg := s.cfgSvc.Get().Compaction
-	cloudModel := s.activeCloudModel()
-	pct := compactionCfg.HardOverridePct
-	if compactionCfg.Enabled && pct > 0 {
-		hardLimit := int(float64(contextmeter.ModelMax(cloudModel)) * pct)
-		if compaction.TotalTokens(contextmeter.Default(), view) > hardLimit {
-			// Never compact inline — kick the background generator (debounced,
-			// deduped, timeout-bounded) and bring THIS turn under the limit with
-			// LLM-free steps only.
-			s.agent.ScheduleCompaction(convID)
-			pre := compaction.TotalTokens(contextmeter.Default(), view)
-			view, _ = compaction.ElideSupersededToolResults(view)
-			if compaction.TotalTokens(contextmeter.Default(), view) > hardLimit {
-				view, _ = compaction.KeepLastNToolResults(view, compaction.DefaultLossyElisionKeepLast)
-			}
-			if compaction.TotalTokens(contextmeter.Default(), view) > hardLimit {
-				preserve := 0
-				if state.ConsolidatedJSON != "" {
-					preserve = 1 // keep the consolidated-summary preamble
-				}
-				var dropped int
-				view, dropped = compaction.TruncateOldestToFit(view, contextmeter.Default(), hardLimit, preserve)
-				fmt.Fprintf(os.Stderr, "[compaction] hard-override %s: %d tokens > limit %d — truncated %d oldest messages (background pass scheduled)\n",
-					convID, pre, hardLimit, dropped)
-			} else {
-				fmt.Fprintf(os.Stderr, "[compaction] hard-override %s: %d tokens > limit %d — elision brought it under (background pass scheduled)\n",
-					convID, pre, hardLimit)
-			}
-		}
-	}
-	// Mechanical superseded-tool-result dedup. LLM-free, lossless, and safe to
-	// apply on top of either a summarized view or the raw history — running it
-	// twice is idempotent.
-	if compactionCfg.ElideToolResults {
-		view, _ = compaction.ElideSupersededToolResults(view)
-	}
-	// Recency-window elision. Stubs older tool_result content down to a marker;
-	// keeps the last N intact. Applied after byte-identical dedup because the
-	// two are complementary — the identical-dedup catches literal duplicates
-	// among the kept N; the recency policy handles the long tail.
-	if compactionCfg.LossyToolElision {
-		view, _ = compaction.KeepLastNToolResults(view, compaction.DefaultLossyElisionKeepLast)
-	}
-	// Final pairing repair: idempotent on a valid view, and insurance for the
-	// one degrade edge (a lone surviving tool_result after truncation) that
-	// would otherwise reach the provider as an invalid message array.
-	return llm.RepairPairing(view)
+// assembleHistory is a front-door shim for the tool loop and test suite.
+// The canonical implementation lives in hostsvc/persistence (no store param).
+// The store parameter is accepted but ignored — the service owns the store.
+func (s *Server) assembleHistory(ctx context.Context, _ conversation.Store, convID string) []llm.Message {
+	return s.persistSvc.AssembleHistory(ctx, convID)
 }
 
 // mapInlineImages converts proto images to agent.InlineImage.

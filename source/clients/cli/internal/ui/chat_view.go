@@ -182,6 +182,21 @@ func (c *chatView) AppendEntry(e *Entry) {
 	c.contentGen++
 }
 
+// RemoveEntry removes one exact entry pointer from the scrollback.
+func (c *chatView) RemoveEntry(target *Entry) bool {
+	for i, e := range c.entries {
+		if e != target {
+			continue
+		}
+		copy(c.entries[i:], c.entries[i+1:])
+		c.entries[len(c.entries)-1] = nil
+		c.entries = c.entries[:len(c.entries)-1]
+		c.markTranscriptDirty()
+		return true
+	}
+	return false
+}
+
 // SetEntriesSlice replaces the entire entry slice (for /clear and applyResume).
 func (c *chatView) SetEntriesSlice(es []*Entry) {
 	c.entries = es

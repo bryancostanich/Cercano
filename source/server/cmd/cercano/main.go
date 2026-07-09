@@ -1649,7 +1649,14 @@ func runWorkerMode(args []string) {
 		os.Exit(1)
 	}
 
-	srv := grpc.NewServer()
+	// Match the host client's 64 MiB call limits (worker.MaxMsgBytes): a StartTurn
+	// carries full assembled history plus inline images, which easily exceeds
+	// gRPC's 4 MiB default and would otherwise fail with ResourceExhausted — a
+	// divergence in-process mode never hits.
+	srv := grpc.NewServer(
+		grpc.MaxRecvMsgSize(worker.MaxMsgBytes),
+		grpc.MaxSendMsgSize(worker.MaxMsgBytes),
+	)
 	proto.RegisterWorkerServer(srv, worker.New())
 
 	log.Printf("[worker] serving on unix:%s", socketPath)

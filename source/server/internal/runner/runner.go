@@ -81,5 +81,9 @@ type Deps struct {
 	Config    cfgsvc.Service
 	Perms     permissions.Broker
 	Agent     *agent.Agent
-	Watchdog  *watchdog.Watchdog // nil = disabled
+	// Watchdog is a LIVE accessor, not a snapshot: the host wires its watchdog
+	// (InitWatchdog) and mutates it (UpdateConfig) AFTER the runner is
+	// constructed, so the runner must read it at turn time. A nil func, or a
+	// func returning nil, = disabled.
+	Watchdog func() *watchdog.Watchdog
 }

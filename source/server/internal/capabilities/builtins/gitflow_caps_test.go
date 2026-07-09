@@ -43,6 +43,34 @@ func TestCheckpointCapability(t *testing.T) {
 	}
 }
 
+func TestCheckpointCapabilityAllowTrunkWithExplicitPaths(t *testing.T) {
+	cap := Checkpoint()
+	dir := tempGitRepo(t)
+	os.WriteFile(filepath.Join(dir, "wanted.txt"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(dir, "local.txt"), []byte("leave me"), 0o644)
+	args, _ := json.Marshal(map[string]any{
+		"subject":     "fix: wanted",
+		"trunk":       "main",
+		"cwd":         dir,
+		"paths":       []string{"wanted.txt"},
+		"allow_trunk": true,
+	})
+	res, err := cap.Execute(context.Background(), &capabilities.Call{Args: args, WorkDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "checkpoint committed") {
+		t.Fatalf("unexpected result: %q", res.Text)
+	}
+	out, err := exec.Command("git", "-C", dir, "show", "--name-only", "--pretty=format:", "HEAD").CombinedOutput()
+	if err != nil {
+		t.Fatalf("show commit: %v\n%s", err, out)
+	}
+	if strings.Contains(string(out), "local.txt") || !strings.Contains(string(out), "wanted.txt") {
+		t.Fatalf("explicit checkpoint committed wrong files: %q", out)
+	}
+}
+
 // TestGitWorktreeCapability_Meta checks name/tier/surfaces.
 func TestGitWorktreeCapability_Meta(t *testing.T) {
 	cap := GitWorktree()

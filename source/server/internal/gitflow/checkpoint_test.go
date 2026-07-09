@@ -56,3 +56,61 @@ func TestCheckpointRejectsClaudeAndTrunkAndEmpty(t *testing.T) {
 		t.Fatal("expected error on empty subject")
 	}
 }
+
+func TestCheckpointAllowTrunkRequiresExplicitPaths(t *testing.T) {
+	r := newTestRepo(t)
+	ctx := context.Background()
+	writeFile(t, r, "small.txt", "small")
+	if _, err := r.CheckpointWithOptions(ctx, "fix: small", "", "main", CheckpointOptions{AllowTrunk: true}); err == nil {
+		t.Fatal("expected allow_trunk without paths to fail")
+	}
+}
+
+func TestCheckpointExplicitPathsCommitOnlyThoseFilesOnTrunk(t *testing.T) {
+	r := newTestRepo(t)
+	ctx := context.Background()
+	writeFile(t, r, "intended.txt", "yes")
+	writeFile(t, r, "unrelated.txt", "no")
+
+	sha, err := r.CheckpointWithOptions(ctx, "fix: intended", "", "main", CheckpointOptions{
+		AllowTrunk: true,
+		Paths:      []string{"intended.txt"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sha == "" {
+		t.Fatal("expected a commit sha")
+	}
+	committed, err := r.run(ctx, "show", "--name-only", "--pretty=format:", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(committed, "unrelated.txt") || !strings.Contains(committed, "intended.txt") {
+		t.Fatalf("explicit path commit included wrong files: %q", committed)
+	}
+	status, err := r.run(ctx, "status", "--porcelain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(status, "?? unrelated.txt") {
+		t.Fatalf("unrelated file should be left untouched, status: %q", status)
+	}
+}
+
+func TestCheckpointExplicitPathsRejectAlreadyStagedUnrelatedFile(t *testing.T) {
+	r := newTestRepo(t)
+	ctx := context.Background()
+	writeFile(t, r, "intended.txt", "yes")
+	writeFile(t, r, "staged.txt", "no")
+	if _, err := r.run(ctx, "add", "staged.txt"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := r.CheckpointWithOptions(ctx, "fix: intended", "", "main", CheckpointOptions{
+		AllowTrunk: true,
+		Paths:      []string{"intended.txt"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unrelated") {
+		t.Fatalf("expected unrelated staged path error, got %v", err)
+	}
+}

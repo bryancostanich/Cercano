@@ -329,6 +329,12 @@ func (s *Server) Shutdown() {
 	if s.runtimesSvc != nil {
 		s.runtimesSvc.StopMeridian()
 	}
+	// Drain the per-conversation worker pool (kill warm workers + stop the
+	// idle-reaper) when worker mode is armed. The in-process runner has nothing
+	// to drain; the type assertion no-ops for it.
+	if sd, ok := s.workerRunner.(interface{ Shutdown() }); ok {
+		sd.Shutdown()
+	}
 }
 
 // activeCloudModel returns the cloud model from the active profile — the

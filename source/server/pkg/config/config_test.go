@@ -5,9 +5,34 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+// TestWorkerIdleTimeout verifies the config default is sensible and the 0 /
+// positive / negative sentinels resolve as documented.
+func TestWorkerIdleTimeout(t *testing.T) {
+	// Default config: 0 field → DefaultWorkerIdleTimeout (a sensible few minutes).
+	if got := Defaults().WorkerIdleTimeout(); got != DefaultWorkerIdleTimeout {
+		t.Fatalf("default idle timeout = %v, want %v", got, DefaultWorkerIdleTimeout)
+	}
+	if DefaultWorkerIdleTimeout < time.Minute || DefaultWorkerIdleTimeout > time.Hour {
+		t.Fatalf("default idle window %v is not a sane interactive value", DefaultWorkerIdleTimeout)
+	}
+	// 0 → use the default (omitted-field case), NOT disabled.
+	if got := (Config{WorkerIdleTimeoutSeconds: 0}).WorkerIdleTimeout(); got != DefaultWorkerIdleTimeout {
+		t.Fatalf("0 must resolve to the default, got %v", got)
+	}
+	// Positive → explicit override in seconds.
+	if got := (Config{WorkerIdleTimeoutSeconds: 90}).WorkerIdleTimeout(); got != 90*time.Second {
+		t.Fatalf("90 → %v, want 90s", got)
+	}
+	// Negative → disabled (0 duration; the reaper starts no goroutine).
+	if got := (Config{WorkerIdleTimeoutSeconds: -1}).WorkerIdleTimeout(); got != 0 {
+		t.Fatalf("negative must disable (0 duration), got %v", got)
+	}
+}
 
 func TestDefaults(t *testing.T) {
 	cfg := Defaults()

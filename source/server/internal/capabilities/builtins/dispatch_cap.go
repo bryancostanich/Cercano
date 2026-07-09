@@ -74,8 +74,14 @@ func (dispatchCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 		ConversationID: convID,
 		Interactive:    false,
 		Emit: func(ev agenttools.ProgressEvent) {
+			// Structured progress is the primary channel: it carries SubAgentID so
+			// the client routes each event to its sub-agent tab. Plain-text Emit is
+			// a fallback ONLY when structured progress is unavailable — emitting
+			// both duplicated every line and leaked sub-agent activity into the
+			// parent transcript.
 			if call.EmitProgress != nil {
 				call.EmitProgress(ev)
+				return
 			}
 			if call.Emit != nil {
 				if ev.Text != "" {

@@ -222,7 +222,7 @@ func TestTokenDeltaCoalescedToTickFrame(t *testing.T) {
 	if !m.animTickActive {
 		t.Fatalf("delta should arm the repaint tick")
 	}
-	if strings.Contains(plain(m.chat.content), "HelloToken") {
+	if strings.Contains(plain(m.mainChat().content), "HelloToken") {
 		t.Fatalf("delta repainted eagerly — coalescing not in effect")
 	}
 
@@ -231,7 +231,7 @@ func TestTokenDeltaCoalescedToTickFrame(t *testing.T) {
 	if m.chatDirty {
 		t.Fatalf("tick frame should flush the dirty flag")
 	}
-	if !strings.Contains(plain(m.chat.content), "HelloToken") {
+	if !strings.Contains(plain(m.mainChat().content), "HelloToken") {
 		t.Fatalf("tick frame did not carry the deferred repaint")
 	}
 	if cmd == nil || !m.animTickActive {

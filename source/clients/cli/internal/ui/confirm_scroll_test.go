@@ -15,8 +15,8 @@ func buildConfirmScrollModel() Model {
 	m.width = 80
 	m.height = 24
 	m.relayout()
-	m.chat.vp.SetContent(strings.Repeat("chat\n", 80))
-	m.chat.SetYOffset(0)
+	m.mainChat().vp.SetContent(strings.Repeat("chat\n", 80))
+	m.mainChat().SetYOffset(0)
 	m.pendingConfirm = &confirmRequest{
 		onYes: func(m Model) (Model, tea.Cmd) { m.pendingConfirm = nil; return m, nil },
 		onNo:  func(m Model) (Model, tea.Cmd) { m.pendingConfirm = nil; return m, nil },
@@ -31,7 +31,7 @@ func TestConfirmPending_MouseWheelScrollsScrollback(t *testing.T) {
 	m := buildConfirmScrollModel()
 	next, _ := m.Update(tea.MouseWheelMsg{X: 2, Y: m.scrollbarTop, Button: tea.MouseWheelDown})
 	got := next.(Model)
-	if got.chat.YOffset() == 0 {
+	if got.mainChat().YOffset() == 0 {
 		t.Fatal("mouse wheel should scroll scrollback while a confirm is pending")
 	}
 	if got.pendingConfirm == nil {
@@ -43,7 +43,7 @@ func TestConfirmPending_PgDnScrollsScrollback(t *testing.T) {
 	m := buildConfirmScrollModel()
 	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	got := next.(Model)
-	if got.chat.YOffset() == 0 {
+	if got.mainChat().YOffset() == 0 {
 		t.Fatal("PgDn should scroll scrollback while a confirm is pending")
 	}
 	if got.pendingConfirm == nil {

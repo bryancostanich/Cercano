@@ -22,8 +22,8 @@ func TestSubAgentEventCreatesEphemeralTabWithGrant(t *testing.T) {
 	if !m.hasSubAgentTabs() {
 		t.Fatalf("expected sub-agent tabs to be visible")
 	}
-	if m.chatTabs.active != "child-1" {
-		t.Fatalf("active tab = %q, want child-1", m.chatTabs.active)
+	if m.chatTabs.active != mainChatTabID {
+		t.Fatalf("active tab = %q, want main (creating a sub tab must not steal focus)", m.chatTabs.active)
 	}
 	tab := m.chatTabs.tabs["child-1"]
 	if tab == nil {

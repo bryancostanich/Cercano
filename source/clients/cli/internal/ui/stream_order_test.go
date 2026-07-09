@@ -20,10 +20,10 @@ func newStreamTestModel() Model {
 		palette:   p,
 		width:     80,
 		streaming: true,
-		chat:      newChatView(theme.NewStyles(p), p, "", "", 79, 20),
 	}
-	m.chat.AppendEntry(&Entry{Role: RoleUser, Content: "read the readme"})
-	m.chat.AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
+	m.setMainChat(newChatView(theme.NewStyles(p), p, "", "", 79, 20))
+	m.mainChat().AppendEntry(&Entry{Role: RoleUser, Content: "read the readme"})
+	m.mainChat().AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
 	return m
 }
 
@@ -47,7 +47,7 @@ func TestStreamOrderingToolBeforeFinalText(t *testing.T) {
 	m.drive(t, agentclient.StreamMsg{Type: agentclient.TypeDone, Final: "Here is the answer."})
 
 	toolIdx, textIdx := -1, -1
-	for i, e := range m.chat.Entries() {
+	for i, e := range m.mainChat().Entries() {
 		if e.Tool != nil {
 			toolIdx = i
 		}
@@ -56,7 +56,7 @@ func TestStreamOrderingToolBeforeFinalText(t *testing.T) {
 		}
 	}
 	if toolIdx < 0 || textIdx < 0 {
-		t.Fatalf("setup: toolIdx=%d textIdx=%d entries=%d", toolIdx, textIdx, len(m.chat.Entries()))
+		t.Fatalf("setup: toolIdx=%d textIdx=%d entries=%d", toolIdx, textIdx, len(m.mainChat().Entries()))
 	}
 	if textIdx < toolIdx {
 		t.Fatalf("ORDERING BUG: final answer at index %d renders BEFORE the tool call at index %d", textIdx, toolIdx)
@@ -74,7 +74,7 @@ func TestStreamOrderingInterleaveNoOrphans(t *testing.T) {
 	m.drive(t, agentclient.StreamMsg{Type: agentclient.TypeDone, Final: "Done"})
 
 	var got []string
-	for _, e := range m.chat.Entries() {
+	for _, e := range m.mainChat().Entries() {
 		switch {
 		case e.Tool != nil:
 			got = append(got, "tool")

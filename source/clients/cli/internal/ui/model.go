@@ -100,7 +100,6 @@ type Model struct {
 
 	splashShown     bool // hide after first user input
 	splash          banner.AnimModel
-	chat            chatView
 	chatTabs        chatTabSurface
 	selectionNotice string
 	input           promptInput
@@ -385,7 +384,6 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 		styles:             s,
 		theme:              active,
 		themes:             themes,
-		chat:               newChatView(s, p, root, home, 80, 10),
 		agent:              ag,
 		convID:             initialConvID,
 		convRef:            convRef,
@@ -401,6 +399,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 		promptBorderColor:  p.Accent,
 		promptColorToken:   "palette:accent",
 	}
+	m.setMainChat(newChatView(m.styles, m.palette, m.root, m.home, 80, 10))
 	m.applyInputStyles()
 	return m
 }
@@ -415,7 +414,7 @@ func newConvID() string {
 // given markdown, for the `--mdtest` render-testing mode. Hides the splash so
 // the rendered doc is visible immediately. No agent round-trip occurs.
 func (m Model) SeedAssistantMarkdown(doc string) Model {
-	m.chat.AppendEntry(&Entry{Role: RoleAssistant, Content: doc})
+	m.mainChat().AppendEntry(&Entry{Role: RoleAssistant, Content: doc})
 	m.splashShown = false
 	return m
 }
@@ -456,7 +455,10 @@ func (m *Model) applyTheme(t theme.Theme) {
 	m.theme = t
 	m.palette = t.Palette
 	m.styles = theme.NewStyles(t.Palette)
-	m.chat.SetStyles(m.styles, m.palette)
+	m.ensureChatTabs()
+	for _, tab := range m.chatTabs.tabs {
+		tab.view.SetStyles(m.styles, m.palette)
+	}
 	m.applyInputStyles()
 	m.promptBorderColor = m.resolvePromptColor(m.promptColorToken)
 	if sp, ok := m.content.(*settingsPage); ok {
@@ -677,7 +679,7 @@ func fetchToolCallCmd(ag *agentclient.Client, convID, toolUseID string) tea.Cmd 
 // (from an expand toggle) and returns the fetch commands, kicking the
 // animation tick so the loading spinner animates while they're in flight.
 func (m *Model) dispatchToolFetches() []tea.Cmd {
-	ids := m.chat.TakePendingToolFetches()
+	ids := m.mainChat().TakePendingToolFetches()
 	if len(ids) == 0 {
 		return nil
 	}
@@ -831,10 +833,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.pendingConfirm != nil {
 			// Confirm pending: the prompt is dormant, but let the wheel scroll
 			// the scrollback so the user can review context before answering.
-			cmd := m.chat.Update(msg)
+			cmd := m.activeChat().Update(msg)
 			return m, cmd
 		}
-		if m.chat.SelectionDragging() {
+		if m.activeChat().SelectionDragging() {
 			return m, nil
 		}
 		mouse := msg.Mouse()
@@ -847,7 +849,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		cmd := m.chat.Update(msg)
+		cmd := m.activeChat().Update(msg)
 		return m, cmd
 
 	case tea.MouseClickMsg:
@@ -858,7 +860,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// to touch before answering y/n. All other clicks are ignored.
 			mouse := msg.Mouse()
 			if mouse.Button == tea.MouseLeft && !m.contentPageActive() &&
-				m.chat.MouseToggleFold(mouse.X, mouse.Y-m.scrollbarTop) {
+				m.activeChat().MouseToggleFold(mouse.X, mouse.Y-m.scrollbarTop) {
 				cmds := m.dispatchToolFetches()
 				m.refreshViewport()
 				return m, tea.Batch(cmds...)
@@ -904,7 +906,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if m.mouseInPrompt(mouse) {
-			m.chat.ClearSelection()
+			m.activeChat().ClearSelection()
 			m.input.MouseDown(mouse.X, mouse.Y-m.promptTop())
 			return m, nil
 		}
@@ -912,13 +914,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// focus it and toggle its Folded state — mirrors keyboard
 		// ToggleFocusedFold. Short-circuits before selection so a click on
 		// a tool entry never starts a text-selection drag.
-		if m.chat.MouseToggleFold(mouse.X, mouse.Y-m.scrollbarTop) {
+		if m.activeChat().MouseToggleFold(mouse.X, mouse.Y-m.scrollbarTop) {
 			cmds := m.dispatchToolFetches()
 			m.refreshViewport()
 			return m, tea.Batch(cmds...)
 		}
 		// Translate screen coords to viewport-local and forward to chatView.
-		m.chat.MouseDown(mouse.X, mouse.Y-m.scrollbarTop)
+		m.activeChat().MouseDown(mouse.X, mouse.Y-m.scrollbarTop)
 		return m, nil
 
 	case tea.MouseMotionMsg:
@@ -932,8 +934,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.pendingConfirm != nil {
-			m.chat.StopScrollbarDrag()
-			m.chat.ClearSelectionDrag()
+			m.activeChat().StopScrollbarDrag()
+			m.activeChat().ClearSelectionDrag()
 			m.input.CancelDrag()
 			return m, nil
 		}
@@ -944,7 +946,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// MouseDrag checks scrollbarDragging first (priority over text selection)
 		// then falls through to the selection extend path.
-		cmd := m.chat.MouseDrag(mouse.X, mouse.Y-m.scrollbarTop)
+		cmd := m.activeChat().MouseDrag(mouse.X, mouse.Y-m.scrollbarTop)
 		return m, cmd
 
 	case tea.MouseReleaseMsg:
@@ -957,7 +959,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.MouseUp(mouse.X, mouse.Y-m.promptTop())
 			return m, nil
 		}
-		cmd, copied := m.chat.MouseUp(mouse.X, mouse.Y-m.scrollbarTop)
+		cmd, copied := m.activeChat().MouseUp(mouse.X, mouse.Y-m.scrollbarTop)
 		if copied {
 			m.selectionNotice = "copied selection"
 		}
@@ -997,7 +999,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// what the tool is about to touch before answering y/n.
 		if m.pendingConfirm != nil {
 			if key.Matches(msg, keys.ScrollKeys) {
-				cmd := m.chat.Update(msg)
+				cmd := m.activeChat().Update(msg)
 				return m, cmd
 			}
 			next, cmd := m.resolveConfirmKey(msg.String())
@@ -1068,15 +1070,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// touches one in-flight turn at a time).
 		if m.streaming && key.Matches(msg, keys.Back) {
 			m.cancelCurrentStream()
-			if next, ok := m.chat.DrainNext(); ok {
+			if next, ok := m.mainChat().DrainNext(); ok {
 				m.relayout()
 				nm, cmd := m.submit(next.text, next.images)
 				return nm, cmd
 			}
 			return m, nil
 		}
-		if m.chat.SelectionActive() {
-			cmd, handled, copied := m.chat.HandleSelectionKey(msg)
+		if m.activeChat().SelectionActive() {
+			cmd, handled, copied := m.activeChat().HandleSelectionKey(msg)
 			if copied {
 				m.selectionNotice = "copied selection"
 			}
@@ -1088,23 +1090,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// rather than the input box. Up/down cycle (clamped at edges),
 		// enter/tab toggle Folded, esc returns to input. Any other key
 		// returns to input and is then handled by the normal input path.
-		if m.chat.InToolNav() {
+		if m.activeChat().InToolNav() {
 			switch {
 			case key.Matches(msg, keys.NavUp):
-				m.chat.NavPrev()
+				m.activeChat().NavPrev()
 				m.refreshViewport()
 				return m, nil
 			case key.Matches(msg, keys.NavDown):
-				m.chat.NavNext()
+				m.activeChat().NavNext()
 				m.refreshViewport()
 				return m, nil
 			case key.Matches(msg, keys.ToggleTool):
-				m.chat.ToggleFocusedFold()
+				m.activeChat().ToggleFocusedFold()
 				cmds := m.dispatchToolFetches()
 				m.refreshViewport()
 				return m, tea.Batch(cmds...)
 			case key.Matches(msg, keys.Back):
-				m.chat.ExitToolNav()
+				m.activeChat().ExitToolNav()
 				m.refreshViewport()
 				return m, nil
 			}
@@ -1127,7 +1129,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Esc on empty input enters tool-entry navigation mode, focusing the
 		// most-recent tool entry. No-op when scrollback has no tool entries.
 		if key.Matches(msg, keys.Back) && m.input.Value() == "" {
-			if m.chat.EnterToolNav() {
+			if m.activeChat().EnterToolNav() {
 				m.refreshViewport()
 				return m, nil
 			}
@@ -1170,7 +1172,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.Matches(msg, keys.ScrollKeys) {
 			// Route navigation keys to the scrollback viewport. Keeps the
 			// textinput's normal arrow / line-edit semantics intact.
-			cmd := m.chat.Update(msg)
+			cmd := m.activeChat().Update(msg)
 			return m, cmd
 		}
 		unmodifiedArrow := msg.Key().Mod == 0
@@ -1186,7 +1188,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// dismissing it on first submit moves the wordmark to entry zero
 			// instead of dropping it entirely.
 			if m.splashShown {
-				m.chat.PrependBanner(m.splash.Meta, m.splash.Started())
+				m.mainChat().PrependBanner(m.splash.Meta, m.splash.Started())
 			}
 			m.splashShown = false
 			// Slash commands are local navigation / UI actions, never sent to
@@ -1196,7 +1198,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Submitting a non-slash mid-stream queues the message instead of
 			// starting a second turn; it sends when the current stream completes.
 			if m.streaming && !isSlash {
-				m.chat.Enqueue(text, images)
+				m.mainChat().Enqueue(text, images)
 				m.relayout()
 				return m, nil
 			}
@@ -1341,7 +1343,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// tick repaint. Rebuilding per event made rebuild rate track
 			// the stream's event rate — the input queue starved behind it.
 			m.turnActivity = "routing"
-			m.chat.Apply(ev)
+			m.mainChat().Apply(ev)
 			m.chatDirty = true
 			return m, tea.Batch(msg.next, m.ensureAnimTick())
 		case chatAssistantDeltaMsg:
@@ -1349,12 +1351,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// faster than 20fps; the tick flushes them in batches.
 			m.turnActivity = "writing"
 			m.turnTokOut++ // one delta ≈ one token (approximate live count)
-			m.chat.Apply(ev)
+			m.mainChat().Apply(ev)
 			m.chatDirty = true
 			return m, tea.Batch(msg.next, m.ensureAnimTick())
 		case toolEntryStartMsg:
 			m.turnActivity = "running " + ev.name
-			m.chat.Apply(ev)
+			m.mainChat().Apply(ev)
 			// Re-arm the spinner loop if it stopped (the placeholder loop
 			// dies once tokens begin streaming), and fall through to the
 			// shared repaint so the new tool row appears immediately.
@@ -1366,7 +1368,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(msg.next, m.ensureAnimTick())
 		case chatDoneMsg:
 			m.applyTurnTelemetry(ev) // footer fields
-			m.chat.Apply(ev)         // transcript finalize + notice
+			m.mainChat().Apply(ev)   // transcript finalize + notice
 		case permissionRequiredMsg:
 			tc := &pendingToolCall{
 				ToolUseID:   ev.id,
@@ -1376,17 +1378,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Destructive: ev.destructive,
 			}
 			m.pendingConfirm = toolConfirm(tc)
-			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: m.renderConfirmPrompt(tc)})
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.renderConfirmPrompt(tc)})
 		default:
 			// Remaining transcript events (tool stop/exec-start/exec-complete,
 			// error) carry no turn-telemetry side effect.
-			m.chat.Apply(ev)
+			m.mainChat().Apply(ev)
 		}
 		m.refreshViewport()
 		return m, msg.next
 
 	case contextRegenProgressMsg:
-		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("context-regen: " + msg.line)})
+		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("context-regen: " + msg.line)})
 		m.refreshViewport()
 		// Also poll the meter: the server reports Compacting=true while the
 		// rebuild holds the compaction claim, and that flag (via ctxUsageMsg)
@@ -1408,7 +1410,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					"Completed passes are saved — the background compactor finishes the remainder after your next message. " +
 					"Only re-run /context-regen if you want a full rebuild from scratch."
 			}
-			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: text})
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: text})
 			m.refreshViewport()
 			return m, fetchContextUsage(m.agent, m.convID)
 		}
@@ -1416,7 +1418,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if doneLine == "" {
 			doneLine = fmt.Sprintf("context rebuilt: ~%d → ~%d tokens", msg.pre, msg.post)
 		}
-		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: doneLine})
+		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: doneLine})
 		m.refreshViewport()
 		// The terminal frame already carries the numbers, but the meter's
 		// authoritative source is GetContextUsage — refetch so every derived
@@ -1426,14 +1428,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case toolCallFetchedMsg:
 		// Lazy tool-body fetch returned — fill the expanded entry (or just
 		// clear the spinner if the fetch failed / found nothing) and repaint.
-		if t := m.chat.findToolEntry(msg.id); t != nil {
+		if t := m.mainChat().findToolEntry(msg.id); t != nil {
 			t.Loading = false
 			if msg.err == nil && msg.detail != nil && msg.detail.Found {
 				t.FullArgs = msg.detail.ArgsJSON
 				t.FullResult = msg.detail.Result
 				t.StartLine = msg.detail.StartLine
 			}
-			m.chat.markTranscriptDirty()
+			m.mainChat().markTranscriptDirty()
 			m.refreshViewport()
 		}
 		return m, nil
@@ -1733,10 +1735,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if msg.crashSummary != "" {
 					body += "\n  cause: " + msg.crashSummary + " (full trace in ~/.config/cercano/crash.log)"
 				}
-				m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: body})
+				m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: body})
 				m.streaming = false
-				m.chat.SetStreaming(false)
-				if e := m.chat.lastAssistantEntry(); e != nil {
+				m.mainChat().SetStreaming(false)
+				if e := m.mainChat().lastAssistantEntry(); e != nil {
 					e.Streaming = false
 				}
 				m.refreshViewport()
@@ -1748,14 +1750,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// config, tools, permission mode, vision caps, runtime
 			// status — could be stale. Re-fetch the lot and tell the
 			// user the link is back.
-			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "✓ agent reconnected"})
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "✓ agent reconnected"})
 			m.refreshViewport()
 			return m, tea.Batch(msg.next, fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent), fetchVisionCmd(m.agent), fetchOpenRuntimeStatusCmd(m.agent))
 		}
 		if msg.state == agentclient.ConnStateFailed {
 			// Only reachable when the client itself is shutting down
 			// mid-recovery — the SDK otherwise retries indefinitely.
-			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "✕ agent connection closed — reconnect abandoned. Restart cercano to recover."})
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "✕ agent connection closed — reconnect abandoned. Restart cercano to recover."})
 			m.refreshViewport()
 		}
 		return m, msg.next
@@ -1781,7 +1783,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			body = slash.RenderToolResult(msg.Res)
 		}
-		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: body})
+		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: body})
 		m.refreshViewport()
 		return m, nil
 
@@ -1793,7 +1795,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.streaming = false
-		m.chat.SetStreaming(false)
+		m.mainChat().SetStreaming(false)
 		// Turn completed normally; the rehydration cache is stale.
 		m.lastSubmittedPrompt = ""
 		if m.cancelStream != nil {
@@ -1801,7 +1803,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancelStream = nil
 		}
 		// Finalize the streaming entry so it stops showing the spinner.
-		if e := m.chat.lastAssistantEntry(); e != nil {
+		if e := m.mainChat().lastAssistantEntry(); e != nil {
 			e.Streaming = false
 		}
 		m.refreshViewport()
@@ -1822,7 +1824,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		done := tea.Batch(pollCmds...)
 		// Drain the next queued message: each completed turn fires the next.
-		if nextMsg, ok := m.chat.DrainNext(); ok {
+		if nextMsg, ok := m.mainChat().DrainNext(); ok {
 			m.relayout()
 			nm, cmd := m.submit(nextMsg.text, nextMsg.images)
 			return nm, tea.Batch(cmd, done)
@@ -1843,12 +1845,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.bannerTickActive = cmd != nil
 			return m, cmd
 		}
-		if m.chat.BannerAnimVisible() {
+		if m.mainChat().BannerAnimVisible() {
 			m.refreshViewport()
 			m.bannerTickActive = true
 			return m, banner.Tick()
 		}
-		if m.chat.HasBanner() {
+		if m.mainChat().HasBanner() {
 			m.bannerTickActive = true
 			return m, banner.PollTick()
 		}
@@ -1865,7 +1867,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, resumeCmd
 
 	case dragScrollTickMsg:
-		cmd, _ := m.chat.DragScrollTick()
+		cmd, _ := m.activeChat().DragScrollTick()
 		return m, cmd
 
 	case ctxUsageTickMsg:
@@ -1905,20 +1907,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// that's when the animated status line is visible. The per-frame push
 		// moves the color sweep into the viewport's content cache; without
 		// it, View renders the last-set content and the animation freezes.
-		if e := m.chat.streamingTextEntry(); e != nil && e.Content == "" {
+		if e := m.mainChat().streamingTextEntry(); e != nil && e.Content == "" {
 			repaint = true
 			keep = true
 		}
 		// Tool spinners on in-progress entries need the same per-frame push;
 		// without this branch the placeholder tick stops once the assistant
 		// streams a token, then the active tool line shows a frozen glyph.
-		if m.chat.hasInProgressTool() {
+		if m.mainChat().hasInProgressTool() {
 			repaint = true
 			keep = true
 		}
 		// Keep ticking while a lazy tool-body fetch is in flight so the
 		// expanded entry's loading spinner animates.
-		if m.chat.hasLoadingTool() {
+		if m.mainChat().hasLoadingTool() {
 			repaint = true
 			keep = true
 		}
@@ -1926,7 +1928,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// model's next action), animate the trailing "still working" line —
 		// without this the indicator would freeze on the first frame after
 		// tools complete.
-		if m.chat.IsBetweenPhases() {
+		if m.mainChat().IsBetweenPhases() {
 			repaint = true
 			keep = true
 		}
@@ -2004,9 +2006,9 @@ func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model,
 		content = strings.TrimSpace(content)
 		content += fmt.Sprintf("  (%d image%s)", len(images), plural(len(images)))
 	}
-	m.chat.AppendEntry(&Entry{Role: RoleUser, Content: content})
+	m.mainChat().AppendEntry(&Entry{Role: RoleUser, Content: content})
 	// Assistant placeholder
-	m.chat.AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
+	m.mainChat().AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
 	m.refreshViewport()
 
 	// Pass the effective workDir so the agent chdirs there and prepends its
@@ -2018,13 +2020,13 @@ func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model,
 	cmd, cancel, err := driver.Submit(context.Background(), m.turnGen, text, images)
 	if err != nil {
 		m.errMsg = err.Error()
-		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "error: " + err.Error()})
+		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "error: " + err.Error()})
 		m.refreshViewport()
 		return m, nil
 	}
 	m.cancelStream = cancel
 	m.streaming = true
-	m.chat.SetStreaming(true)
+	m.mainChat().SetStreaming(true)
 	m.turnStart = time.Now()
 	m.turnActivity = "thinking"
 	m.turnTokOut = 0
@@ -2055,7 +2057,7 @@ func (m *Model) applyDevMode(repo string) string {
 	if m.wdRef != nil {
 		m.wdRef.dir = repo
 	}
-	m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "dev mode: working on " + repo})
+	m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "dev mode: working on " + repo})
 	return slash.DevKickoff(repo)
 }
 
@@ -2117,11 +2119,11 @@ func (m *Model) cancelCurrentStream() {
 	// user submits a new prompt before they arrive.
 	m.turnGen++
 	m.streaming = false
-	m.chat.SetStreaming(false)
-	if e := m.chat.lastAssistantEntry(); e != nil {
+	m.mainChat().SetStreaming(false)
+	if e := m.mainChat().lastAssistantEntry(); e != nil {
 		e.Streaming = false
 	}
-	m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "⊘ canceled"})
+	m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "⊘ canceled"})
 	// Queued follow-ups are preserved: canceling stops the current work but
 	// anything the user typed while waiting is a real intent they still want
 	// executed. The Esc-key caller drains the next queued message and
@@ -2135,7 +2137,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 	case slash.ResultQuit:
 		return m, tea.Quit
 	case slash.ResultClearConversation:
-		m.chat.SetEntriesSlice(nil)
+		m.mainChat().SetEntriesSlice(nil)
 		m.convID = newConvID()
 		if m.convRef != nil {
 			m.convRef.id = m.convID
@@ -2147,7 +2149,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.sessionTitle = ""
 		m.cumIn = 0
 		m.cumOut = 0
-		m.chat.ExitToolNav()
+		m.mainChat().ExitToolNav()
 		m.refreshViewport()
 	case slash.ResultOpenSettings:
 		return m, m.openConfigSurface(configTabGeneral)
@@ -2164,14 +2166,14 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.content = newWizardPage(m.agent, m.palette, m.styles, m.width, m.height)
 	case slash.ResultRegenContext:
 		if m.convID == "" {
-			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "no conversation yet — nothing to rebuild"})
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "no conversation yet — nothing to rebuild"})
 			m.refreshViewport()
 			return m, nil
 		}
 		return m, startContextRegenCmd(m.agent, m.convID, false)
 	case slash.ResultCompactContext:
 		if m.convID == "" {
-			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "no conversation yet — nothing to compact"})
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "no conversation yet — nothing to compact"})
 			m.refreshViewport()
 			return m, nil
 		}
@@ -2184,11 +2186,11 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 	case slash.ResultSetPromptColor:
 		m.promptBorderColor = m.resolvePromptColor(res.Text)
 		m.promptColorToken = res.Text
-		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "prompt color set"})
+		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "prompt color set"})
 		m.refreshViewport()
 	case slash.ResultSetSessionTitle:
 		m.sessionTitle = res.Text
-		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "renamed to: " + res.Text})
+		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "renamed to: " + res.Text})
 		m.refreshViewport()
 	case slash.ResultSetPermissionMode:
 		// Fire-and-forget: server persistence is the source of truth, but the
@@ -2201,7 +2203,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 			_ = ag.SetPermissionMode(context.Background(), mode)
 		}()
 		m.permissionMode = mode
-		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "Permission mode → " + mode})
+		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "Permission mode → " + mode})
 		m.refreshViewport()
 	case slash.ResultInvokeTool:
 		// Decide locally whether to prompt: R-tier runs silently, W/X
@@ -2214,7 +2216,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 			return m, invokeToolCmd(m.agent, res.ToolName, res.ToolArgs)
 		}
 		if perm == "R" {
-			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("running tool:" + res.ToolName)})
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("running tool:" + res.ToolName)})
 			m.refreshViewport()
 			return m, invokeToolCmd(m.agent, res.ToolName, res.ToolArgs)
 		}
@@ -2222,7 +2224,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		tc := &pendingToolCall{Name: res.ToolName, Args: res.ToolArgs, Permission: perm}
 		m.pendingConfirm = toolConfirm(tc)
 		prompt := m.renderConfirmPrompt(tc)
-		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: prompt})
+		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: prompt})
 		m.refreshViewport()
 	case slash.ResultDevMode:
 		kickoff := m.applyDevMode(res.WorkDir)
@@ -2230,13 +2232,13 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		if m.streaming {
 			// A stream is already in flight: enqueue the kickoff so it drains
 			// at streamEndMsg, just like any typed follow-up.
-			m.chat.Enqueue(kickoff, nil)
+			m.mainChat().Enqueue(kickoff, nil)
 			m.relayout()
 			return m, nil
 		}
 		return m.submit(kickoff, nil)
 	case slash.ResultText:
-		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: res.Text})
+		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: res.Text})
 		m.refreshViewport()
 	}
 	return m, nil
@@ -2299,7 +2301,7 @@ func (m *Model) relayout() {
 		m.scrollbarTop++
 	}
 	suggestH := 0
-	if m.chat.Width() > 0 && !m.contentPageActive() {
+	if m.mainChat().Width() > 0 && !m.contentPageActive() {
 		// Width may not yet match contentW on the first paint; the
 		// suggestion uses m.width which we've just updated above.
 		if hint := m.renderSlashSuggestions(); hint != "" {
@@ -2315,7 +2317,7 @@ func (m *Model) relayout() {
 	}
 	queuedH := 0
 	if !m.contentPageActive() {
-		queuedH = len(m.chat.Queued()) // one row per queued message, rendered above the prompt
+		queuedH = len(m.mainChat().Queued()) // one row per queued message, rendered above the prompt
 	}
 	// Size the input first — DynamicHeight re-fits it to the wrapped content at
 	// this width; the body claims whatever rows are left.
@@ -2328,8 +2330,7 @@ func (m *Model) relayout() {
 	if bodyH < 3 {
 		bodyH = 3
 	}
-	m.chat.SetSize(contentW-2, bodyH) // reserve two right columns: a gap + the scrollbar
-	m.syncMainChatTab()
+	m.mainChat().SetSize(contentW-2, bodyH) // reserve two right columns: a gap + the scrollbar
 	for id, tab := range m.chatTabs.tabs {
 		if id == mainChatTabID || tab == nil {
 			continue
@@ -2438,12 +2439,12 @@ func (m Model) handleCtrlCKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 func (m Model) promptTop() int {
 	top := m.contentTop()
-	top += m.chat.Height()
+	top += m.mainChat().Height()
 	if m.recap != "" {
 		top += 2 // blank spacer line + the recap line
 	}
 	if !m.contentPageActive() {
-		top += len(m.chat.Queued()) // queued messages render above the prompt border
+		top += len(m.mainChat().Queued()) // queued messages render above the prompt border
 	}
 	top++ // prompt border above the input
 	if hint := m.renderSlashSuggestions(); hint != "" && !m.contentPageActive() {
@@ -2476,24 +2477,24 @@ func (m Model) splashEffective() bool {
 // has current state, then delegates to chatView.rebuild().
 func (m *Model) refreshViewport() {
 	m.chatDirty = false // any full rebuild flushes pending coalesced repaints
-	m.chat.SetTurnStatus(turnStatus{
+	m.mainChat().SetTurnStatus(turnStatus{
 		activity: m.turnActivity,
 		start:    m.turnStart,
 		tokOut:   m.turnTokOut,
 		model:    m.turnModel,
 		cloud:    m.turnCloud,
 	})
-	m.chat.rebuild()
+	m.activeChat().rebuild()
 }
 
 func (m Model) preparePromptInput() Model {
-	needsRefresh := m.chat.InToolNav()
-	if m.chat.SelectionActive() {
-		m.chat.ClearSelection()
+	needsRefresh := m.activeChat().InToolNav()
+	if m.activeChat().SelectionActive() {
+		m.activeChat().ClearSelection()
 	}
 	m.selectionNotice = ""
 	if needsRefresh {
-		m.chat.ExitToolNav()
+		m.activeChat().ExitToolNav()
 		m.refreshViewport()
 	}
 	return m
@@ -2783,7 +2784,7 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 	defer cancel()
 	turns, err := m.agent.ResumeConversation(ctx, conversationID)
 	if err != nil {
-		m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: "resume failed: " + err.Error()})
+		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "resume failed: " + err.Error()})
 		m.refreshViewport()
 		return m, nil
 	}
@@ -2795,14 +2796,14 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 	if m.wdRef != nil {
 		m.wdRef.dir = ""
 	}
-	m.chat.SetEntriesSlice(nil)
+	m.mainChat().SetEntriesSlice(nil)
 	// cumIn/cumOut wait for fetchContextUsage. The previous local sum here
 	// summed only TokensIn, mishandled tool-call turns, and got overwritten
 	// by the RPC within a roundtrip anyway — a wrong first-paint with no
 	// upside.
 	m.cumIn = 0
 	m.cumOut = 0
-	m.chat.ExitToolNav()
+	m.mainChat().ExitToolNav()
 	m.splashShown = false
 	// Fetch the compaction state so we can place the freeze-boundary divider
 	// in the right spot inside the resumed history. Failure is non-fatal —
@@ -2811,8 +2812,8 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 	if cs, err := m.agent.GetCompactionState(ctx, conversationID); err == nil && cs != nil {
 		frozenThrough = cs.FrozenThrough
 	}
-	m.chat.SetEntriesSlice(resumeEntries(turns, frozenThrough))
-	m.chat.PrependBanner(m.splash.Meta, m.splash.Started())
+	m.mainChat().SetEntriesSlice(resumeEntries(turns, frozenThrough))
+	m.mainChat().PrependBanner(m.splash.Meta, m.splash.Started())
 	// Restore the prior session's living recap into the footer line (renderRecap),
 	// or show a "recap unavailable" placeholder if the recap generator has been
 	// silently failing (e.g. local runtime misconfigured). Don't push into
@@ -3008,7 +3009,7 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 	var detailsEntry *Entry
 	toggleDetails := func(m Model) (Model, tea.Cmd) {
 		if detailsEntry != nil {
-			if m.chat.RemoveEntry(detailsEntry) {
+			if m.mainChat().RemoveEntry(detailsEntry) {
 				detailsEntry = nil
 				m.refreshViewport()
 				return m, nil
@@ -3017,14 +3018,14 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 		}
 		detailsEntry = &Entry{Role: RoleSystem,
 			Content: "details:\n```json\n" + tc.Args + "\n```"}
-		m.chat.AppendEntry(detailsEntry)
+		m.mainChat().AppendEntry(detailsEntry)
 		m.refreshViewport()
 		return m, nil
 	}
 	cr := &confirmRequest{
 		onYes: func(m Model) (Model, tea.Cmd) {
 			m.pendingConfirm = nil
-			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Accent.Render("✓ approved — running…")})
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Accent.Render("✓ approved — running…")})
 			m.refreshViewport()
 			if tc.ToolUseID != "" {
 				// Stream-event origin: unblock the server-side tool loop.
@@ -3039,7 +3040,7 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 		},
 		onNo: func(m Model) (Model, tea.Cmd) {
 			m.pendingConfirm = nil
-			m.chat.AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("canceled.")})
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("canceled.")})
 			m.refreshViewport()
 			if tc.ToolUseID != "" {
 				ag, id := m.agent, tc.ToolUseID
@@ -3059,7 +3060,7 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 	if strings.HasPrefix(tc.Name, "mcp__") {
 		cr.extras["a"] = func(m Model) (Model, tea.Cmd) {
 			m.pendingConfirm = nil
-			m.chat.AppendEntry(&Entry{Role: RoleSystem,
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem,
 				Content: m.styles.Accent.Render("✓ always-allowed — running…")})
 			m.refreshViewport()
 			if tc.ToolUseID != "" {
@@ -3693,7 +3694,7 @@ func (m Model) renderSlashSuggestions() string {
 // Images are re-registered via RegisterImage so the existing "[image N]"
 // markers in the restored text resolve without inserting duplicate markers.
 func (m *Model) unstageLastQueued() bool {
-	last, ok := m.chat.UnstageLast()
+	last, ok := m.mainChat().UnstageLast()
 	if !ok {
 		return false
 	}
@@ -3713,7 +3714,7 @@ func (m *Model) unstageLastQueued() bool {
 // designated for echoed user-prompt rows in the scrollback). Empty when
 // nothing is queued.
 func (m Model) renderQueued() string {
-	queued := m.chat.Queued()
+	queued := m.mainChat().Queued()
 	if len(queued) == 0 {
 		return ""
 	}
@@ -3792,12 +3793,7 @@ func (m Model) renderRecap() string {
 // renderViewportWithScrollbar renders the chat viewport with a one-column
 // vertical scrollbar on its right edge. Delegates to chatView.View.
 func (m Model) renderViewportWithScrollbar() string {
-	if m.hasSubAgentTabs() && m.chatTabs.active != mainChatTabID {
-		if tab := m.chatTabs.tabs[m.chatTabs.active]; tab != nil {
-			return tab.view.View()
-		}
-	}
-	return m.chat.View()
+	return m.activeChat().View()
 }
 
 func (m Model) renderHeader() string {
@@ -3866,7 +3862,7 @@ func (m Model) renderStatus() string {
 	// The footer stays put during a turn — the live turn status renders inline on
 	// the assistant placeholder, not here.
 	help := m.styles.Muted.Render("/help for cmds")
-	if m.chat.SelectionHasRange() {
+	if m.activeChat().SelectionHasRange() {
 		if m.selectionNotice != "" {
 			help = m.styles.Success.Render(m.selectionNotice) +
 				m.styles.Muted.Render("  ") +

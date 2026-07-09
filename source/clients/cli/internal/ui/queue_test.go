@@ -18,7 +18,7 @@ func TestSubmitWhileStreamingQueues(t *testing.T) {
 	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(Model)
 
-	if q := m.chat.Queued(); len(q) != 1 || q[0] != "check the tests" {
+	if q := m.mainChat().Queued(); len(q) != 1 || q[0] != "check the tests" {
 		t.Fatalf("expected queued [check the tests], got %v", q)
 	}
 	if strings.TrimSpace(m.input.Value()) != "" {
@@ -34,8 +34,8 @@ func TestSubmitWhileStreamingQueues(t *testing.T) {
 func TestUpArrowUnstagesLastQueued(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
-	m.chat.Enqueue("check the tests", nil)
-	m.chat.Enqueue("run the linter", nil)
+	m.mainChat().Enqueue("check the tests", nil)
+	m.mainChat().Enqueue("run the linter", nil)
 	m.input.SetValue("")
 
 	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
@@ -44,7 +44,7 @@ func TestUpArrowUnstagesLastQueued(t *testing.T) {
 	if m.input.Value() != "run the linter" {
 		t.Errorf("up-arrow should unstage the last queued message, got input %q", m.input.Value())
 	}
-	if q := m.chat.Queued(); len(q) != 1 || q[0] != "check the tests" {
+	if q := m.mainChat().Queued(); len(q) != 1 || q[0] != "check the tests" {
 		t.Errorf("unstaged item should leave the queue, got %v", q)
 	}
 }
@@ -56,11 +56,11 @@ func TestQueuedLinesReserveViewportRows(t *testing.T) {
 	m = m.SeedAssistantMarkdown("prior reply\n")
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 
-	h0 := m.chat.Height()
-	m.chat.Enqueue("one", nil)
-	m.chat.Enqueue("two", nil)
+	h0 := m.mainChat().Height()
+	m.mainChat().Enqueue("one", nil)
+	m.mainChat().Enqueue("two", nil)
 	m.relayout()
-	if got := m.chat.Height(); got != h0-2 {
+	if got := m.mainChat().Height(); got != h0-2 {
 		t.Errorf("two queued lines should reserve two rows: %d -> %d, want %d", h0, got, h0-2)
 	}
 }
@@ -78,7 +78,7 @@ func (p *queuedPageStub) View() string                           { return p.body
 func TestQueuedLinesHiddenWhileContentPageActive(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
-	m.chat.Enqueue("queued secret prompt", nil)
+	m.mainChat().Enqueue("queued secret prompt", nil)
 
 	if view := m.View().Content; !strings.Contains(view, "queued secret prompt") {
 		t.Fatal("queued prompt should render above the prompt on the main chat page")
@@ -93,7 +93,7 @@ func TestQueuedLinesHiddenWhileContentPageActive(t *testing.T) {
 	if strings.Contains(view, "queued secret prompt") {
 		t.Fatal("queued prompt should stay hidden while a content page is active")
 	}
-	if q := m.chat.Queued(); len(q) != 1 || q[0] != "queued secret prompt" {
+	if q := m.mainChat().Queued(); len(q) != 1 || q[0] != "queued secret prompt" {
 		t.Fatalf("queued prompt should remain pending, got %v", q)
 	}
 }

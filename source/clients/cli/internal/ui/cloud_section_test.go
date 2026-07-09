@@ -31,10 +31,10 @@ func cloudSamplePage() *settingsPage {
 	}
 	sp := &settingsPage{
 		palette: p, styles: theme.NewStyles(p), width: 96, height: 60,
-		cfg:     &agentclient.Config{Port: "50052", LocusMode: "cloud_only"},
-		mode:    "permissive",
-		themes:  theme.NewRegistry(theme.BuiltinThemes()),
-		working: theme.Theme{Name: "cr4k3r_j4x", Palette: p},
+		cfg:       &agentclient.Config{Port: "50052", LocusMode: "cloud_only"},
+		mode:      "permissive",
+		themes:    theme.NewRegistry(theme.BuiltinThemes()),
+		working:   theme.Theme{Name: "cr4k3r_j4x", Palette: p},
 		cloudView: view,
 		profiles: []agentclient.CloudProfileInfo{
 			{Name: "work-openai", Flavor: "chat_completions", Backend: "openai", BaseURL: "https://api.openai.com/v1", Model: "gpt-x", HasKey: true},

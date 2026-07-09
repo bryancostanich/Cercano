@@ -181,7 +181,9 @@ func TestRunAgenticDispatch_EmitsProgress(t *testing.T) {
 	}
 	joined := strings.Join(notes, "\n")
 	for _, want := range []string{
-		"sub-agent tools granted: r_read",
+		// grant/ignored no longer emit as separate progress lines; the toolset
+		// rides on the "started" event (text includes tools=..., and the
+		// structured event carries GrantedTools) so it lands in the sub tab.
 		"sub-agent start:",
 		"sub-agent planned tool: r_read",
 		"sub-agent running tool: r_read",

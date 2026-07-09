@@ -2048,7 +2048,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	return stream.Send(&proto.StreamProcessResponse{
 		Payload: &proto.StreamProcessResponse_FinalResponse{
 			FinalResponse: &proto.ProcessRequestResponse{
-				Output: strings.ToValidUTF8(result.FinalText, ""),
+				Output: strings.ToValidUTF8(result.FinalText, "�"),
 				RoutingMetadata: &proto.RoutingMetadata{
 					ModelName: result.Model,
 				},

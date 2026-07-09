@@ -24,7 +24,7 @@ func (dispatchCap) Surfaces() capabilities.Surface {
 	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
 }
 func (dispatchCap) Description() string {
-	return "Run a sub-agent: hand off an open-ended task to a bounded tool-use loop over a granted set of tools (default: read-only tools). Returns the sub-agent's final result. Tool names passed in `tools` must be the plain registered names (e.g. \"Read\", \"Glob\") — do NOT include any host/MCP prefix like \"mcp__oc__\". Granting write-capable tools (Edit, Write, Bash, git_*) escalates this call to a confirm prompt; one approval authorizes the sub-agent's whole toolset for the run."
+	return "Run a sub-agent: hand off an open-ended task to a bounded tool-use loop over a granted set of tools (default: read-only tools). Include a concise human-facing `intent` when asking for approval if it clarifies why the delegation is needed. Returns the sub-agent's final result. Tool names passed in `tools` must be the plain registered names (e.g. \"Read\", \"Glob\") — do NOT include any host/MCP prefix like \"mcp__oc__\". Granting write-capable tools (Edit, Write, Bash, git_*) escalates this call to a confirm prompt; one approval authorizes the sub-agent's whole toolset for the run."
 }
 func (dispatchCap) Schema() capabilities.Schema {
 	return capabilities.Schema(`{
@@ -33,6 +33,7 @@ func (dispatchCap) Schema() capabilities.Schema {
 		"properties": {
 			"task":            {"type": "string", "description": "Open-ended instruction for the sub-agent tool loop."},
 			"tools":           {"type": "array", "items": {"type": "string"}, "description": "Tool or capability names to grant, using the plain registered names (e.g. \"Read\", \"Glob\", \"Grep\", \"Bash\") — no host or MCP prefix. Omit to default to read-only tools."},
+			"intent":          {"type": "string", "description": "Optional concise human-facing reason for the delegation, shown in permission prompts."},
 			"conversation_id": {"type": "string", "description": "Optional conversation ID to associate with this dispatch."}
 		}
 	}`)
@@ -41,6 +42,7 @@ func (dispatchCap) Schema() capabilities.Schema {
 type dispatchArgs struct {
 	Task           string   `json:"task"`
 	Tools          []string `json:"tools"`
+	Intent         string   `json:"intent"`
 	ConversationID string   `json:"conversation_id"`
 }
 

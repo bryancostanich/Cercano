@@ -68,8 +68,12 @@ func (s *Server) GetCloudProviders(ctx context.Context, req *proto.GetCloudProvi
 		out.CustomProfiles = append(out.CustomProfiles, toInfo(ref))
 	}
 
-	if s.meridianMgr != nil {
-		out.MeridianStatus = meridianStatusToProto(s.meridianMgr.Status())
+	if s.runtimesSvc != nil {
+		if st, ok := s.runtimesSvc.MeridianStatus(); ok {
+			out.MeridianStatus = meridianStatusToProto(st)
+		} else {
+			out.MeridianStatus = &proto.MeridianStatus{State: "disabled"}
+		}
 	} else {
 		out.MeridianStatus = &proto.MeridianStatus{State: "disabled"}
 	}

@@ -8,7 +8,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	cfgsvc "cercano/source/server/internal/hostsvc/config"
+	runtimessvc "cercano/source/server/internal/hostsvc/runtimes"
 	"cercano/source/server/internal/localruntime"
+	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 )
 
@@ -87,7 +90,9 @@ func TestGetModelRAMEstimate_LocalModelFromInventory(t *testing.T) {
 		Path:      path,
 		SizeBytes: fi.Size(),
 	}}})
-	s := &Server{runtimeManager: mgr}
+	rtSvc := runtimessvc.New(cfgsvc.New("", config.Config{}, nil))
+	rtSvc.SetRuntimeManager(mgr)
+	s := &Server{runtimesSvc: rtSvc}
 
 	resp, err := s.GetModelRAMEstimate(context.Background(), &proto.GetModelRAMEstimateRequest{
 		Runtime: "llama_server",
@@ -114,7 +119,9 @@ func TestGetModelRAMEstimate_LocalModelFromInventory(t *testing.T) {
 }
 
 func TestGetModelRAMEstimate_UnknownModelSoftFails(t *testing.T) {
-	s := &Server{runtimeManager: localruntime.NewManager()}
+	rtSvc2 := runtimessvc.New(cfgsvc.New("", config.Config{}, nil))
+	rtSvc2.SetRuntimeManager(localruntime.NewManager())
+	s := &Server{runtimesSvc: rtSvc2}
 	resp, err := s.GetModelRAMEstimate(context.Background(), &proto.GetModelRAMEstimateRequest{
 		ModelId: "nope",
 	})

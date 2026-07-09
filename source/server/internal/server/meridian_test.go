@@ -4,35 +4,28 @@ import (
 	"context"
 	"testing"
 
+	cfgsvc "cercano/source/server/internal/hostsvc/config"
+	runtimessvc "cercano/source/server/internal/hostsvc/runtimes"
 	"cercano/source/server/internal/meridian"
 	"cercano/source/server/pkg/config"
 )
 
-func TestMeridianPortFromBaseURL(t *testing.T) {
-	cases := []struct {
-		in   string
-		want int
-	}{
-		{"http://127.0.0.1:3456", 3456},
-		{"http://127.0.0.1:9999", 9999},
-		{"http://localhost:4567/", 4567},
-		{"", 3456},                          // default
-		{"http://127.0.0.1", 3456},          // no port → default
-		{"://gibberish::", 3456},            // unparseable → default
-		{"http://127.0.0.1:notanint", 3456}, // bad port → default
-	}
-	for _, c := range cases {
-		if got := meridianPortFromBaseURL(c.in); got != c.want {
-			t.Errorf("meridianPortFromBaseURL(%q) = %d, want %d", c.in, got, c.want)
-		}
+// newTestServer builds a minimal *Server suitable for meridian-related tests.
+// It wires a runtimesSvc so callers can call SetupMeridian, SyncMeridianForProfile
+// etc. through the same path production code uses.
+func newTestServerForMeridian() *Server {
+	cfgSvc := cfgsvc.New("", config.Config{}, nil)
+	return &Server{
+		runtimesSvc: runtimessvc.New(cfgSvc),
+		cfgSvc:      cfgSvc,
 	}
 }
 
 func TestSyncMeridianForProfile_NilManagerIsNoOp(t *testing.T) {
-	s := &Server{} // meridianMgr nil
-	// Must not panic regardless of profile.
-	s.syncMeridianForProfile(config.CloudProfile{Route: "meridian", BaseURL: "http://127.0.0.1:3456"}, config.Config{})
-	s.syncMeridianForProfile(config.CloudProfile{Route: "direct"}, config.Config{})
+	svc := runtimessvc.New(cfgsvc.New("", config.Config{}, nil))
+	// No manager set — must not panic.
+	svc.SyncMeridianForProfile(config.CloudProfile{Route: "meridian", BaseURL: "http://127.0.0.1:3456"})
+	svc.SyncMeridianForProfile(config.CloudProfile{Route: "direct"})
 }
 
 func TestSyncMeridianForProfile_NonMeridianRouteStopsManager(t *testing.T) {
@@ -41,9 +34,10 @@ func TestSyncMeridianForProfile_NonMeridianRouteStopsManager(t *testing.T) {
 	// and we can verify by checking the state stays Disabled (no spurious
 	// transition).
 	m := meridian.New(nil, "")
-	s := &Server{meridianMgr: m}
+	svc := runtimessvc.New(cfgsvc.New("", config.Config{}, nil))
+	svc.SetMeridianMgr(m)
 
-	s.syncMeridianForProfile(config.CloudProfile{Route: "direct"}, config.Config{})
+	svc.SyncMeridianForProfile(config.CloudProfile{Route: "direct"})
 
 	if got := m.Status().State; got != meridian.StateDisabled {
 		t.Errorf("state = %s, want disabled (non-meridian route → Stop)", got)
@@ -60,13 +54,14 @@ func TestSyncMeridianForProfile_MeridianRouteCallsEnsure(t *testing.T) {
 	// missing on a fresh keychain probe in CI/test env) and assert the
 	// state moves OFF Disabled to one of the gated terminal states.
 	m := meridian.New(nil, "")
-	s := &Server{meridianMgr: m}
+	svc := runtimessvc.New(cfgsvc.New("", config.Config{}, nil))
+	svc.SetMeridianMgr(m)
 
 	// Sync against a meridian-routed profile.
-	s.syncMeridianForProfile(config.CloudProfile{
+	svc.SyncMeridianForProfile(config.CloudProfile{
 		Route:   "meridian",
 		BaseURL: "http://127.0.0.1:3456",
-	}, config.Config{})
+	})
 
 	// On any host that doesn't have Node 22+ AND a Claude keychain entry
 	// AND nothing on port 3456, the state will be one of:

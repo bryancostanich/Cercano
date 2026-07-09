@@ -25,6 +25,7 @@ import (
 	"cercano/source/server/internal/hostsvc/permissions"
 	persistsvc "cercano/source/server/internal/hostsvc/persistence"
 	"cercano/source/server/internal/hostsvc/providers"
+	runtimessvc "cercano/source/server/internal/hostsvc/runtimes"
 	toolssvc "cercano/source/server/internal/hostsvc/tools"
 	"cercano/source/server/internal/compactiongen"
 	projectctx "cercano/source/server/internal/context"
@@ -39,7 +40,6 @@ import (
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
 	mcphost "cercano/source/server/internal/mcp_host"
-	"cercano/source/server/internal/meridian"
 	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/retention"
@@ -72,16 +72,14 @@ type McpManager interface {
 type Server struct {
 	proto.UnimplementedAgentServer
 	agent        *agent.Agent
-	providerSvc    providers.Resolver    // owns cloud/open providers, router, coordinator, registry, catalogManager
-	cfgSvc         cfgsvc.Service        // owns configPath, currentConfig, cfgMu, secrets
-	toolSvc        toolssvc.Catalog      // owns toolRegistry, capRegistry, dispatchEngine
-	persistSvc     persistsvc.Service    // owns retentionSweeper, compactionGen, contextLoader
+	providerSvc    providers.Resolver       // owns cloud/open providers, router, coordinator, registry, catalogManager
+	cfgSvc         cfgsvc.Service           // owns configPath, currentConfig, cfgMu, secrets
+	toolSvc        toolssvc.Catalog         // owns toolRegistry, capRegistry, dispatchEngine
+	persistSvc     persistsvc.Service       // owns retentionSweeper, compactionGen, contextLoader
 	permBroker     permissions.Broker
-	mcpManager     McpManager
-	meridianMgr    *meridian.Manager
-	runtimeManager localruntime.Manager
-	watchdog       *watchdog.Watchdog // protocol-supervision gate; nil = disabled (default)
-	usageSink        func(usage.Usage)  // wraps the main-loop provider for token recording
+	runtimesSvc    runtimessvc.Supervisors  // owns meridianMgr, runtimeManager, mcpManager
+	watchdog       *watchdog.Watchdog       // protocol-supervision gate; nil = disabled (default)
+	usageSink        func(usage.Usage)      // wraps the main-loop provider for token recording
 
 	events *eventHub // server->client push fan-out (SubscribeEvents)
 
@@ -221,15 +219,37 @@ func (s *Server) SetPermissions(store *agent.PermissionStore, pending *agent.Pen
 }
 
 // SetMcpManager wires the MCP host manager so the RPC handlers can delegate to it.
-func (s *Server) SetMcpManager(m McpManager) { s.mcpManager = m }
+func (s *Server) SetMcpManager(m McpManager) {
+	if s.runtimesSvc == nil {
+		s.runtimesSvc = runtimessvc.New(nil)
+	}
+	s.runtimesSvc.SetMcpManager(m)
+}
+
+// mcpMgr returns the MCP manager from runtimesSvc, or nil when not configured.
+func (s *Server) mcpMgr() McpManager {
+	if s.runtimesSvc == nil {
+		return nil
+	}
+	return s.runtimesSvc.McpManager()
+}
+
+// runtimeMgr returns the local runtime manager from runtimesSvc, or nil when not configured.
+func (s *Server) runtimeMgr() localruntime.Manager {
+	if s.runtimesSvc == nil {
+		return nil
+	}
+	return s.runtimesSvc.RuntimeManager()
+}
 
 // ListMcpServers implements proto.AgentServer — returns a snapshot of all hosted MCP servers.
 func (s *Server) ListMcpServers(ctx context.Context, _ *proto.ListMcpServersRequest) (*proto.ListMcpServersResponse, error) {
 	out := &proto.ListMcpServersResponse{}
-	if s.mcpManager == nil {
+	mgr := s.mcpMgr()
+	if mgr == nil {
 		return out, nil
 	}
-	for _, st := range s.mcpManager.List() {
+	for _, st := range mgr.List() {
 		out.Servers = append(out.Servers, &proto.McpServerInfo{
 			Name: st.Name, State: string(st.State), ToolCount: int32(st.ToolCount), Error: st.Err,
 		})
@@ -239,10 +259,11 @@ func (s *Server) ListMcpServers(ctx context.Context, _ *proto.ListMcpServersRequ
 
 // AddMcpServer implements proto.AgentServer — connects a new MCP server and persists it.
 func (s *Server) AddMcpServer(ctx context.Context, req *proto.AddMcpServerRequest) (*proto.AddMcpServerResponse, error) {
-	if s.mcpManager == nil {
+	mgr := s.mcpMgr()
+	if mgr == nil {
 		return &proto.AddMcpServerResponse{Ok: false, Error: "mcp host not enabled"}, nil
 	}
-	err := s.mcpManager.Add(ctx, req.GetName(), mcphost.ServerConfig{
+	err := mgr.Add(ctx, req.GetName(), mcphost.ServerConfig{
 		Command: req.GetCommand(), Args: req.GetArgs(), Env: req.GetEnv(),
 	})
 	if err != nil {
@@ -253,10 +274,11 @@ func (s *Server) AddMcpServer(ctx context.Context, req *proto.AddMcpServerReques
 
 // RemoveMcpServer implements proto.AgentServer — stops an MCP server and removes it from config.
 func (s *Server) RemoveMcpServer(ctx context.Context, req *proto.RemoveMcpServerRequest) (*proto.RemoveMcpServerResponse, error) {
-	if s.mcpManager == nil {
+	mgr := s.mcpMgr()
+	if mgr == nil {
 		return &proto.RemoveMcpServerResponse{Ok: false, Error: "mcp host not enabled"}, nil
 	}
-	if err := s.mcpManager.Remove(ctx, req.GetName()); err != nil {
+	if err := mgr.Remove(ctx, req.GetName()); err != nil {
 		return &proto.RemoveMcpServerResponse{Ok: false, Error: err.Error()}, nil
 	}
 	return &proto.RemoveMcpServerResponse{Ok: true}, nil
@@ -264,16 +286,17 @@ func (s *Server) RemoveMcpServer(ctx context.Context, req *proto.RemoveMcpServer
 
 // RestartMcpServer implements proto.AgentServer — tears down and reconnects a hosted MCP server.
 func (s *Server) RestartMcpServer(ctx context.Context, req *proto.RestartMcpServerRequest) (*proto.RestartMcpServerResponse, error) {
-	if s.mcpManager == nil {
+	mgr := s.mcpMgr()
+	if mgr == nil {
 		return &proto.RestartMcpServerResponse{Ok: false, Error: "mcp host not enabled"}, nil
 	}
-	if err := s.mcpManager.Restart(ctx, req.GetName()); err != nil {
+	if err := mgr.Restart(ctx, req.GetName()); err != nil {
 		return &proto.RestartMcpServerResponse{Ok: false, Error: err.Error()}, nil
 	}
 	// Restart re-lists synchronously, so the post-restart tool count is
 	// available immediately from the manager's status snapshot.
 	var toolCount int32
-	for _, st := range s.mcpManager.List() {
+	for _, st := range mgr.List() {
 		if st.Name == req.GetName() {
 			toolCount = int32(st.ToolCount)
 			break
@@ -325,10 +348,10 @@ func (s *Server) SetSecrets(st secrets.Store) { s.cfgSvc.SetSecrets(st) }
 // rebuildCloudLocked will Ensure/Stop the proxy as the active profile's
 // route field changes.
 func (s *Server) SetupMeridian(logPath string) {
-	s.meridianMgr = meridian.New(nil, logPath)
-	s.meridianMgr.SetStatusListener(func(st meridian.Status) {
-		s.broadcastMeridianStatus(st)
-	})
+	if s.runtimesSvc == nil {
+		s.runtimesSvc = runtimessvc.New(s.cfgSvc)
+	}
+	s.runtimesSvc.SetupMeridian(logPath, s.broadcastMeridianStatus)
 }
 
 // Shutdown tears down long-lived subprocess managers the server owns
@@ -336,8 +359,8 @@ func (s *Server) SetupMeridian(logPath string) {
 // nothing was started. Does NOT stop the gRPC server itself — that's the
 // caller's job (cmd/cercano/main.go uses GracefulStop).
 func (s *Server) Shutdown() {
-	if s.meridianMgr != nil {
-		s.meridianMgr.Stop()
+	if s.runtimesSvc != nil {
+		s.runtimesSvc.StopMeridian()
 	}
 }
 
@@ -391,55 +414,6 @@ func (s *Server) rebuildCloudLocked() error {
 	return s.providerSvc.Rebuild()
 }
 
-// syncMeridianForProfile starts or stops the managed Meridian proxy based on
-// the active profile's Route field. Called at the end of rebuildCloudLocked
-// so a profile change (or initial load) keeps the proxy in sync with what
-// the cloud route expects.
-//
-// No-op when SetupMeridian was never called (tests / minimal embeddings).
-// cfg is the config snapshot already held by the caller (avoids a second Get()).
-func (s *Server) syncMeridianForProfile(p config.CloudProfile, cfg config.Config) {
-	if s.meridianMgr == nil {
-		return
-	}
-	// The proxy must run when EITHER the active or the backup profile routes
-	// through Meridian — the backup dials it mid-failover, long after this sync.
-	m := p
-	if m.Route != "meridian" {
-		if bp, ok := profileByName(cfg.CloudProfiles, cfg.BackupCloudProfile); ok && bp.Route == "meridian" {
-			m = bp
-		}
-	}
-	if m.Route != "meridian" {
-		s.meridianMgr.Stop()
-		return
-	}
-	port := meridianPortFromBaseURL(m.BaseURL)
-	s.meridianMgr.Ensure(context.Background(), port)
-}
-
-// meridianPortFromBaseURL extracts the TCP port from a profile's BaseURL,
-// falling back to 3456 (Meridian's default) on parse failure or missing port.
-// Only loopback URLs are sensible here — the manager spawns Meridian locally,
-// so a remote BaseURL would mean "talk to someone else's proxy" and is
-// effectively unmanaged.
-func meridianPortFromBaseURL(baseURL string) int {
-	const defaultPort = 3456
-	if baseURL == "" {
-		return defaultPort
-	}
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		return defaultPort
-	}
-	if p := u.Port(); p != "" {
-		if n, err := strconv.Atoi(p); err == nil {
-			return n
-		}
-	}
-	return defaultPort
-}
-
 // RebuildCloud exports rebuildCloud for use by cmd/cercano/main.go at startup.
 func (s *Server) RebuildCloud() error { return s.providerSvc.Rebuild() }
 
@@ -467,8 +441,12 @@ func (s *Server) GetCloudProfiles(ctx context.Context, req *proto.GetCloudProfil
 			Name: p.Name, Flavor: p.Flavor, BaseUrl: p.BaseURL, Model: p.Model, HasKey: hasKey, Backend: p.Backend, Route: p.Route,
 		})
 	}
-	if s.meridianMgr != nil {
-		out.MeridianStatus = meridianStatusToProto(s.meridianMgr.Status())
+	if s.runtimesSvc != nil {
+		if st, ok := s.runtimesSvc.MeridianStatus(); ok {
+			out.MeridianStatus = meridianStatusToProto(st)
+		} else {
+			out.MeridianStatus = &proto.MeridianStatus{State: "disabled"}
+		}
 	} else {
 		out.MeridianStatus = &proto.MeridianStatus{State: "disabled"}
 	}
@@ -611,8 +589,10 @@ func (s *Server) resolveMainProvider() (llm.Provider, bool, bool, error) {
 
 // SetRuntimeManager attaches the local runtime/dashboard state manager.
 func (s *Server) SetRuntimeManager(m localruntime.Manager) {
-	s.runtimeManager = m
-	s.refreshRuntimeEndpoints()
+	if s.runtimesSvc == nil {
+		s.runtimesSvc = runtimessvc.New(s.cfgSvc)
+	}
+	s.runtimesSvc.SetRuntimeManager(m)
 }
 
 // SetCatalogManager attaches the online-catalog manager so
@@ -637,18 +617,19 @@ func (s *Server) SetCompactionGenerator(g *compactiongen.Generator) {
 // NewServer creates a new Agent gRPC server.
 func NewServer(a *agent.Agent, openProvider *legacymodels.OpenModelProvider, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
 	cfgService := cfgsvc.New("", config.Config{}, nil)
+	rtSvc := runtimessvc.New(cfgService)
 	s := &Server{
-		agent:   a,
-		events:  newEventHub(),
-		cfgSvc:  cfgService,
+		agent:       a,
+		events:      newEventHub(),
+		cfgSvc:      cfgService,
+		runtimesSvc: rtSvc,
 	}
-	// syncMeridian bridges rebuildCloud → syncMeridianForProfile without the
-	// providers service holding a direct meridianMgr reference. The callback
-	// captures s so it can read s.meridianMgr at call time (set after construction
-	// via SetupMeridian). This is the Task 6 coupling note — when runtimes is
-	// extracted, syncMeridian moves into that service.
-	syncMeridianFn := func(p config.CloudProfile, c config.Config) {
-		s.syncMeridianForProfile(p, c)
+	// syncMeridian bridges rebuildCloud → runtimesSvc.SyncMeridianForProfile
+	// without the providers service holding a direct meridianMgr reference.
+	// The callback captures rtSvc (constructed above and stored on s) so it
+	// can reach the manager at call time (set after construction via SetupMeridian).
+	syncMeridianFn := func(p config.CloudProfile, _ config.Config) {
+		rtSvc.SyncMeridianForProfile(p)
 	}
 	s.providerSvc = providers.New(cfgService, openProvider, router, coordinator, cloudFactory, registry, syncMeridianFn, nil)
 	// Construct the persistence service. It wraps the agent for store access;
@@ -681,7 +662,9 @@ func NewServer(a *agent.Agent, openProvider *legacymodels.OpenModelProvider, rou
 func (s *Server) SetConfigPersistence(path string, cfg config.Config) {
 	s.cfgSvc.SetPath(path)
 	s.cfgSvc.Set(cfg)
-	s.refreshRuntimeEndpoints()
+	if s.runtimesSvc != nil {
+		s.runtimesSvc.RefreshRuntimeEndpoints()
+	}
 }
 
 // LocusMode returns the currently configured Locus Mode (live; reflects
@@ -1315,10 +1298,11 @@ func (s *Server) ListModels(ctx context.Context, req *proto.ListModelsRequest) (
 // GetRuntimeStatus implements proto.AgentServer — returns the dashboard's
 // provider-neutral runtime snapshot.
 func (s *Server) GetRuntimeStatus(ctx context.Context, req *proto.GetRuntimeStatusRequest) (*proto.GetRuntimeStatusResponse, error) {
-	if s.runtimeManager == nil {
+	rm := s.runtimeMgr()
+	if rm == nil {
 		return &proto.GetRuntimeStatusResponse{}, nil
 	}
-	status, err := s.runtimeManager.Status(ctx)
+	status, err := rm.Status(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1342,10 +1326,11 @@ func (s *Server) GetRuntimeStatus(ctx context.Context, req *proto.GetRuntimeStat
 // dashboard can render "Catalog updated Nh ago" and color the label
 // based on staleness.
 func (s *Server) ListRuntimeModels(ctx context.Context, req *proto.ListRuntimeModelsRequest) (*proto.ListRuntimeModelsResponse, error) {
-	if s.runtimeManager == nil {
+	rm := s.runtimeMgr()
+	if rm == nil {
 		return &proto.ListRuntimeModelsResponse{}, nil
 	}
-	models, err := s.runtimeManager.Inventory(ctx)
+	models, err := rm.Inventory(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1463,10 +1448,11 @@ func (s *Server) RefreshOnlineCatalog(ctx context.Context, req *proto.RefreshOnl
 
 // ListRuntimeEndpoints implements proto.AgentServer.
 func (s *Server) ListRuntimeEndpoints(ctx context.Context, req *proto.ListRuntimeEndpointsRequest) (*proto.ListRuntimeEndpointsResponse, error) {
-	if s.runtimeManager == nil {
+	rm := s.runtimeMgr()
+	if rm == nil {
 		return &proto.ListRuntimeEndpointsResponse{}, nil
 	}
-	endpoints, err := s.runtimeManager.Endpoints(ctx)
+	endpoints, err := rm.Endpoints(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1475,10 +1461,11 @@ func (s *Server) ListRuntimeEndpoints(ctx context.Context, req *proto.ListRuntim
 
 // StartRuntimeModel implements proto.AgentServer.
 func (s *Server) StartRuntimeModel(ctx context.Context, req *proto.StartRuntimeModelRequest) (*proto.StartRuntimeModelResponse, error) {
-	if s.runtimeManager == nil {
+	rm := s.runtimeMgr()
+	if rm == nil {
 		return &proto.StartRuntimeModelResponse{Ok: false, Error: "runtime manager not configured"}, nil
 	}
-	instance, err := s.runtimeManager.Start(ctx, localruntime.StartRequest{
+	instance, err := rm.Start(ctx, localruntime.StartRequest{
 		Runtime: req.GetRuntime(),
 		ModelID: req.GetModelId(),
 	})
@@ -1490,10 +1477,11 @@ func (s *Server) StartRuntimeModel(ctx context.Context, req *proto.StartRuntimeM
 
 // StopRuntimeModel implements proto.AgentServer.
 func (s *Server) StopRuntimeModel(ctx context.Context, req *proto.StopRuntimeModelRequest) (*proto.StopRuntimeModelResponse, error) {
-	if s.runtimeManager == nil {
+	rm := s.runtimeMgr()
+	if rm == nil {
 		return &proto.StopRuntimeModelResponse{Ok: false, Error: "runtime manager not configured"}, nil
 	}
-	if err := s.runtimeManager.Stop(ctx, localruntime.StopRequest{InstanceID: req.GetInstanceId()}); err != nil {
+	if err := rm.Stop(ctx, localruntime.StopRequest{InstanceID: req.GetInstanceId()}); err != nil {
 		return &proto.StopRuntimeModelResponse{Ok: false, Error: err.Error()}, nil
 	}
 	return &proto.StopRuntimeModelResponse{Ok: true}, nil
@@ -1501,10 +1489,11 @@ func (s *Server) StopRuntimeModel(ctx context.Context, req *proto.StopRuntimeMod
 
 // RestartRuntime implements proto.AgentServer.
 func (s *Server) RestartRuntime(ctx context.Context, req *proto.RestartRuntimeRequest) (*proto.RestartRuntimeResponse, error) {
-	if s.runtimeManager == nil {
+	rm := s.runtimeMgr()
+	if rm == nil {
 		return &proto.RestartRuntimeResponse{Ok: false, Error: "runtime manager not configured"}, nil
 	}
-	instance, err := s.runtimeManager.Restart(ctx, localruntime.RestartRequest{
+	instance, err := rm.Restart(ctx, localruntime.RestartRequest{
 		InstanceID: req.GetInstanceId(),
 		Runtime:    req.GetRuntime(),
 		ModelID:    req.GetModelId(),
@@ -1558,7 +1547,8 @@ func enrollmentRecord(modelID, runtime, ref string) localruntime.ModelRecord {
 }
 
 func (s *Server) DownloadRuntimeModel(ctx context.Context, req *proto.DownloadRuntimeModelRequest) (*proto.DownloadRuntimeModelResponse, error) {
-	if s.runtimeManager == nil {
+	rm := s.runtimeMgr()
+	if rm == nil {
 		return &proto.DownloadRuntimeModelResponse{Ok: false, Error: "runtime manager not configured"}, nil
 	}
 	if ref := normalizeOllamaRef(req.GetOllamaRef()); ref != "" {
@@ -1566,11 +1556,11 @@ func (s *Server) DownloadRuntimeModel(ctx context.Context, req *proto.DownloadRu
 		// future alternative implementation is wired in, this branch
 		// is a no-op and the download will fall back to the provider
 		// lookup below (which will fail cleanly with "not found").
-		if imm, ok := s.runtimeManager.(*localruntime.InMemoryManager); ok {
+		if imm, ok := rm.(*localruntime.InMemoryManager); ok {
 			imm.EnrollDownload(enrollmentRecord(req.GetModelId(), req.GetRuntime(), ref))
 		}
 	}
-	model, err := s.runtimeManager.DownloadModel(ctx, localruntime.DownloadRequest{
+	model, err := rm.DownloadModel(ctx, localruntime.DownloadRequest{
 		Runtime: req.GetRuntime(),
 		ModelID: req.GetModelId(),
 	})
@@ -1582,10 +1572,11 @@ func (s *Server) DownloadRuntimeModel(ctx context.Context, req *proto.DownloadRu
 
 // CancelRuntimeModelDownload implements proto.AgentServer.
 func (s *Server) CancelRuntimeModelDownload(ctx context.Context, req *proto.CancelRuntimeModelDownloadRequest) (*proto.CancelRuntimeModelDownloadResponse, error) {
-	if s.runtimeManager == nil {
+	rm := s.runtimeMgr()
+	if rm == nil {
 		return &proto.CancelRuntimeModelDownloadResponse{Ok: false, Error: "runtime manager not configured"}, nil
 	}
-	model, err := s.runtimeManager.CancelDownload(ctx, localruntime.DownloadRequest{
+	model, err := rm.CancelDownload(ctx, localruntime.DownloadRequest{
 		Runtime: req.GetRuntime(),
 		ModelID: req.GetModelId(),
 	})
@@ -1597,10 +1588,11 @@ func (s *Server) CancelRuntimeModelDownload(ctx context.Context, req *proto.Canc
 
 // DeleteRuntimeModel implements proto.AgentServer.
 func (s *Server) DeleteRuntimeModel(ctx context.Context, req *proto.DeleteRuntimeModelRequest) (*proto.DeleteRuntimeModelResponse, error) {
-	if s.runtimeManager == nil {
+	rm := s.runtimeMgr()
+	if rm == nil {
 		return &proto.DeleteRuntimeModelResponse{Ok: false, Error: "runtime manager not configured"}, nil
 	}
-	if err := s.runtimeManager.DeleteModel(ctx, localruntime.DeleteModelRequest{
+	if err := rm.DeleteModel(ctx, localruntime.DeleteModelRequest{
 		Runtime: req.GetRuntime(),
 		ModelID: req.GetModelId(),
 	}); err != nil {
@@ -1612,10 +1604,11 @@ func (s *Server) DeleteRuntimeModel(ctx context.Context, req *proto.DeleteRuntim
 // StreamRuntimeLogs implements proto.AgentServer. The first version streams the
 // current server-side buffer; live follow can build on the same RPC later.
 func (s *Server) StreamRuntimeLogs(req *proto.StreamRuntimeLogsRequest, stream proto.Agent_StreamRuntimeLogsServer) error {
-	if s.runtimeManager == nil {
+	rm := s.runtimeMgr()
+	if rm == nil {
 		return nil
 	}
-	logs, err := s.runtimeManager.Logs(stream.Context(), localruntime.LogRequest{
+	logs, err := rm.Logs(stream.Context(), localruntime.LogRequest{
 		Tail:   int(req.GetTail()),
 		Source: req.GetSource(),
 	})
@@ -1634,19 +1627,17 @@ func (s *Server) StreamRuntimeLogs(req *proto.StreamRuntimeLogsRequest, stream p
 // the derived endpoints. UpdateConfig calls applyRuntimeEndpoints directly
 // with its already-mutated local snapshot instead.
 func (s *Server) refreshRuntimeEndpoints() {
-	if s.runtimeManager == nil {
-		return
+	if s.runtimesSvc != nil {
+		s.runtimesSvc.RefreshRuntimeEndpoints()
 	}
-	s.applyRuntimeEndpoints(s.cfgSvc.Get())
 }
 
 // applyRuntimeEndpoints derives and pushes runtime endpoints from the given
 // config snapshot. Lock-free: the caller owns lock discipline.
 func (s *Server) applyRuntimeEndpoints(cfg config.Config) {
-	if s.runtimeManager == nil {
-		return
+	if s.runtimesSvc != nil {
+		s.runtimesSvc.ApplyRuntimeEndpoints(cfg)
 	}
-	s.runtimeManager.SetEndpoints(localruntime.EndpointsFromConfig(cfg))
 }
 
 func mapRuntimeModels(models []localruntime.ModelRecord) []*proto.RuntimeModel {

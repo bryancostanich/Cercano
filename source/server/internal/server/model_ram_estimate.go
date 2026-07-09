@@ -49,11 +49,12 @@ func (s *Server) GetModelRAMEstimate(ctx context.Context, req *proto.GetModelRAM
 		return resp, nil
 
 	case strings.TrimSpace(req.GetModelId()) != "":
-		if s.runtimeManager == nil {
+		rm := s.runtimeMgr()
+		if rm == nil {
 			resp.Error = "runtime manager not configured"
 			return resp, nil
 		}
-		models, err := s.runtimeManager.Inventory(ctx)
+		models, err := rm.Inventory(ctx)
 		if err != nil {
 			resp.Error = err.Error()
 			return resp, nil

@@ -5,11 +5,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"image/color"
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -2818,7 +2820,7 @@ func (m Model) renderConfirmPrompt(p *pendingToolCall) string {
 		// (display-only — gating is unchanged; the hint never escalates tier).
 		head = m.styles.Accent.Render("▸ ⚠ ")
 	}
-	summary := displayToolName(p.Name) + " " + truncateArgs(p.Args, 80)
+	summary := displayToolName(p.Name) + " " + summarizeArgs(p.Args, 120)
 	hints := m.styles.Muted.Render("[") +
 		m.styles.Accent.Render("y") +
 		m.styles.Muted.Render("]es / [") +
@@ -3140,9 +3142,99 @@ func (m Model) routeChatMsg(msg tea.Msg) (Model, tea.Cmd) {
 	return m, progressAnimTick()
 }
 
-// truncateArgs renders the JSON args compactly for the confirm prompt one-liner.
+// summarizeArgs renders tool arguments for the confirm prompt one-liner. JSON
+// objects become key=value summaries so approval prompts explain the requested
+// action instead of showing raw JSON. The [d]iff action still exposes the full
+// original args when the user wants exact details.
+func summarizeArgs(s string, max int) string {
+	var decoded any
+	dec := json.NewDecoder(strings.NewReader(s))
+	dec.UseNumber()
+	if err := dec.Decode(&decoded); err != nil {
+		return truncateArgs(s, max)
+	}
+	if dec.More() {
+		return truncateArgs(s, max)
+	}
+
+	if obj, ok := decoded.(map[string]any); ok && len(obj) > 0 {
+		keys := orderedArgKeys(obj)
+		parts := make([]string, 0, len(keys))
+		for _, key := range keys {
+			parts = append(parts, key+"="+summarizeArgValue(obj[key]))
+		}
+		return truncateArgs(strings.Join(parts, " "), max)
+	}
+
+	return truncateArgs(summarizeArgValue(decoded), max)
+}
+
+func orderedArgKeys(obj map[string]any) []string {
+	preferred := []string{
+		"conversation_id",
+		"task",
+		"cmd",
+		"cwd",
+		"path",
+		"file_path",
+		"pattern",
+		"query",
+		"url",
+		"tools",
+	}
+	seen := make(map[string]bool, len(obj))
+	keys := make([]string, 0, len(obj))
+	for _, key := range preferred {
+		if _, ok := obj[key]; ok {
+			keys = append(keys, key)
+			seen[key] = true
+		}
+	}
+	rest := make([]string, 0, len(obj)-len(keys))
+	for key := range obj {
+		if !seen[key] {
+			rest = append(rest, key)
+		}
+	}
+	sort.Strings(rest)
+	return append(keys, rest...)
+}
+
+func summarizeArgValue(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return "null"
+	case string:
+		return oneLine(x)
+	case json.Number:
+		return x.String()
+	case bool:
+		if x {
+			return "true"
+		}
+		return "false"
+	case []any:
+		parts := make([]string, 0, len(x))
+		for _, item := range x {
+			parts = append(parts, summarizeArgValue(item))
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	default:
+		b, err := json.Marshal(x)
+		if err != nil {
+			return fmt.Sprint(x)
+		}
+		return string(b)
+	}
+}
+
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// truncateArgs keeps the confirm prompt summary to one line.
 func truncateArgs(s string, max int) string {
-	s = strings.ReplaceAll(s, "\n", " ")
+	s = oneLine(s)
 	if len(s) <= max {
 		return s
 	}

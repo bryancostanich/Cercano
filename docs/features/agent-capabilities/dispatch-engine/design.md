@@ -50,6 +50,49 @@ Co-processor = the degenerate case (fixed prompt, no tools, one-shot). Subagent 
    - **Caller hints** (a role/tier preference, or `ModelOverride`) are advisory inputs the router *may* honor within locus bounds — never an override of locus.
    - **Future upgrade (documented, not built now):** an embedded small-model router that analyzes the prompt and references a **model×capability matrix** to choose the target. The matrix is greenfield today (only `llm.Capabilities` + a binary code/research split in `internal/research/modelcheck.go`). When it lands, only the seam's *implementation* changes — the dispatch engine does not.
 
+7. **Cloud dispatch uses provider-neutral cost/quality profiles.** When the locus allows cloud dispatch, model choice should not be a raw vendor model name and should not be tied to tool permissions. Use three user-facing profiles:
+   - **economy** — cheap and fast; good for read-only exploration, summaries, catalog checks, and mechanical edits that are easy to verify.
+   - **standard** — the default for normal coding, documentation, bounded multi-file edits, and test repair.
+   - **premium** — strongest allowed model for hard design, ambiguous debugging, adversarial review, security-sensitive review, or changes where a wrong answer is expensive.
+
+   The stable rule is: **use the least expensive configured model that is likely to succeed, but do not go below the task's risk level.** A subagent with write tools can still use `economy` when the edit is mechanical and tests check it; a read-only subagent can still need `premium` when the judgment is hard. Permissions answer "what may this subagent do?" Profiles answer "how strong and expensive should the model be?"
+
+   Profiles are provider-neutral. Each provider maps `economy` / `standard` / `premium` to its own model names, and `premium` means "the strongest configured model for this provider," not a promise that all vendors' premium models are equal. Example shape:
+
+   ```yaml
+   model_profiles:
+     cloud:
+       default_provider: anthropic
+       default_profile: standard
+
+       providers:
+         anthropic:
+           economy:
+             model: claude-3-5-haiku-latest
+           standard:
+             model: claude-sonnet-4-20250514
+           premium:
+             model: claude-opus-4-20250514
+
+         openai:
+           economy:
+             model: gpt-4.1-mini
+           standard:
+             model: gpt-4.1
+           premium:
+             model: o3
+
+         google:
+           economy:
+             model: gemini-2.5-flash
+           standard:
+             model: gemini-2.5-pro
+           premium:
+             model: gemini-2.5-pro
+   ```
+
+   Dispatch may accept explicit provider/profile hints or `auto`. In `auto`, the router can ask the current cloud model to choose from the configured allowlist using the task, tools, expected output, and risk. The model chooses a profile, not an arbitrary model name; Cercano validates the choice against config and locus. Dispatch results should report the resolved route plainly, for example: `cloud/anthropic/economy: claude-3-5-haiku-latest; reason: read-only catalog check with low risk and easy verification`.
+
 ## Subagent engine — feature design (DRAFT, unconfirmed)
 
 Drafted by the assistant; not yet user-confirmed. Consequential items are pulled out to a decision-matrix review with the user (see "Adversarial review" below).

@@ -1913,6 +1913,53 @@ func gitInfo(dir string) (bool, string) {
 }
 
 
+// AttachConversation implements proto.AgentServer: a second surface subscribes
+// (read-only) to a conversation's turn events without starting a new turn.
+//
+// Behaviour:
+//   - Attach returns a defensive-copy replay buffer (events already published
+//     in the current or most-recent turn) plus a live channel.
+//   - The replay is sent first, in order, via sendRunnerEvent.
+//   - Then live events are forwarded until (a) the broker closes ch (the turn
+//     ended / superseded and its generation retired), or (b) the client
+//     disconnects (stream.Context().Done()).
+//   - Lossy attach: if this observer drains slowly, events are dropped rather
+//     than stalling the turn's publisher. A passive observer must not block
+//     the initiator.
+//   - Observe-only: no permission prompting, no persistence, no turn gating.
+func (s *Server) AttachConversation(req *proto.AttachConversationRequest, stream proto.Agent_AttachConversationServer) error {
+	convID := req.GetConversationId()
+	if convID == "" {
+		return grpcstatus.Error(codes.InvalidArgument, "conversation_id is required")
+	}
+
+	replay, ch, detach := s.turnBroker.Attach(convID)
+	defer detach()
+
+	// Send the replay buffer first (events published before this Attach call).
+	for _, ev := range replay {
+		if err := sendRunnerEvent(stream, ev); err != nil {
+			return err
+		}
+	}
+
+	// Forward live events until the channel closes or the client disconnects.
+	for {
+		select {
+		case ev, ok := <-ch:
+			if !ok {
+				// Broker closed ch — turn ended or was superseded.
+				return nil
+			}
+			if err := sendRunnerEvent(stream, ev); err != nil {
+				return err
+			}
+		case <-stream.Context().Done():
+			return stream.Context().Err()
+		}
+	}
+}
+
 // streamProcessRequestWithToolLoop drives the native tool-calling loop and
 // emits per-event stream payloads. Used when a layered LLM provider has been
 // wired via SetCloudLLMProvider.
@@ -2133,6 +2180,15 @@ func (s *brokerSink) Emit(ev runnersvc.Event) {
 	s.broker.Publish(s.conv, s.gen, ev)
 }
 
+// streamResponseSender is the minimal interface required by sendRunnerEvent so
+// both proto.Agent_StreamProcessRequestServer and
+// proto.Agent_AttachConversationServer (which are both type aliases for
+// grpc.ServerStreamingServer[proto.StreamProcessResponse]) can be passed
+// without duplicating the mapping switch.
+type streamResponseSender interface {
+	Send(*proto.StreamProcessResponse) error
+}
+
 // sendRunnerEvent maps a runner.Event to the appropriate proto.StreamProcessResponse
 // payload and sends it on stream. This is the extracted mapping switch formerly
 // inlined in hostProtoSink.Emit. It is a free function so the Task-4
@@ -2141,7 +2197,7 @@ func (s *brokerSink) Emit(ev runnersvc.Event) {
 // FinalResponse is NOT sent here (the handler sends it after RunTurn returns).
 // EventWatchdog/escalate is silently dropped — behavior-preserving (old sink
 // did the same).
-func sendRunnerEvent(stream proto.Agent_StreamProcessRequestServer, ev runnersvc.Event) error {
+func sendRunnerEvent(stream streamResponseSender, ev runnersvc.Event) error {
 	switch ev.Kind {
 	case runnersvc.EventProgress:
 		return stream.Send(&proto.StreamProcessResponse{

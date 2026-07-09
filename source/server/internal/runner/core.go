@@ -303,21 +303,22 @@ func makeLoopSink(sink EventSink) func(agent.LoopEvent) {
 			})
 
 		case agent.LoopProgress:
-			if ev.SubAgentID != "" || ev.SubAgentKind != "" {
+			if ev.SubAgentID != "" {
 				sink.Emit(Event{
-					Kind:          EventSubAgent,
-					Text:          ev.Summary,
-					ToolUseID:     ev.ToolUseID,
-					ToolName:      ev.ToolName,
-					Detail:        ev.Detail,
-					Summary:       ev.Summary,
-					StartLine:     ev.StartLine,
-					IsError:       ev.IsError,
-					SubAgentID:    ev.SubAgentID,
-					SubAgentTitle: ev.SubAgentTitle,
-					SubAgentKind:  ev.SubAgentKind,
-					GrantedTools:  append([]string(nil), ev.GrantedTools...),
-					IgnoredTools:  append([]string(nil), ev.IgnoredTools...),
+					Kind:             EventSubAgent,
+					Text:             ev.Summary,
+					ToolUseID:        ev.ToolUseID,
+					ToolName:         ev.ToolName,
+					Detail:           ev.Detail,
+					Summary:          ev.Summary,
+					StartLine:        ev.StartLine,
+					IsError:          ev.IsError,
+					SubAgentID:       ev.SubAgentID,
+					SubAgentParentID: ev.SubAgentParentID,
+					SubAgentTitle:    ev.SubAgentTitle,
+					SubAgentKind:     ev.SubAgentKind,
+					GrantedTools:     append([]string(nil), ev.GrantedTools...),
+					IgnoredTools:     append([]string(nil), ev.IgnoredTools...),
 				})
 				break
 			}

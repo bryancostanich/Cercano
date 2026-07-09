@@ -51,11 +51,12 @@ type Event struct {
 	Thread       string
 
 	// Sub-agent lifecycle/transcript: EventSubAgent.
-	SubAgentID    string
-	SubAgentTitle string
-	SubAgentKind  string
-	GrantedTools  []string
-	IgnoredTools  []string
+	SubAgentID       string
+	SubAgentParentID string
+	SubAgentTitle    string
+	SubAgentKind     string
+	GrantedTools     []string
+	IgnoredTools     []string
 
 	// EventDone.
 	Result Result

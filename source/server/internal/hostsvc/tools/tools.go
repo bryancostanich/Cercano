@@ -292,9 +292,9 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{Kind: "error", Text: fmt.Sprintf("sub-agent grant failed: %v", err), IsError: true})
 		return dispatch.Result{}, err
 	}
-	emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{Kind: "grant", Text: fmt.Sprintf("sub-agent tools granted: %s", strings.Join(granted, ", ")), GrantedTools: granted, IgnoredTools: ignored})
+	emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentParentID: spec.ConversationID, Kind: "grant", Text: fmt.Sprintf("sub-agent tools granted: %s", strings.Join(granted, ", ")), GrantedTools: granted, IgnoredTools: ignored})
 	if len(ignored) > 0 {
-		emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{Kind: "ignored_tools", Text: fmt.Sprintf("sub-agent ignored unknown tool names: %s", strings.Join(ignored, ", ")), GrantedTools: granted, IgnoredTools: ignored})
+		emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentParentID: spec.ConversationID, Kind: "ignored_tools", Text: fmt.Sprintf("sub-agent ignored unknown tool names: %s", strings.Join(ignored, ", ")), GrantedTools: granted, IgnoredTools: ignored})
 	}
 
 	// Permission scope for the sub-loop. A W/X grant was approved as a set —
@@ -338,7 +338,7 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	}
 	log.Printf("[dispatch] subagent start: conv=%s model=%s tools=%v", subConvID, model, registryToolNames(reg))
 	subTitle := "sub"
-	emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentTitle: subTitle, Kind: "started", Text: fmt.Sprintf("sub-agent start: conv=%s model=%s tools=%s", subConvID, model, strings.Join(granted, ", ")), GrantedTools: granted, IgnoredTools: ignored})
+	emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "started", Text: fmt.Sprintf("sub-agent start: conv=%s model=%s tools=%s", subConvID, model, strings.Join(granted, ", ")), GrantedTools: granted, IgnoredTools: ignored})
 
 	// The subagent's provider calls must carry their OWN session identity, not
 	// the parent conversation's (inherited via ctx). Upstream bridges key
@@ -366,10 +366,10 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		ConversationID: subConvID, // nested dispatches link to this sub-conversation
 		OnTextDelta: func(t string) {
 			buf.WriteString(t)
-			emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentTitle: subTitle, Kind: "token", Text: t, GrantedTools: granted, IgnoredTools: ignored})
+			emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "token", Text: t, GrantedTools: granted, IgnoredTools: ignored})
 		},
 		EventSink: func(ev agent.LoopEvent) {
-			if progress, ok := formatSubagentLoopEvent(subConvID, subTitle, ev); ok {
+			if progress, ok := formatSubagentLoopEvent(subConvID, spec.ConversationID, subTitle, ev); ok {
 				emitDispatchProgress(spec.Emit, progress)
 			}
 		},
@@ -378,12 +378,12 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	})
 	if err != nil {
 		log.Printf("[dispatch] subagent done: conv=%s err=%v", subConvID, err)
-		emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentTitle: subTitle, Kind: "error", Text: fmt.Sprintf("sub-agent failed: conv=%s err=%v", subConvID, err), GrantedTools: granted, IgnoredTools: ignored, IsError: true})
+		emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "error", Text: fmt.Sprintf("sub-agent failed: conv=%s err=%v", subConvID, err), GrantedTools: granted, IgnoredTools: ignored, IsError: true})
 		return dispatch.Result{}, err
 	}
 	log.Printf("[dispatch] subagent done: conv=%s iterations=%d tokens_in=%d tokens_out=%d",
 		subConvID, res.Iterations, res.InputTokens, res.OutputTokens)
-	emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentTitle: subTitle, Kind: "done", Text: fmt.Sprintf("sub-agent done: conv=%s iterations=%d", subConvID, res.Iterations), GrantedTools: granted, IgnoredTools: ignored})
+	emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "done", Text: fmt.Sprintf("sub-agent done: conv=%s iterations=%d", subConvID, res.Iterations), GrantedTools: granted, IgnoredTools: ignored})
 
 	// 5. Assemble result. Prefer ToolLoopResult.FinalText (the last assistant
 	// text block from the loop); fall back to the streamed buf if it's empty
@@ -412,17 +412,18 @@ func emitDispatchProgress(emit func(agenttools.ProgressEvent), ev agenttools.Pro
 	emit(ev)
 }
 
-func formatSubagentLoopEvent(id, title string, ev agent.LoopEvent) (agenttools.ProgressEvent, bool) {
+func formatSubagentLoopEvent(id, parentID, title string, ev agent.LoopEvent) (agenttools.ProgressEvent, bool) {
 	progress := agenttools.ProgressEvent{
-		SubAgentID:    id,
-		SubAgentTitle: title,
-		ToolUseID:     ev.ToolUseID,
-		ToolName:      ev.ToolName,
-		ArgsSummary:   ev.Summary,
-		Summary:       ev.Summary,
-		Detail:        ev.Detail,
-		StartLine:     ev.StartLine,
-		IsError:       ev.IsError,
+		SubAgentID:       id,
+		SubAgentParentID: parentID,
+		SubAgentTitle:    title,
+		ToolUseID:        ev.ToolUseID,
+		ToolName:         ev.ToolName,
+		ArgsSummary:      ev.Summary,
+		Summary:          ev.Summary,
+		Detail:           ev.Detail,
+		StartLine:        ev.StartLine,
+		IsError:          ev.IsError,
 	}
 	switch ev.Kind {
 	case agent.LoopToolUseStart:
@@ -448,6 +449,16 @@ func formatSubagentLoopEvent(id, title string, ev agent.LoopEvent) (agenttools.P
 			progress.Text = fmt.Sprintf("sub-agent tool complete: %s", ev.ToolName)
 		}
 	case agent.LoopProgress:
+		if ev.SubAgentID != "" {
+			progress.SubAgentID = ev.SubAgentID
+			progress.SubAgentParentID = ev.SubAgentParentID
+			if progress.SubAgentParentID == "" {
+				progress.SubAgentParentID = id
+			}
+			progress.SubAgentTitle = ev.SubAgentTitle
+			progress.GrantedTools = append([]string(nil), ev.GrantedTools...)
+			progress.IgnoredTools = append([]string(nil), ev.IgnoredTools...)
+		}
 		progress.Kind = ev.SubAgentKind
 		progress.Text = ev.Summary
 		if progress.Kind == "" {

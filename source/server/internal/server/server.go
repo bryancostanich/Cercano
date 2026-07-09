@@ -2305,6 +2305,7 @@ func sendRunnerEvent(stream streamResponseSender, ev runnersvc.Event) error {
 					Id:           ev.SubAgentID,
 					Title:        ev.SubAgentTitle,
 					Kind:         ev.SubAgentKind,
+					ParentId:     ev.SubAgentParentID,
 					GrantedTools: append([]string(nil), ev.GrantedTools...),
 					IgnoredTools: append([]string(nil), ev.IgnoredTools...),
 					Text:         ev.Text,

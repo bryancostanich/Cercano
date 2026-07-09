@@ -520,6 +520,7 @@ type SubAgentEvent struct {
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
 	Kind          string                 `protobuf:"bytes,3,opt,name=kind,proto3" json:"kind,omitempty"` // started|progress|token|tool_use_start|tool_use_stop|tool_exec_start|tool_exec_complete|done|error
+	ParentId      string                 `protobuf:"bytes,14,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
 	GrantedTools  []string               `protobuf:"bytes,4,rep,name=granted_tools,json=grantedTools,proto3" json:"granted_tools,omitempty"`
 	IgnoredTools  []string               `protobuf:"bytes,5,rep,name=ignored_tools,json=ignoredTools,proto3" json:"ignored_tools,omitempty"`
 	Text          string                 `protobuf:"bytes,6,opt,name=text,proto3" json:"text,omitempty"`
@@ -581,6 +582,13 @@ func (x *SubAgentEvent) GetTitle() string {
 func (x *SubAgentEvent) GetKind() string {
 	if x != nil {
 		return x.Kind
+	}
+	return ""
+}
+
+func (x *SubAgentEvent) GetParentId() string {
+	if x != nil {
+		return x.ParentId
 	}
 	return ""
 }
@@ -9427,11 +9435,12 @@ const file_agent_proto_rawDesc = "" +
 	"\x04text\x18\x03 \x01(\tR\x04text\x12\x16\n" +
 	"\x06thread\x18\x04 \x01(\tR\x06thread\"*\n" +
 	"\x0eProgressUpdate\x12\x18\n" +
-	"\amessage\x18\x01 \x01(\tR\amessage\"\xf3\x02\n" +
+	"\amessage\x18\x01 \x01(\tR\amessage\"\x90\x03\n" +
 	"\rSubAgentEvent\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x12\n" +
-	"\x04kind\x18\x03 \x01(\tR\x04kind\x12#\n" +
+	"\x04kind\x18\x03 \x01(\tR\x04kind\x12\x1b\n" +
+	"\tparent_id\x18\x0e \x01(\tR\bparentId\x12#\n" +
 	"\rgranted_tools\x18\x04 \x03(\tR\fgrantedTools\x12#\n" +
 	"\rignored_tools\x18\x05 \x03(\tR\fignoredTools\x12\x12\n" +
 	"\x04text\x18\x06 \x01(\tR\x04text\x12\x1e\n" +

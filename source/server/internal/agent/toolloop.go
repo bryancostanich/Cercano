@@ -40,27 +40,29 @@ type LoopEvent struct {
 	// 1-based line where a file edit/write began (0 = not applicable).
 	StartLine int
 
-	SubAgentID    string
-	SubAgentTitle string
-	SubAgentKind  string
-	GrantedTools  []string
-	IgnoredTools  []string
+	SubAgentID       string
+	SubAgentParentID string
+	SubAgentTitle    string
+	SubAgentKind     string
+	GrantedTools     []string
+	IgnoredTools     []string
 }
 
 func loopProgressEvent(defaultToolUseID, defaultToolName string, progress agenttools.ProgressEvent) LoopEvent {
 	ev := LoopEvent{
-		Kind:          LoopProgress,
-		ToolUseID:     defaultToolUseID,
-		ToolName:      defaultToolName,
-		Summary:       progress.Text,
-		Detail:        progress.Detail,
-		IsError:       progress.IsError,
-		StartLine:     progress.StartLine,
-		SubAgentID:    progress.SubAgentID,
-		SubAgentTitle: progress.SubAgentTitle,
-		SubAgentKind:  progress.Kind,
-		GrantedTools:  append([]string(nil), progress.GrantedTools...),
-		IgnoredTools:  append([]string(nil), progress.IgnoredTools...),
+		Kind:             LoopProgress,
+		ToolUseID:        defaultToolUseID,
+		ToolName:         defaultToolName,
+		Summary:          progress.Text,
+		Detail:           progress.Detail,
+		IsError:          progress.IsError,
+		StartLine:        progress.StartLine,
+		SubAgentID:       progress.SubAgentID,
+		SubAgentParentID: progress.SubAgentParentID,
+		SubAgentTitle:    progress.SubAgentTitle,
+		SubAgentKind:     progress.Kind,
+		GrantedTools:     append([]string(nil), progress.GrantedTools...),
+		IgnoredTools:     append([]string(nil), progress.IgnoredTools...),
 	}
 	if progress.ToolUseID != "" {
 		ev.ToolUseID = progress.ToolUseID

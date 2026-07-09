@@ -6,18 +6,20 @@ import (
 )
 
 type chatTab struct {
-	id      string
-	title   string
-	tools   []string
-	view    chatView
-	done    bool
-	errored bool
+	id       string
+	parentID string
+	title    string
+	tools    []string
+	view     chatView
+	done     bool
+	errored  bool
 }
 
 type chatTabSurface struct {
-	active string
-	order  []string
-	tabs   map[string]*chatTab
+	active      string
+	order       []string
+	tabs        map[string]*chatTab
+	childCounts map[string]int
 }
 
 const mainChatTabID = "main"
@@ -25,6 +27,9 @@ const mainChatTabID = "main"
 func (m *Model) ensureChatTabs() {
 	if m.chatTabs.tabs == nil {
 		m.chatTabs.tabs = map[string]*chatTab{}
+	}
+	if m.chatTabs.childCounts == nil {
+		m.chatTabs.childCounts = map[string]int{}
 	}
 	if _, ok := m.chatTabs.tabs[mainChatTabID]; !ok {
 		m.chatTabs.tabs[mainChatTabID] = &chatTab{id: mainChatTabID, title: "main", view: m.chat}
@@ -57,12 +62,12 @@ func (m *Model) activeChatView() *chatView {
 	return &m.chat
 }
 
-func (m *Model) ensureSubAgentTab(id, title string, tools []string) *chatView {
+func (m *Model) ensureSubAgentTab(id, parentID, title string, tools []string) *chatView {
 	m.ensureChatTabs()
-	if title == "" || title == "sub" {
-		title = fmt.Sprintf("sub %d", len(m.chatTabs.order))
-	}
 	if tab, ok := m.chatTabs.tabs[id]; ok {
+		if parentID != "" && tab.parentID == "" {
+			tab.parentID = parentID
+		}
 		if title != "" && title != "sub" {
 			tab.title = title
 		}
@@ -71,6 +76,7 @@ func (m *Model) ensureSubAgentTab(id, title string, tools []string) *chatView {
 		}
 		return &tab.view
 	}
+	title = m.nextSubAgentTitle(parentID, title)
 	vpW := m.width - 2
 	if vpW < 1 {
 		vpW = 1
@@ -81,11 +87,31 @@ func (m *Model) ensureSubAgentTab(id, title string, tools []string) *chatView {
 	}
 	view := newChatView(m.styles, m.palette, m.root, m.home, vpW, vpH)
 	view.AppendEntry(&Entry{Role: RoleSystem, Content: fmt.Sprintf("Sub-agent %s started", title)})
-	tab := &chatTab{id: id, title: title, tools: append([]string(nil), tools...), view: view}
+	tab := &chatTab{id: id, parentID: parentID, title: title, tools: append([]string(nil), tools...), view: view}
 	m.chatTabs.tabs[id] = tab
 	m.chatTabs.order = append(m.chatTabs.order, id)
 	m.chatTabs.active = id
 	return &tab.view
+}
+
+func (m *Model) nextSubAgentTitle(parentID, requested string) string {
+	if requested != "" && requested != "sub" {
+		return requested
+	}
+	counterKey := mainChatTabID
+	prefix := "sub"
+	if parentID != "" {
+		if parent, ok := m.chatTabs.tabs[parentID]; ok && parent != nil && parent.id != mainChatTabID {
+			counterKey = parentID
+			prefix = parent.title
+		}
+	}
+	m.chatTabs.childCounts[counterKey]++
+	ordinal := m.chatTabs.childCounts[counterKey]
+	if prefix == "sub" {
+		return fmt.Sprintf("sub %d", ordinal)
+	}
+	return fmt.Sprintf("%s.%d", prefix, ordinal)
 }
 
 func (m *Model) chatTabItems() []tabStripItem {
@@ -135,11 +161,7 @@ func (m *Model) applySubAgentEvent(ev subAgentEventMsg) {
 	if ev.id == "" {
 		ev.id = "sub"
 	}
-	title := ev.title
-	if title == "" {
-		title = ev.id
-	}
-	view := m.ensureSubAgentTab(ev.id, title, ev.tools)
+	view := m.ensureSubAgentTab(ev.id, ev.parentID, ev.title, ev.tools)
 	if len(ev.tools) > 0 && ev.kind == "started" {
 		view.AppendEntry(&Entry{Role: RoleSystem, Content: "Tools: " + strings.Join(ev.tools, ", ")})
 	}

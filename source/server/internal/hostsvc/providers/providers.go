@@ -166,7 +166,7 @@ func New(
 
 // --- Resolver interface implementation ---
 
-func (p *service) Cloud() llm.Provider                          { return p.cloudLLMProvider }
+func (p *service) Cloud() llm.Provider                         { return p.cloudLLMProvider }
 func (p *service) Open() llm.Provider                          { return p.openLLMProvider }
 func (p *service) OpenLegacy() *legacymodels.OpenModelProvider { return p.openProvider }
 func (p *service) Router() RouterCloudUpdater                  { return p.router }
@@ -175,10 +175,10 @@ func (p *service) CatalogManager() *ollamacatalog.Manager      { return p.catalo
 func (p *service) CloudLLMProvider() llm.Provider              { return p.cloudLLMProvider }
 func (p *service) OpenLLMProvider() llm.Provider               { return p.openLLMProvider }
 
-func (p *service) SetCloudLLMProvider(prov llm.Provider) { p.cloudLLMProvider = prov }
-func (p *service) SetOpenLLMProvider(prov llm.Provider)  { p.openLLMProvider = prov }
+func (p *service) SetCloudLLMProvider(prov llm.Provider)       { p.cloudLLMProvider = prov }
+func (p *service) SetOpenLLMProvider(prov llm.Provider)        { p.openLLMProvider = prov }
 func (p *service) SetCatalogManager(cm *ollamacatalog.Manager) { p.catalogManager = cm }
-func (p *service) SetUsageSink(fn func(usage.Usage))     { p.usageSink = fn }
+func (p *service) SetUsageSink(fn func(usage.Usage))           { p.usageSink = fn }
 func (p *service) SetOpenProviderFactory(fn func(cfg.Config) llm.Provider) {
 	p.openProviderFactory = fn
 }
@@ -225,6 +225,14 @@ func (p *service) Main() (llm.Provider, bool, bool, error) {
 // Was mainModelFor on Server.
 func (p *service) MainModel(isCloud bool) string {
 	if isCloud {
+		// Main chat is the everyday capability tier; on the cloud side that
+		// resolves through the active profile's vendor cost table (everyday ->
+		// standard), falling back to the profile's own Model when no table is
+		// configured. This keeps main-chat model selection on the same
+		// vendor-keyed path as dispatch — never a raw provider-blind tier slot.
+		if prof, ok := p.cfgSvc.ActiveProfile(); ok {
+			return p.cfgSvc.Get().ModelProfiles.ResolveCloudModelForTier(prof, cfg.TierEveryday)
+		}
 		return p.ActiveCloudModel()
 	}
 	c := p.cfgSvc.Get()
@@ -240,6 +248,14 @@ func (p *service) PrimaryModel() string {
 	cfgSnap := p.cfgSvc.Get()
 	switch cfgSnap.LocusMode {
 	case "cloud_only", "cloud_primary":
+		// Measure against the model main chat actually uses: the everyday tier
+		// resolved through the active profile's vendor cost table, so the meter
+		// tracks the served model rather than the profile's bare default.
+		if prof, ok := p.cfgSvc.ActiveProfile(); ok {
+			if m := cfgSnap.ModelProfiles.ResolveCloudModelForTier(prof, cfg.TierEveryday); m != "" {
+				return m
+			}
+		}
 		if m := p.ActiveCloudModel(); m != "" {
 			return m
 		}

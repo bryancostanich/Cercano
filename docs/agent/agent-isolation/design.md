@@ -220,7 +220,9 @@ us things about 4–6.
 3. **Extract `TurnRunner`** with owned per-conversation state + zero
    process-global mutable state, behind an interface, in the in-process wrapper.
    Add the concurrent-two-runners guard test. **The correctness bug class is
-   structurally dead here — before workers exist.**
+   structurally dead here — before workers exist.** Guarded by
+   `internal/runner.TestCore_ConcurrentTurns_NoCrossTalk` — two cores, different
+   workdirs/sessions, concurrent under -race, zero cross-talk.
 4. **Host broker + multi-surface attach** — per-conversation fan-out,
    `Attach`/`Detach`, snapshot-on-attach. Still in-process runner. **Multi-surface
    feature ships here.**

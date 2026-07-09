@@ -282,6 +282,14 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	}
 	orchestrator := agent.NewAgent(lazyRouter, coordinator, agentOpts...)
 
+	// Startup orphan-sweep: a hard-killed previous host leaves worker process
+	// groups + pidfiles/sockets behind. Reap the ones still alive that identify
+	// as cercano workers before we start serving (and before this host spawns
+	// any worker of its own). Best-effort — never blocks startup.
+	if n := worker.ReapOrphanWorkers(); n > 0 {
+		fmt.Fprintf(os.Stderr, "reaped %d orphaned worker(s) from a previous run\n", n)
+	}
+
 	lis, err := net.Listen("tcp", bindAddr)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to listen on %s: %v", bindAddr, err)

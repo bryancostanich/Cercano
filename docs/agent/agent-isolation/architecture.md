@@ -458,8 +458,8 @@ broker), the runner is a transient engine behind it.
 | **2** | host decomposition — the six `hostsvc` services + thin front door | Done |
 | **3** | `TurnRunner` core — proto-free, provider-free, zero global state; concurrent-runner guard test | Done |
 | **4** | broker + attach — per-conversation fan-out, replay, `AttachConversation` | Done |
-| **5** | worker process — bidi transport, worker binary, host `workerRunner`, credential proxy, basic crash isolation | In progress |
-| **6** | hardening — idle-reap, health/restart, mid-turn resume, worker pooling, orphan-reap-on-startup, permission-driver fallback edges | Planned |
+| **5** | worker process — bidi transport, worker binary, host `workerRunner`, credential proxy, basic crash isolation | Done |
+| **6** | equivalence (backup failover, watchdog, MCP fallback) + lifecycle (per-conversation reuse, health/restart, idle-reap, orphan-sweep, graceful drain) | Done |
 
 **Phase 5 sub-status (as-built).** The wire protocol (`proto.Worker`, envelopes,
 `LLMMessage`, `ConfigSnapshot`, credential messages) and codecs are complete and
@@ -474,14 +474,41 @@ stays the default for embedded mode + the test suite (which construct `Server`
 directly and never call the selector). Both-modes parity and the crash-isolation
 proof (bufconn + a real spawned-process SIGKILL) are tested.
 
-**Known worker-mode limitations vs in-process (Phase 6 closes these):**
-- **Backup-profile failover is absent.** In-process wraps active+backup providers
-  (`providers.wrapBackup`); the worker snapshot carries only the active profile, so
-  a configured backup profile gets no automatic failover under worker mode.
-- **Watchdog is disabled** in the worker (`Watchdog: nil`) — protocol supervision,
-  if the user enabled it, does not run in worker mode.
-- **MCP tools are unavailable mid-turn** in the worker (MCP servers run host-side;
-  the worker excludes them). Built-in/capability tools are unaffected.
+**Phase 6 as-built — equivalence (Part A).** Worker mode now matches in-process on
+the three axes that previously diverged, so `ExecutionMode: worker` is safe as the
+default:
+- **Backup-profile failover** — the config snapshot carries both active and backup
+  profiles; the worker wraps them with `wrapWorkerBackup`, mirroring the host's
+  `providers.wrapBackup` (including the ChatGPT-subscription and no-credential
+  carve-outs, in the same order).
+- **Watchdog** — `buildWorkerWatchdog` reconstructs protocol supervision from the
+  snapshot, running its fast-model OneShot lane on the worker's own local engine
+  (`buildWorkerEngine`); model resolution mirrors the host's `watchdogModelFor`,
+  including the everyday-open fallback so a sparse taxonomy never fails supervision
+  open.
+- **MCP tools** — MCP servers live host-side, so a conversation carrying MCP tools
+  auto-falls-back to the in-process runner. Selection is **per-turn**
+  (`Server.pickTurnRunner` consults `hasMCPTools()`), not a one-time startup check,
+  because MCP loads asynchronously after `SelectExecutionMode`. Built-in/capability
+  turns run in the worker; MCP turns run in-process, transparently.
+
+**Phase 6 as-built — lifecycle (Part B).** Workers are pooled per conversation
+(`internal/worker/pool.go`):
+- **Warm reuse** — a conversation reuses its worker process across turns when it is
+  idle and healthy; otherwise the pool spawns a fresh one (outside the lock).
+- **Health-check / restart** — `workerHealthy` gates reuse on process-alive plus a
+  live gRPC connection state; an unhealthy or crashed worker is evicted and killed,
+  and the next `Acquire` spawns a replacement. A worker crash surfaces to the host
+  as `codes.Unavailable`; the host recovers the turn and does not auto-retry.
+- **Idle-reap** — a background reaper kills workers idle past a configurable window
+  (`config.WorkerIdleTimeout()`: `>0`→seconds, `0`→5-minute default, `<0`→disabled).
+- **Orphan-sweep on startup** — `worker.ReapOrphanWorkers()` (`reap.go`) sweeps
+  workers left behind by a hard host crash, identity-guarded (process-group +
+  `cercano worker` cmdline + spawner-dead) so it never kills an unrelated process,
+  mirroring the Meridian supervisor.
+- **Graceful drain** — on SIGTERM the host `Shutdown()` drains the pool, killing all
+  cached workers (idempotent). No orphans on clean shutdown (drain) or on hard
+  crash (next-startup sweep).
 
 ---
 
@@ -494,9 +521,15 @@ proof (bufconn + a real spawned-process SIGKILL) are tested.
   the six host services.
 - `internal/runner/{runner.go,core.go,event.go}` — the execution core.
 - `internal/broker/broker.go` — turn fence, fan-out, replay, lossy/lossless subs.
-- `internal/worker/{worker.go,proxies.go,wire.go,host.go,spawn.go}` — the worker.
+- `internal/worker/{worker.go,proxies.go,wire.go,host.go,spawn.go}` — the worker
+  transport, stream proxies, codecs, host runner, and process spawn/kill.
+- `internal/worker/{pool.go,reap.go,watchdog.go}` — the per-conversation pool
+  (reuse/health/idle-reap/drain), startup orphan-sweep, and worker-side watchdog.
+- `internal/server/server.go` — `pickTurnRunner`/`hasMCPTools` (per-turn selection),
+  `SelectExecutionMode`, `Shutdown` (pool drain).
 - `source/proto/agent.proto` — `service Worker` + envelopes (~1129).
-- `cmd/cercano/main.go` — the `worker` subcommand (`runWorkerMode`, ~1614).
+- `cmd/cercano/main.go` — the `worker` subcommand (`runWorkerMode`, ~1614),
+  `ReapOrphanWorkers` at startup, SIGTERM→`Shutdown`.
 - `internal/meridian/manager.go` — the supervisor pattern spawn/reap reuses.
-- `docs/agent/agent-isolation/design.md` + `plan-phase{2,3,4,5}.md` — the design
+- `docs/agent/agent-isolation/design.md` + `plan-phase{2,3,4,5,6}.md` — the design
   and per-phase rationale.

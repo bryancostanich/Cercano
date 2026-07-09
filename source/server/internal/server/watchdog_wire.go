@@ -62,7 +62,7 @@ func (s *Server) buildWatchdogFrom(wc config.WatchdogConfig, mc config.ModelsCon
 	// next watchdog rebuild (config reload / watchdog-field update).
 	oneShotModel := watchdogModelFor(wc, mc)
 	oneShot := func(ctx context.Context, prompt string) (string, error) {
-		res, err := s.dispatchEngine.Dispatch(ctx, dispatch.Spec{
+		res, err := s.toolSvc.Engine().Dispatch(ctx, dispatch.Spec{
 			Mode:          dispatch.OneShot,
 			Role:          dispatch.RoleCoproc,
 			Prompt:        prompt,

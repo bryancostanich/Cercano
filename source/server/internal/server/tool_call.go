@@ -20,10 +20,7 @@ import (
 // not yet).
 func (s *Server) GetToolCall(ctx context.Context, req *proto.GetToolCallRequest) (*proto.GetToolCallResponse, error) {
 	out := &proto.GetToolCallResponse{}
-	if s.agent == nil {
-		return out, nil
-	}
-	store := s.agent.PersistentStore()
+	store := s.toolSvc.GetToolCallStore()
 	convID := req.GetConversationId()
 	useID := req.GetToolUseId()
 	if store == nil || convID == "" || useID == "" {

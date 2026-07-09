@@ -12,7 +12,8 @@ import (
 func TestInvokeCapabilityRunsRegisteredCap(t *testing.T) {
 	reg := capabilities.NewRegistry(capabilities.Services{})
 	reg.MustRegister(testEchoCap{})
-	s := &Server{capRegistry: reg}
+	s := NewServer(nil, nil, nil, nil, nil, nil)
+	s.toolSvc.SetCapRegistry(reg)
 	args, _ := json.Marshal(map[string]any{"v": "hi"})
 	resp, err := s.InvokeCapability(context.Background(), &proto.InvokeCapabilityRequest{
 		Name: "echo", ArgsJson: args,
@@ -33,7 +34,8 @@ func TestInvokeCapabilityRunsRegisteredCap(t *testing.T) {
 }
 
 func TestInvokeCapabilityUnknownName(t *testing.T) {
-	s := &Server{capRegistry: capabilities.NewRegistry(capabilities.Services{})}
+	s := NewServer(nil, nil, nil, nil, nil, nil)
+	s.toolSvc.SetCapRegistry(capabilities.NewRegistry(capabilities.Services{}))
 	resp, err := s.InvokeCapability(context.Background(), &proto.InvokeCapabilityRequest{Name: "nope"})
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +46,7 @@ func TestInvokeCapabilityUnknownName(t *testing.T) {
 }
 
 func TestInvokeCapabilityNilRegistry(t *testing.T) {
-	s := &Server{}
+	s := NewServer(nil, nil, nil, nil, nil, nil)
 	resp, err := s.InvokeCapability(context.Background(), &proto.InvokeCapabilityRequest{Name: "anything"})
 	if err != nil {
 		t.Fatal(err)

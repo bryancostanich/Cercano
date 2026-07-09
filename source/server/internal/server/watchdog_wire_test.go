@@ -35,15 +35,14 @@ func TestBuildWatchdogEnabled(t *testing.T) {
 		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
-	s := &Server{
-		dispatchEngine: eng,
-		cfgSvc: cfgsvc.New("", config.Config{Watchdog: config.WatchdogConfig{
-			Enabled:       true,
-			Mode:          "challenge-and-justify",
-			Checks:        []string{"debug-loop"},
-			EscalateAfter: 2,
-		}}, nil),
-	}
+	s := NewServer(nil, nil, nil, nil, nil, nil)
+	s.cfgSvc = cfgsvc.New("", config.Config{Watchdog: config.WatchdogConfig{
+		Enabled:       true,
+		Mode:          "challenge-and-justify",
+		Checks:        []string{"debug-loop"},
+		EscalateAfter: 2,
+	}}, nil)
+	s.SetDispatchEngine(eng)
 	wd := s.buildWatchdog()
 	if wd == nil {
 		t.Fatal("expected non-nil watchdog when enabled")
@@ -58,14 +57,13 @@ func TestBuildWatchdogSkipsUnknownChecks(t *testing.T) {
 		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
-	s := &Server{
-		dispatchEngine: eng,
-		cfgSvc: cfgsvc.New("", config.Config{Watchdog: config.WatchdogConfig{
-			Enabled: true,
-			Mode:    "strict",
-			Checks:  []string{"future-check", "debug-loop"},
-		}}, nil),
-	}
+	s := NewServer(nil, nil, nil, nil, nil, nil)
+	s.cfgSvc = cfgsvc.New("", config.Config{Watchdog: config.WatchdogConfig{
+		Enabled: true,
+		Mode:    "strict",
+		Checks:  []string{"future-check", "debug-loop"},
+	}}, nil)
+	s.SetDispatchEngine(eng)
 	if wd := s.buildWatchdog(); wd == nil {
 		t.Fatal("expected non-nil watchdog with a mix of known/unknown checks")
 	}

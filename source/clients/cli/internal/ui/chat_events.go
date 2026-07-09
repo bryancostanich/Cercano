@@ -90,6 +90,7 @@ type watchdogEventMsg struct {
 // events use kind/tool metadata directly.
 type subAgentEventMsg struct {
 	id       string
+	parentID string
 	title    string
 	kind     string
 	tools    []string
@@ -101,12 +102,13 @@ type subAgentEventMsg struct {
 
 func subAgentEventMsgFromStream(sm agentclient.StreamMsg) subAgentEventMsg {
 	msg := subAgentEventMsg{
-		id:      sm.SubAgentID,
-		title:   sm.SubAgentTitle,
-		kind:    sm.SubAgentKind,
-		tools:   append([]string(nil), sm.GrantedTools...),
-		ignored: append([]string(nil), sm.IgnoredTools...),
-		text:    sm.SubAgentText,
+		id:       sm.SubAgentID,
+		parentID: sm.SubAgentParentID,
+		title:    sm.SubAgentTitle,
+		kind:     sm.SubAgentKind,
+		tools:    append([]string(nil), sm.GrantedTools...),
+		ignored:  append([]string(nil), sm.IgnoredTools...),
+		text:     sm.SubAgentText,
 	}
 	switch sm.SubAgentKind {
 	case "token":

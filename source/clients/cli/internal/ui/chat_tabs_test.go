@@ -45,6 +45,32 @@ func TestSubAgentEventCreatesEphemeralTabWithGrant(t *testing.T) {
 	}
 }
 
+func TestSubAgentNestedLabelsUseParentOrdinal(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	m.applySubAgentEvent(subAgentEventMsg{id: "child-1", kind: "started"})
+	m.applySubAgentEvent(subAgentEventMsg{id: "grandchild-1", parentID: "child-1", kind: "started"})
+	m.applySubAgentEvent(subAgentEventMsg{id: "grandchild-2", parentID: "child-1", kind: "started"})
+	m.applySubAgentEvent(subAgentEventMsg{id: "child-2", kind: "started"})
+
+	checks := map[string]string{
+		"child-1":      "sub 1",
+		"grandchild-1": "sub 1.1",
+		"grandchild-2": "sub 1.2",
+		"child-2":      "sub 2",
+	}
+	for id, want := range checks {
+		tab := m.chatTabs.tabs[id]
+		if tab == nil {
+			t.Fatalf("missing tab %s", id)
+		}
+		if tab.title != want {
+			t.Fatalf("tab %s title = %q, want %q", id, tab.title, want)
+		}
+	}
+}
+
 func TestSubAgentToolEventRoutesToChildTab(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})

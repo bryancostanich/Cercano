@@ -1469,13 +1469,14 @@ type StreamMsg struct {
 	Protocol     string // for TypeWatchdog (protocol name, empty for echo)
 	Thread       string // for TypeWatchdog echo only ("watchdog" | "main")
 
-	SubAgentID     string   // for TypeSubAgent
-	SubAgentTitle  string   // for TypeSubAgent
-	SubAgentKind   string   // for TypeSubAgent
-	GrantedTools   []string // for TypeSubAgent
-	IgnoredTools   []string // for TypeSubAgent
-	SubAgentText   string   // for TypeSubAgent
-	SubAgentToolID string   // for TypeSubAgent
+	SubAgentID       string   // for TypeSubAgent
+	SubAgentParentID string   // for TypeSubAgent
+	SubAgentTitle    string   // for TypeSubAgent
+	SubAgentKind     string   // for TypeSubAgent
+	GrantedTools     []string // for TypeSubAgent
+	IgnoredTools     []string // for TypeSubAgent
+	SubAgentText     string   // for TypeSubAgent
+	SubAgentToolID   string   // for TypeSubAgent
 }
 
 type StreamMsgType int
@@ -1617,21 +1618,22 @@ func (c *Client) StreamChat(ctx context.Context, conversationID, input, workDir 
 			}
 			if se := msg.GetSubAgentEvent(); se != nil {
 				out <- StreamMsg{
-					Type:           TypeSubAgent,
-					SubAgentID:     se.GetId(),
-					SubAgentTitle:  se.GetTitle(),
-					SubAgentKind:   se.GetKind(),
-					GrantedTools:   append([]string(nil), se.GetGrantedTools()...),
-					IgnoredTools:   append([]string(nil), se.GetIgnoredTools()...),
-					SubAgentText:   se.GetText(),
-					SubAgentToolID: se.GetToolUseId(),
-					ToolUseID:      se.GetToolUseId(),
-					ToolName:       se.GetToolName(),
-					ArgsSummary:    se.GetArgsSummary(),
-					Summary:        se.GetSummary(),
-					Detail:         se.GetDetail(),
-					StartLine:      int(se.GetStartLine()),
-					IsError:        se.GetIsError(),
+					Type:             TypeSubAgent,
+					SubAgentID:       se.GetId(),
+					SubAgentParentID: se.GetParentId(),
+					SubAgentTitle:    se.GetTitle(),
+					SubAgentKind:     se.GetKind(),
+					GrantedTools:     append([]string(nil), se.GetGrantedTools()...),
+					IgnoredTools:     append([]string(nil), se.GetIgnoredTools()...),
+					SubAgentText:     se.GetText(),
+					SubAgentToolID:   se.GetToolUseId(),
+					ToolUseID:        se.GetToolUseId(),
+					ToolName:         se.GetToolName(),
+					ArgsSummary:      se.GetArgsSummary(),
+					Summary:          se.GetSummary(),
+					Detail:           se.GetDetail(),
+					StartLine:        int(se.GetStartLine()),
+					IsError:          se.GetIsError(),
 				}
 				continue
 			}

@@ -244,6 +244,7 @@ message SubAgentEvent {
   string id = 1;
   string title = 2;
   string kind = 3; // started|progress|token|tool_use_start|tool_use_stop|tool_exec_start|tool_exec_complete|done|error
+  string parent_id = 14;
   repeated string granted_tools = 4;
   repeated string ignored_tools = 5;
   string text = 6;

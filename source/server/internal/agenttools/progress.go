@@ -11,11 +11,12 @@ type progressEmitterKey struct{}
 type ProgressEvent struct {
 	Text string
 
-	SubAgentID    string
-	SubAgentTitle string
-	Kind          string
-	GrantedTools  []string
-	IgnoredTools  []string
+	SubAgentID       string
+	SubAgentParentID string
+	SubAgentTitle    string
+	Kind             string
+	GrantedTools     []string
+	IgnoredTools     []string
 
 	ToolUseID   string
 	ToolName    string

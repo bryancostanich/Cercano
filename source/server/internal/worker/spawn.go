@@ -59,6 +59,9 @@ func (h *workerHandle) Kill() {
 		killGroupOrProcess(h.cmd.Process)
 		// Best-effort wait so the OS reclaims the zombie.
 		_ = h.cmd.Wait()
+		// Only our own pidfile is removed; needs the pid, so it lives inside
+		// this guard (a partially-built handle has no process and no pidfile).
+		removePidFileIfOwned(h.pidPath, h.cmd.Process.Pid)
 	}
 	if h.conn != nil {
 		_ = h.conn.Close()
@@ -66,7 +69,6 @@ func (h *workerHandle) Kill() {
 	if h.socketPath != "" {
 		_ = os.Remove(h.socketPath)
 	}
-	removePidFileIfOwned(h.pidPath, h.cmd.Process.Pid)
 }
 
 // spawnWorker starts a worker process on a fresh unix socket and returns a

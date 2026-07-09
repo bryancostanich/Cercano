@@ -259,7 +259,8 @@ func (w *workerRunner) RunTurn(
 			}()
 
 		case *proto.WorkerToHost_CredRequest:
-			// Answer credential requests synchronously in a goroutine.
+			// Answer credential requests off the drain path (in a goroutine) so
+			// a slow keychain/OAuth resolve doesn't stall the event stream.
 			cr := m.CredRequest
 			go func() {
 				id := cr.GetId()

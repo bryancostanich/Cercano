@@ -467,13 +467,21 @@ round-trip-tested. The worker binary (`worker.go`, `proxies.go`, the `worker`
 subcommand) is complete, including the credential proxy (`streamCredentialSource`
 / `streamTokenSource`). The host-side `workerRunner` (`host.go`, `spawn.go`) is
 implemented: spawn/dial/drain/crash-detect and host-side credential resolution.
-**Not yet landed:** the config toggle that selects `workerRunner` in `NewServer`
-(the front door still wires the in-process `runner.New(runnerDeps())` at
-server.go ~177/619; `worker.NewWorkerRunner` is not yet referenced from
-`internal/server`), the both-modes regression matrix, and the end-to-end
-crash-isolation proof test with a real spawned process. Until the toggle lands,
-**in-process is the effective default**; the design target is `worker` as the
-production default with `in_process` reserved for embedded mode and the test suite.
+The config toggle is landed: `config.ExecutionMode` defaults to `worker`, and
+`Server.SelectExecutionMode()` (called from `runServerMode` after config load)
+swaps in `worker.NewWorkerRunner`; the in-process `runner.New(runnerDeps())`
+stays the default for embedded mode + the test suite (which construct `Server`
+directly and never call the selector). Both-modes parity and the crash-isolation
+proof (bufconn + a real spawned-process SIGKILL) are tested.
+
+**Known worker-mode limitations vs in-process (Phase 6 closes these):**
+- **Backup-profile failover is absent.** In-process wraps active+backup providers
+  (`providers.wrapBackup`); the worker snapshot carries only the active profile, so
+  a configured backup profile gets no automatic failover under worker mode.
+- **Watchdog is disabled** in the worker (`Watchdog: nil`) — protocol supervision,
+  if the user enabled it, does not run in worker mode.
+- **MCP tools are unavailable mid-turn** in the worker (MCP servers run host-side;
+  the worker excludes them). Built-in/capability tools are unaffected.
 
 ---
 

@@ -1346,7 +1346,8 @@ message CredentialRequest {
 
 // CredentialResponse carries the host-resolved token/key (or an error).
 message CredentialResponse {
-  uint64 id    = 1;
-  string token = 2; // API key or fresh access token, per the profile's auth flavor
-  string error = 3;
+  uint64 id      = 1;
+  string token   = 2; // API key or fresh access token, per the profile's auth flavor
+  string error   = 3;
+  string account = 4; // ChatGPT account ID (non-empty for subscription route; empty for static-key routes)
 }

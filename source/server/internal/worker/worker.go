@@ -77,6 +77,10 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 	// Permission requester: round-trips PermissionRequest↔PermissionResponse.
 	permReq := newStreamPermissionRequester(sndr)
 
+	// Credential source: round-trips CredentialRequest↔CredentialResponse.
+	// Created before the recv loop so it is ready to receive routed responses.
+	credSource := newStreamCredentialSource(sndr)
+
 	// Recv loop: routes incoming HostToWorker messages from the host.
 	recvDone := make(chan struct{})
 	go func() {
@@ -89,6 +93,8 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 			switch {
 			case msg.GetPermResponse() != nil:
 				permReq.deliver(msg.GetPermResponse())
+			case msg.GetCredResponse() != nil:
+				credSource.deliver(msg.GetCredResponse())
 			case msg.GetCancel() != nil:
 				cancel()
 				return
@@ -97,7 +103,7 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 	}()
 
 	// Build Deps from StartTurn.
-	deps, buildErr := w.buildDeps(ctx, start)
+	deps, buildErr := w.buildDeps(ctx, start, credSource)
 	if buildErr != nil {
 		sndr.close()
 		cancel() // returning finalizes the stream; the recv goroutine unwinds on the Recv error
@@ -191,7 +197,7 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 
 // ─── buildDeps ────────────────────────────────────────────────────────────────
 
-func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn) (runner.Deps, error) {
+func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, credSource *streamCredentialSource) (runner.Deps, error) {
 	// Build config from snapshot.
 	cfg := ConfigFromSnapshot(start.GetConfig())
 	cfgService := cfgsvc.New("", cfg, secrets.NewMemory())
@@ -205,7 +211,11 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn) (r
 			return runner.Deps{}, fmt.Errorf("build providers: %w", err)
 		}
 	} else {
-		provSvc = buildWorkerProviders(ctx, cfg, start.GetConfig().GetResolvedCredential())
+		var err error
+		provSvc, err = buildWorkerProviders(ctx, cfg, credSource)
+		if err != nil {
+			return runner.Deps{}, fmt.Errorf("build providers: %w", err)
+		}
 	}
 
 	// Build Tools.
@@ -254,17 +264,34 @@ type workerResolver struct {
 	cfgSvc    cfgsvc.Service
 }
 
-func buildWorkerProviders(_ context.Context, cfg pkgcfg.Config, resolvedCredential string) providerssvc.Resolver {
+func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource *streamCredentialSource) (providerssvc.Resolver, error) {
 	cfgService := cfgsvc.New("", cfg, secrets.NewMemory())
 	r := &workerResolver{cfgSvc: cfgService}
 
 	// Build cloud provider if an active profile is present.
 	if cfg.ActiveCloudProfile != "" && len(cfg.CloudProfiles) > 0 {
 		prof := cfg.CloudProfiles[0]
-		prov, err := cloudfactory.BuildCloudProvider(prof, resolvedCredential)
-		if err != nil {
-			log.Printf("[worker] cloud provider build failed: %v; continuing without cloud", err)
-			r.cloudProv = nil // nil → dispatch returns error for cloud modes; runner handles gracefully
+
+		var prov llm.Provider
+		var buildErr error
+
+		if prof.Flavor == cloudfactory.FlavorResponses && prof.Route == cloudfactory.RouteChatGPT {
+			// ChatGPT subscription: use a stream-backed token source so the host
+			// owns refresh and OAuth — the worker never holds the credential.
+			ts := &streamTokenSource{creds: credSource, profileName: prof.Name}
+			prov, buildErr = cloudfactory.BuildCloudProvider(prof, "", cloudfactory.Options{TokenSource: ts})
+		} else {
+			// Static-key route: fetch the API key once via the stream.
+			key, _, err := credSource.Fetch(ctx, prof.Name)
+			if err != nil {
+				log.Printf("[worker] credential fetch failed for profile %q: %v; continuing without cloud", prof.Name, err)
+				r.openProv = nil
+			} else {
+				prov, buildErr = cloudfactory.BuildCloudProvider(prof, key)
+			}
+		}
+		if buildErr != nil {
+			log.Printf("[worker] cloud provider build failed: %v; continuing without cloud", buildErr)
 		} else {
 			r.cloudProv = prov
 		}
@@ -279,7 +306,7 @@ func buildWorkerProviders(_ context.Context, cfg pkgcfg.Config, resolvedCredenti
 		})
 	}
 
-	return r
+	return r, nil
 }
 
 func (r *workerResolver) Main() (llm.Provider, bool, bool, error) {

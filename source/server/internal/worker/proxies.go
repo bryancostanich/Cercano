@@ -147,6 +147,92 @@ func (p *streamPermissionRequester) deliver(resp *proto.PermissionResponse) {
 	ch <- permResult{allow: resp.GetAllow(), err: err}
 }
 
+// ─── streamCredentialSource ───────────────────────────────────────────────────
+
+// streamCredentialSource round-trips CredentialRequest↔CredentialResponse over
+// the stream. It is the mirror of streamPermissionRequester: monotonic id,
+// per-id response channel, serialised send via sndr, ctx-cancel aware.
+// The worker holds NO durable credential; it fetches on demand so the host owns
+// refresh and ChatGPT-subscription OAuth with no special-casing in the worker.
+type streamCredentialSource struct {
+	sndr    *sender
+	nextID  atomic.Uint64
+	mu      sync.Mutex
+	pending map[uint64]chan credResult
+}
+
+type credResult struct {
+	token   string
+	account string
+	err     error
+}
+
+func newStreamCredentialSource(sndr *sender) *streamCredentialSource {
+	return &streamCredentialSource{
+		sndr:    sndr,
+		pending: make(map[uint64]chan credResult),
+	}
+}
+
+// Fetch asks the host to resolve/refresh the credential for profileName.
+// Returns (token, accountID, err). For static-key profiles accountID is "".
+func (c *streamCredentialSource) Fetch(ctx context.Context, profileName string) (token, accountID string, err error) {
+	id := c.nextID.Add(1)
+	ch := make(chan credResult, 1)
+
+	c.mu.Lock()
+	c.pending[id] = ch
+	c.mu.Unlock()
+
+	defer func() {
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
+	}()
+
+	c.sndr.send(&proto.WorkerToHost{Msg: &proto.WorkerToHost_CredRequest{CredRequest: &proto.CredentialRequest{
+		Id:          id,
+		ProfileName: profileName,
+	}}})
+
+	select {
+	case <-ctx.Done():
+		return "", "", ctx.Err()
+	case r := <-ch:
+		return r.token, r.account, r.err
+	}
+}
+
+// deliver routes a CredentialResponse to the pending Fetch with matching ID.
+func (c *streamCredentialSource) deliver(resp *proto.CredentialResponse) {
+	c.mu.Lock()
+	ch, ok := c.pending[resp.GetId()]
+	c.mu.Unlock()
+	if !ok {
+		return // stale or unmatched; ignore
+	}
+	var err error
+	if e := resp.GetError(); e != "" {
+		err = fmt.Errorf("%s", e)
+	}
+	ch <- credResult{token: resp.GetToken(), account: resp.GetAccount(), err: err}
+}
+
+// ─── streamTokenSource ────────────────────────────────────────────────────────
+
+// streamTokenSource implements responses.TokenSource by proxying to
+// streamCredentialSource. Used for ChatGPT-subscription profiles where the
+// host holds the OAuth token set and handles refresh.
+type streamTokenSource struct {
+	creds       *streamCredentialSource
+	profileName string
+}
+
+// Token satisfies responses.TokenSource: returns (access, accountID, err).
+func (s *streamTokenSource) Token(ctx context.Context) (access, accountID string, err error) {
+	return s.creds.Fetch(ctx, s.profileName)
+}
+
 // ─── streamPersistFunc ────────────────────────────────────────────────────────
 
 // streamPersistFunc sends PersistTurn messages over the stream.

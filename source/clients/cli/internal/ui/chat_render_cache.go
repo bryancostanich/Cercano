@@ -49,6 +49,26 @@ type groupRenderCache struct {
 	rows  []toolArrowRow
 }
 
+// transcriptPrefixCache stores the already-assembled render of the frozen
+// prefix of the transcript. Per-entry caches avoid markdown rerendering; this
+// cache avoids copying every frozen block into a fresh giant string on each
+// streaming repaint. It is keyed by width, theme generation, and contentGen,
+// and always ends at an entry boundary.
+type transcriptPrefixCache struct {
+	width      int
+	stylesGen  int
+	contentGen int
+	end        int
+	content    string
+	arrowRows  []arrowRow
+	lineCount  int
+}
+
+func (c *chatView) markTranscriptDirty() {
+	c.contentGen++
+	c.transcriptPrefix = transcriptPrefixCache{}
+}
+
 // renderEntryCached returns renderEntry output, served from the per-entry
 // cache when the entry is frozen. Dynamic entries bypass the cache: the
 // banner (wall-clock shimmer), the streaming assistant entry (live tail +
@@ -157,7 +177,9 @@ func (c *chatView) renderToolGroupCached(run []*Entry, startIdx int) (string, []
 func (c *chatView) flushRenderCaches() {
 	c.entryCache = map[*Entry]entryRenderCache{}
 	c.groupCache = map[int]groupRenderCache{}
+	c.transcriptPrefix = transcriptPrefixCache{}
 	c.streamPrefix = streamPrefixCache{}
+	c.contentGen++
 }
 
 // streamPrefixCache caches the joined render of the streaming entry's

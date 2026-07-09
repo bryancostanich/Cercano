@@ -11,11 +11,20 @@ import (
 
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/hostsvc/permissions"
+	providerssvc "cercano/source/server/internal/hostsvc/providers"
 	"cercano/source/server/internal/runner"
 	"cercano/source/server/internal/secrets"
+	"cercano/source/server/internal/watchdog"
 	pkgcfg "cercano/source/server/pkg/config"
 	proto "cercano/source/server/pkg/proto"
 )
+
+// BuildWorkerWatchdogForTest exposes buildWorkerWatchdog for tests: it builds
+// the worker's watchdog from a config snapshot, wired to an engine backed by
+// the given resolver's providers.
+func BuildWorkerWatchdogForTest(cfg pkgcfg.Config, r providerssvc.Resolver) *watchdog.Watchdog {
+	return buildWorkerWatchdog(cfg, buildWorkerEngine(r, cfg))
+}
 
 // NewWorkerRunnerForTest constructs a workerRunner with an injected dial
 // function for in-process (bufconn) testing — no real binary needed.

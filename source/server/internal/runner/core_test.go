@@ -30,6 +30,7 @@ import (
 	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/usage"
+	"cercano/source/server/internal/watchdog"
 	"cercano/source/server/pkg/config"
 )
 
@@ -232,6 +233,45 @@ func buildDeps(spy llm.Provider) Deps {
 		Perms:     &fakePerms{store: agent.NewStaticPermissionStore(agent.ModePermissive)},
 		Agent:     nil, // nil-safe; RecordContextUsage handles nil receiver
 		Watchdog:  nil,
+	}
+}
+
+// TestCore_WatchdogReadLiveAtTurnTime is the C1 regression guard.
+//
+// The host builds the runner (SetPermissions) BEFORE it wires its watchdog
+// (InitWatchdog) and it mutates the watchdog again on UpdateConfig — both
+// AFTER construction. So Deps.Watchdog must be read live at turn time via the
+// accessor, never snapshotted at New(). A snapshot would leave the watchdog
+// permanently nil (silently disabled) for every user who enabled it — the
+// exact regression the whole-branch review caught. This test fails if the
+// runner ever reverts to reading a captured value instead of the accessor.
+func TestCore_WatchdogReadLiveAtTurnTime(t *testing.T) {
+	deps := buildDeps(&spyProvider{})
+
+	// Accessor wired to a watchdog that does not exist yet at New() time and is
+	// only "assigned" (observed via the call) when RunTurn asks for it.
+	called := false
+	deps.Watchdog = func() *watchdog.Watchdog {
+		called = true
+		return nil // disabled; we assert only that the runner consults it live
+	}
+
+	core := New(deps)
+	// Ignore any read New() may have done; C1 is specifically about reading at
+	// TURN time. Reset, then require RunTurn itself to consult the accessor.
+	called = false
+	if _, err := core.RunTurn(context.Background(), Request{
+		ConversationID: "conv-wd",
+		Input:          "hi",
+		WorkDir:        t.TempDir(),
+		Gen:            1,
+	}, noopSink{}, nil, nil); err != nil {
+		t.Fatalf("RunTurn: %v", err)
+	}
+
+	if !called {
+		t.Fatal("runner did not read Deps.Watchdog via the accessor at turn time " +
+			"(C1 regression: a construction-time snapshot leaves the watchdog permanently nil)")
 	}
 }
 

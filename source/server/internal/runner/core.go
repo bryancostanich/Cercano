@@ -123,7 +123,10 @@ func (c *Core) RunTurn(
 	gateRegistry := c.d.Tools.Registry()
 	var wdGate agent.WatchdogGate
 	var wdTurnEnd agent.WatchdogTurnEnd
-	wd := c.d.Watchdog
+	var wd *watchdog.Watchdog
+	if c.d.Watchdog != nil {
+		wd = c.d.Watchdog() // live read at turn time (see Deps.Watchdog)
+	}
 	if wd != nil {
 		convID := req.ConversationID
 		wdGate = func(ctx context.Context, toolName string, args json.RawMessage, transcript []llm.Message) agent.WatchdogDecision {

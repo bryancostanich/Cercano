@@ -672,7 +672,10 @@ func (s *Server) runnerDeps() runnersvc.Deps {
 		Config:    s.cfgSvc,
 		Perms:     s.permBroker,
 		Agent:     s.agent,
-		Watchdog:  s.watchdog,
+		// Live accessor: s.watchdog is wired by InitWatchdog and mutated by
+		// UpdateConfig AFTER this runner is built, so the runner reads it at
+		// turn time rather than capturing the (often still-nil) current value.
+		Watchdog: func() *watchdog.Watchdog { return s.watchdog },
 	}
 }
 

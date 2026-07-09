@@ -79,6 +79,13 @@ Reconciling the two required these changes beyond the plan:
 - **Async job + poll MCP dispatch mode** for long agentic runs (synchronous today; risks
   host tool-call timeouts).
 - **Parallel fan-out orchestrator** over the single-dispatch primitive (bounded concurrency).
+- **Cloud dispatch profile routing** — add provider-neutral `economy` / `standard` /
+  `premium` profiles for cloud subagents. `standard` should be the default; `auto`
+  routing should choose the least expensive configured model likely to succeed, bounded
+  by locus mode and the provider allowlist. Keep this separate from permissions: tools
+  decide what the subagent may do, while the profile decides how strong and expensive
+  the cloud model should be. See `design.md` → "Cloud dispatch uses provider-neutral
+  cost/quality profiles."
 - **Watchdog (Spec 0b Part C)** — now unblocked by the dispatch engine's small-model
   routing seam; the protocol-enforcement layer from 0b can be built against it.
 - **`review` structured verdict** — the capability returns a free-text `VERDICT/REASONING`;

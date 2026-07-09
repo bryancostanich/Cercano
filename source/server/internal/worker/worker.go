@@ -25,6 +25,7 @@ import (
 	"cercano/source/server/internal/runner"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/usage"
+	"cercano/source/server/internal/watchdog"
 	pkgcfg "cercano/source/server/pkg/config"
 	proto "cercano/source/server/pkg/proto"
 
@@ -243,6 +244,15 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 	permStore := agent.NewStaticPermissionStore(mode)
 	permBroker := permissions.New(permStore, nil, nil)
 
+	// Build the protocol-supervision watchdog from the snapshotted config
+	// (default-OFF; nil when disabled — identical to in-process). Its fast-model
+	// OneShot lane routes through a dispatch engine wired to the WORKER's own
+	// provider resolver, so the model call runs locally in the worker and never
+	// round-trips to the host. wd is nil when the watchdog is disabled — the
+	// runner's live accessor (c.d.Watchdog()) then yields nil, the correct
+	// default-off behavior.
+	wd := buildWorkerWatchdog(cfg, buildWorkerEngine(provSvc, cfg))
+
 	return runner.Deps{
 		Providers: provSvc,
 		Tools:     toolSvc,
@@ -250,7 +260,7 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 		Config:    cfgService,
 		Perms:     permBroker,
 		Agent:     nil,
-		Watchdog:  nil,
+		Watchdog:  func() *watchdog.Watchdog { return wd },
 	}, nil
 }
 

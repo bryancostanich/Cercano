@@ -77,12 +77,26 @@ func NewWorkerRunner(
 	perms permissions.Broker,
 	st secrets.Store,
 ) runner.TurnRunner {
+	pool := newWorkerPool(nil) // production: spawn via spawnWorker
+	// Start the idle-reaper with the configured window. The reaper runs on a
+	// background context and stops when the pool is Shut down (Shutdown closes
+	// p.done). A window <= 0 (config's "disabled" sentinel) starts no goroutine.
+	pool.StartReaper(context.Background(), cfg.Get().WorkerIdleTimeout())
 	return &workerRunner{
 		persist: persist,
 		cfg:     cfg,
 		perms:   perms,
 		secrets: st,
-		pool:    newWorkerPool(nil), // production: spawn via spawnWorker
+		pool:    pool,
+	}
+}
+
+// Shutdown drains the per-conversation worker pool: kills every warm worker and
+// stops the idle-reaper. Safe to call once at host shutdown; a no-op on a
+// dial-injected (test) runner with no pool.
+func (w *workerRunner) Shutdown() {
+	if w.pool != nil {
+		w.pool.Shutdown()
 	}
 }
 

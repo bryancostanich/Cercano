@@ -47,6 +47,11 @@ type workerHandle struct {
 	conn       *grpc.ClientConn
 	socketPath string
 	pidPath    string
+	// onKill, when set, is invoked by Kill after the process/conn teardown. It is
+	// the injectable kill seam: production leaves it nil; tests set it to observe
+	// that a specific handle was reaped (a dial/bufconn handle has no OS process
+	// to signal, so signalling alone can't prove a reap).
+	onKill func()
 }
 
 // Kill shuts the worker down: kills its process group, closes the gRPC
@@ -68,6 +73,9 @@ func (h *workerHandle) Kill() {
 	}
 	if h.socketPath != "" {
 		_ = os.Remove(h.socketPath)
+	}
+	if h.onKill != nil {
+		h.onKill()
 	}
 }
 

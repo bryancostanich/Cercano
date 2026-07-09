@@ -5,9 +5,40 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+// DefaultWorkerIdleTimeout is the idle window after which a warm per-conversation
+// worker with no new turn is reaped. It is a NAMED, documented value (not a
+// buried literal) so the policy is visible and overridable via config.
+//
+// Reasoning for 5 minutes: interactive conversations come in bursts (a user
+// reads a reply, thinks, replies). A window shorter than a normal think-pause
+// would cold-start the worker mid-conversation and re-pay spawn + provider-build
+// latency — defeating the warm-pool. A window much longer would let a walked-away
+// conversation pin a worker (and its GPU/provider connections) for a long time.
+// Five minutes comfortably exceeds a typical human turn-gap while still freeing
+// resources from truly-abandoned conversations promptly.
+const DefaultWorkerIdleTimeout = 5 * time.Minute
+
+// WorkerIdleTimeout resolves the effective idle-reap window from the config's
+// WorkerIdleTimeoutSeconds field:
+//
+//	> 0 → that many seconds (an explicit operator override)
+//	== 0 → DefaultWorkerIdleTimeout (the omitted-field / "use the default" case)
+//	< 0 → 0 duration, which the reaper treats as DISABLED (never reap)
+func (c Config) WorkerIdleTimeout() time.Duration {
+	switch {
+	case c.WorkerIdleTimeoutSeconds > 0:
+		return time.Duration(c.WorkerIdleTimeoutSeconds) * time.Second
+	case c.WorkerIdleTimeoutSeconds < 0:
+		return 0 // disabled sentinel
+	default:
+		return DefaultWorkerIdleTimeout
+	}
+}
 
 // CloudProfile is one named cloud provider configuration. The API key is NOT
 // stored here — it lives in the OS keychain keyed by Name.
@@ -68,11 +99,20 @@ type Config struct {
 	//                  worker-process work).
 	//   "in_process" — turns run inside the host process (embedded mode / tests).
 	// Empty is treated as "worker" (the production default from Defaults()).
-	ExecutionMode string            `yaml:"execution_mode,omitempty"`
-	LlamaServer   LlamaServerConfig `yaml:"llama_server"`
-	Compaction    CompactionConfig  `yaml:"compaction"`
-	Watchdog      WatchdogConfig    `yaml:"watchdog"`
-	Models        ModelsConfig      `yaml:"models"`
+	ExecutionMode string `yaml:"execution_mode,omitempty"`
+	// WorkerIdleTimeoutSeconds bounds how long a per-conversation warm worker
+	// (execution_mode: worker) may sit idle — no new turn — before the pool's
+	// idle-reaper kills it. Idle conversations otherwise pin a worker process
+	// (and its provider connections) indefinitely on a long-lived host.
+	//
+	// Sentinel: 0 means "use the default" (DefaultWorkerIdleTimeout via
+	// WorkerIdleTimeout()), NOT "disabled" — omitting the field should still
+	// reap. To DISABLE reaping entirely set a negative value (< 0).
+	WorkerIdleTimeoutSeconds int               `yaml:"worker_idle_timeout_seconds,omitempty"`
+	LlamaServer              LlamaServerConfig `yaml:"llama_server"`
+	Compaction               CompactionConfig  `yaml:"compaction"`
+	Watchdog                 WatchdogConfig    `yaml:"watchdog"`
+	Models                   ModelsConfig      `yaml:"models"`
 }
 
 // CompactionConfig controls background context compaction. Thresholds are token
@@ -177,7 +217,11 @@ func Defaults() Config {
 		LocusMode:     "open_primary",
 		Port:          "50052",
 		ExecutionMode: "worker",
-		Models:        ModelsConfig{DefaultProvider: ProviderOpen},
+		// 0 is the "use the default" sentinel; WorkerIdleTimeout() resolves it to
+		// DefaultWorkerIdleTimeout. Left as the zero value so an omitted field and
+		// the default behave identically.
+		WorkerIdleTimeoutSeconds: 0,
+		Models:                   ModelsConfig{DefaultProvider: ProviderOpen},
 		LlamaServer: LlamaServerConfig{
 			ModelDirs:        []string{"~/.cercano/models"},
 			Host:             "127.0.0.1",

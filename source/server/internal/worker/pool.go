@@ -30,6 +30,7 @@ import (
 	"context"
 	"sync"
 	"syscall"
+	"time"
 
 	"google.golang.org/grpc/connectivity"
 )
@@ -43,6 +44,11 @@ type spawnFunc func(ctx context.Context, convID string, gen uint64) (*workerHand
 type pooledEntry struct {
 	handle *workerHandle
 	inUse  bool
+	// lastUsed records when this worker was last active for its conversation —
+	// set on spawn/Acquire (a turn starts) and on Release (a turn ends and the
+	// worker returns warm). The idle-reaper compares now()-lastUsed against the
+	// window. An inUse entry is never reaped regardless of lastUsed.
+	lastUsed time.Time
 }
 
 // workerPool keeps at most one warm worker per conversation.
@@ -50,6 +56,16 @@ type workerPool struct {
 	mu     sync.Mutex
 	byConv map[string]*pooledEntry
 	spawn  spawnFunc
+
+	// now is the pool's clock, injectable so tests exercise the idle-reaper with
+	// a fake clock + tiny window instead of sleeping real durations. Defaults to
+	// time.Now.
+	now func() time.Time
+
+	// done is closed by Shutdown to stop the reaper goroutine (in addition to
+	// the reaper's own ctx). closeOnce guards against a double close.
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 // newWorkerPool builds a pool that spawns via the given spawnFunc (defaults to
@@ -61,6 +77,8 @@ func newWorkerPool(spawn spawnFunc) *workerPool {
 	return &workerPool{
 		byConv: make(map[string]*pooledEntry),
 		spawn:  spawn,
+		now:    time.Now,
+		done:   make(chan struct{}),
 	}
 }
 
@@ -75,6 +93,7 @@ func (p *workerPool) Acquire(ctx context.Context, convID string, gen uint64) (*w
 		// but guard it anyway).
 		if !e.inUse && workerHealthy(e.handle) {
 			e.inUse = true
+			e.lastUsed = p.now() // reuse bumps the idle clock.
 			h := e.handle
 			p.mu.Unlock()
 			return h, nil // WARM REUSE — no spawn.
@@ -110,6 +129,7 @@ func (p *workerPool) Acquire(ctx context.Context, convID string, gen uint64) (*w
 			// A reusable warm entry raced in. Prefer it and discard our spawn
 			// (bounded: exactly one extra spawn+kill, no loop).
 			e.inUse = true
+			e.lastUsed = p.now()
 			reuse := e.handle
 			p.mu.Unlock()
 			h.Kill()
@@ -123,11 +143,11 @@ func (p *workerPool) Acquire(ctx context.Context, convID string, gen uint64) (*w
 		// Release(convID, displaced, …) will compare-and-find-mismatch → no-op,
 		// and that turn's own cleanup path Kills its handle. Our fresh worker is
 		// the pool's live entry for the next turn.
-		p.byConv[convID] = &pooledEntry{handle: h, inUse: true}
+		p.byConv[convID] = &pooledEntry{handle: h, inUse: true, lastUsed: p.now()}
 		p.mu.Unlock()
 		return h, nil
 	}
-	p.byConv[convID] = &pooledEntry{handle: h, inUse: true}
+	p.byConv[convID] = &pooledEntry{handle: h, inUse: true, lastUsed: p.now()}
 	p.mu.Unlock()
 	return h, nil
 }
@@ -157,6 +177,7 @@ func (p *workerPool) Release(convID string, h *workerHandle, healthy bool) {
 	}
 	if healthy {
 		e.inUse = false
+		e.lastUsed = p.now() // returned warm: start the idle clock from now.
 		p.mu.Unlock()
 		return
 	}
@@ -167,7 +188,10 @@ func (p *workerPool) Release(convID string, h *workerHandle, healthy bool) {
 }
 
 // Shutdown kills every cached worker and clears the pool (host-shutdown drain).
+// It also stops the idle-reaper goroutine (by closing p.done).
 func (p *workerPool) Shutdown() {
+	p.closeOnce.Do(func() { close(p.done) })
+
 	p.mu.Lock()
 	entries := make([]*pooledEntry, 0, len(p.byConv))
 	for _, e := range p.byConv {
@@ -178,6 +202,86 @@ func (p *workerPool) Shutdown() {
 
 	for _, e := range entries {
 		e.handle.Kill()
+	}
+}
+
+// StartReaper launches the background idle-reaper goroutine. Every tick it scans
+// cached entries and reaps any that are NOT inUse (no active turn) AND whose
+// idle age (now-lastUsed) exceeds window. An inUse worker (a live turn) is NEVER
+// reaped. The goroutine stops on ctx cancel or Shutdown (p.done closed).
+//
+// window <= 0 DISABLES reaping (config sentinel for "never reap"): no goroutine
+// is started. The tick interval is derived from the window so a small test window
+// sweeps promptly while the production window sweeps modestly (bounded to a sane
+// range so a huge window still gets swept and a tiny one doesn't busy-spin).
+func (p *workerPool) StartReaper(ctx context.Context, window time.Duration) {
+	if window <= 0 {
+		return // reaping disabled.
+	}
+	go p.reapLoop(ctx, window, reapTick(window))
+}
+
+// reapTick derives a sweep interval from the idle window: a fraction of the
+// window (so an idle worker is reaped within ~one tick of crossing it), clamped
+// so we neither busy-spin on a tiny window nor sleep excessively on a huge one.
+func reapTick(window time.Duration) time.Duration {
+	tick := window / 4
+	if tick < minReapTick {
+		tick = minReapTick
+	}
+	if tick > maxReapTick {
+		tick = maxReapTick
+	}
+	return tick
+}
+
+const (
+	// minReapTick floors the sweep interval so a tiny (test) window doesn't spin
+	// the reaper hot; maxReapTick caps it so a large window still sweeps within a
+	// bounded latency. Named, not buried literals.
+	minReapTick = 250 * time.Millisecond
+	maxReapTick = 30 * time.Second
+)
+
+// reapLoop is the reaper's ticker loop. Extracted so tests can drive it with a
+// tiny tick and fake clock deterministically.
+func (p *workerPool) reapLoop(ctx context.Context, window, tick time.Duration) {
+	t := time.NewTicker(tick)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-p.done:
+			return
+		case <-t.C:
+			p.reapIdle(window)
+		}
+	}
+}
+
+// reapIdle scans the pool once and reaps every not-inUse entry idle longer than
+// window. Map mutation happens under the mutex; Kill() runs OUTSIDE the lock
+// (same discipline as Acquire/Release — Kill may block on process wait).
+func (p *workerPool) reapIdle(window time.Duration) {
+	now := p.now()
+	var reaped []*workerHandle
+
+	p.mu.Lock()
+	for convID, e := range p.byConv {
+		if e.inUse {
+			continue // a live turn holds it — never reap.
+		}
+		if now.Sub(e.lastUsed) <= window {
+			continue // used recently — keep warm.
+		}
+		reaped = append(reaped, e.handle)
+		delete(p.byConv, convID)
+	}
+	p.mu.Unlock()
+
+	for _, h := range reaped {
+		h.Kill()
 	}
 }
 

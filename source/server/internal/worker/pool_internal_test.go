@@ -245,3 +245,147 @@ func TestPool_SupersessionRace_Bounded(t *testing.T) {
 	// Give any background Kill/Wait goroutines a beat under -race.
 	time.Sleep(10 * time.Millisecond)
 }
+
+// fakeClock is a monotonic, test-controlled clock. now() reads it; advance moves
+// it forward. Guarded by a mutex so the reaper goroutine (if any) and the test
+// don't race on it under -race.
+type fakeClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *fakeClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *fakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
+}
+
+// TestPool_ReapIdle_ReapsIdlePastWindow: a warm (not-inUse) worker idle longer
+// than the window is reaped by reapIdle — its process is Killed via the spawn
+// seam and its entry removed. Uses a fake clock + tiny window, no real sleep.
+func TestPool_ReapIdle_ReapsIdlePastWindow(t *testing.T) {
+	clk := &fakeClock{t: time.Unix(0, 0)}
+	killed := make(chan struct{}, 1)
+
+	p := newWorkerPool(func(_ context.Context, _ string, _ uint64) (*workerHandle, error) {
+		return &workerHandle{onKill: func() { killed <- struct{}{} }}, nil
+	})
+	p.now = clk.now
+
+	const window = 60 * time.Second
+	h, err := p.Acquire(context.Background(), "conv-A", 1)
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	p.Release("conv-A", h, true) // warm at t=0.
+
+	// Advance PAST the window, then sweep once.
+	clk.advance(window + time.Second)
+	p.reapIdle(window)
+
+	p.mu.Lock()
+	_, present := p.byConv["conv-A"]
+	p.mu.Unlock()
+	if present {
+		t.Fatal("idle-past-window worker must be reaped (entry removed)")
+	}
+	select {
+	case <-killed:
+	case <-time.After(time.Second):
+		t.Fatal("reaped worker's process must be Killed")
+	}
+}
+
+// TestPool_ReapIdle_SkipsInUse: an inUse (active-turn) worker is NEVER reaped
+// even if its lastUsed is far in the past.
+func TestPool_ReapIdle_SkipsInUse(t *testing.T) {
+	clk := &fakeClock{t: time.Unix(0, 0)}
+	p := newWorkerPool(func(_ context.Context, _ string, _ uint64) (*workerHandle, error) {
+		return &workerHandle{onKill: func() { t.Error("in-use worker must NOT be killed") }}, nil
+	})
+	p.now = clk.now
+
+	const window = 60 * time.Second
+	if _, err := p.Acquire(context.Background(), "conv-A", 1); err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	// Do NOT Release — the entry stays inUse (a live turn holds it).
+
+	clk.advance(window * 10) // very old, but in use.
+	p.reapIdle(window)
+
+	p.mu.Lock()
+	_, present := p.byConv["conv-A"]
+	p.mu.Unlock()
+	if !present {
+		t.Fatal("in-use worker must NOT be reaped")
+	}
+}
+
+// TestPool_ReapIdle_SkipsRecent: a worker released within the window is NOT
+// reaped (still warm for the next turn).
+func TestPool_ReapIdle_SkipsRecent(t *testing.T) {
+	clk := &fakeClock{t: time.Unix(0, 0)}
+	p := newWorkerPool(func(_ context.Context, _ string, _ uint64) (*workerHandle, error) {
+		return &workerHandle{onKill: func() { t.Error("recent worker must NOT be killed") }}, nil
+	})
+	p.now = clk.now
+
+	const window = 60 * time.Second
+	h, err := p.Acquire(context.Background(), "conv-A", 1)
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	p.Release("conv-A", h, true) // warm at t=0.
+
+	clk.advance(window / 2) // still within the window.
+	p.reapIdle(window)
+
+	p.mu.Lock()
+	_, present := p.byConv["conv-A"]
+	p.mu.Unlock()
+	if !present {
+		t.Fatal("recently-released worker must NOT be reaped")
+	}
+}
+
+// TestPool_Reaper_LoopReapsAndStops drives the full reaper goroutine with a tiny
+// tick + fake clock: it eventually reaps an idle worker, and Shutdown stops the
+// loop (verified by the goroutine returning; a second Shutdown is a no-op).
+func TestPool_Reaper_LoopReapsAndStops(t *testing.T) {
+	clk := &fakeClock{t: time.Unix(0, 0)}
+	killed := make(chan struct{}, 1)
+	p := newWorkerPool(func(_ context.Context, _ string, _ uint64) (*workerHandle, error) {
+		return &workerHandle{onKill: func() { killed <- struct{}{} }}, nil
+	})
+	p.now = clk.now
+
+	const window = 60 * time.Second
+	h, err := p.Acquire(context.Background(), "conv-A", 1)
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	p.Release("conv-A", h, true)
+
+	// Start the loop with a fast real tick so the test doesn't wait long; the
+	// idle decision uses the FAKE clock, so advancing it past the window makes
+	// the next tick reap.
+	go p.reapLoop(context.Background(), window, 2*time.Millisecond)
+	clk.advance(window + time.Second)
+
+	select {
+	case <-killed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reaper loop must reap the idle worker")
+	}
+
+	p.Shutdown() // stops the loop; second call must not panic (closeOnce).
+	p.Shutdown()
+	time.Sleep(10 * time.Millisecond)
+}

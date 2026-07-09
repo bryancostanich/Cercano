@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"cercano/source/server/internal/agent"
@@ -27,6 +26,7 @@ import (
 	"cercano/source/server/internal/hostsvc/providers"
 	runtimessvc "cercano/source/server/internal/hostsvc/runtimes"
 	toolssvc "cercano/source/server/internal/hostsvc/tools"
+	"cercano/source/server/internal/broker"
 	"cercano/source/server/internal/compactiongen"
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/conversation"
@@ -83,80 +83,33 @@ type Server struct {
 
 	events *eventHub // server->client push fan-out (SubscribeEvents)
 
-	// activeTurns enforces one live turn per conversation. A new turn on a
-	// conversation that already has one supersedes it: the prior turn's ctx is
-	// canceled and its generation retired, so its persistence and event
-	// emission become no-ops while it unwinds. Prevents two turns interleaving
-	// history writes or sharing one upstream (Meridian) session key.
-	turnsMu     sync.Mutex
-	activeTurns map[string]*turnHandle
-	turnGens    map[string]uint64 // per-conversation turn generation (monotonic)
+	// turnBroker owns the per-conversation turn-exclusivity registry. A new
+	// turn supersedes any prior turn on the same conversation: the prior ctx is
+	// canceled and its generation retired so its persistence and event emission
+	// become no-ops while it unwinds. Prevents two turns interleaving history
+	// writes or sharing one upstream (Meridian) session key.
+	turnBroker *broker.Broker
 }
 
-// turnHandle tracks one in-flight turn for a conversation. gen is the
-// conversation's turn generation at the moment this turn began; a turn is
-// "current" only while activeTurns[conv] still points at this handle.
-type turnHandle struct {
-	gen    uint64
-	cancel context.CancelFunc
-}
-
-// beginTurn registers a new turn for conv, superseding any turn already running
-// there (cancels its ctx). Returns a ctx that's canceled when this turn is
-// itself superseded or when parent is done, this turn's generation, and a
-// release func the caller must defer. The fence helpers (turnIsCurrent) gate
-// persistence/emission on the returned gen.
+// beginTurn delegates to the turn broker. It registers a new turn for conv,
+// superseding any turn already running there. Returns a ctx canceled when this
+// turn is superseded or parent is done, this turn's generation, and a release
+// func the caller must defer. Kept as a thin shim so existing call sites and
+// server-package tests compile without change.
 func (s *Server) beginTurn(parent context.Context, conv string) (context.Context, uint64, func()) {
-	ctx, cancel := context.WithCancel(parent)
-	s.turnsMu.Lock()
-	if s.activeTurns == nil {
-		s.activeTurns = make(map[string]*turnHandle)
-	}
-	if prev, ok := s.activeTurns[conv]; ok {
-		prev.cancel() // supersede the turn already running on this conversation
-	}
-	h := &turnHandle{gen: s.turnGenLocked(conv) + 1, cancel: cancel}
-	s.turnGens[conv] = h.gen
-	s.activeTurns[conv] = h
-	s.turnsMu.Unlock()
-
-	release := func() {
-		cancel()
-		s.turnsMu.Lock()
-		// Only clear the registration if it's still ours — a superseding turn
-		// may have replaced it, and must not have its handle removed by us.
-		if cur, ok := s.activeTurns[conv]; ok && cur == h {
-			delete(s.activeTurns, conv)
-		}
-		s.turnsMu.Unlock()
-	}
-	return ctx, h.gen, release
+	return s.turnBroker.BeginTurn(parent, conv)
 }
 
-// turnGenLocked returns the current generation for conv. Caller holds turnsMu.
-func (s *Server) turnGenLocked(conv string) uint64 {
-	if s.turnGens == nil {
-		s.turnGens = make(map[string]uint64)
-	}
-	return s.turnGens[conv]
-}
-
-// turnIsCurrent reports whether gen is still the live generation for conv — the
-// fence that gates a turn's persistence and event emission. A superseded turn
-// fails this and goes quiet.
+// turnIsCurrent reports whether gen is still the live generation for conv.
+// Delegator shim — logic lives in broker.Broker.IsCurrent.
 func (s *Server) turnIsCurrent(conv string, gen uint64) bool {
-	s.turnsMu.Lock()
-	defer s.turnsMu.Unlock()
-	return s.turnGens[conv] == gen
+	return s.turnBroker.IsCurrent(conv, gen)
 }
 
-// hasActiveTurn reports whether a turn is currently registered for conv (test
-// seam for the release-on-return invariant).
+// hasActiveTurn reports whether a turn is currently registered for conv.
+// Delegator shim — logic lives in broker.Broker.HasActiveTurn.
 func (s *Server) hasActiveTurn(conv string) bool {
-	s.turnsMu.Lock()
-	defer s.turnsMu.Unlock()
-	_, ok := s.activeTurns[conv]
-	return ok
+	return s.turnBroker.HasActiveTurn(conv)
 }
 
 // SetContextLoader wires the project-context loader so the native tool-loop can
@@ -624,6 +577,7 @@ func NewServer(a *agent.Agent, openProvider *legacymodels.OpenModelProvider, rou
 		events:      newEventHub(),
 		cfgSvc:      cfgService,
 		runtimesSvc: rtSvc,
+		turnBroker:  broker.New(),
 	}
 	// syncMeridian bridges rebuildCloud → runtimesSvc.SyncMeridianForProfile
 	// without the providers service holding a direct meridianMgr reference.

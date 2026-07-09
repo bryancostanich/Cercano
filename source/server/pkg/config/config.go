@@ -44,22 +44,22 @@ type CloudProfile struct {
 // strips them so disk reflects the profile-only world. New code should
 // always read through the active profile (see Server.activeCloudModel).
 type Config struct {
-	OllamaURL          string            `yaml:"ollama_url"`
-	OpenRuntime       string            `yaml:"open_runtime"`
-	OpenModel         string            `yaml:"open_model,omitempty"`
-	EmbeddingModel     string            `yaml:"embedding_model,omitempty"`
-	CloudProvider      string            `yaml:"cloud_provider,omitempty"`
-	CloudModel         string            `yaml:"cloud_model,omitempty"`
-	CloudAPIKey        string            `yaml:"cloud_api_key,omitempty"`
-	CloudBaseURL       string            `yaml:"cloud_base_url,omitempty"`
-	CloudProfiles      []CloudProfile    `yaml:"cloud_profiles"`
-	ActiveCloudProfile string            `yaml:"active_cloud_profile"`
+	OllamaURL          string         `yaml:"ollama_url"`
+	OpenRuntime        string         `yaml:"open_runtime"`
+	OpenModel          string         `yaml:"open_model,omitempty"`
+	EmbeddingModel     string         `yaml:"embedding_model,omitempty"`
+	CloudProvider      string         `yaml:"cloud_provider,omitempty"`
+	CloudModel         string         `yaml:"cloud_model,omitempty"`
+	CloudAPIKey        string         `yaml:"cloud_api_key,omitempty"`
+	CloudBaseURL       string         `yaml:"cloud_base_url,omitempty"`
+	CloudProfiles      []CloudProfile `yaml:"cloud_profiles"`
+	ActiveCloudProfile string         `yaml:"active_cloud_profile"`
 	// BackupCloudProfile names the profile that serves a request when the
 	// active profile's provider fails (see internal/llm/fallback for what
 	// counts as a failure worth failing over). Empty = no fallback.
 	BackupCloudProfile string `yaml:"backup_cloud_profile,omitempty"`
-	LocusMode          string            `yaml:"locus_mode"` // cloud_only|cloud_primary|open_primary|open_only
-	Port               string            `yaml:"port"`
+	LocusMode          string `yaml:"locus_mode"` // cloud_only|cloud_primary|open_primary|open_only
+	Port               string `yaml:"port"`
 	// ExecutionMode selects how a conversation's turns are executed:
 	//   "worker"     — each turn runs in a dedicated child process ("cercano
 	//                  worker") so a turn that panics/hangs/wedges takes down
@@ -68,11 +68,11 @@ type Config struct {
 	//                  worker-process work).
 	//   "in_process" — turns run inside the host process (embedded mode / tests).
 	// Empty is treated as "worker" (the production default from Defaults()).
-	ExecutionMode string `yaml:"execution_mode,omitempty"`
-	LlamaServer        LlamaServerConfig `yaml:"llama_server"`
-	Compaction         CompactionConfig  `yaml:"compaction"`
-	Watchdog           WatchdogConfig    `yaml:"watchdog"`
-	Models             ModelsConfig      `yaml:"models"`
+	ExecutionMode string            `yaml:"execution_mode,omitempty"`
+	LlamaServer   LlamaServerConfig `yaml:"llama_server"`
+	Compaction    CompactionConfig  `yaml:"compaction"`
+	Watchdog      WatchdogConfig    `yaml:"watchdog"`
+	Models        ModelsConfig      `yaml:"models"`
 }
 
 // CompactionConfig controls background context compaction. Thresholds are token
@@ -172,12 +172,12 @@ func (r *RestartConfig) UnmarshalYAML(value *yaml.Node) error {
 // Defaults returns a Config with default values.
 func Defaults() Config {
 	return Config{
-		OllamaURL:      "http://localhost:11434",
-		OpenRuntime: "ollama",
-		LocusMode:      "open_primary",
-		Port:           "50052",
-		ExecutionMode:  "worker",
-		Models:         ModelsConfig{DefaultProvider: ProviderOpen},
+		OllamaURL:     "http://localhost:11434",
+		OpenRuntime:   "ollama",
+		LocusMode:     "open_primary",
+		Port:          "50052",
+		ExecutionMode: "worker",
+		Models:        ModelsConfig{DefaultProvider: ProviderOpen},
 		LlamaServer: LlamaServerConfig{
 			ModelDirs:        []string{"~/.cercano/models"},
 			Host:             "127.0.0.1",

@@ -169,7 +169,7 @@ func TestMarshalEventRoundTrip(t *testing.T) {
 		},
 		{
 			Kind:        runner.EventToolUseStop,
-			ToolUseID:  "toolu_001",
+			ToolUseID:   "toolu_001",
 			ArgsSummary: "echo hello",
 		},
 		{

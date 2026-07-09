@@ -56,7 +56,9 @@ type recordingHistory struct {
 	persisted  []llm.Message
 }
 
-func (h *recordingHistory) AssembleHistory(_ context.Context, _ string) []llm.Message { return h.history }
+func (h *recordingHistory) AssembleHistory(_ context.Context, _ string) []llm.Message {
+	return h.history
+}
 func (h *recordingHistory) PersistTurn(_ context.Context, _ string, m llm.Message) {
 	h.persisted = append(h.persisted, m)
 }

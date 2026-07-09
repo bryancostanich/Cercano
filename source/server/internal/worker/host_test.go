@@ -24,12 +24,12 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
-	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/agent"
-	cfgsvc "cercano/source/server/internal/hostsvc/config"
+	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/engine"
-	providers "cercano/source/server/internal/hostsvc/providers"
+	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/hostsvc/permissions"
+	providers "cercano/source/server/internal/hostsvc/providers"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/ollamacatalog"
@@ -50,7 +50,7 @@ type fakeHistory struct {
 
 func (h *fakeHistory) AssembleHistory(_ context.Context, _ string) []llm.Message { return h.history }
 func (h *fakeHistory) PersistTurn(_ context.Context, _ string, _ llm.Message)    {}
-func (h *fakeHistory) LoadProjectContext(_ string) string                         { return h.projectCtx }
+func (h *fakeHistory) LoadProjectContext(_ string) string                        { return h.projectCtx }
 
 // ─── hostTestSecrets ─────────────────────────────────────────────────────────
 
@@ -121,27 +121,27 @@ func (r *echoReader) Close() error { return nil }
 
 type echoResolver struct{ prov llm.Provider }
 
-func (f *echoResolver) Main() (llm.Provider, bool, bool, error) { return f.prov, false, false, nil }
-func (f *echoResolver) MainModel(_ bool) string                  { return "fake-model" }
-func (f *echoResolver) PrimaryModel() string                     { return "fake-model" }
-func (f *echoResolver) Rebuild() error                           { return nil }
-func (f *echoResolver) InstallAbsentCloud(_ string)              {}
-func (f *echoResolver) Cloud() llm.Provider                      { return nil }
-func (f *echoResolver) Open() llm.Provider                       { return nil }
-func (f *echoResolver) ActiveCloudModel() string                 { return "" }
-func (f *echoResolver) LocusMode() string                        { return "" }
-func (f *echoResolver) Router() providers.RouterCloudUpdater     { return nil }
-func (f *echoResolver) Registry() *engine.EngineRegistry         { return nil }
-func (f *echoResolver) CatalogManager() *ollamacatalog.Manager   { return nil }
-func (f *echoResolver) OpenLegacy() *legacymodels.OpenModelProvider { return nil }
-func (f *echoResolver) Reconfigure(_ providers.ReconfigureArgs)  {}
-func (f *echoResolver) SetCloudLLMProvider(_ llm.Provider)       {}
-func (f *echoResolver) SetOpenLLMProvider(_ llm.Provider)        {}
+func (f *echoResolver) Main() (llm.Provider, bool, bool, error)                   { return f.prov, false, false, nil }
+func (f *echoResolver) MainModel(_ bool) string                                   { return "fake-model" }
+func (f *echoResolver) PrimaryModel() string                                      { return "fake-model" }
+func (f *echoResolver) Rebuild() error                                            { return nil }
+func (f *echoResolver) InstallAbsentCloud(_ string)                               {}
+func (f *echoResolver) Cloud() llm.Provider                                       { return nil }
+func (f *echoResolver) Open() llm.Provider                                        { return nil }
+func (f *echoResolver) ActiveCloudModel() string                                  { return "" }
+func (f *echoResolver) LocusMode() string                                         { return "" }
+func (f *echoResolver) Router() providers.RouterCloudUpdater                      { return nil }
+func (f *echoResolver) Registry() *engine.EngineRegistry                          { return nil }
+func (f *echoResolver) CatalogManager() *ollamacatalog.Manager                    { return nil }
+func (f *echoResolver) OpenLegacy() *legacymodels.OpenModelProvider               { return nil }
+func (f *echoResolver) Reconfigure(_ providers.ReconfigureArgs)                   {}
+func (f *echoResolver) SetCloudLLMProvider(_ llm.Provider)                        {}
+func (f *echoResolver) SetOpenLLMProvider(_ llm.Provider)                         {}
 func (f *echoResolver) SetOpenProviderFactory(_ func(config.Config) llm.Provider) {}
-func (f *echoResolver) CloudLLMProvider() llm.Provider           { return nil }
-func (f *echoResolver) OpenLLMProvider() llm.Provider            { return nil }
-func (f *echoResolver) SetCatalogManager(_ *ollamacatalog.Manager) {}
-func (f *echoResolver) SetUsageSink(_ func(usage.Usage))         {}
+func (f *echoResolver) CloudLLMProvider() llm.Provider                            { return nil }
+func (f *echoResolver) OpenLLMProvider() llm.Provider                             { return nil }
+func (f *echoResolver) SetCatalogManager(_ *ollamacatalog.Manager)                {}
+func (f *echoResolver) SetUsageSink(_ func(usage.Usage))                          {}
 
 // ─── hostTestToolSvc ─────────────────────────────────────────────────────────
 

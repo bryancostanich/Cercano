@@ -97,9 +97,10 @@ func spawnRealWorker(t *testing.T, bin string) (*exec.Cmd, func(context.Context)
 
 // TestWorker_RealProcess_CrashIsolated spawns a real worker process, starts a
 // turn, KILLS the process mid-turn, and asserts:
-//   (a) the caller gets an error (not a hang — ctx timeout guards this);
-//   (b) the host (this test process) is still alive and can spawn + drive a
-//       SECOND real worker afterward.
+//
+//	(a) the caller gets an error (not a hang — ctx timeout guards this);
+//	(b) the host (this test process) is still alive and can spawn + drive a
+//	    SECOND real worker afterward.
 func TestWorker_RealProcess_CrashIsolated(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping real-process worker e2e under -short")

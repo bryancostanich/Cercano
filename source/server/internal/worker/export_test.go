@@ -13,8 +13,8 @@ import (
 	"cercano/source/server/internal/hostsvc/permissions"
 	"cercano/source/server/internal/runner"
 	"cercano/source/server/internal/secrets"
-	proto "cercano/source/server/pkg/proto"
 	pkgcfg "cercano/source/server/pkg/config"
+	proto "cercano/source/server/pkg/proto"
 )
 
 // NewWorkerRunnerForTest constructs a workerRunner with an injected dial

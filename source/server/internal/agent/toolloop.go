@@ -232,11 +232,11 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 					if revise == "" {
 						revise = "Address the issue and revise your reply"
 					}
-					note := "⚡ watchdog (" + wd.Protocol + "): " + wd.Challenge + ". " + revise
+					var note string
 					if wd.Action == "block" {
-						note += " (required — no override)."
+						note = "Blocked — comply required. watchdog (" + wd.Protocol + "): " + wd.Challenge + ". " + revise + " (required — no override)."
 					} else {
-						note += ", or call `justify` with a reason."
+						note = "Challenge — comply or justify. watchdog (" + wd.Protocol + "): " + wd.Challenge + ". " + revise + ", or call `justify` with a reason."
 					}
 					emit(LoopEvent{Kind: LoopWatchdogChallenge, Detail: wd.Protocol, Summary: wd.Challenge})
 					// The assistant turn was already appended above (line 201); append
@@ -343,7 +343,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 					emit(LoopEvent{Kind: LoopWatchdogChallenge, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Tier: string(pc.tier), Detail: wd.Protocol, Summary: wd.Challenge})
 					results = append(results, llm.Block{
 						Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID,
-						Content: "⚡ watchdog (" + wd.Protocol + "): " + wd.Challenge + " Either follow the protocol first, or call `justify` with a reason to override.",
+						Content: "Challenge — comply or justify. watchdog (" + wd.Protocol + "): " + wd.Challenge + " Follow the protocol first, or call `justify` with a reason to override.",
 						IsError: false,
 					})
 					watchdogIntervened = true

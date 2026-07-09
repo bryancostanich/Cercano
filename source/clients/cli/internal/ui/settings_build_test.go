@@ -88,13 +88,13 @@ func TestClassifyCommit_Watchdog(t *testing.T) {
 func TestWatchdogGroupModeChecksEscalateFields(t *testing.T) {
 	cfg := &agentclient.Config{
 		WatchdogEnabled: true, WatchdogMode: "strict",
-		WatchdogChecks: []string{"debug-loop"}, WatchdogEscalateAfter: 2,
+		WatchdogChecks: []string{"systematic-debugging"}, WatchdogEscalateAfter: 2,
 	}
 	keys := map[string]bool{}
 	for _, f := range buildDevFields(cfg) {
 		keys[f.Key()] = true
 	}
-	for _, want := range []string{"watchdog-mode", "watchdog-check-debug-loop", "watchdog-check-commit-checkpoint", "watchdog-check-plain-english", "watchdog-escalate-after"} {
+	for _, want := range []string{"watchdog-mode", "watchdog-check-systematic-debugging", "watchdog-check-design-decisions", "watchdog-check-commit-checkpoint", "watchdog-check-plain-english", "watchdog-check-worktree-first", "watchdog-check-follow-through", "watchdog-escalate-after"} {
 		if !keys[want] {
 			t.Fatalf("missing field %q", want)
 		}
@@ -102,20 +102,20 @@ func TestWatchdogGroupModeChecksEscalateFields(t *testing.T) {
 }
 
 func TestWatchdogChecksFromForm(t *testing.T) {
-	cfg := &agentclient.Config{WatchdogChecks: []string{"debug-loop", "plain-english"}}
+	cfg := &agentclient.Config{WatchdogChecks: []string{"systematic-debugging", "plain-english"}}
 	f := form.New([]form.Section{
 		{Title: "Development Tools", Groups: []form.Group{
 			{Title: "Watchdog", Fields: buildDevFields(cfg)},
 		}},
 	})
 	got := watchdogChecksFromForm(f)
-	if strings.Join(got, ",") != "debug-loop,plain-english" {
+	if strings.Join(got, ",") != "systematic-debugging,plain-english" {
 		t.Fatalf("live derivation: %v", got)
 	}
 }
 
 func TestClassifyCommit_WatchdogModeChecksEscalate(t *testing.T) {
-	cur := []string{"debug-loop", "commit-checkpoint", "plain-english"}
+	cur := []string{"systematic-debugging", "commit-checkpoint", "plain-english"}
 	// mode
 	if a := classifyCommit("watchdog-mode", "strict", cur); a.kind != commitConfig || a.update.WatchdogMode != "strict" {
 		t.Fatalf("mode: %+v", a)
@@ -126,16 +126,16 @@ func TestClassifyCommit_WatchdogModeChecksEscalate(t *testing.T) {
 	}
 	// turn a check OFF → new full list without it
 	a := classifyCommit("watchdog-check-plain-english", "false", cur)
-	if a.kind != commitConfig || a.update.WatchdogChecks != "debug-loop,commit-checkpoint" {
+	if a.kind != commitConfig || a.update.WatchdogChecks != "systematic-debugging,commit-checkpoint" {
 		t.Fatalf("check off: %+v", a)
 	}
 	// turn a check ON when absent → appended (known-order)
-	b := classifyCommit("watchdog-check-plain-english", "true", []string{"debug-loop"})
-	if b.update.WatchdogChecks != "debug-loop,plain-english" {
+	b := classifyCommit("watchdog-check-plain-english", "true", []string{"systematic-debugging"})
+	if b.update.WatchdogChecks != "systematic-debugging,plain-english" {
 		t.Fatalf("check on: %+v", b)
 	}
 	// last check OFF → "-" sentinel
-	c := classifyCommit("watchdog-check-debug-loop", "false", []string{"debug-loop"})
+	c := classifyCommit("watchdog-check-systematic-debugging", "false", []string{"systematic-debugging"})
 	if c.update.WatchdogChecks != "-" {
 		t.Fatalf("empty sentinel: %+v", c)
 	}

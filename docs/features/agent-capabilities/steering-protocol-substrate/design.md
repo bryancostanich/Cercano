@@ -160,9 +160,9 @@ could plausibly apply.
 
 ### What it checks
 
-Protocol compliance, e.g.: about to `Edit`/`Write` to fix a bug with no debug-loop
-evidence in the transcript; picked among options without running the decision protocol;
-plain-English violations in user-facing output.
+Protocol compliance, e.g.: about to `Edit`/`Write` to fix a bug with no
+`systematic-debugging` evidence in the transcript; picked among options without running
+the `design-decisions` protocol; plain-English violations in user-facing output.
 
 ### How it hooks in
 

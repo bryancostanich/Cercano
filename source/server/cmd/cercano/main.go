@@ -486,6 +486,14 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	mcpCtx, mcpCancel := context.WithCancel(context.Background())
 	mcpMgr.Start(mcpCtx)
 
+	// Select worker vs in-process turn execution from the loaded config
+	// (default: worker → crash isolation). Runs AFTER config, permissions,
+	// and secrets are wired so the worker runner has everything it needs to
+	// pre-assemble history, build the ConfigSnapshot, and resolve credentials.
+	// Tests never reach this path (they build Server directly), so they stay
+	// in-process and never spawn worker processes.
+	srv.SelectExecutionMode()
+
 	proto.RegisterAgentServer(s, srv)
 
 	go func() {

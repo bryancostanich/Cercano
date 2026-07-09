@@ -1619,8 +1619,10 @@ func runMCPMode(cfg config.Config, externalGRPC string) {
 	}
 }
 
-// runWorkerMode serves a single RunTurn bidi RPC over a Unix-domain socket.
-// The host launches this process with --socket <path> and connects to it.
+// runWorkerMode serves the Worker gRPC service over a Unix-domain socket until
+// killed. The host launches this process with --socket <path> and connects to
+// it; with per-conversation worker reuse the host drives many sequential
+// RunTurn streams over one connection to a warm worker.
 func runWorkerMode(args []string) {
 	var socketPath string
 	for i, arg := range args {

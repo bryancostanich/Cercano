@@ -45,6 +45,10 @@ func (s *Server) buildWatchdogFrom(wc config.WatchdogConfig, mc config.ModelsCon
 			checks = append(checks, watchdog.DebugLoopCheck())
 		case "design-decisions":
 			checks = append(checks, watchdog.DesignDecisionsCheck())
+		case "verification-strategy":
+			checks = append(checks, watchdog.VerificationStrategyCheck())
+		case "compute-before-simulate":
+			checks = append(checks, watchdog.ComputeBeforeSimulateCheck())
 		case "commit-checkpoint":
 			checks = append(checks, watchdog.CommitCheckpointCheck())
 		case "plain-english":

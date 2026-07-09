@@ -94,7 +94,7 @@ func TestWatchdogGroupModeChecksEscalateFields(t *testing.T) {
 	for _, f := range buildDevFields(cfg) {
 		keys[f.Key()] = true
 	}
-	for _, want := range []string{"watchdog-mode", "watchdog-check-systematic-debugging", "watchdog-check-design-decisions", "watchdog-check-commit-checkpoint", "watchdog-check-plain-english", "watchdog-check-worktree-first", "watchdog-check-follow-through", "watchdog-escalate-after"} {
+	for _, want := range []string{"watchdog-mode", "watchdog-check-systematic-debugging", "watchdog-check-design-decisions", "watchdog-check-verification-strategy", "watchdog-check-compute-before-simulate", "watchdog-check-commit-checkpoint", "watchdog-check-plain-english", "watchdog-check-worktree-first", "watchdog-check-follow-through", "watchdog-escalate-after"} {
 		if !keys[want] {
 			t.Fatalf("missing field %q", want)
 		}

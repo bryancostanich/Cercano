@@ -67,12 +67,32 @@ func TestRenderConfirmPrompt_NonDestructiveMCP_NoWarnGlyph(t *testing.T) {
 	}
 }
 
+func TestRenderConfirmPrompt_SummarizesJSONArgs(t *testing.T) {
+	m := minimalModel()
+	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
+		Name:       "dispatch",
+		Args:       `{"task":"In /repo, audit the SKILL.md catalog recommendation","tools":["Read","Grep","Bash"]}`,
+		Permission: "X",
+	}))
+	for _, want := range []string{"dispatch task=In /repo, audit the SKILL.md catalog recommendation", "tools=[Read, Grep, Bash]"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("expected %q in prompt, got: %q", want, s)
+		}
+	}
+	if strings.Contains(s, `{"task"`) || strings.Contains(s, `"tools"`) {
+		t.Errorf("prompt should summarize args instead of showing raw JSON: %q", s)
+	}
+}
+
 func TestRenderConfirmPrompt_TruncatesLongArgs(t *testing.T) {
 	m := minimalModel()
 	bigArgs := `{"content":"` + strings.Repeat("x", 500) + `"}`
 	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
 		Name: "write_file", Args: bigArgs, Permission: "W",
 	}))
+	if !strings.Contains(s, "content=") {
+		t.Errorf("expected summarized key in prompt, got: %q", s)
+	}
 	if !strings.Contains(s, "…") {
 		t.Errorf("expected ellipsis from arg truncation, got: %q", s)
 	}

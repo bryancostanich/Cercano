@@ -389,3 +389,53 @@ func TestPool_Reaper_LoopReapsAndStops(t *testing.T) {
 	p.Shutdown()
 	time.Sleep(10 * time.Millisecond)
 }
+
+// TestPool_Shutdown_DrainsAllWorkers is the B5 graceful-drain guard: Shutdown()
+// kills EVERY cached warm worker (not just idle ones) and empties the pool, so
+// a clean host shutdown leaves no orphaned worker processes. Also asserts
+// Shutdown is idempotent (safe to call twice).
+func TestPool_Shutdown_DrainsAllWorkers(t *testing.T) {
+	killed := make(chan string, 8)
+	p := newWorkerPool(func(_ context.Context, conv string, _ uint64) (*workerHandle, error) {
+		c := conv
+		return &workerHandle{onKill: func() { killed <- c }}, nil
+	})
+
+	convs := []string{"conv-A", "conv-B", "conv-C"}
+	for _, conv := range convs {
+		h, err := p.Acquire(context.Background(), conv, 1)
+		if err != nil {
+			t.Fatalf("acquire %s: %v", conv, err)
+		}
+		p.Release(conv, h, true) // return warm — the between-turns state a drain must clean up.
+	}
+
+	p.Shutdown()
+
+	// Pool emptied.
+	p.mu.Lock()
+	n := len(p.byConv)
+	p.mu.Unlock()
+	if n != 0 {
+		t.Errorf("Shutdown left %d pool entries, want 0", n)
+	}
+
+	// Every warm worker's process was killed.
+	got := map[string]bool{}
+	for range convs {
+		select {
+		case c := <-killed:
+			got[c] = true
+		case <-time.After(time.Second):
+			t.Fatalf("Shutdown killed only %d workers, want %d", len(got), len(convs))
+		}
+	}
+	for _, conv := range convs {
+		if !got[conv] {
+			t.Errorf("Shutdown did not kill %s's worker", conv)
+		}
+	}
+
+	// Idempotent: a second Shutdown must not panic (closeOnce guards the done chan).
+	p.Shutdown()
+}

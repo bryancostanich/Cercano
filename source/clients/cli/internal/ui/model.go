@@ -2875,11 +2875,41 @@ func confirmPromptTitle(p *pendingToolCall) string {
 	if isDispatchTool(p.Name) {
 		return displayToolName(p.Name) + " wants to run a delegated agent"
 	}
+	if summary := toolSpecificConfirmSummary(p); summary != "" {
+		return displayToolName(p.Name) + " " + summary
+	}
 	summary := summarizeArgsWithoutKeys(p.Args, 120, "intent")
 	if summary == "" {
 		return displayToolName(p.Name)
 	}
 	return displayToolName(p.Name) + " " + summary
+}
+
+func toolSpecificConfirmSummary(p *pendingToolCall) string {
+	obj, ok := decodeArgObject(p.Args)
+	if !ok {
+		return ""
+	}
+	switch p.Name {
+	case "git_land":
+		feature := oneLine(stringArg(obj, "feature"))
+		if feature == "" {
+			feature = "current branch"
+		}
+		trunk := oneLine(stringArg(obj, "trunk"))
+		if trunk == "" {
+			trunk = "trunk"
+		}
+		if boolArg(obj, "continue") {
+			return "continue landing " + feature + " onto " + trunk
+		}
+		summary := "land " + feature + " onto " + trunk
+		if strategy := oneLine(stringArg(obj, "strategy")); strategy != "" {
+			summary += " (" + strategy + ")"
+		}
+		return summary
+	}
+	return ""
 }
 
 func confirmPromptDetails(p *pendingToolCall) []string {
@@ -2912,6 +2942,13 @@ func stringArg(obj map[string]any, key string) string {
 		return s
 	}
 	return ""
+}
+
+func boolArg(obj map[string]any, key string) bool {
+	if b, ok := obj[key].(bool); ok {
+		return b
+	}
+	return false
 }
 
 func summarizeToolList(v any) string {
@@ -2968,6 +3005,22 @@ func (m Model) resolveConfirmKey(key string) (Model, tea.Cmd) {
 // MCP tools (mcp__*) additionally expose an [a]lways key that persists the
 // allow server-side so future calls run silently.
 func toolConfirm(tc *pendingToolCall) *confirmRequest {
+	var detailsEntry *Entry
+	toggleDetails := func(m Model) (Model, tea.Cmd) {
+		if detailsEntry != nil {
+			if m.chat.RemoveEntry(detailsEntry) {
+				detailsEntry = nil
+				m.refreshViewport()
+				return m, nil
+			}
+			detailsEntry = nil
+		}
+		detailsEntry = &Entry{Role: RoleSystem,
+			Content: "details:\n```json\n" + tc.Args + "\n```"}
+		m.chat.AppendEntry(detailsEntry)
+		m.refreshViewport()
+		return m, nil
+	}
 	cr := &confirmRequest{
 		onYes: func(m Model) (Model, tea.Cmd) {
 			m.pendingConfirm = nil
@@ -2997,18 +3050,8 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 			return m, nil
 		},
 		extras: map[string]func(Model) (Model, tea.Cmd){
-			"d": func(m Model) (Model, tea.Cmd) {
-				m.chat.AppendEntry(&Entry{Role: RoleSystem,
-					Content: "details:\n```json\n" + tc.Args + "\n```"})
-				m.refreshViewport()
-				return m, nil
-			},
-			"D": func(m Model) (Model, tea.Cmd) {
-				m.chat.AppendEntry(&Entry{Role: RoleSystem,
-					Content: "details:\n```json\n" + tc.Args + "\n```"})
-				m.refreshViewport()
-				return m, nil
-			},
+			"d": toggleDetails,
+			"D": toggleDetails,
 		},
 	}
 	// MCP tools are confirm-by-default; offer always-allow, which persists a

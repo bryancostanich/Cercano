@@ -101,6 +101,36 @@ func TestRenderConfirmPrompt_DispatchPrefersIntent(t *testing.T) {
 	}
 }
 
+func TestRenderConfirmPrompt_GitLandUsesHumanSummaryNotCWD(t *testing.T) {
+	m := minimalModel()
+	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
+		Name:       "git_land",
+		Args:       `{"feature":"","trunk":"main","strategy":"rebase","continue":false,"cwd":"/Users/bryancostanich/git_repos/bryan_costanich/Cercano/.worktrees/sub-agent-grants"}`,
+		Permission: "X",
+	}))
+	if !strings.Contains(s, "git_land land current branch onto main") {
+		t.Fatalf("expected human git_land action summary, got: %q", s)
+	}
+	if strings.Contains(s, "/Users/bryancostanich") || strings.Contains(s, "cwd=") {
+		t.Fatalf("git_land prompt title should not be dominated by cwd, got: %q", s)
+	}
+}
+
+func TestRenderConfirmPrompt_GitLandShowsIntentWithoutCWD(t *testing.T) {
+	m := minimalModel()
+	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
+		Name:       "git_land",
+		Args:       `{"intent":"Land sub-agent grant UX onto main","feature":"","trunk":"main","strategy":"rebase","continue":false,"cwd":"/Users/bryancostanich/git_repos/bryan_costanich/Cercano/.worktrees/sub-agent-grants"}`,
+		Permission: "X",
+	}))
+	if !strings.Contains(s, "Intent: Land sub-agent grant UX onto main") {
+		t.Fatalf("expected intent line, got: %q", s)
+	}
+	if strings.Contains(s, "/Users/bryancostanich") || strings.Contains(s, "cwd=") {
+		t.Fatalf("intent-bearing git_land prompt should not show raw cwd, got: %q", s)
+	}
+}
+
 func TestRenderConfirmPrompt_TruncatesLongArgs(t *testing.T) {
 	m := minimalModel()
 	bigArgs := `{"content":"` + strings.Repeat("x", 500) + `"}`
@@ -140,7 +170,7 @@ func TestResolveConfirmKey_Esc_Cancels(t *testing.T) {
 	}
 }
 
-func TestResolveConfirmKey_D_RevealsDetailsAndKeepsPending(t *testing.T) {
+func TestResolveConfirmKey_D_TogglesDetailsAndKeepsPending(t *testing.T) {
 	m := minimalModel()
 	m.pendingConfirm = toolConfirm(&pendingToolCall{Name: "edit_file", Args: `{"path":"a.go"}`, Permission: "W"})
 
@@ -151,16 +181,30 @@ func TestResolveConfirmKey_D_RevealsDetailsAndKeepsPending(t *testing.T) {
 	if cmd != nil {
 		t.Errorf("d should not return a cmd")
 	}
-	found := false
-	for _, e := range next.chat.Entries() {
-		if strings.Contains(e.Content, "details:") && strings.Contains(e.Content, `"path":"a.go"`) {
-			found = true
-			break
+	if got := countDetailEntries(next, `"path":"a.go"`); got != 1 {
+		t.Fatalf("first d should append exactly one details entry, got %d; entries: %+v", got, next.chat.Entries())
+	}
+
+	next, cmd = next.resolveConfirmKey("d")
+	if next.pendingConfirm == nil {
+		t.Errorf("second d must NOT clear pendingConfirm (user still needs to y/n)")
+	}
+	if cmd != nil {
+		t.Errorf("second d should not return a cmd")
+	}
+	if got := countDetailEntries(next, `"path":"a.go"`); got != 0 {
+		t.Fatalf("second d should collapse details, got %d; entries: %+v", got, next.chat.Entries())
+	}
+}
+
+func countDetailEntries(m Model, needle string) int {
+	count := 0
+	for _, e := range m.chat.Entries() {
+		if strings.Contains(e.Content, "details:") && strings.Contains(e.Content, needle) {
+			count++
 		}
 	}
-	if !found {
-		t.Errorf("d should append a system entry with the details; entries: %+v", next.chat.Entries())
-	}
+	return count
 }
 
 func TestResolveConfirmKey_Y_ClearsAndReturnsCmd(t *testing.T) {

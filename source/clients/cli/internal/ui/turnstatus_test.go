@@ -13,7 +13,10 @@ func TestFormatElapsed(t *testing.T) {
 		{0, "0s"},
 		{900 * time.Millisecond, "0s"},
 		{4200 * time.Millisecond, "4s"},
-		{65 * time.Second, "65s"},
+		{59*time.Second + 900*time.Millisecond, "59s"},
+		{60 * time.Second, "1m00s"},
+		{65 * time.Second, "1m05s"},
+		{334 * time.Second, "5m34s"},
 	}
 	for _, c := range cases {
 		if got := formatElapsed(c.d); got != c.want {

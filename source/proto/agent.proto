@@ -1140,6 +1140,7 @@ message HostToWorker {
     StartTurn          start         = 1;
     PermissionResponse perm_response = 2;
     Cancel             cancel        = 3;
+    CredentialResponse cred_response = 4;
   }
 }
 
@@ -1151,6 +1152,7 @@ message WorkerToHost {
     PersistTurn       persist      = 3;
     TurnDone          done         = 4;
     TurnError         error        = 5;
+    CredentialRequest cred_request = 6;
   }
 }
 
@@ -1332,4 +1334,19 @@ message ConfigSnapshot {
   string   watchdog_model          = 35;
   int32    watchdog_escalate_after = 36;
   bool     watchdog_echo           = 37;
+}
+
+// CredentialRequest asks the host to resolve/refresh the provider credential
+// for a cloud profile. The worker holds no durable credential; it asks on
+// demand (and re-asks on mid-turn expiry). Correlated by id like permissions.
+message CredentialRequest {
+  uint64 id           = 1;
+  string profile_name = 2; // active cloud profile the worker is building a provider for
+}
+
+// CredentialResponse carries the host-resolved token/key (or an error).
+message CredentialResponse {
+  uint64 id    = 1;
+  string token = 2; // API key or fresh access token, per the profile's auth flavor
+  string error = 3;
 }

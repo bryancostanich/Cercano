@@ -26,6 +26,7 @@ type chatTabSurface struct {
 	tabs        map[string]*chatTab
 	childCounts map[string]int
 	closed      map[string]bool // ids the user dismissed; late events are dropped
+	focused     bool            // keyboard focus is on the strip, not the prompt
 }
 
 const mainChatTabID = "main"
@@ -163,7 +164,7 @@ func (m Model) hasSubAgentTabs() bool {
 }
 
 func (m Model) renderChatTabStrip() string {
-	return renderTabStrip(m.width, m.chatTabItems(), m.chatTabs.active, false, m.styles)
+	return renderTabStrip(m.width, m.chatTabItems(), m.chatTabs.active, m.chatTabs.focused, m.styles)
 }
 
 func (m *Model) switchChatTab(id string) bool {
@@ -256,4 +257,63 @@ func (m *Model) setMainChat(v chatView) {
 		childCounts: map[string]int{},
 		closed:      map[string]bool{},
 	}
+}
+
+// cycleChatTab returns the id dir steps from the active tab, wrapping around
+// the strip order.
+func (m *Model) cycleChatTab(dir int) string {
+	m.ensureChatTabs()
+	n := len(m.chatTabs.order)
+	if n == 0 {
+		return mainChatTabID
+	}
+	idx := 0
+	for i, id := range m.chatTabs.order {
+		if id == m.chatTabs.active {
+			idx = i
+			break
+		}
+	}
+	idx = (idx + dir + n) % n
+	return m.chatTabs.order[idx]
+}
+
+// handleChatTabStripKey drives keyboard focus and navigation for the chat tab
+// strip, mirroring the settings strip. shift+tab lifts focus from the prompt;
+// while focused, tab/arrows cycle, digits jump, x closes, enter/esc exit. It
+// returns true when it consumed the key. An unrecognized key while focused
+// drops focus and returns false, so that key reaches the prompt as input.
+func (m *Model) handleChatTabStripKey(keyStr string) bool {
+	if !m.hasSubAgentTabs() {
+		return false
+	}
+	if !m.chatTabs.focused {
+		if keyStr == "shift+tab" {
+			m.chatTabs.focused = true
+			return true
+		}
+		return false
+	}
+	switch keyStr {
+	case "tab", "right":
+		m.switchChatTab(m.cycleChatTab(+1))
+	case "shift+tab", "left":
+		m.switchChatTab(m.cycleChatTab(-1))
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		if idx := int(keyStr[0] - '1'); idx < len(m.chatTabs.order) {
+			m.switchChatTab(m.chatTabs.order[idx])
+		}
+	case "x":
+		m.closeActiveSubAgentTab()
+		if !m.hasSubAgentTabs() {
+			m.chatTabs.focused = false
+		}
+	case "enter", "esc":
+		m.chatTabs.focused = false
+	default:
+		// Unknown key: leave focus and let the prompt handle it.
+		m.chatTabs.focused = false
+		return false
+	}
+	return true
 }

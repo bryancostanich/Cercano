@@ -1062,6 +1062,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if isRuntimeDashboardKey(msg) {
 			return m, m.openConfigSurface(configTabModels)
 		}
+		// Chat tab strip keyboard focus + nav: shift+tab lifts focus from the
+		// prompt to the strip; while focused, tab/arrows/digits switch tabs and x
+		// closes. Consumed keys never reach the prompt.
+		if m.handleChatTabStripKey(keyStr) {
+			m.refreshViewport()
+			return m, nil
+		}
 		// Esc cancels an in-flight prompt execution. If there's a queued
 		// follow-up (user typed while waiting), it stays queued through the
 		// cancel and immediately becomes the next turn — canceling stops

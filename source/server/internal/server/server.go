@@ -1914,10 +1914,16 @@ func gitInfo(dir string) (bool, string) {
 // wired via SetCloudLLMProvider.
 //
 // This is the host-side "front door": it handles the per-conversation turn
-// fence (beginTurn), builds the proto-sink and permission-requester adapters,
-// delegates execution to s.turnRunner.RunTurn, and sends the FinalResponse.
-// The execution body (provider resolution, history assembly, watchdog, tool
-// loop, cross-tier fallback, post-turn bookkeeping) now lives in runner.Core.
+// fence (BeginTurn), attaches the initiator as the first subscriber on the
+// conversation broker, runs the turn in a goroutine that publishes events to
+// the broker, and drains those events to the initiator's stream. This is the
+// unified model: the initiator is just the first (and, until Task 4, only)
+// subscriber — identical to what an attacher will do in Task 4.
+//
+// Single-surface behavior is byte-identical to the old hostProtoSink path:
+// the same events are mapped to the same proto payloads, in the same order,
+// by sendRunnerEvent — the only difference is the indirection through the
+// broker's channel rather than a direct stream.Send in Emit.
 func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestRequest, stream proto.Agent_StreamProcessRequestServer) error {
 	// One live turn per conversation. A new turn here supersedes any turn still
 	// running on the same conversation (cancels its ctx); this turn's own ctx
@@ -1926,9 +1932,13 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	ctx, turnGen, releaseTurn := s.beginTurn(stream.Context(), req.GetConversationId())
 	defer releaseTurn()
 
-	// protoSink maps runner.Event → proto.StreamProcessResponse payloads.
-	// It is the inverse of the old agent.LoopEvent sink closure.
-	protoSink := &hostProtoSink{stream: stream}
+	convID := req.GetConversationId()
+
+	// Attach the initiator as the first subscriber. replay is empty at this
+	// point — no events have been published for this turn yet (BeginTurn just
+	// reset the buffer). detach closes ch and removes us from the fan-out set.
+	replay, ch, detach := s.turnBroker.Attach(convID)
+	defer detach()
 
 	// requester gates a W/X permission prompt: blocks until the client responds
 	// via AllowToolCall / DenyToolCall RPCs. Unchanged from the old closure.
@@ -1965,7 +1975,6 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 
 	// persist is the host-fenced turn persister. The generation fence ensures a
 	// superseded turn's late writes cannot land in the live history.
-	convID := req.GetConversationId()
 	var persist runnersvc.PersistFunc
 	if convID != "" {
 		persist = func(m llm.Message) {
@@ -1976,6 +1985,10 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		}
 	}
 
+	// brokerSink publishes runner events to the turn broker so all subscribers
+	// (including this initiator) receive them via Attach channels.
+	sink := &brokerSink{broker: s.turnBroker, conv: convID, gen: turnGen}
+
 	runReq := runnersvc.Request{
 		ConversationID: req.GetConversationId(),
 		Input:          req.GetInput(),
@@ -1984,18 +1997,84 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		Gen:            turnGen,
 	}
 
-	result, err := s.turnRunner.RunTurn(ctx, runReq, protoSink, requester, persist)
-	if err != nil {
-		return err
+	// turnResult carries RunTurn's return values from the goroutine to the
+	// main goroutine. Written exactly once before doneCh receives; read after.
+	type turnResult struct {
+		result runnersvc.Result
+		err    error
+	}
+	doneCh := make(chan turnResult, 1)
+
+	// Run the turn concurrently so the main goroutine can drain the broker
+	// channel without blocking RunTurn (which calls sink.Emit synchronously).
+	go func() {
+		res, err := s.turnRunner.RunTurn(ctx, runReq, sink, requester, persist)
+		doneCh <- turnResult{result: res, err: err}
+	}()
+
+	// Drain the initiator's subscriber channel to the stream.
+	//
+	// Order: send replay events first (guaranteed empty here — BeginTurn just
+	// reset the buffer and no Publish has happened yet), then live events from
+	// ch. When doneCh fires the turn is complete; drain any remaining buffered
+	// events in ch before proceeding to send FinalResponse.
+	for _, ev := range replay {
+		if err := sendRunnerEvent(stream, ev); err != nil {
+			// Stream gone; goroutine will notice ctx cancellation and return.
+			<-doneCh
+			return err
+		}
+	}
+
+	var tr turnResult
+	draining := false
+	for !draining {
+		select {
+		case ev, ok := <-ch:
+			if !ok {
+				// ch closed by detach (deferred) — should not happen here because
+				// detach runs after this loop, but handle defensively.
+				draining = true
+			} else {
+				if err := sendRunnerEvent(stream, ev); err != nil {
+					<-doneCh
+					return err
+				}
+			}
+		case tr = <-doneCh:
+			draining = true
+		}
+	}
+
+	// Drain any events still buffered in ch after the turn completed. This
+	// ensures trailing events (e.g. a final tool-exec-complete published just
+	// before RunTurn returned) are not dropped.
+drainLoop:
+	for {
+		select {
+		case ev, ok := <-ch:
+			if !ok {
+				break drainLoop
+			}
+			if err := sendRunnerEvent(stream, ev); err != nil {
+				return err
+			}
+		default:
+			break drainLoop
+		}
+	}
+
+	if tr.err != nil {
+		return tr.err
 	}
 
 	// If the runner returned a synthetic locus-error FinalText (no real loop
 	// ran), wrap it in a FinalResponse and exit.  The runner signals this by
 	// returning a non-empty FinalText with no Model set.
-	if result.Model == "" {
+	if tr.result.Model == "" {
 		return stream.Send(&proto.StreamProcessResponse{
 			Payload: &proto.StreamProcessResponse_FinalResponse{
-				FinalResponse: &proto.ProcessRequestResponse{Output: result.FinalText},
+				FinalResponse: &proto.ProcessRequestResponse{Output: tr.result.FinalText},
 			},
 		})
 	}
@@ -2005,49 +2084,65 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	return stream.Send(&proto.StreamProcessResponse{
 		Payload: &proto.StreamProcessResponse_FinalResponse{
 			FinalResponse: &proto.ProcessRequestResponse{
-				Output: strings.ToValidUTF8(result.FinalText, "�"),
+				Output: strings.ToValidUTF8(tr.result.FinalText, "�"),
 				RoutingMetadata: &proto.RoutingMetadata{
-					ModelName: result.Model,
+					ModelName: tr.result.Model,
 				},
 				// Carry token counts so the CLI's "last turn" footer isn't stuck at 0.
-				InputTokens:  int32(result.InputTokens),
-				OutputTokens: int32(result.OutputTokens),
+				InputTokens:  int32(tr.result.InputTokens),
+				OutputTokens: int32(tr.result.OutputTokens),
 			},
 		},
 	})
 }
 
-// hostProtoSink implements runner.EventSink by mapping each runner.Event to
-// the appropriate proto.StreamProcessResponse payload and sending it on stream.
-type hostProtoSink struct {
-	stream proto.Agent_StreamProcessRequestServer
+// brokerSink implements runner.EventSink by publishing each event to the turn
+// broker, fenced by the conversation's current generation. All subscribers
+// (including the turn initiator, attached via Attach) receive the event on
+// their channels.
+type brokerSink struct {
+	broker *broker.Broker
+	conv   string
+	gen    uint64
 }
 
-func (s *hostProtoSink) Emit(ev runnersvc.Event) {
+func (s *brokerSink) Emit(ev runnersvc.Event) {
+	s.broker.Publish(s.conv, s.gen, ev)
+}
+
+// sendRunnerEvent maps a runner.Event to the appropriate proto.StreamProcessResponse
+// payload and sends it on stream. This is the extracted mapping switch formerly
+// inlined in hostProtoSink.Emit. It is a free function so the Task-4
+// AttachConversation handler can reuse the same mapping without duplicating it.
+//
+// FinalResponse is NOT sent here (the handler sends it after RunTurn returns).
+// EventWatchdog/escalate is silently dropped — behavior-preserving (old sink
+// did the same).
+func sendRunnerEvent(stream proto.Agent_StreamProcessRequestServer, ev runnersvc.Event) error {
 	switch ev.Kind {
 	case runnersvc.EventProgress:
-		s.stream.Send(&proto.StreamProcessResponse{
+		return stream.Send(&proto.StreamProcessResponse{
 			Payload: &proto.StreamProcessResponse_Progress{
 				Progress: &proto.ProgressUpdate{Message: ev.Text},
 			},
 		})
 
 	case runnersvc.EventRouteSelected:
-		s.stream.Send(&proto.StreamProcessResponse{
+		return stream.Send(&proto.StreamProcessResponse{
 			Payload: &proto.StreamProcessResponse_RouteSelected{
 				RouteSelected: &proto.RouteSelected{Model: ev.Model, IsCloud: ev.IsCloud},
 			},
 		})
 
 	case runnersvc.EventToken:
-		s.stream.Send(&proto.StreamProcessResponse{
+		return stream.Send(&proto.StreamProcessResponse{
 			Payload: &proto.StreamProcessResponse_TokenDelta{
 				TokenDelta: &proto.TokenDelta{Content: ev.Text},
 			},
 		})
 
 	case runnersvc.EventToolUseStart:
-		s.stream.Send(&proto.StreamProcessResponse{
+		return stream.Send(&proto.StreamProcessResponse{
 			Payload: &proto.StreamProcessResponse_ToolUseStart{
 				ToolUseStart: &proto.ToolUseStart{
 					ToolUseId: ev.ToolUseID,
@@ -2057,7 +2152,7 @@ func (s *hostProtoSink) Emit(ev runnersvc.Event) {
 		})
 
 	case runnersvc.EventToolUseStop:
-		s.stream.Send(&proto.StreamProcessResponse{
+		return stream.Send(&proto.StreamProcessResponse{
 			Payload: &proto.StreamProcessResponse_ToolUseStop{
 				ToolUseStop: &proto.ToolUseStop{
 					ToolUseId:   ev.ToolUseID,
@@ -2067,7 +2162,7 @@ func (s *hostProtoSink) Emit(ev runnersvc.Event) {
 		})
 
 	case runnersvc.EventToolExecStart:
-		s.stream.Send(&proto.StreamProcessResponse{
+		return stream.Send(&proto.StreamProcessResponse{
 			Payload: &proto.StreamProcessResponse_ToolExecStart{
 				ToolExecStart: &proto.ToolExecStart{
 					ToolUseId: ev.ToolUseID,
@@ -2076,7 +2171,7 @@ func (s *hostProtoSink) Emit(ev runnersvc.Event) {
 		})
 
 	case runnersvc.EventToolExecComplete:
-		s.stream.Send(&proto.StreamProcessResponse{
+		return stream.Send(&proto.StreamProcessResponse{
 			Payload: &proto.StreamProcessResponse_ToolExecComplete{
 				ToolExecComplete: &proto.ToolExecComplete{
 					ToolUseId: ev.ToolUseID,
@@ -2091,7 +2186,7 @@ func (s *hostProtoSink) Emit(ev runnersvc.Event) {
 	case runnersvc.EventWatchdog:
 		switch ev.WatchdogKind {
 		case "challenge", "block":
-			s.stream.Send(&proto.StreamProcessResponse{
+			return stream.Send(&proto.StreamProcessResponse{
 				Payload: &proto.StreamProcessResponse_WatchdogEvent{
 					WatchdogEvent: &proto.WatchdogEvent{
 						Kind: ev.WatchdogKind, Protocol: ev.Detail, Text: ev.Summary,
@@ -2099,7 +2194,7 @@ func (s *hostProtoSink) Emit(ev runnersvc.Event) {
 				},
 			})
 		case "echo":
-			s.stream.Send(&proto.StreamProcessResponse{
+			return stream.Send(&proto.StreamProcessResponse{
 				Payload: &proto.StreamProcessResponse_WatchdogEvent{
 					WatchdogEvent: &proto.WatchdogEvent{
 						Kind: "echo", Text: ev.Summary, Thread: ev.Thread,
@@ -2113,6 +2208,7 @@ func (s *hostProtoSink) Emit(ev runnersvc.Event) {
 	case runnersvc.EventDone:
 		// Not used by the in-process host (result comes back from RunTurn directly).
 	}
+	return nil
 }
 
 // primaryModel returns the model the context meter measures against: the

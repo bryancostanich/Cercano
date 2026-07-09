@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	Agent_ProcessRequest_FullMethodName             = "/agent.Agent/ProcessRequest"
 	Agent_StreamProcessRequest_FullMethodName       = "/agent.Agent/StreamProcessRequest"
+	Agent_AttachConversation_FullMethodName         = "/agent.Agent/AttachConversation"
 	Agent_UpdateConfig_FullMethodName               = "/agent.Agent/UpdateConfig"
 	Agent_GetConfig_FullMethodName                  = "/agent.Agent/GetConfig"
 	Agent_ListConversations_FullMethodName          = "/agent.Agent/ListConversations"
@@ -88,6 +89,12 @@ type AgentClient interface {
 	ProcessRequest(ctx context.Context, in *ProcessRequestRequest, opts ...grpc.CallOption) (*ProcessRequestResponse, error)
 	// StreamProcessRequest handles AI requests with progress updates (Streaming).
 	StreamProcessRequest(ctx context.Context, in *ProcessRequestRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamProcessResponse], error)
+	// AttachConversation streams the live turn events of a conversation the caller
+	// did NOT start — a second surface (e.g. VS Code) watching a conversation the
+	// CLI is driving. It replays the in-flight turn's events so far, then streams
+	// live, using the same StreamProcessResponse vocabulary as StreamProcessRequest.
+	// Observe-only: it does not send input or answer permission prompts.
+	AttachConversation(ctx context.Context, in *AttachConversationRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamProcessResponse], error)
 	// UpdateConfig updates runtime configuration (model, provider) without server restart.
 	UpdateConfig(ctx context.Context, in *UpdateConfigRequest, opts ...grpc.CallOption) (*UpdateConfigResponse, error)
 	// GetConfig returns the current runtime config. API key is reported as a
@@ -271,6 +278,25 @@ func (c *agentClient) StreamProcessRequest(ctx context.Context, in *ProcessReque
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Agent_StreamProcessRequestClient = grpc.ServerStreamingClient[StreamProcessResponse]
 
+func (c *agentClient) AttachConversation(ctx context.Context, in *AttachConversationRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamProcessResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[1], Agent_AttachConversation_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[AttachConversationRequest, StreamProcessResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_AttachConversationClient = grpc.ServerStreamingClient[StreamProcessResponse]
+
 func (c *agentClient) UpdateConfig(ctx context.Context, in *UpdateConfigRequest, opts ...grpc.CallOption) (*UpdateConfigResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UpdateConfigResponse)
@@ -383,7 +409,7 @@ func (c *agentClient) GetOpenRuntimeStatus(ctx context.Context, in *GetOpenRunti
 
 func (c *agentClient) InstallOpenRuntime(ctx context.Context, in *InstallOpenRuntimeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[InstallProgress], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[1], Agent_InstallOpenRuntime_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[2], Agent_InstallOpenRuntime_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -402,7 +428,7 @@ type Agent_InstallOpenRuntimeClient = grpc.ServerStreamingClient[InstallProgress
 
 func (c *agentClient) RegenerateContext(ctx context.Context, in *RegenerateContextRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RegenerateContextProgress], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[2], Agent_RegenerateContext_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[3], Agent_RegenerateContext_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -601,7 +627,7 @@ func (c *agentClient) GetModelRAMEstimate(ctx context.Context, in *GetModelRAMEs
 
 func (c *agentClient) StreamRuntimeLogs(ctx context.Context, in *StreamRuntimeLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RuntimeLogEntry], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[3], Agent_StreamRuntimeLogs_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[4], Agent_StreamRuntimeLogs_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -660,7 +686,7 @@ func (c *agentClient) GetPermissionMode(ctx context.Context, in *GetPermissionMo
 
 func (c *agentClient) SubscribeEvents(ctx context.Context, in *SubscribeEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ClientEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[4], Agent_SubscribeEvents_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[5], Agent_SubscribeEvents_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -849,7 +875,7 @@ func (c *agentClient) ListCloudProfileModels(ctx context.Context, in *ListCloudP
 
 func (c *agentClient) StartChatGPTLogin(ctx context.Context, in *StartChatGPTLoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StartChatGPTLoginEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[5], Agent_StartChatGPTLogin_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[6], Agent_StartChatGPTLogin_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -876,6 +902,12 @@ type AgentServer interface {
 	ProcessRequest(context.Context, *ProcessRequestRequest) (*ProcessRequestResponse, error)
 	// StreamProcessRequest handles AI requests with progress updates (Streaming).
 	StreamProcessRequest(*ProcessRequestRequest, grpc.ServerStreamingServer[StreamProcessResponse]) error
+	// AttachConversation streams the live turn events of a conversation the caller
+	// did NOT start — a second surface (e.g. VS Code) watching a conversation the
+	// CLI is driving. It replays the in-flight turn's events so far, then streams
+	// live, using the same StreamProcessResponse vocabulary as StreamProcessRequest.
+	// Observe-only: it does not send input or answer permission prompts.
+	AttachConversation(*AttachConversationRequest, grpc.ServerStreamingServer[StreamProcessResponse]) error
 	// UpdateConfig updates runtime configuration (model, provider) without server restart.
 	UpdateConfig(context.Context, *UpdateConfigRequest) (*UpdateConfigResponse, error)
 	// GetConfig returns the current runtime config. API key is reported as a
@@ -1035,6 +1067,9 @@ func (UnimplementedAgentServer) ProcessRequest(context.Context, *ProcessRequestR
 }
 func (UnimplementedAgentServer) StreamProcessRequest(*ProcessRequestRequest, grpc.ServerStreamingServer[StreamProcessResponse]) error {
 	return status.Error(codes.Unimplemented, "method StreamProcessRequest not implemented")
+}
+func (UnimplementedAgentServer) AttachConversation(*AttachConversationRequest, grpc.ServerStreamingServer[StreamProcessResponse]) error {
+	return status.Error(codes.Unimplemented, "method AttachConversation not implemented")
 }
 func (UnimplementedAgentServer) UpdateConfig(context.Context, *UpdateConfigRequest) (*UpdateConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateConfig not implemented")
@@ -1250,6 +1285,17 @@ func _Agent_StreamProcessRequest_Handler(srv interface{}, stream grpc.ServerStre
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Agent_StreamProcessRequestServer = grpc.ServerStreamingServer[StreamProcessResponse]
+
+func _Agent_AttachConversation_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(AttachConversationRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AgentServer).AttachConversation(m, &grpc.GenericServerStream[AttachConversationRequest, StreamProcessResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_AttachConversationServer = grpc.ServerStreamingServer[StreamProcessResponse]
 
 func _Agent_UpdateConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(UpdateConfigRequest)
@@ -2422,6 +2468,11 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "StreamProcessRequest",
 			Handler:       _Agent_StreamProcessRequest_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "AttachConversation",
+			Handler:       _Agent_AttachConversation_Handler,
 			ServerStreams: true,
 		},
 		{

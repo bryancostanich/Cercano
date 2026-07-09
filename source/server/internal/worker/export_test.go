@@ -1,0 +1,52 @@
+package worker
+
+// export_test.go exposes internal symbols to the worker_test package.
+// Only compiled during tests (Go's standard export-test pattern).
+
+import (
+	"context"
+	"net"
+
+	"google.golang.org/grpc"
+
+	cfgsvc "cercano/source/server/internal/hostsvc/config"
+	"cercano/source/server/internal/hostsvc/permissions"
+	"cercano/source/server/internal/runner"
+	"cercano/source/server/internal/secrets"
+	proto "cercano/source/server/pkg/proto"
+	pkgcfg "cercano/source/server/pkg/config"
+)
+
+// NewWorkerRunnerForTest constructs a workerRunner with an injected dial
+// function for in-process (bufconn) testing — no real binary needed.
+func NewWorkerRunnerForTest(
+	persist runner.TurnHistory,
+	cfg cfgsvc.Service,
+	perms permissions.Broker,
+	st secrets.Store,
+	dial func(ctx context.Context) (*grpc.ClientConn, error),
+) runner.TurnRunner {
+	return newWorkerRunnerWithDial(persist, cfg, perms, st, dial)
+}
+
+// ResolveCredentialForTest exposes the host's credential resolution logic
+// for direct unit testing without needing a running worker stream.
+func ResolveCredentialForTest(
+	ctx context.Context,
+	cfg pkgcfg.Config,
+	st secrets.Store,
+	profileName string,
+) (token, account string, err error) {
+	wr := &workerRunner{secrets: st}
+	return wr.resolveCredential(ctx, cfg, profileName)
+}
+
+// BufconnDial returns a dialFunc that connects via the given bufconn listener.
+func BufconnDial(lis interface {
+	DialContext(ctx context.Context) (net.Conn, error)
+}) func(context.Context) (*grpc.ClientConn, error) {
+	return testDialUnix(lis)
+}
+
+// Ensure proto package is used (suppress unused import if needed).
+var _ = proto.NewWorkerClient

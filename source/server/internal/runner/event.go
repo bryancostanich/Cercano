@@ -20,7 +20,7 @@ const (
 	EventToolUseStop                      // model finalized a tool call (with args)
 	EventToolExecStart                    // tool execution began
 	EventToolExecComplete                 // tool execution finished
-	EventWatchdog                         // protocol-supervision event (challenge/block/echo)
+	EventWatchdog                         // protocol-supervision event; WatchdogKind holds the flavor (challenge/block/echo/escalate)
 	EventDone                             // turn complete; Result populated
 )
 
@@ -45,7 +45,7 @@ type Event struct {
 	StartLine   int
 	IsError     bool
 
-	// Watchdog: EventWatchdog.
+	// Watchdog: EventWatchdog. WatchdogKind is one of challenge/block/echo/escalate.
 	WatchdogKind string
 	Thread       string
 

@@ -11,7 +11,7 @@ import (
 // knownWatchdogChecks must stay in sync with the check switch in the server's
 // buildWatchdogFrom (source/server/internal/server/watchdog_wire.go) and the
 // default checks list in pkg/config.
-var knownWatchdogChecks = []string{"systematic-debugging", "design-decisions", "commit-checkpoint", "plain-english", "worktree-first", "follow-through"}
+var knownWatchdogChecks = []string{"systematic-debugging", "design-decisions", "verification-strategy", "compute-before-simulate", "commit-checkpoint", "plain-english", "worktree-first", "follow-through"}
 
 // watchdogChecksFromForm reads the current watchdog-check toggle states from
 // the live form — the source of truth at commit time, immune to a stale or

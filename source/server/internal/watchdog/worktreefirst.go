@@ -50,15 +50,19 @@ func (worktreeFirstCheck) Applies(a Action) bool {
 	if a.Kind != "tool_call" || canonical(a.ToolName) != runCommandToolName {
 		return false
 	}
+	line, ok := runCommandLine(a.ToolArgs)
+	return ok && branchCreatePattern.MatchString(line)
+}
+
+func runCommandLine(args []byte) (string, bool) {
 	var in runCommandInput
-	if err := json.Unmarshal(a.ToolArgs, &in); err != nil {
-		return false
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", false
 	}
 	// Flatten into one effective command line so both direct
 	// invocations (`git checkout -b …`) and shell wrappers
 	// (`bash -lc "git checkout -b …"`) both match.
-	line := strings.Join(in.Cmd, " ")
-	return branchCreatePattern.MatchString(line)
+	return strings.Join(in.Cmd, " "), true
 }
 
 // Evaluate returns a fixed violation whenever Applies matched. The challenge

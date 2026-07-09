@@ -437,8 +437,8 @@ func TestWatchdogDefaults(t *testing.T) {
 	if w.Mode != "challenge-and-justify" {
 		t.Errorf("Mode = %q, want challenge-and-justify", w.Mode)
 	}
-	if len(w.Checks) != 6 || w.Checks[0] != "systematic-debugging" || w.Checks[1] != "design-decisions" || w.Checks[2] != "commit-checkpoint" || w.Checks[3] != "plain-english" || w.Checks[4] != "worktree-first" || w.Checks[5] != "follow-through" {
-		t.Errorf("Checks = %v, want [systematic-debugging design-decisions commit-checkpoint plain-english worktree-first follow-through]", w.Checks)
+	if len(w.Checks) != 8 || w.Checks[0] != "systematic-debugging" || w.Checks[1] != "design-decisions" || w.Checks[2] != "verification-strategy" || w.Checks[3] != "compute-before-simulate" || w.Checks[4] != "commit-checkpoint" || w.Checks[5] != "plain-english" || w.Checks[6] != "worktree-first" || w.Checks[7] != "follow-through" {
+		t.Errorf("Checks = %v, want [systematic-debugging design-decisions verification-strategy compute-before-simulate commit-checkpoint plain-english worktree-first follow-through]", w.Checks)
 	}
 	if w.EscalateAfter != 2 {
 		t.Errorf("EscalateAfter = %d, want 2", w.EscalateAfter)

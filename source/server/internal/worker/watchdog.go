@@ -104,5 +104,13 @@ func workerWatchdogModel(wc pkgcfg.WatchdogConfig, mc pkgcfg.ModelsConfig) strin
 	if id, _, ok := mc.Resolve(pkgcfg.TierFastLightText, pkgcfg.ProviderOpen, true); ok {
 		return id
 	}
+	// Mirror the host engine's model resolution (DispatchModelFor): an
+	// unconfigured fast_light_text tier falls back to the everyday open model
+	// before giving up. Without this, a sparse taxonomy leaves the watchdog
+	// oneShot with an empty model → the model call errors → supervision silently
+	// fails open, a divergence from in-process (which resolves the everyday model).
+	if id, _, ok := mc.Resolve(pkgcfg.TierEveryday, pkgcfg.ProviderOpen, true); ok {
+		return id
+	}
 	return ""
 }

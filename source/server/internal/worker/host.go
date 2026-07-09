@@ -212,7 +212,7 @@ func (w *workerRunner) RunTurn(
 			return runner.Result{}, fmt.Errorf("workerRunner: acquire: %w", err)
 		}
 		conn = wh.conn
-		cleanupFn = func() { w.pool.Release(req.ConversationID, turnHealthy) }
+		cleanupFn = func() { w.pool.Release(req.ConversationID, wh, turnHealthy) }
 	}
 	defer cleanupFn()
 

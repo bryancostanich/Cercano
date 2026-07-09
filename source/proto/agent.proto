@@ -1116,3 +1116,219 @@ message StartChatGPTLoginEvent {
 message AttachConversationRequest {
   string conversation_id = 1;
 }
+
+// ============================================================
+// Worker service — Phase 5 worker-process turn execution
+//
+// The worker process is the gRPC SERVER; the host is the gRPC CLIENT.
+// The host spawns the worker, dials it, opens a RunTurn stream, sends
+// StartTurn, then exchanges events/permissions/persist messages until
+// TurnDone or TurnError arrives.
+// ============================================================
+
+service Worker {
+  // RunTurn executes one conversation turn in the worker process.
+  // Host sends HostToWorker (StartTurn, then PermissionResponse / Cancel as
+  // needed); worker sends WorkerToHost (WorkerEvent, PermissionRequest,
+  // PersistTurn, TurnDone, TurnError).
+  rpc RunTurn (stream HostToWorker) returns (stream WorkerToHost) {}
+}
+
+// HostToWorker is the host→worker envelope.
+message HostToWorker {
+  oneof msg {
+    StartTurn          start         = 1;
+    PermissionResponse perm_response = 2;
+    Cancel             cancel        = 3;
+  }
+}
+
+// WorkerToHost is the worker→host envelope.
+message WorkerToHost {
+  oneof msg {
+    WorkerEvent       event        = 1;
+    PermissionRequest perm_request = 2;
+    PersistTurn       persist      = 3;
+    TurnDone          done         = 4;
+    TurnError         error        = 5;
+  }
+}
+
+// StartTurn carries everything the worker needs to execute one turn.
+// ConfigSnapshot contains the resolved API credential so the worker never
+// touches the keychain.
+message StartTurn {
+  string              conversation_id  = 1;
+  string              input            = 2;
+  repeated InlineImage images          = 3; // reuse existing InlineImage
+  string              work_dir         = 4;
+  uint64              gen              = 5; // turn generation (host persist fence)
+  ConfigSnapshot      config           = 6;
+  repeated LLMMessage history          = 7;
+  string              project_context  = 8;
+}
+
+// LLMMessage is the wire form of llm.Message. Serialization uses the same
+// BlocksJSON encoding the persistence layer uses (json.Marshal(m.Blocks)),
+// so round-trip fidelity is identical to what the DB already guarantees.
+// content is the concatenated text (same as the persistence Content column).
+message LLMMessage {
+  string role        = 1;
+  bytes  blocks_json = 2; // json.Marshal([]llm.Block) — lossless for all block kinds
+  string content     = 3; // concatenated text; informational, not used on unmarshal
+}
+
+// WorkerEvent mirrors runner.Event. The host maps it back to runner.Event via
+// the inverse of sendRunnerEvent. All fields are flat (no sub-messages) to
+// keep the mapping trivial.
+message WorkerEvent {
+  // kind identifies which runner.EventKind this is.
+  WorkerEventKind kind = 1;
+
+  // Text: EventToken delta; EventProgress message.
+  string text     = 2;
+
+  // Route: EventRouteSelected.
+  string model    = 3;
+  bool   is_cloud = 4;
+
+  // Tool lifecycle: EventToolUse*/EventToolExec*.
+  string tool_use_id   = 5;
+  string tool_name     = 6;
+  string args_summary  = 7;
+  string detail        = 8;
+  string summary       = 9;
+  int32  start_line    = 10;
+  bool   is_error      = 11;
+
+  // Watchdog: EventWatchdog.
+  string watchdog_kind = 12;
+  string thread        = 13;
+
+  // EventDone — inline result fields (avoids a nested message).
+  string final_text    = 14;
+  int64  input_tokens  = 15;
+  int64  output_tokens = 16;
+
+  // EventDone / EventRouteSelected — notice (e.g. fallback note).
+  string notice        = 17;
+}
+
+// WorkerEventKind mirrors runner.EventKind.
+enum WorkerEventKind {
+  WORKER_EVENT_KIND_UNSPECIFIED    = 0;
+  WORKER_EVENT_KIND_ROUTE_SELECTED = 1;
+  WORKER_EVENT_KIND_TOKEN          = 2;
+  WORKER_EVENT_KIND_PROGRESS       = 3;
+  WORKER_EVENT_KIND_TOOL_USE_START = 4;
+  WORKER_EVENT_KIND_TOOL_USE_STOP  = 5;
+  WORKER_EVENT_KIND_TOOL_EXEC_START    = 6;
+  WORKER_EVENT_KIND_TOOL_EXEC_COMPLETE = 7;
+  WORKER_EVENT_KIND_WATCHDOG       = 8;
+  WORKER_EVENT_KIND_DONE           = 9;
+}
+
+// PermissionRequest asks the host to gate a W/X tool call.
+// id correlates each request with its PermissionResponse.
+message PermissionRequest {
+  uint64 id          = 1;
+  string tool_use_id = 2;
+  string name        = 3;
+  string args_json   = 4;
+  string tier        = 5;
+  bool   destructive = 6;
+}
+
+// PermissionResponse carries the host's allow/deny decision.
+message PermissionResponse {
+  uint64 id    = 1;
+  bool   allow = 2;
+  string error = 3;
+}
+
+// PersistTurn asks the host to persist one turn message.
+message PersistTurn {
+  LLMMessage message = 1;
+  uint64     gen     = 2; // generation, for the host's persist fence
+}
+
+// TurnDone signals successful turn completion.
+message TurnDone {
+  string final_text    = 1;
+  string model         = 2;
+  bool   is_cloud      = 3;
+  int64  input_tokens  = 4;
+  int64  output_tokens = 5;
+  string notice        = 6;
+}
+
+// TurnError signals a failed turn.
+message TurnError {
+  string message = 1;
+}
+
+// Cancel asks the worker to abort the current turn.
+message Cancel {}
+
+// ConfigSnapshot carries the config fields the worker needs to build its
+// execution Deps (providers.Resolver + runner.Core + tools). The host
+// resolves the API key from the keychain and puts it in resolved_credential
+// so the worker never touches the keychain.
+//
+// Field selection: everything providers.Resolver.Main() / runner.Core /
+// agenttools reads from config at turn time, plus the full Watchdog block
+// (the watchdog supervisor reads it live).
+message ConfigSnapshot {
+  // Locus mode (cloud_only|cloud_primary|open_primary|open_only).
+  string locus_mode = 1;
+
+  // Active cloud profile — the worker uses these to construct the cloud provider.
+  string active_cloud_profile = 2;
+  string cloud_flavor         = 3;  // messages|chat_completions|responses|bedrock
+  string cloud_backend        = 4;  // openai|gemini|groq|… (chat_completions only)
+  string cloud_route          = 5;  // direct|meridian (default=direct)
+  string cloud_base_url       = 6;
+  string cloud_model          = 7;
+  string cloud_region         = 8;  // bedrock: AWS region
+  string cloud_aws_profile    = 9;  // bedrock: ~/.aws named profile
+
+  // Backup cloud profile name (empty = no fallback).
+  string backup_cloud_profile = 10;
+
+  // Resolved API credential — host puts keychain value here.
+  string resolved_credential  = 11;
+
+  // Open-weight (local) runtime + model.
+  string ollama_url    = 12;
+  string open_runtime  = 13; // "ollama" | "llama_server"
+
+  // Model tiers — worker needs these to resolve tier→model at turn time.
+  string tier_most_capable_open   = 14;
+  string tier_most_capable_cloud  = 15;
+  string tier_everyday_open       = 16;
+  string tier_everyday_cloud      = 17;
+  string tier_fast_light_open     = 18;
+  string tier_fast_light_cloud    = 19;
+  string tier_fast_light_text_open  = 20;
+  string tier_fast_light_text_cloud = 21;
+  string tier_embedding_open      = 22;
+  string tier_embedding_cloud     = 23;
+  string default_provider         = 24; // "cloud" | "open"
+
+  // Compaction — runner reads these for context assembly.
+  bool   compaction_enabled               = 25;
+  int32  compaction_activation_floor_tokens = 26;
+  int32  compaction_segment_tokens        = 27;
+  int32  compaction_verbatim_recent       = 28;
+  double compaction_hard_override_pct     = 29;
+  bool   elide_tool_results               = 30;
+  bool   lossy_tool_elision               = 31;
+
+  // Watchdog — supervisor reads these live during the turn.
+  bool     watchdog_enabled        = 32;
+  string   watchdog_mode           = 33;
+  repeated string watchdog_checks  = 34;
+  string   watchdog_model          = 35;
+  int32    watchdog_escalate_after = 36;
+  bool     watchdog_echo           = 37;
+}

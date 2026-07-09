@@ -2503,3 +2503,107 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 	},
 	Metadata: "agent.proto",
 }
+
+const (
+	Worker_RunTurn_FullMethodName = "/agent.Worker/RunTurn"
+)
+
+// WorkerClient is the client API for Worker service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type WorkerClient interface {
+	// RunTurn executes one conversation turn in the worker process.
+	// Host sends HostToWorker (StartTurn, then PermissionResponse / Cancel as
+	// needed); worker sends WorkerToHost (WorkerEvent, PermissionRequest,
+	// PersistTurn, TurnDone, TurnError).
+	RunTurn(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HostToWorker, WorkerToHost], error)
+}
+
+type workerClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewWorkerClient(cc grpc.ClientConnInterface) WorkerClient {
+	return &workerClient{cc}
+}
+
+func (c *workerClient) RunTurn(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HostToWorker, WorkerToHost], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Worker_ServiceDesc.Streams[0], Worker_RunTurn_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[HostToWorker, WorkerToHost]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Worker_RunTurnClient = grpc.BidiStreamingClient[HostToWorker, WorkerToHost]
+
+// WorkerServer is the server API for Worker service.
+// All implementations must embed UnimplementedWorkerServer
+// for forward compatibility.
+type WorkerServer interface {
+	// RunTurn executes one conversation turn in the worker process.
+	// Host sends HostToWorker (StartTurn, then PermissionResponse / Cancel as
+	// needed); worker sends WorkerToHost (WorkerEvent, PermissionRequest,
+	// PersistTurn, TurnDone, TurnError).
+	RunTurn(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error
+	mustEmbedUnimplementedWorkerServer()
+}
+
+// UnimplementedWorkerServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedWorkerServer struct{}
+
+func (UnimplementedWorkerServer) RunTurn(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error {
+	return status.Error(codes.Unimplemented, "method RunTurn not implemented")
+}
+func (UnimplementedWorkerServer) mustEmbedUnimplementedWorkerServer() {}
+func (UnimplementedWorkerServer) testEmbeddedByValue()                {}
+
+// UnsafeWorkerServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to WorkerServer will
+// result in compilation errors.
+type UnsafeWorkerServer interface {
+	mustEmbedUnimplementedWorkerServer()
+}
+
+func RegisterWorkerServer(s grpc.ServiceRegistrar, srv WorkerServer) {
+	// If the following call panics, it indicates UnimplementedWorkerServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&Worker_ServiceDesc, srv)
+}
+
+func _Worker_RunTurn_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(WorkerServer).RunTurn(&grpc.GenericServerStream[HostToWorker, WorkerToHost]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Worker_RunTurnServer = grpc.BidiStreamingServer[HostToWorker, WorkerToHost]
+
+// Worker_ServiceDesc is the grpc.ServiceDesc for Worker service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var Worker_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "agent.Worker",
+	HandlerType: (*WorkerServer)(nil),
+	Methods:     []grpc.MethodDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "RunTurn",
+			Handler:       _Worker_RunTurn_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
+	Metadata: "agent.proto",
+}

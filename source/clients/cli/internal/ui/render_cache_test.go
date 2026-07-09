@@ -125,6 +125,53 @@ func TestPlainLinesLazyAfterRebuild(t *testing.T) {
 	}
 }
 
+func TestTranscriptPrefixCacheServedWhileTailGrows(t *testing.T) {
+	c := newTestChatView(72, 12)
+	entries := []*Entry{
+		{Role: RoleUser, Content: "old prompt"},
+		{Role: RoleAssistant, Content: "old answer"},
+		{Role: RoleAssistant, Content: "live tail", Streaming: true},
+	}
+	c.SetEntriesSlice(entries)
+	c.SetEntries(entries)
+	if c.transcriptPrefix.end != 2 {
+		t.Fatalf("prefix end = %d, want 2", c.transcriptPrefix.end)
+	}
+	cached := c.transcriptPrefix
+	cached.content = "TRANSCRIPT-PREFIX-SENTINEL"
+	cached.lineCount = strings.Count(cached.content, "\n")
+	c.transcriptPrefix = cached
+
+	entries[2].Content += " grows"
+	c.SetEntries(entries)
+	if !strings.Contains(c.content, "TRANSCRIPT-PREFIX-SENTINEL") {
+		t.Fatalf("stable transcript prefix was rebuilt instead of served")
+	}
+	if !strings.Contains(plain(c.content), "grows") {
+		t.Fatalf("dynamic tail missing after serving cached prefix; got:\n%s", plain(c.content))
+	}
+}
+
+func TestTranscriptPrefixCacheInvalidatedByContentGeneration(t *testing.T) {
+	c := newTestChatView(72, 12)
+	entries := []*Entry{
+		{Role: RoleUser, Content: "old prompt"},
+		{Role: RoleAssistant, Content: "old answer"},
+		{Role: RoleAssistant, Content: "live tail", Streaming: true},
+	}
+	c.SetEntriesSlice(entries)
+	c.SetEntries(entries)
+	cached := c.transcriptPrefix
+	cached.content = "TRANSCRIPT-PREFIX-SENTINEL"
+	c.transcriptPrefix = cached
+
+	c.markTranscriptDirty()
+	c.SetEntries(entries)
+	if strings.Contains(c.content, "TRANSCRIPT-PREFIX-SENTINEL") {
+		t.Fatalf("stale transcript prefix served after content generation changed")
+	}
+}
+
 // The committed-prefix cache must serve stable blocks while only the tail
 // grows, and rebuild the moment a new block commits (or the last block
 // extends — the trailing-table instability).

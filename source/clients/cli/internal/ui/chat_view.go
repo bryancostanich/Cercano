@@ -55,11 +55,18 @@ type chatView struct {
 	// stylesGen increments on SetStyles; cached renders carry the generation
 	// they were built under, so a theme switch invalidates every cache.
 	stylesGen int
-	// entryCache / groupCache / streamPrefix serve frozen renders so rebuild
-	// cost tracks the active entry, not the transcript (chat_render_cache.go).
-	entryCache   map[*Entry]entryRenderCache
-	groupCache   map[int]groupRenderCache
-	streamPrefix streamPrefixCache
+	// entryCache / groupCache / transcriptPrefix / streamPrefix serve frozen
+	// renders so rebuild cost tracks the active entry, not the transcript
+	// (chat_render_cache.go).
+	entryCache       map[*Entry]entryRenderCache
+	groupCache       map[int]groupRenderCache
+	transcriptPrefix transcriptPrefixCache
+	streamPrefix     streamPrefixCache
+	// contentGen increments when already-rendered historical content can change
+	// shape without a width/theme change (fold toggles, inserted notices, lazy
+	// tool bodies, wholesale replacement). Dynamic tail mutations do not need to
+	// bump it because the assembled-prefix cache never includes them.
+	contentGen int
 	// arrowRows maps absolute content lines (indexes into plainLines) to the
 	// entries index whose fold arrow is drawn there. Rebuilt by SetEntries on
 	// every render, so it can never drift from the drawn layout.
@@ -168,7 +175,12 @@ func (c *chatView) SetStyles(s theme.Styles, p theme.Palette) {
 func (c *chatView) Entries() []*Entry { return c.entries }
 
 // AppendEntry appends a single entry to the scrollback.
-func (c *chatView) AppendEntry(e *Entry) { c.entries = append(c.entries, e) }
+func (c *chatView) AppendEntry(e *Entry) {
+	c.entries = append(c.entries, e)
+	// Appends do not invalidate an existing frozen prefix, but they change the
+	// transcript shape once the appended entry becomes eligible for prefixing.
+	c.contentGen++
+}
 
 // SetEntriesSlice replaces the entire entry slice (for /clear and applyResume).
 func (c *chatView) SetEntriesSlice(es []*Entry) {
@@ -190,6 +202,7 @@ func (c *chatView) PrependBanner(meta banner.Meta, epoch time.Time) {
 		return
 	}
 	c.entries = append([]*Entry{{Banner: &meta}}, c.entries...)
+	c.markTranscriptDirty()
 }
 
 // bannerRows is the rendered height of the wide banner block in content lines.
@@ -226,11 +239,13 @@ func (c *chatView) insertNoticeAboveLast(e *Entry) {
 	n := len(c.entries)
 	if n == 0 {
 		c.entries = append(c.entries, e)
+		c.markTranscriptDirty()
 		return
 	}
 	c.entries = append(c.entries, nil)
 	copy(c.entries[n-1+1:], c.entries[n-1:])
 	c.entries[n-1] = e
+	c.markTranscriptDirty()
 }
 
 // dropLastEntry removes the last entry. No-op if entries is empty.
@@ -238,6 +253,7 @@ func (c *chatView) dropLastEntry() {
 	if n := len(c.entries); n > 0 {
 		delete(c.entryCache, c.entries[n-1])
 		c.entries = c.entries[:n-1]
+		c.markTranscriptDirty()
 	}
 }
 
@@ -334,6 +350,7 @@ func (c *chatView) foldPendingCensor() {
 	c.pendingCensor.Superseded = true
 	c.pendingCensor.SupersededOpen = false
 	c.pendingCensor = nil
+	c.markTranscriptDirty()
 }
 
 // FillOpenAssistant fills the open streaming placeholder with text and clears
@@ -671,6 +688,7 @@ func (c *chatView) ToggleFocusedFold() {
 	// Collapsed multi-entry run → expand it.
 	if isMulti && !c.groupExpanded[start] {
 		c.groupExpanded[start] = true
+		c.markTranscriptDirty()
 		return
 	}
 	// Expanded run, focus on the first call and it's already folded → collapse
@@ -678,6 +696,7 @@ func (c *chatView) ToggleFocusedFold() {
 	// other position toggles the focused call's own body.
 	if isMulti && c.groupExpanded[start] && c.focusedToolIdx == start && t.Folded {
 		c.groupExpanded[start] = false
+		c.markTranscriptDirty()
 		return
 	}
 	// Toggle the focused call's own body (and queue its lazy fetch on expand).
@@ -831,14 +850,36 @@ func (c *chatView) getPlainLines() []string {
 // separates each block from neighbouring user/assistant/system entries.
 func (c *chatView) SetEntries(entries []*Entry) {
 	wasAtBottom := c.vp.AtBottom()
+
+	prefixEnd := len(entries)
+	// Keep the final entry out of the assembled prefix during ordinary streaming
+	// repaints. The tail is where token/tool mutations happen, so serving the
+	// frozen prefix lets repaint cost track the active entry instead of the whole
+	// transcript. When the turn is between phases there is no visible active
+	// entry, so all entries may be prefixed and only the animated status line is
+	// rebuilt.
+	if prefixEnd > 0 && !c.IsBetweenPhases() {
+		prefixEnd--
+	}
+	if prefixEnd > 0 && entries[prefixEnd-1].Tool != nil {
+		// Prefixes must end on a block boundary; backing out of a tool run avoids
+		// splitting one cached tool group across prefix and dynamic suffix.
+		for prefixEnd > 0 && entries[prefixEnd-1].Tool != nil {
+			prefixEnd--
+		}
+	}
+
+	prefix := c.renderTranscriptPrefix(entries, prefixEnd)
 	var b strings.Builder
-	c.arrowRows = c.arrowRows[:0]
-	// nl counts newlines written so far — which is also the content-line
-	// index where the next write begins. Arrow rows are recorded against it
-	// as blocks are emitted, so the map matches the layout by construction.
-	nl := 0
-	first := true
-	for i := 0; i < len(entries); {
+	b.Grow(len(prefix.content) + 4096)
+	b.WriteString(prefix.content)
+	c.arrowRows = append(c.arrowRows[:0], prefix.arrowRows...)
+	// nl counts newlines written so far — which is also the content-line index
+	// where the next write begins. Arrow rows are recorded against it as blocks
+	// are emitted, so the map matches the layout by construction.
+	nl := prefix.lineCount
+	first := prefixEnd == 0
+	for i := prefixEnd; i < len(entries); {
 		if !first {
 			b.WriteString("\n\n")
 			nl += 2
@@ -1240,6 +1281,7 @@ func (c *chatView) MouseToggleFold(localX, localY int) bool {
 	c.focusedToolIdx = -1
 	if r.entry >= 0 && r.entry < len(c.entries) && c.entries[r.entry].Superseded {
 		c.entries[r.entry].SupersededOpen = !c.entries[r.entry].SupersededOpen
+		c.markTranscriptDirty()
 		return true
 	}
 	if r.group {
@@ -1257,6 +1299,7 @@ func (c *chatView) MouseToggleFold(localX, localY int) bool {
 // tool entry — the key groupExpanded is recorded under.
 func (c *chatView) toggleGroup(start int) {
 	c.groupExpanded[start] = !c.groupExpanded[start]
+	c.markTranscriptDirty()
 }
 
 // toggleEntryFold flips one tool entry between its folded one-liner and its
@@ -1270,6 +1313,7 @@ func (c *chatView) toggleEntryFold(idx int) {
 		return
 	}
 	t.Folded = !t.Folded
+	c.markTranscriptDirty()
 	// Expanding a call whose full body hasn't been fetched yet queues a lazy
 	// GetToolCall and shows a loading spinner until it returns.
 	if !t.Folded && !t.Loading && t.FullArgs == "" && t.FullResult == "" && t.ToolUseID != "" {

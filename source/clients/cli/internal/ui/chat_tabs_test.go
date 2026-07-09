@@ -98,3 +98,51 @@ func TestSubAgentToolEventRoutesToChildTab(t *testing.T) {
 		t.Fatalf("expected child tab transcript to contain routed tool entry")
 	}
 }
+
+func TestChatTabStripFocusNavAndClose(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.applySubAgentEvent(subAgentEventMsg{id: "c1", kind: "started"})
+	m.applySubAgentEvent(subAgentEventMsg{id: "c2", kind: "started"})
+
+	if m.handleChatTabStripKey("x") {
+		t.Fatal("keys must be ignored while the strip is unfocused")
+	}
+	if !m.handleChatTabStripKey("shift+tab") || !m.chatTabs.focused {
+		t.Fatal("shift+tab should move focus to the strip")
+	}
+	m.handleChatTabStripKey("tab")
+	if m.chatTabs.active != "c1" {
+		t.Fatalf("after tab active=%q want c1", m.chatTabs.active)
+	}
+	m.handleChatTabStripKey("tab")
+	if m.chatTabs.active != "c2" {
+		t.Fatalf("after 2x tab active=%q want c2", m.chatTabs.active)
+	}
+	m.handleChatTabStripKey("shift+tab")
+	if m.chatTabs.active != "c1" {
+		t.Fatalf("after shift+tab active=%q want c1", m.chatTabs.active)
+	}
+	// close c1 while focused; c2 remains so focus persists.
+	m.handleChatTabStripKey("x")
+	if _, ok := m.chatTabs.tabs["c1"]; ok {
+		t.Fatal("c1 should be closed")
+	}
+	if !m.chatTabs.focused {
+		t.Fatal("focus should persist while a sub tab remains")
+	}
+	// closed ids are not resurrected by late events.
+	m.applySubAgentEvent(subAgentEventMsg{id: "c1", kind: "token", text: "late"})
+	if _, ok := m.chatTabs.tabs["c1"]; ok {
+		t.Fatal("closed tab must not be resurrected")
+	}
+	// close the last sub tab; focus drops back to the prompt.
+	m.switchChatTab("c2")
+	m.handleChatTabStripKey("x")
+	if m.hasSubAgentTabs() {
+		t.Fatal("all sub tabs should be closed")
+	}
+	if m.chatTabs.focused {
+		t.Fatal("focus should drop when no sub tabs remain")
+	}
+}

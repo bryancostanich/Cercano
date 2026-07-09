@@ -18,6 +18,7 @@ import (
 	providerssvc "cercano/source/server/internal/hostsvc/providers"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/llm/fallback"
 	ollamallm "cercano/source/server/internal/llm/ollama"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/ollamacatalog"
@@ -264,7 +265,7 @@ type workerResolver struct {
 	cfgSvc    cfgsvc.Service
 }
 
-func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource *streamCredentialSource) (providerssvc.Resolver, error) {
+func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource credentialFetcher) (providerssvc.Resolver, error) {
 	cfgService := cfgsvc.New("", cfg, secrets.NewMemory())
 	r := &workerResolver{cfgSvc: cfgService}
 
@@ -295,7 +296,12 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource *st
 		if buildErr != nil {
 			log.Printf("[worker] cloud provider build failed: %v; continuing without cloud", buildErr)
 		} else {
-			r.cloudProv = prov
+			// A configured backup profile wraps the primary in a fallback composite,
+			// mirroring the in-process providers.wrapBackup path. Everything
+			// downstream sees one provider; a missing/unbuildable backup leaves the
+			// primary bare. The backup's credential is fetched via the SAME stream
+			// credential proxy, keyed by the backup profile name.
+			r.cloudProv = wrapWorkerBackup(ctx, prov, prof.Name, cfg, credSource)
 		}
 	}
 	// No active profile → cloudProv remains nil.
@@ -309,6 +315,69 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource *st
 	}
 
 	return r, nil
+}
+
+// wrapWorkerBackup mirrors providers.wrapBackup but sources the backup
+// credential via the stream credential proxy instead of a local keychain: when a
+// distinct backup profile is configured and buildable, it wraps the primary in a
+// fallback composite so failover behaves exactly as in-process. Every failure
+// path returns the primary unchanged — a broken backup must never take down a
+// working primary.
+func wrapWorkerBackup(
+	ctx context.Context,
+	primary llm.Provider,
+	primaryName string,
+	cfg pkgcfg.Config,
+	credSource credentialFetcher,
+) llm.Provider {
+	name := cfg.BackupCloudProfile
+	if name == "" || name == primaryName {
+		return primary
+	}
+	var bp pkgcfg.CloudProfile
+	found := false
+	for _, p := range cfg.CloudProfiles {
+		if p.Name == name {
+			bp = p
+			found = true
+			break
+		}
+	}
+	if !found {
+		log.Printf("[worker] backup profile %q not found; running without fallback", name)
+		return primary
+	}
+
+	var backup llm.Provider
+	var buildErr error
+	if bp.Flavor == cloudfactory.FlavorResponses && bp.Route == cloudfactory.RouteChatGPT {
+		// ChatGPT subscription: the host owns refresh/OAuth; the worker proxies
+		// the token via the stream, keyed by the backup profile name.
+		ts := &streamTokenSource{creds: credSource, profileName: bp.Name}
+		backup, buildErr = cloudfactory.BuildCloudProvider(bp, "", cloudfactory.Options{TokenSource: ts})
+	} else {
+		// Static-key route: fetch the backup's API key via the stream (mirrors
+		// providers.wrapBackup's st.Get(bp.Name)). A fetch error/miss leaves the
+		// key empty; the carve-out below decides if that is fatal.
+		key := ""
+		if k, _, err := credSource.Fetch(ctx, bp.Name); err == nil {
+			key = k
+		}
+		// Same carve-outs as in-process wrapBackup: a proxy BaseURL (Meridian)
+		// authenticates with no key, and bedrock uses the AWS credential chain.
+		if key == "" && bp.BaseURL == "" && bp.Flavor != cloudfactory.FlavorBedrock {
+			log.Printf("[worker] backup profile %q has no API key; running without fallback", name)
+			return primary
+		}
+		backup, buildErr = cloudfactory.BuildCloudProvider(bp, key)
+	}
+	if buildErr != nil {
+		log.Printf("[worker] backup profile %q unbuildable (%v); running without fallback", name, buildErr)
+		return primary
+	}
+	return fallback.New(primary, backup, bp.Model, func(stage string, ferr error) {
+		log.Printf("[worker] failover to backup %q (%s): primary error: %v", name, stage, ferr)
+	})
 }
 
 func (r *workerResolver) Main() (llm.Provider, bool, bool, error) {

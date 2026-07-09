@@ -10329,8 +10329,20 @@ type ConfigSnapshot struct {
 	WatchdogModel         string   `protobuf:"bytes,35,opt,name=watchdog_model,json=watchdogModel,proto3" json:"watchdog_model,omitempty"`
 	WatchdogEscalateAfter int32    `protobuf:"varint,36,opt,name=watchdog_escalate_after,json=watchdogEscalateAfter,proto3" json:"watchdog_escalate_after,omitempty"`
 	WatchdogEcho          bool     `protobuf:"varint,37,opt,name=watchdog_echo,json=watchdogEcho,proto3" json:"watchdog_echo,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// Backup cloud profile fields — mirror the active-profile fields (3-9) so the
+	// worker can build the backup provider and wrap active+backup in a fallback
+	// composite, matching in-process behavior. Populated only when
+	// backup_cloud_profile (10) is set. The backup's credential is fetched via the
+	// same stream credential proxy, keyed by backup_cloud_profile.
+	BackupFlavor     string `protobuf:"bytes,38,opt,name=backup_flavor,json=backupFlavor,proto3" json:"backup_flavor,omitempty"`    // messages|chat_completions|responses|bedrock
+	BackupBackend    string `protobuf:"bytes,39,opt,name=backup_backend,json=backupBackend,proto3" json:"backup_backend,omitempty"` // openai|gemini|groq|… (chat_completions only)
+	BackupRoute      string `protobuf:"bytes,40,opt,name=backup_route,json=backupRoute,proto3" json:"backup_route,omitempty"`       // direct|meridian (default=direct)
+	BackupBaseUrl    string `protobuf:"bytes,41,opt,name=backup_base_url,json=backupBaseUrl,proto3" json:"backup_base_url,omitempty"`
+	BackupModel      string `protobuf:"bytes,42,opt,name=backup_model,json=backupModel,proto3" json:"backup_model,omitempty"`
+	BackupRegion     string `protobuf:"bytes,43,opt,name=backup_region,json=backupRegion,proto3" json:"backup_region,omitempty"`               // bedrock: AWS region
+	BackupAwsProfile string `protobuf:"bytes,44,opt,name=backup_aws_profile,json=backupAwsProfile,proto3" json:"backup_aws_profile,omitempty"` // bedrock: ~/.aws named profile
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ConfigSnapshot) Reset() {
@@ -10620,6 +10632,55 @@ func (x *ConfigSnapshot) GetWatchdogEcho() bool {
 		return x.WatchdogEcho
 	}
 	return false
+}
+
+func (x *ConfigSnapshot) GetBackupFlavor() string {
+	if x != nil {
+		return x.BackupFlavor
+	}
+	return ""
+}
+
+func (x *ConfigSnapshot) GetBackupBackend() string {
+	if x != nil {
+		return x.BackupBackend
+	}
+	return ""
+}
+
+func (x *ConfigSnapshot) GetBackupRoute() string {
+	if x != nil {
+		return x.BackupRoute
+	}
+	return ""
+}
+
+func (x *ConfigSnapshot) GetBackupBaseUrl() string {
+	if x != nil {
+		return x.BackupBaseUrl
+	}
+	return ""
+}
+
+func (x *ConfigSnapshot) GetBackupModel() string {
+	if x != nil {
+		return x.BackupModel
+	}
+	return ""
+}
+
+func (x *ConfigSnapshot) GetBackupRegion() string {
+	if x != nil {
+		return x.BackupRegion
+	}
+	return ""
+}
+
+func (x *ConfigSnapshot) GetBackupAwsProfile() string {
+	if x != nil {
+		return x.BackupAwsProfile
+	}
+	return ""
 }
 
 // CredentialRequest asks the host to resolve/refresh the provider credential
@@ -11503,7 +11564,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x06notice\x18\x06 \x01(\tR\x06notice\"%\n" +
 	"\tTurnError\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\"\b\n" +
-	"\x06Cancel\"\xc6\r\n" +
+	"\x06Cancel\"\xd3\x0f\n" +
 	"\x0eConfigSnapshot\x12\x1d\n" +
 	"\n" +
 	"locus_mode\x18\x01 \x01(\tR\tlocusMode\x120\n" +
@@ -11546,7 +11607,14 @@ const file_agent_proto_rawDesc = "" +
 	"\x0fwatchdog_checks\x18\" \x03(\tR\x0ewatchdogChecks\x12%\n" +
 	"\x0ewatchdog_model\x18# \x01(\tR\rwatchdogModel\x126\n" +
 	"\x17watchdog_escalate_after\x18$ \x01(\x05R\x15watchdogEscalateAfter\x12#\n" +
-	"\rwatchdog_echo\x18% \x01(\bR\fwatchdogEcho\"F\n" +
+	"\rwatchdog_echo\x18% \x01(\bR\fwatchdogEcho\x12#\n" +
+	"\rbackup_flavor\x18& \x01(\tR\fbackupFlavor\x12%\n" +
+	"\x0ebackup_backend\x18' \x01(\tR\rbackupBackend\x12!\n" +
+	"\fbackup_route\x18( \x01(\tR\vbackupRoute\x12&\n" +
+	"\x0fbackup_base_url\x18) \x01(\tR\rbackupBaseUrl\x12!\n" +
+	"\fbackup_model\x18* \x01(\tR\vbackupModel\x12#\n" +
+	"\rbackup_region\x18+ \x01(\tR\fbackupRegion\x12,\n" +
+	"\x12backup_aws_profile\x18, \x01(\tR\x10backupAwsProfile\"F\n" +
 	"\x11CredentialRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12!\n" +
 	"\fprofile_name\x18\x02 \x01(\tR\vprofileName\"j\n" +

@@ -311,6 +311,16 @@ func TestSnapshotConfigRoundTrip(t *testing.T) {
 				Region:     "",
 				AWSProfile: "",
 			},
+			{
+				Name:       "backup",
+				Flavor:     "chat_completions",
+				Backend:    "openai",
+				Route:      "direct",
+				BaseURL:    "https://api.openai.com",
+				Model:      "gpt-5.5",
+				Region:     "us-east-1",
+				AWSProfile: "prod",
+			},
 		},
 		Models: config.ModelsConfig{
 			DefaultProvider: config.ProviderCloud,
@@ -378,6 +388,38 @@ func TestSnapshotConfigRoundTrip(t *testing.T) {
 	}
 	if gp.Model != op.Model {
 		t.Errorf("CloudProfile.Model: got %q want %q", gp.Model, op.Model)
+	}
+
+	// Backup cloud profile must survive as a second entry (active first, backup
+	// second) so buildWorkerProviders can wrap active+backup in a fallback.
+	if len(got.CloudProfiles) != 2 {
+		t.Fatalf("CloudProfiles: got %d profiles, want 2 (active+backup)", len(got.CloudProfiles))
+	}
+	gbp := got.CloudProfiles[1]
+	obp := orig.CloudProfiles[1]
+	if gbp.Name != obp.Name {
+		t.Errorf("backup CloudProfile.Name: got %q want %q", gbp.Name, obp.Name)
+	}
+	if gbp.Flavor != obp.Flavor {
+		t.Errorf("backup CloudProfile.Flavor: got %q want %q", gbp.Flavor, obp.Flavor)
+	}
+	if gbp.Backend != obp.Backend {
+		t.Errorf("backup CloudProfile.Backend: got %q want %q", gbp.Backend, obp.Backend)
+	}
+	if gbp.Route != obp.Route {
+		t.Errorf("backup CloudProfile.Route: got %q want %q", gbp.Route, obp.Route)
+	}
+	if gbp.BaseURL != obp.BaseURL {
+		t.Errorf("backup CloudProfile.BaseURL: got %q want %q", gbp.BaseURL, obp.BaseURL)
+	}
+	if gbp.Model != obp.Model {
+		t.Errorf("backup CloudProfile.Model: got %q want %q", gbp.Model, obp.Model)
+	}
+	if gbp.Region != obp.Region {
+		t.Errorf("backup CloudProfile.Region: got %q want %q", gbp.Region, obp.Region)
+	}
+	if gbp.AWSProfile != obp.AWSProfile {
+		t.Errorf("backup CloudProfile.AWSProfile: got %q want %q", gbp.AWSProfile, obp.AWSProfile)
 	}
 
 	// Open runtime.

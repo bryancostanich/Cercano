@@ -1334,6 +1334,19 @@ message ConfigSnapshot {
   string   watchdog_model          = 35;
   int32    watchdog_escalate_after = 36;
   bool     watchdog_echo           = 37;
+
+  // Backup cloud profile fields — mirror the active-profile fields (3-9) so the
+  // worker can build the backup provider and wrap active+backup in a fallback
+  // composite, matching in-process behavior. Populated only when
+  // backup_cloud_profile (10) is set. The backup's credential is fetched via the
+  // same stream credential proxy, keyed by backup_cloud_profile.
+  string backup_flavor      = 38; // messages|chat_completions|responses|bedrock
+  string backup_backend     = 39; // openai|gemini|groq|… (chat_completions only)
+  string backup_route       = 40; // direct|meridian (default=direct)
+  string backup_base_url    = 41;
+  string backup_model       = 42;
+  string backup_region      = 43; // bedrock: AWS region
+  string backup_aws_profile = 44; // bedrock: ~/.aws named profile
 }
 
 // CredentialRequest asks the host to resolve/refresh the provider credential

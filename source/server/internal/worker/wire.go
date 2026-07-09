@@ -212,6 +212,35 @@ func SnapshotConfig(cfg config.Config, cred string) *proto.ConfigSnapshot {
 		}
 	}
 
+	// Pull backup cloud profile fields (mirror the active-profile fields) so the
+	// worker can build the backup provider and wrap active+backup in a fallback
+	// composite, matching in-process behavior. Only populated when a distinct
+	// backup profile is configured; its credential is fetched via the same stream
+	// credential proxy in the worker, keyed by the backup profile name.
+	var (
+		backupFlavor     string
+		backupBackend    string
+		backupRoute      string
+		backupBaseURL    string
+		backupModel      string
+		backupRegion     string
+		backupAWSProfile string
+	)
+	if cfg.BackupCloudProfile != "" && cfg.BackupCloudProfile != cfg.ActiveCloudProfile {
+		for _, p := range cfg.CloudProfiles {
+			if p.Name == cfg.BackupCloudProfile {
+				backupFlavor = p.Flavor
+				backupBackend = p.Backend
+				backupRoute = p.Route
+				backupBaseURL = p.BaseURL
+				backupModel = p.Model
+				backupRegion = p.Region
+				backupAWSProfile = p.AWSProfile
+				break
+			}
+		}
+	}
+
 	t := cfg.Models.Tiers
 	return &proto.ConfigSnapshot{
 		LocusMode:          cfg.LocusMode,
@@ -224,6 +253,13 @@ func SnapshotConfig(cfg config.Config, cred string) *proto.ConfigSnapshot {
 		CloudRegion:        region,
 		CloudAwsProfile:    awsProfile,
 		BackupCloudProfile: cfg.BackupCloudProfile,
+		BackupFlavor:       backupFlavor,
+		BackupBackend:      backupBackend,
+		BackupRoute:        backupRoute,
+		BackupBaseUrl:      backupBaseURL,
+		BackupModel:        backupModel,
+		BackupRegion:       backupRegion,
+		BackupAwsProfile:   backupAWSProfile,
 		ResolvedCredential: cred,
 
 		OllamaUrl:   cfg.OllamaURL,
@@ -266,7 +302,8 @@ func ConfigFromSnapshot(p *proto.ConfigSnapshot) config.Config {
 		return config.Config{}
 	}
 
-	// Rebuild the active cloud profile.
+	// Rebuild the active cloud profile FIRST — buildWorkerProviders relies on
+	// CloudProfiles[0] being the active profile.
 	profiles := []config.CloudProfile{}
 	if p.ActiveCloudProfile != "" {
 		profiles = append(profiles, config.CloudProfile{
@@ -278,6 +315,21 @@ func ConfigFromSnapshot(p *proto.ConfigSnapshot) config.Config {
 			Model:      p.CloudModel,
 			Region:     p.CloudRegion,
 			AWSProfile: p.CloudAwsProfile,
+		})
+	}
+	// Rebuild the backup cloud profile as a second entry (when distinct from the
+	// active profile) so the worker can build the fallback composite, matching
+	// in-process wrapBackup.
+	if p.BackupCloudProfile != "" && p.BackupCloudProfile != p.ActiveCloudProfile {
+		profiles = append(profiles, config.CloudProfile{
+			Name:       p.BackupCloudProfile,
+			Flavor:     p.BackupFlavor,
+			Backend:    p.BackupBackend,
+			Route:      p.BackupRoute,
+			BaseURL:    p.BackupBaseUrl,
+			Model:      p.BackupModel,
+			Region:     p.BackupRegion,
+			AWSProfile: p.BackupAwsProfile,
 		})
 	}
 

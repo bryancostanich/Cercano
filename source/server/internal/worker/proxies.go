@@ -220,11 +220,19 @@ func (c *streamCredentialSource) deliver(resp *proto.CredentialResponse) {
 
 // ─── streamTokenSource ────────────────────────────────────────────────────────
 
-// streamTokenSource implements responses.TokenSource by proxying to
-// streamCredentialSource. Used for ChatGPT-subscription profiles where the
+// credentialFetcher resolves a profile's credential on demand. The production
+// implementation is *streamCredentialSource (proxying to the host over the
+// stream); tests inject a fake. Keeping the provider-build path on this
+// interface lets the backup-failover parity test drive it without a live stream.
+type credentialFetcher interface {
+	Fetch(ctx context.Context, profileName string) (token, accountID string, err error)
+}
+
+// streamTokenSource implements responses.TokenSource by proxying to a
+// credentialFetcher. Used for ChatGPT-subscription profiles where the
 // host holds the OAuth token set and handles refresh.
 type streamTokenSource struct {
-	creds       *streamCredentialSource
+	creds       credentialFetcher
 	profileName string
 }
 

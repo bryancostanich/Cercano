@@ -24,6 +24,7 @@ import (
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/hostsvc/permissions"
 	"cercano/source/server/internal/hostsvc/providers"
+	toolssvc "cercano/source/server/internal/hostsvc/tools"
 	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/compactiongen"
 	"cercano/source/server/internal/compactor"
@@ -75,8 +76,7 @@ type Server struct {
 	agent        *agent.Agent
 	providerSvc  providers.Resolver // owns cloud/open providers, router, coordinator, registry, catalogManager
 	cfgSvc       cfgsvc.Service     // owns configPath, currentConfig, cfgMu, secrets
-	toolRegistry *agenttools.Registry
-	capRegistry  *capabilities.Registry
+	toolSvc      toolssvc.Catalog   // owns toolRegistry, capRegistry, dispatchEngine
 	permBroker   permissions.Broker
 	mcpManager   McpManager
 	meridianMgr  *meridian.Manager
@@ -84,7 +84,6 @@ type Server struct {
 	retentionSweeper *retention.Sweeper
 	compactionGen    *compactiongen.Generator
 	contextLoader    *projectctx.Loader
-	dispatchEngine   *dispatch.Engine
 	watchdog         *watchdog.Watchdog // protocol-supervision gate; nil = disabled (default)
 	usageSink        func(usage.Usage)  // wraps the main-loop provider for token recording
 
@@ -176,19 +175,16 @@ func (s *Server) SetContextLoader(l *projectctx.Loader) { s.contextLoader = l }
 // cycle between internal/dispatch and internal/agent.
 // Call before InstallCapabilities.
 func (s *Server) SetDispatchEngine(e *dispatch.Engine) {
-	s.dispatchEngine = e
-	if e != nil {
-		e.SetAgenticRunner(s.runAgenticDispatch)
-	}
+	s.toolSvc.SetEngine(e)
 }
 
 // SetToolRegistry attaches the agent's tool registry. The CLI's /tools and
 // /tool commands route through ListTools / InvokeTool RPCs to it.
-func (s *Server) SetToolRegistry(r *agenttools.Registry) { s.toolRegistry = r }
+func (s *Server) SetToolRegistry(r *agenttools.Registry) { s.toolSvc.SetRegistry(r) }
 
 // ToolRegistry returns the current agent tool registry. Used by the MCP host
 // to register dynamically connected tools into the same registry.
-func (s *Server) ToolRegistry() *agenttools.Registry { return s.toolRegistry }
+func (s *Server) ToolRegistry() *agenttools.Registry { return s.toolSvc.Registry() }
 
 // InstallCapabilities builds the capability registry from the server's current
 // providers, config, and context loader, then wires the resulting
@@ -204,14 +200,15 @@ func (s *Server) InstallCapabilities() {
 		ProjectCtx:    s.contextLoader,
 		// Engine/Conversations wired in a later phase; nil-safe until then.
 		Dispatch: func(ctx context.Context, spec dispatch.Spec) (dispatch.Result, error) {
-			if s.dispatchEngine == nil {
+			e := s.toolSvc.Engine()
+			if e == nil {
 				return dispatch.Result{}, fmt.Errorf("dispatch engine not configured")
 			}
-			return s.dispatchEngine.Dispatch(ctx, spec)
+			return e.Dispatch(ctx, spec)
 		},
 	})
 	builtins.Register(capReg)
-	s.capRegistry = capReg
+	s.toolSvc.SetCapRegistry(capReg)
 	s.SetToolRegistry(agentadapter.BuildAgentRegistry(capReg, builtins.AgentAliases(), builtins.CapabilitySynonyms()))
 }
 
@@ -221,6 +218,10 @@ func (s *Server) SetPermissions(store *agent.PermissionStore, pending *agent.Pen
 	s.permBroker = permissions.New(store, pending, func(mode string) {
 		s.broadcastPermissionMode(mode)
 	})
+	// Forward the broker to the tools service so RunAgenticDispatch can use it.
+	if s.toolSvc != nil {
+		s.toolSvc.SetPermBroker(s.permBroker)
+	}
 }
 
 // SetMcpManager wires the MCP host manager so the RPC handlers can delegate to it.
@@ -652,6 +653,20 @@ func NewServer(a *agent.Agent, openProvider *legacymodels.OpenModelProvider, rou
 		s.syncMeridianForProfile(p, c)
 	}
 	s.providerSvc = providers.New(cfgService, openProvider, router, coordinator, cloudFactory, registry, syncMeridianFn, nil)
+	// Construct the tool catalog service. permBroker is not yet wired here
+	// (SetPermissions is called by the caller after construction), so it is
+	// passed nil and updated via toolSvc.SetPermBroker in SetPermissions.
+	s.toolSvc = toolssvc.New(
+		nil, // permBroker — wired in SetPermissions
+		s.buildSystemPrompt,
+		func() conversation.Store {
+			if s.agent == nil {
+				return nil
+			}
+			return s.agent.PersistentStore()
+		},
+		s.persistTurn,
+	)
 	return s
 }
 
@@ -1174,10 +1189,11 @@ func (s *Server) RenameConversation(ctx context.Context, req *proto.RenameConver
 // registry for the CLI's /tools listing. Returns an empty list when no
 // registry was wired (e.g. tests that don't need tools).
 func (s *Server) ListTools(ctx context.Context, req *proto.ListToolsRequest) (*proto.ListToolsResponse, error) {
-	if s.toolRegistry == nil {
+	reg := s.toolSvc.Registry()
+	if reg == nil {
 		return &proto.ListToolsResponse{}, nil
 	}
-	tools := s.toolRegistry.All()
+	tools := reg.All()
 	out := &proto.ListToolsResponse{Tools: make([]*proto.BuiltinTool, 0, len(tools))}
 	for _, t := range tools {
 		out.Tools = append(out.Tools, &proto.BuiltinTool{
@@ -1196,11 +1212,12 @@ func (s *Server) ListTools(ctx context.Context, req *proto.ListToolsRequest) (*p
 // errors so the CLI can render them inline.
 func (s *Server) InvokeTool(ctx context.Context, req *proto.InvokeToolRequest) (*proto.InvokeToolResponse, error) {
 	resp := &proto.InvokeToolResponse{}
-	if s.toolRegistry == nil {
+	reg := s.toolSvc.Registry()
+	if reg == nil {
 		resp.Error = "no tool registry configured"
 		return resp, nil
 	}
-	tool, ok := s.toolRegistry.Get(req.GetName())
+	tool, ok := reg.Get(req.GetName())
 	if !ok {
 		resp.Error = fmt.Sprintf("unknown tool %q", req.GetName())
 		return resp, nil
@@ -1331,7 +1348,7 @@ func (s *Server) GetContextUsage(ctx context.Context, req *proto.GetContextUsage
 func (s *Server) SuggestNextPrompt(ctx context.Context, req *proto.SuggestNextPromptRequest) (*proto.SuggestNextPromptResponse, error) {
 	empty := &proto.SuggestNextPromptResponse{}
 	convID := req.GetConversationId()
-	if convID == "" || s.dispatchEngine == nil {
+	if convID == "" || s.toolSvc.Engine() == nil {
 		return empty, nil
 	}
 	store := s.agent.PersistentStore()
@@ -1378,7 +1395,7 @@ func (s *Server) SuggestNextPrompt(ctx context.Context, req *proto.SuggestNextPr
 	promptB.WriteString(tail.String())
 	promptB.WriteString("\nNext prompt:")
 
-	res, err := s.dispatchEngine.Dispatch(ctx, dispatch.Spec{
+	res, err := s.toolSvc.Engine().Dispatch(ctx, dispatch.Spec{
 		Mode:        dispatch.OneShot,
 		Role:        dispatch.RoleCoproc,
 		Tier:        config.TierFastLightText,
@@ -2031,7 +2048,7 @@ func (s *Server) ProcessRequest(ctx context.Context, req *proto.ProcessRequestRe
 func (s *Server) StreamProcessRequest(req *proto.ProcessRequestRequest, stream proto.Agent_StreamProcessRequestServer) error {
 	fmt.Printf("Received request (Stream): %s\n", req.Input)
 
-	if (s.providerSvc.Cloud() != nil || s.providerSvc.Open() != nil) && s.toolRegistry != nil {
+	if (s.providerSvc.Cloud() != nil || s.providerSvc.Open() != nil) && s.toolSvc.Registry() != nil {
 		return s.streamProcessRequestWithToolLoop(req, stream)
 	}
 
@@ -2311,7 +2328,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 			return false, err
 		}
 		if d.Allow && d.Persist {
-			if tool, ok := s.toolRegistry.Get(name); ok && agenttools.OriginOf(tool) == agenttools.OriginMCP {
+			if tool, ok := s.toolSvc.Registry().Get(name); ok && agenttools.OriginOf(tool) == agenttools.OriginMCP {
 				if err := s.permBroker.AddMCPAllow(name); err != nil {
 					fmt.Fprintf(os.Stderr, "[mcp] persist always-allow for %s: %v\n", name, err)
 				}
@@ -2408,7 +2425,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	// Watchdog wiring (default-OFF: s.watchdog == nil ⇒ unchanged behavior).
 	// Per-request gate bound to this conversation + a per-request registry that
 	// augments the base tools with the conversation-scoped justify tool.
-	gateRegistry := s.toolRegistry
+	gateRegistry := s.toolSvc.Registry()
 	var wdGate agent.WatchdogGate
 	var wdTurnEnd agent.WatchdogTurnEnd
 	wd := s.watchdog
@@ -2422,7 +2439,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 			return agent.WatchdogDecision{Action: d.Action, Protocol: d.Protocol, Challenge: d.Challenge, Revise: d.Revise}
 		}
 		reg := agenttools.NewRegistry()
-		for _, t := range s.toolRegistry.All() {
+		for _, t := range s.toolSvc.Registry().All() {
 			_ = reg.Register(t)
 		}
 		_ = reg.Register(wd.JustifyTool(convID))

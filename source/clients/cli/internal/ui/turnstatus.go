@@ -10,10 +10,15 @@ import (
 // flight: "<activity> · <elapsed> · <N tok↑> · <model> (local|cloud)". These
 // are pure helpers; renderStatus adds the spinner, styling, and interrupt hint.
 
-// formatElapsed renders a turn's running time in whole seconds ("4s"). Whole
-// seconds keep the timer from flickering on every frame.
+// formatElapsed renders a turn's running time in whole seconds. Under a minute
+// it stays compact ("4s"); at a minute or more it becomes easier to scan
+// ("1m05s"). Whole seconds keep the timer from flickering on every frame.
 func formatElapsed(d time.Duration) string {
-	return fmt.Sprintf("%ds", int(d.Seconds()))
+	secs := int(d.Seconds())
+	if secs < 60 {
+		return fmt.Sprintf("%ds", secs)
+	}
+	return fmt.Sprintf("%dm%02ds", secs/60, secs%60)
 }
 
 // turnStatusLine composes the live status content. The token count is shown

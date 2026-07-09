@@ -72,46 +72,46 @@ func (r *fixedReader) Close() error { return nil }
 // fakeResolver is a minimal providers.Resolver that serves fixedProvider.
 type fakeResolver struct{ prov llm.Provider }
 
-func (f *fakeResolver) Main() (llm.Provider, bool, bool, error) { return f.prov, false, false, nil }
-func (f *fakeResolver) MainModel(_ bool) string                  { return "fake-model" }
-func (f *fakeResolver) PrimaryModel() string                     { return "fake-model" }
-func (f *fakeResolver) Rebuild() error                           { return nil }
-func (f *fakeResolver) InstallAbsentCloud(_ string)              {}
-func (f *fakeResolver) Cloud() llm.Provider                      { return nil }
-func (f *fakeResolver) Open() llm.Provider                       { return nil }
-func (f *fakeResolver) ActiveCloudModel() string                 { return "" }
-func (f *fakeResolver) LocusMode() string                        { return "" }
-func (f *fakeResolver) Router() providers.RouterCloudUpdater     { return nil }
-func (f *fakeResolver) Registry() *engine.EngineRegistry         { return nil }
-func (f *fakeResolver) CatalogManager() *ollamacatalog.Manager   { return nil }
-func (f *fakeResolver) OpenLegacy() *legacymodels.OpenModelProvider { return nil }
-func (f *fakeResolver) Reconfigure(_ providers.ReconfigureArgs)  {}
-func (f *fakeResolver) SetCloudLLMProvider(_ llm.Provider)       {}
-func (f *fakeResolver) SetOpenLLMProvider(_ llm.Provider)        {}
+func (f *fakeResolver) Main() (llm.Provider, bool, bool, error)                   { return f.prov, false, false, nil }
+func (f *fakeResolver) MainModel(_ bool) string                                   { return "fake-model" }
+func (f *fakeResolver) PrimaryModel() string                                      { return "fake-model" }
+func (f *fakeResolver) Rebuild() error                                            { return nil }
+func (f *fakeResolver) InstallAbsentCloud(_ string)                               {}
+func (f *fakeResolver) Cloud() llm.Provider                                       { return nil }
+func (f *fakeResolver) Open() llm.Provider                                        { return nil }
+func (f *fakeResolver) ActiveCloudModel() string                                  { return "" }
+func (f *fakeResolver) LocusMode() string                                         { return "" }
+func (f *fakeResolver) Router() providers.RouterCloudUpdater                      { return nil }
+func (f *fakeResolver) Registry() *engine.EngineRegistry                          { return nil }
+func (f *fakeResolver) CatalogManager() *ollamacatalog.Manager                    { return nil }
+func (f *fakeResolver) OpenLegacy() *legacymodels.OpenModelProvider               { return nil }
+func (f *fakeResolver) Reconfigure(_ providers.ReconfigureArgs)                   {}
+func (f *fakeResolver) SetCloudLLMProvider(_ llm.Provider)                        {}
+func (f *fakeResolver) SetOpenLLMProvider(_ llm.Provider)                         {}
 func (f *fakeResolver) SetOpenProviderFactory(_ func(config.Config) llm.Provider) {}
-func (f *fakeResolver) CloudLLMProvider() llm.Provider           { return nil }
-func (f *fakeResolver) OpenLLMProvider() llm.Provider            { return nil }
-func (f *fakeResolver) SetCatalogManager(_ *ollamacatalog.Manager) {}
-func (f *fakeResolver) SetUsageSink(_ func(usage.Usage))         {}
+func (f *fakeResolver) CloudLLMProvider() llm.Provider                            { return nil }
+func (f *fakeResolver) OpenLLMProvider() llm.Provider                             { return nil }
+func (f *fakeResolver) SetCatalogManager(_ *ollamacatalog.Manager)                {}
+func (f *fakeResolver) SetUsageSink(_ func(usage.Usage))                          {}
 
 // fakeConfig satisfies cfgsvc.Service.
 type fakeConfig struct{}
 
-func (c *fakeConfig) Get() config.Config                                    { return config.Config{} }
-func (c *fakeConfig) Path() string                                          { return "" }
-func (c *fakeConfig) Secrets() secrets.Store                                { return nil }
-func (c *fakeConfig) ActiveProfile() (config.CloudProfile, bool)            { return config.CloudProfile{}, false }
-func (c *fakeConfig) Set(_ config.Config)                                   {}
-func (c *fakeConfig) SetPath(_ string)                                      {}
-func (c *fakeConfig) SetSecrets(_ secrets.Store)                            {}
-func (c *fakeConfig) SetActiveProfile(_ string) bool                        { return false }
-func (c *fakeConfig) UpsertProfile(_ config.CloudProfile) (bool, bool)     { return false, false }
-func (c *fakeConfig) RemoveProfile(_ string) (bool, bool)                   { return false, false }
-func (c *fakeConfig) SetBackupProfile(_ string) bool                        { return false }
-func (c *fakeConfig) ProfileInfo(_ string) (bool, bool)                     { return false, false }
-func (c *fakeConfig) Mutate(_ func(*config.Config))                         {}
-func (c *fakeConfig) SetCloudModel(_ string)                                {}
-func (c *fakeConfig) Persist()                                              {}
+func (c *fakeConfig) Get() config.Config                               { return config.Config{} }
+func (c *fakeConfig) Path() string                                     { return "" }
+func (c *fakeConfig) Secrets() secrets.Store                           { return nil }
+func (c *fakeConfig) ActiveProfile() (config.CloudProfile, bool)       { return config.CloudProfile{}, false }
+func (c *fakeConfig) Set(_ config.Config)                              {}
+func (c *fakeConfig) SetPath(_ string)                                 {}
+func (c *fakeConfig) SetSecrets(_ secrets.Store)                       {}
+func (c *fakeConfig) SetActiveProfile(_ string) bool                   { return false }
+func (c *fakeConfig) UpsertProfile(_ config.CloudProfile) (bool, bool) { return false, false }
+func (c *fakeConfig) RemoveProfile(_ string) (bool, bool)              { return false, false }
+func (c *fakeConfig) SetBackupProfile(_ string) bool                   { return false }
+func (c *fakeConfig) ProfileInfo(_ string) (bool, bool)                { return false, false }
+func (c *fakeConfig) Mutate(_ func(*config.Config))                    {}
+func (c *fakeConfig) SetCloudModel(_ string)                           {}
+func (c *fakeConfig) Persist()                                         {}
 
 // fakeToolSvc returns an empty registry.
 type fakeToolSvc struct{ reg *agenttools.Registry }

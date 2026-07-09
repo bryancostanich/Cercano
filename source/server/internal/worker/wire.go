@@ -39,9 +39,9 @@ func MarshalMessage(m llm.Message) (*proto.LLMMessage, error) {
 		}
 	}
 	return &proto.LLMMessage{
-		Role:      string(m.Role),
+		Role:       string(m.Role),
 		BlocksJson: blocksJSON,
-		Content:   text,
+		Content:    text,
 	}, nil
 }
 
@@ -71,29 +71,29 @@ func UnmarshalMessage(p *proto.LLMMessage) (llm.Message, error) {
 // so the host can reconstruct a runner.Event with zero information loss.
 func MarshalEvent(ev runner.Event) *proto.WorkerEvent {
 	p := &proto.WorkerEvent{
-		Kind:        eventKindToProto(ev.Kind),
-		Text:        ev.Text,
-		Model:       ev.Model,
-		IsCloud:     ev.IsCloud,
-		ToolUseId:   ev.ToolUseID,
-		ToolName:    ev.ToolName,
-		ArgsSummary: ev.ArgsSummary,
-		Detail:      ev.Detail,
-		Summary:     ev.Summary,
-		StartLine:   int32(ev.StartLine),
-		IsError:     ev.IsError,
+		Kind:         eventKindToProto(ev.Kind),
+		Text:         ev.Text,
+		Model:        ev.Model,
+		IsCloud:      ev.IsCloud,
+		ToolUseId:    ev.ToolUseID,
+		ToolName:     ev.ToolName,
+		ArgsSummary:  ev.ArgsSummary,
+		Detail:       ev.Detail,
+		Summary:      ev.Summary,
+		StartLine:    int32(ev.StartLine),
+		IsError:      ev.IsError,
 		WatchdogKind: ev.WatchdogKind,
-		Thread:      ev.Thread,
-		Notice:      ev.Notice,
+		Thread:       ev.Thread,
+		Notice:       ev.Notice,
 	}
 	// For EventDone, inline the Result fields.
 	if ev.Kind == runner.EventDone {
-		p.FinalText   = ev.Result.FinalText
-		p.Model       = ev.Result.Model
-		p.IsCloud     = ev.Result.IsCloud
-		p.InputTokens  = int64(ev.Result.InputTokens)
+		p.FinalText = ev.Result.FinalText
+		p.Model = ev.Result.Model
+		p.IsCloud = ev.Result.IsCloud
+		p.InputTokens = int64(ev.Result.InputTokens)
 		p.OutputTokens = int64(ev.Result.OutputTokens)
-		p.Notice      = ev.Result.Notice
+		p.Notice = ev.Result.Notice
 	}
 	return p
 }
@@ -191,22 +191,22 @@ func protoToEventKind(k proto.WorkerEventKind) runner.EventKind {
 func SnapshotConfig(cfg config.Config, cred string) *proto.ConfigSnapshot {
 	// Pull active cloud profile fields.
 	var (
-		flavor      string
-		backend     string
-		route       string
-		baseURL     string
-		model       string
-		region      string
-		awsProfile  string
+		flavor     string
+		backend    string
+		route      string
+		baseURL    string
+		model      string
+		region     string
+		awsProfile string
 	)
 	for _, p := range cfg.CloudProfiles {
 		if p.Name == cfg.ActiveCloudProfile {
-			flavor     = p.Flavor
-			backend    = p.Backend
-			route      = p.Route
-			baseURL    = p.BaseURL
-			model      = p.Model
-			region     = p.Region
+			flavor = p.Flavor
+			backend = p.Backend
+			route = p.Route
+			baseURL = p.BaseURL
+			model = p.Model
+			region = p.Region
 			awsProfile = p.AWSProfile
 			break
 		}
@@ -229,25 +229,25 @@ func SnapshotConfig(cfg config.Config, cred string) *proto.ConfigSnapshot {
 		OllamaUrl:   cfg.OllamaURL,
 		OpenRuntime: cfg.OpenRuntime,
 
-		TierMostCapableOpen:   t.MostCapable.Open,
-		TierMostCapableCloud:  t.MostCapable.Cloud,
-		TierEverydayOpen:      t.Everyday.Open,
-		TierEverydayCloud:     t.Everyday.Cloud,
-		TierFastLightOpen:     t.FastLight.Open,
-		TierFastLightCloud:    t.FastLight.Cloud,
-		TierFastLightTextOpen: t.FastLightText.Open,
+		TierMostCapableOpen:    t.MostCapable.Open,
+		TierMostCapableCloud:   t.MostCapable.Cloud,
+		TierEverydayOpen:       t.Everyday.Open,
+		TierEverydayCloud:      t.Everyday.Cloud,
+		TierFastLightOpen:      t.FastLight.Open,
+		TierFastLightCloud:     t.FastLight.Cloud,
+		TierFastLightTextOpen:  t.FastLightText.Open,
 		TierFastLightTextCloud: t.FastLightText.Cloud,
-		TierEmbeddingOpen:     t.Embedding.Open,
-		TierEmbeddingCloud:    t.Embedding.Cloud,
-		DefaultProvider:       string(cfg.Models.DefaultProvider),
+		TierEmbeddingOpen:      t.Embedding.Open,
+		TierEmbeddingCloud:     t.Embedding.Cloud,
+		DefaultProvider:        string(cfg.Models.DefaultProvider),
 
-		CompactionEnabled:                cfg.Compaction.Enabled,
-		CompactionActivationFloorTokens:  int32(cfg.Compaction.ActivationFloorTokens),
-		CompactionSegmentTokens:          int32(cfg.Compaction.SegmentTokens),
-		CompactionVerbatimRecent:         int32(cfg.Compaction.VerbatimRecent),
-		CompactionHardOverridePct:        cfg.Compaction.HardOverridePct,
-		ElideToolResults:                 cfg.Compaction.ElideToolResults,
-		LossyToolElision:                 cfg.Compaction.LossyToolElision,
+		CompactionEnabled:               cfg.Compaction.Enabled,
+		CompactionActivationFloorTokens: int32(cfg.Compaction.ActivationFloorTokens),
+		CompactionSegmentTokens:         int32(cfg.Compaction.SegmentTokens),
+		CompactionVerbatimRecent:        int32(cfg.Compaction.VerbatimRecent),
+		CompactionHardOverridePct:       cfg.Compaction.HardOverridePct,
+		ElideToolResults:                cfg.Compaction.ElideToolResults,
+		LossyToolElision:                cfg.Compaction.LossyToolElision,
 
 		WatchdogEnabled:       cfg.Watchdog.Enabled,
 		WatchdogMode:          cfg.Watchdog.Mode,

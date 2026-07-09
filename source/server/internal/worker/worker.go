@@ -16,6 +16,7 @@ import (
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/hostsvc/permissions"
 	providerssvc "cercano/source/server/internal/hostsvc/providers"
+	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
 	ollamallm "cercano/source/server/internal/llm/ollama"
 	"cercano/source/server/internal/locus"
@@ -23,7 +24,6 @@ import (
 	"cercano/source/server/internal/runner"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/usage"
-	"cercano/source/server/internal/legacymodels"
 	pkgcfg "cercano/source/server/pkg/config"
 	proto "cercano/source/server/pkg/proto"
 
@@ -335,30 +335,30 @@ func (r *workerResolver) MainModel(isCloud bool) string {
 	return c.OpenModel
 }
 
-func (r *workerResolver) PrimaryModel() string                                    { return r.MainModel(false) }
-func (r *workerResolver) Rebuild() error                                          { return nil }
-func (r *workerResolver) InstallAbsentCloud(_ string)                             { r.cloudProv = nil }
-func (r *workerResolver) Cloud() llm.Provider                                     { return r.cloudProv }
-func (r *workerResolver) Open() llm.Provider                                      { return r.openProv }
+func (r *workerResolver) PrimaryModel() string        { return r.MainModel(false) }
+func (r *workerResolver) Rebuild() error              { return nil }
+func (r *workerResolver) InstallAbsentCloud(_ string) { r.cloudProv = nil }
+func (r *workerResolver) Cloud() llm.Provider         { return r.cloudProv }
+func (r *workerResolver) Open() llm.Provider          { return r.openProv }
 func (r *workerResolver) ActiveCloudModel() string {
 	if prof, ok := r.cfgSvc.ActiveProfile(); ok {
 		return prof.Model
 	}
 	return r.cfgSvc.Get().CloudModel
 }
-func (r *workerResolver) LocusMode() string                                       { return r.cfgSvc.Get().LocusMode }
-func (r *workerResolver) Router() providerssvc.RouterCloudUpdater                 { return nil }
-func (r *workerResolver) Registry() *engine.EngineRegistry                        { return nil }
-func (r *workerResolver) CatalogManager() *ollamacatalog.Manager                  { return nil }
-func (r *workerResolver) OpenLegacy() *legacymodels.OpenModelProvider             { return nil }
-func (r *workerResolver) SetCloudLLMProvider(p llm.Provider)                      { r.cloudProv = p }
-func (r *workerResolver) SetOpenLLMProvider(p llm.Provider)                       { r.openProv = p }
+func (r *workerResolver) LocusMode() string                                         { return r.cfgSvc.Get().LocusMode }
+func (r *workerResolver) Router() providerssvc.RouterCloudUpdater                   { return nil }
+func (r *workerResolver) Registry() *engine.EngineRegistry                          { return nil }
+func (r *workerResolver) CatalogManager() *ollamacatalog.Manager                    { return nil }
+func (r *workerResolver) OpenLegacy() *legacymodels.OpenModelProvider               { return nil }
+func (r *workerResolver) SetCloudLLMProvider(p llm.Provider)                        { r.cloudProv = p }
+func (r *workerResolver) SetOpenLLMProvider(p llm.Provider)                         { r.openProv = p }
 func (r *workerResolver) SetOpenProviderFactory(_ func(pkgcfg.Config) llm.Provider) {}
-func (r *workerResolver) CloudLLMProvider() llm.Provider                          { return r.cloudProv }
-func (r *workerResolver) OpenLLMProvider() llm.Provider                           { return r.openProv }
-func (r *workerResolver) Reconfigure(_ providerssvc.ReconfigureArgs)              {}
-func (r *workerResolver) SetCatalogManager(_ *ollamacatalog.Manager)              {}
-func (r *workerResolver) SetUsageSink(_ func(usage.Usage))                        {}
+func (r *workerResolver) CloudLLMProvider() llm.Provider                            { return r.cloudProv }
+func (r *workerResolver) OpenLLMProvider() llm.Provider                             { return r.openProv }
+func (r *workerResolver) Reconfigure(_ providerssvc.ReconfigureArgs)                {}
+func (r *workerResolver) SetCatalogManager(_ *ollamacatalog.Manager)                {}
+func (r *workerResolver) SetUsageSink(_ func(usage.Usage))                          {}
 
 // ─── workerToolSvc ────────────────────────────────────────────────────────────
 

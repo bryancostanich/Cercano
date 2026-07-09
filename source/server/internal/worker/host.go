@@ -42,8 +42,8 @@ import (
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/runner"
 	"cercano/source/server/internal/secrets"
-	proto "cercano/source/server/pkg/proto"
 	pkgcfg "cercano/source/server/pkg/config"
+	proto "cercano/source/server/pkg/proto"
 )
 
 // dialFunc creates a gRPC connection to a worker. Injectable for tests.
@@ -178,8 +178,8 @@ func (w *workerRunner) RunTurn(
 
 	// ── 5. Spawn worker or use injected dial ──────────────────────────────
 	var (
-		conn       *grpc.ClientConn
-		cleanupFn  func()
+		conn      *grpc.ClientConn
+		cleanupFn func()
 	)
 
 	if w.dial != nil {
@@ -375,7 +375,9 @@ func (w *workerRunner) resolveCredential(ctx context.Context, cfg pkgcfg.Config,
 
 // testDialUnix returns a dialFunc that dials a bufconn listener via the given
 // net.Listener (used in unit tests).
-func testDialUnix(lis interface{ DialContext(ctx context.Context) (net.Conn, error) }) dialFunc {
+func testDialUnix(lis interface {
+	DialContext(ctx context.Context) (net.Conn, error)
+}) dialFunc {
 	return func(ctx context.Context) (*grpc.ClientConn, error) {
 		return grpc.NewClient(
 			"passthrough:///bufconn",

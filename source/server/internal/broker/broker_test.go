@@ -451,3 +451,48 @@ func TestBroker_AttachLossless_DetachExitsClean(t *testing.T) {
 	// Double-detach must be safe (no panic).
 	detach()
 }
+
+// TestBroker_AttachLossless_DetachWithBacklogNoReaderExits is the C-1 (fix
+// review) regression: if the consumer stops reading and detaches while a
+// backlog larger than the out-channel capacity is queued, the drain goroutine
+// must ABANDON the backlog and exit — not wedge on a full out channel forever
+// (a goroutine + queue leak per broken bursty client). This reproduces the
+// server path where stream.Send errors and the handler stops draining ch.
+func TestBroker_AttachLossless_DetachWithBacklogNoReaderExits(t *testing.T) {
+	b := New()
+	_, gen, release := b.BeginTurn(context.Background(), "conv-backlog")
+	defer release()
+
+	_, ch, detach := b.AttachLossless("conv-backlog")
+
+	const published = 500 // >> subChanCap (64)
+	for i := 0; i < published; i++ {
+		b.Publish("conv-backlog", gen, runner.Event{Kind: runner.EventToken, Text: "x"})
+	}
+	// Let the drain goroutine fill out (cap 64) and wedge, with NO reader.
+	time.Sleep(20 * time.Millisecond)
+
+	detach() // closes done; a correct drain must now exit, abandoning the backlog
+
+	// The channel MUST close within a timeout (goroutine exited), and must have
+	// delivered FEWER than all published events — proof it abandoned the backlog
+	// rather than requiring a reader to un-wedge it. A broken (bare-send) drain
+	// only unblocks once a reader drains out, and then delivers ALL 500.
+	count := 0
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range ch {
+			count++
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("lossless drain did not close ch after a no-reader detach — goroutine leaked")
+	}
+	if count >= published {
+		t.Fatalf("drain delivered all %d events after a no-reader detach (count=%d) — it did not "+
+			"abandon the backlog; a real no-reader client would leak the goroutine", published, count)
+	}
+}

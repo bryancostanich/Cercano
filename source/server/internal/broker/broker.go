@@ -280,14 +280,18 @@ func (b *Broker) AttachLossless(conv string) (replay []runner.Event, ch <-chan r
 		for {
 			select {
 			case <-ls.done:
-				// Drain any remaining items before exiting so the caller sees
-				// all events published before detach() was called.
+				// Best-effort tail delivery: forward what still fits, but NEVER
+				// block — the consumer has detached and may have stopped reading
+				// out, so a blocking send here would wedge the goroutine forever.
 				b.mu.Lock()
 				remaining := ls.queue
 				ls.queue = nil
 				b.mu.Unlock()
 				for _, ev := range remaining {
-					out <- ev
+					select {
+					case out <- ev:
+					default: // consumer gone / out full — abandon the rest
+					}
 				}
 				return
 			case <-ls.notify:
@@ -295,8 +299,16 @@ func (b *Broker) AttachLossless(conv string) (replay []runner.Event, ch <-chan r
 				items := ls.queue
 				ls.queue = nil
 				b.mu.Unlock()
+				// Forward, but honor done on every send: if the consumer stops
+				// reading out (e.g. stream.Send error) and later detaches, a bare
+				// blocking send would wedge at out's capacity and never observe
+				// done. Selecting on done lets the goroutine exit instead of leaking.
 				for _, ev := range items {
-					out <- ev
+					select {
+					case out <- ev:
+					case <-ls.done:
+						return
+					}
 				}
 			}
 		}

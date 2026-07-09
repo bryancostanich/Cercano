@@ -56,9 +56,14 @@ type workerRunner struct {
 	perms   permissions.Broker
 	secrets secrets.Store
 
-	// dial is called instead of spawnWorker when non-nil (test injection).
-	// When nil, RunTurn spawns a real worker process.
+	// dial is called instead of the pool when non-nil (test injection). When
+	// nil, RunTurn acquires a warm worker from the per-conversation pool.
 	dial dialFunc
+
+	// pool keeps one warm worker per conversation across turns (production
+	// path). nil on the dial-injected test constructors, which reuse the
+	// injected transport instead.
+	pool *workerPool
 }
 
 // NewWorkerRunner builds a workerRunner that satisfies runner.TurnRunner.
@@ -77,6 +82,7 @@ func NewWorkerRunner(
 		cfg:     cfg,
 		perms:   perms,
 		secrets: st,
+		pool:    newWorkerPool(nil), // production: spawn via spawnWorker
 	}
 }
 
@@ -176,10 +182,19 @@ func (w *workerRunner) RunTurn(
 		PermissionMode: permMode,
 	}
 
-	// ── 5. Spawn worker or use injected dial ──────────────────────────────
+	// ── 5. Acquire a warm worker (pool) or use injected dial ──────────────
+	//
+	// turnHealthy records whether the worker is safe to keep WARM for the next
+	// turn. It flips false on crash / ctx-cancel so the deferred cleanup evicts
+	// + kills the worker (see the drain loop below).
+	//   - dial path (tests): cleanup always closes the injected conn.
+	//   - pool path (production): cleanup calls Release(convID, turnHealthy) —
+	//     healthy keeps the process warm (conn NOT closed, owned by the pooled
+	//     handle); unhealthy kills + evicts so the next Acquire spawns fresh.
 	var (
-		conn      *grpc.ClientConn
-		cleanupFn func()
+		conn        *grpc.ClientConn
+		cleanupFn   func()
+		turnHealthy bool
 	)
 
 	if w.dial != nil {
@@ -191,13 +206,13 @@ func (w *workerRunner) RunTurn(
 		conn = c
 		cleanupFn = func() { _ = conn.Close() }
 	} else {
-		// Production path: spawn a real worker process.
-		wh, err := spawnWorker(ctx, req.ConversationID, req.Gen)
+		// Production path: acquire a warm worker from the per-conversation pool.
+		wh, err := w.pool.Acquire(ctx, req.ConversationID, req.Gen)
 		if err != nil {
-			return runner.Result{}, fmt.Errorf("workerRunner: spawn: %w", err)
+			return runner.Result{}, fmt.Errorf("workerRunner: acquire: %w", err)
 		}
 		conn = wh.conn
-		cleanupFn = wh.Kill
+		cleanupFn = func() { w.pool.Release(req.ConversationID, turnHealthy) }
 	}
 	defer cleanupFn()
 
@@ -229,6 +244,10 @@ func (w *workerRunner) RunTurn(
 		// Check for context cancellation before blocking on Recv.
 		select {
 		case <-ctx.Done():
+			// Supersession / cancel: tell the worker to stop, then let the
+			// deferred cleanup evict + kill it (turnHealthy stays false). A
+			// canceled turn may leave the worker mid-tool in an ambiguous
+			// state, so B1 does NOT keep it warm — the next turn spawns fresh.
 			_ = safeSend(&proto.HostToWorker{Msg: &proto.HostToWorker_Cancel{Cancel: &proto.Cancel{}}})
 			return runner.Result{}, ctx.Err()
 		default:
@@ -237,7 +256,9 @@ func (w *workerRunner) RunTurn(
 		msg, recvErr := stream.Recv()
 		if recvErr != nil {
 			if turnDone {
-				// TurnDone received; the stream closed normally afterwards.
+				// TurnDone received; the stream closed normally afterwards. The
+				// worker finished cleanly → keep it WARM for the next turn.
+				turnHealthy = true
 				return result, nil
 			}
 			// Worker crashed or the stream died before TurnDone.

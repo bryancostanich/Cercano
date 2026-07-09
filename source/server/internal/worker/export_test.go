@@ -57,5 +57,40 @@ func BufconnDial(lis interface {
 	return testDialUnix(lis)
 }
 
+// WorkerHandleForTest is the exported alias of the pooled worker handle, so a
+// test can write a spawn seam with the pool's signature.
+type WorkerHandleForTest = workerHandle
+
+// PoolSpawnFunc is the pool's injectable spawn seam, exported for tests.
+type PoolSpawnFunc = spawnFunc
+
+// NewWorkerRunnerWithPoolSpawnForTest builds a PRODUCTION-path workerRunner
+// (dial == nil, so RunTurn goes through the pool) whose pool spawns via the
+// given seam instead of spawnWorker. This lets a test drive the real
+// pool-reuse logic (Acquire/Release warm/evict) without spawning OS processes:
+// the seam returns bufconn-backed handles and can count spawns.
+func NewWorkerRunnerWithPoolSpawnForTest(
+	persist runner.TurnHistory,
+	cfg cfgsvc.Service,
+	perms permissions.Broker,
+	st secrets.Store,
+	spawn PoolSpawnFunc,
+) runner.TurnRunner {
+	return &workerRunner{
+		persist: persist,
+		cfg:     cfg,
+		perms:   perms,
+		secrets: st,
+		pool:    newWorkerPool(spawn),
+	}
+}
+
+// HandleFromConn wraps a gRPC conn in a *workerHandle with NO backing process
+// (cmd == nil). Such a handle is treated as alive by the pool's health check,
+// so it is reused warm across turns — exactly what the reuse test needs.
+func HandleFromConn(conn *grpc.ClientConn) *WorkerHandleForTest {
+	return &workerHandle{conn: conn}
+}
+
 // Ensure proto package is used (suppress unused import if needed).
 var _ = proto.NewWorkerClient

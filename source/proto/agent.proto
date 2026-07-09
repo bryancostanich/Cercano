@@ -12,6 +12,13 @@ service Agent {
   // StreamProcessRequest handles AI requests with progress updates (Streaming).
   rpc StreamProcessRequest (ProcessRequestRequest) returns (stream StreamProcessResponse) {}
 
+  // AttachConversation streams the live turn events of a conversation the caller
+  // did NOT start — a second surface (e.g. VS Code) watching a conversation the
+  // CLI is driving. It replays the in-flight turn's events so far, then streams
+  // live, using the same StreamProcessResponse vocabulary as StreamProcessRequest.
+  // Observe-only: it does not send input or answer permission prompts.
+  rpc AttachConversation (AttachConversationRequest) returns (stream StreamProcessResponse) {}
+
   // UpdateConfig updates runtime configuration (model, provider) without server restart.
   rpc UpdateConfig (UpdateConfigRequest) returns (UpdateConfigResponse) {}
 
@@ -1101,4 +1108,11 @@ message StartChatGPTLoginEvent {
   string error = 5;
   string profile_name = 6;
   string account_id = 7;
+}
+
+// AttachConversationRequest names the conversation to observe (see the
+// AttachConversation RPC). Declared at file end to keep the generated message
+// ordering — and thus the regen diff — minimal.
+message AttachConversationRequest {
+  string conversation_id = 1;
 }

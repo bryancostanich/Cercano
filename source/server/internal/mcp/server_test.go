@@ -42,6 +42,10 @@ func (m *mockAgentClient) StreamProcessRequest(ctx context.Context, in *proto.Pr
 	return nil, nil
 }
 
+func (m *mockAgentClient) AttachConversation(ctx context.Context, in *proto.AttachConversationRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[proto.StreamProcessResponse], error) {
+	return nil, nil
+}
+
 func (m *mockAgentClient) ListModels(ctx context.Context, in *proto.ListModelsRequest, opts ...grpc.CallOption) (*proto.ListModelsResponse, error) {
 	if m.modelsResp != nil {
 		return m.modelsResp, m.modelsErr

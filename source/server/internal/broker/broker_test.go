@@ -329,3 +329,125 @@ func TestBroker_DoubleDetachSafe(t *testing.T) {
 	detach() // must be a no-op, not a panic
 	detach() // still safe
 }
+
+// ---------------------------------------------------------------------------
+// Task-3 review fixes: AttachLossless
+// ---------------------------------------------------------------------------
+
+// TestBroker_AttachLossless_ZeroLoss verifies that AttachLossless delivers ALL
+// events to the subscriber even when the burst size far exceeds the cap-64
+// channel buffer. Contrasted with a lossy Attach subscriber that DOES drop
+// under the same load.
+//
+// The test publishes 500 events, draining the lossless channel only AFTER all
+// Publish calls are done. The lossy channel is never drained (it fills and
+// drops). After draining the lossless channel we assert:
+//   - lossless received all 500 events in order (zero loss)
+//   - lossy channel holds at most subChanCap events (proves drop occurred)
+func TestBroker_AttachLossless_ZeroLoss(t *testing.T) {
+	const n = 500
+	b := New()
+	_, gen, release := b.BeginTurn(context.Background(), "conv-lossless")
+	defer release()
+
+	// Lossless initiator subscription.
+	_, losslessCh, losslessDetach := b.AttachLossless("conv-lossless")
+	defer losslessDetach()
+
+	// Lossy (cap-64) subscription — will drop under load.
+	_, lossyCh, lossyDetach := b.Attach("conv-lossless")
+	defer lossyDetach()
+
+	// Publish 500 events WITHOUT draining either channel concurrently.
+	for i := 0; i < n; i++ {
+		b.Publish("conv-lossless", gen, runner.Event{
+			Kind: runner.EventToken,
+			Text: string(rune('a' + i%26)),
+		})
+	}
+
+	// Now drain lossless channel; it should have all n events.
+	// The drain goroutine forwards events outside the lock; give it time.
+	received := make([]runner.Event, 0, n)
+	timeout := time.After(5 * time.Second)
+	for len(received) < n {
+		select {
+		case ev, ok := <-losslessCh:
+			if !ok {
+				t.Fatalf("lossless channel closed early after %d events", len(received))
+			}
+			received = append(received, ev)
+		case <-timeout:
+			t.Fatalf("lossless: timed out; got %d/%d events", len(received), n)
+		}
+	}
+	if len(received) != n {
+		t.Errorf("lossless: got %d events, want %d", len(received), n)
+	}
+	// Verify order: each event text must match what we published.
+	for i, ev := range received {
+		want := string(rune('a' + i%26))
+		if ev.Text != want {
+			t.Errorf("lossless event[%d]: got %q, want %q", i, ev.Text, want)
+		}
+	}
+
+	// Lossy channel: must have dropped. It can hold at most subChanCap events.
+	// Drain what's there without blocking.
+	var lossyCount int
+	for {
+		select {
+		case _, ok := <-lossyCh:
+			if !ok {
+				goto lossyDone
+			}
+			lossyCount++
+		default:
+			goto lossyDone
+		}
+	}
+lossyDone:
+	if lossyCount > subChanCap {
+		t.Errorf("lossy channel held %d events, expected at most %d (cap)", lossyCount, subChanCap)
+	}
+	// Must have dropped some events (500 >> 64).
+	if lossyCount == n {
+		t.Errorf("lossy channel received ALL %d events — drop-on-full did not trigger", n)
+	}
+	t.Logf("lossless: %d/%d (0 dropped); lossy: %d/%d (%d dropped)",
+		len(received), n, lossyCount, n, n-lossyCount)
+}
+
+// TestBroker_AttachLossless_DetachExitsClean verifies that calling detach()
+// on a lossless subscription drains remaining queued events and closes the
+// channel without blocking.
+func TestBroker_AttachLossless_DetachExitsClean(t *testing.T) {
+	b := New()
+	_, gen, release := b.BeginTurn(context.Background(), "conv-lossless-detach")
+	defer release()
+
+	_, ch, detach := b.AttachLossless("conv-lossless-detach")
+
+	// Publish a few events, then immediately detach without reading.
+	for i := 0; i < 5; i++ {
+		b.Publish("conv-lossless-detach", gen, runner.Event{Kind: runner.EventToken, Text: "x"})
+	}
+	detach()
+
+	// Channel must close (drain goroutine exits); must not block.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range ch {
+		}
+	}()
+	select {
+	case <-done:
+		// good
+	case <-time.After(2 * time.Second):
+		t.Fatal("detach did not close the lossless channel within 2s")
+	}
+
+	// Double-detach must be safe (no panic).
+	detach()
+}

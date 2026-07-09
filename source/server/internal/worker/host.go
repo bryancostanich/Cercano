@@ -80,6 +80,26 @@ func NewWorkerRunner(
 	}
 }
 
+// DialFunc creates a gRPC connection to a worker. It is the injectable seam
+// used to point a workerRunner at an in-process (bufconn) WorkerServer instead
+// of a spawned process — see NewWorkerRunnerWithDial.
+type DialFunc = dialFunc
+
+// NewWorkerRunnerWithDial builds a workerRunner that dials an already-running
+// WorkerServer via the supplied dial function instead of spawning a child
+// process. This is the seam the server-level both-modes and crash-isolation
+// tests use to drive the real host turn handler through a deterministic
+// in-process (bufconn) worker. Production uses NewWorkerRunner (spawns).
+func NewWorkerRunnerWithDial(
+	persist runner.TurnHistory,
+	cfg cfgsvc.Service,
+	perms permissions.Broker,
+	st secrets.Store,
+	dial DialFunc,
+) runner.TurnRunner {
+	return newWorkerRunnerWithDial(persist, cfg, perms, st, dial)
+}
+
 // newWorkerRunnerWithDial builds a workerRunner with an injected dial function
 // for in-process (bufconn) testing.
 func newWorkerRunnerWithDial(

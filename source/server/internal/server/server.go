@@ -51,6 +51,7 @@ import (
 	"cercano/source/server/internal/usage"
 	"cercano/source/server/internal/watchdog"
 	runnersvc "cercano/source/server/internal/runner"
+	"cercano/source/server/internal/worker"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 )
@@ -635,6 +636,38 @@ func (s *Server) runnerDeps() runnersvc.Deps {
 		// turn time rather than capturing the (often still-nil) current value.
 		Watchdog: func() *watchdog.Watchdog { return s.watchdog },
 	}
+}
+
+// SelectExecutionMode chooses the concrete turn runner based on the live
+// config's ExecutionMode. It is the seam that swaps in crash isolation:
+//
+//   - "in_process" → keep the default in-process runnersvc.Core (fast, embedded,
+//     what the test suite constructs). This is the ONLY mode reachable without
+//     going through it — NewServer leaves the in-process runner wired, so any
+//     test that builds a Server directly (never calling this method) stays
+//     in-process and never spawns a worker process.
+//   - anything else, including the production default "worker" and empty →
+//     swap in the worker.NewWorkerRunner, which runs each turn in a child
+//     process. A worker crash then takes down only that turn's process; the
+//     host survives (see TestWorker_CrashMidTurnIsIsolated).
+//
+// Called from cmd/cercano/main.go's server wiring AFTER the real config,
+// permissions, and secrets are injected — so production selects worker while
+// the hermetic test suite keeps the in-process default untouched.
+func (s *Server) SelectExecutionMode() {
+	mode := s.cfgSvc.Get().ExecutionMode
+	if mode == "in_process" {
+		// Explicit embedded/test mode: keep the in-process runner.
+		return
+	}
+	// Production default ("worker" or empty): run turns in a child process.
+	s.turnRunner = worker.NewWorkerRunner(
+		s.persistSvc,       // pre-assembles history + project context
+		s.cfgSvc,           // builds the ConfigSnapshot
+		s.permBroker,       // permission mode + decisions
+		s.cfgSvc.Secrets(), // resolves credentials for the worker's CredentialRequests
+	)
+	log.Printf("[server] execution mode: worker (turns run in isolated child processes)")
 }
 
 // SetConfigPersistence enables config persistence by storing the config path and current state.

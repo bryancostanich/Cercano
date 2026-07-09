@@ -60,6 +60,15 @@ type Config struct {
 	BackupCloudProfile string `yaml:"backup_cloud_profile,omitempty"`
 	LocusMode          string            `yaml:"locus_mode"` // cloud_only|cloud_primary|open_primary|open_only
 	Port               string            `yaml:"port"`
+	// ExecutionMode selects how a conversation's turns are executed:
+	//   "worker"     — each turn runs in a dedicated child process ("cercano
+	//                  worker") so a turn that panics/hangs/wedges takes down
+	//                  only that conversation's worker, never the host. This is
+	//                  the crash-isolated default (the raison d'être of the
+	//                  worker-process work).
+	//   "in_process" — turns run inside the host process (embedded mode / tests).
+	// Empty is treated as "worker" (the production default from Defaults()).
+	ExecutionMode string `yaml:"execution_mode,omitempty"`
 	LlamaServer        LlamaServerConfig `yaml:"llama_server"`
 	Compaction         CompactionConfig  `yaml:"compaction"`
 	Watchdog           WatchdogConfig    `yaml:"watchdog"`
@@ -167,6 +176,7 @@ func Defaults() Config {
 		OpenRuntime: "ollama",
 		LocusMode:      "open_primary",
 		Port:           "50052",
+		ExecutionMode:  "worker",
 		Models:         ModelsConfig{DefaultProvider: ProviderOpen},
 		LlamaServer: LlamaServerConfig{
 			ModelDirs:        []string{"~/.cercano/models"},

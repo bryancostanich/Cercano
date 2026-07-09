@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"cercano/source/server/internal/gguf"
+	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/sysram"
 	"cercano/source/server/pkg/proto"
 )
@@ -27,12 +28,16 @@ func (s *Server) GetModelRAMEstimate(ctx context.Context, req *proto.GetModelRAM
 
 	switch {
 	case strings.TrimSpace(req.GetOllamaRef()) != "":
-		if s.catalogManager == nil {
+		var cm *ollamacatalog.Manager
+		if s.providerSvc != nil {
+			cm = s.providerSvc.CatalogManager()
+		}
+		if cm == nil {
 			resp.Error = "online catalog not configured"
 			return resp, nil
 		}
 		ref := normalizeOllamaRef(req.GetOllamaRef())
-		est, err := s.catalogManager.ResolveEstimate(ctx, ref)
+		est, err := cm.ResolveEstimate(ctx, ref)
 		if err != nil {
 			resp.Error = err.Error()
 			return resp, nil

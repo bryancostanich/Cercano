@@ -36,19 +36,19 @@ func (s *Server) ProposeContextEdit(ctx context.Context, req *proto.ProposeConte
 	}
 
 	var local, cloud contextedit.CompleteFunc
-	if s.openProvider != nil {
+	if s.providerSvc.OpenLegacy() != nil {
 		local = func(ctx context.Context, prompt string) (string, error) {
-			resp, err := s.openProvider.Process(ctx, &agent.Request{Input: prompt})
+			resp, err := s.providerSvc.OpenLegacy().Process(ctx, &agent.Request{Input: prompt})
 			if err != nil {
 				return "", err
 			}
 			return resp.Output, nil
 		}
 	}
-	if s.cloudLLMProvider != nil {
+	if s.providerSvc.Cloud() != nil {
 		cloudModel := s.activeCloudModel()
 		cloud = func(ctx context.Context, prompt string) (string, error) {
-			resp, err := s.cloudLLMProvider.Chat(ctx, llm.ChatRequest{
+			resp, err := s.providerSvc.Cloud().Chat(ctx, llm.ChatRequest{
 				Model:     cloudModel,
 				Messages:  []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: prompt}}}},
 				MaxTokens: 1024,

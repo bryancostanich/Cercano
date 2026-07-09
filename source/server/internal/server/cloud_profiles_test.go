@@ -6,7 +6,6 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/cloudfactory"
-	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/pkg/config"
@@ -31,18 +30,15 @@ func (f *fakeRouter) GetModelProviders() map[string]agent.ModelProvider { return
 
 func newTestServer() (*Server, *fakeRouter) {
 	r := &fakeRouter{}
-	cfgService := cfgsvc.New("", config.Config{
+	s := NewServer(nil, nil, r, nil, nil, nil)
+	s.cfgSvc.Set(config.Config{
 		CloudProfiles: []config.CloudProfile{
 			{Name: "messages-one", Flavor: "messages", Model: "claude-3-5-haiku-20241022"},
 			{Name: "cc-one", Flavor: "chat_completions", Model: "gpt-4o"},
 			{Name: "unsup-one", Flavor: "bedrock", Model: "x"},
 		},
-	}, secrets.NewMemory())
-	s := &Server{
-		cfgSvc: cfgService,
-		router: r,
-		events: newEventHub(),
-	}
+	})
+	s.cfgSvc.SetSecrets(secrets.NewMemory())
 	return s, r
 }
 
@@ -224,20 +220,17 @@ func TestRebuildCloudKeylessBaseURLCarveout(t *testing.T) {
 }
 
 // TestInstallAbsentCloudCoordinatorNilSafe locks in the coordinator-on-failure
-// behavior that is observable from tests.  Because s.coordinator is the concrete
-// type *loop.ADKCoordinator (which requires real session/validator dependencies
-// to construct), the test server always has coordinator == nil.  The nil guard
-// inside installAbsentCloud makes the coordinator path a safe no-op; this test
-// asserts that no-op is indeed panic-free and that the router + cloudLLMProvider
+// behavior that is observable from tests.  Because the coordinator is the
+// concrete type *loop.ADKCoordinator (which requires real session/validator
+// dependencies to construct), the test server always has coordinator == nil
+// (passed as nil to NewServer → providers.New). The nil guard inside
+// installAbsentCloud makes the coordinator path a safe no-op; this test
+// asserts that no-op is indeed panic-free and that the router + CloudLLMProvider
 // receive the absent sentinel — the same value coordinator.SetCloudProvider
 // receives in production.
 func TestInstallAbsentCloudCoordinatorNilSafe(t *testing.T) {
 	s, r := newTestServer()
-	if s.coordinator != nil {
-		// If this ever fires, a fake coordinator is now constructible and the
-		// test should be upgraded to assert coordinator.last as well.
-		t.Fatal("expected coordinator to be nil in test server — update this test")
-	}
+	// coordinator is always nil in newTestServer (passed as nil to NewServer).
 
 	// Must not panic even with nil coordinator.
 	s.installAbsentCloud("test: no key")

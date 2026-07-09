@@ -20,10 +20,10 @@ import (
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/capabilities/agentadapter"
 	"cercano/source/server/internal/capabilities/builtins"
-	"cercano/source/server/internal/chatgptauth"
 	"cercano/source/server/internal/cloudfactory"
-	"cercano/source/server/internal/hostsvc/permissions"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
+	"cercano/source/server/internal/hostsvc/permissions"
+	"cercano/source/server/internal/hostsvc/providers"
 	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/compactiongen"
 	"cercano/source/server/internal/compactor"
@@ -72,27 +72,15 @@ type McpManager interface {
 // Server is the gRPC server for the Agent service.
 type Server struct {
 	proto.UnimplementedAgentServer
-	agent               *agent.Agent
-	openProvider        *legacymodels.OpenModelProvider
-	router              RouterCloudUpdater
-	coordinator         *loop.ADKCoordinator
-	cloudFactory        agent.CloudFactory
-	registry            *engine.EngineRegistry
-	healthMonitorCancel context.CancelFunc // cancel function for the active health monitor
-	cfgSvc              cfgsvc.Service     // owns configPath, currentConfig, cfgMu, secrets
-	toolRegistry        *agenttools.Registry
-	capRegistry         *capabilities.Registry
-	permBroker          permissions.Broker
-	mcpManager          McpManager
-	meridianMgr         *meridian.Manager
-	cloudLLMProvider    llm.Provider
-	openLLMProvider     llm.Provider                     // native-tool-loop local provider (Ollama or llama-server)
-	openProviderFactory func(config.Config) llm.Provider // rebuilds openLLMProvider on runtime change
-	runtimeManager      localruntime.Manager
-	// catalogManager (optional) surfaces Ollama's public library as an
-	// online model catalog. Nil = no online catalog (dashboard just
-	// shows the hardcoded local catalog + any downloaded files).
-	catalogManager   *ollamacatalog.Manager
+	agent        *agent.Agent
+	providerSvc  providers.Resolver // owns cloud/open providers, router, coordinator, registry, catalogManager
+	cfgSvc       cfgsvc.Service     // owns configPath, currentConfig, cfgMu, secrets
+	toolRegistry *agenttools.Registry
+	capRegistry  *capabilities.Registry
+	permBroker   permissions.Broker
+	mcpManager   McpManager
+	meridianMgr  *meridian.Manager
+	runtimeManager   localruntime.Manager
 	retentionSweeper *retention.Sweeper
 	compactionGen    *compactiongen.Generator
 	contextLoader    *projectctx.Loader
@@ -210,8 +198,8 @@ func (s *Server) ToolRegistry() *agenttools.Registry { return s.toolRegistry }
 func (s *Server) InstallCapabilities() {
 	cfgSnapshot := s.cfgSvc.Get()
 	capReg := capabilities.NewRegistry(capabilities.Services{
-		CloudProvider: s.cloudLLMProvider,
-		OpenProvider:  s.openLLMProvider,
+		CloudProvider: s.providerSvc.Cloud(),
+		OpenProvider:  s.providerSvc.Open(),
 		Config:        &cfgSnapshot,
 		ProjectCtx:    s.contextLoader,
 		// Engine/Conversations wired in a later phase; nil-safe until then.
@@ -300,30 +288,33 @@ func (s *Server) RestartMcpServer(ctx context.Context, req *proto.RestartMcpServ
 // SetCloudLLMProvider attaches the native-tool-calling cloud provider used by
 // GetProviderCapabilities. Optional — when nil, GetProviderCapabilities falls
 // back to a hardcoded Anthropic-shaped capability snapshot.
-func (s *Server) SetCloudLLMProvider(p llm.Provider) { s.cloudLLMProvider = p }
+func (s *Server) SetCloudLLMProvider(p llm.Provider) { s.providerSvc.SetCloudLLMProvider(p) }
 
 // SetOpenLLMProvider attaches the native-tool-calling local provider (Ollama
 // or the llama-server adapter, per open_runtime).
-func (s *Server) SetOpenLLMProvider(p llm.Provider) { s.openLLMProvider = p }
+func (s *Server) SetOpenLLMProvider(p llm.Provider) { s.providerSvc.SetOpenLLMProvider(p) }
 
 // SetOpenProviderFactory installs the constructor used to rebuild the native
 // open provider when the local runtime selection changes at runtime (see the
 // open_runtime branch in UpdateConfig).
 func (s *Server) SetOpenProviderFactory(fn func(config.Config) llm.Provider) {
-	s.openProviderFactory = fn
+	s.providerSvc.SetOpenProviderFactory(fn)
 }
 
 // CloudLLMProvider / OpenLLMProvider return the RAW (unwrapped) providers. The
 // dispatch engine reads these per-dispatch so a runtime cloud swap is honored,
 // and wraps them itself for usage recording — so these must stay unwrapped.
-func (s *Server) CloudLLMProvider() llm.Provider { return s.cloudLLMProvider }
-func (s *Server) OpenLLMProvider() llm.Provider  { return s.openLLMProvider }
+func (s *Server) CloudLLMProvider() llm.Provider { return s.providerSvc.CloudLLMProvider() }
+func (s *Server) OpenLLMProvider() llm.Provider  { return s.providerSvc.OpenLLMProvider() }
 
 // SetUsageSink installs the sink that resolveMainProvider uses to wrap the
 // main tool-loop's provider for token-usage recording. The server's stored
 // providers stay raw; wrapping happens at hand-off so the dispatch engine can
 // read raw providers without double-counting.
-func (s *Server) SetUsageSink(fn func(usage.Usage)) { s.usageSink = fn }
+func (s *Server) SetUsageSink(fn func(usage.Usage)) {
+	s.usageSink = fn
+	s.providerSvc.SetUsageSink(fn)
+}
 
 // SetSecrets attaches the secrets store used to retrieve profile API keys.
 func (s *Server) SetSecrets(st secrets.Store) { s.cfgSvc.SetSecrets(st) }
@@ -359,10 +350,7 @@ func (s *Server) Shutdown() {
 // code that asks "what cloud model are we using right now?" should go
 // through cfgSvc.ActiveProfile(), not currentConfig.CloudModel directly.
 func (s *Server) activeCloudModel() string {
-	if p, ok := s.cfgSvc.ActiveProfile(); ok {
-		return p.Model
-	}
-	return s.cfgSvc.Get().CloudModel
+	return s.providerSvc.ActiveCloudModel()
 }
 
 // activeProfile returns the configured active cloud profile, or false if none.
@@ -387,90 +375,23 @@ func (s *Server) persistConfig() { s.cfgSvc.Persist() }
 // router and the coordinator's CloudModel at the absent sentinel, so a failed
 // rebuild never leaves a half-wired cloud.
 func (s *Server) installAbsentCloud(reason string) {
-	s.SetCloudLLMProvider(nil)
-	absent := legacymodels.NewAbsentCloudProvider(reason)
-	s.router.SetCloudProvider(absent)
-	if s.coordinator != nil {
-		s.coordinator.SetCloudProvider(absent)
-	}
+	s.providerSvc.InstallAbsentCloud(reason)
 }
 
 // rebuildCloud resolves the active profile + its key and rewires BOTH the native
 // tool-loop cloud provider and the router/coordinator CloudModel. On any failure
 // (no active profile, no key, unsupported flavor, keychain down) it clears the
 // native cloud provider and installs the absent-cloud sentinel — the agent keeps
-// running with cloud absent.
-//
-// After the config-service extraction, rebuildCloud no longer holds cfgMu — it
-// reads a snapshot from cfgSvc. The split between config mutation and provider
-// reconfiguration is now sequential (config updates first via cfgSvc, then
-// rebuildCloud). A concurrent reader can momentarily observe new config with old
-// provider wiring; this window is the documented trade-off of the extraction.
+// running with cloud absent. Delegates to providerSvc.Rebuild().
 func (s *Server) rebuildCloud() error {
-	return s.rebuildCloudLocked()
+	return s.providerSvc.Rebuild()
 }
 
-// rebuildCloudLocked is rebuildCloud's body. Lock-free: reads config via
-// cfgSvc.Get() snapshot; writes the CloudModel mirror via cfgSvc.SetCloudModel().
-// The name retains "Locked" for call-site compatibility (callers in UpdateConfig
-// that previously relied on cfgMu already being held now call the same method
-// without a separate lock — the cfgSvc handles its own internal locking).
+// rebuildCloudLocked is an alias for rebuildCloud retained for call-site
+// compatibility. Lock-free: the providers service reads config via cfgSvc
+// snapshots.
 func (s *Server) rebuildCloudLocked() error {
-	cfg := s.cfgSvc.Get()
-	var p config.CloudProfile
-	found := false
-	for _, pp := range cfg.CloudProfiles {
-		if pp.Name == cfg.ActiveCloudProfile {
-			p = pp
-			found = true
-			break
-		}
-	}
-	if !found {
-		s.installAbsentCloud("no active cloud profile")
-		return fmt.Errorf("no active cloud profile")
-	}
-	st := s.cfgSvc.Secrets()
-	key := ""
-	if st != nil {
-		if k, err := st.Get(p.Name); err == nil {
-			key = k
-		}
-	}
-	// If neither a key nor a proxy BaseURL is present the profile cannot
-	// authenticate — install the absent sentinel rather than wiring a dead
-	// provider. Carve-outs: a proxy BaseURL (Meridian) handles auth with an
-	// empty key; and bedrock authenticates via the AWS credential chain, so it
-	// legitimately has no keychain key (its failure mode is a missing region).
-	if key == "" && p.BaseURL == "" && p.Flavor != cloudfactory.FlavorBedrock {
-		s.installAbsentCloud("no API key for profile " + p.Name)
-		return fmt.Errorf("no API key for profile %s", p.Name)
-	}
-	var cloudOpts cloudfactory.Options
-	if p.Flavor == cloudfactory.FlavorResponses && p.Route == cloudfactory.RouteChatGPT {
-		// ChatGPT subscription: authenticate via a refreshing token source over
-		// the keychain (the profile's key slot holds the token JSON), not a
-		// static API key.
-		cloudOpts.TokenSource = chatgptauth.NewSource(st, p.Name, chatgptauth.Flow{})
-	}
-	prov, err := cloudfactory.BuildCloudProvider(p, key, cloudOpts)
-	if err != nil {
-		s.installAbsentCloud(err.Error())
-		return err
-	}
-	// A configured backup profile wraps the primary in a fallback composite;
-	// everything downstream (native loop, router, coordinator) sees one
-	// provider. A missing/unbuildable backup leaves the primary bare.
-	prov = s.wrapBackupLocked(prov, p.Name, cfg)
-	s.SetCloudLLMProvider(prov)
-	mp := agent.NewLLMModelProvider(prov, p.Model)
-	s.router.SetCloudProvider(mp)
-	if s.coordinator != nil {
-		s.coordinator.SetCloudProvider(mp)
-	}
-	s.cfgSvc.SetCloudModel(p.Model) // keep CloudModel reporting consistent
-	s.syncMeridianForProfile(p, cfg)
-	return nil
+	return s.providerSvc.Rebuild()
 }
 
 // syncMeridianForProfile starts or stops the managed Meridian proxy based on
@@ -523,7 +444,7 @@ func meridianPortFromBaseURL(baseURL string) int {
 }
 
 // RebuildCloud exports rebuildCloud for use by cmd/cercano/main.go at startup.
-func (s *Server) RebuildCloud() error { return s.rebuildCloud() }
+func (s *Server) RebuildCloud() error { return s.providerSvc.Rebuild() }
 
 // GetCloudProfiles implements proto.AgentServer — returns the list of configured cloud profiles.
 func (s *Server) GetCloudProfiles(ctx context.Context, req *proto.GetCloudProfilesRequest) (*proto.GetCloudProfilesResponse, error) {
@@ -686,21 +607,9 @@ func (s *Server) RemoveCloudProfile(ctx context.Context, req *proto.RemoveCloudP
 // active Locus Mode. Returns the provider, whether it's the cloud tier, whether
 // this is a fallback (preferred tier unavailable), or an error when the mode
 // forbids crossing and the required tier has no provider wired.
+// Delegates to providerSvc.Main().
 func (s *Server) resolveMainProvider() (llm.Provider, bool, bool, error) {
-	locusMode := s.cfgSvc.Get().LocusMode
-	mode, _ := locus.ParseMode(locusMode)
-	sel, err := dispatch.Select(mode, dispatch.RoleMain, dispatch.Providers{
-		Cloud: s.cloudLLMProvider,
-		Open:  s.openLLMProvider,
-	})
-	if err != nil {
-		return nil, false, false, err
-	}
-	// Wrap the selected provider for "main" token-usage recording at hand-off.
-	// The stored providers stay raw (the dispatch engine reads them raw and
-	// wraps per-dispatch with its own source), so there's no double-counting.
-	prov := usage.Wrap(sel.Provider, "main", sel.IsCloud, s.usageSink)
-	return prov, sel.IsCloud, sel.FellBack, nil
+	return s.providerSvc.Main()
 }
 
 // SetRuntimeManager attaches the local runtime/dashboard state manager.
@@ -714,7 +623,7 @@ func (s *Server) SetRuntimeManager(m localruntime.Manager) {
 // hardcoded catalog + downloaded files, and RefreshOnlineCatalog is
 // wired to the manager's Refresh method.
 func (s *Server) SetCatalogManager(cm *ollamacatalog.Manager) {
-	s.catalogManager = cm
+	s.providerSvc.SetCatalogManager(cm)
 }
 
 // SetRetentionSweeper attaches the background retention sweeper so that
@@ -728,16 +637,22 @@ func (s *Server) SetCompactionGenerator(g *compactiongen.Generator) { s.compacti
 
 // NewServer creates a new Agent gRPC server.
 func NewServer(a *agent.Agent, openProvider *legacymodels.OpenModelProvider, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
-	return &Server{
-		agent:        a,
-		openProvider: openProvider,
-		router:       router,
-		coordinator:  coordinator,
-		cloudFactory: cloudFactory,
-		registry:     registry,
-		events:       newEventHub(),
-		cfgSvc:       cfgsvc.New("", config.Config{}, nil),
+	cfgService := cfgsvc.New("", config.Config{}, nil)
+	s := &Server{
+		agent:   a,
+		events:  newEventHub(),
+		cfgSvc:  cfgService,
 	}
+	// syncMeridian bridges rebuildCloud → syncMeridianForProfile without the
+	// providers service holding a direct meridianMgr reference. The callback
+	// captures s so it can read s.meridianMgr at call time (set after construction
+	// via SetupMeridian). This is the Task 6 coupling note — when runtimes is
+	// extracted, syncMeridian moves into that service.
+	syncMeridianFn := func(p config.CloudProfile, c config.Config) {
+		s.syncMeridianForProfile(p, c)
+	}
+	s.providerSvc = providers.New(cfgService, openProvider, router, coordinator, cloudFactory, registry, syncMeridianFn, nil)
+	return s
 }
 
 // SetConfigPersistence enables config persistence by storing the config path and current state.
@@ -750,7 +665,7 @@ func (s *Server) SetConfigPersistence(path string, cfg config.Config) {
 // LocusMode returns the currently configured Locus Mode (live; reflects
 // UpdateConfig). Used by the agent for co-processor tier resolution.
 func (s *Server) LocusMode() string {
-	return s.cfgSvc.Get().LocusMode
+	return s.providerSvc.LocusMode()
 }
 
 // UpdateConfig implements proto.AgentServer — updates runtime config without restart.
@@ -777,28 +692,15 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 				Message: fmt.Sprintf("invalid ollama_url %q: must be a valid http:// or https:// URL", req.OllamaUrl),
 			}, nil
 		}
-		// Provider block: stop any existing health monitor before switching URLs.
-		if s.healthMonitorCancel != nil {
-			s.healthMonitorCancel()
-		}
-		if s.registry != nil {
-			if eng, err := s.registry.GetEngine("ollama"); err == nil {
-				if confEng, ok := eng.(engine.ConfigurableEngine); ok {
-					confEng.SetBaseURL(req.OllamaUrl)
-					// Start health monitor for the new remote endpoint.
-					monitorCtx, cancel := context.WithCancel(context.Background())
-					s.healthMonitorCancel = cancel
-					confEng.StartHealthMonitor(monitorCtx, 30*time.Second, 3)
-				}
-			}
-		}
+		// Provider block handled by providerSvc.Reconfigure (called below after
+		// all mutations are assembled).
 		changes = append(changes, fmt.Sprintf("ollama_url=%s", req.OllamaUrl))
 		fmt.Printf("UpdateConfig: Ollama URL set to %s (health monitor started)\n", req.OllamaUrl)
 	}
 
 	if req.OpenModel != "" {
-		// Provider block: direct provider mutation.
-		s.openProvider.SetModelName(req.OpenModel)
+		// Provider block handled by providerSvc.Reconfigure (called below after
+		// all mutations are assembled).
 		changes = append(changes, fmt.Sprintf("local_model=%s", req.OpenModel))
 		fmt.Printf("UpdateConfig: Local model set to %s\n", req.OpenModel)
 	}
@@ -819,14 +721,13 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 				Message: fmt.Sprintf("invalid local_runtime %q: expected ollama or llama_server", req.OpenRuntime),
 			}, nil
 		}
-		if s.registry == nil {
+		if s.providerSvc.Registry() == nil {
 			return &proto.UpdateConfigResponse{
 				Success: false,
 				Message: "engine registry is not configured",
 			}, nil
 		}
-		eng, err := s.registry.GetEngine(req.OpenRuntime)
-		if err != nil {
+		if _, err := s.providerSvc.Registry().GetEngine(req.OpenRuntime); err != nil {
 			return &proto.UpdateConfigResponse{
 				Success: false,
 				Message: fmt.Sprintf("local runtime %q is not available: %v", req.OpenRuntime, err),
@@ -851,15 +752,9 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 					c.LlamaServer.Binary, c.LlamaServer.DefaultModel)
 			}
 		}
-		model := req.OpenModel
-		if model == "" && req.OpenRuntime == "llama_server" {
-			model = c.LlamaServer.DefaultModel
-		}
-		if model == "" {
-			model = c.OpenChatModel()
-		}
-		// Provider block: wire the engine.
-		s.openProvider.SetEngine(eng, model)
+		// Provider block handled by providerSvc.Reconfigure (called below after
+		// all mutations are assembled). The resolved model is computed here and
+		// passed via ReconfigureArgs so Reconfigure doesn't re-detect.
 		changes = append(changes, fmt.Sprintf("local_runtime=%s", req.OpenRuntime))
 		fmt.Printf("UpdateConfig: Local runtime set to %s\n", req.OpenRuntime)
 		s.broadcastOpenRuntimeStatus(buildOpenRuntimeStatus(req.OpenRuntime, c, detectErr))
@@ -1129,12 +1024,6 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	}
 	if req.OpenRuntime != "" {
 		c.OpenRuntime = req.OpenRuntime
-		// Provider block: rebuild the native open provider for the new runtime.
-		// Without this, the dispatch engine's open lane (watchdog, coproc caps)
-		// keeps talking to the previous runtime until the agent restarts.
-		if s.openProviderFactory != nil {
-			s.openLLMProvider = s.openProviderFactory(c)
-		}
 		s.broadcastConfigChanged("local_runtime", req.OpenRuntime)
 	}
 	if req.OpenDefaultModel != "" {
@@ -1168,6 +1057,27 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	s.cfgSvc.Set(c)
 	s.applyRuntimeEndpoints(c)
 	s.cfgSvc.Persist()
+
+	// Apply provider/runtime mutations. This runs after cfgSvc.Set so
+	// Reconfigure reads the fully-committed config when rebuilding providers.
+	// The resolved open model for a runtime swap is computed above; we pass the
+	// fully-mutated snapshot so the factory can rebuild with the new runtime.
+	if req.OllamaUrl != "" || req.OpenModel != "" || req.OpenRuntime != "" {
+		resolvedModel := req.OpenModel
+		if resolvedModel == "" && req.OpenRuntime == "llama_server" {
+			resolvedModel = c.LlamaServer.DefaultModel
+		}
+		if resolvedModel == "" && req.OpenRuntime != "" {
+			resolvedModel = (&c).OpenChatModel()
+		}
+		s.providerSvc.Reconfigure(providers.ReconfigureArgs{
+			OllamaURL:         req.OllamaUrl,
+			OpenModel:         req.OpenModel,
+			OpenRuntime:       req.OpenRuntime,
+			ResolvedOpenModel: resolvedModel,
+			MutatedConfig:     c,
+		})
+	}
 
 	return &proto.UpdateConfigResponse{
 		Success: true,
@@ -1571,8 +1481,8 @@ func (s *Server) ExportContext(ctx context.Context, req *proto.ExportContextRequ
 // cloud provider's Name() ("NONE" → "absent", everything else → "ok").
 func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*proto.GetConfigResponse, error) {
 	state := "absent"
-	if s.router != nil {
-		if cp, ok := s.router.GetModelProviders()["CloudModel"]; ok && cp != nil {
+	if r := s.providerSvc.Router(); r != nil {
+		if cp, ok := r.GetModelProviders()["CloudModel"]; ok && cp != nil {
 			if cp.Name() != "NONE" {
 				state = "ok"
 			}
@@ -1629,14 +1539,14 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 
 // ListModels implements proto.AgentServer — returns available models from the active local runtime.
 func (s *Server) ListModels(ctx context.Context, req *proto.ListModelsRequest) (*proto.ListModelsResponse, error) {
-	if s.registry == nil {
+	if s.providerSvc.Registry() == nil {
 		return nil, fmt.Errorf("registry not configured")
 	}
 	runtimeName := s.cfgSvc.Get().OpenRuntime
 	if runtimeName == "" {
 		runtimeName = "ollama"
 	}
-	eng, err := s.registry.GetEngine(runtimeName)
+	eng, err := s.providerSvc.Registry().GetEngine(runtimeName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get %s engine: %v", runtimeName, err)
 	}
@@ -1696,8 +1606,8 @@ func (s *Server) ListRuntimeModels(ctx context.Context, req *proto.ListRuntimeMo
 		return nil, err
 	}
 	resp := &proto.ListRuntimeModelsResponse{Models: mapRuntimeModels(models)}
-	if s.catalogManager != nil {
-		online := s.catalogManager.Models()
+	if cm := s.providerSvc.CatalogManager(); cm != nil {
+		online := cm.Models()
 		if len(online) > 0 {
 			// Dedupe by family name against what we've already mapped.
 			// Anything already present in models (hardcoded catalog OR
@@ -1715,7 +1625,7 @@ func (s *Server) ListRuntimeModels(ctx context.Context, req *proto.ListRuntimeMo
 				resp.Models = append(resp.Models, onlineCatalogModelToProto(m))
 			}
 		}
-		if fa := s.catalogManager.FetchedAt(); !fa.IsZero() {
+		if fa := cm.FetchedAt(); !fa.IsZero() {
 			resp.CatalogUpdatedAt = fa.UTC().Format(time.RFC3339)
 		}
 		// Enrich every ollama-backed entry with warmed estimate numbers
@@ -1726,7 +1636,7 @@ func (s *Server) ListRuntimeModels(ctx context.Context, req *proto.ListRuntimeMo
 			if pm.GetOllamaRef() == "" {
 				continue
 			}
-			est, ok := s.catalogManager.CachedEstimate(pm.GetOllamaRef())
+			est, ok := cm.CachedEstimate(pm.GetOllamaRef())
 			if !ok {
 				continue
 			}
@@ -1786,23 +1696,24 @@ func titleCase(s string) string {
 // fetch of the online catalog, bypassing the 24h TTL. Used by the
 // CLI dashboard's "R" refresh key.
 func (s *Server) RefreshOnlineCatalog(ctx context.Context, req *proto.RefreshOnlineCatalogRequest) (*proto.RefreshOnlineCatalogResponse, error) {
-	if s.catalogManager == nil {
+	cm := s.providerSvc.CatalogManager()
+	if cm == nil {
 		return &proto.RefreshOnlineCatalogResponse{Error: "online catalog not configured"}, nil
 	}
-	if err := s.catalogManager.Refresh(ctx); err != nil {
+	if err := cm.Refresh(ctx); err != nil {
 		// Refresh failure leaves the previous cache in place — surface
 		// the error so the CLI can render it, but keep the timestamp
 		// pointing at the most-recent SUCCESSFUL fetch so users can
 		// still tell how stale the current view is.
 		resp := &proto.RefreshOnlineCatalogResponse{Error: err.Error()}
-		if fa := s.catalogManager.FetchedAt(); !fa.IsZero() {
+		if fa := cm.FetchedAt(); !fa.IsZero() {
 			resp.CatalogUpdatedAt = fa.UTC().Format(time.RFC3339)
 		}
 		return resp, nil
 	}
 	return &proto.RefreshOnlineCatalogResponse{
-		CatalogUpdatedAt: s.catalogManager.FetchedAt().UTC().Format(time.RFC3339),
-		ModelCount:       int32(len(s.catalogManager.Models())),
+		CatalogUpdatedAt: cm.FetchedAt().UTC().Format(time.RFC3339),
+		ModelCount:       int32(len(cm.Models())),
 	}, nil
 }
 
@@ -2120,7 +2031,7 @@ func (s *Server) ProcessRequest(ctx context.Context, req *proto.ProcessRequestRe
 func (s *Server) StreamProcessRequest(req *proto.ProcessRequestRequest, stream proto.Agent_StreamProcessRequestServer) error {
 	fmt.Printf("Received request (Stream): %s\n", req.Input)
 
-	if (s.cloudLLMProvider != nil || s.openLLMProvider != nil) && s.toolRegistry != nil {
+	if (s.providerSvc.Cloud() != nil || s.providerSvc.Open() != nil) && s.toolRegistry != nil {
 		return s.streamProcessRequestWithToolLoop(req, stream)
 	}
 
@@ -2533,10 +2444,10 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	if loopErr != nil {
 		mode, _ := locus.ParseMode(s.cfgSvc.Get().LocusMode)
 		res := mode.Main()
-		fbProv := s.cloudLLMProvider
+		fbProv := s.providerSvc.Cloud()
 		fbCloud := true
 		if res.Fallback == locus.TierLocal {
-			fbProv, fbCloud = s.openLLMProvider, false
+			fbProv, fbCloud = s.providerSvc.Open(), false
 		}
 		if !fellBack && res.CrossAllowed && fbProv != nil {
 			stream.Send(&proto.StreamProcessResponse{
@@ -2586,30 +2497,16 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	})
 }
 
-// mainModelFor returns the configured model name for the active tier. Cloud
-// reads from the active profile (the single source of truth — see
-// activeCloudModel) so a profile-model change propagates without restart.
 // primaryModel returns the model the context meter measures against: the
-// locus route's primary serving model. cloud_only/cloud_primary → the active
-// cloud model (falling back to the open model when no cloud is configured);
-// open_primary/open_only → the open model.
+// locus route's primary serving model. Delegates to providerSvc.PrimaryModel().
 func (s *Server) primaryModel() string {
-	cfgSnap := s.cfgSvc.Get()
-	switch cfgSnap.LocusMode {
-	case "cloud_only", "cloud_primary":
-		if m := s.activeCloudModel(); m != "" {
-			return m
-		}
-	}
-	return cfgSnap.OpenChatModel()
+	return s.providerSvc.PrimaryModel()
 }
 
+// mainModelFor returns the configured model name for the active tier.
+// Delegates to providerSvc.MainModel().
 func (s *Server) mainModelFor(isCloud bool) string {
-	if isCloud {
-		return s.activeCloudModel()
-	}
-	c := s.cfgSvc.Get()
-	return c.OpenChatModel()
+	return s.providerSvc.MainModel(isCloud)
 }
 
 // runMainLoop drives the native tool-loop on the given provider/tier.
@@ -2822,7 +2719,7 @@ func (s *Server) DenyToolCall(ctx context.Context, req *proto.DenyToolCallReques
 
 // GetProviderCapabilities implements proto.AgentServer.
 func (s *Server) GetProviderCapabilities(ctx context.Context, req *proto.GetProviderCapabilitiesRequest) (*proto.GetProviderCapabilitiesResponse, error) {
-	if s.cloudLLMProvider == nil {
+	if s.providerSvc.Cloud() == nil {
 		return &proto.GetProviderCapabilitiesResponse{
 			SupportsTools:         true,
 			SupportsParallelTools: true,
@@ -2831,7 +2728,7 @@ func (s *Server) GetProviderCapabilities(ctx context.Context, req *proto.GetProv
 			MaxToolsPerCall:       0,
 		}, nil
 	}
-	c := s.cloudLLMProvider.Capabilities()
+	c := s.providerSvc.Cloud().Capabilities()
 	return &proto.GetProviderCapabilitiesResponse{
 		SupportsTools:         c.SupportsTools,
 		SupportsParallelTools: c.SupportsParallelTools,
@@ -2879,8 +2776,8 @@ func (s *Server) mapResponse(response *agent.Response) *proto.ProcessRequestResp
 		IsCloud:    response.RoutingMetadata.IsCloud,
 	}
 
-	if s.registry != nil {
-		if eng, err := s.registry.GetEngine("ollama"); err == nil {
+	if r := s.providerSvc.Registry(); r != nil {
+		if eng, err := r.GetEngine("ollama"); err == nil {
 			if confEng, ok := eng.(engine.ConfigurableEngine); ok {
 				rm.Endpoint = confEng.GetActiveURL()
 				rm.IsFallback = confEng.IsUsingFallback()

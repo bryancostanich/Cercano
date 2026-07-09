@@ -300,6 +300,9 @@ message UpdateConfigRequest {
   // model_tier_value is the model id; "-" clears the slot. Empty key = unchanged.
   string model_tier_key = 21;
   string model_tier_value = 22;
+  // Tool loop — max LLM round-trips per turn. Sparse-patch convention:
+  // "" = unchanged; positive integer = cap; -1 = unlimited.
+  string tool_loop_max_iterations = 23;
 }
 
 // Runtime configuration update response.
@@ -770,6 +773,8 @@ message GetConfigResponse {
   // non-empty slots are present), plus the default provider side.
   map<string, string> model_tiers = 23;
   string models_default_provider = 24;
+  // Tool loop — max LLM round-trips per turn. -1 means unlimited.
+  int32 tool_loop_max_iterations = 25;
 }
 
 message ListSkillsRequest {}

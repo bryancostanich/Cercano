@@ -512,3 +512,66 @@ func TestCloudProfileBedrockYAML(t *testing.T) {
 		t.Errorf("region=%q aws_profile=%q", p.Region, p.AWSProfile)
 	}
 }
+
+func TestDefaults_ToolLoop(t *testing.T) {
+	cfg := Defaults()
+	if cfg.ToolLoop.MaxIterations != DefaultToolLoopMaxIterations {
+		t.Fatalf("tool loop max iterations default = %d, want %d", cfg.ToolLoop.MaxIterations, DefaultToolLoopMaxIterations)
+	}
+}
+
+func TestLoad_ToolLoopDefaultsAndUnlimited(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	if err := os.WriteFile(path, []byte("tool_loop:\n  max_iterations: -1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.ToolLoop.MaxIterations != UnlimitedToolLoopMaxIterations {
+		t.Fatalf("tool loop max iterations = %d, want unlimited sentinel", cfg.ToolLoop.MaxIterations)
+	}
+
+	if err := os.WriteFile(path, []byte("tool_loop:\n  max_iterations: 0\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.ToolLoop.MaxIterations != DefaultToolLoopMaxIterations {
+		t.Fatalf("zero max iterations = %d, want default %d", cfg.ToolLoop.MaxIterations, DefaultToolLoopMaxIterations)
+	}
+}
+
+func TestLoad_ToolLoopRejectsBelowUnlimited(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("tool_loop:\n  max_iterations: -2\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "tool_loop.max_iterations") {
+		t.Fatalf("Load error = %v, want tool_loop.max_iterations validation error", err)
+	}
+}
+
+func TestEffectiveMaxIterations(t *testing.T) {
+	if got, unlimited := EffectiveMaxIterations(0); got != DefaultToolLoopMaxIterations || unlimited {
+		t.Fatalf("zero effective = (%d,%v), want (%d,false)", got, unlimited, DefaultToolLoopMaxIterations)
+	}
+	if got, unlimited := EffectiveMaxIterations(37); got != 37 || unlimited {
+		t.Fatalf("positive effective = (%d,%v), want (37,false)", got, unlimited)
+	}
+	if got, unlimited := EffectiveMaxIterations(UnlimitedToolLoopMaxIterations); got != 0 || !unlimited {
+		t.Fatalf("unlimited effective = (%d,%v), want (0,true)", got, unlimited)
+	}
+	if !ValidateToolLoopMaxIterations(-1) || !ValidateToolLoopMaxIterations(0) || !ValidateToolLoopMaxIterations(200) {
+		t.Fatalf("expected -1, 0, and positive values to be valid")
+	}
+	if ValidateToolLoopMaxIterations(-2) {
+		t.Fatalf("expected values below -1 to be invalid")
+	}
+}

@@ -231,6 +231,11 @@ func (c *Core) runLoop(
 	gateRegistry *agenttools.Registry,
 	permStore *agent.PermissionStore,
 ) (agent.ToolLoopResult, error) {
+	maxIterations := 0
+	if c.d.Config != nil {
+		maxIterations = c.d.Config.Get().ToolLoop.MaxIterations
+	}
+
 	return agent.RunToolLoop(ctx, agent.ToolLoopInput{
 		Provider:            provider,
 		Registry:            gateRegistry,
@@ -246,6 +251,7 @@ func (c *Core) runLoop(
 		ConvHistory:         convHistory,
 		OnTextDelta:         onTextDelta,
 		OnTurnComplete:      onTurn,
+		MaxIterations:       maxIterations,
 		WatchdogGate:        wdGate,
 		WatchdogTurnEnd:     wdTurnEnd,
 	})
@@ -331,9 +337,10 @@ func makeLoopSink(sink EventSink) func(agent.LoopEvent) {
 				Summary:      ev.Summary,
 			})
 
-		// LoopPermissionRequired is NOT forwarded via sink — it goes via
-		// requester (request/response, not fire-and-forget). The loop calls
-		// PermissionRequester directly; we don't emit an event here.
+		case agent.LoopPermissionRequired:
+			// LoopPermissionRequired is NOT forwarded via sink — it goes via
+			// requester (request/response, not fire-and-forget). The loop calls
+			// PermissionRequester directly; we don't emit an event here.
 		}
 	}
 }

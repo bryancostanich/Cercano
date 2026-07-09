@@ -704,8 +704,11 @@ type UpdateConfigRequest struct {
 	// model_tier_value is the model id; "-" clears the slot. Empty key = unchanged.
 	ModelTierKey   string `protobuf:"bytes,21,opt,name=model_tier_key,json=modelTierKey,proto3" json:"model_tier_key,omitempty"`
 	ModelTierValue string `protobuf:"bytes,22,opt,name=model_tier_value,json=modelTierValue,proto3" json:"model_tier_value,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Tool loop — max LLM round-trips per turn. Sparse-patch convention:
+	// "" = unchanged; positive integer = cap; -1 = unlimited.
+	ToolLoopMaxIterations string `protobuf:"bytes,23,opt,name=tool_loop_max_iterations,json=toolLoopMaxIterations,proto3" json:"tool_loop_max_iterations,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *UpdateConfigRequest) Reset() {
@@ -888,6 +891,13 @@ func (x *UpdateConfigRequest) GetModelTierKey() string {
 func (x *UpdateConfigRequest) GetModelTierValue() string {
 	if x != nil {
 		return x.ModelTierValue
+	}
+	return ""
+}
+
+func (x *UpdateConfigRequest) GetToolLoopMaxIterations() string {
+	if x != nil {
+		return x.ToolLoopMaxIterations
 	}
 	return ""
 }
@@ -5334,6 +5344,8 @@ type GetConfigResponse struct {
 	// non-empty slots are present), plus the default provider side.
 	ModelTiers            map[string]string `protobuf:"bytes,23,rep,name=model_tiers,json=modelTiers,proto3" json:"model_tiers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	ModelsDefaultProvider string            `protobuf:"bytes,24,opt,name=models_default_provider,json=modelsDefaultProvider,proto3" json:"models_default_provider,omitempty"`
+	// Tool loop — max LLM round-trips per turn. -1 means unlimited.
+	ToolLoopMaxIterations int32 `protobuf:"varint,25,opt,name=tool_loop_max_iterations,json=toolLoopMaxIterations,proto3" json:"tool_loop_max_iterations,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -5534,6 +5546,13 @@ func (x *GetConfigResponse) GetModelsDefaultProvider() string {
 		return x.ModelsDefaultProvider
 	}
 	return ""
+}
+
+func (x *GetConfigResponse) GetToolLoopMaxIterations() int32 {
+	if x != nil {
+		return x.ToolLoopMaxIterations
+	}
+	return 0
 }
 
 type ListSkillsRequest struct {
@@ -9263,7 +9282,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x05index\x18\x01 \x01(\x05R\x05index\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\x12\x1d\n" +
 	"\n" +
-	"media_type\x18\x03 \x01(\tR\tmediaType\"\x91\a\n" +
+	"media_type\x18\x03 \x01(\tR\tmediaType\"\xca\a\n" +
 	"\x13UpdateConfigRequest\x12\x1d\n" +
 	"\n" +
 	"open_model\x18\x01 \x01(\tR\topenModel\x12%\n" +
@@ -9291,7 +9310,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x17watchdog_escalate_after\x18\x13 \x01(\tR\x15watchdogEscalateAfter\x12,\n" +
 	"\x12open_default_model\x18\x14 \x01(\tR\x10openDefaultModel\x12$\n" +
 	"\x0emodel_tier_key\x18\x15 \x01(\tR\fmodelTierKey\x12(\n" +
-	"\x10model_tier_value\x18\x16 \x01(\tR\x0emodelTierValue\"J\n" +
+	"\x10model_tier_value\x18\x16 \x01(\tR\x0emodelTierValue\x127\n" +
+	"\x18tool_loop_max_iterations\x18\x17 \x01(\tR\x15toolLoopMaxIterations\"J\n" +
 	"\x14UpdateConfigResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\xb6\x02\n" +
@@ -9638,7 +9658,7 @@ const file_agent_proto_rawDesc = "" +
 	"resultJson\x12\x19\n" +
 	"\bis_error\x18\x02 \x01(\bR\aisError\x12\x14\n" +
 	"\x05error\x18\x03 \x01(\tR\x05error\"\x12\n" +
-	"\x10GetConfigRequest\"\xb8\b\n" +
+	"\x10GetConfigRequest\"\xf1\b\n" +
 	"\x11GetConfigResponse\x12\x1d\n" +
 	"\n" +
 	"ollama_url\x18\x01 \x01(\tR\tollamaUrl\x12\x1d\n" +
@@ -9670,7 +9690,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x17watchdog_escalate_after\x18\x16 \x01(\tR\x15watchdogEscalateAfter\x12I\n" +
 	"\vmodel_tiers\x18\x17 \x03(\v2(.agent.GetConfigResponse.ModelTiersEntryR\n" +
 	"modelTiers\x126\n" +
-	"\x17models_default_provider\x18\x18 \x01(\tR\x15modelsDefaultProvider\x1a=\n" +
+	"\x17models_default_provider\x18\x18 \x01(\tR\x15modelsDefaultProvider\x127\n" +
+	"\x18tool_loop_max_iterations\x18\x19 \x01(\x05R\x15toolLoopMaxIterations\x1a=\n" +
 	"\x0fModelTiersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x13\n" +

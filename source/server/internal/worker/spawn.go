@@ -41,6 +41,12 @@ const (
 	maxGRPCWorkerMsgBytes = 64 * 1024 * 1024 // 64 MiB — matches agentclient
 )
 
+// MaxMsgBytes is the host↔worker gRPC message-size limit, exported so the
+// worker's gRPC server (cmd/cercano) can set the SAME limit its client dials
+// with. Host and worker must agree, or large StartTurn / result messages fail
+// with ResourceExhausted on the smaller side.
+const MaxMsgBytes = maxGRPCWorkerMsgBytes
+
 // workerHandle owns a spawned worker process and its gRPC connection.
 type workerHandle struct {
 	cmd        *exec.Cmd
@@ -101,7 +107,15 @@ func spawnWorker(ctx context.Context, conversationID string, gen uint64) (*worke
 		return nil, fmt.Errorf("worker spawn: pipe: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, bin, "worker", "--socket", sockPath)
+	// Deliberately exec.Command, NOT exec.CommandContext(ctx, …): the worker
+	// process must OUTLIVE the turn that spawned it. The pool keeps it warm across
+	// turns; binding its lifetime to the turn ctx would SIGKILL it the instant the
+	// first turn completes (the turn ctx cancels on completion), silently defeating
+	// warm reuse — every turn would respawn. The pool owns teardown instead:
+	// Kill() / Shutdown() / idle-reap / startup orphan-sweep. The turn ctx still
+	// bounds STARTUP via waitForSocket(ctx, …) below, so a hung spawn during this
+	// turn is still abortable (and the partial handle is Killed on that path).
+	cmd := exec.Command(bin, "worker", "--socket", sockPath)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stdout = pw
 	cmd.Stderr = pw

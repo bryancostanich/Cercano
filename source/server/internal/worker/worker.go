@@ -275,14 +275,29 @@ type workerResolver struct {
 	cfgSvc    cfgsvc.Service
 }
 
+// profileByName selects a cloud profile by name, mirroring
+// providers.profileByName. An empty name (no active profile) matches nothing,
+// so ok is false and no cloud provider is built.
+func profileByName(profiles []pkgcfg.CloudProfile, name string) (pkgcfg.CloudProfile, bool) {
+	for _, pr := range profiles {
+		if pr.Name == name {
+			return pr, true
+		}
+	}
+	return pkgcfg.CloudProfile{}, false
+}
+
 func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource credentialFetcher) (providerssvc.Resolver, error) {
 	cfgService := cfgsvc.New("", cfg, secrets.NewMemory())
 	r := &workerResolver{cfgSvc: cfgService}
 
-	// Build cloud provider if an active profile is present.
-	if cfg.ActiveCloudProfile != "" && len(cfg.CloudProfiles) > 0 {
-		prof := cfg.CloudProfiles[0]
-
+	// Build cloud provider from the ACTIVE profile, selected BY NAME (mirroring
+	// the host's rebuildCloud / ActiveProfile — the active profile is not
+	// necessarily CloudProfiles[0]). Selecting [0] here builds the wrong
+	// provider (route/flavor/credential-profile) whenever the active profile
+	// isn't first, while the worker's own model resolution correctly uses the
+	// named active profile — a silent worker/in-process divergence.
+	if prof, ok := profileByName(cfg.CloudProfiles, cfg.ActiveCloudProfile); ok {
 		var prov llm.Provider
 		var buildErr error
 

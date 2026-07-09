@@ -2298,6 +2298,27 @@ func sendRunnerEvent(stream streamResponseSender, ev runnersvc.Event) error {
 			// Behavior-preserving: old sink dropped LoopWatchdogEscalate (no send).
 		}
 
+	case runnersvc.EventSubAgent:
+		return stream.Send(&proto.StreamProcessResponse{
+			Payload: &proto.StreamProcessResponse_SubAgentEvent{
+				SubAgentEvent: &proto.SubAgentEvent{
+					Id:           ev.SubAgentID,
+					Title:        ev.SubAgentTitle,
+					Kind:         ev.SubAgentKind,
+					GrantedTools: append([]string(nil), ev.GrantedTools...),
+					IgnoredTools: append([]string(nil), ev.IgnoredTools...),
+					Text:         ev.Text,
+					ToolUseId:    ev.ToolUseID,
+					ToolName:     ev.ToolName,
+					ArgsSummary:  ev.ArgsSummary,
+					Summary:      ev.Summary,
+					Detail:       ev.Detail,
+					StartLine:    int32(ev.StartLine),
+					IsError:      ev.IsError,
+				},
+			},
+		})
+
 	case runnersvc.EventDone:
 		// Not used by the in-process host (result comes back from RunTurn directly).
 	}

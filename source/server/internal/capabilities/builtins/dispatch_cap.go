@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/pkg/config"
@@ -72,6 +73,18 @@ func (dispatchCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 		WorkDir:        call.WorkDir,
 		ConversationID: convID,
 		Interactive:    false,
+		Emit: func(ev agenttools.ProgressEvent) {
+			if call.EmitProgress != nil {
+				call.EmitProgress(ev)
+			}
+			if call.Emit != nil {
+				if ev.Text != "" {
+					call.Emit(ev.Text)
+				} else if ev.Summary != "" {
+					call.Emit(ev.Summary)
+				}
+			}
+		},
 	})
 	if err != nil {
 		return nil, err

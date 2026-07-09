@@ -134,9 +134,13 @@ type Call struct {
 	// The agent surface wires it to the loop gate; the MCP surface passes an
 	// allow-all (the host gates). Most capabilities never call it.
 	RequestPermission func(ctx context.Context, reason string) (bool, error)
-	// Emit streams progress events back to the surface. Nil-safe — capabilities
-	// must tolerate a nil Emit.
+	// Emit streams human-readable progress back to the surface. Nil-safe —
+	// capabilities must tolerate a nil Emit.
 	Emit func(note string)
+	// EmitProgress streams structured progress back to the agent loop. It is used
+	// by capabilities such as dispatch that need child-agent events to survive
+	// through the parent stream without string scraping.
+	EmitProgress func(agenttools.ProgressEvent)
 	// Svc gives the capability access to shared services; set by the adapter/handler that invokes it.
 	Svc Services
 }

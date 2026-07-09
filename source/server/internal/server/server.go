@@ -34,7 +34,6 @@ import (
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
-	"cercano/source/server/internal/llm/anthropic"
 	"cercano/source/server/internal/localruntime"
 	"cercano/source/server/internal/localruntime/llamaserver"
 	"cercano/source/server/internal/locus"
@@ -47,6 +46,7 @@ import (
 	"cercano/source/server/internal/sysram"
 	"cercano/source/server/internal/usage"
 	"cercano/source/server/internal/watchdog"
+	runnersvc "cercano/source/server/internal/runner"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 )
@@ -79,6 +79,7 @@ type Server struct {
 	permBroker     permissions.Broker
 	runtimesSvc    runtimessvc.Supervisors  // owns meridianMgr, runtimeManager, mcpManager
 	watchdog       *watchdog.Watchdog       // protocol-supervision gate; nil = disabled (default)
+	turnRunner     runnersvc.TurnRunner     // executes one conversation turn; rebuilt when perms arrive
 
 	events *eventHub // server->client push fan-out (SubscribeEvents)
 
@@ -215,6 +216,8 @@ func (s *Server) SetPermissions(store *agent.PermissionStore, pending *agent.Pen
 	if s.toolSvc != nil {
 		s.toolSvc.SetPermBroker(s.permBroker)
 	}
+	// Rebuild the turn runner now that the permission broker is wired.
+	s.turnRunner = runnersvc.New(s.runnerDeps())
 }
 
 // SetMcpManager wires the MCP host manager so the RPC handlers can delegate to it.
@@ -653,7 +656,24 @@ func NewServer(a *agent.Agent, openProvider *legacymodels.OpenModelProvider, rou
 		func() conversation.Store { return s.persistSvc.Store() },
 		s.persistSvc.PersistTurn,
 	)
+	// Wire the turn runner with nil Perms (permBroker not yet set). Rebuilt in
+	// SetPermissions once the broker is wired.
+	s.turnRunner = runnersvc.New(s.runnerDeps())
 	return s
+}
+
+// runnerDeps builds the runner.Deps snapshot from current server state.
+// Called at NewServer time and again when SetPermissions wires the broker.
+func (s *Server) runnerDeps() runnersvc.Deps {
+	return runnersvc.Deps{
+		Providers: s.providerSvc,
+		Tools:     s.toolSvc,
+		Persist:   s.persistSvc,
+		Config:    s.cfgSvc,
+		Perms:     s.permBroker,
+		Agent:     s.agent,
+		Watchdog:  s.watchdog,
+	}
 }
 
 // SetConfigPersistence enables config persistence by storing the config path and current state.
@@ -1935,6 +1955,12 @@ func gitInfo(dir string) (bool, string) {
 // streamProcessRequestWithToolLoop drives the native tool-calling loop and
 // emits per-event stream payloads. Used when a layered LLM provider has been
 // wired via SetCloudLLMProvider.
+//
+// This is the host-side "front door": it handles the per-conversation turn
+// fence (beginTurn), builds the proto-sink and permission-requester adapters,
+// delegates execution to s.turnRunner.RunTurn, and sends the FinalResponse.
+// The execution body (provider resolution, history assembly, watchdog, tool
+// loop, cross-tier fallback, post-turn bookkeeping) now lives in runner.Core.
 func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestRequest, stream proto.Agent_StreamProcessRequestServer) error {
 	// One live turn per conversation. A new turn here supersedes any turn still
 	// running on the same conversation (cancels its ctx); this turn's own ctx
@@ -1943,81 +1969,13 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	ctx, turnGen, releaseTurn := s.beginTurn(stream.Context(), req.GetConversationId())
 	defer releaseTurn()
 
-	sink := func(ev agent.LoopEvent) {
-		switch ev.Kind {
-		case agent.LoopToolUseStart:
-			stream.Send(&proto.StreamProcessResponse{
-				Payload: &proto.StreamProcessResponse_ToolUseStart{
-					ToolUseStart: &proto.ToolUseStart{
-						ToolUseId: ev.ToolUseID,
-						ToolName:  ev.ToolName,
-					},
-				},
-			})
-		case agent.LoopToolUseStop:
-			// Per-tool trace to the server log so a runaway/looping turn is
-			// diagnosable after the fact (which tools, what args, in what order).
-			// Summarized: Edit/Write args carry whole file bodies, which would
-			// otherwise flood the shared singleton log with kilobytes per call.
-			argsSummary := summarizeArgs(ev.ArgsJSON)
-			fmt.Fprintf(os.Stderr, "[tool-loop] call %s args=%s\n", ev.ToolName, argsSummary)
-			stream.Send(&proto.StreamProcessResponse{
-				Payload: &proto.StreamProcessResponse_ToolUseStop{
-					ToolUseStop: &proto.ToolUseStop{
-						ToolUseId: ev.ToolUseID,
-						// Summary, not the payload: the CLI parses this to render
-						// the folded entry and fetches full args lazily via
-						// GetToolCall. Streaming full file bodies to every client
-						// on every Edit/Write was wasted bandwidth.
-						ArgsSummary: argsSummary,
-					},
-				},
-			})
-		case agent.LoopToolExecStart:
-			stream.Send(&proto.StreamProcessResponse{
-				Payload: &proto.StreamProcessResponse_ToolExecStart{
-					ToolExecStart: &proto.ToolExecStart{
-						ToolUseId: ev.ToolUseID,
-					},
-				},
-			})
-		case agent.LoopToolExecComplete:
-			fmt.Fprintf(os.Stderr, "[tool-loop]   -> %s (err=%v) %s\n", ev.Summary, ev.IsError, ev.Detail)
-			stream.Send(&proto.StreamProcessResponse{
-				Payload: &proto.StreamProcessResponse_ToolExecComplete{
-					ToolExecComplete: &proto.ToolExecComplete{
-						ToolUseId: ev.ToolUseID,
-						Summary:   ev.Summary,
-						Detail:    ev.Detail,
-						StartLine: int32(ev.StartLine),
-						IsError:   ev.IsError,
-					},
-				},
-			})
-		case agent.LoopWatchdogChallenge, agent.LoopWatchdogBlock:
-			kind := "challenge"
-			if ev.Kind == agent.LoopWatchdogBlock {
-				kind = "block"
-			}
-			stream.Send(&proto.StreamProcessResponse{
-				Payload: &proto.StreamProcessResponse_WatchdogEvent{
-					WatchdogEvent: &proto.WatchdogEvent{
-						Kind: kind, Protocol: ev.Detail, Text: ev.Summary,
-					},
-				},
-			})
-		case agent.LoopWatchdogEcho:
-			stream.Send(&proto.StreamProcessResponse{
-				Payload: &proto.StreamProcessResponse_WatchdogEvent{
-					WatchdogEvent: &proto.WatchdogEvent{
-						Kind: "echo", Text: ev.Summary, Thread: ev.ToolName,
-					},
-				},
-			})
-		}
-	}
+	// protoSink maps runner.Event → proto.StreamProcessResponse payloads.
+	// It is the inverse of the old agent.LoopEvent sink closure.
+	protoSink := &hostProtoSink{stream: stream}
 
-	requester := func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission, destructive bool) (bool, error) {
+	// requester gates a W/X permission prompt: blocks until the client responds
+	// via AllowToolCall / DenyToolCall RPCs. Unchanged from the old closure.
+	requester := runnersvc.PermissionRequester(func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission, destructive bool) (bool, error) {
 		if s.permBroker == nil || !s.permBroker.HasPending() {
 			return false, nil
 		}
@@ -2046,78 +2004,14 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 			}
 		}
 		return d.Allow, nil
-	}
-
-	ctx = anthropic.WithSessionID(ctx, req.GetConversationId())
-
-	// Resolve the provider per the active Locus Mode.
-	provider, isCloud, fellBack, err := s.resolveMainProvider()
-	if err != nil {
-		// *_only mode with its required tier unavailable — hard fail, no silent cross.
-		return stream.Send(&proto.StreamProcessResponse{
-			Payload: &proto.StreamProcessResponse_FinalResponse{
-				FinalResponse: &proto.ProcessRequestResponse{Output: "Locus: " + err.Error()},
-			},
-		})
-	}
-	if fellBack {
-		stream.Send(&proto.StreamProcessResponse{
-			Payload: &proto.StreamProcessResponse_Progress{
-				Progress: &proto.ProgressUpdate{
-					Message: fmt.Sprintf("⚠ preferred tier unavailable — falling back to %s (%s)", provider.Name(), s.mainModelFor(isCloud)),
-				},
-			},
-		})
-	}
-
-	// Announce the true route so the client can show the correct engine badge.
-	stream.Send(&proto.StreamProcessResponse{
-		Payload: &proto.StreamProcessResponse_RouteSelected{
-			RouteSelected: &proto.RouteSelected{
-				Model:   s.mainModelFor(isCloud),
-				IsCloud: isCloud,
-			},
-		},
 	})
 
-	var convHistory []llm.Message
-	if store := s.agent.PersistentStore(); store != nil && req.GetConversationId() != "" {
-		convHistory = s.assembleHistory(ctx, store, req.GetConversationId())
-	}
-
-	// Crash-resilient persistence. Persist the USER turn up front (before any LLM
-	// call) so an interruption — panic, kill, restart, power loss — can never lose
-	// the prompt. The rest of the turn is persisted incrementally as the loop
-	// produces each assistant / tool-result message (onTurn → OnTurnComplete), so
-	// a crash mid-turn loses at most the reply currently streaming, not the turn.
-	// (On the rare cross-tier fallback retry below, a failed attempt's already-
-	// persisted assistant turns may be redundantly re-persisted — non-destructive;
-	// the user turn is written once here and never via onTurn.)
+	// persist is the host-fenced turn persister. The generation fence ensures a
+	// superseded turn's late writes cannot land in the live history.
 	convID := req.GetConversationId()
-	persistEnabled := s.agent != nil && convID != "" && s.agent.PersistentStore() != nil
-	if persistEnabled {
-		if err := s.agent.PersistentStore().EnsureConversation(ctx, convID, req.GetWorkDir(), s.mainModelFor(isCloud)); err != nil {
-			fmt.Fprintf(os.Stderr, "[tool-loop] EnsureConversation(%s) failed: %v\n", convID, err)
-			persistEnabled = false
-			// Persistence silently vanishing cost real forensics time (see
-			// docs/bugs/2026-07-04-user-message-tear.md) — tell the user.
-			stream.Send(&proto.StreamProcessResponse{
-				Payload: &proto.StreamProcessResponse_Progress{
-					Progress: &proto.ProgressUpdate{Message: "⚠ conversation persistence unavailable this turn — it will not appear in /resume"},
-				},
-			})
-		} else {
-			s.persistTurn(ctx, convID, agent.UserMessage(req.GetInput(), mapInlineImages(req.GetImages())))
-		}
-	}
-	var onTurn func(m llm.Message)
-	if persistEnabled {
-		// Fence persistence on the turn generation: if a newer turn has
-		// superseded this one, its assistant/tool turns must not land in the
-		// live history. The ctx is already canceled in that case, but a write
-		// can be in flight at the moment of supersession — the gen check closes
-		// that window.
-		onTurn = func(m llm.Message) {
+	var persist runnersvc.PersistFunc
+	if convID != "" {
+		persist = func(m llm.Message) {
 			if !s.turnIsCurrent(convID, turnGen) {
 				return
 			}
@@ -2125,104 +2019,143 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		}
 	}
 
-	onTextDelta := func(t string) {
-		stream.Send(&proto.StreamProcessResponse{
-			Payload: &proto.StreamProcessResponse_TokenDelta{
-				TokenDelta: &proto.TokenDelta{Content: t},
+	runReq := runnersvc.Request{
+		ConversationID: req.GetConversationId(),
+		Input:          req.GetInput(),
+		Images:         mapInlineImages(req.GetImages()),
+		WorkDir:        req.GetWorkDir(),
+		Gen:            turnGen,
+	}
+
+	result, err := s.turnRunner.RunTurn(ctx, runReq, protoSink, requester, persist)
+	if err != nil {
+		return err
+	}
+
+	// If the runner returned a synthetic locus-error FinalText (no real loop
+	// ran), wrap it in a FinalResponse and exit.  The runner signals this by
+	// returning a non-empty FinalText with no Model set.
+	if result.Model == "" {
+		return stream.Send(&proto.StreamProcessResponse{
+			Payload: &proto.StreamProcessResponse_FinalResponse{
+				FinalResponse: &proto.ProcessRequestResponse{Output: result.FinalText},
 			},
 		})
 	}
 
-	// Watchdog wiring (default-OFF: s.watchdog == nil ⇒ unchanged behavior).
-	// Per-request gate bound to this conversation + a per-request registry that
-	// augments the base tools with the conversation-scoped justify tool.
-	gateRegistry := s.toolSvc.Registry()
-	var wdGate agent.WatchdogGate
-	var wdTurnEnd agent.WatchdogTurnEnd
-	wd := s.watchdog
-	if wd != nil {
-		wdGate = func(ctx context.Context, toolName string, args json.RawMessage, transcript []llm.Message) agent.WatchdogDecision {
-			d := wd.Gate(ctx, convID, watchdog.Action{Kind: "tool_call", ToolName: toolName, ToolArgs: args, Transcript: transcript})
-			return agent.WatchdogDecision{Action: d.Action, Protocol: d.Protocol, Challenge: d.Challenge, Revise: d.Revise}
-		}
-		wdTurnEnd = func(ctx context.Context, finalText string, transcript []llm.Message) agent.WatchdogDecision {
-			d := wd.Gate(ctx, convID, watchdog.Action{Kind: "turn_end", Text: finalText, Transcript: transcript})
-			return agent.WatchdogDecision{Action: d.Action, Protocol: d.Protocol, Challenge: d.Challenge, Revise: d.Revise}
-		}
-		reg := agenttools.NewRegistry()
-		for _, t := range s.toolSvc.Registry().All() {
-			_ = reg.Register(t)
-		}
-		_ = reg.Register(wd.JustifyTool(convID))
-		gateRegistry = reg
-
-		// Echo forwarding is per-turn: the interactive server processes one turn
-		// at a time (turns don't overlap), so setting echo on the shared watchdog
-		// here routes its interventions to THIS turn's sink safely. Full
-		// multi-conversation echo isolation is a follow-on.
-		echoOn := s.cfgSvc.Get().Watchdog.Echo
-		if echoOn {
-			wd.SetEcho(func(thread, text string) {
-				sink(agent.LoopEvent{Kind: agent.LoopWatchdogEcho, ToolName: thread, Summary: text})
-			})
-		}
-	}
-
-	result, loopErr := s.runMainLoop(ctx, req, provider, isCloud, sink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry)
-	if loopErr != nil {
-		mode, _ := locus.ParseMode(s.cfgSvc.Get().LocusMode)
-		res := mode.Main()
-		fbProv := s.providerSvc.Cloud()
-		fbCloud := true
-		if res.Fallback == locus.TierLocal {
-			fbProv, fbCloud = s.providerSvc.Open(), false
-		}
-		if !fellBack && res.CrossAllowed && fbProv != nil {
-			stream.Send(&proto.StreamProcessResponse{
-				Payload: &proto.StreamProcessResponse_Progress{
-					Progress: &proto.ProgressUpdate{
-						Message: fmt.Sprintf("⚠ %s failed (%v) — retrying on %s", provider.Name(), loopErr, fbProv.Name()),
-					},
-				},
-			})
-			stream.Send(&proto.StreamProcessResponse{
-				Payload: &proto.StreamProcessResponse_RouteSelected{
-					RouteSelected: &proto.RouteSelected{Model: s.mainModelFor(fbCloud), IsCloud: fbCloud},
-				},
-			})
-			provider = fbProv
-			isCloud = fbCloud
-			result, loopErr = s.runMainLoop(ctx, req, fbProv, fbCloud, sink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry)
-		}
-		if loopErr != nil {
-			return fmt.Errorf("tool loop error: %w", loopErr)
-		}
-	}
-
-	// Turns were persisted incrementally above (user turn up front + each
-	// assistant/tool message via onTurn). Now that the turn is complete, refresh
-	// the living recap and schedule background compaction.
-	if persistEnabled {
-		s.agent.ScheduleRecap(convID)
-		s.agent.ScheduleCompaction(convID)
-	}
-	s.agent.RecordContextUsage(req.GetConversationId(), s.mainModelFor(isCloud),
-		result.InputTokens, result.OutputTokens)
-
+	// Send the final response. The runner has already done post-turn bookkeeping
+	// (ScheduleRecap, RecordContextUsage) before returning.
 	return stream.Send(&proto.StreamProcessResponse{
 		Payload: &proto.StreamProcessResponse_FinalResponse{
 			FinalResponse: &proto.ProcessRequestResponse{
-				Output: strings.ToValidUTF8(result.FinalText, "�"),
+				Output: strings.ToValidUTF8(result.FinalText, ""),
 				RoutingMetadata: &proto.RoutingMetadata{
-					ModelName: provider.Name(),
+					ModelName: result.Model,
 				},
-				// Carry the turn's token counts so the CLI's "last turn" footer
-				// isn't stuck at 0 — same values RecordContextUsage just stored.
+				// Carry token counts so the CLI's "last turn" footer isn't stuck at 0.
 				InputTokens:  int32(result.InputTokens),
 				OutputTokens: int32(result.OutputTokens),
 			},
 		},
 	})
+}
+
+// hostProtoSink implements runner.EventSink by mapping each runner.Event to
+// the appropriate proto.StreamProcessResponse payload and sending it on stream.
+type hostProtoSink struct {
+	stream proto.Agent_StreamProcessRequestServer
+}
+
+func (s *hostProtoSink) Emit(ev runnersvc.Event) {
+	switch ev.Kind {
+	case runnersvc.EventProgress:
+		s.stream.Send(&proto.StreamProcessResponse{
+			Payload: &proto.StreamProcessResponse_Progress{
+				Progress: &proto.ProgressUpdate{Message: ev.Text},
+			},
+		})
+
+	case runnersvc.EventRouteSelected:
+		s.stream.Send(&proto.StreamProcessResponse{
+			Payload: &proto.StreamProcessResponse_RouteSelected{
+				RouteSelected: &proto.RouteSelected{Model: ev.Model, IsCloud: ev.IsCloud},
+			},
+		})
+
+	case runnersvc.EventToken:
+		s.stream.Send(&proto.StreamProcessResponse{
+			Payload: &proto.StreamProcessResponse_TokenDelta{
+				TokenDelta: &proto.TokenDelta{Content: ev.Text},
+			},
+		})
+
+	case runnersvc.EventToolUseStart:
+		s.stream.Send(&proto.StreamProcessResponse{
+			Payload: &proto.StreamProcessResponse_ToolUseStart{
+				ToolUseStart: &proto.ToolUseStart{
+					ToolUseId: ev.ToolUseID,
+					ToolName:  ev.ToolName,
+				},
+			},
+		})
+
+	case runnersvc.EventToolUseStop:
+		s.stream.Send(&proto.StreamProcessResponse{
+			Payload: &proto.StreamProcessResponse_ToolUseStop{
+				ToolUseStop: &proto.ToolUseStop{
+					ToolUseId:   ev.ToolUseID,
+					ArgsSummary: ev.ArgsSummary,
+				},
+			},
+		})
+
+	case runnersvc.EventToolExecStart:
+		s.stream.Send(&proto.StreamProcessResponse{
+			Payload: &proto.StreamProcessResponse_ToolExecStart{
+				ToolExecStart: &proto.ToolExecStart{
+					ToolUseId: ev.ToolUseID,
+				},
+			},
+		})
+
+	case runnersvc.EventToolExecComplete:
+		s.stream.Send(&proto.StreamProcessResponse{
+			Payload: &proto.StreamProcessResponse_ToolExecComplete{
+				ToolExecComplete: &proto.ToolExecComplete{
+					ToolUseId: ev.ToolUseID,
+					Summary:   ev.Summary,
+					Detail:    ev.Detail,
+					StartLine: int32(ev.StartLine),
+					IsError:   ev.IsError,
+				},
+			},
+		})
+
+	case runnersvc.EventWatchdog:
+		switch ev.WatchdogKind {
+		case "challenge", "block":
+			s.stream.Send(&proto.StreamProcessResponse{
+				Payload: &proto.StreamProcessResponse_WatchdogEvent{
+					WatchdogEvent: &proto.WatchdogEvent{
+						Kind: ev.WatchdogKind, Protocol: ev.Detail, Text: ev.Summary,
+					},
+				},
+			})
+		case "echo":
+			s.stream.Send(&proto.StreamProcessResponse{
+				Payload: &proto.StreamProcessResponse_WatchdogEvent{
+					WatchdogEvent: &proto.WatchdogEvent{
+						Kind: "echo", Text: ev.Summary, Thread: ev.Thread,
+					},
+				},
+			})
+		case "escalate":
+			// Behavior-preserving: old sink dropped LoopWatchdogEscalate (no send).
+		}
+
+	case runnersvc.EventDone:
+		// Not used by the in-process host (result comes back from RunTurn directly).
+	}
 }
 
 // primaryModel returns the model the context meter measures against: the
@@ -2235,47 +2168,6 @@ func (s *Server) primaryModel() string {
 // Delegates to providerSvc.MainModel().
 func (s *Server) mainModelFor(isCloud bool) string {
 	return s.providerSvc.MainModel(isCloud)
-}
-
-// runMainLoop drives the native tool-loop on the given provider/tier.
-// Factored out so Task 6 (fallback) can reuse it without duplicating the
-// RunToolLoop call site.
-func (s *Server) runMainLoop(
-	ctx context.Context,
-	req *proto.ProcessRequestRequest,
-	provider llm.Provider,
-	isCloud bool,
-	sink func(agent.LoopEvent),
-	requester func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission, destructive bool) (bool, error),
-	convHistory []llm.Message,
-	onTextDelta func(string),
-	onTurn func(m llm.Message),
-	watchdogGate agent.WatchdogGate,
-	watchdogTurnEnd agent.WatchdogTurnEnd,
-	registry *agenttools.Registry,
-) (agent.ToolLoopResult, error) {
-	var permStore *agent.PermissionStore
-	if s.permBroker != nil {
-		permStore = s.permBroker.Store()
-	}
-	return agent.RunToolLoop(ctx, agent.ToolLoopInput{
-		Provider:            provider,
-		Registry:            registry,
-		Permissions:         permStore,
-		UserInput:           req.GetInput(),
-		Images:              mapInlineImages(req.GetImages()),
-		Model:               s.mainModelFor(isCloud),
-		System:              s.buildSystemPrompt(req.GetWorkDir()),
-		WorkDir:             req.GetWorkDir(),
-		ConversationID:      req.GetConversationId(),
-		EventSink:           sink,
-		PermissionRequester: requester,
-		ConvHistory:         convHistory,
-		OnTextDelta:         onTextDelta,
-		OnTurnComplete:      onTurn,
-		WatchdogGate:        watchdogGate,
-		WatchdogTurnEnd:     watchdogTurnEnd,
-	})
 }
 
 // persistTurn is a front-door shim used by the tool loop and tests.

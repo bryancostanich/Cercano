@@ -284,8 +284,10 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource *st
 			// Static-key route: fetch the API key once via the stream.
 			key, _, err := credSource.Fetch(ctx, prof.Name)
 			if err != nil {
+				// Cloud stays unbuilt; the turn degrades to the open provider
+				// (locus graceful-degradation). Do NOT touch r.openProv here —
+				// it is built separately below and clearing it would be a bug.
 				log.Printf("[worker] credential fetch failed for profile %q: %v; continuing without cloud", prof.Name, err)
-				r.openProv = nil
 			} else {
 				prov, buildErr = cloudfactory.BuildCloudProvider(prof, key)
 			}

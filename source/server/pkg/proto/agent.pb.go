@@ -10683,6 +10683,7 @@ type CredentialResponse struct {
 	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
 	Token         string                 `protobuf:"bytes,2,opt,name=token,proto3" json:"token,omitempty"` // API key or fresh access token, per the profile's auth flavor
 	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	Account       string                 `protobuf:"bytes,4,opt,name=account,proto3" json:"account,omitempty"` // ChatGPT account ID (non-empty for subscription route; empty for static-key routes)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -10734,6 +10735,13 @@ func (x *CredentialResponse) GetToken() string {
 func (x *CredentialResponse) GetError() string {
 	if x != nil {
 		return x.Error
+	}
+	return ""
+}
+
+func (x *CredentialResponse) GetAccount() string {
+	if x != nil {
+		return x.Account
 	}
 	return ""
 }
@@ -11541,11 +11549,12 @@ const file_agent_proto_rawDesc = "" +
 	"\rwatchdog_echo\x18% \x01(\bR\fwatchdogEcho\"F\n" +
 	"\x11CredentialRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12!\n" +
-	"\fprofile_name\x18\x02 \x01(\tR\vprofileName\"P\n" +
+	"\fprofile_name\x18\x02 \x01(\tR\vprofileName\"j\n" +
 	"\x12CredentialResponse\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x14\n" +
 	"\x05token\x18\x02 \x01(\tR\x05token\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error*0\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\x12\x18\n" +
+	"\aaccount\x18\x04 \x01(\tR\aaccount*0\n" +
 	"\n" +
 	"FileAction\x12\n" +
 	"\n" +

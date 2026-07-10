@@ -103,6 +103,17 @@ type Manager struct {
 	// Returns a release func and true when acquired. Injection point for
 	// tests; production is realAcquireLock.
 	acquireLockFn func() (release func(), ok bool)
+	// versionProbeFn asks the proxy already on the port for its version via
+	// Meridian's /health endpoint, so Ensure can spot a stale external proxy.
+	// ok is false when the endpoint can't be positively identified as a
+	// Meridian at a concrete version. Injection point for tests; production is
+	// realVersionProbe.
+	versionProbeFn func(ctx context.Context, port int) (version string, ok bool)
+	// reapForeignFn kills a stale-version Meridian on the port that we have no
+	// pidfile for (a pre-lock orphan), after versionProbeFn identified it and
+	// while we hold the spawn lock. Returns true when it killed a confirmed
+	// Meridian group. Injection point for tests; production is realReapForeign.
+	reapForeignFn func(port int) bool
 
 	mu                  sync.Mutex
 	status              Status
@@ -161,6 +172,8 @@ func New(logger *log.Logger, logPath string) *Manager {
 	m.reapOrphanFn = m.realReapOrphan
 	m.identifyGroupFn = groupLooksLikeMeridian
 	m.acquireLockFn = m.realAcquireLock
+	m.versionProbeFn = realVersionProbe
+	m.reapForeignFn = m.realReapForeign
 	return m
 }
 
@@ -454,6 +467,14 @@ func (m *Manager) Ensure(ctx context.Context, port int) {
 	if m.lockRelease == nil {
 		release, ok := m.acquireLockFn()
 		if !ok {
+			// A sibling cercano owns the Meridian lifecycle. We don't reap its
+			// proxy (that starts a reap-war), but if it's already serving a
+			// stale version, surface a warning so the operator knows that
+			// sibling needs rebuilding. Best-effort: if its Meridian isn't
+			// serving yet, the probe just returns nothing.
+			if ver, isMeridian := m.versionProbeFn(ctx, port); isMeridian && ver != m.version {
+				m.logger.Printf("meridian: a sibling cercano is serving stale Meridian v%s on port %d (want v%s); rebuild that cercano to upgrade", ver, port, m.version)
+			}
 			m.setStatusLocked(Status{
 				State:   StateExternal,
 				Message: fmt.Sprintf("Meridian on port %d is managed by another cercano process", port),
@@ -472,23 +493,41 @@ func (m *Manager) Ensure(ctx context.Context, port int) {
 	if m.portUsedFn(port) {
 		// If it's our own Meridian, orphaned by a hard-killed agent that never
 		// ran a clean Stop, reap it so a fresh spawn picks up current spawn-time
-		// config; then fall through to spawn our own. Otherwise it's genuinely
-		// someone else's proxy — release the spawn lock (we aren't spawning, and
-		// a wedged us holding it would block every sibling's takeover when the
-		// foreign proxy dies), then adopt and watch it.
+		// config; then fall through to spawn our own.
 		if !m.reapOrphanFn(port) {
-			m.releaseLockLocked()
-			m.setStatusLocked(Status{
-				State:   StateExternal,
-				Message: fmt.Sprintf("Meridian already running on port %d (not managed by Cercano)", port),
-				Port:    port,
-			})
-			m.startExternalWatcherLocked(ctx)
-			m.mu.Unlock()
-			return
+			// Not our pidfile-tracked orphan. Before adopting it as External,
+			// ask what's on the port: a stale-version Meridian (a pre-lock
+			// orphan, or one left by an older build) should be replaced, not
+			// reused forever. We hold the spawn lock here, so reaping can't
+			// start a sibling reap-war — a live sibling would have taken the
+			// lock (Gate 3). A same-version Meridian, an unreachable one, or a
+			// genuinely foreign proxy (OpenCode) is adopted and watched as
+			// before; we never kill what /health can't identify as stale.
+			ver, isMeridian := m.versionProbeFn(ctx, port)
+			stale := isMeridian && ver != m.version
+			if !stale || !m.reapForeignFn(port) {
+				if stale {
+					m.logger.Printf("meridian: external Meridian on port %d is stale (v%s, want v%s) but could not be reaped; restart it manually", port, ver, m.version)
+				}
+				m.releaseLockLocked()
+				msg := fmt.Sprintf("Meridian already running on port %d (not managed by Cercano)", port)
+				if stale {
+					msg = fmt.Sprintf("stale Meridian v%s on port %d (want v%s)", ver, port, m.version)
+				}
+				m.setStatusLocked(Status{
+					State:   StateExternal,
+					Message: msg,
+					Port:    port,
+				})
+				m.startExternalWatcherLocked(ctx)
+				m.mu.Unlock()
+				return
+			}
+			m.logger.Printf("meridian: reaped stale external Meridian v%s on port %d; spawning pinned v%s", ver, port, m.version)
+			// Reaped the stale foreign proxy — fall through to spawn ours.
 		}
-		// Reaped our orphan — fall through to spawn our own below. supervise
-		// waits for the port to free before binding.
+		// Reaped our orphan (or a stale foreign proxy) — fall through to spawn
+		// our own below. supervise waits for the port to free before binding.
 	}
 	// Start a supervisor for our own process.
 	sctx, cancel := context.WithCancel(ctx)

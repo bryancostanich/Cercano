@@ -20,6 +20,10 @@ func newTestManager() *Manager {
 	m.authFn = func() bool { return true }
 	m.portUsedFn = func(int) bool { return false }
 	m.probeFn = func(context.Context, int) error { return nil } // ready immediately
+	// No external Meridian identified / nothing to reap by default; the
+	// stale-external tests override these. Keeps newTestManager network-free.
+	m.versionProbeFn = func(context.Context, int) (string, bool) { return "", false }
+	m.reapForeignFn = func(int) bool { return false }
 	return m
 }
 

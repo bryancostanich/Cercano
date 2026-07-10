@@ -39,3 +39,28 @@ func TestHighlightRange_BackgroundOnlyKeepsText(t *testing.T) {
 		t.Errorf("selection background not applied: %q", hl)
 	}
 }
+
+// A sent-prompt line carries its own background fill (BufferUserLine's navy).
+// The selection has to show over it: the selection bg must be stamped back in
+// after the line's own background SGR, not overridden by it. Regression for the
+// bug where selecting a sent prompt showed no highlight (the fill won).
+func TestHighlightRange_WinsOverLineBackground(t *testing.T) {
+	selBg := "\x1b[48;2;45;79;97m"  // #2D4F61 selection
+	lineBg := "\x1b[48;2;17;51;26m" // #11331A sent-prompt fill (Cracker BufferUserBg)
+	line := lipgloss.NewStyle().Background(lipgloss.Color("#11331A")).Render("sent prompt")
+	hl := highlightRange(line, 0, ansi.StringWidth(line))
+
+	// Text is untouched by the overlay.
+	if got := ansi.Strip(hl); got != "sent prompt" {
+		t.Errorf("highlight altered the text: %q", got)
+	}
+	if !strings.Contains(hl, selBg) {
+		t.Fatalf("selection background not applied: %q", hl)
+	}
+	// Every occurrence of the line's own fill must be immediately followed by
+	// the selection bg, so the selection is the active background over the text
+	// rather than being clobbered by the fill (the pre-fix behavior).
+	if strings.Contains(hl, lineBg) && !strings.Contains(hl, lineBg+selBg) {
+		t.Errorf("line background overrides selection (bug): %q", hl)
+	}
+}

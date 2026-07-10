@@ -335,7 +335,12 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource cre
 	if cfg.OllamaURL != "" {
 		r.openProv = ollamallm.NewClient(ollamallm.Config{
 			BaseURL: cfg.OllamaURL,
-			Model:   cfg.OpenModel,
+			// Read the open model from the everyday-open tier (OpenChatModel),
+			// NOT the legacy cfg.OpenModel field: config normalization
+			// (finalizeModelTiers) migrates open_model into Tiers.Everyday.Open
+			// and BLANKS cfg.OpenModel, so on the host's normalized config — the
+			// one snapshotted here — cfg.OpenModel is always "". Mirrors the host.
+			Model: (&cfg).OpenChatModel(),
 		})
 	}
 
@@ -422,15 +427,37 @@ func (r *workerResolver) Main() (llm.Provider, bool, bool, error) {
 func (r *workerResolver) MainModel(isCloud bool) string {
 	c := r.cfgSvc.Get()
 	if isCloud {
+		// Mirror the host: resolve the everyday tier through the active profile's
+		// vendor cost table, falling back to ActiveCloudModel when no active
+		// profile is configured.
 		if prof, ok := r.cfgSvc.ActiveProfile(); ok {
-			return prof.Model
+			return r.cfgSvc.Get().ModelProfiles.ResolveCloudModelForTier(prof, pkgcfg.TierEveryday)
 		}
-		return c.CloudModel
+		return r.ActiveCloudModel()
 	}
-	return c.OpenModel
+	// Open model lives in the everyday-open tier (OpenChatModel); the legacy
+	// cfg.OpenModel field is blanked by config normalization. Mirrors the host.
+	return (&c).OpenChatModel()
 }
 
-func (r *workerResolver) PrimaryModel() string        { return r.MainModel(false) }
+// PrimaryModel mirrors the host: for cloud-primary locus modes it resolves the
+// everyday tier through the active profile's vendor cost table (falling back to
+// ActiveCloudModel), otherwise the open model.
+func (r *workerResolver) PrimaryModel() string {
+	c := r.cfgSvc.Get()
+	switch c.LocusMode {
+	case "cloud_only", "cloud_primary":
+		if prof, ok := r.cfgSvc.ActiveProfile(); ok {
+			if m := c.ModelProfiles.ResolveCloudModelForTier(prof, pkgcfg.TierEveryday); m != "" {
+				return m
+			}
+		}
+		if m := r.ActiveCloudModel(); m != "" {
+			return m
+		}
+	}
+	return (&c).OpenChatModel()
+}
 func (r *workerResolver) Rebuild() error              { return nil }
 func (r *workerResolver) InstallAbsentCloud(_ string) { r.cloudProv = nil }
 func (r *workerResolver) Cloud() llm.Provider         { return r.cloudProv }

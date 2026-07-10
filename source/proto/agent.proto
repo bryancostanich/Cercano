@@ -1241,6 +1241,14 @@ message WorkerEvent {
 
   // EventDone / EventRouteSelected — notice (e.g. fallback note).
   string notice        = 17;
+
+  // EventSubAgent — child-agent lifecycle/transcript payload.
+  string sub_agent_id        = 18;
+  string sub_agent_parent_id = 19;
+  string sub_agent_title     = 20;
+  string sub_agent_kind      = 21;
+  repeated string granted_tools = 22;
+  repeated string ignored_tools = 23;
 }
 
 // WorkerEventKind mirrors runner.EventKind.
@@ -1255,6 +1263,7 @@ enum WorkerEventKind {
   WORKER_EVENT_KIND_TOOL_EXEC_COMPLETE = 7;
   WORKER_EVENT_KIND_WATCHDOG       = 8;
   WORKER_EVENT_KIND_DONE           = 9;
+  WORKER_EVENT_KIND_SUBAGENT       = 10;
 }
 
 // PermissionRequest asks the host to gate a W/X tool call.
@@ -1373,6 +1382,9 @@ message ConfigSnapshot {
   string backup_model       = 42;
   string backup_region      = 43; // bedrock: AWS region
   string backup_aws_profile = 44; // bedrock: ~/.aws named profile
+
+  int32 tool_loop_max_iterations = 45;
+  string model_profiles_json     = 46; // config.ModelProfiles as JSON (nested; not mirrored in proto)
 }
 
 // CredentialRequest asks the host to resolve/refresh the provider credential

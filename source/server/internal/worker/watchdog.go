@@ -52,11 +52,21 @@ func buildWorkerWatchdog(cfg pkgcfg.Config, engine *dispatch.Engine) *watchdog.W
 
 	// Map configured check names to Check implementations. Unknown names are
 	// future checks — skip them silently rather than failing construction.
+	// Mirror the host's name→check mapping EXACTLY (internal/server/watchdog_wire.go)
+	// so an enabled watchdog runs the identical check set in worker mode. Missing a
+	// case here silently drops that check — a supervision divergence. Unknown names
+	// are future checks — skipped rather than failing construction.
 	var checks []watchdog.Check
 	for _, name := range wc.Checks {
 		switch name {
-		case "debug-loop":
+		case "systematic-debugging", "debug-loop":
 			checks = append(checks, watchdog.DebugLoopCheck())
+		case "design-decisions":
+			checks = append(checks, watchdog.DesignDecisionsCheck())
+		case "verification-strategy":
+			checks = append(checks, watchdog.VerificationStrategyCheck())
+		case "compute-before-simulate":
+			checks = append(checks, watchdog.ComputeBeforeSimulateCheck())
 		case "commit-checkpoint":
 			checks = append(checks, watchdog.CommitCheckpointCheck())
 		case "plain-english":

@@ -305,10 +305,14 @@ func makeLoopSink(sink EventSink) func(agent.LoopEvent) {
 		case agent.LoopProgress:
 			if ev.SubAgentID != "" {
 				sink.Emit(Event{
-					Kind:             EventSubAgent,
-					Text:             ev.Summary,
-					ToolUseID:        ev.ToolUseID,
-					ToolName:         ev.ToolName,
+					Kind:      EventSubAgent,
+					Text:      ev.Summary,
+					ToolUseID: ev.ToolUseID,
+					ToolName:  ev.ToolName,
+					// Sub-agent tool_use_stop carries raw args in ArgsJSON; summarize
+					// it here (as the main path does) so the child tab shows the tool
+					// call instead of a stuck "loading..." placeholder.
+					ArgsSummary:      summarizeArgs(ev.ArgsJSON),
 					Detail:           ev.Detail,
 					Summary:          ev.Summary,
 					StartLine:        ev.StartLine,

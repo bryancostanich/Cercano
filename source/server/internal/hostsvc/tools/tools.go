@@ -420,6 +420,7 @@ func formatSubagentLoopEvent(id, parentID, title string, ev agent.LoopEvent) (ag
 		ToolUseID:        ev.ToolUseID,
 		ToolName:         ev.ToolName,
 		ArgsSummary:      ev.Summary,
+		ArgsJSON:         ev.ArgsJSON,
 		Summary:          ev.Summary,
 		Detail:           ev.Detail,
 		StartLine:        ev.StartLine,

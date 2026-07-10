@@ -54,6 +54,7 @@ func loopProgressEvent(defaultToolUseID, defaultToolName string, progress agentt
 		ToolUseID:        defaultToolUseID,
 		ToolName:         defaultToolName,
 		Summary:          progress.Text,
+		ArgsJSON:         progress.ArgsJSON,
 		Detail:           progress.Detail,
 		IsError:          progress.IsError,
 		StartLine:        progress.StartLine,

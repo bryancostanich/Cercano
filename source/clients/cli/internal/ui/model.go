@@ -920,7 +920,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if mouse.Button != tea.MouseLeft {
 			return m, nil
 		}
-		if m.hasSubAgentTabs() && mouse.Y == m.scrollbarTop-1 {
+		if m.hasSubAgentTabs() && mouse.Y == m.scrollbarTop-2 {
 			if id, isClose, ok := tabStripHitAtX(m.chatTabItems(), mouse.X); ok {
 				if isClose {
 					m.closeSubAgentTab(id)
@@ -1402,6 +1402,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case chatDoneMsg:
 			m.applyTurnTelemetry(ev) // footer fields
 			m.mainChat().Apply(ev)   // transcript finalize + notice
+			// Turn done: retire finished sub-agent tabs now (ephemeral tabs)
+			// instead of waiting for the next turn to start. The sweep spares
+			// main, the active tab, and any still-running tab; refresh the
+			// viewport since dropping the strip + its rule frees two rows.
+			if m.hasSubAgentTabs() {
+				m.cleanupFinishedSubAgentTabs()
+				m.refreshViewport()
+			}
 		case permissionRequiredMsg:
 			tc := &pendingToolCall{
 				ToolUseID:   ev.id,
@@ -2344,7 +2352,7 @@ func (m *Model) relayout() {
 	// plus the ephemeral chat tab row when sub-agent tabs are visible.
 	m.scrollbarTop = 2 + splashH
 	if m.hasSubAgentTabs() && !m.contentPageActive() {
-		m.scrollbarTop++
+		m.scrollbarTop += 2 // chat tab strip row + its underline rule
 	}
 	suggestH := 0
 	if m.mainChat().Width() > 0 && !m.contentPageActive() {
@@ -2371,7 +2379,7 @@ func (m *Model) relayout() {
 	inputH := m.input.Height()
 	bodyH := m.height - chromeNoInput - inputH - splashH - suggestH - recapH - queuedH
 	if m.hasSubAgentTabs() && !m.contentPageActive() {
-		bodyH-- // chat tab strip row
+		bodyH -= 2 // chat tab strip row + its underline rule
 	}
 	if bodyH < 3 {
 		bodyH = 3
@@ -3596,6 +3604,9 @@ func (m Model) View() tea.View {
 	default:
 		if m.hasSubAgentTabs() {
 			parts = append(parts, m.renderChatTabStrip())
+			// A rule under the strip so the tabs read as real tabs, matching the
+			// header divider above. Its row is reserved in scrollbarTop/bodyH below.
+			parts = append(parts, m.styles.BorderDim.Render(strings.Repeat("─", m.width)))
 		}
 		parts = append(parts, m.renderViewportWithScrollbar())
 		if m.recap != "" {

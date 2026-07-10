@@ -10,13 +10,21 @@ import (
 
 // tabStripItem is one visible cell in a reusable single-row tab strip.
 type tabStripItem struct {
-	ID    string
-	Label string
+	ID       string
+	Label    string
+	Closable bool // render a clickable [x] affix (ephemeral sub-agent tabs)
 }
+
+// tabStripCloseGlyph is the clickable close affix rendered inside a closable
+// cell as " ✕".
+const tabStripCloseGlyph = "✕"
 
 type tabStripSegment struct {
 	id         string
 	start, end int
+	// closeStart is the first column of the [x] hit region for a closable
+	// cell (0 when the cell has no close button).
+	closeStart int
 }
 
 const tabStripCellPad = 1
@@ -26,26 +34,42 @@ func tabStripSegments(items []tabStripItem) []tabStripSegment {
 	segs := make([]tabStripSegment, 0, len(items))
 	x := 0
 	for _, item := range items {
-		w := lipgloss.Width(item.Label) + 2*tabStripCellPad
-		segs = append(segs, tabStripSegment{id: item.ID, start: x, end: x + w})
+		labelW := lipgloss.Width(item.Label)
+		w := labelW + 2*tabStripCellPad
+		closeStart := 0
+		if item.Closable {
+			// Cell layout: [pad][label][space][✕][pad]. The close hit region spans
+			// the space + glyph + trailing pad so a click near the ✕ counts.
+			closeStart = x + tabStripCellPad + labelW
+			w += 2 // " ✕"
+		}
+		segs = append(segs, tabStripSegment{id: item.ID, start: x, end: x + w, closeStart: closeStart})
 		x += w + tabStripGap
 	}
 	return segs
 }
 
 func renderTabStrip(width int, items []tabStripItem, active string, focused bool, s theme.Styles) string {
-	gap := strings.Repeat(" ", tabStripGap)
 	var b strings.Builder
 	for i, item := range items {
 		if i > 0 {
-			b.WriteString(gap)
+			// A dim vertical rule separates adjacent tabs.
+			b.WriteString(s.Muted.Render("│"))
 		}
-		cell := strings.Repeat(" ", tabStripCellPad) + item.Label + strings.Repeat(" ", tabStripCellPad)
+		label := item.Label
+		if item.Closable {
+			label += " " + tabStripCloseGlyph
+		}
+		cell := strings.Repeat(" ", tabStripCellPad) + label + strings.Repeat(" ", tabStripCellPad)
 		switch {
 		case item.ID == active && focused:
-			b.WriteString(s.Accent.Reverse(true).Render(cell))
+			// Focused active tab: filled accent background + bold, signaling the
+			// strip owns the keyboard.
+			b.WriteString(s.Accent.Reverse(true).Bold(true).Render(cell))
 		case item.ID == active:
-			b.WriteString(s.Accent.Bold(true).Render(cell))
+			// Active tab always carries a filled background so the selection reads
+			// even when the strip isn't focused.
+			b.WriteString(s.Accent.Reverse(true).Render(cell))
 		default:
 			b.WriteString(s.Muted.Render(cell))
 		}
@@ -57,13 +81,21 @@ func renderTabStrip(width int, items []tabStripItem, active string, focused bool
 	return line
 }
 
+// tabStripAtX maps a column to the tab whose cell contains it (gaps are dead).
 func tabStripAtX(items []tabStripItem, x int) (string, bool) {
+	id, _, ok := tabStripHitAtX(items, x)
+	return id, ok
+}
+
+// tabStripHitAtX maps a column to a tab and reports whether the column landed
+// on that tab's [x] close button.
+func tabStripHitAtX(items []tabStripItem, x int) (id string, isClose bool, ok bool) {
 	for _, seg := range tabStripSegments(items) {
 		if x >= seg.start && x < seg.end {
-			return seg.id, true
+			return seg.id, seg.closeStart > 0 && x >= seg.closeStart, true
 		}
 	}
-	return "", false
+	return "", false, false
 }
 
 func cycleTabStrip(items []tabStripItem, active string, dir int) string {

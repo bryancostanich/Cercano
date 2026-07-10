@@ -159,7 +159,7 @@ func (m *Model) chatTabItems() []tabStripItem {
 		} else if !tab.done && id != mainChatTabID {
 			label += " •"
 		}
-		items = append(items, tabStripItem{ID: id, Label: label})
+		items = append(items, tabStripItem{ID: id, Label: label, Closable: id != mainChatTabID})
 	}
 	return items
 }
@@ -188,7 +188,16 @@ func (m *Model) switchChatTab(id string) bool {
 // previous tab in the strip, ending at main.
 func (m *Model) closeActiveSubAgentTab() bool {
 	m.ensureChatTabs()
-	id := m.chatTabs.active
+	return m.closeSubAgentTab(m.chatTabs.active)
+}
+
+// closeSubAgentTab dismisses the sub-agent tab with the given id (from an [x]
+// click or the close key). Main is never closable. The id is remembered as
+// closed so late streamed events don't resurrect it. If the closed tab was the
+// active one, focus falls back to the previous tab; strip focus is released
+// once no sub tabs remain.
+func (m *Model) closeSubAgentTab(id string) bool {
+	m.ensureChatTabs()
 	if id == mainChatTabID {
 		return false
 	}
@@ -209,7 +218,12 @@ func (m *Model) closeActiveSubAgentTab() bool {
 	m.chatTabs.order = order
 	delete(m.chatTabs.tabs, id)
 	m.chatTabs.closed[id] = true
-	m.chatTabs.active = fallback
+	if m.chatTabs.active == id {
+		m.chatTabs.active = fallback
+	}
+	if !m.hasSubAgentTabs() {
+		m.chatTabs.focused = false
+	}
 	m.activeChat().rebuild()
 	return true
 }

@@ -15,6 +15,7 @@ package worker
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/runner"
@@ -85,6 +86,13 @@ func MarshalEvent(ev runner.Event) *proto.WorkerEvent {
 		WatchdogKind: ev.WatchdogKind,
 		Thread:       ev.Thread,
 		Notice:       ev.Notice,
+
+		SubAgentId:       ev.SubAgentID,
+		SubAgentParentId: ev.SubAgentParentID,
+		SubAgentTitle:    ev.SubAgentTitle,
+		SubAgentKind:     ev.SubAgentKind,
+		GrantedTools:     ev.GrantedTools,
+		IgnoredTools:     ev.IgnoredTools,
 	}
 	// For EventDone, inline the Result fields.
 	if ev.Kind == runner.EventDone {
@@ -119,6 +127,13 @@ func UnmarshalEvent(p *proto.WorkerEvent) runner.Event {
 		WatchdogKind: p.WatchdogKind,
 		Thread:       p.Thread,
 		Notice:       p.Notice,
+
+		SubAgentID:       p.SubAgentId,
+		SubAgentParentID: p.SubAgentParentId,
+		SubAgentTitle:    p.SubAgentTitle,
+		SubAgentKind:     p.SubAgentKind,
+		GrantedTools:     p.GrantedTools,
+		IgnoredTools:     p.IgnoredTools,
 	}
 	if kind == runner.EventDone {
 		ev.Result = runner.Result{
@@ -153,6 +168,8 @@ func eventKindToProto(k runner.EventKind) proto.WorkerEventKind {
 		return proto.WorkerEventKind_WORKER_EVENT_KIND_WATCHDOG
 	case runner.EventDone:
 		return proto.WorkerEventKind_WORKER_EVENT_KIND_DONE
+	case runner.EventSubAgent:
+		return proto.WorkerEventKind_WORKER_EVENT_KIND_SUBAGENT
 	default:
 		return proto.WorkerEventKind_WORKER_EVENT_KIND_UNSPECIFIED
 	}
@@ -178,6 +195,8 @@ func protoToEventKind(k proto.WorkerEventKind) runner.EventKind {
 		return runner.EventWatchdog
 	case proto.WorkerEventKind_WORKER_EVENT_KIND_DONE:
 		return runner.EventDone
+	case proto.WorkerEventKind_WORKER_EVENT_KIND_SUBAGENT:
+		return runner.EventSubAgent
 	default:
 		return runner.EventKind(-1)
 	}
@@ -241,6 +260,14 @@ func SnapshotConfig(cfg config.Config, cred string) *proto.ConfigSnapshot {
 		}
 	}
 
+	// Carry ModelProfiles as a JSON blob (nested struct; not mirrored in proto).
+	var modelProfilesJSON string
+	if b, err := json.Marshal(cfg.ModelProfiles); err != nil {
+		log.Printf("[worker] snapshot: marshal ModelProfiles: %v", err)
+	} else {
+		modelProfilesJSON = string(b)
+	}
+
 	t := cfg.Models.Tiers
 	return &proto.ConfigSnapshot{
 		LocusMode:          cfg.LocusMode,
@@ -291,6 +318,9 @@ func SnapshotConfig(cfg config.Config, cred string) *proto.ConfigSnapshot {
 		WatchdogModel:         cfg.Watchdog.Model,
 		WatchdogEscalateAfter: int32(cfg.Watchdog.EscalateAfter),
 		WatchdogEcho:          cfg.Watchdog.Echo,
+
+		ToolLoopMaxIterations: int32(cfg.ToolLoop.MaxIterations),
+		ModelProfilesJson:     modelProfilesJSON,
 	}
 }
 
@@ -333,6 +363,15 @@ func ConfigFromSnapshot(p *proto.ConfigSnapshot) config.Config {
 		})
 	}
 
+	// Rebuild ModelProfiles from its JSON blob (defensive: zero on error).
+	var mp config.ModelProfiles
+	if p.ModelProfilesJson != "" {
+		if err := json.Unmarshal([]byte(p.ModelProfilesJson), &mp); err != nil {
+			log.Printf("[worker] snapshot: unmarshal ModelProfiles: %v", err)
+			mp = config.ModelProfiles{}
+		}
+	}
+
 	cfg := config.Config{
 		LocusMode:          p.LocusMode,
 		CloudProfiles:      profiles,
@@ -340,6 +379,8 @@ func ConfigFromSnapshot(p *proto.ConfigSnapshot) config.Config {
 		BackupCloudProfile: p.BackupCloudProfile,
 		OllamaURL:          p.OllamaUrl,
 		OpenRuntime:        p.OpenRuntime,
+		ModelProfiles:      mp,
+		ToolLoop:           config.ToolLoopConfig{MaxIterations: int(p.ToolLoopMaxIterations)},
 
 		Models: config.ModelsConfig{
 			DefaultProvider: config.Provider(p.DefaultProvider),

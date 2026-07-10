@@ -85,21 +85,23 @@ const (
 	WorkerEventKind_WORKER_EVENT_KIND_TOOL_EXEC_COMPLETE WorkerEventKind = 7
 	WorkerEventKind_WORKER_EVENT_KIND_WATCHDOG           WorkerEventKind = 8
 	WorkerEventKind_WORKER_EVENT_KIND_DONE               WorkerEventKind = 9
+	WorkerEventKind_WORKER_EVENT_KIND_SUBAGENT           WorkerEventKind = 10
 )
 
 // Enum value maps for WorkerEventKind.
 var (
 	WorkerEventKind_name = map[int32]string{
-		0: "WORKER_EVENT_KIND_UNSPECIFIED",
-		1: "WORKER_EVENT_KIND_ROUTE_SELECTED",
-		2: "WORKER_EVENT_KIND_TOKEN",
-		3: "WORKER_EVENT_KIND_PROGRESS",
-		4: "WORKER_EVENT_KIND_TOOL_USE_START",
-		5: "WORKER_EVENT_KIND_TOOL_USE_STOP",
-		6: "WORKER_EVENT_KIND_TOOL_EXEC_START",
-		7: "WORKER_EVENT_KIND_TOOL_EXEC_COMPLETE",
-		8: "WORKER_EVENT_KIND_WATCHDOG",
-		9: "WORKER_EVENT_KIND_DONE",
+		0:  "WORKER_EVENT_KIND_UNSPECIFIED",
+		1:  "WORKER_EVENT_KIND_ROUTE_SELECTED",
+		2:  "WORKER_EVENT_KIND_TOKEN",
+		3:  "WORKER_EVENT_KIND_PROGRESS",
+		4:  "WORKER_EVENT_KIND_TOOL_USE_START",
+		5:  "WORKER_EVENT_KIND_TOOL_USE_STOP",
+		6:  "WORKER_EVENT_KIND_TOOL_EXEC_START",
+		7:  "WORKER_EVENT_KIND_TOOL_EXEC_COMPLETE",
+		8:  "WORKER_EVENT_KIND_WATCHDOG",
+		9:  "WORKER_EVENT_KIND_DONE",
+		10: "WORKER_EVENT_KIND_SUBAGENT",
 	}
 	WorkerEventKind_value = map[string]int32{
 		"WORKER_EVENT_KIND_UNSPECIFIED":        0,
@@ -112,6 +114,7 @@ var (
 		"WORKER_EVENT_KIND_TOOL_EXEC_COMPLETE": 7,
 		"WORKER_EVENT_KIND_WATCHDOG":           8,
 		"WORKER_EVENT_KIND_DONE":               9,
+		"WORKER_EVENT_KIND_SUBAGENT":           10,
 	}
 )
 
@@ -9939,9 +9942,16 @@ type WorkerEvent struct {
 	InputTokens  int64  `protobuf:"varint,15,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`
 	OutputTokens int64  `protobuf:"varint,16,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
 	// EventDone / EventRouteSelected — notice (e.g. fallback note).
-	Notice        string `protobuf:"bytes,17,opt,name=notice,proto3" json:"notice,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Notice string `protobuf:"bytes,17,opt,name=notice,proto3" json:"notice,omitempty"`
+	// EventSubAgent — child-agent lifecycle/transcript payload.
+	SubAgentId       string   `protobuf:"bytes,18,opt,name=sub_agent_id,json=subAgentId,proto3" json:"sub_agent_id,omitempty"`
+	SubAgentParentId string   `protobuf:"bytes,19,opt,name=sub_agent_parent_id,json=subAgentParentId,proto3" json:"sub_agent_parent_id,omitempty"`
+	SubAgentTitle    string   `protobuf:"bytes,20,opt,name=sub_agent_title,json=subAgentTitle,proto3" json:"sub_agent_title,omitempty"`
+	SubAgentKind     string   `protobuf:"bytes,21,opt,name=sub_agent_kind,json=subAgentKind,proto3" json:"sub_agent_kind,omitempty"`
+	GrantedTools     []string `protobuf:"bytes,22,rep,name=granted_tools,json=grantedTools,proto3" json:"granted_tools,omitempty"`
+	IgnoredTools     []string `protobuf:"bytes,23,rep,name=ignored_tools,json=ignoredTools,proto3" json:"ignored_tools,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *WorkerEvent) Reset() {
@@ -10091,6 +10101,48 @@ func (x *WorkerEvent) GetNotice() string {
 		return x.Notice
 	}
 	return ""
+}
+
+func (x *WorkerEvent) GetSubAgentId() string {
+	if x != nil {
+		return x.SubAgentId
+	}
+	return ""
+}
+
+func (x *WorkerEvent) GetSubAgentParentId() string {
+	if x != nil {
+		return x.SubAgentParentId
+	}
+	return ""
+}
+
+func (x *WorkerEvent) GetSubAgentTitle() string {
+	if x != nil {
+		return x.SubAgentTitle
+	}
+	return ""
+}
+
+func (x *WorkerEvent) GetSubAgentKind() string {
+	if x != nil {
+		return x.SubAgentKind
+	}
+	return ""
+}
+
+func (x *WorkerEvent) GetGrantedTools() []string {
+	if x != nil {
+		return x.GrantedTools
+	}
+	return nil
+}
+
+func (x *WorkerEvent) GetIgnoredTools() []string {
+	if x != nil {
+		return x.IgnoredTools
+	}
+	return nil
 }
 
 // PermissionRequest asks the host to gate a W/X tool call.
@@ -10520,15 +10572,17 @@ type ConfigSnapshot struct {
 	// composite, matching in-process behavior. Populated only when
 	// backup_cloud_profile (10) is set. The backup's credential is fetched via the
 	// same stream credential proxy, keyed by backup_cloud_profile.
-	BackupFlavor     string `protobuf:"bytes,38,opt,name=backup_flavor,json=backupFlavor,proto3" json:"backup_flavor,omitempty"`    // messages|chat_completions|responses|bedrock
-	BackupBackend    string `protobuf:"bytes,39,opt,name=backup_backend,json=backupBackend,proto3" json:"backup_backend,omitempty"` // openai|gemini|groq|… (chat_completions only)
-	BackupRoute      string `protobuf:"bytes,40,opt,name=backup_route,json=backupRoute,proto3" json:"backup_route,omitempty"`       // direct|meridian (default=direct)
-	BackupBaseUrl    string `protobuf:"bytes,41,opt,name=backup_base_url,json=backupBaseUrl,proto3" json:"backup_base_url,omitempty"`
-	BackupModel      string `protobuf:"bytes,42,opt,name=backup_model,json=backupModel,proto3" json:"backup_model,omitempty"`
-	BackupRegion     string `protobuf:"bytes,43,opt,name=backup_region,json=backupRegion,proto3" json:"backup_region,omitempty"`               // bedrock: AWS region
-	BackupAwsProfile string `protobuf:"bytes,44,opt,name=backup_aws_profile,json=backupAwsProfile,proto3" json:"backup_aws_profile,omitempty"` // bedrock: ~/.aws named profile
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	BackupFlavor          string `protobuf:"bytes,38,opt,name=backup_flavor,json=backupFlavor,proto3" json:"backup_flavor,omitempty"`    // messages|chat_completions|responses|bedrock
+	BackupBackend         string `protobuf:"bytes,39,opt,name=backup_backend,json=backupBackend,proto3" json:"backup_backend,omitempty"` // openai|gemini|groq|… (chat_completions only)
+	BackupRoute           string `protobuf:"bytes,40,opt,name=backup_route,json=backupRoute,proto3" json:"backup_route,omitempty"`       // direct|meridian (default=direct)
+	BackupBaseUrl         string `protobuf:"bytes,41,opt,name=backup_base_url,json=backupBaseUrl,proto3" json:"backup_base_url,omitempty"`
+	BackupModel           string `protobuf:"bytes,42,opt,name=backup_model,json=backupModel,proto3" json:"backup_model,omitempty"`
+	BackupRegion          string `protobuf:"bytes,43,opt,name=backup_region,json=backupRegion,proto3" json:"backup_region,omitempty"`               // bedrock: AWS region
+	BackupAwsProfile      string `protobuf:"bytes,44,opt,name=backup_aws_profile,json=backupAwsProfile,proto3" json:"backup_aws_profile,omitempty"` // bedrock: ~/.aws named profile
+	ToolLoopMaxIterations int32  `protobuf:"varint,45,opt,name=tool_loop_max_iterations,json=toolLoopMaxIterations,proto3" json:"tool_loop_max_iterations,omitempty"`
+	ModelProfilesJson     string `protobuf:"bytes,46,opt,name=model_profiles_json,json=modelProfilesJson,proto3" json:"model_profiles_json,omitempty"` // config.ModelProfiles as JSON (nested; not mirrored in proto)
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *ConfigSnapshot) Reset() {
@@ -10865,6 +10919,20 @@ func (x *ConfigSnapshot) GetBackupRegion() string {
 func (x *ConfigSnapshot) GetBackupAwsProfile() string {
 	if x != nil {
 		return x.BackupAwsProfile
+	}
+	return ""
+}
+
+func (x *ConfigSnapshot) GetToolLoopMaxIterations() int32 {
+	if x != nil {
+		return x.ToolLoopMaxIterations
+	}
+	return 0
+}
+
+func (x *ConfigSnapshot) GetModelProfilesJson() string {
+	if x != nil {
+		return x.ModelProfilesJson
 	}
 	return ""
 }
@@ -11724,7 +11792,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x1f\n" +
 	"\vblocks_json\x18\x02 \x01(\fR\n" +
 	"blocksJson\x12\x18\n" +
-	"\acontent\x18\x03 \x01(\tR\acontent\"\x86\x04\n" +
+	"\acontent\x18\x03 \x01(\tR\acontent\"\xef\x05\n" +
 	"\vWorkerEvent\x12*\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x16.agent.WorkerEventKindR\x04kind\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\x12\x14\n" +
@@ -11745,7 +11813,14 @@ const file_agent_proto_rawDesc = "" +
 	"final_text\x18\x0e \x01(\tR\tfinalText\x12!\n" +
 	"\finput_tokens\x18\x0f \x01(\x03R\vinputTokens\x12#\n" +
 	"\routput_tokens\x18\x10 \x01(\x03R\foutputTokens\x12\x16\n" +
-	"\x06notice\x18\x11 \x01(\tR\x06notice\"\xaa\x01\n" +
+	"\x06notice\x18\x11 \x01(\tR\x06notice\x12 \n" +
+	"\fsub_agent_id\x18\x12 \x01(\tR\n" +
+	"subAgentId\x12-\n" +
+	"\x13sub_agent_parent_id\x18\x13 \x01(\tR\x10subAgentParentId\x12&\n" +
+	"\x0fsub_agent_title\x18\x14 \x01(\tR\rsubAgentTitle\x12$\n" +
+	"\x0esub_agent_kind\x18\x15 \x01(\tR\fsubAgentKind\x12#\n" +
+	"\rgranted_tools\x18\x16 \x03(\tR\fgrantedTools\x12#\n" +
+	"\rignored_tools\x18\x17 \x03(\tR\fignoredTools\"\xaa\x01\n" +
 	"\x11PermissionRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x1e\n" +
 	"\vtool_use_id\x18\x02 \x01(\tR\ttoolUseId\x12\x12\n" +
@@ -11770,7 +11845,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x06notice\x18\x06 \x01(\tR\x06notice\"%\n" +
 	"\tTurnError\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\"\b\n" +
-	"\x06Cancel\"\xd3\x0f\n" +
+	"\x06Cancel\"\xbc\x10\n" +
 	"\x0eConfigSnapshot\x12\x1d\n" +
 	"\n" +
 	"locus_mode\x18\x01 \x01(\tR\tlocusMode\x120\n" +
@@ -11820,7 +11895,9 @@ const file_agent_proto_rawDesc = "" +
 	"\x0fbackup_base_url\x18) \x01(\tR\rbackupBaseUrl\x12!\n" +
 	"\fbackup_model\x18* \x01(\tR\vbackupModel\x12#\n" +
 	"\rbackup_region\x18+ \x01(\tR\fbackupRegion\x12,\n" +
-	"\x12backup_aws_profile\x18, \x01(\tR\x10backupAwsProfile\"F\n" +
+	"\x12backup_aws_profile\x18, \x01(\tR\x10backupAwsProfile\x127\n" +
+	"\x18tool_loop_max_iterations\x18- \x01(\x05R\x15toolLoopMaxIterations\x12.\n" +
+	"\x13model_profiles_json\x18. \x01(\tR\x11modelProfilesJson\"F\n" +
 	"\x11CredentialRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12!\n" +
 	"\fprofile_name\x18\x02 \x01(\tR\vprofileName\"j\n" +
@@ -11836,7 +11913,7 @@ const file_agent_proto_rawDesc = "" +
 	"\n" +
 	"\x06UPDATE\x10\x01\x12\n" +
 	"\n" +
-	"\x06DELETE\x10\x02*\xef\x02\n" +
+	"\x06DELETE\x10\x02*\x8f\x03\n" +
 	"\x0fWorkerEventKind\x12!\n" +
 	"\x1dWORKER_EVENT_KIND_UNSPECIFIED\x10\x00\x12$\n" +
 	" WORKER_EVENT_KIND_ROUTE_SELECTED\x10\x01\x12\x1b\n" +
@@ -11847,7 +11924,9 @@ const file_agent_proto_rawDesc = "" +
 	"!WORKER_EVENT_KIND_TOOL_EXEC_START\x10\x06\x12(\n" +
 	"$WORKER_EVENT_KIND_TOOL_EXEC_COMPLETE\x10\a\x12\x1e\n" +
 	"\x1aWORKER_EVENT_KIND_WATCHDOG\x10\b\x12\x1a\n" +
-	"\x16WORKER_EVENT_KIND_DONE\x10\t2\xd6'\n" +
+	"\x16WORKER_EVENT_KIND_DONE\x10\t\x12\x1e\n" +
+	"\x1aWORKER_EVENT_KIND_SUBAGENT\x10\n" +
+	"2\xd6'\n" +
 	"\x05Agent\x12O\n" +
 	"\x0eProcessRequest\x12\x1c.agent.ProcessRequestRequest\x1a\x1d.agent.ProcessRequestResponse\"\x00\x12V\n" +
 	"\x14StreamProcessRequest\x12\x1c.agent.ProcessRequestRequest\x1a\x1c.agent.StreamProcessResponse\"\x000\x01\x12X\n" +

@@ -3,6 +3,7 @@ package worker
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"cercano/source/server/internal/llm"
@@ -214,6 +215,15 @@ func TestMarshalEventRoundTrip(t *testing.T) {
 				Notice:       "cross-tier fallback",
 			},
 		},
+		{
+			Kind:             runner.EventSubAgent,
+			SubAgentID:       "a",
+			SubAgentParentID: "p",
+			SubAgentTitle:    "t",
+			SubAgentKind:     "explore",
+			GrantedTools:     []string{"Read"},
+			IgnoredTools:     []string{"Bash"},
+		},
 	}
 
 	for _, orig := range cases {
@@ -265,6 +275,24 @@ func TestMarshalEventRoundTrip(t *testing.T) {
 		}
 		if got.Notice != orig.Notice {
 			t.Errorf("kind %v: Notice: got %q want %q", orig.Kind, got.Notice, orig.Notice)
+		}
+		if got.SubAgentID != orig.SubAgentID {
+			t.Errorf("kind %v: SubAgentID: got %q want %q", orig.Kind, got.SubAgentID, orig.SubAgentID)
+		}
+		if got.SubAgentParentID != orig.SubAgentParentID {
+			t.Errorf("kind %v: SubAgentParentID: got %q want %q", orig.Kind, got.SubAgentParentID, orig.SubAgentParentID)
+		}
+		if got.SubAgentTitle != orig.SubAgentTitle {
+			t.Errorf("kind %v: SubAgentTitle: got %q want %q", orig.Kind, got.SubAgentTitle, orig.SubAgentTitle)
+		}
+		if got.SubAgentKind != orig.SubAgentKind {
+			t.Errorf("kind %v: SubAgentKind: got %q want %q", orig.Kind, got.SubAgentKind, orig.SubAgentKind)
+		}
+		if !slices.Equal(got.GrantedTools, orig.GrantedTools) {
+			t.Errorf("kind %v: GrantedTools: got %v want %v", orig.Kind, got.GrantedTools, orig.GrantedTools)
+		}
+		if !slices.Equal(got.IgnoredTools, orig.IgnoredTools) {
+			t.Errorf("kind %v: IgnoredTools: got %v want %v", orig.Kind, got.IgnoredTools, orig.IgnoredTools)
 		}
 		if orig.Kind == runner.EventDone {
 			if got.Result.FinalText != orig.Result.FinalText {
@@ -348,6 +376,18 @@ func TestSnapshotConfigRoundTrip(t *testing.T) {
 			Model:         "phi4-mini",
 			EscalateAfter: 2,
 			Echo:          true,
+		},
+		ToolLoop: config.ToolLoopConfig{MaxIterations: 37},
+		ModelProfiles: config.ModelProfiles{
+			Cloud: config.CloudCostProfiles{
+				Providers: map[string]config.VendorCostTiers{
+					"anthropic": {
+						Economy:  config.CostTierModel{Model: "claude-haiku-3-5"},
+						Standard: config.CostTierModel{Model: "claude-sonnet-4-5"},
+						Premium:  config.CostTierModel{Model: "claude-opus-4-5"},
+					},
+				},
+			},
 		},
 	}
 
@@ -500,5 +540,26 @@ func TestSnapshotConfigRoundTrip(t *testing.T) {
 	}
 	if gw.Echo != ow.Echo {
 		t.Errorf("Watchdog.Echo: got %v want %v", gw.Echo, ow.Echo)
+	}
+
+	// ToolLoop cap must survive (worker bounds its tool loop on this).
+	if got.ToolLoop.MaxIterations != orig.ToolLoop.MaxIterations {
+		t.Errorf("ToolLoop.MaxIterations: got %d want %d", got.ToolLoop.MaxIterations, orig.ToolLoop.MaxIterations)
+	}
+
+	// ModelProfiles must survive (worker resolves the reported cloud model from it).
+	gmp, ok := got.ModelProfiles.Cloud.Providers["anthropic"]
+	if !ok {
+		t.Fatalf("ModelProfiles: anthropic vendor missing after round-trip; got %+v", got.ModelProfiles)
+	}
+	omp := orig.ModelProfiles.Cloud.Providers["anthropic"]
+	if gmp.Economy.Model != omp.Economy.Model {
+		t.Errorf("ModelProfiles anthropic.Economy: got %q want %q", gmp.Economy.Model, omp.Economy.Model)
+	}
+	if gmp.Standard.Model != omp.Standard.Model {
+		t.Errorf("ModelProfiles anthropic.Standard: got %q want %q", gmp.Standard.Model, omp.Standard.Model)
+	}
+	if gmp.Premium.Model != omp.Premium.Model {
+		t.Errorf("ModelProfiles anthropic.Premium: got %q want %q", gmp.Premium.Model, omp.Premium.Model)
 	}
 }

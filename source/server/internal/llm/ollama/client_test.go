@@ -17,7 +17,9 @@ func TestClient_Chat_BasicResponse(t *testing.T) {
 				"role":    "assistant",
 				"content": "hello",
 			},
-			"done": true,
+			"done":              true,
+			"prompt_eval_count": 9,
+			"eval_count":        4,
 		})
 	}))
 	defer srv.Close()
@@ -32,5 +34,10 @@ func TestClient_Chat_BasicResponse(t *testing.T) {
 	}
 	if len(resp.Blocks) == 0 || resp.Blocks[0].Text != "hello" {
 		t.Errorf("response blocks: %+v", resp.Blocks)
+	}
+	// The non-streaming path must forward Ollama's usage counts, else local
+	// turns are accounted at zero (#17).
+	if resp.InputTokens != 9 || resp.OutputTokens != 4 {
+		t.Errorf("token counts = in:%d out:%d, want in:9 out:4 (regression of #17)", resp.InputTokens, resp.OutputTokens)
 	}
 }

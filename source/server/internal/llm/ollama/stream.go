@@ -69,7 +69,13 @@ func (c *Client) StreamChat(ctx context.Context, req ChatRequest) (llm.StreamRea
 				ch <- llm.StreamEvent{Type: llm.EventToolUseStop}
 			}
 			if resp.Done {
-				ch <- llm.StreamEvent{Type: llm.EventMessageStop, StopReason: resp.DoneReason}
+				// Ollama reports token usage only on the final (Done) message.
+				ch <- llm.StreamEvent{
+					Type:         llm.EventMessageStop,
+					StopReason:   resp.DoneReason,
+					InputTokens:  resp.PromptEvalCount,
+					OutputTokens: resp.EvalCount,
+				}
 			}
 			return nil
 		})

@@ -28,9 +28,11 @@ func TestStreamChat_CollectYieldsContent(t *testing.T) {
 			"done":    false,
 		})
 		_ = enc.Encode(map[string]any{
-			"model":   "qwen3-coder",
-			"message": map[string]any{"role": "assistant", "content": " there"},
-			"done":    true,
+			"model":             "qwen3-coder",
+			"message":           map[string]any{"role": "assistant", "content": " there"},
+			"done":              true,
+			"prompt_eval_count": 11,
+			"eval_count":        7,
 		})
 	}))
 	defer srv.Close()
@@ -58,5 +60,10 @@ func TestStreamChat_CollectYieldsContent(t *testing.T) {
 	}
 	if text != "Hi there" {
 		t.Errorf("collected text = %q, want %q", text, "Hi there")
+	}
+	// Ollama reports usage only on the final (Done) chunk; the adapter must
+	// forward it on EventMessageStop or every local turn is accounted at zero (#17).
+	if resp.InputTokens != 11 || resp.OutputTokens != 7 {
+		t.Errorf("token counts = in:%d out:%d, want in:11 out:7 (regression of #17 — Ollama usage dropped)", resp.InputTokens, resp.OutputTokens)
 	}
 }

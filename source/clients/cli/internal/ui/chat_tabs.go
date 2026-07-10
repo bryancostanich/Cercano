@@ -13,6 +13,11 @@ type chatTab struct {
 	view     chatView
 	done     bool
 	errored  bool
+	// restored marks a tab rebuilt from persisted transcripts on resume
+	// (not a live dispatch). cleanupFinishedSubAgentTabs spares these so a
+	// reopened sub-agent tab is not swept on the next turn merely because
+	// it is already finished.
+	restored bool
 }
 
 // chatTabSurface owns every chat view, including main. Under Bubble Tea's
@@ -218,13 +223,33 @@ func (m *Model) closeActiveSubAgentTab() bool {
 // to the closed set — that set is reserved for tabs the user explicitly
 // dismissed, whose late events we drop; a finished tab that later streams more
 // events should be free to reappear.
+// dropSubAgentTabs removes every sub-agent tab (keeping main), resetting the
+// child-ordinal counters and strip focus. Called at the top of a resume's tab
+// restore so a freshly-resumed conversation's sub-agent tabs number from 1 and
+// never blend with tabs left over from a previously-active conversation.
+func (m *Model) dropSubAgentTabs() {
+	m.ensureChatTabs()
+	for id := range m.chatTabs.tabs {
+		if id != mainChatTabID {
+			delete(m.chatTabs.tabs, id)
+		}
+	}
+	m.chatTabs.order = []string{mainChatTabID}
+	m.chatTabs.childCounts = map[string]int{}
+	m.chatTabs.active = mainChatTabID
+	m.chatTabs.focused = false
+}
+
 func (m *Model) cleanupFinishedSubAgentTabs() {
 	m.ensureChatTabs()
 	order := make([]string, 0, len(m.chatTabs.order))
 	for _, id := range m.chatTabs.order {
 		tab := m.chatTabs.tabs[id]
-		// Keep main, the active tab, and anything still running.
-		if id == mainChatTabID || id == m.chatTabs.active || tab == nil || !tab.done {
+		// Keep main, the active tab, anything still running, and tabs restored
+		// from persisted transcripts on resume. Restored tabs arrive already
+		// finished (done=true), so without the tab.restored guard the very
+		// next turn would sweep them the moment they were reopened.
+		if id == mainChatTabID || id == m.chatTabs.active || tab == nil || !tab.done || tab.restored {
 			order = append(order, id)
 			continue
 		}

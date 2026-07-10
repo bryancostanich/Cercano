@@ -44,6 +44,13 @@ type Info struct {
 	// whose dispatch spawned it (empty when unknown).
 	Kind     string
 	ParentID string
+
+	// GrantedTools is the tool set a subagent dispatch loop was granted, so a
+	// resumed CLI can reopen each sub-agent tab with the same tools it showed
+	// live. Populated only by ListChildren (persisted as a comma-joined string
+	// in the granted_tools column); nil for main conversations and for the
+	// summary paths (List/Get) that don't select the column.
+	GrantedTools []string
 }
 
 // Turn is one persisted role-emission inside a conversation.
@@ -83,9 +90,12 @@ type Store interface {
 
 	// EnsureSubagentConversation idempotently creates a conversation row of
 	// kind "subagent", linked to the parent conversation whose dispatch
-	// spawned it (parentID may be empty). Subagent conversations are hidden
-	// from List but fully readable via Get/GetTurns for post-mortems.
-	EnsureSubagentConversation(ctx context.Context, id, parentID, projectDir, model string) error
+	// spawned it (parentID may be empty). grantedTools is the tool set the
+	// dispatch loop was granted, stored comma-joined so a resumed CLI can
+	// reopen the sub-agent tab with the same tools. Subagent conversations are
+	// hidden from List but fully readable via Get/GetTurns/ListChildren for
+	// post-mortems and tab restore.
+	EnsureSubagentConversation(ctx context.Context, id, parentID, projectDir, model string, grantedTools []string) error
 
 	// Append records one turn. Updates the conversation's last_turn_at. If
 	// this is the first user turn and the conversation has no title, derives
@@ -134,6 +144,12 @@ type Store interface {
 
 	// Get returns a single conversation's Info, or an error if not found.
 	Get(ctx context.Context, conversationID string) (Info, error)
+
+	// ListChildren returns the subagent conversations spawned under parentID,
+	// ordered by started_at ascending (spawn order), with GrantedTools
+	// populated from the granted_tools column. Backs the CLI's sub-agent tab
+	// restore on resume.
+	ListChildren(ctx context.Context, parentID string) ([]Info, error)
 
 	// Close releases the underlying DB handle.
 	Close() error
@@ -192,6 +208,7 @@ func Open(path string) (Store, error) {
 		`ALTER TABLE conversations ADD COLUMN title_source TEXT NOT NULL DEFAULT 'user'`,
 		`ALTER TABLE conversations ADD COLUMN kind TEXT NOT NULL DEFAULT 'main'`,
 		`ALTER TABLE conversations ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE conversations ADD COLUMN granted_tools TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := db.Exec(alter); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			db.Close()
@@ -282,18 +299,21 @@ func (s *sqliteStore) EnsureConversation(ctx context.Context, id, projectDir, mo
 	return err
 }
 
-func (s *sqliteStore) EnsureSubagentConversation(ctx context.Context, id, parentID, projectDir, model string) error {
+func (s *sqliteStore) EnsureSubagentConversation(ctx context.Context, id, parentID, projectDir, model string, grantedTools []string) error {
 	if id == "" {
 		return errors.New("conversation id required")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now().Unix()
+	// Tool names are identifiers with no commas, so a plain join round-trips
+	// cleanly on read (see ListChildren, which splits on comma).
+	granted := strings.Join(grantedTools, ",")
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO conversations (id, project_dir, model, title_source, kind, parent_id, started_at, last_turn_at)
-		VALUES (?, ?, ?, 'auto', 'subagent', ?, ?, ?)
+		INSERT INTO conversations (id, project_dir, model, title_source, kind, parent_id, granted_tools, started_at, last_turn_at)
+		VALUES (?, ?, ?, 'auto', 'subagent', ?, ?, ?, ?)
 		ON CONFLICT(id) DO NOTHING`,
-		id, projectDir, model, parentID, now, now)
+		id, projectDir, model, parentID, granted, now, now)
 	return err
 }
 
@@ -393,6 +413,52 @@ func (s *sqliteStore) List(ctx context.Context, projectDir string, limit int) ([
 		info.LastTurnAt = time.Unix(lastTurnAt, 0)
 		if recapAt > 0 {
 			info.RecapUpdatedAt = time.Unix(recapAt, 0)
+		}
+		out = append(out, info)
+	}
+	return out, rows.Err()
+}
+
+// ListChildren returns the subagent conversations spawned under parentID,
+// ordered by started_at ascending so callers see them in spawn order (which
+// lets the CLI recompute nested "sub 1", "sub 1.1" labels parent-before-child).
+// GrantedTools is populated from the granted_tools column: the comma-joined
+// string is split back into a slice, with the empty string mapping to nil.
+func (s *sqliteStore) ListChildren(ctx context.Context, parentID string) ([]Info, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT c.id, c.title, c.project_dir, c.model, c.started_at, c.last_turn_at,
+		       c.recap, c.recap_updated_at, c.kind, c.parent_id, c.granted_tools,
+		       (SELECT COUNT(*) FROM turns t WHERE t.conversation_id = c.id) AS turn_count
+		FROM conversations c
+		WHERE c.parent_id = ? AND c.kind = 'subagent'
+		ORDER BY c.started_at ASC`, parentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Info
+	for rows.Next() {
+		var info Info
+		var startedAt, lastTurnAt, recapAt int64
+		var granted string
+		if err := rows.Scan(&info.ID, &info.Title, &info.ProjectDir, &info.Model,
+			&startedAt, &lastTurnAt, &info.Recap, &recapAt, &info.Kind, &info.ParentID,
+			&granted, &info.TurnCount); err != nil {
+			return nil, err
+		}
+		info.StartedAt = time.Unix(startedAt, 0)
+		info.LastTurnAt = time.Unix(lastTurnAt, 0)
+		if recapAt > 0 {
+			info.RecapUpdatedAt = time.Unix(recapAt, 0)
+		}
+		// Empty string → nil (no tools granted); a plain comma split otherwise,
+		// safe because tool names are identifiers with no embedded commas.
+		if granted != "" {
+			info.GrantedTools = strings.Split(granted, ",")
 		}
 		out = append(out, info)
 	}

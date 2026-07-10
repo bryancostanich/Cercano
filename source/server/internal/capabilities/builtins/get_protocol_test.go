@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/capabilities"
+	"cercano/source/server/internal/protocols"
 )
 
 func TestGetProtocolReturnsBody(t *testing.T) {
@@ -24,6 +25,20 @@ func TestGetProtocolReturnsBody(t *testing.T) {
 	}
 	if !strings.Contains(res.Text, "Design Decision Protocol") {
 		t.Fatalf("body not returned: %q", res.Text[:min(80, len(res.Text))])
+	}
+}
+
+func TestGetProtocolCoversEveryBuiltinProtocol(t *testing.T) {
+	cap := GetProtocol()
+	for _, p := range protocols.Builtins() {
+		args, _ := json.Marshal(map[string]any{"name": p.Name})
+		res, err := cap.Execute(context.Background(), &capabilities.Call{Args: args})
+		if err != nil {
+			t.Fatalf("get_protocol(%q): %v", p.Name, err)
+		}
+		if res.Text != p.Body {
+			t.Fatalf("get_protocol(%q) drifted from protocols.Builtins", p.Name)
+		}
 	}
 }
 

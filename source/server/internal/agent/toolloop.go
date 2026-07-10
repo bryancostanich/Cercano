@@ -8,6 +8,7 @@ import (
 
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/pkg/config"
 )
 
 type LoopEventKind string
@@ -17,6 +18,7 @@ const (
 	LoopToolUseStop        LoopEventKind = "tool_use_stop"
 	LoopToolExecStart      LoopEventKind = "tool_exec_start"
 	LoopToolExecComplete   LoopEventKind = "tool_exec_complete"
+	LoopProgress           LoopEventKind = "progress"
 	LoopPermissionRequired LoopEventKind = "permission_required"
 	LoopWatchdogChallenge  LoopEventKind = "watchdog_challenge"
 	LoopWatchdogEscalate   LoopEventKind = "watchdog_escalate"
@@ -37,6 +39,44 @@ type LoopEvent struct {
 	// StartLine mirrors Result.StartLine on tool_exec_complete events: the
 	// 1-based line where a file edit/write began (0 = not applicable).
 	StartLine int
+
+	SubAgentID       string
+	SubAgentParentID string
+	SubAgentTitle    string
+	SubAgentKind     string
+	GrantedTools     []string
+	IgnoredTools     []string
+}
+
+func loopProgressEvent(defaultToolUseID, defaultToolName string, progress agenttools.ProgressEvent) LoopEvent {
+	ev := LoopEvent{
+		Kind:             LoopProgress,
+		ToolUseID:        defaultToolUseID,
+		ToolName:         defaultToolName,
+		Summary:          progress.Text,
+		Detail:           progress.Detail,
+		IsError:          progress.IsError,
+		StartLine:        progress.StartLine,
+		SubAgentID:       progress.SubAgentID,
+		SubAgentParentID: progress.SubAgentParentID,
+		SubAgentTitle:    progress.SubAgentTitle,
+		SubAgentKind:     progress.Kind,
+		GrantedTools:     append([]string(nil), progress.GrantedTools...),
+		IgnoredTools:     append([]string(nil), progress.IgnoredTools...),
+	}
+	if progress.ToolUseID != "" {
+		ev.ToolUseID = progress.ToolUseID
+	}
+	if progress.ToolName != "" {
+		ev.ToolName = progress.ToolName
+	}
+	if progress.Summary != "" {
+		ev.Summary = progress.Summary
+	}
+	if ev.Summary == "" {
+		ev.Summary = progress.Text
+	}
+	return ev
 }
 
 type ToolLoopInput struct {
@@ -77,7 +117,7 @@ type ToolLoopInput struct {
 	OnTurnComplete func(m llm.Message)
 
 	// MaxIterations caps the number of LLM round-trips this call may make.
-	// 0 means use MaxToolLoopIterations (the package default, currently 50).
+	// 0 means use config.DefaultToolLoopMaxIterations; -1 means unlimited.
 	MaxIterations int
 
 	// MaxTokensPerTurn sets the MaxTokens field on each llm.ChatRequest.
@@ -102,12 +142,10 @@ type ToolLoopResult struct {
 	OutputTokens int // last LLM call's provider-reported output tokens
 }
 
-// MaxToolLoopIterations caps the LLM round-trips per turn. Agentic work
-// (locate a project, read several docs, multi-file edits) routinely needs many
-// steps — 10 was far too low and turns died mid-task. This is a safety bound,
-// not an expected ceiling; on hitting it the loop degrades to a final no-tools
-// answer rather than erroring out.
-const MaxToolLoopIterations = 50
+// MaxToolLoopIterations caps the LLM round-trips per turn when no explicit
+// ToolLoopInput.MaxIterations is supplied. Kept as an alias for older tests and
+// callers; the config package owns the single source of truth.
+const MaxToolLoopIterations = config.DefaultToolLoopMaxIterations
 
 func summarizeResult(res *agenttools.Result) string {
 	if res == nil {
@@ -163,10 +201,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		}
 	}
 
-	maxIters := MaxToolLoopIterations
-	if in.MaxIterations > 0 {
-		maxIters = in.MaxIterations
-	}
+	maxIters, unlimitedIters := config.EffectiveMaxIterations(in.MaxIterations)
 	maxTokens := 4096
 	if in.MaxTokensPerTurn > 0 {
 		maxTokens = in.MaxTokensPerTurn
@@ -193,7 +228,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	consecutiveErrors := 0
 	var lastIn, lastOut int
 
-	for iter := 0; iter < maxIters; iter++ {
+	for iter := 0; unlimitedIters || iter < maxIters; iter++ {
 		req := llm.ChatRequest{
 			Model:     in.Model,
 			System:    in.System,
@@ -232,11 +267,11 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 					if revise == "" {
 						revise = "Address the issue and revise your reply"
 					}
-					note := "⚡ watchdog (" + wd.Protocol + "): " + wd.Challenge + ". " + revise
+					var note string
 					if wd.Action == "block" {
-						note += " (required — no override)."
+						note = "Blocked — comply required. watchdog (" + wd.Protocol + "): " + wd.Challenge + ". " + revise + " (required — no override)."
 					} else {
-						note += ", or call `justify` with a reason."
+						note = "Challenge — comply or justify. watchdog (" + wd.Protocol + "): " + wd.Challenge + ". " + revise + ", or call `justify` with a reason."
 					}
 					emit(LoopEvent{Kind: LoopWatchdogChallenge, Detail: wd.Protocol, Summary: wd.Challenge})
 					// The assistant turn was already appended above (line 201); append
@@ -311,8 +346,11 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		rChan := make(chan rr, len(rCalls))
 		for i, pc := range rCalls {
 			go func(i int, pc pendingCall) {
+				execCtx := agenttools.WithProgressEmitter(ctx, func(progress agenttools.ProgressEvent) {
+					emit(loopProgressEvent(pc.block.ToolUseID, pc.block.ToolName, progress))
+				})
 				emit(LoopEvent{Kind: LoopToolExecStart, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName})
-				res, err := pc.tool.Execute(ctx, pc.block.ToolInput)
+				res, err := pc.tool.Execute(execCtx, pc.block.ToolInput)
 				out := llm.Block{Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID}
 				if err != nil {
 					out.Content = err.Error()
@@ -343,7 +381,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 					emit(LoopEvent{Kind: LoopWatchdogChallenge, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Tier: string(pc.tier), Detail: wd.Protocol, Summary: wd.Challenge})
 					results = append(results, llm.Block{
 						Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID,
-						Content: "⚡ watchdog (" + wd.Protocol + "): " + wd.Challenge + " Either follow the protocol first, or call `justify` with a reason to override.",
+						Content: "Challenge — comply or justify. watchdog (" + wd.Protocol + "): " + wd.Challenge + " Follow the protocol first, or call `justify` with a reason to override.",
 						IsError: false,
 					})
 					watchdogIntervened = true
@@ -422,8 +460,11 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 					return ToolLoopResult{FinalText: finalText, Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, nil
 				}
 			}
+			execCtx := agenttools.WithProgressEmitter(ctx, func(progress agenttools.ProgressEvent) {
+				emit(loopProgressEvent(pc.block.ToolUseID, pc.block.ToolName, progress))
+			})
 			emit(LoopEvent{Kind: LoopToolExecStart, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName})
-			res, err := pc.tool.Execute(ctx, pc.block.ToolInput)
+			res, err := pc.tool.Execute(execCtx, pc.block.ToolInput)
 			out := llm.Block{Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID}
 			if err != nil {
 				out.Content = err.Error()

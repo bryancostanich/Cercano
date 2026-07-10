@@ -231,6 +231,11 @@ func (c *Core) runLoop(
 	gateRegistry *agenttools.Registry,
 	permStore *agent.PermissionStore,
 ) (agent.ToolLoopResult, error) {
+	maxIterations := 0
+	if c.d.Config != nil {
+		maxIterations = c.d.Config.Get().ToolLoop.MaxIterations
+	}
+
 	return agent.RunToolLoop(ctx, agent.ToolLoopInput{
 		Provider:            provider,
 		Registry:            gateRegistry,
@@ -246,6 +251,7 @@ func (c *Core) runLoop(
 		ConvHistory:         convHistory,
 		OnTextDelta:         onTextDelta,
 		OnTurnComplete:      onTurn,
+		MaxIterations:       maxIterations,
 		WatchdogGate:        wdGate,
 		WatchdogTurnEnd:     wdTurnEnd,
 	})
@@ -296,6 +302,28 @@ func makeLoopSink(sink EventSink) func(agent.LoopEvent) {
 				IsError:   ev.IsError,
 			})
 
+		case agent.LoopProgress:
+			if ev.SubAgentID != "" {
+				sink.Emit(Event{
+					Kind:             EventSubAgent,
+					Text:             ev.Summary,
+					ToolUseID:        ev.ToolUseID,
+					ToolName:         ev.ToolName,
+					Detail:           ev.Detail,
+					Summary:          ev.Summary,
+					StartLine:        ev.StartLine,
+					IsError:          ev.IsError,
+					SubAgentID:       ev.SubAgentID,
+					SubAgentParentID: ev.SubAgentParentID,
+					SubAgentTitle:    ev.SubAgentTitle,
+					SubAgentKind:     ev.SubAgentKind,
+					GrantedTools:     append([]string(nil), ev.GrantedTools...),
+					IgnoredTools:     append([]string(nil), ev.IgnoredTools...),
+				})
+				break
+			}
+			sink.Emit(Event{Kind: EventProgress, Text: ev.Summary, ToolUseID: ev.ToolUseID, ToolName: ev.ToolName})
+
 		case agent.LoopWatchdogChallenge:
 			sink.Emit(Event{
 				Kind:         EventWatchdog,
@@ -331,9 +359,10 @@ func makeLoopSink(sink EventSink) func(agent.LoopEvent) {
 				Summary:      ev.Summary,
 			})
 
-		// LoopPermissionRequired is NOT forwarded via sink — it goes via
-		// requester (request/response, not fire-and-forget). The loop calls
-		// PermissionRequester directly; we don't emit an event here.
+		case agent.LoopPermissionRequired:
+			// LoopPermissionRequired is NOT forwarded via sink — it goes via
+			// requester (request/response, not fire-and-forget). The loop calls
+			// PermissionRequester directly; we don't emit an event here.
 		}
 	}
 }

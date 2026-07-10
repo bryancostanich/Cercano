@@ -9,21 +9,25 @@ import (
 	"cercano/source/server/internal/llm"
 )
 
-func blockToSDK(b llm.Block) sdk.ContentBlockParamUnion {
+// blockToSDK translates one internal block to the SDK union. ok=false means
+// the block has no Anthropic representation — e.g. reasoning blocks recorded
+// while the conversation ran on another provider — and must be skipped: the
+// zero-value union marshals to a JSON null, which the Messages API rejects.
+func blockToSDK(b llm.Block) (sdk.ContentBlockParamUnion, bool) {
 	switch b.Type {
 	case llm.BlockText:
-		return sdk.NewTextBlock(b.Text)
+		return sdk.NewTextBlock(b.Text), true
 	case llm.BlockToolUse:
-		return sdk.NewToolUseBlock(b.ToolUseID, b.ToolInput, b.ToolName)
+		return sdk.NewToolUseBlock(b.ToolUseID, b.ToolInput, b.ToolName), true
 	case llm.BlockToolResult:
-		return sdk.NewToolResultBlock(b.ToolUseRef, b.Content, b.IsError)
+		return sdk.NewToolResultBlock(b.ToolUseRef, b.Content, b.IsError), true
 	case llm.BlockImage:
 		if b.ImageURL != "" {
-			return sdk.NewImageBlock(sdk.URLImageSourceParam{URL: b.ImageURL})
+			return sdk.NewImageBlock(sdk.URLImageSourceParam{URL: b.ImageURL}), true
 		}
-		return sdk.NewImageBlockBase64(b.MediaType, b.ImageData)
+		return sdk.NewImageBlockBase64(b.MediaType, b.ImageData), true
 	}
-	return sdk.ContentBlockParamUnion{}
+	return sdk.ContentBlockParamUnion{}, false
 }
 
 func blockFromSDK(in sdk.ContentBlockUnion) llm.Block {
@@ -46,7 +50,14 @@ func messagesToSDK(msgs []llm.Message) []sdk.MessageParam {
 	for _, m := range msgs {
 		blocks := make([]sdk.ContentBlockParamUnion, 0, len(m.Blocks))
 		for _, b := range m.Blocks {
-			blocks = append(blocks, blockToSDK(b))
+			if sb, ok := blockToSDK(b); ok {
+				blocks = append(blocks, sb)
+			}
+		}
+		// A message whose blocks were all skipped must be dropped whole:
+		// the Messages API rejects empty content arrays.
+		if len(blocks) == 0 {
+			continue
 		}
 		switch m.Role {
 		case llm.RoleUser:

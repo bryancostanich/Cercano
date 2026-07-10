@@ -20,8 +20,8 @@ func TestCancel_EscStopsStreaming(t *testing.T) {
 	canceled := false
 	m.cancelStream = func() { canceled = true; cancel() }
 	m.streaming = true
-	m.chat.AppendEntry(&Entry{Role: RoleUser, Content: "do a thing"})
-	m.chat.AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
+	m.mainChat().AppendEntry(&Entry{Role: RoleUser, Content: "do a thing"})
+	m.mainChat().AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
 
 	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = next.(Model)
@@ -35,17 +35,17 @@ func TestCancel_EscStopsStreaming(t *testing.T) {
 	if m.cancelStream != nil {
 		t.Fatalf("cancelStream should be cleared")
 	}
-	entries := m.chat.Entries()
+	entries := m.mainChat().Entries()
 	last := entries[len(entries)-1]
 	if last.Role != RoleSystem || last.Content != "⊘ canceled" {
 		t.Fatalf("expected a canceled note, got %+v", last)
 	}
 
 	// A late stream event after cancel must be ignored (no panic, no change).
-	before := len(m.chat.Entries())
+	before := len(m.mainChat().Entries())
 	next, _ = m.Update(chatStreamMsg{ev: streamMsgToEvent(agentclient.StreamMsg{Type: agentclient.TypeToken, Token: "late"})})
 	m = next.(Model)
-	if len(m.chat.Entries()) != before {
+	if len(m.mainChat().Entries()) != before {
 		t.Fatalf("late stream message after cancel should be ignored")
 	}
 }

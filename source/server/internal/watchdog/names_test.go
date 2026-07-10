@@ -36,9 +36,9 @@ func TestChecksFireOnDisplayAliasedToolNames(t *testing.T) {
 		t.Error("worktree-first must not apply to a plain git status")
 	}
 
-	// debug-loop: an Edit-named mutation must apply.
+	// systematic-debugging: an Edit-named mutation must apply.
 	if !(debugLoopCheck{}).Applies(Action{Kind: "tool_call", ToolName: "Edit"}) {
-		t.Error("debug-loop must apply to an Edit-named mutation")
+		t.Error("systematic-debugging must apply to an Edit-named mutation")
 	}
 
 	// commit-checkpoint: an Edit following an uncommitted Write must apply,

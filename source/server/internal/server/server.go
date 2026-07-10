@@ -869,6 +869,20 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		fmt.Printf("UpdateConfig: lossy_tool_elision set to %s\n", v)
 	}
 
+	if req.ToolLoopMaxIterations != "" {
+		n, err := strconv.Atoi(strings.TrimSpace(req.ToolLoopMaxIterations))
+		if err != nil || !config.ValidateToolLoopMaxIterations(n) {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid tool_loop_max_iterations %q: expected -1 or a non-negative integer", req.ToolLoopMaxIterations),
+			}, nil
+		}
+		c.ToolLoop.MaxIterations = n
+		changes = append(changes, fmt.Sprintf("tool_loop.max_iterations=%d", n))
+		s.broadcastConfigChanged("tool_loop.max_iterations", strconv.Itoa(n))
+		fmt.Printf("UpdateConfig: tool_loop.max_iterations set to %d\n", n)
+	}
+
 	if req.CompactionEnabled != "" {
 		v := strings.ToLower(strings.TrimSpace(req.CompactionEnabled))
 		if v != "true" && v != "false" {
@@ -1327,6 +1341,7 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 		CompactedRetentionDays: int32(cfg.Compaction.Retention.CompactedRetentionDays),
 		KeepForever:            cfg.Compaction.Retention.KeepForever,
 		CompactionEnabled:      cfg.Compaction.Enabled,
+		ToolLoopMaxIterations:  int32(cfg.ToolLoop.MaxIterations),
 		ModelTiers:             cfg.Models.TierSlots(),
 		ModelsDefaultProvider:  string(cfg.Models.DefaultProvider),
 	}, nil
@@ -2373,6 +2388,28 @@ func sendRunnerEvent(stream streamResponseSender, ev runnersvc.Event) error {
 		case "escalate":
 			// Behavior-preserving: old sink dropped LoopWatchdogEscalate (no send).
 		}
+
+	case runnersvc.EventSubAgent:
+		return stream.Send(&proto.StreamProcessResponse{
+			Payload: &proto.StreamProcessResponse_SubAgentEvent{
+				SubAgentEvent: &proto.SubAgentEvent{
+					Id:           ev.SubAgentID,
+					Title:        ev.SubAgentTitle,
+					Kind:         ev.SubAgentKind,
+					ParentId:     ev.SubAgentParentID,
+					GrantedTools: append([]string(nil), ev.GrantedTools...),
+					IgnoredTools: append([]string(nil), ev.IgnoredTools...),
+					Text:         ev.Text,
+					ToolUseId:    ev.ToolUseID,
+					ToolName:     ev.ToolName,
+					ArgsSummary:  ev.ArgsSummary,
+					Summary:      ev.Summary,
+					Detail:       ev.Detail,
+					StartLine:    int32(ev.StartLine),
+					IsError:      ev.IsError,
+				},
+			},
+		})
 
 	case runnersvc.EventDone:
 		// Not used by the in-process host (result comes back from RunTurn directly).

@@ -50,7 +50,7 @@ func TestWatchdogGate_ChallengeSkipsExecution(t *testing.T) {
 			return true, nil
 		},
 		WatchdogGate: func(_ context.Context, _ string, _ json.RawMessage, _ []llm.Message) WatchdogDecision {
-			return WatchdogDecision{Action: "challenge", Protocol: "debug-loop", Challenge: "no evidence"}
+			return WatchdogDecision{Action: "challenge", Protocol: "systematic-debugging", Challenge: "no evidence"}
 		},
 	})
 	if err != nil {
@@ -63,13 +63,14 @@ func TestWatchdogGate_ChallengeSkipsExecution(t *testing.T) {
 	for _, m := range result.History {
 		for _, b := range m.Blocks {
 			if b.Type == llm.BlockToolResult && b.ToolUseRef == "u1" &&
+				strings.Contains(b.Content, "Challenge — comply or justify.") &&
 				strings.Contains(b.Content, "watchdog") {
 				found = true
 			}
 		}
 	}
 	if !found {
-		t.Fatal("expected an injected tool-result mentioning 'watchdog'")
+		t.Fatal("expected an injected tool-result with Challenge — comply or justify watchdog text")
 	}
 }
 
@@ -107,7 +108,7 @@ func TestWatchdogBlockDoesNotTripErrorAbort(t *testing.T) {
 			return true, nil
 		},
 		WatchdogGate: func(_ context.Context, _ string, _ json.RawMessage, _ []llm.Message) WatchdogDecision {
-			return WatchdogDecision{Action: "block", Protocol: "debug-loop", Challenge: "blocked"}
+			return WatchdogDecision{Action: "block", Protocol: "systematic-debugging", Challenge: "blocked"}
 		},
 		MaxIterations: 5,
 	})
@@ -328,6 +329,9 @@ func TestWatchdogTurnEnd_ChallengeUsesReviseInstruction(t *testing.T) {
 	}
 	if note == "" {
 		t.Fatal("expected a follow-through watchdog note in history")
+	}
+	if !strings.Contains(note, "Challenge — comply or justify.") {
+		t.Errorf("note must start with the challenge intervention phrase, got: %q", note)
 	}
 	if !strings.Contains(note, revise) {
 		t.Errorf("note must carry the check's revise instruction, got: %q", note)

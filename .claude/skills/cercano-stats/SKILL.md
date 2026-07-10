@@ -10,7 +10,7 @@ View usage statistics and cloud token savings from Cercano's local inference.
 
 ## Important: Display the result
 
-MCP tool results may not be visible to the user in the terminal. After calling `cercano_stats`, you MUST output the full tool result text verbatim in your response so the user can see it.
+MCP tool results may not be visible to the user in the terminal. After calling the tool, you MUST output the full tool result text verbatim in your response so the user can see it.
 
 ## MCP Tool
 

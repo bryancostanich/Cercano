@@ -10,14 +10,14 @@ import (
 )
 
 func TestToSDKBlock_Text(t *testing.T) {
-	got := blockToSDK(llm.Block{Type: llm.BlockText, Text: "hello"})
+	got, _ := blockToSDK(llm.Block{Type: llm.BlockText, Text: "hello"})
 	if got.OfText == nil || got.OfText.Text != "hello" {
 		t.Errorf("text block: %+v", got)
 	}
 }
 
 func TestToSDKBlock_ToolUse(t *testing.T) {
-	got := blockToSDK(llm.Block{
+	got, _ := blockToSDK(llm.Block{
 		Type:      llm.BlockToolUse,
 		ToolUseID: "u1",
 		ToolName:  "read_file",
@@ -29,7 +29,7 @@ func TestToSDKBlock_ToolUse(t *testing.T) {
 }
 
 func TestToSDKBlock_ToolResult(t *testing.T) {
-	got := blockToSDK(llm.Block{
+	got, _ := blockToSDK(llm.Block{
 		Type:       llm.BlockToolResult,
 		ToolUseRef: "u1",
 		Content:    "32 lines",
@@ -88,7 +88,7 @@ func TestToolsToSDK_PanicsOnBadSchema(t *testing.T) {
 
 func TestBlockToSDK_ImageBase64(t *testing.T) {
 	b := llm.Block{Type: llm.BlockImage, MediaType: "image/png", ImageData: "QUJD"}
-	got := blockToSDK(b)
+	got, _ := blockToSDK(b)
 	if got.OfImage == nil || got.OfImage.Source.OfBase64 == nil {
 		t.Errorf("expected base64 image block, got %+v", got)
 	}
@@ -96,9 +96,68 @@ func TestBlockToSDK_ImageBase64(t *testing.T) {
 
 func TestBlockToSDK_ImageURL(t *testing.T) {
 	b := llm.Block{Type: llm.BlockImage, ImageURL: "https://x/y.png"}
-	got := blockToSDK(b)
+	got, _ := blockToSDK(b)
 	if got.OfImage == nil || got.OfImage.Source.OfURL == nil {
 		t.Errorf("expected URL image block, got %+v", got)
+	}
+}
+
+// Reasoning blocks are provider-specific opaque state (e.g. OpenAI Responses
+// encrypted reasoning recorded while a conversation ran on the ChatGPT
+// backend). Anthropic cannot consume them; replaying such a conversation must
+// silently skip them — the zero-value union marshals to a JSON null, which
+// the Messages API (and Meridian) rejects with a 500.
+func TestMessagesToSDK_SkipsReasoningBlocks(t *testing.T) {
+	msgs := []llm.Message{{
+		Role: llm.RoleAssistant,
+		Blocks: []llm.Block{
+			{Type: llm.BlockReasoning, ReasoningID: "rs_1", ReasoningData: "gAAAAA"},
+			{Type: llm.BlockText, Text: "answer"},
+		},
+	}}
+	out := messagesToSDK(msgs)
+	if len(out) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(out))
+	}
+	if len(out[0].Content) != 1 {
+		t.Fatalf("expected reasoning block skipped, got %d content blocks", len(out[0].Content))
+	}
+	if out[0].Content[0].OfText == nil || out[0].Content[0].OfText.Text != "answer" {
+		t.Errorf("surviving block should be the text block: %+v", out[0].Content[0])
+	}
+}
+
+func TestMessagesToSDK_SkipsUnknownBlockTypes(t *testing.T) {
+	msgs := []llm.Message{{
+		Role: llm.RoleAssistant,
+		Blocks: []llm.Block{
+			{Type: llm.BlockType("some_future_type")},
+			{Type: llm.BlockText, Text: "kept"},
+		},
+	}}
+	out := messagesToSDK(msgs)
+	if len(out) != 1 || len(out[0].Content) != 1 {
+		t.Fatalf("expected unknown block skipped, got %+v", out)
+	}
+}
+
+// A message whose blocks are all unconsumable must be dropped entirely:
+// the Messages API rejects messages with empty content.
+func TestMessagesToSDK_DropsMessagesLeftEmpty(t *testing.T) {
+	msgs := []llm.Message{
+		{Role: llm.RoleAssistant, Blocks: []llm.Block{
+			{Type: llm.BlockReasoning, ReasoningID: "rs_1", ReasoningData: "gAAAAA"},
+		}},
+		{Role: llm.RoleUser, Blocks: []llm.Block{
+			{Type: llm.BlockText, Text: "next"},
+		}},
+	}
+	out := messagesToSDK(msgs)
+	if len(out) != 1 {
+		t.Fatalf("expected reasoning-only message dropped, got %d messages", len(out))
+	}
+	if len(out[0].Content) != 1 || out[0].Content[0].OfText == nil || out[0].Content[0].OfText.Text != "next" {
+		t.Errorf("surviving message should be the user text: %+v", out[0])
 	}
 }
 
@@ -107,7 +166,7 @@ func TestRoundTrip(t *testing.T) {
 		Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "read_file",
 		ToolInput: json.RawMessage(`{"path":"main.go"}`),
 	}
-	p := blockToSDK(original)
+	p, _ := blockToSDK(original)
 	resp := sdk.ContentBlockUnion{
 		Type: "tool_use",
 		ID:   p.OfToolUse.ID,

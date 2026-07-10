@@ -27,7 +27,7 @@ func TestConnRecovery_ReconnectedRefreshesAndAnnounces(t *testing.T) {
 		t.Fatal("recovery must return the re-fetch batch cmd, got nil")
 	}
 	found := false
-	for _, e := range nm.chat.Entries() {
+	for _, e := range nm.mainChat().Entries() {
 		if e.Role == RoleSystem && strings.Contains(e.Content, "agent reconnected") {
 			found = true
 		}
@@ -46,7 +46,7 @@ func TestConnRecovery_SteadyConnectedIsSilent(t *testing.T) {
 	next, _ := m.Update(connStateChangedMsg{state: agentclient.ConnStateConnected, attempt: 0})
 	nm := next.(Model)
 
-	for _, e := range nm.chat.Entries() {
+	for _, e := range nm.mainChat().Entries() {
 		if e.Role == RoleSystem && strings.Contains(e.Content, "agent reconnected") {
 			t.Fatal("steady Connected must not announce a recovery")
 		}

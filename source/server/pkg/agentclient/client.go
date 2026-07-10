@@ -232,6 +232,8 @@ type Config struct {
 	KeepForever            bool
 	// CompactionEnabled is the master switch for the summarization pass.
 	CompactionEnabled bool
+	// ToolLoopMaxIterations caps LLM round-trips per turn; -1 means unlimited.
+	ToolLoopMaxIterations int
 	// ModelTiers is the taxonomy's non-empty slots keyed "<tier>.<provider>";
 	// ModelsDefaultProvider is the preferred side ("cloud"|"open"|"").
 	ModelTiers            map[string]string
@@ -267,6 +269,7 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 		CompactedRetentionDays: int(resp.GetCompactedRetentionDays()),
 		KeepForever:            resp.GetKeepForever(),
 		CompactionEnabled:      resp.GetCompactionEnabled(),
+		ToolLoopMaxIterations:  int(resp.GetToolLoopMaxIterations()),
 		ModelTiers:             resp.GetModelTiers(),
 		ModelsDefaultProvider:  resp.GetModelsDefaultProvider(),
 	}, nil
@@ -305,6 +308,8 @@ type ConfigUpdate struct {
 	KeepForever            string
 	// CompactionEnabled — sparse-patch bool. "" | "true" | "false".
 	CompactionEnabled string
+	// ToolLoopMaxIterations — sparse-patch int. "" = unchanged, -1 = unlimited.
+	ToolLoopMaxIterations string
 	// Model taxonomy sparse-patch: ModelTierKey is "default_provider" or
 	// "<tier>.<provider>"; ModelTierValue is the model id ("-" clears).
 	// Empty key = unchanged.
@@ -1301,6 +1306,7 @@ func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, erro
 		CompactedRetentionDays: u.CompactedRetentionDays,
 		KeepForever:            u.KeepForever,
 		CompactionEnabled:      u.CompactionEnabled,
+		ToolLoopMaxIterations:  u.ToolLoopMaxIterations,
 		ModelTierKey:           u.ModelTierKey,
 		ModelTierValue:         u.ModelTierValue,
 	})
@@ -1462,6 +1468,15 @@ type StreamMsg struct {
 	WatchdogKind string // for TypeWatchdog ("challenge" | "block" | "echo")
 	Protocol     string // for TypeWatchdog (protocol name, empty for echo)
 	Thread       string // for TypeWatchdog echo only ("watchdog" | "main")
+
+	SubAgentID       string   // for TypeSubAgent
+	SubAgentParentID string   // for TypeSubAgent
+	SubAgentTitle    string   // for TypeSubAgent
+	SubAgentKind     string   // for TypeSubAgent
+	GrantedTools     []string // for TypeSubAgent
+	IgnoredTools     []string // for TypeSubAgent
+	SubAgentText     string   // for TypeSubAgent
+	SubAgentToolID   string   // for TypeSubAgent
 }
 
 type StreamMsgType int
@@ -1478,6 +1493,7 @@ const (
 	TypePermissionRequired
 	TypeRouteSelected
 	TypeWatchdog
+	TypeSubAgent
 )
 
 func toProtoImages(images []InlineImage) []*proto.InlineImage {
@@ -1598,6 +1614,27 @@ func (c *Client) StreamChat(ctx context.Context, conversationID, input, workDir 
 			}
 			if we := msg.GetWatchdogEvent(); we != nil {
 				out <- streamMsgFromWatchdogEvent(we)
+				continue
+			}
+			if se := msg.GetSubAgentEvent(); se != nil {
+				out <- StreamMsg{
+					Type:             TypeSubAgent,
+					SubAgentID:       se.GetId(),
+					SubAgentParentID: se.GetParentId(),
+					SubAgentTitle:    se.GetTitle(),
+					SubAgentKind:     se.GetKind(),
+					GrantedTools:     append([]string(nil), se.GetGrantedTools()...),
+					IgnoredTools:     append([]string(nil), se.GetIgnoredTools()...),
+					SubAgentText:     se.GetText(),
+					SubAgentToolID:   se.GetToolUseId(),
+					ToolUseID:        se.GetToolUseId(),
+					ToolName:         se.GetToolName(),
+					ArgsSummary:      se.GetArgsSummary(),
+					Summary:          se.GetSummary(),
+					Detail:           se.GetDetail(),
+					StartLine:        int(se.GetStartLine()),
+					IsError:          se.GetIsError(),
+				}
 				continue
 			}
 		}

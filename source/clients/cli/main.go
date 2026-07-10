@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/colorprofile"
 
 	cliui "cercano/source/clients/cli/internal/ui"
 	"cercano/source/clients/cli/internal/uiconfig"
@@ -126,40 +125,9 @@ func runCLI(cfg config.Config, openHistoryOnStart, openWizardOnStart bool, seedD
 	if autoResumeConvID != "" {
 		m = m.OpenConversationOnStart(autoResumeConvID)
 	}
-	var opts []tea.ProgramOption
-	// Apple Terminal exports COLORTERM=truecolor but cannot actually render
-	// 24-bit color — it garbles truecolor SGRs into stray background artifacts
-	// (e.g. pink boxes on styled spans). Clamp to 256 colors there so styling
-	// renders correctly; every other terminal — and redirected, non-color
-	// pipes — is left to bubbletea's normal detection.
-	if appleTerminalTruecolor(os.Environ(), colorprofile.Detect(os.Stdout, os.Environ())) {
-		opts = append(opts, tea.WithColorProfile(colorprofile.ANSI256))
-	}
-	p := tea.NewProgram(m, opts...)
+	p := tea.NewProgram(m)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "cercano:", err)
 		os.Exit(1)
 	}
-}
-
-// appleTerminalTruecolor reports whether we're running under Apple Terminal with
-// a truecolor-advertising environment. Apple Terminal exports
-// COLORTERM=truecolor (so colorprofile upgrades the profile to 24-bit) but
-// cannot actually render truecolor — it mis-parses `38;2;r;g;b` SGRs and paints
-// stray background artifacts. Gating on detected == TrueColor keeps redirected
-// pipes and genuine ≤256-color setups untouched (we only clamp when truecolor
-// would otherwise be emitted).
-func appleTerminalTruecolor(env []string, detected colorprofile.Profile) bool {
-	return envValue(env, "TERM_PROGRAM") == "Apple_Terminal" && detected == colorprofile.TrueColor
-}
-
-// envValue returns the value of key in a KEY=VALUE environment slice, or "".
-func envValue(env []string, key string) string {
-	prefix := key + "="
-	for _, kv := range env {
-		if strings.HasPrefix(kv, prefix) {
-			return kv[len(prefix):]
-		}
-	}
-	return ""
 }

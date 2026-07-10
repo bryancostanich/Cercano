@@ -921,8 +921,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.hasSubAgentTabs() && mouse.Y == m.scrollbarTop-1 {
-			if id, ok := tabStripAtX(m.chatTabItems(), mouse.X); ok {
-				m.switchChatTab(id)
+			if id, isClose, ok := tabStripHitAtX(m.chatTabItems(), mouse.X); ok {
+				if isClose {
+					m.closeSubAgentTab(id)
+				} else {
+					m.switchChatTab(id)
+				}
+				m.refreshViewport()
 				return m, nil
 			}
 		}

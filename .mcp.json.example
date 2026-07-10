@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "cercano": {
+      "type": "stdio",
+      "command": "/path/to/Cercano/source/server/bin/cercano",
+      "args": ["--mcp"]
+    }
+  }
+}

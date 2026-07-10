@@ -50,3 +50,7 @@ test/sandbox/
 .claude/worktrees/
 source/server/compaction-bakeoff
 source/server/cercano
+
+# Developer-local MCP host config (machine-specific absolute binary path).
+# Copy .mcp.json.example to .mcp.json and set the command path for your machine.
+.mcp.json

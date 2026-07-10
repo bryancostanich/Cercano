@@ -313,25 +313,35 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource cre
 			ts := &streamTokenSource{creds: credSource, profileName: prof.Name}
 			prov, buildErr = cloudfactory.BuildCloudProvider(prof, "", cloudfactory.Options{TokenSource: ts})
 		} else {
-			// Static-key route: fetch the API key once via the stream.
-			key, _, err := credSource.Fetch(ctx, prof.Name)
-			if err != nil {
-				// Cloud stays unbuilt; the turn degrades to the open provider
-				// (locus graceful-degradation). Do NOT touch r.openProv here —
-				// it is built separately below and clearing it would be a bug.
-				log.Printf("[worker] credential fetch failed for profile %q: %v; continuing without cloud", prof.Name, err)
+			// Static-key route: fetch the key via the stream. A fetch FAILURE is
+			// treated as an EMPTY key, NOT a skip — mirror the host's rebuildCloud
+			// carve-out: a profile with no key can still authenticate when it has a
+			// proxy BaseURL (Meridian handles auth) or is bedrock (AWS credential
+			// chain). Only when it has NONE of those is cloud truly unauthable —
+			// then leave it unbuilt (the turn degrades to the open provider). Do
+			// NOT touch r.openProv here — it is built separately below.
+			key := ""
+			if k, _, err := credSource.Fetch(ctx, prof.Name); err == nil {
+				key = k
+			}
+			if key == "" && prof.BaseURL == "" && prof.Flavor != cloudfactory.FlavorBedrock {
+				log.Printf("[worker] no credential and no proxy BaseURL for profile %q; continuing without cloud", prof.Name)
 			} else {
 				prov, buildErr = cloudfactory.BuildCloudProvider(prof, key)
 			}
 		}
 		if buildErr != nil {
 			log.Printf("[worker] cloud provider build failed: %v; continuing without cloud", buildErr)
-		} else {
+		} else if prov != nil {
+			// Only wrap a REAL primary. If the primary was skipped (unauthable) or
+			// BuildCloudProvider returned a nil provider, leave cloud unset. Wrapping
+			// a nil primary yields a fallback composite whose Name() nil-derefs the
+			// moment dispatch.Select probes it (p.Cloud != nil is true for a typed-nil
+			// interface) — the production panic this guards against.
+			//
 			// A configured backup profile wraps the primary in a fallback composite,
-			// mirroring the in-process providers.wrapBackup path. Everything
-			// downstream sees one provider; a missing/unbuildable backup leaves the
-			// primary bare. The backup's credential is fetched via the SAME stream
-			// credential proxy, keyed by the backup profile name.
+			// mirroring in-process providers.wrapBackup; its credential is fetched via
+			// the same stream credential proxy, keyed by the backup profile name.
 			r.cloudProv = wrapWorkerBackup(ctx, prov, prof.Name, cfg, credSource)
 		}
 	}

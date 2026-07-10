@@ -194,7 +194,14 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		// profile name is owned by the server (canonical "chatgpt"), so send an
 		// empty name — this way /config and the wizard produce the same single
 		// profile instead of one named after whichever row launched it.
+		// Only forward an explicit GPT model; otherwise send empty so the server
+		// applies its ChatGPT default. Prevents the global-default cloud model
+		// (e.g. gemini-3-flash) shown in the draft from being attached to the
+		// OpenAI/ChatGPT profile.
 		model := strings.TrimSpace(sp.cloudDraft.Model)
+		if !strings.HasPrefix(model, "gpt") {
+			model = ""
+		}
 		return "starting ChatGPT sign-in…", func() tea.Msg {
 			return openChatGPTLoginModalMsg{profile: "", model: model, setActive: true}
 		}, nil

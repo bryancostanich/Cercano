@@ -38,7 +38,11 @@ func (s *Server) StartChatGPTLogin(req *proto.StartChatGPTLoginRequest, stream p
 		profile = "chatgpt"
 	}
 	model := strings.TrimSpace(req.GetModel())
-	if model == "" {
+	// The ChatGPT-account backend only accepts gpt-5.x model names. Guard against
+	// a cross-provider model (e.g. the global default gemini-3-flash) leaking in
+	// from the settings draft: fall back to the ChatGPT default rather than
+	// persisting an invalid model onto the profile.
+	if !strings.HasPrefix(model, "gpt") {
 		model = defaultChatGPTModel
 	}
 

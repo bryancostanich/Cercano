@@ -32,7 +32,10 @@ const tabStripGap = 1
 
 func tabStripSegments(items []tabStripItem) []tabStripSegment {
 	segs := make([]tabStripSegment, 0, len(items))
-	x := 0
+	// The first tab starts at column 1: the leading end bar (see renderTabStrip)
+	// occupies column 0. The gap added after each tab covers the bar before the
+	// next one.
+	x := 1
 	for _, item := range items {
 		labelW := lipgloss.Width(item.Label)
 		w := labelW + 2*tabStripCellPad
@@ -51,11 +54,13 @@ func tabStripSegments(items []tabStripItem) []tabStripSegment {
 
 func renderTabStrip(width int, items []tabStripItem, active string, focused bool, s theme.Styles) string {
 	var b strings.Builder
-	for i, item := range items {
-		if i > 0 {
-			// A dim vertical rule separates adjacent tabs.
-			b.WriteString(s.Muted.Render("│"))
-		}
+	// A dim vertical bar brackets every tab: a left end bar before the first,
+	// a separator between adjacent tabs, and a right end bar after the last
+	// (written after the loop). Kept in sync with tabStripSegments, which starts
+	// the first tab at column 1 to account for the leading bar.
+	bar := s.Muted.Render("│")
+	for _, item := range items {
+		b.WriteString(bar)
 		label := item.Label
 		if item.Closable {
 			label += " " + tabStripCloseGlyph
@@ -73,6 +78,9 @@ func renderTabStrip(width int, items []tabStripItem, active string, focused bool
 		default:
 			b.WriteString(s.Muted.Render(cell))
 		}
+	}
+	if len(items) > 0 {
+		b.WriteString(bar) // right end bar after the last tab
 	}
 	line := b.String()
 	if lipgloss.Width(line) < width {

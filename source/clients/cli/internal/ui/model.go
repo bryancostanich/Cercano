@@ -3604,9 +3604,11 @@ func (m Model) View() tea.View {
 	default:
 		if m.hasSubAgentTabs() {
 			parts = append(parts, m.renderChatTabStrip())
-			// A rule under the strip so the tabs read as real tabs, matching the
-			// header divider above. Its row is reserved in scrollbarTop/bodyH below.
-			parts = append(parts, m.styles.BorderDim.Render(strings.Repeat("─", m.width)))
+			// A top-border glyph under the strip so the tabs read as real tabs.
+			// ▔ (upper one-eighth block) sits at the TOP of its cell so the line
+			// hugs the tabs directly above, unlike ─ which centers it in the row.
+			// Its row is reserved in scrollbarTop/bodyH below.
+			parts = append(parts, m.styles.BorderDim.Render(strings.Repeat("▔", m.width)))
 		}
 		parts = append(parts, m.renderViewportWithScrollbar())
 		if m.recap != "" {

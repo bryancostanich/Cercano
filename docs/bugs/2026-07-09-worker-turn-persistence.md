@@ -68,9 +68,22 @@ foreign key.
 the user turn is persisted up front. The existing `worker.TestBothModes_Parity`
 also exercises the path and caught a follow-on nil-deref during the fix.
 
-## Known follow-ups (not data loss)
+## Follow-ups — RESOLVED (commit 1938863f)
 
-Recap, compaction, and context-usage recording still do not run for
-worker-executed turns (they are host-owned and not yet scheduled after a worker
-turn returns). These are degradations (auto-title, compaction), not data loss,
-and are tracked separately.
+Recap, compaction, and context-usage recording did not run for worker-executed
+turns (host-owned, skipped by the Agent-less worker child). An audit also found
+a fourth: usage/cost telemetry was dropped (`workerResolver.SetUsageSink` is a
+no-op and the child provider is never `usage.Wrap`-ped). All four now run
+host-side via `Server.workerPostTurn`, invoked for worker turns only right after
+`RunTurn`, using the model + aggregate token counts the worker returns in
+`TurnDone`:
+
+- `RecordContextUsage` — the context meter advances, so reactive auto-compaction
+  triggers again (a long worker conversation was otherwise at risk of growing
+  until it overflowed the model context) and the context % is accurate.
+- `ScheduleRecap` / `ScheduleCompaction` — auto-titles and background compaction.
+- one aggregate usage event per worker turn so cost/usage telemetry does not
+  silently zero out (in-process still emits per model call via `usage.Wrap`).
+
+In-process is untouched (the runner already did this), so no double-counting.
+Regression: `internal/server/worker_postturn_test.go`.

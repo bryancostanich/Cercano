@@ -362,4 +362,45 @@ file, or touching more than a couple of files goes through the full
 worktree flow. When in doubt, ask the user which workspace they want.
 `,
 	},
+	{
+		Name:        "delegate-git-plumbing",
+		Description: "Delegate noisy git plumbing to a sub-agent so its churn stays out of the main context.",
+		Domain:      DomainCore,
+		Trigger:     "Before running git plumbing (worktree, rebase, status/diff, fast-forward, land, bisect) inline → delegate it to a sub-agent via the `dispatch` tool (aka `workflow`), which returns just the branch and SHA so porcelain and diffs stay out of the main context.",
+		Body: `# Delegate Git Plumbing Protocol
+
+Git plumbing is noisy and its output has no lasting value once the operation
+is done — only the outcome (which branch, which SHA, or which file
+conflicted) matters afterward. Run it in a sub-agent, not inline, so the
+porcelain, diffs, and rebase or merge logs never flood the main context.
+
+## The Rule
+
+When the work is git mechanics — creating a worktree, rebasing, inspecting
+status or diff, fast-forwarding, running a land's test-gate, or bisecting —
+hand it to a sub-agent via the ` + "`dispatch`" + ` capability (its ` + "`workflow`" + ` alias
+works too). The sub-agent does the churn and returns one line: the resulting
+branch and short SHA, or "conflict at <file>".
+
+## Guardrails
+
+- The sub-agent must scope every command with git -C <abs-worktree> and
+  report the exact branch and SHA it acted on. A sub-agent's git can
+  otherwise silently land in the shared main checkout.
+- Merge-to-main is never implied by delegation. Only land to main when the
+  user's instruction for that specific work authorized it.
+- Authorization and final verification stay with the top-level agent. Only
+  the mechanics are delegated — you still confirm the result yourself.
+- Read-only git delegations run silent; granting write or exec tools trips a
+  single confirm-once prompt at dispatch time. That is itself a reason to
+  bundle a whole git operation into one sub-agent call rather than many.
+
+## What This Prevents
+
+- Rebase logs, status dumps, and diffs flooding the shared context for work
+  whose only durable output is a ref.
+- Sub-agent commits landing on the wrong branch or the shared main checkout.
+- A delegation being mistaken for standing permission to merge to main.
+`,
+	},
 }

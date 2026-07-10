@@ -6,7 +6,7 @@ import (
 )
 
 func TestCoreCatalogComplete(t *testing.T) {
-	want := []string{"compute-before-simulate", "design-decisions", "systematic-debugging", "verification-strategy", "worktree-first"}
+	want := []string{"compute-before-simulate", "delegate-git-plumbing", "design-decisions", "systematic-debugging", "verification-strategy", "worktree-first"}
 	for _, name := range want {
 		p, ok := Get(name)
 		if !ok {
@@ -82,5 +82,27 @@ func TestDesignDecisionsHasMergedSteps(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(p.Body), "argue against your own recommendation") {
 		t.Fatal("design-decisions missing the argue-against-yourself step")
+	}
+}
+
+func TestDelegateGitPlumbingNamesDispatchTool(t *testing.T) {
+	p, ok := Get("delegate-git-plumbing")
+	if !ok {
+		t.Fatal("delegate-git-plumbing missing")
+	}
+	// The point of the protocol is to steer git mechanics onto the dispatch
+	// sub-agent. If a future edit rewrites it to generic "delegate it"
+	// language, the model won't know which tool to reach for — so both the
+	// steering trigger and the body must name the dispatch tool explicitly.
+	if !strings.Contains(p.Trigger, "dispatch") {
+		t.Fatal("delegate-git-plumbing trigger must name the dispatch tool so the steering block surfaces it")
+	}
+	if !strings.Contains(p.Body, "dispatch") {
+		t.Fatal("delegate-git-plumbing body must name the dispatch tool explicitly")
+	}
+	// The core hazard the body must call out: a sub-agent's git silently
+	// landing in the shared main checkout unless scoped with git -C.
+	if !strings.Contains(p.Body, "git -C") {
+		t.Fatal("delegate-git-plumbing body must show the git -C <worktree> scoping guardrail")
 	}
 }

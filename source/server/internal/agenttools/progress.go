@@ -21,6 +21,7 @@ type ProgressEvent struct {
 	ToolUseID   string
 	ToolName    string
 	ArgsSummary string
+	ArgsJSON    string
 	Summary     string
 	Detail      string
 	StartLine   int

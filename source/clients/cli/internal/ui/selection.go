@@ -74,12 +74,18 @@ func (s textSelection) lineRange(line, width int) (int, int, bool) {
 // selection rather than a flat one-color block.
 const selectionBg = "\x1b[48;2;45;79;97m" // #2D4F61
 
-var ansiResetRe = regexp.MustCompile("\x1b\\[0?m")
+// ansiSGRRe matches any SGR escape sequence. highlightRange re-asserts the
+// selection background after *every* SGR (not just resets) so a background set
+// by the line itself — e.g. the navy fill behind sent-prompt lines — can't
+// override the selection and hide it. Matching only resets let such a
+// background-set SGR (which has no following reset) win, leaving the selection
+// invisible on any line with its own background.
+var ansiSGRRe = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 // highlightRange overlays the selection background on the visible columns
 // [start,end) of an already-styled line, preserving the per-character foreground
-// colors. The background is re-applied after every SGR reset so inner resets
-// don't drop it.
+// colors. The selection background is re-asserted after every SGR so inner
+// style changes — including background fills — don't drop or override it.
 func highlightRange(line string, start, end int) string {
 	w := ansi.StringWidth(line)
 	if start < 0 {
@@ -94,7 +100,7 @@ func highlightRange(line string, start, end int) string {
 	before := ansi.Cut(line, 0, start)
 	mid := ansi.Cut(line, start, end)
 	after := ansi.Cut(line, end, w)
-	mid = selectionBg + ansiResetRe.ReplaceAllStringFunc(mid, func(r string) string {
+	mid = selectionBg + ansiSGRRe.ReplaceAllStringFunc(mid, func(r string) string {
 		return r + selectionBg
 	}) + "\x1b[0m"
 	return before + mid + after

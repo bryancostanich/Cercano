@@ -94,6 +94,12 @@ type Server struct {
 	inProcessRunner runnersvc.TurnRunner // in-process turn execution; rebuilt when perms arrive
 	workerRunner    runnersvc.TurnRunner // worker-process execution; nil unless worker mode selected
 
+	// usageSink records per-turn token usage for telemetry. Held here (in
+	// addition to providerSvc) so the server can emit an aggregate usage event
+	// for WORKER turns — the worker child's provider is never wrapped by
+	// resolveMainProvider, so no usage would otherwise be recorded.
+	usageSink func(usage.Usage)
+
 	events *eventHub // server->client push fan-out (SubscribeEvents)
 
 	// turnBroker owns the per-conversation turn-exclusivity registry. A new
@@ -301,6 +307,10 @@ func (s *Server) OpenLLMProvider() llm.Provider  { return s.providerSvc.OpenLLMP
 // read raw providers without double-counting.
 func (s *Server) SetUsageSink(fn func(usage.Usage)) {
 	s.providerSvc.SetUsageSink(fn)
+	// Keep a reference so worker turns (whose child provider is unwrapped) can
+	// still emit an aggregate usage event — see the worker post-turn bookkeeping
+	// in streamProcessRequestWithToolLoop.
+	s.usageSink = fn
 }
 
 // SetSecrets attaches the secrets store used to retrieve profile API keys.
@@ -2168,6 +2178,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	type turnResult struct {
 		result runnersvc.Result
 		err    error
+		worker bool // true if this turn ran in the worker child (post-turn bookkeeping is then host-owned)
 	}
 	doneCh := make(chan turnResult, 1)
 
@@ -2208,8 +2219,9 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 				fmt.Fprintf(os.Stderr, "[server] worker EnsureConversation(%s) failed: %v\n", convID, err)
 			}
 		}
+		isWorker := s.workerRunner != nil && tr == s.workerRunner
 		res, err := tr.RunTurn(ctx, runReq, sink, requester, persist)
-		doneCh <- turnResult{result: res, err: err}
+		doneCh <- turnResult{result: res, err: err, worker: isWorker}
 	}()
 
 	// Drain the initiator's subscriber channel to the stream.
@@ -2279,8 +2291,15 @@ drainLoop:
 		})
 	}
 
-	// Send the final response. The runner has already done post-turn bookkeeping
-	// (ScheduleRecap, RecordContextUsage) before returning.
+	// Post-turn bookkeeping for WORKER turns. In-process, runner.Core does this
+	// via c.d.Agent inside RunTurn; the worker child has no Agent and skips it,
+	// so the host compensates here. Runs for worker turns only (tr.worker) —
+	// in-process already did it, so no double-counting.
+	if tr.worker {
+		s.workerPostTurn(convID, tr.result)
+	}
+
+	// Send the final response.
 	return stream.Send(&proto.StreamProcessResponse{
 		Payload: &proto.StreamProcessResponse_FinalResponse{
 			FinalResponse: &proto.ProcessRequestResponse{
@@ -2294,6 +2313,39 @@ drainLoop:
 			},
 		},
 	})
+}
+
+// workerPostTurn runs the host-owned post-turn bookkeeping that the worker
+// child's runner skips (the child has no Agent): context-usage recording (so the
+// context meter advances and reactive auto-compaction can trigger), recap +
+// compaction scheduling (auto-titles / background compaction), and usage
+// telemetry. In-process, runner.Core does all of this inside RunTurn. Uses the
+// model + aggregate token counts the worker returned. No-op when there is no
+// conversation or no host Agent.
+func (s *Server) workerPostTurn(convID string, res runnersvc.Result) {
+	if convID == "" || s.agent == nil {
+		return
+	}
+	model := ""
+	if s.providerSvc != nil {
+		model = s.providerSvc.MainModel(res.IsCloud)
+	}
+	s.agent.RecordContextUsage(convID, model, res.InputTokens, res.OutputTokens)
+	s.agent.ScheduleRecap(convID)
+	s.agent.ScheduleCompaction(convID)
+	// Usage telemetry: one aggregate event for the whole worker turn — the host
+	// only has turn totals (the child provider is unwrapped), whereas in-process
+	// emits per model call via usage.Wrap. Approximate, but keeps cost/usage
+	// stats from silently zeroing out under worker mode.
+	if s.usageSink != nil {
+		s.usageSink(usage.Usage{
+			Source:       "main",
+			Model:        model,
+			IsCloud:      res.IsCloud,
+			InputTokens:  res.InputTokens,
+			OutputTokens: res.OutputTokens,
+		})
+	}
 }
 
 // brokerSink implements runner.EventSink by publishing each event to the turn

@@ -84,25 +84,34 @@ func (c *Core) RunTurn(
 	// assistant/tool-result turns are persisted incrementally via persist
 	// (OnTurnComplete). On the rare cross-tier fallback retry, already-persisted
 	// assistant turns may be re-persisted — non-destructive.
-	persistEnabled := c.d.Agent != nil && req.ConversationID != "" &&
-		c.d.Agent.PersistentStore() != nil
+	// Persistence is enabled whenever the host supplied a persist sink and this
+	// is a real conversation. In-process the sink writes to the local store; in
+	// worker mode it forwards over the stream to the host, which owns the store.
+	// (Previously this was gated on c.d.Agent != nil, which is nil in the worker
+	// child process — silently disabling ALL persistence for worker-executed
+	// turns. See docs/bugs/2026-07-09-worker-turn-persistence.md.)
+	persistEnabled := persist != nil && req.ConversationID != ""
 	if persistEnabled {
-		if err := c.d.Agent.PersistentStore().EnsureConversation(
-			ctx, req.ConversationID, req.WorkDir, c.d.Providers.MainModel(isCloud),
-		); err != nil {
-			fmt.Fprintf(os.Stderr, "[tool-loop] EnsureConversation(%s) failed: %v\n", req.ConversationID, err)
-			persistEnabled = false
-			// Surface the failure so the user knows the turn won't appear in /resume
-			// (see docs/bugs/2026-07-04-user-message-tear.md).
-			sink.Emit(Event{
-				Kind: EventProgress,
-				Text: "⚠ conversation persistence unavailable this turn — it will not appear in /resume",
-			})
-		} else {
-			// Persist the user turn before calling the model.
-			if persist != nil {
-				persist(agent.UserMessage(req.Input, req.Images))
+		// In-process the runner owns the store and must create the conversation
+		// row before the first write. In worker mode the child has no local
+		// store (c.d.Agent == nil); the host ensures the row up front, so skip.
+		if c.d.Agent != nil && c.d.Agent.PersistentStore() != nil {
+			if err := c.d.Agent.PersistentStore().EnsureConversation(
+				ctx, req.ConversationID, req.WorkDir, c.d.Providers.MainModel(isCloud),
+			); err != nil {
+				fmt.Fprintf(os.Stderr, "[tool-loop] EnsureConversation(%s) failed: %v\n", req.ConversationID, err)
+				persistEnabled = false
+				// Surface the failure so the user knows the turn won't appear in /resume
+				// (see docs/bugs/2026-07-04-user-message-tear.md).
+				sink.Emit(Event{
+					Kind: EventProgress,
+					Text: "⚠ conversation persistence unavailable this turn — it will not appear in /resume",
+				})
 			}
+		}
+		// Persist the user turn before calling the model (crash resilience).
+		if persistEnabled {
+			persist(agent.UserMessage(req.Input, req.Images))
 		}
 	}
 
@@ -196,8 +205,13 @@ func (c *Core) RunTurn(
 		}
 	}
 
-	// Post-turn bookkeeping: recap, compaction, token accounting.
-	if persistEnabled {
+	// Post-turn bookkeeping: recap, compaction, token accounting. Recap and
+	// compaction are host-owned (they operate on the persisted history via the
+	// Agent). In worker mode the child has no Agent (c.d.Agent == nil), so it
+	// must skip them here or ScheduleRecap nil-derefs — the earlier persistEnabled
+	// gate used to imply Agent != nil, but no longer does now that worker turns
+	// persist. RecordContextUsage below is nil-receiver-safe.
+	if persistEnabled && c.d.Agent != nil {
 		c.d.Agent.ScheduleRecap(req.ConversationID)
 		c.d.Agent.ScheduleCompaction(req.ConversationID)
 	}

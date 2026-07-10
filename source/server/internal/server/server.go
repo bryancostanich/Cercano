@@ -2190,7 +2190,25 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		}()
 		// Per-turn runner pick. See pickTurnRunner: in-process by default; the
 		// worker only when armed AND this turn touches no host-side MCP tool.
-		res, err := s.pickTurnRunner().RunTurn(ctx, runReq, sink, requester, persist)
+		tr := s.pickTurnRunner()
+		// Worker turns run in a child process with no local store, so ensure the
+		// conversation row on the host here — otherwise the worker's forwarded
+		// turn writes hit a missing-parent foreign key and are silently dropped
+		// (see docs/bugs/2026-07-09-worker-turn-persistence.md). In-process the
+		// runner ensures the row itself. Model only backfills an empty column on
+		// first insert (EnsureConversation preserves a non-empty model), so the
+		// primary model is a safe value.
+		if convID != "" && s.workerRunner != nil && tr == s.workerRunner &&
+			s.agent != nil && s.agent.PersistentStore() != nil {
+			model := ""
+			if s.providerSvc != nil {
+				model = s.providerSvc.PrimaryModel()
+			}
+			if err := s.agent.PersistentStore().EnsureConversation(ctx, convID, runReq.WorkDir, model); err != nil {
+				fmt.Fprintf(os.Stderr, "[server] worker EnsureConversation(%s) failed: %v\n", convID, err)
+			}
+		}
+		res, err := tr.RunTurn(ctx, runReq, sink, requester, persist)
 		doneCh <- turnResult{result: res, err: err}
 	}()
 

@@ -20,7 +20,7 @@ import (
 // DefaultVersion is the pinned @rynfar/meridian npm version Cercano spawns.
 // Bumping this is a deliberate act — verify the upstream changelog and
 // re-test the full Claude Max round-trip first.
-const DefaultVersion = "1.45.0"
+const DefaultVersion = "1.45.2"
 
 // State is the lifecycle phase of the Meridian subprocess from Cercano's
 // point of view. The transitions are: Disabled → (PrereqsMissing | NeedsAuth

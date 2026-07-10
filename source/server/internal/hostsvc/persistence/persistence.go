@@ -20,8 +20,8 @@ import (
 	"cercano/source/server/internal/compactiongen"
 	"cercano/source/server/internal/compactor"
 	projectctx "cercano/source/server/internal/context"
-	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/contextedit"
+	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
@@ -94,6 +94,7 @@ type Service interface {
 	RenameConversation(ctx context.Context, req *proto.RenameConversationRequest) (*proto.RenameConversationResponse, error)
 	GetConversationTurns(ctx context.Context, req *proto.GetConversationTurnsRequest) (*proto.GetConversationTurnsResponse, error)
 	ListSubAgents(ctx context.Context, req *proto.ListSubAgentsRequest) (*proto.ListSubAgentsResponse, error)
+	DismissSubAgent(ctx context.Context, req *proto.DismissSubAgentRequest) (*proto.DismissSubAgentResponse, error)
 	GetContextUsage(ctx context.Context, req *proto.GetContextUsageRequest) (*proto.GetContextUsageResponse, error)
 	GetCompactionState(ctx context.Context, req *proto.GetCompactionStateRequest) (*proto.GetCompactionStateResponse, error)
 	ExportContext(ctx context.Context, req *proto.ExportContextRequest) (*proto.ExportContextResponse, error)
@@ -462,6 +463,22 @@ func (x *svc) ListSubAgents(ctx context.Context, req *proto.ListSubAgentsRequest
 	return out, nil
 }
 
+func (x *svc) DismissSubAgent(ctx context.Context, req *proto.DismissSubAgentRequest) (*proto.DismissSubAgentResponse, error) {
+	out := &proto.DismissSubAgentResponse{}
+	if x.convAgent == nil {
+		return out, nil
+	}
+	store := x.convAgent.PersistentStore()
+	id := req.GetConversationId()
+	if store == nil || id == "" {
+		return out, nil
+	}
+	if err := store.MarkSubagentDismissed(ctx, id); err != nil {
+		return nil, fmt.Errorf("mark subagent dismissed: %w", err)
+	}
+	return out, nil
+}
+
 func (x *svc) GetConversationTurns(ctx context.Context, req *proto.GetConversationTurnsRequest) (*proto.GetConversationTurnsResponse, error) {
 	out := &proto.GetConversationTurnsResponse{}
 	if x.convAgent == nil {
@@ -482,6 +499,7 @@ func (x *svc) GetConversationTurns(ctx context.Context, req *proto.GetConversati
 	}
 	return out, nil
 }
+
 // GetContextUsage reports cumulative token usage vs. the active model's
 // context-window size for a conversation.
 func (x *svc) GetContextUsage(ctx context.Context, req *proto.GetContextUsageRequest) (*proto.GetContextUsageResponse, error) {

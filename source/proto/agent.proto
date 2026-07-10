@@ -42,6 +42,12 @@ service Agent {
   // transcripts (fetched per child via ResumeConversation).
   rpc ListSubAgents (ListSubAgentsRequest) returns (ListSubAgentsResponse) {}
 
+  // DismissSubAgent marks a persisted sub-agent conversation as dismissed so a
+  // resumed CLI does not reopen its tab (the user closed it, or the tab was
+  // swept when its turn finished). Best-effort: the child transcript stays in
+  // the store, it just no longer surfaces as a tab.
+  rpc DismissSubAgent (DismissSubAgentRequest) returns (DismissSubAgentResponse) {}
+
   // GetContextUsage reports cumulative token usage vs. the active model's
   // context window for a conversation. The CLI status bar polls this after
   // each streamed turn.
@@ -667,6 +673,11 @@ message GetConversationRequest { string conversation_id = 1; }
 // via ResumeConversation.
 message ListSubAgentsRequest  { string parent_id = 1; }
 message ListSubAgentsResponse { repeated SubAgentConversation subagents = 1; }
+
+// DismissSubAgent surface: the CLI passes the sub-agent conversation id to hide
+// its tab on future resumes. Response is empty (best-effort).
+message DismissSubAgentRequest  { string conversation_id = 1; }
+message DismissSubAgentResponse {}
 
 // SubAgentConversation is one persisted sub-agent loop's identity: enough for
 // the CLI to recreate its tab (title + granted tools) and then fetch the

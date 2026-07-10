@@ -1212,6 +1212,13 @@ func (s *Server) ListSubAgents(ctx context.Context, req *proto.ListSubAgentsRequ
 	return s.persistSvc.ListSubAgents(ctx, req)
 }
 
+// DismissSubAgent implements proto.AgentServer — marks a sub-agent conversation
+// dismissed so a resumed CLI does not reopen its tab (delegates to the
+// persistence service).
+func (s *Server) DismissSubAgent(ctx context.Context, req *proto.DismissSubAgentRequest) (*proto.DismissSubAgentResponse, error) {
+	return s.persistSvc.DismissSubAgent(ctx, req)
+}
+
 // ListTools implements proto.AgentServer — enumerates the agent's tool
 // registry for the CLI's /tools listing. Returns an empty list when no
 // registry was wired (e.g. tests that don't need tools).

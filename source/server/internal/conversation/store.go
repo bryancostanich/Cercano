@@ -97,6 +97,12 @@ type Store interface {
 	// post-mortems and tab restore.
 	EnsureSubagentConversation(ctx context.Context, id, parentID, projectDir, model string, grantedTools []string) error
 
+	// MarkSubagentDismissed flags a sub-agent conversation as dismissed so
+	// ListChildren skips it. The CLI calls this when the user closes a
+	// sub-agent tab or it's swept on turn completion, so a resumed CLI does not
+	// reopen it. The transcript stays in the store; only the tab is hidden.
+	MarkSubagentDismissed(ctx context.Context, conversationID string) error
+
 	// Append records one turn. Updates the conversation's last_turn_at. If
 	// this is the first user turn and the conversation has no title, derives
 	// one algorithmically from the content.
@@ -209,6 +215,7 @@ func Open(path string) (Store, error) {
 		`ALTER TABLE conversations ADD COLUMN kind TEXT NOT NULL DEFAULT 'main'`,
 		`ALTER TABLE conversations ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE conversations ADD COLUMN granted_tools TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE conversations ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0`,
 	} {
 		if _, err := db.Exec(alter); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			db.Close()
@@ -433,7 +440,7 @@ func (s *sqliteStore) ListChildren(ctx context.Context, parentID string) ([]Info
 		       c.recap, c.recap_updated_at, c.kind, c.parent_id, c.granted_tools,
 		       (SELECT COUNT(*) FROM turns t WHERE t.conversation_id = c.id) AS turn_count
 		FROM conversations c
-		WHERE c.parent_id = ? AND c.kind = 'subagent'
+		WHERE c.parent_id = ? AND c.kind = 'subagent' AND c.dismissed = 0
 		ORDER BY c.started_at ASC`, parentID)
 	if err != nil {
 		return nil, err
@@ -591,6 +598,21 @@ func (s *sqliteStore) SetGeneratedTitle(ctx context.Context, conversationID, tit
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE conversations SET title = ? WHERE id = ? AND title_source != 'user'`,
 		title, conversationID)
+	return err
+}
+
+// MarkSubagentDismissed sets dismissed = 1 on a sub-agent conversation so
+// ListChildren no longer returns it. Guarded to kind = 'subagent' so it can
+// never hide a main conversation. Idempotent.
+func (s *sqliteStore) MarkSubagentDismissed(ctx context.Context, conversationID string) error {
+	if conversationID == "" {
+		return errors.New("conversation id required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE conversations SET dismissed = 1 WHERE id = ? AND kind = 'subagent'`,
+		conversationID)
 	return err
 }
 

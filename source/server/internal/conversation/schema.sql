@@ -19,7 +19,10 @@ CREATE TABLE IF NOT EXISTS conversations (
     -- dispatch loop was granted. Tool names are identifiers with no commas, so
     -- a plain join round-trips cleanly. Lets a resumed CLI reopen each
     -- sub-agent tab with the same tool set it showed live.
-    granted_tools TEXT NOT NULL DEFAULT ''
+    granted_tools TEXT NOT NULL DEFAULT '',
+    -- dismissed: 1 when a sub-agent tab was closed or swept in the CLI, so a
+    -- resumed CLI skips reopening it (ListChildren filters dismissed = 0).
+    dismissed INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_conv_project ON conversations(project_dir, last_turn_at DESC);
 CREATE INDEX IF NOT EXISTS idx_conv_last_turn ON conversations(last_turn_at DESC);

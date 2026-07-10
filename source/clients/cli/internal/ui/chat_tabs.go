@@ -218,6 +218,7 @@ func (m *Model) closeSubAgentTab(id string) bool {
 	m.chatTabs.order = order
 	delete(m.chatTabs.tabs, id)
 	m.chatTabs.closed[id] = true
+	m.dismissSubAgentTab(id) // persist the close so a resume doesn't reopen it
 	if m.chatTabs.active == id {
 		m.chatTabs.active = fallback
 	}
@@ -268,6 +269,7 @@ func (m *Model) cleanupFinishedSubAgentTabs() {
 			continue
 		}
 		delete(m.chatTabs.tabs, id)
+		m.dismissSubAgentTab(id) // persist the sweep so a resume doesn't reopen it
 	}
 	m.chatTabs.order = order
 	if !m.hasSubAgentTabs() {

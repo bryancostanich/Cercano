@@ -505,6 +505,13 @@ func (c *Client) ListSubAgents(ctx context.Context, parentID string) ([]SubAgent
 	return out, nil
 }
 
+// DismissSubAgent marks a sub-agent conversation dismissed so a resumed CLI
+// does not reopen its tab. Best-effort from the caller's side.
+func (c *Client) DismissSubAgent(ctx context.Context, conversationID string) error {
+	_, err := c.agent.DismissSubAgent(ctx, &proto.DismissSubAgentRequest{ConversationId: conversationID})
+	return err
+}
+
 // DeleteConversation removes a persisted conversation.
 func (c *Client) DeleteConversation(ctx context.Context, conversationID string) error {
 	_, err := c.agent.DeleteConversation(ctx, &proto.DeleteConversationRequest{ConversationId: conversationID})

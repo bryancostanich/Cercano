@@ -2835,6 +2835,22 @@ func resumeEntries(turns []agentclient.PersistedTurn, frozenThrough int64) []*En
 // nextSubAgentTitle recompute "sub 1" / "sub 1.1"-style labels from the
 // parent/child relationships. Best-effort: any RPC failure leaves the main
 // resume intact and simply skips (or partially fills) tab restore.
+// dismissSubAgentTab best-effort tells the server to stop reopening this
+// sub-agent's tab on future resumes. Fire-and-forget: if it fails, the tab may
+// reappear after a restart, and the next close/sweep re-dismisses it. Skips the
+// main tab and no-ops when there's no agent client (tests).
+func (m *Model) dismissSubAgentTab(id string) {
+	if m.agent == nil || id == mainChatTabID || id == "" {
+		return
+	}
+	agent := m.agent
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = agent.DismissSubAgent(ctx, id)
+	}()
+}
+
 func (m *Model) restoreSubAgentTabs(ctx context.Context, conversationID string) {
 	children, err := m.agent.ListSubAgents(ctx, conversationID)
 	if err != nil || len(children) == 0 {

@@ -192,3 +192,21 @@ func TestCleanupFinishedSubAgentTabs(t *testing.T) {
 		t.Fatal("strip focus should release when no sub tabs remain")
 	}
 }
+
+func TestCleanupFinishedSubAgentTabs_SparesRestored(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.applySubAgentEvent(subAgentEventMsg{id: "r1", kind: "started"})
+	// Mark it as applyResume would: a finished tab rebuilt from a transcript.
+	if tab := m.chatTabs.tabs["r1"]; tab != nil {
+		tab.done = true
+		tab.restored = true
+	}
+	// Focus main so r1 is finished AND non-active: a normal finished tab would
+	// be swept here, but a restored one must survive.
+	m.switchChatTab(mainChatTabID)
+	m.cleanupFinishedSubAgentTabs()
+	if _, ok := m.chatTabs.tabs["r1"]; !ok {
+		t.Fatal("restored finished tab must survive cleanup")
+	}
+}

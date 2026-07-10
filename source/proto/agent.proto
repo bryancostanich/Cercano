@@ -36,6 +36,12 @@ service Agent {
   rpc RenameConversation (RenameConversationRequest) returns (RenameConversationResponse) {}
   rpc GetConversation (GetConversationRequest) returns (Conversation) {}
 
+  // ListSubAgents returns the persisted sub-agent (dispatch) conversations
+  // spawned under a parent conversation, in spawn order. The CLI calls this on
+  // resume to reopen each sub-agent chat tab, populated from the persisted
+  // transcripts (fetched per child via ResumeConversation).
+  rpc ListSubAgents (ListSubAgentsRequest) returns (ListSubAgentsResponse) {}
+
   // GetContextUsage reports cumulative token usage vs. the active model's
   // context window for a conversation. The CLI status bar polls this after
   // each streamed turn.
@@ -653,6 +659,26 @@ message RenameConversationRequest  { string conversation_id = 1; string title = 
 message RenameConversationResponse { bool ok = 1; }
 
 message GetConversationRequest { string conversation_id = 1; }
+
+// ListSubAgents surface: the CLI passes the parent (main) conversation id and
+// gets back the persisted sub-agent conversations spawned under it, in spawn
+// order. Each carries the granted tool set so a restored tab renders the same
+// "Tools: …" line it showed live; the transcript itself is fetched per child
+// via ResumeConversation.
+message ListSubAgentsRequest  { string parent_id = 1; }
+message ListSubAgentsResponse { repeated SubAgentConversation subagents = 1; }
+
+// SubAgentConversation is one persisted sub-agent loop's identity: enough for
+// the CLI to recreate its tab (title + granted tools) and then fetch the
+// transcript by id via ResumeConversation. parent_id links nested sub-agents
+// (a dispatch that itself dispatched) so the CLI can recompute "sub 1.1"-style
+// labels from the parent/child relationships.
+message SubAgentConversation {
+  string id = 1;
+  string parent_id = 2;
+  string title = 3;
+  repeated string granted_tools = 4;
+}
 
 // Context-window usage for a conversation. Used is the cumulative tokens
 // counted for this conversation; max is the conventional context-window

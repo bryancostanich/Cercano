@@ -29,6 +29,7 @@ const (
 	Agent_DeleteConversation_FullMethodName         = "/agent.Agent/DeleteConversation"
 	Agent_RenameConversation_FullMethodName         = "/agent.Agent/RenameConversation"
 	Agent_GetConversation_FullMethodName            = "/agent.Agent/GetConversation"
+	Agent_ListSubAgents_FullMethodName              = "/agent.Agent/ListSubAgents"
 	Agent_GetContextUsage_FullMethodName            = "/agent.Agent/GetContextUsage"
 	Agent_GetCompactionState_FullMethodName         = "/agent.Agent/GetCompactionState"
 	Agent_SuggestNextPrompt_FullMethodName          = "/agent.Agent/SuggestNextPrompt"
@@ -109,6 +110,11 @@ type AgentClient interface {
 	DeleteConversation(ctx context.Context, in *DeleteConversationRequest, opts ...grpc.CallOption) (*DeleteConversationResponse, error)
 	RenameConversation(ctx context.Context, in *RenameConversationRequest, opts ...grpc.CallOption) (*RenameConversationResponse, error)
 	GetConversation(ctx context.Context, in *GetConversationRequest, opts ...grpc.CallOption) (*Conversation, error)
+	// ListSubAgents returns the persisted sub-agent (dispatch) conversations
+	// spawned under a parent conversation, in spawn order. The CLI calls this on
+	// resume to reopen each sub-agent chat tab, populated from the persisted
+	// transcripts (fetched per child via ResumeConversation).
+	ListSubAgents(ctx context.Context, in *ListSubAgentsRequest, opts ...grpc.CallOption) (*ListSubAgentsResponse, error)
 	// GetContextUsage reports cumulative token usage vs. the active model's
 	// context window for a conversation. The CLI status bar polls this after
 	// each streamed turn.
@@ -361,6 +367,16 @@ func (c *agentClient) GetConversation(ctx context.Context, in *GetConversationRe
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Conversation)
 	err := c.cc.Invoke(ctx, Agent_GetConversation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) ListSubAgents(ctx context.Context, in *ListSubAgentsRequest, opts ...grpc.CallOption) (*ListSubAgentsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListSubAgentsResponse)
+	err := c.cc.Invoke(ctx, Agent_ListSubAgents_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -922,6 +938,11 @@ type AgentServer interface {
 	DeleteConversation(context.Context, *DeleteConversationRequest) (*DeleteConversationResponse, error)
 	RenameConversation(context.Context, *RenameConversationRequest) (*RenameConversationResponse, error)
 	GetConversation(context.Context, *GetConversationRequest) (*Conversation, error)
+	// ListSubAgents returns the persisted sub-agent (dispatch) conversations
+	// spawned under a parent conversation, in spawn order. The CLI calls this on
+	// resume to reopen each sub-agent chat tab, populated from the persisted
+	// transcripts (fetched per child via ResumeConversation).
+	ListSubAgents(context.Context, *ListSubAgentsRequest) (*ListSubAgentsResponse, error)
 	// GetContextUsage reports cumulative token usage vs. the active model's
 	// context window for a conversation. The CLI status bar polls this after
 	// each streamed turn.
@@ -1091,6 +1112,9 @@ func (UnimplementedAgentServer) RenameConversation(context.Context, *RenameConve
 }
 func (UnimplementedAgentServer) GetConversation(context.Context, *GetConversationRequest) (*Conversation, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetConversation not implemented")
+}
+func (UnimplementedAgentServer) ListSubAgents(context.Context, *ListSubAgentsRequest) (*ListSubAgentsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListSubAgents not implemented")
 }
 func (UnimplementedAgentServer) GetContextUsage(context.Context, *GetContextUsageRequest) (*GetContextUsageResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetContextUsage not implemented")
@@ -1419,6 +1443,24 @@ func _Agent_GetConversation_Handler(srv interface{}, ctx context.Context, dec fu
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AgentServer).GetConversation(ctx, req.(*GetConversationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_ListSubAgents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListSubAgentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).ListSubAgents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_ListSubAgents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).ListSubAgents(ctx, req.(*ListSubAgentsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2290,6 +2332,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetConversation",
 			Handler:    _Agent_GetConversation_Handler,
+		},
+		{
+			MethodName: "ListSubAgents",
+			Handler:    _Agent_ListSubAgents_Handler,
 		},
 		{
 			MethodName: "GetContextUsage",

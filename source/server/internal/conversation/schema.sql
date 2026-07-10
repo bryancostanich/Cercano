@@ -14,7 +14,12 @@ CREATE TABLE IF NOT EXISTS conversations (
     -- dispatch tool loops (hidden from List). parent_id links a subagent loop
     -- to the conversation whose dispatch spawned it.
     kind      TEXT NOT NULL DEFAULT 'main',
-    parent_id TEXT NOT NULL DEFAULT ''
+    parent_id TEXT NOT NULL DEFAULT '',
+    -- granted_tools: for subagent rows, the comma-joined tool names the
+    -- dispatch loop was granted. Tool names are identifiers with no commas, so
+    -- a plain join round-trips cleanly. Lets a resumed CLI reopen each
+    -- sub-agent tab with the same tool set it showed live.
+    granted_tools TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_conv_project ON conversations(project_dir, last_turn_at DESC);
 CREATE INDEX IF NOT EXISTS idx_conv_last_turn ON conversations(last_turn_at DESC);

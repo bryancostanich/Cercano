@@ -93,6 +93,7 @@ type Service interface {
 	DeleteConversation(ctx context.Context, req *proto.DeleteConversationRequest) (*proto.DeleteConversationResponse, error)
 	RenameConversation(ctx context.Context, req *proto.RenameConversationRequest) (*proto.RenameConversationResponse, error)
 	GetConversationTurns(ctx context.Context, req *proto.GetConversationTurnsRequest) (*proto.GetConversationTurnsResponse, error)
+	ListSubAgents(ctx context.Context, req *proto.ListSubAgentsRequest) (*proto.ListSubAgentsResponse, error)
 	GetContextUsage(ctx context.Context, req *proto.GetContextUsageRequest) (*proto.GetContextUsageResponse, error)
 	GetCompactionState(ctx context.Context, req *proto.GetCompactionStateRequest) (*proto.GetCompactionStateResponse, error)
 	ExportContext(ctx context.Context, req *proto.ExportContextRequest) (*proto.ExportContextResponse, error)
@@ -431,6 +432,36 @@ func (x *svc) RenameConversation(ctx context.Context, req *proto.RenameConversat
 
 // GetConversationTurns returns display-ready summaries of a conversation's turns
 // for the /c context viewer. Reads the store only (side-effect-free).
+// ListSubAgents returns the persisted sub-agent (dispatch) conversations
+// spawned under a parent conversation, in spawn order, each carrying the
+// granted tool set so a resumed CLI can reopen the sub-agent tab exactly as it
+// showed live. The transcript itself is fetched per child via
+// ResumeConversation — this call is just the identity + tool-set index.
+func (x *svc) ListSubAgents(ctx context.Context, req *proto.ListSubAgentsRequest) (*proto.ListSubAgentsResponse, error) {
+	out := &proto.ListSubAgentsResponse{}
+	if x.convAgent == nil {
+		return out, nil
+	}
+	store := x.convAgent.PersistentStore()
+	parentID := req.GetParentId()
+	if store == nil || parentID == "" {
+		return out, nil
+	}
+	children, err := store.ListChildren(ctx, parentID)
+	if err != nil {
+		return nil, fmt.Errorf("list children: %w", err)
+	}
+	for _, c := range children {
+		out.Subagents = append(out.Subagents, &proto.SubAgentConversation{
+			Id:           c.ID,
+			ParentId:     c.ParentID,
+			Title:        c.Title,
+			GrantedTools: c.GrantedTools,
+		})
+	}
+	return out, nil
+}
+
 func (x *svc) GetConversationTurns(ctx context.Context, req *proto.GetConversationTurnsRequest) (*proto.GetConversationTurnsResponse, error) {
 	out := &proto.GetConversationTurnsResponse{}
 	if x.convAgent == nil {
@@ -451,7 +482,6 @@ func (x *svc) GetConversationTurns(ctx context.Context, req *proto.GetConversati
 	}
 	return out, nil
 }
-
 // GetContextUsage reports cumulative token usage vs. the active model's
 // context-window size for a conversation.
 func (x *svc) GetContextUsage(ctx context.Context, req *proto.GetContextUsageRequest) (*proto.GetContextUsageResponse, error) {

@@ -474,6 +474,37 @@ func (c *Client) ResumeConversation(ctx context.Context, conversationID string) 
 	return out, nil
 }
 
+// SubAgentInfo is one persisted sub-agent (dispatch) conversation spawned
+// under a parent conversation. Enough for the CLI to recreate its chat tab
+// (title + granted tools); the transcript is fetched separately by id via
+// ResumeConversation.
+type SubAgentInfo struct {
+	ID           string
+	ParentID     string
+	Title        string
+	GrantedTools []string
+}
+
+// ListSubAgents returns the persisted sub-agent conversations spawned under a
+// parent conversation, in spawn order. The CLI calls this on resume to reopen
+// each sub-agent chat tab, then fetches each transcript via ResumeConversation.
+func (c *Client) ListSubAgents(ctx context.Context, parentID string) ([]SubAgentInfo, error) {
+	resp, err := c.agent.ListSubAgents(ctx, &proto.ListSubAgentsRequest{ParentId: parentID})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SubAgentInfo, 0, len(resp.GetSubagents()))
+	for _, sa := range resp.GetSubagents() {
+		out = append(out, SubAgentInfo{
+			ID:           sa.GetId(),
+			ParentID:     sa.GetParentId(),
+			Title:        sa.GetTitle(),
+			GrantedTools: sa.GetGrantedTools(),
+		})
+	}
+	return out, nil
+}
+
 // DeleteConversation removes a persisted conversation.
 func (c *Client) DeleteConversation(ctx context.Context, conversationID string) error {
 	_, err := c.agent.DeleteConversation(ctx, &proto.DeleteConversationRequest{ConversationId: conversationID})

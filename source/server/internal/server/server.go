@@ -1195,6 +1195,13 @@ func (s *Server) RenameConversation(ctx context.Context, req *proto.RenameConver
 	return s.persistSvc.RenameConversation(ctx, req)
 }
 
+// ListSubAgents implements proto.AgentServer — delegates to persistSvc. It
+// returns the persisted sub-agent (dispatch) conversations spawned under a
+// parent conversation so a resumed CLI can reopen each sub-agent tab.
+func (s *Server) ListSubAgents(ctx context.Context, req *proto.ListSubAgentsRequest) (*proto.ListSubAgentsResponse, error) {
+	return s.persistSvc.ListSubAgents(ctx, req)
+}
+
 // ListTools implements proto.AgentServer — enumerates the agent's tool
 // registry for the CLI's /tools listing. Returns an empty list when no
 // registry was wired (e.g. tests that don't need tools).

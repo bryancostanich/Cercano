@@ -326,7 +326,7 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	var onTurn func(m llm.Message)
 	if store := x.dispatchStore(); store != nil {
 		id := conversation.NewID()
-		if perr := store.EnsureSubagentConversation(ctx, id, spec.ConversationID, spec.WorkDir, model); perr != nil {
+		if perr := store.EnsureSubagentConversation(ctx, id, spec.ConversationID, spec.WorkDir, model, granted); perr != nil {
 			log.Printf("[dispatch] subagent persistence unavailable: %v", perr)
 		} else {
 			subConvID = id

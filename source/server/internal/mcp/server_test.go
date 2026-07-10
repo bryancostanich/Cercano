@@ -113,6 +113,10 @@ func (m *mockAgentClient) ListConversations(ctx context.Context, in *proto.ListC
 	return &proto.ListConversationsResponse{}, nil
 }
 
+func (m *mockAgentClient) ListSubAgents(ctx context.Context, in *proto.ListSubAgentsRequest, opts ...grpc.CallOption) (*proto.ListSubAgentsResponse, error) {
+	return &proto.ListSubAgentsResponse{}, nil
+}
+
 func (m *mockAgentClient) ResumeConversation(ctx context.Context, in *proto.ResumeConversationRequest, opts ...grpc.CallOption) (*proto.ResumeConversationResponse, error) {
 	return &proto.ResumeConversationResponse{}, nil
 }

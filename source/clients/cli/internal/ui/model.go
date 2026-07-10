@@ -2787,6 +2787,43 @@ func resumeEntries(turns []agentclient.PersistedTurn, frozenThrough int64) []*En
 	return entries
 }
 
+// restoreSubAgentTabs reopens the sub-agent chat tabs for a resumed
+// conversation from their persisted transcripts. Each child dispatch loop was
+// saved as a hidden "subagent" conversation linked to this parent (see the
+// dispatch tool's persistence path); ListSubAgents returns them in spawn order
+// so a nested child is always processed after its parent, letting
+// nextSubAgentTitle recompute "sub 1" / "sub 1.1"-style labels from the
+// parent/child relationships. Best-effort: any RPC failure leaves the main
+// resume intact and simply skips (or partially fills) tab restore.
+func (m *Model) restoreSubAgentTabs(ctx context.Context, conversationID string) {
+	children, err := m.agent.ListSubAgents(ctx, conversationID)
+	if err != nil || len(children) == 0 {
+		return
+	}
+	// Start from a clean slate so child ordinals number from 1 and no tabs from
+	// a previously-active conversation linger in the strip.
+	m.dropSubAgentTabs()
+	for _, child := range children {
+		turns, terr := m.agent.ResumeConversation(ctx, child.ID)
+		if terr != nil {
+			continue
+		}
+		// ensureSubAgentTab mints the "sub N" / nested label from child.ParentID;
+		// SetEntriesSlice then replaces the placeholder "started" banner with the
+		// persisted transcript. frozenThrough is 0 here: sub-agent loops are not
+		// compacted, so there is no freeze boundary to mark.
+		view := m.ensureSubAgentTab(child.ID, child.ParentID, "", child.GrantedTools)
+		view.SetEntriesSlice(resumeEntries(turns, 0))
+		view.rebuild()
+		// Mark done+restored so the tab renders without an activity dot and, per
+		// cleanupFinishedSubAgentTabs, survives the next turn's sweep.
+		if tab := m.chatTabs.tabs[child.ID]; tab != nil {
+			tab.done = true
+			tab.restored = true
+		}
+	}
+}
+
 // applyResume updates the model + the convRef shared with the slash registry,
 // then rehydrates scrollback from the persisted turns. Returns a tea.Cmd that
 // fetches authoritative context usage from the server — the polling loop only
@@ -2835,6 +2872,10 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 	if info, err := m.agent.GetConversation(ctx, conversationID); err == nil {
 		m.recap = recapDisplay(info)
 	}
+	// Reopen the conversation's sub-agent tabs from their persisted
+	// transcripts so a resumed session shows the same child chat tabs it had
+	// before the CLI restarted. Best-effort; never blocks the main resume.
+	m.restoreSubAgentTabs(ctx, conversationID)
 	m.relayout()
 	cmds := []tea.Cmd{fetchContextUsage(m.agent, m.convID)}
 	if !m.bannerTickActive {

@@ -624,6 +624,17 @@ func selectOpenEngine(cfg config.Config, ollamaEng engine.InferenceEngine, llama
 	return ollamaEng, cfg.OpenChatModel()
 }
 
+const setupUsage = `Usage: cercano setup [--install-engine]
+
+Interactive first-run setup. Detects AI engine backends, writes
+~/.config/cercano/config.yaml, installs the telemetry hook, creates the
+research virtualenv, and pulls the default + embedding models.
+
+Flags:
+  --install-engine   Install a local inference engine (Ollama) if none is found.
+  -h, --help         Print this help and exit without changing anything.
+`
+
 func main() {
 	// Handle subcommands before flag parsing.
 	if len(os.Args) > 1 {
@@ -631,7 +642,11 @@ func main() {
 		case "setup":
 			installEngine := false
 			for _, arg := range os.Args[2:] {
-				if arg == "--install-engine" {
+				switch arg {
+				case "-h", "--help":
+					fmt.Print(setupUsage)
+					return
+				case "--install-engine":
 					installEngine = true
 				}
 			}

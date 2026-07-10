@@ -145,9 +145,10 @@ Everything below is **BUILT and merged to `main`**.
 - **0b Part C watchdog: DONE** (five increments, all under [`watchdog/`](watchdog/)):
   the protocol supervisor — a fast-model gate on the main tool loop (`WatchdogGate` +
   `WatchdogTurnEnd` seams), challenge/justify/escalate state machine, fail-open everywhere,
-  default-OFF. Four checks: `debug-loop`, `commit-checkpoint` (semantic work-boundary
+  default-OFF. Checks are named after the canonical protocols where possible:
+  `systematic-debugging`, `design-decisions`, `commit-checkpoint` (semantic work-boundary
   commit nudge), `plain-english` (turn-end register check that reopens the turn for a
-  rewrite), `worktree-first`. Client visibility (a `WatchdogEvent` stream message rendered
+  rewrite), `worktree-first`, and `follow-through`. Client visibility (a `WatchdogEvent` stream message rendered
   as CLI callouts + a debug echo of the watchdog/main exchange) and full runtime control
   from the settings page (Development Tools → Watchdog: enable, echo, mode, per-check
   toggles, escalate-after), applied live via a lock-free rebuild.

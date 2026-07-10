@@ -10,7 +10,7 @@ import (
 )
 
 // buildDragModel makes a Model with an overflowing chat viewport sized to match
-// production geometry: relayout does m.chat.SetSize(contentW-2, bodyH) where
+// production geometry: relayout does m.mainChat().SetSize(contentW-2, bodyH) where
 // contentW = m.width, so vp.Width() = w-2 = 78. The bar is painted at screen
 // column w-1 = 79; the gap is at w-2 = 78.
 func buildDragModel() Model {
@@ -20,12 +20,13 @@ func buildDragModel() Model {
 	content := strings.Repeat("xxxxxxxx\n", 50) // total 50 > height 10 → overflow
 	cv.vp.SetContent(content)
 	cv.plainLines = plainLines(content)
-	return Model{
+	m := Model{
 		width:        w,
 		height:       vh + 6,
 		scrollbarTop: 2, // header(1) + divider(1), no splash
-		chat:         cv,
 	}
+	m.setMainChat(cv)
+	return m
 }
 
 func send(t *testing.T, m Model, msg tea.Msg) Model {
@@ -40,7 +41,7 @@ func barDrag(t *testing.T, m Model) int {
 	t.Helper()
 	m = send(t, m, tea.MouseClickMsg{X: 79, Y: 2, Button: tea.MouseLeft})
 	m = send(t, m, tea.MouseMotionMsg{X: 79, Y: 9, Button: tea.MouseLeft})
-	return m.chat.YOffset()
+	return m.mainChat().YOffset()
 }
 
 // PROBE: verify ScrollbarHit at PRODUCTION geometry (width=80, vp.Width=78).
@@ -55,7 +56,7 @@ func barDrag(t *testing.T, m Model) int {
 //	X=2  (text col)       → MISS
 func TestScrollbarHitProbe(t *testing.T) {
 	m := buildDragModel()
-	cv := &m.chat
+	cv := m.mainChat()
 	// cv.Width() == 78 (production: relayout sets vp.Width = m.width-2 = 78)
 	if w := cv.Width(); w != 78 {
 		t.Fatalf("PROBE: expected c.Width()=78, got %d (fixture changed?)", w)
@@ -89,7 +90,7 @@ func TestScrollbarGrabAtRightEdge(t *testing.T) {
 	m := buildDragModel()                                                  // width 80 → bar at column 79
 	m = send(t, m, tea.MouseClickMsg{X: 80, Y: 2, Button: tea.MouseLeft})  // X == width (off by one)
 	m = send(t, m, tea.MouseMotionMsg{X: 80, Y: 9, Button: tea.MouseLeft}) // drag down
-	if got := m.chat.YOffset(); got == 0 {
+	if got := m.mainChat().YOffset(); got == 0 {
 		t.Fatalf("bar grab at right edge (X=width=%d) did not scroll (yoff=0)", 80)
 	}
 }
@@ -110,7 +111,7 @@ func TestScrollbarDragWinsOverStuckSelection(t *testing.T) {
 	// Press in viewport text → beginSelection sets selection.Dragging = true,
 	// then (modeling the real failing flow) no clearing release arrives.
 	m = send(t, m, tea.MouseClickMsg{X: 5, Y: 5, Button: tea.MouseLeft})
-	if !m.chat.SelectionDragging() {
+	if !m.mainChat().SelectionDragging() {
 		t.Fatalf("precondition: expected selection.Dragging true after text press")
 	}
 	if got := barDrag(t, m); got == 0 {
@@ -127,7 +128,7 @@ func TestScrollbarDragAfterViewportSelectAndCopy(t *testing.T) {
 	m = send(t, m, tea.MouseMotionMsg{X: 6, Y: 4, Button: tea.MouseLeft})  // drag-select
 	m = send(t, m, tea.MouseReleaseMsg{X: 6, Y: 4, Button: tea.MouseLeft}) // release → auto-copy
 	t.Logf("after select+copy: selDrag=%v selActive=%v sbDrag=%v",
-		m.chat.SelectionDragging(), m.chat.SelectionActive(), m.chat.ScrollbarDragging())
+		m.mainChat().SelectionDragging(), m.mainChat().SelectionActive(), m.mainChat().ScrollbarDragging())
 	if got := barDrag(t, m); got == 0 {
 		t.Fatalf("scrollbar drag after viewport select+copy did not scroll (yoff=0)")
 	}

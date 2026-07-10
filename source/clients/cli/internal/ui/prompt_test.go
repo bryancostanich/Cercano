@@ -107,12 +107,12 @@ func TestPrompt_WheelOutsidePromptScrollsChatViewport(t *testing.T) {
 	m.width = 80
 	m.height = 24
 	m.relayout()
-	m.chat.vp.SetContent(strings.Repeat("chat\n", 80))
-	m.chat.SetYOffset(0)
+	m.mainChat().vp.SetContent(strings.Repeat("chat\n", 80))
+	m.mainChat().SetYOffset(0)
 
 	next, _ := m.Update(tea.MouseWheelMsg{X: 2, Y: m.scrollbarTop, Button: tea.MouseWheelDown})
 	got := next.(Model)
-	if got.chat.YOffset() == 0 {
+	if got.mainChat().YOffset() == 0 {
 		t.Fatal("wheel outside prompt should scroll chat viewport")
 	}
 }
@@ -519,14 +519,14 @@ func TestPrompt_ModifiedArrowsDoNotTriggerHistoryRecall(t *testing.T) {
 func TestPrompt_HomeEndRouteToPrompt(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
-	m.chat.vp.SetContent(strings.Repeat("chat\n", 80))
-	m.chat.SetYOffset(10)
+	m.mainChat().vp.SetContent(strings.Repeat("chat\n", 80))
+	m.mainChat().SetYOffset(10)
 	m.input.SetValue("hello\nworld")
 
 	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyHome})
 	got := next.(Model)
-	if got.chat.YOffset() != 10 {
-		t.Fatalf("home should not scroll viewport, yoffset=%d", got.chat.YOffset())
+	if got.mainChat().YOffset() != 10 {
+		t.Fatalf("home should not scroll viewport, yoffset=%d", got.mainChat().YOffset())
 	}
 	if want := len([]rune("hello\n")); got.input.cursor != want {
 		t.Fatalf("home cursor = %d, want line start %d", got.input.cursor, want)

@@ -36,7 +36,7 @@ func TestApplyDevMode(t *testing.T) {
 		t.Fatalf("kickoff missing doc pointer: %q", kick)
 	}
 	// A visible system entry announces the mode switch.
-	entries := m.chat.Entries()
+	entries := m.mainChat().Entries()
 	if len(entries) == 0 || !strings.Contains(entries[len(entries)-1].Content, "/tmp/cercano-repo") {
 		t.Fatalf("no dev-mode system entry appended: %+v", entries)
 	}
@@ -92,7 +92,7 @@ func TestDevModeStreamingQueuesKickoff(t *testing.T) {
 	if next.workDirOverride != repo {
 		t.Fatalf("workDirOverride = %q, want %q", next.workDirOverride, repo)
 	}
-	q := next.chat.Queued()
+	q := next.mainChat().Queued()
 	if len(q) == 0 {
 		t.Fatal("kickoff not enqueued while streaming")
 	}

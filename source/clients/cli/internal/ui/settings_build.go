@@ -11,7 +11,7 @@ import (
 // knownWatchdogChecks must stay in sync with the check switch in the server's
 // buildWatchdogFrom (source/server/internal/server/watchdog_wire.go) and the
 // default checks list in pkg/config.
-var knownWatchdogChecks = []string{"debug-loop", "commit-checkpoint", "plain-english", "worktree-first"}
+var knownWatchdogChecks = []string{"systematic-debugging", "design-decisions", "verification-strategy", "compute-before-simulate", "commit-checkpoint", "plain-english", "worktree-first", "follow-through"}
 
 // watchdogChecksFromForm reads the current watchdog-check toggle states from
 // the live form — the source of truth at commit time, immune to a stale or
@@ -184,6 +184,8 @@ func classifyCommit(key, value string, currentChecks []string) commitAction {
 		u.KeepForever = value
 	case "compaction-enabled":
 		u.CompactionEnabled = value
+	case "tool-loop-max-iterations":
+		u.ToolLoopMaxIterations = value
 	case "permission-mode":
 		return commitAction{kind: commitPermission, value: value}
 	case "accent-color":

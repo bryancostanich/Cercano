@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,14 +57,171 @@ func (c Config) WorkerIdleTimeout() time.Duration {
 // Route is an open enum — future bridges (CCR, etc.) get their own value and
 // adapter-specific handling. Empty string is treated as "direct".
 type CloudProfile struct {
-	Name       string `yaml:"name"`
-	Flavor     string `yaml:"flavor"`            // messages | chat_completions | responses | bedrock
-	Backend    string `yaml:"backend,omitempty"` // chat_completions only: selects per-backend quirks (openai|gemini|groq|…); empty → defensive default
-	Route      string `yaml:"route,omitempty"`   // direct (default) | meridian | ccr (future) | …
+	Name    string `yaml:"name"`
+	Flavor  string `yaml:"flavor"`            // messages | chat_completions | responses | bedrock
+	Backend string `yaml:"backend,omitempty"` // chat_completions only: selects per-backend quirks (openai|gemini|groq|…); empty → defensive default
+	Route   string `yaml:"route,omitempty"`   // direct (default) | meridian | ccr (future) | …
+	// Provider names the vendor whose cost-tier table this profile draws its
+	// per-request models from (anthropic|openai|google|…). It bridges "how I
+	// connect" (route/flavor/auth on this profile) to "which vendor's model
+	// lineup" (model_profiles.cloud.providers[Provider]). Empty is inferred
+	// from Flavor/Backend at load (see inferProviderVendor).
+	Provider   string `yaml:"provider,omitempty"`
 	BaseURL    string `yaml:"base_url"`
 	Model      string `yaml:"model"`
 	Region     string `yaml:"region,omitempty"`      // bedrock: AWS region (required)
 	AWSProfile string `yaml:"aws_profile,omitempty"` // bedrock: optional ~/.aws named profile
+}
+
+// CostTier names a closed-cloud pricing class. Unlike the capability Tier
+// taxonomy (which spans open + cloud), cost tiers exist only for hosted
+// vendor models, whose model lineups are priced economy → standard → premium.
+type CostTier string
+
+const (
+	CostEconomy  CostTier = "economy"
+	CostStandard CostTier = "standard"
+	CostPremium  CostTier = "premium"
+)
+
+// CostTierModel holds the model id serving one vendor+cost-tier slot.
+type CostTierModel struct {
+	Model string `yaml:"model"`
+}
+
+// VendorCostTiers is one vendor's three-tier cost table. Empty slots mean the
+// vendor doesn't distinguish that tier; resolution falls back to the active
+// profile's own Model.
+type VendorCostTiers struct {
+	Economy  CostTierModel `yaml:"economy"`
+	Standard CostTierModel `yaml:"standard"`
+	Premium  CostTierModel `yaml:"premium"`
+}
+
+// CloudCostProfiles maps a vendor (anthropic|openai|google|…) to its cost
+// table. The vendor key matches CloudProfile.Provider.
+type CloudCostProfiles struct {
+	Providers map[string]VendorCostTiers `yaml:"providers"`
+}
+
+// ModelProfiles is the vendor-keyed cloud model selection table. Closed cloud
+// models are vendor-owned, so "which model" for a cost tier is keyed by the
+// active profile's vendor, not by the capability tier's cloud slot (retired —
+// see ModelTier.Cloud). Open/local models keep the capability-tier `open`
+// slots untouched.
+type ModelProfiles struct {
+	Cloud CloudCostProfiles `yaml:"cloud"`
+}
+
+// ResolveCloud returns the model configured for a vendor+cost-tier pair.
+// ok=false when the vendor is unknown or that tier's slot is empty — the
+// caller falls back to the active profile's own Model.
+func (m ModelProfiles) ResolveCloud(vendor string, tier CostTier) (string, bool) {
+	if vendor == "" {
+		return "", false
+	}
+	vt, ok := m.Cloud.Providers[vendor]
+	if !ok {
+		return "", false
+	}
+	var id string
+	switch tier {
+	case CostEconomy:
+		id = vt.Economy.Model
+	case CostStandard:
+		id = vt.Standard.Model
+	case CostPremium:
+		id = vt.Premium.Model
+	}
+	if id == "" {
+		return "", false
+	}
+	return id, true
+}
+
+// vendorHasModel reports whether model appears anywhere in the vendor's cost
+// table. Used by the fail-loud guard to distinguish a table-backed model from
+// a foreign-vendor id.
+func (m ModelProfiles) vendorHasModel(vendor, model string) bool {
+	vt, ok := m.Cloud.Providers[vendor]
+	if !ok {
+		return false
+	}
+	return model != "" && (vt.Economy.Model == model || vt.Standard.Model == model || vt.Premium.Model == model)
+}
+
+// ResolveCloudModelForTier picks the cloud model for a capability tier: it maps
+// the tier to a cost tier, resolves the active profile's vendor against the
+// cost table, and falls back to the profile's own Model when the tier has no
+// cloud cost-tier meaning (embedding) or the vendor+tier slot is unset. The
+// fail-loud guard runs on the chosen model before it's returned.
+func (m ModelProfiles) ResolveCloudModelForTier(prof CloudProfile, tier Tier) string {
+	vendor := prof.Provider
+	if vendor == "" {
+		vendor = inferProviderVendor(prof)
+	}
+	model := prof.Model
+	if ct, ok := CostTierForCapability(tier); ok {
+		if resolved, ok := m.ResolveCloud(vendor, ct); ok {
+			model = resolved
+		}
+	}
+	m.guardCloudModel(vendor, model, prof.Model)
+	return model
+}
+
+// guardCloudModel emits a loud WARNING when a cloud model is about to be used
+// that is neither in the active vendor's cost table nor the active profile's
+// own Model. It never fails the request — the point is to surface the
+// silent-rejection class of bug (an Anthropic id sent to a Codex vendor, which
+// the vendor then rejects) that is otherwise invisible until the chat errors.
+func (m ModelProfiles) guardCloudModel(vendor, model, profileModel string) {
+	if model == "" || model == profileModel {
+		return
+	}
+	if m.vendorHasModel(vendor, model) {
+		return
+	}
+	log.Printf("[cloud] resolved model %q is not in vendor %q cost table and is not the active profile's model — the provider may reject it", model, vendor)
+}
+
+// CostTierForCapability maps an internal capability tier to the cost tier its
+// cloud lane bills against. The embedding tier has no cloud cost-tier need
+// (embeddings run on the local runtime), so it returns ok=false.
+func CostTierForCapability(t Tier) (CostTier, bool) {
+	switch t {
+	case TierMostCapable:
+		return CostPremium, true
+	case TierEveryday:
+		return CostStandard, true
+	case TierFastLight:
+		return CostEconomy, true
+	case TierFastLightText:
+		return CostEconomy, true
+	}
+	return "", false
+}
+
+// inferProviderVendor derives a profile's vendor from its wire flavor (and, for
+// chat_completions, its backend) when Provider is unset. Used to give
+// existing/legacy configs a vendor without a hand edit. Flavor strings are
+// duplicated as literals here rather than imported from cloudfactory to avoid
+// an import cycle (cloudfactory depends on config).
+func inferProviderVendor(p CloudProfile) string {
+	switch p.Flavor {
+	case "responses":
+		return "openai"
+	case "messages":
+		return "anthropic"
+	case "bedrock":
+		return "anthropic"
+	case "chat_completions":
+		if p.Backend != "" {
+			return p.Backend
+		}
+		return "openai"
+	}
+	return ""
 }
 
 // Config holds all Cercano configuration values.
@@ -112,7 +270,13 @@ type Config struct {
 	LlamaServer              LlamaServerConfig `yaml:"llama_server"`
 	Compaction               CompactionConfig  `yaml:"compaction"`
 	Watchdog                 WatchdogConfig    `yaml:"watchdog"`
+	ToolLoop                 ToolLoopConfig    `yaml:"tool_loop"`
 	Models                   ModelsConfig      `yaml:"models"`
+	// ModelProfiles is the vendor-keyed cloud model selection table (top-level
+	// key model_profiles). Closed cloud model selection resolves here — keyed
+	// by the active profile's vendor — retiring the per-tier models.tiers.*.cloud
+	// slots (kept load-tolerant, no longer read; see ModelTier.Cloud).
+	ModelProfiles ModelProfiles `yaml:"model_profiles"`
 }
 
 // CompactionConfig controls background context compaction. Thresholds are token
@@ -165,6 +329,39 @@ type WatchdogConfig struct {
 	Model         string   `yaml:"model"`
 	EscalateAfter int      `yaml:"escalate_after"`
 	Echo          bool     `yaml:"echo"`
+}
+
+const (
+	// DefaultToolLoopMaxIterations is the default cap on LLM round-trips in one
+	// agentic turn. It is the single source of truth for the runtime default and
+	// for the generated default config.
+	DefaultToolLoopMaxIterations = 200
+	// UnlimitedToolLoopMaxIterations disables the turn-level tool-loop cap.
+	UnlimitedToolLoopMaxIterations = -1
+)
+
+// ToolLoopConfig controls the agentic tool loop.
+// MaxIterations caps LLM round-trips per turn; 0 means use the default, and -1
+// disables the cap.
+type ToolLoopConfig struct {
+	MaxIterations int `yaml:"max_iterations"`
+}
+
+// EffectiveMaxIterations resolves the configured tool-loop cap. The boolean is
+// true when the cap is disabled.
+func EffectiveMaxIterations(n int) (max int, unlimited bool) {
+	if n == UnlimitedToolLoopMaxIterations {
+		return 0, true
+	}
+	if n > 0 {
+		return n, false
+	}
+	return DefaultToolLoopMaxIterations, false
+}
+
+// ValidateToolLoopMaxIterations validates the public config/RPC value.
+func ValidateToolLoopMaxIterations(n int) bool {
+	return n >= UnlimitedToolLoopMaxIterations
 }
 
 // LlamaServerConfig controls the optional managed llama-server sidecar.
@@ -222,6 +419,26 @@ func Defaults() Config {
 		// the default behave identically.
 		WorkerIdleTimeoutSeconds: 0,
 		Models:                   ModelsConfig{DefaultProvider: ProviderOpen},
+		// Seed the vendor-keyed cloud cost tables. Closed cloud model
+		// selection resolves here — keyed by the active profile's vendor.
+		// Only the vendors Cercano ships a default lineup for are seeded;
+		// others (google, …) are added by the user's config.
+		ModelProfiles: ModelProfiles{
+			Cloud: CloudCostProfiles{
+				Providers: map[string]VendorCostTiers{
+					"anthropic": {
+						Economy:  CostTierModel{Model: "claude-haiku-4-5"},
+						Standard: CostTierModel{Model: "claude-opus-4-8"},
+						Premium:  CostTierModel{Model: "claude-fable-5"},
+					},
+					"openai": {
+						Economy:  CostTierModel{Model: "gpt-5-mini"},
+						Standard: CostTierModel{Model: "gpt-5.5"},
+						Premium:  CostTierModel{Model: "gpt-5.5"},
+					},
+				},
+			},
+		},
 		LlamaServer: LlamaServerConfig{
 			ModelDirs:        []string{"~/.cercano/models"},
 			Host:             "127.0.0.1",
@@ -249,10 +466,13 @@ func Defaults() Config {
 		Watchdog: WatchdogConfig{
 			Enabled:       false,
 			Mode:          "challenge-and-justify",
-			Checks:        []string{"debug-loop", "commit-checkpoint", "plain-english", "worktree-first", "follow-through"},
+			Checks:        []string{"systematic-debugging", "design-decisions", "verification-strategy", "compute-before-simulate", "commit-checkpoint", "plain-english", "worktree-first", "follow-through"},
 			Model:         "",
 			EscalateAfter: 2,
 			Echo:          false,
+		},
+		ToolLoop: ToolLoopConfig{
+			MaxIterations: DefaultToolLoopMaxIterations,
 		},
 	}
 }
@@ -404,12 +624,16 @@ func Load(path string) (Config, error) {
 			cfg.Port = defaults.Port
 		}
 		applyLlamaServerDefaults(&cfg.LlamaServer, defaults.LlamaServer)
+		applyToolLoopDefaults(&cfg.ToolLoop, defaults.ToolLoop)
 	}
 
 	applyEnvOverrides(&cfg)
 	finalizeModelTiers(&cfg)
 	migrateCloudProfiles(&cfg)
 	autoDetectMeridianRoute(&cfg)
+	if !ValidateToolLoopMaxIterations(cfg.ToolLoop.MaxIterations) {
+		return cfg, fmt.Errorf("tool_loop.max_iterations must be -1 or a non-negative integer, got %d", cfg.ToolLoop.MaxIterations)
+	}
 	return cfg, nil
 }
 
@@ -442,6 +666,12 @@ func applyLegacyLocalKeys(data []byte, cfg *Config) {
 		cfg.LocusMode = "open_primary"
 	case "local_only":
 		cfg.LocusMode = "open_only"
+	}
+}
+
+func applyToolLoopDefaults(cfg *ToolLoopConfig, defaults ToolLoopConfig) {
+	if cfg.MaxIterations == 0 {
+		cfg.MaxIterations = defaults.MaxIterations
 	}
 }
 
@@ -538,6 +768,16 @@ func (c Config) Clone() Config {
 	if c.Watchdog.Checks != nil {
 		out.Watchdog.Checks = make([]string, len(c.Watchdog.Checks))
 		copy(out.Watchdog.Checks, c.Watchdog.Checks)
+	}
+
+	// ModelProfiles.Cloud.Providers is a map — reallocate so clone and original
+	// don't alias the vendor cost table. VendorCostTiers is all-scalar, so a
+	// value copy per entry suffices.
+	if c.ModelProfiles.Cloud.Providers != nil {
+		out.ModelProfiles.Cloud.Providers = make(map[string]VendorCostTiers, len(c.ModelProfiles.Cloud.Providers))
+		for k, v := range c.ModelProfiles.Cloud.Providers {
+			out.ModelProfiles.Cloud.Providers[k] = v
+		}
 	}
 
 	return out

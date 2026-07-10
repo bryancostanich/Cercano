@@ -28,7 +28,7 @@ func TestModel_ExpandedToolResultStaysWithinTerminal(t *testing.T) {
 		b.WriteString(strconv.Itoa(100 + i))
 		b.WriteString(":    \"required\": [\"path\", \"old_string\", \"new_string\"], trailing text to widen the line well past the wrap\n")
 	}
-	m.chat.SetEntriesSlice([]*Entry{
+	m.mainChat().SetEntriesSlice([]*Entry{
 		{Role: RoleUser, Content: "grep the edit schema"},
 		{Tool: &ToolEntry{ToolUseID: "u1", ToolName: "grep", ArgsSummary: "edit_file", FullResult: b.String(), Status: ToolStatusComplete, Folded: false}},
 	})
@@ -55,7 +55,7 @@ func TestModel_LoadingToolEntryStaysWithinTerminal(t *testing.T) {
 	m.height = 29
 	m.relayout()
 
-	m.chat.SetEntriesSlice([]*Entry{
+	m.mainChat().SetEntriesSlice([]*Entry{
 		{Role: RoleUser, Content: "read a file"},
 		{Tool: &ToolEntry{ToolUseID: "u1", ToolName: "Read", ArgsSummary: "big.go", Status: ToolStatusComplete, Folded: false, Loading: true}},
 	})

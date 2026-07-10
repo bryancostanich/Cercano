@@ -167,6 +167,35 @@ func TestRunAgenticDispatch_LogsStartAndDone(t *testing.T) {
 	}
 }
 
+// TestRunAgenticDispatch_EmitsProgress verifies sub-agent lifecycle and child
+// tool-loop progress can be routed back to the parent turn.
+func TestRunAgenticDispatch_EmitsProgress(t *testing.T) {
+	srv, prov := observabilityDispatchRig(t)
+	var notes []string
+
+	_, err := srv.runAgenticDispatch(context.Background(),
+		dispatch.Spec{Mode: dispatch.Agentic, Task: "probe task", Emit: func(ev agenttools.ProgressEvent) { notes = append(notes, ev.Text) }},
+		dispatch.Selection{Provider: prov}, "test-model")
+	if err != nil {
+		t.Fatalf("runAgenticDispatch: %v", err)
+	}
+	joined := strings.Join(notes, "\n")
+	for _, want := range []string{
+		// grant/ignored no longer emit as separate progress lines; the toolset
+		// rides on the "started" event (text includes tools=..., and the
+		// structured event carries GrantedTools) so it lands in the sub tab.
+		"sub-agent start:",
+		"sub-agent planned tool: r_read",
+		"sub-agent running tool: r_read",
+		"sub-agent tool complete: r_read",
+		"sub-agent done:",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("progress missing %q in:\n%s", want, joined)
+		}
+	}
+}
+
 // TestRunAgenticDispatch_NoStoreStillWorks pins the degraded path: with no
 // persistent store wired (s.agent nil), dispatch runs fine and simply skips
 // persistence, leaving SubConversationID empty.

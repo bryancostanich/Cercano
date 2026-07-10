@@ -15,7 +15,7 @@ func TestDebugLoopApplies(t *testing.T) {
 		t.Fatal("read_file must not apply")
 	}
 	if c.Applies(Action{Kind: "turn_end"}) {
-		t.Fatal("turn_end must not apply to debug-loop")
+		t.Fatal("turn_end must not apply to systematic-debugging")
 	}
 }
 
@@ -28,7 +28,7 @@ func TestDebugLoopNilOneShotFailsOpen(t *testing.T) {
 	if v.Violation {
 		t.Fatal("nil oneShot must fail open (no violation)")
 	}
-	if v.Protocol != "debug-loop" {
+	if v.Protocol != "systematic-debugging" {
 		t.Fatalf("protocol: %q", v.Protocol)
 	}
 }
@@ -44,10 +44,13 @@ func TestDebugLoopEvaluate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !v.Violation || v.Protocol != "debug-loop" {
+	if !v.Violation || v.Protocol != "systematic-debugging" {
 		t.Fatalf("verdict: %+v", v)
 	}
 	if !strings.Contains(gotPrompt, "edit_file") {
 		t.Fatalf("prompt should reference the proposed action: %q", gotPrompt)
+	}
+	if !strings.Contains(v.Challenge, `get_protocol("systematic-debugging")`) || !strings.Contains(v.Challenge, "comply") || !strings.Contains(v.Challenge, "justify") {
+		t.Fatalf("challenge should tell the model to comply or justify with the protocol pull: %q", v.Challenge)
 	}
 }

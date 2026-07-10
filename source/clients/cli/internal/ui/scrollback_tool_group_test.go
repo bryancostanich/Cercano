@@ -119,8 +119,8 @@ func TestRenderToolGroup_MixedShowsSummaryThenActive(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("expected 2 lines (summary + active), got %d: %q", len(lines), s)
 	}
-	if !strings.Contains(lines[0], "2 tool calls") {
-		t.Errorf("first line should be summary: %q", lines[0])
+	if !strings.Contains(lines[0], "3 tool calls") {
+		t.Errorf("first line should be summary counting the whole run (2 completed + 1 in-flight): %q", lines[0])
 	}
 	if !strings.Contains(lines[1], "Running") {
 		t.Errorf("second line should be the active entry with verb form: %q", lines[1])

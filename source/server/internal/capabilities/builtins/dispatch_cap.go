@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/pkg/config"
@@ -24,7 +25,7 @@ func (dispatchCap) Surfaces() capabilities.Surface {
 	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
 }
 func (dispatchCap) Description() string {
-	return "Run a sub-agent: hand off an open-ended task to a bounded tool-use loop over a granted set of tools (default: read-only tools). Returns the sub-agent's final result. Tool names passed in `tools` must be the plain registered names (e.g. \"Read\", \"Glob\") — do NOT include any host/MCP prefix like \"mcp__oc__\". Granting write-capable tools (Edit, Write, Bash, git_*) escalates this call to a confirm prompt; one approval authorizes the sub-agent's whole toolset for the run."
+	return "Run a sub-agent: hand off an open-ended task to a bounded tool-use loop over a granted set of tools (default: read-only tools). Include a concise human-facing `intent` when asking for approval if it clarifies why the delegation is needed. Returns the sub-agent's final result. Tool names passed in `tools` must be the plain registered names (e.g. \"Read\", \"Glob\") — do NOT include any host/MCP prefix like \"mcp__oc__\". Granting write-capable tools (Edit, Write, Bash, git_*) escalates this call to a confirm prompt; one approval authorizes the sub-agent's whole toolset for the run."
 }
 func (dispatchCap) Schema() capabilities.Schema {
 	return capabilities.Schema(`{
@@ -33,6 +34,7 @@ func (dispatchCap) Schema() capabilities.Schema {
 		"properties": {
 			"task":            {"type": "string", "description": "Open-ended instruction for the sub-agent tool loop."},
 			"tools":           {"type": "array", "items": {"type": "string"}, "description": "Tool or capability names to grant, using the plain registered names (e.g. \"Read\", \"Glob\", \"Grep\", \"Bash\") — no host or MCP prefix. Omit to default to read-only tools."},
+			"intent":          {"type": "string", "description": "Optional concise human-facing reason for the delegation, shown in permission prompts."},
 			"conversation_id": {"type": "string", "description": "Optional conversation ID to associate with this dispatch."}
 		}
 	}`)
@@ -41,6 +43,7 @@ func (dispatchCap) Schema() capabilities.Schema {
 type dispatchArgs struct {
 	Task           string   `json:"task"`
 	Tools          []string `json:"tools"`
+	Intent         string   `json:"intent"`
 	ConversationID string   `json:"conversation_id"`
 }
 
@@ -70,6 +73,24 @@ func (dispatchCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 		WorkDir:        call.WorkDir,
 		ConversationID: convID,
 		Interactive:    false,
+		Emit: func(ev agenttools.ProgressEvent) {
+			// Structured progress is the primary channel: it carries SubAgentID so
+			// the client routes each event to its sub-agent tab. Plain-text Emit is
+			// a fallback ONLY when structured progress is unavailable — emitting
+			// both duplicated every line and leaked sub-agent activity into the
+			// parent transcript.
+			if call.EmitProgress != nil {
+				call.EmitProgress(ev)
+				return
+			}
+			if call.Emit != nil {
+				if ev.Text != "" {
+					call.Emit(ev.Text)
+				} else if ev.Summary != "" {
+					call.Emit(ev.Summary)
+				}
+			}
+		},
 	})
 	if err != nil {
 		return nil, err

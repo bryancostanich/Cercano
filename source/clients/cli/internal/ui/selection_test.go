@@ -21,12 +21,14 @@ func newSelectionModel(vpWidth, vpHeight int, content string, plainLns []string)
 	if plainLns != nil {
 		cv.plainLines = plainLns
 	}
-	return Model{chat: cv}
+	m := Model{}
+	m.setMainChat(cv)
+	return m
 }
 
 func TestSelectedTextSingleLine(t *testing.T) {
 	m := newSelectionModel(0, 0, "", []string{"hello world"})
-	m.chat.selection = textSelection{
+	m.mainChat().selection = textSelection{
 		Active: true,
 		Anchor: selectionPoint{
 			Line: 0,
@@ -38,14 +40,14 @@ func TestSelectedTextSingleLine(t *testing.T) {
 		},
 	}
 
-	if got, want := m.chat.selectedText(), "world"; got != want {
+	if got, want := m.mainChat().selectedText(), "world"; got != want {
 		t.Fatalf("selectedText() = %q, want %q", got, want)
 	}
 }
 
 func TestSelectedTextMultilineReverseDrag(t *testing.T) {
 	m := newSelectionModel(0, 0, "", []string{"first line", "second", "third"})
-	m.chat.selection = textSelection{
+	m.mainChat().selection = textSelection{
 		Active: true,
 		Anchor: selectionPoint{
 			Line: 2,
@@ -57,7 +59,7 @@ func TestSelectedTextMultilineReverseDrag(t *testing.T) {
 		},
 	}
 
-	if got, want := m.chat.selectedText(), "line\nsecond\nth"; got != want {
+	if got, want := m.mainChat().selectedText(), "line\nsecond\nth"; got != want {
 		t.Fatalf("selectedText() = %q, want %q", got, want)
 	}
 }
@@ -92,9 +94,9 @@ func TestMouseReleaseCopiesDragSelection(t *testing.T) {
 	cv.scrollbarDragging = true
 	m := Model{
 		scrollbarTop:    0,
-		chat:            cv,
 		selectionNotice: "",
 	}
+	m.setMainChat(cv)
 
 	next, cmd := m.Update(tea.MouseReleaseMsg{X: 5, Y: 0, Button: tea.MouseLeft})
 	if cmd == nil {
@@ -104,10 +106,10 @@ func TestMouseReleaseCopiesDragSelection(t *testing.T) {
 	if got.selectionNotice != "copied selection" {
 		t.Fatalf("selectionNotice = %q, want copied selection", got.selectionNotice)
 	}
-	if got.chat.ScrollbarDragging() {
+	if got.mainChat().ScrollbarDragging() {
 		t.Fatal("scrollbarDragging should be cleared")
 	}
-	if !got.chat.SelectionHasRange() {
+	if !got.mainChat().SelectionHasRange() {
 		t.Fatal("selection should remain visible after auto-copy")
 	}
 }
@@ -131,8 +133,8 @@ func TestPasteMsgClearsSelectionAndToolFocus(t *testing.T) {
 	m := New(nil, false)
 	m.width = 80
 	m.height = 24
-	m.chat.focusedToolIdx = 1
-	m.chat.selection = textSelection{
+	m.mainChat().focusedToolIdx = 1
+	m.mainChat().selection = textSelection{
 		Active: true,
 		Anchor: selectionPoint{Line: 0, Col: 0},
 		Cursor: selectionPoint{Line: 0, Col: 2},
@@ -146,13 +148,13 @@ func TestPasteMsgClearsSelectionAndToolFocus(t *testing.T) {
 	if got.input.Value() != "pasted" {
 		t.Fatalf("input.Value() = %q, want pasted text", got.input.Value())
 	}
-	if got.chat.SelectionActive() {
+	if got.mainChat().SelectionActive() {
 		t.Fatal("paste should clear active viewport selection")
 	}
 	if got.selectionNotice != "" {
 		t.Fatalf("selectionNotice = %q, want cleared notice", got.selectionNotice)
 	}
-	if got.chat.InToolNav() {
+	if got.mainChat().InToolNav() {
 		t.Fatalf("paste should exit tool-nav mode (focusedToolIdx should be -1)")
 	}
 }

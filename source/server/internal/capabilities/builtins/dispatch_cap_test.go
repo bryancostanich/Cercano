@@ -37,7 +37,7 @@ func TestDispatch_Execute_ForwardsSpec(t *testing.T) {
 		"task":  "do X",
 		"tools": []string{"read_file"},
 	})
-	call := &capabilities.Call{Args: args, WorkDir: "/proj", Svc: svc}
+	call := &capabilities.Call{Args: args, WorkDir: "/proj", Emit: func(string) {}, Svc: svc}
 
 	res, err := Dispatch().Execute(context.Background(), call)
 	if err != nil {
@@ -55,6 +55,9 @@ func TestDispatch_Execute_ForwardsSpec(t *testing.T) {
 	}
 	if captured.Role != dispatch.RoleMain {
 		t.Errorf("Spec.Role = %v, want RoleMain", captured.Role)
+	}
+	if captured.Emit == nil {
+		t.Fatal("Spec.Emit is nil; dispatch progress would not reach the parent turn")
 	}
 	if res.Text != "done" {
 		t.Errorf("result text = %q, want %q", res.Text, "done")

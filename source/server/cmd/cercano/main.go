@@ -45,6 +45,7 @@ import (
 	mcphost "cercano/source/server/internal/mcp_host"
 	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/protocols"
+	"cercano/source/server/internal/skills"
 	"cercano/source/server/internal/recap"
 	"cercano/source/server/internal/retention"
 	"cercano/source/server/internal/secrets"
@@ -695,6 +696,30 @@ func main() {
 				return
 			}
 			fmt.Fprintln(os.Stderr, "usage: cercano protocols sync [dir]")
+			os.Exit(2)
+		case "skills":
+			// cercano skills sync [dir] — regenerate the .agents/skills and
+			// .claude/skills trees from the embedded canonical catalog (tool
+			// skills) plus the protocol library. One command, no drift.
+			if len(os.Args) >= 3 && os.Args[2] == "sync" {
+				root := "."
+				if len(os.Args) >= 4 {
+					root = os.Args[3]
+				}
+				toolFiles, err := skills.WriteTrees(root)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "skills sync:", err)
+					os.Exit(1)
+				}
+				protoFiles, err := protocols.WriteSkillFiles(root)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "skills sync (protocols):", err)
+					os.Exit(1)
+				}
+				fmt.Printf("Wrote %d tool skill files and %d protocol skill files under %s\n", len(toolFiles), len(protoFiles), root)
+				return
+			}
+			fmt.Fprintln(os.Stderr, "usage: cercano skills sync [dir]")
 			os.Exit(2)
 		}
 	}

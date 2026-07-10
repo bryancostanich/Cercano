@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 
+	"cercano/source/server/internal/agenttools"
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
@@ -66,6 +67,10 @@ type Spec struct {
 	// Interactive, when true, signals that a human is watching the loop
 	// and event progress should be forwarded (reserved for future use).
 	Interactive bool
+
+	// Emit receives structured progress from an agentic dispatch. It is optional
+	// and proto-free so dispatch stays independent of runner/proto event types.
+	Emit func(agenttools.ProgressEvent)
 
 	// MaxIterations caps the number of LLM round-trips in the loop.
 	// 0 means use the package default (agent.MaxToolLoopIterations = 50).

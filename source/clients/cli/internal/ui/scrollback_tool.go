@@ -509,9 +509,13 @@ func renderToolGroupSpans(entries []ToolEntry, width int, styles theme.Styles, m
 	var lines []string
 	var rows []toolArrowRow
 	if len(completed) > 0 {
-		// The summary header (Group row) toggles the whole run open.
+		// The summary header (Group row) toggles the whole run open. Count the
+		// whole run — completed plus any in-flight call rendered live below —
+		// so the header doesn't under-report ("1 tool call" while a second is
+		// still running). renderGroupSummary shows a faint "…" instead of ✓
+		// while any member is in progress, so the count doesn't imply success.
 		rows = append(rows, toolArrowRow{Line: 0, Entry: 0, Group: true})
-		lines = append(lines, renderGroupSummary(completed, width, styles, opts.Focused, false))
+		lines = append(lines, renderGroupSummary(entries, width, styles, opts.Focused, false))
 	}
 	for _, i := range activeIdx {
 		e := entries[i]
@@ -549,9 +553,13 @@ func renderGroupSummary(completed []ToolEntry, width int, styles theme.Styles, f
 	order := []string{}
 	var total time.Duration
 	anyErr := false
+	anyActive := false
 	for _, e := range completed {
-		if e.Status == ToolStatusError {
+		switch e.Status {
+		case ToolStatusError:
 			anyErr = true
+		case ToolStatusInProgress:
+			anyActive = true
 		}
 		total += e.Duration
 		name := groupBreakdownName(e.ToolName)
@@ -580,9 +588,15 @@ func renderGroupSummary(completed []ToolEntry, width int, styles theme.Styles, f
 	toolEntryFaint := lipgloss.NewStyle().Faint(true)
 	glyph := "✓"
 	glyphStyle := styles.ToolSuccess
-	if anyErr {
+	switch {
+	case anyErr:
 		glyph = "⚠"
 		glyphStyle = styles.ToolError
+	case anyActive:
+		// A member is still running — don't claim success. Faint "…" reads as
+		// "in progress"; the live row below carries the animated spinner.
+		glyph = "…"
+		glyphStyle = toolEntryFaint
 	}
 	// 2-space gutter matches renderToolEntry's unfocused gutter, so summary
 	// and per-call lines share the same left margin. When the group is
@@ -602,6 +616,12 @@ func renderGroupSummary(completed []ToolEntry, width int, styles theme.Styles, f
 	timing := formatDur(total)
 	rightPlain := timing + " " + glyph
 	statusStyled := toolEntryFaint.Render(timing+" ") + glyphStyle.Render(glyph)
+	if anyActive {
+		// The run isn't finished — a timing total would read as final. Show
+		// only the in-progress glyph on the right edge.
+		rightPlain = glyph
+		statusStyled = glyphStyle.Render(glyph)
+	}
 
 	leftW := lipgloss.Width(left)
 	rightW := lipgloss.Width(rightPlain)

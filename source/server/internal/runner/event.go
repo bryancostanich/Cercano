@@ -13,15 +13,16 @@ import (
 type EventKind int
 
 const (
-	EventRouteSelected   EventKind = iota // model badge (which provider/model served the turn)
-	EventToken                            // assistant text delta
-	EventProgress                         // status message
-	EventToolUseStart                     // model planned a tool call
-	EventToolUseStop                      // model finalized a tool call (with args)
-	EventToolExecStart                    // tool execution began
-	EventToolExecComplete                 // tool execution finished
-	EventWatchdog                         // protocol-supervision event; WatchdogKind holds the flavor (challenge/block/echo/escalate)
-	EventDone                             // turn complete; Result populated
+	EventRouteSelected    EventKind = iota // model badge (which provider/model served the turn)
+	EventToken                             // assistant text delta
+	EventProgress                          // status message
+	EventToolUseStart                      // model planned a tool call
+	EventToolUseStop                       // model finalized a tool call (with args)
+	EventToolExecStart                     // tool execution began
+	EventToolExecComplete                  // tool execution finished
+	EventWatchdog                          // protocol-supervision event; WatchdogKind holds the flavor (challenge/block/echo/escalate)
+	EventSubAgent                          // structured child-agent lifecycle/transcript event
+	EventDone                              // turn complete; Result populated
 )
 
 // Event is one runner-emitted notification. Only the fields relevant to Kind
@@ -48,6 +49,14 @@ type Event struct {
 	// Watchdog: EventWatchdog. WatchdogKind is one of challenge/block/echo/escalate.
 	WatchdogKind string
 	Thread       string
+
+	// Sub-agent lifecycle/transcript: EventSubAgent.
+	SubAgentID       string
+	SubAgentParentID string
+	SubAgentTitle    string
+	SubAgentKind     string
+	GrantedTools     []string
+	IgnoredTools     []string
 
 	// EventDone.
 	Result Result

@@ -101,6 +101,11 @@ func messagesToConverse(ctx context.Context, msgs []llm.Message) ([]types.Messag
 				}})
 			}
 		}
+		// A message whose blocks were all foreign is dropped whole: Converse
+		// rejects empty content with a ValidationException.
+		if len(content) == 0 {
+			continue
+		}
 		out = append(out, types.Message{Role: role, Content: content})
 	}
 	return out, nil

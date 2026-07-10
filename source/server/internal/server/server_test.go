@@ -17,6 +17,7 @@ import (
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/localruntime"
 	"cercano/source/server/internal/locus"
+	"cercano/source/server/internal/protocols"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 
@@ -54,7 +55,7 @@ func (m *mockRouter) ClassifyIntent(req *agent.Request) (agent.Intent, error) {
 
 func (m *mockRouter) GetModelProviders() map[string]agent.ModelProvider {
 	return map[string]agent.ModelProvider{
-		"OpenModel": &mockProvider{name: "MockLocal"},
+		"OpenModel":  &mockProvider{name: "MockLocal"},
 		"CloudModel": &mockProvider{name: "MockCloud"},
 	}
 }
@@ -135,7 +136,7 @@ func TestGetRuntimeStatus_IncludesConfiguredEndpoints(t *testing.T) {
 	srv.SetRuntimeManager(localruntime.NewManager())
 	srv.SetConfigPersistence("", config.Config{
 		OllamaURL:      "http://mac-studio.local:11434",
-		OpenModel:     "qwen3-coder",
+		OpenModel:      "qwen3-coder",
 		EmbeddingModel: "nomic-embed-text",
 		CloudProvider:  "anthropic",
 		CloudModel:     "claude-test",
@@ -253,7 +254,7 @@ func TestListSkills(t *testing.T) {
 		t.Fatal("Expected at least one skill, got none")
 	}
 
-	// Verify all expected skills are present
+	// Verify tool skills and every built-in protocol skill are present.
 	expectedSkills := map[string]bool{
 		"cercano-local":     false,
 		"cercano-models":    false,
@@ -262,6 +263,9 @@ func TestListSkills(t *testing.T) {
 		"cercano-extract":   false,
 		"cercano-classify":  false,
 		"cercano-explain":   false,
+	}
+	for _, p := range protocols.Builtins() {
+		expectedSkills[p.Name] = false
 	}
 
 	for _, skill := range resp.Skills {
@@ -299,6 +303,24 @@ func TestGetSkill(t *testing.T) {
 	}
 }
 
+func TestGetSkill_Protocol(t *testing.T) {
+	srv := NewServer(nil, nil, nil, nil, nil, nil)
+
+	resp, err := srv.GetSkill(context.Background(), &proto.GetSkillRequest{Name: "systematic-debugging"})
+	if err != nil {
+		t.Fatalf("GetSkill protocol failed: %v", err)
+	}
+	if resp.Name != "systematic-debugging" {
+		t.Errorf("Expected name 'systematic-debugging', got %q", resp.Name)
+	}
+	if !containsString(resp.Content, "name: systematic-debugging") {
+		t.Error("protocol skill should contain frontmatter with name field")
+	}
+	if !containsString(resp.Content, "# Systematic Debugging Protocol") {
+		t.Error("protocol skill should contain the protocol body")
+	}
+}
+
 func TestGetSkill_NotFound(t *testing.T) {
 	srv := NewServer(nil, nil, nil, nil, nil, nil)
 
@@ -331,7 +353,7 @@ func TestUpdateConfig_OllamaURL_WithModel(t *testing.T) {
 
 	// Set both URL and model in one call
 	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{
-		OllamaUrl:  "http://192.168.1.100:11434",
+		OllamaUrl: "http://192.168.1.100:11434",
 		OpenModel: "llama3",
 	})
 	if err != nil {
@@ -428,6 +450,37 @@ func TestUpdateConfig_WatchdogEnable(t *testing.T) {
 	}
 }
 
+func TestUpdateConfig_ToolLoopMaxIterations(t *testing.T) {
+	srv := NewServer(nil, nil, nil, nil, nil, engine.NewEngineRegistry())
+	srv.SetConfigPersistence("", config.Config{})
+
+	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{ToolLoopMaxIterations: "-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Success {
+		t.Fatalf("expected success, got: %s", resp.Message)
+	}
+	if got := srv.cfgSvc.Get().ToolLoop.MaxIterations; got != config.UnlimitedToolLoopMaxIterations {
+		t.Fatalf("stored max iterations = %d, want unlimited sentinel", got)
+	}
+	cfg, err := srv.GetConfig(context.Background(), &proto.GetConfigRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.GetToolLoopMaxIterations(); got != int32(config.UnlimitedToolLoopMaxIterations) {
+		t.Fatalf("GetConfig max iterations = %d, want unlimited sentinel", got)
+	}
+
+	resp, err = srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{ToolLoopMaxIterations: "-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Success {
+		t.Fatalf("expected invalid value to fail")
+	}
+}
+
 func TestUpdateConfig_WatchdogEcho_and_GetConfig(t *testing.T) {
 	srv := NewServer(nil, nil, nil, nil, nil, engine.NewEngineRegistry())
 	srv.SetConfigPersistence("", config.Config{})
@@ -488,7 +541,7 @@ func TestUpdateConfig_WatchdogModeChecksEscalate(t *testing.T) {
 	srv.SetConfigPersistence("", config.Config{})
 
 	_, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{
-		WatchdogMode: "strict", WatchdogEscalateAfter: "3", WatchdogChecks: "debug-loop,plain-english",
+		WatchdogMode: "strict", WatchdogEscalateAfter: "3", WatchdogChecks: "systematic-debugging,plain-english",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -500,7 +553,7 @@ func TestUpdateConfig_WatchdogModeChecksEscalate(t *testing.T) {
 	if w.EscalateAfter != 3 {
 		t.Fatalf("escalate=%d", w.EscalateAfter)
 	}
-	if strings.Join(w.Checks, ",") != "debug-loop,plain-english" {
+	if strings.Join(w.Checks, ",") != "systematic-debugging,plain-english" {
 		t.Fatalf("checks=%v", w.Checks)
 	}
 

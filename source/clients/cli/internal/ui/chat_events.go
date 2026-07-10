@@ -4,6 +4,8 @@ import (
 	"context"
 
 	tea "charm.land/bubbletea/v2"
+
+	"cercano/source/server/pkg/agentclient"
 )
 
 // ChatDriver plugs an agent into a chat surface. Submit returns a tea.Cmd that
@@ -81,6 +83,46 @@ type watchdogEventMsg struct {
 	protocol string // protocol name (empty for echo)
 	summary  string // human-readable text (proto.Text)
 	thread   string // "watchdog" | "main" (echo only)
+}
+
+// subAgentEventMsg is a structured event envelope for an ephemeral sub-agent
+// tab. inner is any chatView.Apply-compatible transcript event; lifecycle
+// events use kind/tool metadata directly.
+type subAgentEventMsg struct {
+	id       string
+	parentID string
+	title    string
+	kind     string
+	tools    []string
+	ignored  []string
+	inner    tea.Msg
+	toolName string
+	text     string
+}
+
+func subAgentEventMsgFromStream(sm agentclient.StreamMsg) subAgentEventMsg {
+	msg := subAgentEventMsg{
+		id:       sm.SubAgentID,
+		parentID: sm.SubAgentParentID,
+		title:    sm.SubAgentTitle,
+		kind:     sm.SubAgentKind,
+		tools:    append([]string(nil), sm.GrantedTools...),
+		ignored:  append([]string(nil), sm.IgnoredTools...),
+		text:     sm.SubAgentText,
+	}
+	switch sm.SubAgentKind {
+	case "token":
+		msg.inner = chatAssistantDeltaMsg{token: sm.SubAgentText}
+	case "tool_use_start":
+		msg.inner = toolEntryStartMsg{id: sm.ToolUseID, name: sm.ToolName}
+	case "tool_use_stop":
+		msg.inner = toolEntryStopMsg{id: sm.ToolUseID, argsSummary: sm.ArgsSummary}
+	case "tool_exec_start":
+		msg.inner = toolEntryExecStartMsg{id: sm.ToolUseID}
+	case "tool_exec_complete":
+		msg.inner = toolEntryExecCompleteMsg{id: sm.ToolUseID, detail: sm.Detail, summary: sm.Summary, startLine: sm.StartLine, isError: sm.IsError}
+	}
+	return msg
 }
 
 // chatConfirmMsg asks the host to raise the shared confirm gate. onYes/onNo are

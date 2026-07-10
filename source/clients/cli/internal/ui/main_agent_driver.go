@@ -106,6 +106,8 @@ func streamMsgToEvent(sm agentclient.StreamMsg) tea.Msg {
 			summary:  sm.Summary,
 			thread:   sm.Thread,
 		}
+	case agentclient.TypeSubAgent:
+		return subAgentEventMsgFromStream(sm)
 	case agentclient.TypeError:
 		return chatErrorMsg{err: sm.Err}
 	}

@@ -23,7 +23,7 @@ func TestHighlightRange_PreservesForeground(t *testing.T) {
 	if !strings.Contains(out, "38;2;0;200;232") {
 		t.Errorf("cyan foreground was lost: %q", out)
 	}
-	if !strings.Contains(out, "48;2;45;79;97") {
+	if !strings.Contains(out, "48;2;88;130;158") {
 		t.Errorf("selection background not applied: %q", out)
 	}
 }
@@ -35,7 +35,7 @@ func TestHighlightRange_BackgroundOnlyKeepsText(t *testing.T) {
 	if got := ansi.Strip(hl); got != line {
 		t.Errorf("highlight altered the text: %q", got)
 	}
-	if !strings.Contains(hl, "48;2;45;79;97") {
+	if !strings.Contains(hl, "48;2;88;130;158") {
 		t.Errorf("selection background not applied: %q", hl)
 	}
 }
@@ -45,7 +45,7 @@ func TestHighlightRange_BackgroundOnlyKeepsText(t *testing.T) {
 // after the line's own background SGR, not overridden by it. Regression for the
 // bug where selecting a sent prompt showed no highlight (the fill won).
 func TestHighlightRange_WinsOverLineBackground(t *testing.T) {
-	selBg := "\x1b[48;2;45;79;97m"  // #2D4F61 selection
+	selBg := "\x1b[48;2;88;130;158m" // #58829E selection
 	lineBg := "\x1b[48;2;17;51;26m" // #11331A sent-prompt fill (Cracker BufferUserBg)
 	line := lipgloss.NewStyle().Background(lipgloss.Color("#11331A")).Render("sent prompt")
 	hl := highlightRange(line, 0, ansi.StringWidth(line))

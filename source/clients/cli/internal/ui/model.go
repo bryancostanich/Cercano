@@ -2003,6 +2003,13 @@ func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model,
 		next, cmd := m.runSlash(text)
 		return next, cmd
 	}
+	// A genuine new turn is starting: sweep away finished sub-agent tabs the
+	// user has already moved past. Deferred to turn start (not turn end) so a
+	// finished tab stays readable until the user acts; the active tab is spared
+	// inside the sweep so we never yank what they're viewing.
+	if m.hasSubAgentTabs() {
+		m.cleanupFinishedSubAgentTabs()
+	}
 	// Stash the prompt so we can rehydrate the input if the agent crashes
 	// mid-turn. Cleared on successful streamEndMsg; consumed on
 	// connStateChangedMsg(Reconnecting) if the current turn is in flight.

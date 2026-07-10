@@ -209,6 +209,33 @@ func (m *Model) closeActiveSubAgentTab() bool {
 	return true
 }
 
+// cleanupFinishedSubAgentTabs prunes every finished (done, including errored)
+// sub-agent tab at the start of a new main turn. It deliberately spares the
+// tab the user is currently viewing (m.chatTabs.active): a finished tab is
+// still worth reading, so yanking it mid-review would rip the transcript out
+// from under the cursor. Deferring the sweep to turn start means finished tabs
+// only vanish once the user has moved on to new work. Removed ids are NOT added
+// to the closed set — that set is reserved for tabs the user explicitly
+// dismissed, whose late events we drop; a finished tab that later streams more
+// events should be free to reappear.
+func (m *Model) cleanupFinishedSubAgentTabs() {
+	m.ensureChatTabs()
+	order := make([]string, 0, len(m.chatTabs.order))
+	for _, id := range m.chatTabs.order {
+		tab := m.chatTabs.tabs[id]
+		// Keep main, the active tab, and anything still running.
+		if id == mainChatTabID || id == m.chatTabs.active || tab == nil || !tab.done {
+			order = append(order, id)
+			continue
+		}
+		delete(m.chatTabs.tabs, id)
+	}
+	m.chatTabs.order = order
+	if !m.hasSubAgentTabs() {
+		m.chatTabs.focused = false
+	}
+}
+
 func (m *Model) applySubAgentEvent(ev subAgentEventMsg) {
 	if ev.id == "" {
 		ev.id = ev.title

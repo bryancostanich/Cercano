@@ -54,6 +54,11 @@ func (c *Client) StreamChat(ctx context.Context, req ChatRequest) (llm.StreamRea
 
 	go func() {
 		defer close(ch)
+		// Open the message frame before any content. collect.go's stream-guard
+		// drops every delta that arrives before message_start, so without this
+		// the entire Ollama response is discarded. Mirrors the anthropic/openai
+		// adapters, which emit message_start up front.
+		ch <- llm.StreamEvent{Type: llm.EventMessageStart}
 		err := c.api.Chat(cctx, freq, func(resp api.ChatResponse) error {
 			if resp.Message.Content != "" {
 				ch <- llm.StreamEvent{Type: llm.EventTextDelta, TextDelta: resp.Message.Content}

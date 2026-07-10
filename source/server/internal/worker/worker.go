@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"runtime/debug"
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
@@ -162,6 +163,11 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
+				// Log the FULL stack to the worker's stderr (teed to the host log
+				// via spawn.go) before recover() swallows it — a recovered panic
+				// with only its value is undebuggable across the process boundary.
+				stack := debug.Stack()
+				log.Printf("[worker] PANIC in RunTurn: %v\n%s", r, stack)
 				runErr = fmt.Errorf("worker: panic in RunTurn: %v", r)
 			}
 		}()

@@ -69,10 +69,14 @@ func (s textSelection) lineRange(line, width int) (int, int, bool) {
 	}
 }
 
-// selectionBg is the SGR for the selection background — a muted slate blue laid
+// selectionBg is the SGR for the selection background — a mid slate blue laid
 // UNDER the existing text so the syntax colors show through, like a native
-// selection rather than a flat one-color block.
-const selectionBg = "\x1b[48;2;45;79;97m" // #2D4F61
+// selection rather than a flat one-color block. It is deliberately lighter than
+// the sent-prompt navy fill (#1F4163): the older, darker slate (#2D4F61) sat
+// within ~1.2:1 luminance of that navy, so a selection on a prompt line was
+// nearly indistinguishable. This value lifts selection-vs-navy contrast to
+// ~2.6:1 while staying dark enough to keep light foreground text readable.
+const selectionBg = "\x1b[48;2;88;130;158m" // #58829E
 
 // ansiSGRRe matches any SGR escape sequence. highlightRange re-asserts the
 // selection background after *every* SGR (not just resets) so a background set

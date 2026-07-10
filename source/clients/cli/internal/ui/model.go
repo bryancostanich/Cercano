@@ -185,9 +185,8 @@ type Model struct {
 	// cleared by /clear and /resume).
 	wdRef *struct{ dir string }
 
-	openHistoryOnStart bool   // -r flag → open the history picker after first WindowSizeMsg
-	openWizardOnStart  bool   // -s/-setup, first run, or wizard resume → open the setup wizard after first WindowSizeMsg
-	autoResumeConvID   string // launch data: auto-resume this conversation after the first WindowSizeMsg
+	openHistoryOnStart bool // -r flag → open the history picker after first WindowSizeMsg
+	openWizardOnStart  bool // -s/-setup, first run, or wizard resume → open the setup wizard after first WindowSizeMsg
 
 	// promptBorderColor is the color of the lines immediately above and
 	// below the input row. Defaults to the palette's accent (lime). /color
@@ -425,15 +424,6 @@ func (m Model) SeedAssistantMarkdown(doc string) Model {
 // SeedAssistantMarkdown; splash handling mirrors openHistoryOnStart.
 func (m Model) OpenWizardOnStart() Model {
 	m.openWizardOnStart = true
-	m.splashShown = false
-	return m
-}
-
-// OpenConversationOnStart marks a conversation to auto-resume on the first
-// sized frame (launch data — reopens the prior session and its sub-agent
-// tabs). Chainable; an explicit -r picker or -s wizard takes precedence.
-func (m Model) OpenConversationOnStart(convID string) Model {
-	m.autoResumeConvID = convID
 	m.splashShown = false
 	return m
 }
@@ -823,21 +813,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openWizardOnStart = false
 			m.content = newWizardPage(m.agent, m.palette, m.styles, m.width, m.height)
 		}
-		// Launch-data auto-resume: reopen the last session on the first sized
-		// frame. An explicit -r picker or -s wizard (both set m.content above)
-		// takes precedence, so resume only when no page has claimed the frame.
-		var autoResumeCmd tea.Cmd
-		if m.autoResumeConvID != "" && m.width > 0 {
-			id := m.autoResumeConvID
-			m.autoResumeConvID = ""
-			if m.content == nil {
-				m, autoResumeCmd = m.applyResume(id)
-			}
-		}
 		// Force a full alt-screen redraw on resize. Without ClearScreen,
 		// rows in the terminal that were occupied at the OLD size but not
 		// rewritten at the NEW size show stale content.
-		return m, tea.Batch(tea.ClearScreen, autoResumeCmd)
+		return m, tea.ClearScreen
 
 	case tea.MouseWheelMsg:
 		if m.contentPageActive() {
@@ -1837,12 +1816,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.streaming = false
 		m.mainChat().SetStreaming(false)
-		// Record this as the project's last active conversation so a plain
-		// restart auto-resumes it (launch data). Best-effort; write errors are
-		// silent and never affect the turn.
-		if m.convID != "" {
-			_ = uiconfig.SaveLastConversation(m.root, m.convID)
-		}
 		// Turn completed normally; the rehydration cache is stale.
 		m.lastSubmittedPrompt = ""
 		if m.cancelStream != nil {
@@ -2899,8 +2872,6 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 	if m.convRef != nil {
 		m.convRef.id = conversationID
 	}
-	// Resuming makes this the project's last active conversation (launch data).
-	_ = uiconfig.SaveLastConversation(m.root, conversationID)
 	m.workDirOverride = ""
 	if m.wdRef != nil {
 		m.wdRef.dir = ""

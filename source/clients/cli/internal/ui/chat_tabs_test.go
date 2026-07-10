@@ -146,3 +146,49 @@ func TestChatTabStripFocusNavAndClose(t *testing.T) {
 		t.Fatal("focus should drop when no sub tabs remain")
 	}
 }
+
+func TestCleanupFinishedSubAgentTabs(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.applySubAgentEvent(subAgentEventMsg{id: "c1", kind: "started"})
+	m.applySubAgentEvent(subAgentEventMsg{id: "c2", kind: "started"})
+	m.applySubAgentEvent(subAgentEventMsg{id: "c3", kind: "started"})
+
+	// c1 finished, c2 finished-and-active, c3 still running.
+	m.applySubAgentEvent(subAgentEventMsg{id: "c1", kind: "done"})
+	m.applySubAgentEvent(subAgentEventMsg{id: "c2", kind: "done"})
+	m.switchChatTab("c2")
+
+	m.cleanupFinishedSubAgentTabs()
+
+	if _, ok := m.chatTabs.tabs["c1"]; ok {
+		t.Fatal("finished non-active tab c1 should be pruned")
+	}
+	if _, ok := m.chatTabs.tabs["c2"]; !ok {
+		t.Fatal("finished but active tab c2 must be spared")
+	}
+	if _, ok := m.chatTabs.tabs["c3"]; !ok {
+		t.Fatal("still-running tab c3 must be kept")
+	}
+	if _, ok := m.chatTabs.tabs[mainChatTabID]; !ok {
+		t.Fatal("main tab must always remain")
+	}
+	for _, id := range m.chatTabs.order {
+		if id == "c1" {
+			t.Fatal("order still references pruned c1")
+		}
+	}
+
+	// Finish c3, move focus to main, and sweep again: with no sub tab active,
+	// every finished sub tab is pruned and strip focus is released.
+	m.applySubAgentEvent(subAgentEventMsg{id: "c3", kind: "done"})
+	m.switchChatTab(mainChatTabID)
+	m.chatTabs.focused = true
+	m.cleanupFinishedSubAgentTabs()
+	if m.hasSubAgentTabs() {
+		t.Fatal("all finished sub tabs should be pruned when none is active")
+	}
+	if m.chatTabs.focused {
+		t.Fatal("strip focus should release when no sub tabs remain")
+	}
+}

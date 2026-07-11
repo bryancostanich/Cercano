@@ -1174,7 +1174,7 @@ func (c *chatView) renderAssistantMarkdown(e *Entry, textW int) string {
 	blocks, tail := render.SplitBlocks(e.Content)
 	prefix := c.committedPrefix(e, blocks, textW)
 	if strings.TrimSpace(tail) != "" {
-		live := c.md.RenderLive(closeOpenFence(tail), textW)
+		live := c.md.RenderLive(closeOpenFence(render.PinUntypedFences(tail)), textW)
 		if prefix == "" {
 			return live
 		}
@@ -1188,7 +1188,11 @@ func (c *chatView) renderMdBlock(b render.MdBlock, textW int) string {
 	case b.Kind == render.MdTable && b.Table != nil:
 		return b.Table.Render(textW, c.styles)
 	case b.Kind == render.MdCode:
-		body := trimBlankEdgeLines(c.md.Render(b.Raw, textW))
+		// Pin untyped fences to plaintext so chroma renders the body verbatim
+		// instead of guessing a language (a wrong guess paints spurious error
+		// tokens — see render.PinUntypedFences). The code-rule label below still
+		// keys off b.Lang, which stays empty, so no "text" label is shown.
+		body := trimBlankEdgeLines(c.md.Render(render.PinUntypedFences(b.Raw), textW))
 		top := codeRule(b.Lang, textW, c.styles)
 		bottom := codeRule("", textW, c.styles)
 		return top + "\n" + body + "\n" + bottom

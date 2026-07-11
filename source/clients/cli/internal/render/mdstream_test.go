@@ -88,3 +88,18 @@ func TestSplit_UnterminatedTableFallsToTail(t *testing.T) {
 		t.Fatalf("tail = %q", tail)
 	}
 }
+
+func TestPinUntypedFences(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{"untyped", "```\nhi\n```", "```text\nhi\n```"},
+		{"typed-untouched", "```go\nx\n```", "```go\nx\n```"},
+		{"indented untyped", "  ```\n  hi\n  ```", "  ```text\n  hi\n  ```"},
+		{"open only (streaming)", "```\npartial", "```text\npartial"},
+		{"prose no fence", "just text", "just text"},
+	}
+	for _, c := range cases {
+		if got := PinUntypedFences(c.in); got != c.want {
+			t.Errorf("%s: PinUntypedFences(%q) = %q, want %q", c.name, c.in, got, c.want)
+		}
+	}
+}

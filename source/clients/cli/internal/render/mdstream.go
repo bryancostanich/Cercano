@@ -120,3 +120,30 @@ func tableTerminated(lines []string, i, consumed int, hadTrailingNL bool) bool {
 	}
 	return hadTrailingNL
 }
+
+// PinUntypedFences rewrites the opening line of every fenced code block that has
+// no language ( ``` with nothing after it ) to ```text, so chroma uses its
+// plaintext lexer instead of guessing a language from the block's content.
+// Guessing (chroma's lexers.Analyse) mis-detects prose / mixed blocks — e.g. a
+// pasted prompt gets guessed as MySQL — and the wrong lexer manufactures
+// spurious "Error" tokens that render with a jarring background. Fences that
+// already declare a language are left untouched; leading indentation is
+// preserved.
+func PinUntypedFences(md string) string {
+	lines := strings.Split(md, "\n")
+	inFence := false
+	for i, ln := range lines {
+		if !strings.HasPrefix(strings.TrimSpace(ln), "```") {
+			continue
+		}
+		if inFence {
+			inFence = false
+			continue
+		}
+		inFence = true
+		if strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ln), "```")) == "" {
+			lines[i] = strings.Replace(ln, "```", "```text", 1)
+		}
+	}
+	return strings.Join(lines, "\n")
+}

@@ -79,6 +79,14 @@ type Model struct {
 	// used to hit-test scrollbar mouse events. Set in relayout().
 	scrollbarTop int
 
+	// stripShown records whether the chat tab strip occupied its rows at the
+	// last relayout(). refreshViewport() re-lays-out when this drifts from the
+	// live strip state, so a tab appearing or vanishing between layouts (a
+	// sub-agent tab created mid-turn, or the last one closed) cannot leave bodyH
+	// and scrollbarTop stale — which pushes the status bar off-screen and
+	// misaligns the tab-click row until some other event forces a relayout.
+	stripShown bool
+
 	// contentScrollbarDragging is the same gesture, but for a reusable content
 	// page scrollbar rather than the main chat scrollback.
 	contentScrollbarDragging bool
@@ -2365,6 +2373,9 @@ func (m *Model) relayout() {
 		tab.view.SetSize(contentW-2, bodyH)
 		tab.view.rebuild()
 	}
+	// Record the strip's shown-state so refreshViewport() can detect a drift
+	// (a tab created/closed between layouts) and re-run us before painting.
+	m.stripShown = m.hasSubAgentTabs() && !m.contentPageActive()
 	m.refreshViewport()
 }
 
@@ -2503,6 +2514,15 @@ func (m Model) splashEffective() bool {
 // entries at the current width. Syncs turn telemetry first so the render
 // has current state, then delegates to chatView.rebuild().
 func (m *Model) refreshViewport() {
+	// If the chat tab strip appeared or vanished since the last relayout, the
+	// viewport height and scrollbarTop are stale (the strip's two rows are not
+	// reserved). Re-lay-out first; relayout() calls back here with stripShown in
+	// sync, so this recurses at most once. Single choke point that keeps every
+	// tab-mutation path (create, sweep, close) self-correcting.
+	if want := m.hasSubAgentTabs() && !m.contentPageActive(); want != m.stripShown {
+		m.relayout()
+		return
+	}
 	m.chatDirty = false // any full rebuild flushes pending coalesced repaints
 	m.mainChat().SetTurnStatus(turnStatus{
 		activity: m.turnActivity,

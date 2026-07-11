@@ -2136,7 +2136,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		}); err != nil {
 			return false, err
 		}
-		d, err := s.permBroker.Wait(ctx, toolUseID)
+		d, err := s.permBroker.Wait(ctx, convID, toolUseID)
 		if err != nil {
 			return false, err
 		}
@@ -2577,7 +2577,7 @@ func (s *Server) AllowToolCall(ctx context.Context, req *proto.AllowToolCallRequ
 	if s.permBroker == nil {
 		return &proto.AllowToolCallResponse{Ok: false}, nil
 	}
-	ok := s.permBroker.Resolve(req.GetToolUseId(), agent.Decision{Allow: true, Persist: req.GetPersist()})
+	ok := s.permBroker.Resolve(req.GetConversationId(), req.GetToolUseId(), agent.Decision{Allow: true, Persist: req.GetPersist()})
 	return &proto.AllowToolCallResponse{Ok: ok}, nil
 }
 
@@ -2586,7 +2586,7 @@ func (s *Server) DenyToolCall(ctx context.Context, req *proto.DenyToolCallReques
 	if s.permBroker == nil {
 		return &proto.DenyToolCallResponse{Ok: false}, nil
 	}
-	ok := s.permBroker.Resolve(req.GetToolUseId(), agent.Decision{Allow: false})
+	ok := s.permBroker.Resolve(req.GetConversationId(), req.GetToolUseId(), agent.Decision{Allow: false})
 	return &proto.DenyToolCallResponse{Ok: ok}, nil
 }
 

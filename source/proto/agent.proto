@@ -1004,10 +1004,10 @@ message RegenerateContextProgress {
 
 // Allow/Deny pair the asynchronous PermissionRequired stream event with a
 // client reply. tool_use_id is the same id the event carried.
-message AllowToolCallRequest  { string tool_use_id = 1; bool persist = 2; }
+message AllowToolCallRequest  { string tool_use_id = 1; bool persist = 2; string conversation_id = 3; }
 message AllowToolCallResponse { bool ok = 1; }
 
-message DenyToolCallRequest  { string tool_use_id = 1; }
+message DenyToolCallRequest  { string tool_use_id = 1; string conversation_id = 2; }
 message DenyToolCallResponse { bool ok = 1; }
 
 // Provider capability snapshot — clients hide tool-call UI when the active

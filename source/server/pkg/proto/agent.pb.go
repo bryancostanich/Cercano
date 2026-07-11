@@ -7355,11 +7355,12 @@ func (x *RegenerateContextProgress) GetPostTokens() int32 {
 // Allow/Deny pair the asynchronous PermissionRequired stream event with a
 // client reply. tool_use_id is the same id the event carried.
 type AllowToolCallRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ToolUseId     string                 `protobuf:"bytes,1,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`
-	Persist       bool                   `protobuf:"varint,2,opt,name=persist,proto3" json:"persist,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ToolUseId      string                 `protobuf:"bytes,1,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`
+	Persist        bool                   `protobuf:"varint,2,opt,name=persist,proto3" json:"persist,omitempty"`
+	ConversationId string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *AllowToolCallRequest) Reset() {
@@ -7404,6 +7405,13 @@ func (x *AllowToolCallRequest) GetPersist() bool {
 		return x.Persist
 	}
 	return false
+}
+
+func (x *AllowToolCallRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
 }
 
 type AllowToolCallResponse struct {
@@ -7451,10 +7459,11 @@ func (x *AllowToolCallResponse) GetOk() bool {
 }
 
 type DenyToolCallRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ToolUseId     string                 `protobuf:"bytes,1,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ToolUseId      string                 `protobuf:"bytes,1,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`
+	ConversationId string                 `protobuf:"bytes,2,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *DenyToolCallRequest) Reset() {
@@ -7490,6 +7499,13 @@ func (*DenyToolCallRequest) Descriptor() ([]byte, []int) {
 func (x *DenyToolCallRequest) GetToolUseId() string {
 	if x != nil {
 		return x.ToolUseId
+	}
+	return ""
+}
+
+func (x *DenyToolCallRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
 	}
 	return ""
 }
@@ -11980,14 +11996,16 @@ const file_agent_proto_rawDesc = "" +
 	"\n" +
 	"pre_tokens\x18\x05 \x01(\x05R\tpreTokens\x12\x1f\n" +
 	"\vpost_tokens\x18\x06 \x01(\x05R\n" +
-	"postTokens\"P\n" +
+	"postTokens\"y\n" +
 	"\x14AllowToolCallRequest\x12\x1e\n" +
 	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\x12\x18\n" +
-	"\apersist\x18\x02 \x01(\bR\apersist\"'\n" +
+	"\apersist\x18\x02 \x01(\bR\apersist\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\"'\n" +
 	"\x15AllowToolCallResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\"5\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"^\n" +
 	"\x13DenyToolCallRequest\x12\x1e\n" +
-	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\"&\n" +
+	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\x12'\n" +
+	"\x0fconversation_id\x18\x02 \x01(\tR\x0econversationId\"&\n" +
 	"\x14DenyToolCallResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\" \n" +
 	"\x1eGetProviderCapabilitiesRequest\"\x81\x02\n" +

@@ -134,13 +134,13 @@ Output:
 			fmt.Fprintf(os.Stderr, "       [%s] %s\n", status, msg.Summary)
 		case agentclient.TypePermissionRequired:
 			if autoAllow {
-				if err := client.AllowToolCall(ctx, msg.ToolUseID); err != nil {
+				if err := client.AllowToolCall(ctx, convID, msg.ToolUseID); err != nil {
 					fmt.Fprintf(os.Stderr, "[allow error] %v\n", err)
 				} else {
 					fmt.Fprintf(os.Stderr, "[allowed via --auto-allow] %s (%s-tier)\n", msg.ToolName, msg.Tier)
 				}
 			} else {
-				if err := client.DenyToolCall(ctx, msg.ToolUseID); err != nil {
+				if err := client.DenyToolCall(ctx, convID, msg.ToolUseID); err != nil {
 					fmt.Fprintf(os.Stderr, "[deny error] %v\n", err)
 				}
 				fmt.Fprintf(os.Stderr, "[denied] %s-tier tool %s (use --auto-allow to permit)\n", msg.Tier, msg.ToolName)

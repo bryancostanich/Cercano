@@ -1713,15 +1713,17 @@ func (c *Client) GetPermissionMode(ctx context.Context) (string, error) {
 	return res.GetMode(), nil
 }
 
-// AllowToolCall approves a paused tool call awaiting permission.
-func (c *Client) AllowToolCall(ctx context.Context, toolUseID string) error {
-	_, err := c.agent.AllowToolCall(ctx, &proto.AllowToolCallRequest{ToolUseId: toolUseID})
+// AllowToolCall approves a paused tool call awaiting permission. conversationID
+// scopes the reply so it reaches the waiter in the right conversation.
+func (c *Client) AllowToolCall(ctx context.Context, conversationID, toolUseID string) error {
+	_, err := c.agent.AllowToolCall(ctx, &proto.AllowToolCallRequest{ToolUseId: toolUseID, ConversationId: conversationID})
 	return err
 }
 
-// DenyToolCall rejects a paused tool call awaiting permission.
-func (c *Client) DenyToolCall(ctx context.Context, toolUseID string) error {
-	_, err := c.agent.DenyToolCall(ctx, &proto.DenyToolCallRequest{ToolUseId: toolUseID})
+// DenyToolCall rejects a paused tool call awaiting permission. conversationID
+// scopes the reply so it reaches the waiter in the right conversation.
+func (c *Client) DenyToolCall(ctx context.Context, conversationID, toolUseID string) error {
+	_, err := c.agent.DenyToolCall(ctx, &proto.DenyToolCallRequest{ToolUseId: toolUseID, ConversationId: conversationID})
 	return err
 }
 
@@ -1917,8 +1919,8 @@ func (c *Client) RemoveCloudProfile(ctx context.Context, name string) error {
 
 // AllowToolCallPersist approves a paused tool call and, when persist is true,
 // asks the agent to allowlist it for silent future runs.
-func (c *Client) AllowToolCallPersist(ctx context.Context, toolUseID string, persist bool) error {
-	_, err := c.agent.AllowToolCall(ctx, &proto.AllowToolCallRequest{ToolUseId: toolUseID, Persist: persist})
+func (c *Client) AllowToolCallPersist(ctx context.Context, conversationID, toolUseID string, persist bool) error {
+	_, err := c.agent.AllowToolCall(ctx, &proto.AllowToolCallRequest{ConversationId: conversationID, ToolUseId: toolUseID, Persist: persist})
 	return err
 }
 

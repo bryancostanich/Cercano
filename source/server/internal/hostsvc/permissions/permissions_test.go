@@ -37,7 +37,7 @@ func TestBroker_ResolveWait(t *testing.T) {
 	// reaches Wait first (matching the pattern in pending_test.go).
 	go func() {
 		time.Sleep(10 * time.Millisecond)
-		ok := b.Resolve("tool-1", agent.Decision{Allow: true, Persist: false})
+		ok := b.Resolve("c1", "tool-1", agent.Decision{Allow: true, Persist: false})
 		if !ok {
 			t.Errorf("Resolve returned false; no waiter registered")
 		}
@@ -45,7 +45,7 @@ func TestBroker_ResolveWait(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	d, err := b.Wait(ctx, "tool-1")
+	d, err := b.Wait(ctx, "c1", "tool-1")
 	if err != nil {
 		t.Fatalf("Wait: %v", err)
 	}

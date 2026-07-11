@@ -3113,9 +3113,9 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 			m.refreshViewport()
 			if tc.ToolUseID != "" {
 				// Stream-event origin: unblock the server-side tool loop.
-				ag, id := m.agent, tc.ToolUseID
+				ag, id, convID := m.agent, tc.ToolUseID, m.convID
 				if ag != nil {
-					go func() { _ = ag.AllowToolCall(context.Background(), id) }()
+					go func() { _ = ag.AllowToolCall(context.Background(), convID, id) }()
 				}
 				return m, nil
 			}
@@ -3127,9 +3127,9 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("canceled.")})
 			m.refreshViewport()
 			if tc.ToolUseID != "" {
-				ag, id := m.agent, tc.ToolUseID
+				ag, id, convID := m.agent, tc.ToolUseID, m.convID
 				if ag != nil {
-					go func() { _ = ag.DenyToolCall(context.Background(), id) }()
+					go func() { _ = ag.DenyToolCall(context.Background(), convID, id) }()
 				}
 			}
 			return m, nil
@@ -3148,9 +3148,9 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 				Content: m.styles.Accent.Render("✓ always-allowed — running…")})
 			m.refreshViewport()
 			if tc.ToolUseID != "" {
-				ag, id := m.agent, tc.ToolUseID
+				ag, id, convID := m.agent, tc.ToolUseID, m.convID
 				if ag != nil {
-					go func() { _ = ag.AllowToolCallPersist(context.Background(), id, true) }()
+					go func() { _ = ag.AllowToolCallPersist(context.Background(), convID, id, true) }()
 				}
 			}
 			return m, nil

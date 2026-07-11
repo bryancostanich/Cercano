@@ -54,10 +54,14 @@ func press(t *testing.T, wp *wizardPage, code rune) bool {
 func TestWizardCloudPathEndToEnd(t *testing.T) {
 	wp := newTestWizardPage(t)
 
-	// Step 1: pick cloud (first row).
+	// Step 1 (locus, first): the cursor sits on the recommended cloud_primary.
+	rows := wp.rows()
+	if rows[wp.cursor].Key != "cloud_primary" {
+		t.Fatalf("locus cursor: want cloud_primary, got %s", rows[wp.cursor].Key)
+	}
 	press(t, wp, tea.KeyEnter)
 	if wp.state.Step != wizard.StepCloud {
-		t.Fatalf("after primary: want %s, got %s", wizard.StepCloud, wp.state.Step)
+		t.Fatalf("after locus: want %s, got %s", wizard.StepCloud, wp.state.Step)
 	}
 
 	// Step 2 phase 1: pick the first provider (anthropic).
@@ -71,24 +75,14 @@ func TestWizardCloudPathEndToEnd(t *testing.T) {
 	// Phase 2: pick meridian (commits the profile eagerly; stub it).
 	wp.commitMeridianFn = func() error { return nil }
 	press(t, wp, tea.KeyEnter)
-	if wp.state.Step != wizard.StepLocus {
-		t.Fatalf("after cloud: want %s, got %s", wizard.StepLocus, wp.state.Step)
+	if wp.state.Step != wizard.StepOpen {
+		t.Fatalf("after cloud: want %s, got %s (cloud_primary uses open)", wizard.StepOpen, wp.state.Step)
 	}
 	if wp.state.AuthMethod != "meridian" {
 		t.Fatalf("auth: want meridian, got %s", wp.state.AuthMethod)
 	}
 
-	// Step 3: cursor should sit on the recommended cloud_primary row.
-	rows := wp.rows()
-	if rows[wp.cursor].Key != "cloud_primary" {
-		t.Fatalf("locus cursor: want cloud_primary, got %s", rows[wp.cursor].Key)
-	}
-	press(t, wp, tea.KeyEnter)
-	if wp.state.Step != wizard.StepTiers {
-		t.Fatalf("after locus: want %s, got %s", wizard.StepTiers, wp.state.Step)
-	}
-
-	// Step 4: autofill should have filled both sides for every tier.
+	// Step 3 (open): autofill should have filled both sides for every tier.
 	if wp.state.TierPicks["most_capable.cloud"] == "" {
 		t.Error("autofill: most_capable.cloud empty")
 	}
@@ -122,7 +116,6 @@ func TestWizardApplyFailureKeepsState(t *testing.T) {
 	wp := newTestWizardPage(t)
 	press(t, wp, tea.KeyDown)
 	press(t, wp, tea.KeyEnter) // open (second row)
-	press(t, wp, tea.KeyEnter) // recommended locus
 	for range wp.rows() {
 		press(t, wp, tea.KeyDown)
 	}
@@ -150,11 +143,10 @@ func TestWizardOpenPathSkipsCloud(t *testing.T) {
 	wp := newTestWizardPage(t)
 	press(t, wp, tea.KeyDown)
 	press(t, wp, tea.KeyEnter) // open (second row)
-	if wp.state.Step != wizard.StepLocus {
-		t.Fatalf("open primary: want %s, got %s", wizard.StepLocus, wp.state.Step)
+	if wp.state.Step != wizard.StepOpen {
+		t.Fatalf("open primary: want %s, got %s", wizard.StepOpen, wp.state.Step)
 	}
 	// Only open-side tier rows should appear later.
-	press(t, wp, tea.KeyEnter) // accept recommended open_primary
 	for _, r := range wp.rows() {
 		if strings.HasSuffix(r.Key, "."+wizard.SideCloud) {
 			t.Errorf("open path: unexpected cloud tier row %s", r.Key)
@@ -168,12 +160,12 @@ func TestWizardEscResumesMidRun(t *testing.T) {
 	p := theme.BuiltinThemes()[0]
 	wp := newWizardPage(nil, p.Palette, theme.NewStyles(p.Palette), 100, 40)
 
-	press(t, wp, tea.KeyEnter) // cloud (first row)
+	press(t, wp, tea.KeyEnter) // pick cloud_primary (first row) → cloud step
 	if closed := press(t, wp, tea.KeyEscape); closed {
 		t.Fatal("esc on cloud step should go back, not close")
 	}
-	if wp.state.Step != wizard.StepPrimary {
-		t.Fatalf("esc: want %s, got %s", wizard.StepPrimary, wp.state.Step)
+	if wp.state.Step != wizard.StepLocus {
+		t.Fatalf("esc: want %s, got %s", wizard.StepLocus, wp.state.Step)
 	}
 	if closed := press(t, wp, tea.KeyEscape); !closed {
 		t.Fatal("esc on first step should close the page")
@@ -181,19 +173,18 @@ func TestWizardEscResumesMidRun(t *testing.T) {
 
 	// A fresh page resumes from the persisted state.
 	wp2 := newWizardPage(nil, p.Palette, theme.NewStyles(p.Palette), 100, 40)
-	if wp2.state.Step != wizard.StepPrimary {
-		t.Fatalf("resume: want %s, got %s", wizard.StepPrimary, wp2.state.Step)
+	if wp2.state.Step != wizard.StepLocus {
+		t.Fatalf("resume: want %s, got %s", wizard.StepLocus, wp2.state.Step)
 	}
-	if wp2.state.PrimarySide != wizard.SideCloud {
-		t.Fatalf("resume: want preserved side %s, got %q", wizard.SideCloud, wp2.state.PrimarySide)
+	if wp2.state.LocusMode != "cloud_primary" {
+		t.Fatalf("resume: want preserved locus cloud_primary, got %q", wp2.state.LocusMode)
 	}
 }
 
 func TestWizardTierPickerRecordsPick(t *testing.T) {
 	wp := newTestWizardPage(t)
-	press(t, wp, tea.KeyDown)
-	press(t, wp, tea.KeyEnter) // open (second row)
-	press(t, wp, tea.KeyEnter) // recommended locus → tiers
+	press(t, wp, tea.KeyDown)  // cloud_primary → open_only
+	press(t, wp, tea.KeyEnter) // open_only → open step (skips cloud)
 
 	// Enter on the first tier row opens the picker.
 	press(t, wp, tea.KeyEnter)
@@ -243,7 +234,6 @@ func TestWizardPickerEscClosesWithoutChange(t *testing.T) {
 	wp := newTestWizardPage(t)
 	press(t, wp, tea.KeyDown)
 	press(t, wp, tea.KeyEnter) // open (second row)
-	press(t, wp, tea.KeyEnter) // locus → tiers
 	before := wp.state.TierPicks["most_capable.open"]
 	press(t, wp, tea.KeyEnter) // open picker
 	press(t, wp, tea.KeyEscape)
@@ -253,7 +243,7 @@ func TestWizardPickerEscClosesWithoutChange(t *testing.T) {
 	if wp.state.TierPicks["most_capable.open"] != before {
 		t.Error("esc: pick must be unchanged")
 	}
-	if wp.state.Step != wizard.StepTiers {
+	if wp.state.Step != wizard.StepOpen {
 		t.Errorf("esc: page must stay on tiers, got %s", wp.state.Step)
 	}
 }
@@ -294,8 +284,8 @@ func TestWizardAPIKeyFlow(t *testing.T) {
 	if got != "sk-test-123" {
 		t.Errorf("commit: want key passed through, got %q", got)
 	}
-	if wp.state.Step != wizard.StepLocus {
-		t.Fatalf("after key: want %s, got %s", wizard.StepLocus, wp.state.Step)
+	if wp.state.Step != wizard.StepOpen {
+		t.Fatalf("after key: want %s, got %s", wizard.StepOpen, wp.state.Step)
 	}
 
 	// The key must never be persisted in wizard state.
@@ -343,8 +333,8 @@ func TestWizardMeridianCommit(t *testing.T) {
 	if !called {
 		t.Error("meridian: commit not called")
 	}
-	if wp.state.Step != wizard.StepLocus {
-		t.Fatalf("after meridian: want %s, got %s", wizard.StepLocus, wp.state.Step)
+	if wp.state.Step != wizard.StepOpen {
+		t.Fatalf("after meridian: want %s, got %s", wizard.StepOpen, wp.state.Step)
 	}
 }
 
@@ -373,7 +363,6 @@ func TestWizardFinishUpdateCarriesCloudModel(t *testing.T) {
 	// profile (via UpdateConfig's CloudModel → active-profile rebuild path),
 	// or the profile serves requests with whatever model it was seeded with.
 	u := wizardFinishUpdate(wizard.State{
-		PrimarySide:   wizard.SideCloud,
 		CloudProvider: "anthropic",
 		LocusMode:     "cloud_primary",
 		TierPicks:     map[string]string{"everyday.cloud": "claude-opus-4-8"},
@@ -386,34 +375,9 @@ func TestWizardFinishUpdateCarriesCloudModel(t *testing.T) {
 	}
 	// Open path: no cloud provider configured → no CloudModel patch (the
 	// wantCloudRebuild branch errors without an active profile).
-	u2 := wizardFinishUpdate(wizard.State{PrimarySide: wizard.SideOpen, LocusMode: "open_primary"})
+	u2 := wizardFinishUpdate(wizard.State{LocusMode: "open_primary"})
 	if u2.CloudModel != "" {
 		t.Fatalf("open path must not patch CloudModel, got %q", u2.CloudModel)
-	}
-}
-
-func TestWizardSummaryWarnsOnPrimaryLocusContradiction(t *testing.T) {
-	wp := newTestWizardPage(t)
-	wp.state = wizard.State{
-		Step:          wizard.StepDone,
-		PrimarySide:   wizard.SideCloud,
-		CloudProvider: "anthropic",
-		AuthMethod:    "meridian",
-		LocusMode:     "open_primary",
-	}
-	// primary=cloud + locus=open_primary means main chat never reaches the
-	// cloud provider the user just configured — say so before apply.
-	if s := wp.summary(); !strings.Contains(s, "warning") {
-		t.Fatalf("contradictory summary must carry a warning, got:\n%s", s)
-	}
-	// Consistent answers stay clean.
-	wp.state.LocusMode = "cloud_primary"
-	if s := wp.summary(); strings.Contains(s, "warning") {
-		t.Fatalf("consistent summary must not warn, got:\n%s", s)
-	}
-	wp.state = wizard.State{Step: wizard.StepDone, PrimarySide: wizard.SideOpen, LocusMode: "open_only"}
-	if s := wp.summary(); strings.Contains(s, "warning") {
-		t.Fatalf("open/open summary must not warn, got:\n%s", s)
 	}
 }
 
@@ -517,11 +481,11 @@ func TestWizardKeyEntryQTypesIntoPrompt(t *testing.T) {
 
 func TestWizardViewRendersTierPurposes(t *testing.T) {
 	wp := newTestWizardPage(t)
-	wp.state.PrimarySide = wizard.SideOpen
-	wp.state.Step = wizard.StepTiers
+	wp.state.LocusMode = "open_only"
+	wp.state.Step = wizard.StepOpen
 	wp.autofillTiers()
 	v := wp.View()
-	for _, want := range []string{"most-capable", "easy to change later", "step 3 of 3"} {
+	for _, want := range []string{"most-capable", "easy to change later", "step 2 of 2"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("tiers view: missing %q", want)
 		}

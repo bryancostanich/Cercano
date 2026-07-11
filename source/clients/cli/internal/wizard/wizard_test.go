@@ -13,64 +13,91 @@ func useTempState(t *testing.T) string {
 	return path
 }
 
-func TestCloudPathVisitsEveryStep(t *testing.T) {
-	s := New()
-	s.PrimarySide = SideCloud
+// runToEnd drives the machine to completion, filling the cloud step's answers,
+// and returns the visited step sequence.
+func runToEnd(t *testing.T, s State) []Step {
+	t.Helper()
 	steps := []Step{s.Step}
-	answers := func() {
-		switch s.Step {
-		case StepCloud:
-			s.CloudProvider, s.AuthMethod = "anthropic", "meridian"
-		case StepLocus:
-			s.LocusMode = s.RecommendedLocus()
-		}
-	}
 	for !s.Complete() {
-		answers()
+		if s.Step == StepCloud {
+			s.CloudProvider, s.AuthMethod = "anthropic", "meridian"
+		}
 		if err := s.Advance(); err != nil {
 			t.Fatalf("advance from %s: %v", steps[len(steps)-1], err)
 		}
 		steps = append(steps, s.Step)
 	}
-	want := []Step{StepPrimary, StepCloud, StepLocus, StepTiers, StepDone}
-	if len(steps) != len(want) {
-		t.Fatalf("cloud path: want %v, got %v", want, steps)
+	return steps
+}
+
+func eqSteps(a, b []Step) bool {
+	if len(a) != len(b) {
+		return false
 	}
-	for i := range want {
-		if steps[i] != want[i] {
-			t.Fatalf("cloud path: want %v, got %v", want, steps)
+	for i := range a {
+		if a[i] != b[i] {
+			return false
 		}
 	}
-	if s.RecommendedLocus() != "cloud_primary" {
-		t.Errorf("cloud primary: want cloud_primary recommendation, got %s", s.RecommendedLocus())
+	return true
+}
+
+func TestCloudPrimaryVisitsBothMiddleSteps(t *testing.T) {
+	s := New()
+	s.LocusMode = "cloud_primary" // uses cloud AND open
+	got := runToEnd(t, s)
+	want := []Step{StepLocus, StepCloud, StepOpen, StepDone}
+	if !eqSteps(got, want) {
+		t.Fatalf("cloud_primary: want %v, got %v", want, got)
 	}
 }
 
-func TestOpenPathSkipsCloudStep(t *testing.T) {
+func TestCloudOnlySkipsOpenStep(t *testing.T) {
 	s := New()
-	s.PrimarySide = SideOpen
-	if err := s.Advance(); err != nil {
-		t.Fatalf("advance: %v", err)
+	s.LocusMode = "cloud_only"
+	got := runToEnd(t, s)
+	want := []Step{StepLocus, StepCloud, StepDone}
+	if !eqSteps(got, want) {
+		t.Fatalf("cloud_only: want %v (no open step), got %v", want, got)
 	}
-	if s.Step != StepLocus {
-		t.Fatalf("open primary: want %s after primary, got %s", StepLocus, s.Step)
+}
+
+func TestOpenPathsSkipCloudStep(t *testing.T) {
+	for _, mode := range []string{"open_only", "open_primary"} {
+		s := New()
+		s.LocusMode = mode
+		got := runToEnd(t, s)
+		want := []Step{StepLocus, StepOpen, StepDone}
+		if !eqSteps(got, want) {
+			t.Fatalf("%s: want %v (no cloud step), got %v", mode, want, got)
+		}
 	}
-	if s.Prev() != StepPrimary {
-		t.Errorf("open primary: Prev from locus should skip cloud, got %s", s.Prev())
+}
+
+func TestPrevBranchesOnLocus(t *testing.T) {
+	// From the open step, Prev goes back to cloud only when the locus used
+	// cloud; otherwise straight to locus.
+	openAfterCloud := State{Step: StepOpen, LocusMode: "cloud_primary"}
+	if openAfterCloud.Prev() != StepCloud {
+		t.Errorf("cloud_primary: open.Prev = %s, want %s", openAfterCloud.Prev(), StepCloud)
 	}
-	if s.RecommendedLocus() != "open_primary" {
-		t.Errorf("open primary: want open_primary recommendation, got %s", s.RecommendedLocus())
+	openOnly := State{Step: StepOpen, LocusMode: "open_only"}
+	if openOnly.Prev() != StepLocus {
+		t.Errorf("open_only: open.Prev = %s, want %s (skips cloud)", openOnly.Prev(), StepLocus)
 	}
 }
 
 func TestAdvanceRejectsMissingAnswers(t *testing.T) {
 	s := New()
 	if err := s.Advance(); err == nil {
-		t.Error("primary without side: want error")
+		t.Error("locus without mode: want error")
 	}
-	s.PrimarySide = SideCloud
+	s.LocusMode = "cloud_primary"
 	if err := s.Advance(); err != nil {
 		t.Fatalf("advance: %v", err)
+	}
+	if s.Step != StepCloud {
+		t.Fatalf("after locus=cloud_primary: want %s, got %s", StepCloud, s.Step)
 	}
 	if err := s.Advance(); err == nil {
 		t.Error("cloud without provider/auth: want error")
@@ -81,13 +108,27 @@ func TestAdvanceRejectsMissingAnswers(t *testing.T) {
 	}
 }
 
+func TestDefaultProvider(t *testing.T) {
+	cases := map[string]string{
+		"cloud_only":    SideCloud,
+		"cloud_primary": SideCloud,
+		"open_primary":  SideOpen,
+		"open_only":     SideOpen,
+	}
+	for mode, want := range cases {
+		if got := (State{LocusMode: mode}).DefaultProvider(); got != want {
+			t.Errorf("%s: DefaultProvider = %q, want %q", mode, got, want)
+		}
+	}
+}
+
 func TestResumeRoundTrip(t *testing.T) {
 	useTempState(t)
 	if _, ok := Load(); ok {
 		t.Fatal("empty dir: want nothing to resume")
 	}
 	s := New()
-	s.PrimarySide = SideCloud
+	s.LocusMode = "cloud_primary"
 	if err := s.Advance(); err != nil {
 		t.Fatalf("advance: %v", err)
 	}
@@ -98,8 +139,8 @@ func TestResumeRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("want resumable state")
 	}
-	if got.Step != StepCloud || got.PrimarySide != SideCloud {
-		t.Errorf("resume: want step=%s side=%s, got step=%s side=%s", StepCloud, SideCloud, got.Step, got.PrimarySide)
+	if got.Step != StepCloud || got.LocusMode != "cloud_primary" {
+		t.Errorf("resume: want step=%s mode=cloud_primary, got step=%s mode=%s", StepCloud, got.Step, got.LocusMode)
 	}
 }
 
@@ -107,7 +148,7 @@ func TestDoneStepStillResumes(t *testing.T) {
 	// Reaching the summary screen is not completion — only a successful
 	// apply clears the file. Quitting there must resume to the summary.
 	useTempState(t)
-	if err := Save(State{Step: StepDone, PrimarySide: SideOpen}); err != nil {
+	if err := Save(State{Step: StepDone, LocusMode: "open_only"}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	got, ok := Load()

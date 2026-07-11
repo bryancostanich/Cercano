@@ -90,7 +90,11 @@ func TestBuildRuntimeManagerRegistersLlamaServerCatalogWhenOllamaActive(t *testi
 	}
 	foundCatalog := false
 	for _, model := range models {
-		if model.ID == "llama_server:catalog:qwen2.5-coder-1.5b-q4_k_m" {
+		// The llama-server runtime always exposes its own curated catalog,
+		// independent of which online catalog backend is active. Assert on the
+		// catalog source rather than a specific model id, which churns as the
+		// curated set is revised.
+		if model.Runtime == "llama_server" && model.Source == "catalog" {
 			foundCatalog = true
 			break
 		}

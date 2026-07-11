@@ -93,7 +93,7 @@ func newWizardPage(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h
 	if recs, err := config.LoadTierRecommendations(); err == nil {
 		wp.recs, wp.recsOK = recs, true
 	}
-	if st.Step == wizard.StepTiers {
+	if st.Step == wizard.StepOpen {
 		wp.autofillTiers()
 	}
 	wp.applyFn = wp.applyConfig
@@ -298,7 +298,7 @@ func wizardFinishUpdate(st wizard.State) agentclient.ConfigUpdate {
 	u := agentclient.ConfigUpdate{
 		LocusMode:      st.LocusMode,
 		ModelTierKey:   "default_provider",
-		ModelTierValue: st.PrimarySide,
+		ModelTierValue: st.DefaultProvider(),
 	}
 	if st.CloudProvider != "" {
 		u.CloudModel = st.TierPicks["everyday."+wizard.SideCloud]
@@ -339,14 +339,28 @@ func (wp *wizardPage) ID() contentPageID { return contentPageWizard }
 
 func (wp *wizardPage) SetSize(w, h int) { wp.width, wp.height = w, h }
 
+// wizardRecommendedLocus is the mode the locus step pre-selects and leads
+// with. cloud_primary gives the highest-quality frontier experience; it and
+// open_only are the two recommended options (see the locus rows).
+const wizardRecommendedLocus = "cloud_primary"
+
 // rows returns the current screen's choices.
 func (wp *wizardPage) rows() []wizardRow {
 	switch wp.state.Step {
-	case wizard.StepPrimary:
-		return []wizardRow{
-			{Key: wizard.SideCloud, Label: "cloud", Annotation: "hosted API provider"},
-			{Key: wizard.SideOpen, Label: "open", Annotation: "open-weight model on this machine (local-first default)"},
+	case wizard.StepLocus:
+		rows := []wizardRow{
+			{Key: "cloud_primary", Label: "cloud primary", Annotation: "highest-quality frontier model in the cloud; open co-processor for background work"},
+			{Key: "open_only", Label: "open only", Annotation: "fast and fully private — work never leaves this machine"},
+			{Key: "open_primary", Label: "open primary", Annotation: "main model on this machine, cloud fallback — a cost saver"},
+			{Key: "cloud_only", Label: "cloud only", Annotation: "everything on the hosted API — skips Cercano's local co-processor"},
 		}
+		for i := range rows {
+			switch rows[i].Key {
+			case "cloud_primary", "open_only":
+				rows[i].Annotation += "  (recommended)"
+			}
+		}
+		return rows
 	case wizard.StepCloud:
 		if wp.authPick {
 			return wizardAuthRows(wp.state.CloudProvider)
@@ -365,43 +379,30 @@ func (wp *wizardPage) rows() []wizardRow {
 			rows = append(rows, wizardRow{Key: pr.ID, Label: pr.Label, Annotation: ann, Disabled: disabled})
 		}
 		return rows
-	case wizard.StepLocus:
-		rec := wp.state.RecommendedLocus()
-		rows := []wizardRow{
-			{Key: "cloud_only", Label: "cloud only", Annotation: "everything runs on the hosted API"},
-			{Key: "cloud_primary", Label: "cloud primary", Annotation: "main model in the cloud; open co-processor for background work"},
-			{Key: "open_primary", Label: "open primary", Annotation: "main model on this machine; cloud fallback"},
-			{Key: "open_only", Label: "open only", Annotation: "work never leaves this machine"},
-		}
-		for i := range rows {
-			if rows[i].Key == rec {
-				rows[i].Annotation += "  (recommended)"
-			}
-		}
-		return rows
-	case wizard.StepTiers:
-		rows := make([]wizardRow, 0, 2*len(wizardTierOrder)+1)
+	case wizard.StepOpen:
+		// The open-model set: one pick per open capability tier, plus the
+		// embedding slot. The cloud-side tier slots are filled silently from
+		// the active profile's recommendations (autofillTiers) and not shown
+		// here — this screen is the open set.
+		rows := make([]wizardRow, 0, len(wizardTierOrder)+2)
 		for _, t := range wizardTierOrder {
-			for _, side := range wp.tierSides() {
-				key := string(t) + "." + side
-				pick := normalizeModelLabel(wp.state.TierPicks[key])
-				if pick == "" {
-					pick = "—"
-				}
-				rows = append(rows, wizardRow{
-					Key:        key,
-					Label:      strings.ReplaceAll(string(t), "_", "-") + " · " + side,
-					Annotation: pick,
-				})
+			key := string(t) + "." + wizard.SideOpen
+			pick := normalizeModelLabel(wp.state.TierPicks[key])
+			if pick == "" {
+				pick = "—"
 			}
+			rows = append(rows, wizardRow{
+				Key:        key,
+				Label:      strings.ReplaceAll(string(t), "_", "-"),
+				Annotation: pick,
+			})
 		}
-		// Embedding slot — open side only, not part of the four routing tiers.
-		embKey := "embedding.open"
+		embKey := "embedding." + wizard.SideOpen
 		embPick := normalizeModelLabel(wp.state.TierPicks[embKey])
 		if embPick == "" {
 			embPick = "—"
 		}
-		rows = append(rows, wizardRow{Key: embKey, Label: "embedding · open", Annotation: embPick})
+		rows = append(rows, wizardRow{Key: embKey, Label: "embedding", Annotation: embPick})
 		rows = append(rows, wizardRow{Key: "continue", Label: "continue", Annotation: "accept these models"})
 		return rows
 	case wizard.StepDone:
@@ -498,7 +499,7 @@ func shouldRefill(current string, candidates []string) bool {
 func (wp *wizardPage) defaultCursor() int {
 	rows := wp.rows()
 	if wp.state.Step == wizard.StepLocus {
-		rec := wp.state.RecommendedLocus()
+		rec := wizardRecommendedLocus
 		for i, r := range rows {
 			if r.Key == rec {
 				return i
@@ -618,7 +619,7 @@ func (wp *wizardPage) back() (closed bool) {
 		wp.cursor = wp.defaultCursor()
 		return false
 	}
-	if wp.state.Step == wizard.StepPrimary {
+	if wp.state.Step == wizard.StepLocus {
 		wp.persist()
 		return true
 	}
@@ -642,9 +643,6 @@ func (wp *wizardPage) selectRow() (tea.Cmd, bool) {
 	wp.status = ""
 
 	switch wp.state.Step {
-	case wizard.StepPrimary:
-		wp.state.PrimarySide = row.Key
-		wp.advance()
 	case wizard.StepCloud:
 		if !wp.authPick {
 			wp.state.CloudProvider = row.Key
@@ -685,7 +683,7 @@ func (wp *wizardPage) selectRow() (tea.Cmd, bool) {
 	case wizard.StepLocus:
 		wp.state.LocusMode = row.Key
 		wp.advance()
-	case wizard.StepTiers:
+	case wizard.StepOpen:
 		if row.Key == "continue" {
 			wp.advance()
 			return nil, false
@@ -706,14 +704,14 @@ func (wp *wizardPage) selectRow() (tea.Cmd, bool) {
 	return nil, false
 }
 
-// advance moves the state machine forward, autofills on entry to the tiers
+// advance moves the state machine forward, autofills on entry to the open
 // step, persists, and repositions the cursor.
 func (wp *wizardPage) advance() {
 	if err := wp.state.Advance(); err != nil {
 		wp.status = err.Error()
 		return
 	}
-	if wp.state.Step == wizard.StepTiers {
+	if wp.state.Step == wizard.StepOpen {
 		wp.autofillTiers()
 	}
 	wp.persist()
@@ -729,9 +727,12 @@ func (wp *wizardPage) persist() {
 // stepIndex returns the 1-based position and total screen count for the
 // header; the open path has one screen fewer.
 func (wp *wizardPage) stepIndex() (int, int) {
-	order := []wizard.Step{wizard.StepPrimary, wizard.StepCloud, wizard.StepLocus, wizard.StepTiers}
-	if wp.state.PrimarySide == wizard.SideOpen {
-		order = []wizard.Step{wizard.StepPrimary, wizard.StepLocus, wizard.StepTiers}
+	order := []wizard.Step{wizard.StepLocus}
+	if wizard.ModeUsesCloud(wp.state.LocusMode) {
+		order = append(order, wizard.StepCloud)
+	}
+	if wizard.ModeUsesOpen(wp.state.LocusMode) {
+		order = append(order, wizard.StepOpen)
 	}
 	for i, s := range order {
 		if s == wp.state.Step {
@@ -743,17 +744,15 @@ func (wp *wizardPage) stepIndex() (int, int) {
 
 func (wp *wizardPage) stepTitle() string {
 	switch wp.state.Step {
-	case wizard.StepPrimary:
-		return "primary model"
+	case wizard.StepLocus:
+		return "how to run Cercano"
 	case wizard.StepCloud:
 		if wp.authPick {
 			return "sign in to " + wp.state.CloudProvider
 		}
 		return "cloud provider"
-	case wizard.StepLocus:
-		return "cloud / open split"
-	case wizard.StepTiers:
-		return "model tiers"
+	case wizard.StepOpen:
+		return "open models"
 	case wizard.StepDone:
 		return "done"
 	}
@@ -762,23 +761,21 @@ func (wp *wizardPage) stepTitle() string {
 
 func (wp *wizardPage) stepDesc() string {
 	switch wp.state.Step {
-	case wizard.StepPrimary:
-		return "Where should your main model run?"
+	case wizard.StepLocus:
+		return "How do you want to run Cercano?"
 	case wizard.StepCloud:
 		if wp.authPick {
 			return "How do you want to authenticate?"
 		}
 		return "Pick your cloud provider."
-	case wizard.StepLocus:
-		return "How should Cercano split work between cloud and open models?"
-	case wizard.StepTiers:
+	case wizard.StepOpen:
 		var b strings.Builder
-		b.WriteString("Cercano routes different work to different model tiers:\n")
+		b.WriteString("Recommended open models, one per tier \u2014 verified to run on this machine:\n")
 		for _, t := range wizardTierOrder {
 			fmt.Fprintf(&b, "  %-16s %s\n", strings.ReplaceAll(string(t), "_", "-"), wizardTierPurpose[t])
 		}
-		fmt.Fprintf(&b, "  %-16s %s\n", "embedding · open", "vector embedding for semantic search")
-		b.WriteString("These picks are easy to change later — /m or the config file.")
+		fmt.Fprintf(&b, "  %-16s %s\n", "embedding", "vector embedding for semantic search")
+		b.WriteString("Accept them, or select any to change it \u2014 easy to change later. Downloads run in the background \u2014 track them with /m.")
 		return b.String()
 	case wizard.StepDone:
 		return wp.summary()
@@ -790,18 +787,13 @@ func (wp *wizardPage) stepDesc() string {
 func (wp *wizardPage) summary() string {
 	var b strings.Builder
 	b.WriteString("Setup complete:\n")
-	fmt.Fprintf(&b, "  primary:  %s\n", wp.state.PrimarySide)
+	fmt.Fprintf(&b, "  locus:    %s\n", strings.ReplaceAll(wp.state.LocusMode, "_", " "))
 	if wp.state.CloudProvider != "" {
 		note := ""
 		if wp.state.AuthMethod == "chatgpt" {
-			note = " — approve the ChatGPT sign-in window that opens in your browser"
+			note = " \u2014 approve the ChatGPT sign-in window that opens in your browser"
 		}
 		fmt.Fprintf(&b, "  cloud:    %s (%s)%s\n", wp.state.CloudProvider, wp.state.AuthMethod, note)
-	}
-	fmt.Fprintf(&b, "  locus:    %s\n", wp.state.LocusMode)
-	if side := locusMainSide(wp.state.LocusMode); side != "" && side != wp.state.PrimarySide {
-		fmt.Fprintf(&b, "  warning:  you picked %s as your primary model, but the %s locus mode runs main chat on the %s side — main work will not use your %s model\n",
-			wp.state.PrimarySide, strings.ReplaceAll(wp.state.LocusMode, "_", " "), side, wp.state.PrimarySide)
 	}
 	for _, t := range wizardTierOrder {
 		for _, side := range wp.tierSides() {
@@ -809,6 +801,12 @@ func (wp *wizardPage) summary() string {
 			if pick := wp.state.TierPicks[key]; pick != "" {
 				fmt.Fprintf(&b, "  %-24s %s\n", key+":", pick)
 			}
+		}
+	}
+	if wizard.ModeUsesOpen(wp.state.LocusMode) {
+		b.WriteString("\nYour open models download in the background \u2014 watch progress with /m.")
+		if wp.state.LocusMode != "open_only" {
+			b.WriteString(" Cercano uses your cloud model until they finish.")
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")

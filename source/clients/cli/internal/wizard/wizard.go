@@ -2,6 +2,11 @@
 // sequencing, collected answers, and resume persistence. Rendering lives
 // in the ui package; nothing here knows about Bubble Tea.
 // Design: docs/features/setup-wizard/README.md.
+//
+// The flow is locus-first: the organizing question is how the user wants to
+// run Cercano (the locus mode), and that answer decides which of the two
+// middle steps run — cloud-profile setup when the locus uses cloud, the
+// curated open-model set when it uses open.
 package wizard
 
 import (
@@ -17,29 +22,39 @@ import (
 type Step string
 
 const (
-	StepPrimary Step = "primary" // open or cloud main model
-	StepCloud   Step = "cloud"   // provider + auth; skipped when primary is open
-	StepLocus   Step = "locus"   // cloud/open work split
-	StepTiers   Step = "tiers"   // tier profile review/edit
-	StepDone    Step = "done"    // terminal: config applied, state cleared
+	StepLocus Step = "locus" // FIRST — how you want to use Cercano (organizing question)
+	StepCloud Step = "cloud" // provider + auth; only when the locus uses cloud
+	StepOpen  Step = "open"  // curated open-model set; only when the locus uses open
+	StepDone  Step = "done"  // terminal: config applied, state cleared
 )
 
-// Sides of the taxonomy, mirroring config.Provider values.
+// Sides of the taxonomy, mirroring config.Provider values. Used as TierPicks
+// key suffixes.
 const (
 	SideCloud = "cloud"
 	SideOpen  = "open"
 )
+
+// ModeUsesCloud reports whether a locus mode routes any work to the cloud (so
+// the wizard runs the cloud-profile step).
+func ModeUsesCloud(mode string) bool {
+	return mode == "cloud_only" || mode == "cloud_primary"
+}
+
+// ModeUsesOpen reports whether a locus mode runs any work on open models (so
+// the wizard runs the open-model-set step).
+func ModeUsesOpen(mode string) bool {
+	return mode == "open_only" || mode == "open_primary" || mode == "cloud_primary"
+}
 
 // State is every answer collected so far plus the current step. It is
 // persisted after every transition so quitting mid-wizard resumes in place;
 // a completed run clears the file.
 type State struct {
 	Step          Step              `yaml:"step"`
-	PrimarySide   string            `yaml:"primary_side,omitempty"`   // cloud | open
+	LocusMode     string            `yaml:"locus_mode,omitempty"`     // locus.Mode string value (the organizing answer)
 	CloudProvider string            `yaml:"cloud_provider,omitempty"` // cloud preset ID
 	AuthMethod    string            `yaml:"auth_method,omitempty"`    // meridian | chatgpt | device_code | api_key
-	LocusMode     string            `yaml:"locus_mode,omitempty"`     // locus.Mode string value
-	OpenModel     string            `yaml:"open_model,omitempty"`     // chosen open-weight primary
 	TierPicks     map[string]string `yaml:"tier_picks,omitempty"`     // "<tier>.<side>" → model id
 	// Baseline is the cloud-profile configuration captured when the run
 	// started, before any eager commits. Abandoning the wizard restores it.
@@ -68,23 +83,28 @@ type ProfileSnapshot struct {
 	Route   string `yaml:"route,omitempty"`
 }
 
-// New returns a fresh run positioned at the first step.
-func New() State { return State{Step: StepPrimary} }
+// New returns a fresh run positioned at the first step (locus).
+func New() State { return State{Step: StepLocus} }
 
-// next returns the step after s, honoring the open-path branch: an open
-// primary has no cloud provider to configure.
+// next returns the step after s. The two middle steps are conditional on the
+// locus mode: cloud-profile setup only when the locus uses cloud, the
+// open-model set only when it uses open.
 func (s State) next() Step {
 	switch s.Step {
-	case StepPrimary:
-		if s.PrimarySide == SideOpen {
-			return StepLocus
-		}
-		return StepCloud
-	case StepCloud:
-		return StepLocus
 	case StepLocus:
-		return StepTiers
-	case StepTiers:
+		if ModeUsesCloud(s.LocusMode) {
+			return StepCloud
+		}
+		if ModeUsesOpen(s.LocusMode) {
+			return StepOpen
+		}
+		return StepDone
+	case StepCloud:
+		if ModeUsesOpen(s.LocusMode) {
+			return StepOpen
+		}
+		return StepDone
+	case StepOpen:
 		return StepDone
 	}
 	return StepDone
@@ -95,27 +115,31 @@ func (s State) next() Step {
 func (s State) Prev() Step {
 	switch s.Step {
 	case StepCloud:
-		return StepPrimary
-	case StepLocus:
-		if s.PrimarySide == SideOpen {
-			return StepPrimary
+		return StepLocus
+	case StepOpen:
+		if ModeUsesCloud(s.LocusMode) {
+			return StepCloud
 		}
-		return StepCloud
-	case StepTiers:
 		return StepLocus
 	case StepDone:
-		return StepTiers
+		if ModeUsesOpen(s.LocusMode) {
+			return StepOpen
+		}
+		if ModeUsesCloud(s.LocusMode) {
+			return StepCloud
+		}
+		return StepLocus
 	}
-	return StepPrimary
+	return StepLocus
 }
 
 // Advance validates that the current step's answer is present, then moves
 // to the next step. The caller persists via Save.
 func (s *State) Advance() error {
 	switch s.Step {
-	case StepPrimary:
-		if s.PrimarySide != SideCloud && s.PrimarySide != SideOpen {
-			return fmt.Errorf("primary step: side must be %q or %q, got %q", SideCloud, SideOpen, s.PrimarySide)
+	case StepLocus:
+		if s.LocusMode == "" {
+			return fmt.Errorf("locus step: no mode selected")
 		}
 	case StepCloud:
 		if s.CloudProvider == "" {
@@ -124,13 +148,9 @@ func (s *State) Advance() error {
 		if s.AuthMethod == "" {
 			return fmt.Errorf("cloud step: no auth method selected")
 		}
-	case StepLocus:
-		if s.LocusMode == "" {
-			return fmt.Errorf("locus step: no mode selected")
-		}
-	case StepTiers:
-		// Tier picks may legitimately be sparse (user cleared a slot);
-		// nothing to validate here.
+	case StepOpen:
+		// The open-model set is pre-filled from the curated catalog and
+		// editable; sparse picks are legitimate, so nothing to validate here.
 	case StepDone:
 		return fmt.Errorf("wizard already complete")
 	}
@@ -141,14 +161,16 @@ func (s *State) Advance() error {
 // Complete reports whether the run reached the terminal step.
 func (s State) Complete() bool { return s.Step == StepDone }
 
-// RecommendedLocus is the mode the locus step pre-selects: cloud_primary
-// when a cloud provider was configured, otherwise Cercano's open_primary
-// default. Values match locus.ParseMode inputs.
-func (s State) RecommendedLocus() string {
-	if s.PrimarySide == SideCloud {
-		return "cloud_primary"
+// DefaultProvider returns the taxonomy side the locus mode makes primary —
+// what the finish step writes as models.default_provider.
+func (s State) DefaultProvider() string {
+	if ModeUsesCloud(s.LocusMode) && !ModeUsesOpen(s.LocusMode) {
+		return SideCloud
 	}
-	return "open_primary"
+	if s.LocusMode == "cloud_primary" {
+		return SideCloud
+	}
+	return SideOpen
 }
 
 // StatePath resolves the resume file. CERCANO_WIZARD_STATE overrides for

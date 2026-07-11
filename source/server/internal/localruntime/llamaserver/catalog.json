@@ -1,0 +1,109 @@
+{
+  "models": {
+    "qwen3-14b-q4_k_m": {
+      "id": "qwen3-14b-q4_k_m",
+      "display_name": "Qwen3-14B Q4_K_M",
+      "repo": "unsloth/Qwen3-14B-GGUF",
+      "files": ["Qwen3-14B-Q4_K_M.gguf"],
+      "arch": "qwen3",
+      "quant": "Q4_K_M",
+      "family": "qwen",
+      "size_bytes": 9001753984,
+      "supports_tools": true,
+      "supports_embed": false
+    },
+    "qwen3-30b-a3b-instruct-2507-q4_k_m": {
+      "id": "qwen3-30b-a3b-instruct-2507-q4_k_m",
+      "display_name": "Qwen3-30B-A3B Instruct 2507 Q4_K_M",
+      "repo": "unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF",
+      "files": ["Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf"],
+      "arch": "qwen3moe",
+      "quant": "Q4_K_M",
+      "family": "qwen",
+      "size_bytes": 18556686752,
+      "supports_tools": true,
+      "supports_embed": false
+    },
+    "qwen3-30b-a3b-thinking-2507-q4_k_m": {
+      "id": "qwen3-30b-a3b-thinking-2507-q4_k_m",
+      "display_name": "Qwen3-30B-A3B Thinking 2507 Q4_K_M",
+      "repo": "unsloth/Qwen3-30B-A3B-Thinking-2507-GGUF",
+      "files": ["Qwen3-30B-A3B-Thinking-2507-Q4_K_M.gguf"],
+      "arch": "qwen3moe",
+      "quant": "Q4_K_M",
+      "family": "qwen",
+      "size_bytes": 18556686752,
+      "supports_tools": true,
+      "supports_embed": false
+    },
+    "glm-4.5-air-q4_k_m": {
+      "id": "glm-4.5-air-q4_k_m",
+      "display_name": "GLM-4.5-Air Q4_K_M",
+      "repo": "unsloth/GLM-4.5-Air-GGUF",
+      "files": [
+        "Q4_K_M/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf",
+        "Q4_K_M/GLM-4.5-Air-Q4_K_M-00002-of-00002.gguf"
+      ],
+      "arch": "glm4moe",
+      "quant": "Q4_K_M",
+      "family": "glm",
+      "size_bytes": 72975748384,
+      "supports_tools": true,
+      "supports_embed": false
+    },
+    "phi-4-mini-instruct-q4_k_m": {
+      "id": "phi-4-mini-instruct-q4_k_m",
+      "display_name": "Phi-4-mini Instruct Q4_K_M",
+      "repo": "unsloth/Phi-4-mini-instruct-GGUF",
+      "files": ["Phi-4-mini-instruct-Q4_K_M.gguf"],
+      "arch": "phi3",
+      "quant": "Q4_K_M",
+      "family": "phi",
+      "size_bytes": 2491874272,
+      "supports_tools": true,
+      "supports_embed": false
+    },
+    "nomic-embed-text-v1.5-f16": {
+      "id": "nomic-embed-text-v1.5-f16",
+      "display_name": "nomic-embed-text v1.5 F16",
+      "repo": "nomic-ai/nomic-embed-text-v1.5-GGUF",
+      "files": ["nomic-embed-text-v1.5.f16.gguf"],
+      "arch": "nomic-bert",
+      "quant": "f16",
+      "family": "nomic",
+      "size_bytes": 274290560,
+      "supports_tools": false,
+      "supports_embed": true
+    }
+  },
+  "profiles": {
+    "24": {
+      "most_capable": "qwen3-14b-q4_k_m",
+      "everyday": "qwen3-14b-q4_k_m",
+      "fast_light": "phi-4-mini-instruct-q4_k_m",
+      "fast_light_text": "phi-4-mini-instruct-q4_k_m",
+      "embedding": "nomic-embed-text-v1.5-f16"
+    },
+    "48": {
+      "most_capable": "qwen3-30b-a3b-instruct-2507-q4_k_m",
+      "everyday": "qwen3-30b-a3b-instruct-2507-q4_k_m",
+      "fast_light": "phi-4-mini-instruct-q4_k_m",
+      "fast_light_text": "phi-4-mini-instruct-q4_k_m",
+      "embedding": "nomic-embed-text-v1.5-f16"
+    },
+    "96": {
+      "most_capable": "qwen3-30b-a3b-thinking-2507-q4_k_m",
+      "everyday": "qwen3-30b-a3b-instruct-2507-q4_k_m",
+      "fast_light": "phi-4-mini-instruct-q4_k_m",
+      "fast_light_text": "phi-4-mini-instruct-q4_k_m",
+      "embedding": "nomic-embed-text-v1.5-f16"
+    },
+    "128": {
+      "most_capable": "glm-4.5-air-q4_k_m",
+      "everyday": "qwen3-30b-a3b-instruct-2507-q4_k_m",
+      "fast_light": "phi-4-mini-instruct-q4_k_m",
+      "fast_light_text": "phi-4-mini-instruct-q4_k_m",
+      "embedding": "nomic-embed-text-v1.5-f16"
+    }
+  }
+}

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/catalog"
 	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/compactiongen"
 	"cercano/source/server/internal/compactor"
@@ -43,6 +44,7 @@ import (
 	"cercano/source/server/internal/loop"
 	mcpserver "cercano/source/server/internal/mcp"
 	mcphost "cercano/source/server/internal/mcp_host"
+	"cercano/source/server/internal/modelcatalog"
 	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/recap"
@@ -321,6 +323,17 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	}
 	catalogManager.Start(context.Background())
 	srv.SetCatalogManager(catalogManager)
+
+	// Build the pluggable catalog registry: HuggingFace (default active) and
+	// Ollama (wrapping the manager above) as selectable backends, the active
+	// one chosen by config. Browse/search go through the active backend.
+	catalogRegistry := catalog.NewRegistry()
+	catalogRegistry.Register(modelcatalog.NewBackend(&modelcatalog.Client{}))
+	catalogRegistry.Register(ollamacatalog.NewBackend(catalogManager))
+	if err := catalogRegistry.SetActive(cfg.Catalog.Backend); err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] catalog backend %q not available: %v (using default)\n", cfg.Catalog.Backend, err)
+	}
+	srv.SetCatalogRegistry(catalogRegistry)
 	// Wire the catalog manager into the runtime manager as its OCI
 	// resolver — this is what enables DownloadModel to translate an
 	// online-catalog ref (e.g. "qwen2.5-coder:7b") into the concrete

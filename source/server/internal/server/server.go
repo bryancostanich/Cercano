@@ -21,6 +21,7 @@ import (
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/broker"
+	"cercano/source/server/internal/catalog"
 	"cercano/source/server/internal/cloudfactory"
 	"cercano/source/server/internal/compactiongen"
 	projectctx "cercano/source/server/internal/context"
@@ -76,12 +77,16 @@ type Server struct {
 	proto.UnimplementedAgentServer
 	agent       *agent.Agent
 	providerSvc providers.Resolver // owns cloud/open providers, router, coordinator, registry, catalogManager
-	cfgSvc      cfgsvc.Service     // owns configPath, currentConfig, cfgMu, secrets
-	toolSvc     toolssvc.Catalog   // owns toolRegistry, capRegistry, dispatchEngine
-	persistSvc  persistsvc.Service // owns retentionSweeper, compactionGen, contextLoader
-	permBroker  permissions.Broker
-	runtimesSvc runtimessvc.Supervisors // owns meridianMgr, runtimeManager, mcpManager
-	watchdog    *watchdog.Watchdog      // protocol-supervision gate; nil = disabled (default)
+	// catalogRegistry is the pluggable model-catalog registry (HuggingFace /
+	// Ollama backends, one active). Held on Server directly — browse runs
+	// host-side; the worker doesn't discover models.
+	catalogRegistry *catalog.Registry
+	cfgSvc          cfgsvc.Service     // owns configPath, currentConfig, cfgMu, secrets
+	toolSvc         toolssvc.Catalog   // owns toolRegistry, capRegistry, dispatchEngine
+	persistSvc      persistsvc.Service // owns retentionSweeper, compactionGen, contextLoader
+	permBroker      permissions.Broker
+	runtimesSvc     runtimessvc.Supervisors // owns meridianMgr, runtimeManager, mcpManager
+	watchdog        *watchdog.Watchdog      // protocol-supervision gate; nil = disabled (default)
 	// Two runners coexist so the front door can pick per turn. inProcessRunner is
 	// always built (NewServer / SetPermissions) and is the embedded runnersvc.Core
 	// the test suite constructs. workerRunner is nil until SelectExecutionMode
@@ -571,6 +576,14 @@ func (s *Server) SetRuntimeManager(m localruntime.Manager) {
 // wired to the manager's Refresh method.
 func (s *Server) SetCatalogManager(cm *ollamacatalog.Manager) {
 	s.providerSvc.SetCatalogManager(cm)
+}
+
+// SetCatalogRegistry wires the pluggable model-catalog registry — the source
+// browse and search use once an active backend (HuggingFace / Ollama) is
+// selected. Held on Server directly (browse runs host-side); the worker never
+// browses.
+func (s *Server) SetCatalogRegistry(r *catalog.Registry) {
+	s.catalogRegistry = r
 }
 
 // SetRetentionSweeper attaches the background retention sweeper so that

@@ -1442,44 +1442,31 @@ func (s *Server) ListRuntimeModels(ctx context.Context, req *proto.ListRuntimeMo
 		return nil, err
 	}
 	resp := &proto.ListRuntimeModelsResponse{Models: mapRuntimeModels(models)}
-	if cm := s.providerSvc.CatalogManager(); cm != nil {
-		online := cm.Models()
-		if len(online) > 0 {
-			// Dedupe by family name against what we've already mapped.
-			// Anything already present in models (hardcoded catalog OR
-			// downloaded on disk) keeps its richer entry.
-			seen := make(map[string]bool, len(resp.Models))
-			for _, m := range resp.Models {
-				if m.GetFamily() != "" {
-					seen[m.GetFamily()] = true
+	// Online catalog: list from the active backend (HuggingFace by default,
+	// Ollama if selected in config). ListRuntimeModels is called on demand —
+	// when the models page opens or is refreshed, not on a tick — so a live
+	// fetch is acceptable; an error simply omits the online section rather than
+	// failing the whole list. (Backend-specific freshness and eager warmed RAM
+	// estimates, which were tied to the Ollama cache, return generically once
+	// the catalog cache and RAM-estimate generalization land; per-selection
+	// GetModelRAMEstimate still works meanwhile.)
+	if reg := s.catalogRegistry; reg != nil {
+		if backend, ok := reg.Active(); ok {
+			if online, err := backend.List(ctx, catalog.ListOptions{}); err == nil && len(online) > 0 {
+				// Dedupe against inventory (hardcoded catalog OR downloaded on
+				// disk keeps its richer entry).
+				seen := make(map[string]bool, len(resp.Models))
+				for _, m := range resp.Models {
+					if m.GetFamily() != "" {
+						seen[m.GetFamily()] = true
+					}
 				}
-			}
-			for _, m := range online {
-				if seen[m.Name] {
-					continue
+				for _, m := range online {
+					if seen[m.ID] {
+						continue
+					}
+					resp.Models = append(resp.Models, catalogModelToProto(m))
 				}
-				resp.Models = append(resp.Models, onlineCatalogModelToProto(m))
-			}
-		}
-		if fa := cm.FetchedAt(); !fa.IsZero() {
-			resp.CatalogUpdatedAt = fa.UTC().Format(time.RFC3339)
-		}
-		// Enrich every ollama-backed entry with warmed estimate numbers
-		// so the dashboard renders memory/fit lines with zero per-row
-		// RPCs. Un-warmed entries keep zeros — the client falls back to
-		// GetModelRAMEstimate on selection.
-		for _, pm := range resp.Models {
-			if pm.GetCatalogId() == "" {
-				continue
-			}
-			est, ok := cm.CachedEstimate(pm.GetCatalogId())
-			if !ok {
-				continue
-			}
-			pm.KvBytesPerToken = est.KVBytesPerToken
-			pm.MaxContextTokens = est.MaxContextTokens
-			if pm.GetSizeBytes() == 0 {
-				pm.SizeBytes = est.WeightsBytes
 			}
 		}
 	}
@@ -1487,25 +1474,21 @@ func (s *Server) ListRuntimeModels(ctx context.Context, req *proto.ListRuntimeMo
 	return resp, nil
 }
 
-// onlineCatalogModelToProto converts one ollamacatalog.Model to the
-// wire-level RuntimeModel shape. Sparse — the family list from
-// ListModels doesn't include tags or sizes, so most fields are empty
-// until the CLI drills into the family (which triggers a tag fetch on
-// the next release). What we can fill in: display name (title-cased
-// family), family, runtime (llama_server), source (catalog-online),
-// format (gguf), download state (not_downloaded), and ollama_ref
-// (which is what the download handler will use to route through the
-// OCI blob flow).
-func onlineCatalogModelToProto(m ollamacatalog.Model) *proto.RuntimeModel {
+// catalogModelToProto converts a catalog.Model (from the active backend) to
+// the wire-level RuntimeModel shape. Sparse — the list view carries just the
+// backend id; the CLI fetches quant files and sizes on drill-in (Detail).
+// CatalogId carries the backend-scoped id (an HF repo, or an Ollama family),
+// which the download handler resolves through the active backend.
+func catalogModelToProto(m catalog.Model) *proto.RuntimeModel {
 	return &proto.RuntimeModel{
-		Id:            "llama_server:online:" + m.Name,
-		DisplayName:   titleCase(m.Name),
+		Id:            "llama_server:online:" + m.ID,
+		DisplayName:   m.ID,
 		Runtime:       "llama_server",
 		Source:        "catalog-online",
 		Format:        "gguf",
-		Family:        m.Name,
+		Family:        m.ID,
 		DownloadState: "not_downloaded",
-		CatalogId:     m.Name, // colon+tag will be appended by CLI when user picks a size
+		CatalogId:     m.ID,
 		SupportsChat:  true,
 	}
 }

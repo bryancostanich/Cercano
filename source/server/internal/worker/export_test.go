@@ -9,11 +9,14 @@ import (
 
 	"google.golang.org/grpc"
 
+	"cercano/source/server/internal/dispatch"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/hostsvc/permissions"
 	providerssvc "cercano/source/server/internal/hostsvc/providers"
+	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/runner"
 	"cercano/source/server/internal/secrets"
+	"cercano/source/server/internal/toolstack"
 	"cercano/source/server/internal/watchdog"
 	pkgcfg "cercano/source/server/pkg/config"
 	proto "cercano/source/server/pkg/proto"
@@ -23,7 +26,13 @@ import (
 // the worker's watchdog from a config snapshot, wired to an engine backed by
 // the given resolver's providers.
 func BuildWorkerWatchdogForTest(cfg pkgcfg.Config, r providerssvc.Resolver) *watchdog.Watchdog {
-	return buildWorkerWatchdog(cfg, buildWorkerEngine(r, cfg))
+	engine := toolstack.NewEngine(toolstack.EngineDeps{
+		Providers: func() dispatch.Providers {
+			return dispatch.Providers{Cloud: r.Cloud(), Open: r.Open()}
+		},
+		LocusMode: func() locus.Mode { m, _ := locus.ParseMode(cfg.LocusMode); return m },
+	})
+	return buildWorkerWatchdog(cfg, engine)
 }
 
 // NewWorkerRunnerForTest constructs a workerRunner with an injected dial

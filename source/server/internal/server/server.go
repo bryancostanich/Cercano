@@ -21,9 +21,6 @@ import (
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/broker"
-	"cercano/source/server/internal/capabilities"
-	"cercano/source/server/internal/capabilities/agentadapter"
-	"cercano/source/server/internal/capabilities/builtins"
 	"cercano/source/server/internal/cloudfactory"
 	"cercano/source/server/internal/compactiongen"
 	projectctx "cercano/source/server/internal/context"
@@ -49,6 +46,7 @@ import (
 	runnersvc "cercano/source/server/internal/runner"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/sysram"
+	"cercano/source/server/internal/toolstack"
 	"cercano/source/server/internal/usage"
 	"cercano/source/server/internal/watchdog"
 	"cercano/source/server/internal/worker"
@@ -159,23 +157,12 @@ func (s *Server) ToolRegistry() *agenttools.Registry { return s.toolSvc.Registry
 // Services carries live runtime values.
 func (s *Server) InstallCapabilities() {
 	cfgSnapshot := s.cfgSvc.Get()
-	capReg := capabilities.NewRegistry(capabilities.Services{
-		CloudProvider: s.providerSvc.Cloud(),
-		OpenProvider:  s.providerSvc.Open(),
-		Config:        &cfgSnapshot,
-		ProjectCtx:    s.persistSvc.ContextLoader(),
-		// Engine/Conversations wired in a later phase; nil-safe until then.
-		Dispatch: func(ctx context.Context, spec dispatch.Spec) (dispatch.Result, error) {
-			e := s.toolSvc.Engine()
-			if e == nil {
-				return dispatch.Result{}, fmt.Errorf("dispatch engine not configured")
-			}
-			return e.Dispatch(ctx, spec)
-		},
+	toolstack.InstallCapabilities(s.toolSvc, toolstack.CapDeps{
+		Cloud:     s.providerSvc.Cloud(),
+		Open:      s.providerSvc.Open(),
+		Config:    &cfgSnapshot,
+		CtxLoader: s.persistSvc.ContextLoader(),
 	})
-	builtins.Register(capReg)
-	s.toolSvc.SetCapRegistry(capReg)
-	s.SetToolRegistry(agentadapter.BuildAgentRegistry(capReg, builtins.AgentAliases(), builtins.CapabilitySynonyms()))
 }
 
 // SetPermissions wires the permission store and pending-decisions barrier used

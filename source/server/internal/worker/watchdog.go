@@ -5,29 +5,9 @@ import (
 
 	"cercano/source/server/internal/capabilities/builtins"
 	"cercano/source/server/internal/dispatch"
-	providerssvc "cercano/source/server/internal/hostsvc/providers"
-	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/watchdog"
 	pkgcfg "cercano/source/server/pkg/config"
 )
-
-// buildWorkerEngine constructs the dispatch engine the worker's watchdog uses
-// for its fast-model OneShot lane. It is wired to the WORKER's own provider
-// resolver (raw Cloud/Open providers) — the oneShot call runs locally in the
-// worker, never round-tripping to the host. This engine exists ONLY for the
-// watchdog's OneShot lane; project-context injection is not used on that path,
-// so a nil ctxLoader is passed (OneShot with WantsProjectContext=false never
-// touches the loader — see dispatch.Engine.Dispatch).
-func buildWorkerEngine(r providerssvc.Resolver, cfg pkgcfg.Config) *dispatch.Engine {
-	providersFn := func() dispatch.Providers {
-		return dispatch.Providers{Cloud: r.Cloud(), Open: r.Open()}
-	}
-	modeFn := func() locus.Mode {
-		m, _ := locus.ParseMode(cfg.LocusMode)
-		return m
-	}
-	return dispatch.NewEngine(providersFn, modeFn, nil)
-}
 
 // buildWorkerWatchdog constructs the protocol-supervision watchdog from the
 // snapshotted config, mirroring the host's buildWatchdogFrom. Returns nil when

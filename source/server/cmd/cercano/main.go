@@ -45,13 +45,14 @@ import (
 	mcphost "cercano/source/server/internal/mcp_host"
 	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/protocols"
-	"cercano/source/server/internal/skills"
 	"cercano/source/server/internal/recap"
 	"cercano/source/server/internal/retention"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/server"
+	"cercano/source/server/internal/skills"
 	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/internal/tools"
+	"cercano/source/server/internal/toolstack"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 	"cercano/source/server/pkg/update"
@@ -455,23 +456,24 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	// dispatch from the server's RAW (unwrapped) providers, so a runtime cloud
 	// swap (cloud-profile change → RebuildCloud) is honored and the engine's
 	// own per-dispatch usage.Wrap doesn't double-count.
-	coprocEngine := dispatch.NewEngine(
-		func() dispatch.Providers {
+	engineDeps := toolstack.EngineDeps{
+		Providers: func() dispatch.Providers {
 			return dispatch.Providers{Cloud: srv.CloudLLMProvider(), Open: srv.OpenLLMProvider()}
 		},
-		func() locus.Mode { m, _ := locus.ParseMode(srv.LocusMode()); return m },
-		ctxLoader,
-	)
-	// Model resolution is tier-aware and live: DispatchModelFor reads the
-	// taxonomy under the config lock per dispatch, so runtime tier/profile
-	// changes are honored and no startup-captured cfg value can go stale.
-	coprocEngine.SetModelFor(srv.DispatchModelFor)
+		LocusMode: func() locus.Mode { m, _ := locus.ParseMode(srv.LocusMode()); return m },
+		CtxLoader: ctxLoader,
+		// Model resolution is tier-aware and live: DispatchModelFor reads the
+		// taxonomy under the config lock per dispatch, so runtime tier/profile
+		// changes are honored and no startup-captured cfg value can go stale.
+		ModelFor: srv.DispatchModelFor,
+	}
 	// Activate the usage sink so capabilities that set RecordUsage=true (the coproc
 	// caps) emit one event per dispatch. processCoproc/research/document leave
 	// RecordUsage false, so they stay MCP-side — no double-counting.
 	if agentCollector != nil {
-		coprocEngine.SetUsageSink(server.UsageEventSink(agentCollector.Emit))
+		engineDeps.UsageSink = server.UsageEventSink(agentCollector.Emit)
 	}
+	coprocEngine := toolstack.NewEngine(engineDeps)
 	orchestrator.SetDispatchEngine(coprocEngine)
 	srv.SetDispatchEngine(coprocEngine)
 

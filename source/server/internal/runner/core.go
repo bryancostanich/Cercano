@@ -257,7 +257,7 @@ func (c *Core) runLoop(
 		UserInput:           req.Input,
 		Images:              req.Images,
 		Model:               c.d.Providers.MainModel(isCloud),
-		System:              buildSystemPrompt(c.d, req.WorkDir),
+		System:              BuildSystemPrompt(c.d, req.WorkDir),
 		WorkDir:             req.WorkDir,
 		ConversationID:      req.ConversationID,
 		EventSink:           loopSink,
@@ -391,9 +391,10 @@ func makeLoopSink(sink EventSink) func(agent.LoopEvent) {
 // They live here so the runner stays proto-free — it cannot import internal/server.
 // The server's own buildSystemPrompt remains for runAgenticDispatch and toolSvc.
 
-// buildSystemPrompt gathers live environment grounding for workDir and renders
-// the tool-loop system prompt.
-func buildSystemPrompt(d Deps, workDir string) string {
+// BuildSystemPrompt gathers live environment grounding for workDir and renders
+// the tool-loop system prompt. Exported so the worker can reuse it for
+// sub-agent (Agentic dispatch) system prompts instead of keeping a third copy.
+func BuildSystemPrompt(d Deps, workDir string) string {
 	env := loopEnv{
 		WorkDir:  workDir,
 		Platform: runtime.GOOS,

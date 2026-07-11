@@ -7,11 +7,8 @@ import (
 	"runtime/debug"
 
 	"cercano/source/server/internal/agent"
-	"cercano/source/server/internal/agenttools"
-	"cercano/source/server/internal/capabilities"
-	"cercano/source/server/internal/capabilities/agentadapter"
-	"cercano/source/server/internal/capabilities/builtins"
 	"cercano/source/server/internal/cloudfactory"
+	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/engine"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
@@ -25,6 +22,7 @@ import (
 	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/runner"
 	"cercano/source/server/internal/secrets"
+	"cercano/source/server/internal/toolstack"
 	"cercano/source/server/internal/usage"
 	"cercano/source/server/internal/watchdog"
 	pkgcfg "cercano/source/server/pkg/config"
@@ -226,7 +224,39 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 		}
 	}
 
-	// Build Tools.
+	// Build Perms FIRST — the tool stack's sub-agent dispatch needs the broker.
+	// The store's MODE must match the host's: whether a tool tier prompts at all
+	// depends on it, and the actual prompt round-trips to the host via the stream
+	// requester. Defaulting to permissive when the host is strict would silently
+	// auto-run writes the user asked to be prompted for. Empty/unparseable falls
+	// back to permissive (the host default).
+	mode := agent.ModePermissive
+	if m, err := agent.ParseMode(start.GetPermissionMode()); err == nil {
+		mode = m
+	}
+	permStore := agent.NewStaticPermissionStore(mode)
+	permBroker := permissions.New(permStore, nil, nil)
+
+	// Build the worker's dispatch engine ONCE via the shared internal/toolstack
+	// builder — the SAME assembly the host uses — with a real project-context
+	// loader and tier→model resolution mirroring the host's DispatchModelFor. This
+	// is what lets a capability that dispatches (local, the co-processor caps,
+	// review, the web caps, and the dispatch sub-agent) find a live engine in
+	// worker turns exactly as in-process. The same engine backs the watchdog's
+	// OneShot lane (which passes an explicit model override, so tier resolution
+	// never bites it) and the capability tool stack below.
+	ctxLoader := projectctx.NewLoader()
+	engine := toolstack.NewEngine(toolstack.EngineDeps{
+		Providers: func() dispatch.Providers {
+			return dispatch.Providers{Cloud: provSvc.Cloud(), Open: provSvc.Open()}
+		},
+		LocusMode: func() locus.Mode { m, _ := locus.ParseMode(cfg.LocusMode); return m },
+		CtxLoader: ctxLoader,
+		ModelFor:  workerDispatchModelFor(cfg),
+	})
+
+	// Build Tools. The test hook (w.toolsFactory) still wins when set; otherwise
+	// assemble the full capability/tool stack wired to the worker's engine.
 	var toolSvc runner.ToolSvc
 	if w.toolsFactory != nil {
 		var err error
@@ -235,29 +265,16 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 			return runner.Deps{}, fmt.Errorf("build tools: %w", err)
 		}
 	} else {
-		toolSvc = buildWorkerTools()
+		toolSvc = buildWorkerToolSvc(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg)
 	}
-
-	// Build Perms: the store's MODE must match the host's — whether a tool tier
-	// prompts at all depends on it, and the actual prompt round-trips to the host
-	// via the stream requester. Defaulting to permissive when the host is strict
-	// would silently auto-run writes the user asked to be prompted for.
-	// Empty/unparseable falls back to permissive (the host default).
-	mode := agent.ModePermissive
-	if m, err := agent.ParseMode(start.GetPermissionMode()); err == nil {
-		mode = m
-	}
-	permStore := agent.NewStaticPermissionStore(mode)
-	permBroker := permissions.New(permStore, nil, nil)
 
 	// Build the protocol-supervision watchdog from the snapshotted config
 	// (default-OFF; nil when disabled — identical to in-process). Its fast-model
-	// OneShot lane routes through a dispatch engine wired to the WORKER's own
-	// provider resolver, so the model call runs locally in the worker and never
-	// round-trips to the host. wd is nil when the watchdog is disabled — the
-	// runner's live accessor (c.d.Watchdog()) then yields nil, the correct
-	// default-off behavior.
-	wd := buildWorkerWatchdog(cfg, buildWorkerEngine(provSvc, cfg))
+	// OneShot lane routes through the worker's engine (built above), so the model
+	// call runs locally in the worker and never round-trips to the host. wd is nil
+	// when the watchdog is disabled — the runner's live accessor (c.d.Watchdog())
+	// then yields nil, the correct default-off behavior.
+	wd := buildWorkerWatchdog(cfg, engine)
 
 	return runner.Deps{
 		Providers: provSvc,
@@ -498,34 +515,6 @@ func (r *workerResolver) Reconfigure(_ providerssvc.ReconfigureArgs)            
 func (r *workerResolver) SetCatalogManager(_ *ollamacatalog.Manager)                {}
 func (r *workerResolver) SetUsageSink(_ func(usage.Usage))                          {}
 
-// ─── workerToolSvc ────────────────────────────────────────────────────────────
-
-// workerToolSvc is a minimal runner.ToolSvc for the worker.
-type workerToolSvc struct{ reg *agenttools.Registry }
-
-func (s *workerToolSvc) Registry() *agenttools.Registry { return s.reg }
-func (s *workerToolSvc) GrantedRegistry(tools []string) (*agenttools.Registry, []string, []string, error) {
-	if s.reg == nil {
-		return agenttools.NewRegistry(), nil, nil, nil
-	}
-	sub := agenttools.NewRegistry()
-	var granted, unknown []string
-	for _, name := range tools {
-		if t, ok := s.reg.Get(name); ok {
-			_ = sub.Register(t)
-			granted = append(granted, name)
-		} else {
-			unknown = append(unknown, name)
-		}
-	}
-	return sub, granted, unknown, nil
-}
-
-func buildWorkerTools() runner.ToolSvc {
-	// Build the full capability + agent registry with all built-in tools.
-	// MCP tools are NOT included — MCP servers run host-side only.
-	capReg := capabilities.NewRegistry(capabilities.Services{})
-	builtins.Register(capReg)
-	reg := agentadapter.BuildAgentRegistry(capReg, builtins.AgentAliases(), builtins.CapabilitySynonyms())
-	return &workerToolSvc{reg: reg}
-}
+// The worker's capability/tool stack is assembled by buildWorkerToolSvc (see
+// worker_dispatch.go) through the shared internal/toolstack builder — the same
+// assembly the host uses — so worker turns wire an identical Services.

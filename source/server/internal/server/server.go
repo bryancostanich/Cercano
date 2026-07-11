@@ -688,6 +688,13 @@ func (s *Server) SelectExecutionMode() {
 		s.cfgSvc,           // builds the ConfigSnapshot
 		s.permBroker,       // permission mode + decisions
 		s.cfgSvc.Secrets(), // resolves credentials for the worker's CredentialRequests
+		func(ctx context.Context, id, parentID, projectDir, model string, grantedTools []string) error {
+			st := s.persistSvc.Store()
+			if st == nil {
+				return nil
+			}
+			return st.EnsureSubagentConversation(ctx, id, parentID, projectDir, model, grantedTools)
+		}, // worker-side dispatch: create the sub-agent conversation row on the host
 	)
 	log.Printf("[server] execution mode: worker (turns run in isolated child processes; " +
 		"MCP-involving turns fall back to in-process — worker MCP proxying is a future refinement)")

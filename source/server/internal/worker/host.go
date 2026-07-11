@@ -56,6 +56,11 @@ type workerRunner struct {
 	perms   permissions.Broker
 	secrets secrets.Store
 
+	// ensureSubagent creates a sub-agent conversation row when a worker-side
+	// dispatch requests one over the stream. Wired from the server's store; nil
+	// on dial-injected (test) runners (sub-agent rows are then not created).
+	ensureSubagent EnsureSubagentFunc
+
 	// dial is called instead of the pool when non-nil (test injection). When
 	// nil, RunTurn acquires a warm worker from the per-conversation pool.
 	dial dialFunc
@@ -65,6 +70,11 @@ type workerRunner struct {
 	// injected transport instead.
 	pool *workerPool
 }
+
+// EnsureSubagentFunc creates a sub-agent conversation row on the host when a
+// worker-side dispatch asks for one over the stream. Wired from the server's
+// conversation store.
+type EnsureSubagentFunc func(ctx context.Context, id, parentID, projectDir, model string, grantedTools []string) error
 
 // NewWorkerRunner builds a workerRunner that satisfies runner.TurnRunner.
 // The caller supplies the host-side services the runner needs to:
@@ -76,6 +86,7 @@ func NewWorkerRunner(
 	cfg cfgsvc.Service,
 	perms permissions.Broker,
 	st secrets.Store,
+	ensureSubagent EnsureSubagentFunc,
 ) runner.TurnRunner {
 	pool := newWorkerPool(nil) // production: spawn via spawnWorker
 	// Start the idle-reaper with the configured window. The reaper runs on a
@@ -83,11 +94,12 @@ func NewWorkerRunner(
 	// p.done). A window <= 0 (config's "disabled" sentinel) starts no goroutine.
 	pool.StartReaper(context.Background(), cfg.Get().WorkerIdleTimeout())
 	return &workerRunner{
-		persist: persist,
-		cfg:     cfg,
-		perms:   perms,
-		secrets: st,
-		pool:    pool,
+		persist:        persist,
+		cfg:            cfg,
+		perms:          perms,
+		secrets:        st,
+		ensureSubagent: ensureSubagent,
+		pool:           pool,
 	}
 }
 
@@ -334,13 +346,29 @@ func (w *workerRunner) RunTurn(
 			}()
 
 		case *proto.WorkerToHost_Persist:
-			// Forward persist to the host's fenced persist callback.
-			if persist != nil && m.Persist != nil && m.Persist.Message != nil {
+			if m.Persist != nil && m.Persist.Message != nil {
 				lm, err := UnmarshalMessage(m.Persist.Message)
 				if err != nil {
 					log.Printf("[workerRunner] unmarshal persist message: %v", err)
-				} else {
-					persist(lm)
+				} else if cid := m.Persist.GetConversationId(); cid != "" {
+					// Sub-agent turn: persist to its own sub-conversation. Best-effort
+					// and unfenced — the sub-conversation is unique per dispatch, so
+					// there is no supersession race the main-turn fence guards against.
+					if w.persist != nil {
+						w.persist.PersistTurn(ctx, cid, lm)
+					}
+				} else if persist != nil {
+					persist(lm) // main conversation, fenced
+				}
+			}
+
+		case *proto.WorkerToHost_EnsureSubagent:
+			// A worker-side dispatch created a sub-agent: persist its conversation
+			// row on the host so the tab survives restart and is post-mortemable.
+			if w.ensureSubagent != nil && m.EnsureSubagent != nil {
+				e := m.EnsureSubagent
+				if err := w.ensureSubagent(ctx, e.GetId(), e.GetParentId(), e.GetProjectDir(), e.GetModel(), e.GetGrantedTools()); err != nil {
+					log.Printf("[workerRunner] ensure subagent conversation: %v", err)
 				}
 			}
 

@@ -81,6 +81,11 @@ type Service struct {
 	systemPrompt func(workDir string) string
 	store        func() conversation.Store
 	persistTurn  func(ctx context.Context, convID string, m llm.Message)
+
+	// ensureSubagent creates the sub-agent conversation row. In-process this is
+	// unset and RunAgenticDispatch falls back to the store directly; the worker
+	// sets it to a host-stream proxy (the worker has no local conversation store).
+	ensureSubagent func(ctx context.Context, id, parentID, projectDir, model string, grantedTools []string) error
 }
 
 // New constructs a Catalog with the collaborators required by RunAgenticDispatch.
@@ -277,6 +282,34 @@ func (x *Service) dispatchStore() conversation.Store {
 	return x.store()
 }
 
+// SetEnsureSubagent installs the func that creates a sub-agent conversation row.
+// The worker wires this to a host-stream proxy (it has no local store); in-
+// process it stays nil and ensureSubagentConv falls back to the store.
+func (x *Service) SetEnsureSubagent(fn func(ctx context.Context, id, parentID, projectDir, model string, grantedTools []string) error) {
+	x.ensureSubagent = fn
+}
+
+// ensureSubagentConv creates the sub-agent conversation row and reports whether
+// persistence is active. It prefers the injected ensureSubagent proxy (worker
+// path) and otherwise uses the local store (in-process). Returns false when
+// neither is available or the create fails — dispatch still runs, its turns just
+// are not persisted.
+func (x *Service) ensureSubagentConv(ctx context.Context, id, parentID, projectDir, model string, grantedTools []string) bool {
+	ensure := x.ensureSubagent
+	if ensure == nil {
+		st := x.dispatchStore()
+		if st == nil {
+			return false
+		}
+		ensure = st.EnsureSubagentConversation
+	}
+	if err := ensure(ctx, id, parentID, projectDir, model, grantedTools); err != nil {
+		log.Printf("[dispatch] subagent persistence unavailable: %v", err)
+		return false
+	}
+	return true
+}
+
 // RunAgenticDispatch implements dispatch.AgenticRunner. It is wired onto the
 // dispatch.Engine via SetEngine so that internal/dispatch need not import
 // internal/agent (which would create an import cycle).
@@ -330,13 +363,13 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	// parent's tool_result.
 	subConvID := conversation.NewID()
 	var onTurn func(m llm.Message)
-	if store := x.dispatchStore(); store != nil {
-		if perr := store.EnsureSubagentConversation(ctx, subConvID, spec.ConversationID, spec.WorkDir, model, granted); perr != nil {
-			log.Printf("[dispatch] subagent persistence unavailable: %v", perr)
-		} else if x.persistTurn != nil {
-			x.persistTurn(ctx, subConvID, agent.UserMessage(spec.Task, nil))
-			onTurn = func(m llm.Message) { x.persistTurn(ctx, subConvID, m) }
-		}
+	// persisted reports whether the sub-agent conversation ROW was created (a
+	// store in-process, or the worker's host proxy). subConvID still identifies
+	// the tab regardless; the Result's SubConversationID reflects persistence only.
+	persisted := x.ensureSubagentConv(ctx, subConvID, spec.ConversationID, spec.WorkDir, model, granted)
+	if persisted && x.persistTurn != nil {
+		x.persistTurn(ctx, subConvID, agent.UserMessage(spec.Task, nil))
+		onTurn = func(m llm.Message) { x.persistTurn(ctx, subConvID, m) }
 	}
 	log.Printf("[dispatch] subagent start: conv=%s model=%s tools=%v", subConvID, model, registryToolNames(reg))
 	subTitle := "sub"
@@ -391,13 +424,20 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		text = buf.String()
 	}
 
+	// SubConversationID reports the PERSISTED sub-conversation (empty when the row
+	// was not created); the tab is driven separately by the SubAgentID events.
+	subConvResult := ""
+	if persisted {
+		subConvResult = subConvID
+	}
+
 	return dispatch.Result{
 		Text:              text,
 		Model:             model,
 		IsCloud:           sel.IsCloud,
 		InputTokens:       res.InputTokens,
 		OutputTokens:      res.OutputTokens,
-		SubConversationID: subConvID,
+		SubConversationID: subConvResult,
 		GrantedTools:      granted,
 		IgnoredTools:      ignored,
 	}, nil

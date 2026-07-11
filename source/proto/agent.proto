@@ -1216,6 +1216,7 @@ message WorkerToHost {
     TurnDone          done         = 4;
     TurnError         error        = 5;
     CredentialRequest cred_request = 6;
+    EnsureSubagentConversation ensure_subagent = 7;
   }
 }
 
@@ -1323,8 +1324,21 @@ message PermissionResponse {
 
 // PersistTurn asks the host to persist one turn message.
 message PersistTurn {
-  LLMMessage message = 1;
-  uint64     gen     = 2; // generation, for the host's persist fence
+  LLMMessage message         = 1;
+  uint64     gen             = 2; // generation, for the host's persist fence
+  string     conversation_id = 3; // sub-agent turns target their own sub-conversation (empty = main turn)
+}
+
+// EnsureSubagentConversation asks the host to idempotently create the sub-agent
+// conversation row for a worker-side dispatch. Best-effort/fire-and-forget: the
+// worker still runs and tabs the sub-agent even if the host store write fails.
+message EnsureSubagentConversation {
+  string          id            = 1;
+  string          parent_id     = 2;
+  string          project_dir   = 3;
+  string          model         = 4;
+  repeated string granted_tools = 5;
+  uint64          gen           = 6;
 }
 
 // TurnDone signals successful turn completion.

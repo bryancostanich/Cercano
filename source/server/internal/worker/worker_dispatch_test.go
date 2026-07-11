@@ -26,7 +26,7 @@ func TestBuildWorkerToolSvc_WiresDispatch(t *testing.T) {
 		ModelFor:  func(bool, pkgcfg.Tier) string { return "model" },
 	})
 
-	svc := buildWorkerToolSvc(nil, eng, ctxLoader, nil, nil, pkgcfg.Config{})
+	svc := buildWorkerToolSvc(nil, eng, ctxLoader, nil, nil, pkgcfg.Config{}, nil)
 
 	ts, ok := svc.(*toolssvc.Service)
 	if !ok {

@@ -29,40 +29,6 @@ const runtimeName = "llama_server"
 
 var quantRE = regexp.MustCompile(`(?i)(?:^|[-_. ])(Q[0-9][A-Z0-9]*(?:[_-][A-Z0-9]+){0,3})(?:$|[-_. ])`)
 
-type catalogModel struct {
-	ID            string
-	DisplayName   string
-	Filename      string
-	DownloadURL   string
-	Family        string
-	Quantization  string
-	SizeBytes     int64
-	SupportsTools bool
-}
-
-var defaultCatalog = []catalogModel{
-	{
-		ID:            runtimeName + ":catalog:qwen2.5-coder-1.5b-q4_k_m",
-		DisplayName:   "Qwen2.5 Coder 1.5B Instruct Q4_K_M",
-		Filename:      "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
-		DownloadURL:   "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
-		Family:        "qwen",
-		Quantization:  "Q4_K_M",
-		SizeBytes:     1117320768,
-		SupportsTools: true,
-	},
-	{
-		ID:            runtimeName + ":catalog:qwen2.5-coder-7b-q4_k_m",
-		DisplayName:   "Qwen2.5 Coder 7B Instruct Q4_K_M",
-		Filename:      "qwen2.5-coder-7b-instruct-q4_k_m.gguf",
-		DownloadURL:   "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf",
-		Family:        "qwen",
-		Quantization:  "Q4_K_M",
-		SizeBytes:     4683073536,
-		SupportsTools: true,
-	},
-}
-
 type instanceUpdater interface {
 	UpdateInstance(localruntime.InstanceRecord)
 }
@@ -789,37 +755,86 @@ func (p *Provider) modelRecord(path string, info os.FileInfo) localruntime.Model
 	return rec
 }
 
+// catalogModels surfaces the curated compatibility catalog (the embedded,
+// gate-verified RAM-tier set) as downloadable model records. Each model's
+// files land in the target dir under their URL filenames; a multi-shard model
+// (e.g. GLM-4.5-Air's two-part Q4_K_M) counts as downloaded only when every
+// shard is present. Ordered by id for a stable dashboard.
 func (p *Provider) catalogModels() []localruntime.ModelRecord {
+	cat, err := loadCatalog()
+	if err != nil {
+		// A malformed embedded catalog is a build-time bug (the validity test
+		// guards it); at runtime, surface nothing rather than crash Discover.
+		return nil
+	}
 	targetDir := p.catalogTargetDir()
-	out := make([]localruntime.ModelRecord, 0, len(defaultCatalog))
-	for _, item := range defaultCatalog {
-		path := filepath.Join(targetDir, item.Filename)
+	ids := make([]string, 0, len(cat.Models))
+	for id := range cat.Models {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	out := make([]localruntime.ModelRecord, 0, len(ids))
+	for _, id := range ids {
+		m := cat.Models[id]
+		urls := m.DownloadURLs()
+		if len(urls) == 0 {
+			continue
+		}
+		// Path names the first shard — what llama-server is pointed at.
+		primary := filepath.Join(targetDir, urlFilename(urls[0]))
 		state := "not_downloaded"
 		var modified time.Time
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		if allShardsPresent(targetDir, urls) {
 			state = "downloaded"
-			modified = info.ModTime()
+			if info, statErr := os.Stat(primary); statErr == nil {
+				modified = info.ModTime()
+			}
 		}
 		out = append(out, localruntime.ModelRecord{
-			ID:                 item.ID,
-			DisplayName:        item.DisplayName,
+			ID:                 runtimeName + ":catalog:" + m.ID,
+			DisplayName:        m.DisplayName,
 			Runtime:            runtimeName,
 			Source:             "catalog",
-			Path:               path,
+			Path:               primary,
 			Format:             "gguf",
-			Family:             item.Family,
-			Quantization:       item.Quantization,
-			SizeBytes:          item.SizeBytes,
+			Family:             m.Family,
+			Quantization:       m.Quantization,
+			SizeBytes:          m.SizeBytes,
 			ModifiedAt:         modified,
 			DownloadState:      state,
-			DownloadURL:        item.DownloadURL,
-			DownloadTotalBytes: item.SizeBytes,
+			DownloadURLs:       urls,
+			DownloadTotalBytes: m.SizeBytes,
 			RuntimeState:       localruntime.StateStopped,
-			SupportsChat:       true,
-			SupportsTools:      item.SupportsTools,
+			SupportsChat:       !m.SupportsEmbed,
+			SupportsEmbed:      m.SupportsEmbed,
+			SupportsTools:      m.SupportsTools,
 		})
 	}
 	return out
+}
+
+// urlFilename returns the filename portion of a download URL (after the last
+// slash), used to place each shard on disk under its own name.
+func urlFilename(u string) string {
+	if i := strings.LastIndex(u, "/"); i >= 0 {
+		return u[i+1:]
+	}
+	return u
+}
+
+// allShardsPresent reports whether every shard file of a (possibly multi-part)
+// model is present in dir — the "downloaded" test for the curated catalog.
+func allShardsPresent(dir string, urls []string) bool {
+	if len(urls) == 0 {
+		return false
+	}
+	for _, u := range urls {
+		info, err := os.Stat(filepath.Join(dir, urlFilename(u)))
+		if err != nil || info.IsDir() {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *Provider) catalogTargetDir() string {

@@ -54,17 +54,17 @@ func TestDiscoverIncludesQwenCatalogModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Discover returned error: %v", err)
 	}
-	model, ok := findModelByID(models, runtimeName+":catalog:qwen2.5-coder-1.5b-q4_k_m")
+	model, ok := findModelByID(models, runtimeName+":catalog:qwen3-14b-q4_k_m")
 	if !ok {
-		t.Fatalf("expected Qwen catalog model in %#v", models)
+		t.Fatalf("expected Qwen3 catalog model in %#v", models)
 	}
 	if model.Source != "catalog" || model.DownloadState != "not_downloaded" {
 		t.Fatalf("unexpected catalog state: %#v", model)
 	}
-	if model.DownloadURL == "" || model.DownloadTotalBytes == 0 {
+	if len(model.DownloadURLs) == 0 || model.DownloadTotalBytes == 0 {
 		t.Fatalf("expected download metadata: %#v", model)
 	}
-	if model.Path != filepath.Join(dir, "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf") {
+	if model.Path != filepath.Join(dir, "Qwen3-14B-Q4_K_M.gguf") {
 		t.Fatalf("unexpected target path: %q", model.Path)
 	}
 }

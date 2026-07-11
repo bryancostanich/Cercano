@@ -86,12 +86,12 @@ func TestProfileForRAM(t *testing.T) {
 		ramGiB uint64
 		want   int
 	}{
-		{16, 24},  // below smallest -> smallest
-		{24, 24},  // exact
-		{32, 24},  // between -> lower
-		{48, 48},  // exact
-		{64, 48},  // between -> lower
-		{96, 96},  // exact
+		{16, 24},   // below smallest -> smallest
+		{24, 24},   // exact
+		{32, 24},   // between -> lower
+		{48, 48},   // exact
+		{64, 48},   // between -> lower
+		{96, 96},   // exact
 		{128, 128}, // exact
 		{256, 128}, // above largest -> largest
 	}

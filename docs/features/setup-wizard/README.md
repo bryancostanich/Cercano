@@ -5,7 +5,8 @@ working configuration in one guided pass. The organizing question is **how you
 want to use Cercano** (the locus), and everything else follows from it — cloud
 profiles when cloud is in the mix, a recommended set of open-weight models when
 open is in the mix. Open models are served by the **bundled `llama-server`
-runtime**; there is no Ollama install step.
+runtime** and drawn from a **curated compatibility catalog** we author and
+test; there is no Ollama install step and no Ollama catalog dependency.
 
 ## Triggers
 
@@ -20,10 +21,10 @@ runtime**; there is no Ollama install step.
 ## Engine posture: llama-server is the open runtime
 
 Cercano ships and supervises `llama-server`. It is the one open-weight runtime
-the wizard configures, and open models are acquired as **GGUF downloads from
-the llama-server catalog** (direct HuggingFace `resolve/main/...gguf` URLs,
-downloaded into `llama_server.model_dirs`). The wizard never checks for a
-running Ollama daemon and never pulls from the Ollama library.
+the wizard configures, and open models are acquired as **GGUF downloads**
+(direct HuggingFace `resolve/main/...gguf` URLs, downloaded into
+`llama_server.model_dirs`). The wizard never checks for a running Ollama daemon
+and never pulls from the Ollama library.
 
 Pointing Cercano at an **external server** — an Ollama instance running
 locally or remotely, or a hosted OpenAI-compatible endpoint (DeepInfra,
@@ -31,6 +32,51 @@ Mistral, Groq, …) — is a deliberate, post-setup configuration action on the
 `/m` (models) surface, not a first-run branch. Keeping it out of setup is what
 lets the wizard present a single, honest "llama-server is the local engine"
 story.
+
+## Model catalog & the compatibility gate
+
+**The problem this closes.** llama-server (llama.cpp) is not a catalog — it
+runs whatever GGUF you hand it, *if its architecture is compiled into the
+build*. A GGUF's first four bytes being `GGUF` only proves it's a GGUF
+container; the `general.architecture` metadata field inside names the model
+architecture, and llama.cpp only loads architectures it supports. Ollama has
+built its **own** inference engine, so its library now includes architectures
+only Ollama can run (e.g. qwen3-next). "In the Ollama library" therefore means
+"works in Ollama," **not** "works in llama-server" — the two have diverged, and
+pulling an Ollama-library model into llama-server can fail with "unknown
+architecture." The old `ollamacatalog`-as-discovery assumption is retired.
+
+**Two layers, one gate:**
+
+| Layer | Source | Guarantee |
+|---|---|---|
+| Recommended set (setup + tiers) | Curated list we author & test | Verified on our build |
+| Browse / advanced (`/m`) | HuggingFace GGUF index + gate | Gate blocks incompatible |
+
+- **Curated compatibility catalog.** A hand-maintained list of GGUFs we have
+  verified load-and-run on Cercano's pinned llama.cpp build, one per open tier,
+  with tool-calling flagged. This is the only source setup ever touches, so the
+  guided path is structurally foolproof. It supersedes the two-entry
+  `defaultCatalog` stub in `llamaserver/provider.go`.
+- **HuggingFace browse.** For power users on `/m`, discovery switches from the
+  Ollama library to the HuggingFace GGUF index (`hf.co/models?library=gguf`) —
+  API-backed, the real home of GGUFs, no Ollama dependency. Because that index
+  is large and noisy, browse filters to known-good uploaders
+  (bartowski / unsloth / ggml-org) and sorts by popularity, *on top of* the
+  gate.
+- **The architecture gate** is the shared primitive: before committing a
+  multi-gigabyte download, read `general.architecture` from the GGUF header via
+  an HTTP Range request (the header holds the metadata KV block; no full
+  download needed) and refuse/warn if our bundled llama.cpp doesn't support
+  that architecture. The in-tree `headerIdentity` parser in `provider.go`
+  already extracts architecture from on-disk files; it needs to also accept a
+  remote Range reader. This gate is what would have caught qwen3-next *before*
+  the failed pull.
+
+This whole subsystem is a re-architecture of the model-catalog track; the
+`ollamacatalog` package and `docs/features/cli/model-catalog-online/design.md`
+need a follow-up rewrite to match (Ollama-library discovery → HuggingFace +
+gate). This doc records the decision; that track carries the implementation.
 
 ## Steps
 
@@ -123,7 +169,8 @@ variables.
 
 Runs for `cloud_primary`, `open_primary`, and `open_only`. Instead of picking
 one "primary" open model, the wizard presents a **recommended set** of GGUFs,
-one per open capability tier, drawn from the **llama-server catalog**:
+one per open capability tier, drawn from the **curated compatibility catalog**
+(above) — every entry verified on our llama.cpp build:
 
 | Tier | Role | Catalog pick (GGUF) |
 |---|---|---|
@@ -134,18 +181,19 @@ one per open capability tier, drawn from the **llama-server catalog**:
 
 - The default set is shown as an accept-and-move-on list. Accepting fills the
   **`.Open` slots** of `Models.Tiers.{everyday,fast_light,fast_light_text,embedding}`.
-- The set is **editable**: each row opens the same model picker `/m` uses, so a
-  user can swap any tier's pick before accepting. The picker here is backed by
-  the llama-server catalog, **not** the Ollama registry.
+- The set is **editable**: each row opens the same model picker `/m` uses. In
+  setup the picker offers the curated catalog; the broader HuggingFace browse
+  (with the architecture gate) is available on `/m` afterward, not inline.
 - Populating `fast_light_text.Open` here is also what removes the compaction
   summarizer warning at its source — the tier has a real model instead of
   falling through to an empty slot.
 
 **No download UI in the wizard.** Selecting the set does not block on transfer.
-The catalog today ships only two Qwen coder GGUFs; expanding it with per-tier
-entries (a ~7B everyday coder, a ~1.5B fast-light coder, a small prose model
-for `fast_light_text`, and an embedding GGUF) is part of this work — the set
-above is only real once those catalog entries exist.
+The curated catalog today is only a two-entry stub (`defaultCatalog` in
+`llamaserver/provider.go`); populating it with a verified per-tier set (a ~7B
+everyday coder, a ~1.5B fast-light coder, a small prose model for
+`fast_light_text`, and an embedding GGUF) is part of this work — the set above
+is only real once those entries exist and pass the gate.
 
 ### 4. Finish — background downloads, `/m` progress, cloud covers the gap
 
@@ -181,23 +229,26 @@ the `cercano setup` process exits non-zero. This replaces the legacy flow's
 unconditional "[8/8] Setup complete!" — which printed success even when no
 usable model was configured.
 
-## Routing contract (dependency)
+## Routing contract: cloud covers the gap
 
 The finish-message promise — *cloud covers the gap while open models
-download* — is **not** automatic. `dispatch/select.go`'s `Select` crosses to
-the cloud tier only when the preferred (open) provider registers as **absent**
-(`nil` / `"NONE"`) and the mode permits crossing; it does **not** inspect
-download state. So this contract must hold:
+download* — is not automatic today, and this is the fix. `dispatch/select.go`'s
+`Select` crosses to the cloud tier only when the preferred (open) provider
+registers as **absent** (`nil` / `"NONE"`) and the mode permits crossing; it
+does **not** inspect download state. The resolution is to make readiness mean
+*on disk*:
 
-> An open tier slot whose GGUF is not yet on disk must cause the open provider
-> to register as **absent** for that tier, not as present-but-failing. A
-> provider that is always constructed and only errors at call time would break
-> the fallback (the request would error instead of crossing to cloud).
+> **An open tier's provider registers as present only when its GGUF is actually
+> on disk** (`Discover` reports it `downloaded`). While the file is still
+> downloading, the tier registers **absent**, so `Select` crosses to cloud with
+> no new fallback logic — and the moment the file lands, the provider flips to
+> present and the next request uses it.
 
-Verify (and, if needed, implement) that llama-server provider registration is
-gated on GGUF presence (`Discover` returning the model as `downloaded`) before
-relying on the closing message. Under `open_only` there is no cloud tier to
-cross to, which is why the gate warns that work waits on the first download.
+The one thing that would break this is a provider that is always constructed and
+only errors at call time; a not-yet-downloaded model must register **absent**,
+not present-but-failing. Under `open_only` there is no cloud tier to cross to,
+which is why the completion gate warns that work waits on the first download
+rather than promising cover.
 
 ## Non-goals (V1)
 
@@ -220,9 +271,19 @@ cross to, which is why the gate warns that work waits on the first download.
   `StepPrimary` is removed; the four locus modes carry the whole "how do you
   want to use Cercano" decision, with `cloud_primary` and `open_only`
   recommended, `open_primary` as cost-saver, `cloud_only` discouraged.
-- **llama-server catalog only.** Open models are GGUF downloads from the
-  llama-server catalog. Ollama is dropped from setup entirely and becomes a
-  post-setup external-server option.
+- **Catalog: curated set + HuggingFace browse + architecture gate (Option C).**
+  Open models come from a curated compatibility catalog we author and test —
+  the only source setup touches. `/m` browse switches from the Ollama library
+  to the HuggingFace GGUF index, filtered to known-good uploaders. Every
+  download passes an architecture gate: read `general.architecture` from the
+  GGUF header via a Range request and refuse if our llama.cpp build can't load
+  it. Ollama is dropped as a catalog source entirely (still allowed as a
+  post-setup external server). The `ollamacatalog` package and the
+  `model-catalog-online` design need a follow-up rewrite to match.
+- **Cloud covers the download gap via readiness = on-disk.** An open tier
+  registers as present only when its GGUF is downloaded; while downloading it
+  reads absent, so routing crosses to cloud automatically with no new fallback
+  logic. `open_only` has no cover and the completion gate says so.
 - **No download screen.** Open-model downloads start in the background at
   finish; `/m` shows progress; the closing message tells the user cloud covers
   the gap until they land.
@@ -236,7 +297,8 @@ cross to, which is why the gate warns that work waits on the first download.
   path resolves; otherwise an explicit incomplete screen and non-zero exit.
 - **Legacy `runSetup` retired**; `cercano setup` enters this wizard.
 - **Catalog expansion is in scope.** Per-tier GGUF entries must be added to the
-  llama-server catalog for the recommended set to be real.
+  curated compatibility catalog (superseding the two-entry `defaultCatalog`
+  stub) for the recommended set to be real.
 
 ### 2026-07-05 — auth & OAuth (carried forward)
 

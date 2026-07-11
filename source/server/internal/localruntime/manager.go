@@ -43,25 +43,6 @@ type InMemoryManager struct {
 	httpClient   *http.Client
 	logs         []LogEntry
 	logLimit     int
-
-	// ociResolver resolves an OllamaRef ("name:tag") into a concrete
-	// blob URL by fetching the manifest from registry.ollama.ai.
-	// Optional — nil means DownloadModel will refuse to fetch ollama-
-	// library entries (they'll still list, but Download errors clearly
-	// rather than trying an empty URL). Set via SetOCIResolver.
-	ociResolver OCIResolver
-}
-
-// OCIResolver produces a concrete download URL (and total size) from
-// an Ollama library reference. Implementation lives in the
-// ollamacatalog package; this interface keeps localruntime from
-// importing it directly (avoids a package cycle if ollamacatalog ever
-// needs to import localruntime types for testing).
-type OCIResolver interface {
-	// Resolve returns the blob download URL for an Ollama library
-	// reference of the form "name:tag" (e.g. "qwen2.5-coder:7b").
-	// Size is the manifest's model-layer size in bytes.
-	Resolve(ctx context.Context, ref string) (downloadURL string, sizeBytes int64, err error)
 }
 
 type downloadJob struct {
@@ -90,17 +71,6 @@ func (m *InMemoryManager) RegisterProvider(provider Provider) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.providers[provider.Name()] = provider
-}
-
-// SetOCIResolver attaches the resolver used to translate an
-// ollama-library ref into a concrete blob URL. Nil (the default) means
-// online-library entries will error on Download with a clear message —
-// they'll still list, they just can't be fetched. Called from main.go
-// wire-up with the ollamacatalog.Manager, which implements OCIResolver.
-func (m *InMemoryManager) SetOCIResolver(r OCIResolver) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.ociResolver = r
 }
 
 func (m *InMemoryManager) Providers() []ProviderInfo {
@@ -236,37 +206,6 @@ func (m *InMemoryManager) DownloadModel(ctx context.Context, req DownloadRequest
 	}
 	if model.DownloadState == "downloaded" {
 		return &model, nil
-	}
-	// Just-in-time OCI resolution: online-catalog entries (from
-	// Ollama's public library) arrive with OllamaRef but no
-	// DownloadURL, because we don't want to fetch a manifest for every
-	// browsed model. Do the fetch now, right before the URL check, so
-	// only models the user actually clicks Download on incur the cost.
-	if model.DownloadURL == "" && model.OllamaRef != "" {
-		if m.ociResolver == nil {
-			return nil, fmt.Errorf("model %q needs OCI resolution but no OCIResolver is attached", req.ModelID)
-		}
-		url, size, resErr := m.ociResolver.Resolve(ctx, model.OllamaRef)
-		if resErr != nil {
-			return nil, fmt.Errorf("resolve OCI manifest for %s: %w", model.OllamaRef, resErr)
-		}
-		model.DownloadURL = url
-		if model.DownloadTotalBytes == 0 {
-			model.DownloadTotalBytes = size
-		}
-		if model.SizeBytes == 0 {
-			model.SizeBytes = size
-		}
-		if model.Path == "" {
-			// Default target: ~/.cercano/models/<name>-<tag>.gguf
-			home, herr := os.UserHomeDir()
-			if herr == nil {
-				modelDir := filepath.Join(home, ".cercano", "models")
-				// Sanitize the ref into a safe filename.
-				filename := strings.ReplaceAll(model.OllamaRef, ":", "-") + ".gguf"
-				model.Path = filepath.Join(modelDir, filename)
-			}
-		}
 	}
 	if model.DownloadURL == "" && len(model.DownloadURLs) == 0 {
 		return nil, fmt.Errorf("model %q does not have a download URL", req.ModelID)
@@ -432,9 +371,9 @@ func (m *InMemoryManager) findDownloadModel(ctx context.Context, req DownloadReq
 // register online-catalog entries (from Ollama's library) before the
 // runtime layer's inventory logic runs.
 //
-// The enrolled entry is expected to have OllamaRef set (for JIT
-// resolution) or DownloadURL set (for direct download). State should
-// be "not_downloaded" — the download loop transitions it forward.
+// The enrolled entry is expected to have DownloadURL (or DownloadURLs for a
+// sharded model) set. State should be "not_downloaded" — the download loop
+// transitions it forward.
 func (m *InMemoryManager) EnrollDownload(model ModelRecord) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

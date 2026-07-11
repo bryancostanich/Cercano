@@ -1495,24 +1495,6 @@ func catalogModelToProto(m catalog.Model) *proto.RuntimeModel {
 	}
 }
 
-// titleCase renders "qwen2.5-coder" as "Qwen2.5 Coder" for display —
-// cheap heuristic that gets Ollama's kebab-case names to something
-// user-facing.
-func titleCase(s string) string {
-	if s == "" {
-		return ""
-	}
-	// Split on hyphens; capitalize each token; join with a space.
-	parts := strings.Split(s, "-")
-	for i, p := range parts {
-		if p == "" {
-			continue
-		}
-		parts[i] = strings.ToUpper(p[:1]) + p[1:]
-	}
-	return strings.Join(parts, " ")
-}
-
 // RefreshOnlineCatalog implements proto.AgentServer — forces a fresh
 // fetch of the online catalog, bypassing the 24h TTL. Used by the
 // CLI dashboard's "R" refresh key.
@@ -1597,47 +1579,6 @@ func (s *Server) RestartRuntime(ctx context.Context, req *proto.RestartRuntimeRe
 }
 
 // DownloadRuntimeModel implements proto.AgentServer.
-//
-// If the request carries an OllamaRef (e.g. "qwen2.5-coder:7b"), we
-// treat this as an online-catalog entry that no provider has yet
-// enumerated: enroll a fresh ModelRecord with the ref so the
-// InMemoryManager's findDownloadModel finds it, then hand off to the
-// existing DownloadModel path (which performs JIT OCI resolution).
-// normalizeOllamaRef defaults a bare family name ("qwen2.5-coder") to
-// the :latest tag. Online catalog entries carry tagless refs, but the
-// registry needs a tag and the OCI resolver rejects tagless refs;
-// Ollama's registry defines :latest for every library model. Empty
-// stays empty (no online-catalog enrolment requested).
-func normalizeOllamaRef(ref string) string {
-	if ref == "" || strings.Contains(ref, ":") {
-		return ref
-	}
-	return ref + ":latest"
-}
-
-// enrollmentRecord builds the inventory record for an ollama-backed
-// download. Family and DisplayName MUST be set here: ListRuntimeModels
-// dedupes online-catalog entries against the inventory by family name,
-// so an enrolled record without one renders as a duplicate of the
-// catalog entry it came from (and shows "family: (unknown)" in the
-// detail panel) for its entire life.
-func enrollmentRecord(modelID, runtime, ref string) localruntime.ModelRecord {
-	family := ref
-	if i := strings.Index(family, ":"); i > 0 {
-		family = family[:i]
-	}
-	return localruntime.ModelRecord{
-		ID:            modelID,
-		Runtime:       runtime,
-		OllamaRef:     ref,
-		Family:        family,
-		DisplayName:   titleCase(family),
-		DownloadState: "not_downloaded",
-		Format:        "gguf",
-		SupportsChat:  true,
-	}
-}
-
 func (s *Server) DownloadRuntimeModel(ctx context.Context, req *proto.DownloadRuntimeModelRequest) (*proto.DownloadRuntimeModelResponse, error) {
 	rm := s.runtimeMgr()
 	if rm == nil {

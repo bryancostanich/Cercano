@@ -98,11 +98,6 @@ type ModelRecord struct {
 	SupportsEmbed      bool
 	SupportsTools      bool
 	Active             bool
-	// OllamaRef is set on entries backed by Ollama's public library.
-	// Format is "name:tag" (e.g. "qwen2.5-coder:7b"). When non-empty,
-	// the download manager routes through the OCI blob flow at
-	// registry.ollama.ai instead of a direct HTTP GET of DownloadURL.
-	OllamaRef string
 }
 
 type InstanceRecord struct {

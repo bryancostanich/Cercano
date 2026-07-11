@@ -334,18 +334,6 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		fmt.Fprintf(os.Stderr, "[WARN] catalog backend %q not available: %v (using default)\n", cfg.Catalog.Backend, err)
 	}
 	srv.SetCatalogRegistry(catalogRegistry)
-	// Wire the catalog manager into the runtime manager as its OCI
-	// resolver — this is what enables DownloadModel to translate an
-	// online-catalog ref (e.g. "qwen2.5-coder:7b") into the concrete
-	// blob URL via a JIT manifest fetch. Type-asserted because the
-	// runtimeManager variable is the interface type; only
-	// *InMemoryManager currently implements SetOCIResolver, and if a
-	// future alternate implementation lands the assertion just skips
-	// the resolver injection (online catalog would list but not
-	// download — fail-safe).
-	if imm, ok := runtimeManager.(*localruntime.InMemoryManager); ok {
-		imm.SetOCIResolver(catalogManager)
-	}
 	if sweeper != nil {
 		srv.SetRetentionSweeper(sweeper)
 	}

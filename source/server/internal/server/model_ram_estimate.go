@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"cercano/source/server/internal/gguf"
-	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/sysram"
 	"cercano/source/server/pkg/proto"
 )
@@ -28,24 +27,30 @@ func (s *Server) GetModelRAMEstimate(ctx context.Context, req *proto.GetModelRAM
 
 	switch {
 	case strings.TrimSpace(req.GetCatalogId()) != "":
-		var cm *ollamacatalog.Manager
-		if s.providerSvc != nil {
-			cm = s.providerSvc.CatalogManager()
-		}
-		if cm == nil {
-			resp.Error = "online catalog not configured"
+		if s.catalogRegistry == nil {
+			resp.Error = "catalog not configured"
 			return resp, nil
 		}
-		ref := normalizeOllamaRef(req.GetCatalogId())
-		est, err := cm.ResolveEstimate(ctx, ref)
+		backend, ok := s.catalogRegistry.Active()
+		if !ok {
+			resp.Error = "no active catalog backend"
+			return resp, nil
+		}
+		detail, err := backend.Detail(ctx, req.GetCatalogId())
 		if err != nil {
 			resp.Error = err.Error()
 			return resp, nil
 		}
-		resp.WeightsBytes = est.WeightsBytes
-		resp.KvBytesPerToken = est.KVBytesPerToken
-		resp.MaxContextTokens = est.MaxContextTokens
-		resp.Architecture = est.Architecture
+		resp.Architecture = detail.Architecture
+		resp.MaxContextTokens = int64(detail.ContextLength)
+		// WeightsBytes from the default quant's file size — a backend-agnostic
+		// estimate available before download. KvBytesPerToken needs the full
+		// GGUF header (head counts), which a not-yet-downloaded model doesn't
+		// expose here, so it stays 0 and the client degrades to weights +
+		// context. (A remote header Range-read could restore it later.)
+		if f, ok := pickDefaultQuant(detail.Files); ok {
+			resp.WeightsBytes = f.SizeBytes
+		}
 		return resp, nil
 
 	case strings.TrimSpace(req.GetModelId()) != "":

@@ -277,6 +277,17 @@ type Config struct {
 	// by the active profile's vendor — retiring the per-tier models.tiers.*.cloud
 	// slots (kept load-tolerant, no longer read; see ModelTier.Cloud).
 	ModelProfiles ModelProfiles `yaml:"model_profiles"`
+	// Catalog selects the active model-catalog backend for browse/search.
+	Catalog CatalogConfig `yaml:"catalog,omitempty"`
+}
+
+// CatalogConfig selects the active model-catalog backend. Exactly one backend
+// is active at a time; adding a source (HuggingFace, Ollama, …) is a new
+// backend, not a change to this shape.
+type CatalogConfig struct {
+	// Backend is the active catalog source: "huggingface" (default) or
+	// "ollama". An unknown value fails loud when the registry is wired.
+	Backend string `yaml:"backend,omitempty"`
 }
 
 // CompactionConfig controls background context compaction. Thresholds are token
@@ -412,6 +423,7 @@ func Defaults() Config {
 		OllamaURL:     "http://localhost:11434",
 		OpenRuntime:   "ollama",
 		LocusMode:     "open_primary",
+		Catalog:       CatalogConfig{Backend: "huggingface"},
 		Port:          "50052",
 		ExecutionMode: "worker",
 		// 0 is the "use the default" sentinel; WorkerIdleTimeout() resolves it to
@@ -622,6 +634,9 @@ func Load(path string) (Config, error) {
 		}
 		if cfg.Port == "" {
 			cfg.Port = defaults.Port
+		}
+		if cfg.Catalog.Backend == "" {
+			cfg.Catalog.Backend = defaults.Catalog.Backend
 		}
 		applyLlamaServerDefaults(&cfg.LlamaServer, defaults.LlamaServer)
 		applyToolLoopDefaults(&cfg.ToolLoop, defaults.ToolLoop)

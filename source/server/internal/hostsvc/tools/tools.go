@@ -318,22 +318,24 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		system = x.systemPrompt(spec.WorkDir)
 	}
 
-	// 3. Set up sub-agent persistence (best-effort). The loop's turns land in
-	// a hidden "subagent" conversation linked to the parent, so a failed
+	// 3. Sub-agent identity + persistence. The sub-agent's conversation id is
+	// minted unconditionally: it is the
+	// sub-agent's own identity — it drives the sub-agent's tab (every emitted
+	// event carries it as SubAgentID) and its scoped provider session — so it
+	// must exist whether or not persistence is wired. Persistence is a
+	// best-effort layer keyed on this same id: when a store is available
+	// (in-process directly, or the worker via its host proxy) the loop's turns
+	// land in a hidden "subagent" conversation linked to the parent, so a
 	// dispatch can be post-mortemed from the DB instead of dead-ending at the
 	// parent's tool_result.
-	subConvID := ""
+	subConvID := conversation.NewID()
 	var onTurn func(m llm.Message)
 	if store := x.dispatchStore(); store != nil {
-		id := conversation.NewID()
-		if perr := store.EnsureSubagentConversation(ctx, id, spec.ConversationID, spec.WorkDir, model, granted); perr != nil {
+		if perr := store.EnsureSubagentConversation(ctx, subConvID, spec.ConversationID, spec.WorkDir, model, granted); perr != nil {
 			log.Printf("[dispatch] subagent persistence unavailable: %v", perr)
-		} else {
-			subConvID = id
-			if x.persistTurn != nil {
-				x.persistTurn(ctx, subConvID, agent.UserMessage(spec.Task, nil))
-				onTurn = func(m llm.Message) { x.persistTurn(ctx, subConvID, m) }
-			}
+		} else if x.persistTurn != nil {
+			x.persistTurn(ctx, subConvID, agent.UserMessage(spec.Task, nil))
+			onTurn = func(m llm.Message) { x.persistTurn(ctx, subConvID, m) }
 		}
 	}
 	log.Printf("[dispatch] subagent start: conv=%s model=%s tools=%v", subConvID, model, registryToolNames(reg))
@@ -344,12 +346,8 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	// the parent conversation's (inherited via ctx). Upstream bridges key
 	// persistent session state on this id; the subagent's disjoint history
 	// arriving on the parent's key evicts the parent's lineage and cross-
-	// delivers turns between the two.
-	sessionID := subConvID
-	if sessionID == "" {
-		sessionID = conversation.NewID()
-	}
-	ctx = llm.WithSessionID(ctx, sessionID)
+	// delivers turns between the two. subConvID is always set (minted above).
+	ctx = llm.WithSessionID(ctx, subConvID)
 	ctx = llm.WithIndependentSession(ctx) // skip Meridian lineage matching for subagent turns
 
 	// 4. Run the bounded tool loop.

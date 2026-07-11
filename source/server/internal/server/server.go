@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"sort"
@@ -35,6 +36,7 @@ import (
 	runtimessvc "cercano/source/server/internal/hostsvc/runtimes"
 	toolssvc "cercano/source/server/internal/hostsvc/tools"
 	"cercano/source/server/internal/legacymodels"
+	"cercano/source/server/internal/llamacompat"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/localruntime"
 	"cercano/source/server/internal/localruntime/llamaserver"
@@ -1641,13 +1643,22 @@ func (s *Server) DownloadRuntimeModel(ctx context.Context, req *proto.DownloadRu
 	if rm == nil {
 		return &proto.DownloadRuntimeModelResponse{Ok: false, Error: "runtime manager not configured"}, nil
 	}
-	if ref := normalizeOllamaRef(req.GetCatalogId()); ref != "" {
-		// Only the concrete InMemoryManager supports enrolment. If a
-		// future alternative implementation is wired in, this branch
-		// is a no-op and the download will fall back to the provider
-		// lookup below (which will fail cleanly with "not found").
-		if imm, ok := rm.(*localruntime.InMemoryManager); ok {
-			imm.EnrollDownload(enrollmentRecord(req.GetModelId(), req.GetRuntime(), ref))
+	// Online-catalog download: resolve through the active backend and enroll a
+	// concrete, gate-checked, multi-shard-aware record before the manager runs.
+	// A curated or on-disk model carries no catalog_id and falls straight
+	// through to the provider lookup in DownloadModel.
+	if id := req.GetCatalogId(); id != "" && s.catalogRegistry != nil {
+		if backend, ok := s.catalogRegistry.Active(); ok {
+			rec, err := buildCatalogDownloadRecord(ctx, backend, id, req.GetModelId(), req.GetRuntime(), defaultModelDir(s.cfgSvc.Get()))
+			if err != nil {
+				return &proto.DownloadRuntimeModelResponse{Ok: false, Error: err.Error()}, nil
+			}
+			// Only the concrete InMemoryManager supports enrolment; an
+			// alternative implementation makes this a no-op and DownloadModel
+			// fails cleanly with "not found".
+			if imm, ok := rm.(*localruntime.InMemoryManager); ok {
+				imm.EnrollDownload(rec)
+			}
 		}
 	}
 	model, err := rm.DownloadModel(ctx, localruntime.DownloadRequest{
@@ -1658,6 +1669,77 @@ func (s *Server) DownloadRuntimeModel(ctx context.Context, req *proto.DownloadRu
 		return &proto.DownloadRuntimeModelResponse{Ok: false, Error: err.Error()}, nil
 	}
 	return &proto.DownloadRuntimeModelResponse{Ok: true, Model: mapRuntimeModel(*model)}, nil
+}
+
+// buildCatalogDownloadRecord turns an online-catalog id into an enrollable
+// download record via the active backend: fetch Detail (for the arch gate),
+// refuse an architecture llama.cpp can't load, pick the default quant, resolve
+// its URL(s), and place the file(s) under modelDir. Multi-shard aware —
+// DownloadURLs may hold several shard URLs (the manager fetches them all).
+func buildCatalogDownloadRecord(ctx context.Context, backend catalog.Backend, id, modelID, runtime, modelDir string) (localruntime.ModelRecord, error) {
+	detail, err := backend.Detail(ctx, id)
+	if err != nil {
+		return localruntime.ModelRecord{}, fmt.Errorf("catalog detail for %q: %w", id, err)
+	}
+	if !llamacompat.Supported(detail.Architecture) {
+		return localruntime.ModelRecord{}, fmt.Errorf("llama-server can't run %q: unsupported architecture %q (switch the catalog backend or pick a compatible model)", id, detail.Architecture)
+	}
+	file, ok := pickDefaultQuant(detail.Files)
+	if !ok {
+		return localruntime.ModelRecord{}, fmt.Errorf("no downloadable quant files for %q", id)
+	}
+	plan, err := backend.ResolveDownload(ctx, id, file.Name)
+	if err != nil {
+		return localruntime.ModelRecord{}, fmt.Errorf("resolve download for %q: %w", id, err)
+	}
+	if len(plan.URLs) == 0 {
+		return localruntime.ModelRecord{}, fmt.Errorf("no download URLs for %q", id)
+	}
+	return localruntime.ModelRecord{
+		ID:                 modelID,
+		Runtime:            runtime,
+		DisplayName:        id,
+		Family:             id,
+		Path:               filepath.Join(modelDir, filepath.Base(plan.PrimaryFile)),
+		DownloadURLs:       plan.URLs,
+		DownloadTotalBytes: plan.TotalBytes,
+		DownloadState:      "not_downloaded",
+		Format:             "gguf",
+		SupportsChat:       true,
+		SupportsTools:      detail.SupportsTools,
+	}, nil
+}
+
+// pickDefaultQuant chooses the file to download when the request names no
+// specific quant: prefer a Q4_K_M variant (the quality/size sweet spot), else
+// the first file. For a sharded quant this returns the first shard; the
+// backend's ResolveDownload expands it to the whole shard group.
+func pickDefaultQuant(files []catalog.File) (catalog.File, bool) {
+	if len(files) == 0 {
+		return catalog.File{}, false
+	}
+	for _, f := range files {
+		if strings.Contains(strings.ToUpper(f.Name), "Q4_K_M") {
+			return f, true
+		}
+	}
+	return files[0], true
+}
+
+// defaultModelDir resolves the directory downloaded GGUFs land in: the first
+// configured llama_server model dir (with a leading ~ expanded), or
+// ~/.cercano/models by default.
+func defaultModelDir(cfg config.Config) string {
+	dir := "~/.cercano/models"
+	if len(cfg.LlamaServer.ModelDirs) > 0 && strings.TrimSpace(cfg.LlamaServer.ModelDirs[0]) != "" {
+		dir = cfg.LlamaServer.ModelDirs[0]
+	}
+	if strings.HasPrefix(dir, "~/") {
+		if home, herr := os.UserHomeDir(); herr == nil {
+			return filepath.Join(home, dir[2:])
+		}
+	}
+	return dir
 }
 
 // CancelRuntimeModelDownload implements proto.AgentServer.

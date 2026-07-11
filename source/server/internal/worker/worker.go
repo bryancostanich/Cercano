@@ -447,9 +447,16 @@ func wrapWorkerBackup(
 func (r *workerResolver) Main() (llm.Provider, bool, bool, error) {
 	cfg := r.cfgSvc.Get()
 	mode, _ := locus.ParseMode(cfg.LocusMode)
+	// Open tier registers absent when its GGUF isn't on disk yet, so Select
+	// crosses to cloud — the "cloud covers the gap" contract (see
+	// dispatch.OpenModelReady).
+	open := r.openProv
+	if !dispatch.OpenModelReady(cfg) {
+		open = nil
+	}
 	sel, err := dispatch.Select(mode, dispatch.RoleMain, dispatch.Providers{
 		Cloud: r.cloudProv,
-		Open:  r.openProv,
+		Open:  open,
 	})
 	if err != nil {
 		return nil, false, false, err

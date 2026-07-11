@@ -203,11 +203,19 @@ func (p *service) ActiveCloudModel() string {
 // Main returns the provider + model for the active locus mode.
 // Was resolveMainProvider on Server.
 func (p *service) Main() (llm.Provider, bool, bool, error) {
-	locusMode := p.cfgSvc.Get().LocusMode
-	mode, _ := locus.ParseMode(locusMode)
+	c := p.cfgSvc.Get()
+	mode, _ := locus.ParseMode(c.LocusMode)
+	// Register the open tier absent when its GGUF isn't on disk yet (e.g. still
+	// downloading after setup) so Select crosses to cloud — the "cloud covers
+	// the gap" routing contract. Otherwise the not-yet-present model gets
+	// picked and fails at load time instead of falling back.
+	open := p.openLLMProvider
+	if !dispatch.OpenModelReady(c) {
+		open = nil
+	}
 	sel, err := dispatch.Select(mode, dispatch.RoleMain, dispatch.Providers{
 		Cloud: p.cloudLLMProvider,
-		Open:  p.openLLMProvider,
+		Open:  open,
 	})
 	if err != nil {
 		return nil, false, false, err

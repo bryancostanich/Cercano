@@ -234,6 +234,13 @@ func (m *Manager) needsRefresh() bool {
 	return m.cache.IsStale(time.Now(), m.ttl)
 }
 
+// ListTags returns the available tags (quant/size variants) for a model
+// family, fetched live from the Ollama library. Unlike Models(), tags aren't
+// cached — they're fetched on drill-in when the user opens a family.
+func (m *Manager) ListTags(name string) ([]string, error) {
+	return m.fetcher.ListTags(name)
+}
+
 // Resolve implements localruntime.OCIResolver: given an Ollama library
 // reference of the form "name:tag" (e.g. "qwen2.5-coder:7b"), fetches
 // the manifest from registry.ollama.ai, picks the model layer, and

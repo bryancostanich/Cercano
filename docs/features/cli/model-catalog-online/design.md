@@ -128,26 +128,63 @@ Setup and browse have different needs, so two layers over the one gate:
 | Recommended set (setup + tiers) | Curated compatibility catalog | Verified on our build |
 | Browse / advanced (`/m`) | HF GGUF index + gate | Gate blocks incompatible |
 
-**Curated compatibility catalog.** A hand-maintained, per-tier list of GGUFs we
-have actually run on the pinned llama.cpp build. It moves out of the
+**Curated compatibility catalog.** A hand-maintained set of GGUFs we have
+actually run on the pinned llama.cpp build. It moves out of the
 `defaultCatalog` Go slice into an **embedded data file** (`catalog.json`,
-`go:embed`) so updating models is a data edit. Shape per entry:
+`go:embed`) so updating models is a data edit.
+
+The catalog is **keyed by RAM tier**, not a flat list, because the right open
+model depends on the machine — what a 128 GB box runs is wrong for a 48 GB
+laptop. Setup detects total memory (`sysctl hw.memsize` on macOS,
+`/proc/meminfo` on Linux), picks the matching profile, shows it, and lets the
+user override. Profiles: **24, 48, 96, 128 GB** (a machine takes the largest
+profile at or below its RAM).
+
+**Swap-minimization principle.** Spinning up a llama-server model loads its
+full weights into memory — a multi-minute cost for the big ones. Cercano keeps
+multiple models warm at once (one instance each), bounded only by RAM. So a
+profile gives a tier its own distinct everyday and most-capable models **only
+when both fit warm simultaneously**; otherwise they collapse to one shared
+model so the hot path never pays a reload. Every profile is generated under
+this rule.
+
+Default profiles (everyday anchored on Qwen3 **general**, not Qwen3-Coder — the
+newer refresh is the stronger coder; every arch is gate-supported):
+
+| Profile | everyday | most_capable |
+|---|---|---|
+| 24 GB | Qwen3-14B Q4 (~9 GB) | = everyday (no swap) |
+| 48 GB | Qwen3-30B-A3B-2507 Q4 (~19 GB) | = everyday (no swap) |
+| 96 GB | 30B-A3B-Instruct-2507 Q4 | 30B-A3B-Thinking-2507 Q4 |
+| 128 GB | 30B-A3B-2507 Q4 (~19 GB) | GLM-4.5-Air Q4 (~73 GB) |
+
+`fast_light` and `fast_light_text` are Phi-4-mini (`phi3`), and `embedding` is
+nomic-embed-text-v1.5 (`nomic-bert`, f16) across all profiles. The 96 GB
+profile keeps two 30B-A3B variants (Instruct + Thinking) warm together (~37 GB,
+no swap); 128 GB keeps a fast everyday plus GLM-4.5-Air warm (~92 GB).
+
+Entry shape — note **`files[]`**, because some models ship as multi-shard
+splits (GLM-4.5-Air's Q4_K_M is two files); "downloaded?" means *all* shards
+present, and `size_bytes` is their sum:
 
 ```json
 {
-  "tier": "everyday",
-  "repo": "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF",
-  "file": "Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf",
-  "arch": "qwen2",
+  "tier": "most_capable",
+  "repo": "unsloth/GLM-4.5-Air-GGUF",
+  "files": [
+    "Q4_K_M/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf",
+    "Q4_K_M/GLM-4.5-Air-Q4_K_M-00002-of-00002.gguf"
+  ],
+  "arch": "glm4moe",
   "quant": "Q4_K_M",
-  "size_bytes": 4683074336,
+  "size_bytes": 72975748384,
   "supports_tools": true
 }
 ```
 
 This is the **only** source the setup wizard touches, which is what makes the
-guided path foolproof. A test asserts every entry's `arch` is in the supported
-set.
+guided path foolproof. A test asserts every profile entry's `arch` is in the
+supported set.
 
 **HF browse** is the `/m` power-user surface: the gated HuggingFace index, for
 anything not in the curated set.

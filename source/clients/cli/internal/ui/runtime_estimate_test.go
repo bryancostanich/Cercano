@@ -27,11 +27,11 @@ func TestEstimateKey_RoutesLocalRefAndUnestimatable(t *testing.T) {
 	if got := estimateKey(local); got != "local:llama_server:llama_server:m" {
 		t.Errorf("local key = %q", got)
 	}
-	downloaded := agentclient.RuntimeModel{ID: "x", Runtime: "llama_server", DownloadState: "downloaded", OllamaRef: "x:7b"}
+	downloaded := agentclient.RuntimeModel{ID: "x", Runtime: "llama_server", DownloadState: "downloaded", CatalogID: "x:7b"}
 	if got := estimateKey(downloaded); !strings.HasPrefix(got, "local:") {
 		t.Errorf("downloaded model should use the local path, got %q", got)
 	}
-	online := agentclient.RuntimeModel{ID: "llama_server:online:qwen2.5-coder", OllamaRef: "qwen2.5-coder"}
+	online := agentclient.RuntimeModel{ID: "llama_server:online:qwen2.5-coder", CatalogID: "qwen2.5-coder"}
 	if got := estimateKey(online); got != "ref:qwen2.5-coder" {
 		t.Errorf("online key = %q", got)
 	}
@@ -91,7 +91,7 @@ func TestEstimateFitLine_Verdicts(t *testing.T) {
 
 func TestCatalogDetailLines_EstimateStates(t *testing.T) {
 	m := New(nil, false)
-	model := agentclient.RuntimeModel{ID: "llama_server:online:qwen2.5-coder", DisplayName: "Qwen2.5 Coder", OllamaRef: "qwen2.5-coder"}
+	model := agentclient.RuntimeModel{ID: "llama_server:online:qwen2.5-coder", DisplayName: "Qwen2.5 Coder", CatalogID: "qwen2.5-coder"}
 
 	pending := strings.Join(catalogDetailLines(model, nil, true, 60, m.styles), "\n")
 	if !strings.Contains(ansi.Strip(pending), "estimating...") {
@@ -123,7 +123,7 @@ func TestMaybeFetchEstimate_DedupAndPending(t *testing.T) {
 	d := newCatalogTestDashboard(runtimeDashboardSnapshot{
 		Catalog: agentclient.RuntimeModelCatalog{
 			Models: []agentclient.RuntimeModel{
-				{ID: "llama_server:online:qwen2.5-coder", OllamaRef: "qwen2.5-coder", DownloadState: "not_downloaded"},
+				{ID: "llama_server:online:qwen2.5-coder", CatalogID: "qwen2.5-coder", DownloadState: "not_downloaded"},
 			},
 		},
 	})
@@ -165,7 +165,7 @@ func TestSelectedEstimate_PrefersServerEmbeddedNumbers(t *testing.T) {
 			SystemRAMBytes: 64 << 30,
 			Models: []agentclient.RuntimeModel{{
 				ID:               "llama_server:online:qwen2.5-coder",
-				OllamaRef:        "qwen2.5-coder",
+				CatalogID:        "qwen2.5-coder",
 				DownloadState:    "not_downloaded",
 				SizeBytes:        4683074048,
 				KVBytesPerToken:  57344,
@@ -192,7 +192,7 @@ func TestSelectedEstimate_FallsBackToLazyFetchWhenUnwarmed(t *testing.T) {
 		Catalog: agentclient.RuntimeModelCatalog{
 			Models: []agentclient.RuntimeModel{{
 				ID:            "llama_server:online:newmodel",
-				OllamaRef:     "newmodel",
+				CatalogID:     "newmodel",
 				DownloadState: "not_downloaded",
 			}},
 		},
@@ -209,7 +209,7 @@ func TestEstimateIsLocal_DownloadingRecordIsNotLocal(t *testing.T) {
 	downloading := agentclient.RuntimeModel{
 		Path:          "/tmp/dest.gguf",
 		DownloadState: "downloading",
-		OllamaRef:     "nomic-embed-text:latest",
+		CatalogID:     "nomic-embed-text:latest",
 	}
 	if estimateIsLocal(downloading) {
 		t.Error("downloading record treated as local")

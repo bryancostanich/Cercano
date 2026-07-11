@@ -67,8 +67,8 @@ func estimateKey(m agentclient.RuntimeModel) string {
 	if estimateIsLocal(m) {
 		return "local:" + m.Runtime + ":" + m.ID
 	}
-	if m.OllamaRef != "" {
-		return "ref:" + m.OllamaRef
+	if m.CatalogID != "" {
+		return "ref:" + m.CatalogID
 	}
 	return ""
 }
@@ -76,7 +76,7 @@ func estimateKey(m agentclient.RuntimeModel) string {
 // runtimeEstimateCmd fetches the estimate for one model off-thread.
 func runtimeEstimateCmd(ag *agentclient.Client, key string, model agentclient.RuntimeModel) tea.Cmd {
 	local := estimateIsLocal(model)
-	runtime, modelID, ref := model.Runtime, model.ID, model.OllamaRef
+	runtime, modelID, ref := model.Runtime, model.ID, model.CatalogID
 	return func() tea.Msg {
 		if ag == nil {
 			return runtimeEstimateMsg{key: key, est: agentclient.ModelRAMEstimate{Err: errors.New("agent client unavailable")}}

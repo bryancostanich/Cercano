@@ -1603,12 +1603,12 @@ type RuntimeModel struct {
 	DownloadedBytes    int64                  `protobuf:"varint,18,opt,name=downloaded_bytes,json=downloadedBytes,proto3" json:"downloaded_bytes,omitempty"`
 	DownloadTotalBytes int64                  `protobuf:"varint,19,opt,name=download_total_bytes,json=downloadTotalBytes,proto3" json:"download_total_bytes,omitempty"`
 	DownloadError      string                 `protobuf:"bytes,20,opt,name=download_error,json=downloadError,proto3" json:"download_error,omitempty"`
-	// ollama_ref is set on entries backed by Ollama's public library
+	// catalog_id is set on entries backed by Ollama's public library
 	// (as opposed to the hardcoded catalog with direct HuggingFace URLs).
 	// Format is "name:tag" — e.g. "qwen2.5-coder:7b". When set, the
 	// DownloadRuntimeModel handler uses the OCI blob path via
 	// registry.ollama.ai instead of a direct HTTP GET of download_url.
-	OllamaRef string `protobuf:"bytes,21,opt,name=ollama_ref,json=ollamaRef,proto3" json:"ollama_ref,omitempty"`
+	CatalogId string `protobuf:"bytes,21,opt,name=catalog_id,json=catalogId,proto3" json:"catalog_id,omitempty"`
 	// RAM-estimation numbers pre-resolved by the server's background
 	// warmer (see GetModelRAMEstimate for the on-demand equivalent and
 	// the meaning of each field). 0 = not warmed yet — clients fall
@@ -1789,9 +1789,9 @@ func (x *RuntimeModel) GetDownloadError() string {
 	return ""
 }
 
-func (x *RuntimeModel) GetOllamaRef() string {
+func (x *RuntimeModel) GetCatalogId() string {
 	if x != nil {
-		return x.OllamaRef
+		return x.CatalogId
 	}
 	return ""
 }
@@ -2387,16 +2387,16 @@ func (x *ListRuntimeModelsResponse) GetSystemRamBytes() int64 {
 //
 //	total(ctx) ~= weights_bytes + ctx * kv_bytes_per_token + overhead
 //
-// For online catalog entries (ollama_ref set) this costs at most one
+// For online catalog entries (catalog_id set) this costs at most one
 // manifest fetch plus a 256 KiB ranged blob fetch; results are cached
 // by digest so repeat calls are free. For downloaded models (runtime +
 // model_id set) the GGUF header is read straight off disk.
 type GetModelRAMEstimateRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// ollama_ref selects an online catalog entry ("name:tag"; a bare
+	// catalog_id selects an online catalog entry ("name:tag"; a bare
 	// family name is normalized to ":latest" server-side). Mutually
 	// exclusive with runtime/model_id.
-	OllamaRef string `protobuf:"bytes,1,opt,name=ollama_ref,json=ollamaRef,proto3" json:"ollama_ref,omitempty"`
+	CatalogId string `protobuf:"bytes,1,opt,name=catalog_id,json=catalogId,proto3" json:"catalog_id,omitempty"`
 	// runtime + model_id select a model already in the local inventory.
 	Runtime       string `protobuf:"bytes,2,opt,name=runtime,proto3" json:"runtime,omitempty"`
 	ModelId       string `protobuf:"bytes,3,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
@@ -2434,9 +2434,9 @@ func (*GetModelRAMEstimateRequest) Descriptor() ([]byte, []int) {
 	return file_agent_proto_rawDescGZIP(), []int{24}
 }
 
-func (x *GetModelRAMEstimateRequest) GetOllamaRef() string {
+func (x *GetModelRAMEstimateRequest) GetCatalogId() string {
 	if x != nil {
-		return x.OllamaRef
+		return x.CatalogId
 	}
 	return ""
 }
@@ -3062,11 +3062,11 @@ type DownloadRuntimeModelRequest struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Runtime string                 `protobuf:"bytes,1,opt,name=runtime,proto3" json:"runtime,omitempty"`
 	ModelId string                 `protobuf:"bytes,2,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
-	// ollama_ref is optional; when set (e.g. "qwen2.5-coder:7b") the
+	// catalog_id is optional; when set (e.g. "qwen2.5-coder:7b") the
 	// server enrolls a fresh ModelRecord backed by Ollama's registry
 	// rather than looking the model up through providers. Used for
 	// downloading online-catalog entries the provider hasn't cached.
-	OllamaRef     string `protobuf:"bytes,3,opt,name=ollama_ref,json=ollamaRef,proto3" json:"ollama_ref,omitempty"`
+	CatalogId     string `protobuf:"bytes,3,opt,name=catalog_id,json=catalogId,proto3" json:"catalog_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3115,9 +3115,9 @@ func (x *DownloadRuntimeModelRequest) GetModelId() string {
 	return ""
 }
 
-func (x *DownloadRuntimeModelRequest) GetOllamaRef() string {
+func (x *DownloadRuntimeModelRequest) GetCatalogId() string {
 	if x != nil {
-		return x.OllamaRef
+		return x.CatalogId
 	}
 	return ""
 }
@@ -11463,7 +11463,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x14download_total_bytes\x18\x13 \x01(\x03R\x12downloadTotalBytes\x12%\n" +
 	"\x0edownload_error\x18\x14 \x01(\tR\rdownloadError\x12\x1d\n" +
 	"\n" +
-	"ollama_ref\x18\x15 \x01(\tR\tollamaRef\x12+\n" +
+	"catalog_id\x18\x15 \x01(\tR\tcatalogId\x12+\n" +
 	"\x12kv_bytes_per_token\x18\x16 \x01(\x03R\x0fkvBytesPerToken\x12,\n" +
 	"\x12max_context_tokens\x18\x17 \x01(\x03R\x10maxContextTokens\"\x87\x03\n" +
 	"\x0fRuntimeInstance\x12\x0e\n" +
@@ -11522,7 +11522,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x10system_ram_bytes\x18\x03 \x01(\x03R\x0esystemRamBytes\"p\n" +
 	"\x1aGetModelRAMEstimateRequest\x12\x1d\n" +
 	"\n" +
-	"ollama_ref\x18\x01 \x01(\tR\tollamaRef\x12\x18\n" +
+	"catalog_id\x18\x01 \x01(\tR\tcatalogId\x12\x18\n" +
 	"\aruntime\x18\x02 \x01(\tR\aruntime\x12\x19\n" +
 	"\bmodel_id\x18\x03 \x01(\tR\amodelId\"\x81\x02\n" +
 	"\x1bGetModelRAMEstimateResponse\x12#\n" +
@@ -11567,7 +11567,7 @@ const file_agent_proto_rawDesc = "" +
 	"\aruntime\x18\x01 \x01(\tR\aruntime\x12\x19\n" +
 	"\bmodel_id\x18\x02 \x01(\tR\amodelId\x12\x1d\n" +
 	"\n" +
-	"ollama_ref\x18\x03 \x01(\tR\tollamaRef\"o\n" +
+	"catalog_id\x18\x03 \x01(\tR\tcatalogId\"o\n" +
 	"\x1cDownloadRuntimeModelResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12)\n" +

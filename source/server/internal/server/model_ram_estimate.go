@@ -27,7 +27,7 @@ func (s *Server) GetModelRAMEstimate(ctx context.Context, req *proto.GetModelRAM
 	resp := &proto.GetModelRAMEstimateResponse{SystemRamBytes: sysram.Total()}
 
 	switch {
-	case strings.TrimSpace(req.GetOllamaRef()) != "":
+	case strings.TrimSpace(req.GetCatalogId()) != "":
 		var cm *ollamacatalog.Manager
 		if s.providerSvc != nil {
 			cm = s.providerSvc.CatalogManager()
@@ -36,7 +36,7 @@ func (s *Server) GetModelRAMEstimate(ctx context.Context, req *proto.GetModelRAM
 			resp.Error = "online catalog not configured"
 			return resp, nil
 		}
-		ref := normalizeOllamaRef(req.GetOllamaRef())
+		ref := normalizeOllamaRef(req.GetCatalogId())
 		est, err := cm.ResolveEstimate(ctx, ref)
 		if err != nil {
 			resp.Error = err.Error()
@@ -85,7 +85,7 @@ func (s *Server) GetModelRAMEstimate(ctx context.Context, req *proto.GetModelRAM
 		return resp, nil
 
 	default:
-		resp.Error = "request needs ollama_ref or model_id"
+		resp.Error = "request needs catalog_id or model_id"
 		return resp, nil
 	}
 }

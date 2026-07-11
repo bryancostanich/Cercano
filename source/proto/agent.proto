@@ -418,12 +418,12 @@ message RuntimeModel {
   int64 downloaded_bytes = 18;
   int64 download_total_bytes = 19;
   string download_error = 20;
-  // ollama_ref is set on entries backed by Ollama's public library
+  // catalog_id is set on entries backed by Ollama's public library
   // (as opposed to the hardcoded catalog with direct HuggingFace URLs).
   // Format is "name:tag" — e.g. "qwen2.5-coder:7b". When set, the
   // DownloadRuntimeModel handler uses the OCI blob path via
   // registry.ollama.ai instead of a direct HTTP GET of download_url.
-  string ollama_ref = 21;
+  string catalog_id = 21;
   // RAM-estimation numbers pre-resolved by the server's background
   // warmer (see GetModelRAMEstimate for the on-demand equivalent and
   // the meaning of each field). 0 = not warmed yet — clients fall
@@ -501,15 +501,15 @@ message ListRuntimeModelsResponse {
 //
 //   total(ctx) ~= weights_bytes + ctx * kv_bytes_per_token + overhead
 //
-// For online catalog entries (ollama_ref set) this costs at most one
+// For online catalog entries (catalog_id set) this costs at most one
 // manifest fetch plus a 256 KiB ranged blob fetch; results are cached
 // by digest so repeat calls are free. For downloaded models (runtime +
 // model_id set) the GGUF header is read straight off disk.
 message GetModelRAMEstimateRequest {
-  // ollama_ref selects an online catalog entry ("name:tag"; a bare
+  // catalog_id selects an online catalog entry ("name:tag"; a bare
   // family name is normalized to ":latest" server-side). Mutually
   // exclusive with runtime/model_id.
-  string ollama_ref = 1;
+  string catalog_id = 1;
   // runtime + model_id select a model already in the local inventory.
   string runtime = 2;
   string model_id = 3;
@@ -578,11 +578,11 @@ message RestartRuntimeResponse {
 message DownloadRuntimeModelRequest {
   string runtime = 1;
   string model_id = 2;
-  // ollama_ref is optional; when set (e.g. "qwen2.5-coder:7b") the
+  // catalog_id is optional; when set (e.g. "qwen2.5-coder:7b") the
   // server enrolls a fresh ModelRecord backed by Ollama's registry
   // rather than looking the model up through providers. Used for
   // downloading online-catalog entries the provider hasn't cached.
-  string ollama_ref = 3;
+  string catalog_id = 3;
 }
 message DownloadRuntimeModelResponse {
   bool ok = 1;

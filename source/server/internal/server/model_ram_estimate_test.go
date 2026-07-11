@@ -136,7 +136,7 @@ func TestGetModelRAMEstimate_UnknownModelSoftFails(t *testing.T) {
 func TestGetModelRAMEstimate_OnlineWithoutCatalogSoftFails(t *testing.T) {
 	s := &Server{}
 	resp, err := s.GetModelRAMEstimate(context.Background(), &proto.GetModelRAMEstimateRequest{
-		OllamaRef: "qwen2.5-coder:7b",
+		CatalogId: "qwen2.5-coder:7b",
 	})
 	if err != nil {
 		t.Fatalf("expected soft failure, got RPC error: %v", err)

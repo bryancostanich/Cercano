@@ -1469,10 +1469,10 @@ func (s *Server) ListRuntimeModels(ctx context.Context, req *proto.ListRuntimeMo
 		// RPCs. Un-warmed entries keep zeros — the client falls back to
 		// GetModelRAMEstimate on selection.
 		for _, pm := range resp.Models {
-			if pm.GetOllamaRef() == "" {
+			if pm.GetCatalogId() == "" {
 				continue
 			}
-			est, ok := cm.CachedEstimate(pm.GetOllamaRef())
+			est, ok := cm.CachedEstimate(pm.GetCatalogId())
 			if !ok {
 				continue
 			}
@@ -1505,7 +1505,7 @@ func onlineCatalogModelToProto(m ollamacatalog.Model) *proto.RuntimeModel {
 		Format:        "gguf",
 		Family:        m.Name,
 		DownloadState: "not_downloaded",
-		OllamaRef:     m.Name, // colon+tag will be appended by CLI when user picks a size
+		CatalogId:     m.Name, // colon+tag will be appended by CLI when user picks a size
 		SupportsChat:  true,
 	}
 }
@@ -1658,7 +1658,7 @@ func (s *Server) DownloadRuntimeModel(ctx context.Context, req *proto.DownloadRu
 	if rm == nil {
 		return &proto.DownloadRuntimeModelResponse{Ok: false, Error: "runtime manager not configured"}, nil
 	}
-	if ref := normalizeOllamaRef(req.GetOllamaRef()); ref != "" {
+	if ref := normalizeOllamaRef(req.GetCatalogId()); ref != "" {
 		// Only the concrete InMemoryManager supports enrolment. If a
 		// future alternative implementation is wired in, this branch
 		// is a no-op and the download will fall back to the provider

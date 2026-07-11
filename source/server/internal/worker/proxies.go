@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/runner"
 	proto "cercano/source/server/pkg/proto"
@@ -82,8 +83,9 @@ type streamPermissionRequester struct {
 }
 
 type permResult struct {
-	allow bool
-	err   error
+	allow   bool
+	err     error
+	message string
 }
 
 func newStreamPermissionRequester(sndr *sender) *streamPermissionRequester {
@@ -128,6 +130,9 @@ func (p *streamPermissionRequester) Request(
 	case <-ctx.Done():
 		return false, ctx.Err()
 	case r := <-ch:
+		if !r.allow && r.message != "" {
+			return false, &agent.FollowUpDenial{Message: r.message}
+		}
 		return r.allow, r.err
 	}
 }
@@ -144,7 +149,7 @@ func (p *streamPermissionRequester) deliver(resp *proto.PermissionResponse) {
 	if e := resp.GetError(); e != "" {
 		err = fmt.Errorf("%s", e)
 	}
-	ch <- permResult{allow: resp.GetAllow(), err: err}
+	ch <- permResult{allow: resp.GetAllow(), err: err, message: resp.GetMessage()}
 }
 
 // ─── streamCredentialSource ───────────────────────────────────────────────────

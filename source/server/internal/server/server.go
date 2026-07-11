@@ -2140,6 +2140,11 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		if err != nil {
 			return false, err
 		}
+		if !d.Allow && d.Message != "" {
+			// "Chat about this": a denial carrying a redirect message. Surface it as
+			// a FollowUpDenial so the tool loop records the message and continues.
+			return false, &agent.FollowUpDenial{Message: d.Message}
+		}
 		if d.Allow && d.Persist {
 			if tool, ok := s.toolSvc.Registry().Get(name); ok && agenttools.OriginOf(tool) == agenttools.OriginMCP {
 				if err := s.permBroker.AddMCPAllow(name); err != nil {
@@ -2586,7 +2591,7 @@ func (s *Server) DenyToolCall(ctx context.Context, req *proto.DenyToolCallReques
 	if s.permBroker == nil {
 		return &proto.DenyToolCallResponse{Ok: false}, nil
 	}
-	ok := s.permBroker.Resolve(req.GetConversationId(), req.GetToolUseId(), agent.Decision{Allow: false})
+	ok := s.permBroker.Resolve(req.GetConversationId(), req.GetToolUseId(), agent.Decision{Allow: false, Message: req.GetMessage()})
 	return &proto.DenyToolCallResponse{Ok: ok}, nil
 }
 

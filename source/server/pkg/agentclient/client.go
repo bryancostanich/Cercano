@@ -1727,6 +1727,14 @@ func (c *Client) DenyToolCall(ctx context.Context, conversationID, toolUseID str
 	return err
 }
 
+// DenyToolCallWithMessage denies a paused tool call and delivers a "chat about
+// this" redirect: the server records message as the tool_result and continues
+// the same turn so the model responds to it inline (no fresh turn).
+func (c *Client) DenyToolCallWithMessage(ctx context.Context, conversationID, toolUseID, message string) error {
+	_, err := c.agent.DenyToolCall(ctx, &proto.DenyToolCallRequest{ToolUseId: toolUseID, ConversationId: conversationID, Message: message})
+	return err
+}
+
 // ProviderCaps is the capability set reported by the active provider.
 type ProviderCaps struct {
 	SupportsTools         bool

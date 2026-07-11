@@ -8,7 +8,22 @@ import (
 type Decision struct {
 	Allow   bool
 	Persist bool
+	// Message, when set on a denial (Allow=false), is the user's "chat about
+	// this" redirect. The tool loop records it as the tool_result and CONTINUES
+	// the turn instead of ending it, so the model responds to the redirect in
+	// the same stream rather than on a fresh turn.
+	Message string
 }
+
+// FollowUpDenial is the sentinel error a PermissionRequester returns when the
+// user declines a tool call but supplies a redirect message ("chat about
+// this"). It carries no failure semantics — the tool loop catches it at its
+// existing error check, writes Message as the tool_result, and continues the
+// turn. Using a sentinel keeps the PermissionRequester signature (and its
+// runner/worker mirrors) unchanged.
+type FollowUpDenial struct{ Message string }
+
+func (e *FollowUpDenial) Error() string { return "user declined with follow-up message" }
 
 // PendingDecisions is the permission barrier. It is keyed per conversation:
 // a waiter registers under (conversationID, toolUseID) and only a Resolve

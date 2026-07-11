@@ -7462,6 +7462,7 @@ type DenyToolCallRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ToolUseId      string                 `protobuf:"bytes,1,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`
 	ConversationId string                 `protobuf:"bytes,2,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	Message        string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -7506,6 +7507,13 @@ func (x *DenyToolCallRequest) GetToolUseId() string {
 func (x *DenyToolCallRequest) GetConversationId() string {
 	if x != nil {
 		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *DenyToolCallRequest) GetMessage() string {
+	if x != nil {
+		return x.Message
 	}
 	return ""
 }
@@ -10517,6 +10525,7 @@ type PermissionResponse struct {
 	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
 	Allow         bool                   `protobuf:"varint,2,opt,name=allow,proto3" json:"allow,omitempty"`
 	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	Message       string                 `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"` // "chat about this" redirect carried on a denial
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -10568,6 +10577,13 @@ func (x *PermissionResponse) GetAllow() bool {
 func (x *PermissionResponse) GetError() string {
 	if x != nil {
 		return x.Error
+	}
+	return ""
+}
+
+func (x *PermissionResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
 	}
 	return ""
 }
@@ -12002,10 +12018,11 @@ const file_agent_proto_rawDesc = "" +
 	"\apersist\x18\x02 \x01(\bR\apersist\x12'\n" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\"'\n" +
 	"\x15AllowToolCallResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\"^\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"x\n" +
 	"\x13DenyToolCallRequest\x12\x1e\n" +
 	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\x12'\n" +
-	"\x0fconversation_id\x18\x02 \x01(\tR\x0econversationId\"&\n" +
+	"\x0fconversation_id\x18\x02 \x01(\tR\x0econversationId\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\"&\n" +
 	"\x14DenyToolCallResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\" \n" +
 	"\x1eGetProviderCapabilitiesRequest\"\x81\x02\n" +
@@ -12217,11 +12234,12 @@ const file_agent_proto_rawDesc = "" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x1b\n" +
 	"\targs_json\x18\x04 \x01(\tR\bargsJson\x12\x12\n" +
 	"\x04tier\x18\x05 \x01(\tR\x04tier\x12 \n" +
-	"\vdestructive\x18\x06 \x01(\bR\vdestructive\"P\n" +
+	"\vdestructive\x18\x06 \x01(\bR\vdestructive\"j\n" +
 	"\x12PermissionResponse\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x14\n" +
 	"\x05allow\x18\x02 \x01(\bR\x05allow\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"u\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\x12\x18\n" +
+	"\amessage\x18\x04 \x01(\tR\amessage\"u\n" +
 	"\vPersistTurn\x12+\n" +
 	"\amessage\x18\x01 \x01(\v2\x11.agent.LLMMessageR\amessage\x12\x10\n" +
 	"\x03gen\x18\x02 \x01(\x04R\x03gen\x12'\n" +

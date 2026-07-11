@@ -317,7 +317,12 @@ func (w *workerRunner) RunTurn(
 					Id:    id,
 					Allow: allow,
 				}
-				if err != nil {
+				var followUp *agent.FollowUpDenial
+				if errors.As(err, &followUp) {
+					// "Chat about this": relay the redirect message (not as an error) so
+					// the worker rebuilds a FollowUpDenial and its tool loop continues.
+					resp.Message = followUp.Message
+				} else if err != nil {
 					resp.Error = err.Error()
 				}
 				if sendErr := safeSend(&proto.HostToWorker{Msg: &proto.HostToWorker_PermResponse{PermResponse: resp}}); sendErr != nil {

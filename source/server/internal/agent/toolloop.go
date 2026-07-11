@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -449,6 +450,17 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				destructive := agenttools.IsDestructive(pc.tool)
 				emit(LoopEvent{Kind: LoopPermissionRequired, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, ArgsJSON: string(pc.block.ToolInput), Tier: string(pc.tier), Destructive: destructive})
 				allow, err := in.PermissionRequester(ctx, pc.block.ToolUseID, pc.block.ToolName, pc.block.ToolInput, pc.tier, destructive)
+				var followUp *FollowUpDenial
+				if errors.As(err, &followUp) {
+					// "Chat about this": the user declined the tool but sent a redirect.
+					// Record it as this call's tool_result and CONTINUE the turn so the
+					// model responds to the redirect inline rather than on a fresh turn.
+					results = append(results, llm.Block{
+						Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID,
+						Content: followUp.Message, IsError: true,
+					})
+					continue
+				}
 				if err != nil {
 					return ToolLoopResult{}, err
 				}

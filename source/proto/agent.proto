@@ -1007,7 +1007,7 @@ message RegenerateContextProgress {
 message AllowToolCallRequest  { string tool_use_id = 1; bool persist = 2; string conversation_id = 3; }
 message AllowToolCallResponse { bool ok = 1; }
 
-message DenyToolCallRequest  { string tool_use_id = 1; string conversation_id = 2; }
+message DenyToolCallRequest  { string tool_use_id = 1; string conversation_id = 2; string message = 3; }
 message DenyToolCallResponse { bool ok = 1; }
 
 // Provider capability snapshot — clients hide tool-call UI when the active
@@ -1317,9 +1317,10 @@ message PermissionRequest {
 
 // PermissionResponse carries the host's allow/deny decision.
 message PermissionResponse {
-  uint64 id    = 1;
-  bool   allow = 2;
-  string error = 3;
+  uint64 id      = 1;
+  bool   allow   = 2;
+  string error   = 3;
+  string message = 4; // "chat about this" redirect carried on a denial
 }
 
 // PersistTurn asks the host to persist one turn message.

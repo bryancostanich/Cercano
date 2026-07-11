@@ -71,18 +71,25 @@ type ProviderInfo struct {
 }
 
 type ModelRecord struct {
-	ID                 string
-	DisplayName        string
-	Runtime            string
-	Source             string
-	Path               string
-	Format             string
-	Family             string
-	Quantization       string
-	SizeBytes          int64
-	ModifiedAt         time.Time
-	DownloadState      string
-	DownloadURL        string
+	ID            string
+	DisplayName   string
+	Runtime       string
+	Source        string
+	Path          string
+	Format        string
+	Family        string
+	Quantization  string
+	SizeBytes     int64
+	ModifiedAt    time.Time
+	DownloadState string
+	DownloadURL   string
+	// DownloadURLs holds the ordered shard URLs for a multi-file model
+	// (e.g. a split GGUF like GLM-4.5-Air's two-part Q4_K_M). When set, the
+	// download manager fetches each URL into the model's directory (filename
+	// taken from the URL) and the model counts as downloaded only once every
+	// shard is present. Path names the first shard — what llama-server is
+	// pointed at. Empty means a single-file model fetched from DownloadURL.
+	DownloadURLs       []string
 	DownloadedBytes    int64
 	DownloadTotalBytes int64
 	DownloadError      string

@@ -853,7 +853,16 @@ func (m *Manager) setStatusLocked(s Status) {
 // realSpawn launches `npx -y @rynfar/meridian@<version>` with $CLAUDE_PROXY_PORT
 // set, piping stdout+stderr into logSink.
 func realSpawn(ctx context.Context, port int, version string, logSink io.Writer) (*exec.Cmd, error) {
-	cmd := exec.CommandContext(ctx, "npx", "-y", "@rynfar/meridian@"+version)
+	// Dev/diagnostic override: when MERIDIAN_LOCAL_CLI names a locally-built
+	// Meridian entrypoint (e.g. an instrumented source build's dist/cli.js), run
+	// it with `node` instead of the pinned npm release — lets us swap in a patched
+	// proxy (capture/fix work) without republishing. Falls back to npx when unset.
+	var cmd *exec.Cmd
+	if local := os.Getenv("MERIDIAN_LOCAL_CLI"); local != "" {
+		cmd = exec.CommandContext(ctx, "node", local)
+	} else {
+		cmd = exec.CommandContext(ctx, "npx", "-y", "@rynfar/meridian@"+version)
+	}
 	// Own process group, keyed by the npx pid. npx runs the Meridian binary as
 	// a child — killing npx alone leaves Meridian holding the port, which is
 	// how orphans were being created. Group membership lets Stop and the

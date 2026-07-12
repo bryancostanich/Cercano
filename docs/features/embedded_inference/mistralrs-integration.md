@@ -8,6 +8,10 @@
 > It exists so the concrete work is scoped before anyone writes it. Every seam
 > named below was read from `main`; the mistral.rs-side files are new and
 > modelled on the llama-server equivalents.
+>
+> **Decisions D1–D3 resolved 2026-07-12** — see the Decisions section at the
+> end. Where a Piece's inline recommendation differs from a resolved decision,
+> the resolved decision governs.
 
 ## Why, in one paragraph
 
@@ -254,13 +258,76 @@ capability — before the hardest piece (3).
   The curated mistral.rs catalog must be honest about RAM tiers — this is a
   big-machine capability, not a laptop default.
 
-## Open decisions (need sign-off before coding)
+## Decisions (resolved 2026-07-12)
 
-1. **Piece 5: Option A vs B** for online safetensors discovery — recommend A
-   (parameterize by format; derive format from the active runtime).
-2. **Directory-target modelling** (Piece 6): thread a `Format`-aware file-vs-dir
-   target through `DownloadPlan`/`ModelRecord`, vs a dedicated safetensors
-   download path. Recommend the former (keeps one download manager).
-3. **Runtime selection UX:** is mistral.rs picked in config explicitly, or
-   auto-selected when a model's arch is mistral.rs-only? Recommend explicit
-   config first; auto-routing later.
+Worked through with the design-decision protocol. These govern the Pieces above
+where an inline recommendation differs.
+
+### D1 — online safetensors discovery: format-parameterized HF backend, filter declared by the runtime
+
+Chosen: **Piece 5 Option A**, with the format **declared by the runtime** rather
+than hardcoded in the server.
+
+- Add `Format` to `catalog.ListOptions`; the HF backend switches
+  `filter=gguf`/`filter=safetensors` and reads arch from the `gguf` block or,
+  when absent, `config.json` `architectures[0]`. **No `catalog.Backend`
+  interface-method change** — it's a struct-field addition, transparent to the
+  Ollama backend and the test fakes.
+- The runtime advertises the catalog format(s) it wants on
+  `RuntimeCapabilities` (ordered, e.g. mistral.rs `["uqff","safetensors"]`,
+  llama-server `["gguf"]`); the server passes the active runtime's primary
+  format into `List`. Runtime owns the knowledge; the catalog just filters.
+- Multi-format browse from a single runtime is a later refinement — browse uses
+  the primary declared format first.
+- Rejected: a second `huggingface-safetensors` backend (silent config-mismatch
+  footgun; the single-active registry can't browse two at once anyway) and
+  runtime-owned discovery (bypasses/overloads the shipped registry).
+
+### D2 — download layout: uniform per-model directories
+
+Chosen: **Piece 6 Option C** (supersedes the inline Piece 6 recommendation of A).
+
+- Every model lives in its own `modelDir/<model>/`. `ModelRecord.Path` denotes
+  the model **directory**; an explicit `LoadTarget` names the file a
+  file-loaded runtime opens (the `.gguf`) or the directory itself for mistral.rs.
+- The download manager **loses the file-vs-dir branch**: it always writes a
+  manifest of files into the model's directory (a single-file GGUF is just
+  N=1). "Which file the runtime loads" is the provider's concern in `argsFor`,
+  not the manager's.
+- Safe on shipped code because `Discover` already recurses (`filepath.WalkDir`
+  matches `.gguf` at any depth), so nesting new downloads doesn't strand legacy
+  flat GGUFs — they stay discoverable. No migration is required; an optional
+  lazy sweep can tidy flat files later.
+- Cost lands in relocating new-download placement (`buildCatalogDownloadRecord`,
+  `catalogModels`, `catalogTargetDir`/`allShardsPresent`, `manager.go` delete)
+  and refreshing the multi-shard-download tests for the subdir layout.
+- Rationale for choosing C over A despite touching shipped code: no real
+  installed base yet (Homebrew CLI formula still pending), so the uniform layout
+  is cheapest to adopt now; and C removes a branch rather than adding one, with
+  every future directory-shaped format (MLX, ONNX) dropping in free.
+
+### D3 — runtime selection: one active runtime, config'd, restart to change
+
+Chosen: **a single active runtime**, `open_runtime: llama_server | mistralrs`
+(default `llama_server`), swapped by config edit + restart. A **permanent
+swap** — never two runtimes resident at once.
+
+- The active runtime drives the browse format (D1), the compatibility gate
+  (Piece 4), and serving.
+- **Incompatibility nudge, in model tiering:** if the user's configured tiers
+  contain models the active runtime's gate can't run, flag them in the tiering
+  view with a prompt to change them — proactive, not only a download-time
+  refusal. This catches tiers going silently incompatible after a runtime swap.
+- Rejected: per-model auto-selection running both runtimes concurrently. It
+  multiplies RAM/lifecycle complexity, fights the warm-model swap-minimization
+  design, and — decisively — complicates the catalog UX: concurrent runtimes
+  force a runtime selector in front of the catalog that live-reloads the whole
+  model list, gate, and RAM tiers on every flip. Single-active keeps browse a
+  function of one axis. Auto-selection remains a legitimate *future*; this
+  decision doesn't foreclose it.
+- Footprint context (approximate; verify against a pinned build before
+  committing distribution): llama-server Metal is ~tens of MB incl. ggml libs
+  and ships as per-OS release zips; mistralrs-server (Rust/candle) is heavier
+  (~50–150 MB Metal, more with CUDA kernels) with no historical official
+  prebuilt server binary — build-from-source or a self-hosted prebuilt. The
+  chunkier artifact is a further reason not to keep both resident.

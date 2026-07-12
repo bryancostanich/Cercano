@@ -57,11 +57,23 @@ type wizardPage struct {
 	commitMeridianFn func() error
 	recs             config.TierRecommendations
 	recsOK           bool
-	status           string
+	// catalog is the runtime model catalog fetched from the agent once at
+	// construction (ListRuntimeModels). The open tier picks are autofilled and
+	// displayed from its RAM-tiered RecommendedOpenModels, so every open
+	// recommendation is a gate-verified curated model rather than an arbitrary
+	// (possibly incompatible) id from the shipped recs. Empty with no agent
+	// (tests seed it directly).
+	catalog   agentclient.RuntimeModelCatalog
+	catalogOK bool
+	status    string
 	// applyFn commits the collected answers on finish; defaults to
 	// applyConfig, overridable in tests (agentclient.Client is a concrete
 	// gRPC type with nothing to fake).
 	applyFn func() error
+	// downloadFn enrolls a runtime model download on finish; defaults to a
+	// thin wrapper over the agent's DownloadRuntimeModel, overridable in tests
+	// (the concrete gRPC client can't be faked).
+	downloadFn func(ctx context.Context, runtime, modelID string) error
 	// abandonArmed is the q-pressed-once confirm state: the next q abandons
 	// the run (rollback + clear); any other key disarms.
 	abandonArmed bool
@@ -93,10 +105,15 @@ func newWizardPage(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h
 	if recs, err := config.LoadTierRecommendations(); err == nil {
 		wp.recs, wp.recsOK = recs, true
 	}
+	wp.loadRuntimeCatalog()
 	if st.Step == wizard.StepOpen {
 		wp.autofillTiers()
 	}
 	wp.applyFn = wp.applyConfig
+	wp.downloadFn = func(ctx context.Context, runtime, modelID string) error {
+		_, err := wp.agent.DownloadRuntimeModel(ctx, runtime, modelID, "")
+		return err
+	}
 	wp.commitKeyFn = wp.commitAPIKey
 	wp.commitMeridianFn = wp.commitMeridianProfile
 	wp.rollbackFn = wp.rollbackBaseline
@@ -332,6 +349,7 @@ func (wp *wizardPage) applyConfig() error {
 			return fmt.Errorf("%s: %w", k, err)
 		}
 	}
+	wp.enrollOpenDownloads(ctx)
 	return nil
 }
 
@@ -470,6 +488,18 @@ func (wp *wizardPage) autofillTiers() {
 			}
 		}
 		key := string(t) + "." + wizard.SideOpen
+		if wp.catalogOK {
+			// Prefer the RAM-tiered curated recommendation: a gate-verified model
+			// that fits this machine. Store its display name (the open-slot
+			// convention; taxonomy and the finish-time download resolve it back).
+			if id, ok := wp.catalog.RecommendedOpenModels[string(t)]; ok {
+				label := openModelDisplay(wp.catalog, id)
+				if shouldRefill(wp.state.TierPicks[key], []string{label}) {
+					wp.state.TierPicks[key] = label
+				}
+				continue
+			}
+		}
 		candidates := wp.recs.Candidates(config.ProviderOpen, "", t)
 		if shouldRefill(wp.state.TierPicks[key], candidates) {
 			if m, ok := config.PickFirst(candidates, nil); ok {
@@ -859,14 +889,44 @@ func (wp *wizardPage) tierPickerCandidates(slotKey string) []overlay.Row {
 	}
 	var rows []overlay.Row
 	seen := map[string]bool{}
-	for _, m := range wp.recs.Candidates(side, wp.state.CloudProvider, config.Tier(tierName)) {
-		rows = append(rows, overlay.Row{
-			Key:      m,
-			Label:    normalizeModelLabel(m),
-			Selected: m == current,
-			Hint:     "recommended",
-		})
-		seen[m] = true
+	if side == config.ProviderOpen && wp.catalogOK {
+		// Open candidates are the gate-verified curated chat models; the
+		// RAM-tiered pick for this tier is flagged recommended.
+		recommended := ""
+		if id, ok := wp.catalog.RecommendedOpenModels[tierName]; ok {
+			recommended = openModelDisplay(wp.catalog, id)
+		}
+		for _, mdl := range wp.catalog.Models {
+			if mdl.Runtime != "llama_server" || mdl.Source != "catalog" || !mdl.SupportsChat {
+				continue
+			}
+			name := firstNonEmpty(mdl.DisplayName, mdl.ID)
+			if seen[name] {
+				continue
+			}
+			hint := ""
+			if name == recommended {
+				hint = "recommended"
+			}
+			rows = append(rows, overlay.Row{
+				Key:      name,
+				Label:    normalizeModelLabel(name),
+				Value:    "llama_server",
+				Selected: name == current || mdl.ID == current,
+				Hint:     hint,
+			})
+			seen[name] = true
+		}
+	} else {
+		for _, m := range wp.recs.Candidates(side, wp.state.CloudProvider, config.Tier(tierName)) {
+			rows = append(rows, overlay.Row{
+				Key:      m,
+				Label:    normalizeModelLabel(m),
+				Selected: m == current,
+				Hint:     "recommended",
+			})
+			seen[m] = true
+		}
 	}
 	if wp.agent != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -990,4 +1050,68 @@ func padRight(plain, styled string, width int) string {
 		return styled + strings.Repeat(" ", n)
 	}
 	return styled + " "
+}
+
+// loadRuntimeCatalog caches the agent's runtime model catalog once at
+// construction. The open tier autofill and picker source their RAM-tiered
+// recommendations from it (RecommendedOpenModels) so every open pick is a
+// gate-verified curated model. Best-effort: with no agent (tests) or a failed
+// read, catalogOK stays false and the open side falls back to the shipped recs.
+func (wp *wizardPage) loadRuntimeCatalog() {
+	if wp.agent == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if cat, err := wp.agent.ListRuntimeModels(ctx); err == nil {
+		wp.catalog, wp.catalogOK = cat, true
+	}
+}
+
+// enrollOpenDownloads kicks off background downloads for the open tier picks so
+// the models the user selected actually arrive — the summary promises this.
+// Best-effort: a failure surfaces in status but does not fail finish. Open
+// picks are stored as display names; resolve each back to its catalog model id
+// (what DownloadRuntimeModel matches on) and skip any already on disk.
+func (wp *wizardPage) enrollOpenDownloads(ctx context.Context) {
+	if !wp.catalogOK || wp.downloadFn == nil {
+		return
+	}
+	seen := map[string]bool{}
+	for _, t := range wizardTierOrder {
+		pick := wp.state.TierPicks[string(t)+"."+wizard.SideOpen]
+		if pick == "" {
+			continue
+		}
+		mdl, ok := openModelByLabel(wp.catalog, pick)
+		if !ok || mdl.DownloadState == "downloaded" || seen[mdl.ID] {
+			continue
+		}
+		seen[mdl.ID] = true
+		if err := wp.downloadFn(ctx, firstNonEmpty(mdl.Runtime, "llama_server"), mdl.ID); err != nil {
+			wp.status = fmt.Sprintf("downloads started; %s failed: %v", firstNonEmpty(mdl.DisplayName, mdl.ID), err)
+		}
+	}
+}
+
+// openModelDisplay returns the human name for a curated open model id, falling
+// back to the id when the catalog has no matching record.
+func openModelDisplay(cat agentclient.RuntimeModelCatalog, id string) string {
+	for _, m := range cat.Models {
+		if m.ID == id {
+			return firstNonEmpty(m.DisplayName, m.ID)
+		}
+	}
+	return id
+}
+
+// openModelByLabel finds a curated open model by the value stored in a tier
+// slot, which may be its display name (the open-slot convention) or its id.
+func openModelByLabel(cat agentclient.RuntimeModelCatalog, label string) (agentclient.RuntimeModel, bool) {
+	for _, m := range cat.Models {
+		if m.DisplayName == label || m.ID == label {
+			return m, true
+		}
+	}
+	return agentclient.RuntimeModel{}, false
 }

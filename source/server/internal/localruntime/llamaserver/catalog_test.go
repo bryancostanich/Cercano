@@ -1,6 +1,7 @@
 package llamaserver
 
 import (
+	"strings"
 	"testing"
 
 	"cercano/source/server/internal/llamacompat"
@@ -122,5 +123,31 @@ func TestCuratedModel_DownloadURLs(t *testing.T) {
 	want0 := "https://huggingface.co/unsloth/GLM-4.5-Air-GGUF/resolve/main/Q4_K_M/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf"
 	if urls[0] != want0 {
 		t.Errorf("shard 0 URL = %q, want %q", urls[0], want0)
+	}
+}
+
+func TestRecommendedOpenModels(t *testing.T) {
+	cat, err := loadCatalog()
+	if err != nil {
+		t.Fatalf("loadCatalog: %v", err)
+	}
+	const ram = 128 * 1024 * 1024 * 1024 // 128 GB
+	profile, _ := cat.ProfileForRAM(ram)
+
+	got := RecommendedOpenModels(ram)
+	if len(got) != len(profile) {
+		t.Fatalf("tier count: want %d, got %d", len(profile), len(got))
+	}
+	// Every recommendation must be the stable inventory id
+	// ("llama_server:catalog:<bareID>") that catalogModels() surfaces and the
+	// finish-time download path matches on — the bare ProfileForRAM id prefixed.
+	for tier, bareID := range profile {
+		want := runtimeName + ":catalog:" + bareID
+		if got[tier] != want {
+			t.Errorf("tier %q: want %q, got %q", tier, want, got[tier])
+		}
+		if !strings.HasPrefix(got[tier], "llama_server:catalog:") {
+			t.Errorf("tier %q: id %q lacks the inventory prefix", tier, got[tier])
+		}
 	}
 }

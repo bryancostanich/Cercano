@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -489,5 +490,70 @@ func TestWizardViewRendersTierPurposes(t *testing.T) {
 		if !strings.Contains(v, want) {
 			t.Errorf("tiers view: missing %q", want)
 		}
+	}
+}
+
+func TestWizardOpenAutofillUsesCatalog(t *testing.T) {
+	wp := newTestWizardPage(t)
+	wp.catalog = agentclient.RuntimeModelCatalog{
+		Models: []agentclient.RuntimeModel{
+			{ID: "llama_server:catalog:qwen3-14b-q4_k_m", DisplayName: "Qwen3-14B Q4_K_M", Runtime: "llama_server", Source: "catalog"},
+			{ID: "llama_server:catalog:phi-4-mini-instruct-q4_k_m", DisplayName: "Phi-4-mini Instruct Q4_K_M", Runtime: "llama_server", Source: "catalog"},
+		},
+		RecommendedOpenModels: map[string]string{
+			"most_capable":    "llama_server:catalog:qwen3-14b-q4_k_m",
+			"everyday":        "llama_server:catalog:qwen3-14b-q4_k_m",
+			"fast_light":      "llama_server:catalog:phi-4-mini-instruct-q4_k_m",
+			"fast_light_text": "llama_server:catalog:phi-4-mini-instruct-q4_k_m",
+		},
+	}
+	wp.catalogOK = true
+	wp.state.TierPicks = nil
+
+	wp.autofillTiers()
+
+	// Open slots must hold the RAM-tiered curated display names, not the shipped
+	// open recs (which recommend the gate-incompatible qwen3-coder-next).
+	if got := wp.state.TierPicks["most_capable.open"]; got != "Qwen3-14B Q4_K_M" {
+		t.Fatalf("most_capable.open: want curated display name, got %q", got)
+	}
+	if got := wp.state.TierPicks["fast_light.open"]; got != "Phi-4-mini Instruct Q4_K_M" {
+		t.Fatalf("fast_light.open: want curated display name, got %q", got)
+	}
+	if strings.Contains(fmt.Sprintf("%v", wp.state.TierPicks), "qwen3-coder-next") {
+		t.Errorf("open picks must not carry the incompatible recs model: %v", wp.state.TierPicks)
+	}
+}
+
+func TestWizardEnrollOpenDownloads(t *testing.T) {
+	wp := newTestWizardPage(t)
+	wp.catalog = agentclient.RuntimeModelCatalog{
+		Models: []agentclient.RuntimeModel{
+			{ID: "llama_server:catalog:qwen3-14b-q4_k_m", DisplayName: "Qwen3-14B Q4_K_M", Runtime: "llama_server", Source: "catalog", DownloadState: "not_downloaded"},
+			{ID: "llama_server:catalog:phi-4-mini-instruct-q4_k_m", DisplayName: "Phi-4-mini Instruct Q4_K_M", Runtime: "llama_server", Source: "catalog", DownloadState: "downloaded"},
+		},
+	}
+	wp.catalogOK = true
+	wp.state.TierPicks = map[string]string{
+		"most_capable.open":  "Qwen3-14B Q4_K_M",
+		"everyday.open":      "Qwen3-14B Q4_K_M",           // duplicate of most_capable -> one download
+		"fast_light.open":    "Phi-4-mini Instruct Q4_K_M", // already downloaded -> skipped
+		"most_capable.cloud": "claude-opus-4-8",            // cloud slot -> ignored
+	}
+	var got []string
+	wp.downloadFn = func(_ context.Context, runtime, modelID string) error {
+		if runtime != "llama_server" {
+			t.Errorf("runtime: want llama_server, got %q", runtime)
+		}
+		got = append(got, modelID)
+		return nil
+	}
+
+	wp.enrollOpenDownloads(context.Background())
+
+	// Exactly the distinct, not-yet-downloaded curated id, resolved from its
+	// display name: duplicates deduped, downloaded skipped, cloud ignored.
+	if len(got) != 1 || got[0] != "llama_server:catalog:qwen3-14b-q4_k_m" {
+		t.Fatalf("want the single distinct not-downloaded curated id, got %v", got)
 	}
 }

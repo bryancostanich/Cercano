@@ -1473,6 +1473,11 @@ func (s *Server) ListRuntimeModels(ctx context.Context, req *proto.ListRuntimeMo
 		}
 	}
 	resp.SystemRamBytes = sysram.Total()
+	// RAM-tiered open recommendations: the wizard autofills its open tier picks
+	// from these, so every suggestion is a gate-verified curated model that
+	// cannot be incompatible. Keyed the same as SystemRamBytes above so the
+	// verdict and the recommendation agree on the machine's memory.
+	resp.RecommendedOpenModels = llamaserver.RecommendedOpenModels(uint64(resp.SystemRamBytes))
 	return resp, nil
 }
 

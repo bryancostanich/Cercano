@@ -110,3 +110,23 @@ func (c CuratedCatalog) ProfileForRAM(totalBytes uint64) (map[string]string, int
 	}
 	return c.Profiles[strconv.Itoa(chosen)], chosen
 }
+
+// RecommendedOpenModels returns the curated open-model recommendation for a
+// machine with the given total RAM: tier → the stable inventory id
+// "llama_server:catalog:<bareID>" that catalogModels() surfaces and
+// localruntime.MatchesModel resolves both before and after download. The
+// wizard autofills its open tier picks from this, so every recommendation is a
+// gate-verified model that cannot be incompatible. Nil when the embedded
+// catalog fails to load (a build-time bug the validity test guards).
+func RecommendedOpenModels(totalBytes uint64) map[string]string {
+	cat, err := loadCatalog()
+	if err != nil {
+		return nil
+	}
+	profile, _ := cat.ProfileForRAM(totalBytes)
+	out := make(map[string]string, len(profile))
+	for tier, bareID := range profile {
+		out[tier] = runtimeName + ":catalog:" + bareID
+	}
+	return out
+}

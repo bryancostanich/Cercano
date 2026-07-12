@@ -494,6 +494,13 @@ message ListRuntimeModelsResponse {
   // client can render fit verdicts for embedded estimates without a
   // per-model RPC. 0 when the platform probe fails.
   int64 system_ram_bytes = 3;
+  // recommended_open_models maps each capability tier
+  // (most_capable, everyday, fast_light, fast_light_text, embedding)
+  // to the curated open model the server recommends for this machine's
+  // RAM, keyed by the stable inventory id "llama_server:catalog:<bareID>".
+  // Empty when the curated catalog fails to load. The setup wizard uses
+  // this to autofill the open tier picks with gate-compatible models.
+  map<string, string> recommended_open_models = 4;
 }
 
 // GetModelRAMEstimate resolves the numbers a client needs to predict

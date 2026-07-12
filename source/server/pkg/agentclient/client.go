@@ -808,6 +808,12 @@ type RuntimeModelCatalog struct {
 	// for rendering fit verdicts against embedded estimates. 0 when
 	// the platform probe failed.
 	SystemRAMBytes int64
+	// RecommendedOpenModels maps each capability tier to the curated
+	// open model the server recommends for this machine's RAM, keyed by
+	// the stable inventory id "llama_server:catalog:<bareID>". Empty when
+	// the curated catalog failed to load. The setup wizard autofills its
+	// open tier picks from this so every pick is gate-compatible.
+	RecommendedOpenModels map[string]string
 }
 
 func (c *Client) ListRuntimeModels(ctx context.Context) (RuntimeModelCatalog, error) {
@@ -816,8 +822,9 @@ func (c *Client) ListRuntimeModels(ctx context.Context) (RuntimeModelCatalog, er
 		return RuntimeModelCatalog{}, err
 	}
 	out := RuntimeModelCatalog{
-		Models:         mapRuntimeModels(resp.GetModels()),
-		SystemRAMBytes: resp.GetSystemRamBytes(),
+		Models:                mapRuntimeModels(resp.GetModels()),
+		SystemRAMBytes:        resp.GetSystemRamBytes(),
+		RecommendedOpenModels: resp.GetRecommendedOpenModels(),
 	}
 	if s := resp.GetCatalogUpdatedAt(); s != "" {
 		if t, terr := time.Parse(time.RFC3339, s); terr == nil {

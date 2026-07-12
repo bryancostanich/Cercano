@@ -170,17 +170,30 @@ variables.
 Runs for `cloud_primary`, `open_primary`, and `open_only`. Instead of picking
 one "primary" open model, the wizard presents a **recommended set** of GGUFs,
 one per open capability tier, drawn from the **curated compatibility catalog**
-(above) — every entry verified on our llama.cpp build:
+(above) — every entry verified on our llama.cpp build.
 
-| Tier | Role | Catalog pick (GGUF) |
-|---|---|---|
-| `everyday` | Main chat / agent workhorse | Coder model, ~7B class |
-| `fast_light` | Small background helpers | Small coder, ~1.5B class |
-| `fast_light_text` | Prose judgment (recaps, verdicts, summaries) | Small text/instruct model |
-| `embedding` | Local embeddings | Embedding GGUF |
+The set is **sized to the machine**: the server picks it with
+`CuratedCatalog.ProfileForRAM(totalRAM)` (profiles keyed by RAM threshold —
+24 / 48 / 96 / 128 GB; a machine below the smallest threshold still gets the
+24 GB profile) and returns it over `ListRuntimeModels` as
+`recommended_open_models` (tier → the stable inventory id
+`llama_server:catalog:<id>`). The wizard autofills the `.Open` slots of the
+four capability tiers from it:
+
+| Tier | Role | 24 GB | 128 GB |
+|---|---|---|---|
+| `most_capable` | Hardest agentic work | Qwen3-14B | GLM-4.5-Air |
+| `everyday` | Main chat / workhorse | Qwen3-14B | Qwen3-30B-A3B Instruct |
+| `fast_light` | Small background helpers | Phi-4-mini | Phi-4-mini |
+| `fast_light_text` | Prose judgment (recaps, verdicts) | Phi-4-mini | Phi-4-mini |
+
+Picks are stored as the model's **display name** (the open-slot convention;
+taxonomy resolution and the finish-time download resolve it back to the
+catalog id). The `embedding` tier lives in the catalog profile but is not part
+of the wizard's autofilled capability set.
 
 - The default set is shown as an accept-and-move-on list. Accepting fills the
-  **`.Open` slots** of `Models.Tiers.{everyday,fast_light,fast_light_text,embedding}`.
+  **`.Open` slots** of `Models.Tiers.{most_capable,everyday,fast_light,fast_light_text}`.
 - The set is **editable**: each row opens the same model picker `/m` uses. In
   setup the picker offers the curated catalog; the broader HuggingFace browse
   (with the architecture gate) is available on `/m` afterward, not inline.
@@ -189,11 +202,9 @@ one per open capability tier, drawn from the **curated compatibility catalog**
   falling through to an empty slot.
 
 **No download UI in the wizard.** Selecting the set does not block on transfer.
-The curated catalog today is only a two-entry stub (`defaultCatalog` in
-`llamaserver/provider.go`); populating it with a verified per-tier set (a ~7B
-everyday coder, a ~1.5B fast-light coder, a small prose model for
-`fast_light_text`, and an embedding GGUF) is part of this work — the set above
-is only real once those entries exist and pass the gate.
+The curated catalog is populated (six GGUFs across the 24 / 48 / 96 / 128 GB
+profiles in `llamaserver/catalog.json`), superseding the old two-entry
+`defaultCatalog` stub; every entry passes the architecture gate.
 
 ### 4. Finish — background downloads, `/m` progress, cloud covers the gap
 
@@ -201,9 +212,12 @@ On finish the wizard:
 
 1. Writes locus + cloud profiles + open tier picks through `UpdateConfig` /
    `UpsertCloudProfile` / `ApplyModelTierPatch`.
-2. **Kicks off the open-model downloads in the background** via the existing
-   local-runtime download manager (`DownloadModel` / `EnrollDownload`; states
-   `not_downloaded → downloading → downloaded`). It does not wait.
+2. **Kicks off the open-model downloads in the background.** `applyConfig`'s
+   `enrollOpenDownloads` resolves each distinct open pick's display name back to
+   its catalog id and fires `DownloadRuntimeModel` (states
+   `not_downloaded → downloading → downloaded`), skipping any already on disk.
+   Best-effort and non-fatal — a failure surfaces in the status line but never
+   blocks finish. It does not wait.
 3. Prints a closing message: *"Your open models are downloading in the
    background. View progress any time with `/m`. Until they finish, Cercano
    uses your cloud model so you can start working now."*
@@ -232,11 +246,14 @@ usable model was configured.
 ## Routing contract: cloud covers the gap
 
 The finish-message promise — *cloud covers the gap while open models
-download* — is not automatic today, and this is the fix. `dispatch/select.go`'s
-`Select` crosses to the cloud tier only when the preferred (open) provider
-registers as **absent** (`nil` / `"NONE"`) and the mode permits crossing; it
-does **not** inspect download state. The resolution is to make readiness mean
-*on disk*:
+download* — is backed by `dispatch.OpenModelReady`, checked at open-provider
+registration (`hostsvc/providers/providers.go`, `worker/worker.go`). It gates on
+the configured open model's GGUF being present on disk: while that file is still
+downloading (or missing) `OpenModelReady` returns false, the open provider
+registers **absent** (`nil` / `"NONE"`), and `dispatch/select.go`'s `Select`
+crosses to the cloud tier — no special download-state logic in `Select` itself.
+The gate is coarse (the configured open model, not per-tier), realizing
+readiness as *on disk*:
 
 > **An open tier's provider registers as present only when its GGUF is actually
 > on disk** (`Discover` reports it `downloaded`). While the file is still
@@ -264,6 +281,27 @@ rather than promising cover.
   config surfaces.
 
 ## Decisions
+
+### 2026-07-11 — RAM-tiered open recommendations + enroll-on-finish (implemented)
+
+Wires the previously planned open-model path end to end:
+
+- **Open recommendations are RAM-tiered and curated.** The dead-but-tested
+  `CuratedCatalog.ProfileForRAM` is now wired through a new
+  `llamaserver.RecommendedOpenModels(totalRAM)` helper and surfaced on
+  `ListRuntimeModels` as `recommended_open_models` (tier → stable inventory id).
+  The wizard autofills its open tier slots from it, so every open recommendation
+  is a gate-verified model that fits the machine — closing the gap where the
+  shipped recs recommended the gate-incompatible `qwen3-coder-next`.
+- **Downloads actually enroll on finish.** `applyConfig` calls
+  `enrollOpenDownloads`, firing `DownloadRuntimeModel` per distinct open pick
+  (deduped, skipping models already on disk, non-fatal) — the finish message's
+  "downloads run in the background" promise is now backed by code.
+- **Catalog populated.** `llamaserver/catalog.json` carries six curated GGUFs
+  across 24 / 48 / 96 / 128 GB profiles; the two-entry `defaultCatalog` stub is
+  gone.
+- **Readiness = on-disk** (`dispatch.OpenModelReady`) is in place, so routing
+  treats a still-downloading open model as absent and crosses to cloud.
 
 ### 2026-07-10 — locus-first rewrite
 

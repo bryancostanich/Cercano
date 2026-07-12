@@ -1,6 +1,6 @@
 # Online model catalog — design
 
-> **Status (2026-07-11): pluggable catalog backends.** Model discovery is
+> **Status (2026-07-12): pluggable catalog backends — shipped on `main`.** Model discovery is
 > abstracted behind a **backend interface** with exactly one **active backend**
 > at a time, selected in config. **HuggingFace** is the default active backend —
 > the real home of GGUF files, a JSON API that exposes the model architecture,
@@ -203,9 +203,9 @@ or Ollama: each backend's `ResolveDownload` hands it plain URLs (the Ollama
 backend having done its manifest→blob resolution internally). The multi-shard
 download path is implemented (`downloadShard` loop, all-shards-present state).
 
-The `OCIResolver` seam and the `OllamaRef` branch currently in
-`internal/localruntime/manager.go` are **removed** as part of this work — their
-job moves into the Ollama backend.
+The `OCIResolver` seam and the `OllamaRef` branch that used to live in
+`internal/localruntime/manager.go` have been **removed** (commit `85008643`) —
+their job moved into the Ollama backend's `ResolveDownload`.
 
 ## Proto: a generic catalog id
 
@@ -249,29 +249,51 @@ everyday tier's default is always tool-capable.
 - **Multi-shard download** end to end (both shards land, cumulative bytes,
   delete clears all) + single-file back-compat — done.
 - **Ollama backend** `ResolveDownload` (OCI manifest→blob) against an httptest
-  registry — to do.
-- **Download refusal** on unsupported arch — to do.
+  registry — done (`ollamacatalog/ollama_backend_test.go`).
+- **Download refusal** on unsupported arch — done
+  (`server/download_resolve_test.go::TestBuildCatalogDownloadRecord_GatesUnsupportedArch`
+  asserts `qwen3next` is refused before any download; a compatible arch carries
+  through in `…_Compatible`).
 - **Header Range-read** parses `general.architecture` from a truncated fixture —
-  to do.
+  not needed by the shipped backends (HF reads arch from JSON; Ollama from the
+  header while resolving). Only an arbitrary-URL / local-import path would need
+  it; deferred until that feature exists.
 
 ## Status & remaining work
 
-**Landed** (branch `feat/model-catalog-hf-gate`): the `llamacompat` gate; the
-embedded RAM-tiered curated catalog + loader + validity test; multi-shard
-downloads in the manager; the HuggingFace backend client (`modelcatalog`).
+**Shipped on `main`** (merged from `feat/model-catalog-hf-gate`, 2026-07-11):
+the whole pluggable-backend design above is implemented and tested.
 
-**Remaining:**
+- `internal/catalog` — `Backend` interface + concurrency-safe `Registry`
+  (first-registered-active, fail-loud `SetActive`).
+- `internal/modelcatalog` — HuggingFace backend (default active): trusted-
+  uploader allow-list, JSON arch read, plain `resolve/main` URLs, shard-group
+  expansion.
+- `internal/ollamacatalog` — Ollama adapted to `Backend`; the OCI
+  manifest→blob resolution moved into its `ResolveDownload`. The `OCIResolver`
+  seam and `OllamaRef` branch are gone from the download manager (commit
+  `85008643`).
+- Proto `ollama_ref` → `catalog_id` across `RuntimeModel`,
+  `DownloadRuntimeModelRequest`, `GetModelRAMEstimateRequest` (commit
+  `a2eacc48`); `agentclient` and the browse/download/RAM-estimate handlers
+  updated.
+- Server rewired onto the active backend: `ListRuntimeModels` browses it,
+  `DownloadRuntimeModel` → `buildCatalogDownloadRecord` gates + resolves it,
+  `GetModelRAMEstimate` reads it. The active backend is chosen by the
+  `catalog.backend` config field (default `huggingface`), wired in `main.go`.
+- `llamacompat` gate wired into the download path; curated RAM-tiered catalog +
+  loader; multi-shard downloads with resume; open-tier readiness = GGUF on disk.
 
-- Define the `Backend` interface + registry + active-backend config.
-- Adapt `ollamacatalog` to `Backend`; move OCI resolution into its
-  `ResolveDownload`; remove the `OCIResolver` seam and `OllamaRef` branch from
-  the download manager.
-- Rename the proto `ollama_ref` → generic catalog id; regenerate; update
-  `agentclient` and the server handlers.
-- Rewire the server's browse / download / RAM-estimate onto the active backend;
-  generalize the `CatalogManager` type across the provider interface.
-- Provider **registration readiness = GGUF on disk** (setup-wizard routing
-  contract).
+**Genuinely open:**
+
+- Generalize warmed-RAM estimates and catalog freshness beyond the Ollama cache
+  — per-selection `GetModelRAMEstimate` works now, but the eager warmed list and
+  the "catalog updated Nh ago" label return generically only once a
+  backend-neutral catalog cache lands (see the note in `ListRuntimeModels`).
+- Auto-generate the `llamacompat` allow-list from the pinned llama.cpp
+  `LLM_ARCH_NAMES` at build/vendor time; today it's a hand-maintained seed.
+- Remote Range-read of `general.architecture`, only if an arbitrary-URL or
+  local-import path is added (the shipped backends don't need it).
 
 ## Decisions
 

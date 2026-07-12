@@ -1011,10 +1011,10 @@ message RegenerateContextProgress {
 
 // Allow/Deny pair the asynchronous PermissionRequired stream event with a
 // client reply. tool_use_id is the same id the event carried.
-message AllowToolCallRequest  { string tool_use_id = 1; bool persist = 2; }
+message AllowToolCallRequest  { string tool_use_id = 1; bool persist = 2; string conversation_id = 3; }
 message AllowToolCallResponse { bool ok = 1; }
 
-message DenyToolCallRequest  { string tool_use_id = 1; }
+message DenyToolCallRequest  { string tool_use_id = 1; string conversation_id = 2; string message = 3; }
 message DenyToolCallResponse { bool ok = 1; }
 
 // Provider capability snapshot — clients hide tool-call UI when the active
@@ -1223,6 +1223,7 @@ message WorkerToHost {
     TurnDone          done         = 4;
     TurnError         error        = 5;
     CredentialRequest cred_request = 6;
+    EnsureSubagentConversation ensure_subagent = 7;
   }
 }
 
@@ -1323,15 +1324,29 @@ message PermissionRequest {
 
 // PermissionResponse carries the host's allow/deny decision.
 message PermissionResponse {
-  uint64 id    = 1;
-  bool   allow = 2;
-  string error = 3;
+  uint64 id      = 1;
+  bool   allow   = 2;
+  string error   = 3;
+  string message = 4; // "chat about this" redirect carried on a denial
 }
 
 // PersistTurn asks the host to persist one turn message.
 message PersistTurn {
-  LLMMessage message = 1;
-  uint64     gen     = 2; // generation, for the host's persist fence
+  LLMMessage message         = 1;
+  uint64     gen             = 2; // generation, for the host's persist fence
+  string     conversation_id = 3; // sub-agent turns target their own sub-conversation (empty = main turn)
+}
+
+// EnsureSubagentConversation asks the host to idempotently create the sub-agent
+// conversation row for a worker-side dispatch. Best-effort/fire-and-forget: the
+// worker still runs and tabs the sub-agent even if the host store write fails.
+message EnsureSubagentConversation {
+  string          id            = 1;
+  string          parent_id     = 2;
+  string          project_dir   = 3;
+  string          model         = 4;
+  repeated string granted_tools = 5;
+  uint64          gen           = 6;
 }
 
 // TurnDone signals successful turn completion.

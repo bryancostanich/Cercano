@@ -703,6 +703,13 @@ func (s *Server) SelectExecutionMode() {
 		s.cfgSvc,           // builds the ConfigSnapshot
 		s.permBroker,       // permission mode + decisions
 		s.cfgSvc.Secrets(), // resolves credentials for the worker's CredentialRequests
+		func(ctx context.Context, id, parentID, projectDir, model string, grantedTools []string) error {
+			st := s.persistSvc.Store()
+			if st == nil {
+				return nil
+			}
+			return st.EnsureSubagentConversation(ctx, id, parentID, projectDir, model, grantedTools)
+		}, // worker-side dispatch: create the sub-agent conversation row on the host
 	)
 	log.Printf("[server] execution mode: worker (turns run in isolated child processes; " +
 		"MCP-involving turns fall back to in-process — worker MCP proxying is a future refinement)")
@@ -2153,9 +2160,14 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		}); err != nil {
 			return false, err
 		}
-		d, err := s.permBroker.Wait(ctx, toolUseID)
+		d, err := s.permBroker.Wait(ctx, convID, toolUseID)
 		if err != nil {
 			return false, err
+		}
+		if !d.Allow && d.Message != "" {
+			// "Chat about this": a denial carrying a redirect message. Surface it as
+			// a FollowUpDenial so the tool loop records the message and continues.
+			return false, &agent.FollowUpDenial{Message: d.Message}
 		}
 		if d.Allow && d.Persist {
 			if tool, ok := s.toolSvc.Registry().Get(name); ok && agenttools.OriginOf(tool) == agenttools.OriginMCP {
@@ -2594,7 +2606,7 @@ func (s *Server) AllowToolCall(ctx context.Context, req *proto.AllowToolCallRequ
 	if s.permBroker == nil {
 		return &proto.AllowToolCallResponse{Ok: false}, nil
 	}
-	ok := s.permBroker.Resolve(req.GetToolUseId(), agent.Decision{Allow: true, Persist: req.GetPersist()})
+	ok := s.permBroker.Resolve(req.GetConversationId(), req.GetToolUseId(), agent.Decision{Allow: true, Persist: req.GetPersist()})
 	return &proto.AllowToolCallResponse{Ok: ok}, nil
 }
 
@@ -2603,7 +2615,7 @@ func (s *Server) DenyToolCall(ctx context.Context, req *proto.DenyToolCallReques
 	if s.permBroker == nil {
 		return &proto.DenyToolCallResponse{Ok: false}, nil
 	}
-	ok := s.permBroker.Resolve(req.GetToolUseId(), agent.Decision{Allow: false})
+	ok := s.permBroker.Resolve(req.GetConversationId(), req.GetToolUseId(), agent.Decision{Allow: false, Message: req.GetMessage()})
 	return &proto.DenyToolCallResponse{Ok: ok}, nil
 }
 

@@ -82,6 +82,12 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 	// Created before the recv loop so it is ready to receive routed responses.
 	credSource := newStreamCredentialSource(sndr)
 
+	// Sub-agent persistence proxy: a worker-side dispatch creates its sub-agent
+	// conversation row and persists its turns on the host via this stream proxy
+	// (the worker has no local store). Built before buildDeps so the tool stack
+	// can wire it, same as credSource.
+	subPersist := &streamSubagentPersist{sndr: sndr, gen: start.GetGen()}
+
 	// Recv loop: routes incoming HostToWorker messages from the host.
 	recvDone := make(chan struct{})
 	go func() {
@@ -104,7 +110,7 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 	}()
 
 	// Build Deps from StartTurn.
-	deps, buildErr := w.buildDeps(ctx, start, credSource)
+	deps, buildErr := w.buildDeps(ctx, start, credSource, subPersist)
 	if buildErr != nil {
 		sndr.close()
 		cancel() // returning finalizes the stream; the recv goroutine unwinds on the Recv error
@@ -203,7 +209,7 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 
 // ─── buildDeps ────────────────────────────────────────────────────────────────
 
-func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, credSource *streamCredentialSource) (runner.Deps, error) {
+func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, credSource *streamCredentialSource, subPersist *streamSubagentPersist) (runner.Deps, error) {
 	// Build config from snapshot.
 	cfg := ConfigFromSnapshot(start.GetConfig())
 	cfgService := cfgsvc.New("", cfg, secrets.NewMemory())
@@ -265,7 +271,7 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 			return runner.Deps{}, fmt.Errorf("build tools: %w", err)
 		}
 	} else {
-		toolSvc = buildWorkerToolSvc(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg)
+		toolSvc = buildWorkerToolSvc(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist)
 	}
 
 	// Build the protocol-supervision watchdog from the snapshotted config

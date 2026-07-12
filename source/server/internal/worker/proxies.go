@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/runner"
 	proto "cercano/source/server/pkg/proto"
@@ -82,8 +83,9 @@ type streamPermissionRequester struct {
 }
 
 type permResult struct {
-	allow bool
-	err   error
+	allow   bool
+	err     error
+	message string
 }
 
 func newStreamPermissionRequester(sndr *sender) *streamPermissionRequester {
@@ -128,6 +130,9 @@ func (p *streamPermissionRequester) Request(
 	case <-ctx.Done():
 		return false, ctx.Err()
 	case r := <-ch:
+		if !r.allow && r.message != "" {
+			return false, &agent.FollowUpDenial{Message: r.message}
+		}
 		return r.allow, r.err
 	}
 }
@@ -144,7 +149,7 @@ func (p *streamPermissionRequester) deliver(resp *proto.PermissionResponse) {
 	if e := resp.GetError(); e != "" {
 		err = fmt.Errorf("%s", e)
 	}
-	ch <- permResult{allow: resp.GetAllow(), err: err}
+	ch <- permResult{allow: resp.GetAllow(), err: err, message: resp.GetMessage()}
 }
 
 // ─── streamCredentialSource ───────────────────────────────────────────────────
@@ -258,6 +263,53 @@ func (pf *streamPersistFunc) persist(m llm.Message) {
 		Message: msg,
 		Gen:     pf.gen,
 	}}})
+}
+
+// streamSubagentPersist proxies a worker-side dispatch's sub-agent conversation
+// creation and turn persistence to the host over the worker stream. Fire-and-
+// forget/best-effort, same policy as streamPersistFunc: the sub-agent still runs
+// and tabs even if a host store write fails. Sub-agent turns carry their own
+// conversation id so the host writes them to the sub-conversation, not the
+// parent turn.
+type streamSubagentPersist struct {
+	sndr *sender
+	gen  uint64
+}
+
+// ensure satisfies tools.Service's ensureSubagent seam.
+func (s *streamSubagentPersist) ensure(_ context.Context, id, parentID, projectDir, model string, grantedTools []string) error {
+	s.sndr.send(&proto.WorkerToHost{Msg: &proto.WorkerToHost_EnsureSubagent{EnsureSubagent: &proto.EnsureSubagentConversation{
+		Id:           id,
+		ParentId:     parentID,
+		ProjectDir:   projectDir,
+		Model:        model,
+		GrantedTools: grantedTools,
+		Gen:          s.gen,
+	}}})
+	return nil // fire-and-forget; the host logs any store error
+}
+
+// persistTurn satisfies tools.Service's persistTurn seam, tagging each turn with
+// the sub-conversation id so the host routes it to the sub-agent conversation.
+func (s *streamSubagentPersist) persistTurn(_ context.Context, convID string, m llm.Message) {
+	msg, err := MarshalMessage(m)
+	if err != nil {
+		return // best-effort
+	}
+	s.sndr.send(&proto.WorkerToHost{Msg: &proto.WorkerToHost_Persist{Persist: &proto.PersistTurn{
+		Message:        msg,
+		Gen:            s.gen,
+		ConversationId: convID,
+	}}})
+}
+
+// subagentPersistTurn returns sp's persistTurn seam for tools.Service, or nil
+// when sp is nil (tests / no proxy — sub-agent turn persistence is then skipped).
+func subagentPersistTurn(sp *streamSubagentPersist) func(ctx context.Context, convID string, m llm.Message) {
+	if sp == nil {
+		return nil
+	}
+	return sp.persistTurn
 }
 
 // ─── preloadedHistory ─────────────────────────────────────────────────────────

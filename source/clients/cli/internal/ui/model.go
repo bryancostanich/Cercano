@@ -79,6 +79,14 @@ type Model struct {
 	// used to hit-test scrollbar mouse events. Set in relayout().
 	scrollbarTop int
 
+	// stripShown records whether the chat tab strip occupied its rows at the
+	// last relayout(). refreshViewport() re-lays-out when this drifts from the
+	// live strip state, so a tab appearing or vanishing between layouts (a
+	// sub-agent tab created mid-turn, or the last one closed) cannot leave bodyH
+	// and scrollbarTop stale — which pushes the status bar off-screen and
+	// misaligns the tab-click row until some other event forces a relayout.
+	stripShown bool
+
 	// contentScrollbarDragging is the same gesture, but for a reusable content
 	// page scrollbar rather than the main chat scrollback.
 	contentScrollbarDragging bool
@@ -211,6 +219,13 @@ type Model struct {
 	// (and optional extra) keypress. While non-nil, all key events route to
 	// the confirm resolver instead of the input or scrollback.
 	pendingConfirm *confirmRequest
+
+	// composeToolUseID is set while the user composes a "chat about this"
+	// redirect after pressing [c] on a tool confirm: the prompt is dismissed,
+	// keys flow to the input, and enter sends the text as a FollowUp denial
+	// (server records it as the tool_result and continues the turn). esc/ctrl+c
+	// cancels with a plain deny.
+	composeToolUseID string
 
 	// permissionMode caches the agent's current session permission mode
 	// ("strict" | "permissive" | "bypass") so the status bar can render a
@@ -1011,6 +1026,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return next, cmd
 		}
 		keyStr := msg.String()
+		// Compose mode ([c] "chat about this"): the confirm was dismissed and the
+		// user types a redirect. Enter sends it (server records it as the tool
+		// result and continues the turn); esc/ctrl+c cancels with a plain deny. Any
+		// other key falls through to the normal input path so the text is typed.
+		if m.composeToolUseID != "" {
+			switch keyStr {
+			case "enter":
+				text := strings.TrimSpace(m.input.Value())
+				if text == "" {
+					return m, nil
+				}
+				id, convID, ag := m.composeToolUseID, m.convID, m.agent
+				m.composeToolUseID = ""
+				m.input.SetValue("")
+				m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("↳ redirected: " + text)})
+				m.refreshViewport()
+				if ag != nil {
+					go func() { _ = ag.DenyToolCallWithMessage(context.Background(), convID, id, text) }()
+				}
+				return m, nil
+			case "esc", "ctrl+c":
+				id, convID, ag := m.composeToolUseID, m.convID, m.agent
+				m.composeToolUseID = ""
+				m.input.SetValue("")
+				m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("canceled.")})
+				m.refreshViewport()
+				if ag != nil {
+					go func() { _ = ag.DenyToolCall(context.Background(), convID, id) }()
+				}
+				return m, nil
+			}
+		}
 		if keyStr == "ctrl+c" {
 			next, cmd := m.handleCtrlCKey(msg)
 			return next, cmd
@@ -2365,6 +2412,9 @@ func (m *Model) relayout() {
 		tab.view.SetSize(contentW-2, bodyH)
 		tab.view.rebuild()
 	}
+	// Record the strip's shown-state so refreshViewport() can detect a drift
+	// (a tab created/closed between layouts) and re-run us before painting.
+	m.stripShown = m.hasSubAgentTabs() && !m.contentPageActive()
 	m.refreshViewport()
 }
 
@@ -2503,6 +2553,15 @@ func (m Model) splashEffective() bool {
 // entries at the current width. Syncs turn telemetry first so the render
 // has current state, then delegates to chatView.rebuild().
 func (m *Model) refreshViewport() {
+	// If the chat tab strip appeared or vanished since the last relayout, the
+	// viewport height and scrollbarTop are stale (the strip's two rows are not
+	// reserved). Re-lay-out first; relayout() calls back here with stripShown in
+	// sync, so this recurses at most once. Single choke point that keeps every
+	// tab-mutation path (create, sweep, close) self-correcting.
+	if want := m.hasSubAgentTabs() && !m.contentPageActive(); want != m.stripShown {
+		m.relayout()
+		return
+	}
 	m.chatDirty = false // any full rebuild flushes pending coalesced repaints
 	m.mainChat().SetTurnStatus(turnStatus{
 		activity: m.turnActivity,
@@ -2948,6 +3007,11 @@ func (m Model) confirmPromptHints(p *pendingToolCall) string {
 		m.styles.Muted.Render("]o / [") +
 		m.styles.Accent.Render("d") +
 		m.styles.Muted.Render("]etails")
+	if p.ToolUseID != "" {
+		hints += m.styles.Muted.Render(" / [") +
+			m.styles.Accent.Render("c") +
+			m.styles.Muted.Render("]hat")
+	}
 	if strings.HasPrefix(p.Name, "mcp__") {
 		hints += m.styles.Muted.Render(" / [") +
 			m.styles.Accent.Render("a") +
@@ -3113,9 +3177,9 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 			m.refreshViewport()
 			if tc.ToolUseID != "" {
 				// Stream-event origin: unblock the server-side tool loop.
-				ag, id := m.agent, tc.ToolUseID
+				ag, id, convID := m.agent, tc.ToolUseID, m.convID
 				if ag != nil {
-					go func() { _ = ag.AllowToolCall(context.Background(), id) }()
+					go func() { _ = ag.AllowToolCall(context.Background(), convID, id) }()
 				}
 				return m, nil
 			}
@@ -3127,9 +3191,9 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("canceled.")})
 			m.refreshViewport()
 			if tc.ToolUseID != "" {
-				ag, id := m.agent, tc.ToolUseID
+				ag, id, convID := m.agent, tc.ToolUseID, m.convID
 				if ag != nil {
-					go func() { _ = ag.DenyToolCall(context.Background(), id) }()
+					go func() { _ = ag.DenyToolCall(context.Background(), convID, id) }()
 				}
 			}
 			return m, nil
@@ -3138,6 +3202,21 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 			"d": toggleDetails,
 			"D": toggleDetails,
 		},
+	}
+	// [c]hat about this: dismiss the confirm and drop into the compose sub-state.
+	// Only for stream-origin calls — a local /tool invoke has no server tool loop
+	// to redirect.
+	if tc.ToolUseID != "" {
+		enterCompose := func(m Model) (Model, tea.Cmd) {
+			m.pendingConfirm = nil
+			m.composeToolUseID = tc.ToolUseID
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem,
+				Content: m.styles.Muted.Render("↳ chat about this — type your redirect and press enter (esc cancels)")})
+			m.refreshViewport()
+			return m, nil
+		}
+		cr.extras["c"] = enterCompose
+		cr.extras["C"] = enterCompose
 	}
 	// MCP tools are confirm-by-default; offer always-allow, which persists a
 	// silent allowlist rule server-side so future calls bypass the prompt.
@@ -3148,9 +3227,9 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 				Content: m.styles.Accent.Render("✓ always-allowed — running…")})
 			m.refreshViewport()
 			if tc.ToolUseID != "" {
-				ag, id := m.agent, tc.ToolUseID
+				ag, id, convID := m.agent, tc.ToolUseID, m.convID
 				if ag != nil {
-					go func() { _ = ag.AllowToolCallPersist(context.Background(), id, true) }()
+					go func() { _ = ag.AllowToolCallPersist(context.Background(), convID, id, true) }()
 				}
 			}
 			return m, nil

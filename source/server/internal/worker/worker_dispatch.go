@@ -33,12 +33,16 @@ func buildWorkerToolSvc(
 	ctxLoader *projectctx.Loader,
 	cloud, open llm.Provider,
 	cfg pkgcfg.Config,
+	subPersist *streamSubagentPersist,
 ) runner.ToolSvc {
 	systemPrompt := func(workDir string) string {
 		return runner.BuildSystemPrompt(runner.Deps{Persist: workerCtxHistory{loader: ctxLoader}}, workDir)
 	}
-	svc := toolssvc.New(permBroker, systemPrompt, nil, nil)
+	svc := toolssvc.New(permBroker, systemPrompt, nil, subagentPersistTurn(subPersist))
 	svc.SetEngine(engine) // installs the agentic runner for sub-agent dispatch
+	if subPersist != nil {
+		svc.SetEnsureSubagent(subPersist.ensure) // worker creates sub-agent conversation rows on the host
+	}
 	toolstack.InstallCapabilities(svc, toolstack.CapDeps{
 		Cloud:     cloud,
 		Open:      open,

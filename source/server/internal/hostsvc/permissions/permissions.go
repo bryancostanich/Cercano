@@ -31,10 +31,13 @@ type Broker interface {
 	// The tool-loop requester uses this to skip the send+wait path when no
 	// operator can answer.
 	HasPending() bool
-	// Wait blocks until the operator resolves the named tool-use ID.
-	Wait(ctx context.Context, toolUseID string) (agent.Decision, error)
-	// Resolve posts a human decision for the named tool-use ID.
-	Resolve(toolUseID string, d agent.Decision) bool
+	// Wait blocks until the operator resolves the named tool-use ID within
+	// the given conversation. The barrier is keyed per conversation so two
+	// live conversations with colliding tool-use IDs stay isolated.
+	Wait(ctx context.Context, conversationID, toolUseID string) (agent.Decision, error)
+	// Resolve posts a human decision for the named tool-use ID within the
+	// given conversation. See Wait for why the conversation scope matters.
+	Resolve(conversationID, toolUseID string, d agent.Decision) bool
 	// Store returns the underlying PermissionStore (required by RunToolLoop).
 	Store() *agent.PermissionStore
 	// StartWatcher watches permsPath for out-of-band edits and broadcasts on
@@ -94,18 +97,18 @@ func (p *broker) HasPending() bool {
 	return p.pending != nil
 }
 
-func (p *broker) Wait(ctx context.Context, toolUseID string) (agent.Decision, error) {
+func (p *broker) Wait(ctx context.Context, conversationID, toolUseID string) (agent.Decision, error) {
 	if p.pending == nil {
 		return agent.Decision{}, nil // no barrier → zero decision (matches pre-refactor)
 	}
-	return p.pending.Wait(ctx, toolUseID)
+	return p.pending.Wait(ctx, conversationID, toolUseID)
 }
 
-func (p *broker) Resolve(toolUseID string, d agent.Decision) bool {
+func (p *broker) Resolve(conversationID, toolUseID string, d agent.Decision) bool {
 	if p.pending == nil {
 		return false
 	}
-	return p.pending.Resolve(toolUseID, d)
+	return p.pending.Resolve(conversationID, toolUseID, d)
 }
 
 func (p *broker) Store() *agent.PermissionStore {

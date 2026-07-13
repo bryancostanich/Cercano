@@ -331,3 +331,36 @@ swap** — never two runtimes resident at once.
   (~50–150 MB Metal, more with CUDA kernels) with no historical official
   prebuilt server binary — build-from-source or a self-hosted prebuilt. The
   chunkier artifact is a further reason not to keep both resident.
+
+## Distribution (verified 2026-07-12)
+
+Verified from mistral.rs upstream — `install.sh`, the crate manifests, and the
+Docker guide. **Corrects the D3 footprint note's assumption that upstream ships
+no prebuilt binary — it does.**
+
+- **Accelerator is compile-time**, via Cargo features: `metal`, `cuda`
+  (+`cudnn`, `flash-attn` SM80+, `flash-attn-v3` SM90), `mkl`, `accelerate`;
+  plain CPU = no accel feature. **No runtime backend switch** — strictly one
+  binary per accelerator.
+- **Upstream ships prebuilt binaries.** `install.sh` fetches self-contained
+  release tarballs `mistralrs-{cpu|metal|cuda<lane>-sm<cc>}-<triple>.tar.gz`
+  from `releases/latest/download`, probing `nvidia-smi` to select the CUDA-lane
+  × SM cell (Apple Silicon → `metal`; else `cpu`). The binary inside is a bare
+  `mistralrs`; CUDA tarballs also bundle `lib/`. Also: PyPI wheels (CUDA wheels
+  ~0.8–1.1 GB each) and GHCR Docker images (`ghcr.io/ericlbuehler/mistral.rs`).
+- **So Cercano need not own a build matrix.** It fetches the matching upstream
+  tarball on demand — the same pinned-release model already used for llama.cpp —
+  reusing upstream's probe logic. `install.go` becomes fetch-and-extract, not a
+  compiler; it's a *selection* problem, not a *build* problem.
+- **CUDA spread** (Linux+NVIDIA tier, later): toolkit lanes 12.8–13.3; SM floor
+  8.0 (Ampere) for prebuilts (older GPUs → source build); x86_64 SMs
+  80/86/89/90/100/120 (+ Grace 90/100/121). ~32 published cells; a realistic
+  first tier ≈ one lane × 6 x86_64 SMs — all already built upstream.
+- **Phase-1 (Apple Silicon Metal) = one asset**:
+  `mistralrs-metal-aarch64-apple-darwin.tar.gz`. No matrix to run.
+- **Bare-binary size unconfirmed** (the ~1 GB figures are Python wheels, not the
+  tarball binary) — pin against a real download before the bundling/Homebrew
+  decision.
+- **Naming:** the `mistralrs-server` crate is gone; workspace is `mistralrs-cli`
+  + `mistralrs-server-core`, binary `mistralrs`. Update `install.go`/`argsFor`
+  references in Pieces 1 and 7 from `mistralrs-server` to `mistralrs`.

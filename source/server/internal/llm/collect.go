@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 )
 
 // CollectStream consumes a StreamReader into a ChatResponse. onText, when
@@ -25,13 +27,14 @@ import (
 // responses.Chat aggregates its stream through here.
 func CollectStream(ctx context.Context, rdr StreamReader, onText func(string)) (ChatResponse, error) {
 	var (
-		out          ChatResponse
-		currentText  strings.Builder
-		currentTool  *Block
-		toolArgsBuf  strings.Builder
-		accepting    bool
-		started      bool
-		droppedBytes int
+		out            ChatResponse
+		currentText    strings.Builder
+		currentTool    *Block
+		toolArgsBuf    strings.Builder
+		accepting      bool
+		started        bool
+		droppedBytes   int
+		droppedContent strings.Builder
 	)
 	flushText := func() {
 		if currentText.Len() > 0 {
@@ -78,6 +81,7 @@ func CollectStream(ctx context.Context, rdr StreamReader, onText func(string)) (
 					fmt.Fprintf(os.Stderr, "[stream-guard] dropping stream content outside message framing (before message_start / after message_stop)\n")
 				}
 				droppedBytes += len(ev.TextDelta)
+				droppedContent.WriteString(ev.TextDelta)
 				break
 			}
 			if currentTool != nil {
@@ -93,6 +97,7 @@ func CollectStream(ctx context.Context, rdr StreamReader, onText func(string)) (
 					fmt.Fprintf(os.Stderr, "[stream-guard] dropping stream content outside message framing (before message_start / after message_stop)\n")
 				}
 				droppedBytes += len(ev.ToolName)
+				droppedContent.WriteString("[tool_use:" + ev.ToolName + "]")
 				break
 			}
 			flushText()
@@ -134,6 +139,7 @@ func CollectStream(ctx context.Context, rdr StreamReader, onText func(string)) (
 				// One response == one message. A second message_start means the
 				// stream restarted under us — keep only the newest message.
 				fmt.Fprintf(os.Stderr, "[stream-guard] message_start while already accumulating — discarding prior partial message\n")
+				recordStreamAnomaly(ctx, "message_start_discard", streamAnomalySummary(out.Blocks, currentText.String()))
 				currentText.Reset()
 				currentTool = nil
 				toolArgsBuf.Reset()
@@ -164,5 +170,55 @@ func CollectStream(ctx context.Context, rdr StreamReader, onText func(string)) (
 	}
 	flushText()
 	flushTool()
+	if droppedContent.Len() > 0 {
+		recordStreamAnomaly(ctx, "outside_framing", droppedContent.String())
+	}
 	return out, nil
+}
+
+// streamAnomalySummary renders a discarded partial message (text + tool_use
+// blocks) into one string for the anomaly log — the fabricated/replayed content
+// the guard dropped.
+func streamAnomalySummary(blocks []Block, partialText string) string {
+	var b strings.Builder
+	for _, bl := range blocks {
+		switch bl.Type {
+		case BlockText:
+			b.WriteString(bl.Text)
+		case BlockToolUse:
+			b.WriteString("[tool_use:" + bl.ToolName + " " + string(bl.ToolInput) + "]")
+		}
+	}
+	b.WriteString(partialText)
+	return b.String()
+}
+
+// recordStreamAnomaly appends a structured record of a stream-guard catch (a
+// resume-replay / fabricated-turn fingerprint) to
+// ~/.config/cercano/stream-anomalies.jsonl, so every occurrence across all
+// conversations is captured with its content + conversation id — a reviewable
+// trail instead of ad-hoc incident hunting. Best-effort; never affects the stream.
+func recordStreamAnomaly(ctx context.Context, reason, content string) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	rec := map[string]any{
+		"ts":           time.Now().Unix(),
+		"conversation": SessionIDFromContext(ctx),
+		"reason":       reason,
+		"bytes":        len(content),
+		"content":      content,
+	}
+	blob, err := json.Marshal(rec)
+	if err != nil {
+		return
+	}
+	fh, err := os.OpenFile(filepath.Join(home, ".config", "cercano", "stream-anomalies.jsonl"),
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer fh.Close()
+	_, _ = fh.Write(append(blob, '\n'))
 }

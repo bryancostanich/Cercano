@@ -1049,7 +1049,25 @@ func (wp *wizardPage) View() string {
 	b.WriteString(wp.styles.Bright.Render(header))
 	b.WriteString("\n\n")
 	if d := wp.stepDesc(); d != "" {
-		b.WriteString(wp.styles.Primary.Render(d))
+		// Wrap each line to the page width so long prose (the open-step blurb,
+		// the finish-screen "cloud covers the gap" note) doesn't run off the
+		// right edge and get clipped. Short, pre-aligned lines (the tier rows)
+		// fit under the width and pass through untouched, preserving alignment.
+		for i, line := range strings.Split(d, "\n") {
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			if wp.width <= 0 || len([]rune(line)) <= wp.width {
+				b.WriteString(wp.styles.Primary.Render(line))
+				continue
+			}
+			for j, seg := range wrapWords(line, wp.width) {
+				if j > 0 {
+					b.WriteString("\n")
+				}
+				b.WriteString(wp.styles.Primary.Render(seg))
+			}
+		}
 		b.WriteString("\n\n")
 	}
 	for i, r := range wp.rows() {

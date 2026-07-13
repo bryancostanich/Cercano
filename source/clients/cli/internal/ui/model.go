@@ -3692,15 +3692,21 @@ func (m Model) View() tea.View {
 			promptParts = append(promptParts, q)
 		}
 	}
-	promptParts = append(promptParts, promptLine)
-	if hint := m.renderSlashSuggestions(); hint != "" && !m.contentPageActive() {
-		promptParts = append(promptParts, hint)
-	}
+	// The prompt frame (border rules + text input) belongs only on the chat
+	// surface. Content pages such as the setup wizard render their own body and
+	// keep just the status line beneath it, so gate the frame out for them.
 	inputIdx := len(parts) + len(promptParts)
-	promptParts = append(promptParts, m.input.View())
-	promptParts = append(promptParts, promptLine)
-	if notice := m.visionNotice(); notice != "" {
-		promptParts = append(promptParts, notice)
+	if !m.contentPageActive() {
+		promptParts = append(promptParts, promptLine)
+		if hint := m.renderSlashSuggestions(); hint != "" {
+			promptParts = append(promptParts, hint)
+		}
+		inputIdx = len(parts) + len(promptParts)
+		promptParts = append(promptParts, m.input.View())
+		promptParts = append(promptParts, promptLine)
+		if notice := m.visionNotice(); notice != "" {
+			promptParts = append(promptParts, notice)
+		}
 	}
 	promptParts = append(promptParts, m.renderStatus())
 

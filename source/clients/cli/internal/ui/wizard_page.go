@@ -367,10 +367,10 @@ func (wp *wizardPage) rows() []wizardRow {
 	switch wp.state.Step {
 	case wizard.StepLocus:
 		rows := []wizardRow{
-			{Key: "cloud_primary", Label: "cloud primary", Annotation: "highest-quality frontier model in the cloud; open co-processor for background work"},
-			{Key: "open_only", Label: "open only", Annotation: "fast and fully private — work never leaves this machine"},
-			{Key: "open_primary", Label: "open primary", Annotation: "main model on this machine, cloud fallback — a cost saver"},
-			{Key: "cloud_only", Label: "cloud only", Annotation: "everything on the hosted API — skips Cercano's local co-processor"},
+			{Key: "cloud_primary", Label: "cloud primary", Annotation: "highest-quality frontier model in the cloud; open co-processor for background work."},
+			{Key: "open_only", Label: "open only", Annotation: "fast and fully private — work never leaves this machine."},
+			{Key: "open_primary", Label: "open primary", Annotation: "main model on this machine, cloud fallback — a cost saver."},
+			{Key: "cloud_only", Label: "cloud only", Annotation: "everything on the hosted API — skips Cercano's local co-processor."},
 		}
 		for i := range rows {
 			switch rows[i].Key {

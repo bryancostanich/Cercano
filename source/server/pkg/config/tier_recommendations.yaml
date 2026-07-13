@@ -34,7 +34,7 @@ cloud:
     fast_light_text: [llama-3.1-8b-instant]
 
 open:
-  most_capable: [qwen3-coder-next]
-  everyday: [qwen3-coder-next]
-  fast_light: [qwen3-coder-next]
-  fast_light_text: [phi4]
+  most_capable: [qwen3-30b-a3b-instruct-2507-q4_k_m]
+  everyday: [qwen3-30b-a3b-instruct-2507-q4_k_m]
+  fast_light: [phi-4-mini-instruct-q4_k_m]
+  fast_light_text: [phi-4-mini-instruct-q4_k_m]

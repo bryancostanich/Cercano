@@ -67,8 +67,8 @@ func TestBuildCatalogDownloadRecord_Compatible(t *testing.T) {
 	if len(rec.DownloadURLs) != 1 || rec.DownloadURLs[0] != "https://hf/x-Q4_K_M.gguf" {
 		t.Errorf("DownloadURLs = %v", rec.DownloadURLs)
 	}
-	if rec.Path != "/models/x-Q4_K_M.gguf" {
-		t.Errorf("Path = %q, want /models/x-Q4_K_M.gguf", rec.Path)
+	if rec.Path != "/models/unsloth-x-GGUF/x-Q4_K_M.gguf" {
+		t.Errorf("Path = %q, want /models/unsloth-x-GGUF/x-Q4_K_M.gguf", rec.Path)
 	}
 	if rec.DownloadTotalBytes != 123 {
 		t.Errorf("total = %d, want 123", rec.DownloadTotalBytes)

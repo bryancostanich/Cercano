@@ -1637,7 +1637,7 @@ func buildCatalogDownloadRecord(ctx context.Context, backend catalog.Backend, id
 		Runtime:            runtime,
 		DisplayName:        id,
 		Family:             id,
-		Path:               filepath.Join(modelDir, filepath.Base(plan.PrimaryFile)),
+		Path:               filepath.Join(modelDir, localruntime.ModelDirName(id), filepath.Base(plan.PrimaryFile)),
 		DownloadURLs:       plan.URLs,
 		DownloadTotalBytes: plan.TotalBytes,
 		DownloadState:      "not_downloaded",

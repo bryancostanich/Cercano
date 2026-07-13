@@ -64,7 +64,7 @@ func TestDiscoverIncludesQwenCatalogModels(t *testing.T) {
 	if len(model.DownloadURLs) == 0 || model.DownloadTotalBytes == 0 {
 		t.Fatalf("expected download metadata: %#v", model)
 	}
-	if model.Path != filepath.Join(dir, "Qwen3-14B-Q4_K_M.gguf") {
+	if model.Path != filepath.Join(dir, "qwen3-14b-q4_k_m", "Qwen3-14B-Q4_K_M.gguf") {
 		t.Fatalf("unexpected target path: %q", model.Path)
 	}
 }

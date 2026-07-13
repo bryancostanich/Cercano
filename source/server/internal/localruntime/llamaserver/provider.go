@@ -780,11 +780,13 @@ func (p *Provider) catalogModels() []localruntime.ModelRecord {
 		if len(urls) == 0 {
 			continue
 		}
-		// Path names the first shard — what llama-server is pointed at.
-		primary := filepath.Join(targetDir, urlFilename(urls[0]))
+		// Each model gets its own subdirectory (uniform per-model layout);
+		// Path names the first shard within it — what llama-server is pointed at.
+		modelSub := filepath.Join(targetDir, localruntime.ModelDirName(m.ID))
+		primary := filepath.Join(modelSub, urlFilename(urls[0]))
 		state := "not_downloaded"
 		var modified time.Time
-		if allShardsPresent(targetDir, urls) {
+		if allShardsPresent(modelSub, urls) {
 			state = "downloaded"
 			if info, statErr := os.Stat(primary); statErr == nil {
 				modified = info.ModTime()

@@ -320,6 +320,14 @@ func wizardFinishUpdate(st wizard.State) agentclient.ConfigUpdate {
 	if st.CloudProvider != "" {
 		u.CloudModel = st.TierPicks["everyday."+wizard.SideCloud]
 	}
+	if wizard.ModeUsesOpen(st.LocusMode) {
+		// The wizard fills the open tiers from the llama-server catalog and
+		// enrolls llama-server downloads, so the open runtime must be
+		// llama-server. Without this it stays at the config default (ollama)
+		// and the curated GGUFs never load — open work degrades to a dead
+		// Ollama endpoint.
+		u.OpenRuntime = "llama_server"
+	}
 	return u
 }
 

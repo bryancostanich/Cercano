@@ -743,9 +743,30 @@ func (wp *wizardPage) selectRow() (tea.Cmd, bool) {
 			wp.status = "applied, but could not clear wizard state: " + err.Error()
 			return nil, false
 		}
-		return nil, true
+		return wp.openRuntimeCheckCmd(), true
 	}
 	return nil, false
+}
+
+// openRuntimeCheckCmd, after a finish on an open-using locus, verifies the open
+// runtime is installed and ready. If it isn't, it emits the shared install-modal
+// message so the user is walked through installing llama-server (and a model if
+// needed) instead of finishing setup with a runtime that can't run the open
+// tiers. No-op for cloud-only loci, an already-good runtime, or a nil agent.
+func (wp *wizardPage) openRuntimeCheckCmd() tea.Cmd {
+	if wp.agent == nil || !wizard.ModeUsesOpen(wp.state.LocusMode) {
+		return nil
+	}
+	agent := wp.agent
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		st, err := agent.GetOpenRuntimeStatus(ctx, "llama_server")
+		if err != nil || st == nil || st.Ok {
+			return nil
+		}
+		return openOpenRuntimeInstallModalMsg{status: *st}
+	}
 }
 
 // advance moves the state machine forward, autofills on entry to the open

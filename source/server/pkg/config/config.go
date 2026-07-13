@@ -265,6 +265,7 @@ type Config struct {
 	// reap. To DISABLE reaping entirely set a negative value (< 0).
 	WorkerIdleTimeoutSeconds int               `yaml:"worker_idle_timeout_seconds,omitempty"`
 	LlamaServer              LlamaServerConfig `yaml:"llama_server"`
+	MistralRS                MistralRSConfig   `yaml:"mistralrs"`
 	Compaction               CompactionConfig  `yaml:"compaction"`
 	Watchdog                 WatchdogConfig    `yaml:"watchdog"`
 	ToolLoop                 ToolLoopConfig    `yaml:"tool_loop"`
@@ -388,6 +389,24 @@ type LlamaServerConfig struct {
 	Restart          RestartConfig `yaml:"restart"`
 }
 
+// MistralRSConfig controls the optional managed mistral.rs sidecar — a second
+// local runtime (safetensors/UQFF/GGUF served by `mistralrs serve`, selected
+// with open_runtime: mistralrs). Fields mirror LlamaServerConfig; the
+// mistral.rs-specific knob is ISQ, the in-situ quantization level applied at
+// load to an unquantized safetensors model (empty = let mistral.rs decide).
+type MistralRSConfig struct {
+	Enabled          bool          `yaml:"enabled"`
+	Binary           string        `yaml:"binary"`
+	ModelDirs        []string      `yaml:"model_dirs"`
+	DefaultModel     string        `yaml:"default_model"`
+	Host             string        `yaml:"host"`
+	Port             int           `yaml:"port"`
+	ISQ              string        `yaml:"isq"`
+	ExtraArgs        []string      `yaml:"extra_args"`
+	ReadinessTimeout string        `yaml:"readiness_timeout"`
+	Restart          RestartConfig `yaml:"restart"`
+}
+
 // RestartConfig controls sidecar restart behavior.
 type RestartConfig struct {
 	Enabled     bool   `yaml:"enabled"`
@@ -454,6 +473,19 @@ func Defaults() Config {
 			ContextSize:      8192,
 			GPULayers:        "auto",
 			ReadinessTimeout: "60s",
+			Restart: RestartConfig{
+				Enabled:     true,
+				MaxAttempts: 3,
+				Backoff:     "2s",
+			},
+		},
+		MistralRS: MistralRSConfig{
+			ModelDirs: []string{"~/.cercano/models"},
+			Host:      "127.0.0.1",
+			// Longer than llama-server's 60s: mistral.rs may apply in-situ
+			// quantization (ISQ) to an unquantized model at load, which is slow
+			// for large models.
+			ReadinessTimeout: "120s",
 			Restart: RestartConfig{
 				Enabled:     true,
 				MaxAttempts: 3,
@@ -725,6 +757,7 @@ func Load(path string) (Config, error) {
 			cfg.Catalog.Backend = defaults.Catalog.Backend
 		}
 		applyLlamaServerDefaults(&cfg.LlamaServer, defaults.LlamaServer)
+		applyMistralRSDefaults(&cfg.MistralRS, defaults.MistralRS)
 		applyToolLoopDefaults(&cfg.ToolLoop, defaults.ToolLoop)
 	}
 
@@ -774,6 +807,24 @@ func applyLegacyLocalKeys(data []byte, cfg *Config) {
 func applyToolLoopDefaults(cfg *ToolLoopConfig, defaults ToolLoopConfig) {
 	if cfg.MaxIterations == 0 {
 		cfg.MaxIterations = defaults.MaxIterations
+	}
+}
+
+func applyMistralRSDefaults(cfg *MistralRSConfig, defaults MistralRSConfig) {
+	if len(cfg.ModelDirs) == 0 {
+		cfg.ModelDirs = defaults.ModelDirs
+	}
+	if cfg.Host == "" {
+		cfg.Host = defaults.Host
+	}
+	if cfg.ReadinessTimeout == "" {
+		cfg.ReadinessTimeout = defaults.ReadinessTimeout
+	}
+	if cfg.Restart.MaxAttempts == 0 {
+		cfg.Restart.MaxAttempts = defaults.Restart.MaxAttempts
+	}
+	if cfg.Restart.Backoff == "" {
+		cfg.Restart.Backoff = defaults.Restart.Backoff
 	}
 }
 
@@ -864,6 +915,16 @@ func (c Config) Clone() Config {
 	if c.LlamaServer.ExtraArgs != nil {
 		out.LlamaServer.ExtraArgs = make([]string, len(c.LlamaServer.ExtraArgs))
 		copy(out.LlamaServer.ExtraArgs, c.LlamaServer.ExtraArgs)
+	}
+
+	// MistralRS mirrors LlamaServer's two slices.
+	if c.MistralRS.ModelDirs != nil {
+		out.MistralRS.ModelDirs = make([]string, len(c.MistralRS.ModelDirs))
+		copy(out.MistralRS.ModelDirs, c.MistralRS.ModelDirs)
+	}
+	if c.MistralRS.ExtraArgs != nil {
+		out.MistralRS.ExtraArgs = make([]string, len(c.MistralRS.ExtraArgs))
+		copy(out.MistralRS.ExtraArgs, c.MistralRS.ExtraArgs)
 	}
 
 	// Watchdog.Checks is a []string.

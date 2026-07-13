@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"flag"
 	"os"
 	"path/filepath"
 	"time"
@@ -17,6 +18,11 @@ import (
 func RecordAnomaly(conversationID, reason, content string) {
 	path := os.Getenv("CERCANO_ANOMALY_LOG")
 	if path == "" {
+		// A unit test with no explicit override must never write to the real
+		// user anomaly log (test.v is registered only in test binaries).
+		if flag.Lookup("test.v") != nil {
+			return
+		}
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return

@@ -443,6 +443,17 @@ func (s *Server) SetActiveCloudProfile(ctx context.Context, req *proto.SetActive
 	defer func() {
 		log.Printf("[cloud] SetActiveCloudProfile(%q) took %v", req.GetName(), time.Since(start).Round(time.Millisecond))
 	}()
+	// A meridian-routed profile is non-functional without a Claude OAuth token
+	// (Meridian reads what `claude login` writes to the keychain). Refuse to
+	// activate one when the token is absent, with actionable guidance, instead
+	// of silently landing a profile that can't authenticate. Gate before
+	// mutating the active profile so a refused switch leaves state untouched.
+	if prof, ok := profileByName(s.cfgSvc.Get().CloudProfiles, req.GetName()); ok && meridianAuthMissing(prof) {
+		return &proto.SetActiveCloudProfileResponse{
+			Ok:    false,
+			Error: "Sign in to Claude to use Meridian: run `claude login` in a terminal, then try again.",
+		}, nil
+	}
 	if !s.cfgSvc.SetActiveProfile(req.GetName()) {
 		return &proto.SetActiveCloudProfileResponse{Ok: false, Error: fmt.Sprintf("no profile %q", req.GetName())}, nil
 	}

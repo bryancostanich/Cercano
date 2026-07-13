@@ -229,3 +229,17 @@ func (s *Server) broadcastOpenRuntimeStatus(status *proto.OpenRuntimeStatus) {
 		},
 	})
 }
+
+// meridianHasAuth probes for a Claude OAuth token — the credential `claude
+// login` writes to the keychain and that Meridian reads to authenticate
+// upstream. Indirection over meridian.HasClaudeAuth so tests can force either
+// state.
+var meridianHasAuth = meridian.HasClaudeAuth
+
+// meridianAuthMissing reports whether activating prof would strand a
+// non-functional cloud profile: true only for a meridian-routed profile when
+// no Claude token is present. Activating one silently would break cloud with
+// no signal, so callers refuse with actionable guidance instead.
+func meridianAuthMissing(prof config.CloudProfile) bool {
+	return prof.Route == "meridian" && !meridianHasAuth()
+}

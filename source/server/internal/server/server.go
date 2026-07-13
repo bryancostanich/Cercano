@@ -1433,7 +1433,7 @@ func (s *Server) ListRuntimeModels(ctx context.Context, req *proto.ListRuntimeMo
 	// GetModelRAMEstimate still works meanwhile.)
 	if reg := s.catalogRegistry; reg != nil {
 		if backend, ok := reg.Active(); ok {
-			if online, err := backend.List(ctx, catalog.ListOptions{}); err == nil && len(online) > 0 {
+			if online, err := backend.List(ctx, catalog.ListOptions{Format: s.activeCatalogFormat()}); err == nil && len(online) > 0 {
 				// Dedupe against inventory (hardcoded catalog OR downloaded on
 				// disk keeps its richer entry).
 				seen := make(map[string]bool, len(resp.Models))
@@ -1601,6 +1601,25 @@ func (s *Server) DownloadRuntimeModel(ctx context.Context, req *proto.DownloadRu
 // refuse an architecture llama.cpp can't load, pick the default quant, resolve
 // its URL(s), and place the file(s) under modelDir. Multi-shard aware —
 // DownloadURLs may hold several shard URLs (the manager fetches them all).
+// activeCatalogFormat returns the model format the active open runtime browses
+// — its primary declared CatalogFormat — for the catalog List query. Empty
+// falls back to the backend default (gguf). Selecting by the active runtime is
+// what makes browse surface safetensors when mistral.rs is active and GGUF
+// when llama-server is, with no user-facing format switch.
+func (s *Server) activeCatalogFormat() string {
+	rm := s.runtimeMgr()
+	if rm == nil {
+		return ""
+	}
+	runtime := s.cfgSvc.Get().OpenRuntime
+	for _, p := range rm.Providers() {
+		if strings.EqualFold(p.Name, runtime) && len(p.Capabilities.CatalogFormats) > 0 {
+			return p.Capabilities.CatalogFormats[0]
+		}
+	}
+	return ""
+}
+
 // runtimeArchSupported reports whether the target runtime's build can load a
 // model of this architecture. The compatibility gate is runtime-specific:
 // llama-server and mistral.rs compile in different loader sets (mistral.rs can
@@ -1632,7 +1651,7 @@ func buildCatalogDownloadRecord(ctx context.Context, backend catalog.Backend, id
 	if len(plan.URLs) == 0 {
 		return localruntime.ModelRecord{}, fmt.Errorf("no download URLs for %q", id)
 	}
-	return localruntime.ModelRecord{
+	rec := localruntime.ModelRecord{
 		ID:                 modelID,
 		Runtime:            runtime,
 		DisplayName:        id,
@@ -1641,10 +1660,19 @@ func buildCatalogDownloadRecord(ctx context.Context, backend catalog.Backend, id
 		DownloadURLs:       plan.URLs,
 		DownloadTotalBytes: plan.TotalBytes,
 		DownloadState:      "not_downloaded",
-		Format:             "gguf",
+		Format:             detail.Format,
 		SupportsChat:       true,
 		SupportsTools:      detail.SupportsTools,
-	}, nil
+	}
+	if rec.Format == "" {
+		rec.Format = "gguf"
+	}
+	// A directory-loaded format (safetensors/UQFF) points the runtime at the
+	// model's directory; Path anchors the download on a file inside it.
+	if rec.Format == "safetensors" || rec.Format == "uqff" {
+		rec.LoadTarget = filepath.Dir(rec.Path)
+	}
+	return rec, nil
 }
 
 // pickDefaultQuant chooses the file to download when the request names no

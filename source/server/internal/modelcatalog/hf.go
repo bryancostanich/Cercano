@@ -1,22 +1,26 @@
-// Package modelcatalog discovers llama.cpp-compatible GGUF models from the
-// HuggingFace model index.
+// Package modelcatalog discovers models from the HuggingFace model index —
+// llama.cpp-compatible GGUF quants and, for the mistral.rs runtime, safetensors
+// repos.
 //
-// It supersedes the Ollama-library scraping in the ollamacatalog package.
-// HuggingFace is where GGUF files actually live, it exposes model metadata —
-// crucially the GGUF architecture — over a plain JSON API, and it serves the
-// weights as resumable HTTPS downloads with no OCI protocol and no daemon.
-// Because the architecture is in the API response, every candidate is checked
-// against the compatibility gate (llamacompat) for one JSON fetch, not a
-// multi-gigabyte header read, so an incompatible model (e.g. qwen3-next) is
-// never offered for download into llama-server.
+// HuggingFace exposes model metadata — crucially the architecture — over a
+// plain JSON API and serves the weights as resumable HTTPS downloads with no
+// OCI protocol and no daemon. Because the architecture is in the API response,
+// every candidate is checked against the active runtime's compatibility gate
+// for one JSON fetch, not a multi-gigabyte header read, so an incompatible
+// model is never offered for download.
 //
-// Two calls back the browse experience:
+// The browse experience is format-aware. For GGUF:
 //
 //	List:   GET /api/models?filter=gguf&sort=downloads&direction=-1&limit=N
-//	        (ranked GGUF repos; we keep only trusted uploaders)
-//	Detail: GET /api/models/<repo>?blobs=true
-//	        (the gguf{architecture,context_length,chat_template} block plus
-//	         siblings[] — each quant file with its size)
+//	Detail: GET /api/models/<repo>?blobs=true  →  the gguf{architecture,
+//	        context_length,chat_template} block plus the .gguf quant files.
+//
+// For safetensors (mistral.rs):
+//
+//	List:   GET /api/models?filter=safetensors&...
+//	Detail: GET /api/models/<repo>?blobs=true  →  config{model_type,
+//	        architectures,tokenizer_config.chat_template} plus every inference
+//	        file (weights + config + tokenizer) as the download manifest.
 //
 // A file's download URL is the plain resolve path:
 //
@@ -41,9 +45,9 @@ const defaultHFBaseURL = "https://huggingface.co"
 // tooling from browser traffic.
 const userAgent = "cercano-modelcatalog/1.0"
 
-// trustedAuthors is the uploader allow-list for browse. The HF GGUF index is
-// vast and full of broken or experimental community quants, so discovery keeps
-// only repos from uploaders with a track record of correct, complete GGUFs.
+// trustedAuthors is the uploader allow-list for browse. The HF index is vast
+// and full of broken or experimental community uploads, so discovery keeps
+// only repos from uploaders with a track record of correct, complete models.
 // Growing this is a data edit. Keys are lowercase; author match is
 // case-insensitive.
 var trustedAuthors = map[string]struct{}{
@@ -66,25 +70,33 @@ type HFModel struct {
 	Likes     int
 }
 
-// HFFile is one GGUF quant variant within a repo.
+// HFFile is one file within a repo (a GGUF quant, a safetensors shard, or a
+// manifest sidecar like config.json).
 type HFFile struct {
-	Name      string // e.g. "Qwen3-14B-Q4_K_M.gguf"
+	Name      string // e.g. "Qwen3-14B-Q4_K_M.gguf" or "model-00001-of-00003.safetensors"
 	SizeBytes int64
 }
 
-// HFModelDetail is a repo's GGUF metadata: the architecture the gate checks,
-// tool capability, context length, and the quant files with sizes.
+// HFModelDetail is a repo's metadata: the architecture the gate checks, tool
+// capability, context length, and the files with sizes.
 type HFModelDetail struct {
 	Repo          string
+	Format        string // "gguf" | "safetensors" (auto-detected from the API)
 	Architecture  string
 	ContextLength int
 	SupportsTools bool
-	Files         []HFFile
+	// Files are the weight variants: the .gguf quants for a GGUF repo, or the
+	// .safetensors shards for a safetensors repo.
+	Files []HFFile
+	// Manifest is every inference file for a safetensors repo (weights + config
+	// + tokenizer), with docs/license/image junk excluded — the whole set a
+	// directory-loaded runtime needs. Empty for a GGUF repo.
+	Manifest []HFFile
 }
 
-// Compatible reports whether the pinned llama.cpp build can load this model —
-// the gate that keeps incompatible architectures out of the browse download
-// path.
+// Compatible reports whether the pinned llama.cpp build can load this model.
+// It is a GGUF convenience check (llamacompat); the runtime-aware gate the
+// server applies is the authority for a safetensors/mistral.rs download.
 func (d HFModelDetail) Compatible() bool {
 	return llamacompat.Supported(d.Architecture)
 }
@@ -143,15 +155,19 @@ type hfListEntry struct {
 	Likes     int    `json:"likes"`
 }
 
-// ListModels queries the GGUF index ranked by downloads and returns entries
-// from trusted uploaders only, preserving the API's ranking order. limit
-// bounds the query size (the pre-filter fetch); 0 uses a sane default.
-func (c *Client) ListModels(ctx context.Context, limit int) ([]HFModel, error) {
+// ListModels queries the index for the given format ("gguf" default, or
+// "safetensors"), ranked by downloads, and returns entries from trusted
+// uploaders only, preserving the API's ranking order. limit bounds the query
+// size (the pre-filter fetch); 0 uses a sane default.
+func (c *Client) ListModels(ctx context.Context, limit int, format string) ([]HFModel, error) {
 	if limit <= 0 {
 		limit = 100
 	}
+	if strings.TrimSpace(format) == "" {
+		format = "gguf"
+	}
 	q := url.Values{}
-	q.Set("filter", "gguf")
+	q.Set("filter", format)
 	q.Set("sort", "downloads")
 	q.Set("direction", "-1")
 	q.Set("limit", fmt.Sprintf("%d", limit))
@@ -176,7 +192,8 @@ func (c *Client) ListModels(ctx context.Context, limit int) ([]HFModel, error) {
 	return out, nil
 }
 
-// hfDetail mirrors the per-repo fields we need.
+// hfDetail mirrors the per-repo fields we need. A GGUF repo populates gguf{};
+// a safetensors repo populates config{}.
 type hfDetail struct {
 	ID   string `json:"id"`
 	GGUF struct {
@@ -184,6 +201,13 @@ type hfDetail struct {
 		ContextLength int    `json:"context_length"`
 		ChatTemplate  string `json:"chat_template"`
 	} `json:"gguf"`
+	Config struct {
+		ModelType       string   `json:"model_type"`
+		Architectures   []string `json:"architectures"`
+		TokenizerConfig struct {
+			ChatTemplate string `json:"chat_template"`
+		} `json:"tokenizer_config"`
+	} `json:"config"`
 	Siblings []struct {
 		RFilename string `json:"rfilename"`
 		Size      int64  `json:"size"`
@@ -193,38 +217,79 @@ type hfDetail struct {
 	} `json:"siblings"`
 }
 
-// ModelDetail fetches one repo's GGUF metadata and quant file list. Tool
-// capability is inferred from the chat template (it must describe tool calls),
-// which is what the agent tiers require.
+// ModelDetail fetches one repo's metadata and file list, auto-detecting the
+// format from the API shape: a GGUF repo carries the gguf{} block, a
+// safetensors repo carries config{} with a model_type. Tool capability is
+// inferred from the chat template (it must describe tool calls). For a
+// safetensors repo the full inference manifest is collected so a
+// directory-loaded runtime gets weights, config, and tokenizer together.
 func (c *Client) ModelDetail(ctx context.Context, repo string) (HFModelDetail, error) {
 	endpoint := c.base() + "/api/models/" + repo + "?blobs=true"
 	var d hfDetail
 	if err := c.getJSON(ctx, endpoint, &d); err != nil {
 		return HFModelDetail{}, err
 	}
-	detail := HFModelDetail{
-		Repo:          repo,
-		Architecture:  d.GGUF.Architecture,
-		ContextLength: d.GGUF.ContextLength,
-		SupportsTools: templateSupportsTools(d.GGUF.ChatTemplate),
+	detail := HFModelDetail{Repo: repo, ContextLength: d.GGUF.ContextLength}
+
+	if d.GGUF.Architecture != "" {
+		detail.Format = "gguf"
+		detail.Architecture = d.GGUF.Architecture
+		detail.SupportsTools = templateSupportsTools(d.GGUF.ChatTemplate)
+		for _, s := range d.Siblings {
+			if !strings.HasSuffix(strings.ToLower(s.RFilename), ".gguf") {
+				continue
+			}
+			detail.Files = append(detail.Files, HFFile{Name: s.RFilename, SizeBytes: siblingSize(s.Size, s.LFS.Size)})
+		}
+		return detail, nil
 	}
+
+	detail.Format = "safetensors"
+	detail.Architecture = d.Config.ModelType
+	detail.SupportsTools = templateSupportsTools(d.Config.TokenizerConfig.ChatTemplate)
 	for _, s := range d.Siblings {
-		if !strings.HasSuffix(strings.ToLower(s.RFilename), ".gguf") {
-			continue
+		size := siblingSize(s.Size, s.LFS.Size)
+		if strings.HasSuffix(strings.ToLower(s.RFilename), ".safetensors") {
+			detail.Files = append(detail.Files, HFFile{Name: s.RFilename, SizeBytes: size})
 		}
-		size := s.Size
-		if size == 0 {
-			size = s.LFS.Size
+		if isManifestFile(s.RFilename) {
+			detail.Manifest = append(detail.Manifest, HFFile{Name: s.RFilename, SizeBytes: size})
 		}
-		detail.Files = append(detail.Files, HFFile{Name: s.RFilename, SizeBytes: size})
 	}
 	return detail, nil
+}
+
+// siblingSize prefers the plain size, falling back to the LFS size (large
+// files report their real size only under lfs).
+func siblingSize(size, lfsSize int64) int64 {
+	if size == 0 {
+		return lfsSize
+	}
+	return size
 }
 
 // templateSupportsTools reports whether a chat template describes tool calling
 // — the marker that a model can drive the agent's tool loop.
 func templateSupportsTools(tmpl string) bool {
 	return strings.Contains(tmpl, "tool_call") || strings.Contains(tmpl, "<tools>")
+}
+
+// isManifestFile reports whether a repo file belongs in a safetensors model's
+// inference manifest — the weights, config, and tokenizer a directory-loaded
+// runtime needs — excluding git metadata, license, docs, and image junk.
+// merges.txt (a .txt tokenizer file) is deliberately kept.
+func isManifestFile(name string) bool {
+	switch strings.ToLower(name) {
+	case ".gitattributes", ".gitignore", "license", "notice", "readme.md":
+		return false
+	}
+	lower := strings.ToLower(name)
+	for _, ext := range []string{".md", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".pdf"} {
+		if strings.HasSuffix(lower, ext) {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *Client) getJSON(ctx context.Context, endpoint string, dst interface{}) error {

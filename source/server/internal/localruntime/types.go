@@ -63,6 +63,12 @@ type RuntimeCapabilities struct {
 	SupportsChat     bool
 	SupportsEmbed    bool
 	SupportsTools    bool
+	// CatalogFormats is the ordered set of model formats this runtime browses
+	// online, primary first (e.g. ["gguf"] for llama-server,
+	// ["safetensors","uqff","gguf"] for mistral.rs). The server passes the
+	// primary into the catalog's ListOptions.Format so browse surfaces models
+	// the active runtime can actually load. Empty defaults to gguf.
+	CatalogFormats []string
 }
 
 type ProviderInfo struct {

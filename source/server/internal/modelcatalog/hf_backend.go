@@ -35,7 +35,7 @@ func (b *Backend) Name() string { return BackendName }
 // List implements catalog.Backend: the trusted-uploader-filtered GGUF index,
 // optionally narrowed by a substring query on the repo id.
 func (b *Backend) List(ctx context.Context, opts catalog.ListOptions) ([]catalog.Model, error) {
-	models, err := b.client.ListModels(ctx, opts.Limit)
+	models, err := b.client.ListModels(ctx, opts.Limit, opts.Format)
 	if err != nil {
 		return nil, err
 	}
@@ -65,6 +65,7 @@ func (b *Backend) Detail(ctx context.Context, id string) (catalog.Detail, error)
 	return catalog.Detail{
 		Backend:       BackendName,
 		ID:            d.Repo,
+		Format:        d.Format,
 		Architecture:  d.Architecture,
 		ContextLength: d.ContextLength,
 		SupportsTools: d.SupportsTools,
@@ -81,6 +82,11 @@ func (b *Backend) ResolveDownload(ctx context.Context, id, file string) (catalog
 	if err != nil {
 		return catalog.DownloadPlan{}, err
 	}
+	// A safetensors model downloads its whole inference manifest into one
+	// directory; the chosen `file` is irrelevant (there are no quant variants).
+	if d.Format == "safetensors" {
+		return manifestPlan(b.client.base(), id, d.Manifest)
+	}
 	group := filesForDownload(d.Files, file)
 	if len(group) == 0 {
 		return catalog.DownloadPlan{}, fmt.Errorf("modelcatalog: file %q not found in %s", file, id)
@@ -88,6 +94,29 @@ func (b *Backend) ResolveDownload(ctx context.Context, id, file string) (catalog
 	plan := catalog.DownloadPlan{PrimaryFile: group[0].Name}
 	for _, f := range group {
 		plan.URLs = append(plan.URLs, DownloadURL(b.client.base(), id, f.Name))
+		plan.TotalBytes += f.SizeBytes
+	}
+	return plan, nil
+}
+
+// manifestPlan builds the DownloadPlan for a safetensors model: every manifest
+// file. PrimaryFile is config.json when present (else the first file) so the
+// download anchors on it — the download manager places all files alongside it
+// in the model's directory, which is what mistral.rs is then pointed at.
+func manifestPlan(base, id string, manifest []HFFile) (catalog.DownloadPlan, error) {
+	if len(manifest) == 0 {
+		return catalog.DownloadPlan{}, fmt.Errorf("modelcatalog: %s has no downloadable manifest files", id)
+	}
+	primary := manifest[0].Name
+	for _, f := range manifest {
+		if strings.EqualFold(f.Name, "config.json") {
+			primary = f.Name
+			break
+		}
+	}
+	plan := catalog.DownloadPlan{PrimaryFile: primary}
+	for _, f := range manifest {
+		plan.URLs = append(plan.URLs, DownloadURL(base, id, f.Name))
 		plan.TotalBytes += f.SizeBytes
 	}
 	return plan, nil

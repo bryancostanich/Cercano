@@ -43,7 +43,7 @@ func TestListModels_FiltersToTrustedAuthors(t *testing.T) {
 	defer srv.Close()
 	c := &Client{BaseURL: srv.URL}
 
-	models, err := c.ListModels(context.Background(), 10)
+	models, err := c.ListModels(context.Background(), 10, "")
 	if err != nil {
 		t.Fatalf("ListModels: %v", err)
 	}
@@ -56,6 +56,31 @@ func TestListModels_FiltersToTrustedAuthors(t *testing.T) {
 	}
 	if models[0].Author != "unsloth" {
 		t.Errorf("author = %q, want unsloth", models[0].Author)
+	}
+}
+
+func TestListModels_UsesRequestedFormatFilter(t *testing.T) {
+	var gotFilter string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/models" {
+			http.NotFound(w, r)
+			return
+		}
+		gotFilter = r.URL.Query().Get("filter")
+		_, _ = w.Write([]byte(`[{"id":"Qwen/Qwen3-4B","downloads":100,"likes":10}]`))
+	}))
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL}
+
+	models, err := c.ListModels(context.Background(), 10, "safetensors")
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if gotFilter != "safetensors" {
+		t.Errorf("filter = %q, want safetensors", gotFilter)
+	}
+	if len(models) != 1 || models[0].Repo != "Qwen/Qwen3-4B" {
+		t.Fatalf("unexpected models: %#v", models)
 	}
 }
 
@@ -86,6 +111,61 @@ func TestModelDetail_ParsesGGUFAndFiles(t *testing.T) {
 	}
 	if d.Files[1].SizeBytes != 15698534784 {
 		t.Errorf("file1 size = %d, want 15698534784 (from size when no lfs)", d.Files[1].SizeBytes)
+	}
+}
+
+func TestModelDetail_ParsesSafetensorsManifest(t *testing.T) {
+	detailJSON := `{
+		"id":"Qwen/Qwen3-4B",
+		"config":{
+			"model_type":"qwen3",
+			"architectures":["Qwen3ForCausalLM"],
+			"tokenizer_config":{"chat_template":"... <tools> ..."}
+		},
+		"siblings":[
+			{"rfilename":"README.md","size":1000},
+			{"rfilename":"config.json","size":726},
+			{"rfilename":"generation_config.json","size":239},
+			{"rfilename":"model-00001-of-00002.safetensors","size":0,"lfs":{"size":3441185608}},
+			{"rfilename":"model-00002-of-00002.safetensors","size":622329984},
+			{"rfilename":"model.safetensors.index.json","size":25605},
+			{"rfilename":"tokenizer.json","size":11422654},
+			{"rfilename":"tokenizer_config.json","size":9732},
+			{"rfilename":"vocab.json","size":2776833},
+			{"rfilename":"figure.png","size":99}
+		]
+	}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/api/models/") {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(detailJSON))
+	}))
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL}
+
+	d, err := c.ModelDetail(context.Background(), "Qwen/Qwen3-4B")
+	if err != nil {
+		t.Fatalf("ModelDetail: %v", err)
+	}
+	if d.Format != "safetensors" || d.Architecture != "qwen3" {
+		t.Fatalf("format/arch = %q/%q, want safetensors/qwen3", d.Format, d.Architecture)
+	}
+	if !d.SupportsTools {
+		t.Error("SupportsTools = false, want true (template has <tools>)")
+	}
+	if len(d.Files) != 2 {
+		t.Fatalf("Files count = %d, want 2 safetensors shards", len(d.Files))
+	}
+	if d.Files[0].SizeBytes != 3441185608 {
+		t.Errorf("first shard size = %d, want LFS size", d.Files[0].SizeBytes)
+	}
+	if len(d.Manifest) != 8 {
+		t.Fatalf("Manifest count = %d, want 8 (README/image excluded)", len(d.Manifest))
+	}
+	if d.Manifest[0].Name != "config.json" {
+		t.Errorf("manifest[0] = %q, want config.json", d.Manifest[0].Name)
 	}
 }
 

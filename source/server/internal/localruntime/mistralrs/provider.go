@@ -86,6 +86,9 @@ func (p *Provider) Capabilities() localruntime.RuntimeCapabilities {
 		// mistral.rs speaks the OpenAI tool-call protocol natively, so the
 		// runtime advertises tool support (llama-server's provider does not).
 		SupportsTools: true,
+		// mistral.rs browses safetensors first (ISQ-quantized at load), then
+		// pre-quantized UQFF, then GGUF — all formats its loaders accept.
+		CatalogFormats: []string{"safetensors", "uqff", "gguf"},
 	}
 }
 

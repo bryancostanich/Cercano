@@ -37,6 +37,11 @@ type Backend interface {
 type ListOptions struct {
 	Limit int    // 0 = backend default
 	Query string // optional free-text filter; "" = no filter
+	// Format is the model format the caller wants surfaced — the active
+	// runtime's primary format ("gguf" for llama-server, "safetensors" for
+	// mistral.rs). A backend that indexes multiple formats (HuggingFace) uses
+	// it to pick which to list; "" means the backend's default (gguf).
+	Format string
 }
 
 // Model is one entry from List — enough to rank and drill into.
@@ -58,7 +63,8 @@ type File struct {
 type Detail struct {
 	Backend       string
 	ID            string
-	Architecture  string // gate input (general.architecture)
+	Format        string // "gguf" | "safetensors" — the model's on-disk format
+	Architecture  string // gate input (GGUF general.architecture, or config model_type)
 	ContextLength int
 	SupportsTools bool
 	Files         []File

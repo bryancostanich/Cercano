@@ -137,6 +137,7 @@ func (p *Provider) Capabilities() localruntime.RuntimeCapabilities {
 		CanListModels:    true,
 		CanStreamLogs:    true,
 		SupportsChat:     true,
+		CatalogFormats:   []string{"gguf"},
 	}
 }
 

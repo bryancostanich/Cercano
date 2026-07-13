@@ -1108,6 +1108,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// have just changed local-model / cloud-model / cloud-base-url.
 					return m, fetchConfigCmd(m.agent)
 				}
+				if pageID == contentPageWizard {
+					// OpenWizardOnStart suppressed the splash so the wordmark
+					// didn't sit above the setup steps. Reveal it on finish and
+					// replay the shimmer, so completing setup lands on the CERCANO
+					// welcome chrome instead of an empty body. Also refresh the
+					// config so the header reflects the models the wizard just
+					// wrote (mirrors the settings-close refresh above).
+					m.splashShown = true
+					m.splash = banner.NewAnimModel(m.palette, m.splash.Meta)
+					m.bannerTickActive = true
+					return m, tea.Batch(fetchConfigCmd(m.agent), m.splash.Init())
+				}
 			}
 			return m, cmd
 		}

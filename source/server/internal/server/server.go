@@ -43,6 +43,7 @@ import (
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
 	mcphost "cercano/source/server/internal/mcp_host"
+	"cercano/source/server/internal/mistralrscompat"
 	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/retention"
@@ -1600,13 +1601,25 @@ func (s *Server) DownloadRuntimeModel(ctx context.Context, req *proto.DownloadRu
 // refuse an architecture llama.cpp can't load, pick the default quant, resolve
 // its URL(s), and place the file(s) under modelDir. Multi-shard aware —
 // DownloadURLs may hold several shard URLs (the manager fetches them all).
+// runtimeArchSupported reports whether the target runtime's build can load a
+// model of this architecture. The compatibility gate is runtime-specific:
+// llama-server and mistral.rs compile in different loader sets (mistral.rs can
+// load qwen3next; llama.cpp can't), so the gate is chosen by the download's
+// target runtime rather than hardcoded to llama-server.
+func runtimeArchSupported(runtime, arch string) bool {
+	if strings.EqualFold(runtime, "mistralrs") {
+		return mistralrscompat.Supported(arch)
+	}
+	return llamacompat.Supported(arch)
+}
+
 func buildCatalogDownloadRecord(ctx context.Context, backend catalog.Backend, id, modelID, runtime, modelDir string) (localruntime.ModelRecord, error) {
 	detail, err := backend.Detail(ctx, id)
 	if err != nil {
 		return localruntime.ModelRecord{}, fmt.Errorf("catalog detail for %q: %w", id, err)
 	}
-	if !llamacompat.Supported(detail.Architecture) {
-		return localruntime.ModelRecord{}, fmt.Errorf("llama-server can't run %q: unsupported architecture %q (switch the catalog backend or pick a compatible model)", id, detail.Architecture)
+	if !runtimeArchSupported(runtime, detail.Architecture) {
+		return localruntime.ModelRecord{}, fmt.Errorf("%s can't run %q: unsupported architecture %q (switch the runtime or pick a compatible model)", runtime, id, detail.Architecture)
 	}
 	file, ok := pickDefaultQuant(detail.Files)
 	if !ok {

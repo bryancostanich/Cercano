@@ -91,3 +91,24 @@ func TestPickDefaultQuant(t *testing.T) {
 		t.Error("empty files should return ok=false")
 	}
 }
+
+// TestBuildCatalogDownloadRecord_RuntimeAwareGate pins the runtime-specific
+// gate: qwen3next is refused for llama-server (llamacompat) but admitted for
+// mistral.rs (mistralrscompat). Same model, opposite verdicts by target runtime.
+func TestBuildCatalogDownloadRecord_RuntimeAwareGate(t *testing.T) {
+	newBackend := func() *fakeCatalogBackend {
+		return &fakeCatalogBackend{
+			arch:    "qwen3next",
+			files:   []catalog.File{{Name: "model-Q4_K_M.gguf"}},
+			urls:    []string{"https://hf/model-Q4_K_M.gguf"},
+			primary: "model-Q4_K_M.gguf",
+			total:   1,
+		}
+	}
+	if _, err := buildCatalogDownloadRecord(context.Background(), newBackend(), "some/repo", "mid", "llama_server", "/models"); err == nil {
+		t.Error("qwen3next must be refused for llama_server")
+	}
+	if _, err := buildCatalogDownloadRecord(context.Background(), newBackend(), "some/repo", "mid", "mistralrs", "/models"); err != nil {
+		t.Errorf("qwen3next must be admitted for mistralrs, got: %v", err)
+	}
+}

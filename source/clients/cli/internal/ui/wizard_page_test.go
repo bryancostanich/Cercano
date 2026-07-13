@@ -499,12 +499,14 @@ func TestWizardOpenAutofillUsesCatalog(t *testing.T) {
 		Models: []agentclient.RuntimeModel{
 			{ID: "llama_server:catalog:qwen3-14b-q4_k_m", DisplayName: "Qwen3-14B Q4_K_M", Runtime: "llama_server", Source: "catalog"},
 			{ID: "llama_server:catalog:phi-4-mini-instruct-q4_k_m", DisplayName: "Phi-4-mini Instruct Q4_K_M", Runtime: "llama_server", Source: "catalog"},
+			{ID: "llama_server:catalog:nomic-embed-text-v1.5-f16", DisplayName: "Nomic Embed Text v1.5 f16", Runtime: "llama_server", Source: "catalog"},
 		},
 		RecommendedOpenModels: map[string]string{
 			"most_capable":    "llama_server:catalog:qwen3-14b-q4_k_m",
 			"everyday":        "llama_server:catalog:qwen3-14b-q4_k_m",
 			"fast_light":      "llama_server:catalog:phi-4-mini-instruct-q4_k_m",
 			"fast_light_text": "llama_server:catalog:phi-4-mini-instruct-q4_k_m",
+			"embedding":       "llama_server:catalog:nomic-embed-text-v1.5-f16",
 		},
 	}
 	wp.catalogOK = true
@@ -519,6 +521,11 @@ func TestWizardOpenAutofillUsesCatalog(t *testing.T) {
 	}
 	if got := wp.state.TierPicks["fast_light.open"]; got != "Phi-4-mini Instruct Q4_K_M" {
 		t.Fatalf("fast_light.open: want curated display name, got %q", got)
+	}
+	// The embedding slot isn't in wizardTierOrder; autofillTiers must still fill
+	// it from the catalog recommendation, else the embedding row shows "—".
+	if got := wp.state.TierPicks["embedding.open"]; got != "Nomic Embed Text v1.5 f16" {
+		t.Fatalf("embedding.open: want the curated embedding display name, got %q", got)
 	}
 	if strings.Contains(fmt.Sprintf("%v", wp.state.TierPicks), "qwen3-coder-next") {
 		t.Errorf("open picks must not carry the incompatible recs model: %v", wp.state.TierPicks)

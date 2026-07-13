@@ -507,6 +507,20 @@ func (wp *wizardPage) autofillTiers() {
 			}
 		}
 	}
+
+	// The embedding slot isn't part of wizardTierOrder (rows and summary render
+	// it specially), so it's filled here from the same RAM-tiered curated
+	// catalog recommendation used for the capability tiers above. Without this
+	// the embedding row shows "—".
+	if wp.catalogOK {
+		embKey := string(config.TierEmbedding) + "." + wizard.SideOpen
+		if id, ok := wp.catalog.RecommendedOpenModels[string(config.TierEmbedding)]; ok {
+			label := openModelDisplay(wp.catalog, id)
+			if shouldRefill(wp.state.TierPicks[embKey], []string{label}) {
+				wp.state.TierPicks[embKey] = label
+			}
+		}
+	}
 }
 
 // shouldRefill reports whether a tier slot should be (re)filled from

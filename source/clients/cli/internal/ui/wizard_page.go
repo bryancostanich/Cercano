@@ -1031,7 +1031,12 @@ func (wp *wizardPage) View() string {
 		}
 		b.WriteString(caret + padRight(r.Label, label, 28))
 		if r.Annotation != "" {
-			b.WriteString(wp.styles.Info.Render(r.Annotation))
+			for j, ln := range wrapWords(r.Annotation, wp.width-wizardAnnotationCol) {
+				if j > 0 {
+					b.WriteString("\n" + strings.Repeat(" ", wizardAnnotationCol))
+				}
+				b.WriteString(wp.styles.Info.Render(ln))
+			}
 		}
 		b.WriteString("\n")
 	}
@@ -1050,6 +1055,37 @@ func padRight(plain, styled string, width int) string {
 		return styled + strings.Repeat(" ", n)
 	}
 	return styled + " "
+}
+
+// wizardAnnotationCol is the column where a row's annotation begins: 2 for
+// the caret plus the 28-wide label pad in padRight. Wrapped continuation
+// lines indent to it so a long annotation reads as one aligned block.
+const wizardAnnotationCol = 30
+
+// wrapWords splits s into lines no wider than width runes, breaking only at
+// spaces; a word longer than width stands alone on its line. width < 1
+// returns s as a single line, so a caller with an unknown terminal width
+// falls back to the old no-wrap behavior rather than shredding the text one
+// rune per line.
+func wrapWords(s string, width int) []string {
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return nil
+	}
+	if width < 1 {
+		return []string{strings.Join(words, " ")}
+	}
+	var lines []string
+	cur := words[0]
+	for _, w := range words[1:] {
+		if len([]rune(cur))+1+len([]rune(w)) <= width {
+			cur += " " + w
+			continue
+		}
+		lines = append(lines, cur)
+		cur = w
+	}
+	return append(lines, cur)
 }
 
 // loadRuntimeCatalog caches the agent's runtime model catalog once at

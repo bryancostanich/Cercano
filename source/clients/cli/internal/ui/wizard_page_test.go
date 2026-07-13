@@ -557,3 +557,47 @@ func TestWizardEnrollOpenDownloads(t *testing.T) {
 		t.Fatalf("want the single distinct not-downloaded curated id, got %v", got)
 	}
 }
+
+func TestWrapWords(t *testing.T) {
+	// The bug: a long annotation ran off the right edge instead of wrapping.
+	// wrapWords must break on spaces, never exceed width, and preserve every
+	// word in order.
+	long := "highest-quality frontier model in the cloud; open co-processor for background work (recommended)"
+	for _, width := range []int{10, 20, 40, 89} {
+		lines := wrapWords(long, width)
+		if len(lines) < 2 {
+			t.Errorf("width %d: expected the long annotation to wrap, got %d line(s)", width, len(lines))
+		}
+		for _, ln := range lines {
+			// A single word longer than width is allowed to overflow on its
+			// own line; only reject a line that packed more than it should.
+			if n := len([]rune(ln)); n > width && strings.Contains(strings.TrimSpace(ln), " ") {
+				if firstWordFits(ln, width) {
+					t.Errorf("width %d: line %q exceeds width %d", width, ln, width)
+				}
+			}
+		}
+		if got := strings.Join(lines, " "); got != long {
+			t.Errorf("width %d: words not preserved:\n got %q\nwant %q", width, got, long)
+		}
+	}
+
+	// width < 1 yields the whole string on one line (fallback, no panic).
+	if got := wrapWords(long, 0); len(got) != 1 || got[0] != long {
+		t.Errorf("width 0: want single unbroken line, got %v", got)
+	}
+	// A word longer than width stands alone rather than being split.
+	if got := wrapWords("supercalifragilistic ok", 5); len(got) != 2 || got[0] != "supercalifragilistic" {
+		t.Errorf("oversized word: want it alone on its line, got %v", got)
+	}
+	if got := wrapWords("", 10); got != nil {
+		t.Errorf("empty: want nil, got %v", got)
+	}
+}
+
+// firstWordFits reports whether line's first word fits within width, i.e.
+// the line could legitimately have been packed tighter.
+func firstWordFits(line string, width int) bool {
+	fields := strings.Fields(line)
+	return len(fields) > 0 && len([]rune(fields[0])) <= width
+}

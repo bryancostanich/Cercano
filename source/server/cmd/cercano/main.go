@@ -34,12 +34,14 @@ import (
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/engine"
 	llamaengine "cercano/source/server/internal/engine/llamaserver"
+	mistralengine "cercano/source/server/internal/engine/mistralrs"
 	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
 	ollamallm "cercano/source/server/internal/llm/ollama"
 	"cercano/source/server/internal/localruntime"
 	runtimellama "cercano/source/server/internal/localruntime/llamaserver"
+	runtimemistralrs "cercano/source/server/internal/localruntime/mistralrs"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
 	mcpserver "cercano/source/server/internal/mcp"
@@ -148,7 +150,12 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	registry.RegisterEngine(llamaEng)
 	registry.RegisterEmbedder(llamaEng)
 
-	openEngine, openModel := selectOpenEngine(cfg, ollamaEng, llamaEng)
+	// mistral.rs shares the same runtime manager; it registers as an inference
+	// engine only (no embedder — mistral.rs isn't wired for embeddings yet).
+	mistralEng := mistralengine.NewEngine(runtimeManager)
+	registry.RegisterEngine(mistralEng)
+
+	openEngine, openModel := selectOpenEngine(cfg, ollamaEng, llamaEng, mistralEng)
 	openProvider := legacymodels.NewOpenModelProvider(openEngine, openModel)
 
 	// Cloud provider: start with the absent sentinel; RebuildCloud() (called
@@ -464,6 +471,9 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		if strings.EqualFold(c.OpenRuntime, "llama_server") {
 			return llamaengine.NewLLMProvider(llamaEng)
 		}
+		if strings.EqualFold(c.OpenRuntime, "mistralrs") {
+			return mistralengine.NewLLMProvider(mistralEng)
+		}
 		return ollamallm.NewClient(ollamallm.Config{
 			BaseURL: c.OllamaURL,
 			Model:   c.OpenChatModel(),
@@ -557,22 +567,30 @@ func buildRuntimeManager(cfg config.Config) localruntime.Manager {
 	// runtime WAS enabled hold GPU memory regardless of current config.
 	provider.SweepOrphans(manager)
 	manager.RegisterProvider(provider)
-	if !llamaServerEnabled(cfg) {
-		return manager
+
+	// mistral.rs is the second open runtime (open_runtime: mistralrs). Reap its
+	// orphans regardless, but register the provider only when it's the active
+	// runtime — otherwise an inactive mistral.rs would double-list the GGUFs the
+	// llama-server provider already discovers.
+	mistralProvider := runtimemistralrs.NewProvider(cfg.MistralRS)
+	mistralProvider.SweepOrphans(manager)
+	if mistralRSEnabled(cfg) {
+		manager.RegisterProvider(mistralProvider)
 	}
 	// Resume any downloads a prior session left interrupted (a .part shard
 	// survives on disk) — recovers from a sleep or process kill that outlived
 	// the in-memory download job. Background so startup isn't blocked.
 	go resumeInterruptedDownloads(cfg, manager, provider)
-	if strings.TrimSpace(cfg.LlamaServer.DefaultModel) == "" {
-		manager.WriteLog(localruntime.LogEntry{
-			Source:  "cercano.runtime.llama_server",
-			Level:   "info",
-			Message: "llama-server provider registered; no default_model configured",
-		})
-		return manager
+
+	// Warm the active runtime's default model. Single active runtime (D3), so
+	// at most one of these fires; warmDefaultRuntime also logs the
+	// "no default_model configured" case.
+	switch {
+	case mistralRSEnabled(cfg):
+		warmDefaultRuntime(manager, "mistralrs", cfg.MistralRS.DefaultModel)
+	case llamaServerEnabled(cfg):
+		warmDefaultRuntime(manager, "llama_server", cfg.LlamaServer.DefaultModel)
 	}
-	startDefaultRuntimeAsync(manager, cfg.LlamaServer.DefaultModel)
 	return manager
 }
 
@@ -583,21 +601,36 @@ func buildRuntimeManager(cfg config.Config) localruntime.Manager {
 // whole time. Requests that arrive before the model is ready fail with the
 // runtime's not-ready error; readiness surfaces through the runtime-status
 // event stream like every other runtime state change.
-func startDefaultRuntimeAsync(manager localruntime.Manager, modelID string) {
+func startDefaultRuntimeAsync(manager localruntime.Manager, runtime, modelID string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 		defer cancel()
 		if _, err := manager.Start(ctx, localruntime.StartRequest{
-			Runtime: "llama_server",
+			Runtime: runtime,
 			ModelID: modelID,
 		}); err != nil {
 			manager.WriteLog(localruntime.LogEntry{
-				Source:  "cercano.runtime.llama_server",
+				Source:  "cercano.runtime." + runtime,
 				Level:   "error",
-				Message: "failed to start llama-server: " + err.Error(),
+				Message: "failed to start " + runtime + ": " + err.Error(),
 			})
 		}
 	}()
+}
+
+// warmDefaultRuntime warms a runtime's configured default model in the
+// background, or logs that none is set. Shared by the llama-server and
+// mistral.rs lanes.
+func warmDefaultRuntime(manager localruntime.Manager, runtime, modelID string) {
+	if strings.TrimSpace(modelID) == "" {
+		manager.WriteLog(localruntime.LogEntry{
+			Source:  "cercano.runtime." + runtime,
+			Level:   "info",
+			Message: runtime + " provider registered; no default_model configured",
+		})
+		return
+	}
+	startDefaultRuntimeAsync(manager, runtime, modelID)
 }
 
 // sweepStalePartials removes .part files older than a week from the
@@ -629,6 +662,10 @@ func llamaServerEnabled(cfg config.Config) bool {
 	return cfg.LlamaServer.Enabled || strings.EqualFold(cfg.OpenRuntime, "llama_server")
 }
 
+func mistralRSEnabled(cfg config.Config) bool {
+	return cfg.MistralRS.Enabled || strings.EqualFold(cfg.OpenRuntime, "mistralrs")
+}
+
 // selectEmbedEngine picks the embedder for the configured runtime —
 // embeddings run on whatever local runtime is set up, not hardwired to
 // Ollama (local-model-taxonomy design).
@@ -639,13 +676,20 @@ func selectEmbedEngine(cfg config.Config, ollamaEng engine.EmbeddingService, lla
 	return ollamaEng
 }
 
-func selectOpenEngine(cfg config.Config, ollamaEng engine.InferenceEngine, llamaEng engine.InferenceEngine) (engine.InferenceEngine, string) {
+func selectOpenEngine(cfg config.Config, ollamaEng engine.InferenceEngine, llamaEng engine.InferenceEngine, mistralEng engine.InferenceEngine) (engine.InferenceEngine, string) {
 	if strings.EqualFold(cfg.OpenRuntime, "llama_server") {
 		model := strings.TrimSpace(cfg.LlamaServer.DefaultModel)
 		if model == "" {
 			model = cfg.OpenChatModel()
 		}
 		return llamaEng, model
+	}
+	if strings.EqualFold(cfg.OpenRuntime, "mistralrs") {
+		model := strings.TrimSpace(cfg.MistralRS.DefaultModel)
+		if model == "" {
+			model = cfg.OpenChatModel()
+		}
+		return mistralEng, model
 	}
 	return ollamaEng, cfg.OpenChatModel()
 }

@@ -45,7 +45,7 @@ func TestStartDefaultRuntimeAsyncDoesNotBlockCaller(t *testing.T) {
 	// Must return while Start is still blocked — a synchronous warm-up here
 	// holds the gRPC port unbound for the whole model load (the CLI's
 	// auto-launch window is 8s; a GGUF load is comfortably longer).
-	startDefaultRuntimeAsync(m, "qwen3-coder-next")
+	startDefaultRuntimeAsync(m, "llama_server", "qwen3-coder-next")
 	select {
 	case req := <-m.started:
 		if req.Runtime != "llama_server" || req.ModelID != "qwen3-coder-next" {
@@ -65,7 +65,7 @@ func TestStartDefaultRuntimeAsyncLogsFailure(t *testing.T) {
 		startErr: fmt.Errorf("binary missing"),
 	}
 	close(m.release) // Start fails immediately
-	startDefaultRuntimeAsync(m, "qwen3-coder-next")
+	startDefaultRuntimeAsync(m, "llama_server", "qwen3-coder-next")
 	<-m.started
 	select {
 	case e := <-m.logged:

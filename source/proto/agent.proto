@@ -1211,6 +1211,7 @@ message HostToWorker {
     PermissionResponse perm_response = 2;
     Cancel             cancel        = 3;
     CredentialResponse cred_response = 4;
+    OpenInferenceEvent open_event    = 5;
   }
 }
 
@@ -1224,6 +1225,7 @@ message WorkerToHost {
     TurnError         error        = 5;
     CredentialRequest cred_request = 6;
     EnsureSubagentConversation ensure_subagent = 7;
+    OpenInferenceRequest open_request = 8;
   }
 }
 
@@ -1460,4 +1462,59 @@ message CredentialResponse {
   string token   = 2; // API key or fresh access token, per the profile's auth flavor
   string error   = 3;
   string account = 4; // ChatGPT account ID (non-empty for subscription route; empty for static-key routes)
+}
+
+// OpenInferenceRequest asks the host to run an open-model chat on the worker's
+// behalf. The host owns the llama-server runtime manager; the worker has no
+// local open provider, so it proxies inference over the RunTurn stream (mirrors
+// CredentialRequest). Always streamed — the worker's non-streaming Chat
+// accumulates the events locally.
+message OpenInferenceRequest {
+  uint64         id      = 1;
+  LLMChatRequest request = 2;
+}
+
+// LLMChatRequest mirrors llm.ChatRequest for the open-inference proxy.
+message LLMChatRequest {
+  string              model            = 1;
+  string              system           = 2;
+  repeated LLMMessage messages         = 3;
+  repeated LLMTool    tools            = 4;
+  string              tool_choice_type = 5; // "", "auto", "any", "tool", "none"
+  string              tool_choice_name = 6; // set when tool_choice_type == "tool"
+  int32               max_tokens       = 7;
+  double              temperature      = 8;
+}
+
+// LLMTool mirrors llm.Tool (the model-facing fields; Permission is agent-side).
+message LLMTool {
+  string name        = 1;
+  string description = 2;
+  bytes  schema      = 3; // JSON schema (llm.Tool.Schema)
+}
+
+// OpenInferenceEvent streams one open-inference result back to the worker,
+// routed by request id. Terminates with done=true or a non-empty error.
+message OpenInferenceEvent {
+  uint64 id = 1;
+  oneof kind {
+    LLMStreamEvent event = 2;
+    string         error = 3;
+    bool           done  = 4;
+  }
+}
+
+// LLMStreamEvent mirrors llm.StreamEvent field-for-field.
+message LLMStreamEvent {
+  string type           = 1; // llm.StreamEventType serialized (e.g. "text_delta")
+  string text_delta     = 2;
+  string tool_use_id    = 3;
+  string tool_name      = 4;
+  bytes  tool_input_raw = 5;
+  string reasoning_id   = 6;
+  string reasoning_data = 7;
+  string stop_reason    = 8;
+  int64  input_tokens   = 9;
+  int64  output_tokens  = 10;
+  string err_text       = 11;
 }

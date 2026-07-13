@@ -82,6 +82,12 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 	// Created before the recv loop so it is ready to receive routed responses.
 	credSource := newStreamCredentialSource(sndr)
 
+	// Open provider proxy: the worker has no local runtime manager, so it
+	// forwards open-model inference to the host (which owns llama-server) over
+	// this stream. Routed OpenInferenceEvents deliver here. Created before the
+	// recv loop for the same reason as credSource.
+	openProxy := newLlamaServerProxy(sndr)
+
 	// Sub-agent persistence proxy: a worker-side dispatch creates its sub-agent
 	// conversation row and persists its turns on the host via this stream proxy
 	// (the worker has no local store). Built before buildDeps so the tool stack
@@ -102,6 +108,8 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 				permReq.deliver(msg.GetPermResponse())
 			case msg.GetCredResponse() != nil:
 				credSource.deliver(msg.GetCredResponse())
+			case msg.GetOpenEvent() != nil:
+				openProxy.deliver(msg.GetOpenEvent())
 			case msg.GetCancel() != nil:
 				cancel()
 				return
@@ -110,7 +118,7 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 	}()
 
 	// Build Deps from StartTurn.
-	deps, buildErr := w.buildDeps(ctx, start, credSource, subPersist)
+	deps, buildErr := w.buildDeps(ctx, start, credSource, openProxy, subPersist)
 	if buildErr != nil {
 		sndr.close()
 		cancel() // returning finalizes the stream; the recv goroutine unwinds on the Recv error
@@ -209,7 +217,7 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 
 // ─── buildDeps ────────────────────────────────────────────────────────────────
 
-func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, credSource *streamCredentialSource, subPersist *streamSubagentPersist) (runner.Deps, error) {
+func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, credSource *streamCredentialSource, openProxy *streamOpenProvider, subPersist *streamSubagentPersist) (runner.Deps, error) {
 	// Build config from snapshot.
 	cfg := ConfigFromSnapshot(start.GetConfig())
 	cfgService := cfgsvc.New("", cfg, secrets.NewMemory())
@@ -224,7 +232,7 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 		}
 	} else {
 		var err error
-		provSvc, err = buildWorkerProviders(ctx, cfg, credSource)
+		provSvc, err = buildWorkerProviders(ctx, cfg, credSource, openProxy)
 		if err != nil {
 			return runner.Deps{}, fmt.Errorf("build providers: %w", err)
 		}
@@ -316,7 +324,7 @@ func profileByName(profiles []pkgcfg.CloudProfile, name string) (pkgcfg.CloudPro
 	return pkgcfg.CloudProfile{}, false
 }
 
-func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource credentialFetcher) (providerssvc.Resolver, error) {
+func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource credentialFetcher, openProxy *streamOpenProvider) (providerssvc.Resolver, error) {
 	cfgService := cfgsvc.New("", cfg, secrets.NewMemory())
 	r := &workerResolver{cfgSvc: cfgService}
 
@@ -370,8 +378,15 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource cre
 	}
 	// No active profile → cloudProv remains nil.
 
-	// Build open (Ollama) provider if URL is set.
-	if cfg.OllamaURL != "" {
+	// Build the open provider, mirroring the host's openProviderFor: when the
+	// open runtime is llama-server the worker has no local access to it (the
+	// runtime manager is a host singleton), so route open inference through the
+	// host proxy over the RunTurn stream. Otherwise fall back to a direct Ollama
+	// client when a URL is configured. This is the fix for open dispatches
+	// hitting a dead Ollama endpoint under open_runtime=llama_server.
+	if cfg.OpenRuntime == "llama_server" {
+		r.openProv = openProxy
+	} else if cfg.OllamaURL != "" {
 		r.openProv = ollamallm.NewClient(ollamallm.Config{
 			BaseURL: cfg.OllamaURL,
 			// Read the open model from the everyday-open tier (OpenChatModel),

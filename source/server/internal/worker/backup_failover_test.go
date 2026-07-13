@@ -88,7 +88,7 @@ func TestWorkerBackupFailover_WrapsCompositeAndFailsOver(t *testing.T) {
 	}
 	creds := &fakeCredFetcher{tokens: map[string]string{"primary": "key-primary", "backup": "key-backup"}}
 
-	resolver, err := buildWorkerProviders(context.Background(), cfg, creds)
+	resolver, err := buildWorkerProviders(context.Background(), cfg, creds, nil)
 	if err != nil {
 		t.Fatalf("buildWorkerProviders: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestWorkerBackupFailover_NoBackupIsBareProvider(t *testing.T) {
 	}
 	creds := &fakeCredFetcher{tokens: map[string]string{"primary": "key-primary"}}
 
-	resolver, err := buildWorkerProviders(context.Background(), cfg, creds)
+	resolver, err := buildWorkerProviders(context.Background(), cfg, creds, nil)
 	if err != nil {
 		t.Fatalf("buildWorkerProviders: %v", err)
 	}

@@ -45,7 +45,7 @@ func TestBuildWorkerProviders_PrimaryFetchFail_NoNilFallbackPanic(t *testing.T) 
 		Models: pkgcfg.ModelsConfig{Tiers: pkgcfg.ModelTiers{Everyday: pkgcfg.ModelTier{Open: "qwen"}}},
 	}
 
-	r, err := buildWorkerProviders(context.Background(), cfg, &splitFetcher{backupName: "bkp"})
+	r, err := buildWorkerProviders(context.Background(), cfg, &splitFetcher{backupName: "bkp"}, nil)
 	if err != nil {
 		t.Fatalf("buildWorkerProviders: %v", err)
 	}

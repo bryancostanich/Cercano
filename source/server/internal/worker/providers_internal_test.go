@@ -37,7 +37,7 @@ func TestBuildWorkerProviders_SelectsActiveProfileByName(t *testing.T) {
 	}
 
 	f := &recordingFetcher{}
-	if _, err := buildWorkerProviders(context.Background(), cfg, f); err != nil {
+	if _, err := buildWorkerProviders(context.Background(), cfg, f, nil); err != nil {
 		t.Fatalf("buildWorkerProviders: %v", err)
 	}
 

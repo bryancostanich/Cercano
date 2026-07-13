@@ -254,6 +254,20 @@ capability — before the hardest piece (3).
   entries to what's verified; keep next-gen-MoE-on-Metal opt-in until those land.
   Re-checking those PRs' merge/release status is the cheap high-signal follow-up
   flagged in the evaluation doc.
+
+  **Verified 2026-07-12 (GitHub API):** latest release is **v0.9.0**
+  (2026-07-07). The Metal hybrid-MoE correctness PR **#2201** ("Fix Qwen3.6
+  (qwen3_5 / qwen3_5_moe) on Metal: RMSNorm, AFQ, lm_head, hybrid KV cache" —
+  the RMSNorm `+1` over-scale that compounds to a ~14× experts blow-up) is
+  **open, unmerged, and conflicted** (`mergeable_state: dirty`), from an outside
+  contributor, and per its own description depends on #2206 (zero-element KV
+  buffer, the Metal prerequisite) merging first — so it is **not in v0.9.0**.
+  It targets `qwen3_5_moe`, the same GDN-hybrid+MoE class as qwen3next, but
+  qwen3next would need its own loader/verification even once #2201 lands.
+  **Verdict: hybrid-MoE-on-Metal is still open / unreleased** — keep it
+  experimental/opt-in; do not ship a release-stable curated Metal entry for it.
+  **Recheck trigger:** re-verify #2201/#2206 and `/releases/latest` before
+  adopting any mistral.rs release after v0.9.0. (#2207/#2208 not re-verified.)
 - **Model weight/size.** `qwen3next` is an ~80B MoE; even afq2 UQFF is ~25 GB.
   The curated mistral.rs catalog must be honest about RAM tiers — this is a
   big-machine capability, not a laptop default.

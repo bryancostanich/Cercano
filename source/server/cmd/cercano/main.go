@@ -429,10 +429,20 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	}
 
 	// Resolve the active cloud profile and wire both the legacy and native
-	// cloud providers. Errors are logged but not fatal.
-	if err := srv.RebuildCloud(); err != nil {
-		fmt.Fprintf(os.Stderr, "[WARN] cloud profile resolution failed: %v — cloud routing will degrade to local.\n", err)
-	}
+	// cloud providers. Runs in the background: resolving a keychain-stored key
+	// can raise a blocking macOS authorization prompt (e.g. after a rebuild
+	// changes the binary's code identity), and that must NOT delay the gRPC
+	// server from serving. Otherwise the CLI — which only waits briefly for the
+	// agent to become reachable — times out ("signed out") while the prompt is
+	// still open. Cloud flips from absent to ready whenever resolution finishes;
+	// until then routing degrades to local. providerSvc.Rebuild() is already
+	// called concurrently with live turns (runtime profile changes), so
+	// backgrounding it here is safe. Errors are logged, not fatal.
+	go func() {
+		if err := srv.RebuildCloud(); err != nil {
+			fmt.Fprintf(os.Stderr, "[WARN] cloud profile resolution failed: %v — cloud routing will degrade to local.\n", err)
+		}
+	}()
 
 	// Native tool-loop local provider — follows the configured runtime.
 	// Under llama_server the provider resolves/warms instances through the

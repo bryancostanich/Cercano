@@ -388,8 +388,11 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource cre
 	// runtime manager is a host singleton), so route open inference through the
 	// host proxy over the RunTurn stream. Otherwise fall back to a direct Ollama
 	// client when a URL is configured. This is the fix for open dispatches
-	// hitting a dead Ollama endpoint under open_runtime=llama_server.
-	if cfg.OpenRuntime == "llama_server" {
+	// hitting a dead Ollama endpoint under a host-managed open runtime
+	// (llama-server or mistral.rs) — both live only on the host, so the worker
+	// proxies to the host, which serves them via its own openProviderFor. The
+	// proxy carries no runtime label; the host picks the engine from its config.
+	if cfg.OpenRuntime == "llama_server" || cfg.OpenRuntime == "mistralrs" {
 		r.openProv = openProxy
 	} else if cfg.OllamaURL != "" {
 		r.openProv = ollamallm.NewClient(ollamallm.Config{

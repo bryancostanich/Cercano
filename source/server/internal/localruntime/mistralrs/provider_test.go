@@ -53,9 +53,10 @@ func TestDiscoverFindsGGUFModels(t *testing.T) {
 	}
 }
 
-// TestDiscoverHasNoCatalog: Phase 1 surfaces only on-disk models — no curated
-// catalog entries are appended the way the llama-server provider does.
-func TestDiscoverHasNoCatalog(t *testing.T) {
+// TestDiscoverIncludesCuratedCatalog: on an empty model dir, Discover surfaces
+// exactly the embedded curated catalog entries (as not-yet-downloaded records)
+// and no on-disk models.
+func TestDiscoverIncludesCuratedCatalog(t *testing.T) {
 	dir := t.TempDir()
 	provider := NewProvider(config.MistralRSConfig{ModelDirs: []string{dir}})
 
@@ -63,8 +64,16 @@ func TestDiscoverHasNoCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Discover returned error: %v", err)
 	}
-	if len(models) != 0 {
-		t.Fatalf("expected no models from an empty dir, got %#v", models)
+	if len(models) == 0 {
+		t.Fatal("expected curated catalog models from an empty dir, got none")
+	}
+	for _, m := range models {
+		if m.Source != "catalog" {
+			t.Fatalf("empty dir should yield only catalog models, got source %q for %s", m.Source, m.ID)
+		}
+		if m.Runtime != runtimeName || m.DownloadState != "not_downloaded" {
+			t.Fatalf("unexpected catalog record: %#v", m)
+		}
 	}
 }
 

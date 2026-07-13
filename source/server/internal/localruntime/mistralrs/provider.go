@@ -132,8 +132,9 @@ func (p *Provider) Discover(ctx context.Context) ([]localruntime.ModelRecord, er
 	sort.Slice(models, func(i, j int) bool {
 		return models[i].DisplayName < models[j].DisplayName
 	})
-	// No curated catalog in Phase 1: Discover surfaces only the on-disk
-	// models found by the scan above.
+	// Append the embedded curated catalog (safetensors/UQFF/GGUF builds
+	// verified on the pinned mistral.rs) as downloadable records.
+	models = append(models, p.catalogModels()...)
 	return models, errors.Join(errs...)
 }
 

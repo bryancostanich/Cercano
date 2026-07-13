@@ -721,6 +721,7 @@ func (s *Server) SelectExecutionMode() {
 			}
 			return st.EnsureSubagentConversation(ctx, id, parentID, projectDir, model, grantedTools)
 		}, // worker-side dispatch: create the sub-agent conversation row on the host
+		func() llm.Provider { return s.OpenLLMProvider() }, // answers the worker's OpenInferenceRequests
 	)
 	log.Printf("[server] execution mode: worker (turns run in isolated child processes; " +
 		"MCP-involving turns fall back to in-process — worker MCP proxying is a future refinement)")

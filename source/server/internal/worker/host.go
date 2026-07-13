@@ -56,6 +56,12 @@ type workerRunner struct {
 	perms   permissions.Broker
 	secrets secrets.Store
 
+	// openProvider returns the host's current open (local-runtime) llm.Provider,
+	// used to answer a worker's OpenInferenceRequest. A factory (not a value) so
+	// a host-side runtime/config swap is honored per request. nil on
+	// dial-injected test runners without open support.
+	openProvider func() llm.Provider
+
 	// ensureSubagent creates a sub-agent conversation row when a worker-side
 	// dispatch requests one over the stream. Wired from the server's store; nil
 	// on dial-injected (test) runners (sub-agent rows are then not created).
@@ -87,6 +93,7 @@ func NewWorkerRunner(
 	perms permissions.Broker,
 	st secrets.Store,
 	ensureSubagent EnsureSubagentFunc,
+	openProvider func() llm.Provider,
 ) runner.TurnRunner {
 	pool := newWorkerPool(nil) // production: spawn via spawnWorker
 	// Start the idle-reaper with the configured window. The reaper runs on a
@@ -99,6 +106,7 @@ func NewWorkerRunner(
 		perms:          perms,
 		secrets:        st,
 		ensureSubagent: ensureSubagent,
+		openProvider:   openProvider,
 		pool:           pool,
 	}
 }
@@ -350,6 +358,13 @@ func (w *workerRunner) RunTurn(
 				}
 			}()
 
+		case *proto.WorkerToHost_OpenRequest:
+			// Answer open-model inference off the drain path: the worker has no
+			// local runtime manager, so it proxies open calls here and we run
+			// them through the host's open provider, streaming events back.
+			or := m.OpenRequest
+			go w.serveOpenInference(ctx, or, safeSend)
+
 		case *proto.WorkerToHost_Persist:
 			if m.Persist != nil && m.Persist.Message != nil {
 				lm, err := UnmarshalMessage(m.Persist.Message)
@@ -458,5 +473,56 @@ func testDialUnix(lis interface {
 				grpc.MaxCallRecvMsgSize(maxGRPCWorkerMsgBytes),
 			),
 		)
+	}
+}
+
+// serveOpenInference runs a proxied open-model call (OpenInferenceRequest) from
+// the worker through the host's open provider and streams the events back as
+// OpenInferenceEvents, terminating with done or a non-empty error. The worker
+// has no local runtime manager, so this is how open_runtime=llama_server work
+// runs in worker mode. Honors ctx cancel (a worker Cancel unwinds the stream).
+func (w *workerRunner) serveOpenInference(ctx context.Context, req *proto.OpenInferenceRequest, safeSend func(*proto.HostToWorker) error) {
+	id := req.GetId()
+	emit := func(ev *proto.OpenInferenceEvent) {
+		ev.Id = id
+		if sendErr := safeSend(&proto.HostToWorker{Msg: &proto.HostToWorker_OpenEvent{OpenEvent: ev}}); sendErr != nil {
+			log.Printf("[workerRunner] send open event id=%d: %v", id, sendErr)
+		}
+	}
+	fail := func(err error) {
+		emit(&proto.OpenInferenceEvent{Kind: &proto.OpenInferenceEvent_Error{Error: err.Error()}})
+	}
+
+	if w.openProvider == nil {
+		fail(fmt.Errorf("open inference unavailable: no open provider on host"))
+		return
+	}
+	prov := w.openProvider()
+	if prov == nil {
+		fail(fmt.Errorf("open inference unavailable: open provider not configured"))
+		return
+	}
+	chatReq, err := UnmarshalChatRequest(req.GetRequest())
+	if err != nil {
+		fail(fmt.Errorf("open inference: unmarshal request: %w", err))
+		return
+	}
+	rdr, err := prov.StreamChat(ctx, chatReq)
+	if err != nil {
+		fail(err)
+		return
+	}
+	defer rdr.Close()
+	for {
+		ev, ok, err := rdr.Next()
+		if err != nil {
+			fail(err)
+			return
+		}
+		if !ok {
+			emit(&proto.OpenInferenceEvent{Kind: &proto.OpenInferenceEvent_Done{Done: true}})
+			return
+		}
+		emit(&proto.OpenInferenceEvent{Kind: &proto.OpenInferenceEvent_Event{Event: MarshalStreamEvent(ev)}})
 	}
 }

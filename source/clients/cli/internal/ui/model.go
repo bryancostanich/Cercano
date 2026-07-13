@@ -1118,6 +1118,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.splashShown = true
 					m.splash = banner.NewAnimModel(m.palette, m.splash.Meta)
 					m.bannerTickActive = true
+					// Revealing the splash adds banner rows; resize the viewport
+					// so the prompt + status footer still fit (every other splash
+					// toggle relayouts too — omitting it pushes them off-screen).
+					m.relayout()
 					return m, tea.Batch(fetchConfigCmd(m.agent), m.splash.Init())
 				}
 			}

@@ -230,6 +230,19 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	consecutiveErrors := 0
 	var lastIn, lastOut int
 
+	// seenToolUse tracks every tool_use id already emitted in this conversation
+	// (seeded from prior turns). A well-formed stream never reuses a tool_use id
+	// across turns, so a re-emitted id means the model turn replays earlier
+	// content — the fabricated-turn fingerprint the framing guard cannot see.
+	seenToolUse := map[string]bool{}
+	for _, m := range in.ConvHistory {
+		for _, b := range m.Blocks {
+			if b.Type == llm.BlockToolUse && b.ToolUseID != "" {
+				seenToolUse[b.ToolUseID] = true
+			}
+		}
+	}
+
 	for iter := 0; unlimitedIters || iter < maxIters; iter++ {
 		req := llm.ChatRequest{
 			Model:     in.Model,
@@ -248,6 +261,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			return ToolLoopResult{}, err
 		}
 		lastIn, lastOut = resp.InputTokens, resp.OutputTokens
+		noteAssembledTurn(in.ConversationID, resp.Blocks, seenToolUse)
 		appendTurn(llm.Message{Role: llm.RoleAssistant, Blocks: resp.Blocks})
 
 		var toolCalls []llm.Block
@@ -542,12 +556,38 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			finalText += b.Text
 		}
 	}
+	noteAssembledTurn(in.ConversationID, resp.Blocks, seenToolUse)
 	hist = append(hist, llm.Message{Role: llm.RoleAssistant, Blocks: resp.Blocks})
 	return ToolLoopResult{
 		FinalText: finalText, FinalBlocks: resp.Blocks,
 		Iterations: maxIters, History: hist,
 		InputTokens: resp.InputTokens, OutputTokens: resp.OutputTokens,
 	}, nil
+}
+
+// noteAssembledTurn scans a freshly collected model turn for the resume-replay
+// fingerprint: a tool_use id already emitted earlier in this conversation. A
+// well-formed stream never reuses a tool_use id across turns, so a duplicate
+// means the turn replays prior content (a fabricated turn well-formed enough to
+// pass the framing guard). Each hit is recorded to the shared anomaly log with
+// the conversation id and the replayed call. Best-effort; never blocks the loop.
+func noteAssembledTurn(conversationID string, blocks []llm.Block, seen map[string]bool) {
+	for _, b := range blocks {
+		if b.Type != llm.BlockToolUse || b.ToolUseID == "" {
+			continue
+		}
+		if seen[b.ToolUseID] {
+			preview := string(b.ToolInput)
+			if len(preview) > 200 {
+				preview = preview[:200] + "\u2026"
+			}
+			llm.RecordAnomaly(conversationID, "replayed_tool_use",
+				fmt.Sprintf("tool_use id=%s name=%s re-emitted in a later turn (replay fingerprint); input=%s",
+					b.ToolUseID, b.ToolName, preview))
+			continue
+		}
+		seen[b.ToolUseID] = true
+	}
 }
 
 // truncateForError bounds raw model output quoted inside an error message.

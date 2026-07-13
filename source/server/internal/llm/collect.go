@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
-	"time"
 )
 
 // CollectStream consumes a StreamReader into a ChatResponse. onText, when
@@ -199,26 +197,5 @@ func streamAnomalySummary(blocks []Block, partialText string) string {
 // conversations is captured with its content + conversation id — a reviewable
 // trail instead of ad-hoc incident hunting. Best-effort; never affects the stream.
 func recordStreamAnomaly(ctx context.Context, reason, content string) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-	rec := map[string]any{
-		"ts":           time.Now().Unix(),
-		"conversation": SessionIDFromContext(ctx),
-		"reason":       reason,
-		"bytes":        len(content),
-		"content":      content,
-	}
-	blob, err := json.Marshal(rec)
-	if err != nil {
-		return
-	}
-	fh, err := os.OpenFile(filepath.Join(home, ".config", "cercano", "stream-anomalies.jsonl"),
-		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return
-	}
-	defer fh.Close()
-	_, _ = fh.Write(append(blob, '\n'))
+	RecordAnomaly(SessionIDFromContext(ctx), reason, content)
 }

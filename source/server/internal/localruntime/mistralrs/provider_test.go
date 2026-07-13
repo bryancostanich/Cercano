@@ -108,6 +108,25 @@ func TestArgsForIncludesISQ(t *testing.T) {
 	}
 }
 
+func TestArgsForUsesLoadTargetDirectory(t *testing.T) {
+	provider := NewProvider(config.MistralRSConfig{Host: "127.0.0.1"})
+	// A multi-file safetensors/UQFF model: Path anchors the download inside the
+	// model's directory, but mistral.rs is pointed at the directory itself.
+	model := provider.modelRecord("/models/qwen3-4b/config.json", fakeFileInfo{size: 42})
+	model.LoadTarget = "/models/qwen3-4b"
+
+	got := provider.argsFor(model, 8123)
+	want := []string{
+		"serve",
+		"-m", "/models/qwen3-4b",
+		"--port", "8123",
+		"--no-ui",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("args mismatch:\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
 func TestCapabilitiesAdvertiseTools(t *testing.T) {
 	caps := NewProvider(config.MistralRSConfig{}).Capabilities()
 	if !caps.ManagedProcesses || !caps.CanStart || !caps.CanStop || !caps.CanRestart {

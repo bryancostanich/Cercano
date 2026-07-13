@@ -402,9 +402,16 @@ func (p *Provider) startProcess(instanceID, binary string, sink localruntime.Log
 // reconfirmed against the binary's `serve --help` during the Phase 1
 // integration test.
 func (p *Provider) argsFor(model localruntime.ModelRecord, port int) []string {
+	// mistral.rs is pointed at the model directory for a multi-file
+	// safetensors/UQFF model (LoadTarget), or the file itself for a single-file
+	// GGUF (Path when LoadTarget is empty).
+	target := model.Path
+	if model.LoadTarget != "" {
+		target = model.LoadTarget
+	}
 	args := []string{
 		"serve",
-		"-m", model.Path,
+		"-m", target,
 		"--port", strconv.Itoa(port),
 		"--no-ui",
 	}

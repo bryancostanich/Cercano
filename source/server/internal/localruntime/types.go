@@ -71,11 +71,17 @@ type ProviderInfo struct {
 }
 
 type ModelRecord struct {
-	ID            string
-	DisplayName   string
-	Runtime       string
-	Source        string
-	Path          string
+	ID          string
+	DisplayName string
+	Runtime     string
+	Source      string
+	Path        string
+	// LoadTarget is what the runtime is pointed at when it differs from Path:
+	// empty for a single-file GGUF (the runtime loads Path, the file); the
+	// model's directory for a multi-file safetensors/UQFF model (mistral.rs is
+	// launched with `-m <dir>`), where Path anchors the download inside that
+	// directory. Empty means "use Path".
+	LoadTarget    string
 	Format        string
 	Family        string
 	Quantization  string

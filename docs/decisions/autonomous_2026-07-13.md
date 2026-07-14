@@ -121,4 +121,35 @@ rules forbid. The independent-session concept is an artifact of Meridian's
 stateful multiplexing; the stateless API makes it moot. Bundled into the
 Meridian-deletion commits (each with its log line).
 
-Commits: (Meridian deletion, below).
+Commits: ffcf69cc, dab41852, 2973e003 (Meridian deletion steps 1–3).
+
+### Fork C — migrating existing Meridian profiles
+
+**Decision point.** On load, `autoDetectMeridianRoute` promoted profiles at
+Meridian's default port (127.0.0.1:3456) to `route=meridian`. Meridian is gone.
+What happens to a user's existing meridian profile on the first post-upgrade
+load? (Bryan pre-decided the shape: "we can force a re-auth. no coexist.")
+
+**Options.**
+1. **Rewrite `meridian` → `subscription` on load + clear the proxy BaseURL;
+   force re-auth.** The migrated profile has no token in *our* keychain
+   (Meridian read `claude login`'s, not ours), so rebuildCloud lands it
+   "absent" until the user signs in through the loopback flow.
+   - Correctness: a working-but-now-impossible proxy profile becomes a
+     valid-shape subscription profile that transparently prompts sign-in. No
+     silent breakage, no dead proxy URL left to confuse the direct client.
+   - Cleanliness: one migration function replaces the old auto-detect; no
+     meridian route value survives anywhere.
+2. **Drop meridian profiles entirely on load.** Loses the user's model choice /
+   profile name / backup wiring; more destructive than needed. Rejected.
+3. **Leave them as `route=meridian`.** The route no longer exists — the profile
+   is inert and the client can't explain why. Violates "no coexist". Rejected.
+
+**Decision: Option 1.** Correctness-first: it's the only option that neither
+silently breaks a profile (3) nor discards user state (2). The cleared BaseURL
+matters — the subscription route pins api.anthropic.com and a leftover
+`:3456` URL would otherwise route a direct call at a dead proxy. Un-routed
+`:3456` profiles (pre-route configs) are migrated the same way. This replaces
+`autoDetectMeridianRoute` outright — no legacy detect path remains.
+
+Commits: (config migration + wizard/labels, below).

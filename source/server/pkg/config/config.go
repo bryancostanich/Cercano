@@ -520,22 +520,30 @@ func migrateCloudProfiles(cfg *Config) {
 	cfg.ActiveCloudProfile = "default"
 }
 
-// autoDetectMeridianRoute promotes profiles that look like Meridian (default
-// local OAuth bridge port) to route=meridian on first load. Without this,
-// users upgrading from a pre-route config would silently lose Meridian's
-// OpenCode-adapter treatment (3-turn SDK cap instead of 4). Heuristic only —
-// users can hand-edit afterwards. Safe: never overrides an explicit Route.
+// migrateMeridianToSubscription rewrites legacy Meridian profiles to the native
+// subscription route on load. The external Meridian OAuth proxy has been
+// removed; the subscription route calls api.anthropic.com directly with our own
+// OAuth token. Any profile explicitly on route=meridian — or an un-routed
+// profile still pointing at Meridian's default local port (a pre-route config)
+// — is flipped to route=subscription with its proxy BaseURL cleared (the
+// subscription route pins api.anthropic.com; a leftover :3456 URL would send a
+// direct call at a dead proxy).
 //
-// The "127.0.0.1:3456" needle is Meridian's documented default port. If you
-// run Meridian on a different host/port, set route: meridian manually.
-func autoDetectMeridianRoute(cfg *Config) {
+// The migrated profile has no token in our keychain (Meridian read what `claude
+// login` wrote, not our own OAuth store), so it lands "absent" until the user
+// signs in through the loopback flow — the intended one-time re-auth.
+func migrateMeridianToSubscription(cfg *Config) {
 	for i := range cfg.CloudProfiles {
 		p := &cfg.CloudProfiles[i]
-		if p.Route != "" {
+		isMeridian := p.Route == "meridian" ||
+			(p.Route == "" && (strings.Contains(p.BaseURL, "127.0.0.1:3456") || strings.Contains(p.BaseURL, "localhost:3456")))
+		if !isMeridian {
 			continue
 		}
-		if strings.Contains(p.BaseURL, "127.0.0.1:3456") || strings.Contains(p.BaseURL, "localhost:3456") {
-			p.Route = "meridian"
+		p.Route = "subscription"
+		p.BaseURL = ""
+		if p.Flavor == "" {
+			p.Flavor = "messages"
 		}
 	}
 }
@@ -645,7 +653,7 @@ func Load(path string) (Config, error) {
 	applyEnvOverrides(&cfg)
 	finalizeModelTiers(&cfg)
 	migrateCloudProfiles(&cfg)
-	autoDetectMeridianRoute(&cfg)
+	migrateMeridianToSubscription(&cfg)
 	if !ValidateToolLoopMaxIterations(cfg.ToolLoop.MaxIterations) {
 		return cfg, fmt.Errorf("tool_loop.max_iterations must be -1 or a non-negative integer, got %d", cfg.ToolLoop.MaxIterations)
 	}

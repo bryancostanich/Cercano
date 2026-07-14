@@ -383,24 +383,30 @@ func TestCloudProfileBackendYAML(t *testing.T) {
 // Profiles pointed at Meridian's default port get auto-promoted to
 // route: meridian on load. Without this, users upgrading from a pre-route
 // config silently lose Meridian's OpenCode-adapter treatment.
-func TestAutoDetectMeridianRoute(t *testing.T) {
+func TestMigrateMeridianToSubscription(t *testing.T) {
 	cases := []struct {
-		name    string
-		profile CloudProfile
-		want    string
+		name        string
+		profile     CloudProfile
+		wantRoute   string
+		wantBaseURL string
 	}{
-		{"127.0.0.1 default port", CloudProfile{Name: "a", BaseURL: "http://127.0.0.1:3456"}, "meridian"},
-		{"localhost default port", CloudProfile{Name: "b", BaseURL: "http://localhost:3456"}, "meridian"},
-		{"non-default port stays empty", CloudProfile{Name: "c", BaseURL: "http://127.0.0.1:9999"}, ""},
-		{"public URL stays empty", CloudProfile{Name: "d", BaseURL: "https://api.anthropic.com"}, ""},
-		{"explicit route preserved", CloudProfile{Name: "e", BaseURL: "http://127.0.0.1:3456", Route: "direct"}, "direct"},
+		{"explicit meridian route", CloudProfile{Name: "a", Flavor: "messages", Route: "meridian", BaseURL: "http://127.0.0.1:3456"}, "subscription", ""},
+		{"un-routed 127 default port", CloudProfile{Name: "b", BaseURL: "http://127.0.0.1:3456"}, "subscription", ""},
+		{"un-routed localhost default port", CloudProfile{Name: "c", BaseURL: "http://localhost:3456"}, "subscription", ""},
+		{"non-default port untouched", CloudProfile{Name: "d", BaseURL: "http://127.0.0.1:9999"}, "", "http://127.0.0.1:9999"},
+		{"public URL untouched", CloudProfile{Name: "e", BaseURL: "https://api.anthropic.com"}, "", "https://api.anthropic.com"},
+		{"explicit direct route preserved", CloudProfile{Name: "f", Route: "direct", BaseURL: "http://127.0.0.1:3456"}, "direct", "http://127.0.0.1:3456"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &Config{CloudProfiles: []CloudProfile{tc.profile}}
-			autoDetectMeridianRoute(cfg)
-			if got := cfg.CloudProfiles[0].Route; got != tc.want {
-				t.Errorf("Route = %q, want %q", got, tc.want)
+			migrateMeridianToSubscription(cfg)
+			got := cfg.CloudProfiles[0]
+			if got.Route != tc.wantRoute {
+				t.Errorf("Route = %q, want %q", got.Route, tc.wantRoute)
+			}
+			if got.BaseURL != tc.wantBaseURL {
+				t.Errorf("BaseURL = %q, want %q", got.BaseURL, tc.wantBaseURL)
 			}
 		})
 	}

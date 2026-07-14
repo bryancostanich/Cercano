@@ -202,3 +202,26 @@ matters — the subscription route pins api.anthropic.com and a leftover
 `autoDetectMeridianRoute` outright — no legacy detect path remains.
 
 Commits: (config migration + wizard/labels, below).
+
+### Follow-up — default runtime/routing policy
+
+**Decision point.** After the native subscription route landed, the stock
+configuration still defaulted to `open_runtime: ollama` and
+`locus_mode: open_primary`. That made a fresh or partially-rewritten config send
+main tool-loop turns to the Ollama adapter first, which is wrong for the
+subscription-focused default experience.
+
+**Decision.** Default new configs and empty locus-mode parsing to
+`open_runtime: llama_server` plus `locus_mode: cloud_primary`. Main agent work
+therefore prefers the active cloud profile with local fallback; co-processor work
+keeps the existing CloudPrimary behavior of preferring local first. The managed
+local fallback is llama-server, not Ollama. The `models.default_provider` default
+is left unchanged in this commit because this request is about runtime/routing
+policy, not tier-taxonomy preference.
+
+**Test impact.** The multi-surface attach proof previously synchronized on an
+advisory progress event that only appeared on the old route shape. It now waits
+only for the load-bearing broker events (`RouteSelected` replay + `Token` live),
+which matches the test's own correctness contract.
+
+Commit: this follow-up default-policy commit.

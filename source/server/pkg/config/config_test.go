@@ -39,8 +39,8 @@ func TestDefaults(t *testing.T) {
 	if cfg.OllamaURL != "http://localhost:11434" {
 		t.Errorf("expected default OllamaURL, got %q", cfg.OllamaURL)
 	}
-	if cfg.OpenRuntime != "ollama" {
-		t.Errorf("expected default OpenRuntime, got %q", cfg.OpenRuntime)
+	if cfg.OpenRuntime != "llama_server" {
+		t.Errorf("expected default OpenRuntime llama_server, got %q", cfg.OpenRuntime)
 	}
 	// The legacy model fields are retired: Defaults() leaves them blank and
 	// the stock models land in the tier slots at Load time (finalizeModelTiers).
@@ -289,8 +289,8 @@ func TestDefaults_Retention(t *testing.T) {
 }
 
 func TestDefaultsLocusMode(t *testing.T) {
-	if got := Defaults().LocusMode; got != "open_primary" {
-		t.Errorf("Defaults().LocusMode = %q; want open_primary", got)
+	if got := Defaults().LocusMode; got != "cloud_primary" {
+		t.Errorf("Defaults().LocusMode = %q; want cloud_primary", got)
 	}
 }
 

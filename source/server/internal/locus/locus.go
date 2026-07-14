@@ -10,12 +10,13 @@ type Mode string
 const (
 	CloudOnly    Mode = "cloud_only"
 	CloudPrimary Mode = "cloud_primary"
-	OpenPrimary Mode = "open_primary"
-	OpenOnly    Mode = "open_only"
+	OpenPrimary  Mode = "open_primary"
+	OpenOnly     Mode = "open_only"
 )
 
-// DefaultMode preserves Cercano's local-first intent.
-const DefaultMode = OpenPrimary
+// DefaultMode keeps main agent work on cloud first while retaining local
+// fallback when the cloud profile is unavailable.
+const DefaultMode = CloudPrimary
 
 type Tier int
 

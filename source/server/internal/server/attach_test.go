@@ -73,9 +73,9 @@ func (s *pausableStream) Close() error { return nil }
 // pausableProvider wraps scriptedProvider but returns a pausableStream.
 type pausableProvider struct {
 	blocks     []llm.Block
-	pauseAfter int     // event index at which to pause
+	pauseAfter int           // event index at which to pause
 	release    chan struct{} // test closes this to unblock
-	onPause    func()  // called when the pause point is reached
+	onPause    func()        // called when the pause point is reached
 }
 
 func (p *pausableProvider) Name() string { return "pausable" }
@@ -106,12 +106,12 @@ func (p *pausableProvider) StreamChat(_ context.Context, _ llm.ChatRequest) (llm
 // count causes a channel to be closed once that many messages have been received.
 type collectingStream struct {
 	grpc.ServerStream // embed for unimplemented methods
-	mu           sync.Mutex
-	ctx          context.Context
-	msgs         []*proto.StreamProcessResponse
-	notifyAfter  int           // if > 0, close notifyCh once len(msgs) >= notifyAfter
-	notifyCh     chan struct{}  // closed once notifyAfter is reached
-	notifyOnce   sync.Once
+	mu                sync.Mutex
+	ctx               context.Context
+	msgs              []*proto.StreamProcessResponse
+	notifyAfter       int           // if > 0, close notifyCh once len(msgs) >= notifyAfter
+	notifyCh          chan struct{} // closed once notifyAfter is reached
+	notifyOnce        sync.Once
 }
 
 func newCollectingStream(ctx context.Context) *collectingStream {
@@ -196,10 +196,10 @@ func TestAttachConversation_TwoSurfacesSeeOneTurn(t *testing.T) {
 	//   replay = events published before the attach: Progress + RouteSelected
 	//   live = events published after resume: Token
 	// The attacher sees replay+live = all broker-published events.
-	// We wait for at least (RouteSelected + Token) = 2 events from the attacher,
-	// but in practice there are 3 (Progress + RouteSelected + Token).
-	// We use notifyAfter=3 (the observed count from the initiator, minus FinalResponse).
-	const attacherExpected = 3
+	// We wait for the load-bearing broker events from the attacher: RouteSelected
+	// replay plus Token live. Progress events are advisory and route-dependent, so
+	// they must not be part of the synchronization contract.
+	const attacherExpected = 2
 
 	// Initiator stream.
 	initiatorCtx, initiatorCancel := context.WithCancel(context.Background())

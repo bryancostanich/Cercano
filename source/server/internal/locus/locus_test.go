@@ -4,11 +4,11 @@ import "testing"
 
 func TestParseMode(t *testing.T) {
 	cases := map[string]Mode{
-		"":              OpenPrimary,
-		"open_primary": OpenPrimary,
+		"":              CloudPrimary,
+		"open_primary":  OpenPrimary,
 		"cloud_only":    CloudOnly,
 		"cloud_primary": CloudPrimary,
-		"open_only":    OpenOnly,
+		"open_only":     OpenOnly,
 	}
 	for in, want := range cases {
 		got, err := ParseMode(in)

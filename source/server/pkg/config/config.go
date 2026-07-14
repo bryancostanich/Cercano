@@ -421,8 +421,8 @@ func (r *RestartConfig) UnmarshalYAML(value *yaml.Node) error {
 func Defaults() Config {
 	return Config{
 		OllamaURL:     "http://localhost:11434",
-		OpenRuntime:   "ollama",
-		LocusMode:     "open_primary",
+		OpenRuntime:   "llama_server",
+		LocusMode:     "cloud_primary",
 		Catalog:       CatalogConfig{Backend: "huggingface"},
 		Port:          "50052",
 		ExecutionMode: "worker",

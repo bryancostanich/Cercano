@@ -198,13 +198,23 @@ func TestPending_Wait(t *testing.T) {
 		resCh <- res{ts, err}
 	}()
 
-	// Simulated browser redirect back to the loopback listener.
+	// Simulated browser redirect back to the loopback listener. Read the full
+	// page body: it must arrive intact (the teardown race that showed as
+	// "localhost refused to connect" would truncate or reset it) and carry
+	// the success copy the user is told to act on.
 	cbURL := redirect + "?code=the-code&state=" + url.QueryEscape(state)
 	hresp, err := http.Get(cbURL)
 	if err != nil {
 		t.Fatalf("callback GET: %v", err)
 	}
+	page, err := io.ReadAll(hresp.Body)
 	hresp.Body.Close()
+	if err != nil {
+		t.Fatalf("reading callback page body: %v", err)
+	}
+	if !strings.Contains(string(page), "Successfully authenticated") {
+		t.Errorf("callback page missing success copy; got %q", string(page))
+	}
 
 	r := <-resCh
 	if r.err != nil {

@@ -48,7 +48,7 @@ func (a *Agent) degradeIfCloudFailure(ctx context.Context, provider ModelProvide
 	if kind == "not configured" {
 		hint = "Set cloud_base_url / cloud_api_key in ~/.config/cercano/config.yaml to enable cloud."
 	} else {
-		hint = "Check Meridian / API key / model name in ~/.config/cercano/config.yaml. Tail the agent log for the full error."
+		hint = "Check the API key / model name in ~/.config/cercano/config.yaml. Tail the agent log for the full error."
 	}
 	res.Notice = "Cloud " + kind + " (" + reason + "). Answered locally. " + hint
 	return res, true

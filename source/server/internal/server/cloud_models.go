@@ -48,20 +48,12 @@ func (s *Server) ListCloudProfileModels(ctx context.Context, req *proto.ListClou
 	}
 	httpReq.Header.Set("anthropic-version", "2023-06-01")
 
-	// Auth. Meridian mints an OAuth session upstream but still needs the
-	// opencode-family headers Cercano injects on the inference path — Meridian
-	// uses them to bind the request to a session and bump the SDK turn cap.
-	// Direct routes carry an API key from the keychain.
-	switch p.Route {
-	case "meridian":
-		httpReq.Header.Set("x-opencode-session", newHexID(12))
-		httpReq.Header.Set("x-opencode-request", newHexID(16))
-		httpReq.Header.Set("x-opencode-agent-mode", "primary")
-	default:
-		if st := s.cfgSvc.Secrets(); st != nil {
-			if key, err := st.Get(name); err == nil && key != "" {
-				httpReq.Header.Set("x-api-key", key)
-			}
+	// Auth: carry the profile's API key from the keychain. Subscription
+	// profiles have an empty base_url and are short-circuited above onto the
+	// curated fallback list, so they never reach this fetch.
+	if st := s.cfgSvc.Secrets(); st != nil {
+		if key, err := st.Get(name); err == nil && key != "" {
+			httpReq.Header.Set("x-api-key", key)
 		}
 	}
 

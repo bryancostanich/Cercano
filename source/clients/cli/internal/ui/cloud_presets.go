@@ -171,8 +171,8 @@ func rowAnnotation(r cloudRow) string {
 // the user sees not just that a provider is active but how it authenticates.
 func activeLabel(r cloudRow) string {
 	switch {
-	case r.Profile != nil && r.Profile.Route == "meridian":
-		return "active (meridian)"
+	case r.Profile != nil && r.Profile.Route == "subscription":
+		return "active (subscription)"
 	case r.Profile != nil && r.Profile.Flavor == "responses":
 		return "active (ChatGPT OAuth)"
 	default:
@@ -185,8 +185,8 @@ func activeLabel(r cloudRow) string {
 // instead. Otherwise reflect keychain presence.
 func authHint(r cloudRow) string {
 	switch {
-	case r.Profile != nil && r.Profile.Route == "meridian":
-		return "meridian"
+	case r.Profile != nil && r.Profile.Route == "subscription":
+		return "subscription"
 	case r.HasKey:
 		return "✓ key"
 	default:

@@ -18,7 +18,7 @@ func sampleProvidersView() agentclient.CloudProvidersView {
 			{ID: "anthropic", Label: "anthropic", Flavor: "messages", Tier: "verified",
 				PrimaryProfile: "work-anthropic",
 				Profiles: []agentclient.CloudProfileInfo{
-					{Name: "work-anthropic", Flavor: "messages", Route: "meridian", Model: "claude-opus-4-8"},
+					{Name: "work-anthropic", Flavor: "messages", Route: "subscription", Model: "claude-opus-4-8"},
 					{Name: "personal-anthropic", Flavor: "messages", HasKey: true, Model: "claude-sonnet"},
 				}},
 			{ID: "openai-responses", Label: "openai (responses)", Flavor: "responses", BaseURL: "https://api.openai.com/v1", Tier: "untested"},
@@ -109,9 +109,9 @@ func TestRowAnnotation(t *testing.T) {
 			expected: "claude-opus-4-8  active",
 		},
 		{
-			name:     "active meridian → active (meridian)",
-			row:      cloudRow{ID: "profile:x", IsProfile: true, Active: true, Profile: &agentclient.CloudProfileInfo{Model: "claude-opus-4-8", Route: "meridian"}},
-			expected: "claude-opus-4-8  active (meridian)",
+			name:     "active subscription → active (subscription)",
+			row:      cloudRow{ID: "profile:x", IsProfile: true, Active: true, Profile: &agentclient.CloudProfileInfo{Model: "claude-opus-4-8", Route: "subscription"}},
+			expected: "claude-opus-4-8  active (subscription)",
 		},
 		{
 			name:     "active responses → active (ChatGPT OAuth)",
@@ -119,9 +119,9 @@ func TestRowAnnotation(t *testing.T) {
 			expected: "gpt-5.5  active (ChatGPT OAuth)",
 		},
 		{
-			name:     "inactive meridian shows route as auth hint",
-			row:      cloudRow{ID: "profile:x", IsProfile: true, Active: false, Profile: &agentclient.CloudProfileInfo{Route: "meridian"}},
-			expected: "— no model  meridian",
+			name:     "inactive subscription shows route as auth hint",
+			row:      cloudRow{ID: "profile:x", IsProfile: true, Active: false, Profile: &agentclient.CloudProfileInfo{Route: "subscription"}},
+			expected: "— no model  subscription",
 		},
 		{
 			name:     "other row",

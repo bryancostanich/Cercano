@@ -2,8 +2,6 @@ package anthropic
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"net/http"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
@@ -17,19 +15,20 @@ type Config struct {
 	APIKey    string
 	Model     string
 	UserAgent string
-	// Route names the access path. "" / "direct" → vanilla Anthropic API.
-	// "meridian" → emit opencode-style identification headers so the local
-	// Meridian OAuth bridge routes through its OpenCode adapter (4-turn cap
-	// instead of the default 3). See routeMeridian for the header set.
+	// Route names the access path and selects the request authenticator
+	// (see auth.go):
+	//   "" / "direct"  → vanilla Anthropic API; the SDK's x-api-key stands.
+	//   "subscription" → Claude Max/Pro OAuth: a refreshing Bearer token, the
+	//                    oauth beta header, and the Claude Code identity system
+	//                    block (auth_subscription.go). Requires TokenSource.
+	//   "meridian"     → legacy OpenCode-spoof bridge (auth_meridian.go),
+	//                    slated for deletion once the subscription route lands.
 	Route string
+	// TokenSource supplies refreshing subscription bearers; required when
+	// Route == "subscription", ignored otherwise. anthropicauth.Source
+	// satisfies it structurally.
+	TokenSource TokenSource
 }
-
-// Known route values. Kept here so the adapter is the single place that
-// names access paths it handles.
-const (
-	routeDirect   = "direct"
-	routeMeridian = "meridian"
-)
 
 type ChatRequest = llm.ChatRequest
 type ChatResponse = llm.ChatResponse
@@ -37,65 +36,10 @@ type ChatResponse = llm.ChatResponse
 type Client struct {
 	cfg Config
 	sdk *sdk.Client
-}
-
-// WithSessionID attaches a conversation/session ID to ctx so the adapter's
-// RoundTripper can emit opencode-style identification headers per request.
-// Thin alias over the provider-neutral llm.WithSessionID — dispatch and server
-// code stamps through the llm package; both reach the same key.
-func WithSessionID(ctx context.Context, id string) context.Context {
-	return llm.WithSessionID(ctx, id)
-}
-
-type headerRoundTripper struct {
-	base  http.RoundTripper
-	ua    string
-	route string // when "meridian", emit opencode-style identification headers
-}
-
-func (h *headerRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
-	if h.ua != "" {
-		r.Header.Set("User-Agent", h.ua)
-	}
-	// TODO(cercano-native-bridge-adapter): the opencode-* header set is a
-	// borrowed identity — Cercano claims to be OpenCode so Meridian routes
-	// through its OpenCode adapter (4-turn SDK cap vs the default 3-turn
-	// cap which would break our 10-round tool loop). When Meridian (or any
-	// successor bridge) ships a native Cercano adapter, swap these for
-	// x-cercano-* and drop the dishonesty. See docs/agent/README.md.
-	if h.route == routeMeridian {
-		sid := llm.SessionIDFromContext(r.Context())
-		if sid == "" {
-			// Never send a session-less request through Meridian: its OpenCode
-			// adapter falls back to matching the conversation by a content
-			// fingerprint (cwd + first user message), which collides across
-			// concurrent conversations with templated prompts and cross-delivers
-			// their turns. A fresh random id gives an unstamped call its own
-			// isolated lineage instead.
-			sid = "anon-" + newHexToken()
-		}
-		r.Header.Set("x-opencode-session", sid)
-		r.Header.Set("x-opencode-request", newMessageID())
-		r.Header.Set("x-opencode-agent-mode", "primary")
-		// An independent session (dispatch subagent / one-shot) additionally
-		// tells Meridian to skip lineage matching: its adapter treats a
-		// requestSource of subagent-*/fork-* as `{type: "diverged"}` and never
-		// resumes a cached session. Second isolation layer over the unique id.
-		if llm.IsIndependentSession(r.Context()) {
-			r.Header.Set("x-meridian-source", "subagent-"+sid)
-		}
-	}
-	return h.base.RoundTrip(r)
-}
-
-func newMessageID() string {
-	return "msg-" + newHexToken()
-}
-
-func newHexToken() string {
-	var b [16]byte
-	_, _ = rand.Read(b[:])
-	return hex.EncodeToString(b[:])
+	// systemPrefix is prepended as the first system block on every request.
+	// Non-empty only on the subscription route (the Claude Code identity),
+	// where Anthropic gates access on the leading system block.
+	systemPrefix string
 }
 
 func NewClient(cfg Config) *Client {
@@ -103,17 +47,19 @@ func NewClient(cfg Config) *Client {
 	if apiKey == "" {
 		apiKey = "dummy"
 	}
-	opts := []option.RequestOption{
-		option.WithAPIKey(apiKey),
-	}
+	opts := []option.RequestOption{option.WithAPIKey(apiKey)}
 	if cfg.BaseURL != "" {
 		opts = append(opts, option.WithBaseURL(cfg.BaseURL))
 	}
 	opts = append(opts, option.WithHTTPClient(&http.Client{
-		Transport: &headerRoundTripper{base: http.DefaultTransport, ua: cfg.UserAgent, route: cfg.Route},
+		Transport: &authRoundTripper{
+			base: http.DefaultTransport,
+			ua:   cfg.UserAgent,
+			auth: authenticatorForRoute(cfg),
+		},
 	}))
 	c := sdk.NewClient(opts...)
-	return &Client{cfg: cfg, sdk: &c}
+	return &Client{cfg: cfg, sdk: &c, systemPrefix: systemPrefixForRoute(cfg.Route)}
 }
 
 func (c *Client) Name() string { return "anthropic" }
@@ -128,14 +74,28 @@ func (c *Client) Capabilities() llm.Capabilities {
 	}
 }
 
-func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+// systemBlocks assembles the system prompt as ordered text blocks. The prefix
+// (the Claude Code identity, on the subscription route) must come first —
+// Anthropic gates subscription access on the leading system block.
+func systemBlocks(prefix, system string) []sdk.TextBlockParam {
+	var out []sdk.TextBlockParam
+	if prefix != "" {
+		out = append(out, sdk.TextBlockParam{Text: prefix})
+	}
+	if system != "" {
+		out = append(out, sdk.TextBlockParam{Text: system})
+	}
+	return out
+}
+
+func (c *Client) buildParams(req ChatRequest) sdk.MessageNewParams {
 	params := sdk.MessageNewParams{
 		Model:     sdk.Model(req.Model),
 		MaxTokens: int64(req.MaxTokens),
 		Messages:  messagesToSDK(req.Messages),
 	}
-	if req.System != "" {
-		params.System = []sdk.TextBlockParam{{Text: req.System}}
+	if sys := systemBlocks(c.systemPrefix, req.System); len(sys) > 0 {
+		params.System = sys
 	}
 	if len(req.Tools) > 0 {
 		params.Tools = toolsToSDK(req.Tools)
@@ -143,8 +103,11 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 	if req.Temperature > 0 {
 		params.Temperature = sdk.Float(req.Temperature)
 	}
+	return params
+}
 
-	resp, err := c.sdk.Messages.New(ctx, params)
+func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+	resp, err := c.sdk.Messages.New(ctx, c.buildParams(req))
 	if err != nil {
 		return ChatResponse{}, err
 	}
@@ -160,20 +123,6 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 }
 
 func (c *Client) StreamChat(ctx context.Context, req ChatRequest) (llm.StreamReader, error) {
-	params := sdk.MessageNewParams{
-		Model:     sdk.Model(req.Model),
-		MaxTokens: int64(req.MaxTokens),
-		Messages:  messagesToSDK(req.Messages),
-	}
-	if req.System != "" {
-		params.System = []sdk.TextBlockParam{{Text: req.System}}
-	}
-	if len(req.Tools) > 0 {
-		params.Tools = toolsToSDK(req.Tools)
-	}
-	if req.Temperature > 0 {
-		params.Temperature = sdk.Float(req.Temperature)
-	}
-	st := c.sdk.Messages.NewStreaming(ctx, params)
+	st := c.sdk.Messages.NewStreaming(ctx, c.buildParams(req))
 	return &streamReader{stream: st, blockKind: map[int64]string{}}, nil
 }

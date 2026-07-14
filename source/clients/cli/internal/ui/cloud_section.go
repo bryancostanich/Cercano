@@ -133,9 +133,18 @@ func (sp *settingsPage) cloudDetailFields(r cloudRow) []form.Field {
 	if d.Route != "subscription" {
 		out = append(out, form.NewMasked("cloud-key", il("api-key"), sp.draftHasKey(r)))
 	}
+	// Activate button: reads "active" (disabled) when this row is already the
+	// active profile, so it doesn't invite a no-op re-activation and reflects
+	// the current state. Otherwise "activate", enabled unless coming-soon.
+	activateLabel := "activate"
+	activateEnabled := !r.ComingSoon
+	if r.Active {
+		activateLabel = "active"
+		activateEnabled = false
+	}
 	out = append(out,
 		form.NewButton("cloud-save", il("save"), true),
-		form.NewButton("cloud-activate", il("activate"), !r.ComingSoon),
+		form.NewButton("cloud-activate", il(activateLabel), activateEnabled),
 	)
 	if !sp.cloudDraftNew {
 		// Backup toggle: the active profile can't be its own backup (the

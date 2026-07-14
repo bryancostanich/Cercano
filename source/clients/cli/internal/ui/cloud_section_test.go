@@ -159,6 +159,62 @@ func TestCloudSectionComingSoonDisablesActivate(t *testing.T) {
 	}
 }
 
+func TestCloudSectionActiveRowShowsActiveDisabled(t *testing.T) {
+	sp := cloudSamplePage() // active profile is "work-openai"
+	sp.selectCloudRow("profile:work-openai")
+	sec := sp.buildCloudSection()
+	var found bool
+	for _, f := range sec.Fields {
+		if f.Key() != "cloud-activate" {
+			continue
+		}
+		found = true
+		// The active row's activate button reads "active" so it reflects the
+		// current state instead of inviting a no-op re-activation.
+		if !strings.Contains(f.Label(), "active") {
+			t.Errorf("active row's activate button should read \"active\", got %q", f.Label())
+		}
+		if strings.Contains(f.Label(), "activate") {
+			t.Errorf("active row's button should not still say \"activate\", got %q", f.Label())
+		}
+		// It must be disabled: a disabled button never commits on Enter.
+		if _, committed, _ := f.Update(tea.KeyPressMsg{Code: tea.KeyEnter}); committed {
+			t.Error("active row's activate button must be disabled (no commit)")
+		}
+	}
+	if !found {
+		t.Fatal("cloud-activate field missing from active profile row")
+	}
+}
+
+func TestCloudSectionInactiveProfileShowsActivateEnabled(t *testing.T) {
+	sp := cloudSamplePage()
+	// Make a second, non-active profile the selected editable row.
+	sp.cloudView.Providers[3].PrimaryProfile = "personal-gemini"
+	sp.cloudView.Providers[3].Profiles = []agentclient.CloudProfileInfo{
+		{Name: "personal-gemini", Flavor: "chat_completions", Backend: "gemini",
+			BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", Model: "gemini-x", HasKey: true},
+	}
+	sp.selectCloudRow("profile:personal-gemini")
+	sec := sp.buildCloudSection()
+	var found bool
+	for _, f := range sec.Fields {
+		if f.Key() != "cloud-activate" {
+			continue
+		}
+		found = true
+		if f.Label() == "" || !strings.Contains(f.Label(), "activate") {
+			t.Errorf("inactive row's button should read \"activate\", got %q", f.Label())
+		}
+		if _, committed, _ := f.Update(tea.KeyPressMsg{Code: tea.KeyEnter}); !committed {
+			t.Error("inactive row's activate button must be enabled (commits)")
+		}
+	}
+	if !found {
+		t.Fatal("cloud-activate field missing from inactive profile row")
+	}
+}
+
 func TestCloudSectionSubscriptionProfileIsOAuthOnly(t *testing.T) {
 	sp := cloudSamplePage()
 	sp.cloudView.Providers[0].PrimaryProfile = "claude"

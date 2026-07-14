@@ -26,6 +26,15 @@ type openRuntimeStatusChangedMsg struct {
 	next   tea.Cmd
 }
 
+// configChangedMsg is delivered when the agent pushes a ConfigChanged event
+// over the standing SubscribeEvents stream. It keeps header/status chips fresh
+// after settings/profile changes without waiting for an explicit config reload.
+type configChangedMsg struct {
+	field string
+	value string
+	next  tea.Cmd
+}
+
 // subscribeEventsCmd opens the standing server->client event stream and returns
 // a cmd that drains one event and re-arms itself. This is how the status bar
 // learns about mode changes and Meridian state without polling. On stream
@@ -45,6 +54,9 @@ func subscribeEventsCmd(ag *agentclient.Client) tea.Cmd {
 			}
 			if ev.OpenRuntimeStatus != nil {
 				return openRuntimeStatusChangedMsg{status: ev.OpenRuntimeStatus, next: wait}
+			}
+			if ev.ConfigChanged != nil {
+				return configChangedMsg{field: ev.ConfigChanged.Field, value: ev.ConfigChanged.Value, next: wait}
 			}
 			return permissionModeChangedMsg{mode: ev.Mode, next: wait}
 		}

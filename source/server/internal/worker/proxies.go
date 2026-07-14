@@ -246,6 +246,20 @@ func (s *streamTokenSource) Token(ctx context.Context) (access, accountID string
 	return s.creds.Fetch(ctx, s.profileName)
 }
 
+// anthropicStreamTokenSource implements anthropic.TokenSource's one-value
+// token shape by proxying to the same credentialFetcher. The account id is
+// ChatGPT-specific metadata, so it is discarded for Anthropic subscription
+// profiles.
+type anthropicStreamTokenSource struct {
+	creds       credentialFetcher
+	profileName string
+}
+
+func (s *anthropicStreamTokenSource) Token(ctx context.Context) (string, error) {
+	access, _, err := s.creds.Fetch(ctx, s.profileName)
+	return access, err
+}
+
 // ─── streamPersistFunc ────────────────────────────────────────────────────────
 
 // streamPersistFunc sends PersistTurn messages over the stream.

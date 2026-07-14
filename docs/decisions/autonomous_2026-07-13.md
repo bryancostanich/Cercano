@@ -259,3 +259,26 @@ backup pointer. Do not override a valid active/backup pointer; if the user has
 already selected a different real profile, preserve it.
 
 Commit: this follow-up migration-pointer repair commit.
+
+### Follow-up — subscription profile switch and worker routing
+
+**Finding.** Switching the active subscription profile rebuilt the host provider,
+but did not broadcast the active-profile/model changes that the CLI header
+subscribes to. The CLI SDK also dropped ConfigChanged events from the standing
+event stream, so even broadcasts from other paths could leave chips stale until
+a full reload.
+
+A separate worker-path bug prevented messages+subscription profiles from being
+usable for main work under `execution_mode: worker`: the worker had a stream token
+source for the ChatGPT subscription route only. Messages+subscription profiles
+fell through the static-key path and then failed provider construction because
+the factory correctly requires an OAuth token source.
+
+**Decision.** Broadcast `active_cloud_profile` and `cloud_model` after an active
+profile switch. Surface ConfigChanged through the agent client and have the CLI
+apply chip-driving fields while refreshing its config snapshot for derived
+state. Add a worker-side messages subscription token source that proxies bearer
+fetches through the existing host credential stream, including backup-provider
+construction.
+
+Commit: pending.

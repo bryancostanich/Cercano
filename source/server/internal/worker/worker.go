@@ -343,6 +343,11 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource cre
 			// owns refresh and OAuth — the worker never holds the credential.
 			ts := &streamTokenSource{creds: credSource, profileName: prof.Name}
 			prov, buildErr = cloudfactory.BuildCloudProvider(prof, "", cloudfactory.Options{TokenSource: ts})
+		} else if prof.Flavor == cloudfactory.FlavorMessages && prof.Route == cloudfactory.RouteSubscription {
+			// Anthropic subscription has the same worker/host split as ChatGPT, but
+			// its token source only returns the bearer token (no account id).
+			ts := &anthropicStreamTokenSource{creds: credSource, profileName: prof.Name}
+			prov, buildErr = cloudfactory.BuildCloudProvider(prof, "", cloudfactory.Options{AnthropicTokenSource: ts})
 		} else {
 			// Static-key route: fetch the key via the stream. A fetch FAILURE is
 			// treated as an EMPTY key, NOT a skip — mirror the host's rebuildCloud
@@ -454,6 +459,11 @@ func wrapWorkerBackup(
 		// ChatGPT subscription: the host owns refresh/OAuth; the worker proxies
 		// the token via the stream per call, keyed by the backup profile name.
 		opts.TokenSource = &streamTokenSource{creds: credSource, profileName: bp.Name}
+	}
+	if bp.Flavor == cloudfactory.FlavorMessages && bp.Route == cloudfactory.RouteSubscription {
+		// Anthropic subscription uses the same stream credential proxy with the
+		// one-value bearer token source expected by the messages client.
+		opts.AnthropicTokenSource = &anthropicStreamTokenSource{creds: credSource, profileName: bp.Name}
 	}
 	backup, buildErr := cloudfactory.BuildCloudProvider(bp, key, opts)
 	if buildErr != nil {

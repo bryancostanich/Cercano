@@ -1612,6 +1612,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, msg.next
 
+	case configChangedMsg:
+		// Pushed by the agent after settings/profile changes. Apply the fields
+		// that directly drive header chips, then ask for a fresh config snapshot so
+		// derived state such as CloudState and the splash primary model stays in
+		// sync with the server's provider rebuild.
+		switch msg.field {
+		case "cloud_model":
+			m.cloudModel = msg.value
+		case "local_model", "open_model":
+			if msg.value != "" {
+				m.lastModel = msg.value
+			}
+		case "local_runtime", "open_runtime":
+			m.currentOpenRuntime = msg.value
+		}
+		return m, tea.Batch(msg.next, fetchConfigCmd(m.agent))
+
 	case runtimeInstallStartedMsg:
 		if m.openRuntimeModal == nil {
 			// User closed the modal between Enter and stream open — cancel

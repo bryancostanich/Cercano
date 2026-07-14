@@ -967,7 +967,14 @@ func (c *Client) StreamRuntimeLogs(ctx context.Context, tail int, source string)
 type AgentEvent struct {
 	Mode              string             // populated by PermissionModeChanged events
 	OpenRuntimeStatus *OpenRuntimeStatus // populated by OpenRuntimeStatusChanged events
+	ConfigChanged     *ConfigChanged     // populated by ConfigChanged events
 	Err               error
+}
+
+// ConfigChanged mirrors proto.ConfigChanged in the client SDK.
+type ConfigChanged struct {
+	Field string
+	Value string
 }
 
 // OpenRuntimeStatus mirrors proto.OpenRuntimeStatus in the client SDK.
@@ -1065,6 +1072,10 @@ func (c *Client) drainSubscribeEvents(ctx context.Context, stream proto.Agent_Su
 		}
 		if lr := ev.GetOpenRuntimeStatusChanged(); lr != nil {
 			out <- AgentEvent{OpenRuntimeStatus: openRuntimeStatusFromProto(lr.GetStatus())}
+			continue
+		}
+		if cc := ev.GetConfigChanged(); cc != nil {
+			out <- AgentEvent{ConfigChanged: &ConfigChanged{Field: cc.GetField(), Value: cc.GetValue()}}
 			continue
 		}
 		// Unknown event types are silently dropped — clients that don't

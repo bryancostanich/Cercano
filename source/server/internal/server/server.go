@@ -425,6 +425,10 @@ func (s *Server) SetActiveCloudProfile(ctx context.Context, req *proto.SetActive
 		return &proto.SetActiveCloudProfileResponse{Ok: false, Error: err.Error()}, nil
 	}
 	s.persistConfig()
+	if prof, ok := s.activeProfile(); ok {
+		s.broadcastConfigChanged("active_cloud_profile", prof.Name)
+		s.broadcastConfigChanged("cloud_model", prof.Model)
+	}
 	return &proto.SetActiveCloudProfileResponse{Ok: true}, nil
 }
 

@@ -256,6 +256,20 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 			}
 			resp, err := openProvider.Process(ctx, req)
 			if err != nil {
+				// Local summarizer unavailable (e.g. the fast-light-text model is
+				// still downloading, or the runtime is down). Fall back to the
+				// active cloud provider so compaction keeps working instead of
+				// stalling until a local model lands. GetModelProviders()
+				// ["CloudModel"] is kept live by RebuildCloud
+				// (providers.SetCloudProvider); an absent/failed cloud surfaces
+				// the original local error. No ModelOverride — the cloud provider
+				// uses its configured model, not the local summarizer id.
+				if cloud := lazyRouter.GetModelProviders()["CloudModel"]; cloud != nil {
+					cloudReq := &agent.Request{Input: compaction.BuildSummaryPrompt(msgs), Temperature: greedy.Temperature}
+					if cresp, cerr := cloud.Process(ctx, cloudReq); cerr == nil {
+						return compaction.ParseSummary(cresp.Output), nil
+					}
+				}
 				return compaction.StructuredSummary{}, err
 			}
 			return compaction.ParseSummary(resp.Output), nil

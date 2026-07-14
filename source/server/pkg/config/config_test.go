@@ -412,6 +412,42 @@ func TestMigrateMeridianToSubscription(t *testing.T) {
 	}
 }
 
+func TestMigrateMeridianToSubscriptionRepairsActiveProfilePointer(t *testing.T) {
+	cfg := &Config{
+		CloudProfiles: []CloudProfile{
+			{Name: "anthropic", Flavor: "messages", Route: "meridian", BaseURL: "http://127.0.0.1:3456", Model: "model-a"},
+			{Name: "openai-responses", Flavor: "responses", Route: "chatgpt", Model: "model-b"},
+		},
+		ActiveCloudProfile: "meridian",
+		BackupCloudProfile: "missing-old-profile",
+	}
+	migrateMeridianToSubscription(cfg)
+	if cfg.ActiveCloudProfile != "anthropic" {
+		t.Fatalf("ActiveCloudProfile = %q, want migrated profile", cfg.ActiveCloudProfile)
+	}
+	if cfg.BackupCloudProfile != "anthropic" {
+		t.Fatalf("BackupCloudProfile = %q, want migrated profile", cfg.BackupCloudProfile)
+	}
+}
+
+func TestMigrateMeridianToSubscriptionPreservesValidActiveProfilePointer(t *testing.T) {
+	cfg := &Config{
+		CloudProfiles: []CloudProfile{
+			{Name: "anthropic", Flavor: "messages", Route: "meridian", BaseURL: "http://127.0.0.1:3456", Model: "model-a"},
+			{Name: "openai-responses", Flavor: "responses", Route: "chatgpt", Model: "model-b"},
+		},
+		ActiveCloudProfile: "openai-responses",
+		BackupCloudProfile: "openai-responses",
+	}
+	migrateMeridianToSubscription(cfg)
+	if cfg.ActiveCloudProfile != "openai-responses" {
+		t.Fatalf("ActiveCloudProfile = %q, want existing valid active profile", cfg.ActiveCloudProfile)
+	}
+	if cfg.BackupCloudProfile != "openai-responses" {
+		t.Fatalf("BackupCloudProfile = %q, want existing valid backup profile", cfg.BackupCloudProfile)
+	}
+}
+
 // Save must strip the four legacy cloud_* fields when profiles are present.
 // The profile is the source of truth; leaving the legacy mirrors on disk is
 // what made it possible for cloud_model and the active profile's model to

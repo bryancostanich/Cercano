@@ -48,11 +48,8 @@ func (c Config) WorkerIdleTimeout() time.Duration {
 // conventions:
 //   - "direct" (or "")  — vanilla path to the upstream provider (Anthropic
 //     direct, OpenAI direct, etc.). API key auth, no special headers.
-//   - "meridian"        — Meridian local OAuth bridge. Cercano emits
-//     opencode-style identification headers so Meridian routes through its
-//     OpenCode adapter (4-turn SDK cap vs. the default 3-turn). Borrowed
-//     identity; see anthropic/client.go for the TODO to negotiate a native
-//     Cercano adapter upstream.
+//   - "subscription"    — native OAuth subscription path. Cercano stores its
+//     own token lineage and calls the upstream Messages API directly.
 //
 // Route is an open enum — future bridges (CCR, etc.) get their own value and
 // adapter-specific handling. Empty string is treated as "direct".
@@ -60,7 +57,7 @@ type CloudProfile struct {
 	Name    string `yaml:"name"`
 	Flavor  string `yaml:"flavor"`            // messages | chat_completions | responses | bedrock
 	Backend string `yaml:"backend,omitempty"` // chat_completions only: selects per-backend quirks (openai|gemini|groq|…); empty → defensive default
-	Route   string `yaml:"route,omitempty"`   // direct (default) | meridian | ccr (future) | …
+	Route   string `yaml:"route,omitempty"`   // direct (default) | subscription | ccr (future) | …
 	// Provider names the vendor whose cost-tier table this profile draws its
 	// per-request models from (anthropic|openai|google|…). It bridges "how I
 	// connect" (route/flavor/auth on this profile) to "which vendor's model
@@ -533,6 +530,15 @@ func migrateCloudProfiles(cfg *Config) {
 // login` wrote, not our own OAuth store), so it lands "absent" until the user
 // signs in through the loopback flow — the intended one-time re-auth.
 func migrateMeridianToSubscription(cfg *Config) {
+	migrated := make([]string, 0, len(cfg.CloudProfiles))
+	profileExists := func(name string) bool {
+		for _, p := range cfg.CloudProfiles {
+			if p.Name == name {
+				return true
+			}
+		}
+		return false
+	}
 	for i := range cfg.CloudProfiles {
 		p := &cfg.CloudProfiles[i]
 		isMeridian := p.Route == "meridian" ||
@@ -540,11 +546,21 @@ func migrateMeridianToSubscription(cfg *Config) {
 		if !isMeridian {
 			continue
 		}
+		migrated = append(migrated, p.Name)
 		p.Route = "subscription"
 		p.BaseURL = ""
 		if p.Flavor == "" {
 			p.Flavor = "messages"
 		}
+	}
+	if len(migrated) == 0 {
+		return
+	}
+	if cfg.ActiveCloudProfile == "" || cfg.ActiveCloudProfile == "meridian" || !profileExists(cfg.ActiveCloudProfile) {
+		cfg.ActiveCloudProfile = migrated[0]
+	}
+	if cfg.BackupCloudProfile == "meridian" || (cfg.BackupCloudProfile != "" && !profileExists(cfg.BackupCloudProfile)) {
+		cfg.BackupCloudProfile = migrated[0]
 	}
 }
 

@@ -242,3 +242,20 @@ broadcast `active_cloud_profile` alongside `cloud_model` when activation lands,
 so subscribers have an explicit active-profile event to consume.
 
 Commit: this follow-up activation hardening commit.
+
+### Follow-up — migrated route active-profile pointer repair
+
+**Finding.** A legacy config can name the proxy route itself (`meridian`) as the
+active profile pointer, while the actual cloud profile row is named something
+else such as `anthropic`. The route migration correctly rewrote the row to the
+native subscription route, but it did not repair an active/backup pointer that
+now names a non-existent profile. In that shape the migrated subscription row
+has nowhere to be selected from until the user manually switches profiles.
+
+**Decision.** During the route migration, remember the first rewritten profile.
+If `active_cloud_profile` is empty, equals the removed route name, or points to
+no profile, set it to that migrated profile. Apply the same repair to an invalid
+backup pointer. Do not override a valid active/backup pointer; if the user has
+already selected a different real profile, preserve it.
+
+Commit: this follow-up migration-pointer repair commit.

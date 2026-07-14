@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 
+	"cercano/source/server/internal/anthropicauth"
 	"cercano/source/server/internal/chatgptauth"
 	"cercano/source/server/internal/cloudfactory"
 	"cercano/source/server/internal/llm"
@@ -45,6 +46,9 @@ func (s *Server) wrapBackupLocked(primary llm.Provider, primaryName string, cfg 
 	var opts cloudfactory.Options
 	if bp.Flavor == cloudfactory.FlavorResponses && bp.Route == cloudfactory.RouteChatGPT {
 		opts.TokenSource = chatgptauth.NewSource(st, bp.Name, chatgptauth.Flow{})
+	}
+	if bp.Flavor == cloudfactory.FlavorMessages && bp.Route == cloudfactory.RouteSubscription {
+		opts.AnthropicTokenSource = anthropicauth.NewSource(st, bp.Name, anthropicauth.Flow{})
 	}
 	backup, err := cloudfactory.BuildCloudProvider(bp, key, opts)
 	if err != nil {

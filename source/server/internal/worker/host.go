@@ -35,6 +35,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/anthropicauth"
 	"cercano/source/server/internal/chatgptauth"
 	"cercano/source/server/internal/cloudfactory"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
@@ -446,6 +447,17 @@ func (w *workerRunner) resolveCredential(ctx context.Context, cfg pkgcfg.Config,
 			return "", "", fmt.Errorf("credential: chatgpt token: %w", err)
 		}
 		return access, accountID, nil
+	}
+
+	// Claude subscription: same shape — call the token source for a fresh
+	// bearer (no account id on the Anthropic path).
+	if prof.Flavor == cloudfactory.FlavorMessages && prof.Route == cloudfactory.RouteSubscription {
+		src := anthropicauth.NewSource(st, profileName, anthropicauth.Flow{})
+		access, err := src.Token(ctx)
+		if err != nil {
+			return "", "", fmt.Errorf("credential: claude subscription token: %w", err)
+		}
+		return access, "", nil
 	}
 
 	// Static-key route: read the API key from the secrets store.

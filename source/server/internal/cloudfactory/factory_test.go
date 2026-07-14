@@ -1,6 +1,7 @@
 package cloudfactory
 
 import (
+	"context"
 	"testing"
 
 	"cercano/source/server/pkg/config"
@@ -52,5 +53,33 @@ func TestBuildBedrockProvider(t *testing.T) {
 func TestBuildBedrockMissingRegion(t *testing.T) {
 	if _, err := BuildCloudProvider(config.CloudProfile{Name: "b", Flavor: "bedrock", Model: "m"}, ""); err == nil {
 		t.Error("bedrock without a region should error")
+	}
+}
+
+// stubAnthropicTokens is a fixed anthropic.TokenSource for the subscription
+// route tests (satisfies the interface structurally).
+type stubAnthropicTokens struct{}
+
+func (stubAnthropicTokens) Token(ctx context.Context) (string, error) { return "tok", nil }
+
+// The subscription route can't build without a token source — there is no
+// static key to fall back on, so this must fail loudly rather than wire a dead
+// provider (the "force re-auth" state for a not-yet-signed-in profile).
+func TestBuildMessagesSubscriptionRequiresTokenSource(t *testing.T) {
+	if _, err := BuildCloudProvider(
+		config.CloudProfile{Name: "c", Flavor: "messages", Route: RouteSubscription, Model: "claude-x"}, "",
+	); err == nil {
+		t.Error("subscription route without a token source should error")
+	}
+}
+
+func TestBuildMessagesSubscriptionWithTokenSource(t *testing.T) {
+	p, err := BuildCloudProvider(
+		config.CloudProfile{Name: "c", Flavor: "messages", Route: RouteSubscription, Model: "claude-x"},
+		"",
+		Options{AnthropicTokenSource: stubAnthropicTokens{}},
+	)
+	if err != nil || p == nil || p.Name() != "anthropic" {
+		t.Fatalf("subscription with token source → %v, %v", p, err)
 	}
 }

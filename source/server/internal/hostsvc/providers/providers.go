@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/anthropicauth"
 	"cercano/source/server/internal/chatgptauth"
 	"cercano/source/server/internal/cloudfactory"
 	"cercano/source/server/internal/dispatch"
@@ -347,6 +348,11 @@ func (p *service) rebuildCloud() error {
 		// static API key.
 		cloudOpts.TokenSource = chatgptauth.NewSource(st, prof.Name, chatgptauth.Flow{})
 	}
+	if prof.Flavor == cloudfactory.FlavorMessages && prof.Route == cloudfactory.RouteSubscription {
+		// Claude subscription: same shape as ChatGPT — a refreshing token
+		// source over the keychain, not a static API key.
+		cloudOpts.AnthropicTokenSource = anthropicauth.NewSource(st, prof.Name, anthropicauth.Flow{})
+	}
 	prov, err := cloudfactory.BuildCloudProvider(prof, key, cloudOpts)
 	if err != nil {
 		p.installAbsentCloud(err.Error())
@@ -401,6 +407,9 @@ func (p *service) wrapBackup(primary llm.Provider, primaryName string, c cfg.Con
 	var opts cloudfactory.Options
 	if bp.Flavor == cloudfactory.FlavorResponses && bp.Route == cloudfactory.RouteChatGPT {
 		opts.TokenSource = chatgptauth.NewSource(st, bp.Name, chatgptauth.Flow{})
+	}
+	if bp.Flavor == cloudfactory.FlavorMessages && bp.Route == cloudfactory.RouteSubscription {
+		opts.AnthropicTokenSource = anthropicauth.NewSource(st, bp.Name, anthropicauth.Flow{})
 	}
 	backup, err := cloudfactory.BuildCloudProvider(bp, key, opts)
 	if err != nil {

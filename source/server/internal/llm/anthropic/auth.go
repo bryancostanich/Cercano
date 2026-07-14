@@ -3,11 +3,14 @@ package anthropic
 import "net/http"
 
 // Route values. Kept here so the adapter is the single place that names the
-// access paths it handles.
+// access paths it handles. RouteSubscription is exported so the cloud factory
+// can select it without magic strings.
 const (
-	routeDirect       = "direct"
-	routeMeridian     = "meridian"
-	routeSubscription = "subscription"
+	routeDirect   = "direct"
+	routeMeridian = "meridian"
+	// RouteSubscription selects Claude Max/Pro subscription OAuth: a refreshing
+	// Bearer token, the oauth beta header, and the identity system block.
+	RouteSubscription = "subscription"
 )
 
 // authenticator decorates each outgoing Anthropic request with the auth and
@@ -22,7 +25,7 @@ type authenticator interface {
 // and unknown routes get nil (SDK x-api-key only).
 func authenticatorForRoute(cfg Config) authenticator {
 	switch cfg.Route {
-	case routeSubscription:
+	case RouteSubscription:
 		return &subscriptionAuth{tokens: cfg.TokenSource}
 	case routeMeridian:
 		return meridianAuth{}
@@ -35,7 +38,7 @@ func authenticatorForRoute(cfg Config) authenticator {
 // "" for none. Only the subscription route carries one (the Claude Code
 // identity block).
 func systemPrefixForRoute(route string) string {
-	if route == routeSubscription {
+	if route == RouteSubscription {
 		return claudeCodeIdentity
 	}
 	return ""

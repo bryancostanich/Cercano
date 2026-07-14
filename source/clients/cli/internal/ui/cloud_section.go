@@ -122,11 +122,12 @@ func (sp *settingsPage) cloudDetailFields(r cloudRow) []form.Field {
 	if r.Preset != nil && r.Preset.Flavor == "responses" {
 		out = append(out, form.NewButton("cloud-signin", il("sign in with ChatGPT"), true))
 	}
-	// Claude subscription sign-in: messages profiles can authenticate with a
-	// subscription via loopback OAuth. A profile already on route=subscription
-	// is OAuth-only, so do not show an API-key field that the runtime will not
-	// read. Direct messages profiles keep the API-key fallback.
-	if r.Preset != nil && r.Preset.Flavor == "messages" {
+	// Claude subscription sign-in: only show the OAuth action for an existing
+	// subscription profile, or for the bare anthropic template that creates one.
+	// Direct API-key Anthropic profiles use the key field instead; offering both
+	// auth paths on those rows makes it look like two separate profiles should be
+	// signed into.
+	if shouldShowClaudeSignIn(r, d) {
 		out = append(out, form.NewButton("cloud-signin-claude", il("sign in with Claude (subscription)"), true))
 	}
 	if d.Route != "subscription" {
@@ -148,6 +149,20 @@ func (sp *settingsPage) cloudDetailFields(r cloudRow) []form.Field {
 		out = append(out, form.NewButton("cloud-delete", il("delete"), true))
 	}
 	return out
+}
+
+// shouldShowClaudeSignIn reports whether the selected row should expose the
+// subscription OAuth action. Existing direct Anthropic API-key profiles should
+// not show it; otherwise a config with both a subscription profile and a direct
+// API-key profile appears to require signing in twice.
+func shouldShowClaudeSignIn(r cloudRow, d cloudDraft) bool {
+	if r.Preset == nil || r.Preset.Flavor != "messages" {
+		return false
+	}
+	if d.Route == "subscription" {
+		return true
+	}
+	return r.ID == "template:anthropic"
 }
 
 // draftHasKey reports whether the row's profile already has a stored key (drives

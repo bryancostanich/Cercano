@@ -188,3 +188,54 @@ func TestCloudSectionSubscriptionProfileIsOAuthOnly(t *testing.T) {
 		t.Fatalf("draft route = %q, want subscription", sp.cloudDraft.Route)
 	}
 }
+
+func TestCloudSectionDirectAnthropicProfileDoesNotShowSubscriptionSignIn(t *testing.T) {
+	sp := cloudSamplePage()
+	sp.cloudView.Providers[0].PrimaryProfile = "anthropic"
+	sp.cloudView.Providers[0].Profiles = []agentclient.CloudProfileInfo{{
+		Name: "anthropic", Flavor: "messages", Model: "claude-opus-4-8", HasKey: true,
+	}}
+	sp.profiles = append(sp.profiles, agentclient.CloudProfileInfo{
+		Name: "anthropic", Flavor: "messages", Model: "claude-opus-4-8", HasKey: true,
+	})
+
+	sp.selectCloudRow("profile:anthropic")
+	sec := sp.buildCloudSection()
+	keys := map[string]bool{}
+	for _, f := range sec.Fields {
+		keys[f.Key()] = true
+	}
+	if keys["cloud-signin-claude"] {
+		t.Fatalf("direct API-key profile must not show subscription sign-in: %v", keys)
+	}
+	if !keys["cloud-key"] {
+		t.Fatalf("direct API-key profile should still show API-key field: %v", keys)
+	}
+	if !keys["cloud-base-url"] {
+		t.Fatalf("direct API-key profile should still show base-url field: %v", keys)
+	}
+}
+
+func TestShouldShowClaudeSignIn(t *testing.T) {
+	messagesPreset := &cloudPreset{ID: "anthropic", Flavor: "messages"}
+	responsesPreset := &cloudPreset{ID: "openai-responses", Flavor: "responses"}
+	cases := []struct {
+		name string
+		row  cloudRow
+		d    cloudDraft
+		want bool
+	}{
+		{name: "subscription profile", row: cloudRow{ID: "profile:claude", Preset: messagesPreset}, d: cloudDraft{Route: "subscription"}, want: true},
+		{name: "bare anthropic template", row: cloudRow{ID: "template:anthropic", Preset: messagesPreset}, d: cloudDraft{}, want: true},
+		{name: "direct anthropic profile", row: cloudRow{ID: "profile:anthropic", Preset: messagesPreset}, d: cloudDraft{}, want: false},
+		{name: "responses profile", row: cloudRow{ID: "profile:chatgpt", Preset: responsesPreset}, d: cloudDraft{Route: "subscription"}, want: false},
+		{name: "custom messages profile", row: cloudRow{ID: "profile:custom"}, d: cloudDraft{Route: "subscription"}, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldShowClaudeSignIn(tc.row, tc.d); got != tc.want {
+				t.Fatalf("shouldShowClaudeSignIn() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

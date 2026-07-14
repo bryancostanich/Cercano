@@ -422,6 +422,19 @@ func (p *Provider) argsFor(model localruntime.ModelRecord, port int) []string {
 	if p.cfg.ISQ != "" {
 		args = append(args, "--isq", p.cfg.ISQ)
 	}
+	// Paged attention is the concurrency/throughput lever — OFF by default on
+	// Metal, so surface on/off explicitly. NOTE: flag spellings per mistral.rs
+	// docs; VERIFY against the real binary before relying on them (the runtime
+	// has not yet been validated live on Apple Silicon).
+	switch strings.ToLower(strings.TrimSpace(p.cfg.PagedAttn)) {
+	case "on":
+		args = append(args, "--paged-attn", "on")
+	case "off":
+		args = append(args, "--paged-attn", "off")
+	}
+	if f := strings.TrimSpace(p.cfg.PAMemoryFraction); f != "" {
+		args = append(args, "--pa-memory-fraction", f)
+	}
 	args = append(args, p.cfg.ExtraArgs...)
 	return args
 }

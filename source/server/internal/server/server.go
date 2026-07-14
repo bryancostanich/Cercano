@@ -780,10 +780,10 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	}
 
 	if req.OpenRuntime != "" {
-		if req.OpenRuntime != "ollama" && req.OpenRuntime != "llama_server" {
+		if req.OpenRuntime != "ollama" && req.OpenRuntime != "llama_server" && req.OpenRuntime != "mistralrs" {
 			return &proto.UpdateConfigResponse{
 				Success: false,
-				Message: fmt.Sprintf("invalid local_runtime %q: expected ollama or llama_server", req.OpenRuntime),
+				Message: fmt.Sprintf("invalid local_runtime %q: expected ollama, llama_server, or mistralrs", req.OpenRuntime),
 			}, nil
 		}
 		if s.providerSvc.Registry() == nil {
@@ -873,6 +873,46 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		changes = append(changes, fmt.Sprintf("tool_loop.max_iterations=%d", n))
 		s.broadcastConfigChanged("tool_loop.max_iterations", strconv.Itoa(n))
 		fmt.Printf("UpdateConfig: tool_loop.max_iterations set to %d\n", n)
+	}
+
+	// mistral.rs runtime settings (Runtime tab). Sparse-patch: "" = unchanged,
+	// "-" clears. Take effect on the next runtime start.
+	if req.MistralrsIsq != "" {
+		if req.MistralrsIsq == "-" {
+			c.MistralRS.ISQ = ""
+		} else {
+			c.MistralRS.ISQ = strings.TrimSpace(req.MistralrsIsq)
+		}
+		changes = append(changes, fmt.Sprintf("mistralrs.isq=%s", c.MistralRS.ISQ))
+		fmt.Printf("UpdateConfig: mistralrs.isq set to %q\n", c.MistralRS.ISQ)
+	}
+	if req.MistralrsPagedAttn != "" {
+		v := strings.ToLower(strings.TrimSpace(req.MistralrsPagedAttn))
+		if v != "auto" && v != "on" && v != "off" {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid mistralrs_paged_attn %q: expected auto, on, or off", req.MistralrsPagedAttn),
+			}, nil
+		}
+		c.MistralRS.PagedAttn = v
+		changes = append(changes, fmt.Sprintf("mistralrs.paged_attn=%s", v))
+		fmt.Printf("UpdateConfig: mistralrs.paged_attn set to %s\n", v)
+	}
+	if req.MistralrsPaMemoryFraction != "" {
+		if req.MistralrsPaMemoryFraction == "-" {
+			c.MistralRS.PAMemoryFraction = ""
+		} else {
+			f, err := strconv.ParseFloat(strings.TrimSpace(req.MistralrsPaMemoryFraction), 64)
+			if err != nil || f <= 0 || f > 1 {
+				return &proto.UpdateConfigResponse{
+					Success: false,
+					Message: fmt.Sprintf("invalid mistralrs_pa_memory_fraction %q: expected a number in (0, 1]", req.MistralrsPaMemoryFraction),
+				}, nil
+			}
+			c.MistralRS.PAMemoryFraction = strings.TrimSpace(req.MistralrsPaMemoryFraction)
+		}
+		changes = append(changes, fmt.Sprintf("mistralrs.pa_memory_fraction=%s", c.MistralRS.PAMemoryFraction))
+		fmt.Printf("UpdateConfig: mistralrs.pa_memory_fraction set to %q\n", c.MistralRS.PAMemoryFraction)
 	}
 
 	if req.CompactionEnabled != "" {
@@ -1325,31 +1365,34 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 		}
 	}
 	return &proto.GetConfigResponse{
-		OllamaUrl:              cfg.OllamaURL,
-		OpenModel:              cfg.OpenChatModel(),
-		EmbeddingModel:         cfg.OpenEmbeddingModel(),
-		CloudProvider:          cloudProvider,
-		CloudModel:             cloudModel,
-		CloudBaseUrl:           cloudBaseURL,
-		CloudApiKeySet:         cfg.CloudAPIKey != "",
-		CloudState:             state,
-		Port:                   cfg.Port,
-		OpenRuntime:            cfg.OpenRuntime,
-		LocusMode:              cfg.LocusMode,
-		WatchdogEnabled:        cfg.Watchdog.Enabled,
-		WatchdogEcho:           cfg.Watchdog.Echo,
-		WatchdogMode:           cfg.Watchdog.Mode,
-		WatchdogChecks:         strings.Join(cfg.Watchdog.Checks, ","),
-		WatchdogEscalateAfter:  strconv.Itoa(cfg.Watchdog.EscalateAfter),
-		ElideToolResults:       cfg.Compaction.ElideToolResults,
-		LossyToolElision:       cfg.Compaction.LossyToolElision,
-		RawRetentionDays:       int32(cfg.Compaction.Retention.RawRetentionDays),
-		CompactedRetentionDays: int32(cfg.Compaction.Retention.CompactedRetentionDays),
-		KeepForever:            cfg.Compaction.Retention.KeepForever,
-		CompactionEnabled:      cfg.Compaction.Enabled,
-		ToolLoopMaxIterations:  int32(cfg.ToolLoop.MaxIterations),
-		ModelTiers:             cfg.Models.TierSlots(),
-		ModelsDefaultProvider:  string(cfg.Models.DefaultProvider),
+		OllamaUrl:                 cfg.OllamaURL,
+		OpenModel:                 cfg.OpenChatModel(),
+		EmbeddingModel:            cfg.OpenEmbeddingModel(),
+		CloudProvider:             cloudProvider,
+		CloudModel:                cloudModel,
+		CloudBaseUrl:              cloudBaseURL,
+		CloudApiKeySet:            cfg.CloudAPIKey != "",
+		CloudState:                state,
+		Port:                      cfg.Port,
+		OpenRuntime:               cfg.OpenRuntime,
+		LocusMode:                 cfg.LocusMode,
+		WatchdogEnabled:           cfg.Watchdog.Enabled,
+		WatchdogEcho:              cfg.Watchdog.Echo,
+		WatchdogMode:              cfg.Watchdog.Mode,
+		WatchdogChecks:            strings.Join(cfg.Watchdog.Checks, ","),
+		WatchdogEscalateAfter:     strconv.Itoa(cfg.Watchdog.EscalateAfter),
+		ElideToolResults:          cfg.Compaction.ElideToolResults,
+		LossyToolElision:          cfg.Compaction.LossyToolElision,
+		RawRetentionDays:          int32(cfg.Compaction.Retention.RawRetentionDays),
+		CompactedRetentionDays:    int32(cfg.Compaction.Retention.CompactedRetentionDays),
+		KeepForever:               cfg.Compaction.Retention.KeepForever,
+		CompactionEnabled:         cfg.Compaction.Enabled,
+		ToolLoopMaxIterations:     int32(cfg.ToolLoop.MaxIterations),
+		ModelTiers:                cfg.Models.TierSlots(),
+		ModelsDefaultProvider:     string(cfg.Models.DefaultProvider),
+		MistralrsIsq:              cfg.MistralRS.ISQ,
+		MistralrsPagedAttn:        cfg.MistralRS.PagedAttn,
+		MistralrsPaMemoryFraction: cfg.MistralRS.PAMemoryFraction,
 	}, nil
 }
 

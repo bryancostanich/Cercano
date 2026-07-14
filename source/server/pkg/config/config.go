@@ -402,6 +402,8 @@ type MistralRSConfig struct {
 	Host             string        `yaml:"host"`
 	Port             int           `yaml:"port"`
 	ISQ              string        `yaml:"isq"`
+	PagedAttn        string        `yaml:"paged_attn"`         // "" | "auto" | "on" | "off"
+	PAMemoryFraction string        `yaml:"pa_memory_fraction"` // "" | 0<f<=1 as string
 	ExtraArgs        []string      `yaml:"extra_args"`
 	ReadinessTimeout string        `yaml:"readiness_timeout"`
 	Restart          RestartConfig `yaml:"restart"`

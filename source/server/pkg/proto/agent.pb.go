@@ -913,7 +913,7 @@ type UpdateConfigRequest struct {
 	// When set, used as the baseURL for the anthropic client; api_key may be empty
 	// because the proxy handles auth (Claude Max OAuth in Meridian's case).
 	CloudBaseUrl    string `protobuf:"bytes,6,opt,name=cloud_base_url,json=cloudBaseUrl,proto3" json:"cloud_base_url,omitempty"`
-	OpenRuntime     string `protobuf:"bytes,7,opt,name=open_runtime,json=openRuntime,proto3" json:"open_runtime,omitempty"`             // Open-weight runtime name: "ollama" or "llama_server"
+	OpenRuntime     string `protobuf:"bytes,7,opt,name=open_runtime,json=openRuntime,proto3" json:"open_runtime,omitempty"`             // Open-weight runtime name: "ollama", "llama_server", or "mistralrs"
 	LocusMode       string `protobuf:"bytes,8,opt,name=locus_mode,json=locusMode,proto3" json:"locus_mode,omitempty"`                   // cloud_only|cloud_primary|open_primary|open_only
 	WatchdogEnabled string `protobuf:"bytes,9,opt,name=watchdog_enabled,json=watchdogEnabled,proto3" json:"watchdog_enabled,omitempty"` // "" = unchanged, "true"/"false"
 	WatchdogEcho    string `protobuf:"bytes,10,opt,name=watchdog_echo,json=watchdogEcho,proto3" json:"watchdog_echo,omitempty"`         // "" = unchanged, "true"/"false"
@@ -948,8 +948,13 @@ type UpdateConfigRequest struct {
 	// Tool loop — max LLM round-trips per turn. Sparse-patch convention:
 	// "" = unchanged; positive integer = cap; -1 = unlimited.
 	ToolLoopMaxIterations string `protobuf:"bytes,23,opt,name=tool_loop_max_iterations,json=toolLoopMaxIterations,proto3" json:"tool_loop_max_iterations,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// mistral.rs runtime settings (Runtime tab). Sparse-patch: "" = unchanged.
+	// These take effect on runtime restart.
+	MistralrsIsq              string `protobuf:"bytes,24,opt,name=mistralrs_isq,json=mistralrsIsq,proto3" json:"mistralrs_isq,omitempty"`                                            // "-" clears; else ISQ level (e.g. Q4K, Q8_0, AFQ4)
+	MistralrsPagedAttn        string `protobuf:"bytes,25,opt,name=mistralrs_paged_attn,json=mistralrsPagedAttn,proto3" json:"mistralrs_paged_attn,omitempty"`                        // "auto" | "on" | "off"
+	MistralrsPaMemoryFraction string `protobuf:"bytes,26,opt,name=mistralrs_pa_memory_fraction,json=mistralrsPaMemoryFraction,proto3" json:"mistralrs_pa_memory_fraction,omitempty"` // "-" clears; else 0 < f <= 1 (KV-cache budget)
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *UpdateConfigRequest) Reset() {
@@ -1139,6 +1144,27 @@ func (x *UpdateConfigRequest) GetModelTierValue() string {
 func (x *UpdateConfigRequest) GetToolLoopMaxIterations() string {
 	if x != nil {
 		return x.ToolLoopMaxIterations
+	}
+	return ""
+}
+
+func (x *UpdateConfigRequest) GetMistralrsIsq() string {
+	if x != nil {
+		return x.MistralrsIsq
+	}
+	return ""
+}
+
+func (x *UpdateConfigRequest) GetMistralrsPagedAttn() string {
+	if x != nil {
+		return x.MistralrsPagedAttn
+	}
+	return ""
+}
+
+func (x *UpdateConfigRequest) GetMistralrsPaMemoryFraction() string {
+	if x != nil {
+		return x.MistralrsPaMemoryFraction
 	}
 	return ""
 }
@@ -5849,8 +5875,12 @@ type GetConfigResponse struct {
 	ModelsDefaultProvider string            `protobuf:"bytes,24,opt,name=models_default_provider,json=modelsDefaultProvider,proto3" json:"models_default_provider,omitempty"`
 	// Tool loop — max LLM round-trips per turn. -1 means unlimited.
 	ToolLoopMaxIterations int32 `protobuf:"varint,25,opt,name=tool_loop_max_iterations,json=toolLoopMaxIterations,proto3" json:"tool_loop_max_iterations,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// mistral.rs runtime settings — current values.
+	MistralrsIsq              string `protobuf:"bytes,26,opt,name=mistralrs_isq,json=mistralrsIsq,proto3" json:"mistralrs_isq,omitempty"`
+	MistralrsPagedAttn        string `protobuf:"bytes,27,opt,name=mistralrs_paged_attn,json=mistralrsPagedAttn,proto3" json:"mistralrs_paged_attn,omitempty"`
+	MistralrsPaMemoryFraction string `protobuf:"bytes,28,opt,name=mistralrs_pa_memory_fraction,json=mistralrsPaMemoryFraction,proto3" json:"mistralrs_pa_memory_fraction,omitempty"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *GetConfigResponse) Reset() {
@@ -6056,6 +6086,27 @@ func (x *GetConfigResponse) GetToolLoopMaxIterations() int32 {
 		return x.ToolLoopMaxIterations
 	}
 	return 0
+}
+
+func (x *GetConfigResponse) GetMistralrsIsq() string {
+	if x != nil {
+		return x.MistralrsIsq
+	}
+	return ""
+}
+
+func (x *GetConfigResponse) GetMistralrsPagedAttn() string {
+	if x != nil {
+		return x.MistralrsPagedAttn
+	}
+	return ""
+}
+
+func (x *GetConfigResponse) GetMistralrsPaMemoryFraction() string {
+	if x != nil {
+		return x.MistralrsPaMemoryFraction
+	}
+	return ""
 }
 
 type ListSkillsRequest struct {
@@ -11996,7 +12047,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x05index\x18\x01 \x01(\x05R\x05index\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\x12\x1d\n" +
 	"\n" +
-	"media_type\x18\x03 \x01(\tR\tmediaType\"\xca\a\n" +
+	"media_type\x18\x03 \x01(\tR\tmediaType\"\xe2\b\n" +
 	"\x13UpdateConfigRequest\x12\x1d\n" +
 	"\n" +
 	"open_model\x18\x01 \x01(\tR\topenModel\x12%\n" +
@@ -12025,7 +12076,10 @@ const file_agent_proto_rawDesc = "" +
 	"\x12open_default_model\x18\x14 \x01(\tR\x10openDefaultModel\x12$\n" +
 	"\x0emodel_tier_key\x18\x15 \x01(\tR\fmodelTierKey\x12(\n" +
 	"\x10model_tier_value\x18\x16 \x01(\tR\x0emodelTierValue\x127\n" +
-	"\x18tool_loop_max_iterations\x18\x17 \x01(\tR\x15toolLoopMaxIterations\"J\n" +
+	"\x18tool_loop_max_iterations\x18\x17 \x01(\tR\x15toolLoopMaxIterations\x12#\n" +
+	"\rmistralrs_isq\x18\x18 \x01(\tR\fmistralrsIsq\x120\n" +
+	"\x14mistralrs_paged_attn\x18\x19 \x01(\tR\x12mistralrsPagedAttn\x12?\n" +
+	"\x1cmistralrs_pa_memory_fraction\x18\x1a \x01(\tR\x19mistralrsPaMemoryFraction\"J\n" +
 	"\x14UpdateConfigResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\xb6\x02\n" +
@@ -12388,7 +12442,8 @@ const file_agent_proto_rawDesc = "" +
 	"resultJson\x12\x19\n" +
 	"\bis_error\x18\x02 \x01(\bR\aisError\x12\x14\n" +
 	"\x05error\x18\x03 \x01(\tR\x05error\"\x12\n" +
-	"\x10GetConfigRequest\"\xf1\b\n" +
+	"\x10GetConfigRequest\"\x89\n" +
+	"\n" +
 	"\x11GetConfigResponse\x12\x1d\n" +
 	"\n" +
 	"ollama_url\x18\x01 \x01(\tR\tollamaUrl\x12\x1d\n" +
@@ -12421,7 +12476,10 @@ const file_agent_proto_rawDesc = "" +
 	"\vmodel_tiers\x18\x17 \x03(\v2(.agent.GetConfigResponse.ModelTiersEntryR\n" +
 	"modelTiers\x126\n" +
 	"\x17models_default_provider\x18\x18 \x01(\tR\x15modelsDefaultProvider\x127\n" +
-	"\x18tool_loop_max_iterations\x18\x19 \x01(\x05R\x15toolLoopMaxIterations\x1a=\n" +
+	"\x18tool_loop_max_iterations\x18\x19 \x01(\x05R\x15toolLoopMaxIterations\x12#\n" +
+	"\rmistralrs_isq\x18\x1a \x01(\tR\fmistralrsIsq\x120\n" +
+	"\x14mistralrs_paged_attn\x18\x1b \x01(\tR\x12mistralrsPagedAttn\x12?\n" +
+	"\x1cmistralrs_pa_memory_fraction\x18\x1c \x01(\tR\x19mistralrsPaMemoryFraction\x1a=\n" +
 	"\x0fModelTiersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x13\n" +

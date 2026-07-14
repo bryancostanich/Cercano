@@ -162,6 +162,12 @@ func classifyCommit(key, value string, currentChecks []string) commitAction {
 		u.OpenModel = value
 	case "ollama-url":
 		u.OllamaURL = value
+	case "mistralrs-paged-attn":
+		u.MistralRSPagedAttn = value
+	case "mistralrs-pa-memory-fraction":
+		u.MistralRSPAMemoryFraction = dashIfEmpty(value)
+	case "mistralrs-isq":
+		u.MistralRSISQ = dashIfEmpty(value)
 	case "locus-mode":
 		u.LocusMode = value
 	case "watchdog-enabled":
@@ -194,4 +200,55 @@ func classifyCommit(key, value string, currentChecks []string) commitAction {
 		return commitAction{kind: commitNoop}
 	}
 	return commitAction{kind: commitConfig, update: u}
+}
+
+// dashIfEmpty maps a blank committed text field to "-", the sparse-patch
+// clear sentinel, so emptying a field clears the setting instead of being
+// read as "leave unchanged".
+func dashIfEmpty(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "-"
+	}
+	return v
+}
+
+// pagedAttnOrAuto defaults an unset paged-attn selection to "auto".
+func pagedAttnOrAuto(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "auto"
+	}
+	return s
+}
+
+// buildRuntimeSections renders the Runtime tab: the active open runtime, the
+// Ollama endpoint, and — when mistral.rs is the active runtime — its
+// process-launch settings (paged attention, KV-cache budget, ISQ). Model
+// management lives on the Models tab, not here.
+func buildRuntimeSections(cfg *agentclient.Config) []form.Section {
+	secs := []form.Section{
+		{Title: "Open Runtime", Fields: []form.Field{
+			form.NewSelect("local-runtime", "runtime", []form.Option{
+				{Label: "llama_server", Value: "llama_server"},
+				{Label: "ollama", Value: "ollama"},
+				{Label: "mistralrs", Value: "mistralrs"},
+			}, cfg.OpenRuntime),
+		}},
+		{Title: "Ollama", Fields: []form.Field{
+			form.NewText("ollama-url", "url", cfg.OllamaURL, ""),
+		}},
+	}
+	// mistral.rs runtime settings are process-launch flags applied on the next
+	// runtime start, so they only appear when mistral.rs is the active runtime.
+	if strings.EqualFold(cfg.OpenRuntime, "mistralrs") {
+		secs = append(secs, form.Section{Title: "mistral.rs (restart required)", Fields: []form.Field{
+			form.NewSelect("mistralrs-paged-attn", "paged-attn", []form.Option{
+				{Label: "auto", Value: "auto"},
+				{Label: "on", Value: "on"},
+				{Label: "off", Value: "off"},
+			}, pagedAttnOrAuto(cfg.MistralRSPagedAttn)),
+			form.NewText("mistralrs-pa-memory-fraction", "pa-memory-fraction", cfg.MistralRSPAMemoryFraction, "KV-cache budget 0<f<=1 (needs paged-attn on)"),
+			form.NewText("mistralrs-isq", "isq", cfg.MistralRSISQ, "in-situ quantization level, e.g. Q4K"),
+		}})
+	}
+	return secs
 }

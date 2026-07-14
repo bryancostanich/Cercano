@@ -238,6 +238,10 @@ type Config struct {
 	// ModelsDefaultProvider is the preferred side ("cloud"|"open"|"").
 	ModelTiers            map[string]string
 	ModelsDefaultProvider string
+	// mistral.rs runtime settings (Runtime tab).
+	MistralRSISQ              string
+	MistralRSPagedAttn        string
+	MistralRSPAMemoryFraction string
 }
 
 // GetConfig fetches the agent's current runtime config.
@@ -247,31 +251,34 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 		return nil, err
 	}
 	return &Config{
-		OllamaURL:              resp.GetOllamaUrl(),
-		OpenRuntime:            resp.GetOpenRuntime(),
-		OpenModel:              resp.GetOpenModel(),
-		EmbeddingModel:         resp.GetEmbeddingModel(),
-		CloudProvider:          resp.GetCloudProvider(),
-		CloudModel:             resp.GetCloudModel(),
-		CloudBaseURL:           resp.GetCloudBaseUrl(),
-		CloudAPIKeySet:         resp.GetCloudApiKeySet(),
-		CloudState:             resp.GetCloudState(),
-		Port:                   resp.GetPort(),
-		LocusMode:              resp.GetLocusMode(),
-		WatchdogEnabled:        resp.GetWatchdogEnabled(),
-		WatchdogEcho:           resp.GetWatchdogEcho(),
-		WatchdogMode:           resp.GetWatchdogMode(),
-		WatchdogChecks:         splitChecks(resp.GetWatchdogChecks()),
-		WatchdogEscalateAfter:  atoiOr(resp.GetWatchdogEscalateAfter(), 0),
-		ElideToolResults:       resp.GetElideToolResults(),
-		LossyToolElision:       resp.GetLossyToolElision(),
-		RawRetentionDays:       int(resp.GetRawRetentionDays()),
-		CompactedRetentionDays: int(resp.GetCompactedRetentionDays()),
-		KeepForever:            resp.GetKeepForever(),
-		CompactionEnabled:      resp.GetCompactionEnabled(),
-		ToolLoopMaxIterations:  int(resp.GetToolLoopMaxIterations()),
-		ModelTiers:             resp.GetModelTiers(),
-		ModelsDefaultProvider:  resp.GetModelsDefaultProvider(),
+		OllamaURL:                 resp.GetOllamaUrl(),
+		OpenRuntime:               resp.GetOpenRuntime(),
+		OpenModel:                 resp.GetOpenModel(),
+		EmbeddingModel:            resp.GetEmbeddingModel(),
+		CloudProvider:             resp.GetCloudProvider(),
+		CloudModel:                resp.GetCloudModel(),
+		CloudBaseURL:              resp.GetCloudBaseUrl(),
+		CloudAPIKeySet:            resp.GetCloudApiKeySet(),
+		CloudState:                resp.GetCloudState(),
+		Port:                      resp.GetPort(),
+		LocusMode:                 resp.GetLocusMode(),
+		WatchdogEnabled:           resp.GetWatchdogEnabled(),
+		WatchdogEcho:              resp.GetWatchdogEcho(),
+		WatchdogMode:              resp.GetWatchdogMode(),
+		WatchdogChecks:            splitChecks(resp.GetWatchdogChecks()),
+		WatchdogEscalateAfter:     atoiOr(resp.GetWatchdogEscalateAfter(), 0),
+		ElideToolResults:          resp.GetElideToolResults(),
+		LossyToolElision:          resp.GetLossyToolElision(),
+		RawRetentionDays:          int(resp.GetRawRetentionDays()),
+		CompactedRetentionDays:    int(resp.GetCompactedRetentionDays()),
+		KeepForever:               resp.GetKeepForever(),
+		CompactionEnabled:         resp.GetCompactionEnabled(),
+		ToolLoopMaxIterations:     int(resp.GetToolLoopMaxIterations()),
+		ModelTiers:                resp.GetModelTiers(),
+		ModelsDefaultProvider:     resp.GetModelsDefaultProvider(),
+		MistralRSISQ:              resp.GetMistralrsIsq(),
+		MistralRSPagedAttn:        resp.GetMistralrsPagedAttn(),
+		MistralRSPAMemoryFraction: resp.GetMistralrsPaMemoryFraction(),
 	}, nil
 }
 
@@ -315,6 +322,11 @@ type ConfigUpdate struct {
 	// Empty key = unchanged.
 	ModelTierKey   string
 	ModelTierValue string
+	// mistral.rs runtime settings (Runtime tab). Sparse-patch: "" = unchanged,
+	// "-" clears.
+	MistralRSISQ              string
+	MistralRSPagedAttn        string
+	MistralRSPAMemoryFraction string
 }
 
 // RuntimeStatus is the provider-neutral model/runtime dashboard snapshot.
@@ -1314,29 +1326,32 @@ func (c *Client) InstallOpenRuntime(ctx context.Context, runtime string) (<-chan
 // summary line (e.g. "updated: [local_model=qwen3-coder, cloud=anthropic/...]").
 func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, error) {
 	resp, err := c.agent.UpdateConfig(ctx, &proto.UpdateConfigRequest{
-		OllamaUrl:              u.OllamaURL,
-		OpenRuntime:            u.OpenRuntime,
-		OpenModel:              u.OpenModel,
-		OpenDefaultModel:       u.OpenDefaultModel,
-		CloudProvider:          u.CloudProvider,
-		CloudModel:             u.CloudModel,
-		CloudApiKey:            u.CloudAPIKey,
-		CloudBaseUrl:           u.CloudBaseURL,
-		LocusMode:              u.LocusMode,
-		WatchdogEnabled:        u.WatchdogEnabled,
-		WatchdogEcho:           u.WatchdogEcho,
-		WatchdogMode:           u.WatchdogMode,
-		WatchdogChecks:         u.WatchdogChecks,
-		WatchdogEscalateAfter:  u.WatchdogEscalateAfter,
-		ElideToolResults:       u.ElideToolResults,
-		LossyToolElision:       u.LossyToolElision,
-		RawRetentionDays:       u.RawRetentionDays,
-		CompactedRetentionDays: u.CompactedRetentionDays,
-		KeepForever:            u.KeepForever,
-		CompactionEnabled:      u.CompactionEnabled,
-		ToolLoopMaxIterations:  u.ToolLoopMaxIterations,
-		ModelTierKey:           u.ModelTierKey,
-		ModelTierValue:         u.ModelTierValue,
+		OllamaUrl:                 u.OllamaURL,
+		OpenRuntime:               u.OpenRuntime,
+		OpenModel:                 u.OpenModel,
+		OpenDefaultModel:          u.OpenDefaultModel,
+		CloudProvider:             u.CloudProvider,
+		CloudModel:                u.CloudModel,
+		CloudApiKey:               u.CloudAPIKey,
+		CloudBaseUrl:              u.CloudBaseURL,
+		LocusMode:                 u.LocusMode,
+		WatchdogEnabled:           u.WatchdogEnabled,
+		WatchdogEcho:              u.WatchdogEcho,
+		WatchdogMode:              u.WatchdogMode,
+		WatchdogChecks:            u.WatchdogChecks,
+		WatchdogEscalateAfter:     u.WatchdogEscalateAfter,
+		ElideToolResults:          u.ElideToolResults,
+		LossyToolElision:          u.LossyToolElision,
+		RawRetentionDays:          u.RawRetentionDays,
+		CompactedRetentionDays:    u.CompactedRetentionDays,
+		KeepForever:               u.KeepForever,
+		CompactionEnabled:         u.CompactionEnabled,
+		ToolLoopMaxIterations:     u.ToolLoopMaxIterations,
+		ModelTierKey:              u.ModelTierKey,
+		ModelTierValue:            u.ModelTierValue,
+		MistralrsIsq:              u.MistralRSISQ,
+		MistralrsPagedAttn:        u.MistralRSPagedAttn,
+		MistralrsPaMemoryFraction: u.MistralRSPAMemoryFraction,
 	})
 	if err != nil {
 		return "", err

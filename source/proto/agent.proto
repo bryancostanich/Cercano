@@ -308,7 +308,7 @@ message UpdateConfigRequest {
   // When set, used as the baseURL for the anthropic client; api_key may be empty
   // because the proxy handles auth (Claude Max OAuth in Meridian's case).
   string cloud_base_url = 6;
-  string open_runtime = 7;  // Open-weight runtime name: "ollama" or "llama_server"
+  string open_runtime = 7;  // Open-weight runtime name: "ollama", "llama_server", or "mistralrs"
   string locus_mode = 8;     // cloud_only|cloud_primary|open_primary|open_only
   string watchdog_enabled = 9;  // "" = unchanged, "true"/"false"
   string watchdog_echo = 10;    // "" = unchanged, "true"/"false"
@@ -343,6 +343,11 @@ message UpdateConfigRequest {
   // Tool loop — max LLM round-trips per turn. Sparse-patch convention:
   // "" = unchanged; positive integer = cap; -1 = unlimited.
   string tool_loop_max_iterations = 23;
+  // mistral.rs runtime settings (Runtime tab). Sparse-patch: "" = unchanged.
+  // These take effect on runtime restart.
+  string mistralrs_isq = 24;                 // "-" clears; else ISQ level (e.g. Q4K, Q8_0, AFQ4)
+  string mistralrs_paged_attn = 25;          // "auto" | "on" | "off"
+  string mistralrs_pa_memory_fraction = 26;  // "-" clears; else 0 < f <= 1 (KV-cache budget)
 }
 
 // Runtime configuration update response.
@@ -847,6 +852,10 @@ message GetConfigResponse {
   string models_default_provider = 24;
   // Tool loop — max LLM round-trips per turn. -1 means unlimited.
   int32 tool_loop_max_iterations = 25;
+  // mistral.rs runtime settings — current values.
+  string mistralrs_isq = 26;
+  string mistralrs_paged_attn = 27;
+  string mistralrs_pa_memory_fraction = 28;
 }
 
 message ListSkillsRequest {}

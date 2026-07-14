@@ -17,14 +17,6 @@ type permissionModeChangedMsg struct {
 	next tea.Cmd
 }
 
-// meridianStatusChangedMsg is delivered when the agent pushes a Meridian
-// proxy state transition. status is nil only on terminal stream error
-// (which also returns next=nil); otherwise it carries the new snapshot.
-type meridianStatusChangedMsg struct {
-	status *agentclient.MeridianStatus
-	next   tea.Cmd
-}
-
 // openRuntimeStatusChangedMsg is delivered when the agent pushes a
 // OpenRuntimeStatusChanged event — the local-runtime detection outcome
 // after a config-driven runtime swap. Non-ok statuses drive the chip and
@@ -50,9 +42,6 @@ func subscribeEventsCmd(ag *agentclient.Client) tea.Cmd {
 			ev, ok := <-ch
 			if !ok || ev.Err != nil {
 				return nil // stream ended; stop draining
-			}
-			if ev.MeridianStatus != nil {
-				return meridianStatusChangedMsg{status: ev.MeridianStatus, next: wait}
 			}
 			if ev.OpenRuntimeStatus != nil {
 				return openRuntimeStatusChangedMsg{status: ev.OpenRuntimeStatus, next: wait}

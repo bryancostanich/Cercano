@@ -244,13 +244,6 @@ type Model struct {
 	// model can't see them. Interim until capability-aware routing lands.
 	supportsVision bool
 
-	// meridianStatus is the latest snapshot of the local Meridian proxy
-	// pushed by the agent over SubscribeEvents. nil until the first event
-	// (or initial GetCloudProfiles populates it). The status bar reads this
-	// to decide whether to render a "Sign in to Claude" chip or other
-	// setup hints.
-	meridianStatus *agentclient.MeridianStatus
-
 	// openRuntimeStatus is the most recent OpenRuntimeStatusChanged event
 	// from the agent — populated on a config-driven runtime swap when the
 	// server's headless detection can't find the binary or a model. nil
@@ -1617,12 +1610,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.mode != "" {
 			m.permissionMode = msg.mode
 		}
-		return m, msg.next
-
-	case meridianStatusChangedMsg:
-		// Pushed by the agent on every Meridian proxy state transition.
-		// Cache for the status bar and re-arm the drain loop.
-		m.meridianStatus = msg.status
 		return m, msg.next
 
 	case runtimeInstallStartedMsg:
@@ -4160,7 +4147,6 @@ func (m Model) renderStatus() string {
 		m.renderContextMeter(),
 		turnPart,
 		cloudPart,
-		m.renderMeridianChip(),
 		m.renderOpenRuntimeChip(),
 		m.renderConnStateChip(),
 		m.renderPermissionModeChip(),
@@ -4169,40 +4155,6 @@ func (m Model) renderStatus() string {
 		help,
 	}
 	return lipgloss.NewStyle().Width(m.width).Render(strings.Join(parts, ""))
-}
-
-// renderMeridianChip surfaces local Meridian proxy state in the status bar
-// when the user needs to know or act:
-//   - needs_auth       → amber "⚠ /login"  (run claude login)
-//   - prereqs_missing  → red   "⚠ meridian: setup"
-//   - failed           → red   "✕ meridian: failed"
-//   - starting         → muted "meridian: starting…"
-//
-// All other states (disabled, ready, external) return "" — Meridian is
-// either not in use or working silently, and the bar should stay quiet.
-func (m Model) renderMeridianChip() string {
-	if m.meridianStatus == nil {
-		return ""
-	}
-	var label string
-	var valStyle lipgloss.Style
-	switch m.meridianStatus.State {
-	case "needs_auth":
-		label = "⚠ Sign in to Claude (run: claude login)"
-		valStyle = m.styles.Primary
-	case "prereqs_missing":
-		label = "⚠ Meridian setup needed"
-		valStyle = m.styles.Error
-	case "failed":
-		label = "✕ Meridian failed"
-		valStyle = m.styles.Error
-	case "starting":
-		label = "Meridian: starting…"
-		valStyle = m.styles.Muted
-	default:
-		return ""
-	}
-	return m.styles.BorderDim.Render("  ·  ") + valStyle.Render(label)
 }
 
 // renderOpenRuntimeChip surfaces local-runtime detection state — currently

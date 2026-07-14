@@ -966,19 +966,8 @@ func (c *Client) StreamRuntimeLogs(ctx context.Context, tail int, source string)
 // event on this channel.
 type AgentEvent struct {
 	Mode              string             // populated by PermissionModeChanged events
-	MeridianStatus    *MeridianStatus    // populated by MeridianStatusChanged events
 	OpenRuntimeStatus *OpenRuntimeStatus // populated by OpenRuntimeStatusChanged events
 	Err               error
-}
-
-// MeridianStatus mirrors proto.MeridianStatus in the client SDK so callers
-// don't need to import the proto package. See server-side meridian.State for
-// the full set of state strings.
-type MeridianStatus struct {
-	State       string
-	Message     string
-	Port        int32
-	MissingDeps []string
 }
 
 // OpenRuntimeStatus mirrors proto.OpenRuntimeStatus in the client SDK.
@@ -1074,29 +1063,12 @@ func (c *Client) drainSubscribeEvents(ctx context.Context, stream proto.Agent_Su
 			out <- AgentEvent{Mode: pm.GetMode()}
 			continue
 		}
-		if ms := ev.GetMeridianStatusChanged(); ms != nil {
-			out <- AgentEvent{MeridianStatus: meridianStatusFromProto(ms.GetStatus())}
-			continue
-		}
 		if lr := ev.GetOpenRuntimeStatusChanged(); lr != nil {
 			out <- AgentEvent{OpenRuntimeStatus: openRuntimeStatusFromProto(lr.GetStatus())}
 			continue
 		}
 		// Unknown event types are silently dropped — clients that don't
 		// recognise them should not error on forward-compat additions.
-	}
-}
-
-// meridianStatusFromProto converts the wire proto into the client-side struct.
-func meridianStatusFromProto(p *proto.MeridianStatus) *MeridianStatus {
-	if p == nil {
-		return nil
-	}
-	return &MeridianStatus{
-		State:       p.GetState(),
-		Message:     p.GetMessage(),
-		Port:        p.GetPort(),
-		MissingDeps: append([]string(nil), p.GetMissingDeps()...),
 	}
 }
 

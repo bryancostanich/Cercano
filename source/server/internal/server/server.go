@@ -1179,10 +1179,15 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	// Reconfigure reads the fully-committed config when rebuilding providers.
 	// The resolved open model for a runtime swap is computed above; we pass the
 	// fully-mutated snapshot so the factory can rebuild with the new runtime.
+	mistralLaunchFlagsChanged := req.MistralrsIsq != "" ||
+		req.MistralrsPagedAttn != "" || req.MistralrsPaMemoryFraction != ""
 	if req.OllamaUrl != "" || req.OpenModel != "" || req.OpenRuntime != "" {
 		resolvedModel := req.OpenModel
 		if resolvedModel == "" && req.OpenRuntime == "llama_server" {
 			resolvedModel = c.LlamaServer.DefaultModel
+		}
+		if resolvedModel == "" && req.OpenRuntime == "mistralrs" {
+			resolvedModel = c.MistralRS.DefaultModel
 		}
 		if resolvedModel == "" && req.OpenRuntime != "" {
 			resolvedModel = (&c).OpenChatModel()
@@ -1194,6 +1199,35 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 			ResolvedOpenModel: resolvedModel,
 			MutatedConfig:     c,
 		})
+	}
+
+	// mistral.rs launch flags (paged_attn / isq / pa_memory_fraction) are baked
+	// into the process command line at Start (argsFor), so a running sidecar
+	// won't pick them up until it is restarted. Reconfigure above only re-points
+	// in-process routing. Bounce the active mistral.rs sidecar so the new flags
+	// take effect — Stop+Start (not Restart) so a simultaneous model change
+	// comes up on the resolved model rather than the instance's pinned old one.
+	// Option (a): if no sidecar is running, do nothing — the flags apply
+	// whenever the runtime is next started; we don't eagerly spin one up.
+	if mistralLaunchFlagsChanged && strings.EqualFold(c.OpenRuntime, "mistralrs") {
+		if rm := s.runtimeMgr(); rm != nil {
+			if inst, ok := activeRuntimeInstance(ctx, rm, "mistralrs"); ok {
+				model := inst.ModelID
+				if m := strings.TrimSpace(c.MistralRS.DefaultModel); m != "" {
+					model = m
+				}
+				if err := rm.Stop(ctx, localruntime.StopRequest{InstanceID: inst.ID}); err != nil {
+					fmt.Printf("UpdateConfig: mistralrs sidecar stop for flag-restart failed: %v\n", err)
+				} else if _, err := rm.Start(ctx, localruntime.StartRequest{
+					Runtime: "mistralrs",
+					ModelID: model,
+				}); err != nil {
+					fmt.Printf("UpdateConfig: mistralrs sidecar restart failed: %v\n", err)
+				} else {
+					fmt.Printf("UpdateConfig: mistralrs sidecar restarted to apply launch flags (model=%s)\n", model)
+				}
+			}
+		}
 	}
 
 	return &proto.UpdateConfigResponse{
@@ -1650,6 +1684,27 @@ func (s *Server) DownloadRuntimeModel(ctx context.Context, req *proto.DownloadRu
 // falls back to the backend default (gguf). Selecting by the active runtime is
 // what makes browse surface safetensors when mistral.rs is active and GGUF
 // when llama-server is, with no user-facing format switch.
+// activeRuntimeInstance returns the running (or starting) instance for the
+// given runtime, if one exists. Used to locate the sidecar to bounce when a
+// launch-flag config change needs to take effect. A stopped instance is
+// ignored — option (a) is to not restart what isn't running.
+func activeRuntimeInstance(ctx context.Context, rm localruntime.Manager, runtime string) (localruntime.InstanceRecord, bool) {
+	instances, err := rm.Instances(ctx)
+	if err != nil {
+		return localruntime.InstanceRecord{}, false
+	}
+	for _, inst := range instances {
+		if !strings.EqualFold(inst.Runtime, runtime) {
+			continue
+		}
+		if inst.State == localruntime.StateStopped {
+			continue
+		}
+		return inst, true
+	}
+	return localruntime.InstanceRecord{}, false
+}
+
 // recommendedOpenModels returns the curated open-model recommendation for the
 // active open runtime: mistral.rs recommends its own curated chat tiers and
 // keeps the embedding tier on the shared nomic (it does not serve embeddings);

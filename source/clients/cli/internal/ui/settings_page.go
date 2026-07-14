@@ -60,6 +60,7 @@ const (
 	scopeGeneral                      // routing, permissions, server, dev tools
 	scopeCloud                        // cloud-profiles editor
 	scopeUI                           // theme sections
+	scopeRuntime                      // llama_server / ollama runtime settings
 )
 
 // settingsPage is the sectioned settings content page (opened by /s, /settings,
@@ -131,7 +132,7 @@ func newScopedSettingsPage(ag *agentclient.Client, p theme.Palette, s theme.Styl
 func (sp *settingsPage) snapshotSections() []form.Section {
 	// Fetch only what the active scope needs: the UI (theme) tab must render
 	// even when the agent is unreachable, so it never triggers GetConfig.
-	needCfg := sp.scope == scopeGeneral || sp.scope == scopeAll
+	needCfg := sp.scope == scopeGeneral || sp.scope == scopeRuntime || sp.scope == scopeAll
 	needProfiles := sp.scope == scopeCloud || sp.scope == scopeAll
 	if needCfg && sp.cfg == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -168,6 +169,8 @@ func (sp *settingsPage) snapshotSections() []form.Section {
 		return append(buildSettingsSections(sp.cfg, sp.mode, sp.accentToken), sp.devToolsSection())
 	case scopeCloud:
 		return []form.Section{sp.buildCloudSection()}
+	case scopeRuntime:
+		return buildRuntimeSections(sp.cfg)
 	case scopeUI:
 		if sp.themes == nil {
 			return nil

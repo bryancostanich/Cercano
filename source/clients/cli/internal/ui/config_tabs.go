@@ -11,16 +11,17 @@ const (
 	configTabGeneral configTab = iota // routing, permissions, server, dev tools (settings form)
 	configTabCloud                    // cloud-profiles editor (settings form, cloud section)
 	configTabModels                   // the runtime dashboard (local model management)
+	configTabRuntime                  // llama_server / ollama runtime settings (settings form)
 	configTabUI                       // theme + accent color (settings form)
 	configTabContext                  // read-only context viewer for the active conversation
 )
 
 // configTabLabels are the visible tab titles, indexed by configTab.
-var configTabLabels = []string{"General", "Cloud", "Models", "UI", "Context"}
+var configTabLabels = []string{"General", "Cloud", "Models", "Runtime", "UI", "Context"}
 
 // configTabCount is the number of tabs; kept as a named constant so wrap-around
 // navigation and digit-jump bounds stay in one place.
-const configTabCount = 5
+const configTabCount = 6
 
 func (t configTab) label() string {
 	if int(t) < 0 || int(t) >= len(configTabLabels) {

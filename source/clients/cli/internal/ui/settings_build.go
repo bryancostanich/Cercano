@@ -195,3 +195,22 @@ func classifyCommit(key, value string, currentChecks []string) commitAction {
 	}
 	return commitAction{kind: commitConfig, update: u}
 }
+
+// buildRuntimeSections renders the Runtime tab: the active open runtime, its
+// default open model, and the Ollama endpoint. These commit through the same
+// classifyCommit keys the setup wizard uses (local-runtime, local-model,
+// ollama-url), so no new server plumbing is needed.
+func buildRuntimeSections(cfg *agentclient.Config) []form.Section {
+	return []form.Section{
+		{Title: "Open Runtime", Fields: []form.Field{
+			form.NewSelect("local-runtime", "runtime", []form.Option{
+				{Label: "llama_server", Value: "llama_server"},
+				{Label: "ollama", Value: "ollama"},
+			}, cfg.OpenRuntime),
+			form.NewText("local-model", "default-model", cfg.OpenModel, "the everyday open model"),
+		}},
+		{Title: "Ollama", Fields: []form.Field{
+			form.NewText("ollama-url", "url", cfg.OllamaURL, ""),
+		}},
+	}
+}

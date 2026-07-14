@@ -84,6 +84,8 @@ func (m *Model) buildConfigTabPage(tab configTab) (contentPage, tea.Cmd) {
 		return d, tea.Batch(cmd, d.refreshTick())
 	case configTabCloud:
 		return newScopedSettingsPage(m.agent, m.palette, m.styles, m.promptColorToken, m.width, h, m.themes, m.theme, scopeCloud)
+	case configTabRuntime:
+		return newScopedSettingsPage(m.agent, m.palette, m.styles, m.promptColorToken, m.width, h, m.themes, m.theme, scopeRuntime)
 	case configTabUI:
 		return newScopedSettingsPage(m.agent, m.palette, m.styles, m.promptColorToken, m.width, h, m.themes, m.theme, scopeUI)
 	case configTabContext:

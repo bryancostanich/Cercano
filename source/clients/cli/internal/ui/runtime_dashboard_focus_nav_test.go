@@ -26,29 +26,25 @@ func focusNavTestDashboard() *runtimeDashboard {
 	return d
 }
 
-// The fixture yields three action sections: open model (runtime, chat
-// model, ollama URL), installed models (start + delete for the downloaded
-// model), and model tiers (every slot). Downloads and processes are empty
-// and must be skipped by tab.
+// The Models-mode fixture yields two action sections: installed models
+// (start + delete for the downloaded model) and model tiers (every slot).
+// The open-model / runtime picker now lives on the Runtime tab, and
+// downloads and processes are empty here so both are skipped by tab.
 func TestTabWalksSections(t *testing.T) {
 	d := focusNavTestDashboard()
 	starts := d.sectionStarts()
-	if len(starts) != 3 {
-		t.Fatalf("sectionStarts = %v, want [open model, installed, tiers]", starts)
+	if len(starts) != 2 {
+		t.Fatalf("sectionStarts = %v, want [installed, tiers]", starts)
 	}
 	tab := tea.KeyPressMsg{Code: tea.KeyTab}
 
-	d.Update(tab) // catalog -> open model
+	d.Update(tab) // catalog -> installed models
 	if d.focus != runtimeFocusActions || d.operationCursor != starts[0] {
 		t.Fatalf("after 1 tab: focus=%v cursor=%d, want actions@%d", d.focus, d.operationCursor, starts[0])
 	}
-	d.Update(tab) // -> installed models
-	if d.operationCursor != starts[1] {
-		t.Fatalf("after 2 tabs: cursor=%d, want installed start %d", d.operationCursor, starts[1])
-	}
 	d.Update(tab) // -> model tiers
-	if d.operationCursor != starts[2] {
-		t.Fatalf("after 3 tabs: cursor=%d, want tiers start %d", d.operationCursor, starts[2])
+	if d.operationCursor != starts[1] {
+		t.Fatalf("after 2 tabs: cursor=%d, want tiers start %d", d.operationCursor, starts[1])
 	}
 	if d.scrollOffset == 0 {
 		t.Fatal("tabbing into tiers should scroll the viewport down")
@@ -69,12 +65,8 @@ func TestShiftTabWalksSectionsInReverse(t *testing.T) {
 		t.Fatalf("shift+tab from catalog: focus=%v cursor=%d, want tiers start %d", d.focus, d.operationCursor, starts[len(starts)-1])
 	}
 	d.Update(shiftTab) // -> installed models
-	if d.operationCursor != starts[1] {
-		t.Fatalf("second shift+tab: cursor=%d, want installed start %d", d.operationCursor, starts[1])
-	}
-	d.Update(shiftTab) // -> open model
 	if d.operationCursor != starts[0] {
-		t.Fatalf("third shift+tab: cursor=%d, want open model start %d", d.operationCursor, starts[0])
+		t.Fatalf("second shift+tab: cursor=%d, want installed start %d", d.operationCursor, starts[0])
 	}
 	d.Update(shiftTab) // -> back out to catalog
 	if d.focus != runtimeFocusCatalog {

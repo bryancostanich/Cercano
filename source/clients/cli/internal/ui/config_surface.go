@@ -80,12 +80,13 @@ func (m *Model) buildConfigTabPage(tab configTab) (contentPage, tea.Cmd) {
 	h := m.contentPageHeight()
 	switch tab {
 	case configTabModels:
-		d, cmd := newRuntimeDashboard(m.agent, m.palette, m.styles, m.width, h)
+		d, cmd := newRuntimeDashboard(m.agent, m.palette, m.styles, m.width, h, dashboardModeModels)
 		return d, tea.Batch(cmd, d.refreshTick())
 	case configTabCloud:
 		return newScopedSettingsPage(m.agent, m.palette, m.styles, m.promptColorToken, m.width, h, m.themes, m.theme, scopeCloud)
 	case configTabRuntime:
-		return newScopedSettingsPage(m.agent, m.palette, m.styles, m.promptColorToken, m.width, h, m.themes, m.theme, scopeRuntime)
+		d, cmd := newRuntimeDashboard(m.agent, m.palette, m.styles, m.width, h, dashboardModeRuntime)
+		return d, tea.Batch(cmd, d.refreshTick())
 	case configTabUI:
 		return newScopedSettingsPage(m.agent, m.palette, m.styles, m.promptColorToken, m.width, h, m.themes, m.theme, scopeUI)
 	case configTabContext:

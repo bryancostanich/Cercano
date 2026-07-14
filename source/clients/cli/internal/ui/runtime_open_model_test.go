@@ -6,8 +6,8 @@ import (
 	"cercano/source/server/pkg/agentclient"
 )
 
-func TestOpenModelRowsNilConfig(t *testing.T) {
-	rows := openModelRows(nil)
+func TestRuntimeConfigRowsNilConfig(t *testing.T) {
+	rows := runtimeConfigRows(nil)
 	if len(rows) != 1 {
 		t.Fatalf("nil config: want 1 row, got %d", len(rows))
 	}
@@ -19,15 +19,15 @@ func TestOpenModelRowsNilConfig(t *testing.T) {
 	}
 }
 
-func TestOpenModelRowsValues(t *testing.T) {
+func TestRuntimeConfigRowsOllama(t *testing.T) {
 	cfg := &agentclient.Config{
 		OpenRuntime: "ollama",
-		OpenModel:   "qwen3:latest",
 		OllamaURL:   "http://localhost:11434",
 	}
-	rows := openModelRows(cfg)
-	if len(rows) != 3 {
-		t.Fatalf("want 3 rows, got %d", len(rows))
+	rows := runtimeConfigRows(cfg)
+	// runtime + ollama URL — the legacy "chat model" row is gone.
+	if len(rows) != 2 {
+		t.Fatalf("want 2 rows, got %d", len(rows))
 	}
 	if rows[0].Label != "runtime" || rows[0].Value != "ollama" {
 		t.Errorf("runtime row: label=%q value=%q", rows[0].Label, rows[0].Value)
@@ -35,34 +35,38 @@ func TestOpenModelRowsValues(t *testing.T) {
 	if rows[0].Action.Kind != runtimeActionOpenRuntimePick {
 		t.Errorf("runtime action kind: %q", rows[0].Action.Kind)
 	}
-	if rows[1].Label != "chat model" || rows[1].Value != "qwen3:latest" {
-		t.Errorf("chat model row: label=%q value=%q", rows[1].Label, rows[1].Value)
+	if rows[1].Label != "ollama URL" || rows[1].Value != "http://localhost:11434" {
+		t.Errorf("ollama URL row: label=%q value=%q", rows[1].Label, rows[1].Value)
 	}
-	if rows[1].Action.Kind != runtimeActionOpenModelPick {
-		t.Errorf("chat model action kind: %q", rows[1].Action.Kind)
-	}
-	if rows[2].Label != "ollama URL" || rows[2].Value != "http://localhost:11434" {
-		t.Errorf("ollama URL row: label=%q value=%q", rows[2].Label, rows[2].Value)
-	}
-	if rows[2].Action.Kind != runtimeActionOllamaURL {
-		t.Errorf("ollama URL action kind: %q", rows[2].Action.Kind)
+	if rows[1].Action.Kind != runtimeActionOllamaURL {
+		t.Errorf("ollama URL action kind: %q", rows[1].Action.Kind)
 	}
 }
 
-func TestOpenModelRowsDefaultRuntime(t *testing.T) {
-	rows := openModelRows(&agentclient.Config{})
+func TestRuntimeConfigRowsLlamaServerHidesOllamaURL(t *testing.T) {
+	rows := runtimeConfigRows(&agentclient.Config{OpenRuntime: "llama_server"})
+	if len(rows) != 1 {
+		t.Fatalf("llama_server: want 1 row (no ollama URL), got %d", len(rows))
+	}
+	if rows[0].Value != "llama_server" {
+		t.Errorf("runtime row value: %q", rows[0].Value)
+	}
+}
+
+func TestRuntimeConfigRowsDefaultRuntime(t *testing.T) {
+	rows := runtimeConfigRows(&agentclient.Config{})
 	if rows[0].Value != "ollama" {
 		t.Errorf("empty OpenRuntime should default to ollama, got %q", rows[0].Value)
 	}
 }
 
-func TestOpenModelRowsEmptyModelAndURL(t *testing.T) {
-	rows := openModelRows(&agentclient.Config{})
-	if rows[1].Value != "—" {
-		t.Errorf("empty chat model should show —, got %q", rows[1].Value)
+func TestRuntimeConfigRowsEmptyURL(t *testing.T) {
+	rows := runtimeConfigRows(&agentclient.Config{OpenRuntime: "ollama"})
+	if len(rows) != 2 {
+		t.Fatalf("want 2 rows, got %d", len(rows))
 	}
-	if rows[2].Value != "—" {
-		t.Errorf("empty ollama URL should show —, got %q", rows[2].Value)
+	if rows[1].Value != "—" {
+		t.Errorf("empty ollama URL should show —, got %q", rows[1].Value)
 	}
 }
 

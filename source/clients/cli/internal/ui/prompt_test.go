@@ -123,7 +123,7 @@ func TestView_PinsPromptChromeToBottomWithShortOverlay(t *testing.T) {
 	m.height = 24
 	m.splashShown = false
 	m.relayout()
-	dashboard, _ := newRuntimeDashboard(nil, m.palette, m.styles, m.width, m.height)
+	dashboard, _ := newRuntimeDashboard(nil, m.palette, m.styles, m.width, m.height, dashboardModeModels)
 	m.content = dashboard
 
 	view := m.View()
@@ -141,7 +141,7 @@ func TestContentPage_CtrlCUsesGlobalDoublePressQuit(t *testing.T) {
 	m := New(nil, false)
 	m.width = 80
 	m.height = 24
-	dashboard, _ := newRuntimeDashboard(nil, m.palette, m.styles, m.width, m.height)
+	dashboard, _ := newRuntimeDashboard(nil, m.palette, m.styles, m.width, m.height, dashboardModeModels)
 	m.content = dashboard
 
 	next, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})

@@ -44,8 +44,21 @@ const (
 // runtimeDashboard owns the model-management content page. It keeps the global
 // chrome in the root model and renders native dashboard sections in the page
 // body so each section can get its own width and height budget.
+// dashboardMode selects which blocks a runtimeDashboard renders. The same
+// dashboard drives two config tabs: the Runtime tab shows only the runtime /
+// open-model picker block (modal-driven), while the Models tab shows the
+// download / catalog / installed / tiers blocks. Splitting by mode lets both
+// tabs share the picker machinery without duplicating it.
+type dashboardMode int
+
+const (
+	dashboardModeModels dashboardMode = iota
+	dashboardModeRuntime
+)
+
 type runtimeDashboard struct {
 	width, height int
+	mode          dashboardMode
 	palette       theme.Palette
 	styles        theme.Styles
 	agent         *agentclient.Client
@@ -129,7 +142,7 @@ func (d *runtimeDashboard) refreshTick() tea.Cmd {
 	return tea.Tick(interval, func(time.Time) tea.Msg { return runtimeDashboardRefreshMsg{} })
 }
 
-func newRuntimeDashboard(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h int) (*runtimeDashboard, tea.Cmd) {
+func newRuntimeDashboard(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h int, mode dashboardMode) (*runtimeDashboard, tea.Cmd) {
 	search := textinput.New()
 	search.Prompt = ""
 	search.Placeholder = "Search catalog models"
@@ -142,6 +155,7 @@ func newRuntimeDashboard(ag *agentclient.Client, p theme.Palette, s theme.Styles
 		agent:           ag,
 		width:           w,
 		height:          h,
+		mode:            mode,
 		focus:           runtimeFocusCatalog,
 		catalogSearch:   search,
 		estimates:       make(map[string]agentclient.ModelRAMEstimate),
@@ -241,17 +255,15 @@ func (d *runtimeDashboard) fullContent() (string, int) {
 	parts := []string{
 		configBlock,
 		d.renderRuntimeStatusBlock(),
-		d.renderCatalogBlock(d.catalogRowBudget()),
+	}
+	if d.mode == dashboardModeModels {
+		parts = append(parts, d.renderCatalogBlock(d.catalogRowBudget()))
 	}
 	// Action blocks render one at a time so renderActionBlock can
 	// translate its block-local selected row into an absolute line.
-	for _, render := range []func() string{
-		d.renderOpenModelBlock,
-		d.renderDownloadsBlock,
-		d.renderInstalledModelsBlock,
-		d.renderProcessesBlock,
-		d.renderTiersBlock,
-	} {
+	// The block set is mode-scoped and MUST stay in lockstep with
+	// operationRows() so the flat cursor index maps to the right block.
+	for _, render := range d.actionBlocks() {
 		d.blockStartLine = countLines(parts)
 		parts = append(parts, render())
 	}
@@ -357,12 +369,18 @@ func (d *runtimeDashboard) hasActiveDownloads() bool {
 // processes, model tiers), skipping sections that currently have no
 // actionable rows. Must enumerate in the same order as operationRows.
 func (d *runtimeDashboard) sectionStarts() []int {
-	blocks := [][]runtimeDashboardActionRow{
-		openModelRows(d.snapshot.Config),
-		d.downloadRows(),
-		d.installedModelRows(),
-		d.processRows(),
-		tierRows(d.snapshot.Config),
+	var blocks [][]runtimeDashboardActionRow
+	if d.mode == dashboardModeRuntime {
+		blocks = [][]runtimeDashboardActionRow{
+			runtimeConfigRows(d.snapshot.Config),
+		}
+	} else {
+		blocks = [][]runtimeDashboardActionRow{
+			d.downloadRows(),
+			d.installedModelRows(),
+			d.processRows(),
+			tierRows(d.snapshot.Config),
+		}
 	}
 	var starts []int
 	ordinal := 0
@@ -478,9 +496,6 @@ func (d *runtimeDashboard) updateOperations(msg tea.KeyPressMsg) (tea.Cmd, bool)
 			return nil, false
 		case runtimeActionOpenRuntimePick:
 			d.openRuntimePicker()
-			return nil, false
-		case runtimeActionOpenModelPick:
-			d.openOpenModelPicker()
 			return nil, false
 		case runtimeActionOllamaURL:
 			d.openOllamaURLPicker()
@@ -1207,8 +1222,8 @@ func (d *runtimeDashboard) renderTiersBlock() string {
 	return d.renderActionBlock("model tiers", tierRows(d.snapshot.Config))
 }
 
-func (d *runtimeDashboard) renderOpenModelBlock() string {
-	return d.renderActionBlock("open model", openModelRows(d.snapshot.Config))
+func (d *runtimeDashboard) renderRuntimeConfigBlock() string {
+	return d.renderActionBlock("open runtime", runtimeConfigRows(d.snapshot.Config))
 }
 
 func (d *runtimeDashboard) renderActionBlock(title string, rows []runtimeDashboardActionRow) string {
@@ -1289,14 +1304,33 @@ func actionColumnWidths(width int) (labelW, valueW, hintW int) {
 	return labelW, valueW, hintW
 }
 
+// actionBlocks returns the ordered set of action-block renderers for the
+// current mode. Runtime mode shows only the open-model / runtime picker; Models
+// mode shows the download / installed / processes / tiers blocks. This order
+// MUST match operationRows() exactly.
+func (d *runtimeDashboard) actionBlocks() []func() string {
+	if d.mode == dashboardModeRuntime {
+		return []func() string{d.renderRuntimeConfigBlock}
+	}
+	return []func() string{
+		d.renderDownloadsBlock,
+		d.renderInstalledModelsBlock,
+		d.renderProcessesBlock,
+		d.renderTiersBlock,
+	}
+}
+
 func (d *runtimeDashboard) operationRows() []runtimeDashboardActionRow {
 	var rows []runtimeDashboardActionRow
-	rows = append(rows, openModelRows(d.snapshot.Config)...)
+	// Keep this in lockstep with actionBlocks()/fullContent so the flat
+	// cursor index maps to the right block per mode.
+	if d.mode == dashboardModeRuntime {
+		rows = append(rows, runtimeConfigRows(d.snapshot.Config)...)
+		return rows
+	}
 	rows = append(rows, d.downloadRows()...)
 	rows = append(rows, d.installedModelRows()...)
 	rows = append(rows, d.processRows()...)
-	// Keep this order in sync with fullContent's block order so cursor
-	// index → action mapping stays consistent.
 	rows = append(rows, tierRows(d.snapshot.Config)...)
 	return rows
 }

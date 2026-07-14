@@ -67,7 +67,7 @@ func TestConfigSurfaceTabCyclesTabs(t *testing.T) {
 	m := Model{configSurface: &configSurface{active: configTabCloud, focused: true}}
 
 	m, _, handled := m.handleConfigSurfaceKey(tea.KeyPressMsg{Code: tea.KeyTab})
-	if !handled || !m.configSurface.focused || m.configSurface.active != configTabModels {
+	if !handled || !m.configSurface.focused || m.configSurface.active != configTabRuntime {
 		t.Fatalf("Tab on the strip should advance to the next tab and keep focus: handled=%v active=%v focused=%v",
 			handled, m.configSurface.active, m.configSurface.focused)
 	}

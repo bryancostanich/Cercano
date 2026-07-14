@@ -282,3 +282,23 @@ fetches through the existing host credential stream, including backup-provider
 construction.
 
 Commit: pending.
+
+### Follow-up — selected subscription profile identity
+
+**Finding.** The settings-page subscription sign-in button always requested the
+server-owned canonical default profile instead of the selected settings row. That
+made a user action on the `anthropic` provider store credentials under the
+canonical profile while the visible `anthropic` profile still had no secret; later
+activating `anthropic` could therefore leave cloud unavailable even though sign-in
+had just completed.
+
+The terminal header also rendered the cloud model in the `c:` chip. For profile
+activation debugging and user-visible provider identity, the chip now prefers the
+active cloud profile name and falls back to the model only when the active name is
+not available.
+
+**Decision.** Settings sign-in sends the selected draft profile name and activates
+that profile. Wizard/onboarding can still send an empty profile name when it wants
+the canonical default profile.
+
+Commit: pending.

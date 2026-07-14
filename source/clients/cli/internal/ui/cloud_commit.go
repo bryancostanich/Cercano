@@ -202,12 +202,15 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 			return openChatGPTLoginModalMsg{profile: "", model: model, setActive: true}
 		}, nil
 	case cloudCommitSignInClaude:
-		// The loopback sign-in runs in a modal owned by the root model. The
-		// profile name is owned by the server (canonical "claude"), so send an
-		// empty name so /config and the wizard produce the same single profile.
+		// Settings sign-in belongs to the selected provider/profile row. Passing
+		// the draft name stores the subscription token in that profile's secret
+		// slot, so activating "anthropic" later builds the same profile the user
+		// signed into. The wizard still uses an empty profile to request the
+		// canonical server-owned default.
+		profile := strings.TrimSpace(sp.cloudDraft.Name)
 		claudeModel := strings.TrimSpace(sp.cloudDraft.Model)
 		return "starting Claude sign-in…", func() tea.Msg {
-			return openClaudeLoginModalMsg{profile: "", model: claudeModel, setActive: true}
+			return openClaudeLoginModalMsg{profile: profile, model: claudeModel, setActive: true}
 		}, nil
 	case cloudCommitKey:
 		if sp.agent == nil {

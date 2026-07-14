@@ -150,14 +150,15 @@ type Model struct {
 	// bannerTickActive tracks whether the banner.TickMsg chain is alive — it
 	// serves the splash first, then the scrollback banner. applyResume checks
 	// it to restart the loop when resuming without ever having shown a splash.
-	bannerTickActive bool
-	lastLatencyMs    int
-	modelMaxTokens   int
-	lastModel        string // local model name (from config)
-	cloudModel       string // cloud model name (from config); empty when no cloud configured
-	cloudState       string // "" = unknown, "NONE" = absent, "ok" = real cloud configured
-	ctrlCArmed       bool   // first ctrl-c on empty input arms quit; any other key disarms
-	errMsg           string
+	bannerTickActive   bool
+	lastLatencyMs      int
+	modelMaxTokens     int
+	lastModel          string // local model name (from config)
+	cloudModel         string // cloud model name (from config); empty when no cloud configured
+	activeCloudProfile string // active cloud profile name, used for the c: header chip
+	cloudState         string // "" = unknown, "NONE" = absent, "ok" = real cloud configured
+	ctrlCArmed         bool   // first ctrl-c on empty input arms quit; any other key disarms
+	errMsg             string
 
 	// Live turn telemetry, surfaced by renderStatus while a turn streams. Reset
 	// when a turn begins; the engine fields fill in on the RouteSelected event.
@@ -584,11 +585,12 @@ func invokeToolCmd(ag *agentclient.Client, name, argsJSON string) tea.Cmd {
 
 // configLoadedMsg carries the result of the startup / post-edit GetConfig RPC.
 type configLoadedMsg struct {
-	OpenModel       string
-	OpenRuntime     string
-	CloudModel      string
-	CloudConfigured bool
-	LocusMode       string
+	OpenModel          string
+	OpenRuntime        string
+	CloudModel         string
+	ActiveCloudProfile string
+	CloudConfigured    bool
+	LocusMode          string
 }
 
 // primaryModelName resolves the model that the current Locus Mode routes to
@@ -625,12 +627,17 @@ func fetchConfigCmd(ag *agentclient.Client) tea.Cmd {
 		// active-profile model, where those legacy fields can be empty even
 		// while a profile with a keychain-stored key is happily routing.
 		configured := cfg.CloudState == "ok"
+		active := ""
+		if view, err := ag.GetCloudProviders(ctx); err == nil {
+			active = view.Active
+		}
 		return configLoadedMsg{
-			OpenModel:       cfg.OpenModel,
-			OpenRuntime:     cfg.OpenRuntime,
-			CloudModel:      cfg.CloudModel,
-			CloudConfigured: configured,
-			LocusMode:       cfg.LocusMode,
+			OpenModel:          cfg.OpenModel,
+			OpenRuntime:        cfg.OpenRuntime,
+			CloudModel:         cfg.CloudModel,
+			ActiveCloudProfile: active,
+			CloudConfigured:    configured,
+			LocusMode:          cfg.LocusMode,
 		}
 	}
 }
@@ -1576,8 +1583,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentOpenRuntime = msg.OpenRuntime
 		if msg.CloudConfigured {
 			m.cloudModel = msg.CloudModel
+			m.activeCloudProfile = msg.ActiveCloudProfile
 		} else {
 			m.cloudModel = ""
+			m.activeCloudProfile = ""
 		}
 		// Reflect the active primary profile in the splash / scrollback banner
 		// (the scrollback banner is copied from m.splash.Meta at handoff, which
@@ -1620,6 +1629,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.field {
 		case "cloud_model":
 			m.cloudModel = msg.value
+		case "active_cloud_profile":
+			m.activeCloudProfile = msg.value
 		case "local_model", "open_model":
 			if msg.value != "" {
 				m.lastModel = msg.value
@@ -4078,10 +4089,14 @@ func (m Model) renderHeader() string {
 	)
 
 	rightPieces := []string{}
-	if m.cloudModel != "" {
+	cloudChip := m.activeCloudProfile
+	if cloudChip == "" {
+		cloudChip = m.cloudModel
+	}
+	if cloudChip != "" {
 		rightPieces = append(rightPieces,
 			m.styles.Info.Render("c:"),
-			m.styles.Accent.Render(abbreviateModel(m.cloudModel)),
+			m.styles.Accent.Render(abbreviateModel(cloudChip)),
 			m.styles.BorderDim.Render(" │ "),
 		)
 	}

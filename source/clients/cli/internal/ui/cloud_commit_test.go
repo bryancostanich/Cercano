@@ -41,6 +41,30 @@ func TestApplyCloudDraftEdit(t *testing.T) {
 	}
 }
 
+func TestClaudeSettingsSignInUsesSelectedProfile(t *testing.T) {
+	sp := cloudSamplePage()
+	sp.selectCloudRow("template:anthropic")
+	sp.applyCloudDraftEdit("cloud-model", "claude-opus-4-8")
+
+	_, cmd, err := sp.onCommit("cloud-signin-claude", form.ButtonActivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil {
+		t.Fatal("expected sign-in command")
+	}
+	msg, ok := cmd().(openClaudeLoginModalMsg)
+	if !ok {
+		t.Fatalf("expected openClaudeLoginModalMsg, got %T", msg)
+	}
+	if msg.profile != "anthropic" {
+		t.Fatalf("profile = %q; want anthropic", msg.profile)
+	}
+	if !msg.setActive {
+		t.Fatal("settings sign-in should activate the selected profile")
+	}
+}
+
 func TestSelectCommitExpandsRow(t *testing.T) {
 	sp := cloudSamplePage()
 	// onCommit for a row-select sets cloudSelected and reloads.

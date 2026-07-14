@@ -293,6 +293,9 @@ type Model struct {
 	// chatgptLoginModal is the open ChatGPT subscription sign-in modal (nil =
 	// closed), driven by the StartChatGPTLogin stream.
 	chatgptLoginModal *chatgptLoginModal
+	// claudeLoginModal is the open Claude subscription sign-in modal (nil =
+	// closed), driven by the StartClaudeLogin loopback stream.
+	claudeLoginModal *claudeLoginModal
 }
 
 // pendingToolCall is a queued tool invocation awaiting user confirmation.
@@ -1076,6 +1079,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.chatgptLoginModal != nil {
 			return m.handleChatGPTLoginModalKey(msg)
 		}
+		if m.claudeLoginModal != nil {
+			return m.handleClaudeLoginModalKey(msg)
+		}
 		// F1 opens the install modal when the chip is showing. Global so
 		// it works whether the user is on chat, settings, or any content
 		// page. If no unresolved local-runtime setup is queued, F1 is a
@@ -1706,6 +1712,61 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.pendingRuntimeSwitch = msg.pending
 		return m, nil
+
+	case openClaudeLoginModalMsg:
+		if m.claudeLoginModal == nil {
+			m.claudeLoginModal = newClaudeLoginModal(msg.profile, msg.model)
+			return m, startClaudeLoginCmd(m.agent, msg.profile, msg.model, msg.setActive)
+		}
+		return m, nil
+
+	case claudeLoginStartedMsg:
+		if m.claudeLoginModal == nil {
+			if msg.cancel != nil {
+				msg.cancel()
+			}
+			return m, nil
+		}
+		if msg.err != nil {
+			m.claudeLoginModal.setFailed(msg.err.Error())
+			return m, nil
+		}
+		m.claudeLoginModal.cancel = msg.cancel
+		return m, drainClaudeLoginCmd(msg.ch)
+
+	case claudeLoginFrameMsg:
+		if m.claudeLoginModal == nil {
+			return m, nil
+		}
+		if msg.frame.Err != nil {
+			m.claudeLoginModal.setFailed(msg.frame.Err.Error())
+			return m, nil
+		}
+		if msg.frame.Done {
+			if msg.frame.Ok {
+				// The server owns the canonical profile name; reflect it so the
+				// success message is right even when the client sent none.
+				if msg.frame.ProfileName != "" {
+					m.claudeLoginModal.profile = msg.frame.ProfileName
+				}
+				m.claudeLoginModal.setDone()
+			} else {
+				m.claudeLoginModal.setFailed(msg.frame.Error)
+			}
+			return m, nil
+		}
+		m.claudeLoginModal.setURL(msg.frame.AuthorizeURL)
+		var claudeCmds []tea.Cmd
+		if msg.ch != nil {
+			claudeCmds = append(claudeCmds, drainClaudeLoginCmd(msg.ch))
+		}
+		// Auto-open the authorize page once, the moment we have the URL, so the
+		// user lands on it without hunting for the link in the modal.
+		if !m.claudeLoginModal.browserOpened && m.claudeLoginModal.authorizeURL != "" {
+			m.claudeLoginModal.browserOpened = true
+			claudeCmds = append(claudeCmds, openBrowserCmd(m.claudeLoginModal.authorizeURL))
+		}
+		return m, tea.Batch(claudeCmds...)
 
 	case openChatGPTLoginModalMsg:
 		if m.chatgptLoginModal == nil {
@@ -3757,6 +3818,19 @@ func (m Model) View() tea.View {
 		if y < 0 {
 			y = 0
 		}
+		out = composeOverlay(out, box, x, y)
+	}
+	if m.claudeLoginModal != nil {
+		boxW, boxH := m.claudeLoginModal.modalDim(m.width, m.height)
+		x := (m.width - boxW) / 2
+		y := (m.height - boxH) / 2
+		if x < 0 {
+			x = 0
+		}
+		if y < 0 {
+			y = 0
+		}
+		box := m.claudeLoginModal.View(m.styles, m.palette, m.width, m.height)
 		out = composeOverlay(out, box, x, y)
 	}
 	if m.chatgptLoginModal != nil {

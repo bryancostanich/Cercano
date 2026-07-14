@@ -2015,3 +2015,53 @@ func (c *Client) StartChatGPTLogin(ctx context.Context, profileName, model strin
 	}()
 	return out, nil
 }
+
+// ClaudeLoginMsg is one frame of the Claude subscription sign-in stream. The
+// first message carries AuthorizeURL to open in a browser; the terminal
+// message has Done=true with Ok/Error and (on success) the created
+// ProfileName. Err is set only on transport failure and is terminal.
+type ClaudeLoginMsg struct {
+	AuthorizeURL string
+	Done         bool
+	Ok           bool
+	Error        string
+	ProfileName  string
+	Err          error
+}
+
+// StartClaudeLogin opens the Claude subscription sign-in stream and returns a
+// channel of frames. The caller opens the first frame's authorize URL in a
+// browser, then waits for the terminal (Done) frame. Cancel ctx to abort the
+// sign-in.
+func (c *Client) StartClaudeLogin(ctx context.Context, profileName, model string, setActive bool) (<-chan ClaudeLoginMsg, error) {
+	stream, err := c.agent.StartClaudeLogin(ctx, &proto.StartClaudeLoginRequest{
+		ProfileName: profileName,
+		Model:       model,
+		SetActive:   setActive,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan ClaudeLoginMsg, 8)
+	go func() {
+		defer close(out)
+		for {
+			ev, err := stream.Recv()
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			if err != nil {
+				out <- ClaudeLoginMsg{Err: err}
+				return
+			}
+			out <- ClaudeLoginMsg{
+				AuthorizeURL: ev.GetAuthorizeUrl(),
+				Done:         ev.GetDone(),
+				Ok:           ev.GetOk(),
+				Error:        ev.GetError(),
+				ProfileName:  ev.GetProfileName(),
+			}
+		}
+	}()
+	return out, nil
+}

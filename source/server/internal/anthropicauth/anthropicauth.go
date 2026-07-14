@@ -8,13 +8,13 @@
 // identity system block on each Messages call. It can stop working whenever
 // Anthropic tightens enforcement. The wizard labels it accordingly.
 //
-// Verified live 2026-07-13 against a Claude Max subscription: the authorize
-// endpoint, client id, scopes, and PKCE params come from a real `claude
-// login` authorize URL; a direct Bearer call to /v1/messages returned HTTP
-// 200. The token/refresh ENDPOINT and request-body shape below are the
-// widely-used values but were NOT captured live — they are confirmed the
-// first time a real sign-in or refresh runs. Everything is injectable on
-// Flow so a captured correction is a one-line change.
+// Verified live 2026-07-13 against a Claude Max subscription: this package's
+// own PKCE loopback flow exchanged a real authorization code at the token
+// endpoint and the resulting bearer returned HTTP 200 from /v1/messages. The
+// authorize endpoint, client id, scopes, PKCE params, token endpoint, and
+// exchange body shape are all confirmed. Refresh uses the same token endpoint
+// + standard grant and is first exercised at token expiry. Endpoints are
+// injectable on Flow for tests.
 package anthropicauth
 
 import (
@@ -39,9 +39,11 @@ const DefaultClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 // DefaultAuthorizeURL is where the user approves the grant (verified live).
 const DefaultAuthorizeURL = "https://claude.ai/oauth/authorize"
 
-// DefaultTokenURL is the code-exchange / refresh endpoint. UNVERIFIED — this
-// is the standard Anthropic value; confirm on first real sign-in or refresh
-// (or via a one-off mitmproxy capture) and correct here if wrong.
+// DefaultTokenURL is the code-exchange / refresh endpoint. Verified live
+// 2026-07-13: this package's own PKCE flow exchanged a real authorization
+// code here and the resulting bearer returned HTTP 200 from /v1/messages.
+// Refresh uses the same endpoint + standard grant, first exercised at the
+// ~8h token expiry.
 const DefaultTokenURL = "https://console.anthropic.com/v1/oauth/token"
 
 // DefaultScopes mirrors Claude Code's requested set verbatim (from the live

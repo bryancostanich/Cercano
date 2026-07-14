@@ -39,10 +39,12 @@ From the pasted `claude login` authorize URL:
   load-bearing scope is `user:inference`; we mirror the full set. (`user:` set
   is what is actually granted; `org:create_api_key` is not needed by us.)
 
-Still assumed-standard, to confirm on first use:
+Verified live via our own PKCE flow (the `oauth-spike`, since deleted):
 
 - **token / refresh endpoint:** `https://console.anthropic.com/v1/oauth/token`
-  (confirm on first refresh, or via a one-off mitmproxy capture).
+  — our loopback flow exchanged a real authorization code here and the minted
+  bearer returned HTTP 200 from `/v1/messages`. Refresh reuses the same
+  endpoint + standard grant (first exercised at the ~8h token expiry).
 
 Reference only (Flow A stores its OWN copy, see Decisions): Claude Code keeps
 its token in keychain service `Claude Code-credentials` as JSON —
@@ -120,8 +122,15 @@ caches, no lineage, no locks.
 elsewhere) · the `routeMeridian` header block in `anthropic/client.go` · Node
 prereq detection + `npx` spawn.
 
+## Progress
+
+- **Phase 1 done** (commit on `replace-meridian`): `internal/anthropicauth/`
+  — PKCE loopback Flow (Start/Wait/Redeem), skew-aware TokenSet, single-flight
+  Source; 13 tests green under `-race`. Verified end-to-end live: our own flow
+  minted a token that returned HTTP 200 from `/v1/messages`.
+
 ## Open items
 
-- Confirm the token/refresh endpoint (item 3) on first refresh or via mitmproxy.
+- Exercise refresh at the ~8h token expiry (same endpoint, standard grant).
 - Meridian open-issues survey still owed (as corroborating "what we're
   escaping"); `dispatch` sub-agent needs local Ollama up, or pull via `fetch`.

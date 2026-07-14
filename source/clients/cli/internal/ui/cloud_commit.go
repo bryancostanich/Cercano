@@ -22,6 +22,7 @@ const (
 	cloudCommitDelete
 	cloudCommitKey
 	cloudCommitSignIn
+	cloudCommitSignInClaude
 )
 
 type cloudCommitAction struct {
@@ -52,6 +53,8 @@ func classifyCloudCommit(key, value string) cloudCommitAction {
 		return cloudCommitAction{kind: cloudCommitDelete}
 	case "cloud-signin":
 		return cloudCommitAction{kind: cloudCommitSignIn}
+	case "cloud-signin-claude":
+		return cloudCommitAction{kind: cloudCommitSignInClaude}
 	}
 	return cloudCommitAction{kind: cloudCommitNone}
 }
@@ -89,7 +92,7 @@ func (sp *settingsPage) applyCloudDraftEdit(field, value string) {
 func cloudCommitNeedsAgent(ca cloudCommitAction, draftNew bool) bool {
 	switch ca.kind {
 	case cloudCommitSave, cloudCommitActivate, cloudCommitBackup,
-		cloudCommitDelete, cloudCommitKey, cloudCommitSignIn:
+		cloudCommitDelete, cloudCommitKey, cloudCommitSignIn, cloudCommitSignInClaude:
 		return true
 	case cloudCommitDraftEdit:
 		return shouldApplyModelEdit(ca.field, draftNew)
@@ -197,6 +200,14 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		model := strings.TrimSpace(sp.cloudDraft.Model)
 		return "starting ChatGPT sign-in…", func() tea.Msg {
 			return openChatGPTLoginModalMsg{profile: "", model: model, setActive: true}
+		}, nil
+	case cloudCommitSignInClaude:
+		// The loopback sign-in runs in a modal owned by the root model. The
+		// profile name is owned by the server (canonical "claude"), so send an
+		// empty name so /config and the wizard produce the same single profile.
+		claudeModel := strings.TrimSpace(sp.cloudDraft.Model)
+		return "starting Claude sign-in…", func() tea.Msg {
+			return openClaudeLoginModalMsg{profile: "", model: claudeModel, setActive: true}
 		}, nil
 	case cloudCommitKey:
 		if sp.agent == nil {

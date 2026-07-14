@@ -120,6 +120,13 @@ func (sp *settingsPage) cloudDetailFields(r cloudRow) []form.Field {
 	if r.Preset != nil && r.Preset.Flavor == "responses" {
 		out = append(out, form.NewButton("cloud-signin", il("sign in with ChatGPT"), true))
 	}
+	// Claude subscription sign-in: the messages flavor can authenticate with a
+	// Claude Max/Pro subscription via loopback OAuth instead of an API key.
+	// Offer the button on messages rows; the api-key field stays as the
+	// sanctioned fallback one row below.
+	if r.Preset != nil && r.Preset.Flavor == "messages" {
+		out = append(out, form.NewButton("cloud-signin-claude", il("sign in with Claude (subscription)"), true))
+	}
 	out = append(out,
 		form.NewMasked("cloud-key", il("api-key"), sp.draftHasKey(r)),
 		form.NewButton("cloud-save", il("save"), true),

@@ -31,7 +31,8 @@ func (s *Server) StartClaudeLogin(req *proto.StartClaudeLoginRequest, stream pro
 		return sendClaudeLoginResult(stream, false, "", "keychain unavailable")
 	}
 	profile := strings.TrimSpace(req.GetProfileName())
-	if profile == "" {
+	canonicalProfile := profile == ""
+	if canonicalProfile {
 		profile = "claude"
 	}
 	model := strings.TrimSpace(req.GetModel())
@@ -72,7 +73,7 @@ func (s *Server) StartClaudeLogin(req *proto.StartClaudeLoginRequest, stream pro
 		Model:  model,
 	}
 	_, isActive := s.cfgSvc.UpsertProfile(np)
-	if req.GetSetActive() {
+	if shouldActivateClaudeLogin(req.GetSetActive(), canonicalProfile) {
 		s.cfgSvc.SetActiveProfile(profile)
 		isActive = true
 	}
@@ -82,10 +83,20 @@ func (s *Server) StartClaudeLogin(req *proto.StartClaudeLoginRequest, stream pro
 			s.persistConfig()
 			return sendClaudeLoginResult(stream, false, profile, err.Error())
 		}
+		s.broadcastConfigChanged("active_cloud_profile", profile)
 		s.broadcastConfigChanged("cloud_model", np.Model)
 	}
 	s.persistConfig()
 	return sendClaudeLoginResult(stream, true, profile, "")
+}
+
+// shouldActivateClaudeLogin preserves the explicit set_active request while
+// making the canonical no-profile "sign in with Claude" path activate by
+// default. Older/stale clients can omit set_active and still get the onboarding
+// behavior users expect; explicit named-profile reauth remains non-activating
+// unless requested.
+func shouldActivateClaudeLogin(setActive, canonicalProfile bool) bool {
+	return setActive || canonicalProfile
 }
 
 // sendClaudeLoginResult emits the terminal frame of the sign-in stream.

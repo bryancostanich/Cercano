@@ -225,3 +225,20 @@ only for the load-bearing broker events (`RouteSelected` replay + `Token` live),
 which matches the test's own correctness contract.
 
 Commit: this follow-up default-policy commit.
+
+### Follow-up — canonical Claude sign-in activation
+
+**Finding.** The local config had a `claude` subscription profile with token-backed
+metadata, but `active_cloud_profile` remained `openai-responses`. That proves
+the profile creation/auth path completed, while activation either was not
+requested by the client that initiated the sign-in or was later overwritten.
+This is not a Meridian coexistence artifact: the migrated profiles are already
+`route: subscription`, and the `claude` profile is the native replacement path.
+
+**Decision.** Treat the canonical no-profile Claude sign-in request as
+activation-worthy even if an older/stale client omits `set_active`; explicit
+named-profile re-auth remains non-activating unless `set_active` is true. Also
+broadcast `active_cloud_profile` alongside `cloud_model` when activation lands,
+so subscribers have an explicit active-profile event to consume.
+
+Commit: this follow-up activation hardening commit.

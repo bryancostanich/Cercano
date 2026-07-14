@@ -4,46 +4,40 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
-	"strings"
-	"time"
+	"strconv"
 
-	"cercano/source/server/internal/localruntime"
+	"cercano/source/server/internal/mistralrscompat"
 )
 
-// catalogJSON is the curated mistral.rs catalog — safetensors/UQFF/GGUF builds
-// verified to load on the pinned mistral.rs (v0.9.0). It is the foolproof model
-// source (the setup wizard draws from it): nothing incompatible or
-// Metal-unstable is listed. Browsing arbitrary HuggingFace repos is a separate,
-// gated path. Deliberately conservative on Apple Silicon — hybrid-MoE families
-// (qwen3next) stay out until the upstream Metal fixes release, even though the
-// arch gate would admit them.
+// catalogJSON is the curated mistral.rs catalog — RAM-tiered chat models
+// (UQFF, or safetensors for the smaller ones) verified to load on the pinned
+// mistral.rs build. It mirrors the llama-server curated catalog, with two
+// differences: entries carry a Format (uqff|safetensors|gguf), and the profiles
+// fill only the chat tiers — mistral.rs's loaders are text-generation only, so
+// the embedding tier stays cross-runtime (the shared nomic served by Ollama).
 //
 //go:embed catalog.json
 var catalogJSON []byte
 
-// CuratedModel is one curated model. Files is the full download manifest: for
-// safetensors, every file mistral.rs needs (config.json, the model-*.safetensors
-// shards + index, tokenizer files); for UQFF, the .uqff plus its config and
-// tokenizer; for GGUF, the single .gguf. SizeBytes is the sum across files.
+// CuratedModel is one curated mistral.rs model. Files is the full download
+// manifest: for UQFF, the chosen quant .uqff plus residual.safetensors and the
+// config/tokenizer sidecars; for safetensors, the weight shards plus config and
+// tokenizer. SizeBytes is the sum across files. Arch is mistral.rs's model_type
+// (the mistralrscompat gate input).
 type CuratedModel struct {
 	ID            string   `json:"id"`
 	DisplayName   string   `json:"display_name"`
 	Repo          string   `json:"repo"`
 	Files         []string `json:"files"`
-	Format        string   `json:"format"` // "safetensors" | "uqff" | "gguf"
-	Architecture  string   `json:"arch"`   // mistral.rs model_type (mistralrscompat gate input)
+	Format        string   `json:"format"` // "uqff" | "safetensors" | "gguf"
+	Architecture  string   `json:"arch"`
 	Family        string   `json:"family"`
 	SizeBytes     int64    `json:"size_bytes"`
 	SupportsTools bool     `json:"supports_tools"`
 }
 
-// DownloadURLs returns the HuggingFace resolve URL for each manifest file, in
-// listed order. Plain Range-resumable HTTPS GETs the download manager consumes
-// directly — the first file anchors the model's Path (its directory is where
-// every file lands).
+// DownloadURLs returns the HuggingFace resolve URL for each manifest file.
 func (m CuratedModel) DownloadURLs() []string {
 	out := make([]string, 0, len(m.Files))
 	for _, f := range m.Files {
@@ -52,136 +46,98 @@ func (m CuratedModel) DownloadURLs() []string {
 	return out
 }
 
-// CuratedCatalog is the parsed catalog.json: a flat list of curated models.
-// (RAM-tier profiles, like llama-server's, are a later wizard concern.)
+// CuratedCatalog is the parsed catalog.json: a model dictionary keyed by ID
+// plus RAM-tier profiles (keys are GB thresholds as strings). Each profile
+// fills the chat tiers; embedding is not a mistral.rs tier.
 type CuratedCatalog struct {
-	Models []CuratedModel `json:"models"`
+	Models   map[string]CuratedModel      `json:"models"`
+	Profiles map[string]map[string]string `json:"profiles"`
 }
 
-// loadCatalog parses the embedded catalog.json and checks basic integrity:
-// every model has an id, a repo, at least one file, a known format, and a
-// unique id. It does NOT check architecture compatibility — that is the gate's
-// concern, asserted by the catalog validity test against mistralrscompat so a
-// bad entry fails the build, not a user's setup. An empty catalog is valid.
+// requiredTiers are the chat tiers every mistral.rs profile must fill. Unlike
+// llama-server there is no embedding tier — mistral.rs doesn't serve embeddings,
+// so that recommendation stays on the shared cross-runtime model.
+var requiredTiers = []string{"most_capable", "everyday", "fast_light", "fast_light_text"}
+
+// loadCatalog parses the embedded catalog.json and checks referential
+// integrity: at least one profile, every profile fills every required chat
+// tier, every referenced model exists, and every model has an id/repo/files, a
+// known format, and an architecture mistral.rs can load. A bad entry fails the
+// build via the validity test, not a user's setup.
 func loadCatalog() (CuratedCatalog, error) {
 	var cat CuratedCatalog
 	if err := json.Unmarshal(catalogJSON, &cat); err != nil {
 		return CuratedCatalog{}, fmt.Errorf("parse catalog.json: %w", err)
 	}
-	seen := make(map[string]bool, len(cat.Models))
-	for _, m := range cat.Models {
+	for id, m := range cat.Models {
 		if m.ID == "" || m.Repo == "" || len(m.Files) == 0 {
-			return CuratedCatalog{}, fmt.Errorf("catalog model %q missing id/repo/files", m.ID)
+			return CuratedCatalog{}, fmt.Errorf("catalog model %q missing id/repo/files", id)
 		}
 		switch m.Format {
-		case "safetensors", "uqff", "gguf":
+		case "uqff", "safetensors", "gguf":
 		default:
-			return CuratedCatalog{}, fmt.Errorf("catalog model %q has unknown format %q", m.ID, m.Format)
+			return CuratedCatalog{}, fmt.Errorf("catalog model %q has unknown format %q", id, m.Format)
 		}
-		if seen[m.ID] {
-			return CuratedCatalog{}, fmt.Errorf("catalog has duplicate model id %q", m.ID)
+		if !mistralrscompat.Supported(m.Architecture) {
+			return CuratedCatalog{}, fmt.Errorf("catalog model %q architecture %q not loadable by mistral.rs", id, m.Architecture)
 		}
-		seen[m.ID] = true
+	}
+	if len(cat.Profiles) == 0 {
+		return CuratedCatalog{}, fmt.Errorf("catalog has no profiles")
+	}
+	for name, prof := range cat.Profiles {
+		for _, tier := range requiredTiers {
+			id, ok := prof[tier]
+			if !ok || id == "" {
+				return CuratedCatalog{}, fmt.Errorf("profile %q is missing tier %q", name, tier)
+			}
+			if _, ok := cat.Models[id]; !ok {
+				return CuratedCatalog{}, fmt.Errorf("profile %q tier %q references unknown model %q", name, tier, id)
+			}
+		}
 	}
 	return cat, nil
 }
 
-// urlFilename returns the filename portion of a download URL (after the last
-// slash), used to place each file on disk under its own name.
-func urlFilename(u string) string {
-	if i := strings.LastIndex(u, "/"); i >= 0 {
-		return u[i+1:]
-	}
-	return u
-}
-
-// allFilesPresent reports whether every manifest file of a model is present in
-// dir — the "downloaded" test for a curated model.
-func allFilesPresent(dir string, urls []string) bool {
-	if len(urls) == 0 {
-		return false
-	}
-	for _, u := range urls {
-		info, err := os.Stat(filepath.Join(dir, urlFilename(u)))
-		if err != nil || info.IsDir() {
-			return false
+// ProfileForRAM picks the profile for a machine with the given total RAM: the
+// largest profile whose GB threshold is at or below the machine's memory. A
+// machine below the smallest threshold still gets the smallest profile.
+func (c CuratedCatalog) ProfileForRAM(totalBytes uint64) (map[string]string, int) {
+	gb := int(totalBytes / (1024 * 1024 * 1024))
+	thresholds := make([]int, 0, len(c.Profiles))
+	for k := range c.Profiles {
+		if n, err := strconv.Atoi(k); err == nil {
+			thresholds = append(thresholds, n)
 		}
 	}
-	return true
-}
-
-// catalogTargetDir resolves the directory curated downloads land in: the first
-// configured model dir (with a leading ~ expanded), or ~/.cercano/models.
-func (p *Provider) catalogTargetDir() string {
-	if len(p.cfg.ModelDirs) > 0 {
-		if expanded, err := expandPath(p.cfg.ModelDirs[0]); err == nil && expanded != "" {
-			return expanded
+	sort.Ints(thresholds)
+	if len(thresholds) == 0 {
+		return nil, 0
+	}
+	chosen := thresholds[0]
+	for _, t := range thresholds {
+		if gb >= t {
+			chosen = t
 		}
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "."
-	}
-	return filepath.Join(home, ".cercano", "models")
+	return c.Profiles[strconv.Itoa(chosen)], chosen
 }
 
-// catalogModels surfaces the embedded curated catalog as downloadable model
-// records. Each model's files land in its own subdirectory (the uniform
-// per-model layout); for a directory-loaded format (safetensors/uqff)
-// LoadTarget is that subdirectory (mistral.rs is launched with `-m <dir>`),
-// while Path anchors the download on the first file. A model counts as
-// downloaded only when every manifest file is present. Ordered by id.
-func (p *Provider) catalogModels() []localruntime.ModelRecord {
+// RecommendedOpenModels returns the curated mistral.rs chat-tier recommendation
+// for a machine with the given total RAM: tier -> the stable inventory id
+// "mistralrs:catalog:<bareID>" that catalogModels() surfaces. The embedding
+// tier is intentionally absent (mistral.rs doesn't serve embeddings); the
+// caller keeps embedding on the shared cross-runtime model. Nil when the
+// embedded catalog fails to load (a build-time bug the validity test guards).
+func RecommendedOpenModels(totalBytes uint64) map[string]string {
 	cat, err := loadCatalog()
 	if err != nil {
-		// A malformed embedded catalog is a build-time bug (the validity test
-		// guards it); at runtime surface nothing rather than crash Discover.
 		return nil
 	}
-	targetDir := p.catalogTargetDir()
-	models := make([]CuratedModel, len(cat.Models))
-	copy(models, cat.Models)
-	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
-
-	out := make([]localruntime.ModelRecord, 0, len(models))
-	for _, m := range models {
-		urls := m.DownloadURLs()
-		if len(urls) == 0 {
-			continue
-		}
-		modelSub := filepath.Join(targetDir, localruntime.ModelDirName(m.ID))
-		primary := filepath.Join(modelSub, urlFilename(urls[0]))
-		loadTarget := ""
-		if m.Format == "safetensors" || m.Format == "uqff" {
-			// Directory-loaded: mistral.rs is pointed at the model dir.
-			loadTarget = modelSub
-		}
-		state := "not_downloaded"
-		var modified time.Time
-		if allFilesPresent(modelSub, urls) {
-			state = "downloaded"
-			if info, statErr := os.Stat(primary); statErr == nil {
-				modified = info.ModTime()
-			}
-		}
-		out = append(out, localruntime.ModelRecord{
-			ID:                 runtimeName + ":catalog:" + m.ID,
-			DisplayName:        m.DisplayName,
-			Runtime:            runtimeName,
-			Source:             "catalog",
-			Path:               primary,
-			LoadTarget:         loadTarget,
-			Format:             m.Format,
-			Family:             m.Family,
-			SizeBytes:          m.SizeBytes,
-			ModifiedAt:         modified,
-			DownloadState:      state,
-			DownloadURLs:       urls,
-			DownloadTotalBytes: m.SizeBytes,
-			RuntimeState:       localruntime.StateStopped,
-			SupportsChat:       true,
-			SupportsTools:      m.SupportsTools,
-		})
+	profile, _ := cat.ProfileForRAM(totalBytes)
+	out := make(map[string]string, len(profile))
+	for tier, bareID := range profile {
+		out[tier] = runtimeName + ":catalog:" + bareID
 	}
 	return out
 }

@@ -1,35 +1,27 @@
 {
-  "models": [
-    {
+  "models": {
+    "qwen3-1.7b": {
       "id": "qwen3-1.7b",
-      "display_name": "Qwen3 1.7B",
-      "repo": "Qwen/Qwen3-1.7B",
-      "format": "safetensors",
-      "arch": "qwen3",
-      "family": "qwen3",
-      "supports_tools": true,
-      "size_bytes": 4079423234,
+      "display_name": "Qwen3-1.7B (UQFF afq4)",
+      "repo": "mistralrs-community/Qwen3-1.7B-UQFF",
       "files": [
         "config.json",
         "generation_config.json",
-        "merges.txt",
-        "model-00001-of-00002.safetensors",
-        "model-00002-of-00002.safetensors",
-        "model.safetensors.index.json",
         "tokenizer.json",
         "tokenizer_config.json",
-        "vocab.json"
-      ]
-    },
-    {
-      "id": "qwen3-4b",
-      "display_name": "Qwen3 4B",
-      "repo": "Qwen/Qwen3-4B",
-      "format": "safetensors",
+        "residual.safetensors",
+        "afq4-0.uqff"
+      ],
+      "format": "uqff",
       "arch": "qwen3",
-      "family": "qwen3",
-      "supports_tools": true,
-      "size_bytes": 8060896856,
+      "family": "qwen",
+      "size_bytes": 1601913770,
+      "supports_tools": true
+    },
+    "qwen3-4b": {
+      "id": "qwen3-4b",
+      "display_name": "Qwen3-4B (safetensors)",
+      "repo": "Qwen/Qwen3-4B",
       "files": [
         "config.json",
         "generation_config.json",
@@ -41,7 +33,20 @@
         "tokenizer.json",
         "tokenizer_config.json",
         "vocab.json"
-      ]
+      ],
+      "format": "safetensors",
+      "arch": "qwen3",
+      "family": "qwen",
+      "size_bytes": 8060896856,
+      "supports_tools": true
     }
-  ]
+  },
+  "profiles": {
+    "24": {
+      "most_capable": "qwen3-4b",
+      "everyday": "qwen3-4b",
+      "fast_light": "qwen3-1.7b",
+      "fast_light_text": "qwen3-1.7b"
+    }
+  }
 }

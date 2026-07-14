@@ -40,6 +40,7 @@ import (
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/localruntime"
 	"cercano/source/server/internal/localruntime/llamaserver"
+	runtimemistralrs "cercano/source/server/internal/localruntime/mistralrs"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
 	mcphost "cercano/source/server/internal/mcp_host"
@@ -1456,7 +1457,7 @@ func (s *Server) ListRuntimeModels(ctx context.Context, req *proto.ListRuntimeMo
 	// from these, so every suggestion is a gate-verified curated model that
 	// cannot be incompatible. Keyed the same as SystemRamBytes above so the
 	// verdict and the recommendation agree on the machine's memory.
-	resp.RecommendedOpenModels = llamaserver.RecommendedOpenModels(uint64(resp.SystemRamBytes))
+	resp.RecommendedOpenModels = s.recommendedOpenModels(uint64(resp.SystemRamBytes))
 	return resp, nil
 }
 
@@ -1606,6 +1607,24 @@ func (s *Server) DownloadRuntimeModel(ctx context.Context, req *proto.DownloadRu
 // falls back to the backend default (gguf). Selecting by the active runtime is
 // what makes browse surface safetensors when mistral.rs is active and GGUF
 // when llama-server is, with no user-facing format switch.
+// recommendedOpenModels returns the curated open-model recommendation for the
+// active open runtime: mistral.rs recommends its own curated chat tiers and
+// keeps the embedding tier on the shared nomic (it does not serve embeddings);
+// every other runtime uses the llama-server curated recommendation.
+func (s *Server) recommendedOpenModels(ram uint64) map[string]string {
+	if strings.EqualFold(s.cfgSvc.Get().OpenRuntime, "mistralrs") {
+		recs := runtimemistralrs.RecommendedOpenModels(ram)
+		if recs == nil {
+			recs = map[string]string{}
+		}
+		if emb := llamaserver.RecommendedOpenModels(ram)["embedding"]; emb != "" {
+			recs["embedding"] = emb
+		}
+		return recs
+	}
+	return llamaserver.RecommendedOpenModels(ram)
+}
+
 func (s *Server) activeCatalogFormat() string {
 	rm := s.runtimeMgr()
 	if rm == nil {

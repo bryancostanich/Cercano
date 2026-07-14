@@ -162,3 +162,39 @@ func (m *InMemoryManager) downloadShard(ctx context.Context, url, destPath strin
 	}
 	return written, shardOK
 }
+
+// maxShardRetries bounds how many times a transiently-failed shard is retried.
+// Each failure keeps the .part, so every retry resumes via Range instead of
+// re-transferring — this carries a download interrupted by sleep or a network
+// blip to completion once connectivity returns, without looping forever on a
+// permanent error (e.g. a 404).
+const maxShardRetries = 6
+
+// downloadShardWithRetry wraps downloadShard, retrying a transient shardFailed
+// with capped exponential backoff. shardOK and shardCancelled return
+// immediately; a failure that survives every retry returns the last
+// shardFailed with the model's terminal state already recorded.
+func (m *InMemoryManager) downloadShardWithRetry(ctx context.Context, url, destPath string, model *ModelRecord, baseOffset int64) (int64, shardOutcome) {
+	for attempt := 0; ; attempt++ {
+		written, outcome := m.downloadShard(ctx, url, destPath, model, baseOffset)
+		if outcome != shardFailed || attempt >= maxShardRetries {
+			return written, outcome
+		}
+		backoff := time.Duration(1<<uint(attempt)) * time.Second
+		if backoff > 30*time.Second {
+			backoff = 30 * time.Second
+		}
+		m.WriteLog(LogEntry{
+			Source:  "cercano.runtime.download",
+			Level:   "info",
+			ModelID: model.ID,
+			Message: fmt.Sprintf("download failed (attempt %d/%d), retrying %s in %s", attempt+1, maxShardRetries+1, urlBase(url), backoff),
+		})
+		select {
+		case <-ctx.Done():
+			m.markDownloadCancelled(*model)
+			return 0, shardCancelled
+		case <-time.After(backoff):
+		}
+	}
+}

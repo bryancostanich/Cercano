@@ -404,9 +404,10 @@ func (m *InMemoryManager) runDownload(ctx context.Context, model ModelRecord, jo
 			m.updateDownload(model)
 			continue
 		}
-		written, outcome := m.downloadShard(ctx, url, destPath, &model, completed)
+		written, outcome := m.downloadShardWithRetry(ctx, url, destPath, &model, completed)
 		if outcome != shardOK {
-			// downloadShard already recorded the cancelled/failed state.
+			// Cancelled, or failed after exhausting retries — downloadShard
+			// already recorded the terminal state.
 			return
 		}
 		completed += written

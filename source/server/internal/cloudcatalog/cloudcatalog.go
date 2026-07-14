@@ -47,7 +47,7 @@ func Catalog() []Provider {
 		{ID: "anthropic-subscription", Label: "anthropic (subscription)", Flavor: "messages", Route: "subscription", BaseURL: "", Tier: TierVerified},
 		{ID: "anthropic", Label: "anthropic (API key)", Flavor: "messages", BaseURL: "", Tier: TierVerified},
 		{ID: "openai-responses", Label: "openai (ChatGPT subscription)", Flavor: "responses", BaseURL: "https://api.openai.com/v1", Tier: TierUntested},
-		{ID: "openai", Label: "openai", Flavor: "chat_completions", Backend: "openai", BaseURL: "https://api.openai.com/v1", Tier: TierUntested},
+		{ID: "openai", Label: "openai (API key)", Flavor: "chat_completions", Backend: "openai", BaseURL: "https://api.openai.com/v1", Tier: TierUntested},
 		{ID: "gemini", Label: "gemini", Flavor: "chat_completions", Backend: "gemini", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", Tier: TierVerified},
 		{ID: "groq", Label: "groq", Flavor: "chat_completions", Backend: "groq", BaseURL: "https://api.groq.com/openai/v1", Tier: TierUntested},
 		{ID: "deepinfra", Label: "deepinfra", Flavor: "chat_completions", Backend: "", BaseURL: "https://api.deepinfra.com/v1/openai", Tier: TierUntested},

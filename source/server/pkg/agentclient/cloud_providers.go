@@ -18,6 +18,7 @@ type CloudProvider struct {
 	Tier           string // "verified" | "untested" | "coming_soon"
 	Profiles       []CloudProfileInfo
 	PrimaryProfile string // primary profile name; "" when none configured
+	Route          string // auth path this catalog entry represents ("subscription" for OAuth); "" = API key
 }
 
 // CloudProvidersView is the grouped cloud view returned by GetCloudProviders:
@@ -50,6 +51,7 @@ func (c *Client) GetCloudProviders(ctx context.Context) (CloudProvidersView, err
 			BaseURL:        p.GetBaseUrl(),
 			Tier:           p.GetTier(),
 			PrimaryProfile: p.GetPrimaryProfile(),
+			Route:          p.GetRoute(),
 		}
 		for _, pi := range p.GetProfiles() {
 			cp.Profiles = append(cp.Profiles, cloudProfileInfoFromProto(pi))

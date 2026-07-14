@@ -21,12 +21,19 @@ const (
 
 // Provider is one known cloud provider template: the pre-filled flavor/backend/
 // base URL a fresh profile for that provider starts from.
+//
+// A single vendor can appear as more than one catalog entry when it supports
+// distinct authentication paths that we want to present as separate rows — e.g.
+// Anthropic via a Claude subscription (OAuth) versus a direct API key. Those
+// share a Flavor but differ in Route, which is what keeps their configured
+// profiles bucketed apart (see ProviderIDFor).
 type Provider struct {
-	ID      string // stable id ("anthropic", "openai-responses", …) — also the row key
-	Label   string // friendly display label ("openai (responses)")
+	ID      string // stable id ("anthropic", "anthropic-subscription", …) — also the row key
+	Label   string // friendly display label ("anthropic (API key)")
 	Flavor  string // messages | chat_completions | responses | bedrock
 	Backend string // chat_completions only: per-backend quirks selector; empty otherwise
 	BaseURL string // best-effort default endpoint; user-editable
+	Route   string // auth path this entry represents ("subscription" for OAuth); empty = API key
 	Tier    Tier
 }
 
@@ -37,8 +44,9 @@ type Provider struct {
 // now owns it.
 func Catalog() []Provider {
 	return []Provider{
-		{ID: "anthropic", Label: "anthropic", Flavor: "messages", BaseURL: "", Tier: TierVerified},
-		{ID: "openai-responses", Label: "openai (responses)", Flavor: "responses", BaseURL: "https://api.openai.com/v1", Tier: TierUntested},
+		{ID: "anthropic-subscription", Label: "anthropic (subscription)", Flavor: "messages", Route: "subscription", BaseURL: "", Tier: TierVerified},
+		{ID: "anthropic", Label: "anthropic (API key)", Flavor: "messages", BaseURL: "", Tier: TierVerified},
+		{ID: "openai-responses", Label: "openai (ChatGPT subscription)", Flavor: "responses", BaseURL: "https://api.openai.com/v1", Tier: TierUntested},
 		{ID: "openai", Label: "openai", Flavor: "chat_completions", Backend: "openai", BaseURL: "https://api.openai.com/v1", Tier: TierUntested},
 		{ID: "gemini", Label: "gemini", Flavor: "chat_completions", Backend: "gemini", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", Tier: TierVerified},
 		{ID: "groq", Label: "groq", Flavor: "chat_completions", Backend: "groq", BaseURL: "https://api.groq.com/openai/v1", Tier: TierUntested},
@@ -143,7 +151,8 @@ func orderPrimaryFirst(bucket []ProfileRef, active, providerID string) []Profile
 // ProviderIDFor derives which catalog provider a profile belongs to, from its
 // shape — profiles carry no "which preset" field, so the mapping is derived:
 //
-//   - flavor=messages          → anthropic (direct API key or Meridian/Claude Max)
+//   - flavor=messages, subscription route → anthropic-subscription (Claude OAuth)
+//   - flavor=messages, otherwise          → anthropic (direct API key)
 //   - flavor=responses         → openai-responses (ChatGPT subscription)
 //   - flavor=bedrock           → bedrock
 //   - flavor=chat_completions  → by backend (openai|gemini|groq), else by base-URL host
@@ -152,6 +161,9 @@ func orderPrimaryFirst(bucket []ProfileRef, active, providerID string) []Profile
 func ProviderIDFor(p ProfileRef) string {
 	switch p.Flavor {
 	case "messages":
+		if p.Route == "subscription" {
+			return "anthropic-subscription"
+		}
 		return "anthropic"
 	case "responses":
 		return "openai-responses"

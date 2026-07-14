@@ -39,7 +39,7 @@ func (sp *settingsPage) selectCloudRow(rowID string) {
 		id := rowID[9:]
 		for _, prov := range sp.cloudView.Providers {
 			if prov.ID == id {
-				sp.cloudDraft = cloudDraft{Name: prov.ID, Flavor: prov.Flavor, Backend: prov.Backend, BaseURL: prov.BaseURL}
+				sp.cloudDraft = cloudDraft{Name: prov.ID, Flavor: prov.Flavor, Backend: prov.Backend, Route: prov.Route, BaseURL: prov.BaseURL}
 				return
 			}
 		}
@@ -154,17 +154,29 @@ func (sp *settingsPage) cloudDetailFields(r cloudRow) []form.Field {
 const canonicalClaudeProfile = "claude"
 
 // shouldShowClaudeSignIn reports whether the selected row should expose the
-// subscription OAuth action. Existing direct Anthropic API-key profiles should
-// not show it. Existing subscription aliases should not each show their own
-// sign-in button either; if the canonical subscription profile exists, it owns
-// re-auth. Otherwise the primary provider row keeps the action so older configs
-// that only have a legacy subscription alias can still re-authenticate.
+// subscription OAuth action. It is driven entirely by the row/draft's auth
+// path (route), not by hardcoded provider IDs, so the CLI stays a thin renderer
+// of the agent catalog.
+//
+// The action belongs only to the subscription auth path. Anthropic now presents
+// as two catalog entries — "anthropic (subscription)" (route=subscription) and
+// "anthropic (API key)" (empty route) — so a non-subscription draft never shows
+// sign-in. On the bare subscription template it is always offered (that is how
+// a fresh install signs in). For an already-configured subscription profile,
+// the canonical profile owns re-auth; older configs whose only subscription
+// profile is a legacy alias keep the action on the primary row so they can
+// still re-authenticate.
 func (sp *settingsPage) shouldShowClaudeSignIn(r cloudRow, d cloudDraft) bool {
 	if r.Preset == nil || r.Preset.Flavor != "messages" {
 		return false
 	}
 	if d.Route != "subscription" {
-		return r.ID == "template:anthropic"
+		// API-key path (or an unseeded draft): never offer subscription sign-in.
+		return false
+	}
+	if !r.IsProfile {
+		// Bare subscription template: this is the fresh-install sign-in entry.
+		return true
 	}
 	if r.Profile != nil && r.Profile.Name == canonicalClaudeProfile {
 		return true
@@ -172,7 +184,7 @@ func (sp *settingsPage) shouldShowClaudeSignIn(r cloudRow, d cloudDraft) bool {
 	if sp.hasCanonicalClaudeSubscriptionProfile() {
 		return false
 	}
-	return r.IsProfile && !r.SubProfile
+	return !r.SubProfile
 }
 
 func (sp *settingsPage) hasCanonicalClaudeSubscriptionProfile() bool {

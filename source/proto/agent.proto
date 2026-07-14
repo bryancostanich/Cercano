@@ -1079,7 +1079,9 @@ message GetCloudProfilesResponse {
 // CloudProvider is one known-provider catalog entry with the configured
 // profiles that belong to it grouped underneath (primary first). The agent
 // derives the grouping; the CLI renders it as a single provider row plus one
-// sub-row per extra profile.
+// sub-row per extra profile. A single vendor can appear as multiple entries
+// that differ only by auth path (route) — e.g. an OAuth "subscription" entry
+// and an API-key entry for the same vendor.
 message CloudProvider {
   string id       = 1; // stable catalog id / row key ("anthropic", "openai-responses")
   string label    = 2; // friendly display label ("openai (responses)")
@@ -1091,6 +1093,7 @@ message CloudProvider {
   // provider has no profiles yet — render the bare template row.
   repeated CloudProfileInfo profiles = 7;
   string primary_profile = 8; // primary profile name; empty when none configured
+  string route = 9; // auth path this catalog entry represents ("subscription" for OAuth); empty = API key
 }
 message GetCloudProvidersRequest {}
 message GetCloudProvidersResponse {

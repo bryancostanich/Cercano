@@ -58,6 +58,7 @@ func (s *Server) GetCloudProviders(ctx context.Context, req *proto.GetCloudProvi
 		cp := &proto.CloudProvider{
 			Id: gp.ID, Label: gp.Label, Flavor: gp.Flavor, Backend: gp.Backend,
 			BaseUrl: gp.BaseURL, Tier: string(gp.Tier), PrimaryProfile: gp.Primary,
+			Route: gp.Route,
 		}
 		for _, ref := range gp.Profiles {
 			cp.Profiles = append(cp.Profiles, toInfo(ref))

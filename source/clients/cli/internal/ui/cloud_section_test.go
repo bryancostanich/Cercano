@@ -227,7 +227,8 @@ func TestShouldShowClaudeSignIn(t *testing.T) {
 		want bool
 	}{
 		{name: "subscription profile", row: cloudRow{ID: "profile:claude", IsProfile: true, Preset: messagesPreset, Profile: &agentclient.CloudProfileInfo{Name: "claude", Flavor: "messages", Route: "subscription"}}, d: cloudDraft{Route: "subscription"}, want: true},
-		{name: "bare anthropic template", row: cloudRow{ID: "template:anthropic", Preset: messagesPreset}, d: cloudDraft{}, want: true},
+		{name: "bare subscription template", row: cloudRow{ID: "template:anthropic-subscription", Preset: messagesPreset}, d: cloudDraft{Route: "subscription"}, want: true},
+		{name: "bare API-key template", row: cloudRow{ID: "template:anthropic", Preset: messagesPreset}, d: cloudDraft{}, want: false},
 		{name: "direct anthropic profile", row: cloudRow{ID: "profile:anthropic", IsProfile: true, Preset: messagesPreset, Profile: &agentclient.CloudProfileInfo{Name: "anthropic", Flavor: "messages"}}, d: cloudDraft{}, want: false},
 		{name: "responses profile", row: cloudRow{ID: "profile:chatgpt", Preset: responsesPreset}, d: cloudDraft{Route: "subscription"}, want: false},
 		{name: "custom messages profile", row: cloudRow{ID: "profile:custom"}, d: cloudDraft{Route: "subscription"}, want: false},

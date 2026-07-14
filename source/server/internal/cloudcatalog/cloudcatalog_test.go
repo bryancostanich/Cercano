@@ -41,6 +41,19 @@ func TestCatalogIsWellFormed(t *testing.T) {
 	if !seen["openai"] || !seen["openai-responses"] {
 		t.Error("expected both openai and openai-responses in catalog")
 	}
+	// Anthropic must present as two distinct auth paths: subscription (OAuth)
+	// and API key. They share the messages flavor but differ by route.
+	if !seen["anthropic"] || !seen["anthropic-subscription"] {
+		t.Error("expected both anthropic (API key) and anthropic-subscription in catalog")
+	}
+	for _, p := range cat {
+		if p.ID == "anthropic-subscription" && p.Route != "subscription" {
+			t.Errorf("anthropic-subscription must carry route=subscription, got %q", p.Route)
+		}
+		if p.ID == "anthropic" && p.Route != "" {
+			t.Errorf("anthropic (API key) must carry empty route, got %q", p.Route)
+		}
+	}
 }
 
 func TestProviderIDForDerivation(t *testing.T) {
@@ -49,8 +62,8 @@ func TestProviderIDForDerivation(t *testing.T) {
 		in   ProfileRef
 		want string
 	}{
-		{"messages→anthropic (direct)", ProfileRef{Flavor: "messages"}, "anthropic"},
-		{"messages→anthropic (meridian)", ProfileRef{Flavor: "messages", Route: "meridian"}, "anthropic"},
+		{"messages→anthropic (direct API key)", ProfileRef{Flavor: "messages"}, "anthropic"},
+		{"messages+subscription→anthropic-subscription", ProfileRef{Flavor: "messages", Route: "subscription"}, "anthropic-subscription"},
 		{"responses→openai-responses", ProfileRef{Flavor: "responses"}, "openai-responses"},
 		{"bedrock→bedrock", ProfileRef{Flavor: "bedrock"}, "bedrock"},
 		{"chat+openai backend", ProfileRef{Flavor: "chat_completions", Backend: "openai"}, "openai"},
@@ -75,7 +88,7 @@ func TestProviderIDForDerivation(t *testing.T) {
 // A single anthropic profile must appear under exactly one provider, once — the
 // core fix for the "two anthropic rows" complaint.
 func TestGroupSingleProfileNoDuplicate(t *testing.T) {
-	profiles := []ProfileRef{{Name: "default", Flavor: "messages", Route: "meridian"}}
+	profiles := []ProfileRef{{Name: "default", Flavor: "messages"}}
 	providers, custom := Group(profiles, "default")
 	if len(custom) != 0 {
 		t.Errorf("expected no custom profiles, got %v", names(custom))
@@ -95,7 +108,7 @@ func TestGroupSingleProfileNoDuplicate(t *testing.T) {
 // Two anthropic accounts (e.g. two emails) group under one provider, active one primary.
 func TestGroupMultipleProfilesActiveIsPrimary(t *testing.T) {
 	profiles := []ProfileRef{
-		{Name: "work", Flavor: "messages", Route: "meridian"},
+		{Name: "work", Flavor: "messages"},
 		{Name: "personal", Flavor: "messages"},
 	}
 	providers, _ := Group(profiles, "personal")
@@ -158,6 +171,28 @@ func TestGroupOpenAIResponsesVsChatSeparate(t *testing.T) {
 	}
 	if len(chat.Profiles) != 1 || chat.Profiles[0].Name != "openai-key" {
 		t.Errorf("openai profiles = %v, want [openai-key]", names(chat.Profiles))
+	}
+}
+
+// A Claude subscription profile and a direct Anthropic API-key profile must
+// group under separate providers so the UI shows two distinct rows —
+// "anthropic (subscription)" and "anthropic (API key)" — not one merged entry.
+func TestGroupAnthropicSubscriptionVsKeySeparate(t *testing.T) {
+	profiles := []ProfileRef{
+		{Name: "claude", Flavor: "messages", Route: "subscription"},
+		{Name: "anthropic", Flavor: "messages"},
+	}
+	providers, custom := Group(profiles, "claude")
+	if len(custom) != 0 {
+		t.Errorf("expected no custom profiles, got %v", names(custom))
+	}
+	sub := providerByID(t, providers, "anthropic-subscription")
+	key := providerByID(t, providers, "anthropic")
+	if len(sub.Profiles) != 1 || sub.Profiles[0].Name != "claude" {
+		t.Errorf("anthropic-subscription profiles = %v, want [claude]", names(sub.Profiles))
+	}
+	if len(key.Profiles) != 1 || key.Profiles[0].Name != "anthropic" {
+		t.Errorf("anthropic (API key) profiles = %v, want [anthropic]", names(key.Profiles))
 	}
 }
 

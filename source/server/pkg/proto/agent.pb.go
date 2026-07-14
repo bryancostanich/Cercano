@@ -8507,7 +8507,9 @@ func (x *GetCloudProfilesResponse) GetActive() string {
 // CloudProvider is one known-provider catalog entry with the configured
 // profiles that belong to it grouped underneath (primary first). The agent
 // derives the grouping; the CLI renders it as a single provider row plus one
-// sub-row per extra profile.
+// sub-row per extra profile. A single vendor can appear as multiple entries
+// that differ only by auth path (route) — e.g. an OAuth "subscription" entry
+// and an API-key entry for the same vendor.
 type CloudProvider struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Id      string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                          // stable catalog id / row key ("anthropic", "openai-responses")
@@ -8520,6 +8522,7 @@ type CloudProvider struct {
 	// provider has no profiles yet — render the bare template row.
 	Profiles       []*CloudProfileInfo `protobuf:"bytes,7,rep,name=profiles,proto3" json:"profiles,omitempty"`
 	PrimaryProfile string              `protobuf:"bytes,8,opt,name=primary_profile,json=primaryProfile,proto3" json:"primary_profile,omitempty"` // primary profile name; empty when none configured
+	Route          string              `protobuf:"bytes,9,opt,name=route,proto3" json:"route,omitempty"`                                         // auth path this catalog entry represents ("subscription" for OAuth); empty = API key
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -8606,6 +8609,13 @@ func (x *CloudProvider) GetProfiles() []*CloudProfileInfo {
 func (x *CloudProvider) GetPrimaryProfile() string {
 	if x != nil {
 		return x.PrimaryProfile
+	}
+	return ""
+}
+
+func (x *CloudProvider) GetRoute() string {
+	if x != nil {
+		return x.Route
 	}
 	return ""
 }
@@ -12562,7 +12572,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x17GetCloudProfilesRequest\"g\n" +
 	"\x18GetCloudProfilesResponse\x123\n" +
 	"\bprofiles\x18\x01 \x03(\v2\x17.agent.CloudProfileInfoR\bprofiles\x12\x16\n" +
-	"\x06active\x18\x02 \x01(\tR\x06active\"\xf4\x01\n" +
+	"\x06active\x18\x02 \x01(\tR\x06active\"\x8a\x02\n" +
 	"\rCloudProvider\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05label\x18\x02 \x01(\tR\x05label\x12\x16\n" +
@@ -12571,7 +12581,8 @@ const file_agent_proto_rawDesc = "" +
 	"\bbase_url\x18\x05 \x01(\tR\abaseUrl\x12\x12\n" +
 	"\x04tier\x18\x06 \x01(\tR\x04tier\x123\n" +
 	"\bprofiles\x18\a \x03(\v2\x17.agent.CloudProfileInfoR\bprofiles\x12'\n" +
-	"\x0fprimary_profile\x18\b \x01(\tR\x0eprimaryProfile\"\x1a\n" +
+	"\x0fprimary_profile\x18\b \x01(\tR\x0eprimaryProfile\x12\x14\n" +
+	"\x05route\x18\t \x01(\tR\x05route\"\x1a\n" +
 	"\x18GetCloudProvidersRequest\"\xc1\x01\n" +
 	"\x19GetCloudProvidersResponse\x122\n" +
 	"\tproviders\x18\x01 \x03(\v2\x14.agent.CloudProviderR\tproviders\x12@\n" +

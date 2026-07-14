@@ -1511,9 +1511,13 @@ func dashboardPanelWidth(width int) int {
 }
 
 func dashboardContentHeight(height int) int {
-	// Root chrome around content pages is: top bar, divider, prompt top rule,
-	// one-line prompt, prompt bottom rule, and status bar.
-	contentH := height - 6
+	// Root chrome around content pages is only: top bar, divider, and status
+	// bar (3 rows). Content pages do NOT render the prompt frame — View() gates
+	// it out via !m.contentPageActive() — so we must not reserve its rows here.
+	// The config tab strip, when present, is already netted out of the height
+	// passed in (contentPageHeight subtracts configStripRows), so it isn't
+	// double-counted.
+	contentH := height - 3
 	if contentH < 1 {
 		return 1
 	}

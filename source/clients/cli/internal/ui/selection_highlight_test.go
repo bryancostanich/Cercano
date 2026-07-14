@@ -46,7 +46,7 @@ func TestHighlightRange_BackgroundOnlyKeepsText(t *testing.T) {
 // bug where selecting a sent prompt showed no highlight (the fill won).
 func TestHighlightRange_WinsOverLineBackground(t *testing.T) {
 	selBg := "\x1b[48;2;88;130;158m" // #58829E selection
-	lineBg := "\x1b[48;2;17;51;26m" // #11331A sent-prompt fill (Cracker BufferUserBg)
+	lineBg := "\x1b[48;2;17;51;26m"  // #11331A sent-prompt fill (Cracker BufferUserBg)
 	line := lipgloss.NewStyle().Background(lipgloss.Color("#11331A")).Render("sent prompt")
 	hl := highlightRange(line, 0, ansi.StringWidth(line))
 

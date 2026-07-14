@@ -20,6 +20,7 @@ func newCatalogTestDashboard(snapshot runtimeDashboardSnapshot) *runtimeDashboar
 		palette:  m.palette,
 		styles:   m.styles,
 		snapshot: snapshot,
+		loaded:   true,
 		focus:    runtimeFocusCatalog,
 	}
 }

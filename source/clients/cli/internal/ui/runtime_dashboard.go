@@ -63,6 +63,10 @@ type runtimeDashboard struct {
 	styles        theme.Styles
 	agent         *agentclient.Client
 	snapshot      runtimeDashboardSnapshot
+	// loaded flips true once the first asynchronous snapshot arrives, so
+	// the page can render a "loading" placeholder on open instead of a
+	// misleading empty/error state before the fetch has completed.
+	loaded bool
 	// estimates caches resolved RAM estimates by estimateKey;
 	// estimatePending tracks in-flight fetches so cursor movement
 	// doesn't double-dispatch. See runtime_estimate.go.
@@ -102,6 +106,18 @@ type runtimeDashboardSnapshot struct {
 	StatusErr  error
 	Catalog    agentclient.RuntimeModelCatalog
 	CatalogErr error
+}
+
+// runtimeDashboardSnapshotMsg delivers an asynchronously-loaded snapshot
+// back to the UI thread. The snapshot fetch makes three sequential gRPC
+// calls (config, status, catalog) each with a multi-second timeout, so it
+// MUST run off the UI thread inside a tea.Cmd — doing it synchronously in
+// the constructor or on every refresh tick froze the whole terminal while
+// the round-trips were in flight. mode tags the fetch so a snapshot for a
+// dashboard that has since been rebuilt in the other mode is ignored.
+type runtimeDashboardSnapshotMsg struct {
+	snapshot runtimeDashboardSnapshot
+	mode     dashboardMode
 }
 
 type runtimeDashboardAction struct {
@@ -161,8 +177,35 @@ func newRuntimeDashboard(ag *agentclient.Client, p theme.Palette, s theme.Styles
 		estimates:       make(map[string]agentclient.ModelRAMEstimate),
 		estimatePending: make(map[string]bool),
 	}
-	dashboard.snapshot = loadRuntimeDashboardSnapshot(ag)
-	return dashboard, tea.Batch(blinkCmd, dashboard.maybeFetchEstimate())
+	// Load the snapshot asynchronously — see loadSnapshotCmd. The page
+	// renders a "loading" placeholder until the first snapshot arrives.
+	return dashboard, tea.Batch(blinkCmd, dashboard.loadSnapshotCmd(), dashboard.maybeFetchEstimate())
+}
+
+// loadSnapshotCmd fetches the runtime snapshot off the UI thread and
+// delivers it back as a runtimeDashboardSnapshotMsg. The fetch itself is
+// three sequential multi-second gRPC round-trips, so it must never run on
+// the UI goroutine (constructor or refresh handler) — doing so froze the
+// terminal for up to the sum of the call timeouts.
+func (d *runtimeDashboard) loadSnapshotCmd() tea.Cmd {
+	ag := d.agent
+	mode := d.mode
+	return func() tea.Msg {
+		return runtimeDashboardSnapshotMsg{snapshot: loadRuntimeDashboardSnapshot(ag), mode: mode}
+	}
+}
+
+// applySnapshot installs an asynchronously-loaded snapshot and marks the
+// page loaded. The mode guard drops a late snapshot whose fetch was kicked
+// off before the dashboard was rebuilt in the other tab mode.
+func (d *runtimeDashboard) applySnapshot(msg runtimeDashboardSnapshotMsg) tea.Cmd {
+	if msg.mode != d.mode {
+		return nil
+	}
+	d.snapshot = msg.snapshot
+	d.loaded = true
+	d.clampOperationCursor()
+	return nil
 }
 
 func (d *runtimeDashboard) ID() contentPageID {
@@ -244,6 +287,14 @@ func (d *runtimeDashboard) View() string {
 }
 
 func (d *runtimeDashboard) fullContent() (string, int) {
+	contentHeight := dashboardContentHeight(d.height)
+	if !d.loaded {
+		// The first snapshot is still in flight (loaded off the UI thread).
+		// Render a placeholder rather than an empty/error state so opening
+		// the tab feels instant.
+		msg := d.styles.Muted.Render("loading runtime…")
+		return msg, contentHeight
+	}
 	// The action blocks below (downloads, installed models, processes,
 	// tiers) share one flat cursor space — operationRows() — so the
 	// selection ordinal must run continuously across them rather than
@@ -340,19 +391,18 @@ func (d *runtimeDashboard) renderScrollableContent(full string, height int) stri
 }
 
 func (d *runtimeDashboard) applyActionMsg(msg runtimeDashboardActionMsg) tea.Cmd {
-	d.snapshot = loadRuntimeDashboardSnapshot(d.agent)
-	d.clampOperationCursor()
 	if msg.CatalogMessage != "" {
 		d.catalogMessage = msg.CatalogMessage
 	}
 	d.actionMessage = msg.Status
-	return d.refreshTick()
+	// Reload the snapshot off the UI thread and reschedule the tick.
+	return tea.Batch(d.loadSnapshotCmd(), d.refreshTick())
 }
 
 func (d *runtimeDashboard) refreshSnapshot() tea.Cmd {
-	d.snapshot = loadRuntimeDashboardSnapshot(d.agent)
-	d.clampOperationCursor()
-	return d.refreshTick()
+	// Reload the snapshot off the UI thread (never block the tick handler
+	// on the gRPC round-trips) and reschedule the next tick.
+	return tea.Batch(d.loadSnapshotCmd(), d.refreshTick())
 }
 
 func (d *runtimeDashboard) hasActiveDownloads() bool {

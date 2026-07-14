@@ -29,6 +29,7 @@ func newActionCursorTestDashboard() *runtimeDashboard {
 		styles:        m.styles,
 		focus:         runtimeFocusActions,
 		catalogSearch: search,
+		loaded:        true,
 		snapshot: runtimeDashboardSnapshot{
 			Config: &agentclient.Config{},
 			Status: &agentclient.RuntimeStatus{

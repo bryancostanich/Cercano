@@ -109,6 +109,7 @@ func TestRuntimeDashboardViewShowsRuntimeDashboardData(t *testing.T) {
 		palette:  m.palette,
 		styles:   m.styles,
 		snapshot: snapshot,
+		loaded:   true,
 		focus:    runtimeFocusCatalog,
 	}
 	dashboard.catalogSearch = textinput.New()
@@ -207,6 +208,7 @@ func TestRuntimeDashboardViewSeparatesConfigAndOpenLogs(t *testing.T) {
 		palette:  m.palette,
 		styles:   m.styles,
 		snapshot: snapshot,
+		loaded:   true,
 	}
 	dashboard.catalogSearch = textinput.New()
 
@@ -245,6 +247,7 @@ func TestRuntimeDashboardCatalogSearchFiltersAndShowsDetails(t *testing.T) {
 		height:  37,
 		palette: m.palette,
 		styles:  m.styles,
+		loaded:  true,
 		snapshot: runtimeDashboardSnapshot{
 			Config: &agentclient.Config{OpenRuntime: "llama_server"},
 			Status: &agentclient.RuntimeStatus{
@@ -296,6 +299,7 @@ func TestRuntimeDashboardCatalogTypingFiltersByDefault(t *testing.T) {
 		height:  37,
 		palette: m.palette,
 		styles:  m.styles,
+		loaded:  true,
 		snapshot: runtimeDashboardSnapshot{
 			Config: &agentclient.Config{OpenRuntime: "llama_server"},
 			Status: &agentclient.RuntimeStatus{
@@ -334,6 +338,7 @@ func TestRuntimeDashboardBlocksUseFullPageWidth(t *testing.T) {
 		height:  32,
 		palette: m.palette,
 		styles:  m.styles,
+		loaded:  true,
 		snapshot: runtimeDashboardSnapshot{
 			Config: &agentclient.Config{
 				OpenRuntime:   "llama_server",
@@ -384,6 +389,7 @@ func TestRuntimeDashboardLogBlockFillsRemainingContentHeight(t *testing.T) {
 		height:  37,
 		palette: m.palette,
 		styles:  m.styles,
+		loaded:  true,
 		snapshot: runtimeDashboardSnapshot{
 			Config: &agentclient.Config{OpenRuntime: "llama_server"},
 			Status: &agentclient.RuntimeStatus{
@@ -429,6 +435,7 @@ func TestRuntimeDashboardShowsDownloadProgressAndActions(t *testing.T) {
 		palette:  m.palette,
 		styles:   m.styles,
 		snapshot: snapshot,
+		loaded:   true,
 		focus:    runtimeFocusCatalog,
 	}
 	dashboard.catalogSearch = textinput.New()
@@ -603,6 +610,7 @@ func overflowingRuntimeDashboard(t *testing.T, height int) *runtimeDashboard {
 		palette:  m.palette,
 		styles:   m.styles,
 		snapshot: snapshot,
+		loaded:   true,
 		focus:    runtimeFocusCatalog,
 	}
 	dashboard.catalogSearch = textinput.New()

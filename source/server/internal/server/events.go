@@ -13,7 +13,6 @@ import (
 	"sync"
 
 	"cercano/source/server/internal/localruntime/llamaserver"
-	"cercano/source/server/internal/meridian"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 )
@@ -139,35 +138,6 @@ func (s *Server) broadcastPermissionMode(mode string) {
 	})
 }
 
-// broadcastMeridianStatus pushes a MeridianStatusChanged event for the current
-// state of the local Meridian proxy. Called from the meridian.Manager status
-// listener wired up in SetupMeridian — there's exactly one source of these
-// events, so no dedupe is needed.
-func (s *Server) broadcastMeridianStatus(st meridian.Status) {
-	if s.events == nil {
-		return
-	}
-	s.events.broadcast(&proto.ClientEvent{
-		Event: &proto.ClientEvent_MeridianStatusChanged{
-			MeridianStatusChanged: &proto.MeridianStatusChanged{
-				Status: meridianStatusToProto(st),
-			},
-		},
-	})
-}
-
-// meridianStatusToProto converts the internal meridian.Status struct to the
-// wire-level proto. Shared by the event broadcast and the GetCloudProfiles
-// initial-fetch path.
-func meridianStatusToProto(st meridian.Status) *proto.MeridianStatus {
-	return &proto.MeridianStatus{
-		State:       st.State.String(),
-		Message:     st.Message,
-		Port:        int32(st.Port),
-		MissingDeps: st.MissingDeps,
-	}
-}
-
 // buildOpenRuntimeStatus builds the wire-level status message from the
 // runtime name, the (possibly-just-updated) config, and an optional
 // DetectError. Detection failure → ok=false with Missing/SuggestedCommand
@@ -230,16 +200,4 @@ func (s *Server) broadcastOpenRuntimeStatus(status *proto.OpenRuntimeStatus) {
 	})
 }
 
-// meridianHasAuth probes for a Claude OAuth token — the credential `claude
-// login` writes to the keychain and that Meridian reads to authenticate
-// upstream. Indirection over meridian.HasClaudeAuth so tests can force either
-// state.
-var meridianHasAuth = meridian.HasClaudeAuth
 
-// meridianAuthMissing reports whether activating prof would strand a
-// non-functional cloud profile: true only for a meridian-routed profile when
-// no Claude token is present. Activating one silently would break cloud with
-// no signal, so callers refuse with actionable guidance instead.
-func meridianAuthMissing(prof config.CloudProfile) bool {
-	return prof.Route == "meridian" && !meridianHasAuth()
-}

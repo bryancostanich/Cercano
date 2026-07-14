@@ -310,29 +310,11 @@ func (s *Server) SetUsageSink(fn func(usage.Usage)) {
 // SetSecrets attaches the secrets store used to retrieve profile API keys.
 func (s *Server) SetSecrets(st secrets.Store) { s.cfgSvc.SetSecrets(st) }
 
-// SetupMeridian constructs the local Meridian proxy manager and wires its
-// status listener to the event hub so MeridianStatusChanged is broadcast on
-// every state transition. logPath is the file Meridian's stdout/stderr is
-// teed into (typically ~/.cercano/meridian.log).
-//
-// Call once at startup, after the event hub is initialised. After this,
-// rebuildCloudLocked will Ensure/Stop the proxy as the active profile's
-// route field changes.
-func (s *Server) SetupMeridian(logPath string) {
-	if s.runtimesSvc == nil {
-		s.runtimesSvc = runtimessvc.New(s.cfgSvc)
-	}
-	s.runtimesSvc.SetupMeridian(logPath, s.broadcastMeridianStatus)
-}
-
-// Shutdown tears down long-lived subprocess managers the server owns
-// (currently: Meridian). Safe to call once at process exit; cheap when
-// nothing was started. Does NOT stop the gRPC server itself — that's the
-// caller's job (cmd/cercano/main.go uses GracefulStop).
+// Shutdown tears down long-lived subprocess managers the server owns. Safe to
+// call once at process exit; cheap when nothing was started. Does NOT stop the
+// gRPC server itself — that's the caller's job (cmd/cercano/main.go uses
+// GracefulStop).
 func (s *Server) Shutdown() {
-	if s.runtimesSvc != nil {
-		s.runtimesSvc.StopMeridian()
-	}
 	// Drain the per-conversation worker pool (kill warm workers + stop the
 	// idle-reaper) when worker mode is armed. The in-process runner has nothing
 	// to drain; the type assertion no-ops for it.
@@ -418,15 +400,6 @@ func (s *Server) GetCloudProfiles(ctx context.Context, req *proto.GetCloudProfil
 			Name: p.Name, Flavor: p.Flavor, BaseUrl: p.BaseURL, Model: p.Model, HasKey: hasKey, Backend: p.Backend, Route: p.Route,
 		})
 	}
-	if s.runtimesSvc != nil {
-		if st, ok := s.runtimesSvc.MeridianStatus(); ok {
-			out.MeridianStatus = meridianStatusToProto(st)
-		} else {
-			out.MeridianStatus = &proto.MeridianStatus{State: "disabled"}
-		}
-	} else {
-		out.MeridianStatus = &proto.MeridianStatus{State: "disabled"}
-	}
 	return out, nil
 }
 
@@ -443,17 +416,6 @@ func (s *Server) SetActiveCloudProfile(ctx context.Context, req *proto.SetActive
 	defer func() {
 		log.Printf("[cloud] SetActiveCloudProfile(%q) took %v", req.GetName(), time.Since(start).Round(time.Millisecond))
 	}()
-	// A meridian-routed profile is non-functional without a Claude OAuth token
-	// (Meridian reads what `claude login` writes to the keychain). Refuse to
-	// activate one when the token is absent, with actionable guidance, instead
-	// of silently landing a profile that can't authenticate. Gate before
-	// mutating the active profile so a refused switch leaves state untouched.
-	if prof, ok := profileByName(s.cfgSvc.Get().CloudProfiles, req.GetName()); ok && meridianAuthMissing(prof) {
-		return &proto.SetActiveCloudProfileResponse{
-			Ok:    false,
-			Error: "Sign in to Claude to use Meridian: run `claude login` in a terminal, then try again.",
-		}, nil
-	}
 	if !s.cfgSvc.SetActiveProfile(req.GetName()) {
 		return &proto.SetActiveCloudProfileResponse{Ok: false, Error: fmt.Sprintf("no profile %q", req.GetName())}, nil
 	}
@@ -621,14 +583,7 @@ func NewServer(a *agent.Agent, openProvider *legacymodels.OpenModelProvider, rou
 		runtimesSvc: rtSvc,
 		turnBroker:  broker.New(),
 	}
-	// syncMeridian bridges rebuildCloud → runtimesSvc.SyncMeridianForProfile
-	// without the providers service holding a direct meridianMgr reference.
-	// The callback captures rtSvc (constructed above and stored on s) so it
-	// can reach the manager at call time (set after construction via SetupMeridian).
-	syncMeridianFn := func(p config.CloudProfile, _ config.Config) {
-		rtSvc.SyncMeridianForProfile(p)
-	}
-	s.providerSvc = providers.New(cfgService, openProvider, router, coordinator, cloudFactory, registry, syncMeridianFn, nil)
+	s.providerSvc = providers.New(cfgService, openProvider, router, coordinator, cloudFactory, registry, nil)
 	// Construct the persistence service. It wraps the agent for store access;
 	// the agent itself is NOT owned by this service. The func-value collaborators
 	// read live state from providerSvc at call time.

@@ -407,11 +407,6 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		fmt.Fprintf(os.Stderr, "[WARN] keychain unavailable (%v) — cloud profiles can't load keys; fallback deferred.\n", err)
 	}
 
-	// Wire the Meridian proxy manager BEFORE RebuildCloud so the first
-	// resolution of a meridian-routed profile spawns the proxy. Cleanup runs
-	// via srv.Shutdown in the cleanup closure below.
-	srv.SetupMeridian(filepath.Join(filepath.Dir(config.DefaultPath()), "meridian.log"))
-
 	// One-time relocation: if a legacy inline API key is still in the config,
 	// ensure it is safely in the keychain and then blank the YAML field so it
 	// never persists in plain text.  Two cases are handled:

@@ -126,23 +126,13 @@ type service struct {
 	healthMonitorCancel context.CancelFunc // cancel function for the active health monitor
 	catalogManager      *ollamacatalog.Manager
 
-	// syncMeridian is the callback injected from the front door (currently
-	// syncMeridianForProfile on Server) so rebuildCloud can trigger Meridian
-	// sync without holding a direct reference to the manager.
-	// Coupling note for Task 6 (hostsvc/runtimes): this callback and
-	// applyRuntimeEndpoints/refreshRuntimeEndpoints will move into a runtimes
-	// service; for now they bridge through callbacks.
-	syncMeridian func(cfg.CloudProfile, cfg.Config)
-
 	// usageSink wraps the main-loop provider for token recording.
 	usageSink func(usage.Usage)
 }
 
 // New constructs a Resolver with the collaborators it needs.
-// openProvider, cloudFactory, coordinator, router, registry, syncMeridian may
-// be nil when not applicable (e.g. tests, minimal embeddings).
-// syncMeridian is called from rebuildCloud after a profile change; the front
-// door passes syncMeridianForProfile (which holds the meridianMgr reference).
+// openProvider, cloudFactory, coordinator, router, registry may be nil when
+// not applicable (e.g. tests, minimal embeddings).
 func New(
 	cfgSvc cfgsvc.Service,
 	openProvider *legacymodels.OpenModelProvider,
@@ -150,7 +140,6 @@ func New(
 	coordinator *loop.ADKCoordinator,
 	cloudFactory agent.CloudFactory,
 	registry *engine.EngineRegistry,
-	syncMeridian func(cfg.CloudProfile, cfg.Config),
 	usageSink func(usage.Usage),
 ) Resolver {
 	return &service{
@@ -160,7 +149,6 @@ func New(
 		coordinator:  coordinator,
 		cloudFactory: cloudFactory,
 		registry:     registry,
-		syncMeridian: syncMeridian,
 		usageSink:    usageSink,
 	}
 }
@@ -369,9 +357,6 @@ func (p *service) rebuildCloud() error {
 		p.coordinator.SetCloudProvider(mp)
 	}
 	p.cfgSvc.SetCloudModel(prof.Model) // keep CloudModel reporting consistent
-	if p.syncMeridian != nil {
-		p.syncMeridian(prof, c)
-	}
 	return nil
 }
 

@@ -272,6 +272,10 @@ func (m *mockAgentClient) StartChatGPTLogin(ctx context.Context, in *proto.Start
 	return nil, nil
 }
 
+func (m *mockAgentClient) StartClaudeLogin(ctx context.Context, in *proto.StartClaudeLoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[proto.StartClaudeLoginEvent], error) {
+	return nil, nil
+}
+
 func (m *mockAgentClient) RegenerateContext(ctx context.Context, in *proto.RegenerateContextRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[proto.RegenerateContextProgress], error) {
 	return nil, nil
 }

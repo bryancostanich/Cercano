@@ -73,14 +73,15 @@ func TestWizardCloudPathEndToEnd(t *testing.T) {
 	if wp.state.CloudProvider != "anthropic" {
 		t.Fatalf("provider: want anthropic, got %s", wp.state.CloudProvider)
 	}
-	// Phase 2: pick meridian (commits the profile eagerly; stub it).
-	wp.commitMeridianFn = func() error { return nil }
+	// Phase 2: pick "sign in with Claude" (the first anthropic auth row).
+	// It hands off to the loopback modal (owned by the root model) and
+	// advances the wizard behind it — no eager profile commit here.
 	press(t, wp, tea.KeyEnter)
 	if wp.state.Step != wizard.StepOpen {
 		t.Fatalf("after cloud: want %s, got %s (cloud_primary uses open)", wizard.StepOpen, wp.state.Step)
 	}
-	if wp.state.AuthMethod != "meridian" {
-		t.Fatalf("auth: want meridian, got %s", wp.state.AuthMethod)
+	if wp.state.AuthMethod != "claude" {
+		t.Fatalf("auth: want claude, got %s", wp.state.AuthMethod)
 	}
 
 	// Step 3 (open): autofill should have filled both sides for every tier.
@@ -314,28 +315,6 @@ func TestWizardKeyEntryEscReturnsToAuthPick(t *testing.T) {
 	}
 	if !wp.authPick {
 		t.Fatal("esc: want auth-method screen back")
-	}
-}
-
-func TestWizardMeridianCommit(t *testing.T) {
-	wp := newTestWizardPage(t)
-	press(t, wp, tea.KeyEnter) // cloud (first row)
-	press(t, wp, tea.KeyEnter) // anthropic
-
-	wp.commitMeridianFn = func() error { return fmt.Errorf("proxy down") }
-	press(t, wp, tea.KeyEnter) // meridian (first auth row)
-	if wp.state.Step != wizard.StepCloud || !strings.Contains(wp.status, "meridian setup failed") {
-		t.Fatalf("failed meridian: want stay on cloud + error, got step=%s status=%q", wp.state.Step, wp.status)
-	}
-
-	called := false
-	wp.commitMeridianFn = func() error { called = true; return nil }
-	press(t, wp, tea.KeyEnter)
-	if !called {
-		t.Error("meridian: commit not called")
-	}
-	if wp.state.Step != wizard.StepOpen {
-		t.Fatalf("after meridian: want %s, got %s", wizard.StepOpen, wp.state.Step)
 	}
 }
 

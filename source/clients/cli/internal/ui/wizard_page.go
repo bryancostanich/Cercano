@@ -51,10 +51,9 @@ type wizardPage struct {
 	// touches the plaintext resume file.
 	keyEntry bool
 	keyInput textinput.Model
-	// commitKeyFn / commitMeridianFn mirror applyFn: test indirection over
-	// the concrete gRPC client.
-	commitKeyFn      func(key string) error
-	commitMeridianFn func() error
+	// commitKeyFn mirrors applyFn: test indirection over the concrete gRPC
+	// client.
+	commitKeyFn func(key string) error
 	recs             config.TierRecommendations
 	recsOK           bool
 	// catalog is the runtime model catalog fetched from the agent once at
@@ -115,7 +114,6 @@ func newWizardPage(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h
 		return err
 	}
 	wp.commitKeyFn = wp.commitAPIKey
-	wp.commitMeridianFn = wp.commitMeridianProfile
 	wp.rollbackFn = wp.rollbackBaseline
 	wp.loadProviders()
 	if !ok {
@@ -267,31 +265,6 @@ func (wp *wizardPage) commitAPIKey(key string) error {
 		return err
 	}
 	return wp.agent.SetActiveCloudProfile(ctx, preset.ID)
-}
-
-// defaultMeridianBaseURL is Meridian's documented default listen address
-// (the server's meridian manager and the config migration use the same
-// 127.0.0.1:3456 default).
-const defaultMeridianBaseURL = "http://127.0.0.1:3456"
-
-// commitMeridianProfile creates/activates an anthropic profile routed
-// through the Meridian proxy; subscription auth, no key stored. The BaseURL
-// is required: the server only activates a keyless profile when a proxy
-// BaseURL says who handles auth.
-func (wp *wizardPage) commitMeridianProfile() error {
-	if wp.agent == nil {
-		return fmt.Errorf("no agent connection")
-	}
-	preset, _ := wp.wizardPreset("anthropic")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := wp.agent.UpsertCloudProfile(ctx, agentclient.CloudProfileInfo{
-		Name: "anthropic", Flavor: preset.Flavor, Route: "meridian", BaseURL: defaultMeridianBaseURL,
-		Model: wizardProfileModel(wp.recs, "anthropic"),
-	}); err != nil {
-		return err
-	}
-	return wp.agent.SetActiveCloudProfile(ctx, "anthropic")
 }
 
 // startKeyEntry opens the masked key prompt. Returns the cursor-blink cmd.
@@ -452,7 +425,7 @@ func wizardAuthRows(providerID string) []wizardRow {
 	switch providerID {
 	case "anthropic":
 		return []wizardRow{
-			{Key: "meridian", Label: "meridian proxy", Annotation: "Claude subscription sign-in"},
+			{Key: "claude", Label: "sign in with Claude (subscription)", Annotation: "Claude Max/Pro — no API key"},
 			{Key: "api_key", Label: "api key", Annotation: "key from console.anthropic.com"},
 		}
 	case "openai":
@@ -708,14 +681,17 @@ func (wp *wizardPage) selectRow() (tea.Cmd, bool) {
 		case "api_key":
 			// authPick stays true so esc from the prompt returns here.
 			return wp.startKeyEntry(), false
-		case "meridian":
-			if err := wp.commitMeridianFn(); err != nil {
-				wp.status = "meridian setup failed: " + err.Error()
-				return nil, false
-			}
+		case "claude":
+			// Claude subscription sign-in: hand off to the loopback modal, owned
+			// by the root model and composited over this wizard page. It creates
+			// + activates the "claude" profile on success; the wizard's finish
+			// (applyConfig) only writes locus + tier picks. Advance so the wizard
+			// continues behind the modal.
 			wp.authPick = false
-			wp.status = "anthropic (meridian) is the active profile"
 			wp.advance()
+			return func() tea.Msg {
+				return openClaudeLoginModalMsg{profile: "", setActive: true}
+			}, false
 		case "chatgpt":
 			// ChatGPT subscription sign-in: hand off to the device-code modal,
 			// which is owned by the root model and composited over this wizard

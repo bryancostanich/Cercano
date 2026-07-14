@@ -14,7 +14,6 @@ import (
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/llm"
-	"cercano/source/server/internal/llm/anthropic"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/watchdog"
@@ -46,10 +45,9 @@ func (c *Core) RunTurn(
 	requester PermissionRequester,
 	persist PersistFunc,
 ) (Result, error) {
-	// Thread the session ID so the Anthropic provider can tag requests for
-	// multi-turn β features. Must match the old anthropic.WithSessionID call
-	// that lived in streamProcessRequestWithToolLoop before this move.
-	ctx = anthropic.WithSessionID(ctx, req.ConversationID)
+	// Thread the conversation ID as the session ID so downstream (e.g. the
+	// stream-anomaly log) can attribute this turn to its conversation.
+	ctx = llm.WithSessionID(ctx, req.ConversationID)
 
 	// 1. Resolve the provider per the active Locus Mode.
 	provider, isCloud, fellBack, err := c.d.Providers.Main()

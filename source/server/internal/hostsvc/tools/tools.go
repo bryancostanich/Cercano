@@ -376,12 +376,10 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "started", Text: fmt.Sprintf("sub-agent start: conv=%s model=%s tools=%s", subConvID, model, strings.Join(granted, ", ")), GrantedTools: granted, IgnoredTools: ignored})
 
 	// The subagent's provider calls must carry their OWN session identity, not
-	// the parent conversation's (inherited via ctx). Upstream bridges key
-	// persistent session state on this id; the subagent's disjoint history
-	// arriving on the parent's key evicts the parent's lineage and cross-
-	// delivers turns between the two. subConvID is always set (minted above).
+	// the parent conversation's (inherited via ctx), so anomaly attribution and
+	// per-session tagging stay disjoint from the parent. subConvID is always set
+	// (minted above).
 	ctx = llm.WithSessionID(ctx, subConvID)
-	ctx = llm.WithIndependentSession(ctx) // skip Meridian lineage matching for subagent turns
 
 	// 4. Run the bounded tool loop.
 	var buf strings.Builder

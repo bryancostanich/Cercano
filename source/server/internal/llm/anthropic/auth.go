@@ -6,8 +6,7 @@ import "net/http"
 // access paths it handles. RouteSubscription is exported so the cloud factory
 // can select it without magic strings.
 const (
-	routeDirect   = "direct"
-	routeMeridian = "meridian"
+	routeDirect = "direct"
 	// RouteSubscription selects Claude Max/Pro subscription OAuth: a refreshing
 	// Bearer token, the oauth beta header, and the identity system block.
 	RouteSubscription = "subscription"
@@ -27,8 +26,6 @@ func authenticatorForRoute(cfg Config) authenticator {
 	switch cfg.Route {
 	case RouteSubscription:
 		return &subscriptionAuth{tokens: cfg.TokenSource}
-	case routeMeridian:
-		return meridianAuth{}
 	default:
 		return nil
 	}

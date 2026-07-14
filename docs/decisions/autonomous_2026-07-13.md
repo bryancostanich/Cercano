@@ -79,4 +79,46 @@ irreversible, higher-risk direction. The CLI modal is written fresh (lean, no
 copy-code/account handling); a shared modal can be extracted later if a third
 consumer justifies it (YAGNI until then).
 
-Commits: (proto+handler+client+modal, this fork).
+Commits: 4b0ae752 (proto+handler+client+modal).
+
+### Fork B — session-ID context machinery on Meridian removal
+
+**Decision point.** `internal/llm/session.go` holds two context helpers:
+`WithSessionID`/`SessionIDFromContext` and `WithIndependentSession`/
+`IsIndependentSession`. Both existed to feed Meridian's stateful-SDK lineage
+matcher. What survives Meridian's deletion?
+
+**Findings (grep, non-test).** `SessionIDFromContext` is read by
+`collect.go` → `RecordAnomaly(...)` (the stream-anomaly-log feature) — a live,
+non-Meridian consumer. `IsIndependentSession` is read by *nothing* except the
+OpenCode-spoof auth being deleted; its setters (`dispatch/engine.go`,
+`hostsvc/tools/tools.go`) mark subagent turns "independent" purely so Meridian
+would skip lineage matching.
+
+**Options.**
+1. **Keep `WithSessionID`/`SessionIDFromContext`; delete
+   `WithIndependentSession`/`IsIndependentSession` + their two setters.**
+   - Correctness: the stateless Messages API has no lineage matching — every
+     request is independent by construction, so the flag is semantically moot.
+     Removing an unread flag changes no behavior. Session-ID plumbing stays for
+     anomaly attribution.
+   - Cleanliness: removes dead code + two now-meaningless setter calls; the
+     surviving helper has a real reader.
+   - Cost/risk: ~1 file trimmed + 2 call-site edits + `runner/core.go` switched
+     from the deleted `anthropic.WithSessionID` alias to `llm.WithSessionID`.
+     Loud failure (compile) if a reader is missed.
+2. **Keep both** (independent-session "might be useful for a future provider").
+   - A speculative hedge with zero current readers — a dead flag retained on a
+     "someday" basis. Correctness same; cleanliness worse (dead code);
+     violates the run's "no legacy flags / no hedging" rule.
+3. **Delete both pairs** (drop session-ID plumbing entirely).
+   - Incorrect: breaks `collect.go`'s anomaly attribution (loud compile
+     failure). Rejected.
+
+**Decision: Option 1.** Unambiguous under correctness→cleanliness: Option 3 is
+incorrect (breaks a live reader), Option 2 keeps a reader-less flag the run
+rules forbid. The independent-session concept is an artifact of Meridian's
+stateful multiplexing; the stateless API makes it moot. Bundled into the
+Meridian-deletion commits (each with its log line).
+
+Commits: (Meridian deletion, below).

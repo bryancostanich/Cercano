@@ -12,13 +12,62 @@ and move on. Fork at architectural decisions only.
 
 ---
 
-## RUN STATUS (updated at end)
+## RUN STATUS — COMPLETE (ready to land, not landed)
 
-_In progress._
+**Objective met.** Meridian is fully removed and replaced by the native
+Anthropic subscription-OAuth route. Both Go modules build; full server + CLI
+test suites pass. No `route=meridian` path survives in executable code (only
+the migration that detects the legacy value, plus internal doc comments). Not
+pushed, not merged — branch `replace-meridian` is ready for Bryan to test.
 
-Entering state (before this run): Phases 1–2 done; Phase 3 factory/call-site
-wiring done (commit 63da437d). Remaining: sign-in flow (RPC + handler + CLI),
-config/catalog/wizard + migration, Meridian deletion.
+**What works end-to-end now:** a messages-flavor profile on `route=subscription`
+authenticates with a refreshing Bearer from `internal/anthropicauth` (single-
+flight, keychain-backed); users sign in via "sign in with Claude (subscription)"
+in settings or the first-run wizard, which drives the PKCE loopback modal
+(`StartClaudeLogin` RPC) and lands an active profile; existing Meridian profiles
+are migrated to `subscription` on config load and forced to re-auth.
+
+**Decisions (matrix-logged below):**
+- Fork A — dedicated `StartClaudeLogin` RPC over generalizing the ChatGPT one
+  (honest modeling of a distinct grant; no refactor of working code).
+- Fork B — on Meridian removal, keep `WithSessionID` (anomaly-log reader),
+  delete the `WithIndependentSession` flag (Meridian-only dead code).
+- Fork C — migrate `meridian`→`subscription` + clear BaseURL on load, forcing
+  one-time re-auth (no coexist, per the run directive).
+
+**Blocked:** none.
+
+**Deferred (non-behavioral; safe to leave):**
+- Internal doc comments still mention Meridian: the `worker/*` "mirror
+  meridian/manager.go" provenance notes (the pattern was copied from the now-
+  deleted file), the "proxy BaseURL (Meridian)" auth carve-out comments, the
+  proto route-field doc comments (`direct | meridian | ccr`), `config.go`'s
+  route doc, the agentclient route docs, and the system-prompt "OpenCode/
+  Meridian adapter" note. None affect behavior or the wire API.
+- Token *refresh* is exercised only at the ~8h access-token expiry. The code
+  exchange was verified live; refresh reuses the same endpoint + standard grant.
+- Subscription profiles use the curated fallback model list in settings (their
+  BaseURL is empty, so the `/v1/models` fetch short-circuits) — a live catalog
+  fetch via the Bearer token is a possible future enhancement, not a gap.
+
+**Commits this run (oldest→newest), all on `replace-meridian`:**
+- `4b0ae752` feat(cloud): subscription sign-in flow (loopback OAuth) — RPC + modal
+- `ffcf69cc` refactor(llm): remove the meridian provider route + dead session flag
+- `dab41852` refactor(server): delete the meridian proxy manager subsystem (−3064)
+- `2973e003` refactor(proto): remove MeridianStatus messages + client plumbing
+- `44b17c30` feat(cli): wire the subscription sign-in trigger button
+- `75ed0da6` feat(config): migrate meridian profiles to the subscription route
+- `ec3eb39a` feat(cli): wizard offers Claude sign-in instead of the meridian proxy
+- `080c87db` refactor: retire remaining live meridian route paths
+(preceding the run: design doc + Phases 1–3-core through `63da437d`.)
+
+**Review first:** (1) the sign-in path — `internal/server/claude_login.go` +
+`internal/anthropicauth/loopback.go` + the CLI `claude_login_modal.go`; (2) the
+config migration + its test (`migrateMeridianToSubscription`); (3) the
+per-route authenticator strategy (`internal/llm/anthropic/auth*.go`). Smoke
+test: run the CLI, pick "sign in with Claude", approve in the browser (should
+show the green success page), confirm a chat turn works on the subscription
+profile.
 
 ---
 

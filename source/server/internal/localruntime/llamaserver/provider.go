@@ -921,3 +921,9 @@ func errorString(err error) string {
 	}
 	return err.Error()
 }
+
+// CatalogModels returns the embedded curated catalog as downloadable
+// ModelRecords (ID + DownloadURLs). Exported for startup download-resume:
+// callers map each shard filename to its model ID to match stranded .part
+// files back to the model that owns them.
+func (p *Provider) CatalogModels() []localruntime.ModelRecord { return p.catalogModels() }

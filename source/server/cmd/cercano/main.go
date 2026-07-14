@@ -551,6 +551,10 @@ func buildRuntimeManager(cfg config.Config) localruntime.Manager {
 	if !llamaServerEnabled(cfg) {
 		return manager
 	}
+	// Resume any downloads a prior session left interrupted (a .part shard
+	// survives on disk) — recovers from a sleep or process kill that outlived
+	// the in-memory download job. Background so startup isn't blocked.
+	go resumeInterruptedDownloads(cfg, manager, provider)
 	if strings.TrimSpace(cfg.LlamaServer.DefaultModel) == "" {
 		manager.WriteLog(localruntime.LogEntry{
 			Source:  "cercano.runtime.llama_server",
@@ -1716,5 +1720,69 @@ func runWorkerMode(args []string) {
 	if err := srv.Serve(ln); err != nil {
 		fmt.Fprintf(os.Stderr, "worker: serve: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+// resumeInterruptedDownloads re-triggers any curated model whose download was
+// interrupted — a surviving .part shard on disk — so it resumes from where it
+// left off (Range + the shard retry). Background at startup; a no-op when
+// nothing is partial. Recovers downloads stranded by a sleep or process kill
+// that outlived the in-memory download job.
+func resumeInterruptedDownloads(cfg config.Config, manager localruntime.Manager, provider *runtimellama.Provider) {
+	// Map each curated shard filename to its owning model id.
+	fileToModel := map[string]string{}
+	for _, m := range provider.CatalogModels() {
+		urls := m.DownloadURLs
+		if len(urls) == 0 && m.DownloadURL != "" {
+			urls = []string{m.DownloadURL}
+		}
+		for _, u := range urls {
+			fileToModel[filepath.Base(u)] = m.ID
+		}
+	}
+	if len(fileToModel) == 0 {
+		return
+	}
+	triggered := map[string]bool{}
+	for _, dir := range cfg.LlamaServer.ModelDirs {
+		expanded, err := expandSetupPath(dir)
+		if err != nil {
+			continue
+		}
+		entries, err := os.ReadDir(expanded)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || !strings.HasSuffix(name, ".part") {
+				continue
+			}
+			id, ok := fileToModel[strings.TrimSuffix(name, ".part")]
+			if !ok || triggered[id] {
+				continue
+			}
+			triggered[id] = true
+			go func(modelID string) {
+				if _, err := manager.DownloadModel(context.Background(), localruntime.DownloadRequest{
+					Runtime: "llama_server",
+					ModelID: modelID,
+				}); err != nil {
+					manager.WriteLog(localruntime.LogEntry{
+						Source:  "cercano.runtime.download",
+						Level:   "warn",
+						ModelID: modelID,
+						Message: "startup resume failed: " + err.Error(),
+					})
+				}
+			}(id)
+		}
+	}
+	if len(triggered) > 0 {
+		manager.WriteLog(localruntime.LogEntry{
+			Source:  "cercano.runtime.download",
+			Level:   "info",
+			Message: fmt.Sprintf("resuming %d interrupted download(s) on startup", len(triggered)),
+		})
 	}
 }

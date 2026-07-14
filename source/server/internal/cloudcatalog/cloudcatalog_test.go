@@ -109,7 +109,28 @@ func TestGroupMultipleProfilesActiveIsPrimary(t *testing.T) {
 	}
 }
 
-// With no active match in the bucket, primary is the first profile in input order.
+// With no active match in the bucket, primary prefers the same-named profile so
+// the visible provider row edits/signs into the stable catalog profile instead
+// of an older/default alias that happens to appear first in config order.
+func TestGroupPrimaryPrefersSameNamedProfile(t *testing.T) {
+	profiles := []ProfileRef{
+		{Name: "default", Flavor: "messages"},
+		{Name: "anthropic", Flavor: "messages"},
+		{Name: "personal", Flavor: "messages"},
+	}
+	providers, _ := Group(profiles, "some-openai-profile")
+	anthropic := providerByID(t, providers, "anthropic")
+	if anthropic.Primary != "anthropic" {
+		t.Errorf("primary = %q, want anthropic", anthropic.Primary)
+	}
+	got := names(anthropic.Profiles)
+	if len(got) != 3 || got[0] != "anthropic" || got[1] != "default" || got[2] != "personal" {
+		t.Errorf("profiles = %v, want [anthropic default personal]", got)
+	}
+}
+
+// If neither the active profile nor the same-named profile belongs to the
+// bucket, primary falls back to the first profile in input order.
 func TestGroupPrimaryFallsBackToFirst(t *testing.T) {
 	profiles := []ProfileRef{
 		{Name: "work", Flavor: "messages"},

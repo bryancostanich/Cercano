@@ -75,8 +75,9 @@ type GroupedProvider struct {
 // that match no known provider are returned separately as custom.
 //
 // Primary selection: the active profile if it belongs to the provider,
-// otherwise the first profile in the given order. This needs nothing persisted
-// — it is derived purely from the profile list and the active name.
+// otherwise the profile whose name matches the provider ID, otherwise the first
+// profile in the given order. This needs nothing persisted — it is derived
+// purely from the profile list and the active name.
 func Group(profiles []ProfileRef, active string) (providers []GroupedProvider, custom []ProfileRef) {
 	cat := Catalog()
 
@@ -93,7 +94,7 @@ func Group(profiles []ProfileRef, active string) (providers []GroupedProvider, c
 
 	providers = make([]GroupedProvider, 0, len(cat))
 	for _, prov := range cat {
-		gp := GroupedProvider{Provider: prov, Profiles: orderPrimaryFirst(byID[prov.ID], active)}
+		gp := GroupedProvider{Provider: prov, Profiles: orderPrimaryFirst(byID[prov.ID], active, prov.ID)}
 		if len(gp.Profiles) > 0 {
 			gp.Primary = gp.Profiles[0].Name
 		}
@@ -104,9 +105,11 @@ func Group(profiles []ProfileRef, active string) (providers []GroupedProvider, c
 
 // orderPrimaryFirst returns bucket with the primary profile moved to the front.
 // The primary is the active profile if it is in the bucket, otherwise the
-// bucket is returned in its existing (input) order. A fresh slice is returned;
-// the input is not mutated.
-func orderPrimaryFirst(bucket []ProfileRef, active string) []ProfileRef {
+// same-named catalog profile if present (for example provider "anthropic" uses
+// profile "anthropic" before older/default aliases), otherwise the bucket stays
+// in its existing input order. A fresh slice is returned; the input is not
+// mutated.
+func orderPrimaryFirst(bucket []ProfileRef, active, providerID string) []ProfileRef {
 	if len(bucket) == 0 {
 		return nil
 	}
@@ -118,13 +121,21 @@ func orderPrimaryFirst(bucket []ProfileRef, active string) []ProfileRef {
 			break
 		}
 	}
+	if primaryIdx == -1 && providerID != "" {
+		for i, p := range bucket {
+			if p.Name == providerID {
+				primaryIdx = i
+				break
+			}
+		}
+	}
 	if primaryIdx > 0 {
 		out = append(out, bucket[primaryIdx])
 		out = append(out, bucket[:primaryIdx]...)
 		out = append(out, bucket[primaryIdx+1:]...)
 		return out
 	}
-	// Active not in bucket, or already first: keep input order.
+	// Preferred profile not in bucket, or already first: keep input order.
 	out = append(out, bucket...)
 	return out
 }

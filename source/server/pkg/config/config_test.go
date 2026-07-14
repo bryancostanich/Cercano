@@ -340,16 +340,41 @@ local_model: legacy-model
 
 func TestMigrateLegacyCloudToProfile(t *testing.T) {
 	// A config with only the legacy single-cloud fields set migrates to one
-	// "default" profile + active selection on Load. We exercise the helper
+	// provider-named profile + active selection on Load. We exercise the helper
 	// directly to avoid file IO.
 	cfg := Config{CloudProvider: "anthropic", CloudModel: "claude-sonnet-4-6", CloudBaseURL: "http://x"}
 	migrateCloudProfiles(&cfg)
-	if len(cfg.CloudProfiles) != 1 || cfg.ActiveCloudProfile != "default" {
+	if len(cfg.CloudProfiles) != 1 || cfg.ActiveCloudProfile != "anthropic" {
 		t.Fatalf("profiles=%+v active=%q", cfg.CloudProfiles, cfg.ActiveCloudProfile)
 	}
 	p := cfg.CloudProfiles[0]
-	if p.Name != "default" || p.Flavor != "messages" || p.Model != "claude-sonnet-4-6" || p.BaseURL != "http://x" {
+	if p.Name != "anthropic" || p.Flavor != "messages" || p.Model != "claude-sonnet-4-6" || p.BaseURL != "http://x" {
 		t.Errorf("profile = %+v", p)
+	}
+}
+
+func TestMigrateLegacyCloudUsesProviderName(t *testing.T) {
+	cases := []struct {
+		provider string
+		want     string
+	}{
+		{provider: "anthropic", want: "anthropic"},
+		{provider: "google", want: "google"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.provider, func(t *testing.T) {
+			cfg := Config{CloudProvider: tc.provider, CloudModel: "model"}
+			migrateCloudProfiles(&cfg)
+			if len(cfg.CloudProfiles) != 1 {
+				t.Fatalf("profiles=%+v", cfg.CloudProfiles)
+			}
+			if got := cfg.CloudProfiles[0].Name; got != tc.want {
+				t.Fatalf("profile name = %q, want %q", got, tc.want)
+			}
+			if cfg.ActiveCloudProfile != tc.want {
+				t.Fatalf("active profile = %q, want %q", cfg.ActiveCloudProfile, tc.want)
+			}
+		})
 	}
 }
 

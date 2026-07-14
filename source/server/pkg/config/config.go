@@ -225,7 +225,7 @@ func inferProviderVendor(p CloudProfile) string {
 //
 // The four "Cloud*" top-level fields (CloudProvider, CloudModel, CloudAPIKey,
 // CloudBaseURL) are legacy — pre-profile shape that gets migrated into a
-// "default" entry in CloudProfiles on first load. They remain as
+// provider-named entry in CloudProfiles on first load. They remain as
 // load-tolerant inputs and as in-memory mirrors for proto reporting, but Save
 // strips them so disk reflects the profile-only world. New code should
 // always read through the active profile (see Server.activeCloudModel).
@@ -495,7 +495,7 @@ func DefaultPath() string {
 	return filepath.Join(home, ".config", "cercano", "config.yaml")
 }
 
-// migrateCloudProfiles synthesizes a "default" profile from the legacy
+// migrateCloudProfiles synthesizes a provider-named profile from the legacy
 // single-cloud fields when no profiles exist yet. Metadata only — the inline
 // cloud_api_key is relocated to the keychain by the startup wiring, not here
 // (config has no keychain dependency). No-op if profiles already exist or no
@@ -504,17 +504,30 @@ func migrateCloudProfiles(cfg *Config) {
 	if len(cfg.CloudProfiles) > 0 || cfg.CloudProvider == "" {
 		return
 	}
+	name := legacyCloudProfileName(cfg.CloudProvider)
 	flavor := ""
 	if cfg.CloudProvider == "anthropic" {
 		flavor = "messages"
 	}
 	cfg.CloudProfiles = []CloudProfile{{
-		Name:    "default",
+		Name:    name,
 		Flavor:  flavor,
 		BaseURL: cfg.CloudBaseURL,
 		Model:   cfg.CloudModel,
 	}}
-	cfg.ActiveCloudProfile = "default"
+	cfg.ActiveCloudProfile = name
+}
+
+func legacyCloudProfileName(provider string) string {
+	provider = strings.TrimSpace(provider)
+	switch provider {
+	case "":
+		return "default"
+	case "anthropic":
+		return "anthropic"
+	default:
+		return provider
+	}
 }
 
 // migrateMeridianToSubscription rewrites legacy Meridian profiles to the native

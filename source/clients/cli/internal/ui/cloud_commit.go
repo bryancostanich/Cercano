@@ -122,7 +122,7 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 			defer cancel()
 			d := sp.cloudDraft
 			err := sp.agent.UpsertCloudProfile(ctx, agentclient.CloudProfileInfo{
-				Name: d.Name, Flavor: d.Flavor, Backend: d.Backend, BaseURL: d.BaseURL, Model: d.Model,
+				Name: d.Name, Flavor: d.Flavor, Backend: d.Backend, Route: d.Route, BaseURL: d.BaseURL, Model: d.Model,
 			})
 			if err != nil {
 				return "", nil, err
@@ -139,7 +139,7 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		defer cancel()
 		d := sp.cloudDraft
 		err := sp.agent.UpsertCloudProfile(ctx, agentclient.CloudProfileInfo{
-			Name: d.Name, Flavor: d.Flavor, Backend: d.Backend, BaseURL: d.BaseURL, Model: d.Model,
+			Name: d.Name, Flavor: d.Flavor, Backend: d.Backend, Route: d.Route, BaseURL: d.BaseURL, Model: d.Model,
 		})
 		if err != nil {
 			return "", nil, err

@@ -158,3 +158,33 @@ func TestCloudSectionComingSoonDisablesActivate(t *testing.T) {
 		}
 	}
 }
+
+func TestCloudSectionSubscriptionProfileIsOAuthOnly(t *testing.T) {
+	sp := cloudSamplePage()
+	sp.cloudView.Providers[0].PrimaryProfile = "claude"
+	sp.cloudView.Providers[0].Profiles = []agentclient.CloudProfileInfo{{
+		Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-4-8",
+	}}
+	sp.profiles = append(sp.profiles, agentclient.CloudProfileInfo{
+		Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-4-8",
+	})
+
+	sp.selectCloudRow("profile:claude")
+	sec := sp.buildCloudSection()
+	keys := map[string]bool{}
+	for _, f := range sec.Fields {
+		keys[f.Key()] = true
+	}
+	if !keys["cloud-route"] {
+		t.Fatalf("subscription profile should show auth route: %v", keys)
+	}
+	if keys["cloud-key"] {
+		t.Fatalf("subscription profile must not show an API-key field: %v", keys)
+	}
+	if keys["cloud-base-url"] {
+		t.Fatalf("subscription profile must not show a base-url field: %v", keys)
+	}
+	if sp.cloudDraft.Route != "subscription" {
+		t.Fatalf("draft route = %q, want subscription", sp.cloudDraft.Route)
+	}
+}

@@ -577,6 +577,55 @@ func migrateMeridianToSubscription(cfg *Config) {
 	}
 }
 
+// collapseLegacySubscriptionAliases removes stale subscription-route aliases once
+// the canonical native subscription profile exists. During the Meridian
+// switchover, some configs accumulated default/anthropic subscription profiles
+// alongside claude; leaving all three makes the settings UI look like the user
+// has multiple Anthropic subscription accounts to sign into. Keep only the
+// canonical profile and repair active/backup pointers that referenced a removed
+// alias. Direct API-key Anthropic profiles are intentionally untouched because
+// they have Route != subscription.
+func collapseLegacySubscriptionAliases(cfg *Config) {
+	const canonical = "claude"
+	canonicalIdx := -1
+	for i, p := range cfg.CloudProfiles {
+		if p.Name == canonical && p.Flavor == "messages" && p.Route == "subscription" {
+			canonicalIdx = i
+			break
+		}
+	}
+	if canonicalIdx == -1 {
+		return
+	}
+	removed := map[string]bool{}
+	out := cfg.CloudProfiles[:0]
+	for i, p := range cfg.CloudProfiles {
+		if i != canonicalIdx && isLegacySubscriptionAlias(p) {
+			removed[p.Name] = true
+			continue
+		}
+		out = append(out, p)
+	}
+	cfg.CloudProfiles = out
+	if removed[cfg.ActiveCloudProfile] {
+		cfg.ActiveCloudProfile = canonical
+	}
+	if removed[cfg.BackupCloudProfile] {
+		cfg.BackupCloudProfile = canonical
+	}
+}
+
+func isLegacySubscriptionAlias(p CloudProfile) bool {
+	if p.Flavor != "messages" || p.Route != "subscription" {
+		return false
+	}
+	switch p.Name {
+	case "default", "anthropic", "meridian":
+		return true
+	}
+	return false
+}
+
 // migrateModelTiers seeds the model taxonomy from the legacy standalone
 // model keys: open_model → tiers.everyday.open, embedding_model →
 // tiers.embedding.open. Seeding only fills EMPTY slots — a file that already
@@ -683,6 +732,7 @@ func Load(path string) (Config, error) {
 	finalizeModelTiers(&cfg)
 	migrateCloudProfiles(&cfg)
 	migrateMeridianToSubscription(&cfg)
+	collapseLegacySubscriptionAliases(&cfg)
 	if !ValidateToolLoopMaxIterations(cfg.ToolLoop.MaxIterations) {
 		return cfg, fmt.Errorf("tool_loop.max_iterations must be -1 or a non-negative integer, got %d", cfg.ToolLoop.MaxIterations)
 	}

@@ -667,3 +667,111 @@ func TestEffectiveMaxIterations(t *testing.T) {
 		t.Fatalf("expected values below -1 to be invalid")
 	}
 }
+
+func TestCollapseLegacySubscriptionAliasesKeepsCanonicalProfile(t *testing.T) {
+	cfg := &Config{
+		CloudProfiles: []CloudProfile{
+			{Name: "default", Flavor: "messages", Route: "subscription", Model: "claude-fable-5"},
+			{Name: "anthropic", Flavor: "messages", Route: "subscription", Model: "claude-opus-4-8"},
+			{Name: "openai-responses", Flavor: "responses", Route: "chatgpt", Model: "gpt-5.5"},
+			{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-4-8"},
+		},
+		ActiveCloudProfile: "anthropic",
+		BackupCloudProfile: "default",
+	}
+
+	collapseLegacySubscriptionAliases(cfg)
+
+	if cfg.ActiveCloudProfile != "claude" {
+		t.Fatalf("ActiveCloudProfile = %q, want claude", cfg.ActiveCloudProfile)
+	}
+	if cfg.BackupCloudProfile != "claude" {
+		t.Fatalf("BackupCloudProfile = %q, want claude", cfg.BackupCloudProfile)
+	}
+	got := map[string]CloudProfile{}
+	for _, p := range cfg.CloudProfiles {
+		got[p.Name] = p
+	}
+	if _, ok := got["default"]; ok {
+		t.Fatalf("default subscription alias should be removed: %+v", cfg.CloudProfiles)
+	}
+	if _, ok := got["anthropic"]; ok {
+		t.Fatalf("anthropic subscription alias should be removed: %+v", cfg.CloudProfiles)
+	}
+	if _, ok := got["claude"]; !ok {
+		t.Fatalf("canonical subscription profile should remain: %+v", cfg.CloudProfiles)
+	}
+	if _, ok := got["openai-responses"]; !ok {
+		t.Fatalf("unrelated cloud profile should remain: %+v", cfg.CloudProfiles)
+	}
+}
+
+func TestCollapseLegacySubscriptionAliasesPreservesDirectProfile(t *testing.T) {
+	cfg := &Config{CloudProfiles: []CloudProfile{
+		{Name: "anthropic", Flavor: "messages", Route: "", Model: "claude-opus-4-8"},
+		{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-4-8"},
+	}}
+
+	collapseLegacySubscriptionAliases(cfg)
+
+	if len(cfg.CloudProfiles) != 2 {
+		t.Fatalf("direct API-key profile should not be collapsed: %+v", cfg.CloudProfiles)
+	}
+}
+
+func TestLoadCollapsesLegacySubscriptionAliases(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	data := []byte(`cloud_profiles:
+  - name: default
+    flavor: messages
+    route: subscription
+    model: claude-fable-5
+  - name: anthropic
+    flavor: messages
+    route: subscription
+    model: claude-opus-4-8
+  - name: claude
+    flavor: messages
+    route: subscription
+    model: claude-opus-4-8
+  - name: openai-responses
+    flavor: responses
+    route: chatgpt
+    model: gpt-5.5
+active_cloud_profile: anthropic
+backup_cloud_profile: default
+`)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.ActiveCloudProfile != "claude" || cfg.BackupCloudProfile != "claude" {
+		t.Fatalf("active=%q backup=%q, want claude/claude", cfg.ActiveCloudProfile, cfg.BackupCloudProfile)
+	}
+	for _, p := range cfg.CloudProfiles {
+		if p.Name == "default" || p.Name == "anthropic" {
+			t.Fatalf("legacy alias %q survived load: %+v", p.Name, cfg.CloudProfiles)
+		}
+	}
+}
+
+func TestCollapseLegacySubscriptionAliasesRemovesMeridianAlias(t *testing.T) {
+	cfg := &Config{CloudProfiles: []CloudProfile{
+		{Name: "meridian", Flavor: "messages", Route: "subscription", Model: "claude-opus-4-8"},
+		{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-4-8"},
+	}}
+
+	collapseLegacySubscriptionAliases(cfg)
+
+	for _, p := range cfg.CloudProfiles {
+		if p.Name == "meridian" {
+			t.Fatalf("meridian subscription alias should be removed: %+v", cfg.CloudProfiles)
+		}
+	}
+}

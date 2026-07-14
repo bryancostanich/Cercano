@@ -127,7 +127,7 @@ func (sp *settingsPage) cloudDetailFields(r cloudRow) []form.Field {
 	// Direct API-key Anthropic profiles use the key field instead; offering both
 	// auth paths on those rows makes it look like two separate profiles should be
 	// signed into.
-	if shouldShowClaudeSignIn(r, d) {
+	if sp.shouldShowClaudeSignIn(r, d) {
 		out = append(out, form.NewButton("cloud-signin-claude", il("sign in with Claude (subscription)"), true))
 	}
 	if d.Route != "subscription" {
@@ -151,18 +151,49 @@ func (sp *settingsPage) cloudDetailFields(r cloudRow) []form.Field {
 	return out
 }
 
+const canonicalClaudeProfile = "claude"
+
 // shouldShowClaudeSignIn reports whether the selected row should expose the
 // subscription OAuth action. Existing direct Anthropic API-key profiles should
-// not show it; otherwise a config with both a subscription profile and a direct
-// API-key profile appears to require signing in twice.
-func shouldShowClaudeSignIn(r cloudRow, d cloudDraft) bool {
+// not show it. Existing subscription aliases should not each show their own
+// sign-in button either; if the canonical subscription profile exists, it owns
+// re-auth. Otherwise the primary provider row keeps the action so older configs
+// that only have a legacy subscription alias can still re-authenticate.
+func (sp *settingsPage) shouldShowClaudeSignIn(r cloudRow, d cloudDraft) bool {
 	if r.Preset == nil || r.Preset.Flavor != "messages" {
 		return false
 	}
-	if d.Route == "subscription" {
+	if d.Route != "subscription" {
+		return r.ID == "template:anthropic"
+	}
+	if r.Profile != nil && r.Profile.Name == canonicalClaudeProfile {
 		return true
 	}
-	return r.ID == "template:anthropic"
+	if sp.hasCanonicalClaudeSubscriptionProfile() {
+		return false
+	}
+	return r.IsProfile && !r.SubProfile
+}
+
+func (sp *settingsPage) hasCanonicalClaudeSubscriptionProfile() bool {
+	for _, p := range sp.profiles {
+		if p.Name == canonicalClaudeProfile && p.Flavor == "messages" && p.Route == "subscription" {
+			return true
+		}
+	}
+	for _, prov := range sp.cloudView.Providers {
+		for _, p := range prov.Profiles {
+			if p.Name == canonicalClaudeProfile && p.Flavor == "messages" && p.Route == "subscription" {
+				return true
+			}
+		}
+	}
+	for _, p := range sp.cloudView.CustomProfiles {
+		if p.Name == canonicalClaudeProfile && p.Flavor == "messages" && p.Route == "subscription" {
+			return true
+		}
+	}
+	return false
 }
 
 // draftHasKey reports whether the row's profile already has a stored key (drives

@@ -217,6 +217,7 @@ func TestCloudSectionDirectAnthropicProfileDoesNotShowSubscriptionSignIn(t *test
 }
 
 func TestShouldShowClaudeSignIn(t *testing.T) {
+	sp := cloudSamplePage()
 	messagesPreset := &cloudPreset{ID: "anthropic", Flavor: "messages"}
 	responsesPreset := &cloudPreset{ID: "openai-responses", Flavor: "responses"}
 	cases := []struct {
@@ -225,17 +226,50 @@ func TestShouldShowClaudeSignIn(t *testing.T) {
 		d    cloudDraft
 		want bool
 	}{
-		{name: "subscription profile", row: cloudRow{ID: "profile:claude", Preset: messagesPreset}, d: cloudDraft{Route: "subscription"}, want: true},
+		{name: "subscription profile", row: cloudRow{ID: "profile:claude", IsProfile: true, Preset: messagesPreset, Profile: &agentclient.CloudProfileInfo{Name: "claude", Flavor: "messages", Route: "subscription"}}, d: cloudDraft{Route: "subscription"}, want: true},
 		{name: "bare anthropic template", row: cloudRow{ID: "template:anthropic", Preset: messagesPreset}, d: cloudDraft{}, want: true},
-		{name: "direct anthropic profile", row: cloudRow{ID: "profile:anthropic", Preset: messagesPreset}, d: cloudDraft{}, want: false},
+		{name: "direct anthropic profile", row: cloudRow{ID: "profile:anthropic", IsProfile: true, Preset: messagesPreset, Profile: &agentclient.CloudProfileInfo{Name: "anthropic", Flavor: "messages"}}, d: cloudDraft{}, want: false},
 		{name: "responses profile", row: cloudRow{ID: "profile:chatgpt", Preset: responsesPreset}, d: cloudDraft{Route: "subscription"}, want: false},
 		{name: "custom messages profile", row: cloudRow{ID: "profile:custom"}, d: cloudDraft{Route: "subscription"}, want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := shouldShowClaudeSignIn(tc.row, tc.d); got != tc.want {
+			if got := sp.shouldShowClaudeSignIn(tc.row, tc.d); got != tc.want {
 				t.Fatalf("shouldShowClaudeSignIn() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestCloudSectionCanonicalSubscriptionOwnsSignIn(t *testing.T) {
+	sp := cloudSamplePage()
+	sp.cloudView.Providers[0].PrimaryProfile = "anthropic"
+	sp.cloudView.Providers[0].Profiles = []agentclient.CloudProfileInfo{
+		{Name: "anthropic", Flavor: "messages", Route: "subscription", Model: "claude-opus-4-8"},
+		{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-4-8"},
+	}
+	sp.profiles = append(sp.profiles,
+		agentclient.CloudProfileInfo{Name: "anthropic", Flavor: "messages", Route: "subscription", Model: "claude-opus-4-8"},
+		agentclient.CloudProfileInfo{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-4-8"},
+	)
+
+	sp.selectCloudRow("profile:anthropic")
+	anthropic := sp.buildCloudSection()
+	anthropicKeys := map[string]bool{}
+	for _, f := range anthropic.Fields {
+		anthropicKeys[f.Key()] = true
+	}
+	if anthropicKeys["cloud-signin-claude"] {
+		t.Fatalf("legacy subscription alias must not show sign-in when canonical profile exists: %v", anthropicKeys)
+	}
+
+	sp.selectCloudRow("profile:claude")
+	canonical := sp.buildCloudSection()
+	canonicalKeys := map[string]bool{}
+	for _, f := range canonical.Fields {
+		canonicalKeys[f.Key()] = true
+	}
+	if !canonicalKeys["cloud-signin-claude"] {
+		t.Fatalf("canonical subscription profile should show sign-in: %v", canonicalKeys)
 	}
 }

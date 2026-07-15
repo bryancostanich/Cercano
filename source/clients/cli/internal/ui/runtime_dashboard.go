@@ -56,6 +56,17 @@ const (
 	dashboardModeRuntime
 )
 
+// actionSection pairs an action block's renderer with the rows that make up
+// its flat-cursor slice. Bundling them is what keeps rendering, cursor
+// mapping, and section navigation from drifting out of lockstep: every
+// consumer (fullContent, operationRows, sectionStarts, the Enter dispatch)
+// derives from the single ordered list actionSections() returns, so a tab's
+// block set is declared in exactly one place.
+type actionSection struct {
+	render func() string
+	rows   func() []runtimeDashboardActionRow
+}
+
 type runtimeDashboard struct {
 	width, height int
 	mode          dashboardMode
@@ -315,9 +326,10 @@ func (d *runtimeDashboard) fullContent() (string, int) {
 		parts = append(parts, d.renderCatalogBlock(d.catalogRowBudget()))
 	}
 	// Action blocks render one at a time so renderActionBlock can
-	// translate its block-local selected row into an absolute line.
-	// The block set is mode-scoped and MUST stay in lockstep with
-	// operationRows() so the flat cursor index maps to the right block.
+	// translate its block-local selected row into an absolute line. Both
+	// the renderers here and operationRows' cursor space come from
+	// actionSections(), so the flat cursor index maps to the right block
+	// by construction.
 	for _, render := range d.actionBlocks() {
 		d.blockStartLine = countLines(parts)
 		parts = append(parts, render())
@@ -426,24 +438,11 @@ func (d *runtimeDashboard) hasActiveDownloads() bool {
 // processes, model tiers), skipping sections that currently have no
 // actionable rows. Must enumerate in the same order as operationRows.
 func (d *runtimeDashboard) sectionStarts() []int {
-	var blocks [][]runtimeDashboardActionRow
-	if d.mode == dashboardModeRuntime {
-		blocks = [][]runtimeDashboardActionRow{
-			runtimeConfigRows(d.snapshot.Config),
-		}
-	} else {
-		blocks = [][]runtimeDashboardActionRow{
-			d.downloadRows(),
-			d.installedModelRows(),
-			d.processRows(),
-			tierRows(d.snapshot.Config),
-		}
-	}
 	var starts []int
 	ordinal := 0
-	for _, rows := range blocks {
+	for _, s := range d.actionSections() {
 		n := 0
-		for _, row := range rows {
+		for _, row := range s.rows() {
 			if row.Action.Kind != "" {
 				n++
 			}
@@ -1361,34 +1360,48 @@ func actionColumnWidths(width int) (labelW, valueW, hintW int) {
 	return labelW, valueW, hintW
 }
 
-// actionBlocks returns the ordered set of action-block renderers for the
-// current mode. Runtime mode shows only the open-model / runtime picker; Models
-// mode shows the download / installed / processes / tiers blocks. This order
-// MUST match operationRows() exactly.
-func (d *runtimeDashboard) actionBlocks() []func() string {
+// actionSections is the SINGLE source of truth for which action blocks a tab
+// renders and in what order. Every other consumer — fullContent's render loop,
+// operationRows' flat cursor space, sectionStarts' tab navigation, and the
+// Enter dispatch — derives from this list, so the block set and cursor mapping
+// can never drift apart. Runtime mode shows only the runtime picker; Models
+// mode shows the download / installed / processes / tiers blocks.
+func (d *runtimeDashboard) actionSections() []actionSection {
 	if d.mode == dashboardModeRuntime {
-		return []func() string{d.renderRuntimeConfigBlock}
+		return []actionSection{
+			{render: d.renderRuntimeConfigBlock, rows: func() []runtimeDashboardActionRow {
+				return runtimeConfigRows(d.snapshot.Config)
+			}},
+		}
 	}
-	return []func() string{
-		d.renderDownloadsBlock,
-		d.renderInstalledModelsBlock,
-		d.renderProcessesBlock,
-		d.renderTiersBlock,
+	return []actionSection{
+		{render: d.renderDownloadsBlock, rows: d.downloadRows},
+		{render: d.renderInstalledModelsBlock, rows: d.installedModelRows},
+		{render: d.renderProcessesBlock, rows: d.processRows},
+		{render: d.renderTiersBlock, rows: func() []runtimeDashboardActionRow {
+			return tierRows(d.snapshot.Config)
+		}},
 	}
 }
 
+// actionBlocks returns just the renderers, in order, for fullContent's loop.
+func (d *runtimeDashboard) actionBlocks() []func() string {
+	sections := d.actionSections()
+	renders := make([]func() string, len(sections))
+	for i, s := range sections {
+		renders[i] = s.render
+	}
+	return renders
+}
+
+// operationRows is the flat cursor space: every section's rows concatenated in
+// section order. Derived from actionSections so it stays in lockstep by
+// construction.
 func (d *runtimeDashboard) operationRows() []runtimeDashboardActionRow {
 	var rows []runtimeDashboardActionRow
-	// Keep this in lockstep with actionBlocks()/fullContent so the flat
-	// cursor index maps to the right block per mode.
-	if d.mode == dashboardModeRuntime {
-		rows = append(rows, runtimeConfigRows(d.snapshot.Config)...)
-		return rows
+	for _, s := range d.actionSections() {
+		rows = append(rows, s.rows()...)
 	}
-	rows = append(rows, d.downloadRows()...)
-	rows = append(rows, d.installedModelRows()...)
-	rows = append(rows, d.processRows()...)
-	rows = append(rows, tierRows(d.snapshot.Config)...)
 	return rows
 }
 

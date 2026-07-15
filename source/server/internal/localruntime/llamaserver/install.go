@@ -52,6 +52,11 @@ func Install(ctx context.Context, sink LineSink) error {
 	if err != nil {
 		return err
 	}
+	// A cancelled ctx must kill the whole subprocess tree, not just the direct
+	// child: a shell step that backgrounds a process leaves a grandchild that
+	// keeps the stdout/stderr pipe's write end open, so the drain below would
+	// never see EOF and Install would hang.
+	configureCancelKillsGroup(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("stdout pipe: %w", err)

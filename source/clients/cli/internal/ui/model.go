@@ -979,7 +979,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		mouse := msg.Mouse()
 		if m.input.Dragging() {
-			m.input.MouseUp(mouse.X, mouse.Y-m.promptTop())
+			// Releasing a prompt drag auto-copies the selection, mirroring the
+			// scrollback viewport. This is the only copy path that survives
+			// terminals which reserve Cmd+C for their own copy and never
+			// deliver it to the app.
+			if text := m.input.MouseUp(mouse.X, mouse.Y-m.promptTop()); text != "" {
+				m.selectionNotice = "copied selection"
+				return m, selectionClipboardCmd(text)
+			}
 			return m, nil
 		}
 		cmd, copied := m.activeChat().MouseUp(mouse.X, mouse.Y-m.scrollbarTop)

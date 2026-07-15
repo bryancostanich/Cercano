@@ -255,7 +255,12 @@ func (p *promptInput) MouseDrag(x, y int) {
 	p.hasGoal = true
 }
 
-func (p *promptInput) MouseUp(x, y int) {
+// MouseUp ends a drag and returns the plain text of the resulting selection
+// (empty when the drag collapsed to a caret). The host copies that text to the
+// clipboard so releasing a prompt drag auto-copies — matching the scrollback
+// viewport, and covering terminals that reserve Cmd+C for their own copy and
+// so never deliver it to the app.
+func (p *promptInput) MouseUp(x, y int) string {
 	if p.dragging {
 		p.MouseDrag(x, y)
 	}
@@ -263,6 +268,7 @@ func (p *promptInput) MouseUp(x, y int) {
 	if p.selectionAnchor == p.cursor {
 		p.selectionAnchor = noPromptSelection
 	}
+	return p.selectedText()
 }
 
 func (p promptInput) Dragging() bool {

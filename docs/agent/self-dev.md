@@ -5,6 +5,77 @@ doc is read by the agent on entering development mode (`/d`), alongside
 `docs/features/cli/README.md` (CLI track status + outstanding work) and
 `docs/agent/README.md` (agent architecture).
 
+## Delegate to open models — this is the point of Cercano
+
+**Read this before doing recon work.** Cercano exists to keep the frontier
+model's tokens for frontier-grade reasoning and push everything else onto local
+("open") models. When *you* — the main thread — grind through a pile of
+`Grep`/`Read`/`Glob` calls to understand how some code works, you are burning
+frontier tokens on work an open model does perfectly well. Don't. Delegate it.
+
+**The delegation tools are native agent tools, not "just MCP skills."** When
+Cercano runs as the agent (which is what you are right now), the capabilities
+below are in your tool catalog and you call them directly, exactly like `Read`
+or `Bash`. The `SKILL.md` files under `plugins/skills/` and the embedded
+`internal/skills/catalog/` are the *same* capabilities described for host agents
+— but here they are first-class tools you invoke yourself.
+
+| Tool | Shape | Runs on | Use it for |
+|---|---|---|---|
+| `dispatch` (alias `workflow`) | agentic sub-agent (bounded tool loop over a granted toolset) | resolved by locus + the tier you request | tracing a code path, "how/if does X happen," understanding a class, finding something in a subsystem, any read-heavy recon that returns a distilled answer |
+| `explain` | one-shot, local co-processor | open tier | explaining a file/snippet you already have in hand |
+| `summarize` | one-shot, local co-processor | open tier | condensing a long file or output |
+| `extract` | one-shot, local co-processor | open tier | pulling specific facts out of text |
+| `classify` | one-shot, local co-processor | open tier | bucketing text/files |
+
+**Canonical delegation example.** Instead of running fifteen Grep/Read calls
+yourself to chase a code path, call `dispatch` with a concrete intent and a
+read-only grant:
+
+```json
+{
+  "task": "Figure out how/if model reloading happens when the backend changes. Trace the code and return the full code path, the relevant code snippets, and their file:line locations.",
+  "tools": ["Read", "Grep", "Glob"]
+}
+```
+
+The sub-agent does the grinding on an open model and hands you back the answer;
+you spend frontier tokens only on the part that needs them.
+
+### The two axes that decide where work runs
+
+Delegation is a two-axis decision, and **both axes belong to you, the delegating
+thread**:
+
+1. **How much brain does this task need?** You judge whether an open model is
+   *sufficient* (tracing code, understanding a class, documenting → yes, open is
+   plenty) or whether it genuinely needs a frontier model. You express this as a
+   tier; you never express a location.
+2. **Locus mode maps that onto a physical tier and decides whether crossing is
+   allowed** (`internal/locus`, single source of truth). You do not decide
+   local-vs-cloud — locus does:
+   - **cloud_primary** (default): main thread is cloud; open-sufficient
+     delegations resolve *down* to the local model. This is the mode where
+     offloading recon to open models saves the most.
+   - **open_primary**: main thread is an open model; a delegation you mark as
+     needing a frontier model escalates *up* to cloud — but only if crossing is
+     allowed.
+   - **open_only / cloud_only**: never cross tiers; the request stays on the one
+     permitted tier or fails.
+
+So you say "an open model is sufficient for this," locus decides that means the
+local model under cloud_primary (or the open model under open_primary). Same
+knob, correct behavior in every mode.
+
+> **Known gap (as of this writing):** the `dispatch` capability
+> (`internal/capabilities/builtins/dispatch_cap.go`) currently hardcodes
+> `Role: RoleMain, Tier: config.TierEveryday`, so a sub-agent inherits the main
+> tier instead of running on an open model — the "sufficient tier" knob (axis 1)
+> is not yet exposed on the tool. Delegating still shifts the *grinding* off your
+> transcript, but until this is fixed the sub-agent may run on the same tier as
+> you. When working on delegation, this is the first thing to fix. See the
+> `dispatch`/`skills` design discussion in `docs/agent/` for the plan.
+
 ## Layout & build
 
 Two binaries from two Go modules:

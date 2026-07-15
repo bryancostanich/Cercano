@@ -1178,9 +1178,15 @@ func (c *chatView) renderAssistantMarkdown(e *Entry, textW int) string {
 		if prefix == "" {
 			return live
 		}
+		// committedPrefix adds a trailing "\n" after a heading block so the
+		// heading isn't glued to whatever follows; here the tail is what
+		// follows, so join with a single "\n" to land on one blank line.
 		return prefix + "\n" + live
 	}
-	return prefix
+	// A heading as the final committed block leaves a dangling trailing "\n"
+	// (breathing room for a body that never came); trim it so the reply
+	// doesn't end on a blank line.
+	return strings.TrimRight(prefix, "\n")
 }
 
 func (c *chatView) renderMdBlock(b render.MdBlock, textW int) string {

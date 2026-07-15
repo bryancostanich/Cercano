@@ -212,6 +212,97 @@ func (s *Server) runtimeMgr() localruntime.Manager {
 	return s.runtimesSvc.RuntimeManager()
 }
 
+// resolveMistralRSDefault resolves the mistral.rs runtime's configured default
+// model against the runtime manager's inventory, using the same fuzzy matcher
+// the provider uses at Start time (so a config value like "qwen3-14b", a full
+// "mistralrs:catalog:qwen3-14b" ID, a display name, or a file path all match).
+//
+// Returns:
+//   - rec: the matched record (its canonical ID is what DownloadModel needs for
+//     an exact lookup; its DownloadState is the readiness signal). Zero when no
+//     record matched.
+//   - found: whether a record matched at all.
+//
+// A zero/absent default, an unmatched value, or an unavailable manager all
+// return found=false — the caller decides what that means for readiness vs.
+// auto-download.
+func (s *Server) resolveMistralRSDefault(ctx context.Context, cfg config.Config) (rec localruntime.ModelRecord, found bool) {
+	requested := strings.TrimSpace(cfg.MistralRS.DefaultModel)
+	if requested == "" {
+		return localruntime.ModelRecord{}, false
+	}
+	rm := s.runtimeMgr()
+	if rm == nil {
+		return localruntime.ModelRecord{}, false
+	}
+	inv, err := rm.Inventory(ctx)
+	if err != nil {
+		return localruntime.ModelRecord{}, false
+	}
+	for _, m := range inv {
+		if m.Runtime != "mistralrs" {
+			continue
+		}
+		if localruntime.MatchesModel(requested, m) {
+			return m, true
+		}
+	}
+	return localruntime.ModelRecord{}, false
+}
+
+// mistralRSModelMissing reports whether the mistral.rs runtime's configured
+// default model is absent from disk — i.e. switching to mistralrs now would
+// land a runtime that can't serve until a download completes.
+//
+// Returns true when no default is configured, the default matches no known
+// record, or the matching record isn't in the "downloaded" state. When the
+// manager is unavailable resolveMistralRSDefault returns found=false; we
+// treat that as missing=true only if a default is even configured, so a
+// no-manager environment with no default doesn't spuriously light the chip.
+func (s *Server) mistralRSModelMissing(ctx context.Context, cfg config.Config) bool {
+	rec, found := s.resolveMistralRSDefault(ctx, cfg)
+	if !found {
+		return true
+	}
+	return rec.DownloadState != "" && rec.DownloadState != "downloaded"
+}
+
+// autoDownloadMistralRSDefault enqueues the mistral.rs default model's
+// download when switching to the runtime with that model absent. It's the
+// server-driven half of the "switch anyway, fetch in the background" flow:
+// the CLI never orchestrates the pull — it just switches the runtime and
+// watches the chip clear as the download completes.
+//
+// No-op when the default is unset, already downloaded, or already downloading
+// (DownloadModel is idempotent and returns early in those cases). The download
+// runs in its own goroutine inside DownloadModel, so this returns immediately
+// and never blocks the UpdateConfig response. A failure to enqueue is logged,
+// not fatal — the switch still lands and the not-ready chip stays lit.
+func (s *Server) autoDownloadMistralRSDefault(ctx context.Context, cfg config.Config) {
+	rec, found := s.resolveMistralRSDefault(ctx, cfg)
+	if !found {
+		// Nothing to fetch — either no default configured or it matched no
+		// curated record. The not-ready chip will explain which.
+		return
+	}
+	if rec.DownloadState == "downloaded" {
+		return
+	}
+	rm := s.runtimeMgr()
+	if rm == nil {
+		return
+	}
+	// Enqueue by the record's canonical ID — findDownloadModel matches on the
+	// exact ID, not the fuzzy config value, so pass rec.ID (not the raw
+	// cfg.MistralRS.DefaultModel).
+	if _, err := rm.DownloadModel(ctx, localruntime.DownloadRequest{
+		Runtime: "mistralrs",
+		ModelID: rec.ID,
+	}); err != nil {
+		fmt.Printf("UpdateConfig: mistral.rs default-model auto-download failed to enqueue: %v\n", err)
+	}
+}
+
 // ListMcpServers implements proto.AgentServer — returns a snapshot of all hosted MCP servers.
 func (s *Server) ListMcpServers(ctx context.Context, _ *proto.ListMcpServersRequest) (*proto.ListMcpServersResponse, error) {
 	out := &proto.ListMcpServersResponse{}
@@ -822,7 +913,20 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		// passed via ReconfigureArgs so Reconfigure doesn't re-detect.
 		changes = append(changes, fmt.Sprintf("local_runtime=%s", req.OpenRuntime))
 		fmt.Printf("UpdateConfig: Local runtime set to %s\n", req.OpenRuntime)
-		s.broadcastOpenRuntimeStatus(buildOpenRuntimeStatus(req.OpenRuntime, c, detectErr))
+		// Emit the fresh open-runtime status so the CLI's "(F1)" chip reflects
+		// the runtime being switched to. mistral.rs has its own readiness
+		// shape (default model downloaded vs not) that llamaserver.DetectError
+		// can't express, so route it to buildMistralRSStatus. Unlike
+		// llama-server (whose install is a manual, out-of-band step surfaced
+		// via the modal), the mistral.rs default is a curated bundled model,
+		// so the server auto-enqueues its download here — the CLI stays a thin
+		// client and just watches the chip clear + the /m dashboard fill.
+		if req.OpenRuntime == "mistralrs" {
+			s.autoDownloadMistralRSDefault(ctx, c)
+			s.broadcastOpenRuntimeStatus(buildMistralRSStatus(c, s.mistralRSModelMissing(ctx, c)))
+		} else {
+			s.broadcastOpenRuntimeStatus(buildOpenRuntimeStatus(req.OpenRuntime, c, detectErr))
+		}
 	}
 
 	if req.LocusMode != "" {

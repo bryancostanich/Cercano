@@ -10,6 +10,7 @@
 package server
 
 import (
+	"strings"
 	"sync"
 
 	"cercano/source/server/internal/localruntime/llamaserver"
@@ -174,6 +175,38 @@ func buildOpenRuntimeStatus(runtime string, cfg config.Config, detectErr *llamas
 	// GGUFs in ~/.cercano/models".
 	st.BinaryPath = cfg.LlamaServer.Binary
 	st.DefaultModel = cfg.LlamaServer.DefaultModel
+	return st
+}
+
+// buildMistralRSStatus builds the wire-level status for the mistral.rs
+// runtime. Unlike llama-server (whose readiness comes from a binary+GGUF
+// PATH scan via llamaserver.DetectError), mistral.rs ships bundled, so its
+// only readiness question is whether the configured default model is
+// downloaded. The caller computes that (it holds the runtime inventory) and
+// passes it in as modelMissing, keeping this a pure formatter.
+//
+// modelMissing=false → ok=true, "mistral.rs runtime configured".
+// modelMissing=true  → ok=false, Missing="model" so the CLI lights the same
+// "(F1)" open-runtime chip and offers the model download flow, exactly as it
+// does for a llama-server with no GGUF on disk.
+func buildMistralRSStatus(cfg config.Config, modelMissing bool) *proto.OpenRuntimeStatus {
+	st := &proto.OpenRuntimeStatus{
+		Runtime:      "mistralrs",
+		BinaryPath:   cfg.MistralRS.Binary,
+		DefaultModel: cfg.MistralRS.DefaultModel,
+	}
+	if !modelMissing {
+		st.Ok = true
+		st.Message = "mistral.rs runtime configured"
+		return st
+	}
+	st.Ok = false
+	st.Missing = "model"
+	if strings.TrimSpace(cfg.MistralRS.DefaultModel) == "" {
+		st.Message = "mistral.rs runtime: no default model configured"
+	} else {
+		st.Message = "mistral.rs default model not downloaded"
+	}
 	return st
 }
 

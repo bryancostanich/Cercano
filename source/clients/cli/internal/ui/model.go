@@ -4275,12 +4275,17 @@ func (m Model) renderOpenRuntimeChip() string {
 	if m.openRuntimeStatus == nil || m.openRuntimeStatus.Ok {
 		return ""
 	}
+	mistralrs := m.openRuntimeStatus.Runtime == "mistralrs"
 	var label string
 	switch m.openRuntimeStatus.Missing {
 	case "binary":
 		label = "⚠ llama-server not installed (F1)"
 	case "model":
-		label = "⚠ no GGUF model found (F1)"
+		if mistralrs {
+			label = "⚠ mistral.rs model not downloaded (F1)"
+		} else {
+			label = "⚠ no GGUF model found (F1)"
+		}
 	default:
 		label = "⚠ local runtime: setup (F1)"
 	}

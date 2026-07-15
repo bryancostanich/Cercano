@@ -2619,20 +2619,20 @@ func (m Model) handleCtrlCKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
+// promptTop returns the absolute 0-based screen row at which the prompt text
+// input is rendered. It derives from composeFrame — the same layout the
+// renderer uses to place the real terminal cursor — so the mouse hit-test can
+// never drift from the drawn position. The previous implementation re-summed
+// the layout by hand (contentTop + viewport height + recap + queued + border +
+// slash hint) and silently omitted the sub-agent tab-strip rows and the
+// spare-row padding inserted above the prompt when content doesn't fill the
+// screen; those omissions pushed the hit-test off the real input row in every
+// case except a plain, splash-off, full-height frame, which is why clicking
+// the prompt to select/copy appeared to do nothing while the scrollback
+// viewport worked.
 func (m Model) promptTop() int {
-	top := m.contentTop()
-	top += m.mainChat().Height()
-	if m.recap != "" {
-		top += 2 // blank spacer line + the recap line
-	}
-	if !m.contentPageActive() {
-		top += len(m.queuedLines()) // wrapped queued rows render above the prompt border
-	}
-	top++ // prompt border above the input
-	if hint := m.renderSlashSuggestions(); hint != "" && !m.contentPageActive() {
-		top += strings.Count(hint, "\n") + 1
-	}
-	return top
+	parts, inputIdx := m.composeFrame()
+	return inputCursorRow(parts, inputIdx)
 }
 
 func (m Model) mouseInPrompt(mouse tea.Mouse) bool {
@@ -3750,15 +3750,18 @@ func indentBlock(pad, s string) string {
 // height is computed dynamically here so it absorbs whatever rows the
 // suggestion/help line ends up taking — wrapped help text grows downward,
 // the viewport shrinks to keep the status bar pinned to terminal bottom.
-func (m Model) View() tea.View {
-	if m.width == 0 || m.height == 0 {
-		v := tea.NewView("")
-		v.AltScreen = true
-		v.BackgroundColor = m.palette.BgDeep // paint our own bg, not the terminal's
-		return v                             // first paint before WindowSizeMsg
-	}
-
-	var parts []string
+// composeFrame builds the full ordered slice of screen rows (before overlay
+// compositing) and reports inputIdx — the index into parts at which the prompt
+// text input begins. It is the single source of truth for the frame layout:
+// both View() (for rendering + real-cursor placement) and the mouse hit-test
+// (promptTop/mouseInPrompt) derive from it, so "where the input is drawn" and
+// "where a click lands on the input" can never diverge. It must stay pure: it
+// only reads m and returns freshly built slices.
+//
+// inputCursorRow(parts, inputIdx) converts inputIdx to an absolute 0-based
+// screen row, accounting for embedded newlines and the spare-row padding
+// inserted above the prompt when the content does not fill the terminal.
+func (m Model) composeFrame() (parts []string, inputIdx int) {
 	parts = append(parts, m.renderHeader())
 	parts = append(parts, m.styles.BorderDim.Render(strings.Repeat("─", m.width)))
 	if m.splashEffective() {
@@ -3800,7 +3803,7 @@ func (m Model) View() tea.View {
 	// The prompt frame (border rules + text input) belongs only on the chat
 	// surface. Content pages such as the setup wizard render their own body and
 	// keep just the status line beneath it, so gate the frame out for them.
-	inputIdx := len(parts) + len(promptParts)
+	inputIdx = len(parts) + len(promptParts)
 	if !m.contentPageActive() {
 		promptParts = append(promptParts, promptLine)
 		if hint := m.renderSlashSuggestions(); hint != "" {
@@ -3821,6 +3824,18 @@ func (m Model) View() tea.View {
 		inputIdx++
 	}
 	parts = append(parts, promptParts...)
+	return parts, inputIdx
+}
+
+func (m Model) View() tea.View {
+	if m.width == 0 || m.height == 0 {
+		v := tea.NewView("")
+		v.AltScreen = true
+		v.BackgroundColor = m.palette.BgDeep // paint our own bg, not the terminal's
+		return v                             // first paint before WindowSizeMsg
+	}
+
+	parts, inputIdx := m.composeFrame()
 
 	// Alt-screen safety: pad to exactly m.height lines so resize-to-smaller
 	// frames clear the trailing rows the previous larger frame occupied.

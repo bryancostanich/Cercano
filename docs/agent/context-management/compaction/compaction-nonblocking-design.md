@@ -84,9 +84,11 @@ The compactor gains an **output budget**: compaction must move the view
   stderr — the two-day silent failure becomes impossible to miss.
 - The hard-override breach in `assembleHistory` logs when it fires (id,
   view tokens, hard limit) and which degrade steps were applied.
-- A warn-level line at generator construction when no `summarizer_model` is
-  configured (the summarize lane will use the interactive local model, which
-  may be very slow for large histories).
+- No warning at generator construction when `summarizer_model` /
+  `fast_light_text.open` is unset: that is the recommended default. The bakeoff
+  (compaction-bakeoff-findings.md) measured the interactive open model as the
+  best summarizer on both anchor retention and latency, so an empty tier is not
+  a misconfiguration and a larger/interactive model is not inherently slower.
 
 ## 4. Out of scope (verified or deferred)
 

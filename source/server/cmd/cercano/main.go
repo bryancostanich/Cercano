@@ -286,9 +286,13 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 			SegmentTokens:         cfg.Compaction.SegmentTokens,
 			VerbatimRecent:        cfg.Compaction.VerbatimRecent,
 		}
-		if summarizerModel == "" {
-			fmt.Fprintf(os.Stderr, "[compaction] WARN: no summarizer_model and no models.tiers.fast_light_text.open configured — compaction summarizes with the interactive open model (%s), which can be very slow for large histories\n", cfg.OpenChatModel())
-		}
+		// No warning when summarizerModel is empty: an unset fast_light_text.open
+		// is the recommended default, not a misconfiguration. The bakeoff
+		// (compaction-bakeoff-findings.md, "Summarizer model selection") found
+		// the interactive open model to be the best-measured summarizer on both
+		// anchor retention and latency — a larger/interactive model is not
+		// inherently slower (MoE sparsity means disk size is a poor latency
+		// predictor), so there is nothing here to warn about.
 		compGen = compactiongen.New(persistentStore, compactSummarize, compCfg, contextmeter.Default(), 10*time.Second)
 		// Runtime kill switch — Schedule noops until enabled. Wiring the
 		// scheduler unconditionally lets /config compaction-enabled true flip

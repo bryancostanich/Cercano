@@ -67,14 +67,21 @@ So you say "an open model is sufficient for this," locus decides that means the
 local model under cloud_primary (or the open model under open_primary). Same
 knob, correct behavior in every mode.
 
-> **Known gap (as of this writing):** the `dispatch` capability
-> (`internal/capabilities/builtins/dispatch_cap.go`) currently hardcodes
-> `Role: RoleMain, Tier: config.TierEveryday`, so a sub-agent inherits the main
-> tier instead of running on an open model — the "sufficient tier" knob (axis 1)
-> is not yet exposed on the tool. Delegating still shifts the *grinding* off your
-> transcript, but until this is fixed the sub-agent may run on the same tier as
-> you. When working on delegation, this is the first thing to fix. See the
-> `dispatch`/`skills` design discussion in `docs/agent/` for the plan.
+How this is wired in `dispatch_cap.go`: the capability always sets
+`Role: RoleCoproc` — a delegated sub-agent is offloadable work, so its location
+resolves like the co-processor (open under cloud_primary, and per your locus
+mode otherwise). The main thread never names a location. The only model-facing
+knob is `tier: "light" | "standard" | "deep"` (axis 1, "how much brain"),
+mapping to `TierFastLight` / `TierEveryday` / `TierMostCapable`; omitted or
+unrecognized defaults to `light` so delegated grunt work offloads cheaply.
+`tier` never changes `Role` — reasoning demand and location stay independent,
+matching the engine's own `Select(role)` vs `modelFor(tier)` split.
+
+> **History:** `dispatch` used to hardcode `Role: RoleMain` (plus
+> `Tier: TierEveryday`), which pinned every sub-agent to the main thread's tier
+> — cloud under cloud_primary — defeating the point of delegating recon off the
+> frontier tier. Fixed by switching to `RoleCoproc` and exposing the `tier` knob
+> above.
 
 ## Layout & build
 

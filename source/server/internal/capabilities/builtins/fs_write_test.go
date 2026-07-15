@@ -76,6 +76,59 @@ func TestWriteFileCapability_Overwrite(t *testing.T) {
 	}
 }
 
+func TestWriteFileCapability_OverwritePreservesMode(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "launcher.sh")
+	os.WriteFile(p, []byte("#!/bin/sh\necho old\n"), 0o755)
+
+	args, _ := json.Marshal(map[string]any{"path": p, "content": "#!/bin/sh\necho new\n"})
+	if _, err := WriteFile().Execute(context.Background(), &capabilities.Call{Args: args}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	info, err := os.Stat(p)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o755 {
+		t.Fatalf("mode = %o after overwrite, want 755 preserved", got)
+	}
+}
+
+func TestWriteFileCapability_NewFileDefaultMode(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "fresh.txt")
+
+	args, _ := json.Marshal(map[string]any{"path": p, "content": "x"})
+	if _, err := WriteFile().Execute(context.Background(), &capabilities.Call{Args: args}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	info, err := os.Stat(p)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o644 {
+		t.Fatalf("new-file mode = %o, want 644 (not CreateTemp's 0600)", got)
+	}
+}
+
+func TestEditFileCapability_PreservesMode(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "launcher.sh")
+	os.WriteFile(p, []byte("#!/bin/sh\necho old\n"), 0o755)
+
+	args, _ := json.Marshal(map[string]any{"path": p, "old_string": "old", "new_string": "new"})
+	if _, err := EditFile().Execute(context.Background(), &capabilities.Call{Args: args}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	info, err := os.Stat(p)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o755 {
+		t.Fatalf("mode = %o after edit, want 755 preserved", got)
+	}
+}
+
 func TestWriteFileCapability_MissingPath(t *testing.T) {
 	args, _ := json.Marshal(map[string]any{"path": "", "content": "x"})
 	_, err := WriteFile().Execute(context.Background(), &capabilities.Call{Args: args})

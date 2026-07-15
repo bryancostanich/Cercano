@@ -66,11 +66,25 @@ func (writeFileCap) Execute(ctx context.Context, call *capabilities.Call) (*capa
 	}
 	// Atomic write: temp in same dir → rename. Same-dir ensures rename stays
 	// a metadata op rather than a cross-device copy.
+	//
+	// Rename replaces the destination inode, so the temp file's mode becomes
+	// the destination's mode. CreateTemp uses 0600 — carry over the existing
+	// file's permissions (an overwritten launcher script must stay executable),
+	// or 0644 for a new file.
+	mode := os.FileMode(0o644)
+	if info, statErr := os.Stat(a.Path); statErr == nil {
+		mode = info.Mode().Perm()
+	}
 	tmp, err := os.CreateTemp(dir, ".cercano-write-*")
 	if err != nil {
 		return nil, fmt.Errorf("write_file: temp create: %w", err)
 	}
 	tmpPath := tmp.Name()
+	if err := tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return nil, fmt.Errorf("write_file: chmod: %w", err)
+	}
 	if _, err := tmp.WriteString(a.Content); err != nil {
 		tmp.Close()
 		os.Remove(tmpPath)

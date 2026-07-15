@@ -107,6 +107,9 @@ func runCLI(cfg config.Config, openHistoryOnStart, openWizardOnStart bool, seedD
 	if seedDoc != "" {
 		m = m.SeedAssistantMarkdown(seedDoc)
 	}
+	// TEMPORARY: log the detected color profile before the program starts, so
+	// we can diagnose the paste color-loss bug. Remove once diagnosed.
+	cliui.LogStartupColorProfile()
 	p := tea.NewProgram(m)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "cercano:", err)

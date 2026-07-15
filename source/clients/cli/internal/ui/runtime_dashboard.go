@@ -301,13 +301,17 @@ func (d *runtimeDashboard) fullContent() (string, int) {
 	// restarting per block. Reset once per render pass.
 	d.renderActionOrdinal = 0
 	d.selectedActionLine = -1
-	configBlock := d.renderConfigBlocks()
 	contentH := dashboardContentHeight(d.height)
-	parts := []string{
-		configBlock,
-		d.renderRuntimeStatusBlock(),
-	}
-	if d.mode == dashboardModeModels {
+
+	// Runtime mode leads with the "open runtime" action block so the primary
+	// picker sits at the top of the page; the local-config and runtime-status
+	// read-outs follow it. Models mode keeps its config/status header on top.
+	// The action-block loop below is position-independent — blockStartLine is
+	// recomputed from countLines(parts) each iteration — so rendering it first
+	// keeps the flat action cursor mapping correct.
+	var parts []string
+	if d.mode != dashboardModeRuntime {
+		parts = append(parts, d.renderConfigBlocks(), d.renderRuntimeStatusBlock())
 		parts = append(parts, d.renderCatalogBlock(d.catalogRowBudget()))
 	}
 	// Action blocks render one at a time so renderActionBlock can
@@ -317,6 +321,9 @@ func (d *runtimeDashboard) fullContent() (string, int) {
 	for _, render := range d.actionBlocks() {
 		d.blockStartLine = countLines(parts)
 		parts = append(parts, render())
+	}
+	if d.mode == dashboardModeRuntime {
+		parts = append(parts, d.renderConfigBlocks(), d.renderRuntimeStatusBlock())
 	}
 	logRows := contentH - countLines(parts)
 	parts = append(parts, d.renderOpenServerLogBlock(logRows))

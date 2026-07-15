@@ -3,6 +3,7 @@ package anthropicauth
 import (
 	"context"
 	"fmt"
+	"html"
 	"net"
 	"net/http"
 	"strings"
@@ -145,6 +146,11 @@ func (p *Pending) Close() error {
 // redirect, then flushes it so the bytes reach the browser before the server
 // is torn down. Connection: close tells the browser to drop the socket, which
 // keeps graceful shutdown from racing a lingering keep-alive connection.
+//
+// title and msg are plain text and are HTML-escaped before interpolation: the
+// failure page reflects the untrusted "error" query parameter into msg, and
+// that branch runs before the state check, so an unescaped value would let any
+// local process that finds the loopback port inject markup into this page.
 func writeBrowserPage(w http.ResponseWriter, success bool, title, msg string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Connection", "close")
@@ -159,7 +165,7 @@ func writeBrowserPage(w http.ResponseWriter, success bool, title, msg string) {
 		"justify-content:center;height:100vh;margin:0;text-align:center;padding:0 1.5rem\">"+
 		"<div style=\"font-size:1.5rem;color:%s;font-weight:600;margin-bottom:.6rem\">%s</div>"+
 		"<div style=\"color:#C8C8C8;max-width:32rem;line-height:1.5\">%s</div></body></html>",
-		title, accent, title, msg)
+		html.EscapeString(title), accent, html.EscapeString(title), html.EscapeString(msg))
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}

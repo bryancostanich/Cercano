@@ -70,6 +70,60 @@ func TestRuntimeConfigRowsEmptyURL(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigRowsMistralRS(t *testing.T) {
+	cfg := &agentclient.Config{
+		OpenRuntime:               "mistralrs",
+		MistralRSPagedAttn:        "on",
+		MistralRSPAMemoryFraction: "0.85",
+		MistralRSISQ:              "Q4K",
+	}
+	rows := runtimeConfigRows(cfg)
+	// runtime picker + three mistral.rs launch-flag rows (no ollama URL).
+	if len(rows) != 4 {
+		t.Fatalf("mistralrs: want 4 rows, got %d", len(rows))
+	}
+	if rows[0].Value != "mistralrs" || rows[0].Action.Kind != runtimeActionOpenRuntimePick {
+		t.Errorf("runtime row: value=%q kind=%q", rows[0].Value, rows[0].Action.Kind)
+	}
+	want := []struct {
+		label, value, kind string
+	}{
+		{"paged-attn", "on", runtimeActionMistralPagedAttn},
+		{"pa-memory-fraction", "0.85", runtimeActionMistralPAMemoryFrac},
+		{"isq", "Q4K", runtimeActionMistralISQ},
+	}
+	for i, w := range want {
+		r := rows[i+1]
+		if r.Label != w.label || r.Value != w.value || r.Action.Kind != w.kind {
+			t.Errorf("row %d: got label=%q value=%q kind=%q; want %q/%q/%q",
+				i+1, r.Label, r.Value, r.Action.Kind, w.label, w.value, w.kind)
+		}
+	}
+}
+
+func TestRuntimeConfigRowsMistralRSDefaults(t *testing.T) {
+	// Unset flags render placeholders; paged-attn defaults to "auto".
+	rows := runtimeConfigRows(&agentclient.Config{OpenRuntime: "mistralrs"})
+	if len(rows) != 4 {
+		t.Fatalf("want 4 rows, got %d", len(rows))
+	}
+	if rows[1].Value != "auto" {
+		t.Errorf("paged-attn default: got %q, want auto", rows[1].Value)
+	}
+	if rows[2].Value != "—" || rows[3].Value != "—" {
+		t.Errorf("unset flags should show —, got pa=%q isq=%q", rows[2].Value, rows[3].Value)
+	}
+}
+
+func TestRuntimeConfigRowsMistralRSHidesOllamaURL(t *testing.T) {
+	rows := runtimeConfigRows(&agentclient.Config{OpenRuntime: "mistralrs", OllamaURL: "http://x"})
+	for _, r := range rows {
+		if r.Action.Kind == runtimeActionOllamaURL {
+			t.Fatal("mistralrs runtime should not show the ollama URL row")
+		}
+	}
+}
+
 func TestOpenRuntimeSwitchCmdNilAgent(t *testing.T) {
 	cmd := openRuntimeSwitchCmd(nil, "ollama")
 	if cmd != nil {

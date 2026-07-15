@@ -556,6 +556,15 @@ func (d *runtimeDashboard) updateOperations(msg tea.KeyPressMsg) (tea.Cmd, bool)
 		case runtimeActionOllamaURL:
 			d.openOllamaURLPicker()
 			return nil, false
+		case runtimeActionMistralPagedAttn:
+			d.openMistralPagedAttnPicker()
+			return nil, false
+		case runtimeActionMistralPAMemoryFrac:
+			d.openMistralPAMemoryFractionPicker()
+			return nil, false
+		case runtimeActionMistralISQ:
+			d.openMistralISQPicker()
+			return nil, false
 		}
 		d.actionMessage = runtimeDashboardPendingStatus(action)
 		return runtimeDashboardActionCmd(d.agent, action), false

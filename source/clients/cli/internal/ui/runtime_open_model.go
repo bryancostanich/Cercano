@@ -11,8 +11,11 @@ import (
 )
 
 const (
-	runtimeActionOpenRuntimePick = "open_runtime_pick"
-	runtimeActionOllamaURL       = "ollama_url"
+	runtimeActionOpenRuntimePick     = "open_runtime_pick"
+	runtimeActionOllamaURL           = "ollama_url"
+	runtimeActionMistralPagedAttn    = "mistralrs_paged_attn"
+	runtimeActionMistralPAMemoryFrac = "mistralrs_pa_memory_fraction"
+	runtimeActionMistralISQ          = "mistralrs_isq"
 )
 
 // runtimeConfigRows builds the Runtime tab's picker block: the open-runtime
@@ -47,7 +50,40 @@ func runtimeConfigRows(cfg *agentclient.Config) []runtimeDashboardActionRow {
 			Action: runtimeDashboardAction{Kind: runtimeActionOllamaURL},
 		})
 	}
+	// mistral.rs process-launch flags. They only apply when mistral.rs is the
+	// active runtime, and take effect on the next runtime start — the running
+	// sidecar keeps its current flags until restarted.
+	if runtime == "mistralrs" {
+		rows = append(rows, mistralRuntimeRows(cfg)...)
+	}
 	return rows
+}
+
+// mistralRuntimeRows builds the three mistral.rs launch-flag rows: paged
+// attention (concurrency/throughput), KV-cache memory budget, and ISQ
+// (in-situ quantization). "restart" hints flag that these bite on the next
+// runtime start, not live.
+func mistralRuntimeRows(cfg *agentclient.Config) []runtimeDashboardActionRow {
+	return []runtimeDashboardActionRow{
+		{
+			Label:  "paged-attn",
+			Value:  firstNonEmpty(cfg.MistralRSPagedAttn, "auto"),
+			Hint:   "enter to change · restart",
+			Action: runtimeDashboardAction{Kind: runtimeActionMistralPagedAttn},
+		},
+		{
+			Label:  "pa-memory-fraction",
+			Value:  firstNonEmpty(cfg.MistralRSPAMemoryFraction, "—"),
+			Hint:   "enter to edit · restart",
+			Action: runtimeDashboardAction{Kind: runtimeActionMistralPAMemoryFrac},
+		},
+		{
+			Label:  "isq",
+			Value:  firstNonEmpty(cfg.MistralRSISQ, "—"),
+			Hint:   "enter to edit · restart",
+			Action: runtimeDashboardAction{Kind: runtimeActionMistralISQ},
+		},
+	}
 }
 
 // openRuntimePicker installs the ollama / embedded-llama-server radio picker.
@@ -71,6 +107,12 @@ func (d *runtimeDashboard) openRuntimePicker() {
 			Label:    "embedded llama-server",
 			Value:    "managed GGUF runtime",
 			Selected: current == "llama_server",
+		},
+		{
+			Key:      "mistralrs",
+			Label:    "mistral.rs",
+			Value:    "managed UQFF/safetensors runtime",
+			Selected: current == "mistralrs",
 		},
 	}
 	hooks := overlay.Hooks{
@@ -117,6 +159,108 @@ func (d *runtimeDashboard) openOllamaURLPicker() {
 	}
 	picker := overlay.New("ollama URL", rows, hooks)
 	d.tierPicker = &picker
+}
+
+// openMistralPagedAttnPicker installs the auto/on/off radio for mistral.rs
+// paged attention — the concurrency/throughput lever (off by default on
+// Metal). Committed via OnSelect → UpdateConfig; takes effect on next start.
+func (d *runtimeDashboard) openMistralPagedAttnPicker() {
+	current := "auto"
+	if cfg := d.snapshot.Config; cfg != nil {
+		current = firstNonEmpty(cfg.MistralRSPagedAttn, "auto")
+	}
+	opts := []struct{ key, desc string }{
+		{"auto", "on for CUDA, off for Metal/CPU"},
+		{"on", "force paged attention + prefix caching"},
+		{"off", "disable paged attention"},
+	}
+	rows := make([]overlay.Row, len(opts))
+	for i, o := range opts {
+		rows[i] = overlay.Row{Key: o.key, Label: o.key, Value: o.desc, Selected: current == o.key}
+	}
+	hooks := overlay.Hooks{
+		OnSelect: func(row overlay.Row) (string, bool, tea.Cmd) {
+			return d.mistralConfigStatus(row.Key), true,
+				mistralConfigUpdateCmd(d.agent, agentclient.ConfigUpdate{MistralRSPagedAttn: row.Key})
+		},
+	}
+	picker := overlay.New("paged attention", rows, hooks)
+	d.tierPicker = &picker
+}
+
+// openMistralPAMemoryFractionPicker edits the KV-cache memory budget (0<f<=1).
+// Blanking clears it (sends "-", the sparse-patch clear sentinel).
+func (d *runtimeDashboard) openMistralPAMemoryFractionPicker() {
+	d.openMistralTextPicker(
+		"pa-memory-fraction",
+		func(c *agentclient.Config) string { return c.MistralRSPAMemoryFraction },
+		func(v string) agentclient.ConfigUpdate {
+			return agentclient.ConfigUpdate{MistralRSPAMemoryFraction: dashIfEmpty(v)}
+		},
+	)
+}
+
+// openMistralISQPicker edits the ISQ (in-situ quantization) level, e.g. Q4K.
+// Blanking clears it.
+func (d *runtimeDashboard) openMistralISQPicker() {
+	d.openMistralTextPicker(
+		"isq",
+		func(c *agentclient.Config) string { return c.MistralRSISQ },
+		func(v string) agentclient.ConfigUpdate {
+			return agentclient.ConfigUpdate{MistralRSISQ: dashIfEmpty(v)}
+		},
+	)
+}
+
+// openMistralTextPicker is the shared single-editable-row overlay for the two
+// free-text mistral.rs flags, committed via OnEdit → UpdateConfig.
+func (d *runtimeDashboard) openMistralTextPicker(
+	label string,
+	get func(*agentclient.Config) string,
+	build func(string) agentclient.ConfigUpdate,
+) {
+	current := ""
+	if cfg := d.snapshot.Config; cfg != nil {
+		current = get(cfg)
+	}
+	rows := []overlay.Row{{Label: label, Value: current, Editable: true}}
+	hooks := overlay.Hooks{
+		OnEdit: func(row overlay.Row, newValue string) (string, error) {
+			if d.agent == nil {
+				return "no agent connection", nil
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			msg, err := d.agent.UpdateConfig(ctx, build(newValue))
+			if err != nil {
+				return "set failed: " + err.Error(), err
+			}
+			return firstNonEmpty(msg, d.mistralConfigStatus(label)), nil
+		},
+	}
+	picker := overlay.New(label, rows, hooks)
+	d.tierPicker = &picker
+}
+
+// mistralConfigStatus notes the restart requirement so the change doesn't look
+// like it silently did nothing — the running sidecar keeps its old flags.
+func (d *runtimeDashboard) mistralConfigStatus(field string) string {
+	return field + " updated — restart the runtime to apply"
+}
+
+// mistralConfigUpdateCmd dispatches a mistral.rs config update off the UI
+// thread, swallowing the error the way the runtime-switch path does (the
+// server broadcasts ConfigChanged on success).
+func mistralConfigUpdateCmd(ag *agentclient.Client, update agentclient.ConfigUpdate) tea.Cmd {
+	if ag == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = ag.UpdateConfig(ctx, update)
+		return nil
+	}
 }
 
 // openRuntimeSwitchCmd builds the tea.Cmd for a runtime switch. For

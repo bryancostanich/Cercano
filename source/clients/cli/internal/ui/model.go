@@ -2489,7 +2489,7 @@ func (m *Model) relayout() {
 	}
 	queuedH := 0
 	if !m.contentPageActive() {
-		queuedH = len(m.mainChat().Queued()) // one row per queued message, rendered above the prompt
+		queuedH = len(m.queuedLines()) // wrapped rows for queued messages, rendered above the prompt
 	}
 	// Size the input first — DynamicHeight re-fits it to the wrapped content at
 	// this width; the body claims whatever rows are left.
@@ -2619,7 +2619,7 @@ func (m Model) promptTop() int {
 		top += 2 // blank spacer line + the recap line
 	}
 	if !m.contentPageActive() {
-		top += len(m.mainChat().Queued()) // queued messages render above the prompt border
+		top += len(m.queuedLines()) // wrapped queued rows render above the prompt border
 	}
 	top++ // prompt border above the input
 	if hint := m.renderSlashSuggestions(); hint != "" && !m.contentPageActive() {
@@ -3991,41 +3991,52 @@ func (m *Model) unstageLastQueued() bool {
 	return true
 }
 
-// renderQueued draws the messages queued while a response streams as a
-// navy-fill strip just above the prompt — one per line, starting at the
-// content margin and spanning to the right edge. The "⊕" marker shows in
-// muted lime; the text in bright amber on the navy fill, so the queued
-// lines read as upcoming user prompts (matching the same palette slot
-// designated for echoed user-prompt rows in the scrollback). Empty when
+// queuedLines builds the rendered rows for the messages queued while a response
+// streams — a navy-fill strip just above the prompt, starting at the content
+// margin and spanning to the right edge. Each message word-wraps to the strip
+// width with a hanging indent so continuation rows align past the "⊕ " marker.
+// The marker shows in muted lime; the text in bright amber on the navy fill, so
+// the rows read as upcoming user prompts (matching the same palette slot
+// designated for echoed user-prompt rows in the scrollback). The layout height
+// calc counts these lines, so wrapping and reserved rows stay in sync. Nil when
 // nothing is queued.
-func (m Model) renderQueued() string {
+func (m Model) queuedLines() []string {
 	queued := m.mainChat().Queued()
 	if len(queued) == 0 {
-		return ""
+		return nil
 	}
 	leftPad := strings.Repeat(" ", entryIndent)
 	avail := m.width - entryIndent - 2 // marker "⊕ " takes 2 cells
 	if avail < 1 {
 		avail = 1
 	}
-	lines := make([]string, len(queued))
-	for i, q := range queued {
-		text := q
-		if lipgloss.Width(text) > avail {
-			r := []rune(text)
-			if len(r) > avail-1 {
-				text = string(r[:avail-1]) + "…"
+	// Continuation rows hang under the text, aligned past the "⊕ " marker.
+	hang := strings.Repeat(" ", 2)
+	var lines []string
+	for _, q := range queued {
+		wrapped := strings.Split(ansi.Wrap(q, avail, ""), "\n")
+		for i, w := range wrapped {
+			fill := avail - lipgloss.Width(w)
+			if fill < 0 {
+				fill = 0
 			}
+			marker := m.styles.BufferUserMarker.Render("⊕ ")
+			if i > 0 {
+				marker = m.styles.BufferUserText.Render(hang)
+			}
+			lines = append(lines, leftPad+marker+
+				m.styles.BufferUserText.Render(w+strings.Repeat(" ", fill)))
 		}
-		fill := avail - lipgloss.Width(text)
-		if fill < 0 {
-			fill = 0
-		}
-		lines[i] = leftPad +
-			m.styles.BufferUserMarker.Render("⊕ ") +
-			m.styles.BufferUserText.Render(text+strings.Repeat(" ", fill))
 	}
-	return strings.Join(lines, "\n")
+	return lines
+}
+
+// renderQueued draws the messages queued while a response streams as a
+// navy-fill strip just above the prompt. See queuedLines for the per-row
+// layout; long messages wrap (with a hanging indent) rather than truncate.
+// Empty when nothing is queued.
+func (m Model) renderQueued() string {
+	return strings.Join(m.queuedLines(), "\n")
 }
 
 // recapLabelText is the leading label on the recap line; its width also sets the

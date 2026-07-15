@@ -65,6 +65,34 @@ func TestQueuedLinesReserveViewportRows(t *testing.T) {
 	}
 }
 
+// A queued message longer than the strip width wraps to multiple rows instead
+// of truncating, and the reserved viewport rows track the wrapped line count so
+// the status bar stays put.
+func TestQueuedLineWrapsAndReservesWrappedRows(t *testing.T) {
+	m := New(nil, false)
+	m = m.SeedAssistantMarkdown("prior reply\n")
+	m = send(t, m, tea.WindowSizeMsg{Width: 40, Height: 24})
+
+	h0 := m.mainChat().Height()
+	long := strings.Repeat("wrap ", 30) // ~150 cells, far wider than a 40-col strip
+	m.mainChat().Enqueue(strings.TrimSpace(long), nil)
+	m.relayout()
+
+	rows := len(m.queuedLines())
+	if rows < 2 {
+		t.Fatalf("long queued message should wrap to multiple rows, got %d", rows)
+	}
+	// No row should carry a truncation ellipsis — every word must survive.
+	for i, line := range m.queuedLines() {
+		if strings.Contains(line, "…") {
+			t.Errorf("row %d truncated with ellipsis instead of wrapping: %q", i, line)
+		}
+	}
+	if got := m.mainChat().Height(); got != h0-rows {
+		t.Errorf("reserved rows should equal wrapped line count: %d -> %d, want %d", h0, got, h0-rows)
+	}
+}
+
 type queuedPageStub struct{ body string }
 
 func (p *queuedPageStub) ID() contentPageID                      { return contentPageContext }

@@ -7,6 +7,7 @@ import (
 
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/dispatch"
+	"cercano/source/server/pkg/config"
 )
 
 func TestDispatch_Meta(t *testing.T) {
@@ -53,14 +54,58 @@ func TestDispatch_Execute_ForwardsSpec(t *testing.T) {
 	if len(captured.Tools) != 1 || captured.Tools[0] != "read_file" {
 		t.Errorf("Spec.Tools = %v, want [read_file]", captured.Tools)
 	}
-	if captured.Role != dispatch.RoleMain {
-		t.Errorf("Spec.Role = %v, want RoleMain", captured.Role)
+	// A delegated sub-agent is offloadable work: it must resolve like the
+	// co-processor (RoleCoproc), so the user's locus mode decides open vs cloud.
+	// RoleMain would pin it to the main thread's tier (cloud under cloud_primary),
+	// defeating the point of delegating recon off the frontier tier.
+	if captured.Role != dispatch.RoleCoproc {
+		t.Errorf("Spec.Role = %v, want RoleCoproc", captured.Role)
+	}
+	// No "tier" arg -> lightest tier by default, so grunt work offloads cheaply.
+	if captured.Tier != config.TierFastLight {
+		t.Errorf("Spec.Tier = %v, want TierFastLight (default)", captured.Tier)
 	}
 	if captured.Emit == nil {
 		t.Fatal("Spec.Emit is nil; dispatch progress would not reach the parent turn")
 	}
 	if res.Text != "done" {
 		t.Errorf("result text = %q, want %q", res.Text, "done")
+	}
+}
+
+func TestDispatch_Execute_TierKnob(t *testing.T) {
+	// The "tier" arg expresses reasoning demand only; it must map onto the
+	// taxonomy tier without touching Role (location stays RoleCoproc always).
+	cases := []struct {
+		arg  string
+		want config.Tier
+	}{
+		{"light", config.TierFastLight},
+		{"standard", config.TierEveryday},
+		{"deep", config.TierMostCapable},
+		{"", config.TierFastLight},        // omitted -> lightest
+		{"nonsense", config.TierFastLight}, // unrecognized -> lightest
+		{"DEEP", config.TierMostCapable},   // case-insensitive
+	}
+	for _, c := range cases {
+		var captured dispatch.Spec
+		svc := capabilities.Services{
+			Dispatch: func(_ context.Context, spec dispatch.Spec) (dispatch.Result, error) {
+				captured = spec
+				return dispatch.Result{Text: "ok"}, nil
+			},
+		}
+		args, _ := json.Marshal(map[string]any{"task": "t", "tier": c.arg})
+		call := &capabilities.Call{Args: args, WorkDir: "/proj", Svc: svc}
+		if _, err := Dispatch().Execute(context.Background(), call); err != nil {
+			t.Fatalf("tier=%q: Execute error: %v", c.arg, err)
+		}
+		if captured.Tier != c.want {
+			t.Errorf("tier=%q: Spec.Tier = %v, want %v", c.arg, captured.Tier, c.want)
+		}
+		if captured.Role != dispatch.RoleCoproc {
+			t.Errorf("tier=%q: Spec.Role = %v, want RoleCoproc (tier must not change location)", c.arg, captured.Role)
+		}
 	}
 }
 

@@ -808,6 +808,12 @@ func ctxUsageTick() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
+	case tea.ColorProfileMsg:
+		// TEMPORARY INSTRUMENTATION: record each color-profile change so we can
+		// diagnose the paste color-loss bug. Remove once diagnosed.
+		LogColorProfileMsg(msg.Profile)
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height

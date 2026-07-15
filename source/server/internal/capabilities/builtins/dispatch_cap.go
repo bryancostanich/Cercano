@@ -34,6 +34,7 @@ func (dispatchCap) Schema() capabilities.Schema {
 		"properties": {
 			"task":            {"type": "string", "description": "Open-ended instruction for the sub-agent tool loop."},
 			"tools":           {"type": "array", "items": {"type": "string"}, "description": "Tool or capability names to grant, using the plain registered names (e.g. \"Read\", \"Glob\", \"Grep\", \"Bash\") — no host or MCP prefix. Omit to default to read-only tools."},
+			"tier":            {"type": "string", "enum": ["light", "standard", "deep"], "description": "How much reasoning the task needs — NOT where it runs (locus config decides that). \"light\" (default): recon/tracing/extraction the co-processor tier handles well. \"standard\": everyday coding judgment. \"deep\": hard reasoning that warrants the most capable model. Prefer \"light\" for delegated grunt work so it offloads off the frontier tier."},
 			"intent":          {"type": "string", "description": "Optional concise human-facing reason for the delegation, shown in permission prompts."},
 			"conversation_id": {"type": "string", "description": "Optional conversation ID to associate with this dispatch."}
 		}
@@ -43,8 +44,25 @@ func (dispatchCap) Schema() capabilities.Schema {
 type dispatchArgs struct {
 	Task           string   `json:"task"`
 	Tools          []string `json:"tools"`
+	Tier           string   `json:"tier"`
 	Intent         string   `json:"intent"`
 	ConversationID string   `json:"conversation_id"`
+}
+
+// tierForDispatch maps the model-facing "how much brain" knob onto a taxonomy
+// tier. It expresses reasoning demand only — never location. Where the tier
+// resolves (open vs cloud) is decided downstream by the user's locus mode via
+// RoleCoproc, not here. Unknown/empty defaults to the lightest tier so that
+// delegated grunt work offloads off the frontier tier by default.
+func tierForDispatch(s string) config.Tier {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "deep":
+		return config.TierMostCapable
+	case "standard":
+		return config.TierEveryday
+	default: // "light" and anything unrecognized
+		return config.TierFastLight
+	}
 }
 
 func (dispatchCap) Execute(ctx context.Context, call *capabilities.Call) (*capabilities.Result, error) {
@@ -65,9 +83,14 @@ func (dispatchCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 		convID = a.ConversationID
 	}
 	res, err := call.Svc.Dispatch(ctx, dispatch.Spec{
-		Mode:           dispatch.Agentic,
-		Role:           dispatch.RoleMain,
-		Tier:           config.TierEveryday,
+		Mode: dispatch.Agentic,
+		// RoleCoproc, not RoleMain: a delegated sub-agent is offloadable work,
+		// so its location must resolve like co-processor work — the user's locus
+		// mode decides open vs cloud. RoleMain forced it to resolve like the main
+		// thread (cloud under cloud_primary), which defeated the whole point of
+		// delegating recon off the frontier tier.
+		Role:           dispatch.RoleCoproc,
+		Tier:           tierForDispatch(a.Tier),
 		Task:           a.Task,
 		Tools:          a.Tools,
 		WorkDir:        call.WorkDir,

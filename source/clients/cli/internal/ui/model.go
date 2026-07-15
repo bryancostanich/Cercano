@@ -2964,6 +2964,32 @@ func resumeEntries(turns []agentclient.PersistedTurn, frozenThrough int64) []*En
 	return entries
 }
 
+// resumeInputHistory extracts the prior session's submitted prompts from the
+// persisted turns so ↑/↓ recall works immediately after a resume. Only user
+// turns carry prompts; assistant/tool turns are skipped. The result is
+// oldest-first (matching how live submits append to inputHistory) and drops
+// consecutive duplicates the same way recordSubmittedInput does, so the recall
+// order after a resume is identical to what it would have been had the session
+// never been interrupted.
+func resumeInputHistory(turns []agentclient.PersistedTurn) []string {
+	var hist []string
+	for _, t := range turns {
+		if t.Role != "user" {
+			continue
+		}
+		text := strings.ReplaceAll(t.Content, "\r\n", "\n")
+		text = strings.ReplaceAll(text, "\r", "\n")
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		if n := len(hist); n > 0 && hist[n-1] == text {
+			continue
+		}
+		hist = append(hist, text)
+	}
+	return hist
+}
+
 // restoreSubAgentTabs reopens the sub-agent chat tabs for a resumed
 // conversation from their persisted transcripts. Each child dispatch loop was
 // saved as a hidden "subagent" conversation linked to this parent (see the
@@ -3057,6 +3083,13 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 		frozenThrough = cs.FrozenThrough
 	}
 	m.mainChat().SetEntriesSlice(resumeEntries(turns, frozenThrough))
+	// Seed ↑/↓ prompt recall from the resumed session's submitted prompts so
+	// the user can replay prior inputs immediately, exactly as they could
+	// before the CLI restarted. historyIdx parks at the live input (past the
+	// end) so the first ↑ recalls the most recent prompt.
+	m.inputHistory = resumeInputHistory(turns)
+	m.historyIdx = len(m.inputHistory)
+	m.historyStash = ""
 	m.mainChat().PrependBanner(m.splash.Meta, m.splash.Started())
 	// Restore the prior session's living recap into the footer line (renderRecap),
 	// or show a "recap unavailable" placeholder if the recap generator has been

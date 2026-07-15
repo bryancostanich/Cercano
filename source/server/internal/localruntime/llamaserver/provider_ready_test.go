@@ -22,7 +22,7 @@ func TestWaitReadyFailsFastWhenInstanceDied(t *testing.T) {
 	}
 	p.running["dead"] = &managedInstance{record: localruntime.InstanceRecord{
 		ID:        "dead",
-		State:     localruntime.StateFailed,
+		State:     localruntime.InstanceFailed,
 		LastError: "exit status 1",
 	}}
 
@@ -62,13 +62,13 @@ func TestFinishReadinessFlipsStartingToRunning(t *testing.T) {
 	}
 	p.running["slow"] = &managedInstance{record: localruntime.InstanceRecord{
 		ID:    "slow",
-		State: localruntime.StateStarting,
+		State: localruntime.InstanceStarting,
 	}}
 
 	p.finishReadiness("slow", server.URL, nil)
 
 	state, lastErr := p.instanceStatus("slow")
-	if state != localruntime.StateRunning {
+	if state != localruntime.InstanceRunning {
 		t.Fatalf("state = %q, want running", state)
 	}
 	if lastErr != "" {
@@ -96,13 +96,13 @@ func TestFinishReadinessLeavesStoppedInstanceAlone(t *testing.T) {
 	}
 	p.running["stopped"] = &managedInstance{record: localruntime.InstanceRecord{
 		ID:    "stopped",
-		State: localruntime.StateStopped,
+		State: localruntime.InstanceStopped,
 	}}
 
 	p.finishReadiness("stopped", server.URL, nil)
 
 	state, _ := p.instanceStatus("stopped")
-	if state != localruntime.StateStopped {
+	if state != localruntime.InstanceStopped {
 		t.Fatalf("state = %q — finishReadiness must not resurrect a stopped instance", state)
 	}
 }

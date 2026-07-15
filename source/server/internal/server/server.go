@@ -264,7 +264,7 @@ func (s *Server) mistralRSModelMissing(ctx context.Context, cfg config.Config) b
 	if !found {
 		return true
 	}
-	return rec.DownloadState != "" && rec.DownloadState != "downloaded"
+	return rec.DownloadState != localruntime.Downloaded
 }
 
 // autoDownloadMistralRSDefault enqueues the mistral.rs default model's
@@ -285,7 +285,7 @@ func (s *Server) autoDownloadMistralRSDefault(ctx context.Context, cfg config.Co
 		// curated record. The not-ready chip will explain which.
 		return
 	}
-	if rec.DownloadState == "downloaded" {
+	if rec.DownloadState == localruntime.Downloaded {
 		return
 	}
 	rm := s.runtimeMgr()
@@ -640,6 +640,12 @@ func (s *Server) SetRuntimeManager(m localruntime.Manager) {
 		s.runtimesSvc = runtimessvc.New(s.cfgSvc)
 	}
 	s.runtimesSvc.SetRuntimeManager(m)
+	// The Server observes lifecycle transitions so a completed download of the
+	// active runtime's default model clears the not-ready chip and warms the
+	// sidecar (see runtime_observer.go).
+	if m != nil {
+		m.RegisterObserver(s)
+	}
 }
 
 // SetCatalogManager attaches the online-catalog manager so
@@ -1655,7 +1661,7 @@ func catalogModelToProto(m catalog.Model) *proto.RuntimeModel {
 		Source:        "catalog-online",
 		Format:        "gguf",
 		Family:        m.ID,
-		DownloadState: "not_downloaded",
+		DownloadState: localruntime.DownloadNotStarted.String(),
 		CatalogId:     m.ID,
 		SupportsChat:  true,
 	}
@@ -1801,7 +1807,7 @@ func activeRuntimeInstance(ctx context.Context, rm localruntime.Manager, runtime
 		if !strings.EqualFold(inst.Runtime, runtime) {
 			continue
 		}
-		if inst.State == localruntime.StateStopped {
+		if inst.State == localruntime.InstanceStopped {
 			continue
 		}
 		return inst, true
@@ -1880,7 +1886,7 @@ func buildCatalogDownloadRecord(ctx context.Context, backend catalog.Backend, id
 		Path:               filepath.Join(modelDir, localruntime.ModelDirName(id), filepath.Base(plan.PrimaryFile)),
 		DownloadURLs:       plan.URLs,
 		DownloadTotalBytes: plan.TotalBytes,
-		DownloadState:      "not_downloaded",
+		DownloadState:      localruntime.DownloadNotStarted,
 		Format:             detail.Format,
 		SupportsChat:       true,
 		SupportsTools:      detail.SupportsTools,
@@ -2018,12 +2024,12 @@ func mapRuntimeModel(model localruntime.ModelRecord) *proto.RuntimeModel {
 		Quantization:       model.Quantization,
 		SizeBytes:          model.SizeBytes,
 		ModifiedAt:         formatRuntimeTime(model.ModifiedAt),
-		DownloadState:      model.DownloadState,
+		DownloadState:      model.DownloadState.String(),
 		DownloadUrl:        model.DownloadURL,
 		DownloadedBytes:    model.DownloadedBytes,
 		DownloadTotalBytes: model.DownloadTotalBytes,
 		DownloadError:      model.DownloadError,
-		RuntimeState:       model.RuntimeState,
+		RuntimeState:       model.RuntimeState.String(),
 		SupportsChat:       model.SupportsChat,
 		SupportsEmbed:      model.SupportsEmbed,
 		SupportsTools:      model.SupportsTools,
@@ -2044,7 +2050,7 @@ func mapRuntimeInstance(instance localruntime.InstanceRecord) *proto.RuntimeInst
 		Id:           instance.ID,
 		Runtime:      instance.Runtime,
 		ModelId:      instance.ModelID,
-		State:        instance.State,
+		State:        instance.State.String(),
 		Pid:          int32(instance.PID),
 		Address:      instance.Address,
 		Port:         int32(instance.Port),

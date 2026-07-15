@@ -5,22 +5,16 @@ import (
 	"time"
 )
 
-const (
-	StateUnknown     = "unknown"
-	StateHealthy     = "healthy"
-	StateDegraded    = "degraded"
-	StateUnreachable = "unreachable"
-	StateStopped     = "stopped"
-	StateStarting    = "starting"
-	StateRunning     = "running"
-	StateUnhealthy   = "unhealthy"
-	StateCrashed     = "crashed"
-	StateFailed      = "failed"
-)
+// The download and instance lifecycle state machines live in state.go
+// (DownloadState, InstanceState) with their legal-transition tables. Endpoint
+// health uses EndpointStateUnknown and plain strings, a separate concern.
 
 // Manager owns local runtime inventory, process state, endpoint state, and logs.
 type Manager interface {
 	RegisterProvider(Provider)
+	// RegisterObserver adds an Observer notified on every download/instance
+	// state transition. Wire observers at startup, before state mutates.
+	RegisterObserver(Observer)
 	Providers() []ProviderInfo
 	Inventory(context.Context) ([]ModelRecord, error)
 	Instances(context.Context) ([]InstanceRecord, error)
@@ -93,7 +87,7 @@ type ModelRecord struct {
 	Quantization  string
 	SizeBytes     int64
 	ModifiedAt    time.Time
-	DownloadState string
+	DownloadState DownloadState
 	DownloadURL   string
 	// DownloadURLs holds the ordered shard URLs for a multi-file model
 	// (e.g. a split GGUF like GLM-4.5-Air's two-part Q4_K_M). When set, the
@@ -105,7 +99,7 @@ type ModelRecord struct {
 	DownloadedBytes    int64
 	DownloadTotalBytes int64
 	DownloadError      string
-	RuntimeState       string
+	RuntimeState       InstanceState
 	SupportsChat       bool
 	SupportsEmbed      bool
 	SupportsTools      bool
@@ -116,7 +110,7 @@ type InstanceRecord struct {
 	ID           string
 	Runtime      string
 	ModelID      string
-	State        string
+	State        InstanceState
 	PID          int
 	Address      string
 	Port         int
@@ -146,7 +140,7 @@ type EndpointRecord struct {
 
 type InstanceHealth struct {
 	InstanceID string
-	State      string
+	State      InstanceState
 	LatencyMS  int64
 	Error      string
 	CheckedAt  time.Time

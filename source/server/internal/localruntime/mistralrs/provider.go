@@ -165,7 +165,7 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 			ID:        id,
 			Runtime:   runtimeName,
 			ModelID:   model.ID,
-			State:     localruntime.StateStarting,
+			State:     localruntime.InstanceStarting,
 			Address:   host,
 			Port:      port,
 			Endpoint:  endpoint,
@@ -193,7 +193,7 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 
 	if err := p.startProcess(id, binary, sink); err != nil {
 		p.updateRecord(id, sink, func(record *localruntime.InstanceRecord) {
-			record.State = localruntime.StateFailed
+			record.State = localruntime.InstanceFailed
 			record.LastError = err.Error()
 		})
 		return &instance.record, err
@@ -206,7 +206,7 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 	readyCtx, cancel := context.WithTimeout(ctx, p.readinessTimeout())
 	defer cancel()
 	if err := p.waitReady(readyCtx, id, endpoint); err != nil {
-		if p.instanceState(id) == localruntime.StateStarting {
+		if p.instanceState(id) == localruntime.InstanceStarting {
 			// The process is alive and still loading — a large model (or an
 			// in-situ quantization pass) legitimately needs longer than the
 			// readiness window, and killing it here would throw the whole
@@ -226,7 +226,7 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 	}
 
 	p.updateRecord(id, sink, func(record *localruntime.InstanceRecord) {
-		record.State = localruntime.StateRunning
+		record.State = localruntime.InstanceRunning
 		record.ReadyAt = time.Now()
 	})
 
@@ -245,7 +245,7 @@ func (p *Provider) Stop(_ context.Context, instanceID string) error {
 	}
 	instance.stopping = true
 	cmd := instance.cmd
-	instance.record.State = localruntime.StateStopped
+	instance.record.State = localruntime.InstanceStopped
 	p.mu.Unlock()
 	if cmd == nil || cmd.Process == nil {
 		return nil
@@ -269,7 +269,7 @@ func (p *Provider) Probe(ctx context.Context, instanceID string) (*localruntime.
 	if err != nil {
 		return &localruntime.InstanceHealth{
 			InstanceID: instanceID,
-			State:      localruntime.StateUnreachable,
+			State:      localruntime.InstanceUnreachable,
 			LatencyMS:  latency,
 			Error:      err.Error(),
 			CheckedAt:  time.Now(),
@@ -277,7 +277,7 @@ func (p *Provider) Probe(ctx context.Context, instanceID string) (*localruntime.
 	}
 	return &localruntime.InstanceHealth{
 		InstanceID: instanceID,
-		State:      localruntime.StateHealthy,
+		State:      localruntime.InstanceHealthy,
 		LatencyMS:  latency,
 		CheckedAt:  time.Now(),
 	}, nil
@@ -297,7 +297,7 @@ func (p *Provider) resolveModel(ctx context.Context, requested string) (localrun
 	}
 	for _, model := range models {
 		if matchesModel(requested, model) {
-			if model.DownloadState != "" && model.DownloadState != "downloaded" {
+			if model.DownloadState != localruntime.Downloaded {
 				return localruntime.ModelRecord{}, fmt.Errorf("mistral.rs model %q is not downloaded", requested)
 			}
 			return model, nil
@@ -389,7 +389,7 @@ func (p *Provider) startProcess(instanceID, binary string, sink localruntime.Log
 	p.mu.Lock()
 	instance.cmd = cmd
 	instance.record.PID = cmd.Process.Pid
-	instance.record.State = localruntime.StateStarting
+	instance.record.State = localruntime.InstanceStarting
 	instance.record.StartedAt = time.Now()
 	instance.record.LastError = ""
 	p.mu.Unlock()
@@ -480,7 +480,7 @@ func (p *Provider) waitReady(ctx context.Context, instanceID, endpoint string) e
 		// A dead process never becomes ready — fail immediately instead of
 		// polling a closed port for the rest of the window. (watch owns the
 		// exit and records state/LastError.)
-		if state, procErr := p.instanceStatus(instanceID); state == localruntime.StateFailed || state == localruntime.StateStopped || state == "" {
+		if state, procErr := p.instanceStatus(instanceID); state == localruntime.InstanceFailed || state == localruntime.InstanceStopped || state == localruntime.InstanceUnknown {
 			if procErr != "" {
 				return fmt.Errorf("mistral.rs exited during startup: %s", procErr)
 			}
@@ -543,28 +543,29 @@ func (p *Provider) liveInstanceForLocked(modelPath string) *managedInstance {
 			continue
 		}
 		switch inst.record.State {
-		case localruntime.StateStarting, localruntime.StateRunning, localruntime.StateHealthy:
+		case localruntime.InstanceStarting, localruntime.InstanceRunning, localruntime.InstanceHealthy:
 			return inst
 		}
 	}
 	return nil
 }
 
-// instanceState returns the instance's current lifecycle state, or "" when
-// the record no longer exists.
-func (p *Provider) instanceState(instanceID string) string {
+// instanceState returns the instance's current lifecycle state, or
+// InstanceUnknown when the record no longer exists.
+func (p *Provider) instanceState(instanceID string) localruntime.InstanceState {
 	state, _ := p.instanceStatus(instanceID)
 	return state
 }
 
-// instanceStatus returns the instance's state and last recorded error.
-func (p *Provider) instanceStatus(instanceID string) (string, string) {
+// instanceStatus returns the instance's state and last recorded error. A
+// missing record reports InstanceUnknown.
+func (p *Provider) instanceStatus(instanceID string) (localruntime.InstanceState, string) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if inst, ok := p.running[instanceID]; ok {
 		return inst.record.State, inst.record.LastError
 	}
-	return "", ""
+	return localruntime.InstanceUnknown, ""
 }
 
 // finishReadinessCap bounds the background wait for a slow initial model
@@ -588,8 +589,8 @@ func (p *Provider) finishReadiness(instanceID, endpoint string, sink localruntim
 		return
 	}
 	p.updateRecord(instanceID, sink, func(record *localruntime.InstanceRecord) {
-		if record.State == localruntime.StateStarting {
-			record.State = localruntime.StateRunning
+		if record.State == localruntime.InstanceStarting {
+			record.State = localruntime.InstanceRunning
 			record.ReadyAt = time.Now()
 			record.LastError = ""
 		}
@@ -622,7 +623,7 @@ func (p *Provider) watch(instanceID, binary string, sink localruntime.LogSink) {
 			return
 		}
 		if instance.stopping {
-			instance.record.State = localruntime.StateStopped
+			instance.record.State = localruntime.InstanceStopped
 			instance.record.LastExitCode = exitCode
 			record := instance.record
 			p.mu.Unlock()
@@ -635,10 +636,10 @@ func (p *Provider) watch(instanceID, binary string, sink localruntime.LogSink) {
 		instance.record.LastExitCode = exitCode
 		instance.record.LastError = errorString(err)
 		if shouldRestart {
-			instance.record.State = localruntime.StateStarting
+			instance.record.State = localruntime.InstanceStarting
 			instance.record.RestartCount++
 		} else {
-			instance.record.State = localruntime.StateFailed
+			instance.record.State = localruntime.InstanceFailed
 		}
 		record := instance.record
 		p.mu.Unlock()
@@ -653,7 +654,7 @@ func (p *Provider) watch(instanceID, binary string, sink localruntime.LogSink) {
 		time.Sleep(p.restartBackoff())
 		if err := p.startProcess(instanceID, binary, sink); err != nil {
 			p.updateRecord(instanceID, sink, func(record *localruntime.InstanceRecord) {
-				record.State = localruntime.StateFailed
+				record.State = localruntime.InstanceFailed
 				record.LastError = err.Error()
 			})
 			p.emit(sink, "error", instanceID, record.ModelID, "restart failed: "+err.Error())
@@ -760,8 +761,8 @@ func (p *Provider) modelRecord(path string, info os.FileInfo) localruntime.Model
 		Quantization:  inferQuantization(display),
 		SizeBytes:     info.Size(),
 		ModifiedAt:    info.ModTime(),
-		DownloadState: "downloaded",
-		RuntimeState:  localruntime.StateStopped,
+		DownloadState: localruntime.Downloaded,
+		RuntimeState:  localruntime.InstanceStopped,
 		SupportsChat:  true,
 		SupportsTools: true,
 	}

@@ -32,7 +32,7 @@ func TestStart_ReusesLiveInstanceForSameModel(t *testing.T) {
 		record: localruntime.InstanceRecord{
 			ID:       "llama_server:seeded:1234",
 			Runtime:  runtimeName,
-			State:    localruntime.StateRunning,
+			State:    localruntime.InstanceRunning,
 			Endpoint: "http://127.0.0.1:1234",
 		},
 	}
@@ -72,7 +72,7 @@ func TestStart_StoppedInstanceIsNotReused(t *testing.T) {
 		model:    localruntime.ModelRecord{Path: modelPath},
 		record: localruntime.InstanceRecord{
 			ID:    "llama_server:seeded:1234",
-			State: localruntime.StateStopped,
+			State: localruntime.InstanceStopped,
 		},
 	}
 

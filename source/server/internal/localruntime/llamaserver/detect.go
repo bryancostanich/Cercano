@@ -92,7 +92,7 @@ func Detect(ctx context.Context, cfg *config.LlamaServerConfig) error {
 	// the right way to isolate "actually usable right now."
 	var present []localruntime.ModelRecord
 	for _, m := range all {
-		if m.DownloadState == "downloaded" {
+		if m.DownloadState == localruntime.Downloaded {
 			present = append(present, m)
 		}
 	}

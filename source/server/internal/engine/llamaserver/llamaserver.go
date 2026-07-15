@@ -245,9 +245,9 @@ func (e *Engine) endpointFor(ctx context.Context, requested string) (endpoint st
 			continue
 		}
 		switch instance.State {
-		case localruntime.StateRunning, localruntime.StateHealthy:
+		case localruntime.InstanceRunning, localruntime.InstanceHealthy:
 			return instance.Endpoint, modelNameForRequest(selected, requested), nil
-		case localruntime.StateStarting:
+		case localruntime.InstanceStarting:
 			// Still loading the model — its port isn't open yet, so a
 			// request now would get connection-refused. Wait for it below
 			// instead of racing it (or worse, spawning a second copy).
@@ -293,14 +293,14 @@ func (e *Engine) awaitInstanceReady(ctx context.Context, instanceID string) (str
 			}
 			found = true
 			switch instance.State {
-			case localruntime.StateRunning, localruntime.StateHealthy:
+			case localruntime.InstanceRunning, localruntime.InstanceHealthy:
 				return instance.Endpoint, nil
-			case localruntime.StateStarting:
+			case localruntime.InstanceStarting:
 				// keep waiting
 			default:
 				reason := instance.LastError
 				if reason == "" {
-					reason = instance.State
+					reason = instance.State.String()
 				}
 				return "", fmt.Errorf("llama-server instance failed while loading: %s", reason)
 			}

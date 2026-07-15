@@ -58,7 +58,7 @@ func TestDiscoverIncludesQwenCatalogModels(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected Qwen3 catalog model in %#v", models)
 	}
-	if model.Source != "catalog" || model.DownloadState != "not_downloaded" {
+	if model.Source != "catalog" || model.DownloadState != localruntime.DownloadNotStarted {
 		t.Fatalf("unexpected catalog state: %#v", model)
 	}
 	if len(model.DownloadURLs) == 0 || model.DownloadTotalBytes == 0 {

@@ -75,7 +75,7 @@ func TestCompleteStream_DecodesSSE(t *testing.T) {
 			ID:       "inst",
 			Runtime:  runtimeName,
 			ModelID:  "mistralrs:model-a",
-			State:    localruntime.StateRunning,
+			State:    localruntime.InstanceRunning,
 			Endpoint: server.URL,
 		}},
 		models: []localruntime.ModelRecord{{
@@ -128,7 +128,7 @@ func TestChatWithTools_DecodesToolCalls(t *testing.T) {
 			ID:       "inst",
 			Runtime:  runtimeName,
 			ModelID:  "mistralrs:model-a",
-			State:    localruntime.StateRunning,
+			State:    localruntime.InstanceRunning,
 			Endpoint: server.URL,
 		}},
 		models: []localruntime.ModelRecord{{
@@ -211,7 +211,7 @@ func TestComplete_TemperatureOption(t *testing.T) {
 	}
 }
 
-func startingInstance(state, lastErr string) localruntime.InstanceRecord {
+func startingInstance(state localruntime.InstanceState, lastErr string) localruntime.InstanceRecord {
 	return localruntime.InstanceRecord{
 		ID:        "inst-1",
 		Runtime:   runtimeName,
@@ -236,9 +236,9 @@ func TestEndpointFor_WaitsForStartingInstance(t *testing.T) {
 		}},
 		onInstances: func(call int) []localruntime.InstanceRecord {
 			if call <= 1 {
-				return []localruntime.InstanceRecord{startingInstance(localruntime.StateStarting, "")}
+				return []localruntime.InstanceRecord{startingInstance(localruntime.InstanceStarting, "")}
 			}
-			return []localruntime.InstanceRecord{startingInstance(localruntime.StateRunning, "")}
+			return []localruntime.InstanceRecord{startingInstance(localruntime.InstanceRunning, "")}
 		},
 	}
 	eng := NewEngine(manager)
@@ -268,9 +268,9 @@ func TestEndpointFor_StartingInstanceFails(t *testing.T) {
 		}},
 		onInstances: func(call int) []localruntime.InstanceRecord {
 			if call <= 1 {
-				return []localruntime.InstanceRecord{startingInstance(localruntime.StateStarting, "")}
+				return []localruntime.InstanceRecord{startingInstance(localruntime.InstanceStarting, "")}
 			}
-			return []localruntime.InstanceRecord{startingInstance(localruntime.StateFailed, "exit status 1")}
+			return []localruntime.InstanceRecord{startingInstance(localruntime.InstanceFailed, "exit status 1")}
 		},
 	}
 	eng := NewEngine(manager)
@@ -321,7 +321,7 @@ func (m *fakeRuntimeManager) Start(_ context.Context, req localruntime.StartRequ
 		ID:        "started",
 		Runtime:   runtimeName,
 		ModelID:   "mistralrs:model-a",
-		State:     localruntime.StateRunning,
+		State:     localruntime.InstanceRunning,
 		Endpoint:  m.startEndpoint,
 		StartedAt: time.Now(),
 	}
@@ -347,4 +347,5 @@ func (m *fakeRuntimeManager) Status(context.Context) (*localruntime.StatusSnapsh
 func (m *fakeRuntimeManager) Logs(context.Context, localruntime.LogRequest) ([]localruntime.LogEntry, error) {
 	return nil, nil
 }
-func (m *fakeRuntimeManager) WriteLog(localruntime.LogEntry) {}
+func (m *fakeRuntimeManager) WriteLog(localruntime.LogEntry)         {}
+func (m *fakeRuntimeManager) RegisterObserver(localruntime.Observer) {}

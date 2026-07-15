@@ -75,7 +75,7 @@ func TestCompleteStream_DecodesSSE(t *testing.T) {
 			ID:       "inst",
 			Runtime:  runtimeName,
 			ModelID:  "llama_server:model-a",
-			State:    localruntime.StateRunning,
+			State:    localruntime.InstanceRunning,
 			Endpoint: server.URL,
 		}},
 		models: []localruntime.ModelRecord{{
@@ -128,7 +128,7 @@ func TestChatWithTools_DecodesToolCalls(t *testing.T) {
 			ID:       "inst",
 			Runtime:  runtimeName,
 			ModelID:  "llama_server:model-a",
-			State:    localruntime.StateRunning,
+			State:    localruntime.InstanceRunning,
 			Endpoint: server.URL,
 		}},
 		models: []localruntime.ModelRecord{{
@@ -204,7 +204,7 @@ func (m *fakeRuntimeManager) Start(_ context.Context, req localruntime.StartRequ
 		ID:        "started",
 		Runtime:   runtimeName,
 		ModelID:   "llama_server:model-a",
-		State:     localruntime.StateRunning,
+		State:     localruntime.InstanceRunning,
 		Endpoint:  m.startEndpoint,
 		StartedAt: time.Now(),
 	}
@@ -230,7 +230,8 @@ func (m *fakeRuntimeManager) Status(context.Context) (*localruntime.StatusSnapsh
 func (m *fakeRuntimeManager) Logs(context.Context, localruntime.LogRequest) ([]localruntime.LogEntry, error) {
 	return nil, nil
 }
-func (m *fakeRuntimeManager) WriteLog(localruntime.LogEntry) {}
+func (m *fakeRuntimeManager) WriteLog(localruntime.LogEntry)              {}
+func (m *fakeRuntimeManager) RegisterObserver(localruntime.Observer)      {}
 
 func TestComplete_TemperatureOption(t *testing.T) {
 	var sawPayload chatCompletionRequest

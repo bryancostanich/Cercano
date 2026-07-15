@@ -9,7 +9,7 @@ import (
 	"cercano/source/server/internal/localruntime"
 )
 
-func startingInstance(state, lastErr string) localruntime.InstanceRecord {
+func startingInstance(state localruntime.InstanceState, lastErr string) localruntime.InstanceRecord {
 	return localruntime.InstanceRecord{
 		ID:        "inst-1",
 		Runtime:   runtimeName,
@@ -34,9 +34,9 @@ func TestEndpointFor_WaitsForStartingInstance(t *testing.T) {
 		}},
 		onInstances: func(call int) []localruntime.InstanceRecord {
 			if call <= 1 {
-				return []localruntime.InstanceRecord{startingInstance(localruntime.StateStarting, "")}
+				return []localruntime.InstanceRecord{startingInstance(localruntime.InstanceStarting, "")}
 			}
-			return []localruntime.InstanceRecord{startingInstance(localruntime.StateRunning, "")}
+			return []localruntime.InstanceRecord{startingInstance(localruntime.InstanceRunning, "")}
 		},
 	}
 	eng := NewEngine(manager)
@@ -66,9 +66,9 @@ func TestEndpointFor_StartingInstanceFails(t *testing.T) {
 		}},
 		onInstances: func(call int) []localruntime.InstanceRecord {
 			if call <= 1 {
-				return []localruntime.InstanceRecord{startingInstance(localruntime.StateStarting, "")}
+				return []localruntime.InstanceRecord{startingInstance(localruntime.InstanceStarting, "")}
 			}
-			return []localruntime.InstanceRecord{startingInstance(localruntime.StateFailed, "exit status 1")}
+			return []localruntime.InstanceRecord{startingInstance(localruntime.InstanceFailed, "exit status 1")}
 		},
 	}
 	eng := NewEngine(manager)
@@ -95,7 +95,7 @@ func TestEndpointFor_CtxExpiresWhileLoading(t *testing.T) {
 			Path:    "/models/model-a.gguf",
 		}},
 		onInstances: func(int) []localruntime.InstanceRecord {
-			return []localruntime.InstanceRecord{startingInstance(localruntime.StateStarting, "")}
+			return []localruntime.InstanceRecord{startingInstance(localruntime.InstanceStarting, "")}
 		},
 	}
 	eng := NewEngine(manager)

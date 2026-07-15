@@ -130,7 +130,7 @@ func (m *InMemoryManager) downloadShard(ctx context.Context, url, destPath strin
 			written += int64(n)
 			model.DownloadedBytes = baseOffset + written
 			if time.Since(lastUpdate) >= 250*time.Millisecond {
-				m.updateDownload(*model)
+				m.storeDownload(*model)
 				lastUpdate = time.Now()
 			}
 		}

@@ -41,7 +41,7 @@ func TestDownloadModel_MultiShard(t *testing.T) {
 		Path:               filepath.Join(dir, "GLM-Q4_K_M-00001-of-00002.gguf"),
 		DownloadURLs:       []string{url0, url1},
 		DownloadTotalBytes: total,
-		DownloadState:      "not_downloaded",
+		DownloadState:      DownloadNotStarted,
 	}
 
 	m := NewManager()
@@ -51,8 +51,8 @@ func TestDownloadModel_MultiShard(t *testing.T) {
 	}
 
 	final := waitDownloadDone(t, m, model.ID)
-	if final.DownloadState != "downloaded" {
-		t.Fatalf("state = %q (error %q), want downloaded", final.DownloadState, final.DownloadError)
+	if final.DownloadState != Downloaded {
+		t.Fatalf("state = %s (error %q), want downloaded", final.DownloadState, final.DownloadError)
 	}
 	if final.DownloadedBytes != total {
 		t.Errorf("DownloadedBytes = %d, want %d (cumulative across shards)", final.DownloadedBytes, total)
@@ -95,7 +95,7 @@ func TestDownloadModel_SingleFileStillWorks(t *testing.T) {
 		Path:               filepath.Join(dir, "model.gguf"),
 		DownloadURL:        srv.URL + "/model.gguf",
 		DownloadTotalBytes: int64(len(body)),
-		DownloadState:      "not_downloaded",
+		DownloadState:      DownloadNotStarted,
 	}
 
 	m := NewManager()
@@ -105,8 +105,8 @@ func TestDownloadModel_SingleFileStillWorks(t *testing.T) {
 	}
 
 	final := waitDownloadDone(t, m, model.ID)
-	if final.DownloadState != "downloaded" {
-		t.Fatalf("state = %q (error %q), want downloaded", final.DownloadState, final.DownloadError)
+	if final.DownloadState != Downloaded {
+		t.Fatalf("state = %s (error %q), want downloaded", final.DownloadState, final.DownloadError)
 	}
 	if got, err := os.ReadFile(filepath.Join(dir, "model.gguf")); err != nil || !bytes.Equal(got, body) {
 		t.Fatalf("model.gguf: err %v, len %d want %d", err, len(got), len(body))
@@ -120,7 +120,7 @@ func waitDownloadDone(t *testing.T, m *InMemoryManager, id string) ModelRecord {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		rec, ok := m.download(id)
-		if ok && (rec.DownloadState == "downloaded" || rec.DownloadState == "failed" || rec.DownloadState == "cancelled") {
+		if ok && (rec.DownloadState == Downloaded || rec.DownloadState == DownloadFailed || rec.DownloadState == DownloadCancelled) {
 			return rec
 		}
 		time.Sleep(10 * time.Millisecond)

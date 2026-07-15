@@ -37,7 +37,7 @@ func TestEmbed_CallsEmbeddingsEndpoint(t *testing.T) {
 			ID:       "inst-embed",
 			Runtime:  runtimeName,
 			ModelID:  "llama_server:nomic",
-			State:    localruntime.StateRunning,
+			State:    localruntime.InstanceRunning,
 			Endpoint: server.URL,
 		}},
 	}
@@ -74,7 +74,7 @@ func TestEmbed_EmptyDataErrors(t *testing.T) {
 			ID:       "inst-embed",
 			Runtime:  runtimeName,
 			ModelID:  "m",
-			State:    localruntime.StateRunning,
+			State:    localruntime.InstanceRunning,
 			Endpoint: server.URL,
 		}},
 	}

@@ -75,7 +75,7 @@ func TestCatalogModelsShape(t *testing.T) {
 	if !m4b.SupportsTools {
 		t.Error("SupportsTools should be true for Qwen3")
 	}
-	if m4b.DownloadState != "not_downloaded" {
-		t.Errorf("DownloadState = %q, want not_downloaded (nothing on disk)", m4b.DownloadState)
+	if m4b.DownloadState != localruntime.DownloadNotStarted {
+		t.Errorf("DownloadState = %s, want not_downloaded (nothing on disk)", m4b.DownloadState)
 	}
 }

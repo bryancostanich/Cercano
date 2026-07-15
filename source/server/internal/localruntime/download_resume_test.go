@@ -52,7 +52,7 @@ func newResumeTestManager(url, target string, total int64) *InMemoryManager {
 			Source:             "catalog",
 			Path:               target,
 			Format:             "gguf",
-			DownloadState:      "not_downloaded",
+			DownloadState:      DownloadNotStarted,
 			DownloadURL:        url,
 			DownloadTotalBytes: total,
 			SizeBytes:          total,
@@ -62,7 +62,7 @@ func newResumeTestManager(url, target string, total int64) *InMemoryManager {
 	return manager
 }
 
-func waitForState(t *testing.T, m *InMemoryManager, id, want string) ModelRecord {
+func waitForState(t *testing.T, m *InMemoryManager, id string, want DownloadState) ModelRecord {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -95,7 +95,7 @@ func TestDownloadResumesFromPartial(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("DownloadModel: %v", err)
 	}
-	waitForState(t, manager, "catalog:resume-model", "downloaded")
+	waitForState(t, manager, "catalog:resume-model", Downloaded)
 
 	if server.lastRange != "bytes=10-" {
 		t.Errorf("Range header = %q, want bytes=10-", server.lastRange)
@@ -129,7 +129,7 @@ func TestDownloadFailureKeepsPartial(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("DownloadModel: %v", err)
 	}
-	failed := waitForState(t, manager, "catalog:resume-model", "failed")
+	failed := waitForState(t, manager, "catalog:resume-model", DownloadFailed)
 	if failed.DownloadError == "" {
 		t.Error("expected DownloadError to be set")
 	}

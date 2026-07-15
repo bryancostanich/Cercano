@@ -91,10 +91,10 @@ func (p *Provider) catalogModels() []localruntime.ModelRecord {
 			// Directory-loaded: mistral.rs is pointed at the model dir.
 			loadTarget = modelSub
 		}
-		state := "not_downloaded"
+		state := localruntime.DownloadNotStarted
 		var modified time.Time
 		if allFilesPresent(modelSub, urls) {
-			state = "downloaded"
+			state = localruntime.Downloaded
 			if info, statErr := os.Stat(primary); statErr == nil {
 				modified = info.ModTime()
 			}
@@ -113,7 +113,7 @@ func (p *Provider) catalogModels() []localruntime.ModelRecord {
 			DownloadState:      state,
 			DownloadURLs:       urls,
 			DownloadTotalBytes: m.SizeBytes,
-			RuntimeState:       localruntime.StateStopped,
+			RuntimeState:       localruntime.InstanceStopped,
 			SupportsChat:       true,
 			SupportsTools:      m.SupportsTools,
 		})

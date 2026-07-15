@@ -37,7 +37,7 @@ func TestLLMProviderChat(t *testing.T) {
 			ID:       "inst-chat",
 			Runtime:  runtimeName,
 			ModelID:  "mistralrs:phi4",
-			State:    localruntime.StateRunning,
+			State:    localruntime.InstanceRunning,
 			Endpoint: server.URL,
 		}},
 	}

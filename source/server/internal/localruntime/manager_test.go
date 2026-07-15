@@ -47,14 +47,14 @@ func (f *fakeProvider) Start(_ context.Context, req StartRequest, sink LogSink) 
 		ID:      f.startedID,
 		Runtime: f.name,
 		ModelID: req.ModelID,
-		State:   StateRunning,
+		State:   InstanceRunning,
 	}, nil
 }
 
 func (f *fakeProvider) Stop(context.Context, string) error { return nil }
 
 func (f *fakeProvider) Probe(context.Context, string) (*InstanceHealth, error) {
-	return &InstanceHealth{State: StateHealthy}, nil
+	return &InstanceHealth{State: InstanceHealthy}, nil
 }
 
 func TestInMemoryManagerStatusAggregatesProvidersEndpointsAndLogs(t *testing.T) {
@@ -62,7 +62,7 @@ func TestInMemoryManagerStatusAggregatesProvidersEndpointsAndLogs(t *testing.T) 
 		ID:          "ollama",
 		Kind:        "ollama",
 		DisplayName: "Ollama",
-		State:       StateUnknown,
+		State:       EndpointStateUnknown,
 	}}))
 	manager.RegisterProvider(&fakeProvider{
 		name: "llama_server",
@@ -105,7 +105,7 @@ func TestInMemoryManagerStartStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start returned error: %v", err)
 	}
-	if instance.State != StateRunning {
+	if instance.State != InstanceRunning {
 		t.Fatalf("expected running instance, got %#v", instance)
 	}
 
@@ -116,7 +116,7 @@ func TestInMemoryManagerStartStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Instances returned error: %v", err)
 	}
-	if len(instances) != 1 || instances[0].State != StateStopped {
+	if len(instances) != 1 || instances[0].State != InstanceStopped {
 		t.Fatalf("expected stopped instance, got %#v", instances)
 	}
 }
@@ -140,7 +140,7 @@ func TestInMemoryManagerDownloadModelTracksProgressAndWritesFile(t *testing.T) {
 			Source:             "catalog",
 			Path:               target,
 			Format:             "gguf",
-			DownloadState:      "not_downloaded",
+			DownloadState:      DownloadNotStarted,
 			DownloadURL:        server.URL,
 			DownloadTotalBytes: int64(len(body)),
 			SizeBytes:          int64(len(body)),
@@ -155,7 +155,7 @@ func TestInMemoryManagerDownloadModelTracksProgressAndWritesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DownloadModel returned error: %v", err)
 	}
-	if model.DownloadState != "downloading" {
+	if model.DownloadState != Downloading {
 		t.Fatalf("expected downloading model, got %#v", model)
 	}
 
@@ -166,13 +166,13 @@ func TestInMemoryManagerDownloadModelTracksProgressAndWritesFile(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Status returned error: %v", err)
 		}
-		if got, ok := findModelRecord(status.Models, "catalog:model"); ok && got.DownloadState == "downloaded" {
+		if got, ok := findModelRecord(status.Models, "catalog:model"); ok && got.DownloadState == Downloaded {
 			downloaded = got
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if downloaded.DownloadState != "downloaded" {
+	if downloaded.DownloadState != Downloaded {
 		t.Fatalf("model did not finish downloading: %#v", downloaded)
 	}
 	data, err := os.ReadFile(target)
@@ -212,7 +212,7 @@ func TestInMemoryManagerCancelDownloadStopsActiveJob(t *testing.T) {
 			Source:             "catalog",
 			Path:               target,
 			Format:             "gguf",
-			DownloadState:      "not_downloaded",
+			DownloadState:      DownloadNotStarted,
 			DownloadURL:        server.URL,
 			DownloadTotalBytes: 1024,
 			SizeBytes:          1024,
@@ -232,7 +232,7 @@ func TestInMemoryManagerCancelDownloadStopsActiveJob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CancelDownload returned error: %v", err)
 	}
-	if model.DownloadState != "cancelled" {
+	if model.DownloadState != DownloadCancelled {
 		t.Fatalf("expected cancelled model, got %#v", model)
 	}
 	select {
@@ -257,7 +257,7 @@ func TestInMemoryManagerDeleteModelRemovesDownloadedFile(t *testing.T) {
 			Source:             "catalog",
 			Path:               target,
 			Format:             "gguf",
-			DownloadState:      "downloaded",
+			DownloadState:      Downloaded,
 			DownloadURL:        "https://example.test/model.gguf",
 			DownloadTotalBytes: 10,
 			SizeBytes:          10,
@@ -279,7 +279,7 @@ func TestInMemoryManagerDeleteModelRemovesDownloadedFile(t *testing.T) {
 	if !ok {
 		t.Fatal("expected model in status")
 	}
-	if model.DownloadState != "not_downloaded" || model.DownloadedBytes != 0 {
+	if model.DownloadState != DownloadNotStarted || model.DownloadedBytes != 0 {
 		t.Fatalf("expected not_downloaded model after delete, got %#v", model)
 	}
 }

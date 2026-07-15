@@ -187,7 +187,7 @@ func TestStartProcess_RegistersAndUnregistersPID(t *testing.T) {
 	}
 	p.running["inst"] = &managedInstance{
 		model:  localruntime.ModelRecord{Path: "/models/fake.gguf"},
-		record: localruntime.InstanceRecord{ID: "inst", State: localruntime.StateStarting},
+		record: localruntime.InstanceRecord{ID: "inst", State: localruntime.InstanceStarting},
 	}
 
 	// /bin/sleep rejects the llama-server flags and exits immediately —

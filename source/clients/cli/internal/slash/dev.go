@@ -84,7 +84,9 @@ func DevKickoff(repo string) string {
 
 1. docs/features/cli/README.md — the CLI track: architecture, design principles, what's built, deviations from plan, and outstanding tasks.
 2. docs/agent/README.md — the standalone agent: provider layer, tool loop, permission gating, persistence.
-3. docs/agent/self-dev.md — how to build and test both modules, and how to inspect your own logs and databases.
+3. docs/agent/self-dev.md — how to build and test both modules, how to inspect your own logs and databases, and — read this part carefully — how to delegate recon work to open models instead of burning frontier tokens on it.
+
+One rule that governs how you work here: Cercano's whole reason to exist is keeping frontier tokens for frontier-grade reasoning and pushing everything else onto local (open) models. Do NOT grind through piles of Grep/Read/Glob yourself to understand how code works — that is exactly the work an open model does fine. Delegate it with the native 'dispatch' tool (it is a first-class agent tool here, not "just an MCP skill"), giving a concrete intent like "trace how model reloading works and return the code path, snippets, and file:line locations" plus a read-only tool grant. The self-dev doc's "Delegate to open models" section explains the two axes (how much brain the task needs; locus decides where that runs) — internalize it.
 
 When you've read them, give a two-or-three-sentence summary of the current state and stop — the user will direct the work from there.`, repo)
 }

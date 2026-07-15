@@ -90,6 +90,49 @@ func TestAssistantMarkdown_FirstHeadingHasNoLeadingBlank(t *testing.T) {
 	}
 }
 
+func TestAssistantMarkdown_BlankLineAfterHeadings(t *testing.T) {
+	cv := newMdChatView()
+	e := &Entry{Role: RoleAssistant, Content: "# Title\n\nbody after title\n\n## Section\n\nbody after section\n"}
+	vis := plain(cv.renderAssistantMarkdown(e, 60))
+
+	// Each heading must be separated from the paragraph it introduces by a
+	// blank line — SplitBlocks makes the heading its own block, so without an
+	// explicit trailing blank the body would sit on the very next line.
+	for _, tc := range []struct{ heading, body string }{
+		{"Title", "body after title"},
+		{"Section", "body after section"},
+	} {
+		hi := strings.Index(vis, tc.heading)
+		bi := strings.Index(vis, tc.body)
+		if hi < 0 || bi < 0 || bi <= hi {
+			t.Fatalf("heading %q / body %q not both present in order: %q", tc.heading, tc.body, vis)
+		}
+		// The span between the end of the heading text and the start of the
+		// body must contain a blank line (two consecutive newlines).
+		between := vis[hi:bi]
+		if !strings.Contains(between, "\n\n") {
+			t.Fatalf("expected a blank line after heading %q before %q: %q", tc.heading, tc.body, vis)
+		}
+	}
+}
+
+func TestAssistantMarkdown_FinalHeadingHasNoTrailingBlank(t *testing.T) {
+	cv := newMdChatView()
+	e := &Entry{Role: RoleAssistant, Content: "intro\n\n## Trailing Heading\n"}
+	vis := plain(cv.renderAssistantMarkdown(e, 60))
+	// A heading as the last committed block must not leave the reply ending on
+	// a blank line — the trailing breathing-room newline is trimmed when no
+	// body (or streaming tail) follows.
+	if strings.HasSuffix(vis, "\n\n") || strings.HasSuffix(vis, "\n") && strings.TrimSpace(lastLine(vis)) == "" {
+		t.Fatalf("final heading should not end on a blank line: %q", vis)
+	}
+}
+
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	return lines[len(lines)-1]
+}
+
 func TestAssistantMarkdown_CodeBlockHasLabeledRules(t *testing.T) {
 	cv := newMdChatView()
 	e := &Entry{Role: RoleAssistant, Content: "intro\n\n```go\nx := 1\n```\n\nouttro\n"}

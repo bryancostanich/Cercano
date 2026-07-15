@@ -213,10 +213,19 @@ func (c *chatView) committedPrefix(e *Entry, blocks []render.MdBlock, textW int)
 	var parts []string
 	for _, b := range blocks {
 		s := c.renderMdBlock(b, textW)
-		// A blank line before a heading gives it breathing room — but not
-		// when the heading is the very first thing in the reply.
-		if len(parts) > 0 && isHeadingBlock(b) {
-			s = "\n" + s
+		if isHeadingBlock(b) {
+			// A blank line before a heading gives it breathing room — but not
+			// when the heading is the very first thing in the reply.
+			if len(parts) > 0 {
+				s = "\n" + s
+			}
+			// And a blank line after it, so the heading isn't glued to the
+			// paragraph it introduces. SplitBlocks makes the heading its own
+			// block, so parts are joined by a single "\n" and the following
+			// body would otherwise sit on the very next line. A trailing blank
+			// left dangling at the very end of the reply is trimmed by the
+			// caller (renderAssistantMarkdown) when no streaming tail follows.
+			s += "\n"
 		}
 		parts = append(parts, s)
 	}

@@ -57,6 +57,19 @@ type workerRunner struct {
 	perms   permissions.Broker
 	secrets secrets.Store
 
+	// srcMu guards the per-profile token-source caches below. Reusing one
+	// Source per profile is what makes the sources' single-flight refresh
+	// actually apply: a fresh Source per credential request gives each
+	// concurrent caller its own mutex, and Anthropic/OpenAI refresh tokens
+	// rotate (single-use), so racing refreshes invalidate each other.
+	srcMu    sync.Mutex
+	anthSrcs map[string]*anthropicauth.Source
+	chatSrcs map[string]*chatgptauth.Source
+	// anthFlow/chatFlow configure the token endpoints for the cached sources.
+	// The zero value targets the real endpoints; tests override them.
+	anthFlow anthropicauth.Flow
+	chatFlow chatgptauth.Flow
+
 	// openProvider returns the host's current open (local-runtime) llm.Provider,
 	// used to answer a worker's OpenInferenceRequest. A factory (not a value) so
 	// a host-side runtime/config swap is honored per request. nil on
@@ -441,8 +454,7 @@ func (w *workerRunner) resolveCredential(ctx context.Context, cfg pkgcfg.Config,
 
 	// ChatGPT subscription: call the token source to get a fresh access token.
 	if prof.Flavor == cloudfactory.FlavorResponses && prof.Route == cloudfactory.RouteChatGPT {
-		src := chatgptauth.NewSource(st, profileName, chatgptauth.Flow{})
-		access, accountID, err := src.Token(ctx)
+		access, accountID, err := w.chatgptSource(profileName).Token(ctx)
 		if err != nil {
 			return "", "", fmt.Errorf("credential: chatgpt token: %w", err)
 		}
@@ -452,8 +464,7 @@ func (w *workerRunner) resolveCredential(ctx context.Context, cfg pkgcfg.Config,
 	// Claude subscription: same shape — call the token source for a fresh
 	// bearer (no account id on the Anthropic path).
 	if prof.Flavor == cloudfactory.FlavorMessages && prof.Route == cloudfactory.RouteSubscription {
-		src := anthropicauth.NewSource(st, profileName, anthropicauth.Flow{})
-		access, err := src.Token(ctx)
+		access, err := w.anthropicSource(profileName).Token(ctx)
 		if err != nil {
 			return "", "", fmt.Errorf("credential: claude subscription token: %w", err)
 		}
@@ -466,6 +477,39 @@ func (w *workerRunner) resolveCredential(ctx context.Context, cfg pkgcfg.Config,
 		return "", "", fmt.Errorf("credential: get key for profile %q: %w", profileName, err)
 	}
 	return key, "", nil
+}
+
+// anthropicSource returns the cached Anthropic token source for a profile,
+// creating it on first use. Reusing one Source per profile keeps its
+// single-flight refresh effective across concurrent credential requests.
+func (w *workerRunner) anthropicSource(profile string) *anthropicauth.Source {
+	w.srcMu.Lock()
+	defer w.srcMu.Unlock()
+	if s, ok := w.anthSrcs[profile]; ok {
+		return s
+	}
+	if w.anthSrcs == nil {
+		w.anthSrcs = make(map[string]*anthropicauth.Source)
+	}
+	s := anthropicauth.NewSource(w.secrets, profile, w.anthFlow)
+	w.anthSrcs[profile] = s
+	return s
+}
+
+// chatgptSource returns the cached ChatGPT token source for a profile,
+// creating it on first use. See anthropicSource for why the instance is reused.
+func (w *workerRunner) chatgptSource(profile string) *chatgptauth.Source {
+	w.srcMu.Lock()
+	defer w.srcMu.Unlock()
+	if s, ok := w.chatSrcs[profile]; ok {
+		return s
+	}
+	if w.chatSrcs == nil {
+		w.chatSrcs = make(map[string]*chatgptauth.Source)
+	}
+	s := chatgptauth.NewSource(w.secrets, profile, w.chatFlow)
+	w.chatSrcs[profile] = s
+	return s
 }
 
 // testDialUnix returns a dialFunc that dials a bufconn listener via the given

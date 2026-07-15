@@ -275,13 +275,17 @@ func openRuntimeSwitchCmd(ag *agentclient.Client, target string) tea.Cmd {
 	}
 	return func() tea.Msg {
 		if target == "llama_server" {
+			// llama_server needs its binary + a model ready. If either is
+			// missing, open the install modal and DON'T persist the switch —
+			// the modal's success path dispatches UpdateConfig once the
+			// runtime is actually usable. If it IS ready, fall through and
+			// persist the switch like any other runtime.
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			st, err := ag.GetOpenRuntimeStatus(ctx, "llama_server")
 			cancel()
 			if err == nil && st != nil && !st.Ok {
 				return openOpenRuntimeInstallModalMsg{status: *st, pending: "llama_server"}
 			}
-			return nil
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

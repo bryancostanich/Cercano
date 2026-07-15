@@ -122,6 +122,35 @@ func TestInstall_CancelledContextKillsSubprocessAndReturnsCtxErr(t *testing.T) {
 	}
 }
 
+func TestInstall_CancelKillsSurvivingBackgroundChild(t *testing.T) {
+	// The leader shell backgrounds a child that inherits the stdout/stderr
+	// pipes, then blocks. exec.CommandContext's default cancel kills only the
+	// leader (cmd.Process); the backgrounded child survives and keeps the pipe's
+	// write end open, so Install's drain never sees EOF. Install must return
+	// promptly with context.Canceled — which requires killing the whole process
+	// group, not just the leader. Portable repro of the Linux CI hang (on macOS
+	// a bare `sh -c "sleep N"` execs sleep in place, hiding the grandchild).
+	withInstallCommand(t, shScript("sleep 30 & echo READY; sleep 30"))
+
+	sink, _, _ := collectLines()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Install(ctx, sink)
+	}()
+	time.Sleep(100 * time.Millisecond) // let the shell start and background its child
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("expected context.Canceled, got %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Install did not return after cancel (a surviving child held the output pipe open)")
+	}
+}
+
 func TestInstall_UnsupportedPlatformReturnsErrUnsupported(t *testing.T) {
 	withInstallCommand(t, func(ctx context.Context) (*exec.Cmd, error) {
 		return nil, ErrUnsupported

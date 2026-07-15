@@ -282,10 +282,21 @@ func (m *InMemoryManager) DownloadModel(ctx context.Context, req DownloadRequest
 	model.DownloadTotalBytes = total
 	downloadCtx, cancel := context.WithCancel(context.Background())
 	job := &downloadJob{cancel: cancel}
-	// Register the cancel job first so a racing CancelDownload can find it, then
-	// drive the guarded transition into Downloading (which validates the move
-	// and fires observers).
+	// Claim the download slot atomically. The pre-check at the top of the
+	// function races the slow findDownloadModel gap (it may run Inventory), so
+	// re-check under the lock, keyed by the resolved model.ID: whoever registers
+	// the job first wins; a concurrent caller finds the existing "downloading"
+	// record and spawns nothing, so two goroutines never write the same .part
+	// file or clobber each other's cancelable job. We register the cancel job
+	// under this same lock so a racing CancelDownload can find it, then drive
+	// the guarded transition into Downloading (the sole writer of m.downloads,
+	// which validates the move and fires observers).
 	m.mu.Lock()
+	if existing, ok := m.downloads[model.ID]; ok && existing.DownloadState == Downloading {
+		m.mu.Unlock()
+		cancel()
+		return &existing, nil
+	}
 	m.downloadJobs[model.ID] = job
 	m.mu.Unlock()
 	model = m.setDownloadState(model, Downloading, "")

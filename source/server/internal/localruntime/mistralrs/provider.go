@@ -261,8 +261,8 @@ func (p *Provider) Probe(ctx context.Context, instanceID string) (*localruntime.
 		return nil, fmt.Errorf("mistral.rs instance %q not found", instanceID)
 	}
 	start := time.Now()
-	// The /health path is pinned to the mistral.rs v0.9.0 README and should
-	// be reconfirmed against the binary during the Phase 1 integration test;
+	// GET /health is a real route in v0.9.0 (verified in
+	// mistralrs-server-core/src/route_registry.rs: HEALTH_ROUTE = "/health");
 	// a 2xx on /v1/models is accepted as a fallback readiness signal.
 	err := p.probeReady(ctx, instance.record.Endpoint)
 	latency := time.Since(start).Milliseconds()
@@ -402,9 +402,11 @@ func (p *Provider) startProcess(instanceID, binary string, sink localruntime.Log
 // argsFor builds the mistral.rs command line. The v0.9.0 unified CLI serves a
 // model with `mistralrs serve -m <path> --port <port> --no-ui` (NOT the old
 // plain/gguf/uqff subcommands). --isq applies in-situ quantization when
-// configured. These exact flags are pinned to the v0.9.0 README and should be
-// reconfirmed against the binary's `serve --help` during the Phase 1
-// integration test.
+// configured. Every flag below is verified against the v0.9.0 source tree
+// (mistralrs-cli/src/args): `-m`/`--port`/`--no-ui` and `--isq` sit at the
+// `serve` level via DefaultModelOptions+ServerOptions; model format is
+// auto-detected (the default `Auto` ModelType), so a UQFF/safetensors dir or a
+// single GGUF file all load through the same `-m` target.
 func (p *Provider) argsFor(model localruntime.ModelRecord, port int) []string {
 	// mistral.rs is pointed at the model directory for a multi-file
 	// safetensors/UQFF model (LoadTarget), or the file itself for a single-file
@@ -419,13 +421,27 @@ func (p *Provider) argsFor(model localruntime.ModelRecord, port int) []string {
 		"--port", strconv.Itoa(port),
 		"--no-ui",
 	}
+	// A prebuilt UQFF repo ships a `residual.safetensors` plus one or more
+	// `<quant>-N.uqff` shards. Pointing `-m` at the directory alone is NOT
+	// enough: without --from-uqff, mistral.rs treats it as a plain safetensors
+	// model, never loads the .uqff artifact, and dies with "Missing required
+	// tensor(s) ... q_proj.weight". Verified live against the v0.9.0 binary on
+	// Apple Silicon (2026-07). We pass the first `.uqff` shard's basename; the
+	// binary auto-discovers sibling shards (afq4-0.uqff -> also afq4-1.uqff),
+	// and the basename resolves inside the local `-m` directory.
+	if strings.EqualFold(model.Format, "uqff") {
+		if shard := firstUQFFShard(model.DownloadURLs); shard != "" {
+			args = append(args, "--from-uqff", shard)
+		}
+	}
 	if p.cfg.ISQ != "" {
 		args = append(args, "--isq", p.cfg.ISQ)
 	}
 	// Paged attention is the concurrency/throughput lever — OFF by default on
-	// Metal, so surface on/off explicitly. NOTE: flag spellings per mistral.rs
-	// docs; VERIFY against the real binary before relying on them (the runtime
-	// has not yet been validated live on Apple Silicon).
+	// Metal (the `auto` mode disables it there), so surface on/off explicitly.
+	// Flag names verified against v0.9.0 source (mistralrs-cli/src/args/paged_attn.rs):
+	// `--paged-attn auto|on|off` and `--pa-memory-fraction <0.0-1.0>`. We emit
+	// nothing for auto/unset so the binary keeps its own default.
 	switch strings.ToLower(strings.TrimSpace(p.cfg.PagedAttn)) {
 	case "on":
 		args = append(args, "--paged-attn", "on")
@@ -437,6 +453,23 @@ func (p *Provider) argsFor(model localruntime.ModelRecord, port int) []string {
 	}
 	args = append(args, p.cfg.ExtraArgs...)
 	return args
+}
+
+// firstUQFFShard returns the basename of the first `.uqff` file among the
+// model's download URLs (e.g. "afq4-0.uqff"), or "" if none is present. The
+// basename is what --from-uqff wants when -m points at a local directory; the
+// binary resolves it relative to that directory and auto-finds sibling shards.
+func firstUQFFShard(urls []string) string {
+	for _, u := range urls {
+		name := u
+		if i := strings.LastIndexByte(name, '/'); i >= 0 {
+			name = name[i+1:]
+		}
+		if strings.HasSuffix(strings.ToLower(name), ".uqff") {
+			return name
+		}
+	}
+	return ""
 }
 
 func (p *Provider) waitReady(ctx context.Context, instanceID, endpoint string) error {

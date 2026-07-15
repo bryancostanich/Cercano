@@ -136,6 +136,50 @@ func TestArgsForUsesLoadTargetDirectory(t *testing.T) {
 	}
 }
 
+func TestArgsForUQFFAddsFromUQFFShard(t *testing.T) {
+	provider := NewProvider(config.MistralRSConfig{Host: "127.0.0.1"})
+	// A prebuilt UQFF model: -m points at the local dir, and --from-uqff names
+	// the first shard's basename so mistral.rs actually loads the .uqff artifact
+	// (without it, the load fails with "Missing required tensor ... q_proj.weight").
+	model := provider.modelRecord("/models/qwen3-14b/residual.safetensors", fakeFileInfo{size: 42})
+	model.LoadTarget = "/models/qwen3-14b"
+	model.Format = "uqff"
+	model.DownloadURLs = []string{
+		"https://huggingface.co/mistralrs-community/Qwen3-14B-UQFF/resolve/main/residual.safetensors",
+		"https://huggingface.co/mistralrs-community/Qwen3-14B-UQFF/resolve/main/afq4-0.uqff",
+	}
+
+	got := provider.argsFor(model, 8123)
+	want := []string{
+		"serve",
+		"-m", "/models/qwen3-14b",
+		"--port", "8123",
+		"--no-ui",
+		"--from-uqff", "afq4-0.uqff",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("args mismatch:\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestArgsForSafetensorsOmitsFromUQFF(t *testing.T) {
+	provider := NewProvider(config.MistralRSConfig{Host: "127.0.0.1"})
+	// A plain safetensors model must NOT get --from-uqff; it loads via -m alone.
+	model := provider.modelRecord("/models/qwen3-4b/config.json", fakeFileInfo{size: 42})
+	model.LoadTarget = "/models/qwen3-4b"
+	model.Format = "safetensors"
+	model.DownloadURLs = []string{
+		"https://huggingface.co/Qwen/Qwen3-4B/resolve/main/model.safetensors",
+	}
+
+	got := provider.argsFor(model, 8123)
+	for _, a := range got {
+		if a == "--from-uqff" {
+			t.Fatalf("safetensors model should not include --from-uqff, got: %#v", got)
+		}
+	}
+}
+
 func TestCapabilitiesAdvertiseTools(t *testing.T) {
 	caps := NewProvider(config.MistralRSConfig{}).Capabilities()
 	if !caps.ManagedProcesses || !caps.CanStart || !caps.CanStop || !caps.CanRestart {

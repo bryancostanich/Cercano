@@ -34,19 +34,35 @@ func TestPrompt_HeightGrowsWithLinesAndCaps(t *testing.T) {
 }
 
 func TestPrompt_ShiftEnterInsertsNewline(t *testing.T) {
-	m := New(nil, false)
-	m.width = 80
-	m.height = 24
-	m.relayout()
-
-	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
-	got := next.(Model)
-
-	if got.input.Value() != "\n" {
-		t.Fatalf("shift+enter value = %q, want a single newline", got.input.Value())
+	// A Kitty-capable terminal can report Shift+Enter two ways: as a bare
+	// chord, or — because we enable ReportAssociatedText — with Text "\n"
+	// attached. The latter makes msg.String() return "\n" instead of
+	// "shift+enter", so the routing must recognize it structurally. Both forms
+	// must compose a newline, never submit.
+	forms := []struct {
+		name string
+		msg  tea.KeyPressMsg
+	}{
+		{"chord", tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift}},
+		{"associated text", tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift, Text: "\n"}},
 	}
-	if h := got.input.Height(); h != 2 {
-		t.Fatalf("height after shift+enter = %d, want 2", h)
+	for _, f := range forms {
+		t.Run(f.name, func(t *testing.T) {
+			m := New(nil, false)
+			m.width = 80
+			m.height = 24
+			m.relayout()
+
+			next, _ := m.Update(f.msg)
+			got := next.(Model)
+
+			if got.input.Value() != "\n" {
+				t.Fatalf("shift+enter (%s) value = %q, want a single newline", f.name, got.input.Value())
+			}
+			if h := got.input.Height(); h != 2 {
+				t.Fatalf("height after shift+enter (%s) = %d, want 2", f.name, h)
+			}
+		})
 	}
 }
 

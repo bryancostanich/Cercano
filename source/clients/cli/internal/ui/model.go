@@ -1264,6 +1264,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		unmodifiedArrow := msg.Key().Mod == 0
+		// Shift+Enter composes a hard newline instead of submitting. Detect it
+		// structurally (Enter code + Shift modifier) rather than by the chord
+		// string: on terminals that report associated text (we enable Kitty
+		// ReportAssociatedText), the event carries Text "\n" and msg.String()
+		// returns "\n" instead of "shift+enter", so a string-only match misses.
+		if ek := msg.Key(); ek.Code == tea.KeyEnter && ek.Mod.Contains(tea.ModShift) {
+			m.input.InsertString("\n")
+			m.relayout()
+			return m, nil
+		}
 		switch keyStr {
 		case "enter":
 			text := strings.TrimSpace(m.input.Value())
@@ -1293,12 +1303,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Reset the input back to one line (and reclaim any splash rows).
 			m.relayout()
 			return m.submit(text, images)
-		case "shift+enter":
-			// Insert a hard newline for multi-line composing; relayout so the
-			// input grows by a row (up to the cap).
-			m.input.InsertString("\n")
-			m.relayout()
-			return m, nil
 		case "up":
 			// On an empty prompt, ↑ first unstages the most-recently-queued
 			// message for editing (takes priority over history).

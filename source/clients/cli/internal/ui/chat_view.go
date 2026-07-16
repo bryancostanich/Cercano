@@ -854,14 +854,34 @@ func (c *chatView) PlainLines() []string { return c.getPlainLines() }
 // a full parse of the rendered transcript — is off the rebuild hot path.
 func (c *chatView) getPlainLines() []string {
 	if c.plainDirty {
-		styled := c.layout.flattenedLines()
-		c.plainLines = make([]string, len(styled))
-		for i, line := range styled {
-			c.plainLines[i] = ansi.Strip(line)
-		}
+		c.plainLines = c.plainLinesRange(0, c.TotalLineCount()-1)
 		c.plainDirty = false
 	}
 	return c.plainLines
+}
+
+func (c *chatView) plainLineAt(line int) string {
+	styled, ok := c.layout.lineAt(line)
+	if !ok {
+		return ""
+	}
+	return ansi.Strip(styled)
+}
+
+func (c *chatView) plainLinesRange(start, end int) []string {
+	if c.TotalLineCount() == 0 || end < start {
+		return nil
+	}
+	start = clampInt(start, 0, c.TotalLineCount()-1)
+	end = clampInt(end, 0, c.TotalLineCount()-1)
+	if end < start {
+		return nil
+	}
+	out := make([]string, 0, end-start+1)
+	for line := start; line <= end; line++ {
+		out = append(out, c.plainLineAt(line))
+	}
+	return out
 }
 
 // SetEntries rebuilds the viewport content from the provided entries and
@@ -1155,20 +1175,23 @@ func (c *chatView) renderSelectionOnLine(line string, contentLine int) string {
 
 // selectedText returns the plain-text content covered by the current selection.
 func (c *chatView) selectedText() string {
-	plainLns := c.getPlainLines()
-	if !c.selection.hasRange() || len(plainLns) == 0 {
+	if !c.selection.hasRange() || c.TotalLineCount() == 0 {
 		return ""
 	}
 	start, end := c.selection.ordered()
-	start.Line = clampInt(start.Line, 0, len(plainLns)-1)
-	end.Line = clampInt(end.Line, 0, len(plainLns)-1)
+	start.Line = clampInt(start.Line, 0, c.TotalLineCount()-1)
+	end.Line = clampInt(end.Line, 0, c.TotalLineCount()-1)
 	if beforePoint(end, start) {
 		return ""
 	}
 
-	parts := make([]string, 0, end.Line-start.Line+1)
-	for line := start.Line; line <= end.Line; line++ {
-		text := plainLns[line]
+	plainLns := c.plainLinesRange(start.Line, end.Line)
+	if len(plainLns) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(plainLns))
+	for i, text := range plainLns {
+		line := start.Line + i
 		switch {
 		case start.Line == end.Line:
 			parts = append(parts, ansi.Cut(text, start.Col, end.Col))
@@ -1202,8 +1225,8 @@ func (c *chatView) selectionPointFromLocal(localX, localY int, allowScroll bool)
 	}
 	row = clampInt(row, 0, maxInt(0, height-1))
 	line := c.YOffset() + row
-	if pl := c.getPlainLines(); len(pl) > 0 {
-		line = clampInt(line, 0, len(pl)-1)
+	if total := c.TotalLineCount(); total > 0 {
+		line = clampInt(line, 0, total-1)
 	}
 	return selectionPoint{
 		Line: line,
@@ -1302,25 +1325,7 @@ type arrowRow struct {
 // arrow also covers the line. Returns false when nothing claims the point (body
 // text to the right of the rails is left to text selection).
 func (c *chatView) arrowRowAt(line, x int) (arrowRow, bool) {
-	var full arrowRow
-	haveFull := false
-	for _, r := range c.arrowRows {
-		if r.line != line {
-			continue
-		}
-		if r.railMax > 0 {
-			if x >= r.railMin && x < r.railMax {
-				return r, true
-			}
-		} else {
-			full = r
-			haveFull = true
-		}
-	}
-	if haveFull {
-		return full, true
-	}
-	return arrowRow{}, false
+	return c.layout.arrowRowAt(line, x)
 }
 
 // ClearSelection resets the selection state.

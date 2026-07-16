@@ -90,6 +90,48 @@ func (l transcriptLayout) linesRange(top, height int) []string {
 	return out
 }
 
+func (l transcriptLayout) lineAt(line int) (string, bool) {
+	idx := l.unitIndexAtLine(line)
+	if idx < 0 {
+		return "", false
+	}
+	u := l.units[idx]
+	local := line - u.startLine
+	if local < 0 || local >= len(u.lines) {
+		return "", false
+	}
+	return u.lines[local], true
+}
+
+func (l transcriptLayout) arrowRowAt(line, x int) (arrowRow, bool) {
+	idx := l.unitIndexAtLine(line)
+	if idx < 0 {
+		return arrowRow{}, false
+	}
+	u := l.units[idx]
+	localLine := line - u.startLine
+	var full arrowRow
+	haveFull := false
+	for _, r := range u.arrowRows {
+		if r.line != localLine {
+			continue
+		}
+		r.line += u.startLine
+		if r.railMax > 0 {
+			if x >= r.railMin && x < r.railMax {
+				return r, true
+			}
+		} else {
+			full = r
+			haveFull = true
+		}
+	}
+	if haveFull {
+		return full, true
+	}
+	return arrowRow{}, false
+}
+
 func (l transcriptLayout) unitIndexAtLine(line int) int {
 	if len(l.units) == 0 || line < 0 || line >= l.totalLines {
 		return -1

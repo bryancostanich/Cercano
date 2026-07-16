@@ -19,7 +19,9 @@ func newSelectionModel(vpWidth, vpHeight int, content string, plainLns []string)
 		setChatTestContent(&cv, content)
 	}
 	if plainLns != nil {
+		setChatTestContent(&cv, strings.Join(plainLns, "\n"))
 		cv.plainLines = plainLns
+		cv.plainDirty = false
 	}
 	m := Model{}
 	m.setMainChat(cv)

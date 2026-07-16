@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"cercano/source/server/internal/agent"
+	ollamallm "cercano/source/server/internal/llm/ollama"
 	"cercano/source/server/internal/tools"
-	"cercano/source/server/internal/engine/ollama"
-	"cercano/source/server/internal/legacymodels"
 )
 
 // Use the same model as the other integration tests
-const integrationTestModelName = "qwen3-coder" 
+const integrationTestModelName = "qwen3-coder"
 
 func TestGenericGenerator_Integration_GenerateValidCode(t *testing.T) {
 	if os.Getenv("INTEGRATION_TEST") != "1" {
@@ -25,7 +25,10 @@ func TestGenericGenerator_Integration_GenerateValidCode(t *testing.T) {
 
 	// Assume Ollama is running at localhost:11434
 	// We use a known small coding model. Ensure this model is pulled in Ollama.
-	provider := legacymodels.NewOpenModelProvider(ollama.NewOllamaEngine("http://localhost:11434"), integrationTestModelName)
+	provider := agent.InferenceTurnRunner(ollamallm.NewClient(ollamallm.Config{
+		BaseURL: "http://localhost:11434",
+		Model:   integrationTestModelName,
+	}), integrationTestModelName)
 	handler := tools.NewGenericGenerator(provider)
 
 	// Input: A simple Go function
@@ -57,11 +60,11 @@ func Add(a, b int) int {
 	// Usually the prompt asks for "just the Go code", which might include package declaration.
 	// If the model creates a snippet without package, ParseFile might complain if we don't handle it.
 	// However, usually tests start with `package ...`.
-	
+
 	// Clean up any markdown code blocks if the model ignored instructions (common with smaller models)
 	cleanedCode := cleanMarkdown(generatedCode)
-	
-f, err := parser.ParseFile(fset, "", cleanedCode, parser.ParseComments)
+
+	f, err := parser.ParseFile(fset, "", cleanedCode, parser.ParseComments)
 	if err != nil {
 		t.Fatalf("Generated code failed to parse as Go: %v\nCode:\n%s", err, cleanedCode)
 	}

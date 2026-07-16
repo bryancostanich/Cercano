@@ -36,7 +36,7 @@ func (f *fakeLLM) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.Stre
 }
 
 func TestLLMModelProviderProcess(t *testing.T) {
-	mp := NewInferenceTurnRunner(&fakeLLM{name: "openai"}, "gpt-5")
+	mp := InferenceTurnRunner(&fakeLLM{name: "openai"}, "gpt-5")
 	if mp.Name() != "openai" {
 		t.Errorf("name = %q", mp.Name())
 	}
@@ -52,7 +52,7 @@ func TestLLMModelProviderProcessSetsMaxTokens(t *testing.T) {
 	// and no error — the silent-empty-output trap that gutted compaction
 	// summaries. The one-shot adapter must always send a real budget.
 	fake := &fakeLLM{name: "anthropic"}
-	mp := NewInferenceTurnRunner(fake, "claude-opus-4-8")
+	mp := InferenceTurnRunner(fake, "claude-opus-4-8")
 	if _, err := mp.Process(context.Background(), &Request{Input: "hi"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestLLMModelProviderProcessThreadsTemperature(t *testing.T) {
 	// a pointer end-to-end so 0 ("greedy") is distinguishable from unset
 	// ("provider default").
 	fake := &fakeLLM{name: "anthropic"}
-	mp := NewInferenceTurnRunner(fake, "claude-opus-4-8")
+	mp := InferenceTurnRunner(fake, "claude-opus-4-8")
 
 	zero := 0.0
 	if _, err := mp.Process(context.Background(), &Request{Input: "hi", Temperature: &zero}); err != nil {
@@ -92,7 +92,7 @@ func TestLLMModelProviderProcessThreadsTierAndAttributesServedModel(t *testing.T
 	// the model that actually served (on failover, the backup's model — not
 	// the requested one).
 	fake := &fakeLLM{name: "anthropic", servedModel: "gpt-5.4-mini"}
-	mp := NewInferenceTurnRunner(fake, "claude-opus-4-8")
+	mp := InferenceTurnRunner(fake, "claude-opus-4-8")
 	resp, err := mp.Process(context.Background(), &Request{Input: "hi", ModelOverride: "claude-haiku-4-5", Tier: "fast_light_text"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -117,7 +117,7 @@ func TestLLMModelProviderProcessThreadsTierAndAttributesServedModel(t *testing.T
 
 func TestLLMModelProviderProcessModelOverride(t *testing.T) {
 	fake := &fakeLLM{name: "openai"}
-	mp := NewInferenceTurnRunner(fake, "gpt-5")
+	mp := InferenceTurnRunner(fake, "gpt-5")
 	resp, err := mp.Process(context.Background(), &Request{Input: "hi", ModelOverride: "gpt-override"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

@@ -10,8 +10,9 @@ import (
 	"strings"
 	"sync"
 
-	"cercano/source/server/internal/engine"
 	"gopkg.in/yaml.v3"
+
+	"cercano/source/server/internal/engine"
 )
 
 //go:embed prototypes.yaml
@@ -126,7 +127,7 @@ type RoutingMetadata struct {
 // Provider: a TurnRunner is about *routing and running a turn*, an
 // inference.Provider is about *running one inference call*. A TurnRunner is
 // produced from an inference.Provider by the inferenceTurnRunner bridge
-// (NewInferenceTurnRunner) — that adapter is the one legitimate seam between the
+// (InferenceTurnRunner) — that adapter is the one legitimate seam between the
 // two layers, not a leftover to be deleted. Consumers that route (SmartRouter,
 // LazyRouter, ADKCoordinator, cloud-degrade) speak TurnRunner; the inference
 // seam stays free of routing concerns.
@@ -192,6 +193,16 @@ func (sr *SmartRouter) SetCloudProvider(p TurnRunner) {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 	sr.ModelProviders["CloudModel"] = p
+}
+
+// SetOpenProvider replaces the open (local) model provider at runtime
+// (thread-safe). Symmetric with SetCloudProvider: on a runtime/model switch the
+// service rebuilds the open inference provider and re-sets the whole TurnRunner
+// here, rather than mutating a long-lived provider in place.
+func (sr *SmartRouter) SetOpenProvider(p TurnRunner) {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	sr.ModelProviders["OpenModel"] = p
 }
 
 // NewSmartRouter creates a new SmartRouter by loading prototypes from a file path.

@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/url"
@@ -37,7 +36,6 @@ import (
 	runtimessvc "cercano/source/server/internal/hostsvc/runtimes"
 	toolssvc "cercano/source/server/internal/hostsvc/tools"
 	"cercano/source/server/internal/inference"
-	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llamacompat"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/localruntime"
@@ -65,6 +63,7 @@ import (
 // needs to propagate a runtime cloud-provider swap. Both *agent.SmartRouter
 // and *agent.LazyRouter satisfy this.
 type RouterCloudUpdater interface {
+	SetOpenProvider(p agent.TurnRunner)
 	SetCloudProvider(p agent.TurnRunner)
 	Tiers() agent.Tiers
 }
@@ -613,44 +612,6 @@ func (s *Server) SetRuntimeManager(m localruntime.Manager) {
 	if m != nil {
 		m.RegisterObserver(s)
 	}
-	// Route the legacy open-model provider (compaction/recap/research) through
-	// the engine-agnostic lifecycle so it resolves its configured model to a
-	// present on-disk model — or degrades with a clear error — instead of
-	// handing the engine an unresolved name that fails at load. This is the
-	// fix for the compaction "model not downloaded" hard-fail.
-	s.installLegacyOpenResolver(m)
-}
-
-// installLegacyOpenResolver wires the OpenModelProvider's resolver hook to the
-// runtime manager's ResolveOpenModel, so the legacy text path canonicalizes
-// model names through the same lifecycle as interactive chat. No-op if either
-// the manager or the legacy provider is absent.
-func (s *Server) installLegacyOpenResolver(m localruntime.Manager) {
-	if m == nil || s.providerSvc == nil {
-		return
-	}
-	legacy := s.providerSvc.OpenLegacy()
-	if legacy == nil {
-		return
-	}
-	legacy.SetResolver(func(ctx context.Context, requested string) (string, error) {
-		// Resolve against the runtime the legacy engine serves. The legacy path
-		// is Ollama-backed, and ollama manages its own model presence, so we
-		// resolve against "ollama" inventory; a present record returns its
-		// canonical ID as the serve name, an absent one degrades with a clear
-		// error rather than a silent engine load failure.
-		runtime := "ollama"
-		rec, err := m.ResolveOpenModel(ctx, runtime, requested)
-		if err != nil {
-			if errors.Is(err, localruntime.ErrModelNotPresent) {
-				// Known model, not on disk: kick a best-effort ensure so a
-				// retry can succeed, then degrade this call.
-				_ = m.EnsureModelsPresent(ctx, runtime, []string{requested})
-			}
-			return "", err
-		}
-		return rec.ID, nil
-	})
 }
 
 // SetCatalogManager attaches the online-catalog manager so
@@ -681,7 +642,7 @@ func (s *Server) SetCompactionGenerator(g *compactiongen.Generator) {
 }
 
 // NewServer creates a new Agent gRPC server.
-func NewServer(a *agent.Agent, openProvider *legacymodels.OpenModelProvider, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
+func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
 	cfgService := cfgsvc.New("", config.Config{}, nil)
 	rtSvc := runtimessvc.New(cfgService)
 	s := &Server{
@@ -691,7 +652,7 @@ func NewServer(a *agent.Agent, openProvider *legacymodels.OpenModelProvider, rou
 		runtimesSvc: rtSvc,
 		turnBroker:  broker.New(),
 	}
-	s.providerSvc = providers.New(cfgService, openProvider, router, coordinator, cloudFactory, registry, nil)
+	s.providerSvc = providers.New(cfgService, router, coordinator, cloudFactory, registry, nil)
 	// Construct the persistence service. It wraps the agent for store access;
 	// the agent itself is NOT owned by this service. The func-value collaborators
 	// read live state from providerSvc at call time.
@@ -701,7 +662,12 @@ func NewServer(a *agent.Agent, openProvider *legacymodels.OpenModelProvider, rou
 		func() string { return s.providerSvc.PrimaryModel() },
 		func() string { return s.activeCloudModel() },
 		func() *dispatch.Engine { return s.toolSvc.Engine() },
-		func() *legacymodels.OpenModelProvider { return s.providerSvc.OpenLegacy() },
+		func() agent.TurnRunner {
+			if r := s.providerSvc.Router(); r != nil {
+				return r.Tiers().Open
+			}
+			return nil
+		},
 		func() inference.Provider { return s.providerSvc.Cloud() },
 		func() string { return s.activeCloudModel() },
 	)
@@ -838,8 +804,8 @@ func (s *Server) LocusMode() string {
 // UpdateConfig implements proto.AgentServer — updates runtime config without restart.
 //
 // Split: the config service owns parse→validate→mutate→persist; the
-// provider/runtime-facing block (health-monitor restart, openProvider.SetEngine,
-// openProviderFactory) stays on the front door and runs AFTER cfgSvc is
+// provider/runtime-facing block (health-monitor restart, open inference
+// provider rebuild + open TurnRunner reset) stays on the front door and runs AFTER cfgSvc is
 // updated. Config mutation and provider reconfiguration are now sequential
 // (previously atomic under one cfgMu span) — a concurrent reader can momentarily
 // observe new config with old provider wiring (documented trade-off).

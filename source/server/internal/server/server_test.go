@@ -14,7 +14,6 @@ import (
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/engine/ollama"
-	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/localruntime"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/protocols"
@@ -71,7 +70,7 @@ func init() {
 	s := grpc.NewServer()
 	coordinator := &mockCoordinator{}
 	orchestrator := agent.NewAgent(&mockRouter{}, coordinator)
-	proto.RegisterAgentServer(s, NewServer(orchestrator, nil, nil, nil, nil, nil))
+	proto.RegisterAgentServer(s, NewServer(orchestrator, nil, nil, nil, nil))
 	go func() {
 		if err := s.Serve(lis); err != nil {
 			log.Fatalf("Server exited with error: %v", err)
@@ -120,7 +119,7 @@ func TestListModels(t *testing.T) {
 	eng := ollama.NewOllamaEngine(mockOllama.URL)
 	registry.RegisterEngine(eng)
 
-	srv := NewServer(nil, nil, nil, nil, nil, registry)
+	srv := NewServer(nil, nil, nil, nil, registry)
 
 	resp, err := srv.ListModels(context.Background(), &proto.ListModelsRequest{})
 	if err != nil {
@@ -132,7 +131,7 @@ func TestListModels(t *testing.T) {
 }
 
 func TestGetRuntimeStatus_IncludesConfiguredEndpoints(t *testing.T) {
-	srv := NewServer(nil, nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil)
 	srv.SetRuntimeManager(localruntime.NewManager())
 	srv.SetConfigPersistence("", config.Config{
 		OllamaURL:      "http://mac-studio.local:11434",
@@ -164,7 +163,7 @@ func TestMapResponse_IncludesEndpoint(t *testing.T) {
 	registry.RegisterEngine(eng)
 
 	eng.SetBaseURL("http://remote:11434")
-	srv := NewServer(nil, nil, nil, nil, nil, registry)
+	srv := NewServer(nil, nil, nil, nil, registry)
 
 	agentResp := &agent.Response{
 		Output: "test output",
@@ -199,9 +198,7 @@ func TestUpdateConfig_OllamaURL(t *testing.T) {
 	registry := engine.NewEngineRegistry()
 	eng := ollama.NewOllamaEngine("http://localhost:11434")
 	registry.RegisterEngine(eng)
-	provider := legacymodels.NewOpenModelProvider(eng, "test-model")
-
-	srv := NewServer(nil, provider, nil, nil, nil, registry)
+	srv := NewServer(nil, nil, nil, nil, registry)
 
 	// Set a valid remote URL
 	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{
@@ -225,7 +222,7 @@ func TestUpdateConfig_OllamaURL_InvalidURL(t *testing.T) {
 	eng := ollama.NewOllamaEngine("http://localhost:11434")
 	registry.RegisterEngine(eng)
 
-	srv := NewServer(nil, nil, nil, nil, nil, registry)
+	srv := NewServer(nil, nil, nil, nil, registry)
 
 	// Set an invalid URL — should fail validation
 	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{
@@ -244,7 +241,7 @@ func TestUpdateConfig_OllamaURL_InvalidURL(t *testing.T) {
 }
 
 func TestListSkills(t *testing.T) {
-	srv := NewServer(nil, nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil)
 
 	resp, err := srv.ListSkills(context.Background(), &proto.ListSkillsRequest{})
 	if err != nil {
@@ -285,7 +282,7 @@ func TestListSkills(t *testing.T) {
 }
 
 func TestGetSkill(t *testing.T) {
-	srv := NewServer(nil, nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil)
 
 	resp, err := srv.GetSkill(context.Background(), &proto.GetSkillRequest{Name: "cercano-local"})
 	if err != nil {
@@ -304,7 +301,7 @@ func TestGetSkill(t *testing.T) {
 }
 
 func TestGetSkill_Protocol(t *testing.T) {
-	srv := NewServer(nil, nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil)
 
 	resp, err := srv.GetSkill(context.Background(), &proto.GetSkillRequest{Name: "systematic-debugging"})
 	if err != nil {
@@ -322,7 +319,7 @@ func TestGetSkill_Protocol(t *testing.T) {
 }
 
 func TestGetSkill_NotFound(t *testing.T) {
-	srv := NewServer(nil, nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil)
 
 	_, err := srv.GetSkill(context.Background(), &proto.GetSkillRequest{Name: "nonexistent-skill"})
 	if err == nil {
@@ -347,9 +344,7 @@ func TestUpdateConfig_OllamaURL_WithModel(t *testing.T) {
 	registry := engine.NewEngineRegistry()
 	eng := ollama.NewOllamaEngine("http://localhost:11434")
 	registry.RegisterEngine(eng)
-	provider := legacymodels.NewOpenModelProvider(eng, "test-model")
-
-	srv := NewServer(nil, provider, nil, nil, nil, registry)
+	srv := NewServer(nil, nil, nil, nil, registry)
 
 	// Set both URL and model in one call
 	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{
@@ -366,9 +361,6 @@ func TestUpdateConfig_OllamaURL_WithModel(t *testing.T) {
 	if eng.GetActiveURL() != "http://192.168.1.100:11434" {
 		t.Errorf("Expected BaseURL 'http://192.168.1.100:11434', got '%s'", eng.GetActiveURL())
 	}
-	if provider.Name() != "llama3" {
-		t.Errorf("Expected model 'llama3', got '%s'", provider.Name())
-	}
 }
 
 func TestUpdateConfig_OpenRuntime(t *testing.T) {
@@ -377,9 +369,7 @@ func TestUpdateConfig_OpenRuntime(t *testing.T) {
 	llamaEng := &namedTestEngine{name: "llama_server"}
 	registry.RegisterEngine(ollamaEng)
 	registry.RegisterEngine(llamaEng)
-	provider := legacymodels.NewOpenModelProvider(ollamaEng, "ollama-model")
-
-	srv := NewServer(nil, provider, nil, nil, nil, registry)
+	srv := NewServer(nil, nil, nil, nil, registry)
 	srv.SetConfigPersistence("", config.Config{
 		OpenRuntime: "ollama",
 		OpenModel:   "ollama-model",
@@ -397,13 +387,6 @@ func TestUpdateConfig_OpenRuntime(t *testing.T) {
 	if !resp.Success {
 		t.Fatalf("expected success, got: %s", resp.Message)
 	}
-	got, err := provider.Process(context.Background(), &agent.Request{Input: "hello"})
-	if err != nil {
-		t.Fatalf("provider process failed: %v", err)
-	}
-	if got.Output != "llama_server:/models/model-a.gguf:hello" {
-		t.Fatalf("unexpected provider output: %q", got.Output)
-	}
 	cfg, err := srv.GetConfig(context.Background(), &proto.GetConfigRequest{})
 	if err != nil {
 		t.Fatalf("GetConfig failed: %v", err)
@@ -419,7 +402,7 @@ func TestUpdateConfig_WatchdogEnable(t *testing.T) {
 		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
-	srv := NewServer(nil, nil, nil, nil, nil, engine.NewEngineRegistry())
+	srv := NewServer(nil, nil, nil, nil, engine.NewEngineRegistry())
 	srv.SetDispatchEngine(eng)
 	srv.SetConfigPersistence("", config.Config{})
 
@@ -451,7 +434,7 @@ func TestUpdateConfig_WatchdogEnable(t *testing.T) {
 }
 
 func TestUpdateConfig_ToolLoopMaxIterations(t *testing.T) {
-	srv := NewServer(nil, nil, nil, nil, nil, engine.NewEngineRegistry())
+	srv := NewServer(nil, nil, nil, nil, engine.NewEngineRegistry())
 	srv.SetConfigPersistence("", config.Config{})
 
 	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{ToolLoopMaxIterations: "-1"})
@@ -482,7 +465,7 @@ func TestUpdateConfig_ToolLoopMaxIterations(t *testing.T) {
 }
 
 func TestUpdateConfig_WatchdogEcho_and_GetConfig(t *testing.T) {
-	srv := NewServer(nil, nil, nil, nil, nil, engine.NewEngineRegistry())
+	srv := NewServer(nil, nil, nil, nil, engine.NewEngineRegistry())
 	srv.SetConfigPersistence("", config.Config{})
 
 	if _, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{WatchdogEcho: "true"}); err != nil {
@@ -502,7 +485,7 @@ func TestUpdateConfig_WatchdogEcho_and_GetConfig(t *testing.T) {
 }
 
 func TestUpdateConfig_OpenRuntime_Invalid(t *testing.T) {
-	srv := NewServer(nil, nil, nil, nil, nil, engine.NewEngineRegistry())
+	srv := NewServer(nil, nil, nil, nil, engine.NewEngineRegistry())
 	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{
 		OpenRuntime: "tensor_vibes",
 	})
@@ -537,7 +520,7 @@ func (e *namedTestEngine) ListModels(ctx context.Context) ([]engine.ModelInfo, e
 }
 
 func TestUpdateConfig_WatchdogModeChecksEscalate(t *testing.T) {
-	srv := NewServer(nil, nil, nil, nil, nil, engine.NewEngineRegistry())
+	srv := NewServer(nil, nil, nil, nil, engine.NewEngineRegistry())
 	srv.SetConfigPersistence("", config.Config{})
 
 	_, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{

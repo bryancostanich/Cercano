@@ -8,7 +8,6 @@ import (
 	"cercano/source/server/internal/engine"
 	providers "cercano/source/server/internal/hostsvc/providers"
 	"cercano/source/server/internal/inference"
-	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/usage"
@@ -59,7 +58,6 @@ func (r *openResolver) LocusMode() string                                       
 func (r *openResolver) Router() providers.RouterCloudUpdater                            { return nil }
 func (r *openResolver) Registry() *engine.EngineRegistry                                { return nil }
 func (r *openResolver) CatalogManager() *ollamacatalog.Manager                          { return nil }
-func (r *openResolver) OpenLegacy() *legacymodels.OpenModelProvider                     { return nil }
 func (r *openResolver) Reconfigure(_ providers.ReconfigureArgs)                         {}
 func (r *openResolver) SetCloudLLMProvider(_ inference.Provider)                        {}
 func (r *openResolver) SetOpenLLMProvider(_ inference.Provider)                         {}

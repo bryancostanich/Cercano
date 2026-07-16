@@ -20,8 +20,8 @@ type inferenceTurnRunner struct {
 	model string
 }
 
-// NewInferenceTurnRunner wraps an inference.Provider as a TurnRunner.
-func NewInferenceTurnRunner(p inference.Provider, model string) TurnRunner {
+// InferenceTurnRunner wraps an inference.Provider as a TurnRunner.
+func InferenceTurnRunner(p inference.Provider, model string) TurnRunner {
 	return &inferenceTurnRunner{p: p, model: model}
 }
 

@@ -51,7 +51,7 @@ func TestRunAgenticDispatch_RTierDefault(t *testing.T) {
 	reg.MustRegister(rTool)
 	reg.MustRegister(wTool)
 
-	srv := NewServer(nil, nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil)
 	srv.SetToolRegistry(reg)
 
 	// Load a permStore (nil permStore is valid for R-tier which never gates,
@@ -134,7 +134,7 @@ func TestRunAgenticDispatch_ExplicitToolsSubset(t *testing.T) {
 	reg.MustRegister(allowed)
 	reg.MustRegister(excluded)
 
-	srv := NewServer(nil, nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil)
 	srv.SetToolRegistry(reg)
 
 	perms, err := agent.LoadPermissionStore(t.TempDir() + "/perms.yaml")
@@ -181,7 +181,7 @@ func TestRunAgenticDispatch_ExplicitToolsSubset(t *testing.T) {
 // dispatch no longer returns "not configured" (it may still fail for other
 // reasons such as no provider, but not because the runner is absent).
 func TestSetDispatchEngine_WiresAgenticRunner(t *testing.T) {
-	srv := NewServer(nil, nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil)
 	// Minimal registry so runAgenticDispatch doesn't panic on nil toolRegistry.
 	// Include one R-tier tool so the default grant isn't empty; the wiring
 	// test doesn't actually exercise the tool, just proves the runner is

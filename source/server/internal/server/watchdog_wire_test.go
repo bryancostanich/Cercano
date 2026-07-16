@@ -35,7 +35,7 @@ func TestBuildWatchdogEnabled(t *testing.T) {
 		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
-	s := NewServer(nil, nil, nil, nil, nil, nil)
+	s := NewServer(nil, nil, nil, nil, nil)
 	s.cfgSvc = cfgsvc.New("", config.Config{Watchdog: config.WatchdogConfig{
 		Enabled:       true,
 		Mode:          "challenge-and-justify",
@@ -57,7 +57,7 @@ func TestBuildWatchdogSkipsUnknownChecks(t *testing.T) {
 		func() locus.Mode { return locus.OpenOnly },
 		nil,
 	)
-	s := NewServer(nil, nil, nil, nil, nil, nil)
+	s := NewServer(nil, nil, nil, nil, nil)
 	s.cfgSvc = cfgsvc.New("", config.Config{Watchdog: config.WatchdogConfig{
 		Enabled: true,
 		Mode:    "strict",

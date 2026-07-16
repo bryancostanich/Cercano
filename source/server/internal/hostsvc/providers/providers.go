@@ -22,7 +22,6 @@ import (
 	"cercano/source/server/internal/engine"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/inference"
-	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm/fallback"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
@@ -35,6 +34,7 @@ import (
 // needs to propagate a runtime cloud-provider swap. Mirrored from internal/server
 // so providers does not import the server package.
 type RouterCloudUpdater interface {
+	SetOpenProvider(p agent.TurnRunner)
 	SetCloudProvider(p agent.TurnRunner)
 	Tiers() agent.Tiers
 }
@@ -81,9 +81,6 @@ type Resolver interface {
 	// CatalogManager returns the online catalog manager (may be nil).
 	CatalogManager() *ollamacatalog.Manager
 
-	// OpenLegacy returns the legacy open model provider (for ProposeContextEdit).
-	OpenLegacy() *legacymodels.OpenModelProvider
-
 	// Reconfigure applies the UpdateConfig provider/runtime block. Restarts the
 	// Ollama health monitor, updates the open provider's model/engine, and
 	// rebuilds the open LLM provider via the factory when the runtime changes.
@@ -118,7 +115,6 @@ type service struct {
 	cloudLLMProvider    inference.Provider
 	openLLMProvider     inference.Provider
 	openProviderFactory func(cfg.Config) inference.Provider // rebuilds openLLMProvider on runtime change
-	openProvider        *legacymodels.OpenModelProvider
 	cloudFactory        agent.CloudFactory
 	router              RouterCloudUpdater
 	coordinator         *loop.ADKCoordinator
@@ -135,7 +131,6 @@ type service struct {
 // not applicable (e.g. tests, minimal embeddings).
 func New(
 	cfgSvc cfgsvc.Service,
-	openProvider *legacymodels.OpenModelProvider,
 	router RouterCloudUpdater,
 	coordinator *loop.ADKCoordinator,
 	cloudFactory agent.CloudFactory,
@@ -144,7 +139,6 @@ func New(
 ) Resolver {
 	return &service{
 		cfgSvc:       cfgSvc,
-		openProvider: openProvider,
 		router:       router,
 		coordinator:  coordinator,
 		cloudFactory: cloudFactory,
@@ -155,14 +149,13 @@ func New(
 
 // --- Resolver interface implementation ---
 
-func (p *service) Cloud() inference.Provider                   { return p.cloudLLMProvider }
-func (p *service) Open() inference.Provider                    { return p.openLLMProvider }
-func (p *service) OpenLegacy() *legacymodels.OpenModelProvider { return p.openProvider }
-func (p *service) Router() RouterCloudUpdater                  { return p.router }
-func (p *service) Registry() *engine.EngineRegistry            { return p.registry }
-func (p *service) CatalogManager() *ollamacatalog.Manager      { return p.catalogManager }
-func (p *service) CloudLLMProvider() inference.Provider        { return p.cloudLLMProvider }
-func (p *service) OpenLLMProvider() inference.Provider         { return p.openLLMProvider }
+func (p *service) Cloud() inference.Provider              { return p.cloudLLMProvider }
+func (p *service) Open() inference.Provider               { return p.openLLMProvider }
+func (p *service) Router() RouterCloudUpdater             { return p.router }
+func (p *service) Registry() *engine.EngineRegistry       { return p.registry }
+func (p *service) CatalogManager() *ollamacatalog.Manager { return p.catalogManager }
+func (p *service) CloudLLMProvider() inference.Provider   { return p.cloudLLMProvider }
+func (p *service) OpenLLMProvider() inference.Provider    { return p.openLLMProvider }
 
 func (p *service) SetCloudLLMProvider(prov inference.Provider) { p.cloudLLMProvider = prov }
 func (p *service) SetOpenLLMProvider(prov inference.Provider)  { p.openLLMProvider = prov }
@@ -280,7 +273,7 @@ func (p *service) InstallAbsentCloud(reason string) {
 // InstallAbsentCloud (interface) and rebuildCloud call this.
 func (p *service) installAbsentCloud(reason string) {
 	p.SetCloudLLMProvider(nil)
-	absent := legacymodels.NewAbsentCloudProvider(reason)
+	absent := agent.AbsentCloud(reason)
 	p.router.SetCloudProvider(absent)
 	if p.coordinator != nil {
 		p.coordinator.SetCloudProvider(absent)
@@ -351,7 +344,7 @@ func (p *service) rebuildCloud() error {
 	// provider. A missing/unbuildable backup leaves the primary bare.
 	prov = p.wrapBackup(prov, prof.Name, c)
 	p.SetCloudLLMProvider(prov)
-	mp := agent.NewInferenceTurnRunner(prov, prof.Model)
+	mp := agent.InferenceTurnRunner(prov, prof.Model)
 	p.router.SetCloudProvider(mp)
 	if p.coordinator != nil {
 		p.coordinator.SetCloudProvider(mp)
@@ -429,9 +422,10 @@ func (p *service) wrapBackup(primary inference.Provider, primaryName string, c c
 type ReconfigureArgs struct {
 	// OllamaURL triggers a health-monitor restart when non-empty.
 	OllamaURL string
-	// OpenModel triggers openProvider.SetModelName when non-empty.
+	// OpenModel triggers rebuilding/re-wrapping the Open tier when non-empty.
 	OpenModel string
-	// OpenRuntime triggers openProvider.SetEngine when non-empty.
+	// OpenRuntime triggers rebuilding the raw open inference provider and
+	// re-wrapping the Open tier when non-empty.
 	OpenRuntime string
 	// ResolvedOpenModel is the fully-computed model for the engine swap
 	// (may differ from OpenModel when the llama-server default is applied).
@@ -445,11 +439,10 @@ type ReconfigureArgs struct {
 // Reconfigure applies the UpdateConfig provider/runtime block that previously
 // lived inline in UpdateConfig on the front door. It:
 //   - Restarts the Ollama engine health monitor when OllamaURL is non-empty.
-//   - Calls openProvider.SetModelName when OpenModel is non-empty.
-//   - Calls openProvider.SetEngine(engine, ResolvedOpenModel) when OpenRuntime
-//     is non-empty.
 //   - Rebuilds openLLMProvider via openProviderFactory when OpenRuntime is
 //     non-empty and a factory is installed.
+//   - Re-wraps the open inference provider as a fresh TurnRunner and resets the
+//     router/coordinator Open tier when OpenRuntime or OpenModel changes.
 //
 // All fields that are empty mean "no change for this field".
 func (p *service) Reconfigure(args ReconfigureArgs) {
@@ -469,19 +462,35 @@ func (p *service) Reconfigure(args ReconfigureArgs) {
 			}
 		}
 	}
-	if args.OpenModel != "" && p.openProvider != nil {
-		p.openProvider.SetModelName(args.OpenModel)
-	}
-	if args.OpenRuntime != "" && p.openProvider != nil && p.registry != nil {
-		if eng, err := p.registry.GetEngine(args.OpenRuntime); err == nil {
-			p.openProvider.SetEngine(eng, args.ResolvedOpenModel)
-		}
-	}
 	if args.OpenRuntime != "" && p.openProviderFactory != nil {
 		// Rebuild the native open provider for the new runtime. Without this,
 		// the dispatch engine's open lane (watchdog, coproc caps) keeps talking
 		// to the previous runtime until the agent restarts.
 		p.openLLMProvider = p.openProviderFactory(args.MutatedConfig)
+	}
+	if args.OpenRuntime != "" || args.OpenModel != "" {
+		model := args.ResolvedOpenModel
+		if model == "" {
+			model = args.OpenModel
+		}
+		p.setOpenTurnRunner(model)
+	}
+}
+
+// setOpenTurnRunner wraps the current open inference provider as a fresh
+// TurnRunner and installs it into the router/coordinator open slots. This is the
+// rebuild-on-switch replacement for the old mutable open-provider
+// SetEngine/SetModelName path.
+func (p *service) setOpenTurnRunner(model string) {
+	if p.openLLMProvider == nil || model == "" {
+		return
+	}
+	tr := agent.InferenceTurnRunner(p.openLLMProvider, model)
+	if p.router != nil {
+		p.router.SetOpenProvider(tr)
+	}
+	if p.coordinator != nil {
+		p.coordinator.SetOpenProvider(tr)
 	}
 }
 

@@ -3,9 +3,9 @@ package server
 import (
 	"context"
 
-	persistsvc "cercano/source/server/internal/hostsvc/persistence"
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
+	persistsvc "cercano/source/server/internal/hostsvc/persistence"
 	"cercano/source/server/pkg/proto"
 )
 

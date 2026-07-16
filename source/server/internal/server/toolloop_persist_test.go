@@ -131,7 +131,7 @@ func newServerWithStore(t *testing.T) (*Server, conversation.Store) {
 		agent.WithPersistentStore(store),
 		agent.WithContextMeter(reg, "test-model"),
 	)
-	srv := NewServer(a, nil, nil, nil, nil, nil)
+	srv := NewServer(a, nil, nil, nil, nil)
 	srv.SetConfigPersistence("", config.Config{CloudModel: "test-model"})
 	capReg := capabilities.NewRegistry(capabilities.Services{})
 	builtins.Register(capReg)

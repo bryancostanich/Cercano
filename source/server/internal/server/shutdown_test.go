@@ -153,10 +153,10 @@ type fakeSubscribeStream struct {
 	ctx context.Context
 }
 
-func (f *fakeSubscribeStream) Context() context.Context               { return f.ctx }
-func (f *fakeSubscribeStream) Send(_ *proto.ClientEvent) error        { return nil }
-func (f *fakeSubscribeStream) SendMsg(_ any) error                    { return nil }
-func (f *fakeSubscribeStream) RecvMsg(_ any) error                    { return nil }
+func (f *fakeSubscribeStream) Context() context.Context        { return f.ctx }
+func (f *fakeSubscribeStream) Send(_ *proto.ClientEvent) error { return nil }
+func (f *fakeSubscribeStream) SendMsg(_ any) error             { return nil }
+func (f *fakeSubscribeStream) RecvMsg(_ any) error             { return nil }
 
 // BeginShutdown must end a standing SubscribeEvents handler with a nil error —
 // otherwise GracefulStop blocks forever on attached clients.

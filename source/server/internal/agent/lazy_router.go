@@ -19,11 +19,14 @@ type SmartRouterFactory func() (*SmartRouter, error)
 // just so the server can start — even though they will never classify intent.
 // See GitHub issue #5.
 type LazyRouter struct {
-	factory        SmartRouterFactory
+	factory       SmartRouterFactory
 	openProvider  TurnRunner
-	cloudProvider  TurnRunner
-	pendingCloudMu sync.Mutex
-	pendingCloud   TurnRunner
+	cloudProvider TurnRunner
+	// pendingMu guards provider overrides set before the underlying SmartRouter
+	// is built; they are flushed into it in ensure().
+	pendingMu    sync.Mutex
+	pendingCloud TurnRunner
+	pendingOpen  TurnRunner
 
 	once sync.Once
 	real *SmartRouter
@@ -37,7 +40,7 @@ type LazyRouter struct {
 func NewLazyRouter(factory SmartRouterFactory, openProvider, cloudProvider TurnRunner) *LazyRouter {
 	return &LazyRouter{
 		factory:       factory,
-		openProvider: openProvider,
+		openProvider:  openProvider,
 		cloudProvider: cloudProvider,
 	}
 }
@@ -51,12 +54,16 @@ func (lr *LazyRouter) ensure() (*SmartRouter, error) {
 			lr.err = wrapRouterInitError(lr.err)
 			return
 		}
-		// Apply any cloud provider that was set before the router was built.
-		lr.pendingCloudMu.Lock()
-		pending := lr.pendingCloud
-		lr.pendingCloudMu.Unlock()
-		if pending != nil {
-			lr.real.SetCloudProvider(pending)
+		// Apply any providers that were set before the router was built.
+		lr.pendingMu.Lock()
+		pendingCloud := lr.pendingCloud
+		pendingOpen := lr.pendingOpen
+		lr.pendingMu.Unlock()
+		if pendingOpen != nil {
+			lr.real.SetOpenProvider(pendingOpen)
+		}
+		if pendingCloud != nil {
+			lr.real.SetCloudProvider(pendingCloud)
 		}
 	})
 	return lr.real, lr.err
@@ -85,15 +92,19 @@ func (lr *LazyRouter) SelectProvider(req *Request, intent Intent) (TurnRunner, e
 // providers, not classification — forcing a build here would re-introduce the
 // eager-init bug for those paths.
 func (lr *LazyRouter) Tiers() Tiers {
-	// Prefer the built router's tiers if it exists so runtime SetCloudProvider
-	// updates are reflected.
+	// Prefer the built router's tiers if it exists so runtime SetOpenProvider /
+	// SetCloudProvider updates are reflected.
 	if lr.real != nil {
 		return lr.real.Tiers()
 	}
 	t := Tiers{Open: lr.openProvider}
-	lr.pendingCloudMu.Lock()
+	lr.pendingMu.Lock()
+	open := lr.pendingOpen
 	cloud := lr.pendingCloud
-	lr.pendingCloudMu.Unlock()
+	lr.pendingMu.Unlock()
+	if open != nil {
+		t.Open = open
+	}
 	if cloud != nil {
 		t.Cloud = cloud
 	} else if lr.cloudProvider != nil {
@@ -110,9 +121,24 @@ func (lr *LazyRouter) SetCloudProvider(p TurnRunner) {
 		lr.real.SetCloudProvider(p)
 		return
 	}
-	lr.pendingCloudMu.Lock()
+	lr.pendingMu.Lock()
 	lr.pendingCloud = p
-	lr.pendingCloudMu.Unlock()
+	lr.pendingMu.Unlock()
+}
+
+// SetOpenProvider updates the open provider. If the underlying router is
+// already built, the call is delegated. Otherwise the provider is stashed and
+// applied the first time the router gets built. This is the open-runtime twin
+// of SetCloudProvider and replaces the old mutable open-provider path.
+func (lr *LazyRouter) SetOpenProvider(p TurnRunner) {
+	if lr.real != nil {
+		lr.real.SetOpenProvider(p)
+		return
+	}
+	lr.pendingMu.Lock()
+	lr.pendingOpen = p
+	lr.openProvider = p
+	lr.pendingMu.Unlock()
 }
 
 // wrapRouterInitError turns low-level errors from SmartRouter construction

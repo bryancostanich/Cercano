@@ -6,7 +6,6 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/cloudfactory"
-	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
@@ -25,12 +24,13 @@ type fakeRouter struct {
 	last agent.TurnRunner
 }
 
-func (f *fakeRouter) SetCloudProvider(p agent.TurnRunner)            { f.last = p }
-func (f *fakeRouter) Tiers() agent.Tiers { return agent.Tiers{} }
+func (f *fakeRouter) SetOpenProvider(p agent.TurnRunner)  {}
+func (f *fakeRouter) SetCloudProvider(p agent.TurnRunner) { f.last = p }
+func (f *fakeRouter) Tiers() agent.Tiers                  { return agent.Tiers{} }
 
 func newTestServer() (*Server, *fakeRouter) {
 	r := &fakeRouter{}
-	s := NewServer(nil, nil, r, nil, nil, nil)
+	s := NewServer(nil, r, nil, nil, nil)
 	s.cfgSvc.Set(config.Config{
 		CloudProfiles: []config.CloudProfile{
 			{Name: "messages-one", Flavor: "messages", Model: "claude-3-5-haiku-20241022"},
@@ -108,7 +108,7 @@ func TestSetActiveCloudProfileUnsupportedFlavorGoesAbsent(t *testing.T) {
 	if s.CloudLLMProvider() != nil {
 		t.Error("cloudLLMProvider should be nil (cleared) on build failure")
 	}
-	if _, ok := r.last.(*legacymodels.AbsentCloudProvider); !ok {
+	if _, ok := r.last.(*agent.AbsentCloudProvider); !ok {
 		t.Errorf("router should hold AbsentCloudProvider after build failure, got %T", r.last)
 	}
 }
@@ -183,7 +183,7 @@ func TestRebuildCloudKeylessGoesAbsent(t *testing.T) {
 	if s.CloudLLMProvider() != nil {
 		t.Error("cloudLLMProvider should be nil (absent) when no key")
 	}
-	if _, ok := r.last.(*legacymodels.AbsentCloudProvider); !ok {
+	if _, ok := r.last.(*agent.AbsentCloudProvider); !ok {
 		t.Errorf("router should hold AbsentCloudProvider when no key, got %T", r.last)
 	}
 }
@@ -214,7 +214,7 @@ func TestRebuildCloudKeylessBaseURLCarveout(t *testing.T) {
 		t.Error("cloudLLMProvider should be non-nil when BaseURL carve-out applies")
 	}
 	// Router should hold a real provider, not AbsentCloudProvider.
-	if _, ok := r.last.(*legacymodels.AbsentCloudProvider); ok {
+	if _, ok := r.last.(*agent.AbsentCloudProvider); ok {
 		t.Error("router should NOT hold AbsentCloudProvider when BaseURL carve-out applies")
 	}
 }
@@ -238,7 +238,7 @@ func TestInstallAbsentCloudCoordinatorNilSafe(t *testing.T) {
 	if s.CloudLLMProvider() != nil {
 		t.Error("cloudLLMProvider should be nil after installAbsentCloud")
 	}
-	if _, ok := r.last.(*legacymodels.AbsentCloudProvider); !ok {
+	if _, ok := r.last.(*agent.AbsentCloudProvider); !ok {
 		t.Errorf("router should hold AbsentCloudProvider after installAbsentCloud, got %T", r.last)
 	}
 }
@@ -443,7 +443,7 @@ func TestRemoveCloudProfile(t *testing.T) {
 	if s.CloudLLMProvider() != nil {
 		t.Error("cloudLLMProvider should be nil after removing active profile")
 	}
-	if _, ok := r.last.(*legacymodels.AbsentCloudProvider); !ok {
+	if _, ok := r.last.(*agent.AbsentCloudProvider); !ok {
 		t.Errorf("router should hold AbsentCloudProvider after removing active profile, got %T", r.last)
 	}
 }
@@ -538,7 +538,7 @@ func TestSetActiveCloudProfileBedrockKeylessOk(t *testing.T) {
 	if !resp.Ok {
 		t.Fatalf("want Ok=true for keyless bedrock (creds via AWS chain), got false: %s", resp.Error)
 	}
-	if _, absent := r.last.(*legacymodels.AbsentCloudProvider); absent {
+	if _, absent := r.last.(*agent.AbsentCloudProvider); absent {
 		t.Error("keyless bedrock should NOT install the absent provider")
 	}
 }

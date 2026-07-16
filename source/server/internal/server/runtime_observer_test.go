@@ -58,7 +58,7 @@ func TestObserverAutoStartsActiveDefaultOnDownload(t *testing.T) {
 	mgr := localruntime.NewManager()
 	mgr.RegisterProvider(prov)
 
-	srv := NewServer(nil, nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil)
 	srv.SetRuntimeManager(mgr) // registers srv as observer
 	srv.SetConfigPersistence("", config.Config{
 		OpenRuntime: "llama_server",
@@ -101,7 +101,7 @@ func TestObserverIgnoresInactiveRuntimeDownload(t *testing.T) {
 	mgr := localruntime.NewManager()
 	mgr.RegisterProvider(prov)
 
-	srv := NewServer(nil, nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil)
 	srv.SetRuntimeManager(mgr)
 	// Active runtime is mistralrs, but the download is for llama_server.
 	srv.SetConfigPersistence("", config.Config{

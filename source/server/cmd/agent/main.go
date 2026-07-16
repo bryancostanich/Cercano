@@ -16,7 +16,8 @@ import (
 	"cercano/source/server/internal/engine"
 	llamaengine "cercano/source/server/internal/engine/llamaserver"
 	"cercano/source/server/internal/engine/ollama"
-	"cercano/source/server/internal/legacymodels"
+	"cercano/source/server/internal/inference"
+	ollamallm "cercano/source/server/internal/llm/ollama"
 	"cercano/source/server/internal/localruntime"
 	runtimellama "cercano/source/server/internal/localruntime/llamaserver"
 	"cercano/source/server/internal/loop"
@@ -79,8 +80,16 @@ func main() {
 	registry.RegisterEngine(llamaEng)
 
 	// Initialize Providers
-	openEngine, openModel := selectOpenEngine(cfg, ollamaEng, llamaEng)
-	openProvider := legacymodels.NewOpenModelProvider(openEngine, openModel)
+	openProviderFor := func(c config.Config) inference.Provider {
+		if strings.EqualFold(c.OpenRuntime, "llama_server") {
+			return llamaengine.NewLLMProvider(llamaEng)
+		}
+		return ollamallm.NewClient(ollamallm.Config{
+			BaseURL: c.OllamaURL,
+			Model:   c.OpenChatModel(),
+		})
+	}
+	openProvider := agent.InferenceTurnRunner(openProviderFor(cfg), openTurnModel(cfg))
 
 	// Cloud provider construction: only build a real one when there's enough
 	// config to actually reach a cloud (API key OR a proxy baseURL). Otherwise
@@ -91,17 +100,17 @@ func main() {
 		prof := cloudfactory.LegacyProfile(cfg.CloudProvider, cfg.CloudModel, cfg.CloudBaseURL)
 		p, err := cloudfactory.BuildCloudProvider(prof, cfg.CloudAPIKey)
 		if err == nil {
-			cloudProvider = agent.NewInferenceTurnRunner(p, cfg.CloudModel)
+			cloudProvider = agent.InferenceTurnRunner(p, cfg.CloudModel)
 		} else {
 			fmt.Printf("Main: Failed to init Cloud Provider: %v — degrading to local-only.\n", err)
-			cloudProvider = legacymodels.NewAbsentCloudProvider("provider init failed: " + err.Error())
+			cloudProvider = agent.AbsentCloud("provider init failed: " + err.Error())
 		}
 	} else {
 		reason := "no API key or base URL configured"
 		if cfg.CloudProvider == "" {
 			reason = "no provider selected"
 		}
-		cloudProvider = legacymodels.NewAbsentCloudProvider(reason)
+		cloudProvider = agent.AbsentCloud(reason)
 	}
 
 	validator := tools.NewAutoValidator(tools.DefaultLoader(), tools.DefaultKindToValidator())
@@ -114,7 +123,7 @@ func main() {
 		if err != nil {
 			return nil, err
 		}
-		return agent.NewInferenceTurnRunner(p, model), nil
+		return agent.InferenceTurnRunner(p, model), nil
 	})
 	if err != nil {
 		errMsg := err.Error()
@@ -137,7 +146,7 @@ func main() {
 		if err != nil {
 			return nil, err
 		}
-		return agent.NewInferenceTurnRunner(p, model), nil
+		return agent.InferenceTurnRunner(p, model), nil
 	}
 
 	lis, err := net.Listen("tcp", ":"+cfg.Port)
@@ -154,7 +163,7 @@ func main() {
 		grpc.ChainUnaryInterceptor(server.RecoveryUnaryInterceptor()),
 		grpc.ChainStreamInterceptor(server.RecoveryStreamInterceptor()),
 	)
-	srv := server.NewServer(orchestrator, openProvider, smartRouter, coordinator, cloudFactory, registry)
+	srv := server.NewServer(orchestrator, smartRouter, coordinator, cloudFactory, registry)
 	srv.SetRuntimeManager(runtimeManager)
 	srv.SetConfigPersistence(config.DefaultPath(), cfg)
 	proto.RegisterAgentServer(s, srv)
@@ -228,13 +237,12 @@ func llamaServerEnabled(cfg config.Config) bool {
 	return cfg.LlamaServer.Enabled || strings.EqualFold(cfg.OpenRuntime, "llama_server")
 }
 
-func selectOpenEngine(cfg config.Config, ollamaEng engine.InferenceEngine, llamaEng engine.InferenceEngine) (engine.InferenceEngine, string) {
+func openTurnModel(cfg config.Config) string {
 	if strings.EqualFold(cfg.OpenRuntime, "llama_server") {
 		model := strings.TrimSpace(cfg.LlamaServer.DefaultModel)
-		if model == "" {
-			model = cfg.OpenChatModel()
+		if model != "" {
+			return model
 		}
-		return llamaEng, model
 	}
-	return ollamaEng, cfg.OpenChatModel()
+	return cfg.OpenChatModel()
 }

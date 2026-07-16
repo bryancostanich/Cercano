@@ -20,7 +20,7 @@ func buildPermsServer(t *testing.T) *Server {
 	reg.MustRegister(rTool)
 	reg.MustRegister(wTool)
 
-	srv := NewServer(nil, nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil)
 	srv.SetToolRegistry(reg)
 	return srv
 }
@@ -149,7 +149,7 @@ func TestGrantedRegistry_ExactNameWinsOverStrippedForm(t *testing.T) {
 	reg.MustRegister(plain)
 	reg.MustRegister(hosted)
 
-	srv := NewServer(nil, nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil)
 	srv.SetToolRegistry(reg)
 
 	out, _, _, err := srv.grantedRegistry([]string{"mcp__oc__widget"})

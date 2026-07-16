@@ -35,9 +35,8 @@ import (
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/engine"
-	"cercano/source/server/internal/engine/ollama"
-	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
+	ollamallm "cercano/source/server/internal/llm/ollama"
 )
 
 func main() {
@@ -96,10 +95,14 @@ func main() {
 		turns = turns[lo:hi]
 	}
 
-	// Summarize through the production stack (engine → OpenModelProvider →
-	// agent.Request), not a raw Ollama client, so this tool reproduces exactly
-	// what the agent does — including the greedy-decoding pin below.
-	provider := legacymodels.NewOpenModelProvider(ollama.NewOllamaEngine(*ollamaURL), *model)
+	// Summarize through the production turn-runner stack (inference.Provider →
+	// agent.TurnRunner → agent.Request), not a raw Ollama completion call, so
+	// this tool reproduces exactly what the agent does — including the
+	// greedy-decoding pin below.
+	provider := agent.InferenceTurnRunner(ollamallm.NewClient(ollamallm.Config{
+		BaseURL: *ollamaURL,
+		Model:   *model,
+	}), *model)
 
 	msgs := agent.BuildLLMHistory(turns)
 	tok := contextmeter.Default()

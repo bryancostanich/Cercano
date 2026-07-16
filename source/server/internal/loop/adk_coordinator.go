@@ -22,7 +22,7 @@ import (
 
 // ADKCoordinator implements agent.Coordinator using an ADK LoopAgent.
 type ADKCoordinator struct {
-	openProvider       agentmod.TurnRunner
+	openProvider        agentmod.TurnRunner
 	cloudProvider       agentmod.TurnRunner
 	validator           tools.Validator
 	sessionService      session.Service
@@ -33,7 +33,7 @@ type ADKCoordinator struct {
 // NewADKCoordinator creates an ADKCoordinator with local and cloud providers.
 func NewADKCoordinator(local, cloud agentmod.TurnRunner, val tools.Validator, sessionSvc session.Service) *ADKCoordinator {
 	return &ADKCoordinator{
-		openProvider:       local,
+		openProvider:        local,
 		cloudProvider:       cloud,
 		validator:           val,
 		sessionService:      sessionSvc,
@@ -46,6 +46,11 @@ func NewADKCoordinator(local, cloud agentmod.TurnRunner, val tools.Validator, se
 // switch from the local provider to the cloud provider.
 func (c *ADKCoordinator) SetEscalationThreshold(threshold int) {
 	c.escalationThreshold = threshold
+}
+
+// SetOpenProvider replaces the open provider at runtime.
+func (c *ADKCoordinator) SetOpenProvider(p agentmod.TurnRunner) {
+	c.openProvider = p
 }
 
 // SetCloudProvider replaces the cloud provider at runtime.

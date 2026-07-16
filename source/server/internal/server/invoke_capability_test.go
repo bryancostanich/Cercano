@@ -12,7 +12,7 @@ import (
 func TestInvokeCapabilityRunsRegisteredCap(t *testing.T) {
 	reg := capabilities.NewRegistry(capabilities.Services{})
 	reg.MustRegister(testEchoCap{})
-	s := NewServer(nil, nil, nil, nil, nil, nil)
+	s := NewServer(nil, nil, nil, nil, nil)
 	s.toolSvc.SetCapRegistry(reg)
 	args, _ := json.Marshal(map[string]any{"v": "hi"})
 	resp, err := s.InvokeCapability(context.Background(), &proto.InvokeCapabilityRequest{
@@ -34,7 +34,7 @@ func TestInvokeCapabilityRunsRegisteredCap(t *testing.T) {
 }
 
 func TestInvokeCapabilityUnknownName(t *testing.T) {
-	s := NewServer(nil, nil, nil, nil, nil, nil)
+	s := NewServer(nil, nil, nil, nil, nil)
 	s.toolSvc.SetCapRegistry(capabilities.NewRegistry(capabilities.Services{}))
 	resp, err := s.InvokeCapability(context.Background(), &proto.InvokeCapabilityRequest{Name: "nope"})
 	if err != nil {
@@ -46,7 +46,7 @@ func TestInvokeCapabilityUnknownName(t *testing.T) {
 }
 
 func TestInvokeCapabilityNilRegistry(t *testing.T) {
-	s := NewServer(nil, nil, nil, nil, nil, nil)
+	s := NewServer(nil, nil, nil, nil, nil)
 	resp, err := s.InvokeCapability(context.Background(), &proto.InvokeCapabilityRequest{Name: "anything"})
 	if err != nil {
 		t.Fatal(err)
@@ -63,10 +63,10 @@ func TestInvokeCapabilityNilRegistry(t *testing.T) {
 type testEchoCap struct{}
 
 func (testEchoCap) Name() string                   { return "echo" }
-func (testEchoCap) Description() string             { return "echo" }
-func (testEchoCap) Tier() capabilities.Tier         { return capabilities.TierR }
-func (testEchoCap) Schema() capabilities.Schema     { return capabilities.Schema(`{"type":"object"}`) }
-func (testEchoCap) Surfaces() capabilities.Surface  { return capabilities.SurfaceMCP }
+func (testEchoCap) Description() string            { return "echo" }
+func (testEchoCap) Tier() capabilities.Tier        { return capabilities.TierR }
+func (testEchoCap) Schema() capabilities.Schema    { return capabilities.Schema(`{"type":"object"}`) }
+func (testEchoCap) Surfaces() capabilities.Surface { return capabilities.SurfaceMCP }
 func (testEchoCap) Execute(_ context.Context, call *capabilities.Call) (*capabilities.Result, error) {
 	return capabilities.NewTextResult("echo " + string(call.Args)), nil
 }

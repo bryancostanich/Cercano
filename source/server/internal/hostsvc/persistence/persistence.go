@@ -27,7 +27,6 @@ import (
 	"cercano/source/server/internal/dispatch"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/inference"
-	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/retention"
 	"cercano/source/server/pkg/config"
@@ -134,8 +133,8 @@ type svc struct {
 	// May return nil (suggest degrades to empty response).
 	engine func() *dispatch.Engine
 
-	// openLegacy returns the legacy open-model provider for ProposeContextEdit.
-	openLegacy func() *legacymodels.OpenModelProvider
+	// openTurnRunner returns the current open turn runner for ProposeContextEdit.
+	openTurnRunner func() agent.TurnRunner
 
 	// cloudProvider returns the cloud LLM provider for ProposeContextEdit.
 	cloudProvider func() inference.Provider
@@ -163,7 +162,7 @@ type svc struct {
 //   - primaryModel: func returning the primary model name (for GetContextUsage denominator).
 //   - activeCloudModel: func returning the active cloud model (for AssembleHistory hard-override).
 //   - engine: func returning the dispatch engine (for SuggestNextPrompt); may return nil.
-//   - openLegacy: func returning the legacy open provider (for ProposeContextEdit); may return nil.
+//   - openTurnRunner: func returning the current open turn runner (for ProposeContextEdit); may return nil.
 //   - cloudProvider: func returning the cloud LLM provider (for ProposeContextEdit); may return nil.
 //   - cloudModel: func returning the active cloud model string (for ProposeContextEdit); may return "".
 func New(
@@ -172,7 +171,7 @@ func New(
 	primaryModel func() string,
 	activeCloudModel func() string,
 	engine func() *dispatch.Engine,
-	openLegacy func() *legacymodels.OpenModelProvider,
+	openTurnRunner func() agent.TurnRunner,
 	cloudProvider func() inference.Provider,
 	cloudModel func() string,
 ) Service {
@@ -182,7 +181,7 @@ func New(
 		primaryModel:     primaryModel,
 		activeCloudModel: activeCloudModel,
 		engine:           engine,
-		openLegacy:       openLegacy,
+		openTurnRunner:   openTurnRunner,
 		cloudProvider:    cloudProvider,
 		cloudModel:       cloudModel,
 		elisionFloors:    map[string]int64{},
@@ -819,7 +818,7 @@ func (x *svc) ProposeContextEdit(ctx context.Context, req *proto.ProposeContextE
 	}
 
 	var local, cloud contextedit.CompleteFunc
-	if op := x.openLegacy(); op != nil {
+	if op := x.openTurnRunner(); op != nil {
 		local = func(c context.Context, prompt string) (string, error) {
 			resp, err := op.Process(c, &agent.Request{Input: prompt})
 			if err != nil {

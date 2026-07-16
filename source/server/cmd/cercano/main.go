@@ -38,7 +38,6 @@ import (
 	mistralengine "cercano/source/server/internal/engine/mistralrs"
 	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/inference"
-	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
 	ollamallm "cercano/source/server/internal/llm/ollama"
 	"cercano/source/server/internal/localruntime"
@@ -157,13 +156,24 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	mistralEng := mistralengine.NewEngine(runtimeManager)
 	registry.RegisterEngine(mistralEng)
 
-	openEngine, openModel := selectOpenEngine(cfg, ollamaEng, llamaEng, mistralEng)
-	openProvider := legacymodels.NewOpenModelProvider(openEngine, openModel)
+	openProviderFor := func(c config.Config) inference.Provider {
+		if strings.EqualFold(c.OpenRuntime, "llama_server") {
+			return llamaengine.NewLLMProvider(llamaEng)
+		}
+		if strings.EqualFold(c.OpenRuntime, "mistralrs") {
+			return mistralengine.NewLLMProvider(mistralEng)
+		}
+		return ollamallm.NewClient(ollamallm.Config{
+			BaseURL: c.OllamaURL,
+			Model:   c.OpenChatModel(),
+		})
+	}
+	openProvider := agent.InferenceTurnRunner(openProviderFor(cfg), openTurnModel(cfg))
 
 	// Cloud provider: start with the absent sentinel; RebuildCloud() (called
 	// after secrets are wired below) resolves the active profile's key from
 	// the OS keychain and installs the real provider.
-	cloudProvider := legacymodels.NewAbsentCloudProvider("pending profile resolution")
+	cloudProvider := agent.AbsentCloud("pending profile resolution")
 
 	validator := tools.NewAutoValidator(tools.DefaultLoader(), tools.DefaultKindToValidator())
 	sessionSvc := session.InMemoryService()
@@ -175,7 +185,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		if err != nil {
 			return nil, err
 		}
-		return agent.NewInferenceTurnRunner(p, model), nil
+		return agent.InferenceTurnRunner(p, model), nil
 	}
 
 	// SmartRouter is built lazily on first use. This keeps MCP-only deployments
@@ -380,7 +390,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		grpc.ChainUnaryInterceptor(server.RecoveryUnaryInterceptor()),
 		grpc.ChainStreamInterceptor(server.RecoveryStreamInterceptor()),
 	)
-	srv := server.NewServer(orchestrator, openProvider, lazyRouter, coordinator, cloudFactory, registry)
+	srv := server.NewServer(orchestrator, lazyRouter, coordinator, cloudFactory, registry)
 	cloudTierModel = srv.CloudModelForTier
 	srv.SetRuntimeManager(runtimeManager)
 
@@ -513,24 +523,12 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	}()
 
 	// Native tool-loop local provider — follows the configured runtime.
-	// Under llama_server the provider resolves/warms instances through the
-	// runtime manager per call; otherwise it is the Ollama client. Stored RAW
+	// Under llama_server/mistralrs the provider resolves/warms instances through
+	// the runtime manager per call; otherwise it is the Ollama client. Stored RAW
 	// — resolveMainProvider wraps it for usage at hand-off, and the dispatch
 	// engine reads it raw and wraps per-dispatch (no double-count). The same
 	// factory is installed on the server so an open_runtime change at runtime
 	// rebuilds the provider instead of stranding the old lane.
-	openProviderFor := func(c config.Config) inference.Provider {
-		if strings.EqualFold(c.OpenRuntime, "llama_server") {
-			return llamaengine.NewLLMProvider(llamaEng)
-		}
-		if strings.EqualFold(c.OpenRuntime, "mistralrs") {
-			return mistralengine.NewLLMProvider(mistralEng)
-		}
-		return ollamallm.NewClient(ollamallm.Config{
-			BaseURL: c.OllamaURL,
-			Model:   c.OpenChatModel(),
-		})
-	}
 	srv.SetOpenLLMProvider(openProviderFor(cfg))
 	srv.SetOpenProviderFactory(openProviderFor)
 
@@ -728,22 +726,20 @@ func selectEmbedEngine(cfg config.Config, ollamaEng engine.EmbeddingService, lla
 	return ollamaEng
 }
 
-func selectOpenEngine(cfg config.Config, ollamaEng engine.InferenceEngine, llamaEng engine.InferenceEngine, mistralEng engine.InferenceEngine) (engine.InferenceEngine, string) {
+func openTurnModel(cfg config.Config) string {
 	if strings.EqualFold(cfg.OpenRuntime, "llama_server") {
 		model := strings.TrimSpace(cfg.LlamaServer.DefaultModel)
-		if model == "" {
-			model = cfg.OpenChatModel()
+		if model != "" {
+			return model
 		}
-		return llamaEng, model
 	}
 	if strings.EqualFold(cfg.OpenRuntime, "mistralrs") {
 		model := strings.TrimSpace(cfg.MistralRS.DefaultModel)
-		if model == "" {
-			model = cfg.OpenChatModel()
+		if model != "" {
+			return model
 		}
-		return mistralEng, model
 	}
-	return ollamaEng, cfg.OpenChatModel()
+	return cfg.OpenChatModel()
 }
 
 const setupUsage = `Usage: cercano setup [--install-engine]

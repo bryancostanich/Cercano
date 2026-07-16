@@ -205,7 +205,7 @@ func TestRunAgenticDispatch_NoStoreStillWorks(t *testing.T) {
 	reg := agenttools.NewRegistry()
 	reg.MustRegister(stubDispatchTool{name: "r_read", perm: agenttools.PermR, called: &rCalled, retText: "r-result"})
 
-	srv := NewServer(nil, nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil)
 	srv.SetToolRegistry(reg)
 	perms, err := agent.LoadPermissionStore(t.TempDir() + "/perms.yaml")
 	if err != nil {

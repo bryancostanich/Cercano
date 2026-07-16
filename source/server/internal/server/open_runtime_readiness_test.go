@@ -47,7 +47,7 @@ func serverWithModel(t *testing.T, state localruntime.DownloadState) (*Server, c
 	mgr := localruntime.NewManager()
 	mgr.RegisterProvider(&readinessProvider{name: "mistralrs", model: model})
 
-	srv := NewServer(nil, nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil)
 	srv.SetRuntimeManager(mgr)
 	cfg := config.Config{
 		OpenRuntime: "mistralrs",

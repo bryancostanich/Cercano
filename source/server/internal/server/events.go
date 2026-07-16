@@ -163,5 +163,3 @@ func (s *Server) broadcastOpenRuntimeStatus(status *proto.OpenRuntimeStatus) {
 		},
 	})
 }
-
-

@@ -43,7 +43,7 @@ func TestAssembleHistory_HardOverrideNonBlocking(t *testing.T) {
 		agent.WithCompactionScheduler(spy),
 	)
 
-	srv := NewServer(a, nil, nil, nil, nil, nil)
+	srv := NewServer(a, nil, nil, nil, nil)
 	// HardOverridePct = 0.001 → hardLimit = int(0.001 * 128000) = 128 tokens for
 	// the default "test-model" (no specific match → ModelMax returns 128 000).
 	srv.SetConfigPersistence("", config.Config{

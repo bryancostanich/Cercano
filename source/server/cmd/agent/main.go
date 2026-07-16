@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/cloudfactory"
 	"cercano/source/server/internal/engine"
 	llamaengine "cercano/source/server/internal/engine/llamaserver"
 	"cercano/source/server/internal/engine/ollama"
@@ -87,9 +88,10 @@ func main() {
 	var cloudProvider agent.TurnRunner
 	if cfg.CloudProvider != "" && (cfg.CloudAPIKey != "" || cfg.CloudBaseURL != "") {
 		fmt.Printf("Main: Initializing Cloud Provider (%s)...\n", cfg.CloudProvider)
-		cp, err := legacymodels.NewCloudModelProvider(context.Background(), cfg.CloudProvider, cfg.CloudModel, cfg.CloudAPIKey, cfg.CloudBaseURL)
+		prof := cloudfactory.LegacyProfile(cfg.CloudProvider, cfg.CloudModel, cfg.CloudBaseURL)
+		p, err := cloudfactory.BuildCloudProvider(prof, cfg.CloudAPIKey)
 		if err == nil {
-			cloudProvider = cp
+			cloudProvider = agent.NewInferenceTurnRunner(p, cfg.CloudModel)
 		} else {
 			fmt.Printf("Main: Failed to init Cloud Provider: %v — degrading to local-only.\n", err)
 			cloudProvider = legacymodels.NewAbsentCloudProvider("provider init failed: " + err.Error())
@@ -107,7 +109,12 @@ func main() {
 	coordinator := loop.NewADKCoordinator(openProvider, cloudProvider, validator, sessionSvc)
 
 	smartRouter, err := agent.NewSmartRouterFromBytes(openProvider, cloudProvider, cfg.OpenEmbeddingModel(), ollamaEng, agent.DefaultPrototypes(), func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.TurnRunner, error) {
-		return legacymodels.NewCloudModelProvider(ctx, provider, model, apiKey, baseURL)
+		prof := cloudfactory.LegacyProfile(provider, model, baseURL)
+		p, err := cloudfactory.BuildCloudProvider(prof, apiKey)
+		if err != nil {
+			return nil, err
+		}
+		return agent.NewInferenceTurnRunner(p, model), nil
 	})
 	if err != nil {
 		errMsg := err.Error()
@@ -125,7 +132,12 @@ func main() {
 	orchestrator := agent.NewAgent(smartRouter, coordinator, agent.WithConversationStore(convStore))
 
 	cloudFactory := func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.TurnRunner, error) {
-		return legacymodels.NewCloudModelProvider(ctx, provider, model, apiKey, baseURL)
+		prof := cloudfactory.LegacyProfile(provider, model, baseURL)
+		p, err := cloudfactory.BuildCloudProvider(prof, apiKey)
+		if err != nil {
+			return nil, err
+		}
+		return agent.NewInferenceTurnRunner(p, model), nil
 	}
 
 	lis, err := net.Listen("tcp", ":"+cfg.Port)

@@ -24,6 +24,7 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/catalog"
+	"cercano/source/server/internal/cloudfactory"
 	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/compactiongen"
 	"cercano/source/server/internal/compactor"
@@ -169,7 +170,12 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	coordinator := loop.NewADKCoordinator(openProvider, cloudProvider, validator, sessionSvc)
 
 	cloudFactory := func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.TurnRunner, error) {
-		return legacymodels.NewCloudModelProvider(ctx, provider, model, apiKey, baseURL)
+		prof := cloudfactory.LegacyProfile(provider, model, baseURL)
+		p, err := cloudfactory.BuildCloudProvider(prof, apiKey)
+		if err != nil {
+			return nil, err
+		}
+		return agent.NewInferenceTurnRunner(p, model), nil
 	}
 
 	// SmartRouter is built lazily on first use. This keeps MCP-only deployments

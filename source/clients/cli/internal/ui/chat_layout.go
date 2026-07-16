@@ -154,8 +154,7 @@ func splitRenderLines(s string) []string {
 
 func (c *chatView) rebuildTranscriptLayout(entries []*Entry) transcriptLayout {
 	layout := transcriptLayout{width: c.Width(), stylesGen: c.stylesGen, contentGen: c.contentGen}
-	appendUnit := func(kind renderUnitKind, startEntry, endEntry int, block string, rows []arrowRow) {
-		lines := splitRenderLines(block)
+	appendUnit := func(kind renderUnitKind, startEntry, endEntry int, lines []string, rows []arrowRow) {
 		if len(lines) == 0 {
 			return
 		}
@@ -192,17 +191,17 @@ func (c *chatView) rebuildTranscriptLayout(entries []*Entry) transcriptLayout {
 			for j < len(entries) && entries[j].Tool != nil {
 				j++
 			}
-			block, toolRows := c.renderToolGroupCached(entries[i:j], i)
+			_, lines, toolRows := c.renderToolGroupCachedLines(entries[i:j], i)
 			rows := make([]arrowRow, 0, len(toolRows))
 			for _, r := range toolRows {
 				rows = append(rows, arrowRow{line: r.Line, entry: i + r.Entry, group: r.Group, railMin: r.RailMin, railMax: r.RailMax})
 			}
-			appendUnit(unitToolGroup, i, j, block, rows)
+			appendUnit(unitToolGroup, i, j, lines, rows)
 			i = j
 		} else {
-			seg := c.renderEntryCached(entries[i], i)
+			seg, lines := c.renderEntryCachedLines(entries[i], i)
 			rows := supersededArrowRows(entries[i], i, seg)
-			appendUnit(unitEntry, i, i+1, seg, rows)
+			appendUnit(unitEntry, i, i+1, lines, rows)
 			i++
 		}
 		first = false
@@ -220,7 +219,7 @@ func (c *chatView) rebuildTranscriptLayout(entries []*Entry) transcriptLayout {
 		if layout.totalLines > 0 {
 			appendSeparator()
 		}
-		appendUnit(unitTrailingActivity, -1, -1, indentBlock(pad, c.renderTrailingActivity(textW)), nil)
+		appendUnit(unitTrailingActivity, -1, -1, splitRenderLines(indentBlock(pad, c.renderTrailingActivity(textW))), nil)
 	}
 	return layout
 }

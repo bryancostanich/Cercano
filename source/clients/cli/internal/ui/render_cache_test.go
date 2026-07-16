@@ -21,6 +21,7 @@ func TestEntryCacheServedAndInvalidatedOnContentChange(t *testing.T) {
 		t.Fatalf("frozen system entry not cached after SetEntries")
 	}
 	cached.rendered = "ENTRY-SENTINEL"
+	cached.lines = []string{"ENTRY-SENTINEL"}
 	c.entryCache[e] = cached
 
 	c.SetEntries([]*Entry{e})
@@ -45,6 +46,7 @@ func TestEntryCacheInvalidatedOnThemeGeneration(t *testing.T) {
 
 	cached := c.entryCache[e]
 	cached.rendered = "THEME-SENTINEL"
+	cached.lines = []string{"THEME-SENTINEL"}
 	c.entryCache[e] = cached
 
 	c.stylesGen++ // what SetStyles does
@@ -80,6 +82,7 @@ func TestToolGroupCacheServedAndInvalidated(t *testing.T) {
 		t.Fatalf("completed tool group not cached after SetEntries")
 	}
 	g.block = "GROUP-SENTINEL"
+	g.lines = []string{"GROUP-SENTINEL"}
 	c.groupCache[0] = g
 
 	c.SetEntries([]*Entry{e})

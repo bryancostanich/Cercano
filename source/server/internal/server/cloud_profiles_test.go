@@ -22,11 +22,11 @@ import (
 
 // fakeRouter satisfies RouterCloudUpdater for tests.
 type fakeRouter struct {
-	last agent.ModelProvider
+	last agent.TurnRunner
 }
 
-func (f *fakeRouter) SetCloudProvider(p agent.ModelProvider)            { f.last = p }
-func (f *fakeRouter) GetModelProviders() map[string]agent.ModelProvider { return nil }
+func (f *fakeRouter) SetCloudProvider(p agent.TurnRunner)            { f.last = p }
+func (f *fakeRouter) Tiers() agent.Tiers { return agent.Tiers{} }
 
 func newTestServer() (*Server, *fakeRouter) {
 	r := &fakeRouter{}

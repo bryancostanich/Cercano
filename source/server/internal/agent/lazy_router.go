@@ -20,10 +20,10 @@ type SmartRouterFactory func() (*SmartRouter, error)
 // See GitHub issue #5.
 type LazyRouter struct {
 	factory        SmartRouterFactory
-	openProvider  ModelProvider
-	cloudProvider  ModelProvider
+	openProvider  TurnRunner
+	cloudProvider  TurnRunner
 	pendingCloudMu sync.Mutex
-	pendingCloud   ModelProvider
+	pendingCloud   TurnRunner
 
 	once sync.Once
 	real *SmartRouter
@@ -31,10 +31,10 @@ type LazyRouter struct {
 }
 
 // NewLazyRouter returns a LazyRouter that will invoke factory on first use.
-// openProvider and cloudProvider are held so GetModelProviders() works before
+// openProvider and cloudProvider are held so Tiers() works before
 // the underlying SmartRouter is built (e.g. for DirectOpen bypass paths that
 // only need the providers, not classification).
-func NewLazyRouter(factory SmartRouterFactory, openProvider, cloudProvider ModelProvider) *LazyRouter {
+func NewLazyRouter(factory SmartRouterFactory, openProvider, cloudProvider TurnRunner) *LazyRouter {
 	return &LazyRouter{
 		factory:       factory,
 		openProvider: openProvider,
@@ -72,7 +72,7 @@ func (lr *LazyRouter) ClassifyIntent(req *Request) (Intent, error) {
 }
 
 // SelectProvider builds the router on first call.
-func (lr *LazyRouter) SelectProvider(req *Request, intent Intent) (ModelProvider, error) {
+func (lr *LazyRouter) SelectProvider(req *Request, intent Intent) (TurnRunner, error) {
 	real, err := lr.ensure()
 	if err != nil {
 		return nil, err
@@ -80,34 +80,32 @@ func (lr *LazyRouter) SelectProvider(req *Request, intent Intent) (ModelProvider
 	return real.SelectProvider(req, intent)
 }
 
-// GetModelProviders returns providers without triggering router construction.
-// The DirectOpen bypass and cloud-provider override paths only need the raw
+// Tiers returns the tier pair without triggering router construction. The
+// DirectOpen bypass and cloud-provider override paths only need the raw
 // providers, not classification — forcing a build here would re-introduce the
 // eager-init bug for those paths.
-func (lr *LazyRouter) GetModelProviders() map[string]ModelProvider {
-	// Prefer the built router's map if it exists so runtime SetCloudProvider
+func (lr *LazyRouter) Tiers() Tiers {
+	// Prefer the built router's tiers if it exists so runtime SetCloudProvider
 	// updates are reflected.
 	if lr.real != nil {
-		return lr.real.GetModelProviders()
+		return lr.real.Tiers()
 	}
-	providers := map[string]ModelProvider{
-		"OpenModel": lr.openProvider,
-	}
+	t := Tiers{Open: lr.openProvider}
 	lr.pendingCloudMu.Lock()
 	cloud := lr.pendingCloud
 	lr.pendingCloudMu.Unlock()
 	if cloud != nil {
-		providers["CloudModel"] = cloud
+		t.Cloud = cloud
 	} else if lr.cloudProvider != nil {
-		providers["CloudModel"] = lr.cloudProvider
+		t.Cloud = lr.cloudProvider
 	}
-	return providers
+	return t
 }
 
 // SetCloudProvider updates the cloud provider. If the underlying router is
 // already built, the call is delegated. Otherwise the provider is stashed and
 // applied the first time the router gets built.
-func (lr *LazyRouter) SetCloudProvider(p ModelProvider) {
+func (lr *LazyRouter) SetCloudProvider(p TurnRunner) {
 	if lr.real != nil {
 		lr.real.SetCloudProvider(p)
 		return

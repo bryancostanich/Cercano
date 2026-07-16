@@ -18,9 +18,9 @@ type StreamableCoordinator interface {
 // TokenFunc defines a callback for incremental token delivery.
 type TokenFunc func(token string)
 
-// StreamingModelProvider extends ModelProvider with token-level streaming.
-type StreamingModelProvider interface {
-	ModelProvider
+// StreamingTurnRunner extends TurnRunner with token-level streaming.
+type StreamingTurnRunner interface {
+	TurnRunner
 	ProcessStream(ctx context.Context, req *Request, onToken TokenFunc) (*Response, error)
 }
 

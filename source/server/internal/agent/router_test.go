@@ -14,7 +14,7 @@ import (
 	"testing"
 )
 
-// MockModelProvider is a mock implementation of the ModelProvider interface for testing.
+// MockModelProvider is a mock implementation of the TurnRunner interface for testing.
 type MockModelProvider struct {
 	name string
 	err  error
@@ -176,7 +176,7 @@ providers:
 
 	embedder := &mockEmbedder{responses: mockResponses}
 
-	router, err := NewSmartRouter(mockLocal, mockCloud, "nomic-embed-text", embedder, tmpFile.Name(), func(ctx context.Context, provider, model, apiKey, baseURL string) (ModelProvider, error) {
+	router, err := NewSmartRouter(mockLocal, mockCloud, "nomic-embed-text", embedder, tmpFile.Name(), func(ctx context.Context, provider, model, apiKey, baseURL string) (TurnRunner, error) {
 		return &MockModelProvider{name: provider}, nil
 	})
 	if err != nil {

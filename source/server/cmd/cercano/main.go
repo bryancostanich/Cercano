@@ -168,7 +168,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	sessionSvc := session.InMemoryService()
 	coordinator := loop.NewADKCoordinator(openProvider, cloudProvider, validator, sessionSvc)
 
-	cloudFactory := func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.ModelProvider, error) {
+	cloudFactory := func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.TurnRunner, error) {
 		return legacymodels.NewCloudModelProvider(ctx, provider, model, apiKey, baseURL)
 	}
 
@@ -285,12 +285,12 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 				// Local summarizer unavailable (e.g. the fast-light-text model is
 				// still downloading, or the runtime is down). Fall back to the
 				// active cloud provider so compaction keeps working instead of
-				// stalling until a local model lands. GetModelProviders()
+				// stalling until a local model lands. Tiers()
 				// ["CloudModel"] is kept live by RebuildCloud
 				// (providers.SetCloudProvider); an absent/failed cloud surfaces
 				// the original local error. No ModelOverride — the cloud provider
 				// uses its configured model, not the local summarizer id.
-				if cloud := lazyRouter.GetModelProviders()["CloudModel"]; cloud != nil {
+				if cloud := lazyRouter.Tiers().Cloud; cloud != nil {
 					// Tier rides along so a mid-call failover re-resolves the
 					// backup vendor's economy model instead of its default.
 					cloudReq := &agent.Request{Input: compaction.BuildSummaryPrompt(msgs), Temperature: greedy.Temperature, Tier: string(config.TierFastLightText)}

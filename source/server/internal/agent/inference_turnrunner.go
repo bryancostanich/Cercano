@@ -8,21 +8,24 @@ import (
 	"cercano/source/server/internal/llm"
 )
 
-// llmModelProvider adapts an inference.Provider (native tool-calling interface) to the
-// legacy agent.ModelProvider interface, so a single cloud profile can serve both
-// the tool-loop and the co-processor CloudModel slot. Process runs a one-shot
-// Chat (no tools) and concatenates text blocks into Response.Output.
-type llmModelProvider struct {
+// inferenceTurnRunner is THE bridge between the two named layers: it adapts an
+// inference.Provider (run one inference call, in blocks) up to a TurnRunner (run
+// one routed turn, in text + routing metadata). Process runs a one-shot Chat
+// (no tools), flattens text blocks into Response.Output, honors ModelOverride,
+// and attributes the model that actually served (important on a failed-over
+// call). This adapter is the ONLY place inference vocabulary is turned into
+// turn vocabulary — the router layer never touches inference.Provider directly.
+type inferenceTurnRunner struct {
 	p     inference.Provider
 	model string
 }
 
-// NewLLMModelProvider wraps an inference.Provider as a ModelProvider.
-func NewLLMModelProvider(p inference.Provider, model string) ModelProvider {
-	return &llmModelProvider{p: p, model: model}
+// NewInferenceTurnRunner wraps an inference.Provider as a TurnRunner.
+func NewInferenceTurnRunner(p inference.Provider, model string) TurnRunner {
+	return &inferenceTurnRunner{p: p, model: model}
 }
 
-func (a *llmModelProvider) Name() string { return a.p.Name() }
+func (a *inferenceTurnRunner) Name() string { return a.p.Name() }
 
 // processMaxTokens is the output budget for one-shot Process calls (same
 // default as the tool loop). agent.Request carries no MaxTokens, and an unset
@@ -30,7 +33,7 @@ func (a *llmModelProvider) Name() string { return a.p.Name() }
 // with a zero-token completion and no error — silent empty output.
 const processMaxTokens = 4096
 
-func (a *llmModelProvider) Process(ctx context.Context, req *Request) (*Response, error) {
+func (a *inferenceTurnRunner) Process(ctx context.Context, req *Request) (*Response, error) {
 	model := a.model
 	if req.ModelOverride != "" {
 		model = req.ModelOverride

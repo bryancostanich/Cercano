@@ -25,7 +25,7 @@ func TestSmartRouter_Integration_SelectProvider(t *testing.T) {
 	mockLocal := &mockModelProvider{name: "OpenModel"}
 	mockCloud := &mockModelProvider{name: "CloudModel"}
 
-	smartRouter, err := agent.NewSmartRouter(mockLocal, mockCloud, integrationTestModelName, nil, "prototypes.yaml", func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.ModelProvider, error) {
+	smartRouter, err := agent.NewSmartRouter(mockLocal, mockCloud, integrationTestModelName, nil, "prototypes.yaml", func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.TurnRunner, error) {
 		return &mockModelProvider{name: provider}, nil
 	})
 	if err != nil {
@@ -114,7 +114,7 @@ func TestSmartRouter_Integration_SelectProvider(t *testing.T) {
 		})
 	}}
 
-// mockModelProvider is a mock implementation of the agent.ModelProvider interface for testing.
+// mockModelProvider is a mock implementation of the agent.TurnRunner interface for testing.
 type mockModelProvider struct {
 	name string
 	err  error

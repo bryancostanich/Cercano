@@ -1,3 +1,3 @@
-// Package adapters wraps Cercano's ModelProvider and Validator interfaces
+// Package adapters wraps Cercano's TurnRunner and Validator interfaces
 // as ADK agent.Agent implementations for use with the ADK LoopAgent.
 package adapters

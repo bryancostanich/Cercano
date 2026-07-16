@@ -10,11 +10,11 @@ import (
 
 // GenericGenerator handles requests to generate and fix code based on instructions.
 type GenericGenerator struct {
-	provider agent.ModelProvider
+	provider agent.TurnRunner
 }
 
 // NewGenericGenerator creates a new GenericGenerator with the given provider.
-func NewGenericGenerator(provider agent.ModelProvider) *GenericGenerator {
+func NewGenericGenerator(provider agent.TurnRunner) *GenericGenerator {
 	return &GenericGenerator{provider: provider}
 }
 

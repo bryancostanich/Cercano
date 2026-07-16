@@ -118,23 +118,46 @@ type RoutingMetadata struct {
 	IsCloud    bool
 }
 
-// ModelProvider defines the interface for an AI model provider (local or cloud).
-type ModelProvider interface {
+// TurnRunner runs one ROUTED turn: it takes an agent Request (carrying routing
+// metadata — DirectOpen, Coproc, ModelOverride, OnRoute, Tier) and returns a
+// Response (Output plus routing/attribution metadata, Notice, token counts).
+//
+// This is deliberately a DIFFERENT and higher abstraction than inference.
+// Provider: a TurnRunner is about *routing and running a turn*, an
+// inference.Provider is about *running one inference call*. A TurnRunner is
+// produced from an inference.Provider by the inferenceTurnRunner bridge
+// (NewInferenceTurnRunner) — that adapter is the one legitimate seam between the
+// two layers, not a leftover to be deleted. Consumers that route (SmartRouter,
+// LazyRouter, ADKCoordinator, cloud-degrade) speak TurnRunner; the inference
+// seam stays free of routing concerns.
+type TurnRunner interface {
 	Process(ctx context.Context, req *Request) (*Response, error)
 	Name() string
 }
 
 // Router defines the interface for a smart router that selects a model provider.
 type Router interface {
-	SelectProvider(req *Request, intent Intent) (ModelProvider, error)
+	SelectProvider(req *Request, intent Intent) (TurnRunner, error)
 	ClassifyIntent(req *Request) (Intent, error)
-	GetModelProviders() map[string]ModelProvider
+	// Tiers returns the two capability tiers as a typed pair. Replaces the old
+	// stringly-typed GetModelProviders() map[string]TurnRunner — consumers now
+	// read t.Open / t.Cloud instead of m["OpenModel"] / m["CloudModel"], so a
+	// typo can't silently return a nil provider.
+	Tiers() Tiers
+}
+
+// Tiers is the typed pair of capability-tier turn runners the router exposes.
+// Open is the local/open-model tier; Cloud is the cloud-vendor tier (nil in
+// local-only deployments or before a cloud profile is configured).
+type Tiers struct {
+	Open  TurnRunner
+	Cloud TurnRunner
 }
 
 // CloudFactory defines a function that creates a Cloud Model Provider.
 // baseURL is optional; when non-empty it overrides the provider's default
 // endpoint (used by Meridian and other Anthropic-compatible local proxies).
-type CloudFactory func(ctx context.Context, provider, model, apiKey, baseURL string) (ModelProvider, error)
+type CloudFactory func(ctx context.Context, provider, model, apiKey, baseURL string) (TurnRunner, error)
 
 const (
 	similarityThreshold = 0.50
@@ -144,7 +167,7 @@ const (
 // SmartRouter implements the Router interface with routing logic based on semantic similarity.
 type SmartRouter struct {
 	mu                 sync.RWMutex
-	ModelProviders     map[string]ModelProvider
+	ModelProviders     map[string]TurnRunner
 	EmbeddingModelName string
 	IntentPrototypes   []PrototypeEmbedding
 	ProviderPrototypes []PrototypeEmbedding
@@ -152,14 +175,20 @@ type SmartRouter struct {
 	CloudFactory       CloudFactory
 }
 
-func (sr *SmartRouter) GetModelProviders() map[string]ModelProvider {
+// Tiers returns the Open/Cloud tiers as a typed pair. The internal keyed map
+// stays an implementation detail of SmartRouter (SetCloudProvider mutates it by
+// key); the public surface is typed.
+func (sr *SmartRouter) Tiers() Tiers {
 	sr.mu.RLock()
 	defer sr.mu.RUnlock()
-	return sr.ModelProviders
+	return Tiers{
+		Open:  sr.ModelProviders["OpenModel"],
+		Cloud: sr.ModelProviders["CloudModel"],
+	}
 }
 
 // SetCloudProvider replaces the cloud model provider at runtime (thread-safe).
-func (sr *SmartRouter) SetCloudProvider(p ModelProvider) {
+func (sr *SmartRouter) SetCloudProvider(p TurnRunner) {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 	sr.ModelProviders["CloudModel"] = p
@@ -168,7 +197,7 @@ func (sr *SmartRouter) SetCloudProvider(p ModelProvider) {
 // NewSmartRouter creates a new SmartRouter by loading prototypes from a file path.
 // Prefer NewSmartRouterFromBytes for production paths — use DefaultPrototypes() for
 // the embedded default. Path-based loading is retained for test overrides.
-func NewSmartRouter(local, cloud ModelProvider, embeddingModel string, embedder engine.EmbeddingService, prototypesPath string, cloudFactory CloudFactory) (*SmartRouter, error) {
+func NewSmartRouter(local, cloud TurnRunner, embeddingModel string, embedder engine.EmbeddingService, prototypesPath string, cloudFactory CloudFactory) (*SmartRouter, error) {
 	yamlBytes, err := ioutil.ReadFile(prototypesPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load prototypes from %s: %w", prototypesPath, err)
@@ -177,14 +206,14 @@ func NewSmartRouter(local, cloud ModelProvider, embeddingModel string, embedder 
 }
 
 // NewSmartRouterFromBytes creates a SmartRouter from in-memory prototypes YAML.
-func NewSmartRouterFromBytes(local, cloud ModelProvider, embeddingModel string, embedder engine.EmbeddingService, yamlBytes []byte, cloudFactory CloudFactory) (*SmartRouter, error) {
+func NewSmartRouterFromBytes(local, cloud TurnRunner, embeddingModel string, embedder engine.EmbeddingService, yamlBytes []byte, cloudFactory CloudFactory) (*SmartRouter, error) {
 	var rawPrototypes Prototypes
 	if err := yaml.Unmarshal(yamlBytes, &rawPrototypes); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal prototypes: %w", err)
 	}
 
 	sr := &SmartRouter{
-		ModelProviders: map[string]ModelProvider{
+		ModelProviders: map[string]TurnRunner{
 			"OpenModel":  local,
 			"CloudModel": cloud,
 		},
@@ -337,7 +366,7 @@ func (sr *SmartRouter) ClassifyIntent(req *Request) (Intent, error) {
 }
 
 // SelectProvider implements the smart routing algorithm using semantic similarity.
-func (sr *SmartRouter) SelectProvider(req *Request, intent Intent) (ModelProvider, error) {
+func (sr *SmartRouter) SelectProvider(req *Request, intent Intent) (TurnRunner, error) {
 	queryText := extractQueryText(req.Input)
 	embedding, err := sr.GetEmbedding(queryText)
 	if err != nil {

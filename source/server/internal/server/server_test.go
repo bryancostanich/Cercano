@@ -45,7 +45,7 @@ func (m *mockProvider) Name() string {
 
 type mockRouter struct{}
 
-func (m *mockRouter) SelectProvider(req *agent.Request, intent agent.Intent) (agent.ModelProvider, error) {
+func (m *mockRouter) SelectProvider(req *agent.Request, intent agent.Intent) (agent.TurnRunner, error) {
 	return &mockProvider{name: "MockLocal"}, nil
 }
 
@@ -53,10 +53,10 @@ func (m *mockRouter) ClassifyIntent(req *agent.Request) (agent.Intent, error) {
 	return agent.IntentChat, nil
 }
 
-func (m *mockRouter) GetModelProviders() map[string]agent.ModelProvider {
-	return map[string]agent.ModelProvider{
-		"OpenModel":  &mockProvider{name: "MockLocal"},
-		"CloudModel": &mockProvider{name: "MockCloud"},
+func (m *mockRouter) Tiers() agent.Tiers {
+	return agent.Tiers{
+		Open:  &mockProvider{name: "MockLocal"},
+		Cloud: &mockProvider{name: "MockCloud"},
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// stubProvider is a minimal ModelProvider used only to populate the map that
+// stubProvider is a minimal TurnRunner used only to populate the map that
 // LazyRouter returns before the real router is built.
 type stubProvider struct{ name string }
 
@@ -28,17 +28,14 @@ func TestLazyRouter_DoesNotBuildUntilUsed(t *testing.T) {
 
 	lr := NewLazyRouter(factory, local, cloud)
 
-	// GetModelProviders must NOT trigger construction — the DirectOpen bypass
-	// relies on reading providers without the router ever being built.
-	providers := lr.GetModelProviders()
-	if len(providers) != 2 {
-		t.Fatalf("expected 2 providers, got %d", len(providers))
+	// Tiers must NOT trigger construction — the DirectOpen bypass relies on
+	// reading providers without the router ever being built.
+	tiers := lr.Tiers()
+	if tiers.Open != local {
+		t.Error("Open provider missing or wrong")
 	}
-	if providers["OpenModel"] != local {
-		t.Error("OpenModel provider missing or wrong")
-	}
-	if providers["CloudModel"] != cloud {
-		t.Error("CloudModel provider missing or wrong")
+	if tiers.Cloud != cloud {
+		t.Error("Cloud provider missing or wrong")
 	}
 
 	if atomic.LoadInt32(&builds) != 0 {
@@ -86,11 +83,10 @@ func TestLazyRouter_SetCloudProvider_BeforeBuild(t *testing.T) {
 	newCloud := &stubProvider{name: "NewCloud"}
 	lr.SetCloudProvider(newCloud)
 
-	// GetModelProviders must reflect the pending cloud provider even though
-	// the real router hasn't been built.
-	providers := lr.GetModelProviders()
-	if providers["CloudModel"] != newCloud {
-		t.Errorf("expected pending CloudModel to be exposed, got %v", providers["CloudModel"])
+	// Tiers must reflect the pending cloud provider even though the real router
+	// hasn't been built.
+	if got := lr.Tiers().Cloud; got != newCloud {
+		t.Errorf("expected pending Cloud to be exposed, got %v", got)
 	}
 }
 

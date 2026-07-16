@@ -1,6 +1,6 @@
 package agent
 
-// CloudAbsentError is returned by a ModelProvider that stands in for an
+// CloudAbsentError is returned by a TurnRunner that stands in for an
 // unconfigured cloud route. The Agent intercepts this and auto-degrades the
 // turn to the local provider while emitting a visible progress notice to the
 // caller — silent mock fallbacks are explicitly forbidden by the CLI spec.

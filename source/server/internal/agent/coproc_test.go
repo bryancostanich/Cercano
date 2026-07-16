@@ -65,7 +65,7 @@ func newDispatchCoprocAgent(modeStr string, localProv, cloudProv *fakeLLMProvide
 	})
 
 	// Agent still needs a Router (for non-coproc paths); use a stub.
-	a := NewAgent(&fakeCoprocRouter{providers: map[string]ModelProvider{}}, nil)
+	a := NewAgent(&fakeCoprocRouter{providers: map[string]TurnRunner{}}, nil)
 	a.SetLocusModeGetter(func() string { return modeStr })
 	a.SetDispatchEngine(eng)
 	return a
@@ -73,15 +73,17 @@ func newDispatchCoprocAgent(modeStr string, localProv, cloudProv *fakeLLMProvide
 
 // fakeCoprocRouter satisfies the Router interface for test Agents that only
 // exercise the coproc path (router not touched by processCoproc).
-type fakeCoprocRouter struct{ providers map[string]ModelProvider }
+type fakeCoprocRouter struct{ providers map[string]TurnRunner }
 
 func (r *fakeCoprocRouter) ClassifyIntent(req *Request) (Intent, error) {
 	return IntentChat, nil
 }
-func (r *fakeCoprocRouter) SelectProvider(req *Request, i Intent) (ModelProvider, error) {
+func (r *fakeCoprocRouter) SelectProvider(req *Request, i Intent) (TurnRunner, error) {
 	return nil, nil
 }
-func (r *fakeCoprocRouter) GetModelProviders() map[string]ModelProvider { return r.providers }
+func (r *fakeCoprocRouter) Tiers() Tiers {
+	return Tiers{Open: r.providers["OpenModel"], Cloud: r.providers["CloudModel"]}
+}
 
 func TestCoprocRoutesPerMode(t *testing.T) {
 	ctx := context.Background()

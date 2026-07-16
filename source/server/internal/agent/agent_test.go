@@ -11,11 +11,11 @@ import (
 
 type mockRouter struct {
 	intent         Intent
-	provider       ModelProvider
-	ModelProviders map[string]ModelProvider
+	provider       TurnRunner
+	ModelProviders map[string]TurnRunner
 }
 
-func (m *mockRouter) SelectProvider(req *Request, intent Intent) (ModelProvider, error) {
+func (m *mockRouter) SelectProvider(req *Request, intent Intent) (TurnRunner, error) {
 	return m.provider, nil
 }
 
@@ -23,8 +23,11 @@ func (m *mockRouter) ClassifyIntent(req *Request) (Intent, error) {
 	return m.intent, nil
 }
 
-func (m *mockRouter) GetModelProviders() map[string]ModelProvider {
-	return m.ModelProviders
+func (m *mockRouter) Tiers() Tiers {
+	return Tiers{
+		Open:  m.ModelProviders["OpenModel"],
+		Cloud: m.ModelProviders["CloudModel"],
+	}
 }
 
 type mockModelProvider struct{ name string }
@@ -230,17 +233,17 @@ func TestAgent_ProcessRequestStream_FallsBackToCoordinate(t *testing.T) {
 	}
 }
 
-// mockStreamingModelProvider implements StreamingModelProvider for agent tests.
-type mockStreamingModelProvider struct {
+// mockStreamingTurnRunner implements StreamingTurnRunner for agent tests.
+type mockStreamingTurnRunner struct {
 	name   string
 	tokens []string
 }
 
-func (m *mockStreamingModelProvider) Process(ctx context.Context, req *Request) (*Response, error) {
+func (m *mockStreamingTurnRunner) Process(ctx context.Context, req *Request) (*Response, error) {
 	return &Response{Output: strings.Join(m.tokens, "")}, nil
 }
-func (m *mockStreamingModelProvider) Name() string { return m.name }
-func (m *mockStreamingModelProvider) ProcessStream(ctx context.Context, req *Request, onToken TokenFunc) (*Response, error) {
+func (m *mockStreamingTurnRunner) Name() string { return m.name }
+func (m *mockStreamingTurnRunner) ProcessStream(ctx context.Context, req *Request, onToken TokenFunc) (*Response, error) {
 	var out strings.Builder
 	for _, tok := range m.tokens {
 		out.WriteString(tok)
@@ -252,7 +255,7 @@ func (m *mockStreamingModelProvider) ProcessStream(ctx context.Context, req *Req
 }
 
 func TestAgent_ProcessRequestStream_ChatWithTokenStreaming(t *testing.T) {
-	provider := &mockStreamingModelProvider{
+	provider := &mockStreamingTurnRunner{
 		name:   "streaming-mock",
 		tokens: []string{"Hello", " ", "world"},
 	}
@@ -303,8 +306,8 @@ func TestAgent_ProcessRequestStream_ChatFallbackToNonStreaming(t *testing.T) {
 }
 
 func TestAgent_ProcessRequestStream_NilTokenCallback(t *testing.T) {
-	// StreamingModelProvider with nil tokenProgress should use blocking path
-	provider := &mockStreamingModelProvider{
+	// StreamingTurnRunner with nil tokenProgress should use blocking path
+	provider := &mockStreamingTurnRunner{
 		name:   "streaming-mock",
 		tokens: []string{"Hello"},
 	}
@@ -328,7 +331,7 @@ func TestAgent_ProcessRequest_ExplicitCloudOverride(t *testing.T) {
 	router := &mockRouter{
 		intent:   IntentChat,
 		provider: &mockModelProvider{name: "OpenModel"},
-		ModelProviders: map[string]ModelProvider{
+		ModelProviders: map[string]TurnRunner{
 			"CloudModel": cloudProvider,
 		},
 	}
@@ -458,7 +461,7 @@ func TestAgent_ProcessRequest_DirectOpen(t *testing.T) {
 	router := &mockRouter{
 		intent:   IntentChat,
 		provider: cloudProvider, // Router would normally pick cloud
-		ModelProviders: map[string]ModelProvider{
+		ModelProviders: map[string]TurnRunner{
 			"OpenModel": openProvider,
 			"CloudModel": cloudProvider,
 		},

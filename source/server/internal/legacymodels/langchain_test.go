@@ -8,7 +8,7 @@ import (
 
 func TestCloudModelProvider_Interface(t *testing.T) {
 	// This will fail to compile initially
-	var _ agent.ModelProvider = (*CloudModelProvider)(nil)
+	var _ agent.TurnRunner = (*CloudModelProvider)(nil)
 }
 
 func TestNewCloudModelProvider_Gemini(t *testing.T) {

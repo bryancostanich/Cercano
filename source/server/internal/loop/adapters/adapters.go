@@ -30,7 +30,7 @@ const (
 	StateKeyLastValidationError = "cercano:last_validation_error"
 )
 
-// NewGeneratorAgent returns an ADK agent that calls a ModelProvider.
+// NewGeneratorAgent returns an ADK agent that calls a TurnRunner.
 //
 // Provider selection:
 //   - Reads StateKeyUseCloud from session state; if true and cloud != nil, uses cloud.
@@ -42,7 +42,7 @@ const (
 //
 // State written (via event.Actions.StateDelta):
 //   - StateKeyLastGeneratedCode = generated output
-func NewGeneratorAgent(local, cloud agentmod.ModelProvider) (agent.Agent, error) {
+func NewGeneratorAgent(local, cloud agentmod.TurnRunner) (agent.Agent, error) {
 	return agent.New(agent.Config{
 		Name:        "generator",
 		Description: "Generates code using a model provider",
@@ -50,7 +50,7 @@ func NewGeneratorAgent(local, cloud agentmod.ModelProvider) (agent.Agent, error)
 	})
 }
 
-func generatorRun(local, cloud agentmod.ModelProvider) func(agent.InvocationContext) iter.Seq2[*session.Event, error] {
+func generatorRun(local, cloud agentmod.TurnRunner) func(agent.InvocationContext) iter.Seq2[*session.Event, error] {
 	return func(ctx agent.InvocationContext) iter.Seq2[*session.Event, error] {
 		return func(yield func(*session.Event, error) bool) {
 			provider := local

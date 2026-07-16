@@ -405,7 +405,7 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 	// Direct local bypass — skip SmartRouter for co-processor tools
 	if req.DirectOpen {
 		fmt.Println("Agent: DirectOpen — bypassing SmartRouter, using local provider.")
-		local := a.router.GetModelProviders()["OpenModel"]
+		local := a.router.Tiers().Open
 		augReq := &Request{Input: augmentedInput, DirectOpen: true, ModelOverride: req.ModelOverride}
 		res, err := local.Process(ctx, augReq)
 		if err != nil {
@@ -435,7 +435,7 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 	// Explicit override: If user says "use cloud", force CloudModel
 	if strings.Contains(strings.ToLower(req.Input), "use cloud") {
 		fmt.Println("Agent: Explicit 'use cloud' detected. Overriding routing to CloudModel.")
-		if cloud, ok := a.router.GetModelProviders()["CloudModel"]; ok {
+		if cloud := a.router.Tiers().Cloud; cloud != nil {
 			provider = cloud
 		}
 	}
@@ -478,7 +478,7 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 		if newRes, ok := a.degradeIfCloudFailure(ctx, provider, augReq, err, nil); ok {
 			res = newRes
 			err = nil
-			provider = a.router.GetModelProviders()["OpenModel"]
+			provider = a.router.Tiers().Open
 		}
 	}
 	if err != nil {
@@ -555,7 +555,7 @@ func (a *Agent) ProcessRequestStream(ctx context.Context, req *Request, progress
 	// Explicit override: If user says "use cloud", force CloudModel
 	if strings.Contains(strings.ToLower(req.Input), "use cloud") {
 		fmt.Println("Agent: Explicit 'use cloud' detected. Overriding routing to CloudModel.")
-		if cloud, ok := a.router.GetModelProviders()["CloudModel"]; ok {
+		if cloud := a.router.Tiers().Cloud; cloud != nil {
 			provider = cloud
 			progress("Selecting Provider... CloudModel (Override)")
 		}
@@ -563,7 +563,7 @@ func (a *Agent) ProcessRequestStream(ctx context.Context, req *Request, progress
 
 	// Announce the chosen route so the client can show a live engine badge.
 	if req.OnRoute != nil {
-		cloudP := a.router.GetModelProviders()["CloudModel"]
+		cloudP := a.router.Tiers().Cloud
 		req.OnRoute(provider.Name(), cloudP != nil && provider == cloudP)
 	}
 
@@ -630,7 +630,7 @@ func (a *Agent) ProcessRequestStream(ctx context.Context, req *Request, progress
 	}
 
 	var res *Response
-	if sp, ok := provider.(StreamingModelProvider); ok && tokenProgress != nil {
+	if sp, ok := provider.(StreamingTurnRunner); ok && tokenProgress != nil {
 		res, err = sp.ProcessStream(ctx, augReq, tokenProgress)
 	} else {
 		res, err = provider.Process(ctx, augReq)
@@ -639,7 +639,7 @@ func (a *Agent) ProcessRequestStream(ctx context.Context, req *Request, progress
 		if newRes, ok := a.degradeIfCloudFailure(ctx, provider, augReq, err, progress); ok {
 			res = newRes
 			err = nil
-			provider = a.router.GetModelProviders()["OpenModel"]
+			provider = a.router.Tiers().Open
 		}
 	}
 	if err != nil {

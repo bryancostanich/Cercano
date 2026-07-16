@@ -9,7 +9,7 @@ import (
 	"google.golang.org/genai"
 )
 
-// mockStreamingProvider implements StreamingModelProvider for testing.
+// mockStreamingProvider implements StreamingTurnRunner for testing.
 type mockStreamingProvider struct {
 	name   string
 	tokens []string
@@ -30,11 +30,11 @@ func (m *mockStreamingProvider) ProcessStream(ctx context.Context, req *Request,
 	return &Response{Output: accumulated.String()}, nil
 }
 
-func TestStreamingModelProvider_InterfaceSatisfaction(t *testing.T) {
-	var _ StreamingModelProvider = &mockStreamingProvider{}
+func TestStreamingTurnRunner_InterfaceSatisfaction(t *testing.T) {
+	var _ StreamingTurnRunner = &mockStreamingProvider{}
 }
 
-func TestStreamingModelProvider_TokenOrdering(t *testing.T) {
+func TestStreamingTurnRunner_TokenOrdering(t *testing.T) {
 	provider := &mockStreamingProvider{
 		name:   "test",
 		tokens: []string{"Hello", " ", "world", "!"},

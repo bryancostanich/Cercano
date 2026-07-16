@@ -160,9 +160,9 @@ func TestADKCoordinator_Escalation(t *testing.T) {
 	_ = coord // suppress unused warning; coord2 is used above
 }
 
-// callTrackingProvider wraps a ModelProvider and invokes a callback on each Process call.
+// callTrackingProvider wraps a TurnRunner and invokes a callback on each Process call.
 type callTrackingProvider struct {
-	inner  agentmod.ModelProvider
+	inner  agentmod.TurnRunner
 	onCall func()
 }
 

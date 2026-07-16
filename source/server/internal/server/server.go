@@ -65,8 +65,8 @@ import (
 // needs to propagate a runtime cloud-provider swap. Both *agent.SmartRouter
 // and *agent.LazyRouter satisfy this.
 type RouterCloudUpdater interface {
-	SetCloudProvider(p agent.ModelProvider)
-	GetModelProviders() map[string]agent.ModelProvider
+	SetCloudProvider(p agent.TurnRunner)
+	Tiers() agent.Tiers
 }
 
 // McpManager is the subset of *mcphost.Manager the RPC handlers use. An
@@ -1505,7 +1505,7 @@ func (s *Server) ElideContext(ctx context.Context, req *proto.ElideContextReques
 func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*proto.GetConfigResponse, error) {
 	state := "absent"
 	if r := s.providerSvc.Router(); r != nil {
-		if cp, ok := r.GetModelProviders()["CloudModel"]; ok && cp != nil {
+		if cp := r.Tiers().Cloud; cp != nil {
 			if cp.Name() != "NONE" {
 				state = "ok"
 			}

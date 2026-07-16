@@ -17,7 +17,7 @@ import (
 	"cercano/source/server/internal/tools"
 )
 
-// ---- stub ModelProvider ----
+// ---- stub TurnRunner ----
 
 type stubProvider struct {
 	name      string

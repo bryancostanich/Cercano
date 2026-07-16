@@ -17,12 +17,12 @@ import (
 // "cloud … — degrading to local" message. Token streaming is not retried
 // (the per-token channel belongs to the original call); the response Output
 // field is filled by the local retry's blocking Process call.
-func (a *Agent) degradeIfCloudFailure(ctx context.Context, provider ModelProvider, req *Request, originalErr error, progress ProgressFunc) (*Response, bool) {
+func (a *Agent) degradeIfCloudFailure(ctx context.Context, provider TurnRunner, req *Request, originalErr error, progress ProgressFunc) (*Response, bool) {
 	if originalErr == nil {
 		return nil, false
 	}
-	local, ok := a.router.GetModelProviders()["OpenModel"]
-	if !ok || provider == local {
+	local := a.router.Tiers().Open
+	if local == nil || provider == local {
 		return nil, false
 	}
 

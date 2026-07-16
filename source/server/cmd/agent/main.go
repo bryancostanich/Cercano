@@ -84,7 +84,7 @@ func main() {
 	// Cloud provider construction: only build a real one when there's enough
 	// config to actually reach a cloud (API key OR a proxy baseURL). Otherwise
 	// use a sentinel that auto-degrades to local at turn time with a notice.
-	var cloudProvider agent.ModelProvider
+	var cloudProvider agent.TurnRunner
 	if cfg.CloudProvider != "" && (cfg.CloudAPIKey != "" || cfg.CloudBaseURL != "") {
 		fmt.Printf("Main: Initializing Cloud Provider (%s)...\n", cfg.CloudProvider)
 		cp, err := legacymodels.NewCloudModelProvider(context.Background(), cfg.CloudProvider, cfg.CloudModel, cfg.CloudAPIKey, cfg.CloudBaseURL)
@@ -106,7 +106,7 @@ func main() {
 	sessionSvc := session.InMemoryService()
 	coordinator := loop.NewADKCoordinator(openProvider, cloudProvider, validator, sessionSvc)
 
-	smartRouter, err := agent.NewSmartRouterFromBytes(openProvider, cloudProvider, cfg.OpenEmbeddingModel(), ollamaEng, agent.DefaultPrototypes(), func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.ModelProvider, error) {
+	smartRouter, err := agent.NewSmartRouterFromBytes(openProvider, cloudProvider, cfg.OpenEmbeddingModel(), ollamaEng, agent.DefaultPrototypes(), func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.TurnRunner, error) {
 		return legacymodels.NewCloudModelProvider(ctx, provider, model, apiKey, baseURL)
 	})
 	if err != nil {
@@ -124,7 +124,7 @@ func main() {
 	convStore := agent.NewConversationStore(sessionSvc, 3)
 	orchestrator := agent.NewAgent(smartRouter, coordinator, agent.WithConversationStore(convStore))
 
-	cloudFactory := func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.ModelProvider, error) {
+	cloudFactory := func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.TurnRunner, error) {
 		return legacymodels.NewCloudModelProvider(ctx, provider, model, apiKey, baseURL)
 	}
 

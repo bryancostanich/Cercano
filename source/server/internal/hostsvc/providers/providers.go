@@ -35,8 +35,8 @@ import (
 // needs to propagate a runtime cloud-provider swap. Mirrored from internal/server
 // so providers does not import the server package.
 type RouterCloudUpdater interface {
-	SetCloudProvider(p agent.ModelProvider)
-	GetModelProviders() map[string]agent.ModelProvider
+	SetCloudProvider(p agent.TurnRunner)
+	Tiers() agent.Tiers
 }
 
 // Resolver is the interface the front door (Server) depends on for
@@ -351,7 +351,7 @@ func (p *service) rebuildCloud() error {
 	// provider. A missing/unbuildable backup leaves the primary bare.
 	prov = p.wrapBackup(prov, prof.Name, c)
 	p.SetCloudLLMProvider(prov)
-	mp := agent.NewLLMModelProvider(prov, prof.Model)
+	mp := agent.NewInferenceTurnRunner(prov, prof.Model)
 	p.router.SetCloudProvider(mp)
 	if p.coordinator != nil {
 		p.coordinator.SetCloudProvider(mp)

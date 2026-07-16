@@ -79,7 +79,7 @@ func TestCoprocDispatchNoProviderError(t *testing.T) {
 	)
 	eng.SetModelFor(func(isCloud bool, _ config.Tier) string { return "local-model" })
 
-	a := NewAgent(&fakeCoprocRouter{providers: map[string]ModelProvider{}}, nil)
+	a := NewAgent(&fakeCoprocRouter{providers: map[string]TurnRunner{}}, nil)
 	a.SetLocusModeGetter(func() string { return "open_only" })
 	a.SetDispatchEngine(eng)
 
@@ -113,7 +113,7 @@ func TestCoprocDispatchModelOverride(t *testing.T) {
 
 // TestCoprocDispatchNoEngine verifies a clear error when engine not configured.
 func TestCoprocDispatchNoEngine(t *testing.T) {
-	a := NewAgent(&fakeCoprocRouter{providers: map[string]ModelProvider{}}, nil)
+	a := NewAgent(&fakeCoprocRouter{providers: map[string]TurnRunner{}}, nil)
 	// Deliberately do NOT call SetDispatchEngine.
 
 	_, err := a.ProcessRequest(context.Background(), &Request{Input: "hello", Coproc: true})

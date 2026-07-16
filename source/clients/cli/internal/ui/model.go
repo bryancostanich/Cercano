@@ -153,7 +153,8 @@ type Model struct {
 	bannerTickActive   bool
 	lastLatencyMs      int
 	modelMaxTokens     int
-	lastModel          string // local model name (from config)
+	openModel          string // configured local/open model name, used for the o: header chip
+	lastModel          string // model/provider that served the last completed turn
 	cloudModel         string // cloud model name (from config); empty when no cloud configured
 	activeCloudProfile string // active cloud profile name, used for the c: header chip
 	cloudState         string // "" = unknown, "NONE" = absent, "ok" = real cloud configured
@@ -1611,7 +1612,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case configLoadedMsg:
 		if msg.OpenModel != "" {
-			m.lastModel = msg.OpenModel
+			m.openModel = msg.OpenModel
+			// Keep lastModel initialized for legacy telemetry/tests until a real
+			// turn completes, but do not let it drive the o: header chip.
+			if m.lastModel == "" {
+				m.lastModel = msg.OpenModel
+			}
 		}
 		// currentLocalRuntime is used by the install modal's OfferSwitch
 		// state to decide whether to prompt "switch runtime after
@@ -4210,9 +4216,22 @@ func (m Model) renderHeader() string {
 			m.styles.BorderDim.Render(" │ "),
 		)
 	}
+	openChip := m.openModel
+	openChipStyle := m.styles.Accent
+	if m.openRuntimeStatus != nil && m.openRuntimeStatus.Downloading {
+		// The top-bar o: chip is the primary local-runtime state surface. If the
+		// configured open model is actively downloading, say so here; do not show
+		// the last served model (which may be a cloud profile such as
+		// openai-responses).
+		openChip = "downloading"
+		openChipStyle = m.styles.BorderDim
+	}
+	if openChip == "" {
+		openChip = m.lastModel
+	}
 	rightPieces = append(rightPieces,
 		m.styles.Info.Render("o:"),
-		m.styles.Accent.Render(abbreviateModel(m.lastModel)),
+		openChipStyle.Render(abbreviateModel(openChip)),
 	)
 	right := lipgloss.JoinHorizontal(lipgloss.Left, rightPieces...)
 

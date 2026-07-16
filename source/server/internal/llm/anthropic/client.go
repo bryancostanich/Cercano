@@ -3,6 +3,8 @@ package anthropic
 import (
 	"context"
 	"net/http"
+	"strings"
+	"sync"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -40,6 +42,31 @@ type Client struct {
 	// Non-empty only on the subscription route (the Claude Code identity),
 	// where Anthropic gates access on the leading system block.
 	systemPrefix string
+	// tempDeprecated remembers models that rejected an explicit temperature
+	// ("`temperature` is deprecated for this model"), so later calls skip the
+	// doomed attempt instead of paying a 400 round-trip each time.
+	tempDeprecated modelSet
+}
+
+// modelSet is a small concurrency-safe string set.
+type modelSet struct {
+	mu sync.Mutex
+	m  map[string]bool
+}
+
+func (s *modelSet) Load(k string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.m[k]
+}
+
+func (s *modelSet) Store(k string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.m == nil {
+		s.m = map[string]bool{}
+	}
+	s.m[k] = true
 }
 
 func NewClient(cfg Config) *Client {
@@ -116,8 +143,28 @@ func (c *Client) buildParams(req ChatRequest) sdk.MessageNewParams {
 	return params
 }
 
+// isTemperatureDeprecated matches the API rejection newer models return for
+// an explicit temperature ("`temperature` is deprecated for this model.").
+func isTemperatureDeprecated(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "temperature") && strings.Contains(msg, "deprecated")
+}
+
 func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+	// Some models reject the temperature parameter outright — greedy decoding
+	// is unattainable there, and callers that request it (the compaction
+	// summarizer) prefer a default-temperature completion over a failed call.
+	// Skip the doomed attempt for models we've already seen reject it; on a
+	// fresh rejection, retry once without and remember.
+	if req.Temperature != nil && c.tempDeprecated.Load(req.Model) {
+		req.Temperature = nil
+	}
 	resp, err := c.sdk.Messages.New(ctx, c.buildParams(req))
+	if err != nil && req.Temperature != nil && isTemperatureDeprecated(err) {
+		c.tempDeprecated.Store(req.Model)
+		req.Temperature = nil
+		resp, err = c.sdk.Messages.New(ctx, c.buildParams(req))
+	}
 	if err != nil {
 		return ChatResponse{}, err
 	}

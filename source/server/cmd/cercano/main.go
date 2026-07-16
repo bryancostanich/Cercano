@@ -237,6 +237,10 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		recapGen := recap.New(persistentStore, recapComplete, 8*time.Second, 12)
 		agentOpts = append(agentOpts, agent.WithRecapScheduler(recapGen))
 	}
+	// cloudTierModel late-binds the server's live tier→cloud-model resolver
+	// (assigned after srv is constructed) so the compaction summarizer's
+	// cloud fallback rides the economy tier instead of the premium chat model.
+	var cloudTierModel func(config.Tier) string
 	var compGen *compactiongen.Generator
 	if persistentStore != nil {
 		// Summarizer model precedence: explicit compaction.summarizer_model →
@@ -286,8 +290,16 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 				// the original local error. No ModelOverride — the cloud provider
 				// uses its configured model, not the local summarizer id.
 				if cloud := lazyRouter.GetModelProviders()["CloudModel"]; cloud != nil {
-					fmt.Fprintf(os.Stderr, "[compaction] local summarizer failed (%v) — falling back to cloud\n", err)
 					cloudReq := &agent.Request{Input: compaction.BuildSummaryPrompt(msgs), Temperature: greedy.Temperature}
+					// Summarization is fast_light_text work — resolve the
+					// vendor's economy model (live, follows profile switches)
+					// instead of burning the premium chat model on it.
+					if cloudTierModel != nil {
+						if m := cloudTierModel(config.TierFastLightText); m != "" {
+							cloudReq.ModelOverride = m
+						}
+					}
+					fmt.Fprintf(os.Stderr, "[compaction] local summarizer failed (%v) — falling back to cloud (model %q)\n", err, cloudReq.ModelOverride)
 					cresp, cerr := cloud.Process(ctx, cloudReq)
 					if cerr == nil {
 						return parseLogged(cresp.Output, "cloud fallback"), nil
@@ -360,6 +372,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		grpc.ChainStreamInterceptor(server.RecoveryStreamInterceptor()),
 	)
 	srv := server.NewServer(orchestrator, openProvider, lazyRouter, coordinator, cloudFactory, registry)
+	cloudTierModel = srv.CloudModelForTier
 	srv.SetRuntimeManager(runtimeManager)
 
 	// Attach the online-catalog manager so the runtime dashboard has

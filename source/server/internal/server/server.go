@@ -430,6 +430,19 @@ func (s *Server) activeProfile() (config.CloudProfile, bool) {
 	return s.cfgSvc.ActiveProfile()
 }
 
+// CloudModelForTier resolves a capability tier's cloud model against the LIVE
+// active profile and its vendor cost table — e.g. the compaction summarizer's
+// cloud fallback rides fast_light_text, which maps to the vendor's economy
+// model rather than the (premium) chat model. Empty when no profile is active;
+// the caller then omits the override and the provider uses its default.
+func (s *Server) CloudModelForTier(t config.Tier) string {
+	prof, ok := s.activeProfile()
+	if !ok {
+		return ""
+	}
+	return s.cfgSvc.Get().ModelProfiles.ResolveCloudModelForTier(prof, t)
+}
+
 // profileByName looks up a profile by name.
 func profileByName(profiles []config.CloudProfile, name string) (config.CloudProfile, bool) {
 	for _, p := range profiles {

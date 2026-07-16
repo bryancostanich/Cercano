@@ -115,6 +115,71 @@ func TestClient_BuildParams_FloorsUnsetMaxTokens(t *testing.T) {
 	}
 }
 
+func TestClient_Chat_RetriesWithoutDeprecatedTemperature(t *testing.T) {
+	// Newer Anthropic models reject the temperature parameter outright
+	// ("`temperature` is deprecated for this model"). Greedy decoding is
+	// unattainable there — the adapter must retry once without temperature
+	// instead of failing the call, and remember the model so subsequent
+	// calls skip the doomed attempt.
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(b))
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(string(b), `"temperature"`) {
+			w.WriteHeader(400)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"` + "`temperature`" + ` is deprecated for this model."}}`))
+			return
+		}
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"id":"m_1","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"model":"claude","stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":3}}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{BaseURL: srv.URL, APIKey: "dummy", Model: "claude"})
+	zero := 0.0
+	req := ChatRequest{
+		Model: "claude-opus-4-8", MaxTokens: 10, Temperature: &zero,
+		Messages: []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "hi"}}}},
+	}
+
+	resp, err := c.Chat(t.Context(), req)
+	if err != nil {
+		t.Fatalf("expected retry without temperature to succeed, got: %v", err)
+	}
+	if len(resp.Blocks) != 1 || resp.Blocks[0].Text != "ok" {
+		t.Fatalf("unexpected response: %+v", resp.Blocks)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("expected 2 requests (rejected + retry), got %d", len(bodies))
+	}
+	if strings.Contains(bodies[1], `"temperature"`) {
+		t.Fatalf("retry must omit temperature: %s", bodies[1])
+	}
+
+	// Second call to the same model: the adapter remembers and goes straight
+	// to the no-temperature request.
+	bodies = nil
+	if _, err := c.Chat(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	if len(bodies) != 1 || strings.Contains(bodies[0], `"temperature"`) {
+		t.Fatalf("expected a single temperature-free request, got %d: %v", len(bodies), bodies)
+	}
+
+	// A genuinely different 400 must NOT be retried or masked.
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: must be positive"}}`))
+	}))
+	defer srv2.Close()
+	c2 := NewClient(Config{BaseURL: srv2.URL, APIKey: "dummy", Model: "claude"})
+	if _, err := c2.Chat(t.Context(), req); err == nil || !strings.Contains(err.Error(), "max_tokens") {
+		t.Fatalf("unrelated 400 must surface unchanged, got: %v", err)
+	}
+}
+
 func TestClient_BuildParams_TemperatureZeroReachesWire(t *testing.T) {
 	// Temperature is a pointer: nil = provider default (omit from the wire),
 	// &0 = greedy decoding, which MUST be sent — the compaction summarizer

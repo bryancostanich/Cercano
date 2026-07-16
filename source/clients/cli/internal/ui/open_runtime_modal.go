@@ -255,35 +255,23 @@ func installErrorIsMissingModel(errMsg string) bool {
 }
 
 // View renders the modal as a bordered box sized to fit the given terminal
-// frame. Width caps at 80 cells to keep the box readable; height caps at
-// max(20, frameHeight-6) to reserve room for header + prompt.
+// frame. Most states stay compact and content-sized; install/log states keep
+// a taller pane so streamed output has room to breathe.
 func (mo *openRuntimeInstallModal) View(styles theme.Styles, palette theme.Palette, frameW, frameH int) string {
 	if mo.picker != nil {
 		return mo.picker.ViewPanel(pickerBoxWidth(frameW), palette, styles)
 	}
-	// Sizing.
-	boxW := 80
-	if frameW-4 < boxW {
-		boxW = frameW - 4
-	}
-	if boxW < 40 {
-		boxW = 40
-	}
-	boxH := frameH - 6
-	if boxH < 12 {
-		boxH = 12
-	}
-	if boxH > 24 {
-		boxH = 24
-	}
+	boxW, boxH := mo.modalDim(frameW, frameH)
 
 	// Content.
 	var sections []string
 	sections = append(sections, mo.renderHeader(styles))
 	sections = append(sections, "")
 	sections = append(sections, mo.renderBody(styles, boxW-4)) // -4 for border padding
-	sections = append(sections, "")
-	sections = append(sections, mo.renderLogs(styles, boxW-4, boxH-11))
+	if mo.shouldRenderLogPane() {
+		sections = append(sections, "")
+		sections = append(sections, mo.renderLogs(styles, boxW-4, boxH-11))
+	}
 	sections = append(sections, "")
 	sections = append(sections, mo.renderActions(styles))
 
@@ -306,22 +294,43 @@ func (mo *openRuntimeInstallModal) modalDim(frameW, frameH int) (int, int) {
 		// panel's line count.
 		return pickerBoxWidth(frameW), 0
 	}
-	// Match View sizing exactly.
 	boxW := 80
+	if mo.state == runtimeModalOfferSwitch {
+		boxW = 72
+	}
 	if frameW-4 < boxW {
 		boxW = frameW - 4
 	}
 	if boxW < 40 {
 		boxW = 40
 	}
-	boxH := frameH - 6
-	if boxH < 12 {
-		boxH = 12
+
+	boxH := 12
+	if mo.shouldRenderLogPane() {
+		boxH = frameH - 6
+		if boxH < 12 {
+			boxH = 12
+		}
+		if boxH > 24 {
+			boxH = 24
+		}
 	}
-	if boxH > 24 {
-		boxH = 24
+	if frameH-2 < boxH {
+		boxH = frameH - 2
+	}
+	if boxH < 8 {
+		boxH = 8
 	}
 	return boxW, boxH
+}
+
+func (mo *openRuntimeInstallModal) shouldRenderLogPane() bool {
+	switch mo.state {
+	case runtimeModalRunning, runtimeModalFailed, runtimeModalScanningModels:
+		return true
+	default:
+		return false
+	}
 }
 
 func (mo *openRuntimeInstallModal) renderHeader(styles theme.Styles) string {
@@ -354,7 +363,7 @@ func (mo *openRuntimeInstallModal) renderHeader(styles theme.Styles) string {
 		}
 	case runtimeModalOfferSwitch:
 		if mo.offerRuntime == "mistralrs" {
-			title = "mistral.rs model not downloaded"
+			title = "Switch to mistral.rs?"
 		} else {
 			title = "llama-server ready — switch to it?"
 		}
@@ -365,6 +374,10 @@ func (mo *openRuntimeInstallModal) renderHeader(styles theme.Styles) string {
 }
 
 func (mo *openRuntimeInstallModal) renderBody(styles theme.Styles, w int) string {
+	if mo.state == runtimeModalOfferSwitch && mo.offerRuntime == "mistralrs" && mo.status.Missing == "model" {
+		return mo.renderMistralDownloadOfferBody(styles, w)
+	}
+
 	msg := strings.TrimSpace(mo.status.Message)
 	if msg == "" {
 		msg = "Detection couldn't find the required prerequisites."
@@ -381,6 +394,39 @@ func (mo *openRuntimeInstallModal) renderBody(styles theme.Styles, w int) string
 		Foreground(styles.Primary.GetForeground()).
 		Render("  " + cmd)
 	return body + "\n" + label + "\n" + block
+}
+
+func (mo *openRuntimeInstallModal) renderMistralDownloadOfferBody(styles theme.Styles, w int) string {
+	model := strings.TrimSpace(mo.status.DefaultModel)
+	if model == "" {
+		model = "the configured default model"
+	}
+	lines := []string{
+		"mistral.rs needs its default model before it can run:",
+		"",
+		"  " + model,
+		"",
+		"Cercano will switch runtimes now and download the model in the background.",
+	}
+	for i, line := range lines {
+		if ansi.StringWidth(line) > w {
+			lines[i] = ansi.Wrap(line, w, "")
+		}
+	}
+	return styles.Muted.Render(strings.Join(lines, "\n"))
+}
+
+func runtimeDisplayName(runtime string) string {
+	switch runtime {
+	case "llama_server":
+		return "llama-server"
+	case "mistralrs":
+		return "mistral.rs"
+	case "":
+		return "ollama"
+	default:
+		return runtime
+	}
 }
 
 func (mo *openRuntimeInstallModal) renderLogs(styles theme.Styles, w, h int) string {
@@ -452,18 +498,12 @@ func (mo *openRuntimeInstallModal) renderActions(styles theme.Styles) string {
 		// Ask explicitly rather than deciding. For bundled runtimes with a
 		// configured-but-missing default model, switching starts the server-side
 		// background download and the top-bar chip moves to o:downloading.
-		label := "[Enter] Switch to " + mo.offerRuntime
+		label := "[Enter] Switch to " + runtimeDisplayName(mo.offerRuntime)
 		if mo.offerRuntime == "mistralrs" && mo.status.Missing == "model" {
 			label = "[Enter] Switch and download"
 		}
 		primary := styles.Success.Bold(true).Render(label)
-		keepLabel := "[Esc] Keep " + mo.activeRuntime
-		if mo.activeRuntime == "" {
-			// currentLocalRuntime is empty by default (server treats
-			// empty as ollama). Show that to the user rather than an
-			// awkward blank.
-			keepLabel = "[Esc] Keep ollama"
-		}
+		keepLabel := "[Esc] Stay on " + runtimeDisplayName(mo.activeRuntime)
 		secondary := styles.Muted.Render(keepLabel)
 		return primary + "    " + secondary
 	}

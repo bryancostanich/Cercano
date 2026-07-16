@@ -193,8 +193,16 @@ func TestOpenRuntimeModal_MistralMissingModelWithDefaultOffersSwitchDownload(t *
 		t.Fatalf("offerRuntime = %q, want mistralrs", nm.openRuntimeModal.offerRuntime)
 	}
 	out := stripAnsiCSI(nm.openRuntimeModal.View(nm.styles, nm.palette, 100, 30))
-	if !strings.Contains(out, "mistral.rs model not downloaded") || !strings.Contains(out, "Switch and download") {
-		t.Fatalf("modal should explain mistral download confirmation, got:\n%s", out)
+	for _, want := range []string{
+		"Switch to mistral.rs?",
+		"mistral.rs needs its default model before it can run",
+		"mistralrs:catalog:qwen3-14b",
+		"Switch and download",
+		"Stay on llama-server",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("modal should include %q, got:\n%s", want, out)
+		}
 	}
 }
 

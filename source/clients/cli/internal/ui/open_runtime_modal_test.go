@@ -68,23 +68,23 @@ func TestOpenRuntimeModal_ViewIncludesTitleAndSuggestedCommand(t *testing.T) {
 
 func TestOpenRuntimeModal_DimReflectsFrameSize(t *testing.T) {
 	mo := newOpenRuntimeInstallModal(agentclient.OpenRuntimeStatus{})
-	// Wide frame: box clamps to 80.
+	// Wide frame: compact states clamp to 80x12 instead of filling the screen.
 	w, h := mo.modalDim(200, 60)
 	if w != 80 {
 		t.Fatalf("wide frame width = %d, want clamp at 80", w)
 	}
-	if h > 24 {
-		t.Fatalf("wide frame height = %d, want clamp at 24", h)
+	if h != 12 {
+		t.Fatalf("wide frame height = %d, want compact height 12", h)
 	}
 	// Narrow frame: width shrinks but floors at 40.
 	w, _ = mo.modalDim(50, 40)
 	if w > 46 || w < 40 {
 		t.Fatalf("narrow frame width = %d, want 40..46 range", w)
 	}
-	// Very short frame: height floors at 12.
+	// Very short frame: height respects the frame so the modal still fits.
 	_, h = mo.modalDim(120, 10)
-	if h != 12 {
-		t.Fatalf("short frame height = %d, want floor at 12", h)
+	if h != 8 {
+		t.Fatalf("short frame height = %d, want frame-limited height 8", h)
 	}
 }
 
@@ -189,10 +189,10 @@ func TestLocalRuntimeModal_OfferSwitchTitleAndActions(t *testing.T) {
 	}
 	// Actions must name both options with the runtimes explicit so the
 	// user knows exactly what happens on each key.
-	if !strings.Contains(view, "[Enter] Switch to llama_server") {
+	if !strings.Contains(view, "[Enter] Switch to llama-server") {
 		t.Fatalf("OfferSwitch missing Switch-to action:\n%s", view)
 	}
-	if !strings.Contains(view, "[Esc] Keep ollama") {
+	if !strings.Contains(view, "[Esc] Stay on ollama") {
 		t.Fatalf("OfferSwitch must name what user is keeping if they decline:\n%s", view)
 	}
 }
@@ -206,7 +206,7 @@ func TestLocalRuntimeModal_OfferSwitchDefaultsToOllamaWhenActiveEmpty(t *testing
 	mo := newOpenRuntimeInstallModal(agentclient.OpenRuntimeStatus{Missing: "binary"})
 	mo.setOfferSwitch("llama_server", "")
 	view := mo.View(styles, pal, 120, 40)
-	if !strings.Contains(view, "[Esc] Keep ollama") {
+	if !strings.Contains(view, "[Esc] Stay on ollama") {
 		t.Fatalf("empty active runtime must render as ollama:\n%s", view)
 	}
 }

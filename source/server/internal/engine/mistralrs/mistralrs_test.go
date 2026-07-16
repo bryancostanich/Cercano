@@ -53,7 +53,7 @@ func TestComplete_StartsRuntimeAndCallsChatCompletions(t *testing.T) {
 	if manager.startCount != 1 {
 		t.Fatalf("expected runtime start, got %d", manager.startCount)
 	}
-	if sawPayload.Model != "mistralrs:model-a" {
+	if sawPayload.Model != "default" {
 		t.Fatalf("payload model = %q", sawPayload.Model)
 	}
 	if len(sawPayload.Messages) != 2 || sawPayload.Messages[0].Role != "system" || sawPayload.Messages[1].Content != "hi" {

@@ -242,6 +242,18 @@ func runtimeWantedModels(cfg config.Config, runtime string) []string {
 // manager spawns downloads in their own goroutines), so it never delays the
 // UpdateConfig response; enqueue failures are logged, not fatal (the switch
 // still lands and the not-ready chip stays lit until the fetch completes).
+
+func rebindOpenTiersForRuntime(cfg *config.Config, runtime string) string {
+	model := runtimeDefaultModel(*cfg, strings.TrimSpace(runtime))
+	if model == "" {
+		return ""
+	}
+	cfg.Models.Tiers.Everyday.Open = model
+	cfg.Models.Tiers.FastLight.Open = model
+	cfg.Models.Tiers.FastLightText.Open = model
+	return model
+}
+
 func (s *Server) ensureRuntimeModelsPresent(ctx context.Context, cfg config.Config, runtime string) {
 	rm := s.runtimeMgr()
 	if rm == nil {
@@ -1236,6 +1248,11 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	}
 	if req.OpenRuntime != "" {
 		c.OpenRuntime = req.OpenRuntime
+		if req.OpenModel == "" {
+			if rebound := rebindOpenTiersForRuntime(&c, req.OpenRuntime); rebound != "" {
+				s.broadcastConfigChanged("local_model", rebound)
+			}
+		}
 		s.broadcastConfigChanged("local_runtime", req.OpenRuntime)
 	}
 	if req.OpenDefaultModel != "" {

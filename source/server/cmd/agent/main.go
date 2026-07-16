@@ -15,11 +15,13 @@ import (
 	"cercano/source/server/internal/cloudfactory"
 	"cercano/source/server/internal/engine"
 	llamaengine "cercano/source/server/internal/engine/llamaserver"
+	mistralengine "cercano/source/server/internal/engine/mistralrs"
 	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/inference"
 	ollamallm "cercano/source/server/internal/llm/ollama"
 	"cercano/source/server/internal/localruntime"
 	runtimellama "cercano/source/server/internal/localruntime/llamaserver"
+	runtimemistralrs "cercano/source/server/internal/localruntime/mistralrs"
 	"cercano/source/server/internal/loop"
 	"cercano/source/server/internal/server"
 	"cercano/source/server/internal/tools"
@@ -78,11 +80,16 @@ func main() {
 	runtimeManager := buildRuntimeManager(cfg)
 	llamaEng := llamaengine.NewEngine(runtimeManager)
 	registry.RegisterEngine(llamaEng)
+	mistralEng := mistralengine.NewEngine(runtimeManager)
+	registry.RegisterEngine(mistralEng)
 
 	// Initialize Providers
 	openProviderFor := func(c config.Config) inference.Provider {
 		if strings.EqualFold(c.OpenRuntime, "llama_server") {
 			return llamaengine.NewLLMProvider(llamaEng)
+		}
+		if strings.EqualFold(c.OpenRuntime, "mistralrs") {
+			return mistralengine.NewLLMProvider(mistralEng)
 		}
 		return ollamallm.NewClient(ollamallm.Config{
 			BaseURL: c.OllamaURL,
@@ -182,31 +189,46 @@ func buildRuntimeManager(cfg config.Config) localruntime.Manager {
 	// cleanup — before the enabled check, because orphans from when the
 	// runtime WAS enabled hold GPU memory regardless of current config.
 	provider.SweepOrphans(manager)
-	if !llamaServerEnabled(cfg) {
-		return manager
-	}
 	manager.RegisterProvider(provider)
-	if strings.TrimSpace(cfg.LlamaServer.DefaultModel) == "" {
+
+	mistralProvider := runtimemistralrs.NewProvider(cfg.MistralRS)
+	mistralProvider.SweepOrphans(manager)
+	manager.RegisterProvider(mistralProvider)
+	manager.WriteLog(localruntime.LogEntry{
+		Source:  "cercano.runtime.mistralrs",
+		Level:   "info",
+		Message: "mistral.rs provider registered",
+	})
+
+	runtime, model := activeRuntimeDefaultModel(cfg)
+	if model == "" {
 		manager.WriteLog(localruntime.LogEntry{
-			Source:  "cercano.runtime.llama_server",
+			Source:  "cercano.runtime." + runtime,
 			Level:   "info",
-			Message: "llama-server provider registered; no default_model configured",
+			Message: runtime + " provider registered; no default_model configured",
 		})
 		return manager
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
-	if _, err := manager.Start(ctx, localruntime.StartRequest{
-		Runtime: "llama_server",
-		ModelID: cfg.LlamaServer.DefaultModel,
-	}); err != nil {
+	if _, err := manager.Start(ctx, localruntime.StartRequest{Runtime: runtime, ModelID: model}); err != nil {
 		manager.WriteLog(localruntime.LogEntry{
-			Source:  "cercano.runtime.llama_server",
+			Source:  "cercano.runtime." + runtime,
 			Level:   "error",
-			Message: "failed to start llama-server: " + err.Error(),
+			Message: "failed to start " + runtime + ": " + err.Error(),
 		})
 	}
 	return manager
+}
+
+func activeRuntimeDefaultModel(cfg config.Config) (string, string) {
+	if strings.EqualFold(cfg.OpenRuntime, "mistralrs") {
+		return "mistralrs", strings.TrimSpace(cfg.MistralRS.DefaultModel)
+	}
+	if llamaServerEnabled(cfg) {
+		return "llama_server", strings.TrimSpace(cfg.LlamaServer.DefaultModel)
+	}
+	return "ollama", ""
 }
 
 // sweepStalePartials removes .part files older than a week from the
@@ -238,6 +260,12 @@ func llamaServerEnabled(cfg config.Config) bool {
 }
 
 func openTurnModel(cfg config.Config) string {
+	if strings.EqualFold(cfg.OpenRuntime, "mistralrs") {
+		model := strings.TrimSpace(cfg.MistralRS.DefaultModel)
+		if model != "" {
+			return model
+		}
+	}
 	if strings.EqualFold(cfg.OpenRuntime, "llama_server") {
 		model := strings.TrimSpace(cfg.LlamaServer.DefaultModel)
 		if model != "" {

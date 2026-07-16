@@ -617,15 +617,20 @@ func buildRuntimeManager(cfg config.Config) localruntime.Manager {
 	provider.SweepOrphans(manager)
 	manager.RegisterProvider(provider)
 
-	// mistral.rs is the second open runtime (open_runtime: mistralrs). Reap its
-	// orphans regardless, but register the provider only when it's the active
-	// runtime — otherwise an inactive mistral.rs would double-list the GGUFs the
-	// llama-server provider already discovers.
+	// mistral.rs is the second managed open runtime. Reap its orphans regardless
+	// and keep the provider registered even when inactive: runtime switches,
+	// readiness probes, and ensure/download-on-switch all resolve against the
+	// manager inventory before the new runtime is warm. UI surfaces filter by the
+	// active runtime instead of relying on provider registration as a visibility
+	// switch.
 	mistralProvider := runtimemistralrs.NewProvider(cfg.MistralRS)
 	mistralProvider.SweepOrphans(manager)
-	if mistralRSEnabled(cfg) {
-		manager.RegisterProvider(mistralProvider)
-	}
+	manager.RegisterProvider(mistralProvider)
+	manager.WriteLog(localruntime.LogEntry{
+		Source:  "cercano.runtime.mistralrs",
+		Level:   "info",
+		Message: "mistral.rs provider registered",
+	})
 	// Resume any downloads a prior session left interrupted (a .part shard
 	// survives on disk) — recovers from a sleep or process kill that outlived
 	// the in-memory download job. Background so startup isn't blocked.

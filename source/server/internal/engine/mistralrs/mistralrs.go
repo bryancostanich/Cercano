@@ -299,12 +299,11 @@ func matchRuntimeModel(requested string, models []localruntime.ModelRecord) loca
 }
 
 func modelNameForRequest(model localruntime.ModelRecord, requested string) string {
-	if model.ID != "" {
-		return model.ID
-	}
-	if requested != "" {
-		return requested
-	}
+	// Each managed mistral.rs sidecar serves exactly one selected model. The
+	// OpenAI-compatible API exposes that loaded model as "default" (and often
+	// as its filesystem path), not as Cercano's internal catalog ID such as
+	// "mistralrs:catalog:qwen3-30b-a3b-instruct-2507". Sending the internal ID
+	// makes a healthy sidecar reject the request as "model not available".
 	return "default"
 }
 

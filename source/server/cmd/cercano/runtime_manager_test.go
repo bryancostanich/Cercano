@@ -77,30 +77,34 @@ func TestStartDefaultRuntimeAsyncLogsFailure(t *testing.T) {
 	}
 }
 
-func TestBuildRuntimeManagerRegistersLlamaServerCatalogWhenOllamaActive(t *testing.T) {
+func TestBuildRuntimeManagerRegistersManagedRuntimeCatalogsWhenOllamaActive(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.OpenRuntime = "ollama"
 	cfg.LlamaServer.Enabled = false
 	cfg.LlamaServer.DefaultModel = ""
+	cfg.MistralRS.Enabled = false
+	cfg.MistralRS.DefaultModel = ""
 
 	manager := buildRuntimeManager(cfg)
 	models, err := manager.Inventory(context.Background())
 	if err != nil {
 		t.Fatalf("Inventory returned error: %v", err)
 	}
-	foundCatalog := false
+	foundLlamaCatalog := false
+	foundMistralCatalog := false
 	for _, model := range models {
-		// The llama-server runtime always exposes its own curated catalog,
-		// independent of which online catalog backend is active. Assert on the
-		// catalog source rather than a specific model id, which churns as the
-		// curated set is revised.
+		// Managed runtimes always expose their curated catalogs, independent of
+		// which runtime is active. Runtime switch/readiness/ensure paths resolve
+		// against this inventory before the target runtime is warm.
 		if model.Runtime == "llama_server" && model.Source == "catalog" {
-			foundCatalog = true
-			break
+			foundLlamaCatalog = true
+		}
+		if model.Runtime == "mistralrs" && model.Source == "catalog" {
+			foundMistralCatalog = true
 		}
 	}
-	if !foundCatalog {
-		t.Fatalf("expected llama-server catalog model with ollama active, got %#v", models)
+	if !foundLlamaCatalog || !foundMistralCatalog {
+		t.Fatalf("expected llama-server and mistral.rs catalog models with ollama active, got %#v", models)
 	}
 	instances, err := manager.Instances(context.Background())
 	if err != nil {

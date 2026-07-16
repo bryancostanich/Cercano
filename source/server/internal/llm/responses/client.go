@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"cercano/source/server/internal/llm"
@@ -55,6 +56,36 @@ type Client struct {
 	model   string
 	route   string
 	tokens  TokenSource
+	// tempUnsupported remembers models that rejected an explicit temperature
+	// ("Unsupported parameter: temperature" — the gpt-5-family reasoning
+	// models), so later calls skip the doomed attempt.
+	tempUnsupported struct {
+		mu sync.Mutex
+		m  map[string]bool
+	}
+}
+
+func (c *Client) tempUnsupportedLoad(k string) bool {
+	c.tempUnsupported.mu.Lock()
+	defer c.tempUnsupported.mu.Unlock()
+	return c.tempUnsupported.m[k]
+}
+
+func (c *Client) tempUnsupportedStore(k string) {
+	c.tempUnsupported.mu.Lock()
+	defer c.tempUnsupported.mu.Unlock()
+	if c.tempUnsupported.m == nil {
+		c.tempUnsupported.m = map[string]bool{}
+	}
+	c.tempUnsupported.m[k] = true
+}
+
+// isTemperatureUnsupported matches the API rejection reasoning models return
+// for an explicit temperature ("Unsupported parameter: temperature").
+func isTemperatureUnsupported(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "temperature") &&
+		(strings.Contains(msg, "unsupported") || strings.Contains(msg, "deprecated"))
 }
 
 // NewClient constructs a Client. The HTTP transport retries transient statuses
@@ -182,7 +213,24 @@ func errorFromBody(status int, body []byte) error {
 }
 
 // Chat sends a non-streaming Responses request and maps output to blocks.
+// Models that reject an explicit temperature (gpt-5-family reasoning models)
+// get one retry without it — callers that request greedy decoding prefer a
+// default-temperature completion over a failed call — and are remembered so
+// later calls skip the doomed attempt.
 func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	if req.Temperature != nil && c.tempUnsupportedLoad(req.Model) {
+		req.Temperature = nil
+	}
+	resp, err := c.chatOnce(ctx, req)
+	if err != nil && req.Temperature != nil && isTemperatureUnsupported(err) {
+		c.tempUnsupportedStore(req.Model)
+		req.Temperature = nil
+		resp, err = c.chatOnce(ctx, req)
+	}
+	return resp, err
+}
+
+func (c *Client) chatOnce(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
 	// The ChatGPT-account codex backend rejects non-streaming requests
 	// ("Stream must be set to true"). For that route, run the streaming path and
 	// aggregate it into the non-streaming ChatResponse shape.

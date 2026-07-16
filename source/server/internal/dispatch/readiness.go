@@ -9,16 +9,23 @@ import (
 )
 
 // OpenModelReady reports whether the open runtime can serve a request right
-// now. For the bundled llama-server runtime that means the configured
-// default-model GGUF actually exists on disk — this is the routing-readiness
-// contract behind "cloud covers the gap": while that file is still downloading
-// (e.g. right after setup selects an open model set), the open tier registers
-// as absent so Select crosses to cloud, then serves locally the moment the
-// file lands. A not-yet-present model would otherwise be picked and fail at
-// load time instead of falling back.
+// now. It is the routing-readiness contract behind "cloud covers the gap":
+// when the open tier can't serve yet, Select crosses to cloud and then serves
+// locally the moment the model lands, instead of picking a not-yet-present
+// model that fails at load.
 //
-// Non-llama-server open runtimes (Ollama) manage their own model presence, so
-// they are treated as ready and left to their own resolution.
+// This is a CONFIG-LEVEL gate — it deliberately has no access to the runtime
+// manager's inventory (dispatch must not depend on it). So it can only answer
+// for runtimes whose readiness is determinable from config alone:
+//
+//   - llama_server: the default-model GGUF is a filesystem PATH, so we stat it;
+//     a still-downloading .part isn't the final file, so stat fails → not ready.
+//   - ollama / mistralrs and other model-download runtimes: their default is a
+//     model NAME/ID, not a path, so config can't prove presence here. We report
+//     ready (don't block routing) and let the authoritative, inventory-aware
+//     server-side readiness (open_runtime_readiness.go) drive the chip and the
+//     auto-download/warm flow. Blocking routing on an unprovable state would
+//     wrongly force cloud even when the model is present.
 func OpenModelReady(c config.Config) bool {
 	if c.OpenRuntime != "llama_server" {
 		return true

@@ -4309,6 +4309,16 @@ func (m Model) renderOpenRuntimeChip() string {
 	if m.openRuntimeStatus == nil || m.openRuntimeStatus.Ok {
 		return ""
 	}
+	sep := m.styles.BorderDim.Render("  ·  ")
+
+	// Downloading is a distinct, in-progress state — NOT a "you must act" nag.
+	// The runtime's default model is on its way; render a muted "o: downloading"
+	// with no (F1) prompt. It clears to hidden (Ok) once the download lands and
+	// the server re-broadcasts readiness.
+	if m.openRuntimeStatus.Downloading {
+		return sep + m.styles.BorderDim.Render("o: downloading")
+	}
+
 	mistralrs := m.openRuntimeStatus.Runtime == "mistralrs"
 	var label string
 	switch m.openRuntimeStatus.Missing {
@@ -4323,7 +4333,7 @@ func (m Model) renderOpenRuntimeChip() string {
 	default:
 		label = "⚠ local runtime: setup (F1)"
 	}
-	return m.styles.BorderDim.Render("  ·  ") + m.styles.Primary.Render(label)
+	return sep + m.styles.Primary.Render(label)
 }
 
 // renderConnStateChip surfaces gRPC transport health. Amber "reconnecting

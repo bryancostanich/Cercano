@@ -957,6 +957,11 @@ message OpenRuntimeStatus {
   string suggested_command = 5;
   string binary_path = 6;
   string default_model = 7;
+  // downloading is true when the runtime is not yet ready ONLY because its
+  // default model is actively downloading (DownloadState=downloading). It is a
+  // distinct chip state from "missing": the CLI renders "o: downloading" and
+  // does NOT nag the user to act (no F1). When true, ok=false and missing="".
+  bool downloading = 8;
 }
 
 // OpenRuntimeStatusChanged is broadcast whenever the open runtime state

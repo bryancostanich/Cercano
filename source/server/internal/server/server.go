@@ -250,23 +250,6 @@ func (s *Server) resolveMistralRSDefault(ctx context.Context, cfg config.Config)
 	return localruntime.ModelRecord{}, false
 }
 
-// mistralRSModelMissing reports whether the mistral.rs runtime's configured
-// default model is absent from disk — i.e. switching to mistralrs now would
-// land a runtime that can't serve until a download completes.
-//
-// Returns true when no default is configured, the default matches no known
-// record, or the matching record isn't in the "downloaded" state. When the
-// manager is unavailable resolveMistralRSDefault returns found=false; we
-// treat that as missing=true only if a default is even configured, so a
-// no-manager environment with no default doesn't spuriously light the chip.
-func (s *Server) mistralRSModelMissing(ctx context.Context, cfg config.Config) bool {
-	rec, found := s.resolveMistralRSDefault(ctx, cfg)
-	if !found {
-		return true
-	}
-	return rec.DownloadState != localruntime.Downloaded
-}
-
 // autoDownloadMistralRSDefault enqueues the mistral.rs default model's
 // download when switching to the runtime with that model absent. It's the
 // server-driven half of the "switch anyway, fetch in the background" flow:
@@ -915,12 +898,12 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		// inference call. The swap itself proceeds either way — a failed
 		// detection lands as a OpenRuntimeStatusChanged{ok=false} event so
 		// the CLI can offer the install/model-picker flow.
-		var detectErr *llamaserver.DetectError
 		if req.OpenRuntime == "llama_server" {
+			// Detect populates c.LlamaServer.Binary/DefaultModel in place from
+			// the environment (PATH + GGUF scan). We no longer capture the
+			// error here — the fresh chip is emitted by the runtime-agnostic
+			// openRuntimeStatus broadcast below, which re-derives readiness.
 			if err := llamaserver.Detect(ctx, &c.LlamaServer); err != nil {
-				if de, ok := err.(*llamaserver.DetectError); ok {
-					detectErr = de
-				}
 				fmt.Printf("UpdateConfig: llama-server detection: %v\n", err)
 			} else {
 				fmt.Printf("UpdateConfig: llama-server auto-configured — binary=%s default_model=%s\n",
@@ -932,20 +915,16 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		// passed via ReconfigureArgs so Reconfigure doesn't re-detect.
 		changes = append(changes, fmt.Sprintf("local_runtime=%s", req.OpenRuntime))
 		fmt.Printf("UpdateConfig: Local runtime set to %s\n", req.OpenRuntime)
-		// Emit the fresh open-runtime status so the CLI's "(F1)" chip reflects
-		// the runtime being switched to. mistral.rs has its own readiness
-		// shape (default model downloaded vs not) that llamaserver.DetectError
-		// can't express, so route it to buildMistralRSStatus. Unlike
-		// llama-server (whose install is a manual, out-of-band step surfaced
-		// via the modal), the mistral.rs default is a curated bundled model,
-		// so the server auto-enqueues its download here — the CLI stays a thin
-		// client and just watches the chip clear + the /m dashboard fill.
+		// Emit the fresh open-runtime status through the runtime-agnostic
+		// readiness path so the CLI's chip reflects the runtime being switched
+		// to — ready / downloading / missing — uniformly for every runtime.
+		// (Phase 2 generalizes the auto-download below to all runtimes; for now
+		// mistral.rs's curated default is auto-enqueued here so the switch
+		// kicks the fetch and the chip then shows "downloading".)
 		if req.OpenRuntime == "mistralrs" {
 			s.autoDownloadMistralRSDefault(ctx, c)
-			s.broadcastOpenRuntimeStatus(buildMistralRSStatus(c, s.mistralRSModelMissing(ctx, c)))
-		} else {
-			s.broadcastOpenRuntimeStatus(buildOpenRuntimeStatus(req.OpenRuntime, c, detectErr))
 		}
+		s.broadcastOpenRuntimeStatus(s.openRuntimeStatus(ctx, c, req.OpenRuntime))
 	}
 
 	if req.LocusMode != "" {

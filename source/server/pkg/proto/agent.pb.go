@@ -6906,8 +6906,13 @@ type OpenRuntimeStatus struct {
 	SuggestedCommand string                 `protobuf:"bytes,5,opt,name=suggested_command,json=suggestedCommand,proto3" json:"suggested_command,omitempty"`
 	BinaryPath       string                 `protobuf:"bytes,6,opt,name=binary_path,json=binaryPath,proto3" json:"binary_path,omitempty"`
 	DefaultModel     string                 `protobuf:"bytes,7,opt,name=default_model,json=defaultModel,proto3" json:"default_model,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// downloading is true when the runtime is not yet ready ONLY because its
+	// default model is actively downloading (DownloadState=downloading). It is a
+	// distinct chip state from "missing": the CLI renders "o: downloading" and
+	// does NOT nag the user to act (no F1). When true, ok=false and missing="".
+	Downloading   bool `protobuf:"varint,8,opt,name=downloading,proto3" json:"downloading,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *OpenRuntimeStatus) Reset() {
@@ -6987,6 +6992,13 @@ func (x *OpenRuntimeStatus) GetDefaultModel() string {
 		return x.DefaultModel
 	}
 	return ""
+}
+
+func (x *OpenRuntimeStatus) GetDownloading() bool {
+	if x != nil {
+		return x.Downloading
+	}
+	return false
 }
 
 // OpenRuntimeStatusChanged is broadcast whenever the open runtime state
@@ -12661,7 +12673,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x04mode\x18\x01 \x01(\tR\x04mode\";\n" +
 	"\rConfigChanged\x12\x14\n" +
 	"\x05field\x18\x01 \x01(\tR\x05field\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value\"\xe4\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value\"\x86\x02\n" +
 	"\x11OpenRuntimeStatus\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
 	"\aruntime\x18\x02 \x01(\tR\aruntime\x12\x18\n" +
@@ -12670,7 +12682,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x11suggested_command\x18\x05 \x01(\tR\x10suggestedCommand\x12\x1f\n" +
 	"\vbinary_path\x18\x06 \x01(\tR\n" +
 	"binaryPath\x12#\n" +
-	"\rdefault_model\x18\a \x01(\tR\fdefaultModel\"L\n" +
+	"\rdefault_model\x18\a \x01(\tR\fdefaultModel\x12 \n" +
+	"\vdownloading\x18\b \x01(\bR\vdownloading\"L\n" +
 	"\x18OpenRuntimeStatusChanged\x120\n" +
 	"\x06status\x18\x01 \x01(\v2\x18.agent.OpenRuntimeStatusR\x06status\"7\n" +
 	"\x1bGetOpenRuntimeStatusRequest\x12\x18\n" +

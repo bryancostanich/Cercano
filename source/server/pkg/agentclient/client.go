@@ -1019,6 +1019,10 @@ type OpenRuntimeStatus struct {
 	SuggestedCommand string
 	BinaryPath       string
 	DefaultModel     string
+	// Downloading is true when the runtime is not ready ONLY because its
+	// default model is actively downloading. Distinct chip state from Missing:
+	// the CLI renders "o: downloading" with no F1 prompt.
+	Downloading bool
 }
 
 // SubscribeEvents opens the standing server->client event stream and returns a
@@ -1127,6 +1131,7 @@ func openRuntimeStatusFromProto(p *proto.OpenRuntimeStatus) *OpenRuntimeStatus {
 		SuggestedCommand: p.GetSuggestedCommand(),
 		BinaryPath:       p.GetBinaryPath(),
 		DefaultModel:     p.GetDefaultModel(),
+		Downloading:      p.GetDownloading(),
 	}
 }
 

@@ -10,11 +10,8 @@
 package server
 
 import (
-	"strings"
 	"sync"
 
-	"cercano/source/server/internal/localruntime/llamaserver"
-	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 )
 
@@ -139,76 +136,10 @@ func (s *Server) broadcastPermissionMode(mode string) {
 	})
 }
 
-// buildOpenRuntimeStatus builds the wire-level status message from the
-// runtime name, the (possibly-just-updated) config, and an optional
-// DetectError. Detection failure → ok=false with Missing/SuggestedCommand
-// filled from the error; success (nil detectErr) → ok=true with binary +
-// default_model populated from cfg.
-//
-// The runtime name is passed in explicitly rather than read from cfg because
-// cfg.OpenRuntime is only updated later in UpdateConfig, but we need to
-// emit the status for the runtime being SWITCHED TO.
-func buildOpenRuntimeStatus(runtime string, cfg config.Config, detectErr *llamaserver.DetectError) *proto.OpenRuntimeStatus {
-	st := &proto.OpenRuntimeStatus{
-		Runtime: runtime,
-	}
-	if detectErr == nil {
-		st.Ok = true
-		st.BinaryPath = cfg.LlamaServer.Binary
-		st.DefaultModel = cfg.LlamaServer.DefaultModel
-		if runtime == "ollama" {
-			// Ollama has no auto-populated fields; the runtime itself is the
-			// binary. We report ok=true so clients can dismiss any prior
-			// llama-server chip when the user swaps back.
-			st.Message = "ollama runtime active"
-		} else {
-			st.Message = "llama-server runtime configured"
-		}
-		return st
-	}
-	st.Ok = false
-	st.Missing = detectErr.Missing
-	st.Message = detectErr.Error()
-	st.SuggestedCommand = detectErr.SuggestedCommand()
-	// Even on failure, propagate whatever cfg fields did get populated so
-	// the CLI can render a diagnostic like "found llama-server at X but no
-	// GGUFs in ~/.cercano/models".
-	st.BinaryPath = cfg.LlamaServer.Binary
-	st.DefaultModel = cfg.LlamaServer.DefaultModel
-	return st
-}
-
-// buildMistralRSStatus builds the wire-level status for the mistral.rs
-// runtime. Unlike llama-server (whose readiness comes from a binary+GGUF
-// PATH scan via llamaserver.DetectError), mistral.rs ships bundled, so its
-// only readiness question is whether the configured default model is
-// downloaded. The caller computes that (it holds the runtime inventory) and
-// passes it in as modelMissing, keeping this a pure formatter.
-//
-// modelMissing=false → ok=true, "mistral.rs runtime configured".
-// modelMissing=true  → ok=false, Missing="model" so the CLI lights the same
-// "(F1)" open-runtime chip and offers the model download flow, exactly as it
-// does for a llama-server with no GGUF on disk.
-func buildMistralRSStatus(cfg config.Config, modelMissing bool) *proto.OpenRuntimeStatus {
-	st := &proto.OpenRuntimeStatus{
-		Runtime:      "mistralrs",
-		BinaryPath:   cfg.MistralRS.Binary,
-		DefaultModel: cfg.MistralRS.DefaultModel,
-	}
-	if !modelMissing {
-		st.Ok = true
-		st.Message = "mistral.rs runtime configured"
-		return st
-	}
-	st.Ok = false
-	st.Missing = "model"
-	if strings.TrimSpace(cfg.MistralRS.DefaultModel) == "" {
-		st.Message = "mistral.rs runtime: no default model configured"
-	} else {
-		st.Message = "mistral.rs default model not downloaded"
-	}
-	return st
-}
+// Open-runtime status is now built by the single runtime-agnostic readiness
+// path in open_runtime_readiness.go (openRuntimeStatus / openRuntimeStatusFrom),
+// which replaced the per-runtime buildOpenRuntimeStatus + buildMistralRSStatus
+// forks and their `runtime != "llama_server"` gates.
 
 // broadcastOpenRuntimeStatus pushes a OpenRuntimeStatusChanged event for
 // the current state of the active local inference runtime. Called from the

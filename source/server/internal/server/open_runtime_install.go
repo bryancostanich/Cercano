@@ -59,7 +59,7 @@ func (s *Server) InstallOpenRuntime(req *proto.InstallOpenRuntimeRequest, stream
 	}
 	s.cfgSvc.Set(cfgCopy)
 	s.cfgSvc.Persist()
-	s.broadcastOpenRuntimeStatus(buildOpenRuntimeStatus("llama_server", cfgCopy, nil))
+	s.broadcastOpenRuntimeStatus(s.openRuntimeStatus(ctx, cfgCopy, "llama_server"))
 	return sendTerminalFrame(stream, true, "")
 }
 
@@ -70,13 +70,24 @@ func sendTerminalFrame(stream proto.Agent_InstallOpenRuntimeServer, ok bool, err
 	return stream.Send(&proto.InstallProgress{Done: true, Ok: ok, Error: errMsg})
 }
 
-// buildOpenRuntimeStatusFromDetectError is a narrow wrapper around
-// buildOpenRuntimeStatus that only type-asserts once so callers don't have
-// to. Kept private to this file since it exists only for the post-install
-// detection-still-fails branch.
+// buildOpenRuntimeStatusFromDetectError formats an install-completed-but-detect-
+// still-fails diagnostic directly from a llama-server DetectError. It exists
+// only for that post-install branch, where we have the raw error in hand and
+// want its specific messaging (rather than re-running detection through the
+// readiness path).
 func buildOpenRuntimeStatusFromDetectError(cfg config.Config, err error) *proto.OpenRuntimeStatus {
-	de, _ := err.(*llamaserver.DetectError)
-	return buildOpenRuntimeStatus("llama_server", cfg, de)
+	r := openRuntimeReadiness{
+		State:        readyMissing,
+		Missing:      "model",
+		Message:      err.Error(),
+		Binary:       cfg.LlamaServer.Binary,
+		DefaultModel: cfg.LlamaServer.DefaultModel,
+	}
+	if de, ok := err.(*llamaserver.DetectError); ok {
+		r.Missing = de.Missing
+		r.SuggestedCommand = de.SuggestedCommand()
+	}
+	return openRuntimeStatusFrom("llama_server", r)
 }
 
 // GetOpenRuntimeStatus implements proto.AgentServer — pull-side snapshot
@@ -84,35 +95,18 @@ func buildOpenRuntimeStatusFromDetectError(cfg config.Config, err error) *proto.
 // selected local runtime and returns the same OpenRuntimeStatus shape
 // pushed by OpenRuntimeStatusChanged. Cheap (a couple filesystem checks)
 // so no caching — always fresh.
-func (s *Server) GetOpenRuntimeStatus(_ context.Context, req *proto.GetOpenRuntimeStatusRequest) (*proto.GetOpenRuntimeStatusResponse, error) {
+func (s *Server) GetOpenRuntimeStatus(ctx context.Context, req *proto.GetOpenRuntimeStatusRequest) (*proto.GetOpenRuntimeStatusResponse, error) {
 	cfg := s.cfgSvc.Get()
 	// Explicit request overrides the currently-selected runtime — the CLI's
 	// settings-page gate uses this to probe a runtime it's about to switch
-	// to. Empty falls back to what's currently active.
-	runtime := req.GetRuntime()
-	if runtime == "" {
-		runtime = cfg.OpenRuntime
-	}
-	if runtime == "" {
-		runtime = "ollama"
-	}
-	if runtime != "llama_server" {
-		// Ollama and future runtimes don't need setup surfacing today — we
-		// return an ok=true snapshot so the client hides the chip.
-		return &proto.GetOpenRuntimeStatusResponse{
-			Status: buildOpenRuntimeStatus(runtime, cfg, nil),
-		}, nil
-	}
-	llamaCfg := cfg.LlamaServer
-	detectErr := llamaserver.Detect(context.Background(), &llamaCfg)
-	var de *llamaserver.DetectError
-	if detectErr != nil {
-		de, _ = detectErr.(*llamaserver.DetectError)
-	}
-	// Detect populated llamaCfg's Binary/DefaultModel in place — reflect
-	// those into the snapshot so the client sees the resolved fields.
-	cfg.LlamaServer = llamaCfg
+	// to. Empty falls back to what's currently active. Every runtime goes
+	// through the same runtime-agnostic readiness path (openRuntimeStatus):
+	// ollama → ready, llama_server → binary+model detect, mistralrs → model
+	// download-state. This is the pull-side twin of the push broadcast, so a
+	// cold-started or reconnecting CLI gets the SAME chip the switch emitted
+	// (fixes the old `runtime != "llama_server"` gate that returned an
+	// unconditional ok=true for mistralrs and hid the chip).
 	return &proto.GetOpenRuntimeStatusResponse{
-		Status: buildOpenRuntimeStatus("llama_server", cfg, de),
+		Status: s.openRuntimeStatus(ctx, cfg, req.GetRuntime()),
 	}, nil
 }

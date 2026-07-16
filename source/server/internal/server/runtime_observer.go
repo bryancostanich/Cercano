@@ -79,15 +79,11 @@ func (s *Server) onActiveDefaultDownloaded(runtime string, model localruntime.Mo
 	defer cancel()
 
 	// Chip first: the model is now on disk, so the runtime is no longer
-	// "missing model". Re-broadcast the appropriate status so the CLI clears
-	// the (F1) chip without the user having to re-open the config page.
+	// "missing model". Re-broadcast through the runtime-agnostic readiness
+	// path so the CLI clears the chip without the user re-opening the config
+	// page — uniform for every runtime, no per-runtime branch.
 	cfg := s.cfgSvc.Get()
-	switch runtime {
-	case "mistralrs":
-		s.broadcastOpenRuntimeStatus(buildMistralRSStatus(cfg, s.mistralRSModelMissing(ctx, cfg)))
-	case "llama_server":
-		s.broadcastOpenRuntimeStatus(buildOpenRuntimeStatus(runtime, cfg, nil))
-	}
+	s.broadcastOpenRuntimeStatus(s.openRuntimeStatus(ctx, cfg, runtime))
 
 	// Warm the sidecar. Start is idempotent per runtime+model at the provider
 	// level (a running instance for the same model is reused), so a redundant

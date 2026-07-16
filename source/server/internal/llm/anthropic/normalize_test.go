@@ -75,6 +75,8 @@ func TestNormalize_TransientClasses(t *testing.T) {
 	}{
 		{"short retry-after 429", 429, map[string]string{"Retry-After": "2"},
 			`{"type":"error","error":{"type":"rate_limit_error","message":"rate limited"}}`, llm.ErrBusy},
+		{"usage-limit 429 without Retry-After is still quota", 429, nil,
+			`{"type":"error","error":{"type":"rate_limit_error","message":"You have exceeded your usage limit."}}`, llm.ErrQuota},
 		{"bare 429", 429, nil,
 			`{"type":"error","error":{"type":"rate_limit_error","message":"rate limited"}}`, llm.ErrBusy},
 		{"529 overloaded", 529, nil,

@@ -34,14 +34,20 @@ func (c *Client) normalize(err error) error {
 		case ae.StatusCode == http.StatusUnauthorized || ae.StatusCode == http.StatusForbidden:
 			ne.Class = llm.ErrAuth
 		case ae.StatusCode == http.StatusTooManyRequests:
-			if ne.RetryAfter >= httpx.QuotaRetryAfterFloor {
+			// Quota must NEVER be retried — it fails over immediately. Detect
+			// it by a quota-scale Retry-After OR the message markers Anthropic
+			// uses for plan/credit exhaustion, so a quota 429 that arrives
+			// without the header still classifies correctly. Only a bare 429
+			// with neither signal (indistinguishable from a transient rate
+			// limit on the wire) is treated as busy.
+			if ne.RetryAfter >= httpx.QuotaRetryAfterFloor || hasQuotaMarker(err.Error()) {
 				ne.Class = llm.ErrQuota
 			} else {
 				ne.Class = llm.ErrBusy
 			}
 		case ae.StatusCode >= 500: // includes Anthropic's 529 overloaded_error
 			ne.Class = llm.ErrBusy
-		case ae.StatusCode == http.StatusBadRequest && strings.Contains(strings.ToLower(err.Error()), "credit balance"):
+		case ae.StatusCode == http.StatusBadRequest && hasQuotaMarker(err.Error()):
 			// API-key accounts report exhausted credits as a 400
 			// invalid_request_error, not a 429.
 			ne.Class = llm.ErrQuota
@@ -57,4 +63,14 @@ func (c *Client) normalize(err error) error {
 		return &llm.Error{Class: llm.ErrNetwork, Provider: c.Name(), Err: err}
 	}
 	return &llm.Error{Class: llm.ErrUnknown, Provider: c.Name(), Err: err}
+}
+
+// hasQuotaMarker matches the phrasings Anthropic uses for plan/credit
+// exhaustion ("You have exceeded your usage limit", "Your credit balance is
+// too low", quota mentions) as opposed to transient rate limiting.
+func hasQuotaMarker(msg string) bool {
+	m := strings.ToLower(msg)
+	return strings.Contains(m, "usage limit") ||
+		strings.Contains(m, "credit balance") ||
+		strings.Contains(m, "quota")
 }

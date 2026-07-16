@@ -23,13 +23,20 @@ func NewLLMModelProvider(p llm.Provider, model string) ModelProvider {
 
 func (a *llmModelProvider) Name() string { return a.p.Name() }
 
+// processMaxTokens is the output budget for one-shot Process calls (same
+// default as the tool loop). agent.Request carries no MaxTokens, and an unset
+// budget must never reach the wire: api.anthropic.com answers max_tokens:0
+// with a zero-token completion and no error — silent empty output.
+const processMaxTokens = 4096
+
 func (a *llmModelProvider) Process(ctx context.Context, req *Request) (*Response, error) {
 	model := a.model
 	if req.ModelOverride != "" {
 		model = req.ModelOverride
 	}
 	chatResp, err := a.p.Chat(ctx, llm.ChatRequest{
-		Model: model,
+		Model:     model,
+		MaxTokens: processMaxTokens,
 		Messages: []llm.Message{
 			{
 				Role:   llm.RoleUser,

@@ -88,10 +88,20 @@ func systemBlocks(prefix, system string) []sdk.TextBlockParam {
 	return out
 }
 
+// defaultMaxTokens floors an unset ChatRequest.MaxTokens. max_tokens:0 is not
+// rejected by api.anthropic.com — the completion returns with zero output
+// tokens and no error, so a forgotten budget becomes silent empty text (the
+// 2026-07-15 empty-compaction-summary incident). Never send 0.
+const defaultMaxTokens = 4096
+
 func (c *Client) buildParams(req ChatRequest) sdk.MessageNewParams {
+	maxTokens := int64(req.MaxTokens)
+	if maxTokens <= 0 {
+		maxTokens = defaultMaxTokens
+	}
 	params := sdk.MessageNewParams{
 		Model:     sdk.Model(req.Model),
-		MaxTokens: int64(req.MaxTokens),
+		MaxTokens: maxTokens,
 		Messages:  messagesToSDK(req.Messages),
 	}
 	if sys := systemBlocks(c.systemPrefix, req.System); len(sys) > 0 {

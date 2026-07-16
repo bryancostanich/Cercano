@@ -473,3 +473,52 @@ func TestAdvance_KeepsPartialProgressWhenSegmentFails(t *testing.T) {
 		t.Fatalf("zero completed segments must surface the error: err=%v changed=%v more=%v", err, changed, more)
 	}
 }
+
+func TestAdvance_EmptySummaryFailsInsteadOfFreezing(t *testing.T) {
+	// A summarizer that "succeeds" with an empty summary (broken local model,
+	// zero-token cloud completion, unparseable output) must fail the pass.
+	// Accepting it would advance FrozenThrough and hide the segment's content
+	// behind nothing — silent, unbounded context loss (the empty-parts
+	// incident of 2026-07-15: 63 consecutive segments frozen behind empty
+	// summaries).
+	tok := contextmeter.Default()
+	cfg := Config{ActivationFloorTokens: 1000, SegmentTokens: 4000, VerbatimRecent: 2}
+	turns := bigTurns(12, 1000)
+
+	empty := func(context.Context, []llm.Message) (compaction.StructuredSummary, error) {
+		return compaction.StructuredSummary{}, nil
+	}
+	st, changed, more, err := Advance(context.Background(), turns, conversation.Compaction{}, empty, cfg, tok)
+	if err == nil {
+		t.Fatal("an empty summary for a non-trivial segment must surface as an error")
+	}
+	if changed || more {
+		t.Fatalf("no state may change on an empty summary: changed=%v more=%v", changed, more)
+	}
+	if st.FrozenThrough != 0 || st.SegmentSummariesJSON != "" {
+		t.Fatalf("state must be untouched: %+v", st)
+	}
+
+	// Partial-progress parity with segment errors: segments that summarized
+	// non-empty before the empty one are kept, and the boundary stays in
+	// lockstep with the kept summaries.
+	n := 0
+	emptyAfterOne := func(_ context.Context, _ []llm.Message) (compaction.StructuredSummary, error) {
+		n++
+		if n > 1 {
+			return compaction.StructuredSummary{}, nil
+		}
+		return compaction.StructuredSummary{Goal: "SEG0"}, nil
+	}
+	st, changed, more, err = Advance(context.Background(), turns, conversation.Compaction{}, emptyAfterOne, cfg, tok)
+	if err != nil {
+		t.Fatalf("partial progress must not surface the empty-summary error: %v", err)
+	}
+	if !changed || !more {
+		t.Fatalf("expected persisted partial progress with backlog: changed=%v more=%v", changed, more)
+	}
+	var parts []compaction.StructuredSummary
+	if err := json.Unmarshal([]byte(st.SegmentSummariesJSON), &parts); err != nil || len(parts) != 1 {
+		t.Fatalf("want 1 kept segment summary, got %d (err=%v)", len(parts), err)
+	}
+}

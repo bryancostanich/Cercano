@@ -92,3 +92,25 @@ func TestClient_Chat_SendsMessagesAndTools(t *testing.T) {
 		t.Errorf("blocks not converted: %+v", resp.Blocks)
 	}
 }
+
+func TestClient_BuildParams_FloorsUnsetMaxTokens(t *testing.T) {
+	// max_tokens:0 on the wire is not an error at api.anthropic.com — the
+	// completion just comes back with zero output tokens. A caller that
+	// forgets MaxTokens must get a usable budget, not silent empty text.
+	c := &Client{}
+	params := c.buildParams(ChatRequest{
+		Model: "claude-opus-4-8",
+		Messages: []llm.Message{{
+			Role:   llm.RoleUser,
+			Blocks: []llm.Block{{Type: llm.BlockText, Text: "hi"}},
+		}},
+	})
+	if params.MaxTokens <= 0 {
+		t.Fatalf("MaxTokens = %d, want a positive default", params.MaxTokens)
+	}
+	// An explicit budget must pass through untouched.
+	params = c.buildParams(simpleReq())
+	if params.MaxTokens != 10 {
+		t.Fatalf("explicit MaxTokens = %d, want 10", params.MaxTokens)
+	}
+}

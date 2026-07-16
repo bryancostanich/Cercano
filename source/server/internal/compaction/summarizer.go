@@ -151,7 +151,7 @@ func splitRecent(msgs []llm.Message, n int) (older, recent []llm.Message) {
 // renderSummaryMessages wraps a non-empty summary as a single user message, for
 // feeding a prior summary back into the model (rolling).
 func renderSummaryMessages(s StructuredSummary) []llm.Message {
-	if s.isEmpty() {
+	if s.IsEmpty() {
 		return nil
 	}
 	return []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{s.RenderBlock()}}}

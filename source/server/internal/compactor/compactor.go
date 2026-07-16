@@ -6,6 +6,7 @@ package compactor
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/compaction"
@@ -168,6 +169,16 @@ func Advance(ctx context.Context, turns []conversation.Turn, state conversation.
 			segErr = err
 			break
 		}
+		if s.IsEmpty() {
+			// A nil-error empty summary is a summarizer failure in disguise
+			// (zero-token cloud completion, unparseable model output). Freezing
+			// the segment behind it would silently drop the content from every
+			// future send-view — fail the pass loudly instead; the raw turns
+			// stay eligible for the next attempt. (63 consecutive segments were
+			// lost this way on 2026-07-15 before this guard existed.)
+			segErr = fmt.Errorf("summarizer returned an empty summary for a %d-message segment — refusing to freeze content behind nothing", len(seg.Messages))
+			break
+		}
 		newParts = append(newParts, s)
 	}
 	if segErr != nil {
@@ -236,6 +247,11 @@ func Advance(ctx context.Context, turns []conversation.Turn, state conversation.
 		re, err := summarize(ctx, compaction.AssembleSendView(consolidated, nil))
 		if err != nil {
 			return state, false, false, err
+		}
+		if re.IsEmpty() {
+			// Same guard as the segment loop: replacing every frozen summary
+			// with nothing would erase the whole compacted history in one pass.
+			return state, false, false, fmt.Errorf("summarizer returned an empty re-consolidation — refusing to replace %d segment summaries with nothing", len(parts))
 		}
 		parts = []compaction.StructuredSummary{re}
 		consolidated = re

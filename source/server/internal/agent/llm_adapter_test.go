@@ -8,14 +8,16 @@ import (
 )
 
 type fakeLLM struct {
-	name     string
-	gotModel string
+	name         string
+	gotModel     string
+	gotMaxTokens int
 }
 
 func (f *fakeLLM) Name() string                   { return f.name }
 func (f *fakeLLM) Capabilities() llm.Capabilities { return llm.Capabilities{} }
 func (f *fakeLLM) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
 	f.gotModel = req.Model
+	f.gotMaxTokens = req.MaxTokens
 	return llm.ChatResponse{
 		Blocks:       []llm.Block{{Type: llm.BlockText, Text: "echo:" + req.Messages[0].Blocks[0].Text}},
 		InputTokens:  3,
@@ -34,6 +36,21 @@ func TestLLMModelProviderProcess(t *testing.T) {
 	resp, err := mp.Process(context.Background(), &Request{Input: "hi"})
 	if err != nil || resp.Output != "echo:hi" || resp.OutputTokens != 4 || resp.InputTokens != 3 {
 		t.Fatalf("resp = %+v err=%v", resp, err)
+	}
+}
+
+func TestLLMModelProviderProcessSetsMaxTokens(t *testing.T) {
+	// A ChatRequest with MaxTokens 0 reaches the wire as max_tokens:0, which
+	// the Anthropic subscription endpoint answers with a zero-token completion
+	// and no error — the silent-empty-output trap that gutted compaction
+	// summaries. The one-shot adapter must always send a real budget.
+	fake := &fakeLLM{name: "anthropic"}
+	mp := NewLLMModelProvider(fake, "claude-opus-4-8")
+	if _, err := mp.Process(context.Background(), &Request{Input: "hi"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fake.gotMaxTokens <= 0 {
+		t.Fatalf("Chat received MaxTokens = %d, want > 0", fake.gotMaxTokens)
 	}
 }
 

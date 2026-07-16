@@ -49,7 +49,7 @@ func (c RetrievalCompactor) Compact(ctx context.Context, raw []llm.Message, summ
 	// Insert the index right after the summary preamble (position 0 when the
 	// summary is empty the preamble is absent, so prepend).
 	view := make([]llm.Message, 0, len(res.SendView)+1)
-	if len(res.Summaries) > 0 && !res.Summaries[0].isEmpty() && len(res.SendView) > 0 {
+	if len(res.Summaries) > 0 && !res.Summaries[0].IsEmpty() && len(res.SendView) > 0 {
 		view = append(view, res.SendView[0], index)
 		view = append(view, res.SendView[1:]...)
 	} else {

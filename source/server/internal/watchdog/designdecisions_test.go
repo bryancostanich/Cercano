@@ -41,6 +41,42 @@ func TestDesignDecisionsCheckUsesCanonicalProtocolAndChallenge(t *testing.T) {
 	}
 }
 
+func TestDesignDecisionsPromptUsesSuperpowersStyleTriggerContract(t *testing.T) {
+	prompt := buildDesignDecisionsPrompt(Action{
+		Kind:     "tool_call",
+		ToolName: "Edit",
+		ToolArgs: []byte(`{"path":"internal/capabilities/schema.go"}`),
+	})
+
+	mustContain := []string{
+		"create, modify, or commit to behavior",
+		"interfaces, data models, module boundaries",
+		"prompt policy, tool schemas",
+		"unless the recent transcript clearly shows the design-decisions protocol was followed",
+		"Do NOT require the transcript to already prove there are multiple viable approaches",
+		"discovering alternatives is part of the protocol",
+		"Do NOT treat a single rationale paragraph",
+		"small/obvious",
+		"When uncertain whether a mutating action is structural, prefer challenging",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+
+	mustNotContain := []string{
+		"Judge ONLY whether",
+		"with more than one viable approach, WITHOUT evidence",
+		"obvious one-line fixes are NOT violations",
+	}
+	for _, old := range mustNotContain {
+		if strings.Contains(prompt, old) {
+			t.Fatalf("prompt still contains old conservative contract %q:\n%s", old, prompt)
+		}
+	}
+}
+
 func TestDesignDecisionsPromptUsesWiderTranscriptWindow(t *testing.T) {
 	msgs := make([]llm.Message, designDecisionsTranscriptWindow+1)
 	for i := range msgs {

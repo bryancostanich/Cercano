@@ -682,6 +682,18 @@ type CompactionState struct {
 	Compacting          bool
 }
 
+// ElideContext stubs every tool-result body in the conversation's context up
+// to now (the /elide-context command). In-memory and send-view only: stored
+// raw turns are untouched and the effect resets on agent restart. Returns
+// sent-view token counts before/after and how many results were stubbed.
+func (c *Client) ElideContext(ctx context.Context, conversationID string) (pre, post, stubbed int, err error) {
+	resp, err := c.agent.ElideContext(ctx, &proto.ElideContextRequest{ConversationId: conversationID})
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	return int(resp.GetPreTokens()), int(resp.GetPostTokens()), int(resp.GetStubbed()), nil
+}
+
 func (c *Client) GetCompactionState(ctx context.Context, conversationID string) (*CompactionState, error) {
 	resp, err := c.agent.GetCompactionState(ctx, &proto.GetCompactionStateRequest{ConversationId: conversationID})
 	if err != nil {

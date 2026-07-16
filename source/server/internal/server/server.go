@@ -1475,6 +1475,11 @@ func (s *Server) ExportContext(ctx context.Context, req *proto.ExportContextRequ
 	return s.persistSvc.ExportContext(ctx, req)
 }
 
+// ElideContext implements proto.AgentServer — delegates to persistSvc.
+func (s *Server) ElideContext(ctx context.Context, req *proto.ElideContextRequest) (*proto.ElideContextResponse, error) {
+	return s.persistSvc.ElideContext(ctx, req)
+}
+
 // GetConfig implements proto.AgentServer — reports the current runtime config
 // without exposing the literal API key. cloud_state is derived from the active
 // cloud provider's Name() ("NONE" → "absent", everything else → "ok").

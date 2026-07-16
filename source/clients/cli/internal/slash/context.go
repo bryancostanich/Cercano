@@ -48,6 +48,20 @@ func RegisterClearCompactedContext(r *Registry) {
 	})
 }
 
+// RegisterElideContext wires /elide-context — stubs every tool-result body in
+// the current conversation's context up to now. LLM-free, in-memory, and
+// send-view only: the stored raw turns are untouched and the effect resets on
+// agent restart. Tool results produced after the command stay intact.
+func RegisterElideContext(r *Registry) {
+	r.Register(Command{
+		Name: "elide-context",
+		Help: "Stub all tool outputs in this conversation's context so far (in-memory; raw turns untouched, resets on agent restart). Frees tokens without summarizing.",
+		Handler: func(args []string) Result {
+			return Result{Kind: ResultElideContext}
+		},
+	})
+}
+
 // RegisterContext wires /context — shows the project context the agent
 // will prepend to your turns (from .cercano/context.md under the effective
 // work dir). Reads the file directly client-side; no RPC. workDir is called

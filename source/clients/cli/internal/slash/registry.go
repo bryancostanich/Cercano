@@ -39,6 +39,7 @@ const (
 	ResultRegenContext          // rebuild the current conversation's context from raw turns
 	ResultCompactContext        // incrementally compact the current conversation's backlog
 	ResultClearCompactedContext // drop compaction state; rehydrate from raw turns (no re-summarize)
+	ResultElideContext          // stub all tool-result bodies in the context up to now (in-memory)
 )
 
 // Result is what a slash command produces.

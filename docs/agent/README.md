@@ -73,6 +73,7 @@ Switch with `/strict`, `/permissive`, `/bypass`, or `/mode <name>`. Persists to 
 | `/compact` | Compact the conversation's context incrementally (digest the backlog, keep existing summaries) |
 | `/context-regen` | Rebuild the conversation's context from raw turns (clears state, re-runs compaction) |
 | `/clear-compacted-context` | Drop the compacted summaries and rehydrate the context from raw turns — no re-summarization (recovery when a broken summarizer produced a bad/empty compacted layer) |
+| `/elide-context` | Stub all tool outputs in the context so far — LLM-free token reclaim. In-memory and send-view only: raw turns untouched, resets on agent restart; tool results after the command stay intact |
 | `/mcp` | List/add/remove/restart hosted MCP servers |
 | `/help` | Show keymap and command list |
 | `/quit` | Quit (or press Ctrl+C twice) |

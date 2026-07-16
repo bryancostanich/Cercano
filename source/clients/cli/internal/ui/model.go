@@ -349,6 +349,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	slash.RegisterContextRegen(reg)
 	slash.RegisterCompact(reg)
 	slash.RegisterClearCompactedContext(reg)
+	slash.RegisterElideContext(reg)
 	// wdRef is shared with the slash registry so /context tracks the active
 	// workDir even after /d, /clear, or /resume update it.
 	wdRef := &struct{ dir string }{}
@@ -1538,6 +1539,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// field (max, compacting flag) settles too.
 		return m, fetchContextUsage(m.agent, m.convID)
 
+	case elideContextDoneMsg:
+		if msg.err != "" {
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "elide-context failed: " + msg.err})
+			m.refreshViewport()
+			return m, nil
+		}
+		line := fmt.Sprintf("context elided: ~%d → ~%d tokens (%d tool results stubbed; in-memory — resets on agent restart)",
+			msg.pre, msg.post, msg.stubbed)
+		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: line})
+		m.refreshViewport()
+		return m, fetchContextUsage(m.agent, m.convID)
+
 	case toolCallFetchedMsg:
 		// Lazy tool-body fetch returned — fill the expanded entry (or just
 		// clear the spinner if the fetch failed / found nothing) and repaint.
@@ -2375,6 +2388,13 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, startClearCompactedContextCmd(m.agent, m.convID)
+	case slash.ResultElideContext:
+		if m.convID == "" {
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "no conversation yet — nothing to elide"})
+			m.refreshViewport()
+			return m, nil
+		}
+		return m, startElideContextCmd(m.agent, m.convID)
 	case slash.ResultResumeConversation:
 		// /resume <id> path — slash already validated against the agent.
 		var resumeCmd tea.Cmd

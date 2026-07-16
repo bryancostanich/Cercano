@@ -77,6 +77,18 @@ func TestCompact_ReturnsCompactResult(t *testing.T) {
 	}
 }
 
+func TestElideContext_ReturnsElideResult(t *testing.T) {
+	r := New()
+	RegisterElideContext(r)
+	res, ok := r.Dispatch("/elide-context")
+	if !ok {
+		t.Fatal("expected /elide-context to dispatch")
+	}
+	if res.Kind != ResultElideContext {
+		t.Fatalf("kind = %v, want ResultElideContext", res.Kind)
+	}
+}
+
 func TestClearCompactedContext_ReturnsClearResult(t *testing.T) {
 	r := New()
 	RegisterClearCompactedContext(r)

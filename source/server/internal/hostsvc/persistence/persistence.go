@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/compaction"
@@ -98,6 +99,7 @@ type Service interface {
 	GetContextUsage(ctx context.Context, req *proto.GetContextUsageRequest) (*proto.GetContextUsageResponse, error)
 	GetCompactionState(ctx context.Context, req *proto.GetCompactionStateRequest) (*proto.GetCompactionStateResponse, error)
 	ExportContext(ctx context.Context, req *proto.ExportContextRequest) (*proto.ExportContextResponse, error)
+	ElideContext(ctx context.Context, req *proto.ElideContextRequest) (*proto.ElideContextResponse, error)
 	RegenerateContext(req *proto.RegenerateContextRequest, stream proto.Agent_RegenerateContextServer) error
 	ProposeContextEdit(ctx context.Context, req *proto.ProposeContextEditRequest) (*proto.ProposeContextEditResponse, error)
 	DeleteConversationTurns(ctx context.Context, req *proto.DeleteConversationTurnsRequest) (*proto.DeleteConversationTurnsResponse, error)
@@ -139,6 +141,13 @@ type svc struct {
 	retentionSweeper *retention.Sweeper
 	compactionGen    *compactiongen.Generator
 	contextLoader    *projectctx.Loader
+
+	// elisionFloors holds each conversation's /elide-context floor: tool
+	// results in turns at or before this unix-seconds timestamp are stubbed at
+	// context-assembly time. In-memory by design — stored raw turns are never
+	// touched, and the floor resets when the agent restarts.
+	elideMu       sync.Mutex
+	elisionFloors map[string]int64
 }
 
 // New constructs a Service.
@@ -170,7 +179,21 @@ func New(
 		openLegacy:       openLegacy,
 		cloudProvider:    cloudProvider,
 		cloudModel:       cloudModel,
+		elisionFloors:    map[string]int64{},
 	}
+}
+
+// elisionFloor returns the conversation's /elide-context floor, 0 if unset.
+func (x *svc) elisionFloor(convID string) int64 {
+	x.elideMu.Lock()
+	defer x.elideMu.Unlock()
+	return x.elisionFloors[convID]
+}
+
+func (x *svc) setElisionFloor(convID string, floor int64) {
+	x.elideMu.Lock()
+	defer x.elideMu.Unlock()
+	x.elisionFloors[convID] = floor
 }
 
 // --- Setters for owned fields ---
@@ -281,6 +304,11 @@ func (x *svc) AssembleHistory(ctx context.Context, convID string) []llm.Message 
 		return nil
 	}
 	state, _ := store.GetCompaction(ctx, convID)
+	// /elide-context floor: stub tool-result bodies up to the floor before the
+	// view is assembled, so every downstream consumer (model, meter) agrees.
+	if floor := x.elisionFloor(convID); floor > 0 {
+		turns, _ = compactor.StubToolResultsThrough(turns, floor)
+	}
 	view, _ := compactor.BuildSendView(turns, state)
 
 	compactionCfg := x.cfgSvc.Get().Compaction
@@ -516,41 +544,7 @@ func (x *svc) GetContextUsage(ctx context.Context, req *proto.GetContextUsageReq
 		if turns, err := store.GetTurns(ctx, convID); err == nil {
 			raw = estimateRawTokens(turns)
 			state, _ := store.GetCompaction(ctx, convID)
-			compSnap := x.cfgSvc.Get().Compaction
-			elide := compSnap.ElideToolResults
-			lossy := compSnap.LossyToolElision
-			switch {
-			case state.ConsolidatedJSON != "":
-				// Compaction has run. Mirror AssembleHistory: summarized view
-				// plus optional post-elision.
-				view, _ := compactor.BuildSendView(turns, state)
-				if elide {
-					view, _ = compaction.ElideSupersededToolResults(view)
-				}
-				if lossy {
-					view, _ = compaction.KeepLastNToolResults(view, compaction.DefaultLossyElisionKeepLast)
-				}
-				sent = compaction.TotalTokens(contextmeter.Default(), view)
-			case elide || lossy:
-				// No compaction but some elision is on. The meter must reflect
-				// the elided view, not the raw history — otherwise a user
-				// turns on a toggle and sees no change even though the model
-				// receives less. Cost is one full-history tokenize per poll;
-				// acceptable because the elided view is what the request path
-				// is already building on every turn.
-				view := agent.BuildLLMHistory(turns)
-				if elide {
-					view, _ = compaction.ElideSupersededToolResults(view)
-				}
-				if lossy {
-					view, _ = compaction.KeepLastNToolResults(view, compaction.DefaultLossyElisionKeepLast)
-				}
-				sent = compaction.TotalTokens(contextmeter.Default(), view)
-			default:
-				// Fast path: no compaction, no elision. Cheap len/4 estimate
-				// is intentional — the footer polls this frequently.
-				sent = raw
-			}
+			sent = x.sentViewTokens(convID, turns, state, raw)
 		}
 	}
 	var pct float64
@@ -567,6 +561,74 @@ func (x *svc) GetContextUsage(ctx context.Context, req *proto.GetContextUsageReq
 	return &proto.GetContextUsageResponse{
 		TokensUsed: int32(sent), ModelMax: int32(max), Percent: pct,
 		RawTokens: int32(raw), Compacting: isCompacting,
+	}, nil
+}
+
+// sentViewTokens computes the sent-view token count the meter and
+// /elide-context report: the compacted view (or full history) with the
+// conversation's elision floor and the configured mechanical elisions applied,
+// mirroring AssembleHistory. Falls back to the cheap raw estimate on the fast
+// path (no compaction, no elision, no floor) because the footer polls this
+// frequently.
+func (x *svc) sentViewTokens(convID string, turns []conversation.Turn, state conversation.Compaction, raw int) int {
+	compSnap := x.cfgSvc.Get().Compaction
+	elide := compSnap.ElideToolResults
+	lossy := compSnap.LossyToolElision
+	floor := x.elisionFloor(convID)
+	if state.ConsolidatedJSON == "" && !elide && !lossy && floor <= 0 {
+		return raw
+	}
+	if floor > 0 {
+		turns, _ = compactor.StubToolResultsThrough(turns, floor)
+	}
+	// BuildSendView degrades to the full raw history when no compaction state
+	// exists, so one call covers both the summarized and plain cases.
+	view, _ := compactor.BuildSendView(turns, state)
+	if elide {
+		view, _ = compaction.ElideSupersededToolResults(view)
+	}
+	if lossy {
+		view, _ = compaction.KeepLastNToolResults(view, compaction.DefaultLossyElisionKeepLast)
+	}
+	return compaction.TotalTokens(contextmeter.Default(), view)
+}
+
+// ElideContext implements the /elide-context RPC: record "now" as the
+// conversation's elision floor so every tool-result body up to this point is
+// stubbed at context-assembly time. In-memory and send-view only — the stored
+// raw turns are untouched and the floor resets on agent restart. Tool results
+// produced after this call stay intact until the next call.
+func (x *svc) ElideContext(ctx context.Context, req *proto.ElideContextRequest) (*proto.ElideContextResponse, error) {
+	convID := req.GetConversationId()
+	if convID == "" {
+		return nil, fmt.Errorf("conversation_id is required")
+	}
+	store := x.Store()
+	if store == nil {
+		return nil, fmt.Errorf("no conversation store — the agent is running without persistence")
+	}
+	turns, err := store.GetTurns(ctx, convID)
+	if err != nil {
+		return nil, fmt.Errorf("get turns: %w", err)
+	}
+	if len(turns) == 0 {
+		return &proto.ElideContextResponse{}, nil
+	}
+	state, _ := store.GetCompaction(ctx, convID)
+	raw := estimateRawTokens(turns)
+
+	pre := x.sentViewTokens(convID, turns, state, raw)
+	// GetTurns returns turns in created_at order; the newest turn's timestamp
+	// is the floor, so everything currently in the context is covered.
+	floor := turns[len(turns)-1].CreatedAt.Unix()
+	_, stubbed := compactor.StubToolResultsThrough(turns, floor)
+	x.setElisionFloor(convID, floor)
+	post := x.sentViewTokens(convID, turns, state, raw)
+
+	return &proto.ElideContextResponse{
+		PreTokens:  int32(pre),
+		PostTokens: int32(post),
+		Stubbed:    int32(stubbed),
 	}, nil
 }
 

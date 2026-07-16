@@ -33,6 +33,7 @@ const (
 	Agent_DismissSubAgent_FullMethodName            = "/agent.Agent/DismissSubAgent"
 	Agent_GetContextUsage_FullMethodName            = "/agent.Agent/GetContextUsage"
 	Agent_GetCompactionState_FullMethodName         = "/agent.Agent/GetCompactionState"
+	Agent_ElideContext_FullMethodName               = "/agent.Agent/ElideContext"
 	Agent_SuggestNextPrompt_FullMethodName          = "/agent.Agent/SuggestNextPrompt"
 	Agent_GetOpenRuntimeStatus_FullMethodName       = "/agent.Agent/GetOpenRuntimeStatus"
 	Agent_InstallOpenRuntime_FullMethodName         = "/agent.Agent/InstallOpenRuntime"
@@ -129,6 +130,11 @@ type AgentClient interface {
 	// GetCompactionState returns the compaction summary + frozen/live split for
 	// the /c context viewer.
 	GetCompactionState(ctx context.Context, in *GetCompactionStateRequest, opts ...grpc.CallOption) (*GetCompactionStateResponse, error)
+	// ElideContext stubs every tool-result body in the conversation's context up
+	// to now (the /elide-context command). In-memory and send-view only: stored
+	// raw turns are untouched and the floor resets on agent restart. Tool
+	// results produced after the call stay intact until the next call.
+	ElideContext(ctx context.Context, in *ElideContextRequest, opts ...grpc.CallOption) (*ElideContextResponse, error)
 	// SuggestNextPrompt asks the local co-processor model for one short
 	// follow-up the user might type next, given the conversation so far. The
 	// CLI renders the result as ghost text in the input widget. Empty response
@@ -420,6 +426,16 @@ func (c *agentClient) GetCompactionState(ctx context.Context, in *GetCompactionS
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetCompactionStateResponse)
 	err := c.cc.Invoke(ctx, Agent_GetCompactionState_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) ElideContext(ctx context.Context, in *ElideContextRequest, opts ...grpc.CallOption) (*ElideContextResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ElideContextResponse)
+	err := c.cc.Invoke(ctx, Agent_ElideContext_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -997,6 +1013,11 @@ type AgentServer interface {
 	// GetCompactionState returns the compaction summary + frozen/live split for
 	// the /c context viewer.
 	GetCompactionState(context.Context, *GetCompactionStateRequest) (*GetCompactionStateResponse, error)
+	// ElideContext stubs every tool-result body in the conversation's context up
+	// to now (the /elide-context command). In-memory and send-view only: stored
+	// raw turns are untouched and the floor resets on agent restart. Tool
+	// results produced after the call stay intact until the next call.
+	ElideContext(context.Context, *ElideContextRequest) (*ElideContextResponse, error)
 	// SuggestNextPrompt asks the local co-processor model for one short
 	// follow-up the user might type next, given the conversation so far. The
 	// CLI renders the result as ghost text in the input widget. Empty response
@@ -1177,6 +1198,9 @@ func (UnimplementedAgentServer) GetContextUsage(context.Context, *GetContextUsag
 }
 func (UnimplementedAgentServer) GetCompactionState(context.Context, *GetCompactionStateRequest) (*GetCompactionStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetCompactionState not implemented")
+}
+func (UnimplementedAgentServer) ElideContext(context.Context, *ElideContextRequest) (*ElideContextResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ElideContext not implemented")
 }
 func (UnimplementedAgentServer) SuggestNextPrompt(context.Context, *SuggestNextPromptRequest) (*SuggestNextPromptResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SuggestNextPrompt not implemented")
@@ -1574,6 +1598,24 @@ func _Agent_GetCompactionState_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AgentServer).GetCompactionState(ctx, req.(*GetCompactionStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_ElideContext_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ElideContextRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).ElideContext(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_ElideContext_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).ElideContext(ctx, req.(*ElideContextRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2436,6 +2478,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetCompactionState",
 			Handler:    _Agent_GetCompactionState_Handler,
+		},
+		{
+			MethodName: "ElideContext",
+			Handler:    _Agent_ElideContext_Handler,
 		},
 		{
 			MethodName: "SuggestNextPrompt",

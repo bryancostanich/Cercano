@@ -57,6 +57,12 @@ service Agent {
   // the /c context viewer.
   rpc GetCompactionState (GetCompactionStateRequest) returns (GetCompactionStateResponse) {}
 
+  // ElideContext stubs every tool-result body in the conversation's context up
+  // to now (the /elide-context command). In-memory and send-view only: stored
+  // raw turns are untouched and the floor resets on agent restart. Tool
+  // results produced after the call stay intact until the next call.
+  rpc ElideContext (ElideContextRequest) returns (ElideContextResponse) {}
+
   // SuggestNextPrompt asks the local co-processor model for one short
   // follow-up the user might type next, given the conversation so far. The
   // CLI renders the result as ghost text in the input widget. Empty response
@@ -737,6 +743,13 @@ message GetCompactionStateResponse {
   string consolidated_summary = 7;
   bool   compacting           = 8;
 }
+message ElideContextRequest  { string conversation_id = 1; }
+message ElideContextResponse {
+  int32 pre_tokens  = 1; // sent-view tokens before this call
+  int32 post_tokens = 2; // sent-view tokens after
+  int32 stubbed     = 3; // tool results newly stubbed by this call
+}
+
 message ExportContextRequest  { string conversation_id = 1; }
 message ExportContextResponse { string json = 1; }
 

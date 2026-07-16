@@ -216,6 +216,10 @@ func (m *mockAgentClient) ExportContext(ctx context.Context, in *proto.ExportCon
 	return &proto.ExportContextResponse{}, nil
 }
 
+func (m *mockAgentClient) ElideContext(ctx context.Context, in *proto.ElideContextRequest, opts ...grpc.CallOption) (*proto.ElideContextResponse, error) {
+	return &proto.ElideContextResponse{}, nil
+}
+
 func (m *mockAgentClient) ListMcpServers(ctx context.Context, in *proto.ListMcpServersRequest, opts ...grpc.CallOption) (*proto.ListMcpServersResponse, error) {
 	return &proto.ListMcpServersResponse{}, nil
 }

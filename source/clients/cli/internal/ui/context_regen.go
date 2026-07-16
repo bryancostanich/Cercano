@@ -28,6 +28,27 @@ type contextRegenDoneMsg struct {
 	post int
 }
 
+// elideContextDoneMsg is the result of the unary /elide-context RPC.
+type elideContextDoneMsg struct {
+	err     string
+	pre     int
+	post    int
+	stubbed int
+}
+
+// startElideContextCmd runs /elide-context: ask the agent to stub every
+// tool-result body in the conversation's context up to now (in-memory,
+// send-view only — raw turns untouched, resets on agent restart).
+func startElideContextCmd(ag *agentclient.Client, convID string) tea.Cmd {
+	return func() tea.Msg {
+		pre, post, stubbed, err := ag.ElideContext(context.Background(), convID)
+		if err != nil {
+			return elideContextDoneMsg{err: err.Error()}
+		}
+		return elideContextDoneMsg{pre: pre, post: post, stubbed: stubbed}
+	}
+}
+
 // isTransportLoss reports whether a regen error string looks like the stream
 // transport died (agent shutdown/restart) rather than the rebuild itself
 // failing server-side.

@@ -26,7 +26,7 @@ func newDispatchID() string {
 type Mode int
 
 const (
-	OneShot Mode = iota // single routed llm.Provider.Chat call
+	OneShot Mode = iota // single routed inference.Provider.Chat call
 	Agentic             // bounded tool loop (not yet implemented)
 )
 

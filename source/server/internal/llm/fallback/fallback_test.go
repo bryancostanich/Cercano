@@ -10,6 +10,7 @@ import (
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	goopenai "github.com/sashabaranov/go-openai"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 )
 
@@ -54,8 +55,8 @@ type fakeProvider struct {
 	gotStream []llm.ChatRequest
 }
 
-func (f *fakeProvider) Name() string                   { return f.name }
-func (f *fakeProvider) Capabilities() llm.Capabilities { return llm.Capabilities{} }
+func (f *fakeProvider) Name() string                         { return f.name }
+func (f *fakeProvider) Capabilities() inference.Capabilities { return inference.Capabilities{} }
 func (f *fakeProvider) Chat(_ context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
 	f.gotChat = append(f.gotChat, req)
 	return f.chatResp, f.chatErr

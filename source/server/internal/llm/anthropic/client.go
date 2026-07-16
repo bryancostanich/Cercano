@@ -9,6 +9,7 @@ import (
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 )
 
@@ -91,8 +92,8 @@ func NewClient(cfg Config) *Client {
 
 func (c *Client) Name() string { return "anthropic" }
 
-func (c *Client) Capabilities() llm.Capabilities {
-	return llm.Capabilities{
+func (c *Client) Capabilities() inference.Capabilities {
+	return inference.Capabilities{
 		SupportsTools:         true,
 		SupportsParallelTools: true,
 		SupportsCaching:       true,

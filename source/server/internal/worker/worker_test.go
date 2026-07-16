@@ -14,6 +14,7 @@ import (
 	"cercano/source/server/internal/engine"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	providers "cercano/source/server/internal/hostsvc/providers"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/ollamacatalog"
@@ -27,7 +28,7 @@ import (
 
 // ─── fake provider wiring ─────────────────────────────────────────────────────
 
-// fixedProvider is an llm.Provider that immediately returns end_turn with a
+// fixedProvider is an inference.Provider that immediately returns end_turn with a
 // fixed text response. It satisfies the RunToolLoop exit condition after
 // exactly one model round.
 type fixedProvider struct {
@@ -35,8 +36,8 @@ type fixedProvider struct {
 }
 
 func (p *fixedProvider) Name() string { return "fixed" }
-func (p *fixedProvider) Capabilities() llm.Capabilities {
-	return llm.Capabilities{SupportsTools: true}
+func (p *fixedProvider) Capabilities() inference.Capabilities {
+	return inference.Capabilities{SupportsTools: true}
 }
 func (p *fixedProvider) Chat(_ context.Context, _ llm.ChatRequest) (llm.ChatResponse, error) {
 	return llm.ChatResponse{StopReason: "end_turn"}, nil
@@ -70,29 +71,31 @@ func (r *fixedReader) Next() (llm.StreamEvent, bool, error) {
 func (r *fixedReader) Close() error { return nil }
 
 // fakeResolver is a minimal providers.Resolver that serves fixedProvider.
-type fakeResolver struct{ prov llm.Provider }
+type fakeResolver struct{ prov inference.Provider }
 
-func (f *fakeResolver) Main() (llm.Provider, bool, bool, error)                   { return f.prov, false, false, nil }
-func (f *fakeResolver) MainModel(_ bool) string                                   { return "fake-model" }
-func (f *fakeResolver) PrimaryModel() string                                      { return "fake-model" }
-func (f *fakeResolver) Rebuild() error                                            { return nil }
-func (f *fakeResolver) InstallAbsentCloud(_ string)                               {}
-func (f *fakeResolver) Cloud() llm.Provider                                       { return nil }
-func (f *fakeResolver) Open() llm.Provider                                        { return nil }
-func (f *fakeResolver) ActiveCloudModel() string                                  { return "" }
-func (f *fakeResolver) LocusMode() string                                         { return "" }
-func (f *fakeResolver) Router() providers.RouterCloudUpdater                      { return nil }
-func (f *fakeResolver) Registry() *engine.EngineRegistry                          { return nil }
-func (f *fakeResolver) CatalogManager() *ollamacatalog.Manager                    { return nil }
-func (f *fakeResolver) OpenLegacy() *legacymodels.OpenModelProvider               { return nil }
-func (f *fakeResolver) Reconfigure(_ providers.ReconfigureArgs)                   {}
-func (f *fakeResolver) SetCloudLLMProvider(_ llm.Provider)                        {}
-func (f *fakeResolver) SetOpenLLMProvider(_ llm.Provider)                         {}
-func (f *fakeResolver) SetOpenProviderFactory(_ func(config.Config) llm.Provider) {}
-func (f *fakeResolver) CloudLLMProvider() llm.Provider                            { return nil }
-func (f *fakeResolver) OpenLLMProvider() llm.Provider                             { return nil }
-func (f *fakeResolver) SetCatalogManager(_ *ollamacatalog.Manager)                {}
-func (f *fakeResolver) SetUsageSink(_ func(usage.Usage))                          {}
+func (f *fakeResolver) Main() (inference.Provider, bool, bool, error) {
+	return f.prov, false, false, nil
+}
+func (f *fakeResolver) MainModel(_ bool) string                                         { return "fake-model" }
+func (f *fakeResolver) PrimaryModel() string                                            { return "fake-model" }
+func (f *fakeResolver) Rebuild() error                                                  { return nil }
+func (f *fakeResolver) InstallAbsentCloud(_ string)                                     {}
+func (f *fakeResolver) Cloud() inference.Provider                                       { return nil }
+func (f *fakeResolver) Open() inference.Provider                                        { return nil }
+func (f *fakeResolver) ActiveCloudModel() string                                        { return "" }
+func (f *fakeResolver) LocusMode() string                                               { return "" }
+func (f *fakeResolver) Router() providers.RouterCloudUpdater                            { return nil }
+func (f *fakeResolver) Registry() *engine.EngineRegistry                                { return nil }
+func (f *fakeResolver) CatalogManager() *ollamacatalog.Manager                          { return nil }
+func (f *fakeResolver) OpenLegacy() *legacymodels.OpenModelProvider                     { return nil }
+func (f *fakeResolver) Reconfigure(_ providers.ReconfigureArgs)                         {}
+func (f *fakeResolver) SetCloudLLMProvider(_ inference.Provider)                        {}
+func (f *fakeResolver) SetOpenLLMProvider(_ inference.Provider)                         {}
+func (f *fakeResolver) SetOpenProviderFactory(_ func(config.Config) inference.Provider) {}
+func (f *fakeResolver) CloudLLMProvider() inference.Provider                            { return nil }
+func (f *fakeResolver) OpenLLMProvider() inference.Provider                             { return nil }
+func (f *fakeResolver) SetCatalogManager(_ *ollamacatalog.Manager)                      {}
+func (f *fakeResolver) SetUsageSink(_ func(usage.Usage))                                {}
 
 // fakeConfig satisfies cfgsvc.Service.
 type fakeConfig struct{}

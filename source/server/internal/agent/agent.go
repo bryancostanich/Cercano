@@ -499,7 +499,7 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 }
 
 // processCoproc serves a one-shot co-processor request on the tier chosen by
-// the active Locus Mode, routed through the dispatch.Engine on llm.Provider.
+// the active Locus Mode, routed through the dispatch.Engine on inference.Provider.
 func (a *Agent) processCoproc(ctx context.Context, req *Request) (*Response, error) {
 	augmentedInput, originalInput := a.loadHistory(ctx, req)
 	if a.engine == nil {

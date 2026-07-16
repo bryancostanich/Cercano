@@ -36,6 +36,7 @@ import (
 	llamaengine "cercano/source/server/internal/engine/llamaserver"
 	mistralengine "cercano/source/server/internal/engine/mistralrs"
 	"cercano/source/server/internal/engine/ollama"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
 	ollamallm "cercano/source/server/internal/llm/ollama"
@@ -512,7 +513,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	// engine reads it raw and wraps per-dispatch (no double-count). The same
 	// factory is installed on the server so an open_runtime change at runtime
 	// rebuilds the provider instead of stranding the old lane.
-	openProviderFor := func(c config.Config) llm.Provider {
+	openProviderFor := func(c config.Config) inference.Provider {
 		if strings.EqualFold(c.OpenRuntime, "llama_server") {
 			return llamaengine.NewLLMProvider(llamaEng)
 		}

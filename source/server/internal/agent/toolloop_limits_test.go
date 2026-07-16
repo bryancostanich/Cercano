@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 )
 
@@ -14,8 +15,8 @@ import (
 type alwaysToolProvider struct{ calls int }
 
 func (p *alwaysToolProvider) Name() string { return "always-tool" }
-func (p *alwaysToolProvider) Capabilities() llm.Capabilities {
-	return llm.Capabilities{SupportsTools: true}
+func (p *alwaysToolProvider) Capabilities() inference.Capabilities {
+	return inference.Capabilities{SupportsTools: true}
 }
 func (p *alwaysToolProvider) Chat(_ context.Context, _ llm.ChatRequest) (llm.ChatResponse, error) {
 	return llm.ChatResponse{}, nil

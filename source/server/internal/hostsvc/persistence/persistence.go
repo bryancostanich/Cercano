@@ -26,6 +26,7 @@ import (
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/retention"
@@ -137,7 +138,7 @@ type svc struct {
 	openLegacy func() *legacymodels.OpenModelProvider
 
 	// cloudProvider returns the cloud LLM provider for ProposeContextEdit.
-	cloudProvider func() llm.Provider
+	cloudProvider func() inference.Provider
 
 	// cloudModel returns the active cloud model string for ProposeContextEdit.
 	cloudModel func() string
@@ -172,7 +173,7 @@ func New(
 	activeCloudModel func() string,
 	engine func() *dispatch.Engine,
 	openLegacy func() *legacymodels.OpenModelProvider,
-	cloudProvider func() llm.Provider,
+	cloudProvider func() inference.Provider,
 	cloudModel func() string,
 ) Service {
 	return &svc{

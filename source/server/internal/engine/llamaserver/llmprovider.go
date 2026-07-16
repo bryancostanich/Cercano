@@ -4,11 +4,12 @@ import (
 	"context"
 	"strings"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/llm/openai"
 )
 
-// LLMProvider adapts the llama-server runtime to the native llm.Provider
+// LLMProvider adapts the llama-server runtime to the native inference.Provider
 // interface. Each call resolves (and warms, when needed) the runtime instance
 // serving the requested model via endpointFor, then delegates the chat to an
 // OpenAI-compatible client pointed at that instance — llama-server exposes
@@ -20,13 +21,13 @@ type LLMProvider struct {
 	eng *Engine
 }
 
-// NewLLMProvider wraps eng as a native llm.Provider.
+// NewLLMProvider wraps eng as a native inference.Provider.
 func NewLLMProvider(eng *Engine) *LLMProvider { return &LLMProvider{eng: eng} }
 
 func (p *LLMProvider) Name() string { return "llama_server" }
 
-func (p *LLMProvider) Capabilities() llm.Capabilities {
-	return llm.Capabilities{SupportsTools: true}
+func (p *LLMProvider) Capabilities() inference.Capabilities {
+	return inference.Capabilities{SupportsTools: true}
 }
 
 func (p *LLMProvider) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {

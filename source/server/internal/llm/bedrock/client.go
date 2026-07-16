@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 )
 
@@ -27,7 +28,7 @@ type converseAPI interface {
 	ConverseStream(ctx context.Context, in *bedrockruntime.ConverseStreamInput, optFns ...func(*bedrockruntime.Options)) (*bedrockruntime.ConverseStreamOutput, error)
 }
 
-// Client implements llm.Provider over the Bedrock Converse API.
+// Client implements inference.Provider over the Bedrock Converse API.
 type Client struct {
 	api   converseAPI
 	model string
@@ -58,8 +59,8 @@ func NewClient(cfg Config) (*Client, error) {
 
 func (c *Client) Name() string { return "bedrock" }
 
-func (c *Client) Capabilities() llm.Capabilities {
-	return llm.Capabilities{
+func (c *Client) Capabilities() inference.Capabilities {
+	return inference.Capabilities{
 		SupportsTools:         true,
 		SupportsParallelTools: true,
 		SupportsCaching:       false,

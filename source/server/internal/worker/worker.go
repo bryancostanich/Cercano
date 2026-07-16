@@ -14,6 +14,7 @@ import (
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/hostsvc/permissions"
 	providerssvc "cercano/source/server/internal/hostsvc/providers"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/llm/fallback"
@@ -307,8 +308,8 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 // It holds pre-built cloud + open providers and delegates model selection to
 // the config service.
 type workerResolver struct {
-	cloudProv llm.Provider
-	openProv  llm.Provider
+	cloudProv inference.Provider
+	openProv  inference.Provider
 	cfgSvc    cfgsvc.Service
 }
 
@@ -335,7 +336,7 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource cre
 	// isn't first, while the worker's own model resolution correctly uses the
 	// named active profile — a silent worker/in-process divergence.
 	if prof, ok := profileByName(cfg.CloudProfiles, cfg.ActiveCloudProfile); ok {
-		var prov llm.Provider
+		var prov inference.Provider
 		var buildErr error
 
 		if prof.Flavor == cloudfactory.FlavorResponses && prof.Route == cloudfactory.RouteChatGPT {
@@ -435,11 +436,11 @@ func runtimeIsHostManaged(runtime string) bool {
 // working primary.
 func wrapWorkerBackup(
 	ctx context.Context,
-	primary llm.Provider,
+	primary inference.Provider,
 	primaryName string,
 	cfg pkgcfg.Config,
 	credSource credentialFetcher,
-) llm.Provider {
+) inference.Provider {
 	name := cfg.BackupCloudProfile
 	if name == "" || name == primaryName {
 		return primary
@@ -506,7 +507,7 @@ func wrapWorkerBackup(
 	})
 }
 
-func (r *workerResolver) Main() (llm.Provider, bool, bool, error) {
+func (r *workerResolver) Main() (inference.Provider, bool, bool, error) {
 	cfg := r.cfgSvc.Get()
 	mode, _ := locus.ParseMode(cfg.LocusMode)
 	// Open tier registers absent when its GGUF isn't on disk yet, so Select
@@ -562,27 +563,27 @@ func (r *workerResolver) PrimaryModel() string {
 }
 func (r *workerResolver) Rebuild() error              { return nil }
 func (r *workerResolver) InstallAbsentCloud(_ string) { r.cloudProv = nil }
-func (r *workerResolver) Cloud() llm.Provider         { return r.cloudProv }
-func (r *workerResolver) Open() llm.Provider          { return r.openProv }
+func (r *workerResolver) Cloud() inference.Provider   { return r.cloudProv }
+func (r *workerResolver) Open() inference.Provider    { return r.openProv }
 func (r *workerResolver) ActiveCloudModel() string {
 	if prof, ok := r.cfgSvc.ActiveProfile(); ok {
 		return prof.Model
 	}
 	return r.cfgSvc.Get().CloudModel
 }
-func (r *workerResolver) LocusMode() string                                         { return r.cfgSvc.Get().LocusMode }
-func (r *workerResolver) Router() providerssvc.RouterCloudUpdater                   { return nil }
-func (r *workerResolver) Registry() *engine.EngineRegistry                          { return nil }
-func (r *workerResolver) CatalogManager() *ollamacatalog.Manager                    { return nil }
-func (r *workerResolver) OpenLegacy() *legacymodels.OpenModelProvider               { return nil }
-func (r *workerResolver) SetCloudLLMProvider(p llm.Provider)                        { r.cloudProv = p }
-func (r *workerResolver) SetOpenLLMProvider(p llm.Provider)                         { r.openProv = p }
-func (r *workerResolver) SetOpenProviderFactory(_ func(pkgcfg.Config) llm.Provider) {}
-func (r *workerResolver) CloudLLMProvider() llm.Provider                            { return r.cloudProv }
-func (r *workerResolver) OpenLLMProvider() llm.Provider                             { return r.openProv }
-func (r *workerResolver) Reconfigure(_ providerssvc.ReconfigureArgs)                {}
-func (r *workerResolver) SetCatalogManager(_ *ollamacatalog.Manager)                {}
-func (r *workerResolver) SetUsageSink(_ func(usage.Usage))                          {}
+func (r *workerResolver) LocusMode() string                                               { return r.cfgSvc.Get().LocusMode }
+func (r *workerResolver) Router() providerssvc.RouterCloudUpdater                         { return nil }
+func (r *workerResolver) Registry() *engine.EngineRegistry                                { return nil }
+func (r *workerResolver) CatalogManager() *ollamacatalog.Manager                          { return nil }
+func (r *workerResolver) OpenLegacy() *legacymodels.OpenModelProvider                     { return nil }
+func (r *workerResolver) SetCloudLLMProvider(p inference.Provider)                        { r.cloudProv = p }
+func (r *workerResolver) SetOpenLLMProvider(p inference.Provider)                         { r.openProv = p }
+func (r *workerResolver) SetOpenProviderFactory(_ func(pkgcfg.Config) inference.Provider) {}
+func (r *workerResolver) CloudLLMProvider() inference.Provider                            { return r.cloudProv }
+func (r *workerResolver) OpenLLMProvider() inference.Provider                             { return r.openProv }
+func (r *workerResolver) Reconfigure(_ providerssvc.ReconfigureArgs)                      {}
+func (r *workerResolver) SetCatalogManager(_ *ollamacatalog.Manager)                      {}
+func (r *workerResolver) SetUsageSink(_ func(usage.Usage))                                {}
 
 // The worker's capability/tool stack is assembled by buildWorkerToolSvc (see
 // worker_dispatch.go) through the shared internal/toolstack builder — the same

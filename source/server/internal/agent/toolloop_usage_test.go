@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 )
 
@@ -15,8 +16,10 @@ type usageProvider struct {
 	calls   int
 }
 
-func (p *usageProvider) Name() string                   { return "usage" }
-func (p *usageProvider) Capabilities() llm.Capabilities { return llm.Capabilities{SupportsTools: true} }
+func (p *usageProvider) Name() string { return "usage" }
+func (p *usageProvider) Capabilities() inference.Capabilities {
+	return inference.Capabilities{SupportsTools: true}
+}
 func (p *usageProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
 	return llm.ChatResponse{}, nil
 }

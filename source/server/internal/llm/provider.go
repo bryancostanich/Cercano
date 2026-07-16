@@ -1,7 +1,5 @@
 package llm
 
-import "context"
-
 type Capabilities struct {
 	SupportsTools         bool
 	SupportsParallelTools bool
@@ -44,9 +42,7 @@ type ChatResponse struct {
 	Model string
 }
 
-type Provider interface {
-	Name() string
-	Capabilities() Capabilities
-	Chat(ctx context.Context, req ChatRequest) (ChatResponse, error)
-	StreamChat(ctx context.Context, req ChatRequest) (StreamReader, error)
-}
+// The provider seam moved to internal/inference (inference.Provider) with
+// methods Infer / Stream. Capabilities, ChatRequest, and ChatResponse remain
+// here as the chat envelope/vocabulary the seam speaks (inference aliases them
+// as Call / Result). context is still imported by nothing here now — see below.

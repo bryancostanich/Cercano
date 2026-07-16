@@ -10,17 +10,18 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/agenttools"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 )
 
 type mockProvider struct {
 	scripts [][]llm.Block
-	caps    llm.Capabilities
+	caps    inference.Capabilities
 	calls   int
 }
 
-func (m *mockProvider) Name() string                   { return "mock" }
-func (m *mockProvider) Capabilities() llm.Capabilities { return m.caps }
+func (m *mockProvider) Name() string                         { return "mock" }
+func (m *mockProvider) Capabilities() inference.Capabilities { return m.caps }
 func (m *mockProvider) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
 	out := llm.ChatResponse{Blocks: m.scripts[m.calls]}
 	m.calls++
@@ -80,8 +81,8 @@ func blocksToEvents(blocks []llm.Block) []llm.StreamEvent {
 type loopingProvider struct{ calls int }
 
 func (p *loopingProvider) Name() string { return "looping" }
-func (p *loopingProvider) Capabilities() llm.Capabilities {
-	return llm.Capabilities{SupportsTools: true}
+func (p *loopingProvider) Capabilities() inference.Capabilities {
+	return inference.Capabilities{SupportsTools: true}
 }
 func (p *loopingProvider) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
 	return llm.ChatResponse{}, nil
@@ -122,7 +123,7 @@ func TestToolLoop_PlainText_TerminatesImmediately(t *testing.T) {
 		scripts: [][]llm.Block{{
 			{Type: llm.BlockText, Text: "Done."},
 		}},
-		caps: llm.Capabilities{SupportsTools: true},
+		caps: inference.Capabilities{SupportsTools: true},
 	}
 	reg := testDefaultRegistry()
 	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
@@ -152,7 +153,7 @@ func TestToolLoop_SingleToolCall_FeedsResultAndContinues(t *testing.T) {
 			},
 			{{Type: llm.BlockText, Text: "Got it."}},
 		},
-		caps: llm.Capabilities{SupportsTools: true},
+		caps: inference.Capabilities{SupportsTools: true},
 	}
 	reg := testDefaultRegistry()
 	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
@@ -183,7 +184,7 @@ func TestToolLoop_RTierRunsConcurrently(t *testing.T) {
 			},
 			{{Type: llm.BlockText, Text: "done"}},
 		},
-		caps: llm.Capabilities{SupportsTools: true, SupportsParallelTools: true},
+		caps: inference.Capabilities{SupportsTools: true, SupportsParallelTools: true},
 	}
 	reg := testDefaultRegistry()
 	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
@@ -220,7 +221,7 @@ func TestToolLoop_UserDeniesWTier_TerminatesTurn(t *testing.T) {
 			{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "Write",
 				ToolInput: json.RawMessage(`{"path":"/tmp/x","content":"x"}`)},
 		}},
-		caps: llm.Capabilities{SupportsTools: true},
+		caps: inference.Capabilities{SupportsTools: true},
 	}
 	reg := testDefaultRegistry()
 	dir := t.TempDir()
@@ -268,7 +269,7 @@ func TestToolLoop_3StrikeErrorGuard(t *testing.T) {
 			{{Type: llm.BlockToolUse, ToolUseID: "u3", ToolName: "always_fail",
 				ToolInput: json.RawMessage(`{}`)}},
 		},
-		caps: llm.Capabilities{SupportsTools: true},
+		caps: inference.Capabilities{SupportsTools: true},
 	}
 	reg := agenttools.NewRegistry()
 	reg.MustRegister(alwaysFailTool{})
@@ -292,7 +293,7 @@ func TestToolLoop_EmitsExpectedEvents(t *testing.T) {
 				ToolInput: json.RawMessage(`{"path":"."}`)}},
 			{{Type: llm.BlockText, Text: "done"}},
 		},
-		caps: llm.Capabilities{SupportsTools: true},
+		caps: inference.Capabilities{SupportsTools: true},
 	}
 	reg := testDefaultRegistry()
 	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
@@ -352,7 +353,7 @@ func TestToolLoopMCPConfirmsInPermissive(t *testing.T) {
 				ToolInput: json.RawMessage(`{}`)}},
 			{{Type: llm.BlockText, Text: "done"}},
 		},
-		caps: llm.Capabilities{SupportsTools: true},
+		caps: inference.Capabilities{SupportsTools: true},
 	}
 	tool := &fakeMCPTool{}
 	reg := agenttools.NewRegistry()
@@ -416,7 +417,7 @@ func TestToolLoop_MalformedToolInput_WrappedAndAnswered(t *testing.T) {
 				ToolInput: json.RawMessage(bad)}},
 			{{Type: llm.BlockText, Text: "Retrying with valid JSON."}},
 		},
-		caps: llm.Capabilities{SupportsTools: true},
+		caps: inference.Capabilities{SupportsTools: true},
 	}
 	reg := testDefaultRegistry()
 	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
@@ -478,7 +479,7 @@ func TestToolLoop_EditRecordsStartLineOnEventAndResultBlock(t *testing.T) {
 			{{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "Edit", ToolInput: json.RawMessage(args)}},
 			{{Type: llm.BlockText, Text: "done"}},
 		},
-		caps: llm.Capabilities{SupportsTools: true},
+		caps: inference.Capabilities{SupportsTools: true},
 	}
 	reg := testDefaultRegistry()
 	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")

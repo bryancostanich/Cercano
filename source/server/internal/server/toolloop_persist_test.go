@@ -10,10 +10,11 @@ import (
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/capabilities/agentadapter"
 	"cercano/source/server/internal/capabilities/builtins"
-	"cercano/source/server/pkg/config"
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 
 	"google.golang.org/grpc"
@@ -29,26 +30,29 @@ type fakeStream struct {
 	sent []*proto.StreamProcessResponse
 }
 
-func (f *fakeStream) Context() context.Context                  { return f.ctx }
-func (f *fakeStream) Send(m *proto.StreamProcessResponse) error { f.sent = append(f.sent, m); return nil }
-func (f *fakeStream) SetHeader(metadata.MD) error               { return nil }
-func (f *fakeStream) SendHeader(metadata.MD) error              { return nil }
-func (f *fakeStream) SetTrailer(metadata.MD)                    {}
-func (f *fakeStream) SendMsg(m interface{}) error               { return nil }
-func (f *fakeStream) RecvMsg(m interface{}) error               { return nil }
+func (f *fakeStream) Context() context.Context { return f.ctx }
+func (f *fakeStream) Send(m *proto.StreamProcessResponse) error {
+	f.sent = append(f.sent, m)
+	return nil
+}
+func (f *fakeStream) SetHeader(metadata.MD) error  { return nil }
+func (f *fakeStream) SendHeader(metadata.MD) error { return nil }
+func (f *fakeStream) SetTrailer(metadata.MD)       {}
+func (f *fakeStream) SendMsg(m interface{}) error  { return nil }
+func (f *fakeStream) RecvMsg(m interface{}) error  { return nil }
 
-// scriptedProvider is a minimal llm.Provider for tests — replays a queue of
+// scriptedProvider is a minimal inference.Provider for tests — replays a queue of
 // block sequences as successive Chat responses.
 type scriptedProvider struct {
 	scripts [][]llm.Block
 	calls   int
-	caps    llm.Capabilities
+	caps    inference.Capabilities
 	seen    [][]llm.Message // req.Messages captured per StreamChat call
 	usage   [2]int          // [inputTokens, outputTokens] to emit; zero means skip
 }
 
-func (p *scriptedProvider) Name() string                   { return "scripted" }
-func (p *scriptedProvider) Capabilities() llm.Capabilities { return p.caps }
+func (p *scriptedProvider) Name() string                         { return "scripted" }
+func (p *scriptedProvider) Capabilities() inference.Capabilities { return p.caps }
 func (p *scriptedProvider) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
 	out := llm.ChatResponse{Blocks: p.scripts[p.calls]}
 	p.calls++
@@ -62,8 +66,8 @@ func (p *scriptedProvider) StreamChat(ctx context.Context, req llm.ChatRequest) 
 	p.seen = append(p.seen, req.Messages)
 	evs := blocksToEvents(blocks)
 	if p.usage[0] != 0 {
-		evs[0].InputTokens = p.usage[0]              // EventMessageStart is always events[0]
-		evs[len(evs)-1].OutputTokens = p.usage[1]    // EventMessageStop is always the last
+		evs[0].InputTokens = p.usage[0]           // EventMessageStart is always events[0]
+		evs[len(evs)-1].OutputTokens = p.usage[1] // EventMessageStop is always the last
 	}
 	p.calls++
 	return &scriptedStream{events: evs}, nil
@@ -144,7 +148,7 @@ func TestStreamToolLoop_PersistsTurns(t *testing.T) {
 		scripts: [][]llm.Block{{
 			{Type: llm.BlockText, Text: "Hi there."},
 		}},
-		caps: llm.Capabilities{SupportsTools: true},
+		caps: inference.Capabilities{SupportsTools: true},
 	}
 	srv.SetCloudLLMProvider(prov)
 
@@ -197,7 +201,7 @@ func TestStreamToolLoop_PersistsMultiTurnHistory(t *testing.T) {
 				ToolInput: json.RawMessage(`{"path":"."}`)}},
 			{{Type: llm.BlockText, Text: "All done."}},
 		},
-		caps: llm.Capabilities{SupportsTools: true},
+		caps: inference.Capabilities{SupportsTools: true},
 	}
 	srv.SetCloudLLMProvider(prov)
 
@@ -262,7 +266,7 @@ func TestStreamToolLoop_UserTurnPersistedDespiteLLMFailure(t *testing.T) {
 	srv, store := newServerWithStore(t)
 	prov := &scriptedProvider{
 		scripts: nil, // empty → StreamChat errors immediately on the first call
-		caps:    llm.Capabilities{SupportsTools: true},
+		caps:    inference.Capabilities{SupportsTools: true},
 	}
 	srv.SetCloudLLMProvider(prov)
 
@@ -288,7 +292,7 @@ func TestStreamToolLoop_NoConversationID_SkipsPersist(t *testing.T) {
 	srv, store := newServerWithStore(t)
 	prov := &scriptedProvider{
 		scripts: [][]llm.Block{{{Type: llm.BlockText, Text: "hi"}}},
-		caps:    llm.Capabilities{SupportsTools: true},
+		caps:    inference.Capabilities{SupportsTools: true},
 	}
 	srv.SetCloudLLMProvider(prov)
 
@@ -328,7 +332,7 @@ func TestStreamToolLoop_PropagatesWorkDir(t *testing.T) {
 				ToolInput: json.RawMessage(`{}`)}},
 			{{Type: llm.BlockText, Text: "done"}},
 		},
-		caps: llm.Capabilities{SupportsTools: true},
+		caps: inference.Capabilities{SupportsTools: true},
 	}
 	srv.SetCloudLLMProvider(prov)
 
@@ -369,7 +373,7 @@ func TestStreamToolLoop_ReplaysHistoryNoDuplication(t *testing.T) {
 			{{Type: llm.BlockText, Text: "one"}},
 			{{Type: llm.BlockText, Text: "two"}},
 		},
-		caps: llm.Capabilities{SupportsTools: true},
+		caps: inference.Capabilities{SupportsTools: true},
 	}
 	srv.SetCloudLLMProvider(prov)
 
@@ -423,7 +427,7 @@ func TestStreamToolLoop_UpdatesContextMeter(t *testing.T) {
 	srv, _ := newServerWithStore(t)
 	prov := &scriptedProvider{
 		scripts: [][]llm.Block{{{Type: llm.BlockText, Text: "hello"}}},
-		caps:    llm.Capabilities{SupportsTools: true},
+		caps:    inference.Capabilities{SupportsTools: true},
 		usage:   [2]int{4321, 99},
 	}
 	srv.SetCloudLLMProvider(prov)
@@ -460,7 +464,7 @@ func TestStreamToolLoop_FinalResponseCarriesTokens(t *testing.T) {
 	srv, _ := newServerWithStore(t)
 	prov := &scriptedProvider{
 		scripts: [][]llm.Block{{{Type: llm.BlockText, Text: "hello"}}},
-		caps:    llm.Capabilities{SupportsTools: true},
+		caps:    inference.Capabilities{SupportsTools: true},
 		usage:   [2]int{4321, 99},
 	}
 	srv.SetCloudLLMProvider(prov)

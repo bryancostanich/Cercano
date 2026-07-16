@@ -13,6 +13,7 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/protocols"
@@ -231,7 +232,7 @@ func (c *Core) RunTurn(
 func (c *Core) runLoop(
 	ctx context.Context,
 	req Request,
-	provider llm.Provider,
+	provider inference.Provider,
 	isCloud bool,
 	loopSink func(agent.LoopEvent),
 	requester PermissionRequester,

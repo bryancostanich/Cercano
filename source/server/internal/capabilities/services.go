@@ -7,7 +7,7 @@ import (
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/engine"
-	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/pkg/config"
 )
 
@@ -15,8 +15,8 @@ import (
 // when the registry is built. There is no ProviderSet type — the agent holds
 // cloud + local providers as two discrete fields, so Services mirrors that.
 type Services struct {
-	CloudProvider llm.Provider // may be nil (local-only deployments)
-	OpenProvider llm.Provider
+	CloudProvider inference.Provider // may be nil (local-only deployments)
+	OpenProvider  inference.Provider
 	Engine        engine.InferenceEngine
 	Config        *config.Config
 	Conversations conversation.Store
@@ -29,7 +29,7 @@ type Services struct {
 
 // MainProvider returns the provider for a turn: cloud when isCloud and a cloud
 // provider is configured, otherwise local.
-func (s Services) MainProvider(isCloud bool) llm.Provider {
+func (s Services) MainProvider(isCloud bool) inference.Provider {
 	if isCloud && s.CloudProvider != nil {
 		return s.CloudProvider
 	}

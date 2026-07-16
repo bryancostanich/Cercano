@@ -7,6 +7,7 @@ import (
 
 	goopenai "github.com/sashabaranov/go-openai"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/llm/httpx"
 )
@@ -19,7 +20,7 @@ type Config struct {
 	Backend string // selects per-backend quirks; empty → defensive default
 }
 
-// Client implements llm.Provider using the OpenAI chat completions API.
+// Client implements inference.Provider using the OpenAI chat completions API.
 type Client struct {
 	api    *goopenai.Client
 	model  string
@@ -75,8 +76,8 @@ func resolveImageURLs(ctx context.Context, msgs []llm.Message) ([]llm.Message, e
 
 func (c *Client) Name() string { return "openai" }
 
-func (c *Client) Capabilities() llm.Capabilities {
-	return llm.Capabilities{
+func (c *Client) Capabilities() inference.Capabilities {
+	return inference.Capabilities{
 		SupportsTools:         true,
 		SupportsParallelTools: true,
 		SupportsCaching:       false,

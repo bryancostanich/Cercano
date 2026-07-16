@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 )
 
@@ -20,7 +21,7 @@ func TestToolLoop_FollowUpDenial_ContinuesTurnWithMessage(t *testing.T) {
 				ToolInput: json.RawMessage(`{"path":"/tmp/x","content":"x"}`)}},
 			{{Type: llm.BlockText, Text: "understood — summarizing instead"}},
 		},
-		caps: llm.Capabilities{SupportsTools: true},
+		caps: inference.Capabilities{SupportsTools: true},
 	}
 	reg := testDefaultRegistry()
 	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")

@@ -4,20 +4,21 @@ import (
 	"context"
 	"strings"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 )
 
-// llmModelProvider adapts an llm.Provider (native tool-calling interface) to the
+// llmModelProvider adapts an inference.Provider (native tool-calling interface) to the
 // legacy agent.ModelProvider interface, so a single cloud profile can serve both
 // the tool-loop and the co-processor CloudModel slot. Process runs a one-shot
 // Chat (no tools) and concatenates text blocks into Response.Output.
 type llmModelProvider struct {
-	p     llm.Provider
+	p     inference.Provider
 	model string
 }
 
-// NewLLMModelProvider wraps an llm.Provider as a ModelProvider.
-func NewLLMModelProvider(p llm.Provider, model string) ModelProvider {
+// NewLLMModelProvider wraps an inference.Provider as a ModelProvider.
+func NewLLMModelProvider(p inference.Provider, model string) ModelProvider {
 	return &llmModelProvider{p: p, model: model}
 }
 

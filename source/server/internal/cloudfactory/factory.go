@@ -1,4 +1,4 @@
-// Package cloudfactory builds an llm.Provider from a cloud profile. It is the
+// Package cloudfactory builds an inference.Provider from a cloud profile. It is the
 // single extension point for new wire-format flavors: each later sub-project
 // adds one case.
 package cloudfactory
@@ -6,7 +6,7 @@ package cloudfactory
 import (
 	"fmt"
 
-	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm/anthropic"
 	"cercano/source/server/internal/llm/bedrock"
 	"cercano/source/server/internal/llm/openai"
@@ -41,9 +41,9 @@ type Options struct {
 	AnthropicTokenSource anthropic.TokenSource
 }
 
-// BuildCloudProvider maps a profile (+ its key) to an llm.Provider. Only the
+// BuildCloudProvider maps a profile (+ its key) to an inference.Provider. Only the
 // messages (Anthropic) flavor is implemented in the foundation.
-func BuildCloudProvider(p config.CloudProfile, apiKey string, opts ...Options) (llm.Provider, error) {
+func BuildCloudProvider(p config.CloudProfile, apiKey string, opts ...Options) (inference.Provider, error) {
 	switch p.Flavor {
 	case FlavorMessages:
 		if p.Route == RouteSubscription {

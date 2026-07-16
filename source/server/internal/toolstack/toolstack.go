@@ -25,7 +25,7 @@ import (
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/dispatch"
 	tools "cercano/source/server/internal/hostsvc/tools"
-	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/usage"
 	"cercano/source/server/pkg/config"
@@ -64,8 +64,8 @@ func NewEngine(d EngineDeps) *dispatch.Engine {
 // but they are populated to keep the host and worker Services identical, so a
 // future capability that reads them cannot silently diverge between the two.
 type CapDeps struct {
-	Cloud     llm.Provider
-	Open      llm.Provider
+	Cloud     inference.Provider
+	Open      inference.Provider
 	Config    *config.Config
 	CtxLoader *projectctx.Loader
 }

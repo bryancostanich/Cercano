@@ -29,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/pkg/proto"
 
@@ -79,8 +80,8 @@ type pausableProvider struct {
 }
 
 func (p *pausableProvider) Name() string { return "pausable" }
-func (p *pausableProvider) Capabilities() llm.Capabilities {
-	return llm.Capabilities{SupportsTools: true}
+func (p *pausableProvider) Capabilities() inference.Capabilities {
+	return inference.Capabilities{SupportsTools: true}
 }
 func (p *pausableProvider) Chat(_ context.Context, _ llm.ChatRequest) (llm.ChatResponse, error) {
 	return llm.ChatResponse{Blocks: p.blocks}, nil

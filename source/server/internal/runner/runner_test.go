@@ -28,7 +28,7 @@ func TestEvent_CarriesTokenAndToolPayloads(t *testing.T) {
 }
 
 func TestRequest_IsProviderFree(t *testing.T) {
-	// A Request carries user-facing inputs only — no llm.Provider. The runner
+	// A Request carries user-facing inputs only — no inference.Provider. The runner
 	// resolves the provider itself (worker-compatibility). This compiles-or-not
 	// test locks that: Request has no provider field.
 	r := Request{ConversationID: "c1", Input: "x", WorkDir: "/repo", Gen: 1}

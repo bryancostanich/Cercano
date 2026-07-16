@@ -6,11 +6,12 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	proto "cercano/source/server/pkg/proto"
 )
 
-// streamOpenProvider is the worker's open (local-runtime) llm.Provider. The
+// streamOpenProvider is the worker's open (local-runtime) inference.Provider. The
 // worker process has no runtime manager — that's a host singleton that owns the
 // llama-server subprocesses — so it proxies open-model inference to the host
 // over the existing RunTurn bidi stream. StreamChat sends an
@@ -20,14 +21,14 @@ import (
 type streamOpenProvider struct {
 	sndr   *sender
 	name   string
-	caps   llm.Capabilities
+	caps   inference.Capabilities
 	nextID atomic.Uint64
 
 	mu      sync.Mutex
 	pending map[uint64]*openStreamReader
 }
 
-func newStreamOpenProvider(sndr *sender, name string, caps llm.Capabilities) *streamOpenProvider {
+func newStreamOpenProvider(sndr *sender, name string, caps inference.Capabilities) *streamOpenProvider {
 	return &streamOpenProvider{
 		sndr:    sndr,
 		name:    name,
@@ -36,8 +37,8 @@ func newStreamOpenProvider(sndr *sender, name string, caps llm.Capabilities) *st
 	}
 }
 
-func (p *streamOpenProvider) Name() string                   { return p.name }
-func (p *streamOpenProvider) Capabilities() llm.Capabilities { return p.caps }
+func (p *streamOpenProvider) Name() string                         { return p.name }
+func (p *streamOpenProvider) Capabilities() inference.Capabilities { return p.caps }
 
 // StreamChat proxies a streaming open-model call to the host.
 func (p *streamOpenProvider) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.StreamReader, error) {
@@ -161,5 +162,5 @@ func (r *openStreamReader) Close() error {
 // llama-server runtime, advertising the same capabilities the host's llama
 // provider reports (SupportsTools).
 func newLlamaServerProxy(sndr *sender) *streamOpenProvider {
-	return newStreamOpenProvider(sndr, "llama_server", llm.Capabilities{SupportsTools: true})
+	return newStreamOpenProvider(sndr, "llama_server", inference.Capabilities{SupportsTools: true})
 }

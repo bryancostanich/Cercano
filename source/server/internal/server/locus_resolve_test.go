@@ -4,14 +4,17 @@ import (
 	"context"
 	"testing"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/pkg/config"
 )
 
 type stubProv struct{ name string }
 
-func (s stubProv) Name() string                { return s.name }
-func (s stubProv) Capabilities() llm.Capabilities { return llm.Capabilities{SupportsTools: true} }
+func (s stubProv) Name() string { return s.name }
+func (s stubProv) Capabilities() inference.Capabilities {
+	return inference.Capabilities{SupportsTools: true}
+}
 func (s stubProv) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
 	panic("unused")
 }
@@ -23,7 +26,7 @@ func TestResolveMainProvider(t *testing.T) {
 	cloud := stubProv{"anthropic"}
 	local := stubProv{"ollama"}
 
-	mk := func(mode string, c, l llm.Provider) *Server {
+	mk := func(mode string, c, l inference.Provider) *Server {
 		s, _ := newTestServer()
 		s.cfgSvc.Set(config.Config{LocusMode: mode})
 		s.providerSvc.SetCloudLLMProvider(c)

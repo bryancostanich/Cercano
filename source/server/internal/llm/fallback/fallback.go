@@ -1,5 +1,5 @@
 // Package fallback wraps a primary and a backup cloud provider in a single
-// llm.Provider, failing calls over to the backup when the primary fails in a
+// inference.Provider, failing calls over to the backup when the primary fails in a
 // way the backup could serve (see ShouldFailover). The wrapper is invisible to
 // everything downstream — the router, coordinator, and tool loop see one
 // provider.
@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 )
 
@@ -20,8 +21,8 @@ import (
 // the backup's economy model, not its premium default. Requests without a
 // tier get the backup profile's default model.
 type Provider struct {
-	primary        llm.Provider
-	backup         llm.Provider
+	primary        inference.Provider
+	backup         inference.Provider
 	backupModelFor func(tier string) string
 	onFailover     func(stage string, err error)
 }
@@ -32,7 +33,7 @@ type Provider struct {
 // onFailover, when non-nil, is invoked once per failed-over call with the
 // stage ("chat", "stream_dial", "stream_first") and the primary's error — the
 // server logs it so backup-served turns are visible.
-func New(primary, backup llm.Provider, backupModelFor func(tier string) string, onFailover func(stage string, err error)) *Provider {
+func New(primary, backup inference.Provider, backupModelFor func(tier string) string, onFailover func(stage string, err error)) *Provider {
 	return &Provider{primary: primary, backup: backup, backupModelFor: backupModelFor, onFailover: onFailover}
 }
 
@@ -40,7 +41,7 @@ func New(primary, backup llm.Provider, backupModelFor func(tier string) string, 
 // everywhere except the moment of failover, which is surfaced via onFailover.
 func (p *Provider) Name() string { return p.primary.Name() }
 
-func (p *Provider) Capabilities() llm.Capabilities { return p.primary.Capabilities() }
+func (p *Provider) Capabilities() inference.Capabilities { return p.primary.Capabilities() }
 
 func (p *Provider) notify(stage string, err error) {
 	if p.onFailover != nil {

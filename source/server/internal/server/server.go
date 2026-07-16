@@ -36,6 +36,7 @@ import (
 	"cercano/source/server/internal/hostsvc/providers"
 	runtimessvc "cercano/source/server/internal/hostsvc/runtimes"
 	toolssvc "cercano/source/server/internal/hostsvc/tools"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llamacompat"
 	"cercano/source/server/internal/llm"
@@ -322,24 +323,24 @@ func (s *Server) RestartMcpServer(ctx context.Context, req *proto.RestartMcpServ
 // SetCloudLLMProvider attaches the native-tool-calling cloud provider used by
 // GetProviderCapabilities. Optional — when nil, GetProviderCapabilities falls
 // back to a hardcoded Anthropic-shaped capability snapshot.
-func (s *Server) SetCloudLLMProvider(p llm.Provider) { s.providerSvc.SetCloudLLMProvider(p) }
+func (s *Server) SetCloudLLMProvider(p inference.Provider) { s.providerSvc.SetCloudLLMProvider(p) }
 
 // SetOpenLLMProvider attaches the native-tool-calling local provider (Ollama
 // or the llama-server adapter, per open_runtime).
-func (s *Server) SetOpenLLMProvider(p llm.Provider) { s.providerSvc.SetOpenLLMProvider(p) }
+func (s *Server) SetOpenLLMProvider(p inference.Provider) { s.providerSvc.SetOpenLLMProvider(p) }
 
 // SetOpenProviderFactory installs the constructor used to rebuild the native
 // open provider when the local runtime selection changes at runtime (see the
 // open_runtime branch in UpdateConfig).
-func (s *Server) SetOpenProviderFactory(fn func(config.Config) llm.Provider) {
+func (s *Server) SetOpenProviderFactory(fn func(config.Config) inference.Provider) {
 	s.providerSvc.SetOpenProviderFactory(fn)
 }
 
 // CloudLLMProvider / OpenLLMProvider return the RAW (unwrapped) providers. The
 // dispatch engine reads these per-dispatch so a runtime cloud swap is honored,
 // and wraps them itself for usage recording — so these must stay unwrapped.
-func (s *Server) CloudLLMProvider() llm.Provider { return s.providerSvc.CloudLLMProvider() }
-func (s *Server) OpenLLMProvider() llm.Provider  { return s.providerSvc.OpenLLMProvider() }
+func (s *Server) CloudLLMProvider() inference.Provider { return s.providerSvc.CloudLLMProvider() }
+func (s *Server) OpenLLMProvider() inference.Provider  { return s.providerSvc.OpenLLMProvider() }
 
 // SetUsageSink installs the sink that resolveMainProvider uses to wrap the
 // main tool-loop's provider for token-usage recording. The server's stored
@@ -591,12 +592,12 @@ func (s *Server) RemoveCloudProfile(ctx context.Context, req *proto.RemoveCloudP
 	return &proto.RemoveCloudProfileResponse{Ok: true}, nil
 }
 
-// resolveMainProvider picks the llm.Provider for the main tool-loop per the
+// resolveMainProvider picks the inference.Provider for the main tool-loop per the
 // active Locus Mode. Returns the provider, whether it's the cloud tier, whether
 // this is a fallback (preferred tier unavailable), or an error when the mode
 // forbids crossing and the required tier has no provider wired.
 // Delegates to providerSvc.Main().
-func (s *Server) resolveMainProvider() (llm.Provider, bool, bool, error) {
+func (s *Server) resolveMainProvider() (inference.Provider, bool, bool, error) {
 	return s.providerSvc.Main()
 }
 
@@ -701,7 +702,7 @@ func NewServer(a *agent.Agent, openProvider *legacymodels.OpenModelProvider, rou
 		func() string { return s.activeCloudModel() },
 		func() *dispatch.Engine { return s.toolSvc.Engine() },
 		func() *legacymodels.OpenModelProvider { return s.providerSvc.OpenLegacy() },
-		func() llm.Provider { return s.providerSvc.Cloud() },
+		func() inference.Provider { return s.providerSvc.Cloud() },
 		func() string { return s.activeCloudModel() },
 	)
 	// Construct the tool catalog service. permBroker is not yet wired here
@@ -783,7 +784,7 @@ func (s *Server) SelectExecutionMode() {
 			}
 			return st.EnsureSubagentConversation(ctx, id, parentID, projectDir, model, grantedTools)
 		}, // worker-side dispatch: create the sub-agent conversation row on the host
-		func() llm.Provider { return s.OpenLLMProvider() }, // answers the worker's OpenInferenceRequests
+		func() inference.Provider { return s.OpenLLMProvider() }, // answers the worker's OpenInferenceRequests
 	)
 	log.Printf("[server] execution mode: worker (turns run in isolated child processes; " +
 		"MCP-involving turns fall back to in-process — worker MCP proxying is a future refinement)")

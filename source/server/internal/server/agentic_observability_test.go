@@ -11,6 +11,7 @@ import (
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/dispatch"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 )
 
@@ -73,7 +74,7 @@ func observabilityDispatchRig(t *testing.T) (*Server, *scriptedProvider) {
 	srv.SetPermissions(perms, nil)
 
 	prov := &scriptedProvider{
-		caps: llm.Capabilities{SupportsTools: true},
+		caps: inference.Capabilities{SupportsTools: true},
 		scripts: [][]llm.Block{
 			{{Type: llm.BlockToolUse, ToolUseID: "tu1", ToolName: "r_read", ToolInput: json.RawMessage(`{}`)}},
 			{{Type: llm.BlockText, Text: "done"}},
@@ -213,7 +214,7 @@ func TestRunAgenticDispatch_NoStoreStillWorks(t *testing.T) {
 	srv.SetPermissions(perms, nil)
 
 	prov := &scriptedProvider{
-		caps: llm.Capabilities{SupportsTools: true},
+		caps: inference.Capabilities{SupportsTools: true},
 		scripts: [][]llm.Block{
 			{{Type: llm.BlockToolUse, ToolUseID: "tu1", ToolName: "r_read", ToolInput: json.RawMessage(`{}`)}},
 			{{Type: llm.BlockText, Text: "done"}},

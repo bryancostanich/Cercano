@@ -5,7 +5,7 @@ package worker
 //
 // When the ACTIVE profile's credential fetch failed, buildWorkerProviders left
 // the primary provider nil but still wrapped it in a fallback composite (a
-// configured backup). That produced a non-nil llm.Provider interface holding a
+// configured backup). That produced a non-nil inference.Provider interface holding a
 // fallback whose .primary is nil — so dispatch.Select's `p.Cloud != nil` is true
 // but `p.Cloud.Name()` (fallback.Name -> p.primary.Name) nil-derefs. Repro of
 // the real crash: active/meridian profile with no keychain key + a chatgpt

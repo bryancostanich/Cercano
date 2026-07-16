@@ -8,6 +8,7 @@ import (
 
 	api "github.com/ollama/ollama/api"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 )
 
@@ -32,8 +33,8 @@ func NewClient(cfg Config) *Client {
 
 func (c *Client) Name() string { return "ollama" }
 
-func (c *Client) Capabilities() llm.Capabilities {
-	return llm.Capabilities{
+func (c *Client) Capabilities() inference.Capabilities {
+	return inference.Capabilities{
 		SupportsTools:         true,
 		SupportsParallelTools: false,
 		SupportsCaching:       false,

@@ -44,7 +44,7 @@ type ToolSvc interface {
 }
 
 // Request carries the user-facing inputs for one turn. It deliberately holds NO
-// llm.Provider and NO assembled history — the runner resolves the provider and
+// inference.Provider and NO assembled history — the runner resolves the provider and
 // assembles history itself (so it works across a process boundary; see the
 // plan's load-bearing decision).
 type Request struct {
@@ -76,8 +76,8 @@ type TurnRunner interface {
 // at construction; a worker builds its own set from a config snapshot.
 type Deps struct {
 	Providers providers.Resolver
-	Tools     ToolSvc        // narrow interface; tools.Catalog satisfies it
-	Persist   TurnHistory    // narrow interface; persistence.Service satisfies it
+	Tools     ToolSvc     // narrow interface; tools.Catalog satisfies it
+	Persist   TurnHistory // narrow interface; persistence.Service satisfies it
 	Config    cfgsvc.Service
 	Perms     permissions.Broker
 	Agent     *agent.Agent

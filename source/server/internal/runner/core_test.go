@@ -25,6 +25,7 @@ import (
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	permissions "cercano/source/server/internal/hostsvc/permissions"
 	providers "cercano/source/server/internal/hostsvc/providers"
+	"cercano/source/server/internal/inference"
 	legacymodels "cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/ollamacatalog"
@@ -44,7 +45,7 @@ type turnObservation struct {
 }
 
 // ---------------------------------------------------------------------------
-// spyProvider — scripted llm.Provider that records ctx values and writes a
+// spyProvider — scripted inference.Provider that records ctx values and writes a
 // marker file under the observed WorkDir. It emits a single end_turn stream so
 // RunToolLoop exits after one iteration without invoking any real tools.
 // ---------------------------------------------------------------------------
@@ -56,8 +57,8 @@ type spyProvider struct {
 
 func (p *spyProvider) Name() string { return "spy" }
 
-func (p *spyProvider) Capabilities() llm.Capabilities {
-	return llm.Capabilities{SupportsTools: true}
+func (p *spyProvider) Capabilities() inference.Capabilities {
+	return inference.Capabilities{SupportsTools: true}
 }
 
 func (p *spyProvider) Chat(_ context.Context, _ llm.ChatRequest) (llm.ChatResponse, error) {
@@ -110,31 +111,31 @@ func (r *endTurnReader) Close() error { return nil }
 // Only Main() and MainModel() are called by RunTurn; the rest are stubs.
 // ---------------------------------------------------------------------------
 
-type fakeResolver struct{ prov llm.Provider }
+type fakeResolver struct{ prov inference.Provider }
 
-func (f *fakeResolver) Main() (llm.Provider, bool, bool, error) {
+func (f *fakeResolver) Main() (inference.Provider, bool, bool, error) {
 	return f.prov, false, false, nil
 }
-func (f *fakeResolver) MainModel(_ bool) string                    { return "fake-model" }
-func (f *fakeResolver) PrimaryModel() string                       { return "fake-model" }
-func (f *fakeResolver) Rebuild() error                             { return nil }
-func (f *fakeResolver) InstallAbsentCloud(_ string)                {}
-func (f *fakeResolver) Cloud() llm.Provider                        { return nil }
-func (f *fakeResolver) Open() llm.Provider                         { return nil }
-func (f *fakeResolver) ActiveCloudModel() string                   { return "" }
-func (f *fakeResolver) LocusMode() string                          { return "" }
-func (f *fakeResolver) Router() providers.RouterCloudUpdater       { return nil }
-func (f *fakeResolver) Registry() *engine.EngineRegistry           { return nil }
-func (f *fakeResolver) CatalogManager() *ollamacatalog.Manager { return nil }
-func (f *fakeResolver) OpenLegacy() *legacymodels.OpenModelProvider { return nil }
-func (f *fakeResolver) Reconfigure(_ providers.ReconfigureArgs)    {}
-func (f *fakeResolver) SetCloudLLMProvider(_ llm.Provider)         {}
-func (f *fakeResolver) SetOpenLLMProvider(_ llm.Provider)          {}
-func (f *fakeResolver) SetOpenProviderFactory(_ func(config.Config) llm.Provider) {}
-func (f *fakeResolver) CloudLLMProvider() llm.Provider             { return nil }
-func (f *fakeResolver) OpenLLMProvider() llm.Provider              { return nil }
-func (f *fakeResolver) SetCatalogManager(_ *ollamacatalog.Manager)  {}
-func (f *fakeResolver) SetUsageSink(_ func(usage.Usage))           {}
+func (f *fakeResolver) MainModel(_ bool) string                                         { return "fake-model" }
+func (f *fakeResolver) PrimaryModel() string                                            { return "fake-model" }
+func (f *fakeResolver) Rebuild() error                                                  { return nil }
+func (f *fakeResolver) InstallAbsentCloud(_ string)                                     {}
+func (f *fakeResolver) Cloud() inference.Provider                                       { return nil }
+func (f *fakeResolver) Open() inference.Provider                                        { return nil }
+func (f *fakeResolver) ActiveCloudModel() string                                        { return "" }
+func (f *fakeResolver) LocusMode() string                                               { return "" }
+func (f *fakeResolver) Router() providers.RouterCloudUpdater                            { return nil }
+func (f *fakeResolver) Registry() *engine.EngineRegistry                                { return nil }
+func (f *fakeResolver) CatalogManager() *ollamacatalog.Manager                          { return nil }
+func (f *fakeResolver) OpenLegacy() *legacymodels.OpenModelProvider                     { return nil }
+func (f *fakeResolver) Reconfigure(_ providers.ReconfigureArgs)                         {}
+func (f *fakeResolver) SetCloudLLMProvider(_ inference.Provider)                        {}
+func (f *fakeResolver) SetOpenLLMProvider(_ inference.Provider)                         {}
+func (f *fakeResolver) SetOpenProviderFactory(_ func(config.Config) inference.Provider) {}
+func (f *fakeResolver) CloudLLMProvider() inference.Provider                            { return nil }
+func (f *fakeResolver) OpenLLMProvider() inference.Provider                             { return nil }
+func (f *fakeResolver) SetCatalogManager(_ *ollamacatalog.Manager)                      {}
+func (f *fakeResolver) SetUsageSink(_ func(usage.Usage))                                {}
 
 // ---------------------------------------------------------------------------
 // fakeTurnHistory — minimal TurnHistory; returns empty history.
@@ -146,7 +147,7 @@ func (h *fakeTurnHistory) AssembleHistory(_ context.Context, _ string) []llm.Mes
 	return nil
 }
 func (h *fakeTurnHistory) PersistTurn(_ context.Context, _ string, _ llm.Message) {}
-func (h *fakeTurnHistory) LoadProjectContext(_ string) string                       { return "" }
+func (h *fakeTurnHistory) LoadProjectContext(_ string) string                     { return "" }
 
 // ---------------------------------------------------------------------------
 // fakeToolSvc — minimal ToolSvc; returns an empty registry.
@@ -167,21 +168,21 @@ func (s *fakeToolSvc) GrantedRegistry(_ []string) (*agenttools.Registry, []strin
 
 type fakeConfig struct{}
 
-func (c *fakeConfig) Get() config.Config                                           { return config.Config{} }
-func (c *fakeConfig) Path() string                                                 { return "" }
-func (c *fakeConfig) Secrets() secrets.Store                                       { return nil }
-func (c *fakeConfig) ActiveProfile() (config.CloudProfile, bool)                   { return config.CloudProfile{}, false }
-func (c *fakeConfig) Set(_ config.Config)                                           {}
-func (c *fakeConfig) SetPath(_ string)                                             {}
-func (c *fakeConfig) SetSecrets(_ secrets.Store)                                   {}
-func (c *fakeConfig) SetActiveProfile(_ string) bool                               { return false }
-func (c *fakeConfig) UpsertProfile(_ config.CloudProfile) (bool, bool)            { return false, false }
-func (c *fakeConfig) RemoveProfile(_ string) (bool, bool)                          { return false, false }
-func (c *fakeConfig) SetBackupProfile(_ string) bool                               { return false }
-func (c *fakeConfig) ProfileInfo(_ string) (bool, bool)                            { return false, false }
-func (c *fakeConfig) Mutate(_ func(*config.Config))                                {}
-func (c *fakeConfig) SetCloudModel(_ string)                                       {}
-func (c *fakeConfig) Persist()                                                     {}
+func (c *fakeConfig) Get() config.Config                               { return config.Config{} }
+func (c *fakeConfig) Path() string                                     { return "" }
+func (c *fakeConfig) Secrets() secrets.Store                           { return nil }
+func (c *fakeConfig) ActiveProfile() (config.CloudProfile, bool)       { return config.CloudProfile{}, false }
+func (c *fakeConfig) Set(_ config.Config)                              {}
+func (c *fakeConfig) SetPath(_ string)                                 {}
+func (c *fakeConfig) SetSecrets(_ secrets.Store)                       {}
+func (c *fakeConfig) SetActiveProfile(_ string) bool                   { return false }
+func (c *fakeConfig) UpsertProfile(_ config.CloudProfile) (bool, bool) { return false, false }
+func (c *fakeConfig) RemoveProfile(_ string) (bool, bool)              { return false, false }
+func (c *fakeConfig) SetBackupProfile(_ string) bool                   { return false }
+func (c *fakeConfig) ProfileInfo(_ string) (bool, bool)                { return false, false }
+func (c *fakeConfig) Mutate(_ func(*config.Config))                    {}
+func (c *fakeConfig) SetCloudModel(_ string)                           {}
+func (c *fakeConfig) Persist()                                         {}
 
 // ---------------------------------------------------------------------------
 // fakePerms — minimal permissions.Broker returning a permissive PermissionStore.
@@ -189,15 +190,15 @@ func (c *fakeConfig) Persist()                                                  
 
 type fakePerms struct{ store *agent.PermissionStore }
 
-func (p *fakePerms) Mode() agent.PermissionMode             { return agent.ModePermissive }
-func (p *fakePerms) SetMode(_ agent.PermissionMode) error   { return nil }
-func (p *fakePerms) AddMCPAllow(_ string) error             { return nil }
-func (p *fakePerms) HasPending() bool                       { return false }
+func (p *fakePerms) Mode() agent.PermissionMode           { return agent.ModePermissive }
+func (p *fakePerms) SetMode(_ agent.PermissionMode) error { return nil }
+func (p *fakePerms) AddMCPAllow(_ string) error           { return nil }
+func (p *fakePerms) HasPending() bool                     { return false }
 func (p *fakePerms) Wait(_ context.Context, _, _ string) (agent.Decision, error) {
 	return agent.Decision{}, nil
 }
-func (p *fakePerms) Resolve(_, _ string, _ agent.Decision) bool { return true }
-func (p *fakePerms) Store() *agent.PermissionStore           { return p.store }
+func (p *fakePerms) Resolve(_, _ string, _ agent.Decision) bool     { return true }
+func (p *fakePerms) Store() *agent.PermissionStore                  { return p.store }
 func (p *fakePerms) StartWatcher(_ context.Context, _ string) error { return nil }
 
 // ---------------------------------------------------------------------------
@@ -205,11 +206,11 @@ func (p *fakePerms) StartWatcher(_ context.Context, _ string) error { return nil
 // These fail to compile if any fake diverges from the real interface.
 // ---------------------------------------------------------------------------
 
-var _ providers.Resolver    = (*fakeResolver)(nil)
-var _ cfgsvc.Service        = (*fakeConfig)(nil)
-var _ permissions.Broker    = (*fakePerms)(nil)
-var _ TurnHistory            = (*fakeTurnHistory)(nil)
-var _ ToolSvc                = (*fakeToolSvc)(nil)
+var _ providers.Resolver = (*fakeResolver)(nil)
+var _ cfgsvc.Service = (*fakeConfig)(nil)
+var _ permissions.Broker = (*fakePerms)(nil)
+var _ TurnHistory = (*fakeTurnHistory)(nil)
+var _ ToolSvc = (*fakeToolSvc)(nil)
 
 // ---------------------------------------------------------------------------
 // noopSink discards all runner events (we only care about spy observations).
@@ -223,7 +224,7 @@ func (noopSink) Emit(_ Event) {}
 // buildDeps constructs a Deps wired with a given spy provider.
 // ---------------------------------------------------------------------------
 
-func buildDeps(spy llm.Provider) Deps {
+func buildDeps(spy inference.Provider) Deps {
 	reg := agenttools.NewRegistry()
 	return Deps{
 		Providers: &fakeResolver{prov: spy},

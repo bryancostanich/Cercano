@@ -6,19 +6,20 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/dispatch"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/pkg/config"
 )
 
-// fakeLLMProvider is a minimal llm.Provider for dispatch engine tests.
+// fakeLLMProvider is a minimal inference.Provider for dispatch engine tests.
 type fakeLLMProvider struct {
 	name string
 	out  string
 }
 
-func (f *fakeLLMProvider) Name() string                   { return f.name }
-func (f *fakeLLMProvider) Capabilities() llm.Capabilities { return llm.Capabilities{} }
+func (f *fakeLLMProvider) Name() string                         { return f.name }
+func (f *fakeLLMProvider) Capabilities() inference.Capabilities { return inference.Capabilities{} }
 func (f *fakeLLMProvider) Chat(_ context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
 	return llm.ChatResponse{
 		Blocks:       []llm.Block{{Type: llm.BlockText, Text: f.out}},
@@ -43,7 +44,7 @@ func newDispatchCoprocAgent(modeStr string, localProv, cloudProv *fakeLLMProvide
 		cloudModel = cloudProv.name
 	}
 
-	var dLocal, dCloud llm.Provider
+	var dLocal, dCloud inference.Provider
 	if localProv != nil {
 		dLocal = localProv
 	}

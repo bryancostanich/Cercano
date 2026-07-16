@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	projectctx "cercano/source/server/internal/context"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/usage"
@@ -15,12 +16,14 @@ import (
 // provs adapts a static Providers value to the func() Providers that NewEngine takes.
 func provs(p Providers) func() Providers { return func() Providers { return p } }
 
-// echoProvider implements llm.Provider for testing.
+// echoProvider implements inference.Provider for testing.
 // Chat echoes the last user message text back with a prefix and fixed token counts.
 type echoProvider struct{}
 
-func (echoProvider) Name() string                   { return "echo" }
-func (echoProvider) Capabilities() llm.Capabilities { return llm.Capabilities{SupportsTools: true} }
+func (echoProvider) Name() string { return "echo" }
+func (echoProvider) Capabilities() inference.Capabilities {
+	return inference.Capabilities{SupportsTools: true}
+}
 func (echoProvider) Chat(_ context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
 	last := ""
 	if n := len(req.Messages); n > 0 {

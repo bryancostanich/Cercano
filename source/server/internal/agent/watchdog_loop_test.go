@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/agenttools"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 )
 
@@ -35,7 +36,7 @@ func TestWatchdogGate_ChallengeSkipsExecution(t *testing.T) {
 				ToolInput: json.RawMessage(`{}`)}},
 			{{Type: llm.BlockText, Text: "understood"}},
 		},
-		caps: llm.Capabilities{SupportsTools: true},
+		caps: inference.Capabilities{SupportsTools: true},
 	}
 	tool := &fakeWTool{}
 	reg := agenttools.NewRegistry()
@@ -92,7 +93,7 @@ func TestWatchdogBlockDoesNotTripErrorAbort(t *testing.T) {
 		}}
 	}
 	scripts[5] = []llm.Block{{Type: llm.BlockText, Text: "gave up"}}
-	blockProv := &mockProvider{scripts: scripts, caps: llm.Capabilities{SupportsTools: true}}
+	blockProv := &mockProvider{scripts: scripts, caps: inference.Capabilities{SupportsTools: true}}
 
 	tool := &fakeWTool{}
 	reg := agenttools.NewRegistry()
@@ -120,7 +121,7 @@ func TestWatchdogBlockDoesNotTripErrorAbort(t *testing.T) {
 	}
 }
 
-// scriptedProvider is a minimal llm.Provider that returns successive plain-text
+// scriptedProvider is a minimal inference.Provider that returns successive plain-text
 // replies from a slice. SupportsTools is required by RunToolLoop.
 type scriptedProvider struct {
 	replies []string
@@ -128,8 +129,8 @@ type scriptedProvider struct {
 }
 
 func (p *scriptedProvider) Name() string { return "scripted" }
-func (p *scriptedProvider) Capabilities() llm.Capabilities {
-	return llm.Capabilities{SupportsTools: true}
+func (p *scriptedProvider) Capabilities() inference.Capabilities {
+	return inference.Capabilities{SupportsTools: true}
 }
 func (p *scriptedProvider) Chat(_ context.Context, _ llm.ChatRequest) (llm.ChatResponse, error) {
 	return llm.ChatResponse{}, nil
@@ -270,7 +271,7 @@ func TestWatchdogGate_AllowExecutes(t *testing.T) {
 				ToolInput: json.RawMessage(`{}`)}},
 			{{Type: llm.BlockText, Text: "done"}},
 		},
-		caps: llm.Capabilities{SupportsTools: true},
+		caps: inference.Capabilities{SupportsTools: true},
 	}
 	tool := &fakeWTool{}
 	reg := agenttools.NewRegistry()

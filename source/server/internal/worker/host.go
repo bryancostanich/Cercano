@@ -40,6 +40,7 @@ import (
 	"cercano/source/server/internal/cloudfactory"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/hostsvc/permissions"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/runner"
 	"cercano/source/server/internal/secrets"
@@ -70,11 +71,11 @@ type workerRunner struct {
 	anthFlow anthropicauth.Flow
 	chatFlow chatgptauth.Flow
 
-	// openProvider returns the host's current open (local-runtime) llm.Provider,
+	// openProvider returns the host's current open (local-runtime) inference.Provider,
 	// used to answer a worker's OpenInferenceRequest. A factory (not a value) so
 	// a host-side runtime/config swap is honored per request. nil on
 	// dial-injected test runners without open support.
-	openProvider func() llm.Provider
+	openProvider func() inference.Provider
 
 	// ensureSubagent creates a sub-agent conversation row when a worker-side
 	// dispatch requests one over the stream. Wired from the server's store; nil
@@ -107,7 +108,7 @@ func NewWorkerRunner(
 	perms permissions.Broker,
 	st secrets.Store,
 	ensureSubagent EnsureSubagentFunc,
-	openProvider func() llm.Provider,
+	openProvider func() inference.Provider,
 ) runner.TurnRunner {
 	pool := newWorkerPool(nil) // production: spawn via spawnWorker
 	// Start the idle-reaper with the configured window. The reaper runs on a

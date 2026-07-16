@@ -4,13 +4,14 @@ import (
 	"context"
 	"testing"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 )
 
 type stubProvider struct{ name string }
 
-func (p stubProvider) Name() string                  { return p.name }
-func (p stubProvider) Capabilities() llm.Capabilities { return llm.Capabilities{} }
+func (p stubProvider) Name() string                         { return p.name }
+func (p stubProvider) Capabilities() inference.Capabilities { return inference.Capabilities{} }
 func (p stubProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
 	return llm.ChatResponse{}, nil
 }

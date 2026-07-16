@@ -7,6 +7,7 @@ import (
 
 	"cercano/source/server/internal/engine"
 	providers "cercano/source/server/internal/hostsvc/providers"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/legacymodels"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/ollamacatalog"
@@ -16,7 +17,7 @@ import (
 	"cercano/source/server/pkg/config"
 )
 
-// chatProvider is an llm.Provider whose Chat returns a fixed text response.
+// chatProvider is an inference.Provider whose Chat returns a fixed text response.
 // The watchdog's OneShot lane calls Provider.Chat (not StreamChat), so this is
 // what the watchdog's checks see when they dispatch a supervision prompt.
 type chatProvider struct {
@@ -25,8 +26,8 @@ type chatProvider struct {
 }
 
 func (p *chatProvider) Name() string { return p.name }
-func (p *chatProvider) Capabilities() llm.Capabilities {
-	return llm.Capabilities{SupportsTools: true}
+func (p *chatProvider) Capabilities() inference.Capabilities {
+	return inference.Capabilities{SupportsTools: true}
 }
 func (p *chatProvider) Chat(_ context.Context, _ llm.ChatRequest) (llm.ChatResponse, error) {
 	return llm.ChatResponse{
@@ -42,29 +43,31 @@ func (p *chatProvider) StreamChat(_ context.Context, _ llm.ChatRequest) (llm.Str
 // dispatches to RoleCoproc, which under open_primary picks the open side). It
 // mirrors fakeResolver but returns prov from Open()/Main() so the worker's
 // dispatch engine resolves it.
-type openResolver struct{ prov llm.Provider }
+type openResolver struct{ prov inference.Provider }
 
-func (r *openResolver) Main() (llm.Provider, bool, bool, error)                   { return r.prov, false, false, nil }
-func (r *openResolver) MainModel(_ bool) string                                   { return "fake-model" }
-func (r *openResolver) PrimaryModel() string                                      { return "fake-model" }
-func (r *openResolver) Rebuild() error                                            { return nil }
-func (r *openResolver) InstallAbsentCloud(_ string)                               {}
-func (r *openResolver) Cloud() llm.Provider                                       { return nil }
-func (r *openResolver) Open() llm.Provider                                        { return r.prov }
-func (r *openResolver) ActiveCloudModel() string                                  { return "" }
-func (r *openResolver) LocusMode() string                                         { return "" }
-func (r *openResolver) Router() providers.RouterCloudUpdater                      { return nil }
-func (r *openResolver) Registry() *engine.EngineRegistry                          { return nil }
-func (r *openResolver) CatalogManager() *ollamacatalog.Manager                    { return nil }
-func (r *openResolver) OpenLegacy() *legacymodels.OpenModelProvider               { return nil }
-func (r *openResolver) Reconfigure(_ providers.ReconfigureArgs)                   {}
-func (r *openResolver) SetCloudLLMProvider(_ llm.Provider)                        {}
-func (r *openResolver) SetOpenLLMProvider(_ llm.Provider)                         {}
-func (r *openResolver) SetOpenProviderFactory(_ func(config.Config) llm.Provider) {}
-func (r *openResolver) CloudLLMProvider() llm.Provider                            { return nil }
-func (r *openResolver) OpenLLMProvider() llm.Provider                             { return nil }
-func (r *openResolver) SetCatalogManager(_ *ollamacatalog.Manager)                {}
-func (r *openResolver) SetUsageSink(_ func(usage.Usage))                          {}
+func (r *openResolver) Main() (inference.Provider, bool, bool, error) {
+	return r.prov, false, false, nil
+}
+func (r *openResolver) MainModel(_ bool) string                                         { return "fake-model" }
+func (r *openResolver) PrimaryModel() string                                            { return "fake-model" }
+func (r *openResolver) Rebuild() error                                                  { return nil }
+func (r *openResolver) InstallAbsentCloud(_ string)                                     {}
+func (r *openResolver) Cloud() inference.Provider                                       { return nil }
+func (r *openResolver) Open() inference.Provider                                        { return r.prov }
+func (r *openResolver) ActiveCloudModel() string                                        { return "" }
+func (r *openResolver) LocusMode() string                                               { return "" }
+func (r *openResolver) Router() providers.RouterCloudUpdater                            { return nil }
+func (r *openResolver) Registry() *engine.EngineRegistry                                { return nil }
+func (r *openResolver) CatalogManager() *ollamacatalog.Manager                          { return nil }
+func (r *openResolver) OpenLegacy() *legacymodels.OpenModelProvider                     { return nil }
+func (r *openResolver) Reconfigure(_ providers.ReconfigureArgs)                         {}
+func (r *openResolver) SetCloudLLMProvider(_ inference.Provider)                        {}
+func (r *openResolver) SetOpenLLMProvider(_ inference.Provider)                         {}
+func (r *openResolver) SetOpenProviderFactory(_ func(config.Config) inference.Provider) {}
+func (r *openResolver) CloudLLMProvider() inference.Provider                            { return nil }
+func (r *openResolver) OpenLLMProvider() inference.Provider                             { return nil }
+func (r *openResolver) SetCatalogManager(_ *ollamacatalog.Manager)                      {}
+func (r *openResolver) SetUsageSink(_ func(usage.Usage))                                {}
 
 // TestBuildWorkerWatchdog_DisabledIsNil confirms the default-off path: an
 // unset (or explicitly disabled) watchdog config yields a nil watchdog, exactly

@@ -6,13 +6,14 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/dispatch"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 )
 
 // sessionCapturingProvider wraps a provider and records the llm session id on
 // every Chat/StreamChat ctx, so tests can assert what identity a call carried.
 type sessionCapturingProvider struct {
-	llm.Provider
+	inference.Provider
 	mu   sync.Mutex
 	seen []string
 }

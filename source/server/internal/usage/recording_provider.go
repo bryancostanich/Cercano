@@ -1,5 +1,5 @@
 // Package usage records per-call LLM token usage at the provider boundary.
-// A RecordingProvider decorates an llm.Provider; every completed Chat or
+// A RecordingProvider decorates an inference.Provider; every completed Chat or
 // fully-drained StreamChat reports one Usage to a sink. This is the single
 // chokepoint for cost telemetry across the main loop, co-processor work, and
 // dispatched subagents (each provider is exactly one of cloud/local, so the
@@ -10,6 +10,7 @@ package usage
 import (
 	"context"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 )
 
@@ -27,19 +28,19 @@ type Usage struct {
 // Wrap returns a provider that reports a Usage to sink after each call. sink
 // must tolerate being called from the goroutine that drains a stream; it is
 // nil-safe (a nil sink disables recording).
-func Wrap(p llm.Provider, source string, isCloud bool, sink func(Usage)) llm.Provider {
+func Wrap(p inference.Provider, source string, isCloud bool, sink func(Usage)) inference.Provider {
 	return &recordingProvider{inner: p, source: source, isCloud: isCloud, sink: sink}
 }
 
 type recordingProvider struct {
-	inner   llm.Provider
+	inner   inference.Provider
 	source  string
 	isCloud bool
 	sink    func(Usage)
 }
 
-func (r *recordingProvider) Name() string                   { return r.inner.Name() }
-func (r *recordingProvider) Capabilities() llm.Capabilities { return r.inner.Capabilities() }
+func (r *recordingProvider) Name() string                         { return r.inner.Name() }
+func (r *recordingProvider) Capabilities() inference.Capabilities { return r.inner.Capabilities() }
 
 func (r *recordingProvider) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
 	resp, err := r.inner.Chat(ctx, req)

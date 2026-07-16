@@ -7,6 +7,7 @@ import (
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/hostsvc/permissions"
 	toolssvc "cercano/source/server/internal/hostsvc/tools"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/runner"
 	"cercano/source/server/internal/toolstack"
@@ -31,7 +32,7 @@ func buildWorkerToolSvc(
 	permBroker permissions.Broker,
 	engine *dispatch.Engine,
 	ctxLoader *projectctx.Loader,
-	cloud, open llm.Provider,
+	cloud, open inference.Provider,
 	cfg pkgcfg.Config,
 	subPersist *streamSubagentPersist,
 ) runner.ToolSvc {

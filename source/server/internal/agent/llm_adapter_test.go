@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 )
 
@@ -16,8 +17,8 @@ type fakeLLM struct {
 	servedModel  string // reported back as ChatResponse.Model when non-empty
 }
 
-func (f *fakeLLM) Name() string                   { return f.name }
-func (f *fakeLLM) Capabilities() llm.Capabilities { return llm.Capabilities{} }
+func (f *fakeLLM) Name() string                         { return f.name }
+func (f *fakeLLM) Capabilities() inference.Capabilities { return inference.Capabilities{} }
 func (f *fakeLLM) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
 	f.gotModel = req.Model
 	f.gotMaxTokens = req.MaxTokens

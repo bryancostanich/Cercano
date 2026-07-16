@@ -21,8 +21,8 @@ import (
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/engine"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/legacymodels"
-	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/llm/fallback"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
@@ -44,7 +44,7 @@ type RouterCloudUpdater interface {
 type Resolver interface {
 	// Main returns the provider + model for the active locus mode, plus fallback signal.
 	// Was resolveMainProvider on Server.
-	Main() (prov llm.Provider, isCloud bool, fellBack bool, err error)
+	Main() (prov inference.Provider, isCloud bool, fellBack bool, err error)
 
 	// MainModel returns the configured model name for the given tier.
 	// Was mainModelFor on Server.
@@ -61,10 +61,10 @@ type Resolver interface {
 	InstallAbsentCloud(reason string)
 
 	// Cloud returns the raw (unwrapped) cloud LLM provider.
-	Cloud() llm.Provider
+	Cloud() inference.Provider
 
 	// Open returns the raw (unwrapped) local LLM provider.
-	Open() llm.Provider
+	Open() inference.Provider
 
 	// ActiveCloudModel returns the cloud model from the active profile.
 	ActiveCloudModel() string
@@ -90,20 +90,20 @@ type Resolver interface {
 	Reconfigure(args ReconfigureArgs)
 
 	// SetCloudLLMProvider wires the native-tool-calling cloud provider.
-	SetCloudLLMProvider(p llm.Provider)
+	SetCloudLLMProvider(p inference.Provider)
 
 	// SetOpenLLMProvider wires the native-tool-calling local provider (Ollama).
-	SetOpenLLMProvider(p llm.Provider)
+	SetOpenLLMProvider(p inference.Provider)
 
 	// SetOpenProviderFactory installs the constructor used to rebuild the native
 	// open provider when the local runtime selection changes at runtime.
-	SetOpenProviderFactory(fn func(cfg.Config) llm.Provider)
+	SetOpenProviderFactory(fn func(cfg.Config) inference.Provider)
 
 	// CloudLLMProvider returns the raw cloud provider (for dispatch engine).
-	CloudLLMProvider() llm.Provider
+	CloudLLMProvider() inference.Provider
 
 	// OpenLLMProvider returns the raw local provider (for dispatch engine).
-	OpenLLMProvider() llm.Provider
+	OpenLLMProvider() inference.Provider
 
 	// SetCatalogManager wires the online-catalog manager.
 	SetCatalogManager(cm *ollamacatalog.Manager)
@@ -115,9 +115,9 @@ type Resolver interface {
 // service is the concrete Resolver implementation.
 type service struct {
 	cfgSvc              cfgsvc.Service
-	cloudLLMProvider    llm.Provider
-	openLLMProvider     llm.Provider
-	openProviderFactory func(cfg.Config) llm.Provider // rebuilds openLLMProvider on runtime change
+	cloudLLMProvider    inference.Provider
+	openLLMProvider     inference.Provider
+	openProviderFactory func(cfg.Config) inference.Provider // rebuilds openLLMProvider on runtime change
 	openProvider        *legacymodels.OpenModelProvider
 	cloudFactory        agent.CloudFactory
 	router              RouterCloudUpdater
@@ -155,20 +155,20 @@ func New(
 
 // --- Resolver interface implementation ---
 
-func (p *service) Cloud() llm.Provider                         { return p.cloudLLMProvider }
-func (p *service) Open() llm.Provider                          { return p.openLLMProvider }
+func (p *service) Cloud() inference.Provider                   { return p.cloudLLMProvider }
+func (p *service) Open() inference.Provider                    { return p.openLLMProvider }
 func (p *service) OpenLegacy() *legacymodels.OpenModelProvider { return p.openProvider }
 func (p *service) Router() RouterCloudUpdater                  { return p.router }
 func (p *service) Registry() *engine.EngineRegistry            { return p.registry }
 func (p *service) CatalogManager() *ollamacatalog.Manager      { return p.catalogManager }
-func (p *service) CloudLLMProvider() llm.Provider              { return p.cloudLLMProvider }
-func (p *service) OpenLLMProvider() llm.Provider               { return p.openLLMProvider }
+func (p *service) CloudLLMProvider() inference.Provider        { return p.cloudLLMProvider }
+func (p *service) OpenLLMProvider() inference.Provider         { return p.openLLMProvider }
 
-func (p *service) SetCloudLLMProvider(prov llm.Provider)       { p.cloudLLMProvider = prov }
-func (p *service) SetOpenLLMProvider(prov llm.Provider)        { p.openLLMProvider = prov }
+func (p *service) SetCloudLLMProvider(prov inference.Provider) { p.cloudLLMProvider = prov }
+func (p *service) SetOpenLLMProvider(prov inference.Provider)  { p.openLLMProvider = prov }
 func (p *service) SetCatalogManager(cm *ollamacatalog.Manager) { p.catalogManager = cm }
 func (p *service) SetUsageSink(fn func(usage.Usage))           { p.usageSink = fn }
-func (p *service) SetOpenProviderFactory(fn func(cfg.Config) llm.Provider) {
+func (p *service) SetOpenProviderFactory(fn func(cfg.Config) inference.Provider) {
 	p.openProviderFactory = fn
 }
 
@@ -191,7 +191,7 @@ func (p *service) ActiveCloudModel() string {
 
 // Main returns the provider + model for the active locus mode.
 // Was resolveMainProvider on Server.
-func (p *service) Main() (llm.Provider, bool, bool, error) {
+func (p *service) Main() (inference.Provider, bool, bool, error) {
 	c := p.cfgSvc.Get()
 	mode, _ := locus.ParseMode(c.LocusMode)
 	// Register the open tier absent when its GGUF isn't on disk yet (e.g. still
@@ -365,7 +365,7 @@ func (p *service) rebuildCloud() error {
 // cfg is the config snapshot already held by the caller (avoids a second Get()).
 // A backup that can't be built is reported and skipped — a broken backup must
 // never take down a working primary, so every failure path returns the primary unchanged.
-func (p *service) wrapBackup(primary llm.Provider, primaryName string, c cfg.Config) llm.Provider {
+func (p *service) wrapBackup(primary inference.Provider, primaryName string, c cfg.Config) inference.Provider {
 	name := c.BackupCloudProfile
 	if name == "" || name == primaryName {
 		return primary

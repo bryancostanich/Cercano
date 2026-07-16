@@ -5,14 +5,15 @@ import (
 	"strings"
 	"testing"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
 )
 
 type stubLLM struct{ n string }
 
-func (s stubLLM) Name() string                 { return s.n }
-func (stubLLM) Capabilities() llm.Capabilities { return llm.Capabilities{} }
+func (s stubLLM) Name() string                       { return s.n }
+func (stubLLM) Capabilities() inference.Capabilities { return inference.Capabilities{} }
 func (stubLLM) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
 	return llm.ChatResponse{}, nil
 }

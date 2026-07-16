@@ -3,7 +3,7 @@ package dispatch
 import (
 	"fmt"
 
-	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/locus"
 )
 
@@ -17,13 +17,13 @@ const (
 
 // Providers holds the candidate providers; either may be nil/absent.
 type Providers struct {
-	Cloud llm.Provider
-	Open  llm.Provider
+	Cloud inference.Provider
+	Open  inference.Provider
 }
 
 // Selection is the resolved provider for a unit of work.
 type Selection struct {
-	Provider llm.Provider
+	Provider inference.Provider
 	IsCloud  bool
 	FellBack bool
 	Notice   string
@@ -37,7 +37,7 @@ func Select(mode locus.Mode, role Role, p Providers) (Selection, error) {
 	if role == RoleCoproc {
 		res = mode.Coproc()
 	}
-	pick := func(t locus.Tier) llm.Provider {
+	pick := func(t locus.Tier) inference.Provider {
 		if t == locus.TierCloud {
 			if p.Cloud != nil && p.Cloud.Name() != "NONE" {
 				return p.Cloud

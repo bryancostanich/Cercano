@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/llm/httpx"
 )
@@ -48,7 +49,7 @@ type Config struct {
 	TokenSource TokenSource
 }
 
-// Client implements llm.Provider using the OpenAI Responses API.
+// Client implements inference.Provider using the OpenAI Responses API.
 type Client struct {
 	http    httpx.Doer
 	baseURL string
@@ -107,8 +108,8 @@ func NewClient(cfg Config) *Client {
 
 func (c *Client) Name() string { return "openai-responses" }
 
-func (c *Client) Capabilities() llm.Capabilities {
-	return llm.Capabilities{
+func (c *Client) Capabilities() inference.Capabilities {
+	return inference.Capabilities{
 		SupportsTools:         true,
 		SupportsParallelTools: true,
 		SupportsCaching:       false,

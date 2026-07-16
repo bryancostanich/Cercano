@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/pkg/proto"
 )
@@ -94,7 +95,7 @@ func TestTurnExclusivity_CompletedTurnReleasesAndPersists(t *testing.T) {
 	srv, store := newServerWithStore(t)
 	prov := &scriptedProvider{
 		scripts: [][]llm.Block{{{Type: llm.BlockText, Text: "turn A"}}},
-		caps:    llm.Capabilities{SupportsTools: true},
+		caps:    inference.Capabilities{SupportsTools: true},
 	}
 	srv.SetCloudLLMProvider(prov)
 

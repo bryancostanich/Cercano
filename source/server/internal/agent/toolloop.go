@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"cercano/source/server/internal/agenttools"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/pkg/config"
 )
@@ -82,7 +83,7 @@ func loopProgressEvent(defaultToolUseID, defaultToolName string, progress agentt
 }
 
 type ToolLoopInput struct {
-	Provider    llm.Provider
+	Provider    inference.Provider
 	Registry    *agenttools.Registry
 	Permissions *PermissionStore
 	ConvHistory []llm.Message

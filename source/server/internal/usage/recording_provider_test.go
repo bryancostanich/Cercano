@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 )
 
@@ -12,8 +13,10 @@ type fakeProvider struct {
 	stream []llm.StreamEvent
 }
 
-func (fakeProvider) Name() string                   { return "fake" }
-func (fakeProvider) Capabilities() llm.Capabilities { return llm.Capabilities{SupportsTools: true} }
+func (fakeProvider) Name() string { return "fake" }
+func (fakeProvider) Capabilities() inference.Capabilities {
+	return inference.Capabilities{SupportsTools: true}
+}
 func (f fakeProvider) Chat(_ context.Context, _ llm.ChatRequest) (llm.ChatResponse, error) {
 	return f.resp, nil
 }

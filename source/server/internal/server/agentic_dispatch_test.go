@@ -9,6 +9,7 @@ import (
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/dispatch"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/pkg/config"
@@ -63,7 +64,7 @@ func TestRunAgenticDispatch_RTierDefault(t *testing.T) {
 
 	// Script a provider: turn 1 calls r_read, turn 2 returns text "done".
 	prov := &scriptedProvider{
-		caps: llm.Capabilities{SupportsTools: true},
+		caps: inference.Capabilities{SupportsTools: true},
 		scripts: [][]llm.Block{
 			// Turn 1: request the R-tier tool.
 			{{
@@ -144,7 +145,7 @@ func TestRunAgenticDispatch_ExplicitToolsSubset(t *testing.T) {
 
 	// Provider: turn 1 calls grep_tool, turn 2 returns "subset done".
 	prov := &scriptedProvider{
-		caps: llm.Capabilities{SupportsTools: true},
+		caps: inference.Capabilities{SupportsTools: true},
 		scripts: [][]llm.Block{
 			{{
 				Type:      llm.BlockToolUse,
@@ -193,7 +194,7 @@ func TestSetDispatchEngine_WiresAgenticRunner(t *testing.T) {
 	// errors loudly so we can distinguish "no runner" from "no provider".
 	// Instead, use a scripted provider that returns text immediately.
 	prov := &scriptedProvider{
-		caps:    llm.Capabilities{SupportsTools: true},
+		caps:    inference.Capabilities{SupportsTools: true},
 		scripts: [][]llm.Block{{{Type: llm.BlockText, Text: "wired"}}},
 	}
 

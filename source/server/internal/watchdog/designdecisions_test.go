@@ -2,8 +2,11 @@ package watchdog
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
+
+	"cercano/source/server/internal/llm"
 )
 
 func TestDesignDecisionsCheckAppliesToMutations(t *testing.T) {
@@ -35,5 +38,35 @@ func TestDesignDecisionsCheckUsesCanonicalProtocolAndChallenge(t *testing.T) {
 	}
 	if !strings.Contains(v.Challenge, `get_protocol("design-decisions")`) || !strings.Contains(v.Challenge, "comply") || !strings.Contains(v.Challenge, "justify") {
 		t.Fatalf("challenge should tell the model to comply or justify with the protocol pull: %q", v.Challenge)
+	}
+}
+
+func TestDesignDecisionsPromptUsesWiderTranscriptWindow(t *testing.T) {
+	msgs := make([]llm.Message, designDecisionsTranscriptWindow+1)
+	for i := range msgs {
+		msgs[i] = llm.Message{
+			Role: llm.RoleAssistant,
+			Blocks: []llm.Block{{
+				Type: llm.BlockText,
+				Text: fmt.Sprintf("message-%02d", i),
+			}},
+		}
+	}
+
+	prompt := buildDesignDecisionsPrompt(Action{
+		Kind:       "tool_call",
+		ToolName:   "Edit",
+		ToolArgs:   []byte(`{"path":"x.go"}`),
+		Transcript: msgs,
+	})
+
+	if strings.Contains(prompt, "message-00") {
+		t.Fatalf("prompt included older transcript outside the %d-message window", designDecisionsTranscriptWindow)
+	}
+	if !strings.Contains(prompt, "message-01") {
+		t.Fatalf("prompt did not include the first message inside the %d-message window", designDecisionsTranscriptWindow)
+	}
+	if !strings.Contains(prompt, "message-16") {
+		t.Fatal("prompt should include context that the old 16-message window would have dropped")
 	}
 }

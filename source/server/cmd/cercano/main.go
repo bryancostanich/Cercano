@@ -32,7 +32,6 @@ import (
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/crashlog"
-	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/engine"
 	llamaengine "cercano/source/server/internal/engine/llamaserver"
 	mistralengine "cercano/source/server/internal/engine/mistralrs"
@@ -537,8 +536,8 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	// swap (cloud-profile change → RebuildCloud) is honored and the engine's
 	// own per-dispatch usage.Wrap doesn't double-count.
 	engineDeps := toolstack.EngineDeps{
-		Providers: func() dispatch.Providers {
-			return dispatch.Providers{Cloud: srv.CloudLLMProvider(), Open: srv.OpenLLMProvider()}
+		Providers: func() inference.Tiers {
+			return inference.Tiers{Cloud: srv.CloudLLMProvider(), Open: srv.OpenLLMProvider()}
 		},
 		LocusMode: func() locus.Mode { m, _ := locus.ParseMode(srv.LocusMode()); return m },
 		CtxLoader: ctxLoader,

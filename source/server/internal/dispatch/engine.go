@@ -8,6 +8,7 @@ import (
 
 	"cercano/source/server/internal/agenttools"
 	projectctx "cercano/source/server/internal/context"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/usage"
@@ -101,7 +102,7 @@ type Result struct {
 
 // Engine routes dispatch calls to the appropriate provider.
 type Engine struct {
-	providersFn   func() Providers
+	providersFn   func() inference.Tiers
 	modeFn        func() locus.Mode
 	ctxLoader     *projectctx.Loader
 	modelFor      func(isCloud bool, tier config.Tier) string
@@ -116,7 +117,7 @@ type Engine struct {
 // without rebuilding the engine. IMPORTANT: it must return RAW (unwrapped)
 // providers — the engine emits usage directly and conditionally (controlled by
 // Spec.RecordUsage) so returning already-wrapped providers would double-count.
-func NewEngine(providersFn func() Providers, modeFn func() locus.Mode, ctx *projectctx.Loader) *Engine {
+func NewEngine(providersFn func() inference.Tiers, modeFn func() locus.Mode, ctx *projectctx.Loader) *Engine {
 	return &Engine{
 		providersFn: providersFn,
 		modeFn:      modeFn,
@@ -139,7 +140,7 @@ func (e *Engine) SetModelFor(fn func(isCloud bool, tier config.Tier) string) {
 // Dispatch executes spec and returns a Result.
 func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 	// 1. Select provider via locus (providers resolved fresh each dispatch).
-	sel, err := Select(e.modeFn(), spec.Role, e.providersFn())
+	sel, err := inference.Select(e.modeFn(), spec.Role, e.providersFn())
 	if err != nil {
 		return Result{}, err
 	}

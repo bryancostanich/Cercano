@@ -195,7 +195,7 @@ func (p *service) Main() (inference.Provider, bool, bool, error) {
 	if !dispatch.OpenModelReady(c) {
 		open = nil
 	}
-	sel, err := dispatch.Select(mode, dispatch.RoleMain, dispatch.Providers{
+	sel, err := inference.Select(mode, inference.RoleMain, inference.Tiers{
 		Cloud: p.cloudLLMProvider,
 		Open:  open,
 	})

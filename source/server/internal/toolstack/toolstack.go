@@ -37,7 +37,7 @@ import (
 // and MUST return RAW, unwrapped providers — the engine emits usage itself and
 // conditionally, so already-wrapped providers would double-count.
 type EngineDeps struct {
-	Providers func() dispatch.Providers
+	Providers func() inference.Tiers
 	LocusMode func() locus.Mode
 	CtxLoader *projectctx.Loader
 	ModelFor  func(isCloud bool, tier config.Tier) string

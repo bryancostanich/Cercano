@@ -3,8 +3,8 @@ package toolstack_test
 import (
 	"testing"
 
-	"cercano/source/server/internal/dispatch"
 	toolssvc "cercano/source/server/internal/hostsvc/tools"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/toolstack"
 	"cercano/source/server/pkg/config"
@@ -20,7 +20,7 @@ func TestInstallCapabilities_WiresDispatch(t *testing.T) {
 	svc := toolssvc.New(nil, nil, nil, nil)
 
 	eng := toolstack.NewEngine(toolstack.EngineDeps{
-		Providers: func() dispatch.Providers { return dispatch.Providers{} },
+		Providers: func() inference.Tiers { return inference.Tiers{} },
 		LocusMode: func() locus.Mode { var m locus.Mode; return m },
 		ModelFor:  func(bool, config.Tier) string { return "model" },
 	})
@@ -43,7 +43,7 @@ func TestInstallCapabilities_WiresDispatch(t *testing.T) {
 // UsageSink (both optional) without panicking.
 func TestNewEngine_NilOptionalsSafe(t *testing.T) {
 	eng := toolstack.NewEngine(toolstack.EngineDeps{
-		Providers: func() dispatch.Providers { return dispatch.Providers{} },
+		Providers: func() inference.Tiers { return inference.Tiers{} },
 		LocusMode: func() locus.Mode { var m locus.Mode; return m },
 	})
 	if eng == nil {

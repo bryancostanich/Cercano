@@ -19,6 +19,7 @@ import (
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/hostsvc/permissions"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 )
 
@@ -48,7 +49,7 @@ type Catalog interface {
 	// GetToolCallStore returns the conversation store (for GetToolCall).
 	GetToolCallStore() conversation.Store
 	// RunAgenticDispatch implements dispatch.AgenticRunner for the engine.
-	RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, sel dispatch.Selection, model string) (dispatch.Result, error)
+	RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, sel inference.Selection, model string) (dispatch.Result, error)
 	// InvokeCapability resolves and executes a named capability.
 	// argsJSON is the JSON-encoded arguments (may be nil). workDir is the
 	// caller's working directory. Returns (resultJSON, isError, errMsg).
@@ -316,7 +317,7 @@ func (x *Service) ensureSubagentConv(ctx context.Context, id, parentID, projectD
 //
 // It builds a least-privilege registry, assembles a system prompt, and runs
 // agent.RunToolLoop, returning the final text and token counts.
-func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, sel dispatch.Selection, model string) (dispatch.Result, error) {
+func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, sel inference.Selection, model string) (dispatch.Result, error) {
 	// 1. Build the least-privilege tool registry. W/X grants are legitimate
 	// here: the dispatch call itself gated as X at the parent when the grant
 	// was write-capable, so execution implies human approval (or bypass).

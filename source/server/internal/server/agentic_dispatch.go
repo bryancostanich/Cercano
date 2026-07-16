@@ -5,13 +5,14 @@ import (
 
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/dispatch"
+	"cercano/source/server/internal/inference"
 )
 
 // runAgenticDispatch is the front-door delegator for the tool-catalog service's
 // agentic runner. It is installed onto the dispatch.Engine by SetDispatchEngine
 // (via toolSvc.SetEngine), and is kept here as a thin wrapper so tests in
 // package server can still call srv.runAgenticDispatch directly.
-func (s *Server) runAgenticDispatch(ctx context.Context, spec dispatch.Spec, sel dispatch.Selection, model string) (dispatch.Result, error) {
+func (s *Server) runAgenticDispatch(ctx context.Context, spec dispatch.Spec, sel inference.Selection, model string) (dispatch.Result, error) {
 	return s.toolSvc.RunAgenticDispatch(ctx, spec, sel, model)
 }
 

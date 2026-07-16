@@ -261,8 +261,8 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 	// never bites it) and the capability tool stack below.
 	ctxLoader := projectctx.NewLoader()
 	engine := toolstack.NewEngine(toolstack.EngineDeps{
-		Providers: func() dispatch.Providers {
-			return dispatch.Providers{Cloud: provSvc.Cloud(), Open: provSvc.Open()}
+		Providers: func() inference.Tiers {
+			return inference.Tiers{Cloud: provSvc.Cloud(), Open: provSvc.Open()}
 		},
 		LocusMode: func() locus.Mode { m, _ := locus.ParseMode(cfg.LocusMode); return m },
 		CtxLoader: ctxLoader,
@@ -372,7 +372,7 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource cre
 			// Only wrap a REAL primary. If the primary was skipped (unauthable) or
 			// BuildCloudProvider returned a nil provider, leave cloud unset. Wrapping
 			// a nil primary yields a fallback composite whose Name() nil-derefs the
-			// moment dispatch.Select probes it (p.Cloud != nil is true for a typed-nil
+			// moment inference.Select probes it (p.Cloud != nil is true for a typed-nil
 			// interface) — the production panic this guards against.
 			//
 			// A configured backup profile wraps the primary in a fallback composite,
@@ -516,7 +516,7 @@ func (r *workerResolver) Main() (inference.Provider, bool, bool, error) {
 	if !dispatch.OpenModelReady(cfg) {
 		open = nil
 	}
-	sel, err := dispatch.Select(mode, dispatch.RoleMain, dispatch.Providers{
+	sel, err := inference.Select(mode, inference.RoleMain, inference.Tiers{
 		Cloud: r.cloudProv,
 		Open:  open,
 	})

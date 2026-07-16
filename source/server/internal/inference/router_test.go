@@ -1,19 +1,18 @@
-package dispatch
+package inference
 
 import (
 	"context"
 	"strings"
 	"testing"
 
-	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
 )
 
 type stubLLM struct{ n string }
 
-func (s stubLLM) Name() string                       { return s.n }
-func (stubLLM) Capabilities() inference.Capabilities { return inference.Capabilities{} }
+func (s stubLLM) Name() string             { return s.n }
+func (stubLLM) Capabilities() Capabilities { return Capabilities{} }
 func (stubLLM) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
 	return llm.ChatResponse{}, nil
 }
@@ -24,7 +23,7 @@ func (stubLLM) StreamChat(context.Context, llm.ChatRequest) (llm.StreamReader, e
 func TestSelectCoprocPrefersOpenUnderCloudPrimary(t *testing.T) {
 	local := stubLLM{"local"}
 	cloud := stubLLM{"cloud"}
-	sel, err := Select(locus.CloudPrimary, RoleCoproc, Providers{Cloud: cloud, Open: local})
+	sel, err := Select(locus.CloudPrimary, RoleCoproc, Tiers{Cloud: cloud, Open: local})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +35,7 @@ func TestSelectCoprocPrefersOpenUnderCloudPrimary(t *testing.T) {
 func TestSelectFallbackNotice(t *testing.T) {
 	cloud := stubLLM{"cloud"}
 	// local_primary, no local available -> fall back to cloud, with notice.
-	sel, err := Select(locus.OpenPrimary, RoleCoproc, Providers{Cloud: cloud, Open: nil})
+	sel, err := Select(locus.OpenPrimary, RoleCoproc, Tiers{Cloud: cloud, Open: nil})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,14 +48,14 @@ func TestSelectFallbackNotice(t *testing.T) {
 }
 
 func TestSelectNoProviderErrors(t *testing.T) {
-	if _, err := Select(locus.OpenOnly, RoleCoproc, Providers{}); err == nil {
+	if _, err := Select(locus.OpenOnly, RoleCoproc, Tiers{}); err == nil {
 		t.Fatal("expected error when no provider is available")
 	}
 }
 
 func TestSelectCloudOnlyForbidsLocal(t *testing.T) {
 	local := stubLLM{"local"}
-	if _, err := Select(locus.CloudOnly, RoleMain, Providers{Open: local}); err == nil {
+	if _, err := Select(locus.CloudOnly, RoleMain, Tiers{Open: local}); err == nil {
 		t.Fatal("cloud_only with only local available must error, never run local")
 	}
 }
@@ -64,7 +63,7 @@ func TestSelectCloudOnlyForbidsLocal(t *testing.T) {
 func TestSelectMainFallbackNotice(t *testing.T) {
 	cloud := stubLLM{"cloud"}
 	// local_primary, no local available, RoleMain -> fall back to cloud, notice says "main".
-	sel, err := Select(locus.OpenPrimary, RoleMain, Providers{Cloud: cloud, Open: nil})
+	sel, err := Select(locus.OpenPrimary, RoleMain, Tiers{Cloud: cloud, Open: nil})
 	if err != nil {
 		t.Fatal(err)
 	}

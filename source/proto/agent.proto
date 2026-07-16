@@ -1509,7 +1509,9 @@ message LLMChatRequest {
   string              tool_choice_type = 5; // "", "auto", "any", "tool", "none"
   string              tool_choice_name = 6; // set when tool_choice_type == "tool"
   int32               max_tokens       = 7;
-  double              temperature      = 8;
+  // optional so pointer semantics survive the wire: absent = provider
+  // default, present 0 = greedy decoding (the summarizer's requirement).
+  optional double     temperature      = 8;
 }
 
 // LLMTool mirrors llm.Tool (the model-facing fields; Permission is agent-side).

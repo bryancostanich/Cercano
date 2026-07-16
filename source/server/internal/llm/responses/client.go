@@ -107,8 +107,8 @@ func (c *Client) buildRequest(req llm.ChatRequest, stream bool) request {
 	if req.MaxTokens > 0 && c.route != RouteChatGPT {
 		r.MaxOutputTokens = req.MaxTokens
 	}
-	if req.Temperature > 0 {
-		tmp := req.Temperature
+	if req.Temperature != nil {
+		tmp := *req.Temperature
 		r.Temperature = &tmp
 	}
 	return r

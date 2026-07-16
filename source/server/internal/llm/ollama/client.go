@@ -57,8 +57,8 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 	if req.MaxTokens > 0 {
 		opts["num_predict"] = req.MaxTokens
 	}
-	if req.Temperature > 0 {
-		opts["temperature"] = req.Temperature
+	if req.Temperature != nil {
+		opts["temperature"] = *req.Temperature
 	}
 	freq := &api.ChatRequest{
 		Model:    req.Model,

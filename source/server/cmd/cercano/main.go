@@ -261,6 +261,20 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 			if summarizerModel != "" {
 				req.ModelOverride = summarizerModel
 			}
+			parseLogged := func(output, via string) compaction.StructuredSummary {
+				s := compaction.ParseSummary(output)
+				if s.IsEmpty() {
+					// The Advance guard will refuse this; log the raw head so
+					// the "why was it empty" question is answerable from the
+					// server log instead of needing a debugging session.
+					head := output
+					if len(head) > 300 {
+						head = head[:300] + "…"
+					}
+					fmt.Fprintf(os.Stderr, "[compaction] summarizer (%s) output parsed EMPTY; raw head: %q\n", via, head)
+				}
+				return s
+			}
 			resp, err := openProvider.Process(ctx, req)
 			if err != nil {
 				// Local summarizer unavailable (e.g. the fast-light-text model is
@@ -272,14 +286,15 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 				// the original local error. No ModelOverride — the cloud provider
 				// uses its configured model, not the local summarizer id.
 				if cloud := lazyRouter.GetModelProviders()["CloudModel"]; cloud != nil {
+					fmt.Fprintf(os.Stderr, "[compaction] local summarizer failed (%v) — falling back to cloud\n", err)
 					cloudReq := &agent.Request{Input: compaction.BuildSummaryPrompt(msgs), Temperature: greedy.Temperature}
 					if cresp, cerr := cloud.Process(ctx, cloudReq); cerr == nil {
-						return compaction.ParseSummary(cresp.Output), nil
+						return parseLogged(cresp.Output, "cloud fallback"), nil
 					}
 				}
 				return compaction.StructuredSummary{}, err
 			}
-			return compaction.ParseSummary(resp.Output), nil
+			return parseLogged(resp.Output, "local"), nil
 		}
 		compCfg := compactor.Config{
 			ActivationFloorTokens: cfg.Compaction.ActivationFloorTokens,

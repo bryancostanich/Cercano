@@ -35,8 +35,9 @@ func (a *llmModelProvider) Process(ctx context.Context, req *Request) (*Response
 		model = req.ModelOverride
 	}
 	chatResp, err := a.p.Chat(ctx, llm.ChatRequest{
-		Model:     model,
-		MaxTokens: processMaxTokens,
+		Model:       model,
+		MaxTokens:   processMaxTokens,
+		Temperature: req.Temperature,
 		Messages: []llm.Message{
 			{
 				Role:   llm.RoleUser,

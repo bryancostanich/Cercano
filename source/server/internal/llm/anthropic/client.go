@@ -110,8 +110,8 @@ func (c *Client) buildParams(req ChatRequest) sdk.MessageNewParams {
 	if len(req.Tools) > 0 {
 		params.Tools = toolsToSDK(req.Tools)
 	}
-	if req.Temperature > 0 {
-		params.Temperature = sdk.Float(req.Temperature)
+	if req.Temperature != nil {
+		params.Temperature = sdk.Float(*req.Temperature)
 	}
 	return params
 }

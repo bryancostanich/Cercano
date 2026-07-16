@@ -114,3 +114,30 @@ func TestClient_BuildParams_FloorsUnsetMaxTokens(t *testing.T) {
 		t.Fatalf("explicit MaxTokens = %d, want 10", params.MaxTokens)
 	}
 }
+
+func TestClient_BuildParams_TemperatureZeroReachesWire(t *testing.T) {
+	// Temperature is a pointer: nil = provider default (omit from the wire),
+	// &0 = greedy decoding, which MUST be sent — the compaction summarizer
+	// depends on it (default-temp summaries are a format coin flip).
+	c := &Client{}
+	msg := []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "hi"}}}}
+
+	zero := 0.0
+	params := c.buildParams(ChatRequest{Model: "m", MaxTokens: 10, Messages: msg, Temperature: &zero})
+	body, err := json.Marshal(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"temperature":0`) {
+		t.Fatalf("greedy temperature not on the wire: %s", body)
+	}
+
+	params = c.buildParams(ChatRequest{Model: "m", MaxTokens: 10, Messages: msg})
+	body, err = json.Marshal(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), `"temperature"`) {
+		t.Fatalf("nil temperature must be omitted from the wire: %s", body)
+	}
+}

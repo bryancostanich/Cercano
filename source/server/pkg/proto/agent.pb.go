@@ -11735,9 +11735,11 @@ type LLMChatRequest struct {
 	ToolChoiceType string                 `protobuf:"bytes,5,opt,name=tool_choice_type,json=toolChoiceType,proto3" json:"tool_choice_type,omitempty"` // "", "auto", "any", "tool", "none"
 	ToolChoiceName string                 `protobuf:"bytes,6,opt,name=tool_choice_name,json=toolChoiceName,proto3" json:"tool_choice_name,omitempty"` // set when tool_choice_type == "tool"
 	MaxTokens      int32                  `protobuf:"varint,7,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
-	Temperature    float64                `protobuf:"fixed64,8,opt,name=temperature,proto3" json:"temperature,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// optional so pointer semantics survive the wire: absent = provider
+	// default, present 0 = greedy decoding (the summarizer's requirement).
+	Temperature   *float64 `protobuf:"fixed64,8,opt,name=temperature,proto3,oneof" json:"temperature,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *LLMChatRequest) Reset() {
@@ -11820,8 +11822,8 @@ func (x *LLMChatRequest) GetMaxTokens() int32 {
 }
 
 func (x *LLMChatRequest) GetTemperature() float64 {
-	if x != nil {
-		return x.Temperature
+	if x != nil && x.Temperature != nil {
+		return *x.Temperature
 	}
 	return 0
 }
@@ -13021,7 +13023,7 @@ const file_agent_proto_rawDesc = "" +
 	"\aaccount\x18\x04 \x01(\tR\aaccount\"W\n" +
 	"\x14OpenInferenceRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12/\n" +
-	"\arequest\x18\x02 \x01(\v2\x15.agent.LLMChatRequestR\arequest\"\xa8\x02\n" +
+	"\arequest\x18\x02 \x01(\v2\x15.agent.LLMChatRequestR\arequest\"\xbd\x02\n" +
 	"\x0eLLMChatRequest\x12\x14\n" +
 	"\x05model\x18\x01 \x01(\tR\x05model\x12\x16\n" +
 	"\x06system\x18\x02 \x01(\tR\x06system\x12-\n" +
@@ -13030,8 +13032,9 @@ const file_agent_proto_rawDesc = "" +
 	"\x10tool_choice_type\x18\x05 \x01(\tR\x0etoolChoiceType\x12(\n" +
 	"\x10tool_choice_name\x18\x06 \x01(\tR\x0etoolChoiceName\x12\x1d\n" +
 	"\n" +
-	"max_tokens\x18\a \x01(\x05R\tmaxTokens\x12 \n" +
-	"\vtemperature\x18\b \x01(\x01R\vtemperature\"W\n" +
+	"max_tokens\x18\a \x01(\x05R\tmaxTokens\x12%\n" +
+	"\vtemperature\x18\b \x01(\x01H\x00R\vtemperature\x88\x01\x01B\x0e\n" +
+	"\f_temperature\"W\n" +
 	"\aLLMTool\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x16\n" +
@@ -13582,6 +13585,7 @@ func file_agent_proto_init() {
 		(*WorkerToHost_EnsureSubagent)(nil),
 		(*WorkerToHost_OpenRequest)(nil),
 	}
+	file_agent_proto_msgTypes[168].OneofWrappers = []any{}
 	file_agent_proto_msgTypes[170].OneofWrappers = []any{
 		(*OpenInferenceEvent_Event)(nil),
 		(*OpenInferenceEvent_Error)(nil),

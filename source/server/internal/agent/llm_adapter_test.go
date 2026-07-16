@@ -11,6 +11,7 @@ type fakeLLM struct {
 	name         string
 	gotModel     string
 	gotMaxTokens int
+	gotTemp      *float64
 }
 
 func (f *fakeLLM) Name() string                   { return f.name }
@@ -18,6 +19,7 @@ func (f *fakeLLM) Capabilities() llm.Capabilities { return llm.Capabilities{} }
 func (f *fakeLLM) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
 	f.gotModel = req.Model
 	f.gotMaxTokens = req.MaxTokens
+	f.gotTemp = req.Temperature
 	return llm.ChatResponse{
 		Blocks:       []llm.Block{{Type: llm.BlockText, Text: "echo:" + req.Messages[0].Blocks[0].Text}},
 		InputTokens:  3,
@@ -51,6 +53,31 @@ func TestLLMModelProviderProcessSetsMaxTokens(t *testing.T) {
 	}
 	if fake.gotMaxTokens <= 0 {
 		t.Fatalf("Chat received MaxTokens = %d, want > 0", fake.gotMaxTokens)
+	}
+}
+
+func TestLLMModelProviderProcessThreadsTemperature(t *testing.T) {
+	// Greedy decoding (temperature 0) is a correctness requirement for the
+	// compaction summarizer's cloud fallback — default-temperature summaries
+	// are a format coin flip (compaction-bakeoff-findings.md). Temperature is
+	// a pointer end-to-end so 0 ("greedy") is distinguishable from unset
+	// ("provider default").
+	fake := &fakeLLM{name: "anthropic"}
+	mp := NewLLMModelProvider(fake, "claude-opus-4-8")
+
+	zero := 0.0
+	if _, err := mp.Process(context.Background(), &Request{Input: "hi", Temperature: &zero}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fake.gotTemp == nil || *fake.gotTemp != 0 {
+		t.Fatalf("Chat received Temperature = %v, want explicit 0", fake.gotTemp)
+	}
+
+	if _, err := mp.Process(context.Background(), &Request{Input: "hi"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fake.gotTemp != nil {
+		t.Fatalf("unset Temperature must stay nil (provider default), got %v", *fake.gotTemp)
 	}
 }
 

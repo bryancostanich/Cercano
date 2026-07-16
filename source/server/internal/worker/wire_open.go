@@ -67,7 +67,7 @@ func UnmarshalChatRequest(p *proto.LLMChatRequest) (llm.ChatRequest, error) {
 			Name: p.GetToolChoiceName(),
 		},
 		MaxTokens:   int(p.GetMaxTokens()),
-		Temperature: p.GetTemperature(),
+		Temperature: p.Temperature, // optional double → pointer round-trips presence
 	}, nil
 }
 

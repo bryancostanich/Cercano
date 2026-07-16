@@ -9,6 +9,7 @@ import (
 )
 
 func TestMarshalChatRequestRoundTrip(t *testing.T) {
+	temp := 0.7
 	req := llm.ChatRequest{
 		Model:  "qwen3",
 		System: "be helpful",
@@ -21,7 +22,7 @@ func TestMarshalChatRequestRoundTrip(t *testing.T) {
 		},
 		ToolChoice:  llm.ToolChoice{Type: llm.ToolChoiceTool, Name: "read"},
 		MaxTokens:   256,
-		Temperature: 0.7,
+		Temperature: &temp,
 	}
 	p, err := MarshalChatRequest(req)
 	if err != nil {
@@ -31,8 +32,25 @@ func TestMarshalChatRequestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if got.Model != req.Model || got.System != req.System || got.MaxTokens != req.MaxTokens || got.Temperature != req.Temperature {
+	if got.Model != req.Model || got.System != req.System || got.MaxTokens != req.MaxTokens {
 		t.Errorf("scalar mismatch: %+v", got)
+	}
+	if got.Temperature == nil || *got.Temperature != temp {
+		t.Errorf("temperature: got %v want %v", got.Temperature, temp)
+	}
+
+	// Presence must round-trip: explicit 0 (greedy) stays present, unset
+	// stays nil — the wire may not collapse the two.
+	zero := 0.0
+	if p, err := MarshalChatRequest(llm.ChatRequest{Model: "m", Temperature: &zero}); err != nil {
+		t.Fatalf("marshal greedy: %v", err)
+	} else if got, err := UnmarshalChatRequest(p); err != nil || got.Temperature == nil || *got.Temperature != 0 {
+		t.Errorf("greedy 0 must survive the wire: got %v err %v", got.Temperature, err)
+	}
+	if p, err := MarshalChatRequest(llm.ChatRequest{Model: "m"}); err != nil {
+		t.Fatalf("marshal unset: %v", err)
+	} else if got, err := UnmarshalChatRequest(p); err != nil || got.Temperature != nil {
+		t.Errorf("unset temperature must stay nil: got %v err %v", got.Temperature, err)
 	}
 	if got.ToolChoice != req.ToolChoice {
 		t.Errorf("tool choice: got %+v want %+v", got.ToolChoice, req.ToolChoice)

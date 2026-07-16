@@ -134,15 +134,15 @@ func toolsToConverse(tools []llm.Tool) *types.ToolConfiguration {
 }
 
 func inferenceConfig(req llm.ChatRequest) *types.InferenceConfiguration {
-	if req.MaxTokens <= 0 && req.Temperature <= 0 {
+	if req.MaxTokens <= 0 && req.Temperature == nil {
 		return nil
 	}
 	ic := &types.InferenceConfiguration{}
 	if req.MaxTokens > 0 {
 		ic.MaxTokens = aws.Int32(int32(req.MaxTokens))
 	}
-	if req.Temperature > 0 {
-		t := float32(req.Temperature)
+	if req.Temperature != nil {
+		t := float32(*req.Temperature)
 		ic.Temperature = &t
 	}
 	return ic

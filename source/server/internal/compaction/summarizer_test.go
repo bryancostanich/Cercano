@@ -156,6 +156,32 @@ func TestBuildSummaryPrompt_ContractInvariants(t *testing.T) {
 	}
 }
 
+func TestBuildSummaryPrompt_InstructionAfterTranscript(t *testing.T) {
+	// With the instructions only at the top, a model reading ~8k tokens of
+	// agent transcript pattern-completes the conversation instead of
+	// summarizing it (observed live: the summarizer emitted "Perfect. Now
+	// I'll update the doc…[tool Write {…}]" — an assistant turn, not a
+	// summary — deterministically at temperature 0). The transcript must be
+	// explicitly closed and the task restated AFTER it, so the last thing
+	// the model reads is the instruction, not the conversation.
+	body := BuildSummaryPrompt([]llm.Message{textMsg(llm.RoleUser, "let's rename the config key")})
+
+	end := strings.Index(body, "--- end conversation ---")
+	if end < 0 {
+		t.Fatal("prompt must close the transcript with an explicit end marker")
+	}
+	tail := body[end:]
+	if !strings.Contains(tail, "summar") {
+		t.Errorf("the task must be restated after the transcript; tail: %q", tail)
+	}
+	if !strings.Contains(tail, "Do not continue the conversation") {
+		t.Errorf("the tail must forbid continuing the conversation; tail: %q", tail)
+	}
+	if strings.Contains(tail, "rename the config key") {
+		t.Error("transcript content must not appear after the end marker")
+	}
+}
+
 func TestSplitRecent(t *testing.T) {
 	msgs := []llm.Message{
 		textMsg(llm.RoleUser, "1"), textMsg(llm.RoleAssistant, "2"), textMsg(llm.RoleUser, "3"),

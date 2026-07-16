@@ -55,6 +55,14 @@ func BuildSummaryPrompt(messages []llm.Message) string {
 			}
 		}
 	}
+	// Close the transcript and restate the task AFTER it. With the
+	// instructions only at the top, a model that has just read thousands of
+	// tokens of agent transcript pattern-completes the conversation instead
+	// of summarizing it (observed live, deterministic at temperature 0). The
+	// last thing the model reads must be the instruction.
+	b.WriteString("--- end conversation ---\n")
+	b.WriteString("\n")
+	b.WriteString("Now summarize the conversation span above. Respond ONLY in the exact sectioned format specified at the top (GOAL / DECISIONS / PROPOSALS / FILES / OPEN / STATE). Do not continue the conversation, do not reply to it, and do not emit tool calls.\n")
 	return b.String()
 }
 

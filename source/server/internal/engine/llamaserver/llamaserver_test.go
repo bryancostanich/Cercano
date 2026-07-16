@@ -218,6 +218,9 @@ func (m *fakeRuntimeManager) Restart(context.Context, localruntime.RestartReques
 func (m *fakeRuntimeManager) DownloadModel(context.Context, localruntime.DownloadRequest) (*localruntime.ModelRecord, error) {
 	return nil, nil
 }
+func (m *fakeRuntimeManager) EnsureModelsPresent(context.Context, string, []string) error {
+	return nil
+}
 func (m *fakeRuntimeManager) CancelDownload(context.Context, localruntime.DownloadRequest) (*localruntime.ModelRecord, error) {
 	return nil, nil
 }

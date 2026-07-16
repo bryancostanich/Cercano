@@ -25,6 +25,10 @@ type Manager interface {
 	Stop(context.Context, StopRequest) error
 	Restart(context.Context, RestartRequest) (*InstanceRecord, error)
 	DownloadModel(context.Context, DownloadRequest) (*ModelRecord, error)
+	// EnsureModelsPresent resolves the given model refs for a runtime against
+	// discovered inventory and enqueues a download for any not already present.
+	// Engine-agnostic and idempotent — safe to call on every runtime switch.
+	EnsureModelsPresent(ctx context.Context, runtime string, want []string) error
 	CancelDownload(context.Context, DownloadRequest) (*ModelRecord, error)
 	DeleteModel(context.Context, DeleteModelRequest) error
 	Status(context.Context) (*StatusSnapshot, error)

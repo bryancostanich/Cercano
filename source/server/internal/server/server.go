@@ -212,77 +212,46 @@ func (s *Server) runtimeMgr() localruntime.Manager {
 	return s.runtimesSvc.RuntimeManager()
 }
 
-// resolveMistralRSDefault resolves the mistral.rs runtime's configured default
-// model against the runtime manager's inventory, using the same fuzzy matcher
-// the provider uses at Start time (so a config value like "qwen3-14b", a full
-// "mistralrs:catalog:qwen3-14b" ID, a display name, or a file path all match).
-//
-// Returns:
-//   - rec: the matched record (its canonical ID is what DownloadModel needs for
-//     an exact lookup; its DownloadState is the readiness signal). Zero when no
-//     record matched.
-//   - found: whether a record matched at all.
-//
-// A zero/absent default, an unmatched value, or an unavailable manager all
-// return found=false — the caller decides what that means for readiness vs.
-// auto-download.
-func (s *Server) resolveMistralRSDefault(ctx context.Context, cfg config.Config) (rec localruntime.ModelRecord, found bool) {
-	requested := strings.TrimSpace(cfg.MistralRS.DefaultModel)
-	if requested == "" {
-		return localruntime.ModelRecord{}, false
-	}
-	rm := s.runtimeMgr()
-	if rm == nil {
-		return localruntime.ModelRecord{}, false
-	}
-	inv, err := rm.Inventory(ctx)
-	if err != nil {
-		return localruntime.ModelRecord{}, false
-	}
-	for _, m := range inv {
-		if m.Runtime != "mistralrs" {
-			continue
+// runtimeWantedModels returns the set of model refs that SHOULD be present on
+// disk for a runtime — its "default tier set" — sourced from config. Today
+// that is just the configured default model; when tier models (most_capable /
+// everyday / fast_light / …) become part of the ensured set, they are added
+// here, and the engine-agnostic EnsureModelsPresent fetches them uniformly for
+// every backend. Ollama manages its own model presence, so it wants nothing
+// from this path.
+func runtimeWantedModels(cfg config.Config, runtime string) []string {
+	switch runtime {
+	case "mistralrs":
+		if m := strings.TrimSpace(cfg.MistralRS.DefaultModel); m != "" {
+			return []string{m}
 		}
-		if localruntime.MatchesModel(requested, m) {
-			return m, true
+	case "llama_server":
+		if m := strings.TrimSpace(cfg.LlamaServer.DefaultModel); m != "" {
+			return []string{m}
 		}
 	}
-	return localruntime.ModelRecord{}, false
+	return nil
 }
 
-// autoDownloadMistralRSDefault enqueues the mistral.rs default model's
-// download when switching to the runtime with that model absent. It's the
-// server-driven half of the "switch anyway, fetch in the background" flow:
-// the CLI never orchestrates the pull — it just switches the runtime and
-// watches the chip clear as the download completes.
-//
-// No-op when the default is unset, already downloaded, or already downloading
-// (DownloadModel is idempotent and returns early in those cases). The download
-// runs in its own goroutine inside DownloadModel, so this returns immediately
-// and never blocks the UpdateConfig response. A failure to enqueue is logged,
-// not fatal — the switch still lands and the not-ready chip stays lit.
-func (s *Server) autoDownloadMistralRSDefault(ctx context.Context, cfg config.Config) {
-	rec, found := s.resolveMistralRSDefault(ctx, cfg)
-	if !found {
-		// Nothing to fetch — either no default configured or it matched no
-		// curated record. The not-ready chip will explain which.
-		return
-	}
-	if rec.DownloadState == localruntime.Downloaded {
-		return
-	}
+// ensureRuntimeModelsPresent is the server-side entry to the engine-agnostic
+// download-on-switch: it computes the runtime's wanted set from config and
+// hands it to the runtime manager, which resolves each ref against inventory
+// and enqueues any missing download. It is the ONE call the switch path makes
+// for EVERY runtime — no per-runtime branch. Idempotent and non-blocking (the
+// manager spawns downloads in their own goroutines), so it never delays the
+// UpdateConfig response; enqueue failures are logged, not fatal (the switch
+// still lands and the not-ready chip stays lit until the fetch completes).
+func (s *Server) ensureRuntimeModelsPresent(ctx context.Context, cfg config.Config, runtime string) {
 	rm := s.runtimeMgr()
 	if rm == nil {
 		return
 	}
-	// Enqueue by the record's canonical ID — findDownloadModel matches on the
-	// exact ID, not the fuzzy config value, so pass rec.ID (not the raw
-	// cfg.MistralRS.DefaultModel).
-	if _, err := rm.DownloadModel(ctx, localruntime.DownloadRequest{
-		Runtime: "mistralrs",
-		ModelID: rec.ID,
-	}); err != nil {
-		fmt.Printf("UpdateConfig: mistral.rs default-model auto-download failed to enqueue: %v\n", err)
+	want := runtimeWantedModels(cfg, runtime)
+	if len(want) == 0 {
+		return
+	}
+	if err := rm.EnsureModelsPresent(ctx, runtime, want); err != nil {
+		fmt.Printf("UpdateConfig: %s ensure-models-present: %v\n", runtime, err)
 	}
 }
 
@@ -915,15 +884,15 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		// passed via ReconfigureArgs so Reconfigure doesn't re-detect.
 		changes = append(changes, fmt.Sprintf("local_runtime=%s", req.OpenRuntime))
 		fmt.Printf("UpdateConfig: Local runtime set to %s\n", req.OpenRuntime)
-		// Emit the fresh open-runtime status through the runtime-agnostic
-		// readiness path so the CLI's chip reflects the runtime being switched
-		// to — ready / downloading / missing — uniformly for every runtime.
-		// (Phase 2 generalizes the auto-download below to all runtimes; for now
-		// mistral.rs's curated default is auto-enqueued here so the switch
-		// kicks the fetch and the chip then shows "downloading".)
-		if req.OpenRuntime == "mistralrs" {
-			s.autoDownloadMistralRSDefault(ctx, c)
-		}
+		// Ensure the runtime's wanted model set is on disk — engine-agnostic
+		// download-on-switch. One call for EVERY runtime: the manager resolves
+		// each wanted ref against inventory and enqueues any missing download.
+		// Idempotent and non-blocking, so a runtime whose models are already
+		// present is a cheap no-op, and one that needs a fetch kicks it in the
+		// background. Then emit the fresh open-runtime status through the
+		// runtime-agnostic readiness path so the CLI's chip reflects the
+		// runtime being switched to — ready / downloading / missing.
+		s.ensureRuntimeModelsPresent(ctx, c, req.OpenRuntime)
 		s.broadcastOpenRuntimeStatus(s.openRuntimeStatus(ctx, c, req.OpenRuntime))
 	}
 

@@ -157,3 +157,40 @@ func TestRenderCatalogBlockIncludesFooter(t *testing.T) {
 func ctrlR() tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl}
 }
+
+func TestRuntimeDashboardCatalogFiltersToActiveRuntime(t *testing.T) {
+	d := newCatalogTestDashboard(runtimeDashboardSnapshot{
+		Config: &agentclient.Config{OpenRuntime: "mistralrs"},
+		Catalog: agentclient.RuntimeModelCatalog{Models: []agentclient.RuntimeModel{
+			{ID: "llama_server:catalog:phi", Runtime: "llama_server", Source: "catalog", DisplayName: "Phi"},
+			{ID: "mistralrs:catalog:qwen", Runtime: "mistralrs", Source: "catalog", DisplayName: "Qwen"},
+		}},
+	})
+	models := d.catalogModels()
+	if len(models) != 1 || models[0].Runtime != "mistralrs" {
+		t.Fatalf("catalogModels = %+v, want only mistralrs models", models)
+	}
+}
+
+func TestRuntimeDashboardStatusFiltersToActiveRuntime(t *testing.T) {
+	d := newCatalogTestDashboard(runtimeDashboardSnapshot{
+		Config: &agentclient.Config{OpenRuntime: "mistralrs"},
+		Status: &agentclient.RuntimeStatus{
+			Instances: []agentclient.RuntimeInstance{
+				{Runtime: "llama_server", State: "running", ModelID: "llama", PID: 1, Endpoint: "http://llama"},
+				{Runtime: "mistralrs", State: "downloading", ModelID: "qwen", PID: 2, Endpoint: "http://mistral"},
+			},
+			Models: []agentclient.RuntimeModel{
+				{Runtime: "llama_server", DownloadState: "downloaded"},
+				{Runtime: "mistralrs", DownloadState: "downloading"},
+			},
+		},
+	})
+	line := stripAnsiCSI(d.renderRuntimeStatusBlock())
+	if strings.Contains(line, "llama") || strings.Contains(line, "http://llama") {
+		t.Fatalf("runtime status should not show inactive llama-server instance: %q", line)
+	}
+	if !strings.Contains(line, "qwen") || !strings.Contains(line, "http://mistral") || !strings.Contains(line, "1 job") {
+		t.Fatalf("runtime status should show active mistralrs status/download, got %q", line)
+	}
+}

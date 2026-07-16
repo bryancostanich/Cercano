@@ -696,10 +696,11 @@ func loadRuntimeDashboardSnapshot(ag *agentclient.Client) runtimeDashboardSnapsh
 // list is the fallback when that RPC failed, so the pane degrades to
 // the pre-online behavior instead of going blank.
 func (d *runtimeDashboard) catalogModels() []agentclient.RuntimeModel {
+	runtimeName := activeDashboardRuntime(d.snapshot)
 	if d.snapshot.CatalogErr == nil && len(d.snapshot.Catalog.Models) > 0 {
-		return d.snapshot.Catalog.Models
+		return runtimeModelsForRuntime(d.snapshot.Catalog.Models, runtimeName)
 	}
-	return runtimeStatusModels(d.snapshot.Status)
+	return runtimeModelsForRuntime(runtimeStatusModels(d.snapshot.Status), runtimeName)
 }
 
 type runtimeCatalogRefreshDoneMsg struct {
@@ -744,17 +745,8 @@ func (d *runtimeDashboard) renderRuntimeStatusBlock() string {
 	totalW := dashboardPanelWidth(d.width)
 	contentW := dashboardBlockContentWidth(totalW)
 	status := d.snapshot.Status
-	cfg := d.snapshot.Config
-	runtimeName := "llama_server"
-	if cfg != nil {
-		runtimeName = firstNonEmpty(cfg.OpenRuntime, runtimeName)
-	}
-	var running []agentclient.RuntimeInstance
-	for _, instance := range runtimeStatusInstances(status) {
-		if instance.Runtime == runtimeName || instance.Runtime == "llama_server" {
-			running = append(running, instance)
-		}
-	}
+	runtimeName := activeDashboardRuntime(d.snapshot)
+	running := runtimeInstancesForRuntime(status, runtimeName)
 	serverState := "not running"
 	endpoint := ""
 	lastError := ""
@@ -768,7 +760,7 @@ func (d *runtimeDashboard) renderRuntimeStatusBlock() string {
 		endpoint = first.Endpoint
 		lastError = first.LastError
 	}
-	models := runtimeStatusModels(status)
+	models := runtimeModelsForRuntime(runtimeStatusModels(status), runtimeName)
 	fields := []runtimeDashboardField{
 		{Label: "server", Value: serverState},
 		{Label: "endpoint", Value: firstNonEmpty(endpoint, "none")},
@@ -1049,9 +1041,10 @@ func localConfigFields(s runtimeDashboardSnapshot) []runtimeDashboardField {
 	if cfg == nil {
 		return []runtimeDashboardField{{Label: "config", Value: "unavailable"}}
 	}
+	runtimeName := activeDashboardRuntime(s)
 	return []runtimeDashboardField{
 		{Label: "embedding", Value: cfg.EmbeddingModel},
-		{Label: "llama-server", Value: localServerSummary(s.Status, cfg.OpenRuntime)},
+		{Label: runtimeDisplayLabel(runtimeName), Value: localServerSummary(s.Status, runtimeName)},
 	}
 }
 
@@ -1061,10 +1054,7 @@ func localServerSummary(status *agentclient.RuntimeStatus, configuredRuntime str
 	}
 	runtimeName := firstNonEmpty(configuredRuntime, "llama_server")
 	var running []string
-	for _, instance := range status.Instances {
-		if instance.Runtime != "llama_server" && instance.Runtime != runtimeName {
-			continue
-		}
+	for _, instance := range runtimeInstancesForRuntime(status, runtimeName) {
 		parts := nonEmptyParts(instance.State, shortModelName(instance.ModelID))
 		if instance.PID > 0 {
 			parts = append(parts, fmt.Sprintf("pid:%d", instance.PID))
@@ -1087,6 +1077,24 @@ func runtimeStatusLogs(status *agentclient.RuntimeStatus) []agentclient.RuntimeL
 	return status.Logs
 }
 
+func activeDashboardRuntime(s runtimeDashboardSnapshot) string {
+	if s.Config != nil && strings.TrimSpace(s.Config.OpenRuntime) != "" {
+		return strings.TrimSpace(s.Config.OpenRuntime)
+	}
+	return "llama_server"
+}
+
+func runtimeDisplayLabel(runtime string) string {
+	switch runtime {
+	case "mistralrs":
+		return "mistral.rs"
+	case "llama_server":
+		return "llama-server"
+	default:
+		return firstNonEmpty(runtime, "local runtime")
+	}
+}
+
 func runtimeStatusModels(status *agentclient.RuntimeStatus) []agentclient.RuntimeModel {
 	if status == nil {
 		return nil
@@ -1094,11 +1102,40 @@ func runtimeStatusModels(status *agentclient.RuntimeStatus) []agentclient.Runtim
 	return status.Models
 }
 
+func runtimeModelsForRuntime(models []agentclient.RuntimeModel, runtime string) []agentclient.RuntimeModel {
+	if runtime == "" {
+		return models
+	}
+	out := make([]agentclient.RuntimeModel, 0, len(models))
+	for _, model := range models {
+		// Empty runtime appears in older tests / defensive fallback records; keep
+		// it rather than blanking the catalog entirely.
+		if model.Runtime == "" || model.Runtime == runtime {
+			out = append(out, model)
+		}
+	}
+	return out
+}
+
 func runtimeStatusInstances(status *agentclient.RuntimeStatus) []agentclient.RuntimeInstance {
 	if status == nil {
 		return nil
 	}
 	return status.Instances
+}
+
+func runtimeInstancesForRuntime(status *agentclient.RuntimeStatus, runtime string) []agentclient.RuntimeInstance {
+	instances := runtimeStatusInstances(status)
+	if runtime == "" {
+		return instances
+	}
+	out := make([]agentclient.RuntimeInstance, 0, len(instances))
+	for _, instance := range instances {
+		if instance.Runtime == runtime {
+			out = append(out, instance)
+		}
+	}
+	return out
 }
 
 func filteredCatalogModels(models []agentclient.RuntimeModel, query string) []agentclient.RuntimeModel {

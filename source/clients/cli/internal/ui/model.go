@@ -4319,7 +4319,6 @@ func (m Model) renderStatus() string {
 		m.renderContextMeter(),
 		turnPart,
 		cloudPart,
-		m.renderOpenRuntimeChip(),
 		m.renderConnStateChip(),
 		m.renderPermissionModeChip(),
 		m.renderDevChip(),
@@ -4327,43 +4326,6 @@ func (m Model) renderStatus() string {
 		help,
 	}
 	return lipgloss.NewStyle().Width(m.width).Render(strings.Join(parts, ""))
-}
-
-// renderOpenRuntimeChip surfaces local-runtime detection state — currently
-// only used when the user has switched local_runtime to llama_server (via
-// config file edit or /config) and the agent's headless detection couldn't
-// find the binary or a GGUF model. In that case we show an amber chip
-// telling the user to press F1 to open the install modal. When status is
-// nil or ok, the chip is hidden.
-func (m Model) renderOpenRuntimeChip() string {
-	if m.openRuntimeStatus == nil || m.openRuntimeStatus.Ok {
-		return ""
-	}
-	sep := m.styles.BorderDim.Render("  ·  ")
-
-	// Downloading is a distinct, in-progress state — NOT a "you must act" nag.
-	// The runtime's default model is on its way; render a muted "o: downloading"
-	// with no (F1) prompt. It clears to hidden (Ok) once the download lands and
-	// the server re-broadcasts readiness.
-	if m.openRuntimeStatus.Downloading {
-		return sep + m.styles.BorderDim.Render("o: downloading")
-	}
-
-	mistralrs := m.openRuntimeStatus.Runtime == "mistralrs"
-	var label string
-	switch m.openRuntimeStatus.Missing {
-	case "binary":
-		label = "⚠ llama-server not installed (F1)"
-	case "model":
-		if mistralrs {
-			label = "⚠ mistral.rs model not downloaded (F1)"
-		} else {
-			label = "⚠ no GGUF model found (F1)"
-		}
-	default:
-		label = "⚠ local runtime: setup (F1)"
-	}
-	return sep + m.styles.Primary.Render(label)
 }
 
 // renderConnStateChip surfaces gRPC transport health. Amber "reconnecting

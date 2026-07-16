@@ -48,3 +48,21 @@ func TestHeaderOpenChipShowsDownloadingWhenRuntimeStatusDownloading(t *testing.T
 		t.Fatalf("downloading state should take priority over model labels, got %q", out)
 	}
 }
+
+func TestStatusDoesNotRenderOpenRuntimeMissingModelChip(t *testing.T) {
+	m := Model{
+		styles:  theme.NewStyles(theme.Cracker()),
+		palette: theme.Cracker(),
+		width:   120,
+		openRuntimeStatus: &agentclient.OpenRuntimeStatus{
+			Runtime: "mistralrs",
+			Missing: "model",
+			Message: "mistral.rs default model not downloaded",
+		},
+	}
+
+	out := stripAnsiCSI(m.renderStatus())
+	if strings.Contains(out, "model not downloaded") || strings.Contains(out, "o: downloading") || strings.Contains(out, "(F1)") {
+		t.Fatalf("footer/status bar should not render local-runtime model state anymore, got %q", out)
+	}
+}

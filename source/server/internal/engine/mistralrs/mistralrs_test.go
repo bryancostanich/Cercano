@@ -338,6 +338,9 @@ func (m *fakeRuntimeManager) DownloadModel(context.Context, localruntime.Downloa
 func (m *fakeRuntimeManager) EnsureModelsPresent(context.Context, string, []string) error {
 	return nil
 }
+func (m *fakeRuntimeManager) ResolveOpenModel(context.Context, string, string) (localruntime.ModelRecord, error) {
+	return localruntime.ModelRecord{}, nil
+}
 func (m *fakeRuntimeManager) CancelDownload(context.Context, localruntime.DownloadRequest) (*localruntime.ModelRecord, error) {
 	return nil, nil
 }

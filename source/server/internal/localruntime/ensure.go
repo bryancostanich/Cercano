@@ -7,6 +7,55 @@ import (
 	"strings"
 )
 
+// ErrModelNotFound is returned by ResolveOpenModel when a ref matches no record
+// discovered for the runtime — the caller asked for a model that isn't even in
+// the catalog/inventory.
+var ErrModelNotFound = errors.New("model not found for runtime")
+
+// ErrModelNotPresent is returned by ResolveOpenModel when a ref resolves to a
+// known record that is NOT yet on disk (Downloaded). The resolved record is
+// still returned alongside the error so the caller can choose to ensure it,
+// wait, or degrade to another tier — rather than passing an unresolved name to
+// the engine and hard-failing at load (the compaction "not downloaded" bug).
+var ErrModelNotPresent = errors.New("model resolved but not downloaded")
+
+// ResolveOpenModel resolves a wanted model ref for a runtime to its canonical,
+// present record — the third verb of the engine-agnostic model lifecycle
+// (alongside Readiness and EnsureModelsPresent). It is how every open-model
+// consumer (interactive chat, compaction, recap, research) turns a config
+// value like "qwen3-coder" into the actual on-disk model to serve, uniformly
+// for any backend.
+//
+// Returns:
+//   - (record, nil)                when the ref resolves to a Downloaded record.
+//   - (record, ErrModelNotPresent) when it resolves but isn't on disk yet.
+//   - (zero,   ErrModelNotFound)   when nothing matches the ref.
+//
+// The caller decides policy on the not-present case (ensure + await, or degrade
+// to cloud / another tier); this function never blocks on a download.
+func (m *InMemoryManager) ResolveOpenModel(ctx context.Context, runtime, want string) (ModelRecord, error) {
+	runtime = strings.TrimSpace(runtime)
+	want = strings.TrimSpace(want)
+	if runtime == "" {
+		return ModelRecord{}, errors.New("runtime is required")
+	}
+	if want == "" {
+		return ModelRecord{}, fmt.Errorf("%w: empty ref", ErrModelNotFound)
+	}
+	inv, err := m.Inventory(ctx)
+	if err != nil {
+		return ModelRecord{}, fmt.Errorf("resolve open model: inventory: %w", err)
+	}
+	rec, ok := resolveInInventory(inv, runtime, want)
+	if !ok {
+		return ModelRecord{}, fmt.Errorf("%w: %q (%s)", ErrModelNotFound, want, runtime)
+	}
+	if rec.DownloadState != Downloaded {
+		return rec, fmt.Errorf("%w: %q (%s)", ErrModelNotPresent, rec.ID, runtime)
+	}
+	return rec, nil
+}
+
 // EnsureModelsPresent is the engine-agnostic "make these models present" step
 // of the model lifecycle. Given a runtime and the set of model refs that
 // SHOULD be on disk for it (its default / tier set, sourced from config or

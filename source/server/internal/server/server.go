@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/url"
@@ -611,6 +612,44 @@ func (s *Server) SetRuntimeManager(m localruntime.Manager) {
 	if m != nil {
 		m.RegisterObserver(s)
 	}
+	// Route the legacy open-model provider (compaction/recap/research) through
+	// the engine-agnostic lifecycle so it resolves its configured model to a
+	// present on-disk model — or degrades with a clear error — instead of
+	// handing the engine an unresolved name that fails at load. This is the
+	// fix for the compaction "model not downloaded" hard-fail.
+	s.installLegacyOpenResolver(m)
+}
+
+// installLegacyOpenResolver wires the OpenModelProvider's resolver hook to the
+// runtime manager's ResolveOpenModel, so the legacy text path canonicalizes
+// model names through the same lifecycle as interactive chat. No-op if either
+// the manager or the legacy provider is absent.
+func (s *Server) installLegacyOpenResolver(m localruntime.Manager) {
+	if m == nil || s.providerSvc == nil {
+		return
+	}
+	legacy := s.providerSvc.OpenLegacy()
+	if legacy == nil {
+		return
+	}
+	legacy.SetResolver(func(ctx context.Context, requested string) (string, error) {
+		// Resolve against the runtime the legacy engine serves. The legacy path
+		// is Ollama-backed, and ollama manages its own model presence, so we
+		// resolve against "ollama" inventory; a present record returns its
+		// canonical ID as the serve name, an absent one degrades with a clear
+		// error rather than a silent engine load failure.
+		runtime := "ollama"
+		rec, err := m.ResolveOpenModel(ctx, runtime, requested)
+		if err != nil {
+			if errors.Is(err, localruntime.ErrModelNotPresent) {
+				// Known model, not on disk: kick a best-effort ensure so a
+				// retry can succeed, then degrade this call.
+				_ = m.EnsureModelsPresent(ctx, runtime, []string{requested})
+			}
+			return "", err
+		}
+		return rec.ID, nil
+	})
 }
 
 // SetCatalogManager attaches the online-catalog manager so

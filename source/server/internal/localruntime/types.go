@@ -29,6 +29,11 @@ type Manager interface {
 	// discovered inventory and enqueues a download for any not already present.
 	// Engine-agnostic and idempotent — safe to call on every runtime switch.
 	EnsureModelsPresent(ctx context.Context, runtime string, want []string) error
+	// ResolveOpenModel resolves a wanted model ref to its canonical present
+	// record for a runtime. Returns ErrModelNotFound (no match) or
+	// ErrModelNotPresent (matched but not on disk, record still returned) so
+	// callers can ensure/await/degrade instead of hard-failing at the engine.
+	ResolveOpenModel(ctx context.Context, runtime, want string) (ModelRecord, error)
 	CancelDownload(context.Context, DownloadRequest) (*ModelRecord, error)
 	DeleteModel(context.Context, DeleteModelRequest) error
 	Status(context.Context) (*StatusSnapshot, error)

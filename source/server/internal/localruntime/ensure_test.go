@@ -3,11 +3,69 @@ package localruntime
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
 )
+
+// --- ResolveOpenModel (Phase 3, third lifecycle verb) ---
+
+func TestResolveOpenModel_PresentReturnsRecord(t *testing.T) {
+	model := ensureModel(t, "ollama", "ollama:qwen3-coder", "", 0)
+	model.DownloadState = Downloaded
+	m := NewManager()
+	m.RegisterProvider(&fakeProvider{name: "ollama", models: []ModelRecord{model}})
+
+	rec, err := m.ResolveOpenModel(context.Background(), "ollama", model.ID)
+	if err != nil {
+		t.Fatalf("ResolveOpenModel present: %v", err)
+	}
+	if rec.ID != model.ID {
+		t.Errorf("resolved ID = %q, want %q", rec.ID, model.ID)
+	}
+}
+
+func TestResolveOpenModel_NotPresentReturnsRecordAndSentinel(t *testing.T) {
+	model := ensureModel(t, "ollama", "ollama:qwen3-coder", "", 0)
+	model.DownloadState = DownloadNotStarted
+	m := NewManager()
+	m.RegisterProvider(&fakeProvider{name: "ollama", models: []ModelRecord{model}})
+
+	rec, err := m.ResolveOpenModel(context.Background(), "ollama", model.ID)
+	// The whole point: a known-but-absent model degrades with a distinct
+	// sentinel AND still returns the record, so the caller can ensure/await.
+	if !errors.Is(err, ErrModelNotPresent) {
+		t.Fatalf("err = %v, want ErrModelNotPresent", err)
+	}
+	if rec.ID != model.ID {
+		t.Errorf("resolved record should still be returned, got ID %q", rec.ID)
+	}
+}
+
+func TestResolveOpenModel_UnknownReturnsNotFound(t *testing.T) {
+	m := NewManager()
+	m.RegisterProvider(&fakeProvider{name: "ollama"})
+	_, err := m.ResolveOpenModel(context.Background(), "ollama", "does-not-exist")
+	if !errors.Is(err, ErrModelNotFound) {
+		t.Fatalf("err = %v, want ErrModelNotFound", err)
+	}
+}
+
+func TestResolveOpenModel_EmptyRefIsNotFound(t *testing.T) {
+	m := NewManager()
+	if _, err := m.ResolveOpenModel(context.Background(), "ollama", "  "); !errors.Is(err, ErrModelNotFound) {
+		t.Errorf("empty ref err = %v, want ErrModelNotFound", err)
+	}
+}
+
+func TestResolveOpenModel_RequiresRuntime(t *testing.T) {
+	m := NewManager()
+	if _, err := m.ResolveOpenModel(context.Background(), "", "x"); err == nil {
+		t.Errorf("empty runtime should error")
+	}
+}
 
 // ensureModel builds a downloadable ModelRecord served by the given URL, in the
 // DownloadNotStarted state, under a temp dir.

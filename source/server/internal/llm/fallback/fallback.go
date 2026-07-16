@@ -12,23 +12,28 @@ import (
 	"cercano/source/server/internal/llm"
 )
 
-// Provider is the composite. Each provider is paired with its own profile's
-// model id: the two providers speak different model namespaces, so on failover
-// the request's model is rewritten to the backup profile's model (a tier-pick
-// override in the primary's namespace would be rejected by the backup; it also
-// falls back to the backup's default model, reported via onFailover).
+// Provider is the composite. The two providers speak different model
+// namespaces, so on failover the request's model must be rewritten — but
+// experience-preservingly: a request that carries its capability tier
+// (llm.ChatRequest.Tier) is re-resolved to the BACKUP vendor's model for that
+// same tier, so economy-tier work (e.g. the compaction summarizer) lands on
+// the backup's economy model, not its premium default. Requests without a
+// tier get the backup profile's default model.
 type Provider struct {
-	primary     llm.Provider
-	backup      llm.Provider
-	backupModel string
-	onFailover  func(stage string, err error)
+	primary        llm.Provider
+	backup         llm.Provider
+	backupModelFor func(tier string) string
+	onFailover     func(stage string, err error)
 }
 
-// New builds the composite. onFailover, when non-nil, is invoked once per
-// failed-over call with the stage ("chat", "stream_dial", "stream_first") and
-// the primary's error — the server logs it so backup-served turns are visible.
-func New(primary, backup llm.Provider, backupModel string, onFailover func(stage string, err error)) *Provider {
-	return &Provider{primary: primary, backup: backup, backupModel: backupModel, onFailover: onFailover}
+// New builds the composite. backupModelFor maps a capability-tier name to the
+// backup vendor's model for that tier; it is called with "" for untiered
+// requests and must then return the backup profile's default model.
+// onFailover, when non-nil, is invoked once per failed-over call with the
+// stage ("chat", "stream_dial", "stream_first") and the primary's error — the
+// server logs it so backup-served turns are visible.
+func New(primary, backup llm.Provider, backupModelFor func(tier string) string, onFailover func(stage string, err error)) *Provider {
+	return &Provider{primary: primary, backup: backup, backupModelFor: backupModelFor, onFailover: onFailover}
 }
 
 // Name reports the primary's name: the composite impersonates the primary
@@ -44,9 +49,9 @@ func (p *Provider) notify(stage string, err error) {
 }
 
 // backupRequest rewrites the request into the backup provider's model
-// namespace.
+// namespace, preserving the request's capability tier when it carries one.
 func (p *Provider) backupRequest(req llm.ChatRequest) llm.ChatRequest {
-	req.Model = p.backupModel
+	req.Model = p.backupModelFor(req.Tier)
 	return req
 }
 

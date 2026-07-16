@@ -261,7 +261,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 			// window swung 0/7 to 7/7 on anchor retention between samples, while
 			// temperature 0 reproduced exactly and kept every proposal anchor.
 			greedy := engine.Greedy()
-			req := &agent.Request{Input: compaction.BuildSummaryPrompt(msgs), Temperature: greedy.Temperature}
+			req := &agent.Request{Input: compaction.BuildSummaryPrompt(msgs), Temperature: greedy.Temperature, Tier: string(config.TierFastLightText)}
 			if summarizerModel != "" {
 				req.ModelOverride = summarizerModel
 			}
@@ -290,7 +290,9 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 				// the original local error. No ModelOverride — the cloud provider
 				// uses its configured model, not the local summarizer id.
 				if cloud := lazyRouter.GetModelProviders()["CloudModel"]; cloud != nil {
-					cloudReq := &agent.Request{Input: compaction.BuildSummaryPrompt(msgs), Temperature: greedy.Temperature}
+					// Tier rides along so a mid-call failover re-resolves the
+					// backup vendor's economy model instead of its default.
+					cloudReq := &agent.Request{Input: compaction.BuildSummaryPrompt(msgs), Temperature: greedy.Temperature, Tier: string(config.TierFastLightText)}
 					// Summarization is fast_light_text work — resolve the
 					// vendor's economy model (live, follows profile switches)
 					// instead of burning the premium chat model on it.

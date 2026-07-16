@@ -79,6 +79,7 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 		StopReason:   "end_turn",
 		InputTokens:  got.PromptEvalCount,
 		OutputTokens: got.EvalCount,
+		Model:        got.Model,
 	}
 	if got.Message.Content != "" {
 		out.Blocks = append(out.Blocks, llm.Block{Type: llm.BlockText, Text: got.Message.Content})

@@ -401,7 +401,20 @@ func (p *service) wrapBackup(primary llm.Provider, primaryName string, c cfg.Con
 		log.Printf("[cloud] backup profile %q unbuildable (%v); running without fallback", name, err)
 		return primary
 	}
-	return fallback.New(primary, backup, bp.Model, func(stage string, ferr error) {
+	// Experience-preserving model rewrite: a tiered request re-resolves the
+	// SAME capability tier against the backup vendor's cost table, so e.g.
+	// economy-tier summarization fails over to the backup's economy model.
+	// Untiered requests (and unset slots) get the backup profile's default.
+	// The closure captures this rebuild's config snapshot — profile/table
+	// changes trigger another Rebuild, which builds a fresh closure.
+	profiles := c.ModelProfiles
+	backupModelFor := func(tier string) string {
+		if tier == "" {
+			return bp.Model
+		}
+		return profiles.ResolveCloudModelForTier(bp, cfg.Tier(tier))
+	}
+	return fallback.New(primary, backup, backupModelFor, func(stage string, ferr error) {
 		log.Printf("[cloud] failover to backup %q (%s): primary error: %v", name, stage, ferr)
 	})
 }

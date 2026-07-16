@@ -38,6 +38,7 @@ func (a *llmModelProvider) Process(ctx context.Context, req *Request) (*Response
 		Model:       model,
 		MaxTokens:   processMaxTokens,
 		Temperature: req.Temperature,
+		Tier:        req.Tier,
 		Messages: []llm.Message{
 			{
 				Role:   llm.RoleUser,
@@ -54,10 +55,17 @@ func (a *llmModelProvider) Process(ctx context.Context, req *Request) (*Response
 			sb.WriteString(b.Text)
 		}
 	}
+	// Attribute the model that actually served the call when the provider
+	// reports one — on a failed-over call that's the backup's model, and
+	// records must not claim the requested model served it.
+	served := chatResp.Model
+	if served == "" {
+		served = model
+	}
 	return &Response{
 		Output:          sb.String(),
 		InputTokens:     chatResp.InputTokens,
 		OutputTokens:    chatResp.OutputTokens,
-		RoutingMetadata: RoutingMetadata{ModelName: model},
+		RoutingMetadata: RoutingMetadata{ModelName: served},
 	}, nil
 }

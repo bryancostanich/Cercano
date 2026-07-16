@@ -386,6 +386,7 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	res, err := agent.RunToolLoop(ctx, agent.ToolLoopInput{
 		Provider:       sel.Provider,
 		Model:          model,
+		Tier:           string(spec.Tier),
 		System:         system,
 		Registry:       reg,
 		Permissions:    perms,

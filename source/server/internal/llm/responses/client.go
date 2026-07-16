@@ -258,7 +258,7 @@ func (c *Client) chatOnce(ctx context.Context, req llm.ChatRequest) (llm.ChatRes
 	if err := json.Unmarshal(body, &r); err != nil {
 		return llm.ChatResponse{}, fmt.Errorf("responses: decode: %w", err)
 	}
-	out := llm.ChatResponse{Blocks: blocksFromOutput(r.Output), StopReason: r.Status}
+	out := llm.ChatResponse{Blocks: blocksFromOutput(r.Output), StopReason: r.Status, Model: r.Model}
 	if r.Usage != nil {
 		out.InputTokens = r.Usage.InputTokens
 		out.OutputTokens = r.Usage.OutputTokens

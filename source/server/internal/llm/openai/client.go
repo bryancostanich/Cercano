@@ -125,6 +125,7 @@ func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatRespons
 	out := llm.ChatResponse{
 		InputTokens:  resp.Usage.PromptTokens,
 		OutputTokens: resp.Usage.CompletionTokens,
+		Model:        resp.Model,
 	}
 	if len(resp.Choices) > 0 {
 		out.Blocks = blocksFromOpenAI(resp.Choices[0].Message)

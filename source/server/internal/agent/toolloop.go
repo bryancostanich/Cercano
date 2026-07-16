@@ -89,7 +89,12 @@ type ToolLoopInput struct {
 	UserInput   string
 	Images      []InlineImage
 	Model       string
-	System      string
+	// Tier is the capability-tier name Model was resolved from (empty for the
+	// provider's default). Rides every ChatRequest as routing metadata so the
+	// cloud failover composite can re-resolve the tier in the backup vendor's
+	// namespace (dispatch sub-agents pin tier-resolved models).
+	Tier   string
+	System string
 
 	// PermissionRequester is the callback the loop uses to surface a
 	// confirm prompt to the active client (nil = auto-allow, useful in tests).
@@ -246,6 +251,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	for iter := 0; unlimitedIters || iter < maxIters; iter++ {
 		req := llm.ChatRequest{
 			Model:     in.Model,
+			Tier:      in.Tier,
 			System:    in.System,
 			Messages:  hist,
 			Tools:     catalog,
@@ -540,7 +546,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			"You've reached the %d-step tool limit for this turn. Stop calling tools and give your best answer now using what you've gathered.",
 			maxIters)}},
 	})
-	finalReq := llm.ChatRequest{Model: in.Model, System: in.System, Messages: hist, MaxTokens: maxTokens}
+	finalReq := llm.ChatRequest{Model: in.Model, Tier: in.Tier, System: in.System, Messages: hist, MaxTokens: maxTokens}
 	rdr, err := in.Provider.StreamChat(ctx, finalReq)
 	if err != nil {
 		return ToolLoopResult{Iterations: maxIters, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, err

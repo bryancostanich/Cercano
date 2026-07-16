@@ -22,6 +22,14 @@ type ChatRequest struct {
 	// compaction summarizer requires it for reproducible, format-conforming
 	// output (see compaction-bakeoff-findings.md).
 	Temperature *float64
+	// Tier is the capability-tier name (a config.Tier value, e.g.
+	// "fast_light_text") the pinned Model was resolved FROM — routing
+	// metadata, never sent on the wire. It exists so the failover composite
+	// can re-resolve the same tier in the backup vendor's namespace instead
+	// of degrading to the backup's default model (experience-preserving
+	// failover; see docs/agent/cloud-failover-audit.md). Empty means "the
+	// provider's default model" and needs no translation.
+	Tier string
 }
 
 type ChatResponse struct {
@@ -29,6 +37,11 @@ type ChatResponse struct {
 	StopReason   string
 	InputTokens  int
 	OutputTokens int
+	// Model is the model that actually served the call, from the provider's
+	// response envelope (empty when the envelope doesn't carry one). On a
+	// failed-over call this names the BACKUP's model — per-request records
+	// must not claim the requested model served it.
+	Model string
 }
 
 type Provider interface {

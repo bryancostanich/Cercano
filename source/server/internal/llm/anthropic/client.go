@@ -172,6 +172,7 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 		StopReason:   string(resp.StopReason),
 		InputTokens:  int(resp.Usage.InputTokens),
 		OutputTokens: int(resp.Usage.OutputTokens),
+		Model:        string(resp.Model),
 	}
 	for _, b := range resp.Content {
 		out.Blocks = append(out.Blocks, blockFromSDK(b))

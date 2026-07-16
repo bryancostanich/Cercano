@@ -59,6 +59,7 @@ type tool struct {
 type response struct {
 	ID     string       `json:"id"`
 	Status string       `json:"status"`
+	Model  string       `json:"model,omitempty"` // the model that served the call
 	Output []outputItem `json:"output"`
 	Usage  *usage       `json:"usage,omitempty"`
 	Error  *apiError    `json:"error,omitempty"`

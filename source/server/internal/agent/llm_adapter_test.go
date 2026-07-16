@@ -12,6 +12,8 @@ type fakeLLM struct {
 	gotModel     string
 	gotMaxTokens int
 	gotTemp      *float64
+	gotTier      string
+	servedModel  string // reported back as ChatResponse.Model when non-empty
 }
 
 func (f *fakeLLM) Name() string                   { return f.name }
@@ -20,10 +22,12 @@ func (f *fakeLLM) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatRespon
 	f.gotModel = req.Model
 	f.gotMaxTokens = req.MaxTokens
 	f.gotTemp = req.Temperature
+	f.gotTier = req.Tier
 	return llm.ChatResponse{
 		Blocks:       []llm.Block{{Type: llm.BlockText, Text: "echo:" + req.Messages[0].Blocks[0].Text}},
 		InputTokens:  3,
 		OutputTokens: 4,
+		Model:        f.servedModel,
 	}, nil
 }
 func (f *fakeLLM) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.StreamReader, error) {
@@ -78,6 +82,35 @@ func TestLLMModelProviderProcessThreadsTemperature(t *testing.T) {
 	}
 	if fake.gotTemp != nil {
 		t.Fatalf("unset Temperature must stay nil (provider default), got %v", *fake.gotTemp)
+	}
+}
+
+func TestLLMModelProviderProcessThreadsTierAndAttributesServedModel(t *testing.T) {
+	// The tier must ride through so the failover composite can re-resolve it
+	// in the backup vendor's namespace; the response must be attributed to
+	// the model that actually served (on failover, the backup's model — not
+	// the requested one).
+	fake := &fakeLLM{name: "anthropic", servedModel: "gpt-5.4-mini"}
+	mp := NewLLMModelProvider(fake, "claude-opus-4-8")
+	resp, err := mp.Process(context.Background(), &Request{Input: "hi", ModelOverride: "claude-haiku-4-5", Tier: "fast_light_text"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fake.gotTier != "fast_light_text" {
+		t.Fatalf("Chat received Tier = %q, want fast_light_text", fake.gotTier)
+	}
+	if resp.RoutingMetadata.ModelName != "gpt-5.4-mini" {
+		t.Fatalf("ModelName = %q, want the served model gpt-5.4-mini", resp.RoutingMetadata.ModelName)
+	}
+
+	// A provider that reports no served model falls back to the requested one.
+	fake.servedModel = ""
+	resp, err = mp.Process(context.Background(), &Request{Input: "hi", ModelOverride: "claude-haiku-4-5"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.RoutingMetadata.ModelName != "claude-haiku-4-5" {
+		t.Fatalf("ModelName = %q, want the requested model", resp.RoutingMetadata.ModelName)
 	}
 }
 

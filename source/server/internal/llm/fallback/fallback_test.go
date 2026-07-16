@@ -89,11 +89,51 @@ func (r *fakeReader) Next() (llm.StreamEvent, bool, error) {
 }
 func (r *fakeReader) Close() error { r.closed = true; return nil }
 
+// staticBackupModel mirrors the untiered wiring: every tier resolves to the
+// backup profile's default model.
+func staticBackupModel(m string) func(string) string {
+	return func(string) string { return m }
+}
+
+func TestChatFailoverPreservesTier(t *testing.T) {
+	// Experience-preserving failover: a request carrying a capability tier is
+	// re-resolved in the backup vendor's namespace for that SAME tier — the
+	// economy-tier summarizer must land on the backup's economy model, not
+	// its premium default (the 2026-07-15 gpt-5.5 incident).
+	primary := &fakeProvider{name: "anthropic", chatErr: &anthropic.Error{StatusCode: 529}}
+	backup := &fakeProvider{name: "openai", chatResp: llm.ChatResponse{StopReason: "end_turn"}}
+	resolver := func(tier string) string {
+		if tier == "fast_light_text" {
+			return "gpt-5.4-mini"
+		}
+		return "gpt-5.5"
+	}
+	p := New(primary, backup, resolver, nil)
+
+	if _, err := p.Chat(context.Background(), llm.ChatRequest{Model: "claude-haiku-4-5", Tier: "fast_light_text"}); err != nil {
+		t.Fatalf("want backup success, got %v", err)
+	}
+	if len(backup.gotChat) != 1 || backup.gotChat[0].Model != "gpt-5.4-mini" {
+		t.Fatalf("backup request = %+v, want the backup vendor's economy model gpt-5.4-mini", backup.gotChat)
+	}
+	if backup.gotChat[0].Tier != "fast_light_text" {
+		t.Fatalf("tier must survive the rewrite: %+v", backup.gotChat[0])
+	}
+
+	// Untiered requests get the backup default.
+	if _, err := p.Chat(context.Background(), llm.ChatRequest{Model: "claude-fable-5"}); err != nil {
+		t.Fatal(err)
+	}
+	if backup.gotChat[1].Model != "gpt-5.5" {
+		t.Fatalf("untiered request must get the backup default: %+v", backup.gotChat[1])
+	}
+}
+
 func TestChatFailsOverAndRewritesModel(t *testing.T) {
 	primary := &fakeProvider{name: "anthropic", chatErr: &anthropic.Error{StatusCode: 429}}
 	backup := &fakeProvider{name: "openai", chatResp: llm.ChatResponse{StopReason: "end_turn"}}
 	var stage string
-	p := New(primary, backup, "gpt-5.5", func(s string, _ error) { stage = s })
+	p := New(primary, backup, staticBackupModel("gpt-5.5"), func(s string, _ error) { stage = s })
 
 	resp, err := p.Chat(context.Background(), llm.ChatRequest{Model: "claude-fable-5"})
 	if err != nil {
@@ -113,7 +153,7 @@ func TestChatFailsOverAndRewritesModel(t *testing.T) {
 func TestChatDoesNotFailOverOnRequestError(t *testing.T) {
 	primary := &fakeProvider{name: "anthropic", chatErr: &anthropic.Error{StatusCode: 400}}
 	backup := &fakeProvider{name: "openai"}
-	p := New(primary, backup, "gpt-5.5", nil)
+	p := New(primary, backup, staticBackupModel("gpt-5.5"), nil)
 
 	_, err := p.Chat(context.Background(), llm.ChatRequest{Model: "claude-fable-5"})
 	if err == nil {
@@ -127,7 +167,7 @@ func TestChatDoesNotFailOverOnRequestError(t *testing.T) {
 func TestChatDoesNotFailOverWhenContextDone(t *testing.T) {
 	primary := &fakeProvider{name: "anthropic", chatErr: &anthropic.Error{StatusCode: 500}}
 	backup := &fakeProvider{name: "openai"}
-	p := New(primary, backup, "gpt-5.5", nil)
+	p := New(primary, backup, staticBackupModel("gpt-5.5"), nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -145,7 +185,7 @@ func TestStreamDialFailover(t *testing.T) {
 	backup := &fakeProvider{name: "openai", stream: &fakeReader{
 		events: []llm.StreamEvent{{Type: llm.EventMessageStart}},
 	}}
-	p := New(primary, backup, "gpt-5.5", nil)
+	p := New(primary, backup, staticBackupModel("gpt-5.5"), nil)
 
 	r, err := p.StreamChat(context.Background(), llm.ChatRequest{Model: "claude-fable-5"})
 	if err != nil {
@@ -166,7 +206,7 @@ func TestStreamFirstEventErrorFailsOver(t *testing.T) {
 	backup := &fakeProvider{name: "openai", stream: &fakeReader{
 		events: []llm.StreamEvent{{Type: llm.EventMessageStart}, {Type: llm.EventTextDelta, TextDelta: "hi"}},
 	}}
-	p := New(primary, backup, "gpt-5.5", nil)
+	p := New(primary, backup, staticBackupModel("gpt-5.5"), nil)
 
 	r, err := p.StreamChat(context.Background(), llm.ChatRequest{})
 	if err != nil {
@@ -188,7 +228,7 @@ func TestStreamInBandErrorEventFailsOver(t *testing.T) {
 	backup := &fakeProvider{name: "openai", stream: &fakeReader{
 		events: []llm.StreamEvent{{Type: llm.EventMessageStart}},
 	}}
-	p := New(primary, backup, "gpt-5.5", nil)
+	p := New(primary, backup, staticBackupModel("gpt-5.5"), nil)
 
 	r, _ := p.StreamChat(context.Background(), llm.ChatRequest{})
 	ev, ok, err := r.Next()
@@ -203,7 +243,7 @@ func TestStreamNoFailoverAfterEmission(t *testing.T) {
 		errs:   []error{nil, &anthropic.Error{StatusCode: 500}},
 	}}
 	backup := &fakeProvider{name: "openai"}
-	p := New(primary, backup, "gpt-5.5", nil)
+	p := New(primary, backup, staticBackupModel("gpt-5.5"), nil)
 
 	r, _ := p.StreamChat(context.Background(), llm.ChatRequest{})
 	if _, ok, err := r.Next(); !ok || err != nil {
@@ -224,7 +264,7 @@ func TestStreamBackupFailureDoesNotCascade(t *testing.T) {
 	backup := &fakeProvider{name: "openai", stream: &fakeReader{
 		events: []llm.StreamEvent{{Type: llm.EventError, ErrText: "backup also down"}},
 	}}
-	p := New(primary, backup, "gpt-5.5", nil)
+	p := New(primary, backup, staticBackupModel("gpt-5.5"), nil)
 
 	r, _ := p.StreamChat(context.Background(), llm.ChatRequest{})
 	ev, ok, err := r.Next()

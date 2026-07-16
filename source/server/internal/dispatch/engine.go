@@ -153,12 +153,19 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 			tier = config.TierFastLightText
 		}
 	}
+	// Normalize the resolved tier back onto the spec so downstream consumers
+	// (the agentic runner's ToolLoopInput, the one-shot ChatRequest) carry it
+	// as routing metadata — the cloud failover composite re-resolves it in
+	// the backup vendor's namespace. An explicit ModelOverride clears it: the
+	// caller pinned an exact model, not a tier.
+	spec.Tier = tier
 	model := ""
 	if e.modelFor != nil {
 		model = e.modelFor(sel.IsCloud, tier)
 	}
 	if spec.ModelOverride != "" {
 		model = spec.ModelOverride
+		spec.Tier = ""
 	}
 
 	// 3a. Agentic: delegate to the installed runner (lives in internal/server
@@ -184,6 +191,7 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 	// 4. Build chat request.
 	req := llm.ChatRequest{
 		Model:  model,
+		Tier:   string(spec.Tier),
 		System: spec.System,
 		Messages: []llm.Message{
 			{

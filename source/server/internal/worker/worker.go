@@ -473,7 +473,17 @@ func wrapWorkerBackup(
 		log.Printf("[worker] backup profile %q unbuildable (%v); running without fallback", name, buildErr)
 		return primary
 	}
-	return fallback.New(primary, backup, bp.Model, func(stage string, ferr error) {
+	// Same experience-preserving rewrite as the in-process wrapBackup: tiered
+	// requests re-resolve the tier against the backup vendor's cost table
+	// (ModelProfiles rides the config snapshot); untiered get bp.Model.
+	profiles := cfg.ModelProfiles
+	backupModelFor := func(tier string) string {
+		if tier == "" {
+			return bp.Model
+		}
+		return profiles.ResolveCloudModelForTier(bp, pkgcfg.Tier(tier))
+	}
+	return fallback.New(primary, backup, backupModelFor, func(stage string, ferr error) {
 		log.Printf("[worker] failover to backup %q (%s): primary error: %v", name, stage, ferr)
 	})
 }

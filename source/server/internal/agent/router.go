@@ -72,7 +72,13 @@ type Request struct {
 	// Nil keeps the engine default; a pointer to 0 requests greedy decoding
 	// (used by compaction summarization, which must be reproducible).
 	Temperature *float64
-	Coproc      bool // Route per Locus Mode's co-processor tier (local/cloud)
+	// Tier is the capability-tier name (a config.Tier value) the request's
+	// model choice was resolved from. Routing metadata: it rides through to
+	// llm.ChatRequest.Tier so the cloud failover composite can re-resolve the
+	// same tier in the backup vendor's namespace instead of degrading to the
+	// backup's default model. Empty = provider default, no translation needed.
+	Tier   string
+	Coproc bool // Route per Locus Mode's co-processor tier (local/cloud)
 	// Images are user-attached images; buildUserBlocks splices them into the
 	// user message at "[image N]" markers in Input.
 	Images []InlineImage

@@ -111,7 +111,7 @@ func splitRenderLines(s string) []string {
 }
 
 func (c *chatView) rebuildTranscriptLayout(entries []*Entry) transcriptLayout {
-	layout := transcriptLayout{width: c.vp.Width(), stylesGen: c.stylesGen, contentGen: c.contentGen}
+	layout := transcriptLayout{width: c.Width(), stylesGen: c.stylesGen, contentGen: c.contentGen}
 	appendUnit := func(kind renderUnitKind, startEntry, endEntry int, block string, rows []arrowRow) {
 		lines := splitRenderLines(block)
 		if len(lines) == 0 {
@@ -166,7 +166,7 @@ func (c *chatView) rebuildTranscriptLayout(entries []*Entry) transcriptLayout {
 		first = false
 	}
 	if c.IsBetweenPhases() {
-		wrapW := c.vp.Width()
+		wrapW := c.Width()
 		if wrapW < 10 {
 			wrapW = 10
 		}

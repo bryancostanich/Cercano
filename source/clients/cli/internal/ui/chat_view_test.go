@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -15,6 +16,25 @@ func newTestChatView(w, h int) *chatView {
 	p := theme.Cracker()
 	cv := newChatView(theme.NewStyles(p), p, "", "", w, h)
 	return &cv
+}
+
+func setChatTestContent(c *chatView, content string) {
+	lines := strings.Split(content, "\n")
+	c.layout = transcriptLayout{
+		width:      c.Width(),
+		stylesGen:  c.stylesGen,
+		contentGen: c.contentGen,
+		units: []renderUnit{{
+			kind:      unitEntry,
+			startLine: 0,
+			lineCount: len(lines),
+			lines:     lines,
+		}},
+		totalLines: len(lines),
+	}
+	c.scroll.SetTotalLineCount(len(lines))
+	c.plainDirty = true
+	c.plainLines = nil
 }
 
 // TestChatView_ScrollSurfaceMatchesViewport checks that the scroll surface
@@ -83,7 +103,7 @@ func TestChatView_ViewIdentityOverlayMatchesNoSelection(t *testing.T) {
 	}
 }
 
-func TestTranscriptLayoutFlattenedContentMatchesLegacyContent(t *testing.T) {
+func TestTranscriptLayoutFlattenedContentMaterializesRenderedEntries(t *testing.T) {
 	c := newTestChatView(72, 12)
 	entries := []*Entry{
 		{Role: RoleUser, Content: "please inspect this"},
@@ -92,19 +112,51 @@ func TestTranscriptLayoutFlattenedContentMatchesLegacyContent(t *testing.T) {
 	}
 	c.SetEntries(entries)
 
-	if got, want := c.layout.flattenedContent(), c.content; got != want {
-		t.Fatalf("virtual layout flattened content mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	got := plain(c.layout.flattenedContent())
+	for _, want := range []string{"please inspect this", "I can help", "first", "second", "notice line"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("virtual layout flattened content missing %q\n--- got ---\n%s", want, got)
+		}
+	}
+	if got := c.layout.totalLines; got <= 0 {
+		t.Fatalf("SetEntries should populate the virtual layout, totalLines=%d", got)
 	}
 }
 
-func TestTranscriptLayoutToolRowsMatchLegacyArrowRows(t *testing.T) {
+func TestTranscriptLayoutToolRowsBackChatArrowRows(t *testing.T) {
 	c := newTestChatView(100, 20)
 	c.SetEntries(toolClickEntries())
 
-	if got, want := c.layout.flattenedContent(), c.content; got != want {
-		t.Fatalf("virtual layout flattened tool content mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	gotContent := plain(c.layout.flattenedContent())
+	for _, want := range []string{"do stuff", "tool calls", "prose after"} {
+		if !strings.Contains(gotContent, want) {
+			t.Fatalf("virtual layout flattened tool content missing %q\n--- got ---\n%s", want, gotContent)
+		}
 	}
 	if got, want := c.layout.absoluteArrowRows(), c.arrowRows; !reflect.DeepEqual(got, want) {
 		t.Fatalf("virtual layout arrow rows mismatch\ngot:  %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestChatViewViewRendersOnlyVisibleLayoutWindow(t *testing.T) {
+	c := newTestChatView(40, 3)
+	lines := make([]string, 1000)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line-%03d", i)
+	}
+	c.layout = transcriptLayout{units: []renderUnit{{kind: unitEntry, lineCount: len(lines), lines: lines}}, totalLines: len(lines)}
+	c.scroll.SetTotalLineCount(len(lines))
+	c.SetYOffset(500)
+
+	out := plain(c.View())
+	for _, want := range []string{"line-500", "line-501", "line-502"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("View missing visible line %q\n%s", want, out)
+		}
+	}
+	for _, hidden := range []string{"line-000", "line-499", "line-503", "line-999"} {
+		if strings.Contains(out, hidden) {
+			t.Fatalf("View rendered offscreen line %q\n%s", hidden, out)
+		}
 	}
 }

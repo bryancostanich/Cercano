@@ -18,8 +18,7 @@ func buildDragModel() Model {
 	p := theme.Cracker()
 	cv := newChatView(theme.NewStyles(p), p, "", "", w-2, vh)
 	content := strings.Repeat("xxxxxxxx\n", 50) // total 50 > height 10 → overflow
-	cv.vp.SetContent(content)
-	cv.plainLines = plainLines(content)
+	setChatTestContent(&cv, content)
 	m := Model{
 		width:        w,
 		height:       vh + 6,

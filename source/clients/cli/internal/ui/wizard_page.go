@@ -54,8 +54,8 @@ type wizardPage struct {
 	// commitKeyFn mirrors applyFn: test indirection over the concrete gRPC
 	// client.
 	commitKeyFn func(key string) error
-	recs             config.TierRecommendations
-	recsOK           bool
+	recs        config.TierRecommendations
+	recsOK      bool
 	// catalog is the runtime model catalog fetched from the agent once at
 	// construction (ListRuntimeModels). The open tier picks are autofilled and
 	// displayed from its RAM-tiered RecommendedOpenModels, so every open

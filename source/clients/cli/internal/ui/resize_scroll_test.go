@@ -43,9 +43,8 @@ func TestSetSize_PreservesBottomAnchor(t *testing.T) {
 
 // TestSetSize_PreservesMidScrollAnchor verifies that resizing while scrolled to
 // the middle keeps the same content line visible at the bottom of the viewport.
-// Before the fix the resize anchor was computed with c.vp.Height()=0 (the
-// charm.land/bubbles/v2 getter returns 0 until SetHeight is called); we now
-// track the height in c.vpH and seed it from the constructor argument.
+// The resize anchor is computed from the virtual scroll surface height so it is
+// valid immediately after construction and after every relayout.
 func TestSetSize_PreservesMidScrollAnchor(t *testing.T) {
 	c := newTestChatView(80, 10)
 	entries := buildEntries(80)

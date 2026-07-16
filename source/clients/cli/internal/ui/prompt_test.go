@@ -123,7 +123,7 @@ func TestPrompt_WheelOutsidePromptScrollsChatViewport(t *testing.T) {
 	m.width = 80
 	m.height = 24
 	m.relayout()
-	m.mainChat().vp.SetContent(strings.Repeat("chat\n", 80))
+	setChatTestContent(m.mainChat(), strings.Repeat("chat\n", 80))
 	m.mainChat().SetYOffset(0)
 
 	next, _ := m.Update(tea.MouseWheelMsg{X: 2, Y: m.scrollbarTop, Button: tea.MouseWheelDown})
@@ -535,7 +535,7 @@ func TestPrompt_ModifiedArrowsDoNotTriggerHistoryRecall(t *testing.T) {
 func TestPrompt_HomeEndRouteToPrompt(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
-	m.mainChat().vp.SetContent(strings.Repeat("chat\n", 80))
+	setChatTestContent(m.mainChat(), strings.Repeat("chat\n", 80))
 	m.mainChat().SetYOffset(10)
 	m.input.SetValue("hello\nworld")
 

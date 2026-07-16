@@ -51,20 +51,14 @@ func (s *Server) OnDownloadStateChange(ev localruntime.DownloadEvent) {
 func (s *Server) OnInstanceStateChange(localruntime.InstanceEvent) {}
 
 // isActiveRuntimeDefault reports whether model is the configured default for
-// the currently-active runtime. Matching uses the same fuzzy MatchesModel the
-// resolve helpers use, so a config value like a bare id or repo still lines up
-// with the canonical record.
+// the currently-active runtime. It reads the per-runtime default through the
+// shared runtimeDefaultModel helper (the single config→policy seam), rather
+// than re-deriving the per-runtime switch here. Matching uses the same fuzzy
+// MatchesModel the resolve helpers use, so a config value like a bare id or
+// repo still lines up with the canonical record.
 func isActiveRuntimeDefault(cfg config.Config, model localruntime.ModelRecord) bool {
-	var want string
-	switch strings.TrimSpace(cfg.OpenRuntime) {
-	case "mistralrs":
-		want = cfg.MistralRS.DefaultModel
-	case "llama_server":
-		want = cfg.LlamaServer.DefaultModel
-	default:
-		return false
-	}
-	if strings.TrimSpace(want) == "" {
+	want := runtimeDefaultModel(cfg, strings.TrimSpace(cfg.OpenRuntime))
+	if want == "" {
 		return false
 	}
 	return localruntime.MatchesModel(want, model)

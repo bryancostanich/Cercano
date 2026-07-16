@@ -392,7 +392,7 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource cre
 	// (llama-server or mistral.rs) — both live only on the host, so the worker
 	// proxies to the host, which serves them via its own openProviderFor. The
 	// proxy carries no runtime label; the host picks the engine from its config.
-	if cfg.OpenRuntime == "llama_server" || cfg.OpenRuntime == "mistralrs" {
+	if runtimeIsHostManaged(cfg.OpenRuntime) {
 		r.openProv = openProxy
 	} else if cfg.OllamaURL != "" {
 		r.openProv = ollamallm.NewClient(ollamallm.Config{
@@ -407,6 +407,24 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource cre
 	}
 
 	return r, nil
+}
+
+// runtimeIsHostManaged reports whether an open runtime lives ONLY on the host
+// (its runtime manager is a host singleton) and therefore cannot be reached
+// directly from a worker — the worker must proxy open inference to the host
+// over the RunTurn stream. This is a capability question ("does this runtime
+// require host-proxy?"), not really a name list; it is expressed by name here
+// because the worker has no access to the host's RuntimeCapabilities. When a
+// new host-managed runtime is added, list it here (the ONE place the worker's
+// open-routing decision is made) — an Ollama-style, URL-reachable runtime is
+// left off so it routes to a direct client instead.
+func runtimeIsHostManaged(runtime string) bool {
+	switch runtime {
+	case "llama_server", "mistralrs":
+		return true
+	default:
+		return false
+	}
 }
 
 // wrapWorkerBackup mirrors providers.wrapBackup but sources the backup

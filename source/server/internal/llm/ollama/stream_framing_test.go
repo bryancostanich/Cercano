@@ -44,7 +44,7 @@ func TestStreamChat_CollectYieldsContent(t *testing.T) {
 	}
 	defer rdr.Close()
 
-	resp, err := llm.CollectStream(t.Context(), rdr, nil)
+	resp, err := llm.CollectStream(t.Context(), rdr, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

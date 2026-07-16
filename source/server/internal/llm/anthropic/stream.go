@@ -10,6 +10,10 @@ import (
 type streamReader struct {
 	stream    *ssestream.Stream[sdk.MessageStreamEventUnion]
 	blockKind map[int64]string
+	// normalize maps vendor/transport errors into the llm.Error taxonomy; the
+	// SDK is lazy, so even request-time failures (auth, quota 429) surface
+	// here on the first read rather than at StreamChat.
+	normalize func(error) error
 }
 
 func (s *streamReader) Next() (llm.StreamEvent, bool, error) {
@@ -21,6 +25,9 @@ func (s *streamReader) Next() (llm.StreamEvent, bool, error) {
 		}
 	}
 	if err := s.stream.Err(); err != nil {
+		if s.normalize != nil {
+			err = s.normalize(err)
+		}
 		return llm.StreamEvent{}, false, err
 	}
 	return llm.StreamEvent{}, false, nil

@@ -54,7 +54,7 @@ func TestCollectStream_DropsDeltasBeforeMessageStart(t *testing.T) {
 		{Type: llm.EventMessageStop, OutputTokens: 5},
 	}}
 	var shown strings.Builder
-	resp, err := collectStream(context.Background(), rdr, func(s string) { shown.WriteString(s) })
+	resp, err := collectStream(context.Background(), rdr, func(s string) { shown.WriteString(s) }, nil)
 	if err != nil {
 		t.Fatalf("collectStream: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestCollectStream_SecondMessageStartResetsAccumulation(t *testing.T) {
 		{Type: llm.EventTextDelta, TextDelta: "fresh reply"},
 		{Type: llm.EventMessageStop, OutputTokens: 4},
 	}}
-	resp, err := collectStream(context.Background(), rdr, nil)
+	resp, err := collectStream(context.Background(), rdr, nil, nil)
 	if err != nil {
 		t.Fatalf("collectStream: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestCollectStream_DropsDeltasAfterMessageStop(t *testing.T) {
 		{Type: llm.EventMessageStop},
 		{Type: llm.EventTextDelta, TextDelta: " trailing junk"},
 	}}
-	resp, err := collectStream(context.Background(), rdr, nil)
+	resp, err := collectStream(context.Background(), rdr, nil, nil)
 	if err != nil {
 		t.Fatalf("collectStream: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestCollectStream_HappyPathUnchanged(t *testing.T) {
 		{Type: llm.EventMessageStop, OutputTokens: 2},
 	}}
 	var shown strings.Builder
-	resp, err := collectStream(context.Background(), rdr, func(s string) { shown.WriteString(s) })
+	resp, err := collectStream(context.Background(), rdr, func(s string) { shown.WriteString(s) }, nil)
 	if err != nil {
 		t.Fatalf("collectStream: %v", err)
 	}

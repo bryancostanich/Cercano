@@ -105,10 +105,70 @@ func TestStreamReader(t *testing.T) {
 	}
 }
 
-func TestStreamReaderError(t *testing.T) {
-	body := "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"boom\"}}}\n\n"
-	evs := collect(t, body)
-	if len(evs) != 1 || evs[0].Type != llm.EventError || !strings.Contains(evs[0].ErrText, "boom") {
-		t.Fatalf("events = %+v", evs)
+// In-band error frames surface as CLASSIFIED errors from Next (not EventError
+// text), so the resilience engine and the turn runner can apply per-class
+// policy — the incident driver was the codex backend's retryable
+// "An error occurred while processing your request" arriving mid-stream and
+// falling straight through to cross-tier degrade.
+func TestStreamReaderError_Classified(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want llm.ErrorClass
+		text string
+	}{
+		{"response.failed server-side", "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"boom\"}}}\n\n",
+			llm.ErrBusy, "boom"},
+		{"codex retryable processing error", "data: {\"type\":\"error\",\"message\":\"An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists.\"}\n\n",
+			llm.ErrBusy, "You can retry your request"},
+		{"quota marker", "data: {\"type\":\"error\",\"code\":\"insufficient_quota\",\"message\":\"You exceeded your current quota.\"}\n\n",
+			llm.ErrQuota, "quota"},
+		{"invalid marker", "data: {\"type\":\"error\",\"code\":\"invalid_prompt\",\"message\":\"bad input\"}\n\n",
+			llm.ErrInvalidRequest, "bad input"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newStreamReader(io.NopCloser(strings.NewReader(tc.body)))
+			_, ok, err := r.Next()
+			if ok || err == nil {
+				t.Fatalf("want classified error, got ok=%v err=%v", ok, err)
+			}
+			if got := llm.ClassOf(err); got != tc.want {
+				t.Errorf("class = %q, want %q (err: %v)", got, tc.want, err)
+			}
+			if !strings.Contains(err.Error(), tc.text) {
+				t.Errorf("err = %q, want it to carry %q", err, tc.text)
+			}
+		})
+	}
+}
+
+// An error frame after content: the delivered events drain first, then the
+// classified error surfaces.
+func TestStreamReaderError_AfterContent(t *testing.T) {
+	body := "data: {\"type\":\"response.created\"}\n\n" +
+		"data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n" +
+		"data: {\"type\":\"error\",\"message\":\"An error occurred while processing your request. You can retry your request.\"}\n\n"
+	r := newStreamReader(io.NopCloser(strings.NewReader(body)))
+	var texts []string
+	var finalErr error
+	for {
+		ev, ok, err := r.Next()
+		if err != nil {
+			finalErr = err
+			break
+		}
+		if !ok {
+			break
+		}
+		if ev.Type == llm.EventTextDelta {
+			texts = append(texts, ev.TextDelta)
+		}
+	}
+	if len(texts) != 1 || texts[0] != "partial" {
+		t.Errorf("texts = %v — content before the error must still deliver", texts)
+	}
+	if llm.ClassOf(finalErr) != llm.ErrBusy {
+		t.Errorf("err = %v, want busy class after content", finalErr)
 	}
 }

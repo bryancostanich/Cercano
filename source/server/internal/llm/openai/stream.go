@@ -35,6 +35,11 @@ type streamReader struct {
 
 	// true once we've queued the terminal EventMessageStop
 	done bool
+
+	// normalize maps vendor/transport errors into the llm.Error taxonomy;
+	// go-openai is lazy about some failures, so they surface on Recv rather
+	// than at stream construction.
+	normalize func(error) error
 }
 
 func newStreamReader(s *goopenai.ChatCompletionStream) *streamReader {
@@ -75,6 +80,9 @@ func (r *streamReader) Next() (llm.StreamEvent, bool, error) {
 			continue
 		}
 		if err != nil {
+			if r.normalize != nil {
+				err = r.normalize(err)
+			}
 			return llm.StreamEvent{}, false, err
 		}
 

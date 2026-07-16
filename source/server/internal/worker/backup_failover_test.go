@@ -2,19 +2,21 @@ package worker
 
 // Backup-profile failover parity (Task A1).
 //
-// The in-process path wraps active+backup in a fallback composite via
-// providers.wrapBackup → fallback.New. buildWorkerProviders must do the same in
-// the worker, sourcing BOTH credentials via the stream credential proxy. These
-// tests prove:
+// The in-process path wraps every cloud primary in the resilience engine via
+// providers.wrapResilience → resilience.New. buildWorkerProviders must do the
+// same in the worker, sourcing BOTH credentials via the stream credential
+// proxy. These tests prove:
 //
 //  1. With a backup profile configured, the worker's resolved cloud provider IS
-//     a *fallback.Provider wrapping active+backup (structural parity with
+//     a *resilience.Provider wrapping active+backup (structural parity with
 //     in-process), and BOTH credentials are fetched via the proxy (keyed by the
 //     active + backup profile names).
-//  2. A primary failure fails over to the backup: a 5xx from the primary yields
-//     the backup's output — behavior parity with in-process.
-//  3. No backup configured → the resolved provider is the bare primary (no
-//     fallback wrapper), matching in-process.
+//  2. A primary failure fails over to the backup: a 5xx from the primary (busy
+//     class: one same-provider retry, then failover) yields the backup's
+//     output — behavior parity with in-process.
+//  3. No backup configured → the provider is still engine-wrapped (busy retry
+//     + narration apply without a backup), but no backup credential is fetched
+//     and the primary serves.
 
 import (
 	"context"
@@ -25,8 +27,8 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/cloudfactory"
+	"cercano/source/server/internal/inference/resilience"
 	"cercano/source/server/internal/llm"
-	"cercano/source/server/internal/llm/fallback"
 	pkgcfg "cercano/source/server/pkg/config"
 )
 
@@ -101,9 +103,9 @@ func TestWorkerBackupFailover_WrapsCompositeAndFailsOver(t *testing.T) {
 		t.Fatal("expected the cloud provider to be selected under cloud_primary")
 	}
 
-	// Structural parity: the resolved provider must be a fallback composite.
-	if _, ok := prov.(*fallback.Provider); !ok {
-		t.Fatalf("resolved provider is %T, want *fallback.Provider (worker did not wrap active+backup)", prov)
+	// Structural parity: the resolved provider must be the resilience engine.
+	if _, ok := prov.(*resilience.Provider); !ok {
+		t.Fatalf("resolved provider is %T, want *resilience.Provider (worker did not wrap active+backup)", prov)
 	}
 
 	// Both credentials must have been fetched via the proxy (active during the
@@ -158,10 +160,23 @@ func TestWorkerBackupFailover_NoBackupIsBareProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Main: %v", err)
 	}
-	if _, ok := prov.(*fallback.Provider); ok {
-		t.Fatal("resolved provider is a *fallback.Provider but no backup was configured (should be bare)")
+	// The engine wraps even without a backup — retry policy and narration are
+	// not conditional on failover being available.
+	if _, ok := prov.(*resilience.Provider); !ok {
+		t.Fatalf("resolved provider is %T, want *resilience.Provider even without a backup", prov)
 	}
 	if creds.sawFetch("backup") {
 		t.Error("backup credential fetched but no backup configured")
+	}
+	// And it serves from the primary.
+	resp, err := prov.Chat(context.Background(), llm.ChatRequest{
+		Model:    "primary-model",
+		Messages: []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "hi"}}}},
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if len(resp.Blocks) == 0 || resp.Blocks[0].Text != "primary" {
+		t.Errorf("resp = %+v, want the primary's content", resp)
 	}
 }

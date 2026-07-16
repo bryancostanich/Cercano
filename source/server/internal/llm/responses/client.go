@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
-	"time"
 
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
@@ -89,8 +89,9 @@ func isTemperatureUnsupported(err error) bool {
 		(strings.Contains(msg, "unsupported") || strings.Contains(msg, "deprecated"))
 }
 
-// NewClient constructs a Client. The HTTP transport retries transient statuses
-// (429/5xx) with backoff, shared with the chat client via internal/llm/httpx.
+// NewClient constructs a Client. There is no transport-level retry: retry
+// policy is owned by the resilience engine above this adapter, where it is
+// bounded, class-driven, and narrated to the user.
 func NewClient(cfg Config) *Client {
 	base := cfg.BaseURL
 	if cfg.Route == RouteChatGPT {
@@ -99,11 +100,7 @@ func NewClient(cfg Config) *Client {
 	if base == "" {
 		base = defaultBaseURL
 	}
-	retry := &httpx.RetryTransport{
-		Next:   &http.Client{},
-		Policy: httpx.RetryPolicy{MaxAttempts: 3, BaseDelay: 500 * time.Millisecond, OnStatus: []int{429, 500, 502, 503}},
-	}
-	return &Client{http: retry, baseURL: base, apiKey: cfg.APIKey, model: cfg.Model, route: cfg.Route, tokens: cfg.TokenSource}
+	return &Client{http: &http.Client{}, baseURL: base, apiKey: cfg.APIKey, model: cfg.Model, route: cfg.Route, tokens: cfg.TokenSource}
 }
 
 func (c *Client) Name() string { return "openai-responses" }
@@ -160,7 +157,16 @@ func (c *Client) do(ctx context.Context, body request) (*http.Response, error) {
 	if err := c.authorize(ctx, httpReq); err != nil {
 		return nil, err
 	}
-	return c.http.Do(httpReq)
+	resp, err := c.http.Do(httpReq)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+		// The request never produced an HTTP response: DNS, connection
+		// refused/reset, TLS.
+		return nil, &llm.Error{Class: llm.ErrNetwork, Provider: c.Name(), Err: err}
+	}
+	return resp, nil
 }
 
 // authorize sets the auth headers on a request. For the ChatGPT route it
@@ -171,7 +177,11 @@ func (c *Client) authorize(ctx context.Context, req *http.Request) error {
 	if c.tokens != nil {
 		access, accountID, err := c.tokens.Token(ctx)
 		if err != nil {
-			return fmt.Errorf("responses: chatgpt auth: %w", err)
+			// A failing token source (logged-out ChatGPT subscription, refresh
+			// rejected) is an auth-class failure: the resilience engine fails
+			// it over rather than retrying a credential that won't heal.
+			return &llm.Error{Class: llm.ErrAuth, Provider: c.Name(),
+				Err: fmt.Errorf("responses: chatgpt auth: %w", err)}
 		}
 		req.Header.Set("Authorization", "Bearer "+access)
 		if accountID != "" {
@@ -185,22 +195,22 @@ func (c *Client) authorize(ctx context.Context, req *http.Request) error {
 	return nil
 }
 
-// errorFromBody turns a non-2xx response into a readable error. Two body
-// shapes exist: api.openai.com wraps errors as {"error":{"message":...}},
-// while the ChatGPT codex backend returns bare {"detail":"..."}. Anything
-// else falls back to the status plus a body snippet — a bare status code is
-// undiagnosable.
-func errorFromBody(status int, body []byte) error {
+// errorFromBody turns a non-2xx response body into a readable error plus the
+// wire error code/type when present. Two body shapes exist: api.openai.com
+// wraps errors as {"error":{"message":...}}, while the ChatGPT codex backend
+// returns bare {"detail":"..."}. Anything else falls back to the status plus
+// a body snippet — a bare status code is undiagnosable.
+func errorFromBody(status int, body []byte) (err error, code, typ string) {
 	var env struct {
 		Error  *apiError `json:"error"`
 		Detail string    `json:"detail"`
 	}
 	if json.Unmarshal(body, &env) == nil {
 		if env.Error != nil && env.Error.Message != "" {
-			return fmt.Errorf("responses: %s", env.Error.Message)
+			return fmt.Errorf("responses: %s", env.Error.Message), env.Error.Code, env.Error.Type
 		}
 		if env.Detail != "" {
-			return fmt.Errorf("responses: %s", env.Detail)
+			return fmt.Errorf("responses: %s", env.Detail), "", ""
 		}
 	}
 	snippet := strings.TrimSpace(string(body))
@@ -208,9 +218,43 @@ func errorFromBody(status int, body []byte) error {
 		snippet = snippet[:200] + "…"
 	}
 	if snippet == "" {
-		return fmt.Errorf("responses: status %d", status)
+		return fmt.Errorf("responses: status %d", status), "", ""
 	}
-	return fmt.Errorf("responses: status %d: %s", status, snippet)
+	return fmt.Errorf("responses: status %d: %s", status, snippet), "", ""
+}
+
+// normalizeHTTP maps a non-2xx response into the provider-agnostic llm.Error
+// taxonomy. Quota detection uses OpenAI's explicit insufficient_quota marker,
+// usage-limit phrasing (the ChatGPT codex backend reports subscription caps in
+// prose), or a quota-scale Retry-After.
+func (c *Client) normalizeHTTP(resp *http.Response, body []byte) error {
+	inner, code, typ := errorFromBody(resp.StatusCode, body)
+	ne := &llm.Error{
+		Provider:   c.Name(),
+		StatusCode: resp.StatusCode,
+		RetryAfter: httpx.RetryAfter(resp.Header),
+		Err:        inner,
+	}
+	msg := strings.ToLower(inner.Error())
+	quotaMarked := code == "insufficient_quota" || typ == "insufficient_quota" ||
+		strings.Contains(msg, "quota") || strings.Contains(msg, "usage limit")
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		ne.Class = llm.ErrAuth
+	case resp.StatusCode == http.StatusTooManyRequests:
+		if quotaMarked || ne.RetryAfter >= httpx.QuotaRetryAfterFloor {
+			ne.Class = llm.ErrQuota
+		} else {
+			ne.Class = llm.ErrBusy
+		}
+	case resp.StatusCode >= 500:
+		ne.Class = llm.ErrBusy
+	case resp.StatusCode >= 400:
+		ne.Class = llm.ErrInvalidRequest
+	default:
+		ne.Class = llm.ErrUnknown
+	}
+	return ne
 }
 
 // Chat sends a non-streaming Responses request and maps output to blocks.
@@ -241,7 +285,7 @@ func (c *Client) chatOnce(ctx context.Context, req llm.ChatRequest) (llm.ChatRes
 			return llm.ChatResponse{}, err
 		}
 		defer rdr.Close()
-		return llm.CollectStream(ctx, rdr, nil)
+		return llm.CollectStream(ctx, rdr, nil, nil)
 	}
 	httpResp, err := c.do(ctx, c.buildRequest(req, false))
 	if err != nil {
@@ -253,7 +297,7 @@ func (c *Client) chatOnce(ctx context.Context, req llm.ChatRequest) (llm.ChatRes
 		return llm.ChatResponse{}, err
 	}
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return llm.ChatResponse{}, errorFromBody(httpResp.StatusCode, body)
+		return llm.ChatResponse{}, c.normalizeHTTP(httpResp, body)
 	}
 	var r response
 	if err := json.Unmarshal(body, &r); err != nil {
@@ -277,7 +321,7 @@ func (c *Client) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.Strea
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		body, _ := io.ReadAll(httpResp.Body)
 		httpResp.Body.Close()
-		return nil, errorFromBody(httpResp.StatusCode, body)
+		return nil, c.normalizeHTTP(httpResp, body)
 	}
 	return newStreamReader(httpResp.Body), nil
 }

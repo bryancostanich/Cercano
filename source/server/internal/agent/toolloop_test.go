@@ -390,7 +390,7 @@ func TestCollectStreamCarriesReasoning(t *testing.T) {
 		{Type: llm.EventMessageStop, InputTokens: 1, OutputTokens: 1},
 	}
 	rd := &scriptedStream{events: events}
-	resp, err := collectStream(context.Background(), rd, nil)
+	resp, err := collectStream(context.Background(), rd, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

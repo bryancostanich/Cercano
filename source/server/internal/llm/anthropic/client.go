@@ -75,7 +75,12 @@ func NewClient(cfg Config) *Client {
 	if apiKey == "" {
 		apiKey = "dummy"
 	}
-	opts := []option.RequestOption{option.WithAPIKey(apiKey)}
+	// Retries are OWNED by the resilience engine above this adapter, where
+	// they are bounded, class-driven, and narrated to the user. The SDK's
+	// built-in retry honors quota-scale Retry-After headers verbatim and
+	// sleeps inside the request — a silent multi-minute hang that no layer
+	// above can observe (the 2026-07-16 quota incident).
+	opts := []option.RequestOption{option.WithAPIKey(apiKey), option.WithMaxRetries(0)}
 	if cfg.BaseURL != "" {
 		opts = append(opts, option.WithBaseURL(cfg.BaseURL))
 	}
@@ -167,7 +172,7 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 		resp, err = c.sdk.Messages.New(ctx, c.buildParams(req))
 	}
 	if err != nil {
-		return ChatResponse{}, err
+		return ChatResponse{}, c.normalize(err)
 	}
 	out := ChatResponse{
 		StopReason:   string(resp.StopReason),
@@ -183,5 +188,5 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 
 func (c *Client) StreamChat(ctx context.Context, req ChatRequest) (llm.StreamReader, error) {
 	st := c.sdk.Messages.NewStreaming(ctx, c.buildParams(req))
-	return &streamReader{stream: st, blockKind: map[int64]string{}}, nil
+	return &streamReader{stream: st, blockKind: map[int64]string{}, normalize: c.normalize}, nil
 }

@@ -7,8 +7,8 @@ import (
 	"cercano/source/server/pkg/proto"
 )
 
-// The fallback composite itself is built by the providers service
-// (internal/hostsvc/providers.wrapBackup) during Rebuild — this file only
+// The resilience engine itself is built by the providers service
+// (internal/hostsvc/providers.wrapResilience) during Rebuild — this file only
 // carries the RPC that names the backup profile. A near-identical
 // wrapBackupLocked used to live here with no callers; it was deleted so the
 // live builder can't silently drift from a dead twin.

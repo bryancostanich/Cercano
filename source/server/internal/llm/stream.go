@@ -13,6 +13,11 @@ const (
 	EventReasoning         StreamEventType = "reasoning"
 	EventMessageStop       StreamEventType = "message_stop"
 	EventError             StreamEventType = "error"
+	// EventNotice is a non-fatal, user-facing status line injected in-band by
+	// the resilience engine ("anthropic quota reached — switching to openai").
+	// It is display-only: consumers surface it to the user and MUST NOT
+	// persist it as message content.
+	EventNotice StreamEventType = "notice"
 )
 
 type StreamEvent struct {
@@ -36,6 +41,10 @@ type StreamEvent struct {
 	OutputTokens int
 
 	ErrText string
+
+	// Set on EventNotice: the user-facing status line. A dedicated field —
+	// not TextDelta — so no consumer can mistake it for assistant content.
+	Notice string
 }
 
 type StreamReader interface {

@@ -22,7 +22,7 @@ import (
 	"cercano/source/server/internal/engine"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/inference"
-	"cercano/source/server/internal/llm/fallback"
+	"cercano/source/server/internal/inference/resilience"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
 	"cercano/source/server/internal/ollamacatalog"
@@ -339,10 +339,11 @@ func (p *service) rebuildCloud() error {
 		p.installAbsentCloud(err.Error())
 		return err
 	}
-	// A configured backup profile wraps the primary in a fallback composite;
-	// everything downstream (native loop, router, coordinator) sees one
-	// provider. A missing/unbuildable backup leaves the primary bare.
-	prov = p.wrapBackup(prov, prof.Name, c)
+	// The resilience engine wraps every cloud primary — with the backup when
+	// one is configured and buildable, without one otherwise (the class-driven
+	// busy retry and narration apply either way). Everything downstream
+	// (native loop, router, coordinator) sees one provider.
+	prov = p.wrapResilience(prov, prof.Name, c)
 	p.SetCloudLLMProvider(prov)
 	mp := agent.InferenceTurnRunner(prov, prof.Model)
 	p.router.SetCloudProvider(mp)
@@ -353,20 +354,36 @@ func (p *service) rebuildCloud() error {
 	return nil
 }
 
-// wrapBackup wraps the freshly built active-profile provider in a fallback
-// composite when a backup profile is configured and buildable.
-// cfg is the config snapshot already held by the caller (avoids a second Get()).
-// A backup that can't be built is reported and skipped — a broken backup must
-// never take down a working primary, so every failure path returns the primary unchanged.
-func (p *service) wrapBackup(primary inference.Provider, primaryName string, c cfg.Config) inference.Provider {
+// wrapResilience wraps the freshly built active-profile provider in the
+// resilience engine — ALWAYS, so the class-driven busy retry and user
+// narration apply even without a backup. A configured, buildable backup
+// profile adds the failover leg. cfg is the config snapshot already held by
+// the caller (avoids a second Get()). A backup that can't be built is
+// reported and skipped — a broken backup must never take down a working
+// primary, so every backup failure path degrades to a backup-less engine.
+func (p *service) wrapResilience(primary inference.Provider, primaryName string, c cfg.Config) inference.Provider {
+	opts := resilience.Options{OnEvent: func(ev resilience.Event) {
+		log.Printf("[cloud] resilience %s (%s, %s): %s: %v", ev.Action, ev.Stage, ev.Class, ev.Notice(), ev.Err)
+	}}
+	if backup, backupModelFor, ok := p.buildBackup(primaryName, c); ok {
+		opts.Backup = backup
+		opts.BackupModelFor = backupModelFor
+	}
+	return resilience.New(primary, opts)
+}
+
+// buildBackup resolves and builds the configured backup profile's provider
+// plus its tier-resolving model rewrite. ok is false when no distinct,
+// authable, buildable backup exists.
+func (p *service) buildBackup(primaryName string, c cfg.Config) (inference.Provider, func(tier string) string, bool) {
 	name := c.BackupCloudProfile
 	if name == "" || name == primaryName {
-		return primary
+		return nil, nil, false
 	}
 	bp, ok := profileByName(c.CloudProfiles, name)
 	if !ok {
-		log.Printf("[cloud] backup profile %q not found; running without fallback", name)
-		return primary
+		log.Printf("[cloud] backup profile %q not found; running without failover", name)
+		return nil, nil, false
 	}
 	st := p.cfgSvc.Secrets()
 	key := ""
@@ -379,8 +396,8 @@ func (p *service) wrapBackup(primary inference.Provider, primaryName string, c c
 	// a proxy BaseURL (Meridian) authenticates with no key, and bedrock uses
 	// the AWS credential chain.
 	if key == "" && bp.BaseURL == "" && bp.Flavor != cloudfactory.FlavorBedrock {
-		log.Printf("[cloud] backup profile %q has no API key; running without fallback", name)
-		return primary
+		log.Printf("[cloud] backup profile %q has no API key; running without failover", name)
+		return nil, nil, false
 	}
 	var opts cloudfactory.Options
 	if bp.Flavor == cloudfactory.FlavorResponses && bp.Route == cloudfactory.RouteChatGPT {
@@ -391,8 +408,8 @@ func (p *service) wrapBackup(primary inference.Provider, primaryName string, c c
 	}
 	backup, err := cloudfactory.BuildCloudProvider(bp, key, opts)
 	if err != nil {
-		log.Printf("[cloud] backup profile %q unbuildable (%v); running without fallback", name, err)
-		return primary
+		log.Printf("[cloud] backup profile %q unbuildable (%v); running without failover", name, err)
+		return nil, nil, false
 	}
 	// Experience-preserving model rewrite: a tiered request re-resolves the
 	// SAME capability tier against the backup vendor's cost table, so e.g.
@@ -407,9 +424,7 @@ func (p *service) wrapBackup(primary inference.Provider, primaryName string, c c
 		}
 		return profiles.ResolveCloudModelForTier(bp, cfg.Tier(tier))
 	}
-	return fallback.New(primary, backup, backupModelFor, func(stage string, ferr error) {
-		log.Printf("[cloud] failover to backup %q (%s): primary error: %v", name, stage, ferr)
-	})
+	return backup, backupModelFor, true
 }
 
 // ReconfigureArgs carries the provider/runtime-facing arguments from an

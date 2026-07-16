@@ -14,8 +14,5 @@ func TestQuirksFor(t *testing.T) {
 		if !q.ImagesAsBase64 || !q.NormalizeErrors {
 			t.Errorf("quirksFor(%q) should be defensive, got %+v", b, q)
 		}
-		if q.Retry.MaxAttempts < 2 || len(q.Retry.OnStatus) == 0 {
-			t.Errorf("quirksFor(%q) should retry, got %+v", b, q.Retry)
-		}
 	}
 }

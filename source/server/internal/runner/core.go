@@ -176,6 +176,21 @@ func (c *Core) RunTurn(
 	result, loopErr := c.runLoop(ctx, req, provider, isCloud,
 		loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore)
 
+	// 6.5. Same-provider turn retry: a busy-class loop error is a transient
+	// server-side failure — often a mid-stream one, where the resilience
+	// engine deliberately cannot re-serve (content already flowed). At the
+	// turn level a full re-run IS safe: the failed iteration's partial output
+	// was never persisted, and the re-run supersedes it — the same contract
+	// the cross-tier fallback below has always relied on. One narrated
+	// attempt on the same provider before any tier change.
+	if loopErr != nil && ctx.Err() == nil && llm.ClassOf(loopErr) == llm.ErrBusy {
+		notice := fmt.Sprintf("⚠ %s server busy — trying once more", provider.Name())
+		fmt.Fprintf(os.Stderr, "[resilience] turn retry: %s (%v)\n", provider.Name(), loopErr)
+		sink.Emit(Event{Kind: EventProgress, Text: notice})
+		result, loopErr = c.runLoop(ctx, req, provider, isCloud,
+			loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore)
+	}
+
 	// 7. Cross-tier fallback: on error, attempt the other tier if locus allows.
 	var fallbackNotice string
 	if loopErr != nil {
@@ -340,6 +355,14 @@ func makeLoopSink(sink EventSink) func(agent.LoopEvent) {
 				break
 			}
 			sink.Emit(Event{Kind: EventProgress, Text: ev.Summary, ToolUseID: ev.ToolUseID, ToolName: ev.ToolName})
+
+		case agent.LoopNotice:
+			// Resilience-engine narration ("anthropic quota reached — switching
+			// to openai"). Logged so backup-served/retried turns are visible in
+			// the server log, and forwarded on the progress channel so the CLI
+			// shows it as the live status line.
+			fmt.Fprintf(os.Stderr, "[resilience] %s\n", ev.Summary)
+			sink.Emit(Event{Kind: EventProgress, Text: "⚠ " + ev.Summary})
 
 		case agent.LoopWatchdogChallenge:
 			sink.Emit(Event{

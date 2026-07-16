@@ -11,7 +11,10 @@ import (
 // CollectStream consumes a StreamReader into a ChatResponse. onText, when
 // non-nil, is called with each text delta as it arrives so callers can stream
 // assistant prose to the client live (callers that only need the final
-// message pass nil and read the fully-buffered result).
+// message pass nil and read the fully-buffered result). onNotice, when
+// non-nil, receives EventNotice status lines (resilience-engine narration —
+// "anthropic quota reached — switching to openai"); notices are display-only
+// and are NEVER accumulated into the response blocks.
 //
 // Text deltas concatenate into BlockText; tool_use_input_delta events
 // concatenate partial JSON into BlockToolUse.ToolInput. A framing guard (see
@@ -23,7 +26,7 @@ import (
 // Lives in the llm package (not the agent tool loop) so provider adapters can
 // reuse it: the ChatGPT-account codex backend requires streaming, so
 // responses.Chat aggregates its stream through here.
-func CollectStream(ctx context.Context, rdr StreamReader, onText func(string)) (ChatResponse, error) {
+func CollectStream(ctx context.Context, rdr StreamReader, onText func(string), onNotice func(string)) (ChatResponse, error) {
 	var (
 		out            ChatResponse
 		currentText    strings.Builder
@@ -158,6 +161,13 @@ func CollectStream(ctx context.Context, rdr StreamReader, onText func(string)) (
 			}
 			if ev.OutputTokens > 0 {
 				out.OutputTokens = ev.OutputTokens
+			}
+		case EventNotice:
+			// Deliberately outside the accepting/framing guard: notices are
+			// injected before message_start (pre-flight failures) and must
+			// reach the user regardless. They never touch out.Blocks.
+			if onNotice != nil {
+				onNotice(ev.Notice)
 			}
 		case EventError:
 			return out, fmt.Errorf("stream error: %s", ev.ErrText)

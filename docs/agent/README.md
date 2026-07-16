@@ -168,6 +168,8 @@ Layered abstraction. The shared `Provider` interface exposes `Chat`, `StreamChat
 
 The internal `Block` type carries text / `tool_use` / `tool_result` / `image` and is the lingua franca. Each adapter translates SDK types ↔ `Block`. Image translation is plumbed at the provider layer ([vision-input.md](vision-input.md)), but the inbound path (CLI image attach) is not yet implemented.
 
+**Cloud resilience.** Every adapter normalizes its wire errors into provider-agnostic classes (`quota`, `busy`, `auth`, `invalid_request`, `network`, `unknown` — `llm.Error`), and a single engine (`internal/inference/resilience`) owns the retry/failover policy: busy gets one narrated same-provider retry, quota/auth/network fail over to the backup profile immediately, invalid requests surface. Actions are narrated to the user in-band ("anthropic quota reached — switching to openai") and logged server-side. SDK-internal and transport-level retries are deliberately disabled — the engine is the only retry layer. See [cloud-failover-audit.md](cloud-failover-audit.md).
+
 ### Tool loop (`internal/agent/toolloop.go`)
 
 Bounded autonomous loop. Per iteration:

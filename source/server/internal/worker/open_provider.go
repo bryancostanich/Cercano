@@ -72,7 +72,7 @@ func (p *streamOpenProvider) Chat(ctx context.Context, req llm.ChatRequest) (llm
 		return llm.ChatResponse{}, err
 	}
 	defer rdr.Close()
-	return llm.CollectStream(ctx, rdr, nil)
+	return llm.CollectStream(ctx, rdr, nil, nil)
 }
 
 // deliver routes an OpenInferenceEvent from the host to the pending reader.

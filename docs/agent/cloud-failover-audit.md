@@ -121,3 +121,59 @@ deferred).
 Out of scope (documented, deliberate): capabilities merging (finding 3);
 failover for the local/open tier (locus owns that); retrying mid-stream after
 content has flowed (correctly off the table in the composite).
+
+### 6. Hidden retry layers below the composite starve it of errors — HIGH
+
+**Trigger incident (2026-07-16):** a credits-exhausted Claude subscription
+answered `429` with a quota-scale `Retry-After`. `anthropic-sdk-go` honors
+that header **verbatim, uncapped** (`requestconfig.go: retryDelay`) and sleeps
+*inside the request*, up to its default two retries — so the turn hung 8–11
+minutes with no output, no error, and therefore no failover: the composite
+only reacts to errors, and the error was being swallowed one layer below it.
+The user killed the turn repeatedly (context-cancel: correctly not a failover
+trigger) and finally flipped profiles by hand. Log fingerprint: turns with a
+`serving on unix:…` line and nothing else; user asking "did you get stuck?".
+
+Two structural problems, beyond the incident itself:
+
+- **Retry policy existed at three layers** — SDK-internal (anthropic, hidden,
+  unbounded), transport (`httpx.RetryTransport` on the OpenAI clients,
+  bounded but invisible), and the composite (failover). Whichever fired first
+  decided the user experience, and only one of the three was designed.
+- **The classifier keyed off HTTP statuses** it dug out of vendor SDK error
+  types, so it could not tell a quota-dead 429 (retry pointless) from a
+  transient rate-limit 429 (retry sensible).
+
+## Design: one resilience engine, normalized error classes, narrated actions
+
+**Status: implemented (2026-07-16, feat/llm-resilience).**
+
+- Every cloud adapter normalizes its wire errors into `llm.Error` with a
+  provider-agnostic class: `quota`, `busy`, `auth`, `invalid_request`,
+  `network`, `unknown`. Wire knowledge stays in the adapter (per finding 5):
+  anthropic maps quota off a ≥30s `Retry-After` or the credit-balance 400;
+  openai/responses map `insufficient_quota` / usage-limit phrasing; the
+  vendor error stays reachable via `Unwrap`.
+- `internal/inference/resilience` replaces `internal/llm/fallback` and owns
+  the ENTIRE retry/failover policy: `busy` → one narrated same-provider retry
+  (Retry-After capped at 2s, default 500ms), then failover; `quota`/`auth`/
+  `network`/`unknown` → immediate failover; `invalid_request` → surface;
+  context-cancel → surface. The engine wraps every cloud primary **even with
+  no backup configured** (retry + narration still apply).
+- All lower retry layers are gone: `option.WithMaxRetries(0)` on the
+  anthropic SDK client; `httpx.RetryTransport` deleted from both OpenAI-side
+  clients.
+- Every engine decision is narrated: in-band `llm.EventNotice` on streams
+  ("anthropic quota reached — switching to openai", "openai server busy —
+  trying once more", "openai still busy — switching to anthropic"), forwarded
+  by the tool loop to the client's progress channel and excluded from
+  persisted history; the `OnEvent` hook logs the same decision server-side,
+  including on non-streaming (background) calls.
+- Regression pin: `internal/inference/resilience/quota_incident_test.go`
+  replays the incident wire shape through the real anthropic adapter and
+  asserts immediate narrated failover, exactly one primary request, and a
+  wall-clock bound.
+
+Still deliberately out of scope: capabilities merging (finding 3); a
+circuit breaker that remembers a quota-dead primary across calls (today every
+call knocks on the primary once and fails over in one round-trip).

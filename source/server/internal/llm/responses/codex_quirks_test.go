@@ -80,7 +80,8 @@ func TestErrorFromBody_Shapes(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := errorFromBody(400, []byte(tc.body)).Error(); got != tc.want {
+			inner, _, _ := errorFromBody(400, []byte(tc.body))
+			if got := inner.Error(); got != tc.want {
 				t.Errorf("errorFromBody = %q, want %q", got, tc.want)
 			}
 		})

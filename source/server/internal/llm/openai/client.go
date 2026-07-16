@@ -9,7 +9,6 @@ import (
 
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
-	"cercano/source/server/internal/llm/httpx"
 )
 
 // Config holds the OpenAI client configuration.
@@ -29,16 +28,15 @@ type Client struct {
 
 // NewClient constructs a Client from cfg. The HTTP transport is wrapped in a
 // normalizingDoer so per-backend response quirks (array-shaped error bodies) are
-// repaired before go-openai parses them. Transient retries are handled by the
-// httpx.RetryTransport that the normalizer wraps.
+// repaired before go-openai parses them. There is no transport-level retry:
+// retry policy is owned by the resilience engine above this adapter.
 func NewClient(cfg Config) *Client {
 	c := goopenai.DefaultConfig(cfg.APIKey)
 	if cfg.BaseURL != "" {
 		c.BaseURL = cfg.BaseURL
 	}
 	q := quirksFor(cfg.Backend)
-	retry := &httpx.RetryTransport{Next: &http.Client{}, Policy: q.Retry}
-	c.HTTPClient = &normalizingDoer{next: retry, quirks: q}
+	c.HTTPClient = &normalizingDoer{next: &http.Client{}, quirks: q}
 	return &Client{api: goopenai.NewClientWithConfig(c), model: cfg.Model, quirks: q}
 }
 
@@ -121,7 +119,7 @@ func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatRespons
 	}
 	resp, err := c.api.CreateChatCompletion(ctx, c.buildRequest(req, false))
 	if err != nil {
-		return llm.ChatResponse{}, err
+		return llm.ChatResponse{}, c.normalize(err)
 	}
 	out := llm.ChatResponse{
 		InputTokens:  resp.Usage.PromptTokens,
@@ -147,7 +145,9 @@ func (c *Client) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.Strea
 	}
 	stream, err := c.api.CreateChatCompletionStream(ctx, c.buildRequest(req, true))
 	if err != nil {
-		return nil, err
+		return nil, c.normalize(err)
 	}
-	return newStreamReader(stream), nil
+	r := newStreamReader(stream)
+	r.normalize = c.normalize
+	return r, nil
 }

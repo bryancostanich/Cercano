@@ -32,7 +32,7 @@ func TestCollectStream_ForwardsTextDeltas(t *testing.T) {
 		{Type: llm.EventMessageStop, OutputTokens: 2},
 	}}
 	var got []string
-	if _, err := collectStream(context.Background(), rdr, func(s string) { got = append(got, s) }); err != nil {
+	if _, err := collectStream(context.Background(), rdr, func(s string) { got = append(got, s) }, nil); err != nil {
 		t.Fatalf("collectStream: %v", err)
 	}
 	if len(got) != 2 || got[0] != "Hel" || got[1] != "lo" {
@@ -46,7 +46,7 @@ func TestCollectStream_CapturesUsage(t *testing.T) {
 		{Type: llm.EventTextDelta, TextDelta: "hi"},
 		{Type: llm.EventMessageStop, StopReason: "end_turn", OutputTokens: 56},
 	}}
-	resp, err := collectStream(context.Background(), rdr, nil)
+	resp, err := collectStream(context.Background(), rdr, nil, nil)
 	if err != nil {
 		t.Fatalf("collectStream: %v", err)
 	}
@@ -63,9 +63,9 @@ func TestCollectStream_TrailingStopDoesNotClobberUsage(t *testing.T) {
 		{Type: llm.EventMessageStart, InputTokens: 1234},
 		{Type: llm.EventTextDelta, TextDelta: "hi"},
 		{Type: llm.EventMessageStop, StopReason: "end_turn", OutputTokens: 56}, // from message_delta
-		{Type: llm.EventMessageStop},                                            // trailing message_stop, zero usage
+		{Type: llm.EventMessageStop},                                           // trailing message_stop, zero usage
 	}}
-	resp, err := collectStream(context.Background(), rdr, nil)
+	resp, err := collectStream(context.Background(), rdr, nil, nil)
 	if err != nil {
 		t.Fatalf("collectStream: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestCollectStream_SeedsWholeInputFromStartEvent(t *testing.T) {
 		{Type: llm.EventToolUseStop},
 		{Type: llm.EventMessageStop},
 	}}
-	resp, err := collectStream(context.Background(), rdr, nil)
+	resp, err := collectStream(context.Background(), rdr, nil, nil)
 	if err != nil {
 		t.Fatalf("collectStream: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestCollectStream_WrapsInvalidToolInput(t *testing.T) {
 		{Type: llm.EventToolUseStop},
 		{Type: llm.EventMessageStop},
 	}}
-	resp, err := collectStream(context.Background(), rdr, nil)
+	resp, err := collectStream(context.Background(), rdr, nil, nil)
 	if err != nil {
 		t.Fatalf("collectStream: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestCollectStream_TruncatedInputWrapped(t *testing.T) {
 		{Type: llm.EventToolUseStop},
 		{Type: llm.EventMessageStop},
 	}}
-	resp, err := collectStream(context.Background(), rdr, nil)
+	resp, err := collectStream(context.Background(), rdr, nil, nil)
 	if err != nil {
 		t.Fatalf("collectStream: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestCollectStream_ValidDeltasUntouched(t *testing.T) {
 		{Type: llm.EventToolUseStop},
 		{Type: llm.EventMessageStop},
 	}}
-	resp, err := collectStream(context.Background(), rdr, nil)
+	resp, err := collectStream(context.Background(), rdr, nil, nil)
 	if err != nil {
 		t.Fatalf("collectStream: %v", err)
 	}

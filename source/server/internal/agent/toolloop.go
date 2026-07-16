@@ -16,11 +16,15 @@ import (
 type LoopEventKind string
 
 const (
-	LoopToolUseStart       LoopEventKind = "tool_use_start"
-	LoopToolUseStop        LoopEventKind = "tool_use_stop"
-	LoopToolExecStart      LoopEventKind = "tool_exec_start"
-	LoopToolExecComplete   LoopEventKind = "tool_exec_complete"
-	LoopProgress           LoopEventKind = "progress"
+	LoopToolUseStart     LoopEventKind = "tool_use_start"
+	LoopToolUseStop      LoopEventKind = "tool_use_stop"
+	LoopToolExecStart    LoopEventKind = "tool_exec_start"
+	LoopToolExecComplete LoopEventKind = "tool_exec_complete"
+	LoopProgress         LoopEventKind = "progress"
+	// LoopNotice carries a resilience-engine narration line ("anthropic quota
+	// reached — switching to openai") in Summary. Display-only: it reaches the
+	// user via the progress channel and is never part of the transcript.
+	LoopNotice             LoopEventKind = "notice"
 	LoopPermissionRequired LoopEventKind = "permission_required"
 	LoopWatchdogChallenge  LoopEventKind = "watchdog_challenge"
 	LoopWatchdogEscalate   LoopEventKind = "watchdog_escalate"
@@ -262,7 +266,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		if err != nil {
 			return ToolLoopResult{}, err
 		}
-		resp, err := collectStream(ctx, rdr, in.OnTextDelta)
+		resp, err := collectStream(ctx, rdr, in.OnTextDelta, noticeSink(in))
 		rdr.Close()
 		if err != nil {
 			return ToolLoopResult{}, err
@@ -552,7 +556,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	if err != nil {
 		return ToolLoopResult{Iterations: maxIters, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, err
 	}
-	resp, err := collectStream(ctx, rdr, in.OnTextDelta)
+	resp, err := collectStream(ctx, rdr, in.OnTextDelta, noticeSink(in))
 	rdr.Close()
 	if err != nil {
 		return ToolLoopResult{Iterations: maxIters, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, err
@@ -610,6 +614,18 @@ func truncateForError(s string) string {
 // ChatResponse aggregation (moved to the llm package so provider adapters
 // can reuse it — the codex backend requires streaming). Thin wrapper so the
 // loop call sites stay unchanged.
-func collectStream(ctx context.Context, rdr llm.StreamReader, onText func(string)) (llm.ChatResponse, error) {
-	return llm.CollectStream(ctx, rdr, onText)
+func collectStream(ctx context.Context, rdr llm.StreamReader, onText func(string), onNotice func(string)) (llm.ChatResponse, error) {
+	return llm.CollectStream(ctx, rdr, onText, onNotice)
+}
+
+// noticeSink adapts the loop's event sink into the CollectStream notice
+// callback, forwarding resilience-engine narration ("openai server busy —
+// trying once more") to the client as a display-only loop event.
+func noticeSink(in ToolLoopInput) func(string) {
+	if in.EventSink == nil {
+		return nil
+	}
+	return func(text string) {
+		in.EventSink(LoopEvent{Kind: LoopNotice, Summary: text})
+	}
 }

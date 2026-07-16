@@ -3,6 +3,7 @@ package responses
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 
@@ -19,6 +20,11 @@ type streamReader struct {
 	br      *bufio.Reader
 	pending []llm.StreamEvent
 	done    bool
+	// failure is a classified in-band error frame ("response.failed" /
+	// "error"), returned from Next after pending events drain — as a normalized
+	// error, not an EventError, so both the resilience engine (pre-content) and
+	// the turn runner (mid-stream) can apply class-driven policy to it.
+	failure error
 }
 
 func newStreamReader(rc io.ReadCloser) *streamReader {
@@ -49,6 +55,9 @@ type streamItem struct {
 
 func (s *streamReader) Next() (llm.StreamEvent, bool, error) {
 	for len(s.pending) == 0 {
+		if s.failure != nil {
+			return llm.StreamEvent{}, false, s.failure
+		}
 		if s.done {
 			return llm.StreamEvent{}, false, nil
 		}
@@ -138,8 +147,44 @@ func (s *streamReader) dispatch(data string) {
 		}
 		s.pending = append(s.pending, ev)
 	case "response.failed", "response.error", "error":
-		s.pending = append(s.pending, llm.StreamEvent{Type: llm.EventError, ErrText: streamErrorMessage(env, data)})
+		s.failure = classifyStreamError(env, data)
 	}
+}
+
+// classifyStreamError normalizes an in-band error frame into the llm.Error
+// taxonomy. The request was already ACCEPTED (2xx, stream open) when one of
+// these arrives, so a frame without an explicit marker is a server-side
+// processing failure — busy, worth a retry — not an invalid request. The
+// codex backend's generic "An error occurred while processing your request.
+// You can retry your request…" lands here.
+func classifyStreamError(env streamEnvelope, raw string) error {
+	msg := streamErrorMessage(env, raw)
+	code, typ := env.Code, ""
+	if env.Error != nil {
+		if code == "" {
+			code = env.Error.Code
+		}
+		typ = env.Error.Type
+	}
+	if env.Response != nil && env.Response.Error != nil {
+		if code == "" {
+			code = env.Response.Error.Code
+		}
+		if typ == "" {
+			typ = env.Response.Error.Type
+		}
+	}
+	class := llm.ErrBusy
+	lower := strings.ToLower(msg)
+	switch {
+	case code == "insufficient_quota" || typ == "insufficient_quota" ||
+		strings.Contains(lower, "quota") || strings.Contains(lower, "usage limit"):
+		class = llm.ErrQuota
+	case strings.Contains(code, "invalid") || strings.Contains(typ, "invalid_request"):
+		class = llm.ErrInvalidRequest
+	}
+	return &llm.Error{Class: class, Provider: "openai-responses",
+		Err: fmt.Errorf("stream error: %s", msg)}
 }
 
 // streamErrorMessage extracts the most specific error text from an error-ish

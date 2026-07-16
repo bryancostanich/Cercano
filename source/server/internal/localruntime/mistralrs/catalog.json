@@ -120,26 +120,26 @@
     "24": {
       "most_capable": "qwen3-14b",
       "everyday": "qwen3-14b",
-      "fast_light": "qwen3-1.7b",
-      "fast_light_text": "qwen3-1.7b"
+      "fast_light": "qwen3-14b",
+      "fast_light_text": "qwen3-14b"
     },
     "48": {
       "most_capable": "qwen3-30b-a3b-instruct-2507",
       "everyday": "qwen3-30b-a3b-instruct-2507",
-      "fast_light": "qwen3-1.7b",
-      "fast_light_text": "qwen3-1.7b"
+      "fast_light": "qwen3-30b-a3b-instruct-2507",
+      "fast_light_text": "qwen3-30b-a3b-instruct-2507"
     },
     "96": {
       "most_capable": "qwen3-30b-a3b-thinking-2507",
       "everyday": "qwen3-30b-a3b-instruct-2507",
-      "fast_light": "qwen3-1.7b",
-      "fast_light_text": "qwen3-1.7b"
+      "fast_light": "qwen3-30b-a3b-instruct-2507",
+      "fast_light_text": "qwen3-30b-a3b-instruct-2507"
     },
     "128": {
       "most_capable": "qwen3-32b",
       "everyday": "qwen3-30b-a3b-instruct-2507",
-      "fast_light": "qwen3-1.7b",
-      "fast_light_text": "qwen3-1.7b"
+      "fast_light": "qwen3-30b-a3b-instruct-2507",
+      "fast_light_text": "qwen3-30b-a3b-instruct-2507"
     }
   }
 }

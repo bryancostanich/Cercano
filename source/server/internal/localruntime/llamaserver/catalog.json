@@ -80,29 +80,29 @@
     "24": {
       "most_capable": "qwen3-14b-q4_k_m",
       "everyday": "qwen3-14b-q4_k_m",
-      "fast_light": "phi-4-mini-instruct-q4_k_m",
-      "fast_light_text": "phi-4-mini-instruct-q4_k_m",
+      "fast_light": "qwen3-14b-q4_k_m",
+      "fast_light_text": "qwen3-14b-q4_k_m",
       "embedding": "nomic-embed-text-v1.5-f16"
     },
     "48": {
       "most_capable": "qwen3-30b-a3b-instruct-2507-q4_k_m",
       "everyday": "qwen3-30b-a3b-instruct-2507-q4_k_m",
-      "fast_light": "phi-4-mini-instruct-q4_k_m",
-      "fast_light_text": "phi-4-mini-instruct-q4_k_m",
+      "fast_light": "qwen3-30b-a3b-instruct-2507-q4_k_m",
+      "fast_light_text": "qwen3-30b-a3b-instruct-2507-q4_k_m",
       "embedding": "nomic-embed-text-v1.5-f16"
     },
     "96": {
       "most_capable": "qwen3-30b-a3b-thinking-2507-q4_k_m",
       "everyday": "qwen3-30b-a3b-instruct-2507-q4_k_m",
-      "fast_light": "phi-4-mini-instruct-q4_k_m",
-      "fast_light_text": "phi-4-mini-instruct-q4_k_m",
+      "fast_light": "qwen3-30b-a3b-instruct-2507-q4_k_m",
+      "fast_light_text": "qwen3-30b-a3b-instruct-2507-q4_k_m",
       "embedding": "nomic-embed-text-v1.5-f16"
     },
     "128": {
       "most_capable": "glm-4.5-air-q4_k_m",
       "everyday": "qwen3-30b-a3b-instruct-2507-q4_k_m",
-      "fast_light": "phi-4-mini-instruct-q4_k_m",
-      "fast_light_text": "phi-4-mini-instruct-q4_k_m",
+      "fast_light": "qwen3-30b-a3b-instruct-2507-q4_k_m",
+      "fast_light_text": "qwen3-30b-a3b-instruct-2507-q4_k_m",
       "embedding": "nomic-embed-text-v1.5-f16"
     }
   }

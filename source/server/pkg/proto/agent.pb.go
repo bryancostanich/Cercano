@@ -929,6 +929,11 @@ type UpdateConfigRequest struct {
 	// Compaction master switch. When "true", the summarization pass runs on
 	// eligible conversations. "" leaves unchanged.
 	CompactionEnabled string `protobuf:"bytes,16,opt,name=compaction_enabled,json=compactionEnabled,proto3" json:"compaction_enabled,omitempty"`
+	// Tool-elision-only mode. When "true" (and compaction is enabled), passes
+	// run on the normal triggers but never call the summarizer — they advance
+	// the conversation's in-memory elision floor instead (recurring automatic
+	// /elide-context). "" leaves unchanged.
+	ToolElisionOnly string `protobuf:"bytes,27,opt,name=tool_elision_only,json=toolElisionOnly,proto3" json:"tool_elision_only,omitempty"`
 	// Watchdog (Development Tools). Sparse-patch convention: "" = unchanged.
 	WatchdogMode          string `protobuf:"bytes,17,opt,name=watchdog_mode,json=watchdogMode,proto3" json:"watchdog_mode,omitempty"`                              // "challenge-and-justify"|"strict"
 	WatchdogChecks        string `protobuf:"bytes,18,opt,name=watchdog_checks,json=watchdogChecks,proto3" json:"watchdog_checks,omitempty"`                        // "-" = empty; else comma-joined
@@ -1095,6 +1100,13 @@ func (x *UpdateConfigRequest) GetKeepForever() string {
 func (x *UpdateConfigRequest) GetCompactionEnabled() string {
 	if x != nil {
 		return x.CompactionEnabled
+	}
+	return ""
+}
+
+func (x *UpdateConfigRequest) GetToolElisionOnly() string {
+	if x != nil {
+		return x.ToolElisionOnly
 	}
 	return ""
 }
@@ -5969,6 +5981,8 @@ type GetConfigResponse struct {
 	KeepForever            bool  `protobuf:"varint,18,opt,name=keep_forever,json=keepForever,proto3" json:"keep_forever,omitempty"`
 	// Compaction master switch state.
 	CompactionEnabled bool `protobuf:"varint,19,opt,name=compaction_enabled,json=compactionEnabled,proto3" json:"compaction_enabled,omitempty"`
+	// Tool-elision-only mode state (compaction passes elide instead of summarize).
+	ToolElisionOnly bool `protobuf:"varint,29,opt,name=tool_elision_only,json=toolElisionOnly,proto3" json:"tool_elision_only,omitempty"`
 	// Watchdog (Development Tools) — current values.
 	WatchdogMode          string `protobuf:"bytes,20,opt,name=watchdog_mode,json=watchdogMode,proto3" json:"watchdog_mode,omitempty"`
 	WatchdogChecks        string `protobuf:"bytes,21,opt,name=watchdog_checks,json=watchdogChecks,proto3" json:"watchdog_checks,omitempty"`                        // comma-joined
@@ -6146,6 +6160,13 @@ func (x *GetConfigResponse) GetKeepForever() bool {
 func (x *GetConfigResponse) GetCompactionEnabled() bool {
 	if x != nil {
 		return x.CompactionEnabled
+	}
+	return false
+}
+
+func (x *GetConfigResponse) GetToolElisionOnly() bool {
+	if x != nil {
+		return x.ToolElisionOnly
 	}
 	return false
 }
@@ -12163,7 +12184,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x05index\x18\x01 \x01(\x05R\x05index\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\x12\x1d\n" +
 	"\n" +
-	"media_type\x18\x03 \x01(\tR\tmediaType\"\xe2\b\n" +
+	"media_type\x18\x03 \x01(\tR\tmediaType\"\x8e\t\n" +
 	"\x13UpdateConfigRequest\x12\x1d\n" +
 	"\n" +
 	"open_model\x18\x01 \x01(\tR\topenModel\x12%\n" +
@@ -12185,7 +12206,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x12raw_retention_days\x18\r \x01(\tR\x10rawRetentionDays\x128\n" +
 	"\x18compacted_retention_days\x18\x0e \x01(\tR\x16compactedRetentionDays\x12!\n" +
 	"\fkeep_forever\x18\x0f \x01(\tR\vkeepForever\x12-\n" +
-	"\x12compaction_enabled\x18\x10 \x01(\tR\x11compactionEnabled\x12#\n" +
+	"\x12compaction_enabled\x18\x10 \x01(\tR\x11compactionEnabled\x12*\n" +
+	"\x11tool_elision_only\x18\x1b \x01(\tR\x0ftoolElisionOnly\x12#\n" +
 	"\rwatchdog_mode\x18\x11 \x01(\tR\fwatchdogMode\x12'\n" +
 	"\x0fwatchdog_checks\x18\x12 \x01(\tR\x0ewatchdogChecks\x126\n" +
 	"\x17watchdog_escalate_after\x18\x13 \x01(\tR\x15watchdogEscalateAfter\x12,\n" +
@@ -12566,7 +12588,7 @@ const file_agent_proto_rawDesc = "" +
 	"resultJson\x12\x19\n" +
 	"\bis_error\x18\x02 \x01(\bR\aisError\x12\x14\n" +
 	"\x05error\x18\x03 \x01(\tR\x05error\"\x12\n" +
-	"\x10GetConfigRequest\"\x89\n" +
+	"\x10GetConfigRequest\"\xb5\n" +
 	"\n" +
 	"\x11GetConfigResponse\x12\x1d\n" +
 	"\n" +
@@ -12593,7 +12615,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x12raw_retention_days\x18\x10 \x01(\x05R\x10rawRetentionDays\x128\n" +
 	"\x18compacted_retention_days\x18\x11 \x01(\x05R\x16compactedRetentionDays\x12!\n" +
 	"\fkeep_forever\x18\x12 \x01(\bR\vkeepForever\x12-\n" +
-	"\x12compaction_enabled\x18\x13 \x01(\bR\x11compactionEnabled\x12#\n" +
+	"\x12compaction_enabled\x18\x13 \x01(\bR\x11compactionEnabled\x12*\n" +
+	"\x11tool_elision_only\x18\x1d \x01(\bR\x0ftoolElisionOnly\x12#\n" +
 	"\rwatchdog_mode\x18\x14 \x01(\tR\fwatchdogMode\x12'\n" +
 	"\x0fwatchdog_checks\x18\x15 \x01(\tR\x0ewatchdogChecks\x126\n" +
 	"\x17watchdog_escalate_after\x18\x16 \x01(\tR\x15watchdogEscalateAfter\x12I\n" +

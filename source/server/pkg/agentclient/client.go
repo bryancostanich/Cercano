@@ -232,6 +232,9 @@ type Config struct {
 	KeepForever            bool
 	// CompactionEnabled is the master switch for the summarization pass.
 	CompactionEnabled bool
+	// ToolElisionOnly makes compaction passes advance the elision floor
+	// instead of calling the summarizer (LLM-free).
+	ToolElisionOnly bool
 	// ToolLoopMaxIterations caps LLM round-trips per turn; -1 means unlimited.
 	ToolLoopMaxIterations int
 	// ModelTiers is the taxonomy's non-empty slots keyed "<tier>.<provider>";
@@ -273,6 +276,7 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 		CompactedRetentionDays:    int(resp.GetCompactedRetentionDays()),
 		KeepForever:               resp.GetKeepForever(),
 		CompactionEnabled:         resp.GetCompactionEnabled(),
+		ToolElisionOnly:           resp.GetToolElisionOnly(),
 		ToolLoopMaxIterations:     int(resp.GetToolLoopMaxIterations()),
 		ModelTiers:                resp.GetModelTiers(),
 		ModelsDefaultProvider:     resp.GetModelsDefaultProvider(),
@@ -315,6 +319,8 @@ type ConfigUpdate struct {
 	KeepForever            string
 	// CompactionEnabled — sparse-patch bool. "" | "true" | "false".
 	CompactionEnabled string
+	// ToolElisionOnly — sparse-patch bool. "" | "true" | "false".
+	ToolElisionOnly string
 	// ToolLoopMaxIterations — sparse-patch int. "" = unchanged, -1 = unlimited.
 	ToolLoopMaxIterations string
 	// Model taxonomy sparse-patch: ModelTierKey is "default_provider" or
@@ -1370,6 +1376,7 @@ func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, erro
 		CompactedRetentionDays:    u.CompactedRetentionDays,
 		KeepForever:               u.KeepForever,
 		CompactionEnabled:         u.CompactionEnabled,
+		ToolElisionOnly:           u.ToolElisionOnly,
 		ToolLoopMaxIterations:     u.ToolLoopMaxIterations,
 		ModelTierKey:              u.ModelTierKey,
 		ModelTierValue:            u.ModelTierValue,

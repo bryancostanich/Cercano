@@ -86,6 +86,40 @@ func TestStubToolResultsThrough_SkipsAlreadyStubbed(t *testing.T) {
 	}
 }
 
+func TestElisionFloor(t *testing.T) {
+	mk := func(ats ...int64) []conversation.Turn {
+		var ts []conversation.Turn
+		for i, at := range ats {
+			ts = append(ts, conversation.Turn{ID: string(rune('a' + i)), CreatedAt: time.Unix(at, 0)})
+		}
+		return ts
+	}
+
+	// Normal case: floor = the newest turn outside the verbatim window.
+	floor, ok := ElisionFloor(mk(100, 101, 102, 103, 104), 2)
+	if !ok || floor != 102 {
+		t.Fatalf("floor = %d ok=%v, want 102 true", floor, ok)
+	}
+
+	// Same-second straddle: the turn before the verbatim window shares its
+	// second with the first verbatim turn — walk back so no verbatim-window
+	// turn is ever at/below the floor.
+	floor, ok = ElisionFloor(mk(100, 101, 200, 200, 201), 2)
+	if !ok || floor != 101 {
+		t.Fatalf("straddle floor = %d ok=%v, want 101 true", floor, ok)
+	}
+
+	// Everything inside the verbatim window → no floor.
+	if _, ok := ElisionFloor(mk(100, 101), 6); ok {
+		t.Fatal("short conversation must yield no floor")
+	}
+
+	// All turns share one second → no floor (nothing safely elidable).
+	if _, ok := ElisionFloor(mk(100, 100, 100), 1); ok {
+		t.Fatal("single-second burst must yield no floor")
+	}
+}
+
 func TestStubToolResultsThrough_ZeroFloorIsNoOp(t *testing.T) {
 	turns := []conversation.Turn{
 		turnWithBlocks(t, "t0", 100, []llm.Block{

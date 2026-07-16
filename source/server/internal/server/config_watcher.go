@@ -156,6 +156,13 @@ func (s *Server) reloadConfigFromDisk(ctx context.Context) {
 			req.CompactionEnabled = "false"
 		}
 	}
+	if newCfg.Compaction.ToolElisionOnly != snap.Compaction.ToolElisionOnly {
+		if newCfg.Compaction.ToolElisionOnly {
+			req.ToolElisionOnly = "true"
+		} else {
+			req.ToolElisionOnly = "false"
+		}
+	}
 
 	// Warn on fields that UpdateConfig doesn't hot-reload. The agent keeps
 	// running on the old in-memory values until a restart.

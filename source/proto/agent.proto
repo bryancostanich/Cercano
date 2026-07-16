@@ -330,6 +330,11 @@ message UpdateConfigRequest {
   // Compaction master switch. When "true", the summarization pass runs on
   // eligible conversations. "" leaves unchanged.
   string compaction_enabled       = 16;
+  // Tool-elision-only mode. When "true" (and compaction is enabled), passes
+  // run on the normal triggers but never call the summarizer — they advance
+  // the conversation's in-memory elision floor instead (recurring automatic
+  // /elide-context). "" leaves unchanged.
+  string tool_elision_only        = 27;
   // Watchdog (Development Tools). Sparse-patch convention: "" = unchanged.
   string watchdog_mode = 17;            // "challenge-and-justify"|"strict"
   string watchdog_checks = 18;          // "-" = empty; else comma-joined
@@ -855,6 +860,8 @@ message GetConfigResponse {
   bool  keep_forever             = 18;
   // Compaction master switch state.
   bool  compaction_enabled       = 19;
+  // Tool-elision-only mode state (compaction passes elide instead of summarize).
+  bool  tool_elision_only        = 29;
   // Watchdog (Development Tools) — current values.
   string watchdog_mode = 20;
   string watchdog_checks = 21;          // comma-joined

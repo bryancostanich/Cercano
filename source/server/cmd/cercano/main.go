@@ -298,6 +298,10 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		// scheduler unconditionally lets /config compaction-enabled true flip
 		// the switch at runtime; the OLD gate required a restart.
 		compGen.SetEnabled(cfg.Compaction.Enabled)
+		// Tool-elision-only mode: passes keep their triggers but advance the
+		// elision floor instead of summarizing. The pass implementation is
+		// wired by the persistence service (SetCompactionGenerator).
+		compGen.SetToolElisionOnly(cfg.Compaction.ToolElisionOnly)
 		agentOpts = append(agentOpts, agent.WithCompactionScheduler(compGen))
 	}
 	var sweeper *retention.Sweeper

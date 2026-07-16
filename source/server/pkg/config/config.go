@@ -298,6 +298,14 @@ type CompactionConfig struct {
 	VerbatimRecent        int             `yaml:"verbatim_recent"`
 	HardOverridePct       float64         `yaml:"hard_override_pct"`
 	Retention             RetentionConfig `yaml:"retention"`
+	// ToolElisionOnly, when true (and Enabled is true), keeps the compaction
+	// machinery running on its normal triggers — background schedule, debounce,
+	// activation floor, hard-override — but a pass never calls the summarizer.
+	// Instead it advances the conversation's in-memory elision floor: tool
+	// result bodies older than the verbatim-recent window are stubbed at
+	// context-assembly time (the recurring, automatic form of /elide-context).
+	// LLM-free by construction, so it works even when no local model loads.
+	ToolElisionOnly bool `yaml:"tool_elision_only"`
 	// ElideToolResults, when true, runs the mechanical superseded-tool-result
 	// dedup over every assembled history — independent of Enabled. Lossless and
 	// LLM-free, so it's safe to run even while the summarizer is disabled.

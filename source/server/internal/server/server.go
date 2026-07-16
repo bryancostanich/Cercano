@@ -1044,6 +1044,24 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		fmt.Printf("UpdateConfig: compaction_enabled set to %s\n", v)
 	}
 
+	if req.ToolElisionOnly != "" {
+		v := strings.ToLower(strings.TrimSpace(req.ToolElisionOnly))
+		if v != "true" && v != "false" {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid tool_elision_only %q: expected \"true\" or \"false\"", req.ToolElisionOnly),
+			}, nil
+		}
+		on := v == "true"
+		c.Compaction.ToolElisionOnly = on
+		// Hot-swap the pass mode on the running generator; nil-guarded like
+		// SetCompactionEnabled.
+		s.persistSvc.SetToolElisionOnly(on)
+		changes = append(changes, fmt.Sprintf("tool_elision_only=%s", v))
+		s.broadcastConfigChanged("tool_elision_only", v)
+		fmt.Printf("UpdateConfig: tool_elision_only set to %s\n", v)
+	}
+
 	retentionChanged := false
 	if req.RawRetentionDays != "" {
 		n, err := strconv.Atoi(strings.TrimSpace(req.RawRetentionDays))
@@ -1536,6 +1554,7 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 		CompactedRetentionDays:    int32(cfg.Compaction.Retention.CompactedRetentionDays),
 		KeepForever:               cfg.Compaction.Retention.KeepForever,
 		CompactionEnabled:         cfg.Compaction.Enabled,
+		ToolElisionOnly:           cfg.Compaction.ToolElisionOnly,
 		ToolLoopMaxIterations:     int32(cfg.ToolLoop.MaxIterations),
 		ModelTiers:                cfg.Models.TierSlots(),
 		ModelsDefaultProvider:     string(cfg.Models.DefaultProvider),

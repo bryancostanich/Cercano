@@ -199,6 +199,7 @@ func (sp *settingsPage) devToolsSection() form.Section {
 			}},
 			{Title: "Context Management", Fields: []form.Field{
 				form.NewToggle("compaction-enabled", "compaction-enabled", sp.cfg.CompactionEnabled),
+				form.NewToggle("tool-elision-only", "tool-elision-only", sp.cfg.ToolElisionOnly),
 				form.NewToggle("elide-tool-results", "elide-tool-results", sp.cfg.ElideToolResults),
 				form.NewToggle("lossy-tool-elision", "lossy-tool-elision", sp.cfg.LossyToolElision),
 			}},

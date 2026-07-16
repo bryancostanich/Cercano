@@ -16,7 +16,7 @@ import (
 func RegisterConfig(r *Registry, c *agentclient.Client) {
 	r.Register(Command{
 		Name: "config",
-		Help: "View or update runtime config. Usage: /config [key value]. Keys: local-runtime, local-model, cloud-provider, cloud-model, cloud-api-key, cloud-base-url, ollama-url, compaction-enabled, elide-tool-results, lossy-tool-elision, raw-retention-days, compacted-retention-days, keep-forever.",
+		Help: "View or update runtime config. Usage: /config [key value]. Keys: local-runtime, local-model, cloud-provider, cloud-model, cloud-api-key, cloud-base-url, ollama-url, compaction-enabled, tool-elision-only, elide-tool-results, lossy-tool-elision, raw-retention-days, compacted-retention-days, keep-forever.",
 		Handler: func(args []string) Result {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -80,8 +80,10 @@ func RegisterConfig(r *Registry, c *agentclient.Client) {
 				update.KeepForever = value
 			case "compaction-enabled", "compaction_enabled":
 				update.CompactionEnabled = value
+			case "tool-elision-only", "tool_elision_only":
+				update.ToolElisionOnly = value
 			default:
-				return Result{Kind: ResultText, Text: "unknown config key /" + key + " (valid: local-runtime, local-model, ollama-url, cloud-provider, cloud-model, cloud-api-key, cloud-base-url, elide-tool-results, lossy-tool-elision, raw-retention-days, compacted-retention-days, keep-forever, models.<tier>.<provider>, models.default_provider)"}
+				return Result{Kind: ResultText, Text: "unknown config key /" + key + " (valid: local-runtime, local-model, ollama-url, cloud-provider, cloud-model, cloud-api-key, cloud-base-url, compaction-enabled, tool-elision-only, elide-tool-results, lossy-tool-elision, raw-retention-days, compacted-retention-days, keep-forever, models.<tier>.<provider>, models.default_provider)"}
 			}
 			msg, err := c.UpdateConfig(ctx, update)
 			if err != nil {
@@ -174,6 +176,12 @@ func formatConfig(cfg *agentclient.Config) string {
 	}
 	b.WriteString("\n  compaction-enabled: ")
 	if cfg.CompactionEnabled {
+		b.WriteString("on")
+	} else {
+		b.WriteString("off")
+	}
+	b.WriteString("\n  tool-elision-only: ")
+	if cfg.ToolElisionOnly {
 		b.WriteString("on")
 	} else {
 		b.WriteString("off")

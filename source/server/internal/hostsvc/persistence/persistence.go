@@ -82,6 +82,11 @@ type Service interface {
 	// No-op if no generator is wired.
 	SetCompactionEnabled(enabled bool)
 
+	// SetToolElisionOnly flips tool-elision-only mode on the generator: passes
+	// keep their normal triggers but advance the elision floor instead of
+	// calling the summarizer. No-op if no generator is wired.
+	SetToolElisionOnly(v bool)
+
 	// Setters called by wiring code (cmd/cercano or watchdog_wire).
 	SetRetentionSweeper(sw *retention.Sweeper)
 	SetCompactionGenerator(g *compactiongen.Generator)
@@ -190,10 +195,48 @@ func (x *svc) elisionFloor(convID string) int64 {
 	return x.elisionFloors[convID]
 }
 
+// setElisionFloor advances the conversation's floor; it never regresses, so an
+// automatic tool-elision-only pass can't undo a manual /elide-context.
 func (x *svc) setElisionFloor(convID string, floor int64) {
 	x.elideMu.Lock()
 	defer x.elideMu.Unlock()
-	x.elisionFloors[convID] = floor
+	if floor > x.elisionFloors[convID] {
+		x.elisionFloors[convID] = floor
+	}
+}
+
+// advanceElisionFloor is the tool-elision-only compaction pass, wired into the
+// generator via SetElideOnlyFn: apply the compaction activation gate, then
+// move the conversation's elision floor up to the newest turn outside the
+// verbatim-recent window. No summarizer, no persisted state — the floor is
+// in-memory and the stored raw turns are untouched.
+func (x *svc) advanceElisionFloor(ctx context.Context, convID string) (pre, post, stubbed int, changed bool, err error) {
+	store := x.Store()
+	if store == nil {
+		return 0, 0, 0, false, fmt.Errorf("no conversation store")
+	}
+	turns, err := store.GetTurns(ctx, convID)
+	if err != nil {
+		return 0, 0, 0, false, err
+	}
+	if len(turns) == 0 {
+		return 0, 0, 0, false, nil
+	}
+	compSnap := x.cfgSvc.Get().Compaction
+	raw := estimateRawTokens(turns)
+	if raw < compSnap.ActivationFloorTokens {
+		return 0, 0, 0, false, nil // activation gate — same as the LLM pass
+	}
+	floor, ok := compactor.ElisionFloor(turns, compSnap.VerbatimRecent)
+	if !ok || floor <= x.elisionFloor(convID) {
+		return 0, 0, 0, false, nil // nothing new outside the verbatim window
+	}
+	state, _ := store.GetCompaction(ctx, convID)
+	pre = x.sentViewTokens(convID, turns, state, raw)
+	_, stubbed = compactor.StubToolResultsThrough(turns, floor)
+	x.setElisionFloor(convID, floor)
+	post = x.sentViewTokens(convID, turns, state, raw)
+	return pre, post, stubbed, true, nil
 }
 
 // --- Setters for owned fields ---
@@ -201,8 +244,14 @@ func (x *svc) setElisionFloor(convID string, floor int64) {
 // SetRetentionSweeper attaches the background retention sweeper.
 func (x *svc) SetRetentionSweeper(sw *retention.Sweeper) { x.retentionSweeper = sw }
 
-// SetCompactionGenerator attaches the background compaction scheduler.
-func (x *svc) SetCompactionGenerator(g *compactiongen.Generator) { x.compactionGen = g }
+// SetCompactionGenerator attaches the background compaction scheduler and
+// wires the tool-elision-only pass implementation (the floors live here).
+func (x *svc) SetCompactionGenerator(g *compactiongen.Generator) {
+	x.compactionGen = g
+	if g != nil {
+		g.SetElideOnlyFn(x.advanceElisionFloor)
+	}
+}
 
 // SetContextLoader attaches the project-context loader.
 func (x *svc) SetContextLoader(l *projectctx.Loader) { x.contextLoader = l }
@@ -229,6 +278,13 @@ func (x *svc) UpdateRetentionConfig(cfg retention.Config) {
 func (x *svc) SetCompactionEnabled(enabled bool) {
 	if x.compactionGen != nil {
 		x.compactionGen.SetEnabled(enabled)
+	}
+}
+
+// SetToolElisionOnly flips tool-elision-only mode on the generator.
+func (x *svc) SetToolElisionOnly(v bool) {
+	if x.compactionGen != nil {
+		x.compactionGen.SetToolElisionOnly(v)
 	}
 }
 

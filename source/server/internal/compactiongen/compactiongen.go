@@ -43,6 +43,15 @@ type Generator struct {
 	enabled  bool // guarded by mu — the runtime kill switch
 	timers   map[string]*time.Timer
 	inflight map[string]bool
+
+	// toolElisionOnly (guarded by mu) switches a pass from LLM summarization
+	// to elideFn: the compaction triggers/debounce stay as-is, but the pass
+	// only advances the conversation's elision floor — no model call ever.
+	toolElisionOnly bool
+	// elideFn performs the elision-only pass (wired by the persistence
+	// service, which owns the per-conversation elision floors). changed=false
+	// means the floor did not move (gates unmet or already there).
+	elideFn func(ctx context.Context, conversationID string) (pre, post, stubbed int, changed bool, err error)
 }
 
 func New(store Store, summarize compaction.SummarizeFunc, cfg compactor.Config, tok contextmeter.Tokenizer, debounce time.Duration) *Generator {
@@ -62,6 +71,33 @@ func (g *Generator) SetEnabled(v bool) {
 	g.mu.Lock()
 	g.enabled = v
 	g.mu.Unlock()
+}
+
+// SetToolElisionOnly atomically flips tool-elision-only mode. When on, passes
+// run on the normal triggers but never call the summarizer — they delegate to
+// the elide fn instead. Set at startup from cfg.Compaction.ToolElisionOnly and
+// again from the server's UpdateConfig handler on runtime changes.
+func (g *Generator) SetToolElisionOnly(v bool) {
+	g.mu.Lock()
+	g.toolElisionOnly = v
+	g.mu.Unlock()
+}
+
+// SetElideOnlyFn wires the elision-only pass implementation (the persistence
+// service's floor advance). Nil disables the mode regardless of the toggle.
+func (g *Generator) SetElideOnlyFn(fn func(ctx context.Context, conversationID string) (pre, post, stubbed int, changed bool, err error)) {
+	g.mu.Lock()
+	g.elideFn = fn
+	g.mu.Unlock()
+}
+
+func (g *Generator) elisionOnly() (func(ctx context.Context, conversationID string) (int, int, int, bool, error), bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.toolElisionOnly && g.elideFn != nil {
+		return g.elideFn, true
+	}
+	return nil, false
 }
 
 // Schedule requests a debounced compaction pass; rapid calls coalesce.
@@ -120,6 +156,24 @@ func (g *Generator) runCompaction(ctx context.Context, conversationID string) er
 		return nil
 	}
 	defer g.release(conversationID)
+
+	if elide, ok := g.elisionOnly(); ok {
+		// Tool-elision-only mode: same triggers and cadence, no summarizer.
+		// The pass just advances the conversation's elision floor.
+		start := time.Now()
+		pre, post, stubbed, changed, err := elide(ctx, conversationID)
+		if err != nil {
+			g.logf("[compaction] pass FAILED %s (elision-only): %v\n", conversationID, err)
+			return err
+		}
+		if !changed {
+			g.logf("[compaction] pass no-op %s (elision-only): nothing to do\n", conversationID)
+			return nil
+		}
+		g.logf("[compaction] pass ok %s (elision-only): %d -> %d tokens in %s (%d tool results stubbed)\n",
+			conversationID, pre, post, time.Since(start).Round(time.Millisecond), stubbed)
+		return nil
+	}
 
 	turns, err := g.store.GetTurns(ctx, conversationID)
 	if err != nil {

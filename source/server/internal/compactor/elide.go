@@ -9,6 +9,34 @@ import (
 	"cercano/source/server/internal/llm"
 )
 
+// ElisionFloor returns the elision-floor timestamp for a tool-elision-only
+// compaction pass: the CreatedAt of the newest turn outside the verbatim-recent
+// window, walked back so that no verbatim-window turn shares its wall-clock
+// second with the floor (floor semantics are "stub everything <= floor" at
+// second granularity, and tool-use bursts routinely land several turns in one
+// second — the same guard Advance applies to FrozenThrough). ok=false when
+// nothing is safely elidable (too few turns, or the whole span collapses into
+// the verbatim window's second). turns must be in created-at order.
+func ElisionFloor(turns []conversation.Turn, verbatimRecent int) (int64, bool) {
+	if verbatimRecent < 0 {
+		verbatimRecent = 0
+	}
+	if len(turns) <= verbatimRecent {
+		return 0, false
+	}
+	b := len(turns) - verbatimRecent - 1
+	if verbatimRecent > 0 {
+		boundarySec := turns[len(turns)-verbatimRecent].CreatedAt.Unix()
+		for b >= 0 && turns[b].CreatedAt.Unix() >= boundarySec {
+			b--
+		}
+	}
+	if b < 0 {
+		return 0, false
+	}
+	return turns[b].CreatedAt.Unix(), true
+}
+
 // StubToolResultsThrough returns a copy of turns in which every tool_result
 // block belonging to a turn with CreatedAt.Unix() <= floor has its content
 // replaced by a short stub, plus the number of results stubbed. Block

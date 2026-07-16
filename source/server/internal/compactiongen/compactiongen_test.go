@@ -115,6 +115,58 @@ func TestRunCompaction_LogsPassOk(t *testing.T) {
 	}
 }
 
+func TestToolElisionOnly_PassCallsElideFnNotSummarizer(t *testing.T) {
+	fs := &fakeStore{turns: bigTurns(12, 1000)}
+	summarize := func(context.Context, []llm.Message) (compaction.StructuredSummary, error) {
+		t.Fatal("tool-elision-only mode must never invoke the summarizer")
+		return compaction.StructuredSummary{}, nil
+	}
+	cfg := compactor.Config{ActivationFloorTokens: 1000, SegmentTokens: 4000, VerbatimRecent: 2}
+	g := New(fs, summarize, cfg, contextmeter.Default(), 10*time.Millisecond)
+	var buf strings.Builder
+	g.logf = func(f string, a ...any) { fmt.Fprintf(&buf, f, a...) }
+
+	called := ""
+	g.SetElideOnlyFn(func(_ context.Context, convID string) (pre, post, stubbed int, changed bool, err error) {
+		called = convID
+		return 9000, 4000, 7, true, nil
+	})
+	g.SetToolElisionOnly(true)
+
+	if err := g.CompactNow(context.Background(), "conv-elide"); err != nil {
+		t.Fatal(err)
+	}
+	if called != "conv-elide" {
+		t.Fatalf("elide fn called with %q, want conv-elide", called)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "elision-only") || !strings.Contains(out, "9000") || !strings.Contains(out, "4000") {
+		t.Errorf("expected elision-only pass log with token counts; got:\n%s", out)
+	}
+
+	// A no-change pass logs a no-op instead.
+	buf.Reset()
+	g.SetElideOnlyFn(func(context.Context, string) (int, int, int, bool, error) {
+		return 4000, 4000, 0, false, nil
+	})
+	if err := g.CompactNow(context.Background(), "conv-elide"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "no-op") {
+		t.Errorf("expected no-op log; got:\n%s", buf.String())
+	}
+
+	// Mode off → normal path (summarizer would run; use a non-fatal one).
+	g.SetToolElisionOnly(false)
+	g2 := New(fs, func(context.Context, []llm.Message) (compaction.StructuredSummary, error) {
+		return compaction.StructuredSummary{Goal: "g"}, nil
+	}, cfg, contextmeter.Default(), 10*time.Millisecond)
+	g2.SetToolElisionOnly(false)
+	if err := g2.CompactNow(context.Background(), "conv-normal"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunCompaction_LogsPassFailed(t *testing.T) {
 	fs := &fakeStore{turns: bigTurns(12, 1000)}
 	summarize := func(context.Context, []llm.Message) (compaction.StructuredSummary, error) {

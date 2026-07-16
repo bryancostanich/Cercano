@@ -1766,6 +1766,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if modalOpensScanning(msg.status) {
 				return m, fetchModalGGUFsCmd(m.agent)
 			}
+			if modalIsBundledModelMissing(msg.status) {
+				if strings.TrimSpace(msg.status.DefaultModel) == "" {
+					m.openRuntimeModal.setNeedsModel(msg.status.Message)
+				} else {
+					active := m.currentOpenRuntime
+					if active == "" {
+						active = "ollama"
+					}
+					m.openRuntimeModal.setOfferSwitch(msg.pending, active)
+				}
+			}
 			return m, nil
 		}
 		m.pendingRuntimeSwitch = msg.pending

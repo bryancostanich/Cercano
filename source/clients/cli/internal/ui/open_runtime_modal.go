@@ -108,7 +108,11 @@ type openRuntimeInstallModal struct {
 // but the model is missing/ambiguous, so idle's "Install now" can't help.
 // Callers that see true must batch fetchModalGGUFsCmd alongside opening.
 func modalOpensScanning(st agentclient.OpenRuntimeStatus) bool {
-	return st.Missing == "model"
+	return st.Runtime == "llama_server" && st.Missing == "model"
+}
+
+func modalIsBundledModelMissing(st agentclient.OpenRuntimeStatus) bool {
+	return st.Runtime == "mistralrs" && st.Missing == "model"
 }
 
 // newOpenRuntimeInstallModal opens the modal carrying the status snapshot
@@ -328,7 +332,11 @@ func (mo *openRuntimeInstallModal) renderHeader(styles theme.Styles) string {
 		case "binary":
 			title = "Install llama-server?"
 		case "model":
-			title = "Add a GGUF model?"
+			if mo.status.Runtime == "mistralrs" {
+				title = "mistral.rs model needed"
+			} else {
+				title = "Add a GGUF model?"
+			}
 		default:
 			title = "Local runtime setup"
 		}
@@ -339,9 +347,17 @@ func (mo *openRuntimeInstallModal) renderHeader(styles theme.Styles) string {
 	case runtimeModalFailed:
 		title = "Install failed"
 	case runtimeModalNeedsModel:
-		title = "llama-server ready — pick a GGUF model"
+		if mo.status.Runtime == "mistralrs" {
+			title = "mistral.rs needs a model"
+		} else {
+			title = "llama-server ready — pick a GGUF model"
+		}
 	case runtimeModalOfferSwitch:
-		title = "llama-server ready — switch to it?"
+		if mo.offerRuntime == "mistralrs" {
+			title = "mistral.rs model not downloaded"
+		} else {
+			title = "llama-server ready — switch to it?"
+		}
 	case runtimeModalScanningModels:
 		title = "Checking GGUF models…"
 	}
@@ -421,22 +437,26 @@ func (mo *openRuntimeInstallModal) renderActions(styles theme.Styles) string {
 		}
 		return primary + "    " + secondary + errLine
 	case runtimeModalNeedsModel:
-		// The install itself succeeded — Retry would just reinstall
-		// llama-server pointlessly. Primary path is now "Browse
-		// models" which opens the runtime dashboard where the online
-		// catalog is searchable + downloadable. Alternative paths
-		// (dropping a .gguf manually, setting default_model in yaml)
-		// stay listed for users who prefer them.
 		primary := styles.Success.Bold(true).Render("[Enter] Browse models")
 		secondary := styles.Muted.Render("[Esc] Close")
-		hint := styles.Muted.Render("Or, out-of-band:\n" +
+		hintText := "Or, out-of-band:\n" +
 			"  • add a .gguf to ~/.cercano/models/\n" +
-			"  • or set llama_server.default_model in ~/.config/cercano/config.yaml")
+			"  • or set llama_server.default_model in ~/.config/cercano/config.yaml"
+		if mo.status.Runtime == "mistralrs" {
+			hintText = "Choose/download a mistral.rs model from the runtime dashboard,\n" +
+				"or set mistralrs.default_model in ~/.config/cercano/config.yaml."
+		}
+		hint := styles.Muted.Render(hintText)
 		return primary + "    " + secondary + "\n" + hint
 	case runtimeModalOfferSwitch:
-		// Install succeeded and we detected the runtime is not the
-		// currently-active one. Ask explicitly rather than deciding.
-		primary := styles.Success.Bold(true).Render("[Enter] Switch to " + mo.offerRuntime)
+		// Ask explicitly rather than deciding. For bundled runtimes with a
+		// configured-but-missing default model, switching starts the server-side
+		// background download and the top-bar chip moves to o:downloading.
+		label := "[Enter] Switch to " + mo.offerRuntime
+		if mo.offerRuntime == "mistralrs" && mo.status.Missing == "model" {
+			label = "[Enter] Switch and download"
+		}
+		primary := styles.Success.Bold(true).Render(label)
 		keepLabel := "[Esc] Keep " + mo.activeRuntime
 		if mo.activeRuntime == "" {
 			// currentLocalRuntime is empty by default (server treats
@@ -477,8 +497,12 @@ func (m Model) handleOpenRuntimeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch m.openRuntimeModal.state {
 	case runtimeModalIdle:
 		if key == "enter" {
+			runtime := m.openRuntimeModal.status.Runtime
+			if runtime == "" {
+				runtime = "llama_server"
+			}
 			m.openRuntimeModal.state = runtimeModalRunning
-			return m, startOpenRuntimeInstallCmd(m.agent, "llama_server")
+			return m, startOpenRuntimeInstallCmd(m.agent, runtime)
 		}
 		if key == "esc" || key == "q" {
 			m.openRuntimeModal = nil
@@ -502,10 +526,14 @@ func (m Model) handleOpenRuntimeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.openRuntimeModal = nil
 	case runtimeModalFailed:
 		if key == "enter" {
+			runtime := m.openRuntimeModal.status.Runtime
+			if runtime == "" {
+				runtime = "llama_server"
+			}
 			m.openRuntimeModal.state = runtimeModalRunning
 			m.openRuntimeModal.errMsg = ""
 			m.openRuntimeModal.logLines = nil
-			return m, startOpenRuntimeInstallCmd(m.agent, "llama_server")
+			return m, startOpenRuntimeInstallCmd(m.agent, runtime)
 		}
 		if key == "esc" || key == "q" {
 			m.openRuntimeModal = nil

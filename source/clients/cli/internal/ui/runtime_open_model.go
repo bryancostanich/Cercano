@@ -248,6 +248,15 @@ func (d *runtimeDashboard) mistralConfigStatus(field string) string {
 	return field + " updated — restart the runtime to apply"
 }
 
+func runtimeSwitchNeedsReadinessProbe(target string) bool {
+	switch target {
+	case "llama_server", "mistralrs":
+		return true
+	default:
+		return false
+	}
+}
+
 // mistralConfigUpdateCmd dispatches a mistral.rs config update off the UI
 // thread, swallowing the error the way the runtime-switch path does (the
 // server broadcasts ConfigChanged on success).
@@ -263,28 +272,22 @@ func mistralConfigUpdateCmd(ag *agentclient.Client, update agentclient.ConfigUpd
 	}
 }
 
-// openRuntimeSwitchCmd builds the tea.Cmd for a runtime switch. For
-// llama_server it checks readiness first and returns
-// openOpenRuntimeInstallModalMsg when the runtime isn't usable (missing
-// binary or model) — reusing the settings path's install-modal flow. For any
-// other target it calls UpdateConfig directly, swallowing the error the same
-// way dispatchOpenRuntimeSwitch does (the server broadcasts ConfigChanged).
+// openRuntimeSwitchCmd builds the tea.Cmd for a runtime switch. Managed local
+// runtimes are probed first; if the target isn't usable (missing binary/model,
+// or model downloading), return openOpenRuntimeInstallModalMsg so the user can
+// confirm/cancel or browse models. Ollama still switches directly because it
+// manages its own model presence.
 func openRuntimeSwitchCmd(ag *agentclient.Client, target string) tea.Cmd {
 	if ag == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		if target == "llama_server" {
-			// llama_server needs its binary + a model ready. If either is
-			// missing, open the install modal and DON'T persist the switch —
-			// the modal's success path dispatches UpdateConfig once the
-			// runtime is actually usable. If it IS ready, fall through and
-			// persist the switch like any other runtime.
+		if runtimeSwitchNeedsReadinessProbe(target) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			st, err := ag.GetOpenRuntimeStatus(ctx, "llama_server")
+			st, err := ag.GetOpenRuntimeStatus(ctx, target)
 			cancel()
 			if err == nil && st != nil && !st.Ok {
-				return openOpenRuntimeInstallModalMsg{status: *st, pending: "llama_server"}
+				return openOpenRuntimeInstallModalMsg{status: *st, pending: target}
 			}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

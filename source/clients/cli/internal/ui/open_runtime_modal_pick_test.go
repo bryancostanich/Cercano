@@ -23,6 +23,7 @@ func modelWithModal(st agentclient.OpenRuntimeStatus) Model {
 
 func ambiguousStatus() agentclient.OpenRuntimeStatus {
 	return agentclient.OpenRuntimeStatus{
+		Runtime: "llama_server",
 		Missing: "model",
 		Message: "llama-server detection: model: found 2 GGUF models; set llama_server.default_model to disambiguate",
 	}
@@ -41,9 +42,12 @@ func TestOpenRuntimeModal_MissingModelOpensScanning(t *testing.T) {
 		t.Fatalf("state = %v, want runtimeModalScanningModels", mo.state)
 	}
 	if !modalOpensScanning(ambiguousStatus()) {
-		t.Fatal("modalOpensScanning should be true for Missing==model")
+		t.Fatal("modalOpensScanning should be true for llama_server Missing==model")
 	}
-	if modalOpensScanning(agentclient.OpenRuntimeStatus{Missing: "binary"}) {
+	if modalOpensScanning(agentclient.OpenRuntimeStatus{Runtime: "mistralrs", Missing: "model"}) {
+		t.Fatal("modalOpensScanning should be false for mistralrs Missing==model")
+	}
+	if modalOpensScanning(agentclient.OpenRuntimeStatus{Runtime: "llama_server", Missing: "binary"}) {
 		t.Fatal("modalOpensScanning should be false for Missing==binary")
 	}
 }
@@ -162,5 +166,59 @@ func TestOpenRuntimeModal_ScanningViewShowsProgressNotInstall(t *testing.T) {
 	}
 	if strings.Contains(out, "Install now") {
 		t.Fatal("scanning view must not offer Install now")
+	}
+}
+
+func TestOpenRuntimeModal_MistralMissingModelWithDefaultOffersSwitchDownload(t *testing.T) {
+	p := theme.Cracker()
+	m := Model{palette: p, styles: theme.NewStyles(p), currentOpenRuntime: "llama_server"}
+	st := agentclient.OpenRuntimeStatus{
+		Runtime:      "mistralrs",
+		Missing:      "model",
+		DefaultModel: "mistralrs:catalog:qwen3-14b",
+		Message:      "mistralrs default model not downloaded",
+	}
+	next, cmd := m.Update(openOpenRuntimeInstallModalMsg{status: st, pending: "mistralrs"})
+	if cmd != nil {
+		t.Fatalf("mistralrs missing default should not start GGUF scan/install cmd")
+	}
+	nm := next.(Model)
+	if nm.openRuntimeModal == nil {
+		t.Fatalf("modal not opened")
+	}
+	if nm.openRuntimeModal.state != runtimeModalOfferSwitch {
+		t.Fatalf("state = %v, want runtimeModalOfferSwitch", nm.openRuntimeModal.state)
+	}
+	if nm.openRuntimeModal.offerRuntime != "mistralrs" {
+		t.Fatalf("offerRuntime = %q, want mistralrs", nm.openRuntimeModal.offerRuntime)
+	}
+	out := stripAnsiCSI(nm.openRuntimeModal.View(nm.styles, nm.palette, 100, 30))
+	if !strings.Contains(out, "mistral.rs model not downloaded") || !strings.Contains(out, "Switch and download") {
+		t.Fatalf("modal should explain mistral download confirmation, got:\n%s", out)
+	}
+}
+
+func TestOpenRuntimeModal_MistralMissingModelWithoutDefaultBrowsesModels(t *testing.T) {
+	p := theme.Cracker()
+	m := Model{palette: p, styles: theme.NewStyles(p), currentOpenRuntime: "llama_server"}
+	st := agentclient.OpenRuntimeStatus{
+		Runtime: "mistralrs",
+		Missing: "model",
+		Message: "mistralrs runtime: no default model configured",
+	}
+	next, cmd := m.Update(openOpenRuntimeInstallModalMsg{status: st, pending: "mistralrs"})
+	if cmd != nil {
+		t.Fatalf("mistralrs no-default should not start GGUF scan/install cmd")
+	}
+	nm := next.(Model)
+	if nm.openRuntimeModal == nil {
+		t.Fatalf("modal not opened")
+	}
+	if nm.openRuntimeModal.state != runtimeModalNeedsModel {
+		t.Fatalf("state = %v, want runtimeModalNeedsModel", nm.openRuntimeModal.state)
+	}
+	out := stripAnsiCSI(nm.openRuntimeModal.View(nm.styles, nm.palette, 100, 30))
+	if !strings.Contains(out, "mistral.rs needs a model") || !strings.Contains(out, "mistralrs.default_model") {
+		t.Fatalf("modal should point mistral no-default users at model selection, got:\n%s", out)
 	}
 }

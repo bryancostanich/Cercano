@@ -362,22 +362,20 @@ func (sp *settingsPage) onCommit(key, value string) (string, tea.Cmd, error) {
 		ag := sp.agent
 		update := action.update
 		return animateToolSpinner() + " applying…", tea.Batch(settingsSpinnerTick(), func() tea.Msg {
-			// Guard: switching to llama_server requires its binary + a model
-			// to be ready. If either is missing, open the install modal and
-			// DON'T dispatch UpdateConfig — the modal's cancel path leaves
-			// the config unchanged (switch rejected), and its install-success
-			// path dispatches the UpdateConfig at the moment the runtime is
-			// actually usable.
-			if update.OpenRuntime == "llama_server" {
+			// Guard managed runtimes before committing the switch. If the target
+			// isn't ready, open the runtime setup/download modal and DON'T dispatch
+			// UpdateConfig — cancel leaves config unchanged.
+			if runtimeSwitchNeedsReadinessProbe(update.OpenRuntime) {
 				gctx, gcancel := context.WithTimeout(context.Background(), 3*time.Second)
-				st, gerr := ag.GetOpenRuntimeStatus(gctx, "llama_server")
+				st, gerr := ag.GetOpenRuntimeStatus(gctx, update.OpenRuntime)
 				gcancel()
 				if gerr == nil && st != nil && !st.Ok {
 					statusCopy := *st
+					pending := update.OpenRuntime
 					return settingsCommitDoneMsg{
-						status: "install required — see modal",
+						status: "runtime setup required — see modal",
 						followup: func() tea.Msg {
-							return openOpenRuntimeInstallModalMsg{status: statusCopy, pending: "llama_server"}
+							return openOpenRuntimeInstallModalMsg{status: statusCopy, pending: pending}
 						},
 					}
 				}

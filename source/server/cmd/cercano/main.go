@@ -288,9 +288,16 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 				if cloud := lazyRouter.GetModelProviders()["CloudModel"]; cloud != nil {
 					fmt.Fprintf(os.Stderr, "[compaction] local summarizer failed (%v) — falling back to cloud\n", err)
 					cloudReq := &agent.Request{Input: compaction.BuildSummaryPrompt(msgs), Temperature: greedy.Temperature}
-					if cresp, cerr := cloud.Process(ctx, cloudReq); cerr == nil {
+					cresp, cerr := cloud.Process(ctx, cloudReq)
+					if cerr == nil {
 						return parseLogged(cresp.Output, "cloud fallback"), nil
 					}
+					// Surface BOTH failures: the pass error names the local
+					// cause, and the cloud fallback's own error — previously
+					// swallowed, which made "it should have used the cloud"
+					// undiagnosable from the log.
+					fmt.Fprintf(os.Stderr, "[compaction] cloud fallback FAILED: %v\n", cerr)
+					return compaction.StructuredSummary{}, fmt.Errorf("local summarizer: %v; cloud fallback: %w", err, cerr)
 				}
 				return compaction.StructuredSummary{}, err
 			}

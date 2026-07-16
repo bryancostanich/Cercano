@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -79,5 +80,31 @@ func TestChatView_ViewIdentityOverlayMatchesNoSelection(t *testing.T) {
 	out := c.View()
 	if strings.TrimSpace(out) == "" {
 		t.Fatalf("View produced empty output for a user entry")
+	}
+}
+
+func TestTranscriptLayoutFlattenedContentMatchesLegacyContent(t *testing.T) {
+	c := newTestChatView(72, 12)
+	entries := []*Entry{
+		{Role: RoleUser, Content: "please inspect this"},
+		{Role: RoleAssistant, Content: "I can help with that.\n\n- first\n- second"},
+		{Role: RoleSystem, Content: "notice line"},
+	}
+	c.SetEntries(entries)
+
+	if got, want := c.layout.flattenedContent(), c.content; got != want {
+		t.Fatalf("virtual layout flattened content mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+func TestTranscriptLayoutToolRowsMatchLegacyArrowRows(t *testing.T) {
+	c := newTestChatView(100, 20)
+	c.SetEntries(toolClickEntries())
+
+	if got, want := c.layout.flattenedContent(), c.content; got != want {
+		t.Fatalf("virtual layout flattened tool content mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	if got, want := c.layout.absoluteArrowRows(), c.arrowRows; !reflect.DeepEqual(got, want) {
+		t.Fatalf("virtual layout arrow rows mismatch\ngot:  %#v\nwant: %#v", got, want)
 	}
 }

@@ -71,6 +71,10 @@ type chatView struct {
 	// entries index whose fold arrow is drawn there. Rebuilt by SetEntries on
 	// every render, so it can never drift from the drawn layout.
 	arrowRows []arrowRow
+	// layout is the emerging virtual transcript index. During migration it is
+	// built alongside the legacy giant-string viewport so tests can prove exact
+	// rendering equivalence before View switches to visible-window rendering.
+	layout transcriptLayout
 
 	// pendingCensor is the assistant entry the most recent watchdog
 	// challenge/block fired against. If the model rewrites (a fresh assistant
@@ -949,6 +953,7 @@ func (c *chatView) SetEntries(entries []*Entry) {
 	content := b.String()
 	c.content = content
 	c.plainDirty = true
+	c.layout = c.rebuildTranscriptLayout(entries)
 	c.vp.SetContent(content)
 	if c.hasResizeAnchor {
 		// Resize reflow: restore the same distance-from-bottom in the newly

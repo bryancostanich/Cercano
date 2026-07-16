@@ -167,6 +167,28 @@ func TestEnsureModelsPresent_UnresolvedRefErrorsButContinues(t *testing.T) {
 	}
 }
 
+// TestEnsureModelsPresent_CatalogDirectoryAlias pins the mistral.rs catalog
+// shape: downloadable Hugging Face models point at <model-id>/config.json, so
+// a config default written as the bare catalog slug must resolve to the catalog
+// record and enqueue the download.
+func TestEnsureModelsPresent_CatalogDirectoryAlias(t *testing.T) {
+	body := bytes.Repeat([]byte("C"), 512)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+
+	model := ensureModel(t, "mistralrs", "mistralrs:catalog:qwen3-30b-a3b-instruct-2507", srv.URL+"/model.gguf", len(body))
+	model.Path = filepath.Join(t.TempDir(), "qwen3-30b-a3b-instruct-2507", "config.json")
+	m := NewManager()
+	m.RegisterProvider(&fakeProvider{name: "mistralrs", models: []ModelRecord{model}})
+
+	if err := m.EnsureModelsPresent(context.Background(), "mistralrs", []string{"qwen3-30b-a3b-instruct-2507"}); err != nil {
+		t.Fatalf("EnsureModelsPresent: %v", err)
+	}
+	waitDownloadDone(t, m, model.ID)
+}
+
 // TestEnsureModelsPresent_EmptyWantIsNoop proves ollama-style runtimes (nothing
 // wanted) and empty/whitespace refs are a clean no-op, not an error.
 func TestEnsureModelsPresent_EmptyWantIsNoop(t *testing.T) {

@@ -27,8 +27,10 @@ func MatchesModel(requested string, model ModelRecord) bool {
 	}
 	expanded, _ := expandModelPath(requested)
 	if requested == model.ID ||
+		requested == strings.TrimPrefix(model.ID, model.Runtime+":catalog:") ||
 		requested == model.DisplayName ||
 		requested == filepath.Base(model.Path) ||
+		requested == filepath.Base(filepath.Dir(model.Path)) ||
 		expanded == model.Path {
 		return true
 	}

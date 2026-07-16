@@ -986,6 +986,11 @@ message RegenerateContextRequest {
   // incremental=true: keep existing state and digest only the current
   // backlog from FrozenThrough forward (the /compact command).
   bool incremental = 2;
+  // clear_only=true: drop the derived compaction state and stop — no
+  // re-summarization. The next send-view is the full raw turn history (the
+  // /clear-compacted-context command; recovery when the compacted layer is
+  // bad). Mutually exclusive with incremental.
+  bool clear_only = 3;
 }
 
 message RegenerateContextProgress {

@@ -1142,7 +1142,19 @@ type RegenProgress struct {
 // keeps existing summaries (/compact). The returned channel closes after the
 // terminal (Done) frame.
 func (c *Client) RegenerateContext(ctx context.Context, conversationID string, incremental bool) (<-chan RegenProgress, error) {
-	stream, err := c.agent.RegenerateContext(ctx, &proto.RegenerateContextRequest{ConversationId: conversationID, Incremental: incremental})
+	return c.regenContextStream(ctx, &proto.RegenerateContextRequest{ConversationId: conversationID, Incremental: incremental})
+}
+
+// ClearCompactedContext drops the conversation's derived compaction state
+// without re-summarizing, so the next send-view is the full raw turn history
+// (/clear-compacted-context — recovery when the compacted layer is bad). Same
+// streaming contract as RegenerateContext.
+func (c *Client) ClearCompactedContext(ctx context.Context, conversationID string) (<-chan RegenProgress, error) {
+	return c.regenContextStream(ctx, &proto.RegenerateContextRequest{ConversationId: conversationID, ClearOnly: true})
+}
+
+func (c *Client) regenContextStream(ctx context.Context, req *proto.RegenerateContextRequest) (<-chan RegenProgress, error) {
+	stream, err := c.agent.RegenerateContext(ctx, req)
 	if err != nil {
 		return nil, err
 	}

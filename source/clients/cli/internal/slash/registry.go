@@ -30,14 +30,15 @@ const (
 	ResultOpenRuntimeDashboard
 	ResultOpenContextView
 	ResultOpenWizard
-	ResultResumeConversation // Text field carries the conversation id
-	ResultSetPromptColor     // Text field carries the parsed hex (#RRGGBB) or a palette key
-	ResultSetSessionTitle    // Text field carries the new title
-	ResultInvokeTool         // ToolName + ToolArgs carry the tool to invoke (CLI may prompt-confirm first)
-	ResultSetPermissionMode  // PermissionMode carries the new mode (strict|permissive|bypass)
-	ResultDevMode            // WorkDir carries the resolved Cercano repo root
-	ResultRegenContext       // rebuild the current conversation's context from raw turns
-	ResultCompactContext     // incrementally compact the current conversation's backlog
+	ResultResumeConversation    // Text field carries the conversation id
+	ResultSetPromptColor        // Text field carries the parsed hex (#RRGGBB) or a palette key
+	ResultSetSessionTitle       // Text field carries the new title
+	ResultInvokeTool            // ToolName + ToolArgs carry the tool to invoke (CLI may prompt-confirm first)
+	ResultSetPermissionMode     // PermissionMode carries the new mode (strict|permissive|bypass)
+	ResultDevMode               // WorkDir carries the resolved Cercano repo root
+	ResultRegenContext          // rebuild the current conversation's context from raw turns
+	ResultCompactContext        // incrementally compact the current conversation's backlog
+	ResultClearCompactedContext // drop compaction state; rehydrate from raw turns (no re-summarize)
 )
 
 // Result is what a slash command produces.

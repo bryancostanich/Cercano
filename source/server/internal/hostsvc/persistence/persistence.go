@@ -631,7 +631,8 @@ func (x *svc) ExportContext(ctx context.Context, req *proto.ExportContextRequest
 }
 
 // RegenerateContext rebuilds a conversation's derived compaction state from its
-// raw turns, streaming progress to the client.
+// raw turns (or, with clear_only, drops it so the raw history is sent as-is),
+// streaming progress to the client.
 func (x *svc) RegenerateContext(req *proto.RegenerateContextRequest, stream proto.Agent_RegenerateContextServer) error {
 	convID := req.GetConversationId()
 	if convID == "" {
@@ -641,14 +642,28 @@ func (x *svc) RegenerateContext(req *proto.RegenerateContextRequest, stream prot
 		return stream.Send(&proto.RegenerateContextProgress{Done: true, Ok: false, Error: "compaction is not available (agent is running without a conversation store)"})
 	}
 
-	pre, post, err := x.compactionGen.Regenerate(stream.Context(), convID, req.GetIncremental(), func(line string) {
+	if req.GetClearOnly() && req.GetIncremental() {
+		return stream.Send(&proto.RegenerateContextProgress{Done: true, Ok: false, Error: "clear_only and incremental are mutually exclusive"})
+	}
+
+	progress := func(line string) {
 		_ = stream.Send(&proto.RegenerateContextProgress{Line: line})
-	})
+	}
+	var pre, post int
+	var err error
+	if req.GetClearOnly() {
+		pre, post, err = x.compactionGen.Clear(stream.Context(), convID, progress)
+	} else {
+		pre, post, err = x.compactionGen.Regenerate(stream.Context(), convID, req.GetIncremental(), progress)
+	}
 	if err != nil {
 		return stream.Send(&proto.RegenerateContextProgress{Done: true, Ok: false, Error: err.Error(), PreTokens: int32(pre)})
 	}
 	verb := "rebuilt"
-	if req.GetIncremental() {
+	switch {
+	case req.GetClearOnly():
+		verb = "cleared — full raw history restored"
+	case req.GetIncremental():
 		verb = "compacted"
 	}
 	return stream.Send(&proto.RegenerateContextProgress{

@@ -331,6 +331,81 @@ func TestScheduledPass_DefersWhileClaimHeld(t *testing.T) {
 	}
 }
 
+func TestClear_DropsDerivedStateAndRestoresRawView(t *testing.T) {
+	// A summarizer failure can freeze segments behind empty summaries; Clear
+	// is the recovery path — the derived layer goes away entirely so the next
+	// send-view is the full raw history.
+	turns := bigTurns(6, 200)
+	fs := &fakeStore{
+		turns: turns,
+		state: conversation.Compaction{
+			ConversationID:       "c1",
+			FrozenThrough:        turns[3].CreatedAt.Unix(),
+			SegmentSummariesJSON: `[{"Goal":"g"}]`,
+			ConsolidatedJSON:     `{"Goal":"g"}`,
+			CompactedTokens:      1234,
+		},
+	}
+	summarize := func(context.Context, []llm.Message) (compaction.StructuredSummary, error) {
+		t.Fatal("clear must never invoke the summarizer")
+		return compaction.StructuredSummary{}, nil
+	}
+	cfg := compactor.Config{ActivationFloorTokens: 1000, SegmentTokens: 4000, VerbatimRecent: 2}
+	g := New(fs, summarize, cfg, contextmeter.Default(), 10*time.Millisecond)
+
+	pre, post, err := g.Clear(context.Background(), "c1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if fs.saved == nil {
+		t.Fatal("expected cleared state to be persisted")
+	}
+	if fs.saved.FrozenThrough != 0 || fs.saved.SegmentSummariesJSON != "" ||
+		fs.saved.ConsolidatedJSON != "" || fs.saved.CompactedTokens != 0 {
+		t.Fatalf("state not fully cleared: %+v", fs.saved)
+	}
+	if post <= pre {
+		t.Fatalf("full raw view (%d tokens) should exceed the compacted view (%d tokens)", post, pre)
+	}
+}
+
+func TestClear_IdempotentOnUncompactedConversation(t *testing.T) {
+	fs := &fakeStore{turns: bigTurns(3, 50)}
+	summarize := func(context.Context, []llm.Message) (compaction.StructuredSummary, error) {
+		t.Fatal("clear must never invoke the summarizer")
+		return compaction.StructuredSummary{}, nil
+	}
+	cfg := compactor.Config{ActivationFloorTokens: 1000, SegmentTokens: 4000, VerbatimRecent: 2}
+	g := New(fs, summarize, cfg, contextmeter.Default(), 10*time.Millisecond)
+
+	pre, post, err := g.Clear(context.Background(), "c1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pre != post {
+		t.Fatalf("nothing to clear — pre (%d) and post (%d) must match", pre, post)
+	}
+}
+
+func TestClear_RefusesWhilePassInFlight(t *testing.T) {
+	fs := &fakeStore{turns: bigTurns(6, 200)}
+	summarize := func(context.Context, []llm.Message) (compaction.StructuredSummary, error) {
+		return compaction.StructuredSummary{Goal: "g"}, nil
+	}
+	cfg := compactor.Config{ActivationFloorTokens: 1000, SegmentTokens: 4000, VerbatimRecent: 2}
+	g := New(fs, summarize, cfg, contextmeter.Default(), 10*time.Millisecond)
+
+	if !g.claim("c1") {
+		t.Fatal("test setup: claim failed")
+	}
+	defer g.release("c1")
+	if _, _, err := g.Clear(context.Background(), "c1", nil); err == nil {
+		t.Fatal("Clear must refuse while a pass holds the claim")
+	}
+}
+
 func TestRegenerate_IncrementalKeepsExistingState(t *testing.T) {
 	// /compact must digest only the backlog: existing consolidated state
 	// survives, unlike the full rebuild which clears it first.

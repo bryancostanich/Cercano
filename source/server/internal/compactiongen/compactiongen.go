@@ -247,6 +247,46 @@ func (g *Generator) Regenerate(ctx context.Context, conversationID string, incre
 	}
 }
 
+// Clear drops a conversation's derived compaction state entirely — no
+// re-summarization — so the next send-view is rebuilt from the full raw turn
+// history. This is the recovery path when the compacted layer is bad (e.g. a
+// broken summarizer froze segments behind empty summaries): raw turns are the
+// durable source of truth and are untouched. Like Regenerate it ignores the
+// kill switch (explicit user action) and refuses while a pass is in flight so
+// a concurrent Advance can't re-persist the state being cleared. progress
+// (nil-safe) receives one human-readable line per step.
+func (g *Generator) Clear(ctx context.Context, conversationID string, progress func(string)) (preTokens, postTokens int, err error) {
+	if progress == nil {
+		progress = func(string) {}
+	}
+	if !g.claim(conversationID) {
+		return 0, 0, fmt.Errorf("a compaction pass is already running for %s — try again in a moment", conversationID)
+	}
+	defer g.release(conversationID)
+
+	turns, err := g.store.GetTurns(ctx, conversationID)
+	if err != nil {
+		return 0, 0, err
+	}
+	state, err := g.store.GetCompaction(ctx, conversationID)
+	if err != nil {
+		return 0, 0, err
+	}
+	if preView, verr := compactor.BuildSendView(turns, state); verr == nil {
+		preTokens = compaction.TotalTokens(g.tok, preView)
+	}
+	progress(fmt.Sprintf("clearing compacted state over %d raw turns (current view ~%d tokens)", len(turns), preTokens))
+
+	cleared := conversation.Compaction{ConversationID: conversationID}
+	if err := g.store.SaveCompaction(ctx, cleared); err != nil {
+		return preTokens, 0, fmt.Errorf("clear derived state: %w", err)
+	}
+	if view, verr := compactor.BuildSendView(turns, cleared); verr == nil {
+		postTokens = compaction.TotalTokens(g.tok, view)
+	}
+	return preTokens, postTokens, nil
+}
+
 // IsCompacting reports whether a compaction pass is currently running for the
 // conversation.
 func (g *Generator) IsCompacting(conversationID string) bool {

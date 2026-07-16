@@ -348,6 +348,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	slash.RegisterColor(reg)
 	slash.RegisterContextRegen(reg)
 	slash.RegisterCompact(reg)
+	slash.RegisterClearCompactedContext(reg)
 	// wdRef is shared with the slash registry so /context tracks the active
 	// workDir even after /d, /clear, or /resume update it.
 	wdRef := &struct{ dir string }{}
@@ -2367,6 +2368,13 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, startContextRegenCmd(m.agent, m.convID, true)
+	case slash.ResultClearCompactedContext:
+		if m.convID == "" {
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "no conversation yet — nothing to clear"})
+			m.refreshViewport()
+			return m, nil
+		}
+		return m, startClearCompactedContextCmd(m.agent, m.convID)
 	case slash.ResultResumeConversation:
 		// /resume <id> path — slash already validated against the agent.
 		var resumeCmd tea.Cmd

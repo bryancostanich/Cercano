@@ -47,8 +47,30 @@ func isTransportLoss(err string) bool {
 // runs server-side to completion regardless of what the UI does with the
 // stream.
 func startContextRegenCmd(ag *agentclient.Client, convID string, incremental bool) tea.Cmd {
+	first := "rebuilding context from raw turns…"
+	if incremental {
+		first = "compacting context backlog…"
+	}
+	return startContextStreamCmd(func(ctx context.Context) (<-chan agentclient.RegenProgress, error) {
+		return ag.RegenerateContext(ctx, convID, incremental)
+	}, first)
+}
+
+// startClearCompactedContextCmd is /clear-compacted-context: drop the derived
+// compaction state server-side (no re-summarization) so the next send-view is
+// the full raw history. Same streaming/drain contract as a regen.
+func startClearCompactedContextCmd(ag *agentclient.Client, convID string) tea.Cmd {
+	return startContextStreamCmd(func(ctx context.Context) (<-chan agentclient.RegenProgress, error) {
+		return ag.ClearCompactedContext(ctx, convID)
+	}, "clearing compacted context — rehydrating from raw turns…")
+}
+
+// startContextStreamCmd opens a RegenerateContext-shaped stream via open and
+// drains it one frame per message; first is the immediate feedback line shown
+// before the first server frame arrives.
+func startContextStreamCmd(open func(context.Context) (<-chan agentclient.RegenProgress, error), first string) tea.Cmd {
 	return func() tea.Msg {
-		ch, err := ag.RegenerateContext(context.Background(), convID, incremental)
+		ch, err := open(context.Background())
 		if err != nil {
 			return contextRegenDoneMsg{err: err.Error()}
 		}
@@ -65,10 +87,6 @@ func startContextRegenCmd(ag *agentclient.Client, convID string, incremental boo
 				return contextRegenDoneMsg{ok: frame.Ok, err: frame.Error, line: frame.Line, pre: frame.PreTokens, post: frame.PostTokens}
 			}
 			return contextRegenProgressMsg{line: frame.Line, next: drain}
-		}
-		first := "rebuilding context from raw turns…"
-		if incremental {
-			first = "compacting context backlog…"
 		}
 		return contextRegenProgressMsg{line: first, next: drain}
 	}

@@ -33,6 +33,21 @@ func RegisterCompact(r *Registry) {
 	})
 }
 
+// RegisterClearCompactedContext wires /clear-compacted-context — drops the
+// current conversation's derived compaction state (summaries, frozen boundary)
+// without re-summarizing, forcing the next send-view to rehydrate from the
+// full raw turn history. The recovery command when the compacted layer is bad
+// (e.g. a broken summarizer froze segments behind empty summaries).
+func RegisterClearCompactedContext(r *Registry) {
+	r.Register(Command{
+		Name: "clear-compacted-context",
+		Help: "Drop this conversation's compacted summaries and rehydrate the context from its raw turns (recovery for a bad compaction; no re-summarization).",
+		Handler: func(args []string) Result {
+			return Result{Kind: ResultClearCompactedContext}
+		},
+	})
+}
+
 // RegisterContext wires /context — shows the project context the agent
 // will prepend to your turns (from .cercano/context.md under the effective
 // work dir). Reads the file directly client-side; no RPC. workDir is called

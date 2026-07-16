@@ -7137,7 +7137,12 @@ type RegenerateContextRequest struct {
 	// state first, then re-run compaction from the first turn.
 	// incremental=true: keep existing state and digest only the current
 	// backlog from FrozenThrough forward (the /compact command).
-	Incremental   bool `protobuf:"varint,2,opt,name=incremental,proto3" json:"incremental,omitempty"`
+	Incremental bool `protobuf:"varint,2,opt,name=incremental,proto3" json:"incremental,omitempty"`
+	// clear_only=true: drop the derived compaction state and stop — no
+	// re-summarization. The next send-view is the full raw turn history (the
+	// /clear-compacted-context command; recovery when the compacted layer is
+	// bad). Mutually exclusive with incremental.
+	ClearOnly     bool `protobuf:"varint,3,opt,name=clear_only,json=clearOnly,proto3" json:"clear_only,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7182,6 +7187,13 @@ func (x *RegenerateContextRequest) GetConversationId() string {
 func (x *RegenerateContextRequest) GetIncremental() bool {
 	if x != nil {
 		return x.Incremental
+	}
+	return false
+}
+
+func (x *RegenerateContextRequest) GetClearOnly() bool {
+	if x != nil {
+		return x.ClearOnly
 	}
 	return false
 }
@@ -12534,10 +12546,12 @@ const file_agent_proto_rawDesc = "" +
 	"\x04line\x18\x01 \x01(\tR\x04line\x12\x12\n" +
 	"\x04done\x18\x02 \x01(\bR\x04done\x12\x0e\n" +
 	"\x02ok\x18\x03 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\"e\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"\x84\x01\n" +
 	"\x18RegenerateContextRequest\x12'\n" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12 \n" +
-	"\vincremental\x18\x02 \x01(\bR\vincremental\"\xa9\x01\n" +
+	"\vincremental\x18\x02 \x01(\bR\vincremental\x12\x1d\n" +
+	"\n" +
+	"clear_only\x18\x03 \x01(\bR\tclearOnly\"\xa9\x01\n" +
 	"\x19RegenerateContextProgress\x12\x12\n" +
 	"\x04line\x18\x01 \x01(\tR\x04line\x12\x12\n" +
 	"\x04done\x18\x02 \x01(\bR\x04done\x12\x0e\n" +

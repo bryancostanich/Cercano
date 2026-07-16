@@ -76,3 +76,15 @@ func TestCompact_ReturnsCompactResult(t *testing.T) {
 		t.Fatalf("kind = %v, want ResultCompactContext", res.Kind)
 	}
 }
+
+func TestClearCompactedContext_ReturnsClearResult(t *testing.T) {
+	r := New()
+	RegisterClearCompactedContext(r)
+	res, ok := r.Dispatch("/clear-compacted-context")
+	if !ok {
+		t.Fatal("expected /clear-compacted-context to dispatch")
+	}
+	if res.Kind != ResultClearCompactedContext {
+		t.Fatalf("kind = %v, want ResultClearCompactedContext", res.Kind)
+	}
+}

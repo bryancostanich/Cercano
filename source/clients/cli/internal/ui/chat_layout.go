@@ -1,6 +1,9 @@
 package ui
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 type renderUnitKind int
 
@@ -54,6 +57,50 @@ func (l transcriptLayout) absoluteArrowRows() []arrowRow {
 		}
 	}
 	return rows
+}
+
+func (l transcriptLayout) linesRange(top, height int) []string {
+	if height <= 0 {
+		return nil
+	}
+	out := make([]string, height)
+	if len(l.units) == 0 || top >= l.totalLines {
+		return out
+	}
+	if top < 0 {
+		top = 0
+	}
+	bottom := top + height
+	unitIdx := l.unitIndexAtLine(top)
+	for unitIdx >= 0 && unitIdx < len(l.units) {
+		u := l.units[unitIdx]
+		if u.startLine >= bottom {
+			break
+		}
+		unitEnd := u.startLine + u.lineCount
+		if unitEnd <= top {
+			unitIdx++
+			continue
+		}
+		from := maxInt(top, u.startLine)
+		to := minInt(bottom, unitEnd)
+		copy(out[from-top:to-top], u.lines[from-u.startLine:to-u.startLine])
+		unitIdx++
+	}
+	return out
+}
+
+func (l transcriptLayout) unitIndexAtLine(line int) int {
+	if len(l.units) == 0 || line < 0 || line >= l.totalLines {
+		return -1
+	}
+	idx := sort.Search(len(l.units), func(i int) bool {
+		return l.units[i].startLine+l.units[i].lineCount > line
+	})
+	if idx >= len(l.units) {
+		return -1
+	}
+	return idx
 }
 
 func splitRenderLines(s string) []string {

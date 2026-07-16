@@ -1006,12 +1006,15 @@ func (c *chatView) renderToolGroupBlock(run []*Entry, startIdx int) (string, []t
 // View renders the viewport with a one-column scrollbar, applying selection
 // highlighting internally.
 func (c *chatView) View() string {
-	body := c.vp.View()
-	lines := strings.Split(body, "\n")
 	height := c.vp.Height()
+	lines := c.layout.linesRange(c.vp.YOffset(), height)
 	col := scrollbarColumn(c.vp.TotalLineCount(), height, c.vp.YOffset())
 	var b strings.Builder
-	for i, line := range lines {
+	for i := 0; i < height; i++ {
+		line := ""
+		if i < len(lines) {
+			line = lines[i]
+		}
 		contentLine := c.vp.YOffset() + i
 		line = c.renderSelectionOnLine(line, contentLine)
 		// Clamp to the viewport width so an over-wide content line (Glamour
@@ -1019,6 +1022,7 @@ func (c *chatView) View() string {
 		// composited row past m.width and wrap in the terminal — which would
 		// shove the scrollbar onto a wrapped row and make it vanish.
 		line = ansi.Truncate(line, c.vp.Width(), "")
+		line = padToWidth(line, c.vp.Width())
 		b.WriteString(line)
 		b.WriteString(" ") // one-column gap so content doesn't touch the scrollbar
 		// Guard against any row-count mismatch between the rendered body and
@@ -1035,7 +1039,7 @@ func (c *chatView) View() string {
 		} else {
 			b.WriteString(" ")
 		}
-		if i < len(lines)-1 {
+		if i < height-1 {
 			b.WriteString("\n")
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -164,7 +165,15 @@ Output:
 	if sawText {
 		fmt.Println()
 	}
-	os.Exit(exitCode)
+	os.Exit(finalizeHeadlessExit(exitCode, sawText, os.Stderr))
+}
+
+func finalizeHeadlessExit(exitCode int, sawText bool, stderr io.Writer) int {
+	if exitCode != 0 || sawText {
+		return exitCode
+	}
+	fmt.Fprintln(stderr, "cercano: turn completed with no assistant output")
+	return 1
 }
 
 // compactJSON returns a single-line form of a JSON string. Unused but kept

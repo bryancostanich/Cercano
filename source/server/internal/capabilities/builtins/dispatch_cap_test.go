@@ -74,6 +74,29 @@ func TestDispatch_Execute_ForwardsSpec(t *testing.T) {
 	}
 }
 
+func TestDispatch_Execute_CwdArgOverridesAmbientWorkDir(t *testing.T) {
+	var captured dispatch.Spec
+	svc := capabilities.Services{
+		Dispatch: func(_ context.Context, spec dispatch.Spec) (dispatch.Result, error) {
+			captured = spec
+			return dispatch.Result{Text: "done"}, nil
+		},
+	}
+	args, _ := json.Marshal(map[string]any{
+		"task":  "check git state",
+		"tools": []string{"git_info"},
+		"cwd":   "/repo/from/args",
+	})
+	call := &capabilities.Call{Args: args, WorkDir: "/wrong/ambient", Svc: svc}
+
+	if _, err := Dispatch().Execute(context.Background(), call); err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if captured.WorkDir != "/repo/from/args" {
+		t.Fatalf("Spec.WorkDir = %q, want explicit cwd arg", captured.WorkDir)
+	}
+}
+
 func TestDispatch_Execute_IncludesRouteHeader(t *testing.T) {
 	svc := capabilities.Services{
 		Dispatch: func(_ context.Context, spec dispatch.Spec) (dispatch.Result, error) {

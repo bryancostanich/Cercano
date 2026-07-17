@@ -35,6 +35,8 @@ func (dispatchCap) Schema() capabilities.Schema {
 			"task":            {"type": "string", "description": "Open-ended instruction for the sub-agent tool loop."},
 			"tools":           {"type": "array", "items": {"type": "string"}, "description": "Tool or capability names to grant, using the plain registered names (e.g. \"Read\", \"Glob\", \"Grep\", \"Bash\") — no host or MCP prefix. Omit to default to read-only tools."},
 			"tier":            {"type": "string", "enum": ["light", "standard", "deep"], "description": "How much reasoning the task needs — NOT where it runs (locus config decides that). \"light\" (default): recon/tracing/extraction the co-processor tier handles well. \"standard\": everyday coding judgment. \"deep\": hard reasoning that warrants the most capable model. Prefer \"light\" for delegated grunt work so it offloads off the frontier tier."},
+			"cwd":             {"type": "string", "description": "Optional absolute project working directory for the sub-agent. Use this for git/GitHub workflows so scoped tools run in the intended repository."},
+			"path":            {"type": "string", "description": "Alias for cwd."},
 			"intent":          {"type": "string", "description": "Optional concise human-facing reason for the delegation, shown in permission prompts."},
 			"conversation_id": {"type": "string", "description": "Optional conversation ID to associate with this dispatch."}
 		}
@@ -45,6 +47,8 @@ type dispatchArgs struct {
 	Task           string   `json:"task"`
 	Tools          []string `json:"tools"`
 	Tier           string   `json:"tier"`
+	Cwd            string   `json:"cwd"`
+	Path           string   `json:"path"`
 	Intent         string   `json:"intent"`
 	ConversationID string   `json:"conversation_id"`
 }
@@ -82,6 +86,13 @@ func (dispatchCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 	if convID == "" {
 		convID = a.ConversationID
 	}
+	workDir := strings.TrimSpace(a.Cwd)
+	if workDir == "" {
+		workDir = strings.TrimSpace(a.Path)
+	}
+	if workDir == "" {
+		workDir = call.WorkDir
+	}
 	res, err := call.Svc.Dispatch(ctx, dispatch.Spec{
 		Mode: dispatch.Agentic,
 		// RoleCoproc, not RoleMain: a delegated sub-agent is offloadable work,
@@ -93,7 +104,7 @@ func (dispatchCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 		Tier:           tierForDispatch(a.Tier),
 		Task:           a.Task,
 		Tools:          a.Tools,
-		WorkDir:        call.WorkDir,
+		WorkDir:        workDir,
 		ConversationID: convID,
 		Interactive:    false,
 		Emit: func(ev agenttools.ProgressEvent) {

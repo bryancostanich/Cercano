@@ -84,6 +84,23 @@ func TestRenderConfirmPrompt_DispatchFallsBackToTaskAndTools(t *testing.T) {
 	}
 }
 
+func TestRenderConfirmPrompt_DispatchBashUsesShellRiskNotDestructiveLabel(t *testing.T) {
+	m := minimalModel()
+	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
+		Name:       "dispatch",
+		Args:       `{"intent":"Check branch state before pushing","tools":["git_info","git_status","Bash"]}`,
+		Permission: "X",
+	}))
+	for _, want := range []string{"DELEGATED dispatch wants to run a delegated agent", "Risk: Bash grants shell access; approve only trusted tasks."} {
+		if !strings.Contains(s, want) {
+			t.Errorf("expected %q in prompt, got: %q", want, s)
+		}
+	}
+	if strings.Contains(s, "DESTRUCTIVE dispatch") {
+		t.Fatalf("dispatch prompt should explain delegated shell risk instead of labeling the delegation itself destructive: %q", s)
+	}
+}
+
 func TestRenderConfirmPrompt_DispatchPrefersIntent(t *testing.T) {
 	m := minimalModel()
 	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{

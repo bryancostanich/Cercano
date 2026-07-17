@@ -20,9 +20,11 @@ type gitStatusCap struct{}
 // GitStatus constructs the git_status capability.
 func GitStatus() capabilities.Capability { return gitStatusCap{} }
 
-func (gitStatusCap) Name() string                  { return "git_status" }
-func (gitStatusCap) Tier() capabilities.Tier        { return capabilities.TierR }
-func (gitStatusCap) Surfaces() capabilities.Surface { return capabilities.SurfaceAgent | capabilities.SurfaceMCP }
+func (gitStatusCap) Name() string            { return "git_status" }
+func (gitStatusCap) Tier() capabilities.Tier { return capabilities.TierR }
+func (gitStatusCap) Surfaces() capabilities.Surface {
+	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
+}
 func (gitStatusCap) Description() string {
 	return "Show working-tree status as rows of {path, x, y, status} via git status --porcelain=v2. Args: {path?: string} (default cwd)."
 }
@@ -125,15 +127,100 @@ func describeXY(xy string) string {
 	return xy
 }
 
+// gitInfoCap reports branch, HEAD, repo root, and upstream/ahead state without
+// requiring generic shell access. It exists so agents can do common branch
+// safety checks with an R-tier scoped git tool instead of Bash.
+type gitInfoCap struct{}
+
+// GitInfo constructs the git_info capability.
+func GitInfo() capabilities.Capability { return gitInfoCap{} }
+
+func (gitInfoCap) Name() string            { return "git_info" }
+func (gitInfoCap) Tier() capabilities.Tier { return capabilities.TierR }
+func (gitInfoCap) Surfaces() capabilities.Surface {
+	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
+}
+func (gitInfoCap) Description() string {
+	return "Report repository branch, HEAD SHA, root, upstream, and ahead/behind counts. Args: {path?: string} (default cwd)."
+}
+func (gitInfoCap) Schema() capabilities.Schema {
+	return capabilities.Schema(`{"type":"object","properties":{"path":{"type":"string"}}}`)
+}
+
+type gitInfoArgs struct {
+	Path string `json:"path"`
+}
+
+func (gitInfoCap) Execute(ctx context.Context, call *capabilities.Call) (*capabilities.Result, error) {
+	var a gitInfoArgs
+	if len(call.Args) > 0 {
+		if err := json.Unmarshal(call.Args, &a); err != nil {
+			return nil, fmt.Errorf("git_info: parse args: %w", err)
+		}
+	}
+	dir := a.Path
+	if dir == "" {
+		dir = call.WorkDir
+	}
+	run := func(args ...string) (string, error) {
+		cmd := exec.CommandContext(ctx, "git", args...)
+		if dir != "" {
+			cmd.Dir = dir
+		}
+		out, err := cmd.Output()
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(out)), nil
+	}
+	root, err := run("rev-parse", "--show-toplevel")
+	if err != nil {
+		return nil, fmt.Errorf("git_info: %w", err)
+	}
+	branch, _ := run("branch", "--show-current")
+	head, err := run("rev-parse", "--short", "HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("git_info: %w", err)
+	}
+	upstream, upstreamErr := run("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+	ahead, behind := 0, 0
+	if upstreamErr == nil && upstream != "" {
+		if counts, err := run("rev-list", "--left-right", "--count", "HEAD...@{u}"); err == nil {
+			fields := strings.Fields(counts)
+			if len(fields) == 2 {
+				ahead, _ = strconv.Atoi(fields[0])
+				behind, _ = strconv.Atoi(fields[1])
+			}
+		}
+	}
+	payload := map[string]any{
+		"root":     root,
+		"branch":   branch,
+		"head":     head,
+		"upstream": upstream,
+		"ahead":    ahead,
+		"behind":   behind,
+	}
+	b, _ := json.Marshal(payload)
+	res := &capabilities.Result{Type: capabilities.ResultJSON, JSON: b}
+	if branch == "" {
+		branch = "detached"
+	}
+	res.Detail = strings.TrimSpace(branch + " " + head)
+	return res, nil
+}
+
 // gitLogCap reads `git log` and returns commit rows.
 type gitLogCap struct{}
 
 // GitLog constructs the git_log capability.
 func GitLog() capabilities.Capability { return gitLogCap{} }
 
-func (gitLogCap) Name() string                  { return "git_log" }
-func (gitLogCap) Tier() capabilities.Tier        { return capabilities.TierR }
-func (gitLogCap) Surfaces() capabilities.Surface { return capabilities.SurfaceAgent | capabilities.SurfaceMCP }
+func (gitLogCap) Name() string            { return "git_log" }
+func (gitLogCap) Tier() capabilities.Tier { return capabilities.TierR }
+func (gitLogCap) Surfaces() capabilities.Surface {
+	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
+}
 func (gitLogCap) Description() string {
 	return "Show recent commit history as rows of {sha, author, date, subject}. Args: {path?: string, limit?: int (default 20), since?: string}."
 }

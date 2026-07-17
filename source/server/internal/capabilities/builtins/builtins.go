@@ -32,6 +32,7 @@ func Register(reg *capabilities.Registry) {
 	reg.MustRegister(Glob())
 	reg.MustRegister(Grep())
 	reg.MustRegister(GitStatus())
+	reg.MustRegister(GitInfo())
 	reg.MustRegister(GitLog())
 	reg.MustRegister(GetProtocol())
 	reg.MustRegister(Summarize())
@@ -57,6 +58,7 @@ func Register(reg *capabilities.Registry) {
 	// X-tier
 	reg.MustRegister(RmFile())
 	reg.MustRegister(GitPush())
+	reg.MustRegister(GitHubIssueClose())
 	reg.MustRegister(GitResetHard())
 	reg.MustRegister(GitRecover())
 	reg.MustRegister(GitLand())

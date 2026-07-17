@@ -3183,7 +3183,11 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 func (m Model) renderConfirmPrompt(p *pendingToolCall) string {
 	head := m.styles.Accent.Render("▸ ")
 	if p.Permission == "X" {
-		head = m.styles.Error.Render("▸ ⚠ DESTRUCTIVE ")
+		if isDispatchTool(p.Name) {
+			head = m.styles.Error.Render("▸ ⚠ DELEGATED ")
+		} else {
+			head = m.styles.Error.Render("▸ ⚠ DESTRUCTIVE ")
+		}
 	} else if p.Destructive {
 		// MCP tool that self-reports a destructive hint: surface a ⚠ marker
 		// (display-only — gating is unchanged; the hint never escalates tier).
@@ -3274,11 +3278,28 @@ func confirmPromptDetails(p *pendingToolCall) []string {
 		}
 	}
 	if isDispatchTool(p.Name) {
-		if tools := summarizeToolList(obj["tools"]); tools != "" {
+		tools := summarizeToolList(obj["tools"])
+		if tools != "" {
 			details = append(details, "Tools: "+truncateArgs(tools, 160))
+		}
+		if risk := dispatchToolRisk(tools); risk != "" {
+			details = append(details, "Risk: "+risk)
 		}
 	}
 	return details
+}
+
+func dispatchToolRisk(tools string) string {
+	parts := strings.Split(tools, ",")
+	for _, part := range parts {
+		if strings.TrimSpace(part) == "Bash" {
+			return "Bash grants shell access; approve only trusted tasks."
+		}
+	}
+	if tools != "" {
+		return "Delegated tools run as one approved unit."
+	}
+	return ""
 }
 
 func isDispatchTool(name string) bool {

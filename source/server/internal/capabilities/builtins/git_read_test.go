@@ -243,3 +243,49 @@ func TestGitLogCap_NoCommitsError(t *testing.T) {
 		t.Fatalf("error missing prefix: %v", err)
 	}
 }
+
+// --- git_info ---
+
+func TestGitInfoCap_Meta(t *testing.T) {
+	cap := GitInfo()
+	if cap.Name() != "git_info" {
+		t.Fatalf("name wrong: %q", cap.Name())
+	}
+	if cap.Tier() != capabilities.TierR {
+		t.Fatalf("tier wrong: %q", cap.Tier())
+	}
+	want := capabilities.SurfaceAgent | capabilities.SurfaceMCP
+	if cap.Surfaces() != want {
+		t.Fatalf("surfaces wrong: %v", cap.Surfaces())
+	}
+}
+
+func TestGitInfoCap_ReportsBranchAndHead(t *testing.T) {
+	dir := initTestRepo(t)
+	cap := GitInfo()
+	args, _ := json.Marshal(map[string]any{"path": dir})
+	res, err := cap.Execute(context.Background(), &capabilities.Call{Args: args})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(res.JSON, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["branch"] != "main" {
+		t.Fatalf("branch = %v, want main", got["branch"])
+	}
+	if got["head"] == "" {
+		t.Fatalf("head should be populated: %#v", got)
+	}
+	wantRoot, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["root"] != wantRoot {
+		t.Fatalf("root = %v, want %s", got["root"], wantRoot)
+	}
+	if !strings.Contains(res.Detail, "main") {
+		t.Fatalf("detail = %q, want branch summary", res.Detail)
+	}
+}

@@ -47,7 +47,7 @@ func verbForInProgress(tool string) string {
 		return "Stating"
 	case "rm_file":
 		return "Deleting"
-	case "git_status", "git_log", "git_add", "git_commit", "git_push":
+	case "git_info", "git_status", "git_log", "git_add", "git_commit", "git_push", "github_issue_close":
 		return "Git"
 	}
 	return tool
@@ -112,9 +112,15 @@ func humanizeArgs(tool, argsJSON, root, home string) string {
 		return pat
 	case "git_commit":
 		return str("message")
+	case "git_info", "git_status", "git_log":
+		return relPath(str("path"), root, home)
 	case "git_push":
 		rb := strings.TrimSpace(str("remote") + " " + str("branch"))
 		return rb
+	case "github_issue_close":
+		if n, ok := m["number"].(float64); ok && n > 0 {
+			return fmt.Sprintf("#%.0f", n)
+		}
 	}
 	return scalarPairs(m)
 }

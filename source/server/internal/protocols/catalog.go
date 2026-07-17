@@ -399,9 +399,13 @@ branch and short SHA, or "conflict at <file>".
 
 ## Guardrails
 
-- The sub-agent must scope every command with git -C <abs-worktree> and
-  report the exact branch and SHA it acted on. A sub-agent's git can
-  otherwise silently land in the shared main checkout.
+- Prefer scoped git/GitHub capabilities (git_info, git_status,
+  git_push, github_issue_close) over Bash whenever they cover the job.
+  Use Bash only when no scoped capability exists.
+- The sub-agent must scope every command with ` + "`git -C <abs-worktree>`" + ` or scope
+  every scoped tool with the absolute worktree path, then report the exact
+  branch and SHA it acted on. A sub-agent's
+  git can otherwise silently land in the shared main checkout.
 - Merge-to-main is never implied by delegation. Only land to main when the
   user's instruction for that specific work authorized it.
 - Authorization and final verification stay with the top-level agent. Only

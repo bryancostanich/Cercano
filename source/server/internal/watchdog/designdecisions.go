@@ -22,7 +22,7 @@ func (designDecisionsCheck) Applies(a Action) bool {
 		return false
 	}
 	tool := canonical(a.ToolName)
-	return editTools[tool] || tool == "run_command"
+	return editTools[tool]
 }
 
 func (designDecisionsCheck) Evaluate(ctx context.Context, a Action, oneShot OneShotFunc) (Verdict, error) {
@@ -43,7 +43,7 @@ func (designDecisionsCheck) Evaluate(ctx context.Context, a Action, oneShot OneS
 func buildDesignDecisionsPrompt(a Action) string {
 	var b strings.Builder
 	b.WriteString("You are a supervisor enforcing the design-decisions protocol.\n")
-	b.WriteString("The agent is about to run a code-mutating or command tool. Challenge the action when it appears to create, modify, or commit to behavior, interfaces, data models, module boundaries, state/control flow, prompt policy, tool schemas, or other structural choices, unless the recent transcript clearly shows the design-decisions protocol was followed: options were considered, trade-offs were discussed, a recommendation was made, and the human explicitly approved proceeding.\n\n")
+	b.WriteString("The agent is about to run a code-mutating tool. Challenge the action when it appears to create, modify, or commit to behavior, interfaces, data models, module boundaries, state/control flow, prompt policy, tool schemas, or other structural choices, unless the recent transcript clearly shows the design-decisions protocol was followed: options were considered, trade-offs were discussed, a recommendation was made, and the human explicitly approved proceeding.\n\n")
 	b.WriteString("Do NOT require the transcript to already prove there are multiple viable approaches before considering the protocol applicable; discovering alternatives is part of the protocol. Do NOT treat a single rationale paragraph, a claim that the edit is small/obvious, or a localized one-line behavior/config/schema/prompt change as protocol compliance. Truly mechanical edits, already-approved plans, test runs, and inspections are not violations when they do not change behavior or structure. When uncertain whether a mutating action is structural, prefer challenging; the agent can comply with the protocol or justify the exemption.\n\n")
 	fmt.Fprintf(&b, "Proposed action: %s %s\n\n", a.ToolName, string(a.ToolArgs))
 	b.WriteString("Recent transcript:\n")

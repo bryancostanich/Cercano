@@ -19,10 +19,10 @@ import (
 // behaves exactly as today.
 func TestBuildWatchdogDisabledByDefault(t *testing.T) {
 	s := &Server{
-		cfgSvc: cfgsvc.New("", config.Config{Watchdog: config.WatchdogConfig{Enabled: false}}, nil),
+		cfgSvc: cfgsvc.New("", config.Defaults(), nil),
 	}
 	if wd := s.buildWatchdog(); wd != nil {
-		t.Fatalf("expected nil watchdog when disabled, got %v", wd)
+		t.Fatalf("expected nil watchdog from default config, got %v", wd)
 	}
 }
 

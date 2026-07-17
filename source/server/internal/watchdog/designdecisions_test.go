@@ -14,8 +14,8 @@ func TestDesignDecisionsCheckAppliesToMutations(t *testing.T) {
 	if !ch.Applies(Action{Kind: "tool_call", ToolName: "edit_file"}) {
 		t.Fatal("edit_file mutation should be checked for design-decision skips")
 	}
-	if !ch.Applies(Action{Kind: "tool_call", ToolName: "run_command"}) {
-		t.Fatal("run_command should be checked for design-decision skips")
+	if ch.Applies(Action{Kind: "tool_call", ToolName: "run_command"}) {
+		t.Fatal("run_command should not be checked by design-decisions; command-focused protocols handle command safety")
 	}
 	if ch.Applies(Action{Kind: "turn_end"}) {
 		t.Fatal("turn_end should not apply to design-decisions")
@@ -66,6 +66,7 @@ func TestDesignDecisionsPromptUsesSuperpowersStyleTriggerContract(t *testing.T) 
 	}
 
 	mustNotContain := []string{
+		"code-mutating or command tool",
 		"Judge ONLY whether",
 		"with more than one viable approach, WITHOUT evidence",
 		"obvious one-line fixes are NOT violations",

@@ -56,6 +56,15 @@ func TestDefaults(t *testing.T) {
 	if cfg.LlamaServer.Restart.MaxAttempts != 3 {
 		t.Errorf("expected default llama-server restart attempts, got %d", cfg.LlamaServer.Restart.MaxAttempts)
 	}
+	if cfg.Watchdog.Enabled {
+		t.Fatal("watchdog must default off; it is experimental opt-in enforcement")
+	}
+	if cfg.Watchdog.Mode != "challenge-and-justify" {
+		t.Errorf("expected default watchdog mode challenge-and-justify, got %q", cfg.Watchdog.Mode)
+	}
+	if len(cfg.Watchdog.Checks) == 0 {
+		t.Fatal("watchdog default checks should remain configured but dormant while enabled=false")
+	}
 }
 
 func TestLoad_NoFile(t *testing.T) {
@@ -65,6 +74,24 @@ func TestLoad_NoFile(t *testing.T) {
 	}
 	if cfg.OllamaURL != "http://localhost:11434" {
 		t.Errorf("expected default OllamaURL, got %q", cfg.OllamaURL)
+	}
+}
+
+func TestSaveDefaultsWritesWatchdogDisabled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := Save(Defaults(), path); err != nil {
+		t.Fatalf("Save Defaults failed: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	body := string(data)
+	if !strings.Contains(body, "watchdog:\n") {
+		t.Fatalf("saved default config missing watchdog section:\n%s", body)
+	}
+	if !strings.Contains(body, "  enabled: false\n") {
+		t.Fatalf("saved default config must explicitly keep watchdog disabled:\n%s", body)
 	}
 }
 

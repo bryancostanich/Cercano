@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	"cercano/source/clients/cli/internal/theme"
@@ -46,6 +47,22 @@ func TestApply_DeltaOpensFreshBelowTool(t *testing.T) {
 	}
 	if es[1].Tool == nil {
 		t.Fatalf("tool entry should remain at index 1")
+	}
+}
+
+func TestApply_ToolEntryStartDropsRawToolCallJSON(t *testing.T) {
+	cv := newApplyTestView()
+	cv.Apply(chatAssistantDeltaMsg{token: `[{"name":"Bash","arguments":{"cmd":["git","status"],"cwd":"/repo"}}]`})
+	cv.Apply(toolEntryStartMsg{id: "call-1", name: "Bash"})
+
+	es := cv.Entries()
+	if len(es) != 1 || es[0].Tool == nil || es[0].Tool.ToolName != "Bash" {
+		t.Fatalf("expected only formatted tool entry, got %+v", es)
+	}
+	for _, e := range es {
+		if strings.Contains(e.Content, `"arguments"`) || strings.Contains(e.Content, `"name":"Bash"`) {
+			t.Fatalf("raw tool-call JSON leaked into transcript: %+v", es)
+		}
 	}
 }
 

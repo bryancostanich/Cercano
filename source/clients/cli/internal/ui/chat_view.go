@@ -434,12 +434,14 @@ func (c *chatView) Apply(msg tea.Msg) tea.Cmd {
 
 	case toolEntryStartMsg:
 		// Model just emitted a tool_use block. Close the open assistant text
-		// entry first: drop it if it's only the empty "thinking" placeholder,
-		// otherwise stop its streaming indicator. Then drop a folded in-progress
-		// line so the user sees what's being invoked. Args summary fills in on
-		// toolEntryStopMsg; result fills in on toolEntryExecCompleteMsg.
+		// entry first: drop it if it's only the empty "thinking" placeholder or
+		// a raw OpenAI-compatible tool-call JSON blob that some local runtimes
+		// stream as text before their parsed tool event. Otherwise stop its
+		// streaming indicator. Then drop a folded in-progress line so the user
+		// sees what's being invoked. Args summary fills in on toolEntryStopMsg;
+		// result fills in on toolEntryExecCompleteMsg.
 		if e := c.streamingTextEntry(); e != nil {
-			if e.Content == "" {
+			if e.Content == "" || looksLikeRawToolCallText(e.Content, m.name) {
 				c.dropLastEntry()
 			} else {
 				e.Streaming = false

@@ -515,8 +515,9 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	// until then routing degrades to local. providerSvc.Rebuild() is already
 	// called concurrently with live turns (runtime profile changes), so
 	// backgrounding it here is safe. Errors are logged, not fatal.
+	cloudWarnCfg := cfg.Clone()
 	go func() {
-		if err := srv.RebuildCloud(); err != nil {
+		if err := srv.RebuildCloud(); err != nil && shouldWarnCloudRebuildFailure(cloudWarnCfg) {
 			fmt.Fprintf(os.Stderr, "[WARN] cloud profile resolution failed: %v — cloud routing will degrade to local.\n", err)
 		}
 	}()
@@ -907,6 +908,21 @@ func main() {
 	default:
 		runServerMode(cfg)
 	}
+}
+
+// shouldWarnCloudRebuildFailure decides whether a startup cloud rebuild error
+// is actionable for the configured intent. Missing cloud is expected for
+// local/open-only configs, but it is a real startup problem when cloud is the
+// primary lane or when the user has explicitly configured an active profile.
+func shouldWarnCloudRebuildFailure(cfg config.Config) bool {
+	if strings.TrimSpace(cfg.ActiveCloudProfile) != "" {
+		return true
+	}
+	mode, err := locus.ParseMode(cfg.LocusMode)
+	if err != nil {
+		return true
+	}
+	return mode.Main().Preferred == locus.TierCloud
 }
 
 // runSetup checks prerequisites and pulls required Ollama models.

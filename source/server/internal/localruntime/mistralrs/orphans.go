@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -271,4 +273,67 @@ func (p *Provider) liveSiblingFor(ctx context.Context, modelPath, binary string,
 		}
 	}
 	return nil, false
+}
+
+func listMistralProcesses() []runtimeProcess {
+	out, err := exec.Command("ps", "axww", "-o", "pid=,ppid=,command=").Output()
+	if err != nil {
+		return nil
+	}
+	return parseRuntimeProcesses(string(out), "/mistralrs serve ")
+}
+
+func (p *Provider) sweepUnregisteredOrphans() {
+	for _, proc := range listMistralProcesses() {
+		if proc.PPID != 1 {
+			continue
+		}
+		if !p.commandUsesConfiguredModelDir(proc.Command) {
+			continue
+		}
+		terminateGroup(proc.PID)
+	}
+}
+
+type runtimeProcess struct {
+	PID     int
+	PPID    int
+	Command string
+}
+
+func (p *Provider) commandUsesConfiguredModelDir(command string) bool {
+	for _, dir := range p.cfg.ModelDirs {
+		expanded, err := expandPath(dir)
+		if err != nil || expanded == "" {
+			continue
+		}
+		if strings.Contains(command, filepath.Clean(expanded)) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseRuntimeProcesses(out, needle string) []runtimeProcess {
+	var processes []runtimeProcess
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.Contains(line, needle) {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+		ppid, err := strconv.Atoi(fields[1])
+		if err != nil {
+			continue
+		}
+		processes = append(processes, runtimeProcess{PID: pid, PPID: ppid, Command: strings.Join(fields[2:], " ")})
+	}
+	return processes
 }

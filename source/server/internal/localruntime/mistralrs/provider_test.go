@@ -444,3 +444,20 @@ func mustURLPort(t *testing.T, raw string) int {
 	}
 	return port
 }
+
+func TestParseRuntimeProcesses(t *testing.T) {
+	out := ` 67512     1 /Users/me/.cercano/bin/mistralrs serve -m /Users/me/.cercano/models/qwen/config.json --port 123
+ 69113 69111 /Users/me/.cercano/bin/mistralrs serve -m /Users/me/.cercano/models/qwen/config.json --port 456
+ 70000     1 grep mistralrs
+`
+	procs := parseRuntimeProcesses(out, "/mistralrs serve ")
+	if len(procs) != 2 {
+		t.Fatalf("process count = %d, want 2: %#v", len(procs), procs)
+	}
+	if procs[0].PID != 67512 || procs[0].PPID != 1 {
+		t.Fatalf("unexpected first process: %#v", procs[0])
+	}
+	if procs[1].PID != 69113 || procs[1].PPID != 69111 {
+		t.Fatalf("unexpected second process: %#v", procs[1])
+	}
+}

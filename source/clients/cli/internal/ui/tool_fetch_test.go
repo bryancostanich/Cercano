@@ -81,7 +81,7 @@ func TestMouseToggleFold_ClearsFocusCaret(t *testing.T) {
 	c.SetEntriesSlice([]*Entry{
 		{Tool: &ToolEntry{ToolUseID: "u1", ToolName: "Read", ArgsSummary: "a.go", Status: ToolStatusComplete, Folded: true}},
 	})
-	c.SetEntries(c.Entries()) // build arrowRows
+	c.SetEntries(c.Entries()) // build virtual layout rows
 
 	// Enter keyboard nav first — that legitimately sets the focus caret.
 	if !c.EnterToolNav() {

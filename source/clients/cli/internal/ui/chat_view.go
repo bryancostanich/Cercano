@@ -62,10 +62,6 @@ type chatView struct {
 	// tool bodies, wholesale replacement). Dynamic tail mutations do not need to
 	// bump it because the assembled-prefix cache never includes them.
 	contentGen int
-	// arrowRows maps absolute content lines (indexes into plainLines) to the
-	// entries index whose fold arrow is drawn there. Rebuilt by SetEntries on
-	// every render, so it can never drift from the drawn layout.
-	arrowRows []arrowRow
 	// layout is the virtual transcript index that backs visible-window rendering
 	// without assembling a giant transcript string.
 	layout transcriptLayout
@@ -895,7 +891,6 @@ func (c *chatView) SetEntries(entries []*Entry) {
 	wasAtBottom := c.AtBottom()
 
 	c.layout = c.rebuildTranscriptLayout(entries)
-	c.arrowRows = c.layout.absoluteArrowRows()
 	c.plainDirty = true
 	c.scroll.SetTotalLineCount(c.layout.totalLines)
 

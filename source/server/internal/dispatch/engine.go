@@ -82,6 +82,8 @@ type Spec struct {
 type Result struct {
 	Text         string
 	Model        string
+	Provider     string
+	Tier         string
 	IsCloud      bool
 	Notice       string
 	InputTokens  int
@@ -230,12 +232,25 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 	}
 
 	// 7. Return result.
+	servedModel := model
+	if resp.Model != "" {
+		servedModel = resp.Model
+	}
 	return Result{
 		Text:         text,
-		Model:        model,
+		Model:        servedModel,
+		Provider:     providerName(sel),
+		Tier:         string(spec.Tier),
 		IsCloud:      sel.IsCloud,
 		Notice:       sel.Notice,
 		InputTokens:  resp.InputTokens,
 		OutputTokens: resp.OutputTokens,
 	}, nil
+}
+
+func providerName(sel inference.Selection) string {
+	if sel.Provider == nil {
+		return ""
+	}
+	return sel.Provider.Name()
 }

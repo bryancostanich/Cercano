@@ -3,6 +3,7 @@ package builtins
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"cercano/source/server/internal/capabilities"
@@ -73,6 +74,35 @@ func TestDispatch_Execute_ForwardsSpec(t *testing.T) {
 	}
 }
 
+func TestDispatch_Execute_IncludesRouteHeader(t *testing.T) {
+	svc := capabilities.Services{
+		Dispatch: func(_ context.Context, spec dispatch.Spec) (dispatch.Result, error) {
+			return dispatch.Result{
+				Text:         "done",
+				Model:        "qwen3-30b-a3b-instruct-2507",
+				Provider:     "mistralrs",
+				Tier:         string(spec.Tier),
+				IsCloud:      false,
+				GrantedTools: []string{"Read"},
+			}, nil
+		},
+	}
+	args, _ := json.Marshal(map[string]any{"task": "do X", "tools": []string{"Read"}})
+	call := &capabilities.Call{Args: args, WorkDir: "/proj", Svc: svc}
+
+	res, err := Dispatch().Execute(context.Background(), call)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	want := "[sub-agent route: open provider=mistralrs model=qwen3-30b-a3b-instruct-2507 tier=fast_light]"
+	if !strings.Contains(res.Text, want) {
+		t.Fatalf("result missing route header %q:\n%s", want, res.Text)
+	}
+	if !strings.Contains(res.Text, "[sub-agent tools: Read]") {
+		t.Fatalf("result missing tools header:\n%s", res.Text)
+	}
+}
+
 func TestDispatch_Execute_TierKnob(t *testing.T) {
 	// The "tier" arg expresses reasoning demand only; it must map onto the
 	// taxonomy tier without touching Role (location stays RoleCoproc always).
@@ -83,7 +113,7 @@ func TestDispatch_Execute_TierKnob(t *testing.T) {
 		{"light", config.TierFastLight},
 		{"standard", config.TierEveryday},
 		{"deep", config.TierMostCapable},
-		{"", config.TierFastLight},        // omitted -> lightest
+		{"", config.TierFastLight},         // omitted -> lightest
 		{"nonsense", config.TierFastLight}, // unrecognized -> lightest
 		{"DEEP", config.TierMostCapable},   // case-insensitive
 	}

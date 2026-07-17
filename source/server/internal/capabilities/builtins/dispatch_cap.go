@@ -118,18 +118,45 @@ func (dispatchCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 	if err != nil {
 		return nil, err
 	}
-	// Lead with the sub-agent's actual toolset so a mis-granted run is
-	// visible to the caller immediately (a read-only sub-agent once burned
-	// 62 turns discovering it couldn't edit).
+	// Lead with route metadata and the sub-agent's actual toolset so callers can
+	// see which model/runtime handled the delegated work and whether a mis-grant
+	// quietly changed the sub-agent's capabilities.
 	header := ""
+	if route := dispatchRouteHeader(res); route != "" {
+		header += route + "\n"
+	}
 	if len(res.GrantedTools) > 0 {
-		header = "[sub-agent tools: " + strings.Join(res.GrantedTools, ", ")
+		header += "[sub-agent tools: " + strings.Join(res.GrantedTools, ", ")
 		if len(res.IgnoredTools) > 0 {
 			header += " — ignored unknown: " + strings.Join(res.IgnoredTools, ", ")
 		}
-		header += "]\n\n"
+		header += "]\n"
+	}
+	if header != "" {
+		header += "\n"
 	}
 	return capabilities.NewTextResult(header + res.Text), nil
+}
+
+func dispatchRouteHeader(res dispatch.Result) string {
+	if res.Model == "" && res.Provider == "" && res.Tier == "" {
+		return ""
+	}
+	location := "open"
+	if res.IsCloud {
+		location = "cloud"
+	}
+	parts := []string{"[sub-agent route: " + location}
+	if res.Provider != "" {
+		parts = append(parts, "provider="+res.Provider)
+	}
+	if res.Model != "" {
+		parts = append(parts, "model="+res.Model)
+	}
+	if res.Tier != "" {
+		parts = append(parts, "tier="+res.Tier)
+	}
+	return strings.Join(parts, " ") + "]"
 }
 
 // agentGrantTiers maps every agent-surface tool name (display aliases and

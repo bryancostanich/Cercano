@@ -372,9 +372,17 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		x.persistTurn(ctx, subConvID, agent.UserMessage(spec.Task, nil))
 		onTurn = func(m llm.Message) { x.persistTurn(ctx, subConvID, m) }
 	}
-	log.Printf("[dispatch] subagent start: conv=%s model=%s tools=%v", subConvID, model, registryToolNames(reg))
+	provider := ""
+	if sel.Provider != nil {
+		provider = sel.Provider.Name()
+	}
+	location := "open"
+	if sel.IsCloud {
+		location = "cloud"
+	}
+	log.Printf("[dispatch] subagent start: conv=%s route=%s provider=%s model=%s tier=%s tools=%v", subConvID, location, provider, model, spec.Tier, registryToolNames(reg))
 	subTitle := "sub"
-	emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "started", Text: fmt.Sprintf("sub-agent start: conv=%s model=%s tools=%s", subConvID, model, strings.Join(granted, ", ")), GrantedTools: granted, IgnoredTools: ignored})
+	emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "started", Text: fmt.Sprintf("sub-agent start: conv=%s route=%s provider=%s model=%s tier=%s tools=%s", subConvID, location, provider, model, spec.Tier, strings.Join(granted, ", ")), GrantedTools: granted, IgnoredTools: ignored})
 
 	// The subagent's provider calls must carry their OWN session identity, not
 	// the parent conversation's (inherited via ctx), so anomaly attribution and
@@ -412,8 +420,8 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "error", Text: fmt.Sprintf("sub-agent failed: conv=%s err=%v", subConvID, err), GrantedTools: granted, IgnoredTools: ignored, IsError: true})
 		return dispatch.Result{}, err
 	}
-	log.Printf("[dispatch] subagent done: conv=%s iterations=%d tokens_in=%d tokens_out=%d",
-		subConvID, res.Iterations, res.InputTokens, res.OutputTokens)
+	log.Printf("[dispatch] subagent done: conv=%s route=%s provider=%s model=%s tier=%s iterations=%d tokens_in=%d tokens_out=%d",
+		subConvID, location, provider, model, spec.Tier, res.Iterations, res.InputTokens, res.OutputTokens)
 	emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "done", Text: fmt.Sprintf("sub-agent done: conv=%s iterations=%d", subConvID, res.Iterations), GrantedTools: granted, IgnoredTools: ignored})
 
 	// 5. Assemble result. Prefer ToolLoopResult.FinalText (the last assistant
@@ -434,6 +442,8 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	return dispatch.Result{
 		Text:              text,
 		Model:             model,
+		Provider:          provider,
+		Tier:              string(spec.Tier),
 		IsCloud:           sel.IsCloud,
 		InputTokens:       res.InputTokens,
 		OutputTokens:      res.OutputTokens,

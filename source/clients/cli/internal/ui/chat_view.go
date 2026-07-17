@@ -1171,7 +1171,16 @@ func renderDivider(label string, width int, styles theme.Styles) string {
 // renderer. Committed blocks are cached; the tail renders live (with any open
 // code fence synthetically closed) so streaming code highlights as it grows.
 func (c *chatView) renderAssistantMarkdown(e *Entry, textW int) string {
-	blocks, tail := render.SplitBlocks(e.Content)
+	content := e.Content
+	if !e.Streaming && !strings.HasSuffix(content, "\n") {
+		// SplitBlocks keeps an unterminated table at EOF in the live tail so the
+		// streaming renderer does not commit a row until its newline arrives. Once
+		// the assistant turn is frozen, EOF is a real terminator: a final table
+		// without a trailing newline should still use the responsive grid renderer
+		// rather than falling back to Glamour's plain Markdown table style.
+		content += "\n"
+	}
+	blocks, tail := render.SplitBlocks(content)
 	prefix := c.committedPrefix(e, blocks, textW)
 	if strings.TrimSpace(tail) != "" {
 		live := c.md.RenderLive(closeOpenFence(render.PinUntypedFences(tail)), textW)

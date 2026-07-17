@@ -49,6 +49,21 @@ func TestAssistantMarkdown_FormatsProseAndTable(t *testing.T) {
 	}
 }
 
+func TestAssistantMarkdown_FinalTableWithoutTrailingNewlineUsesGrid(t *testing.T) {
+	cv := newMdChatView()
+	e := &Entry{
+		Role:    RoleAssistant,
+		Content: "| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |",
+	}
+	vis := plain(cv.renderAssistantMarkdown(e, 60))
+	if !strings.Contains(vis, "┌") || !strings.Contains(vis, "┘") || !strings.Contains(vis, "│") {
+		t.Fatalf("expected final table to use grid renderer, got %q", vis)
+	}
+	if strings.Contains(vis, "|---|---|") {
+		t.Fatalf("expected markdown separator to be consumed by table renderer, got %q", vis)
+	}
+}
+
 func TestAssistantMarkdown_HeadingsDropHashMarker(t *testing.T) {
 	cv := newMdChatView()
 	e := &Entry{Role: RoleAssistant, Content: "# Title\n\n## Subtitle\n\nbody\n"}

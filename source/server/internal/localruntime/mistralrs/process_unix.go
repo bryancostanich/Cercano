@@ -50,6 +50,7 @@ func processCommand(pid int) string {
 // SIGTERM; the escalation exists for a wedged one.
 func terminateGroup(pid int) {
 	_ = syscall.Kill(-pid, syscall.SIGTERM)
+	_ = syscall.Kill(pid, syscall.SIGTERM)
 	for i := 0; i < 20; i++ {
 		if !processAlive(pid) {
 			return
@@ -57,4 +58,5 @@ func terminateGroup(pid int) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	_ = syscall.Kill(-pid, syscall.SIGKILL)
+	_ = syscall.Kill(pid, syscall.SIGKILL)
 }

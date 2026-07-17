@@ -283,14 +283,16 @@ func listMistralProcesses() []runtimeProcess {
 	return parseRuntimeProcesses(string(out), "/mistralrs serve ")
 }
 
-func (p *Provider) sweepUnregisteredOrphans() {
+func (p *Provider) sweepUnregisteredOrphans(sink localruntime.LogSink) {
 	for _, proc := range listMistralProcesses() {
 		if proc.PPID != 1 {
 			continue
 		}
 		if !p.commandUsesConfiguredModelDir(proc.Command) {
+			p.emit(sink, "debug", "", "", fmt.Sprintf("ignored unregistered mistral.rs orphan pid %d outside configured model dirs: %s", proc.PID, proc.Command))
 			continue
 		}
+		p.emit(sink, "warn", "", "", fmt.Sprintf("reaping unregistered mistral.rs orphan pid %d: %s", proc.PID, proc.Command))
 		terminateGroup(proc.PID)
 	}
 }

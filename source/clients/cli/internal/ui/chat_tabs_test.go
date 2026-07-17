@@ -71,6 +71,26 @@ func TestSubAgentNestedLabelsUseParentOrdinal(t *testing.T) {
 	}
 }
 
+func TestSubAgentErrorEventMarksTabAndShowsMessage(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	m.applySubAgentEvent(subAgentEventMsg{id: "child-1", kind: "started"})
+	m.applySubAgentEvent(subAgentEventMsg{id: "child-1", kind: "error", text: "sub-agent failed: boom"})
+
+	tab := m.chatTabs.tabs["child-1"]
+	if tab == nil || !tab.done || !tab.errored {
+		t.Fatalf("expected errored done tab, got %+v", tab)
+	}
+	var joined []string
+	for _, e := range tab.view.Entries() {
+		joined = append(joined, e.Content)
+	}
+	if !strings.Contains(strings.Join(joined, "\n"), "sub-agent failed: boom") {
+		t.Fatalf("error text not rendered in sub-agent tab entries: %q", strings.Join(joined, "\n"))
+	}
+}
+
 func TestSubAgentToolEventRoutesToChildTab(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -190,6 +210,76 @@ func TestCleanupFinishedSubAgentTabs(t *testing.T) {
 	}
 	if m.chatTabs.focused {
 		t.Fatal("strip focus should release when no sub tabs remain")
+	}
+}
+
+func TestCleanupFinishedSubAgentTabs_RemovesActiveErroredEmptySubAgent(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.applySubAgentEvent(subAgentEventMsg{id: "stale", kind: "started", tools: []string{"Read"}})
+	m.switchChatTab("stale")
+
+	tab := m.chatTabs.tabs["stale"]
+	if tab == nil {
+		t.Fatal("missing stale tab")
+	}
+	tab.done = true
+	tab.errored = true
+	m.cleanupFinishedSubAgentTabs()
+
+	if _, ok := m.chatTabs.tabs["stale"]; ok {
+		t.Fatal("active errored tab with no assistant/tool transcript should be pruned")
+	}
+	if m.chatTabs.active != mainChatTabID {
+		t.Fatalf("active tab = %q, want main after stale tab prune", m.chatTabs.active)
+	}
+}
+
+func TestCleanupFinishedSubAgentTabs_KeepsActiveErroredSubAgentWithErrorMessage(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.applySubAgentEvent(subAgentEventMsg{id: "err", kind: "started"})
+	m.applySubAgentEvent(subAgentEventMsg{id: "err", kind: "error", text: "sub-agent failed: boom"})
+	m.switchChatTab("err")
+
+	m.cleanupFinishedSubAgentTabs()
+
+	if _, ok := m.chatTabs.tabs["err"]; !ok {
+		t.Fatal("active errored tab with explicit error message should be kept for review")
+	}
+}
+
+func TestCleanupFinishedSubAgentTabs_KeepsActiveErroredSubAgentWithTranscript(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.applySubAgentEvent(subAgentEventMsg{id: "err", kind: "started"})
+	m.applySubAgentEvent(subAgentEventMsg{id: "err", kind: "token", inner: chatAssistantDeltaMsg{token: "partial findings"}})
+	m.switchChatTab("err")
+
+	tab := m.chatTabs.tabs["err"]
+	if tab == nil {
+		t.Fatal("missing err tab")
+	}
+	tab.done = true
+	tab.errored = true
+	m.cleanupFinishedSubAgentTabs()
+
+	if _, ok := m.chatTabs.tabs["err"]; !ok {
+		t.Fatal("active errored tab with assistant transcript should be kept for review")
+	}
+}
+
+func TestChatDoneMarksAndPrunesStaleSubAgentTabs(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.applySubAgentEvent(subAgentEventMsg{id: "stale", kind: "started"})
+	m.switchChatTab("stale")
+
+	m.finishStaleSubAgentTabs("sub-agent stopped without a terminal event")
+	m.cleanupFinishedSubAgentTabs()
+
+	if _, ok := m.chatTabs.tabs["stale"]; ok {
+		t.Fatal("stale empty sub-agent tab should be pruned once parent turn ends")
 	}
 }
 

@@ -260,11 +260,15 @@ func (m *Model) cleanupFinishedSubAgentTabs() {
 	order := make([]string, 0, len(m.chatTabs.order))
 	for _, id := range m.chatTabs.order {
 		tab := m.chatTabs.tabs[id]
-		// Keep main, the active tab, anything still running, and tabs restored
-		// from persisted transcripts on resume. Restored tabs arrive already
-		// finished (done=true), so without the tab.restored guard the very
-		// next turn would sweep them the moment they were reopened.
-		if id == mainChatTabID || id == m.chatTabs.active || tab == nil || !tab.done || tab.restored {
+		if id == mainChatTabID || tab == nil || !tab.done || tab.restored {
+			order = append(order, id)
+			continue
+		}
+		// Keep the active tab for post-mortem only when it contains something
+		// worth reading. A failed/abandoned dispatch can leave behind a tab with
+		// only the synthetic "started"/"tools" lifecycle lines; preserving that
+		// tab traps the user in an empty error surface and reopens it on resume.
+		if id == m.chatTabs.active && (!tab.errored || subAgentTabHasSubstantiveTranscript(tab)) {
 			order = append(order, id)
 			continue
 		}
@@ -272,8 +276,52 @@ func (m *Model) cleanupFinishedSubAgentTabs() {
 		m.dismissSubAgentTab(id) // persist the sweep so a resume doesn't reopen it
 	}
 	m.chatTabs.order = order
+	if _, ok := m.chatTabs.tabs[m.chatTabs.active]; !ok {
+		m.chatTabs.active = mainChatTabID
+	}
 	if !m.hasSubAgentTabs() {
 		m.chatTabs.focused = false
+	}
+}
+
+func subAgentTabHasSubstantiveTranscript(tab *chatTab) bool {
+	if tab == nil {
+		return false
+	}
+	for _, e := range tab.view.Entries() {
+		if e == nil {
+			continue
+		}
+		if e.Tool != nil {
+			return true
+		}
+		content := strings.TrimSpace(e.Content)
+		if e.Role == RoleAssistant && content != "" {
+			return true
+		}
+		if e.Role == RoleSystem && strings.HasPrefix(content, "sub-agent failed:") {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Model) finishStaleSubAgentTabs(reason string) {
+	m.ensureChatTabs()
+	for _, id := range m.chatTabs.order {
+		if id == mainChatTabID {
+			continue
+		}
+		tab := m.chatTabs.tabs[id]
+		if tab == nil || tab.done || tab.restored {
+			continue
+		}
+		tab.done = true
+		tab.errored = true
+		if reason != "" {
+			tab.view.AppendEntry(&Entry{Role: RoleSystem, Content: reason})
+			tab.view.rebuild()
+		}
 	}
 }
 

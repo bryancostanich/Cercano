@@ -1479,6 +1479,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case chatDoneMsg:
 			m.applyTurnTelemetry(ev) // footer fields
 			m.mainChat().Apply(ev)   // transcript finalize + notice
+			m.finishStaleSubAgentTabs("sub-agent stopped without a terminal event")
 			// Turn done: retire finished sub-agent tabs now (ephemeral tabs)
 			// instead of waiting for the next turn to start. The sweep spares
 			// main, the active tab, and any still-running tab; refresh the
@@ -1497,6 +1498,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.pendingConfirm = toolConfirm(tc)
 			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.renderConfirmPrompt(tc)})
+		case chatErrorMsg:
+			m.finishStaleSubAgentTabs("sub-agent stopped after parent stream error")
+			m.mainChat().Apply(ev)
+			if m.hasSubAgentTabs() {
+				m.cleanupFinishedSubAgentTabs()
+			}
 		default:
 			// Remaining transcript events (tool stop/exec-start/exec-complete,
 			// error) carry no turn-telemetry side effect.
@@ -3101,6 +3108,13 @@ func (m *Model) restoreSubAgentTabs(ctx context.Context, conversationID string) 
 		view := m.ensureSubAgentTab(child.ID, child.ParentID, "", child.GrantedTools)
 		view.SetEntriesSlice(resumeEntries(turns, 0))
 		view.rebuild()
+		// Sub-agent rows with only the delegated user prompt (or only synthetic
+		// lifecycle text) are stale starts that never produced a readable
+		// transcript. Dismiss them so a wedged dispatch tab does not reopen forever.
+		if tab := m.chatTabs.tabs[child.ID]; tab != nil && !subAgentTabHasSubstantiveTranscript(tab) {
+			m.closeSubAgentTab(child.ID)
+			continue
+		}
 		// Mark done+restored so the tab renders without an activity dot and, per
 		// cleanupFinishedSubAgentTabs, survives the next turn's sweep.
 		if tab := m.chatTabs.tabs[child.ID]; tab != nil {

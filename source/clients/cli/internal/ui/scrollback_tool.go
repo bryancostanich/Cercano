@@ -53,12 +53,13 @@ type ToolEntry struct {
 	// tool_exec_complete event / GetToolCall detail. Numbers the expanded
 	// args diff. 0 = unknown (in-flight, non-file tools, pre-upgrade
 	// history) → the diff renders unnumbered.
-	StartLine int
-	Status    ToolStatus
-	StartedAt time.Time     // exec-start wall clock; result blurb times against it
-	Duration  time.Duration // exec-start → exec-complete; set at the same time ResultSummary is. Used to aggregate group timings.
-	Folded    bool          // one-line folded view vs. expanded args+result body
-	Loading   bool          // a lazy GetToolCall fetch for the expanded body is in flight
+	StartLine  int
+	Status     ToolStatus
+	StartedAt  time.Time     // exec-start wall clock; result blurb times against it
+	Duration   time.Duration // exec-start → exec-complete; set at the same time ResultSummary is. Used to aggregate group timings.
+	Folded     bool          // one-line folded view vs. expanded args+result body
+	Loading    bool          // a lazy GetToolCall fetch for the expanded body is in flight
+	SubAgentID string        // child conversation spawned by dispatch/workflow, if any
 }
 
 // renderToolEntry produces the scrollback text for one tool call.
@@ -119,6 +120,9 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 		statusBit = toolEntrySuccess.Render("✓") + toolEntryFaint.Render(" "+flattenSummary(e.ResultSummary))
 	case ToolStatusError:
 		statusBit = toolEntryError.Render("⚠") + toolEntryFaint.Render(" "+flattenSummary(e.ResultSummary))
+	}
+	if e.SubAgentID != "" {
+		statusBit += toolEntryFaint.Render(" · open tab")
 	}
 
 	// While the call is in progress, render the tool name in active-voice

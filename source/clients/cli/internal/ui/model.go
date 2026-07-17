@@ -945,6 +945,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.MouseDown(mouse.X, mouse.Y-m.promptTop())
 			return m, nil
 		}
+		if subID, ok := m.activeChat().SubAgentTabAt(mouse.X, mouse.Y-m.scrollbarTop); ok {
+			cmd := m.reopenSubAgentTabCmd(subID)
+			m.refreshViewport()
+			return m, cmd
+		}
 		// Tool-entry fold click: if the click landed on a tool entry line,
 		// focus it and toggle its Folded state — mirrors keyboard
 		// ToggleFocusedFold. Short-circuits before selection so a click on
@@ -2013,6 +2018,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			body = slash.RenderToolResult(msg.Res)
 		}
 		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: body})
+		m.refreshViewport()
+		return m, nil
+
+	case subAgentReopenMsg:
+		m.applySubAgentReopen(msg)
 		m.refreshViewport()
 		return m, nil
 

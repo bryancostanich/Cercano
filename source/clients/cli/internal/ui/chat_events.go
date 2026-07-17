@@ -75,6 +75,12 @@ type chatDoneMsg struct {
 }
 type chatErrorMsg struct{ err error }
 
+type subAgentReopenMsg struct {
+	id    string
+	turns []agentclient.PersistedTurn
+	err   error
+}
+
 // watchdogEventMsg is emitted by the main agent driver when the server's
 // watchdog fires. kind is "challenge", "block", or "echo"; chatView.Apply
 // renders each differently in scrollback.
@@ -89,26 +95,28 @@ type watchdogEventMsg struct {
 // tab. inner is any chatView.Apply-compatible transcript event; lifecycle
 // events use kind/tool metadata directly.
 type subAgentEventMsg struct {
-	id       string
-	parentID string
-	title    string
-	kind     string
-	tools    []string
-	ignored  []string
-	inner    tea.Msg
-	toolName string
-	text     string
+	id        string
+	parentID  string
+	title     string
+	kind      string
+	tools     []string
+	ignored   []string
+	inner     tea.Msg
+	toolUseID string
+	toolName  string
+	text      string
 }
 
 func subAgentEventMsgFromStream(sm agentclient.StreamMsg) subAgentEventMsg {
 	msg := subAgentEventMsg{
-		id:       sm.SubAgentID,
-		parentID: sm.SubAgentParentID,
-		title:    sm.SubAgentTitle,
-		kind:     sm.SubAgentKind,
-		tools:    append([]string(nil), sm.GrantedTools...),
-		ignored:  append([]string(nil), sm.IgnoredTools...),
-		text:     sm.SubAgentText,
+		id:        sm.SubAgentID,
+		parentID:  sm.SubAgentParentID,
+		title:     sm.SubAgentTitle,
+		kind:      sm.SubAgentKind,
+		tools:     append([]string(nil), sm.GrantedTools...),
+		ignored:   append([]string(nil), sm.IgnoredTools...),
+		toolUseID: sm.ToolUseID,
+		text:      sm.SubAgentText,
 	}
 	switch sm.SubAgentKind {
 	case "token":

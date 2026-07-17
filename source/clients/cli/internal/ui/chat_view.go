@@ -1302,6 +1302,35 @@ func (c *chatView) MouseInText(localX, localY int) bool {
 // click was handled — the host should refresh the viewport and skip its
 // selection begin. Only the arrow row itself claims a click; expanded tool
 // bodies and prose fall through so text selection works everywhere else.
+func (c *chatView) SubAgentTabAt(localX, localY int) (string, bool) {
+	if !c.MouseInText(localX, localY) {
+		return "", false
+	}
+	r, ok := c.arrowRowAt(c.vp.YOffset()+localY, localX)
+	if !ok || r.group || localX <= 3 || r.entry < 0 || r.entry >= len(c.entries) {
+		return "", false
+	}
+	tool := c.entries[r.entry].Tool
+	if tool == nil || tool.SubAgentID == "" {
+		return "", false
+	}
+	return tool.SubAgentID, true
+}
+
+func (c *chatView) attachSubAgentToTool(toolUseID, subAgentID string) {
+	if toolUseID == "" || subAgentID == "" {
+		return
+	}
+	for _, e := range c.entries {
+		if e == nil || e.Tool == nil || e.Tool.ToolUseID != toolUseID {
+			continue
+		}
+		e.Tool.SubAgentID = subAgentID
+		c.markTranscriptDirty()
+		return
+	}
+}
+
 func (c *chatView) MouseToggleFold(localX, localY int) bool {
 	if !c.MouseInText(localX, localY) {
 		return false

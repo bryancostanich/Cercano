@@ -71,6 +71,51 @@ func TestSubAgentNestedLabelsUseParentOrdinal(t *testing.T) {
 	}
 }
 
+func TestSubAgentStartedAttachesOpenTabAffordanceToDispatchTool(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
+	m.mainChat().Apply(toolEntryStartMsg{id: "tool-1", name: "dispatch"})
+	m.mainChat().Apply(toolEntryStopMsg{id: "tool-1", argsSummary: "conversation_id=recon task=trace"})
+	m.mainChat().Apply(toolEntryExecCompleteMsg{id: "tool-1", summary: "done"})
+
+	m.applySubAgentEvent(subAgentEventMsg{id: "child-1", kind: "started", toolUseID: "tool-1", tools: []string{"Read"}})
+
+	entries := m.mainChat().Entries()
+	if len(entries) == 0 || entries[0].Tool == nil || entries[0].Tool.SubAgentID != "child-1" {
+		t.Fatalf("dispatch tool did not record spawned sub-agent: %+v", entries)
+	}
+	out := renderToolEntry(*entries[0].Tool, 100, false, m.styles, m.mainChat().md)
+	if !strings.Contains(stripAnsiCSI(out), "open tab") {
+		t.Fatalf("dispatch tool line should show open tab affordance, got %q", stripAnsiCSI(out))
+	}
+	m.mainChat().rebuild()
+	if subID, ok := m.mainChat().SubAgentTabAt(10, 0); !ok || subID != "child-1" {
+		t.Fatalf("expected clickable sub-agent hit on tool row, got id=%q ok=%v", subID, ok)
+	}
+}
+
+func TestReopenSubAgentTabClearsClosedState(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.applySubAgentEvent(subAgentEventMsg{id: "child-1", kind: "started"})
+	if !m.closeSubAgentTab("child-1") {
+		t.Fatal("expected close to succeed")
+	}
+	if !m.chatTabs.closed["child-1"] {
+		t.Fatal("closed state was not recorded")
+	}
+
+	if cmd := m.reopenSubAgentTabCmd("child-1"); cmd != nil {
+		t.Fatal("nil-agent reopen should be synchronous")
+	}
+	if _, ok := m.chatTabs.tabs["child-1"]; !ok {
+		t.Fatal("expected sub-agent tab to reopen")
+	}
+	if m.chatTabs.closed["child-1"] {
+		t.Fatal("reopen should clear closed state so late events can route")
+	}
+}
+
 func TestSubAgentPromptEventRendersLaunchingPrompt(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})

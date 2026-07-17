@@ -1,8 +1,12 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 type chatTab struct {
@@ -186,6 +190,46 @@ func (m *Model) switchChatTab(id string) bool {
 // closable. The id is remembered as closed so any later streamed events for it
 // are dropped rather than resurrecting the tab. Focus falls back to the
 // previous tab in the strip, ending at main.
+func (m *Model) reopenSubAgentTabCmd(id string) tea.Cmd {
+	if id == "" {
+		return nil
+	}
+	delete(m.chatTabs.closed, id)
+	if m.agent == nil {
+		view := m.ensureSubAgentTab(id, "", "", nil)
+		view.AppendEntry(&Entry{Role: RoleSystem, Content: "reopened sub-agent tab"})
+		view.rebuild()
+		m.switchChatTab(id)
+		return nil
+	}
+	agent := m.agent
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		turns, err := agent.ResumeConversation(ctx, id)
+		return subAgentReopenMsg{id: id, turns: turns, err: err}
+	}
+}
+
+func (m *Model) applySubAgentReopen(msg subAgentReopenMsg) {
+	if msg.id == "" {
+		return
+	}
+	delete(m.chatTabs.closed, msg.id)
+	view := m.ensureSubAgentTab(msg.id, "", "", nil)
+	if msg.err != nil {
+		view.AppendEntry(&Entry{Role: RoleSystem, Content: "failed to reopen sub-agent tab: " + msg.err.Error()})
+	} else {
+		view.SetEntriesSlice(resumeEntries(msg.turns, 0))
+		if tab := m.chatTabs.tabs[msg.id]; tab != nil {
+			tab.done = true
+			tab.restored = true
+		}
+	}
+	view.rebuild()
+	m.switchChatTab(msg.id)
+}
+
 func (m *Model) closeActiveSubAgentTab() bool {
 	m.ensureChatTabs()
 	return m.closeSubAgentTab(m.chatTabs.active)
@@ -339,6 +383,9 @@ func (m *Model) applySubAgentEvent(ev subAgentEventMsg) {
 		return
 	}
 	view := m.ensureSubAgentTab(ev.id, ev.parentID, ev.title, ev.tools)
+	if ev.kind == "started" && ev.toolUseID != "" {
+		m.mainChat().attachSubAgentToTool(ev.toolUseID, ev.id)
+	}
 	if len(ev.tools) > 0 && ev.kind == "started" {
 		view.AppendEntry(&Entry{Role: RoleSystem, Content: "Tools: " + strings.Join(ev.tools, ", ")})
 	}

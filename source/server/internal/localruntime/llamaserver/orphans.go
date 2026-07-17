@@ -1,8 +1,10 @@
 package llamaserver
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -208,4 +210,82 @@ func serverStillOurs(server serverEntry) bool {
 		return false
 	}
 	return server.ModelPath == "" || strings.Contains(command, server.ModelPath)
+}
+
+type liveSibling struct {
+	owner  registryFile
+	server serverEntry
+}
+
+// liveSiblingFor returns a healthy llama-server process for modelPath that is
+// owned by another currently-live Cercano process. It never kills anything;
+// unhealthy or ambiguous entries are ignored so callers can spawn their own
+// managed process if no safe sibling exists.
+func (p *Provider) liveSiblingFor(ctx context.Context, modelPath, binary string, sink localruntime.LogSink) (*liveSibling, bool) {
+	r := p.registry
+	if r == nil {
+		return nil, false
+	}
+	modelPath = filepath.Clean(modelPath)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entries, err := os.ReadDir(r.dir)
+	if err != nil {
+		return nil, false
+	}
+	for _, dirEntry := range entries {
+		name := dirEntry.Name()
+		if dirEntry.IsDir() || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		path := filepath.Join(r.dir, name)
+		if path == r.ownFile() {
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var state registryFile
+		if err := json.Unmarshal(data, &state); err != nil || state.OwnerPID <= 0 || !ownerAlive(state) {
+			continue
+		}
+		for _, server := range state.Servers {
+			if filepath.Clean(server.ModelPath) != modelPath || !serverStillOurs(server) {
+				continue
+			}
+			if binary != "" && filepath.Base(server.Binary) != filepath.Base(binary) {
+				continue
+			}
+			if server.Port <= 0 {
+				continue
+			}
+			endpoint := fmt.Sprintf("http://%s:%d", healthHost(p.cfg.Host), server.Port)
+			probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			err := p.probeEndpoint(probeCtx, endpoint)
+			cancel()
+			if err != nil {
+				p.emit(sink, "warn", "", "", fmt.Sprintf("ignored llama-server sibling pid %d from owner pid %d: health failed: %v", server.PID, state.OwnerPID, err))
+				continue
+			}
+			return &liveSibling{owner: state, server: server}, true
+		}
+	}
+	return nil, false
+}
+
+func (p *Provider) probeEndpoint(ctx context.Context, endpoint string) error {
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoint+"/health", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("health returned status %d", resp.StatusCode)
+	}
+	return nil
 }

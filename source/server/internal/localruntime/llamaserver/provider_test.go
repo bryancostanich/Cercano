@@ -2,9 +2,14 @@ package llamaserver
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -121,4 +126,79 @@ func findModelByID(models []localruntime.ModelRecord, id string) (localruntime.M
 		}
 	}
 	return localruntime.ModelRecord{}, false
+}
+
+func TestAdoptLiveSiblingReusesHealthyRegisteredServer(t *testing.T) {
+	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			t.Fatalf("unexpected health path %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte("OK"))
+	}))
+	defer health.Close()
+	port := mustURLPort(t, health.URL)
+
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "llama-server")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\nsleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	modelPath := filepath.Join(dir, "model.gguf")
+	if err := os.WriteFile(modelPath, []byte("gguf"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(binary, modelPath)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	}()
+
+	provider := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1"})
+	provider.registry = newPidRegistry(filepath.Join(dir, "registry"))
+	provider.registry.writeOwnLocked(registryFile{
+		OwnerPID: os.Getpid(),
+		OwnerExe: filepath.Base(os.Args[0]),
+		Servers: []serverEntry{{
+			PID:       cmd.Process.Pid,
+			Binary:    binary,
+			ModelPath: modelPath,
+			Port:      port,
+			StartedAt: time.Now().Add(-time.Minute),
+		}},
+	})
+	if err := os.Rename(provider.registry.ownFile(), filepath.Join(provider.registry.dir, "sibling.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	model := localruntime.ModelRecord{ID: "llama_server:model", Runtime: runtimeName, DisplayName: "Model", Path: modelPath}
+	record, ok := provider.adoptLiveSibling(context.Background(), model, binary, localruntime.NewManager())
+	if !ok {
+		t.Fatal("expected healthy sibling to be adopted")
+	}
+	if record.Port != port || record.PID != cmd.Process.Pid || record.State != localruntime.InstanceRunning {
+		t.Fatalf("unexpected adopted record: %#v", record)
+	}
+	if err := provider.Stop(context.Background(), record.ID); err != nil {
+		t.Fatalf("Stop(adopted): %v", err)
+	}
+	if !processAlive(cmd.Process.Pid) {
+		t.Fatal("Stop on adopted instance killed sibling-owned process")
+	}
+}
+
+func mustURLPort(t *testing.T, raw string) int {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return port
 }

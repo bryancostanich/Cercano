@@ -49,6 +49,8 @@ type managedInstance struct {
 	model    localruntime.ModelRecord
 	cmd      *exec.Cmd
 	stopping bool
+	adopted  bool
+	ownerPID int
 }
 
 func NewProvider(cfg config.MistralRSConfig) *Provider {
@@ -150,6 +152,16 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 	if err != nil {
 		return nil, err
 	}
+
+	// One process per model: if a sibling Cercano process already owns a
+	// healthy mistral.rs sidecar for this model, adopt a local record that
+	// proxies to it instead of spawning another full model load on a random
+	// port. This is intentionally before choosePort: the best port is the one
+	// already serving the model.
+	if adopted, ok := p.adoptLiveSibling(ctx, model, binary, sink); ok {
+		return adopted, nil
+	}
+
 	port, err := p.choosePort()
 	if err != nil {
 		return nil, err
@@ -236,6 +248,45 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 	return &out, nil
 }
 
+func (p *Provider) adoptLiveSibling(ctx context.Context, model localruntime.ModelRecord, binary string, sink localruntime.LogSink) (*localruntime.InstanceRecord, bool) {
+	sibling, ok := p.liveSiblingFor(ctx, model.Path, binary, sink)
+	if !ok {
+		return nil, false
+	}
+	host := p.cfg.Host
+	endpoint := fmt.Sprintf("http://%s:%d", healthHost(host), sibling.server.Port)
+	id := runtimeName + ":" + shortID(model.Path) + ":" + strconv.Itoa(sibling.server.Port)
+	inst := &managedInstance{
+		model:    model,
+		adopted:  true,
+		ownerPID: sibling.owner.OwnerPID,
+		record: localruntime.InstanceRecord{
+			ID:        id,
+			Runtime:   runtimeName,
+			ModelID:   model.ID,
+			State:     localruntime.InstanceRunning,
+			PID:       sibling.server.PID,
+			Address:   host,
+			Port:      sibling.server.Port,
+			Endpoint:  endpoint,
+			StartedAt: sibling.server.StartedAt,
+			ReadyAt:   time.Now(),
+		},
+	}
+	p.mu.Lock()
+	if existing := p.liveInstanceForLocked(model.Path); existing != nil {
+		record := existing.record
+		p.mu.Unlock()
+		p.emit(sink, "info", record.ID, model.ID, "reusing running mistral.rs for "+model.DisplayName)
+		return &record, true
+	}
+	p.running[id] = inst
+	p.mu.Unlock()
+	p.emit(sink, "info", id, model.ID, fmt.Sprintf("adopted mistral.rs sidecar pid %d from owner pid %d for %s", sibling.server.PID, sibling.owner.OwnerPID, model.DisplayName))
+	out := inst.record
+	return &out, true
+}
+
 func (p *Provider) Stop(_ context.Context, instanceID string) error {
 	p.mu.Lock()
 	instance, ok := p.running[instanceID]
@@ -246,6 +297,11 @@ func (p *Provider) Stop(_ context.Context, instanceID string) error {
 	instance.stopping = true
 	cmd := instance.cmd
 	instance.record.State = localruntime.InstanceStopped
+	if instance.adopted {
+		delete(p.running, instanceID)
+		p.mu.Unlock()
+		return nil
+	}
 	p.mu.Unlock()
 	if cmd == nil || cmd.Process == nil {
 		return nil

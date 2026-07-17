@@ -2,9 +2,12 @@ package watchdog
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -34,9 +37,12 @@ type Decision struct {
 // after the reply has already streamed, so an unbounded check against a sick
 // model lane holds the stream open and the client queues everything.
 type Config struct {
-	Mode          Mode
-	EscalateAfter int
-	CheckTimeout  time.Duration
+	Mode           Mode
+	EscalateAfter  int
+	CheckTimeout   time.Duration
+	Audit          AuditLogger
+	AuditPrompts   bool
+	AuditResponses bool
 }
 
 // convState holds per-conversation state.
@@ -117,6 +123,55 @@ func keyFor(protocol string, a Action) string {
 	return fmt.Sprintf("%s|%s|%x", protocol, a.ToolName, sum[:6]) // 6 bytes = 12 hex chars
 }
 
+func auditID() string {
+	var b [12]byte
+	if _, err := rand.Read(b[:]); err == nil {
+		return hex.EncodeToString(b[:])
+	}
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+func shortHash(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:12])
+}
+
+func summarizeActionArgs(a Action) string {
+	if a.Kind == "turn_end" {
+		return summarizeText(a.Text, 240)
+	}
+	return summarizeText(string(a.ToolArgs), 240)
+}
+
+func summarizeText(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) <= max {
+		return s
+	}
+	if max <= 1 {
+		return s[:max]
+	}
+	return s[:max-1] + "…"
+}
+
+func (w *Watchdog) recordAudit(ctx context.Context, e AuditEvent) {
+	if w.cfg.Audit == nil {
+		return
+	}
+	if e.ID == "" {
+		e.ID = auditID()
+	}
+	if e.Timestamp.IsZero() {
+		e.Timestamp = time.Now().UTC()
+	}
+	if err := w.cfg.Audit.Record(ctx, e); err != nil {
+		log.Printf("watchdog: audit record failed: %v", err)
+	}
+}
+
 // getOrCreate returns the convState for the given conversation, creating it lazily.
 // Caller must hold w.mu.
 func (w *Watchdog) getOrCreate(conversationID string) *convState {
@@ -139,17 +194,61 @@ func (w *Watchdog) Gate(ctx context.Context, conversationID string, a Action) De
 	// existing fail-open error path below.
 	ctx, cancel := context.WithTimeout(ctx, w.checkTimeout)
 	defer cancel()
+
+	base := AuditEvent{
+		ConversationID:  conversationID,
+		ActionKind:      a.Kind,
+		ToolName:        a.ToolName,
+		ToolArgsHash:    shortHash(a.ToolArgs),
+		ToolArgsSummary: summarizeActionArgs(a),
+	}
+
 	// Run checks; fail-open on error.
 	var violation *Verdict
 	for _, ch := range w.checks {
 		if !ch.Applies(a) {
 			continue
 		}
-		v, err := ch.Evaluate(ctx, a, w.oneShot)
+
+		eval := base
+		eval.EventType = "evaluation"
+		eval.Check = ch.Name()
+		eval.Applies = true
+
+		var prompt, response string
+		var latency time.Duration
+		wrappedOneShot := func(ctx context.Context, p string) (string, error) {
+			prompt = p
+			start := time.Now()
+			res, err := w.oneShot(ctx, p)
+			latency = time.Since(start)
+			response = res
+			return res, err
+		}
+
+		v, err := ch.Evaluate(ctx, a, wrappedOneShot)
+		eval.LatencyMS = latency.Milliseconds()
+		eval.PromptHash = shortHash([]byte(prompt))
+		eval.ResponseHash = shortHash([]byte(response))
+		if w.cfg.AuditPrompts {
+			eval.Prompt = prompt
+		}
+		if w.cfg.AuditResponses {
+			eval.Response = response
+		}
 		if err != nil {
+			eval.Error = err.Error()
+			w.recordAudit(ctx, eval)
 			log.Printf("watchdog: check %q error (fail-open): %v", ch.Name(), err)
 			continue
 		}
+
+		eval.Protocol = v.Protocol
+		eval.Violation = v.Violation
+		eval.Challenge = v.Challenge
+		eval.Revise = v.Revise
+		w.recordAudit(ctx, eval)
+
 		if v.Violation {
 			vCopy := v
 			violation = &vCopy
@@ -158,6 +257,16 @@ func (w *Watchdog) Gate(ctx context.Context, conversationID string, a Action) De
 	}
 
 	if violation == nil {
+		w.recordAudit(ctx, AuditEvent{
+			ConversationID:  conversationID,
+			EventType:       "resolution",
+			ActionKind:      a.Kind,
+			ToolName:        a.ToolName,
+			ToolArgsHash:    shortHash(a.ToolArgs),
+			ToolArgsSummary: summarizeActionArgs(a),
+			Decision:        "allow",
+			Resolution:      "allow",
+		})
 		return Decision{Action: "allow"}
 	}
 
@@ -167,6 +276,22 @@ func (w *Watchdog) Gate(ctx context.Context, conversationID string, a Action) De
 	cs := w.getOrCreate(conversationID)
 	if cs.justified[key] {
 		w.mu.Unlock()
+		w.recordAudit(ctx, AuditEvent{
+			ConversationID:  conversationID,
+			EventType:       "resolution",
+			ActionKind:      a.Kind,
+			ToolName:        a.ToolName,
+			ToolArgsHash:    shortHash(a.ToolArgs),
+			ToolArgsSummary: summarizeActionArgs(a),
+			Protocol:        violation.Protocol,
+			Violation:       true,
+			Challenge:       violation.Challenge,
+			Revise:          violation.Revise,
+			Decision:        "allow",
+			Key:             key,
+			Resolution:      "allow",
+			Reason:          "previously justified",
+		})
 		return Decision{Action: "allow", Protocol: violation.Protocol}
 	}
 	cs.counts[key]++
@@ -178,16 +303,32 @@ func (w *Watchdog) Gate(ctx context.Context, conversationID string, a Action) De
 	}
 	w.mu.Unlock()
 
+	decision := Decision{Protocol: violation.Protocol, Challenge: violation.Challenge, Revise: violation.Revise}
 	if escalate {
-		w.emitEcho("watchdog", fmt.Sprintf("[escalate] %s: %s", violation.Protocol, violation.Challenge))
-		return Decision{Action: "escalate", Protocol: violation.Protocol, Challenge: violation.Challenge, Revise: violation.Revise}
+		decision.Action = "escalate"
+	} else if isStrict {
+		decision.Action = "block"
+	} else {
+		decision.Action = "challenge"
 	}
-	if isStrict {
-		w.emitEcho("watchdog", fmt.Sprintf("[block] %s: %s", violation.Protocol, violation.Challenge))
-		return Decision{Action: "block", Protocol: violation.Protocol, Challenge: violation.Challenge, Revise: violation.Revise}
-	}
-	w.emitEcho("watchdog", fmt.Sprintf("[challenge] %s: %s", violation.Protocol, violation.Challenge))
-	return Decision{Action: "challenge", Protocol: violation.Protocol, Challenge: violation.Challenge, Revise: violation.Revise}
+	w.recordAudit(ctx, AuditEvent{
+		ConversationID:  conversationID,
+		EventType:       "resolution",
+		ActionKind:      a.Kind,
+		ToolName:        a.ToolName,
+		ToolArgsHash:    shortHash(a.ToolArgs),
+		ToolArgsSummary: summarizeActionArgs(a),
+		Protocol:        violation.Protocol,
+		Violation:       true,
+		Challenge:       violation.Challenge,
+		Revise:          violation.Revise,
+		Decision:        decision.Action,
+		Key:             key,
+		Resolution:      decision.Action,
+	})
+
+	w.emitEcho("watchdog", fmt.Sprintf("[%s] %s: %s", decision.Action, violation.Protocol, violation.Challenge))
+	return decision
 }
 
 // recordJustify marks key as justified for the given conversation so Gate

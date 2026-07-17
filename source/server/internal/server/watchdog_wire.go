@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"log"
+	"path/filepath"
 
 	"cercano/source/server/internal/capabilities/builtins"
 	"cercano/source/server/internal/dispatch"
@@ -81,8 +83,36 @@ func (s *Server) buildWatchdogFrom(wc config.WatchdogConfig, mc config.ModelsCon
 		return res.Text, nil
 	}
 
+	var audit watchdog.AuditLogger
+	if wc.Audit.Enabled {
+		path := wc.Audit.Path
+		if path == "" {
+			path = defaultWatchdogAuditPath()
+		}
+		auditLog, err := watchdog.OpenSQLiteAuditLog(path)
+		if err != nil {
+			log.Printf("watchdog: audit disabled; failed to open %q: %v", path, err)
+		} else {
+			audit = auditLog
+		}
+	}
+
 	// EscalateAfter 0 is normalized to 2 inside watchdog.New — don't re-default.
-	return watchdog.New(watchdog.Config{Mode: mode, EscalateAfter: wc.EscalateAfter}, checks, oneShot)
+	return watchdog.New(watchdog.Config{
+		Mode:           mode,
+		EscalateAfter:  wc.EscalateAfter,
+		Audit:          audit,
+		AuditPrompts:   wc.Audit.IncludePrompts,
+		AuditResponses: wc.Audit.IncludeResponses,
+	}, checks, oneShot)
+}
+
+func defaultWatchdogAuditPath() string {
+	base := filepath.Dir(config.DefaultPath())
+	if base == "." || base == "" {
+		return "watchdog-audit.db"
+	}
+	return filepath.Join(base, "watchdog-audit.db")
 }
 
 // InitWatchdog builds the watchdog from config once at startup. Call after the

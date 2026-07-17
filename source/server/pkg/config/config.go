@@ -340,12 +340,23 @@ type RetentionConfig struct {
 // WatchdogConfig controls the protocol-enforcement supervisor. Disabled by
 // default (opt-in). Mode is "challenge-and-justify" or "strict".
 type WatchdogConfig struct {
-	Enabled       bool     `yaml:"enabled"`
-	Mode          string   `yaml:"mode"`
-	Checks        []string `yaml:"checks"`
-	Model         string   `yaml:"model"`
-	EscalateAfter int      `yaml:"escalate_after"`
-	Echo          bool     `yaml:"echo"`
+	Enabled       bool                `yaml:"enabled"`
+	Mode          string              `yaml:"mode"`
+	Checks        []string            `yaml:"checks"`
+	Model         string              `yaml:"model"`
+	EscalateAfter int                 `yaml:"escalate_after"`
+	Echo          bool                `yaml:"echo"`
+	Audit         WatchdogAuditConfig `yaml:"audit"`
+}
+
+// WatchdogAuditConfig controls durable watchdog observability. The watchdog
+// itself is still default-off, but when a user opts into it we keep audit on by
+// default so noisy prompts/verdicts can be analyzed instead of guessed at.
+type WatchdogAuditConfig struct {
+	Enabled          bool   `yaml:"enabled"`
+	Path             string `yaml:"path,omitempty"`
+	IncludePrompts   bool   `yaml:"include_prompts"`
+	IncludeResponses bool   `yaml:"include_responses"`
 }
 
 const (
@@ -521,6 +532,11 @@ func Defaults() Config {
 			Model:         "",
 			EscalateAfter: 2,
 			Echo:          false,
+			Audit: WatchdogAuditConfig{
+				Enabled:          true,
+				IncludePrompts:   true,
+				IncludeResponses: true,
+			},
 		},
 		ToolLoop: ToolLoopConfig{
 			MaxIterations: DefaultToolLoopMaxIterations,

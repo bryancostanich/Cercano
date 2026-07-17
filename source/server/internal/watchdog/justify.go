@@ -57,6 +57,14 @@ func (j *justifyTool) Execute(_ context.Context, args json.RawMessage) (*agentto
 		}, nil
 	}
 	j.w.recordJustify(j.conversationID, key)
+	j.w.recordAudit(context.Background(), AuditEvent{
+		ConversationID: j.conversationID,
+		EventType:      "resolution",
+		Decision:       "allow",
+		Key:            key,
+		Resolution:     "justify",
+		Reason:         a.Reason,
+	})
 	log.Printf("watchdog: justify override recorded for conversation %q key %q reason: %s", j.conversationID, key, a.Reason)
 	j.w.emitEcho("main", "justify: "+a.Reason)
 	return &agenttools.Result{

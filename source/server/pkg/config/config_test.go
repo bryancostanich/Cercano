@@ -65,6 +65,12 @@ func TestDefaults(t *testing.T) {
 	if len(cfg.Watchdog.Checks) == 0 {
 		t.Fatal("watchdog default checks should remain configured but dormant while enabled=false")
 	}
+	if !cfg.Watchdog.Audit.Enabled {
+		t.Fatal("watchdog audit should default on when a user opts into watchdog enforcement")
+	}
+	if !cfg.Watchdog.Audit.IncludePrompts || !cfg.Watchdog.Audit.IncludeResponses {
+		t.Fatal("watchdog audit should capture prompts and responses by default for analysis")
+	}
 }
 
 func TestLoad_NoFile(t *testing.T) {
@@ -92,6 +98,16 @@ func TestSaveDefaultsWritesWatchdogDisabled(t *testing.T) {
 	}
 	if !strings.Contains(body, "  enabled: false\n") {
 		t.Fatalf("saved default config must explicitly keep watchdog disabled:\n%s", body)
+	}
+	for _, want := range []string{
+		"  audit:\n",
+		"    enabled: true\n",
+		"    include_prompts: true\n",
+		"    include_responses: true\n",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("saved default config missing watchdog audit default %q:\n%s", want, body)
+		}
 	}
 }
 

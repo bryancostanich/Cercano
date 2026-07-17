@@ -128,6 +128,26 @@ func TestPlainLinesLazyAfterRebuild(t *testing.T) {
 	}
 }
 
+func TestSelectedTextDoesNotMaterializeFullPlainTranscript(t *testing.T) {
+	c := newTestChatView(60, 5)
+	setChatTestContent(c, strings.Join([]string{"zero", "one", "two", "three", "four"}, "\n"))
+	c.selection.Anchor = selectionPoint{Line: 1, Col: 0}
+	c.selection.Cursor = selectionPoint{Line: 3, Col: 5}
+	c.selection.Active = true
+	c.plainDirty = true
+	c.plainLines = nil
+
+	if got, want := c.selectedText(), "one\ntwo\nthree"; got != want {
+		t.Fatalf("selectedText() = %q, want %q", got, want)
+	}
+	if !c.plainDirty {
+		t.Fatalf("selectedText should strip only the selected range, not clear the full plain transcript cache")
+	}
+	if c.plainLines != nil {
+		t.Fatalf("selectedText should not populate full plainLines cache")
+	}
+}
+
 // The committed-prefix cache must serve stable blocks while only the tail
 // grows, and rebuild the moment a new block commits (or the last block
 // extends — the trailing-table instability).

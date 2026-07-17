@@ -348,7 +348,11 @@ func (m *Model) applySubAgentEvent(ev subAgentEventMsg) {
 	if ev.inner != nil {
 		view.Apply(ev.inner)
 	} else if ev.text != "" {
-		view.AppendEntry(&Entry{Role: RoleSystem, Content: ev.text})
+		role := RoleSystem
+		if ev.kind == "prompt" {
+			role = RoleUser
+		}
+		view.AppendEntry(&Entry{Role: role, Content: ev.text})
 	}
 	if tab := m.chatTabs.tabs[ev.id]; tab != nil {
 		switch ev.kind {

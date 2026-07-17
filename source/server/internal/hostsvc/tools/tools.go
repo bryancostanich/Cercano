@@ -383,6 +383,7 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	log.Printf("[dispatch] subagent start: conv=%s route=%s provider=%s model=%s tier=%s tools=%v", subConvID, location, provider, model, spec.Tier, registryToolNames(reg))
 	subTitle := "sub"
 	emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "started", Text: fmt.Sprintf("sub-agent start: conv=%s route=%s provider=%s model=%s tier=%s tools=%s", subConvID, location, provider, model, spec.Tier, strings.Join(granted, ", ")), GrantedTools: granted, IgnoredTools: ignored})
+	emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "prompt", Text: spec.Task, GrantedTools: granted, IgnoredTools: ignored})
 
 	// The subagent's provider calls must carry their OWN session identity, not
 	// the parent conversation's (inherited via ctx), so anomaly attribution and

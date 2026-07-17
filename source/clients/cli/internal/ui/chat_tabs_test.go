@@ -71,6 +71,27 @@ func TestSubAgentNestedLabelsUseParentOrdinal(t *testing.T) {
 	}
 }
 
+func TestSubAgentPromptEventRendersLaunchingPrompt(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	m.applySubAgentEvent(subAgentEventMsg{id: "child-1", kind: "started", tools: []string{"Read", "Grep"}})
+	m.applySubAgentEvent(subAgentEventMsg{id: "child-1", kind: "prompt", text: "Trace the dispatch behavior and return file:line evidence."})
+
+	tab := m.chatTabs.tabs["child-1"]
+	if tab == nil {
+		t.Fatal("missing child tab")
+	}
+	entries := tab.view.Entries()
+	if len(entries) < 3 {
+		t.Fatalf("expected started/tools/prompt entries, got %+v", entries)
+	}
+	last := entries[len(entries)-1]
+	if last.Role != RoleUser || last.Content != "Trace the dispatch behavior and return file:line evidence." {
+		t.Fatalf("launch prompt rendered incorrectly: role=%v content=%q entries=%+v", last.Role, last.Content, entries)
+	}
+}
+
 func TestSubAgentErrorEventMarksTabAndShowsMessage(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})

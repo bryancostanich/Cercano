@@ -1624,10 +1624,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// install?" — empty is a legitimate value (defaults to ollama),
 		// so we always take the fresh value from the config load.
 		m.currentOpenRuntime = msg.OpenRuntime
-		if msg.CloudConfigured {
+		// Keep the c: header chip tied to concrete cloud identity, not only to
+		// transient CloudState. During startup/rebuilds the server can briefly report
+		// a non-ok cloud state while still returning the configured active profile and
+		// model; clearing the chip in that window leaves the title bar missing c: even
+		// though cloud routing is configured. If both identity fields are empty, clear
+		// as before.
+		if msg.ActiveCloudProfile != "" || msg.CloudModel != "" {
 			m.cloudModel = msg.CloudModel
 			m.activeCloudProfile = msg.ActiveCloudProfile
-		} else {
+		} else if !msg.CloudConfigured {
 			m.cloudModel = ""
 			m.activeCloudProfile = ""
 		}

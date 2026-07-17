@@ -66,3 +66,27 @@ func TestStatusDoesNotRenderOpenRuntimeMissingModelChip(t *testing.T) {
 		t.Fatalf("footer/status bar should not render local-runtime model state anymore, got %q", out)
 	}
 }
+
+func TestConfigLoadedKeepsCloudChipFromIdentityDuringTransientCloudState(t *testing.T) {
+	m := Model{
+		styles:    theme.NewStyles(theme.Cracker()),
+		palette:   theme.Cracker(),
+		width:     120,
+		openModel: "qwen3-30b-a3b-instruct-2507",
+	}
+	updated, _ := m.Update(configLoadedMsg{
+		OpenModel:          "qwen3-30b-a3b-instruct-2507",
+		CloudModel:         "gpt-5.5",
+		ActiveCloudProfile: "openai-responses",
+		CloudConfigured:    false,
+	})
+	m = updated.(Model)
+
+	out := stripAnsiCSI(m.renderHeader())
+	if !strings.Contains(out, "c:openai-responses") {
+		t.Fatalf("header should keep cloud chip from cloud identity even during transient non-ok state, got %q", out)
+	}
+	if !strings.Contains(out, "o:qwen3-30b") {
+		t.Fatalf("header should still show open chip, got %q", out)
+	}
+}

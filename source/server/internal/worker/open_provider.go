@@ -13,7 +13,7 @@ import (
 
 // streamOpenProvider is the worker's open (local-runtime) inference.Provider. The
 // worker process has no runtime manager — that's a host singleton that owns the
-// llama-server subprocesses — so it proxies open-model inference to the host
+// managed runtime subprocesses — so it proxies open-model inference to the host
 // over the existing RunTurn bidi stream. StreamChat sends an
 // OpenInferenceRequest and streams the host's OpenInferenceEvents back, routed
 // by monotonic id; Chat accumulates its own stream via CollectStream. Mirrors
@@ -158,9 +158,14 @@ func (r *openStreamReader) Close() error {
 	return nil
 }
 
-// newLlamaServerProxy builds the worker's open-provider proxy for the
-// llama-server runtime, advertising the same capabilities the host's llama
-// provider reports (SupportsTools).
-func newLlamaServerProxy(sndr *sender) *streamOpenProvider {
-	return newStreamOpenProvider(sndr, "llama_server", inference.Capabilities{SupportsTools: true})
+// newHostManagedOpenProxy builds the worker's open-provider proxy for the
+// active host-managed runtime. The proxy does not own the runtime itself; its
+// Name is observability metadata surfaced in dispatch route headers/logs, so it
+// must follow the config snapshot instead of being hardcoded to llama_server.
+func newHostManagedOpenProxy(sndr *sender, runtime string) *streamOpenProvider {
+	name := runtime
+	if name == "" {
+		name = "host_managed_open"
+	}
+	return newStreamOpenProvider(sndr, name, inference.Capabilities{SupportsTools: true})
 }

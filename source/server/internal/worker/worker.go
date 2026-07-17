@@ -83,10 +83,11 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 	credSource := newStreamCredentialSource(sndr)
 
 	// Open provider proxy: the worker has no local runtime manager, so it
-	// forwards open-model inference to the host (which owns llama-server) over
-	// this stream. Routed OpenInferenceEvents deliver here. Created before the
-	// recv loop for the same reason as credSource.
-	openProxy := newLlamaServerProxy(sndr)
+	// forwards host-managed open-model inference to the host over this stream.
+	// Routed OpenInferenceEvents deliver here. Created before the recv loop for
+	// the same reason as credSource. Its Name follows the StartTurn config
+	// snapshot so dispatch logs/headers report the active runtime correctly.
+	openProxy := newHostManagedOpenProxy(sndr, start.GetConfig().GetOpenRuntime())
 
 	// Sub-agent persistence proxy: a worker-side dispatch creates its sub-agent
 	// conversation row and persists its turns on the host via this stream proxy

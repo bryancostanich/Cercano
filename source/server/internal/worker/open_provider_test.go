@@ -66,3 +66,20 @@ func TestOpenStreamReaderCtxCancel(t *testing.T) {
 		t.Fatalf("want ctx error, got ok=%v err=%v", ok, err)
 	}
 }
+
+func TestHostManagedOpenProxyNameFollowsRuntime(t *testing.T) {
+	p := newHostManagedOpenProxy(nil, "mistralrs")
+	if got := p.Name(); got != "mistralrs" {
+		t.Fatalf("proxy Name = %q, want mistralrs", got)
+	}
+	if !p.Capabilities().SupportsTools {
+		t.Fatalf("host-managed open proxy should advertise tool support")
+	}
+}
+
+func TestHostManagedOpenProxyNameFallback(t *testing.T) {
+	p := newHostManagedOpenProxy(nil, "")
+	if got := p.Name(); got != "host_managed_open" {
+		t.Fatalf("proxy Name = %q, want host_managed_open", got)
+	}
+}

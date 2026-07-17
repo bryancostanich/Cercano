@@ -144,6 +144,11 @@ func (p *Provider) Discover(ctx context.Context) ([]localruntime.ModelRecord, er
 }
 
 func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sink localruntime.LogSink) (*localruntime.InstanceRecord, error) {
+	// Sweep again at the point of demand, not only during provider registration.
+	// A launchd-adopted orphan has no registry entry for sibling adoption to see,
+	// so duplicate prevention must be part of the start lifecycle itself.
+	p.sweepUnregisteredOrphans(sink)
+
 	model, err := p.resolveModel(ctx, req.ModelID)
 	if err != nil {
 		return nil, err

@@ -1562,7 +1562,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				t.FullResult = msg.detail.Result
 				t.StartLine = msg.detail.StartLine
 			}
-			m.mainChat().markTranscriptDirty()
 			m.refreshViewport()
 		}
 		return m, nil

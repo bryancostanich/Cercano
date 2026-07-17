@@ -32,6 +32,7 @@ type entryCacheKey struct {
 type entryRenderCache struct {
 	key      entryCacheKey
 	rendered string
+	lines    []string
 }
 
 // groupCacheKey captures every input that affects a frozen tool-group block.
@@ -46,39 +47,21 @@ type groupCacheKey struct {
 type groupRenderCache struct {
 	key   groupCacheKey
 	block string
+	lines []string
 	rows  []toolArrowRow
 }
 
-// transcriptPrefixCache stores the already-assembled render of the frozen
-// prefix of the transcript. Per-entry caches avoid markdown rerendering; this
-// cache avoids copying every frozen block into a fresh giant string on each
-// streaming repaint. It is keyed by width, theme generation, and contentGen,
-// and always ends at an entry boundary.
-type transcriptPrefixCache struct {
-	width      int
-	stylesGen  int
-	contentGen int
-	end        int
-	content    string
-	arrowRows  []arrowRow
-	lineCount  int
-}
-
-func (c *chatView) markTranscriptDirty() {
-	c.contentGen++
-	c.transcriptPrefix = transcriptPrefixCache{}
-}
-
-// renderEntryCached returns renderEntry output, served from the per-entry
-// cache when the entry is frozen. Dynamic entries bypass the cache: the
-// banner (wall-clock shimmer), the streaming assistant entry (live tail +
-// animated status line), and tool rows (cached at group level instead).
-func (c *chatView) renderEntryCached(e *Entry, idx int) string {
+// renderEntryCachedLines returns renderEntry output as pre-split lines, served
+// from the per-entry cache when the entry is frozen. Dynamic entries bypass the
+// cache: the banner (wall-clock shimmer), the streaming assistant entry (live
+// tail + animated status line), and tool rows (cached at group level instead).
+func (c *chatView) renderEntryCachedLines(e *Entry, idx int) (string, []string) {
 	if e.Banner != nil || e.Tool != nil || e.Streaming {
-		return c.renderEntry(e, idx)
+		out := c.renderEntry(e, idx)
+		return out, splitRenderLines(out)
 	}
 	key := entryCacheKey{
-		width:          c.vp.Width(),
+		width:          c.Width(),
 		stylesGen:      c.stylesGen,
 		role:           e.Role,
 		content:        e.Content,
@@ -87,14 +70,15 @@ func (c *chatView) renderEntryCached(e *Entry, idx int) string {
 		supersededOpen: e.SupersededOpen,
 	}
 	if cached, ok := c.entryCache[e]; ok && cached.key == key {
-		return cached.rendered
+		return cached.rendered, cached.lines
 	}
 	out := c.renderEntry(e, idx)
+	lines := splitRenderLines(out)
 	if c.entryCache == nil { // zero-value chatView (tests build it literally)
 		c.entryCache = map[*Entry]entryRenderCache{}
 	}
-	c.entryCache[e] = entryRenderCache{key: key, rendered: out}
-	return out
+	c.entryCache[e] = entryRenderCache{key: key, rendered: out, lines: lines}
+	return out, lines
 }
 
 // groupIsDynamic reports whether any member of a tool run renders a
@@ -143,32 +127,34 @@ func groupFingerprint(run []*Entry) string {
 	return b.String()
 }
 
-// renderToolGroupCached returns renderToolGroupBlock output, cached per group
-// and keyed by the run's start index (stable: entries are append-only, and
-// the one insert path — insertNoticeAboveLast — changes the fingerprint of
-// any group it shifts, forcing a miss). Groups with an animated member or
-// the nav focus bypass the cache.
-func (c *chatView) renderToolGroupCached(run []*Entry, startIdx int) (string, []toolArrowRow) {
+// renderToolGroupCachedLines returns renderToolGroupBlock output as pre-split
+// lines, cached per group and keyed by the run's start index (stable: entries
+// are append-only, and the one insert path — insertNoticeAboveLast — changes
+// the fingerprint of any group it shifts, forcing a miss). Groups with an
+// animated member or the nav focus bypass the cache.
+func (c *chatView) renderToolGroupCachedLines(run []*Entry, startIdx int) (string, []string, []toolArrowRow) {
 	focusedIn := c.focusedToolIdx >= startIdx && c.focusedToolIdx < startIdx+len(run)
 	if focusedIn || groupIsDynamic(run) {
-		return c.renderToolGroupBlock(run, startIdx)
+		block, rows := c.renderToolGroupBlock(run, startIdx)
+		return block, splitRenderLines(block), rows
 	}
 	key := groupCacheKey{
-		width:     c.vp.Width(),
+		width:     c.Width(),
 		stylesGen: c.stylesGen,
 		count:     len(run),
 		expanded:  c.groupExpanded[startIdx],
 		fp:        groupFingerprint(run),
 	}
 	if g, ok := c.groupCache[startIdx]; ok && g.key == key {
-		return g.block, g.rows
+		return g.block, g.lines, g.rows
 	}
 	block, rows := c.renderToolGroupBlock(run, startIdx)
+	lines := splitRenderLines(block)
 	if c.groupCache == nil { // zero-value chatView (tests build it literally)
 		c.groupCache = map[int]groupRenderCache{}
 	}
-	c.groupCache[startIdx] = groupRenderCache{key: key, block: block, rows: rows}
-	return block, rows
+	c.groupCache[startIdx] = groupRenderCache{key: key, block: block, lines: lines, rows: rows}
+	return block, lines, rows
 }
 
 // flushRenderCaches drops every cached render. Called when the entries slice
@@ -177,9 +163,7 @@ func (c *chatView) renderToolGroupCached(run []*Entry, startIdx int) (string, []
 func (c *chatView) flushRenderCaches() {
 	c.entryCache = map[*Entry]entryRenderCache{}
 	c.groupCache = map[int]groupRenderCache{}
-	c.transcriptPrefix = transcriptPrefixCache{}
 	c.streamPrefix = streamPrefixCache{}
-	c.contentGen++
 }
 
 // streamPrefixCache caches the joined render of the streaming entry's

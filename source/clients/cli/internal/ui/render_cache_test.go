@@ -21,20 +21,21 @@ func TestEntryCacheServedAndInvalidatedOnContentChange(t *testing.T) {
 		t.Fatalf("frozen system entry not cached after SetEntries")
 	}
 	cached.rendered = "ENTRY-SENTINEL"
+	cached.lines = []string{"ENTRY-SENTINEL"}
 	c.entryCache[e] = cached
 
 	c.SetEntries([]*Entry{e})
-	if !strings.Contains(c.content, "ENTRY-SENTINEL") {
+	if !strings.Contains(c.layout.flattenedContent(), "ENTRY-SENTINEL") {
 		t.Fatalf("unchanged frozen entry was re-rendered instead of served from cache")
 	}
 
 	e.Content = "edited line"
 	c.SetEntries([]*Entry{e})
-	if strings.Contains(c.content, "ENTRY-SENTINEL") {
+	if strings.Contains(c.layout.flattenedContent(), "ENTRY-SENTINEL") {
 		t.Fatalf("stale cache served after Content changed")
 	}
-	if !strings.Contains(plain(c.content), "edited line") {
-		t.Fatalf("new content missing after invalidation; got:\n%s", plain(c.content))
+	if !strings.Contains(plain(c.layout.flattenedContent()), "edited line") {
+		t.Fatalf("new content missing after invalidation; got:\n%s", plain(c.layout.flattenedContent()))
 	}
 }
 
@@ -45,11 +46,12 @@ func TestEntryCacheInvalidatedOnThemeGeneration(t *testing.T) {
 
 	cached := c.entryCache[e]
 	cached.rendered = "THEME-SENTINEL"
+	cached.lines = []string{"THEME-SENTINEL"}
 	c.entryCache[e] = cached
 
 	c.stylesGen++ // what SetStyles does
 	c.SetEntries([]*Entry{e})
-	if strings.Contains(c.content, "THEME-SENTINEL") {
+	if strings.Contains(c.layout.flattenedContent(), "THEME-SENTINEL") {
 		t.Fatalf("stale cache served across a theme generation bump")
 	}
 }
@@ -80,16 +82,17 @@ func TestToolGroupCacheServedAndInvalidated(t *testing.T) {
 		t.Fatalf("completed tool group not cached after SetEntries")
 	}
 	g.block = "GROUP-SENTINEL"
+	g.lines = []string{"GROUP-SENTINEL"}
 	c.groupCache[0] = g
 
 	c.SetEntries([]*Entry{e})
-	if !strings.Contains(c.content, "GROUP-SENTINEL") {
+	if !strings.Contains(c.layout.flattenedContent(), "GROUP-SENTINEL") {
 		t.Fatalf("unchanged completed tool group was re-rendered instead of served")
 	}
 
 	e.Tool.ResultSummary = "121 lines"
 	c.SetEntries([]*Entry{e})
-	if strings.Contains(c.content, "GROUP-SENTINEL") {
+	if strings.Contains(c.layout.flattenedContent(), "GROUP-SENTINEL") {
 		t.Fatalf("stale group cache served after a member field changed")
 	}
 }
@@ -125,50 +128,23 @@ func TestPlainLinesLazyAfterRebuild(t *testing.T) {
 	}
 }
 
-func TestTranscriptPrefixCacheServedWhileTailGrows(t *testing.T) {
-	c := newTestChatView(72, 12)
-	entries := []*Entry{
-		{Role: RoleUser, Content: "old prompt"},
-		{Role: RoleAssistant, Content: "old answer"},
-		{Role: RoleAssistant, Content: "live tail", Streaming: true},
-	}
-	c.SetEntriesSlice(entries)
-	c.SetEntries(entries)
-	if c.transcriptPrefix.end != 2 {
-		t.Fatalf("prefix end = %d, want 2", c.transcriptPrefix.end)
-	}
-	cached := c.transcriptPrefix
-	cached.content = "TRANSCRIPT-PREFIX-SENTINEL"
-	cached.lineCount = strings.Count(cached.content, "\n")
-	c.transcriptPrefix = cached
+func TestSelectedTextDoesNotMaterializeFullPlainTranscript(t *testing.T) {
+	c := newTestChatView(60, 5)
+	setChatTestContent(c, strings.Join([]string{"zero", "one", "two", "three", "four"}, "\n"))
+	c.selection.Anchor = selectionPoint{Line: 1, Col: 0}
+	c.selection.Cursor = selectionPoint{Line: 3, Col: 5}
+	c.selection.Active = true
+	c.plainDirty = true
+	c.plainLines = nil
 
-	entries[2].Content += " grows"
-	c.SetEntries(entries)
-	if !strings.Contains(c.content, "TRANSCRIPT-PREFIX-SENTINEL") {
-		t.Fatalf("stable transcript prefix was rebuilt instead of served")
+	if got, want := c.selectedText(), "one\ntwo\nthree"; got != want {
+		t.Fatalf("selectedText() = %q, want %q", got, want)
 	}
-	if !strings.Contains(plain(c.content), "grows") {
-		t.Fatalf("dynamic tail missing after serving cached prefix; got:\n%s", plain(c.content))
+	if !c.plainDirty {
+		t.Fatalf("selectedText should strip only the selected range, not clear the full plain transcript cache")
 	}
-}
-
-func TestTranscriptPrefixCacheInvalidatedByContentGeneration(t *testing.T) {
-	c := newTestChatView(72, 12)
-	entries := []*Entry{
-		{Role: RoleUser, Content: "old prompt"},
-		{Role: RoleAssistant, Content: "old answer"},
-		{Role: RoleAssistant, Content: "live tail", Streaming: true},
-	}
-	c.SetEntriesSlice(entries)
-	c.SetEntries(entries)
-	cached := c.transcriptPrefix
-	cached.content = "TRANSCRIPT-PREFIX-SENTINEL"
-	c.transcriptPrefix = cached
-
-	c.markTranscriptDirty()
-	c.SetEntries(entries)
-	if strings.Contains(c.content, "TRANSCRIPT-PREFIX-SENTINEL") {
-		t.Fatalf("stale transcript prefix served after content generation changed")
+	if c.plainLines != nil {
+		t.Fatalf("selectedText should not populate full plainLines cache")
 	}
 }
 
@@ -222,7 +198,7 @@ func TestTokenDeltaCoalescedToTickFrame(t *testing.T) {
 	if !m.animTickActive {
 		t.Fatalf("delta should arm the repaint tick")
 	}
-	if strings.Contains(plain(m.mainChat().content), "HelloToken") {
+	if strings.Contains(plain(m.mainChat().layout.flattenedContent()), "HelloToken") {
 		t.Fatalf("delta repainted eagerly — coalescing not in effect")
 	}
 
@@ -231,7 +207,7 @@ func TestTokenDeltaCoalescedToTickFrame(t *testing.T) {
 	if m.chatDirty {
 		t.Fatalf("tick frame should flush the dirty flag")
 	}
-	if !strings.Contains(plain(m.mainChat().content), "HelloToken") {
+	if !strings.Contains(plain(m.mainChat().layout.flattenedContent()), "HelloToken") {
 		t.Fatalf("tick frame did not carry the deferred repaint")
 	}
 	if cmd == nil || !m.animTickActive {

@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -44,33 +43,23 @@ type chatView struct {
 	// renders them above the prompt and unstages by reading the methods below.
 	queued []queuedTurn
 
-	vp viewport.Model
-	// content is the assembled transcript from the last SetEntries.
-	// plainLines derives from it lazily (getPlainLines): ansi.Strip over the
-	// whole transcript is O(transcript) and only selection/copy consumes it,
-	// so it is computed on demand instead of on every rebuild.
-	content    string
+	scroll virtualScroll
+	// plainLines is materialized lazily from the virtual layout for compatibility
+	// paths such as selection copy and tests. Ordinary repaint uses only visible
+	// styled lines and does not strip the full transcript.
 	plainDirty bool
 	plainLines []string
 	// stylesGen increments on SetStyles; cached renders carry the generation
 	// they were built under, so a theme switch invalidates every cache.
 	stylesGen int
-	// entryCache / groupCache / transcriptPrefix / streamPrefix serve frozen
-	// renders so rebuild cost tracks the active entry, not the transcript
-	// (chat_render_cache.go).
-	entryCache       map[*Entry]entryRenderCache
-	groupCache       map[int]groupRenderCache
-	transcriptPrefix transcriptPrefixCache
-	streamPrefix     streamPrefixCache
-	// contentGen increments when already-rendered historical content can change
-	// shape without a width/theme change (fold toggles, inserted notices, lazy
-	// tool bodies, wholesale replacement). Dynamic tail mutations do not need to
-	// bump it because the assembled-prefix cache never includes them.
-	contentGen int
-	// arrowRows maps absolute content lines (indexes into plainLines) to the
-	// entries index whose fold arrow is drawn there. Rebuilt by SetEntries on
-	// every render, so it can never drift from the drawn layout.
-	arrowRows []arrowRow
+	// entryCache / groupCache / streamPrefix serve frozen renders so rebuild cost
+	// tracks changed units rather than rerendering every transcript entry.
+	entryCache   map[*Entry]entryRenderCache
+	groupCache   map[int]groupRenderCache
+	streamPrefix streamPrefixCache
+	// layout is the virtual transcript index that backs visible-window rendering
+	// without assembling a giant transcript string.
+	layout transcriptLayout
 
 	// pendingCensor is the assistant entry the most recent watchdog
 	// challenge/block fired against. If the model rewrites (a fresh assistant
@@ -99,13 +88,7 @@ type chatView struct {
 	// instead of preserving the raw YOffset, which drifts on reflow.
 	resizeAnchor    int
 	hasResizeAnchor bool
-	// vpH is the viewport height as last set by SetSize. charm.land/bubbles/v2's
-	// Height() getter returns 0 until SetHeight() is called (WithHeight in the
-	// constructor does not seed it), so we track the value ourselves so SetSize
-	// can compute the correct resize anchor before calling SetHeight.
-	vpH int
-
-	turn turnStatus
+	turn            turnStatus
 	// streaming mirrors the host's m.streaming so the chat can render a
 	// trailing "still working" indicator between the moment the assistant
 	// finishes writing/tool-running and the moment the next event arrives.
@@ -148,8 +131,7 @@ func newChatView(styles theme.Styles, palette theme.Palette, root, home string, 
 		root:           root,
 		home:           home,
 		md:             render.NewMarkdown(theme.MarkdownStyle(palette)),
-		vp:             viewport.New(viewport.WithWidth(vpWidth), viewport.WithHeight(vpHeight)),
-		vpH:            vpHeight,
+		scroll:         newVirtualScroll(vpWidth, vpHeight),
 		focusedToolIdx: -1,
 		groupExpanded:  map[int]bool{},
 		entryCache:     map[*Entry]entryRenderCache{},
@@ -179,7 +161,6 @@ func (c *chatView) AppendEntry(e *Entry) {
 	c.entries = append(c.entries, e)
 	// Appends do not invalidate an existing frozen prefix, but they change the
 	// transcript shape once the appended entry becomes eligible for prefixing.
-	c.contentGen++
 }
 
 // RemoveEntry removes one exact entry pointer from the scrollback.
@@ -191,7 +172,6 @@ func (c *chatView) RemoveEntry(target *Entry) bool {
 		copy(c.entries[i:], c.entries[i+1:])
 		c.entries[len(c.entries)-1] = nil
 		c.entries = c.entries[:len(c.entries)-1]
-		c.markTranscriptDirty()
 		return true
 	}
 	return false
@@ -217,7 +197,6 @@ func (c *chatView) PrependBanner(meta banner.Meta, epoch time.Time) {
 		return
 	}
 	c.entries = append([]*Entry{{Banner: &meta}}, c.entries...)
-	c.markTranscriptDirty()
 }
 
 // bannerRows is the rendered height of the wide banner block in content lines.
@@ -237,14 +216,14 @@ func (c *chatView) BannerAnimVisible() bool {
 	if !c.HasBanner() {
 		return false
 	}
-	wrapW := c.vp.Width()
+	wrapW := c.Width()
 	if wrapW < 10 {
 		wrapW = 10
 	}
 	if wrapW-entryIndent < banner.Width {
 		return false
 	}
-	return c.vp.YOffset() < bannerRows
+	return c.YOffset() < bannerRows
 }
 
 // insertNoticeAboveLast inserts e at position len-1, pushing the last entry
@@ -254,13 +233,11 @@ func (c *chatView) insertNoticeAboveLast(e *Entry) {
 	n := len(c.entries)
 	if n == 0 {
 		c.entries = append(c.entries, e)
-		c.markTranscriptDirty()
 		return
 	}
 	c.entries = append(c.entries, nil)
 	copy(c.entries[n-1+1:], c.entries[n-1:])
 	c.entries[n-1] = e
-	c.markTranscriptDirty()
 }
 
 // dropLastEntry removes the last entry. No-op if entries is empty.
@@ -268,7 +245,6 @@ func (c *chatView) dropLastEntry() {
 	if n := len(c.entries); n > 0 {
 		delete(c.entryCache, c.entries[n-1])
 		c.entries = c.entries[:n-1]
-		c.markTranscriptDirty()
 	}
 }
 
@@ -365,7 +341,6 @@ func (c *chatView) foldPendingCensor() {
 	c.pendingCensor.Superseded = true
 	c.pendingCensor.SupersededOpen = false
 	c.pendingCensor = nil
-	c.markTranscriptDirty()
 }
 
 // FillOpenAssistant fills the open streaming placeholder with text and clears
@@ -385,10 +360,10 @@ func (c *chatView) FillOpenAssistant(text string) bool {
 	return true
 }
 
-// rebuild re-renders the viewport content from c.entries (the authoritative
-// slice). refreshViewport calls this after pushing telemetry state. It is
-// equivalent to the old SetEntries(m.entries) call, but reads from the owned
-// slice instead of accepting an external snapshot.
+// rebuild refreshes the virtual transcript layout from c.entries (the
+// authoritative slice). refreshViewport calls this after pushing telemetry
+// state. It is equivalent to the old SetEntries(m.entries) call, but reads from
+// the owned slice instead of accepting an external snapshot.
 func (c *chatView) rebuild() {
 	c.SetEntries(c.entries)
 }
@@ -614,18 +589,13 @@ func (c *chatView) SetSize(w, h int) {
 	// position after reflow, so the line at the viewport's bottom stays there.
 	oldTotal := c.TotalLineCount()
 	oldOffset := c.YOffset()
-	// Use c.vpH (manually tracked) rather than c.vp.Height(): in
-	// charm.land/bubbles/v2 the Height() getter returns 0 until SetHeight() is
-	// called, so the constructor's WithHeight option doesn't seed it.
-	d := oldTotal - oldOffset - c.vpH
+	d := oldTotal - oldOffset - c.Height()
 	if d < 0 {
 		d = 0
 	}
 	c.resizeAnchor = d
 	c.hasResizeAnchor = true
-	c.vp.SetWidth(w)
-	c.vp.SetHeight(h)
-	c.vpH = h
+	c.scroll.SetSize(w, h)
 }
 
 // ── tool-entry navigation ──────────────────────────────────────────────────
@@ -703,7 +673,6 @@ func (c *chatView) ToggleFocusedFold() {
 	// Collapsed multi-entry run → expand it.
 	if isMulti && !c.groupExpanded[start] {
 		c.groupExpanded[start] = true
-		c.markTranscriptDirty()
 		return
 	}
 	// Expanded run, focus on the first call and it's already folded → collapse
@@ -711,7 +680,6 @@ func (c *chatView) ToggleFocusedFold() {
 	// other position toggles the focused call's own body.
 	if isMulti && c.groupExpanded[start] && c.focusedToolIdx == start && t.Folded {
 		c.groupExpanded[start] = false
-		c.markTranscriptDirty()
 		return
 	}
 	// Toggle the focused call's own body (and queue its lazy fetch on expand).
@@ -793,10 +761,10 @@ func (c *chatView) renderTrailingActivity(textW int) string {
 // ── scroll surface ─────────────────────────────────────────────────────────
 
 // Width returns the viewport width.
-func (c *chatView) Width() int { return c.vp.Width() }
+func (c *chatView) Width() int { return c.scroll.Width() }
 
 // Height returns the viewport height.
-func (c *chatView) Height() int { return c.vp.Height() }
+func (c *chatView) Height() int { return c.scroll.Height() }
 
 // DesiredHeight reports how many rows the chat wants — its rendered content lines
 // plus the queued chrome rows the host pins above the prompt. A host (the /c split
@@ -804,7 +772,7 @@ func (c *chatView) Height() int { return c.vp.Height() }
 // eating the whole panel. The streaming placeholder, when open, is a real entry and
 // is already counted in the content lines.
 func (c *chatView) DesiredHeight() int {
-	n := c.vp.TotalLineCount()
+	n := c.TotalLineCount()
 	n += len(c.queued)
 	if n < 1 {
 		n = 1
@@ -813,33 +781,51 @@ func (c *chatView) DesiredHeight() int {
 }
 
 // TotalLineCount returns the total number of content lines.
-func (c *chatView) TotalLineCount() int { return c.vp.TotalLineCount() }
+func (c *chatView) TotalLineCount() int { return c.scroll.TotalLineCount() }
 
 // YOffset returns the current scroll offset.
-func (c *chatView) YOffset() int { return c.vp.YOffset() }
+func (c *chatView) YOffset() int { return c.scroll.YOffset() }
 
 // SetYOffset sets the scroll offset.
-func (c *chatView) SetYOffset(n int) { c.vp.SetYOffset(n) }
+func (c *chatView) SetYOffset(n int) { c.scroll.SetYOffset(n) }
 
 // AtBottom reports whether the viewport is scrolled to the last line.
-func (c *chatView) AtBottom() bool { return c.vp.AtBottom() }
+func (c *chatView) AtBottom() bool { return c.scroll.AtBottom() }
 
 // GotoBottom scrolls to the last line.
-func (c *chatView) GotoBottom() { c.vp.GotoBottom() }
+func (c *chatView) GotoBottom() { c.scroll.GotoBottom() }
 
 // ScrollUp scrolls the viewport up by n lines.
-func (c *chatView) ScrollUp(n int) { c.vp.ScrollUp(n) }
+func (c *chatView) ScrollUp(n int) { c.scroll.ScrollUp(n) }
 
 // ScrollDown scrolls the viewport down by n lines.
-func (c *chatView) ScrollDown(n int) { c.vp.ScrollDown(n) }
+func (c *chatView) ScrollDown(n int) { c.scroll.ScrollDown(n) }
 
-// Update passes a bubbletea message to the underlying viewport and returns any
-// resulting command. Callers outside chat_view.go must use this instead of
-// accessing vp directly.
+// Update applies scrollback keys/mouse events to the virtual scroll surface.
+// Callers outside chat_view.go must use this instead of accessing scroll state
+// directly.
 func (c *chatView) Update(msg tea.Msg) tea.Cmd {
-	var cmd tea.Cmd
-	c.vp, cmd = c.vp.Update(msg)
-	return cmd
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "pgup", "ctrl+b":
+			c.ScrollUp(maxInt(1, c.Height()))
+		case "pgdown", "ctrl+f":
+			c.ScrollDown(maxInt(1, c.Height()))
+		case "ctrl+u":
+			c.ScrollUp(maxInt(1, c.Height()/2))
+		case "ctrl+d":
+			c.ScrollDown(maxInt(1, c.Height()/2))
+		}
+	case tea.MouseWheelMsg:
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			c.ScrollUp(promptWheelDelta)
+		case tea.MouseWheelDown:
+			c.ScrollDown(promptWheelDelta)
+		}
+	}
+	return nil
 }
 
 // PlainLines returns the ANSI-stripped content lines (for selection copy).
@@ -850,10 +836,34 @@ func (c *chatView) PlainLines() []string { return c.getPlainLines() }
 // a full parse of the rendered transcript — is off the rebuild hot path.
 func (c *chatView) getPlainLines() []string {
 	if c.plainDirty {
-		c.plainLines = plainLines(c.content)
+		c.plainLines = c.plainLinesRange(0, c.TotalLineCount()-1)
 		c.plainDirty = false
 	}
 	return c.plainLines
+}
+
+func (c *chatView) plainLineAt(line int) string {
+	styled, ok := c.layout.lineAt(line)
+	if !ok {
+		return ""
+	}
+	return ansi.Strip(styled)
+}
+
+func (c *chatView) plainLinesRange(start, end int) []string {
+	if c.TotalLineCount() == 0 || end < start {
+		return nil
+	}
+	start = clampInt(start, 0, c.TotalLineCount()-1)
+	end = clampInt(end, 0, c.TotalLineCount()-1)
+	if end < start {
+		return nil
+	}
+	out := make([]string, 0, end-start+1)
+	for line := start; line <= end; line++ {
+		out = append(out, c.plainLineAt(line))
+	}
+	return out
 }
 
 // SetEntries rebuilds the viewport content from the provided entries and
@@ -864,92 +874,12 @@ func (c *chatView) getPlainLines() []string {
 // a single line; the in-progress entry standalone below). A blank line
 // separates each block from neighbouring user/assistant/system entries.
 func (c *chatView) SetEntries(entries []*Entry) {
-	wasAtBottom := c.vp.AtBottom()
+	wasAtBottom := c.AtBottom()
 
-	prefixEnd := len(entries)
-	// Keep the final entry out of the assembled prefix during ordinary streaming
-	// repaints. The tail is where token/tool mutations happen, so serving the
-	// frozen prefix lets repaint cost track the active entry instead of the whole
-	// transcript. When the turn is between phases there is no visible active
-	// entry, so all entries may be prefixed and only the animated status line is
-	// rebuilt.
-	if prefixEnd > 0 && !c.IsBetweenPhases() {
-		prefixEnd--
-	}
-	if prefixEnd > 0 && entries[prefixEnd-1].Tool != nil {
-		// Prefixes must end on a block boundary; backing out of a tool run avoids
-		// splitting one cached tool group across prefix and dynamic suffix.
-		for prefixEnd > 0 && entries[prefixEnd-1].Tool != nil {
-			prefixEnd--
-		}
-	}
-
-	prefix := c.renderTranscriptPrefix(entries, prefixEnd)
-	var b strings.Builder
-	b.Grow(len(prefix.content) + 4096)
-	b.WriteString(prefix.content)
-	c.arrowRows = append(c.arrowRows[:0], prefix.arrowRows...)
-	// nl counts newlines written so far — which is also the content-line index
-	// where the next write begins. Arrow rows are recorded against it as blocks
-	// are emitted, so the map matches the layout by construction.
-	nl := prefix.lineCount
-	first := prefixEnd == 0
-	for i := prefixEnd; i < len(entries); {
-		if !first {
-			b.WriteString("\n\n")
-			nl += 2
-		}
-		if entries[i].Tool != nil {
-			// Walk forward to the end of this contiguous tool run.
-			j := i + 1
-			for j < len(entries) && entries[j].Tool != nil {
-				j++
-			}
-			block, rows := c.renderToolGroupCached(entries[i:j], i)
-			for _, r := range rows {
-				c.arrowRows = append(c.arrowRows, arrowRow{line: nl + r.Line, entry: i + r.Entry, group: r.Group, railMin: r.RailMin, railMax: r.RailMax})
-			}
-			b.WriteString(block)
-			nl += strings.Count(block, "\n")
-			i = j
-		} else {
-			seg := c.renderEntryCached(entries[i], i)
-			if entries[i].Superseded {
-				c.arrowRows = append(c.arrowRows, arrowRow{line: nl, entry: i})
-				if entries[i].SupersededOpen {
-					for ln := 1; ln <= strings.Count(seg, "\n"); ln++ {
-						c.arrowRows = append(c.arrowRows, arrowRow{line: nl + ln, entry: i, railMin: 0, railMax: toolRailContentCol})
-					}
-				}
-			}
-			b.WriteString(seg)
-			nl += strings.Count(seg, "\n")
-			i++
-		}
-		first = false
-	}
-	// Trailing "still working" line: appears below the last entry while the
-	// turn is in flight but no entry is the visible focus of work. Matches
-	// the prose left-margin so it reads as another entry without being one.
-	if c.IsBetweenPhases() {
-		wrapW := c.vp.Width()
-		if wrapW < 10 {
-			wrapW = 10
-		}
-		textW := wrapW - entryIndent
-		if textW < 8 {
-			textW = 8
-		}
-		pad := strings.Repeat(" ", entryIndent)
-		if b.Len() > 0 {
-			b.WriteString("\n\n")
-		}
-		b.WriteString(indentBlock(pad, c.renderTrailingActivity(textW)))
-	}
-	content := b.String()
-	c.content = content
+	c.layout = c.rebuildTranscriptLayout(entries)
 	c.plainDirty = true
-	c.vp.SetContent(content)
+	c.scroll.SetTotalLineCount(c.layout.totalLines)
+
 	if c.hasResizeAnchor {
 		// Resize reflow: restore the same distance-from-bottom in the newly
 		// wrapped content so the line that was at the viewport's bottom stays
@@ -959,9 +889,11 @@ func (c *chatView) SetEntries(entries []*Entry) {
 		if newOffset < 0 {
 			newOffset = 0
 		}
-		c.vp.SetYOffset(newOffset)
+		c.SetYOffset(newOffset)
 	} else if wasAtBottom {
-		c.vp.GotoBottom()
+		c.GotoBottom()
+	} else {
+		c.scroll.Clamp()
 	}
 }
 
@@ -973,7 +905,7 @@ func (c *chatView) SetEntries(entries []*Entry) {
 // per-group state (groupExpanded) and to translate the chatView-global focus
 // index into a slice-local one for the renderer.
 func (c *chatView) renderToolGroupBlock(run []*Entry, startIdx int) (string, []toolArrowRow) {
-	wrapW := c.vp.Width()
+	wrapW := c.Width()
 	if wrapW < 10 {
 		wrapW = 10
 	}
@@ -1001,19 +933,23 @@ func (c *chatView) renderToolGroupBlock(run []*Entry, startIdx int) (string, []t
 // View renders the viewport with a one-column scrollbar, applying selection
 // highlighting internally.
 func (c *chatView) View() string {
-	body := c.vp.View()
-	lines := strings.Split(body, "\n")
-	height := c.vp.Height()
-	col := scrollbarColumn(c.vp.TotalLineCount(), height, c.vp.YOffset())
+	height := c.Height()
+	lines := c.layout.linesRange(c.YOffset(), height)
+	col := scrollbarColumn(c.TotalLineCount(), height, c.YOffset())
 	var b strings.Builder
-	for i, line := range lines {
-		contentLine := c.vp.YOffset() + i
+	for i := 0; i < height; i++ {
+		line := ""
+		if i < len(lines) {
+			line = lines[i]
+		}
+		contentLine := c.YOffset() + i
 		line = c.renderSelectionOnLine(line, contentLine)
 		// Clamp to the viewport width so an over-wide content line (Glamour
 		// pads prose a few columns past the wrap width) can't push the
 		// composited row past m.width and wrap in the terminal — which would
 		// shove the scrollbar onto a wrapped row and make it vanish.
-		line = ansi.Truncate(line, c.vp.Width(), "")
+		line = ansi.Truncate(line, c.Width(), "")
+		line = padToWidth(line, c.Width())
 		b.WriteString(line)
 		b.WriteString(" ") // one-column gap so content doesn't touch the scrollbar
 		// Guard against any row-count mismatch between the rendered body and
@@ -1030,7 +966,7 @@ func (c *chatView) View() string {
 		} else {
 			b.WriteString(" ")
 		}
-		if i < len(lines)-1 {
+		if i < height-1 {
 			b.WriteString("\n")
 		}
 	}
@@ -1040,7 +976,7 @@ func (c *chatView) View() string {
 // ── entry rendering ────────────────────────────────────────────────────────
 
 func (c *chatView) renderEntry(e *Entry, idx int) string {
-	wrapW := c.vp.Width()
+	wrapW := c.Width()
 	if wrapW < 10 {
 		wrapW = 10
 	}
@@ -1211,7 +1147,7 @@ func (c *chatView) renderMdBlock(b render.MdBlock, textW int) string {
 
 // renderSelectionOnLine applies selection highlighting to one rendered line.
 func (c *chatView) renderSelectionOnLine(line string, contentLine int) string {
-	start, end, ok := c.selection.lineRange(contentLine, c.vp.Width())
+	start, end, ok := c.selection.lineRange(contentLine, c.Width())
 	if !ok {
 		return line
 	}
@@ -1220,20 +1156,23 @@ func (c *chatView) renderSelectionOnLine(line string, contentLine int) string {
 
 // selectedText returns the plain-text content covered by the current selection.
 func (c *chatView) selectedText() string {
-	plainLns := c.getPlainLines()
-	if !c.selection.hasRange() || len(plainLns) == 0 {
+	if !c.selection.hasRange() || c.TotalLineCount() == 0 {
 		return ""
 	}
 	start, end := c.selection.ordered()
-	start.Line = clampInt(start.Line, 0, len(plainLns)-1)
-	end.Line = clampInt(end.Line, 0, len(plainLns)-1)
+	start.Line = clampInt(start.Line, 0, c.TotalLineCount()-1)
+	end.Line = clampInt(end.Line, 0, c.TotalLineCount()-1)
 	if beforePoint(end, start) {
 		return ""
 	}
 
-	parts := make([]string, 0, end.Line-start.Line+1)
-	for line := start.Line; line <= end.Line; line++ {
-		text := plainLns[line]
+	plainLns := c.plainLinesRange(start.Line, end.Line)
+	if len(plainLns) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(plainLns))
+	for i, text := range plainLns {
+		line := start.Line + i
 		switch {
 		case start.Line == end.Line:
 			parts = append(parts, ansi.Cut(text, start.Col, end.Col))
@@ -1253,26 +1192,26 @@ func (c *chatView) selectedText() string {
 // If allowScroll is true and the row is out of bounds, the viewport is scrolled
 // one line in the appropriate direction.
 func (c *chatView) selectionPointFromLocal(localX, localY int, allowScroll bool) selectionPoint {
-	height := c.vp.Height()
+	height := c.Height()
 	row := localY
 	if allowScroll {
 		switch {
 		case row < 0:
-			c.vp.ScrollUp(1)
+			c.ScrollUp(1)
 			row = 0
 		case row >= height:
-			c.vp.ScrollDown(1)
+			c.ScrollDown(1)
 			row = height - 1
 		}
 	}
 	row = clampInt(row, 0, maxInt(0, height-1))
-	line := c.vp.YOffset() + row
-	if pl := c.getPlainLines(); len(pl) > 0 {
-		line = clampInt(line, 0, len(pl)-1)
+	line := c.YOffset() + row
+	if total := c.TotalLineCount(); total > 0 {
+		line = clampInt(line, 0, total-1)
 	}
 	return selectionPoint{
 		Line: line,
-		Col:  clampInt(localX, 0, c.vp.Width()),
+		Col:  clampInt(localX, 0, c.Width()),
 	}
 }
 
@@ -1280,9 +1219,9 @@ func (c *chatView) selectionPointFromLocal(localX, localY int, allowScroll bool)
 // region (not on the scrollbar column).
 func (c *chatView) MouseInText(localX, localY int) bool {
 	return localX >= 0 &&
-		localX < c.vp.Width() &&
+		localX < c.Width() &&
 		localY >= 0 &&
-		localY < c.vp.Height()
+		localY < c.Height()
 }
 
 // MouseToggleFold checks whether a local click landed on a tool entry's
@@ -1295,7 +1234,7 @@ func (c *chatView) MouseToggleFold(localX, localY int) bool {
 	if !c.MouseInText(localX, localY) {
 		return false
 	}
-	r, ok := c.arrowRowAt(c.vp.YOffset()+localY, localX)
+	r, ok := c.arrowRowAt(c.YOffset()+localY, localX)
 	if !ok {
 		return false
 	}
@@ -1306,7 +1245,6 @@ func (c *chatView) MouseToggleFold(localX, localY int) bool {
 	c.focusedToolIdx = -1
 	if r.entry >= 0 && r.entry < len(c.entries) && c.entries[r.entry].Superseded {
 		c.entries[r.entry].SupersededOpen = !c.entries[r.entry].SupersededOpen
-		c.markTranscriptDirty()
 		return true
 	}
 	if r.group {
@@ -1324,7 +1262,6 @@ func (c *chatView) MouseToggleFold(localX, localY int) bool {
 // tool entry — the key groupExpanded is recorded under.
 func (c *chatView) toggleGroup(start int) {
 	c.groupExpanded[start] = !c.groupExpanded[start]
-	c.markTranscriptDirty()
 }
 
 // toggleEntryFold flips one tool entry between its folded one-liner and its
@@ -1338,7 +1275,6 @@ func (c *chatView) toggleEntryFold(idx int) {
 		return
 	}
 	t.Folded = !t.Folded
-	c.markTranscriptDirty()
 	// Expanding a call whose full body hasn't been fetched yet queues a lazy
 	// GetToolCall and shows a loading spinner until it returns.
 	if !t.Folded && !t.Loading && t.FullArgs == "" && t.FullResult == "" && t.ToolUseID != "" {
@@ -1367,25 +1303,7 @@ type arrowRow struct {
 // arrow also covers the line. Returns false when nothing claims the point (body
 // text to the right of the rails is left to text selection).
 func (c *chatView) arrowRowAt(line, x int) (arrowRow, bool) {
-	var full arrowRow
-	haveFull := false
-	for _, r := range c.arrowRows {
-		if r.line != line {
-			continue
-		}
-		if r.railMax > 0 {
-			if x >= r.railMin && x < r.railMax {
-				return r, true
-			}
-		} else {
-			full = r
-			haveFull = true
-		}
-	}
-	if haveFull {
-		return full, true
-	}
-	return arrowRow{}, false
+	return c.layout.arrowRowAt(line, x)
 }
 
 // ClearSelection resets the selection state.
@@ -1411,13 +1329,13 @@ func (c *chatView) SelectionDragging() bool { return c.selection.Dragging }
 // This is equivalent to the old host-side test `mouse.X >= m.width-1` because
 // production sets vp.Width() = m.width-2, so Width()+1 = m.width-1.
 func (c *chatView) ScrollbarHit(localX, localY int) bool {
-	return localX >= c.vp.Width()+1 && localY >= 0 && localY < c.vp.Height()
+	return localX >= c.Width()+1 && localY >= 0 && localY < c.Height()
 }
 
 // scrollbarScrub jumps the scroll offset to match the local click row.
 func (c *chatView) scrollbarScrub(localY int) {
-	off := scrollOffsetFromClick(localY, 0, c.vp.Height(), c.vp.TotalLineCount())
-	c.vp.SetYOffset(off)
+	off := scrollOffsetFromClick(localY, 0, c.Height(), c.TotalLineCount())
+	c.SetYOffset(off)
 }
 
 // ScrollbarDragging reports whether a scrollbar drag is in progress.

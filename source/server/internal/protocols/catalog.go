@@ -31,20 +31,26 @@ Any time there are multiple viable implementation approaches — data modeling, 
 
    **Symmetric quantification rule**: every dimension or concern you raise for *one* option must be evaluated for *every* option on that dimension, even if the answer is "same" or "n/a." Asymmetric framing — tagging "stability concerns" on Option C without checking whether Option B has the same concern, or calling B "simpler" without counting B's actual moving parts — is where confirmation bias hides. If a concern applies to multiple options, that concern is not a differentiator and shouldn't be presented as one.
 
-   **Required rollup table**: after identifying the options, present the comparison as a Markdown matrix with **decision axes as rows** and **options as columns**. Do not use a wide row-per-option table that crams cost/risk/reward/side effects into one row. The point is quick side-by-side comparison on each axis.
+   **Required rollup table**: after identifying the options, present the comparison as a terminal-safe Markdown matrix with **decision axes as rows** and **short option labels as columns**. Do not use a wide row-per-option table that crams cost/risk/reward/side effects into one row. Do not put long option names in the table header, and do not put sentences in cells.
 
-   Use this shape:
+   Before the table, define a short legend using terse labels:
 
-   | Axis | Option A | Option B | Option C |
+   - **A — Disable by default**: fresh installs leave watchdog off.
+   - **B — Disable one check**: keep watchdog on, remove noisy check.
+   - **C — Tune checks now**: keep watchdog on, fix noisy checks.
+
+   Then use this compact shape:
+
+   | Axis | A | B | C |
    |---|---|---|---|
-   | Cost / complexity | ... | ... | ... |
-   | Risk | ... | ... | ... |
-   | Reward / outcome | ... | ... | ... |
-   | Side effects | ... | ... | ... |
-   | Best reason to choose | ... | ... | ... |
-   | Main reason not to | ... | ... | ... |
+   | Cost | Low | Low | Med |
+   | Risk | Low | Med | Med |
+   | Reward | Stops surprises | Keeps some coverage | Preserves feature |
+   | Side effects | Opt-in only | Still noisy | More work now |
+   | Best reason | Safest default | Narrow change | Fixes root causes |
+   | Main drawback | Less coverage | Partial fix | May still miss cases |
 
-   Keep cells concise. Put nuance below the table only when a cell would otherwise become a paragraph.
+   Table rules: keep headers short, keep each cell under ~6 words, and keep the whole table readable in an 80–100 column terminal. Put nuance below the table in prose bullets. If the table would wrap, shorten the cells — do not emit an unreadable table.
 
 4. **Explicitly flag hacks.** If an option conflates unrelated concerns, overloads a field for a dual purpose, or works "because there happen to be unused slots," call it a hack. Do not dress it up.
 

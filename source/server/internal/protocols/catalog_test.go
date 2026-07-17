@@ -85,20 +85,26 @@ func TestDesignDecisionsHasMergedSteps(t *testing.T) {
 	}
 }
 
-func TestDesignDecisionsRequiresAxisRowsRollupTable(t *testing.T) {
+func TestDesignDecisionsRequiresTerminalSafeAxisRowsRollupTable(t *testing.T) {
 	p, _ := Get("design-decisions")
 	for _, want := range []string{
+		"terminal-safe Markdown matrix",
 		"decision axes as rows",
-		"options as columns",
+		"short option labels as columns",
 		"Do not use a wide row-per-option table",
-		"| Axis | Option A | Option B | Option C |",
-		"| Cost / complexity | ... | ... | ... |",
-		"| Risk | ... | ... | ... |",
-		"| Reward / outcome | ... | ... | ... |",
-		"| Side effects | ... | ... | ... |",
+		"Do not put long option names in the table header",
+		"do not put sentences in cells",
+		"Before the table, define a short legend",
+		"| Axis | A | B | C |",
+		"| Cost | Low | Low | Med |",
+		"| Risk | Low | Med | Med |",
+		"keep each cell under ~6 words",
+		"80–100 column terminal",
+		"If the table would wrap, shorten the cells",
+		"do not emit an unreadable table",
 	} {
 		if !strings.Contains(p.Body, want) {
-			t.Fatalf("design-decisions missing rollup table requirement %q", want)
+			t.Fatalf("design-decisions missing terminal-safe rollup table requirement %q", want)
 		}
 	}
 }

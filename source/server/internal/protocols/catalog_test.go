@@ -85,31 +85,33 @@ func TestDesignDecisionsHasMergedSteps(t *testing.T) {
 	}
 }
 
-func TestDesignDecisionsRequiresTerminalSafeGridRollupTable(t *testing.T) {
+func TestDesignDecisionsRequiresMarkdownRollupWithTitlesInHeader(t *testing.T) {
 	p, _ := Get("design-decisions")
 	for _, want := range []string{
-		"terminal-safe Markdown **grid table**",
+		"normal Markdown pipe table",
 		"decision axes as rows",
-		"short option labels as columns",
-		"visible separators between body rows",
-		"Do not use a plain pipe table",
-		"one undivided block",
-		"Do not use a wide row-per-option table",
-		"Do not put long option names in the table header",
-		"do not put sentences in cells",
-		"Before the table, define a short legend",
-		"+---------------+----------------+----------------+----------------+",
-		"| Axis          | A              | B              | C              |",
-		"+===============+================+================+================+",
-		"| Cost          | Low            | Low            | Med            |",
-		"| Risk          | Low            | Med            | Med            |",
-		"keep each cell under ~4 words",
-		"80–100 column terminal",
-		"If the grid would wrap, shorten the cells",
-		"do not emit an unreadable table",
+		"actual option titles in the top row",
+		"Do not hide the titles in a separate legend",
+		"do not hand-draw ASCII/grid tables",
+		"Markdown tables exist so the renderer can wrap cells",
+		"| Axis | Disable by default | Disable one check | Tune checks now |",
+		"| Cost | Low: config/default tests | Low: one check list | Medium: prompt + gate work |",
+		"option titles belong in the header row",
+		"cells may be short phrases and may wrap",
+		"do not destroy clarity just to avoid wrapping",
 	} {
 		if !strings.Contains(p.Body, want) {
-			t.Fatalf("design-decisions missing terminal-safe grid table requirement %q", want)
+			t.Fatalf("design-decisions missing Markdown rollup table requirement %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"terminal-safe Markdown **grid table**",
+		"short option labels as columns",
+		"+===============+================",
+		"keep each cell under ~4 words",
+	} {
+		if strings.Contains(p.Body, forbidden) {
+			t.Fatalf("design-decisions still contains rejected grid-table guidance %q", forbidden)
 		}
 	}
 }

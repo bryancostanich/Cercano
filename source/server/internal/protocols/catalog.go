@@ -31,33 +31,20 @@ Any time there are multiple viable implementation approaches — data modeling, 
 
    **Symmetric quantification rule**: every dimension or concern you raise for *one* option must be evaluated for *every* option on that dimension, even if the answer is "same" or "n/a." Asymmetric framing — tagging "stability concerns" on Option C without checking whether Option B has the same concern, or calling B "simpler" without counting B's actual moving parts — is where confirmation bias hides. If a concern applies to multiple options, that concern is not a differentiator and shouldn't be presented as one.
 
-   **Required rollup table**: after identifying the options, present the comparison as a terminal-safe Markdown **grid table** with **decision axes as rows**, **short option labels as columns**, and visible separators between body rows. Do not use a plain pipe table whose body rows can render as one undivided block. Do not use a wide row-per-option table that crams cost/risk/reward/side effects into one row. Do not put long option names in the table header, and do not put sentences in cells.
+   **Required rollup table**: after identifying the options, present the comparison as a normal Markdown pipe table with **decision axes as rows** and the **actual option titles in the top row**. Do not hide the titles in a separate legend with A/B/C-only columns, and do not hand-draw ASCII/grid tables. Markdown tables exist so the renderer can wrap cells and keep the table readable.
 
-   Before the table, define a short legend using terse labels:
+   Use this shape:
 
-   - **A — Disable by default**: fresh installs leave watchdog off.
-   - **B — Disable one check**: keep watchdog on, remove noisy check.
-   - **C — Tune checks now**: keep watchdog on, fix noisy checks.
+   | Axis | Disable by default | Disable one check | Tune checks now |
+   |---|---|---|---|
+   | Cost | Low: config/default tests | Low: one check list | Medium: prompt + gate work |
+   | Risk | Low: opt-in only | Medium: partial fix | Medium: may miss cases |
+   | Reward | Stops surprise interrupts | Keeps some coverage | Preserves feature |
+   | Side effects | Less automatic enforcement | Other checks still run | More tuning work |
+   | Best reason | Safest user default | Narrowest behavior change | Addresses root cause |
+   | Main drawback | Less watchdog coverage | Doesn't fix all noise | More work now |
 
-   Then use this compact grid shape:
-
-   +---------------+----------------+----------------+----------------+
-   | Axis          | A              | B              | C              |
-   +===============+================+================+================+
-   | Cost          | Low            | Low            | Med            |
-   +---------------+----------------+----------------+----------------+
-   | Risk          | Low            | Med            | Med            |
-   +---------------+----------------+----------------+----------------+
-   | Reward        | Stops surprise | Keeps coverage | Preserves UX   |
-   +---------------+----------------+----------------+----------------+
-   | Side effects  | Opt-in only    | Still noisy    | More work now  |
-   +---------------+----------------+----------------+----------------+
-   | Best reason   | Safest default | Narrow change  | Fix root cause |
-   +---------------+----------------+----------------+----------------+
-   | Main drawback | Less coverage  | Partial fix    | Needs tuning   |
-   +---------------+----------------+----------------+----------------+
-
-   Table rules: keep headers short, keep each cell under ~4 words, and keep the whole grid readable in an 80–100 column terminal. Put nuance below the table in prose bullets. If the grid would wrap, shorten the cells — do not emit an unreadable table.
+   Table rules: option titles belong in the header row; cells may be short phrases and may wrap. Keep wording concise, but do not destroy clarity just to avoid wrapping. Put longer nuance below the table in prose bullets.
 
 4. **Explicitly flag hacks.** If an option conflates unrelated concerns, overloads a field for a dual purpose, or works "because there happen to be unused slots," call it a hack. Do not dress it up.
 

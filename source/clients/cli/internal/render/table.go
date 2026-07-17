@@ -122,7 +122,7 @@ func renderGrid(cols []Column, widths []int, rows []map[string]string, styles th
 	// Data rows. Cells wrap (never truncate) to their column width, so a row
 	// can span multiple terminal lines; non-wrapping cells sit on the first
 	// line with blanks beneath.
-	for _, r := range rows {
+	for rowIdx, r := range rows {
 		cellLines := make([][]string, len(cols))
 		rowH := 1
 		for i, c := range cols {
@@ -144,6 +144,10 @@ func renderGrid(cols []Column, widths []int, rows []map[string]string, styles th
 				b.WriteString(" ")
 				b.WriteString(styles.Border.Render("│"))
 			}
+			b.WriteString("\n")
+		}
+		if rowIdx < len(rows)-1 {
+			b.WriteString(styles.Border.Render(borderRow("├", "┼", "┤", "─", widths)))
 			b.WriteString("\n")
 		}
 	}

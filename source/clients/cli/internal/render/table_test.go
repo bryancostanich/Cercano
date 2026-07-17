@@ -27,6 +27,38 @@ func TestTable_FitsWidth_RendersGrid(t *testing.T) {
 	}
 }
 
+func TestTable_FitsWidth_DrawsHorizontalRulesBetweenDataRows(t *testing.T) {
+	tbl := Table{
+		Cols: []Column{
+			{Name: "name"},
+			{Name: "size"},
+		},
+		Rows: []map[string]string{
+			{"name": "qwen", "size": "4.7GB"},
+			{"name": "nomic", "size": "274MB"},
+		},
+	}
+	plain := stripAnsi(tbl.Render(80, theme.NewStyles(theme.Cracker())))
+	lines := strings.Split(plain, "\n")
+	qwenLine := -1
+	nomicLine := -1
+	for i, line := range lines {
+		if strings.Contains(line, "qwen") {
+			qwenLine = i
+		}
+		if strings.Contains(line, "nomic") {
+			nomicLine = i
+		}
+	}
+	if qwenLine < 0 || nomicLine < 0 || qwenLine >= nomicLine {
+		t.Fatalf("expected qwen row before nomic row, got %q", plain)
+	}
+	between := strings.Join(lines[qwenLine+1:nomicLine], "\n")
+	if !strings.Contains(between, "├") || !strings.Contains(between, "┼") || !strings.Contains(between, "┤") {
+		t.Fatalf("expected horizontal grid rule between data rows, got %q", plain)
+	}
+}
+
 func TestTable_TooWide_DropsNothing(t *testing.T) {
 	tbl := Table{
 		Cols: []Column{

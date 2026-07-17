@@ -379,6 +379,39 @@ func (s *Server) Shutdown() {
 	if sd, ok := s.workerRunner.(interface{ Shutdown() }); ok {
 		sd.Shutdown()
 	}
+	s.stopRuntimeInstances()
+}
+
+func (s *Server) stopRuntimeInstances() {
+	rm := s.runtimeMgr()
+	if rm == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	instances, err := rm.Instances(ctx)
+	if err != nil {
+		rm.WriteLog(localruntime.LogEntry{
+			Source:  "cercano.runtime",
+			Level:   "error",
+			Message: "failed to list runtime instances during shutdown: " + err.Error(),
+		})
+		return
+	}
+	for _, inst := range instances {
+		if inst.ID == "" || inst.State == localruntime.InstanceStopped {
+			continue
+		}
+		if err := rm.Stop(ctx, localruntime.StopRequest{InstanceID: inst.ID}); err != nil {
+			rm.WriteLog(localruntime.LogEntry{
+				Source:    "cercano.runtime." + inst.Runtime,
+				Level:     "error",
+				RuntimeID: inst.ID,
+				ModelID:   inst.ModelID,
+				Message:   "failed to stop runtime instance during shutdown: " + err.Error(),
+			})
+		}
+	}
 }
 
 // activeCloudModel returns the cloud model from the active profile — the

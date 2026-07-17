@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
+	"cercano/source/server/internal/localruntime"
 	"cercano/source/server/pkg/proto"
 )
 
@@ -191,4 +192,61 @@ func TestServer_BeginShutdown_EndsSubscribeEvents(t *testing.T) {
 // BeginShutdown on a server with no event hub must not panic.
 func TestServer_BeginShutdown_NilHub(t *testing.T) {
 	(&Server{}).BeginShutdown()
+}
+
+type shutdownRuntimeProvider struct {
+	stopped []string
+}
+
+func (p *shutdownRuntimeProvider) Name() string { return "mistralrs" }
+func (p *shutdownRuntimeProvider) Capabilities() localruntime.RuntimeCapabilities {
+	return localruntime.RuntimeCapabilities{ManagedProcesses: true, CanStop: true}
+}
+func (p *shutdownRuntimeProvider) Discover(context.Context) ([]localruntime.ModelRecord, error) {
+	return nil, nil
+}
+func (p *shutdownRuntimeProvider) Start(context.Context, localruntime.StartRequest, localruntime.LogSink) (*localruntime.InstanceRecord, error) {
+	return nil, nil
+}
+func (p *shutdownRuntimeProvider) Stop(_ context.Context, id string) error {
+	p.stopped = append(p.stopped, id)
+	return nil
+}
+func (p *shutdownRuntimeProvider) Probe(context.Context, string) (*localruntime.InstanceHealth, error) {
+	return nil, nil
+}
+
+func TestServerShutdownStopsRuntimeInstances(t *testing.T) {
+	provider := &shutdownRuntimeProvider{}
+	mgr := localruntime.NewManager()
+	mgr.RegisterProvider(provider)
+	mgr.UpdateInstance(localruntime.InstanceRecord{
+		ID:      "mistralrs:abc:12345",
+		Runtime: "mistralrs",
+		ModelID: "mistralrs:catalog:qwen3-30b-a3b-instruct-2507",
+		State:   localruntime.InstanceRunning,
+	})
+	mgr.UpdateInstance(localruntime.InstanceRecord{
+		ID:      "mistralrs:stopped:12346",
+		Runtime: "mistralrs",
+		ModelID: "mistralrs:catalog:qwen3-30b-a3b-instruct-2507",
+		State:   localruntime.InstanceStopped,
+	})
+
+	srv := &Server{}
+	srv.SetRuntimeManager(mgr)
+	srv.Shutdown()
+
+	if len(provider.stopped) != 1 || provider.stopped[0] != "mistralrs:abc:12345" {
+		t.Fatalf("stopped instances = %#v, want only running instance", provider.stopped)
+	}
+	instances, err := mgr.Instances(context.Background())
+	if err != nil {
+		t.Fatalf("Instances: %v", err)
+	}
+	for _, inst := range instances {
+		if inst.ID == "mistralrs:abc:12345" && inst.State != localruntime.InstanceStopped {
+			t.Fatalf("shutdown did not mark instance stopped: %#v", inst)
+		}
+	}
 }

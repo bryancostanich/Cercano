@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+var blankRenderLine = []string{""}
+
 type renderUnitKind int
 
 const (
@@ -27,7 +29,6 @@ type renderUnit struct {
 type transcriptLayout struct {
 	width      int
 	stylesGen  int
-	contentGen int
 	units      []renderUnit
 	totalLines int
 }
@@ -153,14 +154,23 @@ func splitRenderLines(s string) []string {
 }
 
 func (c *chatView) rebuildTranscriptLayout(entries []*Entry) transcriptLayout {
-	layout := transcriptLayout{width: c.Width(), stylesGen: c.stylesGen, contentGen: c.contentGen}
+	layout := transcriptLayout{width: c.Width(), stylesGen: c.stylesGen}
+	if len(entries) > 0 {
+		// Worst case alternates entry/separator for every entry plus an optional
+		// trailing-activity separator. Preallocating avoids repeated growth while
+		// rebuilding long cached transcripts.
+		layout.units = make([]renderUnit, 0, len(entries)*2)
+	}
 	appendUnit := func(kind renderUnitKind, startEntry, endEntry int, lines []string, rows []arrowRow) {
 		if len(lines) == 0 {
 			return
 		}
 		startLine := layout.totalLines
-		unitRows := make([]arrowRow, len(rows))
-		copy(unitRows, rows)
+		var unitRows []arrowRow
+		if len(rows) > 0 {
+			unitRows = make([]arrowRow, len(rows))
+			copy(unitRows, rows)
+		}
 		layout.units = append(layout.units, renderUnit{
 			kind:       kind,
 			startEntry: startEntry,
@@ -177,7 +187,7 @@ func (c *chatView) rebuildTranscriptLayout(entries []*Entry) transcriptLayout {
 		// transcripts do not gain a phantom unit. Separators are real blank rows,
 		// so append them explicitly.
 		startLine := layout.totalLines
-		layout.units = append(layout.units, renderUnit{kind: unitSeparator, startEntry: -1, endEntry: -1, startLine: startLine, lineCount: 1, lines: []string{""}})
+		layout.units = append(layout.units, renderUnit{kind: unitSeparator, startEntry: -1, endEntry: -1, startLine: startLine, lineCount: 1, lines: blankRenderLine})
 		layout.totalLines++
 	}
 

@@ -51,10 +51,6 @@ type groupRenderCache struct {
 	rows  []toolArrowRow
 }
 
-func (c *chatView) markTranscriptDirty() {
-	c.contentGen++
-}
-
 // renderEntryCachedLines returns renderEntry output as pre-split lines, served
 // from the per-entry cache when the entry is frozen. Dynamic entries bypass the
 // cache: the banner (wall-clock shimmer), the streaming assistant entry (live
@@ -168,7 +164,6 @@ func (c *chatView) flushRenderCaches() {
 	c.entryCache = map[*Entry]entryRenderCache{}
 	c.groupCache = map[int]groupRenderCache{}
 	c.streamPrefix = streamPrefixCache{}
-	c.contentGen++
 }
 
 // streamPrefixCache caches the joined render of the streaming entry's

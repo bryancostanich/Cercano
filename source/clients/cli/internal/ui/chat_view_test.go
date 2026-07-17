@@ -20,9 +20,8 @@ func newTestChatView(w, h int) *chatView {
 func setChatTestContent(c *chatView, content string) {
 	lines := strings.Split(content, "\n")
 	c.layout = transcriptLayout{
-		width:      c.Width(),
-		stylesGen:  c.stylesGen,
-		contentGen: c.contentGen,
+		width:     c.Width(),
+		stylesGen: c.stylesGen,
 		units: []renderUnit{{
 			kind:      unitEntry,
 			startLine: 0,

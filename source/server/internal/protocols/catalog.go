@@ -31,7 +31,7 @@ Any time there are multiple viable implementation approaches — data modeling, 
 
    **Symmetric quantification rule**: every dimension or concern you raise for *one* option must be evaluated for *every* option on that dimension, even if the answer is "same" or "n/a." Asymmetric framing — tagging "stability concerns" on Option C without checking whether Option B has the same concern, or calling B "simpler" without counting B's actual moving parts — is where confirmation bias hides. If a concern applies to multiple options, that concern is not a differentiator and shouldn't be presented as one.
 
-   **Required rollup table**: after identifying the options, present the comparison as a terminal-safe Markdown matrix with **decision axes as rows** and **short option labels as columns**. Do not use a wide row-per-option table that crams cost/risk/reward/side effects into one row. Do not put long option names in the table header, and do not put sentences in cells.
+   **Required rollup table**: after identifying the options, present the comparison as a terminal-safe Markdown **grid table** with **decision axes as rows**, **short option labels as columns**, and visible separators between body rows. Do not use a plain pipe table whose body rows can render as one undivided block. Do not use a wide row-per-option table that crams cost/risk/reward/side effects into one row. Do not put long option names in the table header, and do not put sentences in cells.
 
    Before the table, define a short legend using terse labels:
 
@@ -39,18 +39,25 @@ Any time there are multiple viable implementation approaches — data modeling, 
    - **B — Disable one check**: keep watchdog on, remove noisy check.
    - **C — Tune checks now**: keep watchdog on, fix noisy checks.
 
-   Then use this compact shape:
+   Then use this compact grid shape:
 
-   | Axis | A | B | C |
-   |---|---|---|---|
-   | Cost | Low | Low | Med |
-   | Risk | Low | Med | Med |
-   | Reward | Stops surprises | Keeps some coverage | Preserves feature |
-   | Side effects | Opt-in only | Still noisy | More work now |
-   | Best reason | Safest default | Narrow change | Fixes root causes |
-   | Main drawback | Less coverage | Partial fix | May still miss cases |
+   +---------------+----------------+----------------+----------------+
+   | Axis          | A              | B              | C              |
+   +===============+================+================+================+
+   | Cost          | Low            | Low            | Med            |
+   +---------------+----------------+----------------+----------------+
+   | Risk          | Low            | Med            | Med            |
+   +---------------+----------------+----------------+----------------+
+   | Reward        | Stops surprise | Keeps coverage | Preserves UX   |
+   +---------------+----------------+----------------+----------------+
+   | Side effects  | Opt-in only    | Still noisy    | More work now  |
+   +---------------+----------------+----------------+----------------+
+   | Best reason   | Safest default | Narrow change  | Fix root cause |
+   +---------------+----------------+----------------+----------------+
+   | Main drawback | Less coverage  | Partial fix    | Needs tuning   |
+   +---------------+----------------+----------------+----------------+
 
-   Table rules: keep headers short, keep each cell under ~6 words, and keep the whole table readable in an 80–100 column terminal. Put nuance below the table in prose bullets. If the table would wrap, shorten the cells — do not emit an unreadable table.
+   Table rules: keep headers short, keep each cell under ~4 words, and keep the whole grid readable in an 80–100 column terminal. Put nuance below the table in prose bullets. If the grid would wrap, shorten the cells — do not emit an unreadable table.
 
 4. **Explicitly flag hacks.** If an option conflates unrelated concerns, overloads a field for a dual purpose, or works "because there happen to be unused slots," call it a hack. Do not dress it up.
 

@@ -85,6 +85,24 @@ func TestDesignDecisionsHasMergedSteps(t *testing.T) {
 	}
 }
 
+func TestDesignDecisionsRequiresAxisRowsRollupTable(t *testing.T) {
+	p, _ := Get("design-decisions")
+	for _, want := range []string{
+		"decision axes as rows",
+		"options as columns",
+		"Do not use a wide row-per-option table",
+		"| Axis | Option A | Option B | Option C |",
+		"| Cost / complexity | ... | ... | ... |",
+		"| Risk | ... | ... | ... |",
+		"| Reward / outcome | ... | ... | ... |",
+		"| Side effects | ... | ... | ... |",
+	} {
+		if !strings.Contains(p.Body, want) {
+			t.Fatalf("design-decisions missing rollup table requirement %q", want)
+		}
+	}
+}
+
 func TestDelegateGitPlumbingNamesDispatchTool(t *testing.T) {
 	p, ok := Get("delegate-git-plumbing")
 	if !ok {

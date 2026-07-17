@@ -31,6 +31,21 @@ Any time there are multiple viable implementation approaches — data modeling, 
 
    **Symmetric quantification rule**: every dimension or concern you raise for *one* option must be evaluated for *every* option on that dimension, even if the answer is "same" or "n/a." Asymmetric framing — tagging "stability concerns" on Option C without checking whether Option B has the same concern, or calling B "simpler" without counting B's actual moving parts — is where confirmation bias hides. If a concern applies to multiple options, that concern is not a differentiator and shouldn't be presented as one.
 
+   **Required rollup table**: after identifying the options, present the comparison as a Markdown matrix with **decision axes as rows** and **options as columns**. Do not use a wide row-per-option table that crams cost/risk/reward/side effects into one row. The point is quick side-by-side comparison on each axis.
+
+   Use this shape:
+
+   | Axis | Option A | Option B | Option C |
+   |---|---|---|---|
+   | Cost / complexity | ... | ... | ... |
+   | Risk | ... | ... | ... |
+   | Reward / outcome | ... | ... | ... |
+   | Side effects | ... | ... | ... |
+   | Best reason to choose | ... | ... | ... |
+   | Main reason not to | ... | ... | ... |
+
+   Keep cells concise. Put nuance below the table only when a cell would otherwise become a paragraph.
+
 4. **Explicitly flag hacks.** If an option conflates unrelated concerns, overloads a field for a dual purpose, or works "because there happen to be unused slots," call it a hack. Do not dress it up.
 
 5. **Argue against your own recommendation.** Before locking a recommendation in step 6, write down the strongest case *for each non-recommended option*. If you can't make a substantive case for the alternatives, your analysis is thin — go back to step 3 and look for what you missed. If the counter-cases are genuinely weak after honest effort, the recommendation is sound. This step exists because the protocol relies on honest enumeration in step 3, and confirmation bias can quietly stack the framing toward a preferred option without anyone noticing until the wrong choice ships.

@@ -809,6 +809,9 @@ func ctxUsageTick() tea.Cmd {
 
 // Update is the Bubble Tea reducer.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	start := time.Now()
+	defer func() { m.logSlowUpdate(start, msg) }()
+
 	switch msg := msg.(type) {
 
 	case tea.ColorProfileMsg:
@@ -2719,6 +2722,9 @@ func (m Model) splashEffective() bool {
 // entries at the current width. Syncs turn telemetry first so the render
 // has current state, then delegates to chatView.rebuild().
 func (m *Model) refreshViewport() {
+	start := time.Now()
+	defer func() { m.logSlowRefreshViewport(start) }()
+
 	// If the chat tab strip appeared or vanished since the last relayout, the
 	// viewport height and scrollbarTop are stale (the strip's two rows are not
 	// reserved). Re-lay-out first; relayout() calls back here with stripShown in
@@ -3943,6 +3949,9 @@ func (m Model) composeFrame() (parts []string, inputIdx int) {
 }
 
 func (m Model) View() tea.View {
+	start := time.Now()
+	defer func() { m.logSlowView(start) }()
+
 	if m.width == 0 || m.height == 0 {
 		v := tea.NewView("")
 		v.AltScreen = true

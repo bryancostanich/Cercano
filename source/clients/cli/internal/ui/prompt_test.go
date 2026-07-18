@@ -658,6 +658,20 @@ func TestPrompt_PasteStripsANSISequences(t *testing.T) {
 	}
 }
 
+func TestPrompt_PasteNormalizesCarriageReturns(t *testing.T) {
+	p := newTestPromptInput(80)
+
+	p, _ = p.Update(tea.PasteMsg{Content: "* -r history needs a search/filter\r"})
+	p, _ = updatePromptText(p, "typed after")
+
+	if got, want := p.Value(), "* -r history needs a search/filter\ntyped after"; got != want {
+		t.Fatalf("paste buffer = %q, want %q", got, want)
+	}
+	if strings.Contains(p.View(), "\r") {
+		t.Fatalf("rendered prompt still contains carriage return: %q", p.View())
+	}
+}
+
 func TestPrompt_UndoRedoPasteSingleStep(t *testing.T) {
 	p := newTestPromptInput(80)
 	p, _ = p.Update(tea.PasteMsg{Content: "one\ntwo\nthree"})

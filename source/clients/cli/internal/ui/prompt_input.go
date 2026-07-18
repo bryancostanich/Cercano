@@ -532,7 +532,15 @@ func (p *promptInput) breakUndoCoalescing() {
 }
 
 func sanitizePromptPaste(s string) string {
-	return ansi.Strip(s)
+	s = ansi.Strip(s)
+	// Terminals commonly report pasted line endings as CR or CRLF even when the
+	// clipboard text was copied as LF. A raw carriage return in the prompt buffer
+	// is later emitted during rendering and moves the terminal cursor back to
+	// column 0, corrupting the rest of the frame. Normalize pasted line endings
+	// before insertion so the prompt renderer only ever sees logical newlines.
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	return s
 }
 
 func (p *promptInput) replaceSelectionOrInsert(runes []rune) {

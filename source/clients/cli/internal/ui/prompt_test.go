@@ -642,6 +642,22 @@ func TestPrompt_PasteIntoNonEmptyRendersInView(t *testing.T) {
 	}
 }
 
+func TestPrompt_PasteStripsANSISequences(t *testing.T) {
+	p := newTestPromptInput(80)
+	coloredPaste := "\x1b[38;2;234;130;18m* -r history needs a search/filter\x1b[0m\n"
+	plainPaste := "* -r history needs a search/filter\n"
+
+	p, _ = p.Update(tea.PasteMsg{Content: coloredPaste})
+	p, _ = updatePromptText(p, "typed after")
+
+	if got, want := p.Value(), plainPaste+"typed after"; got != want {
+		t.Fatalf("paste buffer = %q, want %q", got, want)
+	}
+	if strings.Contains(p.Value(), "\x1b") {
+		t.Fatalf("paste left raw escape bytes in prompt buffer: %q", p.Value())
+	}
+}
+
 func TestPrompt_UndoRedoPasteSingleStep(t *testing.T) {
 	p := newTestPromptInput(80)
 	p, _ = p.Update(tea.PasteMsg{Content: "one\ntwo\nthree"})

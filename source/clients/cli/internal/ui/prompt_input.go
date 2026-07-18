@@ -287,7 +287,7 @@ func (p promptInput) Update(msg tea.Msg) (promptInput, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.PasteMsg:
 		p.applyEdit("paste", false, func() {
-			p.replaceSelectionOrInsert([]rune(msg.Content))
+			p.replaceSelectionOrInsert([]rune(sanitizePromptPaste(msg.Content)))
 		})
 		return p, nil
 	case tea.KeyPressMsg:
@@ -529,6 +529,10 @@ func (p *promptInput) restore(s promptSnapshot) {
 
 func (p *promptInput) breakUndoCoalescing() {
 	p.canCoalesce = false
+}
+
+func sanitizePromptPaste(s string) string {
+	return ansi.Strip(s)
 }
 
 func (p *promptInput) replaceSelectionOrInsert(runes []rune) {

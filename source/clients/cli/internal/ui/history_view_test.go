@@ -23,6 +23,8 @@ func keyPress(s string) tea.KeyPressMsg {
 		code = tea.KeyUp
 	case "down":
 		code = tea.KeyDown
+	case "tab":
+		code = tea.KeyTab
 	case "esc":
 		code = tea.KeyEscape
 	case "backspace":
@@ -98,6 +100,60 @@ func TestHistoryUpdate_FilterNarrowsRowsAndEnterResumesMatch(t *testing.T) {
 	msg := cmd().(resumeRequestedMsg)
 	if msg.ConversationID != "b" {
 		t.Fatalf("resumed %q, want b", msg.ConversationID)
+	}
+}
+
+func TestHistoryUpdate_FilterDownMovesFocusToResults(t *testing.T) {
+	rows := []histRow{{id: "a", name: "alpha"}, {id: "b", name: "beta"}}
+	h := newTestHistoryView(rows, 100, 30)
+	h.filtering = true
+	h.filter = "a"
+	h.applyFilter()
+	h.cursor = 0
+
+	cmd, closed := h.Update(keyPress("down"))
+	if closed || cmd != nil {
+		t.Fatalf("down while filtering should move focus, not close; closed=%v cmd=%v", closed, cmd)
+	}
+	if h.filtering {
+		t.Fatal("down should leave search focus and enter result navigation")
+	}
+	if h.filter != "a" {
+		t.Fatalf("down should not mutate filter, got %q", h.filter)
+	}
+	if h.cursor != 1 {
+		t.Fatalf("down should move to next result, cursor=%d", h.cursor)
+	}
+}
+
+func TestHistoryUpdate_FilterTabMovesFocusToResults(t *testing.T) {
+	rows := []histRow{{id: "a", name: "alpha"}, {id: "b", name: "beta"}}
+	h := newTestHistoryView(rows, 100, 30)
+	h.filtering = true
+	h.filter = "a"
+	h.applyFilter()
+
+	cmd, closed := h.Update(keyPress("tab"))
+	if closed || cmd != nil {
+		t.Fatalf("tab while filtering should move focus, not close; closed=%v cmd=%v", closed, cmd)
+	}
+	if h.filtering {
+		t.Fatal("tab should leave search focus and enter result navigation")
+	}
+	if h.filter != "a" {
+		t.Fatalf("tab should not mutate filter, got %q", h.filter)
+	}
+}
+
+func TestHistoryUpdate_FilterIgnoresEscapeSequenceText(t *testing.T) {
+	h := newTestHistoryView([]histRow{{id: "a", name: "alpha"}}, 100, 30)
+	h.filtering = true
+	cmd, closed := h.Update(tea.KeyPressMsg{Code: tea.KeyDown, Text: "\x1b[B"})
+	if closed || cmd != nil {
+		t.Fatalf("escape-sequence key should not close; closed=%v cmd=%v", closed, cmd)
+	}
+	if h.filter != "" {
+		t.Fatalf("non-printable escape sequence leaked into filter: %q", h.filter)
 	}
 }
 

@@ -160,8 +160,16 @@ func (h *historyView) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 
 func (h *historyView) updateFilter(msg tea.KeyPressMsg) bool {
 	switch msg.String() {
-	case "enter":
+	case "enter", "tab":
 		h.filtering = false
+		return true
+	case "down", "j":
+		h.filtering = false
+		h.moveCursor(1)
+		return true
+	case "up", "k":
+		h.filtering = false
+		h.moveCursor(-1)
 		return true
 	case "esc":
 		h.filtering = false
@@ -182,12 +190,21 @@ func (h *historyView) updateFilter(msg tea.KeyPressMsg) bool {
 	if text == "" && msg.Code >= 32 && msg.Code != 127 && msg.Mod == 0 {
 		text = string(msg.Code)
 	}
-	if text == "" || strings.Contains(text, "\n") {
+	if text == "" || msg.Mod != 0 || strings.Contains(text, "\n") || containsNonPrintable(text) {
 		return false
 	}
 	h.filter += text
 	h.applyFilter()
 	return true
+}
+
+func containsNonPrintable(s string) bool {
+	for _, r := range s {
+		if r < 32 || r == 127 {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *historyView) syncVisibleRowsToAll() {

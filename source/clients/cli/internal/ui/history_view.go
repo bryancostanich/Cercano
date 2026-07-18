@@ -76,7 +76,7 @@ func newHistoryMarkdown(p theme.Palette) *render.Markdown {
 func newHistoryView(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h int) (*historyView, tea.Cmd) {
 	hv := &historyView{
 		styles: s, agent: ag,
-		width: w, height: h, cursor: 0, md: newHistoryMarkdown(p),
+		width: w, height: h, cursor: 0, filtering: true, md: newHistoryMarkdown(p),
 	}
 	hv.allRows = loadHistoryRows(ag)
 	hv.applyFilter()

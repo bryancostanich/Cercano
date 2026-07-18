@@ -52,6 +52,22 @@ func newTestHistoryView(rows []histRow, w, hgt int) *historyView {
 	return h
 }
 
+func TestNewHistoryView_StartsWithSearchFocused(t *testing.T) {
+	p := theme.Cracker()
+	h, cmd := newHistoryView(nil, p, theme.NewStyles(p), 100, 30)
+	if cmd != nil {
+		t.Fatalf("newHistoryView returned unexpected command: %v", cmd)
+	}
+	if h == nil || !h.filtering {
+		t.Fatalf("history view should start with search focused, got %+v", h)
+	}
+	lines, _ := h.rowsLines()
+	joined := stripAnsiCSI(strings.Join(lines, "\n"))
+	if !strings.Contains(joined, "search: █") {
+		t.Fatalf("focused empty search prompt missing from view:\n%s", joined)
+	}
+}
+
 func TestHistoryUpdate_FilterNarrowsRowsAndEnterResumesMatch(t *testing.T) {
 	rows := []histRow{
 		{id: "a", name: "table rendering", recap: "grid lines", meta: "2 turns · opus"},

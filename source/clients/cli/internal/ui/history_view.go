@@ -173,7 +173,7 @@ func (h *historyView) updateFilter(msg tea.KeyPressMsg) bool {
 			h.applyFilter()
 		}
 		return true
-	case "ctrl+u":
+	case "ctrl+c", "ctrl+u":
 		h.filter = ""
 		h.applyFilter()
 		return true

@@ -27,6 +27,8 @@ func keyPress(s string) tea.KeyPressMsg {
 		code = tea.KeyEscape
 	case "backspace":
 		code = tea.KeyBackspace
+	case "ctrl+c":
+		return tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
 	default:
 		// Printable single-rune keys (e.g. "q")
 		if len(s) == 1 {
@@ -80,6 +82,23 @@ func TestHistoryUpdate_FilterNarrowsRowsAndEnterResumesMatch(t *testing.T) {
 	msg := cmd().(resumeRequestedMsg)
 	if msg.ConversationID != "b" {
 		t.Fatalf("resumed %q, want b", msg.ConversationID)
+	}
+}
+
+func TestHistoryUpdate_FilterCtrlCClearsSearch(t *testing.T) {
+	rows := []histRow{{id: "a", name: "alpha"}, {id: "b", name: "beta"}}
+	h := newTestHistoryView(rows, 100, 30)
+	h.Update(keyPress("/"))
+	h.Update(tea.KeyPressMsg{Code: 'z', Text: "z"})
+	if len(h.rows) != 0 {
+		t.Fatalf("z filter should match no rows, got %+v", h.rows)
+	}
+	cmd, closed := h.Update(keyPress("ctrl+c"))
+	if closed || cmd != nil {
+		t.Fatalf("ctrl+c while filtering should clear search, not close; closed=%v cmd=%v", closed, cmd)
+	}
+	if h.filter != "" || len(h.rows) != 2 || !h.filtering {
+		t.Fatalf("ctrl+c should clear filter and keep search active; filter=%q rows=%d filtering=%v", h.filter, len(h.rows), h.filtering)
 	}
 }
 

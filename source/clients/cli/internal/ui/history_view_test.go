@@ -25,6 +25,8 @@ func keyPress(s string) tea.KeyPressMsg {
 		code = tea.KeyDown
 	case "esc":
 		code = tea.KeyEscape
+	case "backspace":
+		code = tea.KeyBackspace
 	default:
 		// Printable single-rune keys (e.g. "q")
 		if len(s) == 1 {
@@ -36,13 +38,66 @@ func keyPress(s string) tea.KeyPressMsg {
 
 // newTestHistoryView builds a historyView from hand-made rows, bypassing the
 // agent (newHistoryView needs a live client; the pure render/nav logic does not).
-func newTestHistoryView(rows []histRow, w, h int) *historyView {
+func newTestHistoryView(rows []histRow, w, hgt int) *historyView {
 	p := theme.Cracker()
 	s := theme.NewStyles(p)
-	return &historyView{
+	h := &historyView{
 		styles: s,
-		width:  w, height: h, rows: rows, cursor: 0,
+		width:  w, height: hgt, allRows: rows, cursor: 0,
 		md: newHistoryMarkdown(p),
+	}
+	h.applyFilter()
+	return h
+}
+
+func TestHistoryUpdate_FilterNarrowsRowsAndEnterResumesMatch(t *testing.T) {
+	rows := []histRow{
+		{id: "a", name: "table rendering", recap: "grid lines", meta: "2 turns · opus"},
+		{id: "b", name: "dispatch behavior", recap: "sub-agent tabs", meta: "4 turns · qwen"},
+	}
+	h := newTestHistoryView(rows, 100, 30)
+
+	h.Update(keyPress("/"))
+	h.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	h.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
+
+	if len(h.rows) != 1 || h.rows[0].id != "b" {
+		t.Fatalf("filter rows = %+v, want only dispatch row", h.rows)
+	}
+	lines, _ := h.rowsLines()
+	joined := stripAnsiCSI(strings.Join(lines, "\n"))
+	if !strings.Contains(joined, "search: di") || !strings.Contains(joined, "(1/2)") {
+		t.Fatalf("filter status missing from view:\n%s", joined)
+	}
+	cmd, closed := h.Update(keyPress("enter"))
+	if closed || cmd != nil || h.filtering {
+		t.Fatalf("enter while editing filter should commit filter only; closed=%v cmd=%v filtering=%v", closed, cmd, h.filtering)
+	}
+	cmd, closed = h.Update(keyPress("enter"))
+	if !closed || cmd == nil {
+		t.Fatalf("second enter should resume selected filtered row")
+	}
+	msg := cmd().(resumeRequestedMsg)
+	if msg.ConversationID != "b" {
+		t.Fatalf("resumed %q, want b", msg.ConversationID)
+	}
+}
+
+func TestHistoryUpdate_FilterBackspaceAndEsc(t *testing.T) {
+	rows := []histRow{{id: "a", name: "alpha"}, {id: "b", name: "beta"}}
+	h := newTestHistoryView(rows, 100, 30)
+	h.Update(keyPress("/"))
+	h.Update(tea.KeyPressMsg{Code: 'z', Text: "z"})
+	if len(h.rows) != 0 {
+		t.Fatalf("z filter should match no rows, got %+v", h.rows)
+	}
+	h.Update(keyPress("backspace"))
+	if h.filter != "" || len(h.rows) != 2 {
+		t.Fatalf("backspace should clear filter and restore rows; filter=%q rows=%d", h.filter, len(h.rows))
+	}
+	h.Update(keyPress("esc"))
+	if h.filtering {
+		t.Fatal("esc while filtering should leave filter mode without closing page")
 	}
 }
 

@@ -59,6 +59,9 @@ type historyView struct {
 	styles        theme.Styles
 	agent         *agentclient.Client
 	rows          []histRow
+	allRows       []histRow
+	filter        string
+	filtering     bool
 	cursor        int
 	scrollOffset  int
 	md            *render.Markdown
@@ -75,7 +78,8 @@ func newHistoryView(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, 
 		styles: s, agent: ag,
 		width: w, height: h, cursor: 0, md: newHistoryMarkdown(p),
 	}
-	hv.rows = loadHistoryRows(ag)
+	hv.allRows = loadHistoryRows(ag)
+	hv.applyFilter()
 	return hv, nil
 }
 
@@ -119,9 +123,17 @@ func (h *historyView) SetSize(w, hgt int) {
 }
 
 func (h *historyView) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	if h.filtering {
+		if handled := h.updateFilter(msg); handled {
+			return nil, false
+		}
+	}
 	switch msg.String() {
 	case "esc", "q":
 		return nil, true
+	case "/":
+		h.filtering = true
+		return nil, false
 	case "up", "k":
 		h.moveCursor(-1)
 	case "down", "j":
@@ -144,6 +156,79 @@ func (h *historyView) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		h.ScrollBy(dashboardContentHeight(h.height))
 	}
 	return nil, false
+}
+
+func (h *historyView) updateFilter(msg tea.KeyPressMsg) bool {
+	switch msg.String() {
+	case "enter":
+		h.filtering = false
+		return true
+	case "esc":
+		h.filtering = false
+		return true
+	case "backspace":
+		if h.filter != "" {
+			r := []rune(h.filter)
+			h.filter = string(r[:len(r)-1])
+			h.applyFilter()
+		}
+		return true
+	case "ctrl+u":
+		h.filter = ""
+		h.applyFilter()
+		return true
+	}
+	text := msg.Text
+	if text == "" && msg.Code >= 32 && msg.Code != 127 && msg.Mod == 0 {
+		text = string(msg.Code)
+	}
+	if text == "" || strings.Contains(text, "\n") {
+		return false
+	}
+	h.filter += text
+	h.applyFilter()
+	return true
+}
+
+func (h *historyView) syncVisibleRowsToAll() {
+	if len(h.rows) == 0 || len(h.allRows) == 0 {
+		return
+	}
+	byID := make(map[string]histRow, len(h.rows))
+	for _, r := range h.rows {
+		byID[r.id] = r
+	}
+	for i := range h.allRows {
+		if r, ok := byID[h.allRows[i].id]; ok {
+			h.allRows[i] = r
+		}
+	}
+}
+
+func (h *historyView) applyFilter() {
+	h.syncVisibleRowsToAll()
+	q := strings.ToLower(strings.TrimSpace(h.filter))
+	if len(h.allRows) == 0 && len(h.rows) > 0 {
+		h.allRows = append([]histRow(nil), h.rows...)
+	}
+	if q == "" {
+		h.rows = append([]histRow(nil), h.allRows...)
+	} else {
+		h.rows = h.rows[:0]
+		for _, r := range h.allRows {
+			haystack := strings.ToLower(r.name + "\n" + r.recap + "\n" + r.meta + "\n" + r.id)
+			if strings.Contains(haystack, q) {
+				h.rows = append(h.rows, r)
+			}
+		}
+	}
+	if len(h.rows) == 0 {
+		h.cursor = 0
+	} else {
+		h.cursor = clampInt(h.cursor, 0, len(h.rows)-1)
+	}
+	h.scrollOffset = 0
+	h.clampScroll()
 }
 
 // moveCursor shifts the selection by dir (clamped) and scrolls so the selected
@@ -191,9 +276,22 @@ func (h *historyView) rowsLines() ([]string, []histLineMeta) {
 	for _, hl := range strings.Split(h.md.Render("# History", panelW), "\n") {
 		add(hl, histLineMeta{row: -1})
 	}
+	filterLabel := "  / search"
+	if h.filtering || h.filter != "" {
+		filterLabel = "  search: " + h.filter
+		if h.filtering {
+			filterLabel += "█"
+		}
+		filterLabel += fmt.Sprintf("  (%d/%d)", len(h.rows), len(h.allRows))
+	}
+	add(h.styles.Muted.Render(ansi.Truncate(filterLabel, panelW, "…")), histLineMeta{row: -1})
 	add("", histLineMeta{row: -1})
 
 	if len(h.rows) == 0 {
+		if strings.TrimSpace(h.filter) != "" {
+			add(h.styles.Muted.Render("  (no conversations match the search)"), histLineMeta{row: -1})
+			return lines, meta
+		}
 		add(h.styles.Muted.Render("  (no saved conversations)"), histLineMeta{row: -1})
 		return lines, meta
 	}
@@ -308,7 +406,12 @@ func (h *historyView) applyTurns(id string, turns []agentclient.ContextTurn) {
 		if h.rows[i].id == id {
 			h.rows[i].turns = turns
 			h.rows[i].turnsLoaded = true
-			return
+		}
+	}
+	for i := range h.allRows {
+		if h.allRows[i].id == id {
+			h.allRows[i].turns = turns
+			h.allRows[i].turnsLoaded = true
 		}
 	}
 }

@@ -65,8 +65,17 @@ func TestNewHistoryView_StartsWithSearchFocused(t *testing.T) {
 	}
 	lines, _ := h.rowsLines()
 	joined := stripAnsiCSI(strings.Join(lines, "\n"))
-	if !strings.Contains(joined, "search: █") {
+	if !strings.Contains(joined, "▶ search: █") {
 		t.Fatalf("focused empty search prompt missing from view:\n%s", joined)
+	}
+	ruleCount := 0
+	for _, line := range strings.Split(joined, "\n") {
+		if strings.HasPrefix(line, strings.Repeat("─", 10)) {
+			ruleCount++
+		}
+	}
+	if ruleCount < 2 {
+		t.Fatalf("search prompt should be wrapped in top and bottom rules:\n%s", joined)
 	}
 }
 

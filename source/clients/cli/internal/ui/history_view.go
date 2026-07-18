@@ -284,6 +284,23 @@ func (h *historyView) scrollToCursor() {
 // rowsLines renders the # History heading then two lines per row, returning
 // parallel line + meta slices. Indent and truncation keep every line within the
 // panel width.
+func (h *historyView) renderSearchChrome(width int) []string {
+	if width < 1 {
+		width = 1
+	}
+	line := h.styles.UserPrompt.Render(strings.Repeat("─", width))
+	label := "search: " + h.filter
+	if h.filtering {
+		label += "█"
+	}
+	label += fmt.Sprintf("  (%d/%d)", len(h.rows), len(h.allRows))
+	if !h.filtering && h.filter == "" {
+		label = "/ search"
+	}
+	input := h.styles.UserPrompt.Render("▶ ") + h.styles.Primary.Render(ansi.Truncate(label, max(1, width-2), "…"))
+	return []string{line, input, line}
+}
+
 func (h *historyView) rowsLines() ([]string, []histLineMeta) {
 	var lines []string
 	var meta []histLineMeta
@@ -293,15 +310,9 @@ func (h *historyView) rowsLines() ([]string, []histLineMeta) {
 	for _, hl := range strings.Split(h.md.Render("# History", panelW), "\n") {
 		add(hl, histLineMeta{row: -1})
 	}
-	filterLabel := "  / search"
-	if h.filtering || h.filter != "" {
-		filterLabel = "  search: " + h.filter
-		if h.filtering {
-			filterLabel += "█"
-		}
-		filterLabel += fmt.Sprintf("  (%d/%d)", len(h.rows), len(h.allRows))
+	for _, line := range h.renderSearchChrome(panelW) {
+		add(line, histLineMeta{row: -1})
 	}
-	add(h.styles.Muted.Render(ansi.Truncate(filterLabel, panelW, "…")), histLineMeta{row: -1})
 	add("", histLineMeta{row: -1})
 
 	if len(h.rows) == 0 {

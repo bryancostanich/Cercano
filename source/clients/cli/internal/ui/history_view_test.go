@@ -112,6 +112,21 @@ func TestHistoryUpdate_FilterNarrowsRowsAndEnterResumesMatch(t *testing.T) {
 	}
 }
 
+func TestHistoryUpdate_FilterMatchesTermsInAnyOrder(t *testing.T) {
+	rows := []histRow{
+		{id: "a", name: "more ux polish", recap: "history search"},
+		{id: "b", name: "more rendering", recap: "tables"},
+	}
+	h := newTestHistoryView(rows, 100, 30)
+	h.Update(keyPress("/"))
+	for _, r := range "ux more" {
+		h.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	if len(h.rows) != 1 || h.rows[0].id != "a" {
+		t.Fatalf("order-insensitive filter rows = %+v, want only more ux row", h.rows)
+	}
+}
+
 func TestHistoryUpdate_FilterDownMovesFocusToResults(t *testing.T) {
 	rows := []histRow{{id: "a", name: "alpha"}, {id: "b", name: "beta"}}
 	h := newTestHistoryView(rows, 100, 30)

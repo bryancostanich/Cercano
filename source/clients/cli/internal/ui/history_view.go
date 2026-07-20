@@ -198,6 +198,15 @@ func (h *historyView) updateFilter(msg tea.KeyPressMsg) bool {
 	return true
 }
 
+func historyRowMatchesAllTerms(haystack string, terms []string) bool {
+	for _, term := range terms {
+		if !strings.Contains(haystack, term) {
+			return false
+		}
+	}
+	return true
+}
+
 func containsNonPrintable(s string) bool {
 	for _, r := range s {
 		if r < 32 || r == 127 {
@@ -231,10 +240,11 @@ func (h *historyView) applyFilter() {
 	if q == "" {
 		h.rows = append([]histRow(nil), h.allRows...)
 	} else {
+		terms := strings.Fields(q)
 		h.rows = h.rows[:0]
 		for _, r := range h.allRows {
 			haystack := strings.ToLower(r.name + "\n" + r.recap + "\n" + r.meta + "\n" + r.id)
-			if strings.Contains(haystack, q) {
+			if historyRowMatchesAllTerms(haystack, terms) {
 				h.rows = append(h.rows, r)
 			}
 		}

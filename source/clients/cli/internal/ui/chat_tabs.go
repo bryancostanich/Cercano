@@ -119,7 +119,11 @@ func (m *Model) ensureSubAgentTab(id, parentID, title string, tools []string) *c
 		vpH = 1
 	}
 	view := newChatView(m.styles, m.palette, m.root, m.home, vpW, vpH)
-	view.AppendEntry(&Entry{Role: RoleSystem, Content: fmt.Sprintf("Sub-agent %s started", title)})
+	kind := "Sub-agent"
+	if strings.HasPrefix(id, "activity:") {
+		kind = "Activity"
+	}
+	view.AppendEntry(&Entry{Role: RoleSystem, Content: fmt.Sprintf("%s %s started", kind, title)})
 	tab := &chatTab{id: id, parentID: parentID, title: title, tools: append([]string(nil), tools...), view: view}
 	m.chatTabs.tabs[id] = tab
 	m.chatTabs.order = append(m.chatTabs.order, id)
@@ -343,7 +347,10 @@ func subAgentTabHasSubstantiveTranscript(tab *chatTab) bool {
 		if e.Role == RoleAssistant && content != "" {
 			return true
 		}
-		if e.Role == RoleSystem && strings.HasPrefix(content, "sub-agent failed:") {
+		if e.Role == RoleUser && content != "" {
+			return true
+		}
+		if e.Role == RoleSystem && (strings.HasPrefix(content, "sub-agent failed:") || strings.Contains(content, " failed:")) {
 			return true
 		}
 	}

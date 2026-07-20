@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
+	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/research"
 	"cercano/source/server/internal/web"
@@ -90,7 +93,11 @@ func (deepResearchCap) Execute(ctx context.Context, call *capabilities.Call) (*c
 	// Note: the MCP surface pre-checks for code-only local models via gRPC
 	// routing metadata; natively the dispatch engine owns model selection, so
 	// that probe is skipped here.
-	model := &dispatchModelCaller{call: call, source: "deep_research", model: a.Model, tier: config.TierFastLightText}
+	activityID := fmt.Sprintf("activity:deep_research:%d", time.Now().UnixNano())
+	emitDeepResearchActivity(call, activityID, "started", fmt.Sprintf("deep research start: topic=%q depth=%s phase=%s", a.Topic, defaultLabel(a.Depth, "standard"), defaultLabel(a.Phase, "all")))
+	emitDeepResearchActivity(call, activityID, "prompt", fmt.Sprintf("Topic: %s\nIntent: %s", a.Topic, a.Intent))
+
+	model := &activityModelCaller{inner: &dispatchModelCaller{call: call, source: "deep_research", model: a.Model, tier: config.TierFastLightText}, call: call, activityID: activityID}
 	scriptPath, err := searchScriptPath()
 	if err != nil {
 		return nil, fmt.Errorf("deep_research: search script: %w", err)
@@ -102,6 +109,7 @@ func (deepResearchCap) Execute(ctx context.Context, call *capabilities.Call) (*c
 	if call.Emit != nil {
 		call.Emit("starting deep research…")
 	}
+	emitDeepResearchActivity(call, activityID, "progress", "planning sources and research phases…")
 	phaseResult, err := pipeline.Run(ctx, research.RunConfig{
 		Topic:      a.Topic,
 		Intent:     a.Intent,
@@ -113,8 +121,10 @@ func (deepResearchCap) Execute(ctx context.Context, call *capabilities.Call) (*c
 		Phase:      a.Phase,
 	})
 	if err != nil {
+		emitDeepResearchActivity(call, activityID, "error", "deep research failed: "+err.Error())
 		return nil, fmt.Errorf("deep_research: %w", err)
 	}
+	emitDeepResearchActivity(call, activityID, "done", fmt.Sprintf("deep research complete: phase=%s next=%s", phaseResult.Phase, defaultLabel(phaseResult.NextPhase, "none")))
 
 	out := capabilities.NewTextResult(phaseResult.Summary)
 	if phaseResult.SuggestedNext != nil {
@@ -123,4 +133,47 @@ func (deepResearchCap) Execute(ctx context.Context, call *capabilities.Call) (*c
 		}
 	}
 	return out, nil
+}
+
+type activityModelCaller struct {
+	inner      research.ModelCaller
+	call       *capabilities.Call
+	activityID string
+	calls      int
+}
+
+func (m *activityModelCaller) Call(ctx context.Context, prompt string) (string, error) {
+	m.calls++
+	emitDeepResearchActivity(m.call, m.activityID, "progress", fmt.Sprintf("local analysis call %d…", m.calls))
+	out, err := m.inner.Call(ctx, prompt)
+	if err != nil {
+		emitDeepResearchActivity(m.call, m.activityID, "progress", fmt.Sprintf("local analysis call %d failed: %v", m.calls, err))
+		return "", err
+	}
+	emitDeepResearchActivity(m.call, m.activityID, "progress", fmt.Sprintf("local analysis call %d complete", m.calls))
+	return out, nil
+}
+
+func emitDeepResearchActivity(call *capabilities.Call, activityID, kind, text string) {
+	if call == nil || call.EmitProgress == nil {
+		return
+	}
+	call.EmitProgress(agenttools.ProgressEvent{
+		Text:             text,
+		SubAgentID:       activityID,
+		SubAgentParentID: call.ConversationID,
+		SubAgentTitle:    "research",
+		Kind:             kind,
+		ToolName:         "deep_research",
+		Summary:          text,
+		IsError:          kind == "error",
+	})
+}
+
+func defaultLabel(s, fallback string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return fallback
+	}
+	return s
 }

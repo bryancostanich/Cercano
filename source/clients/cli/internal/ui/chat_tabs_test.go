@@ -71,6 +71,38 @@ func TestSubAgentNestedLabelsUseParentOrdinal(t *testing.T) {
 	}
 }
 
+func TestDeepResearchActivityAttachesOpenTabAffordanceToTool(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
+	m.mainChat().Apply(toolEntryStartMsg{id: "tool-1", name: "deep_research"})
+	m.mainChat().Apply(toolEntryStopMsg{id: "tool-1", argsSummary: "topic=activity tabs intent=live feedback"})
+
+	m.applySubAgentEvent(subAgentEventMsg{id: "activity:deep_research:1", kind: "started", title: "research", toolUseID: "tool-1"})
+	m.applySubAgentEvent(subAgentEventMsg{id: "activity:deep_research:1", kind: "prompt", text: "Topic: activity tabs\nIntent: live feedback"})
+	m.applySubAgentEvent(subAgentEventMsg{id: "activity:deep_research:1", kind: "progress", text: "planning sources…"})
+
+	entries := m.mainChat().Entries()
+	if len(entries) == 0 || entries[0].Tool == nil || entries[0].Tool.SubAgentID != "activity:deep_research:1" {
+		t.Fatalf("deep_research tool did not record spawned activity tab: %+v", entries)
+	}
+	out := renderToolEntry(*entries[0].Tool, 100, false, m.styles, m.mainChat().md)
+	if !strings.Contains(stripAnsiCSI(out), "open tab") {
+		t.Fatalf("deep_research tool line should show open tab affordance, got %q", stripAnsiCSI(out))
+	}
+	tab := m.chatTabs.tabs["activity:deep_research:1"]
+	if tab == nil {
+		t.Fatal("missing research activity tab")
+	}
+	var body []string
+	for _, e := range tab.view.Entries() {
+		body = append(body, e.Content)
+	}
+	joined := strings.Join(body, "\n")
+	if !strings.Contains(joined, "Activity research started") || !strings.Contains(joined, "Topic: activity tabs") || !strings.Contains(joined, "planning sources") {
+		t.Fatalf("activity tab missing live feedback entries: %q", joined)
+	}
+}
+
 func TestSubAgentStartedAttachesOpenTabAffordanceToDispatchTool(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})

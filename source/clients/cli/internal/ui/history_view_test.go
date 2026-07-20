@@ -25,6 +25,8 @@ func keyPress(s string) tea.KeyPressMsg {
 		code = tea.KeyDown
 	case "tab":
 		code = tea.KeyTab
+	case "shift+tab":
+		return tea.KeyPressMsg{Text: "\x1b[Z"}
 	case "esc":
 		code = tea.KeyEscape
 	case "backspace":
@@ -145,8 +147,57 @@ func TestHistoryUpdate_FilterDownMovesFocusToResults(t *testing.T) {
 	if h.filter != "a" {
 		t.Fatalf("down should not mutate filter, got %q", h.filter)
 	}
+	if h.cursor != 0 {
+		t.Fatalf("down should focus the current top result without skipping it, cursor=%d", h.cursor)
+	}
+}
+
+func TestHistoryUpdate_ListUpAtTopReturnsFocusToSearch(t *testing.T) {
+	rows := []histRow{{id: "a", name: "alpha"}, {id: "b", name: "beta"}}
+	h := newTestHistoryView(rows, 100, 30)
+	h.filtering = false
+	h.cursor = 0
+
+	cmd, closed := h.Update(keyPress("up"))
+	if closed || cmd != nil {
+		t.Fatalf("up at first result should focus search, not close; closed=%v cmd=%v", closed, cmd)
+	}
+	if !h.filtering {
+		t.Fatal("up at first result should return focus to search")
+	}
+	if h.cursor != 0 {
+		t.Fatalf("up at first result should not move cursor, got %d", h.cursor)
+	}
+}
+
+func TestHistoryUpdate_ListShiftTabReturnsFocusToSearch(t *testing.T) {
+	rows := []histRow{{id: "a", name: "alpha"}, {id: "b", name: "beta"}}
+	h := newTestHistoryView(rows, 100, 30)
+	h.filtering = false
+	h.cursor = 1
+
+	cmd, closed := h.Update(keyPress("shift+tab"))
+	if closed || cmd != nil {
+		t.Fatalf("shift+tab should focus search, not close; closed=%v cmd=%v", closed, cmd)
+	}
+	if !h.filtering {
+		t.Fatal("shift+tab should return focus to search")
+	}
 	if h.cursor != 1 {
-		t.Fatalf("down should move to next result, cursor=%d", h.cursor)
+		t.Fatalf("shift+tab should not move cursor, got %d", h.cursor)
+	}
+}
+
+func TestHistoryUpdate_FilterJTypesSearchText(t *testing.T) {
+	h := newTestHistoryView([]histRow{{id: "a", name: "jira"}}, 100, 30)
+	h.filtering = true
+
+	h.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	if h.filter != "j" {
+		t.Fatalf("printable j should type in search, got %q", h.filter)
+	}
+	if !h.filtering {
+		t.Fatal("typing j should keep search focused")
 	}
 }
 

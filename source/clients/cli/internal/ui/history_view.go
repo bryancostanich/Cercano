@@ -135,7 +135,14 @@ func (h *historyView) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		h.filtering = true
 		return nil, false
 	case "up", "k":
+		if h.cursor <= 0 {
+			h.filtering = true
+			return nil, false
+		}
 		h.moveCursor(-1)
+	case "shift+tab", "\x1b[Z":
+		h.filtering = true
+		return nil, false
 	case "down", "j":
 		h.moveCursor(1)
 	case "enter":
@@ -163,13 +170,8 @@ func (h *historyView) updateFilter(msg tea.KeyPressMsg) bool {
 	case "enter", "tab":
 		h.filtering = false
 		return true
-	case "down", "j":
+	case "down", "up":
 		h.filtering = false
-		h.moveCursor(1)
-		return true
-	case "up", "k":
-		h.filtering = false
-		h.moveCursor(-1)
 		return true
 	case "esc":
 		h.filtering = false

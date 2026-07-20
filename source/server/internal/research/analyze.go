@@ -333,36 +333,41 @@ func AnalyzeAllWithPrefetch(ctx context.Context, model ModelCaller, fetcher URLF
 	}
 
 	var findings []AnnotatedFinding
+	progress.StartPhase("Analyzing", len(pubs))
 
 	for i, pub := range pubs {
-		progress.Update("Analyzing", fmt.Sprintf("Finding %d of %d: %s", i+1, len(pubs), truncateTitle(pub.Title, 50)))
+		func() {
+			progress.SetStep(fmt.Sprintf("Finding %d of %d: %s", i+1, len(pubs), truncateTitle(pub.Title, 50)))
+			defer progress.CompleteItem()
 
-		content := prefetched[pub.URL]
-		if content == "" && pub.Abstract != "" {
-			content = pub.Abstract
-		}
-		// Last resort: fetch individually
-		if content == "" && pub.URL != "" && fetcher != nil {
-			if result, err := fetcher.FetchURL(pub.URL); err == nil {
-				content = result.Content
+			content := prefetched[pub.URL]
+			if content == "" && pub.Abstract != "" {
+				content = pub.Abstract
 			}
-		}
-		if content == "" {
-			continue
-		}
-		// Skip thin content — paywalled pages, error pages, failed extractions
-		if len(content) < minContentChars {
-			fmt.Fprintf(os.Stderr, "  Skipping %q: only %d chars (min %d)\n", truncateTitle(pub.Title, 40), len(content), minContentChars)
-			continue
-		}
+			// Last resort: fetch individually
+			if content == "" && pub.URL != "" && fetcher != nil {
+				if result, err := fetcher.FetchURL(pub.URL); err == nil {
+					content = result.Content
+				}
+			}
+			if content == "" {
+				return
+			}
+			// Skip thin content — paywalled pages, error pages, failed extractions
+			if len(content) < minContentChars {
+				fmt.Fprintf(os.Stderr, "  Skipping %q: only %d chars (min %d)\n", truncateTitle(pub.Title, 40), len(content), minContentChars)
+				return
+			}
 
-		crossCtx := BuildCrossContext(findings)
+			crossCtx := BuildCrossContext(findings)
 
-		finding, err := AnalyzeFinding(ctx, model, pub, content, intent, crossCtx)
-		if err != nil {
-			continue
-		}
-		findings = append(findings, *finding)
+			finding, err := AnalyzeFinding(ctx, model, pub, content, intent, crossCtx)
+			if err != nil {
+				return
+			}
+			findings = append(findings, *finding)
+			progress.IncrementFindings()
+		}()
 	}
 
 	return findings

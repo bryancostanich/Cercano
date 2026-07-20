@@ -30,12 +30,13 @@ func NewPipeline(model ModelCaller, dispatcher *SearchDispatcher, fetcher URLFet
 type RunConfig struct {
 	Topic      string
 	Intent     string
-	Depth      string   // "survey", "standard", or "deep"
+	Depth      string // "survey", "standard", or "deep"
 	DateRange  string
 	Sources    []string // user override, empty for auto
 	OutputDir  string   // write report to this directory if set
 	ProjectDir string
 	Phase      string // "plan", "search", "analyze", "synthesize", or "" for all
+	Progress   ProgressFunc
 }
 
 // SuggestedNext holds structured metadata for the host agent to auto-invoke deeper research.
@@ -79,6 +80,7 @@ func (p *Pipeline) Run(ctx context.Context, cfg RunConfig) (*PhaseResult, error)
 	}
 
 	progress := NewProgressTracker(outputDir)
+	progress.SetProgressFunc(cfg.Progress)
 	sidecar := NewSidecar(outputDir)
 
 	// Check for existing state

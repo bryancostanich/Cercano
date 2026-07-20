@@ -22,6 +22,7 @@ type ProgressTracker struct {
 	phaseStartedAt   time.Time
 	itemTimes        []time.Duration // rolling last-10 item durations for ETA
 	lastItemStart    time.Time
+	onProgress       ProgressFunc
 }
 
 // NewProgressTracker creates a ProgressTracker. If outputDir is set, writes status.md there.
@@ -38,6 +39,12 @@ func NewProgressTracker(outputDir string) *ProgressTracker {
 }
 
 // StartPhase begins tracking a new phase with a known total item count.
+func (pt *ProgressTracker) SetProgressFunc(fn ProgressFunc) {
+	pt.mu.Lock()
+	defer pt.mu.Unlock()
+	pt.onProgress = fn
+}
+
 func (pt *ProgressTracker) StartPhase(phase string, total int) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
@@ -48,6 +55,7 @@ func (pt *ProgressTracker) StartPhase(phase string, total int) {
 	pt.lastItemStart = time.Now()
 	pt.itemTimes = pt.itemTimes[:0]
 	pt.writeStatus()
+	pt.notifyLocked()
 }
 
 // SetStep updates the current sub-step label within a phase.
@@ -56,6 +64,7 @@ func (pt *ProgressTracker) SetStep(step string) {
 	defer pt.mu.Unlock()
 	pt.step = step
 	pt.writeStatus()
+	pt.notifyLocked()
 }
 
 // CompleteItem marks one item done and records its duration for ETA calculation.
@@ -70,6 +79,7 @@ func (pt *ProgressTracker) CompleteItem() {
 	pt.current++
 	pt.lastItemStart = time.Now()
 	pt.writeStatus()
+	pt.notifyLocked()
 }
 
 // IncrementFindings bumps the accepted findings counter by one.
@@ -78,6 +88,7 @@ func (pt *ProgressTracker) IncrementFindings() {
 	defer pt.mu.Unlock()
 	pt.findingsAccepted++
 	pt.writeStatus()
+	pt.notifyLocked()
 }
 
 // EstRemainingSeconds returns an ETA in seconds based on the rolling average of the last 10 item durations.
@@ -125,17 +136,37 @@ func (pt *ProgressTracker) Update(phase, detail string) {
 	elapsed := time.Since(pt.runStartedAt).Round(time.Second)
 	fmt.Fprintf(os.Stderr, "[%s] %s: %s\n", elapsed, phase, detail)
 	pt.writeStatus()
+	pt.notifyLocked()
 }
 
 // Done is a backward-compatible final method: prints summary and deletes status.md.
 func (pt *ProgressTracker) Done(findingsCount, sourcesCount int) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
+	pt.phase = "complete"
+	pt.step = fmt.Sprintf("%d findings from %d sources", findingsCount, sourcesCount)
+	pt.findingsAccepted = findingsCount
 	elapsed := time.Since(pt.runStartedAt).Round(time.Second)
 	fmt.Fprintf(os.Stderr, "[%s] Complete: %d findings from %d sources\n", elapsed, findingsCount, sourcesCount)
 	if pt.statusPath != "" {
 		os.Remove(pt.statusPath)
 	}
+	pt.notifyLocked()
+}
+
+func (pt *ProgressTracker) notifyLocked() {
+	if pt.onProgress == nil {
+		return
+	}
+	pt.onProgress(ProgressState{
+		Phase:            pt.phase,
+		Step:             pt.step,
+		Current:          pt.current,
+		Total:            pt.total,
+		FindingsAccepted: pt.findingsAccepted,
+		RunStartedAt:     pt.runStartedAt,
+		PhaseStartedAt:   pt.phaseStartedAt,
+	})
 }
 
 // writeStatus writes status.md and logs to stderr. Must be called with mu held.

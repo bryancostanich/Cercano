@@ -97,7 +97,7 @@ func (deepResearchCap) Execute(ctx context.Context, call *capabilities.Call) (*c
 	emitDeepResearchActivity(call, activityID, "started", fmt.Sprintf("deep research start: topic=%q depth=%s phase=%s", a.Topic, defaultLabel(a.Depth, "standard"), defaultLabel(a.Phase, "all")))
 	emitDeepResearchActivity(call, activityID, "prompt", fmt.Sprintf("Topic: %s\nIntent: %s", a.Topic, a.Intent))
 
-	model := &activityModelCaller{inner: &dispatchModelCaller{call: call, source: "deep_research", model: a.Model, tier: config.TierFastLightText}, call: call, activityID: activityID}
+	model := &dispatchModelCaller{call: call, source: "deep_research", model: a.Model, tier: config.TierFastLightText}
 	scriptPath, err := searchScriptPath()
 	if err != nil {
 		return nil, fmt.Errorf("deep_research: search script: %w", err)
@@ -119,6 +119,9 @@ func (deepResearchCap) Execute(ctx context.Context, call *capabilities.Call) (*c
 		OutputDir:  a.OutputDir,
 		ProjectDir: call.WorkDir,
 		Phase:      a.Phase,
+		Progress: func(state research.ProgressState) {
+			emitDeepResearchActivity(call, activityID, "progress", formatDeepResearchProgress(state))
+		},
 	})
 	if err != nil {
 		emitDeepResearchActivity(call, activityID, "error", "deep research failed: "+err.Error())
@@ -135,23 +138,24 @@ func (deepResearchCap) Execute(ctx context.Context, call *capabilities.Call) (*c
 	return out, nil
 }
 
-type activityModelCaller struct {
-	inner      research.ModelCaller
-	call       *capabilities.Call
-	activityID string
-	calls      int
-}
-
-func (m *activityModelCaller) Call(ctx context.Context, prompt string) (string, error) {
-	m.calls++
-	emitDeepResearchActivity(m.call, m.activityID, "progress", fmt.Sprintf("local analysis call %d…", m.calls))
-	out, err := m.inner.Call(ctx, prompt)
-	if err != nil {
-		emitDeepResearchActivity(m.call, m.activityID, "progress", fmt.Sprintf("local analysis call %d failed: %v", m.calls, err))
-		return "", err
+func formatDeepResearchProgress(state research.ProgressState) string {
+	phase := strings.TrimSpace(state.Phase)
+	if phase == "" {
+		phase = "research"
 	}
-	emitDeepResearchActivity(m.call, m.activityID, "progress", fmt.Sprintf("local analysis call %d complete", m.calls))
-	return out, nil
+	var b strings.Builder
+	b.WriteString(phase)
+	if state.Total > 0 {
+		b.WriteString(fmt.Sprintf(" %d/%d", state.Current, state.Total))
+	}
+	if state.Step != "" {
+		b.WriteString(": ")
+		b.WriteString(state.Step)
+	}
+	if state.FindingsAccepted > 0 {
+		b.WriteString(fmt.Sprintf(" (%d findings accepted)", state.FindingsAccepted))
+	}
+	return b.String()
 }
 
 func emitDeepResearchActivity(call *capabilities.Call, activityID, kind, text string) {

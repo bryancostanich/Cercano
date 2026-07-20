@@ -87,21 +87,21 @@ type ResearchPlan struct {
 
 // ResearchProgress tracks the state of a running research job.
 type ResearchProgress struct {
-	Phase        string
-	Step         string
-	Current      int
-	Total        int
-	StartedAt    time.Time
+	Phase     string
+	Step      string
+	Current   int
+	Total     int
+	StartedAt time.Time
 }
 
 // ReportSections holds all generated sections for the final report.
 type ReportSections struct {
-	ExecutiveSummary  string
-	Synthesis         string
-	Contradictions    string
-	GapAnalysis       string
-	ReadingOrder      []string
-	FollowUpQueries   []string
+	ExecutiveSummary string
+	Synthesis        string
+	Contradictions   string
+	GapAnalysis      string
+	ReadingOrder     []string
+	FollowUpQueries  []string
 }
 
 // DeepResearchConfig holds configuration for a research run.
@@ -134,6 +134,9 @@ type ResearchState struct {
 	CreatedAt     time.Time          `json:"created_at"`
 	UpdatedAt     time.Time          `json:"updated_at"`
 }
+
+// ProgressFunc receives semantic research progress snapshots.
+type ProgressFunc func(ProgressState)
 
 // ProgressState is the serializable progress snapshot in the sidecar.
 type ProgressState struct {

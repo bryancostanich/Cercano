@@ -1,35 +1,25 @@
 package builtins
 
 import (
-	"context"
 	"strings"
 	"testing"
 
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/capabilities"
+	"cercano/source/server/internal/research"
 )
 
-type fakeResearchModel struct{}
-
-func (fakeResearchModel) Call(context.Context, string) (string, error) { return "ok", nil }
-
-func TestActivityModelCallerEmitsProgressAroundLocalCalls(t *testing.T) {
-	var events []agenttools.ProgressEvent
-	call := &capabilities.Call{EmitProgress: func(ev agenttools.ProgressEvent) { events = append(events, ev) }}
-	model := &activityModelCaller{inner: fakeResearchModel{}, call: call, activityID: "activity:deep_research:1"}
-	out, err := model.Call(context.Background(), "prompt")
-	if err != nil || out != "ok" {
-		t.Fatalf("Call() = %q, %v", out, err)
-	}
-	if len(events) != 2 {
-		t.Fatalf("events = %+v", events)
-	}
-	if !strings.Contains(events[0].Text, "local analysis call 1") || !strings.Contains(events[1].Text, "complete") {
-		t.Fatalf("unexpected progress text: %+v", events)
-	}
-	for _, ev := range events {
-		if ev.SubAgentID != "activity:deep_research:1" || ev.Kind != "progress" {
-			t.Fatalf("unexpected event: %+v", ev)
+func TestFormatDeepResearchProgressIncludesPhaseStepCounts(t *testing.T) {
+	got := formatDeepResearchProgress(research.ProgressState{
+		Phase:            "Analyzing",
+		Step:             "Finding 3 of 12: ATIF v1.7 schema",
+		Current:          2,
+		Total:            12,
+		FindingsAccepted: 5,
+	})
+	for _, want := range []string{"Analyzing 2/12", "Finding 3 of 12", "5 findings accepted"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatDeepResearchProgress() = %q, missing %q", got, want)
 		}
 	}
 }

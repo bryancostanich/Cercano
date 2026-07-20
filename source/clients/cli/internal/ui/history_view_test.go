@@ -56,6 +56,23 @@ func newTestHistoryView(rows []histRow, w, hgt int) *historyView {
 	return h
 }
 
+func TestNewHistoryView_StartsWithSearchFocusedAndAcceptsTyping(t *testing.T) {
+	p := theme.Cracker()
+	h, cmd := newHistoryView(nil, p, theme.NewStyles(p), 100, 30)
+	if cmd != nil {
+		t.Fatalf("newHistoryView returned unexpected command: %v", cmd)
+	}
+	if h == nil || !h.filtering {
+		t.Fatalf("history view should start with search focused, got %+v", h)
+	}
+
+	h.Update(tea.KeyPressMsg{Code: 'u'})
+	h.Update(tea.KeyPressMsg{Text: "x", Mod: tea.ModShift})
+	if h.filter != "ux" {
+		t.Fatalf("initial focused search should accept printable typing, got %q", h.filter)
+	}
+}
+
 func TestNewHistoryView_StartsWithSearchFocused(t *testing.T) {
 	p := theme.Cracker()
 	h, cmd := newHistoryView(nil, p, theme.NewStyles(p), 100, 30)

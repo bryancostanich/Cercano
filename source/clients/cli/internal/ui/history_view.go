@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -188,16 +190,30 @@ func (h *historyView) updateFilter(msg tea.KeyPressMsg) bool {
 		h.applyFilter()
 		return true
 	}
-	text := msg.Text
-	if text == "" && msg.Code >= 32 && msg.Code != 127 && msg.Mod == 0 {
-		text = string(msg.Code)
-	}
-	if text == "" || msg.Mod != 0 || strings.Contains(text, "\n") || containsNonPrintable(text) {
+	text := historyFilterText(msg)
+	if text == "" {
 		return false
 	}
 	h.filter += text
 	h.applyFilter()
 	return true
+}
+
+func historyFilterText(msg tea.KeyPressMsg) string {
+	if msg.Mod&tea.ModCtrl != 0 {
+		return ""
+	}
+	if msg.Text != "" && !strings.Contains(msg.Text, "\n") && !containsNonPrintable(msg.Text) {
+		return msg.Text
+	}
+	if msg.Code >= 32 && msg.Code != 127 && utf8.ValidRune(msg.Code) && unicode.IsPrint(msg.Code) {
+		return string(msg.Code)
+	}
+	key := msg.String()
+	if len([]rune(key)) == 1 && !containsNonPrintable(key) {
+		return key
+	}
+	return ""
 }
 
 func historyRowMatchesAllTerms(haystack string, terms []string) bool {

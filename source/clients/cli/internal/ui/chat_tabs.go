@@ -199,6 +199,11 @@ func (m *Model) reopenSubAgentTabCmd(id string) tea.Cmd {
 		return nil
 	}
 	delete(m.chatTabs.closed, id)
+	m.ensureChatTabs()
+	if _, ok := m.chatTabs.tabs[id]; ok {
+		m.switchChatTab(id)
+		return nil
+	}
 	if m.agent == nil {
 		view := m.ensureSubAgentTab(id, "", "", nil)
 		view.AppendEntry(&Entry{Role: RoleSystem, Content: "reopened sub-agent tab"})
@@ -220,6 +225,10 @@ func (m *Model) applySubAgentReopen(msg subAgentReopenMsg) {
 		return
 	}
 	delete(m.chatTabs.closed, msg.id)
+	if tab := m.chatTabs.tabs[msg.id]; tab != nil && msg.err == nil && len(msg.turns) == 0 {
+		m.switchChatTab(msg.id)
+		return
+	}
 	view := m.ensureSubAgentTab(msg.id, "", "", nil)
 	if msg.err != nil {
 		view.AppendEntry(&Entry{Role: RoleSystem, Content: "failed to reopen sub-agent tab: " + msg.err.Error()})
@@ -376,6 +385,30 @@ func (m *Model) finishStaleSubAgentTabs(reason string) {
 	}
 }
 
+func formatActivityOrSubAgentText(ev subAgentEventMsg) (Role, string, bool) {
+	if !strings.HasPrefix(ev.id, "activity:") {
+		role := RoleSystem
+		if ev.kind == "prompt" {
+			role = RoleUser
+		}
+		return role, ev.text, true
+	}
+	switch ev.kind {
+	case "started":
+		return RoleSystem, "", false
+	case "prompt":
+		return RoleUser, ev.text, true
+	case "progress":
+		return RoleAssistant, "• " + ev.text, true
+	case "done":
+		return RoleAssistant, "✓ " + ev.text, true
+	case "error":
+		return RoleSystem, "⚠ " + ev.text, true
+	default:
+		return RoleSystem, ev.text, true
+	}
+}
+
 func (m *Model) applySubAgentEvent(ev subAgentEventMsg) {
 	if ev.id == "" {
 		ev.id = ev.title
@@ -402,11 +435,10 @@ func (m *Model) applySubAgentEvent(ev subAgentEventMsg) {
 	if ev.inner != nil {
 		view.Apply(ev.inner)
 	} else if ev.text != "" {
-		role := RoleSystem
-		if ev.kind == "prompt" {
-			role = RoleUser
+		role, content, show := formatActivityOrSubAgentText(ev)
+		if show {
+			view.AppendEntry(&Entry{Role: role, Content: content})
 		}
-		view.AppendEntry(&Entry{Role: role, Content: ev.text})
 	}
 	if tab := m.chatTabs.tabs[ev.id]; tab != nil {
 		switch ev.kind {

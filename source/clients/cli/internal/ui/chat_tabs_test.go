@@ -71,6 +71,53 @@ func TestSubAgentNestedLabelsUseParentOrdinal(t *testing.T) {
 	}
 }
 
+func TestDeepResearchActivityFormattingSuppressesRawStartAndFormatsProgress(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
+
+	m.applySubAgentEvent(subAgentEventMsg{id: "activity:deep_research:1", kind: "started", title: "research", text: `deep research start: topic="ux" depth=standard phase=all`})
+	m.applySubAgentEvent(subAgentEventMsg{id: "activity:deep_research:1", kind: "progress", text: "planning sources and research phases…"})
+	m.applySubAgentEvent(subAgentEventMsg{id: "activity:deep_research:1", kind: "done", text: "deep research complete: phase=synthesize next=none"})
+
+	tab := m.chatTabs.tabs["activity:deep_research:1"]
+	if tab == nil {
+		t.Fatal("missing research activity tab")
+	}
+	var body []string
+	for _, e := range tab.view.Entries() {
+		body = append(body, e.Content)
+	}
+	joined := strings.Join(body, "\n")
+	if strings.Contains(joined, "deep research start:") {
+		t.Fatalf("raw start metadata should not be duplicated in activity tab: %q", joined)
+	}
+	if !strings.Contains(joined, "• planning sources") || !strings.Contains(joined, "✓ deep research complete") {
+		t.Fatalf("activity progress should be formatted, got %q", joined)
+	}
+}
+
+func TestOpenExistingActivityTabPreservesLiveContents(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
+	m.applySubAgentEvent(subAgentEventMsg{id: "activity:deep_research:1", kind: "started", title: "research"})
+	m.applySubAgentEvent(subAgentEventMsg{id: "activity:deep_research:1", kind: "prompt", text: "Topic: tabs\nIntent: live feedback"})
+	m.applySubAgentEvent(subAgentEventMsg{id: "activity:deep_research:1", kind: "progress", text: "planning sources…"})
+
+	m.applySubAgentReopen(subAgentReopenMsg{id: "activity:deep_research:1"})
+	if m.chatTabs.active != "activity:deep_research:1" {
+		t.Fatalf("active tab = %q", m.chatTabs.active)
+	}
+	tab := m.chatTabs.tabs["activity:deep_research:1"]
+	var joined []string
+	for _, e := range tab.view.Entries() {
+		joined = append(joined, e.Content)
+	}
+	body := strings.Join(joined, "\n")
+	if !strings.Contains(body, "Topic: tabs") || !strings.Contains(body, "planning sources") {
+		t.Fatalf("existing live activity contents were lost: %q", body)
+	}
+}
+
 func TestDeepResearchActivityAttachesOpenTabAffordanceToTool(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})

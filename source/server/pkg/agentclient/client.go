@@ -737,6 +737,73 @@ func (c *Client) ExportContext(ctx context.Context, conversationID string) (stri
 	return resp.GetJson(), nil
 }
 
+// ExportTrajectoryOptions controls the agent-owned ATIF trajectory bundle export.
+type ExportTrajectoryOptions struct {
+	ConversationID string
+	OutPath        string
+	Format         string // infer|directory|zip
+	RedactionMode  string // default|none
+	IncludeLogs    bool
+	Overwrite      bool
+}
+
+// ExportTrajectoryEvent is a simplified progress/completion event from the
+// streaming ExportTrajectory RPC.
+type ExportTrajectoryEvent struct {
+	Kind          string // progress|warning|completed|failed
+	Phase         string
+	Message       string
+	Code          string
+	OutputPath    string
+	ManifestPath  string
+	ArtifactCount int
+	SubagentCount int
+}
+
+// ExportTrajectory streams an agent-owned trajectory bundle export. The CLI
+// should use this rather than reading conversations.db or writing bundles.
+func (c *Client) ExportTrajectory(ctx context.Context, opts ExportTrajectoryOptions) (<-chan ExportTrajectoryEvent, <-chan error) {
+	events := make(chan ExportTrajectoryEvent, 16)
+	errs := make(chan error, 1)
+	go func() {
+		defer close(events)
+		defer close(errs)
+		stream, err := c.agent.ExportTrajectory(ctx, &proto.ExportTrajectoryRequest{
+			ConversationId: opts.ConversationID,
+			OutPath:        opts.OutPath,
+			Format:         opts.Format,
+			RedactionMode:  opts.RedactionMode,
+			IncludeLogs:    opts.IncludeLogs,
+			Overwrite:      opts.Overwrite,
+		})
+		if err != nil {
+			errs <- err
+			return
+		}
+		for {
+			ev, err := stream.Recv()
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			if err != nil {
+				errs <- err
+				return
+			}
+			switch p := ev.GetPayload().(type) {
+			case *proto.ExportTrajectoryEvent_Progress:
+				events <- ExportTrajectoryEvent{Kind: "progress", Phase: p.Progress.GetPhase(), Message: p.Progress.GetMessage()}
+			case *proto.ExportTrajectoryEvent_Warning:
+				events <- ExportTrajectoryEvent{Kind: "warning", Code: p.Warning.GetCode(), Message: p.Warning.GetMessage()}
+			case *proto.ExportTrajectoryEvent_Completed:
+				events <- ExportTrajectoryEvent{Kind: "completed", OutputPath: p.Completed.GetOutputPath(), ManifestPath: p.Completed.GetManifestPath(), ArtifactCount: int(p.Completed.GetArtifactCount()), SubagentCount: int(p.Completed.GetSubagentCount())}
+			case *proto.ExportTrajectoryEvent_Failed:
+				events <- ExportTrajectoryEvent{Kind: "failed", Code: p.Failed.GetCode(), Message: p.Failed.GetMessage()}
+			}
+		}
+	}()
+	return events, errs
+}
+
 // ContextTurn is one display-ready turn summary from GetConversationTurns.
 type ContextTurn struct {
 	ID        string

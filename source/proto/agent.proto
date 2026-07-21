@@ -97,6 +97,12 @@ service Agent {
   // ExportContext returns the full uncapped raw history as a JSON []llm.Message.
   rpc ExportContext (ExportContextRequest) returns (ExportContextResponse) {}
 
+  // ExportTrajectory writes a full ATIF-v1.7 Cercano trajectory bundle for a
+  // persisted conversation. The server owns persistence reads, ATIF mapping,
+  // artifact collection, redaction, validation, and optional zip packaging; the
+  // client only collects options and renders progress.
+  rpc ExportTrajectory (ExportTrajectoryRequest) returns (stream ExportTrajectoryEvent) {}
+
   // GetConversationTurns returns display-ready, side-effect-free summaries of a
   // conversation's turns for the /c context viewer. Unlike ResumeConversation
   // it does NOT re-hydrate server session state.
@@ -757,6 +763,48 @@ message ElideContextResponse {
 
 message ExportContextRequest  { string conversation_id = 1; }
 message ExportContextResponse { string json = 1; }
+
+message ExportTrajectoryRequest {
+  string conversation_id = 1;
+  string out_path = 2;
+  string format = 3; // infer|directory|zip
+  string redaction_mode = 4; // default|none
+  bool include_logs = 5;
+  bool overwrite = 6;
+}
+
+message ExportTrajectoryProgress {
+  string phase = 1;
+  string message = 2;
+  int32 current = 3;
+  int32 total = 4;
+}
+
+message ExportTrajectoryWarning {
+  string code = 1;
+  string message = 2;
+}
+
+message ExportTrajectoryCompleted {
+  string output_path = 1;
+  string manifest_path = 2;
+  int32 artifact_count = 3;
+  int32 subagent_count = 4;
+}
+
+message ExportTrajectoryFailed {
+  string code = 1;
+  string message = 2;
+}
+
+message ExportTrajectoryEvent {
+  oneof payload {
+    ExportTrajectoryProgress progress = 1;
+    ExportTrajectoryWarning warning = 2;
+    ExportTrajectoryCompleted completed = 3;
+    ExportTrajectoryFailed failed = 4;
+  }
+}
 
 message GetConversationTurnsRequest  { string conversation_id = 1; }
 message GetConversationTurnsResponse { repeated ContextTurn turns = 1; }

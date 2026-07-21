@@ -39,6 +39,7 @@ const (
 	Agent_InstallOpenRuntime_FullMethodName         = "/agent.Agent/InstallOpenRuntime"
 	Agent_RegenerateContext_FullMethodName          = "/agent.Agent/RegenerateContext"
 	Agent_ExportContext_FullMethodName              = "/agent.Agent/ExportContext"
+	Agent_ExportTrajectory_FullMethodName           = "/agent.Agent/ExportTrajectory"
 	Agent_GetConversationTurns_FullMethodName       = "/agent.Agent/GetConversationTurns"
 	Agent_GetToolCall_FullMethodName                = "/agent.Agent/GetToolCall"
 	Agent_ListTools_FullMethodName                  = "/agent.Agent/ListTools"
@@ -164,6 +165,11 @@ type AgentClient interface {
 	RegenerateContext(ctx context.Context, in *RegenerateContextRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RegenerateContextProgress], error)
 	// ExportContext returns the full uncapped raw history as a JSON []llm.Message.
 	ExportContext(ctx context.Context, in *ExportContextRequest, opts ...grpc.CallOption) (*ExportContextResponse, error)
+	// ExportTrajectory writes a full ATIF-v1.7 Cercano trajectory bundle for a
+	// persisted conversation. The server owns persistence reads, ATIF mapping,
+	// artifact collection, redaction, validation, and optional zip packaging; the
+	// client only collects options and renders progress.
+	ExportTrajectory(ctx context.Context, in *ExportTrajectoryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ExportTrajectoryEvent], error)
 	// GetConversationTurns returns display-ready, side-effect-free summaries of a
 	// conversation's turns for the /c context viewer. Unlike ResumeConversation
 	// it does NOT re-hydrate server session state.
@@ -510,6 +516,25 @@ func (c *agentClient) ExportContext(ctx context.Context, in *ExportContextReques
 	return out, nil
 }
 
+func (c *agentClient) ExportTrajectory(ctx context.Context, in *ExportTrajectoryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ExportTrajectoryEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[4], Agent_ExportTrajectory_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ExportTrajectoryRequest, ExportTrajectoryEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_ExportTrajectoryClient = grpc.ServerStreamingClient[ExportTrajectoryEvent]
+
 func (c *agentClient) GetConversationTurns(ctx context.Context, in *GetConversationTurnsRequest, opts ...grpc.CallOption) (*GetConversationTurnsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetConversationTurnsResponse)
@@ -682,7 +707,7 @@ func (c *agentClient) GetModelRAMEstimate(ctx context.Context, in *GetModelRAMEs
 
 func (c *agentClient) StreamRuntimeLogs(ctx context.Context, in *StreamRuntimeLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RuntimeLogEntry], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[4], Agent_StreamRuntimeLogs_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[5], Agent_StreamRuntimeLogs_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -741,7 +766,7 @@ func (c *agentClient) GetPermissionMode(ctx context.Context, in *GetPermissionMo
 
 func (c *agentClient) SubscribeEvents(ctx context.Context, in *SubscribeEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ClientEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[5], Agent_SubscribeEvents_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[6], Agent_SubscribeEvents_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -930,7 +955,7 @@ func (c *agentClient) ListCloudProfileModels(ctx context.Context, in *ListCloudP
 
 func (c *agentClient) StartChatGPTLogin(ctx context.Context, in *StartChatGPTLoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StartChatGPTLoginEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[6], Agent_StartChatGPTLogin_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[7], Agent_StartChatGPTLogin_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -949,7 +974,7 @@ type Agent_StartChatGPTLoginClient = grpc.ServerStreamingClient[StartChatGPTLogi
 
 func (c *agentClient) StartClaudeLogin(ctx context.Context, in *StartClaudeLoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StartClaudeLoginEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[7], Agent_StartClaudeLogin_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[8], Agent_StartClaudeLogin_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1047,6 +1072,11 @@ type AgentServer interface {
 	RegenerateContext(*RegenerateContextRequest, grpc.ServerStreamingServer[RegenerateContextProgress]) error
 	// ExportContext returns the full uncapped raw history as a JSON []llm.Message.
 	ExportContext(context.Context, *ExportContextRequest) (*ExportContextResponse, error)
+	// ExportTrajectory writes a full ATIF-v1.7 Cercano trajectory bundle for a
+	// persisted conversation. The server owns persistence reads, ATIF mapping,
+	// artifact collection, redaction, validation, and optional zip packaging; the
+	// client only collects options and renders progress.
+	ExportTrajectory(*ExportTrajectoryRequest, grpc.ServerStreamingServer[ExportTrajectoryEvent]) error
 	// GetConversationTurns returns display-ready, side-effect-free summaries of a
 	// conversation's turns for the /c context viewer. Unlike ResumeConversation
 	// it does NOT re-hydrate server session state.
@@ -1216,6 +1246,9 @@ func (UnimplementedAgentServer) RegenerateContext(*RegenerateContextRequest, grp
 }
 func (UnimplementedAgentServer) ExportContext(context.Context, *ExportContextRequest) (*ExportContextResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ExportContext not implemented")
+}
+func (UnimplementedAgentServer) ExportTrajectory(*ExportTrajectoryRequest, grpc.ServerStreamingServer[ExportTrajectoryEvent]) error {
+	return status.Error(codes.Unimplemented, "method ExportTrajectory not implemented")
 }
 func (UnimplementedAgentServer) GetConversationTurns(context.Context, *GetConversationTurnsRequest) (*GetConversationTurnsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetConversationTurns not implemented")
@@ -1695,6 +1728,17 @@ func _Agent_ExportContext_Handler(srv interface{}, ctx context.Context, dec func
 	}
 	return interceptor(ctx, in, info, handler)
 }
+
+func _Agent_ExportTrajectory_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(ExportTrajectoryRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AgentServer).ExportTrajectory(m, &grpc.GenericServerStream[ExportTrajectoryRequest, ExportTrajectoryEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_ExportTrajectoryServer = grpc.ServerStreamingServer[ExportTrajectoryEvent]
 
 func _Agent_GetConversationTurns_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetConversationTurnsRequest)
@@ -2667,6 +2711,11 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "RegenerateContext",
 			Handler:       _Agent_RegenerateContext_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "ExportTrajectory",
+			Handler:       _Agent_ExportTrajectory_Handler,
 			ServerStreams: true,
 		},
 		{

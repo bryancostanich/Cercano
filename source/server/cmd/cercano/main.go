@@ -390,6 +390,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		grpc.ChainStreamInterceptor(server.RecoveryStreamInterceptor()),
 	)
 	srv := server.NewServer(orchestrator, lazyRouter, coordinator, cloudFactory, registry)
+	srv.SetBuildVersion(version)
 	cloudTierModel = srv.CloudModelForTier
 	srv.SetRuntimeManager(runtimeManager)
 
@@ -795,6 +796,9 @@ func main() {
 			// persistent crash log. See runLogs for the actual flag
 			// parsing and output format.
 			runLogs(os.Args[2:])
+			return
+		case "export":
+			runExport(os.Args[2:])
 			return
 		case "agent":
 			// Explicit server mode: starts the gRPC agent in the foreground.

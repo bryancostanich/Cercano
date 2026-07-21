@@ -216,6 +216,10 @@ func (m *mockAgentClient) ExportContext(ctx context.Context, in *proto.ExportCon
 	return &proto.ExportContextResponse{}, nil
 }
 
+func (m *mockAgentClient) ExportTrajectory(ctx context.Context, in *proto.ExportTrajectoryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[proto.ExportTrajectoryEvent], error) {
+	return nil, nil
+}
+
 func (m *mockAgentClient) ElideContext(ctx context.Context, in *proto.ElideContextRequest, opts ...grpc.CallOption) (*proto.ElideContextResponse, error) {
 	return &proto.ElideContextResponse{}, nil
 }

@@ -108,6 +108,8 @@ type Server struct {
 	// resolveMainProvider, so no usage would otherwise be recorded.
 	usageSink func(usage.Usage)
 
+	buildVersion string // surfaced in exported trajectory metadata
+
 	events *eventHub // server->client push fan-out (SubscribeEvents)
 
 	// turnBroker owns the per-conversation turn-exclusivity registry. A new
@@ -679,6 +681,10 @@ func (s *Server) SetCatalogRegistry(r *catalog.Registry) {
 // /config and settings-page changes to retention horizons take effect on the
 // next sweep without a restart.
 func (s *Server) SetRetentionSweeper(sw *retention.Sweeper) { s.persistSvc.SetRetentionSweeper(sw) }
+
+// SetBuildVersion records the binary version for generated metadata such as
+// trajectory exports. Empty versions fall back to "dev" at point of use.
+func (s *Server) SetBuildVersion(v string) { s.buildVersion = strings.TrimSpace(v) }
 
 // SetCompactionGenerator attaches the background compaction scheduler so that
 // /config compaction-enabled true|false flips it at runtime without a restart.

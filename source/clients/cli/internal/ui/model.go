@@ -351,6 +351,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	slash.RegisterCompact(reg)
 	slash.RegisterClearCompactedContext(reg)
 	slash.RegisterElideContext(reg)
+	slash.RegisterExport(reg)
 	// wdRef is shared with the slash registry so /context tracks the active
 	// workDir even after /d, /clear, or /resume update it.
 	wdRef := &struct{ dir string }{}
@@ -2096,6 +2097,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.bannerTickActive = false
 		return m, nil
 
+	case trajectoryExportEventMsg:
+		if ev, ok := m.content.(*trajectoryExportView); ok {
+			return m, ev.applyExportEvent(msg)
+		}
+		return m, nil
+
+	case trajectoryExportErrMsg:
+		if ev, ok := m.content.(*trajectoryExportView); ok {
+			ev.err = msg.err.Error()
+			ev.step = exportDone
+		}
+		return m, nil
+
 	case resumeRequestedMsg:
 		// Fired by the history picker's OnSelect after the overlay closes.
 		var resumeCmd tea.Cmd
@@ -2410,6 +2424,9 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		return m, m.openConfigSurface(configTabContext)
 	case slash.ResultOpenWizard:
 		m.content = newWizardPage(m.agent, m.palette, m.styles, m.width, m.height)
+	case slash.ResultOpenTrajectoryExport:
+		ev, _ := newTrajectoryExportView(m.agent, m.palette, m.styles, m.width, m.height, m.convID, res.Text)
+		m.content = ev
 	case slash.ResultRegenContext:
 		if m.convID == "" {
 			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "no conversation yet — nothing to rebuild"})

@@ -9,6 +9,7 @@ const (
 	contentPageContext  contentPageID = "context"
 	contentPageHistory  contentPageID = "history"
 	contentPageModels   contentPageID = "models"
+	contentPageExport   contentPageID = "export"
 )
 
 // contentPage owns the TUI's main content region between the header and the

@@ -30,6 +30,7 @@ const (
 	ResultOpenRuntimeDashboard
 	ResultOpenContextView
 	ResultOpenWizard
+	ResultOpenTrajectoryExport  // Text field optionally carries a prefilled output path
 	ResultResumeConversation    // Text field carries the conversation id
 	ResultSetPromptColor        // Text field carries the parsed hex (#RRGGBB) or a palette key
 	ResultSetSessionTitle       // Text field carries the new title

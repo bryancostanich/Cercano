@@ -4318,20 +4318,40 @@ func (m Model) queuedLines() []string {
 	}
 	// Continuation rows hang under the text, aligned past the "⊕ " marker.
 	hang := strings.Repeat(" ", 2)
+	hint := "↪ [enter] steer"
+	hintStyle := lipgloss.NewStyle().Foreground(m.palette.Dim).Background(m.palette.BufferUserBg)
 	var lines []string
 	for _, q := range queued {
 		wrapped := strings.Split(ansi.Wrap(q, avail, ""), "\n")
 		for i, w := range wrapped {
-			fill := avail - lipgloss.Width(w)
-			if fill < 0 {
-				fill = 0
-			}
+			isLast := i == len(wrapped)-1
 			marker := m.styles.BufferUserMarker.Render("⊕ ")
 			if i > 0 {
 				marker = m.styles.BufferUserText.Render(hang)
 			}
+			text := w
+			if isLast {
+				lineW := lipgloss.Width(w)
+				hintW := lipgloss.Width(hint)
+				if lineW+1+hintW <= avail {
+					gap := avail - lineW - hintW
+					lines = append(lines, leftPad+marker+
+						m.styles.BufferUserText.Render(text+strings.Repeat(" ", gap))+
+						hintStyle.Render(hint))
+					continue
+				}
+			}
+			fill := avail - lipgloss.Width(text)
+			if fill < 0 {
+				fill = 0
+			}
 			lines = append(lines, leftPad+marker+
-				m.styles.BufferUserText.Render(w+strings.Repeat(" ", fill)))
+				m.styles.BufferUserText.Render(text+strings.Repeat(" ", fill)))
+			if isLast {
+				trimmedHint := ansi.Truncate(hint, avail, "…")
+				gap := max(0, avail-2-lipgloss.Width(trimmedHint))
+				lines = append(lines, leftPad+m.styles.BufferUserText.Render(hang+strings.Repeat(" ", gap))+hintStyle.Render(trimmedHint))
+			}
 		}
 	}
 	return lines

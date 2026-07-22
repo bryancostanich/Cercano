@@ -46,6 +46,28 @@ func TestSubmitWhileStreamingQueuesThenEmptyEnterSteers(t *testing.T) {
 
 // Up-arrow on an empty prompt pulls the most-recently-queued message back into
 // the prompt and removes it from the queue.
+func TestQueuedLineShowsEnterToSteerHint(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.mainChat().Enqueue("okkkkkkk", nil)
+
+	plain := stripAnsiCSI(strings.Join(m.queuedLines(), "\n"))
+	if !strings.Contains(plain, "okkkkkkk") || !strings.Contains(plain, "↪ [enter] steer") {
+		t.Fatalf("queued prompt should include enter-to-steer hint, got %q", plain)
+	}
+}
+
+func TestQueuedLineWrapsSteerHintWhenPromptIsWide(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 28, Height: 24})
+	m.mainChat().Enqueue(strings.Repeat("x", 40), nil)
+
+	plain := stripAnsiCSI(strings.Join(m.queuedLines(), "\n"))
+	if !strings.Contains(plain, "[enter] steer") {
+		t.Fatalf("wrapped queued prompt should still include steer hint, got %q", plain)
+	}
+}
+
 func TestUpArrowUnstagesLastQueued(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})

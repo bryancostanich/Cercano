@@ -946,6 +946,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.MouseDown(mouse.X, mouse.Y-m.promptTop())
 			return m, nil
 		}
+		if url, ok := m.activeChat().LinkAt(mouse.X, mouse.Y-m.scrollbarTop); ok {
+			return m, openBrowserCmd(url)
+		}
 		if subID, ok := m.activeChat().SubAgentTabAt(mouse.X, mouse.Y-m.scrollbarTop); ok {
 			cmd := m.reopenSubAgentTabCmd(subID)
 			m.refreshViewport()

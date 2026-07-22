@@ -2,8 +2,10 @@ package ui
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -71,6 +73,7 @@ type chatView struct {
 	// entries index whose fold arrow is drawn there. Rebuilt by SetEntries on
 	// every render, so it can never drift from the drawn layout.
 	arrowRows []arrowRow
+	linkRows  []linkRow
 
 	// pendingCensor is the assistant entry the most recent watchdog
 	// challenge/block fired against. If the model rewrites (a fresh assistant
@@ -951,6 +954,7 @@ func (c *chatView) SetEntries(entries []*Entry) {
 	content := b.String()
 	c.content = content
 	c.plainDirty = true
+	c.linkRows = collectLinkRows(content)
 	c.vp.SetContent(content)
 	if c.hasResizeAnchor {
 		// Resize reflow: restore the same distance-from-bottom in the newly
@@ -1302,6 +1306,121 @@ func (c *chatView) MouseInText(localX, localY int) bool {
 // click was handled — the host should refresh the viewport and skip its
 // selection begin. Only the arrow row itself claims a click; expanded tool
 // bodies and prose fall through so text selection works everywhere else.
+func collectLinkRows(content string) []linkRow {
+	lines := strings.Split(content, "\n")
+	rows := make([]linkRow, 0)
+	for lineNo, line := range lines {
+		rows = append(rows, collectOSC8LinkRows(line, lineNo)...)
+		plain := ansi.Strip(line)
+		for _, loc := range bareURLRe.FindAllStringIndex(plain, -1) {
+			url := strings.TrimRight(plain[loc[0]:loc[1]], `.,;:!?]}`)
+			if url == "" {
+				continue
+			}
+			rows = append(rows, linkRow{line: lineNo, start: ansi.StringWidth(plain[:loc[0]]), end: ansi.StringWidth(plain[:loc[0]+len(url)]), url: url})
+		}
+	}
+	return rows
+}
+
+func collectOSC8LinkRows(line string, lineNo int) []linkRow {
+	var rows []linkRow
+	active := ""
+	spanStart := -1
+	col := 0
+	for i := 0; i < len(line); {
+		if strings.HasPrefix(line[i:], "\x1b]8;") {
+			if active != "" && spanStart >= 0 && col > spanStart {
+				rows = append(rows, linkRow{line: lineNo, start: spanStart, end: col, url: active})
+			}
+			payloadStart := i + len("\x1b]")
+			payloadEnd, seqEnd := oscEnd(line, payloadStart)
+			if seqEnd < 0 {
+				break
+			}
+			active = osc8URL(line[payloadStart:payloadEnd])
+			if active == "" {
+				spanStart = -1
+			} else {
+				spanStart = col
+			}
+			i = seqEnd
+			continue
+		}
+		if line[i] == '\x1b' {
+			i = skipANSI(line, i)
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(line[i:])
+		if r == utf8.RuneError && size == 0 {
+			break
+		}
+		col += ansi.StringWidth(string(r))
+		i += size
+	}
+	if active != "" && spanStart >= 0 && col > spanStart {
+		rows = append(rows, linkRow{line: lineNo, start: spanStart, end: col, url: active})
+	}
+	return rows
+}
+
+func osc8URL(payload string) string {
+	parts := strings.SplitN(payload, ";", 3)
+	if len(parts) != 3 || parts[0] != "8" {
+		return ""
+	}
+	return parts[2]
+}
+
+func oscEnd(s string, start int) (payloadEnd, seqEnd int) {
+	for i := start; i < len(s); i++ {
+		if s[i] == '\a' {
+			return i, i + 1
+		}
+		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '\\' {
+			return i, i + 2
+		}
+	}
+	return -1, -1
+}
+
+func skipANSI(s string, i int) int {
+	if i+1 >= len(s) {
+		return i + 1
+	}
+	if s[i+1] == '[' {
+		j := i + 2
+		for j < len(s) {
+			if s[j] >= '@' && s[j] <= '~' {
+				return j + 1
+			}
+			j++
+		}
+		return len(s)
+	}
+	if s[i+1] == ']' {
+		_, end := oscEnd(s, i+2)
+		if end >= 0 {
+			return end
+		}
+		return len(s)
+	}
+	return i + 2
+}
+
+func (c *chatView) LinkAt(localX, localY int) (string, bool) {
+	if !c.MouseInText(localX, localY) {
+		return "", false
+	}
+	line := c.vp.YOffset() + localY
+	for _, r := range c.linkRows {
+		if r.line == line && localX >= r.start && localX < r.end && r.url != "" {
+			return r.url, true
+		}
+	}
+	return "", false
+}
+
 func (c *chatView) SubAgentTabAt(localX, localY int) (string, bool) {
 	if !c.MouseInText(localX, localY) {
 		return "", false
@@ -1399,6 +1518,14 @@ type arrowRow struct {
 	railMin int
 	railMax int // > 0 → a rail row claiming [railMin, railMax); 0 → full-width toggle
 }
+
+type linkRow struct {
+	line       int
+	start, end int
+	url        string
+}
+
+var bareURLRe = regexp.MustCompile(`https?://[^\s<>()]+`)
 
 // arrowRowAt returns the clickable row at (line, x). A bounded rail row
 // (railMax > 0) claims a click only within [railMin, railMax); a full-width

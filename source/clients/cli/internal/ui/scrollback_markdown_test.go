@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"cercano/source/clients/cli/internal/theme"
 )
 
@@ -23,6 +25,48 @@ func newMdChatView() *chatView {
 
 // Renders an assistant entry the way renderEntry does for committed blocks,
 // proving prose is Glamour-formatted and tables go through render.Table.
+func TestAssistantMarkdown_LinksHaveClickableHitRegions(t *testing.T) {
+	p := theme.Cracker()
+	cv := newChatView(theme.NewStyles(p), p, "", "", 80, 12)
+	cv.AppendEntry(&Entry{Role: RoleAssistant, Content: "Here is a [link](https://example.com/docs) and https://bare.example/path."})
+	cv.rebuild()
+
+	if len(cv.linkRows) < 2 {
+		t.Fatalf("expected markdown and bare URL link regions, got %+v in %q", cv.linkRows, cv.content)
+	}
+	plainLines := strings.Split(ansi.Strip(cv.content), "\n")
+	line := 0
+	col := -1
+	for i, l := range plainLines {
+		if idx := strings.Index(l, "link"); idx >= 0 {
+			line = i
+			col = ansi.StringWidth(l[:idx])
+			break
+		}
+	}
+	if col < 0 {
+		t.Fatalf("rendered link label not found in %q", strings.Join(plainLines, "\n"))
+	}
+	if got, ok := cv.LinkAt(col, line); !ok || got != "https://example.com/docs" {
+		t.Fatalf("LinkAt markdown label = %q,%v; want https://example.com/docs,true; rows=%+v content=%q", got, ok, cv.linkRows, cv.content)
+	}
+
+	bareCol := -1
+	for i, l := range plainLines {
+		if idx := strings.Index(l, "https://bare.example/path"); idx >= 0 {
+			line = i
+			bareCol = ansi.StringWidth(l[:idx])
+			break
+		}
+	}
+	if bareCol < 0 {
+		t.Fatalf("rendered bare URL not found in %q", strings.Join(plainLines, "\n"))
+	}
+	if got, ok := cv.LinkAt(bareCol, line); !ok || got != "https://bare.example/path" {
+		t.Fatalf("LinkAt bare URL = %q,%v; want https://bare.example/path,true; rows=%+v", got, ok, cv.linkRows)
+	}
+}
+
 func TestAssistantMarkdown_FormatsProseAndTable(t *testing.T) {
 	cv := newMdChatView()
 	e := &Entry{

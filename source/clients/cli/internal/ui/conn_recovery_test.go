@@ -40,6 +40,54 @@ func TestConnRecovery_ReconnectedRefreshesAndAnnounces(t *testing.T) {
 // TestConnRecovery_SteadyConnectedIsSilent guards against the recovery
 // branch firing on the initial Connected event at startup (prev is
 // already Connected — the zero value): no announcement, no re-fetch.
+func TestConnRecovery_PendingConfirmDoesNotRestorePromptIntoComposer(t *testing.T) {
+	m := New(nil, false)
+	m.connState = agentclient.ConnStateConnected
+	m.streaming = true
+	m.lastSubmittedPrompt = "continue"
+	m.input.SetValue("")
+	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "dispatch", Args: `{"task":"check"}`, Permission: "X"})
+
+	next, _ := m.Update(connStateChangedMsg{state: agentclient.ConnStateReconnecting, attempt: 1})
+	nm := next.(Model)
+
+	if nm.pendingConfirm == nil {
+		t.Fatal("pending confirm should survive reconnecting transition")
+	}
+	if nm.input.Value() != "" {
+		t.Fatalf("pending confirm reconnect should not restore last prompt into composer, got %q", nm.input.Value())
+	}
+	if nm.streaming {
+		t.Fatal("streaming should be cleared while preserving the permission gate")
+	}
+	found := false
+	for _, e := range nm.mainChat().Entries() {
+		if e.Role == RoleSystem && strings.Contains(e.Content, "awaiting your tool decision") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("reconnect should explain that the tool decision is still pending")
+	}
+}
+
+func TestConfirmChatClearsStaleInput(t *testing.T) {
+	m := New(nil, false)
+	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "dispatch", Args: `{}`, Permission: "X"})
+	m.input.SetValue("stale restored prompt")
+
+	next, _ := m.resolveConfirmKey("c")
+	if next.pendingConfirm != nil {
+		t.Fatal("chat choice should dismiss pending confirm")
+	}
+	if next.composeToolUseID != "tool-1" {
+		t.Fatalf("composeToolUseID = %q", next.composeToolUseID)
+	}
+	if next.input.Value() != "" {
+		t.Fatalf("chat choice should clear stale input, got %q", next.input.Value())
+	}
+}
+
 func TestConnRecovery_SteadyConnectedIsSilent(t *testing.T) {
 	m := New(nil, false)
 

@@ -1967,7 +1967,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.connAttempt = msg.attempt
 		m.connFailErrMsg = msg.errMsg
 		if msg.state == agentclient.ConnStateReconnecting && prev == agentclient.ConnStateConnected {
-			if m.streaming && m.lastSubmittedPrompt != "" {
+			if m.streaming && m.pendingConfirm != nil {
+				// A permission gate is the active user input surface. Do not restore
+				// the submitted chat prompt into the composer while y/n/d/c is still
+				// pending: that makes the prompt look focused after reconnect and can
+				// leave stale text in the [c]hat redirect editor. Keep the confirm
+				// gate intact so all choices still route through resolveConfirmKey.
+				m.streaming = false
+				m.mainChat().SetStreaming(false)
+				if e := m.mainChat().lastAssistantEntry(); e != nil {
+					e.Streaming = false
+				}
+				body := "⚠ agent disconnected while awaiting your tool decision — reconnecting; answer y/n/d/c once the agent is back."
+				if msg.crashSummary != "" {
+					body += "\n  cause: " + msg.crashSummary + " (full trace in ~/.config/cercano/crash.log)"
+				}
+				m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: body})
+				m.refreshViewport()
+			} else if m.streaming && m.lastSubmittedPrompt != "" {
 				m.input.SetValue(m.lastSubmittedPrompt)
 				body := "⚠ agent disconnected mid-turn — prompt restored to the input; press Enter to re-submit once the agent is back."
 				if msg.crashSummary != "" {
@@ -3480,6 +3497,7 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 		enterCompose := func(m Model) (Model, tea.Cmd) {
 			m.pendingConfirm = nil
 			m.composeToolUseID = tc.ToolUseID
+			m.input.SetValue("")
 			m.mainChat().AppendEntry(&Entry{Role: RoleSystem,
 				Content: m.styles.Muted.Render("↳ chat about this — type your redirect and press enter (esc cancels)")})
 			m.refreshViewport()

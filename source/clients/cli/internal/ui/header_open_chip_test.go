@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"cercano/source/clients/cli/internal/theme"
 	"cercano/source/server/pkg/agentclient"
@@ -46,6 +47,34 @@ func TestHeaderOpenChipShowsDownloadingWhenRuntimeStatusDownloading(t *testing.T
 	}
 	if strings.Contains(out, "openai-responses") || strings.Contains(out, "qwen3-30b") {
 		t.Fatalf("downloading state should take priority over model labels, got %q", out)
+	}
+}
+
+func TestHeaderLongModelChipDoesNotDisplaceTitle(t *testing.T) {
+	m := Model{
+		styles:             theme.NewStyles(theme.Cracker()),
+		palette:            theme.Cracker(),
+		width:              115,
+		sessionTitle:       "CERCANO - MORE UX",
+		activeCloudProfile: "openai-responses",
+		openModel:          "qwen3-30b-a3b-instruct-2507",
+	}
+
+	plain := stripAnsiCSI(m.renderHeader())
+	if got := utf8.RuneCountInString(plain); got > m.width {
+		t.Fatalf("header width = %d, want <= %d: %q", got, m.width, plain)
+	}
+	idx := strings.Index(plain, "CERCANO - MORE UX")
+	if idx < 0 {
+		t.Fatalf("title missing from header: %q", plain)
+	}
+	idxCol := utf8.RuneCountInString(plain[:idx])
+	wantStart := (m.width-utf8.RuneCountInString("░▒▓ CERCANO - MORE UX ▓▒░"))/2 + utf8.RuneCountInString("░▒▓ ")
+	if idxCol < wantStart-2 || idxCol > wantStart+6 {
+		t.Fatalf("title start = %d, want near centered start %d; header=%q", idxCol, wantStart, plain)
+	}
+	if !strings.Contains(plain, "c:openai-responses") || !strings.Contains(plain, "o:") {
+		t.Fatalf("header should preserve model chip prefixes while truncating labels, got %q", plain)
 	}
 }
 

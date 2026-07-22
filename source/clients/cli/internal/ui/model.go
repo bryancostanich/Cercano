@@ -4418,30 +4418,25 @@ func (m Model) renderViewportWithScrollbar() string {
 	return m.activeChat().View()
 }
 
-func (m Model) renderHeader() string {
-	// Three regions:
-	//   left   — brand + version, anchored at column 0
-	//   center — session title (centered across full width when present)
-	//   right  — cloud + local model strip, anchored at the right edge
-	//
-	// With the title centered, the left and right slots stay symmetric so
-	// the bar reads cleanly even on wide terminals.
-	left := lipgloss.JoinHorizontal(lipgloss.Left,
-		m.styles.Primary.Render("▓▓ CERCANO"),
-		m.styles.Muted.Render(" v0.1.0"),
-	)
+func headerTextWidth(s string) int {
+	return utf8.RuneCountInString(s)
+}
 
-	rightPieces := []string{}
+func headerDisplayWidth(s string) int {
+	return ansi.StringWidth(ansi.Strip(s))
+}
+
+func (m Model) renderHeaderRight(maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
 	cloudChip := m.activeCloudProfile
 	if cloudChip == "" {
 		cloudChip = m.cloudModel
 	}
+	cloudLabel := ""
 	if cloudChip != "" {
-		rightPieces = append(rightPieces,
-			m.styles.Info.Render("c:"),
-			m.styles.Accent.Render(abbreviateModel(cloudChip)),
-			m.styles.BorderDim.Render(" │ "),
-		)
+		cloudLabel = abbreviateModel(cloudChip)
 	}
 	openChip := m.openModel
 	openChipStyle := m.styles.Accent
@@ -4456,17 +4451,60 @@ func (m Model) renderHeader() string {
 	if openChip == "" {
 		openChip = m.lastModel
 	}
-	rightPieces = append(rightPieces,
-		m.styles.Info.Render("o:"),
-		openChipStyle.Render(abbreviateModel(openChip)),
-	)
-	right := lipgloss.JoinHorizontal(lipgloss.Left, rightPieces...)
+	openLabel := abbreviateModel(openChip)
 
-	leftW := lipgloss.Width(left)
-	rightW := lipgloss.Width(right)
+	build := func() string {
+		pieces := []string{}
+		if cloudLabel != "" {
+			pieces = append(pieces,
+				m.styles.Info.Render("c:"),
+				m.styles.Accent.Render(cloudLabel),
+				m.styles.BorderDim.Render(" │ "),
+			)
+		}
+		pieces = append(pieces,
+			m.styles.Info.Render("o:"),
+			openChipStyle.Render(openLabel),
+		)
+		return lipgloss.JoinHorizontal(lipgloss.Left, pieces...)
+	}
+
+	right := build()
+	for headerDisplayWidth(right) > maxWidth {
+		if lipgloss.Width(openLabel) > 1 {
+			openLabel = ansi.Truncate(openLabel, lipgloss.Width(openLabel)-1, "…")
+		} else if lipgloss.Width(cloudLabel) > 1 {
+			cloudLabel = ansi.Truncate(cloudLabel, lipgloss.Width(cloudLabel)-1, "…")
+		} else {
+			break
+		}
+		right = build()
+	}
+	if headerDisplayWidth(right) > maxWidth {
+		return ansi.Truncate(right, maxWidth, "…")
+	}
+	return right
+}
+
+func (m Model) renderHeader() string {
+	// Three regions:
+	//   left   — brand + version, anchored at column 0
+	//   center — session title (centered across full width when present)
+	//   right  — cloud + local model strip, anchored at the right edge
+	//
+	// With the title centered, the left and right slots stay symmetric so
+	// the bar reads cleanly even on wide terminals.
+	left := lipgloss.JoinHorizontal(lipgloss.Left,
+		m.styles.Primary.Render("▓▓ CERCANO"),
+		m.styles.Muted.Render(" v0.1.0"),
+	)
+
+	leftW := headerTextWidth("▓▓ CERCANO v0.1.0")
 
 	// No title — flush left and right to the edges with a single gap.
 	if m.sessionTitle == "" {
+		right := m.renderHeaderRight(m.width - leftW - 1)
+		rightW := headerDisplayWidth(right)
 		gap := m.width - leftW - rightW
 		if gap < 1 {
 			gap = 1
@@ -4474,10 +4512,11 @@ func (m Model) renderHeader() string {
 		return left + strings.Repeat(" ", gap) + right
 	}
 
+	titlePlain := "░▒▓ " + m.sessionTitle + " ▓▒░"
 	title := m.styles.Info.Render("░▒▓ ") +
 		m.styles.Info.Render(m.sessionTitle) +
 		m.styles.Info.Render(" ▓▒░")
-	titleW := lipgloss.Width(title)
+	titleW := headerTextWidth(titlePlain)
 
 	// Center the title across the full bar.
 	titleStart := (m.width - titleW) / 2
@@ -4486,6 +4525,8 @@ func (m Model) renderHeader() string {
 		gapBefore = 2 // collision guard with the brand
 	}
 	titleEnd := leftW + gapBefore + titleW
+	right := m.renderHeaderRight(m.width - titleEnd - 2)
+	rightW := headerDisplayWidth(right)
 	gapAfter := m.width - rightW - titleEnd
 	if gapAfter < 2 {
 		gapAfter = 2 // collision guard with the model strip

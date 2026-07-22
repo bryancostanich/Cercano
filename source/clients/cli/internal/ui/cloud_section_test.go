@@ -159,8 +159,8 @@ func TestCloudSectionComingSoonDisablesActivate(t *testing.T) {
 	}
 }
 
-func TestCloudSectionActiveRowShowsActiveDisabled(t *testing.T) {
-	sp := cloudSamplePage() // active profile is "work-openai"
+func TestCloudSectionActiveRowShowsPrimaryDisabled(t *testing.T) {
+	sp := cloudSamplePage() // primary profile is "work-openai"
 	sp.selectCloudRow("profile:work-openai")
 	sec := sp.buildCloudSection()
 	var found bool
@@ -169,25 +169,25 @@ func TestCloudSectionActiveRowShowsActiveDisabled(t *testing.T) {
 			continue
 		}
 		found = true
-		// The active row's activate button reads "active" so it reflects the
-		// current state instead of inviting a no-op re-activation.
-		if !strings.Contains(f.Label(), "active") {
-			t.Errorf("active row's activate button should read \"active\", got %q", f.Label())
+		// The primary row's button reads "primary" so it reflects the current
+		// state instead of inviting a no-op re-selection.
+		if !strings.Contains(f.Label(), "primary") {
+			t.Errorf("primary row's button should read \"primary\", got %q", f.Label())
 		}
-		if strings.Contains(f.Label(), "activate") {
-			t.Errorf("active row's button should not still say \"activate\", got %q", f.Label())
+		if strings.Contains(f.Label(), "set as primary") {
+			t.Errorf("primary row's button should not still say \"set as primary\", got %q", f.Label())
 		}
 		// It must be disabled: a disabled button never commits on Enter.
 		if _, committed, _ := f.Update(tea.KeyPressMsg{Code: tea.KeyEnter}); committed {
-			t.Error("active row's activate button must be disabled (no commit)")
+			t.Error("primary row's button must be disabled (no commit)")
 		}
 	}
 	if !found {
-		t.Fatal("cloud-activate field missing from active profile row")
+		t.Fatal("cloud-activate field missing from primary profile row")
 	}
 }
 
-func TestCloudSectionInactiveProfileShowsActivateEnabled(t *testing.T) {
+func TestCloudSectionInactiveProfileShowsSetAsPrimaryEnabled(t *testing.T) {
 	sp := cloudSamplePage()
 	// Make a second, non-active profile the selected editable row.
 	sp.cloudView.Providers[3].PrimaryProfile = "personal-gemini"
@@ -203,11 +203,11 @@ func TestCloudSectionInactiveProfileShowsActivateEnabled(t *testing.T) {
 			continue
 		}
 		found = true
-		if f.Label() == "" || !strings.Contains(f.Label(), "activate") {
-			t.Errorf("inactive row's button should read \"activate\", got %q", f.Label())
+		if f.Label() == "" || !strings.Contains(f.Label(), "set as primary") {
+			t.Errorf("inactive row's button should read \"set as primary\", got %q", f.Label())
 		}
 		if _, committed, _ := f.Update(tea.KeyPressMsg{Code: tea.KeyEnter}); !committed {
-			t.Error("inactive row's activate button must be enabled (commits)")
+			t.Error("inactive row's set-as-primary button must be enabled (commits)")
 		}
 	}
 	if !found {

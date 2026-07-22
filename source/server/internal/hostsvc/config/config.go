@@ -29,10 +29,10 @@ type Service interface {
 
 	// Locked partial mutations (under internal lock; no persist, no notify —
 	// caller persists explicitly)
-	SetActiveProfile(name string) bool          // false if name not found
+	SetActiveProfile(name string) bool // false if name not found
 	UpsertProfile(p cfg.CloudProfile) (replaced bool, isActive bool)
 	RemoveProfile(name string) (existed, wasActive bool)
-	SetBackupProfile(name string) bool           // false if name!="" and not found
+	SetBackupProfile(name string) bool // false if name!="" and not found
 	ProfileInfo(name string) (exists bool, isActive bool)
 
 	// Mutate applies fn to the live config under the write lock. It does NOT
@@ -122,6 +122,17 @@ func (s *svc) SetActiveProfile(name string) bool {
 	defer s.mu.Unlock()
 	if _, ok := profileByName(s.current.CloudProfiles, name); !ok {
 		return false
+	}
+	previous := s.current.ActiveCloudProfile
+	if previous != "" && previous != name {
+		// Selecting a different primary should keep the previous primary as the
+		// automatic failover target. This also handles the common swap where the
+		// selected profile was already the backup: primary and backup trade places
+		// instead of leaving backup equal to primary.
+		s.current.BackupCloudProfile = previous
+	} else if s.current.BackupCloudProfile == name {
+		// Preserve the invariant that the primary profile is never also backup.
+		s.current.BackupCloudProfile = ""
 	}
 	s.current.ActiveCloudProfile = name
 	return true

@@ -211,6 +211,41 @@ func TestServiceSetCloudModel(t *testing.T) {
 	}
 }
 
+func TestServiceSetActiveProfilePromotesPreviousPrimaryToBackup(t *testing.T) {
+	svc := cfgsvc.New("", cfg.Config{
+		ActiveCloudProfile: "a",
+		BackupCloudProfile: "b",
+		CloudProfiles:      []cfg.CloudProfile{{Name: "a"}, {Name: "b"}},
+	}, nil)
+	if !svc.SetActiveProfile("b") {
+		t.Fatal("SetActiveProfile should return true for existing profile")
+	}
+	c := svc.Get()
+	if c.ActiveCloudProfile != "b" {
+		t.Fatalf("ActiveCloudProfile=%q, want %q", c.ActiveCloudProfile, "b")
+	}
+	if c.BackupCloudProfile != "a" {
+		t.Fatalf("BackupCloudProfile=%q, want previous primary %q", c.BackupCloudProfile, "a")
+	}
+}
+
+func TestServiceSetActiveProfileClearsSelfBackup(t *testing.T) {
+	svc := cfgsvc.New("", cfg.Config{
+		BackupCloudProfile: "b",
+		CloudProfiles:      []cfg.CloudProfile{{Name: "a"}, {Name: "b"}},
+	}, nil)
+	if !svc.SetActiveProfile("b") {
+		t.Fatal("SetActiveProfile should return true for existing profile")
+	}
+	c := svc.Get()
+	if c.ActiveCloudProfile != "b" {
+		t.Fatalf("ActiveCloudProfile=%q, want %q", c.ActiveCloudProfile, "b")
+	}
+	if c.BackupCloudProfile != "" {
+		t.Fatalf("BackupCloudProfile=%q, want cleared", c.BackupCloudProfile)
+	}
+}
+
 func TestServiceSetBackupProfile(t *testing.T) {
 	svc := cfgsvc.New("", cfg.Config{
 		CloudProfiles: []cfg.CloudProfile{{Name: "a"}, {Name: "b"}},

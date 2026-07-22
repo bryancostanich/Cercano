@@ -158,7 +158,7 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 			return "", nil, err
 		}
 		sp.profilesLoaded = false
-		return "active: " + sp.cloudDraft.Name, nil, nil
+		return "primary: " + sp.cloudDraft.Name, nil, nil
 	case cloudCommitBackup:
 		if sp.agent == nil {
 			return "no agent", nil, nil

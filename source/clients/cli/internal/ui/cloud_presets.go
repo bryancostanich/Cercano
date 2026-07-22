@@ -142,7 +142,7 @@ func rowAnnotation(r cloudRow) string {
 				parts = append(parts, "— no model")
 			}
 		}
-		// Active rows get an auth-aware "active (…)" marker so the active
+		// Primary rows get an auth-aware "primary (…)" marker so the primary
 		// provider is unmistakable and its auth path is visible; inactive rows
 		// show just the auth hint.
 		if r.Active {
@@ -166,17 +166,17 @@ func rowAnnotation(r cloudRow) string {
 	return ""
 }
 
-// activeLabel is the auth-aware marker for the active provider's row. Meridian
+// activeLabel is the auth-aware marker for the primary provider's row. Meridian
 // (Claude Max OAuth) and ChatGPT (the responses OAuth path) are called out so
-// the user sees not just that a provider is active but how it authenticates.
+// the user sees not just which provider is primary but how it authenticates.
 func activeLabel(r cloudRow) string {
 	switch {
 	case r.Profile != nil && r.Profile.Route == "subscription":
-		return "active (subscription)"
+		return "primary (subscription)"
 	case r.Profile != nil && r.Profile.Flavor == "responses":
-		return "active (ChatGPT OAuth)"
+		return "primary (ChatGPT OAuth)"
 	default:
-		return "active"
+		return "primary"
 	}
 }
 

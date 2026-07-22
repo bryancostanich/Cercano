@@ -133,13 +133,13 @@ func (sp *settingsPage) cloudDetailFields(r cloudRow) []form.Field {
 	if d.Route != "subscription" {
 		out = append(out, form.NewMasked("cloud-key", il("api-key"), sp.draftHasKey(r)))
 	}
-	// Activate button: reads "active" (disabled) when this row is already the
-	// active profile, so it doesn't invite a no-op re-activation and reflects
-	// the current state. Otherwise "activate", enabled unless coming-soon.
-	activateLabel := "activate"
+	// Primary button: reads "primary" (disabled) when this row is already the
+	// primary profile, so it doesn't invite a no-op re-selection and reflects
+	// the current state. Otherwise "set as primary", enabled unless coming-soon.
+	activateLabel := "set as primary"
 	activateEnabled := !r.ComingSoon
 	if r.Active {
-		activateLabel = "active"
+		activateLabel = "primary"
 		activateEnabled = false
 	}
 	out = append(out,

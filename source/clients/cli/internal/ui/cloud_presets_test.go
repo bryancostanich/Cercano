@@ -94,9 +94,9 @@ func TestRowAnnotation(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "active direct key → plain active",
+			name:     "primary direct key → plain primary",
 			row:      cloudRow{ID: "profile:x", IsProfile: true, HasKey: true, Active: true},
-			expected: "active",
+			expected: "primary",
 		},
 		{
 			name:     "inactive without key",
@@ -104,19 +104,19 @@ func TestRowAnnotation(t *testing.T) {
 			expected: "— no key",
 		},
 		{
-			name:     "active with model, direct key",
+			name:     "primary with model, direct key",
 			row:      cloudRow{ID: "profile:x", IsProfile: true, HasKey: true, Active: true, Profile: &agentclient.CloudProfileInfo{Model: "claude-opus-4-8"}},
-			expected: "claude-opus-4-8  active",
+			expected: "claude-opus-4-8  primary",
 		},
 		{
-			name:     "active subscription → active (subscription)",
+			name:     "primary subscription → primary (subscription)",
 			row:      cloudRow{ID: "profile:x", IsProfile: true, Active: true, Profile: &agentclient.CloudProfileInfo{Model: "claude-opus-4-8", Route: "subscription"}},
-			expected: "claude-opus-4-8  active (subscription)",
+			expected: "claude-opus-4-8  primary (subscription)",
 		},
 		{
-			name:     "active responses → active (ChatGPT OAuth)",
+			name:     "primary responses → primary (ChatGPT OAuth)",
 			row:      cloudRow{ID: "profile:x", IsProfile: true, Active: true, Profile: &agentclient.CloudProfileInfo{Model: "gpt-5.5", Flavor: "responses"}},
-			expected: "gpt-5.5  active (ChatGPT OAuth)",
+			expected: "gpt-5.5  primary (ChatGPT OAuth)",
 		},
 		{
 			name:     "inactive subscription shows route as auth hint",
@@ -180,12 +180,12 @@ func TestBackupMarkerOnRows(t *testing.T) {
 		t.Fatalf("openai row should carry Backup, got %+v", openaiRow)
 	}
 	if anthropicRow.Backup {
-		t.Fatal("active anthropic row must not carry Backup")
+		t.Fatal("primary anthropic row must not carry Backup")
 	}
 	if ann := rowAnnotation(*openaiRow); !strings.Contains(ann, "backup") {
 		t.Fatalf("backup row annotation %q missing marker", ann)
 	}
 	if ann := rowAnnotation(*anthropicRow); strings.Contains(ann, "backup") {
-		t.Fatalf("active row annotation %q must not carry backup marker", ann)
+		t.Fatalf("primary row annotation %q must not carry backup marker", ann)
 	}
 }

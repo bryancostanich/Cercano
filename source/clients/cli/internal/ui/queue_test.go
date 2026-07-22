@@ -7,10 +7,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// Submitting a message while a response is streaming steers the conversation:
-// it cancels the current stream and starts a fresh turn instead of queueing
-// behind stale work.
-func TestSubmitWhileStreamingSteers(t *testing.T) {
+// Submitting a message while a response is streaming stages it in the queue.
+// Pressing Enter again on the empty prompt promotes the staged message into a
+// steering turn by canceling the current stream and submitting the queued text.
+func TestSubmitWhileStreamingQueuesThenEmptyEnterSteers(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	canceled := false
@@ -21,14 +21,26 @@ func TestSubmitWhileStreamingSteers(t *testing.T) {
 	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(Model)
 
-	if q := m.mainChat().Queued(); len(q) != 0 {
-		t.Fatalf("steering should not queue behind stale work, got %v", q)
+	if q := m.mainChat().Queued(); len(q) != 1 || q[0] != "check the tests" {
+		t.Fatalf("expected queued [check the tests], got %v", q)
 	}
-	if !canceled {
-		t.Fatal("steering should cancel the in-flight stream")
+	if canceled {
+		t.Fatal("first enter with text should queue, not cancel")
 	}
 	if strings.TrimSpace(m.input.Value()) != "" {
-		t.Errorf("input should clear after steering, got %q", m.input.Value())
+		t.Errorf("input should clear after queuing, got %q", m.input.Value())
+	}
+	if !m.streaming {
+		t.Fatal("queuing must not end the in-flight stream")
+	}
+
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "\n"})
+	m = next.(Model)
+	if !canceled {
+		t.Fatal("empty enter with a queued prompt should cancel the in-flight stream")
+	}
+	if q := m.mainChat().Queued(); len(q) != 0 {
+		t.Fatalf("steering should drain queued prompt, got %v", q)
 	}
 }
 

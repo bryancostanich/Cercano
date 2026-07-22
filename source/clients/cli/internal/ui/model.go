@@ -318,7 +318,7 @@ type confirmRequest struct {
 }
 
 const defaultInputPlaceholder = "type a message, /help for commands"
-const steerInputPlaceholder = "type + press [enter] to steer convo"
+const steerInputPlaceholder = "type to queue; empty [enter] steers queued convo"
 const armedInputPlaceholder = "(press ^C again to quit, or type a message)"
 
 // New builds the root model. The provided agent client must already be Dial'd.
@@ -1304,6 +1304,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Key().Code == tea.KeyEnter {
 			text := strings.TrimSpace(m.input.Value())
 			if text == "" {
+				if m.streaming {
+					if next, ok := m.mainChat().DrainNext(); ok {
+						m.cancelCurrentStream()
+						m.relayout()
+						return m.submit(next.text, next.images)
+					}
+				}
 				return m, nil
 			}
 			images := promptImagesToInline(m.input.Attachments())
@@ -1319,12 +1326,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// the model — bypass the mid-stream queue so /c, /m, /rename etc.
 			// take effect immediately even while a turn is in flight.
 			isSlash := strings.HasPrefix(text, "/")
-			// Submitting a non-slash mid-stream queues the message instead of
-			// starting a second turn; it sends when the current stream completes.
+			// Submitting a non-slash mid-stream stages the message first. Pressing
+			// Enter again on the now-empty prompt promotes the staged message into
+			// a steering turn by canceling the current stream and submitting it.
 			if m.streaming && !isSlash {
-				m.cancelCurrentStream()
+				m.mainChat().Enqueue(text, images)
 				m.relayout()
-				return m.submit(text, images)
+				return m, nil
 			}
 			// Reset the input back to one line (and reclaim any splash rows).
 			m.relayout()

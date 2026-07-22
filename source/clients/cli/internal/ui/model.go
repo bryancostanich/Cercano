@@ -1306,7 +1306,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if text == "" {
 				if m.streaming {
 					if next, ok := m.mainChat().DrainNext(); ok {
-						m.cancelCurrentStream()
+						m.cancelCurrentStreamSilently()
 						m.relayout()
 						return m.submit(next.text, next.images)
 					}
@@ -2414,6 +2414,14 @@ func (m *Model) setInputValue(s string) {
 // append a muted "canceled" note. Any late events are ignored by the
 // chatStreamMsg guard once m.streaming is false.
 func (m *Model) cancelCurrentStream() {
+	m.cancelCurrentStreamWithNotice(true)
+}
+
+func (m *Model) cancelCurrentStreamSilently() {
+	m.cancelCurrentStreamWithNotice(false)
+}
+
+func (m *Model) cancelCurrentStreamWithNotice(showNotice bool) {
 	if m.cancelStream != nil {
 		m.cancelStream()
 		m.cancelStream = nil
@@ -2428,7 +2436,9 @@ func (m *Model) cancelCurrentStream() {
 	if e := m.mainChat().lastAssistantEntry(); e != nil {
 		e.Streaming = false
 	}
-	m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "⊘ canceled"})
+	if showNotice {
+		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "⊘ canceled"})
+	}
 	// Queued follow-ups are preserved: canceling stops the current work but
 	// anything the user typed while waiting is a real intent they still want
 	// executed. The Esc-key caller drains the next queued message and

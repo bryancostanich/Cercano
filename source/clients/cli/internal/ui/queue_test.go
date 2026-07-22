@@ -42,6 +42,11 @@ func TestSubmitWhileStreamingQueuesThenEmptyEnterSteers(t *testing.T) {
 	if q := m.mainChat().Queued(); len(q) != 0 {
 		t.Fatalf("steering should drain queued prompt, got %v", q)
 	}
+	for _, e := range m.mainChat().Entries() {
+		if e.Role == RoleSystem && e.Content == "⊘ canceled" {
+			t.Fatal("steering should hide the internal cancellation notice")
+		}
+	}
 }
 
 // Up-arrow on an empty prompt pulls the most-recently-queued message back into

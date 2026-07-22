@@ -1,6 +1,82 @@
 # Cercano Agent
 
+> **Hello! You've found the secret agent docs!** If you're here it's because
+> you're an intrepid beta tester, or you found them on your own (also
+> intrepid). :) These pages walk you through setting up and running Cercano as
+> a standalone AI coding agent — the thing that talks to models, calls tools,
+> and edits your code. Pour a coffee; it's a short trip.
+
 The standalone Cercano agent is a daily-driver AI coding assistant with native tool calling, a terminal UI, and a headless mode for scripts and CI. It connects to local models via Ollama and to Anthropic Claude via Meridian (Claude Max OAuth) or a direct API key.
+
+## Set up and use Cercano as a standalone agent
+
+This is the fast path from a fresh clone to a working agent. The five later
+sections ([What you get](#what-you-get), [Quick start](#quick-start),
+[Permission modes](#permission-modes), [Slash commands](#slash-commands),
+[Cloud setup](#cloud-setup)) go deeper on each piece — this is the map.
+
+### 1. Prerequisites
+
+- **Go** (to build the server and CLI — they're separate Go modules under `source/`).
+- **A model to talk to.** Pick at least one:
+  - **Local, zero-cost, offline:** [Ollama](https://ollama.com) with a tool-capable model pulled (e.g. `ollama pull qwen3-coder`). No API key.
+  - **Anthropic Claude:** a direct API key, *or* [Meridian](https://github.com/rynfar/meridian) if you drive Claude through a Claude Max subscription.
+  - **OpenAI-compatible** (OpenAI, Gemini, Groq, …) via an API key, or **ChatGPT** via a Plus/Pro subscription sign-in.
+
+You need Go plus one model source. Everything else is optional.
+
+### 2. Build the dev launcher
+
+The launcher script rebuilds the binaries when they're stale and kills any
+stale agent on each invocation — so you never debug a ghost process. Generate
+it once; it bakes in this clone's path and exports `CERCANO_REPO`:
+
+```bash
+cd source/server && make launcher
+```
+
+After this, `cercano` is on your path (the launcher tells you where it wrote
+it and how to add it to `PATH` if needed).
+
+### 3. Run it
+
+```bash
+cercano
+```
+
+That's the interactive terminal UI. When stdin is a TTY, `cercano` runs the
+CLI; the CLI auto-launches the gRPC agent on `:50052` if one isn't already
+running. To run the agent server by hand, use `cercano agent`.
+
+### 4. Point it at a model
+
+- **Local (Ollama):** if no cloud provider is configured, the agent just uses your local Ollama model. Set which one with `/config` → Local Model, or `/config local_model qwen3-coder`. Done.
+- **Cloud:** open `/config` (or `/cloud`) and add a provider profile — Anthropic, an OpenAI-compatible endpoint, or a ChatGPT subscription sign-in. Set one profile as **primary**; optionally set another as **backup** so the agent fails over automatically when the primary hits a quota or auth error. See [Cloud setup](#cloud-setup) below for the details and config-file examples.
+
+### 5. Talk to it
+
+Type a prompt and hit Enter. The agent decides on its own when to read files,
+grep, run commands, or edit code. For anything destructive (write, edit, run a
+command, delete, git push) it pauses and asks you to confirm with
+`[y]es / [n]o / [d]iff` — how often it asks depends on your
+[permission mode](#permission-modes) (`permissive` by default). Switch modes
+any time with `/strict`, `/permissive`, or `/bypass`.
+
+### 6. Or run it headless
+
+For scripts, CI, or driving Cercano from another agent, skip the UI entirely:
+
+```bash
+cercano run "list the markdown files in this directory"
+cercano run --auto-allow "add a TODO line to the top of README.md"
+cercano run --conv my-session "continue where we left off"
+```
+
+Stdout is the assistant's answer; stderr is progress. Exit codes: `0` success,
+`2` usage error, `3` you denied a confirm gate.
+
+That's the whole loop. The rest of this document is reference detail on each
+piece.
 
 ## What you get
 

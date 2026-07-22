@@ -318,7 +318,7 @@ type confirmRequest struct {
 }
 
 const defaultInputPlaceholder = "type a message, /help for commands"
-const steerInputPlaceholder = "type to queue; empty [enter] steers queued convo"
+const steerInputPlaceholder = "type to queue"
 const armedInputPlaceholder = "(press ^C again to quit, or type a message)"
 
 // New builds the root model. The provided agent client must already be Dial'd.

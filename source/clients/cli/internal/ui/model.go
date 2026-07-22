@@ -311,6 +311,7 @@ type pendingToolCall struct {
 // model routes y / n / esc (and optional extra keys) to it. onYes/onNo
 // resolve and should clear m.pendingConfirm; extras run without resolving.
 type confirmRequest struct {
+	tool   *pendingToolCall
 	onYes  func(Model) (Model, tea.Cmd)
 	onNo   func(Model) (Model, tea.Cmd)
 	extras map[string]func(Model) (Model, tea.Cmd)
@@ -1020,7 +1021,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.PasteMsg:
-		if m.contentPageActive() || m.pendingConfirm != nil {
+		if m.contentPageActive() {
+			return m, nil
+		}
+		if m.pendingConfirm != nil {
+			prevVal := m.input.Value()
+			m.input, _ = m.input.Update(msg)
+			if m.input.Value() != prevVal {
+				m.relayout()
+			}
 			return m, nil
 		}
 		m = m.preparePromptInput()
@@ -1049,11 +1058,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// navigation stays live, though, so the user can page back to review
 		// what the tool is about to touch before answering y/n.
 		if m.pendingConfirm != nil {
-			if key.Matches(msg, keys.ScrollKeys) {
-				cmd := m.activeChat().Update(msg)
-				return m, cmd
-			}
-			next, cmd := m.resolveConfirmKey(msg.String())
+			next, cmd := m.handlePendingConfirmKey(msg)
 			return next, cmd
 		}
 		keyStr := msg.String()
@@ -3280,7 +3285,9 @@ func (m Model) confirmPromptHints(p *pendingToolCall) string {
 	if p.ToolUseID != "" {
 		hints += m.styles.Muted.Render(" / [") +
 			m.styles.Accent.Render("c") +
-			m.styles.Muted.Render("]hat")
+			m.styles.Muted.Render("]hat / type below + [") +
+			m.styles.Accent.Render("enter") +
+			m.styles.Muted.Render("] to steer")
 	}
 	if strings.HasPrefix(p.Name, "mcp__") {
 		hints += m.styles.Muted.Render(" / [") +
@@ -3414,24 +3421,94 @@ func displayToolName(name string) string {
 	return name
 }
 
-// resolveConfirmKey processes a keystroke while a confirm is pending.
-// y/Y → onYes, n/N/esc/ctrl+c → onNo, extras keys → their handler,
-// anything else → ignored (confirm stays pending).
-func (m Model) resolveConfirmKey(key string) (Model, tea.Cmd) {
+func (m Model) handlePendingConfirmKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	if key.Matches(msg, keys.ScrollKeys) {
+		cmd := m.activeChat().Update(msg)
+		return m, cmd
+	}
+	keyStr := msg.String()
+	if keyStr == "enter" {
+		text := strings.TrimSpace(m.input.Value())
+		if text != "" {
+			return m.steerPendingConfirm(text)
+		}
+		if m.pendingConfirm != nil {
+			if fn, ok := m.pendingConfirm.extras["c"]; ok {
+				return fn(m)
+			}
+		}
+		return m, nil
+	}
+	if strings.TrimSpace(m.input.Value()) == "" {
+		if next, cmd, handled := m.resolveConfirmHotkey(keyStr); handled {
+			return next, cmd
+		}
+	}
+	prevVal := m.input.Value()
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	if m.input.Value() != prevVal {
+		m.relayout()
+	}
+	return m, cmd
+}
+
+func (m Model) steerPendingConfirm(text string) (Model, tea.Cmd) {
 	c := m.pendingConfirm
 	if c == nil {
 		return m, nil
 	}
+	if text == "" {
+		return m, nil
+	}
+	id := ""
+	if c.tool != nil {
+		id = c.tool.ToolUseID
+	}
+	m.pendingConfirm = nil
+	convID, ag := m.convID, m.agent
+	m.input.SetValue("")
+	m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("↳ steer: " + text)})
+	m.refreshViewport()
+	if id != "" && ag != nil {
+		go func() { _ = ag.DenyToolCallWithMessage(context.Background(), convID, id, text) }()
+	}
+	return m, nil
+}
+
+func (m Model) confirmToolUseID() string {
+	if m.pendingConfirm != nil && m.pendingConfirm.tool != nil {
+		return m.pendingConfirm.tool.ToolUseID
+	}
+	return ""
+}
+
+// resolveConfirmKey processes a keystroke while a confirm is pending.
+// y/Y → onYes, n/N/esc/ctrl+c → onNo, extras keys → their handler,
+// anything else → ignored (confirm stays pending).
+func (m Model) resolveConfirmKey(key string) (Model, tea.Cmd) {
+	next, cmd, _ := m.resolveConfirmHotkey(key)
+	return next, cmd
+}
+
+func (m Model) resolveConfirmHotkey(key string) (Model, tea.Cmd, bool) {
+	c := m.pendingConfirm
+	if c == nil {
+		return m, nil, false
+	}
 	switch key {
 	case "y", "Y":
-		return c.onYes(m)
+		next, cmd := c.onYes(m)
+		return next, cmd, true
 	case "n", "N", "esc", "ctrl+c":
-		return c.onNo(m)
+		next, cmd := c.onNo(m)
+		return next, cmd, true
 	default:
 		if fn, ok := c.extras[key]; ok {
-			return fn(m)
+			next, cmd := fn(m)
+			return next, cmd, true
 		}
-		return m, nil
+		return m, nil, false
 	}
 }
 
@@ -3458,6 +3535,7 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 		return m, nil
 	}
 	cr := &confirmRequest{
+		tool: tc,
 		onYes: func(m Model) (Model, tea.Cmd) {
 			m.pendingConfirm = nil
 			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Accent.Render("✓ approved — running…")})

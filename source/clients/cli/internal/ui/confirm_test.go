@@ -295,6 +295,74 @@ func TestResolveConfirmKey_OtherKey_Ignored(t *testing.T) {
 	}
 }
 
+func TestConfirmPending_TypingThenEnterSteersToolCall(t *testing.T) {
+	m := New(nil, false)
+	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "dispatch", Args: `{}`, Permission: "X"})
+
+	next, _ := m.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+	m = next.(Model)
+	next, _ = m.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
+	m = next.(Model)
+	if m.input.Value() != "pi" {
+		t.Fatalf("typing while confirm pending should edit prompt, got %q", m.input.Value())
+	}
+
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(Model)
+	if m.pendingConfirm != nil {
+		t.Fatal("steering with enter should clear pending confirm")
+	}
+	if m.input.Value() != "" {
+		t.Fatalf("steering should clear prompt, got %q", m.input.Value())
+	}
+	found := false
+	for _, e := range m.mainChat().Entries() {
+		if strings.Contains(e.Content, "↳ steer: pi") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("steering should append a visible steer entry")
+	}
+}
+
+func TestConfirmPending_EmptyEnterStartsChatSteer(t *testing.T) {
+	m := New(nil, false)
+	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "dispatch", Args: `{}`, Permission: "X"})
+
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(Model)
+	if m.pendingConfirm != nil {
+		t.Fatal("empty enter should resolve into steer/chat mode")
+	}
+	if m.composeToolUseID != "tool-1" {
+		t.Fatalf("composeToolUseID = %q", m.composeToolUseID)
+	}
+}
+
+func TestConfirmPending_HotkeysOnlyWhenPromptEmpty(t *testing.T) {
+	m := New(nil, false)
+	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "dispatch", Args: `{}`, Permission: "X"})
+
+	next, _ := m.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = next.(Model)
+	if m.pendingConfirm != nil {
+		t.Fatal("n with an empty prompt should still deny")
+	}
+
+	m = New(nil, false)
+	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "dispatch", Args: `{}`, Permission: "X"})
+	m.input.SetValue("a")
+	next, _ = m.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = next.(Model)
+	if m.pendingConfirm == nil {
+		t.Fatal("n with non-empty steering text should not deny")
+	}
+	if m.input.Value() != "an" {
+		t.Fatalf("n should append to steering text, got %q", m.input.Value())
+	}
+}
+
 func TestResolveConfirmKey_Generic(t *testing.T) {
 	yes, no, details := false, false, false
 	mk := func() Model {

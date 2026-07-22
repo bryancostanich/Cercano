@@ -916,24 +916,13 @@ func (x *svc) SuggestNextPrompt(ctx context.Context, req *proto.SuggestNextPromp
 		}
 		fmt.Fprintf(&tail, "[%s]\n%s\n\n", t.Role, content)
 	}
-	var promptB strings.Builder
-	promptB.WriteString("You are helping predict what a user might reasonably ask next in an ongoing conversation with an AI coding assistant. ")
-	promptB.WriteString("Output ONE short natural next prompt the user might send, under 80 characters. ")
-	promptB.WriteString("Rules: output ONLY the prompt text; no quotes, no formatting, no leading punctuation, no commentary, no labels.\n\n")
-	if recap != "" {
-		promptB.WriteString("Recap of the conversation so far:\n")
-		promptB.WriteString(recap)
-		promptB.WriteString("\n\n")
-	}
-	promptB.WriteString("Most recent turns:\n")
-	promptB.WriteString(tail.String())
-	promptB.WriteString("\nNext prompt:")
+	prompt := buildSuggestNextPromptPrompt(recap, tail.String())
 
 	res, err := e.Dispatch(ctx, dispatch.Spec{
 		Mode:        dispatch.OneShot,
 		Tier:        config.TierFastLightText,
 		Role:        dispatch.RoleCoproc,
-		Prompt:      promptB.String(),
+		Prompt:      prompt,
 		Source:      "suggest_next_prompt",
 		RecordUsage: true,
 	})
@@ -941,6 +930,37 @@ func (x *svc) SuggestNextPrompt(ctx context.Context, req *proto.SuggestNextPromp
 		return empty, nil
 	}
 	return &proto.SuggestNextPromptResponse{Suggestion: SanitizeSuggestion(res.Text)}, nil
+}
+
+func buildSuggestNextPromptPrompt(recap, tail string) string {
+	var promptB strings.Builder
+	promptB.WriteString("You generate ghost-text tab-complete suggestions for the user's next prompt in a coding-agent conversation. ")
+	promptB.WriteString("Do not imitate casual user chatter. Infer the current task state and suggest the most useful next user action, or output nothing if no high-confidence useful action exists.\n\n")
+	promptB.WriteString("Output contract:\n")
+	promptB.WriteString("- Output exactly ONE next prompt the user could send, under 80 characters.\n")
+	promptB.WriteString("- Output an empty string if the next action is unclear or low-value.\n")
+	promptB.WriteString("- Output ONLY the prompt text: no quotes, bullets, labels, commentary, or punctuation prefixes.\n\n")
+	promptB.WriteString("Good suggestion classes:\n")
+	promptB.WriteString("- Approve a waiting decision: e.g. Proceed with the recommended option.\n")
+	promptB.WriteString("- Choose among options: e.g. Use the structured suggestion engine.\n")
+	promptB.WriteString("- Ask for verification when code changed: e.g. Run the focused tests.\n")
+	promptB.WriteString("- Continue approved implementation: e.g. Implement the prompt builder tests.\n")
+	promptB.WriteString("- Ask for a concise summary after completed work: e.g. Summarize what changed.\n")
+	promptB.WriteString("- Ask to checkpoint/land only when work is complete and verified.\n\n")
+	promptB.WriteString("Avoid bad suggestions:\n")
+	promptB.WriteString("- Do not suggest work already completed in the recent turns.\n")
+	promptB.WriteString("- Do not suggest generic prompts like 'what next?', 'continue', or 'tell me more'.\n")
+	promptB.WriteString("- Do not suggest running tests unless verification is actually pending.\n")
+	promptB.WriteString("- Do not suggest checkpoint/land if edits are still in progress or unverified.\n\n")
+	if strings.TrimSpace(recap) != "" {
+		promptB.WriteString("Recap of the conversation so far:\n")
+		promptB.WriteString(recap)
+		promptB.WriteString("\n\n")
+	}
+	promptB.WriteString("Most recent turns:\n")
+	promptB.WriteString(tail)
+	promptB.WriteString("\nNext useful user prompt:")
+	return promptB.String()
 }
 
 // SanitizeSuggestion normalizes a coproc's suggestion text: single line, no

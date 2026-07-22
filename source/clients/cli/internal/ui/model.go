@@ -318,6 +318,7 @@ type confirmRequest struct {
 }
 
 const defaultInputPlaceholder = "type a message, /help for commands"
+const steerInputPlaceholder = "type + press [enter] to steer convo"
 const armedInputPlaceholder = "(press ^C again to quit, or type a message)"
 
 // New builds the root model. The provided agent client must already be Dial'd.
@@ -1300,8 +1301,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.relayout()
 			return m, nil
 		}
-		switch keyStr {
-		case "enter":
+		if msg.Key().Code == tea.KeyEnter {
 			text := strings.TrimSpace(m.input.Value())
 			if text == "" {
 				return m, nil
@@ -1322,13 +1322,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Submitting a non-slash mid-stream queues the message instead of
 			// starting a second turn; it sends when the current stream completes.
 			if m.streaming && !isSlash {
-				m.mainChat().Enqueue(text, images)
+				m.cancelCurrentStream()
 				m.relayout()
-				return m, nil
+				return m.submit(text, images)
 			}
 			// Reset the input back to one line (and reclaim any splash rows).
 			m.relayout()
 			return m.submit(text, images)
+		}
+		switch keyStr {
 		case "up":
 			// On an empty prompt, ↑ first unstages the most-recently-queued
 			// message for editing (takes priority over history).
@@ -2060,6 +2062,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.streaming = false
+		m.input.Placeholder = defaultInputPlaceholder
 		m.mainChat().SetStreaming(false)
 		// Turn completed normally; the rehydration cache is stale.
 		m.lastSubmittedPrompt = ""
@@ -2296,6 +2299,13 @@ func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model,
 	m.mainChat().AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
 	m.refreshViewport()
 
+	if m.agent == nil {
+		m.errMsg = "agent unavailable"
+		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "error: agent unavailable"})
+		m.refreshViewport()
+		return m, nil
+	}
+
 	// Pass the effective workDir so the agent chdirs there and prepends its
 	// .cercano/context.md if present (/d pins this to the Cercano repo).
 	// New turn = new generation: stream events from any prior (canceled) turn
@@ -2311,6 +2321,7 @@ func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model,
 	}
 	m.cancelStream = cancel
 	m.streaming = true
+	m.input.Placeholder = steerInputPlaceholder
 	m.mainChat().SetStreaming(true)
 	m.turnStart = time.Now()
 	m.turnActivity = "thinking"
@@ -2404,6 +2415,7 @@ func (m *Model) cancelCurrentStream() {
 	// user submits a new prompt before they arrive.
 	m.turnGen++
 	m.streaming = false
+	m.input.Placeholder = defaultInputPlaceholder
 	m.mainChat().SetStreaming(false)
 	if e := m.mainChat().lastAssistantEntry(); e != nil {
 		e.Streaming = false

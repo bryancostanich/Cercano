@@ -3285,9 +3285,9 @@ func (m Model) confirmPromptHints(p *pendingToolCall) string {
 	if p.ToolUseID != "" {
 		hints += m.styles.Muted.Render(" / [") +
 			m.styles.Accent.Render("c") +
-			m.styles.Muted.Render("]hat / type below + [") +
+			m.styles.Muted.Render("]hat / type below + press [") +
 			m.styles.Accent.Render("enter") +
-			m.styles.Muted.Render("] to steer")
+			m.styles.Muted.Render("] to steer convo")
 	}
 	if strings.HasPrefix(p.Name, "mcp__") {
 		hints += m.styles.Muted.Render(" / [") +
@@ -3427,7 +3427,7 @@ func (m Model) handlePendingConfirmKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m, cmd
 	}
 	keyStr := msg.String()
-	if keyStr == "enter" {
+	if msg.Key().Code == tea.KeyEnter {
 		text := strings.TrimSpace(m.input.Value())
 		if text != "" {
 			return m.steerPendingConfirm(text)

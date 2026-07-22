@@ -295,6 +295,15 @@ func TestResolveConfirmKey_OtherKey_Ignored(t *testing.T) {
 	}
 }
 
+func TestConfirmPromptHintsAdvertiseEnterSteer(t *testing.T) {
+	m := minimalModel()
+	out := m.confirmPromptHints(&pendingToolCall{ToolUseID: "tool-1", Name: "dispatch"})
+	plain := stripAnsiCSI(out)
+	if !strings.Contains(plain, "press [enter] to steer convo") {
+		t.Fatalf("confirm hints should advertise enter steering, got %q", plain)
+	}
+}
+
 func TestConfirmPending_TypingThenEnterSteersToolCall(t *testing.T) {
 	m := New(nil, false)
 	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "dispatch", Args: `{}`, Permission: "X"})
@@ -327,16 +336,18 @@ func TestConfirmPending_TypingThenEnterSteersToolCall(t *testing.T) {
 }
 
 func TestConfirmPending_EmptyEnterStartsChatSteer(t *testing.T) {
-	m := New(nil, false)
-	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "dispatch", Args: `{}`, Permission: "X"})
+	for _, msg := range []tea.KeyPressMsg{{Code: tea.KeyEnter}, {Code: tea.KeyEnter, Text: "\n"}} {
+		m := New(nil, false)
+		m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "dispatch", Args: `{}`, Permission: "X"})
 
-	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = next.(Model)
-	if m.pendingConfirm != nil {
-		t.Fatal("empty enter should resolve into steer/chat mode")
-	}
-	if m.composeToolUseID != "tool-1" {
-		t.Fatalf("composeToolUseID = %q", m.composeToolUseID)
+		next, _ := m.Update(msg)
+		m = next.(Model)
+		if m.pendingConfirm != nil {
+			t.Fatalf("empty enter %#v should resolve into steer/chat mode", msg)
+		}
+		if m.composeToolUseID != "tool-1" {
+			t.Fatalf("composeToolUseID = %q", m.composeToolUseID)
+		}
 	}
 }
 

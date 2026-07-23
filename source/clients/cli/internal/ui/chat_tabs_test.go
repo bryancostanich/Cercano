@@ -71,6 +71,40 @@ func TestSubAgentNestedLabelsUseParentOrdinal(t *testing.T) {
 	}
 }
 
+func TestResearchActivityOpensTabAndAttachesOpenTabAffordance(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
+	m.mainChat().Apply(toolEntryStartMsg{id: "tool-r", name: "research"})
+	m.mainChat().Apply(toolEntryStopMsg{id: "tool-r", argsSummary: "query=task tracking max_results=6"})
+
+	m.applySubAgentEvent(subAgentEventMsg{id: "activity:research:1", kind: "started", title: "research", toolUseID: "tool-r", text: `research start: query="task tracking" max_results=6`})
+	m.applySubAgentEvent(subAgentEventMsg{id: "activity:research:1", kind: "prompt", text: "Query: task tracking"})
+	m.applySubAgentEvent(subAgentEventMsg{id: "activity:research:1", kind: "progress", text: "searching the web…"})
+	m.applySubAgentEvent(subAgentEventMsg{id: "activity:research:1", kind: "done", text: "research complete: 6 sources"})
+
+	tab := m.chatTabs.tabs["activity:research:1"]
+	if tab == nil {
+		t.Fatal("research tool should open its own activity tab")
+	}
+	var body []string
+	for _, e := range tab.view.Entries() {
+		body = append(body, e.Content)
+	}
+	joined := strings.Join(body, "\n")
+	if !strings.Contains(joined, "Query: task tracking") || !strings.Contains(joined, "• searching the web") || !strings.Contains(joined, "✓ research complete") {
+		t.Fatalf("research activity tab missing formatted lifecycle: %q", joined)
+	}
+
+	entries := m.mainChat().Entries()
+	if len(entries) == 0 || entries[0].Tool == nil || entries[0].Tool.SubAgentID != "activity:research:1" {
+		t.Fatalf("research tool row should link to its activity tab: %+v", entries)
+	}
+	out := renderToolEntry(*entries[0].Tool, 100, false, m.styles, m.mainChat().md)
+	if !strings.Contains(stripAnsiCSI(out), "open tab") {
+		t.Fatalf("research tool row should show open tab affordance, got %q", stripAnsiCSI(out))
+	}
+}
+
 func TestDeepResearchActivityFormattingSuppressesRawStartAndFormatsProgress(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})

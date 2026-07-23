@@ -54,3 +54,9 @@ source/server/cercano
 # Developer-local MCP host config (machine-specific absolute binary path).
 # Copy .mcp.json.example to .mcp.json and set the command path for your machine.
 .mcp.json
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/

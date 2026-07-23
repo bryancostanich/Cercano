@@ -2082,6 +2082,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if e := m.mainChat().lastAssistantEntry(); e != nil {
 			e.Streaming = false
 		}
+		// The turn is over: drop any latched compaction flag or stuck
+		// in-progress tool so the animation tick can go idle instead of
+		// spinning a CPU core forever when a closing ctxUsageMsg or tool
+		// completion event never arrived.
+		m.clearTurnAnimationState()
 		m.refreshViewport()
 		// Poll the agent for the authoritative context-window usage on the
 		// same conversation. Result arrives as a ctxUsageMsg and overrides
@@ -2446,6 +2451,11 @@ func (m *Model) cancelCurrentStreamWithNotice(showNotice bool) {
 	if e := m.mainChat().lastAssistantEntry(); e != nil {
 		e.Streaming = false
 	}
+	// Compaction is a property of the active turn. Canceling severs the
+	// ctxUsageMsg poll that would otherwise deliver the closing
+	// Compacting=false, so clear it here — a latched compacting flag keeps the
+	// 50ms animation tick alive forever and pins a CPU core until restart.
+	m.clearTurnAnimationState()
 	if showNotice {
 		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "⊘ canceled"})
 	}
@@ -2454,6 +2464,17 @@ func (m *Model) cancelCurrentStreamWithNotice(showNotice bool) {
 	// executed. The Esc-key caller drains the next queued message and
 	// submits it after this returns.
 	m.relayout()
+}
+
+// clearTurnAnimationState resets the turn-scoped flags that keep the 50ms
+// progress-animation tick alive. Any of them left latched after a turn ends —
+// a compacting flag whose closing ctxUsageMsg never arrived, a tool row stuck
+// in-progress because its completion event was dropped — makes the tick
+// self-perpetuate and pin a CPU core until the process restarts. Every
+// turn-termination path must call this, not just the happy-path done event.
+func (m *Model) clearTurnAnimationState() {
+	m.compacting = false
+	m.mainChat().resolveStaleInProgressTools()
 }
 
 func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {

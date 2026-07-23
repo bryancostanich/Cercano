@@ -2226,6 +2226,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cv, ok := m.content.(*contextView); ok && cv.busy() {
 			keep = true
 		}
+		// Keep the trailing "working" animation alive on the visible child tab
+		// (sub-agent or activity) while a phase is running but quiet — the same
+		// treatment the main chat gets, so a long planning/analyze step reads as
+		// alive rather than frozen.
+		if av := m.activeChat(); av != nil && av != m.mainChat() {
+			if av.IsBetweenPhases() || av.hasInProgressTool() {
+				repaint = true
+				keep = true
+			}
+		}
 		if m.compacting {
 			keep = true
 		}

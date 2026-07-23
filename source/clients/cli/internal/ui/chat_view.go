@@ -755,7 +755,21 @@ func (c *chatView) SetTurnStatus(ts turnStatus) {
 // multi-step turn. The model toggles this true on Submit and false on
 // chatDoneMsg / stream cancel.
 func (c *chatView) SetStreaming(s bool) {
+	if s && !c.streaming && c.turn.start.IsZero() {
+		c.turn.start = time.Now()
+	}
 	c.streaming = s
+}
+
+// SetTurnActivity sets the verb shown on the trailing "working" line (e.g.
+// "planning sources…", "working"). Child tabs use this so their animated
+// status reflects the current phase. It also anchors the elapsed clock the
+// first time activity begins so the line doesn't show a bogus duration.
+func (c *chatView) SetTurnActivity(activity string) {
+	if c.turn.start.IsZero() {
+		c.turn.start = time.Now()
+	}
+	c.turn.activity = activity
 }
 
 // IsBetweenPhases reports whether the turn is streaming but no visible

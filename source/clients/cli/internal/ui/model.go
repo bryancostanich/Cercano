@@ -3460,6 +3460,19 @@ func (m Model) handlePendingConfirmKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	if msg.Key().Code == tea.KeyEnter {
 		text := strings.TrimSpace(m.input.Value())
 		if text != "" {
+			// A slash command typed while a permission gate is pending is a
+			// client-side command (e.g. /config, /help), not steering text for
+			// the paused tool. Run it as a slash command and leave the confirm
+			// gate intact so the user can still answer y/n/d/c afterward.
+			if strings.HasPrefix(text, "/") {
+				m.input.SetValue("")
+				m.relayout()
+				next, cmd := m.runSlash(text)
+				if nm, ok := next.(Model); ok {
+					return nm, cmd
+				}
+				return m, cmd
+			}
 			return m.steerPendingConfirm(text)
 		}
 		if m.pendingConfirm != nil {

@@ -138,6 +138,11 @@ func autoLaunchServer(addr string) (string, error) {
 	cmd := exec.Command(bin, "agent")
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
+	// Mark CLI-spawned background agents so the server can shut itself down
+	// when the last client disconnects. Manually started `cercano agent` and
+	// dev/MCP servers do not get this marker and keep their current long-lived
+	// singleton behavior.
+	cmd.Env = append(os.Environ(), "CERCANO_AUTOLAUNCHED=1")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // detach from CLI's tty/process group
 	if err := cmd.Start(); err != nil {
 		logFile.Close()

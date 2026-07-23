@@ -393,6 +393,13 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	srv.SetBuildVersion(version)
 	cloudTierModel = srv.CloudModelForTier
 	srv.SetRuntimeManager(runtimeManager)
+	if os.Getenv("CERCANO_AUTOLAUNCHED") == "1" {
+		srv.EnableIdleShutdown(2*time.Second, func() {
+			if p, err := os.FindProcess(os.Getpid()); err == nil {
+				_ = p.Signal(syscall.SIGTERM)
+			}
+		})
+	}
 
 	// Attach the online-catalog manager so the runtime dashboard has
 	// Ollama's public library available (in addition to the hardcoded

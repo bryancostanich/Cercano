@@ -135,13 +135,14 @@ type Model struct {
 	// path that invokes m.cancelStream — the NEW turn's cancel func.
 	turnGen int
 
-	tokIn, tokOut  int
-	cumIn, cumOut  int
-	ctxRaw         int
-	compacting     bool
-	ctxPollTicks   int
-	ctxPolling     bool // a ctxUsageTick loop is currently running (avoid double-scheduling)
-	animTickActive bool // a progressAnimTick loop is currently running (avoid double-scheduling)
+	tokIn, tokOut           int
+	cumIn, cumOut           int
+	ctxRaw                  int
+	compacting              bool
+	ctxPollTicks            int
+	ctxPolling              bool      // a ctxUsageTick loop is currently running (avoid double-scheduling)
+	animTickActive          bool      // a progressAnimTick loop is currently running (avoid double-scheduling)
+	lastAnimViewportRefresh time.Time // last expensive viewport rebuild done only to advance an animation glyph
 	// chatDirty marks transcript changes whose repaint was deferred to the
 	// next progressAnimTick frame. High-frequency stream events (token
 	// deltas, progress notes) set it instead of rebuilding per event, so the
@@ -786,6 +787,18 @@ type progressAnimTickMsg time.Time
 
 func progressAnimTick() tea.Cmd {
 	return tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg { return progressAnimTickMsg(t) })
+}
+
+const animationViewportRefreshInterval = 300 * time.Millisecond
+
+func (m *Model) shouldRefreshAnimationViewport(now time.Time) bool {
+	if now.IsZero() {
+		return true
+	}
+	if m.lastAnimViewportRefresh.IsZero() {
+		return true
+	}
+	return now.Sub(m.lastAnimViewportRefresh) >= animationViewportRefreshInterval
 }
 
 // ensureAnimTick arms the shared animation/repaint tick loop unless one is
@@ -2185,45 +2198,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// before returning the next tick — that prevents a second kick
 		// (e.g. from toolEntryStartMsg) from doubling the tick rate.
 		m.animTickActive = false
-		repaint := false
+		contentRepaint := false
+		animRepaint := false
 		keep := false
 		// Flush coalesced stream events: token deltas and progress notes set
 		// chatDirty instead of rebuilding per event, so this frame carries
 		// their repaint. Keep ticking while the stream is alive — the next
 		// batch of deltas needs a frame too.
 		if m.chatDirty {
-			repaint = true
+			contentRepaint = true
 		}
 		if m.streaming {
 			keep = true
 		}
-		// Repaint while there's an assistant entry awaiting its first token —
-		// that's when the animated status line is visible. The per-frame push
-		// moves the color sweep into the viewport's content cache; without
-		// it, View renders the last-set content and the animation freezes.
+		// The following branches are animation-only: they advance a spinner,
+		// color sweep, or trailing "working" line inside the transcript. Those
+		// glyphs still need occasional viewport refreshes, but not the 20Hz
+		// full-transcript rebuild used for actual content deltas.
 		if e := m.mainChat().streamingTextEntry(); e != nil && e.Content == "" {
-			repaint = true
+			animRepaint = true
 			keep = true
 		}
-		// Tool spinners on in-progress entries need the same per-frame push;
-		// without this branch the placeholder tick stops once the assistant
-		// streams a token, then the active tool line shows a frozen glyph.
 		if m.mainChat().hasInProgressTool() {
-			repaint = true
+			animRepaint = true
 			keep = true
 		}
-		// Keep ticking while a lazy tool-body fetch is in flight so the
-		// expanded entry's loading spinner animates.
 		if m.mainChat().hasLoadingTool() {
-			repaint = true
+			animRepaint = true
 			keep = true
 		}
-		// Between phases of a multi-step turn (tools done, waiting for the
-		// model's next action), animate the trailing "still working" line —
-		// without this the indicator would freeze on the first frame after
-		// tools complete.
 		if m.mainChat().IsBetweenPhases() {
-			repaint = true
+			animRepaint = true
 			keep = true
 		}
 		// Also keep ticking while the /c chat is busy so its animated
@@ -2237,17 +2242,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// alive rather than frozen.
 		if av := m.activeChat(); av != nil && av != m.mainChat() {
 			if av.IsBetweenPhases() || av.hasInProgressTool() {
-				repaint = true
+				animRepaint = true
 				keep = true
 			}
 		}
 		if m.compacting {
+			// Compaction itself only animates footer/chrome. View() redraws that
+			// cheaply on every tick; it should not force a transcript rebuild.
 			keep = true
 		}
-		// One rebuild per frame no matter how many conditions asked for it —
-		// the old shape called refreshViewport once per branch.
-		if repaint {
+		if contentRepaint {
 			m.refreshViewport()
+			m.lastAnimViewportRefresh = time.Time{}
+		} else if animRepaint && m.shouldRefreshAnimationViewport(time.Time(msg)) {
+			m.refreshViewport()
+			m.lastAnimViewportRefresh = time.Time(msg)
 		}
 		if keep {
 			m.animTickActive = true

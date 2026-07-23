@@ -498,21 +498,39 @@ func (p *Provider) argsFor(model localruntime.ModelRecord, port int) []string {
 	if p.cfg.ISQ != "" {
 		args = append(args, "--isq", p.cfg.ISQ)
 	}
-	// Paged attention is the concurrency/throughput lever — OFF by default on
-	// Metal (the `auto` mode disables it there), so surface on/off explicitly.
-	// Flag names verified against v0.9.0 source (mistralrs-cli/src/args/paged_attn.rs):
-	// `--paged-attn auto|on|off` and `--pa-memory-fraction <0.0-1.0>`. We emit
-	// nothing for auto/unset so the binary keeps its own default.
+	// Memory/context caps are safety-critical on Apple Silicon: mistral.rs Metal
+	// allocations live in IOAccelerator unified memory, not ordinary RSS, so an
+	// uncapped 30B/262k-context model can allocate well beyond physical RAM while
+	// ps still reports tiny RSS. Config defaults compute conservative RAM-aware
+	// caps; explicit extra_args win and suppress duplicate managed flags.
+	extra := p.cfg.ExtraArgs
 	switch strings.ToLower(strings.TrimSpace(p.cfg.PagedAttn)) {
+	case "auto":
+		if !hasFlag(extra, "--paged-attn") {
+			args = append(args, "--paged-attn", "auto")
+		}
 	case "on":
-		args = append(args, "--paged-attn", "on")
+		if !hasFlag(extra, "--paged-attn") {
+			args = append(args, "--paged-attn", "on")
+		}
 	case "off":
-		args = append(args, "--paged-attn", "off")
+		if !hasFlag(extra, "--paged-attn") {
+			args = append(args, "--paged-attn", "off")
+		}
 	}
-	if f := strings.TrimSpace(p.cfg.PAMemoryFraction); f != "" {
+	if f := strings.TrimSpace(p.cfg.PAMemoryFraction); f != "" && !hasAnyFlag(extra, "--pa-memory-fraction", "--pa-memory-mb", "--pa-context-len") {
 		args = append(args, "--pa-memory-fraction", f)
 	}
-	args = append(args, p.cfg.ExtraArgs...)
+	if p.cfg.MaxSeqLen > 0 && !hasFlag(extra, "--max-seq-len") {
+		args = append(args, "--max-seq-len", strconv.Itoa(p.cfg.MaxSeqLen))
+	}
+	if p.cfg.MaxSeqs > 0 && !hasFlag(extra, "--max-seqs") {
+		args = append(args, "--max-seqs", strconv.Itoa(p.cfg.MaxSeqs))
+	}
+	if p.cfg.MaxBatchSize > 0 && !hasFlag(extra, "--max-batch-size") {
+		args = append(args, "--max-batch-size", strconv.Itoa(p.cfg.MaxBatchSize))
+	}
+	args = append(args, extra...)
 	return args
 }
 
@@ -520,6 +538,24 @@ func (p *Provider) argsFor(model localruntime.ModelRecord, port int) []string {
 // model's download URLs (e.g. "afq4-0.uqff"), or "" if none is present. The
 // basename is what --from-uqff wants when -m points at a local directory; the
 // binary resolves it relative to that directory and auto-finds sibling shards.
+func hasAnyFlag(args []string, flags ...string) bool {
+	for _, flag := range flags {
+		if hasFlag(args, flag) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasFlag(args []string, flag string) bool {
+	for _, arg := range args {
+		if arg == flag || strings.HasPrefix(arg, flag+"=") {
+			return true
+		}
+	}
+	return false
+}
+
 func firstUQFFShard(urls []string) string {
 	for _, u := range urls {
 		name := u

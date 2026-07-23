@@ -165,6 +165,79 @@ func TestArgsForUQFFAddsFromUQFFShard(t *testing.T) {
 	}
 }
 
+func TestArgsForAddsMemorySafetyCaps(t *testing.T) {
+	provider := NewProvider(config.MistralRSConfig{
+		Host:             "127.0.0.1",
+		PagedAttn:        "auto",
+		PAMemoryFraction: "0.35",
+		MaxSeqLen:        32768,
+		MaxSeqs:          1,
+		MaxBatchSize:     1,
+	})
+	model := provider.modelRecord("/models/qwen3-30b/config.json", fakeFileInfo{size: 42})
+	model.LoadTarget = "/models/qwen3-30b"
+
+	got := provider.argsFor(model, 8123)
+	for _, want := range [][]string{
+		{"--paged-attn", "auto"},
+		{"--pa-memory-fraction", "0.35"},
+		{"--max-seq-len", "32768"},
+		{"--max-seqs", "1"},
+		{"--max-batch-size", "1"},
+	} {
+		if !containsAdjacent(got, want[0], want[1]) {
+			t.Fatalf("args missing %s %s: %#v", want[0], want[1], got)
+		}
+	}
+}
+
+func TestArgsForExtraArgsOverrideManagedMemoryCaps(t *testing.T) {
+	provider := NewProvider(config.MistralRSConfig{
+		Host:             "127.0.0.1",
+		PagedAttn:        "auto",
+		PAMemoryFraction: "0.35",
+		MaxSeqLen:        32768,
+		MaxSeqs:          1,
+		MaxBatchSize:     1,
+		ExtraArgs: []string{
+			"--paged-attn", "off",
+			"--pa-memory-mb=4096",
+			"--max-seq-len", "8192",
+			"--max-seqs", "2",
+			"--max-batch-size", "4",
+		},
+	})
+	model := provider.modelRecord("/models/qwen3-30b/config.json", fakeFileInfo{size: 42})
+	model.LoadTarget = "/models/qwen3-30b"
+
+	got := provider.argsFor(model, 8123)
+	if countFlag(got, "--paged-attn") != 1 || countFlag(got, "--max-seq-len") != 1 || countFlag(got, "--max-seqs") != 1 || countFlag(got, "--max-batch-size") != 1 {
+		t.Fatalf("managed caps should not duplicate explicit extra_args: %#v", got)
+	}
+	if containsAdjacent(got, "--pa-memory-fraction", "0.35") {
+		t.Fatalf("--pa-memory-mb extra arg should suppress managed pa_memory_fraction: %#v", got)
+	}
+}
+
+func containsAdjacent(args []string, flag, value string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == value {
+			return true
+		}
+	}
+	return false
+}
+
+func countFlag(args []string, flag string) int {
+	count := 0
+	for _, arg := range args {
+		if arg == flag || strings.HasPrefix(arg, flag+"=") {
+			count++
+		}
+	}
+	return count
+}
+
 func TestArgsForSafetensorsOmitsFromUQFF(t *testing.T) {
 	provider := NewProvider(config.MistralRSConfig{Host: "127.0.0.1"})
 	// A plain safetensors model must NOT get --from-uqff; it loads via -m alone.

@@ -423,6 +423,9 @@ type MistralRSConfig struct {
 	ISQ              string        `yaml:"isq"`
 	PagedAttn        string        `yaml:"paged_attn"`         // "" | "auto" | "on" | "off"
 	PAMemoryFraction string        `yaml:"pa_memory_fraction"` // "" | 0<f<=1 as string
+	MaxSeqLen        int           `yaml:"max_seq_len"`        // 0 = derive a RAM-safe cap
+	MaxSeqs          int           `yaml:"max_seqs"`           // 0 = derive a RAM-safe cap
+	MaxBatchSize     int           `yaml:"max_batch_size"`     // 0 = derive a RAM-safe cap
 	ExtraArgs        []string      `yaml:"extra_args"`
 	ReadinessTimeout string        `yaml:"readiness_timeout"`
 	Restart          RestartConfig `yaml:"restart"`
@@ -456,6 +459,7 @@ func (r *RestartConfig) UnmarshalYAML(value *yaml.Node) error {
 
 // Defaults returns a Config with default values.
 func Defaults() Config {
+	mistralMem := defaultMistralRSMemoryDefaults()
 	return Config{
 		OllamaURL:     "http://localhost:11434",
 		OpenRuntime:   "llama_server",
@@ -501,8 +505,13 @@ func Defaults() Config {
 			},
 		},
 		MistralRS: MistralRSConfig{
-			ModelDirs: []string{"~/.cercano/models"},
-			Host:      "127.0.0.1",
+			ModelDirs:        []string{"~/.cercano/models"},
+			Host:             "127.0.0.1",
+			PagedAttn:        mistralMem.PagedAttn,
+			PAMemoryFraction: mistralMem.PAMemoryFraction,
+			MaxSeqLen:        mistralMem.MaxSeqLen,
+			MaxSeqs:          mistralMem.MaxSeqs,
+			MaxBatchSize:     mistralMem.MaxBatchSize,
 			// Longer than llama-server's 60s: mistral.rs may apply in-situ
 			// quantization (ISQ) to an unquantized model at load, which is slow
 			// for large models.
@@ -845,6 +854,21 @@ func applyMistralRSDefaults(cfg *MistralRSConfig, defaults MistralRSConfig) {
 	}
 	if cfg.ReadinessTimeout == "" {
 		cfg.ReadinessTimeout = defaults.ReadinessTimeout
+	}
+	if strings.TrimSpace(cfg.PagedAttn) == "" {
+		cfg.PagedAttn = defaults.PagedAttn
+	}
+	if strings.TrimSpace(cfg.PAMemoryFraction) == "" {
+		cfg.PAMemoryFraction = defaults.PAMemoryFraction
+	}
+	if cfg.MaxSeqLen == 0 {
+		cfg.MaxSeqLen = defaults.MaxSeqLen
+	}
+	if cfg.MaxSeqs == 0 {
+		cfg.MaxSeqs = defaults.MaxSeqs
+	}
+	if cfg.MaxBatchSize == 0 {
+		cfg.MaxBatchSize = defaults.MaxBatchSize
 	}
 	if cfg.Restart.MaxAttempts == 0 {
 		cfg.Restart.MaxAttempts = defaults.Restart.MaxAttempts

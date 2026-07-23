@@ -37,12 +37,27 @@ type ResearchResult struct {
 	Sources []string
 }
 
+// ResearchProgressFunc receives a coarse phase update as the research pipeline
+// advances (e.g. "crafting search queries…", "fetching 4 pages…").
+type ResearchProgressFunc func(phase string)
+
 // ResearchPipeline orchestrates the full research flow: query crafting,
 // search, fetch, and synthesis via the local model.
 type ResearchPipeline struct {
 	model    ModelCaller
 	searcher SearchProvider
 	fetcher  URLFetcher
+	progress ResearchProgressFunc
+}
+
+// SetProgress registers a callback invoked at each pipeline phase. Optional;
+// nil disables progress reporting.
+func (p *ResearchPipeline) SetProgress(fn ResearchProgressFunc) { p.progress = fn }
+
+func (p *ResearchPipeline) report(phase string) {
+	if p.progress != nil {
+		p.progress(phase)
+	}
 }
 
 // NewResearchPipeline creates a pipeline with the given dependencies.
@@ -185,16 +200,19 @@ func (p *ResearchPipeline) Run(ctx context.Context, question string, maxResults 
 	}
 
 	// Step 1: Craft search queries
+	p.report("crafting search queries…")
 	queries, err := p.CraftQueries(ctx, question)
 	if err != nil {
 		return nil, err
 	}
 
 	// Step 2: Search all queries in parallel
+	p.report(fmt.Sprintf("searching %d queries…", len(queries)))
 	allResults, searchErrs := p.SearchAll(ctx, queries, maxResults)
 
 	// Step 3: Deduplicate
 	deduped := DeduplicateResults(allResults)
+	p.report(fmt.Sprintf("found %d unique results", len(deduped)))
 	if len(deduped) == 0 {
 		// When every query errored the cause is the search layer, not the
 		// query content — surface it instead of a misleading "no results".
@@ -205,6 +223,7 @@ func (p *ResearchPipeline) Run(ctx context.Context, question string, maxResults 
 	}
 
 	// Step 4: Fetch top pages in parallel
+	p.report(fmt.Sprintf("fetching up to %d pages…", maxResults))
 	pages := p.FetchAll(ctx, deduped, maxResults)
 	if len(pages) == 0 {
 		// Fall back: synthesize from snippets only
@@ -218,6 +237,7 @@ func (p *ResearchPipeline) Run(ctx context.Context, question string, maxResults 
 	}
 
 	// Step 5: Synthesize answer
+	p.report(fmt.Sprintf("synthesizing answer from %d sources…", len(pages)))
 	answer, err := p.Synthesize(ctx, question, pages)
 	if err != nil {
 		return nil, err

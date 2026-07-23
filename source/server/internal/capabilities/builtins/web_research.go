@@ -70,17 +70,13 @@ func (researchCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 	}
 	activity.Started(fmt.Sprintf("research start: query=%q max_results=%d", a.Query, maxResults))
 	activity.Prompt("Query: " + a.Query)
-	activity.Progress(fmt.Sprintf("searching the web and fetching up to %d sources…", maxResults))
+	pipeline.SetProgress(func(phase string) { activity.Progress(phase) })
 
-	if call.Emit != nil {
-		call.Emit("researching locally…")
-	}
 	result, err := pipeline.Run(ctx, a.Query, a.MaxResults)
 	if err != nil {
 		activity.Failed(err)
 		return nil, fmt.Errorf("research: %w", err)
 	}
-	activity.Progress(fmt.Sprintf("synthesizing answer from %d sources…", len(result.Sources)))
 	activity.Done(fmt.Sprintf("research complete: %d sources", len(result.Sources)))
 
 	var b strings.Builder

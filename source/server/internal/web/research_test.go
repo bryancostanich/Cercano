@@ -224,7 +224,7 @@ func TestSynthesize(t *testing.T) {
 func TestRunFullPipeline(t *testing.T) {
 	model := &mockModelCaller{
 		responses: []string{
-			"1. ollama list models API\n2. ollama REST API models",                                  // query crafting
+			"1. ollama list models API\n2. ollama REST API models",                                 // query crafting
 			"Ollama lists models via GET /api/tags.\n\nSources:\n- https://a.com\n- https://b.com", // synthesis
 		},
 	}
@@ -256,6 +256,37 @@ func TestRunFullPipeline(t *testing.T) {
 	}
 	if len(result.Sources) == 0 {
 		t.Fatal("expected at least one source")
+	}
+}
+
+func TestRunReportsPhaseProgress(t *testing.T) {
+	model := &mockModelCaller{
+		responses: []string{
+			"1. ollama list models API\n2. ollama REST API models",
+			"Answer.\n\nSources:\n- https://a.com",
+		},
+	}
+	searcher := &mockSearcher{
+		results: map[string][]SearchResult{
+			"ollama list models API": {{URL: "https://a.com", Title: "Ollama Docs", Snippet: "API docs"}},
+			"ollama REST API models": {{URL: "https://a.com", Title: "Ollama Docs", Snippet: "dup"}},
+		},
+	}
+	fetcher := &mockFetcher{pages: map[string]string{"https://a.com": "Full docs about listing models..."}}
+
+	p := NewResearchPipeline(model, searcher, fetcher)
+	var phases []string
+	p.SetProgress(func(phase string) { phases = append(phases, phase) })
+
+	if _, err := p.Run(context.Background(), "How do I list models in Ollama?", 5); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	joined := strings.Join(phases, "\n")
+	for _, want := range []string{"crafting search queries", "searching", "found", "fetching", "synthesizing"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("progress phases missing %q; got:\n%s", want, joined)
+		}
 	}
 }
 

@@ -104,9 +104,6 @@ func (deepResearchCap) Execute(ctx context.Context, call *capabilities.Call) (*c
 	dispatcher := research.NewSearchDispatcher(&researchSearchAdapter{searcher: searcher})
 	pipeline := research.NewPipeline(model, dispatcher, &researchFetchAdapter{fetcher: web.NewFetcher()})
 
-	if call.Emit != nil {
-		call.Emit("starting deep research…")
-	}
 	activity.Progress("planning sources and research phases…")
 	phaseResult, err := pipeline.Run(ctx, research.RunConfig{
 		Topic:      a.Topic,

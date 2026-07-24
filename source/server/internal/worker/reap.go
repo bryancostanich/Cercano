@@ -21,11 +21,9 @@ package worker
 import (
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 // reapSeams holds the injectable checks the reaper makes about a process group.
@@ -45,16 +43,6 @@ type reapSeams struct {
 	// killGroup kills the whole process group led by pgid (production:
 	// killGroupByPgid). Recorded so tests can observe which pgids were reaped.
 	killGroup func(pgid int)
-}
-
-// realReapSeams is the production wiring.
-func realReapSeams() reapSeams {
-	return reapSeams{
-		groupAlive:    func(pgid int) bool { return syscall.Kill(-pgid, 0) == nil },
-		identifyGroup: groupLooksLikeWorker,
-		pidAlive:      func(pid int) bool { return syscall.Kill(pid, 0) == nil },
-		killGroup:     killGroupByPgid,
-	}
 }
 
 // ReapOrphanWorkers sweeps the worker pidfile directory and reaps orphaned
@@ -156,17 +144,6 @@ func cleanupStaleFiles(pidPath string, pid int) {
 	_ = os.Remove(sockPath)
 }
 
-// groupLooksLikeWorker reports whether the process group led by pgid has a member
-// whose command line is a cercano worker. The worker is spawned as
-// `cercano worker --socket <path>` (see spawnWorker), so "cercano worker" is a
-// stable substring that identifies it and CANNOT match the host itself
-// (`cercano agent` / bare `cercano`) or an unrelated process. This is the
-// identity guard: a recycled pid that is not running a cercano worker fails here
-// and is never killed.
-func groupLooksLikeWorker(pgid int) bool {
-	return exec.Command("pgrep", "-f", "-g", strconv.Itoa(pgid), "cercano worker").Run() == nil
-}
-
 // removePidFile deletes the pidfile unconditionally (best-effort). Used by the
 // reaper, which has already validated the file's contents itself; teardown paths
 // cleaning up their own spawn use removePidFileIfOwned instead.
@@ -206,7 +183,3 @@ func readWorkerPidFile(path string) (pid, spawnerPid int, ok bool) {
 	return pid, spawnerPid, true
 }
 
-// killGroupByPgid SIGKILLs the whole process group led by pgid.
-func killGroupByPgid(pgid int) {
-	_ = syscall.Kill(-pgid, syscall.SIGKILL)
-}

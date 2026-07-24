@@ -1,6 +1,8 @@
+//go:build unix
+
 package worker
 
-// spawn_internal_test.go — regression guard for the warm-pool lifetime bug.
+// spawn_unix_internal_test.go — regression guard for the warm-pool lifetime bug.
 //
 // The pool keeps a conversation's worker WARM across turns. spawnWorker must
 // therefore NOT bind the child process's lifetime to the turn ctx it was

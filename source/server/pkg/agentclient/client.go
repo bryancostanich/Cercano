@@ -12,10 +12,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"google.golang.org/grpc"
@@ -23,6 +23,15 @@ import (
 
 	"cercano/source/server/pkg/proto"
 )
+
+// cercanoBinaryName is the sibling server binary's filename: on Windows it
+// carries the required .exe extension; elsewhere it's extension-less.
+var cercanoBinaryName = func() string {
+	if runtime.GOOS == "windows" {
+		return "cercano.exe"
+	}
+	return "cercano"
+}()
 
 // grpcConnAlias is used by reconnect.go so its helpers can hold a
 // package-scoped conn type without importing grpc directly. The value
@@ -138,7 +147,7 @@ func autoLaunchServer(addr string) (string, error) {
 	cmd := exec.Command(bin, "agent")
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // detach from CLI's tty/process group
+	cmd.SysProcAttr = detachSysProcAttr() // detach from CLI's tty/process group
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
 		return "", fmt.Errorf("start %s: %w", bin, err)
@@ -151,7 +160,7 @@ func autoLaunchServer(addr string) (string, error) {
 func findCercanoBinary() (string, error) {
 	// 1. Sibling to the running cercano-cli executable (dev build, brew install).
 	if exe, err := os.Executable(); err == nil {
-		candidate := filepath.Join(filepath.Dir(exe), "cercano")
+		candidate := filepath.Join(filepath.Dir(exe), cercanoBinaryName)
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			return candidate, nil
 		}

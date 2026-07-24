@@ -46,31 +46,61 @@ func parseYesNo(input string) bool {
 	return trimmed == "y" || trimmed == "yes"
 }
 
-// promptInstallEngine displays the engine-agnostic install prompt and returns
-// whether the user wants to proceed with installation.
-// If autoInstall is true, skips the prompt and returns true.
-func promptInstallEngine(out io.Writer, in io.Reader, autoInstall bool) bool {
+// engineSetupChoice is the outcome of promptEngineSetupChoice: how the user
+// wants to proceed when no AI engine was detected at the configured URL.
+type engineSetupChoice int
+
+const (
+	engineChoiceInstallLocal engineSetupChoice = iota
+	engineChoiceRemote
+	engineChoiceSkip
+)
+
+// promptEngineSetupChoice asks how the user wants to configure a local AI
+// engine when none was detected at cfg.OllamaURL: install Ollama locally,
+// point at an existing Ollama server elsewhere on the network, or skip AI
+// setup for now. Returns the choice and, for engineChoiceRemote, the raw URL
+// string the user typed (unvalidated — the caller validates so it can decide
+// how to react to a bad URL).
+// If autoInstall is true, skips the prompt and returns engineChoiceInstallLocal.
+func promptEngineSetupChoice(out io.Writer, in io.Reader, autoInstall bool) (engineSetupChoice, string) {
 	if autoInstall {
-		return true
+		return engineChoiceInstallLocal, ""
 	}
 
 	fmt.Fprintln(out, "  No AI engine backend was detected.")
-	fmt.Fprintln(out, "  Would you like help installing one?")
-	fmt.Fprintln(out, "  Ollama is recommended as the simplest path.")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "  [1] Install Ollama locally (recommended)")
+	fmt.Fprintln(out, "  [2] Use an existing Ollama server elsewhere on the network")
+	fmt.Fprintln(out, "  [3] Skip AI setup for now")
 	fmt.Fprintln(out)
 
-	// If stdin is not a terminal (piped), print guidance and return false
+	// If stdin is not a terminal (piped), print guidance and skip.
 	if in == nil {
 		fmt.Fprintln(out, "  To install Ollama, visit: https://ollama.com/download")
-		return false
+		return engineChoiceSkip, ""
 	}
 
-	fmt.Fprint(out, "  Install Ollama now? [Y/n]: ")
 	scanner := bufio.NewScanner(in)
-	if scanner.Scan() {
-		return parseYesNo(scanner.Text())
+	fmt.Fprint(out, "  Choice [1]: ")
+	if !scanner.Scan() {
+		return engineChoiceInstallLocal, "" // default on EOF
 	}
-	return true // default yes on EOF
+	switch strings.TrimSpace(scanner.Text()) {
+	case "", "1":
+		return engineChoiceInstallLocal, ""
+	case "2":
+		fmt.Fprint(out, "  Ollama server URL (e.g. http://mac-studio.local:11434): ")
+		if !scanner.Scan() {
+			return engineChoiceSkip, ""
+		}
+		return engineChoiceRemote, strings.TrimSpace(scanner.Text())
+	case "3":
+		return engineChoiceSkip, ""
+	default:
+		fmt.Fprintln(out, "  Unrecognized choice; skipping AI setup for now.")
+		return engineChoiceSkip, ""
+	}
 }
 
 // promptInstallLlamaServer displays the managed runtime install prompt.

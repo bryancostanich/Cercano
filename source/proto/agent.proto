@@ -365,6 +365,9 @@ message UpdateConfigRequest {
   string mistralrs_isq = 24;                 // "-" clears; else ISQ level (e.g. Q4K, Q8_0, AFQ4)
   string mistralrs_paged_attn = 25;          // "auto" | "on" | "off"
   string mistralrs_pa_memory_fraction = 26;  // "-" clears; else 0 < f <= 1 (KV-cache budget)
+  // Agent lifecycle. Sparse-patch: "" = unchanged, "true"/"false".
+  // Controls whether a CLI-auto-launched agent exits when its last client detaches.
+  string agent_shutdown_on_last_client = 28;
 }
 
 // Runtime configuration update response.
@@ -924,6 +927,8 @@ message GetConfigResponse {
   string mistralrs_isq = 26;
   string mistralrs_paged_attn = 27;
   string mistralrs_pa_memory_fraction = 28;
+  // Agent lifecycle.
+  bool agent_shutdown_on_last_client = 30;
 }
 
 message ListSkillsRequest {}

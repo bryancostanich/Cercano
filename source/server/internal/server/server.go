@@ -1003,6 +1003,20 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		fmt.Printf("UpdateConfig: tool_loop.max_iterations set to %d\n", n)
 	}
 
+	if req.AgentShutdownOnLastClient != "" {
+		v := strings.ToLower(strings.TrimSpace(req.AgentShutdownOnLastClient))
+		if v != "true" && v != "false" {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid agent_shutdown_on_last_client %q: expected \"true\" or \"false\"", req.AgentShutdownOnLastClient),
+			}, nil
+		}
+		c.Agent.ShutdownOnLastClient = v == "true"
+		changes = append(changes, fmt.Sprintf("agent.shutdown_on_last_client=%s", v))
+		s.broadcastConfigChanged("agent.shutdown_on_last_client", v)
+		fmt.Printf("UpdateConfig: agent.shutdown_on_last_client set to %s\n", v)
+	}
+
 	// mistral.rs runtime settings (Runtime tab). Sparse-patch: "" = unchanged,
 	// "-" clears. Take effect on the next runtime start.
 	if req.MistralrsIsq != "" {
@@ -1581,6 +1595,7 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 		ToolLoopMaxIterations:     int32(cfg.ToolLoop.MaxIterations),
 		ModelTiers:                cfg.Models.TierSlots(),
 		ModelsDefaultProvider:     string(cfg.Models.DefaultProvider),
+		AgentShutdownOnLastClient: cfg.Agent.ShutdownOnLastClient,
 		MistralrsIsq:              cfg.MistralRS.ISQ,
 		MistralrsPagedAttn:        cfg.MistralRS.PagedAttn,
 		MistralrsPaMemoryFraction: cfg.MistralRS.PAMemoryFraction,

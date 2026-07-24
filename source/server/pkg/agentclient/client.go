@@ -246,6 +246,8 @@ type Config struct {
 	// ModelsDefaultProvider is the preferred side ("cloud"|"open"|"").
 	ModelTiers            map[string]string
 	ModelsDefaultProvider string
+	// Agent lifecycle.
+	AgentShutdownOnLastClient bool
 	// mistral.rs runtime settings (Runtime tab).
 	MistralRSISQ              string
 	MistralRSPagedAttn        string
@@ -285,6 +287,7 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 		ToolLoopMaxIterations:     int(resp.GetToolLoopMaxIterations()),
 		ModelTiers:                resp.GetModelTiers(),
 		ModelsDefaultProvider:     resp.GetModelsDefaultProvider(),
+		AgentShutdownOnLastClient: resp.GetAgentShutdownOnLastClient(),
 		MistralRSISQ:              resp.GetMistralrsIsq(),
 		MistralRSPagedAttn:        resp.GetMistralrsPagedAttn(),
 		MistralRSPAMemoryFraction: resp.GetMistralrsPaMemoryFraction(),
@@ -333,6 +336,8 @@ type ConfigUpdate struct {
 	// Empty key = unchanged.
 	ModelTierKey   string
 	ModelTierValue string
+	// Agent lifecycle. Sparse-patch: "" = unchanged, "true" / "false" = apply.
+	AgentShutdownOnLastClient string
 	// mistral.rs runtime settings (Runtime tab). Sparse-patch: "" = unchanged,
 	// "-" clears.
 	MistralRSISQ              string
@@ -1457,6 +1462,7 @@ func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, erro
 		ToolLoopMaxIterations:     u.ToolLoopMaxIterations,
 		ModelTierKey:              u.ModelTierKey,
 		ModelTierValue:            u.ModelTierValue,
+		AgentShutdownOnLastClient: u.AgentShutdownOnLastClient,
 		MistralrsIsq:              u.MistralRSISQ,
 		MistralrsPagedAttn:        u.MistralRSPagedAttn,
 		MistralrsPaMemoryFraction: u.MistralRSPAMemoryFraction,

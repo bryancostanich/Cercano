@@ -37,7 +37,7 @@ func TestBuildSettingsSectionsCoversKeys(t *testing.T) {
 		t.Errorf("\"Open Model\" section should not exist in buildSettingsSections output")
 	}
 	for _, want := range []string{
-		"locus-mode", "permission-mode", "port",
+		"locus-mode", "permission-mode", "port", "agent-shutdown-on-last-client",
 	} {
 		if !keys[want] {
 			t.Errorf("missing field %q", want)
@@ -51,6 +51,9 @@ func TestClassifyCommit(t *testing.T) {
 	}
 	if a := classifyCommit("locus-mode", "open_only", nil); a.kind != commitConfig || a.update.LocusMode != "open_only" {
 		t.Fatalf("locus-mode -> %+v", a)
+	}
+	if a := classifyCommit("agent-shutdown-on-last-client", "false", nil); a.kind != commitConfig || a.update.AgentShutdownOnLastClient != "false" {
+		t.Fatalf("agent-shutdown-on-last-client -> %+v", a)
 	}
 	if a := classifyCommit("permission-mode", "bypass", nil); a.kind != commitPermission || a.value != "bypass" {
 		t.Fatalf("permission-mode -> %+v", a)

@@ -958,6 +958,9 @@ type UpdateConfigRequest struct {
 	MistralrsIsq              string `protobuf:"bytes,24,opt,name=mistralrs_isq,json=mistralrsIsq,proto3" json:"mistralrs_isq,omitempty"`                                            // "-" clears; else ISQ level (e.g. Q4K, Q8_0, AFQ4)
 	MistralrsPagedAttn        string `protobuf:"bytes,25,opt,name=mistralrs_paged_attn,json=mistralrsPagedAttn,proto3" json:"mistralrs_paged_attn,omitempty"`                        // "auto" | "on" | "off"
 	MistralrsPaMemoryFraction string `protobuf:"bytes,26,opt,name=mistralrs_pa_memory_fraction,json=mistralrsPaMemoryFraction,proto3" json:"mistralrs_pa_memory_fraction,omitempty"` // "-" clears; else 0 < f <= 1 (KV-cache budget)
+	// Agent lifecycle. Sparse-patch: "" = unchanged, "true"/"false".
+	// Controls whether a CLI-auto-launched agent exits when its last client detaches.
+	AgentShutdownOnLastClient string `protobuf:"bytes,28,opt,name=agent_shutdown_on_last_client,json=agentShutdownOnLastClient,proto3" json:"agent_shutdown_on_last_client,omitempty"`
 	unknownFields             protoimpl.UnknownFields
 	sizeCache                 protoimpl.SizeCache
 }
@@ -1177,6 +1180,13 @@ func (x *UpdateConfigRequest) GetMistralrsPagedAttn() string {
 func (x *UpdateConfigRequest) GetMistralrsPaMemoryFraction() string {
 	if x != nil {
 		return x.MistralrsPaMemoryFraction
+	}
+	return ""
+}
+
+func (x *UpdateConfigRequest) GetAgentShutdownOnLastClient() string {
+	if x != nil {
+		return x.AgentShutdownOnLastClient
 	}
 	return ""
 }
@@ -6435,6 +6445,8 @@ type GetConfigResponse struct {
 	MistralrsIsq              string `protobuf:"bytes,26,opt,name=mistralrs_isq,json=mistralrsIsq,proto3" json:"mistralrs_isq,omitempty"`
 	MistralrsPagedAttn        string `protobuf:"bytes,27,opt,name=mistralrs_paged_attn,json=mistralrsPagedAttn,proto3" json:"mistralrs_paged_attn,omitempty"`
 	MistralrsPaMemoryFraction string `protobuf:"bytes,28,opt,name=mistralrs_pa_memory_fraction,json=mistralrsPaMemoryFraction,proto3" json:"mistralrs_pa_memory_fraction,omitempty"`
+	// Agent lifecycle.
+	AgentShutdownOnLastClient bool `protobuf:"varint,30,opt,name=agent_shutdown_on_last_client,json=agentShutdownOnLastClient,proto3" json:"agent_shutdown_on_last_client,omitempty"`
 	unknownFields             protoimpl.UnknownFields
 	sizeCache                 protoimpl.SizeCache
 }
@@ -6670,6 +6682,13 @@ func (x *GetConfigResponse) GetMistralrsPaMemoryFraction() string {
 		return x.MistralrsPaMemoryFraction
 	}
 	return ""
+}
+
+func (x *GetConfigResponse) GetAgentShutdownOnLastClient() bool {
+	if x != nil {
+		return x.AgentShutdownOnLastClient
+	}
+	return false
 }
 
 type ListSkillsRequest struct {
@@ -12636,7 +12655,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x05index\x18\x01 \x01(\x05R\x05index\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\x12\x1d\n" +
 	"\n" +
-	"media_type\x18\x03 \x01(\tR\tmediaType\"\x8e\t\n" +
+	"media_type\x18\x03 \x01(\tR\tmediaType\"\xd0\t\n" +
 	"\x13UpdateConfigRequest\x12\x1d\n" +
 	"\n" +
 	"open_model\x18\x01 \x01(\tR\topenModel\x12%\n" +
@@ -12669,7 +12688,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x18tool_loop_max_iterations\x18\x17 \x01(\tR\x15toolLoopMaxIterations\x12#\n" +
 	"\rmistralrs_isq\x18\x18 \x01(\tR\fmistralrsIsq\x120\n" +
 	"\x14mistralrs_paged_attn\x18\x19 \x01(\tR\x12mistralrsPagedAttn\x12?\n" +
-	"\x1cmistralrs_pa_memory_fraction\x18\x1a \x01(\tR\x19mistralrsPaMemoryFraction\"J\n" +
+	"\x1cmistralrs_pa_memory_fraction\x18\x1a \x01(\tR\x19mistralrsPaMemoryFraction\x12@\n" +
+	"\x1dagent_shutdown_on_last_client\x18\x1c \x01(\tR\x19agentShutdownOnLastClient\"J\n" +
 	"\x14UpdateConfigResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\xb6\x02\n" +
@@ -13070,7 +13090,7 @@ const file_agent_proto_rawDesc = "" +
 	"resultJson\x12\x19\n" +
 	"\bis_error\x18\x02 \x01(\bR\aisError\x12\x14\n" +
 	"\x05error\x18\x03 \x01(\tR\x05error\"\x12\n" +
-	"\x10GetConfigRequest\"\xb5\n" +
+	"\x10GetConfigRequest\"\xf7\n" +
 	"\n" +
 	"\x11GetConfigResponse\x12\x1d\n" +
 	"\n" +
@@ -13108,7 +13128,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x18tool_loop_max_iterations\x18\x19 \x01(\x05R\x15toolLoopMaxIterations\x12#\n" +
 	"\rmistralrs_isq\x18\x1a \x01(\tR\fmistralrsIsq\x120\n" +
 	"\x14mistralrs_paged_attn\x18\x1b \x01(\tR\x12mistralrsPagedAttn\x12?\n" +
-	"\x1cmistralrs_pa_memory_fraction\x18\x1c \x01(\tR\x19mistralrsPaMemoryFraction\x1a=\n" +
+	"\x1cmistralrs_pa_memory_fraction\x18\x1c \x01(\tR\x19mistralrsPaMemoryFraction\x12@\n" +
+	"\x1dagent_shutdown_on_last_client\x18\x1e \x01(\bR\x19agentShutdownOnLastClient\x1a=\n" +
 	"\x0fModelTiersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x13\n" +

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 )
 
 // ModelCaller abstracts calling the local model. Implemented by the MCP server
@@ -193,66 +194,141 @@ Provide your answer now. Include source URLs as citations.`, question, sb.String
 }
 
 // Run executes the full research pipeline: craft queries → search → deduplicate
-// → fetch → synthesize. Returns a distilled answer with source citations.
+// → fetch → synthesize. Returns a distilled answer with source citations. It
+// keeps no on-disk state — a crash mid-run loses all work. Callers that want a
+// resumable run should use RunDurable with an output directory.
 func (p *ResearchPipeline) Run(ctx context.Context, question string, maxResults int) (*ResearchResult, error) {
+	return p.RunDurable(ctx, question, maxResults, "")
+}
+
+// RunDurable executes the research pipeline while persisting a sidecar
+// (research_state.json) into outputDir after every phase. If a sidecar for an
+// interrupted run already exists there, the run resumes from the last completed
+// phase instead of starting over — crafted queries, search results, and fetched
+// pages survive a crash. When outputDir is empty the sidecar is disabled and
+// this behaves exactly like the classic in-memory Run.
+func (p *ResearchPipeline) RunDurable(ctx context.Context, question string, maxResults int, outputDir string) (*ResearchResult, error) {
 	if maxResults <= 0 {
 		maxResults = 5
 	}
 
-	// Step 1: Craft search queries
-	p.report("crafting search queries…")
-	queries, err := p.CraftQueries(ctx, question)
-	if err != nil {
-		return nil, err
-	}
+	sidecar := newResearchSidecar(outputDir)
+	state := p.loadOrInitState(sidecar, question, maxResults)
 
-	// Step 2: Search all queries in parallel
-	p.report(fmt.Sprintf("searching %d queries…", len(queries)))
-	allResults, searchErrs := p.SearchAll(ctx, queries, maxResults)
-
-	// Step 3: Deduplicate
-	deduped := DeduplicateResults(allResults)
-	p.report(fmt.Sprintf("found %d unique results", len(deduped)))
-	if len(deduped) == 0 {
-		// When every query errored the cause is the search layer, not the
-		// query content — surface it instead of a misleading "no results".
-		if len(searchErrs) > 0 && len(searchErrs) == len(queries) {
-			return nil, fmt.Errorf("all %d searches failed: %w", len(queries), searchErrs[0])
+	// Step 1: Craft search queries (skip if a resumed run already has them).
+	if !state.phaseReached(phaseQueries) {
+		p.report("crafting search queries…")
+		queries, err := p.CraftQueries(ctx, question)
+		if err != nil {
+			return nil, err
 		}
-		return nil, fmt.Errorf("no search results found for: %s", question)
-	}
-
-	// Step 4: Fetch top pages in parallel
-	p.report(fmt.Sprintf("fetching up to %d pages…", maxResults))
-	pages := p.FetchAll(ctx, deduped, maxResults)
-	if len(pages) == 0 {
-		// Fall back: synthesize from snippets only
-		for _, r := range deduped {
-			pages = append(pages, FetchedPage{
-				URL:     r.URL,
-				Title:   r.Title,
-				Content: r.Snippet,
-			})
+		state.Queries = queries
+		state.Phase = phaseQueries
+		if err := sidecar.save(state); err != nil {
+			return nil, fmt.Errorf("persist research state: %w", err)
 		}
 	}
 
-	// Step 5: Synthesize answer
-	p.report(fmt.Sprintf("synthesizing answer from %d sources…", len(pages)))
-	answer, err := p.Synthesize(ctx, question, pages)
-	if err != nil {
-		return nil, err
+	// Step 2 + 3: Search all queries in parallel, then deduplicate.
+	if !state.phaseReached(phaseSearch) {
+		p.report(fmt.Sprintf("searching %d queries…", len(state.Queries)))
+		allResults, searchErrs := p.SearchAll(ctx, state.Queries, maxResults)
+
+		deduped := DeduplicateResults(allResults)
+		p.report(fmt.Sprintf("found %d unique results", len(deduped)))
+		if len(deduped) == 0 {
+			// When every query errored the cause is the search layer, not the
+			// query content — surface it instead of a misleading "no results".
+			if len(searchErrs) > 0 && len(searchErrs) == len(state.Queries) {
+				return nil, fmt.Errorf("all %d searches failed: %w", len(state.Queries), searchErrs[0])
+			}
+			return nil, fmt.Errorf("no search results found for: %s", question)
+		}
+		state.Results = deduped
+		state.Phase = phaseSearch
+		if err := sidecar.save(state); err != nil {
+			return nil, fmt.Errorf("persist research state: %w", err)
+		}
 	}
 
-	// Collect source URLs
+	// Step 4: Fetch top pages in parallel.
+	if !state.phaseReached(phaseFetch) {
+		p.report(fmt.Sprintf("fetching up to %d pages…", maxResults))
+		pages := p.FetchAll(ctx, state.Results, maxResults)
+		if len(pages) == 0 {
+			// Fall back: synthesize from snippets only.
+			for _, r := range state.Results {
+				pages = append(pages, FetchedPage{
+					URL:     r.URL,
+					Title:   r.Title,
+					Content: r.Snippet,
+				})
+			}
+		}
+		state.Pages = pages
+		state.Phase = phaseFetch
+		if err := sidecar.save(state); err != nil {
+			return nil, fmt.Errorf("persist research state: %w", err)
+		}
+	}
+
+	// Step 5: Synthesize answer.
+	if !state.phaseReached(phaseSynthesis) {
+		p.report(fmt.Sprintf("synthesizing answer from %d sources…", len(state.Pages)))
+		answer, err := p.Synthesize(ctx, question, state.Pages)
+		if err != nil {
+			return nil, err
+		}
+		state.Answer = answer
+		state.Sources = sourceURLs(state.Pages)
+		state.Phase = phaseSynthesis
+		if err := sidecar.save(state); err != nil {
+			return nil, fmt.Errorf("persist research state: %w", err)
+		}
+	}
+
+	state.Phase = phaseComplete
+	if err := sidecar.save(state); err != nil {
+		return nil, fmt.Errorf("persist research state: %w", err)
+	}
+
+	return &ResearchResult{
+		Answer:  state.Answer,
+		Sources: state.Sources,
+	}, nil
+}
+
+// loadOrInitState resumes an interrupted run from the sidecar when one exists
+// and matches the current question and format; otherwise it returns a fresh
+// state. A completed or mismatched sidecar is treated as a new run so a repeat
+// question is not silently answered from stale cache.
+func (p *ResearchPipeline) loadOrInitState(sidecar *researchSidecar, question string, maxResults int) *researchState {
+	if sidecar.exists() {
+		if loaded, err := sidecar.load(); err == nil &&
+			loaded.Version == currentResearchStateVersion &&
+			loaded.Question == question &&
+			loaded.isInProgress() {
+			p.report(fmt.Sprintf("resuming research from phase %q…", loaded.Phase))
+			return loaded
+		}
+	}
+	now := time.Now()
+	return &researchState{
+		Version:    currentResearchStateVersion,
+		Question:   question,
+		MaxResults: maxResults,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+}
+
+// sourceURLs extracts the page URLs in order for the result's source list.
+func sourceURLs(pages []FetchedPage) []string {
 	var sources []string
 	for _, page := range pages {
 		sources = append(sources, page.URL)
 	}
-
-	return &ResearchResult{
-		Answer:  answer,
-		Sources: sources,
-	}, nil
+	return sources
 }
 
 // FetchURL implements URLFetcher for the existing Fetcher type.

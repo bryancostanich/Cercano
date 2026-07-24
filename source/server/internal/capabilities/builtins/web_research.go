@@ -25,14 +25,15 @@ func (researchCap) Tier() capabilities.Tier { return capabilities.TierR }
 func (researchCap) Surfaces() capabilities.Surface { return capabilities.SurfaceAgent }
 
 func (researchCap) Description() string {
-	return "Research a question using web search and local AI analysis. Crafts search queries, searches DuckDuckGo, fetches top results, and synthesizes a sourced answer — all locally. Requires the Python venv (run 'cercano setup' once). Args: {query: string, max_results?: int}."
+	return "Research a question using web search and local AI analysis. Crafts search queries, searches DuckDuckGo, fetches top results, and synthesizes a sourced answer — all locally. Requires the Python venv (run 'cercano setup' once). Args: {query: string, max_results?: int, output_dir?: string}."
 }
 func (researchCap) Schema() capabilities.Schema {
 	return capabilities.Schema(`{
 		"type": "object",
 		"properties": {
 			"query":       {"type": "string", "description": "The research question to investigate."},
-			"max_results": {"type": "integer", "description": "Maximum search results to fetch and analyze (default 5)."}
+			"max_results": {"type": "integer", "description": "Maximum search results to fetch and analyze (default 5)."},
+			"output_dir":  {"type": "string", "description": "Persist a resumable research_state.json into this directory so an interrupted run can resume."}
 		},
 		"required": ["query"]
 	}`)
@@ -41,6 +42,7 @@ func (researchCap) Schema() capabilities.Schema {
 type researchArgs struct {
 	Query      string `json:"query"`
 	MaxResults int    `json:"max_results"`
+	OutputDir  string `json:"output_dir"`
 }
 
 func (researchCap) Execute(ctx context.Context, call *capabilities.Call) (*capabilities.Result, error) {
@@ -53,6 +55,23 @@ func (researchCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 	}
 	if !venvReady() {
 		return nil, errors.New("research: " + venvMissingMessage)
+	}
+
+	if a.OutputDir != "" {
+		a.OutputDir = resolvePath(call.WorkDir, a.OutputDir)
+	}
+
+	// The capability is R-tier (research is read-only), but output_dir makes it
+	// write a resumable state file — gate that specific case through the
+	// permission callback rather than promoting the whole capability to W.
+	if a.OutputDir != "" && call.RequestPermission != nil {
+		ok, err := call.RequestPermission(ctx, fmt.Sprintf("research will write a resumable research_state.json into %s", a.OutputDir))
+		if err != nil {
+			return nil, fmt.Errorf("research: permission check: %w", err)
+		}
+		if !ok {
+			return nil, errors.New("research: permission to write state file denied; re-run without 'output_dir' for an in-memory-only run")
+		}
 	}
 
 	scriptPath, err := searchScriptPath()
@@ -72,7 +91,7 @@ func (researchCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 	activity.Prompt("Query: " + a.Query)
 	pipeline.SetProgress(func(phase string) { activity.Progress(phase) })
 
-	result, err := pipeline.Run(ctx, a.Query, a.MaxResults)
+	result, err := pipeline.RunDurable(ctx, a.Query, a.MaxResults, a.OutputDir)
 	if err != nil {
 		activity.Failed(err)
 		return nil, fmt.Errorf("research: %w", err)

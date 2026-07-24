@@ -50,6 +50,9 @@ func TestDefaults(t *testing.T) {
 	if cfg.Port != "50052" {
 		t.Errorf("expected default Port, got %q", cfg.Port)
 	}
+	if !cfg.Agent.ShutdownOnLastClient {
+		t.Fatal("auto-launched agents should default to shutdown_on_last_client=true")
+	}
 	if cfg.LlamaServer.Host != "127.0.0.1" {
 		t.Errorf("expected default llama-server host, got %q", cfg.LlamaServer.Host)
 	}
@@ -80,6 +83,24 @@ func TestLoad_NoFile(t *testing.T) {
 	}
 	if cfg.OllamaURL != "http://localhost:11434" {
 		t.Errorf("expected default OllamaURL, got %q", cfg.OllamaURL)
+	}
+	if !cfg.Agent.ShutdownOnLastClient {
+		t.Fatal("missing config should default agent.shutdown_on_last_client=true")
+	}
+}
+
+func TestLoad_AgentShutdownOnLastClientCanBeDisabled(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("agent:\n  shutdown_on_last_client: false\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.Agent.ShutdownOnLastClient {
+		t.Fatal("explicit agent.shutdown_on_last_client=false should be preserved")
 	}
 }
 

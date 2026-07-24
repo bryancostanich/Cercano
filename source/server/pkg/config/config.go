@@ -53,6 +53,15 @@ func (c Config) WorkerIdleTimeout() time.Duration {
 //
 // Route is an open enum — future bridges (CCR, etc.) get their own value and
 // adapter-specific handling. Empty string is treated as "direct".
+// AgentConfig controls the lifecycle of the background cercano agent process.
+// The default favors laptop/workstation safety: a CLI-auto-launched agent exits
+// when its last CLI client disconnects, which also stops managed local runtime
+// sidecars. Set shutdown_on_last_client=false for intentional background or
+// autonomous-agent deployments that should outlive the UI.
+type AgentConfig struct {
+	ShutdownOnLastClient bool `yaml:"shutdown_on_last_client"`
+}
+
 type CloudProfile struct {
 	Name    string `yaml:"name"`
 	Flavor  string `yaml:"flavor"`            // messages | chat_completions | responses | bedrock
@@ -264,6 +273,7 @@ type Config struct {
 	// WorkerIdleTimeout()), NOT "disabled" — omitting the field should still
 	// reap. To DISABLE reaping entirely set a negative value (< 0).
 	WorkerIdleTimeoutSeconds int               `yaml:"worker_idle_timeout_seconds,omitempty"`
+	Agent                    AgentConfig       `yaml:"agent"`
 	LlamaServer              LlamaServerConfig `yaml:"llama_server"`
 	MistralRS                MistralRSConfig   `yaml:"mistralrs"`
 	Compaction               CompactionConfig  `yaml:"compaction"`
@@ -471,6 +481,7 @@ func Defaults() Config {
 		// DefaultWorkerIdleTimeout. Left as the zero value so an omitted field and
 		// the default behave identically.
 		WorkerIdleTimeoutSeconds: 0,
+		Agent:                    AgentConfig{ShutdownOnLastClient: true},
 		Models:                   ModelsConfig{DefaultProvider: ProviderOpen},
 		// Seed the vendor-keyed cloud cost tables. Closed cloud model
 		// selection resolves here — keyed by the active profile's vendor.

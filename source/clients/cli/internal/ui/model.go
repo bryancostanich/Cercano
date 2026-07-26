@@ -4673,8 +4673,9 @@ func (m Model) renderConnStateChip() string {
 	}
 }
 
-// renderPermissionModeChip renders the session-mode chip for the status bar:
-// strict → red (Error), permissive → amber (Primary), bypass → lime (Accent).
+// renderPermissionModeChip renders the session-mode chip for the status bar,
+// colored by how safe the mode is: strict → green (Success, most gated),
+// permissive → amber (Primary), bypass → red (Error, least gated / unsafe).
 // Returns the empty string when the mode isn't known yet (the startup fetch
 // hasn't landed) so the bar doesn't show a misleading default.
 func (m Model) renderPermissionModeChip() string {
@@ -4684,9 +4685,9 @@ func (m Model) renderPermissionModeChip() string {
 	var valStyle lipgloss.Style
 	switch m.permissionMode {
 	case "strict":
-		valStyle = m.styles.Error
+		valStyle = m.styles.Success
 	case "bypass":
-		valStyle = m.styles.Accent
+		valStyle = m.styles.Error
 	default: // permissive (or anything unexpected) → amber
 		valStyle = m.styles.Primary
 	}

@@ -45,6 +45,13 @@ type Info struct {
 	Kind     string
 	ParentID string
 
+	// PrecursorID links a rolled-over conversation to the one it succeeded:
+	// temporal succession ("this session picked up where precursor_id left
+	// off"), NOT the containment meaning ParentID carries for sub-agents.
+	// Empty for conversations that were not created by a rollover. Walk it
+	// backward (A<-B<-C) to reconstruct a rollover lineage.
+	PrecursorID string
+
 	// GrantedTools is the tool set a subagent dispatch loop was granted, so a
 	// resumed CLI can reopen each sub-agent tab with the same tools it showed
 	// live. Populated only by ListChildren (persisted as a comma-joined string
@@ -96,6 +103,15 @@ type Store interface {
 	// hidden from List but fully readable via Get/GetTurns/ListChildren for
 	// post-mortems and tab restore.
 	EnsureSubagentConversation(ctx context.Context, id, parentID, projectDir, model string, grantedTools []string) error
+
+	// CreateRolledOver creates a new 'main' conversation that succeeds
+	// precursorID (a session rollover), seeding it with handoffTurn as its sole
+	// initial turn. The predecessor is untouched. Fails if id already exists.
+	CreateRolledOver(ctx context.Context, id, projectDir, model, precursorID string, handoffTurn Turn) error
+
+	// Precursor returns the precursor_id of a conversation ("" if it was not
+	// created by a rollover), so a lineage can be walked backward.
+	Precursor(ctx context.Context, id string) (string, error)
 
 	// MarkSubagentDismissed flags a sub-agent conversation as dismissed so
 	// ListChildren skips it. The CLI calls this when the user closes a
@@ -214,6 +230,7 @@ func Open(path string) (Store, error) {
 		`ALTER TABLE conversations ADD COLUMN title_source TEXT NOT NULL DEFAULT 'user'`,
 		`ALTER TABLE conversations ADD COLUMN kind TEXT NOT NULL DEFAULT 'main'`,
 		`ALTER TABLE conversations ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE conversations ADD COLUMN precursor_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE conversations ADD COLUMN granted_tools TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE conversations ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0`,
 	} {
@@ -322,6 +339,75 @@ func (s *sqliteStore) EnsureSubagentConversation(ctx context.Context, id, parent
 		ON CONFLICT(id) DO NOTHING`,
 		id, projectDir, model, parentID, granted, now, now)
 	return err
+}
+
+func (s *sqliteStore) CreateRolledOver(ctx context.Context, id, projectDir, model, precursorID string, handoffTurn Turn) error {
+	if id == "" {
+		return errors.New("conversation id required")
+	}
+	if precursorID == "" {
+		return errors.New("precursor id required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().Unix()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Fail (not upsert) if the id already exists: a rollover mints a fresh id,
+	// so a collision means a caller bug we want to surface rather than mask.
+	res, err := tx.ExecContext(ctx, `
+		INSERT INTO conversations (id, project_dir, model, title_source, kind, precursor_id, started_at, last_turn_at)
+		VALUES (?, ?, ?, 'auto', 'main', ?, ?, ?)
+		ON CONFLICT(id) DO NOTHING`,
+		id, projectDir, model, precursorID, now, now)
+	if err != nil {
+		return fmt.Errorf("insert rolled-over conversation: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("conversation %q already exists", id)
+	}
+
+	// Seed the handoff as the first turn. Its timestamp anchors the new
+	// session's timeline; the frozen boundary starts at zero so no
+	// re-consolidation debt crosses the seam.
+	turnID := handoffTurn.ID
+	if turnID == "" {
+		turnID = newID()
+	}
+	createdAt := handoffTurn.CreatedAt.Unix()
+	if handoffTurn.CreatedAt.IsZero() {
+		createdAt = now
+	}
+	role := handoffTurn.Role
+	if role == "" {
+		role = "user"
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO turns (id, conversation_id, role, content, content_json, tokens_in, tokens_out, latency_ms, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		turnID, id, role, handoffTurn.Content, handoffTurn.BlocksJSON,
+		handoffTurn.TokensIn, handoffTurn.TokensOut, handoffTurn.LatencyMs, createdAt,
+	); err != nil {
+		return fmt.Errorf("seed handoff turn: %w", err)
+	}
+	return tx.Commit()
+}
+
+func (s *sqliteStore) Precursor(ctx context.Context, id string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var precursor string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT precursor_id FROM conversations WHERE id = ?`, id).Scan(&precursor)
+	if err != nil {
+		return "", err
+	}
+	return precursor, nil
 }
 
 func (s *sqliteStore) Append(ctx context.Context, t Turn) error {
@@ -635,11 +721,11 @@ func (s *sqliteStore) Get(ctx context.Context, conversationID string) (Info, err
 	var startedAt, lastTurnAt, recapAt int64
 	err := s.db.QueryRowContext(ctx, `
 		SELECT c.id, c.title, c.project_dir, c.model, c.started_at, c.last_turn_at,
-		       c.recap, c.recap_updated_at, c.kind, c.parent_id,
+		       c.recap, c.recap_updated_at, c.kind, c.parent_id, c.precursor_id,
 		       (SELECT COUNT(*) FROM turns t WHERE t.conversation_id = c.id) AS turn_count
 		FROM conversations c WHERE c.id = ?`, conversationID).
 		Scan(&info.ID, &info.Title, &info.ProjectDir, &info.Model,
-			&startedAt, &lastTurnAt, &info.Recap, &recapAt, &info.Kind, &info.ParentID, &info.TurnCount)
+			&startedAt, &lastTurnAt, &info.Recap, &recapAt, &info.Kind, &info.ParentID, &info.PrecursorID, &info.TurnCount)
 	if err != nil {
 		return Info{}, err
 	}

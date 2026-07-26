@@ -180,3 +180,43 @@ into a phase node's `Notes` field, and rides `spec.md` prose alongside the root 
 reference context (surfaced in the `d`/details view, never walked). Implementations of
 this model must therefore treat `Notes` as free-form prose that survives a Markdown
 round-trip intact — it is not a scratch field. See planning-mode §3.2–3.3.
+
+## 11. Decision record — how the store notifies the outside world
+
+When a task mutates (status flips, a subtask is added mid-execution), something has to
+carry that change out so connected clients can re-render the live task view. The fork was
+the *mechanism*, and specifically how much the `Store` interface should know about
+notification.
+
+| Axis | A: Observer list on the store | B: Return the event from each mutating method | C: Single injected sink |
+|---|---|---|---|
+| Cost | Medium: listener slice, mutex, subscribe/unsubscribe, ~40 lines | Low: widen return signatures, no new state | Low–Medium: one `func(ChangeEvent)` field + nil-check per mutation, ~15 lines |
+| Risk | Leaked subscriptions, listener-ordering, lock-held-during-callback deadlock — **and it duplicates the turn broker's fan-out one layer too low** | A caller can silently drop the event (forgets to forward) | Sink set once at construction; misuse is hard, nil sink = no-op |
+| Reward | Many independent in-process consumers, fully decoupled — but no such second consumer exists | Dead simple; zero store-side state | One clean publish seam feeding the existing broker; store stays free of protocol concerns |
+| Main drawback | A second pub/sub layer beneath the one we already have | Notification-by-omission: easy to forget | If a consumer ever needs store events *without* going through the broker, the single sink is a pinch point |
+
+**Chosen: C — single injected sink.** The store takes one `func(ChangeEvent)` at
+construction and calls it on every mutation; the server is that sink and republishes the
+event onto the existing `brokerSink`.
+
+**Corrected premise (important):** the first cut of this decision justified C with "there
+is only one consumer." That is wrong — a single conversation can be attached by **multiple
+thin clients at once** (two CLIs, or a CLI plus another surface). The real reason C wins is
+that the 1→N fan-out to those clients **already exists in the `turnBroker`**
+(`Attach`/`AttachLossless` hand each attached surface a replay buffer + live channel;
+proven by `TestAttachConversation_TwoSurfacesSeeOneTurn`). Task-change events are just
+another event kind riding that same multiplexer, exactly like token deltas, tool calls,
+and permission prompts already do via `brokerSink`. So the store needs **one** publish
+point into the broker, not its own subscriber list. This makes the multi-client
+requirement *strengthen* C over A: you want a single seam feeding the one existing
+fan-out, not a second independent fan-out sitting under it in the store.
+
+Option A is rejected as a duplicate fan-out one layer too low. Option B is rejected
+because notification-by-omission lets any call site silently drop an update.
+
+**Recorded premise for foundational-surprise detection:** C holds *only while* every
+consumer of store change-events reaches them through the turn broker. If a future consumer
+must observe store mutations **without** a conversation stream — e.g. a background
+persistence indexer or a plan-diff auditor — that violates this premise and should trigger
+a replan of this decision. The cheap out at that point is to make the injected sink a
+fan-out closure the server owns; the `Store` interface stays unchanged either way.

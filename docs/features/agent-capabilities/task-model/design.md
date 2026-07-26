@@ -2,8 +2,11 @@
 
 **Roadmap item:** #3 — Task model + tracking + client surfacing (Tier 1).
 **Status:** Design (approved model; implementation not started).
-**Depends on:** nothing hard (the dispatch/subagent engine and brainstorming/planning
-modes *consume* this model, but the model itself stands alone).
+**Depends on:** nothing to *build* — but this model is the persistence layer for
+planning mode (#7), and planning mode's design has since made **binding decisions**
+on it (serialization format, sibling ordering, the `Notes` field's role). Those are
+folded in below (§8, §10). Reconcile with [`../planning-mode/design.md`](../planning-mode/design.md)
+before implementing — the two are one body of work, not independent items.
 **Consumed by:** #6 brainstorming, #7 planning, #8 autonomous mode.
 
 Research backing this design lives in [`research/`](research/). Read
@@ -124,14 +127,46 @@ research shows in tools that took that path.
 
 1. **Phase 1 — model + persistence + CLI surface.** The `Task` node, the two-store
    interface (session + plan), explicit status, and streaming task state to the CLI.
+   Note the two stores have different backends behind the one interface: the session
+   store is ephemeral in-memory; the plan store is Markdown-file-backed (`plan.md`
+   parse/serialize, per §8). Build it that way from the start — do not stand up a
+   database-backed plan store.
 2. **Phase 2 — planning integration.** Wire the plan store into planning mode (#7):
    Conductor-style plan format producing `Task` trees.
 3. **Phase 3 — MCP exposure + promotion UX.** Expose task state over MCP; add an explicit
    "promote this ad-hoc task into the plan" affordance.
 
-## 8. Open questions
+## 8. Resolved by planning mode (#7)
 
-- Serialization format for the durable plan store (JSON tree vs. flat rows with
-  `ParentID`). Leaning flat rows for queryability; decide at implementation time.
-- Whether ad-hoc session tasks should *auto-clear* on `done` or linger until session end.
-- Ordering: is sibling order significant (explicit `order` field) or insertion-ordered?
+Two questions this doc originally left open have since been **decided** by the
+planning-mode design ([`../planning-mode/design.md`](../planning-mode/design.md),
+Fork 2). Because the plan store *is* planning mode's persistence layer, those
+decisions are binding here:
+
+- **Serialization format for the durable plan store — RESOLVED: Markdown on disk is
+  canon, not a separate store format.** This doc originally leaned toward flat rows with
+  `ParentID` for queryability. Planning mode overrode that: the durable artifact is a
+  Conductor-style `plan.md` file, and the `Task` tree is its *in-memory parse*. The file
+  wins on disagreement. The store is a working form loaded from and serialized back to
+  `plan.md` via a lossless round-trip (heading depth + checkbox indent = tree depth;
+  checkbox glyph = status). Flat-rows-in-a-database is therefore **not** the plan store;
+  if a queryable index is ever wanted it sits *beside* the files as a derived cache, not
+  as the source of truth.
+- **Sibling ordering — RESOLVED: significant, and encoded by position, no `order`
+  field.** Document order in `plan.md` encodes sibling order; the parser preserves
+  sequence. The node stays as specified in §2 (no `order` field), consistent with the
+  "keep the node pure" principle.
+
+## 9. Still open
+
+- Whether ad-hoc **session** tasks (the flat working-set store, not the plan store)
+  should *auto-clear* on `done` or linger until session end. Genuinely open — the
+  planning-mode decisions above only bind the durable plan store.
+
+## 10. Cross-cutting constraint from planning mode
+
+Planning mode packs **phase-level metadata** (objective / files-to-touch / tests-to-write)
+into a phase node's `Notes` field, and rides `spec.md` prose alongside the root node as
+reference context (surfaced in the `d`/details view, never walked). Implementations of
+this model must therefore treat `Notes` as free-form prose that survives a Markdown
+round-trip intact — it is not a scratch field. See planning-mode §3.2–3.3.

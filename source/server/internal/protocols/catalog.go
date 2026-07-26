@@ -20,7 +20,7 @@ Any time there are multiple viable implementation approaches — data modeling, 
 
 1. **Identify the decision point.** State what needs to be decided and why.
 
-2. **Enumerate at least 2–3 real options.** Not strawmen. Each must be a genuinely viable approach.
+2. **Enumerate the real options — every genuinely viable one, and only those.** Not strawmen, and not padded to a number. Usually that's two or three; sometimes it's one. If only one approach is genuinely viable, say so and explain why the obvious alternatives don't survive scrutiny — do not invent weak options to fill a quota. A manufactured option corrupts the honest-enumeration this protocol depends on (and makes step 5 theater). When there is genuinely only one real option, the trade-off table and the argue-against-yourself step collapse to "why the alternatives were ruled out."
 
 3. **For each option, quantify these four dimensions:**
 
@@ -48,7 +48,7 @@ Any time there are multiple viable implementation approaches — data modeling, 
 
 4. **Explicitly flag hacks.** If an option conflates unrelated concerns, overloads a field for a dual purpose, or works "because there happen to be unused slots," call it a hack. Do not dress it up.
 
-5. **Argue against your own recommendation.** Before locking a recommendation in step 6, write down the strongest case *for each non-recommended option*. If you can't make a substantive case for the alternatives, your analysis is thin — go back to step 3 and look for what you missed. If the counter-cases are genuinely weak after honest effort, the recommendation is sound. This step exists because the protocol relies on honest enumeration in step 3, and confirmation bias can quietly stack the framing toward a preferred option without anyone noticing until the wrong choice ships.
+5. **Argue against your own recommendation.** Before locking a recommendation in step 6, write down the strongest case *for each non-recommended option*. If you can't make a substantive case for the alternatives, your analysis is thin — go back to step 3 and look for what you missed. If the counter-cases are genuinely weak after honest effort, the recommendation is sound. This step exists because the protocol relies on honest enumeration in step 3, and confirmation bias can quietly stack the framing toward a preferred option without anyone noticing until the wrong choice ships. (If step 2 found only one genuinely viable option, this step is instead the case *for* each ruled-out alternative — the same discipline, aimed at catching an option you dismissed too fast.)
 
 6. **Recommend the cleanest option**, even if it's more work. Bias toward semantic correctness and clean architecture over implementation convenience.
 

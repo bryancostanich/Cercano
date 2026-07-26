@@ -53,3 +53,40 @@ func TestRecapWrapsAndReservesAllRows(t *testing.T) {
 		t.Errorf("wrapped recap (%d lines) should shrink viewport by 1+%d: %d -> %d, want %d", n, n, h0, got, want)
 	}
 }
+
+// TestRecapGrowthRelayoutsWithoutPresenceToggle guards the reported regression:
+// the living recap updates its text mid-session (no presence toggle), growing
+// from a single wrapped row to several. The old handler relayouted only when the
+// recap's presence flipped, so a text-only growth left the viewport a row too
+// tall and shoved the status bar (bottom toolbar) off-screen until the next
+// keystroke forced a relayout. The handler must relayout on any line-count
+// change, so the viewport tracks the recap's height while it's already present.
+func TestRecapGrowthRelayoutsWithoutPresenceToggle(t *testing.T) {
+	m := New(nil, false)
+	m = m.SeedAssistantMarkdown("some prior reply\n")
+	m = send(t, m, tea.WindowSizeMsg{Width: 60, Height: 30})
+
+	// Start with a short recap that wraps to exactly one line.
+	next, _ := m.Update(recapLoadedMsg{recap: "wired the badge"})
+	m = next.(Model)
+	if n := len(m.recapLines()); n != 1 {
+		t.Fatalf("setup: short recap should be 1 line at width 60, got %d", n)
+	}
+	shortH := m.mainChat().Height()
+
+	// Grow the recap text — no presence toggle, it was already non-empty — into
+	// something that wraps to multiple rows.
+	long := "refactored the telemetry collector to guard Emit against a closed channel, added a race regression test, and rebuilt the server"
+	next, _ = m.Update(recapLoadedMsg{recap: long})
+	m = next.(Model)
+
+	n := len(m.recapLines())
+	if n < 2 {
+		t.Fatalf("test needs a recap that wraps to >1 line at width 60; got %d", n)
+	}
+	// The viewport must shrink by the extra rows the longer recap now claims.
+	if got, want := m.mainChat().Height(), shortH-(n-1); got != want {
+		t.Errorf("recap growing 1 -> %d lines should shrink viewport by %d rows: %d -> %d, want %d",
+			n, n-1, shortH, got, want)
+	}
+}

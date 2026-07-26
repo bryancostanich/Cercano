@@ -1646,13 +1646,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case recapLoadedMsg:
-		// When the recap's presence toggles, the recap line claims (or frees) a
-		// row below the viewport. relayout() must re-run so the viewport resizes
-		// and the status bar stays pinned — otherwise the new line pushes the
-		// footer off-screen until the next resize.
-		had := m.recap != ""
+		// The recap line(s) claim rows below the viewport, so relayout() must
+		// re-run whenever their count changes — otherwise the viewport stays
+		// sized for the old chrome height and the extra row pushes the status
+		// bar off-screen until the next keystroke forces a relayout. The recap
+		// is a *living* summary: its text updates mid-session and can grow from
+		// one wrapped row to two (or shrink), which changes recapH without any
+		// presence toggle. Compare the rendered line count, not just presence.
+		prevLines := len(m.recapLines())
 		m.recap = msg.recap
-		if had != (m.recap != "") {
+		if len(m.recapLines()) != prevLines {
 			m.relayout()
 		}
 		return m, nil

@@ -223,3 +223,26 @@ Hierarchy: **Effort → (spec + plan) → Phase → Task → Sub-task.**
   detail, not architecture).
 - Whether foundational-surprise escalation should offer the human an inline spec-edit
   affordance or just drop to the editor. Resolve in implementation.
+
+---
+
+## 7. Future enhancements (out of scope for first pass)
+
+### 7.1 Browser-served brainstorming artifacts
+
+Superpowers' brainstorm step doesn't stop at prose in the terminal — during the
+**generate** activity it spins up a local browser view and *serves* interactive UX
+mockups and idea explorations as HTML, so brainstorming output is a visual, browsable
+artifact the human can react to rather than a wall of text. (The
+`.superpowers/brainstorm/*.html` scratch files we found are exactly these served
+artifacts.)
+
+This is a genuinely nice affordance for the **generate** step and worth adopting —
+visual UX ideas land far better in a browser than in a terminal. **Explicitly out of
+scope for the first pass.** First pass ships planning mode with terminal/Markdown
+artifacts only (spec + plan). A later iteration can add a local served-HTML brainstorm
+surface as an optional generate-step output, written into the effort directory (e.g.
+`efforts/<name>/brainstorm/*.html`) so it lives with the rest of the effort's
+artifacts and is versioned alongside spec and plan.
+
+Deferred, not rejected — captured here so it isn't lost.

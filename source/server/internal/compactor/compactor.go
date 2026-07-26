@@ -26,11 +26,22 @@ import (
 // active model's context window (e.g. a fraction of ModelMax) so a 200k-window
 // model isn't crushed to the old fixed 16k. Zero falls back to the legacy
 // segment-relative bound so existing construction sites keep working.
+//
+// TieredRetentionSegments enables gentle, always-on degradation for very long
+// sessions (the fallback when a user declines a session rollover). When set to
+// R > 0, the newest R segment summaries are kept verbatim, older-but-not-oldest
+// segments shed transient chatter (Proposals, OpenThreads), and the oldest
+// segments keep only their durable, actionable recall (Goal, State, Files).
+// This shapes the ledger by age BEFORE it is Reduced and before the hard
+// CompactedBudgetTokens backstop fires, so recent-tail fidelity is preserved
+// structurally rather than incidentally. Zero disables tiering (the ledger is
+// merged whole and only the hard budget bounds it).
 type Config struct {
-	ActivationFloorTokens int
-	SegmentTokens         int
-	VerbatimRecent        int
-	CompactedBudgetTokens int
+	ActivationFloorTokens   int
+	SegmentTokens           int
+	VerbatimRecent          int
+	CompactedBudgetTokens   int
+	TieredRetentionSegments int
 }
 
 func DefaultConfig() Config {
@@ -139,6 +150,75 @@ func dropOldestFile(files map[string]string) map[string]string {
 	}
 	delete(files, first)
 	return files
+}
+
+// applyTieredRetention shapes an ordered (oldest→newest) list of per-segment
+// summaries by age, so a very long session degrades gently rather than hitting
+// the hard budget as a cliff. It is the fallback engaged when a user declines a
+// session rollover: the active thread stays high-fidelity while ancient history
+// compresses.
+//
+// Three tiers, split by position in the list:
+//   - recent  (the newest `recent` segments): kept verbatim.
+//   - middle  (everything between): Proposals and OpenThreads dropped — these
+//     are transient ("awaiting decision", "next steps") and least useful once
+//     the conversation has moved well past them. Decisions/Files/Goal/State stay.
+//   - ancient (the oldest, when there are more than 2*recent segments): keep
+//     only the durable, actionable recall — Goal, State, Files. Decisions,
+//     Proposals, OpenThreads dropped.
+//
+// Goal, State, and Files survive every tier, so MergeSummaries' Goal
+// (first-non-empty), State (last-non-empty) and Files (union) semantics are
+// never starved. Pure and deterministic: a fixed function of the input list.
+// recent<=0 is a no-op (tiering disabled). It returns a new slice; inputs are
+// not mutated (Files maps are shallow-copied before keys are dropped).
+func applyTieredRetention(parts []compaction.StructuredSummary, recent int) []compaction.StructuredSummary {
+	if recent <= 0 || len(parts) <= recent {
+		return parts // nothing old enough to compress
+	}
+	// Ancient tier only opens once there is a full middle band behind the recent
+	// window, so a moderately long session degrades in one step (middle) before
+	// the harsher ancient step ever applies.
+	ancientEnd := 0
+	if len(parts) > 2*recent {
+		ancientEnd = len(parts) - 2*recent
+	}
+	recentStart := len(parts) - recent
+
+	out := make([]compaction.StructuredSummary, len(parts))
+	for i, s := range parts {
+		switch {
+		case i >= recentStart:
+			out[i] = s // recent: verbatim
+		case i < ancientEnd:
+			out[i] = compaction.StructuredSummary{
+				Goal:  s.Goal,
+				State: s.State,
+				Files: copyFiles(s.Files),
+			}
+		default: // middle
+			out[i] = compaction.StructuredSummary{
+				Goal:      s.Goal,
+				State:     s.State,
+				Files:     copyFiles(s.Files),
+				Decisions: s.Decisions,
+			}
+		}
+	}
+	return out
+}
+
+// copyFiles shallow-copies a Files map so tier-stripping a segment never mutates
+// the caller's stored summaries. A nil map stays nil (Reduce tolerates it).
+func copyFiles(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }
 
 // Advance runs one stateful compaction pass. It freezes new segments of the
@@ -310,7 +390,16 @@ func Advance(ctx context.Context, turns []conversation.Turn, state conversation.
 	}
 	parts = append(parts, newParts...)
 
-	consolidated := compaction.Reduce(parts)
+	// Age-shape the ledger before reducing: the recent tail stays verbatim while
+	// older segments shed transient (then all-but-durable) detail. This is the
+	// gentle-degradation fallback for sessions that decline a rollover; it runs
+	// ahead of the hard-budget pruneToFit backstop below and, when disabled
+	// (TieredRetentionSegments==0), is a no-op. We reduce a tiered *view* but do
+	// NOT persist it back over `parts` — the raw per-segment summaries stay on
+	// disk so a later, larger-window model (or a relaxed config) can re-derive a
+	// richer consolidation. Only the hard-budget path (below) collapses parts.
+	tieredParts := applyTieredRetention(parts, cfg.TieredRetentionSegments)
+	consolidated := compaction.Reduce(tieredParts)
 
 	// Bound the consolidated summary against the compaction budget. When it has
 	// grown past budget, shrink it DETERMINISTICALLY (pruneToFit) rather than

@@ -314,7 +314,13 @@ type CompactionConfig struct {
 	// ~16k-token ceiling that crushed long sessions on large-window models.
 	// Zero uses the built-in default (see compactedBudgetDefaultPct).
 	CompactedBudgetPct float64         `yaml:"compacted_budget_pct"`
-	Retention          RetentionConfig `yaml:"retention"`
+	// TieredRetentionSegments enables gentle, age-based degradation for very
+	// long sessions (the fallback when a rollover is declined): the newest N
+	// segment summaries stay verbatim, older ones shed transient detail, and
+	// the oldest keep only durable recall (Goal/State/Files). Zero disables
+	// tiering — the ledger is only bounded by CompactedBudgetPct's hard prune.
+	TieredRetentionSegments int             `yaml:"tiered_retention_segments"`
+	Retention               RetentionConfig `yaml:"retention"`
 	// ToolElisionOnly, when true (and Enabled is true), keeps the compaction
 	// machinery running on its normal triggers — background schedule, debounce,
 	// activation floor, hard-override — but a pass never calls the summarizer.

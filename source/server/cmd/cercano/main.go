@@ -359,10 +359,11 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 			budgetTokens = compactedBudgetFloorTokens
 		}
 		compCfg := compactor.Config{
-			ActivationFloorTokens: cfg.Compaction.ActivationFloorTokens,
-			SegmentTokens:         cfg.Compaction.SegmentTokens,
-			VerbatimRecent:        cfg.Compaction.VerbatimRecent,
-			CompactedBudgetTokens: budgetTokens,
+			ActivationFloorTokens:   cfg.Compaction.ActivationFloorTokens,
+			SegmentTokens:           cfg.Compaction.SegmentTokens,
+			VerbatimRecent:          cfg.Compaction.VerbatimRecent,
+			CompactedBudgetTokens:   budgetTokens,
+			TieredRetentionSegments: cfg.Compaction.TieredRetentionSegments,
 		}
 		// No warning when summarizerModel is empty: an unset fast_light_text.open
 		// is the recommended default, not a misconfiguration. The bakeoff

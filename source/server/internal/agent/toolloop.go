@@ -847,7 +847,13 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			isMCP := agenttools.OriginOf(pc.tool) == agenttools.OriginMCP
 			allowlisted := in.Permissions != nil && in.Permissions.IsMCPAllowed(pc.block.ToolName)
 			preauthorized := toolPreauthorized(in.PreauthorizedTools, pc.block.ToolName)
-			if !watchdogApproved && !preauthorized && GateDecisionForTool(mode, pc.tier, pc.block.ToolName, isMCP, allowlisted) {
+			// A WIP-consuming `git stash` always requires a human confirm — the
+			// agent must never silently set a human's uncommitted work aside.
+			// This ORs in ahead of the mode-based gate so no permission mode can
+			// skip it, and it deliberately sits outside the preauthorized check
+			// so a sub-agent tool grant cannot wave it through either.
+			forceConfirm := requiresForcedConfirm(pc.block.ToolName, pc.block.ToolInput)
+			if !watchdogApproved && (forceConfirm || (!preauthorized && GateDecisionForTool(mode, pc.tier, pc.block.ToolName, isMCP, allowlisted))) {
 				if in.PermissionRequester == nil {
 					results = append(results, llm.Block{
 						Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID,

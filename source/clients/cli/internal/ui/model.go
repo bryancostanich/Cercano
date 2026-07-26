@@ -1535,6 +1535,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.pendingConfirm = toolConfirm(tc)
 			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.renderConfirmPrompt(tc)})
+		case rolloverOfferedMsg:
+			m.pendingConfirm = m.rolloverConfirm(ev)
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.renderRolloverPrompt(ev)})
 		case chatErrorMsg:
 			m.finishStaleSubAgentTabs("sub-agent stopped after parent stream error")
 			m.mainChat().Apply(ev)
@@ -3318,6 +3321,83 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 		cmds = append(cmds, banner.Tick())
 	}
 	return m, tea.Batch(cmds...)
+}
+
+// rolloverConfirm builds the y/n gate for a rollover offer. Yes calls
+// AcceptRollover and, on success, resumes into the returned fresh conversation
+// (option B: switch, leaving a visible seam in scrollback); a rejected/errored
+// accept leaves the session where it is with a note. No calls DeclineRollover so
+// the server re-arms the offer after further growth. Both branches clear
+// pendingConfirm by returning a model whose gate the caller drops.
+func (m Model) rolloverConfirm(ev rolloverOfferedMsg) *confirmRequest {
+	return &confirmRequest{
+		onYes: func(mm Model) (Model, tea.Cmd) {
+			mm.pendingConfirm = nil
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			newID, err := mm.agent.AcceptRollover(ctx, ev.convID, ev.offerID)
+			if err != nil || newID == "" {
+				note := "rollover could not start"
+				if err != nil {
+					note += ": " + err.Error()
+				}
+				mm.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: mm.styles.Muted.Render(note)})
+				mm.refreshViewport()
+				return mm, nil
+			}
+			// Leave a visible seam in the OLD session before switching, so the
+			// boundary is legible on scroll-back.
+			mm.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: mm.styles.Muted.Render("↪ rolled over to a fresh session — continuing there")})
+			var cmd tea.Cmd
+			mm, cmd = mm.applyResume(newID)
+			return mm, cmd
+		},
+		onNo: func(mm Model) (Model, tea.Cmd) {
+			mm.pendingConfirm = nil
+			convID, offerID, ag := ev.convID, ev.offerID, mm.agent
+			go func() { _ = ag.DeclineRollover(context.Background(), convID, offerID) }()
+			mm.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: mm.styles.Muted.Render("staying in this session")})
+			mm.refreshViewport()
+			return mm, nil
+		},
+	}
+}
+
+// renderRolloverPrompt is the scrollback message shown while a rollover offer is
+// pending: why it's offered, a short preview of the handoff that would seed the
+// new session, and the y/n hints on their own line.
+func (m Model) renderRolloverPrompt(ev rolloverOfferedMsg) string {
+	head := m.styles.Accent.Render("▸ ")
+	title := "Start a fresh session? " + ev.reason
+	lines := []string{head + m.styles.AgentProse.Render(title)}
+	if p := rolloverPreviewSnippet(ev.preview); p != "" {
+		lines = append(lines, "  "+m.styles.Muted.Render("handoff: "+p))
+	}
+	hints := m.styles.Muted.Render("[") +
+		m.styles.Accent.Render("y") +
+		m.styles.Muted.Render("]es / [") +
+		m.styles.Accent.Render("n") +
+		m.styles.Muted.Render("]o")
+	lines = append(lines, "  "+hints)
+	return strings.Join(lines, "\n")
+}
+
+// rolloverPreviewSnippet condenses the multi-line handoff artifact to a single
+// short line for the confirm prompt (the full artifact seeds the new session's
+// first turn, so it isn't lost).
+func rolloverPreviewSnippet(preview string) string {
+	preview = strings.TrimSpace(preview)
+	if preview == "" {
+		return ""
+	}
+	if i := strings.IndexByte(preview, '\n'); i >= 0 {
+		preview = preview[:i]
+	}
+	const max = 120
+	if len(preview) > max {
+		preview = preview[:max-1] + "…"
+	}
+	return preview
 }
 
 // renderConfirmPrompt builds the confirm message shown in scrollback while

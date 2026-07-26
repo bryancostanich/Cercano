@@ -1634,6 +1634,12 @@ type StreamMsg struct {
 	IgnoredTools     []string // for TypeSubAgent
 	SubAgentText     string   // for TypeSubAgent
 	SubAgentToolID   string   // for TypeSubAgent
+
+	OfferID        string // for TypeRolloverOffered — correlates the Accept/Decline reply
+	ConvID         string // for TypeRolloverOffered — the session being offered a rollover
+	RolloverReason string // for TypeRolloverOffered — human-readable trigger
+	RawTokens      int64  // for TypeRolloverOffered — cumulative raw tokens at the offer
+	HandoffPreview string // for TypeRolloverOffered — summary + verbatim tail that would seed the new session
 }
 
 type StreamMsgType int
@@ -1651,6 +1657,7 @@ const (
 	TypeRouteSelected
 	TypeWatchdog
 	TypeSubAgent
+	TypeRolloverOffered
 )
 
 func toProtoImages(images []InlineImage) []*proto.InlineImage {
@@ -1769,6 +1776,17 @@ func (c *Client) StreamChat(ctx context.Context, conversationID, input, workDir 
 				}
 				continue
 			}
+			if ro := msg.GetRolloverOffered(); ro != nil {
+				out <- StreamMsg{
+					Type:           TypeRolloverOffered,
+					OfferID:        ro.GetOfferId(),
+					ConvID:         ro.GetConversationId(),
+					RolloverReason: ro.GetReason(),
+					RawTokens:      ro.GetRawTokens(),
+					HandoffPreview: ro.GetHandoffPreview(),
+				}
+				continue
+			}
 			if we := msg.GetWatchdogEvent(); we != nil {
 				out <- streamMsgFromWatchdogEvent(we)
 				continue
@@ -1851,6 +1869,29 @@ func (c *Client) DenyToolCall(ctx context.Context, conversationID, toolUseID str
 // the same turn so the model responds to it inline (no fresh turn).
 func (c *Client) DenyToolCallWithMessage(ctx context.Context, conversationID, toolUseID, message string) error {
 	_, err := c.agent.DenyToolCall(ctx, &proto.DenyToolCallRequest{ToolUseId: toolUseID, ConversationId: conversationID, Message: message})
+	return err
+}
+
+// AcceptRollover confirms a RolloverOffered event: the agent mints a fresh
+// conversation seeded by the handoff artifact and links it to conversationID via
+// precursor_id. Returns the new conversation id to resume into. offerID must
+// match the outstanding offer or the server rejects it (empty newID, non-nil
+// error).
+func (c *Client) AcceptRollover(ctx context.Context, conversationID, offerID string) (string, error) {
+	resp, err := c.agent.AcceptRollover(ctx, &proto.AcceptRolloverRequest{OfferId: offerID, ConversationId: conversationID})
+	if err != nil {
+		return "", err
+	}
+	if !resp.GetOk() {
+		return "", fmt.Errorf("rollover rejected: %s", resp.GetError())
+	}
+	return resp.GetNewConversationId(), nil
+}
+
+// DeclineRollover dismisses a RolloverOffered event. The agent re-arms the offer
+// after further growth (hysteresis); no new conversation is created.
+func (c *Client) DeclineRollover(ctx context.Context, conversationID, offerID string) error {
+	_, err := c.agent.DeclineRollover(ctx, &proto.DeclineRolloverRequest{OfferId: offerID, ConversationId: conversationID})
 	return err
 }
 

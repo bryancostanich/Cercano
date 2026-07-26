@@ -138,6 +138,28 @@ func (t *Task) Find(id string) *Task {
 // escapes this package.
 var errStopWalk = fmt.Errorf("taskmodel: stop walk")
 
+// Clone returns a deep copy of t and its entire subtree. The copy shares no
+// mutable state with t: its Children slice and every descendant are freshly
+// allocated, and each ParentID pointer is a distinct pointer (with the same
+// value). Stores return clones across their interface boundary so that callers
+// cannot mutate stored tasks without going through the store's methods.
+func (t *Task) Clone() Task {
+	out := *t // copies scalar fields; Children and ParentID are fixed up below
+	if t.ParentID != nil {
+		p := *t.ParentID
+		out.ParentID = &p
+	}
+	if len(t.Children) > 0 {
+		out.Children = make([]Task, len(t.Children))
+		for i := range t.Children {
+			out.Children[i] = t.Children[i].Clone()
+		}
+	} else {
+		out.Children = nil
+	}
+	return out
+}
+
 // AddChild appends child to t's children, setting child.ParentID to t.ID so the
 // tree stays internally consistent. It returns a pointer to the newly attached
 // child within t's slice.

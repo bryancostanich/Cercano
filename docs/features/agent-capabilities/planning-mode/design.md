@@ -134,6 +134,50 @@ capture → execute triad:
 
 The spec is the richest output of "generate"; the plan is "capture."
 
+### 3.5 Decisions during generation
+
+The generate step is where solution-shape decisions actually get made — which
+is exactly where the `design-decisions` protocol applies. Planning mode does not
+get a pass on it: when generation hits a fork with more than one genuinely
+viable approach, it must run that protocol (enumerate the real options, quantify
+them on the standard axes, argue against its own recommendation) and **record
+the result as a decision in `spec.md`.**
+
+Why the spec is the right home:
+
+- **A decision record is "why" content.** The spec is the durable *what & why*
+  and the fixed point replanning anchors to. A chosen approach plus its
+  ruled-out alternatives and rationale is precisely the reasoning the spec
+  exists to hold — so it travels with the effort and stays auditable.
+- **It makes the plan's reasoning explainable.** Recording decisions in the spec
+  is what turns an opaque plan into one a human can interrogate: not just *what*
+  the plan does but *why this shape and not that one*.
+
+Format follows the protocol, not a new schema. Decisions live in a `## Decisions`
+section of `spec.md` as prose plus the protocol's standard options-vs-axes
+Markdown table, one entry per decision, each naming the chosen option and its
+rationale. The spec stays pure human-owned prose (consistent with §3.2 — only
+`plan.md` is parsed into the tree); decisions are not machine-addressable
+structure, just readable record. If a real need for querying decisions
+(e.g. "list unresolved forks") ever appears, a light structured convention can
+be layered on later — deliberately deferred to avoid parsing the spec now.
+
+The single-option case matters here: per the protocol, generation must **not**
+manufacture alternatives to look thorough. When only one approach is genuinely
+viable, the recorded decision is "the one viable path and why the obvious
+alternatives don't survive scrutiny" — no padded table.
+
+**This sharpens Fork 3.** Recorded decisions give the feedback loop precise
+reference points:
+
+- **Structural replanning** consults the spec's decisions so it doesn't silently
+  re-litigate a settled fork — the replan reshapes phases *against* recorded
+  decisions, not around them.
+- **Foundational surprise** becomes concretely detectable: it is exactly "reality
+  violated a premise recorded in a spec decision." That turns §4.1's vague
+  "reality contradicts the spec" into a testable condition — the executor can
+  point at *which* recorded decision's premise broke.
+
 ---
 
 ## 4. Fork 3 — The execution feedback loop
@@ -164,9 +208,11 @@ remaining phases *against the spec*, then the revised plan re-enters through the
 `y/n/d/c` gate**. Execution resumes from where it paused. No new mode, no new UI.
 
 **Foundational surprise → execution stops and escalates to the human, spec included.**
-Reality contradicts the spec itself. The machine must **not** silently rewrite the
-spec — it is the human-owned anchor. Execution halts and surfaces the contradiction
-("the spec assumed X; reality is Y; I can't proceed without a decision"). The human
+Reality contradicts the spec itself — concretely, a premise recorded in a `spec.md`
+decision (§3.5) turned out false. The machine must **not** silently rewrite the
+spec — it is the human-owned anchor. Execution halts and surfaces the contradiction,
+citing the broken decision ("decision D assumed X; reality is Y; I can't proceed
+without a call"). The human
 edits `spec.md` (or abandons the effort); if the spec changes, the plan is regenerated
 from the new spec. Rare, and deliberately heavyweight.
 
@@ -223,6 +269,9 @@ Hierarchy: **Effort → (spec + plan) → Phase → Task → Sub-task.**
   detail, not architecture).
 - Whether foundational-surprise escalation should offer the human an inline spec-edit
   affordance or just drop to the editor. Resolve in implementation.
+- The exact `## Decisions` grammar in `spec.md` (§3.5) — prose + protocol table for now;
+  whether a light structured convention is ever needed to *query* decisions
+  (e.g. list unresolved forks) is deferred until a real use appears.
 
 ---
 

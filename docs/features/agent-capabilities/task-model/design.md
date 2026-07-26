@@ -157,11 +157,21 @@ decisions are binding here:
   sequence. The node stays as specified in §2 (no `order` field), consistent with the
   "keep the node pure" principle.
 
-## 9. Still open
+## 9. Session-task lifecycle — RESOLVED
 
-- Whether ad-hoc **session** tasks (the flat working-set store, not the plan store)
-  should *auto-clear* on `done` or linger until session end. Genuinely open — the
-  planning-mode decisions above only bind the durable plan store.
+Ad-hoc **session** tasks (the flat working-set store, not the plan store) **stay
+visible when marked `done`, rendered as checked/struck-through in place**. They are
+not auto-cleared. The whole session store is discarded when the session ends.
+
+Rationale: keeping completed tasks visible-but-checked preserves the at-a-glance
+sense of what was just knocked out during a working session, at the cost of a list
+that grows over the session's life — an acceptable trade since the store resets at
+session end anyway. Auto-clearing would keep the list tighter but throw away that
+just-completed history, which is the more useful signal mid-session. No data-model
+change either way: `Status = done` already carries the state; this is purely a
+render/lifecycle rule for the session store's CLI surface (decided here so Phase 1's
+surface can render it correctly). The **durable plan store** is unaffected — its
+tasks persist in `plan.md` regardless of status.
 
 ## 10. Cross-cutting constraint from planning mode
 

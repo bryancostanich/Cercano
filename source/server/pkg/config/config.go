@@ -320,7 +320,15 @@ type CompactionConfig struct {
 	// the oldest keep only durable recall (Goal/State/Files). Zero disables
 	// tiering — the ledger is only bounded by CompactedBudgetPct's hard prune.
 	TieredRetentionSegments int             `yaml:"tiered_retention_segments"`
-	Retention               RetentionConfig `yaml:"retention"`
+	// Rollover* arm and shape the agent's offer to start a fresh conversation
+	// seeded only by a durable handoff when a session grows very long (D). All
+	// off by default: RolloverRawTokenThreshold==0 AND
+	// RolloverReconsolidationThreshold==0 means no offer is ever made.
+	RolloverRawTokenThreshold        int64   `yaml:"rollover_raw_token_threshold"`        // cumulative raw tokens that arms an offer; 0 disables the token trigger
+	RolloverReconsolidationThreshold int     `yaml:"rollover_reconsolidation_threshold"`  // OR-trigger on re-consolidation count; 0 ignores it
+	RolloverRearmMultiple            float64 `yaml:"rollover_rearm_multiple"`             // growth multiple past a decline before re-offering; <=1 => default 1.5
+	RolloverVerbatimTurns            int     `yaml:"rollover_verbatim_turns"`             // turns kept verbatim in the handoff; <=0 => default 6
+	Retention                        RetentionConfig `yaml:"retention"`
 	// ToolElisionOnly, when true (and Enabled is true), keeps the compaction
 	// machinery running on its normal triggers — background schedule, debounce,
 	// activation floor, hard-override — but a pass never calls the summarizer.

@@ -458,6 +458,14 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		srv.SetCompactionGenerator(compGen)
 	}
 	srv.SetContextLoader(ctxLoader)
+	// Wire agent-offered session rollover (D). Zero thresholds leave it fully
+	// off, so this is safe to call unconditionally.
+	srv.SetRolloverConfig(
+		cfg.Compaction.RolloverRawTokenThreshold,
+		cfg.Compaction.RolloverReconsolidationThreshold,
+		cfg.Compaction.RolloverRearmMultiple,
+		cfg.Compaction.RolloverVerbatimTurns,
+	)
 	srv.SetConfigPersistence(config.DefaultPath(), cfg)
 	orchestrator.SetLocusModeGetter(srv.LocusMode)
 

@@ -18,10 +18,19 @@ import (
 // Config holds the (configurable) compaction thresholds. Defaults are derived
 // from the real-session corpus (612 sessions): activate at 40k, freeze 8k
 // segments, keep 6 recent turns verbatim.
+//
+// CompactedBudgetTokens bounds the whole compacted backlog (the consolidated
+// send-view preamble). When the merged ledger renders larger than this, the
+// pass shrinks it deterministically (see pruneToFit) instead of re-summarizing
+// it. It is a token budget, not a segment count: callers derive it from the
+// active model's context window (e.g. a fraction of ModelMax) so a 200k-window
+// model isn't crushed to the old fixed 16k. Zero falls back to the legacy
+// segment-relative bound so existing construction sites keep working.
 type Config struct {
 	ActivationFloorTokens int
 	SegmentTokens         int
 	VerbatimRecent        int
+	CompactedBudgetTokens int
 }
 
 func DefaultConfig() Config {
@@ -61,11 +70,76 @@ func liveTurns(turns []conversation.Turn, frozenThrough int64) []conversation.Tu
 // persisted between passes. The generator reschedules while more remains.
 const maxSegmentsPerPass = 4
 
-// reconsolidateThresholdSegments bounds the consolidated summary: when the
-// consolidated view renders to more than this many segments' worth of tokens,
-// the pass re-consolidates (summarizes the summaries) so compaction output
-// shrinks instead of accumulating forever.
-const reconsolidateThresholdSegments = 2
+// legacyBoundSegments is the fallback bound (in SegmentTokens units) used only
+// when Config.CompactedBudgetTokens is unset (0). Live construction sites derive
+// a window-relative budget instead; this keeps zero-value Configs (older tests,
+// ad-hoc callers) working with the historical behavior's shape.
+const legacyBoundSegments = 4
+
+// budgetTokens resolves the token ceiling for the consolidated backlog: the
+// explicit window-relative budget when set, else a segment-relative fallback.
+func budgetTokens(cfg Config) int {
+	if cfg.CompactedBudgetTokens > 0 {
+		return cfg.CompactedBudgetTokens
+	}
+	seg := cfg.SegmentTokens
+	if seg <= 0 {
+		seg = DefaultConfig().SegmentTokens
+	}
+	return legacyBoundSegments * seg
+}
+
+// pruneToFit shrinks a consolidated summary under a token budget by dropping
+// whole ledger entries in recency order (oldest first) until the rendered
+// send-view fits. It never paraphrases: an entry is kept verbatim or removed
+// whole. Goal and State (single lines, high-signal) are preserved. Files are
+// pruned last because a file's "latest state" is often the most actionable
+// recall. If even the skeleton exceeds budget the summary is returned as-is —
+// dropping Goal/State to hit a byte target would defeat the purpose.
+func pruneToFit(s compaction.StructuredSummary, budget int, tok contextmeter.Tokenizer) compaction.StructuredSummary {
+	fits := func(v compaction.StructuredSummary) bool {
+		return compaction.TotalTokens(tok, compaction.AssembleSendView(v, nil)) <= budget
+	}
+	if fits(s) {
+		return s
+	}
+	// Prune order: OpenThreads (transient), then Proposals, Decisions, Files —
+	// oldest entries first within each. dropOldest removes one entry from the
+	// front (the earliest-seen, since MergeSummaries appends in chronological
+	// order) of the first non-empty list in this priority.
+	for !fits(s) {
+		switch {
+		case len(s.OpenThreads) > 0:
+			s.OpenThreads = s.OpenThreads[1:]
+		case len(s.Proposals) > 0:
+			s.Proposals = s.Proposals[1:]
+		case len(s.Decisions) > 0:
+			s.Decisions = s.Decisions[1:]
+		case len(s.Files) > 0:
+			s.Files = dropOldestFile(s.Files)
+		default:
+			return s // only Goal/State left — return rather than gut it
+		}
+	}
+	return s
+}
+
+// dropOldestFile removes one file entry. Map iteration order is unstable, so it
+// drops the lexically-first path for determinism (the alternative — tracking
+// insertion order — would require changing Files' type across the codebase).
+func dropOldestFile(files map[string]string) map[string]string {
+	if len(files) == 0 {
+		return files
+	}
+	var first string
+	for p := range files {
+		if first == "" || p < first {
+			first = p
+		}
+	}
+	delete(files, first)
+	return files
+}
 
 // Advance runs one stateful compaction pass. It freezes new segments of the
 // eligible (older, un-frozen) history and re-reduces; frozen segments are reused
@@ -238,23 +312,22 @@ func Advance(ctx context.Context, turns []conversation.Turn, state conversation.
 
 	consolidated := compaction.Reduce(parts)
 
-	// Bound the consolidated summary: if it has grown past a couple segments'
-	// worth of tokens, re-consolidate (summarize the summaries) so output shrinks
-	// instead of accumulating forever. On failure return the ORIGINAL state so a
-	// grown state is never persisted.
-	bound := reconsolidateThresholdSegments * cfg.SegmentTokens
+	// Bound the consolidated summary against the compaction budget. When it has
+	// grown past budget, shrink it DETERMINISTICALLY (pruneToFit) rather than
+	// re-summarizing the summaries. The old path fed the already-structured
+	// ledger back through the free-text summarizer, which — because the input is
+	// already reduced — could only paraphrase or invent (the exact defect
+	// reduce.go removed from Reduce), and did so on every re-cross, eroding
+	// detail monotonically. Deterministic pruning drops whole entries (recency
+	// order) so load-bearing shapes (signatures, config, tier lists) survive
+	// verbatim or not at all — never mangled into prose.
+	bound := budgetTokens(cfg)
 	if compaction.TotalTokens(tok, compaction.AssembleSendView(consolidated, nil)) > bound {
-		re, err := summarize(ctx, compaction.AssembleSendView(consolidated, nil))
-		if err != nil {
-			return state, false, false, err
-		}
-		if re.IsEmpty() {
-			// Same guard as the segment loop: replacing every frozen summary
-			// with nothing would erase the whole compacted history in one pass.
-			return state, false, false, fmt.Errorf("summarizer returned an empty re-consolidation — refusing to replace %d segment summaries with nothing", len(parts))
-		}
-		parts = []compaction.StructuredSummary{re}
-		consolidated = re
+		consolidated = pruneToFit(consolidated, bound, tok)
+		// Collapse the per-segment parts into the single pruned ledger: the
+		// budget applies to the consolidated view, and keeping the fat
+		// pre-prune parts would just re-inflate on the next Reduce.
+		parts = []compaction.StructuredSummary{consolidated}
 	}
 
 	segJSON, _ := json.Marshal(parts)

@@ -307,7 +307,14 @@ type CompactionConfig struct {
 	SegmentTokens         int             `yaml:"segment_tokens"`
 	VerbatimRecent        int             `yaml:"verbatim_recent"`
 	HardOverridePct       float64         `yaml:"hard_override_pct"`
-	Retention             RetentionConfig `yaml:"retention"`
+	// CompactedBudgetPct bounds the whole compacted backlog (the consolidated
+	// summary preamble) as a fraction of the active chat model's context
+	// window. When the merged ledger exceeds this, the compactor prunes it
+	// deterministically instead of re-summarizing. Replaces the old fixed
+	// ~16k-token ceiling that crushed long sessions on large-window models.
+	// Zero uses the built-in default (see compactedBudgetDefaultPct).
+	CompactedBudgetPct float64         `yaml:"compacted_budget_pct"`
+	Retention          RetentionConfig `yaml:"retention"`
 	// ToolElisionOnly, when true (and Enabled is true), keeps the compaction
 	// machinery running on its normal triggers — background schedule, debounce,
 	// activation floor, hard-override — but a pass never calls the summarizer.

@@ -132,6 +132,17 @@ func ollamaStartupWarning(check func(string) error, baseURL string) string {
 // handler should ever hit this. A second signal forces immediate exit.
 const drainGrace = 10 * time.Minute
 
+// compactedBudgetDefaultPct is the default fraction of the chat model's context
+// window the compacted backlog may occupy when compaction.compacted_budget_pct
+// is unset. 0.30 of a 200k window ≈ 60k tokens — generous enough that
+// normal-length sessions never trip the deterministic prune, replacing the old
+// fixed 16k ceiling. compactedBudgetFloorTokens keeps a tiny-window local model
+// from getting a uselessly small budget.
+const (
+	compactedBudgetDefaultPct  = 0.30
+	compactedBudgetFloorTokens = 16000
+)
+
 // startGRPCServer initializes all providers and starts the gRPC server.
 // Returns the listener address and a cleanup function.
 func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error) {
@@ -333,10 +344,25 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 			}
 			return parseLogged(resp.Output, "local"), nil
 		}
+		// Budget the compacted backlog as a fraction of the chat model's context
+		// window (default compactedBudgetDefaultPct), never below a floor so a
+		// tiny-window local model still gets a workable summary. This replaces
+		// the old fixed ~16k ceiling that over-compacted long sessions on
+		// large-window models. Keyed off the open chat model; the cloud window
+		// is typically larger, so this is the conservative denominator.
+		budgetPct := cfg.Compaction.CompactedBudgetPct
+		if budgetPct <= 0 {
+			budgetPct = compactedBudgetDefaultPct
+		}
+		budgetTokens := int(float64(contextmeter.ModelMax(cfg.OpenChatModel())) * budgetPct)
+		if budgetTokens < compactedBudgetFloorTokens {
+			budgetTokens = compactedBudgetFloorTokens
+		}
 		compCfg := compactor.Config{
 			ActivationFloorTokens: cfg.Compaction.ActivationFloorTokens,
 			SegmentTokens:         cfg.Compaction.SegmentTokens,
 			VerbatimRecent:        cfg.Compaction.VerbatimRecent,
+			CompactedBudgetTokens: budgetTokens,
 		}
 		// No warning when summarizerModel is empty: an unset fast_light_text.open
 		// is the recommended default, not a misconfiguration. The bakeoff

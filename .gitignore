@@ -55,8 +55,5 @@ source/server/cercano
 # Copy .mcp.json.example to .mcp.json and set the command path for your machine.
 .mcp.json
 
-# Beads / Dolt files (added by bd init)
-.dolt/
+# Local databases (conversations, telemetry, etc.)
 *.db
-.beads-credential-key
-.beads/proxieddb/

@@ -1,6 +1,7 @@
 # Compaction Lifecycle — Budget, Erosion, and Session Rollover — Design
 
-**Status:** Design proposed. Awaiting approval on D+C. A+B pre-approved and in progress.
+**Status:** Implemented on `fix/compaction-budget` (A+B+C+D). See "As-built" at
+the end for what shipped, field names, and one carried caveat.
 
 This document covers four changes to the stateful frozen-segment compactor
 (`source/server/internal/compactor`, `source/server/internal/compaction`). They
@@ -38,49 +39,56 @@ Past some length the honest move is to **start fresh**, not compress harder.
 
 | Change | Name | What it does | Status |
 |---|---|---|---|
-| A | Window-relative budget | Replace the fixed 16k cap with a config'd % of the active model's context window | Pre-approved |
-| B | Kill the erosion engine | Delete the LLM-summarize-the-summary re-consolidation call; shrink deterministically | Pre-approved |
-| C | Tiered retention | Recent segments stay high-detail, ancient ones compress hardest — the graceful "no" path | **Needs approval** |
-| D | Agent-offered rollover | At a threshold, offer to cut a durable handoff and start a linked fresh session | **Needs approval** |
+| A | Window-relative budget | Replace the fixed 16k cap with a config'd % of the active model's context window | **Shipped** |
+| B | Kill the erosion engine | Delete the LLM-summarize-the-summary re-consolidation call; shrink deterministically | **Shipped** |
+| C | Tiered retention | Recent segments stay high-detail, ancient ones compress hardest — the graceful "no" path | **Shipped** |
+| D | Agent-offered rollover | At a threshold, offer to cut a durable handoff and start a linked fresh session | **Shipped** |
 
-A and B are independent bug fixes and ship first. C and D are the lifecycle
+A and B are independent bug fixes and shipped first. C and D are the lifecycle
 redesign and are two halves of one flow, described below.
 
 ---
 
-## A — Window-relative compaction budget (pre-approved)
+## A — Window-relative compaction budget
 
 Replace the fixed `reconsolidateThresholdSegments * SegmentTokens` bound with a
 budget derived from the **active model's context window**, expressed as a
 config'd fraction.
 
-- New `Config` field, e.g. `CompactedBudgetFraction float64` (default ~0.30),
-  and the budget is `fraction * activeContextWindow` computed at pass time from
-  the resolver/context-meter, not a compile-time constant.
-- Keep a sane floor so tiny-window local models still get a workable budget.
+- Config field `CompactionConfig.CompactedBudgetPct float64` (YAML
+  `compacted_budget_pct`, default **0.30**). The budget in tokens
+  (`compactor.Config.CompactedBudgetTokens`) is computed **once at construction
+  time** in `main.go` as `contextmeter.ModelMax(cfg.OpenChatModel()) *
+  CompactedBudgetPct`, not at pass time — the compactor is only built in
+  `main.go`, so no proto/worker wire plumbing was needed.
+- A floor of **16 000 tokens** (`compactedBudgetFloorTokens`) keeps tiny-window
+  local models workable; a zero budget falls back to the legacy segment bound.
 - `reconsolidateThresholdSegments` is retired.
 
 Effect: on a 200k-window model the compacted backlog may occupy ~60k tokens
 instead of 16k — enough that normal-length sessions never trip the shrink path
 at all.
 
-## B — Kill the erosion engine (pre-approved)
+## B — Kill the erosion engine
 
 When the merged ledger *does* exceed budget, **do not** feed it back through the
 free-text summarizer. Instead shrink the structured ledger **deterministically**
-(the same philosophy `reduce.go` applied to `Reduce`):
+via `pruneToFit` (the same philosophy `reduce.go` applied to `Reduce`) — it
+removes whole entries in recency order (oldest first) across OpenThreads,
+Proposals, Decisions, Files until under budget:
 
-- Cap `Decisions` / `Proposals` to the most-recent N (recency-ordered).
-- Evict resolved `OpenThreads`.
+- Drop entries whole, recency-ordered (oldest first).
+- Goal and State are preserved verbatim and never pruned.
 - Coalesce `Files` (latest state per path already wins in `MergeSummaries`).
 
 Load-bearing shapes (config YAML, signatures, tier lists) survive verbatim or
-are dropped whole — never mangled into prose. The `IsEmpty` guard stays; a
-deterministic prune can't summarize-to-nothing.
+are dropped whole — never mangled into prose. The summarizer is **never** called
+on an already-consolidated summary. The `IsEmpty` guard stays; a deterministic
+prune can't summarize-to-nothing.
 
 ---
 
-## C + D — the lifecycle flow (needs approval)
+## C + D — the lifecycle flow
 
 C and D are not alternatives. They are the **two branches of one offer.**
 
@@ -172,11 +180,49 @@ state (a prompt/affordance the CLI renders); the accept/decline is an RPC.
 A+B are independently valuable and verifiable against the live 1,778-turn
 conversation before D/C exist. D+C follow once this design is approved.
 
-## Open questions for approval
+## As-built
 
-1. Approve **D** (agent-offered rollover, `precursor_id` new-row model,
-   summary + verbatim-tail handoff)?
-2. Approve **C** (tiered retention as the decline fallback with a re-arming
-   offer)?
-3. Default for `CompactedBudgetFraction` (proposed **0.30**) and the rollover
-   raw-token threshold (proposed to calibrate against the corpus, not guessed).
+All four changes shipped on `fix/compaction-budget`. Config, field names, and
+the file map as actually implemented:
+
+**Config (`CompactionConfig`, YAML `compaction:`)**
+
+| Field | YAML key | Default | Meaning |
+|---|---|---|---|
+| `CompactedBudgetPct` | `compacted_budget_pct` | `0.30` | Fraction of the chat model's window for the compacted backlog (floored at 16k tokens). |
+| `TieredRetentionSegments` | `tiered_retention_segments` | `0` (off) | Count of newest segments kept verbatim; older tiers pruned harder. |
+| `RolloverRawTokenThreshold` | `rollover_raw_token_threshold` | `0` (off) | Raw-token watermark that arms the rollover offer. |
+| `RolloverReconsolidationThreshold` | `rollover_reconsolidation_threshold` | `0` (off) | Reconsolidation-count backstop trigger. **See caveat.** |
+| `RolloverRearmMultiple` | `rollover_rearm_multiple` | `1.5` | After a decline at T, re-arm at T × this. |
+| `RolloverVerbatimTurns` | `rollover_verbatim_turns` | `6` | Verbatim tail length in the handoff artifact. |
+
+Rollover is fully off unless a threshold is non-zero. Budget/pruning are always on.
+
+**File map**
+
+- Budget + deterministic shrink: `compactor/compactor.go` (`budgetTokens`,
+  `pruneToFit`), wired in `cmd/cercano/main.go` (`compactedBudgetDefaultPct`,
+  `compactedBudgetFloorTokens`).
+- Tiered retention: `compactor/compactor.go` (`applyTieredRetention`, ahead of
+  `Reduce`; `pruneToFit` remains the final backstop).
+- Storage: `conversation/schema.sql` + `store.go` (`precursor_id`,
+  `CreateRolledOver`, `Precursor`).
+- Offer state machine + handoff: `server/rollover.go` (`rolloverManager`,
+  `buildHandoff`); emitted in `server.go` (`maybeOfferRollover`) at the turn
+  boundary before `FinalResponse`.
+- Contract: `proto/agent.proto` (`RolloverOffered`, `AcceptRollover`,
+  `DeclineRollover`).
+- CLI: `clients/cli/internal/ui/` (offer prompt via the generic confirm gate;
+  accept switches into the new session with a scrollback seam) and
+  `pkg/agentclient/client.go` (`TypeRolloverOffered`, `AcceptRollover`,
+  `DeclineRollover`).
+
+**Caveat — reconsolidation-count trigger is inert.** The offer currently gates
+on **raw tokens only**. Nothing in the pipeline persists a reconsolidation
+counter yet, so the OR-branch on `RolloverReconsolidationThreshold` always sees
+0 and never fires (there is a `// TODO` at the source). Making that trigger live
+requires the compactor to persist a shrink counter first — a small, separate
+follow-up. The raw-token trigger is fully functional.
+
+**Follow-up.** Calibrate the default rollover raw-token threshold against the
+corpus rather than guessing; it ships at `0` (off) until then.

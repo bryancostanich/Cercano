@@ -127,8 +127,6 @@ func FuzzMergeSummaries_RewordedCollapse_Aspirational(f *testing.F) {
 	f.Add("prefer a mutex here", "We should prefer a mutex here")
 
 	f.Fuzz(func(t *testing.T, a, b string) {
-		t.Skip("aspirational: reworded near-duplicates are not collapsed yet")
-
 		// The intent: two phrasings that differ only in case/punctuation/filler
 		// should merge to a single canonical decision.
 		merged := MergeSummaries([]StructuredSummary{
@@ -164,8 +162,11 @@ func equalStrings(a, b []string) bool {
 	return true
 }
 
-// normalize is a reference notion of "same decision" used only by the
-// aspirational target: lowercase, strip surrounding punctuation/whitespace.
+// normalize mirrors the production dedupKey: it is the oracle for "same
+// decision" that the merge is expected to honor (lowercase, surrounding
+// punctuation trimmed, internal whitespace collapsed).
 func normalize(s string) string {
-	return strings.Trim(strings.ToLower(strings.TrimSpace(s)), ".!? ")
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.Trim(s, ".!?,;: \t")
+	return strings.Join(strings.Fields(s), " ")
 }

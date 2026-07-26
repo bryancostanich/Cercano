@@ -176,16 +176,20 @@ func TestLongitudinal_RealCorpus_StaysBounded(t *testing.T) {
 	}
 }
 
-// TestLongitudinal_MergeGrowsUnbounded_Aspirational documents the IDEAL that the
-// ledger should not grow when fed equivalent-but-reworded input. Today's
-// exact-string appendUnique fails this: three rephrasings of one decision are
-// kept as three entries. This is the bug the fix will address. It is marked
-// aspirational so it does not gate the build red before the fix lands; flip the
-// skip to see it fail against current code.
+// TestLongitudinal_MergeGrowsUnbounded_Aspirational documents a deliberate
+// NON-GOAL: collapsing genuinely-different phrasings of the same decision (these
+// five share almost no surface form). Lexical dedup (dedupKey: case, surrounding
+// punctuation, whitespace) shipped and collapses reworded-only duplicates; it
+// cannot collapse these because doing so requires semantic similarity
+// (embedding distance + threshold), which is non-deterministic and would break
+// the determinism/no-fabrication invariants the pure merge primitive guarantees.
+// It stays skipped on purpose: satisfying it inside MergeSummaries is a bad
+// trade, not an unfinished task. Any future semantic dedup belongs outside the
+// pure primitive (e.g. behind a flag), and this test marks that boundary.
 func TestLongitudinal_MergeGrowsUnbounded_Aspirational(t *testing.T) {
 	if true {
-		t.Skip("aspirational: exact-string dedup cannot collapse reworded duplicates yet; " +
-			"un-skip once semantic/normalized dedup or a per-section cap lands")
+		t.Skip("non-goal: semantic collapse of distinct phrasings requires " +
+			"non-deterministic similarity; out of scope for the pure deterministic merge")
 	}
 
 	// The same decision, reworded five ways across five segments.

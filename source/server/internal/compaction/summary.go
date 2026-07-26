@@ -34,15 +34,31 @@ func MergeSummaries(sums []StructuredSummary) StructuredSummary {
 func appendUnique(dst, src []string) []string {
 	seen := map[string]bool{}
 	for _, v := range dst {
-		seen[v] = true
+		seen[dedupKey(v)] = true
 	}
 	for _, v := range src {
-		if !seen[v] {
+		k := dedupKey(v)
+		if !seen[k] {
 			dst = append(dst, v)
-			seen[v] = true
+			seen[k] = true
 		}
 	}
 	return dst
+}
+
+// dedupKey maps a bullet to a canonical form for duplicate detection: lowercase,
+// surrounding punctuation/whitespace trimmed, and internal whitespace collapsed
+// to single spaces. Two bullets differing only in case, trailing punctuation, or
+// spacing share a key and are treated as the same entry. The *original* first-
+// seen string is retained for display — only the comparison is normalized — so
+// no content is fabricated or mangled, and the mapping is pure and deterministic.
+// This is intentionally lexical, not semantic: collapsing genuinely-different
+// phrasings of the same idea would require embedding similarity, which is non-
+// deterministic and out of scope for this pure merge primitive.
+func dedupKey(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.Trim(s, ".!?,;: \t")
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // RenderBlock renders the summary into a single text block used as a send-view

@@ -90,6 +90,13 @@ type ToolLoopInput struct {
 	Provider    inference.Provider
 	Registry    *agenttools.Registry
 	Permissions *PermissionStore
+
+	// Profile is a capability fence layered on top of the permission mode (see
+	// profile.go). The zero value restricts nothing. A read-only Profile (e.g.
+	// PlanProfile) both hides forbidden tools from the model and denies them at
+	// the gate. It is orthogonal to Permissions.Mode(), which planning still
+	// honors for the reads it allows.
+	Profile     Profile
 	ConvHistory []llm.Message
 	UserInput   string
 	Images      []InlineImage
@@ -236,7 +243,16 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		}
 	}
 
-	catalog := agenttools.BuildToolCatalog(in.Registry)
+	// Advertisement half of the capability profile (see profile.go): when the
+	// profile restricts, forbidden tools are filtered out of the catalog so the
+	// model never reaches for a tool it can't have. Enforcement is separate,
+	// below at the gate — filtering is ergonomics, not the fence.
+	var catalog []llm.Tool
+	if in.Profile.Restricts() {
+		catalog = agenttools.BuildToolCatalogFiltered(in.Registry, in.Profile.Allows)
+	} else {
+		catalog = agenttools.BuildToolCatalog(in.Registry)
+	}
 	consecutiveErrors := 0
 	var lastIn, lastOut int
 
@@ -358,6 +374,22 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				perm = ap.PermissionFor(tc.ToolInput)
 			}
 			tier := agenttools.PermissionToLLM(perm)
+			// Enforcement half of the capability profile (see profile.go): the
+			// fence. A tool the active profile forbids is denied outright here,
+			// before it can be run (R path) or confirmed (W/X path) — there is
+			// no "yes" available. This is not the same as the catalog filter
+			// above: filtering only shapes what the model is offered; this
+			// catches a forbidden tool that arrives by any other route
+			// (hallucinated name, replayed turn, future code path).
+			if !in.Profile.Allows(tier, tc.ToolName) {
+				emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: tc.ToolUseID, ToolName: tc.ToolName, Summary: "blocked by " + in.Profile.Name + " profile", IsError: true})
+				results = append(results, llm.Block{
+					Type: llm.BlockToolResult, ToolUseRef: tc.ToolUseID,
+					Content: fmt.Sprintf("blocked: the %q profile is read-only — the tool %q (%s) is unavailable. Only read and plan actions are permitted while planning.", in.Profile.Name, tc.ToolName, tier),
+					IsError: true,
+				})
+				continue
+			}
 			pc := pendingCall{block: tc, tool: tool, tier: tier}
 			if tier == llm.PermR {
 				rCalls = append(rCalls, pc)

@@ -10,6 +10,33 @@ import (
 	"cercano/source/server/pkg/agentclient"
 )
 
+func TestCompactFitAnnot(t *testing.T) {
+	const gb = int64(1) << 30
+	sysRAM := 32 * gb          // usable ≈ 24 GB (0.75)
+	cases := []struct {
+		name    string
+		weights int64
+		want    string
+	}{
+		{"unknown weights", 0, ""},
+		{"unknown ram via zero", -1, ""},
+		{"small model fits", 4 * gb, "✓ fits"},           // fixed ~4.7GB « 24GB
+		{"large model tight", 18 * gb, "△ tight"},        // fixed ~18.9GB > 80% of 24GB
+		{"too-large won't fit", 30 * gb, "✗ won't fit"},  // fixed ~31.5GB > 24GB
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ram := sysRAM
+			if c.weights == -1 { // exercise the zero-RAM guard
+				c.weights, ram = 4*gb, 0
+			}
+			if got := compactFitAnnot(c.weights, ram); got != c.want {
+				t.Errorf("compactFitAnnot(%d, %d) = %q; want %q", c.weights, ram, got, c.want)
+			}
+		})
+	}
+}
+
 // qwenEstimate mirrors qwen2.5-coder:7b's real numbers: 4.68 GB
 // weights, 57344 KV bytes/token, 32k max context.
 func qwenEstimate(sysRAM int64) agentclient.ModelRAMEstimate {

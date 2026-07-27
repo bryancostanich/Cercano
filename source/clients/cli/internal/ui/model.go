@@ -1967,7 +1967,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openRuntimeModal.setNeedsModel(needsMsg)
 			return m, nil
 		}
-		m.openRuntimeModal.setPickModel(m.agent, m.pendingRuntimeSwitch, msg.models)
+		m.openRuntimeModal.setPickModel(m.agent, m.pendingRuntimeSwitch, msg.models, msg.sysRAMBytes)
 		return m, nil
 
 	case openRuntimeDashboardMsg:

@@ -100,7 +100,7 @@ func TestOpenRuntimeModal_ModelsLoadedIgnoredWhenModalClosed(t *testing.T) {
 
 func TestOpenRuntimeModal_PickerCursorClampsAtEdges(t *testing.T) {
 	m := modelWithModal(ambiguousStatus())
-	m.openRuntimeModal.setPickModel(nil, "llama_server", twoGGUFs())
+	m.openRuntimeModal.setPickModel(nil, "llama_server", twoGGUFs(), 64<<30)
 	// Up at the top stays at 0.
 	nm, _ := m.handleOpenRuntimeModalKey(keyPress("up"))
 	if nm.openRuntimeModal.picker.Cursor() != 0 {
@@ -116,7 +116,7 @@ func TestOpenRuntimeModal_PickerCursorClampsAtEdges(t *testing.T) {
 
 func TestOpenRuntimeModal_PickerEnterDispatchesAndCloses(t *testing.T) {
 	m := modelWithModal(ambiguousStatus())
-	m.openRuntimeModal.setPickModel(nil, "llama_server", twoGGUFs())
+	m.openRuntimeModal.setPickModel(nil, "llama_server", twoGGUFs(), 64<<30)
 	m.pendingRuntimeSwitch = "llama_server"
 	nm, cmd := m.handleOpenRuntimeModalKey(keyPress("enter"))
 	if nm.openRuntimeModal != nil {
@@ -132,7 +132,7 @@ func TestOpenRuntimeModal_PickerEnterDispatchesAndCloses(t *testing.T) {
 
 func TestOpenRuntimeModal_PickerEscClosesWithoutDispatch(t *testing.T) {
 	m := modelWithModal(ambiguousStatus())
-	m.openRuntimeModal.setPickModel(nil, "llama_server", twoGGUFs())
+	m.openRuntimeModal.setPickModel(nil, "llama_server", twoGGUFs(), 64<<30)
 	m.pendingRuntimeSwitch = "llama_server"
 	nm, cmd := m.handleOpenRuntimeModalKey(keyPress("esc"))
 	if nm.openRuntimeModal != nil || nm.pendingRuntimeSwitch != "" || cmd != nil {
@@ -144,7 +144,7 @@ func TestOpenRuntimeModal_PickerViewListsModels(t *testing.T) {
 	pal := theme.Cracker()
 	styles := theme.NewStyles(pal)
 	mo := newOpenRuntimeInstallModal(ambiguousStatus())
-	mo.setPickModel(nil, "llama_server", twoGGUFs())
+	mo.setPickModel(nil, "llama_server", twoGGUFs(), 64<<30)
 	out := stripAnsiCSI(mo.View(styles, pal, 120, 40))
 	for _, want := range []string{"pick a GGUF model", "qwen3-coder-30b-q4", "llama3.3-70b-q3", "Q4_K_M", "esc close"} {
 		if !strings.Contains(out, want) {

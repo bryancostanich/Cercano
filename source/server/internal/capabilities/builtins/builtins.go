@@ -51,6 +51,7 @@ func Register(reg *capabilities.Registry) {
 	reg.MustRegister(GitAdd())
 	reg.MustRegister(GitCommit())
 	reg.MustRegister(Dispatch())
+	reg.MustRegister(SuggestPlan())
 	reg.MustRegister(GitWorktree())
 	reg.MustRegister(Checkpoint())
 	reg.MustRegister(GitSquash())

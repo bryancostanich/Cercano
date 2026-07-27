@@ -186,6 +186,14 @@ func (s *Server) InstallCapabilities() {
 		Open:      s.providerSvc.Open(),
 		Config:    &cfgSnapshot,
 		CtxLoader: s.persistSvc.ContextLoader(),
+		// suggest_plan enters planning mode via the profile broker once the user
+		// approves the suggestion at the confirm gate.
+		EnterProfile: func(name string) error {
+			if s.profileBroker == nil {
+				return fmt.Errorf("profile broker not configured")
+			}
+			return s.profileBroker.SetActive(name)
+		},
 	})
 }
 

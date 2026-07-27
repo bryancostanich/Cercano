@@ -25,6 +25,14 @@ type Services struct {
 	// Dispatch runs an agentic (or one-shot) unit of delegated model work through
 	// the unified dispatch engine. Nil until wired by the server.
 	Dispatch func(ctx context.Context, spec dispatch.Spec) (dispatch.Result, error)
+
+	// EnterProfile switches the session's active capability profile by name
+	// ("plan", "default", …). It is how the suggest_plan capability flips the
+	// session into the read-only planning fence once the user approves the
+	// suggestion at the confirm gate. A func hook (not the agent.ProfileBroker
+	// type) keeps this package free of an agent import, matching Dispatch. Nil
+	// until wired by the server; suggest_plan errors clearly if it is nil.
+	EnterProfile func(name string) error
 }
 
 // MainProvider returns the provider for a turn: cloud when isCloud and a cloud

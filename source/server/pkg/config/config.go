@@ -460,6 +460,11 @@ type MistralRSConfig struct {
 	ExtraArgs        []string      `yaml:"extra_args"`
 	ReadinessTimeout string        `yaml:"readiness_timeout"`
 	Restart          RestartConfig `yaml:"restart"`
+	// LogLevel sets the RUST_LOG value passed to the mistral.rs child so its
+	// own tracing output (model load, paged-attention/KV allocation, per-request
+	// token counts) is captured. "" defaults to "info". Set "off" to leave the
+	// child's RUST_LOG untouched (inherits the parent environment).
+	LogLevel string `yaml:"log_level"`
 }
 
 // RestartConfig controls sidecar restart behavior.

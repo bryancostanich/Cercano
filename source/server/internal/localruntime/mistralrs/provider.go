@@ -425,6 +425,15 @@ func (p *Provider) startProcess(instanceID, binary string, sink localruntime.Log
 	args := p.argsFor(instance.model, instance.record.Port)
 	cmd := exec.Command(binary, args...)
 	cmd.Stdin = nil
+	// Turn up mistral.rs's own tracing so its model-load and
+	// paged-attention/KV allocation lines are captured. RUST_LOG="off" in
+	// config means "don't touch it" — inherit the parent environment as-is.
+	if level := strings.TrimSpace(p.cfg.LogLevel); !strings.EqualFold(level, "off") {
+		if level == "" {
+			level = "info"
+		}
+		cmd.Env = append(os.Environ(), "RUST_LOG="+level)
+	}
 	setProcessGroup(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -455,9 +464,69 @@ func (p *Provider) startProcess(instanceID, binary string, sink localruntime.Log
 	instance.record.LastError = ""
 	p.mu.Unlock()
 	p.updateSink(sink, instance.record)
-	go p.pipeLogs(stdout, sink, instanceID, instance.model.ID, "stdout")
-	go p.pipeLogs(stderr, sink, instanceID, instance.model.ID, "stderr")
+
+	// Tee the child's stdout/stderr to a per-PID file that is fsync'd per
+	// line, so the last lines before a hard crash/power-off survive on disk.
+	// This is the durable record the in-memory sink cannot provide. A nil
+	// writer (open failure) degrades to sink-only logging.
+	lf := p.openInstanceLog(cmd.Process.Pid, sink, instanceID, instance.model.ID)
+	var logsWG sync.WaitGroup
+	logsWG.Add(2)
+	go func() { defer logsWG.Done(); p.pipeLogs(stdout, sink, lf, instanceID, instance.model.ID, "stdout") }()
+	go func() { defer logsWG.Done(); p.pipeLogs(stderr, sink, lf, instanceID, instance.model.ID, "stderr") }()
+	if lf != nil {
+		go func() { logsWG.Wait(); lf.Close() }()
+	}
 	return nil
+}
+
+// syncedLog is a mutex-guarded, fsync-per-line file writer shared by the
+// stdout and stderr pipe goroutines. Per-line Sync is deliberate: mistral.rs
+// at info level is low-frequency (load + per-request lines, not per-token), so
+// the fsync cost is negligible and buys crash-survivability of the last lines.
+type syncedLog struct {
+	mu sync.Mutex
+	f  *os.File
+}
+
+func (s *syncedLog) writeLine(stream, line string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fmt.Fprintf(s.f, "%s [%s] %s\n", time.Now().Format(time.RFC3339Nano), stream, line)
+	_ = s.f.Sync()
+}
+
+func (s *syncedLog) Close() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_ = s.f.Close()
+}
+
+// openInstanceLog creates <registry.dir>/<pid>.mistralrs.log for the durable
+// tee. Returns nil (and emits a warning) if the file can't be opened; callers
+// treat nil as "sink-only".
+func (p *Provider) openInstanceLog(pid int, sink localruntime.LogSink, runtimeID, modelID string) *syncedLog {
+	if p.registry == nil || p.registry.dir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(p.registry.dir, 0o755); err != nil {
+		p.emit(sink, "warn", runtimeID, modelID, "could not create mistral.rs log dir: "+err.Error())
+		return nil
+	}
+	path := filepath.Join(p.registry.dir, fmt.Sprintf("%d.mistralrs.log", pid))
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		p.emit(sink, "warn", runtimeID, modelID, "could not open mistral.rs log file: "+err.Error())
+		return nil
+	}
+	p.emit(sink, "info", runtimeID, modelID, "mistral.rs logs -> "+path)
+	return &syncedLog{f: f}
 }
 
 // argsFor builds the mistral.rs command line. The v0.9.0 unified CLI serves a
@@ -796,14 +865,17 @@ func (p *Provider) updateSink(sink localruntime.LogSink, record localruntime.Ins
 	}
 }
 
-func (p *Provider) pipeLogs(r io.Reader, sink localruntime.LogSink, runtimeID, modelID, stream string) {
+func (p *Provider) pipeLogs(r io.Reader, sink localruntime.LogSink, lf *syncedLog, runtimeID, modelID, stream string) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	source := runtimeName + "." + runtimeID + "." + stream
 	for scanner.Scan() {
-		p.emit(sink, "info", runtimeID, modelID, scanner.Text(), source)
+		line := scanner.Text()
+		lf.writeLine(stream, line)
+		p.emit(sink, "info", runtimeID, modelID, line, source)
 	}
 	if err := scanner.Err(); err != nil {
+		lf.writeLine(stream, "log stream error: "+err.Error())
 		p.emit(sink, "warn", runtimeID, modelID, "log stream error: "+err.Error(), source)
 	}
 }

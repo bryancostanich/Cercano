@@ -22,8 +22,23 @@ const (
 	EventToolExecComplete                  // tool execution finished
 	EventWatchdog                          // protocol-supervision event; WatchdogKind holds the flavor (challenge/block/echo/escalate)
 	EventSubAgent                          // structured child-agent lifecycle/transcript event
+	EventTaskChange                        // planning/session task-store mutation; TaskChange* fields set
 	EventDone                              // turn complete; Result populated
 )
+
+// TaskSnapshot is the runner's proto-free mirror of a task-store node snapshot.
+// It carries the affected subtree in significant (document) order so the host
+// can map it to proto.TaskNode and the client can render it directly. Kept in
+// this package so the runner event vocabulary stays free of taskmodel imports —
+// the host constructs these from taskmodel.Task at the store→broker seam.
+type TaskSnapshot struct {
+	ID       string
+	Title    string
+	Status   string
+	Notes    string
+	ParentID string // "" for a root
+	Children []TaskSnapshot
+}
 
 // Event is one runner-emitted notification. Only the fields relevant to Kind
 // are set. Proto-free by design.
@@ -49,6 +64,11 @@ type Event struct {
 	// Watchdog: EventWatchdog. WatchdogKind is one of challenge/block/echo/escalate.
 	WatchdogKind string
 	Thread       string
+
+	// Task store: EventTaskChange. TaskChangeKind is "added"|"updated"|"removed";
+	// TaskSnapshot is the affected subtree snapshot.
+	TaskChangeKind string
+	TaskSnapshot   TaskSnapshot
 
 	// Sub-agent lifecycle/transcript: EventSubAgent.
 	SubAgentID       string

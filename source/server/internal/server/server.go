@@ -2871,10 +2871,40 @@ func sendRunnerEvent(stream streamResponseSender, ev runnersvc.Event) error {
 			},
 		})
 
+	case runnersvc.EventTaskChange:
+		return stream.Send(&proto.StreamProcessResponse{
+			Payload: &proto.StreamProcessResponse_TaskChange{
+				TaskChange: &proto.TaskChange{
+					Kind: ev.TaskChangeKind,
+					Task: taskSnapshotToProto(ev.TaskSnapshot),
+				},
+			},
+		})
+
 	case runnersvc.EventDone:
 		// Not used by the in-process host (result comes back from RunTurn directly).
 	}
 	return nil
+}
+
+// taskSnapshotToProto recursively maps a runner.TaskSnapshot (proto-free) to a
+// proto.TaskNode, preserving child order. It is the wire half of the store→
+// broker task-change seam.
+func taskSnapshotToProto(t runnersvc.TaskSnapshot) *proto.TaskNode {
+	node := &proto.TaskNode{
+		Id:       t.ID,
+		Title:    t.Title,
+		Status:   t.Status,
+		Notes:    t.Notes,
+		ParentId: t.ParentID,
+	}
+	if len(t.Children) > 0 {
+		node.Children = make([]*proto.TaskNode, len(t.Children))
+		for i := range t.Children {
+			node.Children[i] = taskSnapshotToProto(t.Children[i])
+		}
+	}
+	return node
 }
 
 // primaryModel returns the model the context meter measures against: the

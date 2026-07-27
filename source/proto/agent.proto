@@ -252,7 +252,34 @@ message StreamProcessResponse {
     WatchdogEvent     watchdog_event = 10;
     SubAgentEvent     sub_agent_event = 11;
     RolloverOffered   rollover_offered = 12;
+    TaskChange        task_change = 13;
   }
+}
+
+// TaskNode is one node of a planning/session task tree, carried on the wire as
+// the recursive snapshot the task store emits. Children are in significant
+// (document) order — the client renders them top-to-bottom as given. status is
+// one of "pending" | "in_progress" | "done" | "blocked". notes carries phase
+// prose (objective/files/tests) verbatim for phase nodes; empty otherwise.
+message TaskNode {
+  string id = 1;
+  string title = 2;
+  string status = 3;
+  string notes = 4;
+  string parent_id = 5;       // empty for a root
+  repeated TaskNode children = 6;
+}
+
+// TaskChange is a single task-store mutation surfaced to every client attached
+// to the conversation. It rides the same per-conversation stream + turn-broker
+// fan-out as token deltas and tool calls (task-model design §11): the store
+// emits one ChangeEvent per mutation, the server republishes it here. task is a
+// full subtree snapshot of the affected node — for an "added" phase it carries
+// all its sub-tasks in one message, and "removed" is a single event for the
+// subtree root (not one per descendant).
+message TaskChange {
+  string kind = 1;            // "added" | "updated" | "removed"
+  TaskNode task = 2;          // post-mutation snapshot (pre-deletion for "removed")
 }
 
 // RolloverOffered is emitted at a turn boundary when a session has grown long

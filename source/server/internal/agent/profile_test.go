@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"testing"
 
 	"cercano/source/server/internal/agenttools"
@@ -22,7 +23,7 @@ func TestProfile_ZeroValueRestrictsNothing(t *testing.T) {
 	}
 }
 
-func TestPlanProfile_AllowsReadAndPlanOnly(t *testing.T) {
+func TestPlanProfile_AllowsReadAndFileWritesOnly(t *testing.T) {
 	p := PlanProfile()
 	if !p.Restricts() {
 		t.Fatal("plan profile must restrict")
@@ -32,11 +33,15 @@ func TestPlanProfile_AllowsReadAndPlanOnly(t *testing.T) {
 		name string
 		want bool
 	}{
-		{llm.PermR, "LS", true},               // read tier — allowed
-		{llm.PermR, "read_file", true},        // read tier — allowed
-		{llm.PermW, "Write", false},           // write tier — fenced
-		{llm.PermX, "bash", false},            // exec tier — fenced
-		{llm.PermW, PlanCapabilityName, true}, // plan cap — escape hatch even though not PermR
+		{llm.PermR, "LS", true},          // read tier — allowed
+		{llm.PermR, "read_file", true},   // read tier — allowed
+		{llm.PermW, "Write", true},       // file write — permitted to author the plan (display alias)
+		{llm.PermW, "write_file", true},  // file write — permitted (capability name)
+		{llm.PermW, "Edit", true},        // file edit — permitted to author the plan
+		{llm.PermX, "bash", false},       // exec tier — fenced
+		{llm.PermX, "Bash", false},       // exec tier — fenced (display alias)
+		{llm.PermW, "git_commit", false}, // non-file write tool — fenced
+		{llm.PermW, "Checkpoint", false}, // git mutation — fenced
 	}
 	for _, c := range cases {
 		if got := p.Allows(c.tier, c.name); got != c.want {
@@ -47,17 +52,26 @@ func TestPlanProfile_AllowsReadAndPlanOnly(t *testing.T) {
 
 // --- D: advertisement filter ----------------------------------------------
 
-func TestPlanProfile_FiltersWriteToolsFromCatalog(t *testing.T) {
-	reg := testDefaultRegistry() // includes LS (R) and Write (W)
+func TestPlanProfile_FiltersExecToolsButKeepsFileWrites(t *testing.T) {
+	reg := testDefaultRegistry() // includes LS (R), Write (W), Bash (X)
 	full := agenttools.BuildToolCatalog(reg)
 	filtered := agenttools.BuildToolCatalogFiltered(reg, PlanProfile().Allows)
 
-	if !hasTool(full, "Write") {
-		t.Fatal("precondition: unfiltered catalog should advertise Write")
+	if !hasTool(full, "Bash") {
+		t.Fatal("precondition: unfiltered catalog should advertise Bash")
 	}
-	if hasTool(filtered, "Write") {
-		t.Fatal("plan profile must NOT advertise the Write (W) tool to the model")
+	// Exec tool is fenced — not advertised while planning.
+	if hasTool(filtered, "Bash") {
+		t.Fatal("plan profile must NOT advertise the Bash (X) tool to the model")
 	}
+	// File-write tools ARE advertised — the model authors spec.md/plan.md with them.
+	if !hasTool(filtered, "Write") {
+		t.Fatal("plan profile must advertise Write so the agent can author the plan")
+	}
+	if !hasTool(filtered, "Edit") {
+		t.Fatal("plan profile must advertise Edit so the agent can revise the plan")
+	}
+	// Read tools remain.
 	if !hasTool(filtered, "LS") {
 		t.Fatal("plan profile must still advertise read-tier tools like LS")
 	}
@@ -74,16 +88,17 @@ func hasTool(cat []llm.Tool, name string) bool {
 
 // --- C: enforcement fence --------------------------------------------------
 
-// A write tool call that reaches the loop despite the D filter (here: injected
+// An EXEC tool call that reaches the loop despite the D filter (here: injected
 // directly via the scripted provider, standing in for a hallucinated name,
 // replayed turn, or future code path) must be DENIED outright by the fence —
-// no confirm prompt, no execution — with an error tool_result.
-func TestPlanProfile_DeniesWriteAtGate_NoConfirm(t *testing.T) {
+// no confirm prompt, no execution — with an error tool_result. File writes are
+// permitted while planning, so the forbidden tool here is Bash (exec).
+func TestPlanProfile_DeniesExecAtGate_NoConfirm(t *testing.T) {
 	prov := &mockProvider{
 		scripts: [][]llm.Block{
 			{
-				{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "Write",
-					ToolInput: json.RawMessage(`{"path":"/tmp/x","content":"x"}`)},
+				{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "Bash",
+					ToolInput: json.RawMessage(`{"cmd":["rm","-rf","/tmp/x"]}`)},
 			},
 			// After the fence denies the write, the loop feeds the error result
 			// back and the model responds — this second turn is that response.
@@ -107,30 +122,83 @@ func TestPlanProfile_DeniesWriteAtGate_NoConfirm(t *testing.T) {
 		Provider: prov, Registry: reg, Permissions: perms,
 		Profile:             PlanProfile(),
 		PermissionRequester: requester,
-		UserInput:           "write x",
+		UserInput:           "run something",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if confirmed {
-		t.Fatal("fence breach: the confirm gate was reached for a write under the plan profile")
+		t.Fatal("fence breach: the confirm gate was reached for an exec tool under the plan profile")
 	}
 
-	// The Write must never have executed: /tmp/x must not exist. (Belt: the
-	// tool_result must be an error naming the profile block.)
+	// The Bash must never have executed. (Belt: the tool_result must be an error
+	// naming the profile block.)
 	var blocked bool
 	for _, m := range result.History {
 		for _, b := range m.Blocks {
 			if b.Type == llm.BlockToolResult && b.ToolUseRef == "u1" {
 				if !b.IsError {
-					t.Fatal("expected an error tool_result for the blocked Write")
+					t.Fatal("expected an error tool_result for the blocked Bash")
 				}
 				blocked = true
 			}
 		}
 	}
 	if !blocked {
-		t.Fatal("no tool_result recorded for the blocked Write call")
+		t.Fatal("no tool_result recorded for the blocked Bash call")
+	}
+}
+
+// The load-bearing refined-B behavior: under the plan profile the agent CAN
+// author the plan by writing a file with the ordinary Write tool — no confirm,
+// it just runs. This is how spec.md/plan.md get written during generation.
+func TestPlanProfile_AllowsFileWriteThrough(t *testing.T) {
+	dir := t.TempDir()
+	planPath := dir + "/plan.md"
+	prov := &mockProvider{
+		scripts: [][]llm.Block{
+			{{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "Write",
+				ToolInput: json.RawMessage(`{"path":"` + planPath + `","content":"# Effort\n\n## Phase 1\n- [ ] do it\n"}`)}},
+			{{Type: llm.BlockText, Text: "plan written"}},
+		},
+		caps: inference.Capabilities{SupportsTools: true},
+	}
+	reg := testDefaultRegistry()
+	perms, _ := LoadPermissionStore(dir + "/perms.yaml")
+
+	// A requester that would DENY — proving the write did not even need a confirm
+	// (file writes are inside the plan profile's allowance, not gated by it).
+	requester := func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission, destructive bool) (bool, error) {
+		return false, nil
+	}
+
+	result, err := RunToolLoop(context.Background(), ToolLoopInput{
+		Provider: prov, Registry: reg, Permissions: perms,
+		Profile:             PlanProfile(),
+		PermissionRequester: requester,
+		UserInput:           "write the plan",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FinalText != "plan written" {
+		t.Fatalf("write should have run under plan profile; final=%q", result.FinalText)
+	}
+	// The file actually exists on disk — the write executed, was not fenced.
+	if _, statErr := os.ReadFile(planPath); statErr != nil {
+		t.Fatalf("plan.md was not written under the plan profile: %v", statErr)
+	}
+	// And the tool_result is a success, not an error.
+	var ok bool
+	for _, m := range result.History {
+		for _, b := range m.Blocks {
+			if b.Type == llm.BlockToolResult && b.ToolUseRef == "u1" && !b.IsError {
+				ok = true
+			}
+		}
+	}
+	if !ok {
+		t.Fatal("expected a successful tool_result for the plan Write")
 	}
 }
 

@@ -63,18 +63,33 @@ func (p Profile) Allows(tier llm.Permission, name string) bool {
 	return p.ExtraCaps[name]
 }
 
-// PlanCapabilityName is the capability that lets the agent write the plan/spec
-// while otherwise fenced to read-only. It is allowed by the plan profile even
-// though it is not a read-tier tool.
-const PlanCapabilityName = "plan"
+// planWriteTools are the write-tier tools the plan profile permits so the agent
+// can author the effort's spec.md and plan.md while otherwise fenced to
+// read-only. This mirrors how Claude Code plan mode and obra/superpowers work:
+// there is no bespoke "make a plan" tool — the plan is prose (Superpowers
+// checkbox markdown, which our codec speaks) written with the ordinary file
+// tools, and the read-only gate simply permits those two writes and nothing
+// else. Structured status flips and task adds are execution-time store ops
+// (PlanStore.SetStatus), not model-facing write tools during generation.
+//
+// Both the agent-surface display aliases ("Write"/"Edit") and the underlying
+// capability names ("write_file"/"edit_file") are listed so the fence permits
+// the tool regardless of whether it was registered with an alias — the fence
+// sees whatever name reaches the gate.
+var planWriteTools = []string{"Write", "Edit", "write_file", "edit_file"}
 
 // PlanProfile is the read-only exploration fence for planning mode (Fork 1):
-// read-tier tools plus the plan capability, nothing else. Write/exec tools are
-// neither advertised nor executable while it is active.
+// read-tier tools plus the file-write tools needed to author spec.md/plan.md,
+// nothing else. Exec tools (bash), git mutations, and destructive tools are
+// neither advertised to the model nor executable while it is active.
 func PlanProfile() Profile {
+	extra := make(map[string]bool, len(planWriteTools))
+	for _, n := range planWriteTools {
+		extra[n] = true
+	}
 	return Profile{
 		Name:         "plan",
 		AllowedTiers: map[llm.Permission]bool{llm.PermR: true},
-		ExtraCaps:    map[string]bool{PlanCapabilityName: true},
+		ExtraCaps:    extra,
 	}
 }

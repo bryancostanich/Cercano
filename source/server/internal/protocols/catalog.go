@@ -470,8 +470,9 @@ Pick a short kebab-case slug for the effort (e.g. ` + "`migrate-config-loader`" 
 ### Step 2 — Capture the plan
 
 Once the spec is approved, write **` + "`efforts/<slug>/plan.md`" + `** in the format
-below. Then present the whole plan through the ` + "`y/n/d/c`" + ` gate for approval to
-begin execution.
+below. Then call ` + "`request_plan_approval`" + ` with the effort path and a concise
+summary of the plan. That W-tier capability raises the standard ` + "`y/n/d/c`" + `
+gate; approval leaves the read-only planning profile so execution can begin.
 
 ## Decisions During Generation (mandatory)
 
@@ -533,7 +534,8 @@ Example:
 - The spec is prose the human owns; ` + "`plan.md`" + ` is what gets parsed. Do not put
   machine-structured data in the spec.
 - Get sign-off on the spec before writing the plan, and route the finished plan
-  through the ` + "`y/n/d/c`" + ` gate before any execution begins.
+  through ` + "`request_plan_approval`" + ` before any execution begins. That capability
+  supplies the ` + "`y/n/d/c`" + ` handoff and drops the read-only fence only on approval.
 
 ## What This Prevents
 

@@ -33,15 +33,16 @@ func TestPlanProfile_AllowsReadAndFileWritesOnly(t *testing.T) {
 		name string
 		want bool
 	}{
-		{llm.PermR, "LS", true},          // read tier — allowed
-		{llm.PermR, "read_file", true},   // read tier — allowed
-		{llm.PermW, "Write", true},       // file write — permitted to author the plan (display alias)
-		{llm.PermW, "write_file", true},  // file write — permitted (capability name)
-		{llm.PermW, "Edit", true},        // file edit — permitted to author the plan
-		{llm.PermX, "bash", false},       // exec tier — fenced
-		{llm.PermX, "Bash", false},       // exec tier — fenced (display alias)
-		{llm.PermW, "git_commit", false}, // non-file write tool — fenced
-		{llm.PermW, "Checkpoint", false}, // git mutation — fenced
+		{llm.PermR, "LS", true},                    // read tier — allowed
+		{llm.PermR, "read_file", true},             // read tier — allowed
+		{llm.PermW, "Write", true},                 // file write — permitted to author the plan (display alias)
+		{llm.PermW, "write_file", true},            // file write — permitted (capability name)
+		{llm.PermW, "Edit", true},                  // file edit — permitted to author the plan
+		{llm.PermX, "request_plan_approval", true}, // handoff tool — permitted to leave planning after approval
+		{llm.PermX, "bash", false},                 // exec tier — fenced
+		{llm.PermX, "Bash", false},                 // exec tier — fenced (display alias)
+		{llm.PermW, "git_commit", false},           // non-file write tool — fenced
+		{llm.PermW, "Checkpoint", false},           // git mutation — fenced
 	}
 	for _, c := range cases {
 		if got := p.Allows(c.tier, c.name); got != c.want {
@@ -70,6 +71,9 @@ func TestPlanProfile_FiltersExecToolsButKeepsFileWrites(t *testing.T) {
 	}
 	if !hasTool(filtered, "Edit") {
 		t.Fatal("plan profile must advertise Edit so the agent can revise the plan")
+	}
+	if !hasTool(filtered, "request_plan_approval") {
+		t.Fatal("plan profile must advertise request_plan_approval so the agent can raise the execution handoff")
 	}
 	// Read tools remain.
 	if !hasTool(filtered, "LS") {
@@ -238,5 +242,86 @@ func TestPlanProfile_AllowsReadToolThrough(t *testing.T) {
 	}
 	if !ran {
 		t.Fatal("LS (read tier) should have run and produced a non-error result")
+	}
+}
+
+func TestSuggestPlan_PromptsInPermissiveMode(t *testing.T) {
+	prov := &mockProvider{
+		scripts: [][]llm.Block{{
+			{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "suggest_plan",
+				ToolInput: json.RawMessage(`{"reason":"spans several files"}`)},
+		}},
+		caps: inference.Capabilities{SupportsTools: true},
+	}
+	reg := testDefaultRegistry()
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml") // default = permissive
+
+	var asked bool
+	requester := func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission, destructive bool) (bool, error) {
+		asked = true
+		if name != "suggest_plan" {
+			t.Fatalf("requester name = %q, want suggest_plan", name)
+		}
+		if tier != llm.PermX {
+			t.Fatalf("requester tier = %q, want PermX so Permissive prompts", tier)
+		}
+		return false, nil // decline; Execute must not run
+	}
+
+	result, err := RunToolLoop(context.Background(), ToolLoopInput{
+		Provider: prov, Registry: reg, Permissions: perms,
+		PermissionRequester: requester,
+		UserInput:           "do a big thing",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !asked {
+		t.Fatal("suggest_plan did not reach the confirm gate in default Permissive mode")
+	}
+	last := result.History[len(result.History)-1]
+	if last.Role != llm.RoleUser || len(last.Blocks) == 0 || !last.Blocks[0].IsError {
+		t.Fatalf("decline should be returned as an error tool_result; got %+v", last)
+	}
+}
+
+func TestRequestPlanApproval_PromptsUnderPlanProfileInPermissiveMode(t *testing.T) {
+	prov := &mockProvider{
+		scripts: [][]llm.Block{{
+			{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "request_plan_approval",
+				ToolInput: json.RawMessage(`{"effort":"efforts/demo","summary":"one phase"}`)},
+		}},
+		caps: inference.Capabilities{SupportsTools: true},
+	}
+	reg := testDefaultRegistry()
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml") // default = permissive
+
+	var asked bool
+	requester := func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission, destructive bool) (bool, error) {
+		asked = true
+		if name != "request_plan_approval" {
+			t.Fatalf("requester name = %q, want request_plan_approval", name)
+		}
+		if tier != llm.PermX {
+			t.Fatalf("requester tier = %q, want PermX so Permissive prompts", tier)
+		}
+		return false, nil // decline; Execute must not drop the profile
+	}
+
+	result, err := RunToolLoop(context.Background(), ToolLoopInput{
+		Provider: prov, Registry: reg, Permissions: perms,
+		Profile:             PlanProfile(),
+		PermissionRequester: requester,
+		UserInput:           "approve plan",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !asked {
+		t.Fatal("request_plan_approval did not reach the confirm gate under PlanProfile in Permissive mode")
+	}
+	last := result.History[len(result.History)-1]
+	if last.Role != llm.RoleUser || len(last.Blocks) == 0 || !last.Blocks[0].IsError {
+		t.Fatalf("decline should be returned as an error tool_result; got %+v", last)
 	}
 }

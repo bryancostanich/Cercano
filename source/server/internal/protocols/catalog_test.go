@@ -193,3 +193,13 @@ func TestPlanningModeTriggerNamesSuggestPlan(t *testing.T) {
 		t.Fatal("planning-mode trigger must name the suggest_plan capability")
 	}
 }
+
+func TestPlanningModeNamesRequestPlanApprovalForHandoff(t *testing.T) {
+	p, _ := Get("planning-mode")
+	if !strings.Contains(p.Body, "request_plan_approval") {
+		t.Fatal("planning-mode body must name request_plan_approval for the plan->execution handoff")
+	}
+	if !strings.Contains(p.Body, "leaves the read-only planning profile") && !strings.Contains(p.Body, "drops the read-only fence") {
+		t.Fatal("planning-mode body must explain that approval leaves the read-only planning profile")
+	}
+}

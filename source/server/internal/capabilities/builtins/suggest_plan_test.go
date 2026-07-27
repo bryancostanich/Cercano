@@ -14,10 +14,10 @@ func TestSuggestPlan_Meta(t *testing.T) {
 	if c.Name() != "suggest_plan" {
 		t.Errorf("Name() = %q", c.Name())
 	}
-	// W-tier is load-bearing: it is what makes the confirm gate fire BEFORE
-	// Execute, which is the user-facing y/n/d/c suggestion prompt.
-	if c.Tier() != capabilities.TierW {
-		t.Errorf("Tier() = %q, want TierW (so the confirm gate fires)", c.Tier())
+	// X-tier is load-bearing: Permissive mode only prompts for X-tier tools, and
+	// suggest_plan changes session mode, so it must never auto-run.
+	if c.Tier() != capabilities.TierX {
+		t.Errorf("Tier() = %q, want TierX (so the confirm gate fires in Permissive)", c.Tier())
 	}
 	// Agent surface only — entering a session mode is meaningless over MCP.
 	if !c.Surfaces().Has(capabilities.SurfaceAgent) {

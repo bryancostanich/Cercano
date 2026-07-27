@@ -1,6 +1,7 @@
 # Model RAM estimate — formula + calibration plan
 
-> **Status (2026-07-27): plan, not started. Low priority / optional.** The
+> **Status (2026-07-27): corrected after code recon; Phase 1 (activation floor)
+> in progress on `feat/model-ram-estimate`. Low priority / optional.** The
 > mistral.rs KV-memory crash class was closed on 2026-07-26 by forcing
 > PagedAttention on Metal (commit `fad654b3`), which caps KV growth in the
 > engine itself. This plan is about making the *fit estimate* accurate — a
@@ -27,6 +28,30 @@ Two memory facts we **measured** that day and that the current estimate ignores:
 The current CLI estimate (`runtime_estimate.go`) models weights + a heuristic
 `estimateOverheadBytes` + linear KV-by-context. It does **not** model the fixed
 activation floor, so it under-predicts real footprint on large models.
+
+### What already exists (verified 2026-07-27, before executing)
+
+Recon of the real code corrected the original phasing:
+
+- **The closed-form KV term is ALREADY implemented and tested.**
+  `gguf.Meta.KVBytesPerToken()` computes `total_kv_heads × (key_dim+value_dim)
+  × 2`, deriving `head_dim` from `embedding_length / head_count` when key/value
+  lengths are absent. It already handles **GQA vs MHA** and **hybrid per-layer
+  KV** (via `KVHeadsTotal` array-sum vs. `BlockCount × HeadCountKV`). Covered by
+  `TestKVBytesPerToken_QwenMath` and GQA/hybrid tests. **So "Phase 1" as
+  originally written is done — do not rewrite it.**
+- Source of arch metadata is the **GGUF header** (`gguf.ParseMeta`, bounded
+  256 KiB read), *not* `config.json` as the original plan assumed. For
+  not-yet-downloaded catalog models, KV stays 0 and the client degrades to
+  weights + context (a remote Range-read could restore it later).
+- **Known assumption:** KV math hardcodes a 2-bytes/element (f16) cache. With
+  paged-attn on we observed `KV cache type is BF16` (also 2 bytes), so it's
+  currently consistent — but a quantized KV cache (`--pa-cache-type`) would
+  break the assumption. Flag, don't fix yet.
+
+The genuine gap is the **fixed activation floor** (`GetModelRAMEstimate` returns
+weights + KV/token + context, but nothing for the activation working set) and
+its calibration.
 
 ## The core question this plan answers
 
@@ -59,17 +84,20 @@ number does not.
 
 ## Plan (phased, each independently landable)
 
-**Phase 1 — Closed-form KV + weights (no measurement).**
-Replace the KV term with the exact `2·layers·kv_heads·head_dim·dtype_bytes`
-from `config.json`. Weights from file size. This alone makes GQA models
-estimate correctly. Pure computation; unit-testable against known configs.
+**Phase 0 — Closed-form KV + weights.** ✅ **Already done** (see "What already
+exists"). `gguf.KVBytesPerToken()` implements the exact closed form with GQA and
+hybrid handling, tested. No work; retained here only so the numbering reflects
+reality.
 
-**Phase 2 — Activation-floor formula (uncalibrated, conservative).**
-Add `f(hidden_dim, intermediate_dim, dtype, batch=1)` as the activation term,
-with a deliberately **conservative** placeholder `C` (over-estimate). Ship it
-warning-only; over-warning is safe, under-warning is not.
+**Phase 1 — Activation-floor formula (uncalibrated, conservative).**
+Add `f(hidden_dim, intermediate_dim, dtype, batch=1)` as an activation term to
+the estimate (a new field on `GetModelRAMEstimateResponse` + `gguf.Meta`
+accessor for the width fields it needs). Use a deliberately **conservative**
+placeholder `C` (over-estimate). Ship it warning-only; over-warning is safe,
+under-warning is not. Pure computation from GGUF-header width fields;
+unit-testable.
 
-**Phase 3 — Calibrate `C` (the measurement mini-project).**
+**Phase 2 — Calibrate `C` (the measurement mini-project).**
 Run the memory probe (built 2026-07-26, `/tmp/cercano_kvprobe.sh` — a
 staircase-of-prompts sampler with an fsync'd wired/free log and a free-memory
 abort floor) against **3–4 architecturally diverse models**:
@@ -79,7 +107,7 @@ abort floor) against **3–4 architecturally diverse models**:
 - ideally one non-GQA for KV cross-check.
 Fit `C` so the formula reproduces the measured floors. Replace the placeholder.
 
-**Phase 4 — Wire the corrected estimate into the fit verdicts.**
+**Phase 3 — Wire the corrected estimate into the fit verdicts.**
 `estimateFitLine` (dashboard) and `compactFitAnnot` (GGUF picker) consume the
 new numbers. Keep the verdict **conservative** (prefer "△ tight" over a wrong
 "✓ fits").

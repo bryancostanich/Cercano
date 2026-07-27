@@ -18,6 +18,15 @@ type MistralRSMemoryDefaults struct {
 func MistralRSMemoryDefaultsForRAM(bytes uint64) MistralRSMemoryDefaults {
 	const gib = uint64(1024 * 1024 * 1024)
 	gb := bytes / gib
+	// PagedAttn stays "auto" here ON PURPOSE — do not change it to "on".
+	// This file is platform-agnostic (it compiles everywhere), but mistral.rs's
+	// "auto" mode DISABLES PagedAttention on Metal/CPU, which turns off the
+	// KV-cache memory governor exactly where these fraction caps matter most.
+	// The fix lives at the platform-aware layer: the provider's argsFor()
+	// translates "auto" -> "on" only where PagedAttention is actually supported
+	// (Metal on darwin/arm64, CUDA on linux/windows). Keeping the stored value
+	// "auto" keeps a config portable across machines; hardcoding "on" here would
+	// make a Metal-authored config error on a CPU-only host.
 	out := MistralRSMemoryDefaults{
 		PagedAttn:    "auto",
 		MaxSeqs:      1,

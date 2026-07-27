@@ -170,9 +170,9 @@ func (d *runtimeDashboard) openMistralPagedAttnPicker() {
 		current = firstNonEmpty(cfg.MistralRSPagedAttn, "auto")
 	}
 	opts := []struct{ key, desc string }{
-		{"auto", "on for CUDA, off for Metal/CPU"},
+		{"auto", "on where supported (Metal/CUDA), off on CPU"},
 		{"on", "force paged attention + prefix caching"},
-		{"off", "disable paged attention"},
+		{"off", "disable paged attention (uncapped KV — risky on Metal)"},
 	}
 	rows := make([]overlay.Row, len(opts))
 	for i, o := range opts {

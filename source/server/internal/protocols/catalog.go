@@ -422,4 +422,125 @@ branch and short SHA, or "conflict at <file>".
 - A delegation being mistaken for standing permission to merge to main.
 `,
 	},
+	{
+		Name:        "planning-mode",
+		Description: "Explore read-only, then author an effort's spec and phased plan before touching anything.",
+		Domain:      DomainCore,
+		Trigger:     "When a request is large, ambiguous, or multi-step enough to warrant a written plan before any changes → propose planning (the `suggest_plan` capability), and once in planning mode pull the `planning-mode` protocol and follow it.",
+		Body: `# Planning Mode Protocol
+
+## When This Applies
+
+You are in planning mode (the read-only planning profile is active — write/exec
+tools other than file writes are fenced off). This happens when the user runs
+` + "`/plan`" + ` or approves your ` + "`suggest_plan`" + ` proposal. Your job now is NOT to
+implement. It is to understand the problem and produce two artifacts a human
+signs off on before any code is written.
+
+## The Unit of Work: an Effort
+
+An **effort** is a directory under ` + "`efforts/<slug>/`" + ` holding two files:
+
+- ` + "`spec.md`" + ` — the stable, human-owned **what & why**. The reason the effort
+  exists, the problem, the goals, the constraints, and the recorded decisions.
+  This is the fixed point everything else anchors to.
+- ` + "`plan.md`" + ` — the execution-owned **how & order**: a phased, checkbox to-do
+  list parsed into the task tree. This churns as execution proceeds.
+
+Pick a short kebab-case slug for the effort (e.g. ` + "`migrate-config-loader`" + `).
+
+## The Two Steps: Generate the Spec, then Capture the Plan
+
+### Step 1 — Generate the spec (get sign-off before the plan)
+
+1. **Explore read-only.** Read the relevant code, docs, and tests. You are
+   fenced to read + file-writes; use it to understand, not to change. Delegate
+   wide reconnaissance to a sub-agent (` + "`dispatch`" + `) so its output does not flood
+   your context.
+2. **Write ` + "`efforts/<slug>/spec.md`" + `** as human-readable prose:
+   - **Problem / motivation** — what is wrong or missing, and why it matters.
+   - **Goals** — what "done" means; and explicit non-goals.
+   - **Constraints** — what must hold (compatibility, interfaces, invariants).
+   - **Decisions** — see below. This section is mandatory whenever you made a
+     solution-shape choice.
+3. **Hand the spec to the human and get sign-off** before writing the plan. Do
+   not proceed to the plan on your own — the spec is the anchor; it must be
+   right first.
+
+### Step 2 — Capture the plan
+
+Once the spec is approved, write **` + "`efforts/<slug>/plan.md`" + `** in the format
+below. Then present the whole plan through the ` + "`y/n/d/c`" + ` gate for approval to
+begin execution.
+
+## Decisions During Generation (mandatory)
+
+The spec is where solution-shape decisions get made, so the ` + "`design-decisions`" + `
+protocol applies here — planning mode does not get a pass on it. When generation
+hits a fork with more than one genuinely viable approach, pull ` + "`design-decisions`" + `
+and follow it: enumerate the real options, quantify them on the standard axes,
+flag any hack, argue against your own recommendation, and **record the result in
+the spec's ` + "`## Decisions`" + ` section** — prose plus the protocol's standard
+options-vs-axes Markdown table, one entry per decision, each naming the chosen
+option and its rationale.
+
+Do not manufacture alternatives to look thorough. If only one approach is
+genuinely viable, record "the one viable path and why the obvious alternatives
+don't survive scrutiny" — no padded table.
+
+The recorded decisions are load-bearing later: execution's replanning reshapes
+phases *against* them (it does not silently re-litigate a settled fork), and a
+"foundational surprise" during execution is precisely "reality violated a
+premise recorded in a spec decision."
+
+## The plan.md Format
+
+Markdown on disk is canon; it is parsed into the task tree. Use exactly:
+
+- ` + "`# Effort Title`" + ` — one H1, the effort root. Prose after it (until the first
+  ` + "`##`" + `) is the root's notes.
+- ` + "`## Phase Name`" + ` — each phase is an H2. The prose after a phase heading, up to
+  its first checkbox, is the phase's notes — put the phase **objective**, the
+  **files to touch**, and the **tests to write** here as plain prose.
+- ` + "`- [ ] Task`" + ` — tasks and sub-tasks are checkboxes. Nest sub-tasks with
+  **2-space indentation** per level. Sibling order is document order — no
+  numbering needed.
+
+Status glyphs (execution updates these; you author them as pending):
+` + "`- [ ]`" + ` pending · ` + "`- [~]`" + ` in progress · ` + "`- [x]`" + ` done · ` + "`- [-]`" + ` blocked.
+
+Example:
+
+    # Migrate Config Loader
+
+    Replace the hand-rolled parser with a typed loader.
+
+    ## Phase 1 — Typed loader
+    Objective: introduce the typed loader behind the existing interface.
+    Files: config/loader.go, config/loader_test.go.
+    Tests: round-trip of every existing fixture; unknown-key error.
+
+    - [ ] Define the typed Config struct
+    - [ ] Implement Load() over the new struct
+      - [ ] Map legacy keys
+      - [ ] Error on unknown keys
+    - [ ] Delete the legacy parser
+
+## Guardrails
+
+- Do not implement during planning. Producing spec.md and plan.md is the whole
+  job; execution is a separate, approved step.
+- The spec is prose the human owns; ` + "`plan.md`" + ` is what gets parsed. Do not put
+  machine-structured data in the spec.
+- Get sign-off on the spec before writing the plan, and route the finished plan
+  through the ` + "`y/n/d/c`" + ` gate before any execution begins.
+
+## What This Prevents
+
+- Barreling into a large, ambiguous change without a reviewed plan.
+- Opaque plans no human can interrogate — recorded decisions make the "why"
+  auditable.
+- Re-litigating settled forks mid-execution, and silent spec drift.
+`,
+	},
 }

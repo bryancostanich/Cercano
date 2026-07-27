@@ -79,7 +79,7 @@ func (suggestPlanCap) Execute(ctx context.Context, call *capabilities.Call) (*ca
 		return nil, fmt.Errorf("suggest_plan: entering planning mode: %w", err)
 	}
 
-	msg := "Entered planning mode (read-only exploration). Investigate the codebase, then author the effort's spec.md (what & why) and plan.md (phased to-do) before making any changes. Write/exec tools other than file writes are unavailable until the plan is approved."
+	msg := "Entered planning mode (read-only exploration). Pull the `planning-mode` protocol (get_protocol) and follow it: investigate the codebase, then author the effort's spec.md (what & why) and plan.md (phased to-do) before making any changes. Write/exec tools other than file writes are unavailable until the plan is approved."
 	if r := strings.TrimSpace(a.Reason); r != "" {
 		msg = "Entered planning mode: " + r + ".\n\n" + msg
 	}

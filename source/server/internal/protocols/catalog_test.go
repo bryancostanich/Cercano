@@ -6,7 +6,7 @@ import (
 )
 
 func TestCoreCatalogComplete(t *testing.T) {
-	want := []string{"compute-before-simulate", "delegate-git-plumbing", "design-decisions", "systematic-debugging", "verification-strategy", "worktree-first"}
+	want := []string{"compute-before-simulate", "delegate-git-plumbing", "design-decisions", "planning-mode", "systematic-debugging", "verification-strategy", "worktree-first"}
 	for _, name := range want {
 		p, ok := Get(name)
 		if !ok {
@@ -135,5 +135,61 @@ func TestDelegateGitPlumbingNamesDispatchTool(t *testing.T) {
 	// landing in the shared main checkout unless scoped with git -C.
 	if !strings.Contains(p.Body, "git -C") {
 		t.Fatal("delegate-git-plumbing body must show the git -C <worktree> scoping guardrail")
+	}
+}
+
+func TestPlanningModeSpecifiesEffortStructure(t *testing.T) {
+	p, ok := Get("planning-mode")
+	if !ok {
+		t.Fatal("planning-mode missing")
+	}
+	// The protocol must name the effort structure and both artifacts, or the
+	// model won't know where to write or what the two files are for.
+	for _, must := range []string{"efforts/", "spec.md", "plan.md"} {
+		if !strings.Contains(p.Body, must) {
+			t.Fatalf("planning-mode body must mention %q", must)
+		}
+	}
+	// The spec-before-plan ordering and the sign-off gate are load-bearing.
+	low := strings.ToLower(p.Body)
+	if !strings.Contains(low, "sign-off") && !strings.Contains(low, "sign off") {
+		t.Fatal("planning-mode body must require sign-off on the spec before the plan")
+	}
+}
+
+func TestPlanningModeDefersToDesignDecisions(t *testing.T) {
+	p, _ := Get("planning-mode")
+	// Decisions during generation must route through the design-decisions
+	// protocol and land in the spec's ## Decisions section (design §3.5). If a
+	// future edit drops this, generation loses its decision discipline.
+	if !strings.Contains(p.Body, "design-decisions") {
+		t.Fatal("planning-mode body must reference the design-decisions protocol by name")
+	}
+	if !strings.Contains(p.Body, "## Decisions") {
+		t.Fatal("planning-mode body must require recording decisions in the spec's ## Decisions section")
+	}
+}
+
+func TestPlanningModeDocumentsPlanGlyphs(t *testing.T) {
+	p, _ := Get("planning-mode")
+	// The plan.md format must match what the taskmodel codec parses: the four
+	// checkbox glyphs and 2-space nesting. If the protocol drifts from the
+	// codec, authored plans won't round-trip.
+	for _, glyph := range []string{"- [ ]", "- [~]", "- [x]", "- [-]"} {
+		if !strings.Contains(p.Body, glyph) {
+			t.Fatalf("planning-mode body must document the %q status glyph (matches the codec)", glyph)
+		}
+	}
+	if !strings.Contains(strings.ToLower(p.Body), "2-space") {
+		t.Fatal("planning-mode body must specify 2-space nesting to match the codec")
+	}
+}
+
+func TestPlanningModeTriggerNamesSuggestPlan(t *testing.T) {
+	p, _ := Get("planning-mode")
+	// The always-on trigger should point the model at suggest_plan (how it
+	// proposes planning) and the protocol (how it executes planning).
+	if !strings.Contains(p.Trigger, "suggest_plan") {
+		t.Fatal("planning-mode trigger must name the suggest_plan capability")
 	}
 }

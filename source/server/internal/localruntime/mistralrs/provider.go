@@ -628,8 +628,16 @@ func (p *Provider) argsFor(model localruntime.ModelRecord, port int) []string {
 			args = append(args, "--paged-attn", "off")
 		}
 	}
-	if f := strings.TrimSpace(p.cfg.PAMemoryFraction); f != "" && !hasAnyFlag(extra, "--pa-memory-fraction", "--pa-memory-mb", "--pa-context-len") {
-		args = append(args, "--pa-memory-fraction", f)
+	// KV-cache budget: an absolute --pa-memory-mb cap takes precedence over the
+	// --pa-memory-fraction (they are mutually exclusive in mistral.rs). Either is
+	// suppressed if the user pinned a pa-memory flag in extra_args.
+	switch {
+	case p.cfg.PAMemoryMB > 0 && !hasAnyFlag(extra, "--pa-memory-fraction", "--pa-memory-mb", "--pa-context-len"):
+		args = append(args, "--pa-memory-mb", strconv.Itoa(p.cfg.PAMemoryMB))
+	default:
+		if f := strings.TrimSpace(p.cfg.PAMemoryFraction); f != "" && !hasAnyFlag(extra, "--pa-memory-fraction", "--pa-memory-mb", "--pa-context-len") {
+			args = append(args, "--pa-memory-fraction", f)
+		}
 	}
 	if p.cfg.MaxSeqLen > 0 && !hasFlag(extra, "--max-seq-len") {
 		args = append(args, "--max-seq-len", strconv.Itoa(p.cfg.MaxSeqLen))

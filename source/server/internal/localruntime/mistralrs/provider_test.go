@@ -213,6 +213,44 @@ func TestArgsForForcesPagedAttnOnMetal(t *testing.T) {
 	}
 }
 
+func TestArgsForPAMemoryMBTakesPrecedenceOverFraction(t *testing.T) {
+	provider := NewProvider(config.MistralRSConfig{
+		Host:             "127.0.0.1",
+		PAMemoryFraction: "0.35",
+		PAMemoryMB:       8192,
+	})
+	model := provider.modelRecord("/models/qwen3-30b/config.json", fakeFileInfo{size: 42})
+	model.LoadTarget = "/models/qwen3-30b"
+	got := provider.argsFor(model, 8123)
+	if !containsAdjacent(got, "--pa-memory-mb", "8192") {
+		t.Fatalf("expected --pa-memory-mb 8192 when PAMemoryMB set: %#v", got)
+	}
+	for _, a := range got {
+		if a == "--pa-memory-fraction" {
+			t.Fatalf("fraction must be suppressed when absolute MB cap is set: %#v", got)
+		}
+	}
+}
+
+func TestArgsForPAMemoryFractionUsedWhenNoMB(t *testing.T) {
+	provider := NewProvider(config.MistralRSConfig{
+		Host:             "127.0.0.1",
+		PAMemoryFraction: "0.35",
+		// PAMemoryMB unset (0)
+	})
+	model := provider.modelRecord("/models/qwen3-30b/config.json", fakeFileInfo{size: 42})
+	model.LoadTarget = "/models/qwen3-30b"
+	got := provider.argsFor(model, 8123)
+	if !containsAdjacent(got, "--pa-memory-fraction", "0.35") {
+		t.Fatalf("expected --pa-memory-fraction 0.35 when no MB cap: %#v", got)
+	}
+	for _, a := range got {
+		if a == "--pa-memory-mb" {
+			t.Fatalf("no --pa-memory-mb expected when PAMemoryMB unset: %#v", got)
+		}
+	}
+}
+
 func TestArgsForExtraArgsOverrideManagedMemoryCaps(t *testing.T) {
 	provider := NewProvider(config.MistralRSConfig{
 		Host:             "127.0.0.1",

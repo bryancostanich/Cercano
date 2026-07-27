@@ -1075,6 +1075,22 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		changes = append(changes, fmt.Sprintf("mistralrs.pa_memory_fraction=%s", c.MistralRS.PAMemoryFraction))
 		fmt.Printf("UpdateConfig: mistralrs.pa_memory_fraction set to %q\n", c.MistralRS.PAMemoryFraction)
 	}
+	if req.MistralrsPaMemoryMb != "" {
+		if req.MistralrsPaMemoryMb == "-" {
+			c.MistralRS.PAMemoryMB = 0
+		} else {
+			mb, err := strconv.Atoi(strings.TrimSpace(req.MistralrsPaMemoryMb))
+			if err != nil || mb <= 0 {
+				return &proto.UpdateConfigResponse{
+					Success: false,
+					Message: fmt.Sprintf("invalid mistralrs_pa_memory_mb %q: expected a positive integer (MB)", req.MistralrsPaMemoryMb),
+				}, nil
+			}
+			c.MistralRS.PAMemoryMB = mb
+		}
+		changes = append(changes, fmt.Sprintf("mistralrs.pa_memory_mb=%d", c.MistralRS.PAMemoryMB))
+		fmt.Printf("UpdateConfig: mistralrs.pa_memory_mb set to %d\n", c.MistralRS.PAMemoryMB)
+	}
 
 	if req.CompactionEnabled != "" {
 		v := strings.ToLower(strings.TrimSpace(req.CompactionEnabled))
@@ -1618,7 +1634,17 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 		MistralrsIsq:              cfg.MistralRS.ISQ,
 		MistralrsPagedAttn:        cfg.MistralRS.PagedAttn,
 		MistralrsPaMemoryFraction: cfg.MistralRS.PAMemoryFraction,
+		MistralrsPaMemoryMb:       mbToString(cfg.MistralRS.PAMemoryMB),
 	}, nil
+}
+
+// mbToString renders an absolute MB cap for the wire: 0 (unset) becomes "" so
+// the client shows a placeholder rather than a literal "0".
+func mbToString(mb int) string {
+	if mb <= 0 {
+		return ""
+	}
+	return strconv.Itoa(mb)
 }
 
 // ListModels implements proto.AgentServer — returns available models from the active local runtime.

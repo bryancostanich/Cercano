@@ -252,6 +252,7 @@ type Config struct {
 	MistralRSISQ              string
 	MistralRSPagedAttn        string
 	MistralRSPAMemoryFraction string
+	MistralRSPAMemoryMB       string
 }
 
 // GetConfig fetches the agent's current runtime config.
@@ -291,6 +292,7 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 		MistralRSISQ:              resp.GetMistralrsIsq(),
 		MistralRSPagedAttn:        resp.GetMistralrsPagedAttn(),
 		MistralRSPAMemoryFraction: resp.GetMistralrsPaMemoryFraction(),
+		MistralRSPAMemoryMB:       resp.GetMistralrsPaMemoryMb(),
 	}, nil
 }
 
@@ -343,6 +345,7 @@ type ConfigUpdate struct {
 	MistralRSISQ              string
 	MistralRSPagedAttn        string
 	MistralRSPAMemoryFraction string
+	MistralRSPAMemoryMB       string
 }
 
 // RuntimeStatus is the provider-neutral model/runtime dashboard snapshot.
@@ -1466,6 +1469,7 @@ func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, erro
 		MistralrsIsq:              u.MistralRSISQ,
 		MistralrsPagedAttn:        u.MistralRSPagedAttn,
 		MistralrsPaMemoryFraction: u.MistralRSPAMemoryFraction,
+		MistralrsPaMemoryMb:       u.MistralRSPAMemoryMB,
 	})
 	if err != nil {
 		return "", err

@@ -454,6 +454,7 @@ type MistralRSConfig struct {
 	ISQ              string        `yaml:"isq"`
 	PagedAttn        string        `yaml:"paged_attn"`         // "" | "auto" | "on" | "off"
 	PAMemoryFraction string        `yaml:"pa_memory_fraction"` // "" | 0<f<=1 as string
+	PAMemoryMB       int           `yaml:"pa_memory_mb"`        // 0 = unset; else absolute KV-cache MB cap (takes precedence over fraction)
 	MaxSeqLen        int           `yaml:"max_seq_len"`        // 0 = derive a RAM-safe cap
 	MaxSeqs          int           `yaml:"max_seqs"`           // 0 = derive a RAM-safe cap
 	MaxBatchSize     int           `yaml:"max_batch_size"`     // 0 = derive a RAM-safe cap

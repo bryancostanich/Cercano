@@ -15,6 +15,12 @@ CREATE TABLE IF NOT EXISTS conversations (
     -- to the conversation whose dispatch spawned it.
     kind      TEXT NOT NULL DEFAULT 'main',
     parent_id TEXT NOT NULL DEFAULT '',
+    -- precursor_id: temporal succession, distinct from parent_id's sub-agent
+    -- containment. When a long session rolls over, a new 'main' conversation is
+    -- created whose only inherited context is a handoff turn, and precursor_id
+    -- points at the session it succeeded. The old conversation is left intact on
+    -- disk; walk precursor_id backward (A<-B<-C) to reconstruct the lineage.
+    precursor_id TEXT NOT NULL DEFAULT '',
     -- granted_tools: for subagent rows, the comma-joined tool names the
     -- dispatch loop was granted. Tool names are identifiers with no commas, so
     -- a plain join round-trips cleanly. Lets a resumed CLI reopen each

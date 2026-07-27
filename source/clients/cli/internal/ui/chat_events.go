@@ -62,6 +62,18 @@ type permissionRequiredMsg struct {
 	destructive              bool
 }
 
+// rolloverOfferedMsg is raised by a RolloverOffered streaming event: the agent
+// is offering to start a fresh conversation, seeded only by the handoff preview,
+// because this session has grown long. The model raises a y/n confirm; yes calls
+// AcceptRollover and resumes into the returned new conversation, no calls
+// DeclineRollover. offerID correlates the reply.
+type rolloverOfferedMsg struct {
+	offerID string
+	convID  string
+	reason  string
+	preview string
+}
+
 // chatDoneMsg signals the end of a driver turn. text is an optional closing
 // line for /c (chatView appends it as a system entry). tokIn/tokOut/notice/model
 // carry main-chat turn telemetry; the /c driver never sets them so they

@@ -45,6 +45,8 @@ the tiers; within a tier, pieces are largely independent.
 3. **Task model + tracking + client surfacing** — A plan/task data model, tracking
    during execution, and streaming task state to clients so they can display it (e.g.
    a right-hand pane in the CLI when wide enough, or a bottom strip otherwise).
+   **DESIGN** — one recursive `Task` node; lifetime = container, not field; explicit
+   status. → [`task-model/design.md`](task-model/design.md)
 
 4. **Git workflow tools** — Algorithm-driven git workflows: worktree creation, branch
    management, and the rebase-onto-main-then-merge-back flow. LLM only as backup where

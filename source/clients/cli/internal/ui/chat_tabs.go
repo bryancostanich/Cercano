@@ -448,8 +448,57 @@ func (m *Model) applySubAgentEvent(ev subAgentEventMsg) {
 			tab.done = true
 			tab.errored = true
 		}
+		// A running child tab (sub-agent or activity) drives the same trailing
+		// "working" animation the main chat uses so a long, quiet phase — a
+		// planning model call, an analyze pass — reads as alive rather than
+		// frozen. Clear it the moment the tab finishes.
+		if tab.done {
+			view.SetStreaming(false)
+		} else {
+			view.SetStreaming(true)
+			view.SetTurnActivity(childTabActivityLabel(ev))
+		}
 	}
 	view.rebuild()
+	// A sub-agent that just completed SUCCESSFULLY must retire its own tab here,
+	// tied to the sub-agent's OWN completion — not left waiting for the parent
+	// turn's chatDoneMsg sweep. Otherwise a sub-agent that finishes after its
+	// parent turn's sweep already ran sits visible-but-finished until the user
+	// happens to run another full turn to completion. cleanupFinishedSubAgentTabs
+	// carries every guard we want: it spares main, the active tab the user is
+	// reading, and restored (user-reopened) tabs, and persists the dismissal so
+	// a resume doesn't reopen it.
+	//
+	// Errored tabs are deliberately NOT swept here: an "error" carries a failure
+	// message the user should be able to read, so it lingers for post-mortem and
+	// is retired later by the parent turn's sweep or explicit navigation — the
+	// same lifetime it had before this eager sweep existed.
+	//
+	// A successful tab that produced substantive output is also spared from the
+	// eager sweep: the user may want to navigate into it and read the result
+	// after it finishes. Those are retired by the parent turn's sweep like
+	// before. Only bare lifecycle-only tabs (started -> done with nothing worth
+	// reading) — the ones that otherwise orphan forever — are retired eagerly.
+	if ev.kind == "done" {
+		if tab := m.chatTabs.tabs[ev.id]; tab != nil && !subAgentTabHasSubstantiveTranscript(tab) {
+			m.cleanupFinishedSubAgentTabs()
+		}
+	}
+}
+
+// childTabActivityLabel picks the verb shown on a running child tab's trailing
+// animation. Progress events carry the freshest phase text; otherwise fall back
+// to a generic "working".
+func childTabActivityLabel(ev subAgentEventMsg) string {
+	if ev.kind == "progress" {
+		if s := strings.TrimSpace(strings.TrimPrefix(ev.text, "•")); s != "" {
+			return s
+		}
+	}
+	if strings.HasPrefix(ev.id, "activity:") {
+		return "working"
+	}
+	return "thinking"
 }
 
 // setMainChat installs v as the main tab's view, (re)initializing the tab

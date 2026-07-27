@@ -29,6 +29,30 @@ func (s *Server) BeginShutdown() {
 	}
 }
 
+// EnableIdleShutdown calls shutdown after the last SubscribeEvents client has
+// disconnected and stayed disconnected for delay. This is used only for
+// CLI-auto-launched background agents: manually started agent/dev servers keep
+// running until signaled. The delayed recheck avoids killing an agent during a
+// reconnect/resume flap.
+func (s *Server) EnableIdleShutdown(delay time.Duration, shutdown func()) {
+	if shutdown == nil {
+		return
+	}
+	if s.events == nil {
+		s.events = newEventHub()
+	}
+	s.events.setOnEmpty(func() {
+		go func() {
+			if delay > 0 {
+				time.Sleep(delay)
+			}
+			if s.events != nil && s.events.subscriberCount() == 0 {
+				shutdown()
+			}
+		}()
+	})
+}
+
 // stopBackstop bounds the hard-stop phase. grpc's Stop() cannot abort a
 // GracefulStop() that has already reached handlersWG.Wait() holding the server
 // mutex (what a wedged streaming handler causes) — Stop() blocks acquiring that

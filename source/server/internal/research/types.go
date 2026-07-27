@@ -113,6 +113,14 @@ type DeepResearchConfig struct {
 	AnalysisTruncate    int // max chars sent to model for analysis
 	MaxQueriesPerSource int // max queries to run per source
 	MaxSources          int // max sources to search
+
+	// ChaseMinRelevance is the minimum relevance score (1-5) a parent finding
+	// must have before its cited references are eligible for chasing. Refs from
+	// findings below this bar are never chased. 0 disables the gate.
+	ChaseMinRelevance int
+	// ChaseDecisionGate, when true, runs a cheap yes/no model pass on each
+	// surviving chase candidate to confirm it's worth fetching for the intent.
+	ChaseDecisionGate bool
 }
 
 // CurrentStateVersion is the version written into ResearchState.Version.
@@ -180,26 +188,32 @@ func DefaultConfig(depth string) DeepResearchConfig {
 			AnalysisTruncate:    10000,
 			MaxQueriesPerSource: 2,
 			MaxSources:          3,
+			ChaseMinRelevance:   0, // survey chases nothing anyway
+			ChaseDecisionGate:   false,
 		}
 	case "deep":
 		return DeepResearchConfig{
 			MaxPrimaryResults:   6,
-			MaxChasedTotal:      50,
-			MaxChasedPerFinding: 5,
+			MaxChasedTotal:      15,
+			MaxChasedPerFinding: 3,
 			PageTruncateChars:   12000,
 			AnalysisTruncate:    15000,
 			MaxQueriesPerSource: 3,
 			MaxSources:          5,
+			ChaseMinRelevance:   4, // only chase refs from strong findings
+			ChaseDecisionGate:   true,
 		}
 	default: // "standard" and anything unrecognised
 		return DeepResearchConfig{
 			MaxPrimaryResults:   4,
-			MaxChasedTotal:      15,
-			MaxChasedPerFinding: 3,
+			MaxChasedTotal:      8,
+			MaxChasedPerFinding: 2,
 			PageTruncateChars:   10000,
 			AnalysisTruncate:    12000,
 			MaxQueriesPerSource: 3,
 			MaxSources:          4,
+			ChaseMinRelevance:   4, // only chase refs from strong findings
+			ChaseDecisionGate:   true,
 		}
 	}
 }

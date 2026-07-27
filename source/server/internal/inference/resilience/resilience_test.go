@@ -181,6 +181,59 @@ func TestChat_QuotaFailsOverImmediately(t *testing.T) {
 	}
 }
 
+func TestChat_QuotaCooldownSkipsPrimaryOnNextTurn(t *testing.T) {
+	primary := &fakeProvider{name: "anthropic", outcome: []error{quotaErr("anthropic"), nil}}
+	backup := &fakeProvider{name: "openai"}
+	p, events, _ := build(primary, backup)
+
+	if _, err := p.Chat(context.Background(), inference.Call{Model: "claude-opus-4-8"}); err != nil {
+		t.Fatalf("first chat err = %v", err)
+	}
+	if _, err := p.Chat(context.Background(), inference.Call{Model: "claude-opus-4-8"}); err != nil {
+		t.Fatalf("second chat err = %v", err)
+	}
+	if primary.calls != 1 {
+		t.Fatalf("primary calls = %d, want 1; quota cooldown should skip primary on the next turn", primary.calls)
+	}
+	if backup.calls != 2 {
+		t.Fatalf("backup calls = %d, want 2", backup.calls)
+	}
+	if len(*events) != 1 {
+		t.Fatalf("events = %+v, want only the initial failover notice", *events)
+	}
+}
+
+func TestChat_QuotaCooldownHonorsRetryAfterAndExpires(t *testing.T) {
+	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	quota := &llm.Error{Class: llm.ErrQuota, Provider: "anthropic", StatusCode: 429,
+		RetryAfter: 2 * time.Minute, Err: errors.New("usage limit reached")}
+	primary := &fakeProvider{name: "anthropic", outcome: []error{quota, nil}}
+	backup := &fakeProvider{name: "openai"}
+	p, _, _ := build(primary, backup)
+	p.now = func() time.Time { return now }
+
+	if _, err := p.Chat(context.Background(), inference.Call{Model: "claude-opus-4-8"}); err != nil {
+		t.Fatalf("first chat err = %v", err)
+	}
+	now = now.Add(time.Minute)
+	if _, err := p.Chat(context.Background(), inference.Call{Model: "claude-opus-4-8"}); err != nil {
+		t.Fatalf("second chat err = %v", err)
+	}
+	if primary.calls != 1 {
+		t.Fatalf("primary calls after one minute = %d, want 1", primary.calls)
+	}
+	now = now.Add(time.Minute + time.Nanosecond)
+	if _, err := p.Chat(context.Background(), inference.Call{Model: "claude-opus-4-8"}); err != nil {
+		t.Fatalf("third chat err = %v", err)
+	}
+	if primary.calls != 2 {
+		t.Fatalf("primary calls after cooldown expiry = %d, want 2", primary.calls)
+	}
+	if backup.calls != 2 {
+		t.Fatalf("backup calls = %d, want 2", backup.calls)
+	}
+}
+
 func TestChat_InvalidRequestSurfaces(t *testing.T) {
 	bad := &llm.Error{Class: llm.ErrInvalidRequest, Provider: "anthropic", StatusCode: 400, Err: errors.New("bad request")}
 	primary := &fakeProvider{name: "anthropic", outcome: []error{bad}}
@@ -277,6 +330,40 @@ func TestStream_QuotaInjectsNoticeThenBackupContent(t *testing.T) {
 	}
 	if evs[1].TextDelta != "from openai" {
 		t.Errorf("content = %+v, want backup text", evs[1])
+	}
+}
+
+func TestStream_QuotaCooldownSkipsPrimaryOnNextTurnWithoutRepeatedNotice(t *testing.T) {
+	primary := &fakeProvider{name: "anthropic", outcome: []error{quotaErr("anthropic"), nil}}
+	backup := &fakeProvider{name: "openai"}
+	p, events, _ := build(primary, backup)
+
+	r, err := p.StreamChat(context.Background(), inference.Call{Model: "claude-opus-4-8"})
+	if err != nil {
+		t.Fatalf("first stream dial err = %v", err)
+	}
+	if _, err := collectStream(t, r); err != nil {
+		t.Fatalf("first stream err = %v", err)
+	}
+	r, err = p.StreamChat(context.Background(), inference.Call{Model: "claude-opus-4-8"})
+	if err != nil {
+		t.Fatalf("second stream dial err = %v", err)
+	}
+	evs, err := collectStream(t, r)
+	if err != nil {
+		t.Fatalf("second stream err = %v", err)
+	}
+	if primary.calls != 1 {
+		t.Fatalf("primary calls = %d, want 1", primary.calls)
+	}
+	if backup.calls != 2 {
+		t.Fatalf("backup calls = %d, want 2", backup.calls)
+	}
+	if len(evs) == 0 || evs[0].Type == llm.EventNotice {
+		t.Fatalf("second events = %+v, want direct backup content without a repeated notice", evs)
+	}
+	if len(*events) != 1 {
+		t.Fatalf("events = %+v, want only the initial failover event", *events)
 	}
 }
 

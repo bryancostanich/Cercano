@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -301,17 +302,43 @@ func (p *Provider) Stop(_ context.Context, instanceID string) error {
 	}
 	instance.stopping = true
 	cmd := instance.cmd
+	adopted := instance.adopted
+	ownerPID := instance.ownerPID
+	pid := instance.record.PID
 	instance.record.State = localruntime.InstanceStopped
-	if instance.adopted {
+	if adopted {
+		// An adopted sidecar is normally owned by a *sibling* agent, so we must
+		// not kill it out from under that owner. But if the recorded owner is no
+		// longer alive — or is this very process (the last owner, shutting down)
+		// — there is no sibling to protect, and leaving it running leaks the
+		// model's (potentially huge) wired GPU memory. In that case, reclaim it.
 		delete(p.running, instanceID)
 		p.mu.Unlock()
+		if pid > 0 && !siblingOwnerAlive(ownerPID) {
+			terminateGroup(pid)
+		}
 		return nil
 	}
 	p.mu.Unlock()
 	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
-	return killProcess(cmd.Process)
+	// Use the escalating group terminator (SIGTERM group -> grace -> SIGKILL):
+	// a mistral.rs wedged mid-Metal-allocation can ignore a bare SIGTERM, so a
+	// single non-escalating signal is unreliable ("hard to kill").
+	terminateGroup(cmd.Process.Pid)
+	return nil
+}
+
+// siblingOwnerAlive reports whether an adopted instance is still protected by a
+// live sibling owner. The owner is NOT a protecting sibling when it is absent
+// (pid <= 0), dead, or this very process — in those cases the caller is the last
+// owner and may reclaim the sidecar.
+func siblingOwnerAlive(ownerPID int) bool {
+	if ownerPID <= 0 || ownerPID == os.Getpid() {
+		return false
+	}
+	return processAlive(ownerPID)
 }
 
 func (p *Provider) Probe(ctx context.Context, instanceID string) (*localruntime.InstanceHealth, error) {
@@ -425,6 +452,15 @@ func (p *Provider) startProcess(instanceID, binary string, sink localruntime.Log
 	args := p.argsFor(instance.model, instance.record.Port)
 	cmd := exec.Command(binary, args...)
 	cmd.Stdin = nil
+	// Turn up mistral.rs's own tracing so its model-load and
+	// paged-attention/KV allocation lines are captured. RUST_LOG="off" in
+	// config means "don't touch it" — inherit the parent environment as-is.
+	if level := strings.TrimSpace(p.cfg.LogLevel); !strings.EqualFold(level, "off") {
+		if level == "" {
+			level = "info"
+		}
+		cmd.Env = append(os.Environ(), "RUST_LOG="+level)
+	}
 	setProcessGroup(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -455,9 +491,69 @@ func (p *Provider) startProcess(instanceID, binary string, sink localruntime.Log
 	instance.record.LastError = ""
 	p.mu.Unlock()
 	p.updateSink(sink, instance.record)
-	go p.pipeLogs(stdout, sink, instanceID, instance.model.ID, "stdout")
-	go p.pipeLogs(stderr, sink, instanceID, instance.model.ID, "stderr")
+
+	// Tee the child's stdout/stderr to a per-PID file that is fsync'd per
+	// line, so the last lines before a hard crash/power-off survive on disk.
+	// This is the durable record the in-memory sink cannot provide. A nil
+	// writer (open failure) degrades to sink-only logging.
+	lf := p.openInstanceLog(cmd.Process.Pid, sink, instanceID, instance.model.ID)
+	var logsWG sync.WaitGroup
+	logsWG.Add(2)
+	go func() { defer logsWG.Done(); p.pipeLogs(stdout, sink, lf, instanceID, instance.model.ID, "stdout") }()
+	go func() { defer logsWG.Done(); p.pipeLogs(stderr, sink, lf, instanceID, instance.model.ID, "stderr") }()
+	if lf != nil {
+		go func() { logsWG.Wait(); lf.Close() }()
+	}
 	return nil
+}
+
+// syncedLog is a mutex-guarded, fsync-per-line file writer shared by the
+// stdout and stderr pipe goroutines. Per-line Sync is deliberate: mistral.rs
+// at info level is low-frequency (load + per-request lines, not per-token), so
+// the fsync cost is negligible and buys crash-survivability of the last lines.
+type syncedLog struct {
+	mu sync.Mutex
+	f  *os.File
+}
+
+func (s *syncedLog) writeLine(stream, line string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fmt.Fprintf(s.f, "%s [%s] %s\n", time.Now().Format(time.RFC3339Nano), stream, line)
+	_ = s.f.Sync()
+}
+
+func (s *syncedLog) Close() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_ = s.f.Close()
+}
+
+// openInstanceLog creates <registry.dir>/<pid>.mistralrs.log for the durable
+// tee. Returns nil (and emits a warning) if the file can't be opened; callers
+// treat nil as "sink-only".
+func (p *Provider) openInstanceLog(pid int, sink localruntime.LogSink, runtimeID, modelID string) *syncedLog {
+	if p.registry == nil || p.registry.dir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(p.registry.dir, 0o755); err != nil {
+		p.emit(sink, "warn", runtimeID, modelID, "could not create mistral.rs log dir: "+err.Error())
+		return nil
+	}
+	path := filepath.Join(p.registry.dir, fmt.Sprintf("%d.mistralrs.log", pid))
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		p.emit(sink, "warn", runtimeID, modelID, "could not open mistral.rs log file: "+err.Error())
+		return nil
+	}
+	p.emit(sink, "info", runtimeID, modelID, "mistral.rs logs -> "+path)
+	return &syncedLog{f: f}
 }
 
 // argsFor builds the mistral.rs command line. The v0.9.0 unified CLI serves a
@@ -498,28 +594,101 @@ func (p *Provider) argsFor(model localruntime.ModelRecord, port int) []string {
 	if p.cfg.ISQ != "" {
 		args = append(args, "--isq", p.cfg.ISQ)
 	}
-	// Paged attention is the concurrency/throughput lever — OFF by default on
-	// Metal (the `auto` mode disables it there), so surface on/off explicitly.
-	// Flag names verified against v0.9.0 source (mistralrs-cli/src/args/paged_attn.rs):
-	// `--paged-attn auto|on|off` and `--pa-memory-fraction <0.0-1.0>`. We emit
-	// nothing for auto/unset so the binary keeps its own default.
-	switch strings.ToLower(strings.TrimSpace(p.cfg.PagedAttn)) {
+	// Memory/context caps are safety-critical on Apple Silicon: mistral.rs Metal
+	// allocations live in IOAccelerator unified memory, not ordinary RSS, so an
+	// uncapped 30B/262k-context model can allocate well beyond physical RAM while
+	// ps still reports tiny RSS. Config defaults compute conservative RAM-aware
+	// caps; explicit extra_args win and suppress duplicate managed flags.
+	extra := p.cfg.ExtraArgs
+	// mistral.rs's own "auto" mode ENABLES PagedAttention on CUDA but DISABLES it
+	// on Metal/CPU — which silently turns off the KV-cache memory governor on
+	// Apple Silicon, exactly where the unified-memory over-allocation above bites
+	// hardest. Since Cercano wants the governor on, translate "auto" (and the
+	// empty default) to an explicit "on" when PagedAttention is available on this
+	// platform (Metal). Explicit "on"/"off" from config always wins.
+	mode := strings.ToLower(strings.TrimSpace(p.cfg.PagedAttn))
+	if mode == "" || mode == "auto" {
+		if pagedAttnAvailable() {
+			mode = "on"
+		} else {
+			mode = "auto"
+		}
+	}
+	switch mode {
+	case "auto":
+		if !hasFlag(extra, "--paged-attn") {
+			args = append(args, "--paged-attn", "auto")
+		}
 	case "on":
-		args = append(args, "--paged-attn", "on")
+		if !hasFlag(extra, "--paged-attn") {
+			args = append(args, "--paged-attn", "on")
+		}
 	case "off":
-		args = append(args, "--paged-attn", "off")
+		if !hasFlag(extra, "--paged-attn") {
+			args = append(args, "--paged-attn", "off")
+		}
 	}
-	if f := strings.TrimSpace(p.cfg.PAMemoryFraction); f != "" {
-		args = append(args, "--pa-memory-fraction", f)
+	// KV-cache budget: an absolute --pa-memory-mb cap takes precedence over the
+	// --pa-memory-fraction (they are mutually exclusive in mistral.rs). Either is
+	// suppressed if the user pinned a pa-memory flag in extra_args.
+	switch {
+	case p.cfg.PAMemoryMB > 0 && !hasAnyFlag(extra, "--pa-memory-fraction", "--pa-memory-mb", "--pa-context-len"):
+		args = append(args, "--pa-memory-mb", strconv.Itoa(p.cfg.PAMemoryMB))
+	default:
+		if f := strings.TrimSpace(p.cfg.PAMemoryFraction); f != "" && !hasAnyFlag(extra, "--pa-memory-fraction", "--pa-memory-mb", "--pa-context-len") {
+			args = append(args, "--pa-memory-fraction", f)
+		}
 	}
-	args = append(args, p.cfg.ExtraArgs...)
+	if p.cfg.MaxSeqLen > 0 && !hasFlag(extra, "--max-seq-len") {
+		args = append(args, "--max-seq-len", strconv.Itoa(p.cfg.MaxSeqLen))
+	}
+	if p.cfg.MaxSeqs > 0 && !hasFlag(extra, "--max-seqs") {
+		args = append(args, "--max-seqs", strconv.Itoa(p.cfg.MaxSeqs))
+	}
+	if p.cfg.MaxBatchSize > 0 && !hasFlag(extra, "--max-batch-size") {
+		args = append(args, "--max-batch-size", strconv.Itoa(p.cfg.MaxBatchSize))
+	}
+	args = append(args, extra...)
 	return args
+}
+
+// pagedAttnAvailable reports whether this platform supports forcing
+// PagedAttention on. mistral.rs supports it on CUDA (Linux/Windows w/ NVIDIA)
+// and, as verified on 0.9.0, on Apple Silicon Metal (darwin/arm64). We force it
+// on there so the KV-cache memory governor is active. On other platforms
+// (e.g. darwin/amd64, plain CPU) we leave "auto" alone rather than risk
+// `--paged-attn on` erroring with "device doesn't support it".
+func pagedAttnAvailable() bool {
+	if runtime.GOOS == "darwin" {
+		return runtime.GOARCH == "arm64" // Metal
+	}
+	// CUDA builds on Linux/Windows; auto already enables PA there, and forcing
+	// "on" is harmless when a supported device is present.
+	return runtime.GOOS == "linux" || runtime.GOOS == "windows"
 }
 
 // firstUQFFShard returns the basename of the first `.uqff` file among the
 // model's download URLs (e.g. "afq4-0.uqff"), or "" if none is present. The
 // basename is what --from-uqff wants when -m points at a local directory; the
 // binary resolves it relative to that directory and auto-finds sibling shards.
+func hasAnyFlag(args []string, flags ...string) bool {
+	for _, flag := range flags {
+		if hasFlag(args, flag) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasFlag(args []string, flag string) bool {
+	for _, arg := range args {
+		if arg == flag || strings.HasPrefix(arg, flag+"=") {
+			return true
+		}
+	}
+	return false
+}
+
 func firstUQFFShard(urls []string) string {
 	for _, u := range urls {
 		name := u
@@ -760,14 +929,17 @@ func (p *Provider) updateSink(sink localruntime.LogSink, record localruntime.Ins
 	}
 }
 
-func (p *Provider) pipeLogs(r io.Reader, sink localruntime.LogSink, runtimeID, modelID, stream string) {
+func (p *Provider) pipeLogs(r io.Reader, sink localruntime.LogSink, lf *syncedLog, runtimeID, modelID, stream string) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	source := runtimeName + "." + runtimeID + "." + stream
 	for scanner.Scan() {
-		p.emit(sink, "info", runtimeID, modelID, scanner.Text(), source)
+		line := scanner.Text()
+		lf.writeLine(stream, line)
+		p.emit(sink, "info", runtimeID, modelID, line, source)
 	}
 	if err := scanner.Err(); err != nil {
+		lf.writeLine(stream, "log stream error: "+err.Error())
 		p.emit(sink, "warn", runtimeID, modelID, "log stream error: "+err.Error(), source)
 	}
 }

@@ -87,7 +87,7 @@ func TestArgsForBuildsServeCommand(t *testing.T) {
 	})
 	model := provider.modelRecord("/models/test.gguf", fakeFileInfo{size: 42})
 
-	got := provider.argsFor(model, 8123)
+	got := withoutPagedAttn(provider.argsFor(model, 8123))
 	want := []string{
 		"serve",
 		"-m", "/models/test.gguf",
@@ -107,7 +107,7 @@ func TestArgsForIncludesISQ(t *testing.T) {
 	})
 	model := provider.modelRecord("/models/test.gguf", fakeFileInfo{size: 42})
 
-	got := provider.argsFor(model, 8123)
+	got := withoutPagedAttn(provider.argsFor(model, 8123))
 	want := []string{
 		"serve",
 		"-m", "/models/test.gguf",
@@ -127,7 +127,7 @@ func TestArgsForUsesLoadTargetDirectory(t *testing.T) {
 	model := provider.modelRecord("/models/qwen3-4b/config.json", fakeFileInfo{size: 42})
 	model.LoadTarget = "/models/qwen3-4b"
 
-	got := provider.argsFor(model, 8123)
+	got := withoutPagedAttn(provider.argsFor(model, 8123))
 	want := []string{
 		"serve",
 		"-m", "/models/qwen3-4b",
@@ -152,7 +152,7 @@ func TestArgsForUQFFAddsFromUQFFShard(t *testing.T) {
 		"https://huggingface.co/mistralrs-community/Qwen3-14B-UQFF/resolve/main/afq4-0.uqff",
 	}
 
-	got := provider.argsFor(model, 8123)
+	got := withoutPagedAttn(provider.argsFor(model, 8123))
 	want := []string{
 		"serve",
 		"-m", "/models/qwen3-14b",
@@ -163,6 +163,154 @@ func TestArgsForUQFFAddsFromUQFFShard(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args mismatch:\n got: %#v\nwant: %#v", got, want)
 	}
+}
+
+func TestArgsForAddsMemorySafetyCaps(t *testing.T) {
+	provider := NewProvider(config.MistralRSConfig{
+		Host:             "127.0.0.1",
+		PagedAttn:        "auto",
+		PAMemoryFraction: "0.35",
+		MaxSeqLen:        32768,
+		MaxSeqs:          1,
+		MaxBatchSize:     1,
+	})
+	model := provider.modelRecord("/models/qwen3-30b/config.json", fakeFileInfo{size: 42})
+	model.LoadTarget = "/models/qwen3-30b"
+
+	got := provider.argsFor(model, 8123)
+	// "auto" is translated to an explicit "on" on platforms where mistral.rs
+	// supports PagedAttention (Metal/CUDA), because its native "auto" DISABLES
+	// the KV governor on Metal. On other platforms it stays "auto".
+	wantPagedAttn := "auto"
+	if pagedAttnAvailable() {
+		wantPagedAttn = "on"
+	}
+	for _, want := range [][]string{
+		{"--paged-attn", wantPagedAttn},
+		{"--pa-memory-fraction", "0.35"},
+		{"--max-seq-len", "32768"},
+		{"--max-seqs", "1"},
+		{"--max-batch-size", "1"},
+	} {
+		if !containsAdjacent(got, want[0], want[1]) {
+			t.Fatalf("args missing %s %s: %#v", want[0], want[1], got)
+		}
+	}
+}
+
+func TestArgsForForcesPagedAttnOnMetal(t *testing.T) {
+	if !pagedAttnAvailable() {
+		t.Skip("PagedAttention not forced on this platform")
+	}
+	// Empty PagedAttn (the default) must resolve to "on" where supported, so the
+	// KV-cache memory governor is active without explicit config.
+	provider := NewProvider(config.MistralRSConfig{Host: "127.0.0.1"})
+	model := provider.modelRecord("/models/qwen3-30b/config.json", fakeFileInfo{size: 42})
+	model.LoadTarget = "/models/qwen3-30b"
+	got := provider.argsFor(model, 8123)
+	if !containsAdjacent(got, "--paged-attn", "on") {
+		t.Fatalf("empty PagedAttn must force --paged-attn on where supported: %#v", got)
+	}
+}
+
+func TestArgsForPAMemoryMBTakesPrecedenceOverFraction(t *testing.T) {
+	provider := NewProvider(config.MistralRSConfig{
+		Host:             "127.0.0.1",
+		PAMemoryFraction: "0.35",
+		PAMemoryMB:       8192,
+	})
+	model := provider.modelRecord("/models/qwen3-30b/config.json", fakeFileInfo{size: 42})
+	model.LoadTarget = "/models/qwen3-30b"
+	got := provider.argsFor(model, 8123)
+	if !containsAdjacent(got, "--pa-memory-mb", "8192") {
+		t.Fatalf("expected --pa-memory-mb 8192 when PAMemoryMB set: %#v", got)
+	}
+	for _, a := range got {
+		if a == "--pa-memory-fraction" {
+			t.Fatalf("fraction must be suppressed when absolute MB cap is set: %#v", got)
+		}
+	}
+}
+
+func TestArgsForPAMemoryFractionUsedWhenNoMB(t *testing.T) {
+	provider := NewProvider(config.MistralRSConfig{
+		Host:             "127.0.0.1",
+		PAMemoryFraction: "0.35",
+		// PAMemoryMB unset (0)
+	})
+	model := provider.modelRecord("/models/qwen3-30b/config.json", fakeFileInfo{size: 42})
+	model.LoadTarget = "/models/qwen3-30b"
+	got := provider.argsFor(model, 8123)
+	if !containsAdjacent(got, "--pa-memory-fraction", "0.35") {
+		t.Fatalf("expected --pa-memory-fraction 0.35 when no MB cap: %#v", got)
+	}
+	for _, a := range got {
+		if a == "--pa-memory-mb" {
+			t.Fatalf("no --pa-memory-mb expected when PAMemoryMB unset: %#v", got)
+		}
+	}
+}
+
+func TestArgsForExtraArgsOverrideManagedMemoryCaps(t *testing.T) {
+	provider := NewProvider(config.MistralRSConfig{
+		Host:             "127.0.0.1",
+		PagedAttn:        "auto",
+		PAMemoryFraction: "0.35",
+		MaxSeqLen:        32768,
+		MaxSeqs:          1,
+		MaxBatchSize:     1,
+		ExtraArgs: []string{
+			"--paged-attn", "off",
+			"--pa-memory-mb=4096",
+			"--max-seq-len", "8192",
+			"--max-seqs", "2",
+			"--max-batch-size", "4",
+		},
+	})
+	model := provider.modelRecord("/models/qwen3-30b/config.json", fakeFileInfo{size: 42})
+	model.LoadTarget = "/models/qwen3-30b"
+
+	got := provider.argsFor(model, 8123)
+	if countFlag(got, "--paged-attn") != 1 || countFlag(got, "--max-seq-len") != 1 || countFlag(got, "--max-seqs") != 1 || countFlag(got, "--max-batch-size") != 1 {
+		t.Fatalf("managed caps should not duplicate explicit extra_args: %#v", got)
+	}
+	if containsAdjacent(got, "--pa-memory-fraction", "0.35") {
+		t.Fatalf("--pa-memory-mb extra arg should suppress managed pa_memory_fraction: %#v", got)
+	}
+}
+
+// withoutPagedAttn strips a managed "--paged-attn <mode>" pair so exact-match
+// arg tests can assert the rest of the command line independent of the
+// platform-dependent PagedAttention default (forced "on" on Metal/CUDA).
+func withoutPagedAttn(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--paged-attn" && i+1 < len(args) {
+			i++ // skip flag and its value
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out
+}
+
+func containsAdjacent(args []string, flag, value string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == value {
+			return true
+		}
+	}
+	return false
+}
+
+func countFlag(args []string, flag string) int {
+	count := 0
+	for _, arg := range args {
+		if arg == flag || strings.HasPrefix(arg, flag+"=") {
+			count++
+		}
+	}
+	return count
 }
 
 func TestArgsForSafetensorsOmitsFromUQFF(t *testing.T) {
@@ -395,11 +543,21 @@ func TestAdoptLiveSiblingReusesHealthyRegisteredServer(t *testing.T) {
 		_, _ = cmd.Process.Wait()
 	}()
 
+	// A protecting sibling must be a DIFFERENT live process, not this test
+	// process: Stop() reclaims a sidecar whose owner is our own PID (the
+	// last-owner case). Spawn a real long-lived helper to stand in as the
+	// live sibling owner.
+	sibling := exec.Command("sleep", "30")
+	if err := sibling.Start(); err != nil {
+		t.Fatalf("start sibling owner: %v", err)
+	}
+	defer func() { _ = sibling.Process.Kill(); _ = sibling.Wait() }()
+
 	provider := NewProvider(config.MistralRSConfig{Host: "127.0.0.1"})
 	provider.registry = newPidRegistry(filepath.Join(dir, "registry"))
 	provider.registry.writeOwnLocked(registryFile{
-		OwnerPID: os.Getpid(),
-		OwnerExe: filepath.Base(os.Args[0]),
+		OwnerPID: sibling.Process.Pid,
+		OwnerExe: "sleep", // must match the sibling's real command (ownerAlive check)
 		Servers: []serverEntry{{
 			PID:       cmd.Process.Pid,
 			Binary:    binary,
@@ -409,7 +567,7 @@ func TestAdoptLiveSiblingReusesHealthyRegisteredServer(t *testing.T) {
 		}},
 	})
 	// Rename the file so it describes a live sibling owner instead of this
-	// provider's own file; ownerAlive still validates against this test process.
+	// provider's own file; siblingOwnerAlive validates the sibling PID is live.
 	siblingFile := filepath.Join(provider.registry.dir, "sibling.json")
 	if err := os.Rename(provider.registry.ownFile(), siblingFile); err != nil {
 		t.Fatal(err)
@@ -429,6 +587,42 @@ func TestAdoptLiveSiblingReusesHealthyRegisteredServer(t *testing.T) {
 	}
 	if !processAlive(cmd.Process.Pid) {
 		t.Fatal("Stop on adopted instance killed sibling-owned process")
+	}
+}
+
+// TestSiblingOwnerAlive guards the Bug B fix: an adopted sidecar is protected
+// only by a DIFFERENT, live owner. Absent, dead, or self owners are not
+// protecting siblings, so the last owner may reclaim the sidecar on shutdown.
+func TestSiblingOwnerAlive(t *testing.T) {
+	if siblingOwnerAlive(0) {
+		t.Error("owner pid 0 (absent) must not be a protecting sibling")
+	}
+	if siblingOwnerAlive(-1) {
+		t.Error("negative owner pid must not be a protecting sibling")
+	}
+	if siblingOwnerAlive(os.Getpid()) {
+		t.Error("self as owner must not be a protecting sibling (last-owner case)")
+	}
+
+	// A live, different process IS a protecting sibling.
+	sib := exec.Command("sleep", "30")
+	if err := sib.Start(); err != nil {
+		t.Fatalf("start sibling: %v", err)
+	}
+	defer func() { _ = sib.Process.Kill(); _ = sib.Wait() }()
+	if !siblingOwnerAlive(sib.Process.Pid) {
+		t.Error("a live, different owner must count as a protecting sibling")
+	}
+
+	// A dead process is NOT a protecting sibling.
+	dead := exec.Command("sleep", "0.01")
+	if err := dead.Start(); err != nil {
+		t.Fatalf("start short-lived: %v", err)
+	}
+	deadPID := dead.Process.Pid
+	_ = dead.Wait()
+	if siblingOwnerAlive(deadPID) {
+		t.Error("a dead owner must not be a protecting sibling")
 	}
 }
 

@@ -24,6 +24,7 @@ import (
 	"cercano/source/server/internal/broker"
 	"cercano/source/server/internal/catalog"
 	"cercano/source/server/internal/cloudfactory"
+	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/compactiongen"
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/conversation"
@@ -90,6 +91,11 @@ type Server struct {
 	toolSvc         toolssvc.Catalog   // owns toolRegistry, capRegistry, dispatchEngine
 	persistSvc      persistsvc.Service // owns retentionSweeper, compactionGen, contextLoader
 	permBroker      permissions.Broker
+	// rollover decides when to offer an agent-initiated session rollover and
+	// enforces the decline/re-arm hysteresis. nil (or a zero-threshold config)
+	// means the feature is off and no offer is ever emitted. Wired via
+	// SetRolloverConfig from main.go.
+	rollover        *rolloverManager
 	runtimesSvc     runtimessvc.Supervisors // owns meridianMgr, runtimeManager, mcpManager
 	watchdog        *watchdog.Watchdog      // protocol-supervision gate; nil = disabled (default)
 	// Two runners coexist so the front door can pick per turn. inProcessRunner is
@@ -189,6 +195,19 @@ func (s *Server) SetPermissions(store *agent.PermissionStore, pending *agent.Pen
 	}
 	// Rebuild the in-process turn runner now that the permission broker is wired.
 	s.inProcessRunner = runnersvc.New(s.runnerDeps())
+}
+
+// SetRolloverConfig wires the agent-offered session-rollover manager. Zero
+// rawTokenThreshold AND zero reconsolidationThreshold leaves the feature off
+// (ShouldOffer always false), so callers can wire it unconditionally. Values
+// come straight from config.CompactionConfig's Rollover* fields.
+func (s *Server) SetRolloverConfig(rawTokenThreshold int64, reconsolidationThreshold int, rearmMultiple float64, verbatimTurns int) {
+	s.rollover = newRolloverManager(rolloverConfig{
+		RawTokenThreshold:        rawTokenThreshold,
+		ReconsolidationThreshold: reconsolidationThreshold,
+		RearmMultiple:            rearmMultiple,
+		VerbatimTurns:            verbatimTurns,
+	})
 }
 
 // SetMcpManager wires the MCP host manager so the RPC handlers can delegate to it.
@@ -1003,6 +1022,20 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		fmt.Printf("UpdateConfig: tool_loop.max_iterations set to %d\n", n)
 	}
 
+	if req.AgentShutdownOnLastClient != "" {
+		v := strings.ToLower(strings.TrimSpace(req.AgentShutdownOnLastClient))
+		if v != "true" && v != "false" {
+			return &proto.UpdateConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("invalid agent_shutdown_on_last_client %q: expected \"true\" or \"false\"", req.AgentShutdownOnLastClient),
+			}, nil
+		}
+		c.Agent.ShutdownOnLastClient = v == "true"
+		changes = append(changes, fmt.Sprintf("agent.shutdown_on_last_client=%s", v))
+		s.broadcastConfigChanged("agent.shutdown_on_last_client", v)
+		fmt.Printf("UpdateConfig: agent.shutdown_on_last_client set to %s\n", v)
+	}
+
 	// mistral.rs runtime settings (Runtime tab). Sparse-patch: "" = unchanged,
 	// "-" clears. Take effect on the next runtime start.
 	if req.MistralrsIsq != "" {
@@ -1041,6 +1074,22 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		}
 		changes = append(changes, fmt.Sprintf("mistralrs.pa_memory_fraction=%s", c.MistralRS.PAMemoryFraction))
 		fmt.Printf("UpdateConfig: mistralrs.pa_memory_fraction set to %q\n", c.MistralRS.PAMemoryFraction)
+	}
+	if req.MistralrsPaMemoryMb != "" {
+		if req.MistralrsPaMemoryMb == "-" {
+			c.MistralRS.PAMemoryMB = 0
+		} else {
+			mb, err := strconv.Atoi(strings.TrimSpace(req.MistralrsPaMemoryMb))
+			if err != nil || mb <= 0 {
+				return &proto.UpdateConfigResponse{
+					Success: false,
+					Message: fmt.Sprintf("invalid mistralrs_pa_memory_mb %q: expected a positive integer (MB)", req.MistralrsPaMemoryMb),
+				}, nil
+			}
+			c.MistralRS.PAMemoryMB = mb
+		}
+		changes = append(changes, fmt.Sprintf("mistralrs.pa_memory_mb=%d", c.MistralRS.PAMemoryMB))
+		fmt.Printf("UpdateConfig: mistralrs.pa_memory_mb set to %d\n", c.MistralRS.PAMemoryMB)
 	}
 
 	if req.CompactionEnabled != "" {
@@ -1581,10 +1630,21 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 		ToolLoopMaxIterations:     int32(cfg.ToolLoop.MaxIterations),
 		ModelTiers:                cfg.Models.TierSlots(),
 		ModelsDefaultProvider:     string(cfg.Models.DefaultProvider),
+		AgentShutdownOnLastClient: cfg.Agent.ShutdownOnLastClient,
 		MistralrsIsq:              cfg.MistralRS.ISQ,
 		MistralrsPagedAttn:        cfg.MistralRS.PagedAttn,
 		MistralrsPaMemoryFraction: cfg.MistralRS.PAMemoryFraction,
+		MistralrsPaMemoryMb:       mbToString(cfg.MistralRS.PAMemoryMB),
 	}, nil
+}
+
+// mbToString renders an absolute MB cap for the wire: 0 (unset) becomes "" so
+// the client shows a placeholder rather than a literal "0".
+func mbToString(mb int) string {
+	if mb <= 0 {
+		return ""
+	}
+	return strconv.Itoa(mb)
 }
 
 // ListModels implements proto.AgentServer — returns available models from the active local runtime.
@@ -2615,6 +2675,13 @@ drainLoop:
 		s.workerPostTurn(convID, tr.result)
 	}
 
+	// Turn boundary: after post-turn bookkeeping (so raw-token accounting is
+	// current) and before the final response, offer a session rollover if the
+	// conversation has grown long enough and the offer is armed. Non-blocking —
+	// we emit the offer and continue; the user replies later via the
+	// Accept/DeclineRollover RPCs. Fully off unless configured.
+	s.maybeOfferRollover(stream.Context(), convID, stream)
+
 	// Send the final response.
 	return stream.Send(&proto.StreamProcessResponse{
 		Payload: &proto.StreamProcessResponse_FinalResponse{
@@ -2804,10 +2871,40 @@ func sendRunnerEvent(stream streamResponseSender, ev runnersvc.Event) error {
 			},
 		})
 
+	case runnersvc.EventTaskChange:
+		return stream.Send(&proto.StreamProcessResponse{
+			Payload: &proto.StreamProcessResponse_TaskChange{
+				TaskChange: &proto.TaskChange{
+					Kind: ev.TaskChangeKind,
+					Task: taskSnapshotToProto(ev.TaskSnapshot),
+				},
+			},
+		})
+
 	case runnersvc.EventDone:
 		// Not used by the in-process host (result comes back from RunTurn directly).
 	}
 	return nil
+}
+
+// taskSnapshotToProto recursively maps a runner.TaskSnapshot (proto-free) to a
+// proto.TaskNode, preserving child order. It is the wire half of the store→
+// broker task-change seam.
+func taskSnapshotToProto(t runnersvc.TaskSnapshot) *proto.TaskNode {
+	node := &proto.TaskNode{
+		Id:       t.ID,
+		Title:    t.Title,
+		Status:   t.Status,
+		Notes:    t.Notes,
+		ParentId: t.ParentID,
+	}
+	if len(t.Children) > 0 {
+		node.Children = make([]*proto.TaskNode, len(t.Children))
+		for i := range t.Children {
+			node.Children[i] = taskSnapshotToProto(t.Children[i])
+		}
+	}
+	return node
 }
 
 // primaryModel returns the model the context meter measures against: the
@@ -2903,6 +3000,121 @@ func (s *Server) DenyToolCall(ctx context.Context, req *proto.DenyToolCallReques
 	}
 	ok := s.permBroker.Resolve(req.GetConversationId(), req.GetToolUseId(), agent.Decision{Allow: false, Message: req.GetMessage()})
 	return &proto.DenyToolCallResponse{Ok: ok}, nil
+}
+
+// AcceptRollover implements proto.AgentServer — the client's "yes" to a
+// RolloverOffered. Mints a new conversation seeded by the handoff artifact,
+// links it to the current one via precursor_id, and returns the new id to
+// resume into. offer_id must match the outstanding offer (else stale).
+func (s *Server) AcceptRollover(ctx context.Context, req *proto.AcceptRolloverRequest) (*proto.AcceptRolloverResponse, error) {
+	if s.rollover == nil {
+		return &proto.AcceptRolloverResponse{Ok: false, Error: "rollover not enabled"}, nil
+	}
+	convID := req.GetConversationId()
+	if !s.rollover.NoteAccepted(convID, req.GetOfferId()) {
+		return &proto.AcceptRolloverResponse{Ok: false, Error: "stale or unknown offer"}, nil
+	}
+	store := s.persistSvc.Store()
+	if store == nil {
+		return &proto.AcceptRolloverResponse{Ok: false, Error: "no store"}, nil
+	}
+	info, err := store.Get(ctx, convID)
+	if err != nil {
+		return &proto.AcceptRolloverResponse{Ok: false, Error: fmt.Sprintf("load conversation: %v", err)}, nil
+	}
+	handoff := s.buildHandoffFor(ctx, convID)
+	newID := conversation.NewID()
+	if err := store.CreateRolledOver(ctx, newID, info.ProjectDir, info.Model, convID,
+		conversation.Turn{Role: "user", Content: handoff}); err != nil {
+		return &proto.AcceptRolloverResponse{Ok: false, Error: fmt.Sprintf("create rolled-over conversation: %v", err)}, nil
+	}
+	return &proto.AcceptRolloverResponse{Ok: true, NewConversationId: newID}, nil
+}
+
+// DeclineRollover implements proto.AgentServer — the client's "no". Disarms the
+// offer until the session grows past the re-arm line (hysteresis). offer_id must
+// match the outstanding offer.
+func (s *Server) DeclineRollover(ctx context.Context, req *proto.DeclineRolloverRequest) (*proto.DeclineRolloverResponse, error) {
+	if s.rollover == nil {
+		return &proto.DeclineRolloverResponse{Ok: false}, nil
+	}
+	// Re-arm relative to the CURRENT raw-token level so growth is measured from
+	// the decline point.
+	raw := s.rawTokensFor(ctx, req.GetConversationId())
+	ok := s.rollover.NoteDeclined(req.GetConversationId(), req.GetOfferId(), raw)
+	return &proto.DeclineRolloverResponse{Ok: ok}, nil
+}
+
+// maybeOfferRollover emits a RolloverOffered event when the conversation has
+// crossed a configured threshold and no offer is currently outstanding. It is a
+// no-op when rollover is disabled, when there's no conversation, or when the
+// thresholds haven't tripped. Best effort: a send failure is swallowed (the
+// offer isn't committed via NoteOffered until the send returns) so a rollover
+// hiccup never breaks a turn.
+func (s *Server) maybeOfferRollover(ctx context.Context, convID string, stream proto.Agent_StreamProcessRequestServer) {
+	if s.rollover == nil || !s.rollover.enabled() || convID == "" {
+		return
+	}
+	raw := s.rawTokensFor(ctx, convID)
+	// Reconsolidation count is not yet tracked anywhere in the pipeline; gate on
+	// raw tokens alone for now. TODO: thread a real re-consolidation counter from
+	// the compactor state once it persists one, then pass it here.
+	reconsolidations := 0
+	offer, reason := s.rollover.ShouldOffer(convID, raw, reconsolidations)
+	if !offer {
+		return
+	}
+	offerID := s.rollover.NoteOffered(convID, raw)
+	preview := s.buildHandoffFor(ctx, convID)
+	if err := stream.Send(&proto.StreamProcessResponse{
+		Payload: &proto.StreamProcessResponse_RolloverOffered{
+			RolloverOffered: &proto.RolloverOffered{
+				OfferId:          offerID,
+				ConversationId:   convID,
+				Reason:           reason,
+				RawTokens:        raw,
+				Reconsolidations: int32(reconsolidations),
+				HandoffPreview:   strings.ToValidUTF8(preview, "\uFFFD"),
+			},
+		},
+	}); err != nil {
+		// The event didn't reach the client. We already recorded it as
+		// outstanding; that's fine — ShouldOffer won't spam re-offers, and the
+		// next turn boundary can surface it again once the client reconnects and
+		// a fresh offer arms after re-arm growth. Nothing to unwind here.
+		return
+	}
+}
+
+// rawTokensFor returns the current uncompacted token total for a conversation,
+// reusing the same accounting GetContextUsage exposes. 0 on any error (the
+// caller treats 0 as "below threshold").
+func (s *Server) rawTokensFor(ctx context.Context, convID string) int64 {
+	if convID == "" {
+		return 0
+	}
+	usage, err := s.persistSvc.GetContextUsage(ctx, &proto.GetContextUsageRequest{ConversationId: convID})
+	if err != nil || usage == nil {
+		return 0
+	}
+	return int64(usage.GetRawTokens())
+}
+
+// buildHandoffFor assembles the durable handoff string for a conversation: its
+// current consolidated summary (if any) plus the verbatim recent tail. Best
+// effort — an empty/absent summary just yields the tail, and a store error
+// yields an empty string rather than failing the rollover.
+func (s *Server) buildHandoffFor(ctx context.Context, convID string) string {
+	store := s.persistSvc.Store()
+	if store == nil {
+		return ""
+	}
+	var summary compaction.StructuredSummary
+	if comp, err := store.GetCompaction(ctx, convID); err == nil && comp.ConsolidatedJSON != "" {
+		_ = json.Unmarshal([]byte(comp.ConsolidatedJSON), &summary)
+	}
+	turns, _ := store.GetTurns(ctx, convID)
+	return buildHandoff(summary, turns, s.rollover.verbatimTurns())
 }
 
 // GetProviderCapabilities implements proto.AgentServer.

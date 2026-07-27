@@ -53,6 +53,15 @@ func (c Config) WorkerIdleTimeout() time.Duration {
 //
 // Route is an open enum — future bridges (CCR, etc.) get their own value and
 // adapter-specific handling. Empty string is treated as "direct".
+// AgentConfig controls the lifecycle of the background cercano agent process.
+// The default favors laptop/workstation safety: a CLI-auto-launched agent exits
+// when its last CLI client disconnects, which also stops managed local runtime
+// sidecars. Set shutdown_on_last_client=false for intentional background or
+// autonomous-agent deployments that should outlive the UI.
+type AgentConfig struct {
+	ShutdownOnLastClient bool `yaml:"shutdown_on_last_client"`
+}
+
 type CloudProfile struct {
 	Name    string `yaml:"name"`
 	Flavor  string `yaml:"flavor"`            // messages | chat_completions | responses | bedrock
@@ -264,6 +273,7 @@ type Config struct {
 	// WorkerIdleTimeout()), NOT "disabled" — omitting the field should still
 	// reap. To DISABLE reaping entirely set a negative value (< 0).
 	WorkerIdleTimeoutSeconds int               `yaml:"worker_idle_timeout_seconds,omitempty"`
+	Agent                    AgentConfig       `yaml:"agent"`
 	LlamaServer              LlamaServerConfig `yaml:"llama_server"`
 	MistralRS                MistralRSConfig   `yaml:"mistralrs"`
 	Compaction               CompactionConfig  `yaml:"compaction"`
@@ -297,7 +307,28 @@ type CompactionConfig struct {
 	SegmentTokens         int             `yaml:"segment_tokens"`
 	VerbatimRecent        int             `yaml:"verbatim_recent"`
 	HardOverridePct       float64         `yaml:"hard_override_pct"`
-	Retention             RetentionConfig `yaml:"retention"`
+	// CompactedBudgetPct bounds the whole compacted backlog (the consolidated
+	// summary preamble) as a fraction of the active chat model's context
+	// window. When the merged ledger exceeds this, the compactor prunes it
+	// deterministically instead of re-summarizing. Replaces the old fixed
+	// ~16k-token ceiling that crushed long sessions on large-window models.
+	// Zero uses the built-in default (see compactedBudgetDefaultPct).
+	CompactedBudgetPct float64         `yaml:"compacted_budget_pct"`
+	// TieredRetentionSegments enables gentle, age-based degradation for very
+	// long sessions (the fallback when a rollover is declined): the newest N
+	// segment summaries stay verbatim, older ones shed transient detail, and
+	// the oldest keep only durable recall (Goal/State/Files). Zero disables
+	// tiering — the ledger is only bounded by CompactedBudgetPct's hard prune.
+	TieredRetentionSegments int             `yaml:"tiered_retention_segments"`
+	// Rollover* arm and shape the agent's offer to start a fresh conversation
+	// seeded only by a durable handoff when a session grows very long (D). All
+	// off by default: RolloverRawTokenThreshold==0 AND
+	// RolloverReconsolidationThreshold==0 means no offer is ever made.
+	RolloverRawTokenThreshold        int64   `yaml:"rollover_raw_token_threshold"`        // cumulative raw tokens that arms an offer; 0 disables the token trigger
+	RolloverReconsolidationThreshold int     `yaml:"rollover_reconsolidation_threshold"`  // OR-trigger on re-consolidation count; 0 ignores it
+	RolloverRearmMultiple            float64 `yaml:"rollover_rearm_multiple"`             // growth multiple past a decline before re-offering; <=1 => default 1.5
+	RolloverVerbatimTurns            int     `yaml:"rollover_verbatim_turns"`             // turns kept verbatim in the handoff; <=0 => default 6
+	Retention                        RetentionConfig `yaml:"retention"`
 	// ToolElisionOnly, when true (and Enabled is true), keeps the compaction
 	// machinery running on its normal triggers — background schedule, debounce,
 	// activation floor, hard-override — but a pass never calls the summarizer.
@@ -423,9 +454,18 @@ type MistralRSConfig struct {
 	ISQ              string        `yaml:"isq"`
 	PagedAttn        string        `yaml:"paged_attn"`         // "" | "auto" | "on" | "off"
 	PAMemoryFraction string        `yaml:"pa_memory_fraction"` // "" | 0<f<=1 as string
+	PAMemoryMB       int           `yaml:"pa_memory_mb"`        // 0 = unset; else absolute KV-cache MB cap (takes precedence over fraction)
+	MaxSeqLen        int           `yaml:"max_seq_len"`        // 0 = derive a RAM-safe cap
+	MaxSeqs          int           `yaml:"max_seqs"`           // 0 = derive a RAM-safe cap
+	MaxBatchSize     int           `yaml:"max_batch_size"`     // 0 = derive a RAM-safe cap
 	ExtraArgs        []string      `yaml:"extra_args"`
 	ReadinessTimeout string        `yaml:"readiness_timeout"`
 	Restart          RestartConfig `yaml:"restart"`
+	// LogLevel sets the RUST_LOG value passed to the mistral.rs child so its
+	// own tracing output (model load, paged-attention/KV allocation, per-request
+	// token counts) is captured. "" defaults to "info". Set "off" to leave the
+	// child's RUST_LOG untouched (inherits the parent environment).
+	LogLevel string `yaml:"log_level"`
 }
 
 // RestartConfig controls sidecar restart behavior.
@@ -456,6 +496,7 @@ func (r *RestartConfig) UnmarshalYAML(value *yaml.Node) error {
 
 // Defaults returns a Config with default values.
 func Defaults() Config {
+	mistralMem := defaultMistralRSMemoryDefaults()
 	return Config{
 		OllamaURL:     "http://localhost:11434",
 		OpenRuntime:   "llama_server",
@@ -467,6 +508,7 @@ func Defaults() Config {
 		// DefaultWorkerIdleTimeout. Left as the zero value so an omitted field and
 		// the default behave identically.
 		WorkerIdleTimeoutSeconds: 0,
+		Agent:                    AgentConfig{ShutdownOnLastClient: true},
 		Models:                   ModelsConfig{DefaultProvider: ProviderOpen},
 		// Seed the vendor-keyed cloud cost tables. Closed cloud model
 		// selection resolves here — keyed by the active profile's vendor.
@@ -501,8 +543,13 @@ func Defaults() Config {
 			},
 		},
 		MistralRS: MistralRSConfig{
-			ModelDirs: []string{"~/.cercano/models"},
-			Host:      "127.0.0.1",
+			ModelDirs:        []string{"~/.cercano/models"},
+			Host:             "127.0.0.1",
+			PagedAttn:        mistralMem.PagedAttn,
+			PAMemoryFraction: mistralMem.PAMemoryFraction,
+			MaxSeqLen:        mistralMem.MaxSeqLen,
+			MaxSeqs:          mistralMem.MaxSeqs,
+			MaxBatchSize:     mistralMem.MaxBatchSize,
 			// Longer than llama-server's 60s: mistral.rs may apply in-situ
 			// quantization (ISQ) to an unquantized model at load, which is slow
 			// for large models.
@@ -845,6 +892,21 @@ func applyMistralRSDefaults(cfg *MistralRSConfig, defaults MistralRSConfig) {
 	}
 	if cfg.ReadinessTimeout == "" {
 		cfg.ReadinessTimeout = defaults.ReadinessTimeout
+	}
+	if strings.TrimSpace(cfg.PagedAttn) == "" {
+		cfg.PagedAttn = defaults.PagedAttn
+	}
+	if strings.TrimSpace(cfg.PAMemoryFraction) == "" {
+		cfg.PAMemoryFraction = defaults.PAMemoryFraction
+	}
+	if cfg.MaxSeqLen == 0 {
+		cfg.MaxSeqLen = defaults.MaxSeqLen
+	}
+	if cfg.MaxSeqs == 0 {
+		cfg.MaxSeqs = defaults.MaxSeqs
+	}
+	if cfg.MaxBatchSize == 0 {
+		cfg.MaxBatchSize = defaults.MaxBatchSize
 	}
 	if cfg.Restart.MaxAttempts == 0 {
 		cfg.Restart.MaxAttempts = defaults.Restart.MaxAttempts

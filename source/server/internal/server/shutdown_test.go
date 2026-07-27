@@ -194,6 +194,45 @@ func TestServer_BeginShutdown_NilHub(t *testing.T) {
 	(&Server{}).BeginShutdown()
 }
 
+func TestServer_EnableIdleShutdownRunsAfterLastSubscriberDisconnects(t *testing.T) {
+	s := &Server{events: newEventHub()}
+	done := make(chan struct{}, 1)
+	s.EnableIdleShutdown(0, func() { done <- struct{}{} })
+
+	_, unsub1 := s.events.subscribe()
+	_, unsub2 := s.events.subscribe()
+	unsub1()
+	select {
+	case <-done:
+		t.Fatal("idle shutdown fired before the last subscriber disconnected")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	unsub2()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("idle shutdown did not fire after last subscriber disconnected")
+	}
+}
+
+func TestServer_EnableIdleShutdownRechecksAfterGrace(t *testing.T) {
+	s := &Server{events: newEventHub()}
+	done := make(chan struct{}, 1)
+	s.EnableIdleShutdown(30*time.Millisecond, func() { done <- struct{}{} })
+
+	_, unsub1 := s.events.subscribe()
+	unsub1()
+	_, unsub2 := s.events.subscribe()
+	defer unsub2()
+
+	select {
+	case <-done:
+		t.Fatal("idle shutdown fired despite a subscriber reconnecting during grace")
+	case <-time.After(80 * time.Millisecond):
+	}
+}
+
 type shutdownRuntimeProvider struct {
 	stopped []string
 }

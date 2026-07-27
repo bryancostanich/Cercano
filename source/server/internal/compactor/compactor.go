@@ -18,10 +18,30 @@ import (
 // Config holds the (configurable) compaction thresholds. Defaults are derived
 // from the real-session corpus (612 sessions): activate at 40k, freeze 8k
 // segments, keep 6 recent turns verbatim.
+//
+// CompactedBudgetTokens bounds the whole compacted backlog (the consolidated
+// send-view preamble). When the merged ledger renders larger than this, the
+// pass shrinks it deterministically (see pruneToFit) instead of re-summarizing
+// it. It is a token budget, not a segment count: callers derive it from the
+// active model's context window (e.g. a fraction of ModelMax) so a 200k-window
+// model isn't crushed to the old fixed 16k. Zero falls back to the legacy
+// segment-relative bound so existing construction sites keep working.
+//
+// TieredRetentionSegments enables gentle, always-on degradation for very long
+// sessions (the fallback when a user declines a session rollover). When set to
+// R > 0, the newest R segment summaries are kept verbatim, older-but-not-oldest
+// segments shed transient chatter (Proposals, OpenThreads), and the oldest
+// segments keep only their durable, actionable recall (Goal, State, Files).
+// This shapes the ledger by age BEFORE it is Reduced and before the hard
+// CompactedBudgetTokens backstop fires, so recent-tail fidelity is preserved
+// structurally rather than incidentally. Zero disables tiering (the ledger is
+// merged whole and only the hard budget bounds it).
 type Config struct {
-	ActivationFloorTokens int
-	SegmentTokens         int
-	VerbatimRecent        int
+	ActivationFloorTokens   int
+	SegmentTokens           int
+	VerbatimRecent          int
+	CompactedBudgetTokens   int
+	TieredRetentionSegments int
 }
 
 func DefaultConfig() Config {
@@ -61,11 +81,145 @@ func liveTurns(turns []conversation.Turn, frozenThrough int64) []conversation.Tu
 // persisted between passes. The generator reschedules while more remains.
 const maxSegmentsPerPass = 4
 
-// reconsolidateThresholdSegments bounds the consolidated summary: when the
-// consolidated view renders to more than this many segments' worth of tokens,
-// the pass re-consolidates (summarizes the summaries) so compaction output
-// shrinks instead of accumulating forever.
-const reconsolidateThresholdSegments = 2
+// legacyBoundSegments is the fallback bound (in SegmentTokens units) used only
+// when Config.CompactedBudgetTokens is unset (0). Live construction sites derive
+// a window-relative budget instead; this keeps zero-value Configs (older tests,
+// ad-hoc callers) working with the historical behavior's shape.
+const legacyBoundSegments = 4
+
+// budgetTokens resolves the token ceiling for the consolidated backlog: the
+// explicit window-relative budget when set, else a segment-relative fallback.
+func budgetTokens(cfg Config) int {
+	if cfg.CompactedBudgetTokens > 0 {
+		return cfg.CompactedBudgetTokens
+	}
+	seg := cfg.SegmentTokens
+	if seg <= 0 {
+		seg = DefaultConfig().SegmentTokens
+	}
+	return legacyBoundSegments * seg
+}
+
+// pruneToFit shrinks a consolidated summary under a token budget by dropping
+// whole ledger entries in recency order (oldest first) until the rendered
+// send-view fits. It never paraphrases: an entry is kept verbatim or removed
+// whole. Goal and State (single lines, high-signal) are preserved. Files are
+// pruned last because a file's "latest state" is often the most actionable
+// recall. If even the skeleton exceeds budget the summary is returned as-is —
+// dropping Goal/State to hit a byte target would defeat the purpose.
+func pruneToFit(s compaction.StructuredSummary, budget int, tok contextmeter.Tokenizer) compaction.StructuredSummary {
+	fits := func(v compaction.StructuredSummary) bool {
+		return compaction.TotalTokens(tok, compaction.AssembleSendView(v, nil)) <= budget
+	}
+	if fits(s) {
+		return s
+	}
+	// Prune order: OpenThreads (transient), then Proposals, Decisions, Files —
+	// oldest entries first within each. dropOldest removes one entry from the
+	// front (the earliest-seen, since MergeSummaries appends in chronological
+	// order) of the first non-empty list in this priority.
+	for !fits(s) {
+		switch {
+		case len(s.OpenThreads) > 0:
+			s.OpenThreads = s.OpenThreads[1:]
+		case len(s.Proposals) > 0:
+			s.Proposals = s.Proposals[1:]
+		case len(s.Decisions) > 0:
+			s.Decisions = s.Decisions[1:]
+		case len(s.Files) > 0:
+			s.Files = dropOldestFile(s.Files)
+		default:
+			return s // only Goal/State left — return rather than gut it
+		}
+	}
+	return s
+}
+
+// dropOldestFile removes one file entry. Map iteration order is unstable, so it
+// drops the lexically-first path for determinism (the alternative — tracking
+// insertion order — would require changing Files' type across the codebase).
+func dropOldestFile(files map[string]string) map[string]string {
+	if len(files) == 0 {
+		return files
+	}
+	var first string
+	for p := range files {
+		if first == "" || p < first {
+			first = p
+		}
+	}
+	delete(files, first)
+	return files
+}
+
+// applyTieredRetention shapes an ordered (oldest→newest) list of per-segment
+// summaries by age, so a very long session degrades gently rather than hitting
+// the hard budget as a cliff. It is the fallback engaged when a user declines a
+// session rollover: the active thread stays high-fidelity while ancient history
+// compresses.
+//
+// Three tiers, split by position in the list:
+//   - recent  (the newest `recent` segments): kept verbatim.
+//   - middle  (everything between): Proposals and OpenThreads dropped — these
+//     are transient ("awaiting decision", "next steps") and least useful once
+//     the conversation has moved well past them. Decisions/Files/Goal/State stay.
+//   - ancient (the oldest, when there are more than 2*recent segments): keep
+//     only the durable, actionable recall — Goal, State, Files. Decisions,
+//     Proposals, OpenThreads dropped.
+//
+// Goal, State, and Files survive every tier, so MergeSummaries' Goal
+// (first-non-empty), State (last-non-empty) and Files (union) semantics are
+// never starved. Pure and deterministic: a fixed function of the input list.
+// recent<=0 is a no-op (tiering disabled). It returns a new slice; inputs are
+// not mutated (Files maps are shallow-copied before keys are dropped).
+func applyTieredRetention(parts []compaction.StructuredSummary, recent int) []compaction.StructuredSummary {
+	if recent <= 0 || len(parts) <= recent {
+		return parts // nothing old enough to compress
+	}
+	// Ancient tier only opens once there is a full middle band behind the recent
+	// window, so a moderately long session degrades in one step (middle) before
+	// the harsher ancient step ever applies.
+	ancientEnd := 0
+	if len(parts) > 2*recent {
+		ancientEnd = len(parts) - 2*recent
+	}
+	recentStart := len(parts) - recent
+
+	out := make([]compaction.StructuredSummary, len(parts))
+	for i, s := range parts {
+		switch {
+		case i >= recentStart:
+			out[i] = s // recent: verbatim
+		case i < ancientEnd:
+			out[i] = compaction.StructuredSummary{
+				Goal:  s.Goal,
+				State: s.State,
+				Files: copyFiles(s.Files),
+			}
+		default: // middle
+			out[i] = compaction.StructuredSummary{
+				Goal:      s.Goal,
+				State:     s.State,
+				Files:     copyFiles(s.Files),
+				Decisions: s.Decisions,
+			}
+		}
+	}
+	return out
+}
+
+// copyFiles shallow-copies a Files map so tier-stripping a segment never mutates
+// the caller's stored summaries. A nil map stays nil (Reduce tolerates it).
+func copyFiles(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
 
 // Advance runs one stateful compaction pass. It freezes new segments of the
 // eligible (older, un-frozen) history and re-reduces; frozen segments are reused
@@ -236,25 +390,33 @@ func Advance(ctx context.Context, turns []conversation.Turn, state conversation.
 	}
 	parts = append(parts, newParts...)
 
-	consolidated := compaction.Reduce(parts)
+	// Age-shape the ledger before reducing: the recent tail stays verbatim while
+	// older segments shed transient (then all-but-durable) detail. This is the
+	// gentle-degradation fallback for sessions that decline a rollover; it runs
+	// ahead of the hard-budget pruneToFit backstop below and, when disabled
+	// (TieredRetentionSegments==0), is a no-op. We reduce a tiered *view* but do
+	// NOT persist it back over `parts` — the raw per-segment summaries stay on
+	// disk so a later, larger-window model (or a relaxed config) can re-derive a
+	// richer consolidation. Only the hard-budget path (below) collapses parts.
+	tieredParts := applyTieredRetention(parts, cfg.TieredRetentionSegments)
+	consolidated := compaction.Reduce(tieredParts)
 
-	// Bound the consolidated summary: if it has grown past a couple segments'
-	// worth of tokens, re-consolidate (summarize the summaries) so output shrinks
-	// instead of accumulating forever. On failure return the ORIGINAL state so a
-	// grown state is never persisted.
-	bound := reconsolidateThresholdSegments * cfg.SegmentTokens
+	// Bound the consolidated summary against the compaction budget. When it has
+	// grown past budget, shrink it DETERMINISTICALLY (pruneToFit) rather than
+	// re-summarizing the summaries. The old path fed the already-structured
+	// ledger back through the free-text summarizer, which — because the input is
+	// already reduced — could only paraphrase or invent (the exact defect
+	// reduce.go removed from Reduce), and did so on every re-cross, eroding
+	// detail monotonically. Deterministic pruning drops whole entries (recency
+	// order) so load-bearing shapes (signatures, config, tier lists) survive
+	// verbatim or not at all — never mangled into prose.
+	bound := budgetTokens(cfg)
 	if compaction.TotalTokens(tok, compaction.AssembleSendView(consolidated, nil)) > bound {
-		re, err := summarize(ctx, compaction.AssembleSendView(consolidated, nil))
-		if err != nil {
-			return state, false, false, err
-		}
-		if re.IsEmpty() {
-			// Same guard as the segment loop: replacing every frozen summary
-			// with nothing would erase the whole compacted history in one pass.
-			return state, false, false, fmt.Errorf("summarizer returned an empty re-consolidation — refusing to replace %d segment summaries with nothing", len(parts))
-		}
-		parts = []compaction.StructuredSummary{re}
-		consolidated = re
+		consolidated = pruneToFit(consolidated, bound, tok)
+		// Collapse the per-segment parts into the single pruned ledger: the
+		// budget applies to the consolidated view, and keeping the fat
+		// pre-prune parts would just re-inflate on the next Reduce.
+		parts = []compaction.StructuredSummary{consolidated}
 	}
 
 	segJSON, _ := json.Marshal(parts)

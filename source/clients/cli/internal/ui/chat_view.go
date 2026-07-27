@@ -292,6 +292,26 @@ func (c *chatView) toolEntryIndices() []int {
 // to keep firing — without this, the spinner on the active tool line would
 // freeze once the assistant text starts streaming (the placeholder loop's
 // stop condition).
+// resolveStaleInProgressTools flips any tool rows still marked in-progress to a
+// terminal (errored) state. Called at turn termination: a tool left in-progress
+// after the turn ends never received its completion event, and while it stays
+// in-progress hasInProgressTool keeps the animation tick alive indefinitely.
+func (c *chatView) resolveStaleInProgressTools() {
+	changed := false
+	for _, e := range c.entries {
+		if e.Tool != nil && e.Tool.Status == ToolStatusInProgress {
+			e.Tool.Status = ToolStatusError
+			if e.Tool.ResultSummary == "" {
+				e.Tool.ResultSummary = "interrupted"
+			}
+			changed = true
+		}
+	}
+	if changed {
+		c.markTranscriptDirty()
+	}
+}
+
 func (c *chatView) hasInProgressTool() bool {
 	for _, e := range c.entries {
 		if e.Tool != nil && e.Tool.Status == ToolStatusInProgress {
@@ -755,7 +775,21 @@ func (c *chatView) SetTurnStatus(ts turnStatus) {
 // multi-step turn. The model toggles this true on Submit and false on
 // chatDoneMsg / stream cancel.
 func (c *chatView) SetStreaming(s bool) {
+	if s && !c.streaming && c.turn.start.IsZero() {
+		c.turn.start = time.Now()
+	}
 	c.streaming = s
+}
+
+// SetTurnActivity sets the verb shown on the trailing "working" line (e.g.
+// "planning sources…", "working"). Child tabs use this so their animated
+// status reflects the current phase. It also anchors the elapsed clock the
+// first time activity begins so the line doesn't show a bogus duration.
+func (c *chatView) SetTurnActivity(activity string) {
+	if c.turn.start.IsZero() {
+		c.turn.start = time.Now()
+	}
+	c.turn.activity = activity
 }
 
 // IsBetweenPhases reports whether the turn is streaming but no visible

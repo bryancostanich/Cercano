@@ -111,6 +111,43 @@ func TestTable_WrappableWrapsToFit(t *testing.T) {
 	}
 }
 
+func TestTable_WideDecisionMatrix_RendersGridAt126(t *testing.T) {
+	// A decision matrix: a rigid key column plus several long option columns.
+	// Natural widths blow well past 126, but because every option column may
+	// wrap, the overflow distributes across them and the table still grids
+	// instead of collapsing to a transpose.
+	tbl := Table{
+		Cols: []Column{
+			{Name: "Axis"},
+			{Name: "A: Observer list", Wrappable: true},
+			{Name: "B: Return event from method", Wrappable: true},
+			{Name: "C: Single injected sink", Wrappable: true},
+		},
+		Rows: []map[string]string{
+			{"Axis": "Cost", "A: Observer list": "Medium: listener slice, mutex, subscribe/unsubscribe, ~40 lines", "B: Return event from method": "Low: widen return signatures, no new state", "C: Single injected sink": "Low-Medium: one field + nil-check per mutation, ~15 lines"},
+			{"Axis": "Risk", "A: Observer list": "Leaked subscriptions, listener-ordering, lock held during callback deadlock risk", "B: Return event from method": "Caller can silently drop the event (forgets to forward)", "C: Single injected sink": "Sink set once; misuse is hard. Nil sink = no-op"},
+			{"Axis": "Reward", "A: Observer list": "Many independent consumers, fully decoupled", "B: Return event from method": "Dead simple; no store-side state at all", "C: Single injected sink": "One clean seam; matches one server bridges reality"},
+		},
+	}
+	plain := stripAnsi(tbl.Render(126, theme.NewStyles(theme.Cracker())))
+	// It must be a grid, not a transpose.
+	if !strings.Contains(plain, "┌") || !strings.Contains(plain, "┼") || !strings.Contains(plain, "┘") {
+		t.Fatalf("expected a grid at 126 cols, got transpose/other:\n%s", plain)
+	}
+	// No line may exceed the budget.
+	for _, line := range strings.Split(plain, "\n") {
+		if w := len([]rune(line)); w > 126 {
+			t.Errorf("line exceeds 126 cols (%d): %q", w, line)
+		}
+	}
+	// Nothing dropped: distinctive words from every column survive.
+	for _, want := range []string{"subscribe", "signatures", "nil-check", "deadlock", "decoupled", "bridges"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("expected %q preserved, got:\n%s", want, plain)
+		}
+	}
+}
+
 func TestTable_TransposesWhenStillTooNarrow(t *testing.T) {
 	// Wide column names + narrow target → even the highest-priority column
 	// won't fit in grid form (border + 2-col pad + header text > maxWidth),

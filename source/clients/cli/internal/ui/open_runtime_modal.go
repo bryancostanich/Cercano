@@ -132,7 +132,7 @@ func newOpenRuntimeInstallModal(st agentclient.OpenRuntimeStatus) *openRuntimeIn
 // llama_server.default_model and switches the runtime in one round trip
 // (runtime defaults to llama_server on the F1 path where no switch was
 // queued). ag may be nil in tests — the dispatch cmd is only run on Enter.
-func (mo *openRuntimeInstallModal) setPickModel(ag *agentclient.Client, runtime string, models []agentclient.RuntimeModel) {
+func (mo *openRuntimeInstallModal) setPickModel(ag *agentclient.Client, runtime string, models []agentclient.RuntimeModel, sysRAMBytes int64) {
 	mo.state = runtimeModalPickModel
 	if runtime == "" {
 		runtime = "llama_server"
@@ -145,6 +145,14 @@ func (mo *openRuntimeInstallModal) setPickModel(ag *agentclient.Client, runtime 
 				annot += "  "
 			}
 			annot += formatBytes(mdl.SizeBytes)
+		}
+		// Surface a coarse fit verdict at load time — this picker is the one
+		// path that loads a model without showing the dashboard's fit line.
+		if fit := compactFitAnnot(mdl.SizeBytes, sysRAMBytes); fit != "" {
+			if annot != "" {
+				annot += "  "
+			}
+			annot += fit
 		}
 		rows = append(rows, overlay.Row{
 			Key:   mdl.Path,
@@ -177,8 +185,9 @@ func pickerBoxWidth(frameW int) int {
 // modalModelsLoadedMsg carries the reply to fetchModalGGUFsCmd — the
 // downloaded llama_server GGUFs, or the fetch error.
 type modalModelsLoadedMsg struct {
-	models []agentclient.RuntimeModel
-	err    error
+	models      []agentclient.RuntimeModel
+	sysRAMBytes int64 // from the catalog; drives the picker's fit glyph
+	err         error
 }
 
 // fetchModalGGUFsCmd lists runtime models and filters to downloaded
@@ -198,7 +207,7 @@ func fetchModalGGUFsCmd(ag *agentclient.Client) tea.Cmd {
 				ggufs = append(ggufs, mdl)
 			}
 		}
-		return modalModelsLoadedMsg{models: ggufs}
+		return modalModelsLoadedMsg{models: ggufs, sysRAMBytes: catalog.SystemRAMBytes}
 	}
 }
 

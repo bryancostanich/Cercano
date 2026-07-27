@@ -15,6 +15,7 @@ const (
 	runtimeActionOllamaURL           = "ollama_url"
 	runtimeActionMistralPagedAttn    = "mistralrs_paged_attn"
 	runtimeActionMistralPAMemoryFrac = "mistralrs_pa_memory_fraction"
+	runtimeActionMistralPAMemoryMB   = "mistralrs_pa_memory_mb"
 	runtimeActionMistralISQ          = "mistralrs_isq"
 )
 
@@ -76,6 +77,12 @@ func mistralRuntimeRows(cfg *agentclient.Config) []runtimeDashboardActionRow {
 			Value:  firstNonEmpty(cfg.MistralRSPAMemoryFraction, "—"),
 			Hint:   "enter to edit · restart",
 			Action: runtimeDashboardAction{Kind: runtimeActionMistralPAMemoryFrac},
+		},
+		{
+			Label:  "pa-memory-mb",
+			Value:  firstNonEmpty(cfg.MistralRSPAMemoryMB, "—"),
+			Hint:   "enter to edit · absolute cap, wins over fraction · restart",
+			Action: runtimeDashboardAction{Kind: runtimeActionMistralPAMemoryMB},
 		},
 		{
 			Label:  "isq",
@@ -170,9 +177,9 @@ func (d *runtimeDashboard) openMistralPagedAttnPicker() {
 		current = firstNonEmpty(cfg.MistralRSPagedAttn, "auto")
 	}
 	opts := []struct{ key, desc string }{
-		{"auto", "on for CUDA, off for Metal/CPU"},
+		{"auto", "on where supported (Metal/CUDA), off on CPU"},
 		{"on", "force paged attention + prefix caching"},
-		{"off", "disable paged attention"},
+		{"off", "disable paged attention (uncapped KV — risky on Metal)"},
 	}
 	rows := make([]overlay.Row, len(opts))
 	for i, o := range opts {
@@ -196,6 +203,18 @@ func (d *runtimeDashboard) openMistralPAMemoryFractionPicker() {
 		func(c *agentclient.Config) string { return c.MistralRSPAMemoryFraction },
 		func(v string) agentclient.ConfigUpdate {
 			return agentclient.ConfigUpdate{MistralRSPAMemoryFraction: dashIfEmpty(v)}
+		},
+	)
+}
+
+// openMistralPAMemoryMBPicker edits the absolute KV-cache MB cap. When set it
+// takes precedence over the fraction. Blanking clears it (sends "-").
+func (d *runtimeDashboard) openMistralPAMemoryMBPicker() {
+	d.openMistralTextPicker(
+		"pa-memory-mb",
+		func(c *agentclient.Config) string { return c.MistralRSPAMemoryMB },
+		func(v string) agentclient.ConfigUpdate {
+			return agentclient.ConfigUpdate{MistralRSPAMemoryMB: dashIfEmpty(v)}
 		},
 	)
 }

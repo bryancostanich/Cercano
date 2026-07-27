@@ -175,6 +175,13 @@ service Agent {
   rpc AllowToolCall (AllowToolCallRequest) returns (AllowToolCallResponse) {}
   rpc DenyToolCall  (DenyToolCallRequest)  returns (DenyToolCallResponse)  {}
 
+  // AcceptRollover + DeclineRollover are how a client replies to a
+  // RolloverOffered stream event. Accept mints a new conversation seeded by the
+  // handoff artifact and returns its id (the client resumes into it). Decline
+  // re-arms the offer after further growth.
+  rpc AcceptRollover  (AcceptRolloverRequest)  returns (AcceptRolloverResponse)  {}
+  rpc DeclineRollover (DeclineRolloverRequest) returns (DeclineRolloverResponse) {}
+
   // GetProviderCapabilities reports what the active provider supports.
   rpc GetProviderCapabilities (GetProviderCapabilitiesRequest) returns (GetProviderCapabilitiesResponse) {}
 
@@ -244,7 +251,55 @@ message StreamProcessResponse {
     RouteSelected     route_selected = 9;
     WatchdogEvent     watchdog_event = 10;
     SubAgentEvent     sub_agent_event = 11;
+    RolloverOffered   rollover_offered = 12;
+    TaskChange        task_change = 13;
   }
+}
+
+// TaskNode is one node of a planning/session task tree, carried on the wire as
+// the recursive snapshot the task store emits. Children are in significant
+// (document) order — the client renders them top-to-bottom as given. status is
+// one of "pending" | "in_progress" | "done" | "blocked". notes carries phase
+// prose (objective/files/tests) verbatim for phase nodes; empty otherwise.
+message TaskNode {
+  string id = 1;
+  string title = 2;
+  string status = 3;
+  string notes = 4;
+  string parent_id = 5;       // empty for a root
+  repeated TaskNode children = 6;
+}
+
+// TaskChange is a single task-store mutation surfaced to every client attached
+// to the conversation. It rides the same per-conversation stream + turn-broker
+// fan-out as token deltas and tool calls (task-model design §11): the store
+// emits one ChangeEvent per mutation, the server republishes it here. task is a
+// full subtree snapshot of the affected node — for an "added" phase it carries
+// all its sub-tasks in one message, and "removed" is a single event for the
+// subtree root (not one per descendant).
+message TaskChange {
+  string kind = 1;            // "added" | "updated" | "removed"
+  TaskNode task = 2;          // post-mutation snapshot (pre-deletion for "removed")
+}
+
+// RolloverOffered is emitted at a turn boundary when a session has grown long
+// enough (by cumulative raw tokens and/or re-consolidation count) that the agent
+// offers to start a fresh conversation seeded only by a durable handoff. It
+// mirrors PermissionRequired: the client shows a prompt and replies with exactly
+// one of AcceptRollover / DeclineRollover, correlated by offer_id. Declining
+// re-arms after further growth (hysteresis lives server-side). The offer never
+// blocks the stream — it rides the next turn boundary and the user answers when
+// ready.
+message RolloverOffered {
+  string offer_id        = 1; // correlates the Accept/Decline reply
+  string conversation_id = 2; // the session being offered a rollover
+  string reason          = 3; // human-readable trigger, e.g. "raw context 180k tokens"
+  int64  raw_tokens      = 4; // cumulative raw tokens at the offer
+  int32  reconsolidations = 5; // how many times the ledger has been re-consolidated
+  // handoff_preview is the artifact that would seed the new session if accepted:
+  // the rendered structured summary followed by the last N verbatim turns. Shown
+  // so the user can judge whether the thread will survive the boundary.
+  string handoff_preview = 6;
 }
 
 // RouteSelected announces which engine is handling the turn, emitted once the
@@ -365,6 +420,10 @@ message UpdateConfigRequest {
   string mistralrs_isq = 24;                 // "-" clears; else ISQ level (e.g. Q4K, Q8_0, AFQ4)
   string mistralrs_paged_attn = 25;          // "auto" | "on" | "off"
   string mistralrs_pa_memory_fraction = 26;  // "-" clears; else 0 < f <= 1 (KV-cache budget)
+  string mistralrs_pa_memory_mb = 29;        // "-" clears; else absolute KV-cache MB cap (takes precedence over fraction)
+  // Agent lifecycle. Sparse-patch: "" = unchanged, "true"/"false".
+  // Controls whether a CLI-auto-launched agent exits when its last client detaches.
+  string agent_shutdown_on_last_client = 28;
 }
 
 // Runtime configuration update response.
@@ -924,6 +983,9 @@ message GetConfigResponse {
   string mistralrs_isq = 26;
   string mistralrs_paged_attn = 27;
   string mistralrs_pa_memory_fraction = 28;
+  string mistralrs_pa_memory_mb = 31;
+  // Agent lifecycle.
+  bool agent_shutdown_on_last_client = 30;
 }
 
 message ListSkillsRequest {}
@@ -1084,6 +1146,17 @@ message AllowToolCallResponse { bool ok = 1; }
 
 message DenyToolCallRequest  { string tool_use_id = 1; string conversation_id = 2; string message = 3; }
 message DenyToolCallResponse { bool ok = 1; }
+
+// AcceptRollover confirms a RolloverOffered: the server creates a new
+// conversation whose precursor_id points at conversation_id, seeds it with the
+// handoff artifact, and returns new_conversation_id for the client to resume.
+message AcceptRolloverRequest  { string offer_id = 1; string conversation_id = 2; }
+message AcceptRolloverResponse { bool ok = 1; string new_conversation_id = 2; string error = 3; }
+
+// DeclineRollover dismisses the offer; the server re-arms it after further
+// growth (hysteresis). No new conversation is created.
+message DeclineRolloverRequest  { string offer_id = 1; string conversation_id = 2; }
+message DeclineRolloverResponse { bool ok = 1; }
 
 // Provider capability snapshot — clients hide tool-call UI when the active
 // provider can't drive native tool use.

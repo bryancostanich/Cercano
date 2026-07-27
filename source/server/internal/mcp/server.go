@@ -303,6 +303,7 @@ type FetchRequest struct {
 type ResearchRequest struct {
 	Query      string `json:"query" jsonschema:"The research question to investigate via web search and local model analysis."`
 	MaxResults int    `json:"max_results,omitempty" jsonschema:"Maximum number of pages to fetch and analyze (default 5)."`
+	OutputDir  string `json:"output_dir,omitempty" jsonschema:"Persist a resumable research_state.json into this directory so an interrupted run can resume from the last completed phase. A relative path is resolved against project_dir. Omit for an in-memory-only run."`
 	ProjectDir string `json:"project_dir,omitempty" jsonschema:"Project root directory. Enables project-aware responses when .cercano/context.md exists."`
 	cloudTokenFields
 }
@@ -756,7 +757,21 @@ func (s *Server) handleResearch(ctx context.Context, request *gomcp.CallToolRequ
 
 	pipeline := web.NewResearchPipeline(modelCaller, searcher, fetcher)
 	notifyProgress(ctx, request, "Researching locally...", 0, 2)
-	result, err := pipeline.Run(ctx, s.withContext(args.ProjectDir, args.Query), args.MaxResults)
+
+	// When an output_dir is supplied the run becomes durable and resumable: a
+	// research_state.json is written after each phase so an interrupted run can
+	// resume. A relative dir is resolved against the project root, matching the
+	// deep_research convention. An empty dir keeps the classic in-memory run.
+	outputDir := args.OutputDir
+	if outputDir != "" && !filepath.IsAbs(outputDir) {
+		base := args.ProjectDir
+		if base == "" {
+			base, _ = os.Getwd()
+		}
+		outputDir = filepath.Join(base, outputDir)
+	}
+
+	result, err := pipeline.RunDurable(ctx, s.withContext(args.ProjectDir, args.Query), args.MaxResults, outputDir)
 	if err != nil {
 		return nil, nil, fmt.Errorf("cercano_research: %w", err)
 	}

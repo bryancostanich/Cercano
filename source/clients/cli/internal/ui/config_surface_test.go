@@ -44,6 +44,32 @@ func TestConfigSurfaceUpAtFirstFieldReturnsToTabBar(t *testing.T) {
 	}
 }
 
+// TestConfigSurfaceUpAtRuntimeDashboardTopReturnsToTabBar mirrors the
+// settings-form climb for the runtime dashboard (used by both /m and
+// /runtime): with the body focused and its active cursor on row 0, Up hands
+// focus back to the tab bar instead of being swallowed as a no-op.
+func TestConfigSurfaceUpAtRuntimeDashboardTopReturnsToTabBar(t *testing.T) {
+	d := &runtimeDashboard{focus: runtimeFocusActions, operationCursor: 0}
+	m := Model{content: d, configSurface: &configSurface{active: configTabRuntime, focused: false}}
+
+	m, _, handled := m.handleConfigSurfaceKey(tea.KeyPressMsg{Code: tea.KeyUp})
+	if !handled || !m.configSurface.focused {
+		t.Fatalf("Up at the dashboard's first row should focus the tab bar: handled=%v", handled)
+	}
+}
+
+// TestConfigSurfaceUpMidRuntimeDashboardFallsThrough is the negative case: Up
+// away from row 0 must NOT climb back — it belongs to the dashboard's own
+// cursor movement.
+func TestConfigSurfaceUpMidRuntimeDashboardFallsThrough(t *testing.T) {
+	d := &runtimeDashboard{focus: runtimeFocusActions, operationCursor: 2}
+	m := Model{content: d, configSurface: &configSurface{active: configTabRuntime, focused: false}}
+
+	if _, _, handled := m.handleConfigSurfaceKey(tea.KeyPressMsg{Code: tea.KeyUp}); handled {
+		t.Fatal("Up mid-list should fall through to the dashboard, not be consumed by the surface")
+	}
+}
+
 // TestConfigSurfaceBodyKeysFallThrough confirms that, once in the body, a
 // non-navigation key the surface doesn't own falls through to the page (so the
 // form/dashboard/context viewer keep their own controls).

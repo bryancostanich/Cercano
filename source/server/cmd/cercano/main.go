@@ -988,6 +988,12 @@ func runSetup(installEngine bool) {
 				break
 			}
 			cfg.OllamaURL = remoteURL
+			// The user explicitly chose to use this remote Ollama server, so
+			// make it the active engine regardless of whether it responds to
+			// this reachability probe right now (see waitForEngine below) —
+			// otherwise cfg.OpenRuntime stays at its "llama_server" default
+			// and inference/model listing silently ignores the URL just saved.
+			cfg.OpenRuntime = "ollama"
 			if err := waitForEngine(checkOllama, cfg.OllamaURL, 3); err != nil {
 				fmt.Fprintf(os.Stderr, "  WARN: %v\n", err)
 				fmt.Fprintln(os.Stderr, "  Saving the URL anyway — check that Ollama is reachable there and re-run 'cercano setup'.")

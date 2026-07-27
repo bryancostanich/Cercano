@@ -104,8 +104,9 @@ func (m *Model) buildConfigTabPage(tab configTab) (contentPage, tea.Cmd) {
 //     to a tab, ↓/Enter drop into the body, Esc closes the surface.
 //   - Body focused: Shift+Tab lifts focus back up to the tab bar (a reliable
 //     keyboard path back to the tabs from any tab), Esc also steps back up (a
-//     second Esc there closes), and ↑ at a form's first field climbs back to
-//     the strip. Every other key falls through to the page.
+//     second Esc there closes), and ↑ at a form's first field or the runtime
+//     dashboard's first row climbs back to the strip. Every other key falls
+//     through to the page.
 //
 // ←/→ are only claimed while the tab bar is focused, so a focused select field
 // (which uses ←/→ to change its value) and the context viewer (←/→ expand and
@@ -150,9 +151,14 @@ func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 		cs.focused = true
 		return m, nil, true
 	}
-	// ↑ at a settings form's first field also climbs back to the tab bar.
+	// ↑ at a settings form's first field, or the runtime dashboard's first
+	// row, also climbs back to the tab bar.
 	if key == "up" {
 		if sp, ok := m.content.(*settingsPage); ok && sp.form != nil && sp.form.Cursor() == 0 {
+			cs.focused = true
+			return m, nil, true
+		}
+		if rd, ok := m.content.(*runtimeDashboard); ok && rd.atSectionTop() {
 			cs.focused = true
 			return m, nil, true
 		}

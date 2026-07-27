@@ -28,6 +28,7 @@ const (
 	ResultOpenThemeSettings // like ResultOpenSettings but lands on the UI/theme tab
 	ResultOpenHistoryPicker
 	ResultOpenRuntimeDashboard
+	ResultOpenRuntimeConfig // like ResultOpenRuntimeDashboard but lands on the Runtime tab (active runtime + open-model picker)
 	ResultOpenContextView
 	ResultOpenWizard
 	ResultOpenTrajectoryExport  // Text field optionally carries a prefilled output path

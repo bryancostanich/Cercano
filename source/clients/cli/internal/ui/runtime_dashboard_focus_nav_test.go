@@ -6,6 +6,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
+	"cercano/source/clients/cli/internal/theme"
 	"cercano/source/server/pkg/agentclient"
 )
 
@@ -71,6 +72,57 @@ func TestShiftTabWalksSectionsInReverse(t *testing.T) {
 	d.Update(shiftTab) // -> back out to catalog
 	if d.focus != runtimeFocusCatalog {
 		t.Fatal("shift+tab past the first section should return to the catalog")
+	}
+}
+
+// The Runtime tab never renders a catalog block (fullContent's mode guard),
+// so it must never start — or land back on — catalog focus: doing so would
+// route arrow keys/Enter to an invisible model list instead of the visible
+// runtime picker, and Enter there fires a real download (see
+// newRuntimeDashboard's mode comment).
+func TestNewRuntimeDashboard_RuntimeModeStartsOnActions(t *testing.T) {
+	d, _ := newRuntimeDashboard(nil, theme.Palette{}, theme.Styles{}, 80, 24, dashboardModeRuntime)
+	if d.focus != runtimeFocusActions {
+		t.Fatalf("Runtime-mode dashboard focus = %v, want runtimeFocusActions", d.focus)
+	}
+}
+
+func TestNewRuntimeDashboard_ModelsModeStartsOnCatalog(t *testing.T) {
+	d, _ := newRuntimeDashboard(nil, theme.Palette{}, theme.Styles{}, 80, 24, dashboardModeModels)
+	if d.focus != runtimeFocusCatalog {
+		t.Fatalf("Models-mode dashboard focus = %v, want runtimeFocusCatalog (unchanged default)", d.focus)
+	}
+}
+
+// In Runtime mode there is exactly one action section (the runtime/open-model
+// picker), so Tab past its end must wrap within actions, not fall back to the
+// nonexistent catalog.
+func TestAdvanceSection_RuntimeModeWrapsWithinActions(t *testing.T) {
+	d := newCatalogTestDashboard(runtimeDashboardSnapshot{Config: &agentclient.Config{}})
+	d.mode = dashboardModeRuntime
+	d.focus = runtimeFocusActions
+	d.catalogSearch = textinput.New()
+
+	starts := d.sectionStarts()
+	if len(starts) == 0 {
+		t.Fatal("expected at least one action section in runtime mode")
+	}
+	d.operationCursor = starts[len(starts)-1]
+
+	d.advanceSection(1)
+	if d.focus != runtimeFocusActions {
+		t.Fatalf("focus after wrap = %v, want runtimeFocusActions (never catalog in runtime mode)", d.focus)
+	}
+	if d.operationCursor != starts[0] {
+		t.Fatalf("operationCursor after wrap = %d, want %d (first section)", d.operationCursor, starts[0])
+	}
+
+	d.advanceSection(-1)
+	if d.focus != runtimeFocusActions {
+		t.Fatalf("focus after reverse wrap = %v, want runtimeFocusActions", d.focus)
+	}
+	if d.operationCursor != starts[len(starts)-1] {
+		t.Fatalf("operationCursor after reverse wrap = %d, want %d (last section)", d.operationCursor, starts[len(starts)-1])
 	}
 }
 

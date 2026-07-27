@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -118,6 +119,80 @@ func TestInMemoryManagerStartStop(t *testing.T) {
 	}
 	if len(instances) != 1 || instances[0].State != InstanceStopped {
 		t.Fatalf("expected stopped instance, got %#v", instances)
+	}
+}
+
+// reloadableProvider is a fakeProvider that also implements ConfigReloader,
+// recording the config pushed into it so a test can assert Restart reloaded.
+type reloadableProvider struct {
+	fakeProvider
+	mu       sync.Mutex
+	reloaded []config.Config
+}
+
+func (r *reloadableProvider) ReloadConfig(cfg config.Config) {
+	r.mu.Lock()
+	r.reloaded = append(r.reloaded, cfg)
+	r.mu.Unlock()
+}
+
+func (r *reloadableProvider) reloadCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.reloaded)
+}
+
+func TestInMemoryManagerRestartReloadsConfig(t *testing.T) {
+	provider := &reloadableProvider{fakeProvider: fakeProvider{name: "mistralrs"}}
+	// The loader stands in for reading the edited config file: it hands back a
+	// sentinel MaxSeqLen the provider records so we can confirm the reload used
+	// freshly loaded config, not the boot-time value.
+	loaded := config.Config{MistralRS: config.MistralRSConfig{MaxSeqLen: 32768}}
+	manager := NewManager(WithConfigLoader(func() (config.Config, error) {
+		return loaded, nil
+	}))
+	manager.RegisterProvider(provider)
+
+	instance, err := manager.Start(context.Background(), StartRequest{
+		Runtime: "mistralrs",
+		ModelID: "model-a",
+	})
+	if err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	if provider.reloadCount() != 0 {
+		t.Fatalf("expected no reload before restart, got %d", provider.reloadCount())
+	}
+
+	if _, err := manager.Restart(context.Background(), RestartRequest{InstanceID: instance.ID}); err != nil {
+		t.Fatalf("Restart returned error: %v", err)
+	}
+	if provider.reloadCount() != 1 {
+		t.Fatalf("expected exactly one reload during restart, got %d", provider.reloadCount())
+	}
+	if got := provider.reloaded[0].MistralRS.MaxSeqLen; got != 32768 {
+		t.Fatalf("restart reloaded stale config: MaxSeqLen=%d, want 32768", got)
+	}
+}
+
+func TestInMemoryManagerRestartReloadFailureIsNonFatal(t *testing.T) {
+	provider := &reloadableProvider{fakeProvider: fakeProvider{name: "mistralrs"}}
+	// A loader error must not wedge restart: the relaunch proceeds with the
+	// provider's existing config rather than failing.
+	manager := NewManager(WithConfigLoader(func() (config.Config, error) {
+		return config.Config{}, errors.New("boom: malformed config")
+	}))
+	manager.RegisterProvider(provider)
+
+	instance, err := manager.Start(context.Background(), StartRequest{Runtime: "mistralrs", ModelID: "model-a"})
+	if err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	if _, err := manager.Restart(context.Background(), RestartRequest{InstanceID: instance.ID}); err != nil {
+		t.Fatalf("Restart should tolerate a config load failure, got: %v", err)
+	}
+	if provider.reloadCount() != 0 {
+		t.Fatalf("expected no reload applied on load failure, got %d", provider.reloadCount())
 	}
 }
 

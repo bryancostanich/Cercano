@@ -261,7 +261,7 @@ func (p *Provider) liveSiblingFor(ctx context.Context, modelPath, binary string,
 			if server.Port <= 0 {
 				continue
 			}
-			endpoint := fmt.Sprintf("http://%s:%d", healthHost(p.cfg.Host), server.Port)
+			endpoint := fmt.Sprintf("http://%s:%d", healthHost(p.snapshot().Host), server.Port)
 			probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 			err := p.probeReady(probeCtx, endpoint)
 			cancel()
@@ -304,7 +304,7 @@ type runtimeProcess struct {
 }
 
 func (p *Provider) commandUsesConfiguredModelDir(command string) bool {
-	for _, dir := range p.cfg.ModelDirs {
+	for _, dir := range p.snapshot().ModelDirs {
 		expanded, err := expandPath(dir)
 		if err != nil || expanded == "" {
 			continue

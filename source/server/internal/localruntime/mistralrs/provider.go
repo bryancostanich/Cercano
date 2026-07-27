@@ -55,6 +55,18 @@ type managedInstance struct {
 }
 
 func NewProvider(cfg config.MistralRSConfig) *Provider {
+	return &Provider{
+		cfg:      withDefaults(cfg),
+		client:   &http.Client{Timeout: 2 * time.Second},
+		running:  make(map[string]*managedInstance),
+		registry: newPidRegistry(defaultRegistryDir()),
+	}
+}
+
+// withDefaults normalizes a MistralRSConfig the same way whether it arrives at
+// construction or via a later ReloadConfig, so a reloaded config behaves
+// identically to a boot-time one.
+func withDefaults(cfg config.MistralRSConfig) config.MistralRSConfig {
 	if cfg.Host == "" {
 		cfg.Host = "127.0.0.1"
 	}
@@ -67,12 +79,29 @@ func NewProvider(cfg config.MistralRSConfig) *Provider {
 	if cfg.Restart.MaxAttempts == 0 {
 		cfg.Restart.MaxAttempts = 3
 	}
-	return &Provider{
-		cfg:      cfg,
-		client:   &http.Client{Timeout: 2 * time.Second},
-		running:  make(map[string]*managedInstance),
-		registry: newPidRegistry(defaultRegistryDir()),
-	}
+	return cfg
+}
+
+// ReloadConfig swaps in a freshly loaded configuration under the provider lock.
+// The manager calls this before a restart so the relaunched process picks up
+// config edits (e.g. mistralrs.max_seq_len or pa_memory_mb) instead of reusing
+// the config captured at server boot. Only the mistralrs slice of the full
+// config is consumed; other runtimes' config is ignored here.
+func (p *Provider) ReloadConfig(cfg config.Config) {
+	p.mu.Lock()
+	p.cfg = withDefaults(cfg.MistralRS)
+	p.mu.Unlock()
+}
+
+// snapshot returns a by-value copy of the current config under the read lock.
+// ReloadConfig can swap p.cfg concurrently with Discover ticks and the restart
+// supervisor, so every reader takes a snapshot once at entry and works from the
+// local copy — a struct-valued copy can't tear the way repeated p.cfg.X reads
+// could once the field became mutable.
+func (p *Provider) snapshot() config.MistralRSConfig {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.cfg
 }
 
 func (p *Provider) Name() string { return runtimeName }
@@ -96,9 +125,10 @@ func (p *Provider) Capabilities() localruntime.RuntimeCapabilities {
 }
 
 func (p *Provider) Discover(ctx context.Context) ([]localruntime.ModelRecord, error) {
+	cfg := p.snapshot()
 	var models []localruntime.ModelRecord
 	var errs []error
-	for _, dir := range p.cfg.ModelDirs {
+	for _, dir := range cfg.ModelDirs {
 		select {
 		case <-ctx.Done():
 			return models, ctx.Err()
@@ -127,7 +157,7 @@ func (p *Provider) Discover(ctx context.Context) ([]localruntime.ModelRecord, er
 				return nil
 			}
 			model := p.modelRecord(path, info)
-			model.Active = matchesModel(p.cfg.DefaultModel, model)
+			model.Active = matchesModel(cfg.DefaultModel, model)
 			models = append(models, model)
 			return nil
 		})
@@ -173,7 +203,7 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 		return nil, err
 	}
 
-	host := p.cfg.Host
+	host := p.snapshot().Host
 	endpoint := fmt.Sprintf("http://%s:%d", healthHost(host), port)
 	id := runtimeName + ":" + shortID(model.Path) + ":" + strconv.Itoa(port)
 	now := time.Now()
@@ -259,7 +289,7 @@ func (p *Provider) adoptLiveSibling(ctx context.Context, model localruntime.Mode
 	if !ok {
 		return nil, false
 	}
-	host := p.cfg.Host
+	host := p.snapshot().Host
 	endpoint := fmt.Sprintf("http://%s:%d", healthHost(host), sibling.server.Port)
 	id := runtimeName + ":" + shortID(model.Path) + ":" + strconv.Itoa(sibling.server.Port)
 	inst := &managedInstance{
@@ -374,7 +404,7 @@ func (p *Provider) Probe(ctx context.Context, instanceID string) (*localruntime.
 func (p *Provider) resolveModel(ctx context.Context, requested string) (localruntime.ModelRecord, error) {
 	requested = strings.TrimSpace(requested)
 	if requested == "" {
-		requested = strings.TrimSpace(p.cfg.DefaultModel)
+		requested = strings.TrimSpace(p.snapshot().DefaultModel)
 	}
 	models, err := p.Discover(ctx)
 	if err != nil && len(models) == 0 {
@@ -404,8 +434,9 @@ func (p *Provider) resolveModel(ctx context.Context, requested string) (localrun
 }
 
 func (p *Provider) resolveBinary() (string, error) {
-	if p.cfg.Binary != "" {
-		path, err := expandPath(p.cfg.Binary)
+	cfg := p.snapshot()
+	if cfg.Binary != "" {
+		path, err := expandPath(cfg.Binary)
 		if err != nil {
 			return "", err
 		}
@@ -431,10 +462,11 @@ func (p *Provider) resolveBinary() (string, error) {
 }
 
 func (p *Provider) choosePort() (int, error) {
-	if p.cfg.Port > 0 {
-		return p.cfg.Port, nil
+	cfg := p.snapshot()
+	if cfg.Port > 0 {
+		return cfg.Port, nil
 	}
-	ln, err := net.Listen("tcp", net.JoinHostPort(healthHost(p.cfg.Host), "0"))
+	ln, err := net.Listen("tcp", net.JoinHostPort(healthHost(cfg.Host), "0"))
 	if err != nil {
 		return 0, err
 	}
@@ -449,13 +481,14 @@ func (p *Provider) startProcess(instanceID, binary string, sink localruntime.Log
 	if !ok {
 		return fmt.Errorf("mistral.rs instance %q not found", instanceID)
 	}
-	args := p.argsFor(instance.model, instance.record.Port)
+	cfg := p.snapshot()
+	args := p.argsFor(cfg, instance.model, instance.record.Port)
 	cmd := exec.Command(binary, args...)
 	cmd.Stdin = nil
 	// Turn up mistral.rs's own tracing so its model-load and
 	// paged-attention/KV allocation lines are captured. RUST_LOG="off" in
 	// config means "don't touch it" — inherit the parent environment as-is.
-	if level := strings.TrimSpace(p.cfg.LogLevel); !strings.EqualFold(level, "off") {
+	if level := strings.TrimSpace(cfg.LogLevel); !strings.EqualFold(level, "off") {
 		if level == "" {
 			level = "info"
 		}
@@ -564,7 +597,7 @@ func (p *Provider) openInstanceLog(pid int, sink localruntime.LogSink, runtimeID
 // `serve` level via DefaultModelOptions+ServerOptions; model format is
 // auto-detected (the default `Auto` ModelType), so a UQFF/safetensors dir or a
 // single GGUF file all load through the same `-m` target.
-func (p *Provider) argsFor(model localruntime.ModelRecord, port int) []string {
+func (p *Provider) argsFor(cfg config.MistralRSConfig, model localruntime.ModelRecord, port int) []string {
 	// mistral.rs is pointed at the model directory for a multi-file
 	// safetensors/UQFF model (LoadTarget), or the file itself for a single-file
 	// GGUF (Path when LoadTarget is empty).
@@ -591,22 +624,22 @@ func (p *Provider) argsFor(model localruntime.ModelRecord, port int) []string {
 			args = append(args, "--from-uqff", shard)
 		}
 	}
-	if p.cfg.ISQ != "" {
-		args = append(args, "--isq", p.cfg.ISQ)
+	if cfg.ISQ != "" {
+		args = append(args, "--isq", cfg.ISQ)
 	}
 	// Memory/context caps are safety-critical on Apple Silicon: mistral.rs Metal
 	// allocations live in IOAccelerator unified memory, not ordinary RSS, so an
 	// uncapped 30B/262k-context model can allocate well beyond physical RAM while
 	// ps still reports tiny RSS. Config defaults compute conservative RAM-aware
 	// caps; explicit extra_args win and suppress duplicate managed flags.
-	extra := p.cfg.ExtraArgs
+	extra := cfg.ExtraArgs
 	// mistral.rs's own "auto" mode ENABLES PagedAttention on CUDA but DISABLES it
 	// on Metal/CPU — which silently turns off the KV-cache memory governor on
 	// Apple Silicon, exactly where the unified-memory over-allocation above bites
 	// hardest. Since Cercano wants the governor on, translate "auto" (and the
 	// empty default) to an explicit "on" when PagedAttention is available on this
 	// platform (Metal). Explicit "on"/"off" from config always wins.
-	mode := strings.ToLower(strings.TrimSpace(p.cfg.PagedAttn))
+	mode := strings.ToLower(strings.TrimSpace(cfg.PagedAttn))
 	if mode == "" || mode == "auto" {
 		if pagedAttnAvailable() {
 			mode = "on"
@@ -632,21 +665,21 @@ func (p *Provider) argsFor(model localruntime.ModelRecord, port int) []string {
 	// --pa-memory-fraction (they are mutually exclusive in mistral.rs). Either is
 	// suppressed if the user pinned a pa-memory flag in extra_args.
 	switch {
-	case p.cfg.PAMemoryMB > 0 && !hasAnyFlag(extra, "--pa-memory-fraction", "--pa-memory-mb", "--pa-context-len"):
-		args = append(args, "--pa-memory-mb", strconv.Itoa(p.cfg.PAMemoryMB))
+	case cfg.PAMemoryMB > 0 && !hasAnyFlag(extra, "--pa-memory-fraction", "--pa-memory-mb", "--pa-context-len"):
+		args = append(args, "--pa-memory-mb", strconv.Itoa(cfg.PAMemoryMB))
 	default:
-		if f := strings.TrimSpace(p.cfg.PAMemoryFraction); f != "" && !hasAnyFlag(extra, "--pa-memory-fraction", "--pa-memory-mb", "--pa-context-len") {
+		if f := strings.TrimSpace(cfg.PAMemoryFraction); f != "" && !hasAnyFlag(extra, "--pa-memory-fraction", "--pa-memory-mb", "--pa-context-len") {
 			args = append(args, "--pa-memory-fraction", f)
 		}
 	}
-	if p.cfg.MaxSeqLen > 0 && !hasFlag(extra, "--max-seq-len") {
-		args = append(args, "--max-seq-len", strconv.Itoa(p.cfg.MaxSeqLen))
+	if cfg.MaxSeqLen > 0 && !hasFlag(extra, "--max-seq-len") {
+		args = append(args, "--max-seq-len", strconv.Itoa(cfg.MaxSeqLen))
 	}
-	if p.cfg.MaxSeqs > 0 && !hasFlag(extra, "--max-seqs") {
-		args = append(args, "--max-seqs", strconv.Itoa(p.cfg.MaxSeqs))
+	if cfg.MaxSeqs > 0 && !hasFlag(extra, "--max-seqs") {
+		args = append(args, "--max-seqs", strconv.Itoa(cfg.MaxSeqs))
 	}
-	if p.cfg.MaxBatchSize > 0 && !hasFlag(extra, "--max-batch-size") {
-		args = append(args, "--max-batch-size", strconv.Itoa(p.cfg.MaxBatchSize))
+	if cfg.MaxBatchSize > 0 && !hasFlag(extra, "--max-batch-size") {
+		args = append(args, "--max-batch-size", strconv.Itoa(cfg.MaxBatchSize))
 	}
 	args = append(args, extra...)
 	return args
@@ -862,6 +895,10 @@ func (p *Provider) watch(instanceID, binary string, sink localruntime.LogSink) {
 			return
 		}
 
+		// Read p.cfg directly (not via snapshot()) — we already hold p.mu.Lock
+		// here, which is mutually exclusive with ReloadConfig's write, so the
+		// read is safe; calling snapshot()'s RLock under the held Lock would
+		// deadlock.
 		shouldRestart := p.cfg.Restart.Enabled && instance.record.RestartCount < p.cfg.Restart.MaxAttempts
 		instance.record.LastExitCode = exitCode
 		instance.record.LastError = errorString(err)
@@ -963,7 +1000,7 @@ func (p *Provider) emit(sink localruntime.LogSink, level, runtimeID, modelID, me
 }
 
 func (p *Provider) readinessTimeout() time.Duration {
-	d, err := time.ParseDuration(p.cfg.ReadinessTimeout)
+	d, err := time.ParseDuration(p.snapshot().ReadinessTimeout)
 	if err != nil || d <= 0 {
 		return 60 * time.Second
 	}
@@ -971,7 +1008,7 @@ func (p *Provider) readinessTimeout() time.Duration {
 }
 
 func (p *Provider) restartBackoff() time.Duration {
-	d, err := time.ParseDuration(p.cfg.Restart.Backoff)
+	d, err := time.ParseDuration(p.snapshot().Restart.Backoff)
 	if err != nil || d <= 0 {
 		return 2 * time.Second
 	}

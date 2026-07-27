@@ -108,6 +108,18 @@ type managedInstance struct {
 }
 
 func NewProvider(cfg config.LlamaServerConfig) *Provider {
+	return &Provider{
+		cfg:      withDefaults(cfg),
+		client:   &http.Client{Timeout: 2 * time.Second},
+		running:  make(map[string]*managedInstance),
+		registry: newPidRegistry(defaultRegistryDir()),
+	}
+}
+
+// withDefaults normalizes a LlamaServerConfig the same way whether it arrives
+// at construction or via ReloadConfig, so a reloaded config behaves identically
+// to a boot-time one.
+func withDefaults(cfg config.LlamaServerConfig) config.LlamaServerConfig {
 	if cfg.Host == "" {
 		cfg.Host = "127.0.0.1"
 	}
@@ -120,12 +132,27 @@ func NewProvider(cfg config.LlamaServerConfig) *Provider {
 	if cfg.Restart.MaxAttempts == 0 {
 		cfg.Restart.MaxAttempts = 3
 	}
-	return &Provider{
-		cfg:      cfg,
-		client:   &http.Client{Timeout: 2 * time.Second},
-		running:  make(map[string]*managedInstance),
-		registry: newPidRegistry(defaultRegistryDir()),
-	}
+	return cfg
+}
+
+// ReloadConfig swaps in a freshly loaded configuration under the provider lock
+// so a restart relaunches llama-server with updated args (e.g. context_size)
+// instead of the config captured at server boot. Only the llama_server slice of
+// the full config is consumed.
+func (p *Provider) ReloadConfig(cfg config.Config) {
+	p.mu.Lock()
+	p.cfg = withDefaults(cfg.LlamaServer)
+	p.mu.Unlock()
+}
+
+// snapshot returns a by-value copy of the current config under the read lock.
+// ReloadConfig can swap p.cfg concurrently with Discover ticks and the restart
+// supervisor, so every reader takes one snapshot at entry and works from the
+// local copy rather than reading p.cfg fields repeatedly.
+func (p *Provider) snapshot() config.LlamaServerConfig {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.cfg
 }
 
 func (p *Provider) Name() string { return runtimeName }
@@ -144,9 +171,10 @@ func (p *Provider) Capabilities() localruntime.RuntimeCapabilities {
 }
 
 func (p *Provider) Discover(ctx context.Context) ([]localruntime.ModelRecord, error) {
+	cfg := p.snapshot()
 	var models []localruntime.ModelRecord
 	var errs []error
-	for _, dir := range p.cfg.ModelDirs {
+	for _, dir := range cfg.ModelDirs {
 		select {
 		case <-ctx.Done():
 			return models, ctx.Err()
@@ -175,7 +203,7 @@ func (p *Provider) Discover(ctx context.Context) ([]localruntime.ModelRecord, er
 				return nil
 			}
 			model := p.modelRecord(path, info)
-			model.Active = matchesModel(p.cfg.DefaultModel, model)
+			model.Active = matchesModel(cfg.DefaultModel, model)
 			models = append(models, model)
 			return nil
 		})
@@ -214,7 +242,7 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 		return nil, err
 	}
 
-	host := p.cfg.Host
+	host := p.snapshot().Host
 	endpoint := fmt.Sprintf("http://%s:%d", healthHost(host), port)
 	id := runtimeName + ":" + shortID(model.Path) + ":" + strconv.Itoa(port)
 	now := time.Now()
@@ -300,7 +328,7 @@ func (p *Provider) adoptLiveSibling(ctx context.Context, model localruntime.Mode
 	if !ok {
 		return nil, false
 	}
-	host := p.cfg.Host
+	host := p.snapshot().Host
 	endpoint := fmt.Sprintf("http://%s:%d", healthHost(host), sibling.server.Port)
 	id := runtimeName + ":" + shortID(model.Path) + ":" + strconv.Itoa(sibling.server.Port)
 	inst := &managedInstance{
@@ -395,7 +423,7 @@ func (p *Provider) Probe(ctx context.Context, instanceID string) (*localruntime.
 func (p *Provider) resolveModel(ctx context.Context, requested string) (localruntime.ModelRecord, error) {
 	requested = strings.TrimSpace(requested)
 	if requested == "" {
-		requested = strings.TrimSpace(p.cfg.DefaultModel)
+		requested = strings.TrimSpace(p.snapshot().DefaultModel)
 	}
 	models, err := p.Discover(ctx)
 	if err != nil && len(models) == 0 {
@@ -425,8 +453,9 @@ func (p *Provider) resolveModel(ctx context.Context, requested string) (localrun
 }
 
 func (p *Provider) resolveBinary() (string, error) {
-	if p.cfg.Binary != "" {
-		path, err := expandPath(p.cfg.Binary)
+	cfg := p.snapshot()
+	if cfg.Binary != "" {
+		path, err := expandPath(cfg.Binary)
 		if err != nil {
 			return "", err
 		}
@@ -445,10 +474,11 @@ func (p *Provider) resolveBinary() (string, error) {
 }
 
 func (p *Provider) choosePort() (int, error) {
-	if p.cfg.Port > 0 {
-		return p.cfg.Port, nil
+	cfg := p.snapshot()
+	if cfg.Port > 0 {
+		return cfg.Port, nil
 	}
-	ln, err := net.Listen("tcp", net.JoinHostPort(healthHost(p.cfg.Host), "0"))
+	ln, err := net.Listen("tcp", net.JoinHostPort(healthHost(cfg.Host), "0"))
 	if err != nil {
 		return 0, err
 	}
@@ -463,7 +493,7 @@ func (p *Provider) startProcess(instanceID, binary string, sink localruntime.Log
 	if !ok {
 		return fmt.Errorf("llama-server instance %q not found", instanceID)
 	}
-	args := p.argsFor(instance.model, instance.record.Port)
+	args := p.argsFor(p.snapshot(), instance.model, instance.record.Port)
 	cmd := exec.Command(binary, args...)
 	cmd.Stdin = nil
 	setProcessGroup(cmd)
@@ -501,10 +531,10 @@ func (p *Provider) startProcess(instanceID, binary string, sink localruntime.Log
 	return nil
 }
 
-func (p *Provider) argsFor(model localruntime.ModelRecord, port int) []string {
+func (p *Provider) argsFor(cfg config.LlamaServerConfig, model localruntime.ModelRecord, port int) []string {
 	args := []string{
 		"--model", model.Path,
-		"--host", p.cfg.Host,
+		"--host", cfg.Host,
 		"--port", strconv.Itoa(port),
 	}
 	if model.SupportsEmbed && !model.SupportsChat {
@@ -514,16 +544,16 @@ func (p *Provider) argsFor(model localruntime.ModelRecord, port int) []string {
 		// completions endpoints.
 		args = append(args, "--embedding")
 	}
-	if p.cfg.ContextSize > 0 {
-		args = append(args, "--ctx-size", strconv.Itoa(p.cfg.ContextSize))
+	if cfg.ContextSize > 0 {
+		args = append(args, "--ctx-size", strconv.Itoa(cfg.ContextSize))
 	}
-	if p.cfg.Threads > 0 {
-		args = append(args, "--threads", strconv.Itoa(p.cfg.Threads))
+	if cfg.Threads > 0 {
+		args = append(args, "--threads", strconv.Itoa(cfg.Threads))
 	}
-	if p.cfg.GPULayers != "" {
-		args = append(args, "--gpu-layers", p.cfg.GPULayers)
+	if cfg.GPULayers != "" {
+		args = append(args, "--gpu-layers", cfg.GPULayers)
 	}
-	args = append(args, p.cfg.ExtraArgs...)
+	args = append(args, cfg.ExtraArgs...)
 	return args
 }
 
@@ -663,6 +693,9 @@ func (p *Provider) watch(instanceID, binary string, sink localruntime.LogSink) {
 			return
 		}
 
+		// Read p.cfg directly (not via snapshot()) — we already hold p.mu.Lock
+		// here, mutually exclusive with ReloadConfig's write; snapshot()'s RLock
+		// under the held Lock would deadlock.
 		shouldRestart := p.cfg.Restart.Enabled && instance.record.RestartCount < p.cfg.Restart.MaxAttempts
 		instance.record.LastExitCode = exitCode
 		instance.record.LastError = errorString(err)
@@ -761,7 +794,7 @@ func (p *Provider) emit(sink localruntime.LogSink, level, runtimeID, modelID, me
 }
 
 func (p *Provider) readinessTimeout() time.Duration {
-	d, err := time.ParseDuration(p.cfg.ReadinessTimeout)
+	d, err := time.ParseDuration(p.snapshot().ReadinessTimeout)
 	if err != nil || d <= 0 {
 		return 60 * time.Second
 	}
@@ -769,7 +802,7 @@ func (p *Provider) readinessTimeout() time.Duration {
 }
 
 func (p *Provider) restartBackoff() time.Duration {
-	d, err := time.ParseDuration(p.cfg.Restart.Backoff)
+	d, err := time.ParseDuration(p.snapshot().Restart.Backoff)
 	if err != nil || d <= 0 {
 		return 2 * time.Second
 	}
@@ -898,8 +931,9 @@ func allShardsPresent(dir string, urls []string) bool {
 }
 
 func (p *Provider) catalogTargetDir() string {
-	if len(p.cfg.ModelDirs) > 0 {
-		if expanded, err := expandPath(p.cfg.ModelDirs[0]); err == nil && expanded != "" {
+	cfg := p.snapshot()
+	if len(cfg.ModelDirs) > 0 {
+		if expanded, err := expandPath(cfg.ModelDirs[0]); err == nil && expanded != "" {
 			return expanded
 		}
 	}

@@ -652,7 +652,15 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 }
 
 func buildRuntimeManager(cfg config.Config) localruntime.Manager {
-	manager := localruntime.NewManager(localruntime.WithEndpoints(localruntime.EndpointsFromConfig(cfg)))
+	manager := localruntime.NewManager(
+		localruntime.WithEndpoints(localruntime.EndpointsFromConfig(cfg)),
+		// Re-read config from disk on restart so a runtime relaunch picks up
+		// edits (e.g. mistralrs.max_seq_len) rather than reusing the config
+		// captured at server boot.
+		localruntime.WithConfigLoader(func() (config.Config, error) {
+			return config.Load(config.DefaultPath())
+		}),
+	)
 	sweepStalePartials(cfg, manager)
 	provider := runtimellama.NewProvider(cfg.LlamaServer)
 	// Reap llama-servers orphaned by cercano processes that died without

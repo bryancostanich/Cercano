@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"cercano/source/server/pkg/config"
 )
 
 const defaultLogLimit = 300
@@ -31,6 +33,17 @@ func WithHTTPClient(client *http.Client) Option {
 	}
 }
 
+// WithConfigLoader injects a function that re-reads the on-disk configuration.
+// Restart calls it so a runtime relaunch picks up config edits (e.g. a changed
+// mistralrs.max_seq_len) instead of relaunching the process with the stale
+// config captured at server boot. Nil or unset means restart reuses whatever
+// config the providers already hold.
+func WithConfigLoader(loader func() (config.Config, error)) Option {
+	return func(m *InMemoryManager) {
+		m.configLoader = loader
+	}
+}
+
 // InMemoryManager is the first runtime manager implementation. It keeps
 // dashboard state in memory and delegates real runtime behavior to providers.
 type InMemoryManager struct {
@@ -44,6 +57,17 @@ type InMemoryManager struct {
 	logs         []LogEntry
 	logLimit     int
 	observers    []Observer
+	configLoader func() (config.Config, error)
+}
+
+// ConfigReloader is an optional capability a Provider may implement so the
+// manager can push a freshly loaded configuration into it before a restart.
+// Providers that don't implement it simply keep the config they were built
+// with. The manager selects the matching slice of config.Config by provider
+// name (see refreshProviderConfig), so each provider only ever sees its own
+// runtime's config.
+type ConfigReloader interface {
+	ReloadConfig(config.Config)
 }
 
 type downloadJob struct {
@@ -248,7 +272,44 @@ func (m *InMemoryManager) Restart(ctx context.Context, req RestartRequest) (*Ins
 			return nil, err
 		}
 	}
+	// Re-read config from disk and push it into the target provider before the
+	// relaunch, so a restart reflects config edits made since server boot
+	// rather than reusing the stale config captured at construction. A load
+	// failure is non-fatal: fall back to the provider's existing config so a
+	// malformed edit can't wedge restart entirely.
+	m.refreshProviderConfig(runtimeName)
 	return m.Start(ctx, StartRequest{Runtime: runtimeName, ModelID: modelID})
+}
+
+// refreshProviderConfig re-reads the on-disk config and, if the named provider
+// implements ConfigReloader, hands it the fresh config so its next launch uses
+// updated args. No-ops when no loader is wired, the load fails, or the provider
+// isn't reloadable.
+func (m *InMemoryManager) refreshProviderConfig(runtimeName string) {
+	m.mu.RLock()
+	loader := m.configLoader
+	m.mu.RUnlock()
+	if loader == nil {
+		return
+	}
+	provider, err := m.provider(runtimeName)
+	if err != nil {
+		return
+	}
+	reloader, ok := provider.(ConfigReloader)
+	if !ok {
+		return
+	}
+	cfg, err := loader()
+	if err != nil {
+		m.WriteLog(LogEntry{
+			Source:  "cercano.runtime",
+			Level:   "warn",
+			Message: fmt.Sprintf("restart: config reload failed, reusing existing config for %q: %v", runtimeName, err),
+		})
+		return
+	}
+	reloader.ReloadConfig(cfg)
 }
 
 func (m *InMemoryManager) DownloadModel(ctx context.Context, req DownloadRequest) (*ModelRecord, error) {

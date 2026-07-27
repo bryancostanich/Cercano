@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,6 +19,78 @@ import (
 	"cercano/source/server/internal/localruntime"
 	"cercano/source/server/pkg/config"
 )
+
+// TestReloadConfigRaceSafe hammers ReloadConfig concurrently with the readers
+// (Discover, argsFor, resolveBinary) under -race. Before the snapshot refactor,
+// p.cfg was written by ReloadConfig while these readers accessed it lock-free —
+// a data race the race detector flags. It also confirms a reload actually
+// changes the args a subsequent launch would use.
+func TestReloadConfigRaceSafe(t *testing.T) {
+	dir := t.TempDir()
+	provider := NewProvider(config.MistralRSConfig{Host: "127.0.0.1", ModelDirs: []string{dir}})
+	model := localruntime.ModelRecord{Path: filepath.Join(dir, "m.gguf")}
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	// Writer: flip MaxSeqLen back and forth.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			seq := 8192
+			if i%2 == 0 {
+				seq = 32768
+			}
+			provider.ReloadConfig(config.Config{MistralRS: config.MistralRSConfig{
+				Host: "127.0.0.1", ModelDirs: []string{dir}, MaxSeqLen: seq,
+			}})
+		}
+	}()
+	// Readers: exercise the snapshot paths.
+	for r := 0; r < 3; r++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				_, _ = provider.Discover(context.Background())
+				_ = provider.argsFor(provider.snapshot(), model, 8123)
+				_, _ = provider.resolveBinary()
+			}
+		}()
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(stop)
+	wg.Wait()
+
+	// After reloads, a snapshot reflects one of the written values (proving the
+	// swap took effect), and argsFor emits the corresponding --max-seq-len.
+	provider.ReloadConfig(config.Config{MistralRS: config.MistralRSConfig{
+		Host: "127.0.0.1", ModelDirs: []string{dir}, MaxSeqLen: 32768,
+	}})
+	args := provider.argsFor(provider.snapshot(), model, 8123)
+	if !containsPair(args, "--max-seq-len", "32768") {
+		t.Fatalf("expected reloaded --max-seq-len 32768 in args, got %v", args)
+	}
+}
+
+func containsPair(args []string, flag, val string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == val {
+			return true
+		}
+	}
+	return false
+}
 
 func TestDiscoverFindsGGUFModels(t *testing.T) {
 	dir := t.TempDir()
@@ -87,7 +160,7 @@ func TestArgsForBuildsServeCommand(t *testing.T) {
 	})
 	model := provider.modelRecord("/models/test.gguf", fakeFileInfo{size: 42})
 
-	got := withoutPagedAttn(provider.argsFor(model, 8123))
+	got := withoutPagedAttn(provider.argsFor(provider.snapshot(), model, 8123))
 	want := []string{
 		"serve",
 		"-m", "/models/test.gguf",
@@ -107,7 +180,7 @@ func TestArgsForIncludesISQ(t *testing.T) {
 	})
 	model := provider.modelRecord("/models/test.gguf", fakeFileInfo{size: 42})
 
-	got := withoutPagedAttn(provider.argsFor(model, 8123))
+	got := withoutPagedAttn(provider.argsFor(provider.snapshot(), model, 8123))
 	want := []string{
 		"serve",
 		"-m", "/models/test.gguf",
@@ -127,7 +200,7 @@ func TestArgsForUsesLoadTargetDirectory(t *testing.T) {
 	model := provider.modelRecord("/models/qwen3-4b/config.json", fakeFileInfo{size: 42})
 	model.LoadTarget = "/models/qwen3-4b"
 
-	got := withoutPagedAttn(provider.argsFor(model, 8123))
+	got := withoutPagedAttn(provider.argsFor(provider.snapshot(), model, 8123))
 	want := []string{
 		"serve",
 		"-m", "/models/qwen3-4b",
@@ -152,7 +225,7 @@ func TestArgsForUQFFAddsFromUQFFShard(t *testing.T) {
 		"https://huggingface.co/mistralrs-community/Qwen3-14B-UQFF/resolve/main/afq4-0.uqff",
 	}
 
-	got := withoutPagedAttn(provider.argsFor(model, 8123))
+	got := withoutPagedAttn(provider.argsFor(provider.snapshot(), model, 8123))
 	want := []string{
 		"serve",
 		"-m", "/models/qwen3-14b",
@@ -177,7 +250,7 @@ func TestArgsForAddsMemorySafetyCaps(t *testing.T) {
 	model := provider.modelRecord("/models/qwen3-30b/config.json", fakeFileInfo{size: 42})
 	model.LoadTarget = "/models/qwen3-30b"
 
-	got := provider.argsFor(model, 8123)
+	got := provider.argsFor(provider.snapshot(), model, 8123)
 	// "auto" is translated to an explicit "on" on platforms where mistral.rs
 	// supports PagedAttention (Metal/CUDA), because its native "auto" DISABLES
 	// the KV governor on Metal. On other platforms it stays "auto".
@@ -207,7 +280,7 @@ func TestArgsForForcesPagedAttnOnMetal(t *testing.T) {
 	provider := NewProvider(config.MistralRSConfig{Host: "127.0.0.1"})
 	model := provider.modelRecord("/models/qwen3-30b/config.json", fakeFileInfo{size: 42})
 	model.LoadTarget = "/models/qwen3-30b"
-	got := provider.argsFor(model, 8123)
+	got := provider.argsFor(provider.snapshot(), model, 8123)
 	if !containsAdjacent(got, "--paged-attn", "on") {
 		t.Fatalf("empty PagedAttn must force --paged-attn on where supported: %#v", got)
 	}
@@ -221,7 +294,7 @@ func TestArgsForPAMemoryMBTakesPrecedenceOverFraction(t *testing.T) {
 	})
 	model := provider.modelRecord("/models/qwen3-30b/config.json", fakeFileInfo{size: 42})
 	model.LoadTarget = "/models/qwen3-30b"
-	got := provider.argsFor(model, 8123)
+	got := provider.argsFor(provider.snapshot(), model, 8123)
 	if !containsAdjacent(got, "--pa-memory-mb", "8192") {
 		t.Fatalf("expected --pa-memory-mb 8192 when PAMemoryMB set: %#v", got)
 	}
@@ -240,7 +313,7 @@ func TestArgsForPAMemoryFractionUsedWhenNoMB(t *testing.T) {
 	})
 	model := provider.modelRecord("/models/qwen3-30b/config.json", fakeFileInfo{size: 42})
 	model.LoadTarget = "/models/qwen3-30b"
-	got := provider.argsFor(model, 8123)
+	got := provider.argsFor(provider.snapshot(), model, 8123)
 	if !containsAdjacent(got, "--pa-memory-fraction", "0.35") {
 		t.Fatalf("expected --pa-memory-fraction 0.35 when no MB cap: %#v", got)
 	}
@@ -270,7 +343,7 @@ func TestArgsForExtraArgsOverrideManagedMemoryCaps(t *testing.T) {
 	model := provider.modelRecord("/models/qwen3-30b/config.json", fakeFileInfo{size: 42})
 	model.LoadTarget = "/models/qwen3-30b"
 
-	got := provider.argsFor(model, 8123)
+	got := provider.argsFor(provider.snapshot(), model, 8123)
 	if countFlag(got, "--paged-attn") != 1 || countFlag(got, "--max-seq-len") != 1 || countFlag(got, "--max-seqs") != 1 || countFlag(got, "--max-batch-size") != 1 {
 		t.Fatalf("managed caps should not duplicate explicit extra_args: %#v", got)
 	}
@@ -323,7 +396,7 @@ func TestArgsForSafetensorsOmitsFromUQFF(t *testing.T) {
 		"https://huggingface.co/Qwen/Qwen3-4B/resolve/main/model.safetensors",
 	}
 
-	got := provider.argsFor(model, 8123)
+	got := provider.argsFor(provider.snapshot(), model, 8123)
 	for _, a := range got {
 		if a == "--from-uqff" {
 			t.Fatalf("safetensors model should not include --from-uqff, got: %#v", got)

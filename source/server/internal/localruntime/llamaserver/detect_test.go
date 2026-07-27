@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -25,10 +26,16 @@ func writeGGUF(t *testing.T, dir, name string) string {
 
 // writeFakeBinary drops an executable stub at dir/llama-server so exec.LookPath
 // (rooted at dir when PATH is set) can find it. The file is never invoked by
-// Detect — only inspected for existence + not-a-dir.
+// Detect — only inspected for existence + not-a-dir. On Windows, LookPath only
+// resolves a bare name against PATHEXT-suffixed files (a plain extensionless
+// stub is invisible to it), so the fake binary needs the .exe suffix there.
 func writeFakeBinary(t *testing.T, dir string) string {
 	t.Helper()
-	p := filepath.Join(dir, "llama-server")
+	name := "llama-server"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	p := filepath.Join(dir, name)
 	if err := os.WriteFile(p, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("write fake binary: %v", err)
 	}
@@ -92,8 +99,17 @@ func TestDetect_ReturnsMissingBinaryWhenPATHEmpty(t *testing.T) {
 	if de.Missing != "binary" {
 		t.Errorf("Missing = %q, want %q", de.Missing, "binary")
 	}
-	if de.SuggestedCommand() != "brew install llama.cpp" {
-		t.Errorf("SuggestedCommand = %q; expected brew install command", de.SuggestedCommand())
+	// SuggestedCommand names the exact command "Install now" would run
+	// (defaultInstallCommand in install.go), which only exists on darwin —
+	// everywhere else there's no managed install path, so it must be empty
+	// rather than suggesting a brew command that doesn't exist there (e.g.
+	// Windows, where brew isn't a thing).
+	wantCmd := ""
+	if runtime.GOOS == "darwin" {
+		wantCmd = "brew install llama.cpp"
+	}
+	if got := de.SuggestedCommand(); got != wantCmd {
+		t.Errorf("SuggestedCommand = %q, want %q", got, wantCmd)
 	}
 	if cfg.Enabled {
 		t.Errorf("Enabled should stay false when binary is missing")

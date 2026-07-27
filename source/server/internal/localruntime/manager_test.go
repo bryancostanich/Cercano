@@ -126,8 +126,9 @@ func TestInMemoryManagerStartStop(t *testing.T) {
 // recording the config pushed into it so a test can assert Restart reloaded.
 type reloadableProvider struct {
 	fakeProvider
-	mu       sync.Mutex
-	reloaded []config.Config
+	mu        sync.Mutex
+	reloaded  []config.Config
+	stopCalls []string
 }
 
 func (r *reloadableProvider) ReloadConfig(cfg config.Config) {
@@ -140,6 +141,19 @@ func (r *reloadableProvider) reloadCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.reloaded)
+}
+
+func (r *reloadableProvider) Stop(_ context.Context, id string) error {
+	r.mu.Lock()
+	r.stopCalls = append(r.stopCalls, id)
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *reloadableProvider) stopCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.stopCalls)
 }
 
 func TestInMemoryManagerRestartReloadsConfig(t *testing.T) {
@@ -193,6 +207,55 @@ func TestInMemoryManagerRestartReloadFailureIsNonFatal(t *testing.T) {
 	}
 	if provider.reloadCount() != 0 {
 		t.Fatalf("expected no reload applied on load failure, got %d", provider.reloadCount())
+	}
+}
+
+func TestInMemoryManagerRestartByRuntimeNameStopsAndRelaunches(t *testing.T) {
+	// Regression: RestartRuntime with only a runtime name (no instance ID)
+	// used to fall through to Start, which adopts the running process — so the
+	// stop + relaunch never happened and config never reloaded. It must now
+	// resolve the running instance and actually restart it.
+	provider := &reloadableProvider{fakeProvider: fakeProvider{name: "mistralrs"}}
+	loaded := config.Config{MistralRS: config.MistralRSConfig{MaxSeqLen: 32768}}
+	manager := NewManager(WithConfigLoader(func() (config.Config, error) { return loaded, nil }))
+	manager.RegisterProvider(provider)
+
+	if _, err := manager.Start(context.Background(), StartRequest{Runtime: "mistralrs", ModelID: "model-a"}); err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+
+	// Restart by runtime name only — the empty-ID path.
+	if _, err := manager.Restart(context.Background(), RestartRequest{Runtime: "mistralrs"}); err != nil {
+		t.Fatalf("Restart by runtime name returned error: %v", err)
+	}
+	if provider.stopCount() != 1 {
+		t.Fatalf("expected the running instance to be stopped once, got %d stops", provider.stopCount())
+	}
+	if provider.reloadCount() != 1 {
+		t.Fatalf("expected config reloaded once during restart, got %d", provider.reloadCount())
+	}
+}
+
+func TestInMemoryManagerRestartByRuntimeNameWithNothingRunningJustStarts(t *testing.T) {
+	// A restart of a runtime that isn't running degenerates to a fresh start:
+	// no stop to perform, but config still reloads and the instance comes up.
+	provider := &reloadableProvider{fakeProvider: fakeProvider{name: "mistralrs"}}
+	loaded := config.Config{MistralRS: config.MistralRSConfig{MaxSeqLen: 32768}}
+	manager := NewManager(WithConfigLoader(func() (config.Config, error) { return loaded, nil }))
+	manager.RegisterProvider(provider)
+
+	inst, err := manager.Restart(context.Background(), RestartRequest{Runtime: "mistralrs", ModelID: "model-a"})
+	if err != nil {
+		t.Fatalf("Restart returned error: %v", err)
+	}
+	if provider.stopCount() != 0 {
+		t.Fatalf("expected no stop when nothing was running, got %d", provider.stopCount())
+	}
+	if inst == nil || inst.State != InstanceRunning {
+		t.Fatalf("expected a running instance after restart-as-start, got %+v", inst)
+	}
+	if provider.reloadCount() != 1 {
+		t.Fatalf("expected config reloaded once, got %d", provider.reloadCount())
 	}
 }
 

@@ -262,13 +262,42 @@ func (m *InMemoryManager) Stop(ctx context.Context, req StopRequest) error {
 }
 
 func (m *InMemoryManager) Restart(ctx context.Context, req RestartRequest) (*InstanceRecord, error) {
-	instance, ok := m.instance(req.InstanceID)
 	runtimeName := req.Runtime
 	modelID := req.ModelID
+
+	// Resolve which instance to restart. Callers may target a specific instance
+	// by ID, or ask to restart a whole runtime by name with no ID. The
+	// by-name path used to fall through to Start, which adopts the
+	// already-running process — so a restart-by-runtime silently no-op'd
+	// (returning ok while changing nothing, notably NOT relaunching with fresh
+	// config). Resolve the running instance for the named runtime so the stop +
+	// relaunch actually happens.
+	instance, ok := m.instance(req.InstanceID)
+	if !ok && req.InstanceID == "" && runtimeName != "" {
+		running := m.runningInstancesForRuntime(runtimeName)
+		switch len(running) {
+		case 0:
+			// Nothing running for this runtime — a "restart" degenerates to a
+			// fresh start below, which is the least-surprising behavior.
+		case 1:
+			instance, ok = running[0], true
+		default:
+			// More than one live instance for a single runtime is unusual for
+			// these local runtimes, but if it happens, restart the newest
+			// (highest ID) rather than guessing — and surface the situation.
+			m.WriteLog(LogEntry{
+				Source:  "cercano.runtime",
+				Level:   "warn",
+				Message: fmt.Sprintf("restart: %d running instances for runtime %q; restarting the most recent", len(running), runtimeName),
+			})
+			instance, ok = running[len(running)-1], true
+		}
+	}
+
 	if ok {
 		runtimeName = instance.Runtime
 		modelID = instance.ModelID
-		if err := m.Stop(ctx, StopRequest{InstanceID: req.InstanceID}); err != nil {
+		if err := m.Stop(ctx, StopRequest{InstanceID: instance.ID}); err != nil {
 			return nil, err
 		}
 	}
@@ -279,6 +308,22 @@ func (m *InMemoryManager) Restart(ctx context.Context, req RestartRequest) (*Ins
 	// malformed edit can't wedge restart entirely.
 	m.refreshProviderConfig(runtimeName)
 	return m.Start(ctx, StartRequest{Runtime: runtimeName, ModelID: modelID})
+}
+
+// runningInstancesForRuntime returns the live (non-stopped) instances for a
+// runtime, sorted by ID ascending, so callers can restart a runtime by name
+// without knowing the exact instance ID.
+func (m *InMemoryManager) runningInstancesForRuntime(runtimeName string) []InstanceRecord {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []InstanceRecord
+	for _, instance := range m.instances {
+		if instance.Runtime == runtimeName && instance.State != InstanceStopped {
+			out = append(out, instance)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
 }
 
 // refreshProviderConfig re-reads the on-disk config and, if the named provider

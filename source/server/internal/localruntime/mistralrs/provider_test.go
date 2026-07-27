@@ -87,7 +87,7 @@ func TestArgsForBuildsServeCommand(t *testing.T) {
 	})
 	model := provider.modelRecord("/models/test.gguf", fakeFileInfo{size: 42})
 
-	got := provider.argsFor(model, 8123)
+	got := withoutPagedAttn(provider.argsFor(model, 8123))
 	want := []string{
 		"serve",
 		"-m", "/models/test.gguf",
@@ -107,7 +107,7 @@ func TestArgsForIncludesISQ(t *testing.T) {
 	})
 	model := provider.modelRecord("/models/test.gguf", fakeFileInfo{size: 42})
 
-	got := provider.argsFor(model, 8123)
+	got := withoutPagedAttn(provider.argsFor(model, 8123))
 	want := []string{
 		"serve",
 		"-m", "/models/test.gguf",
@@ -127,7 +127,7 @@ func TestArgsForUsesLoadTargetDirectory(t *testing.T) {
 	model := provider.modelRecord("/models/qwen3-4b/config.json", fakeFileInfo{size: 42})
 	model.LoadTarget = "/models/qwen3-4b"
 
-	got := provider.argsFor(model, 8123)
+	got := withoutPagedAttn(provider.argsFor(model, 8123))
 	want := []string{
 		"serve",
 		"-m", "/models/qwen3-4b",
@@ -152,7 +152,7 @@ func TestArgsForUQFFAddsFromUQFFShard(t *testing.T) {
 		"https://huggingface.co/mistralrs-community/Qwen3-14B-UQFF/resolve/main/afq4-0.uqff",
 	}
 
-	got := provider.argsFor(model, 8123)
+	got := withoutPagedAttn(provider.argsFor(model, 8123))
 	want := []string{
 		"serve",
 		"-m", "/models/qwen3-14b",
@@ -178,8 +178,15 @@ func TestArgsForAddsMemorySafetyCaps(t *testing.T) {
 	model.LoadTarget = "/models/qwen3-30b"
 
 	got := provider.argsFor(model, 8123)
+	// "auto" is translated to an explicit "on" on platforms where mistral.rs
+	// supports PagedAttention (Metal/CUDA), because its native "auto" DISABLES
+	// the KV governor on Metal. On other platforms it stays "auto".
+	wantPagedAttn := "auto"
+	if pagedAttnAvailable() {
+		wantPagedAttn = "on"
+	}
 	for _, want := range [][]string{
-		{"--paged-attn", "auto"},
+		{"--paged-attn", wantPagedAttn},
 		{"--pa-memory-fraction", "0.35"},
 		{"--max-seq-len", "32768"},
 		{"--max-seqs", "1"},
@@ -188,6 +195,21 @@ func TestArgsForAddsMemorySafetyCaps(t *testing.T) {
 		if !containsAdjacent(got, want[0], want[1]) {
 			t.Fatalf("args missing %s %s: %#v", want[0], want[1], got)
 		}
+	}
+}
+
+func TestArgsForForcesPagedAttnOnMetal(t *testing.T) {
+	if !pagedAttnAvailable() {
+		t.Skip("PagedAttention not forced on this platform")
+	}
+	// Empty PagedAttn (the default) must resolve to "on" where supported, so the
+	// KV-cache memory governor is active without explicit config.
+	provider := NewProvider(config.MistralRSConfig{Host: "127.0.0.1"})
+	model := provider.modelRecord("/models/qwen3-30b/config.json", fakeFileInfo{size: 42})
+	model.LoadTarget = "/models/qwen3-30b"
+	got := provider.argsFor(model, 8123)
+	if !containsAdjacent(got, "--paged-attn", "on") {
+		t.Fatalf("empty PagedAttn must force --paged-attn on where supported: %#v", got)
 	}
 }
 
@@ -217,6 +239,21 @@ func TestArgsForExtraArgsOverrideManagedMemoryCaps(t *testing.T) {
 	if containsAdjacent(got, "--pa-memory-fraction", "0.35") {
 		t.Fatalf("--pa-memory-mb extra arg should suppress managed pa_memory_fraction: %#v", got)
 	}
+}
+
+// withoutPagedAttn strips a managed "--paged-attn <mode>" pair so exact-match
+// arg tests can assert the rest of the command line independent of the
+// platform-dependent PagedAttention default (forced "on" on Metal/CUDA).
+func withoutPagedAttn(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--paged-attn" && i+1 < len(args) {
+			i++ // skip flag and its value
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out
 }
 
 func containsAdjacent(args []string, flag, value string) bool {

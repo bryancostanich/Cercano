@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -599,7 +600,21 @@ func (p *Provider) argsFor(model localruntime.ModelRecord, port int) []string {
 	// ps still reports tiny RSS. Config defaults compute conservative RAM-aware
 	// caps; explicit extra_args win and suppress duplicate managed flags.
 	extra := p.cfg.ExtraArgs
-	switch strings.ToLower(strings.TrimSpace(p.cfg.PagedAttn)) {
+	// mistral.rs's own "auto" mode ENABLES PagedAttention on CUDA but DISABLES it
+	// on Metal/CPU — which silently turns off the KV-cache memory governor on
+	// Apple Silicon, exactly where the unified-memory over-allocation above bites
+	// hardest. Since Cercano wants the governor on, translate "auto" (and the
+	// empty default) to an explicit "on" when PagedAttention is available on this
+	// platform (Metal). Explicit "on"/"off" from config always wins.
+	mode := strings.ToLower(strings.TrimSpace(p.cfg.PagedAttn))
+	if mode == "" || mode == "auto" {
+		if pagedAttnAvailable() {
+			mode = "on"
+		} else {
+			mode = "auto"
+		}
+	}
+	switch mode {
 	case "auto":
 		if !hasFlag(extra, "--paged-attn") {
 			args = append(args, "--paged-attn", "auto")
@@ -627,6 +642,21 @@ func (p *Provider) argsFor(model localruntime.ModelRecord, port int) []string {
 	}
 	args = append(args, extra...)
 	return args
+}
+
+// pagedAttnAvailable reports whether this platform supports forcing
+// PagedAttention on. mistral.rs supports it on CUDA (Linux/Windows w/ NVIDIA)
+// and, as verified on 0.9.0, on Apple Silicon Metal (darwin/arm64). We force it
+// on there so the KV-cache memory governor is active. On other platforms
+// (e.g. darwin/amd64, plain CPU) we leave "auto" alone rather than risk
+// `--paged-attn on` erroring with "device doesn't support it".
+func pagedAttnAvailable() bool {
+	if runtime.GOOS == "darwin" {
+		return runtime.GOARCH == "arm64" // Metal
+	}
+	// CUDA builds on Linux/Windows; auto already enables PA there, and forcing
+	// "on" is harmless when a supported device is present.
+	return runtime.GOOS == "linux" || runtime.GOOS == "windows"
 }
 
 // firstUQFFShard returns the basename of the first `.uqff` file among the

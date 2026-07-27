@@ -6,7 +6,7 @@ import (
 )
 
 func TestCoreCatalogComplete(t *testing.T) {
-	want := []string{"compute-before-simulate", "delegate-git-plumbing", "design-decisions", "planning-mode", "systematic-debugging", "verification-strategy", "worktree-first"}
+	want := []string{"compute-before-simulate", "delegate-git-plumbing", "design-decisions", "executing-plans", "planning-mode", "systematic-debugging", "verification-strategy", "worktree-first"}
 	for _, name := range want {
 		p, ok := Get(name)
 		if !ok {
@@ -201,5 +201,45 @@ func TestPlanningModeNamesRequestPlanApprovalForHandoff(t *testing.T) {
 	}
 	if !strings.Contains(p.Body, "leaves the read-only planning profile") && !strings.Contains(p.Body, "drops the read-only fence") {
 		t.Fatal("planning-mode body must explain that approval leaves the read-only planning profile")
+	}
+}
+
+func TestExecutingPlansNamesSemanticStatusTool(t *testing.T) {
+	p, ok := Get("executing-plans")
+	if !ok {
+		t.Fatal("executing-plans missing")
+	}
+	if !strings.Contains(p.Body, "plan_set_status") {
+		t.Fatal("executing-plans must require semantic status updates via plan_set_status")
+	}
+	for _, status := range []string{"in_progress", "done", "blocked"} {
+		if !strings.Contains(p.Body, status) {
+			t.Fatalf("executing-plans must mention status %q", status)
+		}
+	}
+}
+
+func TestExecutingPlansDocumentsSurpriseTiers(t *testing.T) {
+	p, _ := Get("executing-plans")
+	low := strings.ToLower(p.Body)
+	for _, tier := range []string{"local surprise", "structural surprise", "foundational surprise"} {
+		if !strings.Contains(low, tier) {
+			t.Fatalf("executing-plans must document %s", tier)
+		}
+	}
+	for _, mode := range []string{"Bypass", "Permissive", "Strict"} {
+		if !strings.Contains(p.Body, mode) {
+			t.Fatalf("executing-plans must tie surprise threshold to permission mode %s", mode)
+		}
+	}
+}
+
+func TestExecutingPlansStructuralHandoffUsesApprovalGate(t *testing.T) {
+	p, _ := Get("executing-plans")
+	if !strings.Contains(p.Body, "request_plan_approval") {
+		t.Fatal("structural replanning must come back through request_plan_approval")
+	}
+	if !strings.Contains(p.Body, "spec.md") || !strings.Contains(p.Body, "plan.md") {
+		t.Fatal("executing-plans must name spec.md and plan.md as handoff artifacts")
 	}
 }

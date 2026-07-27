@@ -53,6 +53,7 @@ func Register(reg *capabilities.Registry) {
 	reg.MustRegister(Dispatch())
 	reg.MustRegister(SuggestPlan())
 	reg.MustRegister(RequestPlanApproval())
+	reg.MustRegister(PlanSetStatus())
 	reg.MustRegister(GitWorktree())
 	reg.MustRegister(Checkpoint())
 	reg.MustRegister(GitSquash())

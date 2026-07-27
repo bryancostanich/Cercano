@@ -423,6 +423,80 @@ branch and short SHA, or "conflict at <file>".
 `,
 	},
 	{
+		Name:        "executing-plans",
+		Description: "Execute an approved plan.md in order, keeping status glyphs current and escalating surprises by tier.",
+		Domain:      DomainCore,
+		Trigger:     "After a plan is approved through `request_plan_approval` and you begin implementing it → pull the `executing-plans` protocol and follow it.",
+		Body: `# Executing Plans Protocol
+
+## When This Applies
+
+The user approved an effort's ` + "`plan.md`" + ` through ` + "`request_plan_approval`" + `, and the
+session has left the read-only planning profile. You are now implementing the
+approved plan. The Markdown file remains canon: keep it current while you work.
+
+## Core Loop
+
+1. **Open the approved files.** Read ` + "`efforts/<slug>/spec.md`" + ` and
+   ` + "`efforts/<slug>/plan.md`" + `. The spec is the fixed point; the plan is the
+   executable queue.
+2. **Work in document order.** Start with the first pending checkbox in the
+   first incomplete phase. Do not skip ahead unless the plan itself says to.
+3. **Mark status semantically.** Before starting a task, call
+   ` + "`plan_set_status`" + ` with ` + "`status: \"in_progress\"`" + `. When done, call it with
+   ` + "`status: \"done\"`" + `. If blocked, call it with ` + "`status: \"blocked\"`" + `. Prefer
+   ` + "`task_title`" + ` from the Markdown; use ` + "`task_id`" + ` only if a rendered task tree
+   exposed one. Do not raw-edit status glyphs unless the semantic tool is
+   unavailable and you explicitly say so.
+4. **Verify at the right tier.** Run the smallest tests that cover the task just
+   completed. Do not run broad suites for local internal changes; do not skip
+   integration tests when an interface changed.
+5. **Commit solved units.** When a coherent unit is complete and verified,
+   checkpoint it with a clear commit message. Never push unless asked.
+
+## Surprise Classification
+
+A plan is a prediction. When reality diverges, classify the surprise before
+continuing. The active permission mode controls the threshold: **Bypass** keeps
+more divergence local; **Permissive** is balanced; **Strict** escalates sooner.
+
+### Local surprise — patch the plan in place
+
+Use this when the current phase and goal still hold, but a task is bigger,
+smaller, differently shaped, or missing a local sub-step. Update ` + "`plan.md`" + ` in
+place (split/add/annotate tasks within the phase), then continue. This is normal
+execution churn. Use ` + "`plan_set_status`" + ` for status changes.
+
+### Structural surprise — pause and hand back to planning
+
+Use this when a whole phase/order/approach is invalidated, but the spec still
+holds. Stop executing. Explain the divergence, then re-enter planning with the
+fixed ` + "`spec.md`" + `, the current ` + "`plan.md`" + ` state, and the surprise. The revised
+plan must come back through ` + "`request_plan_approval`" + ` before execution resumes.
+Do not silently rewrite the remaining phases and keep going.
+
+### Foundational surprise — halt and escalate to the human
+
+Use this when reality contradicts the spec itself — especially a premise recorded
+in the spec's ` + "`## Decisions`" + ` section. Stop. Cite the broken decision/premise,
+state what reality showed instead, and ask the human to edit or abandon the spec.
+Do not rewrite the spec yourself.
+
+## Guardrails
+
+- Status updates go through ` + "`plan_set_status`" + ` so the task store, Markdown codec,
+  and client task stream stay aligned.
+- The spec is human-owned. Treat it as an escalation boundary, not something to
+  patch casually during execution.
+- Structural replanning works against the fixed spec and the current plan state;
+  it does not re-litigate settled decisions unless a foundational surprise broke
+  their premise.
+- If you are unsure whether a surprise is local or structural, use the active
+  permission mode as the dial: Strict escalates; Bypass self-patches; Permissive
+  asks when the cost of being wrong is meaningful.
+`,
+	},
+	{
 		Name:        "planning-mode",
 		Description: "Explore read-only, then author an effort's spec and phased plan before touching anything.",
 		Domain:      DomainCore,

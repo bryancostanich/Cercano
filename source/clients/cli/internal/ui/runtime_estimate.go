@@ -236,3 +236,27 @@ func min64(a, b int64) int64 {
 	}
 	return b
 }
+
+// compactFitAnnot is a coarse, KV-agnostic fit glyph for the GGUF picker,
+// where a full per-model estimate isn't available (only weights + system RAM).
+// It answers the crash-relevant question — "can this model's fixed footprint
+// even fit?" — at the moment of loading. The dashboard's estimateFitLine gives
+// the precise, context-aware verdict when a model is inspected.
+//
+// Returns "" when it can't judge (unknown weights or system RAM). Glyphs match
+// estimateFitLine: ✓ comfortable, △ tight, ✗ won't fit.
+func compactFitAnnot(weightsBytes, sysRAMBytes int64) string {
+	if weightsBytes <= 0 || sysRAMBytes <= 0 {
+		return ""
+	}
+	usable := int64(float64(sysRAMBytes) * estimateUsableFraction)
+	fixed := weightsBytes + estimateOverheadBytes(weightsBytes)
+	switch {
+	case fixed > usable:
+		return "✗ won't fit"
+	case fixed > usable*4/5: // within 80% of usable — little headroom for KV/context
+		return "△ tight"
+	default:
+		return "✓ fits"
+	}
+}

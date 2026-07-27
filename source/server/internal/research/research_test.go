@@ -950,11 +950,17 @@ func TestDefaultConfig_Standard(t *testing.T) {
 	if cfg.MaxPrimaryResults != 4 {
 		t.Errorf("standard: expected MaxPrimaryResults=4, got %d", cfg.MaxPrimaryResults)
 	}
-	if cfg.MaxChasedTotal != 15 {
-		t.Errorf("standard: expected MaxChasedTotal=15, got %d", cfg.MaxChasedTotal)
+	if cfg.MaxChasedTotal != 8 {
+		t.Errorf("standard: expected MaxChasedTotal=8, got %d", cfg.MaxChasedTotal)
 	}
-	if cfg.MaxChasedPerFinding != 3 {
-		t.Errorf("standard: expected MaxChasedPerFinding=3, got %d", cfg.MaxChasedPerFinding)
+	if cfg.MaxChasedPerFinding != 2 {
+		t.Errorf("standard: expected MaxChasedPerFinding=2, got %d", cfg.MaxChasedPerFinding)
+	}
+	if cfg.ChaseMinRelevance != 4 {
+		t.Errorf("standard: expected ChaseMinRelevance=4, got %d", cfg.ChaseMinRelevance)
+	}
+	if !cfg.ChaseDecisionGate {
+		t.Errorf("standard: expected ChaseDecisionGate=true")
 	}
 	if cfg.PageTruncateChars != 10000 {
 		t.Errorf("standard: expected PageTruncateChars=10000, got %d", cfg.PageTruncateChars)
@@ -975,11 +981,17 @@ func TestDefaultConfig_Deep(t *testing.T) {
 	if cfg.MaxPrimaryResults != 6 {
 		t.Errorf("deep: expected MaxPrimaryResults=6, got %d", cfg.MaxPrimaryResults)
 	}
-	if cfg.MaxChasedTotal != 50 {
-		t.Errorf("deep: expected MaxChasedTotal=50, got %d", cfg.MaxChasedTotal)
+	if cfg.MaxChasedTotal != 15 {
+		t.Errorf("deep: expected MaxChasedTotal=15, got %d", cfg.MaxChasedTotal)
 	}
-	if cfg.MaxChasedPerFinding != 5 {
-		t.Errorf("deep: expected MaxChasedPerFinding=5, got %d", cfg.MaxChasedPerFinding)
+	if cfg.MaxChasedPerFinding != 3 {
+		t.Errorf("deep: expected MaxChasedPerFinding=3, got %d", cfg.MaxChasedPerFinding)
+	}
+	if cfg.ChaseMinRelevance != 4 {
+		t.Errorf("deep: expected ChaseMinRelevance=4, got %d", cfg.ChaseMinRelevance)
+	}
+	if !cfg.ChaseDecisionGate {
+		t.Errorf("deep: expected ChaseDecisionGate=true")
 	}
 	if cfg.PageTruncateChars != 12000 {
 		t.Errorf("deep: expected PageTruncateChars=12000, got %d", cfg.PageTruncateChars)

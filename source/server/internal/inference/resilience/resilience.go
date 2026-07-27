@@ -18,7 +18,9 @@
 //	busy            → one narrated same-provider retry (wait = server's
 //	                  Retry-After capped at RetryWaitCap, default 500ms),
 //	                  then fail over / surface
-//	quota, auth,
+//	quota          → immediate failover, then skip the primary until the
+//	                  Retry-After/default cooldown expires
+//	auth,
 //	network, unknown → immediate failover (retrying is pointless: the
 //	                  condition will not heal within a turn)
 //	invalid_request → surface (the request is wrong everywhere)
@@ -33,6 +35,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"cercano/source/server/internal/inference"
@@ -89,7 +92,7 @@ func (e Event) Notice() string {
 }
 
 // Options configures the engine. Zero values give: no backup, silent events,
-// 500ms default retry wait, 2s cap.
+// 500ms default retry wait, 2s cap, 1h quota cooldown.
 type Options struct {
 	// Backup, when non-nil, serves calls the primary failed in a way a
 	// different vendor could plausibly serve.
@@ -107,11 +110,15 @@ type Options struct {
 	// never reaches here (quota classifies to immediate failover), but a
 	// hostile or odd busy value must not stall the turn.
 	RetryWaitCap time.Duration
+	// QuotaCooldown is how long the primary is skipped after a quota failover
+	// when the provider did not supply Retry-After. Zero defaults to 1 hour.
+	QuotaCooldown time.Duration
 }
 
 const (
-	defaultRetryWait    = 500 * time.Millisecond
-	defaultRetryWaitCap = 2 * time.Second
+	defaultRetryWait     = 500 * time.Millisecond
+	defaultRetryWaitCap  = 2 * time.Second
+	defaultQuotaCooldown = time.Hour
 )
 
 // Provider is the engine. It impersonates the primary everywhere except the
@@ -123,8 +130,14 @@ type Provider struct {
 	onEvent        func(Event)
 	retryWait      time.Duration
 	retryWaitCap   time.Duration
-	// sleep is an injection seam for tests; production uses ctx-aware sleep.
+	quotaCooldown  time.Duration
+	// sleep and now are injection seams for tests; production uses ctx-aware
+	// sleep and the wall clock.
 	sleep func(ctx context.Context, d time.Duration) bool
+	now   func() time.Time
+
+	mu                 sync.Mutex
+	quotaCooldownUntil time.Time
 }
 
 // New builds the engine around primary.
@@ -136,13 +149,18 @@ func New(primary inference.Provider, opts Options) *Provider {
 		onEvent:        opts.OnEvent,
 		retryWait:      opts.RetryWait,
 		retryWaitCap:   opts.RetryWaitCap,
+		quotaCooldown:  opts.QuotaCooldown,
 		sleep:          ctxSleep,
+		now:            time.Now,
 	}
 	if p.retryWait <= 0 {
 		p.retryWait = defaultRetryWait
 	}
 	if p.retryWaitCap <= 0 {
 		p.retryWaitCap = defaultRetryWaitCap
+	}
+	if p.quotaCooldown <= 0 {
+		p.quotaCooldown = defaultQuotaCooldown
 	}
 	return p
 }
@@ -181,6 +199,32 @@ func (p *Provider) waitFor(err error) time.Duration {
 	return p.retryWait
 }
 
+func (p *Provider) quotaCooldownFor(err error) time.Duration {
+	var ne *llm.Error
+	if errors.As(err, &ne) && ne.RetryAfter > 0 {
+		return ne.RetryAfter
+	}
+	return p.quotaCooldown
+}
+
+func (p *Provider) markQuotaCooldown(err error) {
+	until := p.now().Add(p.quotaCooldownFor(err))
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if until.After(p.quotaCooldownUntil) {
+		p.quotaCooldownUntil = until
+	}
+}
+
+func (p *Provider) quotaCoolingDown() bool {
+	if p.backup == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.now().Before(p.quotaCooldownUntil)
+}
+
 // failsOver reports whether a class is worth re-serving on a different
 // vendor. invalid_request fails everywhere; everything else is a
 // primary-side condition a backup could dodge.
@@ -198,6 +242,9 @@ func (p *Provider) backupRequest(req inference.Call) inference.Call {
 // Chat runs the non-streaming policy. Notices reach logs via OnEvent only —
 // there is no user-visible stream on this path.
 func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Result, error) {
+	if p.quotaCoolingDown() {
+		return p.backup.Chat(ctx, p.backupRequest(req))
+	}
 	resp, err := p.primary.Chat(ctx, req)
 	if err == nil || ctx.Err() != nil {
 		return resp, err
@@ -220,6 +267,9 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 			From: p.primary.Name(), Err: err})
 		return inference.Result{}, err
 	}
+	if class == llm.ErrQuota {
+		p.markQuotaCooldown(err)
+	}
 	p.emit(Event{Action: ActionFailover, Stage: "chat", Class: class,
 		From: p.primary.Name(), To: p.backup.Name(), Err: err})
 	return p.backup.Chat(ctx, p.backupRequest(req))
@@ -230,6 +280,9 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 // following Next() — so the UI shows "trying once more" while the engine
 // waits, not after.
 func (p *Provider) StreamChat(ctx context.Context, req inference.Call) (inference.Stream, error) {
+	if p.quotaCoolingDown() {
+		return p.backup.StreamChat(ctx, p.backupRequest(req))
+	}
 	r := &reader{ctx: ctx, p: p, req: req}
 	inner, err := p.primary.StreamChat(ctx, req)
 	if err != nil {
@@ -339,6 +392,9 @@ func (r *reader) decide(stage string, err error) bool {
 	}
 	if p.backup != nil && failsOver(class) && !r.failedOver {
 		r.failedOver = true
+		if class == llm.ErrQuota {
+			p.markQuotaCooldown(err)
+		}
 		ev := Event{Action: ActionFailover, Stage: stage, Class: class,
 			From: p.primary.Name(), To: p.backup.Name(), Err: err}
 		p.emit(ev)

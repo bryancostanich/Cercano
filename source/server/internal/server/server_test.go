@@ -433,6 +433,37 @@ func TestUpdateConfig_WatchdogEnable(t *testing.T) {
 	}
 }
 
+func TestUpdateConfig_AgentShutdownOnLastClient(t *testing.T) {
+	srv := NewServer(nil, nil, nil, nil, engine.NewEngineRegistry())
+	srv.SetConfigPersistence("", config.Config{})
+
+	resp, err := srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{AgentShutdownOnLastClient: "false"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Success {
+		t.Fatalf("expected success, got: %s", resp.Message)
+	}
+	if srv.cfgSvc.Get().Agent.ShutdownOnLastClient {
+		t.Fatal("agent.shutdown_on_last_client not cleared")
+	}
+	cfg, err := srv.GetConfig(context.Background(), &proto.GetConfigRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GetAgentShutdownOnLastClient() {
+		t.Fatal("GetConfig should report agent_shutdown_on_last_client=false")
+	}
+
+	resp, err = srv.UpdateConfig(context.Background(), &proto.UpdateConfigRequest{AgentShutdownOnLastClient: "maybe"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Success {
+		t.Fatal("expected invalid agent_shutdown_on_last_client to fail")
+	}
+}
+
 func TestUpdateConfig_ToolLoopMaxIterations(t *testing.T) {
 	srv := NewServer(nil, nil, nil, nil, engine.NewEngineRegistry())
 	srv.SetConfigPersistence("", config.Config{})

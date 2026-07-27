@@ -304,6 +304,36 @@ func TestConfirmPromptHintsAdvertiseEnterSteer(t *testing.T) {
 	}
 }
 
+func TestConfirmPending_SlashCommandRunsInsteadOfSteering(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "git_push", Args: `{}`, Permission: "X"})
+	before := len(m.mainChat().Entries())
+
+	for _, r := range "/help" {
+		next, _ := m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+		m = next.(Model)
+	}
+	if m.input.Value() != "/help" {
+		t.Fatalf("typing a slash command should edit the prompt, got %q", m.input.Value())
+	}
+
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "\n"})
+	m = next.(Model)
+
+	if m.input.Value() != "" {
+		t.Fatalf("running a slash command should clear the prompt, got %q", m.input.Value())
+	}
+	for _, e := range m.mainChat().Entries() {
+		if strings.Contains(e.Content, "steer: /help") {
+			t.Fatalf("slash command should not be sent as steer text: %+v", e)
+		}
+	}
+	if len(m.mainChat().Entries()) <= before {
+		t.Fatal("/help should produce output instead of steering the tool call")
+	}
+}
+
 func TestConfirmPending_TypingThenEnterSteersToolCall(t *testing.T) {
 	m := New(nil, false)
 	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "dispatch", Args: `{}`, Permission: "X"})

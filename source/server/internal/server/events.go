@@ -18,9 +18,10 @@ import (
 // eventHub fans server-originated ClientEvents out to all open subscriber
 // streams. Safe for concurrent Subscribe / broadcast / unsubscribe.
 type eventHub struct {
-	mu   sync.Mutex
-	next int
-	subs map[int]chan *proto.ClientEvent
+	mu      sync.Mutex
+	next    int
+	subs    map[int]chan *proto.ClientEvent
+	onEmpty func()
 }
 
 func newEventHub() *eventHub {
@@ -37,13 +38,26 @@ func (h *eventHub) subscribe() (<-chan *proto.ClientEvent, func()) {
 	h.subs[id] = ch
 	h.mu.Unlock()
 	return ch, func() {
+		var onEmpty func()
 		h.mu.Lock()
 		if c, ok := h.subs[id]; ok {
 			delete(h.subs, id)
 			close(c)
+			if len(h.subs) == 0 {
+				onEmpty = h.onEmpty
+			}
 		}
 		h.mu.Unlock()
+		if onEmpty != nil {
+			onEmpty()
+		}
 	}
+}
+
+func (h *eventHub) setOnEmpty(fn func()) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onEmpty = fn
 }
 
 // broadcast delivers ev to every current subscriber without blocking on any

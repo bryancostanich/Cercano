@@ -430,12 +430,25 @@ func ChaseReferences(ctx context.Context, model ModelCaller, dispatcher *SearchD
 	}
 
 	for _, f := range findings {
+		// Relevance gate: only chase references cited by strong findings.
+		if cfg.ChaseMinRelevance > 0 && f.RelevanceScore < cfg.ChaseMinRelevance {
+			continue
+		}
 		count := 0
 		for _, ref := range f.CitedRefs {
 			if count >= cfg.MaxChasedPerFinding {
 				break
 			}
 			if existingTitles[strings.ToLower(ref.Title)] {
+				continue
+			}
+			// Structural junk filter: drop author-profile / scholar-landing refs
+			// before they ever hit the search + fetch path.
+			if isJunkChaseTitle(ref.Title) {
+				continue
+			}
+			// Optional cheap yes/no confirmation for the intent.
+			if cfg.ChaseDecisionGate && !ChaseDecision(ctx, model, ref, intent) {
 				continue
 			}
 			queue = append(queue, chaseItem{ref: ref, parentTitle: f.Publication.Title})
@@ -453,10 +466,12 @@ func ChaseReferences(ctx context.Context, model ModelCaller, dispatcher *SearchD
 	var chased []AnnotatedFinding
 
 	for _, item := range queue {
+		// Default to an open web search for the reference title rather than
+		// forcing Google Scholar (which resolves author names to profile pages).
 		source := Source{
-			Name:    "Google Scholar",
+			Name:    "Web",
 			Type:    "web",
-			Site:    "scholar.google.com",
+			Site:    "", // unscoped: let the title find the actual document
 			Queries: []string{fmt.Sprintf(`"%s"`, item.ref.Title)},
 		}
 
@@ -470,11 +485,27 @@ func ChaseReferences(ctx context.Context, model ModelCaller, dispatcher *SearchD
 			continue
 		}
 
-		pub := pubs[0]
-		if existingURLs[pub.URL] {
+		// Pick the first result whose resolved URL is an actual document, not a
+		// profile / search / auth page.
+		var pub Publication
+		found := false
+		for _, candidate := range pubs {
+			if isJunkChaseURL(candidate.URL) || existingURLs[candidate.URL] {
+				continue
+			}
+			pub = candidate
+			found = true
+			break
+		}
+		if !found {
 			continue
 		}
 		existingURLs[pub.URL] = true
+
+		// Attribute the source to the actual resolved domain, not the plan label.
+		if derived := sourceFromURL(pub.URL, pub.Source); derived != "" {
+			pub.Source = derived
+		}
 
 		content := pub.Abstract
 		if content == "" && pub.URL != "" {
@@ -482,7 +513,7 @@ func ChaseReferences(ctx context.Context, model ModelCaller, dispatcher *SearchD
 				content = result.Content
 			}
 		}
-		if content == "" {
+		if content == "" || len(content) < minContentChars {
 			continue
 		}
 

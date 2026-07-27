@@ -108,6 +108,7 @@ func buildSettingsSections(cfg *agentclient.Config, mode, accentToken string) []
 		}},
 		{Title: "Server", Fields: []form.Field{
 			form.NewReadOnly("port", "port", cfg.Port, "(read-only)"),
+			form.NewToggle("agent-shutdown-on-last-client", "shutdown-agent", cfg.AgentShutdownOnLastClient),
 		}},
 	}
 }
@@ -164,6 +165,8 @@ func classifyCommit(key, value string, currentChecks []string) commitAction {
 		u.OllamaURL = value
 	case "locus-mode":
 		u.LocusMode = value
+	case "agent-shutdown-on-last-client":
+		u.AgentShutdownOnLastClient = value
 	case "watchdog-enabled":
 		u.WatchdogEnabled = value
 	case "watchdog-echo":

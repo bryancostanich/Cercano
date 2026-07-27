@@ -135,13 +135,14 @@ type Model struct {
 	// path that invokes m.cancelStream — the NEW turn's cancel func.
 	turnGen int
 
-	tokIn, tokOut  int
-	cumIn, cumOut  int
-	ctxRaw         int
-	compacting     bool
-	ctxPollTicks   int
-	ctxPolling     bool // a ctxUsageTick loop is currently running (avoid double-scheduling)
-	animTickActive bool // a progressAnimTick loop is currently running (avoid double-scheduling)
+	tokIn, tokOut           int
+	cumIn, cumOut           int
+	ctxRaw                  int
+	compacting              bool
+	ctxPollTicks            int
+	ctxPolling              bool      // a ctxUsageTick loop is currently running (avoid double-scheduling)
+	animTickActive          bool      // a progressAnimTick loop is currently running (avoid double-scheduling)
+	lastAnimViewportRefresh time.Time // last expensive viewport rebuild done only to advance an animation glyph
 	// chatDirty marks transcript changes whose repaint was deferred to the
 	// next progressAnimTick frame. High-frequency stream events (token
 	// deltas, progress notes) set it instead of rebuilding per event, so the
@@ -786,6 +787,18 @@ type progressAnimTickMsg time.Time
 
 func progressAnimTick() tea.Cmd {
 	return tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg { return progressAnimTickMsg(t) })
+}
+
+const animationViewportRefreshInterval = 300 * time.Millisecond
+
+func (m *Model) shouldRefreshAnimationViewport(now time.Time) bool {
+	if now.IsZero() {
+		return true
+	}
+	if m.lastAnimViewportRefresh.IsZero() {
+		return true
+	}
+	return now.Sub(m.lastAnimViewportRefresh) >= animationViewportRefreshInterval
 }
 
 // ensureAnimTick arms the shared animation/repaint tick loop unless one is
@@ -1522,6 +1535,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.pendingConfirm = toolConfirm(tc)
 			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.renderConfirmPrompt(tc)})
+		case rolloverOfferedMsg:
+			m.pendingConfirm = m.rolloverConfirm(ev)
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.renderRolloverPrompt(ev)})
 		case chatErrorMsg:
 			m.finishStaleSubAgentTabs("sub-agent stopped after parent stream error")
 			m.mainChat().Apply(ev)
@@ -1633,13 +1649,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case recapLoadedMsg:
-		// When the recap's presence toggles, the recap line claims (or frees) a
-		// row below the viewport. relayout() must re-run so the viewport resizes
-		// and the status bar stays pinned — otherwise the new line pushes the
-		// footer off-screen until the next resize.
-		had := m.recap != ""
+		// The recap line(s) claim rows below the viewport, so relayout() must
+		// re-run whenever their count changes — otherwise the viewport stays
+		// sized for the old chrome height and the extra row pushes the status
+		// bar off-screen until the next keystroke forces a relayout. The recap
+		// is a *living* summary: its text updates mid-session and can grow from
+		// one wrapped row to two (or shrink), which changes recapH without any
+		// presence toggle. Compare the rendered line count, not just presence.
+		prevLines := len(m.recapLines())
 		m.recap = msg.recap
-		if had != (m.recap != "") {
+		if len(m.recapLines()) != prevLines {
 			m.relayout()
 		}
 		return m, nil
@@ -1948,7 +1967,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openRuntimeModal.setNeedsModel(needsMsg)
 			return m, nil
 		}
-		m.openRuntimeModal.setPickModel(m.agent, m.pendingRuntimeSwitch, msg.models)
+		m.openRuntimeModal.setPickModel(m.agent, m.pendingRuntimeSwitch, msg.models, msg.sysRAMBytes)
 		return m, nil
 
 	case openRuntimeDashboardMsg:
@@ -2082,6 +2101,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if e := m.mainChat().lastAssistantEntry(); e != nil {
 			e.Streaming = false
 		}
+		// The turn is over: drop any latched compaction flag or stuck
+		// in-progress tool so the animation tick can go idle instead of
+		// spinning a CPU core forever when a closing ctxUsageMsg or tool
+		// completion event never arrived.
+		m.clearTurnAnimationState()
 		m.refreshViewport()
 		// Poll the agent for the authoritative context-window usage on the
 		// same conversation. Result arrives as a ctxUsageMsg and overrides
@@ -2180,45 +2204,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// before returning the next tick — that prevents a second kick
 		// (e.g. from toolEntryStartMsg) from doubling the tick rate.
 		m.animTickActive = false
-		repaint := false
+		contentRepaint := false
+		animRepaint := false
 		keep := false
 		// Flush coalesced stream events: token deltas and progress notes set
 		// chatDirty instead of rebuilding per event, so this frame carries
 		// their repaint. Keep ticking while the stream is alive — the next
 		// batch of deltas needs a frame too.
 		if m.chatDirty {
-			repaint = true
+			contentRepaint = true
 		}
 		if m.streaming {
 			keep = true
 		}
-		// Repaint while there's an assistant entry awaiting its first token —
-		// that's when the animated status line is visible. The per-frame push
-		// moves the color sweep into the viewport's content cache; without
-		// it, View renders the last-set content and the animation freezes.
+		// The following branches are animation-only: they advance a spinner,
+		// color sweep, or trailing "working" line inside the transcript. Those
+		// glyphs still need occasional viewport refreshes, but not the 20Hz
+		// full-transcript rebuild used for actual content deltas.
 		if e := m.mainChat().streamingTextEntry(); e != nil && e.Content == "" {
-			repaint = true
+			animRepaint = true
 			keep = true
 		}
-		// Tool spinners on in-progress entries need the same per-frame push;
-		// without this branch the placeholder tick stops once the assistant
-		// streams a token, then the active tool line shows a frozen glyph.
 		if m.mainChat().hasInProgressTool() {
-			repaint = true
+			animRepaint = true
 			keep = true
 		}
-		// Keep ticking while a lazy tool-body fetch is in flight so the
-		// expanded entry's loading spinner animates.
 		if m.mainChat().hasLoadingTool() {
-			repaint = true
+			animRepaint = true
 			keep = true
 		}
-		// Between phases of a multi-step turn (tools done, waiting for the
-		// model's next action), animate the trailing "still working" line —
-		// without this the indicator would freeze on the first frame after
-		// tools complete.
 		if m.mainChat().IsBetweenPhases() {
-			repaint = true
+			animRepaint = true
 			keep = true
 		}
 		// Also keep ticking while the /c chat is busy so its animated
@@ -2226,13 +2242,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cv, ok := m.content.(*contextView); ok && cv.busy() {
 			keep = true
 		}
+		// Keep the trailing "working" animation alive on the visible child tab
+		// (sub-agent or activity) while a phase is running but quiet — the same
+		// treatment the main chat gets, so a long planning/analyze step reads as
+		// alive rather than frozen.
+		if av := m.activeChat(); av != nil && av != m.mainChat() {
+			if av.IsBetweenPhases() || av.hasInProgressTool() {
+				animRepaint = true
+				keep = true
+			}
+		}
 		if m.compacting {
+			// Compaction itself only animates footer/chrome. View() redraws that
+			// cheaply on every tick; it should not force a transcript rebuild.
 			keep = true
 		}
-		// One rebuild per frame no matter how many conditions asked for it —
-		// the old shape called refreshViewport once per branch.
-		if repaint {
+		if contentRepaint {
 			m.refreshViewport()
+			m.lastAnimViewportRefresh = time.Time{}
+		} else if animRepaint && m.shouldRefreshAnimationViewport(time.Time(msg)) {
+			m.refreshViewport()
+			m.lastAnimViewportRefresh = time.Time(msg)
 		}
 		if keep {
 			m.animTickActive = true
@@ -2436,6 +2466,11 @@ func (m *Model) cancelCurrentStreamWithNotice(showNotice bool) {
 	if e := m.mainChat().lastAssistantEntry(); e != nil {
 		e.Streaming = false
 	}
+	// Compaction is a property of the active turn. Canceling severs the
+	// ctxUsageMsg poll that would otherwise deliver the closing
+	// Compacting=false, so clear it here — a latched compacting flag keeps the
+	// 50ms animation tick alive forever and pins a CPU core until restart.
+	m.clearTurnAnimationState()
 	if showNotice {
 		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "⊘ canceled"})
 	}
@@ -2444,6 +2479,17 @@ func (m *Model) cancelCurrentStreamWithNotice(showNotice bool) {
 	// executed. The Esc-key caller drains the next queued message and
 	// submits it after this returns.
 	m.relayout()
+}
+
+// clearTurnAnimationState resets the turn-scoped flags that keep the 50ms
+// progress-animation tick alive. Any of them left latched after a turn ends —
+// a compacting flag whose closing ctxUsageMsg never arrived, a tool row stuck
+// in-progress because its completion event was dropped — makes the tick
+// self-perpetuate and pin a CPU core until the process restarts. Every
+// turn-termination path must call this, not just the happy-path done event.
+func (m *Model) clearTurnAnimationState() {
+	m.compacting = false
+	m.mainChat().resolveStaleInProgressTools()
 }
 
 func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
@@ -3279,6 +3325,83 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+// rolloverConfirm builds the y/n gate for a rollover offer. Yes calls
+// AcceptRollover and, on success, resumes into the returned fresh conversation
+// (option B: switch, leaving a visible seam in scrollback); a rejected/errored
+// accept leaves the session where it is with a note. No calls DeclineRollover so
+// the server re-arms the offer after further growth. Both branches clear
+// pendingConfirm by returning a model whose gate the caller drops.
+func (m Model) rolloverConfirm(ev rolloverOfferedMsg) *confirmRequest {
+	return &confirmRequest{
+		onYes: func(mm Model) (Model, tea.Cmd) {
+			mm.pendingConfirm = nil
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			newID, err := mm.agent.AcceptRollover(ctx, ev.convID, ev.offerID)
+			if err != nil || newID == "" {
+				note := "rollover could not start"
+				if err != nil {
+					note += ": " + err.Error()
+				}
+				mm.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: mm.styles.Muted.Render(note)})
+				mm.refreshViewport()
+				return mm, nil
+			}
+			// Leave a visible seam in the OLD session before switching, so the
+			// boundary is legible on scroll-back.
+			mm.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: mm.styles.Muted.Render("↪ rolled over to a fresh session — continuing there")})
+			var cmd tea.Cmd
+			mm, cmd = mm.applyResume(newID)
+			return mm, cmd
+		},
+		onNo: func(mm Model) (Model, tea.Cmd) {
+			mm.pendingConfirm = nil
+			convID, offerID, ag := ev.convID, ev.offerID, mm.agent
+			go func() { _ = ag.DeclineRollover(context.Background(), convID, offerID) }()
+			mm.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: mm.styles.Muted.Render("staying in this session")})
+			mm.refreshViewport()
+			return mm, nil
+		},
+	}
+}
+
+// renderRolloverPrompt is the scrollback message shown while a rollover offer is
+// pending: why it's offered, a short preview of the handoff that would seed the
+// new session, and the y/n hints on their own line.
+func (m Model) renderRolloverPrompt(ev rolloverOfferedMsg) string {
+	head := m.styles.Accent.Render("▸ ")
+	title := "Start a fresh session? " + ev.reason
+	lines := []string{head + m.styles.AgentProse.Render(title)}
+	if p := rolloverPreviewSnippet(ev.preview); p != "" {
+		lines = append(lines, "  "+m.styles.Muted.Render("handoff: "+p))
+	}
+	hints := m.styles.Muted.Render("[") +
+		m.styles.Accent.Render("y") +
+		m.styles.Muted.Render("]es / [") +
+		m.styles.Accent.Render("n") +
+		m.styles.Muted.Render("]o")
+	lines = append(lines, "  "+hints)
+	return strings.Join(lines, "\n")
+}
+
+// rolloverPreviewSnippet condenses the multi-line handoff artifact to a single
+// short line for the confirm prompt (the full artifact seeds the new session's
+// first turn, so it isn't lost).
+func rolloverPreviewSnippet(preview string) string {
+	preview = strings.TrimSpace(preview)
+	if preview == "" {
+		return ""
+	}
+	if i := strings.IndexByte(preview, '\n'); i >= 0 {
+		preview = preview[:i]
+	}
+	const max = 120
+	if len(preview) > max {
+		preview = preview[:max-1] + "…"
+	}
+	return preview
+}
+
 // renderConfirmPrompt builds the confirm message shown in scrollback while
 // pendingConfirm is set. The first line names the requested action, optional
 // human-facing intent/details follow, and key hints stay on their own final
@@ -3462,6 +3585,19 @@ func (m Model) handlePendingConfirmKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	if msg.Key().Code == tea.KeyEnter {
 		text := strings.TrimSpace(m.input.Value())
 		if text != "" {
+			// A slash command typed while a permission gate is pending is a
+			// client-side command (e.g. /config, /help), not steering text for
+			// the paused tool. Run it as a slash command and leave the confirm
+			// gate intact so the user can still answer y/n/d/c afterward.
+			if strings.HasPrefix(text, "/") {
+				m.input.SetValue("")
+				m.relayout()
+				next, cmd := m.runSlash(text)
+				if nm, ok := next.(Model); ok {
+					return nm, cmd
+				}
+				return m, cmd
+			}
 			return m.steerPendingConfirm(text)
 		}
 		if m.pendingConfirm != nil {
@@ -4619,8 +4755,9 @@ func (m Model) renderConnStateChip() string {
 	}
 }
 
-// renderPermissionModeChip renders the session-mode chip for the status bar:
-// strict → red (Error), permissive → amber (Primary), bypass → lime (Accent).
+// renderPermissionModeChip renders the session-mode chip for the status bar,
+// colored by how safe the mode is: strict → green (Success, most gated),
+// permissive → amber (Primary), bypass → red (Error, least gated / unsafe).
 // Returns the empty string when the mode isn't known yet (the startup fetch
 // hasn't landed) so the bar doesn't show a misleading default.
 func (m Model) renderPermissionModeChip() string {
@@ -4630,9 +4767,9 @@ func (m Model) renderPermissionModeChip() string {
 	var valStyle lipgloss.Style
 	switch m.permissionMode {
 	case "strict":
-		valStyle = m.styles.Error
+		valStyle = m.styles.Success
 	case "bypass":
-		valStyle = m.styles.Accent
+		valStyle = m.styles.Error
 	default: // permissive (or anything unexpected) → amber
 		valStyle = m.styles.Primary
 	}

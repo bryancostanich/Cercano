@@ -122,7 +122,11 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 		statusBit = toolEntryError.Render("⚠") + toolEntryFaint.Render(" "+flattenSummary(e.ResultSummary))
 	}
 	if e.SubAgentID != "" {
-		statusBit += toolEntryFaint.Render(" · open tab")
+		// "open tab" is an interactive affordance (click to open the sub-agent
+		// tab), so color the words in the accent — the same color as the nav
+		// caret — to set them apart from the faint result text. The separator
+		// stays faint so only the actionable words pop.
+		statusBit += toolEntryFaint.Render(" · ") + styles.Accent.Render("open tab")
 	}
 
 	// While the call is in progress, render the tool name in active-voice

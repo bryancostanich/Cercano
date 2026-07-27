@@ -44,17 +44,13 @@ func (t Table) Render(maxWidth int, styles theme.Styles) string {
 	if totalGridWidth(widths) <= maxWidth {
 		return renderGrid(t.Cols, widths, t.Rows, styles)
 	}
-	// Try wrapping the wrappable column across lines to make the grid fit.
-	if i := wrappableIdx(t.Cols); i >= 0 && widths[i] > minWrapWidth {
-		over := totalGridWidth(widths) - maxWidth
-		newW := widths[i] - over
-		if newW < minWrapWidth {
-			newW = minWrapWidth
-		}
-		widths[i] = newW
-		if totalGridWidth(widths) <= maxWidth {
-			return renderGrid(t.Cols, widths, t.Rows, styles)
-		}
+	// Too wide at natural widths → shrink the wrappable columns so their cells
+	// wrap across lines. The overflow is distributed proportionally across all
+	// wrappable columns (down to minWrapWidth each); rigid columns keep their
+	// natural width. This lets a wide decision matrix — several long option
+	// columns — still render as a grid instead of collapsing to a transpose.
+	if shrinkWrappable(t.Cols, widths, maxWidth) && totalGridWidth(widths) <= maxWidth {
+		return renderGrid(t.Cols, widths, t.Rows, styles)
 	}
 	// Still too wide for a grid → responsive transpose; every column survives.
 	return renderTransposed(t.Cols, t.Rows, maxWidth, styles)
@@ -88,13 +84,55 @@ func computeColWidths(cols []Column, rows []map[string]string) []int {
 	return w
 }
 
-func wrappableIdx(cols []Column) int {
+// shrinkWrappable reduces the widths of wrappable columns so the grid fits
+// within maxWidth, distributing the required reduction proportionally to each
+// wrappable column's current width. No column shrinks below minWrapWidth. It
+// mutates widths in place and reports whether any shrinking was possible
+// (false when there are no wrappable columns wider than the floor).
+func shrinkWrappable(cols []Column, widths []int, maxWidth int) bool {
+	// Slack each wrappable column can still give up before hitting the floor.
+	type wcol struct{ idx, slack int }
+	var wraps []wcol
+	totalSlack := 0
 	for i, c := range cols {
-		if c.Wrappable {
-			return i
+		if c.Wrappable && widths[i] > minWrapWidth {
+			s := widths[i] - minWrapWidth
+			wraps = append(wraps, wcol{i, s})
+			totalSlack += s
 		}
 	}
-	return -1
+	if len(wraps) == 0 {
+		return false
+	}
+	over := totalGridWidth(widths) - maxWidth
+	if over <= 0 {
+		return true
+	}
+	// Can't fit even at the floor; shrink everything to the floor and let the
+	// caller fall through to transpose.
+	if over >= totalSlack {
+		for _, w := range wraps {
+			widths[w.idx] = minWrapWidth
+		}
+		return true
+	}
+	// Distribute the overflow proportionally to each column's slack. Track the
+	// running remainder so rounding never under-shrinks and leaves us over budget.
+	remaining := over
+	for i, w := range wraps {
+		var take int
+		if i == len(wraps)-1 {
+			take = remaining // last column absorbs the rounding remainder
+		} else {
+			take = over * w.slack / totalSlack
+		}
+		if take > w.slack {
+			take = w.slack
+		}
+		widths[w.idx] -= take
+		remaining -= take
+	}
+	return true
 }
 
 func renderGrid(cols []Column, widths []int, rows []map[string]string, styles theme.Styles) string {

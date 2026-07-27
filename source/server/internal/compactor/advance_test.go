@@ -264,21 +264,16 @@ func TestAdvanceCappedBoundaryRespectsSameSecond(t *testing.T) {
 }
 
 // recCall records the flattened text of each summarize call and returns a fixed
-// summary. When errOnConsolidate is set it fails only the re-consolidation call
-// (identified by the rendered summary preamble), so new-segment calls still
-// succeed.
+// summary. Tests inspect texts to assert the summarizer is only ever called on
+// raw segments — never on an already-consolidated summary (the shrink path is
+// deterministic, not a re-summarize).
 type recCall struct {
-	texts            []string
-	ret              compaction.StructuredSummary
-	errOnConsolidate bool
+	texts []string
+	ret   compaction.StructuredSummary
 }
 
 func (r *recCall) fn(_ context.Context, msgs []llm.Message) (compaction.StructuredSummary, error) {
-	txt := flat(msgs)
-	r.texts = append(r.texts, txt)
-	if strings.Contains(txt, "[conversation summary]") && r.errOnConsolidate {
-		return compaction.StructuredSummary{}, fmt.Errorf("shrink failed")
-	}
+	r.texts = append(r.texts, flat(msgs))
 	return r.ret, nil
 }
 
@@ -291,18 +286,25 @@ func fatPart() compaction.StructuredSummary {
 	return s
 }
 
-func TestAdvanceReconsolidatesWhenSummariesExceedBound(t *testing.T) {
+// When the merged ledger exceeds the compacted budget, the pass shrinks it
+// DETERMINISTICALLY — dropping whole entries in recency order — instead of
+// re-summarizing. It must never paraphrase (no summarizer call for the shrink),
+// the consolidated view must fit under budget, and the high-signal Goal must
+// survive while excess Decisions are pruned.
+func TestAdvancePrunesDeterministicallyWhenSummariesExceedBudget(t *testing.T) {
 	tok := contextmeter.Default()
-	cfg := Config{ActivationFloorTokens: 1000, SegmentTokens: 500, VerbatimRecent: 2}
+	budget := 800
+	cfg := Config{ActivationFloorTokens: 1000, SegmentTokens: 500, VerbatimRecent: 2, CompactedBudgetTokens: budget}
 	fat := fatPart()
 	seededJSON, _ := json.Marshal([]compaction.StructuredSummary{fat})
-	bound := reconsolidateThresholdSegments * cfg.SegmentTokens
-	if compaction.TotalTokens(tok, compaction.AssembleSendView(compaction.Reduce([]compaction.StructuredSummary{fat}), nil)) <= bound {
-		t.Fatal("test setup: seeded parts should exceed the bound")
+	if compaction.TotalTokens(tok, compaction.AssembleSendView(compaction.Reduce([]compaction.StructuredSummary{fat}), nil)) <= budget {
+		t.Fatal("test setup: seeded parts should exceed the budget")
 	}
 	state := conversation.Compaction{SegmentSummariesJSON: string(seededJSON)}
 
-	rc := &recCall{ret: compaction.StructuredSummary{Goal: "re", State: "small"}}
+	// The summarizer here summarizes the freshly-frozen live turns (a normal
+	// segment pass); it must NOT be invoked to shrink the consolidated ledger.
+	rc := &recCall{ret: compaction.StructuredSummary{Goal: "seg", State: "s"}}
 	turns := bigTurns(12, 3000)
 	st, changed, _, err := Advance(context.Background(), turns, state, rc.fn, cfg, tok)
 	if err != nil {
@@ -311,49 +313,63 @@ func TestAdvanceReconsolidatesWhenSummariesExceedBound(t *testing.T) {
 	if !changed {
 		t.Fatal("expected a pass")
 	}
-	// Exactly one part after re-consolidation.
-	var parts []compaction.StructuredSummary
-	if err := json.Unmarshal([]byte(st.SegmentSummariesJSON), &parts); err != nil {
+	// No summarizer call ever received an already-consolidated summary: the
+	// shrink is deterministic, not a re-summarize.
+	for _, txt := range rc.texts {
+		if strings.Contains(txt, "[conversation summary]") {
+			t.Fatalf("shrink must be deterministic — summarizer was called on a consolidated summary:\n%s", txt)
+		}
+	}
+	// The consolidated view now fits under the budget.
+	var consolidated compaction.StructuredSummary
+	if err := json.Unmarshal([]byte(st.ConsolidatedJSON), &consolidated); err != nil {
 		t.Fatal(err)
 	}
-	if len(parts) != 1 {
-		t.Fatalf("SegmentSummariesJSON holds %d parts, want exactly 1 (re-consolidated)", len(parts))
+	if got := compaction.TotalTokens(tok, compaction.AssembleSendView(consolidated, nil)); got > budget {
+		t.Fatalf("consolidated view %d tokens still over budget %d", got, budget)
 	}
-	// The consolidated view now renders under the bound.
-	var consolidated compaction.StructuredSummary
-	_ = json.Unmarshal([]byte(st.ConsolidatedJSON), &consolidated)
-	if got := compaction.TotalTokens(tok, compaction.AssembleSendView(consolidated, nil)); got > bound {
-		t.Fatalf("consolidated view %d tokens still over bound %d", got, bound)
+	// Goal survives (verbatim, not paraphrased) and decisions were pruned, not
+	// fabricated: every surviving decision is one of the originals.
+	if consolidated.Goal != "FATGOAL" {
+		t.Fatalf("Goal should survive pruning verbatim, got %q", consolidated.Goal)
 	}
-	// The final summarize call was the re-consolidation over the fat content.
-	last := rc.texts[len(rc.texts)-1]
-	if !strings.Contains(last, "[conversation summary]") || !strings.Contains(last, "FATGOAL") {
-		t.Fatalf("last summarize call was not the consolidated content (len=%d)", len(last))
+	if len(consolidated.Decisions) >= len(fat.Decisions) {
+		t.Fatalf("expected decisions to be pruned: had %d, still %d", len(fat.Decisions), len(consolidated.Decisions))
+	}
+	orig := map[string]bool{}
+	for _, d := range fat.Decisions {
+		orig[d] = true
+	}
+	for _, d := range consolidated.Decisions {
+		if !orig[d] {
+			t.Fatalf("pruning fabricated a decision not in the input: %q", d)
+		}
 	}
 }
 
-func TestAdvanceShrinkFailureSurfaces(t *testing.T) {
+// pruneToFit preserves Goal and State even under an aggressively small budget
+// rather than gutting the summary to hit a byte target.
+func TestPruneToFitKeepsGoalAndState(t *testing.T) {
 	tok := contextmeter.Default()
-	cfg := Config{ActivationFloorTokens: 1000, SegmentTokens: 500, VerbatimRecent: 2}
-	seededJSON, _ := json.Marshal([]compaction.StructuredSummary{fatPart()})
-	state := conversation.Compaction{
-		FrozenThrough:        42,
-		SegmentSummariesJSON: string(seededJSON),
-		ConsolidatedJSON:     "orig",
+	s := fatPart()
+	s.State = "STATELINE"
+	out := pruneToFit(s, 1, tok) // impossibly small budget
+	if out.Goal != "FATGOAL" || out.State != "STATELINE" {
+		t.Fatalf("Goal/State must survive even under a tiny budget, got Goal=%q State=%q", out.Goal, out.State)
 	}
+}
 
-	rc := &recCall{ret: compaction.StructuredSummary{Goal: "re", State: "small"}, errOnConsolidate: true}
-	turns := bigTurns(12, 3000)
-	st, changed, more, err := Advance(context.Background(), turns, state, rc.fn, cfg, tok)
-	if err == nil {
-		t.Fatal("expected the re-consolidation error to surface")
+// budgetTokens falls back to the segment-relative bound when no explicit
+// window-relative budget is configured, so zero-value Configs keep working.
+func TestBudgetTokensFallback(t *testing.T) {
+	if got := budgetTokens(Config{CompactedBudgetTokens: 42000}); got != 42000 {
+		t.Fatalf("explicit budget should win, got %d", got)
 	}
-	if changed || more {
-		t.Fatalf("on shrink failure expect no change: changed=%v more=%v", changed, more)
+	if got := budgetTokens(Config{SegmentTokens: 8000}); got != legacyBoundSegments*8000 {
+		t.Fatalf("fallback should be %d, got %d", legacyBoundSegments*8000, got)
 	}
-	// Original state returned verbatim — a grown state is never persisted.
-	if st.FrozenThrough != 42 || st.SegmentSummariesJSON != string(seededJSON) || st.ConsolidatedJSON != "orig" {
-		t.Fatalf("shrink failure must return the original state, got %+v", st)
+	if got := budgetTokens(Config{}); got != legacyBoundSegments*DefaultConfig().SegmentTokens {
+		t.Fatalf("zero Config should use default segment tokens, got %d", got)
 	}
 }
 

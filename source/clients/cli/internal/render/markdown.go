@@ -84,13 +84,14 @@ func splitPipeRow(s string) []string {
 
 func (mt markdownTable) toTable() Table {
 	cols := make([]Column, len(mt.Headers))
-	// The last column is the wrap-OK explanatory field by convention (LLMs put
-	// the long text there); it may wrap across lines to help the grid fit.
-	last := len(mt.Headers) - 1
+	// The first column is the key/axis column (labels like "Cost", "Risk");
+	// it stays rigid at its natural width. Every other column holds content
+	// that may wrap across lines so a wide table (e.g. a decision matrix with
+	// several long option columns) still fits the grid instead of transposing.
 	for i, h := range mt.Headers {
 		cols[i] = Column{
 			Name:      h,
-			Wrappable: i == last,
+			Wrappable: i > 0,
 		}
 	}
 	rows := make([]map[string]string, len(mt.Rows))

@@ -75,12 +75,13 @@ func TestRuntimeConfigRowsMistralRS(t *testing.T) {
 		OpenRuntime:               "mistralrs",
 		MistralRSPagedAttn:        "on",
 		MistralRSPAMemoryFraction: "0.85",
+		MistralRSPAMemoryMB:       "8192",
 		MistralRSISQ:              "Q4K",
 	}
 	rows := runtimeConfigRows(cfg)
-	// runtime picker + three mistral.rs launch-flag rows (no ollama URL).
-	if len(rows) != 4 {
-		t.Fatalf("mistralrs: want 4 rows, got %d", len(rows))
+	// runtime picker + four mistral.rs launch-flag rows (no ollama URL).
+	if len(rows) != 5 {
+		t.Fatalf("mistralrs: want 5 rows, got %d", len(rows))
 	}
 	if rows[0].Value != "mistralrs" || rows[0].Action.Kind != runtimeActionOpenRuntimePick {
 		t.Errorf("runtime row: value=%q kind=%q", rows[0].Value, rows[0].Action.Kind)
@@ -90,6 +91,7 @@ func TestRuntimeConfigRowsMistralRS(t *testing.T) {
 	}{
 		{"paged-attn", "on", runtimeActionMistralPagedAttn},
 		{"pa-memory-fraction", "0.85", runtimeActionMistralPAMemoryFrac},
+		{"pa-memory-mb", "8192", runtimeActionMistralPAMemoryMB},
 		{"isq", "Q4K", runtimeActionMistralISQ},
 	}
 	for i, w := range want {
@@ -104,14 +106,15 @@ func TestRuntimeConfigRowsMistralRS(t *testing.T) {
 func TestRuntimeConfigRowsMistralRSDefaults(t *testing.T) {
 	// Unset flags render placeholders; paged-attn defaults to "auto".
 	rows := runtimeConfigRows(&agentclient.Config{OpenRuntime: "mistralrs"})
-	if len(rows) != 4 {
-		t.Fatalf("want 4 rows, got %d", len(rows))
+	if len(rows) != 5 {
+		t.Fatalf("want 5 rows, got %d", len(rows))
 	}
 	if rows[1].Value != "auto" {
 		t.Errorf("paged-attn default: got %q, want auto", rows[1].Value)
 	}
-	if rows[2].Value != "—" || rows[3].Value != "—" {
-		t.Errorf("unset flags should show —, got pa=%q isq=%q", rows[2].Value, rows[3].Value)
+	// pa-memory-fraction, pa-memory-mb, and isq are unset -> placeholder.
+	if rows[2].Value != "—" || rows[3].Value != "—" || rows[4].Value != "—" {
+		t.Errorf("unset flags should show —, got frac=%q mb=%q isq=%q", rows[2].Value, rows[3].Value, rows[4].Value)
 	}
 }
 

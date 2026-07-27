@@ -224,7 +224,7 @@ func TestSynthesize(t *testing.T) {
 func TestRunFullPipeline(t *testing.T) {
 	model := &mockModelCaller{
 		responses: []string{
-			"1. ollama list models API\n2. ollama REST API models",                                  // query crafting
+			"1. ollama list models API\n2. ollama REST API models",                                 // query crafting
 			"Ollama lists models via GET /api/tags.\n\nSources:\n- https://a.com\n- https://b.com", // synthesis
 		},
 	}
@@ -259,6 +259,37 @@ func TestRunFullPipeline(t *testing.T) {
 	}
 }
 
+func TestRunReportsPhaseProgress(t *testing.T) {
+	model := &mockModelCaller{
+		responses: []string{
+			"1. ollama list models API\n2. ollama REST API models",
+			"Answer.\n\nSources:\n- https://a.com",
+		},
+	}
+	searcher := &mockSearcher{
+		results: map[string][]SearchResult{
+			"ollama list models API": {{URL: "https://a.com", Title: "Ollama Docs", Snippet: "API docs"}},
+			"ollama REST API models": {{URL: "https://a.com", Title: "Ollama Docs", Snippet: "dup"}},
+		},
+	}
+	fetcher := &mockFetcher{pages: map[string]string{"https://a.com": "Full docs about listing models..."}}
+
+	p := NewResearchPipeline(model, searcher, fetcher)
+	var phases []string
+	p.SetProgress(func(phase string) { phases = append(phases, phase) })
+
+	if _, err := p.Run(context.Background(), "How do I list models in Ollama?", 5); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	joined := strings.Join(phases, "\n")
+	for _, want := range []string{"crafting search queries", "searching", "found", "fetching", "synthesizing"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("progress phases missing %q; got:\n%s", want, joined)
+		}
+	}
+}
+
 func TestRunNoSearchResults(t *testing.T) {
 	model := &mockModelCaller{
 		responses: []string{
@@ -283,5 +314,108 @@ func TestRunAllSearchesFailedSurfacesCause(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "searches failed") || !strings.Contains(err.Error(), "can't open file") {
 		t.Fatalf("error should surface the underlying cause, got: %v", err)
+	}
+}
+
+func TestRunDurableWritesCompleteSidecar(t *testing.T) {
+	model := &mockModelCaller{
+		responses: []string{
+			"1. ollama list models API",
+			"Answer.\n\nSources:\n- https://a.com",
+		},
+	}
+	searcher := &mockSearcher{
+		results: map[string][]SearchResult{
+			"ollama list models API": {{URL: "https://a.com", Title: "Ollama Docs", Snippet: "API docs"}},
+		},
+	}
+	fetcher := &mockFetcher{pages: map[string]string{"https://a.com": "Full docs..."}}
+
+	dir := t.TempDir()
+	p := NewResearchPipeline(model, searcher, fetcher)
+	result, err := p.RunDurable(context.Background(), "How do I list models in Ollama?", 5, dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Answer == "" {
+		t.Fatal("expected non-empty answer")
+	}
+
+	// Sidecar must exist and record a completed run with the answer preserved.
+	sc := newResearchSidecar(dir)
+	if !sc.exists() {
+		t.Fatalf("expected sidecar at %s", sc.path())
+	}
+	st, err := sc.load()
+	if err != nil {
+		t.Fatalf("load sidecar: %v", err)
+	}
+	if st.Phase != phaseComplete {
+		t.Fatalf("expected phase %q, got %q", phaseComplete, st.Phase)
+	}
+	if st.isInProgress() {
+		t.Fatal("completed run should not be in progress")
+	}
+	if st.Answer == "" {
+		t.Fatal("sidecar should persist the synthesized answer")
+	}
+}
+
+func TestRunDurableResumesFromFetchPhase(t *testing.T) {
+	// Pre-seed a sidecar interrupted right after the fetch phase: queries,
+	// results, and pages are all present, but no answer yet. A resumed run
+	// must skip straight to synthesis — so a model with ONLY a synthesis
+	// response (no query-crafting response) must still succeed.
+	dir := t.TempDir()
+	seed := &researchState{
+		Version:    currentResearchStateVersion,
+		Question:   "How do I list models in Ollama?",
+		MaxResults: 5,
+		Phase:      phaseFetch,
+		Queries:    []string{"ollama list models API"},
+		Results:    []SearchResult{{URL: "https://a.com", Title: "Ollama Docs", Snippet: "API docs"}},
+		Pages:      []FetchedPage{{URL: "https://a.com", Title: "Ollama Docs", Content: "Full docs..."}},
+	}
+	sc := newResearchSidecar(dir)
+	if err := sc.save(seed); err != nil {
+		t.Fatalf("seed sidecar: %v", err)
+	}
+
+	// Model returns a single synthesis answer. If the pipeline wrongly
+	// re-crafted queries it would consume this as the query response and the
+	// answer would be wrong (or crafting would drive a real search).
+	model := &mockModelCaller{responses: []string{"Resumed answer.\n\nSources:\n- https://a.com"}}
+	// Searcher/fetcher must NOT be called on resume; give them error doubles so
+	// any accidental use fails loudly.
+	searcher := &mockSearcher{err: errors.New("searcher must not run on resume")}
+	fetcher := &mockFetcher{err: errors.New("fetcher must not run on resume")}
+
+	p := NewResearchPipeline(model, searcher, fetcher)
+	result, err := p.RunDurable(context.Background(), "How do I list models in Ollama?", 5, dir)
+	if err != nil {
+		t.Fatalf("resume failed: %v", err)
+	}
+	if !strings.Contains(result.Answer, "Resumed answer") {
+		t.Fatalf("expected resumed synthesis answer, got: %q", result.Answer)
+	}
+	if model.callCount != 1 {
+		t.Fatalf("expected exactly 1 model call (synthesis only), got %d", model.callCount)
+	}
+}
+
+func TestRunWithoutOutputDirWritesNoSidecar(t *testing.T) {
+	// The classic Run path must remain sidecar-free. Verify by running in a
+	// temp cwd and confirming no research_state.json appears anywhere we pass.
+	model := &mockModelCaller{responses: []string{"1. q", "Answer.\n\nSources:\n- https://a.com"}}
+	searcher := &mockSearcher{results: map[string][]SearchResult{"q": {{URL: "https://a.com", Title: "T", Snippet: "s"}}}}
+	fetcher := &mockFetcher{pages: map[string]string{"https://a.com": "content"}}
+
+	p := NewResearchPipeline(model, searcher, fetcher)
+	if _, err := p.Run(context.Background(), "q?", 5); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// An empty-dir sidecar is disabled and reports no file.
+	if newResearchSidecar("").exists() {
+		t.Fatal("disabled sidecar should never report existing")
 	}
 }

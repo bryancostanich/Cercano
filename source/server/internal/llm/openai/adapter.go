@@ -1,7 +1,9 @@
 package openai
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	goopenai "github.com/sashabaranov/go-openai"
 
@@ -108,7 +110,15 @@ func toolsToOpenAI(tools []llm.Tool) []goopenai.Tool {
 // blocksFromOpenAI maps a completed assistant message to llm blocks.
 func blocksFromOpenAI(m goopenai.ChatCompletionMessage) []llm.Block {
 	var blocks []llm.Block
-	if m.Content != "" {
+	// Some local models (notably qwen3 served via mistral.rs) occasionally emit
+	// their tool call twice: once as a correctly structured tool_call, and once
+	// as a leading text block containing the raw JSON the chat template asked
+	// for — a `[{"name": ..., "arguments": ...}]` array. The structured copy is
+	// authoritative; the text copy is noise that would otherwise render in the
+	// tab and, worse, poison the model on the next turn by feeding its own
+	// malformed pattern back to it. Drop the text block when it parses as a
+	// tool-call array and the same message carries a real tool_call.
+	if m.Content != "" && !(len(m.ToolCalls) > 0 && looksLikeToolCallJSON(m.Content)) {
 		blocks = append(blocks, llm.Block{Type: llm.BlockText, Text: m.Content})
 	}
 	for _, tc := range m.ToolCalls {
@@ -118,4 +128,31 @@ func blocksFromOpenAI(m goopenai.ChatCompletionMessage) []llm.Block {
 		})
 	}
 	return blocks
+}
+
+// looksLikeToolCallJSON reports whether s is (only) a JSON array of tool-call
+// objects shaped like {"name": ..., "arguments": ...} — the format qwen3's chat
+// template instructs the model to emit inside <tool_call> tags. It requires a
+// clean full parse and a non-empty name on every element, so ordinary prose
+// (which fails json.Unmarshal) is never suppressed. The "arguments" key is the
+// template's wording; real parsed tool calls carry "input", never "arguments",
+// so a legitimate assistant text block cannot match.
+func looksLikeToolCallJSON(s string) bool {
+	trimmed := strings.TrimSpace(s)
+	if !strings.HasPrefix(trimmed, "[") {
+		return false
+	}
+	var calls []struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &calls); err != nil || len(calls) == 0 {
+		return false
+	}
+	for _, c := range calls {
+		if c.Name == "" {
+			return false
+		}
+	}
+	return true
 }

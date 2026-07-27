@@ -99,6 +99,13 @@ func streamMsgToEvent(sm agentclient.StreamMsg) tea.Msg {
 			tier:        sm.Tier,
 			destructive: sm.Destructive,
 		}
+	case agentclient.TypeRolloverOffered:
+		return rolloverOfferedMsg{
+			offerID: sm.OfferID,
+			convID:  sm.ConvID,
+			reason:  sm.RolloverReason,
+			preview: sm.HandoffPreview,
+		}
 	case agentclient.TypeWatchdog:
 		return watchdogEventMsg{
 			kind:     sm.WatchdogKind,

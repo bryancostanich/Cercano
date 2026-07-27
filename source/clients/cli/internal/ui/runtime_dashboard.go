@@ -584,6 +584,9 @@ func (d *runtimeDashboard) updateOperations(msg tea.KeyPressMsg) (tea.Cmd, bool)
 		case runtimeActionMistralPAMemoryFrac:
 			d.openMistralPAMemoryFractionPicker()
 			return nil, false
+		case runtimeActionMistralPAMemoryMB:
+			d.openMistralPAMemoryMBPicker()
+			return nil, false
 		case runtimeActionMistralISQ:
 			d.openMistralISQPicker()
 			return nil, false

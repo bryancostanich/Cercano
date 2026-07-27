@@ -71,6 +71,40 @@ func TestSubAgentNestedLabelsUseParentOrdinal(t *testing.T) {
 	}
 }
 
+func TestResearchActivityOpensTabAndAttachesOpenTabAffordance(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
+	m.mainChat().Apply(toolEntryStartMsg{id: "tool-r", name: "research"})
+	m.mainChat().Apply(toolEntryStopMsg{id: "tool-r", argsSummary: "query=task tracking max_results=6"})
+
+	m.applySubAgentEvent(subAgentEventMsg{id: "activity:research:1", kind: "started", title: "research", toolUseID: "tool-r", text: `research start: query="task tracking" max_results=6`})
+	m.applySubAgentEvent(subAgentEventMsg{id: "activity:research:1", kind: "prompt", text: "Query: task tracking"})
+	m.applySubAgentEvent(subAgentEventMsg{id: "activity:research:1", kind: "progress", text: "searching the web…"})
+	m.applySubAgentEvent(subAgentEventMsg{id: "activity:research:1", kind: "done", text: "research complete: 6 sources"})
+
+	tab := m.chatTabs.tabs["activity:research:1"]
+	if tab == nil {
+		t.Fatal("research tool should open its own activity tab")
+	}
+	var body []string
+	for _, e := range tab.view.Entries() {
+		body = append(body, e.Content)
+	}
+	joined := strings.Join(body, "\n")
+	if !strings.Contains(joined, "Query: task tracking") || !strings.Contains(joined, "• searching the web") || !strings.Contains(joined, "✓ research complete") {
+		t.Fatalf("research activity tab missing formatted lifecycle: %q", joined)
+	}
+
+	entries := m.mainChat().Entries()
+	if len(entries) == 0 || entries[0].Tool == nil || entries[0].Tool.SubAgentID != "activity:research:1" {
+		t.Fatalf("research tool row should link to its activity tab: %+v", entries)
+	}
+	out := renderToolEntry(*entries[0].Tool, 100, false, m.styles, m.mainChat().md)
+	if !strings.Contains(stripAnsiCSI(out), "open tab") {
+		t.Fatalf("research tool row should show open tab affordance, got %q", stripAnsiCSI(out))
+	}
+}
+
 func TestDeepResearchActivityFormattingSuppressesRawStartAndFormatsProgress(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
@@ -319,7 +353,11 @@ func TestCleanupFinishedSubAgentTabs(t *testing.T) {
 	m.applySubAgentEvent(subAgentEventMsg{id: "c2", kind: "started"})
 	m.applySubAgentEvent(subAgentEventMsg{id: "c3", kind: "started"})
 
-	// c1 finished, c2 finished-and-active, c3 still running.
+	// c1 finished, c2 finished-and-active, c3 still running. c2 carries
+	// substantive assistant output so it survives the eager on-done sweep and is
+	// available for the user to navigate into — the manual sweep below then
+	// spares it as the active tab.
+	m.applySubAgentEvent(subAgentEventMsg{id: "c2", kind: "token", inner: chatAssistantDeltaMsg{token: "c2 result worth reading"}})
 	m.applySubAgentEvent(subAgentEventMsg{id: "c1", kind: "done"})
 	m.applySubAgentEvent(subAgentEventMsg{id: "c2", kind: "done"})
 	m.switchChatTab("c2")
@@ -443,5 +481,43 @@ func TestCleanupFinishedSubAgentTabs_SparesRestored(t *testing.T) {
 	m.cleanupFinishedSubAgentTabs()
 	if _, ok := m.chatTabs.tabs["r1"]; !ok {
 		t.Fatal("restored finished tab must survive cleanup")
+	}
+}
+
+// A sub-agent that finishes must retire its own tab on its OWN done event,
+// without waiting for the parent turn's chatDoneMsg sweep. This is the fix for
+// the orphaned-tab bug: a sub-agent that finishes after the parent turn's sweep
+// already ran previously sat visible-but-finished forever.
+func TestSubAgentDoneEventPrunesOwnTabImmediately(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.applySubAgentEvent(subAgentEventMsg{id: "sa", kind: "started"})
+	// The user is NOT viewing the sub tab — they're back on main.
+	m.switchChatTab(mainChatTabID)
+	if _, ok := m.chatTabs.tabs["sa"]; !ok {
+		t.Fatal("sub tab should exist while running")
+	}
+	// The sub-agent finishes. No parent chatDoneMsg is delivered here.
+	m.applySubAgentEvent(subAgentEventMsg{id: "sa", kind: "done"})
+	if _, ok := m.chatTabs.tabs["sa"]; ok {
+		t.Fatal("finished non-active sub tab must be retired on its own done event")
+	}
+}
+
+// A sub-agent that finishes with substantive output must NOT be yanked away by
+// the eager on-done sweep: the user may want to navigate into it and read the
+// result. Such tabs keep their pre-existing lifetime (retired later by the
+// parent turn's sweep), so only bare lifecycle-only tabs auto-close eagerly.
+func TestSubAgentDoneEventSparesSubstantiveTab(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.applySubAgentEvent(subAgentEventMsg{id: "sa", kind: "started"})
+	// Substantive assistant output the user might want to read after it finishes.
+	m.applySubAgentEvent(subAgentEventMsg{id: "sa", kind: "token", inner: chatAssistantDeltaMsg{token: "found the thing"}})
+	// User is on main — not viewing the tab — when it finishes.
+	m.switchChatTab(mainChatTabID)
+	m.applySubAgentEvent(subAgentEventMsg{id: "sa", kind: "done"})
+	if _, ok := m.chatTabs.tabs["sa"]; !ok {
+		t.Fatal("finished substantive sub tab must survive the eager on-done sweep for later review")
 	}
 }

@@ -65,6 +65,8 @@ const (
 	Agent_SubscribeEvents_FullMethodName            = "/agent.Agent/SubscribeEvents"
 	Agent_AllowToolCall_FullMethodName              = "/agent.Agent/AllowToolCall"
 	Agent_DenyToolCall_FullMethodName               = "/agent.Agent/DenyToolCall"
+	Agent_AcceptRollover_FullMethodName             = "/agent.Agent/AcceptRollover"
+	Agent_DeclineRollover_FullMethodName            = "/agent.Agent/DeclineRollover"
 	Agent_GetProviderCapabilities_FullMethodName    = "/agent.Agent/GetProviderCapabilities"
 	Agent_ProposeContextEdit_FullMethodName         = "/agent.Agent/ProposeContextEdit"
 	Agent_DeleteConversationTurns_FullMethodName    = "/agent.Agent/DeleteConversationTurns"
@@ -228,6 +230,12 @@ type AgentClient interface {
 	// PermissionRequired stream event.
 	AllowToolCall(ctx context.Context, in *AllowToolCallRequest, opts ...grpc.CallOption) (*AllowToolCallResponse, error)
 	DenyToolCall(ctx context.Context, in *DenyToolCallRequest, opts ...grpc.CallOption) (*DenyToolCallResponse, error)
+	// AcceptRollover + DeclineRollover are how a client replies to a
+	// RolloverOffered stream event. Accept mints a new conversation seeded by the
+	// handoff artifact and returns its id (the client resumes into it). Decline
+	// re-arms the offer after further growth.
+	AcceptRollover(ctx context.Context, in *AcceptRolloverRequest, opts ...grpc.CallOption) (*AcceptRolloverResponse, error)
+	DeclineRollover(ctx context.Context, in *DeclineRolloverRequest, opts ...grpc.CallOption) (*DeclineRolloverResponse, error)
 	// GetProviderCapabilities reports what the active provider supports.
 	GetProviderCapabilities(ctx context.Context, in *GetProviderCapabilitiesRequest, opts ...grpc.CallOption) (*GetProviderCapabilitiesResponse, error)
 	// ProposeContextEdit runs the picker model over a conversation's turn summaries
@@ -803,6 +811,26 @@ func (c *agentClient) DenyToolCall(ctx context.Context, in *DenyToolCallRequest,
 	return out, nil
 }
 
+func (c *agentClient) AcceptRollover(ctx context.Context, in *AcceptRolloverRequest, opts ...grpc.CallOption) (*AcceptRolloverResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AcceptRolloverResponse)
+	err := c.cc.Invoke(ctx, Agent_AcceptRollover_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) DeclineRollover(ctx context.Context, in *DeclineRolloverRequest, opts ...grpc.CallOption) (*DeclineRolloverResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeclineRolloverResponse)
+	err := c.cc.Invoke(ctx, Agent_DeclineRollover_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *agentClient) GetProviderCapabilities(ctx context.Context, in *GetProviderCapabilitiesRequest, opts ...grpc.CallOption) (*GetProviderCapabilitiesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetProviderCapabilitiesResponse)
@@ -1135,6 +1163,12 @@ type AgentServer interface {
 	// PermissionRequired stream event.
 	AllowToolCall(context.Context, *AllowToolCallRequest) (*AllowToolCallResponse, error)
 	DenyToolCall(context.Context, *DenyToolCallRequest) (*DenyToolCallResponse, error)
+	// AcceptRollover + DeclineRollover are how a client replies to a
+	// RolloverOffered stream event. Accept mints a new conversation seeded by the
+	// handoff artifact and returns its id (the client resumes into it). Decline
+	// re-arms the offer after further growth.
+	AcceptRollover(context.Context, *AcceptRolloverRequest) (*AcceptRolloverResponse, error)
+	DeclineRollover(context.Context, *DeclineRolloverRequest) (*DeclineRolloverResponse, error)
 	// GetProviderCapabilities reports what the active provider supports.
 	GetProviderCapabilities(context.Context, *GetProviderCapabilitiesRequest) (*GetProviderCapabilitiesResponse, error)
 	// ProposeContextEdit runs the picker model over a conversation's turn summaries
@@ -1324,6 +1358,12 @@ func (UnimplementedAgentServer) AllowToolCall(context.Context, *AllowToolCallReq
 }
 func (UnimplementedAgentServer) DenyToolCall(context.Context, *DenyToolCallRequest) (*DenyToolCallResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DenyToolCall not implemented")
+}
+func (UnimplementedAgentServer) AcceptRollover(context.Context, *AcceptRolloverRequest) (*AcceptRolloverResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AcceptRollover not implemented")
+}
+func (UnimplementedAgentServer) DeclineRollover(context.Context, *DeclineRolloverRequest) (*DeclineRolloverResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeclineRollover not implemented")
 }
 func (UnimplementedAgentServer) GetProviderCapabilities(context.Context, *GetProviderCapabilitiesRequest) (*GetProviderCapabilitiesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetProviderCapabilities not implemented")
@@ -2176,6 +2216,42 @@ func _Agent_DenyToolCall_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Agent_AcceptRollover_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AcceptRolloverRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).AcceptRollover(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_AcceptRollover_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).AcceptRollover(ctx, req.(*AcceptRolloverRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_DeclineRollover_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeclineRolloverRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).DeclineRollover(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_DeclineRollover_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).DeclineRollover(ctx, req.(*DeclineRolloverRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Agent_GetProviderCapabilities_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetProviderCapabilitiesRequest)
 	if err := dec(in); err != nil {
@@ -2630,6 +2706,14 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DenyToolCall",
 			Handler:    _Agent_DenyToolCall_Handler,
+		},
+		{
+			MethodName: "AcceptRollover",
+			Handler:    _Agent_AcceptRollover_Handler,
+		},
+		{
+			MethodName: "DeclineRollover",
+			Handler:    _Agent_DeclineRollover_Handler,
 		},
 		{
 			MethodName: "GetProviderCapabilities",

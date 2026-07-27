@@ -147,6 +147,11 @@ func autoLaunchServer(addr string) (string, error) {
 	cmd := exec.Command(bin, "agent")
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
+	// Mark CLI-spawned background agents so the server can shut itself down
+	// when the last client disconnects. Manually started `cercano agent` and
+	// dev/MCP servers do not get this marker and keep their current long-lived
+	// singleton behavior.
+	cmd.Env = append(os.Environ(), "CERCANO_AUTOLAUNCHED=1")
 	cmd.SysProcAttr = detachSysProcAttr() // detach from CLI's tty/process group
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
@@ -250,10 +255,13 @@ type Config struct {
 	// ModelsDefaultProvider is the preferred side ("cloud"|"open"|"").
 	ModelTiers            map[string]string
 	ModelsDefaultProvider string
+	// Agent lifecycle.
+	AgentShutdownOnLastClient bool
 	// mistral.rs runtime settings (Runtime tab).
 	MistralRSISQ              string
 	MistralRSPagedAttn        string
 	MistralRSPAMemoryFraction string
+	MistralRSPAMemoryMB       string
 }
 
 // GetConfig fetches the agent's current runtime config.
@@ -289,9 +297,11 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 		ToolLoopMaxIterations:     int(resp.GetToolLoopMaxIterations()),
 		ModelTiers:                resp.GetModelTiers(),
 		ModelsDefaultProvider:     resp.GetModelsDefaultProvider(),
+		AgentShutdownOnLastClient: resp.GetAgentShutdownOnLastClient(),
 		MistralRSISQ:              resp.GetMistralrsIsq(),
 		MistralRSPagedAttn:        resp.GetMistralrsPagedAttn(),
 		MistralRSPAMemoryFraction: resp.GetMistralrsPaMemoryFraction(),
+		MistralRSPAMemoryMB:       resp.GetMistralrsPaMemoryMb(),
 	}, nil
 }
 
@@ -337,11 +347,14 @@ type ConfigUpdate struct {
 	// Empty key = unchanged.
 	ModelTierKey   string
 	ModelTierValue string
+	// Agent lifecycle. Sparse-patch: "" = unchanged, "true" / "false" = apply.
+	AgentShutdownOnLastClient string
 	// mistral.rs runtime settings (Runtime tab). Sparse-patch: "" = unchanged,
 	// "-" clears.
 	MistralRSISQ              string
 	MistralRSPagedAttn        string
 	MistralRSPAMemoryFraction string
+	MistralRSPAMemoryMB       string
 }
 
 // RuntimeStatus is the provider-neutral model/runtime dashboard snapshot.
@@ -1461,9 +1474,11 @@ func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, erro
 		ToolLoopMaxIterations:     u.ToolLoopMaxIterations,
 		ModelTierKey:              u.ModelTierKey,
 		ModelTierValue:            u.ModelTierValue,
+		AgentShutdownOnLastClient: u.AgentShutdownOnLastClient,
 		MistralrsIsq:              u.MistralRSISQ,
 		MistralrsPagedAttn:        u.MistralRSPagedAttn,
 		MistralrsPaMemoryFraction: u.MistralRSPAMemoryFraction,
+		MistralrsPaMemoryMb:       u.MistralRSPAMemoryMB,
 	})
 	if err != nil {
 		return "", err
@@ -1632,6 +1647,12 @@ type StreamMsg struct {
 	IgnoredTools     []string // for TypeSubAgent
 	SubAgentText     string   // for TypeSubAgent
 	SubAgentToolID   string   // for TypeSubAgent
+
+	OfferID        string // for TypeRolloverOffered — correlates the Accept/Decline reply
+	ConvID         string // for TypeRolloverOffered — the session being offered a rollover
+	RolloverReason string // for TypeRolloverOffered — human-readable trigger
+	RawTokens      int64  // for TypeRolloverOffered — cumulative raw tokens at the offer
+	HandoffPreview string // for TypeRolloverOffered — summary + verbatim tail that would seed the new session
 }
 
 type StreamMsgType int
@@ -1649,6 +1670,7 @@ const (
 	TypeRouteSelected
 	TypeWatchdog
 	TypeSubAgent
+	TypeRolloverOffered
 )
 
 func toProtoImages(images []InlineImage) []*proto.InlineImage {
@@ -1767,6 +1789,17 @@ func (c *Client) StreamChat(ctx context.Context, conversationID, input, workDir 
 				}
 				continue
 			}
+			if ro := msg.GetRolloverOffered(); ro != nil {
+				out <- StreamMsg{
+					Type:           TypeRolloverOffered,
+					OfferID:        ro.GetOfferId(),
+					ConvID:         ro.GetConversationId(),
+					RolloverReason: ro.GetReason(),
+					RawTokens:      ro.GetRawTokens(),
+					HandoffPreview: ro.GetHandoffPreview(),
+				}
+				continue
+			}
 			if we := msg.GetWatchdogEvent(); we != nil {
 				out <- streamMsgFromWatchdogEvent(we)
 				continue
@@ -1849,6 +1882,29 @@ func (c *Client) DenyToolCall(ctx context.Context, conversationID, toolUseID str
 // the same turn so the model responds to it inline (no fresh turn).
 func (c *Client) DenyToolCallWithMessage(ctx context.Context, conversationID, toolUseID, message string) error {
 	_, err := c.agent.DenyToolCall(ctx, &proto.DenyToolCallRequest{ToolUseId: toolUseID, ConversationId: conversationID, Message: message})
+	return err
+}
+
+// AcceptRollover confirms a RolloverOffered event: the agent mints a fresh
+// conversation seeded by the handoff artifact and links it to conversationID via
+// precursor_id. Returns the new conversation id to resume into. offerID must
+// match the outstanding offer or the server rejects it (empty newID, non-nil
+// error).
+func (c *Client) AcceptRollover(ctx context.Context, conversationID, offerID string) (string, error) {
+	resp, err := c.agent.AcceptRollover(ctx, &proto.AcceptRolloverRequest{OfferId: offerID, ConversationId: conversationID})
+	if err != nil {
+		return "", err
+	}
+	if !resp.GetOk() {
+		return "", fmt.Errorf("rollover rejected: %s", resp.GetError())
+	}
+	return resp.GetNewConversationId(), nil
+}
+
+// DeclineRollover dismisses a RolloverOffered event. The agent re-arms the offer
+// after further growth (hysteresis); no new conversation is created.
+func (c *Client) DeclineRollover(ctx context.Context, conversationID, offerID string) error {
+	_, err := c.agent.DeclineRollover(ctx, &proto.DeclineRolloverRequest{OfferId: offerID, ConversationId: conversationID})
 	return err
 }
 

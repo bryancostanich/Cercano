@@ -196,6 +196,14 @@ func (m *mockAgentClient) SetPermissionMode(ctx context.Context, in *proto.SetPe
 	return &proto.SetPermissionModeResponse{}, nil
 }
 
+func (m *mockAgentClient) SetSessionProfile(ctx context.Context, in *proto.SetSessionProfileRequest, opts ...grpc.CallOption) (*proto.SetSessionProfileResponse, error) {
+	return &proto.SetSessionProfileResponse{}, nil
+}
+
+func (m *mockAgentClient) GetSessionProfile(ctx context.Context, in *proto.GetSessionProfileRequest, opts ...grpc.CallOption) (*proto.GetSessionProfileResponse, error) {
+	return &proto.GetSessionProfileResponse{}, nil
+}
+
 func (m *mockAgentClient) ProposeContextEdit(ctx context.Context, in *proto.ProposeContextEditRequest, opts ...grpc.CallOption) (*proto.ProposeContextEditResponse, error) {
 	return &proto.ProposeContextEditResponse{}, nil
 }

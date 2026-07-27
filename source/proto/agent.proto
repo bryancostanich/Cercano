@@ -163,6 +163,15 @@ service Agent {
   // GetPermissionMode reads the current mode.
   rpc GetPermissionMode (GetPermissionModeRequest) returns (GetPermissionModeResponse) {}
 
+  // SetSessionProfile switches the active capability profile — the read-only
+  // planning fence ("plan"), the unrestricted default (""|"default"), or a
+  // future named mode. Orthogonal to the permission mode. Errors if the name is
+  // not registered.
+  rpc SetSessionProfile (SetSessionProfileRequest) returns (SetSessionProfileResponse) {}
+
+  // GetSessionProfile reads the active profile name and the registered names.
+  rpc GetSessionProfile (GetSessionProfileRequest) returns (GetSessionProfileResponse) {}
+
   // SubscribeEvents is a standing server->client stream the client holds open
   // for its whole session. The agent pushes unsolicited state changes here so
   // clients never poll. First event type is PermissionModeChanged (fired when
@@ -1020,6 +1029,18 @@ message SetPermissionModeResponse { bool ok = 1; string error = 2; }
 
 message GetPermissionModeRequest  {}
 message GetPermissionModeResponse { string mode = 1; }
+
+// Session-profile RPCs let the CLI's /mode command switch the active capability
+// profile (the read-only planning fence and future named modes). name "" or
+// "default" selects the unrestricted posture.
+message SetSessionProfileRequest  { string name = 1; }    // "plan" | "default" | "" | future mode
+message SetSessionProfileResponse { bool ok = 1; string error = 2; }
+
+message GetSessionProfileRequest  {}
+message GetSessionProfileResponse {
+  string active = 1;           // active profile name ("default" when unrestricted)
+  repeated string available = 2; // registered profile names (excluding default)
+}
 
 // SubscribeEvents transport. The request is empty today; a client_id may be
 // added later for targeted pushes. ClientEvent is a oneof so new server->client

@@ -91,13 +91,19 @@ type Server struct {
 	toolSvc         toolssvc.Catalog   // owns toolRegistry, capRegistry, dispatchEngine
 	persistSvc      persistsvc.Service // owns retentionSweeper, compactionGen, contextLoader
 	permBroker      permissions.Broker
+	// profileBroker owns the session's active capability profile — the read-only
+	// planning fence today, and future named modes (brainstorm, execute, …). It
+	// is orthogonal to permBroker (which owns the confirm-aggressiveness mode):
+	// one names *which tools exist at all*, the other *whether we ask the human*.
+	// Seeded at NewServer; switched via SetSessionProfile.
+	profileBroker *agent.ProfileBroker
 	// rollover decides when to offer an agent-initiated session rollover and
 	// enforces the decline/re-arm hysteresis. nil (or a zero-threshold config)
 	// means the feature is off and no offer is ever emitted. Wired via
 	// SetRolloverConfig from main.go.
-	rollover        *rolloverManager
-	runtimesSvc     runtimessvc.Supervisors // owns meridianMgr, runtimeManager, mcpManager
-	watchdog        *watchdog.Watchdog      // protocol-supervision gate; nil = disabled (default)
+	rollover    *rolloverManager
+	runtimesSvc runtimessvc.Supervisors // owns meridianMgr, runtimeManager, mcpManager
+	watchdog    *watchdog.Watchdog      // protocol-supervision gate; nil = disabled (default)
 	// Two runners coexist so the front door can pick per turn. inProcessRunner is
 	// always built (NewServer / SetPermissions) and is the embedded runnersvc.Core
 	// the test suite constructs. workerRunner is nil until SelectExecutionMode
@@ -716,11 +722,12 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 	cfgService := cfgsvc.New("", config.Config{}, nil)
 	rtSvc := runtimessvc.New(cfgService)
 	s := &Server{
-		agent:       a,
-		events:      newEventHub(),
-		cfgSvc:      cfgService,
-		runtimesSvc: rtSvc,
-		turnBroker:  broker.New(),
+		agent:         a,
+		events:        newEventHub(),
+		cfgSvc:        cfgService,
+		runtimesSvc:   rtSvc,
+		turnBroker:    broker.New(),
+		profileBroker: agent.NewProfileBroker(),
 	}
 	s.providerSvc = providers.New(cfgService, router, coordinator, cloudFactory, registry, nil)
 	// Construct the persistence service. It wraps the agent for store access;
@@ -773,6 +780,15 @@ func (s *Server) runnerDeps() runnersvc.Deps {
 		// UpdateConfig AFTER this runner is built, so the runner reads it at
 		// turn time rather than capturing the (often still-nil) current value.
 		Watchdog: func() *watchdog.Watchdog { return s.watchdog },
+		// Live accessor for the active capability profile (planning fence /
+		// future modes). Read at turn time so a mid-session /mode switch takes
+		// effect on the next turn.
+		Profiles: func() agent.Profile {
+			if s.profileBroker == nil {
+				return agent.Profile{}
+			}
+			return s.profileBroker.Active()
+		},
 	}
 }
 
@@ -2982,6 +2998,32 @@ func (s *Server) GetPermissionMode(ctx context.Context, req *proto.GetPermission
 		return &proto.GetPermissionModeResponse{Mode: string(agent.ModePermissive)}, nil
 	}
 	return &proto.GetPermissionModeResponse{Mode: string(s.permBroker.Mode())}, nil
+}
+
+// SetSessionProfile implements proto.AgentServer — switches the active
+// capability profile (planning fence / future modes). Orthogonal to the
+// permission mode; takes effect on the next turn (the runner reads the active
+// profile live at turn time).
+func (s *Server) SetSessionProfile(ctx context.Context, req *proto.SetSessionProfileRequest) (*proto.SetSessionProfileResponse, error) {
+	if s.profileBroker == nil {
+		return &proto.SetSessionProfileResponse{Ok: false, Error: "profile broker not configured"}, nil
+	}
+	if err := s.profileBroker.SetActive(req.GetName()); err != nil {
+		return &proto.SetSessionProfileResponse{Ok: false, Error: err.Error()}, nil
+	}
+	return &proto.SetSessionProfileResponse{Ok: true}, nil
+}
+
+// GetSessionProfile implements proto.AgentServer — reports the active profile
+// name and the registered names for the /mode command.
+func (s *Server) GetSessionProfile(ctx context.Context, req *proto.GetSessionProfileRequest) (*proto.GetSessionProfileResponse, error) {
+	if s.profileBroker == nil {
+		return &proto.GetSessionProfileResponse{Active: agent.DefaultProfileName}, nil
+	}
+	return &proto.GetSessionProfileResponse{
+		Active:    s.profileBroker.ActiveName(),
+		Available: s.profileBroker.Names(),
+	}, nil
 }
 
 // AllowToolCall implements proto.AgentServer.

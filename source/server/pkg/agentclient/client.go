@@ -1854,6 +1854,29 @@ func (c *Client) GetPermissionMode(ctx context.Context) (string, error) {
 	return res.GetMode(), nil
 }
 
+// SetSessionProfile switches the active capability profile (the read-only
+// planning fence and future named modes). name "" or "default" returns to the
+// unrestricted posture. Orthogonal to SetPermissionMode.
+func (c *Client) SetSessionProfile(ctx context.Context, name string) error {
+	res, err := c.agent.SetSessionProfile(ctx, &proto.SetSessionProfileRequest{Name: name})
+	if err != nil {
+		return err
+	}
+	if !res.GetOk() {
+		return fmt.Errorf("%s", res.GetError())
+	}
+	return nil
+}
+
+// GetSessionProfile reads the active profile name and the registered names.
+func (c *Client) GetSessionProfile(ctx context.Context) (active string, available []string, err error) {
+	res, err := c.agent.GetSessionProfile(ctx, &proto.GetSessionProfileRequest{})
+	if err != nil {
+		return "", nil, err
+	}
+	return res.GetActive(), res.GetAvailable(), nil
+}
+
 // AllowToolCall approves a paused tool call awaiting permission. conversationID
 // scopes the reply so it reaches the waiter in the right conversation.
 func (c *Client) AllowToolCall(ctx context.Context, conversationID, toolUseID string) error {

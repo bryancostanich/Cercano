@@ -172,9 +172,17 @@ func (c *Core) RunTurn(
 		permStore = c.d.Perms.Store()
 	}
 
+	// 6b. Read the active capability profile (read-only planning fence / future
+	// modes). Live accessor: read at turn time so a mid-session mode switch
+	// takes effect on the next turn. Nil accessor = unrestricted (zero Profile).
+	var profile agent.Profile
+	if c.d.Profiles != nil {
+		profile = c.d.Profiles()
+	}
+
 	// Run the tool loop on the primary provider.
 	result, loopErr := c.runLoop(ctx, req, provider, isCloud,
-		loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore)
+		loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile)
 
 	// 6.5. Same-provider turn retry: a busy-class loop error is a transient
 	// server-side failure — often a mid-stream one, where the resilience
@@ -188,7 +196,7 @@ func (c *Core) RunTurn(
 		fmt.Fprintf(os.Stderr, "[resilience] turn retry: %s (%v)\n", provider.Name(), loopErr)
 		sink.Emit(Event{Kind: EventProgress, Text: notice})
 		result, loopErr = c.runLoop(ctx, req, provider, isCloud,
-			loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore)
+			loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile)
 	}
 
 	// 7. Cross-tier fallback: on error, attempt the other tier if locus allows.
@@ -212,7 +220,7 @@ func (c *Core) RunTurn(
 			provider = fbProv
 			isCloud = fbCloud
 			result, loopErr = c.runLoop(ctx, req, fbProv, fbCloud,
-				loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore)
+				loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile)
 		}
 		if loopErr != nil {
 			return Result{}, fmt.Errorf("tool loop error: %w", loopErr)
@@ -258,6 +266,7 @@ func (c *Core) runLoop(
 	wdTurnEnd agent.WatchdogTurnEnd,
 	gateRegistry *agenttools.Registry,
 	permStore *agent.PermissionStore,
+	profile agent.Profile,
 ) (agent.ToolLoopResult, error) {
 	maxIterations := 0
 	if c.d.Config != nil {
@@ -268,6 +277,7 @@ func (c *Core) runLoop(
 		Provider:            provider,
 		Registry:            gateRegistry,
 		Permissions:         permStore,
+		Profile:             profile,
 		UserInput:           req.Input,
 		Images:              req.Images,
 		Model:               c.d.Providers.MainModel(isCloud),

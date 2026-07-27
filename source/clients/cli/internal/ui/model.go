@@ -368,6 +368,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	slash.RegisterTools(reg, ag)
 	slash.RegisterMcp(reg, ag)
 	slash.RegisterPermissions(reg, ag)
+	slash.RegisterPlan(reg, ag)
 	// currentConv is captured by reference so it always returns the active
 	// conversation id even after /resume swaps it.
 	convRef := &struct{ id string }{}
@@ -2582,6 +2583,24 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		}()
 		m.permissionMode = mode
 		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "Permission mode → " + mode})
+		m.refreshViewport()
+	case slash.ResultSetSessionProfile:
+		// Switch the active capability profile (planning fence / future modes).
+		// Fire-and-forget like the permission mode: takes effect on the next
+		// turn (the runner reads the active profile live). On error, surface it.
+		name := res.SessionProfile
+		ag := m.agent
+		go func() {
+			if err := ag.SetSessionProfile(context.Background(), name); err != nil {
+				// best-effort: the next turn simply won't be fenced
+				_ = err
+			}
+		}()
+		label := name
+		if name == "default" {
+			label = "off (unrestricted)"
+		}
+		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "Mode → " + label})
 		m.refreshViewport()
 	case slash.ResultInvokeTool:
 		// Decide locally whether to prompt: R-tier runs silently, W/X

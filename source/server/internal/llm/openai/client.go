@@ -21,9 +21,10 @@ type Config struct {
 
 // Client implements inference.Provider using the OpenAI chat completions API.
 type Client struct {
-	api    *goopenai.Client
-	model  string
-	quirks Quirks
+	api     *goopenai.Client
+	model   string
+	backend string
+	quirks  Quirks
 }
 
 // NewClient constructs a Client from cfg. The HTTP transport is wrapped in a
@@ -37,7 +38,7 @@ func NewClient(cfg Config) *Client {
 	}
 	q := quirksFor(cfg.Backend)
 	c.HTTPClient = &normalizingDoer{next: &http.Client{}, quirks: q}
-	return &Client{api: goopenai.NewClientWithConfig(c), model: cfg.Model, quirks: q}
+	return &Client{api: goopenai.NewClientWithConfig(c), model: cfg.Model, backend: cfg.Backend, quirks: q}
 }
 
 // resolveImageURLs replaces URL image blocks with inline base64, so backends

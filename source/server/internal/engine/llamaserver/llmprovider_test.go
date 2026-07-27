@@ -2,10 +2,12 @@ package llamaserver
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/localruntime"
 )
@@ -15,8 +17,14 @@ import (
 // endpoint, translate the response into llm blocks.
 func TestLLMProviderChat(t *testing.T) {
 	var sawPath string
+	var sawPayload struct {
+		MaxTokens int `json:"max_tokens"`
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sawPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&sawPayload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"choices": [{"message": {"role": "assistant", "content": "verdict: fine"}, "finish_reason": "stop"}],
@@ -57,6 +65,9 @@ func TestLLMProviderChat(t *testing.T) {
 	}
 	if sawPath != "/v1/chat/completions" {
 		t.Errorf("path = %q, want /v1/chat/completions", sawPath)
+	}
+	if sawPayload.MaxTokens != engine.DefaultMaxTokens {
+		t.Errorf("max_tokens = %d, want default %d", sawPayload.MaxTokens, engine.DefaultMaxTokens)
 	}
 	if len(resp.Blocks) == 0 || resp.Blocks[0].Text != "verdict: fine" {
 		t.Errorf("blocks = %+v, want text 'verdict: fine'", resp.Blocks)

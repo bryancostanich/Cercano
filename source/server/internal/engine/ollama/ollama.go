@@ -221,7 +221,10 @@ func (e *OllamaEngine) Complete(ctx context.Context, model, prompt, systemPrompt
 // always pinned; sampling params are included only when explicitly set, so an
 // empty GenOptions preserves the server's defaults.
 func generateOptions(opts engine.GenOptions) map[string]interface{} {
-	o := map[string]interface{}{"num_ctx": 32768}
+	o := map[string]interface{}{
+		"num_ctx":     32768,
+		"num_predict": engine.EffectiveMaxTokens(opts.MaxTokens),
+	}
 	if opts.Temperature != nil {
 		o["temperature"] = *opts.Temperature
 	}
@@ -328,7 +331,10 @@ func (e *OllamaEngine) ChatWithTools(ctx context.Context, req engine.ChatRequest
 		"model":    req.Model,
 		"messages": req.Messages,
 		"stream":   true,
-		"options":  map[string]interface{}{"num_ctx": 32768},
+		"options": map[string]interface{}{
+			"num_ctx":     32768,
+			"num_predict": engine.EffectiveMaxTokens(req.MaxTokens),
+		},
 	}
 	if len(req.Tools) > 0 {
 		payload["tools"] = req.Tools

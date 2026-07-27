@@ -59,10 +59,17 @@ func TestComplete_StartsRuntimeAndCallsChatCompletions(t *testing.T) {
 	if len(sawPayload.Messages) != 2 || sawPayload.Messages[0].Role != "system" || sawPayload.Messages[1].Content != "hi" {
 		t.Fatalf("unexpected messages: %#v", sawPayload.Messages)
 	}
+	if sawPayload.MaxTokens != engine.DefaultMaxTokens {
+		t.Fatalf("max_tokens = %d, want default %d", sawPayload.MaxTokens, engine.DefaultMaxTokens)
+	}
 }
 
 func TestCompleteStream_DecodesSSE(t *testing.T) {
+	var sawPayload chatCompletionRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&sawPayload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n"))
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}],\"timings\":{\"prompt_n\":2,\"predicted_n\":5}}\n\n"))
@@ -86,7 +93,7 @@ func TestCompleteStream_DecodesSSE(t *testing.T) {
 		}},
 	}
 	var tokens []string
-	result, err := NewEngine(manager).CompleteStream(context.Background(), "", "hi", "", engine.GenOptions{}, func(token string) {
+	result, err := NewEngine(manager).CompleteStream(context.Background(), "", "hi", "", engine.GenOptions{MaxTokens: 123}, func(token string) {
 		tokens = append(tokens, token)
 	})
 	if err != nil {
@@ -97,6 +104,9 @@ func TestCompleteStream_DecodesSSE(t *testing.T) {
 	}
 	if result.InputTokens != 2 || result.OutputTokens != 5 {
 		t.Fatalf("unexpected token counts: %#v", result)
+	}
+	if sawPayload.MaxTokens != 123 {
+		t.Fatalf("max_tokens = %d, want explicit 123", sawPayload.MaxTokens)
 	}
 }
 

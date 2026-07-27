@@ -15,6 +15,11 @@ import (
 
 func oaFixture(t *testing.T, status int, body string) (*Client, *atomic.Int32) {
 	t.Helper()
+	return oaFixtureBackend(t, "openai", status, body)
+}
+
+func oaFixtureBackend(t *testing.T, backend string, status int, body string) (*Client, *atomic.Int32) {
+	t.Helper()
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
@@ -23,7 +28,7 @@ func oaFixture(t *testing.T, status int, body string) (*Client, *atomic.Int32) {
 		w.Write([]byte(body))
 	}))
 	t.Cleanup(srv.Close)
-	return NewClient(Config{APIKey: "k", BaseURL: srv.URL + "/v1", Model: "gpt-5.5", Backend: "openai"}), &hits
+	return NewClient(Config{APIKey: "k", BaseURL: srv.URL + "/v1", Model: "gpt-5.5", Backend: backend}), &hits
 }
 
 func oaChatErr(t *testing.T, c *Client) error {
@@ -66,6 +71,21 @@ func TestNormalize_Classes(t *testing.T) {
 				t.Errorf("requests = %d, want 1 (transport retries must be gone)", hits.Load())
 			}
 		})
+	}
+}
+
+func TestNormalize_MistralRSNoResponseIsInvalidRequest(t *testing.T) {
+	body := `{"message":"No response received from the model."}`
+	c, _ := oaFixtureBackend(t, "mistralrs", http.StatusInternalServerError, body)
+	if got := llm.ClassOf(oaChatErr(t, c)); got != llm.ErrInvalidRequest {
+		t.Fatalf("mistralrs class = %q, want %q", got, llm.ErrInvalidRequest)
+	}
+
+	// The quirk must stay backend-scoped: a generic OpenAI 500 is transient
+	// busy and remains eligible for the normal bounded retry/failover policy.
+	c, _ = oaFixtureBackend(t, "openai", http.StatusInternalServerError, body)
+	if got := llm.ClassOf(oaChatErr(t, c)); got != llm.ErrBusy {
+		t.Fatalf("openai class = %q, want %q", got, llm.ErrBusy)
 	}
 }
 

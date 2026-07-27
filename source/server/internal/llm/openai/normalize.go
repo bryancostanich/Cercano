@@ -27,7 +27,7 @@ func (c *Client) normalize(err error) error {
 	var ae *goopenai.APIError
 	if errors.As(err, &ae) {
 		return &llm.Error{
-			Class:      classifyOpenAI(ae.HTTPStatusCode, codeString(ae.Code), ae.Type, ae.Message),
+			Class:      c.classify(ae.HTTPStatusCode, codeString(ae.Code), ae.Type, ae.Message),
 			Provider:   c.Name(),
 			StatusCode: ae.HTTPStatusCode,
 			Err:        err,
@@ -36,7 +36,7 @@ func (c *Client) normalize(err error) error {
 	var re *goopenai.RequestError
 	if errors.As(err, &re) {
 		return &llm.Error{
-			Class:      classifyOpenAI(re.HTTPStatusCode, "", "", ""),
+			Class:      c.classify(re.HTTPStatusCode, "", "", re.Error()),
 			Provider:   c.Name(),
 			StatusCode: re.HTTPStatusCode,
 			Err:        err,
@@ -47,6 +47,22 @@ func (c *Client) normalize(err error) error {
 		return &llm.Error{Class: llm.ErrNetwork, Provider: c.Name(), Err: err}
 	}
 	return &llm.Error{Class: llm.ErrUnknown, Provider: c.Name(), Err: err}
+}
+
+func (c *Client) classify(status int, code, typ, msg string) llm.ErrorClass {
+	if c.backend == "mistralrs" && isMistralRSContextTooLong(status, msg) {
+		return llm.ErrInvalidRequest
+	}
+	return classifyOpenAI(status, code, typ, msg)
+}
+
+func isMistralRSContextTooLong(status int, msg string) bool {
+	if status < 500 {
+		return false
+	}
+	m := strings.ToLower(msg)
+	return strings.Contains(m, "no response received from the model") ||
+		(strings.Contains(m, "sequence") && strings.Contains(m, "too long") && strings.Contains(m, "kv cache"))
 }
 
 // classifyOpenAI is the OpenAI-dialect status/code → class mapping, shared by

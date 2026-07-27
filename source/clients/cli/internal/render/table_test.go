@@ -148,6 +148,45 @@ func TestTable_WideDecisionMatrix_RendersGridAt126(t *testing.T) {
 	}
 }
 
+func TestTable_LongHeaders_WrapWithinBudget(t *testing.T) {
+	// Regression: a wrappable column whose HEADER name is longer than the width
+	// shrinkWrappable leaves it must wrap the header across lines, not overflow
+	// the cell border. Mirrors the screenshot where a long option-column header
+	// ran past the right border while body cells wrapped fine.
+	tbl := Table{
+		Cols: []Column{
+			{Name: "Axis"},
+			{Name: "Keep fraction only (fix `PagedAttn` default)", Wrappable: true},
+			{Name: "Add absolute `pa_memory_mb`, keep fraction as fallback", Wrappable: true},
+		},
+		Rows: []map[string]string{
+			{"Axis": "Cost", "Keep fraction only (fix `PagedAttn` default)": "Very low: 1-line default change + tests", "Add absolute `pa_memory_mb`, keep fraction as fallback": "Medium-high: field swap + migrate existing configs/tests"},
+			{"Axis": "Risk", "Keep fraction only (fix `PagedAttn` default)": "Low: reuses proven path", "Add absolute `pa_memory_mb`, keep fraction as fallback": "Med: breaks existing configs that set fraction"},
+		},
+	}
+	const budget = 100
+	plain := stripAnsi(tbl.Render(budget, theme.NewStyles(theme.Cracker())))
+	// Must be a grid (headers are the case we care about).
+	if !strings.Contains(plain, "┌") || !strings.Contains(plain, "┘") {
+		t.Fatalf("expected a grid, got:\n%s", plain)
+	}
+	// No line — header lines included — may exceed the budget.
+	for _, line := range strings.Split(plain, "\n") {
+		if w := len([]rune(line)); w > budget {
+			t.Errorf("line exceeds %d cols (%d): %q", budget, w, line)
+		}
+	}
+	// Every header word survives (wrapped, never truncated).
+	for _, want := range []string{"fraction", "PagedAttn", "absolute", "pa_memory_mb", "fallback"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("expected header word %q preserved, got:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "…") {
+		t.Errorf("headers should wrap, not truncate; got:\n%s", plain)
+	}
+}
+
 func TestTable_TransposesWhenStillTooNarrow(t *testing.T) {
 	// Wide column names + narrow target → even the highest-priority column
 	// won't fit in grid form (border + 2-col pad + header text > maxWidth),

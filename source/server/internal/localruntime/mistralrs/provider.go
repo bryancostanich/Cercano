@@ -301,17 +301,43 @@ func (p *Provider) Stop(_ context.Context, instanceID string) error {
 	}
 	instance.stopping = true
 	cmd := instance.cmd
+	adopted := instance.adopted
+	ownerPID := instance.ownerPID
+	pid := instance.record.PID
 	instance.record.State = localruntime.InstanceStopped
-	if instance.adopted {
+	if adopted {
+		// An adopted sidecar is normally owned by a *sibling* agent, so we must
+		// not kill it out from under that owner. But if the recorded owner is no
+		// longer alive — or is this very process (the last owner, shutting down)
+		// — there is no sibling to protect, and leaving it running leaks the
+		// model's (potentially huge) wired GPU memory. In that case, reclaim it.
 		delete(p.running, instanceID)
 		p.mu.Unlock()
+		if pid > 0 && !siblingOwnerAlive(ownerPID) {
+			terminateGroup(pid)
+		}
 		return nil
 	}
 	p.mu.Unlock()
 	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
-	return killProcess(cmd.Process)
+	// Use the escalating group terminator (SIGTERM group -> grace -> SIGKILL):
+	// a mistral.rs wedged mid-Metal-allocation can ignore a bare SIGTERM, so a
+	// single non-escalating signal is unreliable ("hard to kill").
+	terminateGroup(cmd.Process.Pid)
+	return nil
+}
+
+// siblingOwnerAlive reports whether an adopted instance is still protected by a
+// live sibling owner. The owner is NOT a protecting sibling when it is absent
+// (pid <= 0), dead, or this very process — in those cases the caller is the last
+// owner and may reclaim the sidecar.
+func siblingOwnerAlive(ownerPID int) bool {
+	if ownerPID <= 0 || ownerPID == os.Getpid() {
+		return false
+	}
+	return processAlive(ownerPID)
 }
 
 func (p *Provider) Probe(ctx context.Context, instanceID string) (*localruntime.InstanceHealth, error) {

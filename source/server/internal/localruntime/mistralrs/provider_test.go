@@ -468,11 +468,21 @@ func TestAdoptLiveSiblingReusesHealthyRegisteredServer(t *testing.T) {
 		_, _ = cmd.Process.Wait()
 	}()
 
+	// A protecting sibling must be a DIFFERENT live process, not this test
+	// process: Stop() reclaims a sidecar whose owner is our own PID (the
+	// last-owner case). Spawn a real long-lived helper to stand in as the
+	// live sibling owner.
+	sibling := exec.Command("sleep", "30")
+	if err := sibling.Start(); err != nil {
+		t.Fatalf("start sibling owner: %v", err)
+	}
+	defer func() { _ = sibling.Process.Kill(); _ = sibling.Wait() }()
+
 	provider := NewProvider(config.MistralRSConfig{Host: "127.0.0.1"})
 	provider.registry = newPidRegistry(filepath.Join(dir, "registry"))
 	provider.registry.writeOwnLocked(registryFile{
-		OwnerPID: os.Getpid(),
-		OwnerExe: filepath.Base(os.Args[0]),
+		OwnerPID: sibling.Process.Pid,
+		OwnerExe: "sleep", // must match the sibling's real command (ownerAlive check)
 		Servers: []serverEntry{{
 			PID:       cmd.Process.Pid,
 			Binary:    binary,
@@ -482,7 +492,7 @@ func TestAdoptLiveSiblingReusesHealthyRegisteredServer(t *testing.T) {
 		}},
 	})
 	// Rename the file so it describes a live sibling owner instead of this
-	// provider's own file; ownerAlive still validates against this test process.
+	// provider's own file; siblingOwnerAlive validates the sibling PID is live.
 	siblingFile := filepath.Join(provider.registry.dir, "sibling.json")
 	if err := os.Rename(provider.registry.ownFile(), siblingFile); err != nil {
 		t.Fatal(err)
@@ -502,6 +512,42 @@ func TestAdoptLiveSiblingReusesHealthyRegisteredServer(t *testing.T) {
 	}
 	if !processAlive(cmd.Process.Pid) {
 		t.Fatal("Stop on adopted instance killed sibling-owned process")
+	}
+}
+
+// TestSiblingOwnerAlive guards the Bug B fix: an adopted sidecar is protected
+// only by a DIFFERENT, live owner. Absent, dead, or self owners are not
+// protecting siblings, so the last owner may reclaim the sidecar on shutdown.
+func TestSiblingOwnerAlive(t *testing.T) {
+	if siblingOwnerAlive(0) {
+		t.Error("owner pid 0 (absent) must not be a protecting sibling")
+	}
+	if siblingOwnerAlive(-1) {
+		t.Error("negative owner pid must not be a protecting sibling")
+	}
+	if siblingOwnerAlive(os.Getpid()) {
+		t.Error("self as owner must not be a protecting sibling (last-owner case)")
+	}
+
+	// A live, different process IS a protecting sibling.
+	sib := exec.Command("sleep", "30")
+	if err := sib.Start(); err != nil {
+		t.Fatalf("start sibling: %v", err)
+	}
+	defer func() { _ = sib.Process.Kill(); _ = sib.Wait() }()
+	if !siblingOwnerAlive(sib.Process.Pid) {
+		t.Error("a live, different owner must count as a protecting sibling")
+	}
+
+	// A dead process is NOT a protecting sibling.
+	dead := exec.Command("sleep", "0.01")
+	if err := dead.Start(); err != nil {
+		t.Fatalf("start short-lived: %v", err)
+	}
+	deadPID := dead.Process.Pid
+	_ = dead.Wait()
+	if siblingOwnerAlive(deadPID) {
+		t.Error("a dead owner must not be a protecting sibling")
 	}
 }
 

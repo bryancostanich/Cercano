@@ -300,6 +300,14 @@ func (m *mockAgentClient) ListCloudProfileModels(ctx context.Context, in *proto.
 	return &proto.ListCloudProfileModelsResponse{}, nil
 }
 
+func (m *mockAgentClient) AcceptRollover(ctx context.Context, in *proto.AcceptRolloverRequest, opts ...grpc.CallOption) (*proto.AcceptRolloverResponse, error) {
+	return &proto.AcceptRolloverResponse{}, nil
+}
+
+func (m *mockAgentClient) DeclineRollover(ctx context.Context, in *proto.DeclineRolloverRequest, opts ...grpc.CallOption) (*proto.DeclineRolloverResponse, error) {
+	return &proto.DeclineRolloverResponse{}, nil
+}
+
 func TestNewServer_RegistersTools(t *testing.T) {
 	mock := &mockAgentClient{}
 	s := NewServer(mock)

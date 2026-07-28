@@ -1440,7 +1440,11 @@ func (c *Client) InstallOpenRuntime(ctx context.Context, runtime string) (<-chan
 // UpdateConfig sends a runtime config patch. Returns the agent's confirmation
 // summary line (e.g. "updated: [local_model=qwen3-coder, cloud=anthropic/...]").
 func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, error) {
-	resp, err := c.agent.UpdateConfig(ctx, &proto.UpdateConfigRequest{
+	ag := c.agent
+	if ag == nil {
+		return "", errors.New("agent client is not connected")
+	}
+	resp, err := ag.UpdateConfig(ctx, &proto.UpdateConfigRequest{
 		OllamaUrl:                 u.OllamaURL,
 		OpenRuntime:               u.OpenRuntime,
 		OpenModel:                 u.OpenModel,
@@ -1478,6 +1482,21 @@ func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, erro
 		return "", fmt.Errorf("%s", resp.GetMessage())
 	}
 	return resp.GetMessage(), nil
+}
+
+func (c *Client) ShutdownAgent(ctx context.Context, reason string) error {
+	ag := c.agent
+	if ag == nil {
+		return errors.New("agent client is not connected")
+	}
+	resp, err := ag.ShutdownAgent(ctx, &proto.ShutdownAgentRequest{Reason: reason})
+	if err != nil {
+		return err
+	}
+	if !resp.GetAccepted() {
+		return fmt.Errorf("agent shutdown rejected: %s", resp.GetMessage())
+	}
+	return nil
 }
 
 func mapRuntimeModels(models []*proto.RuntimeModel) []RuntimeModel {

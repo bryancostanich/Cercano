@@ -1829,6 +1829,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case openRuntimeConfirmSwitchMsg:
+		if msg.target == "" {
+			return m, nil
+		}
+		if msg.target == msg.active {
+			return m, nil
+		}
+		st := agentclient.OpenRuntimeStatus{Runtime: msg.target, Ok: true}
+		m.openRuntimeModal = newOpenRuntimeInstallModal(st)
+		m.openRuntimeModal.setOfferSwitch(msg.target, msg.active)
+		m.pendingRuntimeSwitch = msg.target
+		return m, nil
+
 	case openOpenRuntimeInstallModalMsg:
 		// Emitted by the settings page when the user tries to switch to
 		// a runtime that isn't ready. Opens the install modal (idle for a

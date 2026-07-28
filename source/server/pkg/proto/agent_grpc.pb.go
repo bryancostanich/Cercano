@@ -23,6 +23,7 @@ const (
 	Agent_StreamProcessRequest_FullMethodName       = "/agent.Agent/StreamProcessRequest"
 	Agent_AttachConversation_FullMethodName         = "/agent.Agent/AttachConversation"
 	Agent_UpdateConfig_FullMethodName               = "/agent.Agent/UpdateConfig"
+	Agent_ShutdownAgent_FullMethodName              = "/agent.Agent/ShutdownAgent"
 	Agent_GetConfig_FullMethodName                  = "/agent.Agent/GetConfig"
 	Agent_ListConversations_FullMethodName          = "/agent.Agent/ListConversations"
 	Agent_ResumeConversation_FullMethodName         = "/agent.Agent/ResumeConversation"
@@ -104,8 +105,14 @@ type AgentClient interface {
 	// live, using the same StreamProcessResponse vocabulary as StreamProcessRequest.
 	// Observe-only: it does not send input or answer permission prompts.
 	AttachConversation(ctx context.Context, in *AttachConversationRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamProcessResponse], error)
-	// UpdateConfig updates runtime configuration (model, provider) without server restart.
+	// UpdateConfig updates runtime configuration (model, provider). Some changes
+	// (notably open_runtime swaps) require an agent restart before all worker-side
+	// providers and model-tier mappings are rebuilt.
 	UpdateConfig(ctx context.Context, in *UpdateConfigRequest, opts ...grpc.CallOption) (*UpdateConfigResponse, error)
+	// ShutdownAgent asks the singleton agent process to exit after this response
+	// is sent. CLI clients use this for restart-required config changes; their
+	// reconnect loop auto-launches the replacement agent.
+	ShutdownAgent(ctx context.Context, in *ShutdownAgentRequest, opts ...grpc.CallOption) (*ShutdownAgentResponse, error)
 	// GetConfig returns the current runtime config. API key is reported as a
 	// presence bool only — the literal value never leaves the agent.
 	GetConfig(ctx context.Context, in *GetConfigRequest, opts ...grpc.CallOption) (*GetConfigResponse, error)
@@ -349,6 +356,16 @@ func (c *agentClient) UpdateConfig(ctx context.Context, in *UpdateConfigRequest,
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UpdateConfigResponse)
 	err := c.cc.Invoke(ctx, Agent_UpdateConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) ShutdownAgent(ctx context.Context, in *ShutdownAgentRequest, opts ...grpc.CallOption) (*ShutdownAgentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ShutdownAgentResponse)
+	err := c.cc.Invoke(ctx, Agent_ShutdownAgent_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1064,8 +1081,14 @@ type AgentServer interface {
 	// live, using the same StreamProcessResponse vocabulary as StreamProcessRequest.
 	// Observe-only: it does not send input or answer permission prompts.
 	AttachConversation(*AttachConversationRequest, grpc.ServerStreamingServer[StreamProcessResponse]) error
-	// UpdateConfig updates runtime configuration (model, provider) without server restart.
+	// UpdateConfig updates runtime configuration (model, provider). Some changes
+	// (notably open_runtime swaps) require an agent restart before all worker-side
+	// providers and model-tier mappings are rebuilt.
 	UpdateConfig(context.Context, *UpdateConfigRequest) (*UpdateConfigResponse, error)
+	// ShutdownAgent asks the singleton agent process to exit after this response
+	// is sent. CLI clients use this for restart-required config changes; their
+	// reconnect loop auto-launches the replacement agent.
+	ShutdownAgent(context.Context, *ShutdownAgentRequest) (*ShutdownAgentResponse, error)
 	// GetConfig returns the current runtime config. API key is reported as a
 	// presence bool only — the literal value never leaves the agent.
 	GetConfig(context.Context, *GetConfigRequest) (*GetConfigResponse, error)
@@ -1268,6 +1291,9 @@ func (UnimplementedAgentServer) AttachConversation(*AttachConversationRequest, g
 }
 func (UnimplementedAgentServer) UpdateConfig(context.Context, *UpdateConfigRequest) (*UpdateConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateConfig not implemented")
+}
+func (UnimplementedAgentServer) ShutdownAgent(context.Context, *ShutdownAgentRequest) (*ShutdownAgentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ShutdownAgent not implemented")
 }
 func (UnimplementedAgentServer) GetConfig(context.Context, *GetConfigRequest) (*GetConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetConfig not implemented")
@@ -1533,6 +1559,24 @@ func _Agent_UpdateConfig_Handler(srv interface{}, ctx context.Context, dec func(
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AgentServer).UpdateConfig(ctx, req.(*UpdateConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_ShutdownAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ShutdownAgentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).ShutdownAgent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_ShutdownAgent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).ShutdownAgent(ctx, req.(*ShutdownAgentRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2636,6 +2680,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateConfig",
 			Handler:    _Agent_UpdateConfig_Handler,
+		},
+		{
+			MethodName: "ShutdownAgent",
+			Handler:    _Agent_ShutdownAgent_Handler,
 		},
 		{
 			MethodName: "GetConfig",

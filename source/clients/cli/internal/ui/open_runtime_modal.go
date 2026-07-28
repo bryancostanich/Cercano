@@ -10,6 +10,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -242,11 +243,10 @@ func (mo *openRuntimeInstallModal) setNeedsModel(msg string) {
 	mo.errMsg = msg
 }
 
-// setOfferSwitch transitions to the "install succeeded, switch runtime?"
-// state. offerRuntime is the runtime id (e.g. "llama_server") that would
-// be activated on Enter; activeRuntime is the currently-active id used
-// to render the "keep <name>" option so users know what they're
-// declining.
+// setOfferSwitch transitions to the "switch runtime and restart agent?" state.
+// offerRuntime is the runtime id (e.g. "llama_server") that would be activated
+// on Enter; activeRuntime is the currently-active id used to render the "keep
+// <name>" option so users know what they're declining.
 func (mo *openRuntimeInstallModal) setOfferSwitch(offerRuntime, activeRuntime string) {
 	mo.state = runtimeModalOfferSwitch
 	mo.offerRuntime = offerRuntime
@@ -371,11 +371,7 @@ func (mo *openRuntimeInstallModal) renderHeader(styles theme.Styles) string {
 			title = "llama-server ready — pick a GGUF model"
 		}
 	case runtimeModalOfferSwitch:
-		if mo.offerRuntime == "mistralrs" {
-			title = "Switch to mistral.rs?"
-		} else {
-			title = "llama-server ready — switch to it?"
-		}
+		title = fmt.Sprintf("Switch to %s and restart agent?", runtimeDisplayName(mo.offerRuntime))
 	case runtimeModalScanningModels:
 		title = "Checking GGUF models…"
 	}
@@ -383,8 +379,12 @@ func (mo *openRuntimeInstallModal) renderHeader(styles theme.Styles) string {
 }
 
 func (mo *openRuntimeInstallModal) renderBody(styles theme.Styles, w int) string {
-	if mo.state == runtimeModalOfferSwitch && mo.offerRuntime == "mistralrs" && mo.status.Missing == "model" {
-		return mo.renderMistralDownloadOfferBody(styles, w)
+	if mo.state == runtimeModalOfferSwitch {
+		if mo.offerRuntime == "mistralrs" && mo.status.Missing == "model" {
+			return mo.renderMistralDownloadOfferBody(styles, w)
+		}
+		msg := fmt.Sprintf("Changing the open runtime from %s to %s requires restarting the Cercano agent so worker-side providers and model tiers are rebuilt. Active CLI sessions will reconnect automatically; in-flight requests will be cancelled.", runtimeDisplayName(mo.activeRuntime), runtimeDisplayName(mo.offerRuntime))
+		return styles.Muted.Render(ansi.Wrap(msg, w, ""))
 	}
 
 	msg := strings.TrimSpace(mo.status.Message)
@@ -504,12 +504,11 @@ func (mo *openRuntimeInstallModal) renderActions(styles theme.Styles) string {
 		hint := styles.Muted.Render(hintText)
 		return primary + "    " + secondary + "\n" + hint
 	case runtimeModalOfferSwitch:
-		// Ask explicitly rather than deciding. For bundled runtimes with a
-		// configured-but-missing default model, switching starts the server-side
-		// background download and the top-bar chip moves to o:downloading.
-		label := "[Enter] Switch to " + runtimeDisplayName(mo.offerRuntime)
+		// Ask explicitly rather than deciding. Runtime swaps are followed by an
+		// agent restart so worker-side provider state cannot stay stale.
+		label := "[Enter] Switch and restart"
 		if mo.offerRuntime == "mistralrs" && mo.status.Missing == "model" {
-			label = "[Enter] Switch and download"
+			label = "[Enter] Switch, download, and restart"
 		}
 		primary := styles.Success.Bold(true).Render(label)
 		keepLabel := "[Esc] Stay on " + runtimeDisplayName(mo.activeRuntime)
@@ -637,32 +636,39 @@ func (m Model) handleOpenRuntimeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 }
 
 // dispatchOpenModelPick fires the picker's outcome in the background: set
-// llama_server.default_model to the chosen GGUF and switch to the runtime,
-// one UpdateConfig round trip. Errors are swallowed for the same reason as
-// dispatchOpenRuntimeSwitch — the server broadcasts ConfigChanged /
-// OpenRuntimeStatusChanged either way, so outcomes surface via the chip.
+// llama_server.default_model to the chosen GGUF, switch to the runtime, then
+// request an agent restart so worker-side providers and tier mappings are rebuilt.
 func dispatchOpenModelPick(ag *agentclient.Client, runtime, ggufPath string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = ag.UpdateConfig(ctx, agentclient.ConfigUpdate{
+		_, err := ag.UpdateConfig(ctx, agentclient.ConfigUpdate{
 			OpenRuntime:      runtime,
 			OpenDefaultModel: ggufPath,
 		})
+		cancel()
+		if err == nil {
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer shutdownCancel()
+			_ = ag.ShutdownAgent(shutdownCtx, "open runtime switched to "+runtime)
+		}
 		return nil
 	}
 }
 
-// dispatchOpenRuntimeSwitch fires an UpdateConfig(local-runtime=runtime) in
-// the background after a successful install. Errors are swallowed — the
-// server broadcasts its own ConfigChanged / OpenRuntimeStatusChanged events
-// so any status change becomes visible via the normal channels without a
-// custom msg round-trip.
+// dispatchOpenRuntimeSwitch fires UpdateConfig(open_runtime=runtime), then asks
+// the agent to shut down so clients reconnect to a fresh process. Errors are
+// swallowed — config/status events and reconnect state surface outcomes via the
+// normal channels without a custom msg round-trip.
 func dispatchOpenRuntimeSwitch(ag *agentclient.Client, runtime string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = ag.UpdateConfig(ctx, agentclient.ConfigUpdate{OpenRuntime: runtime})
+		_, err := ag.UpdateConfig(ctx, agentclient.ConfigUpdate{OpenRuntime: runtime})
+		cancel()
+		if err == nil {
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer shutdownCancel()
+			_ = ag.ShutdownAgent(shutdownCtx, "open runtime switched to "+runtime)
+		}
 		return nil
 	}
 }

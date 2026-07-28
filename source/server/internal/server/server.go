@@ -1460,6 +1460,22 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	}, nil
 }
 
+// ShutdownAgent implements proto.AgentServer. It returns before beginning
+// shutdown so the requesting client can receive the acknowledgement and let its
+// reconnect loop/auto-launch path bring up a fresh agent.
+func (s *Server) ShutdownAgent(ctx context.Context, req *proto.ShutdownAgentRequest) (*proto.ShutdownAgentResponse, error) {
+	reason := strings.TrimSpace(req.GetReason())
+	if reason == "" {
+		reason = "client-requested restart"
+	}
+	log.Printf("ShutdownAgent accepted: %s", reason)
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		s.BeginShutdown()
+	}()
+	return &proto.ShutdownAgentResponse{Accepted: true, Message: "agent shutdown scheduled"}, nil
+}
+
 // ListConversations implements proto.AgentServer — delegates to persistSvc.
 func (s *Server) ListConversations(ctx context.Context, req *proto.ListConversationsRequest) (*proto.ListConversationsResponse, error) {
 	return s.persistSvc.ListConversations(ctx, req)

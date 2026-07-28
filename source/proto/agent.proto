@@ -19,8 +19,15 @@ service Agent {
   // Observe-only: it does not send input or answer permission prompts.
   rpc AttachConversation (AttachConversationRequest) returns (stream StreamProcessResponse) {}
 
-  // UpdateConfig updates runtime configuration (model, provider) without server restart.
+  // UpdateConfig updates runtime configuration (model, provider). Some changes
+  // (notably open_runtime swaps) require an agent restart before all worker-side
+  // providers and model-tier mappings are rebuilt.
   rpc UpdateConfig (UpdateConfigRequest) returns (UpdateConfigResponse) {}
+
+  // ShutdownAgent asks the singleton agent process to exit after this response
+  // is sent. CLI clients use this for restart-required config changes; their
+  // reconnect loop auto-launches the replacement agent.
+  rpc ShutdownAgent (ShutdownAgentRequest) returns (ShutdownAgentResponse) {}
 
   // GetConfig returns the current runtime config. API key is reported as a
   // presence bool only — the literal value never leaves the agent.
@@ -438,6 +445,15 @@ message UpdateConfigRequest {
 // Runtime configuration update response.
 message UpdateConfigResponse {
   bool success = 1;
+  string message = 2;
+}
+
+message ShutdownAgentRequest {
+  string reason = 1;
+}
+
+message ShutdownAgentResponse {
+  bool accepted = 1;
   string message = 2;
 }
 

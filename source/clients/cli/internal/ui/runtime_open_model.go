@@ -132,7 +132,7 @@ func (d *runtimeDashboard) openRuntimePicker() {
 				// it look like nothing happened.
 				msg = "runtime set to " + row.Key + " — restart to load its models"
 			}
-			return msg, true, openRuntimeSwitchCmd(d.agent, row.Key)
+			return msg, true, openRuntimeSwitchCmd(d.agent, row.Key, current)
 		},
 	}
 	picker := overlay.New("open runtime", rows, hooks)
@@ -296,7 +296,12 @@ func mistralConfigUpdateCmd(ag *agentclient.Client, update agentclient.ConfigUpd
 // or model downloading), return openOpenRuntimeInstallModalMsg so the user can
 // confirm/cancel or browse models. Ollama still switches directly because it
 // manages its own model presence.
-func openRuntimeSwitchCmd(ag *agentclient.Client, target string) tea.Cmd {
+type openRuntimeConfirmSwitchMsg struct {
+	target string
+	active string
+}
+
+func openRuntimeSwitchCmd(ag *agentclient.Client, target, active string) tea.Cmd {
 	if ag == nil {
 		return nil
 	}
@@ -309,9 +314,9 @@ func openRuntimeSwitchCmd(ag *agentclient.Client, target string) tea.Cmd {
 				return openOpenRuntimeInstallModalMsg{status: *st, pending: target}
 			}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = ag.UpdateConfig(ctx, agentclient.ConfigUpdate{OpenRuntime: target})
-		return nil
+		if active == "" {
+			active = "ollama"
+		}
+		return openRuntimeConfirmSwitchMsg{target: target, active: active}
 	}
 }

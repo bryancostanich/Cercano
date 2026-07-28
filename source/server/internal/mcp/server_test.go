@@ -105,6 +105,10 @@ func (m *mockAgentClient) UpdateConfig(ctx context.Context, in *proto.UpdateConf
 	return &proto.UpdateConfigResponse{Success: true, Message: "Configuration updated"}, m.configErr
 }
 
+func (m *mockAgentClient) ShutdownAgent(ctx context.Context, in *proto.ShutdownAgentRequest, opts ...grpc.CallOption) (*proto.ShutdownAgentResponse, error) {
+	return &proto.ShutdownAgentResponse{Accepted: true, Message: "shutdown scheduled"}, nil
+}
+
 func (m *mockAgentClient) GetConfig(ctx context.Context, in *proto.GetConfigRequest, opts ...grpc.CallOption) (*proto.GetConfigResponse, error) {
 	return &proto.GetConfigResponse{}, nil
 }

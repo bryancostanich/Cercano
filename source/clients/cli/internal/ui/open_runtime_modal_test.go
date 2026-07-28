@@ -182,15 +182,16 @@ func TestLocalRuntimeModal_OfferSwitchTitleAndActions(t *testing.T) {
 	mo.setOfferSwitch("llama_server", "ollama")
 	view := mo.View(styles, pal, 120, 40)
 
-	// Title must be affirmative about the install — the user just watched
-	// llama-server install successfully. Not a scary "failed" tone.
-	if !strings.Contains(view, "llama-server ready") {
-		t.Fatalf("OfferSwitch title missing \"llama-server ready\":\n%s", view)
+	if !strings.Contains(view, "Switch to llama-server and restart agent?") {
+		t.Fatalf("OfferSwitch title missing restart prompt:\n%s", view)
+	}
+	if !strings.Contains(view, "Active CLI sessions will reconnect") || !strings.Contains(view, "automatically") {
+		t.Fatalf("OfferSwitch body must explain reconnect behavior:\n%s", view)
 	}
 	// Actions must name both options with the runtimes explicit so the
 	// user knows exactly what happens on each key.
-	if !strings.Contains(view, "[Enter] Switch to llama-server") {
-		t.Fatalf("OfferSwitch missing Switch-to action:\n%s", view)
+	if !strings.Contains(view, "[Enter] Switch and restart") {
+		t.Fatalf("OfferSwitch missing restart action:\n%s", view)
 	}
 	if !strings.Contains(view, "[Esc] Stay on ollama") {
 		t.Fatalf("OfferSwitch must name what user is keeping if they decline:\n%s", view)

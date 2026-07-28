@@ -1631,6 +1631,29 @@ func (s *Server) ElideContext(ctx context.Context, req *proto.ElideContextReques
 // GetConfig implements proto.AgentServer — reports the current runtime config
 // without exposing the literal API key. cloud_state is derived from the active
 // cloud provider's Name() ("NONE" → "absent", everything else → "ok").
+func (s *Server) effectiveOpenTierSlots() map[string]string {
+	cfg := s.cfgSvc.Get()
+	runtime := cfg.OpenRuntime
+	if runtime == "" {
+		runtime = "llama_server"
+	}
+	cfgForResolve := cfg
+	cfgForResolve.OpenRuntime = runtime
+	out := map[string]string{}
+	for _, t := range []config.Tier{
+		config.TierMostCapable,
+		config.TierEveryday,
+		config.TierFastLight,
+		config.TierFastLightText,
+		config.TierEmbedding,
+	} {
+		if id := effectiveOpenModelFor(cfgForResolve, t); id != "" {
+			out[runtime+"."+string(t)] = id
+		}
+	}
+	return out
+}
+
 func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*proto.GetConfigResponse, error) {
 	state := "absent"
 	if r := s.providerSvc.Router(); r != nil {
@@ -1686,7 +1709,7 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 		CompactionEnabled:         cfg.Compaction.Enabled,
 		ToolElisionOnly:           cfg.Compaction.ToolElisionOnly,
 		ToolLoopMaxIterations:     int32(cfg.ToolLoop.MaxIterations),
-		ModelTiers:                cfg.Models.TierSlots(),
+		ModelTiers:                s.effectiveOpenTierSlots(),
 		AgentShutdownOnLastClient: cfg.Agent.ShutdownOnLastClient,
 		MistralrsIsq:              cfg.MistralRS.ISQ,
 		MistralrsPagedAttn:        cfg.MistralRS.PagedAttn,

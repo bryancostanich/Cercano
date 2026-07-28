@@ -999,9 +999,11 @@ message GetConfigResponse {
   string watchdog_mode = 20;
   string watchdog_checks = 21;          // comma-joined
   string watchdog_escalate_after = 22;  // int as string
-  // Model taxonomy — current open tier slots, keyed "<tier>.open" (only
-  // non-empty slots are present). Cloud tiers and the retired default-provider
-  // knob are no longer reported here; field 24 is reserved.
+  // Model taxonomy — effective active-runtime open tier values, keyed
+  // "<runtime>.<tier>". These are display values (override else catalog
+  // default); writes still go through UpdateConfig.ModelTierKey/Value.
+  // Cloud tiers and the retired default-provider knob are no longer reported
+  // here; field 24 is reserved.
   reserved 24;
   reserved "models_default_provider";
   map<string, string> model_tiers = 23;

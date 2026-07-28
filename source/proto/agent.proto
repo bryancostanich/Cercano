@@ -422,10 +422,11 @@ message UpdateConfigRequest {
   // open_runtime switch in the same request, so a request carrying both
   // resolves an ambiguous-model detection in one round trip.
   string open_default_model = 20;
-  // Model taxonomy (sparse-patch): model_tier_key selects the slot —
-  // "default_provider", or "<tier>.<provider>" with tier one of
-  // most_capable|everyday|fast_light|fast_light_text and provider cloud|open.
-  // model_tier_value is the model id; "-" clears the slot. Empty key = unchanged.
+  // Model taxonomy (sparse-patch): model_tier_key selects the open slot —
+  // "<tier>.open" with tier one of most_capable|everyday|fast_light|
+  // fast_light_text|embedding. (Cloud is configured via its own vendor-keyed
+  // profile path, not through tier slots.) model_tier_value is the model id;
+  // "-" clears the slot. Empty key = unchanged.
   string model_tier_key = 21;
   string model_tier_value = 22;
   // Tool loop — max LLM round-trips per turn. Sparse-patch convention:
@@ -998,10 +999,12 @@ message GetConfigResponse {
   string watchdog_mode = 20;
   string watchdog_checks = 21;          // comma-joined
   string watchdog_escalate_after = 22;  // int as string
-  // Model taxonomy — current tier slots, keyed "<tier>.<provider>" (only
-  // non-empty slots are present), plus the default provider side.
+  // Model taxonomy — current open tier slots, keyed "<tier>.open" (only
+  // non-empty slots are present). Cloud tiers and the retired default-provider
+  // knob are no longer reported here; field 24 is reserved.
+  reserved 24;
+  reserved "models_default_provider";
   map<string, string> model_tiers = 23;
-  string models_default_provider = 24;
   // Tool loop — max LLM round-trips per turn. -1 means unlimited.
   int32 tool_loop_max_iterations = 25;
   // mistral.rs runtime settings — current values.
@@ -1590,18 +1593,19 @@ message ConfigSnapshot {
   string ollama_url    = 12;
   string open_runtime  = 13; // "ollama" | "llama_server"
 
-  // Model tiers — worker needs these to resolve tier→model at turn time.
-  string tier_most_capable_open   = 14;
-  string tier_most_capable_cloud  = 15;
-  string tier_everyday_open       = 16;
-  string tier_everyday_cloud      = 17;
-  string tier_fast_light_open     = 18;
-  string tier_fast_light_cloud    = 19;
-  string tier_fast_light_text_open  = 20;
-  string tier_fast_light_text_cloud = 21;
-  string tier_embedding_open      = 22;
-  string tier_embedding_cloud     = 23;
-  string default_provider         = 24; // "cloud" | "open"
+  // Open-side model tiers — worker needs these to resolve tier→model at turn
+  // time. Cloud is resolved separately via the vendor-keyed cost-tier path, so
+  // it is NOT carried here. The former per-tier *_cloud slots and the
+  // default_provider knob were retired (effort: runtime-aware-model-tiers) and
+  // their field numbers/names are reserved so they can never be reused.
+  reserved 15, 17, 19, 21, 23, 24;
+  reserved "tier_most_capable_cloud", "tier_everyday_cloud", "tier_fast_light_cloud",
+           "tier_fast_light_text_cloud", "tier_embedding_cloud", "default_provider";
+  string tier_most_capable_open    = 14;
+  string tier_everyday_open        = 16;
+  string tier_fast_light_open      = 18;
+  string tier_fast_light_text_open = 20;
+  string tier_embedding_open       = 22;
 
   // Compaction — runner reads these for context assembly.
   bool   compaction_enabled               = 25;

@@ -280,15 +280,13 @@ func (wp *wizardPage) startKeyEntry() tea.Cmd {
 }
 
 // wizardFinishUpdate builds the finish step's first config patch: locus mode,
-// default provider, and — on the cloud path — the everyday-cloud tier pick as
-// CloudModel, which UpdateConfig writes into the active profile and rebuilds.
-// The profile model is what actually serves main-chat requests, so the
-// "everyday workhorse" answer must land there, not only in the tier taxonomy.
+// and — on the cloud path — the everyday-cloud tier pick as CloudModel, which
+// UpdateConfig writes into the active profile and rebuilds. The profile model
+// is what actually serves main-chat requests, so the "everyday workhorse"
+// answer must land there, not only in the tier taxonomy.
 func wizardFinishUpdate(st wizard.State) agentclient.ConfigUpdate {
 	u := agentclient.ConfigUpdate{
-		LocusMode:      st.LocusMode,
-		ModelTierKey:   "default_provider",
-		ModelTierValue: st.DefaultProvider(),
+		LocusMode: st.LocusMode,
 	}
 	if st.CloudProvider != "" {
 		u.CloudModel = st.TierPicks["everyday."+wizard.SideCloud]

@@ -62,8 +62,7 @@ type ModelTiers struct {
 // Server.resolveTierModel), so there is exactly one source of truth and no
 // stale mirror to drift.
 type ModelsConfig struct {
-	DefaultProvider Provider   `yaml:"default_provider"` // side to prefer when the caller has no preference
-	Tiers           ModelTiers `yaml:"tiers"`
+	Tiers ModelTiers `yaml:"tiers"`
 }
 
 // OpenChatModel resolves the interactive local chat model — the everyday
@@ -114,22 +113,14 @@ func (m *ModelsConfig) tierSlot(t Tier) *ModelTier {
 	return nil
 }
 
-// ApplyModelTierPatch applies one sparse-patch update to the taxonomy:
-// key "default_provider" sets the preferred side (cloud|open); key
-// "<tier>.<provider>" sets that slot's model id, with "-" clearing it.
+// ApplyModelTierPatch applies one sparse-patch update to the open taxonomy:
+// key "<tier>.open" sets that tier's open slot model id, with "-" clearing it.
+// (Cloud is configured via its own vendor-keyed profile path, not here.)
 // Returns a short change description for the caller's change log.
 func ApplyModelTierPatch(m *ModelsConfig, key, value string) (string, error) {
-	if key == "default_provider" {
-		p := Provider(value)
-		if p != ProviderCloud && p != ProviderOpen {
-			return "", fmt.Errorf("models.default_provider must be %q or %q, got %q", ProviderCloud, ProviderOpen, value)
-		}
-		m.DefaultProvider = p
-		return "models.default_provider=" + value, nil
-	}
 	tierName, provName, ok := strings.Cut(key, ".")
 	if !ok {
-		return "", fmt.Errorf("model tier key %q must be \"default_provider\" or \"<tier>.<provider>\"", key)
+		return "", fmt.Errorf("model tier key %q must be \"<tier>.open\"", key)
 	}
 	slot := m.tierSlot(Tier(tierName))
 	if slot == nil {

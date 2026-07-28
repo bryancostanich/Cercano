@@ -509,7 +509,7 @@ func Defaults() Config {
 		// the default behave identically.
 		WorkerIdleTimeoutSeconds: 0,
 		Agent:                    AgentConfig{ShutdownOnLastClient: true},
-		Models:                   ModelsConfig{DefaultProvider: ProviderOpen},
+		Models:                   ModelsConfig{},
 		// Seed the vendor-keyed cloud cost tables. Closed cloud model
 		// selection resolves here — keyed by the active profile's vendor.
 		// Only the vendors Cercano ships a default lineup for are seeded;

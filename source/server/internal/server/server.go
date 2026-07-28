@@ -1669,7 +1669,6 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 		ToolElisionOnly:           cfg.Compaction.ToolElisionOnly,
 		ToolLoopMaxIterations:     int32(cfg.ToolLoop.MaxIterations),
 		ModelTiers:                cfg.Models.TierSlots(),
-		ModelsDefaultProvider:     string(cfg.Models.DefaultProvider),
 		AgentShutdownOnLastClient: cfg.Agent.ShutdownOnLastClient,
 		MistralrsIsq:              cfg.MistralRS.ISQ,
 		MistralrsPagedAttn:        cfg.MistralRS.PagedAttn,

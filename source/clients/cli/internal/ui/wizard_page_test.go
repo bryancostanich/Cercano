@@ -347,8 +347,8 @@ func TestWizardFinishUpdateCarriesCloudModel(t *testing.T) {
 		LocusMode:     "cloud_primary",
 		TierPicks:     map[string]string{"everyday.cloud": "claude-opus-4-8"},
 	})
-	if u.LocusMode != "cloud_primary" || u.ModelTierKey != "default_provider" || u.ModelTierValue != wizard.SideCloud {
-		t.Fatalf("locus/default_provider patch wrong: %+v", u)
+	if u.LocusMode != "cloud_primary" {
+		t.Fatalf("locus patch wrong: %+v", u)
 	}
 	if u.CloudModel != "claude-opus-4-8" {
 		t.Fatalf("want everyday.cloud pick as CloudModel, got %q", u.CloudModel)

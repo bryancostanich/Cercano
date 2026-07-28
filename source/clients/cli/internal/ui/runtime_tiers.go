@@ -12,17 +12,14 @@ import (
 
 const runtimeActionTierPick = "tier_pick"
 
-// tierSlotOrder fixes the display order of the /m tiers section: the default
-// provider first, then each tier's cloud/open pair, most capable → fastest.
+// tierSlotOrder fixes the display order of the /m tiers section: each open
+// tier, most capable → fastest. Cloud is configured through its own
+// vendor-keyed profile path (not per-tier slots), and the retired
+// default_provider knob is gone — so only open slots appear here.
 var tierSlotOrder = []struct{ Key, Label string }{
-	{"default_provider", "default provider"},
-	{"most_capable.cloud", "most-capable · cloud"},
 	{"most_capable.open", "most-capable · open"},
-	{"everyday.cloud", "everyday · cloud"},
 	{"everyday.open", "everyday · open"},
-	{"fast_light.cloud", "fast-light · cloud"},
 	{"fast_light.open", "fast-light · open"},
-	{"fast_light_text.cloud", "fast-light-text · cloud"},
 	{"fast_light_text.open", "fast-light-text · open"},
 	// The embedding slot is tier UI over the embedding_model config
 	// field (single source of truth server-side), not a taxonomy entry.
@@ -39,8 +36,6 @@ func tierRows(cfg *agentclient.Config) []runtimeDashboardActionRow {
 	for _, slot := range tierSlotOrder {
 		value := ""
 		switch slot.Key {
-		case "default_provider":
-			value = cfg.ModelsDefaultProvider
 		case "embedding.open":
 			value = cfg.EmbeddingModel
 		default:
@@ -59,22 +54,11 @@ func tierRows(cfg *agentclient.Config) []runtimeDashboardActionRow {
 	return rows
 }
 
-// tierPickerRows builds the candidate list for one slot. default_provider
-// offers the two sides; .open slots offer the installed runtime models;
-// .cloud slots are filled by the caller from the live catalog (with the
-// static fallback) — this function only handles the locally-known kinds and
-// the shared trailing clear row. The current assignment is hinted.
+// tierPickerRows builds the candidate list for one open tier slot: the
+// installed runtime models plus a trailing clear row, with the current
+// assignment hinted. (Cloud tiers are not configured here; they resolve via
+// the vendor-keyed profile path.)
 func tierPickerRows(tierKey string, cfg *agentclient.Config, status *agentclient.RuntimeStatus) []overlay.Row {
-	if tierKey == "default_provider" {
-		current := ""
-		if cfg != nil {
-			current = cfg.ModelsDefaultProvider
-		}
-		return []overlay.Row{
-			{Key: "cloud", Label: "cloud", Value: "hosted API side", Hint: currentHint("cloud", current)},
-			{Key: "open", Label: "open", Value: "open-weight side", Hint: currentHint("open", current)},
-		}
-	}
 	current := ""
 	if cfg != nil {
 		current = cfg.ModelTiers[tierKey]

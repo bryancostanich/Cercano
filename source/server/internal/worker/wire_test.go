@@ -351,7 +351,6 @@ func TestSnapshotConfigRoundTrip(t *testing.T) {
 			},
 		},
 		Models: config.ModelsConfig{
-			DefaultProvider: config.ProviderCloud,
 			Tiers: config.ModelTiers{
 				MostCapable:   config.ModelTier{Open: "qwen3-72b"},
 				Everyday:      config.ModelTier{Open: "qwen3-coder"},
@@ -483,10 +482,6 @@ func TestSnapshotConfigRoundTrip(t *testing.T) {
 	checkTier("FastLight", gt.FastLight.Open, ot.FastLight.Open)
 	checkTier("FastLightText", gt.FastLightText.Open, ot.FastLightText.Open)
 	checkTier("Embedding", gt.Embedding.Open, ot.Embedding.Open)
-
-	if got.Models.DefaultProvider != orig.Models.DefaultProvider {
-		t.Errorf("DefaultProvider: got %q want %q", got.Models.DefaultProvider, orig.Models.DefaultProvider)
-	}
 
 	// Compaction.
 	gc, oc := got.Compaction, orig.Compaction

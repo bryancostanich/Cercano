@@ -292,17 +292,14 @@ func SnapshotConfig(cfg config.Config, cred string) *proto.ConfigSnapshot {
 		OllamaUrl:   cfg.OllamaURL,
 		OpenRuntime: cfg.OpenRuntime,
 
-		// Cloud tier slots are removed from the model taxonomy (cloud resolves
-		// via the vendor-keyed cost-tier path); the proto still carries the
-		// retired Tier*Cloud fields until they are dropped in the schema-regen
-		// commit, so they are simply left unset here. DefaultProvider is still
-		// carried until that same commit retires it.
+		// Only the open tier slots cross the wire. Cloud resolves via the
+		// vendor-keyed cost-tier path, and the default-provider knob was retired
+		// (their proto field numbers are now reserved).
 		TierMostCapableOpen:   t.MostCapable.Open,
 		TierEverydayOpen:      t.Everyday.Open,
 		TierFastLightOpen:     t.FastLight.Open,
 		TierFastLightTextOpen: t.FastLightText.Open,
 		TierEmbeddingOpen:     t.Embedding.Open,
-		DefaultProvider:       string(cfg.Models.DefaultProvider),
 
 		CompactionEnabled:               cfg.Compaction.Enabled,
 		CompactionActivationFloorTokens: int32(cfg.Compaction.ActivationFloorTokens),
@@ -383,7 +380,6 @@ func ConfigFromSnapshot(p *proto.ConfigSnapshot) config.Config {
 		ToolLoop:           config.ToolLoopConfig{MaxIterations: int(p.ToolLoopMaxIterations)},
 
 		Models: config.ModelsConfig{
-			DefaultProvider: config.Provider(p.DefaultProvider),
 			Tiers: config.ModelTiers{
 				MostCapable:   config.ModelTier{Open: p.TierMostCapableOpen},
 				Everyday:      config.ModelTier{Open: p.TierEverydayOpen},

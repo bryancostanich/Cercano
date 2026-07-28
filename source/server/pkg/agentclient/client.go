@@ -242,10 +242,8 @@ type Config struct {
 	ToolElisionOnly bool
 	// ToolLoopMaxIterations caps LLM round-trips per turn; -1 means unlimited.
 	ToolLoopMaxIterations int
-	// ModelTiers is the taxonomy's non-empty slots keyed "<tier>.<provider>";
-	// ModelsDefaultProvider is the preferred side ("cloud"|"open"|"").
-	ModelTiers            map[string]string
-	ModelsDefaultProvider string
+	// ModelTiers is the open taxonomy's non-empty slots keyed "<tier>.open".
+	ModelTiers map[string]string
 	// Agent lifecycle.
 	AgentShutdownOnLastClient bool
 	// mistral.rs runtime settings (Runtime tab).
@@ -287,7 +285,6 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 		ToolElisionOnly:           resp.GetToolElisionOnly(),
 		ToolLoopMaxIterations:     int(resp.GetToolLoopMaxIterations()),
 		ModelTiers:                resp.GetModelTiers(),
-		ModelsDefaultProvider:     resp.GetModelsDefaultProvider(),
 		AgentShutdownOnLastClient: resp.GetAgentShutdownOnLastClient(),
 		MistralRSISQ:              resp.GetMistralrsIsq(),
 		MistralRSPagedAttn:        resp.GetMistralrsPagedAttn(),
@@ -333,9 +330,8 @@ type ConfigUpdate struct {
 	ToolElisionOnly string
 	// ToolLoopMaxIterations — sparse-patch int. "" = unchanged, -1 = unlimited.
 	ToolLoopMaxIterations string
-	// Model taxonomy sparse-patch: ModelTierKey is "default_provider" or
-	// "<tier>.<provider>"; ModelTierValue is the model id ("-" clears).
-	// Empty key = unchanged.
+	// Model taxonomy sparse-patch: ModelTierKey is "<tier>.open";
+	// ModelTierValue is the model id ("-" clears). Empty key = unchanged.
 	ModelTierKey   string
 	ModelTierValue string
 	// Agent lifecycle. Sparse-patch: "" = unchanged, "true" / "false" = apply.

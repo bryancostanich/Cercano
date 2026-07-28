@@ -7,22 +7,20 @@ import (
 	"cercano/source/server/pkg/agentclient"
 )
 
-// TestFormatConfig_ModelTiers pins that /config show renders the model
-// taxonomy: default provider plus each configured tier slot, sorted.
+// TestFormatConfig_ModelTiers pins that /config show renders the open model
+// taxonomy: each configured open tier slot, sorted. (Cloud is not a tier slot.)
 func TestFormatConfig_ModelTiers(t *testing.T) {
 	cfg := &agentclient.Config{
-		ModelsDefaultProvider: "open",
 		ModelTiers: map[string]string{
 			"fast_light_text.open": "phi4:14b",
-			"everyday.cloud":       "claude-fable-5",
+			"everyday.open":        "qwen3-coder",
 		},
 	}
 	out := formatConfig(cfg)
 	for _, want := range []string{
 		"models",
-		"default-provider: open",
-		"everyday.cloud",
-		"claude-fable-5",
+		"everyday.open",
+		"qwen3-coder",
 		"fast_light_text.open",
 		"phi4:14b",
 	} {
@@ -30,8 +28,8 @@ func TestFormatConfig_ModelTiers(t *testing.T) {
 			t.Errorf("formatConfig missing %q in:\n%s", want, out)
 		}
 	}
-	// Deterministic ordering: everyday.cloud sorts before fast_light_text.open.
-	if strings.Index(out, "everyday.cloud") > strings.Index(out, "fast_light_text.open") {
+	// Deterministic ordering: everyday.open sorts before fast_light_text.open.
+	if strings.Index(out, "everyday.open") > strings.Index(out, "fast_light_text.open") {
 		t.Error("tier slots should render in sorted order")
 	}
 }

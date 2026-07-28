@@ -39,14 +39,13 @@ func TestResolveOpen(t *testing.T) {
 	}
 }
 
-// TestModelsYAMLRoundTrip pins the on-disk shape: a models section with
-// default_provider and a tiers map including the fast_light_text tier.
+// TestModelsYAMLRoundTrip pins the on-disk shape: a models section with a
+// tiers map including the fast_light_text tier's open slot.
 func TestModelsYAMLRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	src := `ollama_url: http://localhost:11434
 models:
-    default_provider: open
     tiers:
         fast_light_text:
             open: phi4:14b
@@ -57,9 +56,6 @@ models:
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
-	}
-	if cfg.Models.DefaultProvider != "open" {
-		t.Errorf("DefaultProvider = %q, want open", cfg.Models.DefaultProvider)
 	}
 	if cfg.Models.Tiers.FastLightText.Open != "phi4:14b" {
 		t.Errorf("FastLightText.Open = %q, want phi4:14b", cfg.Models.Tiers.FastLightText.Open)
@@ -75,16 +71,9 @@ models:
 	}
 }
 
-// TestDefaults_ModelsProvider pins the local-first default provider.
-func TestDefaults_ModelsProvider(t *testing.T) {
-	if got := Defaults().Models.DefaultProvider; got != "open" {
-		t.Errorf("Defaults().Models.DefaultProvider = %q, want open", got)
-	}
-}
-
 // TestApplyModelTierPatch pins the sparse-patch contract used by /config:
-// "<tier>.<provider>" sets a slot, "default_provider" sets the preference,
-// "-" clears, and unknown tiers/providers are rejected with an error.
+// "<tier>.open" sets a slot, "-" clears it, and unknown tiers/providers are
+// rejected with an error. (Cloud is not patchable here — vendor-keyed path.)
 func TestApplyModelTierPatch(t *testing.T) {
 	var m ModelsConfig
 
@@ -99,14 +88,9 @@ func TestApplyModelTierPatch(t *testing.T) {
 		t.Errorf("change description should name the slot, got %q", desc)
 	}
 
-	if _, err := ApplyModelTierPatch(&m, "default_provider", "cloud"); err != nil {
-		t.Fatalf("set default_provider: %v", err)
-	}
-	if m.DefaultProvider != ProviderCloud {
-		t.Errorf("DefaultProvider = %q", m.DefaultProvider)
-	}
-	if _, err := ApplyModelTierPatch(&m, "default_provider", "banana"); err == nil {
-		t.Error("invalid default_provider value must be rejected")
+	// Cloud is no longer a patchable provider side.
+	if _, err := ApplyModelTierPatch(&m, "everyday.cloud", "claude-opus"); err == nil {
+		t.Error("everyday.cloud must be rejected — cloud is not a tier slot")
 	}
 
 	if _, err := ApplyModelTierPatch(&m, "fast_light_text.open", "-"); err != nil {

@@ -1219,10 +1219,11 @@ type UpdateConfigRequest struct {
 	// open_runtime switch in the same request, so a request carrying both
 	// resolves an ambiguous-model detection in one round trip.
 	OpenDefaultModel string `protobuf:"bytes,20,opt,name=open_default_model,json=openDefaultModel,proto3" json:"open_default_model,omitempty"`
-	// Model taxonomy (sparse-patch): model_tier_key selects the slot —
-	// "default_provider", or "<tier>.<provider>" with tier one of
-	// most_capable|everyday|fast_light|fast_light_text and provider cloud|open.
-	// model_tier_value is the model id; "-" clears the slot. Empty key = unchanged.
+	// Model taxonomy (sparse-patch): model_tier_key selects the open slot —
+	// "<tier>.open" with tier one of most_capable|everyday|fast_light|
+	// fast_light_text|embedding. (Cloud is configured via its own vendor-keyed
+	// profile path, not through tier slots.) model_tier_value is the model id;
+	// "-" clears the slot. Empty key = unchanged.
 	ModelTierKey   string `protobuf:"bytes,21,opt,name=model_tier_key,json=modelTierKey,proto3" json:"model_tier_key,omitempty"`
 	ModelTierValue string `protobuf:"bytes,22,opt,name=model_tier_value,json=modelTierValue,proto3" json:"model_tier_value,omitempty"`
 	// Tool loop — max LLM round-trips per turn. Sparse-patch convention:
@@ -6811,13 +6812,10 @@ type GetConfigResponse struct {
 	// Tool-elision-only mode state (compaction passes elide instead of summarize).
 	ToolElisionOnly bool `protobuf:"varint,29,opt,name=tool_elision_only,json=toolElisionOnly,proto3" json:"tool_elision_only,omitempty"`
 	// Watchdog (Development Tools) — current values.
-	WatchdogMode          string `protobuf:"bytes,20,opt,name=watchdog_mode,json=watchdogMode,proto3" json:"watchdog_mode,omitempty"`
-	WatchdogChecks        string `protobuf:"bytes,21,opt,name=watchdog_checks,json=watchdogChecks,proto3" json:"watchdog_checks,omitempty"`                        // comma-joined
-	WatchdogEscalateAfter string `protobuf:"bytes,22,opt,name=watchdog_escalate_after,json=watchdogEscalateAfter,proto3" json:"watchdog_escalate_after,omitempty"` // int as string
-	// Model taxonomy — current tier slots, keyed "<tier>.<provider>" (only
-	// non-empty slots are present), plus the default provider side.
+	WatchdogMode          string            `protobuf:"bytes,20,opt,name=watchdog_mode,json=watchdogMode,proto3" json:"watchdog_mode,omitempty"`
+	WatchdogChecks        string            `protobuf:"bytes,21,opt,name=watchdog_checks,json=watchdogChecks,proto3" json:"watchdog_checks,omitempty"`                        // comma-joined
+	WatchdogEscalateAfter string            `protobuf:"bytes,22,opt,name=watchdog_escalate_after,json=watchdogEscalateAfter,proto3" json:"watchdog_escalate_after,omitempty"` // int as string
 	ModelTiers            map[string]string `protobuf:"bytes,23,rep,name=model_tiers,json=modelTiers,proto3" json:"model_tiers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	ModelsDefaultProvider string            `protobuf:"bytes,24,opt,name=models_default_provider,json=modelsDefaultProvider,proto3" json:"models_default_provider,omitempty"`
 	// Tool loop — max LLM round-trips per turn. -1 means unlimited.
 	ToolLoopMaxIterations int32 `protobuf:"varint,25,opt,name=tool_loop_max_iterations,json=toolLoopMaxIterations,proto3" json:"tool_loop_max_iterations,omitempty"`
 	// mistral.rs runtime settings — current values.
@@ -7027,13 +7025,6 @@ func (x *GetConfigResponse) GetModelTiers() map[string]string {
 		return x.ModelTiers
 	}
 	return nil
-}
-
-func (x *GetConfigResponse) GetModelsDefaultProvider() string {
-	if x != nil {
-		return x.ModelsDefaultProvider
-	}
-	return ""
 }
 
 func (x *GetConfigResponse) GetToolLoopMaxIterations() int32 {
@@ -12401,20 +12392,13 @@ type ConfigSnapshot struct {
 	// Resolved API credential — host puts keychain value here.
 	ResolvedCredential string `protobuf:"bytes,11,opt,name=resolved_credential,json=resolvedCredential,proto3" json:"resolved_credential,omitempty"`
 	// Open-weight (local) runtime + model.
-	OllamaUrl   string `protobuf:"bytes,12,opt,name=ollama_url,json=ollamaUrl,proto3" json:"ollama_url,omitempty"`
-	OpenRuntime string `protobuf:"bytes,13,opt,name=open_runtime,json=openRuntime,proto3" json:"open_runtime,omitempty"` // "ollama" | "llama_server"
-	// Model tiers — worker needs these to resolve tier→model at turn time.
-	TierMostCapableOpen    string `protobuf:"bytes,14,opt,name=tier_most_capable_open,json=tierMostCapableOpen,proto3" json:"tier_most_capable_open,omitempty"`
-	TierMostCapableCloud   string `protobuf:"bytes,15,opt,name=tier_most_capable_cloud,json=tierMostCapableCloud,proto3" json:"tier_most_capable_cloud,omitempty"`
-	TierEverydayOpen       string `protobuf:"bytes,16,opt,name=tier_everyday_open,json=tierEverydayOpen,proto3" json:"tier_everyday_open,omitempty"`
-	TierEverydayCloud      string `protobuf:"bytes,17,opt,name=tier_everyday_cloud,json=tierEverydayCloud,proto3" json:"tier_everyday_cloud,omitempty"`
-	TierFastLightOpen      string `protobuf:"bytes,18,opt,name=tier_fast_light_open,json=tierFastLightOpen,proto3" json:"tier_fast_light_open,omitempty"`
-	TierFastLightCloud     string `protobuf:"bytes,19,opt,name=tier_fast_light_cloud,json=tierFastLightCloud,proto3" json:"tier_fast_light_cloud,omitempty"`
-	TierFastLightTextOpen  string `protobuf:"bytes,20,opt,name=tier_fast_light_text_open,json=tierFastLightTextOpen,proto3" json:"tier_fast_light_text_open,omitempty"`
-	TierFastLightTextCloud string `protobuf:"bytes,21,opt,name=tier_fast_light_text_cloud,json=tierFastLightTextCloud,proto3" json:"tier_fast_light_text_cloud,omitempty"`
-	TierEmbeddingOpen      string `protobuf:"bytes,22,opt,name=tier_embedding_open,json=tierEmbeddingOpen,proto3" json:"tier_embedding_open,omitempty"`
-	TierEmbeddingCloud     string `protobuf:"bytes,23,opt,name=tier_embedding_cloud,json=tierEmbeddingCloud,proto3" json:"tier_embedding_cloud,omitempty"`
-	DefaultProvider        string `protobuf:"bytes,24,opt,name=default_provider,json=defaultProvider,proto3" json:"default_provider,omitempty"` // "cloud" | "open"
+	OllamaUrl             string `protobuf:"bytes,12,opt,name=ollama_url,json=ollamaUrl,proto3" json:"ollama_url,omitempty"`
+	OpenRuntime           string `protobuf:"bytes,13,opt,name=open_runtime,json=openRuntime,proto3" json:"open_runtime,omitempty"` // "ollama" | "llama_server"
+	TierMostCapableOpen   string `protobuf:"bytes,14,opt,name=tier_most_capable_open,json=tierMostCapableOpen,proto3" json:"tier_most_capable_open,omitempty"`
+	TierEverydayOpen      string `protobuf:"bytes,16,opt,name=tier_everyday_open,json=tierEverydayOpen,proto3" json:"tier_everyday_open,omitempty"`
+	TierFastLightOpen     string `protobuf:"bytes,18,opt,name=tier_fast_light_open,json=tierFastLightOpen,proto3" json:"tier_fast_light_open,omitempty"`
+	TierFastLightTextOpen string `protobuf:"bytes,20,opt,name=tier_fast_light_text_open,json=tierFastLightTextOpen,proto3" json:"tier_fast_light_text_open,omitempty"`
+	TierEmbeddingOpen     string `protobuf:"bytes,22,opt,name=tier_embedding_open,json=tierEmbeddingOpen,proto3" json:"tier_embedding_open,omitempty"`
 	// Compaction — runner reads these for context assembly.
 	CompactionEnabled               bool    `protobuf:"varint,25,opt,name=compaction_enabled,json=compactionEnabled,proto3" json:"compaction_enabled,omitempty"`
 	CompactionActivationFloorTokens int32   `protobuf:"varint,26,opt,name=compaction_activation_floor_tokens,json=compactionActivationFloorTokens,proto3" json:"compaction_activation_floor_tokens,omitempty"`
@@ -12576,23 +12560,9 @@ func (x *ConfigSnapshot) GetTierMostCapableOpen() string {
 	return ""
 }
 
-func (x *ConfigSnapshot) GetTierMostCapableCloud() string {
-	if x != nil {
-		return x.TierMostCapableCloud
-	}
-	return ""
-}
-
 func (x *ConfigSnapshot) GetTierEverydayOpen() string {
 	if x != nil {
 		return x.TierEverydayOpen
-	}
-	return ""
-}
-
-func (x *ConfigSnapshot) GetTierEverydayCloud() string {
-	if x != nil {
-		return x.TierEverydayCloud
 	}
 	return ""
 }
@@ -12604,13 +12574,6 @@ func (x *ConfigSnapshot) GetTierFastLightOpen() string {
 	return ""
 }
 
-func (x *ConfigSnapshot) GetTierFastLightCloud() string {
-	if x != nil {
-		return x.TierFastLightCloud
-	}
-	return ""
-}
-
 func (x *ConfigSnapshot) GetTierFastLightTextOpen() string {
 	if x != nil {
 		return x.TierFastLightTextOpen
@@ -12618,30 +12581,9 @@ func (x *ConfigSnapshot) GetTierFastLightTextOpen() string {
 	return ""
 }
 
-func (x *ConfigSnapshot) GetTierFastLightTextCloud() string {
-	if x != nil {
-		return x.TierFastLightTextCloud
-	}
-	return ""
-}
-
 func (x *ConfigSnapshot) GetTierEmbeddingOpen() string {
 	if x != nil {
 		return x.TierEmbeddingOpen
-	}
-	return ""
-}
-
-func (x *ConfigSnapshot) GetTierEmbeddingCloud() string {
-	if x != nil {
-		return x.TierEmbeddingCloud
-	}
-	return ""
-}
-
-func (x *ConfigSnapshot) GetDefaultProvider() string {
-	if x != nil {
-		return x.DefaultProvider
 	}
 	return ""
 }
@@ -13906,7 +13848,7 @@ const file_agent_proto_rawDesc = "" +
 	"resultJson\x12\x19\n" +
 	"\bis_error\x18\x02 \x01(\bR\aisError\x12\x14\n" +
 	"\x05error\x18\x03 \x01(\tR\x05error\"\x12\n" +
-	"\x10GetConfigRequest\"\xac\v\n" +
+	"\x10GetConfigRequest\"\x93\v\n" +
 	"\x11GetConfigResponse\x12\x1d\n" +
 	"\n" +
 	"ollama_url\x18\x01 \x01(\tR\tollamaUrl\x12\x1d\n" +
@@ -13938,8 +13880,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x0fwatchdog_checks\x18\x15 \x01(\tR\x0ewatchdogChecks\x126\n" +
 	"\x17watchdog_escalate_after\x18\x16 \x01(\tR\x15watchdogEscalateAfter\x12I\n" +
 	"\vmodel_tiers\x18\x17 \x03(\v2(.agent.GetConfigResponse.ModelTiersEntryR\n" +
-	"modelTiers\x126\n" +
-	"\x17models_default_provider\x18\x18 \x01(\tR\x15modelsDefaultProvider\x127\n" +
+	"modelTiers\x127\n" +
 	"\x18tool_loop_max_iterations\x18\x19 \x01(\x05R\x15toolLoopMaxIterations\x12#\n" +
 	"\rmistralrs_isq\x18\x1a \x01(\tR\fmistralrsIsq\x120\n" +
 	"\x14mistralrs_paged_attn\x18\x1b \x01(\tR\x12mistralrsPagedAttn\x12?\n" +
@@ -13948,7 +13889,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x1dagent_shutdown_on_last_client\x18\x1e \x01(\bR\x19agentShutdownOnLastClient\x1a=\n" +
 	"\x0fModelTiersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x13\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x18\x10\x19R\x17models_default_provider\"\x13\n" +
 	"\x11ListSkillsRequest\"A\n" +
 	"\tSkillInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
@@ -14299,7 +14240,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x06notice\x18\x06 \x01(\tR\x06notice\"%\n" +
 	"\tTurnError\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\"\b\n" +
-	"\x06Cancel\"\xbc\x10\n" +
+	"\x06Cancel\"\xb6\x0f\n" +
 	"\x0eConfigSnapshot\x12\x1d\n" +
 	"\n" +
 	"locus_mode\x18\x01 \x01(\tR\tlocusMode\x120\n" +
@@ -14319,17 +14260,11 @@ const file_agent_proto_rawDesc = "" +
 	"\n" +
 	"ollama_url\x18\f \x01(\tR\tollamaUrl\x12!\n" +
 	"\fopen_runtime\x18\r \x01(\tR\vopenRuntime\x123\n" +
-	"\x16tier_most_capable_open\x18\x0e \x01(\tR\x13tierMostCapableOpen\x125\n" +
-	"\x17tier_most_capable_cloud\x18\x0f \x01(\tR\x14tierMostCapableCloud\x12,\n" +
-	"\x12tier_everyday_open\x18\x10 \x01(\tR\x10tierEverydayOpen\x12.\n" +
-	"\x13tier_everyday_cloud\x18\x11 \x01(\tR\x11tierEverydayCloud\x12/\n" +
-	"\x14tier_fast_light_open\x18\x12 \x01(\tR\x11tierFastLightOpen\x121\n" +
-	"\x15tier_fast_light_cloud\x18\x13 \x01(\tR\x12tierFastLightCloud\x128\n" +
-	"\x19tier_fast_light_text_open\x18\x14 \x01(\tR\x15tierFastLightTextOpen\x12:\n" +
-	"\x1atier_fast_light_text_cloud\x18\x15 \x01(\tR\x16tierFastLightTextCloud\x12.\n" +
-	"\x13tier_embedding_open\x18\x16 \x01(\tR\x11tierEmbeddingOpen\x120\n" +
-	"\x14tier_embedding_cloud\x18\x17 \x01(\tR\x12tierEmbeddingCloud\x12)\n" +
-	"\x10default_provider\x18\x18 \x01(\tR\x0fdefaultProvider\x12-\n" +
+	"\x16tier_most_capable_open\x18\x0e \x01(\tR\x13tierMostCapableOpen\x12,\n" +
+	"\x12tier_everyday_open\x18\x10 \x01(\tR\x10tierEverydayOpen\x12/\n" +
+	"\x14tier_fast_light_open\x18\x12 \x01(\tR\x11tierFastLightOpen\x128\n" +
+	"\x19tier_fast_light_text_open\x18\x14 \x01(\tR\x15tierFastLightTextOpen\x12.\n" +
+	"\x13tier_embedding_open\x18\x16 \x01(\tR\x11tierEmbeddingOpen\x12-\n" +
 	"\x12compaction_enabled\x18\x19 \x01(\bR\x11compactionEnabled\x12K\n" +
 	"\"compaction_activation_floor_tokens\x18\x1a \x01(\x05R\x1fcompactionActivationFloorTokens\x12:\n" +
 	"\x19compaction_segment_tokens\x18\x1b \x01(\x05R\x17compactionSegmentTokens\x12<\n" +
@@ -14351,7 +14286,7 @@ const file_agent_proto_rawDesc = "" +
 	"\rbackup_region\x18+ \x01(\tR\fbackupRegion\x12,\n" +
 	"\x12backup_aws_profile\x18, \x01(\tR\x10backupAwsProfile\x127\n" +
 	"\x18tool_loop_max_iterations\x18- \x01(\x05R\x15toolLoopMaxIterations\x12.\n" +
-	"\x13model_profiles_json\x18. \x01(\tR\x11modelProfilesJson\"F\n" +
+	"\x13model_profiles_json\x18. \x01(\tR\x11modelProfilesJsonJ\x04\b\x0f\x10\x10J\x04\b\x11\x10\x12J\x04\b\x13\x10\x14J\x04\b\x15\x10\x16J\x04\b\x17\x10\x18J\x04\b\x18\x10\x19R\x17tier_most_capable_cloudR\x13tier_everyday_cloudR\x15tier_fast_light_cloudR\x1atier_fast_light_text_cloudR\x14tier_embedding_cloudR\x10default_provider\"F\n" +
 	"\x11CredentialRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12!\n" +
 	"\fprofile_name\x18\x02 \x01(\tR\vprofileName\"j\n" +

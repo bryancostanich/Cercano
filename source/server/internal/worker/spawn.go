@@ -19,13 +19,22 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
-	"syscall"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
+// cercanoBinaryName is the sibling server binary's filename: on Windows it
+// carries the required .exe extension; elsewhere it's extension-less.
+var cercanoBinaryName = func() string {
+	if runtime.GOOS == "windows" {
+		return "cercano.exe"
+	}
+	return "cercano"
+}()
 
 const (
 	// workerSocketDir is the directory where per-turn unix sockets live.
@@ -116,7 +125,7 @@ func spawnWorker(ctx context.Context, conversationID string, gen uint64) (*worke
 	// bounds STARTUP via waitForSocket(ctx, …) below, so a hung spawn during this
 	// turn is still abortable (and the partial handle is Killed on that path).
 	cmd := exec.Command(bin, "worker", "--socket", sockPath)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setProcessGroup(cmd)
 	cmd.Stdout = pw
 	cmd.Stderr = pw
 
@@ -156,8 +165,13 @@ func spawnWorker(ctx context.Context, conversationID string, gen uint64) (*worke
 	}
 
 	// gRPC-dial the unix socket (insecure, same machine / same user).
+	// The single-colon "unix:" form (not "unix://") is required for a Windows
+	// path: "unix://C:\..." makes gRPC's target parser treat "C:\..." as a
+	// host, and the drive-letter colon then breaks host:port splitting
+	// ("too many colons in address"). "unix:" avoids the authority parse
+	// entirely and works for POSIX absolute paths too.
 	conn, err := grpc.NewClient(
-		"unix://"+sockPath,
+		"unix:"+sockPath,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallSendMsgSize(maxGRPCWorkerMsgBytes),
@@ -176,7 +190,7 @@ func spawnWorker(ctx context.Context, conversationID string, gen uint64) (*worke
 func findWorkerBinary() (string, error) {
 	// 1. Sibling to this running binary.
 	if exe, err := os.Executable(); err == nil {
-		candidate := filepath.Join(filepath.Dir(exe), "cercano")
+		candidate := filepath.Join(filepath.Dir(exe), cercanoBinaryName)
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			return candidate, nil
 		}
@@ -238,17 +252,6 @@ func waitForSocket(ctx context.Context, path string, timeout time.Duration) erro
 			return fmt.Errorf("socket did not become available within %s", timeout)
 		}
 		time.Sleep(spawnPollInterval)
-	}
-}
-
-// killGroupOrProcess kills the process group (so all children die too).
-// Mirror of internal/meridian/manager.go:killGroupOrProcess.
-func killGroupOrProcess(proc *os.Process) {
-	if proc == nil {
-		return
-	}
-	if err := syscall.Kill(-proc.Pid, syscall.SIGKILL); err != nil {
-		_ = proc.Kill()
 	}
 }
 

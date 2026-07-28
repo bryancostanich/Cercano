@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"sync"
 
 	"google.golang.org/grpc"
@@ -538,6 +539,31 @@ func testDialUnix(lis interface {
 // OpenInferenceEvents, terminating with done or a non-empty error. The worker
 // has no local runtime manager, so this is how open_runtime=llama_server work
 // runs in worker mode. Honors ctx cancel (a worker Cancel unwinds the stream).
+func workerTemperatureForLog(t *float64) string {
+	if t == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%g", *t)
+}
+
+func workerToolNamesForLog(tools []llm.Tool) []string {
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Name != "" {
+			names = append(names, tool.Name)
+		}
+	}
+	return names
+}
+
+func workerTruncateRunes(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
+}
+
 func (w *workerRunner) serveOpenInference(ctx context.Context, req *proto.OpenInferenceRequest, safeSend func(*proto.HostToWorker) error) {
 	id := req.GetId()
 	emit := func(ev *proto.OpenInferenceEvent) {
@@ -564,6 +590,8 @@ func (w *workerRunner) serveOpenInference(ctx context.Context, req *proto.OpenIn
 		fail(fmt.Errorf("open inference: unmarshal request: %w", err))
 		return
 	}
+	log.Printf("[workerRunner] open inference request: id=%d provider=%s model=%s temp=%s max_tokens=%d tools=%v lean_subagent_prompt=%t system_prefix=%q messages=%d",
+		id, prov.Name(), chatReq.Model, workerTemperatureForLog(chatReq.Temperature), chatReq.MaxTokens, workerToolNamesForLog(chatReq.Tools), strings.Contains(chatReq.System, "bounded Cercano sub-agent"), workerTruncateRunes(strings.TrimSpace(chatReq.System), 120), len(chatReq.Messages))
 	rdr, err := prov.StreamChat(ctx, chatReq)
 	if err != nil {
 		fail(err)

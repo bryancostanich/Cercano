@@ -35,6 +35,21 @@ type CuratedModel struct {
 	Family        string   `json:"family"`
 	SizeBytes     int64    `json:"size_bytes"`
 	SupportsTools bool     `json:"supports_tools"`
+	// PlainChatOK reports whether the model produces correct visible assistant
+	// content for ordinary (non-tool) chat on the pinned build. Absent means
+	// true; set false only for models that load and can do tool calls but return
+	// empty/garbled plain-chat content. A false model must never be
+	// auto-selected for a plain-chat capability tier.
+	PlainChatOK *bool `json:"plain_chat_ok,omitempty"`
+	// Status is an authoring note: "tested" (default when empty), "experimental",
+	// or "broken". Informational.
+	Status string `json:"status,omitempty"`
+}
+
+// PlainChatSupported reports whether the model is safe for plain-chat tiers.
+// Absent PlainChatOK (nil) defaults to true.
+func (m CuratedModel) PlainChatSupported() bool {
+	return m.PlainChatOK == nil || *m.PlainChatOK
 }
 
 // DownloadURLs returns the HuggingFace resolve URL for each manifest file.
@@ -91,8 +106,14 @@ func loadCatalog() (CuratedCatalog, error) {
 			if !ok || id == "" {
 				return CuratedCatalog{}, fmt.Errorf("profile %q is missing tier %q", name, tier)
 			}
-			if _, ok := cat.Models[id]; !ok {
+			model, ok := cat.Models[id]
+			if !ok {
 				return CuratedCatalog{}, fmt.Errorf("profile %q tier %q references unknown model %q", name, tier, id)
+			}
+			// All mistral.rs required tiers are plain-chat tiers (no embedding
+			// tier here), so each must reference a plain-chat-capable model.
+			if !model.PlainChatSupported() {
+				return CuratedCatalog{}, fmt.Errorf("profile %q tier %q references model %q which is not plain-chat capable (plain_chat_ok:false)", name, tier, id)
 			}
 		}
 	}

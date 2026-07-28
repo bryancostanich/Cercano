@@ -28,19 +28,48 @@ Isolate cloud from the open rework by removing the retired capability-tier cloud
 slots. The live vendor-keyed cost-tier path (`ModelProfiles.Cloud.Providers`,
 `ResolveCloudModelForTier`) is NOT touched.
 
-- [ ] Confirm (one grep pass) that `ModelTier.Cloud` and the `cloud:` block in
-      `tier_recommendations.yaml` are read only by config surface / wizard
-      autofill, never by live resolution. Record the finding in HANDOFF.md.
-- [ ] Remove the `Cloud` field from `ModelTier` (temporarily leaving `Open` as
-      today's string so this phase compiles in isolation).
-- [ ] Remove the cloud branch from `side()`, the cloud write from
-      `ApplyModelTierPatch()`, and the cloud emit from `TierSlots()`. `Resolve()`
-      loses its cloud fallback branch (cloud no longer resolves through tiers).
-- [ ] Delete the `cloud:` block from `tier_recommendations.yaml` and the
-      `r.Cloud` loader/lookup in `tierrecs.go`.
-- [ ] Update tests that set/read `.Cloud` (`models_test.go:142`,
-      `tierrecs_test.go` cloud cases).
-- [ ] `go build ./...` + `go test ./...` green. Checkpoint.
+- [x] CONFIRMED (grep pass): `ModelTier.Cloud` is retired residue — only readers
+      are `side()`, `ApplyModelTierPatch`, `TierSlots`, and a test. Live cloud
+      resolves via the vendor-keyed `ModelProfiles.Cloud.Providers` path, not
+      through these slots.
+- [x] SCOPE CORRECTION (local surprise): the `cloud:` block in
+      `tier_recommendations.yaml` + `tierrecs.go`'s `Cloud` map are NOT residue —
+      they are the **setup wizard's cloud autofill** (`Candidates(ProviderCloud,
+      provider, tier)`), used live by the CLI wizard at
+      `wizard_page.go:241,464`. Those are the correct vendor-keyed wizard picks
+      and MUST NOT be deleted. Phase 2 only removes `ModelTier.Cloud`.
+- [x] Remove the `Cloud` field from `ModelTier` (left `Open` as a string; open
+      re-key is Phase 3).
+- [x] BONUS (approved mid-phase — "no more garbage"): the two-sided cross-
+      provider resolver was 100% vestigial (every caller passed
+      `ProviderOpen, true`). Collapsed it: `Resolve(t, prefer, strict)` →
+      `ResolveOpen(t) (string, bool)`; deleted `side()`, `Provider.other()`,
+      and the `resolveTierModel` cloud-stuffing hack. Commit 1 (`1abd259f`).
+- [x] Retire `default_provider` + the proto `*_cloud`/`default_provider` fields:
+      edited `agent.proto` (reserved the field numbers), regenerated
+      `agent.pb.go` with protoc v34.1 / protoc-gen-go v1.36.11, removed
+      `ModelsConfig.DefaultProvider`, the patch key, wire marshaling, and the
+      agentclient field. Commit 2 (`938a5bfb`).
+- [x] CLI scope expansion (found mid-phase): `runtime_tiers.go` still listed
+      all `.cloud` tier slots + a `default_provider` row in the picker UI —
+      the four-tier cloud residue in the CLI. Removed them; open tiers +
+      embedding only. Wizard no longer writes `default_provider`.
+- [x] Tests updated across both modules; `tierrecs_test.go` cloud cases left
+      intact (live wizard autofill, correctly). Loader is non-strict so stale
+      `default_provider:`/`tiers.*.cloud:` keys in existing configs load-ignore.
+- [x] `go build ./...` + `go test ./...` green for server AND CLI. Two commits.
+
+  NOTE for future: proto regen command (no Makefile target exists) —
+  `PATH="$PATH:$(go env GOPATH)/bin" protoc --proto_path=source/proto
+  --go_out=. --go_opt=module=cercano/source/server --go-grpc_out=.
+  --go-grpc_opt=module=cercano/source/server source/proto/agent.proto`
+  writes to repo-root `pkg/proto/` (module= strips the prefix); move the two
+  files into `source/server/pkg/proto/`. Verified byte-identical regen.
+
+  NOTE: sub-agent dispatch is currently unreliable — the open `everyday` tier
+  routes to GLM-4.5-Air, which Phase 1 flagged `plain_chat_ok:false` (empty
+  output). The flag is not yet wired into live tier selection; that is later-
+  phase work. Recon/mechanical delegation will misfire until then.
 
 ## Phase 3 — Re-key the open side runtime-outer
 

@@ -1,5 +1,9 @@
 # Plan: runtime-aware, RAM-aware, profile-rich model tiers
 
+> **Resuming in a fresh conversation? Read `HANDOFF.md` in this directory FIRST.**
+> Phase 1 is committed and green. Phase 2 (the `ModelTier.Open` schema break) is
+> next; HANDOFF.md has the verified blast-radius map and design.
+
 No migration. Clean break. Each phase must build and keep the full test suite
 green before moving on. Phases are ordered so the schema lands first, then data,
 then wiring, then UI.

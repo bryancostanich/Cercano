@@ -17,8 +17,15 @@ const planSetStatusSample = `# Demo Effort
 Objective: test semantic status updates.
 
 - [ ] First task
-- [ ] Duplicate
-- [ ] Duplicate
+- [ ] Shared title
+- [ ] Parent task
+  - [ ] Nested child
+
+## Phase 2
+Objective: test structural targeting.
+
+- [ ] Shared title
+- [ ] Other task
 `
 
 func writePlanSetStatusSample(t *testing.T) (dir, rel string) {
@@ -51,7 +58,7 @@ func TestPlanSetStatus_Meta(t *testing.T) {
 	}
 }
 
-func TestPlanSetStatus_Execute_ByTitleWritesThrough(t *testing.T) {
+func TestPlanSetStatus_Execute_ByBareUniqueTitleWritesThrough(t *testing.T) {
 	dir, rel := writePlanSetStatusSample(t)
 	args, _ := json.Marshal(map[string]any{
 		"plan_path":  rel,
@@ -65,25 +72,62 @@ func TestPlanSetStatus_Execute_ByTitleWritesThrough(t *testing.T) {
 	if !strings.Contains(res.Text, "First task") || !strings.Contains(res.Text, "in_progress") {
 		t.Fatalf("unexpected result: %q", res.Text)
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, rel))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), "- [~] First task") {
+	raw := readPlanSetStatusFile(t, dir, rel)
+	if !strings.Contains(raw, "- [~] First task") {
 		t.Fatalf("plan.md did not get the in-progress glyph:\n%s", raw)
 	}
 }
 
-func TestPlanSetStatus_Execute_DuplicateTitleRequiresID(t *testing.T) {
+func TestPlanSetStatus_Execute_PhaseTitleDisambiguatesTaskTitle(t *testing.T) {
+	dir, rel := writePlanSetStatusSample(t)
+	args, _ := json.Marshal(map[string]any{
+		"plan_path":   rel,
+		"phase_title": "Phase 2",
+		"task_title":  "Shared title",
+		"status":      "done",
+	})
+	_, err := PlanSetStatus().Execute(context.Background(), &capabilities.Call{Args: args, WorkDir: dir})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	raw := readPlanSetStatusFile(t, dir, rel)
+	if strings.Count(raw, "- [x] Shared title") != 1 {
+		t.Fatalf("expected exactly one Shared title done, got:\n%s", raw)
+	}
+	phase2 := raw[strings.Index(raw, "## Phase 2"):]
+	if !strings.Contains(phase2, "- [x] Shared title") {
+		t.Fatalf("Phase 2 Shared title was not the one updated:\n%s", raw)
+	}
+}
+
+func TestPlanSetStatus_Execute_TaskPathTargetsNestedTask(t *testing.T) {
+	dir, rel := writePlanSetStatusSample(t)
+	args, _ := json.Marshal(map[string]any{
+		"plan_path":   rel,
+		"phase_title": "Phase 1",
+		"task_path":   []string{"Parent task", "Nested child"},
+		"status":      "blocked",
+	})
+	_, err := PlanSetStatus().Execute(context.Background(), &capabilities.Call{Args: args, WorkDir: dir})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	raw := readPlanSetStatusFile(t, dir, rel)
+	if !strings.Contains(raw, "  - [-] Nested child") {
+		t.Fatalf("nested task did not get blocked glyph:\n%s", raw)
+	}
+}
+
+func TestPlanSetStatus_Execute_DuplicateBareTitleRequiresContext(t *testing.T) {
 	dir, rel := writePlanSetStatusSample(t)
 	args, _ := json.Marshal(map[string]any{
 		"plan_path":  rel,
-		"task_title": "Duplicate",
+		"task_title": "Shared title",
 		"status":     "done",
 	})
 	_, err := PlanSetStatus().Execute(context.Background(), &capabilities.Call{Args: args, WorkDir: dir})
-	if err == nil || !strings.Contains(err.Error(), "ambiguous") {
-		t.Fatalf("expected ambiguous-title error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "provide phase_title or task_path") {
+		t.Fatalf("expected context-required ambiguity error, got %v", err)
 	}
 }
 
@@ -96,4 +140,13 @@ func TestPlanSetStatus_Execute_ValidatesStatusAndPath(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "plan_path is required") {
 		t.Fatalf("expected missing-path error, got %v", err)
 	}
+}
+
+func readPlanSetStatusFile(t *testing.T, dir, rel string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(dir, rel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
 }

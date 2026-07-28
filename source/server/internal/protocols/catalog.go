@@ -444,10 +444,12 @@ approved plan. The Markdown file remains canon: keep it current while you work.
    first incomplete phase. Do not skip ahead unless the plan itself says to.
 3. **Mark status semantically.** Before starting a task, call
    ` + "`plan_set_status`" + ` with ` + "`status: \"in_progress\"`" + `. When done, call it with
-   ` + "`status: \"done\"`" + `. If blocked, call it with ` + "`status: \"blocked\"`" + `. Prefer
-   ` + "`task_title`" + ` from the Markdown; use ` + "`task_id`" + ` only if a rendered task tree
-   exposed one. Do not raw-edit status glyphs unless the semantic tool is
-   unavailable and you explicitly say so.
+   ` + "`status: \"done\"`" + `. If blocked, call it with ` + "`status: \"blocked\"`" + `. Target the
+   task by human-readable Markdown structure: ` + "`phase_title`" + ` plus ` + "`task_title`" + `,
+   or ` + "`phase_title`" + ` plus ` + "`task_path`" + ` for nested tasks. Do not add machine IDs to
+   ` + "`plan.md`" + `. Internal task IDs are an implementation detail, not part of the
+   human-owned artifact. Do not raw-edit status glyphs unless the semantic tool
+   is unavailable and you explicitly say so.
 4. **Verify at the right tier.** Run the smallest tests that cover the task just
    completed. Do not run broad suites for local internal changes; do not skip
    integration tests when an interface changed.

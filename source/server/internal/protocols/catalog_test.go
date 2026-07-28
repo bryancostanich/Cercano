@@ -212,6 +212,14 @@ func TestExecutingPlansNamesSemanticStatusTool(t *testing.T) {
 	if !strings.Contains(p.Body, "plan_set_status") {
 		t.Fatal("executing-plans must require semantic status updates via plan_set_status")
 	}
+	for _, selector := range []string{"phase_title", "task_title", "task_path"} {
+		if !strings.Contains(p.Body, selector) {
+			t.Fatalf("executing-plans must instruct human-readable selector %q", selector)
+		}
+	}
+	if !strings.Contains(p.Body, "Do not add machine IDs") {
+		t.Fatal("executing-plans must explicitly forbid adding machine IDs to plan.md")
+	}
 	for _, status := range []string{"in_progress", "done", "blocked"} {
 		if !strings.Contains(p.Body, status) {
 			t.Fatalf("executing-plans must mention status %q", status)

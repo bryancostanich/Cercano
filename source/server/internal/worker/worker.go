@@ -525,11 +525,10 @@ func buildWorkerBackup(
 func (r *workerResolver) Main() (inference.Provider, bool, bool, error) {
 	cfg := r.cfgSvc.Get()
 	mode, _ := locus.ParseMode(cfg.LocusMode)
-	// Open tier registers absent when its GGUF isn't on disk yet, so Select
-	// crosses to cloud — the "cloud covers the gap" contract (see
-	// dispatch.OpenModelReady).
+	// Open tier registers absent only when config can prove the effective model
+	// is unavailable; catalog IDs are left to runtime ensure/warm paths.
 	open := r.openProv
-	if !dispatch.OpenModelReady(cfg) {
+	if !dispatch.OpenModelReadyFor(cfg, openTierModel(cfg, pkgcfg.TierEveryday)) {
 		open = nil
 	}
 	sel, err := inference.Select(mode, inference.RoleMain, inference.Tiers{

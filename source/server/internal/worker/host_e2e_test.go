@@ -134,9 +134,13 @@ func TestWorker_RealProcess_CrashIsolated(t *testing.T) {
 
 	// open_only so no cloud credential is required; the blackhole ollama makes
 	// the turn hang in the provider call until we kill the process.
+	var models config.ModelsConfig
+	models.SetOverride("ollama", config.TierEveryday, "crash-test-model")
 	cfg := cfgsvc.New("", config.Config{
-		LocusMode: "open_only",
-		OllamaURL: ollamaURL,
+		LocusMode:   "open_only",
+		OpenRuntime: "ollama",
+		OllamaURL:   ollamaURL,
+		Models:      models,
 	}, secrets.NewMemory())
 
 	runnerA := worker.NewWorkerRunnerWithDial(&recordingHistory{}, cfg, newTestBroker(), newHostSecrets(nil), dialA)

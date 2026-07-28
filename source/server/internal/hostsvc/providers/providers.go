@@ -199,7 +199,7 @@ func (p *service) Main() (inference.Provider, bool, bool, error) {
 	// the gap" routing contract. Otherwise the not-yet-present model gets
 	// picked and fails at load time instead of falling back.
 	open := p.openLLMProvider
-	if !dispatch.OpenModelReady(c) {
+	if !dispatch.OpenModelReadyFor(c, p.openModels.ChatModel()) {
 		open = nil
 	}
 	sel, err := inference.Select(mode, inference.RoleMain, inference.Tiers{

@@ -203,12 +203,12 @@ func buildRuntimeManager(cfg config.Config) localruntime.Manager {
 		Message: "mistral.rs provider registered",
 	})
 
-	runtime, model := activeRuntimeDefaultModel(cfg)
+	runtime, model := activeRuntimeTurnModel(cfg)
 	if model == "" {
 		manager.WriteLog(localruntime.LogEntry{
 			Source:  "cercano.runtime." + runtime,
 			Level:   "info",
-			Message: runtime + " provider registered; no default_model configured",
+			Message: runtime + " provider registered; no effective open model configured",
 		})
 		return manager
 	}
@@ -224,12 +224,12 @@ func buildRuntimeManager(cfg config.Config) localruntime.Manager {
 	return manager
 }
 
-func activeRuntimeDefaultModel(cfg config.Config) (string, string) {
+func activeRuntimeTurnModel(cfg config.Config) (string, string) {
 	if strings.EqualFold(cfg.OpenRuntime, "mistralrs") {
-		return "mistralrs", strings.TrimSpace(cfg.MistralRS.DefaultModel)
+		return "mistralrs", openTurnModel(cfg)
 	}
 	if llamaServerEnabled(cfg) {
-		return "llama_server", strings.TrimSpace(cfg.LlamaServer.DefaultModel)
+		return "llama_server", openTurnModel(cfg)
 	}
 	return "ollama", ""
 }
@@ -271,17 +271,9 @@ func openChatModel(cfg config.Config) string { return openTierModel(cfg, config.
 func openEmbeddingModel(cfg config.Config) string { return openTierModel(cfg, config.TierEmbedding) }
 
 func openTurnModel(cfg config.Config) string {
-	if strings.EqualFold(cfg.OpenRuntime, "mistralrs") {
-		model := strings.TrimSpace(cfg.MistralRS.DefaultModel)
-		if model != "" {
-			return model
-		}
-	}
-	if strings.EqualFold(cfg.OpenRuntime, "llama_server") {
-		model := strings.TrimSpace(cfg.LlamaServer.DefaultModel)
-		if model != "" {
-			return model
-		}
-	}
+	// The turn model is the effective everyday tier (override else catalog
+	// default). Do not prefer llama_server.default_model / mistralrs.default_model:
+	// those legacy runtime-default fields can be stale after the runtime-aware
+	// tier resolver chooses a catalog default.
 	return openChatModel(cfg)
 }

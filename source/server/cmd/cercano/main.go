@@ -691,14 +691,15 @@ func buildRuntimeManager(cfg config.Config) localruntime.Manager {
 	// the in-memory download job. Background so startup isn't blocked.
 	go resumeInterruptedDownloads(cfg, manager, provider)
 
-	// Warm the active runtime's default model. Single active runtime (D3), so
-	// at most one of these fires; warmDefaultRuntime also logs the
-	// "no default_model configured" case.
+	// Warm the active runtime's EFFECTIVE chat model (override else catalog
+	// default), not the legacy per-runtime default_model field. Otherwise the
+	// runtime can keep serving a stale model while config reports a newer
+	// effective tier model.
 	switch {
 	case mistralRSEnabled(cfg):
-		warmDefaultRuntime(manager, "mistralrs", cfg.MistralRS.DefaultModel)
+		warmDefaultRuntime(manager, "mistralrs", openTurnModel(cfg))
 	case llamaServerEnabled(cfg):
-		warmDefaultRuntime(manager, "llama_server", cfg.LlamaServer.DefaultModel)
+		warmDefaultRuntime(manager, "llama_server", openTurnModel(cfg))
 	}
 	return manager
 }
@@ -799,18 +800,10 @@ func openChatModel(cfg config.Config) string { return openTierModel(cfg, config.
 func openEmbeddingModel(cfg config.Config) string { return openTierModel(cfg, config.TierEmbedding) }
 
 func openTurnModel(cfg config.Config) string {
-	if strings.EqualFold(cfg.OpenRuntime, "llama_server") {
-		model := strings.TrimSpace(cfg.LlamaServer.DefaultModel)
-		if model != "" {
-			return model
-		}
-	}
-	if strings.EqualFold(cfg.OpenRuntime, "mistralrs") {
-		model := strings.TrimSpace(cfg.MistralRS.DefaultModel)
-		if model != "" {
-			return model
-		}
-	}
+	// The turn model is the effective everyday tier (override else catalog
+	// default). Do not prefer llama_server.default_model / mistralrs.default_model:
+	// those legacy runtime-default fields can be stale after the runtime-aware
+	// tier resolver chooses a catalog default.
 	return openChatModel(cfg)
 }
 

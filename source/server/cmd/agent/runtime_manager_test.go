@@ -35,13 +35,13 @@ func TestBuildRuntimeManagerRegistersManagedRuntimeCatalogsWhenOllamaActive(t *t
 	}
 }
 
-func TestOpenTurnModelUsesMistralDefault(t *testing.T) {
+func TestOpenTurnModelUsesEffectiveOverride(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.OpenRuntime = "mistralrs"
-	cfg.MistralRS.DefaultModel = "qwen3-30b-a3b-instruct-2507"
+	cfg.MistralRS.DefaultModel = "stale-runtime-default"
 	cfg.Models.SetOverride("mistralrs", config.TierEveryday, "custom-override")
 
-	if got := openTurnModel(cfg); got != "qwen3-30b-a3b-instruct-2507" {
-		t.Fatalf("openTurnModel = %q", got)
+	if got := openTurnModel(cfg); got != "custom-override" {
+		t.Fatalf("openTurnModel = %q, want custom-override", got)
 	}
 }

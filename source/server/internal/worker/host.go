@@ -139,15 +139,23 @@ func NewWorkerRunner(
 // runtime, for the ConfigSnapshot. Empty when no resolver is wired (test
 // runners) — the worker then simply has no open tier models.
 func (w *workerRunner) resolveOpenTiers() map[string]string {
-	if w.openTierModel == nil {
-		return nil
-	}
+	cfg := w.cfg.Get()
 	out := map[string]string{}
 	for _, t := range []pkgcfg.Tier{
 		pkgcfg.TierMostCapable, pkgcfg.TierEveryday, pkgcfg.TierFastLight,
 		pkgcfg.TierFastLightText, pkgcfg.TierEmbedding,
 	} {
-		if id := w.openTierModel(t); id != "" {
+		var id string
+		if w.openTierModel != nil {
+			id = w.openTierModel(t)
+		} else {
+			// Dial-injected/test runners do not have the catalog-backed resolver.
+			// They can still faithfully forward explicit active-runtime overrides
+			// already present in config; they just cannot synthesize catalog
+			// defaults. Production always has openTierModel wired.
+			id, _ = cfg.Models.OverrideFor(cfg.OpenRuntime, t)
+		}
+		if id != "" {
 			out[string(t)] = id
 		}
 	}

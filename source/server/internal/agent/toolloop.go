@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"cercano/source/server/internal/agenttools"
@@ -212,6 +213,27 @@ func truncateRunes(s string, max int) string {
 	return string(r[:max]) + "…"
 }
 
+func toolNamesForLog(tools []llm.Tool) []string {
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Name != "" {
+			names = append(names, tool.Name)
+		}
+	}
+	return names
+}
+
+func temperatureForLog(t *float64) string {
+	if t == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%g", *t)
+}
+
+func systemHasLeanSubagentMarker(system string) bool {
+	return strings.Contains(system, "bounded Cercano sub-agent")
+}
+
 func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) {
 	ctx = agenttools.WithWorkDir(ctx, in.WorkDir)
 	ctx = agenttools.WithConversationID(ctx, in.ConversationID)
@@ -284,6 +306,8 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			MaxTokens:   maxTokens,
 			Temperature: in.Temperature,
 		}
+		log.Printf("[tool-loop] model request: conv=%s provider=%s model=%s iter=%d stream=true temp=%s max_tokens=%d tools=%v lean_subagent_prompt=%t system_prefix=%q user_prefix=%q history=%d",
+			in.ConversationID, in.Provider.Name(), in.Model, iter+1, temperatureForLog(req.Temperature), req.MaxTokens, toolNamesForLog(req.Tools), systemHasLeanSubagentMarker(req.System), truncateRunes(strings.TrimSpace(req.System), 120), truncateRunes(strings.TrimSpace(in.UserInput), 120), len(req.Messages))
 		rdr, err := in.Provider.StreamChat(ctx, req)
 		if err != nil {
 			return ToolLoopResult{}, err
@@ -307,6 +331,8 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				finalText += b.Text
 			}
 		}
+		log.Printf("[tool-loop] model response: conv=%s provider=%s model=%s iter=%d tool_calls=%d text_len=%d tokens_in=%d tokens_out=%d text_prefix=%q",
+			in.ConversationID, in.Provider.Name(), in.Model, iter+1, len(toolCalls), len([]rune(finalText)), lastIn, lastOut, truncateRunes(strings.TrimSpace(finalText), 160))
 		if len(toolCalls) == 0 {
 			if in.WatchdogTurnEnd != nil && strings.TrimSpace(finalText) != "" {
 				wd := in.WatchdogTurnEnd(ctx, finalText, hist)

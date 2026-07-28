@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 
 	goopenai "github.com/sashabaranov/go-openai"
@@ -53,6 +54,7 @@ func patchExplicitZeroTemperature(req *http.Request) (*http.Request, error) {
 			if err != nil {
 				return nil, err
 			}
+			log.Printf("[openai] patched explicit zero temperature: method=%s path=%s", req.Method, req.URL.Path)
 		}
 	}
 	req.Body = io.NopCloser(bytes.NewReader(body))

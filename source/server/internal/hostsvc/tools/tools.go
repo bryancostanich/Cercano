@@ -11,7 +11,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"runtime"
 	"strings"
+	"time"
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
@@ -346,11 +348,12 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		}
 	}
 
-	// 2. Build system prompt (env grounding + steering block + project context).
-	var system string
-	if x.systemPrompt != nil {
-		system = x.systemPrompt(spec.WorkDir)
-	}
+	// 2. Build a lean sub-agent prompt. Do NOT reuse the main-agent system
+	// prompt here: it contains recursive delegation/planning/git-protocol rules
+	// intended for the top-level agent, and local models have been observed to
+	// ignore tools and emit unrelated text under that prompt. A dispatch worker
+	// needs bounded task/tool instructions, not full-frontier agency.
+	system := buildSubagentSystemPrompt(spec.WorkDir, granted)
 
 	// 3. Sub-agent identity + persistence. The sub-agent's conversation id is
 	// minted unconditionally: it is the
@@ -459,6 +462,34 @@ func emitDispatchProgress(emit func(agenttools.ProgressEvent), ev agenttools.Pro
 		return
 	}
 	emit(ev)
+}
+
+func buildSubagentSystemPrompt(workDir string, grantedTools []string) string {
+	var b strings.Builder
+	b.WriteString("You are a bounded Cercano sub-agent. Complete only the delegated task.\n\n")
+	b.WriteString("Rules:\n")
+	b.WriteString("- Use only the tools provided in this request. Do not mention or call unavailable tools.\n")
+	b.WriteString("- Do not delegate to another agent. Do not call dispatch/workflow.\n")
+	b.WriteString("- If the answer depends on repository contents, call Read, Grep, Glob, or another granted inspection tool before answering.\n")
+	b.WriteString("- Do not claim you inspected, ran, or verified anything unless you used a tool in this run.\n")
+	b.WriteString("- Keep the final answer concise and limited to the delegated task. Include file:line citations when applicable.\n")
+	b.WriteString("- End when the delegated task is complete; do not ask for follow-up work.\n\n")
+	b.WriteString("<env>\n")
+	if strings.TrimSpace(workDir) != "" {
+		fmt.Fprintf(&b, "Working directory: %s\n", workDir)
+	}
+	fmt.Fprintf(&b, "Platform: %s\n", runtime.GOOS)
+	fmt.Fprintf(&b, "Today's date: %s\n", time.Now().Format("2006-01-02"))
+	b.WriteString("</env>\n\n")
+	b.WriteString("Resolve relative file paths against the working directory; do not search outside it unless the delegated task explicitly provides an absolute path.\n")
+	if len(grantedTools) > 0 {
+		b.WriteString("\n<granted_tools>\n")
+		for _, name := range grantedTools {
+			fmt.Fprintf(&b, "- %s\n", name)
+		}
+		b.WriteString("</granted_tools>\n")
+	}
+	return b.String()
 }
 
 func formatSubagentLoopEvent(id, parentID, title string, ev agent.LoopEvent) (agenttools.ProgressEvent, bool) {

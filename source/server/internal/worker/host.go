@@ -564,6 +564,27 @@ func workerTruncateRunes(s string, max int) string {
 	return string(r[:max]) + "…"
 }
 
+func workerMessageShapesForLog(messages []llm.Message) string {
+	parts := make([]string, 0, len(messages))
+	for i, msg := range messages {
+		blockParts := make([]string, 0, len(msg.Blocks))
+		for _, block := range msg.Blocks {
+			switch block.Type {
+			case llm.BlockText:
+				blockParts = append(blockParts, fmt.Sprintf("text:%q", workerTruncateRunes(strings.TrimSpace(block.Text), 80)))
+			case llm.BlockToolUse:
+				blockParts = append(blockParts, fmt.Sprintf("tool_use:%s", block.ToolName))
+			case llm.BlockToolResult:
+				blockParts = append(blockParts, fmt.Sprintf("tool_result:%s", block.ToolUseRef))
+			default:
+				blockParts = append(blockParts, string(block.Type))
+			}
+		}
+		parts = append(parts, fmt.Sprintf("%d:%s[%s]", i, msg.Role, strings.Join(blockParts, ",")))
+	}
+	return strings.Join(parts, " | ")
+}
+
 func (w *workerRunner) serveOpenInference(ctx context.Context, req *proto.OpenInferenceRequest, safeSend func(*proto.HostToWorker) error) {
 	id := req.GetId()
 	emit := func(ev *proto.OpenInferenceEvent) {
@@ -590,8 +611,8 @@ func (w *workerRunner) serveOpenInference(ctx context.Context, req *proto.OpenIn
 		fail(fmt.Errorf("open inference: unmarshal request: %w", err))
 		return
 	}
-	log.Printf("[workerRunner] open inference request: id=%d provider=%s model=%s temp=%s max_tokens=%d tools=%v lean_subagent_prompt=%t system_prefix=%q messages=%d",
-		id, prov.Name(), chatReq.Model, workerTemperatureForLog(chatReq.Temperature), chatReq.MaxTokens, workerToolNamesForLog(chatReq.Tools), strings.Contains(chatReq.System, "bounded Cercano sub-agent"), workerTruncateRunes(strings.TrimSpace(chatReq.System), 120), len(chatReq.Messages))
+	log.Printf("[workerRunner] open inference request: id=%d provider=%s model=%s temp=%s max_tokens=%d tools=%v lean_subagent_prompt=%t system_prefix=%q messages=%d message_shapes=%s",
+		id, prov.Name(), chatReq.Model, workerTemperatureForLog(chatReq.Temperature), chatReq.MaxTokens, workerToolNamesForLog(chatReq.Tools), strings.Contains(chatReq.System, "bounded Cercano sub-agent"), workerTruncateRunes(strings.TrimSpace(chatReq.System), 120), len(chatReq.Messages), workerMessageShapesForLog(chatReq.Messages))
 	rdr, err := prov.StreamChat(ctx, chatReq)
 	if err != nil {
 		fail(err)

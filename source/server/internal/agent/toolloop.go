@@ -143,6 +143,11 @@ type ToolLoopInput struct {
 	// 0 means use the package default (4096).
 	MaxTokensPerTurn int
 
+	// Temperature, when non-nil, is forwarded to the provider for every model
+	// turn. A pointer to 0 requests greedy decoding; sub-agent dispatch uses
+	// this because local tool-call compliance is extremely temperature-sensitive.
+	Temperature *float64
+
 	// ConversationID names the conversation this loop serves. Threaded onto
 	// ctx so tools that spawn linked work (dispatch) can record lineage.
 	ConversationID string
@@ -271,12 +276,13 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 
 	for iter := 0; unlimitedIters || iter < maxIters; iter++ {
 		req := llm.ChatRequest{
-			Model:     in.Model,
-			Tier:      in.Tier,
-			System:    in.System,
-			Messages:  hist,
-			Tools:     catalog,
-			MaxTokens: maxTokens,
+			Model:       in.Model,
+			Tier:        in.Tier,
+			System:      in.System,
+			Messages:    hist,
+			Tools:       catalog,
+			MaxTokens:   maxTokens,
+			Temperature: in.Temperature,
 		}
 		rdr, err := in.Provider.StreamChat(ctx, req)
 		if err != nil {

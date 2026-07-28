@@ -3,6 +3,7 @@ package openai
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"image"
 	"image/color"
 	"image/png"
@@ -34,6 +35,32 @@ func TestClientChat(t *testing.T) {
 	}
 	if c.Name() != "openai" || !c.Capabilities().SupportsTools || !c.Capabilities().SupportsVision {
 		t.Errorf("name/caps wrong")
+	}
+}
+
+func TestClientChatSerializesExplicitZeroTemperature(t *testing.T) {
+	var saw struct {
+		Temperature *float64 `json:"temperature"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&saw); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "gpt-x"})
+	zero := 0.0
+	if _, err := c.Chat(context.Background(), llm.ChatRequest{
+		Messages:    []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "hi"}}}},
+		Temperature: &zero,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if saw.Temperature == nil || *saw.Temperature != 0 {
+		t.Fatalf("temperature = %#v, want explicit 0", saw.Temperature)
 	}
 }
 

@@ -394,7 +394,10 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	// (minted above).
 	ctx = llm.WithSessionID(ctx, subConvID)
 
-	// 4. Run the bounded tool loop.
+	// 4. Run the bounded tool loop. Use greedy decoding: qwen/mistral.rs tool-call
+	// compliance is extremely temperature-sensitive, and dispatch workers value
+	// deterministic tool use over creative prose.
+	greedy := 0.0
 	var buf strings.Builder
 	res, err := agent.RunToolLoop(ctx, agent.ToolLoopInput{
 		Provider:       sel.Provider,
@@ -405,6 +408,7 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		Permissions:    perms,
 		UserInput:      spec.Task,
 		MaxIterations:  spec.MaxIterations,
+		Temperature:    &greedy,
 		WorkDir:        spec.WorkDir,
 		ConversationID: subConvID, // nested dispatches link to this sub-conversation
 		OnTextDelta: func(t string) {

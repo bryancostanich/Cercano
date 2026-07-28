@@ -18,16 +18,19 @@ type mockProvider struct {
 	scripts [][]llm.Block
 	caps    inference.Capabilities
 	calls   int
+	reqs    []llm.ChatRequest
 }
 
 func (m *mockProvider) Name() string                         { return "mock" }
 func (m *mockProvider) Capabilities() inference.Capabilities { return m.caps }
 func (m *mockProvider) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	m.reqs = append(m.reqs, req)
 	out := llm.ChatResponse{Blocks: m.scripts[m.calls]}
 	m.calls++
 	return out, nil
 }
 func (m *mockProvider) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.StreamReader, error) {
+	m.reqs = append(m.reqs, req)
 	if m.calls >= len(m.scripts) {
 		return nil, fmt.Errorf("mockProvider: no script for call %d", m.calls)
 	}
@@ -97,6 +100,27 @@ func (p *loopingProvider) StreamChat(ctx context.Context, req llm.ChatRequest) (
 		blocks = []llm.Block{{Type: llm.BlockText, Text: "Here's my best answer."}}
 	}
 	return &scriptedStream{events: blocksToEvents(blocks)}, nil
+}
+
+func TestToolLoopForwardsTemperature(t *testing.T) {
+	provider := &mockProvider{scripts: [][]llm.Block{{{Type: llm.BlockText, Text: "done"}}}, caps: inference.Capabilities{SupportsTools: true}}
+	zero := 0.0
+	result, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider:    provider,
+		Registry:    agenttools.NewRegistry(),
+		Permissions: NewStaticPermissionStore(ModeBypass),
+		UserInput:   "say done",
+		Temperature: &zero,
+	})
+	if err != nil {
+		t.Fatalf("RunToolLoop returned error: %v", err)
+	}
+	if result.FinalText != "done" {
+		t.Fatalf("result.FinalText = %q, want done", result.FinalText)
+	}
+	if len(provider.reqs) != 1 || provider.reqs[0].Temperature == nil || *provider.reqs[0].Temperature != 0 {
+		t.Fatalf("provider request temperature = %#v, want explicit 0", provider.reqs)
+	}
 }
 
 func TestToolLoop_HitsCap_DegradesToFinalAnswer(t *testing.T) {

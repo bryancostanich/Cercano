@@ -19,11 +19,46 @@ type normalizingDoer struct {
 }
 
 func (d *normalizingDoer) Do(req *http.Request) (*http.Response, error) {
-	resp, err := d.next.Do(req)
+	patched, err := patchExplicitZeroTemperature(req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := d.next.Do(patched)
 	if err != nil {
 		return nil, err
 	}
 	return d.normalize(resp), nil
+}
+
+func patchExplicitZeroTemperature(req *http.Request) (*http.Request, error) {
+	if req.Body == nil || req.Method == http.MethodGet {
+		return req, nil
+	}
+	body, err := io.ReadAll(req.Body)
+	req.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(body, &obj); err != nil {
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		req.ContentLength = int64(len(body))
+		return req, nil
+	}
+	if raw, ok := obj["temperature"]; ok {
+		var temp float64
+		if json.Unmarshal(raw, &temp) == nil && temp == explicitZeroTemperatureSentinel {
+			obj["temperature"] = json.RawMessage(`0`)
+			body, err = json.Marshal(obj)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	req.ContentLength = int64(len(body))
+	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
+	return req, nil
 }
 
 // normalize rewrites an array-shaped error body to the object shape when the

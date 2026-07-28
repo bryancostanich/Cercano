@@ -170,6 +170,25 @@ func TestDetect_AmbiguousModelReturnsError(t *testing.T) {
 	}
 }
 
+func TestDetect_PrefersQwenOverGLMWhenAmbiguous(t *testing.T) {
+	binDir := t.TempDir()
+	modelDir := t.TempDir()
+	writeFakeBinary(t, binDir)
+	// GLM loads but has known plain-chat problems under llama-server, so a
+	// qwen instruct GGUF must win auto-selection when both are present.
+	writeGGUF(t, modelDir, "GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf")
+	writeGGUF(t, modelDir, "Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf")
+	withPATH(t, binDir)
+
+	cfg := baseCfg(modelDir)
+	if err := Detect(context.Background(), &cfg); err != nil {
+		t.Fatalf("Detect should auto-select the preferred model, got error: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(cfg.DefaultModel), "qwen3-30b-a3b-instruct") {
+		t.Fatalf("DefaultModel = %q, want the qwen instruct GGUF", cfg.DefaultModel)
+	}
+}
+
 func TestDetect_AppliesDefaultsWhenFieldsEmpty(t *testing.T) {
 	// Detect should populate ModelDirs (etc.) from config.Defaults() when
 	// callers pass an entirely zero-valued cfg. Without this the model_dir

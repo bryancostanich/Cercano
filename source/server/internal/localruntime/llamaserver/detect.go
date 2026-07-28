@@ -100,13 +100,50 @@ func Detect(ctx context.Context, cfg *config.LlamaServerConfig) error {
 		return &DetectError{Missing: "model", Cause: errors.New("no GGUF files in configured model_dirs")}
 	}
 	if len(present) == 1 {
+		// A single present GGUF is the only possible default. We still set it
+		// (there is no alternative), leaving capability warnings to the readiness
+		// path rather than failing detection.
 		cfg.DefaultModel = present[0].Path
+		return nil
+	}
+	// Multiple GGUFs present. Prefer a model we have verified behaves correctly
+	// under llama-server for agentic use (tool calls + multi-turn tool results +
+	// plain chat) rather than forcing the user to disambiguate or, worse,
+	// picking a model with known problems. GLM-4.5-Air loads and passes tool
+	// probes but returns empty content on plain chat on the pinned build, so it
+	// must never be auto-selected as the default.
+	if pick := preferredPresentModel(present); pick != "" {
+		cfg.DefaultModel = pick
 		return nil
 	}
 	return &DetectError{
 		Missing: "model",
 		Cause:   fmt.Errorf("found %d GGUF models; set llama_server.default_model to disambiguate", len(present)),
 	}
+}
+
+// preferredModelSubstrings ranks known-good llama-server models for autoselect.
+// Earlier entries win. These are matched case-insensitively against the GGUF
+// path/filename. Qwen3 instruct GGUFs are our verified tool+chat default.
+var preferredModelSubstrings = []string{
+	"qwen3-30b-a3b-instruct",
+	"qwen3-14b",
+	"qwen3",
+}
+
+// preferredPresentModel returns the path of the highest-ranked known-good model
+// among the present GGUFs, or "" when none of the present models is on the
+// preferred list (the caller then surfaces the disambiguation error rather than
+// guessing).
+func preferredPresentModel(present []localruntime.ModelRecord) string {
+	for _, want := range preferredModelSubstrings {
+		for _, m := range present {
+			if strings.Contains(strings.ToLower(m.Path), want) {
+				return m.Path
+			}
+		}
+	}
+	return ""
 }
 
 // applyDefaults populates fields that are unset with their config.Defaults()

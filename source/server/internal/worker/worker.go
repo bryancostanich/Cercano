@@ -398,12 +398,10 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource cre
 	} else if cfg.OllamaURL != "" {
 		r.openProv = ollamallm.NewClient(ollamallm.Config{
 			BaseURL: cfg.OllamaURL,
-			// Read the open model from the everyday-open tier (OpenChatModel),
-			// NOT the legacy cfg.OpenModel field: config normalization
-			// (finalizeModelTiers) migrates open_model into Tiers.Everyday.Open
-			// and BLANKS cfg.OpenModel, so on the host's normalized config — the
-			// one snapshotted here — cfg.OpenModel is always "". Mirrors the host.
-			Model: (&cfg).OpenChatModel(),
+			// The everyday open model — the host resolved it (override ⊕ catalog)
+			// and sent it as the active runtime's override, so OverrideFor
+			// returns exactly what the host intended.
+			Model: openTierModel(cfg, pkgcfg.TierEveryday),
 		})
 	}
 
@@ -555,9 +553,7 @@ func (r *workerResolver) MainModel(isCloud bool) string {
 		}
 		return r.ActiveCloudModel()
 	}
-	// Open model lives in the everyday-open tier (OpenChatModel); the legacy
-	// cfg.OpenModel field is blanked by config normalization. Mirrors the host.
-	return (&c).OpenChatModel()
+	return openTierModel(c, pkgcfg.TierEveryday)
 }
 
 // PrimaryModel mirrors the host: for cloud-primary locus modes it resolves the
@@ -576,7 +572,7 @@ func (r *workerResolver) PrimaryModel() string {
 			return m
 		}
 	}
-	return (&c).OpenChatModel()
+	return openTierModel(c, pkgcfg.TierEveryday)
 }
 func (r *workerResolver) Rebuild() error              { return nil }
 func (r *workerResolver) InstallAbsentCloud(_ string) { r.cloudProv = nil }

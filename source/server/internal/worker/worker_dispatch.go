@@ -14,6 +14,15 @@ import (
 	pkgcfg "cercano/source/server/pkg/config"
 )
 
+// openTierModel returns the worker's effective open model for a tier. The host
+// resolved override-else-catalog-default and sent the result as the active
+// runtime's override, so a plain OverrideFor on the worker's config yields the
+// host-intended model without the worker ever needing the catalog.
+func openTierModel(cfg pkgcfg.Config, t pkgcfg.Tier) string {
+	id, _ := cfg.Models.OverrideFor(cfg.OpenRuntime, t)
+	return id
+}
+
 // buildWorkerToolSvc assembles the worker's capability/tool stack via the shared
 // internal/toolstack builder — the SAME assembly the host uses — so worker turns
 // wire an identical capabilities.Services (Dispatch included). The previous
@@ -80,10 +89,10 @@ func workerDispatchModelFor(cfg pkgcfg.Config) func(isCloud bool, tier pkgcfg.Ti
 			}
 			return cfg.ModelProfiles.ResolveCloudModelForTier(prof, tier)
 		}
-		if id, ok := cfg.Models.ResolveOpen(tier); ok {
+		if id := openTierModel(cfg, tier); id != "" {
 			return id
 		}
-		if id, ok := cfg.Models.ResolveOpen(pkgcfg.TierEveryday); ok {
+		if id := openTierModel(cfg, pkgcfg.TierEveryday); id != "" {
 			return id
 		}
 		return ""

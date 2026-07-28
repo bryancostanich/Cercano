@@ -20,10 +20,13 @@ import (
 	"cercano/source/server/internal/inference"
 	ollamallm "cercano/source/server/internal/llm/ollama"
 	"cercano/source/server/internal/localruntime"
+	"cercano/source/server/internal/localruntime/catalogdefaults"
 	runtimellama "cercano/source/server/internal/localruntime/llamaserver"
 	runtimemistralrs "cercano/source/server/internal/localruntime/mistralrs"
 	"cercano/source/server/internal/loop"
+	"cercano/source/server/internal/openmodels"
 	"cercano/source/server/internal/server"
+	"cercano/source/server/internal/sysram"
 	"cercano/source/server/internal/tools"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
@@ -60,7 +63,7 @@ func main() {
 		cfg = config.Defaults()
 	}
 
-	fmt.Printf("Local model: %s\n", cfg.OpenChatModel())
+	fmt.Printf("Local model: %s\n", openChatModel(cfg))
 	fmt.Printf("Ollama URL: %s\n", cfg.OllamaURL)
 	if cfg.CloudProvider != "" {
 		fmt.Printf("Cloud provider: %s (%s)\n", cfg.CloudProvider, cfg.CloudModel)
@@ -93,7 +96,7 @@ func main() {
 		}
 		return ollamallm.NewClient(ollamallm.Config{
 			BaseURL: c.OllamaURL,
-			Model:   c.OpenChatModel(),
+			Model:   openChatModel(c),
 		})
 	}
 	openProvider := agent.InferenceTurnRunner(openProviderFor(cfg), openTurnModel(cfg))
@@ -124,7 +127,7 @@ func main() {
 	sessionSvc := session.InMemoryService()
 	coordinator := loop.NewADKCoordinator(openProvider, cloudProvider, validator, sessionSvc)
 
-	smartRouter, err := agent.NewSmartRouterFromBytes(openProvider, cloudProvider, cfg.OpenEmbeddingModel(), ollamaEng, agent.DefaultPrototypes(), func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.TurnRunner, error) {
+	smartRouter, err := agent.NewSmartRouterFromBytes(openProvider, cloudProvider, openEmbeddingModel(cfg), ollamaEng, agent.DefaultPrototypes(), func(ctx context.Context, provider, model, apiKey, baseURL string) (agent.TurnRunner, error) {
 		prof := cloudfactory.LegacyProfile(provider, model, baseURL)
 		p, err := cloudfactory.BuildCloudProvider(prof, apiKey)
 		if err != nil {
@@ -182,7 +185,7 @@ func main() {
 }
 
 func buildRuntimeManager(cfg config.Config) localruntime.Manager {
-	manager := localruntime.NewManager(localruntime.WithEndpoints(localruntime.EndpointsFromConfig(cfg)))
+	manager := localruntime.NewManager(localruntime.WithEndpoints(localruntime.EndpointsFromConfig(cfg, openChatModel(cfg), openEmbeddingModel(cfg))))
 	sweepStalePartials(cfg, manager)
 	provider := runtimellama.NewProvider(cfg.LlamaServer)
 	// Reap llama-servers orphaned by cercano processes that died without
@@ -259,6 +262,14 @@ func llamaServerEnabled(cfg config.Config) bool {
 	return cfg.LlamaServer.Enabled || strings.EqualFold(cfg.OpenRuntime, "llama_server")
 }
 
+func openTierModel(cfg config.Config, tier config.Tier) string {
+	return openmodels.EffectiveModel(cfg, tier, catalogdefaults.ForRuntime, uint64(sysram.Total()))
+}
+
+func openChatModel(cfg config.Config) string { return openTierModel(cfg, config.TierEveryday) }
+
+func openEmbeddingModel(cfg config.Config) string { return openTierModel(cfg, config.TierEmbedding) }
+
 func openTurnModel(cfg config.Config) string {
 	if strings.EqualFold(cfg.OpenRuntime, "mistralrs") {
 		model := strings.TrimSpace(cfg.MistralRS.DefaultModel)
@@ -272,5 +283,5 @@ func openTurnModel(cfg config.Config) string {
 			return model
 		}
 	}
-	return cfg.OpenChatModel()
+	return openChatModel(cfg)
 }

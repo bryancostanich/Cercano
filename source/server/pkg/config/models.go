@@ -35,138 +35,115 @@ const (
 	ProviderOpen  Provider = "open"
 )
 
-// ModelTier holds the open-side model id for one tier. Empty = not configured.
+// OpenModels holds the open (local) model taxonomy as per-runtime OVERRIDES:
+// runtime name → tier name → model id. It stores ONLY the tiers the user has
+// explicitly customized. Anything not present here resolves to that runtime's
+// curated catalog default — which lives in internal/localruntime and is merged
+// in by the server (Server.ResolveOpenModel), never by pkg/config (which must
+// not import the catalog). So config is override-only and can never hold a
+// stale copy of a default: untouched tiers always track the catalog.
 //
-// Cloud is NOT represented here: cloud models are vendor-owned and resolve
-// through the vendor-keyed cost-tier path (ModelProfiles.Cloud.Providers +
-// ResolveCloudModelForTier), not through capability-tier slots. The retired
-// four-tier `cloud` slot was deleted (effort: runtime-aware-model-tiers,
-// Phase 2) so a fourth cloud tier can never reappear here.
-type ModelTier struct {
-	Open string `yaml:"open"`
+// Overrides are per-runtime and never ported across runtimes — a model id that
+// is valid for llama_server may be meaningless or invalid on mistralrs.
+type OpenModels struct {
+	// Overrides[runtime][tier] = model id. Both levels are sparse.
+	Overrides map[string]map[string]string `yaml:"overrides,omitempty"`
 }
 
-// ModelTiers is the full tier table.
-type ModelTiers struct {
-	MostCapable   ModelTier `yaml:"most_capable"`
-	Everyday      ModelTier `yaml:"everyday"`
-	FastLight     ModelTier `yaml:"fast_light"`
-	FastLightText ModelTier `yaml:"fast_light_text"`
-	Embedding     ModelTier `yaml:"embedding,omitempty"`
-}
-
-// ModelsConfig is the model taxonomy: which model serves each capability tier,
-// per provider side. The everyday tier's slots deliberately have NO copy-based
-// migration from the legacy cloud-profile/open_model fields — an empty
-// everyday slot falls through to those live values at resolution time (see
-// Server.resolveTierModel), so there is exactly one source of truth and no
-// stale mirror to drift.
+// ModelsConfig is the model taxonomy. The open side is per-runtime overrides
+// over the catalog default (see OpenModels); the cloud side resolves through
+// its own vendor-keyed cost-tier path (ModelProfiles.Cloud.Providers +
+// ResolveCloudModelForTier) and is not represented here.
 type ModelsConfig struct {
-	Tiers ModelTiers `yaml:"tiers"`
+	Open OpenModels `yaml:"open"`
 }
 
-// OpenChatModel resolves the interactive local chat model — the everyday
-// tier's open slot. This is THE way to read "which local model do I chat
-// with"; the legacy open_model key is retired (migrated at load, dropped
-// from Save; design: docs/features/local-model-taxonomy/design.md).
-func (c *Config) OpenChatModel() string {
-	return c.Models.Tiers.Everyday.Open
-}
-
-// OpenEmbeddingModel resolves the embedding model the same way — the
-// embedding tier's open slot (legacy embedding_model key retired).
-func (c *Config) OpenEmbeddingModel() string {
-	return c.Models.Tiers.Embedding.Open
-}
-
-// tier returns the ModelTier for t (zero value for unknown tiers).
-func (m ModelsConfig) tier(t Tier) ModelTier {
-	switch t {
-	case TierMostCapable:
-		return m.Tiers.MostCapable
-	case TierEveryday:
-		return m.Tiers.Everyday
-	case TierFastLight:
-		return m.Tiers.FastLight
-	case TierFastLightText:
-		return m.Tiers.FastLightText
-	case TierEmbedding:
-		return m.Tiers.Embedding
+// OverrideFor returns the user's override model id for (runtime, tier), and
+// ok=false when there is none. ok=false is EXPECTED and not an error — it means
+// "use the catalog default", which only the server can compute. This is the
+// only open-model lookup pkg/config exposes; the effective running model
+// (override-else-catalog-default) is resolved server-side.
+func (m ModelsConfig) OverrideFor(runtime string, t Tier) (string, bool) {
+	tiers, ok := m.Open.Overrides[runtime]
+	if !ok {
+		return "", false
 	}
-	return ModelTier{}
+	id, ok := tiers[string(t)]
+	if !ok || id == "" {
+		return "", false
+	}
+	return id, true
 }
 
-// tierSlot returns a pointer to the named tier's struct, or nil for unknown.
-func (m *ModelsConfig) tierSlot(t Tier) *ModelTier {
-	switch t {
-	case TierMostCapable:
-		return &m.Tiers.MostCapable
-	case TierEveryday:
-		return &m.Tiers.Everyday
-	case TierFastLight:
-		return &m.Tiers.FastLight
-	case TierFastLightText:
-		return &m.Tiers.FastLightText
-	case TierEmbedding:
-		return &m.Tiers.Embedding
+// SetOverride writes (or, with an empty id, clears) the override for
+// (runtime, tier). Clearing prunes empty maps so config stays minimal and a
+// runtime with no customizations leaves no residue.
+func (m *ModelsConfig) SetOverride(runtime string, t Tier, id string) {
+	if id == "" {
+		if tiers, ok := m.Open.Overrides[runtime]; ok {
+			delete(tiers, string(t))
+			if len(tiers) == 0 {
+				delete(m.Open.Overrides, runtime)
+			}
+		}
+		return
 	}
-	return nil
+	if m.Open.Overrides == nil {
+		m.Open.Overrides = map[string]map[string]string{}
+	}
+	if m.Open.Overrides[runtime] == nil {
+		m.Open.Overrides[runtime] = map[string]string{}
+	}
+	m.Open.Overrides[runtime][string(t)] = id
 }
 
 // ApplyModelTierPatch applies one sparse-patch update to the open taxonomy:
-// key "<tier>.open" sets that tier's open slot model id, with "-" clearing it.
-// (Cloud is configured via its own vendor-keyed profile path, not here.)
-// Returns a short change description for the caller's change log.
+// key "<runtime>.<tier>" sets that runtime's override for the tier, with "-"
+// clearing it. The runtime is explicit so setup can seed a runtime you are
+// about to switch to. (Cloud is configured via its own vendor-keyed profile
+// path, not here.) Returns a short change description for the caller's log.
 func ApplyModelTierPatch(m *ModelsConfig, key, value string) (string, error) {
-	tierName, provName, ok := strings.Cut(key, ".")
+	runtimeName, tierName, ok := strings.Cut(key, ".")
 	if !ok {
-		return "", fmt.Errorf("model tier key %q must be \"<tier>.open\"", key)
+		return "", fmt.Errorf("model tier key %q must be \"<runtime>.<tier>\"", key)
 	}
-	slot := m.tierSlot(Tier(tierName))
-	if slot == nil {
+	if !validTier(Tier(tierName)) {
 		return "", fmt.Errorf("unknown model tier %q (want %s|%s|%s|%s|%s)", tierName,
 			TierMostCapable, TierEveryday, TierFastLight, TierFastLightText, TierEmbedding)
+	}
+	if runtimeName == "" {
+		return "", fmt.Errorf("model tier key %q is missing a runtime", key)
 	}
 	if value == "-" {
 		value = ""
 	}
-	switch Provider(provName) {
-	case ProviderOpen:
-		slot.Open = value
-	default:
-		// Cloud is configured via its own vendor-keyed profile path, not
-		// through capability-tier slots; only the open side is patchable here.
-		return "", fmt.Errorf("unknown provider %q in model tier key (want %s)", provName, ProviderOpen)
-	}
+	m.SetOverride(runtimeName, Tier(tierName), value)
 	shown := value
 	if shown == "" {
 		shown = "-"
 	}
-	return "models." + key + "=" + shown, nil
+	return "models.open.overrides." + key + "=" + shown, nil
 }
 
-// TierSlots enumerates the non-empty tier slots keyed "<tier>.<provider>" —
-// the read-side view served by GetConfig and rendered by /config show.
+// TierSlots enumerates all override slots keyed "<runtime>.<tier>" — the
+// read-side view served by GetConfig and rendered by /config show.
 func (m ModelsConfig) TierSlots() map[string]string {
 	out := map[string]string{}
-	for _, t := range []Tier{TierMostCapable, TierEveryday, TierFastLight, TierFastLightText, TierEmbedding} {
-		mt := m.tier(t)
-		if mt.Open != "" {
-			out[string(t)+".open"] = mt.Open
+	for runtime, tiers := range m.Open.Overrides {
+		for tier, id := range tiers {
+			if id != "" {
+				out[runtime+"."+tier] = id
+			}
 		}
 	}
 	return out
 }
 
-// ResolveOpen returns the configured open (local) model id for a tier, and
-// ok=false when nothing is configured — the caller decides what that means (a
-// background helper skips; main chat errors). There is no provider preference
-// or cross-provider fallback: cloud is resolved through its own vendor-keyed
-// cost-tier path (ModelProfiles.ResolveCloudModelForTier), so a tier only ever
-// yields its single open slot.
-func (m ModelsConfig) ResolveOpen(t Tier) (string, bool) {
-	if id := m.tier(t).Open; id != "" {
-		return id, true
+// validTier reports whether t is a known tier name.
+func validTier(t Tier) bool {
+	switch t {
+	case TierMostCapable, TierEveryday, TierFastLight, TierFastLightText, TierEmbedding:
+		return true
 	}
-	return "", false
+	return false
 }

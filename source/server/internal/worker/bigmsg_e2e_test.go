@@ -53,7 +53,7 @@ func TestWorker_RealProcess_AcceptsLargeStartTurn(t *testing.T) {
 		Images:         []*proto.InlineImage{bigImage},
 		WorkDir:        t.TempDir(),
 		Gen:            1,
-		Config:         worker.SnapshotConfig(config.Config{LocusMode: "open_only"}, ""),
+		Config:         worker.SnapshotConfig(config.Config{LocusMode: "open_only"}, "", nil),
 		PermissionMode: "permissive",
 	}
 

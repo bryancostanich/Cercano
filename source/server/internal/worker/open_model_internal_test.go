@@ -2,11 +2,10 @@ package worker
 
 // open_model_internal_test.go — regression guard for open-model resolution.
 //
-// Config normalization (finalizeModelTiers) migrates the legacy open_model into
-// Models.Tiers.Everyday.Open and BLANKS cfg.OpenModel. So on the host's
-// normalized config — the one the worker snapshots — cfg.OpenModel is always
-// "". The worker must therefore read the open model from the everyday-open tier
-// (OpenChatModel), like the host, NOT from the blanked legacy field.
+// Config normalization blanks the legacy open_model. The host resolves the
+// effective everyday model (override ⊕ catalog) and snapshots it to the worker
+// as the active runtime's override. The worker must therefore read the active
+// runtime override, NOT the blanked legacy field.
 
 import (
 	"testing"
@@ -17,14 +16,12 @@ import (
 )
 
 func TestWorkerResolver_OpenModelFromEverydayTier(t *testing.T) {
-	// Mirror a host-normalized config: OpenModel blanked, model in the tier.
+	// Mirror a worker snapshot: OpenModel blanked, effective host-resolved
+	// model stored as the active runtime's override.
 	cfg := pkgcfg.Config{
-		OpenModel: "", // finalizeModelTiers blanks this on every load path
-		Models: pkgcfg.ModelsConfig{
-			Tiers: pkgcfg.ModelTiers{
-				Everyday: pkgcfg.ModelTier{Open: "qwen3-coder"},
-			},
-		},
+		OpenRuntime: "llama_server",
+		OpenModel:   "", // finalizeModelTiers blanks this on every load path
+		Models:      workerTestModels("llama_server", map[pkgcfg.Tier]string{pkgcfg.TierEveryday: "qwen3-coder"}),
 	}
 	r := &workerResolver{cfgSvc: cfgsvc.New("", cfg, secrets.NewMemory())}
 

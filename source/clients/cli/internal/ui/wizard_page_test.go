@@ -88,8 +88,8 @@ func TestWizardCloudPathEndToEnd(t *testing.T) {
 	if wp.state.TierPicks["most_capable.cloud"] == "" {
 		t.Error("autofill: most_capable.cloud empty")
 	}
-	if wp.state.TierPicks["fast_light_text.open"] == "" {
-		t.Error("autofill: fast_light_text.open empty")
+	if wp.state.TierPicks["llama_server.fast_light_text"] == "" {
+		t.Error("autofill: llama_server.fast_light_text empty")
 	}
 	// Continue is the last row.
 	for range wp.rows() {
@@ -194,7 +194,7 @@ func TestWizardTierPickerRecordsPick(t *testing.T) {
 		t.Fatal("enter on tier row: want picker open")
 	}
 	// First candidate is the recommendation, already the autofilled pick.
-	rows := wp.tierPickerCandidates("most_capable.open")
+	rows := wp.tierPickerCandidates("llama_server.most_capable")
 	if len(rows) < 2 {
 		t.Fatalf("picker: want recommendation + clear rows, got %d", len(rows))
 	}
@@ -213,21 +213,21 @@ func TestWizardTierPickerRecordsPick(t *testing.T) {
 	if wp.picker != nil {
 		t.Fatal("select: want picker closed")
 	}
-	if _, ok := wp.state.TierPicks["most_capable.open"]; ok {
+	if _, ok := wp.state.TierPicks["llama_server.most_capable"]; ok {
 		t.Error("clear: pick should be removed")
 	}
 	st, ok := wizard.Load()
 	if !ok {
 		t.Fatal("want persisted state")
 	}
-	if _, exists := st.TierPicks["most_capable.open"]; exists {
+	if _, exists := st.TierPicks["llama_server.most_capable"]; exists {
 		t.Error("clear: persisted state should not carry the removed pick")
 	}
 
 	// Reopen and pick the recommendation again.
 	press(t, wp, tea.KeyEnter)
 	press(t, wp, tea.KeyEnter)
-	if wp.state.TierPicks["most_capable.open"] == "" {
+	if wp.state.TierPicks["llama_server.most_capable"] == "" {
 		t.Error("pick: want slot filled from picker selection")
 	}
 }
@@ -236,13 +236,13 @@ func TestWizardPickerEscClosesWithoutChange(t *testing.T) {
 	wp := newTestWizardPage(t)
 	press(t, wp, tea.KeyDown)
 	press(t, wp, tea.KeyEnter) // open (second row)
-	before := wp.state.TierPicks["most_capable.open"]
+	before := wp.state.TierPicks["llama_server.most_capable"]
 	press(t, wp, tea.KeyEnter) // open picker
 	press(t, wp, tea.KeyEscape)
 	if wp.picker != nil {
 		t.Fatal("esc: want picker closed")
 	}
-	if wp.state.TierPicks["most_capable.open"] != before {
+	if wp.state.TierPicks["llama_server.most_capable"] != before {
 		t.Error("esc: pick must be unchanged")
 	}
 	if wp.state.Step != wizard.StepOpen {
@@ -495,16 +495,16 @@ func TestWizardOpenAutofillUsesCatalog(t *testing.T) {
 
 	// Open slots must hold the RAM-tiered curated display names, not the shipped
 	// open recs (which recommend the gate-incompatible qwen3-coder-next).
-	if got := wp.state.TierPicks["most_capable.open"]; got != "Qwen3-14B Q4_K_M" {
-		t.Fatalf("most_capable.open: want curated display name, got %q", got)
+	if got := wp.state.TierPicks["llama_server.most_capable"]; got != "Qwen3-14B Q4_K_M" {
+		t.Fatalf("llama_server.most_capable: want curated display name, got %q", got)
 	}
-	if got := wp.state.TierPicks["fast_light.open"]; got != "Phi-4-mini Instruct Q4_K_M" {
-		t.Fatalf("fast_light.open: want curated display name, got %q", got)
+	if got := wp.state.TierPicks["llama_server.fast_light"]; got != "Phi-4-mini Instruct Q4_K_M" {
+		t.Fatalf("llama_server.fast_light: want curated display name, got %q", got)
 	}
 	// The embedding slot isn't in wizardTierOrder; autofillTiers must still fill
 	// it from the catalog recommendation, else the embedding row shows "—".
-	if got := wp.state.TierPicks["embedding.open"]; got != "Nomic Embed Text v1.5 f16" {
-		t.Fatalf("embedding.open: want the curated embedding display name, got %q", got)
+	if got := wp.state.TierPicks["llama_server.embedding"]; got != "Nomic Embed Text v1.5 f16" {
+		t.Fatalf("llama_server.embedding: want the curated embedding display name, got %q", got)
 	}
 	if strings.Contains(fmt.Sprintf("%v", wp.state.TierPicks), "qwen3-coder-next") {
 		t.Errorf("open picks must not carry the incompatible recs model: %v", wp.state.TierPicks)
@@ -521,10 +521,10 @@ func TestWizardEnrollOpenDownloads(t *testing.T) {
 	}
 	wp.catalogOK = true
 	wp.state.TierPicks = map[string]string{
-		"most_capable.open":  "Qwen3-14B Q4_K_M",
-		"everyday.open":      "Qwen3-14B Q4_K_M",           // duplicate of most_capable -> one download
-		"fast_light.open":    "Phi-4-mini Instruct Q4_K_M", // already downloaded -> skipped
-		"most_capable.cloud": "claude-opus-4-8",            // cloud slot -> ignored
+		"llama_server.most_capable": "Qwen3-14B Q4_K_M",
+		"llama_server.everyday":     "Qwen3-14B Q4_K_M",           // duplicate of most_capable -> one download
+		"llama_server.fast_light":   "Phi-4-mini Instruct Q4_K_M", // already downloaded -> skipped
+		"most_capable.cloud":        "claude-opus-4-8",            // cloud slot -> ignored
 	}
 	var got []string
 	wp.downloadFn = func(_ context.Context, runtime, modelID string) error {

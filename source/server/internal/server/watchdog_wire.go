@@ -68,7 +68,7 @@ func (s *Server) buildWatchdogFrom(wc config.WatchdogConfig, mc config.ModelsCon
 	// tier (open side — this lane is local), else the lane's own default.
 	// Resolved at build time; a models-section change takes effect on the
 	// next watchdog rebuild (config reload / watchdog-field update).
-	oneShotModel := watchdogModelFor(wc, mc)
+	oneShotModel := s.watchdogModelFor(wc)
 	oneShot := func(ctx context.Context, prompt string) (string, error) {
 		res, err := s.toolSvc.Engine().Dispatch(ctx, dispatch.Spec{
 			Mode:          dispatch.OneShot,

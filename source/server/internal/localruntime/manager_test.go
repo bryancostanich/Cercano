@@ -425,14 +425,14 @@ func TestInMemoryManagerDeleteModelRemovesDownloadedFile(t *testing.T) {
 func TestEndpointsFromConfigIncludesExternalEndpointInfo(t *testing.T) {
 	cfg := config.Config{
 		OllamaURL:      "http://mac-studio.local:11434",
-		OpenModel:     "qwen3-coder",
+		OpenModel:      "qwen3-coder",
 		EmbeddingModel: "nomic-embed-text",
 		CloudProvider:  "anthropic",
 		CloudModel:     "claude-test",
 		CloudBaseURL:   "http://127.0.0.1:3456",
 	}
 
-	endpoints := EndpointsFromConfig(cfg)
+	endpoints := EndpointsFromConfig(cfg, "qwen3-coder", "nomic-embed-text")
 	if len(endpoints) != 2 {
 		t.Fatalf("expected 2 endpoints, got %#v", endpoints)
 	}

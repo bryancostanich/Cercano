@@ -73,7 +73,7 @@ type CuratedCatalog struct {
 }
 
 // requiredTiers are the capability tiers every profile must fill. Kept in sync
-// with pkg/config's ModelTiers; a profile missing any of these is a catalog
+// with pkg/config's Tier constants; a profile missing any of these is a catalog
 // authoring bug caught at load time.
 var requiredTiers = []string{"most_capable", "everyday", "fast_light", "fast_light_text", "embedding"}
 

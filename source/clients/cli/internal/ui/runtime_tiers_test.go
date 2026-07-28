@@ -12,8 +12,9 @@ import (
 // slots dashed. (No default-provider row; cloud is not a tier slot.)
 func TestTierRows(t *testing.T) {
 	cfg := &agentclient.Config{
+		OpenRuntime: "llama_server",
 		ModelTiers: map[string]string{
-			"fast_light_text.open": "phi4:14b",
+			"llama_server.fast_light_text": "phi4:14b",
 		},
 	}
 	rows := tierRows(cfg)
@@ -25,13 +26,13 @@ func TestTierRows(t *testing.T) {
 		if r.Action.Kind != runtimeActionTierPick {
 			t.Errorf("row %q missing tier-pick action: %+v", r.Label, r.Action)
 		}
-		if r.Action.TierKey == "fast_light_text.open" {
+		if r.Action.TierKey == "llama_server.fast_light_text" {
 			sawConfigured = true
 			if r.Value != "phi4:14b" {
 				t.Errorf("configured slot value = %q", r.Value)
 			}
 		}
-		if r.Action.TierKey == "most_capable.open" {
+		if r.Action.TierKey == "llama_server.most_capable" {
 			sawEmpty = true
 			if r.Value != "—" {
 				t.Errorf("empty slot should render a dash, got %q", r.Value)
@@ -52,7 +53,8 @@ func TestTierRows(t *testing.T) {
 // runtime models plus a clear row, with the current value hinted.
 func TestTierPickerRows(t *testing.T) {
 	cfg := &agentclient.Config{
-		ModelTiers: map[string]string{"fast_light_text.open": "phi4:14b"},
+		OpenRuntime: "llama_server",
+		ModelTiers:  map[string]string{"llama_server.fast_light_text": "phi4:14b"},
 	}
 	status := &agentclient.RuntimeStatus{
 		Models: []agentclient.RuntimeModel{
@@ -61,7 +63,7 @@ func TestTierPickerRows(t *testing.T) {
 		},
 	}
 
-	rows := tierPickerRows("fast_light_text.open", cfg, status)
+	rows := tierPickerRows("llama_server.fast_light_text", cfg, status)
 	var keys []string
 	var currentHinted bool
 	for _, r := range rows {

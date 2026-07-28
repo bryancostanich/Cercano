@@ -21,7 +21,7 @@ func (r *recordingRouter) Tiers() agent.Tiers                  { return agent.Ti
 
 type labelProvider struct{ label string }
 
-func (p *labelProvider) Name() string { return p.label }
+func (p *labelProvider) Name() string                         { return p.label }
 func (p *labelProvider) Capabilities() inference.Capabilities { return inference.Capabilities{} }
 func (p *labelProvider) Chat(_ context.Context, req inference.Call) (inference.Result, error) {
 	return inference.Result{
@@ -38,7 +38,7 @@ func (p *labelProvider) StreamChat(context.Context, inference.Call) (inference.S
 
 func TestReconfigure_RebuildsAndResetsOpenTurnRunner(t *testing.T) {
 	router := &recordingRouter{}
-	svc := New(nil, router, nil, nil, nil, nil)
+	svc := New(nil, nil, router, nil, nil, nil, nil)
 	svc.SetOpenLLMProvider(&labelProvider{label: "initial"})
 	svc.SetOpenProviderFactory(func(c config.Config) inference.Provider {
 		return &labelProvider{label: c.OpenRuntime}
@@ -68,7 +68,7 @@ func TestReconfigure_RebuildsAndResetsOpenTurnRunner(t *testing.T) {
 
 func TestReconfigure_OpenModelOnlyResetsOpenTurnRunner(t *testing.T) {
 	router := &recordingRouter{}
-	svc := New(nil, router, nil, nil, nil, nil)
+	svc := New(nil, nil, router, nil, nil, nil, nil)
 	svc.SetOpenLLMProvider(&labelProvider{label: "ollama"})
 
 	svc.Reconfigure(ReconfigureArgs{OpenModel: "qwen3-coder", ResolvedOpenModel: "qwen3-coder"})

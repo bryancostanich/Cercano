@@ -71,13 +71,16 @@ slots. The live vendor-keyed cost-tier path (`ModelProfiles.Cloud.Providers`,
   output). The flag is not yet wired into live tier selection; that is later-
   phase work. Recon/mechanical delegation will misfire until then.
 
-## Phase 3 — Re-key open config as per-runtime overrides (pkg/config only)
+## Phase 3 — Re-key open config as per-runtime overrides (merged with Phase 5; DONE)
 
 Replace the flat tier struct with runtime-keyed **overrides** (only tiers the
 user changed). Tier entries are **model-id strings** — no settings. Defaulting
-leaves `pkg/config`; the catalog default is merged by the server in Phase 5.
-Keep this phase confined to `pkg/config` so it stays small and verifiable in
-isolation.
+leaves `pkg/config`; the catalog default is merged by a single resolver.
+
+STATUS: DONE in one honest commit with Phase 5/server merge work, by user
+choice ("everything all at once") to avoid a temporary dual representation. The
+planned pkg/config-only cut was impossible because the old `ModelTier` shape was
+used across server, worker, cmd, host services, and tests.
 
 Grounded decisions (settled with the user; do not relitigate):
 - Model-id-only tiers. No per-model/per-tier settings (recon confirmed launch
@@ -88,63 +91,61 @@ Grounded decisions (settled with the user; do not relitigate):
 - Merge locus A: server merges override-else-catalog-default. `pkg/config` must
   NOT import the catalog.
 
-- [ ] New type in `pkg/config/models.go`: `OpenModels{ Overrides
+- [x] New type in `pkg/config/models.go`: `OpenModels{ Overrides
       map[string]map[string]string }` (`runtime → tier → model-id`), replacing
       `ModelTiers`/`ModelTier` entirely. YAML: `models.open.overrides.<runtime>.
-      <tier>`. Keep the five tier constants (`most_capable` … `embedding`).
-- [ ] Rewrite resolution to be override-only and !ok-tolerant:
-      `ResolveOpen(tier)` reads `Overrides[c.OpenRuntime][tier]` and returns
-      `!ok` when there is no override (the server then supplies the catalog
-      default — this is expected, not an error). `OpenChatModel()` /
-      `OpenEmbeddingModel()` read `c.OpenRuntime` directly (no cached runtime
-      copy — no split-brain).
-- [ ] `ApplyModelTierPatch` / `TierSlots`: key grammar `open.<runtime>.<tier>`
-      (write an override; "-" clears it). `TierSlots` reports the active
-      runtime's overrides only. NOTE: patching a tier for a *non-active* runtime
-      is allowed (explicit runtime in the key) — this is how setup can seed a
-      runtime you're about to switch to.
-- [ ] Remove `finalizeModelTiers` tier-defaulting (`config.go` ~761–781) and the
-      legacy `open_model→everyday` migration + `CERCANO_OPEN_MODEL`/
-      `CERCANO_EMBEDDING_MODEL` writing into the flat struct. Env overrides now
-      write the active runtime's override (or defer to Phase 5 — confirm during
-      impl which is cleaner). Delete `models_migrate_test.go`.
-- [ ] Rewrite `pkg/config` tests for the override shape. Loader stays non-strict
-      so stale flat `open:`/`tiers.*` keys load-ignore. `go build ./...` +
-      `go test ./pkg/config/...` green. Checkpoint.
+      <tier>`. Five tier constants kept.
+- [x] Delete config effective-model accessors (`OpenChatModel` /
+      `OpenEmbeddingModel`) — Path C. Config exposes only overrides;
+      effective resolution moved out of config.
+- [x] Clean resolver: new `internal/openmodels.Resolver`, constructed once with
+      config + `internal/localruntime/catalogdefaults.ForRuntime` + RAM source.
+      It is the single owner of override-else-catalog-default; no setter
+      injection, no nil fallback, no duplicated merge logic.
+- [x] `ApplyModelTierPatch` / `TierSlots`: key grammar `<runtime>.<tier>`
+      (write an override; "-" clears it). The server keeps `embedding.open` as
+      a compatibility UI key that writes the active runtime's embedding override.
+- [x] Remove hardcoded config tier-defaulting. Legacy/env model values now seed
+      active-runtime overrides only when explicitly present/set; otherwise
+      catalog default resolves at runtime.
+- [x] Rewrite server, worker, cmd, host services, and CLI to use the resolver or
+      active-runtime overrides as appropriate. Worker snapshots carry
+      host-resolved effective tier ids as active-runtime overrides so workers do
+      not need the catalog.
+- [x] Rewrite tests for the override shape. Loader stays non-strict so stale
+      flat `open:`/`tiers.*` keys load-ignore. Server + CLI `go build ./...` and
+      `go test ./...` green. Checkpoint.
 
-## Phase 4 — Worker wire protocol
+## Phase 4 — Worker wire protocol (DONE in merged Phase 3 commit)
 
-- [ ] The worker needs the *resolved* open model for the active runtime, not the
-      override map. Since resolution now includes the catalog-default merge
-      (Phase 5), send the server-resolved active-runtime tier ids over the wire
-      (keep the existing flat `TierEverydayOpen` etc. fields, now populated from
-      the merged resolution). Confirm no `ModelTiers` struct crosses the wire.
-- [ ] Update `wire_test.go`. `go test ./internal/worker/...` green.
+- [x] Worker snapshots now carry the *resolved* active-runtime tier ids (host
+      resolver output). `ConfigFromSnapshot` stores those ids as active-runtime
+      overrides so the worker uses exactly the host-intended models without the
+      catalog.
+- [x] `wire_test.go` and worker tests updated; `go test ./internal/worker/...`
+      green.
 
-## Phase 5 — Server merge (locus A) + switch + config watcher
+## Phase 5 — Server merge (locus A) + switch + config watcher (DONE in merged Phase 3 commit)
 
-This is where override-else-catalog-default lives.
+- [x] Added `internal/openmodels.Resolver` + shared
+      `internal/localruntime/catalogdefaults.ForRuntime`; all effective open
+      resolution flows through the resolver.
+- [x] Deleted `rebindOpenTiersForRuntime`: switching runtime writes no tiers;
+      it just changes runtime and the resolver picks that runtime's
+      override-or-catalog-default.
+- [x] `config_watcher.go` updated for active-runtime override diffs.
+- [x] `ensure_switch_test.go`, `models_resolve_test.go`,
+      `embedding_tier_test.go` updated; `go test ./internal/server/...` green.
 
-- [ ] Add the merge resolver in `internal/server`: `resolveOpenTier(runtime,
-      tier) = cfg.Overrides[runtime][tier]  else  catalogDefault(runtime, tier)`,
-      where `catalogDefault` reads the runtime's `catalog.json` by detected RAM
-      (server may import `internal/localruntime`). Route all open-tier resolution
-      through it. Honor Phase 1's `plain_chat_ok:false` (never default-select a
-      broken model).
-- [ ] `rebindOpenTiersForRuntime` / runtime-switch: reload the active runtime's
-      override-over-default set on switch. No stale cross-runtime values.
-- [ ] `config_watcher.go`: detect open-override changes in the new shape.
-- [ ] Update `ensure_switch_test.go`, `models_resolve_test.go`,
-      `embedding_tier_test.go`. `go test ./internal/server/...` green.
+## Phase 6 — CLI UI (setup + later customization) (DONE in merged Phase 3 commit)
 
-## Phase 6 — CLI UI (setup + later customization)
-
-- [ ] Tier picker writes an `open.<active_runtime>.<tier>` override; shows the
-      effective value (override if set, else catalog default) and offers only
-      catalog-valid models for that runtime+RAM. GLM never auto-selected.
-- [ ] Setup wizard seeds overrides for the chosen runtime the same way (same
-      override store — setup and later `/config` are one path).
-- [ ] Update UI tests.
+- [x] Tier picker writes `<active_runtime>.<tier>` overrides; cloud tier picker
+      residue removed. Runtime dashboard shows active-runtime overrides/effective
+      embedding compatibility field.
+- [x] Setup wizard seeds `llama_server.<tier>` overrides for the chosen open
+      runtime; internal `everyday.cloud` remains only as the cloud-profile model
+      pick and is not sent as a model-tier patch.
+- [x] UI tests updated; CLI `go build ./...` and `go test ./...` green.
 
 ## Phase 7 — Full verification
 

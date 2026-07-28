@@ -85,7 +85,7 @@ func (c TierCandidates) validate() error {
 		}
 	}
 	for t := range c {
-		if (&ModelsConfig{}).tierSlot(t) == nil {
+		if !validTier(t) {
 			return fmt.Errorf("unknown tier %q", t)
 		}
 	}

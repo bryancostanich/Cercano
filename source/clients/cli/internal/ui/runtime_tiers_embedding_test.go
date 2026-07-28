@@ -7,7 +7,7 @@ import (
 )
 
 func TestTierRows_EmbeddingSlotReadsEmbeddingModel(t *testing.T) {
-	rows := tierRows(&agentclient.Config{EmbeddingModel: "nomic-embed-text-v2-moe"})
+	rows := tierRows(&agentclient.Config{OpenRuntime: "llama_server", EmbeddingModel: "nomic-embed-text-v2-moe"})
 	found := false
 	for _, row := range rows {
 		if row.Label == "embedding · open" {
@@ -15,7 +15,7 @@ func TestTierRows_EmbeddingSlotReadsEmbeddingModel(t *testing.T) {
 			if row.Value != "nomic-embed-text-v2-moe" {
 				t.Errorf("embedding row value = %q", row.Value)
 			}
-			if row.Action.Kind != runtimeActionTierPick || row.Action.TierKey != "embedding.open" {
+			if row.Action.Kind != runtimeActionTierPick || row.Action.TierKey != "llama_server.embedding" {
 				t.Errorf("embedding row action = %+v", row.Action)
 			}
 		}

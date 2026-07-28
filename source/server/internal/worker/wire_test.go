@@ -350,15 +350,13 @@ func TestSnapshotConfigRoundTrip(t *testing.T) {
 				AWSProfile: "prod",
 			},
 		},
-		Models: config.ModelsConfig{
-			Tiers: config.ModelTiers{
-				MostCapable:   config.ModelTier{Open: "qwen3-72b"},
-				Everyday:      config.ModelTier{Open: "qwen3-coder"},
-				FastLight:     config.ModelTier{Open: "qwen3-1.7b"},
-				FastLightText: config.ModelTier{Open: "phi4-mini"},
-				Embedding:     config.ModelTier{Open: "nomic-embed-text"},
-			},
-		},
+		Models: workerTestModels("llama_server", map[config.Tier]string{
+			config.TierMostCapable:   "qwen3-72b",
+			config.TierEveryday:      "qwen3-coder",
+			config.TierFastLight:     "qwen3-1.7b",
+			config.TierFastLightText: "phi4-mini",
+			config.TierEmbedding:     "nomic-embed-text",
+		}),
 		Compaction: config.CompactionConfig{
 			Enabled:               true,
 			ActivationFloorTokens: 8000,
@@ -391,7 +389,14 @@ func TestSnapshotConfigRoundTrip(t *testing.T) {
 	}
 
 	cred := "sk-ant-test-credential"
-	p := SnapshotConfig(orig, cred)
+	openTiers := map[string]string{
+		string(config.TierMostCapable):   "qwen3-72b",
+		string(config.TierEveryday):      "qwen3-coder",
+		string(config.TierFastLight):     "qwen3-1.7b",
+		string(config.TierFastLightText): "phi4-mini",
+		string(config.TierEmbedding):     "nomic-embed-text",
+	}
+	p := SnapshotConfig(orig, cred, openTiers)
 	got := ConfigFromSnapshot(p)
 
 	// Check locus + profile identity.
@@ -469,19 +474,14 @@ func TestSnapshotConfigRoundTrip(t *testing.T) {
 		t.Errorf("OpenRuntime: got %q want %q", got.OpenRuntime, orig.OpenRuntime)
 	}
 
-	// Model tiers.
-	gt, ot := got.Models.Tiers, orig.Models.Tiers
-	checkTier := func(name, gotOpen, wantOpen string) {
-		t.Helper()
-		if gotOpen != wantOpen {
-			t.Errorf("tier %s Open: got %q want %q", name, gotOpen, wantOpen)
+	// Model tiers: wire carries host-resolved effective models, stored in the
+	// worker config as active-runtime overrides.
+	for tier, want := range openTiers {
+		gotID, ok := got.Models.OverrideFor(got.OpenRuntime, config.Tier(tier))
+		if !ok || gotID != want {
+			t.Errorf("tier %s override = (%q,%v), want (%q,true)", tier, gotID, ok, want)
 		}
 	}
-	checkTier("MostCapable", gt.MostCapable.Open, ot.MostCapable.Open)
-	checkTier("Everyday", gt.Everyday.Open, ot.Everyday.Open)
-	checkTier("FastLight", gt.FastLight.Open, ot.FastLight.Open)
-	checkTier("FastLightText", gt.FastLightText.Open, ot.FastLightText.Open)
-	checkTier("Embedding", gt.Embedding.Open, ot.Embedding.Open)
 
 	// Compaction.
 	gc, oc := got.Compaction, orig.Compaction

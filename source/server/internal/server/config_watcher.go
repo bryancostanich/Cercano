@@ -98,8 +98,13 @@ func (s *Server) reloadConfigFromDisk(ctx context.Context) {
 	if newCfg.OllamaURL != snap.OllamaURL {
 		req.OllamaUrl = newCfg.OllamaURL
 	}
-	if newCfg.Models.Tiers.Everyday.Open != snap.Models.Tiers.Everyday.Open {
-		req.OpenModel = newCfg.Models.Tiers.Everyday.Open
+	// Detect a change to the active runtime's everyday override. (A runtime
+	// switch is handled by the OpenRuntime diff below; it re-resolves the
+	// effective model without touching overrides.)
+	newEveryday, _ := newCfg.Models.OverrideFor(newCfg.OpenRuntime, config.TierEveryday)
+	oldEveryday, _ := snap.Models.OverrideFor(snap.OpenRuntime, config.TierEveryday)
+	if newEveryday != oldEveryday {
+		req.OpenModel = newEveryday
 	}
 	if newCfg.OpenRuntime != snap.OpenRuntime {
 		req.OpenRuntime = newCfg.OpenRuntime
@@ -169,7 +174,9 @@ func (s *Server) reloadConfigFromDisk(ctx context.Context) {
 	if newCfg.Port != snap.Port {
 		fmt.Printf("ConfigWatcher: port change (%q → %q) requires a restart\n", snap.Port, newCfg.Port)
 	}
-	if newCfg.Models.Tiers.Embedding.Open != snap.Models.Tiers.Embedding.Open {
+	newEmbed, _ := newCfg.Models.OverrideFor(newCfg.OpenRuntime, config.TierEmbedding)
+	oldEmbed, _ := snap.Models.OverrideFor(snap.OpenRuntime, config.TierEmbedding)
+	if newEmbed != oldEmbed {
 		fmt.Printf("ConfigWatcher: embedding model change requires a restart\n")
 	}
 

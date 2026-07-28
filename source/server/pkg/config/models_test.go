@@ -7,48 +7,41 @@ import (
 	"testing"
 )
 
-// TestResolveOpen pins the open-tier-resolution contract: a configured tier
-// yields its open model, and an empty tier is !ok. Cloud is NOT resolved here
-// — it flows through the vendor-keyed cost-tier path — so ResolveOpen reads
-// only the open slot and never crosses providers.
-func TestResolveOpen(t *testing.T) {
-	m := ModelsConfig{
-		Tiers: ModelTiers{
-			Everyday:      ModelTier{Open: "qwen3-coder"},
-			FastLightText: ModelTier{Open: "phi4:14b"},
-		},
-	}
+func TestOverrideFor(t *testing.T) {
+	var m ModelsConfig
+	m.SetOverride("llama_server", TierEveryday, "qwen3-coder")
+	m.SetOverride("llama_server", TierFastLightText, "phi4:14b")
 
 	cases := []struct {
-		name   string
-		tier   Tier
-		wantID string
-		wantOK bool
+		name    string
+		runtime string
+		tier    Tier
+		wantID  string
+		wantOK  bool
 	}{
-		{"everyday open", TierEveryday, "qwen3-coder", true},
-		{"text tier open", TierFastLightText, "phi4:14b", true},
-		{"unconfigured tier", TierMostCapable, "", false},
-		{"empty open slot", TierFastLight, "", false},
+		{"runtime override", "llama_server", TierEveryday, "qwen3-coder", true},
+		{"second override", "llama_server", TierFastLightText, "phi4:14b", true},
+		{"other runtime untouched", "mistralrs", TierEveryday, "", false},
+		{"unconfigured tier", "llama_server", TierMostCapable, "", false},
 	}
 	for _, c := range cases {
-		id, ok := m.ResolveOpen(c.tier)
+		id, ok := m.OverrideFor(c.runtime, c.tier)
 		if id != c.wantID || ok != c.wantOK {
-			t.Errorf("%s: ResolveOpen(%s) = (%q,%v), want (%q,%v)",
-				c.name, c.tier, id, ok, c.wantID, c.wantOK)
+			t.Errorf("%s: OverrideFor(%s,%s) = (%q,%v), want (%q,%v)",
+				c.name, c.runtime, c.tier, id, ok, c.wantID, c.wantOK)
 		}
 	}
 }
 
-// TestModelsYAMLRoundTrip pins the on-disk shape: a models section with a
-// tiers map including the fast_light_text tier's open slot.
 func TestModelsYAMLRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	src := `ollama_url: http://localhost:11434
 models:
-    tiers:
-        fast_light_text:
-            open: phi4:14b
+    open:
+        overrides:
+            llama_server:
+                fast_light_text: phi4:14b
 `
 	if err := os.WriteFile(path, []byte(src), 0644); err != nil {
 		t.Fatal(err)
@@ -57,72 +50,68 @@ models:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Models.Tiers.FastLightText.Open != "phi4:14b" {
-		t.Errorf("FastLightText.Open = %q, want phi4:14b", cfg.Models.Tiers.FastLightText.Open)
+	if got, ok := cfg.Models.OverrideFor("llama_server", TierFastLightText); !ok || got != "phi4:14b" {
+		t.Errorf("override = (%q,%v), want phi4:14b,true", got, ok)
 	}
 	if err := Save(cfg, path); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	out, _ := os.ReadFile(path)
-	for _, want := range []string{"models:", "tiers:", "fast_light_text:", "phi4:14b"} {
+	for _, want := range []string{"models:", "open:", "overrides:", "llama_server:", "fast_light_text: phi4:14b"} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("saved config missing %q:\n%s", want, out)
 		}
 	}
 }
 
-// TestApplyModelTierPatch pins the sparse-patch contract used by /config:
-// "<tier>.open" sets a slot, "-" clears it, and unknown tiers/providers are
-// rejected with an error. (Cloud is not patchable here — vendor-keyed path.)
 func TestApplyModelTierPatch(t *testing.T) {
 	var m ModelsConfig
 
-	desc, err := ApplyModelTierPatch(&m, "fast_light_text.open", "phi4:14b")
+	desc, err := ApplyModelTierPatch(&m, "llama_server.fast_light_text", "phi4:14b")
 	if err != nil {
 		t.Fatalf("set slot: %v", err)
 	}
-	if m.Tiers.FastLightText.Open != "phi4:14b" {
-		t.Errorf("slot not set: %+v", m.Tiers.FastLightText)
+	if got, ok := m.OverrideFor("llama_server", TierFastLightText); !ok || got != "phi4:14b" {
+		t.Errorf("slot not set: (%q,%v)", got, ok)
 	}
-	if !strings.Contains(desc, "fast_light_text.open") {
+	if !strings.Contains(desc, "llama_server.fast_light_text") {
 		t.Errorf("change description should name the slot, got %q", desc)
 	}
 
-	// Cloud is no longer a patchable provider side.
-	if _, err := ApplyModelTierPatch(&m, "everyday.cloud", "claude-opus"); err == nil {
-		t.Error("everyday.cloud must be rejected — cloud is not a tier slot")
+	// Cloud is no longer a patchable provider side, and tier names are validated.
+	if _, err := ApplyModelTierPatch(&m, "llama_server.cloud", "claude-opus"); err == nil {
+		t.Error("cloud tier must be rejected")
 	}
 
-	if _, err := ApplyModelTierPatch(&m, "fast_light_text.open", "-"); err != nil {
+	if _, err := ApplyModelTierPatch(&m, "llama_server.fast_light_text", "-"); err != nil {
 		t.Fatalf("clear slot: %v", err)
 	}
-	if m.Tiers.FastLightText.Open != "" {
-		t.Errorf("slot not cleared: %q", m.Tiers.FastLightText.Open)
+	if got, ok := m.OverrideFor("llama_server", TierFastLightText); ok || got != "" {
+		t.Errorf("slot not cleared: (%q,%v)", got, ok)
+	}
+	if len(m.Open.Overrides) != 0 {
+		t.Errorf("empty runtime map should be pruned, got %#v", m.Open.Overrides)
 	}
 
-	if _, err := ApplyModelTierPatch(&m, "medium_rare.open", "x"); err == nil {
+	if _, err := ApplyModelTierPatch(&m, "llama_server.medium_rare", "x"); err == nil {
 		t.Error("unknown tier must be rejected")
 	}
-	if _, err := ApplyModelTierPatch(&m, "everyday.hybrid", "x"); err == nil {
-		t.Error("unknown provider must be rejected")
-	}
 	if _, err := ApplyModelTierPatch(&m, "everyday", "x"); err == nil {
-		t.Error("missing provider segment must be rejected")
+		t.Error("missing runtime/tier segment must be rejected")
 	}
 }
 
-// TestModelTierSlots pins the read-side enumeration used by GetConfig and
-// /config show: only non-empty slots, keyed "<tier>.<provider>".
 func TestModelTierSlots(t *testing.T) {
 	var m ModelsConfig
-	m.Tiers.FastLightText.Open = "phi4:14b"
-	m.Tiers.Everyday.Open = "qwen3-coder"
+	m.SetOverride("llama_server", TierFastLightText, "phi4:14b")
+	m.SetOverride("llama_server", TierEveryday, "qwen3-coder")
+	m.SetOverride("mistralrs", TierEveryday, "mistral-qwen")
 
 	slots := m.TierSlots()
-	if len(slots) != 2 {
-		t.Fatalf("slots = %v, want 2 entries", slots)
+	if len(slots) != 3 {
+		t.Fatalf("slots = %v, want 3 entries", slots)
 	}
-	if slots["fast_light_text.open"] != "phi4:14b" || slots["everyday.open"] != "qwen3-coder" {
+	if slots["llama_server.fast_light_text"] != "phi4:14b" || slots["llama_server.everyday"] != "qwen3-coder" || slots["mistralrs.everyday"] != "mistral-qwen" {
 		t.Errorf("slots = %v", slots)
 	}
 }

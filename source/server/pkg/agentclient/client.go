@@ -242,7 +242,8 @@ type Config struct {
 	ToolElisionOnly bool
 	// ToolLoopMaxIterations caps LLM round-trips per turn; -1 means unlimited.
 	ToolLoopMaxIterations int
-	// ModelTiers is the open taxonomy's non-empty slots keyed "<tier>.open".
+	// ModelTiers is the open override taxonomy's non-empty slots keyed
+	// "<runtime>.<tier>".
 	ModelTiers map[string]string
 	// Agent lifecycle.
 	AgentShutdownOnLastClient bool
@@ -330,8 +331,10 @@ type ConfigUpdate struct {
 	ToolElisionOnly string
 	// ToolLoopMaxIterations — sparse-patch int. "" = unchanged, -1 = unlimited.
 	ToolLoopMaxIterations string
-	// Model taxonomy sparse-patch: ModelTierKey is "<tier>.open";
+	// Model taxonomy sparse-patch: ModelTierKey is "<runtime>.<tier>";
 	// ModelTierValue is the model id ("-" clears). Empty key = unchanged.
+	// The server also accepts the legacy UI compatibility key "embedding.open"
+	// for the active runtime's embedding override.
 	ModelTierKey   string
 	ModelTierValue string
 	// Agent lifecycle. Sparse-patch: "" = unchanged, "true" / "false" = apply.

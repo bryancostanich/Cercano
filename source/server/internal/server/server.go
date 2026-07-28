@@ -40,13 +40,14 @@ import (
 	"cercano/source/server/internal/llamacompat"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/localruntime"
+	"cercano/source/server/internal/localruntime/catalogdefaults"
 	"cercano/source/server/internal/localruntime/llamaserver"
-	runtimemistralrs "cercano/source/server/internal/localruntime/mistralrs"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
 	mcphost "cercano/source/server/internal/mcp_host"
 	"cercano/source/server/internal/mistralrscompat"
 	"cercano/source/server/internal/ollamacatalog"
+	"cercano/source/server/internal/openmodels"
 	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/retention"
 	runnersvc "cercano/source/server/internal/runner"
@@ -87,9 +88,10 @@ type Server struct {
 	// Ollama backends, one active). Held on Server directly — browse runs
 	// host-side; the worker doesn't discover models.
 	catalogRegistry *catalog.Registry
-	cfgSvc          cfgsvc.Service     // owns configPath, currentConfig, cfgMu, secrets
-	toolSvc         toolssvc.Catalog   // owns toolRegistry, capRegistry, dispatchEngine
-	persistSvc      persistsvc.Service // owns retentionSweeper, compactionGen, contextLoader
+	cfgSvc          cfgsvc.Service       // owns configPath, currentConfig, cfgMu, secrets
+	openModels      *openmodels.Resolver // single effective-open-model resolver (override ⊕ catalog)
+	toolSvc         toolssvc.Catalog     // owns toolRegistry, capRegistry, dispatchEngine
+	persistSvc      persistsvc.Service   // owns retentionSweeper, compactionGen, contextLoader
 	permBroker      permissions.Broker
 	// profileBroker owns the session's active capability profile — the read-only
 	// planning fence today, and future named modes (brainstorm, execute, …). It
@@ -227,7 +229,7 @@ func (s *Server) SetRolloverConfig(rawTokenThreshold int64, reconsolidationThres
 // SetMcpManager wires the MCP host manager so the RPC handlers can delegate to it.
 func (s *Server) SetMcpManager(m McpManager) {
 	if s.runtimesSvc == nil {
-		s.runtimesSvc = runtimessvc.New(nil)
+		s.runtimesSvc = runtimessvc.New(nil, s.openModels)
 	}
 	s.runtimesSvc.SetMcpManager(m)
 }
@@ -278,15 +280,16 @@ func runtimeWantedModels(cfg config.Config, runtime string) []string {
 // UpdateConfig response; enqueue failures are logged, not fatal (the switch
 // still lands and the not-ready chip stays lit until the fetch completes).
 
-func rebindOpenTiersForRuntime(cfg *config.Config, runtime string) string {
-	model := runtimeDefaultModel(*cfg, strings.TrimSpace(runtime))
-	if model == "" {
-		return ""
+// effectiveOpenModelFor resolves a tier's effective open model against an
+// explicit (possibly in-flight, not-yet-committed) config: the runtime's
+// override, else the catalog default by RAM. Used where the live resolver
+// (which reads committed config) would see stale state — e.g. mid-UpdateConfig,
+// after mutating c.OpenRuntime but before the mutation lands.
+func effectiveOpenModelFor(cfg config.Config, t config.Tier) string {
+	if id, ok := cfg.Models.OverrideFor(cfg.OpenRuntime, t); ok {
+		return id
 	}
-	cfg.Models.Tiers.Everyday.Open = model
-	cfg.Models.Tiers.FastLight.Open = model
-	cfg.Models.Tiers.FastLightText.Open = model
-	return model
+	return catalogdefaults.ForRuntime(cfg.OpenRuntime, uint64(sysram.Total()))[string(t)]
 }
 
 func (s *Server) ensureRuntimeModelsPresent(ctx context.Context, cfg config.Config, runtime string) {
@@ -683,7 +686,7 @@ func (s *Server) resolveMainProvider() (inference.Provider, bool, bool, error) {
 // SetRuntimeManager attaches the local runtime/dashboard state manager.
 func (s *Server) SetRuntimeManager(m localruntime.Manager) {
 	if s.runtimesSvc == nil {
-		s.runtimesSvc = runtimessvc.New(s.cfgSvc)
+		s.runtimesSvc = runtimessvc.New(s.cfgSvc, s.openModels)
 	}
 	s.runtimesSvc.SetRuntimeManager(m)
 	// The Server observes lifecycle transitions so a completed download of the
@@ -728,16 +731,22 @@ func (s *Server) SetCompactionGenerator(g *compactiongen.Generator) {
 // NewServer creates a new Agent gRPC server.
 func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
 	cfgService := cfgsvc.New("", config.Config{}, nil)
-	rtSvc := runtimessvc.New(cfgService)
+	// The single effective-open-model resolver: overrides from config, defaults
+	// from the per-runtime catalog by RAM. Every collaborator that needs the
+	// effective open model receives this.
+	openModelsResolver := openmodels.New(cfgService, catalogdefaults.ForRuntime,
+		func() uint64 { return uint64(sysram.Total()) })
+	rtSvc := runtimessvc.New(cfgService, openModelsResolver)
 	s := &Server{
 		agent:         a,
 		events:        newEventHub(),
 		cfgSvc:        cfgService,
+		openModels:    openModelsResolver,
 		runtimesSvc:   rtSvc,
 		turnBroker:    broker.New(),
 		profileBroker: agent.NewProfileBroker(),
 	}
-	s.providerSvc = providers.New(cfgService, router, coordinator, cloudFactory, registry, nil)
+	s.providerSvc = providers.New(cfgService, openModelsResolver, router, coordinator, cloudFactory, registry, nil)
 	// Construct the persistence service. It wraps the agent for store access;
 	// the agent itself is NOT owned by this service. The func-value collaborators
 	// read live state from providerSvc at call time.
@@ -845,6 +854,7 @@ func (s *Server) SelectExecutionMode() {
 			return st.EnsureSubagentConversation(ctx, id, parentID, projectDir, model, grantedTools)
 		}, // worker-side dispatch: create the sub-agent conversation row on the host
 		func() inference.Provider { return s.OpenLLMProvider() }, // answers the worker's OpenInferenceRequests
+		s.openModels.Model, // resolves effective active-runtime open tier models for the snapshot
 	)
 	log.Printf("[server] execution mode: worker (turns run in isolated child processes; " +
 		"MCP-involving turns fall back to in-process — worker MCP proxying is a future refinement)")
@@ -1320,7 +1330,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		if val == "-" {
 			val = ""
 		}
-		c.Models.Tiers.Embedding.Open = val
+		c.Models.SetOverride(c.OpenRuntime, config.TierEmbedding, val)
 		desc := "embedding_model=" + val
 		if val == "" {
 			desc = "embedding_model unset"
@@ -1354,18 +1364,26 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		c.OllamaURL = req.OllamaUrl
 		s.broadcastConfigChanged("ollama_url", req.OllamaUrl)
 	}
-	if req.OpenModel != "" {
-		c.Models.Tiers.Everyday.Open = req.OpenModel
-		s.broadcastConfigChanged("local_model", req.OpenModel)
-	}
+	// Runtime first, so an accompanying OpenModel override keys onto the new
+	// active runtime. Switching runtime writes NOTHING to the tiers — the
+	// everyday model simply re-resolves (override-else-catalog-default) under
+	// the new runtime, so there is never a stale cross-runtime model id.
 	if req.OpenRuntime != "" {
 		c.OpenRuntime = req.OpenRuntime
+		s.broadcastConfigChanged("local_runtime", req.OpenRuntime)
 		if req.OpenModel == "" {
-			if rebound := rebindOpenTiersForRuntime(&c, req.OpenRuntime); rebound != "" {
-				s.broadcastConfigChanged("local_model", rebound)
+			// Reflect the newly-resolved everyday model for the UI. Resolve
+			// against the in-flight c (its OpenRuntime is already updated), not
+			// the live resolver, which still sees the pre-switch committed config.
+			if m := effectiveOpenModelFor(c, config.TierEveryday); m != "" {
+				s.broadcastConfigChanged("local_model", m)
 			}
 		}
-		s.broadcastConfigChanged("local_runtime", req.OpenRuntime)
+	}
+	if req.OpenModel != "" {
+		// Explicit user pick → an override for the (now-)active runtime.
+		c.Models.SetOverride(c.OpenRuntime, config.TierEveryday, req.OpenModel)
+		s.broadcastConfigChanged("local_model", req.OpenModel)
 	}
 	if req.OpenDefaultModel != "" {
 		// c.LlamaServer.DefaultModel was already set up top (before the runtime
@@ -1414,7 +1432,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 			resolvedModel = c.MistralRS.DefaultModel
 		}
 		if resolvedModel == "" && req.OpenRuntime != "" {
-			resolvedModel = (&c).OpenChatModel()
+			resolvedModel = effectiveOpenModelFor(c, config.TierEveryday)
 		}
 		s.providerSvc.Reconfigure(providers.ReconfigureArgs{
 			OllamaURL:         req.OllamaUrl,
@@ -1645,8 +1663,8 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 	}
 	return &proto.GetConfigResponse{
 		OllamaUrl:                 cfg.OllamaURL,
-		OpenModel:                 cfg.OpenChatModel(),
-		EmbeddingModel:            cfg.OpenEmbeddingModel(),
+		OpenModel:                 s.openModels.Model(config.TierEveryday),
+		EmbeddingModel:            s.openModels.Model(config.TierEmbedding),
 		CloudProvider:             cloudProvider,
 		CloudModel:                cloudModel,
 		CloudBaseUrl:              cloudBaseURL,
@@ -1961,22 +1979,17 @@ func activeRuntimeInstance(ctx context.Context, rm localruntime.Manager, runtime
 	return localruntime.InstanceRecord{}, false
 }
 
-// recommendedOpenModels returns the curated open-model recommendation for the
-// active open runtime: mistral.rs recommends its own curated chat tiers and
-// keeps the embedding tier on the shared nomic (it does not serve embeddings);
-// every other runtime uses the llama-server curated recommendation.
+// ResolveOpenModel returns the EFFECTIVE open model id for a tier on the active
+// runtime (override-else-catalog-default). It delegates to the single resolver
+// (internal/openmodels) so there is exactly one implementation of the merge.
+func (s *Server) ResolveOpenModel(t config.Tier) string {
+	return s.openModels.Model(t)
+}
+
+// recommendedOpenModels is the active-runtime convenience wrapper (over the
+// shared catalogdefaults.ForRuntime) retained for the RAM-status RPC caller.
 func (s *Server) recommendedOpenModels(ram uint64) map[string]string {
-	if strings.EqualFold(s.cfgSvc.Get().OpenRuntime, "mistralrs") {
-		recs := runtimemistralrs.RecommendedOpenModels(ram)
-		if recs == nil {
-			recs = map[string]string{}
-		}
-		if emb := llamaserver.RecommendedOpenModels(ram)["embedding"]; emb != "" {
-			recs["embedding"] = emb
-		}
-		return recs
-	}
-	return llamaserver.RecommendedOpenModels(ram)
+	return catalogdefaults.ForRuntime(s.cfgSvc.Get().OpenRuntime, ram)
 }
 
 func (s *Server) activeCatalogFormat() string {

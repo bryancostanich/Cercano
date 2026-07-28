@@ -425,6 +425,7 @@ func TestStreamToolLoop_ReplaysHistoryNoDuplication(t *testing.T) {
 // model-max for the active cloud model.
 func TestStreamToolLoop_UpdatesContextMeter(t *testing.T) {
 	srv, _ := newServerWithStore(t)
+	srv.cfgSvc.Mutate(func(c *config.Config) { c.LocusMode = "cloud_only" })
 	prov := &scriptedProvider{
 		scripts: [][]llm.Block{{{Type: llm.BlockText, Text: "hello"}}},
 		caps:    inference.Capabilities{SupportsTools: true},

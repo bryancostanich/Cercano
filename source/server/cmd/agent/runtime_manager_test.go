@@ -39,7 +39,7 @@ func TestOpenTurnModelUsesMistralDefault(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.OpenRuntime = "mistralrs"
 	cfg.MistralRS.DefaultModel = "qwen3-30b-a3b-instruct-2507"
-	cfg.Models.Tiers.Everyday.Open = "stale-gguf-alias"
+	cfg.Models.SetOverride("mistralrs", config.TierEveryday, "custom-override")
 
 	if got := openTurnModel(cfg); got != "qwen3-30b-a3b-instruct-2507" {
 		t.Fatalf("openTurnModel = %q", got)

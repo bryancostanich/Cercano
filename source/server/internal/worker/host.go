@@ -59,6 +59,12 @@ type workerRunner struct {
 	perms   permissions.Broker
 	secrets secrets.Store
 
+	// openTierModel resolves the EFFECTIVE open model id for a tier on the
+	// active runtime (override-else-catalog-default), so the ConfigSnapshot
+	// carries host-resolved models the worker can use without the catalog. nil
+	// on dial-injected test runners (they send no open tier models).
+	openTierModel func(pkgcfg.Tier) string
+
 	// srcMu guards the per-profile token-source caches below. Reusing one
 	// Source per profile is what makes the sources' single-flight refresh
 	// actually apply: a fresh Source per credential request gives each
@@ -110,6 +116,7 @@ func NewWorkerRunner(
 	st secrets.Store,
 	ensureSubagent EnsureSubagentFunc,
 	openProvider func() inference.Provider,
+	openTierModel func(pkgcfg.Tier) string,
 ) runner.TurnRunner {
 	pool := newWorkerPool(nil) // production: spawn via spawnWorker
 	// Start the idle-reaper with the configured window. The reaper runs on a
@@ -123,8 +130,28 @@ func NewWorkerRunner(
 		secrets:        st,
 		ensureSubagent: ensureSubagent,
 		openProvider:   openProvider,
+		openTierModel:  openTierModel,
 		pool:           pool,
 	}
+}
+
+// resolveOpenTiers returns the effective open model id per tier for the active
+// runtime, for the ConfigSnapshot. Empty when no resolver is wired (test
+// runners) — the worker then simply has no open tier models.
+func (w *workerRunner) resolveOpenTiers() map[string]string {
+	if w.openTierModel == nil {
+		return nil
+	}
+	out := map[string]string{}
+	for _, t := range []pkgcfg.Tier{
+		pkgcfg.TierMostCapable, pkgcfg.TierEveryday, pkgcfg.TierFastLight,
+		pkgcfg.TierFastLightText, pkgcfg.TierEmbedding,
+	} {
+		if id := w.openTierModel(t); id != "" {
+			out[string(t)] = id
+		}
+	}
+	return out
 }
 
 // Shutdown drains the per-conversation worker pool: kills every warm worker and
@@ -204,7 +231,9 @@ func (w *workerRunner) RunTurn(
 
 	// ── 3. Build ConfigSnapshot + permission mode ──────────────────────────
 	cfg := w.cfg.Get()
-	snap := SnapshotConfig(cfg, "") // no credential in snapshot — worker fetches on demand
+	// Resolve the active runtime's effective open tier models host-side (the
+	// worker cannot see the catalog); the snapshot carries them as overrides.
+	snap := SnapshotConfig(cfg, "", w.resolveOpenTiers()) // no credential — worker fetches on demand
 	permMode := string(agent.ModePermissive)
 	if w.perms != nil {
 		permMode = string(w.perms.Mode())

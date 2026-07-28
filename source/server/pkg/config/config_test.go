@@ -42,8 +42,8 @@ func TestDefaults(t *testing.T) {
 	if cfg.OpenRuntime != "llama_server" {
 		t.Errorf("expected default OpenRuntime llama_server, got %q", cfg.OpenRuntime)
 	}
-	// The legacy model fields are retired: Defaults() leaves them blank and
-	// the stock models land in the tier slots at Load time (finalizeModelTiers).
+	// The legacy model fields are retired: Defaults() leaves them blank; stock
+	// models now resolve from the server/catalog unless the user sets overrides.
 	if cfg.OpenModel != "" || cfg.EmbeddingModel != "" {
 		t.Errorf("legacy model fields = (%q, %q), want blank in Defaults", cfg.OpenModel, cfg.EmbeddingModel)
 	}
@@ -144,12 +144,12 @@ func TestLoad_FromFile(t *testing.T) {
 	if cfg.OllamaURL != "http://mac-studio.local:11434" {
 		t.Errorf("expected OllamaURL from file, got %q", cfg.OllamaURL)
 	}
-	if got := cfg.OpenChatModel(); got != "GLM-4.7-Flash" {
-		t.Errorf("expected chat model from file (via legacy local_model migration), got %q", got)
+	if got, ok := cfg.Models.OverrideFor(cfg.OpenRuntime, TierEveryday); !ok || got != "GLM-4.7-Flash" {
+		t.Errorf("expected chat override from file (via legacy local_model migration), got (%q,%v)", got, ok)
 	}
-	// Defaults should fill in unset fields
-	if got := cfg.OpenEmbeddingModel(); got != "nomic-embed-text" {
-		t.Errorf("expected default embedding model, got %q", got)
+	// Embedding defaults now come from the server/catalog merge, not pkg/config.
+	if got, ok := cfg.Models.OverrideFor(cfg.OpenRuntime, TierEmbedding); ok || got != "" {
+		t.Errorf("expected no embedding override by default, got (%q,%v)", got, ok)
 	}
 	if cfg.Port != "50052" {
 		t.Errorf("expected default Port, got %q", cfg.Port)
@@ -197,8 +197,8 @@ func TestLoad_EnvOverridesFile(t *testing.T) {
 		t.Errorf("expected env override for OllamaURL, got %q", cfg.OllamaURL)
 	}
 	// File value should remain where no env var exists
-	if got := cfg.OpenChatModel(); got != "file-model" {
-		t.Errorf("expected chat model from file, got %q", got)
+	if got, ok := cfg.Models.OverrideFor(cfg.OpenRuntime, TierEveryday); !ok || got != "file-model" {
+		t.Errorf("expected chat override from file, got (%q,%v)", got, ok)
 	}
 }
 
@@ -210,8 +210,8 @@ func TestLoad_EnvOverridesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
-	if got := cfg.OpenChatModel(); got != "env-model" {
-		t.Errorf("expected env chat model, got %q", got)
+	if got, ok := cfg.Models.OverrideFor(cfg.OpenRuntime, TierEveryday); !ok || got != "env-model" {
+		t.Errorf("expected env chat override, got (%q,%v)", got, ok)
 	}
 	if cfg.Port != "9999" {
 		t.Errorf("expected env Port, got %q", cfg.Port)
@@ -283,14 +283,13 @@ func TestSave_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 
-	cfg := Config{
-		OllamaURL:      "http://studio.local:11434",
-		OpenModel:      "GLM-4.7-Flash",
-		EmbeddingModel: "nomic-embed-text",
-		CloudProvider:  "google",
-		CloudModel:     "gemini-2.0-flash",
-		Port:           "50053",
-	}
+	cfg := Defaults()
+	cfg.OllamaURL = "http://studio.local:11434"
+	cfg.OpenModel = "GLM-4.7-Flash"
+	cfg.EmbeddingModel = "nomic-embed-text"
+	cfg.CloudProvider = "google"
+	cfg.CloudModel = "gemini-2.0-flash"
+	cfg.Port = "50053"
 
 	if err := Save(cfg, path); err != nil {
 		t.Fatalf("Save failed: %v", err)
@@ -304,10 +303,9 @@ func TestSave_RoundTrip(t *testing.T) {
 	if loaded.OllamaURL != cfg.OllamaURL {
 		t.Errorf("OllamaURL mismatch: %q vs %q", loaded.OllamaURL, cfg.OllamaURL)
 	}
-	// open_model migrates to the everyday tier on load; the resolver is the
-	// round-trip-stable accessor.
-	if loaded.OpenChatModel() != cfg.OpenModel {
-		t.Errorf("chat model mismatch: %q vs %q", loaded.OpenChatModel(), cfg.OpenModel)
+	// open_model migrates to the active runtime's everyday override on load.
+	if got, ok := loaded.Models.OverrideFor(loaded.OpenRuntime, TierEveryday); !ok || got != cfg.OpenModel {
+		t.Errorf("chat override mismatch: (%q,%v) vs %q", got, ok, cfg.OpenModel)
 	}
 	if loaded.CloudProvider != cfg.CloudProvider {
 		t.Errorf("CloudProvider mismatch: %q vs %q", loaded.CloudProvider, cfg.CloudProvider)
@@ -373,8 +371,8 @@ locus_mode: local_primary
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
-	if got := cfg.OpenChatModel(); got != "legacy-model" {
-		t.Errorf("expected legacy local_model to migrate into the everyday tier, got %q", got)
+	if got, ok := cfg.Models.OverrideFor(cfg.OpenRuntime, TierEveryday); !ok || got != "legacy-model" {
+		t.Errorf("expected legacy local_model to migrate into the everyday override, got (%q,%v)", got, ok)
 	}
 	if cfg.OpenRuntime != "llama_server" {
 		t.Errorf("expected legacy local_runtime to populate OpenRuntime, got %q", cfg.OpenRuntime)
@@ -397,8 +395,8 @@ local_model: legacy-model
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
-	if got := cfg.OpenChatModel(); got != "new-key-model" {
-		t.Errorf("open_model should win over local_model, got %q", got)
+	if got, ok := cfg.Models.OverrideFor(cfg.OpenRuntime, TierEveryday); !ok || got != "new-key-model" {
+		t.Errorf("open_model should win over local_model, got (%q,%v)", got, ok)
 	}
 }
 

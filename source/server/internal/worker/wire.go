@@ -207,7 +207,12 @@ func protoToEventKind(k proto.WorkerEventKind) runner.EventKind {
 // SnapshotConfig builds a ConfigSnapshot from a config.Config and the
 // keychain-resolved API credential. The snapshot carries only the fields the
 // worker's execution Deps need; nothing else crosses the process boundary.
-func SnapshotConfig(cfg config.Config, cred string) *proto.ConfigSnapshot {
+// SnapshotConfig serializes config for the worker. openTiers carries the
+// EFFECTIVE open model id per tier for the active runtime (override-else-
+// catalog-default), resolved host-side because the worker cannot see the
+// catalog; the worker receives them as the active runtime's overrides. Keys are
+// tier names (config.TierEveryday, …); a nil/empty map sends no open models.
+func SnapshotConfig(cfg config.Config, cred string, openTiers map[string]string) *proto.ConfigSnapshot {
 	// Pull active cloud profile fields.
 	var (
 		flavor     string
@@ -268,7 +273,6 @@ func SnapshotConfig(cfg config.Config, cred string) *proto.ConfigSnapshot {
 		modelProfilesJSON = string(b)
 	}
 
-	t := cfg.Models.Tiers
 	return &proto.ConfigSnapshot{
 		LocusMode:          cfg.LocusMode,
 		ActiveCloudProfile: cfg.ActiveCloudProfile,
@@ -295,11 +299,11 @@ func SnapshotConfig(cfg config.Config, cred string) *proto.ConfigSnapshot {
 		// Only the open tier slots cross the wire. Cloud resolves via the
 		// vendor-keyed cost-tier path, and the default-provider knob was retired
 		// (their proto field numbers are now reserved).
-		TierMostCapableOpen:   t.MostCapable.Open,
-		TierEverydayOpen:      t.Everyday.Open,
-		TierFastLightOpen:     t.FastLight.Open,
-		TierFastLightTextOpen: t.FastLightText.Open,
-		TierEmbeddingOpen:     t.Embedding.Open,
+		TierMostCapableOpen:   openTiers[string(config.TierMostCapable)],
+		TierEverydayOpen:      openTiers[string(config.TierEveryday)],
+		TierFastLightOpen:     openTiers[string(config.TierFastLight)],
+		TierFastLightTextOpen: openTiers[string(config.TierFastLightText)],
+		TierEmbeddingOpen:     openTiers[string(config.TierEmbedding)],
 
 		CompactionEnabled:               cfg.Compaction.Enabled,
 		CompactionActivationFloorTokens: int32(cfg.Compaction.ActivationFloorTokens),
@@ -324,6 +328,19 @@ func SnapshotConfig(cfg config.Config, cred string) *proto.ConfigSnapshot {
 // ConfigFromSnapshot reconstructs the config.Config fields the worker cares
 // about from a ConfigSnapshot. Fields the worker never reads (e.g. Port,
 // retention, LlamaServer) are left at zero/default.
+// modelsConfigFromWire rebuilds the worker-side models config from the wire's
+// effective open tier ids, storing each non-empty tier as an override under the
+// active runtime so OverrideFor returns the host-intended model.
+func modelsConfigFromWire(runtime string, tiers map[string]string) config.ModelsConfig {
+	var m config.ModelsConfig
+	for tier, id := range tiers {
+		if id != "" {
+			m.SetOverride(runtime, config.Tier(tier), id)
+		}
+	}
+	return m
+}
+
 func ConfigFromSnapshot(p *proto.ConfigSnapshot) config.Config {
 	if p == nil {
 		return config.Config{}
@@ -379,15 +396,16 @@ func ConfigFromSnapshot(p *proto.ConfigSnapshot) config.Config {
 		ModelProfiles:      mp,
 		ToolLoop:           config.ToolLoopConfig{MaxIterations: int(p.ToolLoopMaxIterations)},
 
-		Models: config.ModelsConfig{
-			Tiers: config.ModelTiers{
-				MostCapable:   config.ModelTier{Open: p.TierMostCapableOpen},
-				Everyday:      config.ModelTier{Open: p.TierEverydayOpen},
-				FastLight:     config.ModelTier{Open: p.TierFastLightOpen},
-				FastLightText: config.ModelTier{Open: p.TierFastLightTextOpen},
-				Embedding:     config.ModelTier{Open: p.TierEmbeddingOpen},
-			},
-		},
+		// The wire carries EFFECTIVE open tier models (host resolved them); store
+		// them as the active runtime's overrides so the worker's config resolves
+		// each tier to exactly what the host intended, without the catalog.
+		Models: modelsConfigFromWire(p.OpenRuntime, map[string]string{
+			string(config.TierMostCapable):   p.TierMostCapableOpen,
+			string(config.TierEveryday):      p.TierEverydayOpen,
+			string(config.TierFastLight):     p.TierFastLightOpen,
+			string(config.TierFastLightText): p.TierFastLightTextOpen,
+			string(config.TierEmbedding):     p.TierEmbeddingOpen,
+		}),
 
 		Compaction: config.CompactionConfig{
 			Enabled:               p.CompactionEnabled,

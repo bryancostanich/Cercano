@@ -41,9 +41,9 @@ func RegisterConfig(r *Registry, c *agentclient.Client) {
 			value := strings.Join(args[1:], " ")
 
 			var update agentclient.ConfigUpdate
-			// Model taxonomy: /config models.<tier>.open <model-id>
-			// ("-" clears a slot). Key validation lives server-side in
-			// ApplyModelTierPatch.
+			// Open model overrides: /config models.<runtime>.<tier> <model-id>
+			// ("-" clears an override). Key validation lives server-side in
+			// ApplyModelTierPatch. Example: models.llama_server.everyday qwen3-coder
 			if strings.HasPrefix(key, "models.") {
 				update.ModelTierKey = strings.TrimPrefix(key, "models.")
 				update.ModelTierValue = value

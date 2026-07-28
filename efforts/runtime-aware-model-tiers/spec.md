@@ -1,133 +1,184 @@
-# Runtime-aware, RAM-aware, profile-rich model tiers
+# Split cloud and open into two taxonomies; make the open side runtime-keyed
 
-## Problem
+## The core mistake we are undoing
 
-`config.ModelTier.Open` is a single string, but Cercano supports three open
-runtimes (`ollama`, `mistralrs`, `llama_server`) whose model identifiers are
-mutually incompatible (Ollama tags vs mistral catalog IDs vs llama-server GGUF
-paths). Switching `open_runtime` does **not** switch the model set — it leaves a
-now-wrong `Open` string, producing split-brain state (config says one runtime,
-tiers route to another runtime's model).
+`config.ModelTier` fused two unrelated taxonomies into one struct:
 
-There is also no capability metadata per model, so the system cannot express
-facts we verified empirically this session:
+```go
+type ModelTier struct {
+    Cloud string `yaml:"cloud"`
+    Open  string `yaml:"open"`
+}
+```
 
-- qwen UQFF on mistral.rs: loads, but multi-turn tool use is broken.
-- GLM GGUF on mistral.rs: does not load (`glm4moe` rejected).
-- GLM GGUF on llama-server: loads, tool-call/tool-result work, but **plain chat
-  returns empty content** (`plain_chat_ok = false`).
-- qwen GGUF on llama-server: fully works (tools + plain chat).
+Cloud and open are **not** two columns of one table. They are two different
+axes:
+
+- **Cloud** is keyed by **vendor** and has **three cost tiers**
+  (economy / standard / premium). A cloud model id belongs to a vendor, not to a
+  capability tier, and definitely not to a local runtime.
+- **Open** is keyed by **runtime** (`ollama` / `mistralrs` / `llama_server`),
+  whose model identifiers are mutually incompatible (Ollama tags vs mistral
+  catalog IDs vs llama-server GGUF paths). An open model id is meaningless
+  without its runtime.
+
+Forcing both into one `ModelTier{Cloud, Open}` with the four capability tiers
+(`most_capable` / `everyday` / `fast_light` / `fast_light_text`) is the original
+sin. Every corner this effort kept hitting is that fused struct fighting back:
+
+- The runtime-blind `Open` **string**: switching `open_runtime` leaves a
+  now-wrong id (config says one runtime, tiers route to another runtime's
+  model). This is the split-brain.
+- Cloud jammed into the same four capability tiers, when cloud's real taxonomy
+  is three vendor-keyed cost tiers.
+
+## History: cloud was already corrected once, but the residue was left behind
+
+`ef502a4b` already found that resolving cloud through the four capability-keyed
+`tiers.*.cloud` slots was wrong (it sent an Anthropic id to Codex, which
+rejected it). It introduced the **correct** cloud path — provider-neutral
+cost tiers (economy / standard / premium) keyed by vendor, via
+`ModelProfiles.Cloud.Providers.<vendor>` and `ResolveCloudModelForTier`, with a
+capability→cost bridge (`most_capable→premium`, `everyday→standard`,
+`fast_light[_text]→economy`).
+
+That commit **retired** `ModelTier.Cloud` from resolution ("kept load-tolerant,
+no longer read") but never deleted it. So today two cloud tier systems coexist:
+
+- **Correct, live**: `ModelProfiles.Cloud.Providers.<vendor>` — three cost
+  tiers, vendor-keyed, resolved by `ResolveCloudModelForTier`. **Keep.**
+- **Retired residue**: `ModelTier.Cloud`, the `.cloud` slots in
+  `tier_recommendations.yaml`, and the `.cloud` patch/show plumbing. This is the
+  four-tier cloud that "keeps coming back" — because it was never deleted.
+
+Phase 1 of this effort did **not** touch cloud. The four-tier cloud residue
+predates this effort.
 
 ## Goal
 
-1. Make the open side of a tier **runtime-aware**: each tier carries a model
-   per open runtime, so switching `open_runtime` is lossless and needs no
-   reconciliation.
-2. Introduce a **rich model profile** concept: a catalog of known, tested
-   `(runtime, artifact, capability)` records (`supports_tools`, `plain_chat_ok`,
-   `status`, `min_ram_gb`).
-3. Provide a **recommended matrix**: `(runtime × RAM level) → recommended model
-   per tier`, so setup and runtime-switch pick correct defaults for the machine.
+1. **Delete the four-tier cloud residue** so four-tier cloud is structurally
+   impossible: remove `ModelTier.Cloud`, the `cloud:` block in
+   `tier_recommendations.yaml`, and the `.cloud` patch/show plumbing. Cloud
+   resolution keeps flowing solely through the existing vendor-keyed cost-tier
+   path, which is untouched and already correct.
+
+2. **Make the open side runtime-keyed (runtime-outer).** A config carries one
+   **full open tier set per runtime**, with an active-runtime pointer. Switching
+   `open_runtime` swaps in that runtime's whole set losslessly — no runtime-blind
+   string, no reconciliation. This mirrors the per-runtime `catalog.json` shape
+   the codebase already uses.
+
+3. **Keep Phase 1.** Its `plain_chat_ok` / `status` capability fields and the
+   build-time gate live in the already-correct per-runtime catalog layer and are
+   retained as-is.
+
+## The two taxonomies (target shape)
+
+**Cloud — unchanged, vendor-keyed, three cost tiers:**
+
+```yaml
+model_profiles:
+  cloud:
+    providers:
+      anthropic: { economy: claude-haiku, standard: claude-sonnet, premium: claude-opus }
+      openai:    { economy: ...,           standard: ...,            premium: ... }
+```
+
+Resolved via `ResolveCloudModelForTier(vendor, capabilityTier)` using the
+existing capability→cost bridge. The active vendor comes from the active cloud
+profile (`CloudProfiles` / `ActiveCloudProfile`). Nothing here changes.
+
+**Open — runtime-outer, a full tier set per runtime:**
+
+```yaml
+models:
+  open_runtime: llama_server        # the active runtime (already exists as cfg.OpenRuntime)
+  open:
+    runtimes:
+      llama_server:
+        most_capable:    qwen3-30b-thinking
+        everyday:        qwen3-coder
+        fast_light:      ...
+        fast_light_text: ...
+        embedding:       nomic-embed-text
+      mistralrs:
+        most_capable:    ...
+        everyday:        ...
+        fast_light:      ...
+        fast_light_text: ...
+        embedding:       ...
+```
+
+Resolution for the open side: `open.runtimes[cfg.OpenRuntime][tier]`. Switching
+`cfg.OpenRuntime` selects a different, complete, internally-consistent set.
+
+The `ModelTier{Cloud, Open}` struct is **deleted**. Cloud and open no longer
+share a type or a tier enum, so a fourth cloud tier can never structurally
+reappear.
 
 ## Non-goals / decisions
 
-- **No migration.** Clean break. Existing configs' flat `open:` string values
-  are discarded and replaced by the stock matrix defaults on next load. The user
-  explicitly approved blowing away current `open:` tier values.
-- RAM buckets reuse the exact thresholds already in
-  `pkg/config/mistralrs_memory.go` (`<32`, `32–63`, `64–127`, `128+`), factored
-  into one shared function so they never diverge.
-- The recommended matrix lives in the existing embedded
-  `pkg/config/tier_recommendations.yaml` (extended), not a new file (option D).
-- The profile catalog is data (embedded YAML), separate from user config.
+- **No migration.** Clean break. Existing configs' flat `open:` string values and
+  any `tiers.*.cloud` values are discarded on next load and replaced by the
+  runtime's stock defaults. The user explicitly approved blowing away current
+  values.
+- **Runtime-outer, not tier-outer.** The runtime owns its full tier set; the whole
+  set swaps on runtime change. (Explicitly chosen over "tier owns a per-runtime
+  map".)
+- **Cloud is out of scope except for deleting the retired residue.** The live
+  vendor-keyed cost-tier cloud path is correct and untouched.
+- RAM buckets reuse the existing thresholds (`<32`, `32–63`, `64–127`, `128+`)
+  already used by the per-runtime catalogs; open defaults are picked from the
+  per-runtime `catalog.json` by detected RAM (this data already exists — do not
+  rebuild it).
+- The per-runtime curated catalogs (`mistralrs/catalog.json`,
+  `llamaserver/catalog.json`) remain the source of runtime-valid model ids and
+  capability facts; Phase 1's `plain_chat_ok` / `status` fields stay.
 
-## Reality check (discovered during Phase 1 recon — supersedes parts of the plan below)
+## Blast radius (verified read/write sites)
 
-Much of the "matrix" already exists. Do NOT rebuild it:
+Open side (`ModelTier.Open` string → runtime-keyed set):
+- `pkg/config/models.go`: `ModelTier`, `side()`, `Resolve()`, `OpenChatModel()`,
+  `OpenEmbeddingModel()`, `ApplyModelTierPatch()`, `TierSlots()`,
+  `tier()`/`tierSlot()`.
+- `pkg/config/config.go`: open defaulting/finalize (lines ~761–781), env
+  overrides (~956–968), delete legacy flat-`open` migration.
+- `pkg/config/tierrecs.go` + `tier_recommendations.yaml`: open block; **delete**
+  the `cloud:` block.
+- `internal/worker/wire.go`: `TierEverydayOpen` etc. flat wire fields.
+- `internal/server/server.go`: `rebindOpenTiersForRuntime`, runtime-switch flow.
+- `internal/server/config_watcher.go`: `Everyday.Open` change detection.
+- CLI `internal/ui`: tier/runtime pickers.
+- Tests referencing `.Open` as a string:
+  `models_test.go`, `models_migrate_test.go` (delete), `config_test.go`,
+  `tierrecs_test.go`, plus server/worker tests.
 
-- Per-runtime curated catalogs already ship: `mistralrs/catalog.json` and
-  `llamaserver/catalog.json`, each with RAM-tiered `profiles`
-  (`"24"/"48"/"96"/"128"` GB → tier → model ID) and a `CuratedModel` dictionary.
-- `CuratedCatalog.ProfileForRAM(bytes)` already does the RAM-bucket lookup.
-- `CuratedModel` already carries `SupportsTools` and `SupportsEmbed`.
-- `server.recommendedOpenModels(ram)` already switches on the active runtime.
-- The setup wizard already prefers this per-runtime RAM-tiered catalog over the
-  flat `tier_recommendations.yaml` open block.
+Cloud residue to delete (do NOT touch the live vendor-keyed path):
+- `ModelTier.Cloud` field + `.cloud` YAML tag (`models.go:41`).
+- `side()` cloud branch (`models.go:99`), `ApplyModelTierPatch` cloud write
+  (`models.go:156`), `TierSlots` cloud emit (`models.go:176`).
+- The `cloud:` block in `tier_recommendations.yaml` and its loader/consumer in
+  `tierrecs.go` (`r.Cloud`, lines ~59/62/104) — confirm it is only wizard
+  autofill, then remove.
+- `models_test.go:142` (`Everyday.Cloud = ...`).
 
-So the matrix (D) is largely done. The real remaining gaps are:
-
-1. **`ModelTier.Open` is still a single string** → the resolved/persisted tier is
-   not runtime-keyed, so switching `open_runtime` leaves a stale cross-runtime
-   value (the split-brain). This is the core defect and the main work (B).
-2. **No capability field for "loads + tools work but plain chat broken."**
-   `CuratedModel` has `SupportsTools`/`SupportsEmbed` but not `PlainChatOK`/
-   `Status`. The llama `128` profile currently recommends `glm-4.5-air` for
-   `most_capable`, which we verified returns empty content on plain chat — a live
-   bad default that must be fixed and made expressible.
-3. **Two overlapping open-recommendation systems** (catalog.json profiles vs the
-   `tier_recommendations.yaml` `open:` block). The flat YAML open block is now
-   redundant/misleading and should be retired or reduced to a non-open fallback.
-
-## Approved design (B + D)
-
-Schema:
-
-```go
-type ModelProfile struct {
-    ID            string // "qwen3-30b-instruct-mistralrs", "glm-4.5-air-llama"
-    Runtime       string // mistralrs | llama_server | ollama
-    Model         string // wire model / catalog id / gguf path for that runtime
-    MinRAMGB      int
-    SupportsTools bool
-    PlainChatOK   bool
-    Status        string // tested | experimental | broken
-}
-
-type ModelTier struct {
-    Cloud string            `yaml:"cloud"`
-    Open  map[string]string `yaml:"open"` // runtime -> profileID (or model id)
-}
-```
-
-Resolution: `id := tier.Open[cfg.OpenRuntime]` → profile catalog lookup →
-runtime/model/capabilities. Switching runtime is lossless.
-
-Matrix data (`tier_recommendations.yaml`, replacing the flat `open:` block):
-
-```yaml
-open:
-  <runtime>:
-    "<ram_bucket_gb>":
-      most_capable: [profileID, ...]
-      everyday: [...]
-      fast_light: [...]
-      fast_light_text: [...]
-profiles:
-  <profileID>: { runtime, model, min_ram_gb, supports_tools, plain_chat_ok, status }
-```
+Must NOT be touched (different meaning of "Cloud" — live cloud runtime):
+- `inference.Tiers.Cloud` (the built cloud *TurnRunner*), `router.go` `Tiers`,
+  `main.go:319/584`, `ResolveCloudModelForTier`, `ModelProfiles.Cloud.Providers`,
+  `CloudProfiles`/`ActiveCloudProfile`, all `cmd/*/main.go` cloud-provider wiring.
 
 ## Acceptance
 
-- `ModelTier.Open` is a per-runtime map everywhere it is read/written
-  (config, worker wire protocol, server switch logic, resolver, UI).
-- Switching `open_runtime` selects that runtime's tier models with no stale
-  cross-runtime values.
-- The profile catalog encodes the verified capability facts above; GLM is
-  present but flagged `plain_chat_ok: false` and is never auto-selected as a
-  plain-chat default.
-- Setup / runtime-switch pick tier defaults from the matrix by detected RAM.
-- `go build ./...` and full `go test ./...` pass for both server and CLI.
-- No migration code remains for the legacy flat `open:` string.
-
-## Blast radius (known read/write sites)
-
-- `pkg/config/models.go`: `ModelTier`, `side()`, `Resolve()`, `OpenChatModel()`,
-  `ApplyModelTierPatch()`, `TierSlots()`, `tier()/tierSlot()`.
-- `pkg/config/config.go`: default/finalize logic (`finalizeModelTiers`,
-  `Everyday.Open`/`Embedding.Open` defaulting), delete legacy migration.
-- `pkg/config/tierrecs.go` + `tier_recommendations.yaml`: matrix + profiles.
-- `internal/worker/wire.go`: `TierEverydayOpen` etc. flat wire fields.
-- `internal/server/server.go`: `rebindOpenTiersForRuntime`, switch flow.
-- `internal/server/config_watcher.go`: `Everyday.Open` change detection.
-- CLI `internal/ui`: tier/runtime pickers.
-- ~15 test files referencing `.Open` as a string.
+- `ModelTier` is gone. Cloud and open are separate types with separate tier
+  vocabularies; there is no struct where a fourth cloud tier can exist.
+- The open side is a per-runtime full tier set (runtime-outer). Reads resolve via
+  `open.runtimes[cfg.OpenRuntime][tier]`.
+- Switching `open_runtime` selects that runtime's tier set with no stale
+  cross-runtime values and no reconciliation.
+- Cloud resolution flows only through the vendor-keyed cost-tier path; the retired
+  `.cloud` capability slots and the `cloud:` recommendations block are deleted.
+- Open tier defaults are picked from the per-runtime catalog by detected RAM;
+  GLM stays present but flagged `plain_chat_ok:false` and is never auto-selected
+  as a plain-chat default (Phase 1 retained).
+- No migration code remains for the legacy flat `open:` string or `tiers.*.cloud`.
+- `go build ./...` and `go test ./...` pass for both server and CLI.

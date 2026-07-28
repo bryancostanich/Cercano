@@ -1,71 +1,103 @@
-# Plan: runtime-aware, RAM-aware, profile-rich model tiers
+# Plan: split cloud/open taxonomies; runtime-keyed open tiers
 
-> **Resuming in a fresh conversation? Read `HANDOFF.md` in this directory FIRST.**
-> Phase 1 is committed and green. Phase 2 (the `ModelTier.Open` schema break) is
-> next; HANDOFF.md has the verified blast-radius map and design.
+> Re-specced after discovering the real defect: `ModelTier{Cloud, Open}` fuses
+> two unrelated taxonomies. See `spec.md`. Phase 1 (catalog capability fields) is
+> committed and green and is KEPT. Everything below (the old string→map Phase 2+)
+> is replaced by the two-taxonomy design.
 
 No migration. Clean break. Each phase must build and keep the full test suite
-green before moving on. Phases are ordered so the schema lands first, then data,
-then wiring, then UI.
+green before moving on. Order: delete cloud residue first (small, isolates the
+open work), then re-key open runtime-outer, then wiring, then UI.
 
-## Phase 1 — REPLANNED after recon: catalog capability fields + fix bad GLM default
+## Phase 1 — Catalog capability fields + fix bad GLM default (DONE, KEPT)
 
-The runtime×RAM×tier matrix already exists in mistralrs/llamaserver catalog.json
-with ProfileForRAM + SupportsTools/SupportsEmbed. Do NOT rebuild it. Instead:
+Committed and green. Lives in the correct per-runtime catalog layer; unaffected
+by the taxonomy split.
 
-- [x] Add `PlainChatOK *bool` (nil=true) and `Status string`
-      (tested/experimental/broken) to `CuratedModel` in both llamaserver and
-      mistralrs catalogs, with a `PlainChatSupported()` helper.
-- [x] Mark `glm-4.5-air-q4_k_m` as `plain_chat_ok:false`, `status:"broken"`.
-- [x] Fix the llama `128` profile: `most_capable` was GLM (empty plain chat) →
-      repointed to `qwen3-30b-a3b-thinking-2507-q4_k_m`. GLM stays in the model
-      dictionary (tool-capable) but is no longer an auto-selected default.
-- [x] Loader now rejects any chat (non-embedding) tier referencing a
-      `plain_chat_ok:false` model (extracted `validateCatalog`); mirrored in the
-      mistralrs catalog loader.
-- [x] Tests: new fields parse; GLM flagged; plain-chat tiers gated; loader
-      rejection test. Full server build + `go test ./...` green.
+- [x] `PlainChatOK *bool` (nil=true) + `Status` on `CuratedModel`, both catalogs,
+      with `PlainChatSupported()`.
+- [x] GLM flagged `plain_chat_ok:false`, `status:"broken"`; llama `128`
+      `most_capable` repointed off GLM to a verified qwen.
+- [x] Loader rejects any chat (non-embedding) tier referencing a
+      `plain_chat_ok:false` model.
+- [x] Tests green; full server build + `go test ./...` green.
 
-## Phase 2 — Schema change: `ModelTier.Open` string -> per-runtime map
+## Phase 2 — Delete the four-tier cloud residue
 
-- [ ] Change `ModelTier.Open` to `map[string]string` (runtime -> profile/model).
-- [ ] Update `side()`, `Resolve()`, `OpenChatModel()`, `ApplyModelTierPatch()`,
-      `TierSlots()` to read/write by active `OpenRuntime`.
-- [ ] Delete legacy flat-`open` migration (`models_migrate*`, the string
-      defaulting in `config.go`). Replace defaulting with matrix-driven stock
-      values for the detected runtime+RAM.
-- [ ] Tests in `pkg/config` updated for the map shape (no migration tests).
+Isolate cloud from the open rework by removing the retired capability-tier cloud
+slots. The live vendor-keyed cost-tier path (`ModelProfiles.Cloud.Providers`,
+`ResolveCloudModelForTier`) is NOT touched.
 
-## Phase 3 — Worker wire protocol
+- [ ] Confirm (one grep pass) that `ModelTier.Cloud` and the `cloud:` block in
+      `tier_recommendations.yaml` are read only by config surface / wizard
+      autofill, never by live resolution. Record the finding in HANDOFF.md.
+- [ ] Remove the `Cloud` field from `ModelTier` (temporarily leaving `Open` as
+      today's string so this phase compiles in isolation).
+- [ ] Remove the cloud branch from `side()`, the cloud write from
+      `ApplyModelTierPatch()`, and the cloud emit from `TierSlots()`. `Resolve()`
+      loses its cloud fallback branch (cloud no longer resolves through tiers).
+- [ ] Delete the `cloud:` block from `tier_recommendations.yaml` and the
+      `r.Cloud` loader/lookup in `tierrecs.go`.
+- [ ] Update tests that set/read `.Cloud` (`models_test.go:142`,
+      `tierrecs_test.go` cloud cases).
+- [ ] `go build ./...` + `go test ./...` green. Checkpoint.
 
-- [ ] Replace flat `TierEverydayOpen` etc. in `internal/worker/wire.go` with a
-      representation that carries the active runtime's resolved open model (the
-      worker only needs the resolved model for the active runtime, not the whole
-      map — confirm during implementation).
-- [ ] Update `wire_test.go`.
+## Phase 3 — Re-key the open side runtime-outer
 
-## Phase 4 — Server switch + config watcher
+Replace the fused tier struct with a per-runtime open tier set.
 
-- [ ] Rework `rebindOpenTiersForRuntime` / the switch flow to select the
-      runtime's matrix defaults instead of overwriting a single string.
-- [ ] Update `config_watcher.go` `Everyday.Open` change detection for the map.
+- [ ] New types in `pkg/config/models.go`:
+      - `OpenTierSet` — the five open tiers (`most_capable`, `everyday`,
+        `fast_light`, `fast_light_text`, `embedding`) as string model ids.
+      - `OpenModels{ Runtimes map[string]OpenTierSet }` replacing `ModelTiers`'
+        open role; `ModelTier` deleted entirely.
+      - Decide where cloud cost tiers already live (`ModelProfiles.Cloud`) — no
+        new cloud type needed.
+- [ ] Resolution: open reads `open.runtimes[cfg.OpenRuntime][tier]`. Thread the
+      active runtime explicitly into `OpenChatModel()` / `OpenEmbeddingModel()`
+      (they already hang off `*Config`, so they read `c.OpenRuntime`). No cached
+      copy of the runtime inside the models sub-struct (no split-brain).
+- [ ] `ApplyModelTierPatch` / `TierSlots` key grammar becomes open-only and
+      runtime-explicit: `open.<runtime>.<tier>` for writes, and `TierSlots`
+      shows the active runtime's set. (Cloud is configured via its own
+      vendor/profile path, not here.)
+- [ ] Defaulting/finalize (`config.go` ~761–781): fill a runtime's open tier set
+      from that runtime's `catalog.json` by detected RAM, for each known runtime
+      (or at least the active one — confirm during impl). Delete the flat-string
+      defaulting and the `OpenModel` legacy copy.
+- [ ] Delete legacy migration: `models_migrate_test.go` and the flat-`open`
+      migration code paths.
+- [ ] Rewrite `pkg/config` tests for the runtime-outer shape (no migration
+      tests). `go build ./...` + `go test ./pkg/config/...` green. Checkpoint.
+
+## Phase 4 — Worker wire protocol
+
+- [ ] Replace flat `TierEverydayOpen` etc. in `internal/worker/wire.go`. The
+      worker only needs the resolved open model for the active runtime, so send
+      the resolved-for-active-runtime ids, not the whole map (confirm during
+      impl).
+- [ ] Update `wire_test.go`. `go test ./internal/worker/...` green.
+
+## Phase 5 — Server switch + config watcher
+
+- [ ] Rework `rebindOpenTiersForRuntime` / the runtime-switch flow: switching
+      runtime selects that runtime's open tier set (from config, filled from the
+      catalog by RAM if absent) instead of overwriting a single string.
+- [ ] Update `config_watcher.go` open-tier change detection for the new shape.
 - [ ] Update `ensure_switch_test.go`, `models_resolve_test.go`,
-      `embedding_tier_test.go`.
-
-## Phase 5 — Setup + runtime-switch pick from matrix by RAM
-
-- [ ] Setup wizard and runtime-switch choose tier defaults from the matrix using
-      detected RAM and target runtime.
-- [ ] GLM flagged tool-only: never auto-selected for plain-chat/everyday.
+      `embedding_tier_test.go`. `go test ./internal/server/...` green.
 
 ## Phase 6 — CLI UI
 
-- [ ] Tier/runtime pickers show only profiles valid for the active runtime+RAM.
+- [ ] Tier/runtime pickers operate on the active runtime's open tier set and show
+      only catalog-valid models for that runtime+RAM; GLM never auto-selected for
+      plain-chat/everyday.
 - [ ] Update UI tests.
 
 ## Phase 7 — Full verification
 
 - [ ] `go build ./...` server + CLI.
 - [ ] `go test ./...` server + CLI.
-- [ ] Live smoke: switch runtime, confirm tiers resolve to the runtime's models
-      with no stale cross-runtime values.
+- [ ] Live smoke: switch runtime; confirm the open tiers resolve to that
+      runtime's models with no stale cross-runtime values; confirm cloud still
+      resolves via the vendor cost-tier path.

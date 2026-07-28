@@ -1,21 +1,41 @@
 # HANDOFF — start here (fresh conversation)
 
 You are picking up the `runtime-aware-model-tiers` effort mid-stream. Phase 1 is
-committed and green. **Your job is Phase 2.** Read this whole file, then read
-`spec.md` and `plan.md` in this directory before editing anything.
+committed and green. Read this whole file, then read `spec.md` and `plan.md` in
+this directory before editing anything.
 
 Repo root: `/Users/bryancostanich/git_repos/bryan_costanich/Cercano`
 Server module: `source/server` (run `go build ./...` / `go test ./...` from there)
 CLI module: `source/clients/cli`
 
-## One-line task
+## RE-SPECCED — the old "string→map" task below is SUPERSEDED
 
-Make the open side of a model tier **runtime-keyed** so switching `open_runtime`
-never leaves a stale cross-runtime model id. Change `ModelTier.Open` from a
-single `string` to a per-runtime map, thread the active runtime through
-resolution, delete legacy migration, and default from the existing per-runtime
-catalog. **No migration — clean break** (approved by the user; existing flat
-`open:` string values are discarded on load).
+The effort was re-scoped after discovering the real defect: `ModelTier{Cloud,
+Open}` fuses two unrelated taxonomies. The current design (authoritative in
+`spec.md`/`plan.md`) is:
+
+1. **Delete the retired four-tier cloud residue** (`ModelTier.Cloud`, the
+   `cloud:` block in `tier_recommendations.yaml`, the `.cloud` patch/show
+   plumbing). Cloud already has a correct, live, vendor-keyed cost-tier path
+   (`ModelProfiles.Cloud.Providers` + `ResolveCloudModelForTier`, three tiers:
+   economy/standard/premium) — that stays untouched. Do NOT confuse
+   `ModelTier.Cloud` (retired string slot, delete) with `inference.Tiers.Cloud`
+   (live cloud TurnRunner, keep).
+2. **Re-key the open side runtime-outer**: one full open tier set PER RUNTIME
+   (`open.runtimes.<runtime>.<tier>`), active runtime = `cfg.OpenRuntime`.
+   Switching runtime swaps the whole set losslessly. `ModelTier` is deleted.
+
+Phases: Phase 2 = delete cloud residue; Phase 3 = re-key open runtime-outer;
+4 = worker wire; 5 = server switch/watcher; 6 = CLI; 7 = verify. See `plan.md`.
+
+**No migration — clean break** (user-approved; existing flat `open:` values and
+`tiers.*.cloud` values are discarded on load).
+
+## (Superseded) original one-line task
+
+~~Change `ModelTier.Open` from a single `string` to a per-runtime map~~ — this
+described only half the fix and kept the fused struct. Replaced by the
+two-taxonomy split above.
 
 ## Why (context from Phase 0 recon — already verified, do not re-litigate)
 

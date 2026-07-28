@@ -197,6 +197,50 @@ func TestToolLoop_SingleToolCall_FeedsResultAndContinues(t *testing.T) {
 	}
 }
 
+func TestToolLoop_FlattenToolResultsFeedsPlainUserText(t *testing.T) {
+	prov := &mockProvider{
+		scripts: [][]llm.Block{
+			{{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "LS", ToolInput: json.RawMessage(`{"path":"."}`)}},
+			{{Type: llm.BlockText, Text: "Got it."}},
+		},
+		caps: inference.Capabilities{SupportsTools: true},
+	}
+	reg := testDefaultRegistry()
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+
+	result, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider:           prov,
+		Registry:           reg,
+		Permissions:        perms,
+		UserInput:          "list this dir",
+		FlattenToolResults: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FinalText != "Got it." {
+		t.Fatalf("final: %q", result.FinalText)
+	}
+	if len(prov.reqs) != 2 {
+		t.Fatalf("provider calls = %d, want 2", len(prov.reqs))
+	}
+	msgs := prov.reqs[1].Messages
+	if len(msgs) < 3 {
+		t.Fatalf("second request messages = %#v", msgs)
+	}
+	assistant := msgs[len(msgs)-2]
+	if assistant.Role != llm.RoleAssistant || len(assistant.Blocks) != 1 || assistant.Blocks[0].Type != llm.BlockText {
+		t.Fatalf("assistant history should be plain text summary, got %#v", assistant)
+	}
+	user := msgs[len(msgs)-1]
+	if user.Role != llm.RoleUser || len(user.Blocks) != 1 || user.Blocks[0].Type != llm.BlockText {
+		t.Fatalf("tool result history should be plain user text, got %#v", user)
+	}
+	if !strings.Contains(user.Blocks[0].Text, "Tool result from LS") {
+		t.Fatalf("flattened tool result missing marker: %q", user.Blocks[0].Text)
+	}
+}
+
 func TestToolLoop_RTierRunsConcurrently(t *testing.T) {
 	prov := &mockProvider{
 		scripts: [][]llm.Block{

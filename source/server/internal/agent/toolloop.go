@@ -149,6 +149,13 @@ type ToolLoopInput struct {
 	// this because local tool-call compliance is extremely temperature-sensitive.
 	Temperature *float64
 
+	// FlattenToolResults feeds tool results back as ordinary user text instead of
+	// provider-native tool-result messages. Some local OpenAI-compatible runtimes
+	// (qwen via mistral.rs) can emit tool calls but derail when consuming
+	// role:"tool" result history; this compatibility mode preserves tool use
+	// while giving the model plain text evidence for the final answer.
+	FlattenToolResults bool
+
 	// ConversationID names the conversation this loop serves. Threaded onto
 	// ctx so tools that spawn linked work (dispatch) can record lineage.
 	ConversationID string
@@ -234,6 +241,48 @@ func systemHasLeanSubagentMarker(system string) bool {
 	return strings.Contains(system, "bounded Cercano sub-agent")
 }
 
+func flattenToolUseSummary(calls []llm.Block) string {
+	if len(calls) == 0 {
+		return "I used the granted tools."
+	}
+	var b strings.Builder
+	b.WriteString("I used the granted tools: ")
+	for i, call := range calls {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(call.ToolName)
+	}
+	b.WriteString(".")
+	return b.String()
+}
+
+func flattenToolResultsForModel(calls, results []llm.Block) string {
+	var b strings.Builder
+	b.WriteString("Tool results from the granted tools follow. Use only these results and the original user request to continue.\n\n")
+	byID := make(map[string]llm.Block, len(calls))
+	for _, call := range calls {
+		byID[call.ToolUseID] = call
+	}
+	for i, result := range results {
+		call := byID[result.ToolUseRef]
+		if i > 0 {
+			b.WriteString("\n\n")
+		}
+		name := call.ToolName
+		if name == "" {
+			name = "tool"
+		}
+		fmt.Fprintf(&b, "Tool result from %s(%s):\n", name, string(call.ToolInput))
+		if result.IsError {
+			b.WriteString("ERROR: ")
+		}
+		b.WriteString(result.Content)
+	}
+	b.WriteString("\n\nUsing only the tool results above, answer the original request. If the original request asked for citations, include exact file:line citations from the tool output.")
+	return b.String()
+}
+
 func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) {
 	ctx = agenttools.WithWorkDir(ctx, in.WorkDir)
 	ctx = agenttools.WithConversationID(ctx, in.ConversationID)
@@ -260,11 +309,20 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	})
 
 	// appendTurn records a new (this-turn) assistant or tool-result message into
-	// the history and notifies the host (OnTurnComplete) so it can persist it
-	// immediately. The leading user message above is intentionally NOT routed
-	// through here — the host persists it up front before the loop runs.
+	// the model-facing history and notifies the host (OnTurnComplete) so it can
+	// persist it immediately. The leading user message above is intentionally NOT
+	// routed through here — the host persists it up front before the loop runs.
 	appendTurn := func(m llm.Message) {
 		hist = append(hist, m)
+		if in.OnTurnComplete != nil {
+			in.OnTurnComplete(m)
+		}
+	}
+	// appendModelTurn records only the next model's view of history. It is used
+	// by FlattenToolResults so local providers see plain text while persistence
+	// still records the original structured tool_use/tool_result transcript.
+	appendModelTurn := func(m llm.Message) { hist = append(hist, m) }
+	persistTurn := func(m llm.Message) {
 		if in.OnTurnComplete != nil {
 			in.OnTurnComplete(m)
 		}
@@ -306,8 +364,8 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			MaxTokens:   maxTokens,
 			Temperature: in.Temperature,
 		}
-		log.Printf("[tool-loop] model request: conv=%s provider=%s model=%s iter=%d stream=true temp=%s max_tokens=%d tools=%v lean_subagent_prompt=%t system_prefix=%q user_prefix=%q history=%d",
-			in.ConversationID, in.Provider.Name(), in.Model, iter+1, temperatureForLog(req.Temperature), req.MaxTokens, toolNamesForLog(req.Tools), systemHasLeanSubagentMarker(req.System), truncateRunes(strings.TrimSpace(req.System), 120), truncateRunes(strings.TrimSpace(in.UserInput), 120), len(req.Messages))
+		log.Printf("[tool-loop] model request: conv=%s provider=%s model=%s iter=%d stream=true temp=%s max_tokens=%d tools=%v lean_subagent_prompt=%t flatten_tool_results=%t system_prefix=%q user_prefix=%q history=%d",
+			in.ConversationID, in.Provider.Name(), in.Model, iter+1, temperatureForLog(req.Temperature), req.MaxTokens, toolNamesForLog(req.Tools), systemHasLeanSubagentMarker(req.System), in.FlattenToolResults, truncateRunes(strings.TrimSpace(req.System), 120), truncateRunes(strings.TrimSpace(in.UserInput), 120), len(req.Messages))
 		rdr, err := in.Provider.StreamChat(ctx, req)
 		if err != nil {
 			return ToolLoopResult{}, err
@@ -319,7 +377,6 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		}
 		lastIn, lastOut = resp.InputTokens, resp.OutputTokens
 		noteAssembledTurn(in.ConversationID, resp.Blocks, seenToolUse)
-		appendTurn(llm.Message{Role: llm.RoleAssistant, Blocks: resp.Blocks})
 
 		var toolCalls []llm.Block
 		var finalText string
@@ -330,6 +387,12 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			if b.Type == llm.BlockText {
 				finalText += b.Text
 			}
+		}
+		if len(toolCalls) > 0 && in.FlattenToolResults {
+			persistTurn(llm.Message{Role: llm.RoleAssistant, Blocks: resp.Blocks})
+			appendModelTurn(llm.Message{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: flattenToolUseSummary(toolCalls)}}})
+		} else {
+			appendTurn(llm.Message{Role: llm.RoleAssistant, Blocks: resp.Blocks})
 		}
 		log.Printf("[tool-loop] model response: conv=%s provider=%s model=%s iter=%d tool_calls=%d text_len=%d tokens_in=%d tokens_out=%d text_prefix=%q",
 			in.ConversationID, in.Provider.Name(), in.Model, iter+1, len(toolCalls), len([]rune(finalText)), lastIn, lastOut, truncateRunes(strings.TrimSpace(finalText), 160))
@@ -587,7 +650,12 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				break
 			}
 		}
-		appendTurn(llm.Message{Role: llm.RoleUser, Blocks: results})
+		if in.FlattenToolResults {
+			persistTurn(llm.Message{Role: llm.RoleUser, Blocks: results})
+			appendModelTurn(llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: flattenToolResultsForModel(toolCalls, results)}}})
+		} else {
+			appendTurn(llm.Message{Role: llm.RoleUser, Blocks: results})
+		}
 
 		switch {
 		case watchdogIntervened:
@@ -615,7 +683,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			"You've reached the %d-step tool limit for this turn. Stop calling tools and give your best answer now using what you've gathered.",
 			maxIters)}},
 	})
-	finalReq := llm.ChatRequest{Model: in.Model, Tier: in.Tier, System: in.System, Messages: hist, MaxTokens: maxTokens}
+	finalReq := llm.ChatRequest{Model: in.Model, Tier: in.Tier, System: in.System, Messages: hist, MaxTokens: maxTokens, Temperature: in.Temperature}
 	rdr, err := in.Provider.StreamChat(ctx, finalReq)
 	if err != nil {
 		return ToolLoopResult{Iterations: maxIters, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, err

@@ -400,17 +400,18 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	greedy := 0.0
 	var buf strings.Builder
 	res, err := agent.RunToolLoop(ctx, agent.ToolLoopInput{
-		Provider:       sel.Provider,
-		Model:          model,
-		Tier:           string(spec.Tier),
-		System:         system,
-		Registry:       reg,
-		Permissions:    perms,
-		UserInput:      spec.Task,
-		MaxIterations:  spec.MaxIterations,
-		Temperature:    &greedy,
-		WorkDir:        spec.WorkDir,
-		ConversationID: subConvID, // nested dispatches link to this sub-conversation
+		Provider:           sel.Provider,
+		Model:              model,
+		Tier:               string(spec.Tier),
+		System:             system,
+		Registry:           reg,
+		Permissions:        perms,
+		UserInput:          spec.Task,
+		MaxIterations:      spec.MaxIterations,
+		Temperature:        &greedy,
+		FlattenToolResults: true,
+		WorkDir:            spec.WorkDir,
+		ConversationID:     subConvID, // nested dispatches link to this sub-conversation
 		OnTextDelta: func(t string) {
 			buf.WriteString(t)
 			emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "token", Text: t, GrantedTools: granted, IgnoredTools: ignored})

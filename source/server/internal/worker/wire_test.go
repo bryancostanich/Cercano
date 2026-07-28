@@ -353,11 +353,11 @@ func TestSnapshotConfigRoundTrip(t *testing.T) {
 		Models: config.ModelsConfig{
 			DefaultProvider: config.ProviderCloud,
 			Tiers: config.ModelTiers{
-				MostCapable:   config.ModelTier{Open: "qwen3-72b", Cloud: "claude-opus-4-5"},
-				Everyday:      config.ModelTier{Open: "qwen3-coder", Cloud: "claude-sonnet-4-5"},
-				FastLight:     config.ModelTier{Open: "qwen3-1.7b", Cloud: "claude-haiku-3-5"},
-				FastLightText: config.ModelTier{Open: "phi4-mini", Cloud: "claude-haiku-3-5"},
-				Embedding:     config.ModelTier{Open: "nomic-embed-text", Cloud: ""},
+				MostCapable:   config.ModelTier{Open: "qwen3-72b"},
+				Everyday:      config.ModelTier{Open: "qwen3-coder"},
+				FastLight:     config.ModelTier{Open: "qwen3-1.7b"},
+				FastLightText: config.ModelTier{Open: "phi4-mini"},
+				Embedding:     config.ModelTier{Open: "nomic-embed-text"},
 			},
 		},
 		Compaction: config.CompactionConfig{
@@ -472,20 +472,17 @@ func TestSnapshotConfigRoundTrip(t *testing.T) {
 
 	// Model tiers.
 	gt, ot := got.Models.Tiers, orig.Models.Tiers
-	checkTier := func(name, gotOpen, gotCloud, wantOpen, wantCloud string) {
+	checkTier := func(name, gotOpen, wantOpen string) {
 		t.Helper()
 		if gotOpen != wantOpen {
 			t.Errorf("tier %s Open: got %q want %q", name, gotOpen, wantOpen)
 		}
-		if gotCloud != wantCloud {
-			t.Errorf("tier %s Cloud: got %q want %q", name, gotCloud, wantCloud)
-		}
 	}
-	checkTier("MostCapable", gt.MostCapable.Open, gt.MostCapable.Cloud, ot.MostCapable.Open, ot.MostCapable.Cloud)
-	checkTier("Everyday", gt.Everyday.Open, gt.Everyday.Cloud, ot.Everyday.Open, ot.Everyday.Cloud)
-	checkTier("FastLight", gt.FastLight.Open, gt.FastLight.Cloud, ot.FastLight.Open, ot.FastLight.Cloud)
-	checkTier("FastLightText", gt.FastLightText.Open, gt.FastLightText.Cloud, ot.FastLightText.Open, ot.FastLightText.Cloud)
-	checkTier("Embedding", gt.Embedding.Open, gt.Embedding.Cloud, ot.Embedding.Open, ot.Embedding.Cloud)
+	checkTier("MostCapable", gt.MostCapable.Open, ot.MostCapable.Open)
+	checkTier("Everyday", gt.Everyday.Open, ot.Everyday.Open)
+	checkTier("FastLight", gt.FastLight.Open, ot.FastLight.Open)
+	checkTier("FastLightText", gt.FastLightText.Open, ot.FastLightText.Open)
+	checkTier("Embedding", gt.Embedding.Open, ot.Embedding.Open)
 
 	if got.Models.DefaultProvider != orig.Models.DefaultProvider {
 		t.Errorf("DefaultProvider: got %q want %q", got.Models.DefaultProvider, orig.Models.DefaultProvider)

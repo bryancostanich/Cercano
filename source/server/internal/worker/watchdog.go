@@ -91,7 +91,7 @@ func workerWatchdogModel(wc pkgcfg.WatchdogConfig, mc pkgcfg.ModelsConfig) strin
 	if wc.Model != "" {
 		return wc.Model
 	}
-	if id, _, ok := mc.Resolve(pkgcfg.TierFastLightText, pkgcfg.ProviderOpen, true); ok {
+	if id, ok := mc.ResolveOpen(pkgcfg.TierFastLightText); ok {
 		return id
 	}
 	// Mirror the host engine's model resolution (DispatchModelFor): an
@@ -99,7 +99,7 @@ func workerWatchdogModel(wc pkgcfg.WatchdogConfig, mc pkgcfg.ModelsConfig) strin
 	// before giving up. Without this, a sparse taxonomy leaves the watchdog
 	// oneShot with an empty model → the model call errors → supervision silently
 	// fails open, a divergence from in-process (which resolves the everyday model).
-	if id, _, ok := mc.Resolve(pkgcfg.TierEveryday, pkgcfg.ProviderOpen, true); ok {
+	if id, ok := mc.ResolveOpen(pkgcfg.TierEveryday); ok {
 		return id
 	}
 	return ""

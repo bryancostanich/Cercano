@@ -8,39 +8,25 @@ import (
 	"cercano/source/server/pkg/proto"
 )
 
-// TestResolveTierModel_EverydayFallsThroughToLiveConfig pins the no-stale-
-// mirror design: an empty everyday slot resolves to the LIVE values (active
-// cloud profile's model / open_model) at resolution time, rather than a
-// copied-at-migration mirror that can drift.
-// TestResolveTierModel_EverydayCloudFallsThrough_OpenIsTierOnly: the cloud
-// side of everyday still falls through to the live active-profile model,
-// but the open side is TIER-ONLY — the legacy open_model field is retired
-// and must not resolve (local-model-taxonomy design).
-func TestResolveTierModel_EverydayCloudFallsThrough_OpenIsTierOnly(t *testing.T) {
+// TestResolveTierModel_OpenIsTierOnly pins the open-tier resolver: it reads
+// ONLY the tier's open slot. The retired open_model field must not resolve,
+// and cloud is not the resolver's concern (cloud flows through
+// DispatchModelFor's vendor-keyed path — see TestDispatchModelFor).
+func TestResolveTierModel_OpenIsTierOnly(t *testing.T) {
 	s, _ := newTestServer()
 	s.cfgSvc.Mutate(func(c *config.Config) {
 		c.OpenModel = "qwen3-coder" // retired field: must be IGNORED
 		c.ActiveCloudProfile = "messages-one"
 	})
 
-	id, prov, ok := s.resolveTierModel(config.TierEveryday, config.ProviderCloud, false)
-	if !ok || prov != config.ProviderCloud {
-		t.Fatalf("everyday cloud: (%q,%q,%v)", id, prov, ok)
-	}
-	if id != s.activeCloudModel() {
-		t.Errorf("everyday cloud = %q, want live active-profile model %q", id, s.activeCloudModel())
-	}
-
-	// Open side, empty tier slot: the retired open_model field must not
-	// resolve; non-strict lookup falls through to the cloud side instead.
-	id, prov, ok = s.resolveTierModel(config.TierEveryday, config.ProviderOpen, false)
-	if ok && prov == config.ProviderOpen {
+	// Empty everyday open slot: the retired open_model field must not resolve.
+	if id, ok := s.resolveTierModel(config.TierEveryday); ok {
 		t.Errorf("everyday open resolved (%q) from the retired open_model field", id)
 	}
 
 	// An explicitly configured everyday slot resolves.
 	s.cfgSvc.Mutate(func(c *config.Config) { c.Models.Tiers.Everyday.Open = "qwen3-coder-next" })
-	id, _, ok = s.resolveTierModel(config.TierEveryday, config.ProviderOpen, false)
+	id, ok := s.resolveTierModel(config.TierEveryday)
 	if !ok || id != "qwen3-coder-next" {
 		t.Errorf("explicit everyday open = (%q,%v), want qwen3-coder-next", id, ok)
 	}
@@ -54,7 +40,7 @@ func TestResolveTierModel_OtherTiersNoImplicitFallback(t *testing.T) {
 	s, _ := newTestServer()
 	s.cfgSvc.Mutate(func(c *config.Config) { c.OpenModel = "qwen3-coder" })
 
-	if id, _, ok := s.resolveTierModel(config.TierFastLightText, config.ProviderOpen, true); ok {
+	if id, ok := s.resolveTierModel(config.TierFastLightText); ok {
 		t.Errorf("unconfigured fast_light_text must be !ok, got %q", id)
 	}
 }
@@ -72,16 +58,16 @@ func TestWatchdogModelFor(t *testing.T) {
 
 	wc.Model = ""
 	mc.Tiers.FastLightText.Open = "phi4:14b"
-	mc.Tiers.FastLightText.Cloud = "claude-haiku-4-5-20251001"
 	if got := watchdogModelFor(wc, mc); got != "phi4:14b" {
 		t.Errorf("fast_light_text open: got %q, want phi4:14b", got)
 	}
 
-	// Cloud-only tier config must NOT leak a cloud model into the local
-	// coproc lane — empty means the lane keeps its own default.
+	// An empty open slot yields empty — the local coproc lane keeps its own
+	// default resolution and no cloud model can leak in (cloud is never
+	// resolved through the tier's open slot).
 	mc.Tiers.FastLightText.Open = ""
 	if got := watchdogModelFor(wc, mc); got != "" {
-		t.Errorf("cloud-only tier: got %q, want empty (no cross-provider leak)", got)
+		t.Errorf("empty open tier: got %q, want empty", got)
 	}
 }
 

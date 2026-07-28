@@ -4,23 +4,14 @@ import (
 	"cercano/source/server/pkg/config"
 )
 
-// resolveTierModel resolves a taxonomy tier against the live config. It wraps
-// the pure config.ModelsConfig.Resolve with one server-owned rule: an empty
-// EVERYDAY slot falls through to the live legacy values (active cloud
-// profile's model, open_model) so there is exactly one source of truth — no
-// copy-based migration, no stale mirror. Other tiers resolve strictly from
-// the models section; unconfigured means !ok and the caller decides.
+// resolveTierModel resolves a taxonomy tier's OPEN model against the live
+// config. Cloud is resolved separately through the vendor-keyed cost-tier path
+// (see DispatchModelFor / ModelProfiles.ResolveCloudModelForTier), so this
+// reads only the open slot; unconfigured means !ok and the caller decides.
 //
 // Callers must hold no lock expectations — this reads a snapshot from cfgSvc.
-func (s *Server) resolveTierModel(t config.Tier, prefer config.Provider, strict bool) (string, config.Provider, bool) {
-	mc := s.cfgSvc.Get().Models
-
-	if t == config.TierEveryday {
-		if mc.Tiers.Everyday.Cloud == "" {
-			mc.Tiers.Everyday.Cloud = s.activeCloudModel()
-		}
-	}
-	return mc.Resolve(t, prefer, strict)
+func (s *Server) resolveTierModel(t config.Tier) (string, bool) {
+	return s.cfgSvc.Get().Models.ResolveOpen(t)
 }
 
 // DispatchModelFor resolves the model id for a dispatch: the provider side is
@@ -46,10 +37,10 @@ func (s *Server) DispatchModelFor(isCloud bool, tier config.Tier) string {
 		}
 		return s.cfgSvc.Get().ModelProfiles.ResolveCloudModelForTier(prof, tier)
 	}
-	if id, _, ok := s.resolveTierModel(tier, config.ProviderOpen, true); ok {
+	if id, ok := s.resolveTierModel(tier); ok {
 		return id
 	}
-	if id, _, ok := s.resolveTierModel(config.TierEveryday, config.ProviderOpen, true); ok {
+	if id, ok := s.resolveTierModel(config.TierEveryday); ok {
 		return id
 	}
 	return ""
@@ -64,7 +55,7 @@ func watchdogModelFor(wc config.WatchdogConfig, mc config.ModelsConfig) string {
 	if wc.Model != "" {
 		return wc.Model
 	}
-	if id, _, ok := mc.Resolve(config.TierFastLightText, config.ProviderOpen, true); ok {
+	if id, ok := mc.ResolveOpen(config.TierFastLightText); ok {
 		return id
 	}
 	return ""

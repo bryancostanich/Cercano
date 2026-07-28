@@ -7,40 +7,34 @@ import (
 	"testing"
 )
 
-// TestModelsResolve pins the tier-resolution contract: explicit slot wins,
-// empty prefer falls back to DefaultProvider, non-strict falls back to the
-// other provider side, strict does not, and a fully-empty tier is !ok.
-func TestModelsResolve(t *testing.T) {
+// TestResolveOpen pins the open-tier-resolution contract: a configured tier
+// yields its open model, and an empty tier is !ok. Cloud is NOT resolved here
+// — it flows through the vendor-keyed cost-tier path — so ResolveOpen reads
+// only the open slot and never crosses providers.
+func TestResolveOpen(t *testing.T) {
 	m := ModelsConfig{
-		DefaultProvider: "open",
 		Tiers: ModelTiers{
-			Everyday:      ModelTier{Cloud: "claude-sonnet-4-6", Open: "qwen3-coder"},
-			FastLight:     ModelTier{Cloud: "claude-haiku-4-5-20251001"},
+			Everyday:      ModelTier{Open: "qwen3-coder"},
 			FastLightText: ModelTier{Open: "phi4:14b"},
 		},
 	}
 
 	cases := []struct {
-		name     string
-		tier     Tier
-		prefer   Provider
-		strict   bool
-		wantID   string
-		wantProv Provider
-		wantOK   bool
+		name   string
+		tier   Tier
+		wantID string
+		wantOK bool
 	}{
-		{"explicit hit", TierEveryday, ProviderCloud, false, "claude-sonnet-4-6", ProviderCloud, true},
-		{"prefer empty uses default provider", TierEveryday, "", false, "qwen3-coder", ProviderOpen, true},
-		{"fallback to other side", TierFastLight, ProviderOpen, false, "claude-haiku-4-5-20251001", ProviderCloud, true},
-		{"strict blocks fallback", TierFastLight, ProviderOpen, true, "", "", false},
-		{"text tier open", TierFastLightText, ProviderOpen, true, "phi4:14b", ProviderOpen, true},
-		{"unconfigured tier", TierMostCapable, ProviderCloud, false, "", "", false},
+		{"everyday open", TierEveryday, "qwen3-coder", true},
+		{"text tier open", TierFastLightText, "phi4:14b", true},
+		{"unconfigured tier", TierMostCapable, "", false},
+		{"empty open slot", TierFastLight, "", false},
 	}
 	for _, c := range cases {
-		id, prov, ok := m.Resolve(c.tier, c.prefer, c.strict)
-		if id != c.wantID || prov != c.wantProv || ok != c.wantOK {
-			t.Errorf("%s: Resolve(%s,%s,strict=%v) = (%q,%q,%v), want (%q,%q,%v)",
-				c.name, c.tier, c.prefer, c.strict, id, prov, ok, c.wantID, c.wantProv, c.wantOK)
+		id, ok := m.ResolveOpen(c.tier)
+		if id != c.wantID || ok != c.wantOK {
+			t.Errorf("%s: ResolveOpen(%s) = (%q,%v), want (%q,%v)",
+				c.name, c.tier, id, ok, c.wantID, c.wantOK)
 		}
 	}
 }
@@ -55,7 +49,6 @@ models:
     default_provider: open
     tiers:
         fast_light_text:
-            cloud: claude-haiku-4-5-20251001
             open: phi4:14b
 `
 	if err := os.WriteFile(path, []byte(src), 0644); err != nil {
@@ -139,13 +132,13 @@ func TestApplyModelTierPatch(t *testing.T) {
 func TestModelTierSlots(t *testing.T) {
 	var m ModelsConfig
 	m.Tiers.FastLightText.Open = "phi4:14b"
-	m.Tiers.Everyday.Cloud = "claude-fable-5"
+	m.Tiers.Everyday.Open = "qwen3-coder"
 
 	slots := m.TierSlots()
 	if len(slots) != 2 {
 		t.Fatalf("slots = %v, want 2 entries", slots)
 	}
-	if slots["fast_light_text.open"] != "phi4:14b" || slots["everyday.cloud"] != "claude-fable-5" {
+	if slots["fast_light_text.open"] != "phi4:14b" || slots["everyday.open"] != "qwen3-coder" {
 		t.Errorf("slots = %v", slots)
 	}
 }

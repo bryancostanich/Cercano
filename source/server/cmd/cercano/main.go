@@ -247,7 +247,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		// never depends on the interactive open model, which may be heavy or
 		// even unloadable. Unset tier keeps the provider default.
 		recapModel := ""
-		if id, _, ok := cfg.Models.Resolve(config.TierFastLightText, config.ProviderOpen, true); ok {
+		if id, ok := cfg.Models.ResolveOpen(config.TierFastLightText); ok {
 			recapModel = id
 		}
 		recapComplete := func(ctx context.Context, prompt string) (string, error) {
@@ -277,7 +277,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		// coder models drop anchors; see capability-tier-audit.md).
 		summarizerModel := cfg.Compaction.SummarizerModel
 		if summarizerModel == "" {
-			if id, _, ok := cfg.Models.Resolve(config.TierFastLightText, config.ProviderOpen, true); ok {
+			if id, ok := cfg.Models.ResolveOpen(config.TierFastLightText); ok {
 				summarizerModel = id
 			}
 		}

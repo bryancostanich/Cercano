@@ -35,11 +35,15 @@ const (
 	ProviderOpen  Provider = "open"
 )
 
-// ModelTier holds the per-provider model ids for one tier. Empty = not
-// configured on that side.
+// ModelTier holds the open-side model id for one tier. Empty = not configured.
+//
+// Cloud is NOT represented here: cloud models are vendor-owned and resolve
+// through the vendor-keyed cost-tier path (ModelProfiles.Cloud.Providers +
+// ResolveCloudModelForTier), not through capability-tier slots. The retired
+// four-tier `cloud` slot was deleted (effort: runtime-aware-model-tiers,
+// Phase 2) so a fourth cloud tier can never reappear here.
 type ModelTier struct {
-	Cloud string `yaml:"cloud"`
-	Open  string `yaml:"open"`
+	Open string `yaml:"open"`
 }
 
 // ModelTiers is the full tier table.
@@ -93,22 +97,6 @@ func (m ModelsConfig) tier(t Tier) ModelTier {
 	return ModelTier{}
 }
 
-// side returns the model id for one provider side of a tier.
-func (mt ModelTier) side(p Provider) string {
-	if p == ProviderCloud {
-		return mt.Cloud
-	}
-	return mt.Open
-}
-
-// other returns the opposite provider side.
-func (p Provider) other() Provider {
-	if p == ProviderCloud {
-		return ProviderOpen
-	}
-	return ProviderCloud
-}
-
 // tierSlot returns a pointer to the named tier's struct, or nil for unknown.
 func (m *ModelsConfig) tierSlot(t Tier) *ModelTier {
 	switch t {
@@ -152,12 +140,12 @@ func ApplyModelTierPatch(m *ModelsConfig, key, value string) (string, error) {
 		value = ""
 	}
 	switch Provider(provName) {
-	case ProviderCloud:
-		slot.Cloud = value
 	case ProviderOpen:
 		slot.Open = value
 	default:
-		return "", fmt.Errorf("unknown provider %q in model tier key (want %s|%s)", provName, ProviderCloud, ProviderOpen)
+		// Cloud is configured via its own vendor-keyed profile path, not
+		// through capability-tier slots; only the open side is patchable here.
+		return "", fmt.Errorf("unknown provider %q in model tier key (want %s)", provName, ProviderOpen)
 	}
 	shown := value
 	if shown == "" {
@@ -172,9 +160,6 @@ func (m ModelsConfig) TierSlots() map[string]string {
 	out := map[string]string{}
 	for _, t := range []Tier{TierMostCapable, TierEveryday, TierFastLight, TierFastLightText, TierEmbedding} {
 		mt := m.tier(t)
-		if mt.Cloud != "" {
-			out[string(t)+".cloud"] = mt.Cloud
-		}
 		if mt.Open != "" {
 			out[string(t)+".open"] = mt.Open
 		}
@@ -182,28 +167,15 @@ func (m ModelsConfig) TierSlots() map[string]string {
 	return out
 }
 
-// Resolve returns the configured model for a tier. prefer picks the provider
-// side; empty prefer falls back to DefaultProvider (then open, the local-first
-// default). When the preferred side is empty and strict is false, the other
-// side is tried. Returns ok=false when nothing is configured — the caller
-// decides what that means (a background helper skips; main chat errors).
-func (m ModelsConfig) Resolve(t Tier, prefer Provider, strict bool) (string, Provider, bool) {
-	p := prefer
-	if p == "" {
-		p = m.DefaultProvider
+// ResolveOpen returns the configured open (local) model id for a tier, and
+// ok=false when nothing is configured — the caller decides what that means (a
+// background helper skips; main chat errors). There is no provider preference
+// or cross-provider fallback: cloud is resolved through its own vendor-keyed
+// cost-tier path (ModelProfiles.ResolveCloudModelForTier), so a tier only ever
+// yields its single open slot.
+func (m ModelsConfig) ResolveOpen(t Tier) (string, bool) {
+	if id := m.tier(t).Open; id != "" {
+		return id, true
 	}
-	if p == "" {
-		p = ProviderOpen
-	}
-	mt := m.tier(t)
-	if id := mt.side(p); id != "" {
-		return id, p, true
-	}
-	if strict {
-		return "", "", false
-	}
-	if id := mt.side(p.other()); id != "" {
-		return id, p.other(), true
-	}
-	return "", "", false
+	return "", false
 }

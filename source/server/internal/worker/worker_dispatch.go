@@ -80,10 +80,10 @@ func workerDispatchModelFor(cfg pkgcfg.Config) func(isCloud bool, tier pkgcfg.Ti
 			}
 			return cfg.ModelProfiles.ResolveCloudModelForTier(prof, tier)
 		}
-		if id, _, ok := cfg.Models.Resolve(tier, pkgcfg.ProviderOpen, true); ok {
+		if id, ok := cfg.Models.ResolveOpen(tier); ok {
 			return id
 		}
-		if id, _, ok := cfg.Models.Resolve(pkgcfg.TierEveryday, pkgcfg.ProviderOpen, true); ok {
+		if id, ok := cfg.Models.ResolveOpen(pkgcfg.TierEveryday); ok {
 			return id
 		}
 		return ""

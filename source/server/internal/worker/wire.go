@@ -292,17 +292,17 @@ func SnapshotConfig(cfg config.Config, cred string) *proto.ConfigSnapshot {
 		OllamaUrl:   cfg.OllamaURL,
 		OpenRuntime: cfg.OpenRuntime,
 
-		TierMostCapableOpen:    t.MostCapable.Open,
-		TierMostCapableCloud:   t.MostCapable.Cloud,
-		TierEverydayOpen:       t.Everyday.Open,
-		TierEverydayCloud:      t.Everyday.Cloud,
-		TierFastLightOpen:      t.FastLight.Open,
-		TierFastLightCloud:     t.FastLight.Cloud,
-		TierFastLightTextOpen:  t.FastLightText.Open,
-		TierFastLightTextCloud: t.FastLightText.Cloud,
-		TierEmbeddingOpen:      t.Embedding.Open,
-		TierEmbeddingCloud:     t.Embedding.Cloud,
-		DefaultProvider:        string(cfg.Models.DefaultProvider),
+		// Cloud tier slots are removed from the model taxonomy (cloud resolves
+		// via the vendor-keyed cost-tier path); the proto still carries the
+		// retired Tier*Cloud fields until they are dropped in the schema-regen
+		// commit, so they are simply left unset here. DefaultProvider is still
+		// carried until that same commit retires it.
+		TierMostCapableOpen:   t.MostCapable.Open,
+		TierEverydayOpen:      t.Everyday.Open,
+		TierFastLightOpen:     t.FastLight.Open,
+		TierFastLightTextOpen: t.FastLightText.Open,
+		TierEmbeddingOpen:     t.Embedding.Open,
+		DefaultProvider:       string(cfg.Models.DefaultProvider),
 
 		CompactionEnabled:               cfg.Compaction.Enabled,
 		CompactionActivationFloorTokens: int32(cfg.Compaction.ActivationFloorTokens),
@@ -385,11 +385,11 @@ func ConfigFromSnapshot(p *proto.ConfigSnapshot) config.Config {
 		Models: config.ModelsConfig{
 			DefaultProvider: config.Provider(p.DefaultProvider),
 			Tiers: config.ModelTiers{
-				MostCapable:   config.ModelTier{Open: p.TierMostCapableOpen, Cloud: p.TierMostCapableCloud},
-				Everyday:      config.ModelTier{Open: p.TierEverydayOpen, Cloud: p.TierEverydayCloud},
-				FastLight:     config.ModelTier{Open: p.TierFastLightOpen, Cloud: p.TierFastLightCloud},
-				FastLightText: config.ModelTier{Open: p.TierFastLightTextOpen, Cloud: p.TierFastLightTextCloud},
-				Embedding:     config.ModelTier{Open: p.TierEmbeddingOpen, Cloud: p.TierEmbeddingCloud},
+				MostCapable:   config.ModelTier{Open: p.TierMostCapableOpen},
+				Everyday:      config.ModelTier{Open: p.TierEverydayOpen},
+				FastLight:     config.ModelTier{Open: p.TierFastLightOpen},
+				FastLightText: config.ModelTier{Open: p.TierFastLightTextOpen},
+				Embedding:     config.ModelTier{Open: p.TierEmbeddingOpen},
 			},
 		},
 

@@ -62,11 +62,15 @@ predates this effort.
    resolution keeps flowing solely through the existing vendor-keyed cost-tier
    path, which is untouched and already correct.
 
-2. **Make the open side runtime-keyed (runtime-outer).** A config carries one
-   **full open tier set per runtime**, with an active-runtime pointer. Switching
-   `open_runtime` swaps in that runtime's whole set losslessly — no runtime-blind
-   string, no reconciliation. This mirrors the per-runtime `catalog.json` shape
-   the codebase already uses.
+2. **Make the open side runtime-keyed, as lazy per-tier overrides over a
+   per-runtime catalog default.** Each runtime has a curated default tier set
+   (the existing `catalog.json`). The user's config stores **only the tiers they
+   have changed**, keyed by runtime; everything untouched resolves live from the
+   catalog default. Switching `open_runtime` selects that runtime's
+   overrides-over-default set — never a stale cross-runtime model id, and no
+   reconciliation. A tier entry is **just a model id string** (no per-model or
+   per-tier settings — run-host settings stay in the per-runtime
+   `LlamaServerConfig`/`MistralRSConfig` where they already live).
 
 3. **Keep Phase 1.** Its `plain_chat_ok` / `status` capability fields and the
    build-time gate live in the already-correct per-runtime catalog layer and are
@@ -88,93 +92,116 @@ Resolved via `ResolveCloudModelForTier(vendor, capabilityTier)` using the
 existing capability→cost bridge. The active vendor comes from the active cloud
 profile (`CloudProfiles` / `ActiveCloudProfile`). Nothing here changes.
 
-**Open — runtime-outer, a full tier set per runtime:**
+**Open — runtime-keyed, lazy per-tier overrides over the catalog default:**
+
+The **default** for each runtime is the curated `catalog.json` (authored by us,
+ships with the binary, read-only). The user's **config stores only overrides** —
+the specific tiers they changed, per runtime. Nothing is written for a runtime
+until the user customizes a tier of it; untouched tiers are never copied.
 
 ```yaml
 models:
-  open_runtime: llama_server        # the active runtime (already exists as cfg.OpenRuntime)
+  open_runtime: llama_server        # active runtime (already cfg.OpenRuntime)
   open:
-    runtimes:
-      llama_server:
-        most_capable:    qwen3-30b-thinking
-        everyday:        qwen3-coder
-        fast_light:      ...
-        fast_light_text: ...
-        embedding:       nomic-embed-text
-      mistralrs:
-        most_capable:    ...
-        everyday:        ...
-        fast_light:      ...
-        fast_light_text: ...
-        embedding:       ...
+    overrides:
+      llama_server:                 # only present because the user changed it
+        everyday: my-custom-qwen    # only tiers the user touched
 ```
 
-Resolution for the open side: `open.runtimes[cfg.OpenRuntime][tier]`. Switching
-`cfg.OpenRuntime` selects a different, complete, internally-consistent set.
+A tier entry is a **plain model-id string** — no settings.
+
+**Resolution (merge locus A — the server merges):** `pkg/config` exposes the
+overrides only (it must not import the catalog — layering inversion). The
+**server** resolves each `(runtime, tier)` as:
+
+```
+overrides[runtime][tier]  if present
+else  catalogDefault(runtime, tier)   // server imports the catalog + RAM detect
+```
+
+So config stays catalog-free, untouched tiers always track catalog improvements
+(e.g. Phase 1's GLM fix flows through automatically), and a customized tier is
+taken wholesale. Customizations are **per-runtime and never ported** across
+runtimes (a model id / setting valid for one runtime may be invalid for
+another).
 
 The `ModelTier{Cloud, Open}` struct is **deleted**. Cloud and open no longer
 share a type or a tier enum, so a fourth cloud tier can never structurally
 reappear.
 
+**Explicitly dropped (were considered, rejected):**
+- Per-model and per-tier *settings*. Recon showed launch settings
+  (`ContextSize`, `ISQ`, `MaxSeqLen`, `GPULayers`, `ExtraArgs`, …) are run-host
+  properties that already live per-runtime in `LlamaServerConfig`/
+  `MistralRSConfig`; a model carries none. Tiers stay model-id-only.
+- Hoarding a **full** tier set per runtime in config (interpretation 1). Config
+  holds only overrides; the catalog is the default.
+
 ## Non-goals / decisions
 
 - **No migration.** Clean break. Existing configs' flat `open:` string values and
-  any `tiers.*.cloud` values are discarded on next load and replaced by the
-  runtime's stock defaults. The user explicitly approved blowing away current
-  values.
-- **Runtime-outer, not tier-outer.** The runtime owns its full tier set; the whole
-  set swaps on runtime change. (Explicitly chosen over "tier owns a per-runtime
-  map".)
+  any `tiers.*.cloud` values are discarded on next load; the catalog default
+  fills in. The user explicitly approved blowing away current values.
+- **Overrides, not full sets.** Config persists only tiers the user changed
+  (lazy, per-runtime). The catalog is the default; untouched tiers are never
+  copied and always track the catalog.
+- **Model-id-only tiers.** No per-model or per-tier settings. Run-host settings
+  stay in `LlamaServerConfig`/`MistralRSConfig`, untouched.
+- **Customizations are per-runtime and never ported.** Switching runtime never
+  carries a model id or setting into a runtime where it may be invalid.
 - **Cloud is out of scope except for deleting the retired residue.** The live
   vendor-keyed cost-tier cloud path is correct and untouched.
-- RAM buckets reuse the existing thresholds (`<32`, `32–63`, `64–127`, `128+`)
-  already used by the per-runtime catalogs; open defaults are picked from the
-  per-runtime `catalog.json` by detected RAM (this data already exists — do not
-  rebuild it).
+- **Merge locus A:** the server merges override-else-catalog-default (it can
+  import the catalog and detect RAM); `pkg/config` stays catalog-free.
 - The per-runtime curated catalogs (`mistralrs/catalog.json`,
-  `llamaserver/catalog.json`) remain the source of runtime-valid model ids and
-  capability facts; Phase 1's `plain_chat_ok` / `status` fields stay.
+  `llamaserver/catalog.json`) remain the source of runtime-valid default model
+  ids and capability facts; Phase 1's `plain_chat_ok` / `status` fields stay.
 
-## Blast radius (verified read/write sites)
+## Blast radius (post-Phase-2 code — verified)
 
-Open side (`ModelTier.Open` string → runtime-keyed set):
-- `pkg/config/models.go`: `ModelTier`, `side()`, `Resolve()`, `OpenChatModel()`,
-  `OpenEmbeddingModel()`, `ApplyModelTierPatch()`, `TierSlots()`,
-  `tier()`/`tierSlot()`.
-- `pkg/config/config.go`: open defaulting/finalize (lines ~761–781), env
-  overrides (~956–968), delete legacy flat-`open` migration.
-- `pkg/config/tierrecs.go` + `tier_recommendations.yaml`: open block; **delete**
-  the `cloud:` block.
-- `internal/worker/wire.go`: `TierEverydayOpen` etc. flat wire fields.
-- `internal/server/server.go`: `rebindOpenTiersForRuntime`, runtime-switch flow.
-- `internal/server/config_watcher.go`: `Everyday.Open` change detection.
-- CLI `internal/ui`: tier/runtime pickers.
-- Tests referencing `.Open` as a string:
-  `models_test.go`, `models_migrate_test.go` (delete), `config_test.go`,
-  `tierrecs_test.go`, plus server/worker tests.
+Phase 2 already deleted the cloud residue and collapsed the resolver to
+`ResolveOpen(t) (string, bool)`. The current open shape is a flat
+`ModelTiers{ MostCapable, Everyday, … ModelTier{Open string} }`. Phase 3
+replaces that flat shape with runtime-keyed overrides.
 
-Cloud residue to delete (do NOT touch the live vendor-keyed path):
-- `ModelTier.Cloud` field + `.cloud` YAML tag (`models.go:41`).
-- `side()` cloud branch (`models.go:99`), `ApplyModelTierPatch` cloud write
-  (`models.go:156`), `TierSlots` cloud emit (`models.go:176`).
-- The `cloud:` block in `tier_recommendations.yaml` and its loader/consumer in
-  `tierrecs.go` (`r.Cloud`, lines ~59/62/104) — confirm it is only wizard
-  autofill, then remove.
-- `models_test.go:142` (`Everyday.Cloud = ...`).
+`pkg/config` (data model + resolver → overrides-only):
+- `models.go`: delete `ModelTier`/`ModelTiers`; add `OpenModels{ Overrides
+  map[runtime]map[tier]string }` (or equivalent). Rewrite `ResolveOpen`,
+  `OpenChatModel`, `OpenEmbeddingModel`, `TierSlots`, `ApplyModelTierPatch`,
+  `tier()`/`tierSlot()` around `(runtime, tier) → override string`. Note:
+  `ResolveOpen` returning `!ok` for a missing override is now *expected* — the
+  server supplies the catalog default; config no longer defaults tiers itself.
+- `config.go`: the `finalizeModelTiers` defaulting (~761–781, currently
+  hardcodes `everyday=qwen3-coder`, `embedding=nomic-embed-text`) is **removed**
+  — defaulting moves to the server/catalog. Env overrides (~956–968:
+  `CERCANO_OPEN_MODEL`/`CERCANO_EMBEDDING_MODEL`) now write the *active*
+  runtime's override. Delete the legacy `open_model→everyday` migration.
+- `models_test.go`, `config_test.go`, `tierrecs_test.go`: update for the new
+  shape.
 
-Must NOT be touched (different meaning of "Cloud" — live cloud runtime):
-- `inference.Tiers.Cloud` (the built cloud *TurnRunner*), `router.go` `Tiers`,
-  `main.go:319/584`, `ResolveCloudModelForTier`, `ModelProfiles.Cloud.Providers`,
-  `CloudProfiles`/`ActiveCloudProfile`, all `cmd/*/main.go` cloud-provider wiring.
+Server (merge locus A — new):
+- `internal/server`: the resolver that today calls `ResolveOpen` must become
+  `override else catalogDefault(runtime, tier)`, importing the catalog + RAM
+  detection. This is the merge point. `rebindOpenTiersForRuntime` /
+  runtime-switch reloads the active runtime's override-over-default set.
+- `config_watcher.go`: open-override change detection for the new shape.
+
+Worker wire (Phase 4) & CLI (Phase 6) handled in their own phases.
+
+Must NOT be touched (live cloud path, unrelated to this change):
+- `inference.Tiers.Cloud` (the built cloud *TurnRunner*), `ResolveCloudModelForTier`,
+  `ModelProfiles.Cloud.Providers`, `CloudProfiles`/`ActiveCloudProfile`.
 
 ## Acceptance
 
-- `ModelTier` is gone. Cloud and open are separate types with separate tier
-  vocabularies; there is no struct where a fourth cloud tier can exist.
-- The open side is a per-runtime full tier set (runtime-outer). Reads resolve via
-  `open.runtimes[cfg.OpenRuntime][tier]`.
-- Switching `open_runtime` selects that runtime's tier set with no stale
-  cross-runtime values and no reconciliation.
+- `ModelTier`/`ModelTiers` flat shape is gone; open config is runtime-keyed
+  overrides (`overrides[runtime][tier] = model-id`), model-id strings only.
+- Config persists **only** tiers the user changed, lazily, per runtime; untouched
+  tiers resolve from the catalog default. No full per-runtime sets in config.
+- The server merges `override else catalogDefault(runtime, tier)`; `pkg/config`
+  does not import the catalog.
+- Switching `open_runtime` resolves that runtime's override-over-default set —
+  no stale cross-runtime values, no reconciliation, no cross-runtime porting.
 - Cloud resolution flows only through the vendor-keyed cost-tier path; the retired
   `.cloud` capability slots and the `cloud:` recommendations block are deleted.
 - Open tier defaults are picked from the per-runtime catalog by detected RAM;

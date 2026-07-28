@@ -21,15 +21,28 @@ Open}` fuses two unrelated taxonomies. The current design (authoritative in
    economy/standard/premium) — that stays untouched. Do NOT confuse
    `ModelTier.Cloud` (retired string slot, delete) with `inference.Tiers.Cloud`
    (live cloud TurnRunner, keep).
-2. **Re-key the open side runtime-outer**: one full open tier set PER RUNTIME
-   (`open.runtimes.<runtime>.<tier>`), active runtime = `cfg.OpenRuntime`.
-   Switching runtime swaps the whole set losslessly. `ModelTier` is deleted.
+2. **Re-key the open side as per-runtime OVERRIDES** (not full sets). Each
+   runtime's curated `catalog.json` IS the default. Config stores only the tiers
+   the user changed, keyed by runtime: `models.open.overrides.<runtime>.<tier> =
+   model-id`. Lazy (nothing stored until customized), per-runtime, never ported.
+   Tier entries are **model-id strings only — no settings** (recon confirmed
+   launch settings are run-host, already per-runtime in `LlamaServerConfig`/
+   `MistralRSConfig`). Resolution = **override else catalog default**, merged by
+   the SERVER (merge locus A) so `pkg/config` never imports the catalog.
+   `ModelTier` is deleted.
 
-Phases: Phase 2 = delete cloud residue; Phase 3 = re-key open runtime-outer;
-4 = worker wire; 5 = server switch/watcher; 6 = CLI; 7 = verify. See `plan.md`.
+STATUS: Phase 2 DONE (cloud residue deleted, resolver collapsed to
+`ResolveOpen`, default_provider + proto `*_cloud` fields retired — commits
+1abd259f, 938a5bfb). Spec/plan re-revised for the override model after settling
+the design with the user (model-id-only, lazy overrides, server merge). Phase 3
+is next.
+
+Phases: Phase 3 = re-key open config as per-runtime overrides (pkg/config only);
+4 = worker wire; 5 = server merge (locus A) + switch/watcher; 6 = CLI setup +
+customization; 7 = verify. See `plan.md` for the grounded, settled detail.
 
 **No migration — clean break** (user-approved; existing flat `open:` values and
-`tiers.*.cloud` values are discarded on load).
+`tiers.*.cloud` values load-ignore; catalog default fills in).
 
 ## (Superseded) original one-line task
 

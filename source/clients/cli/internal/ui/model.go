@@ -179,6 +179,12 @@ type Model struct {
 
 	recap string // living one-line work summary; shown in the chat footer
 
+	// taskPane is the V1 task drawer: a right-side collapsible pane. It is only a
+	// shell for now; TaskChange consumption fills it in later. Kept as layout
+	// state rather than hardcoding "right pane" into the task model so future
+	// docking (left/right/top/bottom) can replace this without touching task data.
+	taskPane taskPaneState
+
 	// nextPromptSuggestion is a locally-generated "what to do next" one-liner
 	// fetched after each streamEndMsg. Renders as ghost text in the empty
 	// input (via input.Suggestion); Tab accepts it into the value. Overwritten
@@ -946,6 +952,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if mouse.Button != tea.MouseLeft {
 			return m, nil
 		}
+		if m.taskPaneHit(mouse.X, mouse.Y) {
+			m.toggleTaskPane()
+			return m, nil
+		}
 		if m.hasSubAgentTabs() && mouse.Y == m.scrollbarTop-2 {
 			if id, isClose, ok := tabStripHitAtX(m.chatTabItems(), mouse.X); ok {
 				if isClose {
@@ -1112,6 +1122,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if keyStr == "ctrl+c" {
 			next, cmd := m.handleCtrlCKey(msg)
 			return next, cmd
+		}
+		if keyStr == "ctrl+t" {
+			m.toggleTaskPane()
+			return m, nil
 		}
 		if m.ctrlCArmed {
 			m.ctrlCArmed = false
@@ -2683,6 +2697,9 @@ func (m *Model) applyTurnTelemetry(d chatDoneMsg) {
 //	status  (1)
 func (m *Model) relayout() {
 	contentW := m.width
+	if paneW := m.taskPaneWidth(); paneW > 0 {
+		contentW -= paneW
+	}
 	if contentW < 20 {
 		contentW = 20
 	}
@@ -4580,7 +4597,7 @@ func (m Model) renderRecap() string {
 // renderViewportWithScrollbar renders the chat viewport with a one-column
 // vertical scrollbar on its right edge. Delegates to chatView.View.
 func (m Model) renderViewportWithScrollbar() string {
-	return m.activeChat().View()
+	return m.renderViewportWithTaskPane()
 }
 
 func headerTextWidth(s string) int {

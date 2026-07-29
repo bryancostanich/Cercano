@@ -23,6 +23,7 @@ type taskPaneState struct {
 	Expanded bool
 	Width    int // expanded width including the left border; zero -> default
 	Tasks    map[string]taskPaneTask
+	Roots    []string
 }
 
 type taskPaneTask struct {
@@ -82,6 +83,11 @@ func (m *Model) applyTaskChange(kind string, task *agentclient.TaskNode) {
 	}
 	if kind == "removed" {
 		removeTaskPaneSubtree(m.taskPane.Tasks, task)
+		m.taskPane.Roots = removeTaskPaneID(m.taskPane.Roots, task.ID)
+		for id, existing := range m.taskPane.Tasks {
+			existing.Children = removeTaskPaneID(existing.Children, task.ID)
+			m.taskPane.Tasks[id] = existing
+		}
 		if len(m.taskPane.Tasks) == 0 && m.taskPane.Expanded {
 			m.taskPane.Expanded = false
 		}
@@ -89,6 +95,14 @@ func (m *Model) applyTaskChange(kind string, task *agentclient.TaskNode) {
 		return
 	}
 	upsertTaskPaneSubtree(m.taskPane.Tasks, task)
+	if task.ParentID == "" || m.taskPane.Tasks[task.ParentID].ID == "" {
+		m.taskPane.Roots = appendTaskPaneID(m.taskPane.Roots, task.ID)
+	} else {
+		m.taskPane.Roots = removeTaskPaneID(m.taskPane.Roots, task.ID)
+		parent := m.taskPane.Tasks[task.ParentID]
+		parent.Children = appendTaskPaneID(parent.Children, task.ID)
+		m.taskPane.Tasks[parent.ID] = parent
+	}
 	m.relayout()
 }
 
@@ -177,9 +191,9 @@ func (m Model) renderTaskPane(width, height int) string {
 	lines := []string{
 		border + fitCell(m.styles.Accent.Render(header), innerW),
 		border + m.styles.BorderDim.Render(strings.Repeat("─", innerW)),
-		border + fitCell(m.styles.Muted.Render("No task tree loaded yet."), innerW),
-		border + fitCell(m.styles.Muted.Render("Plan status will appear here."), innerW),
-		border + fitCell(m.styles.Muted.Render("Toggle: ctrl+t or click tab."), innerW),
+	}
+	for _, line := range m.taskPaneLines(innerW) {
+		lines = append(lines, border+line)
 	}
 	for len(lines) < height {
 		lines = append(lines, border+strings.Repeat(" ", innerW))
@@ -188,6 +202,113 @@ func (m Model) renderTaskPane(width, height int) string {
 		lines = lines[:height]
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m Model) taskPaneLines(width int) []string {
+	if width <= 0 {
+		return nil
+	}
+	if len(m.taskPane.Tasks) == 0 {
+		return []string{fitCell(m.styles.Muted.Render("No tasks."), width)}
+	}
+	roots := m.taskPane.Roots
+	if len(roots) == 0 {
+		roots = deriveTaskPaneRoots(m.taskPane.Tasks)
+	}
+	lines := make([]string, 0, len(m.taskPane.Tasks))
+	seen := make(map[string]bool, len(m.taskPane.Tasks))
+	for _, id := range roots {
+		m.appendTaskPaneTaskLines(&lines, seen, id, 0, width)
+	}
+	// Be forgiving if updates arrived out of order and left an orphaned task not
+	// reachable from the root list. Render it rather than silently dropping it.
+	for id := range m.taskPane.Tasks {
+		if !seen[id] {
+			m.appendTaskPaneTaskLines(&lines, seen, id, 0, width)
+		}
+	}
+	if len(lines) == 0 {
+		return []string{fitCell(m.styles.Muted.Render("No tasks."), width)}
+	}
+	return lines
+}
+
+func (m Model) appendTaskPaneTaskLines(lines *[]string, seen map[string]bool, id string, depth, width int) {
+	if seen[id] {
+		return
+	}
+	task, ok := m.taskPane.Tasks[id]
+	if !ok {
+		return
+	}
+	seen[id] = true
+	indent := strings.Repeat("  ", depth)
+	glyph := taskPaneStatusGlyph(task.Status)
+	text := indent + glyph + " " + task.Title
+	style := lipgloss.NewStyle()
+	switch task.Status {
+	case "done":
+		style = m.styles.Muted.Strikethrough(true)
+	case "in_progress":
+		style = m.styles.Accent
+	case "blocked":
+		style = m.styles.Error
+	default:
+		style = m.styles.Primary
+	}
+	*lines = append(*lines, fitCell(style.Render(text), width))
+	for _, childID := range task.Children {
+		m.appendTaskPaneTaskLines(lines, seen, childID, depth+1, width)
+	}
+}
+
+func taskPaneStatusGlyph(status string) string {
+	switch status {
+	case "done":
+		return "✓"
+	case "in_progress":
+		return "~"
+	case "blocked":
+		return "!"
+	default:
+		return "☐"
+	}
+}
+
+func deriveTaskPaneRoots(tasks map[string]taskPaneTask) []string {
+	roots := make([]string, 0)
+	for id, task := range tasks {
+		if task.ParentID == "" {
+			roots = append(roots, id)
+			continue
+		}
+		if _, ok := tasks[task.ParentID]; !ok {
+			roots = append(roots, id)
+		}
+	}
+	return roots
+}
+
+func appendTaskPaneID(ids []string, id string) []string {
+	if id == "" {
+		return ids
+	}
+	for _, existing := range ids {
+		if existing == id {
+			return ids
+		}
+	}
+	return append(ids, id)
+}
+
+func removeTaskPaneID(ids []string, id string) []string {
+	out := ids[:0]
+	for _, existing := range ids {
+		if existing != id {
+			out = append(out, existing)
+		}
+	}
+	return out
 }
 
 func joinColumns(left, right string) string {

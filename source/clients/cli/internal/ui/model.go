@@ -1600,7 +1600,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		// The terminal frame already carries the numbers, but the meter's
 		// authoritative source is GetContextUsage — refetch so every derived
-		// field (max, compacting flag) settles too.
+		// field (max, compacting flag) settles too. For /compact, the server
+		// starts the background pass immediately, so the poll should see the real
+		// compacting claim rather than a client-side fake.
+		if msg.incremental && !m.ctxPolling {
+			m.ctxPolling = true
+			return m, tea.Batch(fetchContextUsage(m.agent, m.convID), ctxUsageTick())
+		}
 		return m, fetchContextUsage(m.agent, m.convID)
 
 	case elideContextDoneMsg:

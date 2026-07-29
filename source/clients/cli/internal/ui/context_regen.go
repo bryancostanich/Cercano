@@ -12,8 +12,9 @@ import (
 // contextRegenProgressMsg is one progress line from the RegenerateContext
 // stream; next re-arms the drain so the following frame is delivered.
 type contextRegenProgressMsg struct {
-	line string
-	next tea.Cmd
+	line        string
+	incremental bool
+	next        tea.Cmd
 }
 
 // contextRegenDoneMsg is the terminal frame of a context regen: ok/err from
@@ -21,11 +22,12 @@ type contextRegenProgressMsg struct {
 // server's summary wording ("context rebuilt/compacted: ~X → ~Y tokens"),
 // which knows whether the run was a full rebuild or incremental.
 type contextRegenDoneMsg struct {
-	ok   bool
-	err  string
-	line string
-	pre  int
-	post int
+	ok          bool
+	err         string
+	line        string
+	pre         int
+	post        int
+	incremental bool
 }
 
 // elideContextDoneMsg is the result of the unary /elide-context RPC.
@@ -64,8 +66,8 @@ func isTransportLoss(err string) bool {
 // startContextRegenCmd opens the RegenerateContext streaming RPC for the
 // conversation and drains it one frame per message, mirroring the runtime
 // install pattern. incremental=false is the full /context-regen foreground
-// rebuild; incremental=true is /compact, which now schedules background
-// compaction and returns immediately.
+// rebuild; incremental=true is /compact, which starts background compaction
+// immediately and returns without waiting for the pass.
 func startContextRegenCmd(ag *agentclient.Client, convID string, incremental bool) tea.Cmd {
 	first := "rebuilding context from raw turns…"
 	if incremental {
@@ -73,7 +75,7 @@ func startContextRegenCmd(ag *agentclient.Client, convID string, incremental boo
 	}
 	return startContextStreamCmd(func(ctx context.Context) (<-chan agentclient.RegenProgress, error) {
 		return ag.RegenerateContext(ctx, convID, incremental)
-	}, first)
+	}, first, incremental)
 }
 
 // startClearCompactedContextCmd is /clear-compacted-context: drop the derived
@@ -82,32 +84,32 @@ func startContextRegenCmd(ag *agentclient.Client, convID string, incremental boo
 func startClearCompactedContextCmd(ag *agentclient.Client, convID string) tea.Cmd {
 	return startContextStreamCmd(func(ctx context.Context) (<-chan agentclient.RegenProgress, error) {
 		return ag.ClearCompactedContext(ctx, convID)
-	}, "clearing compacted context — rehydrating from raw turns…")
+	}, "clearing compacted context — rehydrating from raw turns…", false)
 }
 
 // startContextStreamCmd opens a RegenerateContext-shaped stream via open and
 // drains it one frame per message; first is the immediate feedback line shown
 // before the first server frame arrives.
-func startContextStreamCmd(open func(context.Context) (<-chan agentclient.RegenProgress, error), first string) tea.Cmd {
+func startContextStreamCmd(open func(context.Context) (<-chan agentclient.RegenProgress, error), first string, incremental bool) tea.Cmd {
 	return func() tea.Msg {
 		ch, err := open(context.Background())
 		if err != nil {
-			return contextRegenDoneMsg{err: err.Error()}
+			return contextRegenDoneMsg{err: err.Error(), incremental: incremental}
 		}
 		var drain tea.Cmd
 		drain = func() tea.Msg {
 			frame, ok := <-ch
 			if !ok {
-				return contextRegenDoneMsg{err: "regen stream ended unexpectedly"}
+				return contextRegenDoneMsg{err: "regen stream ended unexpectedly", incremental: incremental}
 			}
 			if frame.Err != nil {
-				return contextRegenDoneMsg{err: frame.Err.Error()}
+				return contextRegenDoneMsg{err: frame.Err.Error(), incremental: incremental}
 			}
 			if frame.Done {
-				return contextRegenDoneMsg{ok: frame.Ok, err: frame.Error, line: frame.Line, pre: frame.PreTokens, post: frame.PostTokens}
+				return contextRegenDoneMsg{ok: frame.Ok, err: frame.Error, line: frame.Line, pre: frame.PreTokens, post: frame.PostTokens, incremental: incremental}
 			}
-			return contextRegenProgressMsg{line: frame.Line, next: drain}
+			return contextRegenProgressMsg{line: frame.Line, incremental: incremental, next: drain}
 		}
-		return contextRegenProgressMsg{line: first, next: drain}
+		return contextRegenProgressMsg{line: first, incremental: incremental, next: drain}
 	}
 }

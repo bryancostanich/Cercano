@@ -350,16 +350,13 @@ func TestSnapshotConfigRoundTrip(t *testing.T) {
 				AWSProfile: "prod",
 			},
 		},
-		Models: config.ModelsConfig{
-			DefaultProvider: config.ProviderCloud,
-			Tiers: config.ModelTiers{
-				MostCapable:   config.ModelTier{Open: "qwen3-72b", Cloud: "claude-opus-4-5"},
-				Everyday:      config.ModelTier{Open: "qwen3-coder", Cloud: "claude-sonnet-4-5"},
-				FastLight:     config.ModelTier{Open: "qwen3-1.7b", Cloud: "claude-haiku-3-5"},
-				FastLightText: config.ModelTier{Open: "phi4-mini", Cloud: "claude-haiku-3-5"},
-				Embedding:     config.ModelTier{Open: "nomic-embed-text", Cloud: ""},
-			},
-		},
+		Models: workerTestModels("llama_server", map[config.Tier]string{
+			config.TierMostCapable:   "qwen3-72b",
+			config.TierEveryday:      "qwen3-coder",
+			config.TierFastLight:     "qwen3-1.7b",
+			config.TierFastLightText: "phi4-mini",
+			config.TierEmbedding:     "nomic-embed-text",
+		}),
 		Compaction: config.CompactionConfig{
 			Enabled:               true,
 			ActivationFloorTokens: 8000,
@@ -392,7 +389,14 @@ func TestSnapshotConfigRoundTrip(t *testing.T) {
 	}
 
 	cred := "sk-ant-test-credential"
-	p := SnapshotConfig(orig, cred)
+	openTiers := map[string]string{
+		string(config.TierMostCapable):   "qwen3-72b",
+		string(config.TierEveryday):      "qwen3-coder",
+		string(config.TierFastLight):     "qwen3-1.7b",
+		string(config.TierFastLightText): "phi4-mini",
+		string(config.TierEmbedding):     "nomic-embed-text",
+	}
+	p := SnapshotConfig(orig, cred, openTiers)
 	got := ConfigFromSnapshot(p)
 
 	// Check locus + profile identity.
@@ -470,25 +474,13 @@ func TestSnapshotConfigRoundTrip(t *testing.T) {
 		t.Errorf("OpenRuntime: got %q want %q", got.OpenRuntime, orig.OpenRuntime)
 	}
 
-	// Model tiers.
-	gt, ot := got.Models.Tiers, orig.Models.Tiers
-	checkTier := func(name, gotOpen, gotCloud, wantOpen, wantCloud string) {
-		t.Helper()
-		if gotOpen != wantOpen {
-			t.Errorf("tier %s Open: got %q want %q", name, gotOpen, wantOpen)
+	// Model tiers: wire carries host-resolved effective models, stored in the
+	// worker config as active-runtime overrides.
+	for tier, want := range openTiers {
+		gotID, ok := got.Models.OverrideFor(got.OpenRuntime, config.Tier(tier))
+		if !ok || gotID != want {
+			t.Errorf("tier %s override = (%q,%v), want (%q,true)", tier, gotID, ok, want)
 		}
-		if gotCloud != wantCloud {
-			t.Errorf("tier %s Cloud: got %q want %q", name, gotCloud, wantCloud)
-		}
-	}
-	checkTier("MostCapable", gt.MostCapable.Open, gt.MostCapable.Cloud, ot.MostCapable.Open, ot.MostCapable.Cloud)
-	checkTier("Everyday", gt.Everyday.Open, gt.Everyday.Cloud, ot.Everyday.Open, ot.Everyday.Cloud)
-	checkTier("FastLight", gt.FastLight.Open, gt.FastLight.Cloud, ot.FastLight.Open, ot.FastLight.Cloud)
-	checkTier("FastLightText", gt.FastLightText.Open, gt.FastLightText.Cloud, ot.FastLightText.Open, ot.FastLightText.Cloud)
-	checkTier("Embedding", gt.Embedding.Open, gt.Embedding.Cloud, ot.Embedding.Open, ot.Embedding.Cloud)
-
-	if got.Models.DefaultProvider != orig.Models.DefaultProvider {
-		t.Errorf("DefaultProvider: got %q want %q", got.Models.DefaultProvider, orig.Models.DefaultProvider)
 	}
 
 	// Compaction.

@@ -86,4 +86,11 @@ type Deps struct {
 	// constructed, so the runner must read it at turn time. A nil func, or a
 	// func returning nil, = disabled.
 	Watchdog func() *watchdog.Watchdog
+
+	// Profiles is a LIVE accessor for the session's active capability profile
+	// (the read-only planning fence, and future modes). Like Watchdog it is read
+	// at turn time so the host can flip the active profile mid-session via the
+	// broker. A nil func, or a func returning a zero Profile, means unrestricted
+	// (no fence) — the default posture.
+	Profiles func() agent.Profile
 }

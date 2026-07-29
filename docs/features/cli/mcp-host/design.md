@@ -1,6 +1,50 @@
 # MCP Host
 
-> Status: Built — phases 6 + 15.
+> Status: Built — phases 6 + 15. **Validated end-to-end** against a live
+> third-party stdio server (`rekolektion-viz`): `AddMcpServer` connected it, 22
+> tools registered under `mcp__rekolektion-viz__*` and reached `ready`, and
+> `InvokeTool` round-tripped real results back through the agent.
+
+## Using it — adding an MCP server
+
+An MCP server is declared in `~/.config/cercano/mcp.yaml`:
+
+```yaml
+mcpServers:
+  rekolektion-viz:
+    command: /path/to/dotnet
+    args:
+      - run
+      - --project
+      - /path/to/Rekolektion.Viz.Mcp
+    env: {}
+```
+
+Three ways to register / manage one:
+
+- **The MCP config tab (primary UI)** — `/config` → the **MCP** tab (or bare
+  `/mcp`, which opens straight to it) is a live dashboard of every hosted
+  server: name, state (`connecting` / `ready` / `failed`), tool count, and last
+  error, refreshing so a `connecting → ready` transition appears without a
+  reload. Per-row keys: `r` reconnect, `x` remove. Press `a` to float an
+  add-server popover form (name / command / args / env) — `enter` submits via
+  `AddMcpServer`, `esc` cancels. This is the way to add/manage a server without
+  memorizing command syntax.
+- **`/mcp` fast paths (CLI)** — `/mcp add <name> <command> [args…]`,
+  `/mcp remove <name>`, `/mcp restart <name>` call the same RPCs directly for
+  scripted or muscle-memory use. (Bare `/mcp` and `/mcp list` open the config
+  tab above rather than printing a table.)
+- **Config file** — edit `mcp.yaml` and (re)start the agent; declared servers
+  connect in the background at boot.
+
+Live changes (from the tab or `/mcp add`) persist the entry to `mcp.yaml` in
+canonical form.
+
+Registered tools appear in `/tools` as `mcp/<server>/<tool>` (display form; the
+model sees `mcp__<server>__<tool>`) and, being untrusted third-party code,
+confirm by default even in `permissive` mode until allowlisted (the `[a]lways
+allow` confirm key persists an allowlist entry).
+
 
 ## Overview / Goal
 

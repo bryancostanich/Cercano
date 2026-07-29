@@ -161,18 +161,6 @@ func (s *State) Advance() error {
 // Complete reports whether the run reached the terminal step.
 func (s State) Complete() bool { return s.Step == StepDone }
 
-// DefaultProvider returns the taxonomy side the locus mode makes primary —
-// what the finish step writes as models.default_provider.
-func (s State) DefaultProvider() string {
-	if ModeUsesCloud(s.LocusMode) && !ModeUsesOpen(s.LocusMode) {
-		return SideCloud
-	}
-	if s.LocusMode == "cloud_primary" {
-		return SideCloud
-	}
-	return SideOpen
-}
-
 // StatePath resolves the resume file. CERCANO_WIZARD_STATE overrides for
 // tests, mirroring the uiconfig env-override convention.
 func StatePath() string {

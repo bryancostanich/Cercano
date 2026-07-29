@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"sync"
 
 	"google.golang.org/grpc"
@@ -58,6 +59,12 @@ type workerRunner struct {
 	perms   permissions.Broker
 	secrets secrets.Store
 
+	// openTierModel resolves the EFFECTIVE open model id for a tier on the
+	// active runtime (override-else-catalog-default), so the ConfigSnapshot
+	// carries host-resolved models the worker can use without the catalog. nil
+	// on dial-injected test runners (they send no open tier models).
+	openTierModel func(pkgcfg.Tier) string
+
 	// srcMu guards the per-profile token-source caches below. Reusing one
 	// Source per profile is what makes the sources' single-flight refresh
 	// actually apply: a fresh Source per credential request gives each
@@ -81,6 +88,11 @@ type workerRunner struct {
 	// dispatch requests one over the stream. Wired from the server's store; nil
 	// on dial-injected (test) runners (sub-agent rows are then not created).
 	ensureSubagent EnsureSubagentFunc
+
+	// setProfile switches the host session's active capability profile when a
+	// worker-side session-control capability (suggest_plan/request_plan_approval)
+	// asks for it. The worker must not own this state.
+	setProfile func(context.Context, string) error
 
 	// dial is called instead of the pool when non-nil (test injection). When
 	// nil, RunTurn acquires a warm worker from the per-conversation pool.
@@ -108,7 +120,9 @@ func NewWorkerRunner(
 	perms permissions.Broker,
 	st secrets.Store,
 	ensureSubagent EnsureSubagentFunc,
+	setProfile func(context.Context, string) error,
 	openProvider func() inference.Provider,
+	openTierModel func(pkgcfg.Tier) string,
 ) runner.TurnRunner {
 	pool := newWorkerPool(nil) // production: spawn via spawnWorker
 	// Start the idle-reaper with the configured window. The reaper runs on a
@@ -121,9 +135,38 @@ func NewWorkerRunner(
 		perms:          perms,
 		secrets:        st,
 		ensureSubagent: ensureSubagent,
+		setProfile:     setProfile,
 		openProvider:   openProvider,
+		openTierModel:  openTierModel,
 		pool:           pool,
 	}
+}
+
+// resolveOpenTiers returns the effective open model id per tier for the active
+// runtime, for the ConfigSnapshot. Empty when no resolver is wired (test
+// runners) — the worker then simply has no open tier models.
+func (w *workerRunner) resolveOpenTiers() map[string]string {
+	cfg := w.cfg.Get()
+	out := map[string]string{}
+	for _, t := range []pkgcfg.Tier{
+		pkgcfg.TierMostCapable, pkgcfg.TierEveryday, pkgcfg.TierFastLight,
+		pkgcfg.TierFastLightText, pkgcfg.TierEmbedding,
+	} {
+		var id string
+		if w.openTierModel != nil {
+			id = w.openTierModel(t)
+		} else {
+			// Dial-injected/test runners do not have the catalog-backed resolver.
+			// They can still faithfully forward explicit active-runtime overrides
+			// already present in config; they just cannot synthesize catalog
+			// defaults. Production always has openTierModel wired.
+			id, _ = cfg.Models.OverrideFor(cfg.OpenRuntime, t)
+		}
+		if id != "" {
+			out[string(t)] = id
+		}
+	}
+	return out
 }
 
 // Shutdown drains the per-conversation worker pool: kills every warm worker and
@@ -203,7 +246,9 @@ func (w *workerRunner) RunTurn(
 
 	// ── 3. Build ConfigSnapshot + permission mode ──────────────────────────
 	cfg := w.cfg.Get()
-	snap := SnapshotConfig(cfg, "") // no credential in snapshot — worker fetches on demand
+	// Resolve the active runtime's effective open tier models host-side (the
+	// worker cannot see the catalog); the snapshot carries them as overrides.
+	snap := SnapshotConfig(cfg, "", w.resolveOpenTiers()) // no credential — worker fetches on demand
 	permMode := string(agent.ModePermissive)
 	if w.perms != nil {
 		permMode = string(w.perms.Mode())
@@ -407,6 +452,25 @@ func (w *workerRunner) RunTurn(
 				}
 			}
 
+		case *proto.WorkerToHost_ProfileRequest:
+			// Session-control capabilities run in the worker but own no session
+			// state. Apply profile changes on the host profile broker and respond so
+			// the capability can report success/failure to the model.
+			pr := m.ProfileRequest
+			go func() {
+				resp := &proto.SessionProfileResponse{Id: pr.GetId(), Ok: true}
+				if w.setProfile == nil {
+					resp.Ok = false
+					resp.Error = "session profile control not configured"
+				} else if err := w.setProfile(ctx, pr.GetName()); err != nil {
+					resp.Ok = false
+					resp.Error = err.Error()
+				}
+				if sendErr := safeSend(&proto.HostToWorker{Msg: &proto.HostToWorker_ProfileResponse{ProfileResponse: resp}}); sendErr != nil {
+					log.Printf("[workerRunner] send profile response id=%d: %v", pr.GetId(), sendErr)
+				}
+			}()
+
 		case *proto.WorkerToHost_Done:
 			// Capture result; continue draining until Recv returns EOF.
 			d := m.Done
@@ -538,6 +602,52 @@ func testDialUnix(lis interface {
 // OpenInferenceEvents, terminating with done or a non-empty error. The worker
 // has no local runtime manager, so this is how open_runtime=llama_server work
 // runs in worker mode. Honors ctx cancel (a worker Cancel unwinds the stream).
+func workerTemperatureForLog(t *float64) string {
+	if t == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%g", *t)
+}
+
+func workerToolNamesForLog(tools []llm.Tool) []string {
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Name != "" {
+			names = append(names, tool.Name)
+		}
+	}
+	return names
+}
+
+func workerTruncateRunes(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
+}
+
+func workerMessageShapesForLog(messages []llm.Message) string {
+	parts := make([]string, 0, len(messages))
+	for i, msg := range messages {
+		blockParts := make([]string, 0, len(msg.Blocks))
+		for _, block := range msg.Blocks {
+			switch block.Type {
+			case llm.BlockText:
+				blockParts = append(blockParts, fmt.Sprintf("text:%q", workerTruncateRunes(strings.TrimSpace(block.Text), 80)))
+			case llm.BlockToolUse:
+				blockParts = append(blockParts, fmt.Sprintf("tool_use:%s", block.ToolName))
+			case llm.BlockToolResult:
+				blockParts = append(blockParts, fmt.Sprintf("tool_result:%s", block.ToolUseRef))
+			default:
+				blockParts = append(blockParts, string(block.Type))
+			}
+		}
+		parts = append(parts, fmt.Sprintf("%d:%s[%s]", i, msg.Role, strings.Join(blockParts, ",")))
+	}
+	return strings.Join(parts, " | ")
+}
+
 func (w *workerRunner) serveOpenInference(ctx context.Context, req *proto.OpenInferenceRequest, safeSend func(*proto.HostToWorker) error) {
 	id := req.GetId()
 	emit := func(ev *proto.OpenInferenceEvent) {
@@ -564,6 +674,8 @@ func (w *workerRunner) serveOpenInference(ctx context.Context, req *proto.OpenIn
 		fail(fmt.Errorf("open inference: unmarshal request: %w", err))
 		return
 	}
+	log.Printf("[workerRunner] open inference request: id=%d provider=%s model=%s temp=%s max_tokens=%d tools=%v lean_subagent_prompt=%t system_prefix=%q messages=%d message_shapes=%s",
+		id, prov.Name(), chatReq.Model, workerTemperatureForLog(chatReq.Temperature), chatReq.MaxTokens, workerToolNamesForLog(chatReq.Tools), strings.Contains(chatReq.System, "bounded Cercano sub-agent"), workerTruncateRunes(strings.TrimSpace(chatReq.System), 120), len(chatReq.Messages), workerMessageShapesForLog(chatReq.Messages))
 	rdr, err := prov.StreamChat(ctx, chatReq)
 	if err != nil {
 		fail(err)

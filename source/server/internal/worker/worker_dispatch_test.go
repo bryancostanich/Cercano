@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"testing"
 
 	projectctx "cercano/source/server/internal/context"
@@ -26,7 +27,7 @@ func TestBuildWorkerToolSvc_WiresDispatch(t *testing.T) {
 		ModelFor:  func(bool, pkgcfg.Tier) string { return "model" },
 	})
 
-	svc := buildWorkerToolSvc(nil, eng, ctxLoader, nil, nil, pkgcfg.Config{}, nil)
+	svc := buildWorkerToolSvc(nil, eng, ctxLoader, nil, nil, pkgcfg.Config{}, nil, func(context.Context, string) error { return nil })
 
 	ts, ok := svc.(*toolssvc.Service)
 	if !ok {
@@ -34,5 +35,39 @@ func TestBuildWorkerToolSvc_WiresDispatch(t *testing.T) {
 	}
 	if ts.CapRegistry().Services().Dispatch == nil {
 		t.Fatal("worker Services.Dispatch is nil — the dispatch-engine bug has regressed")
+	}
+}
+
+// TestBuildWorkerToolSvc_WiresEnterProfile guards the planning-mode regression:
+// worker turns must route session-control capabilities (suggest_plan and
+// request_plan_approval) back to the host profile broker instead of advertising
+// those tools with a nil Services.EnterProfile hook.
+func TestBuildWorkerToolSvc_WiresEnterProfile(t *testing.T) {
+	ctxLoader := projectctx.NewLoader()
+	eng := toolstack.NewEngine(toolstack.EngineDeps{
+		Providers: func() dispatch.Providers { return dispatch.Providers{} },
+		LocusMode: func() locus.Mode { var m locus.Mode; return m },
+		CtxLoader: ctxLoader,
+		ModelFor:  func(bool, pkgcfg.Tier) string { return "model" },
+	})
+
+	var entered string
+	svc := buildWorkerToolSvc(nil, eng, ctxLoader, nil, nil, pkgcfg.Config{}, nil, func(_ context.Context, name string) error {
+		entered = name
+		return nil
+	})
+	ts, ok := svc.(*toolssvc.Service)
+	if !ok {
+		t.Fatalf("expected *toolssvc.Service, got %T", svc)
+	}
+	enter := ts.CapRegistry().Services().EnterProfile
+	if enter == nil {
+		t.Fatal("worker Services.EnterProfile is nil — suggest_plan would be advertised but unable to enter planning mode")
+	}
+	if err := enter("plan"); err != nil {
+		t.Fatalf("EnterProfile(plan): %v", err)
+	}
+	if entered != "plan" {
+		t.Fatalf("host profile bridge called with %q, want plan", entered)
 	}
 }

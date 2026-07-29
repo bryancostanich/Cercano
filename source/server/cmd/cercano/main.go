@@ -41,6 +41,7 @@ import (
 	"cercano/source/server/internal/llm"
 	ollamallm "cercano/source/server/internal/llm/ollama"
 	"cercano/source/server/internal/localruntime"
+	"cercano/source/server/internal/localruntime/catalogdefaults"
 	runtimellama "cercano/source/server/internal/localruntime/llamaserver"
 	runtimemistralrs "cercano/source/server/internal/localruntime/mistralrs"
 	"cercano/source/server/internal/locus"
@@ -49,12 +50,14 @@ import (
 	mcphost "cercano/source/server/internal/mcp_host"
 	"cercano/source/server/internal/modelcatalog"
 	"cercano/source/server/internal/ollamacatalog"
+	"cercano/source/server/internal/openmodels"
 	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/recap"
 	"cercano/source/server/internal/retention"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/server"
 	"cercano/source/server/internal/skills"
+	"cercano/source/server/internal/sysram"
 	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/internal/tools"
 	"cercano/source/server/internal/toolstack"
@@ -176,7 +179,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		}
 		return ollamallm.NewClient(ollamallm.Config{
 			BaseURL: c.OllamaURL,
-			Model:   c.OpenChatModel(),
+			Model:   openChatModel(c),
 		})
 	}
 	openProvider := agent.InferenceTurnRunner(openProviderFor(cfg), openTurnModel(cfg))
@@ -204,7 +207,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	// since MCP tools never classify intent. Prototypes are embedded in the
 	// binary (see //go:embed in internal/agent/router.go). See GitHub issue #5.
 	routerFactory := func() (*agent.SmartRouter, error) {
-		return agent.NewSmartRouterFromBytes(openProvider, cloudProvider, cfg.OpenEmbeddingModel(), selectEmbedEngine(cfg, ollamaEng, llamaEng), agent.DefaultPrototypes(), cloudFactory)
+		return agent.NewSmartRouterFromBytes(openProvider, cloudProvider, openEmbeddingModel(cfg), selectEmbedEngine(cfg, ollamaEng, llamaEng), agent.DefaultPrototypes(), cloudFactory)
 	}
 	lazyRouter := agent.NewLazyRouter(routerFactory, openProvider, cloudProvider)
 
@@ -237,7 +240,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	agentOpts := []agent.AgentOption{
 		agent.WithConversationStore(convStore),
 		agent.WithPersistentStore(persistentStore),
-		agent.WithContextMeter(meterRegistry, cfg.OpenChatModel()),
+		agent.WithContextMeter(meterRegistry, openChatModel(cfg)),
 		agent.WithContextLoader(ctxLoader),
 	}
 	// Living recap: after each turn, a debounced local-model pass updates a
@@ -248,7 +251,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		// never depends on the interactive open model, which may be heavy or
 		// even unloadable. Unset tier keeps the provider default.
 		recapModel := ""
-		if id, _, ok := cfg.Models.Resolve(config.TierFastLightText, config.ProviderOpen, true); ok {
+		if id, ok := openTierModelOK(cfg, config.TierFastLightText); ok {
 			recapModel = id
 		}
 		recapComplete := func(ctx context.Context, prompt string) (string, error) {
@@ -278,7 +281,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		// coder models drop anchors; see capability-tier-audit.md).
 		summarizerModel := cfg.Compaction.SummarizerModel
 		if summarizerModel == "" {
-			if id, _, ok := cfg.Models.Resolve(config.TierFastLightText, config.ProviderOpen, true); ok {
+			if id, ok := openTierModelOK(cfg, config.TierFastLightText); ok {
 				summarizerModel = id
 			}
 		}
@@ -355,7 +358,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 		if budgetPct <= 0 {
 			budgetPct = compactedBudgetDefaultPct
 		}
-		budgetTokens := int(float64(contextmeter.ModelMax(cfg.OpenChatModel())) * budgetPct)
+		budgetTokens := int(float64(contextmeter.ModelMax(openChatModel(cfg))) * budgetPct)
 		if budgetTokens < compactedBudgetFloorTokens {
 			budgetTokens = compactedBudgetFloorTokens
 		}
@@ -653,7 +656,15 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 }
 
 func buildRuntimeManager(cfg config.Config) localruntime.Manager {
-	manager := localruntime.NewManager(localruntime.WithEndpoints(localruntime.EndpointsFromConfig(cfg)))
+	manager := localruntime.NewManager(
+		localruntime.WithEndpoints(localruntime.EndpointsFromConfig(cfg, openChatModel(cfg), openEmbeddingModel(cfg))),
+		// Re-read config from disk on restart so a runtime relaunch picks up
+		// edits (e.g. mistralrs.max_seq_len) rather than reusing the config
+		// captured at server boot.
+		localruntime.WithConfigLoader(func() (config.Config, error) {
+			return config.Load(config.DefaultPath())
+		}),
+	)
 	sweepStalePartials(cfg, manager)
 	provider := runtimellama.NewProvider(cfg.LlamaServer)
 	// Reap llama-servers orphaned by cercano processes that died without
@@ -681,14 +692,15 @@ func buildRuntimeManager(cfg config.Config) localruntime.Manager {
 	// the in-memory download job. Background so startup isn't blocked.
 	go resumeInterruptedDownloads(cfg, manager, provider)
 
-	// Warm the active runtime's default model. Single active runtime (D3), so
-	// at most one of these fires; warmDefaultRuntime also logs the
-	// "no default_model configured" case.
+	// Warm the active runtime's EFFECTIVE chat model (override else catalog
+	// default), not the legacy per-runtime default_model field. Otherwise the
+	// runtime can keep serving a stale model while config reports a newer
+	// effective tier model.
 	switch {
 	case mistralRSEnabled(cfg):
-		warmDefaultRuntime(manager, "mistralrs", cfg.MistralRS.DefaultModel)
+		warmDefaultRuntime(manager, "mistralrs", openTurnModel(cfg))
 	case llamaServerEnabled(cfg):
-		warmDefaultRuntime(manager, "llama_server", cfg.LlamaServer.DefaultModel)
+		warmDefaultRuntime(manager, "llama_server", openTurnModel(cfg))
 	}
 	return manager
 }
@@ -775,20 +787,25 @@ func selectEmbedEngine(cfg config.Config, ollamaEng engine.EmbeddingService, lla
 	return ollamaEng
 }
 
+func openTierModel(cfg config.Config, tier config.Tier) string {
+	return openmodels.EffectiveModel(cfg, tier, catalogdefaults.ForRuntime, uint64(sysram.Total()))
+}
+
+func openTierModelOK(cfg config.Config, tier config.Tier) (string, bool) {
+	id := openTierModel(cfg, tier)
+	return id, id != ""
+}
+
+func openChatModel(cfg config.Config) string { return openTierModel(cfg, config.TierEveryday) }
+
+func openEmbeddingModel(cfg config.Config) string { return openTierModel(cfg, config.TierEmbedding) }
+
 func openTurnModel(cfg config.Config) string {
-	if strings.EqualFold(cfg.OpenRuntime, "llama_server") {
-		model := strings.TrimSpace(cfg.LlamaServer.DefaultModel)
-		if model != "" {
-			return model
-		}
-	}
-	if strings.EqualFold(cfg.OpenRuntime, "mistralrs") {
-		model := strings.TrimSpace(cfg.MistralRS.DefaultModel)
-		if model != "" {
-			return model
-		}
-	}
-	return cfg.OpenChatModel()
+	// The turn model is the effective everyday tier (override else catalog
+	// default). Do not prefer llama_server.default_model / mistralrs.default_model:
+	// those legacy runtime-default fields can be stale after the runtime-aware
+	// tier resolver chooses a catalog default.
+	return openChatModel(cfg)
 }
 
 const setupUsage = `Usage: cercano setup [--install-engine]
@@ -1082,14 +1099,14 @@ func runSetup(installEngine bool) {
 					os.Exit(1)
 				}
 				fmt.Printf("  OK: %s pulled.\n", picked)
-				cfg.Models.Tiers.Everyday.Open = picked
+				cfg.Models.SetOverride(cfg.OpenRuntime, config.TierEveryday, picked)
 			} else {
 				fmt.Fprintln(os.Stderr, "  Skipping model pull. Pull a chat model with `ollama pull <model>` and re-run `cercano setup`.")
 			}
 		} else {
 			// Use the configured model if it's installed; otherwise fall
 			// back to the first installed chat model and update the config.
-			configured := strings.TrimSuffix(cfg.OpenChatModel(), ":latest")
+			configured := strings.TrimSuffix(openChatModel(cfg), ":latest")
 			configuredPresent := false
 			for _, m := range chatModels {
 				if strings.TrimSuffix(m, ":latest") == configured {
@@ -1098,11 +1115,11 @@ func runSetup(installEngine bool) {
 				}
 			}
 			if configuredPresent {
-				fmt.Printf("  OK: Using %s (from config).\n", cfg.OpenChatModel())
+				fmt.Printf("  OK: Using %s (from config).\n", openChatModel(cfg))
 			} else {
 				chosen := chatModels[0]
-				fmt.Printf("  Configured model %q not installed. Using %s instead.\n", cfg.OpenChatModel(), chosen)
-				cfg.Models.Tiers.Everyday.Open = chosen
+				fmt.Printf("  Configured model %q not installed. Using %s instead.\n", openChatModel(cfg), chosen)
+				cfg.Models.SetOverride(cfg.OpenRuntime, config.TierEveryday, chosen)
 			}
 
 			if len(chatModels) > 1 {
@@ -1153,18 +1170,18 @@ func runSetup(installEngine bool) {
 	if cfg.OpenRuntime == "llama_server" {
 		// Embeddings ride the llama-server runtime — the encoder GGUF in
 		// model_dirs serves them; no Ollama daemon or pull is involved.
-		fmt.Printf("  Skipped Ollama pull: embeddings run on llama-server (%s).\n", cfg.OpenEmbeddingModel())
+		fmt.Printf("  Skipped Ollama pull: embeddings run on llama-server (%s).\n", openEmbeddingModel(cfg))
 	} else if engineAvailable {
 		installed, err := listInstalledModels(cfg.OllamaURL)
 		if err == nil {
-			if hasInstalledModel(installed, cfg.OpenEmbeddingModel()) {
-				fmt.Printf("  OK: Embedding model %s is installed.\n", cfg.OpenEmbeddingModel())
+			if hasInstalledModel(installed, openEmbeddingModel(cfg)) {
+				fmt.Printf("  OK: Embedding model %s is installed.\n", openEmbeddingModel(cfg))
 			} else {
-				fmt.Printf("  Pulling embedding model %s...\n", cfg.OpenEmbeddingModel())
-				if err := pullModel(cfg.OllamaURL, cfg.OpenEmbeddingModel()); err != nil {
-					fmt.Fprintf(os.Stderr, "  WARN: Could not pull %s: %v\n", cfg.OpenEmbeddingModel(), err)
+				fmt.Printf("  Pulling embedding model %s...\n", openEmbeddingModel(cfg))
+				if err := pullModel(cfg.OllamaURL, openEmbeddingModel(cfg)); err != nil {
+					fmt.Fprintf(os.Stderr, "  WARN: Could not pull %s: %v\n", openEmbeddingModel(cfg), err)
 				} else {
-					fmt.Printf("  OK: %s pulled.\n", cfg.OpenEmbeddingModel())
+					fmt.Printf("  OK: %s pulled.\n", openEmbeddingModel(cfg))
 				}
 			}
 		} else {
@@ -1714,6 +1731,11 @@ func generateSessionID() string {
 
 // runServerMode starts the gRPC server in standalone mode (for IDE clients).
 func runServerMode(cfg config.Config) {
+	// Tee log.Printf diagnostics to ~/.cercano-dispatch.log so they survive
+	// when the CLI auto-launches this agent and swallows its stderr. Without
+	// this, subsystem logs (e.g. [mcphost] connection failures) are lost.
+	setupDispatchLogFile()
+
 	// Persistent crash log. Sits alongside config.yaml so operators can
 	// find it after the fact. Failure to open the log is non-fatal —
 	// crash recording is nice-to-have; the server should still start.
@@ -1740,7 +1762,7 @@ func runServerMode(cfg config.Config) {
 	}()
 
 	fmt.Printf("Starting Cercano gRPC server (v%s)...\n", version)
-	fmt.Printf("Local model: %s\n", cfg.OpenChatModel())
+	fmt.Printf("Local model: %s\n", openChatModel(cfg))
 	fmt.Printf("Ollama URL: %s\n", cfg.OllamaURL)
 	if crashWriter != nil {
 		fmt.Printf("Crash log: %s\n", crashLogPath)
@@ -1812,7 +1834,7 @@ func runMCPMode(cfg config.Config, externalGRPC string) {
 	} else {
 		// Embedded mode: start gRPC server in-process on a random port
 		fmt.Fprintf(os.Stderr, "Cercano MCP server (v%s) starting with embedded gRPC server...\n", version)
-		fmt.Fprintf(os.Stderr, "Local model: %s | Ollama: %s\n", cfg.OpenChatModel(), cfg.OllamaURL)
+		fmt.Fprintf(os.Stderr, "Local model: %s | Ollama: %s\n", openChatModel(cfg), cfg.OllamaURL)
 
 		addr, _, err := startGRPCServer(cfg, "localhost:0")
 		if err != nil {

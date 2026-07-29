@@ -195,11 +195,24 @@ func TestOllamaEngine_TemperatureOption(t *testing.T) {
 	if temp != 0.0 {
 		t.Fatalf("greedy temperature = %v, want 0", temp)
 	}
+	if got := int(sawOptions["num_predict"].(float64)); got != engine.DefaultMaxTokens {
+		t.Fatalf("default num_predict = %d, want %d", got, engine.DefaultMaxTokens)
+	}
 
 	if _, err := eng.Complete(context.Background(), "m", "p", "", engine.GenOptions{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if _, ok := sawOptions["temperature"]; ok {
 		t.Fatal("default request must not override the server's temperature")
+	}
+	if got := int(sawOptions["num_predict"].(float64)); got != engine.DefaultMaxTokens {
+		t.Fatalf("default num_predict = %d, want %d", got, engine.DefaultMaxTokens)
+	}
+
+	if _, err := eng.Complete(context.Background(), "m", "p", "", engine.GenOptions{MaxTokens: 77}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := int(sawOptions["num_predict"].(float64)); got != 77 {
+		t.Fatalf("explicit num_predict = %d, want 77", got)
 	}
 }

@@ -422,4 +422,240 @@ branch and short SHA, or "conflict at <file>".
 - A delegation being mistaken for standing permission to merge to main.
 `,
 	},
+	{
+		Name:        "executing-plans",
+		Description: "Execute an approved plan.md in order, keeping status glyphs current and escalating surprises by tier.",
+		Domain:      DomainCore,
+		Trigger:     "After a plan is approved through `request_plan_approval` and you begin implementing it → pull the `executing-plans` protocol and follow it.",
+		Body: `# Executing Plans Protocol
+
+## When This Applies
+
+The user approved an effort's ` + "`plan.md`" + ` through ` + "`request_plan_approval`" + `, and the
+session has left the read-only planning profile. You are now implementing the
+approved plan. The Markdown file remains canon: keep it current while you work.
+
+## Core Loop
+
+1. **Open the approved files.** Read ` + "`efforts/<slug>/spec.md`" + ` and
+   ` + "`efforts/<slug>/plan.md`" + `. The spec is the fixed point; the plan is the
+   executable queue.
+2. **Work in document order.** Start with the first pending checkbox in the
+   first incomplete phase. Do not skip ahead unless the plan itself says to.
+3. **Mark status semantically.** Before starting a task, call
+   ` + "`plan_set_status`" + ` with ` + "`status: \"in_progress\"`" + `. When done, call it with
+   ` + "`status: \"done\"`" + `. If blocked, call it with ` + "`status: \"blocked\"`" + `. Target the
+   task by human-readable Markdown structure: ` + "`phase_title`" + ` plus ` + "`task_title`" + `,
+   or ` + "`phase_title`" + ` plus ` + "`task_path`" + ` for nested tasks. Do not add machine IDs to
+   ` + "`plan.md`" + `. Internal task IDs are an implementation detail, not part of the
+   human-owned artifact. Do not raw-edit status glyphs unless the semantic tool
+   is unavailable and you explicitly say so.
+4. **Verify at the right tier.** Run the smallest tests that cover the task just
+   completed. Do not run broad suites for local internal changes; do not skip
+   integration tests when an interface changed.
+5. **Commit solved units.** When a coherent unit is complete and verified,
+   checkpoint it with a clear commit message. Never push unless asked.
+
+## Surprise Classification
+
+A plan is a prediction. When reality diverges, classify the surprise before
+continuing. The active permission mode controls the threshold: **Bypass** keeps
+more divergence local; **Permissive** is balanced; **Strict** escalates sooner.
+
+### Local surprise — patch the plan in place
+
+Use this when the current phase and goal still hold, but a task is bigger,
+smaller, differently shaped, or missing a local sub-step. Update ` + "`plan.md`" + ` in
+place (split/add/annotate tasks within the phase), then continue. This is normal
+execution churn. Use ` + "`plan_set_status`" + ` for status changes.
+
+### Structural surprise — pause and hand back to planning
+
+Use this when a whole phase/order/approach is invalidated, but the spec still
+holds. Stop executing. Explain the divergence, then re-enter planning with the
+fixed ` + "`spec.md`" + `, the current ` + "`plan.md`" + ` state, and the surprise. The revised
+plan must come back through ` + "`request_plan_approval`" + ` before execution resumes.
+Do not silently rewrite the remaining phases and keep going.
+
+### Foundational surprise — halt and escalate to the human
+
+Use this when reality contradicts the spec itself — especially a premise recorded
+in the spec's ` + "`## Decisions`" + ` section. Stop. Cite the broken decision/premise,
+state what reality showed instead, and ask the human to edit or abandon the spec.
+Do not rewrite the spec yourself.
+
+## Guardrails
+
+- Status updates go through ` + "`plan_set_status`" + ` so the task store, Markdown codec,
+  and client task stream stay aligned.
+- The spec is human-owned. Treat it as an escalation boundary, not something to
+  patch casually during execution.
+- Structural replanning works against the fixed spec and the current plan state;
+  it does not re-litigate settled decisions unless a foundational surprise broke
+  their premise.
+- If you are unsure whether a surprise is local or structural, use the active
+  permission mode as the dial: Strict escalates; Bypass self-patches; Permissive
+  asks when the cost of being wrong is meaningful.
+`,
+	},
+	{
+		Name:        "planning-mode",
+		Description: "Explore read-only, then author an effort's spec and phased plan before touching anything.",
+		Domain:      DomainCore,
+		Trigger:     "When a request is large, ambiguous, or multi-step enough to warrant a written plan before any changes — or the moment you conclude you should write a spec or plan — you MUST call `suggest_plan` first. Do NOT author `spec.md`/`plan.md` yourself outside planning mode; deciding a plan is needed is itself the trigger to call `suggest_plan`. Once in planning mode, pull the `planning-mode` protocol and follow it.",
+		Body: `# Planning Mode Protocol
+
+## When This Applies
+
+You are in planning mode (the read-only planning profile is active — write/exec
+tools other than file writes are fenced off). This happens when the user runs
+` + "`/plan`" + ` or approves your ` + "`suggest_plan`" + ` proposal. Your job now is NOT to
+implement. It is to understand the problem and produce two artifacts a human
+signs off on before any code is written.
+
+**Precondition — you must have entered planning mode via ` + "`suggest_plan`" + ` (or
+` + "`/plan`" + `) before doing any of the below.** Recognizing that a request needs a
+spec or plan is the trigger to call ` + "`suggest_plan`" + `, not permission to write
+one yourself. Never create or edit ` + "`efforts/<slug>/spec.md`" + ` or ` + "`plan.md`" + `
+outside planning mode. If you catch yourself saying "this is planning work, let
+me write a spec and plan" while not in planning mode, stop and call
+` + "`suggest_plan`" + ` — hand-authoring the artifacts skips the human approval gate
+and the read-only fence, which is the whole point of planning mode.
+
+## The Unit of Work: an Effort
+
+An **effort** is a directory under ` + "`efforts/<slug>/`" + ` holding two files:
+
+- ` + "`spec.md`" + ` — the stable, human-owned **what & why**. The reason the effort
+  exists, the problem, the goals, the constraints, and the recorded decisions.
+  This is the fixed point everything else anchors to.
+- ` + "`plan.md`" + ` — the execution-owned **how & order**: a phased, checkbox to-do
+  list parsed into the task tree. This churns as execution proceeds.
+
+Pick a short kebab-case slug for the effort (e.g. ` + "`migrate-config-loader`" + `).
+
+## The Two Steps: Generate the Spec, then Capture the Plan
+
+### Step 1 — Generate the spec (get sign-off before the plan)
+
+1. **Explore read-only.** Read the relevant code, docs, and tests. You are
+   fenced to read + file-writes; use it to understand, not to change. Delegate
+   wide reconnaissance to a sub-agent (` + "`dispatch`" + `) so its output does not flood
+   your context.
+2. **Decision checkpoint before writing the spec.** If exploration reveals any
+   solution-shape fork — data model, transport/binding, interface boundary,
+   storage/durability, security posture, state machine, or module boundary —
+   pull ` + "`design-decisions`" + `. First show a concise bulleted decision queue:
+   one bullet per decision, named in plain English, with no option matrix yet.
+   Then work through the queue one decision at a time: present that decision's
+   real options conversationally, wait for the human's approval or selection,
+   and only then move to the next decision. Do **not** present all decision
+   matrices at once, and do **not** bury decisions in a finished spec as the
+   first time the human sees them. If there are no real forks, say that
+   explicitly before writing the spec.
+3. **Write ` + "`efforts/<slug>/spec.md`" + `** as human-readable prose only after
+   the decision checkpoint is complete:
+   - **Problem / motivation** — what is wrong or missing, and why it matters.
+   - **Goals** — what "done" means; and explicit non-goals.
+   - **Constraints** — what must hold (compatibility, interfaces, invariants).
+   - **Decisions** — see below. This section records the approved choices from
+     the checkpoint; it is not a substitute for surfacing forks first.
+4. **Hand the spec to the human and get sign-off** before writing the plan. Do
+   not proceed to the plan on your own — the spec is the anchor; it must be
+   right first.
+
+### Step 2 — Capture the plan
+
+Once the spec is approved, write **` + "`efforts/<slug>/plan.md`" + `** in the format
+below. Then call ` + "`request_plan_approval`" + ` with the effort path and a concise
+summary of the plan. That W-tier capability raises the standard ` + "`y/n/d/c`" + `
+gate; approval leaves the read-only planning profile so execution can begin.
+
+## Decisions During Generation (mandatory)
+
+The spec is where approved solution-shape decisions are recorded, but the
+human must see those forks before the spec is written. Planning mode does not get
+an exception from ` + "`design-decisions`" + `: when generation hits a fork with more
+than one genuinely viable approach, pull ` + "`design-decisions`" + ` and stop at a
+**decision checkpoint**. Start with a concise bulleted list of all decisions you
+found so the human sees the agenda. Then handle decisions sequentially, one per
+exchange: present only the current decision's real options, quantify them on the
+standard axes, flag any hack, argue against your own recommendation, and wait
+for the human's approval or selection before moving on. Do not dump every
+decision matrix in one response unless the human explicitly asks for the full
+batch. Only after the queue is resolved do you write the results into the spec's
+` + "`## Decisions`" + ` section — prose plus the protocol's standard
+options-vs-axes Markdown table, one entry per decision, each naming the chosen
+option and its rationale.
+
+Do not manufacture alternatives to look thorough. If only one approach is
+genuinely viable, record "the one viable path and why the obvious alternatives
+don't survive scrutiny" — no padded table.
+
+The recorded decisions are load-bearing later: execution's replanning reshapes
+phases *against* them (it does not silently re-litigate a settled fork), and a
+"foundational surprise" during execution is precisely "reality violated a
+premise recorded in a spec decision."
+
+## The plan.md Format
+
+Markdown on disk is canon; it is parsed into the task tree. Use exactly:
+
+- ` + "`# Effort Title`" + ` — one H1, the effort root. Prose after it (until the first
+  ` + "`##`" + `) is the root's notes.
+- ` + "`## Phase Name`" + ` — each phase is an H2. The prose after a phase heading, up to
+  its first checkbox, is the phase's notes — put the phase **objective**, the
+  **files to touch**, and the **tests to write** here as plain prose.
+- ` + "`- [ ] Task`" + ` — tasks and sub-tasks are checkboxes. Nest sub-tasks with
+  **2-space indentation** per level. Sibling order is document order — no
+  numbering needed.
+
+Status glyphs (execution updates these; you author them as pending):
+` + "`- [ ]`" + ` pending · ` + "`- [~]`" + ` in progress · ` + "`- [x]`" + ` done · ` + "`- [-]`" + ` blocked.
+
+Example:
+
+    # Migrate Config Loader
+
+    Replace the hand-rolled parser with a typed loader.
+
+    ## Phase 1 — Typed loader
+    Objective: introduce the typed loader behind the existing interface.
+    Files: config/loader.go, config/loader_test.go.
+    Tests: round-trip of every existing fixture; unknown-key error.
+
+    - [ ] Define the typed Config struct
+    - [ ] Implement Load() over the new struct
+      - [ ] Map legacy keys
+      - [ ] Error on unknown keys
+    - [ ] Delete the legacy parser
+
+## Guardrails
+
+- Enter planning mode via ` + "`suggest_plan`" + ` (or ` + "`/plan`" + `) *before* authoring any
+  spec or plan. Concluding "this needs a plan" means call ` + "`suggest_plan`" + ` — it
+  does not mean start writing ` + "`spec.md`" + `/` + "`plan.md`" + ` by hand. Doing so skips the
+  approval gate and the read-only fence.
+- Do not implement during planning. Producing spec.md and plan.md is the whole
+  job; execution is a separate, approved step.
+- The spec is prose the human owns; ` + "`plan.md`" + ` is what gets parsed. Do not put
+  machine-structured data in the spec.
+- Get sign-off on the spec before writing the plan, and route the finished plan
+  through ` + "`request_plan_approval`" + ` before any execution begins. That capability
+  supplies the ` + "`y/n/d/c`" + ` handoff and drops the read-only fence only on approval.
+- Never leave planning mode by just starting to edit code. There are exactly two
+  exits, and you must call one of them: ` + "`request_plan_approval`" + ` when a plan is
+  written and you want execution to begin (asks the human), or ` + "`plan_exit`" + `
+  when you are abandoning the plan or concluded no written plan is needed (exits
+  silently, no approval). If you find yourself about to implement while still in
+  planning mode, stop and call one of these first.
+
+## What This Prevents
+
+- Barreling into a large, ambiguous change without a reviewed plan.
+- Opaque plans no human can interrogate — recorded decisions make the "why"
+  auditable.
+- Re-litigating settled forks mid-execution, and silent spec drift.
+`,
+	},
 }

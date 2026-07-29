@@ -2,8 +2,6 @@ package slash
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	"time"
 
 	"cercano/source/server/pkg/agentclient"
@@ -27,28 +25,10 @@ func RegisterMcp(r *Registry, c *agentclient.Client) {
 			sub, rest := parseMcp(args)
 			switch sub {
 			case "list":
-				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-				defer cancel()
-				servers, err := c.ListMcpServers(ctx)
-				if err != nil {
-					return Result{Kind: ResultText, Text: "mcp: " + err.Error()}
-				}
-				if len(servers) == 0 {
-					return Result{Kind: ResultText, Text: "no MCP servers configured."}
-				}
-				var b strings.Builder
-				b.WriteString("MCP servers:\n\n")
-				b.WriteString("| server | state | tools | error |\n")
-				b.WriteString("| --- | --- | --- | --- |\n")
-				for _, s := range servers {
-					fmt.Fprintf(&b, "| %s | %s | %d | %s |\n",
-						escapePipes(s.Name),
-						escapePipes(s.State),
-						s.ToolCount,
-						escapePipes(s.Err),
-					)
-				}
-				return Result{Kind: ResultText, Text: b.String()}
+				// Bare /mcp (and /mcp list) opens the MCP config tab — a live,
+				// managed view — rather than dumping a one-shot table into
+				// scrollback. add/remove/restart stay as CLI fast paths below.
+				return Result{Kind: ResultOpenMcpConfig}
 
 			case "add":
 				if len(rest) < 2 {

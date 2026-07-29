@@ -28,16 +28,21 @@ func ParseMode(s string) (PermissionMode, error) {
 }
 
 // GateDecision returns true when a tool call at the given tier requires
-// human confirmation under the given mode.
+// human confirmation under the given mode. Bypass suppresses W-tier prompts, but
+// X-tier calls still confirm because they are destructive or session-control
+// operations that must never auto-run.
 func GateDecision(mode PermissionMode, tier llm.Permission) bool {
 	if tier == llm.PermR {
 		return false
+	}
+	if tier == llm.PermX {
+		return true
 	}
 	switch mode {
 	case ModeStrict:
 		return true
 	case ModePermissive:
-		return tier == llm.PermX
+		return false
 	case ModeBypass:
 		return false
 	}
@@ -46,8 +51,12 @@ func GateDecision(mode PermissionMode, tier llm.Permission) bool {
 
 // GateDecisionForMCP extends GateDecision with MCP origin. MCP tools are
 // untrusted third-party code: they confirm by default even in permissive mode,
-// unless allowlisted. Bypass still skips everything.
+// unless allowlisted. Bypass suppresses non-X MCP prompts; X-tier calls still
+// confirm even under bypass and even when allowlisted.
 func GateDecisionForMCP(mode PermissionMode, tier llm.Permission, isMCP, allowlisted bool) bool {
+	if tier == llm.PermX {
+		return true
+	}
 	if mode == ModeBypass {
 		return false
 	}

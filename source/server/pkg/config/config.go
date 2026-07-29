@@ -112,9 +112,9 @@ type CloudCostProfiles struct {
 
 // ModelProfiles is the vendor-keyed cloud model selection table. Closed cloud
 // models are vendor-owned, so "which model" for a cost tier is keyed by the
-// active profile's vendor, not by the capability tier's cloud slot (retired —
-// see ModelTier.Cloud). Open/local models keep the capability-tier `open`
-// slots untouched.
+// active profile's vendor, not by the retired capability-tier cloud slots.
+// Open/local models are runtime-keyed overrides over the catalog default (see
+// ModelsConfig/OpenModels).
 type ModelProfiles struct {
 	Cloud CloudCostProfiles `yaml:"cloud"`
 }
@@ -282,8 +282,7 @@ type Config struct {
 	Models                   ModelsConfig      `yaml:"models"`
 	// ModelProfiles is the vendor-keyed cloud model selection table (top-level
 	// key model_profiles). Closed cloud model selection resolves here — keyed
-	// by the active profile's vendor — retiring the per-tier models.tiers.*.cloud
-	// slots (kept load-tolerant, no longer read; see ModelTier.Cloud).
+	// by the active profile's vendor. Retired per-tier cloud slots are ignored.
 	ModelProfiles ModelProfiles `yaml:"model_profiles"`
 	// Catalog selects the active model-catalog backend for browse/search.
 	Catalog CatalogConfig `yaml:"catalog,omitempty"`
@@ -302,32 +301,32 @@ type CatalogConfig struct {
 // counts; HardOverridePct is a fraction of the cloud model's max context above
 // which the request path compacts synchronously.
 type CompactionConfig struct {
-	Enabled               bool            `yaml:"enabled"`
-	ActivationFloorTokens int             `yaml:"activation_floor_tokens"`
-	SegmentTokens         int             `yaml:"segment_tokens"`
-	VerbatimRecent        int             `yaml:"verbatim_recent"`
-	HardOverridePct       float64         `yaml:"hard_override_pct"`
+	Enabled               bool    `yaml:"enabled"`
+	ActivationFloorTokens int     `yaml:"activation_floor_tokens"`
+	SegmentTokens         int     `yaml:"segment_tokens"`
+	VerbatimRecent        int     `yaml:"verbatim_recent"`
+	HardOverridePct       float64 `yaml:"hard_override_pct"`
 	// CompactedBudgetPct bounds the whole compacted backlog (the consolidated
 	// summary preamble) as a fraction of the active chat model's context
 	// window. When the merged ledger exceeds this, the compactor prunes it
 	// deterministically instead of re-summarizing. Replaces the old fixed
 	// ~16k-token ceiling that crushed long sessions on large-window models.
 	// Zero uses the built-in default (see compactedBudgetDefaultPct).
-	CompactedBudgetPct float64         `yaml:"compacted_budget_pct"`
+	CompactedBudgetPct float64 `yaml:"compacted_budget_pct"`
 	// TieredRetentionSegments enables gentle, age-based degradation for very
 	// long sessions (the fallback when a rollover is declined): the newest N
 	// segment summaries stay verbatim, older ones shed transient detail, and
 	// the oldest keep only durable recall (Goal/State/Files). Zero disables
 	// tiering — the ledger is only bounded by CompactedBudgetPct's hard prune.
-	TieredRetentionSegments int             `yaml:"tiered_retention_segments"`
+	TieredRetentionSegments int `yaml:"tiered_retention_segments"`
 	// Rollover* arm and shape the agent's offer to start a fresh conversation
 	// seeded only by a durable handoff when a session grows very long (D). All
 	// off by default: RolloverRawTokenThreshold==0 AND
 	// RolloverReconsolidationThreshold==0 means no offer is ever made.
-	RolloverRawTokenThreshold        int64   `yaml:"rollover_raw_token_threshold"`        // cumulative raw tokens that arms an offer; 0 disables the token trigger
-	RolloverReconsolidationThreshold int     `yaml:"rollover_reconsolidation_threshold"`  // OR-trigger on re-consolidation count; 0 ignores it
-	RolloverRearmMultiple            float64 `yaml:"rollover_rearm_multiple"`             // growth multiple past a decline before re-offering; <=1 => default 1.5
-	RolloverVerbatimTurns            int     `yaml:"rollover_verbatim_turns"`             // turns kept verbatim in the handoff; <=0 => default 6
+	RolloverRawTokenThreshold        int64           `yaml:"rollover_raw_token_threshold"`       // cumulative raw tokens that arms an offer; 0 disables the token trigger
+	RolloverReconsolidationThreshold int             `yaml:"rollover_reconsolidation_threshold"` // OR-trigger on re-consolidation count; 0 ignores it
+	RolloverRearmMultiple            float64         `yaml:"rollover_rearm_multiple"`            // growth multiple past a decline before re-offering; <=1 => default 1.5
+	RolloverVerbatimTurns            int             `yaml:"rollover_verbatim_turns"`            // turns kept verbatim in the handoff; <=0 => default 6
 	Retention                        RetentionConfig `yaml:"retention"`
 	// ToolElisionOnly, when true (and Enabled is true), keeps the compaction
 	// machinery running on its normal triggers — background schedule, debounce,
@@ -397,6 +396,14 @@ const (
 	DefaultToolLoopMaxIterations = 200
 	// UnlimitedToolLoopMaxIterations disables the turn-level tool-loop cap.
 	UnlimitedToolLoopMaxIterations = -1
+	// DefaultToolLoopMaxTokensPerTurn is the default per-turn output-token budget
+	// (max_tokens / num_predict) the tool loop requests from the provider. It
+	// bounds how much the model may emit in one turn, including tool-call
+	// arguments. 4096 tokens (~12-16 KB) is smaller than a typical source file,
+	// so a single Write of a real file truncated mid-JSON at that cap; 8192
+	// (~24-32 KB) fits ordinary files while staying well within model output
+	// limits. Callers may override via ToolLoopInput.MaxTokensPerTurn.
+	DefaultToolLoopMaxTokensPerTurn = 8192
 )
 
 // ToolLoopConfig controls the agentic tool loop.
@@ -454,7 +461,7 @@ type MistralRSConfig struct {
 	ISQ              string        `yaml:"isq"`
 	PagedAttn        string        `yaml:"paged_attn"`         // "" | "auto" | "on" | "off"
 	PAMemoryFraction string        `yaml:"pa_memory_fraction"` // "" | 0<f<=1 as string
-	PAMemoryMB       int           `yaml:"pa_memory_mb"`        // 0 = unset; else absolute KV-cache MB cap (takes precedence over fraction)
+	PAMemoryMB       int           `yaml:"pa_memory_mb"`       // 0 = unset; else absolute KV-cache MB cap (takes precedence over fraction)
 	MaxSeqLen        int           `yaml:"max_seq_len"`        // 0 = derive a RAM-safe cap
 	MaxSeqs          int           `yaml:"max_seqs"`           // 0 = derive a RAM-safe cap
 	MaxBatchSize     int           `yaml:"max_batch_size"`     // 0 = derive a RAM-safe cap
@@ -509,7 +516,7 @@ func Defaults() Config {
 		// the default behave identically.
 		WorkerIdleTimeoutSeconds: 0,
 		Agent:                    AgentConfig{ShutdownOnLastClient: true},
-		Models:                   ModelsConfig{DefaultProvider: ProviderOpen},
+		Models:                   ModelsConfig{},
 		// Seed the vendor-keyed cloud cost tables. Closed cloud model
 		// selection resolves here — keyed by the active profile's vendor.
 		// Only the vendors Cercano ships a default lineup for are seeded;
@@ -758,26 +765,27 @@ func migrateModelTiers(data []byte, cfg *Config) {
 		}
 		return false
 	}
-	if cfg.Models.Tiers.Everyday.Open == "" && cfg.OpenModel != "" && filePresent("open_model", "local_model") {
-		cfg.Models.Tiers.Everyday.Open = cfg.OpenModel
+	// Legacy open_model / embedding_model migrate into the ACTIVE runtime's
+	// overrides (they were runtime-blind singletons; the active runtime is the
+	// only correct home for them). Only when the user actually had the legacy
+	// key set — an unset legacy field must not manufacture an override, or we
+	// would mask the catalog default.
+	rt := cfg.OpenRuntime
+	if _, ok := cfg.Models.OverrideFor(rt, TierEveryday); !ok && cfg.OpenModel != "" && filePresent("open_model", "local_model") {
+		cfg.Models.SetOverride(rt, TierEveryday, cfg.OpenModel)
 	}
-	if cfg.Models.Tiers.Embedding.Open == "" && cfg.EmbeddingModel != "" && filePresent("embedding_model") {
-		cfg.Models.Tiers.Embedding.Open = cfg.EmbeddingModel
+	if _, ok := cfg.Models.OverrideFor(rt, TierEmbedding); !ok && cfg.EmbeddingModel != "" && filePresent("embedding_model") {
+		cfg.Models.SetOverride(rt, TierEmbedding, cfg.EmbeddingModel)
 	}
 }
 
-// finalizeModelTiers completes the taxonomy after migration and env
-// overrides: still-empty slots get the stock local models, and the retired
-// legacy fields are blanked so Save (omitempty) drops open_model /
-// embedding_model from the file for good. Runs LAST in both Load paths —
-// defaults must never mask a file, migration, or env choice.
+// finalizeModelTiers blanks the retired legacy singleton fields so Save
+// (omitempty) drops open_model / embedding_model from the file for good. It no
+// longer defaults any tier: an unset tier resolves to the runtime's catalog
+// default at the server (override-else-catalog-default), so pkg/config must NOT
+// seed a hardcoded model here — that would reintroduce a runtime-blind default
+// and a stale copy. Runs LAST in both Load paths.
 func finalizeModelTiers(cfg *Config) {
-	if cfg.Models.Tiers.Everyday.Open == "" {
-		cfg.Models.Tiers.Everyday.Open = "qwen3-coder"
-	}
-	if cfg.Models.Tiers.Embedding.Open == "" {
-		cfg.Models.Tiers.Embedding.Open = "nomic-embed-text"
-	}
 	cfg.OpenModel = ""
 	cfg.EmbeddingModel = ""
 }
@@ -949,23 +957,24 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("OLLAMA_URL"); v != "" {
 		cfg.OllamaURL = v
 	}
-	// CERCANO_OPEN_* is the primary naming; CERCANO_LOCAL_* is accepted for
-	// backward compat with earlier releases. When both are set the new
-	// spelling wins.
-	if v := os.Getenv("CERCANO_LOCAL_MODEL"); v != "" {
-		cfg.Models.Tiers.Everyday.Open = v
-	}
-	if v := os.Getenv("CERCANO_OPEN_MODEL"); v != "" {
-		cfg.Models.Tiers.Everyday.Open = v
-	}
+	// Runtime first, so the model overrides below key onto the correct active
+	// runtime. CERCANO_OPEN_* is the primary naming; CERCANO_LOCAL_* is
+	// accepted for backward compat. When both are set the new spelling wins.
 	if v := os.Getenv("CERCANO_LOCAL_RUNTIME"); v != "" {
 		cfg.OpenRuntime = v
 	}
 	if v := os.Getenv("CERCANO_OPEN_RUNTIME"); v != "" {
 		cfg.OpenRuntime = v
 	}
+	// Model env overrides set the ACTIVE runtime's override for that tier.
+	if v := os.Getenv("CERCANO_LOCAL_MODEL"); v != "" {
+		cfg.Models.SetOverride(cfg.OpenRuntime, TierEveryday, v)
+	}
+	if v := os.Getenv("CERCANO_OPEN_MODEL"); v != "" {
+		cfg.Models.SetOverride(cfg.OpenRuntime, TierEveryday, v)
+	}
 	if v := os.Getenv("CERCANO_EMBEDDING_MODEL"); v != "" {
-		cfg.Models.Tiers.Embedding.Open = v
+		cfg.Models.SetOverride(cfg.OpenRuntime, TierEmbedding, v)
 	}
 	if v := os.Getenv("CERCANO_PORT"); v != "" {
 		cfg.Port = v

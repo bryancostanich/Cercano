@@ -75,7 +75,7 @@ func (e *Engine) ChatWithTools(ctx context.Context, req engine.ChatRequest) (eng
 		messages = append(messages, openAIMessageFromEngine(msg))
 	}
 	model := req.Model
-	resp, err := e.chat(ctx, model, messages, req.Tools, engine.GenOptions{}, false, nil)
+	resp, err := e.chat(ctx, model, messages, req.Tools, engine.GenOptions{MaxTokens: req.MaxTokens}, false, nil)
 	if err != nil {
 		return engine.ChatResponse{}, err
 	}
@@ -136,6 +136,7 @@ func (e *Engine) chat(ctx context.Context, model string, messages []openAIMessag
 		ParseToolCalls:  len(tools) > 0,
 		ParallelToolUse: len(tools) > 0,
 		Temperature:     opts.Temperature,
+		MaxTokens:       engine.EffectiveMaxTokens(opts.MaxTokens),
 	}
 	if len(tools) > 0 {
 		payload.ToolChoice = "auto"
@@ -318,6 +319,7 @@ type chatCompletionRequest struct {
 	// Temperature is a pointer so 0 (greedy decoding) survives serialization
 	// instead of being dropped as a zero value; nil keeps the server default.
 	Temperature *float64 `json:"temperature,omitempty"`
+	MaxTokens   int      `json:"max_tokens,omitempty"`
 }
 
 type openAIMessage struct {

@@ -142,16 +142,33 @@ func renderGrid(cols []Column, widths []int, rows []map[string]string, styles th
 	b.WriteString(styles.Border.Render(borderRow("┌", "┬", "┐", "─", widths)))
 	b.WriteString("\n")
 
-	// Header row.
-	b.WriteString(styles.Border.Render("│"))
+	// Header row. Header cells wrap to their column width exactly like data
+	// cells — a wrappable column can be shrunk below its name's natural width
+	// by shrinkWrappable, so the header name must break across lines too rather
+	// than overflow the cell border.
+	headerLines := make([][]string, len(cols))
+	headerH := 1
 	for i, c := range cols {
-		cell := padCell(c.Name, widths[i])
-		b.WriteString(" ")
-		b.WriteString(styles.Accent.Render(cell))
-		b.WriteString(" ")
-		b.WriteString(styles.Border.Render("│"))
+		headerLines[i] = wrapCell(c.Name, widths[i])
+		if len(headerLines[i]) > headerH {
+			headerH = len(headerLines[i])
+		}
 	}
-	b.WriteString("\n")
+	for k := 0; k < headerH; k++ {
+		b.WriteString(styles.Border.Render("│"))
+		for i := range cols {
+			cell := ""
+			if k < len(headerLines[i]) {
+				cell = headerLines[i][k]
+			}
+			cell = padCell(cell, widths[i])
+			b.WriteString(" ")
+			b.WriteString(styles.Accent.Render(cell))
+			b.WriteString(" ")
+			b.WriteString(styles.Border.Render("│"))
+		}
+		b.WriteString("\n")
+	}
 
 	// Header separator: ├──┼──┤
 	b.WriteString(styles.Border.Render(borderRow("├", "┼", "┤", "─", widths)))

@@ -28,6 +28,7 @@ const (
 	ResultOpenThemeSettings // like ResultOpenSettings but lands on the UI/theme tab
 	ResultOpenHistoryPicker
 	ResultOpenRuntimeDashboard
+	ResultOpenMcpConfig     // opens the /config surface on the MCP tab
 	ResultOpenRuntimeConfig // like ResultOpenRuntimeDashboard but lands on the Runtime tab (active runtime + open-model picker)
 	ResultOpenContextView
 	ResultOpenWizard
@@ -42,6 +43,7 @@ const (
 	ResultCompactContext        // incrementally compact the current conversation's backlog
 	ResultClearCompactedContext // drop compaction state; rehydrate from raw turns (no re-summarize)
 	ResultElideContext          // stub all tool-result bodies in the context up to now (in-memory)
+	ResultSetSessionProfile     // SessionProfile carries the profile name ("plan"|"default"|future)
 )
 
 // Result is what a slash command produces.
@@ -51,6 +53,7 @@ type Result struct {
 	ToolName       string // for ResultInvokeTool
 	ToolArgs       string // for ResultInvokeTool (JSON-encoded args)
 	PermissionMode string // for ResultSetPermissionMode
+	SessionProfile string // for ResultSetSessionProfile ("plan"|"default"|future)
 	WorkDir        string // for ResultDevMode
 }
 

@@ -45,7 +45,11 @@ func messagesToInput(msgs []llm.Message) []inputItem {
 				items = append(items, inputItem{Type: "function_call", CallID: b.ToolUseID, Name: b.ToolName, Arguments: string(b.ToolInput)})
 			case llm.BlockToolResult:
 				flush()
-				items = append(items, inputItem{Type: "function_call_output", CallID: b.ToolUseRef, Output: b.Content})
+				// Output is always emitted (even for empty content): the
+				// Responses API rejects a function_call_output item that omits
+				// it. json.Marshal of a string never fails.
+				out, _ := json.Marshal(b.Content)
+				items = append(items, inputItem{Type: "function_call_output", CallID: b.ToolUseRef, Output: json.RawMessage(out)})
 			case llm.BlockReasoning:
 				flush()
 				items = append(items, inputItem{Type: "reasoning", ID: b.ReasoningID, EncryptedContent: b.ReasoningData, Summary: json.RawMessage("[]")})

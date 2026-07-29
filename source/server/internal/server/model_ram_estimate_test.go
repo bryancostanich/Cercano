@@ -90,7 +90,7 @@ func TestGetModelRAMEstimate_LocalModelFromInventory(t *testing.T) {
 		Path:      path,
 		SizeBytes: fi.Size(),
 	}}})
-	rtSvc := runtimessvc.New(cfgsvc.New("", config.Config{}, nil))
+	rtSvc := runtimessvc.New(cfgsvc.New("", config.Config{}, nil), nil)
 	rtSvc.SetRuntimeManager(mgr)
 	s := &Server{runtimesSvc: rtSvc}
 
@@ -119,7 +119,7 @@ func TestGetModelRAMEstimate_LocalModelFromInventory(t *testing.T) {
 }
 
 func TestGetModelRAMEstimate_UnknownModelSoftFails(t *testing.T) {
-	rtSvc2 := runtimessvc.New(cfgsvc.New("", config.Config{}, nil))
+	rtSvc2 := runtimessvc.New(cfgsvc.New("", config.Config{}, nil), nil)
 	rtSvc2.SetRuntimeManager(localruntime.NewManager())
 	s := &Server{runtimesSvc: rtSvc2}
 	resp, err := s.GetModelRAMEstimate(context.Background(), &proto.GetModelRAMEstimateRequest{

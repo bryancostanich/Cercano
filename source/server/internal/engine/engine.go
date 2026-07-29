@@ -57,9 +57,10 @@ type ToolFunctionJSON struct {
 
 // ChatRequest is the input to ChatWithTools.
 type ChatRequest struct {
-	Model    string           `json:"model"`
-	Messages []ChatMessage    `json:"messages"`
-	Tools    []ToolSchemaJSON `json:"tools,omitempty"`
+	Model     string           `json:"model"`
+	Messages  []ChatMessage    `json:"messages"`
+	Tools     []ToolSchemaJSON `json:"tools,omitempty"`
+	MaxTokens int              `json:"max_tokens,omitempty"`
 }
 
 // ChatResponse is the output of ChatWithTools.
@@ -74,10 +75,22 @@ type ChatResponse struct {
 
 // InferenceEngine defines the interface for local text generation backends.
 // GenOptions carries per-call sampling parameters for a completion.
+const DefaultMaxTokens = 4096
+
 type GenOptions struct {
 	// Temperature is the sampling temperature. Nil uses the engine's default;
 	// a pointer to 0 requests greedy decoding (deterministic output).
 	Temperature *float64
+	// MaxTokens bounds generated output. Zero means use DefaultMaxTokens for
+	// local runtimes; callers that need a tighter cap should set it explicitly.
+	MaxTokens int
+}
+
+func EffectiveMaxTokens(maxTokens int) int {
+	if maxTokens > 0 {
+		return maxTokens
+	}
+	return DefaultMaxTokens
 }
 
 // Greedy returns GenOptions pinned to temperature 0 (deterministic decoding).

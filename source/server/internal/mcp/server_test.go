@@ -105,6 +105,10 @@ func (m *mockAgentClient) UpdateConfig(ctx context.Context, in *proto.UpdateConf
 	return &proto.UpdateConfigResponse{Success: true, Message: "Configuration updated"}, m.configErr
 }
 
+func (m *mockAgentClient) ShutdownAgent(ctx context.Context, in *proto.ShutdownAgentRequest, opts ...grpc.CallOption) (*proto.ShutdownAgentResponse, error) {
+	return &proto.ShutdownAgentResponse{Accepted: true, Message: "shutdown scheduled"}, nil
+}
+
 func (m *mockAgentClient) GetConfig(ctx context.Context, in *proto.GetConfigRequest, opts ...grpc.CallOption) (*proto.GetConfigResponse, error) {
 	return &proto.GetConfigResponse{}, nil
 }
@@ -194,6 +198,14 @@ func (m *mockAgentClient) GetProviderCapabilities(ctx context.Context, in *proto
 
 func (m *mockAgentClient) SetPermissionMode(ctx context.Context, in *proto.SetPermissionModeRequest, opts ...grpc.CallOption) (*proto.SetPermissionModeResponse, error) {
 	return &proto.SetPermissionModeResponse{}, nil
+}
+
+func (m *mockAgentClient) SetSessionProfile(ctx context.Context, in *proto.SetSessionProfileRequest, opts ...grpc.CallOption) (*proto.SetSessionProfileResponse, error) {
+	return &proto.SetSessionProfileResponse{}, nil
+}
+
+func (m *mockAgentClient) GetSessionProfile(ctx context.Context, in *proto.GetSessionProfileRequest, opts ...grpc.CallOption) (*proto.GetSessionProfileResponse, error) {
+	return &proto.GetSessionProfileResponse{}, nil
 }
 
 func (m *mockAgentClient) ProposeContextEdit(ctx context.Context, in *proto.ProposeContextEditRequest, opts ...grpc.CallOption) (*proto.ProposeContextEditResponse, error) {

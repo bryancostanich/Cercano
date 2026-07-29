@@ -26,6 +26,7 @@ import (
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
 	"cercano/source/server/internal/ollamacatalog"
+	"cercano/source/server/internal/openmodels"
 	"cercano/source/server/internal/usage"
 	cfg "cercano/source/server/pkg/config"
 )
@@ -115,6 +116,10 @@ type service struct {
 	cloudLLMProvider    inference.Provider
 	openLLMProvider     inference.Provider
 	openProviderFactory func(cfg.Config) inference.Provider // rebuilds openLLMProvider on runtime change
+	// openModels resolves the EFFECTIVE open model for a tier on the active
+	// runtime (override-else-catalog-default). A required collaborator,
+	// constructed with config + catalog at startup — never nil in production.
+	openModels          *openmodels.Resolver
 	cloudFactory        agent.CloudFactory
 	router              RouterCloudUpdater
 	coordinator         *loop.ADKCoordinator
@@ -131,6 +136,7 @@ type service struct {
 // not applicable (e.g. tests, minimal embeddings).
 func New(
 	cfgSvc cfgsvc.Service,
+	openModels *openmodels.Resolver,
 	router RouterCloudUpdater,
 	coordinator *loop.ADKCoordinator,
 	cloudFactory agent.CloudFactory,
@@ -139,6 +145,7 @@ func New(
 ) Resolver {
 	return &service{
 		cfgSvc:       cfgSvc,
+		openModels:   openModels,
 		router:       router,
 		coordinator:  coordinator,
 		cloudFactory: cloudFactory,
@@ -192,7 +199,7 @@ func (p *service) Main() (inference.Provider, bool, bool, error) {
 	// the gap" routing contract. Otherwise the not-yet-present model gets
 	// picked and fails at load time instead of falling back.
 	open := p.openLLMProvider
-	if !dispatch.OpenModelReady(c) {
+	if !dispatch.OpenModelReadyFor(c, p.openModels.ChatModel()) {
 		open = nil
 	}
 	sel, err := inference.Select(mode, inference.RoleMain, inference.Tiers{
@@ -225,8 +232,7 @@ func (p *service) MainModel(isCloud bool) string {
 		}
 		return p.ActiveCloudModel()
 	}
-	c := p.cfgSvc.Get()
-	return (&c).OpenChatModel()
+	return p.openModels.ChatModel()
 }
 
 // PrimaryModel returns the model the context meter measures against: the
@@ -250,8 +256,7 @@ func (p *service) PrimaryModel() string {
 			return m
 		}
 	}
-	// OpenChatModel has a pointer receiver; take the address of the snapshot.
-	return (&cfgSnap).OpenChatModel()
+	return p.openModels.ChatModel()
 }
 
 // Rebuild re-derives providers from current config.

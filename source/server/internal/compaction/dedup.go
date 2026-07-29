@@ -59,23 +59,34 @@ func toolKey(b llm.Block) string {
 }
 
 // DefaultLossyElisionKeepLast is the recency-window default for
-// KeepLastNToolResults. Measured on real long-conversation corpus: keeping the
-// last 20 tool results recovers ~58% of tokens while retaining enough recent
-// context for the model to continue reasoning about the current work. Tuning
-// lower (10) buys ~2 more points; going higher (50) gives up ~7 points.
-const DefaultLossyElisionKeepLast = 20
+// KeepLastNToolResults. Keep the count deliberately small: tool results are
+// often large mechanical evidence, and the model usually needs only the last
+// few verbatim outputs to continue the current step. Older raw results remain
+// in the persistent store for inspection/export or explicit rehydration.
+const DefaultLossyElisionKeepLast = 5
 
-// KeepLastNToolResults stubs the Content of every tool_result block EXCEPT the
-// last n in document order, replacing each earlier one with a one-line stub.
-// All blocks and ids stay in place, so pairing remains valid. Returns the
-// rewritten messages and the number of stubbed results.
+// DefaultLossyElisionMaxResultChars caps any single retained tool_result body.
+// A count-only policy is unsafe: one recent grep/read result can be megabytes
+// and dominate the next prompt even when it is the newest result.
+const DefaultLossyElisionMaxResultChars = 16 * 1024
+
+// DefaultLossyElisionTotalResultChars caps the total verbatim tool_result text
+// retained by KeepLastNToolResults. This bounds the live-tail evidence budget
+// even when several recent results are individually under the per-result cap.
+const DefaultLossyElisionTotalResultChars = 64 * 1024
+
+// KeepLastNToolResults stubs tool_result Content unless the result is recent
+// enough AND fits within the per-result and total retained-result budgets. All
+// blocks and ids stay in place, so pairing remains valid. Returns the rewritten
+// messages and the number of stubbed results.
 //
 // Unlike ElideSupersededToolResults (byte-identical dedup only, lossless in the
-// sense that no information is destroyed), this is a recency-window policy —
-// it stubs older tool_results even when they have no duplicate. Older tool
-// content is reconstructible: the model can re-invoke the tool if it needs the
-// content again, and the raw turns are still in the persistent store for
-// programmatic rehydration. Callers must gate this behind an explicit opt-in.
+// sense that no information is destroyed), this is a lossy context-window
+// policy: it stubs older or oversized tool_results even when they have no
+// duplicate. Tool content is reconstructible: the model can re-invoke the tool
+// if it needs the content again, and the raw turns are still in the persistent
+// store for programmatic rehydration. Callers must gate this behind an explicit
+// opt-in.
 func KeepLastNToolResults(msgs []llm.Message, n int) ([]llm.Message, int) {
 	if n < 0 {
 		n = 0
@@ -90,10 +101,35 @@ func KeepLastNToolResults(msgs []llm.Message, n int) ([]llm.Message, int) {
 			}
 		}
 	}
-	keepFrom := len(refs) - n
-	if keepFrom <= 0 {
+	if len(refs) == 0 {
 		return msgs, 0
 	}
+	keepFrom := len(refs) - n
+	if keepFrom < 0 {
+		keepFrom = 0
+	}
+
+	// Decide keep/stub from newest to oldest so the total budget favors the most
+	// recent evidence. A result must pass all three gates: within the last n,
+	// below the per-result cap, and within the total retained-result budget.
+	keep := make([]bool, len(refs))
+	retainedChars := 0
+	for idx := len(refs) - 1; idx >= 0; idx-- {
+		if idx < keepFrom {
+			continue
+		}
+		r := refs[idx]
+		contentLen := len(msgs[r.m].Blocks[r.b].Content)
+		if contentLen > DefaultLossyElisionMaxResultChars {
+			continue
+		}
+		if retainedChars+contentLen > DefaultLossyElisionTotalResultChars {
+			continue
+		}
+		keep[idx] = true
+		retainedChars += contentLen
+	}
+
 	// Copy shallowly, rewriting the Content of stub-eligible tool_results.
 	out := make([]llm.Message, len(msgs))
 	for i, m := range msgs {
@@ -101,11 +137,11 @@ func KeepLastNToolResults(msgs []llm.Message, n int) ([]llm.Message, int) {
 	}
 	stubbed := 0
 	for idx, r := range refs {
-		if idx >= keepFrom {
+		if keep[idx] {
 			continue
 		}
 		blk := out[r.m].Blocks[r.b]
-		blk.Content = fmt.Sprintf("[elided: superseded result, %d chars]", len(blk.Content))
+		blk.Content = fmt.Sprintf("[elided: tool result, %d chars]", len(blk.Content))
 		out[r.m].Blocks[r.b] = blk
 		stubbed++
 	}

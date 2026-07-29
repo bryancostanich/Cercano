@@ -60,6 +60,78 @@ func TestCatalog_AgentTiersSupportTools(t *testing.T) {
 	}
 }
 
+// TestCatalog_PlainChatTiersAreChatCapable guards the newer plain-chat gate:
+// every required tier except embedding is a plain-chat tier, so its model must
+// produce visible chat content. GLM-4.5-Air loads and does tool calls but
+// returns empty plain-chat output on the pinned build, so it must not appear in
+// any chat tier — the loader enforces this, and this test asserts the shipped
+// data satisfies it.
+func TestCatalog_PlainChatTiersAreChatCapable(t *testing.T) {
+	cat, err := loadCatalog()
+	if err != nil {
+		t.Fatalf("loadCatalog: %v", err)
+	}
+	for name, prof := range cat.Profiles {
+		for tier, id := range prof {
+			if tier == "embedding" {
+				continue
+			}
+			if !cat.Models[id].PlainChatSupported() {
+				t.Errorf("profile %q chat tier %q uses non-plain-chat model %q", name, tier, id)
+			}
+		}
+	}
+}
+
+// TestCatalog_GLMFlaggedPlainChatBroken pins the specific verified fact: GLM is
+// present (tool-capable) but marked plain_chat_ok:false so it is never an
+// auto-selected plain-chat default.
+func TestCatalog_GLMFlaggedPlainChatBroken(t *testing.T) {
+	cat, err := loadCatalog()
+	if err != nil {
+		t.Fatalf("loadCatalog: %v", err)
+	}
+	glm, ok := cat.Models["glm-4.5-air-q4_k_m"]
+	if !ok {
+		t.Fatal("expected glm-4.5-air-q4_k_m in catalog")
+	}
+	if glm.PlainChatSupported() {
+		t.Error("GLM must be flagged plain_chat_ok:false")
+	}
+	if !glm.SupportsTools {
+		t.Error("GLM should still advertise tool support")
+	}
+}
+
+// TestLoadCatalog_RejectsNonPlainChatInChatTier asserts the loader itself
+// fails a catalog that places a non-plain-chat model in a chat tier, so a bad
+// authoring edit is caught at build time rather than recommending an
+// empty-output model to a user.
+func TestLoadCatalog_RejectsNonPlainChatInChatTier(t *testing.T) {
+	no := false
+	cat := CuratedCatalog{
+		Models: map[string]CuratedModel{
+			"chatty":   {ID: "chatty", SupportsTools: true},
+			"emptybot": {ID: "emptybot", SupportsTools: true, PlainChatOK: &no},
+			"embedder": {ID: "embedder", SupportsEmbed: true},
+		},
+		Profiles: map[string]map[string]string{
+			"48": {
+				"most_capable":    "emptybot",
+				"everyday":        "chatty",
+				"fast_light":      "chatty",
+				"fast_light_text": "chatty",
+				"embedding":       "embedder",
+			},
+		},
+	}
+	if err := validateCatalog(cat); err == nil {
+		t.Fatal("expected validation error for non-plain-chat model in most_capable tier")
+	} else if !strings.Contains(err.Error(), "plain-chat") {
+		t.Fatalf("error should mention plain-chat, got: %v", err)
+	}
+}
+
 // TestCatalog_EmbeddingTierEmbeds ensures each profile's embedding slot is an
 // actual encoder model, not a chat model dropped in by mistake.
 func TestCatalog_EmbeddingTierEmbeds(t *testing.T) {

@@ -11,6 +11,9 @@ type progressEmitterKey struct{}
 type ProgressEvent struct {
 	Text string
 
+	TaskChangeKind string
+	TaskSnapshot   TaskProgressSnapshot
+
 	SubAgentID       string
 	SubAgentParentID string
 	SubAgentTitle    string
@@ -26,6 +29,18 @@ type ProgressEvent struct {
 	Detail      string
 	StartLine   int
 	IsError     bool
+}
+
+// TaskProgressSnapshot is the progress-channel mirror of a task-store node
+// snapshot. Capabilities use it to publish semantic plan/task changes through
+// the existing tool-loop progress path without importing runner or proto types.
+type TaskProgressSnapshot struct {
+	ID       string
+	Title    string
+	Status   string
+	Notes    string
+	ParentID string
+	Children []TaskProgressSnapshot
 }
 
 // ProgressEmitter is a best-effort callback tools may use to surface progress

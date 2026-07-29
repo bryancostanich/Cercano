@@ -45,8 +45,9 @@ func allFilesPresent(dir string, urls []string) bool {
 // catalogTargetDir resolves the directory curated downloads land in: the first
 // configured model dir (with a leading ~ expanded), or ~/.cercano/models.
 func (p *Provider) catalogTargetDir() string {
-	if len(p.cfg.ModelDirs) > 0 {
-		if expanded, err := expandPath(p.cfg.ModelDirs[0]); err == nil && expanded != "" {
+	cfg := p.snapshot()
+	if len(cfg.ModelDirs) > 0 {
+		if expanded, err := expandPath(cfg.ModelDirs[0]); err == nil && expanded != "" {
 			return expanded
 		}
 	}

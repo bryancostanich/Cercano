@@ -128,7 +128,7 @@ func TestRuntimeConfigRowsMistralRSHidesOllamaURL(t *testing.T) {
 }
 
 func TestOpenRuntimeSwitchCmdNilAgent(t *testing.T) {
-	cmd := openRuntimeSwitchCmd(nil, "ollama")
+	cmd := openRuntimeSwitchCmd(nil, "ollama", "llama_server")
 	if cmd != nil {
 		t.Fatal("nil agent should return nil cmd")
 	}

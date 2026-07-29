@@ -8,7 +8,11 @@ import (
 	"cercano/source/server/pkg/config"
 )
 
-func EndpointsFromConfig(cfg config.Config) []EndpointRecord {
+// EndpointsFromConfig builds the endpoint inventory for status/display. The
+// effective open chat/embedding model ids are passed in by the caller because
+// resolving them (override-else-catalog-default) requires the catalog, which
+// this package must not import; callers that don't have them may pass "".
+func EndpointsFromConfig(cfg config.Config, openChatModel, openEmbeddingModel string) []EndpointRecord {
 	endpoints := []EndpointRecord{
 		{
 			ID:          "ollama",
@@ -18,7 +22,7 @@ func EndpointsFromConfig(cfg config.Config) []EndpointRecord {
 			Scope:       endpointScope(cfg.OllamaURL, "local"),
 			State:       EndpointStateUnknown,
 			ActiveRoles: []string{"local_inference", "embeddings"},
-			Models:      uniqueNonEmpty(cfg.OpenChatModel(), cfg.OpenEmbeddingModel()),
+			Models:      uniqueNonEmpty(openChatModel, openEmbeddingModel),
 			AuthState:   "none",
 		},
 	}

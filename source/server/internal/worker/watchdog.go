@@ -63,7 +63,7 @@ func buildWorkerWatchdog(cfg pkgcfg.Config, engine *dispatch.Engine) *watchdog.W
 	// Model resolution mirrors the host: explicit watchdog.model wins, else the
 	// fast_light_text tier's OPEN side (this lane is local), else the lane
 	// default.
-	oneShotModel := workerWatchdogModel(wc, cfg.Models)
+	oneShotModel := workerWatchdogModel(wc, cfg.Models, cfg.OpenRuntime)
 	oneShot := func(ctx context.Context, prompt string) (string, error) {
 		res, err := engine.Dispatch(ctx, dispatch.Spec{
 			Mode:          dispatch.OneShot,
@@ -87,11 +87,13 @@ func buildWorkerWatchdog(cfg pkgcfg.Config, engine *dispatch.Engine) *watchdog.W
 // (the watchdog's oneShot lane dispatches to the local co-processor, so a cloud
 // model id must never leak into it). Empty means the lane keeps its own default
 // resolution.
-func workerWatchdogModel(wc pkgcfg.WatchdogConfig, mc pkgcfg.ModelsConfig) string {
+func workerWatchdogModel(wc pkgcfg.WatchdogConfig, mc pkgcfg.ModelsConfig, runtime string) string {
 	if wc.Model != "" {
 		return wc.Model
 	}
-	if id, _, ok := mc.Resolve(pkgcfg.TierFastLightText, pkgcfg.ProviderOpen, true); ok {
+	// The worker receives effective tier models as the active runtime's
+	// overrides (see modelsConfigFromWire), so OverrideFor is the resolution.
+	if id, ok := mc.OverrideFor(runtime, pkgcfg.TierFastLightText); ok {
 		return id
 	}
 	// Mirror the host engine's model resolution (DispatchModelFor): an
@@ -99,7 +101,7 @@ func workerWatchdogModel(wc pkgcfg.WatchdogConfig, mc pkgcfg.ModelsConfig) strin
 	// before giving up. Without this, a sparse taxonomy leaves the watchdog
 	// oneShot with an empty model → the model call errors → supervision silently
 	// fails open, a divergence from in-process (which resolves the everyday model).
-	if id, _, ok := mc.Resolve(pkgcfg.TierEveryday, pkgcfg.ProviderOpen, true); ok {
+	if id, ok := mc.OverrideFor(runtime, pkgcfg.TierEveryday); ok {
 		return id
 	}
 	return ""

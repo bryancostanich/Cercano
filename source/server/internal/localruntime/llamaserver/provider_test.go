@@ -84,7 +84,7 @@ func TestArgsForBuildsLlamaServerCommand(t *testing.T) {
 	})
 	model := provider.modelRecord("/models/test.gguf", fakeFileInfo{size: 42})
 
-	got := provider.argsFor(model, 8123)
+	got := provider.argsFor(provider.snapshot(), model, 8123)
 	want := []string{
 		"--model", "/models/test.gguf",
 		"--host", "127.0.0.1",

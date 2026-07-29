@@ -95,6 +95,10 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 	// can wire it, same as credSource.
 	subPersist := &streamSubagentPersist{sndr: sndr, gen: start.GetGen()}
 
+	// Session profile proxy: session-control capabilities such as suggest_plan
+	// must mutate the host's live profile broker, not a worker-local copy.
+	profileCtl := newStreamSessionProfileController(sndr)
+
 	// Recv loop: routes incoming HostToWorker messages from the host.
 	recvDone := make(chan struct{})
 	go func() {
@@ -111,6 +115,8 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 				credSource.deliver(msg.GetCredResponse())
 			case msg.GetOpenEvent() != nil:
 				openProxy.deliver(msg.GetOpenEvent())
+			case msg.GetProfileResponse() != nil:
+				profileCtl.deliver(msg.GetProfileResponse())
 			case msg.GetCancel() != nil:
 				cancel()
 				return
@@ -119,7 +125,7 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 	}()
 
 	// Build Deps from StartTurn.
-	deps, buildErr := w.buildDeps(ctx, start, credSource, openProxy, subPersist)
+	deps, buildErr := w.buildDeps(ctx, start, credSource, openProxy, subPersist, profileCtl)
 	if buildErr != nil {
 		sndr.close()
 		cancel() // returning finalizes the stream; the recv goroutine unwinds on the Recv error
@@ -218,7 +224,7 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 
 // ─── buildDeps ────────────────────────────────────────────────────────────────
 
-func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, credSource *streamCredentialSource, openProxy *streamOpenProvider, subPersist *streamSubagentPersist) (runner.Deps, error) {
+func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, credSource *streamCredentialSource, openProxy *streamOpenProvider, subPersist *streamSubagentPersist, profileCtl *streamSessionProfileController) (runner.Deps, error) {
 	// Build config from snapshot.
 	cfg := ConfigFromSnapshot(start.GetConfig())
 	cfgService := cfgsvc.New("", cfg, secrets.NewMemory())
@@ -280,7 +286,7 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 			return runner.Deps{}, fmt.Errorf("build tools: %w", err)
 		}
 	} else {
-		toolSvc = buildWorkerToolSvc(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist)
+		toolSvc = buildWorkerToolSvc(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile)
 	}
 
 	// Build the protocol-supervision watchdog from the snapshotted config
@@ -398,12 +404,10 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource cre
 	} else if cfg.OllamaURL != "" {
 		r.openProv = ollamallm.NewClient(ollamallm.Config{
 			BaseURL: cfg.OllamaURL,
-			// Read the open model from the everyday-open tier (OpenChatModel),
-			// NOT the legacy cfg.OpenModel field: config normalization
-			// (finalizeModelTiers) migrates open_model into Tiers.Everyday.Open
-			// and BLANKS cfg.OpenModel, so on the host's normalized config — the
-			// one snapshotted here — cfg.OpenModel is always "". Mirrors the host.
-			Model: (&cfg).OpenChatModel(),
+			// The everyday open model — the host resolved it (override ⊕ catalog)
+			// and sent it as the active runtime's override, so OverrideFor
+			// returns exactly what the host intended.
+			Model: openTierModel(cfg, pkgcfg.TierEveryday),
 		})
 	}
 
@@ -527,11 +531,10 @@ func buildWorkerBackup(
 func (r *workerResolver) Main() (inference.Provider, bool, bool, error) {
 	cfg := r.cfgSvc.Get()
 	mode, _ := locus.ParseMode(cfg.LocusMode)
-	// Open tier registers absent when its GGUF isn't on disk yet, so Select
-	// crosses to cloud — the "cloud covers the gap" contract (see
-	// dispatch.OpenModelReady).
+	// Open tier registers absent only when config can prove the effective model
+	// is unavailable; catalog IDs are left to runtime ensure/warm paths.
 	open := r.openProv
-	if !dispatch.OpenModelReady(cfg) {
+	if !dispatch.OpenModelReadyFor(cfg, openTierModel(cfg, pkgcfg.TierEveryday)) {
 		open = nil
 	}
 	sel, err := inference.Select(mode, inference.RoleMain, inference.Tiers{
@@ -555,9 +558,7 @@ func (r *workerResolver) MainModel(isCloud bool) string {
 		}
 		return r.ActiveCloudModel()
 	}
-	// Open model lives in the everyday-open tier (OpenChatModel); the legacy
-	// cfg.OpenModel field is blanked by config normalization. Mirrors the host.
-	return (&c).OpenChatModel()
+	return openTierModel(c, pkgcfg.TierEveryday)
 }
 
 // PrimaryModel mirrors the host: for cloud-primary locus modes it resolves the
@@ -576,7 +577,7 @@ func (r *workerResolver) PrimaryModel() string {
 			return m
 		}
 	}
-	return (&c).OpenChatModel()
+	return openTierModel(c, pkgcfg.TierEveryday)
 }
 func (r *workerResolver) Rebuild() error              { return nil }
 func (r *workerResolver) InstallAbsentCloud(_ string) { r.cloudProv = nil }

@@ -179,6 +179,12 @@ type Model struct {
 
 	recap string // living one-line work summary; shown in the chat footer
 
+	// taskPane is the V1 task drawer: a right-side collapsible pane. It is only a
+	// shell for now; TaskChange consumption fills it in later. Kept as layout
+	// state rather than hardcoding "right pane" into the task model so future
+	// docking (left/right/top/bottom) can replace this without touching task data.
+	taskPane taskPaneState
+
 	// nextPromptSuggestion is a locally-generated "what to do next" one-liner
 	// fetched after each streamEndMsg. Renders as ghost text in the empty
 	// input (via input.Suggestion); Tab accepts it into the value. Overwritten
@@ -316,6 +322,14 @@ type confirmRequest struct {
 	onYes  func(Model) (Model, tea.Cmd)
 	onNo   func(Model) (Model, tea.Cmd)
 	extras map[string]func(Model) (Model, tea.Cmd)
+	// stale marks a tool-permission gate whose server-side turn died — e.g.
+	// the agent restarted while the y/n/d/c prompt was up. The paused tool
+	// call and its blocked waiter no longer exist in the fresh agent process,
+	// so answering can never resolve it (AllowToolCall would Resolve nothing).
+	// When set, resolveConfirmHotkey stops pretending the gate is live: it
+	// short-circuits the Allow/Deny RPCs and, on yes, re-submits the user's
+	// original prompt as a fresh turn instead of orphaning it.
+	stale bool
 }
 
 const defaultInputPlaceholder = "type a message, /help for commands"
@@ -368,6 +382,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	slash.RegisterTools(reg, ag)
 	slash.RegisterMcp(reg, ag)
 	slash.RegisterPermissions(reg, ag)
+	slash.RegisterPlan(reg, ag)
 	// currentConv is captured by reference so it always returns the active
 	// conversation id even after /resume swaps it.
 	convRef := &struct{ id string }{}
@@ -789,7 +804,7 @@ func progressAnimTick() tea.Cmd {
 	return tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg { return progressAnimTickMsg(t) })
 }
 
-const animationViewportRefreshInterval = 300 * time.Millisecond
+const animationViewportRefreshInterval = 50 * time.Millisecond
 
 func (m *Model) shouldRefreshAnimationViewport(now time.Time) bool {
 	if now.IsZero() {
@@ -945,6 +960,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if mouse.Button != tea.MouseLeft {
 			return m, nil
 		}
+		if m.taskPaneHit(mouse.X, mouse.Y) {
+			m.toggleTaskPane()
+			return m, nil
+		}
 		if m.hasSubAgentTabs() && mouse.Y == m.scrollbarTop-2 {
 			if id, isClose, ok := tabStripHitAtX(m.chatTabItems(), mouse.X); ok {
 				if isClose {
@@ -1036,6 +1055,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.PasteMsg:
 		if m.contentPageActive() {
+			// A content page owns the screen. Most pages don't take pasted
+			// text, but ones with a text field (e.g. the MCP add-server form)
+			// do — offer the paste to the active page and only drop it if the
+			// page declines. Without this, paste is silently swallowed here and
+			// never reaches the form.
+			if p, ok := m.content.(pasteConsumingPage); ok {
+				if p.handlePaste(msg.Content) {
+					return m, nil
+				}
+			}
 			return m, nil
 		}
 		if m.pendingConfirm != nil {
@@ -1111,6 +1140,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if keyStr == "ctrl+c" {
 			next, cmd := m.handleCtrlCKey(msg)
 			return next, cmd
+		}
+		if keyStr == "ctrl+t" {
+			m.toggleTaskPane()
+			return m, nil
 		}
 		if m.ctrlCArmed {
 			m.ctrlCArmed = false
@@ -1445,6 +1478,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case mcpDashboardRefreshMsg:
+		if dashboard, ok := m.content.(*mcpDashboard); ok {
+			return m, dashboard.refreshSnapshot()
+		}
+		return m, nil
+
+	case mcpDashboardSnapshotMsg:
+		if dashboard, ok := m.content.(*mcpDashboard); ok {
+			return m, dashboard.applySnapshot(msg)
+		}
+		return m, nil
+
+	case mcpDashboardActionMsg:
+		if dashboard, ok := m.content.(*mcpDashboard); ok {
+			return m, dashboard.applyActionMsg(msg)
+		}
+		return m, nil
+
+	case mcpDashboardClearActionMsg:
+		if dashboard, ok := m.content.(*mcpDashboard); ok {
+			dashboard.clearActionMessage(msg.gen)
+		}
+		return m, nil
+
 	case runtimeEstimateMsg:
 		if dashboard, ok := m.content.(*runtimeDashboard); ok {
 			return m, dashboard.applyEstimate(msg)
@@ -1513,6 +1570,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applySubAgentEvent(ev)
 			m.refreshViewport()
 			return m, tea.Batch(msg.next, m.ensureAnimTick())
+		case taskChangeMsg:
+			m.applyTaskChange(ev.kind, ev.task)
+			m.refreshViewport()
+			return m, msg.next
 		case chatDoneMsg:
 			m.applyTurnTelemetry(ev) // footer fields
 			m.mainChat().Apply(ev)   // transcript finalize + notice
@@ -1564,16 +1625,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case contextRegenDoneMsg:
 		if msg.err != "" || !msg.ok {
 			text := "context-regen failed: " + msg.err
-			// A severed stream means the agent went away mid-rebuild (the dev
-			// launcher SIGTERMs stale agents on rebuild). That is not lost
-			// work — every completed pass is persisted, and the background
-			// compactor digests the remainder — but the raw rpc error invites
-			// exactly the wrong reaction (re-running regen starts over from
-			// scratch), so explain instead.
+			// A severed stream does not prove the agent process died; it means the
+			// foreground regen stream was interrupted (EOF/GOAWAY/unavailable/etc.).
+			// Every completed pass is persisted, and /compact now uses the background
+			// scheduler instead of a long foreground stream.
 			if isTransportLoss(msg.err) {
-				text = "context-regen interrupted: the agent went away mid-rebuild (restart or rebuild). " +
-					"Completed passes are saved — the background compactor finishes the remainder after your next message. " +
-					"Only re-run /context-regen if you want a full rebuild from scratch."
+				text = "context-regen stream interrupted: " + msg.err + ". " +
+					"Completed passes are saved. Use /compact to continue in the background, " +
+					"or re-run /context-regen only if you want a full foreground rebuild from scratch."
 			}
 			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: text})
 			m.refreshViewport()
@@ -1587,7 +1646,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		// The terminal frame already carries the numbers, but the meter's
 		// authoritative source is GetContextUsage — refetch so every derived
-		// field (max, compacting flag) settles too.
+		// field (max, compacting flag) settles too. For /compact, the server
+		// starts the background pass immediately, so the poll should see the real
+		// compacting claim rather than a client-side fake.
+		if msg.incremental && !m.ctxPolling {
+			m.ctxPolling = true
+			return m, tea.Batch(fetchContextUsage(m.agent, m.convID), ctxUsageTick())
+		}
 		return m, fetchContextUsage(m.agent, m.convID)
 
 	case elideContextDoneMsg:
@@ -1812,6 +1877,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.openRuntimeModal.state = runtimeModalDone
 			}
 		}
+		return m, nil
+
+	case openRuntimeConfirmSwitchMsg:
+		if msg.target == "" {
+			return m, nil
+		}
+		if msg.target == msg.active {
+			return m, nil
+		}
+		st := agentclient.OpenRuntimeStatus{Runtime: msg.target, Ok: true}
+		m.openRuntimeModal = newOpenRuntimeInstallModal(st)
+		m.openRuntimeModal.setOfferSwitch(msg.target, msg.active)
+		m.pendingRuntimeSwitch = msg.target
 		return m, nil
 
 	case openOpenRuntimeInstallModalMsg:
@@ -2040,6 +2118,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// status — could be stale. Re-fetch the lot and tell the
 			// user the link is back.
 			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "✓ agent reconnected"})
+			// A tool-permission gate that was up during the restart is now
+			// stale: the paused tool call and its blocked waiter died with the
+			// old process, so answering it can never resolve anything. Mark it
+			// so the y/n resolver stops pretending the gate is live and instead
+			// re-runs the user's request on yes.
+			if m.pendingConfirm != nil && m.pendingConfirm.tool != nil {
+				m.pendingConfirm.stale = true
+				m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("↻ the pending tool decision was lost when the agent restarted — press [y] to re-run your request, or [n] to drop it.")})
+			}
 			m.refreshViewport()
 			return m, tea.Batch(msg.next, fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent), fetchVisionCmd(m.agent), fetchOpenRuntimeStatusCmd(m.agent))
 		}
@@ -2204,6 +2291,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// before returning the next tick — that prevents a second kick
 		// (e.g. from toolEntryStartMsg) from doubling the tick rate.
 		m.animTickActive = false
+		frameTime := time.Time(msg)
+		m.mainChat().SetAnimationTime(frameTime)
+		if av := m.activeChat(); av != nil && av != m.mainChat() {
+			av.SetAnimationTime(frameTime)
+		}
+		if cv, ok := m.content.(*contextView); ok {
+			cv.chat.SetAnimationTime(frameTime)
+		}
 		contentRepaint := false
 		animRepaint := false
 		keep := false
@@ -2260,9 +2355,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if contentRepaint {
 			m.refreshViewport()
 			m.lastAnimViewportRefresh = time.Time{}
-		} else if animRepaint && m.shouldRefreshAnimationViewport(time.Time(msg)) {
+		} else if animRepaint && m.shouldRefreshAnimationViewport(frameTime) {
 			m.refreshViewport()
-			m.lastAnimViewportRefresh = time.Time(msg)
+			m.lastAnimViewportRefresh = frameTime
 		}
 		if keep {
 			m.animTickActive = true
@@ -2332,12 +2427,24 @@ func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model,
 		content = strings.TrimSpace(content)
 		content += fmt.Sprintf("  (%d image%s)", len(images), plural(len(images)))
 	}
+	m.streaming = true
+	m.input.Placeholder = steerInputPlaceholder
+	m.mainChat().SetStreaming(true)
+	m.turnStart = time.Now()
+	m.turnActivity = "thinking"
+	m.turnTokOut = 0
+	m.turnModel = ""
+	m.turnCloud = false
+	m.mainChat().SetAnimationTime(m.turnStart)
 	m.mainChat().AppendEntry(&Entry{Role: RoleUser, Content: content})
 	// Assistant placeholder
 	m.mainChat().AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
 	m.refreshViewport()
 
 	if m.agent == nil {
+		m.streaming = false
+		m.input.Placeholder = defaultInputPlaceholder
+		m.mainChat().SetStreaming(false)
 		m.errMsg = "agent unavailable"
 		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "error: agent unavailable"})
 		m.refreshViewport()
@@ -2358,14 +2465,6 @@ func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model,
 		return m, nil
 	}
 	m.cancelStream = cancel
-	m.streaming = true
-	m.input.Placeholder = steerInputPlaceholder
-	m.mainChat().SetStreaming(true)
-	m.turnStart = time.Now()
-	m.turnActivity = "thinking"
-	m.turnTokOut = 0
-	m.turnModel = ""
-	m.turnCloud = false
 	// Fire both the driver's self-re-arming drain and the progress-text
 	// animator; both re-issue themselves until streaming ends. Mark the
 	// anim loop as running so the tool-start kick path doesn't double-fire it.
@@ -2521,6 +2620,8 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.content = hv
 	case slash.ResultOpenRuntimeDashboard:
 		return m, m.openConfigSurface(configTabModels)
+	case slash.ResultOpenMcpConfig:
+		return m, m.openConfigSurface(configTabMcp)
 	case slash.ResultOpenRuntimeConfig:
 		return m, m.openConfigSurface(configTabRuntime)
 	case slash.ResultOpenContextView:
@@ -2584,6 +2685,24 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		}()
 		m.permissionMode = mode
 		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "Permission mode → " + mode})
+		m.refreshViewport()
+	case slash.ResultSetSessionProfile:
+		// Switch the active capability profile (planning fence / future modes).
+		// Fire-and-forget like the permission mode: takes effect on the next
+		// turn (the runner reads the active profile live). On error, surface it.
+		name := res.SessionProfile
+		ag := m.agent
+		go func() {
+			if err := ag.SetSessionProfile(context.Background(), name); err != nil {
+				// best-effort: the next turn simply won't be fenced
+				_ = err
+			}
+		}()
+		label := name
+		if name == "default" {
+			label = "off (unrestricted)"
+		}
+		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "Mode → " + label})
 		m.refreshViewport()
 	case slash.ResultInvokeTool:
 		// Decide locally whether to prompt: R-tier runs silently, W/X
@@ -2666,6 +2785,9 @@ func (m *Model) applyTurnTelemetry(d chatDoneMsg) {
 //	status  (1)
 func (m *Model) relayout() {
 	contentW := m.width
+	if paneW := m.taskPaneWidth(); paneW > 0 {
+		contentW -= paneW
+	}
 	if contentW < 20 {
 		contentW = 20
 	}
@@ -2957,7 +3079,7 @@ func closeOpenFence(s string) string {
 // animateSpinnerGlyph renders the spinner symbol with two layered motions:
 //
 //  1. A clockwise block-rotation through 8 half/quarter-block glyphs
-//     (`▌▘▀▝▐▗▄▖`) at 80ms/frame — gives the visual of a square rolling
+//     (`▌▘▀▝▐▗▄▖`) at 100ms/frame — gives the visual of a square rolling
 //     in place. Ties to the wordmark block-letter aesthetic.
 //
 //  2. A sine-modulated brightness pulse (lime → white → lime) at 1.5s cycle,
@@ -2968,15 +3090,24 @@ func closeOpenFence(s string) string {
 // Both motions are wall-clock-driven so phases stay smooth across status
 // changes; nothing per-entry to track.
 func animateSpinnerGlyph() string {
+	return animateSpinnerGlyphAt(time.Now())
+}
+
+func spinnerFrameAt(t time.Time) (string, int) {
 	const frames = "▌▘▀▝▐▗▄▖"
-	const frameMs = 80
+	const frameMs = 100
+	runes := []rune(frames)
+	idx := int(t.UnixMilli()/frameMs) % len(runes)
+	return string(runes[idx]), idx
+}
+
+func animateSpinnerGlyphAt(t time.Time) string {
 	const pulseCycleMs = 1500
 
-	nowMs := time.Now().UnixMilli()
+	nowMs := t.UnixMilli()
 
 	// Rotation.
-	runes := []rune(frames)
-	glyph := string(runes[int(nowMs/frameMs)%len(runes)])
+	glyph, _ := spinnerFrameAt(t)
 
 	// Brightness pulse — stays in the orange/amber family throughout:
 	// primary amber base lerps to bright amber peak (palette colors), so
@@ -3006,13 +3137,17 @@ func animateSpinnerGlyph() string {
 // derived from wall-clock time so the animation stays smooth regardless of
 // when the status text last changed.
 func animateLimeSweep(text string) string {
+	return animateLimeSweepAt(text, time.Now())
+}
+
+func animateLimeSweepAt(text string, t time.Time) string {
 	const (
 		cycleMs = 1500 // one full sweep duration
 		tail    = 4.0  // half-width of the bright band, in columns
 		padCols = 4.0  // off-screen lead-in / trail-out
 	)
 	// Walk-clock phase, 0..1.
-	phaseMs := time.Now().UnixMilli() % int64(cycleMs)
+	phaseMs := t.UnixMilli() % int64(cycleMs)
 	progress := float64(phaseMs) / float64(cycleMs)
 
 	cols := utf8.RuneCountInString(text)
@@ -3663,6 +3798,42 @@ func (m Model) resolveConfirmHotkey(key string) (Model, tea.Cmd, bool) {
 	c := m.pendingConfirm
 	if c == nil {
 		return m, nil, false
+	}
+	// Stale tool gate: the server-side turn died (agent restart) so the
+	// Allow/Deny RPCs would resolve nothing. Don't call onYes/onNo — they'd
+	// print "approved — running…" and silently orphan the call. Instead, yes
+	// re-runs the original request as a fresh turn; no/esc drops it honestly.
+	if c.stale && c.tool != nil {
+		switch key {
+		case "y", "Y":
+			m.pendingConfirm = nil
+			prompt := m.lastSubmittedPrompt
+			if prompt == "" {
+				m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("nothing to re-run — the original request wasn't captured.")})
+				m.refreshViewport()
+				return m, nil, true
+			}
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Accent.Render("↻ re-running your request on the restarted agent…")})
+			m.refreshViewport()
+			next, cmd := m.submit(prompt, nil)
+			nm, _ := next.(Model)
+			return nm, cmd, true
+		case "n", "N", "esc", "ctrl+c":
+			m.pendingConfirm = nil
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("dropped the lost tool decision.")})
+			m.refreshViewport()
+			return m, nil, true
+		case "d", "D":
+			// Details are still local (just show the args); leave the gate up.
+			if fn, ok := c.extras[key]; ok {
+				next, cmd := fn(m)
+				return next, cmd, true
+			}
+			return m, nil, true
+		default:
+			// [c]hat and other extras can't redirect a dead turn; ignore.
+			return m, nil, true
+		}
 	}
 	switch key {
 	case "y", "Y":
@@ -4563,7 +4734,7 @@ func (m Model) renderRecap() string {
 // renderViewportWithScrollbar renders the chat viewport with a one-column
 // vertical scrollbar on its right edge. Delegates to chatView.View.
 func (m Model) renderViewportWithScrollbar() string {
-	return m.activeChat().View()
+	return m.renderViewportWithTaskPane()
 }
 
 func headerTextWidth(s string) int {

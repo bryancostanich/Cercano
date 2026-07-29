@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -118,6 +119,143 @@ func TestInMemoryManagerStartStop(t *testing.T) {
 	}
 	if len(instances) != 1 || instances[0].State != InstanceStopped {
 		t.Fatalf("expected stopped instance, got %#v", instances)
+	}
+}
+
+// reloadableProvider is a fakeProvider that also implements ConfigReloader,
+// recording the config pushed into it so a test can assert Restart reloaded.
+type reloadableProvider struct {
+	fakeProvider
+	mu        sync.Mutex
+	reloaded  []config.Config
+	stopCalls []string
+}
+
+func (r *reloadableProvider) ReloadConfig(cfg config.Config) {
+	r.mu.Lock()
+	r.reloaded = append(r.reloaded, cfg)
+	r.mu.Unlock()
+}
+
+func (r *reloadableProvider) reloadCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.reloaded)
+}
+
+func (r *reloadableProvider) Stop(_ context.Context, id string) error {
+	r.mu.Lock()
+	r.stopCalls = append(r.stopCalls, id)
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *reloadableProvider) stopCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.stopCalls)
+}
+
+func TestInMemoryManagerRestartReloadsConfig(t *testing.T) {
+	provider := &reloadableProvider{fakeProvider: fakeProvider{name: "mistralrs"}}
+	// The loader stands in for reading the edited config file: it hands back a
+	// sentinel MaxSeqLen the provider records so we can confirm the reload used
+	// freshly loaded config, not the boot-time value.
+	loaded := config.Config{MistralRS: config.MistralRSConfig{MaxSeqLen: 32768}}
+	manager := NewManager(WithConfigLoader(func() (config.Config, error) {
+		return loaded, nil
+	}))
+	manager.RegisterProvider(provider)
+
+	instance, err := manager.Start(context.Background(), StartRequest{
+		Runtime: "mistralrs",
+		ModelID: "model-a",
+	})
+	if err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	if provider.reloadCount() != 0 {
+		t.Fatalf("expected no reload before restart, got %d", provider.reloadCount())
+	}
+
+	if _, err := manager.Restart(context.Background(), RestartRequest{InstanceID: instance.ID}); err != nil {
+		t.Fatalf("Restart returned error: %v", err)
+	}
+	if provider.reloadCount() != 1 {
+		t.Fatalf("expected exactly one reload during restart, got %d", provider.reloadCount())
+	}
+	if got := provider.reloaded[0].MistralRS.MaxSeqLen; got != 32768 {
+		t.Fatalf("restart reloaded stale config: MaxSeqLen=%d, want 32768", got)
+	}
+}
+
+func TestInMemoryManagerRestartReloadFailureIsNonFatal(t *testing.T) {
+	provider := &reloadableProvider{fakeProvider: fakeProvider{name: "mistralrs"}}
+	// A loader error must not wedge restart: the relaunch proceeds with the
+	// provider's existing config rather than failing.
+	manager := NewManager(WithConfigLoader(func() (config.Config, error) {
+		return config.Config{}, errors.New("boom: malformed config")
+	}))
+	manager.RegisterProvider(provider)
+
+	instance, err := manager.Start(context.Background(), StartRequest{Runtime: "mistralrs", ModelID: "model-a"})
+	if err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	if _, err := manager.Restart(context.Background(), RestartRequest{InstanceID: instance.ID}); err != nil {
+		t.Fatalf("Restart should tolerate a config load failure, got: %v", err)
+	}
+	if provider.reloadCount() != 0 {
+		t.Fatalf("expected no reload applied on load failure, got %d", provider.reloadCount())
+	}
+}
+
+func TestInMemoryManagerRestartByRuntimeNameStopsAndRelaunches(t *testing.T) {
+	// Regression: RestartRuntime with only a runtime name (no instance ID)
+	// used to fall through to Start, which adopts the running process — so the
+	// stop + relaunch never happened and config never reloaded. It must now
+	// resolve the running instance and actually restart it.
+	provider := &reloadableProvider{fakeProvider: fakeProvider{name: "mistralrs"}}
+	loaded := config.Config{MistralRS: config.MistralRSConfig{MaxSeqLen: 32768}}
+	manager := NewManager(WithConfigLoader(func() (config.Config, error) { return loaded, nil }))
+	manager.RegisterProvider(provider)
+
+	if _, err := manager.Start(context.Background(), StartRequest{Runtime: "mistralrs", ModelID: "model-a"}); err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+
+	// Restart by runtime name only — the empty-ID path.
+	if _, err := manager.Restart(context.Background(), RestartRequest{Runtime: "mistralrs"}); err != nil {
+		t.Fatalf("Restart by runtime name returned error: %v", err)
+	}
+	if provider.stopCount() != 1 {
+		t.Fatalf("expected the running instance to be stopped once, got %d stops", provider.stopCount())
+	}
+	if provider.reloadCount() != 1 {
+		t.Fatalf("expected config reloaded once during restart, got %d", provider.reloadCount())
+	}
+}
+
+func TestInMemoryManagerRestartByRuntimeNameWithNothingRunningJustStarts(t *testing.T) {
+	// A restart of a runtime that isn't running degenerates to a fresh start:
+	// no stop to perform, but config still reloads and the instance comes up.
+	provider := &reloadableProvider{fakeProvider: fakeProvider{name: "mistralrs"}}
+	loaded := config.Config{MistralRS: config.MistralRSConfig{MaxSeqLen: 32768}}
+	manager := NewManager(WithConfigLoader(func() (config.Config, error) { return loaded, nil }))
+	manager.RegisterProvider(provider)
+
+	inst, err := manager.Restart(context.Background(), RestartRequest{Runtime: "mistralrs", ModelID: "model-a"})
+	if err != nil {
+		t.Fatalf("Restart returned error: %v", err)
+	}
+	if provider.stopCount() != 0 {
+		t.Fatalf("expected no stop when nothing was running, got %d", provider.stopCount())
+	}
+	if inst == nil || inst.State != InstanceRunning {
+		t.Fatalf("expected a running instance after restart-as-start, got %+v", inst)
+	}
+	if provider.reloadCount() != 1 {
+		t.Fatalf("expected config reloaded once, got %d", provider.reloadCount())
 	}
 }
 
@@ -287,14 +425,14 @@ func TestInMemoryManagerDeleteModelRemovesDownloadedFile(t *testing.T) {
 func TestEndpointsFromConfigIncludesExternalEndpointInfo(t *testing.T) {
 	cfg := config.Config{
 		OllamaURL:      "http://mac-studio.local:11434",
-		OpenModel:     "qwen3-coder",
+		OpenModel:      "qwen3-coder",
 		EmbeddingModel: "nomic-embed-text",
 		CloudProvider:  "anthropic",
 		CloudModel:     "claude-test",
 		CloudBaseURL:   "http://127.0.0.1:3456",
 	}
 
-	endpoints := EndpointsFromConfig(cfg)
+	endpoints := EndpointsFromConfig(cfg, "qwen3-coder", "nomic-embed-text")
 	if len(endpoints) != 2 {
 		t.Fatalf("expected 2 endpoints, got %#v", endpoints)
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"cercano/source/server/internal/agenttools"
@@ -46,6 +47,9 @@ type LoopEvent struct {
 	// 1-based line where a file edit/write began (0 = not applicable).
 	StartLine int
 
+	TaskChangeKind string
+	TaskSnapshot   agenttools.TaskProgressSnapshot
+
 	SubAgentID       string
 	SubAgentParentID string
 	SubAgentTitle    string
@@ -64,6 +68,8 @@ func loopProgressEvent(defaultToolUseID, defaultToolName string, progress agentt
 		Detail:           progress.Detail,
 		IsError:          progress.IsError,
 		StartLine:        progress.StartLine,
+		TaskChangeKind:   progress.TaskChangeKind,
+		TaskSnapshot:     progress.TaskSnapshot,
 		SubAgentID:       progress.SubAgentID,
 		SubAgentParentID: progress.SubAgentParentID,
 		SubAgentTitle:    progress.SubAgentTitle,
@@ -90,6 +96,13 @@ type ToolLoopInput struct {
 	Provider    inference.Provider
 	Registry    *agenttools.Registry
 	Permissions *PermissionStore
+
+	// Profile is a capability fence layered on top of the permission mode (see
+	// profile.go). The zero value restricts nothing. A read-only Profile (e.g.
+	// PlanProfile) both hides forbidden tools from the model and denies them at
+	// the gate. It is orthogonal to Permissions.Mode(), which planning still
+	// honors for the reads it allows.
+	Profile     Profile
 	ConvHistory []llm.Message
 	UserInput   string
 	Images      []InlineImage
@@ -133,8 +146,29 @@ type ToolLoopInput struct {
 	MaxIterations int
 
 	// MaxTokensPerTurn sets the MaxTokens field on each llm.ChatRequest.
-	// 0 means use the package default (4096).
+	// 0 means use config.DefaultToolLoopMaxTokensPerTurn.
 	MaxTokensPerTurn int
+
+	// ContextWindow is the resolved model's input context size in tokens. When
+	// >0, RunToolLoop runs a cheap pre-flight size estimate before the first
+	// provider call and fails fast with a classified llm.ErrContextOverflow if
+	// the estimated prompt already exceeds the window (see preflight.go). 0
+	// disables the check — the caller could not resolve a window, so the
+	// provider's own overflow error stays the only backstop. Set by dispatch
+	// (sub-agents pin small local windows); the interactive loop leaves it 0.
+	ContextWindow int
+
+	// Temperature, when non-nil, is forwarded to the provider for every model
+	// turn. A pointer to 0 requests greedy decoding; sub-agent dispatch uses
+	// this because local tool-call compliance is extremely temperature-sensitive.
+	Temperature *float64
+
+	// FlattenToolResults feeds tool results back as ordinary user text instead of
+	// provider-native tool-result messages. Some local OpenAI-compatible runtimes
+	// (qwen via mistral.rs) can emit tool calls but derail when consuming
+	// role:"tool" result history; this compatibility mode preserves tool use
+	// while giving the model plain text evidence for the final answer.
+	FlattenToolResults bool
 
 	// ConversationID names the conversation this loop serves. Threaded onto
 	// ctx so tools that spawn linked work (dispatch) can record lineage.
@@ -200,6 +234,69 @@ func truncateRunes(s string, max int) string {
 	return string(r[:max]) + "…"
 }
 
+func toolNamesForLog(tools []llm.Tool) []string {
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Name != "" {
+			names = append(names, tool.Name)
+		}
+	}
+	return names
+}
+
+func temperatureForLog(t *float64) string {
+	if t == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%g", *t)
+}
+
+func systemHasLeanSubagentMarker(system string) bool {
+	return strings.Contains(system, "bounded Cercano sub-agent")
+}
+
+func flattenToolUseSummary(calls []llm.Block) string {
+	if len(calls) == 0 {
+		return "I used the granted tools."
+	}
+	var b strings.Builder
+	b.WriteString("I used the granted tools: ")
+	for i, call := range calls {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(call.ToolName)
+	}
+	b.WriteString(".")
+	return b.String()
+}
+
+func flattenToolResultsForModel(calls, results []llm.Block) string {
+	var b strings.Builder
+	b.WriteString("Tool results from the granted tools follow. Use only these results and the original user request to continue.\n\n")
+	byID := make(map[string]llm.Block, len(calls))
+	for _, call := range calls {
+		byID[call.ToolUseID] = call
+	}
+	for i, result := range results {
+		call := byID[result.ToolUseRef]
+		if i > 0 {
+			b.WriteString("\n\n")
+		}
+		name := call.ToolName
+		if name == "" {
+			name = "tool"
+		}
+		fmt.Fprintf(&b, "Tool result from %s(%s):\n", name, string(call.ToolInput))
+		if result.IsError {
+			b.WriteString("ERROR: ")
+		}
+		b.WriteString(result.Content)
+	}
+	b.WriteString("\n\nUsing only the tool results above, answer the original request. If the original request asked for citations, include exact file:line citations from the tool output.")
+	return b.String()
+}
+
 func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) {
 	ctx = agenttools.WithWorkDir(ctx, in.WorkDir)
 	ctx = agenttools.WithConversationID(ctx, in.ConversationID)
@@ -214,9 +311,19 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	}
 
 	maxIters, unlimitedIters := config.EffectiveMaxIterations(in.MaxIterations)
-	maxTokens := 4096
+	maxTokens := config.DefaultToolLoopMaxTokensPerTurn
 	if in.MaxTokensPerTurn > 0 {
 		maxTokens = in.MaxTokensPerTurn
+	}
+
+	// Pre-flight size guard: before spending a provider round-trip (and, for a
+	// local model, a warm-up), estimate the prompt size against the resolved
+	// window and fail fast with an actionable, size-classified error. Counts
+	// the system prompt, prior history, this turn's input, and inline images.
+	// No-op when in.ContextWindow is 0. See preflight.go for the heuristic and
+	// why an approximate check is the right tool here.
+	if err := preflightContextCheck(in.System, in.ConvHistory, in.UserInput, len(in.Images), in.ContextWindow); err != nil {
+		return ToolLoopResult{}, err
 	}
 
 	hist := append([]llm.Message{}, in.ConvHistory...)
@@ -226,17 +333,35 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	})
 
 	// appendTurn records a new (this-turn) assistant or tool-result message into
-	// the history and notifies the host (OnTurnComplete) so it can persist it
-	// immediately. The leading user message above is intentionally NOT routed
-	// through here — the host persists it up front before the loop runs.
+	// the model-facing history and notifies the host (OnTurnComplete) so it can
+	// persist it immediately. The leading user message above is intentionally NOT
+	// routed through here — the host persists it up front before the loop runs.
 	appendTurn := func(m llm.Message) {
 		hist = append(hist, m)
 		if in.OnTurnComplete != nil {
 			in.OnTurnComplete(m)
 		}
 	}
+	// appendModelTurn records only the next model's view of history. It is used
+	// by FlattenToolResults so local providers see plain text while persistence
+	// still records the original structured tool_use/tool_result transcript.
+	appendModelTurn := func(m llm.Message) { hist = append(hist, m) }
+	persistTurn := func(m llm.Message) {
+		if in.OnTurnComplete != nil {
+			in.OnTurnComplete(m)
+		}
+	}
 
-	catalog := agenttools.BuildToolCatalog(in.Registry)
+	// Advertisement half of the capability profile (see profile.go): when the
+	// profile restricts, forbidden tools are filtered out of the catalog so the
+	// model never reaches for a tool it can't have. Enforcement is separate,
+	// below at the gate — filtering is ergonomics, not the fence.
+	var catalog []llm.Tool
+	if in.Profile.Restricts() {
+		catalog = agenttools.BuildToolCatalogFiltered(in.Registry, in.Profile.Allows)
+	} else {
+		catalog = agenttools.BuildToolCatalog(in.Registry)
+	}
 	consecutiveErrors := 0
 	var lastIn, lastOut int
 
@@ -255,13 +380,16 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 
 	for iter := 0; unlimitedIters || iter < maxIters; iter++ {
 		req := llm.ChatRequest{
-			Model:     in.Model,
-			Tier:      in.Tier,
-			System:    in.System,
-			Messages:  hist,
-			Tools:     catalog,
-			MaxTokens: maxTokens,
+			Model:       in.Model,
+			Tier:        in.Tier,
+			System:      in.System,
+			Messages:    hist,
+			Tools:       catalog,
+			MaxTokens:   maxTokens,
+			Temperature: in.Temperature,
 		}
+		log.Printf("[tool-loop] model request: conv=%s provider=%s model=%s iter=%d stream=true temp=%s max_tokens=%d tools=%v lean_subagent_prompt=%t flatten_tool_results=%t system_prefix=%q user_prefix=%q history=%d",
+			in.ConversationID, in.Provider.Name(), in.Model, iter+1, temperatureForLog(req.Temperature), req.MaxTokens, toolNamesForLog(req.Tools), systemHasLeanSubagentMarker(req.System), in.FlattenToolResults, truncateRunes(strings.TrimSpace(req.System), 120), truncateRunes(strings.TrimSpace(in.UserInput), 120), len(req.Messages))
 		rdr, err := in.Provider.StreamChat(ctx, req)
 		if err != nil {
 			return ToolLoopResult{}, err
@@ -273,7 +401,6 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		}
 		lastIn, lastOut = resp.InputTokens, resp.OutputTokens
 		noteAssembledTurn(in.ConversationID, resp.Blocks, seenToolUse)
-		appendTurn(llm.Message{Role: llm.RoleAssistant, Blocks: resp.Blocks})
 
 		var toolCalls []llm.Block
 		var finalText string
@@ -285,6 +412,14 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				finalText += b.Text
 			}
 		}
+		if len(toolCalls) > 0 && in.FlattenToolResults {
+			persistTurn(llm.Message{Role: llm.RoleAssistant, Blocks: resp.Blocks})
+			appendModelTurn(llm.Message{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: flattenToolUseSummary(toolCalls)}}})
+		} else {
+			appendTurn(llm.Message{Role: llm.RoleAssistant, Blocks: resp.Blocks})
+		}
+		log.Printf("[tool-loop] model response: conv=%s provider=%s model=%s iter=%d tool_calls=%d text_len=%d tokens_in=%d tokens_out=%d text_prefix=%q",
+			in.ConversationID, in.Provider.Name(), in.Model, iter+1, len(toolCalls), len([]rune(finalText)), lastIn, lastOut, truncateRunes(strings.TrimSpace(finalText), 160))
 		if len(toolCalls) == 0 {
 			if in.WatchdogTurnEnd != nil && strings.TrimSpace(finalText) != "" {
 				wd := in.WatchdogTurnEnd(ctx, finalText, hist)
@@ -335,12 +470,25 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		var rCalls, wxCalls []pendingCall
 		for _, tc := range toolCalls {
 			// A wrapped malformed input never reaches the tool: answer with
-			// the raw text so the model can see exactly what it emitted and
-			// resend valid JSON.
+			// the raw text so the model can see exactly what it emitted.
 			if raw, malformed := llm.MalformedToolInput(tc.ToolInput); malformed {
+				// Distinguish a genuine authoring mistake from a size-limit
+				// truncation. When the response was cut off at the output-token
+				// cap (StopReason "length"/"max_tokens"), the arguments were
+				// sliced off mid-JSON — the input is not "invalid", it is
+				// incomplete because the payload was too large to emit in one
+				// call. Telling the model to "resend valid JSON" here makes it
+				// resend the same oversized call and truncate again (an infinite
+				// retry). Instead, name the truncation and tell it to chunk.
+				var content string
+				if llm.IsLengthTruncation(resp.StopReason) {
+					content = fmt.Sprintf("this tool call was cut off at the output-token limit — the arguments are incomplete because the payload was too large to emit in one call, not because the JSON was malformed. Do NOT resend the same call. If you are writing a file, split it into several smaller Write/Edit calls (write part, then append the rest with additional Edit calls). Raw (truncated) input received: %s", truncateForError(raw))
+				} else {
+					content = fmt.Sprintf("tool input was not valid JSON — resend the call with arguments as a single valid JSON object. Raw input received: %s", truncateForError(raw))
+				}
 				results = append(results, llm.Block{
 					Type: llm.BlockToolResult, ToolUseRef: tc.ToolUseID,
-					Content: fmt.Sprintf("tool input was not valid JSON — resend the call with arguments as a single valid JSON object. Raw input received: %s", truncateForError(raw)),
+					Content: content,
 					IsError: true,
 				})
 				continue
@@ -358,6 +506,22 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				perm = ap.PermissionFor(tc.ToolInput)
 			}
 			tier := agenttools.PermissionToLLM(perm)
+			// Enforcement half of the capability profile (see profile.go): the
+			// fence. A tool the active profile forbids is denied outright here,
+			// before it can be run (R path) or confirmed (W/X path) — there is
+			// no "yes" available. This is not the same as the catalog filter
+			// above: filtering only shapes what the model is offered; this
+			// catches a forbidden tool that arrives by any other route
+			// (hallucinated name, replayed turn, future code path).
+			if !in.Profile.Allows(tier, tc.ToolName) {
+				emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: tc.ToolUseID, ToolName: tc.ToolName, Summary: "blocked by " + in.Profile.Name + " profile", IsError: true})
+				results = append(results, llm.Block{
+					Type: llm.BlockToolResult, ToolUseRef: tc.ToolUseID,
+					Content: fmt.Sprintf("blocked: the %q profile is read-only — the tool %q (%s) is unavailable. Only read and plan actions are permitted while planning.", in.Profile.Name, tc.ToolName, tier),
+					IsError: true,
+				})
+				continue
+			}
 			pc := pendingCall{block: tc, tool: tool, tier: tier}
 			if tier == llm.PermR {
 				rCalls = append(rCalls, pc)
@@ -523,7 +687,12 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				break
 			}
 		}
-		appendTurn(llm.Message{Role: llm.RoleUser, Blocks: results})
+		if in.FlattenToolResults {
+			persistTurn(llm.Message{Role: llm.RoleUser, Blocks: results})
+			appendModelTurn(llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: flattenToolResultsForModel(toolCalls, results)}}})
+		} else {
+			appendTurn(llm.Message{Role: llm.RoleUser, Blocks: results})
+		}
 
 		switch {
 		case watchdogIntervened:
@@ -551,7 +720,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			"You've reached the %d-step tool limit for this turn. Stop calling tools and give your best answer now using what you've gathered.",
 			maxIters)}},
 	})
-	finalReq := llm.ChatRequest{Model: in.Model, Tier: in.Tier, System: in.System, Messages: hist, MaxTokens: maxTokens}
+	finalReq := llm.ChatRequest{Model: in.Model, Tier: in.Tier, System: in.System, Messages: hist, MaxTokens: maxTokens, Temperature: in.Temperature}
 	rdr, err := in.Provider.StreamChat(ctx, finalReq)
 	if err != nil {
 		return ToolLoopResult{Iterations: maxIters, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, err

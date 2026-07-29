@@ -42,10 +42,19 @@ func TestGateDecision_Permissive(t *testing.T) {
 	}
 }
 
-func TestGateDecision_Bypass_NoConfirm(t *testing.T) {
-	for _, tier := range []llm.Permission{llm.PermR, llm.PermW, llm.PermX} {
-		if GateDecision(ModeBypass, tier) {
-			t.Errorf("Bypass %s: should not require confirm", tier)
+func TestGateDecision_Bypass_StillConfirmsX(t *testing.T) {
+	cases := []struct {
+		tier llm.Permission
+		want bool
+	}{
+		{llm.PermR, false},
+		{llm.PermW, false},
+		{llm.PermX, true},
+	}
+	for _, c := range cases {
+		got := GateDecision(ModeBypass, c.tier)
+		if got != c.want {
+			t.Errorf("Bypass %s: got %v want %v", c.tier, got, c.want)
 		}
 	}
 }
@@ -148,7 +157,7 @@ func TestGateDecisionForMCP(t *testing.T) {
 		{ModePermissive, true, false, true},
 		// MCP in permissive, allowlisted: silent.
 		{ModePermissive, true, true, false},
-		// MCP under bypass: silent.
+		// MCP W under bypass: silent.
 		{ModeBypass, true, false, false},
 		// MCP under strict, not allowlisted: confirm.
 		{ModeStrict, true, false, true},
@@ -159,6 +168,9 @@ func TestGateDecisionForMCP(t *testing.T) {
 			t.Errorf("mode=%s mcp=%v allow=%v: got %v want %v",
 				c.mode, c.isMCP, c.allowlisted, got, c.want)
 		}
+	}
+	if !GateDecisionForMCP(ModeBypass, llm.PermX, true, true) {
+		t.Fatal("X-tier MCP tool must still confirm under bypass, even if allowlisted")
 	}
 }
 

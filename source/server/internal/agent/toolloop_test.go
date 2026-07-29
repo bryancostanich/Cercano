@@ -18,16 +18,19 @@ type mockProvider struct {
 	scripts [][]llm.Block
 	caps    inference.Capabilities
 	calls   int
+	reqs    []llm.ChatRequest
 }
 
 func (m *mockProvider) Name() string                         { return "mock" }
 func (m *mockProvider) Capabilities() inference.Capabilities { return m.caps }
 func (m *mockProvider) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	m.reqs = append(m.reqs, req)
 	out := llm.ChatResponse{Blocks: m.scripts[m.calls]}
 	m.calls++
 	return out, nil
 }
 func (m *mockProvider) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.StreamReader, error) {
+	m.reqs = append(m.reqs, req)
 	if m.calls >= len(m.scripts) {
 		return nil, fmt.Errorf("mockProvider: no script for call %d", m.calls)
 	}
@@ -97,6 +100,27 @@ func (p *loopingProvider) StreamChat(ctx context.Context, req llm.ChatRequest) (
 		blocks = []llm.Block{{Type: llm.BlockText, Text: "Here's my best answer."}}
 	}
 	return &scriptedStream{events: blocksToEvents(blocks)}, nil
+}
+
+func TestToolLoopForwardsTemperature(t *testing.T) {
+	provider := &mockProvider{scripts: [][]llm.Block{{{Type: llm.BlockText, Text: "done"}}}, caps: inference.Capabilities{SupportsTools: true}}
+	zero := 0.0
+	result, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider:    provider,
+		Registry:    agenttools.NewRegistry(),
+		Permissions: NewStaticPermissionStore(ModeBypass),
+		UserInput:   "say done",
+		Temperature: &zero,
+	})
+	if err != nil {
+		t.Fatalf("RunToolLoop returned error: %v", err)
+	}
+	if result.FinalText != "done" {
+		t.Fatalf("result.FinalText = %q, want done", result.FinalText)
+	}
+	if len(provider.reqs) != 1 || provider.reqs[0].Temperature == nil || *provider.reqs[0].Temperature != 0 {
+		t.Fatalf("provider request temperature = %#v, want explicit 0", provider.reqs)
+	}
 }
 
 func TestToolLoop_HitsCap_DegradesToFinalAnswer(t *testing.T) {
@@ -170,6 +194,50 @@ func TestToolLoop_SingleToolCall_FeedsResultAndContinues(t *testing.T) {
 	}
 	if result.FinalText != "Got it." {
 		t.Errorf("final: %q", result.FinalText)
+	}
+}
+
+func TestToolLoop_FlattenToolResultsFeedsPlainUserText(t *testing.T) {
+	prov := &mockProvider{
+		scripts: [][]llm.Block{
+			{{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "LS", ToolInput: json.RawMessage(`{"path":"."}`)}},
+			{{Type: llm.BlockText, Text: "Got it."}},
+		},
+		caps: inference.Capabilities{SupportsTools: true},
+	}
+	reg := testDefaultRegistry()
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+
+	result, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider:           prov,
+		Registry:           reg,
+		Permissions:        perms,
+		UserInput:          "list this dir",
+		FlattenToolResults: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FinalText != "Got it." {
+		t.Fatalf("final: %q", result.FinalText)
+	}
+	if len(prov.reqs) != 2 {
+		t.Fatalf("provider calls = %d, want 2", len(prov.reqs))
+	}
+	msgs := prov.reqs[1].Messages
+	if len(msgs) < 3 {
+		t.Fatalf("second request messages = %#v", msgs)
+	}
+	assistant := msgs[len(msgs)-2]
+	if assistant.Role != llm.RoleAssistant || len(assistant.Blocks) != 1 || assistant.Blocks[0].Type != llm.BlockText {
+		t.Fatalf("assistant history should be plain text summary, got %#v", assistant)
+	}
+	user := msgs[len(msgs)-1]
+	if user.Role != llm.RoleUser || len(user.Blocks) != 1 || user.Blocks[0].Type != llm.BlockText {
+		t.Fatalf("tool result history should be plain user text, got %#v", user)
+	}
+	if !strings.Contains(user.Blocks[0].Text, "Tool result from LS") {
+		t.Fatalf("flattened tool result missing marker: %q", user.Blocks[0].Text)
 	}
 }
 

@@ -33,6 +33,22 @@ type CuratedModel struct {
 	SizeBytes     int64    `json:"size_bytes"`
 	SupportsTools bool     `json:"supports_tools"`
 	SupportsEmbed bool     `json:"supports_embed"`
+	// PlainChatOK reports whether the model produces correct visible assistant
+	// content for ordinary (non-tool) chat on the pinned build. Absent means
+	// true; it is only set false for models that load and can do tool calls but
+	// return empty/garbled plain-chat content (e.g. GLM-4.5-Air on llama-server).
+	// A false model must never be auto-selected for a plain-chat capability tier.
+	PlainChatOK *bool `json:"plain_chat_ok,omitempty"`
+	// Status is an authoring note: "tested" (default when empty), "experimental",
+	// or "broken". Informational; PlainChatOK/SupportsTools are the enforced gates.
+	Status string `json:"status,omitempty"`
+}
+
+// PlainChatSupported reports whether the model is safe for plain-chat tiers.
+// Absent PlainChatOK (nil) defaults to true so only known-bad models must be
+// annotated.
+func (m CuratedModel) PlainChatSupported() bool {
+	return m.PlainChatOK == nil || *m.PlainChatOK
 }
 
 // DownloadURLs returns the HuggingFace resolve URL for each file, in shard
@@ -57,7 +73,7 @@ type CuratedCatalog struct {
 }
 
 // requiredTiers are the capability tiers every profile must fill. Kept in sync
-// with pkg/config's ModelTiers; a profile missing any of these is a catalog
+// with pkg/config's Tier constants; a profile missing any of these is a catalog
 // authoring bug caught at load time.
 var requiredTiers = []string{"most_capable", "everyday", "fast_light", "fast_light_text", "embedding"}
 
@@ -71,21 +87,40 @@ func loadCatalog() (CuratedCatalog, error) {
 	if err := json.Unmarshal(catalogJSON, &cat); err != nil {
 		return CuratedCatalog{}, fmt.Errorf("parse catalog.json: %w", err)
 	}
+	if err := validateCatalog(cat); err != nil {
+		return CuratedCatalog{}, err
+	}
+	return cat, nil
+}
+
+// validateCatalog checks referential integrity and capability gates for a
+// parsed catalog: at least one profile, every profile fills every required
+// tier, referenced models exist, and every chat (non-embedding) tier references
+// a plain-chat-capable model. Split out from loadCatalog so tests can exercise
+// the rules against synthetic catalogs.
+func validateCatalog(cat CuratedCatalog) error {
 	if len(cat.Profiles) == 0 {
-		return CuratedCatalog{}, fmt.Errorf("catalog has no profiles")
+		return fmt.Errorf("catalog has no profiles")
 	}
 	for name, prof := range cat.Profiles {
 		for _, tier := range requiredTiers {
 			id, ok := prof[tier]
 			if !ok || id == "" {
-				return CuratedCatalog{}, fmt.Errorf("profile %q is missing tier %q", name, tier)
+				return fmt.Errorf("profile %q is missing tier %q", name, tier)
 			}
-			if _, ok := cat.Models[id]; !ok {
-				return CuratedCatalog{}, fmt.Errorf("profile %q tier %q references unknown model %q", name, tier, id)
+			model, ok := cat.Models[id]
+			if !ok {
+				return fmt.Errorf("profile %q tier %q references unknown model %q", name, tier, id)
+			}
+			// Every required tier except embedding is a plain-chat tier: it must
+			// reference a model that actually produces visible chat content, or
+			// the wizard would recommend a model that answers with empty output.
+			if tier != "embedding" && !model.PlainChatSupported() {
+				return fmt.Errorf("profile %q tier %q references model %q which is not plain-chat capable (plain_chat_ok:false)", name, tier, id)
 			}
 		}
 	}
-	return cat, nil
+	return nil
 }
 
 // ProfileForRAM picks the profile for a machine with the given total RAM: the

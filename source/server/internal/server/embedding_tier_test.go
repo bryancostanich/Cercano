@@ -7,8 +7,8 @@ import (
 	"cercano/source/server/pkg/proto"
 )
 
-// The embedding.open tier slot is UI over the embedding_model config
-// field — it must write that field, not a Models-taxonomy entry.
+// The embedding.open compatibility key writes the active runtime's embedding
+// override and broadcasts embedding_model for the UI/restart notice.
 func TestUpdateConfig_EmbeddingTierWritesEmbeddingModel(t *testing.T) {
 	s, _ := newTestServer()
 	s.events = newEventHub()
@@ -21,8 +21,9 @@ func TestUpdateConfig_EmbeddingTierWritesEmbeddingModel(t *testing.T) {
 	if err != nil || !resp.Success {
 		t.Fatalf("UpdateConfig: err=%v resp=%+v", err, resp)
 	}
-	if got := s.cfgSvc.Get().Models.Tiers.Embedding.Open; got != "nomic-embed-text-v2-moe" {
-		t.Errorf("embedding.open tier slot = %q", got)
+	got, ok := s.cfgSvc.Get().Models.OverrideFor(s.cfgSvc.Get().OpenRuntime, config.TierEmbedding)
+	if !ok || got != "nomic-embed-text-v2-moe" {
+		t.Errorf("embedding override = (%q,%v)", got, ok)
 	}
 	select {
 	case ev := <-ch:
@@ -38,14 +39,14 @@ func TestUpdateConfig_EmbeddingTierWritesEmbeddingModel(t *testing.T) {
 func TestUpdateConfig_EmbeddingTierClear(t *testing.T) {
 	s, _ := newTestServer()
 	s.events = newEventHub()
-	s.cfgSvc.Mutate(func(c *config.Config) { c.Models.Tiers.Embedding.Open = "old-model" })
+	s.cfgSvc.Mutate(func(c *config.Config) { c.Models.SetOverride(c.OpenRuntime, config.TierEmbedding, "old-model") })
 	resp, err := s.UpdateConfig(t.Context(), &proto.UpdateConfigRequest{
 		ModelTierKey: "embedding.open", ModelTierValue: "-",
 	})
 	if err != nil || !resp.Success {
 		t.Fatalf("UpdateConfig: err=%v resp=%+v", err, resp)
 	}
-	if got := s.cfgSvc.Get().Models.Tiers.Embedding.Open; got != "" {
-		t.Errorf("embedding.open tier slot = %q, want cleared", got)
+	if got, ok := s.cfgSvc.Get().Models.OverrideFor(s.cfgSvc.Get().OpenRuntime, config.TierEmbedding); ok || got != "" {
+		t.Errorf("embedding override = (%q,%v), want cleared", got, ok)
 	}
 }

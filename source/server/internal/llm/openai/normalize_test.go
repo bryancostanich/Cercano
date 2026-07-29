@@ -15,6 +15,11 @@ import (
 
 func oaFixture(t *testing.T, status int, body string) (*Client, *atomic.Int32) {
 	t.Helper()
+	return oaFixtureBackend(t, "openai", status, body)
+}
+
+func oaFixtureBackend(t *testing.T, backend string, status int, body string) (*Client, *atomic.Int32) {
+	t.Helper()
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
@@ -23,7 +28,7 @@ func oaFixture(t *testing.T, status int, body string) (*Client, *atomic.Int32) {
 		w.Write([]byte(body))
 	}))
 	t.Cleanup(srv.Close)
-	return NewClient(Config{APIKey: "k", BaseURL: srv.URL + "/v1", Model: "gpt-5.5", Backend: "openai"}), &hits
+	return NewClient(Config{APIKey: "k", BaseURL: srv.URL + "/v1", Model: "gpt-5.5", Backend: backend}), &hits
 }
 
 func oaChatErr(t *testing.T, c *Client) error {
@@ -69,6 +74,21 @@ func TestNormalize_Classes(t *testing.T) {
 	}
 }
 
+func TestNormalize_MistralRSNoResponseIsInvalidRequest(t *testing.T) {
+	body := `{"message":"No response received from the model."}`
+	c, _ := oaFixtureBackend(t, "mistralrs", http.StatusInternalServerError, body)
+	if got := llm.ClassOf(oaChatErr(t, c)); got != llm.ErrInvalidRequest {
+		t.Fatalf("mistralrs class = %q, want %q", got, llm.ErrInvalidRequest)
+	}
+
+	// The quirk must stay backend-scoped: a generic OpenAI 500 is transient
+	// busy and remains eligible for the normal bounded retry/failover policy.
+	c, _ = oaFixtureBackend(t, "openai", http.StatusInternalServerError, body)
+	if got := llm.ClassOf(oaChatErr(t, c)); got != llm.ErrBusy {
+		t.Fatalf("openai class = %q, want %q", got, llm.ErrBusy)
+	}
+}
+
 func TestNormalize_VendorErrorStaysReachable(t *testing.T) {
 	c, _ := oaFixture(t, 429,
 		`{"error":{"message":"You exceeded your current quota.","code":"insufficient_quota"}}`)
@@ -83,5 +103,39 @@ func TestNormalize_VendorErrorStaysReachable(t *testing.T) {
 	var ae *goopenai.APIError
 	if !errors.As(err, &ae) {
 		t.Error("vendor error must stay reachable through the normalized wrapper")
+	}
+}
+
+func TestNormalize_ContextOverflow(t *testing.T) {
+	// Cloud OpenAI-compatible: opaque message, no counts. Must classify as
+	// context_overflow (not a generic 400 invalid_request) so callers can give
+	// size-specific guidance.
+	c, _ := oaFixture(t, http.StatusBadRequest,
+		`{"error":{"message":"Context size has been exceeded.","type":"invalid_request_error"}}`)
+	err := oaChatErr(t, c)
+	if got := llm.ClassOf(err); got != llm.ErrContextOverflow {
+		t.Fatalf("cloud class = %q, want %q (err: %v)", got, llm.ErrContextOverflow, err)
+	}
+	var le *llm.Error
+	if !errors.As(err, &le) {
+		t.Fatalf("want *llm.Error, got %T", err)
+	}
+	if le.Used != 0 || le.Limit != 0 {
+		t.Errorf("opaque overflow counts = (%d,%d), want (0,0)", le.Used, le.Limit)
+	}
+
+	// llama-server: message carries both counts, which must be parsed onto the
+	// normalized error.
+	c, _ = oaFixture(t, http.StatusBadRequest,
+		`{"error":{"message":"request (21156 tokens) exceeds the available context size (16384 tokens)","type":"invalid_request_error"}}`)
+	err = oaChatErr(t, c)
+	if got := llm.ClassOf(err); got != llm.ErrContextOverflow {
+		t.Fatalf("llama-server class = %q, want %q (err: %v)", got, llm.ErrContextOverflow, err)
+	}
+	if !errors.As(err, &le) {
+		t.Fatalf("want *llm.Error, got %T", err)
+	}
+	if le.Used != 21156 || le.Limit != 16384 {
+		t.Errorf("parsed counts = (%d,%d), want (21156,16384)", le.Used, le.Limit)
 	}
 }

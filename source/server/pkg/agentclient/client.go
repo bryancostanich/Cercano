@@ -251,10 +251,9 @@ type Config struct {
 	ToolElisionOnly bool
 	// ToolLoopMaxIterations caps LLM round-trips per turn; -1 means unlimited.
 	ToolLoopMaxIterations int
-	// ModelTiers is the taxonomy's non-empty slots keyed "<tier>.<provider>";
-	// ModelsDefaultProvider is the preferred side ("cloud"|"open"|"").
-	ModelTiers            map[string]string
-	ModelsDefaultProvider string
+	// ModelTiers is the open override taxonomy's non-empty slots keyed
+	// "<runtime>.<tier>".
+	ModelTiers map[string]string
 	// Agent lifecycle.
 	AgentShutdownOnLastClient bool
 	// mistral.rs runtime settings (Runtime tab).
@@ -296,7 +295,6 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 		ToolElisionOnly:           resp.GetToolElisionOnly(),
 		ToolLoopMaxIterations:     int(resp.GetToolLoopMaxIterations()),
 		ModelTiers:                resp.GetModelTiers(),
-		ModelsDefaultProvider:     resp.GetModelsDefaultProvider(),
 		AgentShutdownOnLastClient: resp.GetAgentShutdownOnLastClient(),
 		MistralRSISQ:              resp.GetMistralrsIsq(),
 		MistralRSPagedAttn:        resp.GetMistralrsPagedAttn(),
@@ -342,9 +340,10 @@ type ConfigUpdate struct {
 	ToolElisionOnly string
 	// ToolLoopMaxIterations — sparse-patch int. "" = unchanged, -1 = unlimited.
 	ToolLoopMaxIterations string
-	// Model taxonomy sparse-patch: ModelTierKey is "default_provider" or
-	// "<tier>.<provider>"; ModelTierValue is the model id ("-" clears).
-	// Empty key = unchanged.
+	// Model taxonomy sparse-patch: ModelTierKey is "<runtime>.<tier>";
+	// ModelTierValue is the model id ("-" clears). Empty key = unchanged.
+	// The server also accepts the legacy UI compatibility key "embedding.open"
+	// for the active runtime's embedding override.
 	ModelTierKey   string
 	ModelTierValue string
 	// Agent lifecycle. Sparse-patch: "" = unchanged, "true" / "false" = apply.
@@ -1449,7 +1448,11 @@ func (c *Client) InstallOpenRuntime(ctx context.Context, runtime string) (<-chan
 // UpdateConfig sends a runtime config patch. Returns the agent's confirmation
 // summary line (e.g. "updated: [local_model=qwen3-coder, cloud=anthropic/...]").
 func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, error) {
-	resp, err := c.agent.UpdateConfig(ctx, &proto.UpdateConfigRequest{
+	ag := c.agent
+	if ag == nil {
+		return "", errors.New("agent client is not connected")
+	}
+	resp, err := ag.UpdateConfig(ctx, &proto.UpdateConfigRequest{
 		OllamaUrl:                 u.OllamaURL,
 		OpenRuntime:               u.OpenRuntime,
 		OpenModel:                 u.OpenModel,
@@ -1487,6 +1490,21 @@ func (c *Client) UpdateConfig(ctx context.Context, u ConfigUpdate) (string, erro
 		return "", fmt.Errorf("%s", resp.GetMessage())
 	}
 	return resp.GetMessage(), nil
+}
+
+func (c *Client) ShutdownAgent(ctx context.Context, reason string) error {
+	ag := c.agent
+	if ag == nil {
+		return errors.New("agent client is not connected")
+	}
+	resp, err := ag.ShutdownAgent(ctx, &proto.ShutdownAgentRequest{Reason: reason})
+	if err != nil {
+		return err
+	}
+	if !resp.GetAccepted() {
+		return fmt.Errorf("agent shutdown rejected: %s", resp.GetMessage())
+	}
+	return nil
 }
 
 func mapRuntimeModels(models []*proto.RuntimeModel) []RuntimeModel {
@@ -1653,6 +1671,20 @@ type StreamMsg struct {
 	RolloverReason string // for TypeRolloverOffered — human-readable trigger
 	RawTokens      int64  // for TypeRolloverOffered — cumulative raw tokens at the offer
 	HandoffPreview string // for TypeRolloverOffered — summary + verbatim tail that would seed the new session
+
+	TaskChangeKind string    // for TypeTaskChange ("added" | "updated" | "removed")
+	Task           *TaskNode // for TypeTaskChange
+}
+
+// TaskNode is the client-side mirror of proto.TaskNode. It stays in
+// agentclient so the CLI does not need to import generated proto types.
+type TaskNode struct {
+	ID       string
+	Title    string
+	Status   string
+	Notes    string
+	ParentID string
+	Children []TaskNode
 }
 
 type StreamMsgType int
@@ -1671,6 +1703,7 @@ const (
 	TypeWatchdog
 	TypeSubAgent
 	TypeRolloverOffered
+	TypeTaskChange
 )
 
 func toProtoImages(images []InlineImage) []*proto.InlineImage {
@@ -1804,6 +1837,14 @@ func (c *Client) StreamChat(ctx context.Context, conversationID, input, workDir 
 				out <- streamMsgFromWatchdogEvent(we)
 				continue
 			}
+			if tc := msg.GetTaskChange(); tc != nil {
+				out <- StreamMsg{
+					Type:           TypeTaskChange,
+					TaskChangeKind: tc.GetKind(),
+					Task:           taskNodeFromProto(tc.GetTask()),
+				}
+				continue
+			}
 			if se := msg.GetSubAgentEvent(); se != nil {
 				out <- StreamMsg{
 					Type:             TypeSubAgent,
@@ -1842,6 +1883,26 @@ func streamMsgFromWatchdogEvent(we *proto.WatchdogEvent) StreamMsg {
 	}
 }
 
+func taskNodeFromProto(n *proto.TaskNode) *TaskNode {
+	if n == nil {
+		return nil
+	}
+	out := &TaskNode{
+		ID:       n.GetId(),
+		Title:    n.GetTitle(),
+		Status:   n.GetStatus(),
+		Notes:    n.GetNotes(),
+		ParentID: n.GetParentId(),
+		Children: make([]TaskNode, 0, len(n.GetChildren())),
+	}
+	for _, child := range n.GetChildren() {
+		if c := taskNodeFromProto(child); c != nil {
+			out.Children = append(out.Children, *c)
+		}
+	}
+	return out
+}
+
 // SetPermissionMode changes the agent's session permission mode.
 func (c *Client) SetPermissionMode(ctx context.Context, mode string) error {
 	res, err := c.agent.SetPermissionMode(ctx, &proto.SetPermissionModeRequest{Mode: mode})
@@ -1861,6 +1922,29 @@ func (c *Client) GetPermissionMode(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return res.GetMode(), nil
+}
+
+// SetSessionProfile switches the active capability profile (the read-only
+// planning fence and future named modes). name "" or "default" returns to the
+// unrestricted posture. Orthogonal to SetPermissionMode.
+func (c *Client) SetSessionProfile(ctx context.Context, name string) error {
+	res, err := c.agent.SetSessionProfile(ctx, &proto.SetSessionProfileRequest{Name: name})
+	if err != nil {
+		return err
+	}
+	if !res.GetOk() {
+		return fmt.Errorf("%s", res.GetError())
+	}
+	return nil
+}
+
+// GetSessionProfile reads the active profile name and the registered names.
+func (c *Client) GetSessionProfile(ctx context.Context) (active string, available []string, err error) {
+	res, err := c.agent.GetSessionProfile(ctx, &proto.GetSessionProfileRequest{})
+	if err != nil {
+		return "", nil, err
+	}
+	return res.GetActive(), res.GetAvailable(), nil
 }
 
 // AllowToolCall approves a paused tool call awaiting permission. conversationID
@@ -1938,6 +2022,11 @@ type McpServer struct {
 	State     string
 	ToolCount int
 	Err       string
+	// Launch config, surfaced for the details view. Only populated while the
+	// MCP config tab is polling ListMcpServers.
+	Command string
+	Args    []string
+	Env     map[string]string
 }
 
 // ListMcpServers returns a snapshot of all hosted MCP servers.
@@ -1949,7 +2038,8 @@ func (c *Client) ListMcpServers(ctx context.Context) ([]McpServer, error) {
 	out := make([]McpServer, 0, len(resp.GetServers()))
 	for _, s := range resp.GetServers() {
 		out = append(out, McpServer{Name: s.GetName(), State: s.GetState(),
-			ToolCount: int(s.GetToolCount()), Err: s.GetError()})
+			ToolCount: int(s.GetToolCount()), Err: s.GetError(),
+			Command: s.GetCommand(), Args: s.GetArgs(), Env: s.GetEnv()})
 	}
 	return out, nil
 }

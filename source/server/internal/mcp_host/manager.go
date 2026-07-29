@@ -25,12 +25,17 @@ const (
 	StateFailed  ServerState = "failed"
 )
 
-// ServerStatus is a point-in-time view of one hosted server.
+// ServerStatus is a point-in-time view of one hosted server. It includes the
+// launch config (Command/Args/Env) so clients can render server details and
+// reconstruct the server if it is later removed.
 type ServerStatus struct {
 	Name      string
 	State     ServerState
 	ToolCount int
 	Err       string
+	Command   string
+	Args      []string
+	Env       map[string]string
 }
 
 // serverHandle tracks the live state of one hosted server.
@@ -109,13 +114,17 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 	m.servers[name] = h
 	m.mu.Unlock()
 
+	log.Printf("[mcphost] %q: connecting (command=%q args=%v)", name, cfg.Command, cfg.Args)
+
 	c, err := m.dialFn(cctx, cfg) // path 1 on error
 	if err != nil {
+		log.Printf("[mcphost] %q: connect failed: %v", name, err)
 		h.fail(err)
 		return
 	}
 	tools, err := c.listTools(cctx) // path 2 on error
 	if err != nil {
+		log.Printf("[mcphost] %q: list tools failed: %v", name, err)
 		_ = c.close()
 		h.fail(err)
 		return
@@ -135,12 +144,17 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 	// Path 3: normal success path.
 	h.conn = c
 	h.state = StateReady
+	var skipped int
 	for _, rt := range tools {
 		tl := newMCPTool(name, rt, h.ready(m.callWait))
 		if err := m.reg.Register(tl); err == nil {
 			h.tools = append(h.tools, tl.Name())
+		} else {
+			skipped++
+			log.Printf("[mcphost] %q: skipped tool %q: %v", name, tl.Name(), err)
 		}
 	}
+	log.Printf("[mcphost] %q: ready (%d tools registered, %d skipped)", name, len(h.tools), skipped)
 	close(h.readyCh)
 	h.mu.Unlock()
 }
@@ -200,7 +214,15 @@ func (m *Manager) List() []ServerStatus {
 	out := make([]ServerStatus, 0, len(handles))
 	for _, h := range handles {
 		h.mu.Lock()
-		out = append(out, ServerStatus{Name: h.name, State: h.state, ToolCount: len(h.tools), Err: h.err})
+		out = append(out, ServerStatus{
+			Name:      h.name,
+			State:     h.state,
+			ToolCount: len(h.tools),
+			Err:       h.err,
+			Command:   h.cfg.Command,
+			Args:      h.cfg.Args,
+			Env:       h.cfg.Env,
+		})
 		h.mu.Unlock()
 	}
 	return out
@@ -238,21 +260,44 @@ func (m *Manager) Start(ctx context.Context) {
 // If a server with the same name already exists, it is torn down before the
 // new one starts (prevents a leaked connection and orphaned tool registrations).
 func (m *Manager) Add(ctx context.Context, name string, cfg ServerConfig) error {
+	log.Printf("[mcphost] Add %q requested", name)
 	m.mu.Lock()
 	old := m.servers[name]
 	m.mu.Unlock()
 	if old != nil {
+		log.Printf("[mcphost] %q: replacing existing server", name)
 		m.teardown(old)
 		m.mu.Lock()
 		delete(m.servers, name)
 		m.mu.Unlock()
 	}
 	m.startServer(ctx, name, cfg)
-	return m.persistAdd(name, cfg)
+	if err := m.persistAdd(name, cfg); err != nil {
+		log.Printf("[mcphost] %q: persist config failed: %v", name, err)
+		return err
+	}
+	// Surface the connection outcome so an add that landed a failed server is
+	// not silently reported as success by the RPC layer.
+	if st := m.status(name); st != nil && st.State == StateFailed {
+		log.Printf("[mcphost] Add %q: server registered but failed to connect: %s", name, st.Err)
+	}
+	return nil
+}
+
+// status returns a point-in-time snapshot for one server, or nil if unknown.
+func (m *Manager) status(name string) *ServerStatus {
+	for _, st := range m.List() {
+		if st.Name == name {
+			s := st
+			return &s
+		}
+	}
+	return nil
 }
 
 // Remove stops a server, unregisters its tools, and drops it from mcp.yaml.
 func (m *Manager) Remove(ctx context.Context, name string) error {
+	log.Printf("[mcphost] Remove %q requested", name)
 	m.mu.Lock()
 	h := m.servers[name]
 	delete(m.servers, name)
@@ -269,8 +314,10 @@ func (m *Manager) Restart(ctx context.Context, name string) error {
 	h := m.servers[name]
 	m.mu.Unlock()
 	if h == nil {
+		log.Printf("[mcphost] Restart %q: no such server", name)
 		return os.ErrNotExist
 	}
+	log.Printf("[mcphost] Restart %q requested", name)
 	cfg := h.cfg
 	m.teardown(h)
 	m.mu.Lock()

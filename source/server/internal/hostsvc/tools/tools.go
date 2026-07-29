@@ -11,7 +11,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"runtime"
 	"strings"
+	"time"
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
@@ -42,6 +44,10 @@ type Catalog interface {
 	// SetPermBroker updates the permission broker used by RunAgenticDispatch.
 	// Called by the front door when permissions are wired (SetPermissions).
 	SetPermBroker(b permissions.Broker)
+	// SetContextWindowResolver installs the resolver mapping a dispatch
+	// sub-agent's resolved model to its input context window (tokens), feeding
+	// the pre-flight size guard. Unset = guard disabled.
+	SetContextWindowResolver(fn func(model string, isCloud bool) int)
 	// GrantedRegistry builds the least-privilege sub-registry for a dispatch.
 	// Returns the registry, the granted tool names, the ignored-unknown names,
 	// and any error (e.g. empty resulting catalog).
@@ -87,6 +93,22 @@ type Service struct {
 	// unset and RunAgenticDispatch falls back to the store directly; the worker
 	// sets it to a host-stream proxy (the worker has no local conversation store).
 	ensureSubagent func(ctx context.Context, id, parentID, projectDir, model string, grantedTools []string) error
+
+	// contextWindowFor resolves the input context window (in tokens) for a
+	// dispatch sub-agent's resolved model, feeding RunAgenticDispatch's
+	// pre-flight size guard (see agent.ToolLoopInput.ContextWindow). Returns 0
+	// when the window is unknown (e.g. a cloud model whose window we don't
+	// track), which disables the guard for that call. nil = guard always off.
+	// A func-value seam so this package need not import config.
+	contextWindowFor func(model string, isCloud bool) int
+}
+
+// SetContextWindowResolver installs the resolver that maps a dispatch
+// sub-agent's resolved model to its input context window in tokens. The front
+// door wires this from config (e.g. config.LlamaServer.ContextSize for local
+// models). Leaving it unset disables the dispatch pre-flight size guard.
+func (x *Service) SetContextWindowResolver(fn func(model string, isCloud bool) int) {
+	x.contextWindowFor = fn
 }
 
 // New constructs a Catalog with the collaborators required by RunAgenticDispatch.
@@ -346,11 +368,12 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		}
 	}
 
-	// 2. Build system prompt (env grounding + steering block + project context).
-	var system string
-	if x.systemPrompt != nil {
-		system = x.systemPrompt(spec.WorkDir)
-	}
+	// 2. Build a lean sub-agent prompt. Do NOT reuse the main-agent system
+	// prompt here: it contains recursive delegation/planning/git-protocol rules
+	// intended for the top-level agent, and local models have been observed to
+	// ignore tools and emit unrelated text under that prompt. A dispatch worker
+	// needs bounded task/tool instructions, not full-frontier agency.
+	system := buildSubagentSystemPrompt(spec.WorkDir, granted)
 
 	// 3. Sub-agent identity + persistence. The sub-agent's conversation id is
 	// minted unconditionally: it is the
@@ -391,19 +414,31 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	// (minted above).
 	ctx = llm.WithSessionID(ctx, subConvID)
 
-	// 4. Run the bounded tool loop.
+	// 4. Run the bounded tool loop. Use greedy decoding: qwen/mistral.rs tool-call
+	// compliance is extremely temperature-sensitive, and dispatch workers value
+	// deterministic tool use over creative prose.
+	greedy := 0.0
 	var buf strings.Builder
+	// Resolve the sub-agent model's context window for the pre-flight size
+	// guard. 0 (unknown, or no resolver wired) disables the guard for this call.
+	contextWindow := 0
+	if x.contextWindowFor != nil {
+		contextWindow = x.contextWindowFor(model, sel.IsCloud)
+	}
 	res, err := agent.RunToolLoop(ctx, agent.ToolLoopInput{
-		Provider:       sel.Provider,
-		Model:          model,
-		Tier:           string(spec.Tier),
-		System:         system,
-		Registry:       reg,
-		Permissions:    perms,
-		UserInput:      spec.Task,
-		MaxIterations:  spec.MaxIterations,
-		WorkDir:        spec.WorkDir,
-		ConversationID: subConvID, // nested dispatches link to this sub-conversation
+		Provider:           sel.Provider,
+		Model:              model,
+		Tier:               string(spec.Tier),
+		System:             system,
+		ContextWindow:      contextWindow,
+		Registry:           reg,
+		Permissions:        perms,
+		UserInput:          spec.Task,
+		MaxIterations:      spec.MaxIterations,
+		Temperature:        &greedy,
+		FlattenToolResults: true,
+		WorkDir:            spec.WorkDir,
+		ConversationID:     subConvID, // nested dispatches link to this sub-conversation
 		OnTextDelta: func(t string) {
 			buf.WriteString(t)
 			emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "token", Text: t, GrantedTools: granted, IgnoredTools: ignored})
@@ -459,6 +494,34 @@ func emitDispatchProgress(emit func(agenttools.ProgressEvent), ev agenttools.Pro
 		return
 	}
 	emit(ev)
+}
+
+func buildSubagentSystemPrompt(workDir string, grantedTools []string) string {
+	var b strings.Builder
+	b.WriteString("You are a bounded Cercano sub-agent. Complete only the delegated task.\n\n")
+	b.WriteString("Rules:\n")
+	b.WriteString("- Use only the tools provided in this request. Do not mention or call unavailable tools.\n")
+	b.WriteString("- Do not delegate to another agent. Do not call dispatch/workflow.\n")
+	b.WriteString("- If the answer depends on repository contents, call Read, Grep, Glob, or another granted inspection tool before answering.\n")
+	b.WriteString("- Do not claim you inspected, ran, or verified anything unless you used a tool in this run.\n")
+	b.WriteString("- Keep the final answer concise and limited to the delegated task. Include file:line citations when applicable.\n")
+	b.WriteString("- End when the delegated task is complete; do not ask for follow-up work.\n\n")
+	b.WriteString("<env>\n")
+	if strings.TrimSpace(workDir) != "" {
+		fmt.Fprintf(&b, "Working directory: %s\n", workDir)
+	}
+	fmt.Fprintf(&b, "Platform: %s\n", runtime.GOOS)
+	fmt.Fprintf(&b, "Today's date: %s\n", time.Now().Format("2006-01-02"))
+	b.WriteString("</env>\n\n")
+	b.WriteString("Resolve relative file paths against the working directory; do not search outside it unless the delegated task explicitly provides an absolute path.\n")
+	if len(grantedTools) > 0 {
+		b.WriteString("\n<granted_tools>\n")
+		for _, name := range grantedTools {
+			fmt.Fprintf(&b, "- %s\n", name)
+		}
+		b.WriteString("</granted_tools>\n")
+	}
+	return b.String()
 }
 
 func formatSubagentLoopEvent(id, parentID, title string, ev agent.LoopEvent) (agenttools.ProgressEvent, bool) {

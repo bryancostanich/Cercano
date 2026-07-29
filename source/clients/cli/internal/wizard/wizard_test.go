@@ -108,19 +108,6 @@ func TestAdvanceRejectsMissingAnswers(t *testing.T) {
 	}
 }
 
-func TestDefaultProvider(t *testing.T) {
-	cases := map[string]string{
-		"cloud_only":    SideCloud,
-		"cloud_primary": SideCloud,
-		"open_primary":  SideOpen,
-		"open_only":     SideOpen,
-	}
-	for mode, want := range cases {
-		if got := (State{LocusMode: mode}).DefaultProvider(); got != want {
-			t.Errorf("%s: DefaultProvider = %q, want %q", mode, got, want)
-		}
-	}
-}
 
 func TestResumeRoundTrip(t *testing.T) {
 	useTempState(t)

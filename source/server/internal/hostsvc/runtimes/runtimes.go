@@ -14,6 +14,7 @@ import (
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/localruntime"
 	mcphost "cercano/source/server/internal/mcp_host"
+	"cercano/source/server/internal/openmodels"
 	cfg "cercano/source/server/pkg/config"
 )
 
@@ -43,13 +44,16 @@ type Supervisors interface {
 
 type service struct {
 	cfgSvc     cfgsvc.Service
+	openModels *openmodels.Resolver
 	runtimeMgr localruntime.Manager
 	mcpMgr     McpManager
 }
 
-// New constructs a Supervisors service. cfgSvc may be nil (tests).
-func New(cfgSvc cfgsvc.Service) Supervisors {
-	return &service{cfgSvc: cfgSvc}
+// New constructs a Supervisors service. cfgSvc and openModels may be nil
+// (tests); when openModels is nil the endpoint inventory omits the effective
+// open models (display-only).
+func New(cfgSvc cfgsvc.Service, openModels *openmodels.Resolver) Supervisors {
+	return &service{cfgSvc: cfgSvc, openModels: openModels}
 }
 
 // SetRuntimeManager wires the local runtime manager and immediately pushes
@@ -68,7 +72,12 @@ func (s *service) ApplyRuntimeEndpoints(c cfg.Config) {
 	if s.runtimeMgr == nil {
 		return
 	}
-	s.runtimeMgr.SetEndpoints(localruntime.EndpointsFromConfig(c))
+	var chat, embed string
+	if s.openModels != nil {
+		chat = s.openModels.ChatModel()
+		embed = s.openModels.EmbeddingModel()
+	}
+	s.runtimeMgr.SetEndpoints(localruntime.EndpointsFromConfig(c, chat, embed))
 }
 
 // RefreshRuntimeEndpoints snapshots the current config and pushes endpoints.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/llm/openai"
@@ -58,9 +59,13 @@ func (p *LLMProvider) clientFor(ctx context.Context, req llm.ChatRequest) (*open
 		model = "default"
 	}
 	req.Model = model
+	if req.MaxTokens <= 0 {
+		req.MaxTokens = engine.DefaultMaxTokens
+	}
 	c := openai.NewClient(openai.Config{
 		BaseURL: strings.TrimRight(endpoint, "/") + "/v1",
 		Model:   model,
+		Backend: "llama_server",
 	})
 	return c, req, nil
 }

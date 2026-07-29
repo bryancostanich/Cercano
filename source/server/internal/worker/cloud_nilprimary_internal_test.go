@@ -42,7 +42,8 @@ func TestBuildWorkerProviders_PrimaryFetchFail_NoNilFallbackPanic(t *testing.T) 
 			// Backup: static key + BaseURL -> builds without network.
 			{Name: "bkp", Flavor: "messages", Route: "direct", BaseURL: "http://127.0.0.1:9999"},
 		},
-		Models: pkgcfg.ModelsConfig{Tiers: pkgcfg.ModelTiers{Everyday: pkgcfg.ModelTier{Open: "qwen"}}},
+		OpenRuntime: "ollama",
+		Models:      workerTestModels("ollama", map[pkgcfg.Tier]string{pkgcfg.TierEveryday: "qwen"}),
 	}
 
 	r, err := buildWorkerProviders(context.Background(), cfg, &splitFetcher{backupName: "bkp"}, nil)

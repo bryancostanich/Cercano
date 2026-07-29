@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/dispatch"
@@ -13,6 +14,15 @@ import (
 	"cercano/source/server/internal/toolstack"
 	pkgcfg "cercano/source/server/pkg/config"
 )
+
+// openTierModel returns the worker's effective open model for a tier. The host
+// resolved override-else-catalog-default and sent the result as the active
+// runtime's override, so a plain OverrideFor on the worker's config yields the
+// host-intended model without the worker ever needing the catalog.
+func openTierModel(cfg pkgcfg.Config, t pkgcfg.Tier) string {
+	id, _ := cfg.Models.OverrideFor(cfg.OpenRuntime, t)
+	return id
+}
 
 // buildWorkerToolSvc assembles the worker's capability/tool stack via the shared
 // internal/toolstack builder — the SAME assembly the host uses — so worker turns
@@ -35,6 +45,7 @@ func buildWorkerToolSvc(
 	cloud, open inference.Provider,
 	cfg pkgcfg.Config,
 	subPersist *streamSubagentPersist,
+	enterProfile func(context.Context, string) error,
 ) runner.ToolSvc {
 	systemPrompt := func(workDir string) string {
 		return runner.BuildSystemPrompt(runner.Deps{Persist: workerCtxHistory{loader: ctxLoader}}, workDir)
@@ -49,6 +60,12 @@ func buildWorkerToolSvc(
 		Open:      open,
 		Config:    &cfg,
 		CtxLoader: ctxLoader,
+		EnterProfile: func(name string) error {
+			if enterProfile == nil {
+				return fmt.Errorf("session profile control not configured")
+			}
+			return enterProfile(context.Background(), name)
+		},
 	})
 	return svc
 }
@@ -80,10 +97,10 @@ func workerDispatchModelFor(cfg pkgcfg.Config) func(isCloud bool, tier pkgcfg.Ti
 			}
 			return cfg.ModelProfiles.ResolveCloudModelForTier(prof, tier)
 		}
-		if id, _, ok := cfg.Models.Resolve(tier, pkgcfg.ProviderOpen, true); ok {
+		if id := openTierModel(cfg, tier); id != "" {
 			return id
 		}
-		if id, _, ok := cfg.Models.Resolve(pkgcfg.TierEveryday, pkgcfg.ProviderOpen, true); ok {
+		if id := openTierModel(cfg, pkgcfg.TierEveryday); id != "" {
 			return id
 		}
 		return ""

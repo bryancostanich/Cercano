@@ -68,6 +68,10 @@ type CapDeps struct {
 	Open      inference.Provider
 	Config    *config.Config
 	CtxLoader *projectctx.Loader
+	// EnterProfile switches the session's active capability profile (used by the
+	// suggest_plan capability to enter planning mode on user approval). Optional;
+	// nil means planning mode is unavailable and suggest_plan errors clearly.
+	EnterProfile func(name string) error
 }
 
 // InstallCapabilities builds the capability registry with a fully-populated
@@ -90,6 +94,7 @@ func InstallCapabilities(svc tools.Catalog, d CapDeps) {
 			}
 			return e.Dispatch(ctx, spec)
 		},
+		EnterProfile: d.EnterProfile,
 	})
 	builtins.Register(capReg)
 	svc.SetCapRegistry(capReg)

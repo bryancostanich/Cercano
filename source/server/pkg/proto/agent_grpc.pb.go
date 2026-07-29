@@ -23,6 +23,7 @@ const (
 	Agent_StreamProcessRequest_FullMethodName       = "/agent.Agent/StreamProcessRequest"
 	Agent_AttachConversation_FullMethodName         = "/agent.Agent/AttachConversation"
 	Agent_UpdateConfig_FullMethodName               = "/agent.Agent/UpdateConfig"
+	Agent_ShutdownAgent_FullMethodName              = "/agent.Agent/ShutdownAgent"
 	Agent_GetConfig_FullMethodName                  = "/agent.Agent/GetConfig"
 	Agent_ListConversations_FullMethodName          = "/agent.Agent/ListConversations"
 	Agent_ResumeConversation_FullMethodName         = "/agent.Agent/ResumeConversation"
@@ -62,6 +63,8 @@ const (
 	Agent_GetSkill_FullMethodName                   = "/agent.Agent/GetSkill"
 	Agent_SetPermissionMode_FullMethodName          = "/agent.Agent/SetPermissionMode"
 	Agent_GetPermissionMode_FullMethodName          = "/agent.Agent/GetPermissionMode"
+	Agent_SetSessionProfile_FullMethodName          = "/agent.Agent/SetSessionProfile"
+	Agent_GetSessionProfile_FullMethodName          = "/agent.Agent/GetSessionProfile"
 	Agent_SubscribeEvents_FullMethodName            = "/agent.Agent/SubscribeEvents"
 	Agent_AllowToolCall_FullMethodName              = "/agent.Agent/AllowToolCall"
 	Agent_DenyToolCall_FullMethodName               = "/agent.Agent/DenyToolCall"
@@ -102,8 +105,14 @@ type AgentClient interface {
 	// live, using the same StreamProcessResponse vocabulary as StreamProcessRequest.
 	// Observe-only: it does not send input or answer permission prompts.
 	AttachConversation(ctx context.Context, in *AttachConversationRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamProcessResponse], error)
-	// UpdateConfig updates runtime configuration (model, provider) without server restart.
+	// UpdateConfig updates runtime configuration (model, provider). Some changes
+	// (notably open_runtime swaps) require an agent restart before all worker-side
+	// providers and model-tier mappings are rebuilt.
 	UpdateConfig(ctx context.Context, in *UpdateConfigRequest, opts ...grpc.CallOption) (*UpdateConfigResponse, error)
+	// ShutdownAgent asks the singleton agent process to exit after this response
+	// is sent. CLI clients use this for restart-required config changes; their
+	// reconnect loop auto-launches the replacement agent.
+	ShutdownAgent(ctx context.Context, in *ShutdownAgentRequest, opts ...grpc.CallOption) (*ShutdownAgentResponse, error)
 	// GetConfig returns the current runtime config. API key is reported as a
 	// presence bool only — the literal value never leaves the agent.
 	GetConfig(ctx context.Context, in *GetConfigRequest, opts ...grpc.CallOption) (*GetConfigResponse, error)
@@ -220,6 +229,13 @@ type AgentClient interface {
 	SetPermissionMode(ctx context.Context, in *SetPermissionModeRequest, opts ...grpc.CallOption) (*SetPermissionModeResponse, error)
 	// GetPermissionMode reads the current mode.
 	GetPermissionMode(ctx context.Context, in *GetPermissionModeRequest, opts ...grpc.CallOption) (*GetPermissionModeResponse, error)
+	// SetSessionProfile switches the active capability profile — the read-only
+	// planning fence ("plan"), the unrestricted default (""|"default"), or a
+	// future named mode. Orthogonal to the permission mode. Errors if the name is
+	// not registered.
+	SetSessionProfile(ctx context.Context, in *SetSessionProfileRequest, opts ...grpc.CallOption) (*SetSessionProfileResponse, error)
+	// GetSessionProfile reads the active profile name and the registered names.
+	GetSessionProfile(ctx context.Context, in *GetSessionProfileRequest, opts ...grpc.CallOption) (*GetSessionProfileResponse, error)
 	// SubscribeEvents is a standing server->client stream the client holds open
 	// for its whole session. The agent pushes unsolicited state changes here so
 	// clients never poll. First event type is PermissionModeChanged (fired when
@@ -340,6 +356,16 @@ func (c *agentClient) UpdateConfig(ctx context.Context, in *UpdateConfigRequest,
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UpdateConfigResponse)
 	err := c.cc.Invoke(ctx, Agent_UpdateConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) ShutdownAgent(ctx context.Context, in *ShutdownAgentRequest, opts ...grpc.CallOption) (*ShutdownAgentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ShutdownAgentResponse)
+	err := c.cc.Invoke(ctx, Agent_ShutdownAgent_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -772,6 +798,26 @@ func (c *agentClient) GetPermissionMode(ctx context.Context, in *GetPermissionMo
 	return out, nil
 }
 
+func (c *agentClient) SetSessionProfile(ctx context.Context, in *SetSessionProfileRequest, opts ...grpc.CallOption) (*SetSessionProfileResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetSessionProfileResponse)
+	err := c.cc.Invoke(ctx, Agent_SetSessionProfile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) GetSessionProfile(ctx context.Context, in *GetSessionProfileRequest, opts ...grpc.CallOption) (*GetSessionProfileResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSessionProfileResponse)
+	err := c.cc.Invoke(ctx, Agent_GetSessionProfile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *agentClient) SubscribeEvents(ctx context.Context, in *SubscribeEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ClientEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[6], Agent_SubscribeEvents_FullMethodName, cOpts...)
@@ -1035,8 +1081,14 @@ type AgentServer interface {
 	// live, using the same StreamProcessResponse vocabulary as StreamProcessRequest.
 	// Observe-only: it does not send input or answer permission prompts.
 	AttachConversation(*AttachConversationRequest, grpc.ServerStreamingServer[StreamProcessResponse]) error
-	// UpdateConfig updates runtime configuration (model, provider) without server restart.
+	// UpdateConfig updates runtime configuration (model, provider). Some changes
+	// (notably open_runtime swaps) require an agent restart before all worker-side
+	// providers and model-tier mappings are rebuilt.
 	UpdateConfig(context.Context, *UpdateConfigRequest) (*UpdateConfigResponse, error)
+	// ShutdownAgent asks the singleton agent process to exit after this response
+	// is sent. CLI clients use this for restart-required config changes; their
+	// reconnect loop auto-launches the replacement agent.
+	ShutdownAgent(context.Context, *ShutdownAgentRequest) (*ShutdownAgentResponse, error)
 	// GetConfig returns the current runtime config. API key is reported as a
 	// presence bool only — the literal value never leaves the agent.
 	GetConfig(context.Context, *GetConfigRequest) (*GetConfigResponse, error)
@@ -1153,6 +1205,13 @@ type AgentServer interface {
 	SetPermissionMode(context.Context, *SetPermissionModeRequest) (*SetPermissionModeResponse, error)
 	// GetPermissionMode reads the current mode.
 	GetPermissionMode(context.Context, *GetPermissionModeRequest) (*GetPermissionModeResponse, error)
+	// SetSessionProfile switches the active capability profile — the read-only
+	// planning fence ("plan"), the unrestricted default (""|"default"), or a
+	// future named mode. Orthogonal to the permission mode. Errors if the name is
+	// not registered.
+	SetSessionProfile(context.Context, *SetSessionProfileRequest) (*SetSessionProfileResponse, error)
+	// GetSessionProfile reads the active profile name and the registered names.
+	GetSessionProfile(context.Context, *GetSessionProfileRequest) (*GetSessionProfileResponse, error)
 	// SubscribeEvents is a standing server->client stream the client holds open
 	// for its whole session. The agent pushes unsolicited state changes here so
 	// clients never poll. First event type is PermissionModeChanged (fired when
@@ -1232,6 +1291,9 @@ func (UnimplementedAgentServer) AttachConversation(*AttachConversationRequest, g
 }
 func (UnimplementedAgentServer) UpdateConfig(context.Context, *UpdateConfigRequest) (*UpdateConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateConfig not implemented")
+}
+func (UnimplementedAgentServer) ShutdownAgent(context.Context, *ShutdownAgentRequest) (*ShutdownAgentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ShutdownAgent not implemented")
 }
 func (UnimplementedAgentServer) GetConfig(context.Context, *GetConfigRequest) (*GetConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetConfig not implemented")
@@ -1349,6 +1411,12 @@ func (UnimplementedAgentServer) SetPermissionMode(context.Context, *SetPermissio
 }
 func (UnimplementedAgentServer) GetPermissionMode(context.Context, *GetPermissionModeRequest) (*GetPermissionModeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetPermissionMode not implemented")
+}
+func (UnimplementedAgentServer) SetSessionProfile(context.Context, *SetSessionProfileRequest) (*SetSessionProfileResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetSessionProfile not implemented")
+}
+func (UnimplementedAgentServer) GetSessionProfile(context.Context, *GetSessionProfileRequest) (*GetSessionProfileResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetSessionProfile not implemented")
 }
 func (UnimplementedAgentServer) SubscribeEvents(*SubscribeEventsRequest, grpc.ServerStreamingServer[ClientEvent]) error {
 	return status.Error(codes.Unimplemented, "method SubscribeEvents not implemented")
@@ -1491,6 +1559,24 @@ func _Agent_UpdateConfig_Handler(srv interface{}, ctx context.Context, dec func(
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AgentServer).UpdateConfig(ctx, req.(*UpdateConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_ShutdownAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ShutdownAgentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).ShutdownAgent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_ShutdownAgent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).ShutdownAgent(ctx, req.(*ShutdownAgentRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2169,6 +2255,42 @@ func _Agent_GetPermissionMode_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Agent_SetSessionProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetSessionProfileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).SetSessionProfile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_SetSessionProfile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).SetSessionProfile(ctx, req.(*SetSessionProfileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_GetSessionProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSessionProfileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).GetSessionProfile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_GetSessionProfile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).GetSessionProfile(ctx, req.(*GetSessionProfileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Agent_SubscribeEvents_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(SubscribeEventsRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -2560,6 +2682,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Agent_UpdateConfig_Handler,
 		},
 		{
+			MethodName: "ShutdownAgent",
+			Handler:    _Agent_ShutdownAgent_Handler,
+		},
+		{
 			MethodName: "GetConfig",
 			Handler:    _Agent_GetConfig_Handler,
 		},
@@ -2698,6 +2824,14 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetPermissionMode",
 			Handler:    _Agent_GetPermissionMode_Handler,
+		},
+		{
+			MethodName: "SetSessionProfile",
+			Handler:    _Agent_SetSessionProfile_Handler,
+		},
+		{
+			MethodName: "GetSessionProfile",
+			Handler:    _Agent_GetSessionProfile_Handler,
 		},
 		{
 			MethodName: "AllowToolCall",

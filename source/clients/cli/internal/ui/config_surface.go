@@ -82,6 +82,9 @@ func (m *Model) buildConfigTabPage(tab configTab) (contentPage, tea.Cmd) {
 	case configTabModels:
 		d, cmd := newRuntimeDashboard(m.agent, m.palette, m.styles, m.width, h, dashboardModeModels)
 		return d, tea.Batch(cmd, d.refreshTick())
+	case configTabMcp:
+		d, cmd := newMcpDashboard(m.agent, m.palette, m.styles, m.width, h)
+		return d, tea.Batch(cmd, d.refreshTick())
 	case configTabCloud:
 		return newScopedSettingsPage(m.agent, m.palette, m.styles, m.promptColorToken, m.width, h, m.themes, m.theme, scopeCloud)
 	case configTabRuntime:
@@ -101,7 +104,9 @@ func (m *Model) buildConfigTabPage(tab configTab) (contentPage, tea.Cmd) {
 // sees them, returning handled=true when it consumes the key. Focus model:
 //
 //   - Tab bar focused: ←/→ and Tab/Shift+Tab switch tabs (wrapping), 1–5 jump
-//     to a tab, ↓/Enter drop into the body, Esc closes the surface.
+//     to a tab, Enter drops into the body, ↓ drops into the body and is also
+//     forwarded to the page so a list moves its cursor on that first press,
+//     Esc closes the surface.
 //   - Body focused: Shift+Tab lifts focus back up to the tab bar (a reliable
 //     keyboard path back to the tabs from any tab), Esc also steps back up (a
 //     second Esc there closes), and ↑ at a form's first field or the runtime
@@ -121,7 +126,17 @@ func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 
 	if key == "esc" {
 		if !cs.focused {
+			// The body owns focus. If the active page has a transient overlay
+			// open (e.g. the MCP dashboard's details / add-server popover), let
+			// Esc close that overlay first rather than yanking focus back to the
+			// tab strip. Only once the page has nothing left to dismiss does Esc
+			// step focus back up.
+			if m.pageWantsEscape() {
+				next, cmd := m.dropFocusForwarding(msg)
+				return next, cmd, true
+			}
 			cs.focused = true
+			m.blurContentBody()
 			return m, nil, true
 		}
 		cmd := m.closeConfigSurface()
@@ -134,11 +149,27 @@ func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 			return m, m.switchConfigTab(cycleConfigTab(cs.active, -1)), true
 		case "right", "tab":
 			return m, m.switchConfigTab(cycleConfigTab(cs.active, +1)), true
-		case "down", "enter":
+		case "enter":
+			// Enter just commits focus into the body without moving anything.
 			cs.focused = false
 			return m, nil, true
-		case "1", "2", "3", "4", "5":
+		case "down":
+			// Drop focus into the body AND forward this same ↓ so a list page
+			// (e.g. the MCP dashboard) moves its cursor on the first press,
+			// instead of the keystroke being silently swallowed to transfer
+			// focus. For a settings form the forwarded ↓ advances off field 0,
+			// which reads naturally too.
+			next, cmd := m.dropFocusForwarding(msg)
+			return next, cmd, true
+		case "1", "2", "3", "4", "5", "6", "7":
 			return m, m.switchConfigTab(configTab(int(key[0] - '1'))), true
+		}
+		// A page may advertise action hotkeys (e.g. the MCP dashboard's
+		// a/r/x) that should work even from the strip: drop into the body and
+		// forward the key so the hint row's promise holds on the first press.
+		if m.pageWantsStripKey(key) {
+			next, cmd := m.dropFocusForwarding(msg)
+			return next, cmd, true
 		}
 		// The tab bar owns focus: swallow other keys so nothing leaks into the
 		// body while the user is on the strip.
@@ -149,6 +180,7 @@ func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 	// is a dependable keyboard route back to the tabs from any tab's body.
 	if key == "shift+tab" {
 		cs.focused = true
+		m.blurContentBody()
 		return m, nil, true
 	}
 	// ↑ at a settings form's first field, or the runtime dashboard's first
@@ -156,6 +188,7 @@ func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 	if key == "up" {
 		if sp, ok := m.content.(*settingsPage); ok && sp.form != nil && sp.form.Cursor() == 0 {
 			cs.focused = true
+			m.blurContentBody()
 			return m, nil, true
 		}
 		if rd, ok := m.content.(*runtimeDashboard); ok && rd.atSectionTop() {
@@ -164,4 +197,80 @@ func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 		}
 	}
 	return m, nil, false
+}
+
+// dropFocusForwarding lifts focus from the tab strip into the body and forwards
+// the triggering key to the active page in the same step, so a list moves its
+// cursor or fires an action hotkey on that first press rather than spending the
+// keystroke solely on the focus transfer.
+func (m Model) dropFocusForwarding(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	if m.configSurface != nil {
+		m.configSurface.focused = false
+	}
+	if m.content == nil {
+		return m, nil
+	}
+	cmd, _ := m.content.Update(msg)
+	return m, cmd
+}
+
+// pageWantsStripKey reports whether the active page has asked for this key to be
+// forwarded from the tab strip (via stripForwardingPage).
+func (m Model) pageWantsStripKey(key string) bool {
+	p, ok := m.content.(stripForwardingPage)
+	if !ok {
+		return false
+	}
+	for _, k := range p.stripForwardKeys() {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
+// pageWantsEscape reports whether the active page has a transient overlay open
+// that Esc should dismiss before the config surface treats Esc as "step focus
+// back to the tab strip". Pages without dismissable overlays don't implement
+// escapeConsumingPage and this returns false.
+func (m Model) pageWantsEscape() bool {
+	p, ok := m.content.(escapeConsumingPage)
+	return ok && p.wantsEscape()
+}
+
+// escapeConsumingPage is a content page that can have a transient overlay open
+// (details popover, add form, …) which Esc should close before the config
+// surface reinterprets Esc as a focus/close step.
+type escapeConsumingPage interface {
+	wantsEscape() bool
+}
+
+// pasteConsumingPage is a content page with a text field that can accept a
+// bracketed paste. The page returns true when it consumed the text; otherwise
+// the paste is dropped (content pages don't feed the prompt input).
+type pasteConsumingPage interface {
+	handlePaste(text string) bool
+}
+
+// bodyFocusablePage is a content page that tracks whether the config surface's
+// body (vs. the tab strip) owns the keyboard, so it can suppress its cursor
+// marker while focus is up on the strip.
+type bodyFocusablePage interface {
+	blurBody()
+}
+
+// stripForwardingPage is a content page that declares keys which, while the tab
+// strip owns focus, should drop into the body and be forwarded to the page —
+// used for dashboard action hotkeys advertised in the page's hint row.
+type stripForwardingPage interface {
+	stripForwardKeys() []string
+}
+
+// blurContentBody tells the active content page that focus has lifted back to
+// the tab strip, so any cursor marker it draws should be hidden until the body
+// is re-entered. A no-op for pages that don't implement bodyFocusablePage.
+func (m *Model) blurContentBody() {
+	if p, ok := m.content.(bodyFocusablePage); ok {
+		p.blurBody()
+	}
 }

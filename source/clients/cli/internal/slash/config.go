@@ -41,9 +41,9 @@ func RegisterConfig(r *Registry, c *agentclient.Client) {
 			value := strings.Join(args[1:], " ")
 
 			var update agentclient.ConfigUpdate
-			// Model taxonomy: /config models.<tier>.<provider> <model-id>
-			// (or models.default_provider cloud|open; "-" clears a slot).
-			// Key validation lives server-side in ApplyModelTierPatch.
+			// Open model overrides: /config models.<runtime>.<tier> <model-id>
+			// ("-" clears an override). Key validation lives server-side in
+			// ApplyModelTierPatch. Example: models.llama_server.everyday qwen3-coder
 			if strings.HasPrefix(key, "models.") {
 				update.ModelTierKey = strings.TrimPrefix(key, "models.")
 				update.ModelTierValue = value
@@ -200,10 +200,8 @@ func formatConfig(cfg *agentclient.Config) string {
 	} else {
 		b.WriteString("off")
 	}
-	if len(cfg.ModelTiers) > 0 || cfg.ModelsDefaultProvider != "" {
+	if len(cfg.ModelTiers) > 0 {
 		b.WriteString("\n  models:")
-		b.WriteString("\n    default-provider: ")
-		b.WriteString(orDash(cfg.ModelsDefaultProvider))
 		keys := make([]string, 0, len(cfg.ModelTiers))
 		for k := range cfg.ModelTiers {
 			keys = append(keys, k)

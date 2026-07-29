@@ -19,8 +19,15 @@ service Agent {
   // Observe-only: it does not send input or answer permission prompts.
   rpc AttachConversation (AttachConversationRequest) returns (stream StreamProcessResponse) {}
 
-  // UpdateConfig updates runtime configuration (model, provider) without server restart.
+  // UpdateConfig updates runtime configuration (model, provider). Some changes
+  // (notably open_runtime swaps) require an agent restart before all worker-side
+  // providers and model-tier mappings are rebuilt.
   rpc UpdateConfig (UpdateConfigRequest) returns (UpdateConfigResponse) {}
+
+  // ShutdownAgent asks the singleton agent process to exit after this response
+  // is sent. CLI clients use this for restart-required config changes; their
+  // reconnect loop auto-launches the replacement agent.
+  rpc ShutdownAgent (ShutdownAgentRequest) returns (ShutdownAgentResponse) {}
 
   // GetConfig returns the current runtime config. API key is reported as a
   // presence bool only — the literal value never leaves the agent.
@@ -162,6 +169,15 @@ service Agent {
 
   // GetPermissionMode reads the current mode.
   rpc GetPermissionMode (GetPermissionModeRequest) returns (GetPermissionModeResponse) {}
+
+  // SetSessionProfile switches the active capability profile — the read-only
+  // planning fence ("plan"), the unrestricted default (""|"default"), or a
+  // future named mode. Orthogonal to the permission mode. Errors if the name is
+  // not registered.
+  rpc SetSessionProfile (SetSessionProfileRequest) returns (SetSessionProfileResponse) {}
+
+  // GetSessionProfile reads the active profile name and the registered names.
+  rpc GetSessionProfile (GetSessionProfileRequest) returns (GetSessionProfileResponse) {}
 
   // SubscribeEvents is a standing server->client stream the client holds open
   // for its whole session. The agent pushes unsolicited state changes here so
@@ -406,10 +422,11 @@ message UpdateConfigRequest {
   // open_runtime switch in the same request, so a request carrying both
   // resolves an ambiguous-model detection in one round trip.
   string open_default_model = 20;
-  // Model taxonomy (sparse-patch): model_tier_key selects the slot —
-  // "default_provider", or "<tier>.<provider>" with tier one of
-  // most_capable|everyday|fast_light|fast_light_text and provider cloud|open.
-  // model_tier_value is the model id; "-" clears the slot. Empty key = unchanged.
+  // Model taxonomy (sparse-patch): model_tier_key selects the open slot —
+  // "<tier>.open" with tier one of most_capable|everyday|fast_light|
+  // fast_light_text|embedding. (Cloud is configured via its own vendor-keyed
+  // profile path, not through tier slots.) model_tier_value is the model id;
+  // "-" clears the slot. Empty key = unchanged.
   string model_tier_key = 21;
   string model_tier_value = 22;
   // Tool loop — max LLM round-trips per turn. Sparse-patch convention:
@@ -429,6 +446,15 @@ message UpdateConfigRequest {
 // Runtime configuration update response.
 message UpdateConfigResponse {
   bool success = 1;
+  string message = 2;
+}
+
+message ShutdownAgentRequest {
+  string reason = 1;
+}
+
+message ShutdownAgentResponse {
+  bool accepted = 1;
   string message = 2;
 }
 
@@ -973,10 +999,14 @@ message GetConfigResponse {
   string watchdog_mode = 20;
   string watchdog_checks = 21;          // comma-joined
   string watchdog_escalate_after = 22;  // int as string
-  // Model taxonomy — current tier slots, keyed "<tier>.<provider>" (only
-  // non-empty slots are present), plus the default provider side.
+  // Model taxonomy — effective active-runtime open tier values, keyed
+  // "<runtime>.<tier>". These are display values (override else catalog
+  // default); writes still go through UpdateConfig.ModelTierKey/Value.
+  // Cloud tiers and the retired default-provider knob are no longer reported
+  // here; field 24 is reserved.
+  reserved 24;
+  reserved "models_default_provider";
   map<string, string> model_tiers = 23;
-  string models_default_provider = 24;
   // Tool loop — max LLM round-trips per turn. -1 means unlimited.
   int32 tool_loop_max_iterations = 25;
   // mistral.rs runtime settings — current values.
@@ -1020,6 +1050,18 @@ message SetPermissionModeResponse { bool ok = 1; string error = 2; }
 
 message GetPermissionModeRequest  {}
 message GetPermissionModeResponse { string mode = 1; }
+
+// Session-profile RPCs let the CLI's /mode command switch the active capability
+// profile (the read-only planning fence and future named modes). name "" or
+// "default" selects the unrestricted posture.
+message SetSessionProfileRequest  { string name = 1; }    // "plan" | "default" | "" | future mode
+message SetSessionProfileResponse { bool ok = 1; string error = 2; }
+
+message GetSessionProfileRequest  {}
+message GetSessionProfileResponse {
+  string active = 1;           // active profile name ("default" when unrestricted)
+  repeated string available = 2; // registered profile names (excluding default)
+}
 
 // SubscribeEvents transport. The request is empty today; a client_id may be
 // added later for targeted pushes. ClientEvent is a oneof so new server->client
@@ -1202,6 +1244,12 @@ message McpServerInfo {
   string state      = 2; // "warming" | "ready" | "failed"
   int32  tool_count = 3;
   string error      = 4;
+  // Launch config, surfaced so clients can show server details (Option A).
+  // On a localhost agent this is the same data mcp.yaml/AddMcpServer already
+  // carry; it is only polled while the MCP config tab is open.
+  string          command = 5;
+  repeated string args    = 6;
+  map<string, string> env = 7;
 }
 message ListMcpServersRequest  {}
 message ListMcpServersResponse { repeated McpServerInfo servers = 1; }
@@ -1359,25 +1407,27 @@ service Worker {
 // HostToWorker is the host→worker envelope.
 message HostToWorker {
   oneof msg {
-    StartTurn          start         = 1;
-    PermissionResponse perm_response = 2;
-    Cancel             cancel        = 3;
-    CredentialResponse cred_response = 4;
-    OpenInferenceEvent open_event    = 5;
+    StartTurn              start            = 1;
+    PermissionResponse     perm_response    = 2;
+    Cancel                 cancel           = 3;
+    CredentialResponse     cred_response    = 4;
+    OpenInferenceEvent     open_event       = 5;
+    SessionProfileResponse profile_response = 6;
   }
 }
 
 // WorkerToHost is the worker→host envelope.
 message WorkerToHost {
   oneof msg {
-    WorkerEvent       event        = 1;
-    PermissionRequest perm_request = 2;
-    PersistTurn       persist      = 3;
-    TurnDone          done         = 4;
-    TurnError         error        = 5;
-    CredentialRequest cred_request = 6;
+    WorkerEvent              event           = 1;
+    PermissionRequest        perm_request    = 2;
+    PersistTurn              persist         = 3;
+    TurnDone                 done            = 4;
+    TurnError                error           = 5;
+    CredentialRequest        cred_request    = 6;
     EnsureSubagentConversation ensure_subagent = 7;
-    OpenInferenceRequest open_request = 8;
+    OpenInferenceRequest     open_request    = 8;
+    SessionProfileRequest    profile_request = 9;
   }
 }
 
@@ -1484,6 +1534,20 @@ message PermissionResponse {
   string message = 4; // "chat about this" redirect carried on a denial
 }
 
+// SessionProfileRequest asks the host to switch the live interactive session's
+// capability profile. The worker must not keep its own profile broker; planning
+// mode changes affect the host session and therefore the next turn's tool fence.
+message SessionProfileRequest {
+  uint64 id = 1;
+  string name = 2;
+}
+
+message SessionProfileResponse {
+  uint64 id = 1;
+  bool   ok = 2;
+  string error = 3;
+}
+
 // PersistTurn asks the host to persist one turn message.
 message PersistTurn {
   LLMMessage message         = 1;
@@ -1553,18 +1617,19 @@ message ConfigSnapshot {
   string ollama_url    = 12;
   string open_runtime  = 13; // "ollama" | "llama_server"
 
-  // Model tiers — worker needs these to resolve tier→model at turn time.
-  string tier_most_capable_open   = 14;
-  string tier_most_capable_cloud  = 15;
-  string tier_everyday_open       = 16;
-  string tier_everyday_cloud      = 17;
-  string tier_fast_light_open     = 18;
-  string tier_fast_light_cloud    = 19;
-  string tier_fast_light_text_open  = 20;
-  string tier_fast_light_text_cloud = 21;
-  string tier_embedding_open      = 22;
-  string tier_embedding_cloud     = 23;
-  string default_provider         = 24; // "cloud" | "open"
+  // Open-side model tiers — worker needs these to resolve tier→model at turn
+  // time. Cloud is resolved separately via the vendor-keyed cost-tier path, so
+  // it is NOT carried here. The former per-tier *_cloud slots and the
+  // default_provider knob were retired (effort: runtime-aware-model-tiers) and
+  // their field numbers/names are reserved so they can never be reused.
+  reserved 15, 17, 19, 21, 23, 24;
+  reserved "tier_most_capable_cloud", "tier_everyday_cloud", "tier_fast_light_cloud",
+           "tier_fast_light_text_cloud", "tier_embedding_cloud", "default_provider";
+  string tier_most_capable_open    = 14;
+  string tier_everyday_open        = 16;
+  string tier_fast_light_open      = 18;
+  string tier_fast_light_text_open = 20;
+  string tier_embedding_open       = 22;
 
   // Compaction — runner reads these for context assembly.
   bool   compaction_enabled               = 25;

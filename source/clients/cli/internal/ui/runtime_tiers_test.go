@@ -7,35 +7,32 @@ import (
 	"cercano/source/server/pkg/agentclient"
 )
 
-// TestTierRows pins the /m tiers section shape: a default-provider row plus
-// one row per tier×provider slot, each carrying a tier-pick action, with
-// configured values shown and empty slots dashed.
+// TestTierRows pins the /m tiers section shape: one row per open tier slot,
+// each carrying a tier-pick action, with configured values shown and empty
+// slots dashed. (No default-provider row; cloud is not a tier slot.)
 func TestTierRows(t *testing.T) {
 	cfg := &agentclient.Config{
-		ModelsDefaultProvider: "open",
+		OpenRuntime: "llama_server",
 		ModelTiers: map[string]string{
-			"fast_light_text.open": "phi4:14b",
+			"llama_server.fast_light_text": "phi4:14b",
 		},
 	}
 	rows := tierRows(cfg)
-	if len(rows) != 10 {
-		t.Fatalf("rows = %d, want 10 (default provider + 4 tiers × 2 providers + embedding)", len(rows))
-	}
-	if rows[0].Action.TierKey != "default_provider" || rows[0].Value != "open" {
-		t.Errorf("row 0 = %+v, want the default-provider row", rows[0])
+	if len(rows) != 5 {
+		t.Fatalf("rows = %d, want 5 (4 open tiers + embedding)", len(rows))
 	}
 	var sawConfigured, sawEmpty bool
 	for _, r := range rows {
 		if r.Action.Kind != runtimeActionTierPick {
 			t.Errorf("row %q missing tier-pick action: %+v", r.Label, r.Action)
 		}
-		if r.Action.TierKey == "fast_light_text.open" {
+		if r.Action.TierKey == "llama_server.fast_light_text" {
 			sawConfigured = true
 			if r.Value != "phi4:14b" {
 				t.Errorf("configured slot value = %q", r.Value)
 			}
 		}
-		if r.Action.TierKey == "everyday.cloud" {
+		if r.Action.TierKey == "llama_server.most_capable" {
 			sawEmpty = true
 			if r.Value != "—" {
 				t.Errorf("empty slot should render a dash, got %q", r.Value)
@@ -52,12 +49,12 @@ func TestTierRows(t *testing.T) {
 	}
 }
 
-// TestTierPickerRows pins the picker candidates per slot kind: provider
-// choices for default_provider; installed runtime models plus a clear row for
-// .open slots; the current value is hinted.
+// TestTierPickerRows pins the picker candidates for an open slot: installed
+// runtime models plus a clear row, with the current value hinted.
 func TestTierPickerRows(t *testing.T) {
 	cfg := &agentclient.Config{
-		ModelTiers: map[string]string{"fast_light_text.open": "phi4:14b"},
+		OpenRuntime: "llama_server",
+		ModelTiers:  map[string]string{"llama_server.fast_light_text": "phi4:14b"},
 	}
 	status := &agentclient.RuntimeStatus{
 		Models: []agentclient.RuntimeModel{
@@ -66,12 +63,7 @@ func TestTierPickerRows(t *testing.T) {
 		},
 	}
 
-	rows := tierPickerRows("default_provider", cfg, status)
-	if len(rows) != 2 || rows[0].Key != "cloud" || rows[1].Key != "open" {
-		t.Fatalf("default_provider rows = %+v", rows)
-	}
-
-	rows = tierPickerRows("fast_light_text.open", cfg, status)
+	rows := tierPickerRows("llama_server.fast_light_text", cfg, status)
 	var keys []string
 	var currentHinted bool
 	for _, r := range rows {

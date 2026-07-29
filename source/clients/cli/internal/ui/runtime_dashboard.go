@@ -331,8 +331,18 @@ func (d *runtimeDashboard) fullContent() (string, int) {
 	// recomputed from countLines(parts) each iteration — so rendering it first
 	// keeps the flat action cursor mapping correct.
 	var parts []string
+	sections := d.actionSections()
 	if d.mode != dashboardModeRuntime {
 		parts = append(parts, d.renderConfigBlocks(), d.renderRuntimeStatusBlock())
+		// In Models mode, model tiers are the third visible section — after
+		// local config and runtime status, before the bulky download catalog.
+		// It is still an action section, so render it with the same ordinal /
+		// blockStartLine machinery as the later action blocks.
+		if len(sections) > 0 {
+			d.blockStartLine = countLines(parts)
+			parts = append(parts, sections[0].render())
+			sections = sections[1:]
+		}
 		parts = append(parts, d.renderCatalogBlock(d.catalogRowBudget()))
 	}
 	// Action blocks render one at a time so renderActionBlock can
@@ -340,9 +350,9 @@ func (d *runtimeDashboard) fullContent() (string, int) {
 	// the renderers here and operationRows' cursor space come from
 	// actionSections(), so the flat cursor index maps to the right block
 	// by construction.
-	for _, render := range d.actionBlocks() {
+	for _, section := range sections {
 		d.blockStartLine = countLines(parts)
-		parts = append(parts, render())
+		parts = append(parts, section.render())
 	}
 	if d.mode == dashboardModeRuntime {
 		parts = append(parts, d.renderConfigBlocks(), d.renderRuntimeStatusBlock())
@@ -1447,7 +1457,8 @@ func actionColumnWidths(width int) (labelW, valueW, hintW int) {
 // operationRows' flat cursor space, sectionStarts' tab navigation, and the
 // Enter dispatch — derives from this list, so the block set and cursor mapping
 // can never drift apart. Runtime mode shows only the runtime picker; Models
-// mode shows the download / installed / processes / tiers blocks.
+// mode shows tiers / downloads / installed / processes. The catalog block is
+// non-action content rendered after tiers.
 func (d *runtimeDashboard) actionSections() []actionSection {
 	if d.mode == dashboardModeRuntime {
 		return []actionSection{
@@ -1457,12 +1468,12 @@ func (d *runtimeDashboard) actionSections() []actionSection {
 		}
 	}
 	return []actionSection{
-		{render: d.renderDownloadsBlock, rows: d.downloadRows},
-		{render: d.renderInstalledModelsBlock, rows: d.installedModelRows},
-		{render: d.renderProcessesBlock, rows: d.processRows},
 		{render: d.renderTiersBlock, rows: func() []runtimeDashboardActionRow {
 			return tierRows(d.snapshot.Config)
 		}},
+		{render: d.renderDownloadsBlock, rows: d.downloadRows},
+		{render: d.renderInstalledModelsBlock, rows: d.installedModelRows},
+		{render: d.renderProcessesBlock, rows: d.processRows},
 	}
 }
 

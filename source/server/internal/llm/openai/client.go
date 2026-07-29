@@ -21,9 +21,10 @@ type Config struct {
 
 // Client implements inference.Provider using the OpenAI chat completions API.
 type Client struct {
-	api    *goopenai.Client
-	model  string
-	quirks Quirks
+	api     *goopenai.Client
+	model   string
+	backend string
+	quirks  Quirks
 }
 
 // NewClient constructs a Client from cfg. The HTTP transport is wrapped in a
@@ -37,7 +38,7 @@ func NewClient(cfg Config) *Client {
 	}
 	q := quirksFor(cfg.Backend)
 	c.HTTPClient = &normalizingDoer{next: &http.Client{}, quirks: q}
-	return &Client{api: goopenai.NewClientWithConfig(c), model: cfg.Model, quirks: q}
+	return &Client{api: goopenai.NewClientWithConfig(c), model: cfg.Model, backend: cfg.Backend, quirks: q}
 }
 
 // resolveImageURLs replaces URL image blocks with inline base64, so backends
@@ -83,6 +84,8 @@ func (c *Client) Capabilities() inference.Capabilities {
 	}
 }
 
+const explicitZeroTemperatureSentinel = -999999.0
+
 func (c *Client) buildRequest(req llm.ChatRequest, stream bool) goopenai.ChatCompletionRequest {
 	r := goopenai.ChatCompletionRequest{
 		Model:    modelOr(c.model, req.Model),
@@ -97,6 +100,18 @@ func (c *Client) buildRequest(req llm.ChatRequest, stream bool) goopenai.ChatCom
 	}
 	if req.MaxTokens > 0 {
 		r.MaxTokens = req.MaxTokens
+	}
+	if req.Temperature != nil {
+		if *req.Temperature == 0 {
+			// go-openai models Temperature as a non-pointer float32 with
+			// omitempty, so assigning 0 would be omitted and local tool use
+			// would fall back to the runtime's high/default sampling. Encode a
+			// private sentinel and let normalizingDoer rewrite it to literal 0
+			// just before the request leaves this process.
+			r.Temperature = explicitZeroTemperatureSentinel
+		} else {
+			r.Temperature = float32(*req.Temperature)
+		}
 	}
 	return r
 }

@@ -49,7 +49,9 @@
       "family": "glm",
       "size_bytes": 72975748384,
       "supports_tools": true,
-      "supports_embed": false
+      "supports_embed": false,
+      "plain_chat_ok": false,
+      "status": "broken"
     },
     "phi-4-mini-instruct-q4_k_m": {
       "id": "phi-4-mini-instruct-q4_k_m",
@@ -99,7 +101,7 @@
       "embedding": "nomic-embed-text-v1.5-f16"
     },
     "128": {
-      "most_capable": "glm-4.5-air-q4_k_m",
+      "most_capable": "qwen3-30b-a3b-thinking-2507-q4_k_m",
       "everyday": "qwen3-30b-a3b-instruct-2507-q4_k_m",
       "fast_light": "qwen3-30b-a3b-instruct-2507-q4_k_m",
       "fast_light_text": "qwen3-30b-a3b-instruct-2507-q4_k_m",

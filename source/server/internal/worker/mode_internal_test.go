@@ -42,7 +42,7 @@ func TestBuildDeps_PermissionModeMatchesHost(t *testing.T) {
 		deps, err := ws.buildDeps(context.Background(), &proto.StartTurn{
 			Config:         &proto.ConfigSnapshot{},
 			PermissionMode: tc.in,
-		}, nil, nil, nil)
+		}, nil, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("buildDeps(mode=%q): %v", tc.in, err)
 		}

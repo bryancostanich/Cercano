@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"strings"
 	"testing"
 
 	"cercano/source/server/internal/agent"
@@ -10,6 +11,34 @@ import (
 // child-tab "loading..." bug: a tool_use_stop LoopEvent carries its args in
 // ArgsJSON (not Summary), and formatSubagentLoopEvent must forward that raw
 // JSON so the runner can summarize it into the sub-agent tab's args line.
+func TestBuildSubagentSystemPrompt_IsLeanAndBounded(t *testing.T) {
+	prompt := buildSubagentSystemPrompt("/repo", []string{"Read", "Grep"})
+	for _, want := range []string{
+		"bounded Cercano sub-agent",
+		"Working directory: /repo",
+		"Use only the tools provided",
+		"If the answer depends on repository contents",
+		"- Read\n",
+		"- Grep\n",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"Delegate mechanical, well-specified work",
+		"call the dispatch tool",
+		"Before running git plumbing",
+		"suggest_plan",
+		"checkpoint tool",
+		"planning mode",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("prompt contains main-agent instruction %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
 func TestFormatSubagentLoopEvent_ToolUseStopCarriesArgs(t *testing.T) {
 	ev := agent.LoopEvent{
 		Kind:      agent.LoopToolUseStop,

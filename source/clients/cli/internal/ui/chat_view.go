@@ -18,6 +18,15 @@ import (
 	"cercano/source/server/pkg/agentclient"
 )
 
+// staleStreamThreshold is how long a streaming assistant text entry may go
+// without a new token before IsBetweenPhases treats it as quiescent and lets
+// the trailing "still working" line appear beneath it. On a healthy fast
+// stream tokens arrive well inside this window, so the line never shows; it
+// only surfaces once the model stalls between a finished prose segment and its
+// next action (e.g. parsing the next tool_use). Tuned to sit above natural
+// inter-token pauses but low enough that a stall doesn't read as frozen.
+const staleStreamThreshold = 500 * time.Millisecond
+
 // turnStatus holds the live streaming telemetry that renderEntry needs while a
 // turn is in-flight. Grouped here so chatView can own it rather than Model.
 type turnStatus struct {
@@ -108,13 +117,20 @@ type chatView struct {
 	// can compute the correct resize anchor before calling SetHeight.
 	vpH int
 
-	turn turnStatus
+	turn     turnStatus
+	animTime time.Time
 	// streaming mirrors the host's m.streaming so the chat can render a
 	// trailing "still working" indicator between the moment the assistant
 	// finishes writing/tool-running and the moment the next event arrives.
 	// Without this, multi-step turns go dark visually once the first phase
 	// completes.
-	streaming         bool
+	streaming bool
+	// lastTokenAt is the wall-clock time the most recent assistant text token
+	// arrived. IsBetweenPhases uses it to detect a streaming text entry that has
+	// gone quiet — the model finished a prose segment and is now off doing work
+	// (parsing the next tool_use, or stalled mid-turn) with no tokens flowing.
+	// Zero means no token has arrived this turn.
+	lastTokenAt       time.Time
 	selection         textSelection
 	scrollbarDragging bool
 
@@ -440,6 +456,9 @@ func (c *chatView) Apply(msg tea.Msg) tea.Cmd {
 			c.foldPendingCensor()
 		}
 		e.Content += m.token
+		// Stamp token arrival so IsBetweenPhases can tell a live stream from one
+		// that has gone quiet mid-turn.
+		c.lastTokenAt = time.Now()
 		// Once real tokens arrive, the pre-stream progress note is no longer
 		// relevant; clear so the renderer drops it.
 		e.Status = ""
@@ -770,6 +789,17 @@ func (c *chatView) SetTurnStatus(ts turnStatus) {
 	c.turn = ts
 }
 
+func (c *chatView) animationTime() time.Time {
+	if !c.animTime.IsZero() {
+		return c.animTime
+	}
+	return time.Now()
+}
+
+func (c *chatView) SetAnimationTime(t time.Time) {
+	c.animTime = t
+}
+
 // SetStreaming mirrors the host's m.streaming so the chat can render a
 // trailing "still working" indicator while waiting between phases of a
 // multi-step turn. The model toggles this true on Submit and false on
@@ -777,6 +807,12 @@ func (c *chatView) SetTurnStatus(ts turnStatus) {
 func (c *chatView) SetStreaming(s bool) {
 	if s && !c.streaming && c.turn.start.IsZero() {
 		c.turn.start = time.Now()
+	}
+	if s && !c.streaming {
+		// New turn: clear any leftover token timestamp so a stale value from the
+		// previous turn can't make this turn's opening (still tokenless) stream
+		// read as quiescent before its first token lands.
+		c.lastTokenAt = time.Time{}
 	}
 	c.streaming = s
 }
@@ -805,7 +841,20 @@ func (c *chatView) IsBetweenPhases() bool {
 		return false
 	}
 	if e := c.streamingTextEntry(); e != nil {
-		return false
+		// An empty streaming entry is the pre-text placeholder — that's its own
+		// loud indicator, so not "between phases".
+		if e.Content == "" {
+			return false
+		}
+		// A streaming entry with content that is still receiving tokens is a
+		// live stream; the prose itself is the visible activity. Only once it
+		// has gone quiet past the threshold — the model finished a segment and
+		// is off doing work with nothing flowing — does the trailing line take
+		// over. lastTokenAt is zero only before the first token, which the
+		// empty-content case above already handles.
+		if c.animationTime().Sub(c.lastTokenAt) < staleStreamThreshold {
+			return false
+		}
 	}
 	// There has to be at least one entry — fresh-prompt placeholder ALSO
 	// counts as "between phases" but is already its own loud indicator,
@@ -825,8 +874,9 @@ func (c *chatView) renderTrailingActivity(textW int) string {
 	if activity == "" {
 		activity = "thinking"
 	}
-	line := turnStatusLine(activity, time.Since(c.turn.start), c.turn.tokOut, c.turn.model, c.turn.cloud)
-	return animateSpinnerGlyph() + " " + animateLimeSweep(line)
+	t := c.animationTime()
+	line := turnStatusLine(activity, t.Sub(c.turn.start), c.turn.tokOut, c.turn.model, c.turn.cloud)
+	return animateSpinnerGlyphAt(t) + " " + animateLimeSweepAt(line, t)
 }
 
 // ── scroll surface ─────────────────────────────────────────────────────────
@@ -1151,8 +1201,9 @@ func (c *chatView) renderEntry(e *Entry, idx int) string {
 			if activity == "" {
 				activity = "thinking"
 			}
-			line := turnStatusLine(activity, time.Since(c.turn.start), c.turn.tokOut, c.turn.model, c.turn.cloud)
-			content := animateSpinnerGlyph() + " " + animateLimeSweep(line)
+			t := c.animationTime()
+			line := turnStatusLine(activity, t.Sub(c.turn.start), c.turn.tokOut, c.turn.model, c.turn.cloud)
+			content := animateSpinnerGlyphAt(t) + " " + animateLimeSweepAt(line, t)
 			return indentBlock(pad, content)
 		}
 		rendered := c.renderAssistantMarkdown(e, textW)

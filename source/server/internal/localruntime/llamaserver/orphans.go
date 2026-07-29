@@ -260,7 +260,7 @@ func (p *Provider) liveSiblingFor(ctx context.Context, modelPath, binary string,
 			if server.Port <= 0 {
 				continue
 			}
-			endpoint := fmt.Sprintf("http://%s:%d", healthHost(p.cfg.Host), server.Port)
+			endpoint := fmt.Sprintf("http://%s:%d", healthHost(p.snapshot().Host), server.Port)
 			probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 			err := p.probeEndpoint(probeCtx, endpoint)
 			cancel()

@@ -67,6 +67,62 @@ func TestKeepLastN_StubsOldestPreservesNewest(t *testing.T) {
 	}
 }
 
+func TestKeepLastN_StubsHugeNewestResult(t *testing.T) {
+	huge := strings.Repeat("x", DefaultLossyElisionMaxResultChars+1)
+	msgs := []llm.Message{
+		{Role: llm.RoleAssistant, Blocks: []llm.Block{toolUse("u1", "grep", `{"pattern":"x"}`)}},
+		{Role: llm.RoleUser, Blocks: []llm.Block{toolResult("u1", huge)}},
+	}
+
+	out, stubbed := KeepLastNToolResults(msgs, 1)
+	if stubbed != 1 {
+		t.Fatalf("expected huge newest result to be stubbed, got %d", stubbed)
+	}
+	got := out[1].Blocks[0].Content
+	if strings.Contains(got, huge[:128]) {
+		t.Fatal("huge result content should not survive in send view")
+	}
+	if !strings.Contains(got, "[elided: tool result") {
+		t.Fatalf("expected elision marker, got %q", got)
+	}
+	if !llm.IsValidPairing(out) {
+		t.Error("elision must preserve pairing validity")
+	}
+}
+
+func TestKeepLastN_EnforcesTotalResultBudgetNewestFirst(t *testing.T) {
+	chunk := strings.Repeat("x", DefaultLossyElisionMaxResultChars-1)
+	msgs := []llm.Message{}
+	for i := 0; i < 5; i++ {
+		id := string(rune('a' + i))
+		msgs = append(msgs,
+			llm.Message{Role: llm.RoleAssistant, Blocks: []llm.Block{toolUse(id, "read", `{"path":"`+id+`.go"}`)}},
+			llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{toolResult(id, id+chunk)}},
+		)
+	}
+
+	out, stubbed := KeepLastNToolResults(msgs, 5)
+	// Four 16 KiB-ish results fit; the fifth would exceed the 64 KiB budget.
+	if stubbed != 1 {
+		t.Fatalf("expected oldest budget-overflow result to be stubbed, got %d", stubbed)
+	}
+	flat := ""
+	for _, m := range out {
+		for _, b := range m.Blocks {
+			flat += b.Content
+		}
+	}
+	if strings.Contains(flat, "a"+chunk) {
+		t.Fatal("oldest result should be stubbed when total budget is exhausted")
+	}
+	if !strings.Contains(flat, "e"+chunk) {
+		t.Fatal("newest result should be kept within the total budget")
+	}
+	if !llm.IsValidPairing(out) {
+		t.Error("elision must preserve pairing validity")
+	}
+}
+
 func TestElide_StubsSupersededDuplicateReads(t *testing.T) {
 	msgs := []llm.Message{
 		{Role: llm.RoleAssistant, Blocks: []llm.Block{toolUse("u1", "read", `{"path":"a.go"}`)}},

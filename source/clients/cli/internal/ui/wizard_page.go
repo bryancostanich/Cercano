@@ -54,8 +54,8 @@ type wizardPage struct {
 	// commitKeyFn mirrors applyFn: test indirection over the concrete gRPC
 	// client.
 	commitKeyFn func(key string) error
-	recs             config.TierRecommendations
-	recsOK           bool
+	recs        config.TierRecommendations
+	recsOK      bool
 	// catalog is the runtime model catalog fetched from the agent once at
 	// construction (ListRuntimeModels). The open tier picks are autofilled and
 	// displayed from its RAM-tiered RecommendedOpenModels, so every open
@@ -280,15 +280,15 @@ func (wp *wizardPage) startKeyEntry() tea.Cmd {
 }
 
 // wizardFinishUpdate builds the finish step's first config patch: locus mode,
-// default provider, and — on the cloud path — the everyday-cloud tier pick as
-// CloudModel, which UpdateConfig writes into the active profile and rebuilds.
-// The profile model is what actually serves main-chat requests, so the
-// "everyday workhorse" answer must land there, not only in the tier taxonomy.
+// and — on the cloud path — the everyday-cloud tier pick as CloudModel, which
+// UpdateConfig writes into the active profile and rebuilds. The profile model
+// is what actually serves main-chat requests, so the "everyday workhorse"
+// answer must land there, not only in the tier taxonomy.
+func wizardOpenTierKey(t config.Tier) string { return "llama_server." + string(t) }
+
 func wizardFinishUpdate(st wizard.State) agentclient.ConfigUpdate {
 	u := agentclient.ConfigUpdate{
-		LocusMode:      st.LocusMode,
-		ModelTierKey:   "default_provider",
-		ModelTierValue: st.DefaultProvider(),
+		LocusMode: st.LocusMode,
 	}
 	if st.CloudProvider != "" {
 		u.CloudModel = st.TierPicks["everyday."+wizard.SideCloud]
@@ -319,6 +319,11 @@ func (wp *wizardPage) applyConfig() error {
 	}
 	keys := make([]string, 0, len(wp.state.TierPicks))
 	for k := range wp.state.TierPicks {
+		// Cloud picks are internal to the wizard and applied through CloudModel
+		// in wizardFinishUpdate, not as model-tier sparse patches.
+		if strings.HasSuffix(k, "."+wizard.SideCloud) {
+			continue
+		}
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
@@ -385,7 +390,7 @@ func (wp *wizardPage) rows() []wizardRow {
 		// here — this screen is the open set.
 		rows := make([]wizardRow, 0, len(wizardTierOrder)+2)
 		for _, t := range wizardTierOrder {
-			key := string(t) + "." + wizard.SideOpen
+			key := wizardOpenTierKey(t)
 			pick := normalizeModelLabel(wp.state.TierPicks[key])
 			if pick == "" {
 				pick = "—"
@@ -396,7 +401,7 @@ func (wp *wizardPage) rows() []wizardRow {
 				Annotation: pick,
 			})
 		}
-		embKey := "embedding." + wizard.SideOpen
+		embKey := wizardOpenTierKey(config.TierEmbedding)
 		embPick := normalizeModelLabel(wp.state.TierPicks[embKey])
 		if embPick == "" {
 			embPick = "—"
@@ -408,16 +413,6 @@ func (wp *wizardPage) rows() []wizardRow {
 		return []wizardRow{{Key: "finish", Label: "finish", Annotation: "apply these settings and close"}}
 	}
 	return nil
-}
-
-// tierSides lists which taxonomy sides the wizard fills: the open side
-// always (every locus mode but cloud_only touches it), the cloud side only
-// when a cloud provider was configured.
-func (wp *wizardPage) tierSides() []string {
-	if wp.state.CloudProvider != "" {
-		return []string{wizard.SideCloud, wizard.SideOpen}
-	}
-	return []string{wizard.SideOpen}
 }
 
 // wizardAuthRows is the design doc's auth matrix for one provider.
@@ -468,7 +463,7 @@ func (wp *wizardPage) autofillTiers() {
 				}
 			}
 		}
-		key := string(t) + "." + wizard.SideOpen
+		key := wizardOpenTierKey(t)
 		if wp.catalogOK {
 			// Prefer the RAM-tiered curated recommendation: a gate-verified model
 			// that fits this machine. Store its display name (the open-slot
@@ -494,7 +489,7 @@ func (wp *wizardPage) autofillTiers() {
 	// catalog recommendation used for the capability tiers above. Without this
 	// the embedding row shows "—".
 	if wp.catalogOK {
-		embKey := string(config.TierEmbedding) + "." + wizard.SideOpen
+		embKey := wizardOpenTierKey(config.TierEmbedding)
 		if id, ok := wp.catalog.RecommendedOpenModels[string(config.TierEmbedding)]; ok {
 			label := openModelDisplay(wp.catalog, id)
 			if shouldRefill(wp.state.TierPicks[embKey], []string{label}) {
@@ -845,11 +840,15 @@ func (wp *wizardPage) summary() string {
 		fmt.Fprintf(&b, "  cloud:    %s (%s)%s\n", wp.state.CloudProvider, wp.state.AuthMethod, note)
 	}
 	for _, t := range wizardTierOrder {
-		for _, side := range wp.tierSides() {
-			key := string(t) + "." + side
+		if wp.state.CloudProvider != "" {
+			key := string(t) + "." + wizard.SideCloud
 			if pick := wp.state.TierPicks[key]; pick != "" {
 				fmt.Fprintf(&b, "  %-24s %s\n", key+":", pick)
 			}
+		}
+		key := wizardOpenTierKey(t)
+		if pick := wp.state.TierPicks[key]; pick != "" {
+			fmt.Fprintf(&b, "  %-24s %s\n", key+":", pick)
 		}
 	}
 	if wizard.ModeUsesOpen(wp.state.LocusMode) {
@@ -895,20 +894,18 @@ func (wp *wizardPage) openTierPicker(slotKey string) {
 	wp.picker = &picker
 }
 
-// tierPickerCandidates lists a slot's options: the shipped recommendations
-// first, then live entries (installed runtime models for .open slots, the
-// active profile's catalog for .cloud slots — best-effort, the wizard often
-// runs before any credentials exist), then the clear row.
+// tierPickerCandidates lists an open slot's options: shipped recommendations
+// first, then live installed runtime models, then the clear row. Cloud is not a
+// model-tier slot; the wizard configures cloud through profile/provider fields.
 func (wp *wizardPage) tierPickerCandidates(slotKey string) []overlay.Row {
-	tierName, _, _ := strings.Cut(slotKey, ".")
-	current := wp.state.TierPicks[slotKey]
-	side := config.ProviderOpen
-	if isCloudTierKey(slotKey) {
-		side = config.ProviderCloud
+	_, tierName, ok := strings.Cut(slotKey, ".")
+	if !ok {
+		tierName = slotKey
 	}
+	current := wp.state.TierPicks[slotKey]
 	var rows []overlay.Row
 	seen := map[string]bool{}
-	if side == config.ProviderOpen && wp.catalogOK {
+	if wp.catalogOK {
 		// Open candidates are the gate-verified curated chat models; the
 		// RAM-tiered pick for this tier is flagged recommended.
 		recommended := ""
@@ -937,7 +934,7 @@ func (wp *wizardPage) tierPickerCandidates(slotKey string) []overlay.Row {
 			seen[name] = true
 		}
 	} else {
-		for _, m := range wp.recs.Candidates(side, wp.state.CloudProvider, config.Tier(tierName)) {
+		for _, m := range wp.recs.Candidates(config.ProviderOpen, "", config.Tier(tierName)) {
 			rows = append(rows, overlay.Row{
 				Key:      m,
 				Label:    normalizeModelLabel(m),
@@ -950,41 +947,25 @@ func (wp *wizardPage) tierPickerCandidates(slotKey string) []overlay.Row {
 	if wp.agent != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		if side == config.ProviderOpen {
-			if status, err := wp.agent.GetRuntimeStatus(ctx); err == nil {
-				for _, m := range downloadedRuntimeModels(runtimeStatusModels(status)) {
-					// Commit the human-readable name, not the hash ID —
-					// same rule as tierPickerRows. Legacy picks may hold
-					// an ID, so selection checks both.
-					name := firstNonEmpty(m.DisplayName, m.ID)
-					if seen[m.ID] || seen[name] {
-						continue
-					}
-					rows = append(rows, overlay.Row{
-						Key:      name,
-						Label:    normalizeModelLabel(name),
-						Value:    firstNonEmpty(m.Runtime, "llama-server"),
-						Selected: name == current || m.ID == current,
-					})
-					seen[name] = true
+		if status, err := wp.agent.GetRuntimeStatus(ctx); err == nil {
+			for _, m := range downloadedRuntimeModels(runtimeStatusModels(status)) {
+				// Commit the human-readable name, not the hash ID —
+				// same rule as tierPickerRows. Legacy picks may hold
+				// an ID, so selection checks both.
+				name := firstNonEmpty(m.DisplayName, m.ID)
+				if seen[m.ID] || seen[name] {
+					continue
 				}
-			}
-		} else if _, active, err := wp.agent.GetCloudProfiles(ctx); err == nil && active != "" {
-			if models, _, err := wp.agent.ListCloudProfileModels(ctx, active); err == nil {
-				for _, m := range models {
-					if seen[m.ID] {
-						continue
-					}
-					rows = append(rows, overlay.Row{
-						Key:      m.ID,
-						Label:    normalizeModelLabel(firstNonEmpty(m.DisplayName, m.ID)),
-						Value:    m.ID,
-						Selected: m.ID == current,
-					})
-					seen[m.ID] = true
-				}
+				rows = append(rows, overlay.Row{
+					Key:      name,
+					Label:    normalizeModelLabel(name),
+					Value:    firstNonEmpty(m.Runtime, "llama-server"),
+					Selected: name == current || m.ID == current,
+				})
+				seen[name] = true
 			}
 		}
+
 	}
 	rows = append(rows, overlay.Row{Key: "-", Label: "clear", Value: "unset this slot", Selected: current == ""})
 	return rows
@@ -1152,7 +1133,7 @@ func (wp *wizardPage) enrollOpenDownloads(ctx context.Context) {
 	}
 	seen := map[string]bool{}
 	for _, t := range wizardTierOrder {
-		pick := wp.state.TierPicks[string(t)+"."+wizard.SideOpen]
+		pick := wp.state.TierPicks[wizardOpenTierKey(t)]
 		if pick == "" {
 			continue
 		}

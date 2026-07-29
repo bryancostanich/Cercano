@@ -12,16 +12,17 @@ const (
 	configTabCloud                    // cloud-profiles editor (settings form, cloud section)
 	configTabRuntime                  // runtime + open-model picker (dashboard, runtime mode)
 	configTabModels                   // the runtime dashboard (local model management)
+	configTabMcp                      // hosted MCP servers (dashboard + add-server popover)
 	configTabUI                       // theme + accent color (settings form)
 	configTabContext                  // read-only context viewer for the active conversation
 )
 
 // configTabLabels are the visible tab titles, indexed by configTab.
-var configTabLabels = []string{"General", "Cloud", "Runtime", "Models", "UI", "Context"}
+var configTabLabels = []string{"General", "Cloud", "Runtime", "Models", "MCP", "UI", "Context"}
 
 // configTabCount is the number of tabs; kept as a named constant so wrap-around
 // navigation and digit-jump bounds stay in one place.
-const configTabCount = 6
+const configTabCount = 7
 
 func (t configTab) label() string {
 	if int(t) < 0 || int(t) >= len(configTabLabels) {

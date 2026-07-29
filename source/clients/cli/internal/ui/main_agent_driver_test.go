@@ -63,6 +63,11 @@ func TestStreamMsgToEvent(t *testing.T) {
 			permissionRequiredMsg{id: "t1", name: "Bash", argsJSON: "{}", tier: "X"},
 		},
 		{
+			"task-change",
+			agentclient.StreamMsg{Type: agentclient.TypeTaskChange, TaskChangeKind: "updated", Task: &agentclient.TaskNode{ID: "task-1", Title: "Do the thing"}},
+			taskChangeMsg{kind: "updated", task: &agentclient.TaskNode{ID: "task-1", Title: "Do the thing"}},
+		},
+		{
 			"error",
 			agentclient.StreamMsg{Type: agentclient.TypeError, Err: bashErr},
 			chatErrorMsg{err: bashErr},

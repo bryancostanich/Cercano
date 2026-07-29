@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -24,7 +25,7 @@ func TestProgressAnimTick_CompactingOnlyDoesNotRefreshViewport(t *testing.T) {
 	}
 }
 
-func TestProgressAnimTick_AnimationOnlyViewportRefreshIsThrottled(t *testing.T) {
+func TestProgressAnimTick_AnimationOnlyViewportRefreshesEveryFrame(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "", Tool: &ToolEntry{ToolName: "research", Status: ToolStatusInProgress}})
@@ -39,15 +40,8 @@ func TestProgressAnimTick_AnimationOnlyViewportRefreshIsThrottled(t *testing.T) 
 	second := first.Add(50 * time.Millisecond)
 	next, _ = m.Update(progressAnimTickMsg(second))
 	m = next.(Model)
-	if !m.lastAnimViewportRefresh.Equal(first) {
-		t.Fatalf("animation-only tick before throttle interval should not refresh viewport; got %v want %v", m.lastAnimViewportRefresh, first)
-	}
-
-	third := first.Add(animationViewportRefreshInterval)
-	next, _ = m.Update(progressAnimTickMsg(third))
-	m = next.(Model)
-	if !m.lastAnimViewportRefresh.Equal(third) {
-		t.Fatalf("animation-only tick after throttle interval should refresh viewport; got %v want %v", m.lastAnimViewportRefresh, third)
+	if !m.lastAnimViewportRefresh.Equal(second) {
+		t.Fatalf("next animation-only tick should refresh viewport; got %v want %v", m.lastAnimViewportRefresh, second)
 	}
 }
 
@@ -67,4 +61,47 @@ func TestProgressAnimTick_ContentDirtyBypassesAnimationThrottle(t *testing.T) {
 	if !m.lastAnimViewportRefresh.IsZero() {
 		t.Fatalf("content repaint should reset animation refresh throttle, got %v", m.lastAnimViewportRefresh)
 	}
+}
+
+func TestThinkingSpinnerAdvancesEveryOtherProgressTick(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.animTickActive = true
+	m.streaming = true
+	m.turnActivity = "thinking"
+	m.turnStart = time.Unix(10, 0)
+	m.turnModel = "local"
+	m.mainChat().SetStreaming(true)
+	m.mainChat().SetEntriesSlice([]*Entry{{Role: RoleAssistant, Streaming: true}})
+	m.refreshViewport()
+
+	base := time.Unix(12, 0)
+	var got []string
+	for i := 0; i < 8; i++ {
+		next, _ := m.Update(progressAnimTickMsg(base.Add(time.Duration(i) * 50 * time.Millisecond)))
+		m = next.(Model)
+		got = append(got, thinkingGlyphFromView(t, m.View().Content))
+	}
+	want := []string{"▌", "▌", "▘", "▘", "▀", "▀", "▝", "▝"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("thinking glyphs = %#v, want %#v", got, want)
+		}
+	}
+}
+
+func thinkingGlyphFromView(t *testing.T, view string) string {
+	t.Helper()
+	out := plain(view)
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "thinking") {
+			fields := strings.Fields(line)
+			if len(fields) > 0 {
+				return fields[0]
+			}
+		}
+	}
+	t.Fatalf("thinking line not found in view:\n%s", out)
+	return ""
 }

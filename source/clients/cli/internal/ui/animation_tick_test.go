@@ -63,7 +63,7 @@ func TestProgressAnimTick_ContentDirtyBypassesAnimationThrottle(t *testing.T) {
 	}
 }
 
-func TestThinkingSpinnerAdvancesEveryProgressTick(t *testing.T) {
+func TestThinkingSpinnerAdvancesEveryOtherProgressTick(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.animTickActive = true
@@ -82,7 +82,7 @@ func TestThinkingSpinnerAdvancesEveryProgressTick(t *testing.T) {
 		m = next.(Model)
 		got = append(got, thinkingGlyphFromView(t, m.View().Content))
 	}
-	want := []string{"▌", "▘", "▀", "▝", "▐", "▗", "▄", "▖"}
+	want := []string{"▌", "▌", "▘", "▘", "▀", "▀", "▝", "▝"}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("thinking glyphs = %#v, want %#v", got, want)

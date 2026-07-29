@@ -3024,7 +3024,7 @@ func closeOpenFence(s string) string {
 // animateSpinnerGlyph renders the spinner symbol with two layered motions:
 //
 //  1. A clockwise block-rotation through 8 half/quarter-block glyphs
-//     (`▌▘▀▝▐▗▄▖`) at 50ms/frame — gives the visual of a square rolling
+//     (`▌▘▀▝▐▗▄▖`) at 100ms/frame — gives the visual of a square rolling
 //     in place. Ties to the wordmark block-letter aesthetic.
 //
 //  2. A sine-modulated brightness pulse (lime → white → lime) at 1.5s cycle,
@@ -3040,7 +3040,7 @@ func animateSpinnerGlyph() string {
 
 func spinnerFrameAt(t time.Time) (string, int) {
 	const frames = "▌▘▀▝▐▗▄▖"
-	const frameMs = 50
+	const frameMs = 100
 	runes := []rune(frames)
 	idx := int(t.UnixMilli()/frameMs) % len(runes)
 	return string(runes[idx]), idx

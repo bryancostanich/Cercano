@@ -767,22 +767,31 @@ func (x *svc) RegenerateContext(req *proto.RegenerateContextRequest, stream prot
 	progress := func(line string) {
 		_ = stream.Send(&proto.RegenerateContextProgress{Line: line})
 	}
+	if req.GetIncremental() {
+		// /compact is a nudge, not a foreground rebuild: enqueue the normal
+		// background compactor and return immediately. The background path runs
+		// bounded passes (persisting after each) and reschedules while backlog
+		// remains, so huge conversations do not depend on one fragile UI stream.
+		x.compactionGen.Schedule(convID)
+		return stream.Send(&proto.RegenerateContextProgress{
+			Done: true,
+			Ok:   true,
+			Line: "context compaction scheduled in background",
+		})
+	}
 	var pre, post int
 	var err error
 	if req.GetClearOnly() {
 		pre, post, err = x.compactionGen.Clear(stream.Context(), convID, progress)
 	} else {
-		pre, post, err = x.compactionGen.Regenerate(stream.Context(), convID, req.GetIncremental(), progress)
+		pre, post, err = x.compactionGen.Regenerate(stream.Context(), convID, false, progress)
 	}
 	if err != nil {
 		return stream.Send(&proto.RegenerateContextProgress{Done: true, Ok: false, Error: err.Error(), PreTokens: int32(pre)})
 	}
 	verb := "rebuilt"
-	switch {
-	case req.GetClearOnly():
+	if req.GetClearOnly() {
 		verb = "cleared — full raw history restored"
-	case req.GetIncremental():
-		verb = "compacted"
 	}
 	return stream.Send(&proto.RegenerateContextProgress{
 		Done:       true,

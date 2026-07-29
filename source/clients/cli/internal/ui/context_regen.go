@@ -63,10 +63,9 @@ func isTransportLoss(err string) bool {
 
 // startContextRegenCmd opens the RegenerateContext streaming RPC for the
 // conversation and drains it one frame per message, mirroring the runtime
-// install pattern. incremental=false is the full /context-regen rebuild;
-// incremental=true is /compact (digest backlog, keep summaries). The work
-// runs server-side to completion regardless of what the UI does with the
-// stream.
+// install pattern. incremental=false is the full /context-regen foreground
+// rebuild; incremental=true is /compact, which now schedules background
+// compaction and returns immediately.
 func startContextRegenCmd(ag *agentclient.Client, convID string, incremental bool) tea.Cmd {
 	first := "rebuilding context from raw turns…"
 	if incremental {

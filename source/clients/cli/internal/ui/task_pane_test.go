@@ -5,11 +5,33 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"cercano/source/server/pkg/agentclient"
 )
+
+func seedTaskPane(m *Model) {
+	m.applyTaskChange("added", &agentclient.TaskNode{ID: "task-1", Title: "Do the thing", Status: "pending"})
+}
+
+func TestTaskPaneHiddenUntilTasksExist(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
+	if got := m.taskPaneWidth(); got != 0 {
+		t.Fatalf("pane should be hidden without tasks, got width %d", got)
+	}
+	if got := m.mainChat().Width(); got != m.width-2 {
+		t.Fatalf("chat width should not reserve a task tab without tasks: got %d want %d", got, m.width-2)
+	}
+	m.toggleTaskPane()
+	if m.taskPane.Expanded {
+		t.Fatal("toggle should be ignored while no tasks exist")
+	}
+}
 
 func TestTaskPaneCollapsedReservesOneColumnWhenWide(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
+	seedTaskPane(&m)
 	if got := m.taskPaneWidth(); got != taskPaneCollapsedWidth {
 		t.Fatalf("collapsed pane width = %d, want %d", got, taskPaneCollapsedWidth)
 	}
@@ -25,6 +47,7 @@ func TestTaskPaneCollapsedReservesOneColumnWhenWide(t *testing.T) {
 func TestTaskPaneUnavailableWhenNarrow(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: taskPaneMinTerminalWidth - 1, Height: 24})
+	seedTaskPane(&m)
 	if m.taskPaneWidth() != 0 {
 		t.Fatalf("pane should be unavailable below min width, got %d", m.taskPaneWidth())
 	}
@@ -36,6 +59,7 @@ func TestTaskPaneUnavailableWhenNarrow(t *testing.T) {
 func TestTaskPaneToggleExpandsAndReclaimsWidth(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
+	seedTaskPane(&m)
 	collapsedChatW := m.mainChat().Width()
 	m.toggleTaskPane()
 	if !m.taskPane.Expanded {
@@ -59,6 +83,7 @@ func TestTaskPaneToggleExpandsAndReclaimsWidth(t *testing.T) {
 func TestTaskPaneRenderShowsCollapsedTabAndExpandedPlaceholder(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	seedTaskPane(&m)
 	collapsed := m.renderTaskPane(taskPaneCollapsedWidth, 8)
 	if !strings.Contains(collapsed, "◀") || !strings.Contains(collapsed, "T") {
 		t.Fatalf("collapsed pane should show arrow/tab label, got %q", collapsed)
@@ -73,11 +98,26 @@ func TestTaskPaneRenderShowsCollapsedTabAndExpandedPlaceholder(t *testing.T) {
 func TestTaskPaneMouseHitToggles(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	seedTaskPane(&m)
 	if !m.taskPaneHit(119, m.scrollbarTop) {
 		t.Fatal("right-edge tab should be hittable")
 	}
 	m = send(t, m, tea.MouseClickMsg{X: 119, Y: m.scrollbarTop, Button: tea.MouseLeft})
 	if !m.taskPane.Expanded {
 		t.Fatal("clicking the right-edge tab should expand the pane")
+	}
+}
+
+func TestTaskPaneRemovalHidesPane(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	seedTaskPane(&m)
+	m.toggleTaskPane()
+	m.applyTaskChange("removed", &agentclient.TaskNode{ID: "task-1", Title: "Do the thing", Status: "pending"})
+	if got := m.taskPaneWidth(); got != 0 {
+		t.Fatalf("pane should hide after last task is removed, got width %d", got)
+	}
+	if m.taskPane.Expanded {
+		t.Fatal("pane should collapse when the last task disappears")
 	}
 }

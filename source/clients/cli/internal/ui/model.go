@@ -1528,6 +1528,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applySubAgentEvent(ev)
 			m.refreshViewport()
 			return m, tea.Batch(msg.next, m.ensureAnimTick())
+		case taskChangeMsg:
+			m.applyTaskChange(ev.kind, ev.task)
+			m.refreshViewport()
+			return m, msg.next
 		case chatDoneMsg:
 			m.applyTurnTelemetry(ev) // footer fields
 			m.mainChat().Apply(ev)   // transcript finalize + notice

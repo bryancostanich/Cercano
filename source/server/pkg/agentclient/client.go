@@ -1662,6 +1662,20 @@ type StreamMsg struct {
 	RolloverReason string // for TypeRolloverOffered — human-readable trigger
 	RawTokens      int64  // for TypeRolloverOffered — cumulative raw tokens at the offer
 	HandoffPreview string // for TypeRolloverOffered — summary + verbatim tail that would seed the new session
+
+	TaskChangeKind string    // for TypeTaskChange ("added" | "updated" | "removed")
+	Task           *TaskNode // for TypeTaskChange
+}
+
+// TaskNode is the client-side mirror of proto.TaskNode. It stays in
+// agentclient so the CLI does not need to import generated proto types.
+type TaskNode struct {
+	ID       string
+	Title    string
+	Status   string
+	Notes    string
+	ParentID string
+	Children []TaskNode
 }
 
 type StreamMsgType int
@@ -1680,6 +1694,7 @@ const (
 	TypeWatchdog
 	TypeSubAgent
 	TypeRolloverOffered
+	TypeTaskChange
 )
 
 func toProtoImages(images []InlineImage) []*proto.InlineImage {
@@ -1813,6 +1828,14 @@ func (c *Client) StreamChat(ctx context.Context, conversationID, input, workDir 
 				out <- streamMsgFromWatchdogEvent(we)
 				continue
 			}
+			if tc := msg.GetTaskChange(); tc != nil {
+				out <- StreamMsg{
+					Type:           TypeTaskChange,
+					TaskChangeKind: tc.GetKind(),
+					Task:           taskNodeFromProto(tc.GetTask()),
+				}
+				continue
+			}
 			if se := msg.GetSubAgentEvent(); se != nil {
 				out <- StreamMsg{
 					Type:             TypeSubAgent,
@@ -1849,6 +1872,26 @@ func streamMsgFromWatchdogEvent(we *proto.WatchdogEvent) StreamMsg {
 		Summary:      we.GetText(),
 		Thread:       we.GetThread(),
 	}
+}
+
+func taskNodeFromProto(n *proto.TaskNode) *TaskNode {
+	if n == nil {
+		return nil
+	}
+	out := &TaskNode{
+		ID:       n.GetId(),
+		Title:    n.GetTitle(),
+		Status:   n.GetStatus(),
+		Notes:    n.GetNotes(),
+		ParentID: n.GetParentId(),
+		Children: make([]TaskNode, 0, len(n.GetChildren())),
+	}
+	for _, child := range n.GetChildren() {
+		if c := taskNodeFromProto(child); c != nil {
+			out.Children = append(out.Children, *c)
+		}
+	}
+	return out
 }
 
 // SetPermissionMode changes the agent's session permission mode.

@@ -115,6 +115,8 @@ func streamMsgToEvent(sm agentclient.StreamMsg) tea.Msg {
 		}
 	case agentclient.TypeSubAgent:
 		return subAgentEventMsgFromStream(sm)
+	case agentclient.TypeTaskChange:
+		return taskChangeMsg{kind: sm.TaskChangeKind, task: sm.Task}
 	case agentclient.TypeError:
 		return chatErrorMsg{err: sm.Err}
 	}

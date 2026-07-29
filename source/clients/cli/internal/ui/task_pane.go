@@ -5,6 +5,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"cercano/source/server/pkg/agentclient"
 )
 
 const (
@@ -20,10 +22,23 @@ const (
 type taskPaneState struct {
 	Expanded bool
 	Width    int // expanded width including the left border; zero -> default
+	Tasks    map[string]taskPaneTask
+}
+
+type taskPaneTask struct {
+	ID       string
+	Title    string
+	Status   string
+	ParentID string
+	Children []string
+}
+
+func (m Model) taskPaneHasTasks() bool {
+	return len(m.taskPane.Tasks) > 0
 }
 
 func (m Model) taskPaneAvailable() bool {
-	return !m.contentPageActive() && m.width >= taskPaneMinTerminalWidth
+	return m.taskPaneHasTasks() && !m.contentPageActive() && m.width >= taskPaneMinTerminalWidth
 }
 
 func (m Model) taskPaneWidth() int {
@@ -56,6 +71,57 @@ func (m *Model) toggleTaskPane() {
 	}
 	m.taskPane.Expanded = !m.taskPane.Expanded
 	m.relayout()
+}
+
+func (m *Model) applyTaskChange(kind string, task *agentclient.TaskNode) {
+	if task == nil || task.ID == "" {
+		return
+	}
+	if m.taskPane.Tasks == nil {
+		m.taskPane.Tasks = make(map[string]taskPaneTask)
+	}
+	if kind == "removed" {
+		removeTaskPaneSubtree(m.taskPane.Tasks, task)
+		if len(m.taskPane.Tasks) == 0 && m.taskPane.Expanded {
+			m.taskPane.Expanded = false
+		}
+		m.relayout()
+		return
+	}
+	upsertTaskPaneSubtree(m.taskPane.Tasks, task)
+	m.relayout()
+}
+
+func upsertTaskPaneSubtree(dst map[string]taskPaneTask, task *agentclient.TaskNode) {
+	if task == nil || task.ID == "" {
+		return
+	}
+	children := make([]string, 0, len(task.Children))
+	for i := range task.Children {
+		child := &task.Children[i]
+		if child.ID == "" {
+			continue
+		}
+		children = append(children, child.ID)
+		upsertTaskPaneSubtree(dst, child)
+	}
+	dst[task.ID] = taskPaneTask{
+		ID:       task.ID,
+		Title:    task.Title,
+		Status:   task.Status,
+		ParentID: task.ParentID,
+		Children: children,
+	}
+}
+
+func removeTaskPaneSubtree(dst map[string]taskPaneTask, task *agentclient.TaskNode) {
+	if task == nil || task.ID == "" {
+		return
+	}
+	for i := range task.Children {
+		removeTaskPaneSubtree(dst, &task.Children[i])
+	}
+	delete(dst, task.ID)
 }
 
 func (m Model) taskPaneHit(x, y int) bool {

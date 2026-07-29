@@ -796,7 +796,7 @@ func progressAnimTick() tea.Cmd {
 	return tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg { return progressAnimTickMsg(t) })
 }
 
-const animationViewportRefreshInterval = 300 * time.Millisecond
+const animationViewportRefreshInterval = 50 * time.Millisecond
 
 func (m *Model) shouldRefreshAnimationViewport(now time.Time) bool {
 	if now.IsZero() {
@@ -2240,6 +2240,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// before returning the next tick — that prevents a second kick
 		// (e.g. from toolEntryStartMsg) from doubling the tick rate.
 		m.animTickActive = false
+		frameTime := time.Time(msg)
+		m.mainChat().SetAnimationTime(frameTime)
+		if av := m.activeChat(); av != nil && av != m.mainChat() {
+			av.SetAnimationTime(frameTime)
+		}
+		if cv, ok := m.content.(*contextView); ok {
+			cv.chat.SetAnimationTime(frameTime)
+		}
 		contentRepaint := false
 		animRepaint := false
 		keep := false
@@ -2296,9 +2304,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if contentRepaint {
 			m.refreshViewport()
 			m.lastAnimViewportRefresh = time.Time{}
-		} else if animRepaint && m.shouldRefreshAnimationViewport(time.Time(msg)) {
+		} else if animRepaint && m.shouldRefreshAnimationViewport(frameTime) {
 			m.refreshViewport()
-			m.lastAnimViewportRefresh = time.Time(msg)
+			m.lastAnimViewportRefresh = frameTime
 		}
 		if keep {
 			m.animTickActive = true
@@ -2368,12 +2376,24 @@ func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model,
 		content = strings.TrimSpace(content)
 		content += fmt.Sprintf("  (%d image%s)", len(images), plural(len(images)))
 	}
+	m.streaming = true
+	m.input.Placeholder = steerInputPlaceholder
+	m.mainChat().SetStreaming(true)
+	m.turnStart = time.Now()
+	m.turnActivity = "thinking"
+	m.turnTokOut = 0
+	m.turnModel = ""
+	m.turnCloud = false
+	m.mainChat().SetAnimationTime(m.turnStart)
 	m.mainChat().AppendEntry(&Entry{Role: RoleUser, Content: content})
 	// Assistant placeholder
 	m.mainChat().AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
 	m.refreshViewport()
 
 	if m.agent == nil {
+		m.streaming = false
+		m.input.Placeholder = defaultInputPlaceholder
+		m.mainChat().SetStreaming(false)
 		m.errMsg = "agent unavailable"
 		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "error: agent unavailable"})
 		m.refreshViewport()
@@ -2394,14 +2414,6 @@ func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model,
 		return m, nil
 	}
 	m.cancelStream = cancel
-	m.streaming = true
-	m.input.Placeholder = steerInputPlaceholder
-	m.mainChat().SetStreaming(true)
-	m.turnStart = time.Now()
-	m.turnActivity = "thinking"
-	m.turnTokOut = 0
-	m.turnModel = ""
-	m.turnCloud = false
 	// Fire both the driver's self-re-arming drain and the progress-text
 	// animator; both re-issue themselves until streaming ends. Mark the
 	// anim loop as running so the tool-start kick path doesn't double-fire it.
@@ -3012,7 +3024,7 @@ func closeOpenFence(s string) string {
 // animateSpinnerGlyph renders the spinner symbol with two layered motions:
 //
 //  1. A clockwise block-rotation through 8 half/quarter-block glyphs
-//     (`▌▘▀▝▐▗▄▖`) at 80ms/frame — gives the visual of a square rolling
+//     (`▌▘▀▝▐▗▄▖`) at 50ms/frame — gives the visual of a square rolling
 //     in place. Ties to the wordmark block-letter aesthetic.
 //
 //  2. A sine-modulated brightness pulse (lime → white → lime) at 1.5s cycle,
@@ -3023,15 +3035,24 @@ func closeOpenFence(s string) string {
 // Both motions are wall-clock-driven so phases stay smooth across status
 // changes; nothing per-entry to track.
 func animateSpinnerGlyph() string {
+	return animateSpinnerGlyphAt(time.Now())
+}
+
+func spinnerFrameAt(t time.Time) (string, int) {
 	const frames = "▌▘▀▝▐▗▄▖"
-	const frameMs = 80
+	const frameMs = 50
+	runes := []rune(frames)
+	idx := int(t.UnixMilli()/frameMs) % len(runes)
+	return string(runes[idx]), idx
+}
+
+func animateSpinnerGlyphAt(t time.Time) string {
 	const pulseCycleMs = 1500
 
-	nowMs := time.Now().UnixMilli()
+	nowMs := t.UnixMilli()
 
 	// Rotation.
-	runes := []rune(frames)
-	glyph := string(runes[int(nowMs/frameMs)%len(runes)])
+	glyph, _ := spinnerFrameAt(t)
 
 	// Brightness pulse — stays in the orange/amber family throughout:
 	// primary amber base lerps to bright amber peak (palette colors), so
@@ -3061,13 +3082,17 @@ func animateSpinnerGlyph() string {
 // derived from wall-clock time so the animation stays smooth regardless of
 // when the status text last changed.
 func animateLimeSweep(text string) string {
+	return animateLimeSweepAt(text, time.Now())
+}
+
+func animateLimeSweepAt(text string, t time.Time) string {
 	const (
 		cycleMs = 1500 // one full sweep duration
 		tail    = 4.0  // half-width of the bright band, in columns
 		padCols = 4.0  // off-screen lead-in / trail-out
 	)
 	// Walk-clock phase, 0..1.
-	phaseMs := time.Now().UnixMilli() % int64(cycleMs)
+	phaseMs := t.UnixMilli() % int64(cycleMs)
 	progress := float64(phaseMs) / float64(cycleMs)
 
 	cols := utf8.RuneCountInString(text)

@@ -108,7 +108,8 @@ type chatView struct {
 	// can compute the correct resize anchor before calling SetHeight.
 	vpH int
 
-	turn turnStatus
+	turn     turnStatus
+	animTime time.Time
 	// streaming mirrors the host's m.streaming so the chat can render a
 	// trailing "still working" indicator between the moment the assistant
 	// finishes writing/tool-running and the moment the next event arrives.
@@ -770,6 +771,17 @@ func (c *chatView) SetTurnStatus(ts turnStatus) {
 	c.turn = ts
 }
 
+func (c *chatView) animationTime() time.Time {
+	if !c.animTime.IsZero() {
+		return c.animTime
+	}
+	return time.Now()
+}
+
+func (c *chatView) SetAnimationTime(t time.Time) {
+	c.animTime = t
+}
+
 // SetStreaming mirrors the host's m.streaming so the chat can render a
 // trailing "still working" indicator while waiting between phases of a
 // multi-step turn. The model toggles this true on Submit and false on
@@ -825,8 +837,9 @@ func (c *chatView) renderTrailingActivity(textW int) string {
 	if activity == "" {
 		activity = "thinking"
 	}
-	line := turnStatusLine(activity, time.Since(c.turn.start), c.turn.tokOut, c.turn.model, c.turn.cloud)
-	return animateSpinnerGlyph() + " " + animateLimeSweep(line)
+	t := c.animationTime()
+	line := turnStatusLine(activity, t.Sub(c.turn.start), c.turn.tokOut, c.turn.model, c.turn.cloud)
+	return animateSpinnerGlyphAt(t) + " " + animateLimeSweepAt(line, t)
 }
 
 // ── scroll surface ─────────────────────────────────────────────────────────
@@ -1151,8 +1164,9 @@ func (c *chatView) renderEntry(e *Entry, idx int) string {
 			if activity == "" {
 				activity = "thinking"
 			}
-			line := turnStatusLine(activity, time.Since(c.turn.start), c.turn.tokOut, c.turn.model, c.turn.cloud)
-			content := animateSpinnerGlyph() + " " + animateLimeSweep(line)
+			t := c.animationTime()
+			line := turnStatusLine(activity, t.Sub(c.turn.start), c.turn.tokOut, c.turn.model, c.turn.cloud)
+			content := animateSpinnerGlyphAt(t) + " " + animateLimeSweepAt(line, t)
 			return indentBlock(pad, content)
 		}
 		rendered := c.renderAssistantMarkdown(e, textW)

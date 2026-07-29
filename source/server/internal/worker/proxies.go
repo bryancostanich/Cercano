@@ -152,6 +152,72 @@ func (p *streamPermissionRequester) deliver(resp *proto.PermissionResponse) {
 	ch <- permResult{allow: resp.GetAllow(), err: err, message: resp.GetMessage()}
 }
 
+// ─── streamSessionProfileController ──────────────────────────────────────────
+
+// streamSessionProfileController round-trips session profile changes to the
+// host. The worker must not mutate a local profile broker: planning-mode entry
+// changes the live host session and therefore the next turn's tool fence.
+type streamSessionProfileController struct {
+	sndr    *sender
+	nextID  atomic.Uint64
+	mu      sync.Mutex
+	pending map[uint64]chan profileResult
+}
+
+type profileResult struct {
+	err error
+}
+
+func newStreamSessionProfileController(sndr *sender) *streamSessionProfileController {
+	return &streamSessionProfileController{
+		sndr:    sndr,
+		pending: make(map[uint64]chan profileResult),
+	}
+}
+
+func (p *streamSessionProfileController) SetProfile(ctx context.Context, name string) error {
+	id := p.nextID.Add(1)
+	ch := make(chan profileResult, 1)
+
+	p.mu.Lock()
+	p.pending[id] = ch
+	p.mu.Unlock()
+
+	defer func() {
+		p.mu.Lock()
+		delete(p.pending, id)
+		p.mu.Unlock()
+	}()
+
+	p.sndr.send(&proto.WorkerToHost{Msg: &proto.WorkerToHost_ProfileRequest{ProfileRequest: &proto.SessionProfileRequest{
+		Id:   id,
+		Name: name,
+	}}})
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case r := <-ch:
+		return r.err
+	}
+}
+
+func (p *streamSessionProfileController) deliver(resp *proto.SessionProfileResponse) {
+	p.mu.Lock()
+	ch, ok := p.pending[resp.GetId()]
+	p.mu.Unlock()
+	if !ok {
+		return
+	}
+	var err error
+	if e := resp.GetError(); e != "" {
+		err = fmt.Errorf("%s", e)
+	} else if !resp.GetOk() {
+		err = fmt.Errorf("session profile switch was rejected")
+	}
+	ch <- profileResult{err: err}
+}
+
 // ─── streamCredentialSource ───────────────────────────────────────────────────
 
 // streamCredentialSource round-trips CredentialRequest↔CredentialResponse over

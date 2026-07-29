@@ -95,6 +95,10 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 	// can wire it, same as credSource.
 	subPersist := &streamSubagentPersist{sndr: sndr, gen: start.GetGen()}
 
+	// Session profile proxy: session-control capabilities such as suggest_plan
+	// must mutate the host's live profile broker, not a worker-local copy.
+	profileCtl := newStreamSessionProfileController(sndr)
+
 	// Recv loop: routes incoming HostToWorker messages from the host.
 	recvDone := make(chan struct{})
 	go func() {
@@ -111,6 +115,8 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 				credSource.deliver(msg.GetCredResponse())
 			case msg.GetOpenEvent() != nil:
 				openProxy.deliver(msg.GetOpenEvent())
+			case msg.GetProfileResponse() != nil:
+				profileCtl.deliver(msg.GetProfileResponse())
 			case msg.GetCancel() != nil:
 				cancel()
 				return
@@ -119,7 +125,7 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 	}()
 
 	// Build Deps from StartTurn.
-	deps, buildErr := w.buildDeps(ctx, start, credSource, openProxy, subPersist)
+	deps, buildErr := w.buildDeps(ctx, start, credSource, openProxy, subPersist, profileCtl)
 	if buildErr != nil {
 		sndr.close()
 		cancel() // returning finalizes the stream; the recv goroutine unwinds on the Recv error
@@ -218,7 +224,7 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 
 // ─── buildDeps ────────────────────────────────────────────────────────────────
 
-func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, credSource *streamCredentialSource, openProxy *streamOpenProvider, subPersist *streamSubagentPersist) (runner.Deps, error) {
+func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, credSource *streamCredentialSource, openProxy *streamOpenProvider, subPersist *streamSubagentPersist, profileCtl *streamSessionProfileController) (runner.Deps, error) {
 	// Build config from snapshot.
 	cfg := ConfigFromSnapshot(start.GetConfig())
 	cfgService := cfgsvc.New("", cfg, secrets.NewMemory())
@@ -280,7 +286,7 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 			return runner.Deps{}, fmt.Errorf("build tools: %w", err)
 		}
 	} else {
-		toolSvc = buildWorkerToolSvc(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist)
+		toolSvc = buildWorkerToolSvc(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile)
 	}
 
 	// Build the protocol-supervision watchdog from the snapshotted config

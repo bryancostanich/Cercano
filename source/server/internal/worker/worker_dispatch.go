@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/dispatch"
@@ -44,6 +45,7 @@ func buildWorkerToolSvc(
 	cloud, open inference.Provider,
 	cfg pkgcfg.Config,
 	subPersist *streamSubagentPersist,
+	enterProfile func(context.Context, string) error,
 ) runner.ToolSvc {
 	systemPrompt := func(workDir string) string {
 		return runner.BuildSystemPrompt(runner.Deps{Persist: workerCtxHistory{loader: ctxLoader}}, workDir)
@@ -58,6 +60,12 @@ func buildWorkerToolSvc(
 		Open:      open,
 		Config:    &cfg,
 		CtxLoader: ctxLoader,
+		EnterProfile: func(name string) error {
+			if enterProfile == nil {
+				return fmt.Errorf("session profile control not configured")
+			}
+			return enterProfile(context.Background(), name)
+		},
 	})
 	return svc
 }

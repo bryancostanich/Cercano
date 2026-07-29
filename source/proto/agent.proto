@@ -1401,25 +1401,27 @@ service Worker {
 // HostToWorker is the host→worker envelope.
 message HostToWorker {
   oneof msg {
-    StartTurn          start         = 1;
-    PermissionResponse perm_response = 2;
-    Cancel             cancel        = 3;
-    CredentialResponse cred_response = 4;
-    OpenInferenceEvent open_event    = 5;
+    StartTurn              start            = 1;
+    PermissionResponse     perm_response    = 2;
+    Cancel                 cancel           = 3;
+    CredentialResponse     cred_response    = 4;
+    OpenInferenceEvent     open_event       = 5;
+    SessionProfileResponse profile_response = 6;
   }
 }
 
 // WorkerToHost is the worker→host envelope.
 message WorkerToHost {
   oneof msg {
-    WorkerEvent       event        = 1;
-    PermissionRequest perm_request = 2;
-    PersistTurn       persist      = 3;
-    TurnDone          done         = 4;
-    TurnError         error        = 5;
-    CredentialRequest cred_request = 6;
+    WorkerEvent              event           = 1;
+    PermissionRequest        perm_request    = 2;
+    PersistTurn              persist         = 3;
+    TurnDone                 done            = 4;
+    TurnError                error           = 5;
+    CredentialRequest        cred_request    = 6;
     EnsureSubagentConversation ensure_subagent = 7;
-    OpenInferenceRequest open_request = 8;
+    OpenInferenceRequest     open_request    = 8;
+    SessionProfileRequest    profile_request = 9;
   }
 }
 
@@ -1524,6 +1526,20 @@ message PermissionResponse {
   bool   allow   = 2;
   string error   = 3;
   string message = 4; // "chat about this" redirect carried on a denial
+}
+
+// SessionProfileRequest asks the host to switch the live interactive session's
+// capability profile. The worker must not keep its own profile broker; planning
+// mode changes affect the host session and therefore the next turn's tool fence.
+message SessionProfileRequest {
+  uint64 id = 1;
+  string name = 2;
+}
+
+message SessionProfileResponse {
+  uint64 id = 1;
+  bool   ok = 2;
+  string error = 3;
 }
 
 // PersistTurn asks the host to persist one turn message.

@@ -853,6 +853,12 @@ func (s *Server) SelectExecutionMode() {
 			}
 			return st.EnsureSubagentConversation(ctx, id, parentID, projectDir, model, grantedTools)
 		}, // worker-side dispatch: create the sub-agent conversation row on the host
+		func(ctx context.Context, name string) error {
+			if s.profileBroker == nil {
+				return fmt.Errorf("profile broker not configured")
+			}
+			return s.profileBroker.SetActive(name)
+		}, // worker-side session-control capabilities: switch the host profile broker
 		func() inference.Provider { return s.OpenLLMProvider() }, // answers the worker's OpenInferenceRequests
 		s.openModels.Model, // resolves effective active-runtime open tier models for the snapshot
 	)

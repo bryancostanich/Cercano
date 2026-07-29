@@ -89,6 +89,11 @@ type workerRunner struct {
 	// on dial-injected (test) runners (sub-agent rows are then not created).
 	ensureSubagent EnsureSubagentFunc
 
+	// setProfile switches the host session's active capability profile when a
+	// worker-side session-control capability (suggest_plan/request_plan_approval)
+	// asks for it. The worker must not own this state.
+	setProfile func(context.Context, string) error
+
 	// dial is called instead of the pool when non-nil (test injection). When
 	// nil, RunTurn acquires a warm worker from the per-conversation pool.
 	dial dialFunc
@@ -115,6 +120,7 @@ func NewWorkerRunner(
 	perms permissions.Broker,
 	st secrets.Store,
 	ensureSubagent EnsureSubagentFunc,
+	setProfile func(context.Context, string) error,
 	openProvider func() inference.Provider,
 	openTierModel func(pkgcfg.Tier) string,
 ) runner.TurnRunner {
@@ -129,6 +135,7 @@ func NewWorkerRunner(
 		perms:          perms,
 		secrets:        st,
 		ensureSubagent: ensureSubagent,
+		setProfile:     setProfile,
 		openProvider:   openProvider,
 		openTierModel:  openTierModel,
 		pool:           pool,
@@ -444,6 +451,25 @@ func (w *workerRunner) RunTurn(
 					log.Printf("[workerRunner] ensure subagent conversation: %v", err)
 				}
 			}
+
+		case *proto.WorkerToHost_ProfileRequest:
+			// Session-control capabilities run in the worker but own no session
+			// state. Apply profile changes on the host profile broker and respond so
+			// the capability can report success/failure to the model.
+			pr := m.ProfileRequest
+			go func() {
+				resp := &proto.SessionProfileResponse{Id: pr.GetId(), Ok: true}
+				if w.setProfile == nil {
+					resp.Ok = false
+					resp.Error = "session profile control not configured"
+				} else if err := w.setProfile(ctx, pr.GetName()); err != nil {
+					resp.Ok = false
+					resp.Error = err.Error()
+				}
+				if sendErr := safeSend(&proto.HostToWorker{Msg: &proto.HostToWorker_ProfileResponse{ProfileResponse: resp}}); sendErr != nil {
+					log.Printf("[workerRunner] send profile response id=%d: %v", pr.GetId(), sendErr)
+				}
+			}()
 
 		case *proto.WorkerToHost_Done:
 			// Capture result; continue draining until Recv returns EOF.

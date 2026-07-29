@@ -28,8 +28,12 @@ type inputItem struct {
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
 
-	// function_call_output
-	Output string `json:"output,omitempty"`
+	// function_call_output. Output is required on every function_call_output
+	// item ("Missing required parameter: 'input[N].output'"), including when the
+	// tool produced no text. RawMessage lets the adapter emit an explicit JSON
+	// string (even "") for tool results while keeping the field absent (nil) for
+	// message/function_call/reasoning items that share this struct.
+	Output json.RawMessage `json:"output,omitempty"`
 
 	// reasoning
 	ID               string `json:"id,omitempty"`

@@ -42,8 +42,35 @@ func TestMessagesToInput_TextImageToolReasoning(t *testing.T) {
 	if items[2].Type != "function_call" || items[2].CallID != "call_1" || items[2].Name != "get_weather" || items[2].Arguments != `{"city":"Paris"}` {
 		t.Fatalf("item2 = %+v", items[2])
 	}
-	if items[3].Type != "function_call_output" || items[3].CallID != "call_1" || items[3].Output != "sunny" {
+	if items[3].Type != "function_call_output" || items[3].CallID != "call_1" || string(items[3].Output) != `"sunny"` {
 		t.Fatalf("item3 = %+v", items[3])
+	}
+}
+
+func TestMessagesToInput_EmptyToolResultKeepsOutput(t *testing.T) {
+	// A tool that produced no output must still serialize an `output` field:
+	// the Responses API rejects a function_call_output item that omits it
+	// ("Missing required parameter: 'input[N].output'").
+	msgs := []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{
+		{Type: llm.BlockToolResult, ToolUseRef: "call_9", Content: ""},
+	}}}
+	items := messagesToInput(msgs)
+	if len(items) != 1 || items[0].Type != "function_call_output" {
+		t.Fatalf("items = %+v", items)
+	}
+	if string(items[0].Output) != `""` {
+		t.Fatalf("empty tool result output = %q, want \"\"", string(items[0].Output))
+	}
+	b, err := json.Marshal(items[0])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := got["output"]; !ok {
+		t.Fatalf("serialized function_call_output missing `output` key: %s", b)
 	}
 }
 

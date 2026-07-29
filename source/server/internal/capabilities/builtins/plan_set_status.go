@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/taskmodel"
 )
@@ -74,7 +75,7 @@ func (planSetStatusCap) Execute(ctx context.Context, call *capabilities.Call) (*
 	}
 
 	resolved := resolvePath(call.WorkDir, planPath)
-	store, err := taskmodel.OpenPlan(resolved, nil)
+	store, err := taskmodel.OpenPlan(resolved, planSetStatusChangeSink(call))
 	if err != nil {
 		return nil, err
 	}
@@ -98,6 +99,37 @@ type planTaskSelector struct {
 	PhaseTitle string
 	TaskTitle  string
 	TaskPath   []string
+}
+
+func planSetStatusChangeSink(call *capabilities.Call) func(taskmodel.ChangeEvent) {
+	if call == nil || call.EmitProgress == nil {
+		return nil
+	}
+	return func(ev taskmodel.ChangeEvent) {
+		call.EmitProgress(agenttools.ProgressEvent{
+			TaskChangeKind: string(ev.Kind),
+			TaskSnapshot:   taskToProgressSnapshot(ev.Task),
+		})
+	}
+}
+
+func taskToProgressSnapshot(t taskmodel.Task) agenttools.TaskProgressSnapshot {
+	parentID := ""
+	if t.ParentID != nil {
+		parentID = *t.ParentID
+	}
+	out := agenttools.TaskProgressSnapshot{
+		ID:       t.ID,
+		Title:    t.Title,
+		Status:   string(t.Status),
+		Notes:    t.Notes,
+		ParentID: parentID,
+		Children: make([]agenttools.TaskProgressSnapshot, 0, len(t.Children)),
+	}
+	for _, child := range t.Children {
+		out.Children = append(out.Children, taskToProgressSnapshot(child))
+	}
+	return out
 }
 
 func resolvePlanTask(store *taskmodel.PlanStore, sel planTaskSelector, planPath string) (string, taskmodel.Task, error) {

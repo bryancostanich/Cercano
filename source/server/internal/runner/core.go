@@ -341,6 +341,14 @@ func makeLoopSink(sink EventSink) func(agent.LoopEvent) {
 			})
 
 		case agent.LoopProgress:
+			if ev.TaskChangeKind != "" {
+				sink.Emit(Event{
+					Kind:           EventTaskChange,
+					TaskChangeKind: ev.TaskChangeKind,
+					TaskSnapshot:   taskProgressSnapshotToRunner(ev.TaskSnapshot),
+				})
+				break
+			}
 			if ev.SubAgentID != "" {
 				sink.Emit(Event{
 					Kind:      EventSubAgent,
@@ -415,6 +423,21 @@ func makeLoopSink(sink EventSink) func(agent.LoopEvent) {
 			// PermissionRequester directly; we don't emit an event here.
 		}
 	}
+}
+
+func taskProgressSnapshotToRunner(in agenttools.TaskProgressSnapshot) TaskSnapshot {
+	out := TaskSnapshot{
+		ID:       in.ID,
+		Title:    in.Title,
+		Status:   in.Status,
+		Notes:    in.Notes,
+		ParentID: in.ParentID,
+		Children: make([]TaskSnapshot, 0, len(in.Children)),
+	}
+	for _, child := range in.Children {
+		out.Children = append(out.Children, taskProgressSnapshotToRunner(child))
+	}
+	return out
 }
 
 // ── buildSystemPrompt and its helpers ────────────────────────────────────────

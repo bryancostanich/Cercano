@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/capabilities"
 )
 
@@ -75,6 +76,35 @@ func TestPlanSetStatus_Execute_ByBareUniqueTitleWritesThrough(t *testing.T) {
 	raw := readPlanSetStatusFile(t, dir, rel)
 	if !strings.Contains(raw, "- [~] First task") {
 		t.Fatalf("plan.md did not get the in-progress glyph:\n%s", raw)
+	}
+}
+
+func TestPlanSetStatus_Execute_EmitsTaskChangeProgress(t *testing.T) {
+	dir, rel := writePlanSetStatusSample(t)
+	args, _ := json.Marshal(map[string]any{
+		"plan_path":  rel,
+		"task_title": "First task",
+		"status":     "in_progress",
+	})
+	var events []agenttools.ProgressEvent
+	_, err := PlanSetStatus().Execute(context.Background(), &capabilities.Call{
+		Args:    args,
+		WorkDir: dir,
+		EmitProgress: func(ev agenttools.ProgressEvent) {
+			events = append(events, ev)
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected one task-change progress event, got %d", len(events))
+	}
+	if events[0].TaskChangeKind != "updated" {
+		t.Fatalf("TaskChangeKind = %q, want updated", events[0].TaskChangeKind)
+	}
+	if events[0].TaskSnapshot.Title != "First task" || events[0].TaskSnapshot.Status != "in_progress" {
+		t.Fatalf("unexpected task snapshot: %+v", events[0].TaskSnapshot)
 	}
 }
 

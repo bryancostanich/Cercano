@@ -3,6 +3,8 @@ package runner
 import (
 	"testing"
 
+	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/llm"
 )
 
@@ -24,6 +26,39 @@ func TestEvent_CarriesTokenAndToolPayloads(t *testing.T) {
 	}
 	if s.events[2].Result.FinalText != "done" {
 		t.Errorf("done event lost result: %+v", s.events[2])
+	}
+}
+
+func TestMakeLoopSink_MapsTaskChangeProgress(t *testing.T) {
+	s := &captureSink{}
+	makeLoopSink(s)(agent.LoopEvent{
+		Kind:           agent.LoopProgress,
+		TaskChangeKind: "updated",
+		TaskSnapshot: agenttools.TaskProgressSnapshot{
+			ID:       "task-1",
+			Title:    "Do the thing",
+			Status:   "done",
+			ParentID: "phase-1",
+			Children: []agenttools.TaskProgressSnapshot{{
+				ID:       "child-1",
+				Title:    "Check result",
+				Status:   "pending",
+				ParentID: "task-1",
+			}},
+		},
+	})
+	if len(s.events) != 1 {
+		t.Fatalf("got %d events, want 1", len(s.events))
+	}
+	ev := s.events[0]
+	if ev.Kind != EventTaskChange || ev.TaskChangeKind != "updated" {
+		t.Fatalf("unexpected event: %+v", ev)
+	}
+	if ev.TaskSnapshot.Title != "Do the thing" || ev.TaskSnapshot.Status != "done" || ev.TaskSnapshot.ParentID != "phase-1" {
+		t.Fatalf("unexpected snapshot: %+v", ev.TaskSnapshot)
+	}
+	if len(ev.TaskSnapshot.Children) != 1 || ev.TaskSnapshot.Children[0].Title != "Check result" {
+		t.Fatalf("child snapshot not preserved: %+v", ev.TaskSnapshot.Children)
 	}
 }
 

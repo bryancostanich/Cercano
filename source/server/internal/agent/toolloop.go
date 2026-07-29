@@ -47,6 +47,9 @@ type LoopEvent struct {
 	// 1-based line where a file edit/write began (0 = not applicable).
 	StartLine int
 
+	TaskChangeKind string
+	TaskSnapshot   agenttools.TaskProgressSnapshot
+
 	SubAgentID       string
 	SubAgentParentID string
 	SubAgentTitle    string
@@ -65,6 +68,8 @@ func loopProgressEvent(defaultToolUseID, defaultToolName string, progress agentt
 		Detail:           progress.Detail,
 		IsError:          progress.IsError,
 		StartLine:        progress.StartLine,
+		TaskChangeKind:   progress.TaskChangeKind,
+		TaskSnapshot:     progress.TaskSnapshot,
 		SubAgentID:       progress.SubAgentID,
 		SubAgentParentID: progress.SubAgentParentID,
 		SubAgentTitle:    progress.SubAgentTitle,

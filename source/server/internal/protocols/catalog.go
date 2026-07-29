@@ -536,10 +536,14 @@ Pick a short kebab-case slug for the effort (e.g. ` + "`migrate-config-loader`" 
 2. **Decision checkpoint before writing the spec.** If exploration reveals any
    solution-shape fork — data model, transport/binding, interface boundary,
    storage/durability, security posture, state machine, or module boundary —
-   pull ` + "`design-decisions`" + `, present the real options conversationally, and
-   wait for the human's approval or selection. Do **not** bury decisions in a
-   finished spec as the first time the human sees them. If there are no real
-   forks, say that explicitly before writing the spec.
+   pull ` + "`design-decisions`" + `. First show a concise bulleted decision queue:
+   one bullet per decision, named in plain English, with no option matrix yet.
+   Then work through the queue one decision at a time: present that decision's
+   real options conversationally, wait for the human's approval or selection,
+   and only then move to the next decision. Do **not** present all decision
+   matrices at once, and do **not** bury decisions in a finished spec as the
+   first time the human sees them. If there are no real forks, say that
+   explicitly before writing the spec.
 3. **Write ` + "`efforts/<slug>/spec.md`" + `** as human-readable prose only after
    the decision checkpoint is complete:
    - **Problem / motivation** — what is wrong or missing, and why it matters.
@@ -564,10 +568,14 @@ The spec is where approved solution-shape decisions are recorded, but the
 human must see those forks before the spec is written. Planning mode does not get
 an exception from ` + "`design-decisions`" + `: when generation hits a fork with more
 than one genuinely viable approach, pull ` + "`design-decisions`" + ` and stop at a
-**decision checkpoint**. Present the real options conversationally, quantify them
-on the standard axes, flag any hack, argue against your own recommendation, and
-wait for the human's approval or selection. Only then write the result into the
-spec's ` + "`## Decisions`" + ` section — prose plus the protocol's standard
+**decision checkpoint**. Start with a concise bulleted list of all decisions you
+found so the human sees the agenda. Then handle decisions sequentially, one per
+exchange: present only the current decision's real options, quantify them on the
+standard axes, flag any hack, argue against your own recommendation, and wait
+for the human's approval or selection before moving on. Do not dump every
+decision matrix in one response unless the human explicitly asks for the full
+batch. Only after the queue is resolved do you write the results into the spec's
+` + "`## Decisions`" + ` section — prose plus the protocol's standard
 options-vs-axes Markdown table, one entry per decision, each naming the chosen
 option and its rationale.
 

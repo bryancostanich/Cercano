@@ -174,18 +174,44 @@ func TestPlanningModeSurfacesDecisionsBeforeSpecWrite(t *testing.T) {
 	p, _ := Get("planning-mode")
 	for _, want := range []string{
 		"Decision checkpoint before writing the spec",
-		"present the real options conversationally",
+		"present that decision's",
 		"wait for the human's approval or selection",
-		"bury decisions in a",
-		"finished spec as the first time the human sees them",
-		"If there are no real",
-		"forks, say that explicitly before writing the spec",
+		"bury decisions in a finished spec as the",
+		"first time the human sees them",
+		"If there are no real forks",
+		"say that",
+		"explicitly before writing the spec",
 		"only after",
 		"the decision checkpoint is complete",
 		"not a substitute for surfacing forks first",
 	} {
 		if !strings.Contains(p.Body, want) {
 			t.Fatalf("planning-mode body must force conversational decision surfacing before spec write; missing %q", want)
+		}
+	}
+}
+
+func TestPlanningModeDecisionCheckpointIsSequential(t *testing.T) {
+	p, _ := Get("planning-mode")
+	for _, want := range []string{
+		"concise bulleted decision queue",
+		"one bullet per decision",
+		"no option matrix yet",
+		"work through the queue one decision at a time",
+		"only then move to the next decision",
+		"Do **not** present all decision",
+		"matrices at once",
+		"Start with a concise bulleted list of all decisions",
+		"one per",
+		"exchange",
+		"Do not dump every",
+		"decision matrix in one response",
+		"unless the human explicitly asks for the full",
+		"batch",
+		"Only after the queue is resolved",
+	} {
+		if !strings.Contains(p.Body, want) {
+			t.Fatalf("planning-mode body must require sequential decision review; missing %q", want)
 		}
 	}
 }

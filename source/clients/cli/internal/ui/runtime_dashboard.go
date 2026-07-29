@@ -1414,7 +1414,8 @@ func actionColumnWidths(width int) (labelW, valueW, hintW int) {
 // operationRows' flat cursor space, sectionStarts' tab navigation, and the
 // Enter dispatch — derives from this list, so the block set and cursor mapping
 // can never drift apart. Runtime mode shows only the runtime picker; Models
-// mode shows the download / installed / processes / tiers blocks.
+// mode shows the download / installed / tiers / processes blocks, keeping
+// model tiers near the top of the Models tab.
 func (d *runtimeDashboard) actionSections() []actionSection {
 	if d.mode == dashboardModeRuntime {
 		return []actionSection{
@@ -1426,10 +1427,10 @@ func (d *runtimeDashboard) actionSections() []actionSection {
 	return []actionSection{
 		{render: d.renderDownloadsBlock, rows: d.downloadRows},
 		{render: d.renderInstalledModelsBlock, rows: d.installedModelRows},
-		{render: d.renderProcessesBlock, rows: d.processRows},
 		{render: d.renderTiersBlock, rows: func() []runtimeDashboardActionRow {
 			return tierRows(d.snapshot.Config)
 		}},
+		{render: d.renderProcessesBlock, rows: d.processRows},
 	}
 }
 

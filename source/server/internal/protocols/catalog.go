@@ -533,13 +533,21 @@ Pick a short kebab-case slug for the effort (e.g. ` + "`migrate-config-loader`" 
    fenced to read + file-writes; use it to understand, not to change. Delegate
    wide reconnaissance to a sub-agent (` + "`dispatch`" + `) so its output does not flood
    your context.
-2. **Write ` + "`efforts/<slug>/spec.md`" + `** as human-readable prose:
+2. **Decision checkpoint before writing the spec.** If exploration reveals any
+   solution-shape fork — data model, transport/binding, interface boundary,
+   storage/durability, security posture, state machine, or module boundary —
+   pull ` + "`design-decisions`" + `, present the real options conversationally, and
+   wait for the human's approval or selection. Do **not** bury decisions in a
+   finished spec as the first time the human sees them. If there are no real
+   forks, say that explicitly before writing the spec.
+3. **Write ` + "`efforts/<slug>/spec.md`" + `** as human-readable prose only after
+   the decision checkpoint is complete:
    - **Problem / motivation** — what is wrong or missing, and why it matters.
    - **Goals** — what "done" means; and explicit non-goals.
    - **Constraints** — what must hold (compatibility, interfaces, invariants).
-   - **Decisions** — see below. This section is mandatory whenever you made a
-     solution-shape choice.
-3. **Hand the spec to the human and get sign-off** before writing the plan. Do
+   - **Decisions** — see below. This section records the approved choices from
+     the checkpoint; it is not a substitute for surfacing forks first.
+4. **Hand the spec to the human and get sign-off** before writing the plan. Do
    not proceed to the plan on your own — the spec is the anchor; it must be
    right first.
 
@@ -552,12 +560,14 @@ gate; approval leaves the read-only planning profile so execution can begin.
 
 ## Decisions During Generation (mandatory)
 
-The spec is where solution-shape decisions get made, so the ` + "`design-decisions`" + `
-protocol applies here — planning mode does not get a pass on it. When generation
-hits a fork with more than one genuinely viable approach, pull ` + "`design-decisions`" + `
-and follow it: enumerate the real options, quantify them on the standard axes,
-flag any hack, argue against your own recommendation, and **record the result in
-the spec's ` + "`## Decisions`" + ` section** — prose plus the protocol's standard
+The spec is where approved solution-shape decisions are recorded, but the
+human must see those forks before the spec is written. Planning mode does not get
+an exception from ` + "`design-decisions`" + `: when generation hits a fork with more
+than one genuinely viable approach, pull ` + "`design-decisions`" + ` and stop at a
+**decision checkpoint**. Present the real options conversationally, quantify them
+on the standard axes, flag any hack, argue against your own recommendation, and
+wait for the human's approval or selection. Only then write the result into the
+spec's ` + "`## Decisions`" + ` section — prose plus the protocol's standard
 options-vs-axes Markdown table, one entry per decision, each naming the chosen
 option and its rationale.
 

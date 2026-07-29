@@ -170,6 +170,26 @@ func TestPlanningModeDefersToDesignDecisions(t *testing.T) {
 	}
 }
 
+func TestPlanningModeSurfacesDecisionsBeforeSpecWrite(t *testing.T) {
+	p, _ := Get("planning-mode")
+	for _, want := range []string{
+		"Decision checkpoint before writing the spec",
+		"present the real options conversationally",
+		"wait for the human's approval or selection",
+		"bury decisions in a",
+		"finished spec as the first time the human sees them",
+		"If there are no real",
+		"forks, say that explicitly before writing the spec",
+		"only after",
+		"the decision checkpoint is complete",
+		"not a substitute for surfacing forks first",
+	} {
+		if !strings.Contains(p.Body, want) {
+			t.Fatalf("planning-mode body must force conversational decision surfacing before spec write; missing %q", want)
+		}
+	}
+}
+
 func TestPlanningModeDocumentsPlanGlyphs(t *testing.T) {
 	p, _ := Get("planning-mode")
 	// The plan.md format must match what the taskmodel codec parses: the four

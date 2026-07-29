@@ -128,6 +128,7 @@ cercano setup    # prepares Ollama plus the managed llama-server runtime
 
 Requires [Go](https://go.dev/dl/) 1.21+.
 
+**macOS / Linux:**
 ```bash
 git clone https://github.com/bryancostanich/Cercano.git
 cd Cercano/source/server
@@ -135,6 +136,19 @@ make build
 bin/cercano setup    # prepares Ollama plus the managed llama-server runtime
 bin/cercano          # starts the gRPC server
 ```
+
+**Windows (PowerShell):**
+
+`make` isn't available by default on Windows, so build with `go build` directly:
+```powershell
+git clone https://github.com/bryancostanich/Cercano.git
+cd Cercano\source\server
+go build -o bin/cercano.exe ./cmd/cercano
+bin\cercano.exe setup    # prepares Ollama plus the managed llama-server runtime
+bin\cercano.exe          # starts the gRPC server
+```
+
+If you'd rather use `make` (e.g. for `make dev`, `make test`, `make clean`), install [Git for Windows](https://git-scm.com/download/win) and run these commands from **Git Bash** instead of PowerShell — the Makefile relies on Unix shell utilities (`rm`, `pkill`, `sleep`) that only Git Bash provides on Windows. Alternatively, install `make` itself via `choco install make` or `scoop install make`, but you'll still need Git Bash (or WSL) for targets like `dev` and `clean` to work correctly.
 
 `cercano setup` handles the local runtime prerequisites: if no AI engine backend is detected, it offers to install [Ollama](https://ollama.com/) automatically (via Homebrew on macOS or the official installer on Linux), starts it, pulls the selected chat model, and ensures the configured embedding model (`nomic-embed-text` by default) is downloaded. It also prepares the optional managed `llama-server` runtime from [llama.cpp](https://github.com/ggml-org/llama.cpp), creates `~/.cercano/models` for GGUF files, and enables the runtime in config when `llama-server` is available. Ollama remains the default local inference path for now. Use `--install-engine` to skip interactive prompts for scripted/CI use.
 
@@ -199,6 +213,7 @@ Cercano can be used as an MCP (Model Context Protocol) server, allowing cloud-ba
    cd source/server
    make build
    ```
+   On Windows, use `go build -o bin/cercano.exe ./cmd/cercano` instead (see [Install from Source](#install-from-source) above).
 
 2. Add to Claude Code (choose one):
 
@@ -450,6 +465,19 @@ Cercano is in active development. For detailed information on the project's goal
 cd source/server
 make all    # Build both agent and MCP server
 make test   # Run all tests
+```
+
+On Windows (PowerShell), `make` isn't available by default — use the underlying Go commands instead:
+```powershell
+cd source/server
+go build -o bin/cercano.exe ./cmd/cercano
+go test ./... -count=1
+```
+The standalone CLI is a separate Go module and builds the same way:
+```powershell
+cd source/clients/cli
+go build -o bin/cercano-cli.exe .
+go test ./... -count=1
 ```
 
 ## Feature TODOs

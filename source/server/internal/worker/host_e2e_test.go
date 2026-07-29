@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -39,7 +40,11 @@ import (
 func buildCercanoBinary(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "cercano")
+	name := "cercano"
+	if runtime.GOOS == "windows" {
+		name = "cercano.exe"
+	}
+	bin := filepath.Join(dir, name)
 	// The worker package lives at internal/worker; the main package is at
 	// cmd/cercano relative to the module root (two dirs up + cmd/cercano).
 	cmd := exec.Command("go", "build", "-o", bin, "cercano/source/server/cmd/cercano")
@@ -87,8 +92,10 @@ func spawnRealWorker(t *testing.T, bin string) (*exec.Cmd, func(context.Context)
 	}
 
 	dial := func(ctx context.Context) (*grpc.ClientConn, error) {
+		// See spawn.go: "unix:" (single colon), not "unix://" — the latter
+		// breaks on a Windows path's drive-letter colon.
 		return grpc.NewClient(
-			"unix://"+sock,
+			"unix:"+sock,
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		)
 	}

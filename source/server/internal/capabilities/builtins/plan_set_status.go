@@ -88,6 +88,7 @@ func (planSetStatusCap) Execute(ctx context.Context, call *capabilities.Call) (*
 	if err != nil {
 		return nil, err
 	}
+	emitPlanHydration(call, store)
 	if err := store.SetStatus(taskID, status); err != nil {
 		return nil, err
 	}
@@ -99,6 +100,18 @@ type planTaskSelector struct {
 	PhaseTitle string
 	TaskTitle  string
 	TaskPath   []string
+}
+
+func emitPlanHydration(call *capabilities.Call, store *taskmodel.PlanStore) {
+	if call == nil || call.EmitProgress == nil || store == nil {
+		return
+	}
+	for _, root := range store.Roots() {
+		call.EmitProgress(agenttools.ProgressEvent{
+			TaskChangeKind: string(taskmodel.ChangeUpdated),
+			TaskSnapshot:   taskToProgressSnapshot(root),
+		})
+	}
 }
 
 func planSetStatusChangeSink(call *capabilities.Call) func(taskmodel.ChangeEvent) {

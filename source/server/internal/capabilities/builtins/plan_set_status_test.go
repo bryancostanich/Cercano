@@ -97,14 +97,20 @@ func TestPlanSetStatus_Execute_EmitsTaskChangeProgress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if len(events) != 1 {
-		t.Fatalf("expected one task-change progress event, got %d", len(events))
+	if len(events) != 2 {
+		t.Fatalf("expected hydration plus one task-change progress event, got %d", len(events))
 	}
-	if events[0].TaskChangeKind != "updated" {
-		t.Fatalf("TaskChangeKind = %q, want updated", events[0].TaskChangeKind)
+	if events[0].TaskChangeKind != "updated" || events[0].TaskSnapshot.Title != "Demo Effort" {
+		t.Fatalf("unexpected hydration event: %+v", events[0])
 	}
-	if events[0].TaskSnapshot.Title != "First task" || events[0].TaskSnapshot.Status != "in_progress" {
-		t.Fatalf("unexpected task snapshot: %+v", events[0].TaskSnapshot)
+	if len(events[0].TaskSnapshot.Children) != 2 {
+		t.Fatalf("hydration should include the full plan tree, got %+v", events[0].TaskSnapshot)
+	}
+	if events[1].TaskChangeKind != "updated" {
+		t.Fatalf("TaskChangeKind = %q, want updated", events[1].TaskChangeKind)
+	}
+	if events[1].TaskSnapshot.Title != "First task" || events[1].TaskSnapshot.Status != "in_progress" {
+		t.Fatalf("unexpected task snapshot: %+v", events[1].TaskSnapshot)
 	}
 }
 

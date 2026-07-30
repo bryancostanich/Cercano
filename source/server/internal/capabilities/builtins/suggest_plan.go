@@ -18,7 +18,7 @@ import (
 //
 // Interaction shape: suggest_plan is an X-tier capability, so the tool loop's
 // existing confirm gate fires the y/n/d/c prompt BEFORE Execute runs even in
-// Permissive mode — that prompt IS the user-facing suggestion. Approving (y) runs Execute, which flips
+// Permissive and Bypass modes — that prompt IS the user-facing suggestion. Approving (y) runs Execute, which flips
 // the session into the read-only planning profile; declining (n) means Execute
 // never runs and the model is told the user preferred to proceed directly. The
 // d (details) and c (chat/compose) keys work because it is the standard gate.
@@ -34,8 +34,8 @@ func SuggestPlan() capabilities.Capability { return suggestPlanCap{} }
 
 func (suggestPlanCap) Name() string { return "suggest_plan" }
 
-// TierX so the confirm gate fires before Execute even in Permissive mode — the
-// suggestion prompt. This capability changes session mode; it must never auto-run.
+// TierX so the confirm gate fires before Execute even in Permissive and Bypass
+// modes — the suggestion prompt. This capability changes session mode; it must never auto-run.
 func (suggestPlanCap) Tier() capabilities.Tier { return capabilities.TierX }
 
 func (suggestPlanCap) Surfaces() capabilities.Surface {

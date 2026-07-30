@@ -285,6 +285,45 @@ func TestSuggestPlan_PromptsInPermissiveMode(t *testing.T) {
 	}
 }
 
+func TestSuggestPlan_PromptsInBypassMode(t *testing.T) {
+	prov := &mockProvider{
+		scripts: [][]llm.Block{{
+			{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "suggest_plan",
+				ToolInput: json.RawMessage(`{"reason":"spans several files"}`)},
+		}},
+		caps: inference.Capabilities{SupportsTools: true},
+	}
+	reg := testDefaultRegistry()
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+	if err := perms.SetMode(ModeBypass); err != nil {
+		t.Fatal(err)
+	}
+
+	var asked bool
+	requester := func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission, destructive bool) (bool, error) {
+		asked = true
+		if name != "suggest_plan" {
+			t.Fatalf("requester name = %q, want suggest_plan", name)
+		}
+		if tier != llm.PermX {
+			t.Fatalf("requester tier = %q, want PermX", tier)
+		}
+		return false, nil
+	}
+
+	_, err := RunToolLoop(context.Background(), ToolLoopInput{
+		Provider: prov, Registry: reg, Permissions: perms,
+		PermissionRequester: requester,
+		UserInput:           "do a big thing",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !asked {
+		t.Fatal("suggest_plan did not reach the confirm gate in Bypass mode; X-tier session-control tools must still prompt")
+	}
+}
+
 func TestRequestPlanApproval_PromptsUnderPlanProfileInPermissiveMode(t *testing.T) {
 	prov := &mockProvider{
 		scripts: [][]llm.Block{{

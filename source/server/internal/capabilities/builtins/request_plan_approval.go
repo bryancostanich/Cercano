@@ -14,7 +14,7 @@ import (
 // and is ready for the human to approve execution.
 //
 // It is X-tier on purpose: the standard tool confirm gate fires BEFORE Execute
-// even in Permissive mode, giving the user the y/n/d/c prompt. Approving runs Execute, which leaves the
+// even in Permissive and Bypass modes, giving the user the y/n/d/c prompt. Approving runs Execute, which leaves the
 // read-only planning profile (back to the unrestricted default). Declining means
 // Execute never runs; the model receives the denial and can revise the plan or
 // continue discussing it.
@@ -29,7 +29,7 @@ func RequestPlanApproval() capabilities.Capability { return requestPlanApprovalC
 
 func (requestPlanApprovalCap) Name() string { return "request_plan_approval" }
 
-// TierX so the confirm gate is the approval prompt even in Permissive mode.
+// TierX so the confirm gate is the approval prompt even in Permissive and Bypass modes.
 func (requestPlanApprovalCap) Tier() capabilities.Tier { return capabilities.TierX }
 
 func (requestPlanApprovalCap) Surfaces() capabilities.Surface {

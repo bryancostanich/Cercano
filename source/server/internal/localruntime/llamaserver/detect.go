@@ -45,7 +45,7 @@ func (e *DetectError) Unwrap() error { return e.Cause }
 // SuggestedCommand returns the command a user should run to satisfy the
 // missing prerequisite. Empty when there's no automated recovery (e.g., a
 // user with 3 GGUFs needs to pick one; no command fixes that, and neither
-// does a missing binary on a platform with no managed install path).
+// does a missing binary on a platform/setup with no managed install path).
 //
 // Must stay in sync with defaultInstallCommand (install.go): this is a
 // suggestion the UI displays as the exact command "Install now" will attempt
@@ -54,12 +54,21 @@ func (e *DetectError) SuggestedCommand() string {
 	if e.Missing != "binary" {
 		return ""
 	}
-	if runtime.GOOS != "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
+		// llama.cpp is the upstream Homebrew formula that ships llama-server.
+		// The setup wizard uses the same command.
+		return "brew install llama.cpp"
+	case "windows":
+		// Only suggest winget when it's actually there to run — otherwise
+		// "Install now" would just fail with the same unsupported error.
+		if _, err := exec.LookPath("winget"); err == nil {
+			return "winget " + strings.Join(wingetInstallArgs(), " ")
+		}
+		return ""
+	default:
 		return ""
 	}
-	// llama.cpp is the upstream Homebrew formula that ships llama-server.
-	// The setup wizard uses the same command.
-	return "brew install llama.cpp"
 }
 
 // Detect populates cfg in-place from filesystem inspection. On success cfg is

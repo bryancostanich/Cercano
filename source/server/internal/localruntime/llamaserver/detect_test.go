@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -100,13 +101,19 @@ func TestDetect_ReturnsMissingBinaryWhenPATHEmpty(t *testing.T) {
 		t.Errorf("Missing = %q, want %q", de.Missing, "binary")
 	}
 	// SuggestedCommand names the exact command "Install now" would run
-	// (defaultInstallCommand in install.go), which only exists on darwin —
-	// everywhere else there's no managed install path, so it must be empty
-	// rather than suggesting a brew command that doesn't exist there (e.g.
-	// Windows, where brew isn't a thing).
+	// (defaultInstallCommand in install.go). darwin always has brew as the
+	// suggestion; windows only suggests winget when winget is actually on
+	// this test host's PATH (mirroring the same check SuggestedCommand
+	// makes); everywhere else there's no managed install path, so it must
+	// be empty rather than suggesting a command that doesn't exist there.
 	wantCmd := ""
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		wantCmd = "brew install llama.cpp"
+	case "windows":
+		if _, err := exec.LookPath("winget"); err == nil {
+			wantCmd = "winget " + strings.Join(wingetInstallArgs(), " ")
+		}
 	}
 	if got := de.SuggestedCommand(); got != wantCmd {
 		t.Errorf("SuggestedCommand = %q, want %q", got, wantCmd)

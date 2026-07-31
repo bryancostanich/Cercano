@@ -282,7 +282,7 @@ func (mo *openRuntimeInstallModal) View(styles theme.Styles, palette theme.Palet
 		sections = append(sections, mo.renderLogs(styles, boxW-4, boxH-11))
 	}
 	sections = append(sections, "")
-	sections = append(sections, mo.renderActions(styles))
+	sections = append(sections, mo.renderActions(styles, boxW-4))
 
 	inner := strings.Join(sections, "\n")
 	box := lipgloss.NewStyle().
@@ -471,7 +471,7 @@ func (mo *openRuntimeInstallModal) renderLogs(styles theme.Styles, w, h int) str
 	return styles.Muted.Render(strings.Join(rendered, "\n"))
 }
 
-func (mo *openRuntimeInstallModal) renderActions(styles theme.Styles) string {
+func (mo *openRuntimeInstallModal) renderActions(styles theme.Styles, w int) string {
 	switch mo.state {
 	case runtimeModalIdle:
 		primary := styles.Success.Bold(true).Render("[Enter] Install now")
@@ -488,7 +488,10 @@ func (mo *openRuntimeInstallModal) renderActions(styles theme.Styles) string {
 		secondary := styles.Muted.Render("[Esc] Close")
 		errLine := ""
 		if mo.errMsg != "" {
-			errLine = "\n" + styles.Error.Render("  "+mo.errMsg)
+			// Install failures can carry a long manual-install message (URL +
+			// PATH instructions) rather than a short "brew: command not
+			// found" — wrap it so it doesn't run past the box border.
+			errLine = "\n" + styles.Error.Render(ansi.Wrap("  "+mo.errMsg, w, ""))
 		}
 		return primary + "    " + secondary + errLine
 	case runtimeModalNeedsModel:

@@ -254,63 +254,60 @@ func (d *mcpDashboard) View() string {
 }
 
 func (d *mcpDashboard) renderList() string {
-	width := maxInt(20, d.width)
-	var b strings.Builder
+	totalW := maxInt(20, d.width)
+	// Inner width available inside the rounded-border block (border + padding).
+	contentW := dashboardBlockContentWidth(totalW)
 
-	title := d.styles.Bright.Render("Hosted MCP servers")
-	b.WriteString(title)
-	b.WriteString("\n\n")
+	var lines []string
 
-	if !d.loaded {
-		b.WriteString(d.styles.Muted.Render("loading…"))
-		return b.String()
-	}
+	switch {
+	case !d.loaded:
+		lines = append(lines, d.styles.Muted.Render("loading…"))
+	case len(d.servers) == 0:
+		lines = append(lines,
+			d.styles.Muted.Render("no MCP servers configured"),
+			"",
+			d.styles.Dim.Render("press ")+
+				d.styles.Accent.Render("a")+
+				d.styles.Dim.Render(" to add one"),
+		)
+	default:
+		// Column layout: marker + name | state | tools | error.
+		nameW := clampInt(contentW*30/100, 12, 28)
+		stateW := 12
+		toolsW := 8
+		errW := maxInt(0, contentW-2-nameW-stateW-toolsW-9)
 
-	if len(d.servers) == 0 {
-		b.WriteString(d.styles.Muted.Render("no MCP servers configured"))
-		b.WriteString("\n\n")
-		b.WriteString(d.styles.Dim.Render("press ") +
-			d.styles.Accent.Render("a") +
-			d.styles.Dim.Render(" to add one"))
-		return b.String()
-	}
-
-	// Column layout: marker + name | state | tools | error.
-	nameW := clampInt(width*30/100, 12, 28)
-	stateW := 12
-	toolsW := 8
-	errW := maxInt(0, width-2-nameW-stateW-toolsW-9)
-
-	for i, s := range d.servers {
-		selected := i == d.cursor
-		marker := "  "
-		nameStyle := d.styles.Primary
-		if selected {
-			marker = d.styles.Accent.Render("▶ ")
-			nameStyle = d.styles.Bright
+		for i, s := range d.servers {
+			selected := i == d.cursor
+			marker := "  "
+			nameStyle := d.styles.Primary
+			if selected {
+				marker = d.styles.Accent.Render("▶ ")
+				nameStyle = d.styles.Bright
+			}
+			name := nameStyle.Render(padRightPlain(truncatePlain(s.Name, nameW), nameW))
+			state := d.stateStyle(s.State).Render(padRightPlain(truncatePlain(s.State, stateW), stateW))
+			tools := d.styles.Muted.Render(padRightPlain(fmt.Sprintf("%d tools", s.ToolCount), toolsW))
+			line := marker + name +
+				d.styles.BorderDim.Render(" │ ") + state +
+				d.styles.BorderDim.Render(" │ ") + tools
+			if errW > 0 && s.Err != "" {
+				line += d.styles.BorderDim.Render(" │ ") +
+					d.styles.Error.Render(truncatePlain(s.Err, errW))
+			}
+			lines = append(lines, line)
 		}
-		name := nameStyle.Render(padRightPlain(truncatePlain(s.Name, nameW), nameW))
-		state := d.stateStyle(s.State).Render(padRightPlain(truncatePlain(s.State, stateW), stateW))
-		tools := d.styles.Muted.Render(padRightPlain(fmt.Sprintf("%d tools", s.ToolCount), toolsW))
-		line := marker + name +
-			d.styles.BorderDim.Render(" │ ") + state +
-			d.styles.BorderDim.Render(" │ ") + tools
-		if errW > 0 && s.Err != "" {
-			line += d.styles.BorderDim.Render(" │ ") +
-				d.styles.Error.Render(truncatePlain(s.Err, errW))
-		}
-		b.WriteString(line)
-		b.WriteString("\n")
 	}
 
-	b.WriteString("\n")
+	lines = append(lines, "")
 	if d.actionMessage != "" {
-		b.WriteString(d.styles.Muted.Render(truncatePlain(d.actionMessage, width)))
-		b.WriteString("\n")
+		lines = append(lines, d.styles.Muted.Render(truncatePlain(d.actionMessage, contentW)))
 	}
 	hint := d.styles.Accent.Render("a") + d.styles.Dim.Render(" add · ") +
 		d.styles.Accent.Render("r") + d.styles.Dim.Render(" reconnect · ") +
 		d.styles.Accent.Render("x") + d.styles.Dim.Render(" remove")
-	b.WriteString(hint)
-	return b.String()
+	lines = append(lines, hint)
+
+	return renderRuntimeDashboardTextBlock("Hosted MCP servers", lines, totalW, 0, d.palette, d.styles)
 }

@@ -149,6 +149,15 @@ type ToolLoopInput struct {
 	// 0 means use config.DefaultToolLoopMaxTokensPerTurn.
 	MaxTokensPerTurn int
 
+	// ContextWindow is the resolved model's input context size in tokens. When
+	// >0, RunToolLoop runs a cheap pre-flight size estimate before the first
+	// provider call and fails fast with a classified llm.ErrContextOverflow if
+	// the estimated prompt already exceeds the window (see preflight.go). 0
+	// disables the check — the caller could not resolve a window, so the
+	// provider's own overflow error stays the only backstop. Set by dispatch
+	// (sub-agents pin small local windows); the interactive loop leaves it 0.
+	ContextWindow int
+
 	// Temperature, when non-nil, is forwarded to the provider for every model
 	// turn. A pointer to 0 requests greedy decoding; sub-agent dispatch uses
 	// this because local tool-call compliance is extremely temperature-sensitive.
@@ -305,6 +314,16 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	maxTokens := config.DefaultToolLoopMaxTokensPerTurn
 	if in.MaxTokensPerTurn > 0 {
 		maxTokens = in.MaxTokensPerTurn
+	}
+
+	// Pre-flight size guard: before spending a provider round-trip (and, for a
+	// local model, a warm-up), estimate the prompt size against the resolved
+	// window and fail fast with an actionable, size-classified error. Counts
+	// the system prompt, prior history, this turn's input, and inline images.
+	// No-op when in.ContextWindow is 0. See preflight.go for the heuristic and
+	// why an approximate check is the right tool here.
+	if err := preflightContextCheck(in.System, in.ConvHistory, in.UserInput, len(in.Images), in.ContextWindow); err != nil {
+		return ToolLoopResult{}, err
 	}
 
 	hist := append([]llm.Message{}, in.ConvHistory...)

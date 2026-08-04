@@ -44,6 +44,10 @@ type Catalog interface {
 	// SetPermBroker updates the permission broker used by RunAgenticDispatch.
 	// Called by the front door when permissions are wired (SetPermissions).
 	SetPermBroker(b permissions.Broker)
+	// SetContextWindowResolver installs the resolver mapping a dispatch
+	// sub-agent's resolved model to its input context window (tokens), feeding
+	// the pre-flight size guard. Unset = guard disabled.
+	SetContextWindowResolver(fn func(model string, isCloud bool) int)
 	// GrantedRegistry builds the least-privilege sub-registry for a dispatch.
 	// Returns the registry, the granted tool names, the ignored-unknown names,
 	// and any error (e.g. empty resulting catalog).
@@ -89,6 +93,22 @@ type Service struct {
 	// unset and RunAgenticDispatch falls back to the store directly; the worker
 	// sets it to a host-stream proxy (the worker has no local conversation store).
 	ensureSubagent func(ctx context.Context, id, parentID, projectDir, model string, grantedTools []string) error
+
+	// contextWindowFor resolves the input context window (in tokens) for a
+	// dispatch sub-agent's resolved model, feeding RunAgenticDispatch's
+	// pre-flight size guard (see agent.ToolLoopInput.ContextWindow). Returns 0
+	// when the window is unknown (e.g. a cloud model whose window we don't
+	// track), which disables the guard for that call. nil = guard always off.
+	// A func-value seam so this package need not import config.
+	contextWindowFor func(model string, isCloud bool) int
+}
+
+// SetContextWindowResolver installs the resolver that maps a dispatch
+// sub-agent's resolved model to its input context window in tokens. The front
+// door wires this from config (e.g. config.LlamaServer.ContextSize for local
+// models). Leaving it unset disables the dispatch pre-flight size guard.
+func (x *Service) SetContextWindowResolver(fn func(model string, isCloud bool) int) {
+	x.contextWindowFor = fn
 }
 
 // New constructs a Catalog with the collaborators required by RunAgenticDispatch.
@@ -399,11 +419,18 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	// deterministic tool use over creative prose.
 	greedy := 0.0
 	var buf strings.Builder
+	// Resolve the sub-agent model's context window for the pre-flight size
+	// guard. 0 (unknown, or no resolver wired) disables the guard for this call.
+	contextWindow := 0
+	if x.contextWindowFor != nil {
+		contextWindow = x.contextWindowFor(model, sel.IsCloud)
+	}
 	res, err := agent.RunToolLoop(ctx, agent.ToolLoopInput{
 		Provider:           sel.Provider,
 		Model:              model,
 		Tier:               string(spec.Tier),
 		System:             system,
+		ContextWindow:      contextWindow,
 		Registry:           reg,
 		Permissions:        perms,
 		UserInput:          spec.Task,

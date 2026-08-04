@@ -776,6 +776,16 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 		func() conversation.Store { return s.persistSvc.Store() },
 		s.persistSvc.PersistTurn,
 	)
+	// Wire the dispatch pre-flight context-window resolver. Local sub-agents run
+	// on the managed llama-server, whose input window is config.LlamaServer.
+	// ContextSize; a cloud sub-agent's window we don't track, so return 0 to
+	// disable the guard (the provider's own overflow error remains the backstop).
+	s.toolSvc.SetContextWindowResolver(func(model string, isCloud bool) int {
+		if isCloud {
+			return 0
+		}
+		return s.cfgSvc.Get().LlamaServer.ContextSize
+	})
 	// Wire the in-process turn runner with nil Perms (permBroker not yet set).
 	// Rebuilt in SetPermissions once the broker is wired. workerRunner stays nil
 	// until SelectExecutionMode picks worker mode, so a Server built directly (the

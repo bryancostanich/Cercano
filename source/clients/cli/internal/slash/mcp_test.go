@@ -28,6 +28,20 @@ func TestRegisterMcp_RegistersCommand(t *testing.T) {
 	}
 }
 
+// Bare /mcp and /mcp list open the MCP config tab (a live managed view)
+// instead of dumping a one-shot table, so they must not touch the client —
+// a nil client is safe here.
+func TestSlash_Mcp_ListOpensConfigTab(t *testing.T) {
+	r := New()
+	RegisterMcp(r, nil)
+	for _, line := range []string{"/mcp", "/mcp list"} {
+		res, _ := r.Dispatch(line)
+		if res.Kind != ResultOpenMcpConfig {
+			t.Errorf("%q: kind = %v, want ResultOpenMcpConfig", line, res.Kind)
+		}
+	}
+}
+
 // The list/add/remove/restart success paths contact a live agentclient.Client,
 // so (matching /tools' test convention) we exercise only the arg-validation and
 // unknown-subcommand branches, which return usage text without touching the

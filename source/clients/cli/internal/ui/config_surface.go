@@ -82,6 +82,9 @@ func (m *Model) buildConfigTabPage(tab configTab) (contentPage, tea.Cmd) {
 	case configTabModels:
 		d, cmd := newRuntimeDashboard(m.agent, m.palette, m.styles, m.width, h, dashboardModeModels)
 		return d, tea.Batch(cmd, d.refreshTick())
+	case configTabMcp:
+		d, cmd := newMcpDashboard(m.agent, m.palette, m.styles, m.width, h)
+		return d, tea.Batch(cmd, d.refreshTick())
 	case configTabCloud:
 		return newScopedSettingsPage(m.agent, m.palette, m.styles, m.promptColorToken, m.width, h, m.themes, m.theme, scopeCloud)
 	case configTabRuntime:
@@ -136,7 +139,7 @@ func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 		case "down", "enter":
 			cs.focused = false
 			return m, nil, true
-		case "1", "2", "3", "4", "5":
+		case "1", "2", "3", "4", "5", "6", "7":
 			return m, m.switchConfigTab(configTab(int(key[0] - '1'))), true
 		}
 		// The tab bar owns focus: swallow other keys so nothing leaks into the

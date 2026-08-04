@@ -1460,6 +1460,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case mcpDashboardRefreshMsg:
+		if dashboard, ok := m.content.(*mcpDashboard); ok {
+			return m, dashboard.refreshSnapshot()
+		}
+		return m, nil
+
+	case mcpDashboardSnapshotMsg:
+		if dashboard, ok := m.content.(*mcpDashboard); ok {
+			return m, dashboard.applySnapshot(msg)
+		}
+		return m, nil
+
+	case mcpDashboardActionMsg:
+		if dashboard, ok := m.content.(*mcpDashboard); ok {
+			return m, dashboard.applyActionMsg(msg)
+		}
+		return m, nil
+
 	case runtimeEstimateMsg:
 		if dashboard, ok := m.content.(*runtimeDashboard); ok {
 			return m, dashboard.applyEstimate(msg)
@@ -2569,6 +2587,8 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.content = hv
 	case slash.ResultOpenRuntimeDashboard:
 		return m, m.openConfigSurface(configTabModels)
+	case slash.ResultOpenMcpConfig:
+		return m, m.openConfigSurface(configTabMcp)
 	case slash.ResultOpenContextView:
 		return m, m.openConfigSurface(configTabContext)
 	case slash.ResultOpenWizard:

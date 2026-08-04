@@ -1,0 +1,316 @@
+package ui
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+
+	"cercano/source/clients/cli/internal/theme"
+	"cercano/source/server/pkg/agentclient"
+)
+
+// mcpDashboard is the MCP config tab: a live, flat-list dashboard of hosted
+// MCP servers with per-row reconnect/remove actions and an add-server popover.
+//
+// Unlike runtimeDashboard (which shares one cursor across several action
+// blocks) this page is a single flat list, so it keeps its own small cursor
+// and action-message state rather than reusing that machinery.
+type mcpDashboard struct {
+	agent   *agentclient.Client
+	palette theme.Palette
+	styles  theme.Styles
+	width   int
+	height  int
+
+	servers []agentclient.McpServer
+	cursor  int
+	loaded  bool
+
+	// actionMessage is a transient inline notice (last action outcome / error).
+	actionMessage string
+
+	// popover is the add-server form overlay; nil when closed.
+	popover *mcpAddForm
+}
+
+// --- messages -------------------------------------------------------------
+
+type mcpDashboardRefreshMsg struct{}
+
+type mcpDashboardSnapshotMsg struct {
+	servers []agentclient.McpServer
+	err     error
+}
+
+type mcpDashboardActionMsg struct {
+	verb string // "reconnect" | "remove" | "add"
+	name string
+	err  error
+}
+
+// newMcpDashboard builds the page and returns it with an initial load command.
+func newMcpDashboard(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h int) (*mcpDashboard, tea.Cmd) {
+	d := &mcpDashboard{
+		agent:   ag,
+		palette: p,
+		styles:  s,
+		width:   w,
+		height:  h,
+	}
+	return d, d.loadSnapshotCmd()
+}
+
+// refreshTick reschedules a snapshot reload so connecting→ready transitions
+// and tool-count updates appear without manual reload. The loop always
+// reschedules while the page is open; a single failed fetch must not kill it.
+func (d *mcpDashboard) refreshTick() tea.Cmd {
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return mcpDashboardRefreshMsg{} })
+}
+
+// loadSnapshotCmd fetches the server list off the UI goroutine.
+func (d *mcpDashboard) loadSnapshotCmd() tea.Cmd {
+	ag := d.agent
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		servers, err := ag.ListMcpServers(ctx)
+		return mcpDashboardSnapshotMsg{servers: servers, err: err}
+	}
+}
+
+// refreshSnapshot is invoked by the tick handler; it kicks a reload and
+// reschedules the tick so live updates keep flowing.
+func (d *mcpDashboard) refreshSnapshot() tea.Cmd {
+	return tea.Batch(d.loadSnapshotCmd(), d.refreshTick())
+}
+
+// applySnapshot installs a freshly-loaded server list and re-clamps the cursor.
+func (d *mcpDashboard) applySnapshot(msg mcpDashboardSnapshotMsg) tea.Cmd {
+	if msg.err != nil {
+		// Keep the last-known list; surface the error inline.
+		d.actionMessage = "list failed: " + msg.err.Error()
+		d.loaded = true
+		return nil
+	}
+	d.servers = msg.servers
+	d.loaded = true
+	d.clampCursor()
+	return nil
+}
+
+// applyActionMsg records the outcome of a reconnect/remove/add and refreshes.
+func (d *mcpDashboard) applyActionMsg(msg mcpDashboardActionMsg) tea.Cmd {
+	if msg.err != nil {
+		d.actionMessage = fmt.Sprintf("%s %s failed: %s", msg.verb, msg.name, msg.err.Error())
+	} else {
+		d.actionMessage = fmt.Sprintf("%s %s ✓", msg.verb, msg.name)
+	}
+	return d.loadSnapshotCmd()
+}
+
+func (d *mcpDashboard) clampCursor() {
+	if d.cursor < 0 {
+		d.cursor = 0
+	}
+	if d.cursor >= len(d.servers) {
+		d.cursor = maxInt(0, len(d.servers)-1)
+	}
+}
+
+// selectedServer returns the server under the cursor, or false if the list is
+// empty.
+func (d *mcpDashboard) selectedServer() (agentclient.McpServer, bool) {
+	if d.cursor < 0 || d.cursor >= len(d.servers) {
+		return agentclient.McpServer{}, false
+	}
+	return d.servers[d.cursor], true
+}
+
+// --- contentPage ----------------------------------------------------------
+
+func (d *mcpDashboard) ID() contentPageID { return contentPageMcp }
+
+func (d *mcpDashboard) SetSize(w, h int) {
+	d.width = w
+	d.height = h
+}
+
+// Update handles keys. When the popover is open, keys route to it first.
+func (d *mcpDashboard) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	if d.popover != nil {
+		cmd, closed, submit := d.popover.Update(msg)
+		if submit != nil {
+			d.popover = nil
+			return d.addServerCmd(*submit), false
+		}
+		if closed {
+			d.popover = nil
+		}
+		return cmd, false
+	}
+
+	switch msg.String() {
+	case "up", "k":
+		if d.cursor > 0 {
+			d.cursor--
+		}
+		return nil, false
+	case "down", "j":
+		if d.cursor < len(d.servers)-1 {
+			d.cursor++
+		}
+		return nil, false
+	case "a":
+		d.popover = newMcpAddForm(d.palette, d.styles)
+		return nil, false
+	case "r":
+		if s, ok := d.selectedServer(); ok {
+			d.actionMessage = "reconnecting " + s.Name + "…"
+			return d.reconnectCmd(s.Name), false
+		}
+		return nil, false
+	case "x":
+		if s, ok := d.selectedServer(); ok {
+			d.actionMessage = "removing " + s.Name + "…"
+			return d.removeCmd(s.Name), false
+		}
+		return nil, false
+	}
+	return nil, false
+}
+
+// --- async action commands ------------------------------------------------
+
+func (d *mcpDashboard) reconnectCmd(name string) tea.Cmd {
+	ag := d.agent
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		err := ag.RestartMcpServer(ctx, name)
+		return mcpDashboardActionMsg{verb: "reconnect", name: name, err: err}
+	}
+}
+
+func (d *mcpDashboard) removeCmd(name string) tea.Cmd {
+	ag := d.agent
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		err := ag.RemoveMcpServer(ctx, name)
+		return mcpDashboardActionMsg{verb: "remove", name: name, err: err}
+	}
+}
+
+func (d *mcpDashboard) addServerCmd(sub mcpAddSubmit) tea.Cmd {
+	ag := d.agent
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		err := ag.AddMcpServer(ctx, sub.name, sub.command, sub.args, sub.env)
+		return mcpDashboardActionMsg{verb: "add", name: sub.name, err: err}
+	}
+}
+
+// stateStyle maps an MCP server state to a themed style.
+func (d *mcpDashboard) stateStyle(state string) lipgloss.Style {
+	switch strings.ToLower(state) {
+	case "ready":
+		return d.styles.Success
+	case "connecting":
+		return d.styles.Warn
+	case "failed", "error":
+		return d.styles.Error
+	default:
+		return d.styles.Muted
+	}
+}
+
+// --- scroller (thin: the row list is short) -------------------------------
+
+func (d *mcpDashboard) ScrollBy(int)  {}
+func (d *mcpDashboard) ScrollTo(int)  {}
+func (d *mcpDashboard) ScrollState() contentPageScrollState {
+	return contentPageScrollState{Total: len(d.servers), Height: d.height, Offset: 0}
+}
+
+// --- rendering ------------------------------------------------------------
+
+func (d *mcpDashboard) View() string {
+	base := d.renderList()
+	if d.popover == nil {
+		return base
+	}
+	// Float the add-server form centered over the list.
+	form := d.popover.View()
+	fw := lipgloss.Width(form)
+	fh := lipgloss.Height(form)
+	x := maxInt(0, (d.width-fw)/2)
+	y := maxInt(0, (d.height-fh)/2)
+	return composeOverlay(base, form, x, y)
+}
+
+func (d *mcpDashboard) renderList() string {
+	width := maxInt(20, d.width)
+	var b strings.Builder
+
+	title := d.styles.Bright.Render("Hosted MCP servers")
+	b.WriteString(title)
+	b.WriteString("\n\n")
+
+	if !d.loaded {
+		b.WriteString(d.styles.Muted.Render("loading…"))
+		return b.String()
+	}
+
+	if len(d.servers) == 0 {
+		b.WriteString(d.styles.Muted.Render("no MCP servers configured"))
+		b.WriteString("\n\n")
+		b.WriteString(d.styles.Dim.Render("press ") +
+			d.styles.Accent.Render("a") +
+			d.styles.Dim.Render(" to add one"))
+		return b.String()
+	}
+
+	// Column layout: marker + name | state | tools | error.
+	nameW := clampInt(width*30/100, 12, 28)
+	stateW := 12
+	toolsW := 8
+	errW := maxInt(0, width-2-nameW-stateW-toolsW-9)
+
+	for i, s := range d.servers {
+		selected := i == d.cursor
+		marker := "  "
+		nameStyle := d.styles.Primary
+		if selected {
+			marker = d.styles.Accent.Render("▶ ")
+			nameStyle = d.styles.Bright
+		}
+		name := nameStyle.Render(padRightPlain(truncatePlain(s.Name, nameW), nameW))
+		state := d.stateStyle(s.State).Render(padRightPlain(truncatePlain(s.State, stateW), stateW))
+		tools := d.styles.Muted.Render(padRightPlain(fmt.Sprintf("%d tools", s.ToolCount), toolsW))
+		line := marker + name +
+			d.styles.BorderDim.Render(" │ ") + state +
+			d.styles.BorderDim.Render(" │ ") + tools
+		if errW > 0 && s.Err != "" {
+			line += d.styles.BorderDim.Render(" │ ") +
+				d.styles.Error.Render(truncatePlain(s.Err, errW))
+		}
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	if d.actionMessage != "" {
+		b.WriteString(d.styles.Muted.Render(truncatePlain(d.actionMessage, width)))
+		b.WriteString("\n")
+	}
+	hint := d.styles.Accent.Render("a") + d.styles.Dim.Render(" add · ") +
+		d.styles.Accent.Render("r") + d.styles.Dim.Render(" reconnect · ") +
+		d.styles.Accent.Render("x") + d.styles.Dim.Render(" remove")
+	b.WriteString(hint)
+	return b.String()
+}

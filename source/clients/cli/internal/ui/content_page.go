@@ -9,6 +9,7 @@ const (
 	contentPageContext  contentPageID = "context"
 	contentPageHistory  contentPageID = "history"
 	contentPageModels   contentPageID = "models"
+	contentPageMcp      contentPageID = "mcp"
 	contentPageExport   contentPageID = "export"
 )
 

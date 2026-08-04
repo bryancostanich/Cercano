@@ -28,6 +28,7 @@ const (
 	ResultOpenThemeSettings // like ResultOpenSettings but lands on the UI/theme tab
 	ResultOpenHistoryPicker
 	ResultOpenRuntimeDashboard
+	ResultOpenMcpConfig // opens the /config surface on the MCP tab
 	ResultOpenContextView
 	ResultOpenWizard
 	ResultOpenTrajectoryExport  // Text field optionally carries a prefilled output path

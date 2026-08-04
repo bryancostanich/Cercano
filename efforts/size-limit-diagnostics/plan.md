@@ -12,9 +12,9 @@ Spec: `efforts/size-limit-diagnostics/spec.md`
 
 ## Phase 2 — Raise the default output budget
 
-- [ ] Replace the bare `maxTokens := 4096` literal (`toolloop.go:305`) with a config-sourced default. Add a config field (e.g. `ToolLoop.MaxTokensPerTurn` or reuse existing config plumbing) defaulting to a value that fits a typical source file (proposed 8192; justify in the commit body against the 4096≈12–16KB finding).
-- [ ] Verify `MaxTokensPerTurn` override still wins when set (`toolloop.go:306-307`).
-- [ ] Test: default flows through to `llm.ChatRequest.MaxTokens` when unset; override respected when set.
+- [x] Replace the bare `maxTokens := 4096` literal (`toolloop.go:305`) with a config-sourced default. Add a config field (e.g. `ToolLoop.MaxTokensPerTurn` or reuse existing config plumbing) defaulting to a value that fits a typical source file (proposed 8192; justify in the commit body against the 4096≈12–16KB finding).
+- [x] Verify `MaxTokensPerTurn` override still wins when set (`toolloop.go:306-307`).
+- [x] Test: default flows through to `llm.ChatRequest.MaxTokens` when unset; override respected when set.
 
 ## Phase 3 — Normalize size errors into named llm.Error classes
 

@@ -396,6 +396,14 @@ const (
 	DefaultToolLoopMaxIterations = 200
 	// UnlimitedToolLoopMaxIterations disables the turn-level tool-loop cap.
 	UnlimitedToolLoopMaxIterations = -1
+	// DefaultToolLoopMaxTokensPerTurn is the default per-turn output-token budget
+	// (max_tokens / num_predict) the tool loop requests from the provider. It
+	// bounds how much the model may emit in one turn, including tool-call
+	// arguments. 4096 tokens (~12-16 KB) is smaller than a typical source file,
+	// so a single Write of a real file truncated mid-JSON at that cap; 8192
+	// (~24-32 KB) fits ordinary files while staying well within model output
+	// limits. Callers may override via ToolLoopInput.MaxTokensPerTurn.
+	DefaultToolLoopMaxTokensPerTurn = 8192
 )
 
 // ToolLoopConfig controls the agentic tool loop.

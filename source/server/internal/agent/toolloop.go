@@ -146,7 +146,7 @@ type ToolLoopInput struct {
 	MaxIterations int
 
 	// MaxTokensPerTurn sets the MaxTokens field on each llm.ChatRequest.
-	// 0 means use the package default (4096).
+	// 0 means use config.DefaultToolLoopMaxTokensPerTurn.
 	MaxTokensPerTurn int
 
 	// Temperature, when non-nil, is forwarded to the provider for every model
@@ -302,7 +302,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	}
 
 	maxIters, unlimitedIters := config.EffectiveMaxIterations(in.MaxIterations)
-	maxTokens := 4096
+	maxTokens := config.DefaultToolLoopMaxTokensPerTurn
 	if in.MaxTokensPerTurn > 0 {
 		maxTokens = in.MaxTokensPerTurn
 	}

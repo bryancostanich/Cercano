@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"cercano/source/clients/cli/internal/theme"
 )
@@ -84,6 +85,20 @@ func (f *mcpAddForm) Update(msg tea.KeyPressMsg) (tea.Cmd, bool, *mcpAddSubmit) 
 		f.values[f.focus] += t
 	}
 	return nil, false, nil
+}
+
+// paste inserts bracketed-paste text into the focused field. The fields are
+// single-line, so ANSI is stripped and any newlines/tabs are flattened to
+// spaces to keep the value on one row (and to keep args/env token-splitting
+// sane). Reports whether anything was inserted.
+func (f *mcpAddForm) paste(text string) bool {
+	clean := ansi.Strip(text)
+	clean = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ", "\t", " ").Replace(clean)
+	if clean == "" {
+		return false
+	}
+	f.values[f.focus] += clean
+	return true
 }
 
 // submit validates and parses the fields. Returns ok=false (setting errMsg)

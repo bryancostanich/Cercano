@@ -1047,6 +1047,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.PasteMsg:
 		if m.contentPageActive() {
+			// A content page owns the screen. Most pages don't take pasted
+			// text, but ones with a text field (e.g. the MCP add-server form)
+			// do — offer the paste to the active page and only drop it if the
+			// page declines. Without this, paste is silently swallowed here and
+			// never reaches the form.
+			if p, ok := m.content.(pasteConsumingPage); ok {
+				if p.handlePaste(msg.Content) {
+					return m, nil
+				}
+			}
 			return m, nil
 		}
 		if m.pendingConfirm != nil {

@@ -197,6 +197,16 @@ func (d *mcpDashboard) SetSize(w, h int) {
 	d.height = h
 }
 
+// handlePaste routes a bracketed paste into the add-server form when it is
+// open. Returns true when the paste was consumed. The details overlay is
+// read-only, so paste is ignored there and everywhere else on the dashboard.
+func (d *mcpDashboard) handlePaste(text string) bool {
+	if d.popover == nil {
+		return false
+	}
+	return d.popover.paste(text)
+}
+
 // Update handles keys. When the popover is open, keys route to it first.
 func (d *mcpDashboard) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	// Reaching Update means the config surface has handed keyboard control to

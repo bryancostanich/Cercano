@@ -239,6 +239,13 @@ type escapeConsumingPage interface {
 	wantsEscape() bool
 }
 
+// pasteConsumingPage is a content page with a text field that can accept a
+// bracketed paste. The page returns true when it consumed the text; otherwise
+// the paste is dropped (content pages don't feed the prompt input).
+type pasteConsumingPage interface {
+	handlePaste(text string) bool
+}
+
 // bodyFocusablePage is a content page that tracks whether the config surface's
 // body (vs. the tab strip) owns the keyboard, so it can suppress its cursor
 // marker while focus is up on the strip.

@@ -119,6 +119,44 @@ func TestMcpDashboard_AKeyOpensPopover(t *testing.T) {
 	}
 }
 
+// TestMcpDashboard_PasteIntoAddForm guards the reported bug: paste into the
+// add-server popover was silently swallowed by the top-level PasteMsg handler
+// (which drops paste whenever a content page is active). The dashboard's
+// handlePaste must route the text into the focused field when the form is open,
+// and decline otherwise so the paste is dropped rather than mis-handled.
+func TestMcpDashboard_PasteIntoAddForm(t *testing.T) {
+	d := newTestMcpDashboard(nil)
+
+	// No form open → paste is declined.
+	if d.handlePaste("npx") {
+		t.Fatal("paste should be declined when the add form is closed")
+	}
+
+	// Open the form; the name field is focused first.
+	d.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	if !d.handlePaste("my-server") {
+		t.Fatal("paste into the focused name field should be consumed")
+	}
+	if got := d.popover.values[mcpFieldName]; got != "my-server" {
+		t.Fatalf("name field = %q, want %q", got, "my-server")
+	}
+
+	// Move to command and paste a value that carries a trailing newline and an
+	// ANSI sequence — both must be flattened away for the single-line field.
+	d.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	if !d.handlePaste("\x1b[31m/usr/local/bin/node\x1b[0m\n") {
+		t.Fatal("paste into command field should be consumed")
+	}
+	if got := d.popover.values[mcpFieldCommand]; got != "/usr/local/bin/node " {
+		t.Fatalf("command field = %q, want ANSI-stripped, newline-flattened value", got)
+	}
+
+	// Empty paste is a no-op.
+	if d.handlePaste("") {
+		t.Fatal("empty paste should not be consumed")
+	}
+}
+
 // TestMcpDashboard_PopoverVisibleInView guards the render path, not just the
 // state flag: opening the add form must actually paint its fields into the
 // composited View. The overlay is centered against d.height, but renderList

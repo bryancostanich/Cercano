@@ -187,6 +187,11 @@ func (d *mcpDashboard) blurBody() { d.bodyFocused = false }
 // work on the first press instead of being swallowed by the strip.
 func (d *mcpDashboard) stripForwardKeys() []string { return []string{"a", "r", "x", "d"} }
 
+// wantsEscape implements escapeConsumingPage: while a details or add-server
+// overlay is open, Esc should close that overlay (routed here via Update)
+// rather than stepping focus back to the config tab strip.
+func (d *mcpDashboard) wantsEscape() bool { return d.details != nil || d.popover != nil }
+
 func (d *mcpDashboard) SetSize(w, h int) {
 	d.width = w
 	d.height = h

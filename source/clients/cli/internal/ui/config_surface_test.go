@@ -68,6 +68,40 @@ func TestConfigSurfaceAddKeyFromStripOpensPopover(t *testing.T) {
 	}
 }
 
+// TestConfigSurfaceEscClosesOverlayBeforeStrip verifies the reported bug fix:
+// with a details/add overlay open on the MCP dashboard body, Esc dismisses that
+// overlay first (keeping the config surface open and the body focused) instead
+// of stepping focus back to the tab strip / closing the tab. Only once the page
+// has nothing left to dismiss does Esc step focus back up.
+func TestConfigSurfaceEscClosesOverlayBeforeStrip(t *testing.T) {
+	d := newTestMcpDashboard([]agentclient.McpServer{{Name: "a", State: "ready"}})
+	// Open the details overlay via the dashboard, body-focused.
+	d.bodyFocused = true
+	d.details = newMcpDetails(d.palette, d.styles, d.servers[0])
+	m := Model{content: d, configSurface: &configSurface{active: configTabMcp, focused: false}}
+
+	// First Esc: closes the overlay, surface stays open, body keeps focus.
+	m, _, handled := m.handleConfigSurfaceKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if !handled {
+		t.Fatal("Esc with an overlay open should be handled")
+	}
+	if d.details != nil {
+		t.Fatal("first Esc should close the details overlay")
+	}
+	if m.configSurface == nil {
+		t.Fatal("first Esc must not close the config surface")
+	}
+	if m.configSurface.focused {
+		t.Fatal("first Esc should keep the body focused, not jump to the tab strip")
+	}
+
+	// Second Esc: nothing left to dismiss, so it steps focus back to the strip.
+	m, _, handled = m.handleConfigSurfaceKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if !handled || !m.configSurface.focused {
+		t.Fatalf("second Esc should step focus back to the tab strip: handled=%v focused=%v", handled, m.configSurface.focused)
+	}
+}
+
 // TestConfigSurfaceEnterFromStripDoesNotMoveCursor verifies Enter keeps its
 // "commit focus into the body without moving anything" role, distinct from Down.
 func TestConfigSurfaceEnterFromStripDoesNotMoveCursor(t *testing.T) {

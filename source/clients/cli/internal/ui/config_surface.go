@@ -125,6 +125,15 @@ func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 
 	if key == "esc" {
 		if !cs.focused {
+			// The body owns focus. If the active page has a transient overlay
+			// open (e.g. the MCP dashboard's details / add-server popover), let
+			// Esc close that overlay first rather than yanking focus back to the
+			// tab strip. Only once the page has nothing left to dismiss does Esc
+			// step focus back up.
+			if m.pageWantsEscape() {
+				next, cmd := m.dropFocusForwarding(msg)
+				return next, cmd, true
+			}
 			cs.focused = true
 			m.blurContentBody()
 			return m, nil, true
@@ -212,6 +221,22 @@ func (m Model) pageWantsStripKey(key string) bool {
 		}
 	}
 	return false
+}
+
+// pageWantsEscape reports whether the active page has a transient overlay open
+// that Esc should dismiss before the config surface treats Esc as "step focus
+// back to the tab strip". Pages without dismissable overlays don't implement
+// escapeConsumingPage and this returns false.
+func (m Model) pageWantsEscape() bool {
+	p, ok := m.content.(escapeConsumingPage)
+	return ok && p.wantsEscape()
+}
+
+// escapeConsumingPage is a content page that can have a transient overlay open
+// (details popover, add form, …) which Esc should close before the config
+// surface reinterprets Esc as a focus/close step.
+type escapeConsumingPage interface {
+	wantsEscape() bool
 }
 
 // bodyFocusablePage is a content page that tracks whether the config surface's

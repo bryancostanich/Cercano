@@ -322,6 +322,14 @@ type confirmRequest struct {
 	onYes  func(Model) (Model, tea.Cmd)
 	onNo   func(Model) (Model, tea.Cmd)
 	extras map[string]func(Model) (Model, tea.Cmd)
+	// stale marks a tool-permission gate whose server-side turn died — e.g.
+	// the agent restarted while the y/n/d/c prompt was up. The paused tool
+	// call and its blocked waiter no longer exist in the fresh agent process,
+	// so answering can never resolve it (AllowToolCall would Resolve nothing).
+	// When set, resolveConfirmHotkey stops pretending the gate is live: it
+	// short-circuits the Allow/Deny RPCs and, on yes, re-submits the user's
+	// original prompt as a fresh turn instead of orphaning it.
+	stale bool
 }
 
 const defaultInputPlaceholder = "type a message, /help for commands"
@@ -2110,6 +2118,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// status — could be stale. Re-fetch the lot and tell the
 			// user the link is back.
 			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "✓ agent reconnected"})
+			// A tool-permission gate that was up during the restart is now
+			// stale: the paused tool call and its blocked waiter died with the
+			// old process, so answering it can never resolve anything. Mark it
+			// so the y/n resolver stops pretending the gate is live and instead
+			// re-runs the user's request on yes.
+			if m.pendingConfirm != nil && m.pendingConfirm.tool != nil {
+				m.pendingConfirm.stale = true
+				m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("↻ the pending tool decision was lost when the agent restarted — press [y] to re-run your request, or [n] to drop it.")})
+			}
 			m.refreshViewport()
 			return m, tea.Batch(msg.next, fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent), fetchVisionCmd(m.agent), fetchOpenRuntimeStatusCmd(m.agent))
 		}
@@ -3779,6 +3796,42 @@ func (m Model) resolveConfirmHotkey(key string) (Model, tea.Cmd, bool) {
 	c := m.pendingConfirm
 	if c == nil {
 		return m, nil, false
+	}
+	// Stale tool gate: the server-side turn died (agent restart) so the
+	// Allow/Deny RPCs would resolve nothing. Don't call onYes/onNo — they'd
+	// print "approved — running…" and silently orphan the call. Instead, yes
+	// re-runs the original request as a fresh turn; no/esc drops it honestly.
+	if c.stale && c.tool != nil {
+		switch key {
+		case "y", "Y":
+			m.pendingConfirm = nil
+			prompt := m.lastSubmittedPrompt
+			if prompt == "" {
+				m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("nothing to re-run — the original request wasn't captured.")})
+				m.refreshViewport()
+				return m, nil, true
+			}
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Accent.Render("↻ re-running your request on the restarted agent…")})
+			m.refreshViewport()
+			next, cmd := m.submit(prompt, nil)
+			nm, _ := next.(Model)
+			return nm, cmd, true
+		case "n", "N", "esc", "ctrl+c":
+			m.pendingConfirm = nil
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("dropped the lost tool decision.")})
+			m.refreshViewport()
+			return m, nil, true
+		case "d", "D":
+			// Details are still local (just show the args); leave the gate up.
+			if fn, ok := c.extras[key]; ok {
+				next, cmd := fn(m)
+				return next, cmd, true
+			}
+			return m, nil, true
+		default:
+			// [c]hat and other extras can't redirect a dead turn; ignore.
+			return m, nil, true
+		}
 	}
 	switch key {
 	case "y", "Y":

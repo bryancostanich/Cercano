@@ -87,6 +87,59 @@ func TestMcpAddForm_SubmitParsesArgsAndEnv(t *testing.T) {
 	}
 }
 
+// TestMcpAddForm_SplitsFlatCommandLine covers the round-trip trap: the details
+// popover's "copy command" flattens command+args into one shell-style line, and
+// a user pastes that whole line into the command field, leaving args empty. The
+// form should split it — first token is the executable, the rest are args —
+// rather than storing the whole line as `command` (which exec() can't find).
+func TestMcpAddForm_SplitsFlatCommandLine(t *testing.T) {
+	f := newTestAddForm()
+	typeRunes(f, "rekolektion-viz")
+	f.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // → command
+	// The exact line copied from the details pane.
+	typeRunes(f, "/Users/b/.dotnet/dotnet run --project /Users/b/rekolektion/tools/viz/src/Rekolektion.Viz.Mcp")
+
+	_, _, sub := f.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if sub == nil {
+		t.Fatal("expected submit")
+	}
+	if sub.command != "/Users/b/.dotnet/dotnet" {
+		t.Fatalf("command = %q, want just the executable path", sub.command)
+	}
+	want := []string{"run", "--project", "/Users/b/rekolektion/tools/viz/src/Rekolektion.Viz.Mcp"}
+	if len(sub.args) != len(want) {
+		t.Fatalf("args = %v, want %v", sub.args, want)
+	}
+	for i := range want {
+		if sub.args[i] != want[i] {
+			t.Fatalf("args[%d] = %q, want %q", i, sub.args[i], want[i])
+		}
+	}
+}
+
+// TestMcpAddForm_DoesNotSplitWhenArgsProvided guards the escape hatch: a user
+// who deliberately fills both command and args must be left untouched, even if
+// the command field happens to contain whitespace.
+func TestMcpAddForm_DoesNotSplitWhenArgsProvided(t *testing.T) {
+	f := newTestAddForm()
+	typeRunes(f, "srv")
+	f.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // → command
+	typeRunes(f, "my cmd")                      // whitespace in command...
+	f.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // → args
+	typeRunes(f, "--flag")                      // ...but args is non-empty
+
+	_, _, sub := f.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if sub == nil {
+		t.Fatal("expected submit")
+	}
+	if sub.command != "my cmd" {
+		t.Fatalf("command = %q, want left untouched", sub.command)
+	}
+	if len(sub.args) != 1 || sub.args[0] != "--flag" {
+		t.Fatalf("args = %v, want [--flag]", sub.args)
+	}
+}
+
 func TestMcpAddForm_EscCancels(t *testing.T) {
 	f := newTestAddForm()
 	_, closed, sub := f.Update(tea.KeyPressMsg{Code: tea.KeyEscape})

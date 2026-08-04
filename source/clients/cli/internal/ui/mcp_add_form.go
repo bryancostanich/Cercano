@@ -117,10 +117,27 @@ func (f *mcpAddForm) submit() (*mcpAddSubmit, bool) {
 		return nil, false
 	}
 	f.errMsg = ""
+
+	// Forgiving round-trip: the details popover's "copy command" flattens
+	// command+args into one shell-style line, and users naturally paste that
+	// whole line back into the command field. If the command field holds a
+	// full command line (has whitespace) and args is empty, split it — first
+	// token is the executable, the rest are args. Without this, the whole line
+	// lands in `command` and exec() fails looking for a file named after it.
+	// Only auto-split when args is empty so anyone who filled both fields
+	// deliberately is left untouched.
+	args := parseMcpArgs(f.values[mcpFieldArgs])
+	if len(args) == 0 {
+		if fields := strings.Fields(command); len(fields) > 1 {
+			command = fields[0]
+			args = fields[1:]
+		}
+	}
+
 	return &mcpAddSubmit{
 		name:    name,
 		command: command,
-		args:    parseMcpArgs(f.values[mcpFieldArgs]),
+		args:    args,
 		env:     parseMcpEnv(f.values[mcpFieldEnv]),
 	}, true
 }

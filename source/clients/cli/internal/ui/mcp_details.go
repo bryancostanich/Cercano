@@ -108,13 +108,17 @@ func (d *mcpDetails) View() string {
 	}
 
 	b.WriteString("\n")
-	copyHint := "c copy"
+	copyLabel := "copy command"
 	if d.copied {
-		copyHint = "c copied ✓"
+		copyLabel = "command copied ✓"
 	}
-	b.WriteString(d.styles.Accent.Render("c") + d.styles.Dim.Render(" "+strings.TrimPrefix(copyHint, "c ")))
+	b.WriteString(d.styles.Accent.Render("c") + d.styles.Dim.Render(" "+copyLabel))
 	b.WriteString(d.styles.Dim.Render(" · "))
 	b.WriteString(d.styles.Accent.Render("esc") + d.styles.Dim.Render(" close"))
+	b.WriteString("\n")
+	// The TUI captures the mouse, so ordinary drag-select is off. Point at the
+	// terminal's own bypass (Option-drag on macOS terminals) for native select.
+	b.WriteString(d.styles.Dim.Render("⌥-drag to select text"))
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

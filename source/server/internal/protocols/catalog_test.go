@@ -240,6 +240,30 @@ func TestPlanningModeTriggerNamesSuggestPlan(t *testing.T) {
 	}
 }
 
+// TestPlanningModeForbidsHandAuthoringOutsidePlanningMode locks the fix for the
+// observed failure where the model recognized planning work ("this is planning
+// work, so I'll write a spec + plan") and then hand-authored spec.md/plan.md
+// with file tools, never calling suggest_plan — skipping the approval gate and
+// the read-only fence. Both the terse trigger and the full body must make it
+// imperative that concluding a plan is needed means calling suggest_plan first,
+// not writing the artifacts directly.
+func TestPlanningModeForbidsHandAuthoringOutsidePlanningMode(t *testing.T) {
+	p, _ := Get("planning-mode")
+	// The always-on trigger must be imperative, not a soft "propose".
+	if !strings.Contains(p.Trigger, "MUST call `suggest_plan`") {
+		t.Fatal("planning-mode trigger must imperatively require calling suggest_plan first")
+	}
+	// The body must forbid authoring the artifacts outside planning mode.
+	for _, must := range []string{
+		"Never create or edit",
+		"outside planning mode",
+	} {
+		if !strings.Contains(p.Body, must) {
+			t.Fatalf("planning-mode body must forbid hand-authoring plan artifacts; missing %q", must)
+		}
+	}
+}
+
 func TestPlanningModeNamesRequestPlanApprovalForHandoff(t *testing.T) {
 	p, _ := Get("planning-mode")
 	if !strings.Contains(p.Body, "request_plan_approval") {

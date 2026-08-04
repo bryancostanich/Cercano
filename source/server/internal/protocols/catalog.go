@@ -502,7 +502,7 @@ Do not rewrite the spec yourself.
 		Name:        "planning-mode",
 		Description: "Explore read-only, then author an effort's spec and phased plan before touching anything.",
 		Domain:      DomainCore,
-		Trigger:     "When a request is large, ambiguous, or multi-step enough to warrant a written plan before any changes → propose planning (the `suggest_plan` capability), and once in planning mode pull the `planning-mode` protocol and follow it.",
+		Trigger:     "When a request is large, ambiguous, or multi-step enough to warrant a written plan before any changes — or the moment you conclude you should write a spec or plan — you MUST call `suggest_plan` first. Do NOT author `spec.md`/`plan.md` yourself outside planning mode; deciding a plan is needed is itself the trigger to call `suggest_plan`. Once in planning mode, pull the `planning-mode` protocol and follow it.",
 		Body: `# Planning Mode Protocol
 
 ## When This Applies
@@ -512,6 +512,15 @@ tools other than file writes are fenced off). This happens when the user runs
 ` + "`/plan`" + ` or approves your ` + "`suggest_plan`" + ` proposal. Your job now is NOT to
 implement. It is to understand the problem and produce two artifacts a human
 signs off on before any code is written.
+
+**Precondition — you must have entered planning mode via ` + "`suggest_plan`" + ` (or
+` + "`/plan`" + `) before doing any of the below.** Recognizing that a request needs a
+spec or plan is the trigger to call ` + "`suggest_plan`" + `, not permission to write
+one yourself. Never create or edit ` + "`efforts/<slug>/spec.md`" + ` or ` + "`plan.md`" + `
+outside planning mode. If you catch yourself saying "this is planning work, let
+me write a spec and plan" while not in planning mode, stop and call
+` + "`suggest_plan`" + ` — hand-authoring the artifacts skips the human approval gate
+and the read-only fence, which is the whole point of planning mode.
 
 ## The Unit of Work: an Effort
 
@@ -623,6 +632,10 @@ Example:
 
 ## Guardrails
 
+- Enter planning mode via ` + "`suggest_plan`" + ` (or ` + "`/plan`" + `) *before* authoring any
+  spec or plan. Concluding "this needs a plan" means call ` + "`suggest_plan`" + ` — it
+  does not mean start writing ` + "`spec.md`" + `/` + "`plan.md`" + ` by hand. Doing so skips the
+  approval gate and the read-only fence.
 - Do not implement during planning. Producing spec.md and plan.md is the whole
   job; execution is a separate, approved step.
 - The spec is prose the human owns; ` + "`plan.md`" + ` is what gets parsed. Do not put

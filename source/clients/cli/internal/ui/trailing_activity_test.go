@@ -50,6 +50,42 @@ func TestChatView_IsBetweenPhases_FalseWhileStreamingTextEntry(t *testing.T) {
 	}
 }
 
+// A streaming text entry that is still actively receiving tokens (last token
+// within the stale threshold) is a live stream — the prose itself is the
+// visible activity, so the trailing line must stay silent.
+func TestChatView_IsBetweenPhases_FalseWhileStreamFresh(t *testing.T) {
+	p := theme.Cracker()
+	c := newChatView(theme.NewStyles(p), p, "", "", 100, 20)
+	c.SetStreaming(true)
+	c.SetEntriesSlice([]*Entry{
+		{Role: RoleAssistant, Content: "Let me write the spec.", Streaming: true},
+	})
+	now := time.Now()
+	c.SetAnimationTime(now)
+	c.lastTokenAt = now.Add(-staleStreamThreshold / 2) // token just arrived
+	if c.IsBetweenPhases() {
+		t.Errorf("fresh stream (token within threshold): IsBetweenPhases must be false")
+	}
+}
+
+// The dead-zone case this change fixes: a streaming text entry with content
+// that has gone quiet past the threshold — the model finished a prose segment
+// and is off doing work with nothing flowing. The trailing line must appear.
+func TestChatView_IsBetweenPhases_TrueWhileStreamStale(t *testing.T) {
+	p := theme.Cracker()
+	c := newChatView(theme.NewStyles(p), p, "", "", 100, 20)
+	c.SetStreaming(true)
+	c.SetEntriesSlice([]*Entry{
+		{Role: RoleAssistant, Content: "Let me write the spec.", Streaming: true},
+	})
+	now := time.Now()
+	c.SetAnimationTime(now)
+	c.lastTokenAt = now.Add(-2 * staleStreamThreshold) // stalled well past threshold
+	if !c.IsBetweenPhases() {
+		t.Errorf("stale stream (no token past threshold): IsBetweenPhases must be true")
+	}
+}
+
 // The target case: tools completed, no streaming text entry, but still
 // streaming. This is the gap the trailing activity line covers.
 func TestChatView_IsBetweenPhases_TrueAfterToolsComplete(t *testing.T) {

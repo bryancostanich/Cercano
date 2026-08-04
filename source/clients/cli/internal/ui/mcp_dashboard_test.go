@@ -119,6 +119,26 @@ func TestMcpDashboard_AKeyOpensPopover(t *testing.T) {
 	}
 }
 
+// TestMcpDashboard_PopoverVisibleInView guards the render path, not just the
+// state flag: opening the add form must actually paint its fields into the
+// composited View. The overlay is centered against d.height, but renderList
+// only produces a few content rows, so without padding the base to the frame
+// height composeOverlay drops every form row past the list's end and the
+// popover vanishes on screen even though d.popover is non-nil.
+func TestMcpDashboard_PopoverVisibleInView(t *testing.T) {
+	d := newTestMcpDashboard([]agentclient.McpServer{{Name: "a", State: "ready"}})
+	d.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	if d.popover == nil {
+		t.Fatal("popover did not open")
+	}
+	out := d.View()
+	for _, want := range []string{"Add MCP server", "command", "env"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("popover text %q missing from composited View:\n%s", want, out)
+		}
+	}
+}
+
 func TestMcpDashboard_ActionMessageAutoClears(t *testing.T) {
 	d := newTestMcpDashboard([]agentclient.McpServer{{Name: "a", State: "ready"}})
 

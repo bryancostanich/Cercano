@@ -296,13 +296,31 @@ func (d *mcpDashboard) View() string {
 	if d.popover == nil {
 		return base
 	}
-	// Float the add-server form centered over the list.
+	// Float the add-server form centered over the list. composeOverlay never
+	// adds rows — box lines that fall past the end of base are dropped — so
+	// the base must be at least as tall as the frame the form is centered in.
+	// renderList only produces as many rows as it has content (a handful),
+	// which is far shorter than d.height; without padding, the centered form
+	// lands on rows that don't exist and vanishes. Pad base up to d.height so
+	// every form row has a line to splice onto.
 	form := d.popover.View()
 	fw := lipgloss.Width(form)
 	fh := lipgloss.Height(form)
 	x := maxInt(0, (d.width-fw)/2)
 	y := maxInt(0, (d.height-fh)/2)
+	base = padViewHeight(base, d.height)
 	return composeOverlay(base, form, x, y)
+}
+
+// padViewHeight appends blank lines to s until it has at least h lines, so a
+// centered overlay composited onto it has rows to land on across the full
+// frame height.
+func padViewHeight(s string, h int) string {
+	n := strings.Count(s, "\n") + 1
+	if n >= h {
+		return s
+	}
+	return s + strings.Repeat("\n", h-n)
 }
 
 func (d *mcpDashboard) renderList() string {

@@ -25,12 +25,17 @@ const (
 	StateFailed  ServerState = "failed"
 )
 
-// ServerStatus is a point-in-time view of one hosted server.
+// ServerStatus is a point-in-time view of one hosted server. It includes the
+// launch config (Command/Args/Env) so clients can render server details and
+// reconstruct the server if it is later removed.
 type ServerStatus struct {
 	Name      string
 	State     ServerState
 	ToolCount int
 	Err       string
+	Command   string
+	Args      []string
+	Env       map[string]string
 }
 
 // serverHandle tracks the live state of one hosted server.
@@ -200,7 +205,15 @@ func (m *Manager) List() []ServerStatus {
 	out := make([]ServerStatus, 0, len(handles))
 	for _, h := range handles {
 		h.mu.Lock()
-		out = append(out, ServerStatus{Name: h.name, State: h.state, ToolCount: len(h.tools), Err: h.err})
+		out = append(out, ServerStatus{
+			Name:      h.name,
+			State:     h.state,
+			ToolCount: len(h.tools),
+			Err:       h.err,
+			Command:   h.cfg.Command,
+			Args:      h.cfg.Args,
+			Env:       h.cfg.Env,
+		})
 		h.mu.Unlock()
 	}
 	return out

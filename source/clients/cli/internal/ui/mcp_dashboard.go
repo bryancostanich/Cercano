@@ -47,6 +47,9 @@ type mcpDashboard struct {
 
 	// popover is the add-server form overlay; nil when closed.
 	popover *mcpAddForm
+
+	// details is the read-only server-details overlay; nil when closed.
+	details *mcpDetails
 }
 
 // --- messages -------------------------------------------------------------
@@ -182,7 +185,7 @@ func (d *mcpDashboard) blurBody() { d.bodyFocused = false }
 // owns the keyboard, these keys should still drop focus into the body and be
 // forwarded here, so the action hotkeys advertised in the hint row (a/r/x)
 // work on the first press instead of being swallowed by the strip.
-func (d *mcpDashboard) stripForwardKeys() []string { return []string{"a", "r", "x"} }
+func (d *mcpDashboard) stripForwardKeys() []string { return []string{"a", "r", "x", "d"} }
 
 func (d *mcpDashboard) SetSize(w, h int) {
 	d.width = w
@@ -194,6 +197,13 @@ func (d *mcpDashboard) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	// Reaching Update means the config surface has handed keyboard control to
 	// the body, so the cursor marker may now be drawn.
 	d.bodyFocused = true
+
+	if d.details != nil {
+		if closed := d.details.Update(msg); closed {
+			d.details = nil
+		}
+		return nil, false
+	}
 
 	if d.popover != nil {
 		cmd, closed, submit := d.popover.Update(msg)
@@ -220,6 +230,11 @@ func (d *mcpDashboard) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, false
 	case "a":
 		d.popover = newMcpAddForm(d.palette, d.styles)
+		return nil, false
+	case "d", "enter":
+		if s, ok := d.selectedServer(); ok {
+			d.details = newMcpDetails(d.palette, d.styles, s)
+		}
 		return nil, false
 	case "r":
 		if s, ok := d.selectedServer(); ok {
@@ -293,23 +308,28 @@ func (d *mcpDashboard) ScrollState() contentPageScrollState {
 
 func (d *mcpDashboard) View() string {
 	base := d.renderList()
-	if d.popover == nil {
+
+	// Float whichever overlay is open — details or the add form — centered over
+	// the list. composeOverlay never adds rows: box lines that fall past the
+	// end of base are dropped. renderList only produces as many rows as it has
+	// content (a handful), far shorter than d.height, so the centered overlay
+	// would land on rows that don't exist and vanish. Pad base up to d.height
+	// first so every overlay row has a line to splice onto.
+	var overlay string
+	switch {
+	case d.details != nil:
+		overlay = d.details.View()
+	case d.popover != nil:
+		overlay = d.popover.View()
+	default:
 		return base
 	}
-	// Float the add-server form centered over the list. composeOverlay never
-	// adds rows — box lines that fall past the end of base are dropped — so
-	// the base must be at least as tall as the frame the form is centered in.
-	// renderList only produces as many rows as it has content (a handful),
-	// which is far shorter than d.height; without padding, the centered form
-	// lands on rows that don't exist and vanishes. Pad base up to d.height so
-	// every form row has a line to splice onto.
-	form := d.popover.View()
-	fw := lipgloss.Width(form)
-	fh := lipgloss.Height(form)
+	fw := lipgloss.Width(overlay)
+	fh := lipgloss.Height(overlay)
 	x := maxInt(0, (d.width-fw)/2)
 	y := maxInt(0, (d.height-fh)/2)
 	base = padViewHeight(base, d.height)
-	return composeOverlay(base, form, x, y)
+	return composeOverlay(base, overlay, x, y)
 }
 
 // padViewHeight appends blank lines to s until it has at least h lines, so a
@@ -375,6 +395,7 @@ func (d *mcpDashboard) renderList() string {
 		lines = append(lines, d.styles.Muted.Render(truncatePlain(d.actionMessage, contentW)))
 	}
 	hint := d.styles.Accent.Render("a") + d.styles.Dim.Render(" add · ") +
+		d.styles.Accent.Render("d") + d.styles.Dim.Render(" details · ") +
 		d.styles.Accent.Render("r") + d.styles.Dim.Render(" reconnect · ") +
 		d.styles.Accent.Render("x") + d.styles.Dim.Render(" remove")
 	lines = append(lines, hint)

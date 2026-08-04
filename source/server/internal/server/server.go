@@ -316,6 +316,7 @@ func (s *Server) ListMcpServers(ctx context.Context, _ *proto.ListMcpServersRequ
 	for _, st := range mgr.List() {
 		out.Servers = append(out.Servers, &proto.McpServerInfo{
 			Name: st.Name, State: string(st.State), ToolCount: int32(st.ToolCount), Error: st.Err,
+			Command: st.Command, Args: st.Args, Env: st.Env,
 		})
 	}
 	return out, nil

@@ -1244,6 +1244,12 @@ message McpServerInfo {
   string state      = 2; // "warming" | "ready" | "failed"
   int32  tool_count = 3;
   string error      = 4;
+  // Launch config, surfaced so clients can show server details (Option A).
+  // On a localhost agent this is the same data mcp.yaml/AddMcpServer already
+  // carry; it is only polled while the MCP config tab is open.
+  string          command = 5;
+  repeated string args    = 6;
+  map<string, string> env = 7;
 }
 message ListMcpServersRequest  {}
 message ListMcpServersResponse { repeated McpServerInfo servers = 1; }

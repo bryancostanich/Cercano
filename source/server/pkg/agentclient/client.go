@@ -2022,6 +2022,11 @@ type McpServer struct {
 	State     string
 	ToolCount int
 	Err       string
+	// Launch config, surfaced for the details view. Only populated while the
+	// MCP config tab is polling ListMcpServers.
+	Command string
+	Args    []string
+	Env     map[string]string
 }
 
 // ListMcpServers returns a snapshot of all hosted MCP servers.
@@ -2033,7 +2038,8 @@ func (c *Client) ListMcpServers(ctx context.Context) ([]McpServer, error) {
 	out := make([]McpServer, 0, len(resp.GetServers()))
 	for _, s := range resp.GetServers() {
 		out = append(out, McpServer{Name: s.GetName(), State: s.GetState(),
-			ToolCount: int(s.GetToolCount()), Err: s.GetError()})
+			ToolCount: int(s.GetToolCount()), Err: s.GetError(),
+			Command: s.GetCommand(), Args: s.GetArgs(), Env: s.GetEnv()})
 	}
 	return out, nil
 }

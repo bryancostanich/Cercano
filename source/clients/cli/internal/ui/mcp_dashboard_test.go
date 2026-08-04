@@ -178,6 +178,51 @@ func TestMcpDashboard_NewMessageSupersedesPendingClear(t *testing.T) {
 	}
 }
 
+func TestMcpDashboard_DKeyOpensDetailsForSelected(t *testing.T) {
+	d := newTestMcpDashboard([]agentclient.McpServer{
+		{Name: "alpha", State: "ready"},
+		{Name: "beta", State: "ready"},
+	})
+	d.bodyFocused = true
+	d.cursor = 1
+	d.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	if d.details == nil {
+		t.Fatal("d did not open the details popover")
+	}
+	if d.details.server.Name != "beta" {
+		t.Fatalf("details server = %q, want the selected row \"beta\"", d.details.server.Name)
+	}
+	// Any key closes it.
+	d.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if d.details != nil {
+		t.Fatal("esc did not close the details popover")
+	}
+}
+
+// TestMcpDashboard_DetailsVisibleInView guards the render path: opening details
+// must paint the server's launch config into the composited View, not just set
+// the flag. Same padding hazard as the add-form popover.
+func TestMcpDashboard_DetailsVisibleInView(t *testing.T) {
+	d := newTestMcpDashboard([]agentclient.McpServer{{
+		Name:    "rekolektion-viz",
+		State:   "ready",
+		Command: "dotnet",
+		Args:    []string{"run", "--project", "/x/y"},
+		Env:     map[string]string{"FOO": "bar"},
+	}})
+	d.bodyFocused = true
+	d.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	if d.details == nil {
+		t.Fatal("details did not open")
+	}
+	out := d.View()
+	for _, want := range []string{"rekolektion-viz", "dotnet run --project /x/y", "FOO=bar", "esc"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("details text %q missing from composited View:\n%s", want, out)
+		}
+	}
+}
+
 func TestMcpDashboard_SnapshotReplacesAndClamps(t *testing.T) {
 	d := newTestMcpDashboard([]agentclient.McpServer{
 		{Name: "a"}, {Name: "b"}, {Name: "c"},

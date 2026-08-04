@@ -63,6 +63,26 @@ func TestMcpDashboard_RowRender(t *testing.T) {
 	}
 }
 
+func TestMcpDashboard_CaretHiddenUntilBodyFocused(t *testing.T) {
+	d := newTestMcpDashboard([]agentclient.McpServer{
+		{Name: "a", State: "ready"},
+	})
+	// Fresh dashboard: strip still owns focus, so no cursor caret is drawn.
+	if got := d.View(); strings.Contains(got, "▶") {
+		t.Fatalf("caret drawn before body focus:\n%s", got)
+	}
+	// Any delegated key means focus has entered the body; the caret appears.
+	d.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if got := d.View(); !strings.Contains(got, "▶") {
+		t.Fatalf("caret missing after body focus:\n%s", got)
+	}
+	// Lifting focus back to the strip hides the caret again.
+	d.blurBody()
+	if got := d.View(); strings.Contains(got, "▶") {
+		t.Fatalf("caret still drawn after blurBody:\n%s", got)
+	}
+}
+
 func TestMcpDashboard_ReconnectEmitsCmdForSelected(t *testing.T) {
 	d := newTestMcpDashboard([]agentclient.McpServer{
 		{Name: "a", State: "ready"},

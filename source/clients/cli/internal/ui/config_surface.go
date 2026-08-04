@@ -126,6 +126,7 @@ func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 	if key == "esc" {
 		if !cs.focused {
 			cs.focused = true
+			m.blurContentBody()
 			return m, nil, true
 		}
 		cmd := m.closeConfigSurface()
@@ -166,14 +167,32 @@ func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 	// is a dependable keyboard route back to the tabs from any tab's body.
 	if key == "shift+tab" {
 		cs.focused = true
+		m.blurContentBody()
 		return m, nil, true
 	}
 	// ↑ at a settings form's first field also climbs back to the tab bar.
 	if key == "up" {
 		if sp, ok := m.content.(*settingsPage); ok && sp.form != nil && sp.form.Cursor() == 0 {
 			cs.focused = true
+			m.blurContentBody()
 			return m, nil, true
 		}
 	}
 	return m, nil, false
+}
+
+// bodyFocusablePage is a content page that tracks whether the config surface's
+// body (vs. the tab strip) owns the keyboard, so it can suppress its cursor
+// marker while focus is up on the strip.
+type bodyFocusablePage interface {
+	blurBody()
+}
+
+// blurContentBody tells the active content page that focus has lifted back to
+// the tab strip, so any cursor marker it draws should be hidden until the body
+// is re-entered. A no-op for pages that don't implement bodyFocusablePage.
+func (m *Model) blurContentBody() {
+	if p, ok := m.content.(bodyFocusablePage); ok {
+		p.blurBody()
+	}
 }

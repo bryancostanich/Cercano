@@ -30,6 +30,14 @@ type mcpDashboard struct {
 	cursor  int
 	loaded  bool
 
+	// bodyFocused is false while the config tab strip still owns the keyboard
+	// and true once focus has dropped into this page's body. The row cursor
+	// marker (▶) is only drawn while bodyFocused, so landing on the MCP tab
+	// does not paint a caret before the user has entered the list. The config
+	// surface only routes keys to Update once the body is focused, so the
+	// first delegated key latches this true.
+	bodyFocused bool
+
 	// actionMessage is a transient inline notice (last action outcome / error).
 	actionMessage string
 
@@ -134,6 +142,11 @@ func (d *mcpDashboard) selectedServer() (agentclient.McpServer, bool) {
 
 func (d *mcpDashboard) ID() contentPageID { return contentPageMcp }
 
+// blurBody implements bodyFocusablePage: focus has lifted back to the config
+// tab strip, so stop drawing the row cursor marker until the body is
+// re-entered.
+func (d *mcpDashboard) blurBody() { d.bodyFocused = false }
+
 func (d *mcpDashboard) SetSize(w, h int) {
 	d.width = w
 	d.height = h
@@ -141,6 +154,10 @@ func (d *mcpDashboard) SetSize(w, h int) {
 
 // Update handles keys. When the popover is open, keys route to it first.
 func (d *mcpDashboard) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	// Reaching Update means the config surface has handed keyboard control to
+	// the body, so the cursor marker may now be drawn.
+	d.bodyFocused = true
+
 	if d.popover != nil {
 		cmd, closed, submit := d.popover.Update(msg)
 		if submit != nil {
@@ -279,7 +296,7 @@ func (d *mcpDashboard) renderList() string {
 		errW := maxInt(0, contentW-2-nameW-stateW-toolsW-9)
 
 		for i, s := range d.servers {
-			selected := i == d.cursor
+			selected := d.bodyFocused && i == d.cursor
 			marker := "  "
 			nameStyle := d.styles.Primary
 			if selected {

@@ -1478,6 +1478,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case mcpDashboardClearActionMsg:
+		if dashboard, ok := m.content.(*mcpDashboard); ok {
+			dashboard.clearActionMessage(msg.gen)
+		}
+		return m, nil
+
 	case runtimeEstimateMsg:
 		if dashboard, ok := m.content.(*runtimeDashboard); ok {
 			return m, dashboard.applyEstimate(msg)

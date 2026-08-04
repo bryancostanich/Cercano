@@ -119,6 +119,45 @@ func TestMcpDashboard_AKeyOpensPopover(t *testing.T) {
 	}
 }
 
+func TestMcpDashboard_ActionMessageAutoClears(t *testing.T) {
+	d := newTestMcpDashboard([]agentclient.McpServer{{Name: "a", State: "ready"}})
+
+	// Setting a message returns a clear cmd and bumps the generation.
+	cmd := d.setActionMessage("reconnect a ✓")
+	if cmd == nil {
+		t.Fatal("setActionMessage returned no clear cmd")
+	}
+	if d.actionMessage == "" {
+		t.Fatal("action message not set")
+	}
+	gen := d.actionMsgGen
+
+	// A stale clear (older generation) is ignored.
+	d.clearActionMessage(gen - 1)
+	if d.actionMessage == "" {
+		t.Fatal("stale clear wiped the current message")
+	}
+
+	// The matching clear drops it.
+	d.clearActionMessage(gen)
+	if d.actionMessage != "" {
+		t.Fatalf("matching clear left message = %q", d.actionMessage)
+	}
+}
+
+func TestMcpDashboard_NewMessageSupersedesPendingClear(t *testing.T) {
+	d := newTestMcpDashboard([]agentclient.McpServer{{Name: "a", State: "ready"}})
+	d.setActionMessage("first")
+	firstGen := d.actionMsgGen
+	d.setActionMessage("second")
+
+	// The first message's scheduled clear must not wipe the second.
+	d.clearActionMessage(firstGen)
+	if d.actionMessage != "second" {
+		t.Fatalf("stale clear wiped superseding message; got %q", d.actionMessage)
+	}
+}
+
 func TestMcpDashboard_SnapshotReplacesAndClamps(t *testing.T) {
 	d := newTestMcpDashboard([]agentclient.McpServer{
 		{Name: "a"}, {Name: "b"}, {Name: "c"},

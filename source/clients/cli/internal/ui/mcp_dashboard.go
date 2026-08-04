@@ -39,7 +39,11 @@ type mcpDashboard struct {
 	bodyFocused bool
 
 	// actionMessage is a transient inline notice (last action outcome / error).
+	// It auto-clears a few seconds after it is set. actionMsgGen stamps each
+	// message so a scheduled clear only fires for the message it was scheduled
+	// for — a newer message resets the timer instead of being wiped early.
 	actionMessage string
+	actionMsgGen  int
 
 	// popover is the add-server form overlay; nil when closed.
 	popover *mcpAddForm
@@ -58,6 +62,33 @@ type mcpDashboardActionMsg struct {
 	verb string // "reconnect" | "remove" | "add"
 	name string
 	err  error
+}
+
+// mcpDashboardClearActionMsg clears the inline action notice, but only if its
+// generation still matches the current one (a newer message supersedes it).
+type mcpDashboardClearActionMsg struct{ gen int }
+
+// actionMessageTTL is how long an action notice lingers before auto-clearing.
+const actionMessageTTL = 4 * time.Second
+
+// setActionMessage installs an inline notice and returns a command that clears
+// it after actionMessageTTL, tagged with this message's generation so a later
+// notice restarts the timer rather than being cleared prematurely.
+func (d *mcpDashboard) setActionMessage(s string) tea.Cmd {
+	d.actionMessage = s
+	d.actionMsgGen++
+	gen := d.actionMsgGen
+	return tea.Tick(actionMessageTTL, func(time.Time) tea.Msg {
+		return mcpDashboardClearActionMsg{gen: gen}
+	})
+}
+
+// clearActionMessage drops the notice if the scheduled clear still targets the
+// current message; a newer message (higher gen) leaves it untouched.
+func (d *mcpDashboard) clearActionMessage(gen int) {
+	if gen == d.actionMsgGen {
+		d.actionMessage = ""
+	}
 }
 
 // newMcpDashboard builds the page and returns it with an initial load command.
@@ -100,9 +131,8 @@ func (d *mcpDashboard) refreshSnapshot() tea.Cmd {
 func (d *mcpDashboard) applySnapshot(msg mcpDashboardSnapshotMsg) tea.Cmd {
 	if msg.err != nil {
 		// Keep the last-known list; surface the error inline.
-		d.actionMessage = "list failed: " + msg.err.Error()
 		d.loaded = true
-		return nil
+		return d.setActionMessage("list failed: " + msg.err.Error())
 	}
 	d.servers = msg.servers
 	d.loaded = true
@@ -112,12 +142,13 @@ func (d *mcpDashboard) applySnapshot(msg mcpDashboardSnapshotMsg) tea.Cmd {
 
 // applyActionMsg records the outcome of a reconnect/remove/add and refreshes.
 func (d *mcpDashboard) applyActionMsg(msg mcpDashboardActionMsg) tea.Cmd {
+	var text string
 	if msg.err != nil {
-		d.actionMessage = fmt.Sprintf("%s %s failed: %s", msg.verb, msg.name, msg.err.Error())
+		text = fmt.Sprintf("%s %s failed: %s", msg.verb, msg.name, msg.err.Error())
 	} else {
-		d.actionMessage = fmt.Sprintf("%s %s ✓", msg.verb, msg.name)
+		text = fmt.Sprintf("%s %s ✓", msg.verb, msg.name)
 	}
-	return d.loadSnapshotCmd()
+	return tea.Batch(d.setActionMessage(text), d.loadSnapshotCmd())
 }
 
 func (d *mcpDashboard) clampCursor() {
@@ -186,14 +217,12 @@ func (d *mcpDashboard) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, false
 	case "r":
 		if s, ok := d.selectedServer(); ok {
-			d.actionMessage = "reconnecting " + s.Name + "…"
-			return d.reconnectCmd(s.Name), false
+			return tea.Batch(d.setActionMessage("reconnecting "+s.Name+"…"), d.reconnectCmd(s.Name)), false
 		}
 		return nil, false
 	case "x":
 		if s, ok := d.selectedServer(); ok {
-			d.actionMessage = "removing " + s.Name + "…"
-			return d.removeCmd(s.Name), false
+			return tea.Batch(d.setActionMessage("removing "+s.Name+"…"), d.removeCmd(s.Name)), false
 		}
 		return nil, false
 	}

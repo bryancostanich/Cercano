@@ -105,10 +105,10 @@ Same file or `internal/ui/mcp_add_form.go` (+ test).
 - [ ] Manual smoke: launch agent, `/config` → MCP tab, add the rekolektion-viz
       server via the popover, watch it go `connecting → ready` with tool count,
       reconnect it, remove it; confirm bare `/mcp` lands on the tab.
-- [ ] Update `docs/features/cli/mcp-host/design.md` "adding an MCP server"
+- [x] Update `docs/features/cli/mcp-host/design.md` "adding an MCP server"
       section to mention the `/config` MCP tab + popover as the primary UI, with
       `/mcp add` as the CLI fast path.
-- [ ] Checkpoint per phase with conventional-commit messages.
+- [x] Checkpoint per phase with conventional-commit messages.
 
 ## Risks / notes
 

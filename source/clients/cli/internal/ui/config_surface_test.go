@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"cercano/source/clients/cli/internal/theme"
+	"cercano/source/server/pkg/agentclient"
 )
 
 // TestConfigSurfaceFocusEntersAndExitsBody walks the focus ladder: the tab bar
@@ -27,6 +28,44 @@ func TestConfigSurfaceFocusEntersAndExitsBody(t *testing.T) {
 	m, _, handled = m.handleConfigSurfaceKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if !handled || m.configSurface != nil || m.content != nil {
 		t.Fatalf("Esc on the tab bar should close the surface: handled=%v surface=%v", handled, m.configSurface)
+	}
+}
+
+// TestConfigSurfaceDownFromStripMovesListCursor verifies that the first Down
+// press from a focused tab strip both drops focus into the body AND advances a
+// list page's cursor — so on the MCP dashboard the keystroke does visible work
+// instead of being silently consumed just to transfer focus.
+func TestConfigSurfaceDownFromStripMovesListCursor(t *testing.T) {
+	d := newTestMcpDashboard([]agentclient.McpServer{
+		{Name: "a", State: "ready"},
+		{Name: "b", State: "ready"},
+	})
+	m := Model{content: d, configSurface: &configSurface{active: configTabMcp, focused: true}}
+
+	m, _, handled := m.handleConfigSurfaceKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	if !handled || m.configSurface.focused {
+		t.Fatalf("Down should enter the body: handled=%v focused=%v", handled, m.configSurface.focused)
+	}
+	if d.cursor != 1 {
+		t.Fatalf("first Down should move the list cursor to row 1, got %d", d.cursor)
+	}
+}
+
+// TestConfigSurfaceEnterFromStripDoesNotMoveCursor verifies Enter keeps its
+// "commit focus into the body without moving anything" role, distinct from Down.
+func TestConfigSurfaceEnterFromStripDoesNotMoveCursor(t *testing.T) {
+	d := newTestMcpDashboard([]agentclient.McpServer{
+		{Name: "a", State: "ready"},
+		{Name: "b", State: "ready"},
+	})
+	m := Model{content: d, configSurface: &configSurface{active: configTabMcp, focused: true}}
+
+	m, _, handled := m.handleConfigSurfaceKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !handled || m.configSurface.focused {
+		t.Fatalf("Enter should enter the body: handled=%v focused=%v", handled, m.configSurface.focused)
+	}
+	if d.cursor != 0 {
+		t.Fatalf("Enter should not move the list cursor, got %d", d.cursor)
 	}
 }
 

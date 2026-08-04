@@ -104,7 +104,9 @@ func (m *Model) buildConfigTabPage(tab configTab) (contentPage, tea.Cmd) {
 // sees them, returning handled=true when it consumes the key. Focus model:
 //
 //   - Tab bar focused: ←/→ and Tab/Shift+Tab switch tabs (wrapping), 1–5 jump
-//     to a tab, ↓/Enter drop into the body, Esc closes the surface.
+//     to a tab, Enter drops into the body, ↓ drops into the body and is also
+//     forwarded to the page so a list moves its cursor on that first press,
+//     Esc closes the surface.
 //   - Body focused: Shift+Tab lifts focus back up to the tab bar (a reliable
 //     keyboard path back to the tabs from any tab), Esc also steps back up (a
 //     second Esc there closes), and ↑ at a form's first field climbs back to
@@ -136,8 +138,21 @@ func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 			return m, m.switchConfigTab(cycleConfigTab(cs.active, -1)), true
 		case "right", "tab":
 			return m, m.switchConfigTab(cycleConfigTab(cs.active, +1)), true
-		case "down", "enter":
+		case "enter":
+			// Enter just commits focus into the body without moving anything.
 			cs.focused = false
+			return m, nil, true
+		case "down":
+			// Drop focus into the body AND forward this same ↓ so a list page
+			// (e.g. the MCP dashboard) moves its cursor on the first press,
+			// instead of the keystroke being silently swallowed to transfer
+			// focus. For a settings form the forwarded ↓ advances off field 0,
+			// which reads naturally too.
+			cs.focused = false
+			if m.content != nil {
+				cmd, _ := m.content.Update(msg)
+				return m, cmd, true
+			}
 			return m, nil, true
 		case "1", "2", "3", "4", "5", "6", "7":
 			return m, m.switchConfigTab(configTab(int(key[0] - '1'))), true

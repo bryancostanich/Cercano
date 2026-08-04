@@ -51,7 +51,7 @@ Streaming chat RPC (verify token streaming), conversation store + resume (SQLite
 
 ## Status
 
-**Substantially built.** The agent-surface enrichments (phases 1–7) and the core CLI client (phases 8–14, 16) are largely in place and the binary runs an interactive streaming REPL today. Remaining gaps: MCP host runtime (phase 6 + its UI in 15), diff renderer / `/diff` / `/undo` (12.3, 14.3), font picker (phase 17), and the formal acceptance pass + Homebrew CLI formula (phase 18). The build also diverged from the original plan in several load-bearing ways — see **Deviations from the original plan** below.
+**Substantially built.** The agent-surface enrichments (phases 1–7) and the core CLI client (phases 8–16) are largely in place and the binary runs an interactive streaming REPL today. The **MCP host runtime (phase 6) and its UI (phase 15) are built and validated end-to-end** — a live third-party stdio server (`rekolektion-viz`) was added via the `AddMcpServer` RPC, registered 22 tools under the `mcp__<server>__<tool>` convention, reached `ready`, and had its tools invoked through the agent returning real results (see `docs/features/cli/mcp-host/`). Remaining gaps: diff renderer / `/diff` / `/undo` (12.3, 14.3), font picker (phase 17), and the formal acceptance pass + Homebrew CLI formula (phase 18). The build also diverged from the original plan in several load-bearing ways — see **Deviations from the original plan** below.
 
 ### Deviations from the original plan
 
@@ -74,7 +74,7 @@ These are intentional changes discovered/decided during implementation; the task
 
 **Phase 1 — Proto extensions & code generation** ✅
 - [x] Task 1.1: Add Conversation/Turn messages and conversation RPCs to `agent.proto` (shipped as `ListConversations`/`ResumeConversation`/`DeleteConversation`/`RenameConversation`/`GetConversation`)
-- [x] Task 1.2: Add Context-meter, Tools, slash, permission RPCs (`GetContextUsage`, `ListTools`/`InvokeTool`, `ListModels`, `ListSkills`/`GetSkill`, `SetPermissionMode`/`GetPermissionMode`, `AllowToolCall`/`DenyToolCall`, `GetProviderCapabilities`) — **MCP-host RPCs not added (phase 6 deferred)**
+- [x] Task 1.2: Add Context-meter, Tools, slash, permission RPCs (`GetContextUsage`, `ListTools`/`InvokeTool`, `ListModels`, `ListSkills`/`GetSkill`, `SetPermissionMode`/`GetPermissionMode`, `AllowToolCall`/`DenyToolCall`, `GetProviderCapabilities`) — **MCP-host RPCs (`ListMcpServers`/`AddMcpServer`/`RemoveMcpServer`/`RestartMcpServer`) shipped**
 - [x] Task 1.3: Regenerate Go bindings and verify build
 
 **Phase 2 — Conversation store + persistence (agent)** ✅

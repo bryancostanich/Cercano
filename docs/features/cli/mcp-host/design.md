@@ -1,6 +1,39 @@
 # MCP Host
 
-> Status: Built — phases 6 + 15.
+> Status: Built — phases 6 + 15. **Validated end-to-end** against a live
+> third-party stdio server (`rekolektion-viz`): `AddMcpServer` connected it, 22
+> tools registered under `mcp__rekolektion-viz__*` and reached `ready`, and
+> `InvokeTool` round-tripped real results back through the agent.
+
+## Using it — adding an MCP server
+
+An MCP server is declared in `~/.config/cercano/mcp.yaml`:
+
+```yaml
+mcpServers:
+  rekolektion-viz:
+    command: /path/to/dotnet
+    args:
+      - run
+      - --project
+      - /path/to/Rekolektion.Viz.Mcp
+    env: {}
+```
+
+Two ways to register one:
+
+- **Config file** — edit `mcp.yaml` and (re)start the agent; declared servers
+  connect in the background at boot.
+- **Live, from the CLI** — `/mcp add <name> <command> [args…]` calls the
+  `AddMcpServer` RPC, connects immediately, and persists the entry to `mcp.yaml`
+  in canonical form. Then `/mcp list` to see state + tool count, `/mcp restart
+  <name>` to reconnect, `/mcp remove <name>` to drop it.
+
+Registered tools appear in `/tools` as `mcp/<server>/<tool>` (display form; the
+model sees `mcp__<server>__<tool>`) and, being untrusted third-party code,
+confirm by default even in `permissive` mode until allowlisted (the `[a]lways
+allow` confirm key persists an allowlist entry).
+
 
 ## Overview / Goal
 

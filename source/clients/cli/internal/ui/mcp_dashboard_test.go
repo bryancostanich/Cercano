@@ -223,6 +223,66 @@ func TestMcpDashboard_DetailsVisibleInView(t *testing.T) {
 	}
 }
 
+// TestMcpDashboard_DetailsCopyKeepsOpen verifies the copy escape hatch: because
+// the TUI captures the mouse, drag-select copy is impossible, so `c` must copy
+// the command to the clipboard (non-nil cmd) and keep the popover open — only a
+// non-`c` key closes it.
+func TestMcpDashboard_DetailsCopyKeepsOpen(t *testing.T) {
+	d := newTestMcpDashboard([]agentclient.McpServer{{
+		Name:    "rekolektion-viz",
+		State:   "ready",
+		Command: "dotnet",
+		Args:    []string{"run", "--project", "/x/y"},
+	}})
+	d.bodyFocused = true
+	d.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	if d.details == nil {
+		t.Fatal("details did not open")
+	}
+	cmd, _ := d.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
+	if cmd == nil {
+		t.Fatal("c did not return a clipboard command")
+	}
+	if d.details == nil {
+		t.Fatal("c must keep the details popover open, not close it")
+	}
+	if !d.details.copied {
+		t.Fatal("c did not flag the command as copied")
+	}
+	// The copied acknowledgement should now render.
+	if !strings.Contains(d.View(), "copied") {
+		t.Fatalf("View missing copied ack:\n%s", d.View())
+	}
+	// A non-c key still closes.
+	d.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if d.details != nil {
+		t.Fatal("esc did not close details after copy")
+	}
+}
+
+// TestMcpDashboard_DetailsWrapsLongCommand guards that a long command path is
+// rendered in full (wrapped across rows), not truncated with an ellipsis. We
+// assert every path segment survives into the View.
+func TestMcpDashboard_DetailsWrapsLongCommand(t *testing.T) {
+	d := newTestMcpDashboard([]agentclient.McpServer{{
+		Name:    "rekolektion-viz",
+		State:   "ready",
+		Command: "/Users/bryancostanich/.dotnet/dotnet",
+		Args:    []string{"run", "--project", "/Users/bryancostanich/git_repos/rekolektion/src/mcp"},
+	}})
+	d.bodyFocused = true
+	d.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	out := stripAnsiCSI(d.View())
+	for _, want := range []string{".dotnet/dotnet", "--project", "rekolektion/src/mcp"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("wrapped command missing %q from View:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "…") || strings.Contains(out, "...") {
+		t.Fatalf("command was truncated instead of wrapped:\n%s", out)
+	}
+}
+
 func TestMcpDashboard_SnapshotReplacesAndClamps(t *testing.T) {
 	d := newTestMcpDashboard([]agentclient.McpServer{
 		{Name: "a"}, {Name: "b"}, {Name: "c"},

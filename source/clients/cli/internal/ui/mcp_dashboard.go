@@ -199,10 +199,11 @@ func (d *mcpDashboard) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	d.bodyFocused = true
 
 	if d.details != nil {
-		if closed := d.details.Update(msg); closed {
+		cmd, closed := d.details.Update(msg)
+		if closed {
 			d.details = nil
 		}
-		return nil, false
+		return cmd, false
 	}
 
 	if d.popover != nil {

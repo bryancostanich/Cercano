@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"cercano/source/clients/cli/internal/theme"
 	"cercano/source/server/pkg/agentclient"
@@ -17,26 +18,36 @@ import (
 // the config-tab list can double as a reference for reconstructing a server —
 // e.g. reading off the exact command to re-add one after removing it.
 //
-// It holds no editable state: any key closes it. The command line is rendered
-// on one row so it is easy to select-and-copy from the terminal.
+// The TUI runs in the alternate screen with mouse reporting on, so a user
+// cannot drag-select and ⌘C the command out of the terminal. Instead the
+// command line is wrapped so it is fully readable, and `c` copies it to the
+// system clipboard via the same OSC 52 + pbcopy path chat-view copy uses. Any
+// other key closes the popover.
 type mcpDetails struct {
 	palette theme.Palette
 	styles  theme.Styles
 	server  agentclient.McpServer
+	copied  bool // set once `c` has copied the command this session
 }
 
 func newMcpDetails(p theme.Palette, s theme.Styles, srv agentclient.McpServer) *mcpDetails {
 	return &mcpDetails{palette: p, styles: s, server: srv}
 }
 
-// Update handles a key. Returns closed==true when the popover should be
-// dismissed. Being read-only, every key closes it.
-func (d *mcpDetails) Update(msg tea.KeyPressMsg) (closed bool) {
-	return true
+// Update handles a key. `c` copies the command line to the clipboard and keeps
+// the popover open (returning the clipboard cmd); any other key closes it.
+func (d *mcpDetails) Update(msg tea.KeyPressMsg) (cmd tea.Cmd, closed bool) {
+	switch msg.String() {
+	case "c":
+		d.copied = true
+		return selectionClipboardCmd(d.commandLine()), false
+	default:
+		return nil, true
+	}
 }
 
-// commandLine renders the full command + args on a single line, so it can be
-// copied straight out of the terminal to re-add the server.
+// commandLine renders the full command + args on a single line — the exact
+// string a user would paste to re-add the server.
 func (d *mcpDetails) commandLine() string {
 	parts := append([]string{d.server.Command}, d.server.Args...)
 	return strings.Join(parts, " ")
@@ -72,10 +83,11 @@ func (d *mcpDetails) View() string {
 	}
 
 	b.WriteString("\n")
-	// Command line on its own full-width row for easy copy.
+	// Command line on its own full-width block, wrapped so the whole path is
+	// readable. ansi.Wrap hard-breaks the long unbroken path token.
 	b.WriteString(d.styles.Muted.Render("command"))
 	b.WriteString("\n")
-	b.WriteString(d.styles.Primary.Render(truncatePlain(d.commandLine(), fieldW)))
+	b.WriteString(d.styles.Primary.Render(ansi.Wrap(d.commandLine(), fieldW, "")))
 	b.WriteString("\n")
 
 	if len(d.server.Env) > 0 {
@@ -90,12 +102,18 @@ func (d *mcpDetails) View() string {
 		sort.Strings(keys)
 		for _, k := range keys {
 			line := k + "=" + d.server.Env[k]
-			b.WriteString(d.styles.Primary.Render(truncatePlain(line, fieldW)))
+			b.WriteString(d.styles.Primary.Render(ansi.Wrap(line, fieldW, "")))
 			b.WriteString("\n")
 		}
 	}
 
 	b.WriteString("\n")
+	copyHint := "c copy"
+	if d.copied {
+		copyHint = "c copied ✓"
+	}
+	b.WriteString(d.styles.Accent.Render("c") + d.styles.Dim.Render(" "+strings.TrimPrefix(copyHint, "c ")))
+	b.WriteString(d.styles.Dim.Render(" · "))
 	b.WriteString(d.styles.Accent.Render("esc") + d.styles.Dim.Render(" close"))
 
 	box := lipgloss.NewStyle().

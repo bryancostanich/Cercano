@@ -51,6 +51,23 @@ func TestConfigSurfaceDownFromStripMovesListCursor(t *testing.T) {
 	}
 }
 
+// TestConfigSurfaceAddKeyFromStripOpensPopover verifies that a page-declared
+// action hotkey (the MCP dashboard's "a") works on the first press even while
+// the tab strip owns focus: it drops into the body and opens the add-server
+// popover, matching the always-visible hint row's promise.
+func TestConfigSurfaceAddKeyFromStripOpensPopover(t *testing.T) {
+	d := newTestMcpDashboard([]agentclient.McpServer{{Name: "a", State: "ready"}})
+	m := Model{content: d, configSurface: &configSurface{active: configTabMcp, focused: true}}
+
+	m, _, handled := m.handleConfigSurfaceKey(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	if !handled || m.configSurface.focused {
+		t.Fatalf("'a' from the strip should enter the body: handled=%v focused=%v", handled, m.configSurface.focused)
+	}
+	if d.popover == nil {
+		t.Fatal("'a' from the strip should open the add-server popover")
+	}
+}
+
 // TestConfigSurfaceEnterFromStripDoesNotMoveCursor verifies Enter keeps its
 // "commit focus into the body without moving anything" role, distinct from Down.
 func TestConfigSurfaceEnterFromStripDoesNotMoveCursor(t *testing.T) {

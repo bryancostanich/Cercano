@@ -149,14 +149,17 @@ func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 			// instead of the keystroke being silently swallowed to transfer
 			// focus. For a settings form the forwarded ↓ advances off field 0,
 			// which reads naturally too.
-			cs.focused = false
-			if m.content != nil {
-				cmd, _ := m.content.Update(msg)
-				return m, cmd, true
-			}
-			return m, nil, true
+			next, cmd := m.dropFocusForwarding(msg)
+			return next, cmd, true
 		case "1", "2", "3", "4", "5", "6", "7":
 			return m, m.switchConfigTab(configTab(int(key[0] - '1'))), true
+		}
+		// A page may advertise action hotkeys (e.g. the MCP dashboard's
+		// a/r/x) that should work even from the strip: drop into the body and
+		// forward the key so the hint row's promise holds on the first press.
+		if m.pageWantsStripKey(key) {
+			next, cmd := m.dropFocusForwarding(msg)
+			return next, cmd, true
 		}
 		// The tab bar owns focus: swallow other keys so nothing leaks into the
 		// body while the user is on the strip.
@@ -181,11 +184,48 @@ func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 	return m, nil, false
 }
 
+// dropFocusForwarding lifts focus from the tab strip into the body and forwards
+// the triggering key to the active page in the same step, so a list moves its
+// cursor or fires an action hotkey on that first press rather than spending the
+// keystroke solely on the focus transfer.
+func (m Model) dropFocusForwarding(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	if m.configSurface != nil {
+		m.configSurface.focused = false
+	}
+	if m.content == nil {
+		return m, nil
+	}
+	cmd, _ := m.content.Update(msg)
+	return m, cmd
+}
+
+// pageWantsStripKey reports whether the active page has asked for this key to be
+// forwarded from the tab strip (via stripForwardingPage).
+func (m Model) pageWantsStripKey(key string) bool {
+	p, ok := m.content.(stripForwardingPage)
+	if !ok {
+		return false
+	}
+	for _, k := range p.stripForwardKeys() {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
 // bodyFocusablePage is a content page that tracks whether the config surface's
 // body (vs. the tab strip) owns the keyboard, so it can suppress its cursor
 // marker while focus is up on the strip.
 type bodyFocusablePage interface {
 	blurBody()
+}
+
+// stripForwardingPage is a content page that declares keys which, while the tab
+// strip owns focus, should drop into the body and be forwarded to the page —
+// used for dashboard action hotkeys advertised in the page's hint row.
+type stripForwardingPage interface {
+	stripForwardKeys() []string
 }
 
 // blurContentBody tells the active content page that focus has lifted back to

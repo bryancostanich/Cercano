@@ -178,6 +178,12 @@ func (d *mcpDashboard) ID() contentPageID { return contentPageMcp }
 // re-entered.
 func (d *mcpDashboard) blurBody() { d.bodyFocused = false }
 
+// stripForwardKeys implements stripForwardingPage: while the config tab strip
+// owns the keyboard, these keys should still drop focus into the body and be
+// forwarded here, so the action hotkeys advertised in the hint row (a/r/x)
+// work on the first press instead of being swallowed by the strip.
+func (d *mcpDashboard) stripForwardKeys() []string { return []string{"a", "r", "x"} }
+
 func (d *mcpDashboard) SetSize(w, h int) {
 	d.width = w
 	d.height = h

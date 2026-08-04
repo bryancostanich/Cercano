@@ -105,3 +105,37 @@ func TestNormalize_VendorErrorStaysReachable(t *testing.T) {
 		t.Error("vendor error must stay reachable through the normalized wrapper")
 	}
 }
+
+func TestNormalize_ContextOverflow(t *testing.T) {
+	// Cloud OpenAI-compatible: opaque message, no counts. Must classify as
+	// context_overflow (not a generic 400 invalid_request) so callers can give
+	// size-specific guidance.
+	c, _ := oaFixture(t, http.StatusBadRequest,
+		`{"error":{"message":"Context size has been exceeded.","type":"invalid_request_error"}}`)
+	err := oaChatErr(t, c)
+	if got := llm.ClassOf(err); got != llm.ErrContextOverflow {
+		t.Fatalf("cloud class = %q, want %q (err: %v)", got, llm.ErrContextOverflow, err)
+	}
+	var le *llm.Error
+	if !errors.As(err, &le) {
+		t.Fatalf("want *llm.Error, got %T", err)
+	}
+	if le.Used != 0 || le.Limit != 0 {
+		t.Errorf("opaque overflow counts = (%d,%d), want (0,0)", le.Used, le.Limit)
+	}
+
+	// llama-server: message carries both counts, which must be parsed onto the
+	// normalized error.
+	c, _ = oaFixture(t, http.StatusBadRequest,
+		`{"error":{"message":"request (21156 tokens) exceeds the available context size (16384 tokens)","type":"invalid_request_error"}}`)
+	err = oaChatErr(t, c)
+	if got := llm.ClassOf(err); got != llm.ErrContextOverflow {
+		t.Fatalf("llama-server class = %q, want %q (err: %v)", got, llm.ErrContextOverflow, err)
+	}
+	if !errors.As(err, &le) {
+		t.Fatalf("want *llm.Error, got %T", err)
+	}
+	if le.Used != 21156 || le.Limit != 16384 {
+		t.Errorf("parsed counts = (%d,%d), want (21156,16384)", le.Used, le.Limit)
+	}
+}

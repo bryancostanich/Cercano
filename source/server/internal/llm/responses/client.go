@@ -238,6 +238,11 @@ func (c *Client) normalizeHTTP(resp *http.Response, body []byte) error {
 	msg := strings.ToLower(inner.Error())
 	quotaMarked := code == "insufficient_quota" || typ == "insufficient_quota" ||
 		strings.Contains(msg, "quota") || strings.Contains(msg, "usage limit")
+	if overflow, used, limit := llm.DetectContextOverflow(inner.Error()); overflow {
+		ne.Class = llm.ErrContextOverflow
+		ne.Used, ne.Limit = used, limit
+		return ne
+	}
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		ne.Class = llm.ErrAuth

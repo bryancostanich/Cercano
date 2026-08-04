@@ -25,6 +25,13 @@ const (
 	// ErrInvalidRequest: the request itself is malformed; it will fail on any
 	// provider and must be surfaced, never retried or failed over.
 	ErrInvalidRequest ErrorClass = "invalid_request"
+	// ErrContextOverflow: the request's input exceeded the model's context
+	// window. Like ErrInvalidRequest it will fail identically on a retry to the
+	// same model, but it is its own class so callers can give size-specific
+	// guidance (trim the task/context, raise the window, use a bigger-window
+	// tier) instead of a generic "bad request". When the provider reports token
+	// counts, Error.Used and Error.Limit carry them.
+	ErrContextOverflow ErrorClass = "context_overflow"
 	// ErrNetwork: transport-level failure before an HTTP response existed
 	// (DNS, connection refused/reset, TLS).
 	ErrNetwork ErrorClass = "network"
@@ -43,12 +50,22 @@ type Error struct {
 	StatusCode int           // HTTP status when one existed; 0 otherwise
 	RetryAfter time.Duration // server-suggested wait; 0 when the server gave none
 	Err        error         // the vendor error, wrapped
+
+	// Used and Limit carry token counts for ErrContextOverflow when the provider
+	// reports them (e.g. llama-server's "request (N tokens) exceeds the available
+	// context size (M tokens)"). Both 0 when the provider gave no numbers (e.g.
+	// the opaque cloud "Context size has been exceeded").
+	Used  int
+	Limit int
 }
 
 func (e *Error) Error() string {
 	msg := fmt.Sprintf("%s %s", e.Provider, e.Class)
 	if e.StatusCode != 0 {
 		msg = fmt.Sprintf("%s (%d)", msg, e.StatusCode)
+	}
+	if e.Class == ErrContextOverflow && e.Limit > 0 {
+		msg = fmt.Sprintf("%s (%d tokens used vs %d limit)", msg, e.Used, e.Limit)
 	}
 	if e.Err != nil {
 		msg = fmt.Sprintf("%s: %v", msg, e.Err)

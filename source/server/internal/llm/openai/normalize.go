@@ -26,6 +26,12 @@ func (c *Client) normalize(err error) error {
 	}
 	var ae *goopenai.APIError
 	if errors.As(err, &ae) {
+		if overflow, used, limit := llm.DetectContextOverflow(ae.Message); overflow {
+			return &llm.Error{
+				Class: llm.ErrContextOverflow, Provider: c.Name(),
+				StatusCode: ae.HTTPStatusCode, Used: used, Limit: limit, Err: err,
+			}
+		}
 		return &llm.Error{
 			Class:      c.classify(ae.HTTPStatusCode, codeString(ae.Code), ae.Type, ae.Message),
 			Provider:   c.Name(),
@@ -35,6 +41,12 @@ func (c *Client) normalize(err error) error {
 	}
 	var re *goopenai.RequestError
 	if errors.As(err, &re) {
+		if overflow, used, limit := llm.DetectContextOverflow(re.Error()); overflow {
+			return &llm.Error{
+				Class: llm.ErrContextOverflow, Provider: c.Name(),
+				StatusCode: re.HTTPStatusCode, Used: used, Limit: limit, Err: err,
+			}
+		}
 		return &llm.Error{
 			Class:      c.classify(re.HTTPStatusCode, "", "", re.Error()),
 			Provider:   c.Name(),

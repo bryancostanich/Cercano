@@ -18,16 +18,21 @@ Spec: `efforts/size-limit-diagnostics/spec.md`
 
 ## Phase 3 — Normalize size errors into named llm.Error classes
 
-- [ ] Define `context_overflow` (input) and `output_truncated` (output) error kinds in the `internal/llm` error taxonomy, carrying `used`/`limit` fields when the provider supplies them.
-- [ ] Map the llama-server `request (N tokens) exceeds the available context size (M tokens)` string to `context_overflow` with parsed counts.
-- [ ] Map the OpenAI-compatible `Context size has been exceeded` passthrough to `context_overflow` (counts absent → zero/unknown).
-- [ ] Tests: adapter-level string → normalized error class + parsed counts for each path.
+- [x] Define `context_overflow` (input) and `output_truncated` (output) error kinds in the `internal/llm` error taxonomy, carrying `used`/`limit` fields when the provider supplies them.
+  <!-- Local surprise (execution): output truncation is NOT an error — it
+                      surfaces as a successful ChatResponse with StopReason "length", already made
+                      legible by Phase 1's IsLengthTruncation. An `output_truncated` ErrorClass
+                      would be dead code (nothing constructs it), so it is dropped. Only the
+                      input-side `context_overflow` class is added. -->
+- [x] Map the llama-server `request (N tokens) exceeds the available context size (M tokens)` string to `context_overflow` with parsed counts.
+- [x] Map the OpenAI-compatible `Context size has been exceeded` passthrough to `context_overflow` (counts absent → zero/unknown).
+- [x] Tests: adapter-level string → normalized error class + parsed counts for each path.
 
 ## Verification gate
 
-- [ ] `go build ./...` (server module)
-- [ ] `go test ./...` (server module) — focus `internal/agent`, `internal/llm`
-- [ ] Re-run the MCP dashboard scenario shape as a loop-level test if feasible (truncated large Write → chunking guidance, not infinite retry).
+- [x] `go build ./...` (server module)
+- [x] `go test ./...` (server module) — focus `internal/agent`, `internal/llm`
+- [x] Re-run the MCP dashboard scenario shape as a loop-level test if feasible (truncated large Write → chunking guidance, not infinite retry).
 
 ## Sequencing notes
 

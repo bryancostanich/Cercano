@@ -71,8 +71,9 @@ func (e Event) Notice() string {
 		llm.ErrBusy:           "server busy",
 		llm.ErrAuth:           "auth failed",
 		llm.ErrNetwork:        "unreachable",
-		llm.ErrInvalidRequest: "rejected the request",
-		llm.ErrUnknown:        "failed",
+		llm.ErrInvalidRequest:  "rejected the request",
+		llm.ErrContextOverflow: "context window exceeded",
+		llm.ErrUnknown:         "failed",
 	}[e.Class]
 	if what == "" {
 		what = "failed"
@@ -226,10 +227,12 @@ func (p *Provider) quotaCoolingDown() bool {
 }
 
 // failsOver reports whether a class is worth re-serving on a different
-// vendor. invalid_request fails everywhere; everything else is a
-// primary-side condition a backup could dodge.
+// vendor. invalid_request fails everywhere; context_overflow fails identically
+// on any model whose window is the same or smaller (and dispatch sub-agents
+// often have no backup at all), so it is surfaced rather than failed over.
+// Everything else is a primary-side condition a backup could dodge.
 func failsOver(class llm.ErrorClass) bool {
-	return class != llm.ErrInvalidRequest
+	return class != llm.ErrInvalidRequest && class != llm.ErrContextOverflow
 }
 
 // backupRequest rewrites the request into the backup provider's model

@@ -451,12 +451,25 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		var rCalls, wxCalls []pendingCall
 		for _, tc := range toolCalls {
 			// A wrapped malformed input never reaches the tool: answer with
-			// the raw text so the model can see exactly what it emitted and
-			// resend valid JSON.
+			// the raw text so the model can see exactly what it emitted.
 			if raw, malformed := llm.MalformedToolInput(tc.ToolInput); malformed {
+				// Distinguish a genuine authoring mistake from a size-limit
+				// truncation. When the response was cut off at the output-token
+				// cap (StopReason "length"/"max_tokens"), the arguments were
+				// sliced off mid-JSON — the input is not "invalid", it is
+				// incomplete because the payload was too large to emit in one
+				// call. Telling the model to "resend valid JSON" here makes it
+				// resend the same oversized call and truncate again (an infinite
+				// retry). Instead, name the truncation and tell it to chunk.
+				var content string
+				if llm.IsLengthTruncation(resp.StopReason) {
+					content = fmt.Sprintf("this tool call was cut off at the output-token limit — the arguments are incomplete because the payload was too large to emit in one call, not because the JSON was malformed. Do NOT resend the same call. If you are writing a file, split it into several smaller Write/Edit calls (write part, then append the rest with additional Edit calls). Raw (truncated) input received: %s", truncateForError(raw))
+				} else {
+					content = fmt.Sprintf("tool input was not valid JSON — resend the call with arguments as a single valid JSON object. Raw input received: %s", truncateForError(raw))
+				}
 				results = append(results, llm.Block{
 					Type: llm.BlockToolResult, ToolUseRef: tc.ToolUseID,
-					Content: fmt.Sprintf("tool input was not valid JSON — resend the call with arguments as a single valid JSON object. Raw input received: %s", truncateForError(raw)),
+					Content: content,
 					IsError: true,
 				})
 				continue

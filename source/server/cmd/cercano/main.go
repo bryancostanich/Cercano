@@ -1709,6 +1709,11 @@ func generateSessionID() string {
 
 // runServerMode starts the gRPC server in standalone mode (for IDE clients).
 func runServerMode(cfg config.Config) {
+	// Tee log.Printf diagnostics to ~/.cercano-dispatch.log so they survive
+	// when the CLI auto-launches this agent and swallows its stderr. Without
+	// this, subsystem logs (e.g. [mcphost] connection failures) are lost.
+	setupDispatchLogFile()
+
 	// Persistent crash log. Sits alongside config.yaml so operators can
 	// find it after the fact. Failure to open the log is non-fatal —
 	// crash recording is nice-to-have; the server should still start.

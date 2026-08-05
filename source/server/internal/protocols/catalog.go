@@ -5,7 +5,7 @@ var builtinProtocols = []Protocol{
 		Name:        "design-decisions",
 		Description: "Stop and weigh real options before coding a structural decision.",
 		Domain:      DomainCore,
-		Trigger:     "Facing a real decision with more than one viable approach → stop, enumerate the real options with their trade-offs in plain English, and get human approval before writing code.",
+		Trigger:     "Facing a real decision with more than one viable approach → stop, enumerate the real options in a Markdown pipe table (decision axes as rows, the actual option titles across the header row) with their trade-offs in plain English, and get human approval before writing code.",
 		Body: `# Design Decision Protocol
 
 ## When This Applies

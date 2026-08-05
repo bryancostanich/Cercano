@@ -176,6 +176,16 @@ func newRuntimeDashboard(ag *agentclient.Client, p theme.Palette, s theme.Styles
 	search.CharLimit = 0
 	search.SetWidth(32)
 	blinkCmd := search.Focus()
+	// The Runtime tab never renders a catalog block (see fullContent's mode
+	// guard), so starting it focused on the catalog routes every keypress to
+	// an invisible model list — arrow keys silently move a cursor nothing
+	// shows, and Enter can fire the catalog's download action against
+	// whatever real model that cursor lands on. Start on actions instead;
+	// the Models tab keeps the existing catalog-first behavior.
+	focus := runtimeFocusCatalog
+	if mode == dashboardModeRuntime {
+		focus = runtimeFocusActions
+	}
 	dashboard := &runtimeDashboard{
 		palette:         p,
 		styles:          s,
@@ -183,7 +193,7 @@ func newRuntimeDashboard(ag *agentclient.Client, p theme.Palette, s theme.Styles
 		width:           w,
 		height:          h,
 		mode:            mode,
-		focus:           runtimeFocusCatalog,
+		focus:           focus,
 		catalogSearch:   search,
 		estimates:       make(map[string]agentclient.ModelRAMEstimate),
 		estimatePending: make(map[string]bool),
@@ -497,6 +507,18 @@ func (d *runtimeDashboard) advanceSection(dir int) {
 	}
 	next := current + dir
 	if next < 0 || next >= len(starts) {
+		// The Runtime tab has no catalog block to focus (see
+		// newRuntimeDashboard) — wrap within the action sections instead of
+		// re-focusing the invisible catalog search box.
+		if d.mode == dashboardModeRuntime {
+			if len(starts) == 0 {
+				return
+			}
+			next = ((next % len(starts)) + len(starts)) % len(starts)
+			d.operationCursor = starts[next]
+			d.scrollFollowAction()
+			return
+		}
 		d.focus = runtimeFocusCatalog
 		_ = d.catalogSearch.Focus()
 		return
@@ -593,6 +615,17 @@ func (d *runtimeDashboard) operationActions() []runtimeDashboardAction {
 		}
 	}
 	return actions
+}
+
+// atSectionTop reports whether the dashboard's active cursor is at the very
+// first row of its current focus target — the point from which Up should
+// climb back to the config tab strip rather than no-op against a clamped
+// cursor. Used by handleConfigSurfaceKey's up-arrow climb-back.
+func (d *runtimeDashboard) atSectionTop() bool {
+	if d.focus == runtimeFocusCatalog {
+		return d.catalogCursor == 0
+	}
+	return d.operationCursor == 0
 }
 
 func (d *runtimeDashboard) clampOperationCursor() {

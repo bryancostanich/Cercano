@@ -59,33 +59,86 @@ func TestParseYesNo(t *testing.T) {
 	}
 }
 
-func TestPromptInstall_AutoYes(t *testing.T) {
-	// With --install-engine flag, should not read from stdin at all
+func TestPromptEngineSetupChoice_AutoYes(t *testing.T) {
+	// With --install-engine flag, should not read from stdin at all.
 	var buf bytes.Buffer
-	result := promptInstallEngine(&buf, nil, true)
-	if !result {
-		t.Error("expected true when --install-engine is set")
+	choice, remote := promptEngineSetupChoice(&buf, nil, true)
+	if choice != engineChoiceInstallLocal {
+		t.Errorf("expected engineChoiceInstallLocal, got %v", choice)
+	}
+	if remote != "" {
+		t.Errorf("expected empty remote URL, got %q", remote)
 	}
 }
 
-func TestPromptInstall_Interactive(t *testing.T) {
+func TestPromptEngineSetupChoice_PipedStdin(t *testing.T) {
 	var outBuf bytes.Buffer
-	inBuf := strings.NewReader("y\n")
-	result := promptInstallEngine(&outBuf, inBuf, false)
-	if !result {
-		t.Error("expected true when user answers 'y'")
+	choice, remote := promptEngineSetupChoice(&outBuf, nil, false)
+	if choice != engineChoiceSkip {
+		t.Errorf("expected engineChoiceSkip for piped/nil stdin, got %v", choice)
 	}
-	if !strings.Contains(outBuf.String(), "No AI engine backend was detected") {
-		t.Error("expected engine-agnostic messaging in output")
+	if remote != "" {
+		t.Errorf("expected empty remote URL, got %q", remote)
+	}
+	if !strings.Contains(outBuf.String(), "https://ollama.com/download") {
+		t.Error("expected manual-install guidance in output")
 	}
 }
 
-func TestPromptInstall_Declined(t *testing.T) {
+func TestPromptEngineSetupChoice_InstallLocal(t *testing.T) {
 	var outBuf bytes.Buffer
-	inBuf := strings.NewReader("n\n")
-	result := promptInstallEngine(&outBuf, inBuf, false)
-	if result {
-		t.Error("expected false when user answers 'n'")
+	inBuf := strings.NewReader("1\n")
+	choice, remote := promptEngineSetupChoice(&outBuf, inBuf, false)
+	if choice != engineChoiceInstallLocal {
+		t.Errorf("expected engineChoiceInstallLocal, got %v", choice)
+	}
+	if remote != "" {
+		t.Errorf("expected empty remote URL, got %q", remote)
+	}
+}
+
+func TestPromptEngineSetupChoice_DefaultBlank(t *testing.T) {
+	var outBuf bytes.Buffer
+	inBuf := strings.NewReader("\n")
+	choice, _ := promptEngineSetupChoice(&outBuf, inBuf, false)
+	if choice != engineChoiceInstallLocal {
+		t.Errorf("expected blank input to default to engineChoiceInstallLocal, got %v", choice)
+	}
+}
+
+func TestPromptEngineSetupChoice_Remote(t *testing.T) {
+	var outBuf bytes.Buffer
+	inBuf := strings.NewReader("2\nhttp://mac-studio.local:11434\n")
+	choice, remote := promptEngineSetupChoice(&outBuf, inBuf, false)
+	if choice != engineChoiceRemote {
+		t.Errorf("expected engineChoiceRemote, got %v", choice)
+	}
+	if remote != "http://mac-studio.local:11434" {
+		t.Errorf("expected remote URL 'http://mac-studio.local:11434', got %q", remote)
+	}
+}
+
+func TestPromptEngineSetupChoice_Skip(t *testing.T) {
+	var outBuf bytes.Buffer
+	inBuf := strings.NewReader("3\n")
+	choice, remote := promptEngineSetupChoice(&outBuf, inBuf, false)
+	if choice != engineChoiceSkip {
+		t.Errorf("expected engineChoiceSkip, got %v", choice)
+	}
+	if remote != "" {
+		t.Errorf("expected empty remote URL, got %q", remote)
+	}
+}
+
+func TestPromptEngineSetupChoice_Unrecognized(t *testing.T) {
+	var outBuf bytes.Buffer
+	inBuf := strings.NewReader("banana\n")
+	choice, remote := promptEngineSetupChoice(&outBuf, inBuf, false)
+	if choice != engineChoiceSkip {
+		t.Errorf("expected engineChoiceSkip for unrecognized input, got %v", choice)
+	}
+	if remote != "" {
+		t.Errorf("expected empty remote URL, got %q", remote)
 	}
 }
 

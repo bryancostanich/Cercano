@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"cercano/source/server/internal/localruntime"
@@ -43,14 +44,31 @@ func (e *DetectError) Unwrap() error { return e.Cause }
 
 // SuggestedCommand returns the command a user should run to satisfy the
 // missing prerequisite. Empty when there's no automated recovery (e.g., a
-// user with 3 GGUFs needs to pick one; no command fixes that).
+// user with 3 GGUFs needs to pick one; no command fixes that, and neither
+// does a missing binary on a platform/setup with no managed install path).
+//
+// Must stay in sync with defaultInstallCommand (install.go): this is a
+// suggestion the UI displays as the exact command "Install now" will attempt
+// to run, so it can never name a command that platform can't actually run.
 func (e *DetectError) SuggestedCommand() string {
-	if e.Missing == "binary" {
+	if e.Missing != "binary" {
+		return ""
+	}
+	switch runtime.GOOS {
+	case "darwin":
 		// llama.cpp is the upstream Homebrew formula that ships llama-server.
 		// The setup wizard uses the same command.
 		return "brew install llama.cpp"
+	case "windows":
+		// Only suggest winget when it's actually there to run — otherwise
+		// "Install now" would just fail with the same unsupported error.
+		if _, err := exec.LookPath("winget"); err == nil {
+			return "winget " + strings.Join(wingetInstallArgs(), " ")
+		}
+		return ""
+	default:
+		return ""
 	}
-	return ""
 }
 
 // Detect populates cfg in-place from filesystem inspection. On success cfg is

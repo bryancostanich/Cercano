@@ -2622,6 +2622,8 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		return m, m.openConfigSurface(configTabModels)
 	case slash.ResultOpenMcpConfig:
 		return m, m.openConfigSurface(configTabMcp)
+	case slash.ResultOpenRuntimeConfig:
+		return m, m.openConfigSurface(configTabRuntime)
 	case slash.ResultOpenContextView:
 		return m, m.openConfigSurface(configTabContext)
 	case slash.ResultOpenWizard:

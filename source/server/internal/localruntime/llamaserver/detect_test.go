@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -25,10 +27,16 @@ func writeGGUF(t *testing.T, dir, name string) string {
 
 // writeFakeBinary drops an executable stub at dir/llama-server so exec.LookPath
 // (rooted at dir when PATH is set) can find it. The file is never invoked by
-// Detect — only inspected for existence + not-a-dir.
+// Detect — only inspected for existence + not-a-dir. On Windows, LookPath only
+// resolves a bare name against PATHEXT-suffixed files (a plain extensionless
+// stub is invisible to it), so the fake binary needs the .exe suffix there.
 func writeFakeBinary(t *testing.T, dir string) string {
 	t.Helper()
-	p := filepath.Join(dir, "llama-server")
+	name := "llama-server"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	p := filepath.Join(dir, name)
 	if err := os.WriteFile(p, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("write fake binary: %v", err)
 	}
@@ -92,8 +100,23 @@ func TestDetect_ReturnsMissingBinaryWhenPATHEmpty(t *testing.T) {
 	if de.Missing != "binary" {
 		t.Errorf("Missing = %q, want %q", de.Missing, "binary")
 	}
-	if de.SuggestedCommand() != "brew install llama.cpp" {
-		t.Errorf("SuggestedCommand = %q; expected brew install command", de.SuggestedCommand())
+	// SuggestedCommand names the exact command "Install now" would run
+	// (defaultInstallCommand in install.go). darwin always has brew as the
+	// suggestion; windows only suggests winget when winget is actually on
+	// this test host's PATH (mirroring the same check SuggestedCommand
+	// makes); everywhere else there's no managed install path, so it must
+	// be empty rather than suggesting a command that doesn't exist there.
+	wantCmd := ""
+	switch runtime.GOOS {
+	case "darwin":
+		wantCmd = "brew install llama.cpp"
+	case "windows":
+		if _, err := exec.LookPath("winget"); err == nil {
+			wantCmd = "winget " + strings.Join(wingetInstallArgs(), " ")
+		}
+	}
+	if got := de.SuggestedCommand(); got != wantCmd {
+		t.Errorf("SuggestedCommand = %q, want %q", got, wantCmd)
 	}
 	if cfg.Enabled {
 		t.Errorf("Enabled should stay false when binary is missing")

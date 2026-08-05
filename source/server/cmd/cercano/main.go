@@ -12,6 +12,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -1014,9 +1015,9 @@ func runSetup(installEngine bool) {
 	if detection.Available {
 		fmt.Printf("  OK: %s is running at %s\n", detection.Name, detection.URL)
 	} else {
-		// Prompt for installation
-		shouldInstall := promptInstallEngine(os.Stderr, os.Stdin, installEngine)
-		if shouldInstall {
+		choice, remoteURL := promptEngineSetupChoice(os.Stderr, os.Stdin, installEngine)
+		switch choice {
+		case engineChoiceInstallLocal:
 			goos := runtime.GOOS
 			hasBrew := hasBrewInstalled()
 			if err := installOllama(goos, hasBrew); err != nil {
@@ -1038,7 +1039,28 @@ func runSetup(installEngine bool) {
 			}
 			fmt.Fprintln(os.Stderr, "  OK: Ollama is running.")
 			engineAvailable = true
-		} else {
+		case engineChoiceRemote:
+			u, err := url.ParseRequestURI(remoteURL)
+			if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+				fmt.Fprintf(os.Stderr, "  FAIL: %q is not a valid http:// or https:// URL.\n", remoteURL)
+				fmt.Fprintln(os.Stderr, "  Skipping engine setup; re-run 'cercano setup' to try again.")
+				break
+			}
+			cfg.OllamaURL = remoteURL
+			// The user explicitly chose to use this remote Ollama server, so
+			// make it the active engine regardless of whether it responds to
+			// this reachability probe right now (see waitForEngine below) —
+			// otherwise cfg.OpenRuntime stays at its "llama_server" default
+			// and inference/model listing silently ignores the URL just saved.
+			cfg.OpenRuntime = "ollama"
+			if err := waitForEngine(checkOllama, cfg.OllamaURL, 3); err != nil {
+				fmt.Fprintf(os.Stderr, "  WARN: %v\n", err)
+				fmt.Fprintln(os.Stderr, "  Saving the URL anyway — check that Ollama is reachable there and re-run 'cercano setup'.")
+			} else {
+				fmt.Printf("  OK: %s is running at %s\n", detection.Name, cfg.OllamaURL)
+				engineAvailable = true
+			}
+		case engineChoiceSkip:
 			fmt.Fprintln(os.Stderr, "  Skipping engine installation.")
 			fmt.Fprintln(os.Stderr, "  Install Ollama from https://ollama.com/download when ready, then re-run 'cercano setup'.")
 		}

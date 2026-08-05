@@ -3,11 +3,14 @@ package mcphost
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"cercano/source/server/internal/llm"
 )
 
 // remoteTool is a tool as advertised by an external MCP server.
@@ -61,19 +64,21 @@ func (c *conn) listTools(ctx context.Context) ([]remoteTool, error) {
 	return out, nil
 }
 
-// call invokes a tool. Returns (text, isToolError, transportError). A tool-level
-// error (isToolError) carries its message in text; a transport error means the
-// call never completed.
-func (c *conn) call(ctx context.Context, tool string, args json.RawMessage) (string, bool, error) {
+// call invokes a tool. Returns (text, images, isToolError, transportError). A
+// tool-level error (isToolError) carries its message in text; a transport error
+// means the call never completed. images holds any image parts of the result as
+// BlockImage-typed llm.Blocks.
+func (c *conn) call(ctx context.Context, tool string, args json.RawMessage) (string, []llm.Block, bool, error) {
 	var arguments any
 	if len(args) > 0 {
 		arguments = args
 	}
 	res, err := c.sess.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: arguments})
 	if err != nil {
-		return "", false, err
+		return "", nil, false, err
 	}
-	return flattenContent(res.Content), res.IsError, nil
+	text, images := flattenContent(res.Content)
+	return text, images, res.IsError, nil
 }
 
 func (c *conn) close() error {
@@ -83,16 +88,26 @@ func (c *conn) close() error {
 	return c.sess.Close()
 }
 
-// flattenContent concatenates the text parts of an MCP tool result. Non-text
-// content (images, resources) is ignored in v1.
-func flattenContent(content []mcp.Content) string {
+// flattenContent splits an MCP tool result into its concatenated text parts and
+// its image parts. Image parts become BlockImage-typed llm.Blocks with MediaType
+// + base64 ImageData; the tool loop decides (per model vision support) whether to
+// forward them. Resource/embedded content is still ignored.
+func flattenContent(content []mcp.Content) (string, []llm.Block) {
 	var b strings.Builder
+	var images []llm.Block
 	for _, part := range content {
-		if tc, ok := part.(*mcp.TextContent); ok {
-			b.WriteString(tc.Text)
+		switch p := part.(type) {
+		case *mcp.TextContent:
+			b.WriteString(p.Text)
+		case *mcp.ImageContent:
+			images = append(images, llm.Block{
+				Type:      llm.BlockImage,
+				MediaType: p.MIMEType,
+				ImageData: base64.StdEncoding.EncodeToString(p.Data),
+			})
 		}
 	}
-	return b.String()
+	return b.String(), images
 }
 
 var errNoSession = errors.New("mcp: no live session")

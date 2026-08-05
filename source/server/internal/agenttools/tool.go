@@ -22,6 +22,8 @@ package agenttools
 import (
 	"context"
 	"encoding/json"
+
+	"cercano/source/server/internal/llm"
 )
 
 // Permission tags how risky a Tool's effects are. The CLI uses these to
@@ -107,6 +109,13 @@ type Result struct {
 	// computed against the pre-edit file; write_file: 1). 0 = not applicable.
 	// Clients use it to number the lines of the args diff they render.
 	StartLine int `json:"start_line,omitempty"`
+	// Images carries any image content a tool returns (MCP tools whose result
+	// includes image parts). Each entry is a BlockImage-typed llm.Block with
+	// MediaType + ImageData populated. The tool loop appends these as sibling
+	// image blocks in the same user turn, immediately after the tool_result —
+	// but only when the active model reports SupportsVision; otherwise the
+	// tool_result text carries a stub and the images are dropped.
+	Images []llm.Block `json:"images,omitempty"`
 }
 
 // LLMContent renders the result as the text the model receives as the tool

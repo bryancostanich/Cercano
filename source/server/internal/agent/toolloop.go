@@ -193,6 +193,32 @@ type ToolLoopResult struct {
 // callers; the config package owns the single source of truth.
 const MaxToolLoopIterations = config.DefaultToolLoopMaxIterations
 
+// toolResultBlocks builds the model-facing blocks for one completed tool call.
+// The tool_result block always comes first. When the tool returned images and
+// the active model reports vision support, each image is appended as a sibling
+// BlockImage in the same user turn immediately after the tool_result (the shape
+// every provider adapter already renders). When the model has no vision support,
+// the images are dropped and a stub is folded into the tool_result text so the
+// model knows an image was produced but not shown.
+func toolResultBlocks(out llm.Block, res *agenttools.Result, supportsVision bool) []llm.Block {
+	if res == nil || len(res.Images) == 0 {
+		return []llm.Block{out}
+	}
+	if !supportsVision {
+		stub := fmt.Sprintf("[%d image(s) omitted: the active model has no vision support]", len(res.Images))
+		if out.Content == "" {
+			out.Content = stub
+		} else {
+			out.Content += "\n" + stub
+		}
+		return []llm.Block{out}
+	}
+	blocks := make([]llm.Block, 0, 1+len(res.Images))
+	blocks = append(blocks, out)
+	blocks = append(blocks, res.Images...)
+	return blocks
+}
+
 func summarizeResult(res *agenttools.Result) string {
 	if res == nil {
 		return ""
@@ -279,6 +305,11 @@ func flattenToolResultsForModel(calls, results []llm.Block) string {
 		byID[call.ToolUseID] = call
 	}
 	for i, result := range results {
+		// Skip sibling image blocks (BlockImage) that a vision-capable tool
+		// result may have appended; the flattened text view carries no images.
+		if result.Type != llm.BlockToolResult {
+			continue
+		}
 		call := byID[result.ToolUseRef]
 		if i > 0 {
 			b.WriteString("\n\n")
@@ -530,9 +561,10 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			}
 		}
 
+		supportsVision := in.Provider.Capabilities().SupportsVision
 		type rr struct {
-			idx int
-			res llm.Block
+			idx    int
+			blocks []llm.Block
 		}
 		rChan := make(chan rr, len(rCalls))
 		for i, pc := range rCalls {
@@ -543,24 +575,29 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				emit(LoopEvent{Kind: LoopToolExecStart, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName})
 				res, err := pc.tool.Execute(execCtx, pc.block.ToolInput)
 				out := llm.Block{Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID}
+				var blocks []llm.Block
 				if err != nil {
 					out.Content = err.Error()
 					out.IsError = true
+					blocks = []llm.Block{out}
 					emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: err.Error(), IsError: true})
 				} else {
 					out.Content = res.LLMContent()
 					out.StartLine = res.StartLine
+					blocks = toolResultBlocks(out, res, supportsVision)
 					emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: summarizeResult(res), Detail: res.Detail, StartLine: res.StartLine, IsError: false})
 				}
-				rChan <- rr{idx: i, res: out}
+				rChan <- rr{idx: i, blocks: blocks}
 			}(i, pc)
 		}
-		rResults := make([]llm.Block, len(rCalls))
+		rResults := make([][]llm.Block, len(rCalls))
 		for range rCalls {
 			r := <-rChan
-			rResults[r.idx] = r.res
+			rResults[r.idx] = r.blocks
 		}
-		results = append(results, rResults...)
+		for _, blocks := range rResults {
+			results = append(results, blocks...)
+		}
 
 		watchdogIntervened := false
 		for _, pc := range wxCalls {
@@ -672,12 +709,13 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				out.Content = err.Error()
 				out.IsError = true
 				emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: err.Error(), IsError: true})
+				results = append(results, out)
 			} else {
 				out.Content = res.LLMContent()
 				out.StartLine = res.StartLine
 				emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: summarizeResult(res), Detail: res.Detail, StartLine: res.StartLine, IsError: false})
+				results = append(results, toolResultBlocks(out, res, supportsVision)...)
 			}
-			results = append(results, out)
 		}
 
 		allErrored := true

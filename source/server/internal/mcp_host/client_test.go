@@ -3,10 +3,13 @@ package mcphost
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"cercano/source/server/internal/llm"
 )
 
 type echoIn struct {
@@ -46,7 +49,7 @@ func TestConnListCall(t *testing.T) {
 		t.Fatalf("tools = %+v", tools)
 	}
 
-	text, isErr, err := c.call(ctx, "echo", json.RawMessage(`{"text":"hi"}`))
+	text, images, isErr, err := c.call(ctx, "echo", json.RawMessage(`{"text":"hi"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,5 +58,34 @@ func TestConnListCall(t *testing.T) {
 	}
 	if text != "echo:hi" {
 		t.Fatalf("call result = %q", text)
+	}
+	if len(images) != 0 {
+		t.Fatalf("expected no images, got %d", len(images))
+	}
+}
+
+func TestFlattenContent_TextAndImage(t *testing.T) {
+	raw := []byte{0xDE, 0xAD, 0xBE, 0xEF}
+	content := []mcp.Content{
+		&mcp.TextContent{Text: "hello "},
+		&mcp.ImageContent{MIMEType: "image/png", Data: raw},
+		&mcp.TextContent{Text: "world"},
+	}
+	text, images := flattenContent(content)
+	if text != "hello world" {
+		t.Fatalf("text = %q, want %q", text, "hello world")
+	}
+	if len(images) != 1 {
+		t.Fatalf("images = %d, want 1", len(images))
+	}
+	img := images[0]
+	if img.Type != llm.BlockImage {
+		t.Fatalf("image block type = %q, want %q", img.Type, llm.BlockImage)
+	}
+	if img.MediaType != "image/png" {
+		t.Fatalf("media type = %q", img.MediaType)
+	}
+	if want := base64.StdEncoding.EncodeToString(raw); img.ImageData != want {
+		t.Fatalf("image data = %q, want %q", img.ImageData, want)
 	}
 }

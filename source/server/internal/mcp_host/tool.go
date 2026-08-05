@@ -55,7 +55,7 @@ func (t *mcpTool) Execute(ctx context.Context, raw json.RawMessage) (*agenttools
 	if err != nil {
 		return nil, fmt.Errorf("mcp server %q unavailable: %w — /mcp restart %s", t.server, err, t.server)
 	}
-	text, isToolErr, callErr := c.call(ctx, t.tool, raw)
+	text, images, isToolErr, callErr := c.call(ctx, t.tool, raw)
 	if callErr != nil {
 		return nil, fmt.Errorf("mcp %s: %w", t.fqName, callErr)
 	}
@@ -67,5 +67,6 @@ func (t *mcpTool) Execute(ctx context.Context, raw json.RawMessage) (*agenttools
 	}
 	res := agenttools.NewTextResult(text)
 	res.Detail = "mcp"
+	res.Images = images
 	return res, nil
 }

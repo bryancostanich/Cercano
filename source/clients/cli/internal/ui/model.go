@@ -3544,7 +3544,12 @@ func rolloverPreviewSnippet(preview string) string {
 // gets a red ⚠ destructive emphasis. MCP tools get an additional [a]lways key.
 func (m Model) renderConfirmPrompt(p *pendingToolCall) string {
 	head := m.styles.Accent.Render("▸ ")
-	if p.Permission == "X" {
+	if isPlanningTool(p.Name) {
+		// Session-control prompts (enter/exit planning, request approval) are
+		// X-tier so the gate always fires, but they destroy nothing — never
+		// render the red DESTRUCTIVE emphasis. A calm marker instead.
+		head = m.styles.Accent.Render("▸ ")
+	} else if p.Permission == "X" {
 		if isDispatchTool(p.Name) {
 			head = m.styles.Error.Render("▸ ⚠ DELEGATED ")
 		} else {
@@ -3588,6 +3593,9 @@ func (m Model) confirmPromptHints(p *pendingToolCall) string {
 }
 
 func confirmPromptTitle(p *pendingToolCall) string {
+	if title := planningPromptTitle(p); title != "" {
+		return title
+	}
 	if isDispatchTool(p.Name) {
 		return displayToolName(p.Name) + " wants to run a delegated agent"
 	}
@@ -3634,6 +3642,21 @@ func confirmPromptDetails(p *pendingToolCall) []string {
 		return nil
 	}
 	details := make([]string, 0, 2)
+	if isPlanningTool(p.Name) {
+		// Show the model's rationale (suggest_plan) or plan summary
+		// (request_plan_approval) as the "why", keeping the title a clean
+		// question. plan_exit carries neither and shows no detail.
+		if reason := oneLine(stringArg(obj, "reason")); reason != "" {
+			details = append(details, "Why: "+truncateArgs(reason, 200))
+		}
+		if summary := oneLine(stringArg(obj, "summary")); summary != "" {
+			details = append(details, "Plan: "+truncateArgs(summary, 200))
+		}
+		if effort := oneLine(stringArg(obj, "effort")); effort != "" {
+			details = append(details, "Effort: "+truncateArgs(effort, 80))
+		}
+		return details
+	}
 	if intent := oneLine(stringArg(obj, "intent")); intent != "" {
 		details = append(details, "Intent: "+truncateArgs(intent, 160))
 	} else if isDispatchTool(p.Name) {
@@ -3668,6 +3691,34 @@ func dispatchToolRisk(tools string) string {
 
 func isDispatchTool(name string) bool {
 	return name == "dispatch" || name == "workflow"
+}
+
+// isPlanningTool reports whether a confirm prompt is a session-control planning
+// action rather than a real tool invocation. These are X-tier (so the gate
+// always fires) but destroy nothing, and deserve a plain-English question
+// instead of the raw "name arg=val" dump.
+func isPlanningTool(name string) bool {
+	switch name {
+	case "suggest_plan", "request_plan_approval", "plan_exit":
+		return true
+	}
+	return false
+}
+
+// planningPromptTitle returns the human-facing question for a planning
+// session-control prompt, or "" if p is not a planning tool. The supporting
+// reason/summary is surfaced separately in confirmPromptDetails, so the title
+// stays a clean one-liner.
+func planningPromptTitle(p *pendingToolCall) string {
+	switch p.Name {
+	case "suggest_plan":
+		return "Enter plan mode to work this out before making changes?"
+	case "request_plan_approval":
+		return "Plan is ready — leave plan mode and start executing it?"
+	case "plan_exit":
+		return "Leave plan mode?"
+	}
+	return ""
 }
 
 func stringArg(obj map[string]any, key string) string {

@@ -47,6 +47,45 @@ func TestRenderConfirmPrompt_X_HasDestructiveEmphasis(t *testing.T) {
 	}
 }
 
+func TestRenderConfirmPrompt_SuggestPlan_AsksPlainQuestionNotDestructive(t *testing.T) {
+	m := minimalModel()
+	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
+		Name:       "suggest_plan",
+		Args:       `{"reason":"spans 4 files; approach uncertain","effort":"viz-drag-audit"}`,
+		Permission: "X",
+	}))
+	if !strings.Contains(s, "Enter plan mode") {
+		t.Errorf("suggest_plan prompt should ask a plain question, got: %q", s)
+	}
+	if strings.Contains(s, "DESTRUCTIVE") || strings.Contains(s, "⚠") {
+		t.Errorf("suggest_plan is X-tier but destroys nothing; must not be DESTRUCTIVE/⚠: %q", s)
+	}
+	if !strings.Contains(s, "Why: spans 4 files; approach uncertain") {
+		t.Errorf("suggest_plan prompt should surface reason as Why detail, got: %q", s)
+	}
+	if strings.Contains(s, `{"reason"`) || strings.Contains(s, "reason=") {
+		t.Errorf("prompt should not dump raw args, got: %q", s)
+	}
+}
+
+func TestRenderConfirmPrompt_RequestPlanApproval_AsksToExecute(t *testing.T) {
+	m := minimalModel()
+	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
+		Name:       "request_plan_approval",
+		Args:       `{"summary":"Fix handle-drag: 3 phases","effort":"viz-drag-audit"}`,
+		Permission: "X",
+	}))
+	if !strings.Contains(s, "start executing") {
+		t.Errorf("request_plan_approval prompt should ask to execute, got: %q", s)
+	}
+	if strings.Contains(s, "DESTRUCTIVE") || strings.Contains(s, "⚠") {
+		t.Errorf("request_plan_approval must not be DESTRUCTIVE/⚠: %q", s)
+	}
+	if !strings.Contains(s, "Plan: Fix handle-drag: 3 phases") {
+		t.Errorf("prompt should surface summary as Plan detail, got: %q", s)
+	}
+}
+
 func TestRenderConfirmPrompt_DestructiveMCP_HasWarnGlyph(t *testing.T) {
 	m := minimalModel()
 	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{

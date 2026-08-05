@@ -643,6 +643,12 @@ Example:
 - Get sign-off on the spec before writing the plan, and route the finished plan
   through ` + "`request_plan_approval`" + ` before any execution begins. That capability
   supplies the ` + "`y/n/d/c`" + ` handoff and drops the read-only fence only on approval.
+- Never leave planning mode by just starting to edit code. There are exactly two
+  exits, and you must call one of them: ` + "`request_plan_approval`" + ` when a plan is
+  written and you want execution to begin (asks the human), or ` + "`plan_exit`" + `
+  when you are abandoning the plan or concluded no written plan is needed (exits
+  silently, no approval). If you find yourself about to implement while still in
+  planning mode, stop and call one of these first.
 
 ## What This Prevents
 

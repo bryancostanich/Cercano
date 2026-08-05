@@ -77,10 +77,14 @@ func (p Profile) Allows(tier llm.Permission, name string) bool {
 // is written. It is X-tier specifically so that gate fires before Execute even
 // in Permissive mode.
 //
+// plan_exit is the silent abandon path: it must remain callable from inside
+// planning mode so the model can leave when a plan is not worth writing. It is
+// W-tier and exits with no gate.
+//
 // Both the agent-surface display aliases ("Write"/"Edit") and the underlying
 // capability names ("write_file"/"edit_file") are listed so the fence permits
 // the file tools regardless of which name reaches the gate.
-var planExtraTools = []string{"Write", "Edit", "write_file", "edit_file", "request_plan_approval"}
+var planExtraTools = []string{"Write", "Edit", "write_file", "edit_file", "request_plan_approval", "plan_exit"}
 
 // PlanProfile is the read-only exploration fence for planning mode (Fork 1):
 // read-tier tools plus the file-write tools needed to author spec.md/plan.md and

@@ -141,3 +141,64 @@ func TestChatView_TrailingActivityHiddenWhenNotStreaming(t *testing.T) {
 		t.Errorf("trailing 'thinking' line should not appear when not streaming, got:\n%s", got)
 	}
 }
+
+func TestChatView_TrailingActivityReservePreventsMidTurnBounce(t *testing.T) {
+	p := theme.Cracker()
+	c := newChatView(theme.NewStyles(p), p, "", "", 100, 20)
+	c.SetStreaming(true)
+	entries := []*Entry{
+		{Role: RoleUser, Content: "do it"},
+		{Role: RoleAssistant, Content: "First I will inspect the repo.", Streaming: true},
+	}
+	c.SetEntriesSlice(entries)
+
+	stale := time.Now()
+	c.SetAnimationTime(stale)
+	c.lastTokenAt = stale.Add(-2 * staleStreamThreshold)
+	c.SetEntries(entries)
+	if !c.IsBetweenPhases() {
+		t.Fatalf("setup: stale streaming entry should show trailing activity")
+	}
+	shownLines := c.TotalLineCount()
+	shown := stripAnsiCSI(strings.Join(c.PlainLines(), "\n"))
+	if !strings.Contains(shown, "thinking") {
+		t.Fatalf("setup: trailing activity should be visible, got:\n%s", shown)
+	}
+
+	fresh := stale.Add(time.Second)
+	c.SetAnimationTime(fresh)
+	c.lastTokenAt = fresh
+	c.SetEntries(entries)
+	if c.IsBetweenPhases() {
+		t.Fatalf("setup: fresh token should hide trailing activity")
+	}
+	hiddenLiveLines := c.TotalLineCount()
+	if hiddenLiveLines < shownLines {
+		t.Fatalf("mid-turn hidden activity shrank transcript: got %d lines, want at least %d", hiddenLiveLines, shownLines)
+	}
+	hiddenLive := stripAnsiCSI(strings.Join(c.PlainLines(), "\n"))
+	if strings.Contains(hiddenLive, "thinking") {
+		t.Fatalf("hidden live reserve should be blank, not activity text, got:\n%s", hiddenLive)
+	}
+
+	entries = append(entries, &Entry{Tool: &ToolEntry{ToolName: "Read", Status: ToolStatusInProgress, StartedAt: fresh}})
+	c.SetEntriesSlice(entries)
+	c.SetEntries(entries)
+	withNewContent := c.PlainLines()
+	if len(withNewContent) == 0 || strings.TrimSpace(withNewContent[len(withNewContent)-1]) == "" {
+		t.Fatalf("new visible content should consume the reserve instead of leaving a blank tail, got:%q", withNewContent)
+	}
+
+	entries[1].Streaming = false
+	entries[2].Tool.Status = ToolStatusComplete
+	c.SetStreaming(false)
+	c.SetEntries(entries)
+	settledLines := c.PlainLines()
+	if len(settledLines) == 0 || strings.TrimSpace(settledLines[len(settledLines)-1]) == "" {
+		t.Fatalf("completed turn should not retain a reserved blank tail, got:%q", settledLines)
+	}
+	settled := stripAnsiCSI(strings.Join(settledLines, "\n"))
+	if strings.Contains(settled, "thinking") {
+		t.Fatalf("completed turn should not retain trailing activity text, got:\n%s", settled)
+	}
+}

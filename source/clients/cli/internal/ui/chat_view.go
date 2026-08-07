@@ -125,6 +125,13 @@ type chatView struct {
 	// Without this, multi-step turns go dark visually once the first phase
 	// completes.
 	streaming bool
+	// tailReserve is the row count claimed by the trailing activity block, and
+	// tailReserveBaseRows is the natural transcript height when that claim was
+	// made. Once the "still working" line appears, hiding it mid-turn leaves the
+	// unfilled remainder blank; real streamed content consumes the reserve
+	// row-for-row so bottom-pinned scrollback does not bounce.
+	tailReserve         int
+	tailReserveBaseRows int
 	// lastTokenAt is the wall-clock time the most recent assistant text token
 	// arrived. IsBetweenPhases uses it to detect a streaming text entry that has
 	// gone quiet — the model finished a prose segment and is now off doing work
@@ -850,6 +857,12 @@ func (c *chatView) SetStreaming(s bool) {
 		// previous turn can't make this turn's opening (still tokenless) stream
 		// read as quiescent before its first token lands.
 		c.lastTokenAt = time.Time{}
+		c.tailReserve = 0
+		c.tailReserveBaseRows = 0
+	}
+	if !s {
+		c.tailReserve = 0
+		c.tailReserveBaseRows = 0
 	}
 	c.streaming = s
 }
@@ -1057,7 +1070,20 @@ func (c *chatView) SetEntries(entries []*Entry) {
 	// Trailing "still working" line: appears below the last entry while the
 	// turn is in flight but no entry is the visible focus of work. Matches
 	// the prose left-margin so it reads as another entry without being one.
-	if c.IsBetweenPhases() {
+	//
+	// Once the line has appeared during a turn, keep its unfilled rows reserved
+	// as blanks while the turn remains live. Otherwise the bottom-pinned viewport
+	// shrinks when IsBetweenPhases flips false (for example when tokens resume),
+	// making the transcript above it bounce. New streamed content consumes the
+	// reserve row-for-row; turn completion clears it.
+	naturalRows := 0
+	if b.Len() > 0 {
+		naturalRows = nl + 1
+	}
+	if !c.streaming {
+		c.tailReserve = 0
+		c.tailReserveBaseRows = 0
+	} else if c.IsBetweenPhases() {
 		wrapW := c.vp.Width()
 		if wrapW < 10 {
 			wrapW = 10
@@ -1067,10 +1093,20 @@ func (c *chatView) SetEntries(entries []*Entry) {
 			textW = 8
 		}
 		pad := strings.Repeat(" ", entryIndent)
+		block := indentBlock(pad, c.renderTrailingActivity(textW))
+		rows := strings.Count(block, "\n") + 1
 		if b.Len() > 0 {
+			rows += 2
 			b.WriteString("\n\n")
 		}
-		b.WriteString(indentBlock(pad, c.renderTrailingActivity(textW)))
+		c.tailReserve = rows
+		c.tailReserveBaseRows = naturalRows
+		b.WriteString(block)
+	} else if c.tailReserve > 0 {
+		remaining := c.tailReserve - (naturalRows - c.tailReserveBaseRows)
+		if remaining > 0 {
+			appendBlankRows(&b, remaining)
+		}
 	}
 	content := b.String()
 	c.content = content
@@ -1090,6 +1126,23 @@ func (c *chatView) SetEntries(entries []*Entry) {
 	} else if wasAtBottom {
 		c.vp.GotoBottom()
 	}
+}
+
+// appendBlankRows extends b by exactly rows visible blank rows. If b already
+// has content, each added newline creates one additional blank row after the
+// existing final line. If b is empty, N blank rows are represented by N-1
+// newline separators because even an empty string occupies one line.
+func appendBlankRows(b *strings.Builder, rows int) {
+	if rows <= 0 {
+		return
+	}
+	if b.Len() == 0 {
+		if rows > 1 {
+			b.WriteString(strings.Repeat("\n", rows-1))
+		}
+		return
+	}
+	b.WriteString(strings.Repeat("\n", rows))
 }
 
 // renderToolGroupBlock turns a contiguous slice of Tool-bearing entries into

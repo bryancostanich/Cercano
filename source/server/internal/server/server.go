@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -195,6 +196,14 @@ func (s *Server) InstallCapabilities() {
 				return fmt.Errorf("profile broker not configured")
 			}
 			return s.profileBroker.SetActive(name)
+		},
+		// restart_agent bounces the singleton agent via a self-SIGTERM once the
+		// user approves at the confirm gate. Same drain+child-stop path as the
+		// ShutdownAgent RPC; the CLI reconnect loop auto-launches a fresh agent.
+		RestartAgent: func(reason string) error {
+			log.Printf("restart_agent capability accepted: %s", reason)
+			s.scheduleSelfShutdown()
+			return nil
 		},
 	})
 }
@@ -1498,17 +1507,37 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 // ShutdownAgent implements proto.AgentServer. It returns before beginning
 // shutdown so the requesting client can receive the acknowledgement and let its
 // reconnect loop/auto-launch path bring up a fresh agent.
+//
+// The bounce is driven by a self-SIGTERM, not a bare BeginShutdown(): only the
+// SIGTERM path runs the full cleanup() cascade (DrainThenStop → mcpMgr.Stop →
+// srv.Shutdown → stopRuntimeInstances), which drains in-flight turns AND stops
+// every llama-server child before the process exits. Calling BeginShutdown()
+// alone would only close the event streams — kicking clients off while the
+// process (and its runtime children) kept running.
 func (s *Server) ShutdownAgent(ctx context.Context, req *proto.ShutdownAgentRequest) (*proto.ShutdownAgentResponse, error) {
 	reason := strings.TrimSpace(req.GetReason())
 	if reason == "" {
 		reason = "client-requested restart"
 	}
 	log.Printf("ShutdownAgent accepted: %s", reason)
+	s.scheduleSelfShutdown()
+	return &proto.ShutdownAgentResponse{Accepted: true, Message: "agent shutdown scheduled"}, nil
+}
+
+// scheduleSelfShutdown ends the standing event streams (so attached clients see
+// the disconnect and begin reconnecting immediately) and then sends the process
+// SIGTERM after a short delay. The delay lets the accepting RPC's response flush
+// to the caller before the listener closes. SIGTERM routes through the main
+// signal handler's cleanup(), the only path that drains turns and stops runtime
+// children. Shared by ShutdownAgent and the restart_agent capability.
+func (s *Server) scheduleSelfShutdown() {
 	go func() {
 		time.Sleep(150 * time.Millisecond)
 		s.BeginShutdown()
+		if p, err := os.FindProcess(os.Getpid()); err == nil {
+			_ = p.Signal(syscall.SIGTERM)
+		}
 	}()
-	return &proto.ShutdownAgentResponse{Accepted: true, Message: "agent shutdown scheduled"}, nil
 }
 
 // ListConversations implements proto.AgentServer — delegates to persistSvc.

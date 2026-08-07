@@ -391,6 +391,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	slash.RegisterLocus(reg, ag)
 	slash.RegisterContextView(reg)
 	slash.RegisterDev(reg)
+	slash.RegisterRestartAgent(reg)
 	slash.RegisterSettings(reg)
 	slash.RegisterSetup(reg)
 	slash.RegisterTheme(reg)
@@ -2740,11 +2741,31 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.submit(kickoff, nil)
+	case slash.ResultRestartAgent:
+		m.mainChat().AppendNotice(&Entry{Role: RoleSystem, Content: "↻ restarting agent — the connection will drop and reconnect momentarily…"})
+		m.refreshViewport()
+		return m, dispatchAgentRestart(m.agent, res.Text)
 	case slash.ResultText:
 		m.mainChat().AppendNotice(&Entry{Role: RoleSystem, Content: res.Text})
 		m.refreshViewport()
 	}
 	return m, nil
+}
+
+// dispatchAgentRestart asks the agent to bounce itself, then returns so the
+// CLI's reconnect loop can bring up (or re-attach to) a fresh agent. The RPC
+// error is swallowed — a dropped connection mid-shutdown is the expected shape,
+// and reconnect state surfaces the outcome through the normal channels.
+func dispatchAgentRestart(ag *agentclient.Client, reason string) tea.Cmd {
+	return func() tea.Msg {
+		if reason == "" {
+			reason = "user-requested restart"
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = ag.ShutdownAgent(ctx, reason)
+		return nil
+	}
 }
 
 // applyTurnTelemetry folds a done event's telemetry into the host footer

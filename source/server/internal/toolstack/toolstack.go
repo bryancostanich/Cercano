@@ -72,6 +72,10 @@ type CapDeps struct {
 	// suggest_plan capability to enter planning mode on user approval). Optional;
 	// nil means planning mode is unavailable and suggest_plan errors clearly.
 	EnterProfile func(name string) error
+	// RestartAgent bounces the singleton agent process (used by the restart_agent
+	// capability). Optional; nil means agent restart is unavailable and
+	// restart_agent errors clearly.
+	RestartAgent func(reason string) error
 }
 
 // InstallCapabilities builds the capability registry with a fully-populated
@@ -95,6 +99,7 @@ func InstallCapabilities(svc tools.Catalog, d CapDeps) {
 			return e.Dispatch(ctx, spec)
 		},
 		EnterProfile: d.EnterProfile,
+		RestartAgent: d.RestartAgent,
 	})
 	builtins.Register(capReg)
 	svc.SetCapRegistry(capReg)

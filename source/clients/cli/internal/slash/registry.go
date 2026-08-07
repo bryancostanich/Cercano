@@ -44,6 +44,7 @@ const (
 	ResultClearCompactedContext // drop compaction state; rehydrate from raw turns (no re-summarize)
 	ResultElideContext          // stub all tool-result bodies in the context up to now (in-memory)
 	ResultSetSessionProfile     // SessionProfile carries the profile name ("plan"|"default"|future)
+	ResultRestartAgent          // bounce the agent process; CLI reconnect loop brings up a fresh one
 )
 
 // Result is what a slash command produces.

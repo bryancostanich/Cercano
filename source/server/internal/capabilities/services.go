@@ -33,6 +33,16 @@ type Services struct {
 	// type) keeps this package free of an agent import, matching Dispatch. Nil
 	// until wired by the server; suggest_plan errors clearly if it is nil.
 	EnterProfile func(name string) error
+
+	// RestartAgent bounces the singleton agent process: it drains in-flight
+	// turns, stops runtime children, and exits, letting the CLI's reconnect loop
+	// auto-launch a fresh agent. It is how the restart_agent capability performs
+	// a clean self-bounce (e.g. after the agent binary is rebuilt). The hook
+	// returns after scheduling the bounce, not after the process exits — the
+	// caller's tool_result must flush before the socket drops. A func hook keeps
+	// this package free of a server import, matching Dispatch/EnterProfile. Nil
+	// until wired by the server; restart_agent errors clearly if it is nil.
+	RestartAgent func(reason string) error
 }
 
 // MainProvider returns the provider for a turn: cloud when isCloud and a cloud

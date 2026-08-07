@@ -364,3 +364,107 @@ func TestRequestPlanApproval_PromptsUnderPlanProfileInPermissiveMode(t *testing.
 		t.Fatalf("decline should be returned as an error tool_result; got %+v", last)
 	}
 }
+
+// stubTool is a minimal Tool used to exercise loop mechanics without pulling in
+// capability/Services wiring. Its Execute always succeeds and flips ran=true.
+type stubTool struct {
+	name string
+	perm agenttools.Permission
+	ran  *bool
+}
+
+func (s stubTool) Name() string                      { return s.name }
+func (s stubTool) Description() string               { return s.name }
+func (s stubTool) Permission() agenttools.Permission { return s.perm }
+func (s stubTool) Schema() json.RawMessage           { return json.RawMessage(`{"type":"object"}`) }
+func (s stubTool) Execute(ctx context.Context, args json.RawMessage) (*agenttools.Result, error) {
+	if s.ran != nil {
+		*s.ran = true
+	}
+	return agenttools.NewTextResult("ok"), nil
+}
+
+// A successful plan_exit call must lift the read-only planning fence for the
+// REST of the same turn. The ProfileBroker change plan_exit makes only lands on
+// the next turn; without the loop-local relaxation the remainder of this turn
+// stays fenced and a following non-file W-tier tool is wrongly blocked. Here a
+// plan_exit (turn 1) is followed by a plain W-tier tool (turn 2) that is NOT in
+// the plan profile's allowance — it must run because the fence was dropped.
+func TestPlanExit_LiftsFenceForRestOfTurn(t *testing.T) {
+	var saved bool
+	reg := agenttools.NewRegistry()
+	// plan_exit stub: in planExtraTools, so it's allowed and executes; W-tier.
+	reg.MustRegister(stubTool{name: "plan_exit", perm: agenttools.PermW})
+	// save_note: a non-file W tool — fenced by PlanProfile unless the fence is
+	// lifted. It records whether it actually ran.
+	reg.MustRegister(stubTool{name: "save_note", perm: agenttools.PermW, ran: &saved})
+
+	prov := &mockProvider{
+		scripts: [][]llm.Block{
+			{{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "plan_exit",
+				ToolInput: json.RawMessage(`{}`)}},
+			{{Type: llm.BlockToolUse, ToolUseID: "u2", ToolName: "save_note",
+				ToolInput: json.RawMessage(`{}`)}},
+			{{Type: llm.BlockText, Text: "done"}},
+		},
+		caps: inference.Capabilities{SupportsTools: true},
+	}
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+
+	// A requester that DENIES — proving save_note ran because the fence was
+	// lifted (unrestricted W runs without a confirm), not because it was
+	// confirmed. (If the fence were still up, save_note would be denied at the
+	// gate with an error result, never reaching Execute.)
+	requester := func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission, destructive bool) (bool, error) {
+		return false, nil
+	}
+
+	result, err := RunToolLoop(context.Background(), ToolLoopInput{
+		Provider: prov, Registry: reg, Permissions: perms,
+		Profile:             PlanProfile(),
+		PermissionRequester: requester,
+		UserInput:           "exit planning then save a note",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !saved {
+		t.Fatal("save_note did not execute after plan_exit — the planning fence was not lifted for the rest of the turn")
+	}
+	if result.FinalText != "done" {
+		t.Fatalf("loop did not complete cleanly; final=%q", result.FinalText)
+	}
+}
+
+// Guard: without a prior plan_exit, the same non-file W tool IS fenced. This
+// pins the fix to plan_exit rather than a blanket relaxation.
+func TestPlanProfile_FencesNonFileWriteWithoutPlanExit(t *testing.T) {
+	var saved bool
+	reg := agenttools.NewRegistry()
+	reg.MustRegister(stubTool{name: "save_note", perm: agenttools.PermW, ran: &saved})
+
+	prov := &mockProvider{
+		scripts: [][]llm.Block{
+			{{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "save_note",
+				ToolInput: json.RawMessage(`{}`)}},
+			{{Type: llm.BlockText, Text: "understood"}},
+		},
+		caps: inference.Capabilities{SupportsTools: true},
+	}
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+	requester := func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission, destructive bool) (bool, error) {
+		return true, nil // even "yes" must not let a fenced tool run
+	}
+
+	if _, err := RunToolLoop(context.Background(), ToolLoopInput{
+		Provider: prov, Registry: reg, Permissions: perms,
+		Profile:             PlanProfile(),
+		PermissionRequester: requester,
+		UserInput:           "save a note",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if saved {
+		t.Fatal("save_note ran under the plan profile with no plan_exit — fence breach")
+	}
+}

@@ -715,6 +715,16 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				out.StartLine = res.StartLine
 				emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: summarizeResult(res), Detail: res.Detail, StartLine: res.StartLine, IsError: false})
 				results = append(results, toolResultBlocks(out, res, supportsVision)...)
+				// plan_exit drops the read-only planning fence. The ProfileBroker
+				// change it makes only lands on the next turn, so without this the
+				// rest of THIS turn stays fenced and any follow-on write/exec tool
+				// is wrongly blocked. Zero the loop-local Profile so subsequent
+				// calls in this turn are unrestricted. This only ever relaxes the
+				// fence (asymmetric): entering a profile still happens cleanly at a
+				// turn boundary, never mid-turn.
+				if pc.block.ToolName == "plan_exit" {
+					in.Profile = Profile{}
+				}
 			}
 		}
 

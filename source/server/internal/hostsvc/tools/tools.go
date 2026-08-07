@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -275,6 +276,71 @@ func logGrantSuccess(reg *agenttools.Registry, normalized []string) {
 	log.Printf("[dispatch] subagent grant: granted %d tool(s) %v%s", len(names), names, note)
 }
 
+// mutatingToolNames returns the set of tool names in reg tagged PermW or PermX
+// (write / destructive). Derived from the registry — never a hardcoded list —
+// so any newly added write tool is classified correctly with no drift.
+func mutatingToolNames(reg *agenttools.Registry) map[string]bool {
+	out := map[string]bool{}
+	if reg == nil {
+		return out
+	}
+	for _, t := range reg.All() {
+		if p := t.Permission(); p == agenttools.PermW || p == agenttools.PermX {
+			out[t.Name()] = true
+		}
+	}
+	return out
+}
+
+// calledToolNames walks a finished tool loop's history and returns the set of
+// tool names the sub-agent actually invoked (BlockToolUse blocks).
+func calledToolNames(history []llm.Message) map[string]bool {
+	out := map[string]bool{}
+	for _, m := range history {
+		for _, b := range m.Blocks {
+			if b.Type == llm.BlockToolUse && b.ToolName != "" {
+				out[b.ToolName] = true
+			}
+		}
+	}
+	return out
+}
+
+// detectSuspiciousNoOp decides whether a finished agentic dispatch looks like a
+// no-op that lied about completing. It reports the HIGH-CONFIDENCE case only:
+// the sub-agent was granted at least one write/execute tool, called NONE of
+// them, yet returned a non-empty final answer. That is a provable
+// contradiction — a fix/migration cannot have happened without a write or exec
+// call — not a guess about whether the task "needed" more work.
+//
+// Intentionally NOT flagged (returns false): a read-only sub-agent that made
+// few calls. "Trace why X happens" answered after one Grep may be lazy or may
+// be a genuinely easy trace; we cannot tell, so flagging it would be a false
+// positive. Those are logged at low signal by the caller instead.
+//
+// finalText is the assembled answer; called is the set from calledToolNames;
+// mutating is the set from mutatingToolNames over the granted registry.
+func detectSuspiciousNoOp(finalText string, called, mutating map[string]bool) (bool, string) {
+	if len(mutating) == 0 {
+		return false, "" // no write/exec tool was granted — no contradiction possible
+	}
+	if strings.TrimSpace(finalText) == "" {
+		return false, "" // no "done" claim to contradict
+	}
+	for name := range called {
+		if mutating[name] {
+			return false, "" // it used at least one write/exec tool — genuine work
+		}
+	}
+	granted := make([]string, 0, len(mutating))
+	for name := range mutating {
+		granted = append(granted, name)
+	}
+	sort.Strings(granted)
+	reason := fmt.Sprintf("granted write/execute tool(s) [%s] but called none of them, yet reported completion — the delegated work likely did not happen", strings.Join(granted, ", "))
+	return true, reason
+}
+
 // availableToolsHint returns a comma-separated list of registered tool names,
 // truncated so a pathological registry doesn't blow up the error message.
 func (x *Service) availableToolsHint() string {
@@ -475,6 +541,25 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		subConvResult = subConvID
 	}
 
+	// No-op detection. Classify the granted registry (authoritative source for
+	// R/W/X) and the tools the loop actually called, then check for the
+	// provable contradiction: equipped to write/exec, wrote/exec'd nothing,
+	// still claimed done. Advisory only — never changes what we return, it
+	// annotates the result so the parent stops trusting a fabricated success.
+	mutating := mutatingToolNames(reg)
+	called := calledToolNames(res.History)
+	suspicious, reason := detectSuspiciousNoOp(text, called, mutating)
+	if suspicious {
+		log.Printf("[dispatch] subagent SUSPICIOUS no-op: conv=%s granted_write=%v called=%v reason=%q",
+			subConvID, sortedKeys(mutating), sortedKeys(called), reason)
+	} else if len(called) <= 1 && len(mutating) == 0 {
+		// Low-signal read-only run: not flagged (no provable contradiction),
+		// but logged so we can study how often near-empty runs happen without
+		// crying wolf on the returned Result.
+		log.Printf("[dispatch] subagent low-signal run: conv=%s called=%v (read-only grant, <=1 tool call)",
+			subConvID, sortedKeys(called))
+	}
+
 	return dispatch.Result{
 		Text:              text,
 		Model:             model,
@@ -486,7 +571,19 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		SubConversationID: subConvResult,
 		GrantedTools:      granted,
 		IgnoredTools:      ignored,
+		Suspicious:        suspicious,
+		SuspicionReason:   reason,
 	}, nil
+}
+
+// sortedKeys returns the keys of a string-set in stable order, for logging.
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func emitDispatchProgress(emit func(agenttools.ProgressEvent), ev agenttools.ProgressEvent) {

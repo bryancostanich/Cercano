@@ -133,6 +133,16 @@ func (dispatchCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 	// see which model/runtime handled the delegated work and whether a mis-grant
 	// quietly changed the sub-agent's capabilities.
 	header := ""
+	// A suspected no-op leads the header: the sub-agent reported completion but
+	// its tool record contradicts the claim (e.g. granted Edit/Bash, called
+	// neither). Surface it first so the parent does not blindly trust res.Text.
+	if res.Suspicious {
+		reason := res.SuspicionReason
+		if reason == "" {
+			reason = "the delegated work likely did not happen"
+		}
+		header += "[sub-agent warning: " + reason + "]\n"
+	}
 	if route := dispatchRouteHeader(res); route != "" {
 		header += route + "\n"
 	}

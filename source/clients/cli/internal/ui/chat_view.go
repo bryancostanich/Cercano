@@ -193,20 +193,21 @@ func (c *chatView) SetStyles(s theme.Styles, p theme.Palette) {
 // mutate the slice directly — use the methods below).
 func (c *chatView) Entries() []*Entry { return c.entries }
 
-// AppendEntry appends a single entry to the scrollback.
+// AppendEntry appends a single entry to the scrollback in chronological order
+// (at the end). This is the right primitive for in-band turn events, which must
+// preserve their arrival order relative to streamed text — e.g. a progress note
+// that lands after some tokens have streamed belongs BELOW that text, and a
+// tool row belongs after the text that preceded the tool call.
 //
-// Tripwire: appending a terminal (non-streaming) entry AFTER an open streaming
-// assistant entry is the exact shape of the LUNIE corruption — the next token
-// then finds a non-streaming last entry and opens a fresh assistant entry below
-// the interloper, splitting the message. Every known out-of-band notice now
-// routes through AppendNotice (which inserts above the open stream instead), so
-// this condition should not occur in practice. If a future call site slips a
-// raw AppendEntry into an active stream, leave evidence in the tui-perf log
-// rather than silently corrupting the transcript. Behavior is unchanged.
+// It is deliberately NOT stream-aware. An OUT-OF-BAND notice (title rename,
+// prompt-color change, mode flip) that can land mid-stream must instead go
+// through AppendNotice, which hoists it ABOVE the open stream so it cannot split
+// the streaming message. The distinction is intentional and cannot be inferred
+// from Role alone: both an out-of-band rename and an in-band progress note
+// arrive as RoleSystem during a stream but want opposite placement, so the
+// choice of placement lives at the call site, expressed by which method is
+// called. See AppendNotice.
 func (c *chatView) AppendEntry(e *Entry) {
-	if c.streamingTextEntry() != nil && !(e.Role == RoleAssistant && e.Streaming) {
-		appendStreamSplitTripwire(e)
-	}
 	c.entries = append(c.entries, e)
 	// Appends do not invalidate an existing frozen prefix, but they change the
 	// transcript shape once the appended entry becomes eligible for prefixing.
@@ -279,8 +280,9 @@ func (c *chatView) BannerAnimVisible() bool {
 }
 
 // insertNoticeAboveLast inserts e at position len-1, pushing the last entry
-// down. Used by the TypeDone arm to slot the ⚠ notice above the final reply.
-// No-op if entries is empty.
+// down. Used by AppendNotice to keep an out-of-band notice above an open stream,
+// and by the TypeDone arm to slot the ⚠ notice above the final reply. No-op
+// (plain append) if entries is empty.
 func (c *chatView) insertNoticeAboveLast(e *Entry) {
 	n := len(c.entries)
 	if n == 0 {
@@ -294,16 +296,21 @@ func (c *chatView) insertNoticeAboveLast(e *Entry) {
 	c.markTranscriptDirty()
 }
 
-// AppendNotice adds an out-of-band system notice (title rename, prompt-color
-// change, mode flip, etc.) to the scrollback WITHOUT corrupting an in-progress
-// stream. When an assistant entry is still streaming it is, by construction,
-// the last entry — a plain append would slot the notice AFTER it, so the next
-// streamed token would find a non-streaming last entry and open a FRESH
-// assistant entry below the notice, splitting the message (e.g. tearing a
-// fenced code block in half). Inserting the notice ABOVE the open stream keeps
-// the streaming entry last, so continuation tokens keep flowing into it.
-// When no stream is open this is an ordinary append. Route every asynchronous
-// system notice through here rather than calling AppendEntry directly.
+// AppendNotice adds an OUT-OF-BAND system notice (title rename, prompt-color
+// change, mode flip, context-regen progress, etc.) without corrupting an
+// in-progress stream. Such notices are not part of the current turn's timeline;
+// they are asynchronous side effects that happen to land while the model is
+// streaming. A plain append would slot the notice AFTER the open (last)
+// streaming entry, so the next streamed token would find a non-streaming last
+// entry and open a FRESH assistant entry below the notice — splitting the
+// message and, e.g., tearing a fenced code block in half (the LUNIE bug).
+// Inserting the notice ABOVE the open stream keeps the streaming entry last, so
+// continuation tokens keep flowing into it. When no stream is open this is an
+// ordinary append.
+//
+// Use this for every asynchronous notice that can fire mid-stream. Use
+// AppendEntry for in-band turn events (progress notes, tool rows) that must
+// stay chronological relative to the streamed text.
 func (c *chatView) AppendNotice(e *Entry) {
 	if c.streamingTextEntry() != nil {
 		c.insertNoticeAboveLast(e)

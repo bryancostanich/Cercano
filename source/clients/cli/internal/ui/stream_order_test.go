@@ -160,6 +160,31 @@ func TestAppendNoticeNoStreamAppendsLast(t *testing.T) {
 	}
 }
 
+// The dual of the AppendNotice guarantee: an IN-BAND entry appended via
+// AppendEntry mid-stream must stay CHRONOLOGICAL (below the streamed text), not
+// hoisted above it. A progress note that lands after tokens have streamed
+// belongs after that text — the scripted-golden turn depends on this ordering.
+// This locks in the deliberate asymmetry: AppendNotice hoists, AppendEntry does
+// not, and the choice lives at the call site because Role alone cannot decide.
+func TestAppendEntryMidStreamStaysChronological(t *testing.T) {
+	p := theme.Cracker()
+	c := newChatView(theme.NewStyles(p), p, "", "", 79, 20)
+	// Open stream with some streamed text already present.
+	c.AppendEntry(&Entry{Role: RoleAssistant, Content: "Looking into it.", Streaming: true})
+	// A progress note lands mid-stream via the in-band path.
+	c.AppendEntry(&Entry{Role: RoleSystem, Content: "searching files"})
+	es := c.Entries()
+	if len(es) != 2 {
+		t.Fatalf("expected 2 entries, got %d: %+v", len(es), es)
+	}
+	if es[0].Role != RoleAssistant || !es[0].Streaming {
+		t.Fatalf("expected streaming assistant text first, got %+v", es[0])
+	}
+	if es[1].Role != RoleSystem || es[1].Content != "searching files" {
+		t.Fatalf("expected in-band note appended chronologically last, got %+v", es[1])
+	}
+}
+
 // Pre-tool prose, a tool call, then the final answer must render in that exact
 // chronological order, with no entry left streaming and no orphan empty entry.
 func TestStreamOrderingInterleaveNoOrphans(t *testing.T) {

@@ -42,6 +42,13 @@ type CuratedModel struct {
 	// Status is an authoring note: "tested" (default when empty), "experimental",
 	// or "broken". Informational; PlainChatOK/SupportsTools are the enforced gates.
 	Status string `json:"status,omitempty"`
+	// ExtraArgs are per-model llama-server launch flags appended after the
+	// global config ExtraArgs. Use this only for flags a specific model
+	// requires to run correctly — e.g. GLM-4.5-Air needs "--jinja" to activate
+	// its native chat template; without it llama-server compute-fails at decode.
+	// Scoped to the one model that needs it so unrelated models (Qwen, Phi) are
+	// never affected.
+	ExtraArgs []string `json:"extra_args,omitempty"`
 }
 
 // PlainChatSupported reports whether the model is safe for plain-chat tiers.

@@ -36,19 +36,21 @@ Objective: prove the adapter recovery restores visible GLM output before touchin
 Files: none required beyond a throwaway probe script; no production edits in this phase.
 Tests: live probes against a running GLM llama-server instance.
 
-- [ ] Ensure a GLM-4.5-Air llama-server instance is running (via `/m` runtime dashboard `start`, not manual spawn; per prior decision, use `StartRuntimeModel`)
-- [ ] Probe non-streaming single-turn: assert visible content is non-empty
-- [ ] Probe non-streaming multi-turn with prior assistant history (the shape that previously emptied `content`): assert visible content is non-empty
-- [ ] Probe streaming single-turn: assert visible text is streamed
-- [ ] Probe streaming multi-turn: assert visible text is streamed
-- [ ] Record probe results (char counts / sample output) in this effort dir as evidence for the Phase 4 gate
+- [x] Ensure a GLM-4.5-Air llama-server instance is running (via `/m` runtime dashboard `start`, not manual spawn; per prior decision, use `StartRuntimeModel`)
+- [x] Probe non-streaming single-turn: assert visible content is non-empty
+- [x] Probe non-streaming multi-turn with prior assistant history (the shape that previously emptied `content`): assert visible content is non-empty
+- [x] Probe streaming single-turn: assert visible text is streamed
+- [x] Probe streaming multi-turn: assert visible text is streamed
+- [x] Record probe results (char counts / sample output) in this effort dir as evidence for the Phase 4 gate
 
 ## Phase 4 — Catalog and configuration update (gated on Phase 3)
 
 Objective: with recovery proven, stop leaving GLM marked/routed as broken. Update catalog status and the relevant config/default routing so GLM is usable through normal tiers. Do NOT start this phase until Phase 3 evidence is recorded.
-Files: `source/server/internal/localruntime/llamaserver/catalog.json`, `source/server/internal/localruntime/llamaserver/catalog.go` (only if the loader guard needs to accept GLM), `source/server/internal/localruntime/llamaserver/catalog_test.go`, `~/.config/cercano/config.yaml` (live machine config), and the bootstrap/default template if it seeds recommended models.
-Tests: catalog loader tests updated to reflect GLM as plain-chat-capable; catalog validity tests still pass; no other model’s tier assignment regressed.
+Files: `source/server/internal/localruntime/llamaserver/catalog.json`, `source/server/internal/localruntime/llamaserver/catalog.go` (loader guard + new `ExtraArgs` field), `source/server/internal/localruntime/llamaserver/provider.go` (thread per-model `ExtraArgs` into `argsFor`), `source/server/internal/localruntime/llamaserver/catalog_test.go`, `~/.config/cercano/config.yaml` (live machine config), and the bootstrap/default template if it seeds recommended models.
+Tests: catalog loader tests updated to reflect GLM as plain-chat-capable; catalog validity tests still pass; per-model `ExtraArgs` is threaded into the launch args; no other model’s tier assignment regressed.
 
+- [ ] Add a per-model `ExtraArgs []string` field to `CuratedModel` (amended Decision 3), and thread it into the llama-server launch: `argsFor` must append the model's per-model args (after the global `cfg.ExtraArgs`). Set GLM's `ExtraArgs` to `["--jinja"]` in `catalog.json`
+  - [ ] Confirm the model launch path carries the catalog `ExtraArgs` through to `argsFor` (the `ModelRecord`/`CuratedModel` → launch bridge); add a provider test asserting GLM's args include `--jinja` and a non-GLM model's do not
 - [ ] Flip GLM catalog entry: `plain_chat_ok: true` and clear/adjust `status: "broken"`
 - [ ] Update `catalog_test.go` expectations that currently assert GLM is broken / plain-chat-not-ok (`TestCatalog_GLMFlaggedPlainChatBroken`, `TestLoadCatalog_RejectsNonPlainChatInChatTier` interactions)
 - [ ] Repoint the intended local tiers to GLM per spec (everyday / fast_light / fast_light_text / most_capable for high-memory profiles) in catalog profiles `96` and `128`; keep embedding on `nomic-embed-text-v1.5-f16`; leave `24`/`48` on qwen

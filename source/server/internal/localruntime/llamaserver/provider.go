@@ -554,6 +554,9 @@ func (p *Provider) argsFor(cfg config.LlamaServerConfig, model localruntime.Mode
 		args = append(args, "--gpu-layers", cfg.GPULayers)
 	}
 	args = append(args, cfg.ExtraArgs...)
+	// Per-model launch flags (from the catalog's ExtraArgs) apply last, scoped
+	// to this model only — e.g. GLM-4.5-Air's required "--jinja".
+	args = append(args, model.ExtraArgs...)
 	return args
 }
 
@@ -901,6 +904,7 @@ func (p *Provider) catalogModels() []localruntime.ModelRecord {
 			SupportsChat:       !m.SupportsEmbed,
 			SupportsEmbed:      m.SupportsEmbed,
 			SupportsTools:      m.SupportsTools,
+			ExtraArgs:          m.ExtraArgs,
 		})
 	}
 	return out

@@ -99,6 +99,37 @@ func TestArgsForBuildsLlamaServerCommand(t *testing.T) {
 	}
 }
 
+// TestArgsForAppendsPerModelExtraArgs verifies a catalog model's per-model
+// ExtraArgs (e.g. GLM's required "--jinja") are appended after the global
+// config ExtraArgs, and that a model with no ExtraArgs adds nothing extra.
+func TestArgsForAppendsPerModelExtraArgs(t *testing.T) {
+	provider := NewProvider(config.LlamaServerConfig{
+		Host:      "127.0.0.1",
+		ExtraArgs: []string{"--no-webui"},
+	})
+
+	glm := localruntime.ModelRecord{Path: "/models/glm.gguf", ExtraArgs: []string{"--jinja"}}
+	got := provider.argsFor(provider.snapshot(), glm, 8123)
+	want := []string{
+		"--model", "/models/glm.gguf",
+		"--host", "127.0.0.1",
+		"--port", "8123",
+		"--no-webui",
+		"--jinja",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("GLM args mismatch:\n got: %#v\nwant: %#v", got, want)
+	}
+
+	plain := localruntime.ModelRecord{Path: "/models/qwen.gguf"}
+	gotPlain := provider.argsFor(provider.snapshot(), plain, 8123)
+	for _, a := range gotPlain {
+		if a == "--jinja" {
+			t.Fatalf("non-GLM model must not carry --jinja: %#v", gotPlain)
+		}
+	}
+}
+
 type fakeFileInfo struct {
 	size int64
 }

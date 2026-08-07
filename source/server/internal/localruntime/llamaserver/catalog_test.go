@@ -83,10 +83,13 @@ func TestCatalog_PlainChatTiersAreChatCapable(t *testing.T) {
 	}
 }
 
-// TestCatalog_GLMFlaggedPlainChatBroken pins the specific verified fact: GLM is
-// present (tool-capable) but marked plain_chat_ok:false so it is never an
-// auto-selected plain-chat default.
-func TestCatalog_GLMFlaggedPlainChatBroken(t *testing.T) {
+// TestCatalog_GLMPlainChatRecovered pins the post-recovery facts: once the
+// OpenAI adapter recovers GLM's answer from reasoning_content (see effort
+// glm-reasoning-content-recovery), GLM is plain-chat capable and tool-capable,
+// and it MUST carry the "--jinja" launch flag — without it llama-server
+// compute-fails at decode, so a GLM entry lacking --jinja would route a broken
+// model to any tier that selects it.
+func TestCatalog_GLMPlainChatRecovered(t *testing.T) {
 	cat, err := loadCatalog()
 	if err != nil {
 		t.Fatalf("loadCatalog: %v", err)
@@ -95,11 +98,20 @@ func TestCatalog_GLMFlaggedPlainChatBroken(t *testing.T) {
 	if !ok {
 		t.Fatal("expected glm-4.5-air-q4_k_m in catalog")
 	}
-	if glm.PlainChatSupported() {
-		t.Error("GLM must be flagged plain_chat_ok:false")
+	if !glm.PlainChatSupported() {
+		t.Error("GLM must be plain_chat_ok:true after reasoning-content recovery")
 	}
 	if !glm.SupportsTools {
-		t.Error("GLM should still advertise tool support")
+		t.Error("GLM should advertise tool support")
+	}
+	hasJinja := false
+	for _, a := range glm.ExtraArgs {
+		if a == "--jinja" {
+			hasJinja = true
+		}
+	}
+	if !hasJinja {
+		t.Errorf("GLM must launch with --jinja (extra_args=%v); without it llama-server compute-fails", glm.ExtraArgs)
 	}
 }
 

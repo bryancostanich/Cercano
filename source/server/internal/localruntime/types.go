@@ -113,6 +113,11 @@ type ModelRecord struct {
 	SupportsEmbed      bool
 	SupportsTools      bool
 	Active             bool
+	// ExtraArgs are per-model runtime launch flags carried from the catalog
+	// (CuratedModel.ExtraArgs) through to the provider's launch args. Empty for
+	// models with no special launch requirements. The llama-server provider
+	// appends these after the global config ExtraArgs.
+	ExtraArgs []string
 }
 
 type InstanceRecord struct {

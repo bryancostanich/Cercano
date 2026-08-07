@@ -18,7 +18,7 @@ This blocks using GLM as the stronger local model for everyday and agentic dispa
 
 - Do not build a general reasoning-display user interface in this effort.
 - Do not expose Claude/OpenAI opaque reasoning blobs as visible chat text.
-- Do not add per-model llama-server launch arguments in the adapter fix.
+- Do not add per-model llama-server launch arguments in the *adapter fix* (Phases 1–2). Adding a per-model catalog `ExtraArgs` field is in scope for Phase 4 (see amended Decision 3).
 - Do not use global `llama_server.extra_args` for GLM-specific behavior.
 - Do not change default tier routing until the adapter fix is verified against GLM.
 
@@ -62,20 +62,33 @@ Chosen option: implement the fallback in both OpenAI-compatible non-streaming an
 
 Rationale: The interactive CLI uses streaming, so a non-streaming-only fix would likely miss the primary user-visible failure. The streaming implementation must buffer reasoning deltas and emit them only at stream end if no normal content was emitted.
 
-### Decision 3 — Do not add per-model launch args in this fix
+### Decision 3 — Do not add per-model launch args *in the adapter fix*; add them in the Phase 4 catalog update
 
-Chosen option: leave llama-server launch arguments unchanged for this adapter fix.
+Chosen option: keep the Phase 1–2 adapter fix free of launch-arg changes, but add a **per-model catalog `ExtraArgs` field** in Phase 4 so GLM launches with `--jinja`. Never use global `llama_server.extra_args` for model-specific behavior.
 
-| Axis | Do not add launch args now | Add per-model `extra_args` now | Use global `llama_server.extra_args` |
+> **Amendment (post-Phase-3):** This decision originally banned per-model launch
+> args entirely, on the premise that `--jinja` was "not reliable enough." Phase 3
+> live verification **inverted that premise**: GLM's *no-jinja* path is the broken
+> one — it compute-fails at decode with `compute status: -1` on every request —
+> while the `--jinja` path loads and serves correctly. `--jinja` is therefore not
+> an optional reliability tweak but a **mandatory launch flag** for GLM to run at
+> all. Because Phase 4 repoints wizard-recommended tiers to GLM, a durable home
+> for `--jinja` is required or first-run users get a GLM that cannot serve. The
+> only durable, non-hacky home is a per-model `ExtraArgs` field on the catalog
+> model (the "right architecture if launch flags become required" this table
+> already identified). The global-`extra_args` option remains rejected: it would
+> attach `--jinja` to every llama-server model, including Qwen.
+
+| Axis | Do not add launch args at all | Per-model catalog `ExtraArgs` (Phase 4) | Global `llama_server.extra_args` |
 |---|---|---|---|
-| Cost | Low: no runtime/catalog schema change | Medium-high: catalog schema, loader, launch merge, tests | Low |
-| Risk | Low: targets the proven adapter failure | Medium: new launch surface can break startup | High: model-specific flags affect unrelated models |
-| Reward | Restores visible output without changing launch semantics | Enables future model-specific launch flags | Quick manual experiment path |
-| Side effects | Does not improve server-side templating | Adds a correct future extension point | Hack: GLM-specific behavior encoded globally |
-| Best reason | Smallest correct fix | Right architecture if launch flags become required | Fastest experiment |
-| Main drawback | Adapter remains responsible for recovery | More scope than needed now | Can break Qwen or other llama-server models |
+| Cost | Low: no schema change | Medium: add field to `CuratedModel`, thread through `argsFor`, tests | Low |
+| Risk | **Ships a broken default**: wizard-recommended GLM compute-fails without `--jinja` | Low: flag scoped to the one model that needs it | High: model-specific flags leak onto Qwen and others |
+| Reward | — | GLM launches correctly wherever it is recommended | Quick manual experiment path |
+| Side effects | Leaves GLM unrunnable through normal tiers | Adds a correct, reusable per-model launch surface | Encodes GLM-specific behavior globally |
+| Best reason | Smallest adapter-only fix | Only durable home for a now-mandatory flag | Fastest experiment |
+| Main drawback | Phase 4 cannot ship GLM as a default | Slightly more Phase 4 scope | Breaks unrelated llama-server models |
 
-Rationale: `--jinja` was not reliable enough to be the core fix, and the catalog currently has no per-model launch-args field. A per-model launch-args feature may be useful later, but it should not be bundled with this adapter bug fix.
+Rationale: The adapter fix (Phases 1–2) still needs no launch-arg change — it recovers misfiled `content`. But Phase 3 proved GLM cannot even run without `--jinja`, so once Phase 4 routes real tiers to GLM, the flag must travel with the model. A per-model catalog `ExtraArgs` field delivers it durably and scoped to GLM alone; global `extra_args` is still rejected because it would affect Qwen and every other llama-server model.
 
 ### Decision 4 — Verify first, then update GLM catalog/configuration defaults
 

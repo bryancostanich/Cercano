@@ -27,9 +27,11 @@ type Table struct {
 	Rows []map[string]string
 }
 
-// minWrapWidth is the narrowest the wrappable column shrinks to before the table
-// gives up on a grid and transposes instead.
-const minWrapWidth = 12
+// minWrapWidth is the narrowest a wrappable column shrinks to before the table
+// gives up on a grid and transposes instead. It is a legibility floor as much
+// as a fit floor: below ~16 columns, prose wraps into shredded 1-2 word lines
+// and hard-breaks mid-word, so the transposed key:value layout reads better.
+const minWrapWidth = 16
 
 // Render returns a styled string that fits within maxWidth WITHOUT dropping any
 // data. It draws a grid when the columns fit — wrapping the wrappable column

@@ -70,8 +70,8 @@ func TestMatch_ParsesColumnsAndRows(t *testing.T) {
 	if len(tbl.Rows) != 2 || tbl.Rows[1]["model"] != "nomic" {
 		t.Fatalf("rows wrong: %+v", tbl.Rows)
 	}
-	// Last column is the wrappable one by convention.
-	if !tbl.Cols[1].Wrappable {
-		t.Fatalf("expected last column wrappable")
+	// Every column is wrappable so no single fat cell forces a transpose.
+	if !tbl.Cols[0].Wrappable || !tbl.Cols[1].Wrappable {
+		t.Fatalf("expected all columns wrappable: %+v", tbl.Cols)
 	}
 }

@@ -254,3 +254,49 @@ func stripAnsi(s string) string {
 	}
 	return b.String()
 }
+
+// TestTable_LongFirstColumnGridsThenTransposes is the regression for the
+// CERCANO - LUNIE FIXES mangle: a table whose FIRST column held ~180 chars of
+// prose. Before all-columns-wrappable, column 0 was rigid and forced
+// naturalGridW well past any terminal, so it always transposed. Now it must
+// grid at a normal width and only transpose when genuinely too narrow.
+func TestTable_LongFirstColumnGridsThenTransposes(t *testing.T) {
+	long := "Detection of no-op sub-agent runs: if a sub-agent is granted Edit or Bash " +
+		"or asked to trace or investigate but only calls read tools once, flag the run " +
+		"as incomplete instead of returning a silent success placeholder here"
+	tbl := Table{
+		Cols: []Column{
+			{Name: "Fix", Wrappable: true},
+			{Name: "What it addresses", Wrappable: true},
+			{Name: "Cost", Wrappable: true},
+		},
+		Rows: []map[string]string{
+			{"Fix": long, "What it addresses": "silent sub-agent no-ops that look like success", "Cost": "medium"},
+			{"Fix": "shorter one", "What it addresses": "another concern", "Cost": "low"},
+		},
+	}
+	st := theme.NewStyles(theme.Cracker())
+
+	// Wide terminal: must GRID now (borders present), not transpose.
+	wide := stripAnsi(tbl.Render(120, st))
+	if !strings.Contains(wide, "\u250c") || !strings.Contains(wide, "\u2518") {
+		t.Errorf("expected grid at width 120, got transpose:\n%s", wide)
+	}
+	if !strings.Contains(wide, "incomplete") || !strings.Contains(wide, "medium") {
+		t.Errorf("grid dropped data at width 120:\n%s", wide)
+	}
+
+	// Genuinely narrow: 3 cols * (16+2) + 4 = 58 min; at 40 it cannot grid,
+	// so it must transpose to key:value (no top border, has \"Fix:\" label).
+	narrow := stripAnsi(tbl.Render(40, st))
+	if strings.Contains(narrow, "\u250c") {
+		t.Errorf("expected transpose at width 40, got grid:\n%s", narrow)
+	}
+	if !strings.Contains(narrow, "Fix:") {
+		t.Errorf("expected key:value labels at width 40:\n%s", narrow)
+	}
+	// Nothing lost in either mode.
+	if !strings.Contains(narrow, "incomplete") {
+		t.Errorf("transpose dropped data at width 40:\n%s", narrow)
+	}
+}

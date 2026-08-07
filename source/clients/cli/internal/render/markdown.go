@@ -84,14 +84,16 @@ func splitPipeRow(s string) []string {
 
 func (mt markdownTable) toTable() Table {
 	cols := make([]Column, len(mt.Headers))
-	// The first column is the key/axis column (labels like "Cost", "Risk");
-	// it stays rigid at its natural width. Every other column holds content
-	// that may wrap across lines so a wide table (e.g. a decision matrix with
-	// several long option columns) still fits the grid instead of transposing.
+	// Every column is wrappable. A short-label column keeps its natural width
+	// (shrinkWrappable only pulls a column down when the grid overflows), while
+	// a column holding long prose can wrap across lines down to minWrapWidth so
+	// one fat cell can no longer force the whole table to transpose. When even
+	// all columns at their floor won't fit, Render falls through to the k:value
+	// transpose — that floored total is the bounded transpose trigger.
 	for i, h := range mt.Headers {
 		cols[i] = Column{
 			Name:      h,
-			Wrappable: i > 0,
+			Wrappable: true,
 		}
 	}
 	rows := make([]map[string]string, len(mt.Rows))

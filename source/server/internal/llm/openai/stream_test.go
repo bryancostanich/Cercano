@@ -197,3 +197,105 @@ func TestStreamChat_SeparateUsageChunk(t *testing.T) {
 		t.Fatalf("tokens on EventMessageStop: got input=%d output=%d, want 7/3", inputToks, outputToks)
 	}
 }
+
+// collectText drives a reader to EOF and returns the concatenated text deltas
+// plus whether EventMessageStart was seen.
+func collectText(t *testing.T, rd llm.StreamReader) string {
+	t.Helper()
+	var text string
+	for {
+		ev, ok, err := rd.Next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			break
+		}
+		if ev.Type == llm.EventTextDelta {
+			text += ev.TextDelta
+		}
+	}
+	return text
+}
+
+func streamReaderFor(t *testing.T, lines ...string) (llm.StreamReader, func()) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sse(w, lines...)
+	}))
+	c := NewClient(Config{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "gpt-x"})
+	rd, err := c.StreamChat(context.Background(), llm.ChatRequest{
+		Messages: []llm.Message{
+			{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "hi"}}},
+		},
+	})
+	if err != nil {
+		srv.Close()
+		t.Fatal(err)
+	}
+	return rd, func() { rd.Close(); srv.Close() }
+}
+
+// TestStreamChat_RecoversReasoningWhenNoContent covers GLM-4.5-Air streaming:
+// reasoning_content deltas carry the plaintext answer while content stays empty.
+// The reader must flush the buffered reasoning as a single visible text delta.
+func TestStreamChat_RecoversReasoningWhenNoContent(t *testing.T) {
+	rd, cleanup := streamReaderFor(t,
+		`{"choices":[{"delta":{"reasoning_content":"The answer "}}]}`,
+		`{"choices":[{"delta":{"reasoning_content":"is 42."}}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2}}`,
+		`[DONE]`,
+	)
+	defer cleanup()
+	if got := collectText(t, rd); got != "The answer is 42." {
+		t.Fatalf("recovered text: got %q, want %q", got, "The answer is 42.")
+	}
+}
+
+// TestStreamChat_PrefersContentOverReasoning: when normal content streams, the
+// buffered reasoning must be discarded (no duplicate/appended text).
+func TestStreamChat_PrefersContentOverReasoning(t *testing.T) {
+	rd, cleanup := streamReaderFor(t,
+		`{"choices":[{"delta":{"reasoning_content":"thinking..."}}]}`,
+		`{"choices":[{"delta":{"content":"Real answer."}}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		`[DONE]`,
+	)
+	defer cleanup()
+	if got := collectText(t, rd); got != "Real answer." {
+		t.Fatalf("text: got %q, want %q", got, "Real answer.")
+	}
+}
+
+// TestStreamChat_InterleavedContentAndReasoning: reasoning arriving both before
+// and after content must not leak into the visible text.
+func TestStreamChat_InterleavedContentAndReasoning(t *testing.T) {
+	rd, cleanup := streamReaderFor(t,
+		`{"choices":[{"delta":{"reasoning_content":"pre "}}]}`,
+		`{"choices":[{"delta":{"content":"hello "}}]}`,
+		`{"choices":[{"delta":{"reasoning_content":"mid "}}]}`,
+		`{"choices":[{"delta":{"content":"world"}}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		`[DONE]`,
+	)
+	defer cleanup()
+	if got := collectText(t, rd); got != "hello world" {
+		t.Fatalf("text: got %q, want %q", got, "hello world")
+	}
+}
+
+// TestStreamChat_ToolCallOnlyIgnoresReasoning: a tool-call-only turn with
+// reasoning must not synthesize a visible text delta (the tool call is the
+// action; a real tool_use turn's reasoning is just thinking).
+func TestStreamChat_ToolCallOnlyIgnoresReasoning(t *testing.T) {
+	rd, cleanup := streamReaderFor(t,
+		`{"choices":[{"delta":{"reasoning_content":"I should search."}}]}`,
+		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"read","arguments":"{}"}}]}}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
+		`[DONE]`,
+	)
+	defer cleanup()
+	if got := collectText(t, rd); got != "" {
+		t.Fatalf("expected no visible text, got %q", got)
+	}
+}

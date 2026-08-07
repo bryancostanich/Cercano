@@ -2,6 +2,7 @@ package openai
 
 import (
 	"io"
+	"strings"
 
 	goopenai "github.com/sashabaranov/go-openai"
 
@@ -32,6 +33,19 @@ type streamReader struct {
 
 	// guards the one-time EventMessageStart emission
 	started bool
+
+	// reasoningBuf accumulates delta.ReasoningContent fragments. Some
+	// OpenAI-compatible servers (notably llama-server serving GLM-4.5-Air) place
+	// the plaintext final answer in reasoning_content and leave content empty. We
+	// buffer it and, only if no normal text delta was emitted, flush it as a
+	// visible text delta at EOF. emittedText tracks whether real content streamed.
+	reasoningBuf strings.Builder
+	emittedText  bool
+
+	// emittedToolCall is set once any tool-call fragment is seen. A tool-use turn
+	// is an action, and its reasoning is just thinking — never promote reasoning
+	// to visible text when a tool call fired.
+	emittedToolCall bool
 
 	// true once we've queued the terminal EventMessageStop
 	done bool
@@ -66,6 +80,15 @@ func (r *streamReader) Next() (llm.StreamEvent, bool, error) {
 			if r.openToolIdx != nil {
 				r.pending = append(r.pending, llm.StreamEvent{Type: llm.EventToolUseStop})
 				r.openToolIdx = nil
+			}
+			// Recover the answer from reasoning: if no real text streamed but we
+			// buffered reasoning_content, emit it now as a single visible text
+			// delta before EventMessageStop.
+			if !r.emittedText && !r.emittedToolCall && r.reasoningBuf.Len() > 0 {
+				r.pending = append(r.pending, llm.StreamEvent{
+					Type:      llm.EventTextDelta,
+					TextDelta: r.reasoningBuf.String(),
+				})
 			}
 			// Terminal event carries both token counts (OpenAI only reports usage
 			// on the final chunk, so both live on EventMessageStop rather than split
@@ -113,14 +136,24 @@ func (r *streamReader) Next() (llm.StreamEvent, bool, error) {
 
 		// Text delta.
 		if delta.Content != "" {
+			r.emittedText = true
 			r.pending = append(r.pending, llm.StreamEvent{
 				Type:      llm.EventTextDelta,
 				TextDelta: delta.Content,
 			})
 		}
 
+		// Reasoning delta: buffer only. GLM-4.5-Air (via llama-server) can put the
+		// plaintext answer here with empty content. We do not emit per-delta —
+		// normal content may still arrive — and flush it at EOF only if no real
+		// text streamed. See reasoningBuf comment above.
+		if delta.ReasoningContent != "" {
+			r.reasoningBuf.WriteString(delta.ReasoningContent)
+		}
+
 		// Tool-call fragments.
 		for _, tc := range delta.ToolCalls {
+			r.emittedToolCall = true
 			idx := 0
 			if tc.Index != nil {
 				idx = *tc.Index

@@ -118,8 +118,21 @@ func blocksFromOpenAI(m goopenai.ChatCompletionMessage) []llm.Block {
 	// tab and, worse, poison the model on the next turn by feeding its own
 	// malformed pattern back to it. Drop the text block when it parses as a
 	// tool-call array and the same message carries a real tool_call.
+	emittedText := false
 	if m.Content != "" && !(len(m.ToolCalls) > 0 && looksLikeToolCallJSON(m.Content)) {
 		blocks = append(blocks, llm.Block{Type: llm.BlockText, Text: m.Content})
+		emittedText = true
+	}
+	// Some OpenAI-compatible servers (notably llama-server serving GLM-4.5-Air)
+	// non-deterministically place the human-readable final answer in the
+	// reasoning_content field, leaving content empty. Unlike Anthropic/Responses
+	// reasoning — which is opaque round-trip state we never display — this is
+	// plaintext and IS the answer. Recover it as visible text, but only when no
+	// real content text block was produced. We deliberately do not fire this when
+	// content was suppressed as a duplicate tool-call JSON array (emittedText
+	// stays false but ToolCalls are present), so we never resurrect that noise.
+	if !emittedText && len(m.ToolCalls) == 0 && m.ReasoningContent != "" {
+		blocks = append(blocks, llm.Block{Type: llm.BlockText, Text: m.ReasoningContent})
 	}
 	for _, tc := range m.ToolCalls {
 		blocks = append(blocks, llm.Block{

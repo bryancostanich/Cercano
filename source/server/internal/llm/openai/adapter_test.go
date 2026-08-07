@@ -150,3 +150,52 @@ func TestBlocksFromOpenAI_SuppressesLeakedToolCallText(t *testing.T) {
 		t.Fatalf("case5: expected text + tool_use, got %+v", b5)
 	}
 }
+
+// TestBlocksFromOpenAI_RecoversReasoningWhenContentEmpty covers the GLM-4.5-Air
+// failure: llama-server can place the plaintext final answer in reasoning_content
+// and leave content empty. We recover it as visible text, but only when there is
+// no real content text block and no tool calls.
+func TestBlocksFromOpenAI_RecoversReasoningWhenContentEmpty(t *testing.T) {
+	// Case A: content empty, reasoning populated, no tool calls -> recover as text.
+	mA := goopenai.ChatCompletionMessage{
+		Content:          "",
+		ReasoningContent: "The answer is 42.",
+	}
+	bA := blocksFromOpenAI(mA)
+	if len(bA) != 1 || bA[0].Type != llm.BlockText || bA[0].Text != "The answer is 42." {
+		t.Fatalf("caseA: expected one recovered text block, got %+v", bA)
+	}
+
+	// Case B: content present AND reasoning present -> content wins, reasoning ignored.
+	mB := goopenai.ChatCompletionMessage{
+		Content:          "Real answer.",
+		ReasoningContent: "internal thinking",
+	}
+	bB := blocksFromOpenAI(mB)
+	if len(bB) != 1 || bB[0].Type != llm.BlockText || bB[0].Text != "Real answer." {
+		t.Fatalf("caseB: expected only the content text block, got %+v", bB)
+	}
+
+	// Case C: both empty -> no blocks.
+	mC := goopenai.ChatCompletionMessage{}
+	bC := blocksFromOpenAI(mC)
+	if len(bC) != 0 {
+		t.Fatalf("caseC: expected no blocks, got %+v", bC)
+	}
+
+	// Case D: empty content + reasoning + a real tool_call -> do NOT promote
+	// reasoning; the tool call is the action and reasoning is just thinking.
+	toolCall := goopenai.ToolCall{
+		ID: "call-1", Type: goopenai.ToolTypeFunction,
+		Function: goopenai.FunctionCall{Name: "Glob", Arguments: `{"pattern":"scratch/*"}`},
+	}
+	mD := goopenai.ChatCompletionMessage{
+		Content:          "",
+		ReasoningContent: "I should search scratch.",
+		ToolCalls:        []goopenai.ToolCall{toolCall},
+	}
+	bD := blocksFromOpenAI(mD)
+	if len(bD) != 1 || bD[0].Type != llm.BlockToolUse {
+		t.Fatalf("caseD: expected only the tool_use block, got %+v", bD)
+	}
+}

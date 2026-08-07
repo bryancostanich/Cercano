@@ -116,3 +116,33 @@ func (m Model) appendTUIPerf(op string, elapsed time.Duration, extra string) {
 	_, _ = f.WriteString(line)
 	_ = f.Close()
 }
+
+// appendStreamSplitTripwire records that a terminal entry was appended after an
+// open streaming assistant entry — the LUNIE stream-split shape. Gated on the
+// same always-on-but-invisible tui-perf flag so it leaves evidence for a future
+// stray call site without any user-visible cost. Never touches the terminal.
+func appendStreamSplitTripwire(e *Entry) {
+	if !tuiPerfEnabled() {
+		return
+	}
+	path := tuiPerfLogPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return
+	}
+	preview := e.Content
+	if len(preview) > 80 {
+		preview = preview[:80]
+	}
+	line := fmt.Sprintf(
+		"%s op=stream_split_tripwire role=%v streaming=%v content=%q\n",
+		time.Now().Format(time.RFC3339Nano), e.Role, e.Streaming, preview,
+	)
+	tuiPerfLogMu.Lock()
+	defer tuiPerfLogMu.Unlock()
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	_, _ = f.WriteString(line)
+	_ = f.Close()
+}

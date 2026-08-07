@@ -108,6 +108,45 @@ func TestStreamNoticeMidStreamDoesNotSplitMessage(t *testing.T) {
 	}
 }
 
+// Every out-of-band notice type that can fire mid-stream (title rename, prompt
+// color, permission/session mode, /help text, context-regen/elide progress and
+// completion) must go through AppendNotice and leave a streamed code block
+// intact. Table-driven so a newly-added notice type is one line to cover.
+func TestAllMidStreamNoticesPreserveCodeFence(t *testing.T) {
+	notices := []string{
+		"renamed to: LUNIE FIXES",
+		"prompt color set",
+		"Permission mode → strict",
+		"Mode → off (unrestricted)",
+		"context-regen: pass 2/3",
+		"context rebuilt: ~9000 → ~4000 tokens",
+		"context elided: ~9000 → ~4000 tokens (3 tool results stubbed)",
+		"/help long multi-line body\nwith several\nlines of text",
+	}
+	for _, content := range notices {
+		t.Run(content[:min(len(content), 24)], func(t *testing.T) {
+			m := newStreamTestModel()
+			c := m.mainChat()
+			c.Apply(chatAssistantDeltaMsg{token: "```go\nfunc main() {\n"})
+			c.AppendNotice(&Entry{Role: RoleSystem, Content: content})
+			c.Apply(chatAssistantDeltaMsg{token: "\tprintln(\"hi\")\n}\n```"})
+
+			var asst []*Entry
+			for _, e := range c.Entries() {
+				if e.Role == RoleAssistant {
+					asst = append(asst, e)
+				}
+			}
+			if len(asst) != 1 {
+				t.Fatalf("notice %q split the stream into %d assistant entries", content, len(asst))
+			}
+			if full := asst[0].Content; !strings.Contains(full, "```go") || !strings.Contains(full, "}\n```") {
+				t.Fatalf("notice %q tore the code fence: %q", content, full)
+			}
+		})
+	}
+}
+
 // With no stream open, AppendNotice must behave as a plain append (notice lands
 // last), so it never disturbs a finalized transcript.
 func TestAppendNoticeNoStreamAppendsLast(t *testing.T) {

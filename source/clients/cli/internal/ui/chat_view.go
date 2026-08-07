@@ -194,7 +194,19 @@ func (c *chatView) SetStyles(s theme.Styles, p theme.Palette) {
 func (c *chatView) Entries() []*Entry { return c.entries }
 
 // AppendEntry appends a single entry to the scrollback.
+//
+// Tripwire: appending a terminal (non-streaming) entry AFTER an open streaming
+// assistant entry is the exact shape of the LUNIE corruption — the next token
+// then finds a non-streaming last entry and opens a fresh assistant entry below
+// the interloper, splitting the message. Every known out-of-band notice now
+// routes through AppendNotice (which inserts above the open stream instead), so
+// this condition should not occur in practice. If a future call site slips a
+// raw AppendEntry into an active stream, leave evidence in the tui-perf log
+// rather than silently corrupting the transcript. Behavior is unchanged.
 func (c *chatView) AppendEntry(e *Entry) {
+	if c.streamingTextEntry() != nil && !(e.Role == RoleAssistant && e.Streaming) {
+		appendStreamSplitTripwire(e)
+	}
 	c.entries = append(c.entries, e)
 	// Appends do not invalidate an existing frozen prefix, but they change the
 	// transcript shape once the appended entry becomes eligible for prefixing.

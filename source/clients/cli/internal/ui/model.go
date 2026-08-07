@@ -1614,7 +1614,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, msg.next
 
 	case contextRegenProgressMsg:
-		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("context-regen: " + msg.line)})
+		m.mainChat().AppendNotice(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("context-regen: " + msg.line)})
 		m.refreshViewport()
 		// Also poll the meter: the server reports Compacting=true while the
 		// rebuild holds the compaction claim, and that flag (via ctxUsageMsg)
@@ -1634,7 +1634,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					"Completed passes are saved. Use /compact to continue in the background, " +
 					"or re-run /context-regen only if you want a full foreground rebuild from scratch."
 			}
-			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: text})
+			m.mainChat().AppendNotice(&Entry{Role: RoleSystem, Content: text})
 			m.refreshViewport()
 			return m, fetchContextUsage(m.agent, m.convID)
 		}
@@ -1642,7 +1642,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if doneLine == "" {
 			doneLine = fmt.Sprintf("context rebuilt: ~%d → ~%d tokens", msg.pre, msg.post)
 		}
-		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: doneLine})
+		m.mainChat().AppendNotice(&Entry{Role: RoleSystem, Content: doneLine})
 		m.refreshViewport()
 		// The terminal frame already carries the numbers, but the meter's
 		// authoritative source is GetContextUsage — refetch so every derived
@@ -1657,13 +1657,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case elideContextDoneMsg:
 		if msg.err != "" {
-			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "elide-context failed: " + msg.err})
+			m.mainChat().AppendNotice(&Entry{Role: RoleSystem, Content: "elide-context failed: " + msg.err})
 			m.refreshViewport()
 			return m, nil
 		}
 		line := fmt.Sprintf("context elided: ~%d → ~%d tokens (%d tool results stubbed; in-memory — resets on agent restart)",
 			msg.pre, msg.post, msg.stubbed)
-		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: line})
+		m.mainChat().AppendNotice(&Entry{Role: RoleSystem, Content: line})
 		m.refreshViewport()
 		return m, fetchContextUsage(m.agent, m.convID)
 
@@ -2667,7 +2667,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 	case slash.ResultSetPromptColor:
 		m.promptBorderColor = m.resolvePromptColor(res.Text)
 		m.promptColorToken = res.Text
-		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "prompt color set"})
+		m.mainChat().AppendNotice(&Entry{Role: RoleSystem, Content: "prompt color set"})
 		m.refreshViewport()
 	case slash.ResultSetSessionTitle:
 		m.sessionTitle = res.Text
@@ -2688,7 +2688,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 			_ = ag.SetPermissionMode(context.Background(), mode)
 		}()
 		m.permissionMode = mode
-		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "Permission mode → " + mode})
+		m.mainChat().AppendNotice(&Entry{Role: RoleSystem, Content: "Permission mode → " + mode})
 		m.refreshViewport()
 	case slash.ResultSetSessionProfile:
 		// Switch the active capability profile (planning fence / future modes).
@@ -2706,7 +2706,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		if name == "default" {
 			label = "off (unrestricted)"
 		}
-		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "Mode → " + label})
+		m.mainChat().AppendNotice(&Entry{Role: RoleSystem, Content: "Mode → " + label})
 		m.refreshViewport()
 	case slash.ResultInvokeTool:
 		// Decide locally whether to prompt: R-tier runs silently, W/X
@@ -2741,7 +2741,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		}
 		return m.submit(kickoff, nil)
 	case slash.ResultText:
-		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: res.Text})
+		m.mainChat().AppendNotice(&Entry{Role: RoleSystem, Content: res.Text})
 		m.refreshViewport()
 	}
 	return m, nil

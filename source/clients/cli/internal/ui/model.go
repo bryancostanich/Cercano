@@ -2671,7 +2671,11 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 	case slash.ResultSetSessionTitle:
 		m.sessionTitle = res.Text
-		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "renamed to: " + res.Text})
+		// Route through AppendNotice: a title rename can land mid-stream, and a
+		// plain append would splice this line into an in-progress assistant
+		// message, splitting it (fenced code blocks torn in half). AppendNotice
+		// inserts above the open stream so continuation tokens stay contiguous.
+		m.mainChat().AppendNotice(&Entry{Role: RoleSystem, Content: "renamed to: " + res.Text})
 		m.refreshViewport()
 	case slash.ResultSetPermissionMode:
 		// Fire-and-forget: server persistence is the source of truth, but the

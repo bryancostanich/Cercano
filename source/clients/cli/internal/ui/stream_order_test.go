@@ -63,6 +63,64 @@ func TestStreamOrderingToolBeforeFinalText(t *testing.T) {
 	}
 }
 
+// Regression for the LUNIE formatting corruption: an out-of-band system notice
+// (a title rename) that lands WHILE an assistant message is streaming must NOT
+// split that message. AppendNotice inserts the notice above the open stream, so
+// continuation tokens keep flowing into the same entry and a fenced code block
+// stays intact. A plain AppendEntry here would slot the notice after the open
+// entry, forcing the next token to open a fresh assistant entry below it.
+func TestStreamNoticeMidStreamDoesNotSplitMessage(t *testing.T) {
+	m := newStreamTestModel()
+	c := m.mainChat()
+
+	// Stream the first half of a fenced code block into the open assistant entry.
+	c.Apply(chatAssistantDeltaMsg{token: "Here is code:\n```go\nfunc main() {\n"})
+	// An async title rename lands mid-stream.
+	c.AppendNotice(&Entry{Role: RoleSystem, Content: "renamed to: LUNIE FIXES"})
+	// The rest of the code block streams in.
+	c.Apply(chatAssistantDeltaMsg{token: "\tprintln(\"hi\")\n}\n```"})
+
+	// Exactly one assistant entry, holding the whole code block contiguously.
+	var asst []*Entry
+	var noticeIdx, asstIdx int = -1, -1
+	for i, e := range c.Entries() {
+		if e.Role == RoleAssistant {
+			asst = append(asst, e)
+			asstIdx = i
+		}
+		if e.Role == RoleSystem && strings.Contains(e.Content, "renamed to") {
+			noticeIdx = i
+		}
+	}
+	if len(asst) != 1 {
+		t.Fatalf("expected the streamed message to stay in ONE assistant entry, got %d", len(asst))
+	}
+	full := asst[0].Content
+	if !strings.Contains(full, "```go") || !strings.Contains(full, "println") || !strings.Contains(full, "}\n```") {
+		t.Fatalf("code block was split; assistant content = %q", full)
+	}
+	// The notice must sit ABOVE the (still last) streaming assistant entry.
+	if noticeIdx < 0 || asstIdx < 0 || noticeIdx > asstIdx {
+		t.Fatalf("notice at %d should precede assistant at %d", noticeIdx, asstIdx)
+	}
+	if !asst[0].Streaming {
+		t.Fatalf("assistant entry should still be streaming after the notice insert")
+	}
+}
+
+// With no stream open, AppendNotice must behave as a plain append (notice lands
+// last), so it never disturbs a finalized transcript.
+func TestAppendNoticeNoStreamAppendsLast(t *testing.T) {
+	p := theme.Cracker()
+	c := newChatView(theme.NewStyles(p), p, "", "", 79, 20)
+	c.AppendEntry(&Entry{Role: RoleAssistant, Content: "done", Streaming: false})
+	c.AppendNotice(&Entry{Role: RoleSystem, Content: "renamed to: X"})
+	es := c.Entries()
+	if len(es) != 2 || es[1].Role != RoleSystem {
+		t.Fatalf("expected notice appended last; entries = %+v", es)
+	}
+}
+
 // Pre-tool prose, a tool call, then the final answer must render in that exact
 // chronological order, with no entry left streaming and no orphan empty entry.
 func TestStreamOrderingInterleaveNoOrphans(t *testing.T) {

@@ -282,6 +282,24 @@ func (c *chatView) insertNoticeAboveLast(e *Entry) {
 	c.markTranscriptDirty()
 }
 
+// AppendNotice adds an out-of-band system notice (title rename, prompt-color
+// change, mode flip, etc.) to the scrollback WITHOUT corrupting an in-progress
+// stream. When an assistant entry is still streaming it is, by construction,
+// the last entry — a plain append would slot the notice AFTER it, so the next
+// streamed token would find a non-streaming last entry and open a FRESH
+// assistant entry below the notice, splitting the message (e.g. tearing a
+// fenced code block in half). Inserting the notice ABOVE the open stream keeps
+// the streaming entry last, so continuation tokens keep flowing into it.
+// When no stream is open this is an ordinary append. Route every asynchronous
+// system notice through here rather than calling AppendEntry directly.
+func (c *chatView) AppendNotice(e *Entry) {
+	if c.streamingTextEntry() != nil {
+		c.insertNoticeAboveLast(e)
+		return
+	}
+	c.AppendEntry(e)
+}
+
 // dropLastEntry removes the last entry. No-op if entries is empty.
 func (c *chatView) dropLastEntry() {
 	if n := len(c.entries); n > 0 {

@@ -24,8 +24,15 @@ func matchTable(lines []string, i int) (markdownTable, int) {
 		return markdownTable{}, 0
 	}
 	mt := markdownTable{StartLine: i, Headers: splitPipeRow(head)}
-	// Require separator column count to match header column count.
-	if len(splitPipeRow(sep)) != len(mt.Headers) {
+	// The header count drives the table's column count. We do NOT require the
+	// separator to have exactly the same number of columns: weak models
+	// routinely miscount the dash groups (e.g. emitting `|---|---|---|` under a
+	// 4-column header). looksLikeSeparator already guarantees every separator
+	// cell is a valid dashes/colons shape, so a count mismatch here is a
+	// producer defect, not a false positive — salvage it rather than falling
+	// through to the prose renderer. Data rows are already normalized to the
+	// header count below; the separator gets the same tolerance.
+	if len(splitPipeRow(sep)) == 0 {
 		return markdownTable{}, 0
 	}
 	j := i + 2

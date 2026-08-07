@@ -16,6 +16,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -402,3 +403,24 @@ func TestCore_ConcurrentTurns_NoCrossTalk(t *testing.T) {
 // Ensure secrets and usage are imported (used by fake stubs above).
 var _ secrets.Store = nil
 var _ usage.Usage = usage.Usage{}
+
+// FU-1b: when a turn runs under the plan profile, the system prompt must carry
+// an in-context signal that planning mode is active — so the model KNOWS its
+// posture instead of re-reaching for suggest_plan or being surprised by a fence.
+// The zero profile (normal turns) adds no such block.
+func TestBuildSystemPrompt_SignalsActiveProfile(t *testing.T) {
+	d := Deps{} // no Persist: project context is empty, fine for this check
+
+	plan := BuildSystemPrompt(d, "", agent.PlanProfile())
+	if !strings.Contains(plan, "PLANNING MODE") {
+		t.Fatalf("plan-profile prompt should announce planning mode; got:\n%s", plan)
+	}
+	if !strings.Contains(plan, "Do NOT call suggest_plan again") {
+		t.Fatalf("plan-profile prompt should tell the model not to re-suggest; got:\n%s", plan)
+	}
+
+	normal := BuildSystemPrompt(d, "", agent.Profile{})
+	if strings.Contains(normal, "PLANNING MODE") {
+		t.Fatalf("unrestricted prompt must not claim planning mode; got:\n%s", normal)
+	}
+}

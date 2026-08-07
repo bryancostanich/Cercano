@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"cercano/source/server/internal/agent"
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/hostsvc/permissions"
@@ -48,7 +49,10 @@ func buildWorkerToolSvc(
 	enterProfile func(context.Context, string) error,
 ) runner.ToolSvc {
 	systemPrompt := func(workDir string) string {
-		return runner.BuildSystemPrompt(runner.Deps{Persist: workerCtxHistory{loader: ctxLoader}}, workDir)
+		// Sub-agents (Agentic dispatch) never run under a session capability
+		// profile — planning mode is a top-level session posture, not inherited
+		// by delegated work — so pass the zero Profile (restricts nothing).
+		return runner.BuildSystemPrompt(runner.Deps{Persist: workerCtxHistory{loader: ctxLoader}}, workDir, agent.Profile{})
 	}
 	svc := toolssvc.New(permBroker, systemPrompt, nil, subagentPersistTurn(subPersist))
 	svc.SetEngine(engine) // installs the agentic runner for sub-agent dispatch

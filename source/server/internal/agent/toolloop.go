@@ -328,6 +328,19 @@ func flattenToolResultsForModel(calls, results []llm.Block) string {
 	return b.String()
 }
 
+// fenceDenialMessage renders the tool_result content when the active capability
+// profile forbids a tool. It special-cases suggest_plan under the plan profile:
+// a model that re-reaches for suggest_plan while already planning would otherwise
+// get the generic "read-only … unavailable while planning" text, which reads as
+// a self-contradiction (it was TRYING to plan). Instead tell it plainly that it
+// is already in planning mode and what to do next (FU-1a).
+func fenceDenialMessage(profileName, toolName string, tier llm.Permission) string {
+	if profileName == "plan" && toolName == "suggest_plan" {
+		return "already in planning mode — no need to call suggest_plan again. You are in the read-only planning fence now: investigate the codebase and author the effort's spec.md and plan.md. When the plan is ready call request_plan_approval; to abandon planning call plan_exit."
+	}
+	return fmt.Sprintf("blocked: the %q profile is read-only — the tool %q (%s) is unavailable. Only read and plan actions are permitted while planning.", profileName, toolName, tier)
+}
+
 func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) {
 	ctx = agenttools.WithWorkDir(ctx, in.WorkDir)
 	ctx = agenttools.WithConversationID(ctx, in.ConversationID)
@@ -548,7 +561,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: tc.ToolUseID, ToolName: tc.ToolName, Summary: "blocked by " + in.Profile.Name + " profile", IsError: true})
 				results = append(results, llm.Block{
 					Type: llm.BlockToolResult, ToolUseRef: tc.ToolUseID,
-					Content: fmt.Sprintf("blocked: the %q profile is read-only — the tool %q (%s) is unavailable. Only read and plan actions are permitted while planning.", in.Profile.Name, tc.ToolName, tier),
+					Content: fenceDenialMessage(in.Profile.Name, tc.ToolName, tier),
 					IsError: true,
 				})
 				continue

@@ -281,7 +281,7 @@ func (c *Core) runLoop(
 		UserInput:           req.Input,
 		Images:              req.Images,
 		Model:               c.d.Providers.MainModel(isCloud),
-		System:              BuildSystemPrompt(c.d, req.WorkDir),
+		System:              BuildSystemPrompt(c.d, req.WorkDir, profile),
 		WorkDir:             req.WorkDir,
 		ConversationID:      req.ConversationID,
 		EventSink:           loopSink,
@@ -449,7 +449,15 @@ func taskProgressSnapshotToRunner(in agenttools.TaskProgressSnapshot) TaskSnapsh
 // BuildSystemPrompt gathers live environment grounding for workDir and renders
 // the tool-loop system prompt. Exported so the worker can reuse it for
 // sub-agent (Agentic dispatch) system prompts instead of keeping a third copy.
-func BuildSystemPrompt(d Deps, workDir string) string {
+//
+// profile is the session's active capability profile for this turn. When it
+// fences anything off (e.g. the read-only planning profile), a state-signal
+// block is appended so the model KNOWS its current posture — otherwise a model
+// that has already entered planning mode has no in-context signal saying so, and
+// re-reaches for suggest_plan or is surprised when a write is fenced (FU-1b).
+// The zero Profile restricts nothing and adds no block, so the common path is
+// unchanged.
+func BuildSystemPrompt(d Deps, workDir string, profile agent.Profile) string {
 	env := loopEnv{
 		WorkDir:  workDir,
 		Platform: runtime.GOOS,
@@ -459,11 +467,30 @@ func BuildSystemPrompt(d Deps, workDir string) string {
 		env.GitRepo, env.GitBranch = runnerGitInfo(workDir)
 	}
 	steering := protocols.SteeringBlock(protocols.ForDomain(protocols.DomainCore))
+	if sig := profileStateSignal(profile); sig != "" {
+		steering = steering + "\n\n" + sig
+	}
 	projectCtx := ""
 	if d.Persist != nil {
 		projectCtx = d.Persist.LoadProjectContext(workDir)
 	}
 	return buildToolLoopSystem(env, steering, runnerDirectorySnapshot(workDir, 80), projectCtx)
+}
+
+// profileStateSignal renders the in-context notice of the active capability
+// profile, or "" when the profile restricts nothing. It is keyed off the
+// profile's Name so a future mode (brainstorm, execute, …) can add its own line
+// without touching the prompt builder.
+func profileStateSignal(p agent.Profile) string {
+	if !p.Restricts() {
+		return ""
+	}
+	switch p.Name {
+	case "plan":
+		return "<planning-mode>\nYou are currently IN PLANNING MODE (a read-only exploration fence is active). You may read the codebase and author the effort's spec.md and plan.md, but write/exec tools on other files are unavailable until the plan is approved. Do NOT call suggest_plan again — you are already planning; proceed to investigate and author the spec. When the plan is ready, call request_plan_approval to hand off to execution; to abandon planning, call plan_exit.\n</planning-mode>"
+	default:
+		return fmt.Sprintf("<active-profile>\nYou are currently in the %q capability profile, which fences off some tools. Tools outside the profile are unavailable this turn.\n</active-profile>", p.Name)
+	}
 }
 
 // loopEnv is the environment grounding rendered into the tool-loop system

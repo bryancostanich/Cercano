@@ -1,6 +1,29 @@
-# Planning-mode follow-ups (filed, not yet fixed)
+# Planning-mode follow-ups
 
-## FU-1: Agent can't tell it's already in planning mode; `suggest_plan` is blocked by its own profile
+## FU-1: Agent can't tell it's already in planning mode; `suggest_plan` is blocked by its own profile — RESOLVED
+
+**Status:** fixed. Both sub-defects addressed:
+
+- **1a** — chose option (b) over (a): `suggest_plan` stays fenced (keeping it out
+  of the catalog while planning is correct), but the fence's tool_result is now
+  self-aware. `fenceDenialMessage` in `internal/agent/toolloop.go` special-cases
+  `suggest_plan` under the `plan` profile and returns "already in planning mode —
+  no need to call suggest_plan again … call request_plan_approval / plan_exit"
+  instead of the contradictory "read-only … unavailable while planning" text.
+  Option (a) was rejected because adding `suggest_plan` to `planExtraTools` would
+  re-advertise it AND fire a spurious second X-tier confirm prompt for a no-op.
+  Test: `TestFenceDenialMessage_SuggestPlanUnderPlanProfile_IsSelfAware`.
+- **1b** — `BuildSystemPrompt` (`internal/runner/core.go`) now takes the active
+  `agent.Profile` and, when it restricts, appends a `<planning-mode>` state
+  signal telling the model it is already planning and what the exits are. The
+  zero profile adds nothing (normal turns unchanged). Sub-agents pass the zero
+  profile. Test: `TestBuildSystemPrompt_SignalsActiveProfile`.
+
+Original report below for context.
+
+---
+
+## FU-1 (original report): Agent can't tell it's already in planning mode; `suggest_plan` is blocked by its own profile
 
 **Observed** (transcript, mode: bypass, model qwen3-30b via claude cloud):
 

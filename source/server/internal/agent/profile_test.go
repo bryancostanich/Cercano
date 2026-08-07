@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"cercano/source/server/internal/agenttools"
@@ -466,5 +467,29 @@ func TestPlanProfile_FencesNonFileWriteWithoutPlanExit(t *testing.T) {
 	}
 	if saved {
 		t.Fatal("save_note ran under the plan profile with no plan_exit — fence breach")
+	}
+}
+
+// FU-1a: re-calling suggest_plan while already in planning mode must not return
+// the self-contradictory "read-only … unavailable while planning" text. It gets
+// a clear "already in planning mode" message pointing at the next step.
+func TestFenceDenialMessage_SuggestPlanUnderPlanProfile_IsSelfAware(t *testing.T) {
+	msg := fenceDenialMessage("plan", "suggest_plan", llm.PermX)
+	if !strings.Contains(msg, "already in planning mode") {
+		t.Fatalf("suggest_plan denial should say it's already planning; got: %q", msg)
+	}
+	// It must NOT claim suggest_plan itself is "unavailable" — that's the
+	// self-contradiction (it was trying to plan). It should instead redirect.
+	if strings.Contains(msg, "unavailable") {
+		t.Fatalf("suggest_plan denial should not say the tool is unavailable; got: %q", msg)
+	}
+	if !strings.Contains(msg, "request_plan_approval") || !strings.Contains(msg, "plan_exit") {
+		t.Fatalf("suggest_plan denial should point at the exits; got: %q", msg)
+	}
+
+	// A genuinely fenced write still gets the plain "unavailable" explanation.
+	other := fenceDenialMessage("plan", "run_command", llm.PermX)
+	if !strings.Contains(other, "unavailable") || !strings.Contains(other, "run_command") {
+		t.Fatalf("non-planning tool denial should keep the read-only explanation; got: %q", other)
 	}
 }

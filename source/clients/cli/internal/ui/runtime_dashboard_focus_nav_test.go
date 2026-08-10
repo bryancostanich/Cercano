@@ -39,20 +39,25 @@ func TestTabWalksSections(t *testing.T) {
 	}
 	tab := tea.KeyPressMsg{Code: tea.KeyTab}
 
-	d.Update(tab) // catalog -> installed models
+	// Stops on the Models tab: filter -> list -> installed -> tiers -> filter.
+	d.Update(tab) // filter -> list
+	if d.focus != runtimeFocusList {
+		t.Fatalf("after 1 tab: focus=%v, want list", d.focus)
+	}
+	d.Update(tab) // list -> installed models
 	if d.focus != runtimeFocusActions || d.operationCursor != starts[0] {
-		t.Fatalf("after 1 tab: focus=%v cursor=%d, want actions@%d", d.focus, d.operationCursor, starts[0])
+		t.Fatalf("after 2 tabs: focus=%v cursor=%d, want actions@%d", d.focus, d.operationCursor, starts[0])
 	}
 	d.Update(tab) // -> model tiers
 	if d.operationCursor != starts[1] {
-		t.Fatalf("after 2 tabs: cursor=%d, want tiers start %d", d.operationCursor, starts[1])
+		t.Fatalf("after 3 tabs: cursor=%d, want tiers start %d", d.operationCursor, starts[1])
 	}
 	if d.scrollOffset == 0 {
 		t.Fatal("tabbing into tiers should scroll the viewport down")
 	}
-	d.Update(tab) // wraps back to catalog
-	if d.focus != runtimeFocusCatalog {
-		t.Fatal("tab past the last section should return to the catalog")
+	d.Update(tab) // wraps back to the filter
+	if d.focus != runtimeFocusFilter {
+		t.Fatal("tab past the last section should return to the filter")
 	}
 }
 
@@ -61,17 +66,22 @@ func TestShiftTabWalksSectionsInReverse(t *testing.T) {
 	starts := d.sectionStarts()
 	shiftTab := tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
 
-	d.Update(shiftTab) // catalog wraps to the LAST section — model tiers
+	// Reverse stops: filter -> tiers -> installed -> list -> filter.
+	d.Update(shiftTab) // filter wraps to the LAST section — model tiers
 	if d.focus != runtimeFocusActions || d.operationCursor != starts[len(starts)-1] {
-		t.Fatalf("shift+tab from catalog: focus=%v cursor=%d, want tiers start %d", d.focus, d.operationCursor, starts[len(starts)-1])
+		t.Fatalf("shift+tab from filter: focus=%v cursor=%d, want tiers start %d", d.focus, d.operationCursor, starts[len(starts)-1])
 	}
 	d.Update(shiftTab) // -> installed models
 	if d.operationCursor != starts[0] {
 		t.Fatalf("second shift+tab: cursor=%d, want installed start %d", d.operationCursor, starts[0])
 	}
-	d.Update(shiftTab) // -> back out to catalog
-	if d.focus != runtimeFocusCatalog {
-		t.Fatal("shift+tab past the first section should return to the catalog")
+	d.Update(shiftTab) // -> list
+	if d.focus != runtimeFocusList {
+		t.Fatalf("third shift+tab: focus=%v, want list", d.focus)
+	}
+	d.Update(shiftTab) // -> back out to filter
+	if d.focus != runtimeFocusFilter {
+		t.Fatal("shift+tab past the list should return to the filter")
 	}
 }
 
@@ -87,10 +97,10 @@ func TestNewRuntimeDashboard_RuntimeModeStartsOnActions(t *testing.T) {
 	}
 }
 
-func TestNewRuntimeDashboard_ModelsModeStartsOnCatalog(t *testing.T) {
+func TestNewRuntimeDashboard_ModelsModeStartsOnFilter(t *testing.T) {
 	d, _ := newRuntimeDashboard(nil, theme.Palette{}, theme.Styles{}, 80, 24, dashboardModeModels)
-	if d.focus != runtimeFocusCatalog {
-		t.Fatalf("Models-mode dashboard focus = %v, want runtimeFocusCatalog (unchanged default)", d.focus)
+	if d.focus != runtimeFocusFilter {
+		t.Fatalf("Models-mode dashboard focus = %v, want runtimeFocusFilter (search box focused)", d.focus)
 	}
 }
 

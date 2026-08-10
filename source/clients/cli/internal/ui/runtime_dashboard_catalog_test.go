@@ -21,7 +21,7 @@ func newCatalogTestDashboard(snapshot runtimeDashboardSnapshot) *runtimeDashboar
 		styles:   m.styles,
 		snapshot: snapshot,
 		loaded:   true,
-		focus:    runtimeFocusCatalog,
+		focus:    runtimeFocusFilter,
 	}
 }
 
@@ -63,7 +63,7 @@ func TestCatalogCtrlRStartsRefreshAndGuardsReentry(t *testing.T) {
 	d := newCatalogTestDashboard(runtimeDashboardSnapshot{
 		Status: &agentclient.RuntimeStatus{},
 	})
-	cmd, closed := d.updateCatalog(ctrlR())
+	cmd, closed := d.updateFilter(ctrlR())
 	if closed {
 		t.Fatal("ctrl+r should not close the dashboard")
 	}
@@ -74,7 +74,7 @@ func TestCatalogCtrlRStartsRefreshAndGuardsReentry(t *testing.T) {
 		t.Fatal("ctrl+r should mark the catalog busy")
 	}
 
-	cmd, _ = d.updateCatalog(ctrlR())
+	cmd, _ = d.updateFilter(ctrlR())
 	if cmd != nil {
 		t.Fatal("second ctrl+r while busy should be a no-op")
 	}

@@ -110,7 +110,7 @@ func TestRuntimeDashboardViewShowsRuntimeDashboardData(t *testing.T) {
 		styles:   m.styles,
 		snapshot: snapshot,
 		loaded:   true,
-		focus:    runtimeFocusCatalog,
+		focus:    runtimeFocusFilter,
 	}
 	dashboard.catalogSearch = textinput.New()
 
@@ -313,7 +313,7 @@ func TestRuntimeDashboardCatalogTypingFiltersByDefault(t *testing.T) {
 				}},
 			},
 		},
-		focus: runtimeFocusCatalog,
+		focus: runtimeFocusFilter,
 	}
 	dashboard.catalogSearch = textinput.New()
 	_ = dashboard.catalogSearch.Focus()
@@ -436,7 +436,7 @@ func TestRuntimeDashboardShowsDownloadProgressAndActions(t *testing.T) {
 		styles:   m.styles,
 		snapshot: snapshot,
 		loaded:   true,
-		focus:    runtimeFocusCatalog,
+		focus:    runtimeFocusFilter,
 	}
 	dashboard.catalogSearch = textinput.New()
 	rows := dashboard.downloadRows()
@@ -611,7 +611,7 @@ func overflowingRuntimeDashboard(t *testing.T, height int) *runtimeDashboard {
 		styles:   m.styles,
 		snapshot: snapshot,
 		loaded:   true,
-		focus:    runtimeFocusCatalog,
+		focus:    runtimeFocusFilter,
 	}
 	dashboard.catalogSearch = textinput.New()
 	_ = dashboard.catalogSearch.Focus()

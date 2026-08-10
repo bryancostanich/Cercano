@@ -16,7 +16,7 @@ func TestRuntimeDashboardRendersPlaceholderBeforeLoad(t *testing.T) {
 		height:  37,
 		palette: m.palette,
 		styles:  m.styles,
-		focus:   runtimeFocusCatalog,
+		focus:   runtimeFocusFilter,
 		// loaded intentionally false: snapshot still in flight.
 	}
 	if d.loaded {
@@ -37,7 +37,7 @@ func TestApplySnapshotMarksLoaded(t *testing.T) {
 		palette: m.palette,
 		styles:  m.styles,
 		mode:    dashboardModeRuntime,
-		focus:   runtimeFocusCatalog,
+		focus:   runtimeFocusFilter,
 	}
 	d.applySnapshot(runtimeDashboardSnapshotMsg{
 		snapshot: runtimeDashboardSnapshot{},
@@ -59,7 +59,7 @@ func TestApplySnapshotDropsMismatchedMode(t *testing.T) {
 		palette: m.palette,
 		styles:  m.styles,
 		mode:    dashboardModeModels,
-		focus:   runtimeFocusCatalog,
+		focus:   runtimeFocusFilter,
 	}
 	d.applySnapshot(runtimeDashboardSnapshotMsg{
 		snapshot: runtimeDashboardSnapshot{},

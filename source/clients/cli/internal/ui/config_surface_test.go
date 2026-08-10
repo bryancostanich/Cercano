@@ -3,6 +3,7 @@ package ui
 import (
 	"testing"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"cercano/source/clients/cli/internal/theme"
@@ -65,6 +66,35 @@ func TestConfigSurfaceAddKeyFromStripOpensPopover(t *testing.T) {
 	}
 	if d.popover == nil {
 		t.Fatal("'a' from the strip should open the add-server popover")
+	}
+}
+
+// TestConfigSurfaceFilterKeyFromStripTypesIntoSearch verifies the reported bug
+// fix: typing a printable character while the config tab strip is focused, on
+// the Models/runtime dashboard, drops into the body, focuses the filter, and
+// lands the keystroke in the search box — instead of the strip silently
+// swallowing it.
+func TestConfigSurfaceFilterKeyFromStripTypesIntoSearch(t *testing.T) {
+	d := newCatalogTestDashboard(runtimeDashboardSnapshot{
+		Config: &agentclient.Config{},
+		Catalog: agentclient.RuntimeModelCatalog{Models: []agentclient.RuntimeModel{
+			{ID: "llama_server:catalog:qwen", Runtime: "llama_server", Source: "catalog", DisplayName: "Qwen"},
+		}},
+	})
+	d.mode = dashboardModeModels
+	d.focus = runtimeFocusActions // start away from the filter to prove it re-focuses
+	d.catalogSearch = textinput.New()
+	m := Model{content: d, configSurface: &configSurface{active: configTabRuntime, focused: true}}
+
+	m, _, handled := m.handleConfigSurfaceKey(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	if !handled || m.configSurface.focused {
+		t.Fatalf("'q' from the strip should enter the body: handled=%v focused=%v", handled, m.configSurface.focused)
+	}
+	if d.focus != runtimeFocusFilter {
+		t.Fatalf("typing from the strip should focus the filter, got %v", d.focus)
+	}
+	if got := d.catalogSearch.Value(); got != "q" {
+		t.Fatalf("filter value = %q, want %q (keystroke should land in the search box)", got, "q")
 	}
 }
 

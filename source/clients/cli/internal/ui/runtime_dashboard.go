@@ -37,7 +37,14 @@ const (
 type runtimeDashboardFocus int
 
 const (
-	runtimeFocusCatalog runtimeDashboardFocus = iota
+	// runtimeFocusFilter owns the catalog search text box: printable keys
+	// type into the filter, esc clears it.
+	runtimeFocusFilter runtimeDashboardFocus = iota
+	// runtimeFocusList owns the catalog model rows: up/down move the
+	// selection cursor, enter starts a download.
+	runtimeFocusList
+	// runtimeFocusActions owns the operation sections (downloads, installed
+	// models, processes, model tiers).
 	runtimeFocusActions
 )
 
@@ -182,7 +189,7 @@ func newRuntimeDashboard(ag *agentclient.Client, p theme.Palette, s theme.Styles
 	// shows, and Enter can fire the catalog's download action against
 	// whatever real model that cursor lands on. Start on actions instead;
 	// the Models tab keeps the existing catalog-first behavior.
-	focus := runtimeFocusCatalog
+	focus := runtimeFocusFilter
 	if mode == dashboardModeRuntime {
 		focus = runtimeFocusActions
 	}
@@ -272,8 +279,11 @@ func (d *runtimeDashboard) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		d.ScrollBy(maxInt(1, dashboardContentHeight(d.height)/2))
 		return nil, false
 	}
-	if d.focus == runtimeFocusCatalog {
-		return d.updateCatalog(msg)
+	switch d.focus {
+	case runtimeFocusFilter:
+		return d.updateFilter(msg)
+	case runtimeFocusList:
+		return d.updateList(msg)
 	}
 	return d.updateOperations(msg)
 }
@@ -475,56 +485,90 @@ func (d *runtimeDashboard) sectionStarts() []int {
 	return starts
 }
 
-// advanceSection moves focus one SECTION forward (dir=+1, tab) or
-// backward (dir=-1, shift+tab): catalog → each action section's first
-// row → wraps back to catalog. This is what makes the model-tiers
-// section directly tabbable instead of requiring a dozen arrow
-// presses through the sections above it.
+// advanceSection moves focus one STOP forward (dir=+1, tab) or backward
+// (dir=-1, shift+tab). On the Models tab the ordered stops are:
+// filter → list → each action section's first row → wraps back to
+// filter. On the Runtime tab (no catalog block) the stops are just the
+// action sections, wrapping among themselves. This is what makes the
+// model-tiers section directly tabbable instead of requiring a dozen
+// arrow presses through the sections above it.
 func (d *runtimeDashboard) advanceSection(dir int) {
 	starts := d.sectionStarts()
-	if d.focus == runtimeFocusCatalog {
+
+	// The Runtime tab has no catalog block: wrap within the action
+	// sections only (see newRuntimeDashboard).
+	if d.mode == dashboardModeRuntime {
 		if len(starts) == 0 {
 			return
 		}
-		d.focus = runtimeFocusActions
-		d.catalogSearch.Blur()
-		d.catalogMessage = ""
-		if dir > 0 {
-			d.operationCursor = starts[0]
-		} else {
-			// shift+tab from the catalog wraps to the LAST section —
-			// one gesture straight to model tiers.
-			d.operationCursor = starts[len(starts)-1]
-		}
+		current := d.currentActionSection(starts)
+		next := ((current+dir)%len(starts) + len(starts)) % len(starts)
+		d.operationCursor = starts[next]
 		d.scrollFollowAction()
 		return
 	}
+
+	// Models tab: build the ordered stop list as filter, list, then one
+	// entry per action section. We track position by a small index space:
+	//   0 = filter, 1 = list, 2+ = action section (index-2).
+	nStops := 2 + len(starts)
+	cur := d.currentStopIndex(starts)
+	nxt := ((cur+dir)%nStops + nStops) % nStops
+	d.gotoStop(nxt, starts)
+}
+
+// currentStopIndex maps the current focus/cursor to the flat stop index
+// used by advanceSection on the Models tab (0=filter, 1=list, 2+=action
+// section ordinal + 2).
+func (d *runtimeDashboard) currentStopIndex(starts []int) int {
+	switch d.focus {
+	case runtimeFocusFilter:
+		return 0
+	case runtimeFocusList:
+		return 1
+	default:
+		return 2 + d.currentActionSection(starts)
+	}
+}
+
+// currentActionSection returns the index (into starts) of the action
+// section the operation cursor currently sits in.
+func (d *runtimeDashboard) currentActionSection(starts []int) int {
 	current := 0
 	for i, s := range starts {
 		if d.operationCursor >= s {
 			current = i
 		}
 	}
-	next := current + dir
-	if next < 0 || next >= len(starts) {
-		// The Runtime tab has no catalog block to focus (see
-		// newRuntimeDashboard) — wrap within the action sections instead of
-		// re-focusing the invisible catalog search box.
-		if d.mode == dashboardModeRuntime {
-			if len(starts) == 0 {
-				return
-			}
-			next = ((next % len(starts)) + len(starts)) % len(starts)
-			d.operationCursor = starts[next]
-			d.scrollFollowAction()
+	return current
+}
+
+// gotoStop moves focus to the flat stop index computed by advanceSection.
+func (d *runtimeDashboard) gotoStop(stop int, starts []int) {
+	switch {
+	case stop == 0:
+		d.focusFilter()
+		d.catalogMessage = ""
+	case stop == 1:
+		// Only land on the list if it has rows; otherwise skip to actions
+		// (or wrap) so focus never sits on an empty list.
+		if len(filteredCatalogModels(d.catalogModels(), d.catalogSearch.Value())) == 0 || len(starts) == 0 {
+			d.focusFilter()
+			d.catalogMessage = ""
 			return
 		}
-		d.focus = runtimeFocusCatalog
-		_ = d.catalogSearch.Focus()
-		return
+		d.focusList()
+	default:
+		if len(starts) == 0 {
+			d.focusFilter()
+			return
+		}
+		d.focus = runtimeFocusActions
+		d.catalogSearch.Blur()
+		d.catalogMessage = ""
+		d.operationCursor = starts[clampIndex(stop-2, len(starts))]
+		d.scrollFollowAction()
 	}
-	d.operationCursor = starts[next]
-	d.scrollFollowAction()
 }
 
 // scrollFollowAction scrolls the page so the selected action row is
@@ -622,8 +666,14 @@ func (d *runtimeDashboard) operationActions() []runtimeDashboardAction {
 // climb back to the config tab strip rather than no-op against a clamped
 // cursor. Used by handleConfigSurfaceKey's up-arrow climb-back.
 func (d *runtimeDashboard) atSectionTop() bool {
-	if d.focus == runtimeFocusCatalog {
-		return d.catalogCursor == 0
+	switch d.focus {
+	case runtimeFocusFilter:
+		// The filter is the topmost stop — up from here climbs to the strip.
+		return true
+	case runtimeFocusList:
+		// Up from the list returns to the filter (handled in updateList),
+		// so the list is never the climb-back point.
+		return false
 	}
 	return d.operationCursor == 0
 }
@@ -637,28 +687,72 @@ func (d *runtimeDashboard) clampOperationCursor() {
 	d.operationCursor = clampIndex(d.operationCursor, len(actions))
 }
 
-func (d *runtimeDashboard) updateCatalog(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+// updateFilter handles keys while the catalog search box is focused. It
+// types into the filter, and moves focus down into the model list on
+// down/tab. esc clears a non-empty filter (or closes the surface when
+// already empty); shift+tab hands focus back up to the tab strip.
+func (d *runtimeDashboard) updateFilter(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	switch msg.String() {
 	case "ctrl+r":
-		if d.catalogBusy {
-			d.catalogMessage = "refresh already running"
-			return nil, false
-		}
-		d.catalogBusy = true
-		d.catalogMessage = "refreshing catalog..."
-		return runtimeCatalogRefreshCmd(d.agent), false
+		return d.refreshCatalog()
 	case "esc":
 		if d.catalogSearch.Value() != "" {
 			d.catalogSearch.SetValue("")
 			d.catalogCursor = 0
+			d.catalogTop = 0
 			d.catalogMessage = "filter cleared"
 			return nil, false
 		}
 		return nil, true
-	case "up":
-		if d.catalogCursor > 0 {
-			d.catalogCursor--
+	case "down", "tab":
+		// Drop into the model list.
+		if len(filteredCatalogModels(d.catalogModels(), d.catalogSearch.Value())) > 0 {
+			d.focusList()
+			return d.maybeFetchEstimate(), false
 		}
+		return nil, false
+	case "enter":
+		// Enter from the filter jumps to the list and selects the first
+		// match, matching a search-then-pick flow.
+		if len(filteredCatalogModels(d.catalogModels(), d.catalogSearch.Value())) > 0 {
+			d.focusList()
+			return d.maybeFetchEstimate(), false
+		}
+		d.catalogMessage = "no model matches filter"
+		return nil, false
+	}
+	prev := d.catalogSearch.Value()
+	var cmd tea.Cmd
+	d.catalogSearch, cmd = d.catalogSearch.Update(msg)
+	if d.catalogSearch.Value() != prev {
+		d.catalogCursor = 0
+		d.catalogTop = 0
+		d.catalogMessage = ""
+		cmd = tea.Batch(cmd, d.maybeFetchEstimate())
+	}
+	return cmd, false
+}
+
+// updateList handles keys while the catalog model rows are focused.
+// up/down move the selection cursor, enter starts a download, and any
+// printable character (or up past the top) returns focus to the filter
+// so the user can keep refining without a mode switch.
+func (d *runtimeDashboard) updateList(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	switch msg.String() {
+	case "ctrl+r":
+		return d.refreshCatalog()
+	case "esc":
+		// Return to the filter; if the filter is already empty, let the
+		// surface handle esc (close).
+		d.focusFilter()
+		return nil, false
+	case "up":
+		if d.catalogCursor == 0 {
+			// At the top of the list, up returns to the filter.
+			d.focusFilter()
+			return nil, false
+		}
+		d.catalogCursor--
 		d.keepCatalogCursorVisible(d.catalogRowBudget(), len(filteredCatalogModels(d.catalogModels(), d.catalogSearch.Value())))
 		return d.maybeFetchEstimate(), false
 	case "down":
@@ -680,36 +774,92 @@ func (d *runtimeDashboard) updateCatalog(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		d.keepCatalogCursorVisible(d.catalogRowBudget(), len(models))
 		return d.maybeFetchEstimate(), false
 	case "enter":
-		models := filteredCatalogModels(d.catalogModels(), d.catalogSearch.Value())
-		if len(models) == 0 {
-			d.catalogMessage = "no model selected"
-			return nil, false
-		}
-		selected := models[clampIndex(d.catalogCursor, len(models))]
-		if strings.EqualFold(selected.DownloadState, "downloaded") {
-			d.catalogMessage = "already downloaded"
-			return nil, false
-		}
-		if strings.EqualFold(selected.DownloadState, "downloading") {
-			d.catalogMessage = "already downloading"
-			return nil, false
-		}
-		d.catalogMessage = "starting download..."
-		if strings.EqualFold(selected.DownloadState, "failed") || strings.EqualFold(selected.DownloadState, "cancelled") {
-			d.catalogMessage = "retrying download..."
-		}
-		return runtimeDashboardDownloadCmd(d.agent, selected), false
+		return d.startSelectedDownload()
 	}
-	prev := d.catalogSearch.Value()
-	var cmd tea.Cmd
-	d.catalogSearch, cmd = d.catalogSearch.Update(msg)
-	if d.catalogSearch.Value() != prev {
-		d.catalogCursor = 0
-		d.catalogTop = 0
-		d.catalogMessage = ""
-		cmd = tea.Batch(cmd, d.maybeFetchEstimate())
+	// A printable character while on the list jumps back to the filter and
+	// inserts it — the user can start typing to refine at any time.
+	if isPrintableKey(msg) {
+		d.focusFilter()
+		return d.updateFilter(msg)
 	}
-	return cmd, false
+	return nil, false
+}
+
+// refreshCatalog kicks off an online catalog refresh, guarding against
+// concurrent refreshes. Shared by the filter and list handlers.
+func (d *runtimeDashboard) refreshCatalog() (tea.Cmd, bool) {
+	if d.catalogBusy {
+		d.catalogMessage = "refresh already running"
+		return nil, false
+	}
+	d.catalogBusy = true
+	d.catalogMessage = "refreshing catalog..."
+	return runtimeCatalogRefreshCmd(d.agent), false
+}
+
+// startSelectedDownload starts (or retries) the download for the model
+// under the list cursor.
+func (d *runtimeDashboard) startSelectedDownload() (tea.Cmd, bool) {
+	models := filteredCatalogModels(d.catalogModels(), d.catalogSearch.Value())
+	if len(models) == 0 {
+		d.catalogMessage = "no model selected"
+		return nil, false
+	}
+	selected := models[clampIndex(d.catalogCursor, len(models))]
+	if strings.EqualFold(selected.DownloadState, "downloaded") {
+		d.catalogMessage = "already downloaded"
+		return nil, false
+	}
+	if strings.EqualFold(selected.DownloadState, "downloading") {
+		d.catalogMessage = "already downloading"
+		return nil, false
+	}
+	d.catalogMessage = "starting download..."
+	if strings.EqualFold(selected.DownloadState, "failed") || strings.EqualFold(selected.DownloadState, "cancelled") {
+		d.catalogMessage = "retrying download..."
+	}
+	return runtimeDashboardDownloadCmd(d.agent, selected), false
+}
+
+// focusFilter moves focus to the search box.
+func (d *runtimeDashboard) focusFilter() {
+	d.focus = runtimeFocusFilter
+	_ = d.catalogSearch.Focus()
+}
+
+// focusList moves focus to the model rows and blurs the search box.
+func (d *runtimeDashboard) focusList() {
+	d.focus = runtimeFocusList
+	d.catalogSearch.Blur()
+}
+
+// isPrintableKey reports whether a key event is a single printable rune
+// with no modifiers (so it should feed the filter rather than navigate).
+func isPrintableKey(msg tea.KeyPressMsg) bool {
+	if msg.Mod != 0 {
+		return false
+	}
+	r := []rune(msg.String())
+	return len(r) == 1 && r[0] >= 0x20
+}
+
+// wantsFilterKey implements filterForwardingPage: on the Models tab a
+// printable character typed from the config tab strip should start
+// filtering. Claiming the key also moves focus to the filter so the
+// forwarded keystroke lands in the search box rather than an action
+// section. The Runtime tab has no catalog block, so it never claims.
+func (d *runtimeDashboard) wantsFilterKey(msg tea.KeyPressMsg) bool {
+	if d.mode == dashboardModeRuntime {
+		return false
+	}
+	if !isPrintableKey(msg) {
+		return false
+	}
+	// Ensure the forwarded key routes into the filter handler.
+	if d.focus != runtimeFocusFilter {
+		d.focusFilter()
+	}
+	return true
 }
 
 func loadRuntimeDashboardSnapshot(ag *agentclient.Client) runtimeDashboardSnapshot {
@@ -888,7 +1038,7 @@ func (d *runtimeDashboard) renderCatalogBlock(rowLimit int) string {
 	}
 
 	queryLabel := d.styles.Muted.Render("filter ")
-	if d.focus == runtimeFocusCatalog {
+	if d.focus == runtimeFocusFilter {
 		queryLabel = d.styles.Bright.Render("filter ")
 	}
 	d.catalogSearch.SetWidth(maxInt(8, contentW-lipgloss.Width(queryLabel)-2))
@@ -913,7 +1063,7 @@ func (d *runtimeDashboard) renderCatalogBlock(rowLimit int) string {
 		left := ""
 		idx := start + i
 		if idx < len(models) {
-			left = d.renderCatalogModelRow(models[idx], idx == d.catalogCursor, listW)
+			left = d.renderCatalogModelRow(models[idx], idx == d.catalogCursor, d.focus == runtimeFocusList, listW)
 		} else if i == 0 && len(models) == 0 {
 			left = d.styles.Dim.Render(catalogEmptyMessage(d.catalogModels(), d.catalogSearch.Value()))
 		}
@@ -991,12 +1141,21 @@ func (d *runtimeDashboard) keepCatalogCursorVisible(rowLimit, total int) {
 	d.catalogTop = clampInt(d.catalogTop, 0, maxInt(0, total-rowLimit))
 }
 
-func (d *runtimeDashboard) renderCatalogModelRow(model agentclient.RuntimeModel, selected bool, width int) string {
+func (d *runtimeDashboard) renderCatalogModelRow(model agentclient.RuntimeModel, selected, listFocused bool, width int) string {
 	marker := "  "
 	nameStyle := d.styles.Primary
 	if selected {
-		marker = d.styles.Accent.Render("▶ ")
-		nameStyle = d.styles.Bright
+		if listFocused {
+			// Active selection: bright arrow + bright name.
+			marker = d.styles.Accent.Render("▶ ")
+			nameStyle = d.styles.Bright
+		} else {
+			// Parked selection (focus is on the filter or actions): show a
+			// dimmer marker so the row the cursor will act on is still
+			// visible, without claiming active focus.
+			marker = d.styles.BorderDim.Render("· ")
+			nameStyle = d.styles.Primary
+		}
 	}
 	name := firstNonEmpty(model.DisplayName, shortModelName(model.ID), model.ID, "unknown")
 	metadata := strings.Join(nonEmptyParts(model.Family, model.Quantization, formatBytes(model.SizeBytes), compactDownloadStatusText(model)), " · ")

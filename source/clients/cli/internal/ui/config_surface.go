@@ -171,6 +171,14 @@ func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 			next, cmd := m.dropFocusForwarding(msg)
 			return next, cmd, true
 		}
+		// A page with a search/filter box (the runtime dashboard) wants a
+		// printable character typed from the strip to start filtering: drop
+		// into the body and forward the key so it lands in the search box
+		// instead of being silently swallowed.
+		if m.pageWantsFilterKey(msg) {
+			next, cmd := m.dropFocusForwarding(msg)
+			return next, cmd, true
+		}
 		// The tab bar owns focus: swallow other keys so nothing leaks into the
 		// body while the user is on the strip.
 		return m, nil, true
@@ -227,6 +235,21 @@ func (m Model) pageWantsStripKey(key string) bool {
 		}
 	}
 	return false
+}
+
+// pageWantsFilterKey reports whether the active page has a search/filter box
+// that a printable character typed from the tab strip should route into. This
+// makes "just start typing to filter" work on the runtime dashboard even when
+// focus is still on the tab strip, instead of the keystroke being swallowed.
+func (m Model) pageWantsFilterKey(msg tea.KeyPressMsg) bool {
+	p, ok := m.content.(filterForwardingPage)
+	return ok && p.wantsFilterKey(msg)
+}
+
+// filterForwardingPage is a content page with a search/filter text box that
+// should receive printable characters typed from the config tab strip.
+type filterForwardingPage interface {
+	wantsFilterKey(msg tea.KeyPressMsg) bool
 }
 
 // pageWantsEscape reports whether the active page has a transient overlay open

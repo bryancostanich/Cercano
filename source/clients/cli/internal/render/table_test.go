@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
+
 	"cercano/source/clients/cli/internal/theme"
 )
 
@@ -253,6 +255,54 @@ func stripAnsi(s string) string {
 		i++
 	}
 	return b.String()
+}
+
+// TestTable_ShrinkRemainderRedistributes is the regression for the VERIFROG -
+// GTM screenshot: a 5-column decision matrix (Approach / Repo bloat / Inline
+// player / Setup effort / Survives clone-fork) that transposed to a stacked
+// key:value block even though an all-columns-at-floor grid (5*(16+2)+6 = 96)
+// fits comfortably inside the 112-col budget. Root cause: shrinkWrappable's
+// proportional pass rounds each column's take DOWN, accumulates the leftover,
+// and dumps it all on the last column — but caps that column's take at its own
+// slack, so any remainder beyond the last column's slack leaked and the grid
+// stayed ~2 cols over budget, tripping the transpose fallback. The fix must
+// redistribute the leftover across columns that still have slack so the grid
+// fits whenever a floor-fit exists.
+func TestTable_ShrinkRemainderRedistributes(t *testing.T) {
+	tbl := Table{
+		Cols: []Column{
+			{Name: "Approach", Wrappable: true},
+			{Name: "Repo bloat", Wrappable: true},
+			{Name: "Inline player on GitHub", Wrappable: true},
+			{Name: "Setup effort", Wrappable: true},
+			{Name: "Survives clone/fork", Wrappable: true},
+		},
+		Rows: []map[string]string{
+			{"Approach": "A: Commit `.mp4` into repo, link in README", "Repo bloat": "Yes — permanent ~30 MB binary in history", "Inline player on GitHub": "✅ Yes (if `.mp4`)", "Setup effort": "Low", "Survives clone/fork": "✅ Yes"},
+			{"Approach": "B: Upload to a GitHub Release, embed the attachment URL", "Repo bloat": "None", "Inline player on GitHub": "✅ Yes", "Setup effort": "Low-med (need `gh` + a release)", "Survives clone/fork": "✅ URL is stable"},
+			{"Approach": "C: Git LFS", "Repo bloat": "Pointer only, but adds LFS quota/config", "Inline player on GitHub": "✅ Yes", "Setup effort": "Med (LFS setup)", "Survives clone/fork": "⚠️ needs LFS on clone"},
+		},
+	}
+	st := theme.NewStyles(theme.Cracker())
+	// An all-floor grid needs only 5*(16+2)+6 = 96 cols, well under 112, so this
+	// MUST grid — the transpose in the screenshot was the bug.
+	const budget = 112
+	plain := stripAnsi(tbl.Render(budget, st))
+	if !strings.Contains(plain, "┌") || !strings.Contains(plain, "┼") || !strings.Contains(plain, "┘") {
+		t.Fatalf("expected a grid at %d cols (floor-fit needs only 96), got transpose:\n%s", budget, plain)
+	}
+	// No line may exceed the budget.
+	for _, line := range strings.Split(plain, "\n") {
+		if w := lipgloss.Width(line); w > budget {
+			t.Errorf("line exceeds %d cols (%d): %q", budget, w, line)
+		}
+	}
+	// Nothing dropped: a distinctive word from every column survives.
+	for _, want := range []string{"Commit", "permanent", "Inline", "release", "clone"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("expected %q preserved, got:\n%s", want, plain)
+		}
+	}
 }
 
 // TestTable_LongFirstColumnGridsThenTransposes is the regression for the

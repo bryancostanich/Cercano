@@ -118,21 +118,41 @@ func shrinkWrappable(cols []Column, widths []int, maxWidth int) bool {
 		}
 		return true
 	}
-	// Distribute the overflow proportionally to each column's slack. Track the
-	// running remainder so rounding never under-shrinks and leaves us over budget.
+	// First pass: distribute the overflow proportionally to each column's slack.
+	// Integer division rounds every share DOWN, so this pass always under-shrinks
+	// by a few columns; we track how much is left over.
 	remaining := over
-	for i, w := range wraps {
-		var take int
-		if i == len(wraps)-1 {
-			take = remaining // last column absorbs the rounding remainder
-		} else {
-			take = over * w.slack / totalSlack
-		}
+	for _, w := range wraps {
+		take := over * w.slack / totalSlack
 		if take > w.slack {
 			take = w.slack
 		}
 		widths[w.idx] -= take
 		remaining -= take
+	}
+	// Second pass: redistribute the rounding leftover across columns that still
+	// have slack, one column at a time. Because we only reach here when
+	// over < totalSlack (a floor-fit exists), enough slack remains to absorb the
+	// leftover in full, so the grid is guaranteed to fit. This replaces the old
+	// "last column absorbs the remainder" scheme, which capped that column's
+	// take at its own (possibly tiny) slack and silently leaked the rest —
+	// leaving the grid a couple of columns over budget and forcing a needless
+	// transpose (the VERIFROG - GTM screenshot regression).
+	for remaining > 0 {
+		progressed := false
+		for _, w := range wraps {
+			if remaining == 0 {
+				break
+			}
+			if widths[w.idx] > minWrapWidth {
+				widths[w.idx]--
+				remaining--
+				progressed = true
+			}
+		}
+		if !progressed {
+			break // no column has slack left; caller falls through to transpose
+		}
 	}
 	return true
 }

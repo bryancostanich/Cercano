@@ -16,10 +16,11 @@ import (
 // reasoning item's output_item.done and is surfaced as EventReasoning in stream
 // order, so collectStream assembles a BlockReasoning before the function_call.
 type streamReader struct {
-	rc      io.ReadCloser
-	br      *bufio.Reader
-	pending []llm.StreamEvent
-	done    bool
+	rc       io.ReadCloser
+	br       *bufio.Reader
+	provider string
+	pending  []llm.StreamEvent
+	done     bool
 	// failure is a classified in-band error frame ("response.failed" /
 	// "error"), returned from Next after pending events drain — as a normalized
 	// error, not an EventError, so both the resilience engine (pre-content) and
@@ -27,8 +28,8 @@ type streamReader struct {
 	failure error
 }
 
-func newStreamReader(rc io.ReadCloser) *streamReader {
-	return &streamReader{rc: rc, br: bufio.NewReader(rc)}
+func newStreamReader(rc io.ReadCloser, provider string) *streamReader {
+	return &streamReader{rc: rc, br: bufio.NewReader(rc), provider: provider}
 }
 
 type streamEnvelope struct {
@@ -68,6 +69,14 @@ func (s *streamReader) Next() (llm.StreamEvent, bool, error) {
 				return llm.StreamEvent{}, false, nil
 			}
 		} else if err != nil {
+			// A mid-stream read failure bypasses the request-round-trip
+			// normalize() in client.go, so classify transport resets here —
+			// otherwise a dropped connection surfaces raw as ErrUnknown
+			// instead of the transient ErrNetwork it is.
+			if llm.IsNetworkError(err) {
+				return llm.StreamEvent{}, false,
+					&llm.Error{Class: llm.ErrNetwork, Provider: s.provider, Err: err}
+			}
 			return llm.StreamEvent{}, false, err
 		}
 		if data == "" {

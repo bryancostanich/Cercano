@@ -41,7 +41,7 @@ data: {"type":"response.completed","response":{"usage":{"input_tokens":9,"output
 
 func collect(t *testing.T, body string) []llm.StreamEvent {
 	t.Helper()
-	rd := newStreamReader(io.NopCloser(strings.NewReader(body)))
+	rd := newStreamReader(io.NopCloser(strings.NewReader(body)), "openai-responses")
 	defer rd.Close()
 	var evs []llm.StreamEvent
 	for {
@@ -128,7 +128,7 @@ func TestStreamReaderError_Classified(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := newStreamReader(io.NopCloser(strings.NewReader(tc.body)))
+			r := newStreamReader(io.NopCloser(strings.NewReader(tc.body)), "openai-responses")
 			_, ok, err := r.Next()
 			if ok || err == nil {
 				t.Fatalf("want classified error, got ok=%v err=%v", ok, err)
@@ -149,7 +149,7 @@ func TestStreamReaderError_AfterContent(t *testing.T) {
 	body := "data: {\"type\":\"response.created\"}\n\n" +
 		"data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n" +
 		"data: {\"type\":\"error\",\"message\":\"An error occurred while processing your request. You can retry your request.\"}\n\n"
-	r := newStreamReader(io.NopCloser(strings.NewReader(body)))
+	r := newStreamReader(io.NopCloser(strings.NewReader(body)), "openai-responses")
 	var texts []string
 	var finalErr error
 	for {

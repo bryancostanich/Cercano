@@ -83,6 +83,11 @@ func quotaErr(provider string) error {
 		RetryAfter: time.Hour, Err: errors.New("usage limit reached")}
 }
 
+func networkErr(provider string) error {
+	return &llm.Error{Class: llm.ErrNetwork, Provider: provider,
+		Err: errors.New("read tcp: connection reset by peer")}
+}
+
 // build wires an engine with instant sleeps and an event recorder.
 func build(primary, backup *fakeProvider) (*Provider, *[]Event, *[]time.Duration) {
 	var events []Event
@@ -137,6 +142,30 @@ func TestChat_BusyRetriesOnceThenSucceeds(t *testing.T) {
 	}
 	if len(*slept) != 1 || (*slept)[0] != time.Second {
 		t.Errorf("slept %v, want the server's 1s Retry-After", *slept)
+	}
+}
+
+func TestChat_NetworkRetriesOnceThenSucceeds(t *testing.T) {
+	// A transport reset is transient: the engine must retry the SAME provider
+	// once before any failover — the regression this fix targets, where a reset
+	// jumped straight to the backup tier.
+	primary := &fakeProvider{name: "anthropic", outcome: []error{networkErr("anthropic"), nil}}
+	backup := &fakeProvider{name: "openai"}
+	p, events, _ := build(primary, backup)
+
+	res, err := p.Chat(context.Background(), inference.Call{Model: "claude"})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if res.Model != "anthropic" {
+		t.Errorf("served by %q, want primary (no failover)", res.Model)
+	}
+	if primary.calls != 2 || backup.calls != 0 {
+		t.Errorf("calls primary=%d backup=%d, want 2/0", primary.calls, backup.calls)
+	}
+	if len(*events) != 1 || (*events)[0].Action != ActionRetry ||
+		(*events)[0].Class != llm.ErrNetwork {
+		t.Errorf("events = %+v, want one network retry", *events)
 	}
 }
 

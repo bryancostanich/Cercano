@@ -328,5 +328,5 @@ func (c *Client) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.Strea
 		httpResp.Body.Close()
 		return nil, c.normalizeHTTP(httpResp, body)
 	}
-	return newStreamReader(httpResp.Body), nil
+	return newStreamReader(httpResp.Body, c.Name()), nil
 }

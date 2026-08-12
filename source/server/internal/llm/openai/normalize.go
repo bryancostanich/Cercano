@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/url"
 	"strings"
 
 	goopenai "github.com/sashabaranov/go-openai"
@@ -54,8 +53,7 @@ func (c *Client) normalize(err error) error {
 			Err:        err,
 		}
 	}
-	var ue *url.Error
-	if errors.As(err, &ue) {
+	if llm.IsNetworkError(err) {
 		return &llm.Error{Class: llm.ErrNetwork, Provider: c.Name(), Err: err}
 	}
 	return &llm.Error{Class: llm.ErrUnknown, Provider: c.Name(), Err: err}

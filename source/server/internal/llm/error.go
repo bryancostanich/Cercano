@@ -3,6 +3,10 @@ package llm
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
+	"os"
+	"syscall"
 	"time"
 )
 
@@ -86,4 +90,47 @@ func ClassOf(err error) ErrorClass {
 		return e.Class
 	}
 	return ErrUnknown
+}
+
+// Retryable reports whether re-running the SAME provider once may succeed.
+// The transient classes — ErrBusy (overload) and ErrNetwork (transport reset/
+// refused/TLS) — are re-runnable by definition. ErrUnknown gets a single cheap
+// attempt too: its own policy already concedes "a wasted second attempt costs
+// one round-trip," and if the retry also fails the caller still falls over.
+//
+// "Once" is not enforced here — it lives at the call sites (the resilience
+// engine's single-shot guard and the runner's straight-line turn retry). This
+// predicate only decides class membership, so every retry site shares one
+// definition of "transient" instead of hardcoding class comparisons.
+func Retryable(class ErrorClass) bool {
+	return class == ErrBusy || class == ErrNetwork || class == ErrUnknown
+}
+
+// IsNetworkError reports whether err is a transport-level failure that should
+// classify as ErrNetwork: a *url.Error from the initial request round-trip, a
+// *net.OpError from a mid-stream read/write (the SDK stream decoders surface
+// raw net errors, NOT url.Error, so those must be caught here), or a bare
+// syscall errno (ECONNRESET, EPIPE, ETIMEDOUT) underneath either. Adapters
+// call this before falling through to ErrUnknown so a dropped connection is
+// classified as the transient failure it is.
+func IsNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return true
+	}
+	var oe *net.OpError
+	if errors.As(err, &oe) {
+		return true
+	}
+	var se *os.SyscallError
+	if errors.As(err, &se) {
+		return true
+	}
+	return errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, syscall.ETIMEDOUT) ||
+		errors.Is(err, syscall.ECONNREFUSED)
 }

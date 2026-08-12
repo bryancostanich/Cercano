@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
+	"os"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -50,6 +54,56 @@ func TestClassOf(t *testing.T) {
 	for _, tc := range cases {
 		if got := ClassOf(tc.err); got != tc.want {
 			t.Errorf("%s: ClassOf = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestRetryable(t *testing.T) {
+	cases := []struct {
+		class ErrorClass
+		want  bool
+	}{
+		{ErrBusy, true},     // transient overload — re-run may succeed
+		{ErrNetwork, true},  // transport reset — re-run may succeed
+		{ErrUnknown, true},  // one cheap attempt, then failover
+		{ErrQuota, false},   // pointless until quota resets
+		{ErrAuth, false},    // bad credential won't fix on retry
+		{ErrInvalidRequest, false},
+		{ErrContextOverflow, false},
+	}
+	for _, tc := range cases {
+		if got := Retryable(tc.class); got != tc.want {
+			t.Errorf("Retryable(%q) = %v, want %v", tc.class, got, tc.want)
+		}
+	}
+}
+
+func TestIsNetworkError(t *testing.T) {
+	// The regression: a mid-stream "connection reset by peer" arrives as a raw
+	// *net.OpError wrapping ECONNRESET — NOT a *url.Error — so the old
+	// url.Error-only check missed it and it fell through to ErrUnknown.
+	opErr := &net.OpError{
+		Op:  "read",
+		Net: "tcp",
+		Err: os.NewSyscallError("read", syscall.ECONNRESET),
+	}
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"url.Error", &url.Error{Op: "Get", URL: "https://x", Err: errors.New("dial")}, true},
+		{"net.OpError connreset", opErr, true},
+		{"wrapped net.OpError", fmt.Errorf("stream: %w", opErr), true},
+		{"bare ECONNRESET", syscall.ECONNRESET, true},
+		{"bare EPIPE", syscall.EPIPE, true},
+		{"foreign error", errors.New("boom"), false},
+		{"context cancel", context.Canceled, false},
+	}
+	for _, tc := range cases {
+		if got := IsNetworkError(tc.err); got != tc.want {
+			t.Errorf("%s: IsNetworkError = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

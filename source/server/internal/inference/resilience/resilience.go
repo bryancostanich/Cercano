@@ -252,8 +252,8 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 	if err == nil || ctx.Err() != nil {
 		return resp, err
 	}
-	if llm.ClassOf(err) == llm.ErrBusy {
-		ev := Event{Action: ActionRetry, Stage: "chat", Class: llm.ErrBusy,
+	if llm.Retryable(llm.ClassOf(err)) {
+		ev := Event{Action: ActionRetry, Stage: "chat", Class: llm.ClassOf(err),
 			From: p.primary.Name(), To: p.primary.Name(), Wait: p.waitFor(err), Err: err}
 		p.emit(ev)
 		if !p.sleep(ctx, ev.Wait) {
@@ -379,7 +379,7 @@ func (r *reader) decide(stage string, err error) bool {
 	}
 	class := llm.ClassOf(err)
 	p := r.p
-	if class == llm.ErrBusy && !r.retried {
+	if llm.Retryable(class) && !r.retried {
 		r.retried = true
 		ev := Event{Action: ActionRetry, Stage: stage, Class: class,
 			From: p.primary.Name(), To: p.primary.Name(), Wait: p.waitFor(err), Err: err}

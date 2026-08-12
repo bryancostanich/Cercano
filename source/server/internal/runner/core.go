@@ -184,15 +184,17 @@ func (c *Core) RunTurn(
 	result, loopErr := c.runLoop(ctx, req, provider, isCloud,
 		loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile)
 
-	// 6.5. Same-provider turn retry: a busy-class loop error is a transient
-	// server-side failure — often a mid-stream one, where the resilience
-	// engine deliberately cannot re-serve (content already flowed). At the
-	// turn level a full re-run IS safe: the failed iteration's partial output
-	// was never persisted, and the re-run supersedes it — the same contract
-	// the cross-tier fallback below has always relied on. One narrated
-	// attempt on the same provider before any tier change.
-	if loopErr != nil && ctx.Err() == nil && llm.ClassOf(loopErr) == llm.ErrBusy {
-		notice := fmt.Sprintf("⚠ %s server busy — trying once more", provider.Name())
+	// 6.5. Same-provider turn retry: a transient loop error — server overload
+	// (busy), a transport reset (network), or an unclassified failure that may
+	// simply be transient (unknown) — is often a mid-stream one, where the
+	// resilience engine deliberately cannot re-serve (content already flowed).
+	// At the turn level a full re-run IS safe: the failed iteration's partial
+	// output was never persisted, and the re-run supersedes it — the same
+	// contract the cross-tier fallback below has always relied on. One narrated
+	// attempt on the same provider before any tier change; llm.Retryable owns
+	// the class policy so this site and the resilience engine stay in sync.
+	if loopErr != nil && ctx.Err() == nil && llm.Retryable(llm.ClassOf(loopErr)) {
+		notice := retryNotice(provider.Name(), llm.ClassOf(loopErr))
 		fmt.Fprintf(os.Stderr, "[resilience] turn retry: %s (%v)\n", provider.Name(), loopErr)
 		sink.Emit(Event{Kind: EventProgress, Text: notice})
 		result, loopErr = c.runLoop(ctx, req, provider, isCloud,
@@ -293,6 +295,21 @@ func (c *Core) runLoop(
 		WatchdogGate:        wdGate,
 		WatchdogTurnEnd:     wdTurnEnd,
 	})
+}
+
+// retryNotice phrases the one-time same-provider turn retry for the user in
+// terms of what actually failed: overload, a dropped connection, or an opaque
+// hiccup. All three resolve to "trying once more" — the retry is single-shot
+// and the cross-tier fallback still follows if it fails again.
+func retryNotice(provider string, class llm.ErrorClass) string {
+	switch class {
+	case llm.ErrNetwork:
+		return fmt.Sprintf("⚠ %s connection dropped — trying once more", provider)
+	case llm.ErrBusy:
+		return fmt.Sprintf("⚠ %s server busy — trying once more", provider)
+	default:
+		return fmt.Sprintf("⚠ %s hiccup — trying once more", provider)
+	}
 }
 
 // makeLoopSink builds the agent.LoopEvent → runner.Event adapter.

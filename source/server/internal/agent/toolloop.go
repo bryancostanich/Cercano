@@ -186,6 +186,13 @@ type ToolLoopResult struct {
 	History      []llm.Message
 	InputTokens  int // last LLM call's provider-reported input tokens (context occupancy)
 	OutputTokens int // last LLM call's provider-reported output tokens
+	// CalledTools is the set of tool names the loop actually invoked, in first-
+	// seen order. It is recorded directly from each turn's BlockToolUse blocks,
+	// BEFORE any lean/flatten rewrite of the model-facing history — so callers
+	// (e.g. the dispatch low-signal / suspicious-no-op detectors) can tell what
+	// ran without re-deriving it from History, which in the sub-agent flatten
+	// path no longer carries BlockToolUse blocks.
+	CalledTools []string
 }
 
 // MaxToolLoopIterations caps the LLM round-trips per turn when no explicit
@@ -376,6 +383,20 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		Blocks: buildUserBlocks(in.UserInput, in.Images),
 	})
 
+	// calledTools accumulates the tool names invoked across every iteration, in
+	// first-seen order, recorded from the raw BlockToolUse blocks before any
+	// flatten rewrite. Surfaced on ToolLoopResult.CalledTools.
+	var calledTools []string
+	calledSeen := map[string]bool{}
+	recordCalled := func(blocks []llm.Block) {
+		for _, b := range blocks {
+			if b.Type == llm.BlockToolUse && b.ToolName != "" && !calledSeen[b.ToolName] {
+				calledSeen[b.ToolName] = true
+				calledTools = append(calledTools, b.ToolName)
+			}
+		}
+	}
+
 	// appendTurn records a new (this-turn) assistant or tool-result message into
 	// the model-facing history and notifies the host (OnTurnComplete) so it can
 	// persist it immediately. The leading user message above is intentionally NOT
@@ -456,6 +477,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				finalText += b.Text
 			}
 		}
+		recordCalled(toolCalls)
 		if len(toolCalls) > 0 && in.FlattenToolResults {
 			persistTurn(llm.Message{Role: llm.RoleAssistant, Blocks: resp.Blocks})
 			appendModelTurn(llm.Message{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: flattenToolUseSummary(toolCalls)}}})
@@ -496,6 +518,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				FinalText: finalText, FinalBlocks: resp.Blocks,
 				Iterations: iter + 1, History: hist,
 				InputTokens: lastIn, OutputTokens: lastOut,
+				CalledTools: calledTools,
 			}, nil
 		}
 
@@ -684,7 +707,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 						Content: "no permission requester wired", IsError: true,
 					})
 					appendTurn(llm.Message{Role: llm.RoleUser, Blocks: results})
-					return ToolLoopResult{FinalText: finalText, Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, nil
+					return ToolLoopResult{FinalText: finalText, Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut, CalledTools: calledTools}, nil
 				}
 				destructive := agenttools.IsDestructive(pc.tool)
 				emit(LoopEvent{Kind: LoopPermissionRequired, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, ArgsJSON: string(pc.block.ToolInput), Tier: string(pc.tier), Destructive: destructive})
@@ -709,7 +732,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 						Content: "user denied execution", IsError: true,
 					})
 					appendTurn(llm.Message{Role: llm.RoleUser, Blocks: results})
-					return ToolLoopResult{FinalText: finalText, Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, nil
+					return ToolLoopResult{FinalText: finalText, Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut, CalledTools: calledTools}, nil
 				}
 			}
 			execCtx := agenttools.WithProgressEmitter(ctx, func(progress agenttools.ProgressEvent) {
@@ -803,6 +826,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		FinalText: finalText, FinalBlocks: resp.Blocks,
 		Iterations: maxIters, History: hist,
 		InputTokens: resp.InputTokens, OutputTokens: resp.OutputTokens,
+		CalledTools: calledTools,
 	}, nil
 }
 

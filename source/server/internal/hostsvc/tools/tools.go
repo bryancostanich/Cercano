@@ -547,7 +547,15 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	// still claimed done. Advisory only — never changes what we return, it
 	// annotates the result so the parent stops trusting a fabricated success.
 	mutating := mutatingToolNames(reg)
-	called := calledToolNames(res.History)
+	// Use the tools the loop actually invoked, recorded directly from each
+	// turn's BlockToolUse blocks (res.CalledTools). Do NOT re-derive from
+	// res.History: in the sub-agent flatten path the model-facing history
+	// replaces tool_use blocks with a text summary, so History carries no
+	// BlockToolUse and every run would look like called=[] — a false no-op.
+	called := make(map[string]bool, len(res.CalledTools))
+	for _, name := range res.CalledTools {
+		called[name] = true
+	}
 	suspicious, reason := detectSuspiciousNoOp(text, called, mutating)
 	if suspicious {
 		log.Printf("[dispatch] subagent SUSPICIOUS no-op: conv=%s granted_write=%v called=%v reason=%q",

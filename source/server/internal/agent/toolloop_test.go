@@ -239,6 +239,22 @@ func TestToolLoop_FlattenToolResultsFeedsPlainUserText(t *testing.T) {
 	if !strings.Contains(user.Blocks[0].Text, "Tool result from LS") {
 		t.Fatalf("flattened tool result missing marker: %q", user.Blocks[0].Text)
 	}
+
+	// Regression: in the flatten path the model-facing History carries NO
+	// BlockToolUse (it was rewritten to a text summary), so deriving "what did
+	// the sub-agent call?" from History yields nothing — the false-no-op that
+	// made every delegated run log called=[]. CalledTools must still record the
+	// real invocation.
+	for _, m := range result.History {
+		for _, b := range m.Blocks {
+			if b.Type == llm.BlockToolUse {
+				t.Fatalf("flatten path should leave no BlockToolUse in History, found %q", b.ToolName)
+			}
+		}
+	}
+	if len(result.CalledTools) != 1 || result.CalledTools[0] != "LS" {
+		t.Fatalf("CalledTools = %v, want [LS] (recorded before the flatten rewrite)", result.CalledTools)
+	}
 }
 
 func TestToolLoop_RTierRunsConcurrently(t *testing.T) {

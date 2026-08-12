@@ -341,6 +341,37 @@ func (m *Model) cleanupFinishedSubAgentTabs() {
 	}
 }
 
+func (m *Model) retireFinishedSubAgentTab(id string) {
+	m.ensureChatTabs()
+	if id == mainChatTabID {
+		return
+	}
+	tab := m.chatTabs.tabs[id]
+	if tab == nil || tab.restored {
+		return
+	}
+	fallback := mainChatTabID
+	order := make([]string, 0, len(m.chatTabs.order))
+	for i, oid := range m.chatTabs.order {
+		if oid == id {
+			if i > 0 {
+				fallback = m.chatTabs.order[i-1]
+			}
+			continue
+		}
+		order = append(order, oid)
+	}
+	m.chatTabs.order = order
+	delete(m.chatTabs.tabs, id)
+	m.dismissSubAgentTab(id) // persist the sweep so a resume doesn't reopen it
+	if m.chatTabs.active == id {
+		m.chatTabs.active = fallback
+	}
+	if !m.hasSubAgentTabs() {
+		m.chatTabs.focused = false
+	}
+}
+
 func subAgentTabHasSubstantiveTranscript(tab *chatTab) bool {
 	if tab == nil {
 		return false
@@ -474,15 +505,16 @@ func (m *Model) applySubAgentEvent(ev subAgentEventMsg) {
 	// is retired later by the parent turn's sweep or explicit navigation — the
 	// same lifetime it had before this eager sweep existed.
 	//
-	// A successful tab that produced substantive output is also spared from the
-	// eager sweep: the user may want to navigate into it and read the result
-	// after it finishes. Those are retired by the parent turn's sweep like
-	// before. Only bare lifecycle-only tabs (started -> done with nothing worth
-	// reading) — the ones that otherwise orphan forever — are retired eagerly.
-	if ev.kind == "done" {
-		if tab := m.chatTabs.tabs[ev.id]; tab != nil && !subAgentTabHasSubstantiveTranscript(tab) {
-			m.cleanupFinishedSubAgentTabs()
-		}
+	// Successful dispatch sub-agent tabs are ephemeral: retire the completed tab
+	// on its OWN done event regardless of transcript length or active state. Users
+	// can reopen finished tabs from the transcript/history surface, so keeping
+	// every substantive dispatch child tab in the strip makes completed dispatches
+	// look stuck and lets tabs accumulate when the parent turn's sweep has already
+	// run. Long-running activity tabs (research/deep_research, id prefix
+	// "activity:") keep their existing lifetime/formatting, and errored tabs keep
+	// the older post-mortem behavior.
+	if ev.kind == "done" && !strings.HasPrefix(ev.id, "activity:") {
+		m.retireFinishedSubAgentTab(ev.id)
 	}
 }
 

@@ -353,13 +353,13 @@ func TestCleanupFinishedSubAgentTabs(t *testing.T) {
 	m.applySubAgentEvent(subAgentEventMsg{id: "c2", kind: "started"})
 	m.applySubAgentEvent(subAgentEventMsg{id: "c3", kind: "started"})
 
-	// c1 finished, c2 finished-and-active, c3 still running. c2 carries
-	// substantive assistant output so it survives the eager on-done sweep and is
-	// available for the user to navigate into — the manual sweep below then
-	// spares it as the active tab.
+	// c1 finished, c2 finished-and-active, c3 still running. This test targets
+	// cleanupFinishedSubAgentTabs directly, so mark c1/c2 done without routing
+	// through applySubAgentEvent(done), whose approved behavior is now to retire
+	// the completed sub-agent tab immediately.
 	m.applySubAgentEvent(subAgentEventMsg{id: "c2", kind: "token", inner: chatAssistantDeltaMsg{token: "c2 result worth reading"}})
-	m.applySubAgentEvent(subAgentEventMsg{id: "c1", kind: "done"})
-	m.applySubAgentEvent(subAgentEventMsg{id: "c2", kind: "done"})
+	m.chatTabs.tabs["c1"].done = true
+	m.chatTabs.tabs["c2"].done = true
 	m.switchChatTab("c2")
 
 	m.cleanupFinishedSubAgentTabs()
@@ -504,20 +504,35 @@ func TestSubAgentDoneEventPrunesOwnTabImmediately(t *testing.T) {
 	}
 }
 
-// A sub-agent that finishes with substantive output must NOT be yanked away by
-// the eager on-done sweep: the user may want to navigate into it and read the
-// result. Such tabs keep their pre-existing lifetime (retired later by the
-// parent turn's sweep), so only bare lifecycle-only tabs auto-close eagerly.
-func TestSubAgentDoneEventSparesSubstantiveTab(t *testing.T) {
+// A sub-agent that finishes successfully must retire its own tab on its OWN
+// done event regardless of transcript length. The transcript remains reopenable
+// elsewhere; the tab strip itself is ephemeral and should not accumulate
+// finished sub-agent tabs just because they produced output.
+func TestSubAgentDoneEventPrunesSubstantiveTabImmediately(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.applySubAgentEvent(subAgentEventMsg{id: "sa", kind: "started"})
-	// Substantive assistant output the user might want to read after it finishes.
+	// Substantive assistant output the user can reopen later.
 	m.applySubAgentEvent(subAgentEventMsg{id: "sa", kind: "token", inner: chatAssistantDeltaMsg{token: "found the thing"}})
 	// User is on main — not viewing the tab — when it finishes.
 	m.switchChatTab(mainChatTabID)
 	m.applySubAgentEvent(subAgentEventMsg{id: "sa", kind: "done"})
-	if _, ok := m.chatTabs.tabs["sa"]; !ok {
-		t.Fatal("finished substantive sub tab must survive the eager on-done sweep for later review")
+	if _, ok := m.chatTabs.tabs["sa"]; ok {
+		t.Fatal("finished substantive sub tab must retire on its own done event")
+	}
+}
+
+func TestSubAgentDoneEventPrunesActiveSubstantiveTabImmediately(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.applySubAgentEvent(subAgentEventMsg{id: "sa", kind: "started"})
+	m.applySubAgentEvent(subAgentEventMsg{id: "sa", kind: "token", inner: chatAssistantDeltaMsg{token: "found the thing"}})
+	m.switchChatTab("sa")
+	m.applySubAgentEvent(subAgentEventMsg{id: "sa", kind: "done"})
+	if _, ok := m.chatTabs.tabs["sa"]; ok {
+		t.Fatal("finished active substantive sub tab must retire on its own done event")
+	}
+	if m.chatTabs.active != mainChatTabID {
+		t.Fatalf("active tab = %q, want main after active sub tab retires", m.chatTabs.active)
 	}
 }

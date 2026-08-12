@@ -251,6 +251,28 @@ to the real cause — the sub-agent flatten path stripping `BlockToolUse` from
 the history the low-signal detector inspected (now read from
 `ToolLoopResult.CalledTools` instead).
 
+### Opt-in live open-model dispatch smoke
+
+Most dispatch/sub-agent tests are hermetic and should run in normal `go test
+./...`. To validate the real local/open-model path on a configured development
+machine, use the skipped-by-default live smoke test:
+
+```bash
+cd source/server
+CERCANO_LIVE_OPEN_MODEL_TEST=1 \
+CERCANO_LIVE_OPEN_MODEL_BASE_URL=http://127.0.0.1:8080/v1 \
+CERCANO_LIVE_OPEN_MODEL_MODEL=glm-4.5-air \
+go test ./internal/server/ -run TestLiveOpenModelDispatch_ReadToolSmoke -count=1 -v
+```
+
+Optional: set `CERCANO_LIVE_OPEN_MODEL_API_KEY` if the endpoint requires one;
+otherwise the test uses a dummy `local` key. The test creates a temp file with a
+sentinel token, grants only `Read`, runs an agentic dispatch against the local
+OpenAI-compatible provider, and asserts both the returned text and dispatch log
+show a real tool-grounded run (`called=[Read]`). It is skipped unless
+`CERCANO_LIVE_OPEN_MODEL_TEST=1` is set, so CI and normal development never
+require a local model.
+
 Model-resolution wiring (all resolved once at agent startup in
 `cmd/cercano/main.go`): compaction summarizer ← `fast_light.open`;
 recap and watchdog ← `fast_light_text.open`; interactive local chat ←

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	openaiadapter "cercano/source/server/internal/llm/openai"
 )
 
 type mockProvider struct {
@@ -140,6 +143,9 @@ func TestToolLoop_HitsCap_DegradesToFinalAnswer(t *testing.T) {
 	if prov.calls != MaxToolLoopIterations+1 {
 		t.Errorf("expected %d calls (cap tool turns + 1 final), got %d", MaxToolLoopIterations+1, prov.calls)
 	}
+	if len(result.CalledTools) != 1 || result.CalledTools[0] != "LS" {
+		t.Fatalf("CalledTools = %v, want [LS] even after max-iteration degrade", result.CalledTools)
+	}
 }
 
 func TestToolLoop_PlainText_TerminatesImmediately(t *testing.T) {
@@ -254,6 +260,126 @@ func TestToolLoop_FlattenToolResultsFeedsPlainUserText(t *testing.T) {
 	}
 	if len(result.CalledTools) != 1 || result.CalledTools[0] != "LS" {
 		t.Fatalf("CalledTools = %v, want [LS] (recorded before the flatten rewrite)", result.CalledTools)
+	}
+}
+
+func TestToolLoop_CalledToolsRecordsMultipleDistinctToolsInOrder(t *testing.T) {
+	var ranA, ranB bool
+	reg := agenttools.NewRegistry()
+	reg.MustRegister(stubTool{name: "tool_a", perm: agenttools.PermR, ran: &ranA})
+	reg.MustRegister(stubTool{name: "tool_b", perm: agenttools.PermR, ran: &ranB})
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+
+	prov := &mockProvider{
+		scripts: [][]llm.Block{
+			{
+				{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "tool_a", ToolInput: json.RawMessage(`{}`)},
+				{Type: llm.BlockToolUse, ToolUseID: "u2", ToolName: "tool_b", ToolInput: json.RawMessage(`{}`)},
+			},
+			{{Type: llm.BlockText, Text: "done"}},
+		},
+		caps: inference.Capabilities{SupportsTools: true, SupportsParallelTools: true},
+	}
+
+	result, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider: prov, Registry: reg, Permissions: perms, UserInput: "call both",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ranA || !ranB {
+		t.Fatalf("expected both tools to run, ranA=%v ranB=%v", ranA, ranB)
+	}
+	want := []string{"tool_a", "tool_b"}
+	if got := strings.Join(result.CalledTools, ","); got != strings.Join(want, ",") {
+		t.Fatalf("CalledTools = %v, want %v", result.CalledTools, want)
+	}
+}
+
+func TestToolLoop_CalledToolsDeduplicatesRepeatedTool(t *testing.T) {
+	var ran bool
+	reg := agenttools.NewRegistry()
+	reg.MustRegister(stubTool{name: "tool_a", perm: agenttools.PermR, ran: &ran})
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+
+	prov := &mockProvider{
+		scripts: [][]llm.Block{
+			{
+				{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "tool_a", ToolInput: json.RawMessage(`{}`)},
+				{Type: llm.BlockToolUse, ToolUseID: "u2", ToolName: "tool_a", ToolInput: json.RawMessage(`{}`)},
+			},
+			{{Type: llm.BlockText, Text: "done"}},
+		},
+		caps: inference.Capabilities{SupportsTools: true, SupportsParallelTools: true},
+	}
+
+	result, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider: prov, Registry: reg, Permissions: perms, UserInput: "call twice",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ran {
+		t.Fatal("expected tool_a to run")
+	}
+	if len(result.CalledTools) != 1 || result.CalledTools[0] != "tool_a" {
+		t.Fatalf("CalledTools = %v, want [tool_a]", result.CalledTools)
+	}
+}
+
+func writeToolLoopSSE(w http.ResponseWriter, lines ...string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	for _, l := range lines {
+		fmt.Fprintf(w, "data: %s\n\n", l)
+	}
+}
+
+func TestToolLoop_OpenAIStreamCollectedToolUseFeedsRunToolLoop(t *testing.T) {
+	var ran bool
+	reg := agenttools.NewRegistry()
+	reg.MustRegister(stubTool{name: "tool_a", perm: agenttools.PermR, ran: &ran})
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		switch calls {
+		case 1:
+			writeToolLoopSSE(w,
+				`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"u1","type":"function","function":{"name":"tool_a","arguments":"{}"}}]}}]}`,
+				`{"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":4}}`,
+				`[DONE]`,
+			)
+		case 2:
+			writeToolLoopSSE(w,
+				`{"choices":[{"delta":{"content":"tool-grounded final"}}]}`,
+				`{"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":3}}`,
+				`[DONE]`,
+			)
+		default:
+			t.Fatalf("unexpected provider request %d", calls)
+		}
+	}))
+	defer srv.Close()
+
+	provider := openaiadapter.NewClient(openaiadapter.Config{BaseURL: srv.URL + "/v1", APIKey: "test", Model: "compat-fixture"})
+	result, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider: provider, Registry: reg, Permissions: perms, UserInput: "call the tool",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ran {
+		t.Fatal("expected tool_a to execute from OpenAI-compatible streamed tool_use")
+	}
+	if result.FinalText != "tool-grounded final" {
+		t.Fatalf("FinalText = %q, want tool-grounded final", result.FinalText)
+	}
+	if len(result.CalledTools) != 1 || result.CalledTools[0] != "tool_a" {
+		t.Fatalf("CalledTools = %v, want [tool_a]", result.CalledTools)
+	}
+	if calls != 2 {
+		t.Fatalf("provider calls = %d, want 2", calls)
 	}
 }
 

@@ -230,6 +230,103 @@ func TestStreamChat_ToolNameOnFinalFragment(t *testing.T) {
 	}
 }
 
+// TestStreamChat_ToolArgumentsArriveBeforeNameAndID covers a compatibility
+// server shape where argument fragments begin before the function name/id show
+// up. The reader must buffer those early argument bytes, emit Start only once it
+// knows the tool name, and replay the buffered args in order.
+func TestStreamChat_ToolArgumentsArriveBeforeNameAndID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sse(w,
+			// chunk 1: arguments arrive first, with neither id nor name yet.
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":"}}]}}]}`,
+			// chunk 2: id + name finally arrive.
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c-early-args","type":"function","function":{"name":"read"}}]}}]}`,
+			// chunk 3: argument tail.
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"file.txt\"}"}}]}}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":3,"completion_tokens":5}}`,
+			`[DONE]`,
+		)
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "compat"})
+	rd, err := c.StreamChat(context.Background(), llm.ChatRequest{
+		Messages: []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "go"}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rd.Close()
+
+	name, id, args, sawStart, sawStop := collectToolTurn(t, rd)
+	if !sawStart || !sawStop {
+		t.Fatalf("expected complete tool framing, sawStart=%v sawStop=%v", sawStart, sawStop)
+	}
+	if name != "read" || id != "c-early-args" {
+		t.Fatalf("tool start = name=%q id=%q, want read/c-early-args", name, id)
+	}
+	if args != `{"path":"file.txt"}` {
+		t.Fatalf("args = %q, want %q", args, `{"path":"file.txt"}`)
+	}
+}
+
+// TestStreamChat_SequentialToolCallIndexes documents the supported multiple-
+// tool shape for this reader: fragments for each tool index must be contiguous.
+// The streamReader intentionally tracks one open tool at a time; fully
+// interleaved fragments for index 0/1/0 are not claimed as supported by this
+// test. Contiguous multi-index streams still assemble into separate tool turns.
+func TestStreamChat_SequentialToolCallIndexes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sse(w,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c0","type":"function","function":{"name":"read","arguments":"{}"}}]}}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"c1","type":"function","function":{"name":"grep","arguments":"{\"pattern\":\"x\"}"}}]}}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":3,"completion_tokens":5}}`,
+			`[DONE]`,
+		)
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "compat"})
+	rd, err := c.StreamChat(context.Background(), llm.ChatRequest{
+		Messages: []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "go"}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rd.Close()
+
+	type turn struct{ name, id, args string }
+	var turns []turn
+	for {
+		ev, ok, err := rd.Next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			break
+		}
+		switch ev.Type {
+		case llm.EventToolUseStart:
+			turns = append(turns, turn{name: ev.ToolName, id: ev.ToolUseID})
+		case llm.EventToolUseInputDelta:
+			if len(turns) == 0 {
+				t.Fatalf("input delta before tool start: %q", ev.TextDelta)
+			}
+			turns[len(turns)-1].args += ev.TextDelta
+		}
+	}
+
+	if len(turns) != 2 {
+		t.Fatalf("turns = %#v, want 2", turns)
+	}
+	if turns[0] != (turn{name: "read", id: "c0", args: `{}`}) {
+		t.Fatalf("turn0 = %#v", turns[0])
+	}
+	if turns[1] != (turn{name: "grep", id: "c1", args: `{"pattern":"x"}`}) {
+		t.Fatalf("turn1 = %#v", turns[1])
+	}
+}
+
 // TestStreamChat_SeparateUsageChunk verifies that the real OpenAI include_usage
 // shape — where finish_reason and usage arrive in SEPARATE chunks — still
 // produces the correct InputTokens/OutputTokens on EventMessageStop.

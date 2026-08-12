@@ -126,6 +126,67 @@ func TestDispatch_Execute_IncludesRouteHeader(t *testing.T) {
 	}
 }
 
+func TestDispatch_Execute_EmptySubagentTextStillIncludesDiagnostics(t *testing.T) {
+	svc := capabilities.Services{
+		Dispatch: func(_ context.Context, spec dispatch.Spec) (dispatch.Result, error) {
+			return dispatch.Result{
+				Text:         "",
+				Model:        "local-open-model",
+				Provider:     "llama_server",
+				Tier:         string(spec.Tier),
+				IsCloud:      false,
+				GrantedTools: []string{"Read", "Grep"},
+			}, nil
+		},
+	}
+	args, _ := json.Marshal(map[string]any{"task": "do X", "tools": []string{"Read", "Grep"}})
+	call := &capabilities.Call{Args: args, WorkDir: "/proj", Svc: svc}
+
+	res, err := Dispatch().Execute(context.Background(), call)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if strings.TrimSpace(res.Text) == "" {
+		t.Fatal("empty sub-agent body must still produce diagnostic headers, got blank result")
+	}
+	if !strings.Contains(res.Text, "[sub-agent route: open provider=llama_server model=local-open-model tier=fast_light]") {
+		t.Fatalf("missing route header for empty sub-agent body:\n%s", res.Text)
+	}
+	if !strings.Contains(res.Text, "[sub-agent tools: Read, Grep]") {
+		t.Fatalf("missing tools header for empty sub-agent body:\n%s", res.Text)
+	}
+}
+
+func TestDispatch_Execute_SuspiciousWarningIsPrepended(t *testing.T) {
+	svc := capabilities.Services{
+		Dispatch: func(_ context.Context, spec dispatch.Spec) (dispatch.Result, error) {
+			return dispatch.Result{
+				Text:            "claimed done",
+				Model:           "local-open-model",
+				Provider:        "llama_server",
+				Tier:            string(spec.Tier),
+				GrantedTools:    []string{"Edit"},
+				Suspicious:      true,
+				SuspicionReason: "granted mutating tools but called none",
+			}, nil
+		},
+	}
+	args, _ := json.Marshal(map[string]any{"task": "do X", "tools": []string{"Edit"}})
+	call := &capabilities.Call{Args: args, WorkDir: "/proj", Svc: svc}
+
+	res, err := Dispatch().Execute(context.Background(), call)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	wantPrefix := "[sub-agent warning: granted mutating tools but called none]\n[sub-agent route: open provider=llama_server model=local-open-model tier=fast_light]"
+	if !strings.HasPrefix(res.Text, wantPrefix) {
+		t.Fatalf("warning should be first so parent does not trust the body blindly. got:\n%s\nwant prefix:\n%s", res.Text, wantPrefix)
+	}
+	if !strings.Contains(res.Text, "claimed done") {
+		t.Fatalf("warning/header rendering dropped body text:\n%s", res.Text)
+	}
+}
+
 func TestDispatch_Execute_TierKnob(t *testing.T) {
 	// The "tier" arg expresses reasoning demand only; it must map onto the
 	// taxonomy tier without touching Role (location stays RoleCoproc always).

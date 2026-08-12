@@ -144,6 +144,44 @@ func TestRunAgenticDispatch_PersistsSubagentLoop(t *testing.T) {
 	}
 }
 
+// TestRunAgenticDispatch_LowSignalUsesCalledToolsNotFlattenedHistory pins the
+// regression from 2026-08-12: sub-agents run with FlattenToolResults=true, so
+// the model-facing History contains a text summary instead of BlockToolUse
+// blocks. The low-signal detector must therefore read ToolLoopResult.CalledTools
+// (recorded before flattening), not re-derive tool usage from flattened History;
+// otherwise every read-only sub-agent logs called=[] even when a tool ran.
+func TestRunAgenticDispatch_LowSignalUsesCalledToolsNotFlattenedHistory(t *testing.T) {
+	srv, prov := observabilityDispatchRig(t)
+
+	out := captureLog(t, func() {
+		res, err := srv.runAgenticDispatch(context.Background(),
+			dispatch.Spec{Mode: dispatch.Agentic, Task: "probe task"},
+			dispatch.Selection{Provider: prov}, "test-model")
+		if err != nil {
+			t.Fatalf("runAgenticDispatch: %v", err)
+		}
+		if res.Suspicious {
+			t.Fatalf("read-only tool-grounded dispatch should not be suspicious: reason=%q text=%q", res.SuspicionReason, res.Text)
+		}
+		if !strings.Contains(res.Text, "done") {
+			t.Fatalf("result text = %q, want final answer containing done", res.Text)
+		}
+	})
+
+	if !strings.Contains(out, "subagent low-signal run:") {
+		t.Fatalf("expected low-signal diagnostic for one-call read-only dispatch, got:\n%s", out)
+	}
+	if !strings.Contains(out, "called=[r_read]") {
+		t.Fatalf("expected low-signal diagnostic to name the real called tool, got:\n%s", out)
+	}
+	if strings.Contains(out, "called=[]") {
+		t.Fatalf("diagnostic re-derived from flattened History and lost the tool call:\n%s", out)
+	}
+	if strings.Contains(out, "SUSPICIOUS no-op") {
+		t.Fatalf("read-only tool-grounded dispatch should not emit suspicious no-op:\n%s", out)
+	}
+}
+
 // TestRunAgenticDispatch_LogsStartAndDone verifies the dispatch lifecycle is
 // visible in the agent log with the sub-conversation id for cross-referencing.
 func TestRunAgenticDispatch_LogsStartAndDone(t *testing.T) {
@@ -174,12 +212,14 @@ func TestRunAgenticDispatch_EmitsProgress(t *testing.T) {
 	srv, prov := observabilityDispatchRig(t)
 	var notes []string
 
-	_, err := srv.runAgenticDispatch(context.Background(),
-		dispatch.Spec{Mode: dispatch.Agentic, Task: "probe task", Emit: func(ev agenttools.ProgressEvent) { notes = append(notes, ev.Text) }},
-		dispatch.Selection{Provider: prov}, "test-model")
-	if err != nil {
-		t.Fatalf("runAgenticDispatch: %v", err)
-	}
+	out := captureLog(t, func() {
+		_, err := srv.runAgenticDispatch(context.Background(),
+			dispatch.Spec{Mode: dispatch.Agentic, Task: "probe task", Emit: func(ev agenttools.ProgressEvent) { notes = append(notes, ev.Text) }},
+			dispatch.Selection{Provider: prov}, "test-model")
+		if err != nil {
+			t.Fatalf("runAgenticDispatch: %v", err)
+		}
+	})
 	joined := strings.Join(notes, "\n")
 	for _, want := range []string{
 		// grant/ignored no longer emit as separate progress lines; the toolset
@@ -194,6 +234,49 @@ func TestRunAgenticDispatch_EmitsProgress(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Errorf("progress missing %q in:\n%s", want, joined)
 		}
+	}
+	if !strings.Contains(out, "called=[r_read]") {
+		t.Fatalf("dispatch log should agree with progress tool name r_read, got:\n%s", out)
+	}
+	if strings.Contains(out, "called=[]") {
+		t.Fatalf("dispatch log lost the tool name that progress reported:\nprogress:\n%s\nlogs:\n%s", joined, out)
+	}
+}
+
+// TestRunAgenticDispatch_NoToolCallsLowSignalRemainsNoTool is the baseline for
+// the low-signal diagnostic: called=[] is valid only when the sub-agent really
+// made no tool calls. This distinguishes the benign no-tool path from the
+// flattened-history regression, where a tool ran but the diagnostic lost it.
+func TestRunAgenticDispatch_NoToolCallsLowSignalRemainsNoTool(t *testing.T) {
+	srv, _ := observabilityDispatchRig(t)
+	prov := &scriptedProvider{
+		caps:    inference.Capabilities{SupportsTools: true},
+		scripts: [][]llm.Block{{{Type: llm.BlockText, Text: "answer without tools"}}},
+	}
+
+	out := captureLog(t, func() {
+		res, err := srv.runAgenticDispatch(context.Background(),
+			dispatch.Spec{Mode: dispatch.Agentic, Task: "probe task"},
+			dispatch.Selection{Provider: prov}, "test-model")
+		if err != nil {
+			t.Fatalf("runAgenticDispatch: %v", err)
+		}
+		if res.Suspicious {
+			t.Fatalf("read-only no-tool dispatch should not be suspicious: reason=%q", res.SuspicionReason)
+		}
+		if !strings.Contains(res.Text, "answer without tools") {
+			t.Fatalf("result text = %q, want no-tool answer", res.Text)
+		}
+	})
+
+	if !strings.Contains(out, "subagent low-signal run:") {
+		t.Fatalf("expected low-signal diagnostic for read-only no-tool dispatch, got:\n%s", out)
+	}
+	if !strings.Contains(out, "called=[]") {
+		t.Fatalf("true no-tool dispatch should log called=[], got:\n%s", out)
+	}
+	if strings.Contains(out, "called=[r_read]") {
+		t.Fatalf("no-tool dispatch should not inherit tool names from another run:\n%s", out)
 	}
 }
 

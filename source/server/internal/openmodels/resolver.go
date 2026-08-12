@@ -60,6 +60,16 @@ func (r *Resolver) Model(t cfg.Tier) string {
 // ChatModel is the effective everyday (interactive local chat) model.
 func (r *Resolver) ChatModel() string { return r.Model(cfg.TierEveryday) }
 
+// VisionModel is the effective open image-inspection model (the vision tier on
+// the active runtime). Unlike ChatModel, vision is an optional override-only
+// tier: it is not part of any runtime's required tiers, so ok=false is the
+// normal "no vision model configured" condition — the inspect_image tool reads
+// this and reports vision unavailable rather than treating it as an error.
+func (r *Resolver) VisionModel() (id string, ok bool) {
+	id = r.Model(cfg.TierVision)
+	return id, id != ""
+}
+
 // EmbeddingModel is the effective embedding model.
 func (r *Resolver) EmbeddingModel() string { return r.Model(cfg.TierEmbedding) }
 

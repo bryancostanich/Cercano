@@ -22,6 +22,14 @@ const (
 	// meaningful today (embeddings run on the configured local runtime);
 	// the cloud side exists for shape-consistency and future use.
 	TierEmbedding Tier = "embedding"
+	// TierVision is the image-inspection model slot used by the inspect_image
+	// tool. It is an OPTIONAL, override-only tier: unlike the chat tiers it is
+	// not part of any runtime's requiredTiers, so a runtime with no vision
+	// model simply resolves empty and the tool reports vision unavailable. A
+	// curated per-RAM catalog default is added later (see the vision-as-tool
+	// effort, Phase 9); until then it must be set explicitly, e.g.
+	// models.open.overrides.llama_server.vision.
+	TierVision Tier = "vision"
 )
 
 // Provider names which side of the taxonomy a model id lives on. "Open" names
@@ -108,8 +116,8 @@ func ApplyModelTierPatch(m *ModelsConfig, key, value string) (string, error) {
 		return "", fmt.Errorf("model tier key %q must be \"<runtime>.<tier>\"", key)
 	}
 	if !validTier(Tier(tierName)) {
-		return "", fmt.Errorf("unknown model tier %q (want %s|%s|%s|%s|%s)", tierName,
-			TierMostCapable, TierEveryday, TierFastLight, TierFastLightText, TierEmbedding)
+		return "", fmt.Errorf("unknown model tier %q (want %s|%s|%s|%s|%s|%s)", tierName,
+			TierMostCapable, TierEveryday, TierFastLight, TierFastLightText, TierEmbedding, TierVision)
 	}
 	if runtimeName == "" {
 		return "", fmt.Errorf("model tier key %q is missing a runtime", key)
@@ -142,7 +150,7 @@ func (m ModelsConfig) TierSlots() map[string]string {
 // validTier reports whether t is a known tier name.
 func validTier(t Tier) bool {
 	switch t {
-	case TierMostCapable, TierEveryday, TierFastLight, TierFastLightText, TierEmbedding:
+	case TierMostCapable, TierEveryday, TierFastLight, TierFastLightText, TierEmbedding, TierVision:
 		return true
 	}
 	return false

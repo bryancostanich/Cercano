@@ -90,8 +90,12 @@ explicit placeholders instead of raw image blocks.
 
 Make vision model selection semantic rather than a one-off config key.
 
-- [ ] Add `vision` to the model tier/profile definitions in `pkg/config`.
-- [ ] Extend config parsing/defaults/tests so overrides like this are valid:
+- [x] Add `vision` to the model tier/profile definitions in `pkg/config`.
+      Done: `config.TierVision = "vision"` added to the `Tier` enum with a doc
+      comment marking it OPTIONAL and override-only (not in any runtime's
+      `requiredTiers`); `validTier` and `ApplyModelTierPatch`'s error message
+      now recognize it.
+- [x] Extend config parsing/defaults/tests so overrides like this are valid:
 
       ```yaml
       models:
@@ -102,15 +106,30 @@ Make vision model selection semantic rather than a one-off config key.
               vision: gemma-3-4b-it-q4_k_m
       ```
 
-- [ ] Add a resolver API for "vision tier for current locus/runtime" that the
+      Done: the override plumbing is generic per (runtime, tier), so this
+      round-trips with no new struct — `SetOverride`/`OverrideFor`/YAML all
+      work. `tierrecs.validate` accepts vision as a known tier without
+      requiring it (only the four chat tiers are required). No new default is
+      seeded yet — curated per-RAM vision defaults land in Phase 9.
+- [x] Add a resolver API for "vision tier for current locus/runtime" that the
       tool can call without knowing config internals.
-- [ ] Ensure no existing tier behavior changes for `everyday`, `fast`, etc.
-- [ ] Tests:
+      Done: `openmodels.Resolver.VisionModel() (id string, ok bool)` — override
+      then catalog default, with `ok=false` as the normal "no vision model
+      configured" condition (not an error) that the tool reads to report
+      vision unavailable.
+- [x] Ensure no existing tier behavior changes for `everyday`, `fast`, etc.
+      Done: only additive changes; `TestVisionModel_DoesNotDisturbEveryday`
+      guards everyday resolution, and the full existing config/openmodels test
+      suites pass unchanged.
+- [x] Tests:
       - `vision` override parses and resolves;
       - missing `vision` override returns a typed/not-found condition;
       - existing tier tests unchanged.
-- [ ] Build + vet + full `go test ./...` green.
-- [ ] Checkpoint.
+      Done: `config.TestVisionTierOverride` (valid target, round-trip, unset
+      miss) and `openmodels` resolver tests (override, catalog default,
+      unconfigured→ok=false, everyday-undisturbed).
+- [x] Build + vet + full `go test ./...` green.
+- [x] Checkpoint.
 
 ## Phase 4 — Built-in `inspect_image` tool skeleton
 

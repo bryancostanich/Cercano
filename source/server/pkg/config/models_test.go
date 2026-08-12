@@ -101,6 +101,32 @@ func TestApplyModelTierPatch(t *testing.T) {
 	}
 }
 
+// TestVisionTierOverride covers the optional, override-only vision tier: it is
+// a valid patch/override target and round-trips through OverrideFor, but is
+// deliberately NOT one of any runtime's required tiers.
+func TestVisionTierOverride(t *testing.T) {
+	if !validTier(TierVision) {
+		t.Fatal("vision must be a known tier")
+	}
+
+	var m ModelsConfig
+	desc, err := ApplyModelTierPatch(&m, "llama_server.vision", "gemma-3-4b-it-q4_k_m")
+	if err != nil {
+		t.Fatalf("set vision slot: %v", err)
+	}
+	if !strings.Contains(desc, "llama_server.vision") {
+		t.Errorf("change description should name the vision slot, got %q", desc)
+	}
+	if got, ok := m.OverrideFor("llama_server", TierVision); !ok || got != "gemma-3-4b-it-q4_k_m" {
+		t.Errorf("vision override = (%q,%v), want gemma-3-4b-it-q4_k_m,true", got, ok)
+	}
+
+	// Unset vision is a normal miss, not an error condition.
+	if got, ok := m.OverrideFor("mistralrs", TierVision); ok || got != "" {
+		t.Errorf("unset vision override = (%q,%v), want empty,false", got, ok)
+	}
+}
+
 func TestModelTierSlots(t *testing.T) {
 	var m ModelsConfig
 	m.SetOverride("llama_server", TierFastLightText, "phi4:14b")

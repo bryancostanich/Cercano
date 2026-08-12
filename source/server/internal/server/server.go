@@ -192,10 +192,7 @@ func (s *Server) InstallCapabilities() {
 		// suggest_plan enters planning mode via the profile broker once the user
 		// approves the suggestion at the confirm gate.
 		EnterProfile: func(convID, name string) error {
-			if s.profileBroker == nil {
-				return fmt.Errorf("profile broker not configured")
-			}
-			return s.profileBroker.SetActive(convID, name)
+			return s.setSessionProfile(convID, name)
 		},
 		// restart_agent bounces the singleton agent via a self-SIGTERM once the
 		// user approves at the confirm gate. Same drain+child-stop path as the
@@ -874,10 +871,7 @@ func (s *Server) SelectExecutionMode() {
 			return st.EnsureSubagentConversation(ctx, id, parentID, projectDir, model, grantedTools)
 		}, // worker-side dispatch: create the sub-agent conversation row on the host
 		func(ctx context.Context, convID, name string) error {
-			if s.profileBroker == nil {
-				return fmt.Errorf("profile broker not configured")
-			}
-			return s.profileBroker.SetActive(convID, name)
+			return s.setSessionProfile(convID, name)
 		}, // worker-side session-control capabilities: switch the host profile broker
 		func() inference.Provider { return s.OpenLLMProvider() }, // answers the worker's OpenInferenceRequests
 		s.openModels.Model, // resolves effective active-runtime open tier models for the snapshot
@@ -3113,7 +3107,7 @@ func (s *Server) SetSessionProfile(ctx context.Context, req *proto.SetSessionPro
 	if s.profileBroker == nil {
 		return &proto.SetSessionProfileResponse{Ok: false, Error: "profile broker not configured"}, nil
 	}
-	if err := s.profileBroker.SetActive(req.GetConversationId(), req.GetName()); err != nil {
+	if err := s.setSessionProfile(req.GetConversationId(), req.GetName()); err != nil {
 		return &proto.SetSessionProfileResponse{Ok: false, Error: err.Error()}, nil
 	}
 	return &proto.SetSessionProfileResponse{Ok: true}, nil

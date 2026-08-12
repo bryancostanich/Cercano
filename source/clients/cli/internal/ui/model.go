@@ -243,6 +243,14 @@ type Model struct {
 	// /bypass /mode slash handlers.
 	permissionMode string
 
+	// sessionProfile is the active capability profile for THIS conversation
+	// ("" / "default" = unrestricted; "plan" = read-only planning fence). It is
+	// orthogonal to permissionMode and rendered alongside it in the mode chip
+	// (e.g. "mode: planning | bypass"). Kept live by sessionProfileChangedMsg,
+	// which the agent broadcasts whenever the profile flips (via /plan, an
+	// approved suggest_plan, plan_exit, or request_plan_approval).
+	sessionProfile string
+
 	// workDirOverride, when non-empty, replaces os.Getwd() as the work_dir
 	// sent with every turn. Set by /d (development mode); empty = normal.
 	workDirOverride string
@@ -522,6 +530,37 @@ func fetchPermissionModeCmd(ag *agentclient.Client) tea.Cmd {
 			return permissionModeMsg{Mode: "permissive"}
 		}
 		return permissionModeMsg{Mode: mode}
+	}
+}
+
+// sessionProfileFetchedMsg carries the result of a GetSessionProfile fetch for a
+// specific conversation. Used to seed the footer chip when RESUMING a
+// conversation that may already be in planning mode — a brand-new conversation
+// always starts unrestricted, so only the resume path needs this.
+type sessionProfileFetchedMsg struct {
+	convID  string
+	profile string
+}
+
+// normalizeProfile collapses the unrestricted posture ("default") to "" so the
+// footer chip's planning check (sessionProfile == "plan") and its "show nothing
+// extra when unrestricted" behavior are plain equality tests.
+func normalizeProfile(p string) string {
+	if p == "default" {
+		return ""
+	}
+	return p
+}
+
+func fetchSessionProfileCmd(ag *agentclient.Client, convID string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		active, _, err := ag.GetSessionProfile(ctx, convID)
+		if err != nil {
+			return nil // non-fatal; the chip stays at its last value
+		}
+		return sessionProfileFetchedMsg{convID: convID, profile: active}
 	}
 }
 
@@ -1788,6 +1827,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.permissionMode = msg.mode
 		}
 		return m, msg.next
+
+	case sessionProfileChangedMsg:
+		// Pushed by the agent whenever a conversation's capability profile flips
+		// (this client's /plan, an approved suggest_plan, plan_exit, etc.). The
+		// active profile is per-conversation, so only update the footer chip when
+		// the event is for THIS conversation; always re-arm the drain loop.
+		if msg.convID == m.convID {
+			m.sessionProfile = normalizeProfile(msg.profile)
+		}
+		return m, msg.next
+
+	case sessionProfileFetchedMsg:
+		// Startup/resume seed for the footer chip. Apply only if it's still the
+		// active conversation (the user may have switched during the fetch).
+		if msg.convID == m.convID {
+			m.sessionProfile = normalizeProfile(msg.profile)
+		}
+		return m, nil
 
 	case configChangedMsg:
 		// Pushed by the agent after settings/profile changes. Apply the fields
@@ -3475,7 +3532,12 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 	// before the CLI restarted. Best-effort; never blocks the main resume.
 	m.restoreSubAgentTabs(ctx, conversationID)
 	m.relayout()
-	cmds := []tea.Cmd{fetchContextUsage(m.agent, m.convID)}
+	cmds := []tea.Cmd{
+		fetchContextUsage(m.agent, m.convID),
+		// Seed the footer mode chip: a resumed conversation may already be in
+		// planning mode, and no broadcast will fire until the next flip.
+		fetchSessionProfileCmd(m.agent, m.convID),
+	}
 	if !m.bannerTickActive {
 		// The tick chain died before this resume (e.g. launching straight
 		// into the history picker never shows the splash); restart it so the
@@ -5003,27 +5065,52 @@ func (m Model) renderConnStateChip() string {
 	}
 }
 
-// renderPermissionModeChip renders the session-mode chip for the status bar,
-// colored by how safe the mode is: strict → green (Success, most gated),
-// permissive → amber (Primary), bypass → red (Error, least gated / unsafe).
-// Returns the empty string when the mode isn't known yet (the startup fetch
-// hasn't landed) so the bar doesn't show a misleading default.
+// renderPermissionModeChip renders the session-mode chip for the status bar.
+// It carries two orthogonal axes, pipe-separated when both are present:
+//
+//		mode: planning | bypass
+//
+//	  - The capability profile ("planning") shows only when the read-only
+//	    planning fence is active for this conversation. It is colored with the
+//	    calm accent — planning is a posture, not a danger level.
+//	  - The permission mode is colored by how safe it is: strict → green (most
+//	    gated), permissive → amber, bypass → red (least gated / unsafe).
+//
+// Planning is rendered first because it is the more consequential state to
+// notice. Returns "" only when neither axis is known yet (the startup fetch
+// hasn't landed and no profile is active) so the bar doesn't show a misleading
+// default.
 func (m Model) renderPermissionModeChip() string {
-	if m.permissionMode == "" {
+	planning := m.sessionProfile == "plan"
+	if m.permissionMode == "" && !planning {
 		return ""
 	}
-	var valStyle lipgloss.Style
-	switch m.permissionMode {
-	case "strict":
-		valStyle = m.styles.Success
-	case "bypass":
-		valStyle = m.styles.Error
-	default: // permissive (or anything unexpected) → amber
-		valStyle = m.styles.Primary
+
+	var val string
+	if planning {
+		val = m.styles.Accent.Render("planning")
 	}
+	if m.permissionMode != "" {
+		var permStyle lipgloss.Style
+		switch m.permissionMode {
+		case "strict":
+			permStyle = m.styles.Success
+		case "bypass":
+			permStyle = m.styles.Error
+		default: // permissive (or anything unexpected) → amber
+			permStyle = m.styles.Primary
+		}
+		perm := permStyle.Render(m.permissionMode)
+		if planning {
+			val += m.styles.Muted.Render(" | ") + perm
+		} else {
+			val = perm
+		}
+	}
+
 	return m.styles.BorderDim.Render("  ·  ") +
 		m.styles.Muted.Render("mode:") +
-		valStyle.Render(" "+m.permissionMode)
+		" " + val
 }
 
 // renderDevChip shows a lime DEV marker while the /d workDir override is

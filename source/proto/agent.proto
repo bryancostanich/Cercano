@@ -1073,12 +1073,24 @@ message ClientEvent {
     PermissionModeChanged permission_mode_changed = 1;
     ConfigChanged config_changed = 2;
     OpenRuntimeStatusChanged open_runtime_status_changed = 4;
+    SessionProfileChanged session_profile_changed = 5;
   }
 }
 
 // PermissionModeChanged carries the new active mode. Clients update their
 // status bar from this — no fetch, no poll.
 message PermissionModeChanged { string mode = 1; }
+
+// SessionProfileChanged carries the new active capability profile for one
+// conversation (the read-only planning fence and future named modes). Broadcast
+// whenever the profile flips — via the /plan command, an approved suggest_plan,
+// plan_exit, or request_plan_approval. Clients render a footer chip from this,
+// updating only when conversation_id matches their active conversation, since
+// the active profile is per-conversation. "" / "default" means unrestricted.
+message SessionProfileChanged {
+  string conversation_id = 1;
+  string profile = 2;
+}
 
 // ConfigChanged carries one config field that just changed (RPC or file
 // watcher). Field is a top-level config key as it appears in UpdateConfigRequest

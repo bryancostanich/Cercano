@@ -10,6 +10,7 @@
 package server
 
 import (
+	"fmt"
 	"sync"
 
 	"cercano/source/server/pkg/proto"
@@ -146,6 +147,44 @@ func (s *Server) broadcastPermissionMode(mode string) {
 	s.events.broadcast(&proto.ClientEvent{
 		Event: &proto.ClientEvent_PermissionModeChanged{
 			PermissionModeChanged: &proto.PermissionModeChanged{Mode: mode},
+		},
+	})
+}
+
+// setSessionProfile flips a conversation's active capability profile via the
+// broker and, on success, broadcasts the resulting active name to all clients.
+// This is the single choke point for profile changes: the /plan RPC, the
+// suggest_plan/plan_exit EnterProfile hook, and the worker setProfile bridge all
+// route through here, so the footer chip can never drift from the broker state.
+// It broadcasts the broker's *resolved* active name (e.g. "" and "default" both
+// collapse to the unrestricted posture) rather than the raw requested name.
+func (s *Server) setSessionProfile(convID, name string) error {
+	if s.profileBroker == nil {
+		return fmt.Errorf("profile broker not configured")
+	}
+	if err := s.profileBroker.SetActive(convID, name); err != nil {
+		return err
+	}
+	s.broadcastSessionProfile(convID, s.profileBroker.ActiveName(convID))
+	return nil
+}
+
+// broadcastSessionProfile pushes a SessionProfileChanged event to all clients
+// after a conversation's active capability profile flips (via /plan, an approved
+// suggest_plan, plan_exit, or request_plan_approval). The event carries the
+// conversation ID so each client updates its footer chip only for its own
+// conversation — the active profile is per-conversation, so a bare broadcast
+// without the ID would leak one conversation's planning state onto every footer.
+func (s *Server) broadcastSessionProfile(convID, profile string) {
+	if s.events == nil {
+		return
+	}
+	s.events.broadcast(&proto.ClientEvent{
+		Event: &proto.ClientEvent_SessionProfileChanged{
+			SessionProfileChanged: &proto.SessionProfileChanged{
+				ConversationId: convID,
+				Profile:        profile,
+			},
 		},
 	})
 }

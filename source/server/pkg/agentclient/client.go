@@ -1083,9 +1083,10 @@ func (c *Client) StreamRuntimeLogs(ctx context.Context, tail int, source string)
 // zero / nil). Err is set if the stream itself failed and is the terminal
 // event on this channel.
 type AgentEvent struct {
-	Mode              string             // populated by PermissionModeChanged events
-	OpenRuntimeStatus *OpenRuntimeStatus // populated by OpenRuntimeStatusChanged events
-	ConfigChanged     *ConfigChanged     // populated by ConfigChanged events
+	Mode              string                 // populated by PermissionModeChanged events
+	OpenRuntimeStatus *OpenRuntimeStatus     // populated by OpenRuntimeStatusChanged events
+	ConfigChanged     *ConfigChanged         // populated by ConfigChanged events
+	SessionProfile    *SessionProfileChanged // populated by SessionProfileChanged events
 	Err               error
 }
 
@@ -1093,6 +1094,15 @@ type AgentEvent struct {
 type ConfigChanged struct {
 	Field string
 	Value string
+}
+
+// SessionProfileChanged mirrors proto.SessionProfileChanged in the client SDK.
+// ConversationID scopes the change — clients update their footer chip only when
+// it matches their active conversation. Profile is "" / "default" for the
+// unrestricted posture, or a named profile such as "plan".
+type SessionProfileChanged struct {
+	ConversationID string
+	Profile        string
 }
 
 // OpenRuntimeStatus mirrors proto.OpenRuntimeStatus in the client SDK.
@@ -1198,6 +1208,13 @@ func (c *Client) drainSubscribeEvents(ctx context.Context, stream proto.Agent_Su
 		}
 		if cc := ev.GetConfigChanged(); cc != nil {
 			out <- AgentEvent{ConfigChanged: &ConfigChanged{Field: cc.GetField(), Value: cc.GetValue()}}
+			continue
+		}
+		if sp := ev.GetSessionProfileChanged(); sp != nil {
+			out <- AgentEvent{SessionProfile: &SessionProfileChanged{
+				ConversationID: sp.GetConversationId(),
+				Profile:        sp.GetProfile(),
+			}}
 			continue
 		}
 		// Unknown event types are silently dropped — clients that don't

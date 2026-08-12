@@ -26,6 +26,18 @@ type openRuntimeStatusChangedMsg struct {
 	next   tea.Cmd
 }
 
+// sessionProfileChangedMsg is delivered when the agent pushes a
+// SessionProfileChanged event — the active capability profile (planning fence /
+// future modes) flipped for some conversation, via /plan, an approved
+// suggest_plan, plan_exit, or request_plan_approval. convID scopes it: the model
+// updates its footer chip only when convID matches the active conversation,
+// since the active profile is per-conversation.
+type sessionProfileChangedMsg struct {
+	convID  string
+	profile string
+	next    tea.Cmd
+}
+
 // configChangedMsg is delivered when the agent pushes a ConfigChanged event
 // over the standing SubscribeEvents stream. It keeps header/status chips fresh
 // after settings/profile changes without waiting for an explicit config reload.
@@ -57,6 +69,9 @@ func subscribeEventsCmd(ag *agentclient.Client) tea.Cmd {
 			}
 			if ev.ConfigChanged != nil {
 				return configChangedMsg{field: ev.ConfigChanged.Field, value: ev.ConfigChanged.Value, next: wait}
+			}
+			if ev.SessionProfile != nil {
+				return sessionProfileChangedMsg{convID: ev.SessionProfile.ConversationID, profile: ev.SessionProfile.Profile, next: wait}
 			}
 			return permissionModeChangedMsg{mode: ev.Mode, next: wait}
 		}

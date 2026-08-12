@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 
 	goopenai "github.com/sashabaranov/go-openai"
@@ -17,14 +18,21 @@ type Config struct {
 	APIKey  string
 	Model   string
 	Backend string // selects per-backend quirks; empty → defensive default
+	// SupportsVision reports whether the model behind this endpoint can accept
+	// image content. Cloud OpenAI passes true; the LOCAL llama-server backend
+	// passes the active model's real capability (a text-only GGUF, or a vision
+	// GGUF launched without its mmproj, cannot see images and would 500 on one).
+	// When false, image blocks are stripped to a text stub before sending.
+	SupportsVision bool
 }
 
 // Client implements inference.Provider using the OpenAI chat completions API.
 type Client struct {
-	api     *goopenai.Client
-	model   string
-	backend string
-	quirks  Quirks
+	api            *goopenai.Client
+	model          string
+	backend        string
+	quirks         Quirks
+	supportsVision bool
 }
 
 // NewClient constructs a Client from cfg. The HTTP transport is wrapped in a
@@ -38,7 +46,7 @@ func NewClient(cfg Config) *Client {
 	}
 	q := quirksFor(cfg.Backend)
 	c.HTTPClient = &normalizingDoer{next: &http.Client{}, quirks: q}
-	return &Client{api: goopenai.NewClientWithConfig(c), model: cfg.Model, backend: cfg.Backend, quirks: q}
+	return &Client{api: goopenai.NewClientWithConfig(c), model: cfg.Model, backend: cfg.Backend, quirks: q, supportsVision: cfg.SupportsVision}
 }
 
 // resolveImageURLs replaces URL image blocks with inline base64, so backends
@@ -73,6 +81,47 @@ func resolveImageURLs(ctx context.Context, msgs []llm.Message) ([]llm.Message, e
 	return out, nil
 }
 
+// visionStub is the placeholder that replaces image blocks bound for a model
+// with no vision support. It matches the phrasing agent/toolloop.go uses for
+// tool-result images so the two paths degrade identically.
+func visionStub(n int) string {
+	return fmt.Sprintf("[%d image(s) omitted: the active model has no vision support]", n)
+}
+
+// stripImagesForTextOnly replaces every image block with a text stub when the
+// target model can't see images, so a text-only (or mmproj-less) local backend
+// receives a coherent, image-free request instead of 500ing on "image input is
+// not supported". Returns the rewritten messages and the number of images
+// stripped (0 means the caller can skip any user notice). The caller's slice is
+// not mutated (copy-on-write per message), matching resolveImageURLs.
+func stripImagesForTextOnly(msgs []llm.Message) ([]llm.Message, int) {
+	stripped := 0
+	out := make([]llm.Message, len(msgs))
+	for i, m := range msgs {
+		out[i] = m
+		imgCount := 0
+		for _, b := range m.Blocks {
+			if b.Type == llm.BlockImage {
+				imgCount++
+			}
+		}
+		if imgCount == 0 {
+			continue
+		}
+		blocks := make([]llm.Block, 0, len(m.Blocks))
+		for _, b := range m.Blocks {
+			if b.Type == llm.BlockImage {
+				blocks = append(blocks, llm.Block{Type: llm.BlockText, Text: visionStub(1)})
+				stripped++
+				continue
+			}
+			blocks = append(blocks, b)
+		}
+		out[i].Blocks = blocks
+	}
+	return out, stripped
+}
+
 func (c *Client) Name() string { return "openai" }
 
 func (c *Client) Capabilities() inference.Capabilities {
@@ -80,7 +129,7 @@ func (c *Client) Capabilities() inference.Capabilities {
 		SupportsTools:         true,
 		SupportsParallelTools: true,
 		SupportsCaching:       false,
-		SupportsVision:        true,
+		SupportsVision:        c.supportsVision,
 	}
 }
 
@@ -125,6 +174,9 @@ func modelOr(def, override string) string {
 
 // Chat sends a non-streaming chat completion request and returns mapped blocks + usage.
 func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	if !c.supportsVision {
+		req.Messages, _ = stripImagesForTextOnly(req.Messages)
+	}
 	if c.quirks.ImagesAsBase64 {
 		msgs, err := resolveImageURLs(ctx, req.Messages)
 		if err != nil {
@@ -151,6 +203,9 @@ func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatRespons
 // StreamChat opens a streaming chat completion and returns a StreamReader that
 // emits llm.StreamEvents following the START→DELTA→STOP contract.
 func (c *Client) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.StreamReader, error) {
+	if !c.supportsVision {
+		req.Messages, _ = stripImagesForTextOnly(req.Messages)
+	}
 	if c.quirks.ImagesAsBase64 {
 		msgs, err := resolveImageURLs(ctx, req.Messages)
 		if err != nil {

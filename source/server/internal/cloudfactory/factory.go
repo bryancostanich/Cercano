@@ -65,7 +65,7 @@ func BuildCloudProvider(p config.CloudProfile, apiKey string, opts ...Options) (
 			Route:   p.Route,
 		}), nil
 	case FlavorChatCompletions:
-		return openai.NewClient(openai.Config{BaseURL: p.BaseURL, APIKey: apiKey, Model: p.Model, Backend: p.Backend}), nil
+		return openai.NewClient(openai.Config{BaseURL: p.BaseURL, APIKey: apiKey, Model: p.Model, Backend: p.Backend, SupportsVision: true}), nil
 	case FlavorResponses:
 		if p.Route == responses.RouteChatGPT {
 			var ts responses.TokenSource
@@ -75,9 +75,9 @@ func BuildCloudProvider(p config.CloudProfile, apiKey string, opts ...Options) (
 			if ts == nil {
 				return nil, fmt.Errorf("responses route %q requires a token source", p.Route)
 			}
-			return responses.NewClient(responses.Config{Model: p.Model, Route: p.Route, TokenSource: ts}), nil
+			return responses.NewClient(responses.Config{Model: p.Model, Route: p.Route, TokenSource: ts, SupportsVision: true}), nil
 		}
-		return responses.NewClient(responses.Config{BaseURL: p.BaseURL, APIKey: apiKey, Model: p.Model}), nil
+		return responses.NewClient(responses.Config{BaseURL: p.BaseURL, APIKey: apiKey, Model: p.Model, SupportsVision: true}), nil
 	case FlavorBedrock:
 		return bedrock.NewClient(bedrock.Config{
 			Region: p.Region, Model: p.Model, AWSProfile: p.AWSProfile, BaseURL: p.BaseURL,

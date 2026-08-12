@@ -66,6 +66,11 @@ func (p *LLMProvider) clientFor(ctx context.Context, req llm.ChatRequest) (*open
 		BaseURL: strings.TrimRight(endpoint, "/") + "/v1",
 		Model:   model,
 		Backend: "mistralrs",
+		// Local backend: default false so images are stripped rather than sent
+		// to a model that can't see them. mistral.rs vision wiring is out of
+		// scope for this effort (llama-server is the failing path); making the
+		// capability truthful here still protects it from the 500.
+		SupportsVision: false,
 	})
 	return c, req, nil
 }

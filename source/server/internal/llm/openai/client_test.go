@@ -10,7 +10,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
+
+	goopenai "github.com/sashabaranov/go-openai"
 
 	"cercano/source/server/internal/llm"
 )
@@ -33,8 +36,15 @@ func TestClientChat(t *testing.T) {
 	if len(resp.Blocks) != 1 || resp.Blocks[0].Text != "hello" || resp.InputTokens != 5 || resp.OutputTokens != 2 {
 		t.Fatalf("resp = %+v", resp)
 	}
-	if c.Name() != "openai" || !c.Capabilities().SupportsTools || !c.Capabilities().SupportsVision {
+	if c.Name() != "openai" || !c.Capabilities().SupportsTools {
 		t.Errorf("name/caps wrong")
+	}
+	// SupportsVision now reflects the configured flag, not a hardcoded true.
+	if visionClient := NewClient(Config{Model: "gpt-x", SupportsVision: true}); !visionClient.Capabilities().SupportsVision {
+		t.Error("SupportsVision:true config should report vision")
+	}
+	if noVision := NewClient(Config{Model: "gpt-x"}); noVision.Capabilities().SupportsVision {
+		t.Error("unset SupportsVision should report no vision")
 	}
 }
 
@@ -141,3 +151,64 @@ func TestResolveImageURLsNoop(t *testing.T) {
 		t.Errorf("no-op changed messages: %+v", out)
 	}
 }
+
+func TestStripImagesForTextOnly(t *testing.T) {
+	msgs := []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{
+		{Type: llm.BlockText, Text: "what is this?"},
+		{Type: llm.BlockImage, MediaType: "image/png", ImageData: "AAAA"},
+		{Type: llm.BlockImage, ImageURL: "https://x/y.png"},
+	}}}
+
+	out, n := stripImagesForTextOnly(msgs)
+	if n != 2 {
+		t.Fatalf("stripped count = %d, want 2", n)
+	}
+	blocks := out[0].Blocks
+	if len(blocks) != 3 {
+		t.Fatalf("want 3 blocks (text + 2 stubs), got %d", len(blocks))
+	}
+	if blocks[0].Type != llm.BlockText || blocks[0].Text != "what is this?" {
+		t.Errorf("text block not preserved: %+v", blocks[0])
+	}
+	for i := 1; i <= 2; i++ {
+		if blocks[i].Type != llm.BlockText {
+			t.Errorf("block %d is %v, want text stub", i, blocks[i].Type)
+		}
+		if !strings.Contains(blocks[i].Text, "image(s) omitted") {
+			t.Errorf("block %d = %q, want the omission stub", i, blocks[i].Text)
+		}
+	}
+	// Copy-on-write: the caller's originals are untouched.
+	if msgs[0].Blocks[1].Type != llm.BlockImage {
+		t.Error("stripImagesForTextOnly mutated the caller's messages")
+	}
+
+	// No images → no strip, count 0, messages unchanged.
+	textOnly := []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "hi"}}}}
+	got, n := stripImagesForTextOnly(textOnly)
+	if n != 0 {
+		t.Errorf("no-image strip count = %d, want 0", n)
+	}
+	if !reflect.DeepEqual(got, textOnly) {
+		t.Errorf("no-image case changed messages: %+v", got)
+	}
+}
+
+// TestStrippedMessagesHaveNoImageParts confirms the end result: once stripped, a
+// text-only backend's serialized request carries zero image parts.
+func TestStrippedMessagesHaveNoImageParts(t *testing.T) {
+	msgs := []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{
+		{Type: llm.BlockText, Text: "describe"},
+		{Type: llm.BlockImage, MediaType: "image/png", ImageData: "AAAA"},
+	}}}
+	stripped, _ := stripImagesForTextOnly(msgs)
+	oai := messagesToOpenAI(stripped, "")
+	for _, m := range oai {
+		for _, p := range m.MultiContent {
+			if p.Type == goopenai.ChatMessagePartTypeImageURL {
+				t.Fatal("stripped request still carries an image part")
+			}
+		}
+	}
+}
+

@@ -50,8 +50,15 @@ func TestClientChat(t *testing.T) {
 	if resp.InputTokens != 7 || resp.OutputTokens != 3 {
 		t.Errorf("usage = %d/%d", resp.InputTokens, resp.OutputTokens)
 	}
-	if c.Name() != "openai-responses" || !c.Capabilities().SupportsVision || !c.Capabilities().SupportsTools {
+	if c.Name() != "openai-responses" || !c.Capabilities().SupportsTools {
 		t.Errorf("name/caps wrong")
+	}
+	// SupportsVision now reflects the configured flag, not a hardcoded true.
+	if v := NewClient(Config{Model: "gpt-5", SupportsVision: true}); !v.Capabilities().SupportsVision {
+		t.Error("SupportsVision:true config should report vision")
+	}
+	if nv := NewClient(Config{Model: "gpt-5"}); nv.Capabilities().SupportsVision {
+		t.Error("unset SupportsVision should report no vision")
 	}
 }
 

@@ -62,10 +62,17 @@ func (p *LLMProvider) clientFor(ctx context.Context, req llm.ChatRequest) (*open
 	if req.MaxTokens <= 0 {
 		req.MaxTokens = engine.DefaultMaxTokens
 	}
+	// SupportsVision reflects the resolved model's real capability: true only
+	// for a vision model launched with its mmproj. Phase 1 lands the capability
+	// gate with this defaulted false (so images are stripped rather than sent to
+	// a backend that would 500); Phase 2 threads the actual per-model flag
+	// through endpointFor from the resolved ModelRecord.
+	vision := false
 	c := openai.NewClient(openai.Config{
-		BaseURL: strings.TrimRight(endpoint, "/") + "/v1",
-		Model:   model,
-		Backend: "llama_server",
+		BaseURL:        strings.TrimRight(endpoint, "/") + "/v1",
+		Model:          model,
+		Backend:        "llama_server",
+		SupportsVision: vision,
 	})
 	return c, req, nil
 }

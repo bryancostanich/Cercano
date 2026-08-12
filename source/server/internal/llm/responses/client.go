@@ -47,6 +47,11 @@ type Config struct {
 	// TokenSource, when set, supplies refreshing subscription bearers and is
 	// used instead of APIKey. Required for RouteChatGPT.
 	TokenSource TokenSource
+	// SupportsVision reports whether the model can accept image content. The
+	// Responses API is a cloud-only path today (all callers pass true); the
+	// field exists so the outbound image-strip gate reads one uniform source of
+	// truth across both OpenAI-compatible clients.
+	SupportsVision bool
 }
 
 // Client implements inference.Provider using the OpenAI Responses API.
@@ -55,8 +60,9 @@ type Client struct {
 	baseURL string
 	apiKey  string
 	model   string
-	route   string
-	tokens  TokenSource
+	route          string
+	tokens         TokenSource
+	supportsVision bool
 	// tempUnsupported remembers models that rejected an explicit temperature
 	// ("Unsupported parameter: temperature" — the gpt-5-family reasoning
 	// models), so later calls skip the doomed attempt.
@@ -100,7 +106,7 @@ func NewClient(cfg Config) *Client {
 	if base == "" {
 		base = defaultBaseURL
 	}
-	return &Client{http: &http.Client{}, baseURL: base, apiKey: cfg.APIKey, model: cfg.Model, route: cfg.Route, tokens: cfg.TokenSource}
+	return &Client{http: &http.Client{}, baseURL: base, apiKey: cfg.APIKey, model: cfg.Model, route: cfg.Route, tokens: cfg.TokenSource, supportsVision: cfg.SupportsVision}
 }
 
 func (c *Client) Name() string { return "openai-responses" }
@@ -110,7 +116,7 @@ func (c *Client) Capabilities() inference.Capabilities {
 		SupportsTools:         true,
 		SupportsParallelTools: true,
 		SupportsCaching:       false,
-		SupportsVision:        true,
+		SupportsVision:        c.supportsVision,
 	}
 }
 

@@ -213,6 +213,44 @@ in upstream llama.cpp.** qwen3-coder-next from Ollama's registry fails with
 runs such models on its own engine. Fix by re-sourcing a HuggingFace-converted
 GGUF, not by upgrading llama.cpp.
 
+### Tracing raw tool-call streaming (`cercano_streamtrace`)
+
+When an OpenAI-compatible server (llama-server, vLLM, etc.) produces wrong or
+missing tool calls, the culprit is often *how it splits one tool call across
+streaming fragments* — the name, id, and argument JSON can arrive on different
+`data:` chunks, and the reassembly in `internal/llm/openai/stream.go` has to
+tolerate it. Don't infer that wire shape from second-order symptoms; observe it.
+
+A build-tagged tracer dumps every raw tool-call fragment to stderr. It is
+**absent from normal builds** (a no-op stub the compiler inlines away — zero
+`os.Stat`/env cost on the hot path), so it must be compiled in explicitly:
+
+```bash
+go build -tags cercano_streamtrace -o ~/bin/.cercano-libexec/cercano ./source/server/cmd/cercano
+# codesign as usual, then restart the agent
+```
+
+Once running a trace-tagged binary, enable it at runtime with EITHER:
+
+- `CERCANO_TRACE_OPENAI_STREAM=1` in the server's env (read once at start), or
+- `touch ~/.cercano/trace-openai-stream` — checked live per stream, so it
+  toggles on the already-running singleton server with no restart (remove the
+  file to turn it off).
+
+Output, one line per fragment, in the server log/stderr:
+
+```
+[openai-stream-trace] tool_call fragment idx=0 id="abc" name="Read" args="{"
+[openai-stream-trace] tool_call fragment idx=0 id="" name="" args="\"path\":"
+```
+
+This is how the 2026-08-12 "delegated sub-agents log `called=[]`" case was
+resolved: the trace proved GLM-4.5-Air sends the tool name on the *first*
+fragment (ruling out a deferred-name streaming bug), which redirected the fix
+to the real cause — the sub-agent flatten path stripping `BlockToolUse` from
+the history the low-signal detector inspected (now read from
+`ToolLoopResult.CalledTools` instead).
+
 Model-resolution wiring (all resolved once at agent startup in
 `cmd/cercano/main.go`): compaction summarizer ← `fast_light.open`;
 recap and watchdog ← `fast_light_text.open`; interactive local chat ←

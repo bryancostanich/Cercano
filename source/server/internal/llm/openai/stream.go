@@ -1,9 +1,7 @@
 package openai
 
 import (
-	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	goopenai "github.com/sashabaranov/go-openai"
@@ -11,47 +9,12 @@ import (
 	"cercano/source/server/internal/llm"
 )
 
-// traceStreamEnabled reports whether raw per-fragment tool-call tracing is on.
-// It fires the trace when EITHER CERCANO_TRACE_OPENAI_STREAM=1 is in the
-// process env OR the sentinel file ~/.cercano/trace-openai-stream exists. The
-// sentinel path exists because the server is a long-lived singleton spawned by
-// the CLI: injecting a new env var requires respawning the whole process tree
-// with that var already exported, which is easy to get wrong. Dropping a file
-// is inheritance-proof — any already-running server picks it up on its next
-// stream without a restart. The result is cached once per process for the env
-// case; the sentinel is checked live so it can be toggled on a running server.
-var traceStreamEnv = os.Getenv("CERCANO_TRACE_OPENAI_STREAM") == "1"
-
-func traceStreamEnabled() bool {
-	if traceStreamEnv {
-		return true
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-	if _, err := os.Stat(home + "/.cercano/trace-openai-stream"); err == nil {
-		return true
-	}
-	return false
-}
-
-// traceToolFragment logs the raw per-fragment tool-call shape (index / id /
-// name / args) each provider chunk carries — the ground-truth observation hook
-// for diagnosing how an OpenAI-compatible server (e.g. llama-server serving
-// GLM-4.5-Air) splits a tool call across streaming fragments, i.e. exactly the
-// data the deferred-name logic above must tolerate.
-func traceToolFragment(tc goopenai.ToolCall) {
-	if !traceStreamEnabled() {
-		return
-	}
-	idx := -1
-	if tc.Index != nil {
-		idx = *tc.Index
-	}
-	fmt.Fprintf(os.Stderr, "[openai-stream-trace] tool_call fragment idx=%d id=%q name=%q args=%q\n",
-		idx, tc.ID, tc.Function.Name, tc.Function.Arguments)
-}
+// traceToolFragment logs the raw per-fragment tool-call shape each provider
+// chunk carries. It is a build-tagged diagnostic: the real implementation lives
+// in stream_trace.go behind `//go:build cercano_streamtrace`, and a zero-cost
+// no-op stub in stream_trace_stub.go compiles into every normal build. See
+// stream_trace.go for how to enable it. Kept out of the default binary entirely
+// so there is no os.Stat / env read on the streaming hot path in production.
 
 // streamReader wraps a go-openai ChatCompletionStream and emits llm.StreamEvents
 // following the START→DELTA→STOP contract mirroring the anthropic reader.

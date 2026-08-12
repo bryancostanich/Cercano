@@ -316,9 +316,14 @@ Use a small vision model, not GLM-4.5V, for the target architecture.
 > wiring AND the live proof together:
 >
 > Remaining wiring (code, unit-testable):
-> 1. Thread a `capabilities.VisionService` into `toolstack.CapDeps` and set it
->    on `capabilities.Services.Vision` in `toolstack.InstallCapabilities`
->    (`internal/toolstack/toolstack.go` is the single host+worker seam).
+> 1. [DONE] Thread a `capabilities.VisionService` into `toolstack.CapDeps` and
+>    set it on `capabilities.Services.Vision` in `toolstack.InstallCapabilities`
+>    (`internal/toolstack/toolstack.go` is the single host+worker seam). Added
+>    the optional `CapDeps.Vision` field (nil default = no behavior change) and a
+>    `TestInstallCapabilities_WiresVision` test proving a supplied service reaches
+>    `Services().Vision` and stays nil when omitted. The two callers
+>    (`server.InstallCapabilities`, `worker_dispatch`) can now pass a live
+>    inspector without another toolstack change.
 > 2. Construct the live service at the host and worker call sites:
 >    `visioninspect.NewCaching(visioninspect.NewLocus(localInspector, cloudInspector, modeFn))`,
 >    where each side is `visioninspect.New(store, resolver)` — `store` is one

@@ -77,6 +77,13 @@ type CapDeps struct {
 	// capability). Optional; nil means agent restart is unavailable and
 	// restart_agent errors clearly.
 	RestartAgent func(reason string) error
+	// Vision backs the inspect_image capability: it resolves a per-conversation
+	// image attachment and asks the configured vision model a focused question.
+	// Optional; nil means vision-as-tool is not configured and inspect_image
+	// reports vision unavailable rather than erroring. The host and worker build
+	// this identically (a caching + locus-aware inspector over one shared
+	// attachment store) so the two turn-execution environments never diverge.
+	Vision capabilities.VisionService
 }
 
 // InstallCapabilities builds the capability registry with a fully-populated
@@ -101,6 +108,7 @@ func InstallCapabilities(svc tools.Catalog, d CapDeps) {
 		},
 		EnterProfile: d.EnterProfile,
 		RestartAgent: d.RestartAgent,
+		Vision:       d.Vision,
 	})
 	builtins.Register(capReg)
 	svc.SetCapRegistry(capReg)

@@ -269,22 +269,39 @@ Add the non-persistent cache and resume/stale guards.
 Implement local/open vision first, then cloud fallback only when the current
 locus allows it.
 
-- [ ] Identify the canonical locus-mode source and predicates (for example:
+- [x] Identify the canonical locus-mode source and predicates (for example:
       local/open-only vs cloud-allowed). Do not invent a parallel policy.
-- [ ] Tool resolution order:
+      Done: uses `internal/locus.Mode`. Vision-as-tool policy is local-first
+      EVERYWHERE (a vision question is cheap grunt work that stays local even
+      under cloud_primary/cloud_only), with cloud fallback allowed for every
+      mode except `open_only`. This is deliberately not `Mode.Main()/Coproc()`
+      (those prefer cloud under cloud_primary); the only thing the mode governs
+      here is whether cloud fallback is permitted at all — predicate is
+      `mode != OpenOnly`, matching the Phase-1 recon note.
+- [x] Tool resolution order:
       1. configured local/open `vision` tier;
       2. if unavailable/failing and locus allows cloud: active cloud vision provider;
       3. otherwise: unavailable tool result.
-- [ ] Label cloud fallback results honestly in the envelope/source.
-- [ ] Tests:
+      Done: `visioninspect.LocusInspector` (implements `capabilities.VisionService`).
+      Inspect tries local, then cloud when permitted+configured — cloud is
+      reached both when local is UNAVAILABLE and when a local call FAILS at
+      request time (a hung/erroring local model must not strand a turn if cloud
+      is allowed). When cloud is not permitted/configured the local outcome
+      (including its error) stands. Mode is read live per call.
+- [x] Label cloud fallback results honestly in the envelope/source.
+      Done: the answering side's `VisionAnswer.Source` (provider:model) rides
+      through unchanged, so a cloud fallback envelope names the cloud source.
+- [x] Tests:
       - local vision success: cloud not called;
       - local vision unavailable + cloud allowed: cloud called;
       - local vision unavailable + local/open-only: unavailable result, cloud not called;
       - local vision failure + cloud allowed: cloud called;
       - local vision failure + local/open-only: unavailable result;
       - cloud fallback envelope includes source/provider label.
-- [ ] Build + vet + full `go test ./...` green.
-- [ ] Checkpoint.
+      Done: `locus_test.go` covers all six cases plus an Available() table
+      across modes and nil-side wiring (cloud-only, both-nil).
+- [x] Build + vet + full `go test ./...` green.
+- [x] Checkpoint.
 
 ## Phase 8 — End-to-end proof with lightweight vision model
 

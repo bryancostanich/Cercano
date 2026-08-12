@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -71,6 +72,32 @@ func TestNormalize_Classes(t *testing.T) {
 				t.Errorf("requests = %d, want 1 (transport retries must be gone)", hits.Load())
 			}
 		})
+	}
+}
+
+// TestNormalize_StringErrorBody500IsBusy pins the real "Compute error"
+// regression. llama-server (and some other OpenAI-compatible servers) return a
+// 5xx with the body {"error":"<string>"} — error as a bare string, not the
+// {"error":{"message":...}} object OpenAI uses. go-openai cannot type that into
+// an *APIError, so before the transport reshaped it, normalize() fell through to
+// ErrUnknown and the HTTP 500 was lost — surfacing as `openai unknown: error,
+// Compute error`. A 5xx must classify as the transient ErrBusy so the bounded
+// retry/failover policy treats it as the overload it is.
+func TestNormalize_StringErrorBody500IsBusy(t *testing.T) {
+	c, _ := oaFixtureBackend(t, "llama_server", http.StatusInternalServerError, `{"error":"Compute error"}`)
+	err := oaChatErr(t, c)
+	if got := llm.ClassOf(err); got != llm.ErrBusy {
+		t.Fatalf("string-error 500 class = %q, want %q (err: %v)", got, llm.ErrBusy, err)
+	}
+	var le *llm.Error
+	if !errors.As(err, &le) {
+		t.Fatalf("want *llm.Error, got %T", err)
+	}
+	if le.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (the 500 must survive normalization)", le.StatusCode)
+	}
+	if !strings.Contains(err.Error(), "Compute error") {
+		t.Fatalf("original message lost: %v", err)
 	}
 }
 

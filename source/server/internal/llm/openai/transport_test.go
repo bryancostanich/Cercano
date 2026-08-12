@@ -48,6 +48,44 @@ func TestNormalizeArrayError(t *testing.T) {
 	}
 }
 
+// TestNormalizeStringError: a `{"error":"<string>"}` body (llama-server's
+// "Compute error" shape) is reshaped so go-openai types it into an APIError and
+// the real message survives instead of go-openai's "unmarshal string" artifact.
+func TestNormalizeStringError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+		io.WriteString(w, `{"error":"Compute error"}`)
+	}))
+	defer srv.Close()
+
+	_, err := clientTo(srv, Quirks{NormalizeErrors: true}).CreateChatCompletion(context.Background(), chatReq())
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "Compute error") {
+		t.Fatalf("real message lost after reshape: %v", err)
+	}
+	// The reshape must preserve the HTTP 500 in the surfaced error.
+	if !strings.Contains(err.Error(), "500") {
+		t.Fatalf("status 500 lost after reshape: %v", err)
+	}
+}
+
+// TestNormalizeStringError_Disabled: with NormalizeErrors off, the body is left
+// untouched (no reshape happens).
+func TestNormalizeStringError_Disabled(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+		io.WriteString(w, `{"error":"Compute error"}`)
+	}))
+	defer srv.Close()
+
+	_, err := clientTo(srv, Quirks{NormalizeErrors: false}).CreateChatCompletion(context.Background(), chatReq())
+	if err == nil {
+		t.Fatal("expected an error even with normalization disabled")
+	}
+}
+
 // TestObjectErrorUnchanged: an already-object error body still parses cleanly.
 func TestObjectErrorUnchanged(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

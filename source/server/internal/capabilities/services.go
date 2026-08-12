@@ -45,6 +45,44 @@ type Services struct {
 	// this package free of a server import, matching Dispatch/EnterProfile. Nil
 	// until wired by the server; restart_agent errors clearly if it is nil.
 	RestartAgent func(reason string) error
+
+	// Vision resolves an image attachment by conversation-scoped ID and asks the
+	// configured vision model a focused question about it. It backs the
+	// inspect_image capability. Nil means vision-as-tool is not wired for this
+	// deployment; inspect_image reports vision unavailable rather than erroring.
+	// A func hook keeps this package free of a visionattach/inference import,
+	// matching Dispatch/EnterProfile/RestartAgent.
+	Vision VisionService
+}
+
+// VisionService is the seam inspect_image calls through. It separates presence
+// ("is this image still in memory?") from inspection ("ask the vision model")
+// so the tool can give a clear reattach message on a stale/unknown ID without
+// spinning up a model call. Implemented by the server over the per-conversation
+// attachment store plus the resolved vision-tier provider; nil when
+// vision-as-tool is not configured.
+type VisionService interface {
+	// Available reports whether a vision model is configured and reachable for
+	// the current locus/runtime. False means inspect_image should return an
+	// "unavailable" result rather than attempt a call.
+	Available() bool
+	// Lookup reports whether an image with imageID is currently held for convID.
+	// A miss is the expected condition after restart/resume or for an unknown
+	// ID; the tool turns it into a clear reattach message.
+	Lookup(convID, imageID string) (found bool)
+	// Inspect asks the vision model question about the image and returns the
+	// answer envelope. It is only reached once Lookup has confirmed presence and
+	// Available reports true. Wired in a later phase; a nil-returning stub is
+	// acceptable while the tool skeleton lands.
+	Inspect(ctx context.Context, convID, imageID, question string) (VisionAnswer, error)
+}
+
+// VisionAnswer is the structured result of one inspect_image call, rendered into
+// the tool's text envelope.
+type VisionAnswer struct {
+	Answer     string // the vision model's free-text answer
+	Confidence string // optional, model-reported or heuristic; may be empty
+	Source     string // which model/provider answered, e.g. "open:gemma-3-4b-it"
 }
 
 // MainProvider returns the provider for a turn: cloud when isCloud and a cloud

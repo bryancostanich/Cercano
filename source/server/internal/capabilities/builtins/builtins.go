@@ -28,6 +28,7 @@ func Register(reg *capabilities.Registry) {
 	// R-tier
 	reg.MustRegister(ReadFile())
 	reg.MustRegister(ViewImage())
+	reg.MustRegister(InspectImage())
 	reg.MustRegister(ListDir())
 	reg.MustRegister(StatFile())
 	reg.MustRegister(Glob())

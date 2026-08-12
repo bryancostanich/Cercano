@@ -136,23 +136,43 @@ Make vision model selection semantic rather than a one-off config key.
 Register the tool and wire it to the attachment store, returning graceful stub
 results before real provider calls land.
 
-- [ ] Add built-in tool metadata/schema for `inspect_image`:
+- [x] Add built-in tool metadata/schema for `inspect_image`:
       - `image_id` string, required;
       - `question` string, required.
-- [ ] Register it only when the active turn/conversation has image attachments,
+      Done: `capabilities/builtins/inspect_image.go`, R-tier, agent-surface only
+      (the attachment store is a live agent-session concept — the MCP host has
+      no such store), registered in `builtins.Register` (count 40→41).
+- [x] Register it only when the active turn/conversation has image attachments,
       or always register it for image-placeholder turns. Avoid prompt/tool list
       mismatch.
-- [ ] Implement lookup against the attachment store.
-- [ ] Return clear unavailable/stale results for:
+      Decision: always register (static catalog); when no vision is
+      configured/available the tool returns a clear "vision not available"
+      result. This keeps the tool catalog stable across turns (no
+      prompt/tool-list churn) and gives the model an honest answer rather than a
+      missing tool. Conditional registration is a possible later refinement.
+- [x] Implement lookup against the attachment store.
+      Done via a `capabilities.VisionService` seam on `Services` (Available /
+      Lookup / Inspect), so the tool stays free of a visionattach/inference
+      import. The server wires the real implementation over the per-conversation
+      store + resolved vision provider in a later phase.
+- [x] Return clear unavailable/stale results for:
       - unknown image ID;
       - image evicted/cleared (resume-like behavior);
       - invalid/empty question.
-- [ ] Tests:
+      Done: nil/unavailable service → "Vision is not available…"; stale/unknown
+      id → "…no longer available in memory. Ask the user to reattach…"; blank
+      id/question → hard arg error (never reaches the model as a fake answer);
+      provider error → graceful "Could not inspect image…" result.
+- [x] Tests:
       - tool appears for image-placeholder turns;
       - unknown/stale image ID returns reattach message, not hard crash;
       - invalid args return clear tool error/result.
-- [ ] Build + vet + full `go test ./...` green.
-- [ ] Checkpoint.
+      Done: `inspect_image_test.go` (metadata/surface, success envelope,
+      empty-confidence/source omission, nil+unavailable service, stale id,
+      provider error, invalid-args table) with a controllable `fakeVision`.
+      Builtins count guard bumped to 41.
+- [x] Build + vet + full `go test ./...` green.
+- [x] Checkpoint.
 
 ## Phase 5 — Vision provider call, tool-less and timeout-bound
 

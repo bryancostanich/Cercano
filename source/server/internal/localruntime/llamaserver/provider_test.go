@@ -130,6 +130,50 @@ func TestArgsForAppendsPerModelExtraArgs(t *testing.T) {
 	}
 }
 
+// TestArgsForPassesMmproj verifies a vision model's projector is passed as
+// --mmproj (right after --model) when the file is present, and is omitted with
+// a text-only launch when the declared projector is missing at spawn time.
+func TestArgsForPassesMmproj(t *testing.T) {
+	provider := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1"})
+
+	dir := t.TempDir()
+	projector := filepath.Join(dir, "mmproj-f16.gguf")
+	if err := os.WriteFile(projector, []byte("gguf"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	vision := localruntime.ModelRecord{Path: "/models/vl.gguf", MmprojPath: projector}
+	got := provider.argsFor(provider.snapshot(), vision, 8123)
+	// Flag order among these is immaterial to llama-server; --mmproj is appended
+	// after the base model/host/port trio.
+	want := []string{
+		"--model", "/models/vl.gguf",
+		"--host", "127.0.0.1",
+		"--port", "8123",
+		"--mmproj", projector,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("vision args mismatch:\n got: %#v\nwant: %#v", got, want)
+	}
+
+	// Declared but missing at launch → text-only, no --mmproj.
+	missing := localruntime.ModelRecord{Path: "/models/vl.gguf", MmprojPath: filepath.Join(dir, "gone.gguf")}
+	gotMissing := provider.argsFor(provider.snapshot(), missing, 8123)
+	for _, a := range gotMissing {
+		if a == "--mmproj" {
+			t.Fatalf("missing projector must not add --mmproj: %#v", gotMissing)
+		}
+	}
+
+	// Non-vision model: no --mmproj at all.
+	plain := localruntime.ModelRecord{Path: "/models/text.gguf"}
+	for _, a := range provider.argsFor(provider.snapshot(), plain, 8123) {
+		if a == "--mmproj" {
+			t.Fatalf("text-only model must not add --mmproj")
+		}
+	}
+}
+
 type fakeFileInfo struct {
 	size int64
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -536,6 +537,18 @@ func (p *Provider) argsFor(cfg config.LlamaServerConfig, model localruntime.Mode
 		"--model", model.Path,
 		"--host", cfg.Host,
 		"--port", strconv.Itoa(port),
+	}
+	// A vision model's projector is passed with --mmproj so llama-server can
+	// decode images. Re-check presence at launch (inventory and spawn are
+	// separate moments): if the projector was declared but has since vanished,
+	// launch text-only rather than aborting — the capability gate already
+	// reports no vision in that case, so images are stripped, not sent.
+	if model.MmprojPath != "" {
+		if _, err := os.Stat(model.MmprojPath); err == nil {
+			args = append(args, "--mmproj", model.MmprojPath)
+		} else {
+			log.Printf("llama-server: mmproj %q for model %q missing at launch — starting text-only", model.MmprojPath, model.ID)
+		}
 	}
 	if model.SupportsEmbed && !model.SupportsChat {
 		// Encoder models (bert family — nomic etc.) serve /v1/embeddings;

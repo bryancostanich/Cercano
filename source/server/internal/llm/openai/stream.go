@@ -1,13 +1,35 @@
 package openai
 
 import (
+	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	goopenai "github.com/sashabaranov/go-openai"
 
 	"cercano/source/server/internal/llm"
 )
+
+// traceStream, when CERCANO_TRACE_OPENAI_STREAM=1, logs the raw per-fragment
+// tool-call shape (index / id / name / args) each provider chunk carries. This
+// is the ground-truth observation hook for diagnosing how a given
+// OpenAI-compatible server (e.g. llama-server serving GLM-4.5-Air) splits a
+// tool call across streaming fragments — the exact data the deferred-name logic
+// above must tolerate. Off by default; zero cost when unset.
+var traceStream = os.Getenv("CERCANO_TRACE_OPENAI_STREAM") == "1"
+
+func traceToolFragment(tc goopenai.ToolCall) {
+	if !traceStream {
+		return
+	}
+	idx := -1
+	if tc.Index != nil {
+		idx = *tc.Index
+	}
+	fmt.Fprintf(os.Stderr, "[openai-stream-trace] tool_call fragment idx=%d id=%q name=%q args=%q\n",
+		idx, tc.ID, tc.Function.Name, tc.Function.Arguments)
+}
 
 // streamReader wraps a go-openai ChatCompletionStream and emits llm.StreamEvents
 // following the START→DELTA→STOP contract mirroring the anthropic reader.
@@ -172,6 +194,7 @@ func (r *streamReader) Next() (llm.StreamEvent, bool, error) {
 
 		// Tool-call fragments.
 		for _, tc := range delta.ToolCalls {
+			traceToolFragment(tc)
 			r.emittedToolCall = true
 			idx := 0
 			if tc.Index != nil {

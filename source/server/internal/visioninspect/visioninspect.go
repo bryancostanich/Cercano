@@ -31,6 +31,9 @@ import (
 	"cercano/source/server/internal/visionattach"
 )
 
+// errNoInner is returned when a wrapper has no underlying vision service.
+var errNoInner = errors.New("vision is not configured")
+
 // DefaultTimeout bounds a single vision call. Vision models on local runtimes
 // can be slow to first token, but a single focused question should not run
 // unbounded — a hung vision call must not wedge the reasoning turn.

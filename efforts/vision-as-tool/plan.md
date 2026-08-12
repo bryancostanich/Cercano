@@ -233,19 +233,36 @@ locus permits) by supplying a locus-aware resolver — no change to the inspecto
 
 Add the non-persistent cache and resume/stale guards.
 
-- [ ] Cache successful results by `(image_id, normalized_question)` within the
+- [x] Cache successful results by `(image_id, normalized_question)` within the
       live conversation store.
-- [ ] Normalize questions conservatively (trim + collapse whitespace + lower for
+      Done: `visioninspect.CachingInspector` — a decorator that also implements
+      `capabilities.VisionService`, wrapping the real inspector. Per-conversation
+      in-memory map keyed by `(image_id, normalized question)`. Available and
+      Lookup pass straight through so cache state never shadows a real
+      availability/presence check.
+- [x] Normalize questions conservatively (trim + collapse whitespace + lower for
       cache key; preserve original question in result envelope).
-- [ ] Cache only successful inspection results, not unavailable/stale errors.
-- [ ] Tests:
+      Done: `cacheKey` = `image_id \x00 lower(collapse-whitespace(question))`.
+      The original question is preserved by the tool's envelope; only the key is
+      normalized.
+- [x] Cache only successful inspection results, not unavailable/stale errors.
+      Done: errors are returned as-is and never stored, so a transient failure
+      or a since-reattached image is always retried.
+- [x] Tests:
       - repeated same question hits cache and calls fake vision provider once;
       - cache cleared but attachment present re-calls provider successfully;
       - attachment store cleared returns "image no longer available; reattach";
       - two conversations do not share attachments or cache entries;
       - max image/byte caps do not leave dangling cache entries.
-- [ ] Build + vet + full `go test ./...` green.
-- [ ] Checkpoint.
+      Done: `cache_test.go` covers hit-on-repeat, question normalization,
+      distinct-image/question misses, errors-not-cached (retry after fix),
+      Clear-forces-recall, per-conversation isolation, Available/Lookup
+      pass-through, and nil-inner. The "store cleared → reattach" path is the
+      tool+store integration (Lookup passes through to the store, so a cleared
+      store makes the tool return the reattach message before Inspect runs);
+      that behavior is covered by Phase-4 `inspect_image_test.go` stale-id.
+- [x] Build + vet + full `go test ./...` green.
+- [x] Checkpoint.
 
 ## Phase 7 — Locus-aware fallback
 

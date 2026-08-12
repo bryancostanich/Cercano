@@ -56,27 +56,35 @@ Build the agentic Air+vision architecture in phases. Each phase keeps
 Add the per-conversation in-memory image store and make the reasoning model see
 explicit placeholders instead of raw image blocks.
 
-- [ ] Add an `ImageAttachmentStore` (or equivalent) that stores image bytes,
+- [x] Add an `ImageAttachmentStore` (or equivalent) that stores image bytes,
       media type, hash, ordinal, and generated image ID per live conversation.
-- [ ] Add guardrails: max images per conversation and max total image bytes.
+      Done: `internal/visionattach.Store` — per-conversation, in-memory, deduped
+      by content hash, conversation-scoped IDs `img_<hash6>_<ord>`, caps + Clear.
+- [x] Add guardrails: max images per conversation and max total image bytes.
       V1 behavior for cap exceedance: do not store the image; replace it with a
       clear placeholder saying the image was omitted because the live attachment
-      limit was exceeded.
-- [ ] Generate conversation-unique image IDs, preferably
-      `img_<short-content-hash>_<ordinal>`.
-- [ ] Rewrite user `BlockImage` entries into text placeholders before the
+      limit was exceeded. Done: caps in `visionattach.Store` + omitted
+      placeholder in `agent.placeholderFor`.
+- [x] Generate conversation-unique image IDs, preferably
+      `img_<short-content-hash>_<ordinal>`. Done: `img_<hash6>_<ord>`.
+- [x] Rewrite user `BlockImage` entries into text placeholders before the
       reasoning model call:
       `[Image img_... attached for this live conversation. Use inspect_image(...)]`
-- [ ] Ensure raw image blocks are not sent to GLM-4.5-Air / text-only reasoning
-      model in the vision-tool path.
-- [ ] Tests:
+      Done: `agent.RewriteImagesToPlaceholders` (nil-safe; NOT yet wired into
+      the live request path — wiring lands with the tool/tier so the feature
+      never goes half-active).
+- [x] Ensure raw image blocks are not sent to GLM-4.5-Air / text-only reasoning
+      model in the vision-tool path. Done at the rewriter level (no image block
+      survives); live wiring deferred as above.
+- [x] Tests:
       - one image produces one attachment + one placeholder;
       - multiple images get unique IDs;
       - duplicate image bytes do not collide incorrectly;
       - cap exceedance produces clear placeholder and no stored attachment;
       - rewritten messages preserve surrounding text order.
-- [ ] Build + vet + full `go test ./...` green.
-- [ ] Checkpoint.
+      Done: `visionattach/store_test.go` + `agent/vision_placeholder_test.go`.
+- [x] Build + vet + full `go test ./...` green.
+- [x] Checkpoint.
 
 ## Phase 3 — First-class `vision` tier/profile
 

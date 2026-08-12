@@ -1925,10 +1925,12 @@ func (c *Client) GetPermissionMode(ctx context.Context) (string, error) {
 }
 
 // SetSessionProfile switches the active capability profile (the read-only
-// planning fence and future named modes). name "" or "default" returns to the
-// unrestricted posture. Orthogonal to SetPermissionMode.
-func (c *Client) SetSessionProfile(ctx context.Context, name string) error {
-	res, err := c.agent.SetSessionProfile(ctx, &proto.SetSessionProfileRequest{Name: name})
+// planning fence and future named modes) for one conversation. name "" or
+// "default" returns to the unrestricted posture. Orthogonal to
+// SetPermissionMode. conversationID scopes the switch so planning mode is
+// per-conversation and never leaks to another attached client.
+func (c *Client) SetSessionProfile(ctx context.Context, conversationID, name string) error {
+	res, err := c.agent.SetSessionProfile(ctx, &proto.SetSessionProfileRequest{Name: name, ConversationId: conversationID})
 	if err != nil {
 		return err
 	}
@@ -1938,9 +1940,10 @@ func (c *Client) SetSessionProfile(ctx context.Context, name string) error {
 	return nil
 }
 
-// GetSessionProfile reads the active profile name and the registered names.
-func (c *Client) GetSessionProfile(ctx context.Context) (active string, available []string, err error) {
-	res, err := c.agent.GetSessionProfile(ctx, &proto.GetSessionProfileRequest{})
+// GetSessionProfile reads the active profile name and the registered names for
+// one conversation.
+func (c *Client) GetSessionProfile(ctx context.Context, conversationID string) (active string, available []string, err error) {
+	res, err := c.agent.GetSessionProfile(ctx, &proto.GetSessionProfileRequest{ConversationId: conversationID})
 	if err != nil {
 		return "", nil, err
 	}

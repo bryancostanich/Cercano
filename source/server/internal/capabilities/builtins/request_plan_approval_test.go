@@ -29,7 +29,7 @@ func TestRequestPlanApproval_Meta(t *testing.T) {
 
 func TestRequestPlanApproval_Execute_LeavesPlanningProfile(t *testing.T) {
 	var entered string
-	svc := capabilities.Services{EnterProfile: func(name string) error { entered = name; return nil }}
+	svc := capabilities.Services{EnterProfile: func(convID, name string) error { entered = name; return nil }}
 	args, _ := json.Marshal(map[string]any{
 		"effort":    "efforts/migrate-config-loader",
 		"summary":   "Three phases: loader, migration, cleanup.",
@@ -61,7 +61,7 @@ func TestRequestPlanApproval_Execute_NilHookErrors(t *testing.T) {
 
 func TestRequestPlanApproval_Execute_NoArgsStillLeavesPlanning(t *testing.T) {
 	var entered string
-	svc := capabilities.Services{EnterProfile: func(n string) error { entered = n; return nil }}
+	svc := capabilities.Services{EnterProfile: func(convID, n string) error { entered = n; return nil }}
 	call := &capabilities.Call{Args: nil, Svc: svc}
 	if _, err := RequestPlanApproval().Execute(context.Background(), call); err != nil {
 		t.Fatalf("Execute with no args: %v", err)

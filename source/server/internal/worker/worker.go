@@ -97,7 +97,7 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 
 	// Session profile proxy: session-control capabilities such as suggest_plan
 	// must mutate the host's live profile broker, not a worker-local copy.
-	profileCtl := newStreamSessionProfileController(sndr)
+	profileCtl := newStreamSessionProfileController(sndr, start.GetConversationId())
 
 	// Recv loop: routes incoming HostToWorker messages from the host.
 	recvDone := make(chan struct{})

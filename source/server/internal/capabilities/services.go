@@ -26,13 +26,15 @@ type Services struct {
 	// the unified dispatch engine. Nil until wired by the server.
 	Dispatch func(ctx context.Context, spec dispatch.Spec) (dispatch.Result, error)
 
-	// EnterProfile switches the session's active capability profile by name
+	// EnterProfile switches one conversation's active capability profile by name
 	// ("plan", "default", …). It is how the suggest_plan capability flips the
 	// session into the read-only planning fence once the user approves the
-	// suggestion at the confirm gate. A func hook (not the agent.ProfileBroker
-	// type) keeps this package free of an agent import, matching Dispatch. Nil
-	// until wired by the server; suggest_plan errors clearly if it is nil.
-	EnterProfile func(name string) error
+	// suggestion at the confirm gate. The convID scopes the switch to the
+	// calling conversation so one client entering planning mode never fences
+	// another attached client. A func hook (not the agent.ProfileBroker type)
+	// keeps this package free of an agent import, matching Dispatch. Nil until
+	// wired by the server; suggest_plan errors clearly if it is nil.
+	EnterProfile func(convID, name string) error
 
 	// RestartAgent bounces the singleton agent process: it drains in-flight
 	// turns, stops runtime children, and exits, letting the CLI's reconnect loop

@@ -158,7 +158,11 @@ func (p *streamPermissionRequester) deliver(resp *proto.PermissionResponse) {
 // host. The worker must not mutate a local profile broker: planning-mode entry
 // changes the live host session and therefore the next turn's tool fence.
 type streamSessionProfileController struct {
-	sndr    *sender
+	sndr *sender
+	// convID scopes profile switches to this worker's conversation so planning
+	// mode stays per-conversation on the host — it is captured once from the
+	// StartTurn and stamped onto every request.
+	convID  string
 	nextID  atomic.Uint64
 	mu      sync.Mutex
 	pending map[uint64]chan profileResult
@@ -168,9 +172,10 @@ type profileResult struct {
 	err error
 }
 
-func newStreamSessionProfileController(sndr *sender) *streamSessionProfileController {
+func newStreamSessionProfileController(sndr *sender, convID string) *streamSessionProfileController {
 	return &streamSessionProfileController{
 		sndr:    sndr,
+		convID:  convID,
 		pending: make(map[uint64]chan profileResult),
 	}
 }
@@ -190,8 +195,9 @@ func (p *streamSessionProfileController) SetProfile(ctx context.Context, name st
 	}()
 
 	p.sndr.send(&proto.WorkerToHost{Msg: &proto.WorkerToHost_ProfileRequest{ProfileRequest: &proto.SessionProfileRequest{
-		Id:   id,
-		Name: name,
+		Id:             id,
+		Name:           name,
+		ConversationId: p.convID,
 	}}})
 
 	select {

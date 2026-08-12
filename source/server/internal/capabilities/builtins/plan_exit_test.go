@@ -28,7 +28,7 @@ func TestPlanExit_Meta(t *testing.T) {
 
 func TestPlanExit_Execute_LeavesPlanningProfile(t *testing.T) {
 	var entered string
-	svc := capabilities.Services{EnterProfile: func(name string) error { entered = name; return nil }}
+	svc := capabilities.Services{EnterProfile: func(convID, name string) error { entered = name; return nil }}
 	args, _ := json.Marshal(map[string]any{"reason": "no plan needed"})
 	call := &capabilities.Call{Args: args, Svc: svc}
 
@@ -46,7 +46,7 @@ func TestPlanExit_Execute_LeavesPlanningProfile(t *testing.T) {
 
 func TestPlanExit_Execute_NoArgsStillLeavesPlanning(t *testing.T) {
 	var entered string
-	svc := capabilities.Services{EnterProfile: func(n string) error { entered = n; return nil }}
+	svc := capabilities.Services{EnterProfile: func(convID, n string) error { entered = n; return nil }}
 	call := &capabilities.Call{Args: nil, Svc: svc}
 	if _, err := PlanExit().Execute(context.Background(), call); err != nil {
 		t.Fatalf("Execute with no args: %v", err)

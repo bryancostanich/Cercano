@@ -91,8 +91,9 @@ type workerRunner struct {
 
 	// setProfile switches the host session's active capability profile when a
 	// worker-side session-control capability (suggest_plan/request_plan_approval)
-	// asks for it. The worker must not own this state.
-	setProfile func(context.Context, string) error
+	// asks for it. The worker must not own this state. The convID scopes the
+	// switch to the worker's conversation so planning mode stays per-conversation.
+	setProfile func(ctx context.Context, convID, name string) error
 
 	// dial is called instead of the pool when non-nil (test injection). When
 	// nil, RunTurn acquires a warm worker from the per-conversation pool.
@@ -120,7 +121,7 @@ func NewWorkerRunner(
 	perms permissions.Broker,
 	st secrets.Store,
 	ensureSubagent EnsureSubagentFunc,
-	setProfile func(context.Context, string) error,
+	setProfile func(ctx context.Context, convID, name string) error,
 	openProvider func() inference.Provider,
 	openTierModel func(pkgcfg.Tier) string,
 ) runner.TurnRunner {
@@ -462,7 +463,7 @@ func (w *workerRunner) RunTurn(
 				if w.setProfile == nil {
 					resp.Ok = false
 					resp.Error = "session profile control not configured"
-				} else if err := w.setProfile(ctx, pr.GetName()); err != nil {
+				} else if err := w.setProfile(ctx, pr.GetConversationId(), pr.GetName()); err != nil {
 					resp.Ok = false
 					resp.Error = err.Error()
 				}

@@ -177,7 +177,7 @@ func (c *Core) RunTurn(
 	// takes effect on the next turn. Nil accessor = unrestricted (zero Profile).
 	var profile agent.Profile
 	if c.d.Profiles != nil {
-		profile = c.d.Profiles()
+		profile = c.d.Profiles(req.ConversationID)
 	}
 
 	// Run the tool loop on the primary provider.

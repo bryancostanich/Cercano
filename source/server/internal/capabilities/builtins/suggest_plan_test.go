@@ -33,7 +33,7 @@ func TestSuggestPlan_Meta(t *testing.T) {
 func TestSuggestPlan_Execute_EntersPlanProfile(t *testing.T) {
 	var entered string
 	svc := capabilities.Services{
-		EnterProfile: func(name string) error { entered = name; return nil },
+		EnterProfile: func(convID, name string) error { entered = name; return nil },
 	}
 	args, _ := json.Marshal(map[string]any{"reason": "spans 4 files; approach uncertain"})
 	call := &capabilities.Call{Args: args, Svc: svc}
@@ -63,7 +63,7 @@ func TestSuggestPlan_Execute_NilHookErrors(t *testing.T) {
 // Empty/absent args are tolerated (reason is optional).
 func TestSuggestPlan_Execute_NoArgs(t *testing.T) {
 	var entered string
-	svc := capabilities.Services{EnterProfile: func(n string) error { entered = n; return nil }}
+	svc := capabilities.Services{EnterProfile: func(convID, n string) error { entered = n; return nil }}
 	call := &capabilities.Call{Args: nil, Svc: svc}
 	if _, err := SuggestPlan().Execute(context.Background(), call); err != nil {
 		t.Fatalf("Execute with no args: %v", err)

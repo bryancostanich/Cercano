@@ -29,7 +29,7 @@ import (
 // ProfileBroker is safe for concurrent use.
 type ProfileBroker struct {
 	mu       sync.RWMutex
-	active   string             // "" means the default (unrestricted) profile
+	active   map[string]string  // conversationID → profile name; "" means default
 	registry map[string]Profile // name → profile; excludes the default
 }
 
@@ -39,9 +39,14 @@ type ProfileBroker struct {
 const DefaultProfileName = "default"
 
 // NewProfileBroker returns a broker seeded with the built-in profiles (currently
-// just "plan") and set to the default (unrestricted) profile.
+// just "plan"). Every conversation starts in the default (unrestricted) profile;
+// the active pointer is keyed by conversation ID so one client entering planning
+// mode does not fence any other attached client.
 func NewProfileBroker() *ProfileBroker {
-	b := &ProfileBroker{registry: make(map[string]Profile)}
+	b := &ProfileBroker{
+		active:   make(map[string]string),
+		registry: make(map[string]Profile),
+	}
 	b.Register(PlanProfile())
 	return b
 }
@@ -58,13 +63,16 @@ func (b *ProfileBroker) Register(p Profile) {
 	b.registry[p.Name] = p
 }
 
-// SetActive selects the active profile by name. "" and "default" select the
-// unrestricted profile; any other name must be registered, or an error is
-// returned and the active profile is left unchanged.
-func (b *ProfileBroker) SetActive(name string) error {
+// SetActive selects the active profile for one conversation by name. "" and
+// "default" clear the fence for that conversation (delete its entry, so it
+// resolves back to the unrestricted posture); any other name must be
+// registered, or an error is returned and the active profile is left unchanged.
+// The active pointer is per-conversation: switching one conversation's profile
+// never affects another attached client.
+func (b *ProfileBroker) SetActive(convID, name string) error {
 	if name == "" || name == DefaultProfileName {
 		b.mu.Lock()
-		b.active = ""
+		delete(b.active, convID)
 		b.mu.Unlock()
 		return nil
 	}
@@ -73,30 +81,33 @@ func (b *ProfileBroker) SetActive(name string) error {
 	if _, ok := b.registry[name]; !ok {
 		return fmt.Errorf("unknown profile %q (known: %s)", name, b.namesLocked())
 	}
-	b.active = name
+	b.active[convID] = name
 	return nil
 }
 
-// Active returns the active Profile. When the session is in the default posture
-// this is the zero Profile, which restricts nothing (see Profile.Restricts).
-func (b *ProfileBroker) Active() Profile {
+// Active returns the active Profile for a conversation. When the conversation
+// has no fence set this is the zero Profile, which restricts nothing (see
+// Profile.Restricts).
+func (b *ProfileBroker) Active(convID string) Profile {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	if b.active == "" {
+	name := b.active[convID]
+	if name == "" {
 		return Profile{}
 	}
-	return b.registry[b.active]
+	return b.registry[name]
 }
 
-// ActiveName returns the active profile's name, or DefaultProfileName when in
-// the unrestricted posture.
-func (b *ProfileBroker) ActiveName() string {
+// ActiveName returns the conversation's active profile name, or
+// DefaultProfileName when it is in the unrestricted posture.
+func (b *ProfileBroker) ActiveName(convID string) string {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	if b.active == "" {
+	name := b.active[convID]
+	if name == "" {
 		return DefaultProfileName
 	}
-	return b.active
+	return name
 }
 
 // Names returns the registered profile names (excluding the default) in sorted

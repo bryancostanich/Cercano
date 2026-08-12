@@ -1054,10 +1054,10 @@ message GetPermissionModeResponse { string mode = 1; }
 // Session-profile RPCs let the CLI's /mode command switch the active capability
 // profile (the read-only planning fence and future named modes). name "" or
 // "default" selects the unrestricted posture.
-message SetSessionProfileRequest  { string name = 1; }    // "plan" | "default" | "" | future mode
+message SetSessionProfileRequest  { string name = 1; string conversation_id = 2; }    // "plan" | "default" | "" | future mode; conversation_id scopes the switch
 message SetSessionProfileResponse { bool ok = 1; string error = 2; }
 
-message GetSessionProfileRequest  {}
+message GetSessionProfileRequest  { string conversation_id = 1; }
 message GetSessionProfileResponse {
   string active = 1;           // active profile name ("default" when unrestricted)
   repeated string available = 2; // registered profile names (excluding default)
@@ -1540,6 +1540,7 @@ message PermissionResponse {
 message SessionProfileRequest {
   uint64 id = 1;
   string name = 2;
+  string conversation_id = 3; // scopes the host profile switch to the worker's conversation
 }
 
 message SessionProfileResponse {

@@ -2697,8 +2697,9 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		// turn (the runner reads the active profile live). On error, surface it.
 		name := res.SessionProfile
 		ag := m.agent
+		convID := m.convID
 		go func() {
-			if err := ag.SetSessionProfile(context.Background(), name); err != nil {
+			if err := ag.SetSessionProfile(context.Background(), convID, name); err != nil {
 				// best-effort: the next turn simply won't be fenced
 				_ = err
 			}

@@ -64,7 +64,7 @@ func TestBuildWorkerToolSvc_WiresEnterProfile(t *testing.T) {
 	if enter == nil {
 		t.Fatal("worker Services.EnterProfile is nil — suggest_plan would be advertised but unable to enter planning mode")
 	}
-	if err := enter("plan"); err != nil {
+	if err := enter("conv1", "plan"); err != nil {
 		t.Fatalf("EnterProfile(plan): %v", err)
 	}
 	if entered != "plan" {

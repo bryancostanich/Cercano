@@ -64,10 +64,13 @@ func buildWorkerToolSvc(
 		Open:      open,
 		Config:    &cfg,
 		CtxLoader: ctxLoader,
-		EnterProfile: func(name string) error {
+		EnterProfile: func(convID, name string) error {
 			if enterProfile == nil {
 				return fmt.Errorf("session profile control not configured")
 			}
+			// The worker's profile controller already carries this worker's
+			// conversation ID (captured from StartTurn) and stamps it onto the
+			// host request, so the capability-supplied convID is redundant here.
 			return enterProfile(context.Background(), name)
 		},
 	})

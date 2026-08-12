@@ -191,11 +191,11 @@ func (s *Server) InstallCapabilities() {
 		CtxLoader: s.persistSvc.ContextLoader(),
 		// suggest_plan enters planning mode via the profile broker once the user
 		// approves the suggestion at the confirm gate.
-		EnterProfile: func(name string) error {
+		EnterProfile: func(convID, name string) error {
 			if s.profileBroker == nil {
 				return fmt.Errorf("profile broker not configured")
 			}
-			return s.profileBroker.SetActive(name)
+			return s.profileBroker.SetActive(convID, name)
 		},
 		// restart_agent bounces the singleton agent via a self-SIGTERM once the
 		// user approves at the confirm gate. Same drain+child-stop path as the
@@ -820,11 +820,11 @@ func (s *Server) runnerDeps() runnersvc.Deps {
 		// Live accessor for the active capability profile (planning fence /
 		// future modes). Read at turn time so a mid-session /mode switch takes
 		// effect on the next turn.
-		Profiles: func() agent.Profile {
+		Profiles: func(convID string) agent.Profile {
 			if s.profileBroker == nil {
 				return agent.Profile{}
 			}
-			return s.profileBroker.Active()
+			return s.profileBroker.Active(convID)
 		},
 	}
 }
@@ -873,11 +873,11 @@ func (s *Server) SelectExecutionMode() {
 			}
 			return st.EnsureSubagentConversation(ctx, id, parentID, projectDir, model, grantedTools)
 		}, // worker-side dispatch: create the sub-agent conversation row on the host
-		func(ctx context.Context, name string) error {
+		func(ctx context.Context, convID, name string) error {
 			if s.profileBroker == nil {
 				return fmt.Errorf("profile broker not configured")
 			}
-			return s.profileBroker.SetActive(name)
+			return s.profileBroker.SetActive(convID, name)
 		}, // worker-side session-control capabilities: switch the host profile broker
 		func() inference.Provider { return s.OpenLLMProvider() }, // answers the worker's OpenInferenceRequests
 		s.openModels.Model, // resolves effective active-runtime open tier models for the snapshot
@@ -3113,7 +3113,7 @@ func (s *Server) SetSessionProfile(ctx context.Context, req *proto.SetSessionPro
 	if s.profileBroker == nil {
 		return &proto.SetSessionProfileResponse{Ok: false, Error: "profile broker not configured"}, nil
 	}
-	if err := s.profileBroker.SetActive(req.GetName()); err != nil {
+	if err := s.profileBroker.SetActive(req.GetConversationId(), req.GetName()); err != nil {
 		return &proto.SetSessionProfileResponse{Ok: false, Error: err.Error()}, nil
 	}
 	return &proto.SetSessionProfileResponse{Ok: true}, nil
@@ -3126,7 +3126,7 @@ func (s *Server) GetSessionProfile(ctx context.Context, req *proto.GetSessionPro
 		return &proto.GetSessionProfileResponse{Active: agent.DefaultProfileName}, nil
 	}
 	return &proto.GetSessionProfileResponse{
-		Active:    s.profileBroker.ActiveName(),
+		Active:    s.profileBroker.ActiveName(req.GetConversationId()),
 		Available: s.profileBroker.Names(),
 	}, nil
 }

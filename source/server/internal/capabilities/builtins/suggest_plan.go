@@ -76,7 +76,7 @@ func (suggestPlanCap) Execute(ctx context.Context, call *capabilities.Call) (*ca
 		// Loudly surface a wiring gap rather than silently pretending we planned.
 		return nil, fmt.Errorf("suggest_plan: planning mode is not available (no profile broker wired)")
 	}
-	if err := call.Svc.EnterProfile("plan"); err != nil {
+	if err := call.Svc.EnterProfile(call.ConversationID, "plan"); err != nil {
 		return nil, fmt.Errorf("suggest_plan: entering planning mode: %w", err)
 	}
 

@@ -7484,10 +7484,11 @@ func (x *GetPermissionModeResponse) GetMode() string {
 // profile (the read-only planning fence and future named modes). name "" or
 // "default" selects the unrestricted posture.
 type SetSessionProfileRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Name           string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	ConversationId string                 `protobuf:"bytes,2,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *SetSessionProfileRequest) Reset() {
@@ -7523,6 +7524,13 @@ func (*SetSessionProfileRequest) Descriptor() ([]byte, []int) {
 func (x *SetSessionProfileRequest) GetName() string {
 	if x != nil {
 		return x.Name
+	}
+	return ""
+}
+
+func (x *SetSessionProfileRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
 	}
 	return ""
 }
@@ -7580,9 +7588,10 @@ func (x *SetSessionProfileResponse) GetError() string {
 }
 
 type GetSessionProfileRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ConversationId string                 `protobuf:"bytes,1,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *GetSessionProfileRequest) Reset() {
@@ -7613,6 +7622,13 @@ func (x *GetSessionProfileRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use GetSessionProfileRequest.ProtoReflect.Descriptor instead.
 func (*GetSessionProfileRequest) Descriptor() ([]byte, []int) {
 	return file_agent_proto_rawDescGZIP(), []int{109}
+}
+
+func (x *GetSessionProfileRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
 }
 
 type GetSessionProfileResponse struct {
@@ -12114,11 +12130,12 @@ func (x *PermissionResponse) GetMessage() string {
 // capability profile. The worker must not keep its own profile broker; planning
 // mode changes affect the host session and therefore the next turn's tool fence.
 type SessionProfileRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Id             uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name           string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	ConversationId string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"` // scopes the host profile switch to the worker's conversation
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *SessionProfileRequest) Reset() {
@@ -12161,6 +12178,13 @@ func (x *SessionProfileRequest) GetId() uint64 {
 func (x *SessionProfileRequest) GetName() string {
 	if x != nil {
 		return x.Name
+	}
+	return ""
+}
+
+func (x *SessionProfileRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
 	}
 	return ""
 }
@@ -14082,13 +14106,15 @@ const file_agent_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\tR\x05error\"\x1a\n" +
 	"\x18GetPermissionModeRequest\"/\n" +
 	"\x19GetPermissionModeResponse\x12\x12\n" +
-	"\x04mode\x18\x01 \x01(\tR\x04mode\".\n" +
+	"\x04mode\x18\x01 \x01(\tR\x04mode\"W\n" +
 	"\x18SetSessionProfileRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"A\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12'\n" +
+	"\x0fconversation_id\x18\x02 \x01(\tR\x0econversationId\"A\n" +
 	"\x19SetSessionProfileResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\x1a\n" +
-	"\x18GetSessionProfileRequest\"Q\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"C\n" +
+	"\x18GetSessionProfileRequest\x12'\n" +
+	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\"Q\n" +
 	"\x19GetSessionProfileResponse\x12\x16\n" +
 	"\x06active\x18\x01 \x01(\tR\x06active\x12\x1c\n" +
 	"\tavailable\x18\x02 \x03(\tR\tavailable\"\x18\n" +
@@ -14399,10 +14425,11 @@ const file_agent_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x14\n" +
 	"\x05allow\x18\x02 \x01(\bR\x05allow\x12\x14\n" +
 	"\x05error\x18\x03 \x01(\tR\x05error\x12\x18\n" +
-	"\amessage\x18\x04 \x01(\tR\amessage\";\n" +
+	"\amessage\x18\x04 \x01(\tR\amessage\"d\n" +
 	"\x15SessionProfileRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\"N\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\"N\n" +
 	"\x16SessionProfileResponse\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x0e\n" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +

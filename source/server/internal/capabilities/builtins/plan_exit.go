@@ -53,7 +53,7 @@ func (planExitCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 	if call.Svc.EnterProfile == nil {
 		return nil, fmt.Errorf("plan_exit: session profile switching is not available (no profile broker wired)")
 	}
-	if err := call.Svc.EnterProfile("default"); err != nil {
+	if err := call.Svc.EnterProfile(call.ConversationID, "default"); err != nil {
 		return nil, fmt.Errorf("plan_exit: leaving planning mode: %w", err)
 	}
 	return &capabilities.Result{

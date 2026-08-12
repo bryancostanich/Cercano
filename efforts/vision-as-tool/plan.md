@@ -178,15 +178,26 @@ results before real provider calls land.
 
 Make `inspect_image` actually ask the configured vision model.
 
-- [ ] Add a small `VisionInspector` interface so tests can inject fake vision
+- [x] Add a small `VisionInspector` interface so tests can inject fake vision
       providers without launching llama-server.
-- [ ] Implement real inspector:
+      Done: `capabilities.VisionService` (from Phase 4) is the tool-facing seam;
+      `visioninspect.Resolver func() (Resolved, bool)` is the injection point so
+      tests supply a fake `inference.Provider` + model with no llama-server.
+- [x] Implement real inspector:
       - build a one-turn request with the image block + focused question;
       - target the resolved `vision` tier provider/model;
       - expose **no tools** to the vision model;
       - apply a tight timeout;
       - normalize errors into tool results when appropriate.
-- [ ] Wrap the answer in the stable text envelope:
+      Done: `internal/visioninspect.Inspector` implements `VisionService`. It
+      builds a single user message (question text + base64 image block) with a
+      steering system prompt, NO tools, MaxTokens cap, and a 90s default timeout
+      (overridable). Provider/model come from the injected `Resolver`. Errors
+      are returned to the tool, which renders them as graceful tool results
+      (not turn-aborting) — the tool owns result normalization; the inspector
+      owns the call. This package imports visionattach+inference+llm but NOT
+      capabilities, so capabilities stays free of an inference dependency.
+- [x] Wrap the answer in the stable text envelope:
 
       ```text
       Image img_... inspection result:
@@ -196,14 +207,27 @@ Make `inspect_image` actually ask the configured vision model.
       Source: ...
       ```
 
-- [ ] Tests:
+      Done: the envelope is rendered by the tool (`inspect_image.renderVisionEnvelope`
+      from Phase 4); the inspector returns `VisionAnswer{Answer, Source}` (Source
+      = `provider:model`). Confidence stays optional/blank in V1 and is omitted
+      from the envelope when empty.
+- [x] Tests:
       - successful local vision call returns envelope;
       - tool-less request: fake inspector asserts no tool schemas are passed;
       - timeout returns a clear tool result;
       - provider error returns a clear tool result and does not abort the whole
         reasoning turn unless the tool framework requires hard errors.
-- [ ] Build + vet + full `go test ./...` green.
-- [ ] Checkpoint.
+      Done: `visioninspect_test.go` (available/lookup, success+source,
+      tool-less request assertion, stale-image guard, no-model, provider error,
+      empty answer, prompt timeout, multi-text-block join) with a fake
+      `inference.Provider`. Envelope/graceful-result behavior is covered by the
+      Phase-4 `inspect_image_test.go`.
+- [x] Build + vet + full `go test ./...` green.
+- [x] Checkpoint.
+
+Note: the `Resolver` returns a single vision target today. Phase 7 makes that
+resolution locus-aware (local/open vision first, then cloud fallback when the
+locus permits) by supplying a locus-aware resolver — no change to the inspector.
 
 ## Phase 6 — Per-conversation inspection cache
 

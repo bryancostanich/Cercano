@@ -878,6 +878,7 @@ func (p *Provider) catalogModels() []localruntime.ModelRecord {
 		// Path names the first shard within it — what llama-server is pointed at.
 		modelSub := filepath.Join(targetDir, localruntime.ModelDirName(m.ID))
 		primary := filepath.Join(modelSub, urlFilename(urls[0]))
+		mmprojPath, vision := resolveVision(modelSub, m)
 		state := localruntime.DownloadNotStarted
 		var modified time.Time
 		if allShardsPresent(modelSub, urls) {
@@ -904,10 +905,29 @@ func (p *Provider) catalogModels() []localruntime.ModelRecord {
 			SupportsChat:       !m.SupportsEmbed,
 			SupportsEmbed:      m.SupportsEmbed,
 			SupportsTools:      m.SupportsTools,
+			SupportsVision:     vision,
+			MmprojPath:         mmprojPath,
 			ExtraArgs:          m.ExtraArgs,
 		})
 	}
 	return out
+}
+
+// resolveVision decides a catalog model's on-disk vision status. Vision
+// requires BOTH the catalog flag AND the projector file physically present in
+// the model's directory: a declared vision model whose mmproj hasn't downloaded
+// yet is treated as text-only (empty path, false) until it lands, so the
+// provider never launches --mmproj against a missing file and never claims
+// vision the backend can't actually serve. Returns (mmprojPath, supportsVision).
+func resolveVision(modelSub string, m CuratedModel) (string, bool) {
+	if !m.SupportsVision || m.MmprojFile == "" {
+		return "", false
+	}
+	candidate := filepath.Join(modelSub, m.MmprojFile)
+	if _, err := os.Stat(candidate); err != nil {
+		return "", false
+	}
+	return candidate, true
 }
 
 // urlFilename returns the filename portion of a download URL (after the last

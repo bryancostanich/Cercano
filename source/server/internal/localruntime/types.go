@@ -112,7 +112,17 @@ type ModelRecord struct {
 	SupportsChat       bool
 	SupportsEmbed      bool
 	SupportsTools      bool
-	Active             bool
+	// SupportsVision reports whether the resolved model can accept image input
+	// (a vision model with its mmproj present). Carried from the catalog through
+	// to the provider's client capability, so a text-only model has images
+	// stripped rather than sent to a backend that would reject them.
+	SupportsVision bool
+	// MmprojPath is the on-disk path to the multimodal projector GGUF for a
+	// vision model, passed to llama-server as --mmproj. Empty for non-vision
+	// models (and for a vision model whose projector file is not yet present,
+	// which downgrades it to text-only until the file lands).
+	MmprojPath string
+	Active     bool
 	// ExtraArgs are per-model runtime launch flags carried from the catalog
 	// (CuratedModel.ExtraArgs) through to the provider's launch args. Empty for
 	// models with no special launch requirements. The llama-server provider

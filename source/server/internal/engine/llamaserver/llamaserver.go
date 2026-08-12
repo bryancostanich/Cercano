@@ -93,7 +93,7 @@ func (e *Engine) ChatWithTools(ctx context.Context, req engine.ChatRequest) (eng
 // encoder GGUFs), so embeddings follow the configured runtime instead of
 // silently requiring an Ollama daemon.
 func (e *Engine) Embed(ctx context.Context, model, text string) ([]float64, error) {
-	endpoint, resolvedModel, err := e.endpointFor(ctx, model)
+	endpoint, resolvedModel, _, err := e.endpointFor(ctx, model)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +173,7 @@ type chatResult struct {
 }
 
 func (e *Engine) chat(ctx context.Context, model string, messages []openAIMessage, tools []engine.ToolSchemaJSON, opts engine.GenOptions, stream bool, onToken func(string)) (chatResult, error) {
-	endpoint, resolvedModel, err := e.endpointFor(ctx, model)
+	endpoint, resolvedModel, _, err := e.endpointFor(ctx, model)
 	if err != nil {
 		return chatResult{}, err
 	}
@@ -220,14 +220,14 @@ func (e *Engine) chat(ctx context.Context, model string, messages []openAIMessag
 	return decodeChatResponse(resp.Body)
 }
 
-func (e *Engine) endpointFor(ctx context.Context, requested string) (endpoint string, modelName string, err error) {
+func (e *Engine) endpointFor(ctx context.Context, requested string) (endpoint string, modelName string, supportsVision bool, err error) {
 	if e.Manager == nil {
-		return "", "", errors.New("llama-server runtime manager is not configured")
+		return "", "", false, errors.New("llama-server runtime manager is not configured")
 	}
 	models, inventoryErr := e.Manager.Inventory(ctx)
 	selected := matchRuntimeModel(requested, models)
 	if inventoryErr != nil && selected.ID == "" {
-		return "", "", inventoryErr
+		return "", "", false, inventoryErr
 	}
 	modelID := requested
 	if selected.ID != "" {
@@ -235,7 +235,7 @@ func (e *Engine) endpointFor(ctx context.Context, requested string) (endpoint st
 	}
 	instances, err := e.Manager.Instances(ctx)
 	if err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
 	startingID := ""
 	for _, instance := range instances {
@@ -247,7 +247,7 @@ func (e *Engine) endpointFor(ctx context.Context, requested string) (endpoint st
 		}
 		switch instance.State {
 		case localruntime.InstanceRunning, localruntime.InstanceHealthy:
-			return instance.Endpoint, modelNameForRequest(selected, requested), nil
+			return instance.Endpoint, modelNameForRequest(selected, requested), selected.SupportsVision, nil
 		case localruntime.InstanceStarting:
 			// Still loading the model — its port isn't open yet, so a
 			// request now would get connection-refused. Wait for it below
@@ -258,21 +258,21 @@ func (e *Engine) endpointFor(ctx context.Context, requested string) (endpoint st
 	if startingID != "" {
 		endpoint, err := e.awaitInstanceReady(ctx, startingID)
 		if err != nil {
-			return "", "", err
+			return "", "", false, err
 		}
-		return endpoint, modelNameForRequest(selected, requested), nil
+		return endpoint, modelNameForRequest(selected, requested), selected.SupportsVision, nil
 	}
 	start, err := e.Manager.Start(ctx, localruntime.StartRequest{
 		Runtime: runtimeName,
 		ModelID: requested,
 	})
 	if err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
 	if start.Endpoint == "" {
-		return "", "", errors.New("llama-server started without an endpoint")
+		return "", "", false, errors.New("llama-server started without an endpoint")
 	}
-	return start.Endpoint, modelNameForRequest(selected, requested), nil
+	return start.Endpoint, modelNameForRequest(selected, requested), selected.SupportsVision, nil
 }
 
 // awaitInstanceReady blocks until a still-loading instance becomes usable,

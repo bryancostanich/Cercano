@@ -51,7 +51,7 @@ func (p *LLMProvider) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.
 // bound to it, plus the request rewritten to the resolved model id (llama-server
 // serves one model per instance; the id in the request is informational).
 func (p *LLMProvider) clientFor(ctx context.Context, req llm.ChatRequest) (*openai.Client, llm.ChatRequest, error) {
-	endpoint, model, err := p.eng.endpointFor(ctx, req.Model)
+	endpoint, model, supportsVision, err := p.eng.endpointFor(ctx, req.Model)
 	if err != nil {
 		return nil, req, err
 	}
@@ -63,16 +63,15 @@ func (p *LLMProvider) clientFor(ctx context.Context, req llm.ChatRequest) (*open
 		req.MaxTokens = engine.DefaultMaxTokens
 	}
 	// SupportsVision reflects the resolved model's real capability: true only
-	// for a vision model launched with its mmproj. Phase 1 lands the capability
-	// gate with this defaulted false (so images are stripped rather than sent to
-	// a backend that would 500); Phase 2 threads the actual per-model flag
-	// through endpointFor from the resolved ModelRecord.
-	vision := false
+	// for a vision model launched with its mmproj (endpointFor derives it from
+	// the resolved ModelRecord). A text-only or mmproj-less backend reports
+	// false, so image blocks are stripped rather than sent to a server that
+	// would 500 on "image input is not supported".
 	c := openai.NewClient(openai.Config{
 		BaseURL:        strings.TrimRight(endpoint, "/") + "/v1",
 		Model:          model,
 		Backend:        "llama_server",
-		SupportsVision: vision,
+		SupportsVision: supportsVision,
 	})
 	return c, req, nil
 }

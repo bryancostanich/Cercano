@@ -43,7 +43,7 @@ func TestEndpointFor_WaitsForStartingInstance(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	endpoint, _, err := eng.endpointFor(ctx, "llama_server:model-a")
+	endpoint, _, _, err := eng.endpointFor(ctx, "llama_server:model-a")
 	if err != nil {
 		t.Fatalf("endpointFor: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestEndpointFor_StartingInstanceFails(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_, _, err := eng.endpointFor(ctx, "llama_server:model-a")
+	_, _, _, err := eng.endpointFor(ctx, "llama_server:model-a")
 	if err == nil || !strings.Contains(err.Error(), "exit status 1") {
 		t.Fatalf("err = %v, want failure carrying the instance's LastError", err)
 	}
@@ -102,7 +102,7 @@ func TestEndpointFor_CtxExpiresWhileLoading(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
 	defer cancel()
-	_, _, err := eng.endpointFor(ctx, "llama_server:model-a")
+	_, _, _, err := eng.endpointFor(ctx, "llama_server:model-a")
 	if err == nil || !strings.Contains(err.Error(), "still loading") {
 		t.Fatalf("err = %v, want a still-loading error", err)
 	}

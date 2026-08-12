@@ -1,6 +1,9 @@
 package llamaserver
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -234,4 +237,66 @@ func TestRecommendedOpenModels(t *testing.T) {
 			t.Errorf("tier %q: id %q lacks the inventory prefix", tier, got[tier])
 		}
 	}
+}
+
+// TestCuratedModel_VisionFieldsRoundTrip confirms the new mmproj/vision catalog
+// fields parse from JSON, so an authored vision entry carries its projector.
+func TestCuratedModel_VisionFieldsRoundTrip(t *testing.T) {
+	const raw = `{
+		"id": "qwen2.5-vl-7b",
+		"files": ["model.gguf", "mmproj-f16.gguf"],
+		"supports_vision": true,
+		"mmproj_file": "mmproj-f16.gguf"
+	}`
+	var m CuratedModel
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !m.SupportsVision {
+		t.Error("SupportsVision did not parse as true")
+	}
+	if m.MmprojFile != "mmproj-f16.gguf" {
+		t.Errorf("MmprojFile = %q, want mmproj-f16.gguf", m.MmprojFile)
+	}
+	// A non-vision entry leaves both zero-valued.
+	var plain CuratedModel
+	if err := json.Unmarshal([]byte(`{"id":"x"}`), &plain); err != nil {
+		t.Fatalf("unmarshal plain: %v", err)
+	}
+	if plain.SupportsVision || plain.MmprojFile != "" {
+		t.Errorf("non-vision entry got vision fields: %+v", plain)
+	}
+}
+
+// TestResolveVision covers the gate: vision is on ONLY when the catalog flag is
+// set, MmprojFile is named, AND that file physically exists in the model dir.
+func TestResolveVision(t *testing.T) {
+	dir := t.TempDir()
+	projector := "mmproj-f16.gguf"
+	if err := os.WriteFile(filepath.Join(dir, projector), []byte("gguf"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("vision + file present", func(t *testing.T) {
+		path, ok := resolveVision(dir, CuratedModel{SupportsVision: true, MmprojFile: projector})
+		if !ok || path != filepath.Join(dir, projector) {
+			t.Errorf("got (%q, %v), want the resolved path + true", path, ok)
+		}
+	})
+	t.Run("vision flag but file missing", func(t *testing.T) {
+		path, ok := resolveVision(dir, CuratedModel{SupportsVision: true, MmprojFile: "absent.gguf"})
+		if ok || path != "" {
+			t.Errorf("missing projector should downgrade to text-only, got (%q, %v)", path, ok)
+		}
+	})
+	t.Run("file present but flag off", func(t *testing.T) {
+		if _, ok := resolveVision(dir, CuratedModel{MmprojFile: projector}); ok {
+			t.Error("no SupportsVision flag should mean no vision")
+		}
+	})
+	t.Run("non-vision model", func(t *testing.T) {
+		if path, ok := resolveVision(dir, CuratedModel{}); ok || path != "" {
+			t.Errorf("plain model should be text-only, got (%q, %v)", path, ok)
+		}
+	})
 }

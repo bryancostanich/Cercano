@@ -33,6 +33,16 @@ type CuratedModel struct {
 	SizeBytes     int64    `json:"size_bytes"`
 	SupportsTools bool     `json:"supports_tools"`
 	SupportsEmbed bool     `json:"supports_embed"`
+	// SupportsVision reports whether the model can accept image input. It is
+	// true only for a multimodal model whose projector (MmprojFile) is also
+	// present, since llama-server needs --mmproj to decode images. Curated
+	// truth, exactly like SupportsTools — not inferred. A false model has its
+	// images stripped before the request reaches the backend.
+	SupportsVision bool `json:"supports_vision,omitempty"`
+	// MmprojFile is the multimodal projector GGUF filename for a vision model,
+	// and MUST also appear in Files so the download manager fetches it. It is
+	// passed to llama-server as --mmproj <path>. Empty for non-vision models.
+	MmprojFile string `json:"mmproj_file,omitempty"`
 	// PlainChatOK reports whether the model produces correct visible assistant
 	// content for ordinary (non-tool) chat on the pinned build. Absent means
 	// true; it is only set false for models that load and can do tool calls but

@@ -94,6 +94,7 @@ func toAgentResult(r *capabilities.Result) *agenttools.Result {
 		Note:      r.Note,
 		Detail:    r.Detail,
 		StartLine: r.StartLine,
+		Images:    r.Images,
 	}
 }
 

@@ -266,7 +266,8 @@ Names match Claude's training (Read, Write, Edit, LS, Glob, Grep, Bash) to keep 
 
 | Name | Tier | Action |
 |---|---|---|
-| `Read` | R | Read a file |
+| `Read` | R | Read a file (text only; refuses binaries) |
+| `ViewImage` | R | Load an image file (PNG/JPEG/GIF/WebP) and place its pixels in front of the model |
 | `LS` | R | List directory contents |
 | `Glob` | R | Glob-match files (no `**` in V1) |
 | `Grep` | R | Search files for a regex |

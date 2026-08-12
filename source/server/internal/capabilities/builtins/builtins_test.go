@@ -10,12 +10,12 @@ func TestRegister_Count(t *testing.T) {
 	reg := capabilities.NewRegistry(capabilities.Services{})
 	Register(reg)
 	all := reg.All()
-	if len(all) != 39 {
+	if len(all) != 40 {
 		names := make([]string, len(all))
 		for i, c := range all {
 			names[i] = c.Name()
 		}
-		t.Fatalf("expected 39 capabilities, got %d: %v", len(all), names)
+		t.Fatalf("expected 40 capabilities, got %d: %v", len(all), names)
 	}
 }
 
@@ -42,7 +42,7 @@ func TestWebCapabilities_AgentSurfaceOnly(t *testing.T) {
 
 func TestAgentAliases_Count(t *testing.T) {
 	aliases := AgentAliases()
-	want := 7
+	want := 8
 	if len(aliases) != want {
 		t.Fatalf("expected %d aliases, got %d: %v", want, len(aliases), aliases)
 	}
@@ -52,6 +52,7 @@ func TestAgentAliases_Entries(t *testing.T) {
 	aliases := AgentAliases()
 	expected := map[string]string{
 		"read_file":   "Read",
+		"view_image":  "ViewImage",
 		"list_dir":    "LS",
 		"glob":        "Glob",
 		"grep":        "Grep",

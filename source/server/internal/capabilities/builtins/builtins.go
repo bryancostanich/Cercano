@@ -27,6 +27,7 @@ func init() {
 func Register(reg *capabilities.Registry) {
 	// R-tier
 	reg.MustRegister(ReadFile())
+	reg.MustRegister(ViewImage())
 	reg.MustRegister(ListDir())
 	reg.MustRegister(StatFile())
 	reg.MustRegister(Glob())
@@ -80,6 +81,7 @@ func Register(reg *capabilities.Registry) {
 func AgentAliases() map[string]string {
 	return map[string]string{
 		"read_file":   "Read",
+		"view_image":  "ViewImage",
 		"list_dir":    "LS",
 		"glob":        "Glob",
 		"grep":        "Grep",

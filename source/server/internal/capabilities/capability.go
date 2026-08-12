@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 
 	"cercano/source/server/internal/agenttools"
+	"cercano/source/server/internal/llm"
 )
 
 // Tier tags how risky a capability's effects are; drives standalone confirm gating.
@@ -69,6 +70,13 @@ type Result struct {
 	// capability's change begins (edit_file: first line of the replaced span,
 	// computed against the pre-edit file; write_file: 1). 0 = not applicable.
 	StartLine int `json:"start_line,omitempty"`
+	// Images carries any image content the capability wants to place in front
+	// of the model. Each entry is a BlockImage-typed llm.Block with MediaType +
+	// base64 ImageData populated (view_image is the built-in producer). The
+	// agent adapter copies these onto agenttools.Result.Images, and the tool
+	// loop appends them as sibling blocks after the tool_result when the active
+	// model reports vision support — the same path MCP image results travel.
+	Images []llm.Block `json:"images,omitempty"`
 }
 
 // LLMContent renders the result as the text the model receives.

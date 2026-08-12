@@ -54,6 +54,26 @@
       "status": "tested",
       "extra_args": ["--jinja", "--ctx-size", "32768", "--cache-type-k", "q8_0", "--cache-type-v", "q8_0"]
     },
+    "glm-4.5v-q4_k_m": {
+      "id": "glm-4.5v-q4_k_m",
+      "display_name": "GLM-4.5V Q4_K_M",
+      "repo": "ggml-org/GLM-4.5V-GGUF",
+      "files": [
+        "GLM-4.5V-Q4_K_M.gguf",
+        "mmproj-GLM-4.5V-Q8_0.gguf"
+      ],
+      "mmproj_file": "mmproj-GLM-4.5V-Q8_0.gguf",
+      "arch": "glm4moe",
+      "quant": "Q4_K_M",
+      "family": "glm",
+      "size_bytes": 71442668736,
+      "supports_tools": true,
+      "supports_embed": false,
+      "supports_vision": true,
+      "plain_chat_ok": true,
+      "status": "tested",
+      "extra_args": ["--jinja", "--ctx-size", "32768", "--cache-type-k", "q8_0", "--cache-type-v", "q8_0"]
+    },
     "glm-4.7-flash-q5_k_m": {
       "id": "glm-4.7-flash-q5_k_m",
       "display_name": "GLM-4.7-Flash Q5_K_M",

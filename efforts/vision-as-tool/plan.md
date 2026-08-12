@@ -307,6 +307,31 @@ locus allows it.
 
 Use a small vision model, not GLM-4.5V, for the target architecture.
 
+> Status (components complete, live wiring pending): Phases 2–7 built every
+> vision-as-tool building block in isolation, each unit-tested and green:
+> attachment store, placeholder rewriter, `vision` tier + resolver,
+> `inspect_image` tool, real tool-less inspector, per-conversation cache, and
+> locus-aware local→cloud fallback. NONE are wired into the live request path
+> yet — by design, so the feature never goes half-active. Phase 8 does the
+> wiring AND the live proof together:
+>
+> Remaining wiring (code, unit-testable):
+> 1. Thread a `capabilities.VisionService` into `toolstack.CapDeps` and set it
+>    on `capabilities.Services.Vision` in `toolstack.InstallCapabilities`
+>    (`internal/toolstack/toolstack.go` is the single host+worker seam).
+> 2. Construct the live service at the host and worker call sites:
+>    `visioninspect.NewCaching(visioninspect.NewLocus(localInspector, cloudInspector, modeFn))`,
+>    where each side is `visioninspect.New(store, resolver)` — `store` is one
+>    shared `visionattach.Store`, the local resolver yields the open provider +
+>    `openModels.VisionModel()`, the cloud resolver yields the cloud provider +
+>    cloud vision model, and `modeFn` reads `locus.ParseMode(cfg.LocusMode)`.
+> 3. Call `agent.RewriteImagesToPlaceholders(store, convID, msgs)` in the live
+>    request path (the image→`llm.BlockImage` seam identified in Phase 1) so the
+>    reasoning model gets placeholders and the store is populated, guarded so it
+>    is a no-op when no vision service is configured (nil store).
+>
+> Live proof (requires running agent + a real vision GGUF + mmproj, per below).
+
 - [ ] Select and add/download one lightweight vision model if none is already
       configured for the `vision` tier. Candidate families:
       - Gemma-3-4B vision GGUF + mmproj;

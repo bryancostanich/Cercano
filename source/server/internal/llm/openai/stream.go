@@ -11,16 +11,38 @@ import (
 	"cercano/source/server/internal/llm"
 )
 
-// traceStream, when CERCANO_TRACE_OPENAI_STREAM=1, logs the raw per-fragment
-// tool-call shape (index / id / name / args) each provider chunk carries. This
-// is the ground-truth observation hook for diagnosing how a given
-// OpenAI-compatible server (e.g. llama-server serving GLM-4.5-Air) splits a
-// tool call across streaming fragments — the exact data the deferred-name logic
-// above must tolerate. Off by default; zero cost when unset.
-var traceStream = os.Getenv("CERCANO_TRACE_OPENAI_STREAM") == "1"
+// traceStreamEnabled reports whether raw per-fragment tool-call tracing is on.
+// It fires the trace when EITHER CERCANO_TRACE_OPENAI_STREAM=1 is in the
+// process env OR the sentinel file ~/.cercano/trace-openai-stream exists. The
+// sentinel path exists because the server is a long-lived singleton spawned by
+// the CLI: injecting a new env var requires respawning the whole process tree
+// with that var already exported, which is easy to get wrong. Dropping a file
+// is inheritance-proof — any already-running server picks it up on its next
+// stream without a restart. The result is cached once per process for the env
+// case; the sentinel is checked live so it can be toggled on a running server.
+var traceStreamEnv = os.Getenv("CERCANO_TRACE_OPENAI_STREAM") == "1"
 
+func traceStreamEnabled() bool {
+	if traceStreamEnv {
+		return true
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	if _, err := os.Stat(home + "/.cercano/trace-openai-stream"); err == nil {
+		return true
+	}
+	return false
+}
+
+// traceToolFragment logs the raw per-fragment tool-call shape (index / id /
+// name / args) each provider chunk carries — the ground-truth observation hook
+// for diagnosing how an OpenAI-compatible server (e.g. llama-server serving
+// GLM-4.5-Air) splits a tool call across streaming fragments, i.e. exactly the
+// data the deferred-name logic above must tolerate.
 func traceToolFragment(tc goopenai.ToolCall) {
-	if !traceStream {
+	if !traceStreamEnabled() {
 		return
 	}
 	idx := -1

@@ -118,6 +118,118 @@ func TestStreamChat_ToolDeltaEvents(t *testing.T) {
 	}
 }
 
+// collectToolTurn drains a stream reader and returns the reassembled tool-use
+// turn (name, id, args) plus whether Start/Stop framing was seen. Shared by the
+// deferred-name regression tests.
+func collectToolTurn(t *testing.T, rd llm.StreamReader) (name, id, args string, sawStart, sawStop bool) {
+	t.Helper()
+	for {
+		ev, ok, err := rd.Next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			break
+		}
+		switch ev.Type {
+		case llm.EventToolUseStart:
+			sawStart = true
+			name = ev.ToolName
+			id = ev.ToolUseID
+		case llm.EventToolUseInputDelta:
+			args += ev.TextDelta
+		case llm.EventToolUseStop:
+			sawStop = true
+		}
+	}
+	return
+}
+
+// TestStreamChat_ToolNameArrivesLate reproduces the GLM-4.5-Air (via
+// llama-server) streaming shape that made every delegated sub-agent run report
+// called=[]: the tool-call index opens with an EMPTY name (and partial args),
+// and the function name arrives in a LATER fragment for the same index. The old
+// reader captured ToolName only on first sight of the index, so the name was
+// permanently lost (empty ToolName → invisible to calledToolNames). The reader
+// must now defer EventToolUseStart until the name is known and still reassemble
+// the full argument JSON in order.
+func TestStreamChat_ToolNameArrivesLate(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sse(w,
+			// chunk 1: index opens with id + FIRST arg fragment, NO name yet.
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c9","type":"function","function":{"arguments":"{\"p\":"}}]}}]}`,
+			// chunk 2: the name arrives now, on a later fragment for the same index.
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"read"}}]}}]}`,
+			// chunk 3: rest of the arguments.
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"x\"}"}}]}}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":3,"completion_tokens":5}}`,
+			`[DONE]`,
+		)
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "glm"})
+	rd, err := c.StreamChat(context.Background(), llm.ChatRequest{
+		Messages: []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "go"}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rd.Close()
+
+	name, id, args, sawStart, sawStop := collectToolTurn(t, rd)
+	if !sawStart {
+		t.Fatal("expected EventToolUseStart even though the name arrived late")
+	}
+	if name != "read" {
+		t.Fatalf("toolName: got %q, want %q (late-arriving name was dropped)", name, "read")
+	}
+	if id != "c9" {
+		t.Fatalf("toolID: got %q, want %q", id, "c9")
+	}
+	if args != `{"p":"x"}` {
+		t.Fatalf("toolArgs (reassembled across the pre-name and post-name fragments): got %q, want %q", args, `{"p":"x"}`)
+	}
+	if !sawStop {
+		t.Fatal("expected EventToolUseStop")
+	}
+}
+
+// TestStreamChat_ToolNameOnFinalFragment covers the variant where the name only
+// appears on the very last tool fragment before finish — the reader must flush
+// the deferred Start at EOF rather than drop the call.
+func TestStreamChat_ToolNameOnFinalFragment(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sse(w,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"arguments":"{}"}}]}}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"list_dir"}}]}}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":2}}`,
+			`[DONE]`,
+		)
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "glm"})
+	rd, err := c.StreamChat(context.Background(), llm.ChatRequest{
+		Messages: []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "go"}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rd.Close()
+
+	name, _, args, sawStart, sawStop := collectToolTurn(t, rd)
+	if !sawStart || name != "list_dir" {
+		t.Fatalf("expected Start with name list_dir, got start=%v name=%q", sawStart, name)
+	}
+	if args != `{}` {
+		t.Fatalf("args: got %q, want %q", args, `{}`)
+	}
+	if !sawStop {
+		t.Fatal("expected EventToolUseStop")
+	}
+}
+
 // TestStreamChat_SeparateUsageChunk verifies that the real OpenAI include_usage
 // shape — where finish_reason and usage arrive in SEPARATE chunks — still
 // produces the correct InputTokens/OutputTokens on EventMessageStop.

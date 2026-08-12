@@ -24,6 +24,24 @@ type streamReader struct {
 	// currently open tool-call index (nil = no open tool)
 	openToolIdx *int
 
+	// Tool-call name/id can arrive across fragments. Strict OpenAI streaming
+	// puts the full Function.Name on the first fragment for an index, but
+	// llama-server serving GLM-4.5-Air (and some other OpenAI-compatible
+	// servers) open the index with an empty name and stream the name — and
+	// sometimes the id — in a later fragment. Emitting EventToolUseStart on
+	// first sight captured ToolName="" permanently (collect.go seeds the block
+	// name once and never patches it), so every such call landed with an empty
+	// ToolName and was invisible to the tool loop.
+	//
+	// To tolerate that, we DEFER EventToolUseStart until the name is known:
+	// accumulate id/name/args for the open index here, emit Start the moment
+	// the name first becomes non-empty (replaying any buffered arg fragments),
+	// and flush at index-change / EOF.
+	openToolID      string
+	openToolName    string
+	openToolStarted bool          // EventToolUseStart already emitted for the open index
+	openToolArgs    strings.Builder // arg fragments buffered before Start was emitted
+
 	// captured from the final usage chunk
 	inputTokens  int
 	outputTokens int
@@ -76,11 +94,12 @@ func (r *streamReader) Next() (llm.StreamEvent, bool, error) {
 
 		chunk, err := r.stream.Recv()
 		if err == io.EOF {
-			// Flush any open tool call.
-			if r.openToolIdx != nil {
-				r.pending = append(r.pending, llm.StreamEvent{Type: llm.EventToolUseStop})
-				r.openToolIdx = nil
-			}
+			// Flush any open tool call. closeOpenTool emits a deferred Start
+			// (with whatever name/args were buffered) when the name arrived but
+			// the loop ended before another fragment triggered emission — the
+			// common GLM-4.5-Air case where the name lands on the final tool
+			// fragment.
+			r.closeOpenTool()
 			// Recover the answer from reasoning: if no real text streamed but we
 			// buffered reasoning_content, emit it now as a single visible text
 			// delta before EventMessageStop.
@@ -159,30 +178,92 @@ func (r *streamReader) Next() (llm.StreamEvent, bool, error) {
 				idx = *tc.Index
 			}
 
-			// Detect tool-index change: close previous, open new.
+			// Detect tool-index change: close the previous open tool (which may
+			// still be buffered if its name never arrived — closeOpenTool emits a
+			// best-effort Start in that case so args are not silently dropped),
+			// then begin the new one.
 			if r.openToolIdx == nil || *r.openToolIdx != idx {
-				if r.openToolIdx != nil {
-					r.pending = append(r.pending, llm.StreamEvent{Type: llm.EventToolUseStop})
-				}
+				r.closeOpenTool()
 				idxCopy := idx
 				r.openToolIdx = &idxCopy
+			}
+
+			// Accumulate id/name across fragments. Providers may send either on a
+			// fragment after the one that opened the index; keep the first
+			// non-empty value we see for each.
+			if tc.ID != "" && r.openToolID == "" {
+				r.openToolID = tc.ID
+			}
+			if tc.Function.Name != "" && r.openToolName == "" {
+				r.openToolName = tc.Function.Name
+			}
+
+			// Emit EventToolUseStart exactly once, as soon as the name is known.
+			// Any arg fragments that arrived before the name are buffered and
+			// replayed immediately after Start so ordering is preserved.
+			if !r.openToolStarted && r.openToolName != "" {
+				r.openToolStarted = true
 				r.pending = append(r.pending, llm.StreamEvent{
 					Type:      llm.EventToolUseStart,
-					ToolUseID: tc.ID,
-					ToolName:  tc.Function.Name,
+					ToolUseID: r.openToolID,
+					ToolName:  r.openToolName,
 				})
+				if r.openToolArgs.Len() > 0 {
+					r.pending = append(r.pending, llm.StreamEvent{
+						Type:      llm.EventToolUseInputDelta,
+						TextDelta: r.openToolArgs.String(),
+					})
+					r.openToolArgs.Reset()
+				}
 			}
 
 			// Argument JSON fragment goes into TextDelta (mirrors anthropic's
 			// input_json_delta → EventToolUseInputDelta{TextDelta: partialJSON}).
+			// If Start has not been emitted yet (name still pending), buffer the
+			// fragment rather than emit an input-delta for a not-yet-started tool.
 			if tc.Function.Arguments != "" {
-				r.pending = append(r.pending, llm.StreamEvent{
-					Type:      llm.EventToolUseInputDelta,
-					TextDelta: tc.Function.Arguments,
-				})
+				if r.openToolStarted {
+					r.pending = append(r.pending, llm.StreamEvent{
+						Type:      llm.EventToolUseInputDelta,
+						TextDelta: tc.Function.Arguments,
+					})
+				} else {
+					r.openToolArgs.WriteString(tc.Function.Arguments)
+				}
 			}
 		}
 	}
+}
+
+// closeOpenTool finalizes the currently-open tool call (if any). When the name
+// arrived normally, Start was already emitted and this just queues Stop. When
+// the name never arrived — a malformed stream — it still emits a best-effort
+// Start (empty name) plus buffered args so nothing is silently dropped, then
+// Stop; the downstream stream-guard/validation surfaces the empty name rather
+// than hiding the call entirely. Resets all open-tool state.
+func (r *streamReader) closeOpenTool() {
+	if r.openToolIdx == nil {
+		return
+	}
+	if !r.openToolStarted {
+		r.pending = append(r.pending, llm.StreamEvent{
+			Type:      llm.EventToolUseStart,
+			ToolUseID: r.openToolID,
+			ToolName:  r.openToolName,
+		})
+		if r.openToolArgs.Len() > 0 {
+			r.pending = append(r.pending, llm.StreamEvent{
+				Type:      llm.EventToolUseInputDelta,
+				TextDelta: r.openToolArgs.String(),
+			})
+		}
+	}
+	r.pending = append(r.pending, llm.StreamEvent{Type: llm.EventToolUseStop})
+	r.openToolIdx = nil
+	r.openToolID = ""
+	r.openToolName = ""
+	r.openToolStarted = false
+	r.openToolArgs.Reset()
 }
 
 func (r *streamReader) Close() error {

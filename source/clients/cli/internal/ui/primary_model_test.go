@@ -5,7 +5,7 @@ import "testing"
 func TestPrimaryModelName(t *testing.T) {
 	const (
 		open  = "qwen3-coder"
-		cloud = "claude-opus-4-8"
+		cloud = "claude-opus-5-0"
 	)
 	cases := []struct {
 		name            string
@@ -34,7 +34,7 @@ func TestPrimaryModelName(t *testing.T) {
 func TestPrimaryModelName_CloudSideFallsBackWhenNoOpen(t *testing.T) {
 	// cloud_only with cloud unconfigured and no local model: last-resort to the
 	// cloud name rather than returning empty (empty would blank the banner).
-	if got := primaryModelName("", "claude-opus-4-8", "cloud_only", false); got != "claude-opus-4-8" {
+	if got := primaryModelName("", "claude-opus-5-0", "cloud_only", false); got != "claude-opus-5-0" {
 		t.Errorf("want last-resort cloud name, got %q", got)
 	}
 }

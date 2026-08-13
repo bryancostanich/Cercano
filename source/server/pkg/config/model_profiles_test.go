@@ -6,7 +6,7 @@ func sampleProfiles() ModelProfiles {
 	return ModelProfiles{Cloud: CloudCostProfiles{Providers: map[string]VendorCostTiers{
 		"anthropic": {
 			Economy:  CostTierModel{Model: "claude-haiku-4-5"},
-			Standard: CostTierModel{Model: "claude-opus-4-8"},
+			Standard: CostTierModel{Model: "claude-opus-5-0"},
 			Premium:  CostTierModel{Model: "claude-fable-5"},
 		},
 		"openai": {
@@ -24,7 +24,7 @@ func TestResolveCloud(t *testing.T) {
 		ok     bool
 	}{
 		{"anthropic", CostEconomy, "claude-haiku-4-5", true},
-		{"anthropic", CostStandard, "claude-opus-4-8", true},
+		{"anthropic", CostStandard, "claude-opus-5-0", true},
 		{"anthropic", CostPremium, "claude-fable-5", true},
 		{"openai", CostStandard, "gpt-5.5", true},
 		{"openai", CostEconomy, "", false},  // slot unset
@@ -86,11 +86,11 @@ func TestInferProviderVendor(t *testing.T) {
 func TestResolveCloudModelForTier(t *testing.T) {
 	m := ModelProfiles{Cloud: CloudCostProfiles{Providers: map[string]VendorCostTiers{
 		"anthropic": {
-			Standard: CostTierModel{Model: "claude-opus-4-8"},
+			Standard: CostTierModel{Model: "claude-opus-5-0"},
 			Premium:  CostTierModel{Model: "claude-fable-5"},
 		},
 	}}}
-	anthro := CloudProfile{Provider: "anthropic", Model: "claude-opus-4-8", Flavor: "messages"}
+	anthro := CloudProfile{Provider: "anthropic", Model: "claude-opus-5-0", Flavor: "messages"}
 	openai := CloudProfile{Model: "gpt-5.5", Flavor: "responses"} // Provider empty -> inferred openai
 
 	cases := []struct {
@@ -100,8 +100,8 @@ func TestResolveCloudModelForTier(t *testing.T) {
 		want string
 	}{
 		{"table hit premium", anthro, TierMostCapable, "claude-fable-5"},
-		{"tier slot unset -> profile model", anthro, TierFastLight, "claude-opus-4-8"},
-		{"embedding has no cost tier -> profile model", anthro, TierEmbedding, "claude-opus-4-8"},
+		{"tier slot unset -> profile model", anthro, TierFastLight, "claude-opus-5-0"},
+		{"embedding has no cost tier -> profile model", anthro, TierEmbedding, "claude-opus-5-0"},
 		{"inferred openai vendor, not in table -> profile model", openai, TierEveryday, "gpt-5.5"},
 	}
 	for _, c := range cases {

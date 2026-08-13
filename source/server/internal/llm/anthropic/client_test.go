@@ -99,7 +99,7 @@ func TestClient_BuildParams_FloorsUnsetMaxTokens(t *testing.T) {
 	// forgets MaxTokens must get a usable budget, not silent empty text.
 	c := &Client{}
 	params := c.buildParams(ChatRequest{
-		Model: "claude-opus-4-8",
+		Model: "claude-opus-5-0",
 		Messages: []llm.Message{{
 			Role:   llm.RoleUser,
 			Blocks: []llm.Block{{Type: llm.BlockText, Text: "hi"}},
@@ -139,7 +139,7 @@ func TestClient_Chat_RetriesWithoutDeprecatedTemperature(t *testing.T) {
 	c := NewClient(Config{BaseURL: srv.URL, APIKey: "dummy", Model: "claude"})
 	zero := 0.0
 	req := ChatRequest{
-		Model: "claude-opus-4-8", MaxTokens: 10, Temperature: &zero,
+		Model: "claude-opus-5-0", MaxTokens: 10, Temperature: &zero,
 		Messages: []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "hi"}}}},
 	}
 

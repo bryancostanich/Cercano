@@ -498,18 +498,18 @@ func TestUpdateConfig_CloudModel_UpdatesActiveProfile(t *testing.T) {
 	defer unsub()
 
 	resp, err := s.UpdateConfig(t.Context(), &proto.UpdateConfigRequest{
-		CloudModel: "claude-opus-4-8",
+		CloudModel: "claude-opus-5-0",
 	})
 	if err != nil || !resp.Success {
 		t.Fatalf("UpdateConfig: err=%v resp=%+v", err, resp)
 	}
 
-	if got := s.activeCloudModel(); got != "claude-opus-4-8" {
-		t.Errorf("activeCloudModel() = %q, want claude-opus-4-8", got)
+	if got := s.activeCloudModel(); got != "claude-opus-5-0" {
+		t.Errorf("activeCloudModel() = %q, want claude-opus-5-0", got)
 	}
 	p, ok := s.activeProfile()
-	if !ok || p.Model != "claude-opus-4-8" {
-		t.Errorf("active profile model = %q (ok=%v), want claude-opus-4-8", p.Model, ok)
+	if !ok || p.Model != "claude-opus-5-0" {
+		t.Errorf("active profile model = %q (ok=%v), want claude-opus-5-0", p.Model, ok)
 	}
 
 	select {

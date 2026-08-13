@@ -734,9 +734,9 @@ func TestCollapseLegacySubscriptionAliasesKeepsCanonicalProfile(t *testing.T) {
 	cfg := &Config{
 		CloudProfiles: []CloudProfile{
 			{Name: "default", Flavor: "messages", Route: "subscription", Model: "claude-fable-5"},
-			{Name: "anthropic", Flavor: "messages", Route: "subscription", Model: "claude-opus-4-8"},
+			{Name: "anthropic", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0"},
 			{Name: "openai-responses", Flavor: "responses", Route: "chatgpt", Model: "gpt-5.5"},
-			{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-4-8"},
+			{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0"},
 		},
 		ActiveCloudProfile: "anthropic",
 		BackupCloudProfile: "default",
@@ -770,8 +770,8 @@ func TestCollapseLegacySubscriptionAliasesKeepsCanonicalProfile(t *testing.T) {
 
 func TestCollapseLegacySubscriptionAliasesPreservesDirectProfile(t *testing.T) {
 	cfg := &Config{CloudProfiles: []CloudProfile{
-		{Name: "anthropic", Flavor: "messages", Route: "", Model: "claude-opus-4-8"},
-		{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-4-8"},
+		{Name: "anthropic", Flavor: "messages", Route: "", Model: "claude-opus-5-0"},
+		{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0"},
 	}}
 
 	collapseLegacySubscriptionAliases(cfg)
@@ -792,11 +792,11 @@ func TestLoadCollapsesLegacySubscriptionAliases(t *testing.T) {
   - name: anthropic
     flavor: messages
     route: subscription
-    model: claude-opus-4-8
+    model: claude-opus-5-0
   - name: claude
     flavor: messages
     route: subscription
-    model: claude-opus-4-8
+    model: claude-opus-5-0
   - name: openai-responses
     flavor: responses
     route: chatgpt
@@ -825,8 +825,8 @@ backup_cloud_profile: default
 
 func TestCollapseLegacySubscriptionAliasesRemovesMeridianAlias(t *testing.T) {
 	cfg := &Config{CloudProfiles: []CloudProfile{
-		{Name: "meridian", Flavor: "messages", Route: "subscription", Model: "claude-opus-4-8"},
-		{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-4-8"},
+		{Name: "meridian", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0"},
+		{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0"},
 	}}
 
 	collapseLegacySubscriptionAliases(cfg)

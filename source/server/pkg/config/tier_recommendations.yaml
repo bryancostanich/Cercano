@@ -8,8 +8,8 @@ version: 1
 
 cloud:
   anthropic:
-    most_capable: [claude-fable-5, claude-opus-4-8]
-    everyday: [claude-opus-4-8]
+    most_capable: [claude-fable-5, claude-opus-5-0]
+    everyday: [claude-opus-5-0]
     fast_light: [claude-haiku-4-5]
     fast_light_text: [claude-haiku-4-5]
   openai:

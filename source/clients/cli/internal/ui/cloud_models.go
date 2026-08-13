@@ -17,7 +17,7 @@ import (
 func fallbackClaudeModels() []agentclient.CloudModelInfo {
 	return []agentclient.CloudModelInfo{
 		{ID: "claude-fable-5", DisplayName: "Claude Fable 5 (most capable)"},
-		{ID: "claude-opus-4-8", DisplayName: "Claude Opus 4.8 (latest)"},
+		{ID: "claude-opus-5-0", DisplayName: "Claude Opus 5.0 (latest)"},
 		{ID: "claude-opus-4-7", DisplayName: "Claude Opus 4.7"},
 		{ID: "claude-sonnet-4-6", DisplayName: "Claude Sonnet 4.6 (balanced)"},
 		{ID: "claude-sonnet-4-5", DisplayName: "Claude Sonnet 4.5"},

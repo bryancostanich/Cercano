@@ -1344,7 +1344,7 @@ message RemoveCloudProfileResponse { bool ok = 1; string error = 2; }
 
 message CloudModelInfo {
   string id           = 1; // canonical model id used in API requests
-  string display_name = 2; // human-friendly label ("Claude Opus 4.8"); may equal id
+  string display_name = 2; // human-friendly label ("Claude Opus 5.0"); may equal id
 }
 message ListCloudProfileModelsRequest  { string profile_name = 1; }
 message ListCloudProfileModelsResponse {

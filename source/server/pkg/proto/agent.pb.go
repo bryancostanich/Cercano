@@ -10809,7 +10809,7 @@ func (x *RemoveCloudProfileResponse) GetError() string {
 type CloudModelInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                                      // canonical model id used in API requests
-	DisplayName   string                 `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"` // human-friendly label ("Claude Opus 4.8"); may equal id
+	DisplayName   string                 `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"` // human-friendly label ("Claude Opus 5.0"); may equal id
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

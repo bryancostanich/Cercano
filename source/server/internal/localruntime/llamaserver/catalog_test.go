@@ -210,6 +210,9 @@ func TestCatalog_QwenVisionEntry(t *testing.T) {
 	if qwen.SupportsTools {
 		t.Fatal("vision inspector model should not be treated as an agent tool-calling model")
 	}
+	if len(qwen.ExtraArgs) != 1 || qwen.ExtraArgs[0] != "--jinja" {
+		t.Fatalf("qwen vision model must launch with --jinja for typed image content, got %v", qwen.ExtraArgs)
+	}
 	urls := qwen.DownloadURLs()
 	want := []string{
 		"https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",

@@ -106,7 +106,8 @@
       "supports_embed": false,
       "supports_vision": true,
       "plain_chat_ok": true,
-      "status": "untested"
+      "status": "untested",
+      "extra_args": ["--jinja"]
     },
     "phi-4-mini-instruct-q4_k_m": {
       "id": "phi-4-mini-instruct-q4_k_m",

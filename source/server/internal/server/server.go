@@ -1716,6 +1716,7 @@ func (s *Server) effectiveOpenTierSlots() map[string]string {
 		config.TierEveryday,
 		config.TierFastLight,
 		config.TierFastLightText,
+		config.TierVision,
 		config.TierEmbedding,
 	} {
 		if id := effectiveOpenModelFor(cfgForResolve, t); id != "" {

@@ -96,6 +96,21 @@ func TestUpdateConfig_ModelTier(t *testing.T) {
 	}
 }
 
+func TestGetConfig_ModelTiersIncludesVision(t *testing.T) {
+	s, _ := newTestServer()
+	s.cfgSvc.Mutate(func(c *config.Config) {
+		c.Models.SetOverride(c.OpenRuntime, config.TierVision, "qwen2.5-vl-3b-instruct-q4_k_m")
+	})
+
+	gc, err := s.GetConfig(t.Context(), &proto.GetConfigRequest{})
+	if err != nil {
+		t.Fatalf("GetConfig: %v", err)
+	}
+	if gc.ModelTiers["llama_server.vision"] != "llama_server:catalog:qwen2.5-vl-3b-instruct-q4_k_m" {
+		t.Fatalf("GetConfig.ModelTiers = %v", gc.ModelTiers)
+	}
+}
+
 func TestUpdateConfig_ModelTierInvalid(t *testing.T) {
 	s, _ := newTestServer()
 

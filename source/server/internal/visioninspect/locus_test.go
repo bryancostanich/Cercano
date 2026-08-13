@@ -63,6 +63,16 @@ func TestLocus_CloudOnlySkipsLocal(t *testing.T) {
 	cloud := visionFrom("cloud:gpt", true)
 	l := NewLocus(local, cloud, modeFn(locus.CloudOnly))
 
+	if !l.Lookup("c1", "img_1") {
+		t.Fatal("cloud_only should resolve image presence through cloud side")
+	}
+	if local.lookups != 0 {
+		t.Fatalf("cloud_only lookup must not touch local vision, got %d", local.lookups)
+	}
+	if cloud.lookups != 1 {
+		t.Fatalf("cloud lookup should run once, got %d", cloud.lookups)
+	}
+
 	ans, err := l.Inspect(context.Background(), "c1", "img_1", "q?")
 	if err != nil {
 		t.Fatal(err)

@@ -16,10 +16,12 @@ type countingVision struct {
 	answer    capabilities.VisionAnswer
 	err       error
 	calls     int
+	lookups   int
 }
 
 func (c *countingVision) Available() bool { return c.available }
 func (c *countingVision) Lookup(convID, imageID string) bool {
+	c.lookups++
 	return c.present[convID+"|"+imageID]
 }
 func (c *countingVision) Inspect(_ context.Context, _, _, _ string) (capabilities.VisionAnswer, error) {

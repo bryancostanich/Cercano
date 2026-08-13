@@ -162,6 +162,69 @@ func TestCatalog_EmbeddingTierEmbeds(t *testing.T) {
 	}
 }
 
+// TestCatalog_ProfiledVisionTierIsValid guards the optional vision tier. It is
+// intentionally not in requiredTiers, but once a profile advertises it the entry
+// must be a real vision-capable model with an explicit projector file. Vision
+// models are leaf inspectors, so tool support is not required here.
+func TestCatalog_ProfiledVisionTierIsValid(t *testing.T) {
+	cat, err := loadCatalog()
+	if err != nil {
+		t.Fatalf("loadCatalog: %v", err)
+	}
+	for name, prof := range cat.Profiles {
+		id, ok := prof["vision"]
+		if !ok || id == "" {
+			t.Fatalf("profile %q missing optional-but-shipped vision tier", name)
+		}
+		m, ok := cat.Models[id]
+		if !ok {
+			t.Fatalf("profile %q vision model %q is not in catalog", name, id)
+		}
+		if !m.SupportsVision {
+			t.Errorf("profile %q vision model %q does not advertise supports_vision", name, id)
+		}
+		if m.MmprojFile == "" {
+			t.Errorf("profile %q vision model %q has no mmproj_file", name, id)
+		}
+		if m.SupportsEmbed {
+			t.Errorf("profile %q vision model %q should not be an embedding model", name, id)
+		}
+	}
+}
+
+func TestCatalog_QwenVisionEntry(t *testing.T) {
+	cat, err := loadCatalog()
+	if err != nil {
+		t.Fatalf("loadCatalog: %v", err)
+	}
+	qwen, ok := cat.Models["qwen2.5-vl-3b-instruct-q4_k_m"]
+	if !ok {
+		t.Fatal("expected qwen2.5-vl-3b-instruct-q4_k_m in catalog")
+	}
+	if qwen.Repo != "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF" {
+		t.Fatalf("repo = %q", qwen.Repo)
+	}
+	if !qwen.SupportsVision || qwen.MmprojFile != "mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf" {
+		t.Fatalf("vision fields = supports:%v mmproj:%q", qwen.SupportsVision, qwen.MmprojFile)
+	}
+	if qwen.SupportsTools {
+		t.Fatal("vision inspector model should not be treated as an agent tool-calling model")
+	}
+	urls := qwen.DownloadURLs()
+	want := []string{
+		"https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
+		"https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main/mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf",
+	}
+	if len(urls) != len(want) {
+		t.Fatalf("download URL count = %d, want %d (%v)", len(urls), len(want), urls)
+	}
+	for i := range want {
+		if urls[i] != want[i] {
+			t.Fatalf("url[%d] = %q, want %q", i, urls[i], want[i])
+		}
+	}
+}
+
 // TestProfileForRAM checks the "largest profile at or below the machine's RAM"
 // selection, including the below-smallest floor and the above-largest cap.
 func TestProfileForRAM(t *testing.T) {
@@ -236,6 +299,10 @@ func TestRecommendedOpenModels(t *testing.T) {
 		if !strings.HasPrefix(got[tier], "llama_server:catalog:") {
 			t.Errorf("tier %q: id %q lacks the inventory prefix", tier, got[tier])
 		}
+	}
+	wantVision := runtimeName + ":catalog:qwen2.5-vl-3b-instruct-q4_k_m"
+	if got["vision"] != wantVision {
+		t.Fatalf("vision recommendation = %q, want %q", got["vision"], wantVision)
 	}
 }
 

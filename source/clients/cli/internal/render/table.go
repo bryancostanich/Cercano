@@ -58,6 +58,28 @@ func (t Table) Render(maxWidth int, styles theme.Styles) string {
 	return renderTransposed(t.Cols, t.Rows, maxWidth, styles)
 }
 
+// RenderMarkdown preserves Table's custom responsive geometry while rendering
+// each header and cell through the Markdown renderer. The table still decides
+// grid-vs-transpose, wrapping, padding, and borders; Markdown only supplies the
+// styled inline/block content inside each cell.
+func (t Table) RenderMarkdown(maxWidth int, styles theme.Styles, md *Markdown) string {
+	if md == nil {
+		return t.Render(maxWidth, styles)
+	}
+	if len(t.Cols) == 0 || len(t.Rows) == 0 {
+		return styles.Muted.Render("(empty table)")
+	}
+
+	widths := computeMarkdownColWidths(t.Cols, t.Rows, md)
+	if totalGridWidth(widths) <= maxWidth {
+		return renderMarkdownGrid(t.Cols, widths, t.Rows, styles, md)
+	}
+	if shrinkWrappable(t.Cols, widths, maxWidth) && totalGridWidth(widths) <= maxWidth {
+		return renderMarkdownGrid(t.Cols, widths, t.Rows, styles, md)
+	}
+	return renderMarkdownTransposed(t.Cols, t.Rows, maxWidth, styles, md)
+}
+
 // totalGridWidth = sum of widths + 1 left border + 1 right border + (cols-1) inner separators + 2 padding per col.
 func totalGridWidth(widths []int) int {
 	if len(widths) == 0 {
@@ -78,6 +100,22 @@ func computeColWidths(cols []Column, rows []map[string]string) []int {
 	for _, r := range rows {
 		for i, c := range cols {
 			cw := lipgloss.Width(r[c.Name])
+			if cw > w[i] {
+				w[i] = cw
+			}
+		}
+	}
+	return w
+}
+
+func computeMarkdownColWidths(cols []Column, rows []map[string]string, md *Markdown) []int {
+	w := make([]int, len(cols))
+	for i, c := range cols {
+		w[i] = maxRenderedLineWidth(renderTableMarkdown(c.Name, 512, md))
+	}
+	for _, r := range rows {
+		for i, c := range cols {
+			cw := maxRenderedLineWidth(renderTableMarkdown(r[c.Name], 512, md))
 			if cw > w[i] {
 				w[i] = cw
 			}
@@ -260,6 +298,106 @@ func renderTransposed(cols []Column, rows []map[string]string, maxWidth int, sty
 	return strings.TrimRight(b.String(), "\n")
 }
 
+func renderMarkdownGrid(cols []Column, widths []int, rows []map[string]string, styles theme.Styles, md *Markdown) string {
+	var b strings.Builder
+
+	b.WriteString(styles.Border.Render(borderRow("┌", "┬", "┐", "─", widths)))
+	b.WriteString("\n")
+
+	headerLines := make([][]string, len(cols))
+	headerH := 1
+	for i, c := range cols {
+		headerLines[i] = markdownCellLines(c.Name, widths[i], md)
+		if len(headerLines[i]) > headerH {
+			headerH = len(headerLines[i])
+		}
+	}
+	for k := 0; k < headerH; k++ {
+		b.WriteString(styles.Border.Render("│"))
+		for i := range cols {
+			cell := ""
+			if k < len(headerLines[i]) {
+				cell = headerLines[i][k]
+			}
+			b.WriteString(" ")
+			b.WriteString(padCell(cell, widths[i]))
+			b.WriteString(" ")
+			b.WriteString(styles.Border.Render("│"))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString(styles.Border.Render(borderRow("├", "┼", "┤", "─", widths)))
+	b.WriteString("\n")
+
+	for rowIdx, r := range rows {
+		cellLines := make([][]string, len(cols))
+		rowH := 1
+		for i, c := range cols {
+			cellLines[i] = markdownCellLines(r[c.Name], widths[i], md)
+			if len(cellLines[i]) > rowH {
+				rowH = len(cellLines[i])
+			}
+		}
+		for k := 0; k < rowH; k++ {
+			b.WriteString(styles.Border.Render("│"))
+			for i := range cols {
+				cell := ""
+				if k < len(cellLines[i]) {
+					cell = cellLines[i][k]
+				}
+				b.WriteString(" ")
+				b.WriteString(padCell(cell, widths[i]))
+				b.WriteString(" ")
+				b.WriteString(styles.Border.Render("│"))
+			}
+			b.WriteString("\n")
+		}
+		if rowIdx < len(rows)-1 {
+			b.WriteString(styles.Border.Render(borderRow("├", "┼", "┤", "─", widths)))
+			b.WriteString("\n")
+		}
+	}
+
+	b.WriteString(styles.Border.Render(borderRow("└", "┴", "┘", "─", widths)))
+	return b.String()
+}
+
+func renderMarkdownTransposed(cols []Column, rows []map[string]string, maxWidth int, styles theme.Styles, md *Markdown) string {
+	var b strings.Builder
+	for i, r := range rows {
+		if i > 0 {
+			b.WriteString("\n")
+			b.WriteString(styles.Border.Render(strings.Repeat("─", min(maxWidth, 40))))
+			b.WriteString("\n")
+		}
+		for _, c := range cols {
+			label := styles.Accent.Render(c.Name + ":")
+			labelW := lipgloss.Width(c.Name) + 2
+			wrapAt := maxWidth - labelW
+			if wrapAt < 10 {
+				wrapAt = 10
+			}
+			val := renderTableMarkdown(r[c.Name], wrapAt, md)
+			b.WriteString(label)
+			if strings.TrimSpace(stripANSIForTable(val)) == "" {
+				b.WriteString("\n")
+				continue
+			}
+			if strings.Contains(val, "\n") || lipgloss.Width(label)+1+maxRenderedLineWidth(val) > maxWidth {
+				b.WriteString("\n")
+				b.WriteString(indentRenderedLines(val, 2))
+				b.WriteString("\n")
+			} else {
+				b.WriteString(" ")
+				b.WriteString(val)
+				b.WriteString("\n")
+			}
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 func borderRow(left, sep, right, fill string, widths []int) string {
 	var b strings.Builder
 	b.WriteString(left)
@@ -275,7 +413,7 @@ func borderRow(left, sep, right, fill string, widths []int) string {
 
 // padCell right-pads val with spaces so its visible width equals targetWidth.
 func padCell(val string, targetWidth int) string {
-	w := lipgloss.Width(val)
+	w := visibleTableWidth(val)
 	if w >= targetWidth {
 		return val
 	}
@@ -323,6 +461,117 @@ func wrapCell(s string, width int) []string {
 		return []string{""}
 	}
 	return lines
+}
+
+func markdownCellLines(s string, width int, md *Markdown) []string {
+	if width < 1 {
+		width = 1
+	}
+	rendered := renderTableMarkdown(s, width, md)
+	lines := strings.Split(rendered, "\n")
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	for i, line := range lines {
+		if visibleTableWidth(line) <= width {
+			continue
+		}
+		// Glamour should respect WithWordWrap(width), but keep table geometry safe
+		// if a long unbreakable rendered span still exceeds the cell.
+		wrappedPlain := wrapCell(stripANSIForTable(line), width)
+		replacement := make([]string, len(wrappedPlain))
+		copy(replacement, wrappedPlain)
+		lines = append(lines[:i], append(replacement, lines[i+1:]...)...)
+	}
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
+}
+
+func renderTableMarkdown(s string, width int, md *Markdown) string {
+	if md == nil {
+		return s
+	}
+	if width < 1 {
+		width = 1
+	}
+	// A trailing newline nudges Glamour/Goldmark to treat the fragment as a
+	// complete paragraph while Render trims Glamour's trailing newlines back off.
+	// Glamour can also pad rendered paragraphs out to the wrap width; trim that
+	// padding per line so cell width decisions reflect visible content, not the
+	// fragment renderer's fill spaces.
+	return trimRenderedLinePadding(strings.Trim(md.Render(s+"\n", width), "\n"))
+}
+
+func trimRenderedLinePadding(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " \t")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func maxRenderedLineWidth(s string) int {
+	max := 0
+	for _, line := range strings.Split(s, "\n") {
+		if w := visibleTableWidth(line); w > max {
+			max = w
+		}
+	}
+	return max
+}
+
+func visibleTableWidth(s string) int {
+	return lipgloss.Width(strings.TrimRight(stripANSIForTable(s), " \t"))
+}
+
+func indentRenderedLines(s string, n int) string {
+	pad := strings.Repeat(" ", n)
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if line == "" {
+			continue
+		}
+		lines[i] = pad + line
+	}
+	return strings.Join(lines, "\n")
+}
+
+func stripANSIForTable(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] == 0x1b && i+1 < len(s) {
+			switch s[i+1] {
+			case '[': // CSI: SGR colors, cursor/control sequences.
+				j := i + 2
+				for j < len(s) && (s[j] < 0x40 || s[j] > 0x7e) {
+					j++
+				}
+				if j < len(s) {
+					i = j + 1
+					continue
+				}
+			case ']': // OSC: Glamour emits OSC-8 hyperlinks for markdown links.
+				j := i + 2
+				for j < len(s) {
+					if s[j] == 0x07 { // BEL terminator
+						i = j + 1
+						goto stripped
+					}
+					if s[j] == 0x1b && j+1 < len(s) && s[j+1] == '\\' { // ST terminator
+						i = j + 2
+						goto stripped
+					}
+					j++
+				}
+			}
+		}
+		b.WriteByte(s[i])
+		i++
+	stripped:
+	}
+	return b.String()
 }
 
 // cutRunes splits s into a head of at most width runes and the remainder.

@@ -1382,7 +1382,7 @@ func (c *chatView) renderAssistantMarkdown(e *Entry, textW int) string {
 func (c *chatView) renderMdBlock(b render.MdBlock, textW int) string {
 	switch {
 	case b.Kind == render.MdTable && b.Table != nil:
-		return b.Table.Render(textW, c.styles)
+		return b.Table.RenderMarkdown(textW, c.styles, c.md)
 	case b.Kind == render.MdCode:
 		// Pin untyped fences to plaintext so chroma renders the body verbatim
 		// instead of guessing a language (a wrong guess paints spurious error

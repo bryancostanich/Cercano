@@ -350,3 +350,49 @@ func TestTable_LongFirstColumnGridsThenTransposes(t *testing.T) {
 		t.Errorf("transpose dropped data at width 40:\n%s", narrow)
 	}
 }
+
+func TestTable_RenderMarkdownGridRendersCellMarkdown(t *testing.T) {
+	tbl := Table{
+		Cols: []Column{{Name: "Model"}, {Name: "Format"}},
+		Rows: []map[string]string{{"Model": "**Qwen2.5-VL-3B**", "Format": "`GGUF` + [mmproj](https://example.com)"}},
+	}
+	md := NewMarkdown(theme.MarkdownStyle(theme.Cracker()))
+	out := tbl.RenderMarkdown(120, theme.NewStyles(theme.Cracker()), md)
+	plain := stripAnsi(out)
+	for _, bad := range []string{"**", "`GGUF`", "](https://example.com)"} {
+		if strings.Contains(plain, bad) {
+			t.Fatalf("expected table cells to render markdown, found raw marker %q in:\n%s", bad, plain)
+		}
+	}
+	for _, want := range []string{"Qwen2.5-VL-3B", "GGUF", "mmproj"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected rendered content %q in:\n%s", want, plain)
+		}
+	}
+	if !strings.Contains(plain, "┌") || !strings.Contains(plain, "┘") {
+		t.Fatalf("expected grid rendering, got:\n%s", plain)
+	}
+}
+
+func TestTable_RenderMarkdownTransposedRendersCellMarkdown(t *testing.T) {
+	tbl := Table{
+		Cols: []Column{{Name: "Model", Wrappable: true}, {Name: "Notes", Wrappable: true}},
+		Rows: []map[string]string{{"Model": "**Qwen2.5-VL-3B**", "Notes": "Best **OCR** with `mmproj` and [docs](https://example.com)"}},
+	}
+	md := NewMarkdown(theme.MarkdownStyle(theme.Cracker()))
+	out := tbl.RenderMarkdown(30, theme.NewStyles(theme.Cracker()), md)
+	plain := stripAnsi(out)
+	if strings.Contains(plain, "┌") {
+		t.Fatalf("expected transpose at narrow width, got grid:\n%s", plain)
+	}
+	for _, bad := range []string{"**", "`mmproj`", "](https://example.com)"} {
+		if strings.Contains(plain, bad) {
+			t.Fatalf("expected transposed cells to render markdown, found raw marker %q in:\n%s", bad, plain)
+		}
+	}
+	for _, want := range []string{"Model:", "Qwen2.5-VL-3B", "Notes:", "OCR", "mmproj", "docs"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected rendered content %q in:\n%s", want, plain)
+		}
+	}
+}

@@ -7,6 +7,8 @@ package render
 
 import (
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 
@@ -507,9 +509,23 @@ func renderTableMarkdown(s string, width int, md *Markdown) string {
 func trimRenderedLinePadding(s string) string {
 	lines := strings.Split(s, "\n")
 	for i, line := range lines {
-		lines[i] = strings.TrimRight(line, " \t")
+		lines[i] = trimTrailingVisibleSpace(line)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func trimTrailingVisibleSpace(s string) string {
+	end := len(s)
+	for {
+		i, r, ok := lastVisibleRuneBefore(s, end)
+		if !ok {
+			return ""
+		}
+		if !unicode.IsSpace(r) {
+			return s[:end]
+		}
+		end = i
+	}
 }
 
 func maxRenderedLineWidth(s string) int {
@@ -541,37 +557,64 @@ func indentRenderedLines(s string, n int) string {
 func stripANSIForTable(s string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); {
-		if s[i] == 0x1b && i+1 < len(s) {
-			switch s[i+1] {
-			case '[': // CSI: SGR colors, cursor/control sequences.
-				j := i + 2
-				for j < len(s) && (s[j] < 0x40 || s[j] > 0x7e) {
-					j++
-				}
-				if j < len(s) {
-					i = j + 1
-					continue
-				}
-			case ']': // OSC: Glamour emits OSC-8 hyperlinks for markdown links.
-				j := i + 2
-				for j < len(s) {
-					if s[j] == 0x07 { // BEL terminator
-						i = j + 1
-						goto stripped
-					}
-					if s[j] == 0x1b && j+1 < len(s) && s[j+1] == '\\' { // ST terminator
-						i = j + 2
-						goto stripped
-					}
-					j++
-				}
-			}
+		if j, ok := skipTerminalControl(s, i); ok {
+			i = j
+			continue
 		}
 		b.WriteByte(s[i])
 		i++
-	stripped:
 	}
 	return b.String()
+}
+
+func lastVisibleRuneBefore(s string, end int) (int, rune, bool) {
+	lastI := -1
+	var lastR rune
+	for i := 0; i < end; {
+		if j, ok := skipTerminalControl(s[:end], i); ok {
+			i = j
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s[i:end])
+		if r == utf8.RuneError && size == 0 {
+			break
+		}
+		lastI = i
+		lastR = r
+		i += size
+	}
+	if lastI < 0 {
+		return 0, 0, false
+	}
+	return lastI, lastR, true
+}
+
+func skipTerminalControl(s string, i int) (int, bool) {
+	if i+1 >= len(s) || s[i] != 0x1b {
+		return i, false
+	}
+	switch s[i+1] {
+	case '[': // CSI: SGR colors, cursor/control sequences.
+		j := i + 2
+		for j < len(s) && (s[j] < 0x40 || s[j] > 0x7e) {
+			j++
+		}
+		if j < len(s) {
+			return j + 1, true
+		}
+	case ']': // OSC: Glamour emits OSC-8 hyperlinks for markdown links.
+		j := i + 2
+		for j < len(s) {
+			if s[j] == 0x07 { // BEL terminator
+				return j + 1, true
+			}
+			if s[j] == 0x1b && j+1 < len(s) && s[j+1] == '\\' { // ST terminator
+				return j + 2, true
+			}
+			j++
+		}
+	}
+	return i, false
 }
 
 // cutRunes splits s into a head of at most width runes and the remainder.

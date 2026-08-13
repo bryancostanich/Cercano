@@ -374,6 +374,37 @@ func TestTable_RenderMarkdownGridRendersCellMarkdown(t *testing.T) {
 	}
 }
 
+func TestTable_RenderMarkdownGridKeepsBordersAlignedAfterFormatting(t *testing.T) {
+	tbl := Table{
+		Cols: []Column{{Name: "Model", Wrappable: true}, {Name: "Format", Wrappable: true}, {Name: "Size", Wrappable: true}, {Name: "Notes", Wrappable: true}},
+		Rows: []map[string]string{
+			{"Model": "**Qwen2.5-VL-3B**", "Format": "`GGUF` + `mmproj`", "Size": "**~2.8 GB**", "Notes": "Best **OCR** and UI/screenshot reading balance; see [ggml-org](https://huggingface.co/ggml-org)."},
+			{"Model": "**SmolVLM2-2.2B**", "Format": "`Q4_K_M.gguf` + `Q8_0.mmproj`", "Size": "**~1.7 GB**", "Notes": "Fastest option; good for a quick `inspect_image` smoke test."},
+			{"Model": "**Gemma-3-4B**", "Format": "`gemma3` vision bundle", "Size": "**~3.3 GB**", "Notes": "Solid *general vision* model with decent reasoning for screenshots."},
+		},
+	}
+	md := NewMarkdown(theme.MarkdownStyle(theme.Cracker()))
+	out := tbl.RenderMarkdown(120, theme.NewStyles(theme.Cracker()), md)
+	plain := stripANSIForTable(out)
+	lines := strings.Split(plain, "\n")
+	wantW := -1
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		w := lipgloss.Width(line)
+		if wantW < 0 {
+			wantW = w
+		}
+		if w != wantW {
+			t.Fatalf("expected every rendered grid line to have width %d, got %d for %q in:\n%s", wantW, w, line, plain)
+		}
+		if w > 120 {
+			t.Fatalf("line exceeds render budget: width=%d line=%q", w, line)
+		}
+	}
+}
+
 func TestTable_RenderMarkdownTransposedRendersCellMarkdown(t *testing.T) {
 	tbl := Table{
 		Cols: []Column{{Name: "Model", Wrappable: true}, {Name: "Notes", Wrappable: true}},

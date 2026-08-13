@@ -23,6 +23,7 @@ import (
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/broker"
+	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/catalog"
 	"cercano/source/server/internal/cloudfactory"
 	"cercano/source/server/internal/compaction"
@@ -56,6 +57,7 @@ import (
 	"cercano/source/server/internal/sysram"
 	"cercano/source/server/internal/toolstack"
 	"cercano/source/server/internal/usage"
+	"cercano/source/server/internal/visionattach"
 	"cercano/source/server/internal/watchdog"
 	"cercano/source/server/internal/worker"
 	"cercano/source/server/pkg/config"
@@ -91,9 +93,18 @@ type Server struct {
 	catalogRegistry *catalog.Registry
 	cfgSvc          cfgsvc.Service       // owns configPath, currentConfig, cfgMu, secrets
 	openModels      *openmodels.Resolver // single effective-open-model resolver (override ⊕ catalog)
-	toolSvc         toolssvc.Catalog     // owns toolRegistry, capRegistry, dispatchEngine
-	persistSvc      persistsvc.Service   // owns retentionSweeper, compactionGen, contextLoader
-	permBroker      permissions.Broker
+	// visionStore is the shared per-conversation image attachment store backing
+	// vision-as-tool. The SAME instance is handed to the runner (which rewrites
+	// image blocks to placeholders and registers them here) and to the
+	// inspect_image VisionService (which looks them up), so the rewrite and the
+	// lookup agree. Built once in NewServer. Non-persistent (V1): empty on
+	// restart, so a resumed conversation's image IDs resolve to a clear reattach
+	// message rather than crashing.
+	visionStore   *visionattach.Store
+	visionService capabilities.VisionService // caching + locus-aware inspector over visionStore; backs inspect_image
+	toolSvc       toolssvc.Catalog           // owns toolRegistry, capRegistry, dispatchEngine
+	persistSvc    persistsvc.Service         // owns retentionSweeper, compactionGen, contextLoader
+	permBroker    permissions.Broker
 	// profileBroker owns the session's active capability profile — the read-only
 	// planning fence today, and future named modes (brainstorm, execute, …). It
 	// is orthogonal to permBroker (which owns the confirm-aggressiveness mode):
@@ -202,6 +213,11 @@ func (s *Server) InstallCapabilities() {
 			s.scheduleSelfShutdown()
 			return nil
 		},
+		// inspect_image resolves per-conversation images from the SAME store the
+		// runner registers placeholders into (see runnerDeps.VisionStore) and asks
+		// the vision model a focused question. nil when vision is unconfigured, in
+		// which case inspect_image reports vision unavailable.
+		Vision: s.visionService,
 	})
 }
 
@@ -754,6 +770,18 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 		profileBroker: agent.NewProfileBroker(),
 	}
 	s.providerSvc = providers.New(cfgService, openModelsResolver, router, coordinator, cloudFactory, registry, nil)
+	// Build the shared vision-as-tool store and service. Local/open vision is
+	// tried first everywhere (a vision question stays local even under
+	// cloud_primary); cloud fallback is deliberately left unwired for now
+	// (CloudProvider nil) — the local path is proven end-to-end first, and a
+	// cloud vision model choice is a separate follow-up. The LocusInspector
+	// degrades cleanly with a nil cloud side. The store is threaded into the
+	// runner (rewrite) and the service into InstallCapabilities (lookup).
+	s.visionStore, s.visionService = toolstack.BuildVision(toolstack.VisionDeps{
+		OpenProvider:    func() inference.Provider { return s.providerSvc.Open() },
+		OpenVisionModel: openModelsResolver.VisionModel,
+		Mode:            func() locus.Mode { m, _ := locus.ParseMode(s.providerSvc.LocusMode()); return m },
+	})
 	// Construct the persistence service. It wraps the agent for store access;
 	// the agent itself is NOT owned by this service. The func-value collaborators
 	// read live state from providerSvc at call time.
@@ -810,6 +838,9 @@ func (s *Server) runnerDeps() runnersvc.Deps {
 		Config:    s.cfgSvc,
 		Perms:     s.permBroker,
 		Agent:     s.agent,
+		// Shared with the inspect_image VisionService (below): the runner
+		// registers image blocks here as placeholders; the tool looks them up.
+		VisionStore: s.visionStore,
 		// Live accessor: s.watchdog is wired by InitWatchdog and mutated by
 		// UpdateConfig AFTER this runner is built, so the runner reads it at
 		// turn time rather than capturing the (often still-nil) current value.

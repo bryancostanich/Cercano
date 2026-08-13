@@ -177,6 +177,16 @@ type ToolLoopInput struct {
 	// WorkDir is the turn's working directory. Threaded onto ctx so tools
 	// resolve relative paths against it — never via process cwd.
 	WorkDir string
+
+	// VisionStore, when non-nil, is the per-conversation image attachment store
+	// backing the vision-as-tool path. When set (and ConversationID is
+	// non-empty), the leading user turn's image blocks are rewritten to text
+	// placeholders and registered in the store under ConversationID, so the
+	// reasoning model never receives raw image bytes — it sees a placeholder and
+	// can call inspect_image to ask the vision model focused questions. Nil means
+	// vision-as-tool is not configured; image blocks pass through untouched and
+	// the provider capability gate still strips them for text-only backends.
+	VisionStore VisionAttachStore
 }
 
 type ToolLoopResult struct {
@@ -382,6 +392,13 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		Role:   llm.RoleUser,
 		Blocks: buildUserBlocks(in.UserInput, in.Images),
 	})
+
+	// Vision-as-tool: replace raw image blocks with text placeholders and
+	// register each image in the per-conversation store, so the reasoning model
+	// sees an inspect_image affordance instead of pixels. No-op when the store is
+	// nil (vision-as-tool unconfigured) or ConversationID is empty. Copy-on-write:
+	// leaves non-image history untouched.
+	hist = RewriteImagesToPlaceholders(in.VisionStore, in.ConversationID, hist)
 
 	// calledTools accumulates the tool names invoked across every iteration, in
 	// first-seen order, recorded from the raw BlockToolUse blocks before any

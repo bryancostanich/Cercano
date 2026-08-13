@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/capabilities"
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/hostsvc/permissions"
@@ -47,6 +48,7 @@ func buildWorkerToolSvc(
 	cfg pkgcfg.Config,
 	subPersist *streamSubagentPersist,
 	enterProfile func(context.Context, string) error,
+	vision capabilities.VisionService,
 ) runner.ToolSvc {
 	systemPrompt := func(workDir string) string {
 		// Sub-agents (Agentic dispatch) never run under a session capability
@@ -73,6 +75,7 @@ func buildWorkerToolSvc(
 			// host request, so the capability-supplied convID is redundant here.
 			return enterProfile(context.Background(), name)
 		},
+		Vision: vision,
 	})
 	return svc
 }

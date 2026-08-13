@@ -276,6 +276,22 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 		ModelFor:  workerDispatchModelFor(cfg),
 	})
 
+	// Build the shared vision-as-tool store + service, mirroring the host. Local
+	// vision is resolved from the config snapshot's vision-tier override; cloud
+	// fallback is left unwired (as on the host) until a cloud vision model is
+	// chosen. The store is per-process, so images added during this worker turn
+	// live only for the turn — which is exactly the scope inspect_image needs, as
+	// it runs within the same turn's tool loop. The SAME store instance is handed
+	// to buildWorkerToolSvc (lookup) and runner.Deps below (rewrite).
+	visionStore, visionSvc := toolstack.BuildVision(toolstack.VisionDeps{
+		OpenProvider: func() inference.Provider { return provSvc.Open() },
+		OpenVisionModel: func() (string, bool) {
+			id := openTierModel(cfg, pkgcfg.TierVision)
+			return id, id != ""
+		},
+		Mode: func() locus.Mode { m, _ := locus.ParseMode(cfg.LocusMode); return m },
+	})
+
 	// Build Tools. The test hook (w.toolsFactory) still wins when set; otherwise
 	// assemble the full capability/tool stack wired to the worker's engine.
 	var toolSvc runner.ToolSvc
@@ -286,7 +302,7 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 			return runner.Deps{}, fmt.Errorf("build tools: %w", err)
 		}
 	} else {
-		toolSvc = buildWorkerToolSvc(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile)
+		toolSvc = buildWorkerToolSvc(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile, visionSvc)
 	}
 
 	// Build the protocol-supervision watchdog from the snapshotted config
@@ -305,6 +321,9 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 		Perms:     permBroker,
 		Agent:     nil,
 		Watchdog:  func() *watchdog.Watchdog { return wd },
+		// Shared with the worker's inspect_image VisionService (built above): the
+		// runner registers image placeholders here; the tool looks them up.
+		VisionStore: visionStore,
 	}, nil
 }
 

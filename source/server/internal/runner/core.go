@@ -286,6 +286,7 @@ func (c *Core) runLoop(
 		System:              BuildSystemPrompt(c.d, req.WorkDir, profile),
 		WorkDir:             req.WorkDir,
 		ConversationID:      req.ConversationID,
+		VisionStore:         c.d.VisionStore,
 		EventSink:           loopSink,
 		PermissionRequester: requester,
 		ConvHistory:         convHistory,

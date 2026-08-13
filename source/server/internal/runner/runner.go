@@ -87,6 +87,17 @@ type Deps struct {
 	// func returning nil, = disabled.
 	Watchdog func() *watchdog.Watchdog
 
+	// VisionStore is the per-conversation image attachment store backing the
+	// vision-as-tool path. When non-nil, the tool loop rewrites the leading user
+	// turn's image blocks to text placeholders and registers them here, so the
+	// inspect_image tool (wired to a VisionService over this SAME store) can
+	// resolve them. Nil means vision-as-tool is not configured; image blocks pass
+	// through and the provider capability gate still strips them for text-only
+	// backends. The host and worker each construct one store and hand the SAME
+	// instance to both this field and the inspect_image VisionService, so the
+	// rewrite and the lookup agree.
+	VisionStore agent.VisionAttachStore
+
 	// Profiles is a LIVE accessor for a conversation's active capability profile
 	// (the read-only planning fence, and future modes). Like Watchdog it is read
 	// at turn time so the host can flip the active profile mid-session via the

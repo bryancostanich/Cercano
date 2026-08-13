@@ -324,18 +324,31 @@ Use a small vision model, not GLM-4.5V, for the target architecture.
 >    `Services().Vision` and stays nil when omitted. The two callers
 >    (`server.InstallCapabilities`, `worker_dispatch`) can now pass a live
 >    inspector without another toolstack change.
-> 2. Construct the live service at the host and worker call sites:
->    `visioninspect.NewCaching(visioninspect.NewLocus(localInspector, cloudInspector, modeFn))`,
->    where each side is `visioninspect.New(store, resolver)` — `store` is one
->    shared `visionattach.Store`, the local resolver yields the open provider +
->    `openModels.VisionModel()`, the cloud resolver yields the cloud provider +
->    cloud vision model, and `modeFn` reads `locus.ParseMode(cfg.LocusMode)`.
-> 3. Call `agent.RewriteImagesToPlaceholders(store, convID, msgs)` in the live
->    request path (the image→`llm.BlockImage` seam identified in Phase 1) so the
->    reasoning model gets placeholders and the store is populated, guarded so it
->    is a no-op when no vision service is configured (nil store).
+> 2. [DONE] Construct the live service at the host and worker call sites via a
+>    new shared `toolstack.BuildVision(VisionDeps)` helper, which returns one
+>    shared `*visionattach.Store` AND the assembled
+>    `NewCaching(NewLocus(local, cloud, modeFn))` service. Each side is
+>    `visioninspect.New(store, resolver)`; the local resolver yields the open
+>    provider + `openModels.VisionModel()` (host) / `openTierModel(cfg, TierVision)`
+>    (worker), `modeFn` reads `locus.ParseMode(cfg.LocusMode)`. Cloud vision is
+>    deliberately left unwired for now (nil) — the local path is proven end-to-end
+>    first and the LocusInspector degrades cleanly with a nil cloud side; a cloud
+>    vision model choice is a tracked follow-up. Built in `server.NewServer` and
+>    the worker's `buildRunnerDeps`; the store is threaded into `runner.Deps` and
+>    the service into `CapDeps.Vision`, so a rewrite and a later lookup share one
+>    store in both turn-execution environments.
+> 3. [DONE] Call `agent.RewriteImagesToPlaceholders(store, convID, msgs)` in the
+>    live request path via a new `ToolLoopInput.VisionStore` field, invoked right
+>    after the leading user turn is built in `agent.RunToolLoop`. The store is
+>    threaded from `runner.Deps.VisionStore` (both host and worker set it).
+>    No-op when the store is nil (vision unconfigured), so image blocks pass
+>    through and the provider capability gate still strips them for text-only
+>    backends. Proven by `TestRunToolLoop_RewritesImagesWhenVisionStoreSet` and
+>    `TestRunToolLoop_LeavesImagesWhenNoVisionStore`.
 >
-> Live proof (requires running agent + a real vision GGUF + mmproj, per below).
+> Wiring is COMPLETE and unit-tested (full source/server build, vet, gofmt, and
+> go test ./... green). What remains is the live proof: a real vision GGUF +
+> mmproj on a running llama-server, per below.
 
 - [ ] Select and add/download one lightweight vision model if none is already
       configured for the `vision` tier. Candidate families:

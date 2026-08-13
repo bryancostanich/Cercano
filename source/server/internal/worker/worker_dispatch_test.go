@@ -27,7 +27,7 @@ func TestBuildWorkerToolSvc_WiresDispatch(t *testing.T) {
 		ModelFor:  func(bool, pkgcfg.Tier) string { return "model" },
 	})
 
-	svc := buildWorkerToolSvc(nil, eng, ctxLoader, nil, nil, pkgcfg.Config{}, nil, func(context.Context, string) error { return nil })
+	svc := buildWorkerToolSvc(nil, eng, ctxLoader, nil, nil, pkgcfg.Config{}, nil, func(context.Context, string) error { return nil }, nil)
 
 	ts, ok := svc.(*toolssvc.Service)
 	if !ok {
@@ -55,7 +55,7 @@ func TestBuildWorkerToolSvc_WiresEnterProfile(t *testing.T) {
 	svc := buildWorkerToolSvc(nil, eng, ctxLoader, nil, nil, pkgcfg.Config{}, nil, func(_ context.Context, name string) error {
 		entered = name
 		return nil
-	})
+	}, nil)
 	ts, ok := svc.(*toolssvc.Service)
 	if !ok {
 		t.Fatalf("expected *toolssvc.Service, got %T", svc)

@@ -770,17 +770,21 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 		profileBroker: agent.NewProfileBroker(),
 	}
 	s.providerSvc = providers.New(cfgService, openModelsResolver, router, coordinator, cloudFactory, registry, nil)
-	// Build the shared vision-as-tool store and service. Local/open vision is
-	// tried first everywhere (a vision question stays local even under
-	// cloud_primary); cloud fallback is deliberately left unwired for now
-	// (CloudProvider nil) — the local path is proven end-to-end first, and a
-	// cloud vision model choice is a separate follow-up. The LocusInspector
-	// degrades cleanly with a nil cloud side. The store is threaded into the
-	// runner (rewrite) and the service into InstallCapabilities (lookup).
+	// Build the shared vision-as-tool store and service. Cloud vision is preferred
+	// whenever the current locus permits cloud; open_only remains a hard no-cloud
+	// boundary. The local/open vision lane remains wired as fallback so images can
+	// still work in open-only deployments once a local model is validated. The
+	// store is threaded into the runner (rewrite) and the service into
+	// InstallCapabilities (lookup).
 	s.visionStore, s.visionService = toolstack.BuildVision(toolstack.VisionDeps{
 		OpenProvider:    func() inference.Provider { return s.providerSvc.Open() },
 		OpenVisionModel: openModelsResolver.VisionModel,
-		Mode:            func() locus.Mode { m, _ := locus.ParseMode(s.providerSvc.LocusMode()); return m },
+		CloudProvider:   func() inference.Provider { return s.providerSvc.Cloud() },
+		CloudVisionModel: func() (string, bool) {
+			id := s.activeCloudModel()
+			return id, id != ""
+		},
+		Mode: func() locus.Mode { m, _ := locus.ParseMode(s.providerSvc.LocusMode()); return m },
 	})
 	// Construct the persistence service. It wraps the agent for store access;
 	// the agent itself is NOT owned by this service. The func-value collaborators

@@ -21,20 +21,36 @@ func visionFrom(source string, available bool) *countingVision {
 	}
 }
 
-func TestLocus_LocalSuccess_CloudNotCalled(t *testing.T) {
+func TestLocus_CloudAllowed_CloudFirst(t *testing.T) {
 	local := visionFrom("open:gemma", true)
 	cloud := visionFrom("cloud:gpt", true)
-	l := NewLocus(local, cloud, modeFn(locus.CloudPrimary)) // cloud_primary still permits local-first vision
+	l := NewLocus(local, cloud, modeFn(locus.CloudPrimary))
 
 	ans, err := l.Inspect(context.Background(), "c1", "img_1", "q?")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ans.Source != "open:gemma" {
-		t.Fatalf("expected local to answer, got source %q", ans.Source)
+	if ans.Source != "cloud:gpt" {
+		t.Fatalf("expected cloud to answer first, got source %q", ans.Source)
 	}
-	if cloud.calls != 0 {
-		t.Fatalf("cloud must not be called when local succeeds, got %d", cloud.calls)
+	if local.calls != 0 {
+		t.Fatalf("local must not be called when cloud succeeds, got %d", local.calls)
+	}
+}
+
+func TestLocus_CloudAllowedLookupCloudFirst(t *testing.T) {
+	local := visionFrom("open:gemma", true)
+	cloud := visionFrom("cloud:gpt", true)
+	l := NewLocus(local, cloud, modeFn(locus.OpenPrimary))
+
+	if !l.Lookup("c1", "img_1") {
+		t.Fatal("cloud-allowed lookup should find the image")
+	}
+	if cloud.lookups != 1 {
+		t.Fatalf("cloud lookup should run first, got %d", cloud.lookups)
+	}
+	if local.lookups != 0 {
+		t.Fatalf("local lookup should not run when cloud finds the image, got %d", local.lookups)
 	}
 }
 
@@ -102,21 +118,21 @@ func TestLocus_LocalUnavailable_OpenOnly_NoCloud(t *testing.T) {
 	}
 }
 
-func TestLocus_LocalFailure_CloudAllowed_CloudCalled(t *testing.T) {
+func TestLocus_CloudFailure_FallsBackToLocal(t *testing.T) {
 	local := visionFrom("open:gemma", true)
-	local.err = errors.New("local backend down")
 	cloud := visionFrom("cloud:gpt", true)
+	cloud.err = errors.New("cloud backend down")
 	l := NewLocus(local, cloud, modeFn(locus.CloudPrimary))
 
 	ans, err := l.Inspect(context.Background(), "c1", "img_1", "q?")
 	if err != nil {
-		t.Fatalf("expected cloud to answer after local failure, got %v", err)
+		t.Fatalf("expected local to answer after cloud failure, got %v", err)
 	}
-	if ans.Source != "cloud:gpt" {
-		t.Fatalf("expected cloud fallback, got source %q", ans.Source)
+	if ans.Source != "open:gemma" {
+		t.Fatalf("expected local fallback, got source %q", ans.Source)
 	}
 	if local.calls != 1 || cloud.calls != 1 {
-		t.Fatalf("expected local tried then cloud, got local=%d cloud=%d", local.calls, cloud.calls)
+		t.Fatalf("expected cloud tried then local, got local=%d cloud=%d", local.calls, cloud.calls)
 	}
 }
 

@@ -9,22 +9,21 @@ import (
 )
 
 // LocusInspector implements the vision-as-tool fallback policy over a locus
-// mode. Local/open vision is preferred for mixed/open modes, but cloud_only is
-// literal: it must not route image inspection to a local vision model.
+// mode. Cloud vision is preferred whenever the current locus permits cloud,
+// because the local vision model lane is optional and may be unavailable or
+// unvalidated. open_only remains a hard no-cloud boundary.
 //
-// This policy is deliberately NOT locus.Mode.Main()/Coproc(): cloud_primary can
-// still prefer local vision because image inspection is cheap grunt work, while
-// cloud_only remains a hard boundary.
+// This policy is deliberately NOT locus.Mode.Main()/Coproc(): image inspection
+// is a leaf tool call, not the main reasoning lane.
 //
-//	mode          local first?   cloud allowed?
-//	cloud_only    no             yes
+//	mode          cloud first?   local allowed?
+//	cloud_only    yes            no
 //	cloud_primary yes            yes
 //	open_primary  yes            yes
-//	open_only     yes            no
+//	open_only     no             yes
 //
-// Fallback fires both when local is unavailable (no local vision model) AND when
-// a local call fails at request time — a hung or erroring local vision model
-// must not strand a turn if cloud vision is permitted and configured.
+// Fallback fires both when the preferred side is unavailable and when its call
+// fails at request time, as long as the fallback side is permitted/configured.
 type LocusInspector struct {
 	local capabilities.VisionService // open/local vision (may be nil)
 	cloud capabilities.VisionService // cloud vision (may be nil)
@@ -64,10 +63,10 @@ func (l *LocusInspector) Available() bool {
 	if l == nil {
 		return false
 	}
-	if l.localAllowed() && l.local != nil && l.local.Available() {
+	if l.cloudAllowed() && l.cloud != nil && l.cloud.Available() {
 		return true
 	}
-	if l.cloudAllowed() && l.cloud != nil && l.cloud.Available() {
+	if l.localAllowed() && l.local != nil && l.local.Available() {
 		return true
 	}
 	return false
@@ -81,19 +80,18 @@ func (l *LocusInspector) Lookup(convID, imageID string) bool {
 	if l == nil {
 		return false
 	}
-	if l.localAllowed() && l.local != nil && l.local.Lookup(convID, imageID) {
+	if l.cloudAllowed() && l.cloud != nil && l.cloud.Lookup(convID, imageID) {
 		return true
 	}
-	if l.cloudAllowed() && l.cloud != nil && l.cloud.Lookup(convID, imageID) {
+	if l.localAllowed() && l.local != nil && l.local.Lookup(convID, imageID) {
 		return true
 	}
 	return false
 }
 
-// Inspect tries local vision first, then cloud vision when the locus permits.
-// Cloud is reached when local is unavailable OR a local call fails. When cloud
-// is not permitted or not configured, the local outcome (including its error)
-// stands.
+// Inspect tries cloud vision first whenever cloud is permitted, then falls back
+// to local/open vision when cloud is unavailable or fails. Under open_only,
+// cloud is never called and the local outcome stands.
 func (l *LocusInspector) Inspect(ctx context.Context, convID, imageID, question string) (capabilities.VisionAnswer, error) {
 	if l == nil {
 		return capabilities.VisionAnswer{}, errNoInner
@@ -102,22 +100,19 @@ func (l *LocusInspector) Inspect(ctx context.Context, convID, imageID, question 
 	localUsable := l.localAllowed() && l.local != nil && l.local.Available()
 	cloudUsable := l.cloudAllowed() && l.cloud != nil && l.cloud.Available()
 
-	if localUsable {
-		ans, err := l.local.Inspect(ctx, convID, imageID, question)
+	if cloudUsable {
+		ans, err := l.cloud.Inspect(ctx, convID, imageID, question)
 		if err == nil {
 			return ans, nil
 		}
-		// Local failed. Fall back to cloud only if permitted+configured;
-		// otherwise the local error stands.
-		if !cloudUsable {
+		if !localUsable {
 			return capabilities.VisionAnswer{}, err
 		}
-		return l.cloud.Inspect(ctx, convID, imageID, question)
+		return l.local.Inspect(ctx, convID, imageID, question)
 	}
 
-	// No local vision path. Use cloud if permitted+configured.
-	if cloudUsable {
-		return l.cloud.Inspect(ctx, convID, imageID, question)
+	if localUsable {
+		return l.local.Inspect(ctx, convID, imageID, question)
 	}
 
 	return capabilities.VisionAnswer{}, errors.New("no vision model is available for the current locus")

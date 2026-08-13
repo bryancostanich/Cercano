@@ -277,17 +277,27 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 	})
 
 	// Build the shared vision-as-tool store + service, mirroring the host. Local
-	// vision is resolved from the config snapshot's vision-tier override; cloud
-	// fallback is left unwired (as on the host) until a cloud vision model is
-	// chosen. The store is per-process, so images added during this worker turn
-	// live only for the turn — which is exactly the scope inspect_image needs, as
-	// it runs within the same turn's tool loop. The SAME store instance is handed
-	// to buildWorkerToolSvc (lookup) and runner.Deps below (rewrite).
+	// Vision is cloud-first whenever the locus permits cloud, with local/open as
+	// fallback and open_only as a hard no-cloud boundary. The store is
+	// per-process, so images added during this worker turn live only for the turn
+	// — which is exactly the scope inspect_image needs, as it runs within the same
+	// turn's tool loop. The SAME store instance is handed to buildWorkerToolSvc
+	// (lookup) and runner.Deps below (rewrite).
 	visionStore, visionSvc := toolstack.BuildVision(toolstack.VisionDeps{
 		OpenProvider: func() inference.Provider { return provSvc.Open() },
 		OpenVisionModel: func() (string, bool) {
 			id := openTierModel(cfg, pkgcfg.TierVision)
 			return id, id != ""
+		},
+		CloudProvider: func() inference.Provider { return provSvc.Cloud() },
+		CloudVisionModel: func() (string, bool) {
+			if prof, ok := profileByName(cfg.CloudProfiles, cfg.ActiveCloudProfile); ok {
+				if id := cfg.ModelProfiles.ResolveCloudModelForTier(prof, pkgcfg.TierEveryday); id != "" {
+					return id, true
+				}
+				return prof.Model, prof.Model != ""
+			}
+			return cfg.CloudModel, cfg.CloudModel != ""
 		},
 		Mode: func() locus.Mode { m, _ := locus.ParseMode(cfg.LocusMode); return m },
 	})

@@ -40,13 +40,13 @@ type VisionDeps struct {
 // InstallCapabilities (CapDeps.Vision) so inspect_image can look them up. The
 // two share the one store, so a rewrite and a later lookup agree.
 //
-// The service is a caching inspector over a locus-aware inspector: local/open
-// vision is tried first everywhere (a vision question is cheap grunt work that
-// stays local even under cloud_primary), with cloud fallback only when the
-// locus permits it. Each side is a plain visioninspect.Inspector over the shared
-// store and a resolver derived from the supplied seams; a nil provider or a
-// model-resolution miss makes that side report unavailable, so a partially-wired
-// deployment degrades to a clear "vision unavailable" rather than an error.
+// The service is a caching inspector over a locus-aware inspector: cloud vision
+// is preferred whenever the locus permits cloud, with local/open as fallback and
+// open_only as a hard no-cloud boundary. Each side is a plain
+// visioninspect.Inspector over the shared store and a resolver derived from the
+// supplied seams; a nil provider or a model-resolution miss makes that side
+// report unavailable, so a partially-wired deployment degrades to a clear
+// "vision unavailable" rather than an error.
 //
 // The host and worker call this identically so their turn-execution environments
 // never diverge.

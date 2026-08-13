@@ -333,6 +333,14 @@ func matchRuntimeModel(requested string, models []localruntime.ModelRecord) loca
 		if requested == "" && model.Active {
 			return model
 		}
+		if localruntime.MatchesModelExact(requested, model) {
+			return model
+		}
+	}
+	for _, model := range models {
+		if model.Runtime != runtimeName {
+			continue
+		}
 		// Shared matcher — MUST stay in lockstep with the provider's
 		// resolveModel. A name the provider resolves but this misses makes
 		// endpointFor skip every warm instance and spawn a fresh

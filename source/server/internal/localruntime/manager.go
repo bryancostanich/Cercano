@@ -296,7 +296,9 @@ func (m *InMemoryManager) Restart(ctx context.Context, req RestartRequest) (*Ins
 
 	if ok {
 		runtimeName = instance.Runtime
-		modelID = instance.ModelID
+		if strings.TrimSpace(modelID) == "" {
+			modelID = instance.ModelID
+		}
 		if err := m.Stop(ctx, StopRequest{InstanceID: instance.ID}); err != nil {
 			return nil, err
 		}

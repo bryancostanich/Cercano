@@ -9,6 +9,37 @@ import (
 	"cercano/source/server/internal/localruntime"
 )
 
+func TestMatchRuntimeModelPrefersExactCatalogRecord(t *testing.T) {
+	requested := "llama_server:catalog:qwen2.5-vl-3b-instruct-q4_k_m"
+	models := []localruntime.ModelRecord{
+		{
+			ID:             "llama_server:82a8bdf5aa27",
+			DisplayName:    "Qwen2.5 VL 3B Instruct",
+			Runtime:        runtimeName,
+			Path:           "/models/qwen2.5-vl-3b-instruct-q4_k_m/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
+			SupportsVision: false,
+			DownloadState:  localruntime.Downloaded,
+		},
+		{
+			ID:             requested,
+			DisplayName:    "Qwen2.5-VL-3B Instruct Q4_K_M",
+			Runtime:        runtimeName,
+			Path:           "/models/qwen2.5-vl-3b-instruct-q4_k_m/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
+			SupportsVision: true,
+			MmprojPath:     "/models/qwen2.5-vl-3b-instruct-q4_k_m/mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf",
+			DownloadState:  localruntime.Downloaded,
+		},
+	}
+
+	got := matchRuntimeModel(requested, models)
+	if got.ID != requested {
+		t.Fatalf("matchRuntimeModel chose %q, want exact catalog record %q", got.ID, requested)
+	}
+	if !got.SupportsVision || got.MmprojPath == "" {
+		t.Fatalf("catalog metadata was not preserved: %+v", got)
+	}
+}
+
 func startingInstance(state localruntime.InstanceState, lastErr string) localruntime.InstanceRecord {
 	return localruntime.InstanceRecord{
 		ID:        "inst-1",

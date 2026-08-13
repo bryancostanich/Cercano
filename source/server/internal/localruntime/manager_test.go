@@ -236,6 +236,24 @@ func TestInMemoryManagerRestartByRuntimeNameStopsAndRelaunches(t *testing.T) {
 	}
 }
 
+func TestInMemoryManagerRestartHonorsExplicitModelID(t *testing.T) {
+	provider := &reloadableProvider{fakeProvider: fakeProvider{name: "mistralrs"}}
+	manager := NewManager(WithConfigLoader(func() (config.Config, error) { return config.Config{}, nil }))
+	manager.RegisterProvider(provider)
+
+	instance, err := manager.Start(context.Background(), StartRequest{Runtime: "mistralrs", ModelID: "old-model"})
+	if err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	restarted, err := manager.Restart(context.Background(), RestartRequest{InstanceID: instance.ID, Runtime: "mistralrs", ModelID: "new-model"})
+	if err != nil {
+		t.Fatalf("Restart returned error: %v", err)
+	}
+	if restarted.ModelID != "new-model" {
+		t.Fatalf("Restart relaunched model %q, want explicit new-model", restarted.ModelID)
+	}
+}
+
 func TestInMemoryManagerRestartByRuntimeNameWithNothingRunningJustStarts(t *testing.T) {
 	// A restart of a runtime that isn't running degenerates to a fresh start:
 	// no stop to perform, but config still reloads and the instance comes up.

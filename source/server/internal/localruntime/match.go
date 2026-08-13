@@ -22,14 +22,14 @@ import (
 // Exact-only otherwise: "phi4" does NOT match phi4-mini-latest.gguf —
 // different model.
 func MatchesModel(requested string, model ModelRecord) bool {
+	if MatchesModelExact(requested, model) {
+		return true
+	}
 	if requested == "" {
 		return false
 	}
 	expanded, _ := expandModelPath(requested)
-	if requested == model.ID ||
-		requested == strings.TrimPrefix(model.ID, model.Runtime+":catalog:") ||
-		requested == model.DisplayName ||
-		requested == filepath.Base(model.Path) ||
+	if requested == filepath.Base(model.Path) ||
 		requested == filepath.Base(filepath.Dir(model.Path)) ||
 		expanded == model.Path {
 		return true
@@ -37,6 +37,19 @@ func MatchesModel(requested string, model ModelRecord) bool {
 	stem := strings.TrimSuffix(filepath.Base(model.Path), filepath.Ext(model.Path))
 	name := strings.TrimSuffix(requested, ":latest")
 	return stem == name || stem == name+"-latest"
+}
+
+// MatchesModelExact reports high-confidence identifier matches that should win
+// over fuzzy same-path/stem matches. This matters when inventory contains both a
+// path-discovered GGUF record and a catalog record for the same file: the
+// catalog record carries metadata such as SupportsVision and MmprojPath.
+func MatchesModelExact(requested string, model ModelRecord) bool {
+	if requested == "" {
+		return false
+	}
+	return requested == model.ID ||
+		requested == strings.TrimPrefix(model.ID, model.Runtime+":catalog:") ||
+		requested == model.DisplayName
 }
 
 func expandModelPath(path string) (string, error) {

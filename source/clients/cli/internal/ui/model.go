@@ -156,8 +156,8 @@ type Model struct {
 	modelMaxTokens     int
 	openModel          string // configured local/open model name, used for the o: header chip
 	lastModel          string // model/provider that served the last completed turn
-	cloudModel         string // cloud model name (from config); empty when no cloud configured
-	activeCloudProfile string // active cloud profile name, used for the c: header chip
+	cloudModel         string // cloud model name (from config), used for the c: header chip; empty when no cloud configured
+	activeCloudProfile string // active cloud profile name, used as a fallback when the model is unknown
 	cloudState         string // "" = unknown, "NONE" = absent, "ok" = real cloud configured
 	ctrlCArmed         bool   // first ctrl-c on empty input arms quit; any other key disarms
 	errMsg             string
@@ -4888,9 +4888,9 @@ func (m Model) renderHeaderRight(maxWidth int) string {
 	if maxWidth <= 0 {
 		return ""
 	}
-	cloudChip := m.activeCloudProfile
+	cloudChip := m.cloudModel
 	if cloudChip == "" {
-		cloudChip = m.cloudModel
+		cloudChip = m.activeCloudProfile
 	}
 	cloudLabel := ""
 	if cloudChip != "" {

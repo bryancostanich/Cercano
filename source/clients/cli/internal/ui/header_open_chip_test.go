@@ -96,7 +96,7 @@ func TestStatusDoesNotRenderOpenRuntimeMissingModelChip(t *testing.T) {
 	}
 }
 
-func TestConfigLoadedKeepsCloudChipFromIdentityDuringTransientCloudState(t *testing.T) {
+func TestConfigLoadedCloudChipPrefersModelDuringTransientCloudState(t *testing.T) {
 	m := Model{
 		styles:    theme.NewStyles(theme.Cracker()),
 		palette:   theme.Cracker(),
@@ -105,15 +105,18 @@ func TestConfigLoadedKeepsCloudChipFromIdentityDuringTransientCloudState(t *test
 	}
 	updated, _ := m.Update(configLoadedMsg{
 		OpenModel:          "qwen3-30b-a3b-instruct-2507",
-		CloudModel:         "gpt-5.5",
-		ActiveCloudProfile: "openai-responses",
+		CloudModel:         "claude-opus-5-0",
+		ActiveCloudProfile: "claude",
 		CloudConfigured:    false,
 	})
 	m = updated.(Model)
 
 	out := stripAnsiCSI(m.renderHeader())
-	if !strings.Contains(out, "c:openai-responses") {
-		t.Fatalf("header should keep cloud chip from cloud identity even during transient non-ok state, got %q", out)
+	if !strings.Contains(out, "c:opus 5.0") {
+		t.Fatalf("header should show the cloud model, not the active profile name, got %q", out)
+	}
+	if strings.Contains(out, "c:claude") {
+		t.Fatalf("header c: chip should not prefer active profile over model, got %q", out)
 	}
 	if !strings.Contains(out, "o:qwen3-30b") {
 		t.Fatalf("header should still show open chip, got %q", out)

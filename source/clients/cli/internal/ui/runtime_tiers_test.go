@@ -18,10 +18,10 @@ func TestTierRows(t *testing.T) {
 		},
 	}
 	rows := tierRows(cfg)
-	if len(rows) != 5 {
-		t.Fatalf("rows = %d, want 5 (4 open tiers + embedding)", len(rows))
+	if len(rows) != 6 {
+		t.Fatalf("rows = %d, want 6 (4 chat tiers + vision + embedding)", len(rows))
 	}
-	var sawConfigured, sawEmpty bool
+	var sawConfigured, sawEmpty, sawVision bool
 	for _, r := range rows {
 		if r.Action.Kind != runtimeActionTierPick {
 			t.Errorf("row %q missing tier-pick action: %+v", r.Label, r.Action)
@@ -38,9 +38,18 @@ func TestTierRows(t *testing.T) {
 				t.Errorf("empty slot should render a dash, got %q", r.Value)
 			}
 		}
+		if r.Action.TierKey == "llama_server.vision" {
+			sawVision = true
+			if r.Label != "vision · open" {
+				t.Errorf("vision label = %q", r.Label)
+			}
+			if r.Value != "—" {
+				t.Errorf("unset vision slot should render a dash, got %q", r.Value)
+			}
+		}
 	}
-	if !sawConfigured || !sawEmpty {
-		t.Error("expected both a configured and an empty slot row")
+	if !sawConfigured || !sawEmpty || !sawVision {
+		t.Error("expected configured, empty, and vision slot rows")
 	}
 
 	// Nil config degrades to a single informational row, no actions.

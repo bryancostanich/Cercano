@@ -22,6 +22,7 @@ var tierSlotOrder = []struct{ Tier, Label string }{
 	{"everyday", "everyday · open"},
 	{"fast_light", "fast-light · open"},
 	{"fast_light_text", "fast-light-text · open"},
+	{"vision", "vision · open"},
 	{"embedding", "embedding · open"},
 }
 

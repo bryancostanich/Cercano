@@ -24,7 +24,7 @@ func visionFrom(source string, available bool) *countingVision {
 func TestLocus_LocalSuccess_CloudNotCalled(t *testing.T) {
 	local := visionFrom("open:gemma", true)
 	cloud := visionFrom("cloud:gpt", true)
-	l := NewLocus(local, cloud, modeFn(locus.CloudPrimary)) // cloud primary, but vision still local-first
+	l := NewLocus(local, cloud, modeFn(locus.CloudPrimary)) // cloud_primary still permits local-first vision
 
 	ans, err := l.Inspect(context.Background(), "c1", "img_1", "q?")
 	if err != nil {
@@ -52,6 +52,26 @@ func TestLocus_LocalUnavailable_CloudAllowed_CloudCalled(t *testing.T) {
 	}
 	if local.calls != 0 {
 		t.Fatalf("unavailable local must not be called, got %d", local.calls)
+	}
+	if cloud.calls != 1 {
+		t.Fatalf("cloud should be called once, got %d", cloud.calls)
+	}
+}
+
+func TestLocus_CloudOnlySkipsLocal(t *testing.T) {
+	local := visionFrom("open:gemma", true)
+	cloud := visionFrom("cloud:gpt", true)
+	l := NewLocus(local, cloud, modeFn(locus.CloudOnly))
+
+	ans, err := l.Inspect(context.Background(), "c1", "img_1", "q?")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ans.Source != "cloud:gpt" {
+		t.Fatalf("cloud_only should use cloud vision, got source %q", ans.Source)
+	}
+	if local.calls != 0 {
+		t.Fatalf("cloud_only must not call local vision, got %d", local.calls)
 	}
 	if cloud.calls != 1 {
 		t.Fatalf("cloud should be called once, got %d", cloud.calls)
@@ -127,10 +147,13 @@ func TestLocus_Available(t *testing.T) {
 		wantAvail bool
 	}{
 		{"local only, open_only", true, false, locus.OpenOnly, true},
+		{"local only, cloud_only", true, false, locus.CloudOnly, false},
 		{"cloud only, open_only", false, true, locus.OpenOnly, false},
+		{"cloud only, cloud_only", false, true, locus.CloudOnly, true},
 		{"cloud only, cloud_primary", false, true, locus.CloudPrimary, true},
 		{"neither, cloud_primary", false, false, locus.CloudPrimary, false},
 		{"both, open_only", true, true, locus.OpenOnly, true},
+		{"both, cloud_only", true, true, locus.CloudOnly, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -89,6 +89,25 @@
       "status": "tested",
       "extra_args": ["--jinja"]
     },
+    "qwen2.5-vl-3b-instruct-q4_k_m": {
+      "id": "qwen2.5-vl-3b-instruct-q4_k_m",
+      "display_name": "Qwen2.5-VL-3B Instruct Q4_K_M",
+      "repo": "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF",
+      "files": [
+        "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
+        "mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf"
+      ],
+      "mmproj_file": "mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf",
+      "arch": "qwen2vl",
+      "quant": "Q4_K_M",
+      "family": "qwen",
+      "size_bytes": 2775000000,
+      "supports_tools": false,
+      "supports_embed": false,
+      "supports_vision": true,
+      "plain_chat_ok": true,
+      "status": "untested"
+    },
     "phi-4-mini-instruct-q4_k_m": {
       "id": "phi-4-mini-instruct-q4_k_m",
       "display_name": "Phi-4-mini Instruct Q4_K_M",
@@ -120,6 +139,7 @@
       "everyday": "qwen3-14b-q4_k_m",
       "fast_light": "qwen3-14b-q4_k_m",
       "fast_light_text": "qwen3-14b-q4_k_m",
+      "vision": "qwen2.5-vl-3b-instruct-q4_k_m",
       "embedding": "nomic-embed-text-v1.5-f16"
     },
     "48": {
@@ -127,6 +147,7 @@
       "everyday": "glm-4.7-flash-q5_k_m",
       "fast_light": "glm-4.7-flash-q5_k_m",
       "fast_light_text": "glm-4.7-flash-q5_k_m",
+      "vision": "qwen2.5-vl-3b-instruct-q4_k_m",
       "embedding": "nomic-embed-text-v1.5-f16"
     },
     "96": {
@@ -134,6 +155,7 @@
       "everyday": "glm-4.5-air-q4_k_m",
       "fast_light": "glm-4.5-air-q4_k_m",
       "fast_light_text": "glm-4.5-air-q4_k_m",
+      "vision": "qwen2.5-vl-3b-instruct-q4_k_m",
       "embedding": "nomic-embed-text-v1.5-f16"
     },
     "128": {
@@ -141,6 +163,7 @@
       "everyday": "glm-4.5-air-q4_k_m",
       "fast_light": "glm-4.5-air-q4_k_m",
       "fast_light_text": "glm-4.5-air-q4_k_m",
+      "vision": "qwen2.5-vl-3b-instruct-q4_k_m",
       "embedding": "nomic-embed-text-v1.5-f16"
     }
   }

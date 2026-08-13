@@ -133,6 +133,22 @@ func TestArgsForAppendsPerModelExtraArgs(t *testing.T) {
 // TestArgsForPassesMmproj verifies a vision model's projector is passed as
 // --mmproj (right after --model) when the file is present, and is omitted with
 // a text-only launch when the declared projector is missing at spawn time.
+func TestLiveInstanceReuseRequiresSameMmproj(t *testing.T) {
+	modelPath := "/models/qwen-vl.gguf"
+	textOnly := localruntime.ModelRecord{ID: "llama_server:path", Path: modelPath}
+	vision := localruntime.ModelRecord{ID: "llama_server:catalog:qwen-vl", Path: modelPath, MmprojPath: "/models/mmproj.gguf"}
+
+	if canReuseInstanceForModel(textOnly, vision) {
+		t.Fatal("text-only same-path instance must not satisfy a vision request")
+	}
+	if !canReuseInstanceForModel(vision, textOnly) {
+		t.Fatal("text-only request can reuse a projector-backed server")
+	}
+	if !canReuseInstanceForModel(vision, vision) {
+		t.Fatal("same path and same projector should be reusable")
+	}
+}
+
 func TestArgsForPassesMmproj(t *testing.T) {
 	provider := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1"})
 

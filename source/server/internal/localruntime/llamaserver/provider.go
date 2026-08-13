@@ -269,7 +269,7 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 	// check shares the insert's critical section so two concurrent Starts
 	// can't both miss it.
 	p.mu.Lock()
-	if existing := p.liveInstanceForLocked(model.Path); existing != nil {
+	if existing := p.liveInstanceForLocked(model); existing != nil {
 		record := existing.record
 		p.mu.Unlock()
 		p.emit(sink, "info", record.ID, model.ID, "reusing running llama-server for "+model.DisplayName)
@@ -350,7 +350,7 @@ func (p *Provider) adoptLiveSibling(ctx context.Context, model localruntime.Mode
 		},
 	}
 	p.mu.Lock()
-	if existing := p.liveInstanceForLocked(model.Path); existing != nil {
+	if existing := p.liveInstanceForLocked(model); existing != nil {
 		record := existing.record
 		p.mu.Unlock()
 		p.emit(sink, "info", record.ID, model.ID, "reusing running llama-server for "+model.DisplayName)
@@ -615,9 +615,9 @@ func (p *Provider) waitReady(ctx context.Context, instanceID, endpoint string) e
 
 // liveInstanceForLocked returns an instance already serving the given model
 // file — starting, running, or healthy — or nil. Callers must hold p.mu.
-func (p *Provider) liveInstanceForLocked(modelPath string) *managedInstance {
+func (p *Provider) liveInstanceForLocked(model localruntime.ModelRecord) *managedInstance {
 	for _, inst := range p.running {
-		if inst.stopping || inst.model.Path != modelPath {
+		if inst.stopping || !canReuseInstanceForModel(inst.model, model) {
 			continue
 		}
 		switch inst.record.State {
@@ -626,6 +626,19 @@ func (p *Provider) liveInstanceForLocked(modelPath string) *managedInstance {
 		}
 	}
 	return nil
+}
+
+func canReuseInstanceForModel(existing, requested localruntime.ModelRecord) bool {
+	if existing.Path != requested.Path {
+		return false
+	}
+	// A vision request requires a server launched with the same projector. A
+	// text-only request can reuse a projector-backed server, but not vice versa:
+	// the text-only process rejects image input.
+	if requested.MmprojPath != "" && existing.MmprojPath != requested.MmprojPath {
+		return false
+	}
+	return true
 }
 
 // instanceState returns the instance's current lifecycle state, or

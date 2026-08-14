@@ -52,6 +52,7 @@ import (
 	"cercano/source/server/internal/openmodels"
 	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/retention"
+	"cercano/source/server/internal/routinglog"
 	runnersvc "cercano/source/server/internal/runner"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/sysram"
@@ -132,7 +133,8 @@ type Server struct {
 	// addition to providerSvc) so the server can emit an aggregate usage event
 	// for WORKER turns — the worker child's provider is never wrapped by
 	// resolveMainProvider, so no usage would otherwise be recorded.
-	usageSink func(usage.Usage)
+	usageSink  func(usage.Usage)
+	routingLog *routinglog.Writer
 
 	buildVersion string // surfaced in exported trajectory metadata
 
@@ -762,12 +764,17 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 	openModelsResolver := openmodels.New(cfgService, catalogdefaults.ForRuntime,
 		func() uint64 { return uint64(sysram.Total()) })
 	rtSvc := runtimessvc.New(cfgService, openModelsResolver)
+	routeLog, err := routinglog.NewWriter("")
+	if err != nil {
+		log.Printf("[routing] open log: %v", err)
+	}
 	s := &Server{
 		agent:         a,
 		events:        newEventHub(),
 		cfgSvc:        cfgService,
 		openModels:    openModelsResolver,
 		runtimesSvc:   rtSvc,
+		routingLog:    routeLog,
 		turnBroker:    broker.New(),
 		profileBroker: agent.NewProfileBroker(),
 	}
@@ -860,6 +867,7 @@ func (s *Server) runnerDeps() runnersvc.Deps {
 			}
 			return s.profileBroker.Active(convID)
 		},
+		RoutingLog: s.routingLog,
 	}
 }
 

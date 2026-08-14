@@ -17,7 +17,9 @@ import (
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/protocols"
+	"cercano/source/server/internal/routinglog"
 	"cercano/source/server/internal/watchdog"
+	"cercano/source/server/pkg/config"
 )
 
 // Core implements TurnRunner. It holds no process-global mutable state, so
@@ -27,6 +29,56 @@ type Core struct{ d Deps }
 
 // New constructs a Core from the injected service dependencies.
 func New(d Deps) *Core { return &Core{d: d} }
+
+func (c *Core) logRoute(event string, fields routinglog.Event) {
+	if c == nil || c.d.RoutingLog == nil {
+		return
+	}
+	c.d.RoutingLog.Log(event, fields)
+}
+
+func providerName(p inference.Provider) string {
+	if p == nil {
+		return ""
+	}
+	return p.Name()
+}
+
+func errClassString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return string(llm.ClassOf(err))
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func addCloudProfileFields(fields routinglog.Event, prefix string, cfg config.Config, name string) {
+	if name == "" {
+		return
+	}
+	for _, p := range cfg.CloudProfiles {
+		if p.Name != name {
+			continue
+		}
+		fields[prefix+"_profile"] = p.Name
+		fields[prefix+"_provider"] = p.Provider
+		fields[prefix+"_flavor"] = p.Flavor
+		fields[prefix+"_route"] = p.Route
+		fields[prefix+"_backend"] = p.Backend
+		fields[prefix+"_base_url_set"] = p.BaseURL != ""
+		fields[prefix+"_stored_model"] = p.Model
+		fields[prefix+"_model_pinned"] = p.ModelPinned
+		return
+	}
+	fields[prefix+"_profile"] = name
+	fields[prefix+"_missing"] = true
+}
 
 // RunTurn executes one conversation turn end-to-end:
 //  1. Resolve provider from locus config.
@@ -49,14 +101,43 @@ func (c *Core) RunTurn(
 	// Thread the conversation ID as the session ID so downstream (e.g. the
 	// stream-anomaly log) can attribute this turn to its conversation.
 	ctx = llm.WithSessionID(ctx, req.ConversationID)
+	startFields := routinglog.Event{
+		"conversation_id":       req.ConversationID,
+		"effective_cloud_model": c.d.Providers.MainModel(true),
+		"effective_open_model":  c.d.Providers.MainModel(false),
+	}
+	if c.d.Config != nil {
+		cfgSnap := c.d.Config.Get()
+		startFields["locus_mode"] = cfgSnap.LocusMode
+		startFields["active_cloud_profile"] = cfgSnap.ActiveCloudProfile
+		startFields["backup_cloud_profile"] = cfgSnap.BackupCloudProfile
+		startFields["open_runtime"] = cfgSnap.OpenRuntime
+		startFields["mistralrs_enabled"] = cfgSnap.MistralRS.Enabled
+		startFields["mistralrs_max_seq_len"] = cfgSnap.MistralRS.MaxSeqLen
+		startFields["llama_server_context_size"] = cfgSnap.LlamaServer.ContextSize
+		addCloudProfileFields(startFields, "active", cfgSnap, cfgSnap.ActiveCloudProfile)
+		addCloudProfileFields(startFields, "backup", cfgSnap, cfgSnap.BackupCloudProfile)
+	}
+	c.logRoute("turn.start", startFields)
 
 	// 1. Resolve the provider per the active Locus Mode.
 	provider, isCloud, fellBack, err := c.d.Providers.Main()
 	if err != nil {
+		c.logRoute("turn.select_error", routinglog.Event{
+			"conversation_id": req.ConversationID,
+			"error":           err.Error(),
+		})
 		// *_only mode with its required tier unavailable — return a synthetic
 		// result so the host can send a terminal FinalResponse.
 		return Result{FinalText: "Locus: " + err.Error()}, nil
 	}
+	c.logRoute("turn.selected", routinglog.Event{
+		"conversation_id": req.ConversationID,
+		"provider":        providerName(provider),
+		"model":           c.d.Providers.MainModel(isCloud),
+		"is_cloud":        isCloud,
+		"locus_fell_back": fellBack,
+	})
 	if fellBack {
 		sink.Emit(Event{
 			Kind: EventProgress,
@@ -181,8 +262,26 @@ func (c *Core) RunTurn(
 	}
 
 	// Run the tool loop on the primary provider.
+	c.logRoute("loop.start", routinglog.Event{
+		"conversation_id": req.ConversationID,
+		"attempt":         "primary",
+		"provider":        providerName(provider),
+		"model":           c.d.Providers.MainModel(isCloud),
+		"is_cloud":        isCloud,
+	})
 	result, loopErr := c.runLoop(ctx, req, provider, isCloud,
 		loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile)
+	c.logRoute("loop.result", routinglog.Event{
+		"conversation_id": req.ConversationID,
+		"attempt":         "primary",
+		"provider":        providerName(provider),
+		"model":           c.d.Providers.MainModel(isCloud),
+		"is_cloud":        isCloud,
+		"error_class":     errClassString(loopErr),
+		"error":           errorString(loopErr),
+		"input_tokens":    result.InputTokens,
+		"output_tokens":   result.OutputTokens,
+	})
 
 	// 6.5. Same-provider turn retry: a transient loop error — server overload
 	// (busy), a transport reset (network), or an unclassified failure that may
@@ -196,21 +295,59 @@ func (c *Core) RunTurn(
 	if loopErr != nil && ctx.Err() == nil && llm.Retryable(llm.ClassOf(loopErr)) {
 		notice := retryNotice(provider.Name(), llm.ClassOf(loopErr))
 		fmt.Fprintf(os.Stderr, "[resilience] turn retry: %s (%v)\n", provider.Name(), loopErr)
+		c.logRoute("loop.retry", routinglog.Event{
+			"conversation_id": req.ConversationID,
+			"attempt":         "same_provider",
+			"provider":        providerName(provider),
+			"model":           c.d.Providers.MainModel(isCloud),
+			"is_cloud":        isCloud,
+			"previous_error":  errorString(loopErr),
+			"error_class":     errClassString(loopErr),
+		})
 		sink.Emit(Event{Kind: EventProgress, Text: notice})
 		result, loopErr = c.runLoop(ctx, req, provider, isCloud,
 			loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile)
+		c.logRoute("loop.result", routinglog.Event{
+			"conversation_id": req.ConversationID,
+			"attempt":         "same_provider_retry",
+			"provider":        providerName(provider),
+			"model":           c.d.Providers.MainModel(isCloud),
+			"is_cloud":        isCloud,
+			"error_class":     errClassString(loopErr),
+			"error":           errorString(loopErr),
+			"input_tokens":    result.InputTokens,
+			"output_tokens":   result.OutputTokens,
+		})
 	}
 
 	// 7. Cross-tier fallback: on error, attempt the other tier if locus allows.
 	var fallbackNotice string
 	if loopErr != nil {
-		mode, _ := locus.ParseMode(c.d.Config.Get().LocusMode)
+		mode := locus.Mode("cloud_primary")
+		if c.d.Config != nil {
+			mode, _ = locus.ParseMode(c.d.Config.Get().LocusMode)
+		}
 		res := mode.Main()
 		fbProv := c.d.Providers.Cloud()
 		fbCloud := true
 		if res.Fallback == locus.TierLocal {
 			fbProv, fbCloud = c.d.Providers.Open(), false
 		}
+		c.logRoute("fallback.consider", routinglog.Event{
+			"conversation_id":     req.ConversationID,
+			"mode":                string(mode),
+			"cross_allowed":       res.CrossAllowed,
+			"already_fell_back":   fellBack,
+			"from_provider":       providerName(provider),
+			"from_model":          c.d.Providers.MainModel(isCloud),
+			"from_is_cloud":       isCloud,
+			"fallback_tier":       res.Fallback.String(),
+			"fallback_provider":   providerName(fbProv),
+			"fallback_model":      c.d.Providers.MainModel(fbCloud),
+			"fallback_is_cloud":   fbCloud,
+			"trigger_error_class": errClassString(loopErr),
+			"trigger_error":       errorString(loopErr),
+		})
 		if !fellBack && res.CrossAllowed && fbProv != nil {
 			fallbackNotice = fmt.Sprintf("⚠ %s failed (%v) — retrying on %s", provider.Name(), loopErr, fbProv.Name())
 			sink.Emit(Event{Kind: EventProgress, Text: fallbackNotice})
@@ -221,8 +358,26 @@ func (c *Core) RunTurn(
 			})
 			provider = fbProv
 			isCloud = fbCloud
+			c.logRoute("loop.start", routinglog.Event{
+				"conversation_id": req.ConversationID,
+				"attempt":         "cross_tier_fallback",
+				"provider":        providerName(fbProv),
+				"model":           c.d.Providers.MainModel(fbCloud),
+				"is_cloud":        fbCloud,
+			})
 			result, loopErr = c.runLoop(ctx, req, fbProv, fbCloud,
 				loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile)
+			c.logRoute("loop.result", routinglog.Event{
+				"conversation_id": req.ConversationID,
+				"attempt":         "cross_tier_fallback",
+				"provider":        providerName(fbProv),
+				"model":           c.d.Providers.MainModel(fbCloud),
+				"is_cloud":        fbCloud,
+				"error_class":     errClassString(loopErr),
+				"error":           errorString(loopErr),
+				"input_tokens":    result.InputTokens,
+				"output_tokens":   result.OutputTokens,
+			})
 		}
 		if loopErr != nil {
 			return Result{}, fmt.Errorf("tool loop error: %w", loopErr)

@@ -13,6 +13,7 @@ import (
 	permissions "cercano/source/server/internal/hostsvc/permissions"
 	providers "cercano/source/server/internal/hostsvc/providers"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/routinglog"
 	"cercano/source/server/internal/watchdog"
 )
 
@@ -105,4 +106,9 @@ type Deps struct {
 	// and never leaks across attached clients. A nil func, or a func returning a
 	// zero Profile, means unrestricted (no fence) — the default posture.
 	Profiles func(convID string) agent.Profile
+
+	// RoutingLog records provider/profile/model selection and fallback metadata
+	// for postmortems. Nil disables logging. The writer must not receive prompt
+	// bodies, tool args, API keys, or response text.
+	RoutingLog *routinglog.Writer
 }

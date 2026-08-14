@@ -20,6 +20,7 @@ import (
 	ollamallm "cercano/source/server/internal/llm/ollama"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/ollamacatalog"
+	"cercano/source/server/internal/routinglog"
 	"cercano/source/server/internal/runner"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/toolstack"
@@ -322,6 +323,10 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 	// when the watchdog is disabled — the runner's live accessor (c.d.Watchdog())
 	// then yields nil, the correct default-off behavior.
 	wd := buildWorkerWatchdog(cfg, engine)
+	routeLog, err := routinglog.NewWriter("")
+	if err != nil {
+		log.Printf("[routing] worker open log: %v", err)
+	}
 
 	return runner.Deps{
 		Providers: provSvc,
@@ -334,6 +339,7 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 		// Shared with the worker's inspect_image VisionService (built above): the
 		// runner registers image placeholders here; the tool looks them up.
 		VisionStore: visionStore,
+		RoutingLog:  routeLog,
 	}, nil
 }
 

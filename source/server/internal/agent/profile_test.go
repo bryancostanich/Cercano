@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"cercano/source/server/internal/agenttools"
@@ -380,10 +381,20 @@ func (s stubTool) Permission() agenttools.Permission { return s.perm }
 func (s stubTool) Schema() json.RawMessage           { return json.RawMessage(`{"type":"object"}`) }
 func (s stubTool) Execute(ctx context.Context, args json.RawMessage) (*agenttools.Result, error) {
 	if s.ran != nil {
+		// The same stubTool can be invoked concurrently when a turn scripts the
+		// same tool name more than once and the provider supports parallel tool
+		// calls (see TestToolLoop_CalledToolsDeduplicatesRepeatedTool). Guard the
+		// shared *ran write so -race stays clean; the post-loop reads are safe
+		// because RunToolLoop joins all tool goroutines before returning.
+		stubRanMu.Lock()
 		*s.ran = true
+		stubRanMu.Unlock()
 	}
 	return agenttools.NewTextResult("ok"), nil
 }
+
+// stubRanMu serializes writes to stubTool.ran across concurrent Execute calls.
+var stubRanMu sync.Mutex
 
 // A successful plan_exit call must lift the read-only planning fence for the
 // REST of the same turn. The ProfileBroker change plan_exit makes only lands on

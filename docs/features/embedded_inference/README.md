@@ -125,6 +125,8 @@ runtime_state   stopped, starting, running, unhealthy, crashed, failed
 supports_chat   bool
 supports_embed  bool
 supports_tools  bool or unknown
+supports_vision bool or unknown
+mmproj_path     projector path for multimodal GGUF models when available
 active          selected for local inference
 ```
 
@@ -170,6 +172,37 @@ but not the same lifecycle controls. Cercano can start, stop, and restart a
 managed `llama-server` child process. For external endpoints, Cercano can probe,
 list models where supported, update config, and show errors, but it should not
 pretend to control processes it does not own.
+
+## Local vision model findings
+
+Vision-capable GGUF models need both the main model and the projector file. The
+curated catalog records this with `supports_vision` and `mmproj_file`; the
+runtime must launch those records with `--mmproj <projector.gguf>` and must avoid
+re-resolving a catalog match to a path-discovered record that lacks projector
+metadata.
+
+Measured and tested candidates on Apple Silicon with the Homebrew llama.cpp
+build available during the 2026-08 pass:
+
+| Model | Catalog status | Disk | Measured physical RAM | Finding |
+|---|---:|---:|---:|---|
+| Qwen2.5-VL 3B Q4_K_M | broken | ~2.5 GB + projector | not useful | Emits `@` garbage / hangs even for text-only prompts with the tested GGUF/build combination. |
+| Moondream2 F16 | broken | ~3–4 GB + projector | not retained | Loads and generates text, but OpenAI chat vision requests fail with `Failed to tokenize prompt`; raw completion path hallucinated a trivial test image. |
+| Gemma 3 4B Q4_K_M | usable fallback | ~3.1 GB total | ~1.6–1.7 GB | Works with `--mmproj --jinja`; good broad scene understanding, poor dense UI optical character recognition (OCR). |
+| Gemma 3 12B Q4_K_M | best local candidate | ~7.6 GB total | ~3.5–3.7 GB | Works with `--mmproj --jinja`; much better than 4B for UI screenshots, still below cloud for exact text/status extraction. |
+
+Policy recommendation from those tests:
+
+- Keep image inspection cloud-first whenever cloud is allowed; dense screenshots
+  still need cloud-quality OCR and task understanding.
+- Use local Gemma as the fallback for `open_only` / offline operation.
+- Prefer Gemma 3 12B over 4B as the local vision default when the extra ~2 GB
+  physical footprint is acceptable.
+- Retain broken catalog entries only for provenance and to prevent accidental
+  selection as profile defaults.
+
+Detailed transcripts and exact prompts are captured in
+`efforts/local-model-vision/HANDOFF.md`.
 
 ## llama-server v1
 

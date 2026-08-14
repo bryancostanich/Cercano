@@ -115,8 +115,15 @@ type ToolLoopInput struct {
 	System string
 
 	// PermissionRequester is the callback the loop uses to surface a
-	// confirm prompt to the active client (nil = auto-allow, useful in tests).
+	// confirm prompt to the active client. Nil means the loop cannot ask; any
+	// tool that still gates will be returned to the model as a permission error.
 	PermissionRequester func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission, destructive bool) (allow bool, err error)
+
+	// PreauthorizedTools names tools whose normal permission prompt was already
+	// approved by an enclosing operation, such as dispatch/workflow. This is an
+	// exact-name allowlist; it is narrower than ModeBypass and intentionally can
+	// cover X-tier tools without weakening the global rule that X normally gates.
+	PreauthorizedTools []string
 
 	// EventSink receives lifecycle events as the loop runs. Nil-safe.
 	EventSink func(ev LoopEvent)
@@ -275,6 +282,15 @@ func truncateRunes(s string, max int) string {
 		return s
 	}
 	return string(r[:max]) + "…"
+}
+
+func toolPreauthorized(granted []string, name string) bool {
+	for _, g := range granted {
+		if g == name {
+			return true
+		}
+	}
+	return false
 }
 
 func toolNamesForLog(tools []llm.Tool) []string {
@@ -717,7 +733,8 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			}
 			isMCP := agenttools.OriginOf(pc.tool) == agenttools.OriginMCP
 			allowlisted := in.Permissions != nil && in.Permissions.IsMCPAllowed(pc.block.ToolName)
-			if !watchdogApproved && GateDecisionForMCP(mode, pc.tier, isMCP, allowlisted) {
+			preauthorized := toolPreauthorized(in.PreauthorizedTools, pc.block.ToolName)
+			if !watchdogApproved && !preauthorized && GateDecisionForMCP(mode, pc.tier, isMCP, allowlisted) {
 				if in.PermissionRequester == nil {
 					results = append(results, llm.Block{
 						Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID,

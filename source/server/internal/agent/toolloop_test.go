@@ -552,6 +552,55 @@ func (m *fakeMCPTool) Execute(_ context.Context, _ json.RawMessage) (*agenttools
 
 // TestToolLoopMCPConfirmsInPermissive verifies that an MCP-origin W tool
 // triggers the PermissionRequester even under ModePermissive (confirm-by-default).
+type fakeXTool struct {
+	executed bool
+}
+
+func (*fakeXTool) Name() string                      { return "git_push" }
+func (*fakeXTool) Description() string               { return "push" }
+func (*fakeXTool) Permission() agenttools.Permission { return agenttools.PermX }
+func (*fakeXTool) Origin() agenttools.Origin         { return agenttools.OriginBuiltin }
+func (*fakeXTool) Schema() json.RawMessage           { return json.RawMessage(`{"type":"object"}`) }
+func (x *fakeXTool) Execute(_ context.Context, _ json.RawMessage) (*agenttools.Result, error) {
+	x.executed = true
+	return agenttools.NewTextResult("pushed"), nil
+}
+
+func TestToolLoopPreauthorizedToolBypassesXGate(t *testing.T) {
+	prov := &mockProvider{
+		scripts: [][]llm.Block{
+			{{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "git_push",
+				ToolInput: json.RawMessage(`{}`)}},
+			{{Type: llm.BlockText, Text: "done"}},
+		},
+		caps: inference.Capabilities{SupportsTools: true},
+	}
+	tool := &fakeXTool{}
+	reg := agenttools.NewRegistry()
+	reg.MustRegister(tool)
+
+	result, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider:           prov,
+		Registry:           reg,
+		Permissions:        NewStaticPermissionStore(ModeBypass),
+		UserInput:          "push",
+		PreauthorizedTools: []string{"git_push"},
+		PermissionRequester: func(_ context.Context, _, _ string, _ json.RawMessage, _ llm.Permission, _ bool) (bool, error) {
+			t.Fatal("preauthorized X-tier tool should not request permission")
+			return false, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tool.executed {
+		t.Fatal("preauthorized X-tier tool did not execute")
+	}
+	if result.FinalText != "done" {
+		t.Fatalf("FinalText = %q, want done", result.FinalText)
+	}
+}
+
 func TestToolLoopMCPConfirmsInPermissive(t *testing.T) {
 	// Script: first turn emits an MCP tool call; second turn is a plain-text
 	// terminator in case the gate doesn't fire (RED path: tool executes and loop

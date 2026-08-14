@@ -505,6 +505,7 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		FlattenToolResults: true,
 		WorkDir:            spec.WorkDir,
 		ConversationID:     subConvID, // nested dispatches link to this sub-conversation
+		PreauthorizedTools: granted,
 		OnTextDelta: func(t string) {
 			buf.WriteString(t)
 			emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "token", Text: t, GrantedTools: granted, IgnoredTools: ignored})

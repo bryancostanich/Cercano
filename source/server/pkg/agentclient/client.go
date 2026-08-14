@@ -889,6 +889,32 @@ func (c *Client) ProposeContextEdit(ctx context.Context, conversationID, instruc
 	return Proposal{DeleteIDs: resp.GetDeleteIds(), Rationale: resp.GetRationale()}, nil
 }
 
+// ExportedImage is one image attachment exported from the live agent's
+// in-memory store.
+type ExportedImage struct {
+	Found     bool
+	MediaType string
+	Data      []byte
+}
+
+// ExportImage returns the raw bytes for an image the user attached to a live
+// conversation. Found is false when the attachment is no longer present (for
+// example after an agent restart) or the ID is unknown.
+func (c *Client) ExportImage(ctx context.Context, conversationID, imageID string) (ExportedImage, error) {
+	resp, err := c.agent.ExportImage(ctx, &proto.ExportImageRequest{
+		ConversationId: conversationID,
+		ImageId:        imageID,
+	})
+	if err != nil {
+		return ExportedImage{}, err
+	}
+	return ExportedImage{
+		Found:     resp.GetFound(),
+		MediaType: resp.GetMediaType(),
+		Data:      resp.GetData(),
+	}, nil
+}
+
 // DeleteConversationTurns hard-deletes the named turns from a conversation and
 // returns the number of turns deleted.
 func (c *Client) DeleteConversationTurns(ctx context.Context, conversationID string, ids []string) (int, error) {

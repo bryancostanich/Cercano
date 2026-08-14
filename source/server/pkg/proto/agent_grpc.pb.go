@@ -87,6 +87,7 @@ const (
 	Agent_ListCloudProfileModels_FullMethodName     = "/agent.Agent/ListCloudProfileModels"
 	Agent_StartChatGPTLogin_FullMethodName          = "/agent.Agent/StartChatGPTLogin"
 	Agent_StartClaudeLogin_FullMethodName           = "/agent.Agent/StartClaudeLogin"
+	Agent_ExportImage_FullMethodName                = "/agent.Agent/ExportImage"
 )
 
 // AgentClient is the client API for Agent service.
@@ -294,6 +295,12 @@ type AgentClient interface {
 	// reports ok/error. On success the agent stores the token set and creates a
 	// messages+subscription cloud profile.
 	StartClaudeLogin(ctx context.Context, in *StartClaudeLoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StartClaudeLoginEvent], error)
+	// ExportImage returns the raw bytes of an image the user attached to a live
+	// conversation, looked up by its per-conversation attachment ID (e.g.
+	// "img_7f3a9c_1"). The attachment store is in-memory only, so a miss is
+	// expected after restart/resume or for an unknown ID; callers must treat
+	// found=false as a recoverable "reattach the image" condition, not an error.
+	ExportImage(ctx context.Context, in *ExportImageRequest, opts ...grpc.CallOption) (*ExportImageResponse, error)
 }
 
 type agentClient struct {
@@ -1065,6 +1072,16 @@ func (c *agentClient) StartClaudeLogin(ctx context.Context, in *StartClaudeLogin
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Agent_StartClaudeLoginClient = grpc.ServerStreamingClient[StartClaudeLoginEvent]
 
+func (c *agentClient) ExportImage(ctx context.Context, in *ExportImageRequest, opts ...grpc.CallOption) (*ExportImageResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExportImageResponse)
+	err := c.cc.Invoke(ctx, Agent_ExportImage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServer is the server API for Agent service.
 // All implementations must embed UnimplementedAgentServer
 // for forward compatibility.
@@ -1270,6 +1287,12 @@ type AgentServer interface {
 	// reports ok/error. On success the agent stores the token set and creates a
 	// messages+subscription cloud profile.
 	StartClaudeLogin(*StartClaudeLoginRequest, grpc.ServerStreamingServer[StartClaudeLoginEvent]) error
+	// ExportImage returns the raw bytes of an image the user attached to a live
+	// conversation, looked up by its per-conversation attachment ID (e.g.
+	// "img_7f3a9c_1"). The attachment store is in-memory only, so a miss is
+	// expected after restart/resume or for an unknown ID; callers must treat
+	// found=false as a recoverable "reattach the image" condition, not an error.
+	ExportImage(context.Context, *ExportImageRequest) (*ExportImageResponse, error)
 	mustEmbedUnimplementedAgentServer()
 }
 
@@ -1483,6 +1506,9 @@ func (UnimplementedAgentServer) StartChatGPTLogin(*StartChatGPTLoginRequest, grp
 }
 func (UnimplementedAgentServer) StartClaudeLogin(*StartClaudeLoginRequest, grpc.ServerStreamingServer[StartClaudeLoginEvent]) error {
 	return status.Error(codes.Unimplemented, "method StartClaudeLogin not implemented")
+}
+func (UnimplementedAgentServer) ExportImage(context.Context, *ExportImageRequest) (*ExportImageResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExportImage not implemented")
 }
 func (UnimplementedAgentServer) mustEmbedUnimplementedAgentServer() {}
 func (UnimplementedAgentServer) testEmbeddedByValue()               {}
@@ -2666,6 +2692,24 @@ func _Agent_StartClaudeLogin_Handler(srv interface{}, stream grpc.ServerStream) 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Agent_StartClaudeLoginServer = grpc.ServerStreamingServer[StartClaudeLoginEvent]
 
+func _Agent_ExportImage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExportImageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).ExportImage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_ExportImage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).ExportImage(ctx, req.(*ExportImageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Agent_ServiceDesc is the grpc.ServiceDesc for Agent service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2908,6 +2952,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListCloudProfileModels",
 			Handler:    _Agent_ListCloudProfileModels_Handler,
+		},
+		{
+			MethodName: "ExportImage",
+			Handler:    _Agent_ExportImage_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

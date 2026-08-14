@@ -246,6 +246,28 @@ service Agent {
   // reports ok/error. On success the agent stores the token set and creates a
   // messages+subscription cloud profile.
   rpc StartClaudeLogin(StartClaudeLoginRequest) returns (stream StartClaudeLoginEvent);
+
+  // ExportImage returns the raw bytes of an image the user attached to a live
+  // conversation, looked up by its per-conversation attachment ID (e.g.
+  // "img_7f3a9c_1"). The attachment store is in-memory only, so a miss is
+  // expected after restart/resume or for an unknown ID; callers must treat
+  // found=false as a recoverable "reattach the image" condition, not an error.
+  rpc ExportImage(ExportImageRequest) returns (ExportImageResponse) {}
+}
+
+// ExportImageRequest identifies one attached image within a conversation.
+message ExportImageRequest {
+  string conversation_id = 1;
+  string image_id = 2;
+}
+
+// ExportImageResponse carries the raw (decoded) image bytes and its media type.
+// found is false when the (conversation_id, image_id) pair is not in the live
+// attachment store.
+message ExportImageResponse {
+  bool found = 1;
+  string media_type = 2;
+  bytes data = 3;
 }
 
 // Incremental token from LLM streaming.

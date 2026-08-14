@@ -3135,6 +3135,27 @@ func (s *Server) GetPermissionMode(ctx context.Context, req *proto.GetPermission
 	return &proto.GetPermissionModeResponse{Mode: string(s.permBroker.Mode())}, nil
 }
 
+// ExportImage implements proto.AgentServer — returns the raw bytes of an image
+// the user attached to a live conversation, looked up by its per-conversation
+// attachment ID. It reads directly from the in-memory vision attachment store
+// without touching the placeholder/rewrite or inspect_image paths. A miss
+// (unknown ID, or after restart/resume when the store is empty) is reported as
+// found=false, not an error, so callers can prompt the user to reattach.
+func (s *Server) ExportImage(ctx context.Context, req *proto.ExportImageRequest) (*proto.ExportImageResponse, error) {
+	if s.visionStore == nil {
+		return &proto.ExportImageResponse{Found: false}, nil
+	}
+	att, ok := s.visionStore.Lookup(req.GetConversationId(), req.GetImageId())
+	if !ok || att == nil {
+		return &proto.ExportImageResponse{Found: false}, nil
+	}
+	return &proto.ExportImageResponse{
+		Found:     true,
+		MediaType: att.MediaType,
+		Data:      att.Data,
+	}, nil
+}
+
 // SetSessionProfile implements proto.AgentServer — switches the active
 // capability profile (planning fence / future modes). Orthogonal to the
 // permission mode; takes effect on the next turn (the runner reads the active

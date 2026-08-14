@@ -46,6 +46,10 @@ func (m *mockAgentClient) AttachConversation(ctx context.Context, in *proto.Atta
 	return nil, nil
 }
 
+func (m *mockAgentClient) ExportImage(ctx context.Context, in *proto.ExportImageRequest, opts ...grpc.CallOption) (*proto.ExportImageResponse, error) {
+	return &proto.ExportImageResponse{}, nil
+}
+
 func (m *mockAgentClient) ListModels(ctx context.Context, in *proto.ListModelsRequest, opts ...grpc.CallOption) (*proto.ListModelsResponse, error) {
 	if m.modelsResp != nil {
 		return m.modelsResp, m.modelsErr

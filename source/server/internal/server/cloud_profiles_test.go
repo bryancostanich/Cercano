@@ -75,6 +75,42 @@ func TestGetCloudProfilesListsBoth(t *testing.T) {
 	}
 }
 
+func TestSetActiveCloudProfileCancelsInFlightTurns(t *testing.T) {
+	s, _ := newTestServer()
+	s.cfgSvc.Set(config.Config{
+		ActiveCloudProfile: "claude",
+		BackupCloudProfile: "openai-responses",
+		CloudProfiles: []config.CloudProfile{
+			{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0", ModelPinned: true},
+			{Name: "openai-responses", Flavor: "responses", Route: "chatgpt", Model: "gpt-5.5", ModelPinned: true},
+		},
+	})
+	if err := s.cfgSvc.Secrets().Set("openai-responses", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	turnCtx, gen, release := s.turnBroker.BeginTurn(context.Background(), "conv-switch")
+	defer release()
+	if !s.turnBroker.IsCurrent("conv-switch", gen) {
+		t.Fatal("test turn should be current before profile switch")
+	}
+
+	resp, err := s.SetActiveCloudProfile(context.Background(), &proto.SetActiveCloudProfileRequest{Name: "openai-responses"})
+	if err != nil {
+		t.Fatalf("SetActiveCloudProfile: %v", err)
+	}
+	if !resp.Ok {
+		t.Fatalf("want Ok=true, got false: %s", resp.Error)
+	}
+	select {
+	case <-turnCtx.Done():
+	default:
+		t.Fatal("profile switch should cancel in-flight turns")
+	}
+	if s.turnBroker.IsCurrent("conv-switch", gen) {
+		t.Fatal("profile switch should fence stale turn generation")
+	}
+}
+
 func TestSetActiveCloudProfileSwapsCurrentBackupToPreviousActive(t *testing.T) {
 	s, _ := newTestServer()
 	s.cfgSvc.Set(config.Config{

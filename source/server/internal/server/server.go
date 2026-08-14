@@ -587,6 +587,17 @@ func (s *Server) SetActiveCloudProfile(ctx context.Context, req *proto.SetActive
 	if !s.cfgSvc.SetActiveProfile(req.GetName()) {
 		return &proto.SetActiveCloudProfileResponse{Ok: false, Error: fmt.Sprintf("no profile %q", req.GetName())}, nil
 	}
+	if s.turnBroker != nil {
+		s.turnBroker.CancelAllTurns()
+	}
+	if s.routingLog != nil {
+		s.routingLog.Log("profile.switch", routinglog.Event{
+			"active_cloud_profile":  s.cfgSvc.Get().ActiveCloudProfile,
+			"backup_cloud_profile":  s.cfgSvc.Get().BackupCloudProfile,
+			"reason":                "set_active_cloud_profile",
+			"canceled_active_turns": true,
+		})
+	}
 	if err := s.rebuildCloud(); err != nil {
 		// active is set, but the provider couldn't be built — report it, keep going.
 		s.persistConfig()

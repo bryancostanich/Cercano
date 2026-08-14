@@ -36,21 +36,21 @@ const subChanCap = 64 // buffered subscriber channel capacity; drop-on-full if f
 // under mu and read by the drain goroutine.
 type losslessSub struct {
 	queue  []runner.Event // unbounded buffer; append under mu, pop by drain goroutine
-	notify chan struct{}   // non-blocking signal that queue has new items (cap 1)
-	done   chan struct{}   // closed by detach; tells drain goroutine to exit
+	notify chan struct{}  // non-blocking signal that queue has new items (cap 1)
+	done   chan struct{}  // closed by detach; tells drain goroutine to exit
 }
 
 // convState bundles all per-conversation mutable state under Broker.mu.
 type convState struct {
 	// turn-exclusivity
-	gen    uint64          // current turn generation (monotonic, starts at 0 = no turn)
-	handle *turnHandle     // nil when no active turn
+	gen    uint64      // current turn generation (monotonic, starts at 0 = no turn)
+	handle *turnHandle // nil when no active turn
 
 	// fan-out + replay
-	buffer    []runner.Event           // current turn's events (reset each BeginTurn)
-	subs      map[int]chan runner.Event // attached subscriber channels (lossy, cap-64)
-	lsubs     map[int]*losslessSub     // attached lossless subscribers
-	nextID    int                      // monotonic subscriber-id counter (shared across both maps)
+	buffer []runner.Event            // current turn's events (reset each BeginTurn)
+	subs   map[int]chan runner.Event // attached subscriber channels (lossy, cap-64)
+	lsubs  map[int]*losslessSub      // attached lossless subscribers
+	nextID int                       // monotonic subscriber-id counter (shared across both maps)
 }
 
 // turnHandle tracks one in-flight turn for a conversation.
@@ -135,6 +135,41 @@ func (b *Broker) IsCurrent(conv string, gen uint64) bool {
 		return false
 	}
 	return cs.gen == gen
+}
+
+// CancelTurn cancels the current turn for conv, if any, and advances the
+// generation so any late events from the canceled turn are fenced out. It is
+// used for user actions that invalidate an in-flight route, such as switching
+// the active cloud profile mid-turn.
+func (b *Broker) CancelTurn(conv string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	cs, ok := b.convs[conv]
+	if !ok || cs.handle == nil {
+		return
+	}
+	cs.handle.cancel()
+	cs.handle = nil
+	cs.gen++
+	cs.buffer = nil
+}
+
+// CancelAllTurns cancels every active turn and advances each conversation's
+// generation so stale late events are fenced out. Profile/routing changes are
+// global, so they invalidate any in-flight provider call selected under the old
+// route.
+func (b *Broker) CancelAllTurns() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, cs := range b.convs {
+		if cs.handle == nil {
+			continue
+		}
+		cs.handle.cancel()
+		cs.handle = nil
+		cs.gen++
+		cs.buffer = nil
+	}
 }
 
 // HasActiveTurn reports whether a turn is currently registered for conv (test

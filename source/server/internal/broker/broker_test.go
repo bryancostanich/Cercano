@@ -45,6 +45,36 @@ func TestBeginTurn_SecondSupersedesFirst(t *testing.T) {
 
 // A different conversation is independent: BeginTurn on conv-b must not cancel
 // or supersede an active turn on conv-a.
+func TestCancelAllTurns_CancelsAndFencesEveryActiveTurn(t *testing.T) {
+	b := New()
+	ctxA, genA, releaseA := b.BeginTurn(context.Background(), "conv-a")
+	defer releaseA()
+	ctxB, genB, releaseB := b.BeginTurn(context.Background(), "conv-b")
+	defer releaseB()
+
+	b.CancelAllTurns()
+
+	select {
+	case <-ctxA.Done():
+	default:
+		t.Fatal("conv-a was not canceled")
+	}
+	select {
+	case <-ctxB.Done():
+	default:
+		t.Fatal("conv-b was not canceled")
+	}
+	if b.IsCurrent("conv-a", genA) {
+		t.Fatal("conv-a old generation should be fenced")
+	}
+	if b.IsCurrent("conv-b", genB) {
+		t.Fatal("conv-b old generation should be fenced")
+	}
+	if b.HasActiveTurn("conv-a") || b.HasActiveTurn("conv-b") {
+		t.Fatal("CancelAllTurns should clear active handles")
+	}
+}
+
 func TestBeginTurn_DifferentConversationsIndependent(t *testing.T) {
 	b := New()
 

@@ -323,13 +323,13 @@ func TestWizardProfileModelFromRecs(t *testing.T) {
 		Version: 1,
 		Cloud: map[string]config.TierCandidates{
 			"anthropic": {
-				config.TierEveryday: {"claude-opus-5-0", "claude-sonnet-4-6"},
+				config.TierEveryday: {"claude-opus-5", "claude-sonnet-4-6"},
 			},
 		},
 	}
 	// The profile model is the everyday-tier pick: "the default workhorse
 	// for main chat" is exactly what profile.Model serves at request time.
-	if got := wizardProfileModel(recs, "anthropic"); got != "claude-opus-5-0" {
+	if got := wizardProfileModel(recs, "anthropic"); got != "claude-opus-5" {
 		t.Fatalf("want everyday-tier first candidate, got %q", got)
 	}
 	// Unknown provider → no recommendation; caller leaves the model unset.
@@ -345,12 +345,12 @@ func TestWizardFinishUpdateCarriesCloudModel(t *testing.T) {
 	u := wizardFinishUpdate(wizard.State{
 		CloudProvider: "anthropic",
 		LocusMode:     "cloud_primary",
-		TierPicks:     map[string]string{"everyday.cloud": "claude-opus-5-0"},
+		TierPicks:     map[string]string{"everyday.cloud": "claude-opus-5"},
 	})
 	if u.LocusMode != "cloud_primary" {
 		t.Fatalf("locus patch wrong: %+v", u)
 	}
-	if u.CloudModel != "claude-opus-5-0" {
+	if u.CloudModel != "claude-opus-5" {
 		t.Fatalf("want everyday.cloud pick as CloudModel, got %q", u.CloudModel)
 	}
 	// Open path: no cloud provider configured → no CloudModel patch (the
@@ -524,7 +524,7 @@ func TestWizardEnrollOpenDownloads(t *testing.T) {
 		"llama_server.most_capable": "Qwen3-14B Q4_K_M",
 		"llama_server.everyday":     "Qwen3-14B Q4_K_M",           // duplicate of most_capable -> one download
 		"llama_server.fast_light":   "Phi-4-mini Instruct Q4_K_M", // already downloaded -> skipped
-		"most_capable.cloud":        "claude-opus-5-0",            // cloud slot -> ignored
+		"most_capable.cloud":        "claude-opus-5",              // cloud slot -> ignored
 	}
 	var got []string
 	wp.downloadFn = func(_ context.Context, runtime, modelID string) error {

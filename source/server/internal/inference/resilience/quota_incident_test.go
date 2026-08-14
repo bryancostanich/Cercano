@@ -54,7 +54,7 @@ func TestQuotaIncident_ImmediateNarratedFailover(t *testing.T) {
 
 	start := time.Now()
 	rdr, err := engine.StreamChat(context.Background(), inference.Call{
-		Model:    "claude-opus-5-0",
+		Model:    "claude-opus-5",
 		Messages: []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "hi"}}}},
 	})
 	if err != nil {

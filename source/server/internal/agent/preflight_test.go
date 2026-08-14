@@ -14,15 +14,32 @@ func TestEstimateTokens_RoughFourCharsPerToken(t *testing.T) {
 		want int
 	}{
 		{"", 0},
-		{"a", 1},       // ceil(1/4)
-		{"abcd", 1},    // exactly 4 chars -> 1
-		{"abcde", 2},   // 5 chars -> ceil(5/4)=2
+		{"a", 1},        // ceil(1/4)
+		{"abcd", 1},     // exactly 4 chars -> 1
+		{"abcde", 2},    // 5 chars -> ceil(5/4)=2
 		{"abcdefgh", 2}, // 8 chars -> 2
 	}
 	for _, c := range cases {
 		if got := estimateTokens(c.in); got != c.want {
 			t.Errorf("estimateTokens(%q) = %d, want %d", c.in, got, c.want)
 		}
+	}
+}
+
+func TestReduceHistoryToContextTailKeepsNewestWithinBudget(t *testing.T) {
+	msg := func(text string) llm.Message {
+		return llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: text}}}
+	}
+	history := []llm.Message{msg(strings.Repeat("a", 1600)), msg(strings.Repeat("b", 1600)), msg(strings.Repeat("c", 1600))}
+	reduced, trimmed := reduceHistoryToContextTail("sys", history, "current", 0, 1000) // 800-token budget; each history msg ~=400 tokens
+	if !trimmed {
+		t.Fatal("expected history to be trimmed")
+	}
+	if len(reduced) != 1 {
+		t.Fatalf("len(reduced) = %d, want 1", len(reduced))
+	}
+	if got := reduced[0].Blocks[0].Text[:1]; got != "c" {
+		t.Fatalf("kept oldest/wrong message prefix %q, want newest c", got)
 	}
 }
 

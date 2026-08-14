@@ -44,7 +44,7 @@ func TestApplyCloudDraftEdit(t *testing.T) {
 func TestClaudeSettingsSignInUsesSelectedProfile(t *testing.T) {
 	sp := cloudSamplePage()
 	sp.selectCloudRow("template:anthropic")
-	sp.applyCloudDraftEdit("cloud-model", "claude-opus-5-0")
+	sp.applyCloudDraftEdit("cloud-model", "claude-opus-5")
 
 	_, cmd, err := sp.onCommit("cloud-signin-claude", form.ButtonActivate)
 	if err != nil {
@@ -109,7 +109,7 @@ func TestShouldApplyModelEdit(t *testing.T) {
 func TestFallbackClaudeModelsIncludeCurrentGeneration(t *testing.T) {
 	want := map[string]bool{
 		"claude-fable-5":    false,
-		"claude-opus-5-0":   false,
+		"claude-opus-5":     false,
 		"claude-sonnet-4-6": false,
 	}
 	for _, m := range fallbackClaudeModels() {

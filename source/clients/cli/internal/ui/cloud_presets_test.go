@@ -18,7 +18,7 @@ func sampleProvidersView() agentclient.CloudProvidersView {
 			{ID: "anthropic", Label: "anthropic", Flavor: "messages", Tier: "verified",
 				PrimaryProfile: "work-anthropic",
 				Profiles: []agentclient.CloudProfileInfo{
-					{Name: "work-anthropic", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0"},
+					{Name: "work-anthropic", Flavor: "messages", Route: "subscription", Model: "claude-opus-5"},
 					{Name: "personal-anthropic", Flavor: "messages", HasKey: true, Model: "claude-sonnet"},
 				}},
 			{ID: "openai-responses", Label: "openai (responses)", Flavor: "responses", BaseURL: "https://api.openai.com/v1", Tier: "untested"},
@@ -105,13 +105,13 @@ func TestRowAnnotation(t *testing.T) {
 		},
 		{
 			name:     "primary with model, direct key",
-			row:      cloudRow{ID: "profile:x", IsProfile: true, HasKey: true, Active: true, Profile: &agentclient.CloudProfileInfo{Model: "claude-opus-5-0"}},
-			expected: "claude-opus-5-0  primary",
+			row:      cloudRow{ID: "profile:x", IsProfile: true, HasKey: true, Active: true, Profile: &agentclient.CloudProfileInfo{Model: "claude-opus-5"}},
+			expected: "claude-opus-5  primary",
 		},
 		{
 			name:     "primary subscription → primary (subscription)",
-			row:      cloudRow{ID: "profile:x", IsProfile: true, Active: true, Profile: &agentclient.CloudProfileInfo{Model: "claude-opus-5-0", Route: "subscription"}},
-			expected: "claude-opus-5-0  primary (subscription)",
+			row:      cloudRow{ID: "profile:x", IsProfile: true, Active: true, Profile: &agentclient.CloudProfileInfo{Model: "claude-opus-5", Route: "subscription"}},
+			expected: "claude-opus-5  primary (subscription)",
 		},
 		{
 			name:     "primary responses → primary (ChatGPT OAuth)",

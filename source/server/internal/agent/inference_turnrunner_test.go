@@ -52,7 +52,7 @@ func TestLLMModelProviderProcessSetsMaxTokens(t *testing.T) {
 	// and no error — the silent-empty-output trap that gutted compaction
 	// summaries. The one-shot adapter must always send a real budget.
 	fake := &fakeLLM{name: "anthropic"}
-	mp := InferenceTurnRunner(fake, "claude-opus-5-0")
+	mp := InferenceTurnRunner(fake, "claude-opus-5")
 	if _, err := mp.Process(context.Background(), &Request{Input: "hi"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestLLMModelProviderProcessThreadsTemperature(t *testing.T) {
 	// a pointer end-to-end so 0 ("greedy") is distinguishable from unset
 	// ("provider default").
 	fake := &fakeLLM{name: "anthropic"}
-	mp := InferenceTurnRunner(fake, "claude-opus-5-0")
+	mp := InferenceTurnRunner(fake, "claude-opus-5")
 
 	zero := 0.0
 	if _, err := mp.Process(context.Background(), &Request{Input: "hi", Temperature: &zero}); err != nil {
@@ -92,7 +92,7 @@ func TestLLMModelProviderProcessThreadsTierAndAttributesServedModel(t *testing.T
 	// the model that actually served (on failover, the backup's model — not
 	// the requested one).
 	fake := &fakeLLM{name: "anthropic", servedModel: "gpt-5.4-mini"}
-	mp := InferenceTurnRunner(fake, "claude-opus-5-0")
+	mp := InferenceTurnRunner(fake, "claude-opus-5")
 	resp, err := mp.Process(context.Background(), &Request{Input: "hi", ModelOverride: "claude-haiku-4-5", Tier: "fast_light_text"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

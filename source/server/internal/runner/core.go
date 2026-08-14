@@ -59,6 +59,20 @@ func errorString(err error) string {
 	return err.Error()
 }
 
+func localContextWindow(cfg config.Config) int {
+	switch cfg.OpenRuntime {
+	case "mistralrs":
+		return cfg.MistralRS.MaxSeqLen
+	case "llama_server":
+		return cfg.LlamaServer.ContextSize
+	default:
+		if cfg.LlamaServer.ContextSize > 0 {
+			return cfg.LlamaServer.ContextSize
+		}
+		return cfg.MistralRS.MaxSeqLen
+	}
+}
+
 func addCloudProfileFields(fields routinglog.Event, prefix string, cfg config.Config, name string) {
 	if name == "" {
 		return
@@ -431,8 +445,13 @@ func (c *Core) runLoop(
 	profile agent.Profile,
 ) (agent.ToolLoopResult, error) {
 	maxIterations := 0
+	contextWindow := 0
 	if c.d.Config != nil {
-		maxIterations = c.d.Config.Get().ToolLoop.MaxIterations
+		cfgSnap := c.d.Config.Get()
+		maxIterations = cfgSnap.ToolLoop.MaxIterations
+		if !isCloud {
+			contextWindow = localContextWindow(cfgSnap)
+		}
 	}
 
 	return agent.RunToolLoop(ctx, agent.ToolLoopInput{
@@ -453,6 +472,7 @@ func (c *Core) runLoop(
 		OnTextDelta:         onTextDelta,
 		OnTurnComplete:      onTurn,
 		MaxIterations:       maxIterations,
+		ContextWindow:       contextWindow,
 		WatchdogGate:        wdGate,
 		WatchdogTurnEnd:     wdTurnEnd,
 	})

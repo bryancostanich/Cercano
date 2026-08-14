@@ -542,7 +542,7 @@ func Defaults() Config {
 				Providers: map[string]VendorCostTiers{
 					"anthropic": {
 						Economy:  CostTierModel{Model: "claude-haiku-4-5"},
-						Standard: CostTierModel{Model: "claude-opus-5-0"},
+						Standard: CostTierModel{Model: "claude-opus-5"},
 						Premium:  CostTierModel{Model: "claude-fable-5"},
 					},
 					"openai": {

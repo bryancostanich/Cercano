@@ -6,7 +6,7 @@ func sampleProfiles() ModelProfiles {
 	return ModelProfiles{Cloud: CloudCostProfiles{Providers: map[string]VendorCostTiers{
 		"anthropic": {
 			Economy:  CostTierModel{Model: "claude-haiku-4-5"},
-			Standard: CostTierModel{Model: "claude-opus-5-0"},
+			Standard: CostTierModel{Model: "claude-opus-5"},
 			Premium:  CostTierModel{Model: "claude-fable-5"},
 		},
 		"openai": {
@@ -24,7 +24,7 @@ func TestResolveCloud(t *testing.T) {
 		ok     bool
 	}{
 		{"anthropic", CostEconomy, "claude-haiku-4-5", true},
-		{"anthropic", CostStandard, "claude-opus-5-0", true},
+		{"anthropic", CostStandard, "claude-opus-5", true},
 		{"anthropic", CostPremium, "claude-fable-5", true},
 		{"openai", CostStandard, "gpt-5.5", true},
 		{"openai", CostEconomy, "", false},  // slot unset
@@ -84,7 +84,7 @@ func TestInferProviderVendor(t *testing.T) {
 func TestResolveCloudModelForTier(t *testing.T) {
 	m := ModelProfiles{Cloud: CloudCostProfiles{Providers: map[string]VendorCostTiers{
 		"anthropic": {
-			Standard: CostTierModel{Model: "claude-opus-5-0"},
+			Standard: CostTierModel{Model: "claude-opus-5"},
 			Premium:  CostTierModel{Model: "claude-fable-5"},
 		},
 	}}}
@@ -99,7 +99,7 @@ func TestResolveCloudModelForTier(t *testing.T) {
 		want string
 	}{
 		{"table hit premium", anthro, TierMostCapable, "claude-fable-5"},
-		{"table hit standard", anthro, TierEveryday, "claude-opus-5-0"},
+		{"table hit standard", anthro, TierEveryday, "claude-opus-5"},
 		{"tier slot unset -> empty", anthro, TierFastLight, ""},
 		{"embedding has no cost tier -> empty", anthro, TierEmbedding, ""},
 		{"profile pin overrides table", pinned, TierMostCapable, "claude-custom"},

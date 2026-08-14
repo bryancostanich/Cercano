@@ -81,7 +81,7 @@ func TestSetActiveCloudProfileCancelsInFlightTurns(t *testing.T) {
 		ActiveCloudProfile: "claude",
 		BackupCloudProfile: "openai-responses",
 		CloudProfiles: []config.CloudProfile{
-			{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0", ModelPinned: true},
+			{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5", ModelPinned: true},
 			{Name: "openai-responses", Flavor: "responses", Route: "chatgpt", Model: "gpt-5.5", ModelPinned: true},
 		},
 	})
@@ -118,7 +118,7 @@ func TestSetActiveCloudProfileSwapsCurrentBackupToPreviousActive(t *testing.T) {
 		BackupCloudProfile: "claude",
 		CloudProfiles: []config.CloudProfile{
 			{Name: "openai-responses", Flavor: "responses", Route: "chatgpt", Model: "gpt-5.5", ModelPinned: true},
-			{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0", ModelPinned: true},
+			{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5", ModelPinned: true},
 		},
 	})
 	if err := s.cfgSvc.Secrets().Set("claude", "sk-test"); err != nil {
@@ -564,18 +564,18 @@ func TestUpdateConfig_CloudModel_UpdatesActiveProfile(t *testing.T) {
 	defer unsub()
 
 	resp, err := s.UpdateConfig(t.Context(), &proto.UpdateConfigRequest{
-		CloudModel: "claude-opus-5-0",
+		CloudModel: "claude-opus-5",
 	})
 	if err != nil || !resp.Success {
 		t.Fatalf("UpdateConfig: err=%v resp=%+v", err, resp)
 	}
 
-	if got := s.activeCloudModel(); got != "claude-opus-5-0" {
-		t.Errorf("activeCloudModel() = %q, want claude-opus-5-0", got)
+	if got := s.activeCloudModel(); got != "claude-opus-5" {
+		t.Errorf("activeCloudModel() = %q, want claude-opus-5", got)
 	}
 	p, ok := s.activeProfile()
-	if !ok || p.Model != "claude-opus-5-0" {
-		t.Errorf("active profile model = %q (ok=%v), want claude-opus-5-0", p.Model, ok)
+	if !ok || p.Model != "claude-opus-5" {
+		t.Errorf("active profile model = %q (ok=%v), want claude-opus-5", p.Model, ok)
 	}
 
 	select {

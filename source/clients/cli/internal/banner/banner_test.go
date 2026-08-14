@@ -41,7 +41,7 @@ func TestRender_LineCountAndWidth(t *testing.T) {
 func TestRender_LongModelGrowsAndNeverClips(t *testing.T) {
 	tagline, version := "local-first ai coprocessor", "v0.1.0"
 	short := Render(theme.Cracker(), Meta{Tagline: tagline, Version: version, Model: "qwen3-coder"})
-	long := Render(theme.Cracker(), Meta{Tagline: tagline, Version: version, Model: "claude-opus-5-0"})
+	long := Render(theme.Cracker(), Meta{Tagline: tagline, Version: version, Model: "claude-opus-5"})
 
 	// Both banners are well-formed rectangles (all lines equal width) …
 	sw := bannerWidth(t, short)
@@ -55,7 +55,7 @@ func TestRender_LongModelGrowsAndNeverClips(t *testing.T) {
 	}
 	// … the model name renders intact on the status line (never clipped) …
 	status := strings.Split(stripAnsi(long), "\n")[6] // border, blank, wm×2, blank, rail, status, border
-	if !strings.Contains(status, "claude-opus-5-0") {
+	if !strings.Contains(status, "claude-opus-5") {
 		t.Fatalf("long model name clipped from status line: %q", status)
 	}
 	// … and the status line fits exactly inside the walls (no overflow past the

@@ -129,7 +129,7 @@ func TestRegistry_Drop(t *testing.T) {
 func TestModelMax_ClaudeGenericMatch(t *testing.T) {
 	// claude-fable-5 was falling through to the 128K unknown-model default,
 	// silently shrinking the context meter's denominator.
-	for _, m := range []string{"claude-fable-5", "claude-mythos-5", "claude-opus-5-0", "CLAUDE-SONNET-5"} {
+	for _, m := range []string{"claude-fable-5", "claude-mythos-5", "claude-opus-5", "CLAUDE-SONNET-5"} {
 		if got := ModelMax(m); got != 200_000 {
 			t.Errorf("ModelMax(%q) = %d, want 200000", m, got)
 		}

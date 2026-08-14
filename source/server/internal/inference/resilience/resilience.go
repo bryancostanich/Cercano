@@ -35,6 +35,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -67,10 +68,10 @@ type Event struct {
 // house style: "<provider> <what happened> — <what we're doing>".
 func (e Event) Notice() string {
 	what := map[llm.ErrorClass]string{
-		llm.ErrQuota:          "quota reached",
-		llm.ErrBusy:           "server busy",
-		llm.ErrAuth:           "auth failed",
-		llm.ErrNetwork:        "unreachable",
+		llm.ErrQuota:           "quota reached",
+		llm.ErrBusy:            "server busy",
+		llm.ErrAuth:            "auth failed",
+		llm.ErrNetwork:         "unreachable",
 		llm.ErrInvalidRequest:  "rejected the request",
 		llm.ErrContextOverflow: "context window exceeded",
 		llm.ErrUnknown:         "failed",
@@ -231,8 +232,29 @@ func (p *Provider) quotaCoolingDown() bool {
 // on any model whose window is the same or smaller (and dispatch sub-agents
 // often have no backup at all), so it is surfaced rather than failed over.
 // Everything else is a primary-side condition a backup could dodge.
-func failsOver(class llm.ErrorClass) bool {
-	return class != llm.ErrInvalidRequest && class != llm.ErrContextOverflow
+func failsOver(class llm.ErrorClass, err error) bool {
+	if class == llm.ErrContextOverflow {
+		return false
+	}
+	if class == llm.ErrInvalidRequest {
+		return isProviderModelUnavailable(err)
+	}
+	return true
+}
+
+func isProviderModelUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	m := strings.ToLower(err.Error())
+	if strings.Contains(m, "model:") && (strings.Contains(m, "not_found") || strings.Contains(m, "not found")) {
+		return true
+	}
+	return strings.Contains(m, "model not found") ||
+		strings.Contains(m, "model_not_found") ||
+		strings.Contains(m, "unsupported model") ||
+		strings.Contains(m, "model unavailable") ||
+		strings.Contains(m, "model is not supported")
 }
 
 // backupRequest rewrites the request into the backup provider's model
@@ -265,7 +287,7 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 		}
 	}
 	class := llm.ClassOf(err)
-	if p.backup == nil || !failsOver(class) {
+	if p.backup == nil || !failsOver(class, err) {
 		p.emit(Event{Action: ActionSurface, Stage: "chat", Class: class,
 			From: p.primary.Name(), Err: err})
 		return inference.Result{}, err
@@ -393,7 +415,7 @@ func (r *reader) decide(stage string, err error) bool {
 		}
 		return true
 	}
-	if p.backup != nil && failsOver(class) && !r.failedOver {
+	if p.backup != nil && failsOver(class, err) && !r.failedOver {
 		r.failedOver = true
 		if class == llm.ErrQuota {
 			p.markQuotaCooldown(err)

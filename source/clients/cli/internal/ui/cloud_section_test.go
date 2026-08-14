@@ -219,10 +219,10 @@ func TestCloudSectionSubscriptionProfileIsOAuthOnly(t *testing.T) {
 	sp := cloudSamplePage()
 	sp.cloudView.Providers[0].PrimaryProfile = "claude"
 	sp.cloudView.Providers[0].Profiles = []agentclient.CloudProfileInfo{{
-		Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0",
+		Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5",
 	}}
 	sp.profiles = append(sp.profiles, agentclient.CloudProfileInfo{
-		Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0",
+		Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5",
 	})
 
 	sp.selectCloudRow("profile:claude")
@@ -249,10 +249,10 @@ func TestCloudSectionDirectAnthropicProfileDoesNotShowSubscriptionSignIn(t *test
 	sp := cloudSamplePage()
 	sp.cloudView.Providers[0].PrimaryProfile = "anthropic"
 	sp.cloudView.Providers[0].Profiles = []agentclient.CloudProfileInfo{{
-		Name: "anthropic", Flavor: "messages", Model: "claude-opus-5-0", HasKey: true,
+		Name: "anthropic", Flavor: "messages", Model: "claude-opus-5", HasKey: true,
 	}}
 	sp.profiles = append(sp.profiles, agentclient.CloudProfileInfo{
-		Name: "anthropic", Flavor: "messages", Model: "claude-opus-5-0", HasKey: true,
+		Name: "anthropic", Flavor: "messages", Model: "claude-opus-5", HasKey: true,
 	})
 
 	sp.selectCloudRow("profile:anthropic")
@@ -302,12 +302,12 @@ func TestCloudSectionCanonicalSubscriptionOwnsSignIn(t *testing.T) {
 	sp := cloudSamplePage()
 	sp.cloudView.Providers[0].PrimaryProfile = "anthropic"
 	sp.cloudView.Providers[0].Profiles = []agentclient.CloudProfileInfo{
-		{Name: "anthropic", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0"},
-		{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0"},
+		{Name: "anthropic", Flavor: "messages", Route: "subscription", Model: "claude-opus-5"},
+		{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5"},
 	}
 	sp.profiles = append(sp.profiles,
-		agentclient.CloudProfileInfo{Name: "anthropic", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0"},
-		agentclient.CloudProfileInfo{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0"},
+		agentclient.CloudProfileInfo{Name: "anthropic", Flavor: "messages", Route: "subscription", Model: "claude-opus-5"},
+		agentclient.CloudProfileInfo{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5"},
 	)
 
 	sp.selectCloudRow("profile:anthropic")

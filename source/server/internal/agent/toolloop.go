@@ -393,6 +393,13 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		maxTokens = in.MaxTokensPerTurn
 	}
 
+	if reduced, trimmed := reduceHistoryToContextTail(in.System, in.ConvHistory, in.UserInput, len(in.Images), in.ContextWindow); trimmed {
+		in.ConvHistory = reduced
+		if in.EventSink != nil {
+			in.EventSink(LoopEvent{Kind: LoopNotice, Summary: "local context is smaller — using recent conversation tail only"})
+		}
+	}
+
 	// Pre-flight size guard: before spending a provider round-trip (and, for a
 	// local model, a warm-up), estimate the prompt size against the resolved
 	// window and fail fast with an actionable, size-classified error. Counts

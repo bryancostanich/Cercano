@@ -122,14 +122,14 @@ func TestConfigLoadedCloudChipPrefersModelDuringTransientCloudState(t *testing.T
 	}
 	updated, _ := m.Update(configLoadedMsg{
 		OpenModel:          "qwen3-30b-a3b-instruct-2507",
-		CloudModel:         "claude-opus-5-0",
+		CloudModel:         "claude-opus-5",
 		ActiveCloudProfile: "claude",
 		CloudConfigured:    false,
 	})
 	m = updated.(Model)
 
 	out := stripAnsiCSI(m.renderHeader())
-	if !strings.Contains(out, "c:opus 5.0") {
+	if !strings.Contains(out, "c:opus-5") {
 		t.Fatalf("header should show the cloud model, not the active profile name, got %q", out)
 	}
 	if strings.Contains(out, "c:claude") {

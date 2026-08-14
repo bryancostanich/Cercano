@@ -64,11 +64,11 @@ func TestBuildBackupResolvesUnpinnedCloudProfileModel(t *testing.T) {
 	if !ok {
 		t.Fatalf("buildBackup should build backup profile")
 	}
-	if got := backupModelFor(""); got != "claude-opus-5-0" {
-		t.Fatalf("untiered backup model = %q, want claude-opus-5-0", got)
+	if got := backupModelFor(""); got != "claude-opus-5" {
+		t.Fatalf("untiered backup model = %q, want claude-opus-5", got)
 	}
-	if got := backupModelFor(string(config.TierEveryday)); got != "claude-opus-5-0" {
-		t.Fatalf("everyday backup model = %q, want claude-opus-5-0", got)
+	if got := backupModelFor(string(config.TierEveryday)); got != "claude-opus-5" {
+		t.Fatalf("everyday backup model = %q, want claude-opus-5", got)
 	}
 }
 

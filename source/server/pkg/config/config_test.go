@@ -598,7 +598,7 @@ func TestSave_StripsUnpinnedCloudDefaults(t *testing.T) {
 		t.Fatalf("read back: %v", err)
 	}
 	text := string(data)
-	for _, banned := range []string{"claude-opus-5-0", "model_profiles:", "model_pinned:"} {
+	for _, banned := range []string{"claude-opus-5", "model_profiles:", "model_pinned:"} {
 		if strings.Contains(text, banned) {
 			t.Fatalf("saved YAML should not persist baked cloud defaults %q:\n%s", banned, text)
 		}
@@ -756,9 +756,9 @@ func TestCollapseLegacySubscriptionAliasesKeepsCanonicalProfile(t *testing.T) {
 	cfg := &Config{
 		CloudProfiles: []CloudProfile{
 			{Name: "default", Flavor: "messages", Route: "subscription", Model: "claude-fable-5"},
-			{Name: "anthropic", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0"},
+			{Name: "anthropic", Flavor: "messages", Route: "subscription", Model: "claude-opus-5"},
 			{Name: "openai-responses", Flavor: "responses", Route: "chatgpt", Model: "gpt-5.5"},
-			{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0"},
+			{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5"},
 		},
 		ActiveCloudProfile: "anthropic",
 		BackupCloudProfile: "default",
@@ -792,8 +792,8 @@ func TestCollapseLegacySubscriptionAliasesKeepsCanonicalProfile(t *testing.T) {
 
 func TestCollapseLegacySubscriptionAliasesPreservesDirectProfile(t *testing.T) {
 	cfg := &Config{CloudProfiles: []CloudProfile{
-		{Name: "anthropic", Flavor: "messages", Route: "", Model: "claude-opus-5-0"},
-		{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0"},
+		{Name: "anthropic", Flavor: "messages", Route: "", Model: "claude-opus-5"},
+		{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5"},
 	}}
 
 	collapseLegacySubscriptionAliases(cfg)
@@ -826,8 +826,8 @@ func TestNormalizeCloudModelDefaultsClearsPersistedDefaults(t *testing.T) {
 	if got := cfg.CloudProfiles[1].Model; got != "claude-custom" || !cfg.CloudProfiles[1].ModelPinned {
 		t.Fatalf("custom model should become an explicit pin, got model=%q pinned=%v", got, cfg.CloudProfiles[1].ModelPinned)
 	}
-	if got := cfg.ModelProfiles.Cloud.Providers["anthropic"].Standard.Model; got != "claude-opus-5-0" {
-		t.Fatalf("baked anthropic standard model = %q, want claude-opus-5-0", got)
+	if got := cfg.ModelProfiles.Cloud.Providers["anthropic"].Standard.Model; got != "claude-opus-5" {
+		t.Fatalf("baked anthropic standard model = %q, want claude-opus-5", got)
 	}
 }
 
@@ -858,11 +858,11 @@ model_profiles:
 	if got := cfg.CloudProfiles[0].Model; got != "" {
 		t.Fatalf("loaded default-derived profile model should be cleared, got %q", got)
 	}
-	if got := cfg.ModelProfiles.ResolveCloudModelForTier(cfg.CloudProfiles[0], TierEveryday); got != "claude-opus-5-0" {
-		t.Fatalf("loaded profile effective model = %q, want claude-opus-5-0", got)
+	if got := cfg.ModelProfiles.ResolveCloudModelForTier(cfg.CloudProfiles[0], TierEveryday); got != "claude-opus-5" {
+		t.Fatalf("loaded profile effective model = %q, want claude-opus-5", got)
 	}
-	if got := cfg.ModelProfiles.Cloud.Providers["anthropic"].Standard.Model; got != "claude-opus-5-0" {
-		t.Fatalf("loaded baked standard model = %q, want claude-opus-5-0", got)
+	if got := cfg.ModelProfiles.Cloud.Providers["anthropic"].Standard.Model; got != "claude-opus-5" {
+		t.Fatalf("loaded baked standard model = %q, want claude-opus-5", got)
 	}
 }
 
@@ -877,11 +877,11 @@ func TestLoadCollapsesLegacySubscriptionAliases(t *testing.T) {
   - name: anthropic
     flavor: messages
     route: subscription
-    model: claude-opus-5-0
+    model: claude-opus-5
   - name: claude
     flavor: messages
     route: subscription
-    model: claude-opus-5-0
+    model: claude-opus-5
   - name: openai-responses
     flavor: responses
     route: chatgpt
@@ -910,8 +910,8 @@ backup_cloud_profile: default
 
 func TestCollapseLegacySubscriptionAliasesRemovesMeridianAlias(t *testing.T) {
 	cfg := &Config{CloudProfiles: []CloudProfile{
-		{Name: "meridian", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0"},
-		{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0"},
+		{Name: "meridian", Flavor: "messages", Route: "subscription", Model: "claude-opus-5"},
+		{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5"},
 	}}
 
 	collapseLegacySubscriptionAliases(cfg)

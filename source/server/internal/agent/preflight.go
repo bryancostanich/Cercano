@@ -17,6 +17,12 @@ import (
 // ErrContextOverflow (see llm/context_overflow.go) remains the backstop.
 const preflightSafetyFraction = 0.9
 
+// localTailContextFraction is the share of a local/open context window used for
+// automatic history tailing. It is intentionally lower than the hard preflight
+// guard so the reduced prompt has room for provider-specific overhead and the
+// model's answer.
+const localTailContextFraction = 0.8
+
 // estimateTokens returns a rough token count for s using the standard
 // ~4-characters-per-token heuristic. It is intentionally cheap and
 // provider-agnostic: no tokenizer, no network round-trip, no per-model vocab.
@@ -48,6 +54,33 @@ func estimateMessageTokens(m llm.Message) int {
 // estimate is closer than len(base64)/4 would be. It only needs to be in the
 // right order of magnitude for the guardrail.
 const perImageTokenEstimate = 1000
+
+func reduceHistoryToContextTail(system string, history []llm.Message, userInput string, images int, window int) ([]llm.Message, bool) {
+	if window <= 0 || len(history) == 0 {
+		return history, false
+	}
+	budget := int(float64(window) * localTailContextFraction)
+	fixed := estimateTokens(system) + estimateTokens(userInput) + images*perImageTokenEstimate
+	remaining := budget - fixed
+	if remaining <= 0 {
+		return nil, len(history) > 0
+	}
+
+	kept := make([]llm.Message, 0, len(history))
+	used := 0
+	for i := len(history) - 1; i >= 0; i-- {
+		cost := estimateMessageTokens(history[i])
+		if used+cost > remaining {
+			break
+		}
+		used += cost
+		kept = append(kept, history[i])
+	}
+	for i, j := 0, len(kept)-1; i < j; i, j = i+1, j-1 {
+		kept[i], kept[j] = kept[j], kept[i]
+	}
+	return kept, len(kept) != len(history)
+}
 
 // preflightContextCheck estimates the total prompt size (system prompt +
 // prior history + this turn's user input + any inline images) and returns a

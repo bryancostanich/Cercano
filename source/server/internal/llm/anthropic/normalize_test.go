@@ -34,7 +34,7 @@ func fixture(t *testing.T, status int, header map[string]string, body string) (*
 func chatErr(t *testing.T, c *Client) error {
 	t.Helper()
 	_, err := c.Chat(context.Background(), llm.ChatRequest{
-		Model:    "claude-opus-5-0",
+		Model:    "claude-opus-5",
 		Messages: []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "hi"}}}},
 	})
 	if err == nil {

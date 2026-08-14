@@ -195,7 +195,7 @@ func TestChat_QuotaFailsOverImmediately(t *testing.T) {
 	backup := &fakeProvider{name: "openai"}
 	p, events, slept := build(primary, backup)
 
-	res, err := p.Chat(context.Background(), inference.Call{Model: "claude-opus-5-0"})
+	res, err := p.Chat(context.Background(), inference.Call{Model: "claude-opus-5"})
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -215,10 +215,10 @@ func TestChat_QuotaCooldownSkipsPrimaryOnNextTurn(t *testing.T) {
 	backup := &fakeProvider{name: "openai"}
 	p, events, _ := build(primary, backup)
 
-	if _, err := p.Chat(context.Background(), inference.Call{Model: "claude-opus-5-0"}); err != nil {
+	if _, err := p.Chat(context.Background(), inference.Call{Model: "claude-opus-5"}); err != nil {
 		t.Fatalf("first chat err = %v", err)
 	}
-	if _, err := p.Chat(context.Background(), inference.Call{Model: "claude-opus-5-0"}); err != nil {
+	if _, err := p.Chat(context.Background(), inference.Call{Model: "claude-opus-5"}); err != nil {
 		t.Fatalf("second chat err = %v", err)
 	}
 	if primary.calls != 1 {
@@ -241,18 +241,18 @@ func TestChat_QuotaCooldownHonorsRetryAfterAndExpires(t *testing.T) {
 	p, _, _ := build(primary, backup)
 	p.now = func() time.Time { return now }
 
-	if _, err := p.Chat(context.Background(), inference.Call{Model: "claude-opus-5-0"}); err != nil {
+	if _, err := p.Chat(context.Background(), inference.Call{Model: "claude-opus-5"}); err != nil {
 		t.Fatalf("first chat err = %v", err)
 	}
 	now = now.Add(time.Minute)
-	if _, err := p.Chat(context.Background(), inference.Call{Model: "claude-opus-5-0"}); err != nil {
+	if _, err := p.Chat(context.Background(), inference.Call{Model: "claude-opus-5"}); err != nil {
 		t.Fatalf("second chat err = %v", err)
 	}
 	if primary.calls != 1 {
 		t.Fatalf("primary calls after one minute = %d, want 1", primary.calls)
 	}
 	now = now.Add(time.Minute + time.Nanosecond)
-	if _, err := p.Chat(context.Background(), inference.Call{Model: "claude-opus-5-0"}); err != nil {
+	if _, err := p.Chat(context.Background(), inference.Call{Model: "claude-opus-5"}); err != nil {
 		t.Fatalf("third chat err = %v", err)
 	}
 	if primary.calls != 2 {
@@ -274,10 +274,31 @@ func TestChat_InvalidRequestSurfaces(t *testing.T) {
 		t.Fatalf("err = %v, want the surfaced 400", err)
 	}
 	if backup.calls != 0 {
-		t.Error("invalid_request must never fail over")
+		t.Error("malformed invalid_request must not fail over")
 	}
 	if len(*events) != 1 || (*events)[0].Action != ActionSurface {
 		t.Errorf("events = %+v", *events)
+	}
+}
+
+func TestChat_ModelUnavailableInvalidRequestFailsOver(t *testing.T) {
+	bad := &llm.Error{Class: llm.ErrInvalidRequest, Provider: "anthropic", StatusCode: 404, Err: errors.New(`not_found_error: model: claude-opus-5`)}
+	primary := &fakeProvider{name: "anthropic", outcome: []error{bad}}
+	backup := &fakeProvider{name: "openai-responses"}
+	p, events, _ := build(primary, backup)
+
+	res, err := p.Chat(context.Background(), inference.Call{Model: "claude-opus-5"})
+	if err != nil {
+		t.Fatalf("Chat returned error: %v", err)
+	}
+	if res.Model != "openai-responses" {
+		t.Fatalf("result model/provider = %q, want backup", res.Model)
+	}
+	if backup.calls != 1 {
+		t.Fatalf("backup calls = %d, want 1", backup.calls)
+	}
+	if len(*events) != 1 || (*events)[0].Action != ActionFailover || (*events)[0].To != "openai-responses" {
+		t.Fatalf("events = %+v", *events)
 	}
 }
 
@@ -343,7 +364,7 @@ func TestStream_QuotaInjectsNoticeThenBackupContent(t *testing.T) {
 	backup := &fakeProvider{name: "openai"}
 	p, _, _ := build(primary, backup)
 
-	r, err := p.StreamChat(context.Background(), inference.Call{Model: "claude-opus-5-0"})
+	r, err := p.StreamChat(context.Background(), inference.Call{Model: "claude-opus-5"})
 	if err != nil {
 		t.Fatalf("dial err = %v", err)
 	}
@@ -367,14 +388,14 @@ func TestStream_QuotaCooldownSkipsPrimaryOnNextTurnWithoutRepeatedNotice(t *test
 	backup := &fakeProvider{name: "openai"}
 	p, events, _ := build(primary, backup)
 
-	r, err := p.StreamChat(context.Background(), inference.Call{Model: "claude-opus-5-0"})
+	r, err := p.StreamChat(context.Background(), inference.Call{Model: "claude-opus-5"})
 	if err != nil {
 		t.Fatalf("first stream dial err = %v", err)
 	}
 	if _, err := collectStream(t, r); err != nil {
 		t.Fatalf("first stream err = %v", err)
 	}
-	r, err = p.StreamChat(context.Background(), inference.Call{Model: "claude-opus-5-0"})
+	r, err = p.StreamChat(context.Background(), inference.Call{Model: "claude-opus-5"})
 	if err != nil {
 		t.Fatalf("second stream dial err = %v", err)
 	}

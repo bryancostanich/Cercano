@@ -29,6 +29,24 @@ func TestApply_DeltaExtendsOpenAssistant(t *testing.T) {
 	}
 }
 
+func TestApply_WarningProgressPersistsAsSystemEntry(t *testing.T) {
+	cv := newApplyTestView()
+	cv.AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true, Status: "routing"})
+	cv.Apply(chatProgressMsg{note: "⚠ anthropic quota reached — switching to openai-responses"})
+	cv.Apply(chatAssistantDeltaMsg{token: "backup answer"})
+
+	es := cv.Entries()
+	if len(es) != 2 {
+		t.Fatalf("expected warning system entry plus assistant, got %d entries: %+v", len(es), es)
+	}
+	if es[0].Role != RoleSystem || !strings.Contains(es[0].Content, "switching to openai-responses") {
+		t.Fatalf("warning progress should persist as system entry, got %+v", es[0])
+	}
+	if es[1].Role != RoleAssistant || es[1].Content != "backup answer" {
+		t.Fatalf("assistant entry changed unexpectedly: %+v", es[1])
+	}
+}
+
 // After a tool entry closes the open assistant segment, the next delta opens a
 // fresh assistant entry BELOW the tool (post-tool prose ordering).
 func TestApply_DeltaOpensFreshBelowTool(t *testing.T) {

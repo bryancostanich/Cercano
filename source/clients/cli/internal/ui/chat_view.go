@@ -508,9 +508,23 @@ func (c *chatView) Apply(msg tea.Msg) tea.Cmd {
 		e.Status = ""
 
 	case chatProgressMsg:
-		// Collapse progress messages onto the open (empty) assistant entry's
-		// Status field — one line that mutates as the agent advances through
-		// phases. Falls back to a normal system entry if there's no open
+		// Warnings/notices (notably cloud retry/failover narration) must be
+		// durable transcript entries. If they live only in the streaming status
+		// field, the first token clears them and users miss important routing
+		// changes.
+		if strings.HasPrefix(m.note, "⚠ ") {
+			warning := &Entry{Role: RoleSystem, Content: m.note}
+			if n := len(c.entries); n > 0 && c.entries[n-1].Role == RoleAssistant && c.entries[n-1].Streaming {
+				c.entries = append(c.entries[:n-1], append([]*Entry{warning}, c.entries[n-1:]...)...)
+				c.markTranscriptDirty()
+			} else {
+				c.AppendEntry(warning)
+			}
+			break
+		}
+		// Collapse ordinary progress messages onto the open (empty) assistant
+		// entry's Status field — one line that mutates as the agent advances
+		// through phases. Falls back to a normal system entry if there's no open
 		// streaming assistant to attach to.
 		if e := c.streamingTextEntry(); e != nil && e.Content == "" {
 			e.Status = m.note

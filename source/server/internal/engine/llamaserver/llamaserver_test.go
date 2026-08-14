@@ -174,6 +174,7 @@ type fakeRuntimeManager struct {
 	instances     []localruntime.InstanceRecord
 	startEndpoint string
 	startCount    int
+	startModelID  string
 	// onInstances, when set, overrides the instances list per call (1-based
 	// call counter) — lets a test walk an instance through starting → running
 	// the way the provider's background finishReadiness would.
@@ -200,6 +201,7 @@ func (m *fakeRuntimeManager) SetEndpoints([]localruntime.EndpointRecord) {}
 func (m *fakeRuntimeManager) UpdateInstance(localruntime.InstanceRecord) {}
 func (m *fakeRuntimeManager) Start(_ context.Context, req localruntime.StartRequest) (*localruntime.InstanceRecord, error) {
 	m.startCount++
+	m.startModelID = req.ModelID
 	instance := localruntime.InstanceRecord{
 		ID:        "started",
 		Runtime:   runtimeName,
@@ -236,8 +238,8 @@ func (m *fakeRuntimeManager) Status(context.Context) (*localruntime.StatusSnapsh
 func (m *fakeRuntimeManager) Logs(context.Context, localruntime.LogRequest) ([]localruntime.LogEntry, error) {
 	return nil, nil
 }
-func (m *fakeRuntimeManager) WriteLog(localruntime.LogEntry)              {}
-func (m *fakeRuntimeManager) RegisterObserver(localruntime.Observer)      {}
+func (m *fakeRuntimeManager) WriteLog(localruntime.LogEntry)         {}
+func (m *fakeRuntimeManager) RegisterObserver(localruntime.Observer) {}
 
 func TestComplete_TemperatureOption(t *testing.T) {
 	var sawPayload chatCompletionRequest

@@ -262,9 +262,18 @@ func (e *Engine) endpointFor(ctx context.Context, requested string) (endpoint st
 		}
 		return endpoint, modelNameForRequest(selected, requested), selected.SupportsVision, nil
 	}
+	// Start with the resolved record's ID (the catalog ID when we matched a
+	// catalog record), not the bare requested name. Passing the bare name makes
+	// the manager re-resolve independently, which can land on a path-discovered
+	// record that lacks catalog metadata such as MmprojPath — launching a vision
+	// model WITHOUT --mmproj and silently degrading it to text-only.
+	startModelID := requested
+	if selected.ID != "" {
+		startModelID = selected.ID
+	}
 	start, err := e.Manager.Start(ctx, localruntime.StartRequest{
 		Runtime: runtimeName,
-		ModelID: requested,
+		ModelID: startModelID,
 	})
 	if err != nil {
 		return "", "", false, err

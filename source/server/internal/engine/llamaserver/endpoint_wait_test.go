@@ -40,6 +40,51 @@ func TestMatchRuntimeModelPrefersExactCatalogRecord(t *testing.T) {
 	}
 }
 
+// TestEndpointFor_StartsWithResolvedCatalogID guards the vision-model launch
+// path: a bare tier override (e.g. "gemma-3-4b-it-q4_k_m") must resolve to the
+// catalog record and be started by its catalog ID, so the manager launches with
+// the catalog's MmprojPath (--mmproj) instead of re-resolving to a
+// path-discovered record that would drop the projector and run text-only.
+func TestEndpointFor_StartsWithResolvedCatalogID(t *testing.T) {
+	catalogID := runtimeName + ":catalog:gemma-3-4b-it-q4_k_m"
+	manager := &fakeRuntimeManager{
+		startEndpoint: "http://127.0.0.1:4243",
+		models: []localruntime.ModelRecord{
+			{
+				ID:            runtimeName + ":7dad57faada8",
+				DisplayName:   "gemma-3-4b-it-Q4_K_M",
+				Runtime:       runtimeName,
+				Path:          "/models/gemma-3-4b-it-q4_k_m/gemma-3-4b-it-Q4_K_M.gguf",
+				DownloadState: localruntime.Downloaded,
+			},
+			{
+				ID:             catalogID,
+				DisplayName:    "Gemma 3 4B Instruct Q4_K_M",
+				Runtime:        runtimeName,
+				Path:           "/models/gemma-3-4b-it-q4_k_m/gemma-3-4b-it-Q4_K_M.gguf",
+				SupportsVision: true,
+				MmprojPath:     "/models/gemma-3-4b-it-q4_k_m/mmproj-model-f16.gguf",
+				DownloadState:  localruntime.Downloaded,
+			},
+		},
+	}
+	e := &Engine{Manager: manager}
+
+	endpoint, _, supportsVision, err := e.endpointFor(context.Background(), "gemma-3-4b-it-q4_k_m")
+	if err != nil {
+		t.Fatalf("endpointFor: %v", err)
+	}
+	if endpoint != "http://127.0.0.1:4243" {
+		t.Fatalf("endpoint = %q", endpoint)
+	}
+	if !supportsVision {
+		t.Fatal("expected supportsVision true from catalog record")
+	}
+	if manager.startModelID != catalogID {
+		t.Fatalf("Start ModelID = %q, want resolved catalog ID %q", manager.startModelID, catalogID)
+	}
+}
+
 func startingInstance(state localruntime.InstanceState, lastErr string) localruntime.InstanceRecord {
 	return localruntime.InstanceRecord{
 		ID:        "inst-1",

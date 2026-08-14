@@ -10,6 +10,7 @@ import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/ollamacatalog"
+	"cercano/source/server/internal/routinglog"
 	"cercano/source/server/internal/usage"
 	"cercano/source/server/internal/watchdog"
 	"cercano/source/server/internal/worker"
@@ -66,6 +67,7 @@ func (r *openResolver) CloudLLMProvider() inference.Provider                    
 func (r *openResolver) OpenLLMProvider() inference.Provider                             { return nil }
 func (r *openResolver) SetCatalogManager(_ *ollamacatalog.Manager)                      {}
 func (r *openResolver) SetUsageSink(_ func(usage.Usage))                                {}
+func (r *openResolver) SetRoutingLog(_ *routinglog.Writer)                              {}
 
 // TestBuildWorkerWatchdog_DisabledIsNil confirms the default-off path: an
 // unset (or explicitly disabled) watchdog config yields a nil watchdog, exactly

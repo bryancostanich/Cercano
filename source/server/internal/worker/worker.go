@@ -327,6 +327,9 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 	if err != nil {
 		log.Printf("[routing] worker open log: %v", err)
 	}
+	if provSvc != nil {
+		provSvc.SetRoutingLog(routeLog)
+	}
 
 	return runner.Deps{
 		Providers: provSvc,
@@ -636,6 +639,7 @@ func (r *workerResolver) OpenLLMProvider() inference.Provider                   
 func (r *workerResolver) Reconfigure(_ providerssvc.ReconfigureArgs)                      {}
 func (r *workerResolver) SetCatalogManager(_ *ollamacatalog.Manager)                      {}
 func (r *workerResolver) SetUsageSink(_ func(usage.Usage))                                {}
+func (r *workerResolver) SetRoutingLog(_ *routinglog.Writer)                              {}
 
 // The worker's capability/tool stack is assembled by buildWorkerToolSvc (see
 // worker_dispatch.go) through the shared internal/toolstack builder — the same

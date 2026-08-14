@@ -33,6 +33,7 @@ import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/ollamacatalog"
+	"cercano/source/server/internal/routinglog"
 	"cercano/source/server/internal/runner"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/usage"
@@ -145,6 +146,7 @@ func (f *echoResolver) CloudLLMProvider() inference.Provider                    
 func (f *echoResolver) OpenLLMProvider() inference.Provider                             { return nil }
 func (f *echoResolver) SetCatalogManager(_ *ollamacatalog.Manager)                      {}
 func (f *echoResolver) SetUsageSink(_ func(usage.Usage))                                {}
+func (f *echoResolver) SetRoutingLog(_ *routinglog.Writer)                              {}
 
 // ─── hostTestToolSvc ─────────────────────────────────────────────────────────
 

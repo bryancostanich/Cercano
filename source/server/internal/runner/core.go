@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -131,10 +132,11 @@ func (c *Core) RunTurn(
 		// result so the host can send a terminal FinalResponse.
 		return Result{FinalText: "Locus: " + err.Error()}, nil
 	}
+	selectedModel := c.d.Providers.MainModel(isCloud)
 	c.logRoute("turn.selected", routinglog.Event{
 		"conversation_id": req.ConversationID,
 		"provider":        providerName(provider),
-		"model":           c.d.Providers.MainModel(isCloud),
+		"model":           selectedModel,
 		"is_cloud":        isCloud,
 		"locus_fell_back": fellBack,
 	})
@@ -142,14 +144,14 @@ func (c *Core) RunTurn(
 		sink.Emit(Event{
 			Kind: EventProgress,
 			Text: fmt.Sprintf("⚠ preferred tier unavailable — falling back to %s (%s)",
-				provider.Name(), c.d.Providers.MainModel(isCloud)),
+				provider.Name(), selectedModel),
 		})
 	}
 
 	// Announce the route so the client shows the correct engine badge.
 	sink.Emit(Event{
 		Kind:    EventRouteSelected,
-		Model:   c.d.Providers.MainModel(isCloud),
+		Model:   selectedModel,
 		IsCloud: isCloud,
 	})
 
@@ -266,16 +268,16 @@ func (c *Core) RunTurn(
 		"conversation_id": req.ConversationID,
 		"attempt":         "primary",
 		"provider":        providerName(provider),
-		"model":           c.d.Providers.MainModel(isCloud),
+		"model":           selectedModel,
 		"is_cloud":        isCloud,
 	})
-	result, loopErr := c.runLoop(ctx, req, provider, isCloud,
+	result, loopErr := c.runLoop(ctx, req, provider, selectedModel, isCloud,
 		loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile)
 	c.logRoute("loop.result", routinglog.Event{
 		"conversation_id": req.ConversationID,
 		"attempt":         "primary",
 		"provider":        providerName(provider),
-		"model":           c.d.Providers.MainModel(isCloud),
+		"model":           selectedModel,
 		"is_cloud":        isCloud,
 		"error_class":     errClassString(loopErr),
 		"error":           errorString(loopErr),
@@ -292,26 +294,26 @@ func (c *Core) RunTurn(
 	// contract the cross-tier fallback below has always relied on. One narrated
 	// attempt on the same provider before any tier change; llm.Retryable owns
 	// the class policy so this site and the resilience engine stay in sync.
-	if loopErr != nil && ctx.Err() == nil && llm.Retryable(llm.ClassOf(loopErr)) {
+	if loopErr != nil && ctx.Err() == nil && !errors.Is(loopErr, context.Canceled) && llm.Retryable(llm.ClassOf(loopErr)) {
 		notice := retryNotice(provider.Name(), llm.ClassOf(loopErr))
 		fmt.Fprintf(os.Stderr, "[resilience] turn retry: %s (%v)\n", provider.Name(), loopErr)
 		c.logRoute("loop.retry", routinglog.Event{
 			"conversation_id": req.ConversationID,
 			"attempt":         "same_provider",
 			"provider":        providerName(provider),
-			"model":           c.d.Providers.MainModel(isCloud),
+			"model":           selectedModel,
 			"is_cloud":        isCloud,
 			"previous_error":  errorString(loopErr),
 			"error_class":     errClassString(loopErr),
 		})
 		sink.Emit(Event{Kind: EventProgress, Text: notice})
-		result, loopErr = c.runLoop(ctx, req, provider, isCloud,
+		result, loopErr = c.runLoop(ctx, req, provider, selectedModel, isCloud,
 			loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile)
 		c.logRoute("loop.result", routinglog.Event{
 			"conversation_id": req.ConversationID,
 			"attempt":         "same_provider_retry",
 			"provider":        providerName(provider),
-			"model":           c.d.Providers.MainModel(isCloud),
+			"model":           selectedModel,
 			"is_cloud":        isCloud,
 			"error_class":     errClassString(loopErr),
 			"error":           errorString(loopErr),
@@ -322,7 +324,7 @@ func (c *Core) RunTurn(
 
 	// 7. Cross-tier fallback: on error, attempt the other tier if locus allows.
 	var fallbackNotice string
-	if loopErr != nil {
+	if loopErr != nil && ctx.Err() == nil && !errors.Is(loopErr, context.Canceled) {
 		mode := locus.Mode("cloud_primary")
 		if c.d.Config != nil {
 			mode, _ = locus.ParseMode(c.d.Config.Get().LocusMode)
@@ -333,17 +335,18 @@ func (c *Core) RunTurn(
 		if res.Fallback == locus.TierLocal {
 			fbProv, fbCloud = c.d.Providers.Open(), false
 		}
+		fallbackModel := c.d.Providers.MainModel(fbCloud)
 		c.logRoute("fallback.consider", routinglog.Event{
 			"conversation_id":     req.ConversationID,
 			"mode":                string(mode),
 			"cross_allowed":       res.CrossAllowed,
 			"already_fell_back":   fellBack,
 			"from_provider":       providerName(provider),
-			"from_model":          c.d.Providers.MainModel(isCloud),
+			"from_model":          selectedModel,
 			"from_is_cloud":       isCloud,
 			"fallback_tier":       res.Fallback.String(),
 			"fallback_provider":   providerName(fbProv),
-			"fallback_model":      c.d.Providers.MainModel(fbCloud),
+			"fallback_model":      fallbackModel,
 			"fallback_is_cloud":   fbCloud,
 			"trigger_error_class": errClassString(loopErr),
 			"trigger_error":       errorString(loopErr),
@@ -353,25 +356,26 @@ func (c *Core) RunTurn(
 			sink.Emit(Event{Kind: EventProgress, Text: fallbackNotice})
 			sink.Emit(Event{
 				Kind:    EventRouteSelected,
-				Model:   c.d.Providers.MainModel(fbCloud),
+				Model:   fallbackModel,
 				IsCloud: fbCloud,
 			})
 			provider = fbProv
 			isCloud = fbCloud
+			selectedModel = fallbackModel
 			c.logRoute("loop.start", routinglog.Event{
 				"conversation_id": req.ConversationID,
 				"attempt":         "cross_tier_fallback",
 				"provider":        providerName(fbProv),
-				"model":           c.d.Providers.MainModel(fbCloud),
+				"model":           fallbackModel,
 				"is_cloud":        fbCloud,
 			})
-			result, loopErr = c.runLoop(ctx, req, fbProv, fbCloud,
+			result, loopErr = c.runLoop(ctx, req, fbProv, fallbackModel, fbCloud,
 				loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile)
 			c.logRoute("loop.result", routinglog.Event{
 				"conversation_id": req.ConversationID,
 				"attempt":         "cross_tier_fallback",
 				"provider":        providerName(fbProv),
-				"model":           c.d.Providers.MainModel(fbCloud),
+				"model":           fallbackModel,
 				"is_cloud":        fbCloud,
 				"error_class":     errClassString(loopErr),
 				"error":           errorString(loopErr),
@@ -379,9 +383,9 @@ func (c *Core) RunTurn(
 				"output_tokens":   result.OutputTokens,
 			})
 		}
-		if loopErr != nil {
-			return Result{}, fmt.Errorf("tool loop error: %w", loopErr)
-		}
+	}
+	if loopErr != nil {
+		return Result{}, fmt.Errorf("tool loop error: %w", loopErr)
 	}
 
 	// Post-turn bookkeeping: recap, compaction, token accounting. Recap and
@@ -394,7 +398,7 @@ func (c *Core) RunTurn(
 		c.d.Agent.ScheduleRecap(req.ConversationID)
 		c.d.Agent.ScheduleCompaction(req.ConversationID)
 	}
-	c.d.Agent.RecordContextUsage(req.ConversationID, c.d.Providers.MainModel(isCloud),
+	c.d.Agent.RecordContextUsage(req.ConversationID, selectedModel,
 		result.InputTokens, result.OutputTokens)
 
 	return Result{
@@ -413,6 +417,7 @@ func (c *Core) runLoop(
 	ctx context.Context,
 	req Request,
 	provider inference.Provider,
+	model string,
 	isCloud bool,
 	loopSink func(agent.LoopEvent),
 	requester PermissionRequester,
@@ -437,7 +442,7 @@ func (c *Core) runLoop(
 		Profile:             profile,
 		UserInput:           req.Input,
 		Images:              req.Images,
-		Model:               c.d.Providers.MainModel(isCloud),
+		Model:               model,
 		System:              BuildSystemPrompt(c.d, req.WorkDir, profile),
 		WorkDir:             req.WorkDir,
 		ConversationID:      req.ConversationID,

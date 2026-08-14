@@ -17,6 +17,7 @@ import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/ollamacatalog"
+	"cercano/source/server/internal/routinglog"
 	"cercano/source/server/internal/runner"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/usage"
@@ -94,6 +95,7 @@ func (f *fakeResolver) CloudLLMProvider() inference.Provider                    
 func (f *fakeResolver) OpenLLMProvider() inference.Provider                             { return nil }
 func (f *fakeResolver) SetCatalogManager(_ *ollamacatalog.Manager)                      {}
 func (f *fakeResolver) SetUsageSink(_ func(usage.Usage))                                {}
+func (f *fakeResolver) SetRoutingLog(_ *routinglog.Writer)                              {}
 
 // fakeConfig satisfies cfgsvc.Service.
 type fakeConfig struct{}

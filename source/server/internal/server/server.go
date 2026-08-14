@@ -779,6 +779,7 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 		profileBroker: agent.NewProfileBroker(),
 	}
 	s.providerSvc = providers.New(cfgService, openModelsResolver, router, coordinator, cloudFactory, registry, nil)
+	s.providerSvc.SetRoutingLog(routeLog)
 	// Build the shared vision-as-tool store and service. Cloud vision is preferred
 	// whenever the current locus permits cloud; open_only remains a hard no-cloud
 	// boundary. The local/open vision lane remains wired as fallback so images can

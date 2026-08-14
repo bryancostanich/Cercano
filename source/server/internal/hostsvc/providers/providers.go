@@ -27,6 +27,7 @@ import (
 	"cercano/source/server/internal/loop"
 	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/openmodels"
+	"cercano/source/server/internal/routinglog"
 	"cercano/source/server/internal/usage"
 	cfg "cercano/source/server/pkg/config"
 )
@@ -108,6 +109,9 @@ type Resolver interface {
 
 	// SetUsageSink installs the token-usage recording sink used by Main().
 	SetUsageSink(fn func(usage.Usage))
+
+	// SetRoutingLog installs the structured routing/failover diagnostic sink.
+	SetRoutingLog(w *routinglog.Writer)
 }
 
 // service is the concrete Resolver implementation.
@@ -128,7 +132,8 @@ type service struct {
 	catalogManager      *ollamacatalog.Manager
 
 	// usageSink wraps the main-loop provider for token recording.
-	usageSink func(usage.Usage)
+	usageSink  func(usage.Usage)
+	routingLog *routinglog.Writer
 }
 
 // New constructs a Resolver with the collaborators it needs.
@@ -154,6 +159,13 @@ func New(
 	}
 }
 
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
 // --- Resolver interface implementation ---
 
 func (p *service) Cloud() inference.Provider              { return p.cloudLLMProvider }
@@ -168,6 +180,7 @@ func (p *service) SetCloudLLMProvider(prov inference.Provider) { p.cloudLLMProvi
 func (p *service) SetOpenLLMProvider(prov inference.Provider)  { p.openLLMProvider = prov }
 func (p *service) SetCatalogManager(cm *ollamacatalog.Manager) { p.catalogManager = cm }
 func (p *service) SetUsageSink(fn func(usage.Usage))           { p.usageSink = fn }
+func (p *service) SetRoutingLog(w *routinglog.Writer)          { p.routingLog = w }
 func (p *service) SetOpenProviderFactory(fn func(cfg.Config) inference.Provider) {
 	p.openProviderFactory = fn
 }
@@ -371,6 +384,20 @@ func (p *service) rebuildCloud() error {
 func (p *service) wrapResilience(primary inference.Provider, primaryName string, c cfg.Config) inference.Provider {
 	opts := resilience.Options{OnEvent: func(ev resilience.Event) {
 		log.Printf("[cloud] resilience %s (%s, %s): %s: %v", ev.Action, ev.Stage, ev.Class, ev.Notice(), ev.Err)
+		if p.routingLog != nil {
+			p.routingLog.Log("cloud.resilience", routinglog.Event{
+				"primary_profile": primaryName,
+				"backup_profile":  c.BackupCloudProfile,
+				"action":          string(ev.Action),
+				"stage":           ev.Stage,
+				"error_class":     string(ev.Class),
+				"from_provider":   ev.From,
+				"to_provider":     ev.To,
+				"wait_ms":         ev.Wait.Milliseconds(),
+				"notice":          ev.Notice(),
+				"error":           errorString(ev.Err),
+			})
+		}
 	}}
 	if backup, backupModelFor, ok := p.buildBackup(primaryName, c); ok {
 		opts.Backup = backup

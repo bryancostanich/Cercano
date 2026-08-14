@@ -14,6 +14,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,6 +30,7 @@ import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/ollamacatalog"
+	"cercano/source/server/internal/routinglog"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/usage"
 	"cercano/source/server/internal/watchdog"
@@ -53,6 +55,19 @@ type turnObservation struct {
 type spyProvider struct {
 	mu           sync.Mutex
 	observations []turnObservation
+}
+
+type cancelProvider struct{}
+
+func (p *cancelProvider) Name() string { return "cancel" }
+func (p *cancelProvider) Capabilities() inference.Capabilities {
+	return inference.Capabilities{SupportsTools: true}
+}
+func (p *cancelProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, context.Canceled
+}
+func (p *cancelProvider) StreamChat(context.Context, llm.ChatRequest) (llm.StreamReader, error) {
+	return nil, context.Canceled
 }
 
 func (p *spyProvider) Name() string { return "spy" }
@@ -111,17 +126,25 @@ func (r *endTurnReader) Close() error { return nil }
 // Only Main() and MainModel() are called by RunTurn; the rest are stubs.
 // ---------------------------------------------------------------------------
 
-type fakeResolver struct{ prov inference.Provider }
+type fakeResolver struct {
+	prov inference.Provider
+	open inference.Provider
+}
 
 func (f *fakeResolver) Main() (inference.Provider, bool, bool, error) {
-	return f.prov, false, false, nil
+	return f.prov, true, false, nil
 }
-func (f *fakeResolver) MainModel(_ bool) string                                         { return "fake-model" }
+func (f *fakeResolver) MainModel(isCloud bool) string {
+	if isCloud {
+		return "fake-cloud-model"
+	}
+	return "fake-open-model"
+}
 func (f *fakeResolver) PrimaryModel() string                                            { return "fake-model" }
 func (f *fakeResolver) Rebuild() error                                                  { return nil }
 func (f *fakeResolver) InstallAbsentCloud(_ string)                                     {}
-func (f *fakeResolver) Cloud() inference.Provider                                       { return nil }
-func (f *fakeResolver) Open() inference.Provider                                        { return nil }
+func (f *fakeResolver) Cloud() inference.Provider                                       { return f.prov }
+func (f *fakeResolver) Open() inference.Provider                                        { return f.open }
 func (f *fakeResolver) ActiveCloudModel() string                                        { return "" }
 func (f *fakeResolver) LocusMode() string                                               { return "" }
 func (f *fakeResolver) Router() providers.RouterCloudUpdater                            { return nil }
@@ -135,6 +158,7 @@ func (f *fakeResolver) CloudLLMProvider() inference.Provider                    
 func (f *fakeResolver) OpenLLMProvider() inference.Provider                             { return nil }
 func (f *fakeResolver) SetCatalogManager(_ *ollamacatalog.Manager)                      {}
 func (f *fakeResolver) SetUsageSink(_ func(usage.Usage))                                {}
+func (f *fakeResolver) SetRoutingLog(_ *routinglog.Writer)                              {}
 
 // ---------------------------------------------------------------------------
 // fakeTurnHistory — minimal TurnHistory; returns empty history.
@@ -233,6 +257,27 @@ func buildDeps(spy inference.Provider) Deps {
 		Perms:     &fakePerms{store: agent.NewStaticPermissionStore(agent.ModePermissive)},
 		Agent:     nil, // nil-safe; RecordContextUsage handles nil receiver
 		Watchdog:  nil,
+	}
+}
+
+func TestCore_ContextCanceledDoesNotCrossTierFallback(t *testing.T) {
+	openSpy := &spyProvider{}
+	deps := buildDeps(&cancelProvider{})
+	deps.Providers = &fakeResolver{prov: &cancelProvider{}, open: openSpy}
+	core := New(deps)
+
+	_, err := core.RunTurn(context.Background(), Request{
+		Input:          "cancel",
+		ConversationID: "cancel-conv",
+		WorkDir:        t.TempDir(),
+	}, noopSink{}, nil, nil)
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunTurn error = %v, want context.Canceled", err)
+	}
+	openSpy.mu.Lock()
+	defer openSpy.mu.Unlock()
+	if len(openSpy.observations) != 0 {
+		t.Fatalf("context-canceled turn should not call fallback/open provider, got %d calls", len(openSpy.observations))
 	}
 }
 

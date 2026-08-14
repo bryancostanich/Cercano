@@ -19,10 +19,6 @@ import (
 	"cercano/source/server/pkg/proto"
 )
 
-// defaultClaudeModel is set on a freshly signed-in subscription profile. The
-// user can change it from the model field afterward.
-const defaultClaudeModel = "claude-sonnet-5"
-
 // StartClaudeLogin implements proto.AgentServer.
 func (s *Server) StartClaudeLogin(req *proto.StartClaudeLoginRequest, stream proto.Agent_StartClaudeLoginServer) error {
 	ctx := stream.Context()
@@ -36,9 +32,7 @@ func (s *Server) StartClaudeLogin(req *proto.StartClaudeLoginRequest, stream pro
 		profile = "claude"
 	}
 	model := strings.TrimSpace(req.GetModel())
-	if model == "" {
-		model = defaultClaudeModel
-	}
+	modelPinned := model != ""
 
 	// Start the loopback authorize and show the user the URL to open.
 	pending, err := anthropicauth.Flow{}.Start(ctx)
@@ -66,11 +60,14 @@ func (s *Server) StartClaudeLogin(req *proto.StartClaudeLoginRequest, stream pro
 	}
 
 	// Create/replace the messages+subscription profile carrying the route.
+	// Empty model means "follow the baked cloud catalog". Only an explicitly
+	// supplied model should become a profile pin.
 	np := config.CloudProfile{
-		Name:   profile,
-		Flavor: cloudfactory.FlavorMessages,
-		Route:  cloudfactory.RouteSubscription,
-		Model:  model,
+		Name:        profile,
+		Flavor:      cloudfactory.FlavorMessages,
+		Route:       cloudfactory.RouteSubscription,
+		Model:       model,
+		ModelPinned: modelPinned,
 	}
 	_, isActive := s.cfgSvc.UpsertProfile(np)
 	if shouldActivateClaudeLogin(req.GetSetActive(), canonicalProfile) {

@@ -1402,7 +1402,7 @@ message StartChatGPTLoginEvent {
 
 message StartClaudeLoginRequest {
   string profile_name = 1; // profile to create/update; default "claude"
-  string model = 2;        // model to set on the profile; default claude-sonnet-5
+  string model = 2;        // optional explicit model pin; empty follows baked cloud defaults
   bool set_active = 3;     // activate the profile on success
 }
 // StartClaudeLoginEvent is one frame of the Claude sign-in stream. The first

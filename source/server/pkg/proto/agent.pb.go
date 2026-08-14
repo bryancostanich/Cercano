@@ -11232,7 +11232,7 @@ func (x *StartChatGPTLoginEvent) GetAccountId() string {
 type StartClaudeLoginRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ProfileName   string                 `protobuf:"bytes,1,opt,name=profile_name,json=profileName,proto3" json:"profile_name,omitempty"` // profile to create/update; default "claude"
-	Model         string                 `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`                                // model to set on the profile; default claude-sonnet-5
+	Model         string                 `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`                                // optional explicit model pin; empty follows baked cloud defaults
 	SetActive     bool                   `protobuf:"varint,3,opt,name=set_active,json=setActive,proto3" json:"set_active,omitempty"`      // activate the profile on success
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

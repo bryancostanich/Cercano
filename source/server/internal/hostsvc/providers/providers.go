@@ -406,6 +406,7 @@ func (p *service) buildBackup(primaryName string, c cfg.Config) (inference.Provi
 		log.Printf("[cloud] backup profile %q has no API key; running without failover", name)
 		return nil, nil, false
 	}
+	bp.Model = c.ModelProfiles.ResolveCloudModelForTier(bp, cfg.TierEveryday)
 	var opts cloudfactory.Options
 	if bp.Flavor == cloudfactory.FlavorResponses && bp.Route == cloudfactory.RouteChatGPT {
 		opts.TokenSource = chatgptauth.NewSource(st, bp.Name, chatgptauth.Flow{})
@@ -429,7 +430,10 @@ func (p *service) buildBackup(primaryName string, c cfg.Config) (inference.Provi
 		if tier == "" {
 			return bp.Model
 		}
-		return profiles.ResolveCloudModelForTier(bp, cfg.Tier(tier))
+		if model := profiles.ResolveCloudModelForTier(bp, cfg.Tier(tier)); model != "" {
+			return model
+		}
+		return bp.Model
 	}
 	return backup, backupModelFor, true
 }

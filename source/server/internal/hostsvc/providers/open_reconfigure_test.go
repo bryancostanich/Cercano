@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/agent"
+	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/pkg/config"
@@ -34,6 +35,41 @@ func (p *labelProvider) Chat(_ context.Context, req inference.Call) (inference.R
 }
 func (p *labelProvider) StreamChat(context.Context, inference.Call) (inference.Stream, error) {
 	return nil, nil
+}
+
+type staticSecretStore struct{ keys map[string]string }
+
+func (s staticSecretStore) Get(profile string) (string, error) { return s.keys[profile], nil }
+func (s staticSecretStore) Set(profile, key string) error      { return nil }
+func (s staticSecretStore) Delete(profile string) error        { return nil }
+func (s staticSecretStore) List() ([]string, error) {
+	out := make([]string, 0, len(s.keys))
+	for k := range s.keys {
+		out = append(out, k)
+	}
+	return out, nil
+}
+
+func TestBuildBackupResolvesUnpinnedCloudProfileModel(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.ActiveCloudProfile = "primary"
+	cfg.BackupCloudProfile = "backup"
+	cfg.CloudProfiles = []config.CloudProfile{
+		{Name: "primary", Provider: "anthropic", Flavor: "messages", Model: "primary-model", ModelPinned: true},
+		{Name: "backup", Provider: "anthropic", Flavor: "messages"},
+	}
+	svc := &service{cfgSvc: cfgsvc.New("", cfg, staticSecretStore{keys: map[string]string{"backup": "sk-test"}})}
+
+	_, backupModelFor, ok := svc.buildBackup("primary", cfg)
+	if !ok {
+		t.Fatalf("buildBackup should build backup profile")
+	}
+	if got := backupModelFor(""); got != "claude-opus-5-0" {
+		t.Fatalf("untiered backup model = %q, want claude-opus-5-0", got)
+	}
+	if got := backupModelFor(string(config.TierEveryday)); got != "claude-opus-5-0" {
+		t.Fatalf("everyday backup model = %q, want claude-opus-5-0", got)
+	}
 }
 
 func TestReconfigure_RebuildsAndResetsOpenTurnRunner(t *testing.T) {

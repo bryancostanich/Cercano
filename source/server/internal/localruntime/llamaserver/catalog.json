@@ -4,7 +4,9 @@
       "id": "qwen3-14b-q4_k_m",
       "display_name": "Qwen3-14B Q4_K_M",
       "repo": "unsloth/Qwen3-14B-GGUF",
-      "files": ["Qwen3-14B-Q4_K_M.gguf"],
+      "files": [
+        "Qwen3-14B-Q4_K_M.gguf"
+      ],
       "arch": "qwen3",
       "quant": "Q4_K_M",
       "family": "qwen",
@@ -16,7 +18,9 @@
       "id": "qwen3-30b-a3b-instruct-2507-q4_k_m",
       "display_name": "Qwen3-30B-A3B Instruct 2507 Q4_K_M",
       "repo": "unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF",
-      "files": ["Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf"],
+      "files": [
+        "Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf"
+      ],
       "arch": "qwen3moe",
       "quant": "Q4_K_M",
       "family": "qwen",
@@ -28,7 +32,9 @@
       "id": "qwen3-30b-a3b-thinking-2507-q4_k_m",
       "display_name": "Qwen3-30B-A3B Thinking 2507 Q4_K_M",
       "repo": "unsloth/Qwen3-30B-A3B-Thinking-2507-GGUF",
-      "files": ["Qwen3-30B-A3B-Thinking-2507-Q4_K_M.gguf"],
+      "files": [
+        "Qwen3-30B-A3B-Thinking-2507-Q4_K_M.gguf"
+      ],
       "arch": "qwen3moe",
       "quant": "Q4_K_M",
       "family": "qwen",
@@ -52,7 +58,15 @@
       "supports_embed": false,
       "plain_chat_ok": true,
       "status": "tested",
-      "extra_args": ["--jinja", "--ctx-size", "32768", "--cache-type-k", "q8_0", "--cache-type-v", "q8_0"]
+      "extra_args": [
+        "--jinja",
+        "--ctx-size",
+        "32768",
+        "--cache-type-k",
+        "q8_0",
+        "--cache-type-v",
+        "q8_0"
+      ]
     },
     "glm-4.5v-q4_k_m": {
       "id": "glm-4.5v-q4_k_m",
@@ -72,13 +86,23 @@
       "supports_vision": true,
       "plain_chat_ok": true,
       "status": "tested",
-      "extra_args": ["--jinja", "--ctx-size", "32768", "--cache-type-k", "q8_0", "--cache-type-v", "q8_0"]
+      "extra_args": [
+        "--jinja",
+        "--ctx-size",
+        "32768",
+        "--cache-type-k",
+        "q8_0",
+        "--cache-type-v",
+        "q8_0"
+      ]
     },
     "glm-4.7-flash-q5_k_m": {
       "id": "glm-4.7-flash-q5_k_m",
       "display_name": "GLM-4.7-Flash Q5_K_M",
       "repo": "unsloth/GLM-4.7-Flash-GGUF",
-      "files": ["GLM-4.7-Flash-Q5_K_M.gguf"],
+      "files": [
+        "GLM-4.7-Flash-Q5_K_M.gguf"
+      ],
       "arch": "deepseek2",
       "quant": "Q5_K_M",
       "family": "glm",
@@ -87,7 +111,9 @@
       "supports_embed": false,
       "plain_chat_ok": true,
       "status": "tested",
-      "extra_args": ["--jinja"]
+      "extra_args": [
+        "--jinja"
+      ]
     },
     "qwen2.5-vl-3b-instruct-q4_k_m": {
       "id": "qwen2.5-vl-3b-instruct-q4_k_m",
@@ -106,14 +132,63 @@
       "supports_embed": false,
       "supports_vision": true,
       "plain_chat_ok": true,
+      "status": "broken",
+      "extra_args": [
+        "--jinja"
+      ],
+      "notes": "ggml-org Q4_K_M GGUF emits @-token garbage on llama.cpp b9890 even for text-only prompts; do not use as vision default"
+    },
+    "gemma-3-4b-it-q4_k_m": {
+      "id": "gemma-3-4b-it-q4_k_m",
+      "display_name": "Gemma 3 4B Instruct Q4_K_M",
+      "repo": "ggml-org/gemma-3-4b-it-GGUF",
+      "files": [
+        "gemma-3-4b-it-Q4_K_M.gguf",
+        "mmproj-model-f16.gguf"
+      ],
+      "mmproj_file": "mmproj-model-f16.gguf",
+      "arch": "gemma3",
+      "quant": "Q4_K_M",
+      "family": "gemma",
+      "size_bytes": 3341000000,
+      "supports_tools": false,
+      "supports_embed": false,
+      "supports_vision": true,
+      "plain_chat_ok": true,
+      "status": "tested",
+      "extra_args": [
+        "--jinja"
+      ]
+    },
+    "moondream2-f16-ct-vicuna": {
+      "id": "moondream2-f16-ct-vicuna",
+      "display_name": "Moondream2 (Vicuna) F16",
+      "repo": "ggml-org/moondream2-20250414-GGUF",
+      "files": [
+        "moondream2-text-model-f16_ct-vicuna.gguf",
+        "moondream2-mmproj-f16-20250414.gguf"
+      ],
+      "mmproj_file": "moondream2-mmproj-f16-20250414.gguf",
+      "arch": "phi2",
+      "quant": "F16",
+      "family": "moondream",
+      "size_bytes": 3750000000,
+      "supports_tools": false,
+      "supports_embed": false,
+      "supports_vision": true,
+      "plain_chat_ok": true,
       "status": "untested",
-      "extra_args": ["--jinja"]
+      "extra_args": [
+        "--jinja"
+      ]
     },
     "phi-4-mini-instruct-q4_k_m": {
       "id": "phi-4-mini-instruct-q4_k_m",
       "display_name": "Phi-4-mini Instruct Q4_K_M",
       "repo": "unsloth/Phi-4-mini-instruct-GGUF",
-      "files": ["Phi-4-mini-instruct-Q4_K_M.gguf"],
+      "files": [
+        "Phi-4-mini-instruct-Q4_K_M.gguf"
+      ],
       "arch": "phi3",
       "quant": "Q4_K_M",
       "family": "phi",
@@ -125,7 +200,9 @@
       "id": "nomic-embed-text-v1.5-f16",
       "display_name": "nomic-embed-text v1.5 F16",
       "repo": "nomic-ai/nomic-embed-text-v1.5-GGUF",
-      "files": ["nomic-embed-text-v1.5.f16.gguf"],
+      "files": [
+        "nomic-embed-text-v1.5.f16.gguf"
+      ],
       "arch": "nomic-bert",
       "quant": "f16",
       "family": "nomic",
@@ -140,7 +217,7 @@
       "everyday": "qwen3-14b-q4_k_m",
       "fast_light": "qwen3-14b-q4_k_m",
       "fast_light_text": "qwen3-14b-q4_k_m",
-      "vision": "qwen2.5-vl-3b-instruct-q4_k_m",
+      "vision": "gemma-3-4b-it-q4_k_m",
       "embedding": "nomic-embed-text-v1.5-f16"
     },
     "48": {
@@ -148,7 +225,7 @@
       "everyday": "glm-4.7-flash-q5_k_m",
       "fast_light": "glm-4.7-flash-q5_k_m",
       "fast_light_text": "glm-4.7-flash-q5_k_m",
-      "vision": "qwen2.5-vl-3b-instruct-q4_k_m",
+      "vision": "gemma-3-4b-it-q4_k_m",
       "embedding": "nomic-embed-text-v1.5-f16"
     },
     "96": {
@@ -156,7 +233,7 @@
       "everyday": "glm-4.5-air-q4_k_m",
       "fast_light": "glm-4.5-air-q4_k_m",
       "fast_light_text": "glm-4.5-air-q4_k_m",
-      "vision": "qwen2.5-vl-3b-instruct-q4_k_m",
+      "vision": "gemma-3-4b-it-q4_k_m",
       "embedding": "nomic-embed-text-v1.5-f16"
     },
     "128": {
@@ -164,7 +241,7 @@
       "everyday": "glm-4.5-air-q4_k_m",
       "fast_light": "glm-4.5-air-q4_k_m",
       "fast_light_text": "glm-4.5-air-q4_k_m",
-      "vision": "qwen2.5-vl-3b-instruct-q4_k_m",
+      "vision": "gemma-3-4b-it-q4_k_m",
       "embedding": "nomic-embed-text-v1.5-f16"
     }
   }

@@ -192,7 +192,46 @@ func TestCatalog_ProfiledVisionTierIsValid(t *testing.T) {
 	}
 }
 
-func TestCatalog_QwenVisionEntry(t *testing.T) {
+func TestCatalog_GemmaVisionEntry(t *testing.T) {
+	cat, err := loadCatalog()
+	if err != nil {
+		t.Fatalf("loadCatalog: %v", err)
+	}
+	gemma, ok := cat.Models["gemma-3-4b-it-q4_k_m"]
+	if !ok {
+		t.Fatal("expected gemma-3-4b-it-q4_k_m in catalog")
+	}
+	if gemma.Repo != "ggml-org/gemma-3-4b-it-GGUF" {
+		t.Fatalf("repo = %q", gemma.Repo)
+	}
+	if !gemma.SupportsVision || gemma.MmprojFile != "mmproj-model-f16.gguf" {
+		t.Fatalf("vision fields = supports:%v mmproj:%q", gemma.SupportsVision, gemma.MmprojFile)
+	}
+	if gemma.SupportsTools {
+		t.Fatal("vision inspector model should not be treated as an agent tool-calling model")
+	}
+	if len(gemma.ExtraArgs) != 1 || gemma.ExtraArgs[0] != "--jinja" {
+		t.Fatalf("gemma vision model must launch with --jinja for typed image content, got %v", gemma.ExtraArgs)
+	}
+	urls := gemma.DownloadURLs()
+	want := []string{
+		"https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf",
+		"https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/mmproj-model-f16.gguf",
+	}
+	if len(urls) != len(want) {
+		t.Fatalf("download URL count = %d, want %d (%v)", len(urls), len(want), urls)
+	}
+	for i := range want {
+		if urls[i] != want[i] {
+			t.Fatalf("url[%d] = %q, want %q", i, urls[i], want[i])
+		}
+	}
+}
+
+// The Qwen2.5-VL Q4_K_M GGUF from ggml-org emits @-token garbage on llama.cpp
+// b9890 even for text-only prompts, so it is retained only as a broken entry and
+// must not be any profile's vision default.
+func TestCatalog_QwenVisionMarkedBroken(t *testing.T) {
 	cat, err := loadCatalog()
 	if err != nil {
 		t.Fatalf("loadCatalog: %v", err)
@@ -201,29 +240,12 @@ func TestCatalog_QwenVisionEntry(t *testing.T) {
 	if !ok {
 		t.Fatal("expected qwen2.5-vl-3b-instruct-q4_k_m in catalog")
 	}
-	if qwen.Repo != "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF" {
-		t.Fatalf("repo = %q", qwen.Repo)
+	if qwen.Status != "broken" {
+		t.Fatalf("qwen status = %q, want broken", qwen.Status)
 	}
-	if !qwen.SupportsVision || qwen.MmprojFile != "mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf" {
-		t.Fatalf("vision fields = supports:%v mmproj:%q", qwen.SupportsVision, qwen.MmprojFile)
-	}
-	if qwen.SupportsTools {
-		t.Fatal("vision inspector model should not be treated as an agent tool-calling model")
-	}
-	if len(qwen.ExtraArgs) != 1 || qwen.ExtraArgs[0] != "--jinja" {
-		t.Fatalf("qwen vision model must launch with --jinja for typed image content, got %v", qwen.ExtraArgs)
-	}
-	urls := qwen.DownloadURLs()
-	want := []string{
-		"https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
-		"https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main/mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf",
-	}
-	if len(urls) != len(want) {
-		t.Fatalf("download URL count = %d, want %d (%v)", len(urls), len(want), urls)
-	}
-	for i := range want {
-		if urls[i] != want[i] {
-			t.Fatalf("url[%d] = %q, want %q", i, urls[i], want[i])
+	for name, prof := range cat.Profiles {
+		if prof["vision"] == "qwen2.5-vl-3b-instruct-q4_k_m" {
+			t.Fatalf("profile %q must not use the broken qwen vision model", name)
 		}
 	}
 }
@@ -303,7 +325,7 @@ func TestRecommendedOpenModels(t *testing.T) {
 			t.Errorf("tier %q: id %q lacks the inventory prefix", tier, got[tier])
 		}
 	}
-	wantVision := runtimeName + ":catalog:qwen2.5-vl-3b-instruct-q4_k_m"
+	wantVision := runtimeName + ":catalog:gemma-3-4b-it-q4_k_m"
 	if got["vision"] != wantVision {
 		t.Fatalf("vision recommendation = %q, want %q", got["vision"], wantVision)
 	}

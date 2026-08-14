@@ -437,6 +437,60 @@ func TestPlanExit_LiftsFenceForRestOfTurn(t *testing.T) {
 	}
 }
 
+// A successful request_plan_approval call must lift the read-only planning fence
+// for the REST of the same turn, exactly like plan_exit. Approving the plan
+// flips the ProfileBroker to the default profile, but that only lands on the
+// next turn; without the loop-local relaxation the model believes it has left
+// planning mode yet every follow-on write/exec tool stays fenced for the rest
+// of this turn. This is the request_plan_approval sibling of the plan_exit case
+// above — both must lift the fence via agent.ToolLiftsPlanFence.
+func TestRequestPlanApproval_LiftsFenceForRestOfTurn(t *testing.T) {
+	var saved bool
+	reg := agenttools.NewRegistry()
+	// request_plan_approval stub: in planExtraTools, so it's allowed; X-tier in
+	// production but W here is enough to exercise the mid-turn fence-lift.
+	reg.MustRegister(stubTool{name: "request_plan_approval", perm: agenttools.PermW})
+	// save_note: a non-file W tool — fenced by PlanProfile unless the fence is
+	// lifted. It records whether it actually ran.
+	reg.MustRegister(stubTool{name: "save_note", perm: agenttools.PermW, ran: &saved})
+
+	prov := &mockProvider{
+		scripts: [][]llm.Block{
+			{{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "request_plan_approval",
+				ToolInput: json.RawMessage(`{}`)}},
+			{{Type: llm.BlockToolUse, ToolUseID: "u2", ToolName: "save_note",
+				ToolInput: json.RawMessage(`{}`)}},
+			{{Type: llm.BlockText, Text: "done"}},
+		},
+		caps: inference.Capabilities{SupportsTools: true},
+	}
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+
+	// A requester that DENIES — proving save_note ran because the fence was
+	// lifted (unrestricted W runs without a confirm), not because it was
+	// confirmed. If the fence were still up, save_note would be denied at the
+	// gate and never reach Execute.
+	requester := func(ctx context.Context, toolUseID, name string, args json.RawMessage, tier llm.Permission, destructive bool) (bool, error) {
+		return false, nil
+	}
+
+	result, err := RunToolLoop(context.Background(), ToolLoopInput{
+		Provider: prov, Registry: reg, Permissions: perms,
+		Profile:             PlanProfile(),
+		PermissionRequester: requester,
+		UserInput:           "approve the plan then save a note",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !saved {
+		t.Fatal("save_note did not execute after request_plan_approval — the planning fence was not lifted for the rest of the turn")
+	}
+	if result.FinalText != "done" {
+		t.Fatalf("loop did not complete cleanly; final=%q", result.FinalText)
+	}
+}
+
 // Guard: without a prior plan_exit, the same non-file W tool IS fenced. This
 // pins the fix to plan_exit rather than a blanket relaxation.
 func TestPlanProfile_FencesNonFileWriteWithoutPlanExit(t *testing.T) {

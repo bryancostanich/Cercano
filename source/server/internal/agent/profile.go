@@ -86,6 +86,23 @@ func (p Profile) Allows(tier llm.Permission, name string) bool {
 // the file tools regardless of which name reaches the gate.
 var planExtraTools = []string{"Write", "Edit", "write_file", "edit_file", "request_plan_approval", "plan_exit"}
 
+// ToolLiftsPlanFence reports whether a tool, once executed successfully, exits
+// planning mode and therefore must drop the read-only fence for the remainder
+// of the current turn.
+//
+// Both handoff tools flip the ProfileBroker to the default (unrestricted)
+// profile in their Execute: plan_exit abandons planning silently, and
+// request_plan_approval hands off to execution once the plan is approved. That
+// broker change only lands on the NEXT turn's profile read (runner reads the
+// active profile once at turn start and freezes it into ToolLoopInput.Profile),
+// so without lifting the loop-local fence mid-turn the rest of THIS turn stays
+// fenced and any follow-on write/exec tool is wrongly blocked. The lift is
+// asymmetric: it only ever relaxes the fence, never tightens it — entering a
+// profile still happens cleanly at a turn boundary.
+func ToolLiftsPlanFence(toolName string) bool {
+	return toolName == "plan_exit" || toolName == "request_plan_approval"
+}
+
 // PlanProfile is the read-only exploration fence for planning mode (Fork 1):
 // read-tier tools plus the file-write tools needed to author spec.md/plan.md and
 // the approval handoff tool, nothing else. Exec tools (bash), git mutations, and

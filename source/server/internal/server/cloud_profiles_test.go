@@ -75,6 +75,36 @@ func TestGetCloudProfilesListsBoth(t *testing.T) {
 	}
 }
 
+func TestSetActiveCloudProfileSwapsCurrentBackupToPreviousActive(t *testing.T) {
+	s, _ := newTestServer()
+	s.cfgSvc.Set(config.Config{
+		ActiveCloudProfile: "openai-responses",
+		BackupCloudProfile: "claude",
+		CloudProfiles: []config.CloudProfile{
+			{Name: "openai-responses", Flavor: "responses", Route: "chatgpt", Model: "gpt-5.5", ModelPinned: true},
+			{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5-0", ModelPinned: true},
+		},
+	})
+	if err := s.cfgSvc.Secrets().Set("claude", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := s.SetActiveCloudProfile(context.Background(), &proto.SetActiveCloudProfileRequest{Name: "claude"})
+	if err != nil {
+		t.Fatalf("SetActiveCloudProfile: %v", err)
+	}
+	if !resp.Ok {
+		t.Fatalf("want Ok=true, got false: %s", resp.Error)
+	}
+	cfg := s.cfgSvc.Get()
+	if cfg.ActiveCloudProfile != "claude" {
+		t.Fatalf("active = %q, want claude", cfg.ActiveCloudProfile)
+	}
+	if cfg.BackupCloudProfile != "openai-responses" {
+		t.Fatalf("backup = %q, want previous active openai-responses", cfg.BackupCloudProfile)
+	}
+}
+
 func TestSetActiveCloudProfileMessagesOk(t *testing.T) {
 	s, _ := newTestServer()
 	// Set a key so rebuildCloud can succeed.

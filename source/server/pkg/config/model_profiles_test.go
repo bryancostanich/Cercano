@@ -78,11 +78,9 @@ func TestInferProviderVendor(t *testing.T) {
 	}
 }
 
-// TestResolveCloudModelForTier covers the resolution the whole feature exists
-// for: a capability tier maps to a vendor cost-tier model, and every miss falls
-// back to the active profile's own Model — which is vendor-correct by
-// definition. That fallback is the bug-fix invariant: a Codex/OpenAI profile
-// can never resolve to an Anthropic id, even with no cost table configured.
+// TestResolveCloudModelForTier covers cloud's split semantics: unpinned
+// profiles follow the baked vendor+tier table, while a profile Model is an
+// explicit pin that overrides every tier.
 func TestResolveCloudModelForTier(t *testing.T) {
 	m := ModelProfiles{Cloud: CloudCostProfiles{Providers: map[string]VendorCostTiers{
 		"anthropic": {
@@ -90,8 +88,9 @@ func TestResolveCloudModelForTier(t *testing.T) {
 			Premium:  CostTierModel{Model: "claude-fable-5"},
 		},
 	}}}
-	anthro := CloudProfile{Provider: "anthropic", Model: "claude-opus-5-0", Flavor: "messages"}
-	openai := CloudProfile{Model: "gpt-5.5", Flavor: "responses"} // Provider empty -> inferred openai
+	anthro := CloudProfile{Provider: "anthropic", Flavor: "messages"}
+	pinned := CloudProfile{Provider: "anthropic", Model: "claude-custom", ModelPinned: true, Flavor: "messages"}
+	openaiPinned := CloudProfile{Model: "gpt-5.5", ModelPinned: true, Flavor: "responses"} // Provider empty -> inferred openai
 
 	cases := []struct {
 		name string
@@ -100,9 +99,11 @@ func TestResolveCloudModelForTier(t *testing.T) {
 		want string
 	}{
 		{"table hit premium", anthro, TierMostCapable, "claude-fable-5"},
-		{"tier slot unset -> profile model", anthro, TierFastLight, "claude-opus-5-0"},
-		{"embedding has no cost tier -> profile model", anthro, TierEmbedding, "claude-opus-5-0"},
-		{"inferred openai vendor, not in table -> profile model", openai, TierEveryday, "gpt-5.5"},
+		{"table hit standard", anthro, TierEveryday, "claude-opus-5-0"},
+		{"tier slot unset -> empty", anthro, TierFastLight, ""},
+		{"embedding has no cost tier -> empty", anthro, TierEmbedding, ""},
+		{"profile pin overrides table", pinned, TierMostCapable, "claude-custom"},
+		{"inferred openai pinned model", openaiPinned, TierEveryday, "gpt-5.5"},
 	}
 	for _, c := range cases {
 		if got := m.ResolveCloudModelForTier(c.prof, c.tier); got != c.want {
@@ -110,10 +111,10 @@ func TestResolveCloudModelForTier(t *testing.T) {
 		}
 	}
 
-	// No cost table at all: a Codex profile still yields its own gpt id, never
-	// a foreign-vendor model.
+	// No cost table at all: an explicit profile pin still yields its own model,
+	// never a foreign-vendor model.
 	empty := ModelProfiles{}
-	if got := empty.ResolveCloudModelForTier(openai, TierMostCapable); got != "gpt-5.5" {
+	if got := empty.ResolveCloudModelForTier(openaiPinned, TierMostCapable); got != "gpt-5.5" {
 		t.Errorf("empty table: got %q want gpt-5.5 (must never cross vendors)", got)
 	}
 }

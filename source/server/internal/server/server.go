@@ -561,8 +561,9 @@ func (s *Server) GetCloudProfiles(ctx context.Context, req *proto.GetCloudProfil
 	out := &proto.GetCloudProfilesResponse{Active: active}
 	for _, p := range profiles {
 		hasKey := keyNamesForPresence[p.Name]
+		model := cfg.ModelProfiles.ResolveCloudModelForTier(p, config.TierEveryday)
 		out.Profiles = append(out.Profiles, &proto.CloudProfileInfo{
-			Name: p.Name, Flavor: p.Flavor, BaseUrl: p.BaseURL, Model: p.Model, HasKey: hasKey, Backend: p.Backend, Route: p.Route,
+			Name: p.Name, Flavor: p.Flavor, BaseUrl: p.BaseURL, Model: model, HasKey: hasKey, Backend: p.Backend, Route: p.Route,
 		})
 	}
 	return out, nil
@@ -592,7 +593,7 @@ func (s *Server) SetActiveCloudProfile(ctx context.Context, req *proto.SetActive
 	s.persistConfig()
 	if prof, ok := s.activeProfile(); ok {
 		s.broadcastConfigChanged("active_cloud_profile", prof.Name)
-		s.broadcastConfigChanged("cloud_model", prof.Model)
+		s.broadcastConfigChanged("cloud_model", s.activeCloudModel())
 	}
 	return &proto.SetActiveCloudProfileResponse{Ok: true}, nil
 }
@@ -643,7 +644,7 @@ func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudP
 	}
 	np := config.CloudProfile{
 		Name: name, Flavor: req.GetFlavor(), Backend: req.GetBackend(),
-		BaseURL: req.GetBaseUrl(), Model: req.GetModel(), Route: req.GetRoute(),
+		BaseURL: req.GetBaseUrl(), Model: req.GetModel(), ModelPinned: req.GetModel() != "", Route: req.GetRoute(),
 	}
 	// Preserve existing route/model when the request omits them (partial-metadata upsert).
 	// We need to read first, then upsert with merged values.
@@ -657,6 +658,7 @@ func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudP
 				}
 				if np.Model == "" {
 					np.Model = p.Model
+					np.ModelPinned = p.ModelPinned
 				}
 				break
 			}
@@ -672,7 +674,7 @@ func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudP
 			s.persistConfig()
 			return &proto.UpsertCloudProfileResponse{Ok: false, Error: err.Error()}, nil
 		}
-		s.broadcastConfigChanged("cloud_model", np.Model)
+		s.broadcastConfigChanged("cloud_model", s.activeCloudModel())
 	}
 	s.persistConfig()
 	return &proto.UpsertCloudProfileResponse{Ok: true}, nil
@@ -1299,6 +1301,7 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 		}
 		if req.CloudModel != "" {
 			c.CloudProfiles[idx].Model = req.CloudModel
+			c.CloudProfiles[idx].ModelPinned = true
 		}
 		if req.CloudBaseUrl != "" {
 			c.CloudProfiles[idx].BaseURL = req.CloudBaseUrl

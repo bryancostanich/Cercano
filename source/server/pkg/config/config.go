@@ -72,11 +72,14 @@ type CloudProfile struct {
 	// connect" (route/flavor/auth on this profile) to "which vendor's model
 	// lineup" (model_profiles.cloud.providers[Provider]). Empty is inferred
 	// from Flavor/Backend at load (see inferProviderVendor).
-	Provider   string `yaml:"provider,omitempty"`
-	BaseURL    string `yaml:"base_url"`
-	Model      string `yaml:"model"`
-	Region     string `yaml:"region,omitempty"`      // bedrock: AWS region (required)
-	AWSProfile string `yaml:"aws_profile,omitempty"` // bedrock: optional ~/.aws named profile
+	Provider string `yaml:"provider,omitempty"`
+	BaseURL  string `yaml:"base_url"`
+	// Model is an explicit cloud model pin. Empty means "follow the baked-in
+	// vendor+tier catalog" so product default updates take effect on restart.
+	Model       string `yaml:"model,omitempty"`
+	ModelPinned bool   `yaml:"model_pinned,omitempty"`
+	Region      string `yaml:"region,omitempty"`      // bedrock: AWS region (required)
+	AWSProfile  string `yaml:"aws_profile,omitempty"` // bedrock: optional ~/.aws named profile
 }
 
 // CostTier names a closed-cloud pricing class. Unlike the capability Tier
@@ -107,7 +110,11 @@ type VendorCostTiers struct {
 // CloudCostProfiles maps a vendor (anthropic|openai|google|…) to its cost
 // table. The vendor key matches CloudProfile.Provider.
 type CloudCostProfiles struct {
-	Providers map[string]VendorCostTiers `yaml:"providers"`
+	Providers map[string]VendorCostTiers `yaml:"providers,omitempty"`
+}
+
+func (c CloudCostProfiles) IsZero() bool {
+	return len(c.Providers) == 0
 }
 
 // ModelProfiles is the vendor-keyed cloud model selection table. Closed cloud
@@ -116,7 +123,11 @@ type CloudCostProfiles struct {
 // Open/local models are runtime-keyed overrides over the catalog default (see
 // ModelsConfig/OpenModels).
 type ModelProfiles struct {
-	Cloud CloudCostProfiles `yaml:"cloud"`
+	Cloud CloudCostProfiles `yaml:"cloud,omitempty"`
+}
+
+func (m ModelProfiles) IsZero() bool {
+	return len(m.Cloud.Providers) == 0
 }
 
 // ResolveCloud returns the model configured for a vendor+cost-tier pair.
@@ -156,17 +167,22 @@ func (m ModelProfiles) vendorHasModel(vendor, model string) bool {
 	return model != "" && (vt.Economy.Model == model || vt.Standard.Model == model || vt.Premium.Model == model)
 }
 
-// ResolveCloudModelForTier picks the cloud model for a capability tier: it maps
-// the tier to a cost tier, resolves the active profile's vendor against the
-// cost table, and falls back to the profile's own Model when the tier has no
-// cloud cost-tier meaning (embedding) or the vendor+tier slot is unset. The
-// fail-loud guard runs on the chosen model before it's returned.
+// ResolveCloudModelForTier picks the cloud model for a capability tier.
+//
+// Cloud differs from open/local model selection: unpinned cloud profiles follow
+// the baked-in vendor+tier catalog carried by the binary, so product default
+// updates automatically take effect for existing users. A profile Model is an
+// explicit pin/override and wins over the catalog for every tier.
 func (m ModelProfiles) ResolveCloudModelForTier(prof CloudProfile, tier Tier) string {
 	vendor := prof.Provider
 	if vendor == "" {
 		vendor = inferProviderVendor(prof)
 	}
-	model := prof.Model
+	if prof.Model != "" {
+		m.guardCloudModel(vendor, prof.Model, prof.Model)
+		return prof.Model
+	}
+	var model string
 	if ct, ok := CostTierForCapability(tier); ok {
 		if resolved, ok := m.ResolveCloud(vendor, ct); ok {
 			model = resolved
@@ -280,10 +296,10 @@ type Config struct {
 	Watchdog                 WatchdogConfig    `yaml:"watchdog"`
 	ToolLoop                 ToolLoopConfig    `yaml:"tool_loop"`
 	Models                   ModelsConfig      `yaml:"models"`
-	// ModelProfiles is the vendor-keyed cloud model selection table (top-level
-	// key model_profiles). Closed cloud model selection resolves here — keyed
-	// by the active profile's vendor. Retired per-tier cloud slots are ignored.
-	ModelProfiles ModelProfiles `yaml:"model_profiles"`
+	// ModelProfiles is the vendor-keyed baked cloud model selection table. Save
+	// strips built-in vendor entries so user config does not pin moving cloud
+	// product defaults.
+	ModelProfiles ModelProfiles `yaml:"model_profiles,omitempty"`
 	// Catalog selects the active model-catalog backend for browse/search.
 	Catalog CatalogConfig `yaml:"catalog,omitempty"`
 }
@@ -738,26 +754,82 @@ func isLegacySubscriptionAlias(p CloudProfile) bool {
 	return false
 }
 
-func migrateCloudModelAliases(cfg *Config) {
+func normalizeCloudModelDefaults(cfg *Config) {
+	applyBakedCloudCatalog(cfg)
 	for i := range cfg.CloudProfiles {
-		cfg.CloudProfiles[i].Model = migrateCloudModelID(cfg.CloudProfiles[i].Model)
-	}
-	if providers := cfg.ModelProfiles.Cloud.Providers; providers != nil {
-		for vendor, tiers := range providers {
-			tiers.Economy.Model = migrateCloudModelID(tiers.Economy.Model)
-			tiers.Standard.Model = migrateCloudModelID(tiers.Standard.Model)
-			tiers.Premium.Model = migrateCloudModelID(tiers.Premium.Model)
-			providers[vendor] = tiers
+		p := &cfg.CloudProfiles[i]
+		if p.Model == "" || p.ModelPinned {
+			continue
 		}
+		vendor := p.Provider
+		if vendor == "" {
+			vendor = inferProviderVendor(*p)
+		}
+		if isProductCloudDefaultModel(vendor, p.Model) {
+			// This model came from an old product default copied into the user's
+			// config. Clear it so the profile follows the baked catalog again.
+			p.Model = ""
+			continue
+		}
+		// A non-catalog model in an existing config is the closest thing we have
+		// to explicit user intent from the pre-pin era; preserve it as a pin.
+		p.ModelPinned = true
 	}
 }
 
-func migrateCloudModelID(model string) string {
-	switch model {
-	case "claude-opus-4-8":
-		return "claude-opus-5-0"
-	default:
-		return model
+func applyBakedCloudCatalog(cfg *Config) {
+	if cfg.ModelProfiles.Cloud.Providers == nil {
+		cfg.ModelProfiles.Cloud.Providers = map[string]VendorCostTiers{}
+	}
+	for vendor, tiers := range bakedCloudCatalog().Cloud.Providers {
+		cfg.ModelProfiles.Cloud.Providers[vendor] = tiers
+	}
+}
+
+func bakedCloudCatalog() ModelProfiles {
+	return Defaults().ModelProfiles
+}
+
+func isProductCloudDefaultModel(vendor, model string) bool {
+	if model == "" {
+		return false
+	}
+	if tiers, ok := bakedCloudCatalog().Cloud.Providers[vendor]; ok && vendorCostTiersContain(tiers, model) {
+		return true
+	}
+	for _, old := range retiredCloudDefaultModels()[vendor] {
+		if model == old {
+			return true
+		}
+	}
+	return false
+}
+
+func vendorCostTiersContain(tiers VendorCostTiers, model string) bool {
+	return tiers.Economy.Model == model || tiers.Standard.Model == model || tiers.Premium.Model == model
+}
+
+func retiredCloudDefaultModels() map[string][]string {
+	return map[string][]string{
+		"anthropic": {"claude-opus-4-8"},
+	}
+}
+
+func stripBakedCloudCatalogForSave(cfg *Config) {
+	for i := range cfg.CloudProfiles {
+		if !cfg.CloudProfiles[i].ModelPinned {
+			cfg.CloudProfiles[i].Model = ""
+		}
+	}
+	providers := cfg.ModelProfiles.Cloud.Providers
+	if providers == nil {
+		return
+	}
+	for vendor := range bakedCloudCatalog().Cloud.Providers {
+		delete(providers, vendor)
+	}
+	if len(providers) == 0 {
+		cfg.ModelProfiles = ModelProfiles{}
 	}
 }
 
@@ -870,7 +942,7 @@ func Load(path string) (Config, error) {
 	migrateCloudProfiles(&cfg)
 	migrateMeridianToSubscription(&cfg)
 	collapseLegacySubscriptionAliases(&cfg)
-	migrateCloudModelAliases(&cfg)
+	normalizeCloudModelDefaults(&cfg)
 	if !ValidateToolLoopMaxIterations(cfg.ToolLoop.MaxIterations) {
 		return cfg, fmt.Errorf("tool_loop.max_iterations must be -1 or a non-negative integer, got %d", cfg.ToolLoop.MaxIterations)
 	}
@@ -1100,6 +1172,7 @@ func Save(cfg Config, path string) error {
 		cfg.CloudAPIKey = ""
 		cfg.CloudBaseURL = ""
 	}
+	stripBakedCloudCatalogForSave(&cfg)
 
 	data, err := yaml.Marshal(cfg)
 	if err != nil {

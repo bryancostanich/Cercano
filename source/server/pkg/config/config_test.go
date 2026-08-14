@@ -547,7 +547,7 @@ func TestSave_StripsLegacyCloudFieldsWhenProfilesPresent(t *testing.T) {
 		CloudModel:         "claude-stale-mirror",
 		CloudAPIKey:        "sk-leaky",
 		CloudBaseURL:       "http://127.0.0.1:3456",
-		CloudProfiles:      []CloudProfile{{Name: "default", Flavor: "messages", Model: "claude-real"}},
+		CloudProfiles:      []CloudProfile{{Name: "default", Flavor: "messages", Model: "claude-real", ModelPinned: true}},
 		ActiveCloudProfile: "default",
 	}
 	if err := Save(cfg, path); err != nil {
@@ -580,6 +580,28 @@ func TestSave_StripsLegacyCloudFieldsWhenProfilesPresent(t *testing.T) {
 	}
 	if len(reloaded.CloudProfiles) != 1 || reloaded.CloudProfiles[0].Model != "claude-real" {
 		t.Errorf("profile lost on round-trip: %+v", reloaded.CloudProfiles)
+	}
+}
+
+func TestSave_StripsUnpinnedCloudDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	cfg := Defaults()
+	cfg.CloudProfiles = []CloudProfile{{Name: "claude", Flavor: "messages", Route: "subscription"}}
+	cfg.ActiveCloudProfile = "claude"
+
+	if err := Save(cfg, path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	text := string(data)
+	for _, banned := range []string{"claude-opus-5-0", "model_profiles:", "model_pinned:"} {
+		if strings.Contains(text, banned) {
+			t.Fatalf("saved YAML should not persist baked cloud defaults %q:\n%s", banned, text)
+		}
 	}
 }
 
@@ -781,34 +803,31 @@ func TestCollapseLegacySubscriptionAliasesPreservesDirectProfile(t *testing.T) {
 	}
 }
 
-func TestMigrateCloudModelAliasesUpdatesPersistedOpus48(t *testing.T) {
+func TestNormalizeCloudModelDefaultsClearsPersistedDefaults(t *testing.T) {
 	cfg := &Config{
 		CloudProfiles: []CloudProfile{
 			{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-4-8"},
-			{Name: "openai-responses", Flavor: "responses", Route: "chatgpt", Model: "gpt-5.5"},
+			{Name: "custom", Flavor: "messages", Model: "claude-custom"},
 		},
 		ModelProfiles: ModelProfiles{Cloud: CloudCostProfiles{Providers: map[string]VendorCostTiers{
 			"anthropic": {
-				Economy:  CostTierModel{Model: "claude-haiku-4-5"},
+				Economy:  CostTierModel{Model: "old-haiku"},
 				Standard: CostTierModel{Model: "claude-opus-4-8"},
-				Premium:  CostTierModel{Model: "claude-fable-5"},
-			},
-			"openai": {
-				Standard: CostTierModel{Model: "gpt-5.5"},
+				Premium:  CostTierModel{Model: "old-fable"},
 			},
 		}}},
 	}
 
-	migrateCloudModelAliases(cfg)
+	normalizeCloudModelDefaults(cfg)
 
-	if got := cfg.CloudProfiles[0].Model; got != "claude-opus-5-0" {
-		t.Fatalf("claude profile model = %q, want claude-opus-5-0", got)
+	if got := cfg.CloudProfiles[0].Model; got != "" {
+		t.Fatalf("default-derived claude profile model should be cleared, got %q", got)
 	}
-	if got := cfg.CloudProfiles[1].Model; got != "gpt-5.5" {
-		t.Fatalf("openai profile model should be unchanged, got %q", got)
+	if got := cfg.CloudProfiles[1].Model; got != "claude-custom" || !cfg.CloudProfiles[1].ModelPinned {
+		t.Fatalf("custom model should become an explicit pin, got model=%q pinned=%v", got, cfg.CloudProfiles[1].ModelPinned)
 	}
 	if got := cfg.ModelProfiles.Cloud.Providers["anthropic"].Standard.Model; got != "claude-opus-5-0" {
-		t.Fatalf("anthropic standard model = %q, want claude-opus-5-0", got)
+		t.Fatalf("baked anthropic standard model = %q, want claude-opus-5-0", got)
 	}
 }
 
@@ -836,11 +855,14 @@ model_profiles:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.CloudProfiles[0].Model; got != "claude-opus-5-0" {
-		t.Fatalf("loaded claude profile model = %q, want claude-opus-5-0", got)
+	if got := cfg.CloudProfiles[0].Model; got != "" {
+		t.Fatalf("loaded default-derived profile model should be cleared, got %q", got)
+	}
+	if got := cfg.ModelProfiles.ResolveCloudModelForTier(cfg.CloudProfiles[0], TierEveryday); got != "claude-opus-5-0" {
+		t.Fatalf("loaded profile effective model = %q, want claude-opus-5-0", got)
 	}
 	if got := cfg.ModelProfiles.Cloud.Providers["anthropic"].Standard.Model; got != "claude-opus-5-0" {
-		t.Fatalf("loaded anthropic standard model = %q, want claude-opus-5-0", got)
+		t.Fatalf("loaded baked standard model = %q, want claude-opus-5-0", got)
 	}
 }
 

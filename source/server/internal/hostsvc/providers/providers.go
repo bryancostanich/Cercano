@@ -183,10 +183,11 @@ func (p *service) LocusMode() string {
 // code that asks "what cloud model are we using right now?" should go
 // through cfgSvc.ActiveProfile(), not currentConfig.CloudModel directly.
 func (p *service) ActiveCloudModel() string {
+	cfgSnap := p.cfgSvc.Get()
 	if prof, ok := p.cfgSvc.ActiveProfile(); ok {
-		return prof.Model
+		return cfgSnap.ModelProfiles.ResolveCloudModelForTier(prof, cfg.TierEveryday)
 	}
-	return p.cfgSvc.Get().CloudModel
+	return cfgSnap.CloudModel
 }
 
 // Main returns the provider + model for the active locus mode.
@@ -339,6 +340,7 @@ func (p *service) rebuildCloud() error {
 		// source over the keychain, not a static API key.
 		cloudOpts.AnthropicTokenSource = anthropicauth.NewSource(st, prof.Name, anthropicauth.Flow{})
 	}
+	prof.Model = c.ModelProfiles.ResolveCloudModelForTier(prof, cfg.TierEveryday)
 	prov, err := cloudfactory.BuildCloudProvider(prof, key, cloudOpts)
 	if err != nil {
 		p.installAbsentCloud(err.Error())

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/url"
@@ -2827,6 +2828,9 @@ drainLoop:
 	}
 
 	if tr.err != nil {
+		if isTurnCancellation(tr.err) {
+			return nil
+		}
 		return tr.err
 	}
 
@@ -2926,6 +2930,20 @@ func (s *brokerSink) Emit(ev runnersvc.Event) {
 // without duplicating the mapping switch.
 type streamResponseSender interface {
 	Send(*proto.StreamProcessResponse) error
+}
+
+func isTurnCancellation(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if st, ok := grpcstatus.FromError(err); ok {
+		return st.Code() == codes.Canceled || st.Code() == codes.DeadlineExceeded
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "context canceled") || strings.Contains(msg, "context deadline exceeded")
 }
 
 // sendRunnerEvent maps a runner.Event to the appropriate proto.StreamProcessResponse

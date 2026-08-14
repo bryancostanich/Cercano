@@ -333,6 +333,11 @@ type confirmRequest struct {
 	onYes   func(Model) (Model, tea.Cmd)
 	onNo    func(Model) (Model, tea.Cmd)
 	extras  map[string]func(Model) (Model, tea.Cmd)
+	// retryPrompt is the user turn that produced this gate. Keep it on the gate
+	// itself because the normal lastSubmittedPrompt rehydration cache is cleared
+	// when the stream closes, which can happen before reconnect recovery marks the
+	// gate stale.
+	retryPrompt string
 	// stale marks a tool-permission gate whose server-side turn died — e.g.
 	// the agent restarted while the y/n/d/c prompt was up. The paused tool
 	// call and its blocked waiter no longer exist in the fresh agent process,
@@ -1647,6 +1652,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Destructive: ev.destructive,
 			}
 			m.pendingConfirm = toolConfirm(tc)
+			m.pendingConfirm.retryPrompt = m.lastSubmittedPrompt
 			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.renderConfirmPrompt(tc)})
 		case rolloverOfferedMsg:
 			m.pendingConfirm = m.rolloverConfirm(ev)
@@ -2195,7 +2201,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// re-runs the user's request on yes.
 			if m.pendingConfirm != nil && m.pendingConfirm.tool != nil {
 				m.pendingConfirm.stale = true
-				m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("↻ the pending tool decision was lost when the agent restarted — press [y] to re-run your request, or [n] to drop it.")})
+				m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("↻ the pending tool decision was lost when the agent restarted — press [y] to re-run that request, [n] to drop it, or type a new message and press Enter.")})
 			}
 			m.refreshViewport()
 			return m, tea.Batch(msg.next, fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent), fetchVisionCmd(m.agent), fetchOpenRuntimeStatusCmd(m.agent))
@@ -3904,7 +3910,7 @@ func (m Model) handlePendingConfirmKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			}
 			return m.steerPendingConfirm(text)
 		}
-		if m.pendingConfirm != nil {
+		if m.pendingConfirm != nil && !m.pendingConfirm.stale {
 			if fn, ok := m.pendingConfirm.extras["c"]; ok {
 				return fn(m)
 			}
@@ -3932,6 +3938,17 @@ func (m Model) steerPendingConfirm(text string) (Model, tea.Cmd) {
 	}
 	if text == "" {
 		return m, nil
+	}
+	if c.stale && c.tool != nil {
+		m.pendingConfirm = nil
+		m.input.SetValue("")
+		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Accent.Render("↻ submitting your new message on the restarted agent…")})
+		m.refreshViewport()
+		next, cmd := m.submit(text, nil)
+		if nm, ok := next.(Model); ok {
+			return nm, cmd
+		}
+		return m, cmd
 	}
 	id := ""
 	if c.tool != nil {
@@ -3976,7 +3993,10 @@ func (m Model) resolveConfirmHotkey(key string) (Model, tea.Cmd, bool) {
 		switch key {
 		case "y", "Y":
 			m.pendingConfirm = nil
-			prompt := m.lastSubmittedPrompt
+			prompt := c.retryPrompt
+			if prompt == "" {
+				prompt = m.lastSubmittedPrompt
+			}
 			if prompt == "" {
 				m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("nothing to re-run — the original request wasn't captured.")})
 				m.refreshViewport()
@@ -3985,8 +4005,10 @@ func (m Model) resolveConfirmHotkey(key string) (Model, tea.Cmd, bool) {
 			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Accent.Render("↻ re-running your request on the restarted agent…")})
 			m.refreshViewport()
 			next, cmd := m.submit(prompt, nil)
-			nm, _ := next.(Model)
-			return nm, cmd, true
+			if nm, ok := next.(Model); ok {
+				return nm, cmd, true
+			}
+			return m, cmd, true
 		case "n", "N", "esc", "ctrl+c":
 			m.pendingConfirm = nil
 			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("dropped the lost tool decision.")})
@@ -4000,8 +4022,9 @@ func (m Model) resolveConfirmHotkey(key string) (Model, tea.Cmd, bool) {
 			}
 			return m, nil, true
 		default:
-			// [c]hat and other extras can't redirect a dead turn; ignore.
-			return m, nil, true
+			// The dead turn cannot be redirected with [c]hat, but ordinary text
+			// should still type into the input so Enter can submit a fresh request.
+			return m, nil, false
 		}
 	}
 	switch key {

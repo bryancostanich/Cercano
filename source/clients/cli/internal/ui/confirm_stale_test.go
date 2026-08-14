@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"cercano/source/server/pkg/agentclient"
 )
 
@@ -96,5 +98,65 @@ func TestConfirmStale_NoDropsGate(t *testing.T) {
 	}
 	if !found {
 		t.Error("no on a stale gate should note the drop")
+	}
+}
+
+// TestConfirmStale_YesUsesCapturedRetryPrompt reproduces the screenshot: the
+// stream close can clear lastSubmittedPrompt before reconnect marks the gate
+// stale. The pending gate must keep its own copy of the prompt so [y] still
+// has something to re-run.
+func TestConfirmStale_YesUsesCapturedRetryPrompt(t *testing.T) {
+	m := New(nil, false)
+	m.lastSubmittedPrompt = "fixed. push"
+	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "dispatch", Args: `{}`, Permission: "X"})
+	m.pendingConfirm.retryPrompt = m.lastSubmittedPrompt
+	m.pendingConfirm.stale = true
+	m.lastSubmittedPrompt = ""
+
+	next, _ := m.resolveConfirmKey("y")
+
+	if next.pendingConfirm != nil {
+		t.Fatal("yes on a stale gate should clear the confirm")
+	}
+	for _, e := range next.mainChat().Entries() {
+		if e.Role == RoleSystem && strings.Contains(e.Content, "nothing to re-run") {
+			t.Fatal("yes should not lose the captured retry prompt")
+		}
+	}
+	found := false
+	for _, e := range next.mainChat().Entries() {
+		if e.Role == RoleUser && strings.Contains(e.Content, "fixed. push") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("yes should re-submit the captured retry prompt")
+	}
+}
+
+// TestConfirmStale_TextSubmitsFreshPrompt ensures ordinary typing is not
+// swallowed by the stale y/n gate. A dead tool call cannot receive chat
+// steering, so typed text should become a fresh request after reconnect.
+func TestConfirmStale_TextSubmitsFreshPrompt(t *testing.T) {
+	m := New(nil, false)
+	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "dispatch", Args: `{}`, Permission: "X"})
+	m.pendingConfirm.retryPrompt = "fixed. push"
+	m.pendingConfirm.stale = true
+	m.input.SetValue("show summary of changes")
+
+	nextModel, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	next := nextModel.(Model)
+
+	if next.pendingConfirm != nil {
+		t.Fatal("typing a fresh prompt after reconnect should clear the stale confirm")
+	}
+	found := false
+	for _, e := range next.mainChat().Entries() {
+		if e.Role == RoleUser && strings.Contains(e.Content, "show summary of changes") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("typed text should submit as a fresh user turn")
 	}
 }

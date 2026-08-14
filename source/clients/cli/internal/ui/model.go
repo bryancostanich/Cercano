@@ -4414,6 +4414,8 @@ func truncateArgs(s string, max int) string {
 //   - claude-sonnet-4-6  → sonnet 4.6
 //   - claude-haiku-4-5   → haiku 4.5
 //   - qwen3-coder:latest → qwen3-coder  (strip the latest tag)
+//   - llama_server:catalog:glm-4.5-air-q4_k_m → glm-4.5-air-q4_k_m
+//   - /models/foo/bar.gguf → bar.gguf
 //   - gemini-1.5-pro     → gemini 1.5 pro (collapse the dashes that aren't
 //     part of the version)
 //   - anything-else      → returned verbatim
@@ -4423,6 +4425,21 @@ func truncateArgs(s string, max int) string {
 func abbreviateModel(name string) string {
 	if name == "" {
 		return "—"
+	}
+	// Strip transport/runtime identity before abbreviating. Header chips are a
+	// glanceable user-facing surface; the namespace is useful for routing and
+	// config but noisy in the title bar.
+	if strings.Contains(name, "/") {
+		parts := strings.FieldsFunc(name, func(r rune) bool { return r == '/' || r == '\\' })
+		if len(parts) > 0 {
+			name = parts[len(parts)-1]
+		}
+	}
+	for _, prefix := range []string{"llama_server:catalog:", "mistralrs:catalog:"} {
+		name = strings.TrimPrefix(name, prefix)
+	}
+	if i := strings.Index(name, ":catalog:"); i >= 0 {
+		name = name[i+len(":catalog:"):]
 	}
 	// Strip Ollama ":latest" suffix.
 	name = strings.TrimSuffix(name, ":latest")

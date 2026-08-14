@@ -28,6 +28,23 @@ func TestHeaderOpenChipUsesConfiguredOpenModelNotLastServed(t *testing.T) {
 	}
 }
 
+func TestHeaderOpenChipStripsRuntimeCatalogPrefix(t *testing.T) {
+	m := Model{
+		styles:    theme.NewStyles(theme.Cracker()),
+		palette:   theme.Cracker(),
+		width:     120,
+		openModel: "llama_server:catalog:glm-4.5-air-q4_k_m",
+	}
+
+	out := stripAnsiCSI(m.renderHeader())
+	if strings.Contains(out, "llama_server:catalog") {
+		t.Fatalf("header should not show runtime catalog namespace, got %q", out)
+	}
+	if !strings.Contains(out, "o:glm-4.5-air") {
+		t.Fatalf("header should show model name in o: chip, got %q", out)
+	}
+}
+
 func TestHeaderOpenChipShowsDownloadingWhenRuntimeStatusDownloading(t *testing.T) {
 	m := Model{
 		styles:    theme.NewStyles(theme.Cracker()),

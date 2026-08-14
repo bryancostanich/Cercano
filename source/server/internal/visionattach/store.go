@@ -150,6 +150,31 @@ func (s *Store) Lookup(convID, id string) (*Attachment, bool) {
 	return att, ok
 }
 
+// LookupAny returns a live attachment by ID without requiring the caller to know
+// its conversation ID. IDs are designed to be conversation-scoped, not globally
+// unique, so this helper only succeeds when there is exactly one live match.
+// A zero match returns (nil, "", false, false). Multiple matches return
+// (nil, "", false, true) so callers can request an explicit conversation ID
+// rather than guessing.
+func (s *Store) LookupAny(id string) (att *Attachment, convID string, ok bool, ambiguous bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for cid, t := range s.convs {
+		if t == nil {
+			continue
+		}
+		candidate, found := t.byID[id]
+		if !found {
+			continue
+		}
+		if ok {
+			return nil, "", false, true
+		}
+		att, convID, ok = candidate, cid, true
+	}
+	return att, convID, ok, false
+}
+
 // Clear drops all attachments for a conversation (e.g. on conversation unload).
 func (s *Store) Clear(convID string) {
 	s.mu.Lock()

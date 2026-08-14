@@ -255,7 +255,9 @@ service Agent {
   rpc ExportImage(ExportImageRequest) returns (ExportImageResponse) {}
 }
 
-// ExportImageRequest identifies one attached image within a conversation.
+// ExportImageRequest identifies one attached image. If conversation_id is
+// empty, the server searches live attachment stores by image_id and succeeds
+// only when exactly one live conversation has that ID.
 message ExportImageRequest {
   string conversation_id = 1;
   string image_id = 2;

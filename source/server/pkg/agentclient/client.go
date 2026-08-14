@@ -899,7 +899,9 @@ type ExportedImage struct {
 
 // ExportImage returns the raw bytes for an image the user attached to a live
 // conversation. Found is false when the attachment is no longer present (for
-// example after an agent restart) or the ID is unknown.
+// example after an agent restart) or the ID is unknown. Pass an empty
+// conversationID to search all live conversations; that succeeds only when the
+// image ID is unique across the live in-memory store.
 func (c *Client) ExportImage(ctx context.Context, conversationID, imageID string) (ExportedImage, error) {
 	resp, err := c.agent.ExportImage(ctx, &proto.ExportImageRequest{
 		ConversationId: conversationID,

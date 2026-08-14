@@ -145,7 +145,9 @@ func (WorkerEventKind) EnumDescriptor() ([]byte, []int) {
 	return file_agent_proto_rawDescGZIP(), []int{1}
 }
 
-// ExportImageRequest identifies one attached image within a conversation.
+// ExportImageRequest identifies one attached image. If conversation_id is
+// empty, the server searches live attachment stores by image_id and succeeds
+// only when exactly one live conversation has that ID.
 type ExportImageRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ConversationId string                 `protobuf:"bytes,1,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`

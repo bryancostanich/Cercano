@@ -123,6 +123,40 @@ func TestConversationsAreIsolated(t *testing.T) {
 	}
 }
 
+func TestLookupAny_UniqueMatch(t *testing.T) {
+	s := NewStore()
+	att := s.Add("conv1", "image/png", []byte("alpha")).Attachment
+
+	got, convID, ok, ambiguous := s.LookupAny(att.ID)
+	if !ok || ambiguous || convID != "conv1" || string(got.Data) != "alpha" {
+		t.Fatalf("LookupAny = att:%+v conv:%q ok:%v ambiguous:%v", got, convID, ok, ambiguous)
+	}
+}
+
+func TestLookupAny_Miss(t *testing.T) {
+	s := NewStore()
+	s.Add("conv1", "image/png", []byte("alpha"))
+
+	got, convID, ok, ambiguous := s.LookupAny("img_missing_1")
+	if got != nil || convID != "" || ok || ambiguous {
+		t.Fatalf("LookupAny miss = att:%+v conv:%q ok:%v ambiguous:%v", got, convID, ok, ambiguous)
+	}
+}
+
+func TestLookupAny_Ambiguous(t *testing.T) {
+	s := NewStore()
+	a := s.Add("convA", "image/png", []byte("same")).Attachment
+	b := s.Add("convB", "image/png", []byte("same")).Attachment
+	if a.ID != b.ID {
+		t.Fatalf("test setup expected duplicate conversation-scoped IDs, got %q and %q", a.ID, b.ID)
+	}
+
+	got, convID, ok, ambiguous := s.LookupAny(a.ID)
+	if got != nil || convID != "" || ok || !ambiguous {
+		t.Fatalf("LookupAny ambiguous = att:%+v conv:%q ok:%v ambiguous:%v", got, convID, ok, ambiguous)
+	}
+}
+
 func TestLookup_MissAfterClear(t *testing.T) {
 	s := NewStore()
 	a := s.Add("c", "image/png", []byte("bye"))

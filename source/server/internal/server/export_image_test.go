@@ -35,6 +35,38 @@ func TestExportImage_ReturnsLiveAttachmentBytes(t *testing.T) {
 	}
 }
 
+func TestExportImage_BlankConversationIDFindsUniqueImageID(t *testing.T) {
+	store := visionattach.NewStore()
+	data := []byte("fake png bytes")
+	added := store.Add("conv1", "image/png", data)
+	s := &Server{visionStore: store}
+
+	resp, err := s.ExportImage(t.Context(), &proto.ExportImageRequest{
+		ImageId: added.Attachment.ID,
+	})
+	if err != nil {
+		t.Fatalf("ExportImage: %v", err)
+	}
+	if !resp.GetFound() || !bytes.Equal(resp.GetData(), data) {
+		t.Fatalf("ExportImage blank conv = found:%v data:%q", resp.GetFound(), resp.GetData())
+	}
+}
+
+func TestExportImage_BlankConversationIDAmbiguous(t *testing.T) {
+	store := visionattach.NewStore()
+	a := store.Add("convA", "image/png", []byte("same")).Attachment
+	b := store.Add("convB", "image/png", []byte("same")).Attachment
+	if a.ID != b.ID {
+		t.Fatalf("test setup expected duplicate IDs, got %q and %q", a.ID, b.ID)
+	}
+	s := &Server{visionStore: store}
+
+	_, err := s.ExportImage(t.Context(), &proto.ExportImageRequest{ImageId: a.ID})
+	if err == nil {
+		t.Fatal("expected ambiguity error")
+	}
+}
+
 func TestExportImage_MissIsNotError(t *testing.T) {
 	s := &Server{visionStore: visionattach.NewStore()}
 	resp, err := s.ExportImage(t.Context(), &proto.ExportImageRequest{

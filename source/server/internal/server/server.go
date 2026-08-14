@@ -3148,7 +3148,19 @@ func (s *Server) ExportImage(ctx context.Context, req *proto.ExportImageRequest)
 	if s.visionStore == nil {
 		return &proto.ExportImageResponse{Found: false}, nil
 	}
-	att, ok := s.visionStore.Lookup(req.GetConversationId(), req.GetImageId())
+	var att *visionattach.Attachment
+	var ok bool
+	convID := req.GetConversationId()
+	imageID := req.GetImageId()
+	if convID == "" {
+		var ambiguous bool
+		att, _, ok, ambiguous = s.visionStore.LookupAny(imageID)
+		if ambiguous {
+			return nil, grpcstatus.Error(codes.FailedPrecondition, "image id is ambiguous across live conversations; pass conversation_id")
+		}
+	} else {
+		att, ok = s.visionStore.Lookup(convID, imageID)
+	}
 	if !ok || att == nil {
 		return &proto.ExportImageResponse{Found: false}, nil
 	}

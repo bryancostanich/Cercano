@@ -193,3 +193,257 @@ curl http://127.0.0.1:52046/health
 
 - Air protected path:
   Cercano OpenAI client with `SupportsVision:false` stripped the image and returned non-500.
+
+## 2026-08-13 follow-up: local vision candidates and pasted-image export
+
+This follow-up tested practical lightweight local vision candidates for the
+`inspect_image` tool path after the vision-as-tool work landed.
+
+### Pasted-image export gap fixed
+
+Problem found during model-quality testing: pasted images lived only in the
+agent's per-conversation in-memory `visionattach.Store`. The chat placeholder
+exposed an `image_id`, but shell/debug tools could not retrieve the original
+bytes, so the same image could not easily be sent to two different providers for
+an apples-to-apples comparison.
+
+Fixes landed:
+
+- `ExportImage(conversation_id, image_id)` gRPC RPC returns `found`,
+  `media_type`, and raw decoded bytes from the live attachment store.
+- `agentclient.ExportImage(ctx, conversationID, imageID)` wrapper added.
+- `conversation_id` may now be empty; the server searches live attachment stores
+  by `image_id` and succeeds only if exactly one live image matches.
+- Missing images return `found=false` rather than an error; ambiguity returns a
+  `FailedPrecondition` asking for an explicit conversation ID.
+
+Live verification after rebuild:
+
+```text
+ExportImage("", "img_2db409_3") => found=true media_type="image/png" bytes=5205794
+wrote /tmp/img_2db409_3.png
+/tmp/img_2db409_3.png: PNG image data, 2784 x 1888
+```
+
+This fixes the debugging workflow: the visible placeholder ID is enough to save a
+pasted image to `/tmp` and send identical bytes to cloud and local vision models.
+
+### Qwen2.5-VL 3B finding
+
+Candidate:
+
+```text
+ggml-org/Qwen2.5-VL-3B-Instruct-GGUF
+Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf
+mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf
+```
+
+Result: **broken in this environment**.
+
+Evidence:
+
+- Managed llama-server was launched with `--mmproj` and `--jinja`.
+- Direct `/v1/chat/completions` image requests returned long `@@@@...` output.
+- Direct text-only prompts to the same server also returned `@@@@...` output.
+- Direct `llama-cli` text-only against the same GGUF hung for minutes.
+
+Conclusion: the failure is below Cercano's image/tool path. It is a bad
+Qwen2.5-VL GGUF / llama.cpp build combination on this machine, not an adapter or
+projector wiring problem. Catalog entry is retained with `status: broken` and
+must not be used as a profile default.
+
+### Moondream2 finding
+
+Candidate:
+
+```text
+ggml-org/moondream2-20250414-GGUF
+moondream2-text-model-f16_ct-vicuna.gguf
+moondream2-mmproj-f16-20250414.gguf
+```
+
+Result: **not usable for Cercano's OpenAI-compatible vision path**.
+
+Evidence:
+
+- Model loads and generates coherent English text, so it is not `@`-broken.
+- llama-server reports vision enabled with `--mmproj`.
+- Image requests through `/v1/chat/completions` fail with:
+
+```text
+Failed to tokenize prompt
+```
+
+- `/props` reports `chat_format: None`.
+- Raw `/completion` with the media marker works mechanically, but hallucinated a
+  trivial synthetic image (described a white box with a red bar as a person's
+  face).
+
+Conclusion: Moondream would require a special non-OpenAI endpoint path and still
+showed poor accuracy. Catalog entry is marked `status: broken`.
+
+### Gemma 3 4B finding
+
+Candidate:
+
+```text
+ggml-org/gemma-3-4b-it-GGUF
+gemma-3-4b-it-Q4_K_M.gguf
+mmproj-model-f16.gguf
+```
+
+Runtime and size:
+
+```text
+main GGUF: 2.32 GB
+projector: 0.79 GB
+total disk: ~3.1 GB
+measured macOS physical footprint after image inference: ~1.6-1.7 GB
+```
+
+Smoke tests:
+
+- `llama-cli` text prompt produced the expected `hello world` response.
+- llama-server with `--mmproj --jinja` accepted image requests and correctly
+  described a synthetic white rectangle with a red horizontal bar and black
+  border.
+
+Quality on a dense Lunie UI screenshot:
+
+- Broad scene understanding: acceptable; identified a colony/base-building game
+  UI with status panel, objectives, central viewport, tutorial prompt, and build
+  toolbar.
+- Exact UI OCR: poor. It missed or corrupted top status bar text, toolbar labels,
+  hotkeys, and costs; e.g. misread `Autofactory` as `Nutfactory`/similar.
+- Task understanding: mostly correct at a high level, but less precise than
+  cloud.
+
+Conclusion: Gemma 3 4B is a valid lightweight local fallback, but not good enough
+to replace cloud vision for dense development screenshots or exact UI text
+extraction.
+
+### Gemma 3 12B finding
+
+Candidate:
+
+```text
+ggml-org/gemma-3-12b-it-GGUF
+gemma-3-12b-it-Q4_K_M.gguf
+mmproj-model-f16.gguf
+```
+
+Downloaded files:
+
+```text
+~/.cercano/models/gemma-3-12b-it-q4_k_m/gemma-3-12b-it-Q4_K_M.gguf   6.8G
+~/.cercano/models/gemma-3-12b-it-q4_k_m/mmproj-model-f16.gguf        815M
+total disk: ~7.6G
+```
+
+Launch command used:
+
+```bash
+/opt/homebrew/bin/llama-server \
+  --model gemma-3-12b-it-Q4_K_M.gguf \
+  --mmproj mmproj-model-f16.gguf \
+  --host 127.0.0.1 \
+  --port 58995 \
+  --ctx-size 8192 \
+  --gpu-layers auto \
+  --jinja
+```
+
+Runtime:
+
+```text
+healthy after ~7s
+modalities: {'vision': True, 'video': True, 'audio': False}
+```
+
+Measured memory after one text request and three image requests:
+
+```text
+phys_footprint:      3630 MB
+phys_footprint_peak: 3763 MB
+```
+
+Quality on the same exported Lunie screenshot (`/tmp/img_2db409_3.png`,
+2784x1888):
+
+- Text smoke test: `Say exactly: hello world` => `hello world`.
+- Broad scene understanding: substantially better than 4B. It correctly saw a
+  base/colony-building game UI with resource/status panel, objectives, central
+  isometric viewport, tutorial prompt, and bottom building toolbar.
+- Still made high-level mistakes: misidentified the game as `Autonauts` instead
+  of Lunie and hallucinated/misnamed some toolbar items.
+- OCR was much better than 4B but still below cloud. It read many fields
+  correctly:
+
+```text
+Pop: 4
+O2: 50.0kg -3.4/d
+Water: 150.0kg -12.0/d
+Stock: 32 Fe | 10 IC | 0 Ore
+Time: day 0
+Speed: paused
+Capacity: 4
+Survive 7 days
+Produce 20 kg O2
+Delivery Rover #1: Idle
+Click a tile adjacent to your Hab or Solar Array to queue the Greenhouse.
+Skip tutorial
+Hab / Solar / Garden / Water / Mine / Conduit
+```
+
+But it still made OCR errors relative to cloud:
+
+```text
+Food: 280.0kg -0.0/d   # cloud read -8.0/d
+Power: 7/39 kW         # cloud read 7/30 kW
+Autofactory            # misread as Nutrafactory
+Reclaim                # misread as Refinery
+LS [L]                 # missed
+hotkeys/costs          # mostly missed or unreliable
+```
+
+Task understanding was mostly correct: it understood the user should click a tile
+adjacent to the Hab or Solar Array to queue a Greenhouse. It was less precise
+than cloud about the UI mapping: the actual selected/relevant build option is
+`Garden [G]`, which queues the Greenhouse.
+
+Conclusion: Gemma 3 12B is the best local candidate tested so far. It is a clear
+upgrade over 4B at only ~3.7 GB physical footprint, but it is still not
+cloud-quality for dense UI screenshots and exact text extraction.
+
+### Cloud baseline finding
+
+The live cloud baseline during this pass was `openai-responses:gpt-5.5` (not
+Opus in that session). On the same screenshot, cloud was clearly superior:
+
+- Correctly identified the Lunie UI and its regions.
+- Extracted dense status bar, objective, tutorial, and toolbar text much more
+  accurately.
+- Correctly understood the action: place/queue a Greenhouse by selecting/using
+  `Garden [G]` on a tile adjacent to the Hab or Solar Array.
+
+### Recommendation after testing
+
+Current best policy:
+
+- Keep image inspection **cloud-first** whenever cloud is allowed.
+- Use local Gemma as fallback for `open_only` / offline cases.
+- Prefer **Gemma 3 12B** over 4B as the local vision default if the extra RAM is
+  acceptable: ~3.7 GB physical footprint versus ~1.7 GB for 4B, with much better
+  OCR and task understanding.
+- Do not route dense development screenshots to local vision by default yet;
+  exact UI reading still needs cloud quality.
+
+Candidate status summary:
+
+| Model | Status | Notes |
+|---|---|---|
+| Qwen2.5-VL 3B Q4_K_M | broken | `@` spam / hang even text-only |
+| Moondream2 F16 | broken | OAI chat vision tokenization fails; raw path hallucinated |
+| Gemma 3 4B Q4_K_M | usable fallback | tiny RAM, broad understanding, poor UI OCR |
+| Gemma 3 12B Q4_K_M | best local candidate | ~3.7 GB RAM, much better than 4B, still below cloud |
+

@@ -177,10 +177,11 @@
       "supports_embed": false,
       "supports_vision": true,
       "plain_chat_ok": true,
-      "status": "untested",
+      "status": "broken",
       "extra_args": [
         "--jinja"
-      ]
+      ],
+      "notes": "Vision fails via llama-server OpenAI /v1/chat/completions (Failed to tokenize prompt; chat_format None on b9890); raw /completion path hallucinated a trivial test image. Not usable through the visioninspect OpenAI path."
     },
     "phi-4-mini-instruct-q4_k_m": {
       "id": "phi-4-mini-instruct-q4_k_m",

@@ -43,6 +43,15 @@ type chatAssistantDeltaMsg struct{ token string }
 // inline status line (distinct from chatStatusMsg, which is /c-compatible).
 type chatProgressMsg struct{ note string }
 
+// reauthRequiredMsg asks the host to raise a reusable confirmation prompt that
+// can launch an existing provider sign-in flow. It is generated from a marked
+// progress note emitted by the server after a runtime auth failure.
+type reauthRequiredMsg struct {
+	provider string
+	profile  string
+	note     string
+}
+
 // toolEntry* events drive the tool-call lifecycle in scrollback.
 type toolEntryStartMsg struct{ id, name string }
 type toolEntryStopMsg struct{ id, argsSummary string }

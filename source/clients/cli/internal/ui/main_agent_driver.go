@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -61,11 +62,39 @@ func (d *mainAgentDriver) Submit(ctx context.Context, gen int, input string, ima
 // Telemetry-bearing events (chatStatusMsg from RouteSelected, chatDoneMsg) carry
 // their payloads so the host can fold them into the footer; transcript fields
 // ride the same events for chatView.Apply. permissionRequiredMsg is host-routed.
+func parseReauthRequiredProgress(note string) (reauthRequiredMsg, bool) {
+	const prefix = "cercano:reauth-required "
+	if !strings.HasPrefix(note, prefix) {
+		return reauthRequiredMsg{}, false
+	}
+	meta, display, ok := strings.Cut(strings.TrimPrefix(note, prefix), " | ")
+	if !ok {
+		display = note
+	}
+	msg := reauthRequiredMsg{note: normalizeProgress(display)}
+	for _, field := range strings.Fields(meta) {
+		key, val, ok := strings.Cut(field, "=")
+		if !ok {
+			continue
+		}
+		switch key {
+		case "provider":
+			msg.provider = val
+		case "profile":
+			msg.profile = val
+		}
+	}
+	return msg, true
+}
+
 func streamMsgToEvent(sm agentclient.StreamMsg) tea.Msg {
 	switch sm.Type {
 	case agentclient.TypeToken:
 		return chatAssistantDeltaMsg{token: sm.Token}
 	case agentclient.TypeProgress:
+		if msg, ok := parseReauthRequiredProgress(sm.Note); ok {
+			return msg
+		}
 		return chatProgressMsg{note: normalizeProgress(sm.Note)}
 	case agentclient.TypeRouteSelected:
 		return chatStatusMsg{model: sm.RouteModel, cloud: sm.RouteCloud}

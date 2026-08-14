@@ -3,10 +3,25 @@ package ui
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"cercano/source/server/pkg/agentclient"
 )
+
+func TestStreamMsgToEventMapsReauthProgress(t *testing.T) {
+	msg := streamMsgToEvent(agentclient.StreamMsg{Type: agentclient.TypeProgress, Note: "cercano:reauth-required provider=anthropic profile=claude | ⚠ anthropic auth failed — switching to openai-responses"})
+	reauth, ok := msg.(reauthRequiredMsg)
+	if !ok {
+		t.Fatalf("want reauthRequiredMsg, got %T", msg)
+	}
+	if reauth.provider != "anthropic" || reauth.profile != "claude" {
+		t.Fatalf("bad reauth metadata: %+v", reauth)
+	}
+	if !strings.Contains(reauth.note, "auth failed") {
+		t.Fatalf("reauth note should keep display text, got %q", reauth.note)
+	}
+}
 
 // streamMsgToEvent is the pure StreamMsg → event map. Each StreamMsg type maps
 // to exactly one agent-agnostic chat event with its payload transposed.

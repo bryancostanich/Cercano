@@ -65,6 +65,14 @@ func TestNormalize_QuotaScale429(t *testing.T) {
 	}
 }
 
+func TestNormalize_SubscriptionRefreshInvalidGrantIsAuth(t *testing.T) {
+	c := NewClient(Config{APIKey: "k"})
+	err := c.normalize(errors.New(`anthropic: subscription token: anthropic token source: refresh: anthropic token request: HTTP 400: {"error":"invalid_grant","error_description":"Refresh token expired"}`))
+	if got := llm.ClassOf(err); got != llm.ErrAuth {
+		t.Fatalf("ClassOf = %q, want auth: %v", got, err)
+	}
+}
+
 func TestNormalize_TransientClasses(t *testing.T) {
 	cases := []struct {
 		name   string

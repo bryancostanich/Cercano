@@ -57,10 +57,22 @@ func (c *Client) normalize(err error) error {
 		}
 		return ne
 	}
+	if isSubscriptionAuthError(err) {
+		return &llm.Error{Class: llm.ErrAuth, Provider: c.Name(), Err: err}
+	}
 	if llm.IsNetworkError(err) {
 		return &llm.Error{Class: llm.ErrNetwork, Provider: c.Name(), Err: err}
 	}
 	return &llm.Error{Class: llm.ErrUnknown, Provider: c.Name(), Err: err}
+}
+
+func isSubscriptionAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	m := strings.ToLower(err.Error())
+	return strings.Contains(m, "subscription token") &&
+		(strings.Contains(m, "invalid_grant") || strings.Contains(m, "refresh token expired") || strings.Contains(m, "reauth"))
 }
 
 // hasQuotaMarker matches the phrasings Anthropic uses for plan/credit

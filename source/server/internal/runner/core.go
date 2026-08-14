@@ -556,9 +556,14 @@ func makeLoopSink(sink EventSink) func(agent.LoopEvent) {
 			// Resilience-engine narration ("anthropic quota reached — switching
 			// to openai"). Logged so backup-served/retried turns are visible in
 			// the server log, and forwarded on the progress channel so the CLI
-			// shows it as the live status line.
+			// shows it as the live status line. Auth failures carry a marker so
+			// capable clients can raise an actionable re-auth prompt.
 			fmt.Fprintf(os.Stderr, "[resilience] %s\n", ev.Summary)
-			sink.Emit(Event{Kind: EventProgress, Text: "⚠ " + ev.Summary})
+			text := "⚠ " + ev.Summary
+			if strings.Contains(strings.ToLower(ev.Summary), "anthropic auth failed") {
+				text = "cercano:reauth-required provider=anthropic profile=claude | " + text
+			}
+			sink.Emit(Event{Kind: EventProgress, Text: text})
 
 		case agent.LoopWatchdogChallenge:
 			sink.Emit(Event{

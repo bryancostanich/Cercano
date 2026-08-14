@@ -19,6 +19,22 @@ func minimalModel() Model {
 	}
 }
 
+func TestReauthRequiredRaisesReusableConfirmPrompt(t *testing.T) {
+	m := modelWithContextView()
+	msg := reauthRequiredMsg{provider: "anthropic", profile: "claude", note: "anthropic auth failed — switching to openai-responses"}
+	m2, _ := m.routeChatMsg(msg)
+	if m2.pendingConfirm == nil {
+		t.Fatal("reauth should raise pendingConfirm")
+	}
+	out := stripAnsiCSI(m2.renderConfirmRequest(m2.pendingConfirm))
+	if !strings.Contains(out, "Claude sign-in expired") {
+		t.Fatalf("prompt missing title: %q", out)
+	}
+	if !strings.Contains(out, "[y]es re-auth") || !strings.Contains(out, "[n]o dismiss") || !strings.Contains(out, "[d]etails") {
+		t.Fatalf("prompt missing custom hints: %q", out)
+	}
+}
+
 func TestRenderConfirmPrompt_W_ShowsKeyHints(t *testing.T) {
 	m := minimalModel()
 	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{

@@ -326,10 +326,13 @@ type pendingToolCall struct {
 // model routes y / n / esc (and optional extra keys) to it. onYes/onNo
 // resolve and should clear m.pendingConfirm; extras run without resolving.
 type confirmRequest struct {
-	tool   *pendingToolCall
-	onYes  func(Model) (Model, tea.Cmd)
-	onNo   func(Model) (Model, tea.Cmd)
-	extras map[string]func(Model) (Model, tea.Cmd)
+	tool    *pendingToolCall
+	title   string
+	details []string
+	hints   string
+	onYes   func(Model) (Model, tea.Cmd)
+	onNo    func(Model) (Model, tea.Cmd)
+	extras  map[string]func(Model) (Model, tea.Cmd)
 	// stale marks a tool-permission gate whose server-side turn died — e.g.
 	// the agent restarted while the y/n/d/c prompt was up. The paused tool
 	// call and its blocked waiter no longer exist in the fresh agent process,
@@ -1582,6 +1585,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// RouteSelected telemetry: engine badge for the footer.
 			m.turnModel = ev.model
 			m.turnCloud = ev.cloud
+		case reauthRequiredMsg:
+			m.turnActivity = "auth"
+			m.mainChat().Apply(chatProgressMsg{note: ev.note})
+			if m.pendingConfirm == nil {
+				m.pendingConfirm = reauthConfirm(ev)
+				m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.renderConfirmRequest(m.pendingConfirm)})
+			}
+			m.chatDirty = true
+			return m, tea.Batch(msg.next, m.ensureAnimTick())
 		case chatProgressMsg:
 			// Coalesced: mark the transcript dirty and let the next anim
 			// tick repaint. Rebuilding per event made rebuild rate track
@@ -3627,6 +3639,24 @@ func rolloverPreviewSnippet(preview string) string {
 
 // renderConfirmPrompt builds the confirm message shown in scrollback while
 // pendingConfirm is set. The first line names the requested action, optional
+func (m Model) renderConfirmRequest(c *confirmRequest) string {
+	if c == nil {
+		return ""
+	}
+	if c.tool != nil {
+		return m.renderConfirmPrompt(c.tool)
+	}
+	head := m.styles.Accent.Render("▸ ")
+	lines := []string{head + m.styles.AgentProse.Render(c.title)}
+	for _, detail := range c.details {
+		lines = append(lines, "  "+m.styles.AgentProse.Render(detail))
+	}
+	if c.hints != "" {
+		lines = append(lines, "  "+c.hints)
+	}
+	return strings.Join(lines, "\n")
+}
+
 // human-facing intent/details follow, and key hints stay on their own final
 // line so long summaries never wrap mid-hint. W-tier renders normally; X-tier
 // gets a red ⚠ destructive emphasis. MCP tools get an additional [a]lways key.
@@ -3990,6 +4020,62 @@ func (m Model) resolveConfirmHotkey(key string) (Model, tea.Cmd, bool) {
 	}
 }
 
+func reauthConfirm(req reauthRequiredMsg) *confirmRequest {
+	profile := req.profile
+	if profile == "" {
+		profile = "claude"
+	}
+	note := req.note
+	if note == "" {
+		note = "Claude sign-in expired."
+	}
+	var detailsEntry *Entry
+	toggleDetails := func(m Model) (Model, tea.Cmd) {
+		if detailsEntry != nil {
+			if m.mainChat().RemoveEntry(detailsEntry) {
+				detailsEntry = nil
+				m.refreshViewport()
+				return m, nil
+			}
+			detailsEntry = nil
+		}
+		detailsEntry = &Entry{Role: RoleSystem, Content: "auth details:\n" + note}
+		m.mainChat().AppendEntry(detailsEntry)
+		m.refreshViewport()
+		return m, nil
+	}
+	return &confirmRequest{
+		title: "Claude sign-in expired",
+		details: []string{
+			"Cercano could not refresh the Claude subscription token.",
+			"Re-authenticate now, or dismiss and keep using the backup profile for this turn.",
+		},
+		hints: "[" + "y" + "]es re-auth / [" + "n" + "]o dismiss / [" + "d" + "]etails",
+		onYes: func(m Model) (Model, tea.Cmd) {
+			m.pendingConfirm = nil
+			if m.agent == nil {
+				m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Error.Render("Claude sign-in unavailable — no agent connection.")})
+				m.refreshViewport()
+				return m, nil
+			}
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Accent.Render("opening Claude sign-in…")})
+			m.refreshViewport()
+			m.claudeLoginModal = newClaudeLoginModal(profile, "")
+			return m, startClaudeLoginCmd(m.agent, profile, "", true)
+		},
+		onNo: func(m Model) (Model, tea.Cmd) {
+			m.pendingConfirm = nil
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("Claude re-auth dismissed.")})
+			m.refreshViewport()
+			return m, nil
+		},
+		extras: map[string]func(Model) (Model, tea.Cmd){
+			"d": toggleDetails,
+			"D": toggleDetails,
+		},
+	}
+}
+
 // toolConfirm builds the confirmRequest for a tool-permission decision,
 // preserving the prior behavior: y approves (Allow RPC for stream-origin call,
 // else local invoke), n denies (Deny RPC for stream-origin), d/D reveals args.
@@ -4249,6 +4335,15 @@ func (m Model) routeChatMsg(msg tea.Msg) (Model, tea.Cmd) {
 	cv, ok := m.content.(*contextView)
 	if !ok {
 		return m, nil
+	}
+	if rm, ok := msg.(reauthRequiredMsg); ok {
+		cv.chat.Apply(chatProgressMsg{note: rm.note})
+		if m.pendingConfirm == nil {
+			m.pendingConfirm = reauthConfirm(rm)
+			cv.chat.AppendEntry(&Entry{Role: RoleSystem, Content: m.renderConfirmRequest(m.pendingConfirm)})
+		}
+		cv.chat.rebuild()
+		return m, progressAnimTick()
 	}
 	if cm, isConfirm := msg.(chatConfirmMsg); isConfirm {
 		// Fill the open streaming placeholder with the rationale rather than

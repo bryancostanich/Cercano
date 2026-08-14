@@ -738,6 +738,29 @@ func isLegacySubscriptionAlias(p CloudProfile) bool {
 	return false
 }
 
+func migrateCloudModelAliases(cfg *Config) {
+	for i := range cfg.CloudProfiles {
+		cfg.CloudProfiles[i].Model = migrateCloudModelID(cfg.CloudProfiles[i].Model)
+	}
+	if providers := cfg.ModelProfiles.Cloud.Providers; providers != nil {
+		for vendor, tiers := range providers {
+			tiers.Economy.Model = migrateCloudModelID(tiers.Economy.Model)
+			tiers.Standard.Model = migrateCloudModelID(tiers.Standard.Model)
+			tiers.Premium.Model = migrateCloudModelID(tiers.Premium.Model)
+			providers[vendor] = tiers
+		}
+	}
+}
+
+func migrateCloudModelID(model string) string {
+	switch model {
+	case "claude-opus-4-8":
+		return "claude-opus-5-0"
+	default:
+		return model
+	}
+}
+
 // migrateModelTiers seeds the model taxonomy from the legacy standalone
 // model keys: open_model → tiers.everyday.open, embedding_model →
 // tiers.embedding.open. Seeding only fills EMPTY slots — a file that already
@@ -847,6 +870,7 @@ func Load(path string) (Config, error) {
 	migrateCloudProfiles(&cfg)
 	migrateMeridianToSubscription(&cfg)
 	collapseLegacySubscriptionAliases(&cfg)
+	migrateCloudModelAliases(&cfg)
 	if !ValidateToolLoopMaxIterations(cfg.ToolLoop.MaxIterations) {
 		return cfg, fmt.Errorf("tool_loop.max_iterations must be -1 or a non-negative integer, got %d", cfg.ToolLoop.MaxIterations)
 	}

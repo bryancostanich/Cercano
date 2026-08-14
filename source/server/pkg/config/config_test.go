@@ -781,6 +781,69 @@ func TestCollapseLegacySubscriptionAliasesPreservesDirectProfile(t *testing.T) {
 	}
 }
 
+func TestMigrateCloudModelAliasesUpdatesPersistedOpus48(t *testing.T) {
+	cfg := &Config{
+		CloudProfiles: []CloudProfile{
+			{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-4-8"},
+			{Name: "openai-responses", Flavor: "responses", Route: "chatgpt", Model: "gpt-5.5"},
+		},
+		ModelProfiles: ModelProfiles{Cloud: CloudCostProfiles{Providers: map[string]VendorCostTiers{
+			"anthropic": {
+				Economy:  CostTierModel{Model: "claude-haiku-4-5"},
+				Standard: CostTierModel{Model: "claude-opus-4-8"},
+				Premium:  CostTierModel{Model: "claude-fable-5"},
+			},
+			"openai": {
+				Standard: CostTierModel{Model: "gpt-5.5"},
+			},
+		}}},
+	}
+
+	migrateCloudModelAliases(cfg)
+
+	if got := cfg.CloudProfiles[0].Model; got != "claude-opus-5-0" {
+		t.Fatalf("claude profile model = %q, want claude-opus-5-0", got)
+	}
+	if got := cfg.CloudProfiles[1].Model; got != "gpt-5.5" {
+		t.Fatalf("openai profile model should be unchanged, got %q", got)
+	}
+	if got := cfg.ModelProfiles.Cloud.Providers["anthropic"].Standard.Model; got != "claude-opus-5-0" {
+		t.Fatalf("anthropic standard model = %q, want claude-opus-5-0", got)
+	}
+}
+
+func TestLoadMigratesPersistedOpus48(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	data := []byte(`cloud_profiles:
+  - name: claude
+    flavor: messages
+    route: subscription
+    model: claude-opus-4-8
+active_cloud_profile: claude
+model_profiles:
+  cloud:
+    providers:
+      anthropic:
+        standard:
+          model: claude-opus-4-8
+`)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.CloudProfiles[0].Model; got != "claude-opus-5-0" {
+		t.Fatalf("loaded claude profile model = %q, want claude-opus-5-0", got)
+	}
+	if got := cfg.ModelProfiles.Cloud.Providers["anthropic"].Standard.Model; got != "claude-opus-5-0" {
+		t.Fatalf("loaded anthropic standard model = %q, want claude-opus-5-0", got)
+	}
+}
+
 func TestLoadCollapsesLegacySubscriptionAliases(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

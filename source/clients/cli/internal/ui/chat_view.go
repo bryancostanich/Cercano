@@ -1275,9 +1275,9 @@ func (c *chatView) renderEntry(e *Entry, idx int) string {
 		lines := strings.Split(wrapped, "\n")
 		for i := range lines {
 			if i == 0 {
-				lines[i] = c.styles.BufferUserMarker.Render("▶ ") + c.styles.BufferUserLine.Render(lines[i])
+				lines[i] = c.styles.BufferUserMarker.Render("▶ ") + c.styles.BufferUserText.Render(lines[i])
 			} else {
-				lines[i] = c.styles.BufferUserLine.Render(pad + lines[i])
+				lines[i] = c.styles.BufferUserText.Render(pad + lines[i])
 			}
 		}
 		return strings.Join(lines, "\n")

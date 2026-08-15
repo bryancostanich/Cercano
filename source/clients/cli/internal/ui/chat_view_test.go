@@ -16,6 +16,11 @@ func newTestChatView(w, h int) *chatView {
 	return &cv
 }
 
+func newTestChatViewWithPalette(w, h int, p theme.Palette) *chatView {
+	cv := newChatView(theme.NewStyles(p), p, "", "", w, h)
+	return &cv
+}
+
 // TestChatView_ScrollSurfaceMatchesViewport checks that the scroll surface
 // methods (TotalLineCount, AtBottom, SetYOffset, YOffset, GotoBottom) behave
 // as expected after loading content.
@@ -79,5 +84,24 @@ func TestChatView_ViewIdentityOverlayMatchesNoSelection(t *testing.T) {
 	out := c.View()
 	if strings.TrimSpace(out) == "" {
 		t.Fatalf("View produced empty output for a user entry")
+	}
+}
+
+func TestChatView_UserPromptAppliesTextForegroundOnLightThemes(t *testing.T) {
+	var daylight theme.Palette
+	for _, t := range theme.BuiltinThemes() {
+		if t.Name == "daylight" {
+			daylight = t.Palette
+			break
+		}
+	}
+	c := newTestChatViewWithPalette(50, 6, daylight)
+	rendered := c.renderEntry(&Entry{Role: RoleUser, Content: "readable prompt"}, 0)
+
+	if !strings.Contains(rendered, "38;2;122;78;10") {
+		t.Fatalf("daylight sent prompt should set BufferUserText foreground (#7A4E0A); got %q", rendered)
+	}
+	if !strings.Contains(rendered, "48;2;230;215;176") {
+		t.Fatalf("daylight sent prompt should keep BufferUserBg background (#E6D7B0); got %q", rendered)
 	}
 }

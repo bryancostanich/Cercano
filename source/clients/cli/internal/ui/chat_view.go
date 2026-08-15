@@ -1378,7 +1378,7 @@ func (c *chatView) renderAssistantMarkdown(e *Entry, textW int) string {
 	blocks, tail := render.SplitBlocks(content)
 	prefix := c.committedPrefix(e, blocks, textW)
 	if strings.TrimSpace(tail) != "" {
-		live := c.md.RenderLive(closeOpenFence(render.PinUntypedFences(tail)), textW)
+		live := c.renderLiveMarkdownTail(tail, textW)
 		if prefix == "" {
 			return live
 		}
@@ -1391,6 +1391,26 @@ func (c *chatView) renderAssistantMarkdown(e *Entry, textW int) string {
 	// (breathing room for a body that never came); trim it so the reply
 	// doesn't end on a blank line.
 	return strings.TrimRight(prefix, "\n")
+}
+
+func (c *chatView) renderLiveMarkdownTail(tail string, textW int) string {
+	pinned := render.PinUntypedFences(tail)
+	if !strings.Contains(pinned, "```") {
+		return c.md.RenderLive(pinned, textW)
+	}
+	closed := closeOpenFence(pinned)
+	if !strings.HasSuffix(closed, "\n") {
+		closed += "\n"
+	}
+	blocks, rest := render.SplitBlocks(closed)
+	parts := make([]string, 0, len(blocks)+1)
+	for _, b := range blocks {
+		parts = append(parts, c.renderMdBlock(b, textW))
+	}
+	if strings.TrimSpace(rest) != "" {
+		parts = append(parts, c.md.RenderLive(rest, textW))
+	}
+	return strings.Join(parts, "\n")
 }
 
 func (c *chatView) renderMdBlock(b render.MdBlock, textW int) string {

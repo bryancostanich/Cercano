@@ -90,6 +90,18 @@ func TestAssistantMarkdown_CodeBlockUsesExplicitDarkBackground(t *testing.T) {
 	}
 }
 
+func TestAssistantMarkdown_LiveCodeBlockUsesExplicitDarkBackground(t *testing.T) {
+	cv := newMdChatViewWithTheme("daylight")
+	e := &Entry{Role: RoleAssistant, Streaming: true, Content: "Passed:\n\n```text\ncargo check -p lunie-asset-manager --message-format=short\ncargo test -p lunie-asset-manager --message-format=short"}
+	out := cv.renderAssistantMarkdown(e, 80)
+	if !strings.Contains(out, "48;2;26;26;26") {
+		t.Fatalf("expected live daylight code block body to render on dark background (#1A1A1A), got %q", out)
+	}
+	if !strings.Contains(plain(out), "cargo check -p lunie-asset-manager") {
+		t.Fatalf("rendered live code text missing: %q", plain(out))
+	}
+}
+
 func TestAssistantMarkdown_FormatsProseAndTable(t *testing.T) {
 	cv := newMdChatView()
 	e := &Entry{

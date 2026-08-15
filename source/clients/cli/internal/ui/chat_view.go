@@ -940,7 +940,7 @@ func (c *chatView) renderTrailingActivity(textW int) string {
 	}
 	t := c.animationTime()
 	line := turnStatusLine(activity, t.Sub(c.turn.start), c.turn.tokOut, c.turn.model, c.turn.cloud)
-	return animateSpinnerGlyphAt(t) + " " + animateLimeSweepAt(line, t)
+	return animateSpinnerGlyphAt(t) + " " + animateActivitySweepAt(line, t, c.palette)
 }
 
 // ── scroll surface ─────────────────────────────────────────────────────────
@@ -1307,7 +1307,7 @@ func (c *chatView) renderEntry(e *Entry, idx int) string {
 			}
 			t := c.animationTime()
 			line := turnStatusLine(activity, t.Sub(c.turn.start), c.turn.tokOut, c.turn.model, c.turn.cloud)
-			content := animateSpinnerGlyphAt(t) + " " + animateLimeSweepAt(line, t)
+			content := animateSpinnerGlyphAt(t) + " " + animateActivitySweepAt(line, t, c.palette)
 			return indentBlock(pad, content)
 		}
 		rendered := c.renderAssistantMarkdown(e, textW)

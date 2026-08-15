@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"cercano/source/clients/cli/internal/theme"
 )
@@ -48,4 +49,36 @@ func TestContextMeter_CompactingOverlay(t *testing.T) {
 	if strings.Count(out, "compacting") != 1 {
 		t.Errorf("expected exactly one compacting label (overlaid, not appended):\n%s", out)
 	}
+}
+
+func TestActivitySweepUsesReadableDarkGreenOnLightThemes(t *testing.T) {
+	daylight := builtinPaletteForTest("daylight")
+	out := animateActivitySweepAt("thinking", time.Unix(0, 0), daylight)
+	if !strings.Contains(out, "38;2;30;122;60") {
+		t.Fatalf("daylight thinking text should use readable theme accent (#1E7A3C), got %q", out)
+	}
+	if strings.Contains(out, "38;2;189;240;0") {
+		t.Fatalf("daylight thinking text should not use neon lime (#BDF000) on a light background, got %q", out)
+	}
+}
+
+func TestCompactingMeterUsesLightThemeContrast(t *testing.T) {
+	daylight := builtinPaletteForTest("daylight")
+	m := Model{styles: theme.NewStyles(daylight), palette: daylight, cumIn: 90000, ctxRaw: 340000, modelMaxTokens: 200000, compacting: true}
+	out := m.renderContextMeter()
+	if !strings.Contains(stripAnsiCSI(out), "compacting") {
+		t.Fatalf("expected compacting label in rendered meter: %q", stripAnsiCSI(out))
+	}
+	if !strings.Contains(out, "38;2;90;58;10") {
+		t.Fatalf("daylight filled compacting label should use dark primary text (#5A3A0A), got %q", out)
+	}
+}
+
+func builtinPaletteForTest(name string) theme.Palette {
+	for _, builtin := range theme.BuiltinThemes() {
+		if builtin.Name == name {
+			return builtin.Palette
+		}
+	}
+	return theme.Cracker()
 }

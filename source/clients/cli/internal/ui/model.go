@@ -3257,12 +3257,16 @@ func animateLimeSweep(text string) string {
 }
 
 func animateLimeSweepAt(text string, t time.Time) string {
+	return animateActivitySweepAt(text, t, theme.Cracker())
+}
+
+func animateActivitySweepAt(text string, t time.Time, p theme.Palette) string {
 	const (
 		cycleMs = 1500 // one full sweep duration
 		tail    = 4.0  // half-width of the bright band, in columns
 		padCols = 4.0  // off-screen lead-in / trail-out
 	)
-	// Walk-clock phase, 0..1.
+	// Wall-clock phase, 0..1.
 	phaseMs := t.UnixMilli() % int64(cycleMs)
 	progress := float64(phaseMs) / float64(cycleMs)
 
@@ -3273,7 +3277,7 @@ func animateLimeSweepAt(text string, t time.Time) string {
 	col := 0
 	for _, r := range text {
 		b.WriteString(lipgloss.NewStyle().
-			Foreground(progressColorAt(col, sweepPos, tail)).
+			Foreground(progressColorAtForPalette(p, col, sweepPos, tail)).
 			Render(string(r)))
 		col++
 	}
@@ -3295,21 +3299,33 @@ func fadeColor(c color.Color, k float64) color.Color {
 // progressColorAt returns the rendered color for one column at a given sweep
 // position. Lime base; the inside `tail` columns lerp toward white.
 func progressColorAt(col int, sweepPos float64, tail float64) color.Color {
+	return progressColorAtForPalette(theme.Cracker(), col, sweepPos, tail)
+}
+
+func progressColorAtForPalette(p theme.Palette, col int, sweepPos float64, tail float64) color.Color {
 	dist := float64(col) - sweepPos
 	if dist < 0 {
 		dist = -dist
 	}
-	if dist >= tail {
-		return lipgloss.Color("#BDF000") // lime base
-	}
-	k := 1.0 - dist/tail               // 0 at edge, 1 at peak
 	base := [3]uint8{0xBD, 0xF0, 0x00} // lime
 	peak := [3]uint8{0xFF, 0xFF, 0xFF} // white peak
+	if isLightColor(p.BgDeep) {
+		base = colorRGB(p.Accent)
+		peak = colorRGB(fadeColor(p.Accent, 0.55))
+	}
+	if dist >= tail {
+		return rgbColor(base)
+	}
+	k := 1.0 - dist/tail // 0 at edge, 1 at peak
 	c := [3]uint8{
 		uint8(float64(base[0]) + (float64(peak[0])-float64(base[0]))*k),
 		uint8(float64(base[1]) + (float64(peak[1])-float64(base[1]))*k),
 		uint8(float64(base[2]) + (float64(peak[2])-float64(base[2]))*k),
 	}
+	return rgbColor(c)
+}
+
+func rgbColor(c [3]uint8) color.Color {
 	hex := []byte("#000000")
 	const digits = "0123456789ABCDEF"
 	hex[1] = digits[c[0]>>4]
@@ -3319,6 +3335,20 @@ func progressColorAt(col int, sweepPos float64, tail float64) color.Color {
 	hex[5] = digits[c[2]>>4]
 	hex[6] = digits[c[2]&0xF]
 	return lipgloss.Color(string(hex))
+}
+
+func colorRGB(c color.Color) [3]uint8 {
+	if c == nil {
+		return [3]uint8{}
+	}
+	r, g, b, _ := c.RGBA()
+	return [3]uint8{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8)}
+}
+
+func isLightColor(c color.Color) bool {
+	rgb := colorRGB(c)
+	luma := 0.2126*float64(rgb[0]) + 0.7152*float64(rgb[1]) + 0.0722*float64(rgb[2])
+	return luma >= 170
 }
 
 // applyResume calls the agent's ResumeConversation RPC, switches the active
@@ -5369,20 +5399,27 @@ func (m Model) renderCompactingMeterBar(cells, fillN int) string {
 		case inLabel && onFill:
 			// The bar must stay visible under the label: the filled cell keeps
 			// its (animated) fill color as the BACKGROUND and the letter is
-			// knocked out of it in the terminal background color — reads as a
-			// solid green bar with the label punched through it. The sweep
-			// animates the background, so the fill shimmer survives the label.
+			// knocked out against it. Light themes need dark ink here; using the
+			// pale terminal background as the glyph color washed the label out.
+			fill := progressColorAtForPalette(m.palette, col, sweepPos, tail)
+			fg := m.palette.BgDeep
+			if isLightColor(m.palette.BgDeep) {
+				fg = m.palette.Primary
+			}
 			b.WriteString(lipgloss.NewStyle().
-				Foreground(m.palette.BgDeep).
-				Background(progressColorAt(col, sweepPos, tail)).
+				Foreground(fg).
+				Background(fill).
 				Render(string(label[col-start])))
 		case inLabel && !onFill:
-			// Empty-side letters are an overlay on the checker: bright amber
-			// text on a faded (darkened) version of the checker's own color,
-			// so the label region reads as a translucent band over the empty
-			// texture rather than letters floating on the bare background.
+			// Empty-side letters are an overlay on the checker. On light themes,
+			// flip the glyph to the page color over a darkened checker so the
+			// label stays readable instead of becoming amber-on-brown mush.
+			fg := m.palette.Bright
+			if isLightColor(m.palette.BgDeep) {
+				fg = m.palette.BgDeep
+			}
 			b.WriteString(lipgloss.NewStyle().
-				Foreground(m.palette.Bright).
+				Foreground(fg).
 				Background(fadeColor(m.palette.Dim, 0.45)).
 				Render(string(label[col-start])))
 		case !inLabel && onFill:
@@ -5392,7 +5429,7 @@ func (m Model) renderCompactingMeterBar(cells, fillN int) string {
 			// does — mixing the two makes the label cells look taller than
 			// the rest of the bar.
 			b.WriteString(lipgloss.NewStyle().
-				Background(progressColorAt(col, sweepPos, tail)).
+				Background(progressColorAtForPalette(m.palette, col, sweepPos, tail)).
 				Render(" "))
 		default: // !inLabel && !onFill
 			b.WriteString(m.styles.MeterEmpty.Render("░"))

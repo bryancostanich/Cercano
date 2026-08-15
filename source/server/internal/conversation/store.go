@@ -208,9 +208,25 @@ func Open(path string) (Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite at %s: %w", path, err)
 	}
-	// WAL gives concurrent readers while one writer commits — useful when
-	// the agent writes turns while a UI fetches /history.
-	if _, err := db.Exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;"); err != nil {
+	// Pin the store to a single physical SQLite connection.
+	//
+	// database/sql otherwise maintains a *pool* of independent connections, and
+	// modernc.org/sqlite opens the file once per pooled connection. In WAL mode
+	// each connection latches its own read snapshot (the WAL end-mark it saw at
+	// begin-read time). When another process checkpoints and truncates the WAL,
+	// a pooled connection can keep serving a stale, pre-write snapshot — so the
+	// /history picker intermittently sees zero conversations even though the
+	// rows are committed on disk. That staleness became sticky across restarts
+	// once the WAL was truncated, which is exactly the "restart no longer fixes
+	// resume" failure. One connection means one consistent view; all callers
+	// already serialize through s.mu, so single-conn costs no real concurrency.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
+	// WAL for durability + crash safety; busy_timeout so the lone connection
+	// waits out any cross-process writer lock instead of erroring; foreign_keys
+	// for the ON DELETE CASCADE from conversations to turns.
+	if _, err := db.Exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("pragma setup: %w", err)
 	}

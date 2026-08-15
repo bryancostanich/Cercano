@@ -1403,6 +1403,7 @@ func (c *chatView) renderMdBlock(b render.MdBlock, textW int) string {
 		// tokens — see render.PinUntypedFences). The code-rule label below still
 		// keys off b.Lang, which stays empty, so no "text" label is shown.
 		body := trimBlankEdgeLines(c.md.Render(render.PinUntypedFences(b.Raw), textW))
+		body = paintCodeBlockBackground(body, textW, c.styles)
 		top := codeRule(b.Lang, textW, c.styles)
 		bottom := codeRule("", textW, c.styles)
 		return top + "\n" + body + "\n" + bottom

@@ -22,6 +22,7 @@ type Styles struct {
 	AgentProse lipgloss.Style // default assistant text
 
 	BufferCode       lipgloss.Style // muted lavender — code-fence lang in scrollback (echoes inline code)
+	BufferCodeBlock  lipgloss.Style // explicit dark canvas behind code-fence bodies
 	BufferUserPrompt lipgloss.Style // muted lime ▶ for echoed user input in scrollback
 	BufferUserLine   lipgloss.Style // navy background fill behind echoed user prompt lines
 	BufferUserMarker lipgloss.Style // muted lime ▶ on the navy fill
@@ -54,6 +55,7 @@ func NewStyles(p Palette) Styles {
 		AgentProse: lipgloss.NewStyle().Foreground(p.Primary),
 
 		BufferCode:       lipgloss.NewStyle().Foreground(p.BufferCode),
+		BufferCodeBlock:  lipgloss.NewStyle().Background(lipgloss.Color(hexBgDeep)),
 		BufferUserPrompt: lipgloss.NewStyle().Foreground(p.BufferLime).Bold(true),
 		BufferUserLine:   lipgloss.NewStyle().Background(p.BufferUserBg),
 		BufferUserMarker: lipgloss.NewStyle().Foreground(p.BufferLime).Background(p.BufferUserBg).Bold(true),

@@ -55,7 +55,10 @@ func MarkdownStyle(p Palette) ansi.StyleConfig {
 	sc.Code.Color = strp(hexStr(p.BufferCode))
 	// Zero the code-block margin so the body aligns flush-left under the
 	// horizontal rules we draw around it (see codeRule in the ui package).
+	// Chroma's bundled Dracula token colors are tuned for a dark canvas; make
+	// that canvas explicit so light themes do not wash out code fences.
 	sc.CodeBlock.Margin = uintp(0)
+	sc.CodeBlock.BackgroundColor = strp(hexBgDeep)
 
 	// List items (bullets and numbers) match normal paragraph text. Dracula
 	// colors the whole list via List.Color (white) and ignores Item/Enumeration

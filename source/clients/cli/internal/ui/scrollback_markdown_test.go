@@ -23,6 +23,17 @@ func newMdChatView() *chatView {
 	return &cv
 }
 
+func newMdChatViewWithTheme(name string) *chatView {
+	for _, builtin := range theme.BuiltinThemes() {
+		if builtin.Name == name {
+			p := builtin.Palette
+			cv := newChatView(theme.NewStyles(p), p, "", "", 0, 0)
+			return &cv
+		}
+	}
+	return newMdChatView()
+}
+
 // Renders an assistant entry the way renderEntry does for committed blocks,
 // proving prose is Glamour-formatted and tables go through render.Table.
 func TestAssistantMarkdown_LinksHaveClickableHitRegions(t *testing.T) {
@@ -64,6 +75,18 @@ func TestAssistantMarkdown_LinksHaveClickableHitRegions(t *testing.T) {
 	}
 	if got, ok := cv.LinkAt(bareCol, line); !ok || got != "https://bare.example/path" {
 		t.Fatalf("LinkAt bare URL = %q,%v; want https://bare.example/path,true; rows=%+v", got, ok, cv.linkRows)
+	}
+}
+
+func TestAssistantMarkdown_CodeBlockUsesExplicitDarkBackground(t *testing.T) {
+	cv := newMdChatViewWithTheme("daylight")
+	e := &Entry{Role: RoleAssistant, Content: "```rust\nstruct Foo {\n    bar: String,\n}\n```\n"}
+	out := cv.renderAssistantMarkdown(e, 60)
+	if !strings.Contains(out, "48;2;26;26;26") {
+		t.Fatalf("expected daylight code block body to render on dark background (#1A1A1A), got %q", out)
+	}
+	if !strings.Contains(plain(out), "struct Foo") {
+		t.Fatalf("rendered code text missing: %q", plain(out))
 	}
 }
 

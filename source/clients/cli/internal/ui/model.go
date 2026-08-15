@@ -3142,6 +3142,21 @@ func trimBlankEdgeLines(s string) string {
 	return strings.Join(lines, "\n")
 }
 
+func paintCodeBlockBackground(s string, width int, styles theme.Styles) string {
+	if s == "" {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		pad := width - lipgloss.Width(line)
+		if pad < 0 {
+			pad = 0
+		}
+		lines[i] = styles.BufferCodeBlock.Render(line + strings.Repeat(" ", pad))
+	}
+	return strings.Join(lines, "\n")
+}
+
 // codeRule renders a full-width horizontal rule delimiting a code block. With a
 // language it reads `─── go ─────────…`; without one it's a plain rule. The rule
 // is muted; the language label is cyan to echo the inline-code color.

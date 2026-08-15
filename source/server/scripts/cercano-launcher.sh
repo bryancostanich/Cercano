@@ -48,25 +48,40 @@ stale() {
     find "$root" -name '*.go' -newer "$bin" -print -quit 2>/dev/null | grep -q .
 }
 
+# build_install BIN BUILD_DIR PKG — build PKG into a temp sibling of BIN, sign
+# it, then mv it over BIN. Never rewrite the installed path in place: if an
+# older instance still has that inode mapped, an in-place `go build -o` or
+# `codesign --force` poisons the kernel's per-vnode signature cache and every
+# later exec of the path dies with SIGKILL until the file is replaced. The mv
+# gives the path a fresh inode on every install, which sidesteps that entirely.
+build_install() {
+    local bin="$1" dir="$2" pkg="$3"
+    local tmp="$bin.new.$$"
+    if ! (cd "$dir" && go build -o "$tmp" "$pkg"); then
+        rm -f "$tmp"
+        return 1
+    fi
+    "$SERVER_DIR/scripts/codesign-if-available.sh" "$tmp"
+    mv -f "$tmp" "$bin"
+}
+
 # 1a. Rebuild the server binary if its sources changed.
 if stale "$SERVER_BIN" "$SERVER_DIR"; then
     echo "[cercano] rebuilding agent server..." >&2
-    if ! (cd "$SERVER_DIR" && go build -o "$SERVER_BIN" ./cmd/cercano/); then
+    if ! build_install "$SERVER_BIN" "$SERVER_DIR" ./cmd/cercano/; then
         echo "[cercano] server build failed" >&2
         exit 1
     fi
-    "$SERVER_DIR/scripts/codesign-if-available.sh" "$SERVER_BIN"
 fi
 
 # 1b. Rebuild the CLI if anything under source/ changed (it depends on the
 #     server module via a replace directive).
 if stale "$CLI_BIN" "$REPO/source"; then
     echo "[cercano] rebuilding CLI..." >&2
-    if ! (cd "$CLI_DIR" && go build -o "$CLI_BIN" .); then
+    if ! build_install "$CLI_BIN" "$CLI_DIR" .; then
         echo "[cercano] CLI build failed" >&2
         exit 1
     fi
-    "$SERVER_DIR/scripts/codesign-if-available.sh" "$CLI_BIN"
 fi
 
 # 2. Kill any stale `cercano agent` processes (started before current server binary).

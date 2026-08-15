@@ -81,7 +81,7 @@ type ToolEntry struct {
 // which entry the up/down nav cursor is currently on. When false, a two-space
 // gutter holds the slot so toggling fold doesn't shift the body horizontally.
 func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, md *render.Markdown) string {
-	toolEntryFaint := lipgloss.NewStyle().Faint(true)
+	toolEntrySubtle := styles.Muted
 	toolEntrySuccess := styles.ToolSuccess
 	toolEntryError := styles.ToolError
 
@@ -108,25 +108,25 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 		// register as the args column. Elapsed time appears alongside once
 		// the call has been running >= 1s; instant tools never expose a
 		// noisy "0s".
-		spin := animateToolSpinner()
+		spin := animateToolSpinnerWithStyle(toolEntrySubtle)
 		extra := ""
 		if !e.StartedAt.IsZero() {
 			if d := time.Since(e.StartedAt); d >= time.Second {
-				extra = toolEntryFaint.Render(" · " + d.Round(time.Second).String())
+				extra = toolEntrySubtle.Render(" · " + d.Round(time.Second).String())
 			}
 		}
 		statusBit = spin + extra
 	case ToolStatusComplete:
-		statusBit = toolEntrySuccess.Render("✓") + toolEntryFaint.Render(" "+flattenSummary(e.ResultSummary))
+		statusBit = toolEntrySuccess.Render("✓") + toolEntrySubtle.Render(" "+flattenSummary(e.ResultSummary))
 	case ToolStatusError:
-		statusBit = toolEntryError.Render("⚠") + toolEntryFaint.Render(" "+flattenSummary(e.ResultSummary))
+		statusBit = toolEntryError.Render("⚠") + toolEntrySubtle.Render(" "+flattenSummary(e.ResultSummary))
 	}
 	if e.SubAgentID != "" {
 		// "open tab" is an interactive affordance (click to open the sub-agent
 		// tab), so color the words in the accent — the same color as the nav
 		// caret — to set them apart from the faint result text. The separator
 		// stays faint so only the actionable words pop.
-		statusBit += toolEntryFaint.Render(" · ") + styles.Accent.Render("open tab")
+		statusBit += toolEntrySubtle.Render(" · ") + styles.Accent.Render("open tab")
 	}
 
 	// While the call is in progress, render the tool name in active-voice
@@ -147,7 +147,7 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 	if pad := nameCol - lipgloss.Width(name); pad > 0 {
 		name += strings.Repeat(" ", pad)
 	}
-	prefix := fmt.Sprintf("%s%s %s ", gutter, marker, name)
+	prefix := gutter + styles.Primary.Render(fmt.Sprintf("%s %s ", marker, name))
 	// Width-aware args elision: if the full args summary won't leave room for
 	// the right-aligned status, segment-elide (paths) or middle-elide so the
 	// line fits one row. width<=0 disables this (no budget known).
@@ -156,7 +156,7 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 		budget := width - lipgloss.Width(prefix) - lipgloss.Width(statusBit) - 3 // 3 = inter-column gap
 		argsText = elideArgs(argsText, budget)
 	}
-	argsRender := toolEntryFaint.Render(argsText)
+	argsRender := toolEntrySubtle.Render(argsText)
 	left := prefix + argsRender
 
 	// Right-align the status/timing to the right edge when the whole entry fits
@@ -222,7 +222,7 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 	if e.Loading {
 		// Keep the "    " indent PLAIN (outside the style) so the rail overlay,
 		// which replaces the byte at offset 2, finds a real space there.
-		body = append(body, "    "+toolEntryFaint.Render(animateToolSpinner()+" loading…"))
+		body = append(body, "    "+toolEntrySubtle.Render(animateToolSpinnerWithStyle(toolEntrySubtle)+" loading…"))
 		railBody(body)
 		return strings.Join(body, "\n")
 	}
@@ -241,7 +241,7 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 			if aw < 8 {
 				aw = 8
 			}
-			argsBody := toolEntryFaint.Render("args: " + expandTabs(e.FullArgs))
+			argsBody := toolEntrySubtle.Render("args: " + expandTabs(e.FullArgs))
 			for _, l := range strings.Split(ansi.Wrap(argsBody, aw, ""), "\n") {
 				body = append(body, "    "+l)
 			}
@@ -261,7 +261,7 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 	// Fetched but nothing recorded (or the fetch failed): say so rather than
 	// render a bare header with an empty body.
 	if e.FullArgs == "" && e.FullResult == "" {
-		body = append(body, "    "+toolEntryFaint.Render("(no details)"))
+		body = append(body, "    "+toolEntrySubtle.Render("(no details)"))
 	}
 	railBody(body)
 	return strings.Join(body, "\n")
@@ -670,11 +670,15 @@ func groupBreakdownName(s string) string {
 // for the assistant placeholder) is deliberate — tools are routine, the
 // indicator should be present-but-quiet, not eye-catching.
 func animateToolSpinner() string {
+	return animateToolSpinnerWithStyle(lipgloss.NewStyle().Faint(true))
+}
+
+func animateToolSpinnerWithStyle(style lipgloss.Style) string {
 	const frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 	const frameMs = 80
 	runes := []rune(frames)
 	glyph := string(runes[int(time.Now().UnixMilli()/frameMs)%len(runes)])
-	return lipgloss.NewStyle().Faint(true).Render(glyph)
+	return style.Render(glyph)
 }
 
 // flattenSummary collapses a tool summary to a single line: newlines, tabs and

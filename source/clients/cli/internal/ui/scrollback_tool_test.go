@@ -31,6 +31,34 @@ func TestToolEntry_FoldedRender(t *testing.T) {
 	}
 }
 
+func TestToolEntry_DaylightHeaderAndArgsUseReadableThemeColors(t *testing.T) {
+	daylight := builtinToolPaletteForTest("daylight")
+	out := renderToolEntry(ToolEntry{
+		ToolName:    "Bash",
+		ArgsSummary: "bash -lc 'bash -n source/server/scripts/cercano-launcher.sh'",
+		Status:      ToolStatusInProgress,
+		Folded:      true,
+	}, 100, false, theme.NewStyles(daylight), render.NewMarkdown(theme.MarkdownStyle(daylight)))
+	if strings.Contains(out, "\x1b[2m") {
+		t.Fatalf("tool header should not rely on terminal faint mode in daylight, got %q", out)
+	}
+	if !strings.Contains(out, "38;2;90;58;10") {
+		t.Fatalf("tool marker/name should use daylight primary (#5A3A0A), got %q", out)
+	}
+	if !strings.Contains(out, "38;2;138;122;85") {
+		t.Fatalf("tool args/status should use daylight muted (#8A7A55), got %q", out)
+	}
+}
+
+func builtinToolPaletteForTest(name string) theme.Palette {
+	for _, builtin := range theme.BuiltinThemes() {
+		if builtin.Name == name {
+			return builtin.Palette
+		}
+	}
+	return theme.Cracker()
+}
+
 func TestToolEntry_ArgsColumnAligned(t *testing.T) {
 	// Short tool names pad to a fixed column so args start at the same offset
 	// regardless of name length.

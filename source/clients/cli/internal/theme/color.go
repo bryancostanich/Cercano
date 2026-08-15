@@ -65,7 +65,18 @@ func IsLight(c color.Color) bool {
 // sequence around nested ANSI styles so existing syntax/user-prompt foregrounds
 // remain intact.
 func SelectionBackgroundSGR(p Palette) string {
-	rgb := RGB(p.SelectionBg)
+	return backgroundSGR(p.SelectionBg)
+}
+
+// CodeBlockBackgroundSGR returns the SGR sequence that paints the fenced-code
+// canvas for a palette. Renderers reassert this around nested syntax-highlighter
+// SGR so token colors cannot reset the dark code background away.
+func CodeBlockBackgroundSGR(p Palette) string {
+	return backgroundSGR(p.CodeBlockBg)
+}
+
+func backgroundSGR(c color.Color) string {
+	rgb := RGB(c)
 	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", rgb[0], rgb[1], rgb[2])
 }
 

@@ -97,8 +97,19 @@ func TestAssistantMarkdown_LiveCodeBlockUsesExplicitDarkBackground(t *testing.T)
 	if !strings.Contains(out, "48;2;26;26;26") {
 		t.Fatalf("expected live daylight code block body to render on dark background (#1A1A1A), got %q", out)
 	}
+	if strings.Count(out, "48;2;26;26;26") < 4 {
+		t.Fatalf("expected dark background to be reasserted across syntax-highlighter SGR, got %q", out)
+	}
 	if !strings.Contains(plain(out), "cargo check -p lunie-asset-manager") {
 		t.Fatalf("rendered live code text missing: %q", plain(out))
+	}
+}
+
+func TestCodeBlockBackgroundReassertsAfterInnerAnsi(t *testing.T) {
+	cv := newMdChatViewWithTheme("daylight")
+	out := paintCodeBlockBackground("\x1b[38;2;255;255;255mcmd\x1b[0m arg", 12, cv.palette)
+	if !strings.Contains(out, "\x1b[0m\x1b[48;2;26;26;26m arg") {
+		t.Fatalf("expected code background to resume after inner reset, got %q", out)
 	}
 }
 

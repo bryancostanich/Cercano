@@ -3154,17 +3154,21 @@ func trimBlankEdgeLines(s string) string {
 	return strings.Join(lines, "\n")
 }
 
-func paintCodeBlockBackground(s string, width int, styles theme.Styles) string {
+func paintCodeBlockBackground(s string, width int, p theme.Palette) string {
 	if s == "" {
 		return s
 	}
+	bg := theme.CodeBlockBackgroundSGR(p)
 	lines := strings.Split(s, "\n")
 	for i, line := range lines {
 		pad := width - lipgloss.Width(line)
 		if pad < 0 {
 			pad = 0
 		}
-		lines[i] = styles.BufferCodeBlock.Render(line + strings.Repeat(" ", pad))
+		padded := line + strings.Repeat(" ", pad)
+		lines[i] = bg + ansiSGRRe.ReplaceAllStringFunc(padded, func(r string) string {
+			return r + bg
+		}) + "\x1b[0m"
 	}
 	return strings.Join(lines, "\n")
 }

@@ -136,6 +136,128 @@ func describeXY(xy string) string {
 	return xy
 }
 
+// gitDiffStatCap reports bounded per-file diff stats without requiring generic
+// shell access. It exists so dirty-tree audits can verify change sizes and
+// group candidates from deterministic data instead of asking an LLM to run
+// ad-hoc `git diff --stat` commands through Bash.
+type gitDiffStatCap struct{}
+
+// GitDiffStat constructs the git_diff_stat capability.
+func GitDiffStat() capabilities.Capability { return gitDiffStatCap{} }
+
+func (gitDiffStatCap) Name() string            { return "git_diff_stat" }
+func (gitDiffStatCap) Tier() capabilities.Tier { return capabilities.TierR }
+func (gitDiffStatCap) Surfaces() capabilities.Surface {
+	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
+}
+func (gitDiffStatCap) Description() string {
+	return "Report deterministic per-file git diff stats as rows with path, scope, insertions, and deletions. Args: {path?: string} (repository directory, default cwd), {paths?: [string]} to filter files, {staged?: bool} to inspect only staged changes. By default includes both unstaged and staged stats."
+}
+func (gitDiffStatCap) Schema() capabilities.Schema {
+	return capabilities.Schema(`{"type":"object","properties":{"path":{"type":"string","description":"Repository/worktree directory. Do not pass a file path; use paths for file filters."},"paths":{"type":"array","items":{"type":"string"},"description":"Optional file path filters, relative to the repository/worktree directory or accepted by git as pathspecs."},"staged":{"type":"boolean","description":"When true, inspect only staged/index changes. When false or omitted, include unstaged and staged rows."}}}`)
+}
+
+type gitDiffStatArgs struct {
+	Path   string   `json:"path"`
+	Paths  []string `json:"paths"`
+	Staged bool     `json:"staged"`
+}
+
+func (gitDiffStatCap) Execute(ctx context.Context, call *capabilities.Call) (*capabilities.Result, error) {
+	var a gitDiffStatArgs
+	if len(call.Args) > 0 {
+		if err := json.Unmarshal(call.Args, &a); err != nil {
+			return nil, fmt.Errorf("git_diff_stat: parse args: %w", err)
+		}
+	}
+	dir := a.Path
+	if dir == "" {
+		dir = call.WorkDir
+	}
+	if dir != "" {
+		if info, statErr := os.Stat(dir); statErr == nil && !info.IsDir() {
+			return nil, fmt.Errorf("git_diff_stat: path must be a repository/worktree directory, got file %q; pass the repository in path and file filters in paths, for example {\"path\":\"/path/to/repo\",\"paths\":[%q]}", dir, dir)
+		}
+	}
+
+	var rows []map[string]any
+	if a.Staged {
+		stagedRows, err := gitDiffNumstat(ctx, dir, "staged", true, a.Paths)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, stagedRows...)
+	} else {
+		unstagedRows, err := gitDiffNumstat(ctx, dir, "unstaged", false, a.Paths)
+		if err != nil {
+			return nil, err
+		}
+		stagedRows, err := gitDiffNumstat(ctx, dir, "staged", true, a.Paths)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, unstagedRows...)
+		rows = append(rows, stagedRows...)
+	}
+
+	res := capabilities.NewRowsResult(rows)
+	res.Detail = countLabel(len(rows), "file stat", "file stats")
+	return res, nil
+}
+
+func gitDiffNumstat(ctx context.Context, dir, scope string, staged bool, paths []string) ([]map[string]any, error) {
+	args := []string{"diff", "--numstat"}
+	if staged {
+		args = append(args, "--cached")
+	}
+	if len(paths) > 0 {
+		args = append(args, "--")
+		args = append(args, paths...)
+	}
+	cmd := exec.CommandContext(ctx, "git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git_diff_stat: %w", err)
+	}
+	return parseGitNumstat(string(out), scope), nil
+}
+
+func parseGitNumstat(text, scope string) []map[string]any {
+	var rows []map[string]any
+	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.SplitN(line, "\t", 3)
+		if len(fields) != 3 {
+			continue
+		}
+		row := map[string]any{
+			"path":  fields[2],
+			"scope": scope,
+		}
+		if fields[0] == "-" {
+			row["insertions"] = nil
+		} else if n, err := strconv.Atoi(fields[0]); err == nil {
+			row["insertions"] = n
+		} else {
+			row["insertions"] = fields[0]
+		}
+		if fields[1] == "-" {
+			row["deletions"] = nil
+		} else if n, err := strconv.Atoi(fields[1]); err == nil {
+			row["deletions"] = n
+		} else {
+			row["deletions"] = fields[1]
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
 // gitInfoCap reports branch, HEAD, repo root, and upstream/ahead state without
 // requiring generic shell access. It exists so agents can do common branch
 // safety checks with an R-tier scoped git tool instead of Bash.

@@ -34,6 +34,7 @@ func Register(reg *capabilities.Registry) {
 	reg.MustRegister(Glob())
 	reg.MustRegister(Grep())
 	reg.MustRegister(GitStatus())
+	reg.MustRegister(GitDiffStat())
 	reg.MustRegister(GitInfo())
 	reg.MustRegister(GitLog())
 	reg.MustRegister(GetProtocol())

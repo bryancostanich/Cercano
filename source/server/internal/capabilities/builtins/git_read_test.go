@@ -185,6 +185,129 @@ func TestGitStatusCap_ErrorPrefix(t *testing.T) {
 	}
 }
 
+// --- git_diff_stat ---
+
+func TestGitDiffStatCap_Meta(t *testing.T) {
+	cap := GitDiffStat()
+	if cap.Name() != "git_diff_stat" {
+		t.Fatalf("name wrong: %q", cap.Name())
+	}
+	if cap.Tier() != capabilities.TierR {
+		t.Fatalf("tier wrong: %q", cap.Tier())
+	}
+	want := capabilities.SurfaceAgent | capabilities.SurfaceMCP
+	if cap.Surfaces() != want {
+		t.Fatalf("surfaces wrong: %v", cap.Surfaces())
+	}
+}
+
+func TestGitDiffStatCap_UnstagedAndStagedRows(t *testing.T) {
+	dir := initTestRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hello\nunstaged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "staged.txt"), []byte("staged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "add", "staged.txt")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add staged.txt: %v\n%s", err, out)
+	}
+
+	cap := GitDiffStat()
+	args, _ := json.Marshal(map[string]any{"path": dir})
+	res, err := cap.Execute(context.Background(), &capabilities.Call{Args: args})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := map[string]map[string]any{}
+	for _, row := range res.Rows {
+		got[row["scope"].(string)+":"+row["path"].(string)] = row
+	}
+	unstaged, ok := got["unstaged:hello.txt"]
+	if !ok {
+		t.Fatalf("missing unstaged hello.txt row: %#v", res.Rows)
+	}
+	if unstaged["insertions"] != 1 || unstaged["deletions"] != 0 {
+		t.Fatalf("unstaged stats wrong: %#v", unstaged)
+	}
+	staged, ok := got["staged:staged.txt"]
+	if !ok {
+		t.Fatalf("missing staged staged.txt row: %#v", res.Rows)
+	}
+	if staged["insertions"] != 1 || staged["deletions"] != 0 {
+		t.Fatalf("staged stats wrong: %#v", staged)
+	}
+}
+
+func TestGitDiffStatCap_PathsFilter(t *testing.T) {
+	dir := initTestRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hello\nchanged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "other.txt"), []byte("other\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cap := GitDiffStat()
+	args, _ := json.Marshal(map[string]any{"path": dir, "paths": []string{"hello.txt"}})
+	res, err := cap.Execute(context.Background(), &capabilities.Call{Args: args})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Rows) != 1 {
+		t.Fatalf("expected 1 filtered row, got %d: %#v", len(res.Rows), res.Rows)
+	}
+	if res.Rows[0]["path"] != "hello.txt" || res.Rows[0]["scope"] != "unstaged" {
+		t.Fatalf("filtered row wrong: %#v", res.Rows[0])
+	}
+}
+
+func TestGitDiffStatCap_StagedOnly(t *testing.T) {
+	dir := initTestRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hello\nunstaged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "staged.txt"), []byte("staged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "add", "staged.txt")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add staged.txt: %v\n%s", err, out)
+	}
+
+	cap := GitDiffStat()
+	args, _ := json.Marshal(map[string]any{"path": dir, "staged": true})
+	res, err := cap.Execute(context.Background(), &capabilities.Call{Args: args})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Rows) != 1 || res.Rows[0]["path"] != "staged.txt" || res.Rows[0]["scope"] != "staged" {
+		t.Fatalf("expected only staged row, got %#v", res.Rows)
+	}
+}
+
+func TestGitDiffStatCap_FilePathRejectedWithPathsHint(t *testing.T) {
+	dir := initTestRepo(t)
+	filePath := filepath.Join(dir, "hello.txt")
+
+	cap := GitDiffStat()
+	args, _ := json.Marshal(map[string]any{"path": filePath})
+	_, err := cap.Execute(context.Background(), &capabilities.Call{Args: args})
+	if err == nil {
+		t.Fatal("expected error for file-valued path")
+	}
+	msg := err.Error()
+	for _, want := range []string{"path must be a repository/worktree directory", "got file", "paths"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q missing %q", msg, want)
+		}
+	}
+}
+
 // --- git_log ---
 
 func TestGitLogCap_Meta(t *testing.T) {

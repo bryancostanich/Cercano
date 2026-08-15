@@ -25,7 +25,7 @@ func (dispatchCap) Surfaces() capabilities.Surface {
 	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
 }
 func (dispatchCap) Description() string {
-	return "Run a sub-agent: hand off an open-ended task to a bounded tool-use loop over a granted set of tools (default: read-only tools). Include a concise human-facing `intent` when asking for approval if it clarifies why the delegation is needed. Returns the sub-agent's final result. Tool names passed in `tools` must be the plain registered names (e.g. \"Read\", \"Glob\") — do NOT include any host/MCP prefix like \"mcp__oc__\". Prefer scoped tools such as git_info, git_status, git_push, and github_issue_close over Bash for git/GitHub workflows. Granting write-capable tools (Edit, Write, Bash, git_*, github_issue_close) escalates this call to a confirm prompt; one approval authorizes the sub-agent's whole toolset for the run."
+	return "Run a sub-agent: hand off an open-ended task to a bounded tool-use loop over a granted set of tools (default: read-only tools). Include a concise human-facing `intent` when asking for approval if it clarifies why the delegation is needed. Returns the sub-agent's final result. Tool names passed in `tools` must be the plain registered names (e.g. \"Read\", \"Glob\") — do NOT include any host/MCP prefix like \"mcp__oc__\". Prefer scoped tools such as git_info, git_status, git_diff_stat, git_push, and github_issue_close over Bash for git/GitHub workflows. Granting write-capable tools (Edit, Write, Bash, git_*, github_issue_close) escalates this call to a confirm prompt; one approval authorizes the sub-agent's whole toolset for the run."
 }
 func (dispatchCap) Schema() capabilities.Schema {
 	return capabilities.Schema(`{

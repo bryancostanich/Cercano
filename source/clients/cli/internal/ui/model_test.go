@@ -69,8 +69,8 @@ func TestCompactingMeterUsesLightThemeContrast(t *testing.T) {
 	if !strings.Contains(stripAnsiCSI(out), "compacting") {
 		t.Fatalf("expected compacting label in rendered meter: %q", stripAnsiCSI(out))
 	}
-	if !strings.Contains(out, "38;2;90;58;10") {
-		t.Fatalf("daylight filled compacting label should use dark primary text (#5A3A0A), got %q", out)
+	if !strings.Contains(out, "38;2;251;243;224") {
+		t.Fatalf("daylight compacting label over the filled dark-green bar should use light page text (#FBF3E0), got %q", out)
 	}
 }
 

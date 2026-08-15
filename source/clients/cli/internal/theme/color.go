@@ -3,6 +3,7 @@ package theme
 import (
 	"fmt"
 	"image/color"
+	"math"
 
 	"charm.land/lipgloss/v2"
 )
@@ -86,13 +87,49 @@ func SpinnerColorAt(p Palette, pulse float64) color.Color {
 	return Lerp(p.SpinnerBase, p.SpinnerPeak, pulse)
 }
 
-// MeterLabelForeground returns readable label text for the context meter.
-func MeterLabelForeground(p Palette, onFill bool) color.Color {
+// ContrastText returns whichever candidate has better WCAG-style contrast
+// against bg. The candidates are usually a light page color and a dark ink color.
+func ContrastText(bg, a, b color.Color) color.Color {
+	if contrastRatio(bg, a) >= contrastRatio(bg, b) {
+		return a
+	}
+	return b
+}
+
+// MeterLabelForeground returns readable label text for the context meter over a
+// specific cell background. The compacting label spans animated fill and empty
+// cells, so contrast must be decided per cell rather than once per theme.
+func MeterLabelForeground(p Palette, bg color.Color, onFill bool) color.Color {
 	if onFill {
-		return p.MeterLabelOnFill
+		return ContrastText(bg, p.BgDeep, p.MeterLabelOnFill)
 	}
 	if IsLight(p.BgDeep) {
-		return p.BgDeep
+		return ContrastText(bg, p.BgDeep, p.Primary)
 	}
-	return p.Bright
+	return ContrastText(bg, p.Bright, p.BgDeep)
+}
+
+func contrastRatio(a, b color.Color) float64 {
+	la := relativeLuminance(a)
+	lb := relativeLuminance(b)
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05)
+}
+
+func relativeLuminance(c color.Color) float64 {
+	rgb := RGB(c)
+	linear := func(v uint8) float64 {
+		s := float64(v) / 255.0
+		if s <= 0.03928 {
+			return s / 12.92
+		}
+		return pow((s+0.055)/1.055, 2.4)
+	}
+	return 0.2126*linear(rgb[0]) + 0.7152*linear(rgb[1]) + 0.0722*linear(rgb[2])
+}
+
+func pow(x, y float64) float64 {
+	return math.Pow(x, y)
 }

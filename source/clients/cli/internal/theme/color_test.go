@@ -10,6 +10,27 @@ func TestSelectionBackgroundSGRUsesPaletteToken(t *testing.T) {
 	}
 }
 
+func TestMeterLabelForegroundChoosesReadableContrastPerCell(t *testing.T) {
+	daylight := paletteByNameForColorTest("daylight")
+	filledBg := daylight.ActivityPeak
+	if got := Hex(MeterLabelForeground(daylight, filledBg, true)); got != "#fbf3e0" {
+		t.Fatalf("daylight meter label over dark filled cell = %s, want #fbf3e0", got)
+	}
+	emptyBg := Fade(daylight.Dim, 0.45)
+	if got := Hex(MeterLabelForeground(daylight, emptyBg, false)); got != "#fbf3e0" {
+		t.Fatalf("daylight meter label over dark empty cell = %s, want #fbf3e0", got)
+	}
+}
+
+func paletteByNameForColorTest(name string) Palette {
+	for _, builtin := range BuiltinThemes() {
+		if builtin.Name == name {
+			return builtin.Palette
+		}
+	}
+	return Cracker()
+}
+
 func TestActivityAndSpinnerColorsUsePaletteTokens(t *testing.T) {
 	p := Cracker()
 	p.ActivityBase = mustHex("#010203")

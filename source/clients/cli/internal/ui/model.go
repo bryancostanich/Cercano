@@ -5333,7 +5333,7 @@ func (m Model) renderCompactingMeterBar(cells, fillN int) string {
 			// knocked out against it. Light themes need dark ink here; using the
 			// pale terminal background as the glyph color washed the label out.
 			fill := theme.ActivityColorAt(m.palette, col, sweepPos, tail)
-			fg := theme.MeterLabelForeground(m.palette, true)
+			fg := theme.MeterLabelForeground(m.palette, fill, true)
 			b.WriteString(lipgloss.NewStyle().
 				Foreground(fg).
 				Background(fill).
@@ -5342,10 +5342,11 @@ func (m Model) renderCompactingMeterBar(cells, fillN int) string {
 			// Empty-side letters are an overlay on the checker. On light themes,
 			// flip the glyph to the page color over a darkened checker so the
 			// label stays readable instead of becoming amber-on-brown mush.
-			fg := theme.MeterLabelForeground(m.palette, false)
+			emptyBg := theme.Fade(m.palette.Dim, 0.45)
+			fg := theme.MeterLabelForeground(m.palette, emptyBg, false)
 			b.WriteString(lipgloss.NewStyle().
 				Foreground(fg).
-				Background(theme.Fade(m.palette.Dim, 0.45)).
+				Background(emptyBg).
 				Render(string(label[col-start])))
 		case !inLabel && onFill:
 			// Background-paint (space glyph), not a █ foreground glyph: the

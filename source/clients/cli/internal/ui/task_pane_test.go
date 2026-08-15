@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -159,5 +160,64 @@ func TestTaskPaneRendersDocumentOrderHierarchy(t *testing.T) {
 	}
 	if !strings.Contains(lines, "  ~ Do the thing") || !strings.Contains(lines, "    ✓ Check the result") {
 		t.Fatalf("tree should render nested indentation, got:\n%s", lines)
+	}
+}
+
+func TestTaskPaneVerticalScrollbarAndWheelScroll(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
+	for i := 0; i < 20; i++ {
+		m.applyTaskChange("added", &agentclient.TaskNode{ID: fmt.Sprintf("task-%02d", i), Title: fmt.Sprintf("Task %02d", i), Status: "pending"})
+	}
+	m.toggleTaskPane()
+
+	view := ansi.Strip(m.renderTaskPane(m.taskPaneWidth(), m.activeChat().Height()))
+	if !strings.Contains(view, "░") || !strings.Contains(view, "█") {
+		t.Fatalf("overflowing task pane should render a vertical scrollbar:\n%s", view)
+	}
+	if !strings.Contains(view, "Task 00") {
+		t.Fatalf("expected top task before scrolling:\n%s", view)
+	}
+
+	paneX := m.width - m.taskPaneWidth() + 2
+	m = send(t, m, tea.MouseWheelMsg{X: paneX, Y: m.scrollbarTop + 3, Button: tea.MouseWheelDown})
+	if m.taskPane.ScrollY == 0 {
+		t.Fatal("mouse wheel over expanded task pane should advance vertical task scroll")
+	}
+	scrolled := ansi.Strip(m.renderTaskPane(m.taskPaneWidth(), m.activeChat().Height()))
+	if scrolled == view {
+		t.Fatalf("scrolling should change visible task pane window:\n%s", scrolled)
+	}
+}
+
+func TestTaskPaneHorizontalScrollbarAndKeyScroll(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
+	m.taskPane.Width = taskPaneMinWidth
+	m.applyTaskChange("added", &agentclient.TaskNode{
+		ID:     "long-task",
+		Title:  "abcdefghijklmnopqrstuvwxyz-0123456789-this-title-is-longer-than-the-pane",
+		Status: "pending",
+	})
+	m.toggleTaskPane()
+
+	view := ansi.Strip(m.renderTaskPane(m.taskPaneWidth(), m.activeChat().Height()))
+	if !strings.Contains(view, "░") || !strings.Contains(view, "█") {
+		t.Fatalf("wide task pane content should render a horizontal scrollbar:\n%s", view)
+	}
+	if !strings.Contains(view, "abcdef") {
+		t.Fatalf("expected left edge of long title before horizontal scrolling:\n%s", view)
+	}
+
+	m = send(t, m, tea.KeyPressMsg{Code: tea.KeyRight})
+	if m.taskPane.ScrollX == 0 {
+		t.Fatal("right arrow with empty prompt should advance horizontal task scroll")
+	}
+	scrolled := ansi.Strip(m.renderTaskPane(m.taskPaneWidth(), m.activeChat().Height()))
+	if strings.Contains(scrolled, "abcdef") {
+		t.Fatalf("horizontal scroll should move past the initial title prefix:\n%s", scrolled)
+	}
+	if !strings.Contains(scrolled, "efgh") {
+		t.Fatalf("horizontal scroll should reveal later title text:\n%s", scrolled)
 	}
 }

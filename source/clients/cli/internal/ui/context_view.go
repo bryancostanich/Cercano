@@ -439,7 +439,7 @@ func (c *contextView) appendTurn(lines *[]string, meta *[]turnLineMeta, i int, t
 			if k == len(body)-1 {
 				g = "╰"
 			}
-			body[k] = overlayRail(body[k], 2, g)
+			body[k] = overlayRail(body[k], 2, g, c.styles)
 		}
 	}
 	for _, l := range body {

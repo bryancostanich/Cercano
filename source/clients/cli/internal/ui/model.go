@@ -939,6 +939,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		mouse := msg.Mouse()
+		if !m.contentPageActive() && m.taskPane.Expanded && m.taskPaneHit(mouse.X, mouse.Y) {
+			switch mouse.Button {
+			case tea.MouseWheelUp:
+				m.scrollTaskPaneBy(-promptWheelDelta, 0)
+			case tea.MouseWheelDown:
+				m.scrollTaskPaneBy(promptWheelDelta, 0)
+			}
+			return m, nil
+		}
 		if m.pendingConfirm != nil {
 			// Confirm pending: the prompt is dormant, but let the wheel scroll
 			// the scrollback so the user can review context before answering.
@@ -948,7 +958,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.activeChat().SelectionDragging() {
 			return m, nil
 		}
-		mouse := msg.Mouse()
 		if m.mouseInPrompt(mouse) {
 			switch mouse.Button {
 			case tea.MouseWheelUp:
@@ -1008,7 +1017,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if mouse.Button != tea.MouseLeft {
 			return m, nil
 		}
-		if m.taskPaneHit(mouse.X, mouse.Y) {
+		if m.taskPaneToggleHit(mouse.X, mouse.Y) {
 			m.toggleTaskPane()
 			return m, nil
 		}
@@ -1191,6 +1200,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if keyStr == "ctrl+t" {
 			m.toggleTaskPane()
+			return m, nil
+		}
+		if m.handleTaskPaneKey(keyStr) {
 			return m, nil
 		}
 		if m.ctrlCArmed {
@@ -3218,34 +3230,20 @@ func spinnerFrameAt(t time.Time) (string, int) {
 }
 
 func animateSpinnerGlyphAt(t time.Time) string {
-	const pulseCycleMs = 1500
+	return animateSpinnerGlyphAtForPalette(t, theme.Cracker())
+}
 
-	nowMs := t.UnixMilli()
+func animateSpinnerGlyphAtForPalette(t time.Time, p theme.Palette) string {
+	const pulseCycleMs = 1500
 
 	// Rotation.
 	glyph, _ := spinnerFrameAt(t)
 
-	// Brightness pulse — stays in the orange/amber family throughout:
-	// primary amber base lerps to bright amber peak (palette colors), so
-	// the rolling block reads orange at every phase of the cycle.
-	phase := float64(nowMs%int64(pulseCycleMs)) / float64(pulseCycleMs)
+	// Brightness pulse stays in the theme's spinner color family while sharing
+	// the wall-clock rhythm used by the activity-text sweep.
+	phase := float64(t.UnixMilli()%int64(pulseCycleMs)) / float64(pulseCycleMs)
 	pulse := 0.5 + 0.5*math.Sin(phase*2*math.Pi)
-	base := [3]uint8{0xEA, 0x82, 0x12} // primary amber
-	peak := [3]uint8{0xFF, 0xB8, 0x4D} // bright amber
-	c := [3]uint8{
-		uint8(float64(base[0]) + (float64(peak[0])-float64(base[0]))*pulse),
-		uint8(float64(base[1]) + (float64(peak[1])-float64(base[1]))*pulse),
-		uint8(float64(base[2]) + (float64(peak[2])-float64(base[2]))*pulse),
-	}
-	hex := []byte("#000000")
-	const digits = "0123456789ABCDEF"
-	hex[1] = digits[c[0]>>4]
-	hex[2] = digits[c[0]&0xF]
-	hex[3] = digits[c[1]>>4]
-	hex[4] = digits[c[1]&0xF]
-	hex[5] = digits[c[2]>>4]
-	hex[6] = digits[c[2]&0xF]
-	return lipgloss.NewStyle().Foreground(lipgloss.Color(string(hex))).Render(glyph)
+	return lipgloss.NewStyle().Foreground(theme.SpinnerColorAt(p, pulse)).Render(glyph)
 }
 
 // animateLimeSweep renders `text` with a per-char color sweep — lime base, a
@@ -3277,78 +3275,11 @@ func animateActivitySweepAt(text string, t time.Time, p theme.Palette) string {
 	col := 0
 	for _, r := range text {
 		b.WriteString(lipgloss.NewStyle().
-			Foreground(progressColorAtForPalette(p, col, sweepPos, tail)).
+			Foreground(theme.ActivityColorAt(p, col, sweepPos, tail)).
 			Render(string(r)))
 		col++
 	}
 	return b.String()
-}
-
-// fadeColor scales a color's RGB toward black by factor k (0 = black,
-// 1 = unchanged). Used for "translucent overlay" backgrounds — terminals have
-// no alpha, so a darkened tone of the underlying color is the closest read.
-func fadeColor(c color.Color, k float64) color.Color {
-	if c == nil {
-		return lipgloss.Color("#000000")
-	}
-	r, g, b, _ := c.RGBA()
-	scale := func(v uint32) uint8 { return uint8(float64(v>>8) * k) }
-	return lipgloss.Color(fmt.Sprintf("#%02X%02X%02X", scale(r), scale(g), scale(b)))
-}
-
-// progressColorAt returns the rendered color for one column at a given sweep
-// position. Lime base; the inside `tail` columns lerp toward white.
-func progressColorAt(col int, sweepPos float64, tail float64) color.Color {
-	return progressColorAtForPalette(theme.Cracker(), col, sweepPos, tail)
-}
-
-func progressColorAtForPalette(p theme.Palette, col int, sweepPos float64, tail float64) color.Color {
-	dist := float64(col) - sweepPos
-	if dist < 0 {
-		dist = -dist
-	}
-	base := [3]uint8{0xBD, 0xF0, 0x00} // lime
-	peak := [3]uint8{0xFF, 0xFF, 0xFF} // white peak
-	if isLightColor(p.BgDeep) {
-		base = colorRGB(p.Accent)
-		peak = colorRGB(fadeColor(p.Accent, 0.55))
-	}
-	if dist >= tail {
-		return rgbColor(base)
-	}
-	k := 1.0 - dist/tail // 0 at edge, 1 at peak
-	c := [3]uint8{
-		uint8(float64(base[0]) + (float64(peak[0])-float64(base[0]))*k),
-		uint8(float64(base[1]) + (float64(peak[1])-float64(base[1]))*k),
-		uint8(float64(base[2]) + (float64(peak[2])-float64(base[2]))*k),
-	}
-	return rgbColor(c)
-}
-
-func rgbColor(c [3]uint8) color.Color {
-	hex := []byte("#000000")
-	const digits = "0123456789ABCDEF"
-	hex[1] = digits[c[0]>>4]
-	hex[2] = digits[c[0]&0xF]
-	hex[3] = digits[c[1]>>4]
-	hex[4] = digits[c[1]&0xF]
-	hex[5] = digits[c[2]>>4]
-	hex[6] = digits[c[2]&0xF]
-	return lipgloss.Color(string(hex))
-}
-
-func colorRGB(c color.Color) [3]uint8 {
-	if c == nil {
-		return [3]uint8{}
-	}
-	r, g, b, _ := c.RGBA()
-	return [3]uint8{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8)}
-}
-
-func isLightColor(c color.Color) bool {
-	rgb := colorRGB(c)
-	luma := 0.2126*float64(rgb[0]) + 0.7152*float64(rgb[1]) + 0.0722*float64(rgb[2])
-	return luma >= 170
 }
 
 // applyResume calls the agent's ResumeConversation RPC, switches the active
@@ -5401,11 +5332,8 @@ func (m Model) renderCompactingMeterBar(cells, fillN int) string {
 			// its (animated) fill color as the BACKGROUND and the letter is
 			// knocked out against it. Light themes need dark ink here; using the
 			// pale terminal background as the glyph color washed the label out.
-			fill := progressColorAtForPalette(m.palette, col, sweepPos, tail)
-			fg := m.palette.BgDeep
-			if isLightColor(m.palette.BgDeep) {
-				fg = m.palette.Primary
-			}
+			fill := theme.ActivityColorAt(m.palette, col, sweepPos, tail)
+			fg := theme.MeterLabelForeground(m.palette, true)
 			b.WriteString(lipgloss.NewStyle().
 				Foreground(fg).
 				Background(fill).
@@ -5414,13 +5342,10 @@ func (m Model) renderCompactingMeterBar(cells, fillN int) string {
 			// Empty-side letters are an overlay on the checker. On light themes,
 			// flip the glyph to the page color over a darkened checker so the
 			// label stays readable instead of becoming amber-on-brown mush.
-			fg := m.palette.Bright
-			if isLightColor(m.palette.BgDeep) {
-				fg = m.palette.BgDeep
-			}
+			fg := theme.MeterLabelForeground(m.palette, false)
 			b.WriteString(lipgloss.NewStyle().
 				Foreground(fg).
-				Background(fadeColor(m.palette.Dim, 0.45)).
+				Background(theme.Fade(m.palette.Dim, 0.45)).
 				Render(string(label[col-start])))
 		case !inLabel && onFill:
 			// Background-paint (space glyph), not a █ foreground glyph: the
@@ -5429,7 +5354,7 @@ func (m Model) renderCompactingMeterBar(cells, fillN int) string {
 			// does — mixing the two makes the label cells look taller than
 			// the rest of the bar.
 			b.WriteString(lipgloss.NewStyle().
-				Background(progressColorAtForPalette(m.palette, col, sweepPos, tail)).
+				Background(theme.ActivityColorAt(m.palette, col, sweepPos, tail)).
 				Render(" "))
 		default: // !inLabel && !onFill
 			b.WriteString(m.styles.MeterEmpty.Render("░"))

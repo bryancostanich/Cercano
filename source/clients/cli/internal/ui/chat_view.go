@@ -940,7 +940,7 @@ func (c *chatView) renderTrailingActivity(textW int) string {
 	}
 	t := c.animationTime()
 	line := turnStatusLine(activity, t.Sub(c.turn.start), c.turn.tokOut, c.turn.model, c.turn.cloud)
-	return animateSpinnerGlyphAt(t) + " " + animateActivitySweepAt(line, t, c.palette)
+	return animateSpinnerGlyphAtForPalette(t, c.palette) + " " + animateActivitySweepAt(line, t, c.palette)
 }
 
 // ── scroll surface ─────────────────────────────────────────────────────────
@@ -1294,7 +1294,7 @@ func (c *chatView) renderEntry(e *Entry, idx int) string {
 				rendered = c.styles.Muted.Render("(empty reply)")
 			}
 			lines := strings.Split(label+"\n"+rendered, "\n")
-			railBody(lines)
+			railBody(lines, c.styles)
 			return indentBlock(pad, strings.Join(lines, "\n"))
 		}
 
@@ -1307,7 +1307,7 @@ func (c *chatView) renderEntry(e *Entry, idx int) string {
 			}
 			t := c.animationTime()
 			line := turnStatusLine(activity, t.Sub(c.turn.start), c.turn.tokOut, c.turn.model, c.turn.cloud)
-			content := animateSpinnerGlyphAt(t) + " " + animateActivitySweepAt(line, t, c.palette)
+			content := animateSpinnerGlyphAtForPalette(t, c.palette) + " " + animateActivitySweepAt(line, t, c.palette)
 			return indentBlock(pad, content)
 		}
 		rendered := c.renderAssistantMarkdown(e, textW)
@@ -1420,7 +1420,7 @@ func (c *chatView) renderSelectionOnLine(line string, contentLine int) string {
 	if !ok {
 		return line
 	}
-	return highlightRange(line, start, end)
+	return highlightRange(line, start, end, theme.SelectionBackgroundSGR(c.palette))
 }
 
 // selectedText returns the plain-text content covered by the current selection.

@@ -22,6 +22,8 @@ const (
 type taskPaneState struct {
 	Expanded bool
 	Width    int // expanded width including the left border; zero -> default
+	ScrollY  int
+	ScrollX  int
 	Tasks    map[string]taskPaneTask
 	Roots    []string
 }
@@ -146,6 +148,16 @@ func (m Model) taskPaneHit(x, y int) bool {
 	return x >= m.width-w && y >= m.scrollbarTop && y < m.scrollbarTop+m.activeChat().Height()
 }
 
+func (m Model) taskPaneToggleHit(x, y int) bool {
+	w := m.taskPaneWidth()
+	if w == 0 || y < m.scrollbarTop || y >= m.scrollbarTop+m.activeChat().Height() {
+		return false
+	}
+	// The one-column collapsed tab toggles anywhere in the pane. Once expanded,
+	// only the left rail/header rail toggles; the body belongs to scrolling.
+	return w == taskPaneCollapsedWidth || x == m.width-w
+}
+
 func (m Model) renderViewportWithTaskPane() string {
 	chat := m.activeChat().View()
 	paneW := m.taskPaneWidth()
@@ -180,23 +192,66 @@ func (m Model) renderTaskPane(width, height int) string {
 		return strings.Join(lines, "\n")
 	}
 
-	innerW := width - 2 // left border + right pad/edge
-	if innerW < 1 {
-		innerW = 1
+	contentW, bodyH, needV, needH, maxLineW, totalLines := m.taskPaneViewportGeometry(width, height)
+	if contentW < 1 {
+		contentW = 1
+	}
+	if bodyH < 0 {
+		bodyH = 0
+	}
+	scrollY := clampInt(m.taskPane.ScrollY, 0, maxInt(0, totalLines-bodyH))
+	scrollX := clampInt(m.taskPane.ScrollX, 0, maxInt(0, maxLineW-contentW))
+
+	headerW := width - 1
+	if headerW < 1 {
+		headerW = 1
 	}
 	header := "▶ Tasks"
 	if !m.taskPane.Expanded {
 		header = "◀ Tasks"
 	}
 	lines := []string{
-		border + fitCell(m.styles.Accent.Render(header), innerW),
-		border + m.styles.BorderDim.Render(strings.Repeat("─", innerW)),
+		border + fitCell(m.styles.Accent.Render(header), headerW),
+		border + m.styles.BorderDim.Render(strings.Repeat("─", headerW)),
 	}
-	for _, line := range m.taskPaneLines(innerW) {
-		lines = append(lines, border+line)
+
+	content := m.taskPaneLines(maxLineW)
+	vbar := scrollbarColumn(totalLines, bodyH, scrollY)
+	for i := 0; i < bodyH; i++ {
+		line := ""
+		if src := scrollY + i; src >= 0 && src < len(content) {
+			line = content[src]
+		}
+		cell := taskPaneSliceCell(line, scrollX, contentW)
+		row := border + cell
+		if needV {
+			glyph := '░'
+			if i < len(vbar) {
+				glyph = vbar[i]
+			}
+			switch glyph {
+			case '█':
+				row += m.styles.Border.Render("█")
+			case '░':
+				row += m.styles.BorderDim.Render("░")
+			default:
+				row += " "
+			}
+		}
+		lines = append(lines, fitCell(row, width))
+	}
+	if needH {
+		hbar := horizontalScrollbarRow(maxLineW, contentW, scrollX,
+			func(s string) string { return m.styles.Border.Render(s) },
+			func(s string) string { return m.styles.BorderDim.Render(s) })
+		row := border + hbar
+		if needV {
+			row += m.styles.BorderDim.Render("┘")
+		}
+		lines = append(lines, fitCell(row, width))
 	}
 	for len(lines) < height {
-		lines = append(lines, border+strings.Repeat(" ", innerW))
+		lines = append(lines, border+strings.Repeat(" ", width-1))
 	}
 	if len(lines) > height {
 		lines = lines[:height]
@@ -256,10 +311,122 @@ func (m Model) appendTaskPaneTaskLines(lines *[]string, seen map[string]bool, id
 	default:
 		style = m.styles.Primary
 	}
-	*lines = append(*lines, fitCell(style.Render(text), width))
+	*lines = append(*lines, style.Render(text))
 	for _, childID := range task.Children {
 		m.appendTaskPaneTaskLines(lines, seen, childID, depth+1, width)
 	}
+}
+
+func (m Model) taskPaneViewportGeometry(width, height int) (contentW, bodyH int, needV, needH bool, maxLineW, totalLines int) {
+	contentW = width - 2 // left border + one right pad/scrollbar column budget
+	if contentW < 1 {
+		contentW = 1
+	}
+	bodyH = height - 2 // header + rule
+	if bodyH < 0 {
+		bodyH = 0
+	}
+	content := m.taskPaneLines(contentW)
+	totalLines = len(content)
+	maxLineW = maxDisplayWidth(content)
+	if maxLineW < contentW {
+		maxLineW = contentW
+	}
+
+	// Horizontal and vertical overflow interact: adding a vertical bar narrows the
+	// content window, while adding a horizontal bar costs a body row. Iterate the
+	// small fixed point rather than baking in a fragile order dependency.
+	for i := 0; i < 3; i++ {
+		nextContentW := width - 2
+		if needV {
+			nextContentW--
+		}
+		if nextContentW < 1 {
+			nextContentW = 1
+		}
+		nextBodyH := height - 2
+		if needH {
+			nextBodyH--
+		}
+		if nextBodyH < 0 {
+			nextBodyH = 0
+		}
+		nextNeedH := maxLineW > nextContentW
+		nextNeedV := totalLines > nextBodyH
+		contentW, bodyH = nextContentW, nextBodyH
+		if nextNeedH == needH && nextNeedV == needV {
+			break
+		}
+		needH, needV = nextNeedH, nextNeedV
+	}
+	return contentW, bodyH, needV, needH, maxLineW, totalLines
+}
+
+func taskPaneSliceCell(line string, scrollX, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	lineW := ansi.StringWidth(ansi.Strip(line))
+	if scrollX < 0 {
+		scrollX = 0
+	}
+	if scrollX > lineW {
+		scrollX = lineW
+	}
+	cell := ansi.Cut(line, scrollX, minInt(lineW, scrollX+width))
+	return fitCell(cell, width)
+}
+
+func horizontalScrollbarRow(total, width, offset int, thumbStyle, trackStyle func(string) string) string {
+	if width <= 0 {
+		return ""
+	}
+	thumbLeft, thumbSize, ok := scrollbarThumb(total, width, offset)
+	var b strings.Builder
+	for i := 0; i < width; i++ {
+		switch {
+		case !ok:
+			b.WriteByte(' ')
+		case i >= thumbLeft && i < thumbLeft+thumbSize:
+			b.WriteString(thumbStyle("█"))
+		default:
+			b.WriteString(trackStyle("░"))
+		}
+	}
+	return b.String()
+}
+
+func (m *Model) scrollTaskPaneBy(dy, dx int) bool {
+	if !m.taskPaneAvailable() || !m.taskPane.Expanded {
+		return false
+	}
+	contentW, bodyH, _, _, maxLineW, totalLines := (*m).taskPaneViewportGeometry(m.taskPaneWidth(), m.activeChat().Height())
+	oldY, oldX := m.taskPane.ScrollY, m.taskPane.ScrollX
+	m.taskPane.ScrollY = clampInt(m.taskPane.ScrollY+dy, 0, maxInt(0, totalLines-bodyH))
+	m.taskPane.ScrollX = clampInt(m.taskPane.ScrollX+dx, 0, maxInt(0, maxLineW-contentW))
+	return oldY != m.taskPane.ScrollY || oldX != m.taskPane.ScrollX
+}
+
+func (m *Model) handleTaskPaneKey(keyStr string) bool {
+	if !m.taskPaneAvailable() || !m.taskPane.Expanded || m.input.Value() != "" {
+		return false
+	}
+	height := maxInt(1, m.activeChat().Height()-3)
+	switch keyStr {
+	case "pgup":
+		return m.scrollTaskPaneBy(-height, 0)
+	case "pgdown":
+		return m.scrollTaskPaneBy(height, 0)
+	case "home":
+		return m.scrollTaskPaneBy(-1_000_000, 0)
+	case "end":
+		return m.scrollTaskPaneBy(1_000_000, 0)
+	case "left":
+		return m.scrollTaskPaneBy(0, -4)
+	case "right":
+		return m.scrollTaskPaneBy(0, 4)
+	}
+	return false
 }
 
 func taskPaneStatusGlyph(status string) string {

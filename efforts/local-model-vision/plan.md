@@ -33,39 +33,39 @@ them. No mmproj yet — after this phase, text-only local models degrade
 gracefully instead of 500ing.
 
 - [ ] Add `SupportsVision bool` to `openai.Config` and the `openai.Client`
-      struct; wire it in `NewClient`. Change `Capabilities()` to report
-      `SupportsVision: c.supportsVision` instead of hardcoded `true`.
+  struct; wire it in `NewClient`. Change `Capabilities()` to report
+              `SupportsVision: c.supportsVision` instead of hardcoded `true`.
 - [ ] Do the same for the `responses` client (`internal/llm/responses`), which
-      is the other OpenAI-compatible local path.
+  is the other OpenAI-compatible local path.
 - [ ] At the outbound content-block conversion seam, when `!supportsVision`,
-      replace image blocks with the text stub `[N image(s) omitted: the active
-      model has no vision support]` (the exact phrasing already at
-      `agent/toolloop.go:208`). LOCAL SURPRISE (recon): tool-RESULT images are
-      already gated a layer up in `agent/toolloop.go:577` via
-      `Capabilities().SupportsVision` — making capability truthful (above) makes
-      that gate effective for local for the first time. The UNGATED path is
-      CONVERSATION/user-turn images, serialized in `openai/adapter.go:46` /
-      `resolveImageURLs`. So the strip is a pre-pass (`stripImagesForTextOnly`)
-      called in openai `Chat`+`StreamChat` (mirroring the `resolveImageURLs`
-      call site), keeping `messagesToOpenAI` pure.
+  replace image blocks with the text stub `[N image(s) omitted: the active
+              model has no vision support]` (the exact phrasing already at
+              `agent/toolloop.go:208`). LOCAL SURPRISE (recon): tool-RESULT images are
+              already gated a layer up in `agent/toolloop.go:577` via
+              `Capabilities().SupportsVision` — making capability truthful (above) makes
+              that gate effective for local for the first time. The UNGATED path is
+              CONVERSATION/user-turn images, serialized in `openai/adapter.go:46` /
+              `resolveImageURLs`. So the strip is a pre-pass (`stripImagesForTextOnly`)
+              called in openai `Chat`+`StreamChat` (mirroring the `resolveImageURLs`
+              call site), keeping `messagesToOpenAI` pure.
 - [ ] NOTICE — LOCAL SURPRISE (recon): the house behavior (`toolResultBlocks`,
-      toolloop.go:213) does NOT emit a separate progress banner — it folds the
-      `[N image(s) omitted...]` stub into the message text as the user-visible
-      signal (it shows in the transcript). Matching that is more consistent than
-      a bespoke notice, so conversation-image stripping is stub-only too; the
-      separate `⚠ ...` progress event is dropped. A banner is a one-line runner
-      add later if wanted.
+  toolloop.go:213) does NOT emit a separate progress banner — it folds the
+              `[N image(s) omitted...]` stub into the message text as the user-visible
+              signal (it shows in the transcript). Matching that is more consistent than
+              a bespoke notice, so conversation-image stripping is stub-only too; the
+              separate `⚠ ...` progress event is dropped. A banner is a one-line runner
+              add later if wanted.
 - [ ] LOCAL provider SupportsVision is threaded in the engine's `clientFor`
-      (`engine/llamaserver/llmprovider.go`), NOT `server.go:3277` (that site is a
-      different provider path). Phase 1 defaults it false (images stripped —
-      safe); Phase 2 threads the real per-model flag via `endpointFor`. Cloud
-      openai/responses pass true explicitly (done in `cloudfactory/factory.go`);
-      mistral.rs local passes false (vision wiring out of scope).
+  (`engine/llamaserver/llmprovider.go`), NOT `server.go:3277` (that site is a
+              different provider path). Phase 1 defaults it false (images stripped —
+              safe); Phase 2 threads the real per-model flag via `endpointFor`. Cloud
+              openai/responses pass true explicitly (done in `cloudfactory/factory.go`);
+              mistral.rs local passes false (vision wiring out of scope).
 - [ ] Tests: unit-test that an image request to a `SupportsVision:false` client
-      serializes the stub (not an image block) and that a `true` client passes
-      the image through. Cover both openai and responses clients.
-- [ ] Build + vet + full `go test ./...` green.
-- [ ] Checkpoint.
+  serializes the stub (not an image block) and that a `true` client passes
+              the image through. Cover both openai and responses clients.
+- [x] Build + vet + full `go test ./...` green.
+- [x] Checkpoint.
 
 ## Phase 2 — Catalog + record: `MmprojFile` / `MmprojPath` / `SupportsVision`
 
@@ -73,20 +73,20 @@ Add the curated metadata and thread the record's vision flag into the provider
 so `server.go` reports real capability.
 
 - [ ] Add `MmprojFile string` and `SupportsVision bool` to `CuratedModel`
-      (`catalog.go`), with doc comments matching the `SupportsTools`/`Files`
-      style. `MmprojFile` is a filename that must also appear in `Files` so the
-      download manager fetches it.
+  (`catalog.go`), with doc comments matching the `SupportsTools`/`Files`
+              style. `MmprojFile` is a filename that must also appear in `Files` so the
+              download manager fetches it.
 - [ ] Add `MmprojPath string` and `SupportsVision bool` to `ModelRecord`
-      (`types.go`), populated where `CuratedModel` → `ModelRecord` is built
-      (resolve `MmprojPath` to the on-disk companion path, mirroring how `Path`
-      is resolved from `Files`).
+  (`types.go`), populated where `CuratedModel` → `ModelRecord` is built
+              (resolve `MmprojPath` to the on-disk companion path, mirroring how `Path`
+              is resolved from `Files`).
 - [ ] Point `server.go`'s local-provider construction at
-      `record.SupportsVision` (replacing the Phase-1 default-false), so a vision
-      model now reports `true` and a text-only model reports `false`.
+  `record.SupportsVision` (replacing the Phase-1 default-false), so a vision
+              model now reports `true` and a text-only model reports `false`.
 - [ ] Tests: catalog round-trips `MmprojFile`/`SupportsVision`; record
-      resolution produces the right `MmprojPath`; a model with no mmproj yields
-      empty `MmprojPath` and `SupportsVision:false`.
-- [ ] Build + vet + full `go test ./...` green.
+  resolution produces the right `MmprojPath`; a model with no mmproj yields
+              empty `MmprojPath` and `SupportsVision:false`.
+- [x] Build + vet + full `go test ./...` green.
 - [ ] Checkpoint.
 
 ## Phase 3 — Launch: pass `--mmproj` to llama-server
@@ -94,15 +94,15 @@ so `server.go` reports real capability.
 Wire the projector into the actual process launch.
 
 - [ ] In `argsFor` (`provider.go:530`), when the record has a non-empty
-      `MmprojPath`, append `--mmproj <path>` to the launch args (before per-model
-      `ExtraArgs`, consistent with existing ordering).
+  `MmprojPath`, append `--mmproj <path>` to the launch args (before per-model
+              `ExtraArgs`, consistent with existing ordering).
 - [ ] Guard: only emit `--mmproj` when the file exists on disk; log a clear
-      warning and fall back to text-only (leave `SupportsVision` effectively
-      false) if the projector is declared but missing, rather than launching a
-      broken server.
+  warning and fall back to text-only (leave `SupportsVision` effectively
+              false) if the projector is declared but missing, rather than launching a
+              broken server.
 - [ ] Tests: `argsFor` includes `--mmproj <path>` iff `MmprojPath` set and file
-      present; omits it otherwise.
-- [ ] Build + vet + full `go test ./...` green.
+  present; omits it otherwise.
+- [x] Build + vet + full `go test ./...` green.
 - [ ] Checkpoint.
 
 ## Phase 4 — Add a curated vision model + end-to-end verification
@@ -110,18 +110,18 @@ Wire the projector into the actual process launch.
 The staged, higher-risk finish: a real model that proves the whole chain.
 
 - [ ] Select a vision GGUF + mmproj pair verified to load on the pinned
-      llama.cpp build (candidates: a Qwen2.5-VL or Gemma-3 vision GGUF at a
-      sensible RAM tier). Confirm the projector filename and repo.
+  llama.cpp build (candidates: a Qwen2.5-VL or Gemma-3 vision GGUF at a
+              sensible RAM tier). Confirm the projector filename and repo.
 - [ ] Add the model to `catalog.json` with `Files` including the projector,
-      `MmprojFile` set, `SupportsVision:true`, correct size/tier, and any
-      required `ExtraArgs`.
+  `MmprojFile` set, `SupportsVision:true`, correct size/tier, and any
+              required `ExtraArgs`.
 - [ ] Download it via the normal path; confirm the projector lands alongside the
-      weights and the model counts as downloaded only when both files present.
+  weights and the model counts as downloaded only when both files present.
 - [ ] End-to-end: launch it (assert `--mmproj` in the live args), send a request
-      with an image, and confirm a non-500, coherent response that references the
-      image. Capture the transcript in HANDOFF.md.
+  with an image, and confirm a non-500, coherent response that references the
+              image. Capture the transcript in HANDOFF.md.
 - [ ] Regression: confirm a text-only local model still strips + notices (Phase 1
-      behavior intact) and cloud vision still works unchanged.
+  behavior intact) and cloud vision still works unchanged.
 - [ ] Build + vet + full `go test ./...` green.
 - [ ] Checkpoint.
 

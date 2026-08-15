@@ -107,6 +107,48 @@ func TestGitStatusCap_ModifiedFile(t *testing.T) {
 	}
 }
 
+func TestGitStatusCap_PathsFilter(t *testing.T) {
+	dir := initTestRepo(t)
+
+	if err := os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "other.txt"), []byte("other\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cap := GitStatus()
+	args, _ := json.Marshal(map[string]any{"path": dir, "paths": []string{"hello.txt"}})
+	res, err := cap.Execute(context.Background(), &capabilities.Call{Args: args})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Rows) != 1 {
+		t.Fatalf("expected 1 filtered row, got %d: %#v", len(res.Rows), res.Rows)
+	}
+	if res.Rows[0]["path"] != "hello.txt" {
+		t.Fatalf("filtered path wrong: %q", res.Rows[0]["path"])
+	}
+}
+
+func TestGitStatusCap_FilePathRejectedWithPathsHint(t *testing.T) {
+	dir := initTestRepo(t)
+	filePath := filepath.Join(dir, "hello.txt")
+
+	cap := GitStatus()
+	args, _ := json.Marshal(map[string]any{"path": filePath})
+	_, err := cap.Execute(context.Background(), &capabilities.Call{Args: args})
+	if err == nil {
+		t.Fatal("expected error for file-valued path")
+	}
+	msg := err.Error()
+	for _, want := range []string{"path must be a repository/worktree directory", "got file", "paths"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q missing %q", msg, want)
+		}
+	}
+}
+
 func TestGitStatusCap_UntrackedFile(t *testing.T) {
 	dir := initTestRepo(t)
 

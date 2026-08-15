@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -26,14 +27,15 @@ func (gitStatusCap) Surfaces() capabilities.Surface {
 	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
 }
 func (gitStatusCap) Description() string {
-	return "Show working-tree status as rows of {path, x, y, status} via git status --porcelain=v2. Args: {path?: string} (default cwd)."
+	return "Show working-tree status as rows of {path, x, y, status} via git status --porcelain=v2. Args: {path?: string} (repository directory, default cwd), {paths?: [string]} to filter specific files."
 }
 func (gitStatusCap) Schema() capabilities.Schema {
-	return capabilities.Schema(`{"type":"object","properties":{"path":{"type":"string"}}}`)
+	return capabilities.Schema(`{"type":"object","properties":{"path":{"type":"string","description":"Repository/worktree directory. Do not pass a file path; use paths for file filters."},"paths":{"type":"array","items":{"type":"string"},"description":"Optional file path filters, relative to the repository/worktree directory or accepted by git as pathspecs."}}}`)
 }
 
 type gitStatusArgs struct {
-	Path string `json:"path"`
+	Path  string   `json:"path"`
+	Paths []string `json:"paths"`
 }
 
 func (gitStatusCap) Execute(ctx context.Context, call *capabilities.Call) (*capabilities.Result, error) {
@@ -44,12 +46,19 @@ func (gitStatusCap) Execute(ctx context.Context, call *capabilities.Call) (*capa
 		}
 	}
 	args := []string{"status", "--porcelain=v2", "--untracked-files=all"}
+	if len(a.Paths) > 0 {
+		args = append(args, "--")
+		args = append(args, a.Paths...)
+	}
 	cmd := exec.CommandContext(ctx, "git", args...)
 	dir := a.Path
 	if dir == "" {
 		dir = call.WorkDir
 	}
 	if dir != "" {
+		if info, statErr := os.Stat(dir); statErr == nil && !info.IsDir() {
+			return nil, fmt.Errorf("git_status: path must be a repository/worktree directory, got file %q; pass the repository in path and file filters in paths, for example {\"path\":\"/path/to/repo\",\"paths\":[%q]}", dir, dir)
+		}
 		cmd.Dir = dir
 	}
 	out, err := cmd.Output()

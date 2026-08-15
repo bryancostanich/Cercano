@@ -17,6 +17,9 @@ func colorFields(p *Palette) map[string]*color.Color {
 		"bg_deep": &p.BgDeep, "surface": &p.Surface, "border_dim": &p.BorderDim, "border": &p.Border,
 		"primary": &p.Primary, "bright": &p.Bright, "dim": &p.Dim, "accent": &p.Accent,
 		"info": &p.Info, "muted": &p.Muted, "success": &p.Success, "warn": &p.Warn, "error": &p.Error,
+		"selection_bg": &p.SelectionBg, "code_block_bg": &p.CodeBlockBg, "bypass_text": &p.BypassText,
+		"activity_base": &p.ActivityBase, "activity_peak": &p.ActivityPeak, "wordmark_peak": &p.WordmarkPeak,
+		"spinner_base": &p.SpinnerBase, "spinner_peak": &p.SpinnerPeak, "meter_label_on_fill": &p.MeterLabelOnFill,
 		"buffer_link": &p.BufferLink, "buffer_code": &p.BufferCode, "buffer_lime": &p.BufferLime,
 		"buffer_error": &p.BufferError, "buffer_user_bg": &p.BufferUserBg,
 	}

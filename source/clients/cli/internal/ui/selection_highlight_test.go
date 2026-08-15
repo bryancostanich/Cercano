@@ -6,6 +6,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"cercano/source/clients/cli/internal/theme"
 )
 
 // The selection must tint the background while keeping the original per-character
@@ -15,7 +17,7 @@ func TestHighlightRange_PreservesForeground(t *testing.T) {
 		" plain " +
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#00C8E8")).Render("cyan")
 
-	out := highlightRange(line, 0, ansi.StringWidth(line))
+	out := highlightRange(line, 0, ansi.StringWidth(line), theme.SelectionBackgroundSGR(theme.Cracker()))
 
 	if !strings.Contains(out, "38;2;234;130;18") {
 		t.Errorf("amber foreground was lost: %q", out)
@@ -30,7 +32,7 @@ func TestHighlightRange_PreservesForeground(t *testing.T) {
 
 func TestHighlightRange_BackgroundOnlyKeepsText(t *testing.T) {
 	line := "abcdefghij"
-	hl := highlightRange(line, 2, 5)
+	hl := highlightRange(line, 2, 5, theme.SelectionBackgroundSGR(theme.Cracker()))
 	// Background-only highlight: stripping ANSI leaves the text byte-for-byte.
 	if got := ansi.Strip(hl); got != line {
 		t.Errorf("highlight altered the text: %q", got)
@@ -48,7 +50,7 @@ func TestHighlightRange_WinsOverLineBackground(t *testing.T) {
 	selBg := "\x1b[48;2;88;130;158m" // #58829E selection
 	lineBg := "\x1b[48;2;17;51;26m"  // #11331A sent-prompt fill (Cracker BufferUserBg)
 	line := lipgloss.NewStyle().Background(lipgloss.Color("#11331A")).Render("sent prompt")
-	hl := highlightRange(line, 0, ansi.StringWidth(line))
+	hl := highlightRange(line, 0, ansi.StringWidth(line), selBg)
 
 	// Text is untouched by the overlay.
 	if got := ansi.Strip(hl); got != "sent prompt" {

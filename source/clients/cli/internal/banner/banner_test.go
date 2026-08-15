@@ -1,6 +1,7 @@
 package banner
 
 import (
+	"image/color"
 	"strings"
 	"testing"
 
@@ -65,6 +66,15 @@ func TestRender_LongModelGrowsAndNeverClips(t *testing.T) {
 	}
 }
 
+func TestRenderWithSweep_UsesPaletteWordmarkPeak(t *testing.T) {
+	p := theme.Cracker()
+	p.WordmarkPeak = mustBannerHex("#123456")
+	out := RenderWithSweep(p, Meta{Tagline: "x", Version: "y", Model: "z"}, -0.5)
+	if !strings.Contains(out, "38;2;18;52;86") {
+		t.Fatalf("wordmark shimmer should use Palette.WordmarkPeak, got %q", out)
+	}
+}
+
 func TestRenderWithSweep_OffScreenEqualsStatic(t *testing.T) {
 	// A sweep position well off the wordmark (left or right) must paint base
 	// color everywhere — the rendered string is identical to the static Render
@@ -107,6 +117,14 @@ func TestRender_EmptyModelOmitsSeparator(t *testing.T) {
 	if got := strings.Count(status, "·"); got != 1 {
 		t.Errorf("status line has %d '·' separators, want 1 (empty model): %q", got, status)
 	}
+}
+
+func mustBannerHex(s string) color.Color {
+	c, err := theme.ParseHex(s)
+	if err != nil {
+		panic(err)
+	}
+	return c
 }
 
 func TestWordmarkCols_Const(t *testing.T) {

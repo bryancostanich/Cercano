@@ -75,7 +75,7 @@ func renderWithRowColors(p theme.Palette, m Meta, colorTop, colorBot func(rune, 
 	// (2-col left pad + content + 2-col right breathing pad) needs more room,
 	// so long model names never clip past the right wall.
 	inner := Width - 2
-	if statusInner := 2 /*left pad*/ + statusVisible + 2 /*right pad*/; statusInner > inner {
+	if statusInner := 2 /*left pad*/ + statusVisible + 2; /*right pad*/ statusInner > inner {
 		inner = statusInner
 	}
 
@@ -139,12 +139,10 @@ func renderWithRowColors(p theme.Palette, m Meta, colorTop, colorBot func(rune, 
 func visibleWidth(s string) int { return lipgloss.Width(s) }
 
 // makeShimmerColorFn returns a per-column color function for one wordmark row.
-// Distance from the sweep head selects amber → bright → white via piecewise lerp.
+// Distance from the sweep head selects primary → bright → wordmark peak via
+// theme-owned interpolation.
 func makeShimmerColorFn(p theme.Palette, sweepPos float64) func(rune, int) color.Color {
 	const tail = 5.0
-	base := colorToRGB(p.Primary)
-	bright := colorToRGB(p.Bright)
-	white := [3]uint8{0xFF, 0xFF, 0xFF}
 
 	return func(r rune, col int) color.Color {
 		// Spaces inside the wordmark (e.g. the N letter's gap) stay base; the
@@ -158,39 +156,9 @@ func makeShimmerColorFn(p theme.Palette, sweepPos float64) func(rune, int) color
 			return p.Primary
 		}
 		k := 1.0 - ad/tail // 0 at edge, 1 at peak
-		var c [3]uint8
 		if k < 0.5 {
-			c = lerpRGB(base, bright, k*2)
-		} else {
-			c = lerpRGB(bright, white, (k-0.5)*2)
+			return theme.Lerp(p.Primary, p.Bright, k*2)
 		}
-		return lipgloss.Color(rgbToHex(c))
+		return theme.Lerp(p.Bright, p.WordmarkPeak, (k-0.5)*2)
 	}
-}
-
-// colorToRGB extracts the R/G/B components from a color.Color.
-// The alpha-premultiplied 16-bit values from RGBA() are scaled back to 8-bit.
-func colorToRGB(c color.Color) [3]uint8 {
-	r, g, b, _ := c.RGBA()
-	return [3]uint8{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8)}
-}
-
-func lerpRGB(a, b [3]uint8, t float64) [3]uint8 {
-	return [3]uint8{
-		uint8(float64(a[0]) + (float64(b[0])-float64(a[0]))*t),
-		uint8(float64(a[1]) + (float64(b[1])-float64(a[1]))*t),
-		uint8(float64(a[2]) + (float64(b[2])-float64(a[2]))*t),
-	}
-}
-
-func rgbToHex(c [3]uint8) string {
-	const hex = "0123456789ABCDEF"
-	out := []byte("#000000")
-	out[1] = hex[c[0]>>4]
-	out[2] = hex[c[0]&0xF]
-	out[3] = hex[c[1]>>4]
-	out[4] = hex[c[1]&0xF]
-	out[5] = hex[c[2]>>4]
-	out[6] = hex[c[2]&0xF]
-	return string(out)
 }

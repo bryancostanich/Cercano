@@ -69,14 +69,10 @@ func (s textSelection) lineRange(line, width int) (int, int, bool) {
 	}
 }
 
-// selectionBg is the SGR for the selection background — a mid slate blue laid
-// UNDER the existing text so the syntax colors show through, like a native
-// selection rather than a flat one-color block. It is deliberately lighter than
-// the sent-prompt navy fill (#1F4163): the older, darker slate (#2D4F61) sat
-// within ~1.2:1 luminance of that navy, so a selection on a prompt line was
-// nearly indistinguishable. This value lifts selection-vs-navy contrast to
-// ~2.6:1 while staying dark enough to keep light foreground text readable.
-const selectionBg = "\x1b[48;2;88;130;158m" // #58829E
+// The selection background is laid UNDER existing text so syntax colors show
+// through, like a native selection rather than a flat one-color block. The SGR
+// itself comes from the active theme so selection contrast is part of the theme
+// contract instead of a render-layer color literal.
 
 // ansiSGRRe matches any SGR escape sequence. highlightRange re-asserts the
 // selection background after *every* SGR (not just resets) so a background set
@@ -90,7 +86,7 @@ var ansiSGRRe = regexp.MustCompile("\x1b\\[[0-9;]*m")
 // [start,end) of an already-styled line, preserving the per-character foreground
 // colors. The selection background is re-asserted after every SGR so inner
 // style changes — including background fills — don't drop or override it.
-func highlightRange(line string, start, end int) string {
+func highlightRange(line string, start, end int, selectionBg string) string {
 	w := ansi.StringWidth(line)
 	if start < 0 {
 		start = 0

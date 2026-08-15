@@ -25,6 +25,17 @@ type Palette struct {
 	Warn      color.Color // meter mid-range, advisory
 	Error     color.Color // failures, bypass indicator
 
+	// Semantic UI surfaces that need explicit contrast tokens.
+	SelectionBg      color.Color // active text-selection background
+	CodeBlockBg      color.Color // fenced-code canvas behind syntax highlighting
+	BypassText       color.Color // text on bypass/danger badges
+	ActivityBase     color.Color // live activity sweep base
+	ActivityPeak     color.Color // live activity sweep peak
+	WordmarkPeak     color.Color // splash wordmark shimmer peak
+	SpinnerBase      color.Color // live spinner pulse base
+	SpinnerPeak      color.Color // live spinner pulse peak
+	MeterLabelOnFill color.Color // context-meter label text on filled cells
+
 	// Content colors (scrollback + markdown prose).
 	BufferLink   color.Color // markdown links
 	BufferCode   color.Color // inline code / code-fence lang
@@ -51,6 +62,9 @@ const (
 	hexSuccess   = "#6FCF6F"
 	hexWarn      = "#FFD24D"
 	hexError     = "#E84D4D"
+
+	hexSelectionBg  = "#58829E"
+	hexActivityPeak = "#FFFFFF"
 )
 
 // Cracker returns the default cercano-cli palette, built from the hex constants
@@ -70,6 +84,16 @@ func Cracker() Palette {
 		Success:   lipgloss.Color(hexSuccess),
 		Warn:      lipgloss.Color(hexWarn),
 		Error:     lipgloss.Color(hexError),
+
+		SelectionBg:      lipgloss.Color(hexSelectionBg),
+		CodeBlockBg:      lipgloss.Color(hexBgDeep),
+		BypassText:       lipgloss.Color(hexBgDeep),
+		ActivityBase:     lipgloss.Color(hexAccent),
+		ActivityPeak:     lipgloss.Color(hexActivityPeak),
+		WordmarkPeak:     lipgloss.Color(hexActivityPeak),
+		SpinnerBase:      lipgloss.Color(hexPrimary),
+		SpinnerPeak:      lipgloss.Color(hexBright),
+		MeterLabelOnFill: lipgloss.Color(hexBgDeep),
 
 		BufferLink:   lipgloss.Color(bufLinkHex),
 		BufferCode:   lipgloss.Color(bufCodeHex),

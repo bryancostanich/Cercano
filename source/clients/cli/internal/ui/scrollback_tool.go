@@ -223,7 +223,7 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 		// Keep the "    " indent PLAIN (outside the style) so the rail overlay,
 		// which replaces the byte at offset 2, finds a real space there.
 		body = append(body, "    "+toolEntrySubtle.Render(animateToolSpinnerWithStyle(toolEntrySubtle)+" loading…"))
-		railBody(body)
+		railBody(body, styles)
 		return strings.Join(body, "\n")
 	}
 	if e.FullArgs != "" {
@@ -263,7 +263,7 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 	if e.FullArgs == "" && e.FullResult == "" {
 		body = append(body, "    "+toolEntrySubtle.Render("(no details)"))
 	}
-	railBody(body)
+	railBody(body, styles)
 	return strings.Join(body, "\n")
 }
 
@@ -303,7 +303,7 @@ func renderToolArgsDiff(toolName, argsJSON string, startLine, width int, styles 
 // carry old-file numbers, inserted and context lines carry new-file numbers,
 // both counters seeded at startLine. startLine == 0 renders unnumbered.
 func renderDiffBlock(path string, ops []render.DiffLine, startLine, width int, styles theme.Styles) []string {
-	faint := lipgloss.NewStyle().Faint(true)
+	faint := styles.Muted
 	const indent = "    "
 	gutterW := 0
 	if startLine > 0 {
@@ -398,13 +398,13 @@ func renderToolGroup(entries []ToolEntry, width int, styles theme.Styles, md *re
 // this rail bracket the expanded region, so it can be collapsed by clicking the
 // rail anywhere down its length (see MouseToggleFold) — not just the far-up
 // arrow. No-op on lines whose offset-2 byte isn't the expected plain space.
-func railBody(body []string) {
+func railBody(body []string, styles theme.Styles) {
 	for k := 1; k < len(body); k++ {
 		g := "│"
 		if k == len(body)-1 {
 			g = "╰"
 		}
-		body[k] = overlayRail(body[k], 2, g)
+		body[k] = overlayRail(body[k], 2, g, styles)
 	}
 }
 
@@ -412,9 +412,9 @@ func railBody(body []string) {
 // rail glyph, leaving the rest intact. No-op when that byte isn't a space, so it
 // never corrupts styled content — used to draw the collapse rail (both the
 // per-entry and the outer group rail) without re-plumbing the render functions.
-func overlayRail(line string, col int, glyph string) string {
+func overlayRail(line string, col int, glyph string, styles theme.Styles) string {
 	if len(line) > col && line[col] == ' ' {
-		return line[:col] + lipgloss.NewStyle().Faint(true).Render(glyph) + line[col+1:]
+		return line[:col] + styles.Muted.Render(glyph) + line[col+1:]
 	}
 	return line
 }
@@ -497,7 +497,7 @@ func renderToolGroupSpans(entries []ToolEntry, width int, styles theme.Styles, m
 			if ln == last {
 				g = "╰"
 			}
-			blockLines[ln] = overlayRail(blockLines[ln], 2, g)
+			blockLines[ln] = overlayRail(blockLines[ln], 2, g, styles)
 			rows = append(rows, toolArrowRow{Line: ln, Entry: 0, Group: true, RailMin: 0, RailMax: toolRailContentCol})
 		}
 		return strings.Join(blockLines, "\n"), rows
@@ -593,7 +593,7 @@ func renderGroupSummary(completed []ToolEntry, width int, styles theme.Styles, f
 		breakdown = " (" + strings.Join(parts, ", ") + ")"
 	}
 
-	toolEntryFaint := lipgloss.NewStyle().Faint(true)
+	toolEntryFaint := styles.Muted
 	glyph := "✓"
 	glyphStyle := styles.ToolSuccess
 	switch {
@@ -670,7 +670,7 @@ func groupBreakdownName(s string) string {
 // for the assistant placeholder) is deliberate — tools are routine, the
 // indicator should be present-but-quiet, not eye-catching.
 func animateToolSpinner() string {
-	return animateToolSpinnerWithStyle(lipgloss.NewStyle().Faint(true))
+	return animateToolSpinnerWithStyle(theme.NewStyles(theme.Cracker()).Muted)
 }
 
 func animateToolSpinnerWithStyle(style lipgloss.Style) string {

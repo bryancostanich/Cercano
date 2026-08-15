@@ -269,7 +269,7 @@ func (sp *settingsPage) applySpinnerTick() tea.Cmd {
 	if !sp.pendingCommit {
 		return nil
 	}
-	sp.form.SetStatus(animateToolSpinner() + " applying…")
+	sp.form.SetStatus(animateToolSpinnerWithStyle(sp.styles.Muted) + " applying…")
 	return settingsSpinnerTick()
 }
 
@@ -361,7 +361,7 @@ func (sp *settingsPage) onCommit(key, value string) (string, tea.Cmd, error) {
 		sp.pendingCommit = true
 		ag := sp.agent
 		update := action.update
-		return animateToolSpinner() + " applying…", tea.Batch(settingsSpinnerTick(), func() tea.Msg {
+		return animateToolSpinnerWithStyle(sp.styles.Muted) + " applying…", tea.Batch(settingsSpinnerTick(), func() tea.Msg {
 			// Guard managed runtimes before committing the switch. If the target
 			// isn't ready, open the runtime setup/download modal and DON'T dispatch
 			// UpdateConfig — cancel leaves config unchanged.
@@ -399,7 +399,7 @@ func (sp *settingsPage) onCommit(key, value string) (string, tea.Cmd, error) {
 		sp.pendingCommit = true
 		ag := sp.agent
 		mode := action.value
-		return animateToolSpinner() + " applying…", tea.Batch(settingsSpinnerTick(), func() tea.Msg {
+		return animateToolSpinnerWithStyle(sp.styles.Muted) + " applying…", tea.Batch(settingsSpinnerTick(), func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if err := ag.SetPermissionMode(ctx, mode); err != nil {

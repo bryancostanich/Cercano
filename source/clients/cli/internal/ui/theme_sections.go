@@ -18,6 +18,13 @@ var contentColorRows = []struct{ key, label string }{
 	{"buffer_error", "tool-err"}, {"buffer_user_bg", "user-bg"},
 }
 
+var semanticColorRows = []struct{ key, label string }{
+	{"selection_bg", "selection-bg"}, {"code_block_bg", "code-bg"}, {"bypass_text", "bypass-text"},
+	{"activity_base", "activity-base"}, {"activity_peak", "activity-peak"},
+	{"spinner_base", "spinner-base"}, {"spinner_peak", "spinner-peak"},
+	{"meter_label_on_fill", "meter-label"},
+}
+
 // paletteHex returns the #RRGGBB hex for a yaml color key of a palette.
 func paletteHex(p theme.Palette, key string) string {
 	pc := p
@@ -38,6 +45,10 @@ func buildThemeSections(working theme.Theme, names []string, builtin, dirty bool
 	for _, r := range contentColorRows {
 		content = append(content, form.NewColor("color:"+r.key, r.label, paletteHex(working.Palette, r.key), editable))
 	}
+	semantic := make([]form.Field, 0, len(semanticColorRows))
+	for _, r := range semanticColorRows {
+		semantic = append(semantic, form.NewColor("color:"+r.key, r.label, paletteHex(working.Palette, r.key), editable))
+	}
 	themeRow := form.NewSelect("theme-select", "theme", optionsFromNames(names), working.Name)
 	actions := []form.Field{
 		form.NewButton("theme-save", "Save", editable && dirty),
@@ -49,6 +60,7 @@ func buildThemeSections(working theme.Theme, names []string, builtin, dirty bool
 		{Title: "Theme", Fields: []form.Field{themeRow}},
 		{Title: "Theme · Chrome", Fields: chrome},
 		{Title: "Theme · Content", Fields: content},
+		{Title: "Theme · Semantic", Fields: semantic},
 		{Title: "Theme · Actions", Fields: actions},
 	}
 }

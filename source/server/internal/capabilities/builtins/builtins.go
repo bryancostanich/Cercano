@@ -58,6 +58,7 @@ func Register(reg *capabilities.Registry) {
 	reg.MustRegister(RequestPlanApproval())
 	reg.MustRegister(PlanExit())
 	reg.MustRegister(SuggestAutonomous())
+	reg.MustRegister(RequestAutonomousExecution())
 	reg.MustRegister(RequestAutonomousExit())
 	reg.MustRegister(CompleteAutonomousReview())
 	reg.MustRegister(AutoExit())

@@ -39,7 +39,7 @@ func (requestPlanApprovalCap) Surfaces() capabilities.Surface {
 }
 
 func (requestPlanApprovalCap) Description() string {
-	return "Request human approval to leave planning mode and begin executing the written plan. Call this only after you have written the effort's spec.md and plan.md and summarized what will be executed. The user is shown the standard y/n/d/c prompt; on approval the session exits the read-only planning profile so implementation can proceed. After approval, either begin interactive execution or, when hands-off execution fits the approved plan, draft a concise autonomous run brief from spec.md/plan.md and call suggest_autonomous for a separate user approval. Pass a concise summary of the plan and the effort path so the user can review details before approving."
+	return "Request human approval to leave planning mode and begin executing the written plan. Call this only after you have written the effort's spec.md and plan.md and summarized what will be executed. The user is shown the standard y/n/d/c prompt; on approval the session exits the read-only planning profile so implementation can proceed. After approval, ask the execution-style follow-up by calling request_autonomous_execution before beginning implementation. Pass a concise summary of the plan and the effort path so the user can review details before approving."
 }
 
 func (requestPlanApprovalCap) Schema() capabilities.Schema {
@@ -77,7 +77,7 @@ func (requestPlanApprovalCap) Execute(ctx context.Context, call *capabilities.Ca
 		return nil, fmt.Errorf("request_plan_approval: leaving planning mode: %w", err)
 	}
 
-	parts := []string{"Plan approved. Left planning mode; normal implementation tools are available. Begin executing the approved plan, keeping plan.md status glyphs current as work proceeds. If the user wants hands-off execution, or the plan is well-scoped for autonomous work, you may draft a concise autonomous run brief from the approved spec.md/plan.md and call suggest_autonomous for separate approval before entering autonomous mode."}
+	parts := []string{"Plan approved. Left planning mode; normal implementation tools are available. Before beginning implementation, call request_autonomous_execution to ask: \"Plan approved. Would you like me to execute it to completion autonomously?\" If the user says yes, draft a concise autonomous run brief from the approved spec.md/plan.md and call suggest_autonomous for separate brief approval; if no, proceed step-by-step under the executing-plans protocol."}
 	if effort := strings.TrimSpace(a.Effort); effort != "" {
 		parts = append(parts, "Effort: "+effort)
 	}

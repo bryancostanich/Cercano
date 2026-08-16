@@ -459,8 +459,10 @@ points, treat it as a brief revision. Do not silently reinterpret the run.
    gate when interfaces, persistence, or user-visible behavior changed.
 7. **Fix failures with data.** If a test or bug appears, follow systematic
    debugging before patching.
-8. **Checkpoint solved units.** Commit solved units with clear messages. Never
-   push or merge unless explicitly authorized.
+8. **Checkpoint solved units, then continue.** Commit solved units with clear
+   messages. A checkpoint boundary is not a pause boundary: after checkpointing,
+   immediately continue to the next unsatisfied ` + "`done_when`" + ` item or next necessary
+   implementation slice. Never push or merge unless explicitly authorized.
 9. **Request final review.** When the brief is satisfied, call
    ` + "`request_autonomous_exit`" + ` to enter decision review. Walk the user through
    decisions one by one; only after acceptance call ` + "`complete_autonomous_review`" + `.
@@ -493,7 +495,11 @@ continue when the choice:
 
 ## High Bar For Stopping Mid-Run
 
-Do not stop just because there are two reasonable implementation paths. Stop and
+Do not stop just because there are two reasonable implementation paths. Do not
+stop just because you reached a clean checkpoint. A status summary is not a
+substitute for continuing work: do not end your turn with a progress report
+unless the approved brief is complete, you are blocked, the user explicitly asked
+for a pause/status-only update, or a high-risk stop condition is met. Stop and
 ask only when the decision crosses a high-risk boundary:
 
 - it is effectively irreversible;
@@ -542,14 +548,16 @@ approved plan. The Markdown file remains canon: keep it current while you work.
 
 ## Optional Autonomous Bridge
 
-After approval, normal interactive execution remains valid. If the user asked for
-hands-off execution, or the accepted plan is well-scoped enough for autonomous
-work, you may offer autonomous execution as a separate step: derive a concise run
-brief from the approved ` + "`spec.md`" + ` / ` + "`plan.md`" + ` with ` + "`goal`" + `, ` + "`done_when`" + `,
+After approval, do not silently begin implementation. First call
+` + "`request_autonomous_execution`" + ` to ask the execution-style follow-up:
+"Plan approved. Would you like me to execute it to completion autonomously?"
+This is a normal y/n/d/c prompt. If the user says yes, derive a concise run brief
+from the approved ` + "`spec.md`" + ` / ` + "`plan.md`" + ` with ` + "`goal`" + `, ` + "`done_when`" + `,
 ` + "`constraints`" + `, and ` + "`review_points`" + `, then call ` + "`suggest_autonomous`" + ` with
-` + "`source_plan_path`" + ` and ` + "`source_spec_path`" + `. Do not enter autonomous mode just
-because the plan was approved; ` + "`suggest_autonomous`" + ` is a second y/n/d/c approval
-boundary for the run brief.
+` + "`source_plan_path`" + ` and ` + "`source_spec_path`" + ` for the separate run-brief approval.
+If the user says no, continue step-by-step under this protocol. Do not enter
+autonomous mode just because the plan was approved; ` + "`suggest_autonomous`" + ` remains a
+second approval boundary for the concrete run brief.
 
 ## Core Loop
 
@@ -685,11 +693,12 @@ Pick a short kebab-case slug for the effort (e.g. ` + "`migrate-config-loader`" 
 Once the spec is approved, write **` + "`efforts/<slug>/plan.md`" + `** in the format
 below. Then call ` + "`request_plan_approval`" + ` with the effort path and a concise
 summary of the plan. That W-tier capability raises the standard ` + "`y/n/d/c`" + `
-gate; approval leaves the read-only planning profile so execution can begin. If
-the approved plan is a good fit for hands-off work, the next step may be to
-draft a lightweight autonomous run brief from ` + "`spec.md`" + ` / ` + "`plan.md`" + ` and call
-` + "`suggest_autonomous`" + ` for a separate y/n/d/c approval; do not fold that into
-` + "`request_plan_approval`" + ` itself.
+gate; approval leaves the read-only planning profile so execution can begin.
+After that approval, call ` + "`request_autonomous_execution`" + ` to ask: "Plan approved.
+Would you like me to execute it to completion autonomously?" If the user says
+yes, draft a lightweight autonomous run brief from ` + "`spec.md`" + ` / ` + "`plan.md`" + ` and call
+` + "`suggest_autonomous`" + ` for a separate y/n/d/c run-brief approval. If the user says
+no, proceed step-by-step under the executing-plans protocol.
 
 ## Decisions During Generation (mandatory)
 

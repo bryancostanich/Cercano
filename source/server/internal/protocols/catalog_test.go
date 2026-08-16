@@ -272,7 +272,7 @@ func TestPlanningModeNamesRequestPlanApprovalForHandoff(t *testing.T) {
 	if !strings.Contains(p.Body, "leaves the read-only planning profile") && !strings.Contains(p.Body, "drops the read-only fence") {
 		t.Fatal("planning-mode body must explain that approval leaves the read-only planning profile")
 	}
-	for _, want := range []string{"suggest_autonomous", "lightweight autonomous run brief", "separate y/n/d/c approval"} {
+	for _, want := range []string{"request_autonomous_execution", "Would you like me to execute it to completion autonomously?", "suggest_autonomous", "lightweight autonomous run brief", "separate y/n/d/c"} {
 		if !strings.Contains(p.Body, want) {
 			t.Fatalf("planning-mode body must document optional autonomous bridge; missing %q", want)
 		}
@@ -329,7 +329,7 @@ func TestExecutingPlansStructuralHandoffUsesApprovalGate(t *testing.T) {
 
 func TestExecutingPlansDocumentsOptionalAutonomousBridge(t *testing.T) {
 	p, _ := Get("executing-plans")
-	for _, want := range []string{"Optional Autonomous Bridge", "suggest_autonomous", "source_plan_path", "source_spec_path", "second y/n/d/c approval"} {
+	for _, want := range []string{"Optional Autonomous Bridge", "request_autonomous_execution", "Would you like me to execute it to completion autonomously?", "suggest_autonomous", "source_plan_path", "source_spec_path", "second approval boundary"} {
 		if !strings.Contains(p.Body, want) {
 			t.Fatalf("executing-plans must document autonomous bridge; missing %q", want)
 		}
@@ -366,6 +366,8 @@ func TestAutonomousRunProtocolDoesNotAskForEveryDecision(t *testing.T) {
 		"Autonomy means normal in-scope decisions continue without human approval",
 		"Log and",
 		"Do not stop just because there are two reasonable implementation paths",
+		"checkpoint boundary is not a pause boundary",
+		"do not end your turn with a progress report",
 	} {
 		if !strings.Contains(p.Body, want) {
 			t.Fatalf("autonomous-run protocol must keep the stop threshold high; missing %q", want)

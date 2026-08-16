@@ -3928,7 +3928,7 @@ func isDispatchTool(name string) bool {
 // instead of the raw "name arg=val" dump.
 func isSessionControlTool(name string) bool {
 	switch name {
-	case "suggest_plan", "request_plan_approval", "plan_exit", "suggest_autonomous", "request_autonomous_exit", "complete_autonomous_review", "auto_exit":
+	case "suggest_plan", "request_plan_approval", "plan_exit", "suggest_autonomous", "request_autonomous_execution", "request_autonomous_exit", "complete_autonomous_review", "auto_exit":
 		return true
 	}
 	return false
@@ -3948,6 +3948,8 @@ func sessionControlPromptTitle(p *pendingToolCall) string {
 		return "Leave plan mode?"
 	case "suggest_autonomous":
 		return "Start autonomous mode with this run brief?"
+	case "request_autonomous_execution":
+		return "Plan approved. Would you like me to execute it to completion autonomously?"
 	case "request_autonomous_exit":
 		return "Autonomous run complete — begin final decision review?"
 	case "complete_autonomous_review":

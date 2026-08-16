@@ -137,6 +137,23 @@ func TestRenderConfirmPrompt_SuggestAutonomous_WrapsBriefBody(t *testing.T) {
 	}
 }
 
+func TestRenderConfirmPrompt_RequestAutonomousExecution_AsksFollowupChoice(t *testing.T) {
+	m := minimalModel()
+	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
+		Name:       "request_autonomous_execution",
+		Args:       `{"summary":"three phases","effort":"efforts/demo"}`,
+		Permission: "X",
+	}))
+	for _, want := range []string{"Plan approved. Would you like me to execute it to completion autonomously?", "Plan: three phases", "Effort: efforts/demo"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("request_autonomous_execution prompt missing %q: %q", want, s)
+		}
+	}
+	if strings.Contains(s, "DESTRUCTIVE") || strings.Contains(s, "⚠") {
+		t.Errorf("request_autonomous_execution must not be DESTRUCTIVE/⚠: %q", s)
+	}
+}
+
 func TestRenderConfirmPrompt_RequestAutonomousExit_AsksForReview(t *testing.T) {
 	m := minimalModel()
 	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{

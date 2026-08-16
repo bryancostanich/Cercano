@@ -423,6 +423,111 @@ branch and short SHA, or "conflict at <file>".
 `,
 	},
 	{
+		Name:        "autonomous-run",
+		Description: "Run against an approved autonomous brief, logging decisions and reviewing them before exit.",
+		Domain:      DomainCore,
+		Trigger:     "When autonomous mode is active, after `suggest_autonomous` is approved, or before completing an autonomous run → pull the `autonomous-run` protocol and follow it.",
+		Body: `# Autonomous Run Protocol
+
+Autonomous mode is not permission to be sloppy. It is permission to keep moving
+inside an approved lightweight run brief while recording the important choices
+for later review.
+
+## Active Contract
+
+Work to the active autonomous run brief:
+
+- **Goal**: the single outcome the run is trying to achieve.
+- **Done when**: the checklist that proves the run is complete.
+- **Constraints**: boundaries that must not be crossed.
+- **Review points**: areas where decision capture is especially important.
+
+If a user instruction changes the goal, done criteria, constraints, or review
+points, treat it as a brief revision. Do not silently reinterpret the run.
+
+## Operating Loop
+
+1. **Orient.** Inspect the current code/docs/state needed for the next slice.
+2. **Plan locally.** Keep a short working plan in your own reasoning; do not
+   turn autonomous mode into a heavy planning-mode ceremony.
+3. **Delegate mechanical work.** Use sub-agents for bounded audits, bulk edits,
+   research sweeps, and noisy git plumbing when appropriate.
+4. **Make clean decisions.** For meaningful forks inside the brief, use the
+   decision discipline below, call ` + "`capture_decision`" + `, then continue.
+5. **Implement in small slices.** Keep changes reviewable and reversible.
+6. **Verify at the right tier.** Run focused tests for each slice; broaden the
+   gate when interfaces, persistence, or user-visible behavior changed.
+7. **Fix failures with data.** If a test or bug appears, follow systematic
+   debugging before patching.
+8. **Checkpoint solved units.** Commit solved units with clear messages. Never
+   push or merge unless explicitly authorized.
+9. **Request final review.** When the brief is satisfied, call
+   ` + "`request_autonomous_exit`" + ` to enter decision review. Walk the user through
+   decisions one by one; only after acceptance call ` + "`complete_autonomous_review`" + `.
+
+## Decision Discipline
+
+For meaningful forks, do the design-decision protocol internally before choosing:
+
+- identify the decision point;
+- enumerate real viable options, not strawmen;
+- compare cost, risk, reward, and side effects symmetrically;
+- explicitly flag hacky options and why they are hacks;
+- argue the strongest case for non-chosen options;
+- choose the cleanest option, even if it is more work;
+- record the decision with ` + "`capture_decision`" + `.
+
+The point is to fight the model's bias toward convenient hacks. A decision entry
+that says only "I chose X because it works" is a failure of the protocol.
+
+## When To Continue Without Asking
+
+Autonomy means normal in-scope decisions continue without human approval. Log and
+continue when the choice:
+
+- stays inside the approved brief;
+- is reversible, or hard-but-bounded to reverse;
+- does not alter security, permissions, data-loss behavior, migrations, user
+  data, push/merge state, or destructive operations;
+- has a clean preferred option after honest comparison.
+
+## High Bar For Stopping Mid-Run
+
+Do not stop just because there are two reasonable implementation paths. Stop and
+ask only when the decision crosses a high-risk boundary:
+
+- it is effectively irreversible;
+- if wrong, it would invalidate most downstream work or require a major rewrite;
+- it expands scope beyond the approved brief;
+- it changes security, permission, data-loss, destructive-operation, migration,
+  push/merge, or user-data semantics;
+- you cannot honestly identify a clean preferred option.
+
+## Final Review
+
+` + "`request_autonomous_exit`" + ` starts review; it does not complete the run. During
+review:
+
+1. Present captured decisions in order.
+2. For each decision, explain the choice, the cleanest-option rationale, hack
+   flags, and reversibility.
+3. If the user accepts, move to the next decision.
+4. If the user changes a decision, keep autonomous mode active, revise the work,
+   and capture any new decision created by that revision.
+5. After all decisions are accepted, call ` + "`complete_autonomous_review`" + `.
+
+## Non-Negotiables
+
+- Correctness beats cleanliness; cleanliness beats future cost; convenience does
+  not beat any of them.
+- Do not push or merge without explicit authorization.
+- Do not hide hacks. If an option is hacky, label it.
+- Do not skip verification because the run is autonomous.
+- Do not call ` + "`complete_autonomous_review`" + ` before walking through the captured
+  decisions or confirming there were no decisions to review.
+`,
+	},
+	{
 		Name:        "executing-plans",
 		Description: "Execute an approved plan.md in order, keeping status glyphs current and escalating surprises by tier.",
 		Domain:      DomainCore,

@@ -6,7 +6,7 @@ import (
 )
 
 func TestCoreCatalogComplete(t *testing.T) {
-	want := []string{"compute-before-simulate", "delegate-git-plumbing", "design-decisions", "executing-plans", "planning-mode", "systematic-debugging", "verification-strategy", "worktree-first"}
+	want := []string{"autonomous-run", "compute-before-simulate", "delegate-git-plumbing", "design-decisions", "executing-plans", "planning-mode", "systematic-debugging", "verification-strategy", "worktree-first"}
 	for _, name := range want {
 		p, ok := Get(name)
 		if !ok {
@@ -332,6 +332,43 @@ func TestExecutingPlansDocumentsOptionalAutonomousBridge(t *testing.T) {
 	for _, want := range []string{"Optional Autonomous Bridge", "suggest_autonomous", "source_plan_path", "source_spec_path", "second y/n/d/c approval"} {
 		if !strings.Contains(p.Body, want) {
 			t.Fatalf("executing-plans must document autonomous bridge; missing %q", want)
+		}
+	}
+}
+
+func TestAutonomousRunProtocolLocksDecisionDisciplineAndReview(t *testing.T) {
+	p, ok := Get("autonomous-run")
+	if !ok {
+		t.Fatal("autonomous-run missing")
+	}
+	for _, want := range []string{
+		"approved lightweight run brief",
+		"capture_decision",
+		"design-decision protocol",
+		"explicitly flag hacky options",
+		"High Bar For Stopping Mid-Run",
+		"effectively irreversible",
+		"invalidate most downstream work",
+		"request_autonomous_exit",
+		"complete_autonomous_review",
+		"walking through the captured",
+		"Do not push or merge",
+	} {
+		if !strings.Contains(p.Body, want) {
+			t.Fatalf("autonomous-run protocol missing %q", want)
+		}
+	}
+}
+
+func TestAutonomousRunProtocolDoesNotAskForEveryDecision(t *testing.T) {
+	p, _ := Get("autonomous-run")
+	for _, want := range []string{
+		"Autonomy means normal in-scope decisions continue without human approval",
+		"Log and",
+		"Do not stop just because there are two reasonable implementation paths",
+	} {
+		if !strings.Contains(p.Body, want) {
+			t.Fatalf("autonomous-run protocol must keep the stop threshold high; missing %q", want)
 		}
 	}
 }

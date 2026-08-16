@@ -691,6 +691,8 @@ func profileStateSignal(p agent.Profile) string {
 	switch p.Name {
 	case "plan":
 		return "<planning-mode>\nYou are currently IN PLANNING MODE (a read-only exploration fence is active). You may read the codebase and author the effort's spec.md and plan.md, but write/exec tools on other files are unavailable until the plan is approved. Do NOT call suggest_plan again — you are already planning; proceed to investigate and author the spec. When the plan is ready, call request_plan_approval to hand off to execution; to abandon planning, call plan_exit.\n</planning-mode>"
+	case "autonomous":
+		return "<autonomous-mode>\nYou are currently IN AUTONOMOUS MODE. Work against the approved run brief: pursue the goal, satisfy the done_when items, honor constraints, and pay attention to review_points. For meaningful in-scope forks, use the design-decision protocol, capture the decision, then continue without asking. Stop mid-run only for high-risk boundary cases: effectively irreversible choices, scope expansion, security/permission/data-loss semantics, destructive operations, push/merge/migration/user-data changes, or when you cannot identify a clean preferred option. When the brief is satisfied, request autonomous exit so the user can review captured decisions before leaving this mode.\n</autonomous-mode>"
 	default:
 		return fmt.Sprintf("<active-profile>\nYou are currently in the %q capability profile, which fences off some tools. Tools outside the profile are unavailable this turn.\n</active-profile>", p.Name)
 	}

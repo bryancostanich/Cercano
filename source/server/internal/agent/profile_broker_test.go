@@ -62,6 +62,24 @@ func TestProfileBroker_SwitchToPlanAndBack(t *testing.T) {
 // TestProfileBroker_ActiveIsPerConversation is the regression guard for the bug
 // this keying fixes: one conversation entering planning mode must NOT fence any
 // other attached conversation.
+func TestProfileBroker_SwitchToAutonomous(t *testing.T) {
+	b := NewProfileBroker()
+
+	if err := b.SetActive(conv, "autonomous"); err != nil {
+		t.Fatalf("SetActive(autonomous): %v", err)
+	}
+	if b.ActiveName(conv) != "autonomous" {
+		t.Fatalf("ActiveName = %q, want autonomous", b.ActiveName(conv))
+	}
+	p := b.Active(conv)
+	if !p.Restricts() {
+		t.Fatal("autonomous profile must signal as an active profile")
+	}
+	if !p.Allows(llm.PermX, "Bash") || !p.Allows(llm.PermW, "Write") || !p.Allows(llm.PermR, "Read") {
+		t.Fatal("autonomous profile should not fence normal tool tiers")
+	}
+}
+
 func TestProfileBroker_ActiveIsPerConversation(t *testing.T) {
 	b := NewProfileBroker()
 	const (
@@ -129,7 +147,7 @@ func TestProfileBroker_NamesSortedExcludesDefault(t *testing.T) {
 	b := NewProfileBroker()
 	b.Register(Profile{Name: "brainstorm", AllowedTiers: map[llm.Permission]bool{llm.PermR: true}})
 	got := b.Names()
-	want := []string{"brainstorm", "plan"}
+	want := []string{"autonomous", "brainstorm", "plan"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Names = %v, want %v", got, want)
 	}

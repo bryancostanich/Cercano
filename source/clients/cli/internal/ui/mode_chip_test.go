@@ -24,8 +24,11 @@ func TestModeChip_MergesPlanningAndPermission(t *testing.T) {
 		{"permission only", "bypass", "", "mode: bypass"},
 		{"permission only permissive", "permissive", "", "mode: permissive"},
 		{"planning only", "", "plan", "mode: planning"},
+		{"autonomous only", "", "autonomous", "mode: autonomous"},
 		{"both merged", "bypass", "plan", "mode: planning | bypass"},
+		{"autonomous merged", "permissive", "autonomous", "mode: autonomous | permissive"},
 		{"both merged strict", "strict", "plan", "mode: planning | strict"},
+		{"autonomous merged strict", "strict", "autonomous", "mode: autonomous | strict"},
 		{"default profile does not add planning", "permissive", "", "mode: permissive"},
 	}
 
@@ -69,14 +72,17 @@ func TestModeChip_PlanningFirstWithPipe(t *testing.T) {
 	}
 }
 
-// TestNormalizeProfile collapses the unrestricted posture so the chip's planning
-// check stays a plain equality test.
+// TestNormalizeProfile collapses the unrestricted posture so the chip only
+// receives named non-default profiles.
 func TestNormalizeProfile(t *testing.T) {
 	if got := normalizeProfile("default"); got != "" {
 		t.Fatalf("normalizeProfile(default) = %q, want empty", got)
 	}
 	if got := normalizeProfile("plan"); got != "plan" {
 		t.Fatalf("normalizeProfile(plan) = %q, want plan", got)
+	}
+	if got := normalizeProfile("autonomous"); got != "autonomous" {
+		t.Fatalf("normalizeProfile(autonomous) = %q, want autonomous", got)
 	}
 	if got := normalizeProfile(""); got != "" {
 		t.Fatalf("normalizeProfile(\"\") = %q, want empty", got)

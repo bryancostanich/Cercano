@@ -5222,27 +5222,33 @@ func (m Model) renderConnStateChip() string {
 // renderPermissionModeChip renders the session-mode chip for the status bar.
 // It carries two orthogonal axes, pipe-separated when both are present:
 //
-//		mode: planning | bypass
+//		mode: autonomous | bypass
 //
-//	  - The capability profile ("planning") shows only when the read-only
-//	    planning fence is active for this conversation. It is colored with the
-//	    calm accent — planning is a posture, not a danger level.
+//	  - The capability profile ("planning" or "autonomous") shows only when a
+//	    non-default profile is active for this conversation. It is colored with
+//	    the calm accent — the profile is a posture, not a danger level.
 //	  - The permission mode is colored by how safe it is: strict → green (most
 //	    gated), permissive → amber, bypass → red (least gated / unsafe).
 //
-// Planning is rendered first because it is the more consequential state to
+// The profile is rendered first because it is the more consequential state to
 // notice. Returns "" only when neither axis is known yet (the startup fetch
 // hasn't landed and no profile is active) so the bar doesn't show a misleading
 // default.
 func (m Model) renderPermissionModeChip() string {
-	planning := m.sessionProfile == "plan"
-	if m.permissionMode == "" && !planning {
+	profileLabel := ""
+	switch m.sessionProfile {
+	case "plan":
+		profileLabel = "planning"
+	case "autonomous":
+		profileLabel = "autonomous"
+	}
+	if m.permissionMode == "" && profileLabel == "" {
 		return ""
 	}
 
 	var val string
-	if planning {
-		val = m.styles.Accent.Render("planning")
+	if profileLabel != "" {
+		val = m.styles.Accent.Render(profileLabel)
 	}
 	if m.permissionMode != "" {
 		var permStyle lipgloss.Style
@@ -5255,7 +5261,7 @@ func (m Model) renderPermissionModeChip() string {
 			permStyle = m.styles.Primary
 		}
 		perm := permStyle.Render(m.permissionMode)
-		if planning {
+		if profileLabel != "" {
 			val += m.styles.Muted.Render(" | ") + perm
 		} else {
 			val = perm

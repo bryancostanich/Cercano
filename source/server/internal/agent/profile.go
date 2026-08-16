@@ -119,3 +119,20 @@ func PlanProfile() Profile {
 		ExtraCaps:    extra,
 	}
 }
+
+// AutonomousProfile is the live-work posture for autonomous mode. It does not
+// remove any permission tier by itself: the strict/permissive/bypass permission
+// mode remains the confirm-aggressiveness dial, while autonomous mode supplies
+// behavioral shaping (approved brief, decision logging, final review) through
+// the profile signal. Listing every known tier makes the profile "restricting"
+// for signaling/filtering purposes without actually fencing normal tools.
+func AutonomousProfile() Profile {
+	return Profile{
+		Name: "autonomous",
+		AllowedTiers: map[llm.Permission]bool{
+			llm.PermR: true,
+			llm.PermW: true,
+			llm.PermX: true,
+		},
+	}
+}

@@ -42,8 +42,8 @@ func TestToolEntry_DaylightHeaderAndArgsUseReadableThemeColors(t *testing.T) {
 	if strings.Contains(out, "\x1b[2m") {
 		t.Fatalf("tool header should not rely on terminal faint mode in daylight, got %q", out)
 	}
-	if !strings.Contains(out, "38;2;90;58;10") {
-		t.Fatalf("tool marker/name should use daylight primary (#5A3A0A), got %q", out)
+	if !strings.Contains(out, "38;2;59;48;32") {
+		t.Fatalf("tool marker/name should use daylight primary (#3B3020), got %q", out)
 	}
 	if !strings.Contains(out, "38;2;111;106;85") {
 		t.Fatalf("tool args/status should use daylight muted (#6F6A55), got %q", out)

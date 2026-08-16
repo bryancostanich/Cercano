@@ -63,8 +63,8 @@ func TestRenderToolGroup_DaylightSummaryLabelUsesReadablePrimary(t *testing.T) {
 		makeCompletedTool("Edit", 7*time.Millisecond),
 	}
 	out := renderToolGroup(entries, 100, styles, md, defaultOpts())
-	if !strings.Contains(out, "38;2;90;58;10") {
-		t.Fatalf("daylight tool group summary marker/count should use primary text (#5A3A0A), got %q", out)
+	if !strings.Contains(out, "38;2;59;48;32") {
+		t.Fatalf("daylight tool group summary marker/count should use primary text (#3B3020), got %q", out)
 	}
 	if strings.Contains(out, "\x1b[2m▸") || strings.Contains(out, "\x1b[2m2 tool calls") {
 		t.Fatalf("tool group summary marker/count should not be faint in daylight, got %q", out)

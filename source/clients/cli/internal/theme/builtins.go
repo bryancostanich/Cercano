@@ -43,9 +43,9 @@ func synthwavePalette() Palette {
 func daylightPalette() Palette {
 	return Palette{
 		BgDeep: hc("#FBF3E0"), Surface: hc("#F1E6CC"), BorderDim: hc("#D8C7A0"), Border: hc("#B79A5E"),
-		Primary: hc("#5A3A0A"), Bright: hc("#7A4E0A"), Dim: hc("#C9B68C"), Accent: hc("#1E7A3C"),
-		Info: hc("#1763A0"), Muted: hc("#6F6A55"), Success: hc("#2E7D32"), Warn: hc("#8A5A00"), Error: hc("#B23A3A"),
-		SelectionBg: hc("#58829E"), CodeBlockBg: hc("#1A1A1A"), BypassText: hc("#FBF3E0"), ActivityBase: hc("#1E7A3C"), ActivityPeak: hc("#104321"), WordmarkPeak: hc("#7A4E0A"), SpinnerBase: hc("#5A3A0A"), SpinnerPeak: hc("#7A4E0A"), MeterLabelOnFill: hc("#5A3A0A"), SelectionCaret: hc("#8A00C2"),
+		Primary: hc("#3B3020"), Bright: hc("#5B3FA3"), Dim: hc("#C9B68C"), Accent: hc("#1E7A3C"),
+		Info: hc("#1763A0"), Muted: hc("#6F6A55"), Success: hc("#2E7D32"), Warn: hc("#9A2D00"), Error: hc("#B23A3A"),
+		SelectionBg: hc("#58829E"), CodeBlockBg: hc("#1A1A1A"), BypassText: hc("#FBF3E0"), ActivityBase: hc("#1E7A3C"), ActivityPeak: hc("#104321"), WordmarkPeak: hc("#5B3FA3"), SpinnerBase: hc("#3B3020"), SpinnerPeak: hc("#5B3FA3"), MeterLabelOnFill: hc("#3B3020"), SelectionCaret: hc("#8A00C2"),
 		BufferLink: hc("#1763A0"), BufferCode: hc("#6A4BA3"), BufferLime: hc("#1E7A3C"), BufferError: hc("#B23A3A"), BufferUserBg: hc("#E6D7B0"),
 	}
 }

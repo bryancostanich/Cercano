@@ -2,6 +2,7 @@ package theme
 
 import (
 	"image/color"
+	"math"
 	"testing"
 )
 
@@ -63,6 +64,56 @@ func TestBuiltinThemeTextColorsMeetContrastBaseline(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestDaylightTextTokensAvoidSaturatedYellowHue(t *testing.T) {
+	daylight := paletteByNameForColorTest("daylight")
+	tokens := []struct {
+		name  string
+		color color.Color
+	}{
+		{name: "primary", color: daylight.Primary},
+		{name: "bright", color: daylight.Bright},
+		{name: "warn", color: daylight.Warn},
+		{name: "wordmark_peak", color: daylight.WordmarkPeak},
+		{name: "spinner_peak", color: daylight.SpinnerPeak},
+		{name: "meter_label_on_fill", color: daylight.MeterLabelOnFill},
+	}
+	for _, token := range tokens {
+		hue, saturation := hueSaturation(token.color)
+		if hue >= 30 && hue <= 65 && saturation >= 0.5 {
+			t.Fatalf("daylight %s is saturated yellow/orange (hue %.1f sat %.2f): %s", token.name, hue, saturation, Hex(token.color))
+		}
+	}
+}
+
+func hueSaturation(c color.Color) (hue, saturation float64) {
+	rgb := RGB(c)
+	r := float64(rgb[0]) / 255.0
+	g := float64(rgb[1]) / 255.0
+	b := float64(rgb[2]) / 255.0
+	maxc := math.Max(r, math.Max(g, b))
+	minc := math.Min(r, math.Min(g, b))
+	delta := maxc - minc
+	if maxc == 0 {
+		return 0, 0
+	}
+	saturation = delta / maxc
+	if delta == 0 {
+		return 0, saturation
+	}
+	switch maxc {
+	case r:
+		hue = 60 * math.Mod((g-b)/delta, 6)
+	case g:
+		hue = 60 * ((b-r)/delta + 2)
+	case b:
+		hue = 60 * ((r-g)/delta + 4)
+	}
+	if hue < 0 {
+		hue += 360
+	}
+	return hue, saturation
 }
 
 func TestActivityAndSpinnerColorsUsePaletteTokens(t *testing.T) {

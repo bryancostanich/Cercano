@@ -29,6 +29,60 @@ func seedTaskPaneTree(m *Model) {
 	})
 }
 
+func TestTaskPaneParentStatusRollsUpWhenChildrenDone(t *testing.T) {
+	m := New(nil, false)
+	m.applyTaskChange("added", &agentclient.TaskNode{
+		ID:     "phase-1",
+		Title:  "Phase 1",
+		Status: "pending",
+		Children: []agentclient.TaskNode{
+			{ID: "task-1", Title: "Done one", Status: "done", ParentID: "phase-1"},
+			{ID: "task-2", Title: "Done two", Status: "done", ParentID: "phase-1"},
+		},
+	})
+	lines := strings.Split(ansi.Strip(strings.Join(m.taskPaneLines(40), "\n")), "\n")
+	if len(lines) == 0 || !strings.HasPrefix(lines[0], "✓ Phase 1") {
+		t.Fatalf("parent phase should render checked when all children are done, got %#v", lines)
+	}
+}
+
+func TestTaskPaneParentStatusDoesNotRollUpWhenChildrenPending(t *testing.T) {
+	m := New(nil, false)
+	m.applyTaskChange("added", &agentclient.TaskNode{
+		ID:     "phase-1",
+		Title:  "Phase 1",
+		Status: "pending",
+		Children: []agentclient.TaskNode{
+			{ID: "task-1", Title: "Done one", Status: "done", ParentID: "phase-1"},
+			{ID: "task-2", Title: "Still pending", Status: "pending", ParentID: "phase-1"},
+		},
+	})
+	lines := strings.Split(ansi.Strip(strings.Join(m.taskPaneLines(40), "\n")), "\n")
+	if len(lines) == 0 || !strings.HasPrefix(lines[0], "☐ Phase 1") {
+		t.Fatalf("parent phase should stay unchecked until all children are done, got %#v", lines)
+	}
+}
+
+func TestTaskPaneParentStatusRollsUpThroughNestedChildren(t *testing.T) {
+	m := New(nil, false)
+	m.applyTaskChange("added", &agentclient.TaskNode{
+		ID:     "phase-1",
+		Title:  "Phase 1",
+		Status: "pending",
+		Children: []agentclient.TaskNode{{
+			ID:       "task-1",
+			Title:    "Parent task",
+			Status:   "pending",
+			ParentID: "phase-1",
+			Children: []agentclient.TaskNode{{ID: "subtask-1", Title: "Subtask", Status: "done", ParentID: "task-1"}},
+		}},
+	})
+	lines := strings.Split(ansi.Strip(strings.Join(m.taskPaneLines(40), "\n")), "\n")
+	if len(lines) < 2 || !strings.HasPrefix(lines[0], "✓ Phase 1") || !strings.HasPrefix(lines[1], "  ✓ Parent task") {
+		t.Fatalf("parent statuses should roll up through nested done children, got %#v", lines)
+	}
+}
+
 func TestTaskPaneHiddenUntilTasksExist(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})

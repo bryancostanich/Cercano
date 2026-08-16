@@ -391,11 +391,12 @@ func (m Model) appendTaskPaneTaskLines(lines *[]string, seen map[string]bool, id
 	}
 	seen[id] = true
 	indent := strings.Repeat("  ", depth)
-	glyph := taskPaneStatusGlyph(task.Status)
+	status := m.taskPaneEffectiveStatus(id, nil)
+	glyph := taskPaneStatusGlyph(status)
 	firstPrefix := indent + glyph + " "
 	wrapPrefix := indent + "  "
 	style := lipgloss.NewStyle()
-	switch task.Status {
+	switch status {
 	case "done":
 		style = m.styles.Muted.Strikethrough(true)
 	case "in_progress":
@@ -411,6 +412,49 @@ func (m Model) appendTaskPaneTaskLines(lines *[]string, seen map[string]bool, id
 	for _, childID := range task.Children {
 		m.appendTaskPaneTaskLines(lines, seen, childID, depth+1, width)
 	}
+}
+
+func (m Model) taskPaneEffectiveStatus(id string, visiting map[string]bool) string {
+	task, ok := m.taskPane.Tasks[id]
+	if !ok {
+		return "pending"
+	}
+	if len(task.Children) == 0 {
+		if task.Status == "" {
+			return "pending"
+		}
+		return task.Status
+	}
+	if visiting == nil {
+		visiting = make(map[string]bool)
+	}
+	if visiting[id] {
+		if task.Status == "" {
+			return "pending"
+		}
+		return task.Status
+	}
+	visiting[id] = true
+	defer delete(visiting, id)
+
+	switch task.Status {
+	case "done", "in_progress", "blocked":
+		return task.Status
+	}
+	allDone := true
+	for _, childID := range task.Children {
+		if m.taskPaneEffectiveStatus(childID, visiting) != "done" {
+			allDone = false
+			break
+		}
+	}
+	if allDone && len(task.Children) > 0 {
+		return "done"
+	}
+	if task.Status == "" {
+		return "pending"
+	}
+	return task.Status
 }
 
 func wrapTaskPaneTaskText(firstPrefix, wrapPrefix, title string, width int) []string {

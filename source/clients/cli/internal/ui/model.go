@@ -3713,8 +3713,12 @@ func (m Model) renderConfirmPrompt(p *pendingToolCall) string {
 	}
 
 	lines := []string{head + m.styles.AgentProse.Render(confirmPromptTitle(p))}
-	for _, detail := range confirmPromptDetails(p) {
-		lines = append(lines, "  "+m.styles.AgentProse.Render(detail))
+	if p.Name == "suggest_autonomous" {
+		lines = append(lines, m.renderAutonomousBriefConfirmDetails(p)...)
+	} else {
+		for _, detail := range confirmPromptDetails(p) {
+			lines = append(lines, "  "+m.styles.AgentProse.Render(detail))
+		}
 	}
 	lines = append(lines, "  "+m.confirmPromptHints(p))
 	return strings.Join(lines, "\n")
@@ -3785,6 +3789,63 @@ func toolSpecificConfirmSummary(p *pendingToolCall) string {
 		return summary
 	}
 	return ""
+}
+
+func (m Model) renderAutonomousBriefConfirmDetails(p *pendingToolCall) []string {
+	obj, ok := decodeArgObject(p.Args)
+	if !ok {
+		return nil
+	}
+	bodyWidth := m.width - 6
+	if bodyWidth < 40 {
+		bodyWidth = 80
+	}
+	lines := make([]string, 0, 16)
+	addTextSection := func(heading, text string) {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return
+		}
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, "  "+m.styles.Accent.Bold(true).Render(heading))
+		wrapped := strings.Split(ansi.Wrap(oneLine(text), bodyWidth, ""), "\n")
+		for _, line := range wrapped {
+			if strings.TrimSpace(line) != "" {
+				lines = append(lines, "    "+m.styles.AgentProse.Render(line))
+			}
+		}
+	}
+	addListSection := func(heading string, vals []string) {
+		vals = compactStringList(vals)
+		if len(vals) == 0 {
+			return
+		}
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, "  "+m.styles.Accent.Bold(true).Render(heading))
+		for _, val := range vals {
+			wrapped := strings.Split(ansi.Wrap(oneLine(val), bodyWidth-2, ""), "\n")
+			for i, line := range wrapped {
+				if strings.TrimSpace(line) == "" {
+					continue
+				}
+				prefix := "    • "
+				if i > 0 {
+					prefix = "      "
+				}
+				lines = append(lines, prefix+m.styles.AgentProse.Render(line))
+			}
+		}
+	}
+	addTextSection("Why", stringArg(obj, "reason"))
+	addTextSection("Goal", stringArg(obj, "goal"))
+	addListSection("Done when", stringSliceArg(obj["done_when"]))
+	addListSection("Constraints", stringSliceArg(obj["constraints"]))
+	addListSection("Review points", stringSliceArg(obj["review_points"]))
+	return lines
 }
 
 func confirmPromptDetails(p *pendingToolCall) []string {
@@ -3907,9 +3968,13 @@ func boolArg(obj map[string]any, key string) bool {
 }
 
 func summarizeStringSlice(v any) string {
+	return strings.Join(stringSliceArg(v), "; ")
+}
+
+func stringSliceArg(v any) []string {
 	items, ok := v.([]any)
 	if !ok || len(items) == 0 {
-		return ""
+		return nil
 	}
 	parts := make([]string, 0, len(items))
 	for _, item := range items {
@@ -3917,7 +3982,17 @@ func summarizeStringSlice(v any) string {
 			parts = append(parts, s)
 		}
 	}
-	return strings.Join(parts, "; ")
+	return compactStringList(parts)
+}
+
+func compactStringList(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func summarizeToolList(v any) string {

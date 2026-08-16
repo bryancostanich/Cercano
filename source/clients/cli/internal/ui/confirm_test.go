@@ -106,16 +106,34 @@ func TestRenderConfirmPrompt_SuggestAutonomous_AsksToStartWithBrief(t *testing.T
 	m := minimalModel()
 	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
 		Name:       "suggest_autonomous",
-		Args:       `{"reason":"plan accepted","goal":"implement autonomous mode","done_when":["profile active","tests pass"],"constraints":["do not push"]}`,
+		Args:       `{"reason":"plan accepted","goal":"implement autonomous mode","done_when":["profile active","tests pass"],"constraints":["do not push"],"review_points":["storage choices"]}`,
 		Permission: "X",
 	}))
-	for _, want := range []string{"Start autonomous mode with this run brief?", "Why: plan accepted", "Goal: implement autonomous mode", "Done when: profile active; tests pass"} {
+	for _, want := range []string{"Start autonomous mode with this run brief?", "Why\n    plan accepted", "Goal\n    implement autonomous mode", "Done when\n    • profile active\n    • tests pass", "Constraints\n    • do not push", "Review points\n    • storage choices"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("suggest_autonomous prompt missing %q: %q", want, s)
 		}
 	}
+	if strings.Contains(s, "Why:") || strings.Contains(s, "Goal:") || strings.Contains(s, "Done when:") {
+		t.Errorf("suggest_autonomous brief should render block headings instead of inline labels: %q", s)
+	}
 	if strings.Contains(s, "DESTRUCTIVE") || strings.Contains(s, "⚠") {
 		t.Errorf("suggest_autonomous is X-tier but destroys nothing; must not be DESTRUCTIVE/⚠: %q", s)
+	}
+}
+
+func TestRenderConfirmPrompt_SuggestAutonomous_WrapsBriefBody(t *testing.T) {
+	m := minimalModel()
+	m.width = 46
+	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
+		Name:       "suggest_autonomous",
+		Args:       `{"reason":"multi step renderer migration with bounded scope","goal":"complete the globe renderer integration so mission startup uses globe metadata and rendering resources consistently","done_when":["mission startup loads globe metadata and initializes renderer resources correctly"]}`,
+		Permission: "X",
+	}))
+	for _, want := range []string{"Goal\n    complete the globe renderer integration", "    so mission startup uses globe metadata", "    and rendering resources consistently", "Done when\n    • mission startup loads globe metadata", "      and initializes renderer resources"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("wrapped suggest_autonomous prompt missing %q: %q", want, s)
+		}
 	}
 }
 

@@ -5,16 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"cercano/source/server/internal/capabilities"
+	"cercano/source/server/internal/conversation"
 )
-
-type autonomousBrief struct {
-	Goal         string   `json:"goal"`
-	DoneWhen     []string `json:"done_when"`
-	Constraints  []string `json:"constraints"`
-	ReviewPoints []string `json:"review_points"`
-}
 
 type suggestAutonomousArgs struct {
 	Reason         string   `json:"reason"`
@@ -64,6 +59,49 @@ func (suggestAutonomousCap) Execute(ctx context.Context, call *capabilities.Call
 	if strings.TrimSpace(a.Goal) == "" {
 		return nil, fmt.Errorf("suggest_autonomous: goal is required")
 	}
+	brief := conversation.AutonomyBrief{
+		Goal:         strings.TrimSpace(a.Goal),
+		DoneWhen:     compactStrings(a.DoneWhen),
+		Constraints:  compactStrings(a.Constraints),
+		ReviewPoints: compactStrings(a.ReviewPoints),
+	}
+	if call.Svc.Conversations != nil && strings.TrimSpace(call.ConversationID) != "" {
+		briefJSON, err := json.Marshal(brief)
+		if err != nil {
+			return nil, fmt.Errorf("suggest_autonomous: marshal brief: %w", err)
+		}
+		reason := strings.TrimSpace(a.Reason)
+		if reason == "" {
+			reason = "initial autonomous brief"
+		}
+		revsJSON, err := json.Marshal([]conversation.AutonomyBriefRevision{{
+			Number:    1,
+			Actor:     "assistant",
+			Reason:    reason,
+			Timestamp: time.Now(),
+			Brief:     brief,
+		}})
+		if err != nil {
+			return nil, fmt.Errorf("suggest_autonomous: marshal brief revisions: %w", err)
+		}
+		sourceKind := "direct_user_request"
+		if strings.TrimSpace(a.SourcePlanPath) != "" || strings.TrimSpace(a.SourceSpecPath) != "" {
+			sourceKind = "accepted_plan"
+		}
+		if err := call.Svc.Conversations.SaveAutonomyRun(ctx, conversation.AutonomyRun{
+			ConversationID: call.ConversationID,
+			State:          "running",
+			SourceKind:     sourceKind,
+			SourcePlanPath: strings.TrimSpace(a.SourcePlanPath),
+			SourceSpecPath: strings.TrimSpace(a.SourceSpecPath),
+			BriefJSON:      string(briefJSON),
+			RevisionsJSON:  string(revsJSON),
+			DecisionsJSON:  "[]",
+			ReviewJSON:     "{}",
+		}); err != nil {
+			return nil, fmt.Errorf("suggest_autonomous: save autonomy ledger: %w", err)
+		}
+	}
 	if call.Svc.EnterProfile == nil {
 		return nil, fmt.Errorf("suggest_autonomous: autonomous mode is not available (no profile broker wired)")
 	}
@@ -102,6 +140,9 @@ func (autoExitCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 		if err := json.Unmarshal(call.Args, &a); err != nil {
 			return nil, fmt.Errorf("auto_exit: parse args: %w", err)
 		}
+	}
+	if err := updateAutonomyRunState(ctx, call, "abandoned"); err != nil {
+		return nil, fmt.Errorf("auto_exit: update autonomy ledger: %w", err)
 	}
 	if call.Svc.EnterProfile == nil {
 		return nil, fmt.Errorf("auto_exit: autonomous mode is not available (no profile broker wired)")
@@ -147,6 +188,9 @@ func (requestAutonomousExitCap) Execute(ctx context.Context, call *capabilities.
 			return nil, fmt.Errorf("request_autonomous_exit: parse args: %w", err)
 		}
 	}
+	if err := updateAutonomyRunState(ctx, call, "completed"); err != nil {
+		return nil, fmt.Errorf("request_autonomous_exit: update autonomy ledger: %w", err)
+	}
 	if call.Svc.EnterProfile == nil {
 		return nil, fmt.Errorf("request_autonomous_exit: autonomous mode is not available (no profile broker wired)")
 	}
@@ -161,4 +205,29 @@ func (requestAutonomousExitCap) Execute(ctx context.Context, call *capabilities.
 		parts = append(parts, "Verification: "+v)
 	}
 	return &capabilities.Result{Type: capabilities.ResultText, Text: strings.Join(parts, "\n")}, nil
+}
+
+func compactStrings(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func updateAutonomyRunState(ctx context.Context, call *capabilities.Call, state string) error {
+	if call.Svc.Conversations == nil || strings.TrimSpace(call.ConversationID) == "" {
+		return nil
+	}
+	run, err := call.Svc.Conversations.GetAutonomyRun(ctx, call.ConversationID)
+	if err != nil {
+		// Exiting autonomous mode should remain possible even if the run predates
+		// the ledger or the ledger was unavailable in this execution environment.
+		return nil
+	}
+	run.State = state
+	run.UpdatedAt = time.Now()
+	return call.Svc.Conversations.SaveAutonomyRun(ctx, run)
 }

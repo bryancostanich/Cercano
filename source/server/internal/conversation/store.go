@@ -73,6 +73,42 @@ type Turn struct {
 	CreatedAt      time.Time
 }
 
+// AutonomyBrief is the lightweight approved contract for autonomous mode. It is
+// deliberately smaller than a plan: enough goal/boundary structure for the agent
+// to work hands-off, not another planning document.
+type AutonomyBrief struct {
+	Goal         string   `json:"goal"`
+	DoneWhen     []string `json:"done_when,omitempty"`
+	Constraints  []string `json:"constraints,omitempty"`
+	ReviewPoints []string `json:"review_points,omitempty"`
+}
+
+// AutonomyBriefRevision preserves each approved brief change so later decision
+// review can answer what goal/boundaries were active at the time.
+type AutonomyBriefRevision struct {
+	Number    int           `json:"number"`
+	Actor     string        `json:"actor"`
+	Reason    string        `json:"reason"`
+	Timestamp time.Time     `json:"timestamp"`
+	Brief     AutonomyBrief `json:"brief"`
+}
+
+// AutonomyRun is the durable per-conversation ledger for autonomous mode. JSON
+// fields stay opaque to the store until richer review APIs need normalization.
+type AutonomyRun struct {
+	ConversationID string
+	State          string
+	SourceKind     string
+	SourcePlanPath string
+	SourceSpecPath string
+	BriefJSON      string
+	RevisionsJSON  string
+	DecisionsJSON  string
+	ReviewJSON     string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 // Compaction is the persisted derived compaction layer for a conversation.
 // Summaries are opaque JSON here; the compactor package owns their structure.
 type Compaction struct {
@@ -152,6 +188,12 @@ type Store interface {
 	GetCompaction(ctx context.Context, conversationID string) (Compaction, error)
 	// SaveCompaction upserts the derived compaction state.
 	SaveCompaction(ctx context.Context, c Compaction) error
+
+	// SaveAutonomyRun upserts the per-conversation autonomous run ledger.
+	SaveAutonomyRun(ctx context.Context, r AutonomyRun) error
+	// GetAutonomyRun returns the autonomous run ledger for a conversation, or
+	// sql.ErrNoRows when no autonomous run has been created for it.
+	GetAutonomyRun(ctx context.Context, conversationID string) (AutonomyRun, error)
 
 	// DeleteTurns removes the named turns from a conversation. Unknown ids are
 	// ignored (idempotent); other conversations are never affected.

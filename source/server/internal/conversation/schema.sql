@@ -65,3 +65,22 @@ CREATE TABLE IF NOT EXISTS conversation_compaction (
     compacted_tokens  INTEGER NOT NULL DEFAULT 0,
     updated_at        INTEGER NOT NULL DEFAULT 0
 );
+
+-- autonomy_runs: one lightweight autonomous-run ledger per conversation. The
+-- profile remains conversation-scoped; this table stores the durable contract
+-- and review trail for that profile without introducing a separate job system.
+-- Briefs, revisions, decisions, and review state are JSON so V1 stays compact;
+-- the table boundary leaves room to normalize later if the review UI needs it.
+CREATE TABLE IF NOT EXISTS autonomy_runs (
+    conversation_id   TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+    state             TEXT NOT NULL DEFAULT 'proposed',
+    source_kind       TEXT NOT NULL DEFAULT '',
+    source_plan_path  TEXT NOT NULL DEFAULT '',
+    source_spec_path  TEXT NOT NULL DEFAULT '',
+    brief_json        TEXT NOT NULL DEFAULT '',
+    revisions_json    TEXT NOT NULL DEFAULT '',
+    decisions_json    TEXT NOT NULL DEFAULT '',
+    review_json       TEXT NOT NULL DEFAULT '',
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL
+);

@@ -39,6 +39,7 @@ func MarkdownStyle(p Palette) ansi.StyleConfig {
 	sc.Strong.Color = strp(Hex(p.Bright))
 	sc.Strong.Bold = boolp(true)
 	sc.Emph.Italic = boolp(true)
+	sc.Emph.Color = strp(Hex(p.Primary))
 
 	// Inline code uses the buffer code color — high enough contrast on the
 	// charcoal background, and hue-distinct from both the amber prose and the

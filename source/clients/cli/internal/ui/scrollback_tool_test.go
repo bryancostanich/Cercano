@@ -45,8 +45,8 @@ func TestToolEntry_DaylightHeaderAndArgsUseReadableThemeColors(t *testing.T) {
 	if !strings.Contains(out, "38;2;90;58;10") {
 		t.Fatalf("tool marker/name should use daylight primary (#5A3A0A), got %q", out)
 	}
-	if !strings.Contains(out, "38;2;138;122;85") {
-		t.Fatalf("tool args/status should use daylight muted (#8A7A55), got %q", out)
+	if !strings.Contains(out, "38;2;111;106;85") {
+		t.Fatalf("tool args/status should use daylight muted (#6F6A55), got %q", out)
 	}
 }
 

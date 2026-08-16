@@ -1,6 +1,9 @@
 package theme
 
-import "testing"
+import (
+	"image/color"
+	"testing"
+)
 
 func TestSelectionBackgroundSGRUsesPaletteToken(t *testing.T) {
 	p := Cracker()
@@ -29,6 +32,36 @@ func paletteByNameForColorTest(name string) Palette {
 		}
 	}
 	return Cracker()
+}
+
+func TestBuiltinThemeTextColorsMeetContrastBaseline(t *testing.T) {
+	type role struct {
+		name        string
+		color       func(Palette) color.Color
+		minContrast float64
+	}
+	roles := []role{
+		{name: "primary", color: func(p Palette) color.Color { return p.Primary }, minContrast: 4.5},
+		{name: "bright", color: func(p Palette) color.Color { return p.Bright }, minContrast: 4.5},
+		{name: "accent", color: func(p Palette) color.Color { return p.Accent }, minContrast: 4.5},
+		{name: "info", color: func(p Palette) color.Color { return p.Info }, minContrast: 4.5},
+		{name: "success", color: func(p Palette) color.Color { return p.Success }, minContrast: 4.5},
+		{name: "warn", color: func(p Palette) color.Color { return p.Warn }, minContrast: 4.5},
+		{name: "error", color: func(p Palette) color.Color { return p.Error }, minContrast: 4.5},
+		{name: "buffer_link", color: func(p Palette) color.Color { return p.BufferLink }, minContrast: 4.5},
+		{name: "buffer_code", color: func(p Palette) color.Color { return p.BufferCode }, minContrast: 4.5},
+		{name: "buffer_lime", color: func(p Palette) color.Color { return p.BufferLime }, minContrast: 4.5},
+		{name: "buffer_error", color: func(p Palette) color.Color { return p.BufferError }, minContrast: 4.5},
+		{name: "muted", color: func(p Palette) color.Color { return p.Muted }, minContrast: 3.0},
+	}
+	for _, builtin := range BuiltinThemes() {
+		for _, r := range roles {
+			got := contrastRatio(r.color(builtin.Palette), builtin.Palette.BgDeep)
+			if got < r.minContrast {
+				t.Fatalf("%s %s contrast on BgDeep = %.2f, want >= %.2f", builtin.Name, r.name, got, r.minContrast)
+			}
+		}
+	}
 }
 
 func TestActivityAndSpinnerColorsUsePaletteTokens(t *testing.T) {

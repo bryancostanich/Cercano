@@ -10,6 +10,9 @@ func TestMarkdownStyleUsesPaletteColors(t *testing.T) {
 	if sc.Code.Color == nil || *sc.Code.Color != "#b7a6e0" {
 		t.Fatalf("Code.Color = %v, want #b7a6e0", sc.Code.Color)
 	}
+	if sc.Emph.Color == nil || *sc.Emph.Color != "#ea8212" {
+		t.Fatalf("Emph.Color = %v, want #ea8212", sc.Emph.Color)
+	}
 	if sc.CodeBlock.BackgroundColor == nil || *sc.CodeBlock.BackgroundColor != "#1a1a1a" {
 		t.Fatalf("CodeBlock.BackgroundColor = %v, want #1a1a1a", sc.CodeBlock.BackgroundColor)
 	}

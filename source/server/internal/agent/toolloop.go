@@ -157,13 +157,17 @@ type ToolLoopInput struct {
 	MaxTokensPerTurn int
 
 	// ContextWindow is the resolved model's input context size in tokens. When
-	// >0, RunToolLoop runs a cheap pre-flight size estimate before the first
-	// provider call and fails fast with a classified llm.ErrContextOverflow if
-	// the estimated prompt already exceeds the window (see preflight.go). 0
-	// disables the check — the caller could not resolve a window, so the
-	// provider's own overflow error stays the only backstop. Set by dispatch
-	// (sub-agents pin small local windows); the interactive loop leaves it 0.
+	// >0, RunToolLoop budgets the exact provider request before each model call
+	// and fails fast with a classified llm.ErrContextOverflow if even the
+	// minimally trimmed request cannot fit. 0 disables the check — the caller
+	// could not resolve a window, so the provider's own overflow error stays the
+	// only backstop.
 	ContextWindow int
+
+	// TightContextFallback marks a retry into a smaller context after the primary
+	// route overflowed. The loop may use more conservative catalog/history policy
+	// in this mode, but it must still intersect with the active permission fence.
+	TightContextFallback bool
 
 	// Temperature, when non-nil, is forwarded to the provider for every model
 	// turn. A pointer to 0 requests greedy decoding; sub-agent dispatch uses
@@ -414,11 +418,10 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	// profile restricts, forbidden tools are filtered out of the catalog so the
 	// model never reaches for a tool it can't have. Enforcement is separate,
 	// below at the gate — filtering is ergonomics, not the fence.
-	var catalog []llm.Tool
-	if in.Profile.Restricts() {
-		catalog = agenttools.BuildToolCatalogFiltered(in.Registry, in.Profile.Allows)
-	} else {
-		catalog = agenttools.BuildToolCatalog(in.Registry)
+	hydratedTools := map[string]bool{}
+	catalog := buildCompactToolCatalog(in.Registry, in.Profile, in.TightContextFallback, hydratedTools)
+	if in.TightContextFallback {
+		log.Printf("[tool-loop] compact fallback catalog: conv=%s provider=%s model=%s tools=%d names=%v", in.ConversationID, in.Provider.Name(), in.Model, len(catalog), toolNamesForLog(catalog))
 	}
 
 	// calledTools accumulates the tool names invoked across every iteration, in
@@ -472,13 +475,19 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	}
 
 	for iter := 0; unlimitedIters || iter < maxIters; iter++ {
+		catalog = buildCompactToolCatalog(in.Registry, in.Profile, in.TightContextFallback, hydratedTools)
+		effectiveSystem := in.System
+		if in.TightContextFallback {
+			effectiveSystem += compactToolDirectory(in.Registry, in.Profile, hydratedTools)
+			log.Printf("[tool-loop] compact fallback catalog: conv=%s provider=%s model=%s iter=%d tools=%d hydrated=%d names=%v", in.ConversationID, in.Provider.Name(), in.Model, iter+1, len(catalog), len(hydratedTools), toolNamesForLog(catalog))
+		}
 		preserveTail := len(hist) - priorHistoryCount
 		if preserveTail < 1 {
 			preserveTail = 1
 		}
 		beforeTrim := len(hist)
 		trimmed, budget := TrimMessagesToBudget(RequestBudgetInput{
-			System:        in.System,
+			System:        effectiveSystem,
 			Messages:      hist,
 			Tools:         catalog,
 			MaxTokens:     maxTokens,
@@ -503,7 +512,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		req := llm.ChatRequest{
 			Model:          in.Model,
 			Tier:           in.Tier,
-			System:         in.System,
+			System:         effectiveSystem,
 			Messages:       hist,
 			Tools:          catalog,
 			MaxTokens:      maxTokens,
@@ -618,6 +627,12 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				})
 				continue
 			}
+			if in.TightContextFallback && tc.ToolName == enableToolsName {
+				content, isErr := handleEnableTools(tc.ToolInput, in.Registry, in.Profile, hydratedTools)
+				log.Printf("[tool-loop] compact fallback hydration: conv=%s requested=%s result=%q", in.ConversationID, string(tc.ToolInput), content)
+				results = append(results, llm.Block{Type: llm.BlockToolResult, ToolUseRef: tc.ToolUseID, Content: content, IsError: isErr})
+				continue
+			}
 			tool, ok := in.Registry.Get(tc.ToolName)
 			if !ok {
 				results = append(results, llm.Block{
@@ -643,6 +658,14 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				results = append(results, llm.Block{
 					Type: llm.BlockToolResult, ToolUseRef: tc.ToolUseID,
 					Content: fenceDenialMessage(in.Profile.Name, tc.ToolName, tier),
+					IsError: true,
+				})
+				continue
+			}
+			if in.TightContextFallback && !compactFallbackAllows(tier, tc.ToolName) && !hydratedTools[tc.ToolName] {
+				results = append(results, llm.Block{
+					Type: llm.BlockToolResult, ToolUseRef: tc.ToolUseID,
+					Content: fmt.Sprintf("tool %q is not enabled in compact fallback mode; call enable_tools first if it appears in the compact tool directory", tc.ToolName),
 					IsError: true,
 				})
 				continue

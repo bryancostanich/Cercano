@@ -38,37 +38,37 @@ Spec: `efforts/fix-local-fallback-context-budget/spec.md`
 
 ## Phase 3 — Mark tight local fallback explicitly
 
-- [ ] In `runner.Core.runLoop`, when cloud/openai-responses fails with `context_overflow` and retry selects a smaller local provider, set an explicit flag on `agent.ToolLoopInput` such as `TightContextFallback` or `CompactToolCatalog`.
-- [ ] Avoid deriving behavior from provider name alone. The flag should describe the state: this is a retry into a smaller context after an overflow or a similarly constrained path.
-- [ ] Keep the existing user-facing notice `local context is smaller — using recent conversation tail only`, but update wording if needed to reflect exact budgeting rather than fixed tail-only trimming.
-- [ ] Add runner-level tests that simulate cloud overflow followed by local retry and assert the tool-loop input carries the tight-context flag.
+- [x] In `runner.Core.runLoop`, when cloud/openai-responses fails with `context_overflow` and retry selects a smaller local provider, set an explicit flag on `agent.ToolLoopInput` such as `TightContextFallback` or `CompactToolCatalog`.
+- [x] Avoid deriving behavior from provider name alone. The flag should describe the state: this is a retry into a smaller context after an overflow or a similarly constrained path.
+- [x] Keep the existing user-facing notice `local context is smaller — using recent conversation tail only`, but update wording if needed to reflect exact budgeting rather than fixed tail-only trimming.
+- [x] Add runner-level tests that simulate cloud overflow followed by local retry and assert the tool-loop input carries the tight-context flag.
 
 ## Phase 4 — Add a conservative static local-fallback tool profile
 
-- [ ] Define an explicit compact fallback tool allowlist/profile. Initial candidates:
+- [x] Define an explicit compact fallback tool allowlist/profile. Initial candidates:
   - read/search/list tools: `Read`, `Grep`, `Glob`, `LS`, `stat_file`, possibly `ViewImage`/`inspect_image`,
-                                  - edit tools: `Edit`, `Write` only when the active permission profile allows writes,
-                                  - execution: `Bash` only when the active permission profile allows execution,
-                                  - git inspection/checkpoint tools that are already permission-gated,
-                                  - planning/checkpoint handoff tools needed by Cercano's own workflow,
-                                  - the hydration tool(s) from Phase 5.
-- [ ] Implement the profile as a real capability profile or allow predicate, not as ad hoc string filtering in the request builder.
-- [ ] Combine the compact profile with the active permission profile by intersection. Compact fallback can remove advertised tools; it must never add a tool the active profile forbids.
-- [ ] Log catalog size and tool names in compact mode, using existing truncation helpers where needed.
-- [ ] Tests:
+                                                                              - edit tools: `Edit`, `Write` only when the active permission profile allows writes,
+                                                                              - execution: `Bash` only when the active permission profile allows execution,
+                                                                              - git inspection/checkpoint tools that are already permission-gated,
+                                                                              - planning/checkpoint handoff tools needed by Cercano's own workflow,
+                                                                              - the hydration tool(s) from Phase 5.
+- [x] Implement the profile as a real capability profile or allow predicate, not as ad hoc string filtering in the request builder.
+- [x] Combine the compact profile with the active permission profile by intersection. Compact fallback can remove advertised tools; it must never add a tool the active profile forbids.
+- [x] Log catalog size and tool names in compact mode, using existing truncation helpers where needed.
+- [x] Tests:
   - [ ] compact mode advertises fewer tools than normal mode,
   - [ ] permission restrictions still win,
   - [ ] normal cloud/frontier mode still advertises the current catalog.
 
 ## Phase 5 — Add hydrated tool catalog support
 
-- [ ] Add a small native hydration tool, name to be finalized during implementation, with behavior like `enable_tools` or `get_tool_info`.
-- [ ] Provide a terse directory of non-advertised tools in tight-context mode. Directory entries should include only name, category, one-line purpose, and permission tier.
-- [ ] Store hydrated tool names in the current tool-loop state for the lifetime of the turn.
-- [ ] After a hydration call, rebuild the catalog for the next model iteration to include the full schemas for the requested allowed tools.
-- [ ] Deny hydration for unknown tools or tools blocked by the active permission profile with a clear tool-result message.
-- [ ] Make hydration idempotent: requesting an already-enabled tool should succeed without duplicating catalog entries.
-- [ ] Tests:
+- [x] Add a small native hydration tool, name to be finalized during implementation, with behavior like `enable_tools` or `get_tool_info`.
+- [x] Provide a terse directory of non-advertised tools in tight-context mode. Directory entries should include only name, category, one-line purpose, and permission tier.
+- [x] Store hydrated tool names in the current tool-loop state for the lifetime of the turn.
+- [x] After a hydration call, rebuild the catalog for the next model iteration to include the full schemas for the requested allowed tools.
+- [x] Deny hydration for unknown tools or tools blocked by the active permission profile with a clear tool-result message.
+- [x] Make hydration idempotent: requesting an already-enabled tool should succeed without duplicating catalog entries.
+- [x] Tests:
   - [ ] allowed tool hydration adds its schema on the next request,
   - [ ] denied tool hydration does not add the schema,
   - [ ] duplicate hydration is harmless,
@@ -76,20 +76,20 @@ Spec: `efforts/fix-local-fallback-context-budget/spec.md`
 
 ## Phase 6 — Verification and live diagnostics
 
-- [ ] Run focused tests for touched packages first, likely:
+- [x] Run focused tests for touched packages first, likely:
   - [ ] `go test ./internal/agent`
   - [ ] `go test ./internal/agenttools`
   - [ ] `go test ./internal/runner`
   - [ ] any new package tests for the budget helper.
-- [ ] Run broader server verification if shared interfaces changed:
+- [x] Run broader server verification if shared interfaces changed:
   - [ ] `go test ./...`
-- [ ] Exercise a synthetic local 32k-window request with many tools and long history. Confirm logs show:
+- [x] Exercise a synthetic local 32k-window request with many tools and long history. Confirm logs show:
   - [ ] compact/tight-context mode,
   - [ ] reduced catalog size,
   - [ ] tool schema token estimate,
   - [ ] trimmed history count,
   - [ ] final estimated prompt below budget.
-- [ ] Inspect the failure path by forcing an unfit minimal request and confirm it returns preflight `context_overflow` without contacting the provider.
+- [x] Inspect the failure path by forcing an unfit minimal request and confirm it returns preflight `context_overflow` without contacting the provider.
 
 ## Sequencing notes
 

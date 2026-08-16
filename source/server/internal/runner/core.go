@@ -286,7 +286,7 @@ func (c *Core) RunTurn(
 		"is_cloud":        isCloud,
 	})
 	result, loopErr := c.runLoop(ctx, req, provider, selectedModel, isCloud,
-		loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile)
+		loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile, false)
 	c.logRoute("loop.result", routinglog.Event{
 		"conversation_id": req.ConversationID,
 		"attempt":         "primary",
@@ -322,7 +322,7 @@ func (c *Core) RunTurn(
 		})
 		sink.Emit(Event{Kind: EventProgress, Text: notice})
 		result, loopErr = c.runLoop(ctx, req, provider, selectedModel, isCloud,
-			loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile)
+			loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile, false)
 		c.logRoute("loop.result", routinglog.Event{
 			"conversation_id": req.ConversationID,
 			"attempt":         "same_provider_retry",
@@ -366,6 +366,7 @@ func (c *Core) RunTurn(
 			"trigger_error":       errorString(loopErr),
 		})
 		if !fellBack && res.CrossAllowed && fbProv != nil {
+			tightContextFallback := !fbCloud && llm.ClassOf(loopErr) == llm.ErrContextOverflow
 			fallbackNotice = fmt.Sprintf("⚠ %s failed (%v) — retrying on %s", provider.Name(), loopErr, fbProv.Name())
 			sink.Emit(Event{Kind: EventProgress, Text: fallbackNotice})
 			sink.Emit(Event{
@@ -377,14 +378,15 @@ func (c *Core) RunTurn(
 			isCloud = fbCloud
 			selectedModel = fallbackModel
 			c.logRoute("loop.start", routinglog.Event{
-				"conversation_id": req.ConversationID,
-				"attempt":         "cross_tier_fallback",
-				"provider":        providerName(fbProv),
-				"model":           fallbackModel,
-				"is_cloud":        fbCloud,
+				"conversation_id":        req.ConversationID,
+				"attempt":                "cross_tier_fallback",
+				"provider":               providerName(fbProv),
+				"model":                  fallbackModel,
+				"is_cloud":               fbCloud,
+				"tight_context_fallback": tightContextFallback,
 			})
 			result, loopErr = c.runLoop(ctx, req, fbProv, fallbackModel, fbCloud,
-				loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile)
+				loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile, tightContextFallback)
 			c.logRoute("loop.result", routinglog.Event{
 				"conversation_id": req.ConversationID,
 				"attempt":         "cross_tier_fallback",
@@ -443,6 +445,7 @@ func (c *Core) runLoop(
 	gateRegistry *agenttools.Registry,
 	permStore *agent.PermissionStore,
 	profile agent.Profile,
+	tightContextFallback bool,
 ) (agent.ToolLoopResult, error) {
 	maxIterations := 0
 	contextWindow := 0
@@ -455,26 +458,27 @@ func (c *Core) runLoop(
 	}
 
 	return agent.RunToolLoop(ctx, agent.ToolLoopInput{
-		Provider:            provider,
-		Registry:            gateRegistry,
-		Permissions:         permStore,
-		Profile:             profile,
-		UserInput:           req.Input,
-		Images:              req.Images,
-		Model:               model,
-		System:              BuildSystemPrompt(c.d, req.WorkDir, profile),
-		WorkDir:             req.WorkDir,
-		ConversationID:      req.ConversationID,
-		VisionStore:         c.d.VisionStore,
-		EventSink:           loopSink,
-		PermissionRequester: requester,
-		ConvHistory:         convHistory,
-		OnTextDelta:         onTextDelta,
-		OnTurnComplete:      onTurn,
-		MaxIterations:       maxIterations,
-		ContextWindow:       contextWindow,
-		WatchdogGate:        wdGate,
-		WatchdogTurnEnd:     wdTurnEnd,
+		Provider:             provider,
+		Registry:             gateRegistry,
+		Permissions:          permStore,
+		Profile:              profile,
+		UserInput:            req.Input,
+		Images:               req.Images,
+		Model:                model,
+		System:               BuildSystemPrompt(c.d, req.WorkDir, profile),
+		WorkDir:              req.WorkDir,
+		ConversationID:       req.ConversationID,
+		VisionStore:          c.d.VisionStore,
+		EventSink:            loopSink,
+		PermissionRequester:  requester,
+		ConvHistory:          convHistory,
+		OnTextDelta:          onTextDelta,
+		OnTurnComplete:       onTurn,
+		MaxIterations:        maxIterations,
+		ContextWindow:        contextWindow,
+		TightContextFallback: tightContextFallback,
+		WatchdogGate:         wdGate,
+		WatchdogTurnEnd:      wdTurnEnd,
 	})
 }
 

@@ -14,6 +14,7 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -55,9 +56,12 @@ type turnObservation struct {
 type spyProvider struct {
 	mu           sync.Mutex
 	observations []turnObservation
+	requests     []llm.ChatRequest
 }
 
 type cancelProvider struct{}
+
+type contextOverflowProvider struct{}
 
 func (p *cancelProvider) Name() string { return "cancel" }
 func (p *cancelProvider) Capabilities() inference.Capabilities {
@@ -70,6 +74,17 @@ func (p *cancelProvider) StreamChat(context.Context, llm.ChatRequest) (llm.Strea
 	return nil, context.Canceled
 }
 
+func (p *contextOverflowProvider) Name() string { return "cloud-overflow" }
+func (p *contextOverflowProvider) Capabilities() inference.Capabilities {
+	return inference.Capabilities{SupportsTools: true}
+}
+func (p *contextOverflowProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, &llm.Error{Class: llm.ErrContextOverflow, Provider: "test", Used: 10, Limit: 5, Err: errors.New("too large")}
+}
+func (p *contextOverflowProvider) StreamChat(context.Context, llm.ChatRequest) (llm.StreamReader, error) {
+	return nil, &llm.Error{Class: llm.ErrContextOverflow, Provider: "test", Used: 10, Limit: 5, Err: errors.New("too large")}
+}
+
 func (p *spyProvider) Name() string { return "spy" }
 
 func (p *spyProvider) Capabilities() inference.Capabilities {
@@ -80,7 +95,7 @@ func (p *spyProvider) Chat(_ context.Context, _ llm.ChatRequest) (llm.ChatRespon
 	return llm.ChatResponse{StopReason: "end_turn"}, nil
 }
 
-func (p *spyProvider) StreamChat(ctx context.Context, _ llm.ChatRequest) (llm.StreamReader, error) {
+func (p *spyProvider) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.StreamReader, error) {
 	workDir := agenttools.WorkDirFromContext(ctx)
 	sessionID := llm.SessionIDFromContext(ctx)
 
@@ -89,6 +104,7 @@ func (p *spyProvider) StreamChat(ctx context.Context, _ llm.ChatRequest) (llm.St
 		workDir:   workDir,
 		sessionID: sessionID,
 	})
+	p.requests = append(p.requests, req)
 	p.mu.Unlock()
 
 	// Write a marker file under the observed WorkDir so we can assert
@@ -104,6 +120,19 @@ func (p *spyProvider) StreamChat(ctx context.Context, _ llm.ChatRequest) (llm.St
 }
 
 // endTurnReader yields a single message_stop / end_turn event then EOF.
+type testTool struct {
+	name string
+	perm agenttools.Permission
+}
+
+func (t testTool) Name() string                      { return t.name }
+func (t testTool) Description() string               { return "test tool" }
+func (t testTool) Permission() agenttools.Permission { return t.perm }
+func (t testTool) Schema() json.RawMessage           { return json.RawMessage(`{"type":"object"}`) }
+func (t testTool) Execute(context.Context, json.RawMessage) (*agenttools.Result, error) {
+	return &agenttools.Result{Type: agenttools.ResultText, Text: "ok"}, nil
+}
+
 type endTurnReader struct {
 	done bool
 }
@@ -290,6 +319,41 @@ func TestCore_ContextCanceledDoesNotCrossTierFallback(t *testing.T) {
 // permanently nil (silently disabled) for every user who enabled it — the
 // exact regression the whole-branch review caught. This test fails if the
 // runner ever reverts to reading a captured value instead of the accessor.
+func TestCore_ContextOverflowFallbackUsesCompactLocalCatalog(t *testing.T) {
+	openSpy := &spyProvider{}
+	deps := buildDeps(&contextOverflowProvider{})
+	reg := agenttools.NewRegistry()
+	reg.MustRegister(testTool{name: "Read", perm: agenttools.PermR})
+	reg.MustRegister(testTool{name: "git_push", perm: agenttools.PermX})
+	deps.Tools = &fakeToolSvc{reg: reg}
+	deps.Providers = &fakeResolver{prov: &contextOverflowProvider{}, open: openSpy}
+	core := New(deps)
+
+	_, err := core.RunTurn(context.Background(), Request{
+		Input:          "recover locally",
+		ConversationID: "fallback-conv",
+		WorkDir:        t.TempDir(),
+	}, noopSink{}, nil, nil)
+	if err != nil {
+		t.Fatalf("RunTurn fallback should succeed on open provider: %v", err)
+	}
+	openSpy.mu.Lock()
+	defer openSpy.mu.Unlock()
+	if len(openSpy.requests) == 0 {
+		t.Fatal("expected fallback/open provider to be called")
+	}
+	tools := map[string]bool{}
+	for _, tool := range openSpy.requests[0].Tools {
+		tools[tool.Name] = true
+	}
+	if !tools["Read"] {
+		t.Fatalf("compact fallback should include core Read tool, got %v", tools)
+	}
+	if tools["git_push"] {
+		t.Fatalf("context-overflow fallback to local should use compact catalog and hide git_push, got %v", tools)
+	}
+}
+
 func TestCore_WatchdogReadLiveAtTurnTime(t *testing.T) {
 	deps := buildDeps(&spyProvider{})
 

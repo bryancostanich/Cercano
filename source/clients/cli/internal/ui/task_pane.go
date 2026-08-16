@@ -392,7 +392,8 @@ func (m Model) appendTaskPaneTaskLines(lines *[]string, seen map[string]bool, id
 	seen[id] = true
 	indent := strings.Repeat("  ", depth)
 	glyph := taskPaneStatusGlyph(task.Status)
-	text := indent + glyph + " " + task.Title
+	firstPrefix := indent + glyph + " "
+	wrapPrefix := indent + "  "
 	style := lipgloss.NewStyle()
 	switch task.Status {
 	case "done":
@@ -404,10 +405,54 @@ func (m Model) appendTaskPaneTaskLines(lines *[]string, seen map[string]bool, id
 	default:
 		style = m.styles.Primary
 	}
-	*lines = append(*lines, style.Render(text))
+	for _, text := range wrapTaskPaneTaskText(firstPrefix, wrapPrefix, task.Title, width) {
+		*lines = append(*lines, style.Render(text))
+	}
 	for _, childID := range task.Children {
 		m.appendTaskPaneTaskLines(lines, seen, childID, depth+1, width)
 	}
+}
+
+func wrapTaskPaneTaskText(firstPrefix, wrapPrefix, title string, width int) []string {
+	if width <= 0 {
+		return nil
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return []string{fitCell(firstPrefix, width)}
+	}
+	var lines []string
+	prefix := firstPrefix
+	remaining := title
+	for {
+		avail := width - ansi.StringWidth(prefix)
+		if avail < 1 {
+			avail = 1
+		}
+		chunk, rest := takeTaskPaneWrapChunk(remaining, avail)
+		lines = append(lines, prefix+chunk)
+		if strings.TrimSpace(rest) == "" {
+			break
+		}
+		remaining = strings.TrimSpace(rest)
+		prefix = wrapPrefix
+	}
+	return lines
+}
+
+func takeTaskPaneWrapChunk(s string, width int) (chunk, rest string) {
+	s = strings.TrimSpace(s)
+	if width <= 0 || ansi.StringWidth(s) <= width {
+		return s, ""
+	}
+	cut := ansi.Cut(s, 0, width)
+	cutBytes := len(cut)
+	if cutBytes < len(s) {
+		if idx := strings.LastIndex(cut, " "); idx > 0 {
+			return strings.TrimRight(cut[:idx], " "), s[idx+1:]
+		}
+	}
+	return cut, s[cutBytes:]
 }
 
 func (m Model) taskPaneViewportGeometry(width, height int) (contentW, bodyH int, needV, needH bool, maxLineW, totalLines int) {

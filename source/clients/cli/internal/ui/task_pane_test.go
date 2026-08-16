@@ -170,6 +170,69 @@ func TestTaskPaneRendersDocumentOrderHierarchy(t *testing.T) {
 	}
 }
 
+func TestTaskPaneWrapsLongTitlesWithIndentation(t *testing.T) {
+	m := New(nil, false)
+	m.applyTaskChange("added", &agentclient.TaskNode{
+		ID:     "parent",
+		Title:  "Parent task with a title that needs to wrap inside the task pane",
+		Status: "pending",
+		Children: []agentclient.TaskNode{{
+			ID:       "child",
+			Title:    "Child task also wraps while preserving nested indentation",
+			Status:   "pending",
+			ParentID: "parent",
+		}},
+	})
+	lines := strings.Split(ansi.Strip(strings.Join(m.taskPaneLines(24), "\n")), "\n")
+	if len(lines) < 4 {
+		t.Fatalf("expected wrapped task lines, got %#v", lines)
+	}
+	if !strings.HasPrefix(lines[0], "☐ ") || !strings.HasPrefix(lines[1], "  ") {
+		t.Fatalf("parent continuation should align under title text, got %#v", lines[:2])
+	}
+	childStart := -1
+	for i, line := range lines {
+		if strings.HasPrefix(line, "  ☐ ") {
+			childStart = i
+			break
+		}
+	}
+	if childStart < 0 || childStart+1 >= len(lines) {
+		t.Fatalf("expected wrapped child task lines, got %#v", lines)
+	}
+	if !strings.HasPrefix(lines[childStart+1], "    ") {
+		t.Fatalf("child continuation should preserve nested indentation, got %#v", lines[childStart:childStart+2])
+	}
+	for _, line := range lines {
+		if ansi.StringWidth(line) > 24 {
+			t.Fatalf("wrapped line exceeds pane width: width=%d line=%q all=%#v", ansi.StringWidth(line), line, lines)
+		}
+	}
+}
+
+func TestTaskPaneLongTitlesWrapInsteadOfHorizontalScrolling(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
+	m.taskPane.Width = taskPaneMinWidth
+	m.applyTaskChange("added", &agentclient.TaskNode{
+		ID:     "long-task",
+		Title:  "abcdefghijklmnopqrstuvwxyz 0123456789 this title wraps rather than requiring horizontal scrolling",
+		Status: "pending",
+	})
+	m.toggleTaskPane()
+	_, _, _, needH, _, _ := m.taskPaneViewportGeometry(m.taskPaneWidth(), m.activeChat().Height())
+	if needH {
+		t.Fatal("wrappable task titles should not require a horizontal scrollbar")
+	}
+	view := ansi.Strip(m.renderTaskPane(m.taskPaneWidth(), m.activeChat().Height()))
+	if strings.Contains(view, "░") || strings.Contains(view, "█") {
+		t.Fatalf("wrapped title should not render a horizontal scrollbar:\n%s", view)
+	}
+	if !strings.Contains(view, "rather than") || !strings.Contains(view, "requiring") {
+		t.Fatalf("wrapped title should reveal later text without horizontal scroll:\n%s", view)
+	}
+}
+
 func TestTaskPaneVerticalScrollbarAndWheelScroll(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
@@ -197,7 +260,7 @@ func TestTaskPaneVerticalScrollbarAndWheelScroll(t *testing.T) {
 	}
 }
 
-func TestTaskPaneHorizontalScrollbarAndKeyScroll(t *testing.T) {
+func TestTaskPaneHorizontalInputNoopsWhenTitlesWrap(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
 	m.taskPane.Width = taskPaneMinWidth
@@ -208,25 +271,14 @@ func TestTaskPaneHorizontalScrollbarAndKeyScroll(t *testing.T) {
 	})
 	m.toggleTaskPane()
 
-	view := ansi.Strip(m.renderTaskPane(m.taskPaneWidth(), m.activeChat().Height()))
-	if !strings.Contains(view, "░") || !strings.Contains(view, "█") {
-		t.Fatalf("wide task pane content should render a horizontal scrollbar:\n%s", view)
-	}
-	if !strings.Contains(view, "abcdef") {
-		t.Fatalf("expected left edge of long title before horizontal scrolling:\n%s", view)
-	}
-
 	paneX := m.width - m.taskPaneWidth() + 2
 	m = send(t, m, tea.MouseWheelMsg{X: paneX, Y: m.scrollbarTop + 3, Button: tea.MouseWheelRight})
-	if m.taskPane.ScrollX == 0 {
-		t.Fatal("horizontal trackpad wheel over expanded task pane should advance horizontal task scroll")
-	}
 	m = send(t, m, tea.KeyPressMsg{Code: tea.KeyRight})
-	scrolled := ansi.Strip(m.renderTaskPane(m.taskPaneWidth(), m.activeChat().Height()))
-	if strings.Contains(scrolled, "abcdef") {
-		t.Fatalf("horizontal scroll should move past the initial title prefix:\n%s", scrolled)
+	if m.taskPane.ScrollX != 0 {
+		t.Fatalf("wrapped task titles should not require horizontal scroll, got ScrollX=%d", m.taskPane.ScrollX)
 	}
-	if !strings.Contains(scrolled, "fghi") {
-		t.Fatalf("horizontal scroll should reveal later title text:\n%s", scrolled)
+	view := ansi.Strip(m.renderTaskPane(m.taskPaneWidth(), m.activeChat().Height()))
+	if !strings.Contains(view, "is-title-is-longer") || !strings.Contains(view, "han-the-pane") {
+		t.Fatalf("wrapped title should reveal later text without horizontal scroll:\n%s", view)
 	}
 }

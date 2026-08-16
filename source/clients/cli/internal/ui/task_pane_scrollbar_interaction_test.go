@@ -53,32 +53,21 @@ func TestTaskPaneVerticalScrollbarClickAndDrag(t *testing.T) {
 	}
 }
 
-func TestTaskPaneHorizontalScrollbarClickAndDrag(t *testing.T) {
+func TestTaskPaneWrappedTitlesDoNotExposeHorizontalScrollbarDrag(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
 	seedWideTaskPane(&m)
 	m.toggleTaskPane()
 	g, ok := m.taskPaneGeometry()
-	if !ok || !g.needH {
-		t.Fatalf("expected horizontal scrollbar geometry: %+v ok=%v", g, ok)
+	if !ok {
+		t.Fatalf("expected task pane geometry")
 	}
-
+	if g.needH {
+		t.Fatalf("wrapped task titles should not expose horizontal scrollbar geometry: %+v", g)
+	}
 	m = send(t, m, tea.MouseClickMsg{X: g.contentLeft() + g.contentW - 1, Y: g.hbarY(), Button: tea.MouseLeft})
-	if !m.taskPane.Dragging || scrollbarOrientation(m.taskPane.Drag) != scrollbarHorizontal {
-		t.Fatalf("horizontal scrollbar click should start horizontal drag, dragging=%v axis=%v", m.taskPane.Dragging, m.taskPane.Drag)
-	}
-	if m.taskPane.ScrollX == 0 {
-		t.Fatal("horizontal scrollbar click near right edge should move ScrollX")
-	}
-	first := m.taskPane.ScrollX
-
-	m = send(t, m, tea.MouseMotionMsg{X: g.contentLeft(), Y: g.hbarY(), Button: tea.MouseLeft})
-	if m.taskPane.ScrollX >= first {
-		t.Fatalf("horizontal scrollbar drag left should reduce ScrollX: before=%d after=%d", first, m.taskPane.ScrollX)
-	}
-	m = send(t, m, tea.MouseReleaseMsg{X: g.contentLeft(), Y: g.hbarY(), Button: tea.MouseLeft})
 	if m.taskPane.Dragging {
-		t.Fatal("horizontal scrollbar release should clear task pane drag")
+		t.Fatal("without horizontal overflow, click near former hbar row should not start scrollbar drag")
 	}
 }
 
@@ -92,7 +81,7 @@ func TestTaskPaneExpandedRailClickCollapsesBodyClickDoesNot(t *testing.T) {
 		t.Fatal("expected task pane geometry")
 	}
 
-	m = send(t, m, tea.MouseClickMsg{X: g.contentLeft()+2, Y: g.bodyTop(), Button: tea.MouseLeft})
+	m = send(t, m, tea.MouseClickMsg{X: g.contentLeft() + 2, Y: g.bodyTop(), Button: tea.MouseLeft})
 	if !m.taskPane.Expanded {
 		t.Fatal("body click should not collapse expanded task pane")
 	}

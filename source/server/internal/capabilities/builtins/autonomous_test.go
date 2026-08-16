@@ -201,3 +201,62 @@ func TestCompleteAutonomousReview_MarksCompletedAndLeavesProfile(t *testing.T) {
 		t.Fatalf("review json not completed: %q", run.ReviewJSON)
 	}
 }
+
+func TestAutonomousLifecycle_StartCaptureReviewComplete(t *testing.T) {
+	store, err := conversation.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	const conv = "conv-lifecycle"
+	if err := store.EnsureConversation(ctx, conv, "/proj", "model"); err != nil {
+		t.Fatalf("EnsureConversation: %v", err)
+	}
+	var active string
+	svc := capabilities.Services{
+		Conversations: store,
+		EnterProfile:  func(convID, name string) error { active = name; return nil },
+	}
+
+	if _, err := SuggestAutonomous().Execute(ctx, &capabilities.Call{ConversationID: conv, Args: []byte(`{"reason":"integration flow","goal":"ship lifecycle","done_when":["review completes"],"constraints":["do not push"],"review_points":["decision logging"]}`), Svc: svc}); err != nil {
+		t.Fatalf("suggest_autonomous: %v", err)
+	}
+	if active != "autonomous" {
+		t.Fatalf("active after start = %q, want autonomous", active)
+	}
+
+	if _, err := CaptureDecision().Execute(ctx, &capabilities.Call{ConversationID: conv, Args: minimalDecisionArgs("choose lifecycle shape"), Svc: svc}); err != nil {
+		t.Fatalf("capture_decision: %v", err)
+	}
+	if _, err := RequestAutonomousExit().Execute(ctx, &capabilities.Call{ConversationID: conv, Args: []byte(`{"summary":"done","verification":"targeted tests passed"}`), Svc: svc}); err != nil {
+		t.Fatalf("request_autonomous_exit: %v", err)
+	}
+	if active != "autonomous" {
+		t.Fatalf("active after request exit = %q, want still autonomous", active)
+	}
+	run, err := store.GetAutonomyRun(ctx, conv)
+	if err != nil {
+		t.Fatalf("GetAutonomyRun review_pending: %v", err)
+	}
+	if run.State != "review_pending" {
+		t.Fatalf("state after request exit = %q, want review_pending", run.State)
+	}
+	if !strings.Contains(run.DecisionsJSON, "choose lifecycle shape") {
+		t.Fatalf("decision not retained through review request: %q", run.DecisionsJSON)
+	}
+
+	if _, err := CompleteAutonomousReview().Execute(ctx, &capabilities.Call{ConversationID: conv, Args: []byte(`{"summary":"accepted"}`), Svc: svc}); err != nil {
+		t.Fatalf("complete_autonomous_review: %v", err)
+	}
+	if active != "default" {
+		t.Fatalf("active after complete = %q, want default", active)
+	}
+	run, err = store.GetAutonomyRun(ctx, conv)
+	if err != nil {
+		t.Fatalf("GetAutonomyRun completed: %v", err)
+	}
+	if run.State != "completed" || !strings.Contains(run.ReviewJSON, "accepted") {
+		t.Fatalf("run not completed with review summary: state=%q review=%q", run.State, run.ReviewJSON)
+	}
+}

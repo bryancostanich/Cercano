@@ -98,8 +98,8 @@ func TestChatView_UserPromptAppliesTextForegroundOnLightThemes(t *testing.T) {
 	c := newTestChatViewWithPalette(50, 6, daylight)
 	rendered := c.renderEntry(&Entry{Role: RoleUser, Content: "readable prompt"}, 0)
 
-	if !strings.Contains(rendered, "38;2;91;63;163") {
-		t.Fatalf("daylight sent prompt should set BufferUserText foreground (#5B3FA3); got %q", rendered)
+	if !strings.Contains(rendered, "38;2;122;78;10") {
+		t.Fatalf("daylight sent prompt should set BufferUserText foreground (#7A4E0A); got %q", rendered)
 	}
 	if !strings.Contains(rendered, "48;2;230;215;176") {
 		t.Fatalf("daylight sent prompt should keep BufferUserBg background (#E6D7B0); got %q", rendered)

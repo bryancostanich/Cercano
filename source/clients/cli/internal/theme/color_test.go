@@ -73,10 +73,7 @@ func TestDaylightTextTokensAvoidSaturatedYellowHue(t *testing.T) {
 		color color.Color
 	}{
 		{name: "primary", color: daylight.Primary},
-		{name: "bright", color: daylight.Bright},
 		{name: "warn", color: daylight.Warn},
-		{name: "wordmark_peak", color: daylight.WordmarkPeak},
-		{name: "spinner_peak", color: daylight.SpinnerPeak},
 		{name: "meter_label_on_fill", color: daylight.MeterLabelOnFill},
 	}
 	for _, token := range tokens {

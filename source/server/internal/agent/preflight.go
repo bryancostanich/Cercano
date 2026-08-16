@@ -1,10 +1,6 @@
 package agent
 
-import (
-	"fmt"
-
-	"cercano/source/server/internal/llm"
-)
+import "cercano/source/server/internal/llm"
 
 // preflightSafetyFraction is the share of a model's context window the
 // estimated prompt may occupy before the pre-flight check refuses to start the
@@ -96,23 +92,11 @@ func preflightContextCheck(system string, history []llm.Message, userInput strin
 	if window <= 0 {
 		return nil
 	}
-	used := estimateTokens(system) + estimateTokens(userInput)
-	for _, m := range history {
-		used += estimateMessageTokens(m)
-	}
-	used += images * perImageTokenEstimate
-
-	budget := int(float64(window) * preflightSafetyFraction)
-	if used <= budget {
+	messages := append([]llm.Message{}, history...)
+	messages = append(messages, llm.Message{Role: llm.RoleUser, Blocks: buildUserBlocks(userInput, make([]InlineImage, images))})
+	budget := EstimateRequestBudget(RequestBudgetInput{System: system, Messages: messages, ContextWindow: window})
+	if budget.Fits {
 		return nil
 	}
-	return &llm.Error{
-		Class:    llm.ErrContextOverflow,
-		Provider: "preflight",
-		Used:     used,
-		Limit:    window,
-		Err: fmt.Errorf(
-			"sub-agent prompt is ~%d tokens but this tier's model holds %d; trim the task or its context, or raise the model's context window",
-			used, window),
-	}
+	return budget.OverflowError()
 }

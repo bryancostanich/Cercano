@@ -12,7 +12,10 @@ import (
 // callCountingProvider records how many times StreamChat was invoked so a test
 // can prove the pre-flight guard short-circuits BEFORE any provider round-trip.
 // A single successful text turn is returned if it ever is called.
-type callCountingProvider struct{ calls int }
+type callCountingProvider struct {
+	calls   int
+	lastReq llm.ChatRequest
+}
 
 func (p *callCountingProvider) Name() string { return "counting" }
 func (p *callCountingProvider) Capabilities() inference.Capabilities {
@@ -23,6 +26,7 @@ func (p *callCountingProvider) Chat(ctx context.Context, req llm.ChatRequest) (l
 }
 func (p *callCountingProvider) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.StreamReader, error) {
 	p.calls++
+	p.lastReq = req
 	events := []llm.StreamEvent{
 		{Type: llm.EventMessageStart},
 		{Type: llm.EventTextDelta, TextDelta: "ok"},
@@ -43,7 +47,7 @@ func TestToolLoop_Preflight_OversizedPrompt_FailsFastNoProviderCall(t *testing.T
 		Registry:      reg,
 		Permissions:   perms,
 		UserInput:     strings.Repeat("x", 8000), // ~2000 tokens
-		ContextWindow: 1000,                       // budget ~900 tokens
+		ContextWindow: 1000,                      // budget ~900 tokens
 	})
 	if err == nil {
 		t.Fatal("oversized prompt must return an error")
@@ -67,7 +71,7 @@ func TestToolLoop_Preflight_FittingPrompt_RunsNormally(t *testing.T) {
 		Registry:      reg,
 		Permissions:   perms,
 		UserInput:     "small task",
-		ContextWindow: 16384,
+		ContextWindow: 32768,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -82,6 +86,38 @@ func TestToolLoop_Preflight_FittingPrompt_RunsNormally(t *testing.T) {
 
 // ContextWindow 0 (the interactive loop's default) disables the guard entirely,
 // even for a large prompt — the provider is still called.
+func TestToolLoop_Preflight_TrimsOversizedHistoryBeforeProviderCall(t *testing.T) {
+	prov := &callCountingProvider{}
+	reg := testDefaultRegistry()
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+	history := []llm.Message{
+		{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: strings.Repeat("old", 8000)}}},
+		{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: strings.Repeat("middle", 8000)}}},
+	}
+
+	_, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider:      prov,
+		Registry:      reg,
+		Permissions:   perms,
+		ConvHistory:   history,
+		UserInput:     "current task",
+		ContextWindow: 32768,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prov.calls == 0 {
+		t.Fatal("expected provider call after trimming")
+	}
+	if len(prov.lastReq.Messages) >= len(history)+1 {
+		t.Fatalf("expected history to be trimmed before provider call, got %d messages", len(prov.lastReq.Messages))
+	}
+	last := prov.lastReq.Messages[len(prov.lastReq.Messages)-1]
+	if last.Role != llm.RoleUser || last.Blocks[0].Text != "current task" {
+		t.Fatalf("current user message must be preserved, got %+v", last)
+	}
+}
+
 func TestToolLoop_Preflight_ZeroWindow_Disabled(t *testing.T) {
 	prov := &callCountingProvider{}
 	reg := testDefaultRegistry()

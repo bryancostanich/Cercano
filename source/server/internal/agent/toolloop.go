@@ -393,23 +393,6 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		maxTokens = in.MaxTokensPerTurn
 	}
 
-	if reduced, trimmed := reduceHistoryToContextTail(in.System, in.ConvHistory, in.UserInput, len(in.Images), in.ContextWindow); trimmed {
-		in.ConvHistory = reduced
-		if in.EventSink != nil {
-			in.EventSink(LoopEvent{Kind: LoopNotice, Summary: "local context is smaller — using recent conversation tail only"})
-		}
-	}
-
-	// Pre-flight size guard: before spending a provider round-trip (and, for a
-	// local model, a warm-up), estimate the prompt size against the resolved
-	// window and fail fast with an actionable, size-classified error. Counts
-	// the system prompt, prior history, this turn's input, and inline images.
-	// No-op when in.ContextWindow is 0. See preflight.go for the heuristic and
-	// why an approximate check is the right tool here.
-	if err := preflightContextCheck(in.System, in.ConvHistory, in.UserInput, len(in.Images), in.ContextWindow); err != nil {
-		return ToolLoopResult{}, err
-	}
-
 	hist := append([]llm.Message{}, in.ConvHistory...)
 	hist = append(hist, llm.Message{
 		Role:   llm.RoleUser,
@@ -422,6 +405,21 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	// nil (vision-as-tool unconfigured) or ConversationID is empty. Copy-on-write:
 	// leaves non-image history untouched.
 	hist = RewriteImagesToPlaceholders(in.VisionStore, in.ConversationID, hist)
+	priorHistoryCount := len(hist) - 1
+	if priorHistoryCount < 0 {
+		priorHistoryCount = 0
+	}
+
+	// Advertisement half of the capability profile (see profile.go): when the
+	// profile restricts, forbidden tools are filtered out of the catalog so the
+	// model never reaches for a tool it can't have. Enforcement is separate,
+	// below at the gate — filtering is ergonomics, not the fence.
+	var catalog []llm.Tool
+	if in.Profile.Restricts() {
+		catalog = agenttools.BuildToolCatalogFiltered(in.Registry, in.Profile.Allows)
+	} else {
+		catalog = agenttools.BuildToolCatalog(in.Registry)
+	}
 
 	// calledTools accumulates the tool names invoked across every iteration, in
 	// first-seen order, recorded from the raw BlockToolUse blocks before any
@@ -457,16 +455,6 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		}
 	}
 
-	// Advertisement half of the capability profile (see profile.go): when the
-	// profile restricts, forbidden tools are filtered out of the catalog so the
-	// model never reaches for a tool it can't have. Enforcement is separate,
-	// below at the gate — filtering is ergonomics, not the fence.
-	var catalog []llm.Tool
-	if in.Profile.Restricts() {
-		catalog = agenttools.BuildToolCatalogFiltered(in.Registry, in.Profile.Allows)
-	} else {
-		catalog = agenttools.BuildToolCatalog(in.Registry)
-	}
 	consecutiveErrors := 0
 	var lastIn, lastOut int
 
@@ -484,6 +472,34 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	}
 
 	for iter := 0; unlimitedIters || iter < maxIters; iter++ {
+		preserveTail := len(hist) - priorHistoryCount
+		if preserveTail < 1 {
+			preserveTail = 1
+		}
+		beforeTrim := len(hist)
+		trimmed, budget := TrimMessagesToBudget(RequestBudgetInput{
+			System:        in.System,
+			Messages:      hist,
+			Tools:         catalog,
+			MaxTokens:     maxTokens,
+			ContextWindow: in.ContextWindow,
+		}, preserveTail)
+		if budget.TrimmedMessages > 0 {
+			hist = trimmed
+			priorHistoryCount -= budget.TrimmedMessages
+			if priorHistoryCount < 0 {
+				priorHistoryCount = 0
+			}
+			log.Printf("[tool-loop] context budget trimmed history: conv=%s provider=%s model=%s iter=%d before_messages=%d after_messages=%d estimated_tokens=%d tool_tokens=%d output_reserve=%d limit=%d budget=%d", in.ConversationID, in.Provider.Name(), in.Model, iter+1, beforeTrim, len(hist), budget.EstimatedUsed, budget.ToolTokens, budget.OutputReserve, budget.Limit, budget.PromptBudget)
+			if in.EventSink != nil {
+				in.EventSink(LoopEvent{Kind: LoopNotice, Summary: "local context is smaller — trimmed conversation history to fit the model window"})
+			}
+		}
+		if !budget.Fits {
+			log.Printf("[tool-loop] context budget overflow before provider call: conv=%s provider=%s model=%s iter=%d estimated_tokens=%d tool_tokens=%d output_reserve=%d limit=%d budget=%d messages=%d tools=%d", in.ConversationID, in.Provider.Name(), in.Model, iter+1, budget.EstimatedUsed, budget.ToolTokens, budget.OutputReserve, budget.Limit, budget.PromptBudget, len(hist), len(catalog))
+			return ToolLoopResult{}, budget.OverflowError()
+		}
+
 		req := llm.ChatRequest{
 			Model:          in.Model,
 			Tier:           in.Tier,

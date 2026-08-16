@@ -66,7 +66,7 @@ func NewStyles(p Palette) Styles {
 		BypassFlag:       lipgloss.NewStyle().Foreground(p.BypassText).Background(p.Error).Bold(true),
 		ToolSuccess:      lipgloss.NewStyle().Foreground(p.BufferLime),
 		ToolError:        lipgloss.NewStyle().Foreground(p.BufferError),
-		ToolFocus:        lipgloss.NewStyle().Foreground(p.BgDeep).Background(p.SelectionCaret).Bold(true),
-		SelectionCaret:   lipgloss.NewStyle().Foreground(p.BgDeep).Background(p.SelectionCaret).Bold(true),
+		ToolFocus:        lipgloss.NewStyle().Foreground(p.SelectionCaret).Bold(true),
+		SelectionCaret:   lipgloss.NewStyle().Foreground(p.SelectionCaret).Bold(true),
 	}
 }

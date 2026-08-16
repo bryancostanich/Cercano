@@ -384,8 +384,8 @@ func TestHistoryRowsLines_DaylightSelectedArrowUsesSelectionCaret(t *testing.T) 
 	h.applyFilter()
 	lines, _ := h.rowsLines()
 	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "38;2;138;0;194") {
-		t.Fatalf("selected history arrow should use bright daylight selection caret (#8A00C2), got %q", joined)
+	if !strings.Contains(joined, "38;2;122;30;44") {
+		t.Fatalf("selected history arrow should use daylight oxblood selection caret (#7A1E2C), got %q", joined)
 	}
 	if strings.Contains(joined, "48;2;") {
 		t.Fatalf("selected history arrow should not render as a filled chip, got %q", joined)

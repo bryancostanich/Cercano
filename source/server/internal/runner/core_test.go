@@ -465,7 +465,7 @@ func TestBuildSystemPrompt_SignalsActiveProfile(t *testing.T) {
 	}
 
 	autonomous := BuildSystemPrompt(d, "", agent.AutonomousProfile())
-	for _, want := range []string{"AUTONOMOUS MODE", "approved run brief", "capture the decision", "request autonomous exit"} {
+	for _, want := range []string{"AUTONOMOUS MODE", "approved run brief", "capture_decision", "request autonomous exit"} {
 		if !strings.Contains(autonomous, want) {
 			t.Fatalf("autonomous-profile prompt should contain %q; got:\n%s", want, autonomous)
 		}

@@ -93,6 +93,41 @@ type AutonomyBriefRevision struct {
 	Brief     AutonomyBrief `json:"brief"`
 }
 
+// AutonomyDecisionOption records one real option considered at a meaningful
+// autonomous fork. The fields intentionally mirror the design-decision protocol
+// so the model has to evaluate trade-offs instead of taking the shortest hack.
+type AutonomyDecisionOption struct {
+	Title       string   `json:"title"`
+	Cost        string   `json:"cost"`
+	Risk        string   `json:"risk"`
+	Reward      string   `json:"reward"`
+	SideEffects string   `json:"side_effects"`
+	HackFlags   []string `json:"hack_flags,omitempty"`
+}
+
+// AutonomyDecisionCounterargument captures the strongest case against or for an
+// option so final review can see the decision was not rubber-stamped.
+type AutonomyDecisionCounterargument struct {
+	Option        string `json:"option"`
+	StrongestCase string `json:"strongest_case"`
+}
+
+// AutonomyDecision is one structured design-decision entry in the autonomous
+// ledger. Sequence and Timestamp are assigned by the capture_decision tool.
+type AutonomyDecision struct {
+	Sequence         int                               `json:"sequence"`
+	Timestamp        time.Time                         `json:"timestamp"`
+	DecisionPoint    string                            `json:"decision_point"`
+	Options          []AutonomyDecisionOption          `json:"options"`
+	Counterarguments []AutonomyDecisionCounterargument `json:"counterarguments"`
+	Recommendation   string                            `json:"recommendation"`
+	ChosenPath       string                            `json:"chosen_path"`
+	WhyCleanest      string                            `json:"why_cleanest"`
+	Reversibility    string                            `json:"reversibility"`
+	StopRequired     bool                              `json:"stop_required"`
+	StopReason       string                            `json:"stop_reason,omitempty"`
+}
+
 // AutonomyRun is the durable per-conversation ledger for autonomous mode. JSON
 // fields stay opaque to the store until richer review APIs need normalization.
 type AutonomyRun struct {

@@ -189,6 +189,23 @@ func TestTaskPaneMouseHitToggles(t *testing.T) {
 	if !m.taskPane.Expanded {
 		t.Fatal("clicking the right-edge tab should expand the pane")
 	}
+	g, ok := m.taskPaneGeometry()
+	if !ok {
+		t.Fatal("expected expanded task pane geometry")
+	}
+	if !m.taskPaneToggleHit(g.left, g.top+3) {
+		t.Fatal("expanded task pane rail should remain a collapse target")
+	}
+	if !m.taskPaneToggleHit(g.contentLeft(), g.top) {
+		t.Fatal("expanded task pane header arrow should be a collapse target")
+	}
+	if m.taskPaneToggleHit(g.contentLeft()+2, g.top) {
+		t.Fatal("expanded task pane header label should not be a collapse target")
+	}
+	m = send(t, m, tea.MouseClickMsg{X: g.contentLeft(), Y: g.top, Button: tea.MouseLeft})
+	if m.taskPane.Expanded {
+		t.Fatal("clicking the expanded header arrow should collapse the pane")
+	}
 }
 
 func TestTaskPaneRemovalHidesPane(t *testing.T) {

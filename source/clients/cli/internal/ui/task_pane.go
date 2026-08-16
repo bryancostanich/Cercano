@@ -163,10 +163,18 @@ func (m Model) taskPaneToggleHit(x, y int) bool {
 		return false
 	}
 	// The one-column collapsed tab toggles only on its own TASKS rail at the far
-	// right. Once expanded, only the left rail/header rail toggles; the body
-	// belongs to scrolling. Do not treat the whole viewport row as a toggle, or
-	// clicks on the main scrollback scrollbar will expand/collapse the task pane.
-	return x == m.width-w
+	// right. Once expanded, the left rail toggles, and the header arrow next to
+	// "Tasks" is also a toggle target because it is the obvious visible affordance.
+	// The body belongs to scrolling. Do not treat the whole viewport row as a
+	// toggle, or clicks on the main scrollback scrollbar will expand/collapse the
+	// task pane.
+	left := m.width - w
+	if x == left {
+		return true
+	}
+	// The expanded header renders as "│▶ Tasks"; make only that visible arrow
+	// cell an additional toggle target.
+	return m.taskPane.Expanded && y == m.scrollbarTop && x == left+1
 }
 
 type taskPaneGeometry struct {

@@ -91,7 +91,7 @@ func (c *chatView) renderSubAgentStartCard(card *subAgentStartEntry, maxWidth in
 		outerW = 28
 	}
 	innerW := outerW - 4 // borders plus one space of padding on each side.
-	border := c.styles.BorderDim
+	border := c.styles.Bright
 	labelStyle := c.styles.Info
 	valueStyle := c.styles.Primary
 	accent := c.styles.Accent

@@ -6,6 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"cercano/source/clients/cli/internal/theme"
 )
 
 func TestSubAgentEventCreatesEphemeralTabWithGrant(t *testing.T) {
@@ -252,6 +254,27 @@ func TestSubAgentPromptEventRendersLaunchingPrompt(t *testing.T) {
 	rendered := stripAnsiCSI(tab.view.renderEntry(entries[0], 0))
 	if !strings.Contains(rendered, "Task") || !strings.Contains(rendered, "│ Trace the dispatch behavior") {
 		t.Fatalf("startup card did not render task with pipe rail:\n%s", rendered)
+	}
+}
+
+func TestSubAgentStartCardDaylightBorderUsesReadableBrown(t *testing.T) {
+	m := New(nil, false)
+	m.palette = builtinPaletteForTest("daylight")
+	m.styles = theme.NewStyles(m.palette)
+	m.chatTabs.tabs[mainChatTabID].view.palette = m.palette
+	m.chatTabs.tabs[mainChatTabID].view.styles = m.styles
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.applySubAgentEvent(subAgentEventMsg{id: "child-1", kind: "started", title: "sub 1"})
+	tab := m.chatTabs.tabs["child-1"]
+	if tab == nil || len(tab.view.Entries()) != 1 || tab.view.Entries()[0].SubAgentStart == nil {
+		t.Fatalf("missing startup card entry: %+v", tab)
+	}
+	rendered := tab.view.renderEntry(tab.view.Entries()[0], 0)
+	if !strings.Contains(rendered, "38;2;122;78;10") {
+		t.Fatalf("daylight sub-agent card border should use readable brown Bright (#7A4E0A), got %q", rendered)
+	}
+	if strings.Contains(rendered, "38;2;216;199;160") {
+		t.Fatalf("daylight sub-agent card border should not use low-contrast BorderDim (#D8C7A0), got %q", rendered)
 	}
 }
 

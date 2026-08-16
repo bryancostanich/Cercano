@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/conversation"
 	"cercano/source/server/pkg/proto"
 )
 
@@ -23,8 +24,12 @@ func TestSessionProfile_SetGetAndLiveAccessor(t *testing.T) {
 	if got.GetActive() != agent.DefaultProfileName {
 		t.Fatalf("initial active = %q, want default", got.GetActive())
 	}
-	if len(got.GetAvailable()) == 0 || got.GetAvailable()[0] != "plan" {
-		t.Fatalf("available = %v, want to include plan", got.GetAvailable())
+	available := map[string]bool{}
+	for _, name := range got.GetAvailable() {
+		available[name] = true
+	}
+	if !available["plan"] || !available["autonomous"] {
+		t.Fatalf("available = %v, want to include plan and autonomous", got.GetAvailable())
 	}
 
 	// The runner's live accessor sees the default (no fence).
@@ -49,6 +54,26 @@ func TestSessionProfile_SetGetAndLiveAccessor(t *testing.T) {
 	// A DIFFERENT conversation is NOT fenced by this one entering planning mode.
 	if srv.runnerDeps().Profiles("conv-other").Restricts() {
 		t.Fatal("planning mode must not leak to another conversation")
+	}
+
+	// Autonomous is a live posture too, but it does not fence normal tool tiers by
+	// itself; permission mode remains the approval dial.
+	res, err = srv.SetSessionProfile(ctx, &proto.SetSessionProfileRequest{Name: "autonomous", ConversationId: conv})
+	if err != nil || !res.GetOk() {
+		t.Fatalf("SetSessionProfile(autonomous): err=%v resp=%+v", err, res)
+	}
+	got, _ = srv.GetSessionProfile(ctx, &proto.GetSessionProfileRequest{ConversationId: conv})
+	if got.GetActive() != "autonomous" {
+		t.Fatalf("active = %q, want autonomous", got.GetActive())
+	}
+	if !srv.runnerDeps().Profiles(conv).Restricts() {
+		t.Fatal("autonomous: runner accessor should signal active profile")
+	}
+
+	// Return to planning for the unchanged-profile assertion below.
+	res, err = srv.SetSessionProfile(ctx, &proto.SetSessionProfileRequest{Name: "plan", ConversationId: conv})
+	if err != nil || !res.GetOk() {
+		t.Fatalf("SetSessionProfile(plan) second time: err=%v resp=%+v", err, res)
 	}
 
 	// Unknown profile is a loud error and does not change the active profile.
@@ -78,5 +103,48 @@ func TestSessionProfile_SetGetAndLiveAccessor(t *testing.T) {
 	}
 	if srv.runnerDeps().Profiles(conv).Restricts() {
 		t.Fatal("after default: runner accessor should be unrestricted again")
+	}
+}
+
+func TestSessionProfile_RehydratesAutonomousFromRunningLedger(t *testing.T) {
+	srv, store := newServerWithStore(t)
+	ctx := context.Background()
+	const conv = "conv-auto-ledger"
+	if err := store.EnsureConversation(ctx, conv, "/proj", "model"); err != nil {
+		t.Fatalf("EnsureConversation: %v", err)
+	}
+	if err := store.SaveAutonomyRun(ctx, conversation.AutonomyRun{ConversationID: conv, State: "running", BriefJSON: `{"goal":"ship"}`}); err != nil {
+		t.Fatalf("SaveAutonomyRun: %v", err)
+	}
+
+	got, err := srv.GetSessionProfile(ctx, &proto.GetSessionProfileRequest{ConversationId: conv})
+	if err != nil {
+		t.Fatalf("GetSessionProfile: %v", err)
+	}
+	if got.GetActive() != "autonomous" {
+		t.Fatalf("active = %q, want autonomous", got.GetActive())
+	}
+	if srv.profileBroker.ActiveName(conv) != "autonomous" {
+		t.Fatalf("broker active = %q, want autonomous", srv.profileBroker.ActiveName(conv))
+	}
+}
+
+func TestSessionProfile_DoesNotRehydrateAutonomousFromTerminalLedger(t *testing.T) {
+	srv, store := newServerWithStore(t)
+	ctx := context.Background()
+	const conv = "conv-auto-done"
+	if err := store.EnsureConversation(ctx, conv, "/proj", "model"); err != nil {
+		t.Fatalf("EnsureConversation: %v", err)
+	}
+	if err := store.SaveAutonomyRun(ctx, conversation.AutonomyRun{ConversationID: conv, State: "completed", BriefJSON: `{"goal":"ship"}`}); err != nil {
+		t.Fatalf("SaveAutonomyRun: %v", err)
+	}
+
+	got, err := srv.GetSessionProfile(ctx, &proto.GetSessionProfileRequest{ConversationId: conv})
+	if err != nil {
+		t.Fatalf("GetSessionProfile: %v", err)
+	}
+	if got.GetActive() != agent.DefaultProfileName {
+		t.Fatalf("active = %q, want default", got.GetActive())
 	}
 }

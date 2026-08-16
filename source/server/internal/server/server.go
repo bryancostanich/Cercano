@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -199,10 +200,11 @@ func (s *Server) ToolRegistry() *agenttools.Registry { return s.toolSvc.Registry
 func (s *Server) InstallCapabilities() {
 	cfgSnapshot := s.cfgSvc.Get()
 	toolstack.InstallCapabilities(s.toolSvc, toolstack.CapDeps{
-		Cloud:     s.providerSvc.Cloud(),
-		Open:      s.providerSvc.Open(),
-		Config:    &cfgSnapshot,
-		CtxLoader: s.persistSvc.ContextLoader(),
+		Cloud:         s.providerSvc.Cloud(),
+		Open:          s.providerSvc.Open(),
+		Config:        &cfgSnapshot,
+		Conversations: s.persistSvc.Store(),
+		CtxLoader:     s.persistSvc.ContextLoader(),
 		// suggest_plan enters planning mode via the profile broker once the user
 		// approves the suggestion at the confirm gate.
 		EnterProfile: func(convID, name string) error {
@@ -3234,8 +3236,23 @@ func (s *Server) GetSessionProfile(ctx context.Context, req *proto.GetSessionPro
 	if s.profileBroker == nil {
 		return &proto.GetSessionProfileResponse{Active: agent.DefaultProfileName}, nil
 	}
+	convID := req.GetConversationId()
+	active := s.profileBroker.ActiveName(convID)
+	if active == agent.DefaultProfileName && convID != "" && s.persistSvc != nil && s.persistSvc.Store() != nil {
+		if run, err := s.persistSvc.Store().GetAutonomyRun(ctx, convID); err == nil && (run.State == "running" || run.State == "review_pending") {
+			// ProfileBroker is intentionally in-memory for normal session posture, but
+			// autonomous mode has a durable ledger. Rehydrate the active profile from
+			// that ledger so reconnect/resume restores the status chip and prompt
+			// posture for an unfinished run.
+			if err := s.setSessionProfile(convID, "autonomous"); err == nil {
+				active = "autonomous"
+			}
+		} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			log.Printf("GetSessionProfile: autonomy ledger lookup failed for %s: %v", convID, err)
+		}
+	}
 	return &proto.GetSessionProfileResponse{
-		Active:    s.profileBroker.ActiveName(req.GetConversationId()),
+		Active:    active,
 		Available: s.profileBroker.Names(),
 	}, nil
 }

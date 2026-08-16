@@ -23,6 +23,7 @@ import (
 	"cercano/source/server/internal/capabilities/agentadapter"
 	"cercano/source/server/internal/capabilities/builtins"
 	projectctx "cercano/source/server/internal/context"
+	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
 	tools "cercano/source/server/internal/hostsvc/tools"
 	"cercano/source/server/internal/inference"
@@ -68,6 +69,10 @@ type CapDeps struct {
 	Open      inference.Provider
 	Config    *config.Config
 	CtxLoader *projectctx.Loader
+	// Conversations is the durable conversation store used by capabilities that
+	// persist conversation-scoped side ledgers. Optional; nil means those ledgers
+	// are unavailable in this execution environment.
+	Conversations conversation.Store
 	// EnterProfile switches one conversation's active capability profile (used by
 	// the suggest_plan capability to enter planning mode on user approval). The
 	// convID scopes the switch to the calling conversation. Optional; nil means
@@ -98,6 +103,7 @@ func InstallCapabilities(svc tools.Catalog, d CapDeps) {
 		CloudProvider: d.Cloud,
 		OpenProvider:  d.Open,
 		Config:        d.Config,
+		Conversations: d.Conversations,
 		ProjectCtx:    d.CtxLoader,
 		Dispatch: func(ctx context.Context, spec dispatch.Spec) (dispatch.Result, error) {
 			e := svc.Engine()

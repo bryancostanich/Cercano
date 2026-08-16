@@ -946,6 +946,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.scrollTaskPaneBy(-promptWheelDelta, 0)
 			case tea.MouseWheelDown:
 				m.scrollTaskPaneBy(promptWheelDelta, 0)
+			case tea.MouseWheelLeft:
+				m.scrollTaskPaneBy(0, -promptWheelDelta)
+			case tea.MouseWheelRight:
+				m.scrollTaskPaneBy(0, promptWheelDelta)
 			}
 			return m, nil
 		}
@@ -1021,6 +1025,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toggleTaskPane()
 			return m, nil
 		}
+		if axis, state, pos, ok := m.taskPaneScrollbarAt(mouse.X, mouse.Y); ok {
+			m.taskPane.Dragging = true
+			m.taskPane.Drag = axis
+			m.taskPaneScrollTo(axis, scrollbarOffsetFromPosition(pos, state))
+			return m, nil
+		}
+		if m.taskPane.Expanded && m.taskPaneHit(mouse.X, mouse.Y) {
+			// The expanded pane body belongs to task interactions; do not let a
+			// click through to scrollback selection behind the right-side drawer.
+			return m, nil
+		}
 		if m.hasSubAgentTabs() && mouse.Y == m.scrollbarTop-2 {
 			if id, isClose, ok := tabStripHitAtX(m.chatTabItems(), mouse.X); ok {
 				if isClose {
@@ -1075,6 +1090,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		mouse := msg.Mouse()
+		if m.taskPane.Dragging {
+			axis, state, pos, ok := m.taskPaneScrollbarAt(mouse.X, mouse.Y)
+			if !ok || axis != m.taskPane.Drag {
+				g, geomOK := m.taskPaneGeometry()
+				if !geomOK {
+					return m, nil
+				}
+				switch scrollbarOrientation(m.taskPane.Drag) {
+				case scrollbarVertical:
+					state = g.verticalState(m.taskPane.ScrollY)
+					pos = mouse.Y - g.bodyTop()
+				case scrollbarHorizontal:
+					state = g.horizontalState(m.taskPane.ScrollX)
+					pos = mouse.X - g.contentLeft()
+				}
+			}
+			m.taskPaneScrollTo(m.taskPane.Drag, scrollbarOffsetFromPosition(pos, state))
+			return m, nil
+		}
 		if m.input.Dragging() {
 			m.input.MouseDrag(mouse.X, mouse.Y-m.promptTop())
 			return m, nil
@@ -1090,6 +1124,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		mouse := msg.Mouse()
+		if m.taskPane.Dragging {
+			m.clearTaskPaneDrag()
+			return m, nil
+		}
 		if m.input.Dragging() {
 			// Releasing a prompt drag auto-copies the selection, mirroring the
 			// scrollback viewport. This is the only copy path that survives

@@ -124,6 +124,13 @@ func TestTaskPaneMouseHitToggles(t *testing.T) {
 	if !m.taskPaneHit(119, m.scrollbarTop) {
 		t.Fatal("right-edge tab should be hittable")
 	}
+	if m.taskPaneToggleHit(118, m.scrollbarTop) {
+		t.Fatal("collapsed task pane should not toggle from the main scrollback scrollbar column")
+	}
+	m = send(t, m, tea.MouseClickMsg{X: 118, Y: m.scrollbarTop, Button: tea.MouseLeft})
+	if m.taskPane.Expanded {
+		t.Fatal("clicking outside the right-edge TASKS tab should not expand the pane")
+	}
 	m = send(t, m, tea.MouseClickMsg{X: 119, Y: m.scrollbarTop, Button: tea.MouseLeft})
 	if !m.taskPane.Expanded {
 		t.Fatal("clicking the right-edge tab should expand the pane")
@@ -209,15 +216,17 @@ func TestTaskPaneHorizontalScrollbarAndKeyScroll(t *testing.T) {
 		t.Fatalf("expected left edge of long title before horizontal scrolling:\n%s", view)
 	}
 
-	m = send(t, m, tea.KeyPressMsg{Code: tea.KeyRight})
+	paneX := m.width - m.taskPaneWidth() + 2
+	m = send(t, m, tea.MouseWheelMsg{X: paneX, Y: m.scrollbarTop + 3, Button: tea.MouseWheelRight})
 	if m.taskPane.ScrollX == 0 {
-		t.Fatal("right arrow with empty prompt should advance horizontal task scroll")
+		t.Fatal("horizontal trackpad wheel over expanded task pane should advance horizontal task scroll")
 	}
+	m = send(t, m, tea.KeyPressMsg{Code: tea.KeyRight})
 	scrolled := ansi.Strip(m.renderTaskPane(m.taskPaneWidth(), m.activeChat().Height()))
 	if strings.Contains(scrolled, "abcdef") {
 		t.Fatalf("horizontal scroll should move past the initial title prefix:\n%s", scrolled)
 	}
-	if !strings.Contains(scrolled, "efgh") {
+	if !strings.Contains(scrolled, "fghi") {
 		t.Fatalf("horizontal scroll should reveal later title text:\n%s", scrolled)
 	}
 }

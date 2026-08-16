@@ -24,9 +24,17 @@ type taskPaneState struct {
 	Width    int // expanded width including the left border; zero -> default
 	ScrollY  int
 	ScrollX  int
+	Drag     taskPaneScrollbarDrag
+	Dragging bool
 	Tasks    map[string]taskPaneTask
 	Roots    []string
 }
+
+type taskPaneScrollbarDrag scrollbarOrientation
+
+const (
+	taskPaneDragNone taskPaneScrollbarDrag = -1
+)
 
 type taskPaneTask struct {
 	ID       string
@@ -73,6 +81,7 @@ func (m *Model) toggleTaskPane() {
 		return
 	}
 	m.taskPane.Expanded = !m.taskPane.Expanded
+	m.clearTaskPaneDrag()
 	m.relayout()
 }
 
@@ -153,9 +162,93 @@ func (m Model) taskPaneToggleHit(x, y int) bool {
 	if w == 0 || y < m.scrollbarTop || y >= m.scrollbarTop+m.activeChat().Height() {
 		return false
 	}
-	// The one-column collapsed tab toggles anywhere in the pane. Once expanded,
-	// only the left rail/header rail toggles; the body belongs to scrolling.
-	return w == taskPaneCollapsedWidth || x == m.width-w
+	// The one-column collapsed tab toggles only on its own TASKS rail at the far
+	// right. Once expanded, only the left rail/header rail toggles; the body
+	// belongs to scrolling. Do not treat the whole viewport row as a toggle, or
+	// clicks on the main scrollback scrollbar will expand/collapse the task pane.
+	return x == m.width-w
+}
+
+type taskPaneGeometry struct {
+	left, top, width, height int
+	contentW, bodyH          int
+	needV, needH             bool
+	maxLineW, totalLines     int
+}
+
+func (m Model) taskPaneGeometry() (taskPaneGeometry, bool) {
+	w := m.taskPaneWidth()
+	if w == 0 {
+		return taskPaneGeometry{}, false
+	}
+	h := m.activeChat().Height()
+	contentW, bodyH, needV, needH, maxLineW, totalLines := m.taskPaneViewportGeometry(w, h)
+	return taskPaneGeometry{
+		left:       m.width - w,
+		top:        m.scrollbarTop,
+		width:      w,
+		height:     h,
+		contentW:   contentW,
+		bodyH:      bodyH,
+		needV:      needV,
+		needH:      needH,
+		maxLineW:   maxLineW,
+		totalLines: totalLines,
+	}, true
+}
+
+func (g taskPaneGeometry) bodyTop() int { return g.top + 2 }
+func (g taskPaneGeometry) hbarY() int   { return g.bodyTop() + g.bodyH }
+func (g taskPaneGeometry) contentLeft() int {
+	return g.left + 1
+}
+func (g taskPaneGeometry) vbarX() int {
+	return g.contentLeft() + g.contentW
+}
+func (g taskPaneGeometry) verticalState(offset int) scrollbarState {
+	return scrollbarState{Total: g.totalLines, Viewport: g.bodyH, Offset: offset, Length: g.bodyH}
+}
+func (g taskPaneGeometry) horizontalState(offset int) scrollbarState {
+	return scrollbarState{Total: g.maxLineW, Viewport: g.contentW, Offset: offset, Length: g.contentW}
+}
+
+func (m Model) taskPaneScrollbarAt(x, y int) (taskPaneScrollbarDrag, scrollbarState, int, bool) {
+	if !m.taskPaneAvailable() || !m.taskPane.Expanded {
+		return 0, scrollbarState{}, 0, false
+	}
+	g, ok := m.taskPaneGeometry()
+	if !ok {
+		return 0, scrollbarState{}, 0, false
+	}
+	if g.needV && x == g.vbarX() && y >= g.bodyTop() && y < g.bodyTop()+g.bodyH {
+		state := g.verticalState(m.taskPane.ScrollY)
+		return taskPaneScrollbarDrag(scrollbarVertical), state, y - g.bodyTop(), true
+	}
+	if g.needH && y == g.hbarY() && x >= g.contentLeft() && x < g.contentLeft()+g.contentW {
+		state := g.horizontalState(m.taskPane.ScrollX)
+		return taskPaneScrollbarDrag(scrollbarHorizontal), state, x - g.contentLeft(), true
+	}
+	return 0, scrollbarState{}, 0, false
+}
+
+func (m *Model) taskPaneScrollTo(axis taskPaneScrollbarDrag, offset int) bool {
+	g, ok := (*m).taskPaneGeometry()
+	if !ok {
+		return false
+	}
+	oldY, oldX := m.taskPane.ScrollY, m.taskPane.ScrollX
+	switch scrollbarOrientation(axis) {
+	case scrollbarVertical:
+		m.taskPane.ScrollY = clampInt(offset, 0, maxInt(0, g.totalLines-g.bodyH))
+	case scrollbarHorizontal:
+		m.taskPane.ScrollX = clampInt(offset, 0, maxInt(0, g.maxLineW-g.contentW))
+	}
+	return oldY != m.taskPane.ScrollY || oldX != m.taskPane.ScrollX
+}
+
+func (m *Model) clearTaskPaneDrag() {
+	m.taskPane.Dragging = false
+	m.taskPane.Drag = taskPaneDragNone
 }
 
 func (m Model) renderViewportWithTaskPane() string {
@@ -381,16 +474,16 @@ func horizontalScrollbarRow(total, width, offset int, thumbStyle, trackStyle fun
 	if width <= 0 {
 		return ""
 	}
-	thumbLeft, thumbSize, ok := scrollbarThumb(total, width, offset)
+	glyphs := scrollbarGlyphs(scrollbarState{Total: total, Viewport: width, Offset: offset, Length: width})
 	var b strings.Builder
-	for i := 0; i < width; i++ {
-		switch {
-		case !ok:
-			b.WriteByte(' ')
-		case i >= thumbLeft && i < thumbLeft+thumbSize:
+	for _, glyph := range glyphs {
+		switch glyph {
+		case '█':
 			b.WriteString(thumbStyle("█"))
-		default:
+		case '░':
 			b.WriteString(trackStyle("░"))
+		default:
+			b.WriteByte(' ')
 		}
 	}
 	return b.String()

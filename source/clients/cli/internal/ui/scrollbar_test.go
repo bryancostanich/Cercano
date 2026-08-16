@@ -42,6 +42,18 @@ func TestScrollbarThumbMinSize(t *testing.T) {
 	}
 }
 
+func TestScrollbarHorizontalMetricsAndClickOffset(t *testing.T) {
+	state := scrollbarState{Total: 80, Viewport: 20, Offset: 0, Length: 20}
+	glyphs := scrollbarGlyphs(state)
+	want := strings.Repeat("█", 5) + strings.Repeat("░", 15)
+	if got := string(glyphs); got != want {
+		t.Fatalf("horizontal glyphs at left = %q, want %q", got, want)
+	}
+	if got := scrollbarOffsetFromPosition(19, state); got != 60 {
+		t.Fatalf("right-edge click offset = %d, want 60", got)
+	}
+}
+
 func TestScrollOffsetFromClick(t *testing.T) {
 	// viewport top=2, height=10, total=40 (max offset 30).
 	cases := []struct {

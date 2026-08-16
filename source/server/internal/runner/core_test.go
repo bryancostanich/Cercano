@@ -464,8 +464,15 @@ func TestBuildSystemPrompt_SignalsActiveProfile(t *testing.T) {
 		t.Fatalf("plan-profile prompt should tell the model not to re-suggest; got:\n%s", plan)
 	}
 
+	autonomous := BuildSystemPrompt(d, "", agent.AutonomousProfile())
+	for _, want := range []string{"AUTONOMOUS MODE", "approved run brief", "capture the decision", "request autonomous exit"} {
+		if !strings.Contains(autonomous, want) {
+			t.Fatalf("autonomous-profile prompt should contain %q; got:\n%s", want, autonomous)
+		}
+	}
+
 	normal := BuildSystemPrompt(d, "", agent.Profile{})
-	if strings.Contains(normal, "PLANNING MODE") {
-		t.Fatalf("unrestricted prompt must not claim planning mode; got:\n%s", normal)
+	if strings.Contains(normal, "PLANNING MODE") || strings.Contains(normal, "AUTONOMOUS MODE") {
+		t.Fatalf("unrestricted prompt must not claim a special profile; got:\n%s", normal)
 	}
 }

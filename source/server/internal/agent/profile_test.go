@@ -53,6 +53,26 @@ func TestPlanProfile_AllowsReadAndFileWritesOnly(t *testing.T) {
 	}
 }
 
+func TestAutonomousProfile_AllowsEveryKnownTierButSignalsActiveProfile(t *testing.T) {
+	p := AutonomousProfile()
+	if !p.Restricts() {
+		t.Fatal("autonomous profile must be active/signaling even though it does not fence normal tools")
+	}
+	cases := []struct {
+		tier llm.Permission
+		name string
+	}{
+		{llm.PermR, "Read"},
+		{llm.PermW, "Write"},
+		{llm.PermX, "Bash"},
+	}
+	for _, c := range cases {
+		if !p.Allows(c.tier, c.name) {
+			t.Errorf("autonomous profile must allow %s tool %q", c.tier, c.name)
+		}
+	}
+}
+
 // --- D: advertisement filter ----------------------------------------------
 
 func TestPlanProfile_FiltersExecToolsButKeepsFileWrites(t *testing.T) {

@@ -38,16 +38,17 @@ type ProfileBroker struct {
 // both select it. It is never stored in the registry.
 const DefaultProfileName = "default"
 
-// NewProfileBroker returns a broker seeded with the built-in profiles (currently
-// just "plan"). Every conversation starts in the default (unrestricted) profile;
-// the active pointer is keyed by conversation ID so one client entering planning
-// mode does not fence any other attached client.
+// NewProfileBroker returns a broker seeded with the built-in profiles. Every
+// conversation starts in the default (unrestricted) profile; the active pointer
+// is keyed by conversation ID so one client entering a mode does not fence or
+// reshape any other attached client.
 func NewProfileBroker() *ProfileBroker {
 	b := &ProfileBroker{
 		active:   make(map[string]string),
 		registry: make(map[string]Profile),
 	}
 	b.Register(PlanProfile())
+	b.Register(AutonomousProfile())
 	return b
 }
 

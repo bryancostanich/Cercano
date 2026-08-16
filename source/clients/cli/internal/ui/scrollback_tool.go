@@ -620,7 +620,7 @@ func renderGroupSummary(completed []ToolEntry, width int, styles theme.Styles, f
 	if expanded {
 		marker = "▾"
 	}
-	left := gutter + marker + " " + label + toolEntryFaint.Render(breakdown)
+	left := gutter + styles.Primary.Render(marker+" "+label) + toolEntryFaint.Render(breakdown)
 	timing := formatDur(total)
 	rightPlain := timing + " " + glyph
 	statusStyled := toolEntryFaint.Render(timing+" ") + glyphStyle.Render(glyph)

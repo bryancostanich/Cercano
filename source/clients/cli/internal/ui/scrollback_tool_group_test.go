@@ -48,6 +48,29 @@ func TestRenderToolGroup_SingleEntryPassesThroughToPerCallLine(t *testing.T) {
 	}
 }
 
+func TestRenderToolGroup_DaylightSummaryLabelUsesReadablePrimary(t *testing.T) {
+	var daylight theme.Palette
+	for _, builtin := range theme.BuiltinThemes() {
+		if builtin.Name == "daylight" {
+			daylight = builtin.Palette
+			break
+		}
+	}
+	styles := theme.NewStyles(daylight)
+	md := render.NewMarkdown(theme.MarkdownStyle(daylight))
+	entries := []ToolEntry{
+		makeCompletedTool("Read", 5*time.Millisecond),
+		makeCompletedTool("Edit", 7*time.Millisecond),
+	}
+	out := renderToolGroup(entries, 100, styles, md, defaultOpts())
+	if !strings.Contains(out, "38;2;90;58;10") {
+		t.Fatalf("daylight tool group summary marker/count should use primary text (#5A3A0A), got %q", out)
+	}
+	if strings.Contains(out, "\x1b[2m▸") || strings.Contains(out, "\x1b[2m2 tool calls") {
+		t.Fatalf("tool group summary marker/count should not be faint in daylight, got %q", out)
+	}
+}
+
 func TestRenderToolGroup_PluralLabelWithBreakdown(t *testing.T) {
 	styles := theme.NewStyles(theme.Cracker())
 	md := render.NewMarkdown(theme.MarkdownStyle(theme.Cracker()))

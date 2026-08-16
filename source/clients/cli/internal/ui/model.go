@@ -3515,7 +3515,7 @@ func (m *Model) restoreSubAgentTabs(ctx context.Context, conversationID string) 
 // resume until the user takes their next turn. The cmd is the only way to
 // drive the meter from this code path; callers MUST plumb it through.
 func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	turns, err := m.agent.ResumeConversation(ctx, conversationID)
 	if err != nil {

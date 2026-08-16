@@ -96,6 +96,7 @@ type Service interface {
 	ListConversations(ctx context.Context, req *proto.ListConversationsRequest) (*proto.ListConversationsResponse, error)
 	GetConversation(ctx context.Context, req *proto.GetConversationRequest) (*proto.Conversation, error)
 	ResumeConversation(ctx context.Context, req *proto.ResumeConversationRequest) (*proto.ResumeConversationResponse, error)
+	StreamResumeConversation(req *proto.ResumeConversationRequest, stream proto.Agent_StreamResumeConversationServer) error
 	DeleteConversation(ctx context.Context, req *proto.DeleteConversationRequest) (*proto.DeleteConversationResponse, error)
 	RenameConversation(ctx context.Context, req *proto.RenameConversationRequest) (*proto.RenameConversationResponse, error)
 	GetConversationTurns(ctx context.Context, req *proto.GetConversationTurnsRequest) (*proto.GetConversationTurnsResponse, error)
@@ -467,6 +468,11 @@ func (x *svc) GetConversation(ctx context.Context, req *proto.GetConversationReq
 	}, nil
 }
 
+const (
+	resumeConversationChunkTargetBytes  = 8 << 20
+	resumeConversationChunkHardMaxBytes = 48 << 20
+)
+
 // ResumeConversation loads persisted turns for a conversation, rehydrates the
 // in-memory session store, returns the turns so the CLI can render them in scrollback.
 func (x *svc) ResumeConversation(ctx context.Context, req *proto.ResumeConversationRequest) (*proto.ResumeConversationResponse, error) {
@@ -479,19 +485,89 @@ func (x *svc) ResumeConversation(ctx context.Context, req *proto.ResumeConversat
 	}
 	out := &proto.ResumeConversationResponse{Turns: make([]*proto.PersistedTurn, 0, len(turns))}
 	for _, t := range turns {
-		out.Turns = append(out.Turns, &proto.PersistedTurn{
-			Id:             t.ID,
-			ConversationId: t.ConversationID,
-			Role:           t.Role,
-			Content:        t.Content,
-			TokensIn:       int32(t.TokensIn),
-			TokensOut:      int32(t.TokensOut),
-			LatencyMs:      int32(t.LatencyMs),
-			CreatedAt:      t.CreatedAt.Unix(),
-			ContentJson:    t.BlocksJSON,
-		})
+		out.Turns = append(out.Turns, persistedTurnProto(t))
 	}
 	return out, nil
+}
+
+// StreamResumeConversation loads the same logical transcript as
+// ResumeConversation, but sends it in byte-budgeted batches so large histories
+// do not become one oversized gRPC response message. The agent-side resume call
+// still runs once up front so session rehydration and context-meter behavior
+// match the unary compatibility RPC.
+func (x *svc) StreamResumeConversation(req *proto.ResumeConversationRequest, stream proto.Agent_StreamResumeConversationServer) error {
+	if x.convAgent == nil {
+		return nil
+	}
+	turns, err := x.convAgent.ResumeConversation(stream.Context(), req.GetConversationId())
+	if err != nil {
+		return err
+	}
+	return sendResumeTurnChunks(req.GetConversationId(), turns, resumeConversationChunkTargetBytes, stream.Send)
+}
+
+func sendResumeTurnChunks(conversationID string, turns []conversation.Turn, targetBytes int, send func(*proto.ResumeConversationChunk) error) error {
+	return sendResumeTurnChunksWithLimits(conversationID, turns, targetBytes, resumeConversationChunkHardMaxBytes, send)
+}
+
+func sendResumeTurnChunksWithLimits(conversationID string, turns []conversation.Turn, targetBytes, hardMaxBytes int, send func(*proto.ResumeConversationChunk) error) error {
+	if targetBytes <= 0 {
+		targetBytes = resumeConversationChunkTargetBytes
+	}
+	if hardMaxBytes <= 0 {
+		hardMaxBytes = resumeConversationChunkHardMaxBytes
+	}
+	chunk := &proto.ResumeConversationChunk{Turns: make([]*proto.PersistedTurn, 0)}
+	chunkBytes := 0
+	flush := func() error {
+		if len(chunk.GetTurns()) == 0 {
+			return nil
+		}
+		if err := send(chunk); err != nil {
+			return err
+		}
+		chunk = &proto.ResumeConversationChunk{Turns: make([]*proto.PersistedTurn, 0)}
+		chunkBytes = 0
+		return nil
+	}
+	for _, t := range turns {
+		pt := persistedTurnProto(t)
+		turnBytes := estimatePersistedTurnBytes(pt)
+		if turnBytes > hardMaxBytes {
+			return fmt.Errorf("conversation %s contains an individual turn too large to stream safely: turn %s is about %d bytes", conversationID, pt.GetId(), turnBytes)
+		}
+		if chunkBytes > 0 && chunkBytes+turnBytes > targetBytes {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+		chunk.Turns = append(chunk.Turns, pt)
+		chunkBytes += turnBytes
+	}
+	return flush()
+}
+
+func persistedTurnProto(t conversation.Turn) *proto.PersistedTurn {
+	return &proto.PersistedTurn{
+		Id:             t.ID,
+		ConversationId: t.ConversationID,
+		Role:           t.Role,
+		Content:        t.Content,
+		TokensIn:       int32(t.TokensIn),
+		TokensOut:      int32(t.TokensOut),
+		LatencyMs:      int32(t.LatencyMs),
+		CreatedAt:      t.CreatedAt.Unix(),
+		ContentJson:    t.BlocksJSON,
+	}
+}
+
+func estimatePersistedTurnBytes(t *proto.PersistedTurn) int {
+	if t == nil {
+		return 0
+	}
+	// String payload dominates resume size. The constant covers protobuf tags,
+	// lengths, numeric fields, and slice overhead with enough slack for batching.
+	return 128 + len(t.GetId()) + len(t.GetConversationId()) + len(t.GetRole()) + len(t.GetContent()) + len(t.GetContentJson())
 }
 
 // DeleteConversation hard-deletes a conversation.

@@ -19,7 +19,9 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 
 	"cercano/source/server/pkg/proto"
 )
@@ -492,14 +494,43 @@ func (c *Client) ListConversations(ctx context.Context, projectDir string, limit
 }
 
 // ResumeConversation loads the turns of a persisted conversation and
-// rehydrates the in-memory session store on the agent.
+// rehydrates the in-memory session store on the agent. It uses the streaming
+// resume RPC and collects chunks so callers keep a simple full-transcript API
+// without forcing the transport to carry one giant response message.
 func (c *Client) ResumeConversation(ctx context.Context, conversationID string) ([]PersistedTurn, error) {
+	stream, err := c.agent.StreamResumeConversation(ctx, &proto.ResumeConversationRequest{ConversationId: conversationID})
+	if err != nil {
+		if status.Code(err) == codes.Unimplemented {
+			return c.resumeConversationUnary(ctx, conversationID)
+		}
+		return nil, err
+	}
+	var out []PersistedTurn
+	for {
+		chunk, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return out, nil
+		}
+		if err != nil {
+			if len(out) == 0 && status.Code(err) == codes.Unimplemented {
+				return c.resumeConversationUnary(ctx, conversationID)
+			}
+			return nil, fmt.Errorf("stream resume conversation %s: %w", conversationID, err)
+		}
+		out = appendPersistedTurns(out, chunk.GetTurns())
+	}
+}
+
+func (c *Client) resumeConversationUnary(ctx context.Context, conversationID string) ([]PersistedTurn, error) {
 	resp, err := c.agent.ResumeConversation(ctx, &proto.ResumeConversationRequest{ConversationId: conversationID})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]PersistedTurn, 0, len(resp.GetTurns()))
-	for _, t := range resp.GetTurns() {
+	return appendPersistedTurns(nil, resp.GetTurns()), nil
+}
+
+func appendPersistedTurns(out []PersistedTurn, turns []*proto.PersistedTurn) []PersistedTurn {
+	for _, t := range turns {
 		out = append(out, PersistedTurn{
 			ID:             t.GetId(),
 			ConversationID: t.GetConversationId(),
@@ -512,7 +543,7 @@ func (c *Client) ResumeConversation(ctx context.Context, conversationID string) 
 			ContentJSON:    t.GetContentJson(),
 		})
 	}
-	return out, nil
+	return out
 }
 
 // SubAgentInfo is one persisted sub-agent (dispatch) conversation spawned

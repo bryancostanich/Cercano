@@ -1608,6 +1608,11 @@ func (s *Server) ResumeConversation(ctx context.Context, req *proto.ResumeConver
 	return s.persistSvc.ResumeConversation(ctx, req)
 }
 
+// StreamResumeConversation implements proto.AgentServer — delegates to persistSvc.
+func (s *Server) StreamResumeConversation(req *proto.ResumeConversationRequest, stream proto.Agent_StreamResumeConversationServer) error {
+	return s.persistSvc.StreamResumeConversation(req, stream)
+}
+
 // DeleteConversation implements proto.AgentServer — delegates to persistSvc.
 func (s *Server) DeleteConversation(ctx context.Context, req *proto.DeleteConversationRequest) (*proto.DeleteConversationResponse, error) {
 	return s.persistSvc.DeleteConversation(ctx, req)

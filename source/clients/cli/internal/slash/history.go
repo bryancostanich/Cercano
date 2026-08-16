@@ -30,13 +30,9 @@ func RegisterHistory(r *Registry, c *agentclient.Client, currentConv CurrentConv
 			if len(args) == 0 {
 				return Result{Kind: ResultOpenHistoryPicker}
 			}
-			// Validate by hitting the agent — bad ids fail fast in the CLI
-			// rather than surprising the user mid-stream.
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-			if _, err := c.ResumeConversation(ctx, args[0]); err != nil {
-				return Result{Kind: ResultText, Text: "resume failed: " + err.Error()}
-			}
+			// Do not validate by fetching the full transcript here: large histories
+			// are streamed during applyResume, where errors can be reported without
+			// doing the expensive resume twice.
 			return Result{Kind: ResultResumeConversation, Text: args[0]}
 		},
 	})

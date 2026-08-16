@@ -14,6 +14,8 @@ import (
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // mockAgentClient implements proto.AgentClient for testing.
@@ -131,6 +133,10 @@ func (m *mockAgentClient) DismissSubAgent(ctx context.Context, in *proto.Dismiss
 
 func (m *mockAgentClient) ResumeConversation(ctx context.Context, in *proto.ResumeConversationRequest, opts ...grpc.CallOption) (*proto.ResumeConversationResponse, error) {
 	return &proto.ResumeConversationResponse{}, nil
+}
+
+func (m *mockAgentClient) StreamResumeConversation(ctx context.Context, in *proto.ResumeConversationRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[proto.ResumeConversationChunk], error) {
+	return nil, status.Error(codes.Unimplemented, "method StreamResumeConversation not implemented")
 }
 
 func (m *mockAgentClient) DeleteConversation(ctx context.Context, in *proto.DeleteConversationRequest, opts ...grpc.CallOption) (*proto.DeleteConversationResponse, error) {

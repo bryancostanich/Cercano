@@ -27,6 +27,7 @@ const (
 	Agent_GetConfig_FullMethodName                  = "/agent.Agent/GetConfig"
 	Agent_ListConversations_FullMethodName          = "/agent.Agent/ListConversations"
 	Agent_ResumeConversation_FullMethodName         = "/agent.Agent/ResumeConversation"
+	Agent_StreamResumeConversation_FullMethodName   = "/agent.Agent/StreamResumeConversation"
 	Agent_DeleteConversation_FullMethodName         = "/agent.Agent/DeleteConversation"
 	Agent_RenameConversation_FullMethodName         = "/agent.Agent/RenameConversation"
 	Agent_GetConversation_FullMethodName            = "/agent.Agent/GetConversation"
@@ -123,6 +124,10 @@ type AgentClient interface {
 	// agent so the next chat turn sees full prior context.
 	ListConversations(ctx context.Context, in *ListConversationsRequest, opts ...grpc.CallOption) (*ListConversationsResponse, error)
 	ResumeConversation(ctx context.Context, in *ResumeConversationRequest, opts ...grpc.CallOption) (*ResumeConversationResponse, error)
+	// StreamResumeConversation returns the same logical resume transcript as
+	// ResumeConversation, but in bounded batches so large histories do not become
+	// one oversized gRPC message.
+	StreamResumeConversation(ctx context.Context, in *ResumeConversationRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ResumeConversationChunk], error)
 	DeleteConversation(ctx context.Context, in *DeleteConversationRequest, opts ...grpc.CallOption) (*DeleteConversationResponse, error)
 	RenameConversation(ctx context.Context, in *RenameConversationRequest, opts ...grpc.CallOption) (*RenameConversationResponse, error)
 	GetConversation(ctx context.Context, in *GetConversationRequest, opts ...grpc.CallOption) (*Conversation, error)
@@ -409,6 +414,25 @@ func (c *agentClient) ResumeConversation(ctx context.Context, in *ResumeConversa
 	return out, nil
 }
 
+func (c *agentClient) StreamResumeConversation(ctx context.Context, in *ResumeConversationRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ResumeConversationChunk], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[2], Agent_StreamResumeConversation_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ResumeConversationRequest, ResumeConversationChunk]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_StreamResumeConversationClient = grpc.ServerStreamingClient[ResumeConversationChunk]
+
 func (c *agentClient) DeleteConversation(ctx context.Context, in *DeleteConversationRequest, opts ...grpc.CallOption) (*DeleteConversationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DeleteConversationResponse)
@@ -511,7 +535,7 @@ func (c *agentClient) GetOpenRuntimeStatus(ctx context.Context, in *GetOpenRunti
 
 func (c *agentClient) InstallOpenRuntime(ctx context.Context, in *InstallOpenRuntimeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[InstallProgress], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[2], Agent_InstallOpenRuntime_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[3], Agent_InstallOpenRuntime_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -530,7 +554,7 @@ type Agent_InstallOpenRuntimeClient = grpc.ServerStreamingClient[InstallProgress
 
 func (c *agentClient) RegenerateContext(ctx context.Context, in *RegenerateContextRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RegenerateContextProgress], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[3], Agent_RegenerateContext_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[4], Agent_RegenerateContext_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -559,7 +583,7 @@ func (c *agentClient) ExportContext(ctx context.Context, in *ExportContextReques
 
 func (c *agentClient) ExportTrajectory(ctx context.Context, in *ExportTrajectoryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ExportTrajectoryEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[4], Agent_ExportTrajectory_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[5], Agent_ExportTrajectory_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -748,7 +772,7 @@ func (c *agentClient) GetModelRAMEstimate(ctx context.Context, in *GetModelRAMEs
 
 func (c *agentClient) StreamRuntimeLogs(ctx context.Context, in *StreamRuntimeLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RuntimeLogEntry], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[5], Agent_StreamRuntimeLogs_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[6], Agent_StreamRuntimeLogs_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -827,7 +851,7 @@ func (c *agentClient) GetSessionProfile(ctx context.Context, in *GetSessionProfi
 
 func (c *agentClient) SubscribeEvents(ctx context.Context, in *SubscribeEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ClientEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[6], Agent_SubscribeEvents_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[7], Agent_SubscribeEvents_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1036,7 +1060,7 @@ func (c *agentClient) ListCloudProfileModels(ctx context.Context, in *ListCloudP
 
 func (c *agentClient) StartChatGPTLogin(ctx context.Context, in *StartChatGPTLoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StartChatGPTLoginEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[7], Agent_StartChatGPTLogin_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[8], Agent_StartChatGPTLogin_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1055,7 +1079,7 @@ type Agent_StartChatGPTLoginClient = grpc.ServerStreamingClient[StartChatGPTLogi
 
 func (c *agentClient) StartClaudeLogin(ctx context.Context, in *StartClaudeLoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StartClaudeLoginEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[8], Agent_StartClaudeLogin_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[9], Agent_StartClaudeLogin_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1115,6 +1139,10 @@ type AgentServer interface {
 	// agent so the next chat turn sees full prior context.
 	ListConversations(context.Context, *ListConversationsRequest) (*ListConversationsResponse, error)
 	ResumeConversation(context.Context, *ResumeConversationRequest) (*ResumeConversationResponse, error)
+	// StreamResumeConversation returns the same logical resume transcript as
+	// ResumeConversation, but in bounded batches so large histories do not become
+	// one oversized gRPC message.
+	StreamResumeConversation(*ResumeConversationRequest, grpc.ServerStreamingServer[ResumeConversationChunk]) error
 	DeleteConversation(context.Context, *DeleteConversationRequest) (*DeleteConversationResponse, error)
 	RenameConversation(context.Context, *RenameConversationRequest) (*RenameConversationResponse, error)
 	GetConversation(context.Context, *GetConversationRequest) (*Conversation, error)
@@ -1326,6 +1354,9 @@ func (UnimplementedAgentServer) ListConversations(context.Context, *ListConversa
 }
 func (UnimplementedAgentServer) ResumeConversation(context.Context, *ResumeConversationRequest) (*ResumeConversationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResumeConversation not implemented")
+}
+func (UnimplementedAgentServer) StreamResumeConversation(*ResumeConversationRequest, grpc.ServerStreamingServer[ResumeConversationChunk]) error {
+	return status.Error(codes.Unimplemented, "method StreamResumeConversation not implemented")
 }
 func (UnimplementedAgentServer) DeleteConversation(context.Context, *DeleteConversationRequest) (*DeleteConversationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteConversation not implemented")
@@ -1660,6 +1691,17 @@ func _Agent_ResumeConversation_Handler(srv interface{}, ctx context.Context, dec
 	}
 	return interceptor(ctx, in, info, handler)
 }
+
+func _Agent_StreamResumeConversation_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(ResumeConversationRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AgentServer).StreamResumeConversation(m, &grpc.GenericServerStream[ResumeConversationRequest, ResumeConversationChunk]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_StreamResumeConversationServer = grpc.ServerStreamingServer[ResumeConversationChunk]
 
 func _Agent_DeleteConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DeleteConversationRequest)
@@ -2967,6 +3009,11 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "AttachConversation",
 			Handler:       _Agent_AttachConversation_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "StreamResumeConversation",
+			Handler:       _Agent_StreamResumeConversation_Handler,
 			ServerStreams: true,
 		},
 		{

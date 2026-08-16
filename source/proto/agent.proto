@@ -39,6 +39,10 @@ service Agent {
   // agent so the next chat turn sees full prior context.
   rpc ListConversations (ListConversationsRequest) returns (ListConversationsResponse) {}
   rpc ResumeConversation (ResumeConversationRequest) returns (ResumeConversationResponse) {}
+  // StreamResumeConversation returns the same logical resume transcript as
+  // ResumeConversation, but in bounded batches so large histories do not become
+  // one oversized gRPC message.
+  rpc StreamResumeConversation (ResumeConversationRequest) returns (stream ResumeConversationChunk) {}
   rpc DeleteConversation (DeleteConversationRequest) returns (DeleteConversationResponse) {}
   rpc RenameConversation (RenameConversationRequest) returns (RenameConversationResponse) {}
   rpc GetConversation (GetConversationRequest) returns (Conversation) {}
@@ -802,6 +806,7 @@ message ListConversationsResponse {
 
 message ResumeConversationRequest  { string conversation_id = 1; }
 message ResumeConversationResponse { repeated PersistedTurn turns = 1; }
+message ResumeConversationChunk    { repeated PersistedTurn turns = 1; }
 
 message DeleteConversationRequest  { string conversation_id = 1; }
 message DeleteConversationResponse { bool ok = 1; }

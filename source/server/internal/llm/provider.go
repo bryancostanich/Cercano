@@ -15,6 +15,11 @@ type ChatRequest struct {
 	Tools      []Tool
 	ToolChoice ToolChoice
 	MaxTokens  int
+	// ConversationID and RequestID are diagnostic-only correlation fields. They
+	// are never sent to providers; adapters use them to connect model-loop logs
+	// with provider-bound HTTP request/error logs.
+	ConversationID string
+	RequestID      string
 	// Temperature is a pointer so 0 ("greedy decoding") is distinguishable
 	// from unset (nil = the provider's default). Greedy matters: the
 	// compaction summarizer requires it for reproducible, format-conforming

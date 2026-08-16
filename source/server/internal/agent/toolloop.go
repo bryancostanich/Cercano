@@ -485,13 +485,15 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 
 	for iter := 0; unlimitedIters || iter < maxIters; iter++ {
 		req := llm.ChatRequest{
-			Model:       in.Model,
-			Tier:        in.Tier,
-			System:      in.System,
-			Messages:    hist,
-			Tools:       catalog,
-			MaxTokens:   maxTokens,
-			Temperature: in.Temperature,
+			Model:          in.Model,
+			Tier:           in.Tier,
+			System:         in.System,
+			Messages:       hist,
+			Tools:          catalog,
+			MaxTokens:      maxTokens,
+			Temperature:    in.Temperature,
+			ConversationID: in.ConversationID,
+			RequestID:      fmt.Sprintf("%s:%d", in.ConversationID, iter+1),
 		}
 		log.Printf("[tool-loop] model request: conv=%s provider=%s model=%s iter=%d stream=true temp=%s max_tokens=%d tools=%v lean_subagent_prompt=%t flatten_tool_results=%t system_prefix=%q user_prefix=%q history=%d",
 			in.ConversationID, in.Provider.Name(), in.Model, iter+1, temperatureForLog(req.Temperature), req.MaxTokens, toolNamesForLog(req.Tools), systemHasLeanSubagentMarker(req.System), in.FlattenToolResults, truncateRunes(strings.TrimSpace(req.System), 120), truncateRunes(strings.TrimSpace(in.UserInput), 120), len(req.Messages))

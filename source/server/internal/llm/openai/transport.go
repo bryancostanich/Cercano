@@ -14,6 +14,9 @@ import (
 // object shape go-openai's ErrorResponse expects, before go-openai parses them.
 // Retry is handled by the httpx.RetryTransport this wraps (see client.go). 2xx
 // (streaming) responses pass through untouched — their bodies are never buffered.
+type diagnosticConversationIDKey struct{}
+type diagnosticRequestIDKey struct{}
+
 type normalizingDoer struct {
 	next   goopenai.HTTPDoer
 	quirks Quirks
@@ -26,8 +29,10 @@ func (d *normalizingDoer) Do(req *http.Request) (*http.Response, error) {
 	}
 	resp, err := d.next.Do(patched)
 	if err != nil {
+		log.Printf("[openai] http request failed: conv=%s request_id=%s method=%s path=%s error=%v", diagnosticConversationID(patched), diagnosticRequestID(patched), patched.Method, patched.URL.Path, err)
 		return nil, err
 	}
+	log.Printf("[openai] http response: conv=%s request_id=%s method=%s path=%s status=%d content_length=%d", diagnosticConversationID(patched), diagnosticRequestID(patched), patched.Method, patched.URL.Path, resp.StatusCode, resp.ContentLength)
 	return d.normalize(resp), nil
 }
 
@@ -73,10 +78,12 @@ func (d *normalizingDoer) normalize(resp *http.Response) *http.Response {
 	body, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if err != nil {
+		log.Printf("[openai] http error body read failed: conv=%s request_id=%s status=%d error=%v", diagnosticConversationID(resp.Request), diagnosticRequestID(resp.Request), resp.StatusCode, err)
 		resp.Body = io.NopCloser(bytes.NewReader(nil))
 		resp.ContentLength = 0
 		return resp
 	}
+	log.Printf("[openai] http error body: conv=%s request_id=%s status=%d raw_body=%q", diagnosticConversationID(resp.Request), diagnosticRequestID(resp.Request), resp.StatusCode, truncateLogString(string(body), 2000))
 	if fixed, ok := arrayErrorToObject(body); ok {
 		body = fixed
 	}
@@ -134,6 +141,33 @@ func stringErrorToObject(body []byte) ([]byte, bool) {
 		return nil, false
 	}
 	return fixed, true
+}
+
+func diagnosticConversationID(req *http.Request) string {
+	if req == nil {
+		return ""
+	}
+	if v, ok := req.Context().Value(diagnosticConversationIDKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+func diagnosticRequestID(req *http.Request) string {
+	if req == nil {
+		return ""
+	}
+	if v, ok := req.Context().Value(diagnosticRequestIDKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+func truncateLogString(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
 }
 
 func mustMarshal(v any) []byte {

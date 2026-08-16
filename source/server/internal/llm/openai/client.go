@@ -3,7 +3,9 @@ package openai
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 
 	goopenai "github.com/sashabaranov/go-openai"
@@ -135,6 +137,16 @@ func (c *Client) Capabilities() inference.Capabilities {
 
 const explicitZeroTemperatureSentinel = -999999.0
 
+func (c *Client) requestContext(ctx context.Context, req llm.ChatRequest) context.Context {
+	if req.ConversationID != "" {
+		ctx = context.WithValue(ctx, diagnosticConversationIDKey{}, req.ConversationID)
+	}
+	if req.RequestID != "" {
+		ctx = context.WithValue(ctx, diagnosticRequestIDKey{}, req.RequestID)
+	}
+	return ctx
+}
+
 func (c *Client) buildRequest(req llm.ChatRequest, stream bool) goopenai.ChatCompletionRequest {
 	r := goopenai.ChatCompletionRequest{
 		Model:    modelOr(c.model, req.Model),
@@ -172,6 +184,27 @@ func modelOr(def, override string) string {
 	return def
 }
 
+func logRequestDiagnostics(req llm.ChatRequest, wire goopenai.ChatCompletionRequest, backend string, stream bool) {
+	body, err := json.Marshal(wire)
+	bodyBytes := 0
+	if err == nil {
+		bodyBytes = len(body)
+	}
+	toolsBytes := 0
+	if b, err := json.Marshal(wire.Tools); err == nil {
+		toolsBytes = len(b)
+	}
+	messagesBytes := 0
+	if b, err := json.Marshal(wire.Messages); err == nil {
+		messagesBytes = len(b)
+	}
+	// This is a cheap upper-bound-ish diagnostic for postmortems, not billing
+	// accounting. Provider usage on successful calls remains authoritative.
+	approxPromptTokens := (messagesBytes + toolsBytes + 3) / 4
+	log.Printf("[openai] request diagnostics: conv=%s request_id=%s backend=%s model=%s stream=%t messages=%d message_bytes=%d tools=%d tool_schema_bytes=%d body_bytes=%d approx_prompt_tokens=%d max_tokens=%d temperature_set=%t",
+		req.ConversationID, req.RequestID, backend, wire.Model, stream, len(wire.Messages), messagesBytes, len(wire.Tools), toolsBytes, bodyBytes, approxPromptTokens, wire.MaxTokens, req.Temperature != nil)
+}
+
 // Chat sends a non-streaming chat completion request and returns mapped blocks + usage.
 func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
 	if !c.supportsVision {
@@ -184,8 +217,11 @@ func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatRespons
 		}
 		req.Messages = msgs
 	}
-	resp, err := c.api.CreateChatCompletion(ctx, c.buildRequest(req, false))
+	wire := c.buildRequest(req, false)
+	logRequestDiagnostics(req, wire, c.backend, false)
+	resp, err := c.api.CreateChatCompletion(c.requestContext(ctx, req), wire)
 	if err != nil {
+		log.Printf("[openai] request failed: conv=%s request_id=%s backend=%s model=%s stream=false error=%v", req.ConversationID, req.RequestID, c.backend, wire.Model, err)
 		return llm.ChatResponse{}, c.normalize(err)
 	}
 	out := llm.ChatResponse{
@@ -213,8 +249,11 @@ func (c *Client) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.Strea
 		}
 		req.Messages = msgs
 	}
-	stream, err := c.api.CreateChatCompletionStream(ctx, c.buildRequest(req, true))
+	wire := c.buildRequest(req, true)
+	logRequestDiagnostics(req, wire, c.backend, true)
+	stream, err := c.api.CreateChatCompletionStream(c.requestContext(ctx, req), wire)
 	if err != nil {
+		log.Printf("[openai] request failed: conv=%s request_id=%s backend=%s model=%s stream=true error=%v", req.ConversationID, req.RequestID, c.backend, wire.Model, err)
 		return nil, c.normalize(err)
 	}
 	r := newStreamReader(stream)

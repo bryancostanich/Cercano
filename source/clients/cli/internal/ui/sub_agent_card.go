@@ -92,6 +92,7 @@ func (c *chatView) renderSubAgentStartCard(card *subAgentStartEntry, maxWidth in
 	}
 	innerW := outerW - 4 // borders plus one space of padding on each side.
 	border := c.styles.Bright
+	titleStyle := c.styles.Primary.Bold(true)
 	labelStyle := c.styles.Info
 	valueStyle := c.styles.Primary
 	accent := c.styles.Accent
@@ -130,15 +131,19 @@ func (c *chatView) renderSubAgentStartCard(card *subAgentStartEntry, maxWidth in
 	if title == "started" {
 		title = "Sub-agent started"
 	}
-	topTitle := "─ " + title + " "
-	if lipgloss.Width(topTitle) > outerW-2 {
-		topTitle = "─ " + ellipsizeVisible(title, outerW-5) + " "
+	topTitle := title
+	if lipgloss.Width(topTitle) > outerW-5 {
+		topTitle = ellipsizeVisible(title, outerW-5)
 	}
-	topFill := outerW - 2 - lipgloss.Width(topTitle)
+	topFill := outerW - 5 - lipgloss.Width(topTitle)
 	if topFill < 0 {
 		topFill = 0
 	}
-	rows = append(rows, border.Render("╭"+topTitle+strings.Repeat("─", topFill)+"╮"))
+	rows = append(rows,
+		border.Render("╭─ ")+
+			titleStyle.Render(topTitle)+
+			border.Render(" "+strings.Repeat("─", topFill)+"╮"),
+	)
 
 	if card.Route != "" || card.Provider != "" {
 		route := card.Route

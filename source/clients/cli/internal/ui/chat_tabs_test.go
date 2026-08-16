@@ -273,6 +273,9 @@ func TestSubAgentStartCardDaylightBorderUsesReadableBrown(t *testing.T) {
 	if !strings.Contains(rendered, "38;2;122;78;10") {
 		t.Fatalf("daylight sub-agent card border should use readable brown Bright (#7A4E0A), got %q", rendered)
 	}
+	if !strings.Contains(rendered, "38;2;59;48;32") {
+		t.Fatalf("daylight sub-agent card title should use dark primary ink (#3B3020), got %q", rendered)
+	}
 	if strings.Contains(rendered, "38;2;216;199;160") {
 		t.Fatalf("daylight sub-agent card border should not use low-contrast BorderDim (#D8C7A0), got %q", rendered)
 	}

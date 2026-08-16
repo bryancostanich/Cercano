@@ -272,6 +272,11 @@ func TestPlanningModeNamesRequestPlanApprovalForHandoff(t *testing.T) {
 	if !strings.Contains(p.Body, "leaves the read-only planning profile") && !strings.Contains(p.Body, "drops the read-only fence") {
 		t.Fatal("planning-mode body must explain that approval leaves the read-only planning profile")
 	}
+	for _, want := range []string{"suggest_autonomous", "lightweight autonomous run brief", "separate y/n/d/c approval"} {
+		if !strings.Contains(p.Body, want) {
+			t.Fatalf("planning-mode body must document optional autonomous bridge; missing %q", want)
+		}
+	}
 }
 
 func TestExecutingPlansNamesSemanticStatusTool(t *testing.T) {
@@ -319,5 +324,14 @@ func TestExecutingPlansStructuralHandoffUsesApprovalGate(t *testing.T) {
 	}
 	if !strings.Contains(p.Body, "spec.md") || !strings.Contains(p.Body, "plan.md") {
 		t.Fatal("executing-plans must name spec.md and plan.md as handoff artifacts")
+	}
+}
+
+func TestExecutingPlansDocumentsOptionalAutonomousBridge(t *testing.T) {
+	p, _ := Get("executing-plans")
+	for _, want := range []string{"Optional Autonomous Bridge", "suggest_autonomous", "source_plan_path", "source_spec_path", "second y/n/d/c approval"} {
+		if !strings.Contains(p.Body, want) {
+			t.Fatalf("executing-plans must document autonomous bridge; missing %q", want)
+		}
 	}
 }

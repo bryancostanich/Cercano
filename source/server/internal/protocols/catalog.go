@@ -435,6 +435,17 @@ The user approved an effort's ` + "`plan.md`" + ` through ` + "`request_plan_app
 session has left the read-only planning profile. You are now implementing the
 approved plan. The Markdown file remains canon: keep it current while you work.
 
+## Optional Autonomous Bridge
+
+After approval, normal interactive execution remains valid. If the user asked for
+hands-off execution, or the accepted plan is well-scoped enough for autonomous
+work, you may offer autonomous execution as a separate step: derive a concise run
+brief from the approved ` + "`spec.md`" + ` / ` + "`plan.md`" + ` with ` + "`goal`" + `, ` + "`done_when`" + `,
+` + "`constraints`" + `, and ` + "`review_points`" + `, then call ` + "`suggest_autonomous`" + ` with
+` + "`source_plan_path`" + ` and ` + "`source_spec_path`" + `. Do not enter autonomous mode just
+because the plan was approved; ` + "`suggest_autonomous`" + ` is a second y/n/d/c approval
+boundary for the run brief.
+
 ## Core Loop
 
 1. **Open the approved files.** Read ` + "`efforts/<slug>/spec.md`" + ` and
@@ -569,7 +580,11 @@ Pick a short kebab-case slug for the effort (e.g. ` + "`migrate-config-loader`" 
 Once the spec is approved, write **` + "`efforts/<slug>/plan.md`" + `** in the format
 below. Then call ` + "`request_plan_approval`" + ` with the effort path and a concise
 summary of the plan. That W-tier capability raises the standard ` + "`y/n/d/c`" + `
-gate; approval leaves the read-only planning profile so execution can begin.
+gate; approval leaves the read-only planning profile so execution can begin. If
+the approved plan is a good fit for hands-off work, the next step may be to
+draft a lightweight autonomous run brief from ` + "`spec.md`" + ` / ` + "`plan.md`" + ` and call
+` + "`suggest_autonomous`" + ` for a separate y/n/d/c approval; do not fold that into
+` + "`request_plan_approval`" + ` itself.
 
 ## Decisions During Generation (mandatory)
 

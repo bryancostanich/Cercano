@@ -105,6 +105,37 @@ func TestToolLoop_CompactFallbackDeniesHydrationBlockedByProfile(t *testing.T) {
 	}
 }
 
+func TestHandleEnableTools_DuplicateHydrationIsHarmless(t *testing.T) {
+	hydrated := map[string]bool{}
+	reg := testDefaultRegistry()
+	content, isErr := handleEnableTools([]byte(`{"tools":["git_push","git_push"]}`), reg, Profile{}, hydrated)
+	if isErr {
+		t.Fatalf("duplicate allowed hydration should not be an error: %s", content)
+	}
+	if !hydrated["git_push"] {
+		t.Fatalf("expected git_push hydrated, got %v", hydrated)
+	}
+}
+
+func TestToolLoop_CompactDirectoryOnlyInTightContext(t *testing.T) {
+	fullProv := &callCountingProvider{}
+	compactProv := &callCountingProvider{}
+	reg := testDefaultRegistry()
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+	if _, err := RunToolLoop(t.Context(), ToolLoopInput{Provider: fullProv, Registry: reg, Permissions: perms, UserInput: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RunToolLoop(t.Context(), ToolLoopInput{Provider: compactProv, Registry: reg, Permissions: perms, UserInput: "hi", TightContextFallback: true}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(fullProv.lastReq.System, "COMPACT TOOL DIRECTORY") {
+		t.Fatalf("normal mode should not include compact tool directory: %q", fullProv.lastReq.System)
+	}
+	if !strings.Contains(compactProv.lastReq.System, "COMPACT TOOL DIRECTORY") {
+		t.Fatalf("tight fallback should include compact tool directory: %q", compactProv.lastReq.System)
+	}
+}
+
 func TestToolLoop_CompactFallbackIntersectsActiveProfile(t *testing.T) {
 	prov := &callCountingProvider{}
 	reg := testDefaultRegistry()

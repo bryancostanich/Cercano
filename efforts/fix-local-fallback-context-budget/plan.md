@@ -7,18 +7,18 @@ Spec: `efforts/fix-local-fallback-context-budget/spec.md`
 
 - [x] Introduce a focused budget helper near the agent/tool-loop code, using `llm.Message` and `llm.Tool` as inputs.
 - [x] Move or wrap the existing estimates from `internal/agent/preflight.go` so the helper can calculate:
-  - [ ] system prompt cost,
-  - [ ] message/history cost,
-  - [ ] image placeholder/image estimate cost,
-  - [ ] serialized tool schema cost,
-  - [ ] output-token reserve from `MaxTokens`,
-  - [ ] effective prompt budget from `ContextWindow` and a safety fraction.
+  - [x] system prompt cost,
+  - [x] message/history cost,
+  - [x] image placeholder/image estimate cost,
+  - [x] serialized tool schema cost,
+  - [x] output-token reserve from `MaxTokens`,
+  - [x] effective prompt budget from `ContextWindow` and a safety fraction.
 - [x] Return a structured result with enough fields for logs and tests: estimated used tokens, fixed tokens, history tokens, tool tokens, output reserve, limit, budget, fit/overflow, and trimmed message count.
 - [x] Unit-test the helper with:
-  - [ ] messages only,
-  - [ ] tools only,
-  - [ ] messages plus tools exceeding the window,
-  - [ ] output reserve pushing an otherwise-fitting prompt over budget.
+  - [x] messages only,
+  - [x] tools only,
+  - [x] messages plus tools exceeding the window,
+  - [x] output reserve pushing an otherwise-fitting prompt over budget.
 
 ## Phase 2 — Enforce the budget on the exact tool-loop request
 
@@ -31,10 +31,10 @@ Spec: `efforts/fix-local-fallback-context-budget/spec.md`
 - [x] If the minimal request still does not fit, return `llm.ErrContextOverflow` with estimated used/limit values and do not call the provider.
 - [x] Emit/log a concise notice when trimming happens, including previous history count, new history count, estimated prompt tokens, tool tokens, output reserve, and local limit.
 - [x] Tests:
-  - [ ] oversized history is trimmed before provider call,
-  - [ ] tool schemas are counted,
-  - [ ] no provider call occurs when the request cannot fit,
-  - [ ] valid pairing after trimming.
+  - [x] oversized history is trimmed before provider call,
+  - [x] tool schemas are counted,
+  - [x] no provider call occurs when the request cannot fit,
+  - [x] valid pairing after trimming.
 
 ## Phase 3 — Mark tight local fallback explicitly
 
@@ -47,18 +47,18 @@ Spec: `efforts/fix-local-fallback-context-budget/spec.md`
 
 - [x] Define an explicit compact fallback tool allowlist/profile. Initial candidates:
   - read/search/list tools: `Read`, `Grep`, `Glob`, `LS`, `stat_file`, possibly `ViewImage`/`inspect_image`,
-                                                                              - edit tools: `Edit`, `Write` only when the active permission profile allows writes,
-                                                                              - execution: `Bash` only when the active permission profile allows execution,
-                                                                              - git inspection/checkpoint tools that are already permission-gated,
-                                                                              - planning/checkpoint handoff tools needed by Cercano's own workflow,
-                                                                              - the hydration tool(s) from Phase 5.
+                                                                                                                                            - edit tools: `Edit`, `Write` only when the active permission profile allows writes,
+                                                                                                                                            - execution: `Bash` only when the active permission profile allows execution,
+                                                                                                                                            - git inspection/checkpoint tools that are already permission-gated,
+                                                                                                                                            - planning/checkpoint handoff tools needed by Cercano's own workflow,
+                                                                                                                                            - the hydration tool(s) from Phase 5.
 - [x] Implement the profile as a real capability profile or allow predicate, not as ad hoc string filtering in the request builder.
 - [x] Combine the compact profile with the active permission profile by intersection. Compact fallback can remove advertised tools; it must never add a tool the active profile forbids.
 - [x] Log catalog size and tool names in compact mode, using existing truncation helpers where needed.
 - [x] Tests:
-  - [ ] compact mode advertises fewer tools than normal mode,
-  - [ ] permission restrictions still win,
-  - [ ] normal cloud/frontier mode still advertises the current catalog.
+  - [x] compact mode advertises fewer tools than normal mode,
+  - [x] permission restrictions still win,
+  - [x] normal cloud/frontier mode still advertises the current catalog.
 
 ## Phase 5 — Add hydrated tool catalog support
 
@@ -69,26 +69,26 @@ Spec: `efforts/fix-local-fallback-context-budget/spec.md`
 - [x] Deny hydration for unknown tools or tools blocked by the active permission profile with a clear tool-result message.
 - [x] Make hydration idempotent: requesting an already-enabled tool should succeed without duplicating catalog entries.
 - [x] Tests:
-  - [ ] allowed tool hydration adds its schema on the next request,
-  - [ ] denied tool hydration does not add the schema,
-  - [ ] duplicate hydration is harmless,
-  - [ ] terse directory is present only in compact/tight-context mode.
+  - [x] allowed tool hydration adds its schema on the next request,
+  - [x] denied tool hydration does not add the schema,
+  - [x] duplicate hydration is harmless,
+  - [x] terse directory is present only in compact/tight-context mode.
 
 ## Phase 6 — Verification and live diagnostics
 
 - [x] Run focused tests for touched packages first, likely:
-  - [ ] `go test ./internal/agent`
-  - [ ] `go test ./internal/agenttools`
-  - [ ] `go test ./internal/runner`
-  - [ ] any new package tests for the budget helper.
+  - [x] `go test ./internal/agent`
+  - [x] `go test ./internal/agenttools`
+  - [x] `go test ./internal/runner`
+  - [x] any new package tests for the budget helper.
 - [x] Run broader server verification if shared interfaces changed:
-  - [ ] `go test ./...`
+  - [x] `go test ./...`
 - [x] Exercise a synthetic local 32k-window request with many tools and long history. Confirm logs show:
-  - [ ] compact/tight-context mode,
-  - [ ] reduced catalog size,
-  - [ ] tool schema token estimate,
-  - [ ] trimmed history count,
-  - [ ] final estimated prompt below budget.
+  - [x] compact/tight-context mode,
+  - [x] reduced catalog size,
+  - [x] tool schema token estimate,
+  - [x] trimmed history count,
+  - [x] final estimated prompt below budget.
 - [x] Inspect the failure path by forcing an unfit minimal request and confirm it returns preflight `context_overflow` without contacting the provider.
 
 ## Sequencing notes

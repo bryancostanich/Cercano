@@ -320,6 +320,10 @@ func calledToolNames(history []llm.Message) map[string]bool {
 //
 // finalText is the assembled answer; called is the set from calledToolNames;
 // mutating is the set from mutatingToolNames over the granted registry.
+func suspiciousNoOpMessage(reason string) string {
+	return "sub-agent failed validation: " + reason
+}
+
 func detectSuspiciousNoOp(finalText string, called, mutating map[string]bool) (bool, string) {
 	if len(mutating) == 0 {
 		return false, "" // no write/exec tool was granted — no contradiction possible
@@ -545,8 +549,8 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	// No-op detection. Classify the granted registry (authoritative source for
 	// R/W/X) and the tools the loop actually called, then check for the
 	// provable contradiction: equipped to write/exec, wrote/exec'd nothing,
-	// still claimed done. Advisory only — never changes what we return, it
-	// annotates the result so the parent stops trusting a fabricated success.
+	// still claimed done. This is a hard validation error for write/exec grants
+	// so the parent cannot trust fabricated completion.
 	mutating := mutatingToolNames(reg)
 	// Use the tools the loop actually invoked, recorded directly from each
 	// turn's BlockToolUse blocks (res.CalledTools). Do NOT re-derive from
@@ -561,6 +565,21 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	if suspicious {
 		log.Printf("[dispatch] subagent SUSPICIOUS no-op: conv=%s granted_write=%v called=%v reason=%q",
 			subConvID, sortedKeys(mutating), sortedKeys(called), reason)
+		emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "error", Text: suspiciousNoOpMessage(reason), GrantedTools: granted, IgnoredTools: ignored, IsError: true})
+		return dispatch.Result{
+			Text:              text,
+			Model:             model,
+			Provider:          provider,
+			Tier:              string(spec.Tier),
+			IsCloud:           sel.IsCloud,
+			InputTokens:       res.InputTokens,
+			OutputTokens:      res.OutputTokens,
+			SubConversationID: subConvResult,
+			GrantedTools:      granted,
+			IgnoredTools:      ignored,
+			Suspicious:        true,
+			SuspicionReason:   reason,
+		}, fmt.Errorf("%s", suspiciousNoOpMessage(reason))
 	} else if len(called) <= 1 && len(mutating) == 0 {
 		// Low-signal read-only run: not flagged (no provable contradiction),
 		// but logged so we can study how often near-empty runs happen without

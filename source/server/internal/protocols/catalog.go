@@ -391,17 +391,25 @@ porcelain, diffs, and rebase or merge logs never flood the main context.
 
 ## The Rule
 
-When the work is git mechanics — creating a worktree, rebasing, inspecting
-status or diff, fast-forwarding, running a land's test-gate, or bisecting —
-hand it to a sub-agent via the ` + "`dispatch`" + ` capability (its ` + "`workflow`" + ` alias
-works too). The sub-agent does the churn and returns one line: the resulting
-branch and short SHA, or "conflict at <file>".
+When the work is noisy git mechanics — creating a worktree, rebasing,
+inspecting status or diff, fast-forwarding, running a land's test-gate, or
+bisecting — hand it to a sub-agent via the ` + "`dispatch`" + ` capability (its
+` + "`workflow`" + ` alias works too). The sub-agent does the churn and returns one
+line: the resulting branch and short SHA, or "conflict at <file>".
+
+Do not delegate an explicit user request to publish the current branch merely
+because it is git-related. When the user says "push" or otherwise directly
+authorizes publishing, use the scoped ` + "`git_push`" + ` capability yourself with an
+explicit worktree, remote, branch, and ` + "`force=false`" + ` unless force was requested. That
+keeps the approval prompt attached to the actual push attempt rather than to a
+sub-agent that might fail before pushing.
 
 ## Guardrails
 
 - Prefer scoped git/GitHub capabilities (git_info, git_status,
-  git_push, github_issue_close) over Bash whenever they cover the job.
-  Use Bash only when no scoped capability exists.
+  github_issue_close, and git_push when a delegated workflow truly needs to
+  publish) over Bash whenever they cover the job. Use Bash only when no scoped
+  capability exists.
 - The sub-agent must scope every command with ` + "`git -C <abs-worktree>`" + ` or scope
   every scoped tool with the absolute worktree path, then report the exact
   branch and SHA it acted on. A sub-agent's

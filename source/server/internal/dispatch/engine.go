@@ -106,9 +106,10 @@ type Result struct {
 	// case is a sub-agent granted a write/execute tool (PermW/PermX) that
 	// called none of them yet returned a non-empty "done" summary — a
 	// migration or fix cannot have happened without a write or exec call, so
-	// the summary is untrustworthy. Advisory only: it never changes control
-	// flow, it surfaces the contradiction to the parent so it stops trusting a
-	// fabricated success. SuspicionReason is a human-readable explanation.
+	// the summary is untrustworthy. Agentic dispatch returns this case as an
+	// error so the parent cannot treat fabricated write/execute completion as
+	// success; the fields remain populated for diagnostics. SuspicionReason is
+	// a human-readable explanation.
 	Suspicious      bool
 	SuspicionReason string
 }
